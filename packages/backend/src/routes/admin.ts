@@ -5856,12 +5856,17 @@ router.get('/agency-send', authenticate, requireSuperAdmin, async (req: Request,
       params.push(status);
       where = `WHERE a.status = $${params.length}`;
     }
+    // ★2026-08-26(2) 대행발송 내역 메뉴(Harold 지시) — 진행 레일·접수구분·고객사명·신청자명까지 이 응답이 재료다.
+    //   source 컬럼은 DDL 후행 안전(부재 시 'screen'으로 읽힘)을 위해 to_jsonb 경유가 아니라 명시 컬럼으로 두되,
+    //   이 배포 시점에는 이미 실행된 DDL이다(SCHEMA.md 0826 실측).
     const rows = await query(
-      `SELECT a.id, a.status, a.message_type, a.requested_at, a.recipient_count, a.file_name,
-              a.test_round, a.reapproval_count, a.created_at, a.queued_at, a.campaign_id,
-              c.company_name
+      `SELECT a.id, a.status, a.source, a.message_type, a.subject, a.is_ad, a.callback_number,
+              a.requested_at, a.recipient_count, a.file_name, LEFT(a.current_content, 80) AS content_preview,
+              a.test_round, a.reapproval_count, a.created_at, a.approved_at, a.queued_at, a.campaign_id,
+              c.company_name, u.name AS user_name, u.login_id AS user_login
          FROM agency_send_requests a
          LEFT JOIN companies c ON c.id = a.company_id
+         LEFT JOIN users u ON u.id = a.created_by
          ${where}
         ORDER BY a.created_at DESC
         LIMIT 200`,

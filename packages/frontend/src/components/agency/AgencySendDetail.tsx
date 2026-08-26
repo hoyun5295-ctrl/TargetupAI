@@ -183,7 +183,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
               <h3 className={CUI_MODAL_TITLE}>{req?.fileName || '대행발송'}</h3>
               <p className={CUI_MODAL_DESC}>
                 {/* ★0826 §18: 출처는 SOURCE_LABEL 단일표. 발신 이메일 주소 전문은 이력(payload)에서만 보인다 */}
-                {req ? `${SOURCE_LABEL[req.source] || SOURCE_LABEL.screen} · ${formatWhen(req.requestedAt)} · ${req.recipientCount.toLocaleString()}건 · ${req.messageType}` : ''}
+                {/* ★0826(2) 접수 계정 = 관리자 응답에만 실려 온다 */}
+                {req ? `${SOURCE_LABEL[req.source] || SOURCE_LABEL.screen} · ${formatWhen(req.requestedAt)} · ${req.recipientCount.toLocaleString()}건 · ${req.messageType}${req.createdByName ? ` · ${req.createdByName}` : ''}` : ''}
               </p>
             </div>
           </div>

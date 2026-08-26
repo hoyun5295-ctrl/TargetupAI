@@ -54,6 +54,11 @@ export interface AgencySendRequest {
   cancelledAt: string | null;
   cancelReason: string | null;
   createdAt: string;
+  /**
+   * ★2026-08-26(2) 접수 계정 이름. **관리자 응답에만 실려 온다**(일반 사용자는 본인 것만 보므로 키 없음).
+   * 값이 있으면 목록·상세가 "누가 낸 접수인지"를 보여준다.
+   */
+  createdByName?: string | null;
 }
 
 export interface AgencySendEvent {
@@ -218,21 +223,25 @@ export interface OneStepOverrides {
   varMapping?: Record<string, string>;
 }
 
-function oneStepBody(formFile: File, listFile: File, overrides: OneStepOverrides): FormData {
+/**
+ * ★2026-08-26(2) 통일 양식 = 한 파일(시트1 내용 + 시트2 고객리스트). 화면은 파일 하나만 올린다.
+ * 명단 파일(listFile)은 구양식 하위호환 축으로 서버가 계속 받지만, 화면 표준은 null이다.
+ */
+function oneStepBody(formFile: File, listFile: File | null, overrides: OneStepOverrides): FormData {
   const fd = new FormData();
   fd.append('form', formFile);
-  fd.append('list', listFile);
+  if (listFile) fd.append('list', listFile);
   fd.append('overrides', JSON.stringify(overrides || {}));
   return fd;
 }
 
-export async function previewOneStep(formFile: File, listFile: File, overrides: OneStepOverrides): Promise<OneStepAnalysisView> {
+export async function previewOneStep(formFile: File, listFile: File | null, overrides: OneStepOverrides): Promise<OneStepAnalysisView> {
   const res = await fetch('/api/agency-send/one-step/preview', { method: 'POST', headers: auth(), body: oneStepBody(formFile, listFile, overrides) });
   const data = await unwrap(res);
   return data.analysis;
 }
 
-export async function submitOneStep(formFile: File, listFile: File, overrides: OneStepOverrides): Promise<AgencySendRequest[]> {
+export async function submitOneStep(formFile: File, listFile: File | null, overrides: OneStepOverrides): Promise<AgencySendRequest[]> {
   const res = await fetch('/api/agency-send/one-step', { method: 'POST', headers: auth(), body: oneStepBody(formFile, listFile, overrides) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data?.success) {

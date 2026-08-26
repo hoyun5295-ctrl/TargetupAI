@@ -84,7 +84,7 @@ function migrationPending(res: Response) {
  * 자격 확인. 쓰기·읽기 전 엔드포인트가 첫 줄에서 부른다.
  * 라우트 장식(미들웨어)으로 두지 않는 이유 = 효과를 만드는 문과 같은 함수 안에 있어야 경로가 늘어도 안 샌다.
  */
-async function requireAgencySend(req: Request, res: Response): Promise<{ companyId: string; userId: string } | null> {
+async function requireAgencySend(req: Request, res: Response): Promise<{ companyId: string; userId: string; seesAll: boolean } | null> {
   const companyId = req.user?.companyId;
   const userId = req.user?.userId;
   if (!companyId || !userId) {
@@ -96,8 +96,19 @@ async function requireAgencySend(req: Request, res: Response): Promise<{ company
     res.status(403).json({ success: false, code: 'AGENCY_SEND_NOT_ALLOWED', error: '대행발송이 열려 있지 않은 계정입니다.' });
     return null;
   }
-  return { companyId, userId };
+  // ★2026-08-26(2) 사용자 격리(서수란 접수 · Harold 확정) — 관리자는 회사 전체, 일반 사용자는 본인 접수만.
+  //   제품 공통 패턴(자동발송 D151-3 · 주소록 · AI 오퍼레이터)과 같은 축이다.
+  //   ⛔ 판정은 JWT 어휘(company_admin)로만 한다 — DB users.user_type(admin/user)과 어휘가 달라
+  //   혼용하면 제한 사용자가 승격된다(SCHEMA.md users 절 · 자동마케팅 발송 범위 사고 기원).
+  const seesAll = req.user?.userType === 'company_admin' || req.user?.userType === 'super_admin';
+  return { companyId, userId, seesAll };
 }
+
+/**
+ * 소유자 술어 파라미터 — 관리자는 null(전체), 일반 사용자는 본인 id.
+ * 쓰는 자리 전부가 `AND ($n::uuid IS NULL OR created_by = $n::uuid)` 한 모양이다(경로마다 다른 판정 금지).
+ */
+const ownerParam = (auth: { userId: string; seesAll: boolean }): string | null => (auth.seesAll ? null : auth.userId);
 
 /** 목록·상세 응답에서 내부 필드를 떼어낸다 */
 function toPublic(row: any) {
@@ -144,6 +155,9 @@ function toPublic(row: any) {
     cancelledAt: row.cancelled_at,
     cancelReason: row.cancel_reason,
     createdAt: row.created_at,
+    // ★2026-08-26(2) 접수 계정 — 관리자 조회(users JOIN이 실린 SELECT)에만 값이 있다.
+    //   일반 사용자 응답에는 키 자체가 없다(본인 것만 보이므로 표시할 이유가 없다).
+    ...(row.created_by_name !== undefined ? { createdByName: row.created_by_name || row.created_by_login || null } : {}),
   };
 }
 
@@ -154,10 +168,22 @@ router.get('/', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
   try {
-    const r = await query(
-      `SELECT * FROM agency_send_requests WHERE company_id = $1::uuid ORDER BY created_at DESC LIMIT 100`,
-      [auth.companyId],
-    );
+    // 관리자 = 회사 전체(접수 계정 이름 동봉) · 일반 사용자 = 본인 접수만(★2026-08-26(2) 격리)
+    const r = auth.seesAll
+      ? await query(
+          `SELECT a.*, u.name AS created_by_name, u.login_id AS created_by_login
+             FROM agency_send_requests a
+             LEFT JOIN users u ON u.id = a.created_by
+            WHERE a.company_id = $1::uuid
+            ORDER BY a.created_at DESC LIMIT 100`,
+          [auth.companyId],
+        )
+      : await query(
+          `SELECT * FROM agency_send_requests
+            WHERE company_id = $1::uuid AND created_by = $2::uuid
+            ORDER BY created_at DESC LIMIT 100`,
+          [auth.companyId, auth.userId],
+        );
     return res.json({ success: true, requests: r.rows.map(toPublic) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
@@ -187,7 +213,8 @@ router.post('/', async (req: Request, res: Response) => {
 
 // ════════════════════════════════════════════════════════════
 // 요청서 원스텝 접수 (★2026-08-25(3) · Harold "요청서 규격화 + 원스텝")
-//   파일 2개(요청서 규격 + 명단 자유형)를 서버가 파싱·검증·집계한다.
+//   ★2026-08-26(2) 통일 양식 = 파일 하나(내용 + 고객리스트 시트)를 서버가 파싱·검증·집계한다.
+//   명단 파일을 따로 올리는 옛 방식도 API 계약으로는 계속 받는다(list 필드 = 선택).
 //   브라우저에는 상위 50건 샘플과 집계만 내려간다(전 행 전송이 화면 접수가 느린 진짜 원인).
 //   확정도 같은 파일을 다시 받아 같은 분석을 거친다(서버에 중간 상태를 두지 않는다 — 무상태).
 //   ⛔ 회신번호 열 방식 = 회신번호별로 접수를 나눈다. 대행발송이 타는 적재 배관(주소록 슬롯 5칸)은
@@ -229,7 +256,8 @@ function oneStepFiles(req: Request): { formBuf: Buffer | null; listBuf: Buffer |
   const formBuf = files.form?.[0]?.buffer || null;
   const listBuf = files.list?.[0]?.buffer || null;
   // multer는 latin1로 줄 때가 있어 원래 한글 파일명으로 되돌린다(업로드 라우트와 같은 관행)
-  const rawName = files.list?.[0]?.originalname || null;
+  // ★2026-08-26(2) 통일 양식(한 파일)이면 명단 파일이 없다 — 목록에 보일 파일명은 요청서 파일명이다
+  const rawName = files.list?.[0]?.originalname || files.form?.[0]?.originalname || null;
   let listName: string | null = null;
   if (rawName) {
     try { listName = Buffer.from(rawName, 'latin1').toString('utf8'); } catch { listName = rawName; }
@@ -363,10 +391,14 @@ router.get('/:id', async (req: Request, res: Response) => {
   if (!auth) return;
   try {
     const r = await query(
-      `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, auth.companyId],
+      `SELECT a.*, u.name AS created_by_name, u.login_id AS created_by_login
+         FROM agency_send_requests a
+         LEFT JOIN users u ON u.id = a.created_by
+        WHERE a.id = $1::uuid AND a.company_id = $2::uuid AND ($3::uuid IS NULL OR a.created_by = $3::uuid)`,
+      [req.params.id, auth.companyId, ownerParam(auth)],
     );
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
+    if (!auth.seesAll) { delete r.rows[0].created_by_name; delete r.rows[0].created_by_login; }
 
     const events = await query(
       `SELECT kind, payload, created_at FROM agency_send_events WHERE request_id = $1::uuid ORDER BY created_at DESC LIMIT 50`,
@@ -390,8 +422,9 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
   if (!auth) return;
   try {
     const own = await query(
-      `SELECT id FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, auth.companyId],
+      `SELECT id FROM agency_send_requests
+        WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
+      [req.params.id, auth.companyId, ownerParam(auth)],
     );
     if (own.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
     const r = await query(
@@ -413,6 +446,15 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
   try {
+    // ★2026-08-26(2) 격리 — 일반 사용자는 본인 접수만 승인할 수 있다. 승인 CT는 담당자 링크(무인증
+    //   토큰) 경로와 공유라 계정 축을 모른다. 소유자는 바뀌지 않는 값이라 사전 확인으로 충분하다.
+    if (!auth.seesAll) {
+      const own = await query(
+        `SELECT 1 FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid AND created_by = $3::uuid`,
+        [req.params.id, auth.companyId, auth.userId],
+      );
+      if (own.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
+    }
     // ⛔ 승인의 기준은 **행 수정 번호**다(★2026-08-23 Codex 2R high). 문안 버전만 보면
     //   시각만 바뀐 건은 상태도 버전도 그대로라, 담당자가 **못 본 시각**으로 옛 승인이 통과한다.
     // ★2026-08-25 판정·전이·이력·워커 기동은 승인 효과 CT 하나가 소유한다(utils/agency-send-approve.ts).
@@ -448,8 +490,9 @@ router.post('/:id/content', async (req: Request, res: Response) => {
     if (req.body?.subject != null && rejectSubjectVars(req.body.subject, res)) return;
 
     const r = await query(
-      `SELECT status, var_mapping, revision, campaign_id FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, auth.companyId],
+      `SELECT status, var_mapping, revision, campaign_id FROM agency_send_requests
+        WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
+      [req.params.id, auth.companyId, ownerParam(auth)],
     );
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
     if (!isEditable(r.rows[0].status)) {
@@ -520,8 +563,9 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
   try {
     const r = await query(
       `SELECT status, revision, is_ad, campaign_id, final_test_at
-         FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, auth.companyId],
+         FROM agency_send_requests
+        WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
+      [req.params.id, auth.companyId, ownerParam(auth)],
     );
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
     if (!isEditable(r.rows[0].status)) {
@@ -601,7 +645,7 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     const claimed = await query(
       `WITH prev AS (
          SELECT id, status, revision FROM agency_send_requests
-          WHERE id = $1::uuid AND company_id = $2::uuid
+          WHERE id = $1::uuid AND company_id = $2::uuid AND ($4::uuid IS NULL OR created_by = $4::uuid)
           FOR UPDATE
        )
        UPDATE agency_send_requests a
@@ -612,13 +656,15 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
           AND prev.status NOT IN (${NOT_CANCELABLE_SQL})
           AND a.lock_token IS NULL
        RETURNING prev.status AS prev_status, prev.revision AS prev_revision, a.*`,
-      [req.params.id, auth.companyId, String(req.body?.reason || '담당자 취소').slice(0, 200)],
+      [req.params.id, auth.companyId, String(req.body?.reason || '담당자 취소').slice(0, 200), ownerParam(auth)],
     );
 
     if (claimed.rows.length === 0) {
+      // 소유자 술어를 여기도 건다 — 남의 접수는 상태("이미 취소됨" 등)조차 보이면 안 된다(404로 답한다)
       const nowRow = await query(
-        `SELECT status FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-        [req.params.id, auth.companyId],
+        `SELECT status FROM agency_send_requests
+          WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
+        [req.params.id, auth.companyId, ownerParam(auth)],
       );
       if (nowRow.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
       if (nowRow.rows[0].status === 'cancelled') {

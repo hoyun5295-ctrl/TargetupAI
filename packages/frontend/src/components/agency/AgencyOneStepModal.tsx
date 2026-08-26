@@ -1,8 +1,9 @@
 /**
  * AgencyOneStepModal — 요청서 원스텝 접수 (★ 2026-08-25(3) 신설 · Harold "요청서 규격화 + 원스텝")
  *
- * 설계 = docs/2026-08-22-agency-send-design.md §17. 파일 2개(요청서 규격 + 명단 자유형)를 올리면
- * 서버가 파싱·검증·집계하고, 화면은 **상위 50건 샘플과 집계 숫자만** 받아 확인 화면을 그린다.
+ * 설계 = docs/2026-08-22-agency-send-design.md §17. ★2026-08-26(2) 통일 양식(Harold 승인) =
+ * **파일 하나**(시트1 내용 + 시트2 고객리스트)를 올리면 서버가 파싱·검증·집계하고, 화면은
+ * **상위 50건 샘플과 집계 숫자만** 받아 확인 화면을 그린다.
  * 접수하기를 누르면 같은 파일을 다시 보내 서버가 같은 분석을 거쳐 접수를 만든다(중간 상태 없음).
  *
  * ⛔ 문안·제목·광고는 요청서가 진실이다 — 여기서 고치지 않는다(고치려면 요청서를 고쳐 다시 올린다).
@@ -83,8 +84,8 @@ function FileSlot({ label, hint, file, onFile, accent }: {
 export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) {
   const toast = useToast();
   const [phase, setPhase] = useState<'upload' | 'confirm'>('upload');
+  // ★2026-08-26(2) 통일 양식 = 파일 하나(내용 + 고객리스트 시트). 명단 슬롯은 폐지했다.
   const [formFile, setFormFile] = useState<File | null>(null);
-  const [listFile, setListFile] = useState<File | null>(null);
   const [analysis, setAnalysis] = useState<OneStepAnalysisView | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -108,7 +109,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
   const analyzeSeq = useRef(0);
 
   const reset = () => {
-    setPhase('upload'); setFormFile(null); setListFile(null); setAnalysis(null);
+    setPhase('upload'); setFormFile(null); setAnalysis(null);
     setRequestedAt(''); setCallbackChoice(''); setPhoneColumnChoice(''); setManagerPhones([]); setManagerInput('');
     setVarMapping({}); setAiPickedVars(new Set());
     setSamplePage(0); setPreviewOpen(false); mms.setMmsUploadedImages([]);
@@ -120,11 +121,11 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
   };
 
   /** 파일이 바뀌면 이전 분석은 전부 무효다(★Codex 적대 2R — 옛 파일의 분석으로 새 파일을 접수하면 안 된다) */
-  const replaceFile = (kind: 'form' | 'list') => (f: File) => {
+  const replaceFile = (f: File) => {
     if (loading || saving) return;
     analyzeSeq.current += 1;
     setAnalysis(null);
-    if (kind === 'form') setFormFile(f); else setListFile(f);
+    setFormFile(f);
   };
 
   const loadSenders = async () => {
@@ -163,11 +164,11 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
 
   const analyze = async (withOverrides: boolean) => {
     if (saving) return;
-    if (!formFile || !listFile) { toast.error('요청서와 고객 명단, 두 파일을 올려 주세요.'); return; }
+    if (!formFile) { toast.error('요청서 파일을 올려 주세요.'); return; }
     const seq = ++analyzeSeq.current;
     setLoading(true);
     try {
-      const a = await previewOneStep(formFile, listFile, withOverrides ? currentOverrides(analysis) : { mmsImagePaths: mms.mmsUploadedImages.map((i) => i.serverPath) });
+      const a = await previewOneStep(formFile, null, withOverrides ? currentOverrides(analysis) : { mmsImagePaths: mms.mmsUploadedImages.map((i) => i.serverPath) });
       if (seq !== analyzeSeq.current) return; // 그 사이 새 분석이 시작됐다 — 이 응답은 버린다
       setAnalysis(a);
       setSamplePage(0);
@@ -191,12 +192,12 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
   };
 
   const submit = async () => {
-    if (saving || loading || !formFile || !listFile || !analysis) return;
+    if (saving || loading || !formFile || !analysis) return;
     if (analysis.errors.length > 0) { toast.error('반려 사유를 먼저 해결해 주세요.'); return; }
     const seq = analyzeSeq.current; // 제출은 지금 보고 있는 분석 세대에 묶인다
     setSaving(true);
     try {
-      const created = await submitOneStep(formFile, listFile, currentOverrides(analysis));
+      const created = await submitOneStep(formFile, null, currentOverrides(analysis));
       if (seq !== analyzeSeq.current) return; // 그 사이 파일이 바뀌었다 — 이 응답으로 화면을 건드리지 않는다
       toast.success(`${created.length}건 접수했습니다. 스팸 검사를 마치면 담당자 번호로 문자를 보내 드립니다.`);
       onCreated(created);
@@ -245,7 +246,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
               <h3 className={CUI_MODAL_TITLE}>요청서로 접수</h3>
               <p className={CUI_MODAL_DESC}>
                 {phase === 'upload'
-                  ? '요청서와 고객 명단, 두 파일이면 끝납니다'
+                  ? '요청서 파일 하나면 끝납니다'
                   : a ? `보낼 번호 ${a.counts.valid.toLocaleString()}건이 준비됐습니다` : ''}
               </p>
             </div>
@@ -260,14 +261,13 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
             <div className="max-w-[560px] mx-auto space-y-5">
               <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-600/15 bg-indigo-50 px-4 py-3">
                 <p className="text-[13px] text-indigo-900 leading-relaxed">
-                  처음이시면 요청서 양식부터 받아 채워 주세요. 제목과 문안, 보낼 시각, 회신번호, 담당자 번호를 적는 한 장짜리입니다. 수신자 열 이름 칸은 선택이며, 적으면 그 열로 확정됩니다.
+                  처음이시면 요청서 양식부터 받아 주세요. 첫 시트(내용)에 문안과 보낼 시각, 회신번호, 담당자 번호를 적고, 고객리스트 시트에 명단을 채우면 파일 하나로 접수가 끝납니다.
                 </p>
                 <a href="/agency-request-form.xlsx" download="대행발송_요청서_양식.xlsx" className={`${CUI_BTN_OUTLINE} shrink-0`}>
                   <Download className="w-[15px] h-[15px]" />양식 내려받기
                 </a>
               </div>
-              <FileSlot label="요청서" hint="양식 그대로 채운 엑셀" file={formFile} onFile={replaceFile('form')} accent />
-              <FileSlot label="고객 명단" hint="엑셀 또는 CSV(첫 줄이 열 이름이면 그대로, 없어도 받습니다)" file={listFile} onFile={replaceFile('list')} />
+              <FileSlot label="요청서" hint="내용 시트와 고객리스트 시트를 채운 엑셀 파일 하나" file={formFile} onFile={replaceFile} accent />
               <p className={CUI_HINT}>이미지 문자가 필요하면 다음 화면에서 이미지를 넣을 수 있습니다.</p>
             </div>
           ) : a && (

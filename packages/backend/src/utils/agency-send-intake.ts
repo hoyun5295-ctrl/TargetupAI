@@ -16,6 +16,7 @@ import { getRegisteredCallbackSet, isCallbackRegistered } from './callback-filte
 import { validateMmsPayload } from './mms-validator';
 import {
   parseAgencyRequestForm, parseAgencyRecipientList, pickPhoneColumn, resolveCallbackPlan, matchHeader,
+  hasRecipientSheet,
   type AgencyFormError, type CallbackPlan,
 } from './agency-send-form';
 import { normalizePhone, normalizeAgencyPhone } from './normalize-phone';
@@ -341,9 +342,15 @@ export async function analyzeOneStep(
     counts: { total: 0, valid: 0, dup: 0, invalid: 0, callbackMissing: 0 },
     groups: [], sample: [], sampleRows: [], messageType: 'SMS', fileName: listName, errors,
   };
-  if (!formBuf) { errors.push({ field: '요청서', error: '요청서 파일을 올려 주세요.' }); }
-  if (!listBuf) { errors.push({ field: '명단', error: '고객 명단 파일을 올려 주세요.' }); }
-  if (!formBuf || !listBuf) return empty;
+  if (!formBuf) { errors.push({ field: '요청서', error: '요청서 파일을 올려 주세요.' }); return empty; }
+  // ★2026-08-26(2) 통일 양식 = 한 파일(시트1 내용 + 시트2 고객리스트). 명단 파일이 따로 없으면
+  //   요청서 파일의 고객리스트 시트를 명단으로 쓴다(parseAgencyRecipientList가 시트 이름으로 골라 읽는다).
+  //   별도 명단 파일이 오면 그 파일이 우선이다(구양식·두 파일 하위호환).
+  const effectiveListBuf = listBuf || (hasRecipientSheet(formBuf) ? formBuf : null);
+  if (!effectiveListBuf) {
+    errors.push({ field: '명단', error: '고객리스트 시트를 찾지 못했습니다. 새 요청서 양식(고객리스트 시트 포함)에 명단을 채우거나, 명단 파일을 함께 올려 주세요.' });
+    return empty;
+  }
 
   const form = parseAgencyRequestForm(formBuf);
   errors.push(...form.errors);
@@ -351,7 +358,7 @@ export async function analyzeOneStep(
   let headers: string[] = [];
   let rows: Record<string, any>[] = [];
   try {
-    const list = parseAgencyRecipientList(listBuf);
+    const list = parseAgencyRecipientList(effectiveListBuf);
     headers = list.headers;
     rows = list.rows;
     // ⛔ 같은 이름의 열·상한 초과는 조용히 못 넘어간다(★Codex 적대 1R — 열이 밀리거나 잘리면 다른 사람에게 간다)

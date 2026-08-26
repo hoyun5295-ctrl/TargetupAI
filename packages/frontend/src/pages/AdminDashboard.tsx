@@ -19,6 +19,7 @@ import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026
 import SalesOutreachModal from '../components/admin/SalesOutreachModal'; // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달)
 import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal'; // ★ 2026-08-26 대행발송 허용 발신 이메일(§18)
 import AgencyMailIntakePanel from '../components/admin/AgencyMailIntakePanel'; // ★ 2026-08-26 대행발송 메일 접수 관제(§18)
+import AgencySendLedgerPanel from '../components/admin/AgencySendLedgerPanel'; // ★ 2026-08-26(2) 대행발송 내역(전 고객사 진행현황)
 import { AUDIT_ACTION_COLOR, AUDIT_ACTION_LABEL, formatAuditDetail } from '../constants/audit-action-labels'; // ★ 2026-08-24 감사 액션 한글화 CT
 import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
@@ -88,7 +89,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
@@ -4466,7 +4467,7 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '발송 관리', color: 'emerald',
-                tabs: ['callbacks', 'stats', 'scheduled', 'allCampaigns', 'templates', 'agencyMail'] as const,
+                tabs: ['callbacks', 'stats', 'scheduled', 'allCampaigns', 'templates', 'agencyMail', 'agencyLedger'] as const,
                 items: [
                   // ★ 2026-08-08 상단 메뉴는 **두 축의 합** — "발신번호 관리에 볼 일 N건"이 여기선 맞는 말이다.
                   //   화면에 보이는 두 탭 뱃지의 합으로 만든다(서버 total을 따로 받으면 뱃지끼리 어긋날 수 있다).
@@ -4476,6 +4477,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'allCampaigns', label: '캠페인 관리', onClick: () => loadAllCampaigns() },
                   // ★ 2026-07-09 CRM 캠페인 대행 설계 — 비즈니스+ 업체 접수 요청서 분석 → 제안서 PDF (별도 페이지)
                   { key: 'campaignAgency', label: '캠페인 대행 설계', onClick: () => navigate('/admin/campaign-agency') },
+                  // ★ 2026-08-26(2) 전 고객사 대행발송 진행현황(진행 레일 + 접수구분 + 고객사·신청자)
+                  { key: 'agencyLedger', label: '대행발송 내역' },
                   // ★ 2026-08-26 §18 이메일 접수 관제 — 반려·격리 메일의 유일한 노출면
                   { key: 'agencyMail', label: '대행발송 접수' },
                   { key: 'templates', label: '템플릿 관리' },
@@ -10509,6 +10512,7 @@ const handleApproveRequest = async (id: string) => {
 
       {/* ★2026-08-26 §18 대행발송 메일 접수 관제 탭 */}
       {activeTab === 'agencyMail' && <AgencyMailIntakePanel />}
+      {activeTab === 'agencyLedger' && <AgencySendLedgerPanel />}
 
       {/* ★2026-08-26 §18 허용 발신 이메일 관리 — 회사 편집 모달 밖의 독립 오버레이(z-[60]).
           확인·알림 모달이 이 아래(문서 뒤쪽)에 렌더되므로 같은 z에서도 위에 뜬다(파일 내 중첩 관례). */}

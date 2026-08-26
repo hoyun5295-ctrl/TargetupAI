@@ -45,18 +45,19 @@
 6. **⛔ `final_test_at`은 통과 분기에서만 찍는다.** 시도 시각(`last_test_at`)으로 "당일 검사 통과"를 판정하면 차단된 문안이 검사 없이 예약된다.
 7. **⛔ 문안 변수는 주소록 슬롯 4칸으로 번역해 넘긴다**(`agency-send-vars.ts`). 치환 CT는 값을 **DB 컬럼 이름**으로 찾으므로 변수명을 키로 넘기면 전 건이 빈칸으로 발송된다(에러도 로그도 없다).
 8. **⛔ 확정 경로에서 AI를 부르지 마라.** 미리보기가 추천하고, 화면이 그 매핑을 조정값으로 되보내고, 확정은 조정값만 믿는다(`aiSuggest=false`). 이메일은 전 구간이 확정 경로다.
-9. **⛔ 양식의 원본은 xlsx가 아니라 생성 스크립트다**(`packages/backend/scripts/build-agency-request-form.js`). 손으로 고치면 파서 계약(시트명 "요청서"·A열 라벨)이 깨진다. 바꾼 뒤 **파서 왕복 실측**이 같은 커밋에 들어간다.
+9. **⛔ 양식의 원본은 xlsx가 아니라 생성 스크립트다**(`packages/backend/scripts/build-agency-request-form.js`). 손으로 고치면 파서 계약(★0826(2) 통일 양식 = 시트 "내용"+"고객리스트" 한 파일 · 라벨 별칭 · 구양식 시트 "요청서"도 계속 읽음)이 깨진다. 바꾼 뒤 **파서 왕복 실측**이 같은 커밋에 들어간다. **값 칸(B열)에 안내문·예시 금지** — 파서 PLACEHOLDER_VALUES가 늘어나는 원천이다.
 10. **⛔ 이 축의 모든 문구에 줄표 0**(모달·버튼·안내 문자·회신 메일 전부). 계약 테스트 = `em-dash-invariants.test.ts`.
+11. **⛔ 일반 사용자(company_user)는 본인 접수만, 관리자(company_admin·super_admin)는 회사 전체**(★0826(2) 서수란 접수·Harold 확정). 고객 라우트에 행 접근 경로를 새로 만들면 소유자 술어(`created_by`)를 같은 커밋에 건다. 판정은 **JWT 어휘로만**(DB `users.user_type`과 어휘가 다르다 · SCHEMA users 절 함정).
 
 **이메일 입구 전용 (§18)**
 
-11. **⛔ 서버 메일을 지우지 않는다(DELE 0).** 처리 상태의 진실은 intake 원장 단독이다. POP3에는 폴더·읽음 개념이 없다. 이 메일함에 다른 POP3 클라이언트를 물리면 그쪽 삭제 설정이 메일을 지운다.
-12. **⛔ 신원은 allowlist_only.** 하이웍스가 수신 인증 헤더를 안 붙이므로(0826 실측) **허용 목록 정확 일치가 전부**다. 메일 안의 `ARC-*`·`Authentication-Results`·`X-Authinfo`는 발신자가 위조 삽입 가능하니 신뢰 근거로 쓰지 마라.
-13. **⛔ 신원 판정 전에 본문·첨부를 내려받지 마라**(TOP 헤더만 → 판정 → 선점 INSERT → RETR). 무인증 입구의 첨부 폭탄 방어다.
-14. **⛔ 허용 주소는 귀속 사용자(`user_id`)를 반드시 갖는다.** 그 값이 접수의 `created_by`가 되고, 없으면 승인까지 다 끝난 건이 발송 직전 `dispatch_no_owner`로 죽는다.
-15. **⛔ POP3 로그인 실패는 백오프 대상이 아니다.** 3연속이면 폴링을 멈추고 경보를 보낸 뒤 **사람이 재개**한다(1분마다 재시도 = 계정 잠금).
-16. **⛔ 중복 차단 집합에 `queued` 미도래를 포함한다.** 종결로 읽으면 아직 나가지 않은 예약과 같은 명단이 한 벌 더 접수된다(이중 발송).
-17. **⛔ 회신은 발신 주소 ∧ 활성 허용 목록 교집합에만 보낸다.** 위조 메일에 답해도 진짜 소유자에게 가고, 우리가 백스캐터 반사판이 되지 않는다. 미등록·판정 실패에는 회신 0.
+12. **⛔ 서버 메일을 지우지 않는다(DELE 0).** 처리 상태의 진실은 intake 원장 단독이다. POP3에는 폴더·읽음 개념이 없다. 이 메일함에 다른 POP3 클라이언트를 물리면 그쪽 삭제 설정이 메일을 지운다.
+13. **⛔ 신원은 allowlist_only.** 하이웍스가 수신 인증 헤더를 안 붙이므로(0826 실측) **허용 목록 정확 일치가 전부**다. 메일 안의 `ARC-*`·`Authentication-Results`·`X-Authinfo`는 발신자가 위조 삽입 가능하니 신뢰 근거로 쓰지 마라.
+14. **⛔ 신원 판정 전에 본문·첨부를 내려받지 마라**(TOP 헤더만 → 판정 → 선점 INSERT → RETR). 무인증 입구의 첨부 폭탄 방어다.
+15. **⛔ 허용 주소는 귀속 사용자(`user_id`)를 반드시 갖는다.** 그 값이 접수의 `created_by`가 되고, 없으면 승인까지 다 끝난 건이 발송 직전 `dispatch_no_owner`로 죽는다.
+16. **⛔ POP3 로그인 실패는 백오프 대상이 아니다.** 3연속이면 폴링을 멈추고 경보를 보낸 뒤 **사람이 재개**한다(1분마다 재시도 = 계정 잠금).
+17. **⛔ 중복 차단 집합에 `queued` 미도래를 포함한다.** 종결로 읽으면 아직 나가지 않은 예약과 같은 명단이 한 벌 더 접수된다(이중 발송).
+18. **⛔ 회신은 발신 주소 ∧ 활성 허용 목록 교집합에만 보낸다.** 위조 메일에 답해도 진짜 소유자에게 가고, 우리가 백스캐터 반사판이 되지 않는다. 미등록·판정 실패에는 회신 0.
 
 ---
 
@@ -66,7 +67,7 @@
 |---|---|
 | `utils/agency-send-state.ts` | 상태 머신(11상태)·전이표·시각 규칙. 리드타임 상수 = 화면 `MIN_LEAD_MINUTES`(180) / 이메일 `EMAIL_MIN_LEAD_MINUTES`(240) · 이메일 중복 차단 집합(`EMAIL_DUP_BLOCKING_SQL`과 판정 함수가 짝) |
 | **`utils/agency-send-intake.ts`** | **접수 코어**(`createRequestCore`) + 원스텝 분석(`analyzeOneStep`) + 발송 창 조회 + 이력 기록. 입구 3 공통. `pre.minLeadMinutes`로 입구별 리드타임을 **코어가 집행** |
-| `utils/agency-send-form.ts` | 요청서·명단 파서. 라벨 별칭 계약 · 무헤더 감지와 열 이름 합성 · 열 점수표(`scorePhoneColumns` 한 벌 + 임계 둘: 화면 0.5 / 이메일 0.9+격차) · 회신번호 칸 해석 |
+| `utils/agency-send-form.ts` | 요청서·명단 파서. ★0826(2) **통일 양식**(시트 "내용"+"고객리스트" 한 파일 · 업계 라벨 별칭 · 괄호 부연 제거 대조 · 플레이스홀더 빈칸 처리 · 한국어 시각 표기 · 문자타입 알림톡 반려 · `hasRecipientSheet`) + 구양식(시트 "요청서"+별도 명단) 하위호환 · 무헤더 감지와 열 이름 합성 · 열 점수표(`scorePhoneColumns` 한 벌 + 임계 둘: 화면 0.5 / 이메일 0.9+격차) · 회신번호 칸 해석 |
 | `utils/agency-send-vars.ts` | 문안 항목 ↔ 명단 열 매칭(`resolveVarColumns`) + 주소록 슬롯 번역(`buildSlotPlan`) |
 | `utils/agency-send-worker.ts` | 5분 워커 A~F(1차 검사·당일 재검사·적재·만료·대조·lock 복구). 적재는 `createDirectSendCampaign`에 위임 |
 | `utils/agency-send-approve.ts` | 승인 효과 CT(한 트랜잭션). 입구 둘(로그인 화면·문자 링크)이 같은 함수를 지난다 |
@@ -75,10 +76,10 @@
 | `utils/pop3-client.ts` | 자체 소형 POP3S 클라이언트(tls 위 6명령). ⛔ MIME 해석은 여기서 안 한다(`mailparser`의 일) |
 | `utils/agency-send-email.ts` | 허용 발신자 정규화·판정(`resolveEmailSender` — 주소와 귀속 사용자 활성을 한 쿼리로) |
 | `utils/agency-mailer.ts` | 회신 발신(3값 `sent\|rejected\|unknown` · ENV 없으면 수신·접수까지 전면 잠금) |
-| `routes/agency-send.ts` | 고객사 API(목록·접수·원스텝·상세·승인·문안 수정·시각 변경·취소). 코어는 CT에서 import |
+| `routes/agency-send.ts` | 고객사 API(목록·접수·원스텝·상세·승인·문안 수정·시각 변경·취소). 코어는 CT에서 import. ★0826(2) **사용자 격리**(소유자 술어 `ownerParam` 한 모양 · 관리자 응답에만 접수 계정 JOIN) |
 | `routes/agency-approve.ts` | 무로그인 링크 승인 API. ⛔ 노출은 문안·시각·건수·발신번호까지(명단·매핑·내부 식별자 금지) |
-| `routes/admin.ts` | 회사 스위치 PATCH · **허용 이메일 4라우트** · 접수 현황(+`mailIntake`) |
-| 프론트 | `pages/AgencySendPage.tsx`(목록) · `components/agency/*`(Composer·OneStepModal·Detail·api 미러) · `pages/AgencyApprovePage.tsx` · `components/admin/AgencyEmailSendersModal.tsx` · `components/admin/AgencyMailIntakePanel.tsx` |
+| `routes/admin.ts` | 회사 스위치 PATCH · **허용 이메일 4라우트** · 접수 현황(+`mailIntake` · ★0826(2) 내역 메뉴 재료 = source·레일 스탬프·고객사명·신청자명) |
+| 프론트 | `pages/AgencySendPage.tsx`(목록) · `components/agency/*`(Composer·OneStepModal·Detail·api 미러·★0826(2) `AgencyProgressRail` 공용 레일) · `pages/AgencyApprovePage.tsx` · `components/admin/AgencyEmailSendersModal.tsx` · `components/admin/AgencyMailIntakePanel.tsx` · ★0826(2) `components/admin/AgencySendLedgerPanel.tsx`(슈퍼관리자 대행발송 내역) |
 | 표시 라벨 | `components/agency/agency-send-api.ts`가 `STATUS_LABEL`·`SOURCE_LABEL`·`EVENT_LABEL` **단일표**를 소유. 새 상태·출처·이벤트는 여기 등재가 같은 커밋 |
 
 **DB** = `agency_send_requests`(+`source`) · `agency_send_recipients` · `agency_send_events` · `agency_send_email_senders` · `agency_send_email_intake` · `agency_send_mail_state`. 컬럼 원문·불변은 [SCHEMA.md](../status/SCHEMA.md) 해당 절.
@@ -109,6 +110,7 @@
 | 2026-08-25 | 화면 개편 §15 · **담당자 링크 승인 §16** · **요청서 원스텝 §17**(+양식 리디자인 §17-5) · 배포 | 설계서 §15~§17-5 |
 | 2026-08-25(4~6) | 문안 항목 AI 매핑 §17-6 · 명단 미리보기 엑셀 뷰 §17-7 · 헤더 접수 입구 두 문 §15-6 | 설계서 §17-6~§17-7 |
 | **2026-08-26** | **이메일 접수(챕터 2) 설계→구현→배포 하루 종결.** 브레인스토밍 4역할 + 회의론자 15건 → **하이웍스 실측으로 전제 2개 정정**(POP3만 · 인증헤더 미부착) → 신설 7파일 · DDL 4종 · 자체 적대 5R(실결함 7) | 설계서 §18·§18-11-1 |
+| **2026-08-26(2)** | **통일 양식 + 사용자 격리 + 슈퍼관리자 내역 메뉴.** ①업계 실물 양식(카톡 수신 실측) 기준으로 세 입구 통일: 한 파일(내용+고객리스트) · 화면 슬롯 1개 · 이메일 1파일 표준(2파일 관용) · 배포 양식 재생성(값 칸 빈칸 규약) ②사용자 격리(서수란 접수): company_user 본인만·관리자 전체 + 접수 계정 표시 ③슈퍼관리자 "대행발송 내역" 탭(진행 레일+접수구분+고객사·신청자) · DDL 0 · Codex 생략(Harold 지시)·자체 적대 검토 | 설계서 §19 |
 
 **뒤집힌 판단 (같은 자리에서 다시 틀리지 않으려고 남긴다)**
 

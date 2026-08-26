@@ -14,6 +14,7 @@ import fs from 'fs';
 import {
   parseAgencyRecipientList, parseAgencyRequestForm, pickPhoneColumn, pickPhoneColumnStrict,
   scorePhoneColumns, resolveCallbackPlan, parseWhenText, matchHeader,
+  looksLikeRequestForm, hasRecipientSheet,
 } from '../agency-send-form';
 import { restoreMobileLeadingZero, normalizeAgencyPhone } from '../normalize-phone';
 
@@ -265,15 +266,125 @@ describe('대행발송 §18-4 — 요청서 "수신자 열 이름" 칸(선택)',
 });
 
 describe('대행발송 §17-5 계약 — 배포 양식 파서 왕복(재생성본이 파서를 통과해야 한다)', () => {
-  it('frontend/public/agency-request-form.xlsx를 그대로 채워진 값으로 파싱하면 오류 0이다', () => {
+  it('frontend/public/agency-request-form.xlsx: 통일 양식(내용+고객리스트 한 파일)이고, 값 칸은 비워 배포한다', () => {
+    // ★2026-08-26(2) 배포본의 값 칸은 전부 빈칸이다(값 칸의 예시·안내문이 값으로 접수되는 것을 원천 차단).
+    //   그래서 왕복 계약 = 필수 4필드가 정확히 "빈칸" 사유로 반려된다(라벨이 미인식이면 같은 결과가
+    //   나올 수 없다 — 미인식 라벨 검증은 아래 통일 양식 픽스처 테스트가 값을 채워 증명한다).
     const formPath = path.resolve(__dirname, '../../../../frontend/public/agency-request-form.xlsx');
     expect(fs.existsSync(formPath)).toBe(true);
-    const f = parseAgencyRequestForm(fs.readFileSync(formPath));
-    expect(f.errors).toEqual([]);
-    expect(f.content.length).toBeGreaterThan(0);
-    expect(f.requestedAt).not.toBeNull();
-    expect(f.managerPhones.length).toBeGreaterThan(0);
-    // 신설 칸은 예시값 없이 비워 배포한다(선택 항목 · 채우면 그 열로 확정된다)
+    const buf = fs.readFileSync(formPath);
+    expect(looksLikeRequestForm(buf)).toBe(true);
+    expect(hasRecipientSheet(buf)).toBe(true);
+    const f = parseAgencyRequestForm(buf);
+    expect(f.errors.map((e) => e.field).sort()).toEqual(['담당자 번호', '문안', '보낼 시각', '회신번호']);
+    expect(f.isAd).toBe(true);
     expect(f.phoneColumnName).toBe('');
+    const list = parseAgencyRecipientList(buf);
+    expect(list.headers).toEqual(['고객명', '고객연락처 (수신번호)', '매장이름', '매장전화번호 (회신번호)', '기타', '기타2']);
+    expect(list.rows.length).toBe(0);
+  });
+});
+
+/**
+ * ★2026-08-26(2) 통일 양식 계약 — 업계 실물 레이아웃(카카오톡 수신 파일 실측)을 그대로 본뜬 픽스처.
+ *   A열 비움 · B열 라벨(줄바꿈·괄호 부연 포함) · C열 값 · 시트1 "내용" + 시트2 "고객리스트".
+ */
+function industryBuffer(opts: {
+  when?: string; content?: string; callback?: string; managers?: string; type?: string; image?: string;
+  listRows?: any[][];
+} = {}): Buffer {
+  const aoa: any[][] = [
+    [null, '구 분', '내 용'],
+    [null, '문자타입', opts.type ?? null],
+    [null, '알림톡 실패 시 전환 발송 사용 여부', null],
+    [null, '※ 전환 발송 사용시 알림톡과 동일한 문안 발송을 기본으로 합니다.', null],
+    [null, '발송날짜 및 시간', opts.when ?? '월 일 시 분'],
+    [null, '메시지 제목\r\n(LMS,MMS만 해당)', '가을 행사 안내'],
+    [null, '템플릿코드\r\n(알림톡만 해당)', null],
+    [null, '테스트 문자\r\n받을 번호\r\n(여러 개 가능)', opts.managers ?? null],
+    [null, '메시지 내용', opts.content ?? null],
+    [null, '발신번호\r\n(=회신번호)', opts.callback ?? "(고객 별로 발신번호가 상이할 경우, '고객리스트'시트에 고객 별로 발신번호 기재 부탁드립니다.)"],
+    [null, '이미지 파일명\r\n(MMS/\r\n친구톡 이미지 발송)', opts.image ?? '① '],
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '내용');
+  const listAoa = opts.listRows ?? [
+    ['고객명', '고객연락처 (수신번호)', '매장이름', '매장전화번호 (회신번호)', '기타', '기타2'],
+    ['김하나', '01000001111', '강남점', '0200000000', 'VIP', ''],
+    ['이두리', '01000002222', '서초점', '0310000000', '일반', ''],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(listAoa), '고객리스트');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+}
+
+describe('대행발송 통일 양식(★2026-08-26(2)) — 업계 레이아웃 파싱', () => {
+  it('B열 라벨(줄바꿈·괄호 부연)을 해석해 전 필드를 읽는다', () => {
+    const f = parseAgencyRequestForm(industryBuffer({
+      when: '2026년 9월 1일 오후 2시',
+      content: '[한줄상회] %고객명%님, 행사 안내드립니다.',
+      callback: '0507-0000-0000',
+      managers: '010-0000-1111, 010-0000-2222',
+      image: '',
+    }));
+    expect(f.errors).toEqual([]);
+    expect(f.subject).toBe('가을 행사 안내');
+    expect(f.content).toContain('%고객명%');
+    expect(f.requestedAt).not.toBeNull();
+    expect(f.requestedAt!.getHours()).toBe(14);
+    expect(f.callbackRaw).toBe('0507-0000-0000');
+    expect(f.managerPhones).toEqual(['01000001111', '01000002222']);
+  });
+
+  it('템플릿 안내문("월 일 시 분"·발신번호 안내·①)은 값이 아니라 빈칸이다', () => {
+    const f = parseAgencyRequestForm(industryBuffer({ content: '문안', managers: '01000001111' }));
+    expect(f.requestedAtText).toBe('');
+    expect(f.callbackRaw).toBe('');
+    expect(f.imageFileName).toBe('');
+    expect(f.errors.some((e) => e.field === '보낼 시각')).toBe(true);
+    expect(f.errors.some((e) => e.field === '회신번호')).toBe(true);
+  });
+
+  it('문자타입이 알림톡·친구톡이면 반려하고, SMS·LMS·MMS·빈칸은 통과한다', () => {
+    const base = { when: '2026-09-01 14:00', content: '문안', callback: '0507-0000-0000', managers: '01000001111', image: '' };
+    expect(parseAgencyRequestForm(industryBuffer({ ...base, type: '알림톡' })).errors.some((e) => e.field === '문자타입')).toBe(true);
+    expect(parseAgencyRequestForm(industryBuffer({ ...base, type: '친구톡' })).errors.some((e) => e.field === '문자타입')).toBe(true);
+    expect(parseAgencyRequestForm(industryBuffer({ ...base, type: 'LMS' })).errors).toEqual([]);
+    expect(parseAgencyRequestForm(industryBuffer(base)).errors).toEqual([]);
+  });
+
+  it('이미지 파일명 칸의 실제 값은 imageFileName으로 노출된다(이메일 경로 반려 재료)', () => {
+    const f = parseAgencyRequestForm(industryBuffer({
+      when: '2026-09-01 14:00', content: '문안', callback: '0507-0000-0000', managers: '01000001111', image: 'banner.jpg',
+    }));
+    expect(f.imageFileName).toBe('banner.jpg');
+  });
+
+  it('명단은 같은 파일의 "고객리스트" 시트에서 읽는다(첫 시트 "내용"이 명단으로 오독되지 않는다)', () => {
+    const buf = industryBuffer({ content: '문안', callback: '0507', managers: '01000001111' });
+    const list = parseAgencyRecipientList(buf);
+    expect(list.headers[0]).toBe('고객명');
+    expect(list.rows.length).toBe(2);
+    expect(hasRecipientSheet(buf)).toBe(true);
+    expect(looksLikeRequestForm(buf)).toBe(true);
+  });
+
+  it('"내용" 시트 단독은 요청서로 보지 않고, 예시 시트 이름은 명단이 아니다', () => {
+    const solo = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(solo, XLSX.utils.aoa_to_sheet([['내용만']]), '내용');
+    const soloBuf = XLSX.write(solo, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    expect(looksLikeRequestForm(soloBuf)).toBe(false);
+    const sample = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(sample, XLSX.utils.aoa_to_sheet([['휴대폰번호'], ['01000001111']]), '고객 명단 예시');
+    const sampleBuf = XLSX.write(sample, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    expect(hasRecipientSheet(sampleBuf)).toBe(false);
+  });
+
+  it('한국어 시각 표기: 연도 필수, 오전·오후·요일 괄호 허용, 달력 왕복 대조 유지', () => {
+    expect(parseWhenText('2026년 9월 1일 14시 30분')!.getMinutes()).toBe(30);
+    expect(parseWhenText('2026년 9월 1일(월) 오후 2시')!.getHours()).toBe(14);
+    expect(parseWhenText('2026년 9월 1일 오전 12시')!.getHours()).toBe(0);
+    expect(parseWhenText('9월 1일 14시')).toBeNull();
+    expect(parseWhenText('2026년 2월 30일 14시')).toBeNull();
+    expect(parseWhenText('월 일 시 분')).toBeNull();
   });
 });

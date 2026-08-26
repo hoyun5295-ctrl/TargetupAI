@@ -26,7 +26,7 @@ import {
 } from './agency-send-intake';
 import {
   parseAgencyRequestForm, parseAgencyRecipientList, pickPhoneColumnStrict, resolveCallbackPlan,
-  looksLikeRequestForm,
+  looksLikeRequestForm, hasRecipientSheet,
 } from './agency-send-form';
 import { extractAgencyVars } from './agency-send-vars';
 import { EMAIL_MIN_LEAD_MINUTES, EMAIL_DUP_BLOCKING_SQL } from './agency-send-state';
@@ -386,7 +386,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   if (octets > MAX_MESSAGE_OCTETS) {
     await finalizeIntake(claimed.id, 'rejected', { reason: 'too_large', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
     await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
-      buildRejectedReply(['메일이 너무 큽니다. 요청서와 명단 두 파일만 첨부해 다시 보내주세요(파일당 15MB 이내).']), messageId);
+      buildRejectedReply(['메일이 너무 큽니다. 요청서 양식 파일 하나만 첨부해 다시 보내주세요(15MB 이내).']), messageId);
     return;
   }
 
@@ -408,31 +408,52 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     return;
   }
   if (atts.length > MAX_ATTACH_FILES) {
-    await reject([`첨부가 ${atts.length}개입니다. 요청서와 명단 두 파일만 첨부해 주세요.`], 'too_many_files');
+    await reject([`첨부가 ${atts.length}개입니다. 요청서 파일 하나만 첨부해 주세요.`], 'too_many_files');
     return;
   }
   if (atts.reduce((a, b) => a + (b.size || b.content?.length || 0), 0) > MAX_ATTACH_TOTAL) {
-    await reject(['첨부 용량이 큽니다. 두 파일 합쳐 15MB 이내로 보내주세요.'], 'attachments_too_large');
+    await reject(['첨부 용량이 큽니다. 15MB 이내로 보내주세요.'], 'attachments_too_large');
     return;
   }
+  // ★2026-08-26(2) 표준 = 통일 양식 **한 파일**(시트1 내용 + 시트2 고객리스트). 요청서와 명단을
+  //   두 파일로 나눠 첨부한 메일도 그대로 받는다(반려당할 이유가 없는 메일을 반려하지 않는다).
   const sheets = atts.filter((a) => /\.(xlsx|xls|csv)$/i.test(String(a.filename || '')));
-  if (sheets.length !== 2) {
-    await reject(['요청서(양식 그대로)와 고객 명단, 두 파일을 함께 첨부해 주세요. 지금은 표 파일이 ' + sheets.length + '개입니다.'], 'attachments_invalid');
+  let formBuf: Buffer;
+  let listBuf: Buffer;
+  let listName: string;
+  if (sheets.length === 1) {
+    const buf = sheets[0].content as Buffer;
+    if (!looksLikeRequestForm(buf) || !hasRecipientSheet(buf)) {
+      await reject(['첨부한 파일에서 요청서(내용 시트)와 고객리스트 시트를 함께 찾지 못했습니다. 내려받은 양식 그대로 첫 시트에 내용을, 고객리스트 시트에 명단을 채워 첨부해 주세요.'], 'form_not_identified');
+      return;
+    }
+    formBuf = buf;
+    listBuf = buf;
+    listName = String(sheets[0].filename || '대행발송요청서.xlsx');
+  } else if (sheets.length === 2) {
+    const forms = sheets.filter((a) => looksLikeRequestForm(a.content as Buffer));
+    if (forms.length !== 1) {
+      await reject(['어느 파일이 요청서인지 확인하지 못했습니다. 요청서는 내려받은 양식을 그대로 채워 첨부해 주세요.'], 'form_not_identified');
+      return;
+    }
+    const formAtt = forms[0];
+    const listAtt = sheets.find((a) => a !== formAtt)!;
+    formBuf = formAtt.content as Buffer;
+    listBuf = listAtt.content as Buffer;
+    listName = String(listAtt.filename || '고객명단.xlsx');
+  } else {
+    await reject(['요청서 양식 파일(내용 시트 + 고객리스트 시트)을 한 개 첨부해 주세요. 지금은 표 파일이 ' + sheets.length + '개입니다.'], 'attachments_invalid');
     return;
   }
-  const forms = sheets.filter((a) => looksLikeRequestForm(a.content as Buffer));
-  if (forms.length !== 1) {
-    await reject(['어느 파일이 요청서인지 확인하지 못했습니다. 요청서는 내려받은 양식(시트 이름 "요청서")을 그대로 채워 첨부해 주세요.'], 'form_not_identified');
-    return;
-  }
-  const formAtt = forms[0];
-  const listAtt = sheets.find((a) => a !== formAtt)!;
-  const formBuf = formAtt.content as Buffer;
-  const listBuf = listAtt.content as Buffer;
-  const listName = String(listAtt.filename || '고객명단.xlsx');
 
   // 8) 이메일 전용 사전 게이트(§18-3) — 확인 화면이 없는 경로의 추가 반려 규칙
   const form = parseAgencyRequestForm(formBuf);
+  // ★2026-08-26(2) 요청서의 "이미지 파일명" 칸에 값이 있으면 반려 — 이 경로는 이미지 첨부 자체를
+  //   안 받으므로(has_image), 이름만 적힌 이미지는 실리지 못한 채 문자만 나간다(기대와 다른 발송).
+  if (form.imageFileName) {
+    await reject(['요청서에 이미지 파일명이 적혀 있습니다. 이미지 문자는 화면 접수에서 이미지를 붙여 진행해 주세요. 메일 접수는 짧은 문자와 긴 문자만 받습니다.'], 'has_image');
+    return;
+  }
   let list: ReturnType<typeof parseAgencyRecipientList> | null = null;
   try { list = parseAgencyRecipientList(listBuf); } catch { list = null; }
   if (list) {

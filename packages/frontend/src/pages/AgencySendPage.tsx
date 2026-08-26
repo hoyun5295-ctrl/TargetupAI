@@ -15,16 +15,18 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, FileSpreadsheet, Loader2, MessageSquare, Plus, RefreshCw, Send, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, FileSpreadsheet, Loader2, MessageSquare, Plus, RefreshCw, Send } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { useToast } from '../components/ToastProvider';
 import AgencySendIntroModal from '../components/agency/AgencySendIntroModal';
 import AgencySendComposer, { type AgencyComposerPrefill } from '../components/agency/AgencySendComposer';
 import AgencyOneStepModal from '../components/agency/AgencyOneStepModal';
 import AgencySendDetail from '../components/agency/AgencySendDetail';
+// ★2026-08-26(2) 진행 레일은 공용 컴포넌트로 승격 — 슈퍼관리자 대행발송 내역과 같은 그리기를 쓴다
+import AgencyProgressRail from '../components/agency/AgencyProgressRail';
 import {
   fetchAgencyRecipients, fetchAgencyRequests, formatWhenRelative, isApprovable, isRedoable,
-  RAIL_STEPS, railFor, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
+  SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencySendRequest,
 } from '../components/agency/agency-send-api';
 import {
@@ -75,50 +77,6 @@ function EntryButton({ tone, icon, title, sub, onClick }: {
         <span className={`hidden sm:block text-[11px] font-semibold mt-px ${solid ? 'text-white/80' : 'text-indigo-700'}`}>{sub}</span>
       </span>
     </button>
-  );
-}
-
-/** 6단계 진행 레일. 표시 판정은 railFor(CT) 하나가 소유하고 여기는 그리기만 한다 */
-function ProgressRail({ r }: { r: AgencySendRequest }) {
-  const rail = railFor(r);
-  // 흐름이 닿은 마지막 단계. 연결선은 이 값 하나로 단조롭게 칠한다(마디별 조건 분기를 두지 않는다)
-  const reach = rail.fail ? rail.fail.at : (rail.now ?? Math.max(0, rail.doneBefore - 1));
-  const lineOn = rail.muted ? 'bg-neutral-300' : 'bg-indigo-600';
-  return (
-    <div className="flex items-start flex-1 min-w-[340px]" aria-label="진행 단계">
-      {RAIL_STEPS.map((label, i) => {
-        const fail = rail.fail?.at === i;
-        const now = !fail && rail.now === i;
-        const done = !fail && !now && i < rail.doneBefore;
-        return (
-          <div key={label} className="flex-1 flex flex-col items-center relative">
-            {i > 0 && (
-              <span className={`absolute left-0 right-1/2 top-[9px] h-0.5 ${reach >= i ? lineOn : 'bg-neutral-200'}`} aria-hidden="true" />
-            )}
-            {i < RAIL_STEPS.length - 1 && (
-              <span className={`absolute left-1/2 right-0 top-[9px] h-0.5 ${reach >= i + 1 ? lineOn : 'bg-neutral-200'}`} aria-hidden="true" />
-            )}
-            <span className={`relative z-10 h-5 w-5 rounded-full grid place-items-center border-2 ${
-              fail ? 'bg-rose-500 border-rose-500 text-white'
-                : now ? 'bg-white border-indigo-600'
-                : done ? (rail.muted ? 'bg-neutral-300 border-neutral-300 text-white' : 'bg-indigo-600 border-indigo-600 text-white')
-                : 'bg-white border-neutral-200'}`}>
-              {fail ? <X className="w-2.5 h-2.5" strokeWidth={3.2} />
-                : now ? <span className="h-[7px] w-[7px] rounded-full bg-indigo-600 animate-pulse" />
-                : done ? <Check className="w-2.5 h-2.5" strokeWidth={3.2} />
-                : null}
-            </span>
-            <span className={`mt-1 text-[11px] whitespace-nowrap ${
-              fail ? 'text-rose-700 font-bold'
-                : now ? 'text-indigo-700 font-bold'
-                : done ? (rail.muted ? 'text-neutral-400 font-semibold' : 'text-indigo-700 font-semibold')
-                : 'text-neutral-400 font-semibold'}`}>
-              {fail ? rail.fail!.label : label}
-            </span>
-          </div>
-        );
-      })}
-    </div>
   );
 }
 
@@ -252,7 +210,7 @@ export default function AgencySendPage() {
                 tone="form"
                 icon={<FileSpreadsheet className="w-[15px] h-[15px]" strokeWidth={2} />}
                 title="요청서로 접수"
-                sub="파일 2개면 끝납니다"
+                sub="파일 하나면 끝납니다"
                 onClick={() => setOneStepOpen(true)}
               />
               <EntryButton
@@ -348,11 +306,12 @@ export default function AgencySendPage() {
                           </div>
                           <p className={`${CUI_CELL_META} mt-0.5 truncate`}>
                             {/* ★0826 §18: 출처 라벨 = SOURCE_LABEL 단일표(fileName 유무 추정 폐지 — 이메일 접수도 파일명이 있어 구분이 안 됐다) */}
-                            {SOURCE_LABEL[r.source] || SOURCE_LABEL.screen} · <span className="tabular-nums">{r.recipientCount.toLocaleString()}</span>명 · {r.messageType}{r.isAd ? ' · 광고' : ''}
+                            {/* ★0826(2) 접수 계정 — 관리자 응답에만 실려 온다(관리자는 하위 전부를 보므로 누가 냈는지 표시) */}
+                            {SOURCE_LABEL[r.source] || SOURCE_LABEL.screen} · <span className="tabular-nums">{r.recipientCount.toLocaleString()}</span>명 · {r.messageType}{r.isAd ? ' · 광고' : ''}{r.createdByName ? <> · <span className="text-indigo-700 font-semibold">{r.createdByName}</span></> : null}
                           </p>
                         </div>
                         <div className="hidden md:flex flex-1 min-w-0">
-                          <ProgressRail r={r} />
+                          <AgencyProgressRail r={r} />
                         </div>
                         <div className="flex items-center justify-between lg:justify-end gap-4 lg:w-[300px] shrink-0">
                           <div className="text-left lg:text-right lg:w-[124px]">
