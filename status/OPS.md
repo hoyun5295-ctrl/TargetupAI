@@ -278,6 +278,110 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT status, re
 
 ---
 
+### 2-2-E. AI 영업 아웃리치 v2 배포 (★2026-08-26 신설 · 기능 = [FEATURE-SALES-OUTREACH.md](../docs/FEATURE-SALES-OUTREACH.md) · 설계 = [설계서 §15](../docs/2026-07-31-ai-sales-outreach-design.md))
+
+> **코드는 이미 서버에 있다**(0824 커밋 `4ca769e7`·`c5c0862e`. 이후 배포에 함께 실려 갔다). 남은 것은 **ENV와 DDL 둘뿐**이다.
+> ⛔ 순서 = **⓪ 코드 확인 → ① 존재 검증 → ② ENV → ③ DDL → ④ 반영 확인**. 코드 배포가 DDL보다 먼저라는 규율은 이미 충족된 상태다.
+> ⛔ **ENV 없이 DDL만 넣으면 화면은 안 열린다.** `OUTREACH_COMPANY_ID`·`OUTREACH_USER_ID`가 없으면 기능 전체가 "준비가 되지 않았습니다"로 정직하게 거절한다(폴백 없음).
+> ⛔ **발송은 3중으로 잠겨 있다**(불변 3): `OUTREACH_SMTP_USER/PASS` 미설정 · `OUTREACH_UNSUB_NOTICE` 공백 · 문안에 `BENEFIT_PLACEHOLDER` 잔존. 셋 중 하나라도면 발송 버튼이 안 열린다. **수신거부 문구는 아직 Harold 미결정**(설계서 §15-10 #8)이라 ②에서 그 키를 비워 두면 **제작까지만 도는 상태로 안전하게 실측**할 수 있다.
+
+**⓪ 코드가 서버에 실려 있는지** — 부팅 때 sweeper가 자기를 등재한다.
+```bash
+grep -a "sales-outreach-sweeper" ~/.pm2/logs/targetup-backend-out*.log | tail -3
+```
+`[sales-outreach-sweeper] 시작 (주기 10분 · 좀비 15분 · 파기 30일)` = 실려 있음. 아무 줄도 없으면 그 커밋 이후 재기동이 없었던 것이니 `pm2 restart targetup-backend` 후 다시 본다.
+
+**① 테이블 존재 검증 (③ 실행 전 필수 · 0행이어야 CREATE 한다)**
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('sales_outreach_jobs','sales_outreach_assets');"
+```
+0행 = 미생성(정상 · ②로). 행이 나오면 이미 만들어진 것이니 ③을 건너뛰고 ④의 컬럼 대조부터 한다.
+
+**② ENV** — `packages/backend/.env`. 넣은 뒤 `pm2 restart targetup-backend --update-env`(**reload는 env를 다시 안 읽는다**).
+
+| 키 | 값 | 없으면 |
+|---|---|---|
+| `SALES_OUTREACH_ALLOWED_USERS` | `ceo` | **키가 없어도 기본값 `ceo`가 적용된다**(전면 차단이 아니다 · `audit-log.ts:55`). fail-closed가 걸리는 곳은 미로그인·미등록·조회 실패다 |
+| `OUTREACH_COMPANY_ID` | 인비토 내부 귀속 회사 `companies.id`(uuid) | **기능 전체가 "준비 안 됨"으로 거절** |
+| `OUTREACH_USER_ID` | 그 회사의 `users.id`(uuid) | 위와 같음 |
+| `OUTREACH_SMTP_USER` | `hanjul@invitocorp.com` | 발송만 잠김(제작은 정상) |
+| `OUTREACH_SMTP_PASS` | 그 계정 **메일 전용 비밀번호** | 위와 같음 |
+| `OUTREACH_MAIL_TO` | 자사 수신함 주소 | 생략 = `INVITO_INFO.email` 기본값 사용 |
+| `OUTREACH_UNSUB_NOTICE` | 메일 하단 수신거부 안내 문구 | 발송 잠김(**지금은 이게 정상 상태**) |
+
+발신 서버는 기존 `SMTP_HOST`·`SMTP_PORT`를 그대로 쓴다(기본 `smtp.hiworks.com:465`). 공개 샘플 주소의 앞부분은 `PUBLIC_BASE_URL`(기본 `https://hanjul.ai`).
+
+귀속 회사·사용자 uuid를 모를 때 찾는 SQL:
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT c.id AS company_id, c.name, u.id AS user_id, u.login_id FROM companies c JOIN users u ON u.company_id = c.id WHERE c.name LIKE '%인비토%' ORDER BY c.created_at, u.created_at;"
+```
+
+**③ DDL 2테이블** — ①이 0행일 때만. `ON_ERROR_STOP`+트랜잭션으로 묶여 있어 **한 줄이라도 실패하면 통째로 롤백**된다(반쯤 만들어진 상태가 안 남는다). 문법만 미리 보고 싶으면 마지막 `COMMIT;`을 `ROLLBACK;`으로 바꿔 한 번 돌린 뒤 되돌린다.
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup <<'SQL'
+\set ON_ERROR_STOP on
+BEGIN;
+CREATE TABLE sales_outreach_jobs (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_name      text NOT NULL,
+  industry_category text,
+  homepage_url      text NOT NULL,
+  stage             text NOT NULL DEFAULT 'queued'
+                    CHECK (stage IN ('queued','crawling','analyzing','awaiting_confirm',
+                                     'producing_copy','producing_image','producing_dm','producing_email',
+                                     'ready','sent','failed')),
+  lock_token        uuid,
+  lock_at           timestamptz,
+  stage_results     jsonb NOT NULL DEFAULT '{}'::jsonb,
+  brand_profile     jsonb,
+  event_quote       jsonb,
+  fail_stage        text,
+  fail_reason       text,
+  preview_code      text UNIQUE,
+  mail_sent_at      timestamptz,
+  mail_result       text CHECK (mail_result IN ('sending','sent','rejected','unknown')),
+  mail_confirmed_at timestamptz,
+  forwarded_at      timestamptz,
+  purged_at         timestamptz,
+  created_by        uuid,
+  created_at        timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_soj_created_at ON sales_outreach_jobs (created_at DESC);
+CREATE INDEX idx_soj_stage      ON sales_outreach_jobs (stage);
+CREATE INDEX idx_soj_unpurged   ON sales_outreach_jobs (purged_at) WHERE purged_at IS NULL;
+
+CREATE TABLE sales_outreach_assets (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id      uuid NOT NULL REFERENCES sales_outreach_jobs(id) ON DELETE CASCADE,
+  kind        text NOT NULL CHECK (kind IN ('copy','email_html','dm','studio_image')),
+  payload     jsonb NOT NULL,
+  regen_count integer NOT NULL DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_soa_job_kind ON sales_outreach_assets (job_id, kind, created_at DESC);
+COMMIT;
+SQL
+```
+⛔ `created_by`에 **FK를 걸지 않는다** — 슈퍼관리자는 `super_admins` 소속이라 `users` FK를 걸면 `23503`으로 터진다(2026-07-28 회사 수정 실패 사고 · SCHEMA.md 공통 원칙). 값은 `super_admins.id` uuid다.
+⛔ CHECK 목록은 코드 실측 전수다(stage 11값 = 모달·라우트·잡·sweeper 교차 확인 · `mail_result`에 **`sending` 포함**이 핵심 — 발송 선점 CAS가 쓰는 값이라 빠뜨리면 발송이 통째로 막힌다).
+
+**④ 반영 확인** — 컬럼 수 20 · 6이 나와야 한다.
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT table_name, COUNT(*) AS cols FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('sales_outreach_jobs','sales_outreach_assets') GROUP BY table_name ORDER BY 1;"
+```
+DDL 전에 화면을 열면 라우트가 **503 `DB_MIGRATION_PENDING`**과 "DB 마이그레이션 필요" 안내를 낸다(`routes/sales-outreach.ts:43`). 500이 뜨면 그건 다른 원인이다.
+
+**⑤ 운영 실측 1건 (설계서 §15-8 잔여)** — 순서대로 하나씩.
+1. 슈퍼관리자 `ceo`로 **AI 영업** 메뉴 진입 → 업체 1곳 등록(홈페이지 주소만) → 확인 대기까지 도달하는지
+2. 이미지 단계가 도는지 = rembg 상주(`studio-py` pm2 프로세스)가 살아 있어야 한다
+3. 제작 완료(ready) 후 **메일 미리보기**가 화면에 뜨는지 · 공개 샘플 페이지 링크가 열리는지
+4. 발송은 `OUTREACH_UNSUB_NOTICE`가 정해진 뒤에 한다. 첫 발송은 자사 수신함 1통이고, 결과 3값(`sent`/`rejected`/`unknown`)이 목록에 그대로 찍히는지 본다
+5. `[업체에 전달함]` 표시까지 눌러야 공개 샘플 페이지 수명 기산이 설계대로 도는지 확인된다
+
+**⑥ 긴급 정지** — `SALES_OUTREACH_ALLOWED_USERS`를 존재하지 않는 login_id로 바꾸고 `pm2 restart targetup-backend --update-env`. 메뉴 자체가 닫힌다. 발송만 막으려면 `OUTREACH_UNSUB_NOTICE`를 비운다.
+
+---
+
 ### 2-3. QTmsg 발송 엔진 (로컬 - 개발용)
 ```bash
 cd C:\projects\qtmsg\bin

@@ -55,6 +55,16 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-0826-2 네이버 쇼핑 검색 API가 이 앱에서 404다 — DM 편집기의 쇼핑 후보가 상시 0건 (🔵 Open · 축 밖 기록만) — 2026-08-26 (영업 아웃리치 v3 착수 게이트 G4 실측)
+
+> **증상**: 운영 `packages/backend/.env`의 `NAVER_CLIENT_ID/SECRET`으로 `openapi.naver.com/v1/search/shop.json`을 호출하면 **HTTP 404 · `errorCode: SE05`(존재하지 않는 검색 api)**. 같은 키·같은 헤더로 `blog.json`은 **HTTP 200**(`total` 16,078,772)이라 키 문제도 인증 문제도 아니다 — **그 애플리케이션에서 쇼핑 검색만 안 열린 것**이다. 키 20자/10자 · 이물 문자 0.
+> **위치**: `utils/naver-shop-search.ts:61~64`가 `!res.ok`를 `console.log` 한 줄만 남기고 빈 배열로 접는다(49행도 미설정을 같은 형태로 접는다). 소비처 = `routes/dm.ts:981~986`(DM 편집기 이미지 후보). 화면에는 "후보 없음"으로만 보여 장애가 드러나지 않는다.
+> **근거**: (가) Harold 실행 curl 3회(shop 404 · blog 200 · 이물 문자 0) (나) `app.ts:1~3`이 `dotenv.config()`를 첫 줄에 두고 `naver-shop-search.ts:11~12`가 모듈 로드 시점에 `process.env`를 읽는다. pm2가 이 키를 주입하지 않으므로(`pm2 jlist` 기준 길이 0) 앱이 쥐는 값은 `.env`의 그 키다.
+> **미검증 1 → 대부분 닫힘**: 저장소 `ecosystem.config.js`가 `targetup-backend`의 `cwd`를 `/home/administrator/targetup-app/packages/backend`로 선언하고, 같은 파일의 `out_file`이 실제로 조회한 로그 파일과 일치한다. 즉 `dotenv.config()`가 읽는 `.env`는 curl이 읽은 그 파일이다. **남은 틈은 살아 있는 프로세스가 이 설정으로 기동됐는지 하나뿐**(`pm2 jlist`의 `pm_cwd` 1회 확인으로 완전히 닫힌다).
+> **미검증 2**: 404의 원인이 그 앱의 사용 API 설정인지 네이버의 제공 정책 변경인지. 네이버 개발자센터 "사용 API" 목록 1회 확인으로 갈린다. 공개 자료 검색으로는 중단 공지를 확인하지 못했다.
+> **수정 방향**: 원인 확정이 먼저다. ①쇼핑 검색 사용 설정 또는 앱 재등록 ②`isNaverShopSearchConfigured()`가 "키 문자열이 있음"만 보고 true를 내는 구조라 화면이 "설정됨인데 후보 0"으로 보인다 — 실패를 정직하게 드러내는 축은 별건(2값을 3값으로). ⛔ **이 세션 축(영업 아웃리치) 밖이라 기록만 한다.**
+> **파급**: 영업 아웃리치 v3 스마트스토어 재료 축의 착수 게이트 G4 실패 사유 = [설계서 §16-9-1](../docs/2026-07-31-ai-sales-outreach-design.md). 그 축은 이 버그가 닫히기 전에는 재개하지 않는다.
+
 ### 🟡 B-0826-1 AI 영업 크롤이 `Promise.all`이라 한 소스 실패가 나머지 결과까지 버린다 (🔵 Open · 기존 부채 · 스마트스토어 축 착수 시 선결) — 2026-08-26 (스마트스토어 브레인스토밍 백엔드 실측)
 
 - `packages/backend/src/utils/sales-outreach-jobs.ts:190~196` — `Promise.all([fetchEventTextFromUrl, fetchHtmlGuarded])`을 바깥 try/catch가 감싸, 둘 중 하나만 던져도 `eventText`·`page`가 함께 null이 되어 `crawlOutcome='unavailable'`로 접힌다. 행사 텍스트는 잘 읽혔는데 HTML fetch가 죽었다는 이유로 행사 후보가 통째로 사라지는 형태.
