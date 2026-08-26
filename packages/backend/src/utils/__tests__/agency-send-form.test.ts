@@ -279,8 +279,9 @@ describe('대행발송 §17-5 계약 — 배포 양식 파서 왕복(재생성�
     expect(f.errors.map((e) => e.field).sort()).toEqual(['담당자 번호', '문안', '보낼 시각', '회신번호']);
     expect(f.isAd).toBe(true);
     expect(f.phoneColumnName).toBe('');
+    // ★0826(3) 배포 양식 = 업체 실물 복제(헤더의 줄바꿈 부연까지 원문 보존)
     const list = parseAgencyRecipientList(buf);
-    expect(list.headers).toEqual(['고객명', '고객연락처 (수신번호)', '매장이름', '매장전화번호 (회신번호)', '기타', '기타2']);
+    expect(list.headers).toEqual(['고객명', '고객연락처 (수신번호)', '매장이름', '매장전화번호 (회신번호)', '기타\n(ex:포인트 등)', '기타2\n(ex:포인트 등)']);
     expect(list.rows.length).toBe(0);
   });
 });
