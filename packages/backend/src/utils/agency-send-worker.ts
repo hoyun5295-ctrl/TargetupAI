@@ -27,7 +27,7 @@ import {
   buildApprovedExpiredNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestFailedNotify, formatWhen, shortLabel,
 } from './agency-send-notify';
-import { agencyManagerPhones, buildAgencyApproveUrl } from './agency-send-link';
+import { agencyManagerPhones, buildShortAgencyApproveUrl } from './agency-send-link';
 import {
   isApprovalCurrent, isApprovalExpired, isFinalTestDue, isLockStale, isQueueDue, isSameKstDay,
   lockRecoveryStatus, LOCK_STALE_MINUTES, MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES,
@@ -171,6 +171,27 @@ async function freshLinkFields(requestId: string): Promise<any | null> {
     [requestId],
   );
   return r.rows[0] || null;
+}
+
+/**
+ * 담당자별 승인 문장 목록 — 번호마다 자기 번호로 서명한 **단축** 승인 주소를 싣는다(★2026-08-26(4) Harold).
+ * 단축은 번호당 DB INSERT 1회(담당자 최대 10명)라 순차로 충분하다. 단축이 실패한 번호는 원본 주소를 받는다.
+ */
+async function buildApproveTexts(
+  phones: string[],
+  compose: (approveUrl: string) => string,
+  companyId: string,
+  requestId: string,
+  linkRow: any,
+): Promise<Array<{ phone: string; text: string }>> {
+  const out: Array<{ phone: string; text: string }> = [];
+  for (const phone of phones) {
+    const approveUrl = await buildShortAgencyApproveUrl(
+      companyId, requestId, phone, Number(linkRow.content_version), new Date(linkRow.requested_at),
+    );
+    out.push({ phone, text: compose(approveUrl) });
+  }
+  return out;
 }
 
 /**
@@ -396,18 +417,16 @@ async function runFirstTest(): Promise<void> {
       });
       // ★2026-08-25 링크 승인: 담당자마다 자기 번호에 묶인 승인 주소를 받는다(agency-send-link CT).
       //   주소는 통지 직전의 신선한 문안 버전으로 서명한다(이 tick의 다듬기로 버전이 올라 있을 수 있다)
+      // ★2026-08-26(4) 주소는 단축으로 싣고(실패 시 원본 폴백), 요청 건수를 함께 안내한다(Harold)
       const linkRow = (await freshLinkFields(row.id)) || row;
+      const count = Number(row.recipient_count || 0);
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
-        text: buildPassedNotify({ label, whenText }),
-        perPhoneTexts: managerPhonesOf(linkRow).map((phone) => ({
-          phone,
-          text: buildPassedNotify({
-            label, whenText,
-            approveUrl: buildAgencyApproveUrl(row.id, phone, Number(linkRow.content_version), new Date(linkRow.requested_at)),
-          }),
-        })),
+        text: buildPassedNotify({ label, whenText, count }),
+        perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
+          buildPassedNotify({ label, whenText, count, approveUrl }),
+          row.company_id, row.id, linkRow),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);
     } catch (err: any) {
@@ -527,18 +546,16 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
           messageType: target.message_type, mmsImages: images,
         });
         // ★2026-08-25 링크 승인: 재승인은 다듬어진 새 문안 버전으로 서명한 새 주소가 나간다(옛 링크는 버전 불일치로 죽는다)
+        // ★2026-08-26(4) 단축 주소 + 요청 건수 동반
         const reappRow = (await freshLinkFields(target.id)) || target;
+        const reappCount = Number(target.recipient_count || 0);
         await notifyManager({
           companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(reappRow),
           callback: target.callback_number, title: '[대행발송] 재승인 요청',
-          text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(target.requested_at)) }),
-          perPhoneTexts: managerPhonesOf(reappRow).map((phone) => ({
-            phone,
-            text: buildReapprovalNotify({
-              label, whenText: formatWhen(new Date(reappRow.requested_at)),
-              approveUrl: buildAgencyApproveUrl(target.id, phone, Number(reappRow.content_version), new Date(reappRow.requested_at)),
-            }),
-          })),
+          text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(target.requested_at)), count: reappCount }),
+          perPhoneTexts: await buildApproveTexts(managerPhonesOf(reappRow), (approveUrl) =>
+            buildReapprovalNotify({ label, whenText: formatWhen(new Date(reappRow.requested_at)), count: reappCount, approveUrl }),
+            target.company_id, target.id, reappRow),
         });
         continue;
       }
@@ -650,17 +667,14 @@ async function dispatchToPipeline(row: any, content: string, token: string): Pro
       console.error(`${LOG} 재승인 실물 문자 실패 request=${row.id}:`, err?.message);
       await logEvent(row.id, 'notify_failed', { error: String(err?.message || ''), kind: 'manager-test' });
     }
+    const unappCount = Number(row.recipient_count || 0);
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(unappRow),
       callback: row.callback_number, title: '[대행발송] 재승인 요청',
-      text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(row.requested_at)) }),
-      perPhoneTexts: managerPhonesOf(unappRow).map((phone) => ({
-        phone,
-        text: buildReapprovalNotify({
-          label, whenText: formatWhen(new Date(unappRow.requested_at)),
-          approveUrl: buildAgencyApproveUrl(row.id, phone, Number(unappRow.content_version), new Date(unappRow.requested_at)),
-        }),
-      })),
+      text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(row.requested_at)), count: unappCount }),
+      perPhoneTexts: await buildApproveTexts(managerPhonesOf(unappRow), (approveUrl) =>
+        buildReapprovalNotify({ label, whenText: formatWhen(new Date(unappRow.requested_at)), count: unappCount, approveUrl }),
+        row.company_id, row.id, unappRow),
     });
     return;
   }

@@ -93,32 +93,80 @@ function cellText(v: any): string {
 /**
  * "2026-09-01 14:00" 류를 서버 시각(KST 운영)으로 읽는다. 구분자 - . / 허용, 초는 허용·무시.
  * ★2026-08-26(2) 한국어 표기도 받는다: "2026년 9월 1일 14시 30분" · "2026년 9월 1일(월) 오후 2시".
- *   **연도 없는 표기("9월 1일 14시")는 받지 않는다** — 이메일은 확인 화면이 없는 무인 경로라
- *   해를 추정하면 틀린 해로 그대로 나간다. 반려 회신이 올바른 예시를 안내한다.
+ *   ★2026-08-26(4) **연도 없는 표기("8월 30일 10시")를 받는다**(Harold 확정 · 서수란 실측 반려에서).
+ *   실물 양식 안내문이 "월 일 시 분"이라 업체 대부분이 연도를 뺀다. 해석 규칙:
+ *   ①올해로 본다 ②이미 지났으면 내년으로 보되, **내년 해석은 60일 이내일 때만**(NEAR_ROLLOVER_DAYS ·
+ *   연말의 "1월 3일"은 통과, 6월의 "1월 3일" 오타는 먼 미래로 조용히 잡히는 대신 올해 과거로 남아
+ *   리드타임 검증이 정확한 사유로 반려한다). 최종 안전망 = 승인 문자·화면에 시각이 찍히고 승인 없이는 안 나간다.
  * ⛔ 끝까지 고정한다(시간대 접미사 등 잔여 문자는 거절) + **달력 왕복 대조**를 한다(★Codex 적대 1R) —
  *   JS Date는 2월 30일을 3월 2일로 조용히 굴려서, 검증만 통과하고 사용자가 적지 않은 날에 나간다.
  */
-export function parseWhenText(text: string): Date | null {
+export const NEAR_ROLLOVER_DAYS = 60;
+
+// ★2026-08-26(4) 시간부 공용 문법(Harold "여러 경우의 수를 알아듣게") — 날짜형·상대형이 같은 조각을 쓴다.
+//   받는 것 = "14:00" · "14시" · "14시 30분" · "14시 반" · "14시 분"(빈 분) · "14" · 오전/오후/새벽/아침/낮/저녁/밤 · 끝의 "쯤/경".
+const TIME_PART = String.raw`(?:(오전|오후|새벽|아침|낮|저녁|밤)\s*)?(\d{1,2})(?:\s*:\s*(\d{1,2})(?::\d{2})?|\s*시\s*(?:(\d{1,2})\s*분?|(반)|분)?)?\s*(?:쯤|경)?`;
+const DATE_TIME_RE = new RegExp(
+  String.raw`^(?:(\d{4})\s*[년\-./]\s*)?(\d{1,2})\s*[월\-./]\s*(\d{1,2})\s*일?\s*(?:[(（][^)）]{1,4}[)）])?[\sT]*` + TIME_PART + String.raw`\s*$`,
+);
+const RELATIVE_RE = new RegExp(String.raw`^(오늘|내일|모레)\s*` + TIME_PART + String.raw`\s*$`);
+
+/** 시간부 해석. 모호한 표기("밤 12시" = 자정인지 낮인지)는 null = 반려(적은 값과 다른 시각 금지) */
+function resolveTimePart(half: string | undefined, hhRaw: string, miColon?: string, miSi?: string, ban?: string): { hh: number; mi: number } | null {
+  let hh = Number(hhRaw);
+  const isAm = half === '오전' || half === '새벽' || half === '아침';
+  const isPm = half === '오후' || half === '낮' || half === '저녁' || half === '밤';
+  if (half === '밤' && hh === 12) return null; // "밤 12시" = 자정 관용이라 낮 12시로 읽으면 오발송이다
+  if (isPm && hh < 12) hh += 12;
+  if (isAm && hh === 12) hh = 0;
+  const mi = Number(miColon ?? miSi ?? (ban ? 30 : 0));
+  if (hh > 23 || mi > 59) return null;
+  return { hh, mi };
+}
+
+export function parseWhenText(text: string, now: Date = new Date()): Date | null {
   const s = String(text || '').trim();
-  let y: number; let mo: number; let dd: number; let hh: number; let mi: number;
-  const m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})[\sT]+(\d{1,2}):(\d{2})(?::\d{2})?$/);
-  if (m) {
-    [y, mo, dd, hh, mi] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5])];
-  } else {
-    const k = s.match(/^(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*(?:[(（][^)）]{1,4}[)）])?\s*(?:(오전|오후)\s*)?(\d{1,2})(?:\s*시\s*(?:(\d{1,2})\s*분?)?|\s*:\s*(\d{2}))$/);
-    if (!k) return null;
-    [y, mo, dd] = [Number(k[1]), Number(k[2]), Number(k[3])];
-    hh = Number(k[5]);
-    if (k[4] === '오후' && hh < 12) hh += 12;
-    if (k[4] === '오전' && hh === 12) hh = 0;
-    mi = Number(k[6] ?? k[7] ?? 0);
+  // ★2026-08-26(4) 날짜부와 시간부를 한 문법으로 통합(Harold "시간 정도는 읽어서 판단해라") —
+  //   "2026-09-01 14:00" · "09-01 14시" · "9월 1일 오후 2시" · "8월 30일 10시 분" · "09-01 14" ·
+  //   "내일 10시 반"처럼 숫자형·한국어형·상대형이 섞여도 읽는다. 시간 숫자 자체가 없으면 반려 유지.
+  const rel = s.match(RELATIVE_RE);
+  if (rel) {
+    const t = resolveTimePart(rel[2], rel[3], rel[4], rel[5], rel[6]);
+    if (!t) return null;
+    const offset = rel[1] === '오늘' ? 0 : rel[1] === '내일' ? 1 : 2;
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, t.hh, t.mi, 0, 0);
+    return Number.isNaN(base.getTime()) ? null : base;
   }
-  if (mo < 1 || mo > 12 || dd < 1 || dd > 31 || hh > 23 || mi > 59) return null;
-  const d = new Date(y, mo - 1, dd, hh, mi, 0, 0);
-  if (Number.isNaN(d.getTime())) return null;
-  // 왕복 대조 — 넣은 값 그대로 나오지 않으면 달력에 없는 날짜다
-  if (d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== dd || d.getHours() !== hh || d.getMinutes() !== mi) return null;
-  return d;
+
+  const k = s.match(DATE_TIME_RE);
+  if (!k) return null;
+  const yearText = k[1];
+  const [mo, dd] = [Number(k[2]), Number(k[3])];
+  const t = resolveTimePart(k[4], k[5], k[6], k[7], k[8]);
+  if (!t) return null;
+  const { hh, mi } = t;
+  if (mo < 1 || mo > 12 || dd < 1 || dd > 31) return null;
+
+  /** 그 해로 조립 + 달력 왕복 대조. 달력에 없는 날짜면 null */
+  const build = (y: number): Date | null => {
+    const d = new Date(y, mo - 1, dd, hh, mi, 0, 0);
+    if (Number.isNaN(d.getTime())) return null;
+    if (d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== dd || d.getHours() !== hh || d.getMinutes() !== mi) return null;
+    return d;
+  };
+
+  if (yearText) return build(Number(yearText));
+
+  const thisYear = build(now.getFullYear());
+  if (!thisYear) return null;
+  if (thisYear.getTime() > now.getTime()) return thisYear;
+  const nextYear = build(now.getFullYear() + 1);
+  if (nextYear && nextYear.getTime() - now.getTime() <= NEAR_ROLLOVER_DAYS * 24 * 60 * 60 * 1000) {
+    return nextYear;
+  }
+  // 내년으로도 가깝지 않다 = 지난 날짜를 적었을 가능성이 압도적이다. 올해 과거 그대로 돌려주고
+  // 리드타임 검증("이미 지난 시각")이 사용자가 적은 날짜 기준의 정확한 사유로 반려하게 한다.
+  return thisYear;
 }
 
 /** 광고 여부. 기본 = 예(Harold 지시) — 명시적인 부정만 끈다 */
@@ -220,7 +268,7 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
   if (!content) errors.push({ field: '문안', error: '문안 칸이 비어 있습니다.' });
   const requestedAt = requestedAtText ? parseWhenText(requestedAtText) : null;
   if (!requestedAtText) errors.push({ field: '보낼 시각', error: '보낼 시각 칸이 비어 있습니다.' });
-  else if (!requestedAt) errors.push({ field: '보낼 시각', error: `보낼 시각을 읽지 못했습니다: "${requestedAtText}". 예: 2026-09-01 14:00` });
+  else if (!requestedAt) errors.push({ field: '보낼 시각', error: `보낼 시각을 읽지 못했습니다: "${requestedAtText}". 예: 8월 30일 10시 30분 또는 2026-09-01 14:00` });
   if (!callbackRaw) errors.push({ field: '회신번호', error: '회신번호 칸이 비어 있습니다. 번호 또는 명단의 열 이름을 적어 주세요.' });
   if (managerPhones.length === 0) errors.push({ field: '담당자 번호', error: '테스트 문자를 받을 담당자 휴대폰 번호가 없습니다.' });
 

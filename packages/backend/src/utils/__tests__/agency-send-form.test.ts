@@ -380,12 +380,55 @@ describe('대행발송 통일 양식(★2026-08-26(2)) — 업계 레이아웃 �
     expect(hasRecipientSheet(sampleBuf)).toBe(false);
   });
 
-  it('한국어 시각 표기: 연도 필수, 오전·오후·요일 괄호 허용, 달력 왕복 대조 유지', () => {
+  it('한국어 시각 표기: 오전·오후·요일 괄호·빈 분("10시 분") 허용, 달력 왕복 대조 유지', () => {
     expect(parseWhenText('2026년 9월 1일 14시 30분')!.getMinutes()).toBe(30);
     expect(parseWhenText('2026년 9월 1일(월) 오후 2시')!.getHours()).toBe(14);
     expect(parseWhenText('2026년 9월 1일 오전 12시')!.getHours()).toBe(0);
-    expect(parseWhenText('9월 1일 14시')).toBeNull();
     expect(parseWhenText('2026년 2월 30일 14시')).toBeNull();
     expect(parseWhenText('월 일 시 분')).toBeNull();
+  });
+
+  /**
+   * ★2026-08-26(4) 연도 없는 표기 허용(Harold 확정 · 서수란 실측 반려에서).
+   * 규칙 = 올해 → 지났으면 내년(60일 이내일 때만) → 그 밖은 올해 과거 그대로(리드타임 검증이 반려).
+   */
+  it('연도 없는 표기: 올해로 해석하고, 지난 날짜는 60일 이내일 때만 내년으로 넘긴다', () => {
+    const now = new Date(2026, 7, 26, 13, 0); // 2026-08-26 13:00
+    const d = parseWhenText('8월 30일 10시 분', now); // 실물 양식이 유도하는 그 표기
+    expect(d).not.toBeNull();
+    expect([d!.getFullYear(), d!.getMonth() + 1, d!.getDate(), d!.getHours(), d!.getMinutes()]).toEqual([2026, 8, 30, 10, 0]);
+    expect(parseWhenText('8/30 10:00', now)!.getFullYear()).toBe(2026);
+    // ★0826(4) 표기 혼합 허용(Harold "시간 정도는 읽어서 판단해라") — 숫자 날짜+한국어 시·분 생략·시간만
+    expect(parseWhenText('09-01 14시', now)!.getHours()).toBe(14);
+    expect(parseWhenText('9월 1일 14', now)!.getHours()).toBe(14);
+    expect(parseWhenText('2026-09-01 오후 2시 30분', now)!.getMinutes()).toBe(30);
+    expect(parseWhenText('9월 1일', now)).toBeNull(); // 시간 숫자가 아예 없으면 반려 유지
+  });
+
+  it('상대 날짜·시간대 낱말·반·쯤을 읽고, 모호한 "밤 12시"는 반려한다', () => {
+    const now = new Date(2026, 7, 26, 9, 0); // 2026-08-26 09:00
+    const tomorrow = parseWhenText('내일 10시 반', now)!;
+    expect([tomorrow.getMonth() + 1, tomorrow.getDate(), tomorrow.getHours(), tomorrow.getMinutes()]).toEqual([8, 27, 10, 30]);
+    expect(parseWhenText('모레 오후 2시', now)!.getDate()).toBe(28);
+    expect(parseWhenText('오늘 14:00', now)!.getDate()).toBe(26);
+    expect(parseWhenText('9월 1일 낮 12시', now)!.getHours()).toBe(12);
+    expect(parseWhenText('9월 1일 저녁 7시', now)!.getHours()).toBe(19);
+    expect(parseWhenText('9월 1일 밤 9시', now)!.getHours()).toBe(21);
+    expect(parseWhenText('9월 1일 새벽 2시', now)!.getHours()).toBe(2);
+    expect(parseWhenText('9월 1일 10시쯤', now)!.getHours()).toBe(10);
+    expect(parseWhenText('9월 1일 밤 12시', now)).toBeNull(); // 자정 관용과 충돌 = 반려(적은 값과 다른 시각 금지)
+    expect(parseWhenText('내일', now)).toBeNull();
+    // 연말의 "1월 3일" = 내년(20여 일 뒤 · 60일 이내)
+    const yearEnd = new Date(2026, 11, 29, 10, 0);
+    expect(parseWhenText('1월 3일 10시', yearEnd)!.getFullYear()).toBe(2027);
+    // 6월의 "1월 3일" = 내년은 60일 밖이라 올해 과거 그대로(조용히 먼 미래로 잡지 않는다)
+    const midYear = new Date(2026, 5, 1, 10, 0);
+    const past = parseWhenText('1월 3일 10시', midYear)!;
+    expect(past.getFullYear()).toBe(2026);
+    expect(past.getTime()).toBeLessThan(midYear.getTime());
+    // 어제 날짜도 내년으로 밀지 않는다(내년 해석은 60일 밖)
+    const yesterday = parseWhenText('8월 25일 10시', now)!;
+    expect(yesterday.getFullYear()).toBe(2026);
+    expect(yesterday.getTime()).toBeLessThan(now.getTime());
   });
 });

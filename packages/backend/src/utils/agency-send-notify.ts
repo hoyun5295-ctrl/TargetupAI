@@ -19,8 +19,11 @@ export interface AgencyNotifyContext {
   /**
    * 링크 승인 주소(★2026-08-25 · 담당자 번호별로 다르다 = agency-send-link CT가 만든다).
    * 있으면 로그인 안내 대신 이 주소로 바로 승인하게 안내한다.
+   * ★2026-08-26(4) 단축 주소가 온다(buildShortAgencyApproveUrl · 실패 시 원본).
    */
   approveUrl?: string;
+  /** ★2026-08-26(4) 전송 요청 건수(Harold "문자에 XX건 넣자"). 승인·재승인 안내에 실린다 */
+  count?: number;
 }
 
 /** 문자 앞머리. 담당자가 받은 문자가 무엇인지 한눈에 알게 한다 */
@@ -42,6 +45,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
   return compose([
     `${HEAD} 스팸 검사를 통과했습니다.`,
     `건: ${shortLabel(ctx.label)}`,
+    ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
     ctx.approveUrl
       ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 바로 승인해 주세요.'
@@ -68,6 +72,7 @@ export function buildReapprovalNotify(ctx: AgencyNotifyContext): string {
   return compose([
     `${HEAD} 수정한 문안이 스팸 검사를 통과했습니다.`,
     `건: ${shortLabel(ctx.label)}`,
+    ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
     ctx.approveUrl
       ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 다시 승인해 주세요.'

@@ -150,10 +150,11 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
     );
   };
 
+  // ★2026-08-26(4) Harold "아이디-사용자이름 보고 선택" — 이름만으로는 동명이인·계정 식별이 안 된다
   const userLabel = (u: UserRow) => {
-    const name = u.name || u.login_id;
+    const base = u.name && u.name !== u.login_id ? `${u.login_id} - ${u.name}` : u.login_id;
     const inactive = u.is_active !== true || u.status !== 'active';
-    return inactive ? `${name} (비활성)` : name;
+    return inactive ? `${base} (비활성)` : base;
   };
 
   return (
@@ -250,7 +251,7 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
                               {s.label && <span className="text-[12px] text-neutral-500 truncate">{s.label}</span>}
                             </div>
                             <div className="mt-0.5 text-[12px] text-neutral-500 truncate">
-                              귀속: {s.user_name || s.user_login_id || '(사용자 없음)'}
+                              귀속: {s.user_login_id ? `${s.user_login_id}${s.user_name && s.user_name !== s.user_login_id ? ` - ${s.user_name}` : ''}` : '(사용자 없음)'}
                               {ownerBroken && s.is_active && (
                                 <span className="ml-1.5 text-amber-600 font-medium">사용자 비활성 · 이 주소의 접수는 반려됩니다</span>
                               )}

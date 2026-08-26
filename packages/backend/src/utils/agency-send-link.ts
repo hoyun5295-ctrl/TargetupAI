@@ -21,6 +21,7 @@
  */
 import jwt from 'jsonwebtoken';
 import { normalizePhone } from './normalize-phone';
+import { createShortUrl } from './short-url';
 
 // 전역 비밀키에서 파생한 승인 전용 키. 전역 키 미설정(폴백) 문제 자체는 전 인증 공통의 별건이다(BUGS 등재).
 const RAW_SECRET = process.env.JWT_SECRET || 'targetup-jwt-secret-fallback';
@@ -41,13 +42,18 @@ export interface AgencyApproveTokenPayload {
   contentVersion: number;
 }
 
+/** 만료 초 계산 = 발송 시각 + 24시간과 7일 중 긴 쪽. 토큰과 단축 URL이 **같은 값**을 쓴다 */
+export function agencyApproveTtlSeconds(requestedAt: Date, now: Date = new Date()): number {
+  const untilSend = Math.ceil((requestedAt.getTime() - now.getTime()) / 1000) + AFTER_SEND_MARGIN_SECONDS;
+  return Math.max(MIN_TTL_SECONDS, untilSend);
+}
+
 /** 만료 = 발송 시각 + 24시간과 7일 중 긴 쪽. 발송이 먼 접수도 링크가 먼저 죽지 않는다 */
 export function signAgencyApproveToken(p: {
   requestId: string; phone: string; contentVersion: number; requestedAt: Date; now?: Date;
 }): string {
   const now = p.now ?? new Date();
-  const untilSend = Math.ceil((p.requestedAt.getTime() - now.getTime()) / 1000) + AFTER_SEND_MARGIN_SECONDS;
-  const expiresIn = Math.max(MIN_TTL_SECONDS, untilSend);
+  const expiresIn = agencyApproveTtlSeconds(p.requestedAt, now);
   return jwt.sign(
     { scope: SCOPE, r: p.requestId, p: p.phone, cv: Number(p.contentVersion) },
     JWT_KEY,
@@ -79,6 +85,32 @@ export function buildAgencyApproveUrl(
   const base = String(process.env.HANJUL_BASE_URL || 'https://hanjul.ai').replace(/\/+$/, '');
   const token = signAgencyApproveToken({ requestId, phone, contentVersion, requestedAt, now });
   return `${base}/agency-approve#t=${encodeURIComponent(token)}`;
+}
+
+/**
+ * 담당자 문자용 **단축** 승인 주소 (★2026-08-26(4) Harold "링크가 너무 길다 · 단축 URL로").
+ * 기존 단축 CT(CT-40 · message_short_urls)를 그대로 쓴다. 리다이렉트는 저장된 full_url의
+ * #fragment까지 Location에 실려 그대로 옮겨진다(fragment는 서버로 전송되지 않는 성질 유지).
+ *
+ * ⛔ 단축 URL 만료 = **토큰 만료와 같은 값**(agencyApproveTtlSeconds) — 토큰이 죽은 뒤에도
+ *   리다이렉트만 살아 있는 반쪽 링크를 만들지 않는다.
+ * ⛔ 단축 실패 시 원본 주소 그대로 돌려준다(CT-40 원칙 · 승인 안내가 단축 때문에 멈추면 안 된다).
+ * 보안 노트: full_url에 토큰이 저장된다 — "폰 소지 = 권한" 전제와 같은 부류이고, 만료를 토큰과
+ *   맞춰 두어 저장된 토큰이 죽은 뒤의 잔존 창을 없앤다(문안 버전이 바뀌면 그 전에도 서명 검증이 죽인다).
+ */
+export async function buildShortAgencyApproveUrl(
+  companyId: string, requestId: string, phone: string, contentVersion: number, requestedAt: Date, now?: Date,
+): Promise<string> {
+  const fullUrl = buildAgencyApproveUrl(requestId, phone, contentVersion, requestedAt, now);
+  try {
+    const base = now ?? new Date();
+    const expiresAt = new Date(base.getTime() + agencyApproveTtlSeconds(requestedAt, base) * 1000);
+    const { shortUrl } = await createShortUrl({ companyId, fullUrl, expiresAt });
+    return shortUrl;
+  } catch (err: any) {
+    console.warn('[agency-send-link] 승인 링크 단축 실패(원본 주소로 발송):', err?.message);
+    return fullUrl;
+  }
 }
 
 /**
