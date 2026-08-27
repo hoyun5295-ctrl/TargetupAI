@@ -214,7 +214,7 @@ export type FooterProps = {
 
 export type ProductCarouselItem = { id?: string; image_url: string; name: string; price: number; discount_price?: number; discount_rate?: number; link_url?: string; };
 // image_fit: 채우기(cover=꽉 차게·기존 기본) / 맞추기(contain=전체 보임·잘림 X). image_focus: cover일 때 보일 초점(정렬). 미지정=cover/center(회귀 0).
-export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; auto_slide?: boolean; slide_interval_ms?: number; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; background_color?: string; caption_bg_color?: string; image_height?: 'sm' | 'md' | 'lg'; };
+export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; auto_slide?: boolean; slide_interval_ms?: number; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; background_color?: string; caption_bg_color?: string; image_height?: 'sm' | 'md' | 'lg'; /* ★ 2026-08-26 제목 크기·색(임은지) — 백엔드 dm-section-registry 미러 */ title_size?: 'sm' | 'md' | 'lg'; title_color?: string; };
 
 export type GalleryImage = { url: string; caption?: string; link_url?: string; };
 export type GalleryProps = { title?: string; images: GalleryImage[]; layout: 'grid_2x2' | 'grid_3x3' | 'list_1xN' | 'masonry'; enable_zoom?: boolean; enable_fullscreen?: boolean; full_bleed?: boolean; };

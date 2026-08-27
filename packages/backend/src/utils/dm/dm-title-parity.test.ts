@@ -76,7 +76,17 @@ describe('dm title parity — 발행 SSR ↔ 편집 캔버스 제목 클래스(d
   const SSR_SPLIT = /\n(?:export\s+)?(?:async\s+)?function |\n(?:export\s+)?const \w+\s*=/;
   const CANVAS_SPLIT = /\nexport\s+(?:default\s+)?(?:async\s+)?function |\nexport\s+const \w+\s*[:=]/;
 
-  const ssrH2 = titleH2Counts(ssr.src, SSR_SPLIT, /class="dm-section (dm-[a-z-]+)"/g);
+  // ★ 2026-08-26 제목을 공통 함수로 뺀 섹션 보정 — 상품 슬라이드는 classic·list·focus 세 구도가
+  //   `productTitleHtml(p)` 하나를 쓴다(구도마다 따로 쓰면 한 구도만 클래스를 잃는 결함이 다시 난다).
+  //   정적 카운터는 함수 호출을 못 따라가므로, 호출부를 그 함수가 실제로 내는 클래스 속성으로 치환해 센다.
+  //   그 함수가 정말 dm-text-h2를 내는지는 dm-editor-parity의 행동 테스트가 밟는다.
+  const TITLE_HELPER_EXPANSIONS: Array<[RegExp, string]> = [
+    [/\$\{productTitleHtml\(p\)\}/g, '<div class="dm-text-h2"></div>'],
+  ];
+  const expandTitleHelpers = (s: string) =>
+    TITLE_HELPER_EXPANSIONS.reduce((acc, [call, emits]) => acc.replace(call, emits), s);
+
+  const ssrH2 = titleH2Counts(expandTitleHelpers(ssr.src), SSR_SPLIT, /class="dm-section (dm-[a-z-]+)"/g);
   const canvasH2 = new Map<string, number>();
   for (const src of canvasFiles) {
     for (const [cls, n] of titleH2Counts(src, CANVAS_SPLIT, /className="dm-section (dm-[a-z-]+)"/g)) {

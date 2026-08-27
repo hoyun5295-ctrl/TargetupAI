@@ -805,7 +805,7 @@ function renderProductCarousel(p: any, treatment?: string): string {
     ? `<div data-dm-pc-dots style="display:flex;justify-content:center;gap:6px;margin-top:var(--dm-sp-3)">${Array.from({ length: pageCount }, (_: unknown, i: number) => `<span data-dm-pc-dot="${i}" style="width:8px;height:8px;border-radius:50%;background:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-300)'};cursor:pointer"></span>`).join('')}</div>`
     : '';
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
-    ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
+    ${productTitleHtml(p)}
     <div class="dm-pc-items"${isScroll ? ' data-dm-pcarousel' : ''} style="${itemsStyle}">${itemsInner}</div>
     ${dots}
   </div>`;
@@ -846,6 +846,16 @@ function productImgHeight(p: any): number {
   return p?.image_height === 'sm' ? 120 : p?.image_height === 'lg' ? 220 : 150;
 }
 
+// ★ 2026-08-26 상품 슬라이드 제목 크기·색(임은지 접수) — classic·list·focus 세 구도가 **이 함수 하나**를 쓴다.
+//   구도마다 따로 쓰면 2026-07-16(서수란)처럼 한 구도에만 먹는 결함이 그대로 다시 난다.
+//   미지정이면 옛 문자열과 문자 단위로 같다(무회귀). dm-text-h2 클래스는 아트디렉션 모티프가 걸리는 자리라 유지.
+function productTitleHtml(p: any): string {
+  if (!p?.title) return '';
+  const size = p.title_size === 'sm' ? 'var(--dm-fs-body)' : p.title_size === 'lg' ? 'var(--dm-fs-h1)' : '';
+  const color = p.title_color ? escapeHtml(p.title_color) : 'var(--dm-neutral-900)';
+  return `<div class="dm-text-h2" style="color:${color};margin-bottom:var(--dm-sp-4)${size ? `;font-size:${size}` : ''}">${escapeHtml(p.title)}</div>`;
+}
+
 // 포커스: 첫 상품 풀폭 대형 카드 + 나머지 2열 (히어로급 대표 상품 강조)
 // ★ 2026-07-16 서수란 신고 — 배경색·글씨공간 색·이미지 높이가 classic(기본 2열)에만 먹던 것 정정.
 //   focus 구도도 background_color(섹션·맞추기 여백)·caption_bg_color(카드)·image_height 소비. 캔버스 NewSections 미러.
@@ -873,7 +883,7 @@ function renderProductFocus(p: any, products: any[]): string {
         <div style="margin-top:auto;padding-top:4px">${productPriceHtml(it, false)}</div>
       </div>`, `width:calc(50% - 6px);box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:14px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`)).join('');
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
-    ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
+    ${productTitleHtml(p)}
     <div class="dm-pc-items" style="display:flex;flex-wrap:wrap;gap:12px">${bigCard}${restItems}</div>
   </div>`;
 }
@@ -898,7 +908,7 @@ function renderProductList(p: any, products: any[]): string {
     return href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="${style}">${inner}</a>` : `<div style="${style}">${inner}</div>`;
   }).join('');
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
-    ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
+    ${productTitleHtml(p)}
     <div class="dm-pc-items" style="display:flex;flex-direction:column;gap:10px">${rows}</div>
   </div>`;
 }

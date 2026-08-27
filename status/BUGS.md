@@ -55,6 +55,22 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-0826-4 이메일 캠페인 상품 슬라이드 — 편집기 속성 5개가 발송 HTML에 반영되지 않는다 (🟢 수정 완료·배포 대기) — 2026-08-26 접수 `cmt9gn8of01vujnotzl63acsl`(임은지 P2)
+
+> **증상**: 배경색·글씨공간 색을 바꿔도 오른쪽 미리보기에 아무 변화가 없다. 제목 글씨 크기·색은 지정할 방법이 아예 없다.
+> **원인**: `utils/email/email-section-renderer.ts` `renderProductCarousel`이 `background_color`·`caption_bg_color`·`image_fit`·`image_focus`·`image_height` **다섯 개를 한 번도 읽지 않았다.** 카드 배경은 전부 `b.cardBg` 테마 고정. 제목은 `b.type.h3.size` + `b.text` 고정에 편집기 입력도 없었다.
+> **뿌리**: 편집 패널이 `components/dm/panels/editors/ProductCarouselEditor.tsx`로 **DM과 공용**인데, "편집기 속성이 실제로 반영되는가"를 잡는 장치(`dm-property-contract.ts` + `dm-editor-parity.test.ts`)가 **DM에만** 있었다. 그래서 2026-07-15 서수란 신고로 만든 필드가 DM만 받고 이메일은 못 받은 채 살아남았다. LESSONS_FRONTEND 2026-08-25 블록 순서 건과 **같은 형태**(DM에 있는 지식이 이메일로 안 옮겨짐).
+> **수정**: ①다섯 속성 전부 소비(classic·list·focus 세 구도 모두) ②`title_size`·`title_color` 신설을 **DM·이메일 양쪽 렌더러 + 편집기 + 편집 캔버스**에 함께 ③**이메일 속성 계약 원장 신설** `utils/email/email-property-contract.ts` + `email/__tests__/email-editor-parity.test.ts`(원장에 등재된 속성이 출력을 실제로 바꾸는지 밟는 행동 테스트 · 등재만 하고 안 읽으면 실패).
+> ⛔ **미지정 = 옛 출력 그대로**(무회귀). 배포 전 실측 = 상품 슬라이드가 든 캠페인 8블록 중 값이 든 건 1건뿐이고, 그 1건은 접수자가 넣어 둔 값이라 적용이 곧 정상화다.
+> **회귀 검증**: `caption_bg_color` 소비를 되돌려 파리티가 실제로 깨지는 것을 확인하고 원복했다.
+
+### 🟡 B-0826-3 이메일 캠페인 편집 — 오른쪽 미리보기가 수정할 때마다 맨 위로 튄다 (🟢 수정 완료·배포 대기) — 2026-08-26 접수 `cmt9ggaj301vajnotaks523h7`(임은지 P2)
+
+> **증상**: 하단 블록을 고치는데 미리보기는 헤더·히어로가 있는 맨 위로 올라간다. 고칠 때마다 다시 스크롤을 내려야 한다.
+> **원인**: `EmailVisualEditor.tsx`의 미리보기가 `<iframe srcDoc={previewHtml}>`이다. 편집 500ms 뒤 백엔드 렌더 결과가 `previewHtml`에 들어가고(160~176행), `srcDoc`이 바뀌면 **iframe이 문서를 통째로 새로 만든다.** 새 문서라 스크롤은 언제나 0이다.
+> **수정**: iframe에 ref + `onLoad`. 문서가 새로 뜰 때 직전 위치로 되돌리고, 그 문서에 스크롤 리스너를 달아 위치를 계속 기록한다. 문서가 새로 생길 때 리스너도 함께 사라지므로 누적되지 않는다. `sandbox` 속성이 없어 같은 출처로 접근 가능하고, 접근이 막히는 환경에서는 복원만 생략하고 옛 동작으로 돈다.
+> ⛔ PC 전체화면 미리보기(같은 파일의 두 번째 iframe)는 이번 축이 아니라 **손대지 않았다** — 편집하며 보는 화면이 아니다.
+
 ### 🟡 B-0826-2 네이버 쇼핑 검색 API가 이 앱에서 404다 — DM 편집기의 쇼핑 후보가 상시 0건 (🔵 Open · 축 밖 기록만) — 2026-08-26 (영업 아웃리치 v3 착수 게이트 G4 실측)
 
 > **증상**: 운영 `packages/backend/.env`의 `NAVER_CLIENT_ID/SECRET`으로 `openapi.naver.com/v1/search/shop.json`을 호출하면 **HTTP 404 · `errorCode: SE05`(존재하지 않는 검색 api)**. 같은 키·같은 헤더로 `blog.json`은 **HTTP 200**(`total` 16,078,772)이라 키 문제도 인증 문제도 아니다 — **그 애플리케이션에서 쇼핑 검색만 안 열린 것**이다. 키 20자/10자 · 이물 문자 0.

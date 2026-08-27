@@ -152,3 +152,13 @@ export const DM_COLOR_TABLE_2026_07_23: Array<{ section: string; prop: string; d
   { section: 'instant_coupon', prop: 'button_bg_color', desc: '쿠폰 받기 버튼 배경색' },
   { section: 'instant_coupon', prop: 'button_text_color', desc: '쿠폰 받기 버튼 글씨색' },
 ];
+
+/** ★ 2026-08-26 상품 슬라이드 제목 크기·색(임은지 접수 cmt9gn8of01vujnotzl63acsl) —
+ *  **DM·이메일 양쪽 렌더러가 함께 소비해야 한다.** 한쪽만 넣으면 같은 접수의 나머지 절반
+ *  (편집기에는 있는데 이메일 발송 HTML엔 반영 안 됨)을 그대로 재생산한다.
+ *  DM 소비 검증 = dm-editor-parity.test.ts / 이메일 = email/__tests__/email-editor-parity.test.ts
+ *  이메일 원장 = utils/email/email-property-contract.ts (공용 편집기 속성은 두 표에 함께 등재한다). */
+export const DM_PRODUCT_TITLE_PROPS: Array<{ section: string; prop: string; desc: string }> = [
+  { section: 'product_carousel', prop: 'title_size', desc: '상품슬라이드 제목 크기 sm|md|lg (미지정 = md = 현행)' },
+  { section: 'product_carousel', prop: 'title_color', desc: '상품슬라이드 제목 색 (미지정 = 본문색)' },
+];

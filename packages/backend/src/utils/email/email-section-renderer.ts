@@ -23,6 +23,7 @@ import type {
 import type { DmBrandKit } from '../dm/dm-tokens';
 import { resolveEmailBrand, emailSelfHostFontImport, type EmailBrand, type EmailDesign } from './email-tokens';
 import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE, selectEmailTreatment } from './email-blocks';
+import { EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_TITLE_SIZE_KEY } from './email-property-contract';
 // ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 + 쿠폰 마감 한국어 표시 (normalize CT)
 import { normalizeWebUrl, formatKoreanDateTimeDisplay } from '../normalize';
 
@@ -296,7 +297,26 @@ function renderCoupon(p: CouponProps, b: EmailBrand, treatment: string): string 
 function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string): string {
   const items = (p.products || []).filter((x) => x && x.name).slice(0, 6);
   if (items.length === 0) return '';
-  const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
+
+  // ★ 2026-08-26 편집기 속성 소비(임은지 접수 cmt9gn8of01vujnotzl63acsl) — 배경색·글씨공간 색·
+  //   이미지 맞춤·정렬·높이가 편집기에만 있고 이메일 렌더러가 한 번도 안 읽던 것. DM 렌더러 미러.
+  //   ⛔ 미지정이면 전부 옛 값이라 기존 캠페인 출력은 한 글자도 안 바뀐다(무회귀).
+  //   근거표 = email-property-contract.ts · 검증 = __tests__/email-editor-parity.test.ts
+  const sectionBg = p.background_color ? `;background:${esc(p.background_color)}` : '';
+  const cardBg = p.caption_bg_color ? esc(p.caption_bg_color) : b.cardBg;
+  const hKey: 'sm' | 'md' | 'lg' = p.image_height === 'sm' || p.image_height === 'lg' ? p.image_height : 'md';
+  const imgH = EMAIL_PRODUCT_IMG_HEIGHT[hKey];
+  const thumbH = EMAIL_PRODUCT_LIST_THUMB[hKey];
+  // 맞추기(contain)는 여백이 생기므로 그 여백을 배경색으로 채운다(미지정이면 테마 배경).
+  // 채우기(cover)에서 정렬이 가운데면 아무것도 덧붙이지 않는다 — 옛 출력과 문자 단위로 같게.
+  const imgFitCss = p.image_fit === 'contain'
+    ? `object-fit:contain;background:${p.background_color ? esc(p.background_color) : b.bg}`
+    : `object-fit:cover${p.image_focus === 'top' || p.image_focus === 'bottom' ? `;object-position:center ${p.image_focus}` : ''}`;
+
+  // 제목 크기·색 — md = h3 = 현행이라 미지정이면 옛 출력 그대로.
+  const titleSizeKey = EMAIL_PRODUCT_TITLE_SIZE_KEY[p.title_size === 'sm' || p.title_size === 'lg' ? p.title_size : 'md'];
+  const titleColor = p.title_color ? esc(p.title_color) : b.text;
+  const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type[titleSizeKey].size};font-weight:700;color:${titleColor};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
 
   const priceOf = (it: ProductCarouselItem, big = false): string => {
     const fs = big ? b.type.h3.size : b.type.body.size;
@@ -317,11 +337,11 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
     const img = emailImg(it.image_url, ctx.publicBase);
     const url = linkOf(it);
     const imgTag = img
-      ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="100%" height="200" style="width:100%;height:200px;object-fit:cover;display:block;border:0;border-radius:${b.radius.sm}">`
-      : `<div style="width:100%;height:200px;background:${b.bg};border-radius:${b.radius.sm};font-size:0;line-height:0">&nbsp;</div>`;
+      ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="100%" height="${imgH}" style="width:100%;height:${imgH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}">`
+      : `<div style="width:100%;height:${imgH}px;background:${b.bg};border-radius:${b.radius.sm};font-size:0;line-height:0">&nbsp;</div>`;
     const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4;min-height:37px">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
-    const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[3]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
+    const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[3]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
     return `<td width="50%" valign="top" class="em-stack" style="padding:${b.sp[2]}">${cardTable}</td>`;
   };
 
@@ -330,12 +350,12 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
     const rowFor = (it: ProductCarouselItem): string => {
       const img = emailImg(it.image_url, ctx.publicBase);
       const url = linkOf(it);
-      const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="96" style="width:96px;height:96px;object-fit:cover;display:block;border:0;border-radius:${b.radius.sm}">` : '';
+      const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="${thumbH}" style="width:${thumbH}px;height:${thumbH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}">` : '';
       const meta = `<div style="font-size:${b.type.body.size};color:${b.text};font-weight:700;line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
-      const rowInner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${imgTag ? `<td width="96" valign="top" style="padding-right:${b.sp[4]}">${imgTag}</td>` : ''}<td valign="middle">${url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${meta}</a>` : meta}</td></tr></table>`;
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${rowInner}</td></tr></table>`;
+      const rowInner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${imgTag ? `<td width="${thumbH}" valign="top" style="padding-right:${b.sp[4]}">${imgTag}</td>` : ''}<td valign="middle">${url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${meta}</a>` : meta}</td></tr></table>`;
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${rowInner}</td></tr></table>`;
     };
-    return `<tr><td style="padding:${b.sp[6]}">${title}${items.map(rowFor).join('')}</td></tr>`;
+    return `<tr><td style="padding:${b.sp[6]}${sectionBg}">${title}${items.map(rowFor).join('')}</td></tr>`;
   }
 
   // ★ 3.0 구도 focus — 대표 1개 전폭 카드 + 나머지 2열
@@ -346,10 +366,18 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
     gridItems = items.slice(1);
     const img = emailImg(it.image_url, ctx.publicBase);
     const url = linkOf(it);
-    const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">` : '';
+    // 대표 이미지는 원래 자연 높이(고정 박스 없음)라 object-fit이 걸리지 않는다.
+    // 맞춤·정렬·높이 중 하나라도 지정됐을 때만 고정 박스를 주고, 아니면 옛 출력 그대로 둔다(무회귀).
+    const focusTouched = p.image_fit === 'contain' || p.image_focus === 'top' || p.image_focus === 'bottom'
+      || p.image_height === 'sm' || p.image_height === 'lg';
+    const bigH = p.image_height === 'sm' ? 220 : p.image_height === 'lg' ? 360 : 280;
+    const bigStyle = focusTouched
+      ? `width:100%;height:${bigH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}`
+      : `width:100%;display:block;border:0;border-radius:${b.radius.sm}`;
+    const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="${bigStyle}">` : '';
     const meta = `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};color:${b.text};font-weight:700;margin-top:${b.sp[3]};line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it, true)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
-    focusHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[4]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
+    focusHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[4]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
   }
 
   const rows: string[] = [];
@@ -357,7 +385,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
     const right = gridItems[i + 1] ? cellFor(gridItems[i + 1]) : '<td width="50%" class="em-stack"></td>';
     rows.push(`<tr>${cellFor(gridItems[i])}${right}</tr>`);
   }
-  return `<tr><td style="padding:${b.sp[6]} ${b.sp[4]}">${title}${focusHtml}<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows.join('')}</table></td></tr>`;
+  return `<tr><td style="padding:${b.sp[6]} ${b.sp[4]}${sectionBg}">${title}${focusHtml}<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows.join('')}</table></td></tr>`;
 }
 
 function renderGallery(p: GalleryProps, b: EmailBrand, ctx: EmailRenderCtx): string {

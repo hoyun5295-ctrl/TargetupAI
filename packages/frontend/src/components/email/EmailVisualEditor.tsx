@@ -91,6 +91,22 @@ export default function EmailVisualEditor({
 
   const [previewHtml, setPreviewHtml] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
+  // ★ 2026-08-26 미리보기 스크롤 보존(임은지 접수 cmt9ggaj301vajnotaks523h7) — 편집할 때마다 srcDoc이
+  //   바뀌면서 iframe이 문서를 새로 만들어 스크롤이 항상 맨 위로 갔다. 하단 블록을 고치는 내내 다시
+  //   내려야 했던 원인. srcDoc iframe은 부모와 같은 출처라 위치를 읽고 되돌릴 수 있다.
+  const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const previewScrollY = useRef(0);
+  const handlePreviewLoad = () => {
+    const win = previewFrameRef.current?.contentWindow;
+    if (!win) return;
+    try {
+      if (previewScrollY.current > 0) win.scrollTo(0, previewScrollY.current);
+      // 문서가 매번 새로 생기므로 리스너도 그 문서와 함께 사라진다(중복 누적 없음).
+      win.addEventListener('scroll', () => { previewScrollY.current = win.scrollY; }, { passive: true });
+    } catch {
+      // 접근 불가 환경 = 복원 생략(옛 동작 그대로). 미리보기가 깨지지는 않는다.
+    }
+  };
   const [saving, setSaving] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   // ★ 2026-07-14 Harold 지시 — 행사·상품 정보 붙여넣기 → 상품 카드 자동 구성 + 내용 재창조
@@ -743,7 +759,13 @@ export default function EmailVisualEditor({
               </div>
             )}
             <div className="flex-1 overflow-hidden bg-white">
-              <iframe title="이메일 미리보기" srcDoc={previewHtml} className="w-full h-full border-0" />
+              <iframe
+                ref={previewFrameRef}
+                onLoad={handlePreviewLoad}
+                title="이메일 미리보기"
+                srcDoc={previewHtml}
+                className="w-full h-full border-0"
+              />
             </div>
           </div>
         </div>

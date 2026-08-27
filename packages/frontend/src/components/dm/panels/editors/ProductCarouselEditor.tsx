@@ -115,6 +115,21 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
   return (
     <>
       <Field label="제목 (선택)"><TextInput value={props.title} onChange={(v) => onUpdate({ title: v })} placeholder="이번 주 추천 상품" /></Field>
+      {/* ★ 2026-08-26 제목 크기·색(임은지 신고) — 미지정 = 현행(보통·본문색). DM SSR·이메일 렌더러 양쪽이 함께 소비한다. */}
+      {props.title ? (
+        <>
+          <Field label="제목 크기">
+            <Select
+              value={props.title_size || 'md'}
+              onChange={(v) => onUpdate({ title_size: v as 'sm' | 'md' | 'lg' })}
+              options={[{ value: 'sm', label: '작게' }, { value: 'md', label: '보통' }, { value: 'lg', label: '크게' }]}
+            />
+          </Field>
+          <Field label="제목 색" hint="미지정 = 본문색">
+            <ColorOverride value={props.title_color} onChange={(v) => onUpdate({ title_color: v })} />
+          </Field>
+        </>
+      ) : null}
       {/* ★ 2026-07-14 상품 이미지 맞춤(남지현 신고) — 첨부 이미지가 잘려 보이는 문제. 맞추기=전체 보이기(잘림 X). */}
       <Field label="이미지 맞춤" hint="맞추기 = 잘리지 않고 전체 보이기">
         <Select

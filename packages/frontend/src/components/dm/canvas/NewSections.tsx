@@ -62,6 +62,19 @@ const H2_TITLE_STYLE: React.CSSProperties = {
   marginBottom: 'var(--dm-sp-4)',
 };
 
+// ★ 2026-08-26 상품 슬라이드 제목 크기·색(임은지 신고) — classic·list·focus 세 구도가 이 함수 하나를 쓴다.
+//   구도마다 따로 쓰면 한 구도에만 먹는 결함이 다시 난다(2026-07-16 서수란 선례). SSR productTitleHtml 미러.
+//   미지정이면 H2_TITLE_STYLE 그대로 = 현행.
+const productTitleStyle = (p: { title_size?: 'sm' | 'md' | 'lg'; title_color?: string }): React.CSSProperties => ({
+  ...H2_TITLE_STYLE,
+  ...(p?.title_color ? { color: p.title_color } : null),
+  ...(p?.title_size === 'sm'
+    ? { fontSize: 'var(--dm-fs-body)' }
+    : p?.title_size === 'lg'
+      ? { fontSize: 'var(--dm-fs-h1)' }
+      : null),
+});
+
 const H2_TITLE_STYLE_TIGHT: React.CSSProperties = {
   color: 'var(--dm-neutral-900)',
   marginBottom: 'var(--dm-sp-3)',
@@ -116,7 +129,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
     const [first, ...rest] = products;
     return (
       <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', ...(props.background_color ? { background: props.background_color } : {}) }}>
-        {props.title && <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.title}</div>}
+        {props.title && <div className="dm-text-h2" style={productTitleStyle(props)}>{props.title}</div>}
         <div className="dm-pc-items" style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ width: '100%', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 18, overflow: 'hidden', boxShadow: 'var(--dm-shadow-md)' }}>
             {first.image_url ? <img src={dmImageUrl(first.image_url)} alt={first.name} style={{ width: '100%', height: focusBigH, display: 'block', ...imgFit }} /> : <div style={{ width: '100%', height: focusBigH, background: 'var(--dm-neutral-100)' }} />}
@@ -141,7 +154,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
   if (treatment === 'list' && products.length > 0) {
     return (
       <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', ...(props.background_color ? { background: props.background_color } : {}) }}>
-        {props.title && <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.title}</div>}
+        {props.title && <div className="dm-text-h2" style={productTitleStyle(props)}>{props.title}</div>}
         <div className="dm-pc-items" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {products.map((p, i) => (
             <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 14 }}>
@@ -218,7 +231,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
   const pageCount = pcPages.length;
   return (
     <div className="dm-section dm-product-carousel" style={props.background_color ? { ...SECTION_SHELL_LG, background: props.background_color } : SECTION_SHELL_LG}>
-      {props.title && <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.title}</div>}
+      {props.title && <div className="dm-text-h2" style={productTitleStyle(props)}>{props.title}</div>}
       {products.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[상품을 추가해주세요]</div>
       ) : (

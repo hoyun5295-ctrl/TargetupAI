@@ -533,3 +533,30 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
     });
   });
 });
+
+// ── 상품 슬라이드 제목 크기·색 (2026-08-26 임은지 접수 — 이메일과 함께 신설) ──
+describe('상품 슬라이드 제목 크기·색 — 세 구도 전부 소비', () => {
+  const P = [{ image_url: 'https://x.com/a.jpg', name: 'P', price: 1000 }];
+  const render = (props: any, treatment?: string) =>
+    renderSection(mk('product_carousel', { products: P, ...props }, treatment ? ({ treatment } as any) : {}), {} as any);
+
+  for (const t of [undefined, 'list', 'focus']) {
+    const label = t || 'classic';
+    it(`[${label}] title_color가 제목 색으로 실린다`, () => {
+      expect(render({ title: '가을 감사제', title_color: '#ff3366' }, t)).toContain('#ff3366');
+    });
+    it(`[${label}] title_size가 제목 크기를 바꾼다`, () => {
+      const sm = render({ title: '가을 감사제', title_size: 'sm' }, t);
+      const md = render({ title: '가을 감사제' }, t);
+      const lg = render({ title: '가을 감사제', title_size: 'lg' }, t);
+      expect(sm).not.toBe(md);
+      expect(lg).not.toBe(md);
+      expect(sm).not.toBe(lg);
+    });
+    it(`[${label}] 미지정이면 제목 출력이 현행 그대로(무회귀)`, () => {
+      const html = render({ title: '가을 감사제' }, t);
+      expect(html).toContain('class="dm-text-h2"');
+      expect(html).toContain('color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)"');
+    });
+  }
+});

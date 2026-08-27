@@ -232,6 +232,9 @@ export type ProductCarouselProps = {
   background_color?: string;   // 슬라이드 섹션 배경(기본 회색 var(--dm-neutral-50) 대체)
   caption_bg_color?: string;   // 상품명·가격 글씨공간(카드) 배경
   image_height?: 'sm' | 'md' | 'lg';  // 이미지 높이 조정(기본 md — 기존 고정 높이)
+  // ★ 2026-08-26 제목 크기·색(임은지 접수) — 미지정 = 현행(md·본문색). DM·이메일 양쪽 렌더러가 함께 소비한다.
+  title_size?: 'sm' | 'md' | 'lg';
+  title_color?: string;
 };
 
 export type GalleryImage = {
