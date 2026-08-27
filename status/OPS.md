@@ -274,7 +274,25 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT status, re
 
 **⑥ 경보 3종**(시스템 알림 LMS · dedupKey) — `agency-mail-login-fail`(즉시 · 폴링 정지 동반) / `agency-mail-unknown-sender`(미등록 발신 · 6시간 요약) / `agency-mail-poll-fail`(마지막 성공 폴링 30분 초과 · ⛔ "메일 0통"과는 다른 축).
 
-**⑦ 상한 조정** — 일일 상한(주소 5통·회사 10통)·틱당 10통·리드타임 240분은 **코드 상수**다(`utils/agency-send-mail-worker.ts` 상단 · 리드타임은 `utils/agency-send-state.ts EMAIL_MIN_LEAD_MINUTES`). 운영에서 자주 걸리면 현황 탭의 초과 거절 카운터를 근거로 값을 바꾼 뒤 배포한다. ENV로 빼지 않은 이유 = 발송량 축이라 코드 리뷰를 지나게 하려고.
+**⑦ 상한 조정** (★2026-08-26(6) 개정 — 옛 "주소 5통·회사 10통·리드타임 240분 코드 상수" 서술은 폐기)
+- **일일 상한 = 기본 무제한**이고 **ENV로 조인다**(코드 배포 없이). `AGENCY_MAIL_DAILY_SENDER_LIMIT`(주소별) · `AGENCY_MAIL_DAILY_COMPANY_LIMIT`(회사별) · **0 또는 미설정 = 그 축을 세지 않는다**(쿼리도 안 돈다). 바꾼 뒤 `pm2 restart targetup-backend --update-env`.
+- 푼 근거 = 진짜 방벽은 상한이 아니라 **담당자 승인 게이트**(승인 없이 나가는 경로 0)이고, 검사·테스트 문자 비용은 요청한 고객사 몫이다. 폭주가 실제로 오면 위 ENV로 되돌린다.
+- **리드타임 = 40분**(화면·이메일 통일 · `utils/agency-send-state.ts`). 미달 요청은 거절이 아니라 `max(요청+30분, 지금+40분)`으로 **자동 조정**되고 그 사실이 4곳(확인 화면·회신 메일·담당자 문자·변경 토스트)에 고지된다. 발송 허용 시간 밖이면 조정하지 않고 거절.
+- 틱당 처리 통수(10)는 그대로 코드 상수다(`utils/agency-send-mail-worker.ts MAX_PER_TICK`).
+
+**⑧ 허용 이메일 등록 — 한 주소가 여러 청구 계정을 대신할 때** (★2026-08-27 신설 · 설계 = [설계서 §20](../docs/2026-08-22-agency-send-design.md))
+
+> 담당자 1명이 청구 계정 여러 개(부서·법인)를 관리하는 업체용이다. 계정이 하나인 업체는 종전과 같아 아무 조치도 필요 없다.
+
+1. 슈퍼관리자 → 고객사 수정 → **허용 이메일 관리**에서 **같은 주소를 계정마다 한 번씩** 등록한다(회사가 달라도 같은 방법).
+2. **두 번째 등록부터 표시명이 필수**다. 이 표시명이 곧 담당자가 요청서에 적을 이름이므로 업체가 부르는 대로 적는다(예: 금강 · 신환). 표시명이나 귀속 계정 로그인 아이디가 그 주소의 기존 등록과 겹치면 **등록이 400으로 막힌다**(겹치면 지정 판정이 안 돼 그 주소의 접수가 전부 반려되기 때문). 다중 등록 행에는 목록에 "청구 계정: 이름" 뱃지가 붙는다.
+3. 업체 담당자 안내 = 요청서 "내용" 시트 **아무 빈 줄**의 라벨 칸에 `청구 계정`, 값 칸에 안내받은 이름. 지정이 없거나 이름을 못 찾으면 접수가 반려되고 **회신 메일에 그 주소로 요청 가능한 계정 목록이 자동으로 실린다**(담당자가 그걸 보고 다시 보내면 된다).
+4. ⛔ **기본 계정을 만들지 않는다.** 후보가 여럿인데 지정이 없으면 반려가 정답이다(자동 선택 = 엉뚱한 계정으로 조용히 청구).
+
+같은 주소의 다중 등록 현황:
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT s.email_norm, c.name AS company, u.login_id, s.label, s.is_active FROM agency_send_email_senders s JOIN companies c ON c.id = s.company_id LEFT JOIN users u ON u.id = s.user_id WHERE s.email_norm IN (SELECT email_norm FROM agency_send_email_senders WHERE is_active GROUP BY email_norm HAVING COUNT(*) > 1) ORDER BY s.email_norm, s.created_at;"
+```
 
 ---
 

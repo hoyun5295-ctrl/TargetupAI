@@ -1113,9 +1113,9 @@ ALTER TABLE agency_send_requests ADD CONSTRAINT ck_agency_send_source
 - **미확정(auth null) 반려는 회사·사용자 없이 기록한다**(intake 원장). 후보가 여러 회사일 수 있어 추정 기록은 오귀속이다.
 - 코드 선배포 · DDL 후행 안전: 옛 UNIQUE가 살아 있는 동안 다중 행은 존재할 수 없어 `choose` 경로가 돌지 않고, 등록의 label 사전 검사(400)가 새 안내를 먼저 한다.
 
-### 20-4) DDL (Harold 실행 · §21 배포 인계에 원문)
+### 20-4) DDL — ★2026-08-27 실행완료 (Harold 실측: 교체 전 옛 인덱스 확인 → BEGIN·DROP·CREATE·COMMIT → `uq_agency_email_sender_active_user`만 잔존 확인)
 
-실행 전 확인 → `BEGIN; DROP INDEX uq_agency_email_sender_active; CREATE UNIQUE INDEX uq_agency_email_sender_active_user ON agency_send_email_senders (email_norm, user_id) WHERE is_active; COMMIT;` (트랜잭션으로 묶어 사이 창의 무제약 등록을 차단).
+`BEGIN; DROP INDEX uq_agency_email_sender_active; CREATE UNIQUE INDEX uq_agency_email_sender_active_user ON agency_send_email_senders (email_norm, user_id) WHERE is_active; COMMIT;` (트랜잭션으로 묶어 사이 창의 무제약 등록을 차단).
 
 ### 20-5) 배포 후 실측 5
 
