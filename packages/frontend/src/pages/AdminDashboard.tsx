@@ -5825,15 +5825,35 @@ const handleApproveRequest = async (id: string) => {
                     그 밖의 모든 국외 IP는 로그인·세션 발급 단계에서 차단됩니다.
                   </p>
                 </div>
-                <div className={`shrink-0 rounded-lg px-4 py-2.5 text-center ${geoStatus?.enforced ? 'bg-rose-500/20 border border-rose-400/40' : 'bg-gray-800 border border-gray-700'}`}>
-                  <div className="text-[10px] text-gray-400">정책 시행</div>
-                  <div className={`text-base font-bold ${geoStatus?.enforced ? 'text-rose-300' : 'text-gray-400'}`}>
-                    {geoStatus?.enforced ? '시행 중' : '미시행'}
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-gray-500">
-                    {geoStatus?.enforced ? geoStatus.enforceFrom : '탐지·기록만'}
-                  </div>
-                </div>
+                {/* ★0827 시행 상태 3단 — 「시행일이 안 잡힘」과 「시행일이 잡혔는데 아직 안 옴」은 다른 상태다.
+                    둘을 똑같이 '미시행'으로 그리면 시행일을 정해 둔 통제가 통제 없음으로 읽힌다. */}
+                {(() => {
+                  const enforced = geoStatus?.enforced === true;
+                  const rawFrom = String(geoStatus?.enforceFrom || '').trim();
+                  const fromDate = rawFrom ? new Date(rawFrom) : null;
+                  const validFrom = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : null;
+                  const fromText = validFrom
+                    ? `${validFrom.getFullYear()}년 ${validFrom.getMonth() + 1}월 ${validFrom.getDate()}일`
+                    : rawFrom;
+                  const scheduled = !enforced && !!validFrom;
+                  const tone = enforced
+                    ? 'bg-rose-500/20 border border-rose-400/40'
+                    : scheduled
+                      ? 'bg-amber-500/15 border border-amber-400/40'
+                      : 'bg-gray-800 border border-gray-700';
+                  const titleTone = enforced ? 'text-rose-300' : scheduled ? 'text-amber-200' : 'text-gray-400';
+                  return (
+                    <div className={`shrink-0 rounded-lg px-4 py-2.5 text-center ${tone}`}>
+                      <div className="text-[10px] text-gray-400">정책 시행</div>
+                      <div className={`text-base font-bold ${titleTone}`}>
+                        {enforced ? '시행 중' : scheduled ? '시행 예정' : '시행일 미지정'}
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-gray-500">
+                        {enforced ? `${fromText}부터` : scheduled ? `${fromText}부터 차단` : '탐지·기록만'}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
