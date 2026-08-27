@@ -34,3 +34,31 @@ export const EMAIL_PRODUCT_TREATMENTS = ['classic', 'list', 'focus'] as const;
 
 /** 제목 크기 → 타이포 토큰 키. **md = h3 = 현행**이라 미지정 캠페인은 제목 출력이 안 바뀐다. */
 export const EMAIL_PRODUCT_TITLE_SIZE_KEY = { sm: 'body', md: 'h3', lg: 'h2' } as const;
+
+/** 히어로 — 편집기(HeroEditor)가 노출하는 속성 중 **이미지가 있을 때** 렌더에 반영돼야 하는 것.
+ *  ★ 2026-08-27 추가 — 상품 슬라이드만 등재하고 히어로를 빼 둔 탓에 같은 부류(편집기에는 있는데
+ *  렌더러가 안 읽음)가 하루 만에 다시 접수됐다(`cmtb65jft02y5jnot96pjwvjo`). 섹션을 빼놓으면 원장이 아니다. */
+export const EMAIL_HERO_PROPS: Array<{ prop: string; desc: string }> = [
+  { prop: 'height', desc: '히어로 높이 sm|md|lg|full (미지정 = md 320px)' },
+  { prop: 'image_fit', desc: '이미지 맞춤 cover|contain (미지정 = cover)' },
+  { prop: 'focus', desc: '이미지 초점 center|top|bottom (미지정 = center)' },
+  { prop: 'align', desc: '텍스트 정렬 left|center|right' },
+  { prop: 'headline_color', desc: '헤드라인 색' },
+  { prop: 'headline_size', desc: '헤드라인 크기(px)' },
+  { prop: 'sub_copy_color', desc: '서브카피 색' },
+  { prop: 'sub_copy_size', desc: '서브카피 크기(px)' },
+];
+
+/** 히어로 구도 = EMAIL_TREATMENTS.hero와 같아야 한다. 이미지를 쓰는 구도는 classic·split 둘. */
+export const EMAIL_HERO_IMAGE_TREATMENTS = ['classic', 'split'] as const;
+
+/** 히어로 높이 px — 렌더러 HERO_HEIGHT_PX와 같은 값(원장이 기대치를 소유한다). */
+export const EMAIL_HERO_HEIGHT = { sm: 200, md: 320, lg: 480, full: 600 } as const;
+
+/** 캠페인 단위 디자인(`design`) 축 — 테마 모달·서체 모달이 패치하는 값.
+ *  ★ 2026-08-27 서체 지정 접수(`cmtb6kn6j0369jnotmslux7i2`) — 렌더러는 이미 읽고 있었고 **고를 입구만 없었다.**
+ *  입구를 붙이는 축이라도 "읽히고 있다"를 계약으로 고정해 둔다. 안 그러면 다음에 렌더러를 손볼 때 조용히 끊긴다. */
+export const EMAIL_DESIGN_PROPS: Array<{ prop: string; desc: string; probe: string }> = [
+  { prop: 'font_family', desc: '본문 서체 (미지정 = 브랜드킷 → 기본)', probe: '"Noto Serif KR", serif' },
+  { prop: 'font_display', desc: '제목 서체 (미지정 = 본문 서체)', probe: '"Black Han Sans", sans-serif' },
+];

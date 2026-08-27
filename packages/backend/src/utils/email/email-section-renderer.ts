@@ -111,6 +111,13 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment:
   const align = p.align || 'center';
   const minH = HERO_HEIGHT_PX[(p.height as string) || 'md'] || 320;
   const headEsc = esc(p.headline).replace(/\n/g, '<br>');
+  // ★ 2026-08-27 이미지 초점·맞춤 소비(임은지 접수 cmtb65jft02y5jnot96pjwvjo).
+  //   focus는 편집기에 있는데 배경 위치가 'center center'로 굳어 있었고, split 구도는 높이·맞춤·초점을
+  //   셋 다 안 읽어 이미지가 원본 비율로 늘어났다. 기본값은 옛 문자열과 같아 다른 캠페인은 무변화.
+  const focusPos = p.focus === 'top' || p.focus === 'bottom' ? p.focus : 'center';
+  const heroImgFit = p.image_fit === 'contain'
+    ? `object-fit:contain;background:${b.bg}`
+    : `object-fit:cover;object-position:center ${focusPos}`;
 
   // ★ 3.0 구도 typographic — 이미지 미사용 대형 타이포(에디토리얼). 모티프+디스플레이 서체.
   if (treatment === 'typographic') {
@@ -125,7 +132,8 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment:
 
   // ★ 3.0 구도 split — 이미지 절반 + 텍스트 절반(모바일 = em-stack 세로 스택). 이미지 없으면 classic 폴백.
   if (treatment === 'split' && img) {
-    const imgCell = `<td width="50%" valign="middle" class="em-stack" style="padding:0"><img src="${esc(img)}" alt="${esc(p.headline || '')}" style="width:100%;display:block;border:0"></td>`;
+    // 높이 고정 박스 — 없으면 세로로 긴 원본(이미지 스튜디오 산출물 등)이 그대로 늘어나 옆 칸 텍스트가 밀린다.
+    const imgCell = `<td width="50%" valign="middle" class="em-stack" style="padding:0"><img src="${esc(img)}" alt="${esc(p.headline || '')}" height="${minH}" style="width:100%;height:${minH}px;${heroImgFit};display:block;border:0"></td>`;
     const txtCell = `<td width="50%" valign="middle" class="em-stack" style="padding:${b.sp[6]};text-align:${align}">`
       + motifHtml(b, ordinal)
       + `<div style="font-family:${b.displayFont};font-size:${fsPx(p.headline_size, b.type.h1.size)};line-height:1.2;font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || b.text)};margin:0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, b)}</div>`
@@ -145,7 +153,7 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment:
     const sub = p.sub_copy
       ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || 'rgba(255,255,255,0.92)')};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
       : '';
-    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center center;background-size:${p.image_fit === 'contain' ? 'contain' : 'cover'};background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" class="em-hero" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
+    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center ${focusPos};background-size:${p.image_fit === 'contain' ? 'contain' : 'cover'};background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" class="em-hero" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
   }
 
   // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경. ★ 2026-07-02 줄바꿈+색상 지정 동일 적용 + 크기(fsPx)

@@ -4,7 +4,7 @@
 // 렌더는 백엔드 단일 진실원(POST /api/email/render-preview). 다크 + violet 톤.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
-  ArrowDown, ArrowUp, Copy, Eye, GripVertical, Loader2, Monitor, Palette, Plus, Save, Sparkles, Trash2, Wand2, X,
+  ArrowDown, ArrowUp, Copy, Eye, GripVertical, Loader2, Monitor, Palette, Plus, Save, Sparkles, Trash2, Type, Wand2, X,
 } from 'lucide-react';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent,
@@ -18,6 +18,8 @@ import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 // ★ 2026-07-13 디자인 3.0 — 테마 8종 1클릭 + 구도/배경면 픽커 + 프리헤더 (캠페인 단위 design)
 import EmailDesignThemeModal from './EmailDesignThemeModal';
+// ★ 2026-08-27 서체 지정(임은지 접수) — DM_FONT_CATALOG 단일 소스 · 캠페인 design만 패치
+import EmailFontModal from './EmailFontModal';
 import {
   EMAIL_TREATMENT_OPTIONS, EMAIL_BACKGROUND_OPTIONS, type EmailDesign,
 } from '../../utils/email-themes';
@@ -43,6 +45,12 @@ const EMAIL_ACCENT_AWARE = new Set<SectionType>([
 const EMAIL_BAND_AWARE = new Set<SectionType>([
   'text_card', 'cta', 'coupon', 'promo_code', 'product_carousel', 'reviews',
 ]);
+
+/** ★ 2026-08-27 미리보기 PC 폭 — 발송 셸의 모바일 분기(@media max-width:600px)보다 넓게 잡아
+ *  데스크탑 레이아웃(분할 구도의 2열 등)이 확실히 걸리게 한다. */
+const PREVIEW_PC_WIDTH = 680;
+/** 패널 실폭(360px 컨테이너에서 좌측 보더 1px 제외) 대비 축소율 — 가로 스크롤 없이 전체가 보인다. */
+const PREVIEW_PC_SCALE = 359 / PREVIEW_PC_WIDTH;
 
 // 개인화 변수(Liquid 토큰) — ★ 2026-07-02 Harold 지시: 하드코딩이 아니라 회사 실데이터 필드만 노출.
 //   실제 목록은 GET /api/email/personalization-vars (CT-58 실측 프로필 — 데이터 70%+ 채워진 필드)에서 로드.
@@ -88,6 +96,7 @@ export default function EmailVisualEditor({
   // ★ 2026-07-13 디자인 3.0 — 캠페인 단위 design (테마 1클릭·프리헤더·구도/배경은 섹션 필드)
   const [design, setDesign] = useState<EmailDesign | null>(initialDesign ?? null);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [fontOpen, setFontOpen] = useState(false);
 
   const [previewHtml, setPreviewHtml] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -96,6 +105,10 @@ export default function EmailVisualEditor({
   //   내려야 했던 원인. srcDoc iframe은 부모와 같은 출처라 위치를 읽고 되돌릴 수 있다.
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
   const previewScrollY = useRef(0);
+  // ★ 2026-08-27 미리보기 폭 토글(임은지 접수 cmtb65jft02y5jnot96pjwvjo) — 패널이 360px 고정이라
+  //   발송 HTML의 @media (max-width:600px)가 **항상** 걸려 모바일 레이아웃만 보였다. 라벨은 "실제 발송 HTML"이라
+  //   사용자는 그게 발송 모습이라고 믿는다. 기본값은 현행(모바일)이라 회귀 0.
+  const [previewWidth, setPreviewWidth] = useState<'mobile' | 'pc'>('mobile');
   const handlePreviewLoad = () => {
     const win = previewFrameRef.current?.contentWindow;
     if (!win) return;
@@ -453,6 +466,15 @@ export default function EmailVisualEditor({
           >
             <Palette className="w-4 h-4" /><span className="hidden md:inline">테마</span>
           </button>
+          {/* ★ 2026-08-27 서체 지정(임은지 접수) — DM 퀵바 [서체]와 같은 자리를 이메일에도. 렌더러는 이미 읽고 있었다. */}
+          <button
+            type="button"
+            onClick={() => setFontOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
+            title="이 캠페인 전체 글꼴을 바꿉니다 (문안은 그대로)"
+          >
+            <Type className="w-4 h-4" /><span className="hidden md:inline">서체</span>
+          </button>
           <button
             onClick={() => setPcPreviewOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
@@ -586,6 +608,13 @@ export default function EmailVisualEditor({
                             <option key={o.value} value={o.value}>{o.label}</option>
                           ))}
                         </select>
+                      </div>
+                    )}
+                    {/* ★ 2026-08-27 분할 구도 안내(임은지 접수) — "글자가 이미지 오른쪽으로 빠졌다"는 설정 실수가
+                        아니라 이 구도의 정의다. 고르는 자리에서 알려 준다. */}
+                    {selected.type === 'hero' && (selected as any).treatment === 'split' && (
+                      <div className="text-[10px] leading-relaxed text-amber-300/80">
+                        분할 구도는 넓은 화면에서 이미지가 왼쪽, 글자가 오른쪽으로 나갑니다. 좁은 화면에서만 위아래로 쌓입니다. 오른쪽 미리보기에서 PC 폭으로 확인하세요.
                       </div>
                     )}
                     {EMAIL_BAND_AWARE.has(selected.type) && (
@@ -758,13 +787,30 @@ export default function EmailVisualEditor({
                 ))}
               </div>
             )}
+            <div className="px-2 py-1.5 border-b border-white/10 flex items-center gap-1">
+              <span className="text-[10px] text-white/40 mr-auto">보이는 폭</span>
+              <button
+                type="button"
+                onClick={() => setPreviewWidth('mobile')}
+                className={`text-[10px] px-2 py-1 rounded ${previewWidth === 'mobile' ? 'bg-violet-500/30 border border-violet-400/40 text-white' : 'bg-slate-900/60 border border-white/10 text-white/50'}`}
+              >모바일</button>
+              <button
+                type="button"
+                onClick={() => setPreviewWidth('pc')}
+                className={`text-[10px] px-2 py-1 rounded ${previewWidth === 'pc' ? 'bg-violet-500/30 border border-violet-400/40 text-white' : 'bg-slate-900/60 border border-white/10 text-white/50'}`}
+              >PC</button>
+            </div>
             <div className="flex-1 overflow-hidden bg-white">
               <iframe
                 ref={previewFrameRef}
                 onLoad={handlePreviewLoad}
                 title="이메일 미리보기"
                 srcDoc={previewHtml}
-                className="w-full h-full border-0"
+                className="border-0"
+                style={previewWidth === 'pc'
+                  // 680px 문서를 패널 폭에 맞춰 축소해 보여준다. 높이는 축소분만큼 늘려 아래 여백을 없앤다.
+                  ? { width: PREVIEW_PC_WIDTH, height: `${(100 / PREVIEW_PC_SCALE).toFixed(2)}%`, transform: `scale(${PREVIEW_PC_SCALE})`, transformOrigin: 'top left' }
+                  : { width: '100%', height: '100%' }}
               />
             </div>
           </div>
@@ -793,6 +839,20 @@ export default function EmailVisualEditor({
           onApply={(d) => setDesign(d)}
           onReset={() => setDesign((cur) => (cur?.preheader ? { preheader: cur.preheader } : null))}
           onClose={() => setThemeOpen(false)}
+        />
+      )}
+
+      {/* ★ 2026-08-27 서체 지정 — 캠페인 design만 패치(브랜드킷 무변경 = DM·인앱 영향 0) */}
+      {fontOpen && (
+        <EmailFontModal
+          current={design}
+          onApply={(d) => setDesign(d)}
+          onReset={() => setDesign((cur) => {
+            if (!cur) return null;
+            const { font_family: _f, font_display: _d, ...rest } = cur;
+            return Object.keys(rest).length > 0 ? rest : null;
+          })}
+          onClose={() => setFontOpen(false)}
         />
       )}
 

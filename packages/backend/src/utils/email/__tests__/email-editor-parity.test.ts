@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { renderEmailSections } from '../email-section-renderer';
-import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS } from '../email-property-contract';
+import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS } from '../email-property-contract';
 import type { Section } from '../../dm/dm-section-registry';
 
 const PRODUCTS = [
@@ -114,4 +114,70 @@ describe('email-property-contract 원장 = 실제 소비 (등재만 하고 안 �
       expect(probed, `${prop}가 이메일 렌더러에서 소비되지 않는다`).not.toBe(base);
     });
   }
+});
+
+// ── 히어로 (2026-08-27 임은지 접수 cmtb65jft02y5jnot96pjwvjo) ──
+describe('히어로 — 편집기 속성이 이미지 구도 전부에서 반영된다', () => {
+  const hero = (props: Record<string, unknown>, treatment?: string): Section =>
+    ({ id: 's-hero', type: 'hero', order: 0, visible: true, treatment,
+       props: { headline: '붉은팥 PDRN 모공탄력 세럼', sub_copy: '열감을 내리고 모공은 쫀쫀하게', align: 'center', height: 'md', image_url: 'https://x.example.com/hero.jpg', ...props } } as unknown as Section);
+  const rh = (props: Record<string, unknown>, treatment?: string) => renderEmailSections([hero(props, treatment)], {});
+
+  for (const t of EMAIL_HERO_IMAGE_TREATMENTS) {
+    it(`[${t}] 높이 설정이 실제 높이를 바꾼다 (편집기 "높이" 컨트롤이 죽지 않는다)`, () => {
+      expect(rh({ height: 'sm' }, t)).toContain(`${EMAIL_HERO_HEIGHT.sm}px`);
+      expect(rh({ height: 'lg' }, t)).toContain(`${EMAIL_HERO_HEIGHT.lg}px`);
+      expect(rh({ height: 'md' }, t)).toContain(`${EMAIL_HERO_HEIGHT.md}px`);
+    });
+
+    it(`[${t}] 이미지 맞춤(contain)이 출력을 바꾼다 — 완성 포스터가 잘리지 않아야 한다`, () => {
+      expect(rh({ image_fit: 'contain' }, t)).not.toBe(rh({}, t));
+    });
+
+    it(`[${t}] 이미지 초점(focus=top)이 출력을 바꾼다`, () => {
+      expect(rh({ focus: 'top' }, t)).not.toBe(rh({}, t));
+    });
+  }
+
+  it('원장의 히어로 속성은 전부 출력을 바꾼다 (등재만 하고 안 읽으면 실패)', () => {
+    const PROBE: Record<string, unknown> = {
+      height: 'lg', image_fit: 'contain', focus: 'top', align: 'left',
+      headline_color: '#ff3366', headline_size: 33, sub_copy_color: '#3366ff', sub_copy_size: 22,
+    };
+    for (const { prop, desc } of EMAIL_HERO_PROPS) {
+      expect(PROBE[prop], `${prop} 탐침 값 없음`).toBeDefined();
+      expect(rh({ [prop]: PROBE[prop] }), `${prop} (${desc})가 이메일 히어로 렌더러에서 소비되지 않는다`).not.toBe(rh({}));
+    }
+  });
+});
+
+// ── 캠페인 서체 (2026-08-27 임은지 접수 cmtb6kn6j0369jnotmslux7i2) ──
+describe('캠페인 디자인 서체 — 지정하면 발송 HTML에 실린다', () => {
+  const body: Section[] = [
+    { id: 'h', type: 'hero', order: 0, visible: true, props: { headline: '헤드라인', sub_copy: '서브카피', align: 'center', height: 'md' } } as unknown as Section,
+    { id: 't', type: 'text_card', order: 1, visible: true, props: { headline: '소개', body: '본문입니다' } } as unknown as Section,
+  ];
+
+  it('서체 미지정 = 현행 출력 (회귀 0)', () => {
+    expect(renderEmailSections(body, { design: {} as never })).toBe(renderEmailSections(body, {}));
+  });
+
+  for (const { prop, desc, probe } of EMAIL_DESIGN_PROPS) {
+    it(`${prop} (${desc}) — 지정 값이 실제 출력을 바꾼다`, () => {
+      const base = renderEmailSections(body, {});
+      const styled = renderEmailSections(body, { design: { [prop]: probe } as never });
+      expect(styled, `${prop}가 이메일 렌더러에서 소비되지 않는다`).not.toBe(base);
+      // 카탈로그 서체는 이메일 폴백 스택으로 승격되므로 **서체 이름**이 출력에 남아야 한다
+      const face = probe.split(',')[0].replace(/"/g, '').trim();
+      expect(styled).toContain(face);
+    });
+  }
+
+  it('카탈로그 서체는 자가호스팅 fonts.css @import까지 함께 나간다 (수신함에서 실제 그 글꼴로 보인다)', () => {
+    const base = renderEmailSections(body, {});
+    const styled = renderEmailSections(body, { design: { font_family: '"Noto Serif KR", serif' } as never });
+    expect(base).not.toContain('/api/dm/v/fonts.css');
+    expect(styled, '자가호스팅 서체 @import가 빠지면 수신함에서 기본 글꼴로 떨어진다').toContain('/api/dm/v/fonts.css');
+    expect(styled).toContain('@import url(');
+  });
 });
