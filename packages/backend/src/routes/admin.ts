@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample, SPAM_BLOCK_NOTICE } from '../utils/spam-block';
-import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache, GEO_BLOCK_NOTICE } from '../utils/geo-access';
+import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache, GEO_BLOCK_NOTICE, validateCidrToken, isInvalidCidrError } from '../utils/geo-access';
 import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy } from '../utils/sender-line-limit';
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
@@ -941,7 +941,6 @@ const GEO_MIGRATION_HINT = {
   code: 'DB_MIGRATION_PENDING',
 };
 // IPv4 · IPv6 CIDR 모양. 실제 유효성은 PG의 ::cidr 캐스팅이 확정한다(트랜잭션 안이라 실패 시 롤백)
-const CIDR_RE = /^(\d{1,3}(\.\d{1,3}){3}|[0-9a-fA-F:]+)\/\d{1,3}$/;
 
 router.get('/geo/status', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
   try {
@@ -978,10 +977,15 @@ router.post('/geo/cidrs/bulk', authenticate, requireSuperAdmin, async (req: Requ
     //   IPv6를 함께 올렸다가 통째로 누락되면 시행 후 정상 국내 IPv6 사용자를 막고 구제할 방법도 없다.
     //   하나라도 어긋나면 DELETE 전에 요청 전체를 거부한다.
     const tokens = raw.split(/[\s,]+/).map((v) => v.trim()).filter((v) => v.length > 0);
-    const invalid = tokens.filter((v) => !CIDR_RE.test(v));
+    // ★0827 정규식만으로는 `115.138.27.202/0`처럼 **PG가 거부하는 값**이 통과했다.
+    //   그러면 DELETE 뒤 INSERT에서 터져 롤백되고 화면에는 이유가 남지 않는다. 값을 지목해 돌려준다.
+    const invalid = tokens
+      .map((v) => ({ v, r: validateCidrToken(v) }))
+      .filter((x) => !x.r.ok)
+      .map((x) => `${x.v} (${(x.r as { ok: false; reason: string }).reason})`);
     if (invalid.length > 0) {
       return res.status(400).json({
-        error: `CIDR 형식이 아닌 값이 ${invalid.length}건 있습니다. 전체를 반영하지 않았습니다.`,
+        error: `등록할 수 없는 값이 ${invalid.length}건 있습니다. 전체를 반영하지 않았습니다. ${invalid.slice(0, 3).join(' · ')}`,
         invalid: invalid.slice(0, 20),
       });
     }
@@ -1036,8 +1040,12 @@ router.post('/geo/cidrs/bulk', authenticate, requireSuperAdmin, async (req: Requ
     return res.json({ replaced: parsed.length, before });
   } catch (error: any) {
     if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
-    console.error('국내 대역 등록 실패:', error);
-    return res.status(500).json({ error: '국내 대역 등록 실패' });
+    // ★0827 사전 검증이 IPv6 호스트 비트까지 보지는 않는다 — PG가 거부하면 그 사실을 그대로 알린다(500 금지)
+    if (isInvalidCidrError(error)) {
+      return res.status(400).json({ error: `대역 형식을 PostgreSQL이 거부했습니다. 전체를 반영하지 않았습니다. (${String(error?.message || '').slice(0, 160)})` });
+    }
+    console.error('허용 대역 등록 실패:', error);
+    return res.status(500).json({ error: '허용 대역 등록 실패' });
   }
 });
 
@@ -1070,8 +1078,9 @@ router.post('/geo/exceptions', authenticate, requireSuperAdmin, async (req: Requ
       return res.status(400).json({ error: '범위는 user · company_api · company_agent · global 중 하나여야 합니다.' });
     }
     const cidr = String(req.body?.cidr || '').trim();
-    if (!CIDR_RE.test(cidr)) {
-      return res.status(400).json({ error: 'CIDR 형식(예: 203.0.113.0/24)으로 입력해주세요. 단일 IP는 /32입니다.' });
+    const cidrCheck = validateCidrToken(cidr);
+    if (!cidrCheck.ok) {
+      return res.status(400).json({ error: `CIDR 형식(예: 203.0.113.0/24)으로 입력해주세요. 단일 IP는 /32입니다. ${cidrCheck.reason}` });
     }
     const reason = String(req.body?.reason || '').trim();
     if (!reason) return res.status(400).json({ error: '승인 사유를 입력해주세요. 사유 없는 예외는 등록할 수 없습니다.' });

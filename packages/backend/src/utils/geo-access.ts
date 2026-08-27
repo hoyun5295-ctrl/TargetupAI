@@ -50,6 +50,55 @@ export function isGeoBlockEnforced(now: Date = new Date()): boolean {
   return now.getTime() >= from.getTime();
 }
 
+/**
+ * CIDR 한 토큰 검증 — **PG `cidr` 타입과 같은 엄격함**으로 본다. (★2026-08-27)
+ *
+ * ⛔ 왜 필요한가 — 정규식만으로 거르면 `115.138.27.202/0` 같은 값이 통과한다.
+ *   PG는 `cidr`에 **마스크 오른쪽 비트가 남아 있으면** 거부하는데, 그 거부가 INSERT 시점에 나서
+ *   트랜잭션이 롤백되고 화면에는 "등록 실패"만 남는다(어느 값이 문제인지 알 수 없다).
+ *   그래서 **DELETE 앞에서**, 값을 지목해 돌려준다.
+ *
+ * ⚠ IPv6 호스트 비트까지 여기서 계산하지 않는다(자릿수 확장·축약 규칙을 다시 구현하면 그것이 새 결함원이다).
+ *   IPv6는 형식·프리픽스 범위만 보고 최종 판정은 PG에 맡기되, 호출부가 PG 메시지를 400으로 흘린다.
+ */
+export function validateCidrToken(raw: string): { ok: true } | { ok: false; reason: string } {
+  const v = String(raw ?? '').trim();
+  const slash = v.lastIndexOf('/');
+  if (slash < 0) return { ok: false, reason: '/프리픽스가 없습니다(단일 IP는 /32)' };
+  const addr = v.slice(0, slash);
+  const prefixRaw = v.slice(slash + 1);
+  if (!/^\d{1,3}$/.test(prefixRaw)) return { ok: false, reason: '프리픽스가 숫자가 아닙니다' };
+  const prefix = Number(prefixRaw);
+
+  const isV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(addr);
+  if (isV4) {
+    const octets = addr.split('.').map(Number);
+    if (octets.some((o) => o > 255)) return { ok: false, reason: 'IPv4 각 자리는 255를 넘을 수 없습니다' };
+    if (prefix > 32) return { ok: false, reason: 'IPv4 프리픽스는 0~32입니다' };
+    const ip = ((octets[0] << 24) >>> 0) + (octets[1] << 16) + (octets[2] << 8) + octets[3];
+    const mask = prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0;
+    if (((ip & mask) >>> 0) !== ip) {
+      // 그 주소가 실제로 속한 네트워크를 함께 알려준다 — 고쳐 넣을 값을 사람이 계산하지 않게
+      const net = (ip & mask) >>> 0;
+      const netStr = [net >>> 24, (net >>> 16) & 255, (net >>> 8) & 255, net & 255].join('.');
+      const hint = prefix === 0 ? '0.0.0.0/0' : `${netStr}/${prefix}`;
+      return { ok: false, reason: `네트워크 주소가 아닙니다(${hint} 또는 ${addr}/32 로 넣어주세요)` };
+    }
+    return { ok: true };
+  }
+
+  const isV6 = addr.includes(':') && /^[0-9a-fA-F:]+$/.test(addr);
+  if (!isV6) return { ok: false, reason: 'IP 주소 형식이 아닙니다' };
+  if (prefix > 128) return { ok: false, reason: 'IPv6 프리픽스는 0~128입니다' };
+  return { ok: true };
+}
+
+/** PG가 cidr 값을 거부했는가 — 호출부가 500 대신 400으로 돌려주기 위한 판정 */
+export function isInvalidCidrError(err: any): boolean {
+  const msg = String(err?.message || '');
+  return msg.includes('invalid cidr value') || msg.includes('invalid input syntax for type cidr');
+}
+
 /** DDL 미적용 감지 — 호출부가 503 DB_MIGRATION_PENDING으로 돌려주기 위한 판정 */
 export function isGeoSchemaMissing(err: any): boolean {
   const msg = String(err?.message || '');

@@ -261,7 +261,14 @@ export default function AdminDashboard() {
     setGeoBusy(true);
     try {
       const { ok, data } = await geoPost('/api/admin/geo/cidrs/bulk', { cidrs: geoCidrInput });
-      if (!ok) { showAlert('오류', data?.error || '대역 등록에 실패했습니다.', 'error'); return; }
+      if (!ok) {
+        // ★0827 어느 값이 왜 막혔는지 화면에 남긴다 — "등록 실패" 한 줄이면 고칠 방법이 없다
+        const detail = Array.isArray(data?.invalid) && data.invalid.length > 0
+          ? `\n\n${data.invalid.slice(0, 10).join('\n')}`
+          : '';
+        showAlert('오류', `${data?.error || '대역 등록에 실패했습니다.'}${detail}`, 'error');
+        return;
+      }
       setGeoCidrInput('');
       await loadGeoAccess();
       showAlert('성공', `${Number(data.replaced).toLocaleString()}개 대역으로 교체되었습니다(이전 ${Number(data.before).toLocaleString()}개).`, 'success');
@@ -5810,6 +5817,11 @@ const handleApproveRequest = async (id: string) => {
                 여기 등록한 국내 할당 대역만 차단에서 제외됩니다. <span className="font-medium">등록되지 않은 IP는 전부 차단 대상</span>입니다.
                 대역이 하나도 없으면 판정 자체를 하지 않습니다(전원 통과).
                 줄바꿈·쉼표·공백 어느 것으로 구분해도 됩니다. <span className="font-medium">등록할 때마다 전체가 교체</span>됩니다.
+              </p>
+              <p className="mt-1.5 text-[11px] text-gray-400 leading-relaxed">
+                네트워크 주소로 넣어주세요. <span className="font-medium text-gray-500">단일 IP 하나는 /32</span>입니다
+                (예: 115.138.27.202/32). 115.138.27.202/16 처럼 대역 가운데 주소를 적으면 등록되지 않고,
+                어느 값을 어떻게 고쳐야 하는지 알려줍니다.
               </p>
               <textarea
                 value={geoCidrInput}
