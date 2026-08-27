@@ -44,6 +44,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   user_update: '사용자 수정',
   account_restricted: '계정 제한',
   company_terminated: '회사 해지',
+  // ★ 2026-08-27 직원 계정 등급(전송자격인증 3.2·3.3)
+  admin_role_changed: '직원 등급 변경',
   // 발송 라인·정책
   line_group_create: '라인그룹 생성',
   line_group_update: '라인그룹 수정',

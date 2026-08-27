@@ -49,6 +49,14 @@ export interface BlockRule {
 export const MIN_ELEMENTS = 2;
 export const MAX_ELEMENTS = 5;
 
+/**
+ * 차단 시 발송자에게 나가는 안내 문구 — **이 상수가 유일한 원본이다.**
+ * 관리자 화면의 「차단 안내」 미리보기와, 차단 승격(설계서 §4-H) 시 발송 경로가 같은 값을 쓴다.
+ * ⛔ 화면에 문구를 복사해 두면 둘이 갈라지고, 심사에 내는 안내 화면이 실제와 달라진다.
+ */
+export const SPAM_BLOCK_NOTICE =
+  '등록된 차단정보에 걸려 발송이 중지되었습니다. 문안을 수정한 뒤 다시 시도해주세요. 정상 문안인데 걸렸다면 고객센터로 알려주세요.';
+
 /** 규칙 캐시 유지(ms) — 대량 발송 중 매 건 조회를 피한다 */
 const RULE_CACHE_TTL_MS = 60_000;
 let ruleCache: { rules: BlockRule[]; expires: number } | null = null;

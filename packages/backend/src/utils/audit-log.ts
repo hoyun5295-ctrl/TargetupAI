@@ -7,6 +7,7 @@
  * - 열람 권한: ENV AUDIT_LOG_VIEWER_IDS (콤마 구분 super_admins.login_id, 기본 'ceo')만 허용.
  */
 import { query } from '../config/database';
+import { fetchAdminRole, canRead } from './admin-role';
 
 export interface AuditLogInput {
   actorUserId?: string | null;   // 행위자 id (super_admins.id 또는 users.id)
@@ -40,17 +41,28 @@ export async function recordAuditLog(input: AuditLogInput): Promise<void> {
 }
 
 /**
- * 슈퍼관리자 계정 화이트리스트 판정 (공통 코어) — ENV(콤마 구분 super_admins.login_id) 기준.
+ * 슈퍼관리자 계정 화이트리스트 판정 (공통 코어) — **등급 AND ENV** 두 관문을 모두 통과해야 열린다.
  * 미로그인·미등록·조회 실패는 전부 false(닫힘). 권한 판정은 실패 시 열리면 안 된다.
+ *
+ * ★ 2026-08-27 등급 관문 추가(전송자격인증 3.2) — 근거 = utils/admin-role.ts 권한분류표.
+ *   ⛔ **AND로 붙인다.** 등급이 열어도 ENV가 막으면 막힌 채로 둔다. 그래야 이 축을 도입하면서
+ *      지금 닫혀 있는 것이 열리는 일이 구조적으로 불가능하다(권한 축 도입이 권한 개방이 되면 안 된다).
+ *   ⚠ `permKey`가 없으면 등급 관문을 건너뛴다 — 분류표에 아직 올리지 않은 축을 조용히 막지 않기 위해서다.
+ *      새 축을 만들 때 permKey를 함께 넘기는 것이 규율이다.
  */
 async function isSuperAdminAllowed(
   superAdminId: string | null | undefined,
   envKey: string,
   fallbackIds: string,
   tag: string,
+  permKey?: string,
 ): Promise<boolean> {
   if (!superAdminId) return false;
   try {
+    if (permKey) {
+      const role = await fetchAdminRole(superAdminId);
+      if (!canRead(role, permKey)) return false;
+    }
     const me = await query('SELECT login_id FROM super_admins WHERE id = $1', [superAdminId]);
     const allowed = (process.env[envKey] || fallbackIds)
       .split(',').map((s) => s.trim()).filter(Boolean);
@@ -66,7 +78,7 @@ async function isSuperAdminAllowed(
  * Harold 명시 2026-06-11: 감사 로그는 ceo 계정에서만 열람.
  */
 export function isAuditLogViewer(superAdminId?: string | null): Promise<boolean> {
-  return isSuperAdminAllowed(superAdminId, 'AUDIT_LOG_VIEWER_IDS', 'ceo', 'audit-log');
+  return isSuperAdminAllowed(superAdminId, 'AUDIT_LOG_VIEWER_IDS', 'ceo', 'audit-log', 'auditLogs');
 }
 
 /**
@@ -75,7 +87,7 @@ export function isAuditLogViewer(superAdminId?: string | null): Promise<boolean>
  * 그래서 감사 로그 게이트(isAuditLogViewer)를 재사용하지 않고 축을 나눈다 — 합치면 한쪽을 열 때 다른 쪽도 열린다.
  */
 export function isGeoHitsViewer(superAdminId?: string | null): Promise<boolean> {
-  return isSuperAdminAllowed(superAdminId, 'GEO_HITS_VIEWER_IDS', 'ceo,suran', 'geo-hits');
+  return isSuperAdminAllowed(superAdminId, 'GEO_HITS_VIEWER_IDS', 'ceo,suran', 'geo-hits', 'geoHits');
 }
 
 /**
@@ -83,7 +95,7 @@ export function isGeoHitsViewer(superAdminId?: string | null): Promise<boolean> 
  * Harold 명시 2026-08-24: 어떤 업체가 어떤 질문을 했는지는 ceo 계정에서만 본다(감사 로그와 같은 규약).
  */
 export function isHelpQuestionViewer(superAdminId?: string | null): Promise<boolean> {
-  return isSuperAdminAllowed(superAdminId, 'HELP_QUESTION_VIEWER_IDS', 'ceo', 'help-questions');
+  return isSuperAdminAllowed(superAdminId, 'HELP_QUESTION_VIEWER_IDS', 'ceo', 'help-questions', 'helpQuestions');
 }
 
 /**
@@ -91,7 +103,7 @@ export function isHelpQuestionViewer(superAdminId?: string | null): Promise<bool
  * 인비토AI 학습 데이터는 전사 비식별 집계라 소유자(ceo) 전용. 감사 로그와 분리된 별도 env.
  */
 export function isAiTrainingViewer(superAdminId?: string | null): Promise<boolean> {
-  return isSuperAdminAllowed(superAdminId, 'AI_TRAINING_VIEWER_IDS', 'ceo', 'ai-training');
+  return isSuperAdminAllowed(superAdminId, 'AI_TRAINING_VIEWER_IDS', 'ceo', 'ai-training', 'aiTraining');
 }
 
 /**
@@ -101,7 +113,7 @@ export function isAiTrainingViewer(superAdminId?: string | null): Promise<boolea
  * 넘기면 uuid 비교 예외를 코어 catch가 삼켜 전원 차단된다(설계서 §4-6 D1).
  */
 export function isDiagnosisViewer(superAdminId?: string | null): Promise<boolean> {
-  return isSuperAdminAllowed(superAdminId, 'MARKETING_DIAGNOSIS_VIEWER_IDS', 'ceo', 'marketing-diagnosis');
+  return isSuperAdminAllowed(superAdminId, 'MARKETING_DIAGNOSIS_VIEWER_IDS', 'ceo', 'marketing-diagnosis', 'marketingDiagnosis');
 }
 
 /**
@@ -111,7 +123,7 @@ export function isDiagnosisViewer(superAdminId?: string | null): Promise<boolean
  * 감사 로그·AI 학습과 **별도 env** — 한 계정을 열어줄 때 다른 축까지 함께 열리면 안 된다.
  */
 export function isSettlementOverviewViewer(superAdminId?: string | null): Promise<boolean> {
-  return isSuperAdminAllowed(superAdminId, 'SETTLEMENT_OVERVIEW_VIEWER_IDS', 'ceo', 'settlement-overview');
+  return isSuperAdminAllowed(superAdminId, 'SETTLEMENT_OVERVIEW_VIEWER_IDS', 'ceo', 'settlement-overview', 'settlementOverview');
 }
 
 /**
@@ -123,7 +135,7 @@ export function isSettlementOverviewViewer(superAdminId?: string | null): Promis
  * 같은 API를 쓰므로, 걸면 다른 슈퍼관리자의 라인 배정 화면이 조용히 깨진다.
  */
 export function isLineGroupAdmin(superAdminId?: string | null): Promise<boolean> {
-  return isSuperAdminAllowed(superAdminId, 'LINE_GROUP_ADMIN_USERS', 'ceo,admin', 'line-group');
+  return isSuperAdminAllowed(superAdminId, 'LINE_GROUP_ADMIN_USERS', 'ceo,admin', 'line-group', 'lineGroups');
 }
 
 /**
@@ -134,7 +146,7 @@ export function isLineGroupAdmin(superAdminId?: string | null): Promise<boolean>
  * 설계 = docs/2026-07-31-ai-sales-outreach-design.md §15-6.
  */
 export function isSalesOutreachOperator(superAdminId?: string | null): Promise<boolean> {
-  return isSuperAdminAllowed(superAdminId, 'SALES_OUTREACH_ALLOWED_USERS', 'ceo', 'sales-outreach');
+  return isSuperAdminAllowed(superAdminId, 'SALES_OUTREACH_ALLOWED_USERS', 'ceo', 'sales-outreach', 'salesOutreach');
 }
 
 /** 변경 전/후 객체에서 달라진 필드만 추출 — details 용량 최소화 + 변경 없는 수정은 기록 생략용 */

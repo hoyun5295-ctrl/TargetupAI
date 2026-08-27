@@ -1,13 +1,14 @@
 import bcrypt from 'bcryptjs';
-import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample } from '../utils/spam-block';
-import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache } from '../utils/geo-access';
+import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample, SPAM_BLOCK_NOTICE } from '../utils/spam-block';
+import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache, GEO_BLOCK_NOTICE } from '../utils/geo-access';
 import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy } from '../utils/sender-line-limit';
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
 import type { PoolClient } from 'pg';
-import { authenticate, requireSuperAdmin } from '../middlewares/auth';
+import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/auth';
+import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
 import { insertCuratedSeeds, listCuratedSeeds, listCuratedSeedCounts, deleteCuratedSeed, saveCuratedSeedOne, updateCuratedSeed, SeedGateFail } from '../utils/copy-seed-curator';
@@ -736,7 +737,8 @@ router.get('/spam-block/rules', authenticate, requireSuperAdmin, async (_req: Re
          FROM spam_block_rules r
         ORDER BY r.is_active DESC, r.created_at DESC`
     );
-    return res.json({ rules: result.rows });
+    // 차단 안내 문구 — 원본은 spam-block.ts 상수 하나(화면에 복사 금지)
+    return res.json({ rules: result.rows, blockNotice: SPAM_BLOCK_NOTICE });
   } catch (error: any) {
     if (String(error?.message || '').includes('does not exist')) {
       return res.status(503).json({
@@ -954,6 +956,8 @@ router.get('/geo/status', authenticate, requireSuperAdmin, async (_req: Request,
       // 시행 여부는 env가 소유한다 — 화면은 상태만 보여준다
       enforced: isGeoBlockEnforced(),
       enforceFrom: process.env.GEO_BLOCK_ENFORCE_FROM || null,
+      // 차단 시 이용자에게 나가는 안내 — 원본은 geo-access.ts 상수 하나(화면에 복사 금지)
+      blockNotice: GEO_BLOCK_NOTICE,
     });
   } catch (error: any) {
     if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
@@ -1124,6 +1128,115 @@ router.delete('/geo/exceptions/:id', authenticate, requireSuperAdmin, async (req
     if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
     console.error('접근 예외 회수 실패:', error);
     return res.status(500).json({ error: '접근 예외 회수 실패' });
+  }
+});
+
+// ============================================================
+// ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3)
+//   컨트롤타워 = utils/admin-role.ts (권한분류표의 유일한 원본)
+//   ⛔ 등급 변경은 `super`만. 이 게이트가 없으면 하위 등급이 스스로를 올릴 수 있다.
+//   ⛔ 사유 없는 변경은 받지 않는다 — 기준 3.3이 요구하는 것은 "변경 이력 **및 사유** 관리대장"이다.
+// ============================================================
+
+/** 계정 목록 + 권한분류표 + 내 등급 — 화면은 표를 스스로 만들지 않고 이 응답을 그린다 */
+router.get('/admin-accounts', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const myRole = await fetchAdminRole(req.user?.userId);
+    if (!canRead(myRole, 'adminAccounts')) {
+      return res.status(403).json({ error: '관리자 계정은 대표 등급에서만 볼 수 있습니다.' });
+    }
+    const result = await query(
+      `SELECT id, login_id, name, email, role, is_active, created_at, last_login_at
+         FROM super_admins
+        ORDER BY is_active DESC, created_at`
+    );
+    return res.json({
+      accounts: result.rows.map((r: any) => ({ ...r, role: normalizeAdminRole(r.role) })),
+      matrix: PERMISSION_MATRIX,
+      roles: ADMIN_ROLES.map((r) => ({ value: r, label: ADMIN_ROLE_LABEL[r], desc: ADMIN_ROLE_DESC[r] })),
+      levelLabels: ACCESS_LEVEL_LABEL,
+      myRole,
+    });
+  } catch (error: any) {
+    console.error('관리자 계정 조회 실패:', error);
+    return res.status(500).json({ error: '관리자 계정 조회 실패' });
+  }
+});
+
+/** 등급 변경 — 사유 필수. 이 기록이 3.3 「접근권한 변경 이력 및 사유 관리대장」이 된다 */
+router.patch('/admin-accounts/:id/role', authenticate, requireSuperAdmin, requireUuidId, async (req: Request, res: Response) => {
+  try {
+    const myRole = await fetchAdminRole(req.user?.userId);
+    if (!canWrite(myRole, 'adminAccounts')) {
+      return res.status(403).json({ error: '등급 변경은 대표 등급에서만 가능합니다.' });
+    }
+    const { id } = req.params;
+    const nextRole = String(req.body?.role || '').trim().toLowerCase();
+    if (!(ADMIN_ROLES as string[]).includes(nextRole)) {
+      return res.status(400).json({ error: '알 수 없는 등급입니다.' });
+    }
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: '변경 사유를 입력해주세요.' });
+
+    const before = await query('SELECT login_id, name, role FROM super_admins WHERE id = $1', [id]);
+    if (before.rows.length === 0) return res.status(404).json({ error: '계정을 찾을 수 없습니다.' });
+    const prevRole = normalizeAdminRole(before.rows[0].role);
+
+    // ⛔ 마지막 대표를 강등하면 관리자 계정 화면에 아무도 못 들어간다(복구는 DB 직접 수정뿐)
+    if (prevRole === 'super' && nextRole !== 'super') {
+      const supers = await query(
+        `SELECT COUNT(*)::int AS n FROM super_admins WHERE is_active = true AND LOWER(COALESCE(role,'')) = 'super' AND id <> $1`,
+        [id]
+      );
+      if ((supers.rows[0]?.n || 0) === 0) {
+        return res.status(400).json({ error: '마지막 대표 등급 계정은 강등할 수 없습니다.' });
+      }
+    }
+
+    await query('UPDATE super_admins SET role = $1 WHERE id = $2', [nextRole, id]);
+    await recordAuditLog({
+      actorUserId: req.user?.userId || null,
+      action: 'admin_role_changed',
+      targetType: 'super_admin',
+      targetId: id,
+      details: {
+        login_id: before.rows[0].login_id,
+        name: before.rows[0].name,
+        before: prevRole,
+        after: nextRole,
+        reason,
+      },
+      req,
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('관리자 등급 변경 실패:', error);
+    return res.status(500).json({ error: '관리자 등급 변경 실패' });
+  }
+});
+
+/** 등급 변경 이력 — 3.3 관리대장. 원천은 audit_logs(신규 테이블 0) */
+router.get('/admin-accounts/history', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const myRole = await fetchAdminRole(req.user?.userId);
+    if (!canRead(myRole, 'adminAccounts')) {
+      return res.status(403).json({ error: '관리자 계정은 대표 등급에서만 볼 수 있습니다.' });
+    }
+    const limit = Math.min(Number(req.query.limit) || 100, 300);
+    const result = await query(
+      `SELECT l.id, l.action, l.details, l.created_at, host(l.ip_address) AS ip_address,
+              a.login_id AS actor_login_id, a.name AS actor_name
+         FROM audit_logs l
+         LEFT JOIN super_admins a ON a.id = l.user_id
+        WHERE l.action IN ('admin_role_changed', 'admin_account_created', 'admin_account_disabled', 'admin_account_enabled')
+        ORDER BY l.created_at DESC
+        LIMIT $1`,
+      [limit]
+    );
+    return res.json({ history: result.rows });
+  } catch (error: any) {
+    console.error('관리자 권한 변경 이력 조회 실패:', error);
+    return res.status(500).json({ error: '관리자 권한 변경 이력 조회 실패' });
   }
 });
 

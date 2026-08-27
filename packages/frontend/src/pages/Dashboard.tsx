@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../components/ToastProvider';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
 import AddressBookModal from '../components/AddressBookModal';
+import SenderAuthModal, { type SenderAuthState } from '../components/SenderAuthModal';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
@@ -169,6 +170,19 @@ export default function Dashboard() {
   const navigate = useNavigate();
   // ★ 2026-06-25: CustomerDataGate "올리러 가기" 진입(/dashboard?upload=1) → 고객 DB 업로드 모달 자동 오픈
   const [searchParams, setSearchParams] = useSearchParams();
+  /**
+   * ★ 2026-08-27 발신 인증(전송자격인증 3.5) 팝업 — **발송 경로에 배선되어 있지 않다.**
+   *   `?senderAuthPreview=1`(요구) / `=2`(인증됨)로만 열린다. 발송 흐름에는 영향이 0이다.
+   *   OTP 발급·검증과 발송 preflight 연결은 별도 작업(발송 파이프라인은 영향표 없이 손대지 않는다).
+   */
+  const senderAuthPreview = searchParams.get('senderAuthPreview');
+  const [senderAuthCode, setSenderAuthCode] = useState('');
+  const senderAuthState: SenderAuthState | null =
+    senderAuthPreview === '1'
+      ? { kind: 'required', callback: '1800-8125', maskedPhone: '010-****-1234', expiresInMinutes: 5, reason: 'first' }
+      : senderAuthPreview === '2'
+        ? { kind: 'verified', callback: '1800-8125', verifiedAt: '오늘 09:12', remainingHours: 23 }
+        : null;
   const { user, logout } = useAuthStore();
 
   // 기능 제한 체크 헬퍼
@@ -4027,6 +4041,18 @@ const campaignData = {
         isPaidPlan={!!planInfo?.plan_code && planInfo.plan_code !== 'FREE'}
         onClose={() => setShowAgencyIntro(false)}
       />
+
+      {senderAuthState && (
+        <SenderAuthModal
+          state={senderAuthState}
+          code={senderAuthCode}
+          onCodeChange={setSenderAuthCode}
+          onVerify={() => {}}
+          onResend={() => {}}
+          onProceed={() => {}}
+          onCancel={() => { searchParams.delete('senderAuthPreview'); setSearchParams(searchParams); }}
+        />
+      )}
 
       {/* 하단 링크 — 2026-07-05 (Harold 명시): 매뉴얼 링크 헤더 → 푸터 복귀 (헤더 간소화, 매뉴얼 강조 제거) */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">

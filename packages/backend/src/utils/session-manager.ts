@@ -32,7 +32,7 @@ import type { Request } from 'express';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
-import { evaluateLoginOrigin } from './geo-access';
+import { evaluateLoginOrigin, GEO_BLOCK_NOTICE } from './geo-access';
 
 /** 한 번에 허용되는 동시 로그인 세션 수 — 항상 1개 (D111 P0: D100의 5개 허용 폐기) */
 const MAX_SESSIONS_PER_APP = 1;
@@ -312,7 +312,7 @@ export async function rotateUserSession(
     if (origin.decision === 'block') {
       return {
         status: 'geo_blocked',
-        message: '국내에서만 접속할 수 있습니다. 해외에서 사용해야 한다면 담당자에게 예외 등록을 요청해주세요.',
+        message: GEO_BLOCK_NOTICE,
       };
     }
   }

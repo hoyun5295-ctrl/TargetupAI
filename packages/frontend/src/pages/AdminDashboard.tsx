@@ -89,9 +89,18 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
+  // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
+  const [adminAccountsAllowed, setAdminAccountsAllowed] = useState(false);
+  const [adminAccounts, setAdminAccounts] = useState<any[]>([]);
+  const [adminMatrix, setAdminMatrix] = useState<any[]>([]);
+  const [adminRoleOptions, setAdminRoleOptions] = useState<any[]>([]);
+  const [adminLevelLabels, setAdminLevelLabels] = useState<Record<string, string>>({});
+  const [adminRoleHistory, setAdminRoleHistory] = useState<any[]>([]);
+  const [adminRoleEdit, setAdminRoleEdit] = useState<{ id: string; login_id: string; role: string; reason: string } | null>(null);
+  const [adminRoleBusy, setAdminRoleBusy] = useState(false);
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
   const [outreachAllowed, setOutreachAllowed] = useState(false);
@@ -205,6 +214,7 @@ export default function AdminDashboard() {
   // ★ 2026-08-18 금칙어 차단(전송자격인증 5.2) — 조합 규칙·시뮬레이션·탐지 이력
   const [spamRules, setSpamRules] = useState<any[]>([]);
   const [spamHits, setSpamHits] = useState<any[]>([]);
+  const [spamBlockNotice, setSpamBlockNotice] = useState('');
   const [spamRuleName, setSpamRuleName] = useState('');
   const [spamElements, setSpamElements] = useState<Array<{ type: string; value: string }>>([
     { type: 'keyword', value: '' },
@@ -278,6 +288,45 @@ export default function AdminDashboard() {
     await loadGeoAccess();
   };
 
+  // ★ 2026-08-27 직원 계정·권한 — 권한분류표·등급 정의는 서버가 소유한다(화면이 표를 만들지 않는다)
+  const loadAdminAccounts = async () => {
+    const token = localStorage.getItem('token');
+    const headers = { 'Authorization': `Bearer ${token}` };
+    const [listRes, histRes] = await Promise.all([
+      fetch('/api/admin/admin-accounts', { headers }),
+      fetch('/api/admin/admin-accounts/history?limit=100', { headers }),
+    ]);
+    if (listRes.ok) {
+      const body = await listRes.json();
+      setAdminAccounts(body.accounts || []);
+      setAdminMatrix(body.matrix || []);
+      setAdminRoleOptions(body.roles || []);
+      setAdminLevelLabels(body.levelLabels || {});
+      setAdminAccountsAllowed(true);
+    } else {
+      setAdminAccountsAllowed(false);
+    }
+    if (histRes.ok) setAdminRoleHistory((await histRes.json()).history || []);
+  };
+
+  const handleAdminRoleSave = async () => {
+    if (!adminRoleEdit) return;
+    if (!adminRoleEdit.reason.trim()) { showAlert('확인', '변경 사유를 입력해주세요.', 'error'); return; }
+    setAdminRoleBusy(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/admin-accounts/${adminRoleEdit.id}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ role: adminRoleEdit.role, reason: adminRoleEdit.reason.trim() }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) { showAlert('오류', data?.error || '등급 변경에 실패했습니다.', 'error'); return; }
+      setAdminRoleEdit(null);
+      await loadAdminAccounts();
+    } finally { setAdminRoleBusy(false); }
+  };
+
   const loadSpamBlock = async () => {
     const token = localStorage.getItem('token');
     const headers = { 'Authorization': `Bearer ${token}` };
@@ -285,7 +334,12 @@ export default function AdminDashboard() {
       fetch('/api/admin/spam-block/rules', { headers }),
       fetch('/api/admin/spam-block/hits?limit=100', { headers }),
     ]);
-    if (rulesRes.ok) setSpamRules((await rulesRes.json()).rules || []);
+    if (rulesRes.ok) {
+      const body = await rulesRes.json();
+      setSpamRules(body.rules || []);
+      // 차단 안내 문구는 서버(spam-block.ts 상수)가 유일한 원본 — 화면에 복사해 두지 않는다
+      setSpamBlockNotice(body.blockNotice || '');
+    }
     if (hitsRes.ok) setSpamHits((await hitsRes.json()).hits || []);
   };
 
@@ -944,6 +998,7 @@ useEffect(() => { if (activeTab === 'stats') loadSendStats(1); }, [activeTab]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'spamBlock') loadSpamBlock(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'geoAccess') loadGeoAccess(); }, [activeTab]);
+useEffect(() => { if (activeTab === 'adminAccounts') loadAdminAccounts(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs' && auditAccessAllowed) loadAuditLogs(1); }, [activeTab, auditAccessAllowed]);
 // ★ 2026-06-11: 감사 로그 열람 권한 확인 (1회) — 허용 계정에만 감사 로그 메뉴 노출
 useEffect(() => {
@@ -983,6 +1038,13 @@ useEffect(() => {
       const d = await r.json();
       setOutreachAllowed(d.allowed === true);
     } catch { setOutreachAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-08-27: 직원 계정·권한(전송자격인증 3.2·3.3) — 대표 등급에만 메뉴 노출.
+      //   목록 응답 자체가 게이트라 별도 access 엔드포인트를 만들지 않는다.
+      const r = await fetch('/api/admin/admin-accounts', { headers: { Authorization: `Bearer ${token}` } });
+      setAdminAccountsAllowed(r.ok);
+    } catch { setAdminAccountsAllowed(false); }
   })();
 }, []);
 useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
@@ -4502,7 +4564,7 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '시스템', color: 'gray',
-                tabs: ['syncAgents', 'agentDeploy', 'lineGroups', 'auditLogs', 'helpQuestions', 'loginBlocks'] as const,
+                tabs: ['syncAgents', 'agentDeploy', 'lineGroups', 'auditLogs', 'helpQuestions', 'loginBlocks', 'adminAccounts'] as const,
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
                   { key: 'agentDeploy', label: '싱크에이전트 배포' },
@@ -4521,6 +4583,7 @@ const handleApproveRequest = async (id: string) => {
                   // ★ 2026-06-13: AI 학습 데이터 = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
                   ...(aiTrainingAllowed ? [{ key: 'aiTraining', label: 'AI 학습 데이터', onClick: () => navigate('/admin/ai-training') }] : []),
                   { key: 'loginBlocks', label: '로그인 차단 관리' },
+                  ...(adminAccountsAllowed ? [{ key: 'adminAccounts', label: '직원 계정·권한' }] : []),
                 ],
               },
             ].map(group => {
@@ -5518,6 +5581,171 @@ const handleApproveRequest = async (id: string) => {
             </div>
         )}
 
+        {/* ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) */}
+        {activeTab === 'adminAccounts' && (
+          <div className="space-y-6">
+            {!adminAccountsAllowed ? (
+              <div className="bg-white rounded-xl border border-gray-200 px-5 py-10 text-center text-sm text-gray-500">
+                직원 계정·권한은 대표 등급 계정에서만 볼 수 있습니다.
+              </div>
+            ) : (
+              <>
+                <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-white">
+                  <div className="text-[11px] font-semibold tracking-wide text-gray-400">접근권한 관리</div>
+                  <h3 className="mt-1 text-lg font-bold">직원 계정 등급 · 권한분류표</h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-gray-300">
+                    등급마다 접근할 수 있는 영역과 권한 수준(조회 · 변경 · 삭제)이 정해져 있습니다.
+                    등급을 바꾸려면 사유를 남겨야 하고, 그 기록이 아래 변경 이력 대장에 남습니다.
+                  </p>
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-100">
+                    <h3 className="text-base font-semibold text-gray-900">계정 목록</h3>
+                    <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 관리자 계정 원장</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-xs text-gray-500">
+                        <tr>
+                          <th className="px-4 py-2 text-left">계정 ID</th>
+                          <th className="px-4 py-2 text-left">이름</th>
+                          <th className="px-4 py-2 text-left">소속</th>
+                          <th className="px-4 py-2 text-left">등급</th>
+                          <th className="px-4 py-2 text-left">상태</th>
+                          <th className="px-4 py-2 text-left">최종 접속</th>
+                          <th className="px-4 py-2 text-right">등급 변경</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {adminAccounts.length === 0 && (
+                          <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">계정이 없습니다.</td></tr>
+                        )}
+                        {adminAccounts.map((a) => {
+                          const opt = adminRoleOptions.find((o) => o.value === a.role);
+                          return (
+                            <tr key={a.id} className={a.is_active ? '' : 'opacity-45'}>
+                              <td className="px-4 py-2 font-mono text-xs text-gray-900">{a.login_id}</td>
+                              <td className="px-4 py-2 text-xs text-gray-900">{a.name || '-'}</td>
+                              <td className="px-4 py-2 text-xs text-gray-600">{a.role === 'super' ? '대표' : '모바일 지원팀'}</td>
+                              <td className="px-4 py-2">
+                                <span className={`px-2 py-0.5 text-[11px] rounded ${a.role === 'super' ? 'bg-indigo-100 text-indigo-700' : a.role === 'lead' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
+                                  {opt?.label || a.role}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 text-xs text-gray-600">{a.is_active ? '사용 중' : '비활성'}</td>
+                              <td className="px-4 py-2 text-[11px] text-gray-400">{a.last_login_at ? formatDateTime(a.last_login_at) : '-'}</td>
+                              <td className="px-4 py-2 text-right">
+                                <button
+                                  onClick={() => setAdminRoleEdit({ id: a.id, login_id: a.login_id, role: a.role, reason: '' })}
+                                  className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
+                                >
+                                  변경
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-100">
+                    <h3 className="text-base font-semibold text-gray-900">권한분류표</h3>
+                    <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 권한 판정 컨트롤타워 (화면이 표를 만들지 않는다)</p>
+                  </div>
+                  <div className="px-5 py-3 flex flex-wrap gap-3 border-b border-gray-100">
+                    {adminRoleOptions.map((o) => (
+                      <div key={o.value} className="text-[11px] text-gray-600">
+                        <span className="font-semibold text-gray-900">{o.label}</span>
+                        <span className="ml-1.5 text-gray-400">{o.desc}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-xs text-gray-500">
+                        <tr>
+                          <th className="px-4 py-2 text-left">영역</th>
+                          <th className="px-4 py-2 text-left">해당 화면</th>
+                          {adminRoleOptions.map((o) => (
+                            <th key={o.value} className="px-4 py-2 text-center">{o.label}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {adminMatrix.map((row) => (
+                          <tr key={row.key}>
+                            <td className="px-4 py-2 text-xs font-medium text-gray-900">{row.area}</td>
+                            <td className="px-4 py-2 text-[11px] text-gray-500">{row.screens}</td>
+                            {adminRoleOptions.map((o) => {
+                              const lv = row.levels?.[o.value] || 'NONE';
+                              return (
+                                <td key={o.value} className="px-4 py-2 text-center">
+                                  <span className={`inline-block px-2 py-0.5 text-[11px] rounded ${
+                                    lv === 'NONE' ? 'bg-gray-100 text-gray-400'
+                                      : lv === 'R' ? 'bg-sky-50 text-sky-700'
+                                      : lv === 'RW' ? 'bg-emerald-50 text-emerald-700'
+                                      : 'bg-indigo-50 text-indigo-700'}`}>
+                                    {adminLevelLabels[lv] || lv}
+                                  </span>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-100">
+                    <h3 className="text-base font-semibold text-gray-900">접근권한 변경 이력 대장</h3>
+                    <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 감사 로그 (admin_role_changed 외)</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-xs text-gray-500">
+                        <tr>
+                          <th className="px-4 py-2 text-left">일시</th>
+                          <th className="px-4 py-2 text-left">처리자</th>
+                          <th className="px-4 py-2 text-left">대상 계정</th>
+                          <th className="px-4 py-2 text-left">변경</th>
+                          <th className="px-4 py-2 text-left">사유</th>
+                          <th className="px-4 py-2 text-left">접속 IP</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {adminRoleHistory.length === 0 && (
+                          <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-xs">변경 이력이 없습니다.</td></tr>
+                        )}
+                        {adminRoleHistory.map((h) => {
+                          const d = h.details || {};
+                          const beforeLabel = adminRoleOptions.find((o) => o.value === d.before)?.label || d.before || '-';
+                          const afterLabel = adminRoleOptions.find((o) => o.value === d.after)?.label || d.after || '-';
+                          return (
+                            <tr key={h.id}>
+                              <td className="px-4 py-2 text-xs text-gray-500">{formatDateTime(h.created_at)}</td>
+                              <td className="px-4 py-2 text-xs text-gray-900">{h.actor_name || h.actor_login_id || '-'}</td>
+                              <td className="px-4 py-2 font-mono text-xs text-gray-700">{d.login_id || '-'}</td>
+                              <td className="px-4 py-2 text-xs text-gray-700">{beforeLabel} → {afterLabel}</td>
+                              <td className="px-4 py-2 text-xs text-gray-600 max-w-xs truncate">{d.reason || '-'}</td>
+                              <td className="px-4 py-2 font-mono text-[11px] text-gray-500">{h.ip_address || '-'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* ★ 2026-08-19 국외 접근 통제 (전송자격인증 2.2) */}
         {activeTab === 'helpQuestions' && helpQAccessAllowed && (
           <HelpQuestionsTab companies={companies.map((c) => ({ id: c.id, company_name: c.company_name }))} />
@@ -5525,9 +5753,34 @@ const handleApproveRequest = async (id: string) => {
 
         {activeTab === 'geoAccess' && (
           <div className="space-y-6">
+            {/* ★0827 차단 정책 선언 — 심사(2.2)는 "국외 IP 대역을 차단하는 정책"이 화면에서 읽히는지를 본다.
+                판정 로직은 무변경이다. 허용 대역은 그 차단 정책의 예외 목록이지 정책 자체가 아니다. */}
+            <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-white">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <div className="text-[11px] font-semibold tracking-wide text-gray-400">접근제어 정책</div>
+                  <h3 className="mt-1 text-lg font-bold">국외 IP 대역 전면 차단</h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-gray-300">
+                    기본 정책은 <span className="font-semibold text-white">차단</span>입니다.
+                    아래 허용 대역(화이트리스트)에 드는 IP와 관리자가 수동 승인한 예외만 통과하고,
+                    그 밖의 모든 국외 IP는 로그인·세션 발급 단계에서 차단됩니다.
+                  </p>
+                </div>
+                <div className={`shrink-0 rounded-lg px-4 py-2.5 text-center ${geoStatus?.enforced ? 'bg-rose-500/20 border border-rose-400/40' : 'bg-gray-800 border border-gray-700'}`}>
+                  <div className="text-[10px] text-gray-400">정책 시행</div>
+                  <div className={`text-base font-bold ${geoStatus?.enforced ? 'text-rose-300' : 'text-gray-400'}`}>
+                    {geoStatus?.enforced ? '시행 중' : '미시행'}
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-gray-500">
+                    {geoStatus?.enforced ? geoStatus.enforceFrom : '탐지·기록만'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <div className="text-xs text-gray-500">등록된 국내 대역</div>
+                <div className="text-xs text-gray-500">차단 예외 · 허용 대역</div>
                 <div className="mt-1.5 text-2xl font-bold text-gray-900 tabular-nums">
                   {Number(geoStatus?.cidrCount || 0).toLocaleString()}<span className="ml-1 text-sm font-semibold text-gray-400">개</span>
                 </div>
@@ -5536,29 +5789,26 @@ const handleApproveRequest = async (id: string) => {
                 </div>
               </div>
               <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <div className="text-xs text-gray-500">활성 예외 승인</div>
+                <div className="text-xs text-gray-500">차단 예외 · 수동 승인</div>
                 <div className="mt-1.5 text-2xl font-bold text-gray-900 tabular-nums">
                   {Number(geoStatus?.exceptionCount || 0).toLocaleString()}<span className="ml-1 text-sm font-semibold text-gray-400">건</span>
                 </div>
                 <div className="mt-1 text-[11px] text-gray-400">해외 근무자 · 해외 본사 서버</div>
               </div>
-              <div className={`rounded-xl border p-5 ${geoStatus?.enforced ? 'bg-rose-50 border-rose-200' : 'bg-white border-gray-200'}`}>
-                <div className="text-xs text-gray-500">차단 시행</div>
-                <div className={`mt-1.5 text-2xl font-bold ${geoStatus?.enforced ? 'text-rose-700' : 'text-gray-400'}`}>
-                  {geoStatus?.enforced ? '시행 중' : '미시행'}
+              <div className="bg-white rounded-xl border border-gray-200 p-5">
+                <div className="text-xs text-gray-500">차단 시 이용자 안내</div>
+                <div className="mt-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-800">
+                  {geoStatus?.blockNotice || '차단 안내 문구를 불러오지 못했습니다'}
                 </div>
-                <div className="mt-1 text-[11px] text-gray-500 leading-relaxed">
-                  {geoStatus?.enforced
-                    ? `${geoStatus.enforceFrom} 부터 국외 로그인이 차단됩니다`
-                    : '지금은 국외 접속을 기록만 합니다. 시행은 서버 환경변수 GEO_BLOCK_ENFORCE_FROM 으로만 열립니다'}
-                </div>
+                <div className="mt-1 text-[10px] text-gray-400 italic">Data source: 서버 차단 응답 문구</div>
               </div>
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-base font-semibold text-gray-900">국내 대역 등록</h3>
+              <h3 className="text-base font-semibold text-gray-900">차단 예외 대역 등록 (화이트리스트)</h3>
               <p className="mt-1 text-xs text-gray-500 leading-relaxed">
-                등록된 대역에 <span className="font-medium">들지 않는 IP</span>를 국외로 봅니다. 대역이 하나도 없으면 판정 자체를 하지 않습니다(전원 통과).
+                여기 등록한 국내 할당 대역만 차단에서 제외됩니다. <span className="font-medium">등록되지 않은 IP는 전부 차단 대상</span>입니다.
+                대역이 하나도 없으면 판정 자체를 하지 않습니다(전원 통과).
                 줄바꿈·쉼표·공백 어느 것으로 구분해도 됩니다. <span className="font-medium">등록할 때마다 전체가 교체</span>됩니다.
               </p>
               <textarea
@@ -5581,9 +5831,9 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-base font-semibold text-gray-900">예외 승인</h3>
+              <h3 className="text-base font-semibold text-gray-900">관리자 수동 승인 (예외 IP 허용)</h3>
               <p className="mt-1 text-xs text-gray-500 leading-relaxed">
-                해외에서 들어와야 하는 대상을 등록합니다. <span className="font-medium">사유 없이는 등록되지 않습니다</span>. 이 기록이 심사에 내는 예외 승인 대장입니다.
+                차단 정책에서 개별로 빼줄 대상을 등록합니다. <span className="font-medium">사유 없이는 등록되지 않습니다</span>. 이 기록이 심사에 내는 예외 승인 대장입니다.
                 <br />
                 SDK·싱크에이전트는 국가로 막지 않습니다. 해외 본사를 둔 고객사는 <span className="font-medium">회사 API · 회사 에이전트</span> 범위로 그 대역을 등록해주세요.
               </p>
@@ -5674,7 +5924,7 @@ const handleApproveRequest = async (id: string) => {
 
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
-                <h3 className="text-base font-semibold text-gray-900">국외 접근 이력</h3>
+                <h3 className="text-base font-semibold text-gray-900">국외 IP 탐지 · 차단 결과 로그</h3>
                 <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 감사 로그 (foreign_access_detected · foreign_access_blocked)</p>
               </div>
               <div className="overflow-x-auto">
@@ -5717,15 +5967,42 @@ const handleApproveRequest = async (id: string) => {
         {/* 요금제 관리 탭 */}
         {activeTab === 'spamBlock' && (
           <div className="space-y-6">
+            {/* ★0827 차단 체계 선언 — 심사(5.2)는 "발송 요청 시 자동 차단"이 화면에서 읽히는지를 본다. */}
+            <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-white">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <div className="text-[11px] font-semibold tracking-wide text-gray-400">발송 요청 필터링 정책</div>
+                  <h3 className="mt-1 text-lg font-bold">금칙어 · 악성 URL 자동 차단</h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-gray-300">
+                    모든 발송 요청은 큐에 적재되기 전에 차단정보와 대조합니다.
+                    등록된 조합에 걸린 문안은 <span className="font-semibold text-white">발송이 중지</span>되고
+                    발송자에게 안내가 표시되며, 그 사실이 차단 결과 로그에 남습니다.
+                  </p>
+                </div>
+                <div className="shrink-0 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-center">
+                  <div className="text-[10px] text-gray-400">등록된 차단정보</div>
+                  <div className="text-base font-bold text-white tabular-nums">{spamRules.length}<span className="ml-0.5 text-xs font-semibold text-gray-400">건</span></div>
+                  <div className="mt-0.5 text-[10px] text-gray-500">전 발송 경로 적용</div>
+                </div>
+              </div>
+              {spamBlockNotice && (
+                <div className="mt-4 rounded-lg border border-rose-400/40 bg-rose-500/15 px-4 py-3">
+                  <div className="text-[10px] font-semibold text-rose-300">차단 시 발송자에게 표시되는 안내</div>
+                  <p className="mt-1 text-xs leading-relaxed text-rose-100">{spamBlockNotice}</p>
+                  <div className="mt-1 text-[10px] text-gray-500 italic">Data source: 서버 차단 응답 문구</div>
+                </div>
+              )}
+            </div>
+
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-base font-semibold text-gray-900">차단정보 등록</h3>
               <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                요소 <span className="font-medium">2~5개의 조합</span>으로 만듭니다. 요소가 <span className="font-medium">전부 맞을 때만</span> 걸립니다.
+                키워드 · URL · 전화번호를 <span className="font-medium">2~5개 조합</span>으로 만듭니다. 요소가 <span className="font-medium">전부 맞을 때만</span> 걸립니다.
                 단일 키워드는 정상 문자를 막기 때문에 등록되지 않습니다.
               </p>
               <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-                이 체계는 <span className="font-medium text-gray-700">탐지만 합니다. 발송을 막지 않습니다.</span>
-                걸린 문안은 아래 탐지 이력에 기록되고 문자는 그대로 나갑니다.
+                등록 전에 <span className="font-medium text-gray-700">최근 발송 문안으로 오탐을 먼저 확인</span>하세요.
+                정상 문안이 걸리는 조합을 등록하면 그 고객사의 발송이 실제로 멈춥니다.
               </p>
 
               <div className="mt-4 space-y-3">
@@ -5764,7 +6041,7 @@ const handleApproveRequest = async (id: string) => {
                   </button>
                   <button type="button" onClick={handleSpamCreate} disabled={spamBusy || spamElementsPayload().length < 2}
                     className="px-4 py-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg">
-                    탐지 전용으로 등록
+                    차단정보 등록
                   </button>
                 </div>
 
@@ -5805,7 +6082,7 @@ const handleApproveRequest = async (id: string) => {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {spamRules.length === 0 && (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">등록된 차단정보가 없습니다. 규칙이 없으면 발송은 그대로 나갑니다.</td></tr>
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">등록된 차단정보가 없습니다. 차단정보가 없으면 발송은 그대로 나갑니다.</td></tr>
                     )}
                     {spamRules.map((r) => (
                       <tr key={r.id}>
@@ -5822,7 +6099,9 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-2 text-xs text-gray-500">{r.source}</td>
                         <td className="px-4 py-2 text-right text-xs text-gray-700">{r.hit_count}</td>
                         <td className="px-4 py-2">
-                          <span className="px-2 py-0.5 text-[11px] rounded bg-gray-100 text-gray-600">탐지만 (발송됨)</span>
+                          <span className={`px-2 py-0.5 text-[11px] rounded ${r.is_active ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-500'}`}>
+                            {r.is_active ? '발송 차단' : '중지됨'}
+                          </span>
                         </td>
                       </tr>
                     ))}
@@ -5833,8 +6112,8 @@ const handleApproveRequest = async (id: string) => {
 
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
-                <h3 className="text-base font-semibold text-gray-900">탐지 이력</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 금칙어 탐지 로그</p>
+                <h3 className="text-base font-semibold text-gray-900">탐지 · 차단 결과 로그</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 금칙어 탐지 로그 (spam_block_hits)</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -5860,7 +6139,9 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-2 text-xs text-gray-700">{h.company_name || '-'}</td>
                         <td className="px-4 py-2 text-xs text-gray-500">{h.send_source || '-'}</td>
                         <td className="px-4 py-2">
-                          <span className="px-2 py-0.5 text-[11px] rounded bg-gray-100 text-gray-600">탐지만</span>
+                          <span className={`px-2 py-0.5 text-[11px] rounded ${h.action_taken === 'block' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {h.action_taken === 'block' ? '발송 차단' : '탐지'}
+                          </span>
                         </td>
                         <td className="px-4 py-2 text-right text-xs text-gray-700">{h.affected_rows}</td>
                         <td className="px-4 py-2 text-xs text-gray-500 max-w-xs truncate">{h.content_sample}</td>
@@ -7132,6 +7413,58 @@ const handleApproveRequest = async (id: string) => {
       )}
 
       {/* ★ D130: 레거시 발신 프로필 등록 모달(Sender Key 수동 입력) 제거됨 — AlimtalkSendersSection의 SenderRegistrationWizard로 대체 */}
+
+      {/* ★ 2026-08-27 등급 변경 모달 — 사유 없이는 저장되지 않는다(전송자격인증 3.3 변경 이력 및 사유) */}
+      {adminRoleEdit && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold">등급 변경</h3>
+                <p className="text-xs text-gray-500 font-mono">{adminRoleEdit.login_id}</p>
+              </div>
+              <button onClick={() => setAdminRoleEdit(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">등급</label>
+                <select
+                  value={adminRoleEdit.role}
+                  onChange={(e) => setAdminRoleEdit({ ...adminRoleEdit, role: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
+                >
+                  {adminRoleOptions.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1.5 text-[11px] text-gray-500 leading-relaxed">
+                  {adminRoleOptions.find((o) => o.value === adminRoleEdit.role)?.desc || ''}
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">변경 사유 (필수)</label>
+                <input
+                  value={adminRoleEdit.reason}
+                  onChange={(e) => setAdminRoleEdit({ ...adminRoleEdit, reason: e.target.value })}
+                  placeholder="예: 지원팀장 승진에 따른 권한 조정"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+                <p className="mt-1.5 text-[11px] text-gray-400">이 사유가 접근권한 변경 이력 대장에 그대로 남습니다.</p>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t flex justify-end gap-2">
+              <button onClick={() => setAdminRoleEdit(null)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">취소</button>
+              <button
+                onClick={handleAdminRoleSave}
+                disabled={adminRoleBusy || !adminRoleEdit.reason.trim()}
+                className="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40"
+              >
+                {adminRoleBusy ? '저장 중...' : '변경 저장'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 템플릿 상세 모달 — 고객사 업로드 템플릿 정보 확인 (발송/승인 내용·반려 사유) */}
       {templateDetail && (

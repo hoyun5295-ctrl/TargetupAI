@@ -30,6 +30,14 @@ export type OriginCountry = 'domestic' | 'foreign' | 'unknown';
 export type OriginDecision = 'allow' | 'record' | 'block';
 
 /**
+ * 차단 시 이용자에게 나가는 안내 문구 — **이 상수가 유일한 원본이다.**
+ * 로그인 응답(session-manager)과 관리자 화면 현황(geo/status)이 같은 값을 쓴다.
+ * 화면에 문구를 복사해 두면 둘이 갈라지고, 심사에 내는 안내 화면이 실제와 달라진다.
+ */
+export const GEO_BLOCK_NOTICE =
+  '국내에서만 접속할 수 있습니다. 해외에서 사용해야 한다면 담당자에게 예외 등록을 요청해주세요.';
+
+/**
  * 시행일 스위치.
  * ⚠ 미설정 = 미시행이 기본값이다. `GEO_BLOCK_ENFORCE_FROM=2026-10-01`을 넣는 순간 시행되고,
  *   되돌리려면 그 값을 지운다. 값이 날짜가 아니면 미시행이다 — 오타로 전 고객을 막지 않는다.
@@ -333,9 +341,7 @@ export async function guardHumanOriginEarly(
        VALUES (gen_random_uuid(), $1, 'foreign_access_blocked', 'user', $1, $2, $3, $4, NOW())`,
       [userId, JSON.stringify({ stage: 'pre_auth_effect' }), req.ip, req.headers['user-agent'] || '']
     ).catch(() => {});
-    res.status(403).json({
-      error: '국내에서만 접속할 수 있습니다. 해외에서 사용해야 한다면 담당자에게 예외 등록을 요청해주세요.',
-    });
+    res.status(403).json({ error: GEO_BLOCK_NOTICE });
     return false;
   } catch (err: any) {
     console.error('[geo-access] 선차단 판정 실패 — 통과시킨다:', err?.message || err);
