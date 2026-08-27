@@ -51,12 +51,54 @@ export async function isBlocked(ipAddress: string, loginId: string): Promise<Act
  * audit_logs(login_fail)는 호출 측(auth.ts)이 이미 INSERT한 직후에 호출하는 전제.
  * 이 함수는 카운트만 수행 + 차단 INSERT.
  */
-export async function recordFailureAndMaybeBlock(ipAddress: string, loginId: string): Promise<{ blocked: boolean }> {
-  if (!ipAddress || !loginId) return { blocked: false };
+/**
+ * 로그인 실패 결과. (★2026-08-27 전송자격인증 3.4 「로그인 횟수 제한 경고 및 차단」)
+ * ⛔ 경고 문구를 호출부에서 만들지 않는다. 임계값(5회)과 차단 시간(30분)은 이 파일이 소유하고,
+ *   호출부가 그 숫자를 다시 쓰면 임계값이 두 곳이 되어 한쪽만 바뀌는 날이 온다.
+ */
+export interface FailureOutcome {
+  blocked: boolean;
+  /** 윈도우 내 누적 실패 횟수 */
+  failCount: number;
+  /** 차단까지 남은 실패 횟수. 차단됐으면 0 */
+  remainingAttempts: number;
+  /** 차단이 임박했을 때만 값이 있다. 호출부가 자기 실패 문구 뒤에 붙인다 */
+  warning: string | null;
+  /** 이번 실패로 차단됐을 때의 안내. 그 밖에는 null */
+  blockedMessage: string | null;
+}
+
+/** 차단이 몇 회 남았을 때부터 경고를 보여줄지. 매번 알리면 공격자에게 진행 상황을 알려주는 셈이 된다 */
+const WARN_WHEN_REMAINING_AT_MOST = 2;
+
+function buildOutcome(failCount: number, blocked: boolean): FailureOutcome {
+  const remaining = Math.max(0, FAIL_THRESHOLD - failCount);
+  if (blocked) {
+    return {
+      blocked: true,
+      failCount,
+      remainingAttempts: 0,
+      warning: null,
+      blockedMessage: `로그인 시도 ${FAIL_THRESHOLD}회 초과로 ${BLOCK_DURATION_MIN}분간 접속이 제한되었습니다. ${BLOCK_DURATION_MIN}분 후 자동 해제되며, 그 전에 이용하시려면 관리자에게 문의해주세요.`,
+    };
+  }
+  return {
+    blocked: false,
+    failCount,
+    remainingAttempts: remaining,
+    warning: remaining > 0 && remaining <= WARN_WHEN_REMAINING_AT_MOST
+      ? `${remaining}회 더 실패하면 ${BLOCK_DURATION_MIN}분간 접속이 제한됩니다.`
+      : null,
+    blockedMessage: null,
+  };
+}
+
+export async function recordFailureAndMaybeBlock(ipAddress: string, loginId: string): Promise<FailureOutcome> {
+  if (!ipAddress || !loginId) return buildOutcome(0, false);
 
   // 이미 차단 중이면 추가 INSERT 안 함 (멱등성)
   const existing = await isBlocked(ipAddress, loginId);
-  if (existing) return { blocked: true };
+  if (existing) return buildOutcome(existing.fail_count || FAIL_THRESHOLD, true);
 
   // 최근 윈도우 내 동일 (ip, loginId) login_fail 카운트
   const countResult = await query(
@@ -70,7 +112,7 @@ export async function recordFailureAndMaybeBlock(ipAddress: string, loginId: str
   );
   const failCount = Number(countResult.rows[0]?.cnt || 0);
 
-  if (failCount < FAIL_THRESHOLD) return { blocked: false };
+  if (failCount < FAIL_THRESHOLD) return buildOutcome(failCount, false);
 
   // 차단 INSERT
   await query(
@@ -79,7 +121,7 @@ export async function recordFailureAndMaybeBlock(ipAddress: string, loginId: str
     [ipAddress, loginId, String(BLOCK_DURATION_MIN), AUTO_REASON, failCount]
   );
   console.log(`[login-block] AUTO BLOCK ip=${ipAddress} loginId=${loginId} failCount=${failCount}`);
-  return { blocked: true };
+  return buildOutcome(failCount, true);
 }
 
 /**

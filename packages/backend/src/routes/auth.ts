@@ -86,8 +86,11 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
            VALUES (gen_random_uuid(), 'login_fail', 'super_admin', $1, $2, $3, NOW())`,
           [JSON.stringify({ loginId, reason: 'user_not_found' }), req.ip, req.headers['user-agent'] || '']
         );
-        await recordFailureAndMaybeBlock(ipForBlock, loginId);
-        return res.status(401).json({ error: 'Invalid credentials' });
+        // ★0827 경고·차단 문구는 CT가 소유한다(전송자격인증 3.4). 임계값을 여기서 다시 쓰지 않는다.
+        const fail = await recordFailureAndMaybeBlock(ipForBlock, loginId);
+        return res.status(401).json({
+          error: fail.blockedMessage || ['아이디 또는 비밀번호가 일치하지 않습니다.', fail.warning].filter(Boolean).join(' '),
+        });
       }
 
       const admin = result.rows[0];
@@ -99,8 +102,11 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
            VALUES (gen_random_uuid(), $1, 'login_fail', 'super_admin', $2, $3, $4, NOW())`,
           [admin.id, JSON.stringify({ loginId, reason: 'invalid_password' }), req.ip, req.headers['user-agent'] || '']
         );
-        await recordFailureAndMaybeBlock(ipForBlock, loginId);
-        return res.status(401).json({ error: 'Invalid credentials' });
+        // ★0827 경고·차단 문구는 CT가 소유한다(전송자격인증 3.4). 임계값을 여기서 다시 쓰지 않는다.
+        const fail = await recordFailureAndMaybeBlock(ipForBlock, loginId);
+        return res.status(401).json({
+          error: fail.blockedMessage || ['아이디 또는 비밀번호가 일치하지 않습니다.', fail.warning].filter(Boolean).join(' '),
+        });
       }
 
       // ★ 2026-05-11: 슈퍼관리자 2FA(TOTP) 게이트 — utils/totp.ts CT
@@ -152,8 +158,11 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
            VALUES (gen_random_uuid(), $1, 'login_fail', 'super_admin', $2, $3, $4, NOW())`,
           [admin.id, JSON.stringify({ loginId, reason: 'invalid_totp' }), req.ip, req.headers['user-agent'] || '']
         );
-        await recordFailureAndMaybeBlock(ipForBlock, loginId);
-        return res.status(401).json({ error: 'OTP 코드가 일치하지 않습니다.', needTotp: true });
+        const totpFail = await recordFailureAndMaybeBlock(ipForBlock, loginId);
+        return res.status(401).json({
+          error: totpFail.blockedMessage || ['OTP 번호가 일치하지 않습니다.', totpFail.warning].filter(Boolean).join(' '),
+          needTotp: !totpFail.blocked,
+        });
       }
       if (usedBackup) {
         await query(
@@ -263,8 +272,11 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
          VALUES (gen_random_uuid(), 'login_fail', 'user', $1, $2, $3, NOW())`,
         [JSON.stringify({ loginId, reason: 'user_not_found' }), req.ip, req.headers['user-agent'] || '']
       );
-      await recordFailureAndMaybeBlock(ipForBlock, loginId);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      // ★0827 경고·차단 문구는 CT가 소유한다(전송자격인증 3.4). 임계값을 여기서 다시 쓰지 않는다.
+      const fail = await recordFailureAndMaybeBlock(ipForBlock, loginId);
+      return res.status(401).json({
+        error: fail.blockedMessage || ['아이디 또는 비밀번호가 일치하지 않습니다.', fail.warning].filter(Boolean).join(' '),
+      });
     }
 
     const user = result.rows[0];
@@ -319,8 +331,11 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
          VALUES (gen_random_uuid(), $1, 'login_fail', 'user', $2, $3, $4, NOW())`,
         [user.id, JSON.stringify({ loginId, reason: 'invalid_password', companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
       );
-      await recordFailureAndMaybeBlock(ipForBlock, loginId);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      // ★0827 경고·차단 문구는 CT가 소유한다(전송자격인증 3.4). 임계값을 여기서 다시 쓰지 않는다.
+      const fail = await recordFailureAndMaybeBlock(ipForBlock, loginId);
+      return res.status(401).json({
+        error: fail.blockedMessage || ['아이디 또는 비밀번호가 일치하지 않습니다.', fail.warning].filter(Boolean).join(' '),
+      });
     }
 
     // ===== 고객사 관리자 전용 접속 체크 =====
