@@ -8,7 +8,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
 import type { PoolClient } from 'pg';
 import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/auth';
-import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
+import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, canDelete, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
 import { insertCuratedSeeds, listCuratedSeeds, listCuratedSeedCounts, deleteCuratedSeed, saveCuratedSeedOne, updateCuratedSeed, SeedGateFail } from '../utils/copy-seed-curator';
@@ -1221,6 +1221,113 @@ router.patch('/admin-accounts/:id/role', authenticate, requireSuperAdmin, requir
   } catch (error: any) {
     console.error('관리자 등급 변경 실패:', error);
     return res.status(500).json({ error: '관리자 등급 변경 실패' });
+  }
+});
+
+/**
+ * 직원 계정 생성 — 3.2 「계정 목록」·3.3 「계정 생성 로그」의 원천.
+ * ⛔ 초기 비밀번호는 **해시만** 저장하고 감사 로그 details에 어떤 형태로도 넣지 않는다(감사 로그는 열람 대상이다).
+ * ⛔ `must_change_password = true`로 만든다 — 만든 사람이 아는 비밀번호로 계속 쓰게 두지 않는다.
+ */
+router.post('/admin-accounts', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const myRole = await fetchAdminRole(req.user?.userId);
+    if (!canWrite(myRole, 'adminAccounts')) {
+      return res.status(403).json({ error: '계정 생성은 대표 등급에서만 가능합니다.' });
+    }
+    const loginId = String(req.body?.loginId || '').trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,50}$/.test(loginId)) {
+      return res.status(400).json({ error: '아이디는 영문 소문자·숫자·밑줄 3~50자입니다.' });
+    }
+    const name = String(req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ error: '이름을 입력해주세요.' });
+    const email = String(req.body?.email || '').trim() || null;
+    const role = String(req.body?.role || '').trim().toLowerCase();
+    if (!(ADMIN_ROLES as string[]).includes(role)) {
+      return res.status(400).json({ error: '알 수 없는 등급입니다.' });
+    }
+    const password = String(req.body?.password || '');
+    if (password.length < 10) {
+      return res.status(400).json({ error: '초기 비밀번호는 10자 이상이어야 합니다.' });
+    }
+
+    const dup = await query('SELECT id FROM super_admins WHERE LOWER(login_id) = $1', [loginId]);
+    if (dup.rows.length > 0) {
+      return res.status(400).json({ error: '이미 있는 아이디입니다.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const created = await query(
+      `INSERT INTO super_admins (id, login_id, password_hash, name, email, role, is_active, must_change_password, created_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, true, true, NOW())
+       RETURNING id`,
+      [loginId, passwordHash, name, email, role]
+    );
+    await recordAuditLog({
+      actorUserId: req.user?.userId || null,
+      action: 'admin_account_created',
+      targetType: 'super_admin',
+      targetId: created.rows[0].id,
+      details: { login_id: loginId, name, role, reason: String(req.body?.reason || '').trim() || '신규 직원 계정 발급' },
+      req,
+    });
+    // 최초 로그인에서 OTP 등록 화면이 자동으로 뜬다(totp_enabled 미설정) — 별도 안내가 필요하다
+    return res.json({ success: true, id: created.rows[0].id });
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요: super_admins ALTER 실행 요청 (must_change_password)',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('관리자 계정 생성 실패:', error);
+    return res.status(500).json({ error: '관리자 계정 생성 실패' });
+  }
+});
+
+/** 직원 계정 사용 중지·재개 — 3.3 「계정 삭제 로그」. 행을 지우지 않는다(지우면 심사에 낼 이력이 사라진다) */
+router.patch('/admin-accounts/:id/active', authenticate, requireSuperAdmin, requireUuidId, async (req: Request, res: Response) => {
+  try {
+    const myRole = await fetchAdminRole(req.user?.userId);
+    if (!canDelete(myRole, 'adminAccounts')) {
+      return res.status(403).json({ error: '계정 사용 중지는 대표 등급에서만 가능합니다.' });
+    }
+    const { id } = req.params;
+    const nextActive = req.body?.isActive === true;
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: '사유를 입력해주세요.' });
+    if (id === req.user?.userId && !nextActive) {
+      return res.status(400).json({ error: '자기 계정은 중지할 수 없습니다.' });
+    }
+
+    const before = await query('SELECT login_id, name, role, is_active FROM super_admins WHERE id = $1', [id]);
+    if (before.rows.length === 0) return res.status(404).json({ error: '계정을 찾을 수 없습니다.' });
+
+    // ⛔ 마지막 활성 대표를 중지하면 관리자 계정 화면에 아무도 못 들어간다(복구는 DB 직접 수정뿐)
+    if (!nextActive && normalizeAdminRole(before.rows[0].role) === 'super') {
+      const supers = await query(
+        `SELECT COUNT(*)::int AS n FROM super_admins WHERE is_active = true AND LOWER(COALESCE(role,'')) = 'super' AND id <> $1`,
+        [id]
+      );
+      if ((supers.rows[0]?.n || 0) === 0) {
+        return res.status(400).json({ error: '마지막 대표 등급 계정은 중지할 수 없습니다.' });
+      }
+    }
+
+    await query('UPDATE super_admins SET is_active = $1 WHERE id = $2', [nextActive, id]);
+    await recordAuditLog({
+      actorUserId: req.user?.userId || null,
+      action: nextActive ? 'admin_account_enabled' : 'admin_account_disabled',
+      targetType: 'super_admin',
+      targetId: id,
+      details: { login_id: before.rows[0].login_id, name: before.rows[0].name, reason },
+      req,
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('관리자 계정 상태 변경 실패:', error);
+    return res.status(500).json({ error: '관리자 계정 상태 변경 실패' });
   }
 });
 

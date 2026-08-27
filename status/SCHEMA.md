@@ -1358,10 +1358,17 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | password_hash | varchar(255) |
 | name | varchar(100) |
 | email | varchar(100) |
-| role | varchar(20) |
+| role | varchar(20) — ★2026-08-27부터 등급 축(`super`·`lead`·`support`). 판정 = `utils/admin-role.ts`. 모르는 값·NULL은 최저(`support`)로 접힌다 |
 | is_active | boolean |
 | created_at | timestamp |
 | last_login_at | timestamp |
+| phone | varchar |
+| can_access_hanjullo | boolean — ⚠ 2026-08-27 실측 소비처 0건(죽은 컬럼) |
+| can_access_flyer | boolean — ⚠ 2026-08-27 실측 소비처 0건(죽은 컬럼) |
+| totp_secret | varchar |
+| totp_enabled | boolean — false·NULL이면 최초 로그인에서 QR 등록 화면이 자동으로 뜬다 |
+| backup_codes | jsonb |
+| must_change_password | boolean NOT NULL DEFAULT false **(2026-08-27 ALTER 실행완료)** — true면 세션을 발급하지 않고 변경 전용 단명 토큰만 준다(`rotateUserSession`). 컬럼 부재 시 코드가 강제를 건너뛴다 |
 
 ### test_contacts (테스트 연락처)
 | 컬럼 | 타입 |

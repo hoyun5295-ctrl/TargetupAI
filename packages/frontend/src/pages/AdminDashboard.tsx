@@ -100,6 +100,8 @@ export default function AdminDashboard() {
   const [adminLevelLabels, setAdminLevelLabels] = useState<Record<string, string>>({});
   const [adminRoleHistory, setAdminRoleHistory] = useState<any[]>([]);
   const [adminRoleEdit, setAdminRoleEdit] = useState<{ id: string; login_id: string; role: string; reason: string } | null>(null);
+  const [adminCreate, setAdminCreate] = useState<{ loginId: string; name: string; email: string; role: string; password: string; reason: string } | null>(null);
+  const [adminActiveEdit, setAdminActiveEdit] = useState<{ id: string; login_id: string; isActive: boolean; reason: string } | null>(null);
   const [adminRoleBusy, setAdminRoleBusy] = useState(false);
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
@@ -330,6 +332,42 @@ export default function AdminDashboard() {
       const data = await res.json().catch(() => ({} as any));
       if (!res.ok) { showAlert('오류', data?.error || '등급 변경에 실패했습니다.', 'error'); return; }
       setAdminRoleEdit(null);
+      await loadAdminAccounts();
+    } finally { setAdminRoleBusy(false); }
+  };
+
+  const handleAdminCreate = async () => {
+    if (!adminCreate) return;
+    setAdminRoleBusy(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/admin-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(adminCreate),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) { showAlert('오류', data?.error || '계정 생성에 실패했습니다.', 'error'); return; }
+      setAdminCreate(null);
+      await loadAdminAccounts();
+      showAlert('완료', '계정을 만들었습니다.\n최초 로그인에서 OTP 등록 화면이 뜨고, 그 다음 비밀번호를 바꿔야 들어갈 수 있습니다.', 'success');
+    } finally { setAdminRoleBusy(false); }
+  };
+
+  const handleAdminActiveSave = async () => {
+    if (!adminActiveEdit) return;
+    if (!adminActiveEdit.reason.trim()) { showAlert('확인', '사유를 입력해주세요.', 'error'); return; }
+    setAdminRoleBusy(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/admin-accounts/${adminActiveEdit.id}/active`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ isActive: adminActiveEdit.isActive, reason: adminActiveEdit.reason.trim() }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) { showAlert('오류', data?.error || '상태 변경에 실패했습니다.', 'error'); return; }
+      setAdminActiveEdit(null);
       await loadAdminAccounts();
     } finally { setAdminRoleBusy(false); }
   };
@@ -5607,9 +5645,17 @@ const handleApproveRequest = async (id: string) => {
                 </div>
 
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="px-5 py-3 border-b border-gray-100">
-                    <h3 className="text-base font-semibold text-gray-900">계정 목록</h3>
-                    <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 관리자 계정 원장</p>
+                  <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-gray-900">계정 목록</h3>
+                      <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 관리자 계정 원장</p>
+                    </div>
+                    <button
+                      onClick={() => setAdminCreate({ loginId: '', name: '', email: '', role: 'support', password: '', reason: '' })}
+                      className="px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+                    >
+                      계정 추가
+                    </button>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -5642,12 +5688,18 @@ const handleApproveRequest = async (id: string) => {
                               </td>
                               <td className="px-4 py-2 text-xs text-gray-600">{a.is_active ? '사용 중' : '비활성'}</td>
                               <td className="px-4 py-2 text-[11px] text-gray-400">{a.last_login_at ? formatDateTime(a.last_login_at) : '-'}</td>
-                              <td className="px-4 py-2 text-right">
+                              <td className="px-4 py-2 text-right whitespace-nowrap">
                                 <button
                                   onClick={() => setAdminRoleEdit({ id: a.id, login_id: a.login_id, role: a.role, reason: '' })}
                                   className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
                                 >
-                                  변경
+                                  등급
+                                </button>
+                                <button
+                                  onClick={() => setAdminActiveEdit({ id: a.id, login_id: a.login_id, isActive: !a.is_active, reason: '' })}
+                                  className="ml-1.5 px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
+                                >
+                                  {a.is_active ? '중지' : '재개'}
                                 </button>
                               </td>
                             </tr>
@@ -7425,6 +7477,130 @@ const handleApproveRequest = async (id: string) => {
       )}
 
       {/* ★ D130: 레거시 발신 프로필 등록 모달(Sender Key 수동 입력) 제거됨 — AlimtalkSendersSection의 SenderRegistrationWizard로 대체 */}
+
+      {/* ★ 2026-08-27 계정 생성 모달 — 초기 비밀번호는 이 화면에서만 다루고 어디에도 남기지 않는다 */}
+      {adminCreate && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b flex justify-between items-center flex-shrink-0">
+              <div>
+                <h3 className="text-lg font-bold">직원 계정 추가</h3>
+                <p className="text-xs text-gray-500">최초 로그인에서 OTP 등록과 비밀번호 변경을 거칩니다</p>
+              </div>
+              <button onClick={() => setAdminCreate(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div className="p-6 space-y-3.5 overflow-auto">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">아이디</label>
+                <input
+                  value={adminCreate.loginId}
+                  onChange={(e) => setAdminCreate({ ...adminCreate, loginId: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') })}
+                  placeholder="suran"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg font-mono outline-none focus:border-indigo-500"
+                />
+                <p className="mt-1 text-[11px] text-gray-400">영문 소문자·숫자·밑줄 3~50자. 로그를 사람 단위로 남기려면 공용 아이디를 쓰지 않습니다.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">이름</label>
+                  <input
+                    value={adminCreate.name}
+                    onChange={(e) => setAdminCreate({ ...adminCreate, name: e.target.value })}
+                    placeholder="서수란"
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">등급</label>
+                  <select
+                    value={adminCreate.role}
+                    onChange={(e) => setAdminCreate({ ...adminCreate, role: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
+                  >
+                    {adminRoleOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">이메일 (선택)</label>
+                <input
+                  value={adminCreate.email}
+                  onChange={(e) => setAdminCreate({ ...adminCreate, email: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">초기 비밀번호</label>
+                <input
+                  type="password"
+                  value={adminCreate.password}
+                  onChange={(e) => setAdminCreate({ ...adminCreate, password: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+                <p className="mt-1 text-[11px] text-gray-400">10자 이상. 본인이 첫 로그인에서 반드시 바꿉니다.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">발급 사유 (선택)</label>
+                <input
+                  value={adminCreate.reason}
+                  onChange={(e) => setAdminCreate({ ...adminCreate, reason: e.target.value })}
+                  placeholder="예: 지원팀장 개인 계정 발급"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t flex justify-end gap-2 flex-shrink-0">
+              <button onClick={() => setAdminCreate(null)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">취소</button>
+              <button
+                onClick={handleAdminCreate}
+                disabled={adminRoleBusy || !adminCreate.loginId.trim() || !adminCreate.name.trim() || adminCreate.password.length < 10}
+                className="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40"
+              >
+                {adminRoleBusy ? '만드는 중...' : '계정 만들기'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 2026-08-27 사용 중지·재개 모달 — 행을 지우지 않는다(지우면 심사에 낼 이력이 사라진다) */}
+      {adminActiveEdit && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold">{adminActiveEdit.isActive ? '계정 사용 재개' : '계정 사용 중지'}</h3>
+                <p className="text-xs text-gray-500 font-mono">{adminActiveEdit.login_id}</p>
+              </div>
+              <button onClick={() => setAdminActiveEdit(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-xs text-gray-500 leading-relaxed">
+                계정 행은 지우지 않고 사용만 막습니다. 지우면 그 계정이 남긴 기록의 주인이 사라져 심사에 낼 이력이 끊깁니다.
+              </p>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">사유 (필수)</label>
+                <input
+                  value={adminActiveEdit.reason}
+                  onChange={(e) => setAdminActiveEdit({ ...adminActiveEdit, reason: e.target.value })}
+                  placeholder="예: 공용 계정 폐지 · 개인 계정으로 전환"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t flex justify-end gap-2">
+              <button onClick={() => setAdminActiveEdit(null)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">취소</button>
+              <button
+                onClick={handleAdminActiveSave}
+                disabled={adminRoleBusy || !adminActiveEdit.reason.trim()}
+                className={`px-4 py-2 text-sm font-semibold text-white rounded-lg disabled:opacity-40 ${adminActiveEdit.isActive ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}
+              >
+                {adminRoleBusy ? '저장 중...' : adminActiveEdit.isActive ? '사용 재개' : '사용 중지'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ★ 2026-08-27 등급 변경 모달 — 사유 없이는 저장되지 않는다(전송자격인증 3.3 변경 이력 및 사유) */}
       {adminRoleEdit && (

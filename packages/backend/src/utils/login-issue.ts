@@ -73,6 +73,14 @@ export async function issueUserLogin(params: {
     return { status: 'conflict', conflict: rotate.conflict };
   }
 
+  // ★ 2026-08-27 이 경로는 고객사 사용자(appSource !== 'super')라 여기까지 오지 않는다.
+  //   그래도 열어 두지 않는다 — 나중에 이 헬퍼를 슈퍼관리자에 재사용하면 조용히 통과해 버린다.
+  //   세션은 이미 회전됐으므로 통과가 아니라 오류로 접는다.
+  if (rotate.status === 'password_change_required') {
+    console.error('[login-issue] 고객사 경로에서 비밀번호 변경 요구가 나왔다 — 배선을 확인해야 한다');
+    throw new Error('PASSWORD_CHANGE_REQUIRED_ON_USER_PATH');
+  }
+
   if (rotate.takeover) {
     await query(
       `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)

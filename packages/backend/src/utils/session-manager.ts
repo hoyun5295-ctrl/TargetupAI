@@ -147,7 +147,13 @@ export type RotateOutcome =
   | { status: 'rotated'; takeover: boolean }
   | { status: 'conflict'; conflict: SessionConflict }
   /** 국외 접근 차단 — 세션을 만들지 않았다(전송자격인증 2.2) */
-  | { status: 'geo_blocked'; message: string };
+  | { status: 'geo_blocked'; message: string }
+  /**
+   * 초기 비밀번호를 아직 바꾸지 않았다 — 세션을 만들지 않았다(전송자격인증 3.2·3.3).
+   * ⛔ JWT를 주고 화면에서 가리는 방식은 통제가 아니다(그 토큰으로 다른 API를 부를 수 있다).
+   *    변경 전용 단명 토큰만 준다.
+   */
+  | { status: 'password_change_required'; changeToken: string; loginId: string };
 
 /**
  * 유휴 임계(분) — 이보다 오래 활동이 없는 세션은 "접속 중"으로 보지 않는다.
@@ -240,6 +246,66 @@ function ticketSecret(): string {
   return secret;
 }
 
+const PASSWORD_CHANGE_PURPOSE = 'super_password_change';
+/** 변경 토큰 수명(초) — 로그인 직후 한 화면에서 쓰고 버린다. 길게 두면 그 자체가 우회 창이 된다 */
+const PASSWORD_CHANGE_TTL_SECONDS = 600;
+
+/**
+ * 초기 비밀번호 변경 전용 단명 토큰. (★2026-08-27 전송자격인증 3.2·3.3)
+ * ★ `userId`가 아니라 `puid`로 넣는다 — 미들웨어 가드가 뚫려도 `req.user`가 채워지지 않게 한다
+ *   (인계 티켓과 같은 규율). 이 토큰으로는 비밀번호 변경 말고 아무것도 못 한다.
+ */
+export function signPasswordChangeToken(userId: string): string {
+  return jwt.sign(
+    { purpose: PASSWORD_CHANGE_PURPOSE, puid: userId },
+    ticketSecret(),
+    { expiresIn: PASSWORD_CHANGE_TTL_SECONDS }
+  );
+}
+
+/** 변경 토큰 검증 — 통과하면 그 계정 id를 돌려준다. 그 밖은 전부 null(닫힘) */
+export function verifyPasswordChangeToken(token: any): string | null {
+  if (!token || typeof token !== 'string') return null;
+  try {
+    const decoded = jwt.verify(token, ticketSecret()) as any;
+    if (decoded?.purpose !== PASSWORD_CHANGE_PURPOSE) return null;
+    return typeof decoded?.puid === 'string' && decoded.puid ? decoded.puid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 이 슈퍼관리자가 초기 비밀번호를 아직 안 바꿨는가.
+ *
+ * ⛔ **컬럼이 없으면 강제하지 않는다.** `must_change_password`는 0827 ALTER로 생긴 컬럼이라,
+ *   코드가 먼저 나간 인스턴스에서 42703이 나면 전 슈퍼관리자가 로그인 불가가 된다.
+ *   통제를 위해 서비스를 세우지 않는다 — 없으면 통과시키고 로그만 남긴다.
+ * ⚠ 조회 실패도 통과다. 이 게이트가 fail-closed면 DB가 흔들릴 때 아무도 못 들어온다.
+ *   막는 힘은 이 컬럼이 아니라 **비밀번호를 아는 사람만 여기까지 온다**는 앞 단계가 갖는다.
+ */
+async function mustChangeSuperAdminPassword(userId: string): Promise<{ required: boolean; loginId: string }> {
+  try {
+    const r = await query(
+      'SELECT login_id, must_change_password FROM super_admins WHERE id = $1',
+      [userId]
+    );
+    if (r.rows.length === 0) return { required: false, loginId: '' };
+    return {
+      required: r.rows[0].must_change_password === true,
+      loginId: String(r.rows[0].login_id || ''),
+    };
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    if (msg.includes('must_change_password') || (msg.includes('column') && msg.includes('does not exist'))) {
+      console.log('[session] must_change_password 컬럼 부재 — 강제 변경을 건너뛴다(ALTER 필요)');
+      return { required: false, loginId: '' };
+    }
+    console.log('[session] 초기 비밀번호 판정 실패 — 통과시킨다:', msg);
+    return { required: false, loginId: '' };
+  }
+}
+
 /**
  * 인계 동의 티켓 발급.
  * ★ userId를 표준 클레임명(`userId`)으로 넣지 않는다 — 미들웨어 가드가 뚫려도 req.user가 채워지지 않게.
@@ -313,6 +379,20 @@ export async function rotateUserSession(
       return {
         status: 'geo_blocked',
         message: GEO_BLOCK_NOTICE,
+      };
+    }
+  }
+
+  // ★ 2026-08-27 초기 비밀번호 강제 변경(전송자격인증 3.2·3.3) — 국외 게이트와 **같은 자리**다.
+  //   세션을 만드는 유일한 함수 안에 두어야 새 로그인 경로가 생겨도 새지 않는다(0819에 세 번 샌 축).
+  //   ⚠ 슈퍼관리자 축만이다. 고객사 사용자에는 이 정책이 없다(컬럼도 super_admins에만 있다).
+  if (params.appSource === 'super') {
+    const pwd = await mustChangeSuperAdminPassword(params.userId);
+    if (pwd.required) {
+      return {
+        status: 'password_change_required',
+        changeToken: signPasswordChangeToken(params.userId),
+        loginId: pwd.loginId,
       };
     }
   }

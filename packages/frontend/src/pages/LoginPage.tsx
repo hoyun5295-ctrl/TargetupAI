@@ -26,6 +26,8 @@ export default function LoginPage() {
   const [backupAcknowledged, setBackupAcknowledged] = useState(false);
 
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  /** ★ 2026-08-27 슈퍼관리자 초기 비밀번호 변경 — 세션(JWT) 없이 변경 전용 단명 토큰만 들고 있는 상태 */
+  const [superPwChange, setSuperPwChange] = useState<{ changeToken: string; loginId: string } | null>(null);
   const [tempUser, setTempUser] = useState<any>(null);
   const [tempToken, setTempToken] = useState('');
   const [currentPw, setCurrentPw] = useState('');
@@ -157,6 +159,16 @@ export default function LoginPage() {
         return;
       }
 
+      // ★ 2026-08-27 초기 비밀번호 미변경 — 서버가 JWT를 주지 않았다(전송자격인증 3.2·3.3)
+      if (data.passwordChangeRequired) {
+        setSuperPwChange({ changeToken: data.changeToken, loginId: data.loginId });
+        setCurrentPw(password);
+        setNewPw(''); setNewPwConfirm(''); setPwError('');
+        setShowPasswordModal(true);
+        setLoading(false);
+        return;
+      }
+
       applyLoginSuccess(data);
     } catch (err: any) {
       const status = err.response?.status;
@@ -277,6 +289,15 @@ export default function LoginPage() {
         return;
       }
       const result = await res.json();
+      // ★ 2026-08-27 OTP 등록은 끝났지만 초기 비밀번호를 아직 안 바꿨다 — 세션을 안 준다
+      if (result.passwordChangeRequired) {
+        setEnrollmentData(null);
+        setSuperPwChange({ changeToken: result.changeToken, loginId: result.loginId });
+        setCurrentPw(password);
+        setNewPw(''); setNewPwConfirm(''); setPwError('');
+        setShowPasswordModal(true);
+        return;
+      }
       localStorage.setItem('sessionTimeoutMinutes', String(result.sessionTimeoutMinutes || 30));
       login(result.user, result.token);
       navigate('/admin');
@@ -289,6 +310,29 @@ export default function LoginPage() {
 
   const handlePasswordChange = async () => {
     setPwError('');
+    // ★ 2026-08-27 슈퍼관리자 초기 비밀번호(전송자격인증 3.2·3.3) — 이 경로에는 **JWT가 없다**.
+    //   세션을 안 만든 상태라 변경 전용 단명 토큰만 들고 있고, 바꾼 뒤에는 다시 로그인한다.
+    if (superPwChange) {
+      if (newPw.length < 10) { setPwError('비밀번호는 10자 이상이어야 합니다.'); return; }
+      if (newPw !== newPwConfirm) { setPwError('새 비밀번호가 일치하지 않습니다.'); return; }
+      if (currentPw === newPw) { setPwError('초기 비밀번호와 다른 값으로 바꿔주세요.'); return; }
+      setPwLoading(true);
+      try {
+        const res = await fetch('/api/auth/super/change-initial-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ changeToken: superPwChange.changeToken, currentPassword: currentPw, newPassword: newPw }),
+        });
+        const data = await res.json().catch(() => ({} as any));
+        if (!res.ok) { setPwError(data?.error || '비밀번호 변경에 실패했습니다.'); return; }
+        setSuperPwChange(null);
+        setShowPasswordModal(false);
+        setNewPw(''); setNewPwConfirm(''); setPassword('');
+        setError('비밀번호가 바뀌었습니다. 새 비밀번호로 다시 로그인해주세요.');
+      } catch { setPwError('비밀번호 변경에 실패했습니다.'); }
+      finally { setPwLoading(false); }
+      return;
+    }
     if (newPw.length < 8) { setPwError('비밀번호는 8자 이상이어야 합니다.'); return; }
     if (newPw !== newPwConfirm) { setPwError('새 비밀번호가 일치하지 않습니다.'); return; }
     if (currentPw === newPw) { setPwError('기존 비밀번호와 다른 비밀번호를 입력하세요.'); return; }
@@ -670,14 +714,21 @@ export default function LoginPage() {
             </svg>
           </div>
           <h3 className="text-lg font-bold text-gray-900">비밀번호 변경 필요</h3>
-          <p className="text-sm text-gray-500 mt-1">보안을 위해 비밀번호를 변경해주세요.</p>
+          {superPwChange ? (
+            <p className="text-sm text-gray-500 mt-1 leading-relaxed">
+              <span className="font-medium text-gray-700">{superPwChange.loginId}</span> 계정은 초기 비밀번호입니다.<br />
+              바꾸기 전에는 로그인되지 않습니다.
+            </p>
+          ) : (
+            <p className="text-sm text-gray-500 mt-1">보안을 위해 비밀번호를 변경해주세요.</p>
+          )}
         </div>
         <div className="px-6 pb-6 pt-4 space-y-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">새 비밀번호 *</label>
             <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)}
               className="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm"
-              placeholder="8자 이상 입력" />
+              placeholder={superPwChange ? '10자 이상 입력' : '8자 이상 입력'} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">새 비밀번호 확인 *</label>

@@ -5,7 +5,7 @@ import rateLimit from 'express-rate-limit';
 import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
-import { rotateUserSession, normalizeAppSource, newSessionId } from '../utils/session-manager';
+import { rotateUserSession, normalizeAppSource, newSessionId, verifyPasswordChangeToken } from '../utils/session-manager';
 import { resolveCompanyAccessDenial } from '../utils/company-access';
 import { issueUserLogin } from '../utils/login-issue';
 import {
@@ -191,6 +191,15 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
 
       if (superRotate.status === 'geo_blocked') {
         return res.status(403).json({ error: superRotate.message });
+      }
+      // ★ 2026-08-27 초기 비밀번호 미변경 — **JWT를 주지 않는다**(전송자격인증 3.2·3.3).
+      //   화면에서 가리는 방식이면 그 토큰으로 다른 API를 부를 수 있다. 변경 전용 단명 토큰만 준다.
+      if (superRotate.status === 'password_change_required') {
+        return res.json({
+          passwordChangeRequired: true,
+          changeToken: superRotate.changeToken,
+          loginId: superRotate.loginId,
+        });
       }
       if (superRotate.status === 'conflict') {
         await query(
@@ -731,6 +740,21 @@ router.post('/super/confirm-totp', async (req: Request, res: Response) => {
       );
       return res.status(409).json(enrollRotate.conflict);
     }
+    // ★ 2026-08-27 초기 비밀번호 미변경 — JWT만 막는다.
+    //   ⚠ TOTP 등록은 이미 확정됐다(`totp_enabled = TRUE`가 위에서 커밋됐다). **그 사실은 기록한다** —
+    //     실제로 일어난 일을 안 남기면 감사 기록이 사실과 어긋난다.
+    if (enrollRotate.status === 'password_change_required') {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'totp_enrolled', 'super_admin', $2, $3, $4, NOW())`,
+        [admin.id, JSON.stringify({ loginId: admin.login_id }), req.ip, req.headers['user-agent'] || '']
+      ).catch(() => {});
+      return res.json({
+        passwordChangeRequired: true,
+        changeToken: enrollRotate.changeToken,
+        loginId: enrollRotate.loginId,
+      });
+    }
 
     if (enrollRotate.takeover) {
       await query(
@@ -762,6 +786,72 @@ router.post('/super/confirm-totp', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[super/confirm-totp]', err);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+/**
+ * 슈퍼관리자 초기 비밀번호 변경 (★2026-08-27 전송자격인증 3.2·3.3).
+ *
+ * ⛔ 이 경로는 **JWT를 요구하지 않는다.** 초기 비밀번호 상태에서는 세션 자체를 안 만들기 때문이다.
+ *   대신 로그인 응답이 준 변경 전용 단명 토큰(10분)만 받는다 — 이 토큰으로 다른 API는 못 부른다.
+ * ⛔ 토큰만으로 바꾸지 않는다. **현재 비밀번호를 다시 확인**한다 — 토큰이 새면 계정이 넘어간다.
+ * ⛔ 변경 후 세션을 발급하지 않는다. 새 비밀번호로 다시 로그인하게 한다(TOTP도 다시 지난다).
+ */
+router.post('/super/change-initial-password', async (req: Request, res: Response) => {
+  try {
+    const adminId = verifyPasswordChangeToken(req.body?.changeToken);
+    if (!adminId) {
+      return res.status(401).json({ error: '변경 시간이 지났습니다. 다시 로그인해주세요.' });
+    }
+    const currentPassword = String(req.body?.currentPassword || '');
+    const newPassword = String(req.body?.newPassword || '');
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: '현재 비밀번호와 새 비밀번호를 입력해주세요.' });
+    }
+    if (newPassword.length < 10) {
+      return res.status(400).json({ error: '새 비밀번호는 10자 이상이어야 합니다.' });
+    }
+    if (newPassword === currentPassword) {
+      return res.status(400).json({ error: '초기 비밀번호와 다른 값으로 바꿔주세요.' });
+    }
+
+    const result = await query('SELECT id, login_id, password_hash FROM super_admins WHERE id = $1 AND is_active = true', [adminId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '계정을 찾을 수 없습니다.' });
+    }
+    const admin = result.rows[0];
+    if (!(await bcrypt.compare(currentPassword, admin.password_hash))) {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_fail', 'super_admin', $2, $3, $4, NOW())`,
+        [admin.id, JSON.stringify({ loginId: admin.login_id, reason: 'invalid_password', step: 'initial_password_change' }), req.ip, req.headers['user-agent'] || '']
+      ).catch(() => {});
+      return res.status(401).json({ error: '현재 비밀번호가 일치하지 않습니다.' });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await query(
+      'UPDATE super_admins SET password_hash = $1, must_change_password = false WHERE id = $2',
+      [newHash, admin.id]
+    );
+    // ⛔ 비밀번호는 어떤 형태로도 details에 넣지 않는다(감사 로그는 열람 대상이다)
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, 'admin_password_changed', 'super_admin', $1, $2, $3, $4, NOW())`,
+      [admin.id, JSON.stringify({ loginId: admin.login_id, reason: 'initial_password' }), req.ip, req.headers['user-agent'] || '']
+    ).catch(() => {});
+
+    return res.json({ success: true, message: '비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해주세요.' });
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요: super_admins ALTER 실행 요청 (must_change_password)',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('[super/change-initial-password]', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
