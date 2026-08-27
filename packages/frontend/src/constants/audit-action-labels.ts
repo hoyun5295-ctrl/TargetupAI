@@ -125,6 +125,19 @@ const DETAIL_KEY_LABEL: Record<string, string> = {
   deleted_customers: '삭제 수', deleted_count: '삭제 수', count: '건수',
 };
 
+/**
+ * 직원 계정 등급 → 한글. (★2026-08-27 전송자격인증 3.2·3.3)
+ * ⛔ **원본은 백엔드 `utils/admin-role.ts` `ADMIN_ROLE_LABEL`이다.** 여기는 감사 로그 상세를 그리기 위한 사본이고,
+ *   갈라지지 않도록 백엔드 계약 테스트(`admin-role-label-parity`)가 두 파일을 대조한다. 한쪽만 고치면 테스트가 깨진다.
+ */
+export const ADMIN_ROLE_LABEL: Record<string, string> = {
+  super: '대표',
+  lead: '지원팀장',
+  support: '지원팀원',
+};
+
+const roleName = (v: any) => ADMIN_ROLE_LABEL[String(v ?? '')] || String(v ?? '') || '-';
+
 const yn = (v: any) => (v === true ? '예' : v === false ? '아니오' : String(v));
 
 /**
@@ -158,6 +171,27 @@ export function formatAuditDetail(action: string, details: any): string {
       return `${d.company_name || ''} · ${Number(d.deleted_count || d.count || 0).toLocaleString()}명 선택삭제`;
     case 'customer_delete_all':
       return `${d.company_name || ''} · ${Number(d.deleted_customers || 0).toLocaleString()}명 전체삭제`;
+    // ★ 2026-08-27 직원 계정 등급(전송자격인증 3.2·3.3) — 등급 코드를 그대로 내보내지 않는다
+    case 'admin_role_changed':
+      return [
+        `${d.name || d.login_id || ''}(${d.login_id || ''})`,
+        `등급 ${roleName(d.before)} → ${roleName(d.after)}`,
+        d.reason && `사유: ${d.reason}`,
+      ].filter(Boolean).join(' · ');
+    case 'admin_account_created':
+      return [
+        `${d.name || ''}(${d.login_id || ''}) 계정 생성`,
+        `등급 ${roleName(d.role)}`,
+        d.reason && `사유: ${d.reason}`,
+      ].filter(Boolean).join(' · ');
+    case 'admin_account_disabled':
+    case 'admin_account_enabled':
+      return [
+        `${d.name || ''}(${d.login_id || ''}) ${action === 'admin_account_enabled' ? '사용 재개' : '사용 중지'}`,
+        d.reason && `사유: ${d.reason}`,
+      ].filter(Boolean).join(' · ');
+    case 'admin_password_changed':
+      return `${d.login_id || ''} 비밀번호 변경${d.reason === 'initial_password' ? ' (초기 비밀번호 교체)' : ''}`;
     default: {
       const parts = Object.entries(d)
         .filter(([, v]) => v != null && v !== '' && typeof v !== 'object')

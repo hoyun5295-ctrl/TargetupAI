@@ -5783,14 +5783,25 @@ const handleApproveRequest = async (id: string) => {
                         )}
                         {adminRoleHistory.map((h) => {
                           const d = h.details || {};
-                          const beforeLabel = adminRoleOptions.find((o) => o.value === d.before)?.label || d.before || '-';
-                          const afterLabel = adminRoleOptions.find((o) => o.value === d.after)?.label || d.after || '-';
+                          const roleName = (v: any) => adminRoleOptions.find((o) => o.value === v)?.label || v || '-';
+                          // ★0827 등급 변경 말고도 생성·중지·재개가 같은 대장에 쌓인다.
+                          //   before/after만 보면 그 행들이 「- → -」가 되어 심사 제출물에 빈칸이 남는다.
+                          const change =
+                            h.action === 'admin_role_changed'
+                              ? `${roleName(d.before)} → ${roleName(d.after)}`
+                              : h.action === 'admin_account_created'
+                                ? `계정 생성 · ${roleName(d.role)}`
+                                : h.action === 'admin_account_disabled'
+                                  ? '사용 중지'
+                                  : h.action === 'admin_account_enabled'
+                                    ? '사용 재개'
+                                    : '-';
                           return (
                             <tr key={h.id}>
                               <td className="px-4 py-2 text-xs text-gray-500">{formatDateTime(h.created_at)}</td>
                               <td className="px-4 py-2 text-xs text-gray-900">{h.actor_name || h.actor_login_id || '-'}</td>
                               <td className="px-4 py-2 font-mono text-xs text-gray-700">{d.login_id || '-'}</td>
-                              <td className="px-4 py-2 text-xs text-gray-700">{beforeLabel} → {afterLabel}</td>
+                              <td className="px-4 py-2 text-xs text-gray-700 whitespace-nowrap">{change}</td>
                               <td className="px-4 py-2 text-xs text-gray-600 max-w-xs truncate">{d.reason || '-'}</td>
                               <td className="px-4 py-2 font-mono text-[11px] text-gray-500">{h.ip_address || '-'}</td>
                             </tr>
