@@ -10,9 +10,10 @@
  *   라이선스) + 우리 서버 자가 호스팅이라 수신 단말에서도 미리보기 그대로 렌더.
  * 미리보기 글꼴은 fonts.css(자가호스팅)로 로드 — 편집 캔버스·발행 뷰어와 동일 파일.
  */
-import { useEffect } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
 import { DM_FONT_CATALOG } from '../../../utils/dm-tokens';
+import { ensureSelfHostFontsLoaded } from '../../../utils/brand-fonts';
 import ModalBase from './ModalBase';
 
 export default function FontApplyModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -23,13 +24,7 @@ export default function FontApplyModal({ open, onClose }: { open: boolean; onClo
   // 미리보기용 자가호스팅 서체 로드 — 편집 캔버스/브랜드킷과 동일 파일(idempotent). 각 서체가 실제 글꼴로 보임.
   useEffect(() => {
     if (!open) return;
-    const ID = 'dm-selfhost-fonts';
-    if (document.getElementById(ID)) return;
-    const link = document.createElement('link');
-    link.id = ID;
-    link.rel = 'stylesheet';
-    link.href = '/api/dm/v/fonts.css';
-    document.head.appendChild(link);
+    ensureSelfHostFontsLoaded();
   }, [open]);
 
   const currentFamily = brandKit.font_family || '';
@@ -79,11 +74,12 @@ export default function FontApplyModal({ open, onClose }: { open: boolean; onClo
                 </span>
                 {active && <span style={{ fontSize: 11, color: '#4f46e5', fontWeight: 700, flexShrink: 0 }}>적용 중</span>}
               </div>
-              {/* 실제 출력 글꼴 미리보기 — 제목(굵게)+본문(한글·영문·숫자) */}
-              <div style={{ fontFamily: c.css, fontSize: 22, lineHeight: 1.25, fontWeight: 700, color: '#111827', marginTop: 8 }}>
+              {/* 실제 출력 글꼴 미리보기 — 제목(굵게)+본문(한글·영문·숫자).
+                  .font-live = index.css 전역 !important 서체 강제의 탈출구(인라인 fontFamily는 눌려서 무효). */}
+              <div className="font-live" style={{ ['--font-live']: c.css, fontSize: 22, lineHeight: 1.25, fontWeight: 700, color: '#111827', marginTop: 8 } as CSSProperties}>
                 가나다 Aa 123
               </div>
-              <div style={{ fontFamily: c.css, fontSize: 13, lineHeight: 1.5, color: '#4b5563', marginTop: 3 }}>
+              <div className="font-live" style={{ ['--font-live']: c.css, fontSize: 13, lineHeight: 1.5, color: '#4b5563', marginTop: 3 } as CSSProperties}>
                 안녕하세요 ABCabc 0123
               </div>
             </button>

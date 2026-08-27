@@ -12,6 +12,22 @@ import { DM_FONT_CATALOG } from './dm-tokens';
 
 export type FontOption = { value: string; label: string };
 
+/**
+ * ★ 2026-08-27 자가호스팅 서체 로드 통합 (임은지 접수 cmtb7zjd40375jnotvo50ic11 수정 동행).
+ * 동일한 link 주입 로직이 DmCanvas·FontApplyModal·BrandKitModal·EmailFontModal 4벌로 흩어져 있던 것을
+ * 단일 헬퍼로 통합 — 편집 캔버스·서체/테마 미리보기·발행 뷰어·발송 메일이 같은 @font-face 파일을 쓴다.
+ * idempotent: 이미 로드돼 있으면 아무것도 하지 않는다. (프론트=백엔드 동일 출처라 상대 경로.)
+ */
+export function ensureSelfHostFontsLoaded(): void {
+  const ID = 'dm-selfhost-fonts';
+  if (document.getElementById(ID)) return;
+  const link = document.createElement('link');
+  link.id = ID;
+  link.rel = 'stylesheet';
+  link.href = '/api/dm/v/fonts.css';
+  document.head.appendChild(link);
+}
+
 /** 한글용 서체 = 큐레이션 카탈로그 전부(전부 한글 primary). */
 export const BRAND_FONT_KO_OPTIONS: ReadonlyArray<FontOption> = DM_FONT_CATALOG.map((f) => ({
   value: f.css,

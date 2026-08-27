@@ -1,8 +1,10 @@
 // EmailDesignThemeModal — 이메일 디자인 테마 8종 1클릭 적용 (★ 2026-07-13 디자인 3.0)
 // 테마 = 캠페인 design(색·서체·아트디렉션) 패치 — 문안/섹션 구성은 건드리지 않는다.
 // 커스텀 다크 모달(native dialog 0 · 백드롭 클릭 닫힘 없음 — X/취소만).
+import { useEffect, type CSSProperties } from 'react';
 import { Check, Palette, RotateCcw, X } from 'lucide-react';
 import { EMAIL_DESIGN_THEMES, applyEmailTheme, type EmailDesign } from '../../utils/email-themes';
+import { ensureSelfHostFontsLoaded } from '../../utils/brand-fonts';
 
 export default function EmailDesignThemeModal({
   current, onApply, onReset, onClose,
@@ -13,6 +15,9 @@ export default function EmailDesignThemeModal({
   onClose: () => void;
 }) {
   const currentTheme = current?.theme;
+
+  // ★ 2026-08-27 서체 샘플용 자가호스팅 서체 로드(idempotent) — 발송 메일이 쓰는 파일과 동일.
+  useEffect(() => { ensureSelfHostFontsLoaded(); }, []);
   return (
     <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3">
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden">
@@ -42,9 +47,10 @@ export default function EmailDesignThemeModal({
                 >
                   {/* 미리보기 스트립 — 테마 배경 + 서체 샘플 + 스와치 */}
                   <div style={{ background: t.design.palette?.background || '#fff' }} className="px-4 pt-3.5 pb-3 border-b border-black/5">
+                    {/* .font-live = index.css 전역 !important 서체 강제의 탈출구(인라인 fontFamily는 눌려서 무효) */}
                     <div
-                      style={{ fontFamily: t.previewFont || 'inherit', color: darkPreview ? '#f2f5fa' : (t.design.palette?.primary || '#111') }}
-                      className="text-[17px] font-extrabold tracking-tight"
+                      style={{ ['--font-live']: t.previewFont || 'inherit', color: darkPreview ? '#f2f5fa' : (t.design.palette?.primary || '#111') } as CSSProperties}
+                      className="font-live text-[17px] font-extrabold tracking-tight"
                     >
                       가나다 Aa 123
                     </div>

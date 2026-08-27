@@ -808,12 +808,12 @@ Codex = 1R needs-attention(high 1 · medium 2 → 전부 정정: 입력 잠금 �
 | 조각 | 소유 | 내용 |
 |---|---|---|
 | 접수 코어 승격 | `utils/agency-send-intake.ts` (신설) | `createRequestCore` · `analyzeOneStep`을 라우트에서 승격(**원본 복사** · 라우트 쪽 정의는 삭제하고 CT를 import · 승격 커밋에서 잔존 0 전수 grep). ⛔ 워커가 라우트를 import하는 방향 금지. `pre`에 `minLeadMinutes`를 추가해 **리드타임은 코어가 집행**한다(화면 180 기본 · 이메일 240 · 어댑터에 시각 판정 코드 금지 · 239분 요청 반려 행동 테스트로 고정) |
-| 허용 발신자 원장 | `agency_send_email_senders` (신설 테이블) | `company_id · email_norm · user_id(필수) · label · is_active`. 정규화 = 헤더 디코딩 후 주소만 추출 · lower · trim(**plus-tag는 보존** · 정확 일치만). 활성 행 한정 **전역 UNIQUE**(한 주소가 두 회사에 있으면 회사 판정 불가). ⛔ `user_id`가 접수의 `created_by` · 정산 3축 귀속 · 회신번호 자격(user 단위 `assignment_scope`)을 전부 정한다. 없으면 승인까지 끝난 건이 발송 직전 `dispatch_no_owner`로 죽는다(`agency-send-worker.ts:666`) |
-| 신원 판정 | `resolveEmailSender` (한 함수) | 허용 주소 조회와 **귀속 사용자 활성 상태를 같은 쿼리로** 읽는다(비활성 = 접수 없이 반려 회신 + 알림). 조회 2행 이상 = fail-closed. **★0826 확정 = allowlist_only 모드**: 하이웍스가 수신 인증 헤더를 안 붙여(실측) 신원 게이트는 허용 목록 **정확 일치가 전부**다. 완충 = 일일 상한 절반값 본값 채택(§18-7) + 슈퍼관리자 현황 상시 경고 배지 + 접수 완료 회신이 항상 **진짜 주소 소유자**에게 가는 것(위조 접수 즉시 인지 경로) + 담당자 승인 게이트. ⛔ 메일 안의 `ARC-*`·`Authentication-Results`·`X-Authinfo` 류는 발신자가 위조 삽입 가능하므로 신뢰 근거로 쓰지 않는다(하이웍스가 유입 위조 헤더를 제거하는지 검증되기 전에는 · 추가 과제). ⛔ 신원 · `canUseAgencySend` · 전역 ENV 게이트는 **`createRequestCore` 직전 단일 지점**에서 본다(네 번째 우회 입구 방지) |
+| 허용 발신자 원장 | `agency_send_email_senders` (신설 테이블) | `company_id · email_norm · user_id(필수) · label · is_active`. 정규화 = 헤더 디코딩 후 주소만 추출 · lower · trim(**plus-tag는 보존** · 정확 일치만). ~~활성 행 한정 **전역 UNIQUE**(한 주소가 두 회사에 있으면 회사 판정 불가)~~ ★0827 §20 정정: 활성 UNIQUE = `(email_norm, user_id)` — 같은 주소를 여러 귀속(청구 계정)에 등록할 수 있고, 여럿이면 요청서 "청구 계정" 지정으로 판정한다. ⛔ `user_id`가 접수의 `created_by` · 정산 3축 귀속 · 회신번호 자격(user 단위 `assignment_scope`)을 전부 정한다. 없으면 승인까지 끝난 건이 발송 직전 `dispatch_no_owner`로 죽는다(`agency-send-worker.ts:666`) |
+| 신원 판정 | `resolveEmailSender` (한 함수) | 허용 주소 조회와 **귀속 사용자 활성 상태를 같은 쿼리로** 읽는다(비활성 = 접수 없이 반려 회신 + 알림). ~~조회 2행 이상 = fail-closed~~ ★0827 §20 정정: 사용 가능한 귀속 2행 이상 = `choose`(요청서 "청구 계정" 지정으로 확정 · 자동 선택 0). **★0826 확정 = allowlist_only 모드**: 하이웍스가 수신 인증 헤더를 안 붙여(실측) 신원 게이트는 허용 목록 **정확 일치가 전부**다. 완충 = 일일 상한 절반값 본값 채택(§18-7) + 슈퍼관리자 현황 상시 경고 배지 + 접수 완료 회신이 항상 **진짜 주소 소유자**에게 가는 것(위조 접수 즉시 인지 경로) + 담당자 승인 게이트. ⛔ 메일 안의 `ARC-*`·`Authentication-Results`·`X-Authinfo` 류는 발신자가 위조 삽입 가능하므로 신뢰 근거로 쓰지 않는다(하이웍스가 유입 위조 헤더를 제거하는지 검증되기 전에는 · 추가 과제). ⛔ 신원 · `canUseAgencySend` · 전역 ENV 게이트는 **`createRequestCore` 직전 단일 지점**에서 본다(네 번째 우회 입구 방지) |
 | 회신 CT | `utils/agency-mailer.ts` (신설) | `outreach-mailer` 계약 복제(3값 `sent|rejected|unknown` · 부분 거부 판정 · 총 시간 상한) + `to` 인자. ⛔ `to` = 그 메일의 발신 주소 ∧ 활성 허용 목록 **교집합만**(위조 메일에 답해도 진짜 소유자에게 간다 · 백스캐터 반사판 방지). ⛔ ENV 미설정이면 `isAgencyMailerReady()` false = **폴링·접수 전체 잠금**(회신이 이 경로의 유일한 통지라 접수만 되고 통지 0인 상태를 금지). ENV = 정산·영업과 분리된 세 번째 계정 축 |
 | intake 원장 | `agency_send_email_intake` (신설 테이블) | `(mailbox, uidl)` UNIQUE = 선점 arbiter(★0826 실측: 하이웍스 UIDL = `..._20260825_...eml` 형태의 안정 식별자) · `(mailbox, message_hash)` UNIQUE · status `claimed|accepted|rejected|failed` · `reply_status` · 사유 코드 · `request_ids`(성공 분기에서만). ⛔ **헤더 메타·해시·사유 코드만 담는다. 첨부 바이트·명단 행 저장 금지**(주석 + 테스트로 고정) · 보존 90일 |
 | 메일 워커 | `utils/agency-send-mail-worker.ts` (신설) | 1분 주기 **별도 워커**(기존 5분 틱에 얹지 않는다). 프로토콜 = **POP3S**(pop3s.hiworks.com:995 · 메일 전용 비밀번호 + USER/PASS · ⛔ APOP 금지: 서버가 거부한다 실측). 절차 = §18-5, 수치 = §18-7 |
-| 관리 API · 모달 | `routes/admin.ts` 별도 라우트 + AdminDashboard 별도 모달 | `GET/POST/DELETE /api/admin/companies/:id/agency-send-emails`(기존 스위치 PATCH에 안 끼움 · 503 마이그레이션 문구도 별도). 모달 = 스위치 카드 아래 트리거 **"허용 이메일 N개 관리"**(건수 표기 · 스위치 ON인데 0건이면 경고 한 줄: 조용한 전량 반려 방지 · OFF에도 노출) · 즉시 저장(추가 POST · 삭제 DELETE) · ⛔ 스위치의 낙관 갱신+롤백 패턴 복제 금지(스테일 클로저 · 목록은 서버 응답 통째 교체 + 요청 중 disabled) · 주소별 활성 토글 + **"전부 비활성" 버튼**(긴급 정지 · 등록 보존) · `showConfirm`/`showAlert` 재사용 · 흰 모달 + 인디고(부모 톤) · 스크림 z-[60](`CUI_MODAL_SCRIM`은 z-50이라 부모와 동률 = 금지) · 입력 = Composer 담당자 번호 칩 미러. 재활성 23505 = "이미 다른 곳에 등록된 주소입니다"(⛔ 어느 회사인지 미노출) |
+| 관리 API · 모달 | `routes/admin.ts` 별도 라우트 + AdminDashboard 별도 모달 | `GET/POST/DELETE /api/admin/companies/:id/agency-send-emails`(기존 스위치 PATCH에 안 끼움 · 503 마이그레이션 문구도 별도). 모달 = 스위치 카드 아래 트리거 **"허용 이메일 N개 관리"**(건수 표기 · 스위치 ON인데 0건이면 경고 한 줄: 조용한 전량 반려 방지 · OFF에도 노출) · 즉시 저장(추가 POST · 삭제 DELETE) · ⛔ 스위치의 낙관 갱신+롤백 패턴 복제 금지(스테일 클로저 · 목록은 서버 응답 통째 교체 + 요청 중 disabled) · 주소별 활성 토글 + **"전부 비활성" 버튼**(긴급 정지 · 등록 보존) · `showConfirm`/`showAlert` 재사용 · 흰 모달 + 인디고(부모 톤) · 스크림 z-[60](`CUI_MODAL_SCRIM`은 z-50이라 부모와 동률 = 금지) · 입력 = Composer 담당자 번호 칩 미러. 재활성 23505 = ~~"이미 다른 곳에 등록된 주소입니다"~~ ★0827 §20 정정: "같은 주소와 귀속의 활성 등록이 이미 있습니다"(어느 회사인지 미노출 원칙은 유지) |
 | 출처 표시 | `agency_send_requests.source` (신설 컬럼) + 프론트 단일표 | `varchar(16) NOT NULL DEFAULT 'screen'` CHECK(`'screen','one_step','email'`). ⛔ 화면·원스텝 INSERT는 무접촉(DEFAULT에 맡김) · **이메일 경로만 값을 명시 기입**(코드 선배포·DDL 후행이 안전한 근거). `toPublic` 노출 + `SOURCE_LABEL`(`agency-send-api.ts` STATUS_LABEL 옆) + `EVENT_LABEL`에 `email_received`·`email_rejected` **같은 커밋 등재**(미등재 kind는 상세가 삼킨다). 이벤트 payload `via:'email'`+발신 주소 = 경위 축(상세 전용). 목록 메타 줄의 '파일 명단/직접 입력' 추정(fileName 유무)을 source 라벨로 대체 |
 | 슈퍼관리자 현황 | 기존 `GET /api/admin/agency-send` + 탭 컴포넌트 | 새 라우트 0: 응답에 `mailIntake` 키(마지막 성공 폴링 시각(⛔ DB 영속 · 메모리는 재기동마다 리셋) · status별 건수 · 회신 실패 건 · 미등록 카운터 · 반려·격리 최근 20건). 화면은 **별도 컴포넌트 파일**로 탭 렌더(AdminDashboard 인라인 금지) · visibilitychange 복귀 1회 갱신(주기 폴링 보류) |
 | 경보 | `system-alert` dedupKey 3종 | `agency-mail-login-fail`(POP3 로그인 실패 3연속 = 폴링 정지 · **즉시** · ★0826 정정: 인증 헤더 부재 확정으로 "위조 신호 경보"는 성립 불가, 위조 인지는 소유자 회신 경로가 진다) / `agency-mail-unknown-sender`(미등록 = 6시간 쿨다운 요약 + 주 1회 도메인 요약) / `agency-mail-poll-fail`(30분 정체 · ⛔ "메일 0통"과 "폴 실패"를 가른다 · `AGENCY_MAIL_ENABLED` off면 기준 시각 재설정으로 오탐 방지) |
@@ -1084,3 +1084,55 @@ ALTER TABLE agency_send_requests ADD CONSTRAINT ck_agency_send_source
 - DDL 1 = `agency_send_requests.requested_at_original timestamptz NULL`(조정 전 원본 · 담당자 문자 분기와 화면 표시의 근거). **컬럼 부재 폴백 있음**(있으면 싣고 없으면 조정만 적용) = 배포 → DDL 순서 안전. 재시도 회신 SELECT에는 넣지 않는다(컬럼 부재 시 복구 경로가 멈춘다).
 
 **영향 없음(확인)**: `requested_at`의 의미가 바뀌지 않는다(여전히 "보낼 시각")는 점이 핵심이다. 접수 시점에 한 번만 계산해 저장하므로 워커 후보 SQL·승인 판정·적재·만료·대조·집계·고객 360은 전부 무변경이다.
+
+---
+
+## §20) 청구 계정 다중 귀속 — 한 이메일 주소가 여러 계정을 대신 요청 (★2026-08-27 서수란 접수 `cmtb5y3pv02qwjnotttqxen6a` · Harold 승인·당일 구현)
+
+### 20-1) 경위와 판정
+
+**접수**: "여러 개의 귀속 계정을 한 명이 관리하는 경우, 귀속 계정은 여러 개 생성되었으나 요청 담당자가 1~2명이면 현재 시스템에서는 메일 대행을 이용할 수 없다(귀속 계정에 중복 이메일 등록도 안 된다)." 사례 4개(금강제화 4계정 1담당 · 시세이도 4부서 + CRM 대행 · 동국제약 2계정 1담당 · 송지오옴므)가 전부 **한 요구로 수렴**: 담당자 이메일 1개가 여러 청구 계정을 대신 요청하고, 어느 계정으로 청구할지는 건별로 담당자가 지정한다(대행 업계의 기존 실무 그대로).
+
+**막던 것**: `uq_agency_email_sender_active (email_norm) WHERE is_active`(활성 주소 전역 1행) + `resolveEmailSender`의 2행 이상 = fail-closed. §18 설계 때 "주소 1 = 귀속 1"만 상정했던 것이 뿌리다. 귀속 = `created_by` = 발송·정산 계정이므로 이것은 편의가 아니라 **청구 정확성** 문제다.
+
+### 20-2) 확정 구조
+
+1. **DDL**: 활성 부분 UNIQUE를 `(email_norm)` → **`(email_norm, user_id)`**로 교체. 같은 주소를 여러 귀속(같은 회사든 다른 회사든)에 등록할 수 있다. 회사가 갈려도 같은 메커니즘(후보 집합에서 지정으로 선택)이라 특례가 없다.
+2. **요청서 "청구 계정" 칸(선택)**: 파서 `FIELD_ALIASES`에 신설(별칭 = 청구계정·청구 부서·귀속 계정·청구 계정명). 배포 양식 본문은 실물 복제 계약대로 무변경, "빈 줄에 라벨 추가" 방식(광고 여부와 같은 취급) + 작성 안내 시트 한 줄.
+3. **판정(`resolveEmailSender` 개편)**: 사용 가능한 귀속(허용 행 활성 ∧ 사용자 활성) 0 = `owner_inactive` · 1 = `ok` · 2+ = **`choose`**. 옛 `ambiguous` outcome 폐기.
+4. **지정 대조(`matchBillingTarget`)**: 표시명(label) 또는 로그인 ID **정확 일치**(정규화 = 공백 제거+lower). 일치 0 = 반려(목록 안내) · 2+ = 반려+경보. ⛔ 부분·유사 일치 금지(돈 귀속).
+5. **워커 절차**: 후보 1 + 지정 없음 = 현행 그대로(기존 업체 무변화) · 후보 1 + 지정 불일치 = 반려 `billing_target_mismatch`(엉뚱한 계정으로 조용히 청구되는 경로 차단) · 후보 2+ = 지정 필수, 없거나 못 찾으면 반려 회신에 **그 주소로 요청 가능한 계정 목록**("표시명 (로그인ID)")을 실어 안내(자기 권한 목록이라 노출 무해 · 회신 교집합 계약 유지).
+6. **회사 축 게이트 재배열**: 일일 상한(company)·자격(`canUseAgencySend`)을 `enforceCompanyGates` 한 벌로 추출해 **귀속 확정 직후** 호출(판정 두 벌 금지). 후보 1 경로는 기존 자리(RETR 전 = 방어 유지), `choose` 경로는 요청서에서 확정한 직후(구조상 RETR 뒤 · 후보 전원이 등록 회사라 우회 입구 아님). 발신자 축 상한·크기 게이트는 제자리.
+7. **등록 라우트(admin)**: 다중이 되는 등록은 **표시명 필수** + 새 표시명·귀속 로그인 ID가 기존 행의 표시명·로그인 ID와 겹치면 400(ambiguous 예방을 등록에서) + 기존 행에 표시명이 없으면 응답 `warning`(로그인 ID로는 지정 가능하니 막지는 않는다). 23505 = (주소, 귀속) 중복 문구로 교체.
+8. **모달**: 같은 주소 다중 활성이면 각 행에 "청구 계정: 이름" 인디고 뱃지(담당자가 요청서에 적을 값) + 안내문 교체 + `warning` 표시.
+
+### 20-3) ⛔ 계약
+
+- **자동 선택 0.** 후보가 여럿인데 지정이 없으면 반려다. "기본 계정"을 두면 지정을 깜빡한 건이 조용히 엉뚱한 계정으로 청구된다(0건은 안전의 증거가 아니다 부류의 돈 판).
+- **지정 대조는 정확 일치 한 벌**(`matchBillingTarget` · 회귀 주입으로 부분 일치 훼손 시 테스트 실패 확인). 등록 라우트의 겹침 예방도 같은 정규화(`normalizeBillingTargetKey`)를 쓴다 — 판정 두 벌 금지.
+- **미확정(auth null) 반려는 회사·사용자 없이 기록한다**(intake 원장). 후보가 여러 회사일 수 있어 추정 기록은 오귀속이다.
+- 코드 선배포 · DDL 후행 안전: 옛 UNIQUE가 살아 있는 동안 다중 행은 존재할 수 없어 `choose` 경로가 돌지 않고, 등록의 label 사전 검사(400)가 새 안내를 먼저 한다.
+
+### 20-4) DDL (Harold 실행 · §21 배포 인계에 원문)
+
+실행 전 확인 → `BEGIN; DROP INDEX uq_agency_email_sender_active; CREATE UNIQUE INDEX uq_agency_email_sender_active_user ON agency_send_email_senders (email_norm, user_id) WHERE is_active; COMMIT;` (트랜잭션으로 묶어 사이 창의 무제약 등록을 차단).
+
+### 20-5) 배포 후 실측 5
+
+①금강제화형 시나리오: 같은 주소를 계정 2개에 표시명("금강"·"신환")으로 등록 → 지정 없이 발송 = 반려 회신에 목록 · "청구 계정: 금강" 추가 발송 = 금강 계정 명의 접수(접수 계정·정산 귀속 확인) ②지정 오타("금가") = not_found 반려 + 목록 ③기존 단일 귀속 업체 = 지정 없이 현행 그대로 접수 ④단일 귀속인데 다른 이름 지정 = mismatch 반려 ⑤등록 모달: 두 번째 등록에 표시명 없이 = 400 안내 · 표시명 겹침 = 400 · 다중 행에 인디고 뱃지 표시.
+
+### 20-6) Codex 적대 검토 1R 판정과 정정 (needs-attention · high 2 · medium 3 → 4건 수용·2권고 불수용)
+
+| 지적 | 판정 | 정정 |
+|---|---|---|
+| [high] POST 조회·INSERT 분리 + 재활성 PATCH 무검사 = 정상 관리자 조작만으로 전 지정값 ambiguous 활성 집합 성립(등록 → 비활성 → 교차 키 등록 → 재활성) | 수용. 뿌리 = "활성 집합의 지정 키 유일" 불변이 쓰기 경로마다 따로 검사됨 | 판정을 `senderKeyClash` **한 벌**로 추출(교차 겹침 = 내 표시명 ↔ 남 로그인 ID까지) + POST·활성화 PATCH가 **이메일 단위 `pg_advisory_xact_lock` 한 트랜잭션** 안에서 활성 행을 다시 읽어 같은 함수를 지난다. 비활성 방향은 집합을 줄이므로 무검사. 테스트 3건(교차 겹침 시나리오 포함) |
+| [high] resolver가 `s.company_id ↔ u.company_id` 동일성 미검증 = 데이터 드리프트 시 교차 테넌트 귀속·청구 | 수용(fail-closed) | JOIN을 `ON u.id = s.user_id AND u.company_id = s.company_id`로 — 불일치 행은 사용자 없음 = usable 제외 = `owner_inactive`. **복합 FK 권고는 불수용**(0728 FK 없음 원칙 · 코드 fail-closed로 대신) |
+| [medium] usable 0일 때 첫 행 회사로 임의 귀속 = 원장·일일 상한 오염 | 수용(high 2와 같은 뿌리 = 귀속 판정 느슨) | 등록 행들의 회사가 **하나일 때만** 귀속, 여러 회사면 `companyId: null`(미확정 그대로 기록) + 경보 dedupKey는 회사 없으면 발신 주소로 |
+| [medium] choose 경로에서 이미지 파일명 반려가 청구 확정보다 먼저 = 유효 지정 건이 회사 없이 기록·상한 미적용 | 수용 | 8b(청구 확정 + 회사 축 게이트)를 form 기반 반려보다 앞으로 이동. **RETR 전 같은 회사 preflight 권고는 불수용**(후보 전원이 등록 회사라 위험 낮음 · 분기 추가 대비 이득이 RETR 비용뿐 = 수용 위험 명시) |
+| [medium] DDL 전 창의 옛 UNIQUE 23505를 "같은 사용자 중복"으로 오안내 | 수용 | `err.constraint`로 옛 `uq_agency_email_sender_active` = **503 DB_MIGRATION_PENDING**, 새 인덱스 = 409(POST·PATCH 공용 `agencyEmailUniqueConflict`) |
+
+정정 후 게이트 = backend tsc 0 · vitest 205파일 3,175건(신규 senderKeyClash 3건 포함).
+
+**2R(정정분 증분) = high·critical 0 · medium 2 → 1건 즉시 정정 · 1건 수용 위험 등재(종료 조건 충족 · 라운드 상한 2회)**
+- [medium·정정] POST·PATCH의 `pool.connect()`가 try 밖 = 풀 고갈·failover 시 JSON 오류 계약 밖으로 탈출 → `client` nullable + 획득을 try 안으로(연결된 경우에만 ROLLBACK·release). 이번 라운드에 새로 쓴 줄의 결함이라 즉시 닫았다.
+- [medium·수용 위험] 단일 파일 + 고객리스트 시트 누락(`form_not_identified`) 등 **form 파싱 전 반려**는 청구 계정 확정 전이라 다중 귀속 주소의 그 반려가 회사·사용자 없이 기록된다. 뿌리 = 첨부 불량 경로는 form 자체가 없어 "귀속 없는 반려"가 구조적으로 불가피(0개·zip·이미지 첨부도 동일). 실효 = 원장 회사 칸 공백(from_email로 추적 가능) + 회사 일일 상한 미포함(**기본 무제한이라 현재 실효 0**) · 돈·발송 영향 0(반려는 접수를 안 만든다). 상한을 ENV로 다시 조일 때 이 구멍을 함께 볼 것.

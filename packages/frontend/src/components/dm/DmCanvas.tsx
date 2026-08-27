@@ -10,6 +10,7 @@
 import { useEffect } from 'react';
 import { useDmBuilderStore } from '../../stores/dmBuilderStore';
 import { brandKitToCssVars, dmArtDirectionCssVars } from '../../utils/dm-tokens';
+import { ensureSelfHostFontsLoaded } from '../../utils/brand-fonts';
 import MobileFrame from './MobileFrame';
 import { SectionRenderer } from './canvas';
 
@@ -42,15 +43,7 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
   // ★ 2026-07-16 자가 호스팅 — 편집 캔버스도 발행 뷰어와 "같은" 우리 서버 @font-face(/api/dm/v/fonts.css)를 로드.
   //   구글 CDN 미로드로 편집(고딕)≠발행(궁서) 갈리던 신고 정정. 선언만 하고 실제 사용 서체만 다운로드.
   //   같은 파일을 편집·발행이 공유 = 편집 화면 = 발행물(WYSIWYG). (프론트=백엔드 동일 출처라 상대 경로.)
-  useEffect(() => {
-    const ID = 'dm-selfhost-fonts';
-    if (document.getElementById(ID)) return;
-    const link = document.createElement('link');
-    link.id = ID;
-    link.rel = 'stylesheet';
-    link.href = '/api/dm/v/fonts.css';
-    document.head.appendChild(link);
-  }, []);
+  useEffect(() => { ensureSelfHostFontsLoaded(); }, []);
 
   // 아트디렉션 모티프/디바이더 = data 속성으로 캔버스에도 반영 (dm-builder.css 디자인 3.0 절 소비)
   const ad = brandKit.art_direction;

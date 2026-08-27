@@ -10,11 +10,12 @@
  *  6. 연락처 (phone/email/website)
  *  7. SNS 링크 (인스타/유튜브/카카오/네이버)
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import axios from 'axios';
 import type { DmBrandKit } from '../../../stores/dmBuilderStore';
 import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
 import { DM_FONT_PAIRINGS, DM_FONT_CATALOG } from '../../../utils/dm-tokens';
+import { ensureSelfHostFontsLoaded } from '../../../utils/brand-fonts';
 import ModalBase, { ModalButton } from './ModalBase';
 
 const api = axios.create({ baseURL: '/api' });
@@ -70,7 +71,8 @@ function FontPicker({ value, onChange, resetLabel }: { value: string; onChange: 
               ...(active ? { borderColor: '#4f46e5', background: '#eef2ff', boxShadow: 'inset 0 0 0 1px #4f46e5' } : {}),
             }}
           >
-            <div style={{ fontFamily: o.css, fontSize: 18, lineHeight: 1.3, color: '#111827' }}>가나다 Ag</div>
+            {/* .font-live = index.css 전역 !important 서체 강제의 탈출구(인라인 fontFamily는 눌려서 무효) */}
+            <div className="font-live" style={{ ['--font-live']: o.css, fontSize: 18, lineHeight: 1.3, color: '#111827' } as CSSProperties}>가나다 Ag</div>
             <div style={{ fontSize: 10.5, marginTop: 3, fontWeight: active ? 700 : 500, color: active ? '#4338ca' : '#6b7280' }}>{o.label}</div>
           </button>
         );
@@ -102,15 +104,7 @@ export default function BrandKitModal({ open, onClose }: { open: boolean; onClos
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ★ 2026-07-16 미리보기용 자가호스팅 서체 로드 — 편집 캔버스와 동일 파일(idempotent). 각 서체가 실제 글꼴로 보임.
-  useEffect(() => {
-    const ID = 'dm-selfhost-fonts';
-    if (document.getElementById(ID)) return;
-    const link = document.createElement('link');
-    link.id = ID;
-    link.rel = 'stylesheet';
-    link.href = '/api/dm/v/fonts.css';
-    document.head.appendChild(link);
-  }, []);
+  useEffect(() => { ensureSelfHostFontsLoaded(); }, []);
 
   const loadCompanyKit = async () => {
     setLoading(true);

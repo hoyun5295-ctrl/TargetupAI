@@ -5,14 +5,21 @@
  * 적용 = updateBrandKit(theme.kit) 1회 — 섹션 문안/구성은 건드리지 않음(색·룩만).
  * 톤 기반 추천 배지 = 결정적 매핑(recommendThemeIds) — AI 호출·임의 상수 없음.
  */
+import { useEffect, type CSSProperties } from 'react';
 import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
 import { DM_DESIGN_THEMES, recommendThemeIds } from '../../../utils/dm-themes';
+import { ensureSelfHostFontsLoaded } from '../../../utils/brand-fonts';
 import ModalBase from './ModalBase';
 
 export default function DesignThemeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const brandKit = useDmBuilderStore((s) => s.brandKit);
   const updateBrandKit = useDmBuilderStore((s) => s.updateBrandKit);
   const setToast = useDmBuilderStore((s) => s.setToast);
+
+  // ★ 2026-08-27 서체 샘플용 자가호스팅 서체 로드(idempotent) — 캔버스가 먼저 로드했어도 무해.
+  useEffect(() => {
+    if (open) ensureSelfHostFontsLoaded();
+  }, [open]);
 
   const currentTheme = brandKit.art_direction?.theme;
   const recommended = recommendThemeIds(brandKit.tone);
@@ -53,7 +60,8 @@ export default function DesignThemeModal({ open, onClose }: { open: boolean; onC
             >
               {/* 미리보기 스트립 — 테마 배경 + 스와치 + 서체 샘플 */}
               <div style={{ background: t.kit.background_color || '#fff', padding: '14px 14px 12px', borderBottom: '1px solid #eee' }}>
-                <div style={{ fontFamily: t.previewFont || 'inherit', fontSize: 17, fontWeight: 800, color: dark ? '#f2f5fa' : (t.kit.primary_color || '#111'), letterSpacing: '-0.01em' }}>
+                {/* .font-live = index.css 전역 !important 서체 강제의 탈출구(인라인 fontFamily는 눌려서 무효) */}
+                <div className="font-live" style={{ ['--font-live']: t.previewFont || 'inherit', fontSize: 17, fontWeight: 800, color: dark ? '#f2f5fa' : (t.kit.primary_color || '#111'), letterSpacing: '-0.01em' } as CSSProperties}>
                   가나다 Aa 123
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>

@@ -6,6 +6,7 @@ import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
+import type { PoolClient } from 'pg';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
@@ -47,7 +48,7 @@ import { buildAdminAgentStatsXlsx } from '../utils/manage-stats-export';
 // ★ 2026-07-25 고객 대상 표는 엑셀(.xlsx)로 나간다 — LESSONS_BACKEND "고객 대상 xlsx = exceljs".
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { normalizePhone } from '../utils/normalize-phone';
-import { normalizeSenderEmail } from '../utils/agency-send-email';
+import { normalizeSenderEmail, senderKeyClash } from '../utils/agency-send-email';
 // ★ 2026-08-26(3) 대행발송 운영 취소 — 효과는 고객 화면과 같은 CT를 지난다(입구만 다르다)
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 import { buildStaffCancelledNotify, formatWhen as agencyFormatWhen, shortLabel } from '../utils/agency-send-notify';
@@ -1608,59 +1609,166 @@ router.get('/companies/:id/agency-send-emails', authenticate, requireSuperAdmin,
   }
 });
 
-// 추가 — 주소는 정규화(주소만 추출·소문자) 후 저장. 귀속 사용자는 그 회사 소속·활성이어야 한다
+// ★0827 Codex 1R medium — 코드 선배포·DDL 후행 창에서 옛 전역 UNIQUE(email_norm 단독) 충돌을
+//   "같은 사용자 중복"으로 오안내하지 않는다. constraint 이름으로 옛/새를 가른다(이름이 안 오면 409 유지).
+const agencyEmailUniqueConflict = (res: Response, err: any, takenMessage: string) => {
+  if (err?.constraint === 'uq_agency_email_sender_active') {
+    return res.status(503).json({
+      success: false,
+      code: 'DB_MIGRATION_PENDING',
+      error: 'DB 마이그레이션 필요: agency_send_email_senders 활성 UNIQUE 교체(설계서 §20-4) 실행 요청',
+    });
+  }
+  return res.status(409).json({ success: false, code: 'EMAIL_TAKEN', error: takenMessage });
+};
+
+// 추가 — 주소는 정규화(주소만 추출·소문자) 후 저장. 귀속 사용자는 그 회사 소속·활성이어야 한다.
+// ★2026-08-27 §18-13 같은 주소를 여러 귀속(청구 계정)에 등록할 수 있다(대행 실무 = 담당자 1명이
+//   청구 계정 여러 개를 대신 요청). 다중이 되는 등록은 표시명 필수 — 담당자가 요청서 "청구 계정" 칸에
+//   그 이름을 적어 지정한다. 표시명·로그인 ID가 기존 행과 겹치면 지정 판정이 안 되므로 등록에서 막는다.
+// ⛔ 검사와 쓰기는 **이메일 단위 advisory lock 한 트랜잭션**(★0827 Codex 1R high) — 조회·INSERT가
+//   갈라져 있으면 동시 등록 두 건이 서로를 못 보고 겹치는 키로 함께 들어간다. 겹침 판정 = senderKeyClash
+//   한 벌(재활성 PATCH와 공용).
 router.post('/companies/:id/agency-send-emails', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const email = normalizeSenderEmail(req.body?.email);
   const userId = String(req.body?.userId || '');
   const label = String(req.body?.label || '').trim().slice(0, 100) || null;
   if (!email || email.length > 320) return res.status(400).json({ success: false, error: '이메일 주소 형식을 확인해 주세요.' });
   if (!userId) return res.status(400).json({ success: false, error: '접수를 귀속할 사용자를 골라 주세요.' });
+  // ★0827 Codex 2R — 커넥션 획득도 오류 계약 안에서(풀 고갈·failover가 JSON 오류 없이 새는 것 방지)
+  let client: PoolClient | null = null;
   try {
-    const u = await query(
-      `SELECT id FROM users WHERE id = $1::uuid AND company_id = $2::uuid AND is_active = true AND status = 'active'`,
+    const c = await pool.connect();
+    client = c;
+    await c.query('BEGIN');
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`agency-email:${email}`]);
+    const u = await c.query(
+      `SELECT id, login_id FROM users WHERE id = $1::uuid AND company_id = $2::uuid AND is_active = true AND status = 'active'`,
       [userId, req.params.id],
     );
     if (u.rows.length === 0) {
+      await c.query('ROLLBACK');
       return res.status(400).json({ success: false, error: '그 회사의 활성 사용자만 귀속할 수 있습니다.' });
     }
-    const inserted = await query(
+    // 같은 활성 주소의 기존 등록(회사 무관 · 전역) — 잠금 안에서 읽어 동시 등록과의 경합을 없앤다
+    const existing = await c.query(
+      `SELECT s.label, us.login_id FROM agency_send_email_senders s
+        LEFT JOIN users us ON us.id = s.user_id
+       WHERE s.email_norm = $1 AND s.is_active`,
+      [email],
+    );
+    let warning: string | null = null;
+    if (existing.rows.length > 0) {
+      if (!label) {
+        await c.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          error: '이 주소는 이미 다른 계정에 등록되어 있습니다. 여러 계정에 등록하려면 표시명(청구 계정 이름)을 적어 주세요. 담당자가 요청서의 "청구 계정" 칸에 이 이름을 적어 청구 계정을 지정합니다.',
+        });
+      }
+      // 지정 대조 키 충돌 예방 — 겹치면 matchBillingTarget이 ambiguous가 되어 그 주소의 접수가 전부 반려된다
+      if (senderKeyClash(
+        existing.rows.map((row: any) => ({ label: row.label ?? null, loginId: row.login_id ?? null })),
+        { label, loginId: u.rows[0].login_id ?? null },
+      )) {
+        await c.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          error: '표시명 또는 귀속 계정의 로그인 아이디가 이 주소의 기존 등록과 겹칩니다. 담당자가 지정할 때 구분되도록 다른 표시명을 적어 주세요.',
+        });
+      }
+      if (existing.rows.some((r: any) => !r.label)) {
+        warning = '이 주소의 기존 등록 중 표시명이 없는 행이 있습니다. 담당자는 그 계정을 로그인 아이디로만 지정할 수 있으니, 필요하면 그 행을 삭제하고 표시명을 넣어 다시 등록해 주세요.';
+      }
+    }
+    const inserted = await c.query(
       `INSERT INTO agency_send_email_senders (company_id, email_norm, user_id, label, created_by)
        VALUES ($1::uuid, $2, $3::uuid, $4, $5::uuid)
        RETURNING id, email_norm, user_id, label, is_active, created_at`,
       [req.params.id, email, userId, label, req.user?.userId || null],
     );
+    await c.query('COMMIT');
     console.log(`[Admin] 허용 이메일 추가: company=${req.params.id} email=${email}`);
-    return res.status(201).json({ success: true, sender: inserted.rows[0] });
+    return res.status(201).json({ success: true, sender: inserted.rows[0], warning });
   } catch (err: any) {
+    if (client) await client.query('ROLLBACK').catch(() => { /* noop */ });
     if (err?.code === '23505') {
-      return res.status(409).json({ success: false, code: 'EMAIL_TAKEN', error: '이미 다른 곳에 등록된 주소입니다.' });
+      return agencyEmailUniqueConflict(res, err, '이 주소는 이미 그 사용자에 등록되어 있습니다.');
     }
     if (isAgencyEmailMissingRelation(err)) return agencyEmailMigrationPending(res);
     console.error('[Admin] 허용 이메일 추가 실패:', err);
     return res.status(500).json({ success: false, error: '허용 이메일을 추가하지 못했습니다.' });
+  } finally {
+    client?.release();
   }
 });
 
 // 주소별 활성 토글 · "전부 비활성"(id 대신 all=true · 긴급 정지, 등록 보존)
+// ★0827 Codex 1R high — **재활성도 등록과 같은 키 겹침 검사를 지난다**(senderKeyClash 한 벌 · 이메일 단위
+//   잠금). 무검사면 "등록 → 비활성 → 교차 키 등록 → 재활성"으로 전 지정값이 ambiguous인 활성 집합이
+//   만들어져 그 주소의 접수가 전부 반려된다. 비활성 방향은 집합을 줄이므로 무검사.
 router.patch('/companies/:id/agency-send-emails/:senderId', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const active = req.body?.isActive === true;
+  // ★0827 Codex 2R — 커넥션 획득도 오류 계약 안에서(POST와 같은 형태)
+  let client: PoolClient | null = null;
   try {
-    const updated = await query(
+    const c = await pool.connect();
+    client = c;
+    await c.query('BEGIN');
+    if (active) {
+      const target = await c.query(
+        `SELECT s.id, s.email_norm, s.label, us.login_id FROM agency_send_email_senders s
+          LEFT JOIN users us ON us.id = s.user_id
+         WHERE s.id = $1::uuid AND s.company_id = $2::uuid`,
+        [req.params.senderId, req.params.id],
+      );
+      if (target.rows.length === 0) {
+        await c.query('ROLLBACK');
+        return res.status(404).json({ success: false, error: '등록된 주소를 찾을 수 없습니다.' });
+      }
+      const t = target.rows[0];
+      await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`agency-email:${t.email_norm}`]);
+      const others = await c.query(
+        `SELECT s.label, us.login_id FROM agency_send_email_senders s
+          LEFT JOIN users us ON us.id = s.user_id
+         WHERE s.email_norm = $1 AND s.is_active AND s.id <> $2::uuid`,
+        [t.email_norm, t.id],
+      );
+      if (others.rows.length > 0 && senderKeyClash(
+        others.rows.map((row: any) => ({ label: row.label ?? null, loginId: row.login_id ?? null })),
+        { label: t.label ?? null, loginId: t.login_id ?? null },
+      )) {
+        await c.query('ROLLBACK');
+        return res.status(409).json({
+          success: false,
+          code: 'EMAIL_TAKEN',
+          error: '이 주소의 다른 활성 등록과 표시명 또는 로그인 아이디가 겹쳐 다시 켤 수 없습니다. 이 행을 삭제하고 구분되는 표시명으로 다시 등록해 주세요.',
+        });
+      }
+    }
+    const updated = await c.query(
       `UPDATE agency_send_email_senders SET is_active = $1, updated_at = NOW()
         WHERE id = $2::uuid AND company_id = $3::uuid
         RETURNING id, email_norm, is_active`,
       [active, req.params.senderId, req.params.id],
     );
-    if (updated.rows.length === 0) return res.status(404).json({ success: false, error: '등록된 주소를 찾을 수 없습니다.' });
+    if (updated.rows.length === 0) {
+      await c.query('ROLLBACK');
+      return res.status(404).json({ success: false, error: '등록된 주소를 찾을 수 없습니다.' });
+    }
+    await c.query('COMMIT');
     return res.json({ success: true, sender: updated.rows[0] });
   } catch (err: any) {
+    if (client) await client.query('ROLLBACK').catch(() => { /* noop */ });
     if (err?.code === '23505') {
-      // 비활성 사이에 다른 회사가 같은 주소를 활성 등록한 경우 — 어느 회사인지는 노출하지 않는다(§18-8 9)
-      return res.status(409).json({ success: false, code: 'EMAIL_TAKEN', error: '이미 다른 곳에 등록된 주소입니다.' });
+      // (email_norm, user_id) 부분 UNIQUE 기준 — 비활성 사이에 같은 주소·같은 귀속의 활성 행이 생긴 경우
+      return agencyEmailUniqueConflict(res, err, '같은 주소와 귀속의 활성 등록이 이미 있습니다.');
     }
     if (isAgencyEmailMissingRelation(err)) return agencyEmailMigrationPending(res);
     console.error('[Admin] 허용 이메일 상태 변경 실패:', err);
     return res.status(500).json({ success: false, error: '상태를 바꾸지 못했습니다.' });
+  } finally {
+    client?.release();
   }
 });
 

@@ -55,6 +55,20 @@
 
 ## 2) 활성 버그
 
+### 🟢 B-0827-4 대행발송 이메일 접수 — 담당자 1명이 여러 청구 계정을 대신 요청할 수 없다 (🟢 수정 완료·배포 대기) — 2026-08-27 접수 `cmtb5y3pv02qwjnotttqxen6a`(서수란 P2)
+
+> **접수**: "귀속 계정은 여러 개인데 요청 담당자가 1~2명이면 메일 대행을 이용할 수 없다(귀속 계정에 중복 이메일 등록 불가)." 사례 4(금강제화·시세이도·동국제약·송지오옴므) 전부 = 담당자 주소 1개가 청구 계정 여러 개를 대신 요청하고 건별로 청구 계정을 지정하는 실무.
+> **원인**: `uq_agency_email_sender_active (email_norm) WHERE is_active`(활성 주소 전역 1행) + `resolveEmailSender` 2행 이상 = fail-closed. §18 설계가 "주소 1 = 귀속 1"만 상정. 귀속 = `created_by` = 정산 계정이라 청구 정확성 문제다.
+> **수정**(설계서 §20 소유): 활성 UNIQUE를 `(email_norm, user_id)`로 교체(DDL 1 · 코드 선배포 안전) · `choose` outcome + 요청서 "청구 계정" 칸(선택 · 별칭 4종) + `matchBillingTarget`(표시명·로그인 ID **정확 일치** · 자동 선택 0 · 못 고르면 반려 회신에 계정 목록) · 회사 축 게이트(`enforceCompanyGates`)를 귀속 확정 직후 한 벌로 재배열 · 등록 라우트 = 다중 등록 표시명 필수 + 겹침 400(ambiguous 예방) · 모달 = 청구 계정 뱃지·안내문. 후보 1개 기존 업체는 동작 무변화. 정산 축 새 값 0(created_by 확정 이후 기존 배관 그대로).
+> **Codex 적대 1R 정정 4건 + 2R 정정 1건**(§20-6 소유): 등록 POST·재활성 PATCH를 이메일 단위 advisory lock 한 트랜잭션 + `senderKeyClash` 한 벌로(재활성 우회 = 전 지정값 ambiguous 차단) · resolver JOIN에 회사 일치 조건(교차 테넌트 fail-closed) · owner_inactive 귀속은 회사 1개일 때만 · 청구 확정을 form 반려보다 앞으로 · 옛 UNIQUE 23505 = 503 마이그레이션 안내 · 커넥션 획득을 오류 계약 안으로. 2R = high·critical 0 종결. **수용 위험 1**(§20-6): form 파싱 전 반려(첨부 불량·시트 누락)는 다중 귀속 주소에서 회사 미기록으로 남는다(구조적 불가피 · 상한 기본 무제한이라 실효 0 · 상한 재조임 때 함께 볼 것). (백엔드 tsc 0 · vitest 205파일 3,175 · 신규 테스트 12 + 회귀 주입(부분 일치 훼손 = 실패) 확인 · 프론트 tsc 0·production 빌드 통과 · 양식 재생성+파서 왕복 실측)
+
+### 🟢 B-0827-3 이메일·DM 서체 선택 — 12종 미리보기가 전부 같은 글꼴로 보인다 (🟢 수정 완료·배포 대기) — 2026-08-27 접수 `cmtb7zjd40375jnotvo50ic11`(임은지 P2)
+
+> **접수**: "서체를 클릭하면 여러 글꼴이 보이는데 실제 글씨체가 다 동일해 보여서 하나씩 지정해서 봐야 한다. 서체 목록부터 어떤 글꼴인지 보이면 좋겠다."
+> **확인된 사실**: 미리보기 코드는 처음부터 실서체 지정(`style={{ fontFamily }}`)이었고 자가호스팅 `fonts.css`도 로드하고 있었다(운영 200 실측·woff2 50개=카탈로그 산술 일치). 죽인 것은 `index.css:5`의 **`*, *::before, *::after { font-family: 'Pretendard' … !important }`**(first commit부터) — 스타일시트 `!important`는 인라인 style을 이기므로 앱 문서 안 모든 서체 지정이 프리텐다드로 강제된다. 발송 메일·발행 뷰어·이메일 미리보기 iframe은 별도 문서라 정상 → "적용하면 결과물은 바뀌는데 고르는 화면에선 다 똑같은" 현상.
+> **수정**: 전역 규칙은 무접촉으로 두고 바로 아래 특이성 우위 탈출 규칙 `.font-live, .font-live * { font-family: var(--font-live, inherit) !important }` 신설(!important끼리는 특이성 순). 서체 미리보기 5곳(EmailFontModal·FontApplyModal 2곳·BrandKitModal FontPicker·DesignThemeModal·EmailDesignThemeModal 서체 샘플)을 `className="font-live"`+`--font-live` 변수로 치환. 동행 정리 = 4벌 중복이던 fonts.css link 주입을 CT `utils/brand-fonts.ts` `ensureSelfHostFontsLoaded()`로 통합(6곳 소비·인라인 잔존 0), 로드가 아예 없던 테마 모달 2곳에 로드 추가. 백엔드·DB 변경 0. (프론트 tsc 0·production 빌드 통과·산출물 CSS 규칙 실존 grep 확인)
+> ⛔ **[추가 과제 — 미착수]** 같은 전역 `!important` 때문에 DM 편집 캔버스(`var(--dm-font-display)` 인라인 소비)·인앱 BlockPreview 등 same-document 서체 표시 전부가 눌려 있다(서체 바꾼 고객은 캔버스=프리텐다드·발행물=실서체로 갈림 — "편집 화면=발행물" 서체 축 위반). 근본 수정 = 전역 `!important` 제거인데 인라인 fontFamily 21파일 51곳이 전부 소생하는 앱 전체 영향이라 별도 세션 축으로 분리.
+
 ### 🟢 B-0827-2 이메일 캠페인 — 서체를 고를 입구가 없다 (🟢 신설 완료·배포 대기) — 2026-08-27 접수 `cmtb6kn6j0369jnotmslux7i2`(임은지 P2)
 
 > **접수**: "모바일 DM에서 전체 서체를 지정할 수 있는 것처럼 이메일도 서체 지정이 있으면 좋겠습니다."

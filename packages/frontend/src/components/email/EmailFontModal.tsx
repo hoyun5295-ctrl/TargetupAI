@@ -8,9 +8,10 @@
 // ⛔ 서체 목록은 DM_FONT_CATALOG **단일 소스**를 그대로 쓴다. 사본을 만들면 곧 한쪽만 갱신된다.
 // 미리보기 글꼴 = /api/dm/v/fonts.css 자가호스팅(편집 캔버스·발송 메일과 같은 파일) — 보이는 대로 나간다.
 // 커스텀 다크 모달(native dialog 0 · 백드롭 클릭 닫힘 없음 — X/취소만).
-import { useEffect } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import { Check, RotateCcw, Type, X } from 'lucide-react';
 import { DM_FONT_CATALOG } from '../../utils/dm-tokens';
+import { ensureSelfHostFontsLoaded } from '../../utils/brand-fonts';
 import type { EmailDesign } from '../../utils/email-themes';
 
 export default function EmailFontModal({
@@ -22,15 +23,7 @@ export default function EmailFontModal({
   onClose: () => void;
 }) {
   // 미리보기용 자가호스팅 서체 로드 — 발송 메일이 쓰는 파일과 동일(idempotent).
-  useEffect(() => {
-    const ID = 'dm-selfhost-fonts';
-    if (document.getElementById(ID)) return;
-    const link = document.createElement('link');
-    link.id = ID;
-    link.rel = 'stylesheet';
-    link.href = '/api/dm/v/fonts.css';
-    document.head.appendChild(link);
-  }, []);
+  useEffect(() => { ensureSelfHostFontsLoaded(); }, []);
 
   const currentFamily = current?.font_family || '';
   const isActive = (css: string) =>
@@ -71,8 +64,9 @@ export default function EmailFontModal({
                     <span className="text-[11px] text-white/50">{f.label}</span>
                     {active && <Check className="w-3.5 h-3.5 text-violet-300 shrink-0" />}
                   </div>
-                  {/* 실제 글꼴로 크게 — 어떤 서체인지 이름이 아니라 모양으로 고른다 */}
-                  <div className="text-[19px] leading-snug text-white truncate" style={{ fontFamily: f.css }}>
+                  {/* 실제 글꼴로 크게 — 어떤 서체인지 이름이 아니라 모양으로 고른다.
+                      .font-live = index.css 전역 !important 서체 강제의 탈출구(인라인 fontFamily는 눌려서 무효). */}
+                  <div className="font-live text-[19px] leading-snug text-white truncate" style={{ ['--font-live']: f.css } as CSSProperties}>
                     가나다 마케팅 ABC 123
                   </div>
                 </button>

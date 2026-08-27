@@ -5,7 +5,9 @@
  * ⛔ 즉시 저장(추가 POST · 상태 PATCH · 삭제 DELETE)이고 목록은 **서버 응답으로 통째 교체**한다.
  *   부모 회사 편집 모달의 낙관적 갱신+롤백 패턴을 복제하지 않는다(스테일 클로저 유실 · LESSONS_FRONTEND).
  * ⛔ 귀속 사용자 필수 — 이 주소로 온 접수의 created_by(발송·정산 귀속)가 된다.
- * ⛔ 활성 주소는 전역 유일 — 409(EMAIL_TAKEN)는 "이미 다른 곳에 등록"으로만 보이고 어느 회사인지는 안 보인다.
+ * ★2026-08-27 §18-13 같은 주소를 여러 귀속(청구 계정)에 등록할 수 있다(담당자 1명이 청구 계정 여러 개를
+ *   대신 요청하는 대행 실무). 다중 등록의 표시명 = 담당자가 요청서 "청구 계정" 칸에 적는 지정 이름.
+ *   충돌 검사(표시명 필수·지정 이름 겹침)는 서버(routes/admin.ts)가 소유하고 여기는 메시지만 보여 준다.
  * 톤 = 부모(AdminDashboard 회사 편집)와 같은 흰 모달 + 인디고. 스크림 z-[60](중첩 모달 관례).
  */
 import { useEffect, useRef, useState } from 'react';
@@ -104,6 +106,8 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
         return false;
       }
       if (okMessage) showAlert('완료', okMessage, 'success');
+      // ★0827 §18-13 서버가 함께 보내는 안내(예: 표시명 없는 기존 행) — 성공은 성공대로, 안내는 안내대로
+      if (data?.warning) showAlert('확인해 주세요', String(data.warning), 'warning');
       await load();
       return true;
     } catch {
@@ -226,7 +230,8 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
                 </div>
                 {formError && <p className="mt-2 text-[12.5px] font-medium text-rose-600">{formError}</p>}
                 <p className="mt-2 text-[12px] text-neutral-500">
-                  접수 메일의 보낸 주소와 글자 그대로 일치해야 합니다. 같은 주소는 한 곳에만 등록할 수 있습니다.
+                  접수 메일의 보낸 주소와 글자 그대로 일치해야 합니다. 같은 주소를 여러 계정에 등록할 수 있고,
+                  그 경우 담당자가 요청서의 "청구 계정" 칸에 표시명을 적어 어느 계정으로 청구할지 지정합니다.
                 </p>
               </div>
 
@@ -243,12 +248,21 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
                   <ul className="space-y-2">
                     {senders.map((s) => {
                       const ownerBroken = s.user_is_active !== true || s.user_status !== 'active';
+                      // ★0827 §18-13 같은 활성 주소가 여러 귀속에 등록됐으면, 각 행의 지정 이름(표시명 · 없으면
+                      //   로그인 아이디)이 담당자가 요청서 "청구 계정" 칸에 적을 값이다 — 뱃지로 보여 준다.
+                      const shared = s.is_active && senders.filter((o) => o.is_active && o.email_norm === s.email_norm).length > 1;
                       return (
                         <li key={s.id} className={`rounded-xl border px-3.5 py-2.5 flex items-center gap-3 ${s.is_active ? 'border-neutral-200 bg-white' : 'border-neutral-150 bg-neutral-50 opacity-70'}`}>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="text-[13.5px] font-semibold text-neutral-800 truncate">{s.email_norm}</span>
-                              {s.label && <span className="text-[12px] text-neutral-500 truncate">{s.label}</span>}
+                              {shared ? (
+                                <span className="shrink-0 text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-full truncate">
+                                  청구 계정: {s.label || s.user_login_id || '(이름 없음)'}
+                                </span>
+                              ) : (
+                                s.label && <span className="text-[12px] text-neutral-500 truncate">{s.label}</span>
+                              )}
                             </div>
                             <div className="mt-0.5 text-[12px] text-neutral-500 truncate">
                               귀속: {s.user_login_id ? `${s.user_login_id}${s.user_name && s.user_name !== s.user_login_id ? ` - ${s.user_name}` : ''}` : '(사용자 없음)'}

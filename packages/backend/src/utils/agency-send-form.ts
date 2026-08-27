@@ -42,6 +42,12 @@ export interface ParsedAgencyForm {
    * 붙이므로 무시하고, **이메일 접수만** 이 값이 있으면 반려한다(첨부 없는 이미지 지정 = 기대와 다른 발송).
    */
   imageFileName: string;
+  /**
+   * ★2026-08-27 §18-13 "청구 계정" 칸(선택). 한 이메일 주소가 여러 귀속(청구 계정)에 등록된 경우
+   * 어느 계정 명의로 접수·청구할지 담당자가 지정한다. 대조는 워커가 matchBillingTarget으로 한다.
+   * 선택 항목이라 비면 '' (귀속이 1개인 대부분 업체는 적을 필요가 없다).
+   */
+  billingTarget: string;
   errors: AgencyFormError[];
 }
 
@@ -191,7 +197,7 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
   } catch {
     return {
       subject: '', content: '', requestedAtText: '', requestedAt: null, callbackRaw: '',
-      isAd: true, managerPhones: [], phoneColumnName: '', imageFileName: '',
+      isAd: true, managerPhones: [], phoneColumnName: '', imageFileName: '', billingTarget: '',
       errors: [{ field: '요청서', error: '요청서 파일을 읽지 못했습니다. 양식 그대로인지 확인해 주세요.' }],
     };
   }
@@ -213,6 +219,8 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
     // ★2026-08-26(2) 업계 양식 칸 — 문자타입은 알림톡·친구톡 반려 판정에만 쓴다(타입 자체는 배관이 정한다)
     { field: '문자타입', labels: ['문자타입', '문자 타입', '메시지타입', '메시지 타입'] },
     { field: '이미지 파일명', labels: ['이미지 파일명', '이미지파일명'] },
+    // ★2026-08-27 §18-13 신설(선택) — 한 주소가 여러 청구 계정에 등록된 경우의 지정 칸(이메일 접수 전용 소비)
+    { field: '청구 계정', labels: ['청구 계정', '청구계정', '청구 부서', '청구부서', '귀속 계정', '귀속계정', '청구 계정명'] },
   ];
   const occurrences: Array<{ label: string; value: string }> = [];
   for (const r of rows) {
@@ -272,7 +280,10 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
   if (!callbackRaw) errors.push({ field: '회신번호', error: '회신번호 칸이 비어 있습니다. 번호 또는 명단의 열 이름을 적어 주세요.' });
   if (managerPhones.length === 0) errors.push({ field: '담당자 번호', error: '테스트 문자를 받을 담당자 휴대폰 번호가 없습니다.' });
 
-  return { subject, content, requestedAtText, requestedAt, callbackRaw, isAd, managerPhones, phoneColumnName, imageFileName, errors };
+  return {
+    subject, content, requestedAtText, requestedAt, callbackRaw, isAd, managerPhones, phoneColumnName,
+    imageFileName, billingTarget: pick('청구 계정'), errors,
+  };
 }
 
 /** 명단 상한. 접수 상한(3만)의 두 배까지 읽고 그 위는 자른다(초과는 분석 단계가 반려한다) */

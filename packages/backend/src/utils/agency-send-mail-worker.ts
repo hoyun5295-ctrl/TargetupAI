@@ -7,6 +7,8 @@
  * ⛔ 불변(어기면 사고):
  *   - 서버 메일은 건드리지 않는다(DELE 0). 처리 상태의 진실 = intake 원장 단독(§18-5).
  *   - 신원 게이트 = allowlist_only(정확 일치). 판정·자격·ENV 확인은 접수 직전 **단일 지점**(§18-2).
+ *   - ★0827 §18-13 귀속(청구 계정) 후보가 여럿이면 요청서 "청구 계정" 지정으로만 확정한다.
+ *     돈 귀속이라 자동 선택 0 — 지정이 없거나 못 찾으면 반려(회신에 그 주소의 계정 목록 안내).
  *   - 신원 통과 전에는 본문·첨부를 내려받지 않는다(TOP 헤더만 · 무인증 첨부 폭탄 방어).
  *   - 확정 경로 AI 0(analyzeOneStep aiSuggest=false) · 리드타임 집행은 코어(pre.minLeadMinutes).
  *   - 반려 메일은 접수 행을 만들지 않는다(원장에만) · 회신은 발신 주소 ∧ 활성 허용 목록 교집합에만.
@@ -18,7 +20,7 @@ import crypto from 'crypto';
 import { simpleParser, type ParsedMail } from 'mailparser';
 import pool, { query } from '../config/database';
 import { Pop3Client, Pop3Error } from './pop3-client';
-import { resolveEmailSender } from './agency-send-email';
+import { resolveEmailSender, matchBillingTarget, describeBillingTargets, type SenderCandidate } from './agency-send-email';
 import { canUseAgencySend, loadPlanContext } from './plan-guard';
 import { getRegisteredCallbackSet } from './callback-filter';
 import {
@@ -340,28 +342,24 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     });
     return;
   }
-  if (sender.outcome === 'ambiguous') {
-    await finalizeIntake(claimed.id, 'rejected', { reason: 'ambiguous_sender', replyStatus: 'skipped' });
-    await sendSystemAlert({
-      dedupKey: 'agency-mail-ambiguous-sender',
-      message: `대행발송 허용 이메일에 같은 활성 주소가 2행 이상입니다(fail-closed 반려 중): ${fromAddr}`,
-      cooldownMs: 60 * 60 * 1000,
-    });
-    return;
-  }
   if (sender.outcome === 'owner_inactive') {
     await finalizeIntake(claimed.id, 'rejected', { reason: 'owner_inactive', companyId: sender.companyId, replyStatus: 'pending' });
     await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
       buildRejectedReply(['접수 설정에 문제가 있어 접수되지 않았습니다. 한줄로 담당자에게 문의해 주세요.']), messageId, 'owner_inactive');
     await sendSystemAlert({
-      dedupKey: `agency-mail-owner-inactive:${sender.companyId}`,
+      // ★0827 회사 미확정(여러 회사에 걸린 주소)이면 주소로 dedup — null 키 하나로 전 주소가 접히면 안 된다
+      dedupKey: `agency-mail-owner-inactive:${sender.companyId ?? fromAddr}`,
       message: `대행발송 허용 이메일의 귀속 사용자가 비활성입니다. 접수가 반려되고 있습니다: ${fromAddr}`,
       cooldownMs: 6 * 60 * 60 * 1000,
     });
     return;
   }
 
-  const auth = { companyId: sender.companyId, userId: sender.userId };
+  // ★2026-08-27 §18-13 — 사용 가능한 귀속(청구 계정)이 1개면 즉시 확정, 여러 개면 요청서의
+  //   "청구 계정" 지정으로 확정을 미룬다. 돈 귀속이라 자동 선택은 없다(지정 못 하면 반려).
+  let auth: { companyId: string; userId: string } | null =
+    sender.outcome === 'ok' ? { companyId: sender.candidate.companyId, userId: sender.candidate.userId } : null;
+  const candidates: SenderCandidate[] = sender.outcome === 'ok' ? [sender.candidate] : sender.candidates;
 
   // 4) 일일 상한(메일 통수 · KST 당일 · §18-7) — 초과는 지연이 아니라 거절.
   //    ★2026-08-26(6) 값이 0이면 그 축은 아예 세지 않는다(기본 무제한 · 쿼리도 돌지 않는다).
@@ -372,38 +370,45 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       [ctx.mailbox, fromAddr, midnight, claimed.id],
     );
     if ((senderCount.rows[0]?.c || 0) >= DAILY_SENDER_LIMIT) {
-      await finalizeIntake(claimed.id, 'rejected', { reason: 'daily_sender_limit', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
+      await finalizeIntake(claimed.id, 'rejected', { reason: 'daily_sender_limit', companyId: auth?.companyId ?? null, userId: auth?.userId ?? null, replyStatus: 'pending' });
       await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
         buildRejectedReply([`이 주소로는 하루 ${DAILY_SENDER_LIMIT}통까지 접수할 수 있습니다. 내일 다시 보내시거나 화면에서 접수해 주세요.`]), messageId, 'daily_sender_limit');
       return;
     }
   }
-  if (DAILY_COMPANY_LIMIT > 0) {
-    const companyCount = await query(
-      `SELECT COUNT(*)::int AS c FROM agency_send_email_intake WHERE mailbox = $1 AND company_id = $2::uuid AND claimed_at >= $3::timestamptz AND id <> $4`,
-      [ctx.mailbox, auth.companyId, midnight, claimed.id],
-    );
-    if ((companyCount.rows[0]?.c || 0) >= DAILY_COMPANY_LIMIT) {
-      await finalizeIntake(claimed.id, 'rejected', { reason: 'daily_company_limit', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
-      await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
-        buildRejectedReply([`회사 기준 하루 ${DAILY_COMPANY_LIMIT}통까지 접수할 수 있습니다. 내일 다시 보내시거나 화면에서 접수해 주세요.`]), messageId, 'daily_company_limit');
-      return;
-    }
-  }
 
-  // 5) 자격(회사 스위치 AND 유료) — 네 번째 우회 입구 방지(§18-2)
-  const ctxPlan = await loadPlanContext(auth.companyId);
-  if (!canUseAgencySend(ctxPlan)) {
-    await finalizeIntake(claimed.id, 'rejected', { reason: 'not_allowed', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
-    await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
-      buildRejectedReply(['대행발송이 열려 있지 않은 계정입니다. 한줄로 담당자에게 문의해 주세요.']), messageId, 'not_allowed');
-    return;
-  }
+  // 4b+5) 회사 축 게이트(일일 상한 company + 자격) — **귀속 확정 직후** 한 자리에서만 부른다(판정 두 벌 금지).
+  //   후보 1개 경로는 여기(첨부 내려받기 전 = 기존 방어 유지), 후보 여러 개 경로는 요청서에서 청구 계정을
+  //   확정한 직후(구조상 RETR 뒤일 수밖에 없다 — 후보 전원이 등록 회사라 §18-2 우회 입구는 아니다).
+  const enforceCompanyGates = async (acct: { companyId: string; userId: string }): Promise<boolean> => {
+    if (DAILY_COMPANY_LIMIT > 0) {
+      const companyCount = await query(
+        `SELECT COUNT(*)::int AS c FROM agency_send_email_intake WHERE mailbox = $1 AND company_id = $2::uuid AND claimed_at >= $3::timestamptz AND id <> $4`,
+        [ctx.mailbox, acct.companyId, midnight, claimed.id],
+      );
+      if ((companyCount.rows[0]?.c || 0) >= DAILY_COMPANY_LIMIT) {
+        await finalizeIntake(claimed.id, 'rejected', { reason: 'daily_company_limit', companyId: acct.companyId, userId: acct.userId, replyStatus: 'pending' });
+        await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
+          buildRejectedReply([`회사 기준 하루 ${DAILY_COMPANY_LIMIT}통까지 접수할 수 있습니다. 내일 다시 보내시거나 화면에서 접수해 주세요.`]), messageId, 'daily_company_limit');
+        return false;
+      }
+    }
+    // 자격(회사 스위치 AND 유료) — 네 번째 우회 입구 방지(§18-2)
+    const ctxPlan = await loadPlanContext(acct.companyId);
+    if (!canUseAgencySend(ctxPlan)) {
+      await finalizeIntake(claimed.id, 'rejected', { reason: 'not_allowed', companyId: acct.companyId, userId: acct.userId, replyStatus: 'pending' });
+      await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
+        buildRejectedReply(['대행발송이 열려 있지 않은 계정입니다. 한줄로 담당자에게 문의해 주세요.']), messageId, 'not_allowed');
+      return false;
+    }
+    return true;
+  };
+  if (auth && !(await enforceCompanyGates(auth))) return;
 
   // 6) 크기 게이트(RETR 전 · 첨부 폭탄 방어)
   const octets = ctx.octets.get(seq) || 0;
   if (octets > MAX_MESSAGE_OCTETS) {
-    await finalizeIntake(claimed.id, 'rejected', { reason: 'too_large', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
+    await finalizeIntake(claimed.id, 'rejected', { reason: 'too_large', companyId: auth?.companyId ?? null, userId: auth?.userId ?? null, replyStatus: 'pending' });
     await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
       buildRejectedReply(['메일이 너무 큽니다. 요청서 양식 파일 하나만 첨부해 다시 보내주세요(15MB 이내).']), messageId);
     return;
@@ -413,8 +418,9 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   const raw = await ctx.client.retr(seq);
   const mail: ParsedMail = await simpleParser(raw);
   const atts = (mail.attachments || []).filter((a) => a.contentDisposition !== 'inline' && !a.cid);
+  // 청구 계정 미확정(auth null) 반려는 회사·사용자 없이 기록한다 — 후보가 여러 회사일 수 있어 추정 기록은 오귀속이다
   const reject = async (reasons: string[], reasonCode: string, headers?: string[]) => {
-    await finalizeIntake(claimed.id, 'rejected', { reason: reasonCode, companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
+    await finalizeIntake(claimed.id, 'rejected', { reason: reasonCode, companyId: auth?.companyId ?? null, userId: auth?.userId ?? null, replyStatus: 'pending' });
     await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가', buildRejectedReply(reasons, headers), messageId);
   };
 
@@ -467,6 +473,43 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
 
   // 8) 이메일 전용 사전 게이트(§18-3) — 확인 화면이 없는 경로의 추가 반려 규칙
   const form = parseAgencyRequestForm(formBuf);
+
+  // 8b) ★2026-08-27 §18-13 청구 계정 확정 — 후보가 여럿이면 요청서의 "청구 계정" 지정이 필수다.
+  //   돈 귀속(created_by = 발송·정산 계정)이라 자동 선택은 없다. 하나여도 지정이 적혀 있으면 대조해서
+  //   다르면 반려한다(담당자가 지정한 계정과 다른 계정으로 조용히 청구되는 경로 차단).
+  //   ⛔ 확정은 form 기반 반려(이미지 파일명 등)보다 **먼저**다(★0827 Codex 1R) — 청구 계정이 제대로
+  //   적힌 반려 건이 회사·사용자 없이 기록되고 회사 축 상한·자격을 건너뛰면 원장과 상한이 부정확해진다.
+  const targetList = describeBillingTargets(candidates);
+  if (!auth) {
+    if (!form.billingTarget) {
+      await reject([`이 이메일 주소는 청구 계정 여러 개에 등록되어 있어 어느 계정으로 접수할지 지정이 필요합니다. 요청서 빈 줄에 "청구 계정" 항목을 추가하고 다음 중 하나를 적어 다시 보내주세요: ${targetList}`], 'billing_target_required');
+      return;
+    }
+    const match = matchBillingTarget(candidates, form.billingTarget);
+    if (match.outcome === 'not_found') {
+      await reject([`요청서에 적힌 청구 계정 "${form.billingTarget}"을(를) 찾지 못했습니다. 다음 중 하나를 그대로 적어 주세요: ${targetList}`], 'billing_target_not_found');
+      return;
+    }
+    if (match.outcome === 'ambiguous') {
+      await reject([`요청서에 적힌 청구 계정 "${form.billingTarget}"이(가) 등록된 계정 여러 개와 일치합니다. 한줄로 담당자에게 표시명 정리를 요청해 주세요.`], 'billing_target_ambiguous');
+      await sendSystemAlert({
+        dedupKey: `agency-mail-billing-target-ambiguous:${fromAddr}`,
+        message: `대행발송 허용 이메일의 청구 계정 표시명이 겹칩니다(지정 판정 불가·반려 중): ${fromAddr}`,
+        cooldownMs: 60 * 60 * 1000,
+      });
+      return;
+    }
+    auth = { companyId: match.candidate.companyId, userId: match.candidate.userId };
+    if (!(await enforceCompanyGates(auth))) return;
+  } else if (form.billingTarget) {
+    const match = matchBillingTarget(candidates, form.billingTarget);
+    if (match.outcome !== 'matched' || match.candidate.userId !== auth.userId) {
+      await reject([`요청서에 적힌 청구 계정 "${form.billingTarget}"은(는) 이 이메일 주소로 요청할 수 있는 계정이 아닙니다. 이 주소로 요청할 수 있는 계정: ${targetList}`], 'billing_target_mismatch');
+      return;
+    }
+  }
+  const acct = auth;
+
   // ★2026-08-26(2) 요청서의 "이미지 파일명" 칸에 값이 있으면 반려 — 이 경로는 이미지 첨부 자체를
   //   안 받으므로(has_image), 이름만 적힌 이미지는 실리지 못한 채 문자만 나간다(기대와 다른 발송).
   if (form.imageFileName) {
@@ -499,7 +542,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
 
   // 9) 분석(확정 경로 · AI 0 · 리드타임 240은 코어와 같은 상수) — 반려 사유는 전량 회신에 싣는다
   const overrides = parseOneStepOverrides(overridesRaw);
-  const analysis = await analyzeOneStep(auth, formBuf, listBuf, listName, overrides, false, EMAIL_MIN_LEAD_MINUTES);
+  const analysis = await analyzeOneStep(acct, formBuf, listBuf, listName, overrides, false, EMAIL_MIN_LEAD_MINUTES);
   if (analysis.errors.length > 0) {
     await reject(analysis.errors.map((e) => `[${e.field}] ${e.error}`), 'form_invalid', analysis.headers);
     return;
@@ -521,7 +564,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     `SELECT id FROM agency_send_requests
       WHERE company_id = $1::uuid AND requested_at = $2::timestamptz AND original_content = $3 AND ${EMAIL_DUP_BLOCKING_SQL}
       LIMIT 5`,
-    [auth.companyId, analysis.requestedAtIso, analysis.content],
+    [acct.companyId, analysis.requestedAtIso, analysis.content],
   );
   for (const cand of dupCandidates.rows) {
     const agg = await query(
@@ -529,7 +572,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     );
     const candHash = sha256(((agg.rows[0]?.phones as string[] | null) || []).join(','));
     if (candHash === recipientsHash) {
-      await finalizeIntake(claimed.id, 'rejected', { reason: 'duplicate_request', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
+      await finalizeIntake(claimed.id, 'rejected', { reason: 'duplicate_request', companyId: acct.companyId, userId: acct.userId, replyStatus: 'pending' });
       await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 이미 접수된 요청서입니다',
         buildRejectedReply(['같은 문안과 명단, 같은 시각의 접수가 이미 진행 중입니다. 다시 접수할 필요가 없습니다. 내용을 바꾸려면 화면에서 그 접수를 수정하거나 취소해 주세요.']),
         messageId, 'duplicate_request');
@@ -539,15 +582,15 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
 
   // 11) 접수 — 사전 조회는 트랜잭션 밖(§18-2), 코어가 검증·적재·리드타임을 집행한다
   const pre = {
-    registeredSet: await getRegisteredCallbackSet(auth.companyId, auth.userId),
-    window: await loadSendWindow(auth.companyId, analysis.isAd),
+    registeredSet: await getRegisteredCallbackSet(acct.companyId, acct.userId),
+    window: await loadSendWindow(acct.companyId, analysis.isAd),
     minLeadMinutes: EMAIL_MIN_LEAD_MINUTES,
   };
   const txClient = await pool.connect();
   let requestRow: any = null;
   try {
     await txClient.query('BEGIN');
-    const result = await createRequestCore(auth, {
+    const result = await createRequestCore(acct, {
       messageType: analysis.messageType,
       subject: analysis.subject || undefined,
       content: analysis.content,
@@ -574,7 +617,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
           SET status = 'accepted', company_id = $2::uuid, user_id = $3::uuid, request_ids = $4::uuid[],
               reply_status = 'pending', decided_at = NOW(), updated_at = NOW()
         WHERE id = $1`,
-      [claimed.id, auth.companyId, auth.userId, [requestRow.id]],
+      [claimed.id, acct.companyId, acct.userId, [requestRow.id]],
     );
     await txClient.query('COMMIT');
   } catch (txErr) {
@@ -589,7 +632,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     recipientCount: requestRow.recipient_count, messageType: requestRow.message_type,
     via: 'email', fromEmail: fromAddr, autoPickedPhoneColumn,
   });
-  log(`이메일 접수 company=${auth.companyId} request=${requestRow.id} ${requestRow.message_type} ${requestRow.recipient_count}건 from=${fromAddr}`);
+  log(`이메일 접수 company=${acct.companyId} request=${requestRow.id} ${requestRow.message_type} ${requestRow.recipient_count}건 from=${fromAddr}`);
 
   // 12) 접수 완료 회신 — 이 경로의 확인 화면(실패해도 접수는 유효 · 재시도 패스가 있다 · 회의론자 필수 3)
   await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 완료',

@@ -6,6 +6,16 @@
   font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
 }
 
+/* ★ 2026-08-27 서체 미리보기 탈출구 (임은지 접수 cmtb7zjd40375jnotvo50ic11)
+   위 전역 !important가 인라인 fontFamily까지 눌러 서체 선택 카드 12종이 전부 같은 글꼴로 보였다.
+   !important끼리는 특이성 순 — .font-live(0,1,0)가 *(0,0,0)를 이겨 지정 서체로 렌더된다.
+   사용 = className="font-live" + style={{ '--font-live': <font-family 스택> }}.
+   변수 미지정이면 inherit(부모 서체) — 무해. 서체 파일은 자가호스팅 fonts.css가 소유
+   (utils/brand-fonts.ts ensureSelfHostFontsLoaded — 발송 메일·발행 뷰어와 같은 파일). */
+.font-live, .font-live * {
+  font-family: var(--font-live, inherit) !important;
+}
+
 /* 네이티브 select 드롭다운 가독성 — 다크 테마 select(text-white)의 옵션이 OS 흰 배경에서
    흰 글씨로 안 보이는 문제 전역 차단 (2026-06-29 자동 마케팅 생성 선택 박스 신고).
    ★ 2026-07-02: !important 승격 — 컴포넌트가 [&>option]:bg-* 로 옵션 배경만 덮어써

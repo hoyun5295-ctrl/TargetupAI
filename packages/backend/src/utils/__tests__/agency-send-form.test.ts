@@ -62,6 +62,19 @@ describe('대행발송 요청서 — 라벨 파싱', () => {
     expect(fields).toContain('회신번호');
     expect(fields).toContain('담당자 번호');
   });
+
+  // ★2026-08-27 §18-13 — 한 주소가 여러 청구 계정에 등록된 경우의 지정 칸(선택 · 이메일 접수 전용 소비)
+  it('"청구 계정" 칸(선택)을 읽는다. 별칭(청구 부서·귀속 계정)도 같은 필드다', () => {
+    expect(parseAgencyRequestForm(formBuffer(FULL)).billingTarget).toBe('');
+    expect(parseAgencyRequestForm(formBuffer([...FULL, ['청구 계정', '금강']])).billingTarget).toBe('금강');
+    expect(parseAgencyRequestForm(formBuffer([...FULL, ['청구 부서', '신환']])).billingTarget).toBe('신환');
+    expect(parseAgencyRequestForm(formBuffer([...FULL, ['귀속계정', 'kumkang1']])).billingTarget).toBe('kumkang1');
+  });
+
+  it('"청구 계정" 별칭 두 개가 서로 다른 값이면 중복 반려로 모인다(의미 단위 중복 계약)', () => {
+    const f = parseAgencyRequestForm(formBuffer([...FULL, ['청구 계정', '금강'], ['청구 부서', '신환']]));
+    expect(f.errors.some((e) => e.field === '청구 계정')).toBe(true);
+  });
 });
 
 describe('대행발송 요청서 — 시각·회신번호 해석', () => {
