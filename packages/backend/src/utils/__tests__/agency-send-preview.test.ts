@@ -115,8 +115,9 @@ describe('워커·라우트 배선 (불변 4 = 조립은 한 벌)', () => {
   });
 });
 
-describe('상세 진입 문 (★0828 Harold: 미리보기를 만들어도 여는 문이 없으면 실측을 못 한다)', () => {
+describe('상세 진입 문·미리보기 모달 (★0828(2) Harold: 미리보기를 만들어도 여는 문이 없으면 실측을 못 한다)', () => {
   const read = (p: string) => fs.readFileSync(path.resolve(__dirname, p), 'utf8');
+  const MODAL = '../../../../frontend/src/components/agency/AgencyPreviewModal.tsx';
 
   it('고객 목록: 승인·재접수 버튼이 없는 행에도 상세 보기 버튼이 있다', () => {
     const page = read('../../../../frontend/src/pages/AgencySendPage.tsx');
@@ -124,17 +125,37 @@ describe('상세 진입 문 (★0828 Harold: 미리보기를 만들어도 여는
     expect(page, '행 클릭 진입이 사라지면 어포던스가 버튼 하나뿐이 된다').toMatch(/onClick=\{\(\) => setDetailId\(r\.id\)\}/);
   });
 
-  it('고객 상세: 받는 사람별 미리보기 절이 있고 서버 조립만 쓴다(화면 재구현 0)', () => {
-    const detail = read('../../../../frontend/src/components/agency/AgencySendDetail.tsx');
-    expect(detail).toMatch(/받는 사람별 발송 내용 미리보기/);
-    expect(detail).toMatch(/fetchAgencyPreview/);
-    expect(detail, '화면이 치환을 재구현하면 실물과 다른 문장을 보여 준다').not.toMatch(/replace\(\/%/);
+  it('미리보기 모달은 공용 컴포넌트 한 벌이고 두 화면이 그것을 쓴다(인라인 재구현 0)', () => {
+    const modal = read(MODAL);
+    expect(modal.length, '공용 미리보기 모달이 없다').toBeGreaterThan(100);
+    for (const consumer of [
+      '../../../../frontend/src/components/agency/AgencySendDetail.tsx',
+      '../../../../frontend/src/components/admin/AgencySendLedgerPanel.tsx',
+    ]) {
+      const src = read(consumer);
+      expect(src, `${consumer}가 공용 모달을 쓰지 않는다`).toMatch(/import AgencyPreviewModal from/);
+      expect(src).toMatch(/<AgencyPreviewModal/);
+      expect(src, '미리보기 목록을 화면이 다시 그리면 두 벌이 된다').not.toMatch(/samples[\s\S]{0,20}\.slice\(/);
+    }
   });
 
-  it('슈퍼관리자 내역: 상세 버튼 + 미리보기 모달이 있고 관리자 API를 부른다', () => {
-    const panel = read('../../../../frontend/src/components/admin/AgencySendLedgerPanel.tsx');
-    expect(panel).toMatch(/받는 사람별 발송 내용 미리보기/);
-    expect(panel).toMatch(/\/api\/admin\/agency-send\/\$\{row\.id\}\/preview/);
+  it('모달은 서버 조립 문장만 그린다 (화면 치환 재구현 0)', () => {
+    const modal = read(MODAL);
+    expect(modal).toMatch(/samples/);
+    expect(modal, '화면이 치환을 재구현하면 실물과 다른 문장을 보여 준다').not.toMatch(/replace\(\/%/);
+  });
+
+  it('모달은 portal로 body에 붙는다 (부모 모달 overflow-hidden에 잘리지 않는다 · 2026-08-18 P0 선례)', () => {
+    const modal = read(MODAL);
+    expect(modal).toMatch(/createPortal\(/);
+    expect(modal).toMatch(/document\.body/);
+  });
+
+  it('왼쪽 목록은 10건씩 페이징이고, 고르면 오른쪽 폰 화면이 그 사람으로 바뀐다', () => {
+    const modal = read(MODAL);
+    expect(modal).toMatch(/PREVIEW_PAGE_SIZE = 10/);
+    expect(modal, '목록 항목이 선택을 바꾸지 않으면 폰이 고정된다').toMatch(/onClick=\{\(\) => setSelected\(idx\)\}/);
+    expect(modal).toMatch(/samples\[selected\]/);
   });
 
   it('관리자 미리보기 라우트는 super_admin 게이트를 지나고 같은 CT를 부른다', () => {

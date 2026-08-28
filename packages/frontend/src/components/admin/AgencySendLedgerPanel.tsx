@@ -7,16 +7,15 @@
  * 표시 판정(레일·상태·출처 라벨)은 고객 화면과 **같은 CT**(agency-send-api)를 읽는다 — 두 화면이 다르게 읽히면 안 된다.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Eye, Loader2, RefreshCw, Search, Send, X } from 'lucide-react';
+import { AlertTriangle, Eye, Loader2, RefreshCw, Search, Send, X } from 'lucide-react';
 import AgencyProgressRail from '../agency/AgencyProgressRail';
+import AgencyPreviewModal from '../agency/AgencyPreviewModal';
 import {
   formatWhenRelative, isCancelable, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencyPreviewSample, type AgencySendStatus,
 } from '../agency/agency-send-api';
 import { CUI_PILL_BASE, CUI_PILL_TONE } from '../../utils/console-ui';
 
-/** ★0828(2) 상세 미리보기 — 미리보기 페이지 크기(고객 상세와 같은 10건 관례) */
-const PREVIEW_PAGE_SIZE = 10;
 
 interface AdminAgencyDetail {
   request: {
@@ -93,10 +92,10 @@ export default function AgencySendLedgerPanel() {
   const [detail, setDetail] = useState<AdminAgencyDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
-  const [detailPage, setDetailPage] = useState(0);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const openDetail = async (row: AdminAgencyRow) => {
-    setDetailId(row.id); setDetail(null); setDetailError(''); setDetailPage(0);
+    setDetailId(row.id); setDetail(null); setDetailError(''); setPreviewOpen(false);
     setDetailLoading(true);
     try {
       const res = await fetch(`/api/admin/agency-send/${row.id}/preview`, {
@@ -344,46 +343,22 @@ export default function AgencySendLedgerPanel() {
                     </div>
                   </div>
                   <div>
-                    <h4 className="text-[12.5px] font-semibold text-gray-500 mb-1.5">받는 사람별 발송 내용 미리보기</h4>
+                    <h4 className="text-[12.5px] font-semibold text-gray-500 mb-1.5">받는 사람별 발송 내용</h4>
                     {detail.samples.length === 0 ? (
                       <p className="text-[12.5px] text-gray-400">보여 줄 수신자가 없습니다.</p>
                     ) : (
                       <>
-                        <p className="text-[12px] text-gray-500 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewOpen(true)}
+                          className="h-9 px-4 rounded-lg border border-indigo-200 text-indigo-600 text-[13px] font-semibold hover:bg-indigo-50 hover:border-indigo-300 transition-colors inline-flex items-center gap-1.5"
+                        >
+                          <Eye className="w-4 h-4" />받는 사람별 발송 내용 보기
+                        </button>
+                        <p className="mt-1.5 text-[12px] text-gray-500">
                           실제 발송과 같은 치환으로 만든 문장입니다.
-                          {detail.total > detail.shown ? ` 전체 ${detail.total.toLocaleString()}건 중 상위 ${detail.shown}건 표본입니다.` : ` 전체 ${detail.shown}건입니다.`}
+                          {detail.total > detail.shown ? ` 전체 ${detail.total.toLocaleString()}명 가운데 상위 ${detail.shown}명을 볼 수 있습니다.` : ` 전체 ${detail.shown}명입니다.`}
                         </p>
-                        <ul className="space-y-1.5">
-                          {detail.samples
-                            .slice(detailPage * PREVIEW_PAGE_SIZE, (detailPage + 1) * PREVIEW_PAGE_SIZE)
-                            .map((s, i) => (
-                              <li key={detailPage * PREVIEW_PAGE_SIZE + i} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-[12.5px]">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-semibold text-gray-900 tabular-nums">{s.phone}</span>
-                                  <span className="text-[11.5px] text-gray-400">{detailPage * PREVIEW_PAGE_SIZE + i + 1}번째</span>
-                                </div>
-                                {s.subject && <div className="mt-1 font-semibold text-gray-800">{s.subject}</div>}
-                                <div className="mt-1 text-gray-700 whitespace-pre-wrap leading-relaxed">{s.text}</div>
-                              </li>
-                            ))}
-                        </ul>
-                        {detail.samples.length > PREVIEW_PAGE_SIZE && (
-                          <div className="mt-2.5 flex items-center justify-center gap-2">
-                            <button type="button" onClick={() => setDetailPage((p) => Math.max(0, p - 1))} disabled={detailPage === 0}
-                              className="h-8 w-8 grid place-items-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-40" aria-label="이전">
-                              <ChevronLeft className="w-4 h-4" />
-                            </button>
-                            <span className="text-[12px] text-gray-500 tabular-nums">
-                              {detailPage + 1} / {Math.ceil(detail.samples.length / PREVIEW_PAGE_SIZE)}
-                            </span>
-                            <button type="button"
-                              onClick={() => setDetailPage((p) => Math.min(Math.ceil(detail.samples.length / PREVIEW_PAGE_SIZE) - 1, p + 1))}
-                              disabled={detailPage >= Math.ceil(detail.samples.length / PREVIEW_PAGE_SIZE) - 1}
-                              className="h-8 w-8 grid place-items-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-40" aria-label="다음">
-                              <ChevronRight className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
                       </>
                     )}
                   </div>
@@ -392,6 +367,22 @@ export default function AgencySendLedgerPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ★0828(2) 받는 사람별 미리보기 — 고객 화면과 **같은 공용 모달**(조립은 서버 CT 한 벌) */}
+      {detail && (
+        <AgencyPreviewModal
+          show={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          title={`${detail.request.companyName || '(회사 없음)'} · ${detail.request.fileName || '대행발송'}`}
+          subtitle={`${Number(detail.request.recipientCount || 0).toLocaleString()}명 · ${detail.request.messageType}${detail.request.isAd ? ' · 광고' : ''} · ${formatWhenRelative(detail.request.requestedAt).big}`}
+          samples={detail.samples}
+          shown={detail.shown}
+          total={detail.total}
+          messageType={detail.request.messageType}
+          callbackNumber={detail.request.callbackNumber}
+          imageCount={Array.isArray(detail.request.mmsImagePaths) ? detail.request.mmsImagePaths.length : 0}
+        />
       )}
 
       {/* ── 운영 취소 확인 모달 (native dialog 금지 · 처리 중 닫힘 차단) ── */}

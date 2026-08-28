@@ -86,6 +86,7 @@
 | `routes/agency-send.ts` | 고객사 API(목록·접수·원스텝·상세·승인·문안 수정·시각 변경·취소). 코어는 CT에서 import. ★0826(2) **사용자 격리**(소유자 술어 `ownerParam` 한 모양 · 관리자 응답에만 접수 계정 JOIN) |
 | `routes/agency-approve.ts` | 무로그인 링크 승인 API. ⛔ 노출은 문안·시각·건수·발신번호까지(명단·매핑·내부 식별자 금지) |
 | `routes/admin.ts` | 회사 스위치 PATCH · **허용 이메일 4라우트** · 접수 현황(+`mailIntake` · ★0826(2) 내역 메뉴 재료 = source·레일 스탬프·고객사명·신청자명) · ★0826(3) **운영 취소**(`POST /agency-send/:id/cancel` · 확정 시에만 담당자 안내 문자) |
+| **`components/agency/AgencyPreviewModal.tsx`** | ★0828(2) **치환 미리보기 모달 공용 한 벌**(고객 상세·슈퍼관리자 내역이 함께 쓴다). 좌 목록 10건 페이징 · 우 폰 화면 · 누르면 폰이 바뀐다. ⛔ 서버 조립 문장만 그린다(화면 치환 재구현 0) · ⛔ `createPortal`(부모 모달 `overflow-hidden`에 잘림 방지) |
 | 프론트 | `pages/AgencySendPage.tsx`(목록) · `components/agency/*`(Composer·OneStepModal·Detail·api 미러·★0826(2) `AgencyProgressRail` 공용 레일) · `pages/AgencyApprovePage.tsx` · `components/admin/AgencyEmailSendersModal.tsx` · `components/admin/AgencyMailIntakePanel.tsx` · ★0826(2) `components/admin/AgencySendLedgerPanel.tsx`(슈퍼관리자 대행발송 내역) |
 | 표시 라벨 | `components/agency/agency-send-api.ts`가 `STATUS_LABEL`·`SOURCE_LABEL`·`EVENT_LABEL` **단일표**를 소유. 새 상태·출처·이벤트는 여기 등재가 같은 커밋 |
 
