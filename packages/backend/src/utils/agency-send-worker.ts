@@ -31,6 +31,7 @@ import { agencyManagerPhones, buildShortAgencyApproveUrl } from './agency-send-l
 import {
   isApprovalCurrent, isApprovalExpired, isFinalTestDue, isLockStale, isQueueDue, isSameKstDay,
   lockRecoveryStatus, LOCK_STALE_MINUTES, MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES,
+  DELIVERED_BY_TIME_SQL,
   type AgencySendStatus,
 } from './agency-send-state';
 import { buildSlotPlan, toSlotValues } from './agency-send-vars';
@@ -1015,7 +1016,21 @@ async function runCancelSweep(): Promise<void> {
       const found = await inspectAttemptCampaign(row.company_id, row.dispatch_key);
 
       if (found.id) {
-        const { ok, error } = await neutralizeCampaign(row.id, row.company_id, found.id, '담당자 취소(마무리)');
+        const { ok, error, alreadySent } = await neutralizeCampaign(row.id, row.company_id, found.id, '담당자 취소(마무리)');
+        // ⛔ **막을 것이 없었다 = 이미 나갔다.** `cancelled`로 확정하면 고객은 받았는데 화면은 취소가 된다.
+        //   예약(`queued`)으로 되돌리고 사실을 이벤트로 남긴다 — 캠페인이 있다는 것이 예약까지 갔던 증거다.
+        if (ok && alreadySent) {
+          await query(
+            `UPDATE agency_send_requests
+                SET status = 'queued', cancel_reason = NULL, lock_at = NULL,
+                    revision = revision + 1, updated_at = NOW()
+              WHERE id = $1::uuid AND status = 'cancelling'`,
+            [row.id],
+          );
+          await logEvent(row.id, 'cancel_already_sent', { campaignId: found.id });
+          console.warn(`${LOG} 이미 발송되어 취소하지 못함 request=${row.id}`);
+          continue;
+        }
         if (!ok) {
           await logEvent(row.id, 'cancel_sweep_retry', { campaignId: found.id, error });
           // 실패해도 `updated_at`을 밀어 **배치를 회전시킨다**. 안 밀면 영구 실패 스무 건이 앞자리를 차지해
@@ -1029,7 +1044,9 @@ async function runCancelSweep(): Promise<void> {
             try {
               await sendSystemAlert({
                 dedupKey: `agency-cancel-stuck:${row.id}`,
-                message: `대행발송 취소가 끝나지 않았다 request=${row.id} campaign=${found.id} 사유=${error || '미상'} 큐 잔존 여부 확인 필요`,
+                title: '대행발송 취소가 여러 번 시도해도 끝나지 않았습니다.',
+                details: [`오류: ${error || '미상'}`],
+                action: '발송 큐가 살아 있을 수 있습니다. 대행발송 접수 화면에서 확인해 주세요.',
               });
             } catch { /* 경보 실패가 배치를 멈추게 두지 않는다 */ }
           }
@@ -1073,6 +1090,28 @@ async function runCancelSweep(): Promise<void> {
 
 // ────────────── E. lock 복구 ──────────────
 
+/**
+ * ★2026-08-28 예약 시각이 지난 접수를 **발송 완료**로 넘긴다.
+ *
+ * 그전에는 적재(`queued`)가 마지막 상태라, 발송이 끝난 뒤에도 화면이 「예약 완료」로 남고
+ * **취소 버튼이 계속 보였다**(서수란 접수 `cmtcgacmr03o8jnothzxrtrf6`). 누르면 되돌릴 것이 없어
+ * 「취소 중」에 갇혔다.
+ *
+ * ⛔ 판정 기준은 상태 CT가 소유한다(`DELIVERED_BY_TIME_SQL`) — 이메일 중복 판정과 **같은 축**이다.
+ *   여기서 따로 시각 규칙을 쓰면 한쪽은 끝난 건, 다른 쪽은 살아 있는 건으로 갈린다.
+ * ⛔ 이 전이는 "큐가 비었다"가 아니라 "예약 시각이 지났다"를 뜻한다. 화면 표시와 취소 버튼을 위한 것이고,
+ *   실제로 나갔는지의 최종 판정은 취소 시 `cancelCampaign`이 큐를 보고 한다(`alreadySent`).
+ */
+async function runMarkDelivered(): Promise<void> {
+  const r = await query(
+    `UPDATE agency_send_requests
+        SET status = 'sent', updated_at = NOW()
+      WHERE ${DELIVERED_BY_TIME_SQL}
+      RETURNING id`,
+  );
+  if (r.rows.length > 0) console.log(`${LOG} 발송 완료로 넘김 ${r.rows.length}건`);
+}
+
 async function runLockRecovery(): Promise<void> {
   const rows = await query(
     `SELECT id, company_id, status, lock_at, lock_token, campaign_id, dispatch_key FROM agency_send_requests
@@ -1112,6 +1151,7 @@ async function runLockRecovery(): Promise<void> {
 export async function runAgencySendWorker(): Promise<void> {
   try {
     await runCancelSweep();
+    await runMarkDelivered();
     await runLockRecovery();
     await runFirstTest();
     await runFinalTest();

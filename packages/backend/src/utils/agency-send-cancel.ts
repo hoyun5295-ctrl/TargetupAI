@@ -76,15 +76,38 @@ export async function cancelAgencyRequestTx(opts: {
 
   // 예약이 만들어진 뒤의 취소는 **큐 삭제까지 끝나야** 취소다.
   if (campaignId) {
-    let result: { success: boolean; error?: string; tooLate?: boolean };
+    let result: { success: boolean; error?: string; tooLate?: boolean; alreadySent?: boolean };
     try {
       const { cancelCampaign } = await import('./campaign-lifecycle');
+      // ⛔ `queueOnly` — 대행발송 캠페인은 적재를 끝내면 `completed`가 된다(예약 시각은 큐 행이 든다).
+      //   이 옵션이 없으면 상태 게이트에 막혀 **예약이 잡힌 접수를 아무도 취소할 수 없다**(0828 확정).
+      //   15분 게이트(`skipTimeCheck`)는 켜지 않는다 — 그건 사용자 정책이고 여기는 사용자 입구다.
       result = await cancelCampaign(campaignId, opts.companyId, {
         cancelledBy: opts.cancelledBy,
         cancelledByType: opts.cancelledByType,
+        queueOnly: true,
       });
     } catch (cancelErr: any) {
       result = { success: false, error: String(cancelErr?.message || '취소 처리 중 오류가 발생했습니다.') };
+    }
+
+    // ⛔ **막을 것이 없었다 = 이미 나갔다.** 여기서 `cancelled`로 확정하면 화면이 거짓말을 한다
+    //   (고객은 메시지를 받았는데 접수는 취소됨). 원래 상태로 되돌리고 사실을 알린다.
+    //   되돌리기가 안전한 이유 = 큐를 건드린 것이 0건이라 상태를 유지해도 어긋나지 않는다(`tooLate`와 같다).
+    if (result.success && result.alreadySent) {
+      const reverted = await query(
+        `UPDATE agency_send_requests
+            SET status = $1, cancel_reason = NULL, revision = revision + 1, updated_at = NOW()
+          WHERE id = $2::uuid AND company_id = $3::uuid AND status = 'cancelling' AND revision = $4`,
+        [claimedRow.prev_status, opts.requestId, opts.companyId, claimedRow.revision],
+      );
+      await logEvent(opts.requestId, 'cancel_already_sent', {
+        campaignId, reverted: reverted.rowCount || 0,
+      });
+      return {
+        ok: false, status: 409, code: 'ALREADY_SENT',
+        error: '이미 발송이 끝나 취소할 수 없습니다.',
+      };
     }
     if (!result.success) {
       // ⛔ **되돌리는 것은 "큐를 건드리기 전에 거절당한 것이 확실할 때"뿐이다**(★2026-08-23 Codex 4R high).

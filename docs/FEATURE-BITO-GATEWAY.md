@@ -538,7 +538,7 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 | 1 | 관리 플레인(web/api) | [bito-gateway/FEATURE-GW-WEB-API.md](bito-gateway/FEATURE-GW-WEB-API.md) | **0815 점검·문서화 완료** |
 | 2 | 설치·전환·업데이트 | [bito-gateway/FEATURE-GW-AGENT-DEPLOY.md](bito-gateway/FEATURE-GW-AGENT-DEPLOY.md) | **0815 완료** (결함 6종은 이 허브 §4가 계속 소유) |
 | 3 | 에이전트 코어(poller·journal) | [bito-gateway/FEATURE-GW-AGENT-CORE.md](bito-gateway/FEATURE-GW-AGENT-CORE.md) | **0815 완료** |
-| 4 | 발송·결과 엔진 | [bito-gateway/FEATURE-GW-ENGINE.md](bito-gateway/FEATURE-GW-ENGINE.md) | **0815 완료** |
+| 4 | 발송·결과 엔진 | [bito-gateway/FEATURE-GW-ENGINE.md](bito-gateway/FEATURE-GW-ENGINE.md) | **0815 완료** · ★0828 고객 웹훅 종결 계약 배포(§6 — 두 경계 동시 잠금·남은 축 §6-5) |
 | 5 | 과금 | [bito-gateway/FEATURE-GW-BILLING.md](bito-gateway/FEATURE-GW-BILLING.md) | **0815 완료** |
 | 6 | 커넥터·라우팅 | [bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md](bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md) | **0815 완료** (능력 라우팅 부재 소스 확정) |
 | 7 | **브랜드메시지** | [bito-gateway/FEATURE-GW-BRAND-MESSAGE.md](bito-gateway/FEATURE-GW-BRAND-MESSAGE.md) | **0815 신설**(허브 §4-6에서 분리) · 호출어 **브랜드메시지** |

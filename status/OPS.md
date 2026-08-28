@@ -58,7 +58,7 @@
 | `sales` 계정 | **게이트웨이 IP(54·57·58)+비토(139.150.81.213) 전용** → localhost 접속 시 `ERROR 1045` = 정상(보안). 검증은 반드시 `-uroot` |
 
 **반복 실수 방지 (2026-07-16 실측 시행착오):**
-- 호스트(`administrator@invito`)에 mysql/mariadb 클라이언트 **없음** → 반드시 `docker exec`로 컨테이너 안 `mariadb` 사용 (`sudo apt install` 금지).
+- 호스트(`administrator@invito`)에 mysql/mariadb 클라이언트 **없음** → 반드시 `docker exec`로 컨테이너 안 **`mysql`** 사용(★2026-08-28 실측 정정 — `mariadb`는 컨테이너에 없다) (`sudo apt install` 금지).
 - `-usales`는 localhost에서 **거부**(IP 전용) → `-uroot`.
 - MariaDB **예약어**(`rows`·`groups` 등)를 컬럼 별칭으로 쓰면 문법 에러 → 백틱 또는 개명(`rowcnt`).
 

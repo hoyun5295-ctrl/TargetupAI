@@ -54,7 +54,16 @@ const MAX_ATTACH_FILES = 5;
 const DAILY_SENDER_LIMIT = Number(process.env.AGENCY_MAIL_DAILY_SENDER_LIMIT || 0);
 const DAILY_COMPANY_LIMIT = Number(process.env.AGENCY_MAIL_DAILY_COMPANY_LIMIT || 0);
 const REPLY_MAX_ATTEMPTS = 3;
-const REPLY_RATE_PER_HOUR = 5;
+/**
+ * 같은 주소 시간당 회신 상한 — **0 = 무제한(기본)**.
+ *
+ * ★2026-08-28 하드코딩 `5`에서 ENV로(서수란 접수 `cmtcgrrji03oqjnottkdx0xd6`).
+ *   0826에 일일 상한 둘을 무제한으로 풀 때 **이 값만 남아** 실질적으로 접수를 막고 있었다.
+ *   요청서를 고쳐 다시 보내는 것이 정상 흐름인데 다섯 통이면 창(1시간)이 닫혀,
+ *   보내는 쪽은 30분을 기다려도 아무 답을 받지 못했다.
+ *   위 일일 상한과 같은 규율이다 — 판정 코드는 남기고 폭주가 오면 ENV로 다시 조인다(배포 없이).
+ */
+const REPLY_RATE_PER_HOUR = Number(process.env.AGENCY_MAIL_REPLY_RATE_PER_HOUR || 0);
 const CLAIM_STALE_MS = 10 * 60 * 1000;
 const FAIL_MAX_ATTEMPTS = 4;
 /** 백오프 계단(분) — 네트워크·DB 일시 장애만 탄다. 파싱·신원 반려는 0회 즉시 확정 */
@@ -269,24 +278,51 @@ async function finalizeIntake(id: string, status: 'rejected' | 'failed' | 'accep
   );
 }
 
-/** 회신 상한: 같은 주소 1시간 5통(§18-7). 같은 사유의 중복 안내 24시간 1회(§18-6 3층) */
-async function replyAllowed(mailbox: string, toEmail: string, onceADayReason?: string): Promise<boolean> {
+/**
+ * 회신 상한: 같은 주소 1시간 5통(§18-7). 같은 사유의 중복 안내 24시간 1회(§18-6 3층).
+ *
+ * ★2026-08-28 **상한에 걸렸을 때 침묵하지 않는다**(서수란 접수 `cmtcgrrji03oqjnottkdx0xd6`).
+ *   요청서를 고쳐 다시 보내는 것이 정상 흐름인데, 다섯 통을 채우면 그 뒤로는 아무 답이 없어
+ *   보내는 쪽은 **왜 안 오는지 알 수 없었다**(30분을 기다려도 창이 1시간이라 그대로였다).
+ *   그래서 상한에 **정확히 닿은 첫 회차에만** 「지금은 안내를 보낼 수 없다」를 한 통 보낸다.
+ *   그 안내가 `sent`로 기록되어 카운트를 하나 올리므로 **다음부터는 저절로 침묵한다**(DDL 0 · 별도 마커 불요).
+ */
+type ReplyGate = { allow: boolean; capNotice: boolean };
+
+async function replyAllowed(mailbox: string, toEmail: string, onceADayReason?: string): Promise<ReplyGate> {
   const hourly = await query(
     `SELECT COUNT(*)::int AS c FROM agency_send_email_intake
       WHERE mailbox = $1 AND from_email = $2 AND reply_status = 'sent' AND decided_at > NOW() - interval '1 hour'`,
     [mailbox, toEmail],
   );
-  if ((hourly.rows[0]?.c || 0) >= REPLY_RATE_PER_HOUR) return false;
+  const sent = hourly.rows[0]?.c || 0;
+  if (sent >= REPLY_RATE_PER_HOUR) {
+    // `===`가 계약이다. 안내를 보내면 카운트가 상한+1이 되어 그 뒤 회차는 `>`라 조용해진다.
+    return { allow: false, capNotice: sent === REPLY_RATE_PER_HOUR };
+  }
   if (onceADayReason) {
     const daily = await query(
       `SELECT COUNT(*)::int AS c FROM agency_send_email_intake
         WHERE mailbox = $1 AND from_email = $2 AND reason = $3 AND reply_status = 'sent' AND decided_at > NOW() - interval '24 hours'`,
       [mailbox, toEmail, onceADayReason],
     );
-    if ((daily.rows[0]?.c || 0) > 0) return false;
+    // 같은 사유 24시간 억제는 그대로 둔다 — 이건 "한도"가 아니라 "같은 말을 두 번 하지 않는다"라
+    // 사용자가 이미 그 안내를 받아 본 상태다(침묵이 아니다).
+    if ((daily.rows[0]?.c || 0) > 0) return { allow: false, capNotice: false };
   }
-  return true;
+  return { allow: true, capNotice: false };
 }
+
+/** 상한에 닿았을 때 한 번 나가는 안내 — 왜 답이 없는지와 언제 다시 되는지를 말한다 */
+const REPLY_CAP_NOTICE = [
+  '보내주신 메일은 받았습니다.',
+  '',
+  `다만 안내 메일이 한 시간에 ${REPLY_RATE_PER_HOUR}통까지만 나가도록 되어 있어,`,
+  '지금은 접수 결과를 메일로 보내드리지 못합니다.',
+  '',
+  '한 시간쯤 뒤에 다시 보내주시면 결과를 안내해 드립니다.',
+  '급하시면 한줄로 화면에서 바로 접수하실 수 있습니다.',
+].join('\n');
 
 async function sendReplyAndRecord(intakeId: string, mailbox: string, toEmail: string, subject: string, text: string, inReplyTo: string | null, onceADayReason?: string, keepPendingOnRateLimit = false): Promise<void> {
   if (!(await replyAllowed(mailbox, toEmail, onceADayReason))) {

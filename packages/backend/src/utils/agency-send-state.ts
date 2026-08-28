@@ -24,11 +24,12 @@ export type AgencySendStatus =
   | 'reapproval'         // 당일 차단 → 다듬은 문안으로 재승인 대기
   | 'expired'            // 요청 시각까지 승인이 없어 나가지 않음
   | 'cancelling'         // 담당자가 취소를 눌렀고 **큐 삭제가 아직 안 끝났다**
-  | 'cancelled';         // 담당자 취소
+  | 'cancelled'          // 담당자 취소
+  | 'sent';              // 예약 시각이 지나 발송이 끝났다(종결 · ★2026-08-28)
 
 export const AGENCY_SEND_STATUSES: readonly AgencySendStatus[] = [
   'received', 'testing', 'awaiting_approval', 'test_failed', 'approved',
-  'final_testing', 'queued', 'reapproval', 'expired', 'cancelling', 'cancelled',
+  'final_testing', 'queued', 'reapproval', 'expired', 'cancelling', 'cancelled', 'sent',
 ];
 
 /**
@@ -48,7 +49,10 @@ const TRANSITIONS: Record<AgencySendStatus, readonly AgencySendStatus[]> = {
   final_testing: ['queued', 'reapproval', 'test_failed', 'expired', 'approved'],  // approved = lock 복구
   // ⛔ 적재 뒤에는 상태를 내리지 않는다 — 일부가 이미 나갔을 수 있어 "미발송"으로 적으면 거짓이 된다.
   //   적재 실패는 이벤트와 안내로 알리고 상태는 그대로 둔다(취소만 상태를 바꾼다).
-  queued: ['cancelling'],                                                // 취소는 기존 캠페인 취소 CT를 함께 탄다
+  // ★2026-08-28 `sent` = 예약 시각이 지나 끝난 상태. 그전에는 적재가 끝이라 **발송된 뒤에도 화면이
+  //   「예약 완료」로 남았고, 그래서 취소 버튼이 계속 보였다**(서수란 접수 `cmtcgacmr03o8jnothzxrtrf6`).
+  queued: ['cancelling', 'sent'],                                        // 취소는 기존 캠페인 취소 CT를 함께 탄다
+
   reapproval: ['approved', 'received', 'expired', 'cancelling'],
   expired: ['received', 'cancelling'],                                   // received = 새 시각으로 다시 올린다
   /**
@@ -60,6 +64,8 @@ const TRANSITIONS: Record<AgencySendStatus, readonly AgencySendStatus[]> = {
    */
   cancelling: ['cancelled', 'received', 'awaiting_approval', 'test_failed', 'approved', 'queued', 'reapproval', 'expired'],
   cancelled: [],
+  // ⛔ 종결이다. 이미 나간 발송은 되돌릴 수 없고, 「취소됨」으로 적으면 고객이 받은 사실과 어긋난다.
+  sent: [],
 };
 
 export function canTransition(from: AgencySendStatus, to: AgencySendStatus): boolean {
@@ -77,11 +83,30 @@ export function isEditable(status: AgencySendStatus): boolean {
  */
 export function canCancel(status: AgencySendStatus): boolean {
   return status !== 'cancelled' && status !== 'cancelling'
-    && status !== 'testing' && status !== 'final_testing';
+    && status !== 'testing' && status !== 'final_testing'
+    // ★2026-08-28 발송이 끝난 건은 취소 대상이 아니다(접수 `cmtcgacmr03o8jnothzxrtrf6`).
+    && status !== 'sent';
 }
 
 /** 취소 가능 상태를 SQL `NOT IN (...)`에 넣을 리터럴. 위 판정과 **같은 집합이어야 한다** */
-export const NOT_CANCELABLE_SQL = "'cancelled','cancelling','testing','final_testing'";
+export const NOT_CANCELABLE_SQL = "'cancelled','cancelling','testing','final_testing','sent'";
+
+/**
+ * 발송이 끝난 것으로 볼 수 있는가 — **예약 시각이 지난 `queued`**.
+ *
+ * ⛔ 새 기준을 만들지 않는다. 이메일 중복 판정(`EMAIL_DUP_BLOCKING_SQL`)이 이미 같은 축을 쓰고 있어,
+ *   두 곳이 다른 시각 규칙을 가지면 "한쪽은 끝난 건, 다른 쪽은 살아 있는 건"으로 갈린다.
+ */
+export function isDeliveredByTime(
+  status: AgencySendStatus, requestedAt: Date | null | undefined, now: Date,
+): boolean {
+  if (status !== 'queued') return false;
+  if (!requestedAt || Number.isNaN(requestedAt.getTime())) return false;
+  return requestedAt.getTime() <= now.getTime();
+}
+
+/** 위 판정의 SQL 짝 — 같은 집합이어야 한다 */
+export const DELIVERED_BY_TIME_SQL = "status = 'queued' AND requested_at <= NOW()";
 
 /** 취소에 큐 삭제가 필요한가. `queued`부터가 큐에 실려 있다 */
 export function needsQueueCancel(status: AgencySendStatus): boolean {

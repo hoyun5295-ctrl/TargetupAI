@@ -7,7 +7,7 @@
 
 export type AgencySendStatus =
   | 'received' | 'testing' | 'awaiting_approval' | 'test_failed' | 'approved'
-  | 'final_testing' | 'queued' | 'reapproval' | 'expired' | 'cancelling' | 'cancelled';
+  | 'final_testing' | 'queued' | 'reapproval' | 'expired' | 'cancelling' | 'cancelled' | 'sent';
 
 export interface AgencySendRequest {
   id: string;
@@ -306,6 +306,8 @@ export const STATUS_LABEL: Record<AgencySendStatus, string> = {
   expired: '미발송',
   cancelling: '취소 중',
   cancelled: '취소됨',
+  // ★2026-08-28 적재(예약 완료)가 끝이라 발송 뒤에도 「예약 완료」로 남아 있었다.
+  sent: '발송 완료',
 };
 
 /**
@@ -330,6 +332,7 @@ export const STATUS_TONE: Record<AgencySendStatus, 'neutral' | 'amber' | 'blue' 
   expired: 'rose',
   cancelling: 'amber',
   cancelled: 'neutral',
+  sent: 'neutral',
 };
 
 /** 담당자가 지금 승인할 수 있는 상태인가(서버가 최종 판정하고, 화면은 버튼을 켜고 끄는 데만 쓴다) */
@@ -345,7 +348,9 @@ export function isEditableStatus(status: AgencySendStatus): boolean {
 export function isCancelable(status: AgencySendStatus): boolean {
   // `cancelling`은 취소가 진행 중이라 다시 누를 수 없다(두 번 누르면 큐 삭제가 겹친다)
   return status !== 'cancelled' && status !== 'cancelling'
-    && status !== 'testing' && status !== 'final_testing';
+    && status !== 'testing' && status !== 'final_testing'
+    // ★2026-08-28 발송이 끝난 건은 취소 대상이 아니다(서수란 접수). 백엔드 `canCancel`과 같은 집합이어야 한다.
+    && status !== 'sent';
 }
 
 // ────────────── 진행 레일 (★2026-08-25 목록 개편 · 시안 A) ──────────────
@@ -377,6 +382,8 @@ export function railFor(r: Pick<AgencySendRequest, 'status' | 'approvedAt' | 'qu
     case 'approved': return { doneBefore: 4, now: 4, fail: null, muted: false };
     case 'final_testing': return { doneBefore: 4, now: 4, fail: null, muted: false };
     case 'queued': return { doneBefore: 5, now: 5, fail: null, muted: false };
+    // 마지막 칸(발송)까지 찍는다 — 여기가 켜져야 사용자가 「끝났다」를 안다.
+    case 'sent': return { doneBefore: 6, now: null, fail: null, muted: false };
     case 'expired': {
       const at = r.approvedAt ? 4 : 3;
       return { doneBefore: at, now: null, fail: { at, label: '미발송' }, muted: true };

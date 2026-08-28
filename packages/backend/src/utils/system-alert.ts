@@ -73,10 +73,55 @@ export function getSystemAlertPhones(): string[] {
 export interface SystemAlertParams {
   /** 중복 발송 차단 키 (예: 'queue-delay:<campaignId>', 'agent-down:<agentId>') */
   dedupKey: string;
-  /** 본문 — 짧은 사실 요약. CT가 머리말/맺음말을 붙인다. */
-  message: string;
+  /** 본문 — 짧은 사실 요약. CT가 머리말/맺음말을 붙인다. `title`을 쓰면 생략한다. */
+  message?: string;
+  /**
+   * ★2026-08-28 구조화 입력 — **새 알림은 이쪽을 쓴다**(Harold 지적).
+   *
+   * 옛 알림들은 한 줄에 사실·식별자·요청을 다 이어 붙여 사람이 읽기 어려웠다
+   * (「대행발송 예약을 되돌리지 못했다 request=… campaign=… 사유=… 큐 잔존 여부 확인 필요」).
+   * 문자는 폭이 좁아 **한 줄에 하나씩** 놓아야 눈에 들어온다.
+   *
+   * `title`   = 무슨 일이 일어났는가. **존댓말 완결문**으로 쓴다(명사형 종결 금지).
+   * `details` = 「이름: 값」 한 줄에 하나. 사람이 판단에 쓰는 값만.
+   * `action`  = 무엇을 하면 되는가.
+   */
+  title?: string;
+  details?: string[];
+  action?: string;
   /** 쿨다운(ms). 기본 6시간. */
   cooldownMs?: number;
+}
+
+/**
+ * 내부 식별자를 문자에서 걷어낸다.
+ *
+ * ⛔ UUID를 받아도 사람이 할 수 있는 일이 없다. 찾는 자리는 슈퍼관리자 화면이고,
+ *   문자는 **무슨 일이 있었고 무엇을 보면 되는지**만 전하면 된다.
+ *   0828 실물 = 36자 UUID 두 개가 LMS 본문의 절반을 차지하고 있었다.
+ */
+export function stripInternalIds(text: string): string {
+  if (!text) return '';
+  return text
+    // `request=<uuid>` 처럼 키까지 붙은 형태를 통째로
+    .replace(/\b[A-Za-z_]+\s*=\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '')
+    // 맨 UUID
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '')
+    // 걷어낸 자리에 남은 군더더기 공백
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+}
+
+/** 알림 본문 조립 — 구조화 입력이면 줄로 나누고, 옛 `message`는 그대로 쓴다 */
+export function buildSystemAlertBody(p: SystemAlertParams): string {
+  if (p.title) {
+    const lines: string[] = [p.title];
+    if (p.details && p.details.length > 0) lines.push('', ...p.details);
+    if (p.action) lines.push('', p.action);
+    return lines.join('\n');
+  }
+  return p.message || '';
 }
 
 /**
@@ -102,10 +147,12 @@ export async function sendSystemAlert(params: SystemAlertParams): Promise<number
       if (expires && expires > now) return 0; // 쿨다운 중 — 조용히 생략
     }
 
+    // ★2026-08-28 구조화 조립 + 내부 식별자 제거를 여기 한 자리에서 한다.
+    //   옛 `message` 호출부도 그대로 이 길을 지나므로 UUID가 실리던 알림이 함께 정리된다.
     const body = [
       '[한줄로 시스템 알림]',
       '',
-      sanitizeSmsText(params.message),
+      stripInternalIds(sanitizeSmsText(buildSystemAlertBody(params))),
       '',
       '슈퍼관리자에서 확인해주세요.',
     ].join('\n');
@@ -127,7 +174,7 @@ export async function sendSystemAlert(params: SystemAlertParams): Promise<number
     await bulkInsertSmsQueue([authTable], rows, true);
     await markSentNow(params.dedupKey);                 // PG 영속 (재시작에도 유지)
     cooldownMap.set(params.dedupKey, now + cooldownMs); // 메모리 보조 (DB 폴백 시 사용)
-    log(`발송 ${rows.length}명 — ${params.dedupKey}: ${params.message.slice(0, 80)}`);
+    log(`발송 ${rows.length}명 — ${params.dedupKey}: ${buildSystemAlertBody(params).slice(0, 80)}`);
     return rows.length;
   } catch (err: any) {
     // 알림 실패가 호출 워커/라우트를 죽이면 안 된다

@@ -189,7 +189,9 @@ async function checkSyncAgents(): Promise<void> {
       await sendSystemAlert({
         dedupKey: `agent-down:${a.id}`,
         cooldownMs: 12 * 60 * 60 * 1000,
-        message: `싱크에이전트 중단 의심 — ${label}: 마지막 하트비트 ${min}분 전. 고객사 PC/에이전트 확인 필요.`,
+        title: '싱크에이전트가 멈춘 것으로 보입니다.',
+        details: [`고객사: ${a.company_name || '(회사 미상)'}`, `마지막 신호: ${min}분 전`],
+        action: '고객사 PC와 에이전트가 켜져 있는지 확인해 주세요.',
       });
       continue;
     }
@@ -203,7 +205,9 @@ async function checkSyncAgents(): Promise<void> {
       await sendSystemAlert({
         dedupKey: `sync-stalled:${a.id}`,
         cooldownMs: 12 * 60 * 60 * 1000,
-        message: `싱크에이전트 동기화 정체 — ${label}: 하트비트는 정상인데 마지막 동기화가 ${hours}시간 전입니다.`,
+        title: '싱크에이전트가 연결은 되어 있는데 자료를 받아오지 못하고 있습니다.',
+        details: [`고객사: ${a.company_name || '(회사 미상)'}`, `마지막 동기화: ${hours}시간 전`],
+        action: '싱크에이전트 화면에서 상태를 확인해 주세요.',
       });
     }
   }
@@ -260,9 +264,13 @@ async function checkSyncFailures(): Promise<void> {
       await sendSystemAlert({
         dedupKey: `${tier.keyPrefix}:${r.id}`,
         cooldownMs: tier.cooldownMs,
-        message:
-          `싱크 적재 실패 누적(${tier.name}) — ${label}: ${windowLabel} 실패 ${Number(r.fails).toLocaleString()}건` +
-          `(배치 ${Number(r.batches).toLocaleString()}개).${reasonTxt ? ` 주요 사유: ${reasonTxt}` : ''}`,
+        title: `싱크 적재 실패가 쌓이고 있습니다(${tier.name}).`,
+        details: [
+          `고객사: ${r.company_name || '(회사 미상)'}`,
+          `${windowLabel} 실패: ${Number(r.fails).toLocaleString()}건 (배치 ${Number(r.batches).toLocaleString()}개)`,
+          ...(reasonTxt ? [`주요 사유: ${reasonTxt}`] : []),
+        ],
+        action: '싱크에이전트 화면에서 실패 내역을 확인해 주세요.',
       });
       log(`싱크 실패 누적 통지(${tier.name}) — ${label}: ${r.fails}건`);
     }

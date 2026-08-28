@@ -150,6 +150,12 @@ export interface CancelCampaignResult {
   success: boolean;
   error?: string;
   tooLate?: boolean;
+  /**
+   * ★2026-08-28 큐에 막을 것이 하나도 없었다 = **이미 전량 나갔다**(대기 0 · 픽업 0).
+   * `success`는 true다(할 일이 없었을 뿐 실패가 아니다). 호출부는 이 값으로
+   * "취소했다"와 "이미 나가서 취소할 것이 없었다"를 갈라 사용자에게 사실대로 말해야 한다.
+   */
+  alreadySent?: boolean;
   cancelledCount: number;
   refundedAmount: number;
 }
@@ -173,9 +179,23 @@ export async function cancelCampaign(
     cancelledBy?: string;
     cancelledByType?: string;
     skipTimeCheck?: boolean;
+    /**
+     * ★2026-08-28 **큐만 중화하고 캠페인 상태는 그대로 둔다**(대행발송 전용).
+     *
+     * 왜 필요한가 — 대행발송은 캠페인 생성 **51밀리초 뒤** 적재를 끝내고 `completed`가 된다.
+     *   예약 시각은 큐 행의 `sendTime`이 들고 있어 발송은 나중이다. 그런데 아래 1번 게이트가
+     *   `scheduled`·`draft`만 통과시켜 **예약이 잡힌 대행발송은 취소할 방법이 없었다**(0828 확정).
+     *
+     * 왜 상태를 안 바꾸는가 — 청구 선택기가 `status='completed'`를 요구한다
+     *   (`send-usage-aggregation.ts`). `cancelled`로 바꾸면 **이미 나간 발송이 청구에서 사라진다.**
+     *   수량은 큐의 성공 행 수로 세므로, 상태를 두고 큐만 지우면 나간 몫은 청구되고 막은 몫은 0원이 된다.
+     *
+     * ⛔ 이 옵션은 큐 중화·잔존 검증·환불을 **전부 그대로 지난다.** 건너뛰는 것은 상태 변경뿐이다.
+     */
+    queueOnly?: boolean;
   } = {}
 ): Promise<CancelCampaignResult> {
-  const { reason, cancelledBy, cancelledByType, skipTimeCheck = false } = options;
+  const { reason, cancelledBy, cancelledByType, skipTimeCheck = false, queueOnly = false } = options;
 
   // 1. 캠페인 확인
   const campaign = await query(
@@ -190,7 +210,13 @@ export async function cancelCampaign(
   const camp = campaign.rows[0];
 
   // ★ D95: draft 상태도 취소 허용 (회신번호 확인 모달 취소 시 orphan draft 정리)
-  if (camp.status !== 'scheduled' && camp.status !== 'draft') {
+  // ★ 2026-08-28 `queueOnly`는 이 게이트를 지난다 — 적재가 끝난(`completed`) 예약도 **큐에 남아 있으면
+  //   막을 수 있어야 한다.** 상태는 "우리 배관이 끝났나"를 말할 뿐 "고객에게 갔나"가 아니다.
+  //   ⛔ 단 이미 취소된 건은 그대로 막는다(중복 취소는 환불을 두 번 만든다).
+  if (camp.status === 'cancelled') {
+    return { success: false, error: '이미 취소된 캠페인입니다', cancelledCount: 0, refundedAmount: 0 };
+  }
+  if (!queueOnly && camp.status !== 'scheduled' && camp.status !== 'draft') {
     return { success: false, error: '취소 가능한 상태가 아닙니다', cancelledCount: 0, refundedAmount: 0 };
   }
 
@@ -346,6 +372,19 @@ export async function cancelCampaign(
     if (!smsOk || !brandOk) {
       console.warn(`[취소] campaign ${campaignId} 취소 환불 미완료 — 워커 재시도가 이어받는다`);
     }
+  }
+
+  // ★ 2026-08-28 `queueOnly` — 큐 중화·검증·환불까지 마쳤으면 여기서 끝낸다.
+  //   상태를 바꾸지 않는 이유는 옵션 주석이 소유한다(청구 축 `status='completed'`).
+  //   `alreadySent` = 대기도 픽업도 0이었다 = **막을 것이 없었다**(이미 전량 나갔다).
+  //   실패가 아니라 결과다 — 호출부가 "취소했다"와 "이미 나갔다"를 갈라 말할 수 있게 한다.
+  if (queueOnly) {
+    return {
+      success: true,
+      alreadySent: totalCancelCount === 0 && alreadyPickedUp === 0,
+      cancelledCount: totalCancelCount,
+      refundedAmount: totalRefunded,
+    };
   }
 
   // 7. PostgreSQL 캠페인 상태 변경

@@ -70,27 +70,38 @@ export async function inspectAttemptCampaign(
  */
 export async function neutralizeCampaign(
   requestId: string, companyId: string, campaignId: string, why: string,
-): Promise<{ ok: boolean; error: string }> {
+): Promise<{ ok: boolean; error: string; alreadySent?: boolean }> {
   let ok = false;
   let error = '';
+  let alreadySent = false;
   try {
     const { cancelCampaign } = await import('./campaign-lifecycle');
     // ⛔ `skipTimeCheck` — 15분 게이트는 사용자 정책이지 안전장치가 아니다. 여기서 멈추면 나가면 안 되는 발송이 나간다.
-    const undone = await cancelCampaign(campaignId, companyId, { skipTimeCheck: true, reason: why });
+    // ⛔ `queueOnly` — 대행발송은 캠페인 생성 직후 적재를 끝내고 `completed`가 된다(예약 시각은 큐 행이 든다).
+    //   상태 게이트(`scheduled`·`draft`)를 그대로 두면 **예약이 잡힌 건을 영영 못 막는다**(0828 확정).
+    //   상태를 바꾸지 않는 이유는 청구 축이다 — `cancelCampaign`의 옵션 주석이 소유한다.
+    const undone = await cancelCampaign(campaignId, companyId, {
+      skipTimeCheck: true, queueOnly: true, reason: why,
+    });
     ok = undone.success;
     error = undone.error || '';
+    alreadySent = !!undone.alreadySent;
   } catch (err: any) {
     error = String(err?.message || err);
   }
   if (!ok) {
     try {
+      // ⛔ UUID를 싣지 않는다 — 받는 사람이 그 값으로 할 수 있는 일이 없고 본문만 채운다.
+      //   찾는 자리는 슈퍼관리자 화면이고, 문자는 무슨 일이 있었고 무엇을 보면 되는지만 전한다.
       await sendSystemAlert({
         dedupKey: `agency-orphan:${campaignId}`,
-        message: `대행발송 예약을 되돌리지 못했다 request=${requestId} campaign=${campaignId} 사유=${why} 오류=${error || '미상'} 큐 잔존 여부 확인 필요`,
+        title: '대행발송 예약을 되돌리지 못했습니다.',
+        details: [`사유: ${why}`, `오류: ${error || '미상'}`],
+        action: '발송 큐가 살아 있을 수 있습니다. 대행발송 접수 화면에서 확인해 주세요.',
       });
     } catch (alertErr: any) {
       console.error('[agency-send] 경보 전송 실패(중화 결과는 그대로 돌려준다):', alertErr?.message || alertErr);
     }
   }
-  return { ok, error };
+  return { ok, error, alreadySent };
 }
