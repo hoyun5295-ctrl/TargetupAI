@@ -7,7 +7,11 @@
 
 ## 1. 정체성
 
-한줄로가 발송한 메시지가 통신사로 나가는 **마지막 구간**. 자비스가 개발했고, 2026-08-14 기준 **실사용 트래픽 0**(완성 후 발송량 적은 고객사부터 이관 예정 — Harold 확정).
+한줄로가 발송한 메시지가 통신사로 나가는 **마지막 구간**. 자비스가 개발했다.
+
+⚠ **실사용 트래픽이 있다(★2026-08-28 실측 — 이전의 "트래픽 0" 서술은 폐기).**
+API(REST) 접수가 **하루 191건**이고 하루 종일 나간다(파주시청 DMZ 관광예약 업체). **게이트웨이를 정지시킬 수 없다** — 이행·점검을 위한 정지 창을 만드는 설계는 성립하지 않는다.
+시간대별 밀도와 배포 창 판단 근거 = [보안 스포크 §1·§6](bito-gateway/FEATURE-GW-SECURITY.md).
 
 ```
 한줄로 INSERT → MySQL SMSQ_SEND_13/14/15 → Bito Agent 폴링 → 게이트웨이 → 중계/통신사 → REPORT → 고객 DB 반영
@@ -538,6 +542,7 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 | 5 | 과금 | [bito-gateway/FEATURE-GW-BILLING.md](bito-gateway/FEATURE-GW-BILLING.md) | **0815 완료** |
 | 6 | 커넥터·라우팅 | [bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md](bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md) | **0815 완료** (능력 라우팅 부재 소스 확정) |
 | 7 | **브랜드메시지** | [bito-gateway/FEATURE-GW-BRAND-MESSAGE.md](bito-gateway/FEATURE-GW-BRAND-MESSAGE.md) | **0815 신설**(허브 §4-6에서 분리) · 호출어 **브랜드메시지** |
+| 8 | **보안** | [bito-gateway/FEATURE-GW-SECURITY.md](bito-gateway/FEATURE-GW-SECURITY.md) | **★0828 신설** · 무인증 라우트 폐쇄·API 키 회전 완료 / bind 봉투 암호화 코드 배포·이행 대기 / 잔여 10건 · 호출어 **게이트웨이 보안** |
 
 - 한줄로 측 라인·Agent 운영 = [status/OPS.md](../status/OPS.md) §6-3
 - 브랜드메시지 F 트랙 = [2026-07-29-brand-message-qtmsg-agent-design.md](2026-07-29-brand-message-qtmsg-agent-design.md)

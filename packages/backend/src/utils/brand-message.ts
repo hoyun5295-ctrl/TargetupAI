@@ -74,23 +74,127 @@ export interface BrandBubbleSpec {
   requireHeader: boolean;
   requireVideo: boolean;
   requireCommerce: boolean;
-  /** 아이템/캐러셀 개수 (0 = 해당 없음) */
+  /**
+   * 와이드 리스트 아이템 개수 (0 = 해당 없음) — §6.10.6.
+   * ⛔ 캐러셀은 이 축을 쓰지 않는다 — 카드 수는 인트로 사용 여부로 갈리므로 `carousel`이 소유한다.
+   */
   minItems: number;
   maxItems: number;
+  /**
+   * 버튼명 최대 글자 수 — attachment_method.pdf §3.4 "TEXT, IMAGE - 최대 14자 - 그외 최대 8자".
+   * ★2026-08-28 신설. 그전에는 이 축이 없어 화면이 전 유형 14자를 허용했다.
+   */
+  maxButtonName: number;
+  /**
+   * 부가 정보(ADDITIONAL_CONTENT) 최대 글자 수 (0 = 사용 불가 유형) — §4.4.1.
+   * ★2026-08-28 신설. 그전에는 검사기가 'COMMERCE'와 34/1을 인라인으로 갖고 있었다.
+   */
+  maxAdditional: number;
+  maxAdditionalNewline: number;
+  /**
+   * 상품명 최대 글자 수 (0 = 커머스 아닌 유형) — attachment_method.pdf §3.4 "상품제목 (최대 30자)".
+   * ★2026-08-28 신설. 그전에는 이 축이 없어 검사기가 길이를 아예 안 봤고, 화면만 30을 들고 있었다.
+   */
+  maxCommerceTitle: number;
+  /** 캐러셀 규격 (캐러셀 2종만) — attachment_method.pdf §5.3 */
+  carousel?: BrandCarouselSpec;
 }
 
+/**
+ * 캐러셀 규격 — 출처: attachment_method.pdf **§5.3 CAROUSEL - 브랜드 메시지 자유형**.
+ *
+ * 구조는 3단이다: `head`(인트로) · `list`(카드) · `tail`(더보기).
+ * 카드 하나는 다시 `attachment`(이미지·버튼·쿠폰·커머스)를 품는다.
+ *
+ * ⛔ 이 표를 추측으로 채우지 마라 — 규격을 벗어난 값은 큐에는 들어가고 발송만 무로그 폐기된다.
+ */
+export interface BrandCarouselSpec {
+  /** 인트로(head) 사용 가능 여부 — 규격상 CAROUSEL_COMMERCE만 */
+  allowIntro: boolean;
+  /** 인트로 헤더 최대 20자·줄바꿈 불가 */
+  introHeaderMax: number;
+  /** 인트로 내용 최대 50자·줄바꿈 최대 2개 */
+  introContentMax: number;
+  introContentNewline: number;
+  /** 카드 수 — "캐러셀 인트로 사용시 1~5개, 그 외 2~6개" */
+  listMinWithIntro: number;
+  listMaxWithIntro: number;
+  listMin: number;
+  listMax: number;
+  /** 카드 헤더 — FEED는 필수, COMMERCE는 사용 불가 */
+  itemHeader: 'required' | 'forbidden';
+  itemHeaderMax: number;
+  /** 카드 메시지 — FEED는 필수, COMMERCE는 사용 불가 */
+  itemMessage: 'required' | 'forbidden';
+  itemMessageMax: number;
+  itemMessageNewline: number;
+  /** 카드 부가 정보 — FEED는 사용 불가 */
+  itemAdditional: 'allowed' | 'forbidden';
+  itemAdditionalMax: number;
+  itemAdditionalNewline: number;
+  /** 카드당 버튼 최대 개수 */
+  itemButtonMax: number;
+}
+
+/** 캐러셀 공통값 — 두 유형이 같은 자리는 여기서 한 번만 적는다(§5.3 표) */
+const CAROUSEL_COMMON = {
+  introHeaderMax: 20,
+  introContentMax: 50,
+  introContentNewline: 2,
+  listMinWithIntro: 1,
+  listMaxWithIntro: 5,
+  listMin: 2,
+  listMax: 6,
+  itemHeaderMax: 20,
+  itemMessageMax: 180,
+  itemMessageNewline: 10,
+  itemAdditionalMax: 34,
+  itemAdditionalNewline: 1,
+  itemButtonMax: 2,
+} as const;
+
 export const BUBBLE_TYPES: Record<string, BrandBubbleSpec> = {
-  TEXT: { code: 'TEXT', label: '텍스트', maxMessage: 1300, maxNewline: 99, maxButtons: 5, minButtons: 0, couponMaxButtons: 4, couponDescMax: 12, maxHeader: 0, requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0 },
+  TEXT: { code: 'TEXT', label: '텍스트', maxMessage: 1300, maxNewline: 99, maxButtons: 5, minButtons: 0, couponMaxButtons: 4, couponDescMax: 12, maxHeader: 0, requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0, maxButtonName: 14, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0 },
   // IMAGE 줄바꿈 29 = 자유형(§4.4.1) 기준. 기본형(§4.3.1)은 같은 자리를 99로 적어 매뉴얼끼리 갈리는데,
   // 우리가 리치 첨부를 싣는 경로는 자유형뿐이라 좁은 쪽을 택한다(fail-closed).
-  IMAGE: { code: 'IMAGE', label: '이미지', maxMessage: 1300, maxNewline: 29, maxButtons: 5, minButtons: 0, couponMaxButtons: 4, couponDescMax: 12, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0 },
-  WIDE: { code: 'WIDE', label: '와이드 이미지', maxMessage: 76, maxNewline: 5, maxButtons: 2, minButtons: 0, couponMaxButtons: 2, couponDescMax: 18, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0 },
-  WIDE_ITEM_LIST: { code: 'WIDE_ITEM_LIST', label: '와이드 리스트', maxMessage: 0, maxNewline: 0, maxButtons: 2, minButtons: 0, couponMaxButtons: 2, couponDescMax: 18, maxHeader: 20, requireImage: false, requireHeader: true, requireVideo: false, requireCommerce: false, minItems: 3, maxItems: 5 },
-  CAROUSEL_FEED: { code: 'CAROUSEL_FEED', label: '캐러셀 피드', maxMessage: 0, maxNewline: 0, maxButtons: 0, minButtons: 0, couponMaxButtons: 0, couponDescMax: 12, maxHeader: 0, requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 2, maxItems: 6 },
+  IMAGE: { code: 'IMAGE', label: '이미지', maxMessage: 1300, maxNewline: 29, maxButtons: 5, minButtons: 0, couponMaxButtons: 4, couponDescMax: 12, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0, maxButtonName: 14, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0 },
+  WIDE: { code: 'WIDE', label: '와이드 이미지', maxMessage: 76, maxNewline: 5, maxButtons: 2, minButtons: 0, couponMaxButtons: 2, couponDescMax: 18, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0, maxButtonName: 8, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0 },
+  // ★2026-08-28 아이템 상한 5 → 4 (Harold 확정). 규격 문서 둘이 갈린다:
+  //   attachment_method.pdf §3.4 `item.list` = "아이템리스트(최소:3, 최대:4)"
+  //   IMC-Agent 매뉴얼 §6.10.6                = 최소 3, 최대 5
+  //   5로 보낸 실측이 한 번도 없고, 규격 밖은 무로그 폐기라 **좁은 쪽**을 택한다.
+  //   ⛔ 5로 되돌리려면 근거가 문서가 아니라 **실측 1건**이어야 한다.
+  WIDE_ITEM_LIST: { code: 'WIDE_ITEM_LIST', label: '와이드 리스트', maxMessage: 0, maxNewline: 0, maxButtons: 2, minButtons: 0, couponMaxButtons: 2, couponDescMax: 18, maxHeader: 20, requireImage: false, requireHeader: true, requireVideo: false, requireCommerce: false, minItems: 3, maxItems: 4, maxButtonName: 8, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0 },
+  // 캐러셀 2종은 카드 수를 `carousel`이 소유한다(인트로 사용 여부로 갈리므로 minItems/maxItems로는 못 적는다).
+  CAROUSEL_FEED: {
+    code: 'CAROUSEL_FEED', label: '캐러셀 피드', maxMessage: 0, maxNewline: 0,
+    maxButtons: 0, minButtons: 0, couponMaxButtons: 0, couponDescMax: 12, maxHeader: 0,
+    requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: false,
+    minItems: 0, maxItems: 0, maxButtonName: 8, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0,
+    carousel: {
+      ...CAROUSEL_COMMON,
+      allowIntro: false,          // §5.3 head = "CAROUSEL_COMMERCE 인 경우 사용"
+      itemHeader: 'required',     // §5.3 "Header 필드 필수 - CAROUSEL_FEED"
+      itemMessage: 'required',    // §5.3 "Message 필드 필수 - CAROUSEL_FEED"
+      itemAdditional: 'forbidden' // §5.3 "additional_content 필드 사용불가: CAROUSEL_FEED"
+    },
+  },
   // PREMIUM_VIDEO의 HEADER·MESSAGE는 §4.4.1에서 둘 다 "선택"이다(옛 표는 헤더를 필수로 잘못 적고 있었다).
-  PREMIUM_VIDEO: { code: 'PREMIUM_VIDEO', label: '프리미엄 동영상', maxMessage: 76, maxNewline: 5, maxButtons: 1, minButtons: 0, couponMaxButtons: 1, couponDescMax: 18, maxHeader: 20, requireImage: false, requireHeader: false, requireVideo: true, requireCommerce: false, minItems: 0, maxItems: 0 },
-  COMMERCE: { code: 'COMMERCE', label: '커머스', maxMessage: 0, maxNewline: 0, maxButtons: 2, minButtons: 1, couponMaxButtons: 2, couponDescMax: 12, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: true, minItems: 0, maxItems: 0 },
-  CAROUSEL_COMMERCE: { code: 'CAROUSEL_COMMERCE', label: '캐러셀 커머스', maxMessage: 0, maxNewline: 0, maxButtons: 0, minButtons: 0, couponMaxButtons: 0, couponDescMax: 12, maxHeader: 0, requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: true, minItems: 2, maxItems: 6 },
+  PREMIUM_VIDEO: { code: 'PREMIUM_VIDEO', label: '프리미엄 동영상', maxMessage: 76, maxNewline: 5, maxButtons: 1, minButtons: 0, couponMaxButtons: 1, couponDescMax: 18, maxHeader: 20, requireImage: false, requireHeader: false, requireVideo: true, requireCommerce: false, minItems: 0, maxItems: 0, maxButtonName: 8, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0 },
+  COMMERCE: { code: 'COMMERCE', label: '커머스', maxMessage: 0, maxNewline: 0, maxButtons: 2, minButtons: 1, couponMaxButtons: 2, couponDescMax: 12, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: true, minItems: 0, maxItems: 0, maxButtonName: 8, maxAdditional: 34, maxAdditionalNewline: 1, maxCommerceTitle: 30 },
+  CAROUSEL_COMMERCE: {
+    code: 'CAROUSEL_COMMERCE', label: '캐러셀 커머스', maxMessage: 0, maxNewline: 0,
+    maxButtons: 0, minButtons: 0, couponMaxButtons: 0, couponDescMax: 12, maxHeader: 0,
+    requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: true,
+    minItems: 0, maxItems: 0, maxButtonName: 8, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 30,
+    carousel: {
+      ...CAROUSEL_COMMON,
+      allowIntro: true,
+      itemHeader: 'forbidden',    // §5.3 "Header 필드 사용불가 - CAROUSEL_COMMERCE"
+      itemMessage: 'forbidden',   // §5.3 "Message 필드 사용불가 - CAROUSEL_COMMERCE"
+      itemAdditional: 'allowed'
+    },
+  },
 };
 
 export type BubbleTypeCode = keyof typeof BUBBLE_TYPES;
@@ -147,7 +251,22 @@ export const RESEND_TYPES = {
  * ★ 2026-07-30 지원 유형 게이트 — msg_contents SQL 조립 예시가 확보된 유형만 개방.
  * 나머지는 "조용한 실패"(큐 적재 후 무로그 폐기) 구조라 추측 조립 금지. 확장은 실예시 확보 후.
  */
-export const SUPPORTED_BUBBLE_TYPES = ['TEXT', 'IMAGE', 'WIDE'] as const;
+/**
+ * 발송이 열린 유형 원장 — ★2026-08-28 배열 상수에서 원장으로 승격.
+ *
+ * **실측 1건(REPORT `0000`)을 통과한 유형만 넣는다.** 규격을 구현했다는 것은 여기 넣을 근거가 아니다.
+ * 형식이 어긋나면 큐에는 들어가고 발송만 무로그 폐기되므로(파일 머리 ⛔), 열어 둔 유형이 틀리면
+ * **차감만 남고 메시지는 사라진다.** 그래서 유형을 열 때 `since`와 `note`를 함께 적게 만들었다.
+ *
+ * ⛔ 5종을 한 번에 넣지 마라 — 유형 하나 실측 → 그 유형만 추가가 이 원장의 사용법이다.
+ */
+export const BUBBLE_TYPE_OPENED: Record<string, { since: string; note: string }> = {
+  TEXT:  { since: '2026-08-18', note: 'REPORT 0000 단말 실수신 (MSG_UID 9자리 확정 직후)' },
+  IMAGE: { since: '2026-07-30', note: '발송 스펙 확보분' },
+  WIDE:  { since: '2026-07-30', note: '발송 스펙 확보분' },
+};
+
+export const SUPPORTED_BUBBLE_TYPES: readonly string[] = Object.keys(BUBBLE_TYPE_OPENED);
 
 export function isSupportedBubbleType(t: any): boolean {
   return (SUPPORTED_BUBBLE_TYPES as readonly string[]).includes(String(t || '').trim().toUpperCase());
@@ -236,8 +355,16 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
   if (!isSupportedBubbleType(bubble)) {
     throw new BrandMessageBuildError(UNSUPPORTED_BUBBLE_MSG(bubble || '(없음)'));
   }
-  if (p.carouselJson && String(p.carouselJson).trim() !== '') {
-    throw new BrandMessageBuildError('브랜드메시지 캐러셀 유형은 아직 지원하지 않습니다');
+  // ★2026-08-28 캐러셀 입구 개방 — 상위 조립 규격을 확보했다(attachment_method.pdf §5.3).
+  //   그전에는 값이 있으면 무조건 거부했다("조립 예시 미확보"). 지금은 유형이 캐러셀일 때만 받는다.
+  //   ⛔ 캐러셀이 아닌 유형에 캐러셀이 실려 오면 여전히 거부다 — 규격 밖 필드는 무로그 폐기를 부른다.
+  const carouselSpec = BUBBLE_TYPES[bubble]?.carousel;
+  const hasCarouselInput = !!(p.carouselJson && String(p.carouselJson).trim() !== '');
+  if (hasCarouselInput && !carouselSpec) {
+    throw new BrandMessageBuildError(`${BUBBLE_TYPES[bubble]?.label || bubble}은 캐러셀을 사용하지 않습니다`);
+  }
+  if (carouselSpec && !hasCarouselInput) {
+    throw new BrandMessageBuildError(`${BUBBLE_TYPES[bubble]?.label || bubble}: 캐러셀 카드가 필요합니다`);
   }
   const targeting = String(p.targeting || '').trim().toUpperCase();
   if (!['M', 'N', 'I'].includes(targeting)) {
@@ -255,8 +382,16 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
   let msgContents: string;
   if (p.typeDef === 'FREE') {
     const message = String(p.message || '').trim();
-    if (!message) throw new BrandMessageBuildError('브랜드메시지 본문이 비어 있습니다');
-    msgContents = message;   // 순수 본문 — 게이트웨이 CONTENTS/MESSAGE로 그대로 실린다
+    // ★2026-08-28 본문 필수를 **유형 기준**으로 바꿨다(그전에는 자유형이면 무조건 필수).
+    //   와이드리스트·커머스·캐러셀 2종은 규격상 본문이 없는 유형이라(§4.4.1 · §5.3 `maxMessage: 0`)
+    //   여기서 막히면 조립 자체가 불가능했다. 5종 개통을 막고 있던 자리 중 하나다.
+    //   ⛔ 본문 미사용 유형은 msg_contents를 **비운 채로** 적재한다 — 게이트웨이 인계 계약(§6-1):
+    //      게이트웨이 brandBaseItem이 `firstNonEmpty(payload.MESSAGE, req.Message)`로 채우므로,
+    //      여기서 비워야 규격상 message 사용불가인 CAROUSEL_COMMERCE에 값이 실리지 않는다.
+    if (BUBBLE_TYPES[bubble].maxMessage > 0 && !message) {
+      throw new BrandMessageBuildError('브랜드메시지 본문이 비어 있습니다');
+    }
+    msgContents = BUBBLE_TYPES[bubble].maxMessage > 0 ? message : '';
   } else {
     // 기본형: 내용은 템플릿(k_template_code)이 담당 — MESSAGE 키를 넣지 않는다(매뉴얼).
     // TYPE_DEF는 게이트웨이 하위호환 경계(absorb)의 전문 식별 마커라 유지한다.
@@ -288,6 +423,10 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
   if (p.attachmentJson && String(p.attachmentJson).trim() !== '') {
     etc.ATTACHMENT = parseJsonOrThrow(p.attachmentJson, '첨부(ATTACHMENT)');
   }
+  // 캐러셀은 ATTACHMENT와 형제 키다(게이트웨이 payload.go가 `CAROUSEL`을 따로 읽는다).
+  if (hasCarouselInput) {
+    etc.CAROUSEL = parseJsonOrThrow(String(p.carouselJson), '캐러셀(CAROUSEL)');
+  }
 
   // ── 규격 검사 — 조립될 실제 값으로 판정한다(호출부 6곳이 같은 판정을 받는 자리) ──
   assertBrandContentSpec({
@@ -299,6 +438,7 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
     header,
     additionalContent: additional,
     attachment: etc.ATTACHMENT ?? null,
+    carousel: etc.CAROUSEL ?? null,
   });
 
   // ── 발송 가능 시간 (KST 08:00~20:50) — 매뉴얼 v2.3.1 §3.9.1 ──
@@ -617,17 +757,27 @@ function assertBrandContentSpec(input: {
   header: string;
   additionalContent: string;
   attachment: any;
+  carousel?: any;
 }): void {
   const { spec, targeting, isFreeForm, message, header, additionalContent, attachment } = input;
   const label = spec.label;
 
   // ── 본문 (자유형만 — 기본형 본문은 템플릿이 담당한다) ─────────────────
-  if (isFreeForm && spec.maxMessage > 0) {
-    if (charLen(message) > spec.maxMessage) {
-      throw new BrandMessageBuildError(`${label}: 본문은 최대 ${spec.maxMessage}자입니다 (현재 ${charLen(message)}자)`);
-    }
-    if (newlineCount(message) > spec.maxNewline) {
-      throw new BrandMessageBuildError(`${label}: 줄바꿈은 최대 ${spec.maxNewline}개입니다 (현재 ${newlineCount(message)}개)`);
+  //   ★2026-08-28 `maxMessage === 0`(본문 미사용 유형)에 본문이 실려 오는 경우를 막는다.
+  //   그전에는 `> 0`일 때만 검사해서, 본문을 쓰지 않는 유형에 값이 들어와도 그대로 통과했다.
+  //   특히 CAROUSEL_COMMERCE는 §5.3이 message를 **사용불가**로 못 박은 유형이다.
+  if (isFreeForm) {
+    if (spec.maxMessage === 0) {
+      if (message) {
+        throw new BrandMessageBuildError(`${label}은 본문을 사용하지 않습니다`);
+      }
+    } else {
+      if (charLen(message) > spec.maxMessage) {
+        throw new BrandMessageBuildError(`${label}: 본문은 최대 ${spec.maxMessage}자입니다 (현재 ${charLen(message)}자)`);
+      }
+      if (newlineCount(message) > spec.maxNewline) {
+        throw new BrandMessageBuildError(`${label}: 줄바꿈은 최대 ${spec.maxNewline}개입니다 (현재 ${newlineCount(message)}개)`);
+      }
     }
   }
 
@@ -647,16 +797,18 @@ function assertBrandContentSpec(input: {
     }
   }
 
-  // ── 부가 정보 (매뉴얼 §4.4.1 — COMMERCE만 사용, 34자·줄바꿈 1개) ──────
+  // ── 부가 정보 (매뉴얼 §4.4.1) ────────────────────────────────────────
+  //   ★2026-08-28 유형 이름과 34/1을 인라인으로 갖고 있던 것을 spec으로 옮겼다.
+  //   값이 여기 있으면 유형이 늘 때마다 이 함수를 고쳐야 한다(규격은 BUBBLE_TYPES가 소유).
   if (additionalContent) {
-    if (input.bubble !== 'COMMERCE') {
+    if (spec.maxAdditional === 0) {
       throw new BrandMessageBuildError(`${label}은 부가 정보를 사용하지 않습니다`);
     }
-    if (charLen(additionalContent) > 34) {
-      throw new BrandMessageBuildError(`부가 정보는 최대 34자입니다 (현재 ${charLen(additionalContent)}자)`);
+    if (charLen(additionalContent) > spec.maxAdditional) {
+      throw new BrandMessageBuildError(`부가 정보는 최대 ${spec.maxAdditional}자입니다 (현재 ${charLen(additionalContent)}자)`);
     }
-    if (newlineCount(additionalContent) > 1) {
-      throw new BrandMessageBuildError('부가 정보의 줄바꿈은 1개까지입니다');
+    if (newlineCount(additionalContent) > spec.maxAdditionalNewline) {
+      throw new BrandMessageBuildError(`부가 정보의 줄바꿈은 ${spec.maxAdditionalNewline}개까지입니다`);
     }
   }
 
@@ -693,6 +845,13 @@ function assertBrandContentSpec(input: {
       || (typeof attCommerce?.regular_price === 'string' && attCommerce.regular_price.trim() !== '');
     if (!required(present, priceOk)) {
       throw new BrandMessageBuildError(`${label}: 상품 정상가가 필요합니다`);
+    }
+    // ★2026-08-28 상품명 길이 — §3.4 "상품제목 (최대 30자)". 그전에는 이 검사가 없었다.
+    const cTitle = strFieldOrThrow(attCommerce?.title, '상품 제목');
+    if (cTitle && spec.maxCommerceTitle > 0 && charLen(cTitle) > spec.maxCommerceTitle) {
+      throw new BrandMessageBuildError(
+        `${label}: 상품명은 최대 ${spec.maxCommerceTitle}자입니다 (현재 ${charLen(cTitle)}자)`
+      );
     }
   }
   // 버튼 최소 개수는 자유형만 — 기본형은 템플릿이 버튼을 갖는다.
@@ -733,6 +892,14 @@ function assertBrandContentSpec(input: {
         const names = btnSpec.anyOf.fields.map(f => BUTTON_FIELD_LABEL[f] || f).join(' · ');
         throw new BrandMessageBuildError(`${at}(${btnSpec.label}): ${names} 중 ${btnSpec.anyOf.count}개 이상을 입력해야 합니다`);
       }
+    }
+    // ★2026-08-28 버튼명 길이 — §3.4 "TEXT, IMAGE - 최대 14자 - 그외 최대 8자".
+    //   그전에는 이 축이 없어 8자 유형에도 14자가 통과했다(화면 maxLength가 전 유형 14 고정이었다).
+    const btnName = strFieldOrThrow(btn?.name, `${at} 버튼명`);
+    if (charLen(btnName) > spec.maxButtonName) {
+      throw new BrandMessageBuildError(
+        `${at}: 버튼명은 최대 ${spec.maxButtonName}자입니다 (현재 ${charLen(btnName)}자)`
+      );
     }
     if (btnSpec.allowedNames && !btnSpec.allowedNames.includes(strFieldOrThrow(btn?.name, `${at} 버튼명`))) {
       throw new BrandMessageBuildError(`${at}(${btnSpec.label}): 버튼명은 ${btnSpec.allowedNames.join(' / ')} 중에서만 쓸 수 있습니다`);
@@ -783,6 +950,157 @@ function assertBrandContentSpec(input: {
       if (i > 0 && !strFieldOrThrow(item?.title, `${at} 제목`)) throw new BrandMessageBuildError(`${at}: 제목이 필요합니다`);
     });
   }
+
+  // ── 캐러셀 (§5.3 — head 인트로 / list 카드 / tail 더보기) ─────────────
+  //   ★2026-08-28 신설. 그전에는 캐러셀 값이 오면 조립 앞단에서 통째로 거부했다.
+  if (spec.carousel) {
+    assertCarouselSpec(spec, input.carousel, label);
+  }
+}
+
+/**
+ * 캐러셀 검사 — 출처: attachment_method.pdf **§5.3**.
+ *
+ * 세 자리가 서로 다른 규칙을 갖는다.
+ *   `head`(인트로) = CAROUSEL_COMMERCE만 · 헤더 20자 줄바꿈 불가 · 내용 50자 줄바꿈 2
+ *   `list`(카드)   = 인트로 쓰면 1~5장, 안 쓰면 2~6장 · 유형별로 header·message가 필수이거나 사용불가
+ *   `tail`(더보기) = url_mobile 필수 · **변수 사용 불가**
+ */
+export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: string): void {
+  const cs = spec.carousel!;
+  const car = plainObjectOrThrow(carousel, '캐러셀');
+  if (!car) throw new BrandMessageBuildError(`${label}: 캐러셀 카드가 필요합니다`);
+
+  // ── head (인트로) ──
+  const head = plainObjectOrThrow(car.head, '캐러셀 인트로');
+  const useIntro = head !== undefined;
+  if (useIntro && !cs.allowIntro) {
+    throw new BrandMessageBuildError(`${label}은 캐러셀 인트로를 사용하지 않습니다`);
+  }
+  if (useIntro) {
+    const iHeader = strFieldOrThrow(head?.header, '인트로 제목');
+    if (!iHeader) throw new BrandMessageBuildError('캐러셀 인트로: 제목이 필요합니다');
+    if (charLen(iHeader) > cs.introHeaderMax) {
+      throw new BrandMessageBuildError(`캐러셀 인트로: 제목은 최대 ${cs.introHeaderMax}자입니다 (현재 ${charLen(iHeader)}자)`);
+    }
+    if (newlineCount(iHeader) > 0) throw new BrandMessageBuildError('캐러셀 인트로: 제목에는 줄바꿈을 넣을 수 없습니다');
+
+    const iContent = strFieldOrThrow(head?.content, '인트로 내용');
+    if (!iContent) throw new BrandMessageBuildError('캐러셀 인트로: 내용이 필요합니다');
+    if (charLen(iContent) > cs.introContentMax) {
+      throw new BrandMessageBuildError(`캐러셀 인트로: 내용은 최대 ${cs.introContentMax}자입니다 (현재 ${charLen(iContent)}자)`);
+    }
+    if (newlineCount(iContent) > cs.introContentNewline) {
+      throw new BrandMessageBuildError(`캐러셀 인트로: 줄바꿈은 최대 ${cs.introContentNewline}개입니다`);
+    }
+    if (!strFieldOrThrow(head?.image_url, '인트로 이미지')) {
+      throw new BrandMessageBuildError('캐러셀 인트로: 이미지가 필요합니다');
+    }
+    // §5.3 "url_mobile이 필수 — url_mobile, url_pc, scheme_android, scheme_ios 중 하나라도 입력하는 경우"
+    const introLinkKeys = ['url_pc', 'scheme_android', 'scheme_ios'];
+    const hasOtherLink = introLinkKeys.some((k) => strFieldOrThrow(head?.[k], '인트로 링크'));
+    if (hasOtherLink && !strFieldOrThrow(head?.url_mobile, '인트로 모바일 링크')) {
+      throw new BrandMessageBuildError('캐러셀 인트로: 다른 링크를 넣으면 모바일 링크가 필요합니다');
+    }
+  }
+
+  // ── list (카드) ──
+  const list = asArray(car.list);
+  const min = useIntro ? cs.listMinWithIntro : cs.listMin;
+  const max = useIntro ? cs.listMaxWithIntro : cs.listMax;
+  if (list.length < min || list.length > max) {
+    throw new BrandMessageBuildError(
+      useIntro
+        ? `${label}: 인트로를 쓰면 카드는 ${min}~${max}장입니다 (현재 ${list.length}장)`
+        : `${label}: 카드는 ${min}~${max}장입니다 (현재 ${list.length}장)`
+    );
+  }
+  list.forEach((card: any, i: number) => {
+    const at = `${i + 1}번째 카드`;
+    plainObjectOrThrow(card, at);
+
+    const cHeader = strFieldOrThrow(card?.header, `${at} 제목`);
+    if (cs.itemHeader === 'forbidden') {
+      if (cHeader) throw new BrandMessageBuildError(`${label}: ${at}는 제목을 사용하지 않습니다`);
+    } else {
+      if (!cHeader) throw new BrandMessageBuildError(`${at}: 제목이 필요합니다`);
+      if (charLen(cHeader) > cs.itemHeaderMax) {
+        throw new BrandMessageBuildError(`${at}: 제목은 최대 ${cs.itemHeaderMax}자입니다 (현재 ${charLen(cHeader)}자)`);
+      }
+      if (newlineCount(cHeader) > 0) throw new BrandMessageBuildError(`${at}: 제목에는 줄바꿈을 넣을 수 없습니다`);
+    }
+
+    const cMessage = strFieldOrThrow(card?.message, `${at} 내용`);
+    if (cs.itemMessage === 'forbidden') {
+      if (cMessage) throw new BrandMessageBuildError(`${label}: ${at}는 내용을 사용하지 않습니다`);
+    } else {
+      if (!cMessage) throw new BrandMessageBuildError(`${at}: 내용이 필요합니다`);
+      if (charLen(cMessage) > cs.itemMessageMax) {
+        throw new BrandMessageBuildError(`${at}: 내용은 최대 ${cs.itemMessageMax}자입니다 (현재 ${charLen(cMessage)}자)`);
+      }
+      if (newlineCount(cMessage) > cs.itemMessageNewline) {
+        throw new BrandMessageBuildError(`${at}: 줄바꿈은 최대 ${cs.itemMessageNewline}개입니다`);
+      }
+    }
+
+    const cAdd = strFieldOrThrow(card?.additional_content, `${at} 부가 정보`);
+    if (cAdd) {
+      if (cs.itemAdditional === 'forbidden') {
+        throw new BrandMessageBuildError(`${label}: ${at}는 부가 정보를 사용하지 않습니다`);
+      }
+      if (charLen(cAdd) > cs.itemAdditionalMax) {
+        throw new BrandMessageBuildError(`${at}: 부가 정보는 최대 ${cs.itemAdditionalMax}자입니다 (현재 ${charLen(cAdd)}자)`);
+      }
+      if (newlineCount(cAdd) > cs.itemAdditionalNewline) {
+        throw new BrandMessageBuildError(`${at}: 부가 정보의 줄바꿈은 ${cs.itemAdditionalNewline}개까지입니다`);
+      }
+    }
+
+    // 카드 안의 attachment는 다시 이미지·버튼·쿠폰·커머스를 품는다(§5.2 "캐러셀 아이템 이미지, 버튼 정보").
+    const cAtt = plainObjectOrThrow(card?.attachment, `${at} 첨부`) ?? {};
+    const cCommerce = plainObjectOrThrow(cAtt.commerce, `${at} 상품 정보`);
+    const cProdTitle = strFieldOrThrow(cCommerce?.title, `${at} 상품명`);
+    if (cProdTitle && spec.maxCommerceTitle > 0 && charLen(cProdTitle) > spec.maxCommerceTitle) {
+      throw new BrandMessageBuildError(
+        `${at}: 상품명은 최대 ${spec.maxCommerceTitle}자입니다 (현재 ${charLen(cProdTitle)}자)`
+      );
+    }
+    // §6.10.8 — 할인가를 넣었으면 할인율·정액할인 중 하나는 있어야 한다(카드에도 같은 규칙).
+    if (cCommerce && cCommerce.discount_price !== undefined
+        && cCommerce.discount_rate === undefined && cCommerce.discount_fixed === undefined) {
+      throw new BrandMessageBuildError(`${at}: 할인가를 넣으면 할인율 또는 할인금액 중 하나를 함께 입력해야 합니다`);
+    }
+    const cButtons = asArray(cAtt.button);
+    if (cButtons.length > cs.itemButtonMax) {
+      throw new BrandMessageBuildError(`${at}: 버튼은 최대 ${cs.itemButtonMax}개입니다 (현재 ${cButtons.length}개)`);
+    }
+    cButtons.forEach((btn: any, bi: number) => {
+      const bat = `${at} ${bi + 1}번째 버튼`;
+      plainObjectOrThrow(btn, bat);
+      const bName = strFieldOrThrow(btn?.name, `${bat} 버튼명`);
+      if (!bName) throw new BrandMessageBuildError(`${bat}: 버튼명이 필요합니다`);
+      if (charLen(bName) > spec.maxButtonName) {
+        throw new BrandMessageBuildError(`${bat}: 버튼명은 최대 ${spec.maxButtonName}자입니다 (현재 ${charLen(bName)}자)`);
+      }
+      const bType = strFieldOrThrow(btn?.type, `${bat} 종류`).toUpperCase();
+      if (!BUTTON_TYPES[bType]) throw new BrandMessageBuildError(`${bat}: 지원하지 않는 버튼 종류입니다 (${bType || '미지정'})`);
+    });
+  });
+
+  // ── tail (더보기) ──
+  const tail = plainObjectOrThrow(car.tail, '캐러셀 더보기');
+  if (tail !== undefined) {
+    const tUrl = strFieldOrThrow(tail?.url_mobile, '더보기 모바일 링크');
+    if (!tUrl) throw new BrandMessageBuildError('캐러셀 더보기: 모바일 링크가 필요합니다');
+    // 더보기에는 변수를 쓸 수 없다(카카오 브랜드메시지 가이드 · 접수 문서 「캐러셀 더보기」 항).
+    // 치환이 일어나지 않아 `#{...}`가 링크에 그대로 남는다.
+    for (const k of ['url_mobile', 'url_pc', 'scheme_android', 'scheme_ios']) {
+      const v = strFieldOrThrow(tail?.[k], '더보기 링크');
+      if (v && v.includes('#{')) {
+        throw new BrandMessageBuildError('캐러셀 더보기 링크에는 변수를 사용할 수 없습니다');
+      }
+    }
+  }
 }
 
 /**
@@ -831,14 +1149,21 @@ const BUTTON_FIELD_LABEL: Record<string, string> = {
 // ============================================================
 
 /** ATTACHMENT_JSON 구성 */
-export function buildAttachmentJson(params: {
+/**
+ * ATTACHMENT 본체 조립 — 객체를 돌려준다.
+ *
+ * ★2026-08-28 `buildAttachmentJson`에서 본문을 그대로 떼어냈다(내용 변경 0).
+ *   캐러셀 카드도 같은 모양의 첨부를 품기 때문이다(§5.2 "캐러셀 아이템 이미지, 버튼 정보").
+ *   여기서 나누지 않으면 카드 조립이 같은 코드를 한 벌 더 갖게 된다.
+ */
+function buildAttachmentBody(params: {
   buttons?: BrandButton[];
   image?: BrandImage;
   coupon?: BrandCoupon;
   itemList?: BrandItemListItem[];
   commerce?: BrandCommerce;
   video?: BrandVideo;
-}): string | null {
+}): Record<string, any> {
   const attachment: any = {};
 
   if (params.buttons && params.buttons.length > 0) {
@@ -912,11 +1237,107 @@ export function buildAttachmentJson(params: {
     };
   }
 
+  return attachment;
+}
+
+export function buildAttachmentJson(params: Parameters<typeof buildAttachmentBody>[0]): string | null {
+  const attachment = buildAttachmentBody(params);
   return Object.keys(attachment).length > 0 ? JSON.stringify(attachment) : null;
 }
 
-// (2026-07-30) 옛 buildCarouselJson 삭제 — 캐러셀은 상위 조립 예시 미확보로 입구 차단 유형.
-// 확장 시 buildBrandQueuePayload에 상위 키 실예시 확보 후 되살린다(추측 조립 금지).
+// ============================================================
+// 캐러셀 조립 (§5.3)
+// ============================================================
+
+/** 캐러셀 인트로 — CAROUSEL_COMMERCE만 사용(§5.3 head) */
+export interface BrandCarouselIntro {
+  header: string;
+  content: string;
+  image_url: string;
+  url_mobile?: string;
+  url_pc?: string;
+  scheme_android?: string;
+  scheme_ios?: string;
+}
+
+/** 캐러셀 카드 — 본문 필드 + 자기 첨부(이미지·버튼·쿠폰·커머스)를 품는다(§5.3 list) */
+export interface BrandCarouselCard {
+  header?: string;
+  message?: string;
+  additional_content?: string;
+  image?: BrandImage;
+  buttons?: BrandButton[];
+  coupon?: BrandCoupon;
+  commerce?: BrandCommerce;
+}
+
+/** 캐러셀 더보기 — 맨 끝 고정 카드(§5.3 tail). 변수 사용 불가 */
+export interface BrandCarouselTail {
+  url_mobile: string;
+  url_pc?: string;
+  scheme_android?: string;
+  scheme_ios?: string;
+}
+
+/**
+ * 캐러셀 JSON 조립 — ★2026-08-28 되살렸다.
+ *
+ * 2026-07-30에 "상위 조립 예시 미확보"로 지웠던 함수다. 그 예시를 `attachment_method.pdf` §5.3에서
+ * 확보해 규격대로 다시 만들었다. 구조는 `head`(인트로) · `list`(카드) · `tail`(더보기) 3단이고,
+ * 카드 첨부는 `buildAttachmentBody`를 그대로 쓴다(같은 규격이라 코드를 두 벌 두지 않는다).
+ *
+ * ⛔ 값 검사는 여기서 하지 않는다 — `assertBrandContentSpec` → `assertCarouselSpec`이 소유한다.
+ *    조립기가 검사까지 하면 호출부마다 검사가 갈린다(0818 결함 2의 뿌리).
+ */
+export function buildCarouselJson(params: {
+  intro?: BrandCarouselIntro;
+  cards: BrandCarouselCard[];
+  tail?: BrandCarouselTail;
+}): string | null {
+  if (!params.cards || params.cards.length === 0) return null;
+
+  const carousel: Record<string, any> = {};
+
+  if (params.intro) {
+    const i = params.intro;
+    carousel.head = {
+      header: i.header,
+      content: i.content,
+      image_url: i.image_url,
+      ...(i.url_mobile && { url_mobile: i.url_mobile }),
+      ...(i.url_pc && { url_pc: i.url_pc }),
+      ...(i.scheme_android && { scheme_android: i.scheme_android }),
+      ...(i.scheme_ios && { scheme_ios: i.scheme_ios }),
+    };
+  }
+
+  carousel.list = params.cards.map((card) => {
+    const attachment = buildAttachmentBody({
+      buttons: card.buttons,
+      image: card.image,
+      coupon: card.coupon,
+      commerce: card.commerce,
+    });
+    return {
+      ...(card.header && { header: card.header }),
+      ...(card.message && { message: card.message }),
+      ...(card.additional_content && { additional_content: card.additional_content }),
+      ...(Object.keys(attachment).length > 0 && { attachment }),
+    };
+  });
+
+  if (params.tail) {
+    const t = params.tail;
+    carousel.tail = {
+      url_mobile: t.url_mobile,
+      ...(t.url_pc && { url_pc: t.url_pc }),
+      ...(t.scheme_android && { scheme_android: t.scheme_android }),
+      ...(t.scheme_ios && { scheme_ios: t.scheme_ios }),
+    };
+  }
+
+  return JSON.stringify(carousel);
+}
 
 // ============================================================
 // 발송 함수
