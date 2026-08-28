@@ -17,10 +17,16 @@
  * 테이블 부재(마이그레이션 전)는 조용히 넘어간다(agency-send-worker와 같은 안전망).
  */
 import crypto from 'crypto';
+import fs from 'fs';
 import { simpleParser, type ParsedMail } from 'mailparser';
 import pool, { query } from '../config/database';
+import { LIMITS } from '../config/defaults';
 import { Pop3Client, Pop3Error } from './pop3-client';
-import { resolveEmailSender, matchBillingTarget, describeBillingTargets, type SenderCandidate } from './agency-send-email';
+import {
+  resolveEmailSender, matchBillingTarget, describeBillingTargets, type SenderCandidate,
+  isImageAttachment, mailImageName, validateMailMmsImages,
+} from './agency-send-email';
+import { saveMmsImageBuffer } from './mms-image-util';
 import { canUseAgencySend, loadPlanContext } from './plan-guard';
 import { getRegisteredCallbackSet } from './callback-filter';
 import {
@@ -157,6 +163,8 @@ function buildAcceptedReply(input: {
   total: number; valid: number; dup: number; invalid: number;
   /** ★2026-08-26(6) 촉박해서 시각을 자동 조정했으면 원본 시각. 이메일은 확인 화면이 없어 이 회신이 유일한 고지다 */
   originalAtIso?: string | null;
+  /** ★2026-08-28 MMS 이미지 원본 파일명(첨부 순서 그대로). 순서 고지는 이 회신이 유일한 확인 자리다 */
+  imageNames?: string[];
 }): string {
   const when = new Date(input.requestedAtIso);
   const p = (n: number) => String(n).padStart(2, '0');
@@ -173,6 +181,9 @@ function buildAcceptedReply(input: {
     `회신번호: ${input.callback}`,
     `담당자 번호: ${input.managerPhones.join(', ')}`,
     `수신자 열: ${input.phoneColumn}${input.autoPickedPhoneColumn ? ' (자동 선정)' : ''}`,
+    ...(input.imageNames && input.imageNames.length > 0
+      ? [`첨부 이미지: ${input.imageNames.length}장, 이 순서로 붙습니다: ${input.imageNames.join(', ')}`]
+      : []),
     `보낼 인원: ${input.valid.toLocaleString()}명 (명단 ${input.total.toLocaleString()}행, 중복 ${input.dup}건, 형식 오류 ${input.invalid}건 제외)`,
     '',
     '문안:',
@@ -454,22 +465,34 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   const raw = await ctx.client.retr(seq);
   const mail: ParsedMail = await simpleParser(raw);
   const atts = (mail.attachments || []).filter((a) => a.contentDisposition !== 'inline' && !a.cid);
+  // ★2026-08-28 MMS 개통(서수란 접수 cmtclkuhe04iujnotbi3xbuu3) — 이미지를 요청서와 별도 첨부로 받는다.
+  //   규격(JPG 실체·300KB·3장)이면 그대로 접수하고, 벗어나면 파일별 사유로 반려한다(변환 없음).
+  //   저장은 청구 계정 확정 뒤에만 하고, 저장 뒤 반려로 빠지면 그 자리에서 지운다(고아 파일 방지).
+  const savedImagePaths: string[] = [];
+  const savedImageNames: string[] = [];
   // 청구 계정 미확정(auth null) 반려는 회사·사용자 없이 기록한다 — 후보가 여러 회사일 수 있어 추정 기록은 오귀속이다
   const reject = async (reasons: string[], reasonCode: string, headers?: string[]) => {
+    for (const p of savedImagePaths.splice(0)) {
+      try { fs.unlinkSync(p); } catch { /* 이미 없으면 그만 · 반려 자체를 막지 않는다 */ }
+    }
     await finalizeIntake(claimed.id, 'rejected', { reason: reasonCode, companyId: auth?.companyId ?? null, userId: auth?.userId ?? null, replyStatus: 'pending' });
     await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가', buildRejectedReply(reasons, headers), messageId);
   };
 
-  if (atts.some((a) => String(a.contentType || '').startsWith('image/'))) {
-    await reject(['이미지가 첨부되어 있습니다. 이미지 문자는 화면 접수에서 이미지를 붙여 진행해 주세요. 메일 접수는 짧은 문자와 긴 문자만 받습니다.'], 'has_image');
-    return;
+  const imageAtts = atts.filter((a) => isImageAttachment(a));
+  if (imageAtts.length > 0) {
+    const check = validateMailMmsImages(imageAtts);
+    if (!check.ok) {
+      await reject(check.reasons, 'mms_image_invalid');
+      return;
+    }
   }
   if (atts.some((a) => /\.zip$/i.test(String(a.filename || '')))) {
     await reject(['압축(zip) 파일은 받지 않습니다. 요청서와 명단을 각각 엑셀 또는 CSV로 첨부해 주세요.'], 'zip_not_allowed');
     return;
   }
   if (atts.length > MAX_ATTACH_FILES) {
-    await reject([`첨부가 ${atts.length}개입니다. 요청서 파일 하나만 첨부해 주세요.`], 'too_many_files');
+    await reject([`첨부가 ${atts.length}개입니다. 요청서 양식 파일 하나와 이미지 최대 ${LIMITS.mmsImageCount}장까지만 첨부해 주세요.`], 'too_many_files');
     return;
   }
   if (atts.reduce((a, b) => a + (b.size || b.content?.length || 0), 0) > MAX_ATTACH_TOTAL) {
@@ -546,11 +569,20 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   }
   const acct = auth;
 
-  // ★2026-08-26(2) 요청서의 "이미지 파일명" 칸에 값이 있으면 반려 — 이 경로는 이미지 첨부 자체를
-  //   안 받으므로(has_image), 이름만 적힌 이미지는 실리지 못한 채 문자만 나간다(기대와 다른 발송).
-  if (form.imageFileName) {
-    await reject(['요청서에 이미지 파일명이 적혀 있습니다. 이미지 문자는 화면 접수에서 이미지를 붙여 진행해 주세요. 메일 접수는 짧은 문자와 긴 문자만 받습니다.'], 'has_image');
+  // ★2026-08-28 요청서의 "이미지 파일명" 칸에 값이 있는데 첨부가 0장이면 반려 — 이름만 적힌 이미지는
+  //   실리지 못한 채 문자만 나간다(기대와 다른 발송). 첨부가 있으면 칸은 무시하고 **첨부 순서**를 쓴다:
+  //   파일명 오타 하나로 반려 왕복(하루)을 만드는 것보다, 접수 완료 회신에 순서를 적고
+  //   최종 확인은 담당자 테스트 문자(이미지 포함 실물 · 불변 11)가 맡는 쪽이 왕복이 적다(Harold 확정).
+  if (form.imageFileName && imageAtts.length === 0) {
+    await reject(['요청서에 이미지 파일명이 적혀 있는데 이미지가 첨부되어 있지 않습니다. 이미지 파일(JPG)을 메일에 함께 첨부해 다시 보내주세요.'], 'image_not_attached');
     return;
+  }
+
+  // 이미지 저장 — 청구 계정 확정 뒤(회사 저장소 경로가 필요하다). 이후 반려 분기는 reject가 파일을 지운다.
+  for (let i = 0; i < imageAtts.length; i++) {
+    const saved = saveMmsImageBuffer(acct.companyId, imageAtts[i].content as Buffer);
+    savedImagePaths.push(saved.serverPath);
+    savedImageNames.push(mailImageName(imageAtts[i], i));
   }
   let list: ReturnType<typeof parseAgencyRecipientList> | null = null;
   try { list = parseAgencyRecipientList(listBuf); } catch { list = null; }
@@ -577,6 +609,8 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   }
 
   // 9) 분석(확정 경로 · AI 0 · 리드타임 240은 코어와 같은 상수) — 반려 사유는 전량 회신에 싣는다
+  //   이미지가 있으면 분석·코어가 화면 접수와 같은 결정(타입 = MMS · validateMmsPayload)을 그대로 탄다
+  if (savedImagePaths.length > 0) overridesRaw.mmsImagePaths = [...savedImagePaths];
   const overrides = parseOneStepOverrides(overridesRaw);
   const analysis = await analyzeOneStep(acct, formBuf, listBuf, listName, overrides, false, EMAIL_MIN_LEAD_MINUTES);
   if (analysis.errors.length > 0) {
@@ -634,7 +668,8 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       callbackNumber: group.callback,
       managerPhones: analysis.managerPhones,
       requestedAt: analysis.requestedAtIso,
-      mmsImagePaths: [],
+      // ★2026-08-28 형태 = 화면 접수와 같은 절대경로 문자열 배열(발송 배관 계약 무변경)
+      mmsImagePaths: savedImagePaths,
       fileName: analysis.fileName,
       phoneColumn: analysis.phoneColumn || '전화번호',
       varMapping: Object.fromEntries(analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
@@ -680,6 +715,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       callback: group.callback, managerPhones: analysis.managerPhones,
       phoneColumn: analysis.phoneColumn || '전화번호', autoPickedPhoneColumn,
       total: analysis.counts.total, valid: analysis.counts.valid, dup: analysis.counts.dup, invalid: analysis.counts.invalid,
+      imageNames: savedImageNames,
     }), messageId, undefined, true);
 }
 

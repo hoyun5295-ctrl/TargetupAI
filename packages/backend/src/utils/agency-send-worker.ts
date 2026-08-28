@@ -35,11 +35,12 @@ import {
   type AgencySendStatus,
 } from './agency-send-state';
 import { buildSlotPlan, toSlotValues } from './agency-send-vars';
+import { buildRenderedSample as buildSample } from './agency-send-preview';
 import { inspectAttemptCampaign, neutralizeCampaign } from './agency-send-campaign';
 import { bulkInsertSmsQueue, getAuthSmsTable, insertTestSmsQueue, toKoreaTimeStr } from './sms-queue';
 import { countStagingFiltered, createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
-import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
+import { getOpt080Number } from './messageUtils';
 import { normalizePhone } from './normalize-phone';
 import { sendSystemAlert } from './system-alert';
 
@@ -228,34 +229,8 @@ async function sendManagerTest(opts: {
   }
 }
 
-/**
- * 검사·테스트 문자에 쓸 문안 한 벌을 만든다(첫 수신자 기준 변수 치환 + 광고 부착).
- *
- * ⛔ 조립은 `prepareSendMessage` 하나를 지난다 — 실제 발송(`direct-send-processor`)이 부르는 함수와
- *   같아야 **검사한 문장 = 담당자가 본 문장 = 나가는 문장**이 된다(불변 4).
- * ⛔ 수신자 값은 문안 변수명이 아니라 **주소록 슬롯**으로 넘긴다. 치환 함수는 값을 DB 컬럼 이름으로
- *   찾기 때문에, 변수명을 키로 넘기면 하나도 못 찾고 전부 빈 문자열이 된다(2026-08-23 정정).
- */
-async function buildSample(row: any): Promise<{ text: string; subject: string }> {
-  const first = await query(
-    `SELECT phone, vars FROM agency_send_recipients WHERE request_id = $1::uuid ORDER BY row_no LIMIT 1`,
-    [row.id],
-  );
-  const plan = buildSlotPlan(String(row.current_content || ''));
-  const slotValues = toSlotValues(first.rows[0]?.vars, plan.order);
-  const mappings = await prepareFieldMappings(row.company_id);
-  const opt080 = row.is_ad ? await getOpt080Number(row.created_by || null, row.company_id) : '';
-
-  const { message, subject } = prepareSendMessage(plan.slotContent, {}, mappings, {
-    msgType: row.message_type,
-    isAd: !!row.is_ad,
-    opt080Number: opt080,
-    addressBookFields: slotValues,
-    subject: String(row.subject || ''),
-    skipNumberFormatting: true,
-  });
-  return { text: message, subject };
-}
+// ★2026-08-28 buildSample은 utils/agency-send-preview.ts로 이동(원문 복사) — 상세 미리보기가 같은
+//   조립을 상위 N행에 쓰기 위해서다. 검사한 문장 = 담당자가 본 문장 = 미리보기 = 나가는 문장(불변 4).
 
 /**
  * 스팸 검사 한 판. 걸리면 다듬어 다시 본다.

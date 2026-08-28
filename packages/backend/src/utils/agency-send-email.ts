@@ -14,6 +14,8 @@
  *   자동 선택은 없다 — 못 고르면 반려다. 옛 'ambiguous'(같은 주소 2행 = fail-closed)는 폐기됐다.
  */
 import { query } from '../config/database';
+import { LIMITS } from '../config/defaults';
+import { isJpegBuffer } from './mms-image-util';
 
 /**
  * 발신 주소 정규화: `"홍길동" <a@b.com>` 에서 주소만 추출 → lower → trim. plus-tag 보존.
@@ -145,4 +147,64 @@ export function describeBillingTargets(candidates: SenderCandidate[]): string {
   return candidates
     .map((c) => (c.label ? `${c.label} (${c.loginId})` : c.loginId))
     .join(', ');
+}
+
+// ─────────────────────────────────────────────────────────────
+// MMS 이미지 첨부 규격 (★2026-08-28 서수란 접수 cmtclkuhe04iujnotbi3xbuu3 · Harold 확정)
+//   메일 접수도 이미지 최대 3장을 요청서와 별도 파일로 첨부해 MMS를 보낼 수 있다.
+//   규격이면 그대로 접수, 벗어나면 파일별 사유로 반려한다(변환하지 않는다 · 파이썬 서비스 의존 0).
+//   ⛔ 판정은 확장자·MIME이 아니라 파일 실체(JPG SOI 바이트)로 한다 — 무인증에 가까운 입구에서
+//     받은 바이너리가 디스크에 닿는 첫 경로다(화면 업로드보다 한 단계 강하게).
+// ─────────────────────────────────────────────────────────────
+
+/** mailparser 첨부 최소 형태(테스트에서 버퍼로 흉내 낼 수 있게 구조만 요구) */
+export interface MailImageAttachment {
+  filename?: string | null;
+  contentType?: string | null;
+  size?: number;
+  content?: Buffer | null;
+}
+
+const IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp|bmp|heic|heif|tiff?)$/i;
+
+/** 이 첨부가 이미지 후보인가(표 파일·기타와 가르는 판정). 이름과 유형 어느 쪽이든 이미지를 주장하면 후보다. */
+export function isImageAttachment(att: MailImageAttachment): boolean {
+  if (String(att.contentType || '').toLowerCase().startsWith('image/')) return true;
+  return IMAGE_EXT_RE.test(String(att.filename || ''));
+}
+
+/** 표시용 이름: 없으면 "이미지 N" */
+export function mailImageName(att: MailImageAttachment, index: number): string {
+  const n = String(att.filename || '').trim();
+  return n || `이미지 ${index + 1}`;
+}
+
+/**
+ * 이미지 첨부 규격 검사: 최대 장수(LIMITS.mmsImageCount) · 각각 JPG 실체 · 장당 300KB(LIMITS.mmsImageSize).
+ * 반려 사유는 파일별로 만든다(어느 파일이 왜 걸렸는지 없이는 사용자가 고칠 수 없다).
+ */
+export function validateMailMmsImages(atts: MailImageAttachment[]): { ok: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  if (atts.length > LIMITS.mmsImageCount) {
+    reasons.push(`이미지가 ${atts.length}장입니다. 최대 ${LIMITS.mmsImageCount}장까지 첨부할 수 있습니다.`);
+  }
+  const maxKb = Math.floor(LIMITS.mmsImageSize / 1024);
+  let oversize = false;
+  atts.forEach((att, i) => {
+    const name = mailImageName(att, i);
+    const buf = att.content || null;
+    if (!isJpegBuffer(buf)) {
+      reasons.push(`${name}: JPG 파일만 받습니다. JPG로 저장해 다시 첨부해 주세요.`);
+      return;
+    }
+    const size = buf ? buf.length : (att.size || 0);
+    if (size > LIMITS.mmsImageSize) {
+      oversize = true;
+      reasons.push(`${name}: ${Math.ceil(size / 1024)}KB입니다. ${maxKb}KB 이하로 줄여 주세요.`);
+    }
+  });
+  if (oversize) {
+    reasons.push('용량이 큰 이미지는 화면 접수에서 라이브러리 소재로 올리면 규격에 맞게 자동 변환됩니다.');
+  }
+  return { ok: reasons.length === 0, reasons };
 }

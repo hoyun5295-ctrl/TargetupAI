@@ -93,6 +93,23 @@ export async function fetchAgencyRequest(id: string): Promise<{ request: AgencyS
   return { request: data.request, events: data.events || [] };
 }
 
+/** 치환 미리보기 한 명 몫. 서버가 실물 조립(발송과 같은 CT)으로 만든 값이다 */
+export interface AgencyPreviewSample {
+  phone: string;
+  text: string;
+  subject: string;
+}
+
+/**
+ * 치환 미리보기 (★2026-08-28 서수란 접수). 상위 표본만 온다(shown ≤ 서버 상한 50).
+ * ⛔ 치환을 화면에서 다시 만들지 않는다. 실물과 다른 코드가 만든 미리보기는 다른 문장을 보여 준다.
+ */
+export async function fetchAgencyPreview(id: string): Promise<{ samples: AgencyPreviewSample[]; shown: number; total: number }> {
+  const res = await fetch(`/api/agency-send/${id}/preview`, { headers: auth() });
+  const data = await unwrap(res);
+  return { samples: data.samples || [], shown: data.shown || 0, total: data.total || 0 };
+}
+
 /** 재접수(같은 내용으로 다시 접수)용 수신자 목록. 읽기 전용이고, 새 접수는 기존 접수 API를 그대로 탄다 */
 export async function fetchAgencyRecipients(id: string): Promise<Array<{ phone: string; vars: Record<string, any> }>> {
   const res = await fetch(`/api/agency-send/${id}/recipients`, { headers: auth() });

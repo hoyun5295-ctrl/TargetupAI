@@ -81,3 +81,104 @@ describe('활성 집합 지정 키 겹침(senderKeyClash) — 등록 POST·재�
     expect(senderKeyClash([], { label: '금강', loginId: 'a1' })).toBe(false);
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// MMS 이미지 첨부 규격 (★2026-08-28 서수란 접수 cmtclkuhe04iujnotbi3xbuu3)
+//   메일 접수 MMS 개통: 규격(JPG 실체·300KB·3장)이면 접수, 벗어나면 파일별 사유 반려.
+//   판정은 확장자·MIME이 아니라 파일 첫 바이트(SOI)다 — 무인증 입구의 위장 파일 방어.
+// ─────────────────────────────────────────────────────────────
+import { isImageAttachment, mailImageName, validateMailMmsImages } from '../agency-send-email';
+import { isJpegBuffer } from '../mms-image-util';
+import fs from 'fs';
+import path from 'path';
+
+const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, 1)]);
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100, 1)]);
+const att = (filename: string, content: Buffer, contentType = '') => ({ filename, content, contentType, size: content.length });
+
+describe('이미지 첨부 판정(isImageAttachment) — 표 파일과 가른다', () => {
+  it('contentType image/* 또는 이미지 확장자면 이미지 후보다', () => {
+    expect(isImageAttachment(att('a.jpg', JPG))).toBe(true);
+    expect(isImageAttachment(att('사진.PNG', PNG))).toBe(true);
+    expect(isImageAttachment({ filename: 'x.bin', contentType: 'image/jpeg', content: JPG })).toBe(true);
+  });
+  it('표·문서 파일은 이미지 후보가 아니다', () => {
+    expect(isImageAttachment(att('명단.xlsx', Buffer.alloc(10)))).toBe(false);
+    expect(isImageAttachment(att('요청서.csv', Buffer.alloc(10)))).toBe(false);
+    expect(isImageAttachment(att('문서.pdf', Buffer.alloc(10)))).toBe(false);
+  });
+});
+
+describe('MMS 규격 검사(validateMailMmsImages)', () => {
+  it('규격 안(JPG 실체 · 300KB 이하 · 3장 이하) = 통과', () => {
+    const r = validateMailMmsImages([att('a.jpg', JPG), att('b.jpg', JPG), att('c.jpg', JPG)]);
+    expect(r.ok).toBe(true);
+    expect(r.reasons).toEqual([]);
+  });
+  it('PNG는 파일별 사유로 반려된다', () => {
+    const r = validateMailMmsImages([att('a.jpg', JPG), att('포스터.png', PNG)]);
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join('\n')).toContain('포스터.png');
+    expect(r.reasons.join('\n')).toContain('JPG 파일만');
+  });
+  it('확장자만 jpg인 위장 파일(내용 PNG)도 반려된다 — 실체 판정', () => {
+    const r = validateMailMmsImages([att('위장.jpg', PNG)]);
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join('\n')).toContain('위장.jpg');
+  });
+  it('300KB 초과는 실측 KB와 함께 반려되고, 변환 출구(화면 접수)를 안내한다', () => {
+    const big = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(310 * 1024, 1)]);
+    const r = validateMailMmsImages([att('큰사진.jpg', big)]);
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join('\n')).toContain('큰사진.jpg');
+    expect(r.reasons.join('\n')).toContain('300KB 이하');
+    expect(r.reasons.join('\n')).toContain('화면 접수');
+  });
+  it('4장은 장수 사유로 반려된다', () => {
+    const r = validateMailMmsImages([att('a.jpg', JPG), att('b.jpg', JPG), att('c.jpg', JPG), att('d.jpg', JPG)]);
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join('\n')).toContain('최대 3장');
+  });
+  it('파일명 없는 첨부는 순번으로 부른다', () => {
+    expect(mailImageName({ content: JPG }, 1)).toBe('이미지 2');
+  });
+  it('JPG 실체 판정은 SOI 바이트다', () => {
+    expect(isJpegBuffer(JPG)).toBe(true);
+    expect(isJpegBuffer(PNG)).toBe(false);
+    expect(isJpegBuffer(Buffer.alloc(0))).toBe(false);
+  });
+});
+
+describe('메일 워커 배선 (소스 계약) — MMS 개통이 되돌아가지 않는다', () => {
+  const worker = fs.readFileSync(path.resolve(__dirname, '../agency-send-mail-worker.ts'), 'utf8');
+
+  it('이미지 무조건 반려(has_image)가 되살아나지 않았다 — 규격 게이트만 있다', () => {
+    expect(worker).not.toMatch(/'has_image'/);
+    expect(worker).toMatch(/validateMailMmsImages\(imageAtts\)/);
+    expect(worker).toMatch(/'mms_image_invalid'/);
+  });
+  it('이미지 파일명 칸만 있고 첨부 0장이면 반려한다(첨부 없는 이미지 지정 = 기대와 다른 발송)', () => {
+    expect(worker).toMatch(/form\.imageFileName && imageAtts\.length === 0/);
+    expect(worker).toMatch(/'image_not_attached'/);
+  });
+  it('저장은 청구 계정 확정 뒤이고, 반려 시 저장 파일을 지운다(고아 방지)', () => {
+    const saveAt = worker.indexOf('saveMmsImageBuffer(acct.companyId');
+    const acctAt = worker.indexOf('const acct = auth;');
+    expect(saveAt).toBeGreaterThan(acctAt);
+    expect(worker).toMatch(/savedImagePaths\.splice\(0\)/);
+  });
+  it('접수 코어에는 화면 접수와 같은 형태(절대경로 배열)로 넘긴다', () => {
+    expect(worker).toMatch(/mmsImagePaths: savedImagePaths/);
+    expect(worker, 'SMS·LMS 전용 시절의 빈 배열 고정이 되살아났다').not.toMatch(/mmsImagePaths: \[\]/);
+  });
+  it('접수 완료 회신에 이미지 순서를 적는다(이 회신이 유일한 확인 자리다)', () => {
+    expect(worker).toMatch(/imageNames: savedImageNames/);
+    expect(worker).toMatch(/이 순서로 붙습니다/);
+  });
+  it('신규 반려 코드는 슈퍼관리자 라벨표에 등재됐다(미등재 = 화면이 코드를 그대로 보여준다)', () => {
+    const panel = fs.readFileSync(
+      path.resolve(__dirname, '../../../../frontend/src/components/admin/AgencyMailIntakePanel.tsx'), 'utf8');
+    expect(panel).toMatch(/mms_image_invalid/);
+    expect(panel).toMatch(/image_not_attached/);
+  });
+});

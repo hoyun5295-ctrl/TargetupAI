@@ -8,7 +8,7 @@
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔.
  */
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Check, Clock, History, Loader2, Send, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, History, Loader2, Send, X } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import {
   CUI_BTN_DANGER, CUI_BTN_GHOST, CUI_BTN_PRIMARY, CUI_CELL_META, CUI_DANGER_BOX, CUI_DANGER_ICON,
@@ -17,10 +17,14 @@ import {
   CUI_PILL_BASE, CUI_PILL_TONE, CUI_SEC_TITLE, CUI_TEXTAREA,
 } from '../../utils/console-ui';
 import {
-  approveAgencyRequest, cancelAgencyRequest, fetchAgencyRequest, formatWhen, isApprovable,
-  isCancelable, isEditableStatus, rescheduleAgencyRequest, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
-  toLocalInput, updateAgencyContent, type AgencySendEvent, type AgencySendRequest,
+  approveAgencyRequest, cancelAgencyRequest, fetchAgencyPreview, fetchAgencyRequest, formatWhen,
+  isApprovable, isCancelable, isEditableStatus, rescheduleAgencyRequest, SOURCE_LABEL, STATUS_LABEL,
+  STATUS_TONE, toLocalInput, updateAgencyContent, type AgencyPreviewSample, type AgencySendEvent,
+  type AgencySendRequest,
 } from './agency-send-api';
+
+/** 미리보기 페이지 크기. 원스텝 확인 화면의 10건 페이징과 같은 관례다 */
+const PREVIEW_PAGE_SIZE = 10;
 
 interface Props {
   requestId: string | null;
@@ -82,11 +86,18 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [newWhen, setNewWhen] = useState('');
+  // ★2026-08-28 치환 미리보기(서수란 접수) — 펼칠 때 1회 조회(지연). 문안을 고치면 접수를 다시 여는
+  //   흐름이라 접수 단위 캐시로 충분하다.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [preview, setPreview] = useState<{ samples: AgencyPreviewSample[]; shown: number; total: number } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewPage, setPreviewPage] = useState(0);
 
   useEffect(() => {
     if (!requestId) { setReq(null); setEvents([]); return; }
     let alive = true;
     setLoading(true);
+    setPreviewOpen(false); setPreview(null); setPreviewPage(0);
     fetchAgencyRequest(requestId)
       .then(({ request, events: ev }) => {
         if (!alive) return;
@@ -101,7 +112,22 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     return () => { alive = false; };
   }, [requestId]);
 
-  const apply = (r: AgencySendRequest) => { setReq(r); setDraft(r.currentContent); onChanged(r); };
+  const togglePreview = async () => {
+    if (previewOpen) { setPreviewOpen(false); return; }
+    setPreviewOpen(true);
+    if (preview || previewLoading || !requestId) return;
+    setPreviewLoading(true);
+    try {
+      setPreview(await fetchAgencyPreview(requestId));
+      setPreviewPage(0);
+    } catch (e: any) {
+      toast.error(e?.message || '미리보기를 불러오지 못했습니다.');
+      setPreviewOpen(false);
+    } finally { setPreviewLoading(false); }
+  };
+
+  // 문안·시각이 바뀌면 미리보기도 낡는다. 비워 두면 다음 펼침에서 새로 읽는다.
+  const apply = (r: AgencySendRequest) => { setReq(r); setDraft(r.currentContent); setPreview(null); setPreviewOpen(false); onChanged(r); };
 
   /**
    * 서버가 거절했을 때 현재 상태를 다시 읽는다.
@@ -259,6 +285,76 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                     {req.originalContent}
                   </div>
                   <p className={CUI_HINT}>스팸 검사에 걸려 표현을 다듬었습니다. 날짜와 번호, 링크는 그대로입니다.</p>
+                </div>
+              )}
+
+              {/* ★2026-08-28 치환 미리보기(서수란 접수) — 예약은 발송 2시간 전 검사 뒤 걸리므로 그 전에도
+                  각 사람에게 실제로 나갈 문장을 여기서 검토한다. 조립은 서버 실물 CT(발송과 같은 함수) */}
+              {!editing && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={togglePreview}
+                    className={`${CUI_SEC_TITLE} flex items-center gap-1.5 hover:text-indigo-600`}
+                  >
+                    <Eye className="w-4 h-4 text-neutral-400" strokeWidth={2} />
+                    받는 사람별 발송 내용 미리보기
+                    <ChevronDown className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${previewOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
+                  </button>
+                  {previewOpen && (
+                    <div className="mt-2">
+                      {previewLoading && (
+                        <div className="py-6 grid place-items-center text-neutral-400"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                      )}
+                      {preview && !previewLoading && preview.samples.length === 0 && (
+                        <p className={CUI_HINT}>보여 줄 수신자가 없습니다.</p>
+                      )}
+                      {preview && !previewLoading && preview.samples.length > 0 && (
+                        <>
+                          <p className={CUI_HINT}>
+                            실제 발송과 같은 치환으로 만든 문장입니다.
+                            {preview.total > preview.shown ? ` 전체 ${preview.total.toLocaleString()}건 중 상위 ${preview.shown}건 표본입니다.` : ` 전체 ${preview.shown}건입니다.`}
+                            {req.finalTestRequired ? ' 예약은 발송 두 시간 전 검사를 통과한 뒤 걸립니다.' : ''}
+                          </p>
+                          <ul className="mt-2 space-y-1.5">
+                            {preview.samples
+                              .slice(previewPage * PREVIEW_PAGE_SIZE, (previewPage + 1) * PREVIEW_PAGE_SIZE)
+                              .map((s, i) => (
+                                <li key={previewPage * PREVIEW_PAGE_SIZE + i} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-[12.5px]">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-medium text-neutral-900 tabular-nums">{s.phone}</span>
+                                    <span className={CUI_CELL_META}>{previewPage * PREVIEW_PAGE_SIZE + i + 1}번째</span>
+                                  </div>
+                                  {s.subject && <div className="mt-1 font-semibold text-neutral-800">{s.subject}</div>}
+                                  <div className="mt-1 text-neutral-700 whitespace-pre-wrap leading-relaxed">{s.text}</div>
+                                </li>
+                              ))}
+                          </ul>
+                          {preview.samples.length > PREVIEW_PAGE_SIZE && (
+                            <div className="mt-2 flex items-center justify-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setPreviewPage((p) => Math.max(0, p - 1))}
+                                disabled={previewPage === 0}
+                                className={`${CUI_BTN_GHOST} disabled:opacity-40`}
+                                aria-label="이전"
+                              ><ChevronLeft className="w-4 h-4" strokeWidth={2} /></button>
+                              <span className={CUI_CELL_META}>
+                                {previewPage + 1} / {Math.ceil(preview.samples.length / PREVIEW_PAGE_SIZE)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setPreviewPage((p) => Math.min(Math.ceil(preview.samples.length / PREVIEW_PAGE_SIZE) - 1, p + 1))}
+                                disabled={previewPage >= Math.ceil(preview.samples.length / PREVIEW_PAGE_SIZE) - 1}
+                                className={`${CUI_BTN_GHOST} disabled:opacity-40`}
+                                aria-label="다음"
+                              ><ChevronRight className="w-4 h-4" strokeWidth={2} /></button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

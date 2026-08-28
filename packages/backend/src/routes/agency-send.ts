@@ -19,6 +19,7 @@ import {
   type AgencySendStatus,
 } from '../utils/agency-send-state';
 import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
+import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples } from '../utils/agency-send-preview';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 // ★2026-08-26 §18 승격 — 접수 코어·원스텝 분석은 CT(utils/agency-send-intake.ts)가 소유한다.
@@ -440,6 +441,32 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 수신자 조회 실패:', err);
     return res.status(500).json({ success: false, error: '수신자 목록을 불러오지 못했습니다.' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// GET /api/agency-send/:id/preview — 치환 미리보기 (★2026-08-28 서수란 접수 cmtcle8gn04bnjnot641p0fvq)
+//   발송 2시간 이상 남은 건은 큐 적재(T-2h)까지 예약내역에 없어 머지 내용을 검토할 수 없었다.
+//   파이프라인은 그대로 두고(불변 1·2) 상위 표본에 실물 조립(buildRenderedSamples)을 돌려 보여 준다.
+//   ⛔ 조립 = 스팸 검사·테스트 문자·본 발송과 같은 CT 한 벌(prepareSendMessage). 화면 재구현 금지.
+// ════════════════════════════════════════════════════════════
+router.get('/:id/preview', async (req: Request, res: Response) => {
+  const auth = await requireAgencySend(req, res);
+  if (!auth) return;
+  try {
+    const r = await query(
+      `SELECT * FROM agency_send_requests
+        WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
+      [req.params.id, auth.companyId, ownerParam(auth)],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
+    const row = r.rows[0];
+    const samples = await buildRenderedSamples(row, AGENCY_PREVIEW_LIMIT);
+    return res.json({ success: true, samples, shown: samples.length, total: row.recipient_count });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return migrationPending(res);
+    console.error('[agency-send] 미리보기 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '미리보기를 불러오지 못했습니다.' });
   }
 });
 
