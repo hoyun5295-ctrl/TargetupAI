@@ -114,3 +114,34 @@ describe('워커·라우트 배선 (불변 4 = 조립은 한 벌)', () => {
     expect(seg.slice(0, 1500)).toMatch(/buildRenderedSamples\(row, AGENCY_PREVIEW_LIMIT\)/);
   });
 });
+
+describe('상세 진입 문 (★0828 Harold: 미리보기를 만들어도 여는 문이 없으면 실측을 못 한다)', () => {
+  const read = (p: string) => fs.readFileSync(path.resolve(__dirname, p), 'utf8');
+
+  it('고객 목록: 승인·재접수 버튼이 없는 행에도 상세 보기 버튼이 있다', () => {
+    const page = read('../../../../frontend/src/pages/AgencySendPage.tsx');
+    expect(page).toMatch(/상세 보기/);
+    expect(page, '행 클릭 진입이 사라지면 어포던스가 버튼 하나뿐이 된다').toMatch(/onClick=\{\(\) => setDetailId\(r\.id\)\}/);
+  });
+
+  it('고객 상세: 받는 사람별 미리보기 절이 있고 서버 조립만 쓴다(화면 재구현 0)', () => {
+    const detail = read('../../../../frontend/src/components/agency/AgencySendDetail.tsx');
+    expect(detail).toMatch(/받는 사람별 발송 내용 미리보기/);
+    expect(detail).toMatch(/fetchAgencyPreview/);
+    expect(detail, '화면이 치환을 재구현하면 실물과 다른 문장을 보여 준다').not.toMatch(/replace\(\/%/);
+  });
+
+  it('슈퍼관리자 내역: 상세 버튼 + 미리보기 모달이 있고 관리자 API를 부른다', () => {
+    const panel = read('../../../../frontend/src/components/admin/AgencySendLedgerPanel.tsx');
+    expect(panel).toMatch(/받는 사람별 발송 내용 미리보기/);
+    expect(panel).toMatch(/\/api\/admin\/agency-send\/\$\{row\.id\}\/preview/);
+  });
+
+  it('관리자 미리보기 라우트는 super_admin 게이트를 지나고 같은 CT를 부른다', () => {
+    const admin = read('../../routes/admin.ts');
+    const seg = admin.slice(admin.indexOf("'/agency-send/:id/preview'"));
+    expect(seg.length, '관리자 미리보기 라우트가 없다').toBeGreaterThan(10);
+    expect(seg.slice(0, 200)).toMatch(/requireSuperAdmin/);
+    expect(seg.slice(0, 2500)).toMatch(/buildRenderedSamples\(row, AGENCY_PREVIEW_LIMIT\)/);
+  });
+});

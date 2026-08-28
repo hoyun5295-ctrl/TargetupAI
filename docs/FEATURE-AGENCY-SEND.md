@@ -74,7 +74,7 @@
 | **`utils/agency-send-intake.ts`** | **접수 코어**(`createRequestCore`) + 원스텝 분석(`analyzeOneStep`) + 발송 창 조회 + 이력 기록. 입구 3 공통. `pre.minLeadMinutes`로 입구별 리드타임을 **코어가 집행** |
 | `utils/agency-send-form.ts` | 요청서·명단 파서. ★0826(2) **통일 양식**(시트 "내용"+"고객리스트" 한 파일 · 업계 라벨 별칭 · 괄호 부연 제거 대조 · 플레이스홀더 빈칸 처리 · 한국어 시각 표기 · 문자타입 알림톡 반려 · `hasRecipientSheet`) + 구양식(시트 "요청서"+별도 명단) 하위호환 · 무헤더 감지와 열 이름 합성 · 열 점수표(`scorePhoneColumns` 한 벌 + 임계 둘: 화면 0.5 / 이메일 0.9+격차) · 회신번호 칸 해석 |
 | `utils/agency-send-vars.ts` | 문안 항목 ↔ 명단 열 매칭(`resolveVarColumns`) + 주소록 슬롯 번역(`buildSlotPlan`) |
-| **`utils/agency-send-preview.ts`** | ★0828(2) **실물 문장 조립 CT**(`buildRenderedSample` 1행 = 검사·테스트 문자 / `buildRenderedSamples` 상위 N = 상세 미리보기). 조립은 `prepareSendMessage` 한 벌 · 워커 옛 `buildSample`이 여기로 이동 |
+| **`utils/agency-send-preview.ts`** | ★0828(2) **실물 문장 조립 CT**(`buildRenderedSample` 1행 = 검사·테스트 문자 / `buildRenderedSamples` 상위 N = 상세 미리보기). 조립은 `prepareSendMessage` 한 벌 · 워커 옛 `buildSample`이 여기로 이동. 소비 = 고객 `GET /:id/preview`(소유자 술어) + 관리자 `GET /api/admin/agency-send/:id/preview`(super_admin) 둘 다 **같은 CT** |
 | `utils/agency-send-worker.ts` | 5분 워커 A~F(1차 검사·당일 재검사·적재·만료·대조·lock 복구). 적재는 `createDirectSendCampaign`에 위임 |
 | `utils/agency-send-approve.ts` | 승인 효과 CT(한 트랜잭션). 입구 둘(로그인 화면·문자 링크)이 같은 함수를 지난다 |
 | `utils/agency-send-cancel.ts` | ★0826(3) 취소 효과 CT. 입구 둘(고객 화면·슈퍼관리자 운영 취소)이 같은 함수를 지난다. cancelling 선점 → 큐 삭제 확인 → 확정 · tooLate만 되돌림 · 실패는 워커 F 인계 |

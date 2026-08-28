@@ -7,13 +7,28 @@
  * 표시 판정(레일·상태·출처 라벨)은 고객 화면과 **같은 CT**(agency-send-api)를 읽는다 — 두 화면이 다르게 읽히면 안 된다.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Loader2, RefreshCw, Search, Send, X } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Eye, Loader2, RefreshCw, Search, Send, X } from 'lucide-react';
 import AgencyProgressRail from '../agency/AgencyProgressRail';
 import {
   formatWhenRelative, isCancelable, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
-  type AgencySendStatus,
+  type AgencyPreviewSample, type AgencySendStatus,
 } from '../agency/agency-send-api';
 import { CUI_PILL_BASE, CUI_PILL_TONE } from '../../utils/console-ui';
+
+/** ★0828(2) 상세 미리보기 — 미리보기 페이지 크기(고객 상세와 같은 10건 관례) */
+const PREVIEW_PAGE_SIZE = 10;
+
+interface AdminAgencyDetail {
+  request: {
+    id: string; status: AgencySendStatus; messageType: string; subject: string | null;
+    isAd: boolean; callbackNumber: string | null; requestedAt: string; recipientCount: number;
+    fileName: string | null; currentContent: string; originalContent: string;
+    companyName: string | null; userName: string | null; mmsImagePaths: unknown[];
+  };
+  samples: AgencyPreviewSample[];
+  shown: number;
+  total: number;
+}
 
 interface AdminAgencyRow {
   id: string;
@@ -73,6 +88,29 @@ export default function AgencySendLedgerPanel() {
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelError, setCancelError] = useState('');
   const [notice, setNotice] = useState('');
+  // ★2026-08-28(2) 상세 + 치환 미리보기(서수란 접수) — 직원이 실물 문장(발송과 같은 조립)을 확인하는 자리
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<AdminAgencyDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [detailPage, setDetailPage] = useState(0);
+
+  const openDetail = async (row: AdminAgencyRow) => {
+    setDetailId(row.id); setDetail(null); setDetailError(''); setDetailPage(0);
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`/api/admin/agency-send/${row.id}/preview`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+      });
+      const body = await res.json();
+      if (!res.ok || body?.success === false) throw new Error(body?.error || '상세를 불러오지 못했습니다.');
+      setDetail(body);
+    } catch (e: any) {
+      setDetailError(e?.message || '상세를 불러오지 못했습니다.');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   const load = useCallback(async (status: string) => {
     setLoading(true);
@@ -230,7 +268,15 @@ export default function AgencySendLedgerPanel() {
                     <p className={`text-[13.5px] font-bold tracking-[-0.01em] ${terminal ? 'text-gray-400' : 'text-gray-900'}`}>{when.big}</p>
                     <p className="text-[12px] text-gray-400">{when.sub}</p>
                   </div>
-                  <div className="lg:w-[92px] shrink-0 flex lg:justify-end">
+                  <div className="lg:w-[158px] shrink-0 flex items-center gap-1.5 lg:justify-end">
+                    {/* ★0828(2) 상세 = 문안 + 받는 사람별 치환 미리보기(서수란 접수) */}
+                    <button
+                      type="button"
+                      onClick={() => void openDetail(r)}
+                      className="h-8 px-3 rounded-lg border border-indigo-200 text-indigo-600 text-[12.5px] font-semibold hover:bg-indigo-50 hover:border-indigo-300 transition-colors inline-flex items-center gap-1"
+                    >
+                      <Eye className="w-3.5 h-3.5" />상세
+                    </button>
                     {r.status === 'cancelling' ? (
                       <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-amber-600">
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />취소 중
@@ -255,6 +301,97 @@ export default function AgencySendLedgerPanel() {
 
       {notice && (
         <div className="mx-6 mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-[13px] text-emerald-800">{notice}</div>
+      )}
+
+      {/* ── 상세 + 치환 미리보기 모달 (★0828(2) 서수란 접수 · 읽기 전용) ── */}
+      {detailId && (
+        <div className="fixed inset-0 z-[70] bg-gray-900/45 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-[640px] max-h-[88vh] flex flex-col" role="dialog" aria-modal="true" aria-label="대행발송 상세">
+            <div className="px-5 py-4 border-b flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+                  <Eye className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-[15px] font-semibold text-gray-900 truncate">
+                    {detail?.request ? `${detail.request.companyName || '(회사 없음)'} · ${detail.request.fileName || '대행발송'}` : '대행발송 상세'}
+                  </h3>
+                  {detail?.request && (
+                    <p className="text-[12px] text-gray-500 truncate">
+                      <span className="text-indigo-700 font-semibold">{detail.request.userName || '(신청자 없음)'}</span>
+                      {' · '}<span className="tabular-nums">{Number(detail.request.recipientCount || 0).toLocaleString()}</span>명
+                      {' · '}{detail.request.messageType}{detail.request.isAd ? ' · 광고' : ''}
+                      {Array.isArray(detail.request.mmsImagePaths) && detail.request.mmsImagePaths.length > 0 ? ` · 이미지 ${detail.request.mmsImagePaths.length}장` : ''}
+                      {' · '}{formatWhenRelative(detail.request.requestedAt).big}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => setDetailId(null)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 shrink-0" aria-label="닫기">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 overflow-y-auto space-y-4">
+              {detailLoading && <div className="py-10 grid place-items-center text-gray-400"><Loader2 className="w-5 h-5 animate-spin" /></div>}
+              {detailError && !detailLoading && <p className="text-[13px] text-rose-600">{detailError}</p>}
+              {detail && !detailLoading && (
+                <>
+                  <div>
+                    <h4 className="text-[12.5px] font-semibold text-gray-500 mb-1.5">문안</h4>
+                    <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-[13px] text-gray-800 whitespace-pre-wrap leading-relaxed">
+                      {detail.request.subject && <div className="font-semibold text-gray-900 mb-1">{detail.request.subject}</div>}
+                      {detail.request.currentContent}
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="text-[12.5px] font-semibold text-gray-500 mb-1.5">받는 사람별 발송 내용 미리보기</h4>
+                    {detail.samples.length === 0 ? (
+                      <p className="text-[12.5px] text-gray-400">보여 줄 수신자가 없습니다.</p>
+                    ) : (
+                      <>
+                        <p className="text-[12px] text-gray-500 mb-2">
+                          실제 발송과 같은 치환으로 만든 문장입니다.
+                          {detail.total > detail.shown ? ` 전체 ${detail.total.toLocaleString()}건 중 상위 ${detail.shown}건 표본입니다.` : ` 전체 ${detail.shown}건입니다.`}
+                        </p>
+                        <ul className="space-y-1.5">
+                          {detail.samples
+                            .slice(detailPage * PREVIEW_PAGE_SIZE, (detailPage + 1) * PREVIEW_PAGE_SIZE)
+                            .map((s, i) => (
+                              <li key={detailPage * PREVIEW_PAGE_SIZE + i} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-[12.5px]">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-gray-900 tabular-nums">{s.phone}</span>
+                                  <span className="text-[11.5px] text-gray-400">{detailPage * PREVIEW_PAGE_SIZE + i + 1}번째</span>
+                                </div>
+                                {s.subject && <div className="mt-1 font-semibold text-gray-800">{s.subject}</div>}
+                                <div className="mt-1 text-gray-700 whitespace-pre-wrap leading-relaxed">{s.text}</div>
+                              </li>
+                            ))}
+                        </ul>
+                        {detail.samples.length > PREVIEW_PAGE_SIZE && (
+                          <div className="mt-2.5 flex items-center justify-center gap-2">
+                            <button type="button" onClick={() => setDetailPage((p) => Math.max(0, p - 1))} disabled={detailPage === 0}
+                              className="h-8 w-8 grid place-items-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-40" aria-label="이전">
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <span className="text-[12px] text-gray-500 tabular-nums">
+                              {detailPage + 1} / {Math.ceil(detail.samples.length / PREVIEW_PAGE_SIZE)}
+                            </span>
+                            <button type="button"
+                              onClick={() => setDetailPage((p) => Math.min(Math.ceil(detail.samples.length / PREVIEW_PAGE_SIZE) - 1, p + 1))}
+                              disabled={detailPage >= Math.ceil(detail.samples.length / PREVIEW_PAGE_SIZE) - 1}
+                              className="h-8 w-8 grid place-items-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-40" aria-label="다음">
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── 운영 취소 확인 모달 (native dialog 금지 · 처리 중 닫힘 차단) ── */}

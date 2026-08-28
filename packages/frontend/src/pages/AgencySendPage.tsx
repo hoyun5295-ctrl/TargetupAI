@@ -333,7 +333,13 @@ export default function AgencySendPage() {
                                 {redoLoadingId === r.id ? <Loader2 className="w-[14px] h-[14px] animate-spin" /> : null}
                                 같은 내용으로 다시 접수
                               </button>
-                            ) : null}
+                            ) : (
+                              /* ★0828(2) 서수란 접수 — 행 클릭으로 상세가 열리는 것을 아무도 몰랐다(어포던스 0).
+                                 승인·재접수 버튼이 없는 행에도 문을 명시한다. 상세 = 문안 + 받는 사람별 치환 미리보기 */
+                              <button type="button" onClick={() => setDetailId(r.id)} className={`${CUI_BTN_OUTLINE} h-8 px-3 text-[13px]`}>
+                                상세 보기
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>

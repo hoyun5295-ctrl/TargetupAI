@@ -52,6 +52,7 @@ import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeSenderEmail, senderKeyClash } from '../utils/agency-send-email';
 // ★ 2026-08-26(3) 대행발송 운영 취소 — 효과는 고객 화면과 같은 CT를 지난다(입구만 다르다)
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
+import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples } from '../utils/agency-send-preview';
 import { buildStaffCancelledNotify, formatWhen as agencyFormatWhen, shortLabel } from '../utils/agency-send-notify';
 import { notifyManager } from '../utils/agency-send-worker';
 import { agencyManagerPhones } from '../utils/agency-send-link';
@@ -6263,6 +6264,45 @@ router.get('/agency-send', authenticate, requireSuperAdmin, async (req: Request,
     }
     console.error('[Admin] 대행발송 현황 조회 실패:', error);
     return res.status(500).json({ error: '대행발송 현황 조회 실패' });
+  }
+});
+
+// ★ 2026-08-28(2) 대행발송 상세 + 치환 미리보기 — 서수란 접수 cmtcle8gn04bnjnot641p0fvq.
+//   내역 탭이 목록뿐이라 직원이 치환(머지) 결과를 확인할 자리가 없었다. 조립은 고객 상세와 같은 CT
+//   (buildRenderedSamples = 검사·테스트 문자·발송과 한 벌)라 여기서도 실물 문장이 그대로 보인다.
+//   읽기 전용 · 문안 원문 + 상위 표본만(명단 전체는 고객 소유 화면의 일이다).
+router.get('/agency-send/:id/preview', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const r = await query(
+      `SELECT a.*, c.name AS company_name, u.name AS user_name, u.login_id AS user_login
+         FROM agency_send_requests a
+         LEFT JOIN companies c ON c.id = a.company_id
+         LEFT JOIN users u ON u.id = a.created_by
+        WHERE a.id = $1::uuid`,
+      [req.params.id],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
+    const row = r.rows[0];
+    const samples = await buildRenderedSamples(row, AGENCY_PREVIEW_LIMIT);
+    return res.json({
+      success: true,
+      request: {
+        id: row.id, status: row.status, messageType: row.message_type, subject: row.subject,
+        isAd: row.is_ad, callbackNumber: row.callback_number, requestedAt: row.requested_at,
+        recipientCount: row.recipient_count, fileName: row.file_name,
+        currentContent: row.current_content, originalContent: row.original_content,
+        companyName: row.company_name, userName: row.user_name || row.user_login || null,
+        mmsImagePaths: row.mms_image_paths || [],
+      },
+      samples, shown: samples.length, total: row.recipient_count,
+    });
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: agency_send_* 테이블 생성 요청' });
+    }
+    console.error('[Admin] 대행발송 미리보기 조회 실패:', error);
+    return res.status(500).json({ success: false, error: '미리보기를 불러오지 못했습니다.' });
   }
 });
 
