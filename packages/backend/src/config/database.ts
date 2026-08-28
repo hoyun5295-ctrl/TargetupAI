@@ -33,7 +33,13 @@ void (async () => {
         console.error(`❌ PostgreSQL 연결 실패 (${attempt}회 재시도 후):`, err?.message);
         return;
       }
-      console.warn(`[PostgreSQL] 연결 재시도 ${attempt}/5 — ${err?.message}`);
+      // ★2026-08-28 **예상된 재시도는 경고가 아니다.** 바로 위 주석대로 부팅 순간 첫 시도가
+      //   타임아웃하는 것은 정상 경로이고 실제로 매 부팅 1회씩 찍혀 에러 로그를 채우고 있었다.
+      //   정상이 경고로 남으면 진짜 오류가 그 사이에 묻힌다.
+      //   다만 2회째부터는 경합이 아니라 이상 신호이므로 경고로 올린다.
+      const line = `[PostgreSQL] 연결 재시도 ${attempt}/5 — ${err?.message}`;
+      if (attempt === 1) console.log(line);
+      else console.warn(line);
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
