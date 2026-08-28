@@ -37,7 +37,9 @@ void (async () => {
       //   타임아웃하는 것은 정상 경로이고 실제로 매 부팅 1회씩 찍혀 에러 로그를 채우고 있었다.
       //   정상이 경고로 남으면 진짜 오류가 그 사이에 묻힌다.
       //   다만 2회째부터는 경합이 아니라 이상 신호이므로 경고로 올린다.
-      const line = `[PostgreSQL] 연결 재시도 ${attempt}/5 — ${err?.message}`;
+      // ⛔ 줄표를 쓰지 마라 — `console.*(...)` 안이 아니라 변수로 빼는 순간
+      //   줄표 불변식(em-dash-invariants)이 이 줄을 사용자 노출 문자열로 본다(0828 push 차단).
+      const line = `[PostgreSQL] 연결 재시도 ${attempt}/5: ${err?.message}`;
       if (attempt === 1) console.log(line);
       else console.warn(line);
       await new Promise((r) => setTimeout(r, 2000));
