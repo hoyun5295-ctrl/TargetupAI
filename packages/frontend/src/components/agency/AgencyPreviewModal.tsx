@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Image as ImageIcon, Loader2, Send, X } from 'lucide-react';
 import { calculateSmsBytes } from '../../utils/formatDate';
+import MmsImagePreview from '../shared/MmsImagePreview';
 import {
   CUI_MODAL, CUI_MODAL_CLOSE, CUI_MODAL_DESC, CUI_MODAL_HEAD, CUI_MODAL_TITLE,
 } from '../../utils/console-ui';
@@ -34,16 +35,17 @@ interface Props {
   total: number;
   messageType: string;
   callbackNumber?: string | null;
-  /** MMS 이미지 장수(0이면 표시 안 함) */
-  imageCount?: number;
+  /** MMS 이미지(원장 `mms_image_paths` 그대로). 공용 MmsImagePreview가 서버 경로를 서빙 URL로 바꿔 그린다 */
+  images?: any[];
   loading?: boolean;
   error?: string;
 }
 
 export default function AgencyPreviewModal({
   show, onClose, title, subtitle, samples, shown, total,
-  messageType, callbackNumber, imageCount = 0, loading = false, error = '',
+  messageType, callbackNumber, images = [], loading = false, error = '',
 }: Props) {
+  const imageList = Array.isArray(images) ? images : [];
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState(0);
 
@@ -152,10 +154,14 @@ export default function AgencyPreviewModal({
                         <Send className="w-3.5 h-3.5" strokeWidth={2} />
                       </span>
                       <div className="min-w-0 rounded-2xl rounded-tl-md border border-neutral-200 bg-white px-3.5 py-3 shadow-sm">
-                        {imageCount > 0 && (
-                          <span className="inline-flex items-center gap-1 mb-1.5 h-[21px] px-2 rounded-md bg-neutral-100 text-neutral-600 text-[11.5px] font-semibold">
-                            <ImageIcon className="w-3 h-3" strokeWidth={2} />이미지 {imageCount}장
-                          </span>
+                        {imageList.length > 0 && (
+                          <div className="mb-2">
+                            {/* 실제 붙어 나갈 이미지 그대로. 공용 CT가 서버 경로를 서빙 URL로 바꾼다 */}
+                            <MmsImagePreview images={imageList} size="full" maxHeight="200px" compact borderColor="border border-neutral-200" />
+                            <span className="mt-1 inline-flex items-center gap-1 text-[11.5px] text-neutral-500">
+                              <ImageIcon className="w-3 h-3" strokeWidth={2} />이미지 {imageList.length}장이 함께 나갑니다
+                            </span>
+                          </div>
                         )}
                         {current?.subject && (
                           <p className="text-[13px] font-bold text-neutral-900 mb-1 break-words">{current.subject}</p>

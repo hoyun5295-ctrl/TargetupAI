@@ -88,7 +88,8 @@
 | `routes/admin.ts` | 회사 스위치 PATCH · **허용 이메일 4라우트** · 접수 현황(+`mailIntake` · ★0826(2) 내역 메뉴 재료 = source·레일 스탬프·고객사명·신청자명) · ★0826(3) **운영 취소**(`POST /agency-send/:id/cancel` · 확정 시에만 담당자 안내 문자) |
 | **`components/agency/AgencyPreviewModal.tsx`** | ★0828(2) **치환 미리보기 모달 공용 한 벌**(고객 상세·슈퍼관리자 내역이 함께 쓴다). 좌 목록 10건 페이징 · 우 폰 화면 · 누르면 폰이 바뀐다. ⛔ 서버 조립 문장만 그린다(화면 치환 재구현 0) · ⛔ `createPortal`(부모 모달 `overflow-hidden`에 잘림 방지) |
 | 프론트 | `pages/AgencySendPage.tsx`(목록) · `components/agency/*`(Composer·OneStepModal·Detail·api 미러·★0826(2) `AgencyProgressRail` 공용 레일) · `pages/AgencyApprovePage.tsx` · `components/admin/AgencyEmailSendersModal.tsx` · `components/admin/AgencyMailIntakePanel.tsx` · ★0826(2) `components/admin/AgencySendLedgerPanel.tsx`(슈퍼관리자 대행발송 내역) |
-| 표시 라벨 | `components/agency/agency-send-api.ts`가 `STATUS_LABEL`·`SOURCE_LABEL`·`EVENT_LABEL` **단일표**를 소유. 새 상태·출처·이벤트는 여기 등재가 같은 커밋 |
+| 표시 라벨 | `components/agency/agency-send-api.ts`가 `STATUS_LABEL`·`SOURCE_LABEL` **단일표**를 소유. 새 상태·출처는 여기 등재가 같은 커밋 |
+| **`components/agency/AgencyEventLog.tsx`** | ★0828(2) **진행 기록 표·문장 공용 한 벌**(`EVENT_LABEL` + 렌더). 고객 상세·슈퍼관리자 내역 상세가 함께 쓴다 — 화면마다 두면 "고객에게는 승인 번호가 보이는데 직원 화면에는 안 보이는" 상태가 된다(0828(2)에 실제로 발생). 새 이벤트 kind 등재가 같은 커밋 |
 
 **DB** = `agency_send_requests`(+`source`) · `agency_send_recipients` · `agency_send_events` · `agency_send_email_senders` · `agency_send_email_intake` · `agency_send_mail_state`. 컬럼 원문·불변은 [SCHEMA.md](../status/SCHEMA.md) 해당 절.
 

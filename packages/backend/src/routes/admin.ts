@@ -6284,8 +6284,16 @@ router.get('/agency-send/:id/preview', authenticate, requireSuperAdmin, async (r
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
     const row = r.rows[0];
     const samples = await buildRenderedSamples(row, AGENCY_PREVIEW_LIMIT);
+    // ★2026-08-28(2) 진행 기록 동승(Harold 지적) — 링크 승인은 **어느 담당자 번호가 눌렀는지**가 여기 남는다.
+    //   운영 문의의 절반이 "누가 언제 승인했나"라 직원 화면에 이력이 없으면 고객 화면을 대신 열어야 한다.
+    //   고객 상세(GET /api/agency-send/:id)와 같은 조회·같은 정렬·같은 상한.
+    const events = await query(
+      `SELECT kind, payload, created_at FROM agency_send_events WHERE request_id = $1::uuid ORDER BY created_at DESC LIMIT 50`,
+      [req.params.id],
+    );
     return res.json({
       success: true,
+      events: events.rows,
       request: {
         id: row.id, status: row.status, messageType: row.message_type, subject: row.subject,
         isAd: row.is_ad, callbackNumber: row.callback_number, requestedAt: row.requested_at,

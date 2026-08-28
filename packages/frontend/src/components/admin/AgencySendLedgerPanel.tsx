@@ -10,9 +10,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Eye, Loader2, RefreshCw, Search, Send, X } from 'lucide-react';
 import AgencyProgressRail from '../agency/AgencyProgressRail';
 import AgencyPreviewModal from '../agency/AgencyPreviewModal';
+import AgencyEventLog from '../agency/AgencyEventLog';
 import {
   formatWhenRelative, isCancelable, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
-  type AgencyPreviewSample, type AgencySendStatus,
+  type AgencyPreviewSample, type AgencySendEvent, type AgencySendStatus,
 } from '../agency/agency-send-api';
 import { CUI_PILL_BASE, CUI_PILL_TONE } from '../../utils/console-ui';
 
@@ -24,6 +25,7 @@ interface AdminAgencyDetail {
     fileName: string | null; currentContent: string; originalContent: string;
     companyName: string | null; userName: string | null; mmsImagePaths: unknown[];
   };
+  events: AgencySendEvent[];
   samples: AgencyPreviewSample[];
   shown: number;
   total: number;
@@ -362,6 +364,8 @@ export default function AgencySendLedgerPanel() {
                       </>
                     )}
                   </div>
+                  {/* ★0828(2) 진행 기록 — 링크 승인이면 어느 담당자 번호가 눌렀는지까지 보인다(고객 화면과 같은 표) */}
+                  <AgencyEventLog events={detail.events || []} variant="compact" />
                 </>
               )}
             </div>
@@ -381,7 +385,7 @@ export default function AgencySendLedgerPanel() {
           total={detail.total}
           messageType={detail.request.messageType}
           callbackNumber={detail.request.callbackNumber}
-          imageCount={Array.isArray(detail.request.mmsImagePaths) ? detail.request.mmsImagePaths.length : 0}
+          images={Array.isArray(detail.request.mmsImagePaths) ? detail.request.mmsImagePaths : []}
         />
       )}
 

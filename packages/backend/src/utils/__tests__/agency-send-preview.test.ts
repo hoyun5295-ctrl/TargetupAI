@@ -166,3 +166,36 @@ describe('상세 진입 문·미리보기 모달 (★0828(2) Harold: 미리보�
     expect(seg.slice(0, 2500)).toMatch(/buildRenderedSamples\(row, AGENCY_PREVIEW_LIMIT\)/);
   });
 });
+
+describe('이력·이미지 표시 (★0828(2) Harold 지적 2건)', () => {
+  const read = (p: string) => fs.readFileSync(path.resolve(__dirname, p), 'utf8');
+  const FRONT = '../../../../frontend/src/components';
+
+  it('진행 기록 표·문장은 공용 한 벌이고 두 화면이 함께 쓴다', () => {
+    const log = read(`${FRONT}/agency/AgencyEventLog.tsx`);
+    expect(log, '공용 이력 컴포넌트가 없다').toMatch(/EVENT_LABEL/);
+    expect(log, '링크 승인은 어느 담당자 번호가 눌렀는지까지 남는다(부인 방지)').toMatch(/담당자 \$\{e\.payload\?\.phone/);
+    for (const consumer of ['/agency/AgencySendDetail.tsx', '/admin/AgencySendLedgerPanel.tsx']) {
+      const src = read(FRONT + consumer);
+      expect(src, `${consumer}가 공용 이력을 쓰지 않는다`).toMatch(/<AgencyEventLog/);
+      expect(src, `${consumer}에 EVENT_LABEL 사본이 되살아났다`).not.toMatch(/const EVENT_LABEL/);
+    }
+  });
+
+  it('슈퍼관리자 상세도 이력을 받는다 (직원 화면에만 승인 번호가 빠지지 않게)', () => {
+    const admin = read('../../routes/admin.ts');
+    const seg = admin.slice(admin.indexOf("'/agency-send/:id/preview'"));
+    expect(seg.slice(0, 2500), '관리자 미리보기 응답에 events가 없다').toMatch(/events: events\.rows/);
+    expect(seg.slice(0, 2500)).toMatch(/FROM agency_send_events WHERE request_id/);
+  });
+
+  it('폰 미리보기는 이미지를 장수만이 아니라 실물로 그린다 (공용 MmsImagePreview 재사용)', () => {
+    const modal = read(`${FRONT}/agency/AgencyPreviewModal.tsx`);
+    expect(modal).toMatch(/import MmsImagePreview from/);
+    expect(modal).toMatch(/<MmsImagePreview images=\{imageList\}/);
+    expect(modal, '이미지 경로 배열을 받아야 실물을 그린다').toMatch(/images\?: any\[\]/);
+    for (const consumer of ['/agency/AgencySendDetail.tsx', '/admin/AgencySendLedgerPanel.tsx']) {
+      expect(read(FRONT + consumer), `${consumer}가 장수만 넘기고 있다`).toMatch(/images=\{Array\.isArray\(/);
+    }
+  });
+});
