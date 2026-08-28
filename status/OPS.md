@@ -334,7 +334,7 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT table_name
 docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT c.id AS company_id, c.name, u.id AS user_id, u.login_id FROM companies c JOIN users u ON u.company_id = c.id WHERE c.name LIKE '%인비토%' ORDER BY c.created_at, u.created_at;"
 ```
 
-**③ DDL 2테이블** — ①이 0행일 때만. `ON_ERROR_STOP`+트랜잭션으로 묶여 있어 **한 줄이라도 실패하면 통째로 롤백**된다(반쯤 만들어진 상태가 안 남는다). 문법만 미리 보고 싶으면 마지막 `COMMIT;`을 `ROLLBACK;`으로 바꿔 한 번 돌린 뒤 되돌린다.
+**③ DDL 2테이블** — ★**2026-08-28 실행완료**(반영 확인 = jobs 20컬럼 · assets 6컬럼). 아래는 재실행이 필요할 때의 원문이고, ①이 0행일 때만 돈다. `ON_ERROR_STOP`+트랜잭션으로 묶여 있어 **한 줄이라도 실패하면 통째로 롤백**된다(반쯤 만들어진 상태가 안 남는다). 문법만 미리 보고 싶으면 마지막 `COMMIT;`을 `ROLLBACK;`으로 바꿔 한 번 돌린 뒤 되돌린다.
 ```bash
 docker exec -i targetup-postgres psql -U targetup targetup <<'SQL'
 \set ON_ERROR_STOP on

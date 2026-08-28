@@ -147,6 +147,37 @@ export default function EmailVisualEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ★ 2026-08-28 ESC 닫기(임은지 접수 cmtcic3gr03wdjnotwmk8ofk0) — 닫기 버튼이 헤더 밖으로 밀려 잘리면
+  //   화면을 닫을 방법이 아예 없어 새로고침·뒤로가기를 눌러야 했다. 버튼 폭은 헤더 구조로 고쳤고(아래),
+  //   키보드 탈출구도 함께 둔다(다른 모달 20여 곳의 관례).
+  //   편집기는 잃을 것이 많은 화면이라 두 가지를 막는다: ①한글 입력 조합 취소로 눌린 ESC(isComposing)
+  //   ②편집 내용이 있는데 즉시 닫히는 것(있으면 커스텀 확인 모달로 되묻는다 · native dialog 금지).
+  const initialSnapshotRef = useRef<string | null>(null);
+  if (initialSnapshotRef.current === null) {
+    initialSnapshotRef.current = JSON.stringify({ name, subject, isAd, sections, design });
+  }
+  const isDirty = () => JSON.stringify({ name, subject, isAd, sections, design }) !== initialSnapshotRef.current;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.isComposing) return;
+      // 위에 열린 것이 있으면 그쪽이 먼저 닫힌다(자식 모달은 자기 ESC를 갖는다). 저장 중에는 무시.
+      if (themeOpen || fontOpen || pcPreviewOpen || addOpen || confirmState || saving) return;
+      if (!isDirty()) { onClose(); return; }
+      setConfirmState({
+        mode: 'warning',
+        title: '편집 중인 내용이 있습니다',
+        description: '저장하지 않고 닫으면 지금까지 편집한 내용이 사라집니다.',
+        confirmLabel: '저장하지 않고 닫기',
+        cancelLabel: '계속 편집',
+        onConfirm: () => { onClose(); },
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [themeOpen, fontOpen, pcPreviewOpen, addOpen, confirmState, saving, name, subject, isAd, sections, design]);
+
   const selected = useMemo(() => sections.find((s) => s.id === selectedId) || null, [sections, selectedId]);
 
   // 변수 칩 삽입용 — 마지막으로 포커스된 입력칸 추적(공용 SectionPropsEditor 무수정).
@@ -443,64 +474,74 @@ export default function EmailVisualEditor({
   return (
     <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 md:p-4">
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden">
-        {/* 헤더 */}
-        <div className="flex items-center gap-3 px-4 md:px-5 py-3 border-b border-white/10 bg-slate-900/80">
+        {/* 헤더 — ★ 2026-08-28 닫기 버튼 유실 정정(임은지 접수 cmtcic3gr03wdjnotwmk8ofk0).
+            [근본] 버튼이 전부 shrink-0인데 입력 두 개에 min-w-0이 없었다. flex 아이템의 min-width 기본값이
+            auto라 input은 자기 콘텐츠 폭 아래로 줄지 않는다 = 툴바 총 폭이 모달(max-w-6xl)을 넘고,
+            부모의 overflow-hidden에 마지막 자식인 닫기 버튼부터 잘렸다. 완성 저장을 마친 캠페인은
+            버튼이 [임시저장]+[완성 저장 · 50] 둘에서 [저장] 하나로 줄어 폭이 남아 닫기가 보였다(접수자 관찰과 일치).
+            [구조] 좌측 입력 묶음 = flex-1 min-w-0(줄어드는 쪽) / 우측 액션 묶음 = shrink-0(줄지 않는 쪽).
+            이제 폭이 모자라면 제목 칸이 줄지 닫기 버튼이 밀려나지 않는다. 라벨은 lg 미만에서 접어 폭을 번다. */}
+        <div className="flex items-center gap-2 px-4 md:px-5 py-3 border-b border-white/10 bg-slate-900/80">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shrink-0">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
-          <input
-            value={name} onChange={(e) => setName(e.target.value)} placeholder="캠페인 이름"
-            className="bg-transparent text-sm font-semibold text-white border-b border-white/10 focus:border-violet-400 focus:outline-none px-1 py-0.5 w-40"
-          />
-          <input
-            value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="이메일 제목"
-            className="flex-1 bg-transparent text-sm text-white/90 border-b border-white/10 focus:border-violet-400 focus:outline-none px-1 py-0.5"
-          />
-          <label className="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer shrink-0">
-            <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" />광고성
-          </label>
-          <button
-            onClick={() => setThemeOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
-            title="디자인 테마 8종: 색·서체·조판을 1클릭으로 바꿉니다 (문안은 그대로)"
-          >
-            <Palette className="w-4 h-4" /><span className="hidden md:inline">테마</span>
-          </button>
-          {/* ★ 2026-08-27 서체 지정(임은지 접수) — DM 퀵바 [서체]와 같은 자리를 이메일에도. 렌더러는 이미 읽고 있었다. */}
-          <button
-            type="button"
-            onClick={() => setFontOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
-            title="이 캠페인 전체 글꼴을 바꿉니다 (문안은 그대로)"
-          >
-            <Type className="w-4 h-4" /><span className="hidden md:inline">서체</span>
-          </button>
-          <button
-            onClick={() => setPcPreviewOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
-            title="PC(데스크탑) 폭으로 크게 미리보기"
-          >
-            {/* ★ 2026-07-02(3) Harold 지시 — PC 미리보기는 편집 중(완성 전)에도 항상 사용. 잠금은 발송에만 유지 */}
-            <Monitor className="w-4 h-4" /><span className="hidden md:inline">PC 미리보기</span>
-          </button>
-          <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/15 px-3 py-2 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-500/25 disabled:opacity-40 shrink-0" title="AI가 블록 카피를 매끄럽게 다듬어요 (1 크레딧 · 사실·혜택 보존)">
-            {improving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}<span className="hidden md:inline">AI로 개선</span>
-          </button>
-          {completedState ? (
-            <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}저장
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <input
+              value={name} onChange={(e) => setName(e.target.value)} placeholder="캠페인 이름"
+              className="bg-transparent text-sm font-semibold text-white border-b border-white/10 focus:border-violet-400 focus:outline-none px-1 py-0.5 w-40 min-w-0"
+            />
+            <input
+              value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="이메일 제목"
+              className="flex-1 min-w-0 bg-transparent text-sm text-white/90 border-b border-white/10 focus:border-violet-400 focus:outline-none px-1 py-0.5"
+            />
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <label className="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer shrink-0">
+              <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" />광고성
+            </label>
+            <button
+              onClick={() => setThemeOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
+              title="디자인 테마 8종: 색·서체·조판을 1클릭으로 바꿉니다 (문안은 그대로)"
+            >
+              <Palette className="w-4 h-4" /><span className="hidden lg:inline">테마</span>
             </button>
-          ) : (
-            <>
-              <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50 shrink-0" title="무료 (발송은 잠긴 상태로 보관됩니다)">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}<span className="hidden md:inline">임시저장</span>
+            {/* ★ 2026-08-27 서체 지정(임은지 접수) — DM 퀵바 [서체]와 같은 자리를 이메일에도. 렌더러는 이미 읽고 있었다. */}
+            <button
+              type="button"
+              onClick={() => setFontOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
+              title="이 캠페인 전체 글꼴을 바꿉니다 (문안은 그대로)"
+            >
+              <Type className="w-4 h-4" /><span className="hidden lg:inline">서체</span>
+            </button>
+            <button
+              onClick={() => setPcPreviewOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
+              title="PC(데스크탑) 폭으로 크게 미리보기"
+            >
+              {/* ★ 2026-07-02(3) Harold 지시 — PC 미리보기는 편집 중(완성 전)에도 항상 사용. 잠금은 발송에만 유지 */}
+              <Monitor className="w-4 h-4" /><span className="hidden lg:inline">PC 미리보기</span>
+            </button>
+            <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/15 px-3 py-2 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-500/25 disabled:opacity-40 shrink-0" title="AI가 블록 카피를 매끄럽게 다듬어요 (1 크레딧 · 사실·혜택 보존)">
+              {improving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}<span className="hidden lg:inline">AI로 개선</span>
+            </button>
+            {completedState ? (
+              <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}저장
               </button>
-              <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0" title="50크레딧 1회, 이후 수정·발송·이력 무제한 무료">
-                <Save className="w-4 h-4" />완성 저장 · 50
-              </button>
-            </>
-          )}
-          <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
+            ) : (
+              <>
+                <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50 shrink-0" title="무료 (발송은 잠긴 상태로 보관됩니다)">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}<span className="hidden lg:inline">임시저장</span>
+                </button>
+                <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0" title="50크레딧 1회, 이후 수정·발송·이력 무제한 무료">
+                  <Save className="w-4 h-4" />완성 저장 · 50
+                </button>
+              </>
+            )}
+            <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 shrink-0" aria-label="닫기" title="닫기 (ESC)"><X className="w-5 h-5" /></button>
+          </div>
         </div>
 
         <div className="flex-1 flex min-h-0">

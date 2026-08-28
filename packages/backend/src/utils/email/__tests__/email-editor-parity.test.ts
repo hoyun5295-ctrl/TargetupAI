@@ -139,6 +139,21 @@ describe('히어로 — 편집기 속성이 이미지 구도 전부에서 반영
     });
   }
 
+  // ★ 2026-08-28 남지현 접수 cmtck9xxo0447jnotnjo3n8ff — 작게·보통·크게·전체화면 무엇을 눌러도 안 바뀐다.
+  //   인라인 높이는 정상이었다(바로 위 계약이 통과한다). 같은 문서의 발송 셸 CSS가
+  //   `@media (max-width:600px){.em-hero{height:auto !important}}`로 그 값을 전부 덮고 있었다.
+  //   미리보기 패널은 폭 360px 고정이라 이 분기가 항상 걸린다 = 편집기의 높이 컨트롤이 죽어 있었다.
+  //   실제 발송에서도 모바일 메일앱은 같은 규칙을 적용한다. "480px가 문자열에 들어 있다"만 보는 계약은
+  //   이 형태를 못 잡으므로, 값을 덮는 쪽까지 함께 고정한다.
+  it('셸 CSS가 히어로 높이를 덮지 않는다 (모바일 폭에서도 고른 높이가 살아 있다)', () => {
+    const doc = rh({ height: 'lg' });
+    const rules = doc.match(/\.em-hero\s*\{[^}]*\}/g) || [];
+    expect(rules.length, '.em-hero 규칙이 통째로 사라졌다 — 모바일 여백 축소까지 함께 지운 것은 아닌지 확인').toBeGreaterThan(0);
+    for (const rule of rules) {
+      expect(rule, `셸 CSS가 히어로 높이를 덮는다: ${rule}`).not.toMatch(/height\s*:/);
+    }
+  });
+
   it('원장의 히어로 속성은 전부 출력을 바꾼다 (등재만 하고 안 읽으면 실패)', () => {
     const PROBE: Record<string, unknown> = {
       height: 'lg', image_fit: 'contain', focus: 'top', align: 'left',

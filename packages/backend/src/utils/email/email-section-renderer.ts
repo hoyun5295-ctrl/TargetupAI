@@ -104,6 +104,11 @@ function wrapBand(rowsHtml: string, bgStyle: string): string {
 // ────────────── 블록 렌더러 ──────────────
 
 // 이메일용 히어로 높이(전체화면 vh는 이메일 불가 → 큰 고정 px). td height 속성 + style로 클라이언트 호환.
+// ★ 2026-08-28 남지현 접수 cmtck9xxo0447jnotnjo3n8ff — 이 값들은 처음부터 정확히 실려 나가고 있었는데
+//   아래 셸의 모바일 분기가 `.em-hero{height:auto !important}`로 전부 덮어 높이 선택이 죽어 있었다.
+//   미리보기 패널은 폭 360px라 그 분기가 항상 걸렸고, 실제 발송에서도 모바일 메일앱에서 무시됐다.
+//   td의 height는 최소 높이처럼 동작해 내용이 넘치면 셀이 늘어난다 = auto로 눌러 둘 이유가 없었다.
+//   계약 = email-editor-parity.test.ts "셸 CSS가 히어로 높이를 덮지 않는다".
 const HERO_HEIGHT_PX: Record<string, number> = { sm: 200, md: 320, lg: 480, full: 600 };
 
 function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string, ordinal: number): string {
@@ -653,7 +658,7 @@ img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
   .em-outer{padding:0 !important}
   .em-shell{width:100% !important;border-radius:0 !important}
   .em-stack{display:block !important;width:100% !important;box-sizing:border-box !important}
-  .em-hero{height:auto !important;padding:36px 20px !important}
+  .em-hero{padding:36px 20px !important}
 }
 @media (prefers-color-scheme:dark){
   body,.em-body{background:${darkPrefBg} !important}
