@@ -886,7 +886,14 @@ async function runReconcile(): Promise<void> {
             manager_phone, manager_phones, callback_number, file_name, original_content
        FROM agency_send_requests
       WHERE dispatch_key IS NOT NULL
-        AND status NOT IN ('cancelling')
+        -- ★2026-08-28 sent(발송 종결)를 대조 대상에서 뺀다.
+        --   아래 2번이 "live인데 원장이 queued가 아니다"를 예약 완료로 맞추는데 sent도 그 조건에 걸려
+        --   매 tick 종결 상태를 queued로 되돌렸다(실측: 세 건의 updated_at이 같은 tick으로 갱신되고
+        --   status는 queued 그대로). 적재 완료 캠페인은 inspectAttemptCampaign이 live로 보므로
+        --   여기서 빼지 않으면 sent가 영영 남지 못한다.
+        --   ⛔ cancelled는 빼지 마라 - 1번(예약 회수)이 그 상태를 대상으로 삼는다.
+        --   ⛔ 이 안은 템플릿 리터럴이다. 주석에도 백틱을 쓰지 마라(문자열이 끊긴다).
+        AND status NOT IN ('cancelling', 'sent')
         AND updated_at > NOW() - INTERVAL '30 days'
       ORDER BY updated_at DESC
       LIMIT 200`,
@@ -920,7 +927,7 @@ async function runReconcile(): Promise<void> {
           `UPDATE agency_send_requests
               SET status = 'queued', campaign_id = $2::uuid, queued_at = COALESCE(queued_at, NOW()),
                   lock_at = NULL, lock_token = NULL, revision = revision + 1, updated_at = NOW()
-            WHERE id = $1::uuid AND revision = $3 AND status NOT IN ('cancelled','cancelling')
+            WHERE id = $1::uuid AND revision = $3 AND status NOT IN ('cancelled','cancelling','sent')
             RETURNING id`,
           [row.id, found.id, row.revision],
         );

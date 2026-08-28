@@ -137,6 +137,25 @@ describe('4. 발송 완료 상태는 백엔드와 프론트가 같다', () => {
   it('워커가 그 SQL로 전이시킨다 (자기 시각 규칙을 만들지 않는다)', () => {
     expect(AGENCY_WORKER).toMatch(/SET status = 'sent'[\s\S]{0,120}\$\{DELIVERED_BY_TIME_SQL\}/);
   });
+
+  /**
+   * ★2026-08-28 실측으로 잡은 회귀 — `sent`를 만들자 **워커 D가 매 tick 되돌렸다.**
+   * ②번이 "`live`인데 원장이 `queued`가 아니다"를 예약 완료로 맞추는데 `sent`가 그 조건에 걸렸다.
+   * 적재 완료 캠페인은 `inspectAttemptCampaign`이 `live`로 보므로, 막지 않으면 `sent`가 영영 남지 못한다.
+   */
+  it('대조 워커가 종결 상태를 되돌리지 않는다 — 조회에서 뺀다', () => {
+    expect(AGENCY_WORKER).toMatch(/status NOT IN \('cancelling', 'sent'\)/);
+  });
+
+  it('대조 워커가 종결 상태를 되돌리지 않는다 — 되맞춤 UPDATE에서도 뺀다(이중 방어)', () => {
+    expect(AGENCY_WORKER).toMatch(/status NOT IN \('cancelled','cancelling','sent'\)/);
+  });
+
+  it("⛔ cancelled는 대조 대상에서 빼면 안 된다 (①번 예약 회수가 그 상태를 쓴다)", () => {
+    expect(AGENCY_WORKER).toMatch(/row\.status === 'cancelled'/);
+    // 조회 조건에 cancelled가 들어가면 ①번이 죽는다
+    expect(AGENCY_WORKER).not.toMatch(/status NOT IN \([^)]*'cancelled'[^)]*\)\s*\n\s*AND updated_at/);
+  });
 });
 
 describe('5. 알림 문구에 내부 식별자를 싣지 않는다', () => {
