@@ -21,6 +21,7 @@
  */
 import jwt from 'jsonwebtoken';
 import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
+import { createShortUrl } from './short-url';
 import { sanitizeSmsText } from './auto-notify-message';
 
 const RAW_SECRET = process.env.JWT_SECRET || 'targetup-jwt-secret-fallback';
@@ -80,6 +81,30 @@ export function buildChargeApproveUrl(kind: ChargeApproveKind, targetId: string,
 }
 
 /**
+ * 문자용 단축 승인 주소 (★2026-08-29 Harold "단축 URL로" 재도입).
+ *
+ * ⛔ **전제 = 클릭 비추적 가드.** 1R critical의 유출 경로는 단축 자체가 아니라 클릭 라우트가
+ *   full_url(토큰 포함)을 그 회사 cdp_events에 기록해 고객사가 자기 이벤트 조회로 읽는 것이었다.
+ *   `routes/short-url.ts`가 승인류 링크(`/charge-approve`·`/agency-approve`)의 cdp 기록을
+ *   건너뛰도록 고친 뒤에만 이 함수가 성립한다(계약 = charge-approve.test.ts가 가드와 짝으로 잠근다).
+ * ⛔ 단축 만료 = 토큰 만료와 같은 값(토큰이 죽은 뒤 리다이렉트만 사는 반쪽 링크 금지 · 대행발송 규약 미러).
+ * ⛔ 단축 실패 = 원본 주소 그대로(승인 안내가 단축 때문에 멈추면 안 된다).
+ */
+export async function buildShortChargeApproveUrl(
+  companyId: string, kind: ChargeApproveKind, targetId: string, phone: string,
+): Promise<string> {
+  const fullUrl = buildChargeApproveUrl(kind, targetId, phone);
+  try {
+    const expiresAt = new Date(Date.now() + CHARGE_APPROVE_TTL_SECONDS * 1000);
+    const { shortUrl } = await createShortUrl({ companyId, fullUrl, expiresAt });
+    return shortUrl;
+  } catch (err: any) {
+    console.warn('[charge-approve-link] 승인 링크 단축 실패(원본 주소로 발송):', err?.message);
+    return fullUrl;
+  }
+}
+
+/**
  * 문자에 싣는 동적 필드 정규화 (★Codex 1R high 신설 · 2R 순서 정정 · **3R 화이트리스트 전환**).
  *
  * 입금자명·회사명은 고객이 제어한다. 그대로 실으면 플랫폼 발신 문자 안에 고객이 쓴 줄이 우리 문장처럼
@@ -135,10 +160,8 @@ export async function notifyChargeApprovers(input: {
     const callback = getPlatformNoticeCallback();
     const rows: any[][] = [];
     for (const phone of phones) {
-      // ⛔ 단축 금지(★Codex 1R critical): 범용 단축 CT는 클릭 시 full_url(fragment 토큰 포함)을 그 회사
-      //   cdp_events.properties에 기록하고 고객사가 자기 이벤트 조회로 그대로 읽는다 = 승인권 유출.
-      //   LMS(2000바이트)라 원본 주소 길이는 문제가 아니다.
-      const url = buildChargeApproveUrl(input.kind, input.targetId, phone);
+      // 단축 = 비추적 가드(short-url.ts 승인류 cdp 기록 생략)와 짝(★0829 재도입 · 함수 주석 참조)
+      const url = await buildShortChargeApproveUrl(input.companyId, input.kind, input.targetId, phone);
       const body = sanitizeSmsText([
         '[한줄로] 충전 승인 요청',
         '',

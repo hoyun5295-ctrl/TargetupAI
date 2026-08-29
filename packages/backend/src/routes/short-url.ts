@@ -47,6 +47,21 @@ router.get('/c/:hash', async (req: Request, res: Response) => {
     // ───────────────────────────────────────────────────────────
     res.redirect(302, resolved.fullUrl);
 
+    // ★2026-08-29 승인 링크(fragment에 승인 토큰)는 **트래킹하지 않는다** (충전 링크 Codex 1R critical 정정
+    //   + 대행발송 동일 유출 B-0828-7 종결). 종전에는 full_url 전체(토큰 포함)를 그 회사 cdp_events의
+    //   properties에 기록했고, 고객사가 자기 이벤트 조회로 그대로 읽어 **승인권을 회수**할 수 있었다.
+    //   승인 링크 클릭은 마케팅 이벤트가 아니다 — cdp 기록 자체를 건너뛴다(click_count 갱신만 유지).
+    //   판정은 경로 패턴 하나: 새 승인류 링크가 생기면 여기 등재가 같은 커밋이다.
+    if (/\/(?:charge|agency)-approve(?:#|\?|$)/.test(resolved.fullUrl)) {
+      void query(
+        `UPDATE message_short_urls SET click_count = click_count + 1, last_clicked_at = NOW() WHERE hash = $1`,
+        [hash],
+      ).catch((err) => {
+        console.warn('[short-url] click_count 갱신 실패:', err?.message);
+      });
+      return;
+    }
+
     // ───────────────────────────────────────────────────────────
     // 비동기 트래킹 (redirect 후 진입 — 사용자 영향 0)
     // ───────────────────────────────────────────────────────────

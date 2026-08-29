@@ -727,7 +727,7 @@ CT = `pay-stats.ts` `getAgentCustNameMap()`(원장 전량·60초 캐시·실패 
 2. **ENV 수신 목록이 곧 권한 목록.** 링크 승인은 토큰 서명 + "그 번호가 지금도 목록에 있는가"를 함께 본다. 번호를 빼면 나간 문자의 링크도 그 자리에서 죽는다.
 3. **승인 효과에 새 경로를 만들지 않는다.** 입구가 늘면 위 CT 두 벌을 부른다(인라인 부활 = 계약이 잡는다).
 4. **링크 승인의 감사** = balance_transactions.description·admin_note·agent_charge_requests.requested_by(`link:번호`)에 남는다. confirmed_by·admin_id는 링크 경로에서 NULL(pending 행이 원래 NULL로 실존 = 구조 확정).
-5. **⛔ 승인 링크에 범용 단축 CT 금지**(★Codex 1R critical) — 클릭 라우트가 full_url(fragment 토큰 포함)을 그 회사 cdp_events에 기록해 고객사가 자기 이벤트 조회로 승인권을 회수한다. 원본 주소 직접 발송(LMS라 길이 여유). 같은 구조의 대행발송 단축 = [B-0828-7](../status/BUGS.md).
+5. **⛔ 승인 링크 단축은 클릭 비추적 가드와 짝**(★Codex 1R critical → 0829 Harold "단축으로" 개정) — 유출의 뿌리는 단축이 아니라 클릭 라우트가 full_url(토큰 포함)을 그 회사 cdp_events에 기록하던 것. `routes/short-url.ts`가 승인류 링크(`/charge-approve`·`/agency-approve`)의 cdp 기록을 건너뛰는 가드를 갖고, 단축은 그 전제 위에서만 쓴다(만료 = 토큰 동치 · 실패 = 원본 폴백). 가드 없는 단축 부활 = 계약이 잡는다. 대행발송 동일 유출 = [B-0828-7](../status/BUGS.md) 함께 종결.
 6. **⛔ 에이전트 링크 승인 = 선점 CAS가 먼저**(★Codex 1R critical) — 게이트웨이 호출 전에 `pending → processing` CAS로 주문을 원자 선점한다(0건 = 이미 처리). 검증 거절·uncertain_pending만 선점 원복, ok·duplicated(registered)·uncertain 계열은 `charge_request_id` 연결(폴링이 fulfilled를 잇는다). 재전송(duplicated)은 코어의 `requestStatus`로 갈라 **registered만 성공**이다.
 7. **무통장 반려도 `status='pending'` CAS**(★Codex 1R high) — 링크 승인 커밋을 반려가 덮으면 잔액은 오르고 상태는 rejected인 회계 불일치가 된다.
 8. **문자 동적 필드는 `oneLineField`**(★Codex 1R high) — 고객 제어 입력(입금자명 등)의 개행·URL을 걷는다(피싱 삽입 차단). 발신 = `getPlatformNoticeCallback()`(phones[0] 발신은 번호도용 차단 미수신 · system-alert 동일 구조 = [B-0828-8](../status/BUGS.md)).

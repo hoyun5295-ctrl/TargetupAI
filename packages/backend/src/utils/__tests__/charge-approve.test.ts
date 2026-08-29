@@ -185,9 +185,19 @@ describe('Codex 적대 1R·2R 정정 계약 (돈 축 — 되돌아가면 빨간�
   const core = read('../agent-charge-core.ts');
   const admin = read('../../routes/admin.ts');
 
-  it('C1: 승인 링크에 범용 단축 CT를 쓰지 않는다 (클릭 기록이 토큰을 고객사에 유출한다)', () => {
-    expect(linkCt).not.toMatch(/createShortUrl|short-url/);
-    expect(route).not.toMatch(/createShortUrl/);
+  it('C1(개정 0829): 단축은 **클릭 비추적 가드와 짝**으로만 쓴다 (가드 없는 단축 = 토큰이 고객사 이벤트로 샌다)', () => {
+    // Harold 0829 "단축 URL로" 재도입. 유출의 뿌리는 단축이 아니라 클릭 라우트의 cdp 기록이었다.
+    const clickRoute = read('../../routes/short-url.ts');
+    // ①가드: 승인류 링크는 cdp 기록을 건너뛴다(충전·대행 두 축 다 · B-0828-7 종결)
+    expect(clickRoute, '승인류 비추적 가드가 사라졌다').toMatch(/charge\|agency\)-approve/);
+    const guardAt = clickRoute.indexOf(')-approve');
+    const trackAt = clickRoute.indexOf('void trackEvent(');
+    expect(guardAt, '가드가 trackEvent보다 뒤면 기록이 먼저 나간다').toBeLessThan(trackAt);
+    // ②단축 사용: 만료 = 토큰 만료 동치 · 실패 = 원본 폴백
+    expect(linkCt).toMatch(/createShortUrl\(\{ companyId, fullUrl, expiresAt \}\)/);
+    expect(linkCt).toMatch(/CHARGE_APPROVE_TTL_SECONDS \* 1000/);
+    expect(linkCt, '단축 실패가 안내를 멈추면 안 된다').toMatch(/원본 주소로 발송/);
+    expect(linkCt, '단축은 가드 전제를 주석 계약으로 남긴다').toMatch(/비추적 가드/);
   });
 
   it('C2(2R): 주문 선점은 **코어의 예약 트랜잭션 안**이다 — 입구가 아니라 효과 자리에 게이트가 있다', () => {
