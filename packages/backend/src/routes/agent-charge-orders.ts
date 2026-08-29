@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { queryPayAgentBalances, getAgentCustNameMap, listAgentCharges, countAgentCharges, isPayStatsConfigured } from '../utils/pay-stats';
 import { parseAgentChargeOrder } from '../utils/agent-charge-orders';
+import { notifyChargeApprovers } from '../utils/charge-approve-link';
 
 /**
  * ★ 2026-07-27 §5-4 — 에이전트 충전 요청 (고객사 창구)
@@ -266,6 +267,21 @@ router.post('/', async (req: Request, res: Response) => {
     console.log(
       `[에이전트 충전요청] ${parsed.agentSendId} ${parsed.amount.toLocaleString()}원 / 입금자 ${parsed.depositorName}`
     );
+
+    // ★2026-08-28(3) 담당자 승인 안내 문자(Harold 지시) — 접수는 이미 끝났다.
+    //   ★Codex 1R medium 수용 — 회사명 SELECT까지 응답 뒤로 미룬다(알림 전용 I/O가 201 경로를 잡으면
+    //   느린 쿼리·풀 고갈 때 접수 응답이 늦어지고, 클라이언트 timeout 재시도가 중복 요청 오류로 떨어진다).
+    setImmediate(() => {
+      void (async () => {
+        const companyRow = await query('SELECT company_name FROM companies WHERE id = $1', [companyId]).catch(() => ({ rows: [] as any[] }));
+        await notifyChargeApprovers({
+          kind: 'agent_order', targetId: String(ins.rows[0].id), companyId,
+          companyName: String((companyRow as any).rows?.[0]?.company_name || '(회사 미상)'),
+          amount: parsed.amount, depositorName: parsed.depositorName,
+          extraLine: `발송ID: ${parsed.agentSendId}`,
+        });
+      })().catch(() => { /* CT가 이미 로그를 남긴다 */ });
+    });
 
     res.status(201).json({
       message: '충전 요청이 접수되었습니다. 입금 확인 후 처리됩니다.',

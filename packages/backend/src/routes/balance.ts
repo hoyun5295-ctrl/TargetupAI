@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth';
 import { queryPayAgentBalances, getAgentCustNameMap } from '../utils/pay-stats';
 import { resolveChargeUnitPrice } from '../utils/unit-price';
 import { judgePayerName } from '../utils/fraud-review';
+import { notifyChargeApprovers } from '../utils/charge-approve-link';
 
 const router = Router();
 
@@ -246,6 +247,15 @@ router.post('/deposit-request', async (req: Request, res: Response) => {
       `[무통장입금요청] ${companyName}: ${Number(amount).toLocaleString()}원 / 입금자: ${depositorName.trim()}` +
       (heldReason ? ' / 명의 확인 필요' : '')
     );
+
+    // ★2026-08-28(3) 담당자 승인 안내 문자(Harold 지시) — 접수는 이미 끝났다. 발송 실패가 응답을 막지 않는다.
+    //   명의 확인 보류 건은 링크로 승인할 수 없으므로(소명 확인 = 관리 화면) 문자를 보내지 않는다.
+    if (!heldReason) {
+      notifyChargeApprovers({
+        kind: 'deposit', targetId: String(result.rows[0].id), companyId,
+        companyName, amount: Number(amount), depositorName: depositorName.trim(),
+      }).catch(() => { /* CT가 이미 로그를 남긴다 */ });
+    }
 
     res.status(201).json({
       // 보류 사유 원문은 내려주지 않는다 — 명의 판정 기준이 그대로 노출되면 우회를 돕는다

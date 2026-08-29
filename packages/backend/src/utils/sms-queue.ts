@@ -1341,8 +1341,15 @@ export async function bulkInsertSmsQueue(
           );
         }
         sentCount += batch.length;
-      } catch (batchErr) {
-        console.error(`[sms-queue] bulk INSERT 실패 (${table}, ${batch.length}건):`, batchErr);
+      } catch (batchErr: any) {
+        // ★2026-08-29 Codex 2R high — 오류 객체를 통째로 찍으면 mysql2가 보존한 `err.sql`(파라미터가
+        //   포맷된 INSERT 전문)이 로그에 남는다. 본문에는 승인 링크 토큰처럼 **그 자체가 권한인 값**이
+        //   실릴 수 있어, 로그 열람자가 그것을 재사용할 수 있다. 진단에 필요한 것만 남긴다.
+        console.error(
+          `[sms-queue] bulk INSERT 실패 (${table}, ${batch.length}건): ` +
+          `code=${batchErr?.code || 'unknown'} errno=${batchErr?.errno ?? '-'} sqlState=${batchErr?.sqlState || '-'} ` +
+          `msg=${String(batchErr?.message || '').replace(/\s+/g, ' ').slice(0, 200)}`
+        );
         // 실패 batch는 미집계 → 호출부에서 환불 처리
       }
     }

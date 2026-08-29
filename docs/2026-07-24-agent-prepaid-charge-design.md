@@ -707,3 +707,38 @@ CT = `pay-stats.ts` `getAgentCustNameMap()`(원장 전량·60초 캐시·실패 
 
 **판정 기준**: 금액을 움직이는 **쓰기 경로**나 **DDL**이 없으면 대상이 아니다. 조회·표시만 바뀌면 tsc·계약 테스트·자가 grep으로 끝낸다.
 (1라운드 지적 3건 자체는 실제 결함이라 수용해 정정했다 — §15-1·§15-2에 반영된 내용이 그것이다.)
+
+## 16. 충전 승인 문자 링크 — 두 축(웹 무통장입금·에이전트) 공통 ★코드완료 · Codex 3R 종결 · **출하 가능**(2026-08-29 Harold "화면과 똑같이 충전만 넣으면 되는 것" 확정)
+
+승인 대기가 올라오면 담당자 번호(ENV `CHARGE_APPROVAL_NOTIFY_PHONES` · 쉼표 구분)로 안내 문자가 나가고,
+문자 속 서명 링크에서 **승인 한 번**으로 처리된다. 화면(시스템 관리)은 그대로 있고 입구가 하나 는 것이다.
+
+| 재료 | 소유 |
+|---|---|
+| 토큰·URL·안내 문자 발송 | `utils/charge-approve-link.ts` (대행발송 링크 규격 미러: 전용 파생 키·scope·HS256·exp 7일·fragment 운반·헤더 전송·단축 URL) |
+| 무통장 승인 효과 | `utils/deposit-approve.ts` — 관리자 라우트 인라인 트랜잭션(0819 Codex 2R분)을 **원본 복사 이동**. 화면 PUT과 링크가 같은 함수 |
+| 에이전트 승인 효과 | `utils/agent-charge-core.ts` — `POST /agent-charges` 본문(Codex 7R~12R분)을 **원본 복사 이동**. 화면·링크가 같은 코어. 링크 멱등키 = `order:<주문ID>` 고정 |
+| 무로그인 라우트 | `routes/charge-approve.ts` (GET /info · POST /approve · 선례 = agency-approve.ts) |
+| 승인 페이지 | `frontend/pages/ChargeApprovePage.tsx` (`/charge-approve` · 폰 우선) |
+| 알림 훅 | `routes/balance.ts`(무통장 접수 직후 · **명의 보류 건 제외**) · `routes/agent-charge-orders.ts`(접수 직후) · fire-and-forget |
+
+⛔ **불변** (Codex 적대 1R 정정 반영 · 계약 = `charge-approve.test.ts` 25건)
+1. **링크가 못 하는 것 셋** = 거절 · 명의 확인 보류(held) 건 승인 · uncertain 해소. 전부 관리 화면 소유 — 링크 입구에 만들지 않는다.
+2. **ENV 수신 목록이 곧 권한 목록.** 링크 승인은 토큰 서명 + "그 번호가 지금도 목록에 있는가"를 함께 본다. 번호를 빼면 나간 문자의 링크도 그 자리에서 죽는다.
+3. **승인 효과에 새 경로를 만들지 않는다.** 입구가 늘면 위 CT 두 벌을 부른다(인라인 부활 = 계약이 잡는다).
+4. **링크 승인의 감사** = balance_transactions.description·admin_note·agent_charge_requests.requested_by(`link:번호`)에 남는다. confirmed_by·admin_id는 링크 경로에서 NULL(pending 행이 원래 NULL로 실존 = 구조 확정).
+5. **⛔ 승인 링크에 범용 단축 CT 금지**(★Codex 1R critical) — 클릭 라우트가 full_url(fragment 토큰 포함)을 그 회사 cdp_events에 기록해 고객사가 자기 이벤트 조회로 승인권을 회수한다. 원본 주소 직접 발송(LMS라 길이 여유). 같은 구조의 대행발송 단축 = [B-0828-7](../status/BUGS.md).
+6. **⛔ 에이전트 링크 승인 = 선점 CAS가 먼저**(★Codex 1R critical) — 게이트웨이 호출 전에 `pending → processing` CAS로 주문을 원자 선점한다(0건 = 이미 처리). 검증 거절·uncertain_pending만 선점 원복, ok·duplicated(registered)·uncertain 계열은 `charge_request_id` 연결(폴링이 fulfilled를 잇는다). 재전송(duplicated)은 코어의 `requestStatus`로 갈라 **registered만 성공**이다.
+7. **무통장 반려도 `status='pending'` CAS**(★Codex 1R high) — 링크 승인 커밋을 반려가 덮으면 잔액은 오르고 상태는 rejected인 회계 불일치가 된다.
+8. **문자 동적 필드는 `oneLineField`**(★Codex 1R high) — 고객 제어 입력(입금자명 등)의 개행·URL을 걷는다(피싱 삽입 차단). 발신 = `getPlatformNoticeCallback()`(phones[0] 발신은 번호도용 차단 미수신 · system-alert 동일 구조 = [B-0828-8](../status/BUGS.md)).
+9. **에이전트 링크 승인 뒤 fulfilled 전이는 기존 폴링 축 소유**(Codex 1R high 불수용 · 수용 위험) — 링크는 등록 + `charge_request_id` 연결까지가 사실이고 그렇게만 말한다. 문자 수신자 = 관리 화면 운영자라 다음 열람 때 폴링이 정리한다. 전용 대사 워커는 **별도 과제**로 기록.
+
+### 16-1. Codex 적대 리뷰 종결 기록 — 1R 7건 · 2R 5건 · 3R 6건 (2026-08-29)
+
+**출하 기준(Harold 0829 확정)**: 링크 = **화면과 같은 문**(같은 코어·같은 검증)을 지나는 두 번째 입구 + 재클릭 멱등. 화면이 매일 운영되는 검증된 기준선이고, 링크는 그보다 안전하면 된다. 배관 자체의 개선은 이 기능의 출하 조건이 아니다.
+
+- **1R(7건)·2R(5건)**: 전건 수용·정정. 핵심 = 단축 URL 승인권 유출 차단(단축 폐지) · 주문 선점을 코어 예약 트랜잭션으로(입구가 아니라 효과 자리) · 반려 CAS · 발신번호 CT · 미반영 해소 시 주문 복원 · fulfilled 대사 워커 신설.
+- **3R(6건) 판정**: 내 변경분 3건 수용·정정 = ①IDN·유니코드 점 우회 → `oneLineField`를 **허용 문자 화이트리스트**로 전환(막을 것을 나열하지 않는다 · 점·콜론·슬래시·@ 자체가 사라져 호스트 형태 불성립) ②실패 정리(주문 원복+예약 삭제)를 한 트랜잭션으로 — 원복 전건 성공일 때만 삭제, 실패 시 예약 보존(전역 게이트+해소 = 설계된 수렴 루프) ③대사 워커가 SeqNo 없는 요청을 SQL에서 제외(기아 방지). **나머지 3건 = 링크 이전부터 화면 경로에 실존하던 배관 성질** → [B-0829-1](../status/BUGS.md)로 분리 기록(두 손 이중 제출·duplicated 200 실상태 은폐·해소 SeqNo 미저장).
+- 리뷰 회고: 라운드가 준 것(1R 단축 유출·2R 코어 선점)은 실결함이었으나, 3R부터는 심사 대상이 기능이 아니라 기존 배관으로 옮겨 갔다. **경계 = "이 지적이 링크가 없어도 성립하는가"** — 성립하면 BUGS, 아니면 정정.
+
+**게이트(최종)**: BE·FE tsc 0 · vitest 218파일 3,391건(이 축 계약 31) · production 빌드 · 결함 주입 검출 5회 · harness-check.
