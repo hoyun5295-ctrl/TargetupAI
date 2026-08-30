@@ -43,6 +43,7 @@
 - **관리 사이트** = ops.hanjulgw.com(전용 nginx 블록·인증서) → 로컬 4000 Admin API(`bito-admin-api.service`). 관리자 계정·OTP 원장 = `admin_user`(`admin`·`suran` 2개 · 2026-08-25 실측).
   - ⛔ **관리자 OTP를 초기화하는 화면도 API도 없고 백업 코드도 없다.** 폰 교체·분실 시 유일한 길 = `UPDATE admin_user SET totp_enabled=false, totp_secret=NULL, updated_at=NOW() WHERE username='...'` 후 재로그인하면 QR 재발급. **`totp_secret`을 함께 비워야 한다** — 로그인 코드가 새 비밀키를 "비밀키가 빌 때만" 만들어서, 플래그만 내리면 옛 키가 그대로 QR에 실린다(`web/api/server.js` setupRequired 분기). 리셋과 재등록 사이에는 비밀번호만으로 QR 발급까지 도달 가능하니 즉시 이어서 끝낸다.
 - **포트**: 외부 22·80·443 · **9090(gRPC, Agent 접속)** · 4404(webhook) / 로컬 33306·4000(Admin API)·5432·6379·9081
+  - ⚠ **9090 은 출발지 허용 목록이다**(★0830 실측). ufw `ALLOW IN` 대상 = `58.227.193.62`(한줄로 Agent 3대) + `58.227.193.66`(발송 콘솔 Agent · 0830 추가). 목록에 없는 서버는 `connection refused` 가 아니라 **`i/o timeout`** 으로 막힌다 — 리스너 부재로 오진하기 쉽다.
 - `fail2ban` 가동 중
 - 환경변수 = `/etc/default/bito-gateway`(EnvironmentFile) + 유닛 드롭인 3종
 - ⚠ **비밀번호 평문 노출** — 상세 §3.
@@ -50,6 +51,7 @@
 ### .66 — 사내 (58.227.193.66)
 그룹웨어 등 사내 용도. **부하 0.00**으로 사실상 유휴 — 사양 대비 여력이 가장 크다.
 - node·next-server·postgres 구동, 포트 외부 80·443·8080·4000
+- ★2026-08-30 추가 = **MySQL 8.0.46**(`smsdb` · `bind-address` `127.0.0.1` · 3306·33060 외부 노출 0) + **Bito Agent v1.0.14**(`bito-agent.service` · `/opt/bito-agent` · agentID `bito-agent-01` · 대상 `SMSQ_SEND_13`). 발송 콘솔용 사내 확인 환경이다. 그룹웨어(PostgreSQL·next-server)와 접점 없음. 절차·불변 = `bito-console/docs/OPS.md` §7-6
 - ⚠ 커널 `6.8.0-31`로 같은 24.04 계열 중 가장 오래됐다(`.65`는 136). 패치 주기에서 빠져 있다.
 
 ### .58 — invito58 (58.227.193.58)
