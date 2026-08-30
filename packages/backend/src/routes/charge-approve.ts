@@ -19,10 +19,11 @@ import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import {
   CHARGE_APPROVE_TOKEN_HEADER, getChargeApprovalPhones, verifyChargeApproveToken,
-  CHARGE_KIND_LABEL, oneLineField, type ChargeApproveKind,
+  CHARGE_KIND_LABEL, oneLineField, notifyChargeApproved, type ChargeApproveKind,
 } from '../utils/charge-approve-link';
 import { approveDepositRequestTx } from '../utils/deposit-approve';
 import { executeAgentChargeBatch } from '../utils/agent-charge-core';
+import { recordAuditLog } from '../utils/audit-log';
 
 const router = Router();
 
@@ -144,6 +145,18 @@ router.post('/approve', async (req: Request, res: Response) => {
         return res.status(outcome.status >= 500 ? outcome.status : 409).json({ success: false, error: friendly });
       }
       console.log(`[charge-approve] 무통장입금 링크 승인 request=${resolved.row.id} phone=${resolved.phone} +${Number(resolved.row.amount).toLocaleString()}원`);
+      // ★2026-08-30 보안 보강 A1·A2 — 수신 목록 전원 통보 + 감사 원장 기록(ip·ua). 실패해도 승인은 유효.
+      void notifyChargeApproved({
+        kind: 'deposit', companyName: resolved.row.company_name || '',
+        amount: Number(resolved.row.amount || 0), approvedByPhone: resolved.phone,
+      });
+      void recordAuditLog({
+        action: 'charge_link_approved',
+        targetType: 'deposit_request',
+        targetId: String(resolved.row.id),
+        details: { phone: resolved.phone, companyName: resolved.row.company_name || '', amount: Number(resolved.row.amount || 0), kind: 'deposit' },
+        req,
+      });
       return res.json({
         success: true,
         message: `${Number(resolved.row.amount).toLocaleString()}원이 충전되었습니다.`,
@@ -166,6 +179,18 @@ router.post('/approve', async (req: Request, res: Response) => {
 
     if (outcome.kind === 'ok') {
       console.log(`[charge-approve] 에이전트 링크 승인 order=${resolved.row.id} phone=${resolved.phone} req=${outcome.requestId}`);
+      // ★2026-08-30 보안 보강 A1·A2 — 수신 목록 전원 통보 + 감사 원장 기록(ip·ua). 실패해도 승인은 유효.
+      void notifyChargeApproved({
+        kind: 'agent_order', companyName: resolved.row.company_name || '',
+        amount: Number(resolved.row.amount || 0), approvedByPhone: resolved.phone,
+      });
+      void recordAuditLog({
+        action: 'charge_link_approved',
+        targetType: 'agent_charge_order',
+        targetId: String(resolved.row.id),
+        details: { phone: resolved.phone, companyName: resolved.row.company_name || '', amount: Number(resolved.row.amount || 0), kind: 'agent_order' },
+        req,
+      });
       return res.json({
         success: true,
         message: '충전을 등록했습니다. 게이트웨이 반영은 잠시 후 자동 확인됩니다.',

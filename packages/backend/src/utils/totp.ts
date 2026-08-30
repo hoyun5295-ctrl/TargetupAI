@@ -13,7 +13,12 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'targetup-jwt-secret-fallback';
+// ⛔ 폴백 키 금지(★2026-08-30 보안 보강 B3) — 미설정 = 서명 throw(라우트 500) · 검증 null.
+function jwtKey(): string {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error('JWT_SECRET 미설정: 2FA 등록 토큰을 서명·검증할 수 없습니다.');
+  return s;
+}
 const ISSUER = '한줄로 시스템';
 
 authenticator.options = { step: 30, window: 1 };
@@ -84,12 +89,12 @@ export async function verifyBackupCode(
 }
 
 export function signEnrollToken(adminId: string): string {
-  return jwt.sign({ adminId, scope: 'totp_enroll' }, JWT_SECRET, { expiresIn: '5m' });
+  return jwt.sign({ adminId, scope: 'totp_enroll' }, jwtKey(), { expiresIn: '5m' });
 }
 
 export function verifyEnrollToken(token: string): string | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    const decoded = jwt.verify(token, jwtKey()) as any;
     if (!decoded || decoded.scope !== 'totp_enroll') return null;
     return decoded.adminId || null;
   } catch {

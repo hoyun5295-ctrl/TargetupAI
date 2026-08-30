@@ -17,6 +17,9 @@ import {
 } from '../charge-approve-link';
 import { signAgencyApproveToken } from '../agency-send-link';
 
+// ★2026-08-30 B3 — 폴백 키가 제거되어 서명·검증은 JWT_SECRET이 있어야만 돈다(fail-closed 계약)
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-charge-link';
+
 const read = (p: string) => fs.readFileSync(path.resolve(__dirname, p), 'utf8');
 
 describe('토큰 — 전용 키·scope·kind (돈 승인권의 경계)', () => {
@@ -170,11 +173,20 @@ describe('공개 페이지·마운트', () => {
     expect(appTsx).toMatch(/path="\/charge-approve"/);
   });
 
-  it('승인 페이지는 토큰을 헤더로만 보낸다 (fragment 수신 · URL 전송 0)', () => {
+  it('승인 페이지는 토큰을 헤더로만 보낸다 (fragment 수신·즉시 제거는 공용 훅 소유 · URL 전송 0)', () => {
+    // ★2026-08-30 C6 — fragment 파싱·주소 제거가 useApproveToken 훅으로 이동했다(두 승인 페이지 공용).
     const page = fs.readFileSync(path.resolve(__dirname, '../../../../frontend/src/pages/ChargeApprovePage.tsx'), 'utf8');
     expect(page).toMatch(/X-Charge-Approve-Token/);
-    expect(page).toMatch(/window\.location\.hash/);
+    expect(page, '토큰 캡처는 공용 훅으로만').toMatch(/useApproveToken\(\)/);
     expect(page, 'API URL에 토큰을 실으면 요청 로그에 남는다').not.toMatch(/approve\?t=|info\?t=/);
+    const hook = fs.readFileSync(path.resolve(__dirname, '../../../../frontend/src/hooks/useApproveToken.ts'), 'utf8');
+    expect(hook, 'fragment 수신이 사라졌다').toMatch(/window\.location\.hash/);
+    expect(hook, '토큰을 주소에서 지우는 계약(C6)이 사라졌다').toMatch(/history\.replaceState/);
+    expect(hook, '같은 탭 재진입(#t=만 바뀜) 재캡처 계약이 사라졌다').toMatch(/hashchange/);
+    // ★Codex 2R — query(?t=)는 JS 전에 접근 로그로 전송되므로 토큰으로 받지 않는다
+    expect(hook, 'query 토큰 수용이 되살아났다(접근 로그 유출 경로)').not.toMatch(/URLSearchParams\(window\.location\.search\)/);
+    // 화면 재료는 자기 토큰에 묶인다 — 옛 화면으로 새 토큰을 승인하는 불일치 차단
+    expect(page, '승인 게이트의 토큰 결합(forToken)이 사라졌다').toMatch(/state\.forToken !== token/);
   });
 });
 

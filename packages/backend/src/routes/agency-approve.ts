@@ -24,6 +24,9 @@ import {
 } from '../utils/agency-send-link';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { checkApproval } from '../utils/agency-send-state';
+import { notifyManager } from '../utils/agency-send-worker';
+import { buildLinkApprovedNotify, formatWhen } from '../utils/agency-send-notify';
+import { recordAuditLog } from '../utils/audit-log';
 
 const router = Router();
 
@@ -114,6 +117,31 @@ router.post('/approve', async (req: Request, res: Response) => {
       return res.status(outcome.status).json({ success: false, error: outcome.error, ...(outcome.code ? { code: outcome.code } : {}) });
     }
     console.log(`[agency-approve] 링크 승인 request=${resolved.row.id} phone=${resolved.phone}`);
+
+    // ★2026-08-30 보안 보강 A1 — 승인 실행을 담당자 전원에게 즉시 통보(fire-and-forget · 실패해도 승인은 유효).
+    //   링크가 새서 남이 승인했다면 이 문자가 유일한 발각 경로다. 본인 승인에게는 영수증이 된다.
+    const approved = outcome.row;
+    void notifyManager({
+      companyId: String(approved.company_id),
+      requestId: String(approved.id),
+      phones: agencyManagerPhones(approved),
+      callback: String(approved.callback_number || ''),
+      title: '[대행발송] 승인 완료',
+      text: buildLinkApprovedNotify({
+        label: String(approved.file_name || approved.current_content || ''),
+        whenText: approved.requested_at ? formatWhen(new Date(approved.requested_at)) : undefined,
+        approvedTail: resolved.phone.slice(-4),
+      }),
+    }).catch(() => {});
+    // ★2026-08-30 보안 보강 A2 — 링크 승인을 감사 원장에도 남긴다(시스템 관리 감사 화면 노출 · ip·ua 포함)
+    void recordAuditLog({
+      action: 'agency_link_approved',
+      targetType: 'agency_send_request',
+      targetId: String(approved.id),
+      details: { phone: resolved.phone, label: String(approved.file_name || '').slice(0, 40), contentVersion: resolved.contentVersion },
+      req,
+    });
+
     return res.json({ success: true, request: toApprovalView(outcome.row) });
   } catch (err: any) {
     if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });

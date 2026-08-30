@@ -173,6 +173,22 @@ export function buildStaffCancelledNotify(ctx: AgencyNotifyContext): string {
   ]);
 }
 
+/**
+ * ⑩ 링크로 승인이 실행됐다 (★2026-08-30 보안 보강 A1)
+ *
+ * 담당자 전원이 같은 문자를 받는다. 승인 링크가 새서 남이 눌렀다면 이 문자가 유일한 발각
+ * 경로이고(본인 아닌 승인의 즉시 인지), 본인 승인에게는 영수증이 된다.
+ */
+export function buildLinkApprovedNotify(ctx: AgencyNotifyContext & { approvedTail: string }): string {
+  return compose([
+    `${HEAD} 발송이 승인되었습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
+    `끝자리 ${ctx.approvedTail} 번호의 링크로 승인되었습니다.`,
+    '본인이나 동료의 승인이 아니면 즉시 한줄로 담당자에게 알려 주세요.',
+  ]);
+}
+
 /** 요청 시각을 담당자가 읽는 형태로 (KST) */
 export function formatWhen(at: Date): string {
   const kst = new Date(at.getTime() + 9 * 60 * 60 * 1000);

@@ -8,12 +8,13 @@
  * ⛔ 서버가 주는 것만 그린다(수신자 명단 없음). 판정(approvable·409)은 전부 서버가 한다.
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔 라이트(CUI_ 계열 색).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Loader2, Send } from 'lucide-react';
 import {
   formatWhen, STATUS_LABEL, STATUS_TONE, type AgencySendStatus,
 } from '../components/agency/agency-send-api';
 import { CUI_BTN_PRIMARY, CUI_PILL_BASE, CUI_PILL_TONE } from '../utils/console-ui';
+import { useApproveToken } from '../hooks/useApproveToken';
 
 interface ApprovalView {
   label: string;
@@ -33,19 +34,23 @@ interface ApprovalView {
 type ViewState =
   | { kind: 'loading' }
   | { kind: 'invalid' }
-  | { kind: 'ready'; request: ApprovalView; approvable: boolean; blockReason: string | null; notice?: string }
+  // forToken = 이 화면 재료가 어느 토큰의 것인가(★Codex 2R 수용) — 재진입으로 토큰이 바뀌면
+  // A의 화면으로 B를 승인하는 불일치를 approve 게이트가 막는다
+  | { kind: 'ready'; forToken: string; request: ApprovalView; approvable: boolean; blockReason: string | null; notice?: string }
   | { kind: 'done'; request: ApprovalView };
 
 export default function AgencyApprovePage() {
   // 토큰은 fragment(#t=)에 실려 온다 — fragment는 서버로 전송되지 않아 어떤 접근 로그에도 안 남는다.
-  // 옛 형식(?t=)도 함께 읽는다(방어적 · 비용 0).
-  const token = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('t')
-    || new URLSearchParams(window.location.search).get('t') || '';
+  // 캡처 즉시 주소에서 지우고, 같은 탭 재진입(#t=만 바뀌는 진입)도 잡는다(★2026-08-30 C6 · useApproveToken).
+  const token = useApproveToken();
+  // 재진입으로 토큰이 바뀐 뒤 도착하는 낡은 응답을 폐기하기 위한 최신값 참조
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
   const [state, setState] = useState<ViewState>({ kind: 'loading' });
   const [approving, setApproving] = useState(false);
 
   // ⛔ 토큰은 API에 **헤더로만** 보낸다 — URL에 실으면 서버 요청 로그에 승인권이 평문으로 남는다.
-  //   랜딩 주소의 ?t= 는 문자 규격상 유지한다(새로고침에도 필요하고, 정적 페이지라 앱 로그를 지나지 않는다).
+  //   랜딩 주소의 토큰은 위에서 캡처 즉시 지웠다(C6) — 새로고침은 안내 문자의 주소로 다시 연다.
   const tokenHeader = { 'X-Agency-Approve-Token': token };
 
   const load = useCallback(async (notice?: string) => {
@@ -53,18 +58,24 @@ export default function AgencyApprovePage() {
     try {
       const res = await fetch('/api/agency-approve/info', { headers: tokenHeader, referrerPolicy: 'no-referrer' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.success) { setState({ kind: 'invalid' }); return; }
-      setState({ kind: 'ready', request: data.request, approvable: !!data.approvable, blockReason: data.blockReason || null, notice });
+      if (tokenRef.current !== token) return; // 재진입으로 토큰이 바뀐 낡은 응답은 버린다
+      // 승인 완료(done)를 늦게 도착한 조회 응답이 되돌리지 않는다(★Codex 2R 수용)
+      if (!res.ok || !data?.success) { setState((prev) => (prev.kind === 'done' ? prev : { kind: 'invalid' })); return; }
+      setState((prev) => (prev.kind === 'done' ? prev : {
+        kind: 'ready', forToken: token, request: data.request, approvable: !!data.approvable, blockReason: data.blockReason || null, notice,
+      }));
     } catch {
-      setState({ kind: 'invalid' });
+      if (tokenRef.current !== token) return;
+      setState((prev) => (prev.kind === 'done' ? prev : { kind: 'invalid' }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  useEffect(() => { load(); }, [load]);
+  // 토큰이 바뀌면(재진입) 즉시 화면 재료를 비운다 — 옛 화면으로 새 토큰을 승인하는 창을 없앤다
+  useEffect(() => { setState({ kind: 'loading' }); load(); }, [load]);
 
   const approve = async () => {
-    if (approving || state.kind !== 'ready') return;
+    if (approving || state.kind !== 'ready' || state.forToken !== token) return;
     setApproving(true);
     try {
       const res = await fetch('/api/agency-approve/approve', {
@@ -74,6 +85,7 @@ export default function AgencyApprovePage() {
         body: JSON.stringify({ revision: state.request.revision }),
       });
       const data = await res.json().catch(() => ({}));
+      if (tokenRef.current !== token) return; // 재진입으로 토큰이 바뀐 낡은 응답은 버린다
       if (res.ok && data?.success) {
         setState({ kind: 'done', request: data.request });
         return;
@@ -101,8 +113,9 @@ export default function AgencyApprovePage() {
         </div>
       </header>
       <main className="flex-1 w-full max-w-[560px] mx-auto px-5 py-6">{children}</main>
-      <footer className="w-full max-w-[560px] mx-auto px-5 pb-6">
+      <footer className="w-full max-w-[560px] mx-auto px-5 pb-6 space-y-1">
         <p className="text-[11px] text-neutral-400">한줄로 대행발송 · 이 화면은 안내 문자를 받은 담당자용입니다</p>
+        <p className="text-[11px] text-neutral-400">이 화면은 승인 버튼 외에 어떤 입력도 요구하지 않습니다. 로그인·비밀번호·결제정보를 묻는 비슷한 화면은 가짜이니 입력하지 마세요.</p>
       </footer>
     </div>
   );

@@ -139,7 +139,7 @@ export async function notifyManager(opts: {
   try {
     const table = await getAuthSmsTable();
     const images = opts.mmsImages || [];
-    await bulkInsertSmsQueue(
+    const inserted = await bulkInsertSmsQueue(
       [table],
       entries.map(({ phone, text }) => ([
         phone, opts.callback, text, opts.msgType || 'L', opts.title,
@@ -149,6 +149,13 @@ export async function notifyManager(opts: {
       true,
       { companyId: opts.companyId, source: 'agency-send' } as any,
     );
+    // ★2026-08-30 Codex 지적 수용 — 큐 CT는 배치 INSERT 오류를 삼키고 적재 건수만 돌려준다.
+    //   건수를 안 보면 전원 미적재도 조용히 성공으로 끝난다(승인 통보가 발각 경로인 축에서는 치명).
+    //   부족분은 기존 실패 규약 그대로 이력에 남긴다(notify_failed · 본 흐름은 계속).
+    if (inserted < entries.length) {
+      console.error(`${LOG} 담당자 안내 일부 미적재 request=${opts.requestId}: ${inserted}/${entries.length}`);
+      await logEvent(opts.requestId, 'notify_failed', { inserted, expected: entries.length });
+    }
   } catch (err: any) {
     // 안내를 못 보내도 본 흐름(상태 전이)은 멈추지 않는다. 화면에는 상태가 남는다
     console.error(`${LOG} 담당자 안내 실패 request=${opts.requestId}:`, err?.message);

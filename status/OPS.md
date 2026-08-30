@@ -400,6 +400,22 @@ DDL 전에 화면을 열면 라우트가 **503 `DB_MIGRATION_PENDING`**과 "DB �
 
 ---
 
+### 2-2-F. 국외 접속 판정 대역(geo_allow_cidrs) 갱신 (★2026-08-30 신설 · 반기 권장)
+
+국외 접속 판정은 `geo_allow_cidrs`에 "있으면 국내, 없으면 국외"다(`utils/geo-access.ts`). 목록이 한국 전체 대역을 못 덮으면 국내 로그인이 국외 감지로 오탐된다(2026-08-30 실측: 수기 60개 시절 사흘간 57개 IP 216건 오탐).
+
+1. 원천 재다운로드: `https://ftp.apnic.net/stats/apnic/delegated-apnic-extended-latest` (약 9MB)
+2. 변환(로컬): `node packages/backend/scripts/build-kr-cidrs.js <받은 파일> packages/backend/scripts/data/kr-cidrs.txt`
+   - 표본 국내 IP 3개 커버·정렬·최소 1,000개 단언 내장. 실패하면 적재로 넘어가지 않는다.
+3. 적재: 슈퍼관리자 시스템 관리 → 국외 접속 통제 카드 → 대역 일괄 등록 textarea에 `kr-cidrs.txt` 내용 전체 붙여넣기 → 등록(전체 교체 · `POST /api/admin/geo/cidrs/bulk`)
+4. 재검증:
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE '115.138.27.202'::inet <<= cidr) AS 표본커버 FROM geo_allow_cidrs;"
+```
+⛔ 시행 스위치(`GEO_BLOCK_ENFORCE_FROM`)는 적재·재검증 후 오탐이 잦아든 것을 확인한 뒤에만 켠다. 대역이 불완전한 상태로 켜면 전 고객 로그인이 차단된다.
+
+---
+
 ### 2-3. QTmsg 발송 엔진 (로컬 - 개발용)
 ```bash
 cd C:\projects\qtmsg\bin

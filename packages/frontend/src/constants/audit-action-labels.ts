@@ -63,6 +63,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   deposit_hold_resolved: '입금 보류 해제',
   diagnosis_manual_grant: '진단 수동 부여',
   diagnosis_status_change: '진단 상태 변경',
+  // ★ 2026-08-30 승인 링크 보안 보강 — 무로그인 링크로 실행된 승인의 감사 노출
+  charge_link_approved: '충전 링크 승인',
+  agency_link_approved: '대행발송 링크 승인',
 };
 
 /** 액션 → 뱃지 색(등록 없으면 회색). 성공=초록 · 실패·차단·파기=빨강 · 감지·주의=호박 · 인계·변경=파랑 */
@@ -87,6 +90,8 @@ export const AUDIT_ACTION_COLOR: Record<string, string> = {
   login_takeover: 'bg-indigo-100 text-indigo-700',
   account_restricted: 'bg-red-100 text-red-700',
   company_terminated: 'bg-red-100 text-red-700',
+  charge_link_approved: 'bg-green-100 text-green-700',
+  agency_link_approved: 'bg-green-100 text-green-700',
 };
 
 const USER_TYPE_LABEL: Record<string, string> = {
@@ -192,6 +197,12 @@ export function formatAuditDetail(action: string, details: any): string {
       ].filter(Boolean).join(' · ');
     case 'admin_password_changed':
       return `${d.login_id || ''} 비밀번호 변경${d.reason === 'initial_password' ? ' (초기 비밀번호 교체)' : ''}`;
+    // ★ 2026-08-30 승인 링크 보안 보강
+    case 'charge_link_approved':
+      return [d.companyName, d.amount != null && `${Number(d.amount).toLocaleString()}원`, d.phone && `승인 번호 ${d.phone}`]
+        .filter(Boolean).join(' · ');
+    case 'agency_link_approved':
+      return [d.label, d.phone && `승인 번호 ${d.phone}`].filter(Boolean).join(' · ');
     default: {
       const parts = Object.entries(d)
         .filter(([, v]) => v != null && v !== '' && typeof v !== 'object')

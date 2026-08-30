@@ -255,6 +255,30 @@ const cdpPublicLimiter = rateLimit({
 });
 app.use(['/api/cdp/ingest', '/api/cdp/webhook', '/api/cafe24/webhook', '/api/naver-commerce/webhook', '/api/imweb/webhook'], cdpPublicLimiter);
 
+// ★2026-08-30 보안 보강 C5 — 무로그인 승인류(충전·대행발송)와 단축 URL 리다이렉트에 IP당 리미터.
+//   토큰은 서명이라 추측이 안 되고 단축 해시도 62^8이지만, 무제한 시도 자체를 두지 않는 방어 깊이다.
+//   승인류 = 사람이 문자에서 열어 버튼 몇 번이면 끝(분 30이면 넉넉) / 단축 클릭 = 통신사 공유 IP(CGNAT)
+//   뒤에 실사용자가 여럿이라 cdp 공개 축과 같은 분 600(마케팅 클릭을 막으면 안 된다 — 좁히려면 실측 후).
+//   ⛔ 두 승인류는 버킷을 **따로** 둔다(Codex 지적 수용) — 한 인스턴스를 공유하면 공유 IP(사무실 NAT)에서
+//   한쪽의 소나기가 다른 쪽의 급한 승인까지 막는다. 같은 설정·다른 인스턴스 = 다른 버킷.
+const approveLimiterOpts = {
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.', code: 'RATE_LIMITED' },
+} as const;
+app.use('/api/agency-approve', rateLimit({ ...approveLimiterOpts }));
+app.use('/api/charge-approve', rateLimit({ ...approveLimiterOpts }));
+const shortUrlLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: '요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.',
+});
+app.use('/c', shortUrlLimiter);
+
 // ★ D130: IMC 웹훅은 HMAC 검증을 위해 raw body 필요
 //    express.json()이 먼저 파싱하면 rawBody 손실되므로 이 경로만 선처리
 app.use('/api/alimtalk/webhook', express.raw({ type: '*/*', limit: '10mb' }));

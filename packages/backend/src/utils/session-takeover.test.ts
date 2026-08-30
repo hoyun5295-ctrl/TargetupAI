@@ -241,7 +241,23 @@ describe('인계 티켓은 API 인증 토큰이 아니다', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('정상 로그인 토큰(sessionId 없는 옛 토큰 포함)은 통과한다', async () => {
+  it('sessionId를 실은 정상 토큰은 통과하고, sessionId 없는 토큰은 401이다', async () => {
+    // ★2026-08-30 보안 보강 B4 — "옛 토큰 자연 만료" 유예 종료. 발급 3지점 전부가 sessionId를
+    //   실은 지 오래고 만료도 24시간이라, 이 분기에 오는 것은 위조·탈취 토큰뿐이다.
+    //   sessionId만 빼면 세션 대조(강제 로그아웃·유휴 만료)를 건너뛰던 구멍을 닫는 계약.
+    const withSession = jwt.sign(
+      { userId: USER, userType: 'company_admin', loginId: 'hoyun', sessionId: LIVE_SESSION },
+      process.env.JWT_SECRET as string,
+      { expiresIn: '1h' }
+    );
+    mockDb([{ id: LIVE_SESSION, last_activity_at: new Date(), expires_at: new Date(Date.now() + 3600_000) }]);
+    const okReq: any = { headers: { authorization: `Bearer ${withSession}` } };
+    const okRes = fakeRes();
+    const okNext = vi.fn();
+    await authenticate(okReq, okRes, okNext);
+    expect(okNext).toHaveBeenCalled();
+    expect(okReq.user.userId).toBe(USER);
+
     const legacy = jwt.sign(
       { userId: USER, userType: 'company_admin', loginId: 'hoyun' },
       process.env.JWT_SECRET as string,
@@ -253,7 +269,7 @@ describe('인계 티켓은 API 인증 토큰이 아니다', () => {
 
     await authenticate(req, res, next);
 
-    expect(next).toHaveBeenCalled();
-    expect(req.user.userId).toBe(USER);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(401);
   });
 });

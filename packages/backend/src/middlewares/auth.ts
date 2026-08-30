@@ -58,9 +58,12 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     // 이후 호출 체인(callAIWithFallback 등)이 현재 사용자 ID를 인자 없이 읽도록 컨텍스트 저장
     requestContext.enterWith({ userId: decoded.userId, companyId: decoded.companyId, userType: decoded.userType });
 
-    // sessionId 없는 기존 토큰은 통과 (배포 후 자연 만료)
+    // ★2026-08-30 보안 보강 B4 — sessionId 없는 토큰은 거절한다. 과도기 유예("배포 후 자연 만료")였는데
+    //   발급 3지점(auth.ts 2곳·login-issue.ts) 전부가 sessionId를 실은 지 오래고 만료도 24시간이라
+    //   정상 토큰은 이 분기에 올 수 없다. 남겨 두면 위조·탈취 토큰이 sessionId만 빼고
+    //   세션 대조(강제 로그아웃·유휴 만료)를 통째로 건너뛴다.
     if (!decoded.sessionId) {
-      return next();
+      return res.status(401).json({ error: 'Invalid token' });
     }
 
     // ★ 세션 유효성 체크 — is_active + expires_at 만료 여부

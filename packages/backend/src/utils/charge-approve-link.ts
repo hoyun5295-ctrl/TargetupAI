@@ -24,8 +24,15 @@ import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from '
 import { createShortUrl } from './short-url';
 import { sanitizeSmsText } from './auto-notify-message';
 
-const RAW_SECRET = process.env.JWT_SECRET || 'targetup-jwt-secret-fallback';
-const JWT_KEY = `charge-approve:${RAW_SECRET}`;
+// ⛔ 폴백 키 금지(★2026-08-30 보안 보강 B3 · agency-send-link 미러) — 미설정 = 서명 throw · 검증 null.
+if (!process.env.JWT_SECRET) {
+  console.error('[charge-approve-link] JWT_SECRET 미설정 — 충전 승인 링크 발급·검증이 전면 잠깁니다.');
+}
+function jwtKey(): string {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error('JWT_SECRET 미설정: 승인 토큰을 서명·검증할 수 없습니다.');
+  return `charge-approve:${s}`;
+}
 const SCOPE = 'charge_approve';
 /** 만료 7일 — 충전 요청은 발송 시각 개념이 없어 고정 창이면 충분하다(그 안에 처리되거나 화면에서 처리된다) */
 export const CHARGE_APPROVE_TTL_SECONDS = 7 * 24 * 3600;
@@ -55,7 +62,7 @@ export function getChargeApprovalPhones(): string[] {
 export function signChargeApproveToken(p: { kind: ChargeApproveKind; targetId: string; phone: string }): string {
   return jwt.sign(
     { scope: SCOPE, k: p.kind, t: p.targetId, p: p.phone },
-    JWT_KEY,
+    jwtKey(),
     { algorithm: 'HS256', expiresIn: CHARGE_APPROVE_TTL_SECONDS },
   );
 }
@@ -63,7 +70,7 @@ export function signChargeApproveToken(p: { kind: ChargeApproveKind; targetId: s
 export function verifyChargeApproveToken(token: string): ChargeApproveTokenPayload | null {
   if (!token) return null;
   try {
-    const decoded = jwt.verify(token, JWT_KEY, { algorithms: ['HS256'] }) as any;
+    const decoded = jwt.verify(token, jwtKey(), { algorithms: ['HS256'] }) as any;
     if (!decoded || decoded.scope !== SCOPE || !decoded.t || !decoded.p) return null;
     if (decoded.k !== 'deposit' && decoded.k !== 'agent_order') return null;
     if (!Number.isFinite(Number(decoded.exp))) return null;
@@ -137,6 +144,43 @@ export const CHARGE_KIND_LABEL: Record<ChargeApproveKind, string> = {
  * 승인 대기 안내 문자 발송 — 번호마다 자기 링크를 실어 개별 조립한다.
  * @returns 발송 시도한 수신자 수(0 = ENV 미설정)
  */
+/**
+ * 승인 실행 통보 (★2026-08-30 보안 보강 A1) — 수신 목록(ENV) 전원에게 즉시 알린다.
+ * 링크가 새서 남이 승인했다면 이 문자가 유일한 발각 경로이고, 본인 승인에게는 영수증이 된다.
+ * 발송 실패가 승인 효과를 되돌리지 않는다(fire-and-forget · notifyChargeApprovers와 같은 규약).
+ */
+export async function notifyChargeApproved(input: {
+  kind: ChargeApproveKind;
+  companyName: string;
+  amount: number;
+  approvedByPhone: string;
+}): Promise<void> {
+  try {
+    const phones = getChargeApprovalPhones();
+    if (phones.length === 0) return;
+    const authTable = await getAuthSmsTable();
+    const callback = getPlatformNoticeCallback();
+    const body = sanitizeSmsText([
+      '[한줄로] 충전 승인 완료',
+      '',
+      `구분: ${CHARGE_KIND_LABEL[input.kind]}`,
+      `고객사: ${oneLineField(input.companyName, 30)}`,
+      `금액: ${Number(input.amount).toLocaleString()}원`,
+      `끝자리 ${String(input.approvedByPhone).slice(-4)} 번호의 링크로 승인되었습니다.`,
+      '본인이나 동료의 승인이 아니면 즉시 확인해 주세요.',
+    ].join('\n'));
+    const rows = phones.map((phone) => ([
+      phone, callback, body, 'L', '[한줄로] 충전 승인 완료', null, '', 'charge-approve', '', '', '',
+    ]));
+    const inserted = await bulkInsertSmsQueue([authTable], rows as any[][], true);
+    if (inserted < rows.length) {
+      console.error(`[charge-approve-link] 승인 통보 일부 미적재: ${inserted}/${rows.length}`);
+    }
+  } catch (err: any) {
+    console.error('[charge-approve-link] 승인 통보 발송 오류:', err?.message || err);
+  }
+}
+
 export async function notifyChargeApprovers(input: {
   kind: ChargeApproveKind;
   targetId: string;

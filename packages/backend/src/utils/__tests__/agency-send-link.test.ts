@@ -13,6 +13,9 @@ import {
 } from '../agency-send-link';
 import { buildPassedNotify, buildReapprovalNotify } from '../agency-send-notify';
 
+// ★2026-08-30 B3 — 폴백 키가 제거되어 서명·검증은 JWT_SECRET이 있어야만 돈다(fail-closed 계약)
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-agency-link';
+
 const REQ = '11111111-2222-3333-4444-555555555555';
 const PHONE = '01000001111';
 
@@ -30,7 +33,7 @@ describe('대행발송 링크 승인 — 토큰', () => {
     const token = signAgencyApproveToken({ requestId: REQ, phone: PHONE, contentVersion: 3, requestedAt: new Date() });
     expect(verifyAgencyApproveToken(token.slice(0, -2) + 'xx')).toBeNull();
     // 같은 비밀키로 서명해도 scope가 다르면 승인 토큰이 아니다
-    const other = jwt.sign({ scope: 'totp_enroll', r: REQ, p: PHONE }, process.env.JWT_SECRET || 'targetup-jwt-secret-fallback');
+    const other = jwt.sign({ scope: 'totp_enroll', r: REQ, p: PHONE }, process.env.JWT_SECRET as string);
     expect(verifyAgencyApproveToken(other)).toBeNull();
     expect(verifyAgencyApproveToken('')).toBeNull();
   });

@@ -17,18 +17,24 @@
  * ⛔ 토큰 소지 = 그 담당자 번호의 폰 소지로 간주한다(Harold 2026-08-25 수용한 위험 — 감사는
  *   승인 이력의 via·phone·ip가 진다). 국외 차단은 걸지 않는다(담당자 해외 출장 승인 허용).
  * ⛔ API 호출에 토큰을 URL로 싣지 않는다(요청 로그에 남는다) — 운반은 헤더(X-Agency-Approve-Token).
- *   문자 속 랜딩 주소의 ?t= 는 유지한다(문자는 주소 하나만 실을 수 있고, 그 주소는 앱 로그를 지나지 않는다).
+ *   랜딩 주소도 fragment(#t=)뿐이다(★0830 확정 · query ?t=는 JS 전에 접근 로그로 전송돼 페이지도 안 받는다).
  */
 import jwt from 'jsonwebtoken';
 import { normalizePhone } from './normalize-phone';
 import { createShortUrl } from './short-url';
 
-// 전역 비밀키에서 파생한 승인 전용 키. 전역 키 미설정(폴백) 문제 자체는 전 인증 공통의 별건이다(BUGS 등재).
-const RAW_SECRET = process.env.JWT_SECRET || 'targetup-jwt-secret-fallback';
+// ⛔ 폴백 키 금지(★2026-08-30 보안 보강 B3) — 저장소에 공개된 문자열로 서명하면 소스를 본 사람이
+//   승인권을 위조한다. 미설정 = 서명 throw(발급 중단) · 검증 null(전부 404) = fail-closed.
+//   auth.ts는 기동 자체를 차단하지만, 그 모듈을 안 지나는 별도 프로세스(워커·스크립트)가
+//   이 CT만 import하는 경우를 여기서 막는다. 지연 판정이라 테스트는 호출 전 env 주입으로 충분하다.
 if (!process.env.JWT_SECRET) {
-  console.warn('[agency-send-link] JWT_SECRET 미설정 — 폴백 키로 동작 중입니다. 운영에서는 반드시 설정해야 합니다.');
+  console.error('[agency-send-link] JWT_SECRET 미설정 — 대행발송 승인 링크 발급·검증이 전면 잠깁니다.');
 }
-const JWT_KEY = `agency-approve:${RAW_SECRET}`;
+function jwtKey(): string {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error('JWT_SECRET 미설정: 승인 토큰을 서명·검증할 수 없습니다.');
+  return `agency-approve:${s}`;
+}
 const SCOPE = 'agency_approve';
 const MIN_TTL_SECONDS = 7 * 24 * 3600;      // 최소 7일
 const AFTER_SEND_MARGIN_SECONDS = 24 * 3600; // 발송 시각 + 24시간까지
@@ -56,7 +62,7 @@ export function signAgencyApproveToken(p: {
   const expiresIn = agencyApproveTtlSeconds(p.requestedAt, now);
   return jwt.sign(
     { scope: SCOPE, r: p.requestId, p: p.phone, cv: Number(p.contentVersion) },
-    JWT_KEY,
+    jwtKey(),
     { algorithm: 'HS256', expiresIn },
   );
 }
@@ -64,7 +70,7 @@ export function signAgencyApproveToken(p: {
 export function verifyAgencyApproveToken(token: string): AgencyApproveTokenPayload | null {
   if (!token) return null;
   try {
-    const decoded = jwt.verify(token, JWT_KEY, { algorithms: ['HS256'] }) as any;
+    const decoded = jwt.verify(token, jwtKey(), { algorithms: ['HS256'] }) as any;
     if (!decoded || decoded.scope !== SCOPE || !decoded.r || !decoded.p) return null;
     if (!Number.isFinite(Number(decoded.exp)) || !Number.isFinite(Number(decoded.cv))) return null;
     return { requestId: String(decoded.r), phone: String(decoded.p), contentVersion: Number(decoded.cv) };
