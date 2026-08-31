@@ -1002,7 +1002,14 @@ function renderTabPanelContent(t: any): string {
   const ct = t?.content_type;
   const content = String(t?.content || '');
   if (ct === 'image' && content.trim()) {
-    return `<img src="${escapeHtml(publicImageUrl(content.trim()))}" loading="lazy" alt="" style="width:100%;height:auto;display:block;border-radius:var(--dm-radius-md)"/>`;
+    const img = `<img src="${escapeHtml(publicImageUrl(content.trim()))}" loading="lazy" alt="" style="width:100%;height:auto;display:block;border-radius:var(--dm-radius-md)"/>`;
+    // ★ 2026-08-31 (임은지 접수 cmtgmu3ws0536jnotc8z54i1c) 이미지 탭도 눌러서 이동한다. 상품 목록은 줄 안의
+    //   URL이 상품마다 링크가 되는데 이미지에는 그 자리가 없어 "링크 삽입 시 연결"이 성립하지 않았다.
+    //   주소가 없으면 옛 그대로 이미지만 나간다(회귀 0). 링크 검증은 상품 행과 같은 `safeUrl` 한 벌.
+    const linkUrl = String(t?.link_url || '').trim();
+    return linkUrl
+      ? `<a href="${safeUrl(linkUrl)}" target="_blank" rel="noopener" style="display:block;text-decoration:none">${img}</a>`
+      : img;
   }
   if (ct === 'product_list') {
     const items = parseTabProductList(content);

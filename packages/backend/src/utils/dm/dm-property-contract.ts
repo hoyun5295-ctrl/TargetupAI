@@ -162,3 +162,13 @@ export const DM_PRODUCT_TITLE_PROPS: Array<{ section: string; prop: string; desc
   { section: 'product_carousel', prop: 'title_size', desc: '상품슬라이드 제목 크기 sm|md|lg (미지정 = md = 현행)' },
   { section: 'product_carousel', prop: 'title_color', desc: '상품슬라이드 제목 색 (미지정 = 본문색)' },
 ];
+
+/** ★ 2026-08-31 탭 카드 이미지 링크(임은지 접수 cmtgmu3ws0536jnotc8z54i1c) —
+ *  섹션 prop이 아니라 **`tabs[]` 항목의 필드**라 위 표들과 형태가 다르다(그래서 표를 나눴다).
+ *  content_type='image'일 때만 읽는다. 미지정 = 링크 없는 이미지(현행 · 회귀 0).
+ *  같은 접수의 나머지 절반은 편집기 쪽이다 — 유형을 바꿔도 입력칸이 같아 무엇을 넣어야 이 렌더가
+ *  나오는지 알 수 없었다(TabCardsEditor 유형별 분기). 소비 검증 = dm-editor-parity.test.ts.
+ *  이메일은 대상이 아니다: `tab_cards`는 EMAIL_INCOMPATIBLE 'static'이고 전용 렌더 분기가 없어 읽는 쪽이 없다. */
+export const DM_TAB_ITEM_PROPS: Array<{ section: string; prop: string; desc: string }> = [
+  { section: 'tab_cards', prop: 'tabs[].link_url', desc: '이미지 탭을 눌렀을 때 이동할 주소 (content_type=image 전용 · 미지정 = 링크 없음)' },
+];

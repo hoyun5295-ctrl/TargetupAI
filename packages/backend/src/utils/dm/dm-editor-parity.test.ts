@@ -361,6 +361,43 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
       expect(tab, "캔버스가 content_type='product_list'(상품 목록) 렌더 미러").toContain('product_list');
     });
 
+    // ── 2026-08-31 (임은지 cmtgmu3ws0536jnotc8z54i1c) 이미지 탭 링크 + 편집기 유형별 입력칸 ──
+    it('탭 content_type=image + link_url — 발행이 이미지를 링크(<a href>)로 감싼다', () => {
+      const html = renderSection(mk('tab_cards', {
+        tabs: [{ label: '이미지', content_type: 'image', content: 'https://ex.com/a.jpg', link_url: 'https://ex.com/go' }],
+      }), {} as any);
+      expect(html, 'link_url이 있으면 <a href>로 감싸야 = 눌러서 이동').toContain('href="https://ex.com/go"');
+      expect(html, '링크 안에 이미지가 그대로 있어야').toContain('a.jpg');
+    });
+    it('탭 content_type=image + link_url 미지정 — 옛 그대로 이미지만(회귀 0)', () => {
+      const html = renderSection(mk('tab_cards', {
+        tabs: [{ label: '이미지', content_type: 'image', content: 'https://ex.com/a.jpg' }],
+      }), {} as any);
+      expect(html, '주소가 없으면 링크로 감싸지 않는다').not.toContain('<a href');
+      expect(html).toContain('<img');
+    });
+    it('탭 content_type=image + 위험 스킴 link_url — 링크로 나가지 않는다(새로 낸 입구의 방어)', () => {
+      const html = renderSection(mk('tab_cards', {
+        // eslint-disable-next-line no-script-url
+        tabs: [{ label: '이미지', content_type: 'image', content: 'https://ex.com/a.jpg', link_url: 'javascript:alert(1)' }],
+      }), {} as any);
+      expect(html, 'javascript: 스킴이 href로 나가면 안 된다').not.toContain('javascript:');
+      expect(html, '차단된 링크는 # 로 대체(safeUrl 계약)').toContain('href="#"');
+    });
+    it('탭 카드 — 캔버스가 이미지 링크(link_url) 분기 미러', () => {
+      const tab = block('TabCardsSection', 'PollSection');
+      expect(tab, '캔버스가 link_url을 읽어야 = 편집에서 링크 유무를 알 수 있다').toContain('link_url');
+    });
+    it('탭 편집기 — content_type마다 입력칸이 갈린다(셋 다 같은 글상자면 무엇을 넣을지 알 수 없다)', () => {
+      const editor = readFileSync(
+        resolve(process.cwd(), '../frontend/src/components/dm/panels/editors/TabCardsEditor.tsx'), 'utf8',
+      );
+      expect(editor, "이미지 유형은 업로더로 받아야(옛: placeholder '내용' 글상자 하나)").toContain('ImageUploader');
+      expect(editor, '이미지 유형에 이동 주소 입력칸이 있어야').toContain('link_url');
+      expect(editor, '상품 목록은 인식 결과를 그 자리에서 보여야(형식을 맞췄는지 발행 전에 안다)').toContain('parsePastedProducts');
+      expect(editor, "유형별 안내가 있어야").toContain('TYPE_HINT');
+    });
+
     // ── 설정한 경품이 단말 어디에도 안 보이던 것 노출 (룰렛 휠엔 라벨 없음 / 추첨 경품 미표시) ──
     it('룰렛 — 당첨 경품(prize_count>0) 라벨이 발행에 노출(휠엔 라벨 없어 경품 안내)', () => {
       const html = renderSection(mk('roulette', { segments: [{ id: '1', label: '1등', probability: 0.1, prize_count: 5, reward_description: '스타벅스 기프티콘' }, { id: '2', label: '꽝', probability: 0.9, prize_count: 0 }], one_spin_per_user: true }), {} as any);

@@ -222,7 +222,10 @@ export type GalleryProps = { title?: string; images: GalleryImage[]; layout: 'gr
 export type SlideshowSlide = { image_url: string; caption?: string; link_url?: string; };
 export type SlideshowProps = { slides: SlideshowSlide[]; interval_ms: number; show_pause?: boolean; show_indicator?: boolean; slide_ratio?: '16:9' | '1:1' | '3:4' | 'original'; };
 
-export type TabCardItem = { label: string; content_type: 'text' | 'image' | 'product_list'; content: string; };
+// ★ 2026-08-31 (임은지 접수 cmtgmu3ws0536jnotc8z54i1c) `link_url` = content_type='image'일 때 이미지를 눌러
+//   이동할 주소(선택). 상품 목록은 줄 안의 URL이 상품마다 링크가 되지만 이미지에는 그 자리가 없었다.
+//   미지정 = 링크 없는 이미지(현행 그대로 · 회귀 0). 다른 content_type은 이 값을 읽지 않는다.
+export type TabCardItem = { label: string; content_type: 'text' | 'image' | 'product_list'; content: string; link_url?: string; };
 // ★ 2026-07-23 (임은지) tab_active_bg/text_color = 활성 탭 버튼 배경/글씨색(미지정=#171717/#fff·회귀 0). backend 미러.
 //   탭 버튼 글씨 크기 = 섹션 '제목 크기'(--dm-fs-tab), 탭 내용 크기 = 섹션 '본문 크기'.
 export type TabCardsProps = { tabs: TabCardItem[]; default_tab_index?: number; tab_active_bg?: string; tab_active_text_color?: string; };

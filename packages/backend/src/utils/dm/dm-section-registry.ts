@@ -270,6 +270,12 @@ export type TabCardItem = {
   label: string;
   content_type: 'text' | 'image' | 'product_list';
   content: string;
+  /**
+   * ★ 2026-08-31 (임은지 접수 cmtgmu3ws0536jnotc8z54i1c) 이미지 탭을 눌렀을 때 이동할 주소.
+   * `content_type='image'`일 때만 읽는다. 미지정 = 링크 없는 이미지(현행 · 회귀 0).
+   * frontend `utils/dm-section-defaults.ts`의 미러(registry ↔ defaults 복제 패턴).
+   */
+  link_url?: string;
 };
 
 export type TabCardsProps = {

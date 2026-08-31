@@ -3166,6 +3166,7 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 
 **agency_send_events**: `id bigserial PK, request_id uuid NOT NULL REFERENCES agency_send_requests(id) ON DELETE CASCADE, kind varchar(32) NOT NULL, payload jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT NOW()`. 인덱스 `(request_id, created_at DESC)`.
 
+- ⛔ `agency_send_events.kind`에 **CHECK 없음**(★2026-08-31 `pg_constraint` 실측 = PK·FK 2개뿐). 새 이벤트 종류는 DDL 0으로 늘릴 수 있다 — 대신 프론트 `AgencyEventLog`의 `EVENT_LABEL` 등재가 **같은 커밋**이다(미등재 kind는 화면에서 문장이 뭉개진다).
 - ⛔ `created_by`·`approved_by`·`campaign_id`에 **FK 없음**(0728 `23503` 원칙 + 캠페인 정리 워커가 옛 행을 지운다).
 - ⛔ **큐 적재는 당일 재검사 통과 뒤 1회뿐**이라 `queued` 이전 상태에는 MySQL 큐가 없다. 취소도 그 전에는 상태 변경만이다(0611 에이치피오 사고 경로를 구조로 제거).
 - `approval_version`은 승인 당시 `content_version`. 문안이 바뀌면(다듬기) 값이 어긋나 재승인으로 간다.

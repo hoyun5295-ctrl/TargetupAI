@@ -360,7 +360,18 @@ export function TabCardsSection({ props }: { props: TabCardsProps }) {
   if (!content) {
     panel = <span style={PLACEHOLDER_STYLE}>[내용을 추가해주세요]</span>;
   } else if (cur?.content_type === 'image') {
-    panel = <img src={dmImageUrl(content)} alt="" style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 'var(--dm-radius-md)' }} />;
+    // ★ 2026-08-31 (임은지 접수 cmtgmu3ws0536jnotc8z54i1c) 발행 renderTabPanelContent 미러 — link_url이 있으면
+    //   이미지가 링크가 된다. 편집 캔버스는 실제로 이동하지 않으므로(편집 중이다) 상품 행과 같은 화살표로
+    //   "눌러서 이동한다"는 사실만 보여 준다. 주소가 없으면 옛 그대로 이미지만(회귀 0).
+    const tabImageLink = String(cur?.link_url || '').trim();
+    panel = (
+      <div style={{ position: 'relative' }}>
+        <img src={dmImageUrl(content)} alt="" style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 'var(--dm-radius-md)' }} />
+        {tabImageLink ? (
+          <span aria-hidden="true" style={{ position: 'absolute', right: 8, bottom: 8, padding: '2px 9px', borderRadius: 999, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 'var(--dm-fs-tiny)', fontWeight: 700 }}>→</span>
+        ) : null}
+      </div>
+    );
   } else if (cur?.content_type === 'product_list' && plItems.length > 0) {
     panel = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
