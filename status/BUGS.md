@@ -240,10 +240,6 @@
 > **위치**: `agency-send-worker.ts:1103~1106`. 다른 워커들은 가드를 갖고 있다(`godo-sync-worker.ts:54` · `cdp-webhook-retry-worker.ts:22` · `system-monitor-worker.ts:272` 등).
 > **수정 방향**: `let running` + try/finally(다른 워커와 같은 형태). 신설되는 1분 메일 워커(설계서 §18-5)는 처음부터 가드+advisory lock을 갖고 나가고, 기존 5분 워커는 이 건으로 별도 수정(축 밖이라 기록만 · 5분 주기라 실사고 미관측).
 
-### ✅ B-0825-2 JWT_SECRET 미설정 시 저장소 공개 폴백 키로 전 토큰이 서명된다 (✅ 종결 2026-08-30 · 승인 링크 보안 보강 세션) — 2026-08-25 (Codex 적대 1R)
-> **증상**: `JWT_SECRET` ENV가 없으면 로그인 JWT·OTP 등록 토큰·대행발송 승인 토큰이 전부 저장소에 공개된 고정 문자열(`targetup-jwt-secret-fallback`)로 서명된다. 그 상태면 누구든 토큰을 위조할 수 있다.
-> **종결(2026-08-30)**: ①폴백 문자열 소스 전수 제거(grep 잔존 0) — `utils/totp.ts`·`utils/agency-send-link.ts`·`utils/charge-approve-link.ts` 전부 지연 fail-closed(미설정 = 서명 throw·검증 null)로 전환. `middlewares/auth.ts`는 기존 fail-fast(기동 차단) 유지, `routes/auth.ts:433`은 원래 폴백 없음. ②운영 실측 = `packages/backend/.env`에 36자 설정 확인(Harold 실행 · 값 비노출 길이 검사). 루트 `.env`에는 없으나 그 cwd 프로세스는 `studio-py`(파이썬)라 JWT 무관. ③같은 세션에서 sessionId 없는 토큰 유예 통과 분기도 제거(위조 토큰의 세션 대조 우회 차단).
-
 ### 🟡 B-0825-1 AI 호출 토큰 기록이 캐시 생성분을 누락한다 — 도움말 축 정정 시 전수 grep으로 확인된 동일 패턴 2곳 (🔵 Open · 축 밖 기록만) — 2026-08-25
 > **증상**: `ai_call_log.input_tokens` 기록식이 `input_tokens + cache_read_input_tokens`만 합산해 **캐시 신규 생성분(cache_creation)이 통째로 빠진다.** 프롬프트 캐시를 쓰는 호출은 생성 회차가 가장 비싼데(도움말 봇 실측 = 질문당 약 2.9만 토큰), 원장에는 수십 토큰으로 적혀 원가 실측이 실제보다 작게 나온다.
 > **위치(전수 grep)**: [agency-send-refine.ts:193](../packages/backend/src/utils/agency-send-refine.ts) · [ai-mapping.ts:244](../packages/backend/src/utils/ai-mapping.ts) (`tokensUsed` 합산). 도움말 축([help-answer.ts](../packages/backend/src/utils/help-answer.ts))은 2026-08-25 정정 완료 — 같은 세션 축 밖이라 이 2곳은 기록만(`scope_discipline_one_ticket_axis`). `services/ai.ts`는 read/created를 PM2 로그에는 찍는데 기록 경로 합산 여부 미확인(확인부터).

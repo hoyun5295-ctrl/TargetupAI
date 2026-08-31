@@ -2,6 +2,12 @@
 > 원본: status/BUGS.md — 2026-07-03 관제탑 재설계 v2로 원문 그대로 이동 (요약·재서술 없음).
 > 본문 내 상대 링크는 재설계 전 경로 기준 — 설계·핸드오프 문서는 archive/DESIGNS/ 에 있다.
 
+## 2026-08-30 ✅ 종결 — B-0825-2 JWT_SECRET 미설정 시 저장소 공개 폴백 키로 전 토큰이 서명된다 (승인 링크 보안 보강 세션에서 종결)
+
+> BUGS.md §2에서 이동(2026-08-30).
+> **증상(원문)**: `JWT_SECRET` ENV가 없으면 로그인 JWT·OTP 등록 토큰·대행발송 승인 토큰이 전부 저장소에 공개된 고정 문자열(`targetup-jwt-secret-fallback`)로 서명된다. 그 상태면 누구든 토큰을 위조할 수 있다.
+> **종결 경위(2026-08-30)**: ①폴백 문자열 소스 전수 제거(grep 잔존 0) — `utils/totp.ts`·`utils/agency-send-link.ts`·`utils/charge-approve-link.ts` 전부 지연 fail-closed(미설정 = 서명 throw·검증 null)로 전환. `middlewares/auth.ts`는 기존 fail-fast(기동 차단) 유지, `routes/auth.ts:433`은 원래 폴백 없음. ②운영 실측 = `packages/backend/.env`에 36자 설정 확인(Harold 실행 · 값 비노출 길이 검사 · pm2 jlist는 dotenv 변수를 못 보므로 프로세스 cwd 기준으로 판정). 루트 `.env`에는 없으나 그 cwd 프로세스는 `studio-py`(파이썬)라 JWT 무관. ③같은 세션에서 sessionId 없는 토큰 유예 통과 분기도 제거(위조·탈취 토큰의 세션 대조 우회 차단 · 계약 테스트 갱신). 배포 완료(승인 링크 보안 보강 패키지 · 충전 설계서 §16 불변 10).
+
 ## 2026-07-18 ✅ 종결 — B-0718-1 프론트 스플리팅 배포 → 전 고객 화면 진입 불능 (재발 방지 3겹 + M1 재도입 배포·Harold 화면 실측 통과)
 
 > BUGS.md §2에서 이동(2026-07-18). **종결 경위**: 종결 조건 ①서버 git 일치(d6958238) ②safe-build 게이트(3-1 lazy 청크 실존+3-2 비literal 동적 import 검출)+verify-live-chunks.sh — Codex 5라운드 통과·하네스 실측 ③난독화 exclude — 로컬 3회×3세트(총 9회) 반복 빌드 실측 후 **M1 재도입 배포(eab1f413·Codex 3R 정정: 선로딩 미작동·복원 전 이중 선로딩·Dashboard↔위저드 청크 결합)**로 라이브 반영. 서버 게이트 실전 통과(35건 실존·비literal 0) + 라이브 전수 177건 실패 0 + **Harold 화면 실측 "다 잘 된다"** = Closed. 첫 로드 5MB→0.37MB(약 13배).

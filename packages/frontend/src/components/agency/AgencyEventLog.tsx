@@ -17,6 +17,9 @@ const EVENT_LABEL: Record<string, string> = {
   received: '접수했습니다',
   spam_blocked: '스팸 검사에 걸렸습니다',
   refined: '문안을 다듬었습니다',
+  // ★2026-08-31 다듬을 곳이 없어 문안이 그대로인 회차. `refined`와 나눈 이유는 이 경우 담당자에게
+  //   새 문안·재승인 문자가 나가지 않기 때문이다(바뀐 문장이 없으니 보낼 것이 없다).
+  refine_nochange: '다듬을 곳이 없어 그대로 다시 검사했습니다',
   refine_failed: '문안을 다듬지 못했습니다',
   awaiting_approval: '검사를 통과해 승인을 기다립니다',
   approved: '승인했습니다',

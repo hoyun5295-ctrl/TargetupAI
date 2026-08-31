@@ -292,8 +292,16 @@ async function runSpamRound(row: any, startRound: number): Promise<{
       await logEvent(row.id, 'refine_failed', { round: rounds, reason: refined.reason });
       break; // 다듬지 못하면 더 돌려도 같은 문안이다
     }
+    // ★2026-08-31 **실제로 바뀌었을 때만** '다듬었다'로 남긴다.
+    //   `checkRefined`는 빈 값·길이·앵커 손실·없던 혜택만 거르고 "원문과 똑같은 결과"는 통과시킨다.
+    //   짧은 문안은 다듬을 곳이 없어 모델이 원문을 그대로 돌려주는데, 전에는 그 회차도 `refined`로 찍혔다.
+    //   그런데 담당자 통보는 문안이 **달라졌을 때만** 나간다(워커 B 통과 분기). 기록은 "다듬었다"인데
+    //   문자는 안 나가 "다듬었다면서 왜 안내가 없나"가 된다(0831 Harold 지적).
+    // ⛔ 비교는 통보 분기와 **같은 기준**(글자 그대로)이어야 한다. 여기서 공백을 정규화하면 그 순간
+    //   기록과 통보가 다시 갈린다.
+    const refineChanged = refined.content !== content;
     content = refined.content;
-    await logEvent(row.id, 'refined', { round: rounds });
+    await logEvent(row.id, refineChanged ? 'refined' : 'refine_nochange', { round: rounds });
   }
 
   return { passed: false, finalContent: content, rounds, detail };
