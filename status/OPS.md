@@ -566,6 +566,53 @@ ps aux | grep qtmsg | grep -v grep | wc -l   # 11개면 정상
 grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 ```
 
+### 6-4-A. Agent가 죽었을 때 복구 순서 (★2026-08-31 실사고 기반 런북)
+
+> ⛔ **재기동을 먼저 하지 않는다.** 올리는 순간 `status_code=100` 중 발송 시각이 지난 건이 즉시 나간다.
+> 늦은 발송은 0611 에이치피오 사고(250만원)의 형태다. **적체를 판정하고 늦은 건을 닫은 뒤에 올린다.**
+
+**① 어느 에이전트가 죽었나** — 커맨드라인에 `agentN`이 안 찍히므로 **관리 포트로 본다**(1번=9001 … 11번=9011).
+```bash
+ss -ltn | grep -oE ':(900[1-9]|901[01])\b' | sort -uV | tr '\n' ' '; echo
+```
+
+**② 원인** — 로그 끝이 곧 죽은 시각이다. 에러 없이 온전한 줄에서 끊겼으면 애플리케이션이 스스로 죽은 게 아니다.
+```bash
+tail -20 "$(ls -t /home/administrator/agent<N>/logs/* | head -1)"
+ls -lt /home/administrator/agent<N>/bin/ | head -5      # hs_err_pid*.log = JVM 크래시 확정
+```
+- `hs_err_pid*.log` 있음 = JVM 크래시. 파일 머리의 신호·`Problematic frame`이 원인.
+- 없고 시스템 로그(`journalctl`)에 OOM도 없음 = 외부 종료 쪽.
+- ⚠ **OOM으로 단정하지 마라** — 커널 로그에 `Killed process`가 없으면 OOM이 아니다.
+
+**③ 적체 판정** — 올리면 나갈 것과 이미 늦은 것을 가른다.
+```bash
+docker exec -i targetup-mysql mysql -usmsuser -p smsdb -e "SELECT status_code, SUM(sendreq_time <= NOW()) due_now, SUM(sendreq_time > NOW()) future, MIN(sendreq_time) oldest, MAX(sendreq_time) newest, SUM(mobsend_time IS NULL) not_stamped FROM SMSQ_SEND_<N> WHERE status_code IN (100,104) GROUP BY status_code;"
+```
+- `100` = 미발송. `due_now`가 올리자마자 나갈 건수, `future`는 예약분(제 시각에 나감).
+- `104` = 에이전트가 집었으나 미완결. **재기동해도 안 나간다**(폴링은 100만 집는다).
+- `not_stamped`(mobsend_time NULL)가 전량이면 **통신사에 안 갔다** = 되살려도 중복 발송 아님.
+
+**④ 늦은 건 닫기** — `104` + `rsv1='3'`(서버전송요청완료) + `mobsend_time IS NULL`만 대상.
+⛔ `rsv1='1'·'2'`는 정상 진행분이라 **절대 건드리지 않는다**(`expired-pending-sweeper` 절대 원칙과 같은 선).
+```bash
+docker exec -i targetup-mysql mysql -usmsuser -p smsdb -e "SELECT rsv1, COUNT(*) FROM SMSQ_SEND_<N> WHERE status_code=104 GROUP BY rsv1;"
+docker exec -i targetup-mysql mysql -usmsuser -p smsdb -e "SELECT COUNT(*) before_cnt FROM SMSQ_SEND_<N> WHERE rsv1='3' AND status_code=104 AND mobsend_time IS NULL; UPDATE SMSQ_SEND_<N> SET status_code=4000, repmsg_recvtm=NOW() WHERE rsv1='3' AND status_code=104 AND mobsend_time IS NULL; SELECT COUNT(*) remain_104 FROM SMSQ_SEND_<N> WHERE status_code=104;"
+```
+- `4000` = 전송 시간 초과=실패. **워커와 같은 컬럼 세트를 쓴다**(다르게 쓰면 정합이 깨진다).
+- 효과 검증 = `remain_104`가 **0**이어야 성공(6원칙 ②).
+- 환불은 `mysql-refund-sweeper`(14일 윈도우)가 실패 건수를 세어 자동 처리 — 별도 조치 불요.
+- **급하지 않으면 안 해도 된다** — `expired-pending-sweeper`가 48시간 경과분을 같은 방식으로 자동 마킹한다. 수동 실행은 그것을 앞당기는 것뿐이다(화면에 '대기'로 남아 문의가 꼬이는 것을 막는 값).
+
+**⑤ 재기동 · 소화 확인**
+```bash
+cd /home/administrator/agent<N>/bin && ./qtmsg.sh start && sleep 3 && ss -ltn | grep :90<NN>
+docker exec -i targetup-mysql mysql -usmsuser -p smsdb -e "SELECT status_code, COUNT(*) cnt FROM SMSQ_SEND_<N> GROUP BY status_code ORDER BY cnt DESC;"
+```
+`100`이 줄고 성공 코드가 늘면 정상 소화 중이다.
+
+> **실사고 기록(2026-08-31)** — agent6이 18:32:16에 JVM SIGSEGV(`GCTaskThread`·`libjvm.so`)로 죽었다. 로그는 PING/PONG 정상 중 예고 없이 끊겼고 시스템 로그엔 흔적이 없었으며 OOM도 아니었다. `hs_err_pid1779348.log`가 유일한 증거였다. **11개 에이전트 통틀어 크래시 덤프 1건 = 일회성**(반복이면 JVM 버전·서버 메모리를 봐야 한다). 영향 = 어제 접수 721건 미발송(7개 캠페인·아난티 등) + 오늘 740건 지연. 조치 = 721건 4000 마킹(잔존 0 확인) 후 재기동.
+
 ### 6-5. 백엔드 라인그룹 기반 분배
 - 환경변수: `SMS_TABLES=SMSQ_SEND_1,SMSQ_SEND_2,SMSQ_SEND_3,SMSQ_SEND_4,SMSQ_SEND_5,SMSQ_SEND_6,SMSQ_SEND_7,SMSQ_SEND_8,SMSQ_SEND_9,SMSQ_SEND_10,SMSQ_SEND_11`
 - 서버 `.env`: `packages/backend/.env`에 설정
