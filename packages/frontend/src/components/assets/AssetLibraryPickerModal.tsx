@@ -21,13 +21,19 @@ interface AssetUsage { usedBytes: number; limitBytes: number; planCode: string }
 
 const mb = (n: number) => `${(Number(n) / 1024 / 1024).toFixed(1)}MB`;
 
-export default function AssetLibraryPickerModal({ open, onClose, onPick, multiSelect = false, onPickMany }: {
+export default function AssetLibraryPickerModal({ open, onClose, onPick, multiSelect = false, onPickMany, showKindBadge = false }: {
   open: boolean;
   onClose: () => void;
   onPick: (asset: PickedAsset) => void;
   /** ★ 2026-07-19 P4: 다중 선택 모드 — 클릭=토글, 하단 [N개 선택 완료]가 onPickMany로 반환. 미전달=단일(하위호환). */
   multiSelect?: boolean;
   onPickMany?: (assets: PickedAsset[]) => void;
+  /**
+   * ★ 2026-09-01 AI 생성 이미지 표시(브랜드 메시지) — true면 kind='generated' 타일에 "AI 생성" 배지 +
+   * 하단 안내 한 줄을 띄운다. 미전달 = 기존 호출부 무변화. multiSelect의 체크 표시와 자리가 겹치므로
+   * 배지는 단일 선택 화면(브랜드 편집기)에서만 켠다.
+   */
+  showKindBadge?: boolean;
 }) {
   const [assets, setAssets] = useState<PickedAsset[]>([]);
   const [sel, setSel] = useState<Record<string, PickedAsset>>({});
@@ -167,6 +173,11 @@ export default function AssetLibraryPickerModal({ open, onClose, onPick, multiSe
                       <Check className="w-3 h-3 text-white" />
                     </span>
                   )}
+                  {showKindBadge && !multiSelect && a.kind === 'generated' && (
+                    <span className="absolute top-1.5 left-1.5 text-[9px] font-bold text-white px-1.5 py-0.5 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 pointer-events-none">
+                      AI 생성
+                    </span>
+                  )}
                   <button
                     onClick={() => remove(a.id)}
                     className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white/70 hover:text-rose-300 hover:bg-black/80 hidden group-hover:flex items-center justify-center"
@@ -181,6 +192,13 @@ export default function AssetLibraryPickerModal({ open, onClose, onPick, multiSe
             </div>
           )}
         </div>
+
+        {/* AI 생성 배지 안내 — 배지를 켠 화면(브랜드 편집기)에서만 */}
+        {showKindBadge && !multiSelect && (
+          <div className="px-6 py-3 border-t border-white/10 shrink-0 text-[11px] leading-relaxed text-white/45">
+            <span className="text-violet-300 font-semibold">AI 생성</span> 표시가 있는 이미지를 고르면, 심사 기준에 맞춰 발송 본문 끝에 안내 문구가 자동으로 들어갑니다.
+          </div>
+        )}
 
         {/* 다중 선택 확정 바 */}
         {multiSelect && (

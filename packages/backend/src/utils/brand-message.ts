@@ -35,6 +35,8 @@ import { BRAND_SEND_WINDOW } from '../config/defaults';
 import { query } from '../config/database';
 // ★ 2026-07-03 KAKAO(브랜드메시지) 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
 import { logCampaignTraining } from './training-logger';
+// ★ 2026-09-01 AI 생성 이미지 표시 — cdp_assets.kind 판정 (설계서 docs/2026-09-01-ai-image-notice-design.md)
+import { getAssetByUrl, isAssetsTableMissing, type AssetRow } from './assets';
 
 // ============================================================
 // 상수 정의
@@ -585,6 +587,11 @@ export interface BrandButton {
 export interface BrandImage {
   img_url: string;
   img_link?: string;
+  /**
+   * ★ 2026-09-01 AI 생성 이미지 판정용(전략 A) — 라이브러리에서 고른 cdp_assets.id.
+   * 카카오 전문에는 실리지 않는다(buildAttachmentBody가 img_url·img_link만 투영).
+   */
+  asset_id?: string;
 }
 
 /**
@@ -1419,6 +1426,117 @@ function recordSentTables(campaignId: string | undefined, table: string): void {
   ).catch((e: any) => console.warn(`[brand-message] sentTables 기록 실패(무영향):`, e?.message || e));
 }
 
+// ============================================================
+// ★ 2026-09-01 AI 생성 이미지 표시 (설계서 docs/2026-09-01-ai-image-notice-design.md)
+//   카카오 브랜드 메시지 가이드 4-2: 생성형 AI 소재는 안내 문구/워터마크 의무 — 위반 = 발송 제한.
+//   대상 = cdp_assets.kind='generated'뿐(§4-3 — uploaded에 붙이면 그것이 거짓 표시다.
+//   nukki·variant는 1단계 제외). 배선 = sendBrandMessage 한 곳(§4-4 — 템플릿 경로는
+//   본문을 카카오 등록 템플릿이 소유해 붙일 자리가 없다 §4-4-1).
+// ============================================================
+
+export const BRAND_AI_IMAGE_NOTICE = '*AI로 생성된 이미지입니다';
+
+const OWN_IMAGE_PREFIX = '/api/cdp/inapp/image/';
+
+/** DNS 표기 정규화 — 소문자 + root dot 제거 (★Codex 2R H1: `hanjul.ai.`은 `hanjul.ai`과 같은 호스트다) */
+const normalizeHost = (h: string): string => h.toLowerCase().replace(/\.$/, '');
+
+/** 절대 URL을 자사 서빙 경로로 인정할 호스트 — 기존 base env 규약(HANJUL_BASE_URL·PUBLIC_BASE_URL)에서 파생 */
+function trustedImageHosts(): Set<string> {
+  const hosts = new Set<string>(['hanjul.ai', 'app.hanjul.ai', 'localhost', '127.0.0.1']);
+  for (const v of [process.env.HANJUL_BASE_URL, process.env.PUBLIC_BASE_URL]) {
+    if (!v) continue;
+    try { hosts.add(normalizeHost(new URL(v).hostname)); } catch { /* 잘못된 env 값은 무시 */ }
+  }
+  return hosts;
+}
+
+/**
+ * 우리 공개 서빙 URL을 cdp_assets.url 저장형(상대 경로)으로 정규화. 우리 경로가 아니면 null.
+ * ★Codex 1R H1 — 문자열 중간 매칭(indexOf)은 남의 호스트 URL이나 쿼리 안에 든 경로도
+ * 자사로 오인한다. 상대 경로는 정확한 접두, 절대 URL은 신뢰 호스트 + pathname 접두만 인정한다.
+ * ★Codex 2R H1 — scheme은 http/https만, 호스트는 정규화(normalizeHost) 후 대조한다.
+ */
+function toOwnAssetPath(imgUrl: string): string | null {
+  if (imgUrl.startsWith(OWN_IMAGE_PREFIX)) return imgUrl.split(/[?#]/)[0];
+  try {
+    const u = new URL(imgUrl);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    if (!trustedImageHosts().has(normalizeHost(u.hostname))) return null;
+    if (!u.pathname.startsWith(OWN_IMAGE_PREFIX)) return null;
+    return u.pathname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * AI 생성 이미지 판정 — **판정 대상은 발송 실물(img_url) 하나다.**
+ * ★Codex 1R H1 수용으로 구조 정정: 처음에는 asset_id의 kind를 우선 믿었는데, 그러면 id와 URL을
+ * 엇갈리게 보내는 것만으로 표시를 우회하거나(업로드 id + AI 이미지 URL) 거짓 표시를 만들 수 있었다
+ * (AI id + 업로드 URL). 카카오가 내려받는 것은 img_url이므로 판정 근거도 그 URL의 라이브러리 행이어야
+ * 한다. image.asset_id는 판정에 쓰지 않는다(참고 정보로만 남는다).
+ * ★Codex 2R H1 수용: 자사 서빙 경로인데 행이 없으면 **무조건 거절**한다 — asset_id 유무로 가르던
+ * 초안은 id를 빼는 것만으로 fail-open이 됐다. 행 없음 = 삭제된 에셋(파일은 비파괴 정책으로 계속
+ * 서빙될 수 있다)이거나 다른 회사의 에셋 URL이라, kind를 모른 채 보내면 표시 누락이 될 수 있다.
+ * 외부 URL은 false다(판정 불가 수용 — 모르는 이미지에 AI 표시를 하면 그것이 거짓 표시다).
+ * 조회 오류는 "미표시 발송"으로 접지 않는다 — 이 자리는 차감·적재보다 앞이라 거절해도 돈이 안 움직인다.
+ */
+export async function isBrandImageAiGenerated(
+  companyId: string,
+  image?: { img_url?: string; asset_id?: string } | null,
+): Promise<boolean> {
+  const imgUrl = String(image?.img_url || '').trim();
+  if (!imgUrl) return false;
+  const ownPath = toOwnAssetPath(imgUrl);
+  if (!ownPath) return false;
+
+  let row: AssetRow | null;
+  try {
+    row = await getAssetByUrl(companyId, ownPath);
+  } catch (err: any) {
+    // 테이블 미생성 환경만 false — 그 환경은 등재 자체가 없어 자사 URL + 행 없음이 정상이고
+    // generated 에셋도 존재할 수 없다. 그 외 조회 오류는 fail-closed.
+    if (isAssetsTableMissing(err)) return false;
+    throw new BrandMessageBuildError('이미지 정보를 확인하지 못했습니다. 잠시 후 다시 시도해주세요');
+  }
+  if (!row) {
+    throw new BrandMessageBuildError('첨부한 이미지 정보를 확인할 수 없습니다. 이미지를 다시 선택해주세요');
+  }
+  return row.kind === 'generated';
+}
+
+/**
+ * 안내 문구 부착 — 순수 함수(조립기와 같은 이유로 DB를 보지 않는다).
+ * 초과는 조립기가 아니라 여기서 먼저 사유를 만들어 거절한다(§4-5) — 조립기 오류
+ * ("본문은 최대 76자")는 사용자가 쓰지 않은 글자를 세므로 이유가 안 보인다.
+ * ⛔ 문구를 빼고 발송하는 폴백은 만들지 않는다 — 표시 없이 나가면 이 축의 목적이 사라진다.
+ */
+// 멱등 인정 = 문구가 **말미의 독립 줄**일 때만 (★Codex 1R M2 — includes 판정은 본문 중간의
+// 언급('...입니다 아님' 등)에도 부착을 생략해, 설계가 보장한 말미 안내가 사라진다)
+const NOTICE_TAIL_RE = new RegExp(
+  `(?:^|\\n)${BRAND_AI_IMAGE_NOTICE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
+);
+
+export function appendAiImageNotice(message: string, spec: BrandBubbleSpec): string {
+  if (!message.trim()) return message;                              // 본문 필수 검사를 우회시키지 않는다
+  if (NOTICE_TAIL_RE.test(message.trimEnd())) return message;       // 재발송·저장 본문 중복 방지(§4-3-3)
+  const candidate = `${message}\n${BRAND_AI_IMAGE_NOTICE}`;
+  const overChars = charLen(candidate) - spec.maxMessage;
+  if (overChars > 0) {
+    throw new BrandMessageBuildError(
+      `AI 생성 이미지 안내 문구를 포함하면 본문 글자 수를 넘습니다. 본문을 ${overChars}자 줄여 주세요`
+    );
+  }
+  const overNl = newlineCount(candidate) - spec.maxNewline;
+  if (overNl > 0) {
+    throw new BrandMessageBuildError(
+      `AI 생성 이미지 안내 문구를 포함하면 줄바꿈 수를 넘습니다. 본문 줄바꿈을 ${overNl}개 줄여 주세요`
+    );
+  }
+  return candidate;
+}
+
 /**
  * 자유형 브랜드메시지 발송
  * - validation → 수신거부 필터 → 선불 차감 → SMSQ 배치 INSERT(msg_type='F') → 미적재분 환불
@@ -1434,6 +1552,15 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
   let queuePayload: BrandQueuePayload;
   let fallback: ResolvedBrandFallback;
   try {
+    // ★ 2026-09-01 AI 생성 이미지 안내 문구(§4-4) — 판정·부착은 조립·차감보다 앞.
+    //   대체발송은 아래에서 **원본 본문**으로 확정한다 — 문자 대체본은 카카오 심사 대상이
+    //   아니라 문구를 넣지 않는다(§4-7-①). 보강본은 카카오로 가는 큐 본문에만 쓴다.
+    let message = params.message;
+    if (await isBrandImageAiGenerated(params.companyId, params.image)) {
+      const spec = BUBBLE_TYPES[String(params.bubbleType || '').trim().toUpperCase()];
+      // spec이 없는 유형은 바로 아래 조립기가 미지원으로 거절한다 — 판정을 두 벌 두지 않는다.
+      if (spec) message = appendAiImageNotice(String(params.message || ''), spec);
+    }
     queuePayload = buildBrandQueuePayload({
       typeDef: 'FREE',
       senderKey: params.senderKey,
@@ -1442,7 +1569,7 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
       isAd: params.isAd === true,
       header: params.header,
       additionalContent: params.additionalContent,
-      message: params.message,
+      message,
       unsubscribePhone: params.unsubscribePhone,
       unsubscribeAuth: params.unsubscribeAuth,
       sendAt: params.reservedDate,

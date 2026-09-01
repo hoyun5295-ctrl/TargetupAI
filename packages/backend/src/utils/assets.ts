@@ -12,6 +12,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { query } from '../config/database';
 import { loadPlanContext } from './plan-guard';
 
@@ -124,6 +125,73 @@ export async function getAsset(companyId: string, assetId: string, ownerId?: str
     params,
   );
   return (result.rows[0] as AssetRow) || null;
+}
+
+/**
+ * URL 기준 단건 조회 — 브랜드 메시지 AI 표시 판정의 보조 축 (2026-09-01 AI 이미지 표시 §4-3).
+ * cdp_assets.url은 상대 경로(/api/cdp/inapp/image/{companyId}/{filename})로 저장된다 —
+ * 절대 URL은 호출부가 상대 경로로 정규화해 넘긴다. 정확 일치만 본다(파일명이 uuid라 충돌 없음).
+ */
+export async function getAssetByUrl(companyId: string, url: string): Promise<AssetRow | null> {
+  const result = await query(
+    `SELECT id, company_id, kind, url, filename, bytes, format, origin, prompt, channel_spec, width, height, created_at
+       FROM cdp_assets
+      WHERE company_id = $1::uuid AND url = $2
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [companyId, url],
+  );
+  return (result.rows[0] as AssetRow) || null;
+}
+
+/**
+ * 이미지 실물 저장 + 라이브러리 자동 등재 — 업로드 라우트 공용 (2026-09-01 브랜드 편집기 업로드).
+ * 저장 경로·URL 규약은 인앱 업로드(routes/cdp.ts /inapp/upload-image)와 동일하다 —
+ * 공개 서빙 GET /api/cdp/inapp/image/... 를 그대로 타므로 카카오가 내려받을 수 있다.
+ * ★Codex 1R H2 수용 — 등재 실패를 흡수하지 않는다. 등재 없는 파일은 사용량에도 안 잡히고
+ * 라이브러리에서 지울 수도 없는 고아가 되므로, 파일을 되돌리고 throw한다(업로드 = 저장+등재 원자).
+ */
+export async function storeAssetFile(input: {
+  companyId: string;
+  userId: string;
+  buffer: Buffer;
+  originalName: string;
+  origin: string;
+}): Promise<{ url: string; filename: string; bytes: number; assetId: string }> {
+  const companyDir = path.join(INAPP_IMAGE_BASE, input.companyId);
+  if (!fs.existsSync(companyDir)) fs.mkdirSync(companyDir, { recursive: true });
+  const ext = path.extname(input.originalName).toLowerCase();
+  const filename = `${uuidv4()}${ext}`;
+  const filepath = path.join(companyDir, filename);
+  fs.writeFileSync(filepath, input.buffer);
+  const url = `/api/cdp/inapp/image/${input.companyId}/${filename}`;
+  const assetId = await registerAsset({
+    companyId: input.companyId,
+    createdBy: input.userId,
+    kind: 'uploaded',
+    origin: input.origin,
+    url,
+    filename: input.originalName,
+    bytes: input.buffer.length,
+    format: ext.replace('.', '') || null,
+  });
+  if (!assetId) {
+    // ★Codex 2R M1 부분 수용 — registerAsset은 오류를 null로 축약하므로 "커밋됐는데 응답만 끊긴"
+    //   불확정 결과일 수 있다. 파일을 지우기 전에 행 존재를 재확인하고, 실제로 커밋됐으면 그 행을
+    //   성공으로 돌려준다(행은 남고 파일만 지워지는 깨진 소재 방지). 재확인마저 실패하는 잔여 위험 =
+    //   BUGS B-0901-1 ③.
+    try {
+      const committed = await getAssetByUrl(input.companyId, url);
+      if (committed) return { url, filename, bytes: input.buffer.length, assetId: committed.id };
+    } catch { /* 재확인 불가 — 아래 회수·오류 경로로 */ }
+    try {
+      fs.unlinkSync(filepath);
+    } catch (e: any) {
+      console.warn('[assets] 등재 실패 파일 회수 실패(고아 파일 가능):', filepath, e?.message);
+    }
+    throw new Error('이미지를 라이브러리에 등재하지 못했습니다. 잠시 후 다시 시도해주세요.');
+  }
+  return { url, filename, bytes: input.buffer.length, assetId };
 }
 
 /** 목록 — 최신순, 검색(q = 파일명·프롬프트 부분 일치), 최대 200건.

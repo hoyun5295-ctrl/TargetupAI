@@ -1,7 +1,7 @@
 # AI 생성 이미지 표시 (브랜드 메시지) — 설계서
 
 > **호출어 = "AI 이미지 표시"**
-> 상태 = **설계 확정 · 구현 미착수**(2026-09-01 Harold "설계도 완벽하게, 다음 세션에서 작업").
+> 상태 = **1단계 구현 완료 · 배포 대기**(2026-09-01 Harold 승인: 전략 A + 발송 화면 전면 재설계 병행 · §9).
 > 이 문서 하나만 읽으면 착수 가능하도록 썼다. 코드 위치·판정 규칙·미확정 항목·착수 순서가 전부 여기 있다.
 
 ---
@@ -140,8 +140,7 @@ MMS는 1080px·300KB로 재인코딩한다(`docs/FEATURE-IMAGE-STUDIO.md` §2-6�
 
 ### 4-4. 삽입 지점
 
-**`sendBrandMessage`(`brand-message.ts:1426`)와 `sendBrandMessageTemplate`(1548행)에서
-`buildBrandQueuePayload`를 호출하기 전에 `message`를 보강한다.**
+**`sendBrandMessage`(`brand-message.ts:1426`)에서 `buildBrandQueuePayload`를 호출하기 전에 `message`를 보강한다.**
 
 이유가 있다. `buildBrandQueuePayload`는 **순수 조립 함수**이고 DB를 보지 않는다.
 AI 생성 판정은 `cdp_assets` 조회가 필요하므로, DB를 볼 수 있는 async 발송 함수에서 처리하고
@@ -149,6 +148,43 @@ AI 생성 판정은 `cdp_assets` 조회가 필요하므로, DB를 볼 수 있는
 
 신규 CT는 `utils/brand-message.ts` 안에 두되, 에셋 조회는 기존 `utils/assets.ts`를 재사용한다
 (인라인 SQL 금지 · CLAUDE.md `no_inline_duplication`).
+
+### 4-4-1. ⛔ 템플릿 경로는 본문을 건드릴 수 없다 (구조 제약)
+
+`sendBrandMessageTemplate`(1548행)은 `buildBrandQueuePayload`에 **`message`를 넘기지 않는다**(1568~1591행 실측).
+넘기는 것은 `messageVariableJson`·`couponVariableJson`뿐이다. **본문은 카카오에 등록된 템플릿이 소유**하고
+우리는 변수만 채운다. 즉 **발송 시점에 문구를 덧붙일 자리가 없다.**
+
+⛔ 1단계 배선은 **`sendBrandMessage` 한 곳뿐이다.** 템플릿 경로에 같은 코드를 넣으려 하면 안 된다.
+
+템플릿 경로에서 AI 이미지를 쓰는 경우의 처리는 **미정**이다. 선택지는 둘.
+- 템플릿을 카카오에 등록할 때 본문에 문구를 포함(운영 규칙 · 코드 아님)
+- 변수 슬롯에 문구를 끼워 넣기(템플릿이 그 자리를 갖고 있어야 성립)
+
+참고로 템플릿 경로는 `imageVariableJson`을 **현재 거부한다**(1555행 — "기본형은 본문 변수·쿠폰 변수만 지원").
+이미지는 `params.image`로 첨부되므로 **첨부는 되고 본문만 못 건드리는** 상태다.
+
+### 4-4-2. ⛔ 판정 근거가 약하다 — 편집기가 URL 텍스트 입력이다
+
+`BrandMessageEditor.tsx:406`이 이미지를 **자유 텍스트 URL 입력**으로 받는다.
+라이브러리에서 고르는 UI가 아니다(`<input type="text" value={imageUrl}>`).
+
+그래서 §4-3의 "URL로 `cdp_assets`를 조회한다"가 **그대로는 성립하지 않는다.**
+
+- `cdp_assets.url` = `/api/cdp/inapp/image/{companyId}/{filename}` (상대 경로)
+- 브랜드 메시지 `img_url` = 카카오가 직접 내려받아야 하므로 **외부 접근 가능한 절대 URL**
+- 사용자가 외부 URL을 그대로 붙여넣을 수도 있다
+
+**판정 전략 3안 — 착수 시 하나를 고른다.**
+
+| 안 | 방법 | 장단 |
+|---|---|---|
+| **A (권장)** | 편집기에 **라이브러리 선택 UI 추가** + `assetId`를 함께 전달 | 판정이 확실하다. 프론트 작업이 붙는다 |
+| B | URL **경로 끝(파일명) 기준 매칭** | 코드는 작다. 외부 URL·파일명 충돌에 취약해 오탐·미탐이 남는다 |
+| C | 사용자가 "AI 생성 이미지" 체크 | 추가 입력 요구라 `marketing_user_ux_priority` 위반. **채택 금지** |
+
+⚠ **A를 고르면 이 작업은 백엔드만의 일이 아니다.** 착수 전 Harold 확인 필요.
+B로 시작하고 A로 올리는 것도 가능하나, B 상태에서는 **"판정했다"고 단정하면 안 된다**(미탐이 남는다).
 
 ### 4-5. 길이 초과 처리
 
@@ -168,6 +204,25 @@ AI 생성 이미지 안내 문구를 포함하면 본문 글자 수를 넘습니
 - AI 생성 이미지가 없으면 본문이 **한 글자도 바뀌지 않는다**
 - `uploaded` 이미지만 있으면 붙지 않는다
 - 이미 문구가 있으면 두 번 붙지 않는다
+
+### 4-7. 함께 봐야 하는 경로 (빠뜨리기 쉬운 곳)
+
+**① 대체발송(resend)** — 브랜드 메시지는 미도달 시 문자로 대체 발송된다
+(`resolveBrandFallback` 538행 · `resendMessage`·`resendTitle`).
+카카오 심사 대상이 아니므로 **문자 대체본에는 붙이지 않는다**가 1단계 방침이다.
+⚠ 단 대체발송이 **MMS로 그 이미지를 함께 보내는 경우**라면 AI 기본법 축(§7)에서 다시 봐야 한다.
+착수 시 `resolveBrandFallback`이 이미지를 싣는지 실측할 것.
+
+**② 미리보기** — 편집기 미리보기에 문구가 안 보이면 사용자는 발송 후에야 알게 된다.
+본문 길이 계산도 미리보기 기준으로 하므로, 여기에 반영하지 않으면 §4-5 길이 초과 에러가
+"쓰지도 않은 글자 때문에" 나는 것처럼 보인다. **프론트 반영이 1단계에 포함돼야 한다.**
+
+**③ 테스트 발송** — 테스트도 실제 카카오를 지나므로 **같은 규칙을 적용한다**.
+테스트만 빼면 "테스트는 됐는데 본발송이 막히는" 상태가 된다.
+
+**④ 캐러셀 카드 일부만 AI** — 카드 5장 중 1장만 생성물이면 문구를 붙일지.
+**하나라도 있으면 붙인다**가 방침이다(표시 누락보다 과표시가 안전).
+단 캐러셀 2종은 본문이 0자라 1단계 범위 밖이다(§3).
 
 ---
 
@@ -192,15 +247,41 @@ AI 생성 이미지 안내 문구를 포함하면 본문 글자 수를 넘습니
 
 ## 6. 착수 순서
 
-1. `cdp_assets` 조회 CT 확인 — `utils/assets.ts`에 URL 기준 조회가 있는지. 없으면 거기에 추가(라우트·발송 파일에 인라인 SQL 금지)
-2. 이미지 URL 수집 함수 — `buildAttachmentBody`·`buildCarouselJson`이 소비하는 필드 집합과 **같은 곳**을 본다
-3. 문구 부착 함수 + 길이 초과 판정
-4. `sendBrandMessage`·`sendBrandMessageTemplate` 두 곳에 배선 (⛔ 한 곳만 하면 템플릿 경로가 샌다)
-5. 회귀 테스트 — §4-6 세 조건 + 타입 4종 각각 + 길이 초과 에러
-6. **결함 주입 검출 확인** — 부착 분기를 죽였을 때 테스트가 실제로 깨지는지
-7. 게이트 = backend tsc 0 · vitest 전량 · BUGS/SoT 등재
+**0. 먼저 Harold 확인 — §4-4-2 판정 전략 A/B 중 무엇으로 갈지.** A면 프론트 작업이 범위에 들어온다.
+   이걸 정하지 않고 시작하면 만들어 놓고 다시 만든다.
+
+1. `resolveBrandFallback`(538행)이 대체발송에 **이미지를 싣는지 실측** (§4-7-①의 갈림길)
+2. `cdp_assets` 조회 CT 확인 — `utils/assets.ts`에 URL·id 기준 조회가 있는지. 없으면 거기에 추가
+   (라우트·발송 파일에 인라인 SQL 금지 · `no_inline_duplication`)
+3. 이미지 URL 수집 함수 — `buildAttachmentBody`(1159행)·`buildCarouselJson`(1292행)이 소비하는 필드 집합과 **같은 곳**을 본다
+4. 문구 부착 함수 + 길이 초과 판정 (`charLen` 710행이 세는 방식·`maxNewline` 소모 실측)
+5. **`sendBrandMessage` 한 곳에 배선** (⛔ 템플릿 경로는 구조상 불가 — §4-4-1)
+6. 프론트 미리보기 반영 (§4-7-②)
+7. 회귀 테스트 — §4-6 세 조건 + 본문 있는 타입 4종 각각 + 길이 초과 에러 + `uploaded` 미부착
+8. **결함 주입 검출 확인** — 부착 분기를 죽였을 때 테스트가 실제로 깨지는지
+9. 게이트 = backend tsc 0 · frontend tsc 0 · vitest 전량 · 프론트 production 빌드 · BUGS/SoT 등재
 
 **DDL 0.** `cdp_assets.kind`가 이미 있어 스키마 변경이 없다.
+
+### 6-1. 착수 전 실측할 것 — ★2026-09-01 전량 확정 (구현 세션 실측)
+
+| 무엇 | 확정 결과 |
+|---|---|
+| 판정 전략 A/B | **A 확정**(Harold) + 발송 화면 전면 재설계 병행. 목업 승인 = `docs/mockups/2026-09-01-brand-send-redesign-mockup.html` |
+| 대체발송의 이미지 동반 여부 | **동반 경로 자체가 없다.** `resolveBrandFallback`은 N/A/B만 허용하고 MM(MMS)은 throw. 반환 타입에 이미지 필드도 없다 → §4-7-① 방침(문자 대체본 미부착) 그대로 확정 |
+| `charLen`의 계산 방식 | 코드포인트(`[...s].length`). **`\n`도 1자로 maxMessage에 포함** → 문구 소모 = maxMessage 16자 + maxNewline 1(§4-2의 "줄바꿈 1 + 15자" 표현을 정정) |
+| 본문 0자 타입 실사용 | **구조적 0건 확정.** `BUBBLE_TYPE_OPENED` 게이트가 TEXT·IMAGE·WIDE만 개통(그 외는 조립기가 거부)이라 MySQL 조회 불필요. §5 2단계는 해당 유형 개통 시점에 판단 |
+
+### 6-2. ★2026-09-01 배선 실측 정정 — §6-5 "sendBrandMessage 한 곳"의 실제 커버리지
+
+`buildBrandQueuePayload` 직접 호출부가 sendBrandMessage 밖에 4곳 있다(전수 grep).
+
+| 호출부 | 이미지 | 1단계 문구 |
+|---|---|---|
+| `/brand-send` 자유형 → sendBrandMessage | 가능 | **부착(배선 완료)** |
+| `/brand-send` 기본형 → sendBrandMessageTemplate | 가능 | 구조상 불가(§4-4-1) · 화면이 기본형+AI 이미지 조합에 안내 띄움 |
+| 테스트발송 campaigns.ts:429 | **attachmentJson 자체를 안 실음** | 대상 아님(이미지 없음) |
+| AI캠페인 campaigns.ts:1017 · 직접발송 2374 · 예약청크 direct-send-processor.ts:170 | `kakao_attachment_json` 경유 가능 | **미배선 — 추가 과제**(그 경로에 asset_id 축이 없다. 실사용 실측 후 판단) |
 
 ---
 
@@ -219,11 +300,79 @@ AI 생성 이미지 안내 문구를 포함하면 본문 글자 수를 넘습니
 
 | 무엇 | 어디 |
 |---|---|
-| 브랜드 메시지 조립·발송 CT | `packages/backend/src/utils/brand-message.ts` (BUBBLE_TYPES 156 · sendBrandMessage 1426 · sendBrandMessageTemplate 1548) |
+| 브랜드 메시지 조립·발송 CT | `packages/backend/src/utils/brand-message.ts` (BUBBLE_TYPES 156 · charLen 710 · buildAttachmentBody 1159 · buildCarouselJson 1292 · resolveBrandFallback 538 · **sendBrandMessage 1426** · sendBrandMessageTemplate 1548) |
 | 발송 라우트 호출부 | `packages/backend/src/routes/campaigns.ts:3508` |
+| **편집기(이미지 입력)** | `packages/frontend/src/components/BrandMessageEditor.tsx` (URL 텍스트 입력 406 · image 조립 285) |
 | 이미지 생성 엔진 | `packages/backend/src/utils/image-studio.ts` (`GEMINI_IMAGE_MODEL` 26행) |
 | 이미지 스튜디오 구조 | `docs/FEATURE-IMAGE-STUDIO.md` |
 | 에셋 원장 | `status/SCHEMA.md` `cdp_assets` 절 (2363행~) · CT = `utils/assets.ts` |
 | 발송 시간 창 | `packages/backend/src/config/defaults.ts:216~232` |
 | 규제 현황(AI법·계도기간) | memory `reference_compliance_2026_regulatory_status` |
 | 원본 가이드 | 카카오비즈니스 「브랜드 메시지」 가이드 4-2 · 5절 |
+
+---
+
+## 9. ★2026-09-01 1단계 구현 기록 (전략 A + 화면 전면 재설계)
+
+### 9-1. 백엔드
+
+- `utils/brand-message.ts` — `BRAND_AI_IMAGE_NOTICE`(문구 상수) · `isBrandImageAiGenerated`(판정:
+  **발송 실물 img_url 단일 축** — Codex 1R H1 수용으로 asset_id의 kind를 믿는 초안을 폐기했다.
+  id와 URL을 엇갈리게 보내면 표시 우회/거짓 표시가 됐기 때문. 자사 서빙 경로(상대 = 정확 접두 ·
+  절대 = 신뢰 호스트(HANJUL_BASE_URL·PUBLIC_BASE_URL 파생) + pathname 접두)만 `getAssetByUrl` 정확
+  일치로 조회하고 그 행의 kind가 판정 전부다. asset_id는 "라이브러리에서 골랐다"는 주장으로만 쓴다:
+  주장 + 행 없음 = 거절. 외부 URL = false. 조회 오류 = fail-closed 거절, cdp_assets 미생성 환경만 false)
+  · `appendAiImageNotice`(순수 부착: 빈 본문 무변경 · **말미 독립 줄일 때만 멱등**(1R M2 — includes
+  판정은 본문 중간 언급으로 부착이 생략됐다) · 길이/줄바꿈 사전 판정, 초과 시 몇 자 줄일지 포함 거절,
+  문구 생략 폴백 없음)
+- 배선 = `sendBrandMessage` try 블록 맨 앞(조립·차감 앞). **대체발송(`resolveBrandFallback`)은 원본
+  본문으로 확정** — 문자 대체본에 문구가 새지 않는다(소스 계약 테스트로 고정)
+- `BrandImage.asset_id` 추가 — `buildAttachmentBody`가 img_url·img_link만 투영하므로 카카오 전문에 안 샌다
+- `utils/assets.ts` — `getAssetByUrl`(URL 정확 일치 단건) · `storeAssetFile`(실물 저장 + kind='uploaded' 등재)
+- `routes/assets.ts` — `POST /api/assets/upload` 신설(authenticate만: 브랜드 발송이 요금제 무관이라
+  인앱 업로드의 관리자+유료 게이트를 재사용하면 죽은 버튼이 된다. multer 2MB·확장자/mime 화이트리스트·
+  플랜별 저장 한도)
+- 테스트 = `brand-message.test.ts` 3블록 16건(부착 경계·판정 조합·소스 계약). **결함 주입 검출 확인**:
+  부착 분기를 지우면 소스 계약 테스트가 깨진다(실측). campaigns.message_content는 원본 본문 유지(의도:
+  사용자가 쓴 본문. 발송 실물은 큐 msg_contents가 진실)
+
+### 9-2. 프론트 (승인 목업 기준 전면 재작성)
+
+- `BrandMessageEditor.tsx` — 이미지 입력 3방식(라이브러리 픽커+asset_id / 업로드 / URL 직접 입력),
+  AI 생성 배지, 본문 카운터 +16 반영(코드포인트 계산 `cpLen`으로 backend charLen과 동일 자), 줄바꿈
+  카운터 신설, 사전 차단 사유, 유형 카드 규격 힌트, 접이식 값 요약, 하단 고정 발송 바(수신자·유형·광고·
+  대체·AI 안내 요약), 버튼명 길이 거울(maxBtnName) 신설. **이미지는 이미지 유형에서만 payload에 싣는다**
+  (옛 코드는 유형 전환 후 남은 imageUrl이 TEXT 발송에 따라갔다)
+- `BrandMessagePreview.tsx` — `aiNoticeText` prop: 본문 아래 "자동 추가" 표시와 함께 문구 렌더
+- `AssetLibraryPickerModal.tsx` — `showKindBadge` optional prop(미전달 호출부 무변화): generated 타일에
+  "AI 생성" 배지 + 하단 안내 1줄
+- `BrandSendModal.tsx` — 에디터 래퍼 패딩 제거(발송 바 sticky) + recipientCount 전달
+- 수용한 간극: URL 직접 입력으로 자사 라이브러리 AI 이미지 주소를 붙여넣으면 **백엔드만 부착**(화면
+  미리보기에는 안 보임 · kind 근거가 없어서). 초과 시 백엔드가 사유 있는 오류로 알려준다
+
+### 9-2-1. Codex 적대 리뷰 (1R: high 4 · medium 2)
+
+| 지적 | 처리 |
+|---|---|
+| H1 판정이 asset_id와 실제 img_url을 결합하지 않음 + toOwnAssetPath 중간 매칭 | **수용·구조 정정** — 판정을 발송 실물 URL 단일 축으로(§9-1). 엇갈림 조합·적대 host 테스트 추가 |
+| H2 업로드 fail-open(용량 조회 오류 무시·등재 실패 흡수) | **부분 수용** — 용량 조회 실패 = 503/500 fail-closed, 등재 실패 = 파일 회수 + 오류. 원자적 용량 예약은 불수용(B-0901-1 ②) |
+| H3 기본형 전환 후 숨은 자유형 문안이 대체발송으로 실발송 가능 | **수용** — payload 모드별 투영 + 기본형 대체발송 문안 필수 사전 차단. (옛 편집기부터 있던 결함이 재작성 파일에 승계된 것 — 재작성 범위라 즉시 수정) |
+| H4 늦게 끝난 업로드가 최신 이미지 선택을 덮음 | **수용** — 이미지 소스 세대 가드(imageSeqRef) |
+| M1 업로드 바이트 미검증 | **기록** — [BUGS B-0901-1 ①](../status/BUGS.md) (기존 인앱 라우트와 공통 과제) |
+| M2 본문 중간 문구로 부착 우회 | **수용** — 말미 독립 줄 멱등 판정(백엔드 + 프론트 거울 + 테스트) |
+
+**2R (high 2 · medium 1 · 범위 밖 1) — 라운드 상한 2회로 종결:**
+
+| 지적 | 처리 |
+|---|---|
+| H1a 자사 경로 + 행 없음이 asset_id 생략만으로 fail-open | **수용** — 자사 경로 행 없음 = 무조건 거절(테이블 미생성 환경만 false). asset_id는 판정에서 완전 제외 |
+| H1b trailing-dot 호스트(`hanjul.ai.`) 우회 + scheme 미검증 | **수용** — 호스트 정규화(소문자 + root dot 제거) + http/https 화이트리스트. 회귀 테스트 추가 |
+| M1 등재 실패 보상 삭제가 불확정 커밋을 못 다룸 | **부분 수용** — 파일 삭제 전 행 재확인(커밋이면 성공 반환) + unlink 실패 로그. 잔여 = [BUGS B-0901-1 ③](../status/BUGS.md) |
+| 범위 밖: 기본형 LM 대체발송 제목 공란 미차단 | **정정** — LM 제목 사전 차단을 기본형·자유형 blockReason에 추가(백엔드 거절 문구와 동일 문장) |
+
+### 9-3. 추가 과제 (기록만 · 착수 판단 = Harold)
+
+1. AI캠페인·직접발송 재실행·예약청크 경로(§6-2)의 문구 부착 — `kakao_attachment_json`에 asset_id 축 신설 필요
+2. cdp.ts 인앱 업로드 라우트의 `storeAssetFile` CT 수렴(현재 저장 로직 두 벌)
+3. WIDE 권장 해상도 표기 — 화면은 800×400 안내 유지 중. 매뉴얼 실측값 확인 후 유형별 분기(미검증)
+4. 이미지 스튜디오 산출물에 브랜드 채널 규격(channel_spec) 태그 — 픽커에서 브랜드 적합 이미지 우선 노출

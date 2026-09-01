@@ -19,10 +19,16 @@ interface BrandMessagePreviewProps {
   unsubPhone?: string;
   /** 선택한 발신프로필 이름 — 없으면 자리표시 */
   profileName?: string;
+  /**
+   * ★ 2026-09-01 AI 생성 이미지 안내 문구 — 값이 있으면 본문 아래에 "자동 추가" 표시와 함께 보여준다.
+   * 실제 발송에서는 본문 끝 줄바꿈 뒤에 이 문구가 그대로 붙는다(backend CT-12 appendAiImageNotice).
+   * 문구 텍스트는 편집기가 소유한다 — 여기서 다시 적지 않는다(두 벌 금지).
+   */
+  aiNoticeText?: string;
 }
 
 export default function BrandMessagePreview({
-  bubbleType, message, header, imageUrl, buttons, couponTitle, isAd, unsubPhone, profileName,
+  bubbleType, message, header, imageUrl, buttons, couponTitle, isAd, unsubPhone, profileName, aiNoticeText,
 }: BrandMessagePreviewProps) {
   const hasContent = Boolean(
     (message && message.trim()) || (header && header.trim()) || imageUrl || couponTitle ||
@@ -78,6 +84,16 @@ export default function BrandMessagePreview({
                 {message && (
                   <div className="px-3.5 py-2.5">
                     <div className="text-[13px] leading-relaxed text-slate-800 whitespace-pre-wrap break-words">{message}</div>
+                  </div>
+                )}
+
+                {/* AI 생성 이미지 안내 문구 — 발송 시 본문 끝에 자동으로 붙는 줄을 미리 보여준다 */}
+                {aiNoticeText && message && message.trim() && (
+                  <div className="relative mx-3.5 mb-2.5 rounded-lg bg-violet-50 ring-1 ring-violet-200/70 px-2.5 py-1.5">
+                    <span className="absolute -top-2 right-2 text-[8px] font-bold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 px-1.5 py-px rounded-full">
+                      자동 추가
+                    </span>
+                    <span className="text-[12px] text-slate-600 leading-relaxed">{aiNoticeText}</span>
                   </div>
                 )}
 

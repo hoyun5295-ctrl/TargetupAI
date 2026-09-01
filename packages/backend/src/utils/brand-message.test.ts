@@ -9,6 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import {
   buildBrandQueuePayload,
   buildAttachmentJson,
@@ -16,8 +18,21 @@ import {
   isSupportedBubbleType,
   SUPPORTED_BUBBLE_TYPES,
   BrandMessageBuildError,
+  BUBBLE_TYPES,
+  BRAND_AI_IMAGE_NOTICE,
+  appendAiImageNotice,
+  isBrandImageAiGenerated,
 } from './brand-message';
 import { getDisplayContents, getSendTypeLabel } from './sms-result-map';
+import { getAssetByUrl } from './assets';
+
+// ★ 2026-09-01 AI 생성 이미지 표시 — 판정 CT의 DB 조회만 대역으로 바꾼다.
+//   isAssetsTableMissing 등 나머지는 실물 그대로 둔다(mock이 실제보다 관대해지는 것 금지).
+vi.mock('./assets', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./assets')>();
+  return { ...actual, getAssetByUrl: vi.fn() };
+});
+const getAssetByUrlMock = vi.mocked(getAssetByUrl);
 
 /**
  * sendAt을 창 안(KST 10:00)으로 고정한다 — 조립기가 발송 가능 시간(08:00~20:50)을 판정하므로
@@ -518,5 +533,168 @@ describe('시각 판정은 "실제로 나갈 때"를 기준으로 한다', () =>
   it('여유 밖의 예약은 그대로 통과한다 — 창을 임의로 좁히지 않는다', () => {
     at('2027-08-18T11:00:00Z');   // KST 20:00
     expect(() => buildBrandQueuePayload({ ...FREE_BASE, sendAt: '2027-08-18 20:49:00' })).not.toThrow();
+  });
+});
+
+// ============================================================
+// ★ 2026-09-01 AI 생성 이미지 표시 (설계서 docs/2026-09-01-ai-image-notice-design.md)
+//   카카오 브랜드 메시지 가이드 4-2: AI 생성물은 안내 문구/워터마크 의무 — 위반 = 발송 제한.
+//   판정 = cdp_assets.kind('generated'만) / 부착 = 본문 끝 줄바꿈+문구 / 회귀 0 조건 = §4-6.
+// ============================================================
+
+describe('AI 안내 문구 부착 — appendAiImageNotice (부착·중복·초과)', () => {
+  const IMAGE = BUBBLE_TYPES.IMAGE;   // 1300자 / 줄바꿈 29
+  const WIDE = BUBBLE_TYPES.WIDE;     // 76자 / 줄바꿈 5
+
+  it('본문 끝에 줄바꿈+문구가 붙는다 — 소모 = 코드포인트 16(줄바꿈 포함) + 줄바꿈 1', () => {
+    expect(appendAiImageNotice('본문', IMAGE)).toBe('본문\n' + BRAND_AI_IMAGE_NOTICE);
+    // 문구 소모 실측을 계약으로 고정한다 — 문구를 바꾸면 화면 카운터(+16)도 같이 바꿔야 한다.
+    expect([...('\n' + BRAND_AI_IMAGE_NOTICE)].length).toBe(16);
+  });
+
+  it('이미 문구가 있으면 다시 붙이지 않는다 — 재발송·저장 본문 중복 방지(§4-3-3)', () => {
+    const once = appendAiImageNotice('본문', IMAGE);
+    expect(appendAiImageNotice(once, IMAGE)).toBe(once);
+    // 말미 문구 뒤 개행·공백은 멱등으로 인정한다
+    const withTrailing = `본문\n${BRAND_AI_IMAGE_NOTICE}\n`;
+    expect(appendAiImageNotice(withTrailing, IMAGE)).toBe(withTrailing);
+  });
+
+  it('본문 중간의 문구 언급은 멱등이 아니다 — 말미 독립 줄일 때만 인정(Codex 1R M2)', () => {
+    const midMention = `${BRAND_AI_IMAGE_NOTICE} 아님이라고 주장하는 본문`;
+    expect(appendAiImageNotice(midMention, IMAGE)).toBe(`${midMention}\n${BRAND_AI_IMAGE_NOTICE}`);
+    const suffixed = `본문\n${BRAND_AI_IMAGE_NOTICE} (참고)`;
+    expect(appendAiImageNotice(suffixed, IMAGE)).toBe(`${suffixed}\n${BRAND_AI_IMAGE_NOTICE}`);
+  });
+
+  it('빈 본문에는 붙이지 않는다 — 본문 필수 검사를 문구가 우회시키면 안 된다', () => {
+    expect(appendAiImageNotice('', IMAGE)).toBe('');
+    expect(appendAiImageNotice('   ', IMAGE)).toBe('   ');
+  });
+
+  it('WIDE 경계 — 60자(+16=76)는 통과, 61자는 몇 자 줄일지까지 알려주고 거절(§4-5)', () => {
+    expect(() => appendAiImageNotice('가'.repeat(60), WIDE)).not.toThrow();
+    expect(() => appendAiImageNotice('가'.repeat(61), WIDE)).toThrow(/본문을 1자 줄여/);
+    expect(() => appendAiImageNotice('가'.repeat(70), WIDE)).toThrow(/본문을 10자 줄여/);
+  });
+
+  it('줄바꿈 초과 — WIDE는 문구 몫 1개를 빼면 본문 4개까지다', () => {
+    expect(() => appendAiImageNotice('a\nb\nc\nd\ne', WIDE)).not.toThrow();          // 줄바꿈 4 → +1 = 5
+    expect(() => appendAiImageNotice('a\nb\nc\nd\ne\nf', WIDE)).toThrow(/줄바꿈/);   // 줄바꿈 5 → +1 = 6
+  });
+
+  it('이모지도 코드포인트 1자로 센다 — 조립기 charLen과 같은 자', () => {
+    expect(() => appendAiImageNotice('🙂'.repeat(60), WIDE)).not.toThrow();
+    expect(() => appendAiImageNotice('🙂'.repeat(61), WIDE)).toThrow(BrandMessageBuildError);
+  });
+
+  it('부착 결과는 조립기를 그대로 통과한다 — IMAGE 자유형 끝까지', () => {
+    const msg = appendAiImageNotice('본문', IMAGE);
+    const { msgContents } = buildBrandQueuePayload({
+      ...FREE_BASE, bubbleType: 'IMAGE', message: msg,
+      attachmentJson: buildAttachmentJson({ image: { img_url: 'https://hanjul.ai/api/cdp/inapp/image/c/f.png' } }),
+    });
+    expect(msgContents.endsWith(BRAND_AI_IMAGE_NOTICE)).toBe(true);
+  });
+});
+
+describe('AI 생성 판정 — isBrandImageAiGenerated (발송 실물 URL 단일 축 · fail-closed)', () => {
+  beforeEach(() => { getAssetByUrlMock.mockReset(); });
+
+  const AID = 'a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1';
+  const OWN_REL = '/api/cdp/inapp/image/2b1c3d4e/f0a1.png';
+  const OWN_ABS = `https://hanjul.ai${OWN_REL}`;
+
+  it('이미지가 없으면 false — DB를 보지 않는다(회귀 0 조건 ①)', async () => {
+    await expect(isBrandImageAiGenerated('c1', undefined)).resolves.toBe(false);
+    await expect(isBrandImageAiGenerated('c1', null)).resolves.toBe(false);
+    await expect(isBrandImageAiGenerated('c1', { img_url: '' })).resolves.toBe(false);
+    expect(getAssetByUrlMock).not.toHaveBeenCalled();
+  });
+
+  it('자사 URL의 라이브러리 행 kind가 판정 전부다: generated → true / uploaded·nukki·variant → false (§4-3 ⛔)', async () => {
+    getAssetByUrlMock.mockResolvedValueOnce({ kind: 'generated' } as any);
+    await expect(isBrandImageAiGenerated('c1', { img_url: OWN_ABS, asset_id: AID })).resolves.toBe(true);
+    expect(getAssetByUrlMock).toHaveBeenCalledWith('c1', OWN_REL);
+    for (const kind of ['uploaded', 'nukki', 'variant']) {
+      getAssetByUrlMock.mockResolvedValueOnce({ kind } as any);
+      await expect(isBrandImageAiGenerated('c1', { img_url: OWN_ABS, asset_id: AID })).resolves.toBe(false);
+    }
+  });
+
+  it('asset_id와 URL을 엇갈리게 보내도 판정은 URL 행을 따른다 — 우회·거짓 표시 차단(Codex 1R H1)', async () => {
+    // AI 이미지 URL + 업로드 행 asset_id를 주장해도: URL 행이 generated면 부착된다(우회 불가)
+    getAssetByUrlMock.mockResolvedValueOnce({ kind: 'generated' } as any);
+    await expect(isBrandImageAiGenerated('c1', { img_url: OWN_ABS, asset_id: 'uploaded-row-id-claim' })).resolves.toBe(true);
+    // 업로드 이미지 URL + AI 행 asset_id를 주장해도: URL 행이 uploaded면 붙지 않는다(거짓 표시 불가)
+    getAssetByUrlMock.mockResolvedValueOnce({ kind: 'uploaded' } as any);
+    await expect(isBrandImageAiGenerated('c1', { img_url: OWN_ABS, asset_id: 'generated-row-id-claim' })).resolves.toBe(false);
+  });
+
+  it('자사 경로인데 행이 없으면 asset_id 유무와 무관하게 거절 — 삭제·타사 URL fail-open 차단(Codex 2R H1)', async () => {
+    // 삭제된 에셋은 파일이 비파괴 정책으로 계속 서빙될 수 있다 — kind를 모른 채 보내지 않는다
+    getAssetByUrlMock.mockResolvedValueOnce(null);
+    await expect(isBrandImageAiGenerated('c1', { img_url: OWN_ABS, asset_id: AID }))
+      .rejects.toThrow(/이미지를 다시 선택/);
+    getAssetByUrlMock.mockResolvedValueOnce(null);
+    await expect(isBrandImageAiGenerated('c1', { img_url: OWN_ABS }))
+      .rejects.toThrow(/이미지를 다시 선택/);
+  });
+
+  it('상대 경로는 정확한 접두만, 쿼리·해시는 떼고 대조한다', async () => {
+    getAssetByUrlMock.mockResolvedValueOnce({ kind: 'generated' } as any);
+    await expect(isBrandImageAiGenerated('c1', { img_url: `${OWN_REL}?v=1#x` })).resolves.toBe(true);
+    expect(getAssetByUrlMock).toHaveBeenCalledWith('c1', OWN_REL);
+  });
+
+  it('trailing-dot 호스트는 정규화해 자사로 인정하고, http/https 외 scheme은 거부한다(Codex 2R H1)', async () => {
+    getAssetByUrlMock.mockResolvedValueOnce({ kind: 'generated' } as any);
+    await expect(isBrandImageAiGenerated('c1', { img_url: `https://hanjul.ai.${OWN_REL}` })).resolves.toBe(true);
+    expect(getAssetByUrlMock).toHaveBeenCalledWith('c1', OWN_REL);
+    // scheme 화이트리스트 밖은 자사 판정 자체가 안 된다(외부와 동일 취급)
+    await expect(isBrandImageAiGenerated('c1', { img_url: `ftp://hanjul.ai${OWN_REL}` })).resolves.toBe(false);
+    expect(getAssetByUrlMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('외부 URL·신뢰 밖 호스트·쿼리 속 경로·중간 매칭은 조회 없이 false (Codex 1R H1 강화)', async () => {
+    const notOurs = [
+      'https://cdn.example.invalid/banner.png',
+      `https://evil.example.invalid${OWN_REL}`,          // 남의 호스트 + 자사 모양 경로
+      `https://hanjul.ai/redirect?u=${OWN_REL}`,          // 쿼리 안에 든 경로
+      `x${OWN_REL}`,                                      // 접두가 아닌 중간 매칭
+    ];
+    for (const url of notOurs) {
+      await expect(isBrandImageAiGenerated('c1', { img_url: url })).resolves.toBe(false);
+    }
+    expect(getAssetByUrlMock).not.toHaveBeenCalled();
+  });
+
+  it('조회 오류를 "미표시 발송"으로 접지 않는다 — 사유 있는 거절(차감 전이라 돈 무영향)', async () => {
+    getAssetByUrlMock.mockRejectedValueOnce(new Error('connection refused'));
+    await expect(isBrandImageAiGenerated('c1', { img_url: OWN_REL, asset_id: AID }))
+      .rejects.toThrow(/이미지 정보를 확인하지 못했습니다/);
+  });
+
+  it('cdp_assets 미생성 환경의 판정은 false — generated가 존재할 수 없는 환경', async () => {
+    getAssetByUrlMock.mockRejectedValueOnce(new Error('relation "cdp_assets" does not exist'));
+    await expect(isBrandImageAiGenerated('c1', { img_url: OWN_REL })).resolves.toBe(false);
+  });
+});
+
+describe('배선 계약 — sendBrandMessage가 부착을 소유한다 (소스 계약 · 결함 주입 검출)', () => {
+  const src = readFileSync(resolve(__dirname, './brand-message.ts'), 'utf8');
+  const start = src.indexOf('export async function sendBrandMessage(');
+  const end = src.indexOf('export async function sendBrandMessageTemplate(');
+  const fn = src.slice(start, end);
+
+  it('자유형 발송은 조립 전에 판정·부착을 지난다 — 부착 분기를 지우면 여기가 깨진다', () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(fn).toContain('isBrandImageAiGenerated(');
+    expect(fn).toContain('appendAiImageNotice(');
+    expect(fn.indexOf('isBrandImageAiGenerated(')).toBeLessThan(fn.indexOf('buildBrandQueuePayload('));
+  });
+
+  it('대체발송은 원본 본문으로 확정한다 — 문자 대체본에 안내 문구가 새지 않는다(§4-7-①)', () => {
+    expect(fn).toMatch(/originalMessage:\s*params\.message/);
   });
 });

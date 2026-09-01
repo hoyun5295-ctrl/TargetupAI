@@ -471,19 +471,20 @@ export default function BrandSendModal({
       aside={aside}
       maxW="max-w-7xl"
     >
-      {/* 우측 — 메시지 (기존 에디터 재사용. 새로 만들면 두 벌이 되고 반드시 갈라진다) */}
-      <div className="p-5 sm:p-6">
-        <BrandMessageEditor
-          profiles={profiles}
-          sending={!!sending}
-          accent={accent}
-          onSend={(payload: any) => {
-            if (!canSend) return;
-            // 바로 보내지 않는다 — 건수를 보여주고 확인을 받는다(문자·알림톡과 같은 계약)
-            setPending(payload);
-          }}
-        />
-      </div>
+      {/* 우측 — 메시지 (기존 에디터 재사용. 새로 만들면 두 벌이 되고 반드시 갈라진다)
+          ★2026-09-01 패딩 래퍼 제거 — 에디터가 자기 패딩과 하단 고정 발송 바(sticky)를 소유한다.
+          여기서 패딩을 두르면 발송 바가 스크롤 바닥에서 떠 보인다. */}
+      <BrandMessageEditor
+        profiles={profiles}
+        sending={!!sending}
+        accent={accent}
+        recipientCount={phones.length}
+        onSend={(payload: any) => {
+          if (!canSend) return;
+          // 바로 보내지 않는다 — 건수를 보여주고 확인을 받는다(문자·알림톡과 같은 계약)
+          setPending(payload);
+        }}
+      />
 
       <ConfirmDialogShell
         show={!!pending}
