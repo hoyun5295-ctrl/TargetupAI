@@ -182,7 +182,12 @@ function renderHeader(p: HeaderProps, b: EmailBrand, ctx: EmailRenderCtx): strin
   const logoH = p.logo_size === 'sm' ? '24' : p.logo_size === 'lg' ? '48' : '32';
   const brandFs = p.brand_size === 'sm' ? b.type.small.size : p.brand_size === 'lg' ? b.type.h1.size : b.type.h3.size;
   const logoTag = logo ? `<img src="${esc(logo)}" alt="${brand}" height="${logoH}" style="height:${logoH}px;display:inline-block;vertical-align:middle;border:0">` : '';
-  const brandTag = brand ? `<span style="font-family:${b.displayFont};font-size:${brandFs};font-weight:700;color:${b.text};vertical-align:middle;margin-left:${logo ? b.sp[2] : '0'}">${brand}</span>` : '';
+  // ★ 2026-08-31 (임은지 접수 cmtgt4pgm0543jnot7j7j02xu) 브랜드명 색이 테마 본문색으로 **고정**돼 있어
+  //   편집기의 "브랜드명 색"이 이메일에서만 죽어 있었다(DM 렌더러는 같은 값을 읽는다 · dm-section-renderer 127행).
+  //   편집 패널을 DM과 공유하는 구조라, 이메일 렌더러가 안 읽으면 칸은 보이는데 조용히 무시된다.
+  // ⛔ 미지정이면 옛 값(b.text) 그대로 — 기존 캠페인 출력이 한 글자도 바뀌지 않는다(회귀 0).
+  const brandColor = p.title_color ? esc(p.title_color) : b.text;
+  const brandTag = brand ? `<span style="font-family:${b.displayFont};font-size:${brandFs};font-weight:700;color:${brandColor};vertical-align:middle;margin-left:${logo ? b.sp[2] : '0'}">${brand}</span>` : '';
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};text-align:${align};border-bottom:1px solid ${b.border}">${logoTag}${brandTag}</td></tr>`;
 }
 
@@ -233,6 +238,21 @@ function renderButton(btn: CtaButton, b: EmailBrand, invert = false): string {
   if (btn.style === 'secondary') { bg = b.accent; bgImage = 'none'; border = b.accent; shadow = '0 2px 8px rgba(15,23,42,0.12)'; vmlFill = b.accent; }
   else if (btn.style === 'outline') { bg = b.cardBg; bgImage = 'none'; color = b.primary; shadow = 'none'; vmlFill = b.cardBg; vmlStroke = b.primary; }
   if (invert) { bg = '#ffffff'; bgImage = 'none'; color = b.primary; border = '#ffffff'; shadow = 'none'; vmlFill = '#ffffff'; vmlStroke = ''; }
+  // ★ 2026-08-31 (임은지 접수 cmtgtxqdj054jjnot99virpq9) 편집기의 버튼별 "버튼색"이 이메일에서만 죽어 있었다 —
+  //   이 함수가 btn.color를 한 번도 읽지 않아 스타일 3종 어디서도 지정색이 나가지 않았다(접수 원문).
+  //   규칙은 DM `ctaBtnColorStyle`(dm-section-renderer 440행)과 **같은 한 벌**이다 — 다르게 두면 편집 미리보기와
+  //   실제 메일이 갈린다. outline = 테두리·글씨색만, 그 외 = 배경색 + 흰 글씨.
+  // ⛔ 지정색은 구도 반전(bar의 흰 버튼)보다 뒤에 적용한다. 사람이 고른 색이 자동 반전보다 우선이다.
+  // ⛔ VML(아웃룩 데스크탑)도 같이 바꾼다 — 빠뜨리면 아웃룩에서만 옛 색이 나가 "일부 수신자만 색이 다르다"가 된다.
+  const customColor = typeof btn.color === 'string' && btn.color.trim() ? esc(btn.color.trim()) : '';
+  if (customColor) {
+    if (btn.style === 'outline') {
+      border = customColor; color = customColor; vmlStroke = customColor;
+    } else {
+      bg = customColor; bgImage = 'none'; border = customColor; color = '#ffffff';
+      vmlFill = customColor; vmlStroke = '';
+    }
+  }
   const vml = `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${esc(url)}" style="height:46px;v-text-anchor:middle;width:230px" arcsize="30%" fillcolor="${vmlFill}" ${vmlStroke ? `strokecolor="${vmlStroke}"` : 'stroke="f"'}><w:anchorlock/><center style="color:${color};font-family:sans-serif;font-size:15px;font-weight:800">${esc(btn.label)}</center></v:roundrect><![endif]-->`;
   const htmlBtn = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr><td style="border-radius:14px;background:${bg};background-image:${bgImage};border:1px solid ${border};box-shadow:${shadow}"><a href="${esc(url)}" style="display:inline-block;padding:14px 34px;font-size:${b.type.body.size};font-weight:800;letter-spacing:-0.01em;color:${color};text-decoration:none">${esc(btn.label)}</a></td></tr></table>`;
   return `${vml}<!--[if !mso]><!-->${htmlBtn}<!--<![endif]-->`;

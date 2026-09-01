@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { renderEmailSections } from '../email-section-renderer';
-import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS } from '../email-property-contract';
+import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS, EMAIL_HEADER_PROPS, EMAIL_CTA_BUTTON_PROPS, EMAIL_CTA_BUTTON_STYLES } from '../email-property-contract';
 import type { Section } from '../../dm/dm-section-registry';
 
 const PRODUCTS = [
@@ -194,5 +194,69 @@ describe('캠페인 디자인 서체 — 지정하면 발송 HTML에 실린다',
     expect(base).not.toContain('/api/dm/v/fonts.css');
     expect(styled, '자가호스팅 서체 @import가 빠지면 수신함에서 기본 글꼴로 떨어진다').toContain('/api/dm/v/fonts.css');
     expect(styled).toContain('@import url(');
+  });
+});
+
+// ── 헤더 브랜드명 색 (2026-08-31 임은지 접수 cmtgt4pgm0543jnot7j7j02xu) ──
+describe('헤더 — 브랜드명 색이 이메일 발송 HTML에 반영된다', () => {
+  const header = (props: Record<string, unknown>): Section =>
+    ({ id: 's-hd', type: 'header', order: 0, visible: true,
+       props: { variant: 'logo', brand_name: '톤28', show_brand_name: true, ...props } } as unknown as Section);
+  const rh = (props: Record<string, unknown>) => renderEmailSections([header(props)], {});
+
+  for (const { prop, desc, probe } of EMAIL_HEADER_PROPS) {
+    it(`${prop} (${desc}) — 지정 값이 실제 출력에 실린다`, () => {
+      const base = rh({});
+      const painted = rh({ [prop]: probe });
+      expect(painted, `${prop}가 이메일 렌더러에서 소비되지 않는다`).not.toBe(base);
+      expect(painted, '지정한 색 자체가 출력에 있어야 한다').toContain(String(probe));
+    });
+  }
+
+  it('색 미지정이면 옛 출력 그대로다 (기존 캠페인 회귀 0)', () => {
+    expect(rh({ title_color: undefined })).toBe(rh({}));
+  });
+
+  it('로고만 쓰는 구도(브랜드명 숨김)에서는 색 지정이 출력을 바꾸지 않는다', () => {
+    const noBrand = { show_brand_name: false, brand_name: '' };
+    expect(rh({ ...noBrand, title_color: '#c2185b' })).toBe(rh(noBrand));
+  });
+});
+
+// ── CTA 버튼색 (2026-08-31 임은지 접수 cmtgtxqdj054jjnot99virpq9) ──
+describe('CTA — 버튼색이 스타일 3종 전부에서 반영된다', () => {
+  const cta = (btn: Record<string, unknown>, treatment?: string): Section =>
+    ({ id: 's-cta', type: 'cta', order: 0, visible: true, treatment,
+       props: { buttons: [{ label: '자세히 보기', url: 'https://ex.com/a', ...btn }] } } as unknown as Section);
+  const rc = (btn: Record<string, unknown>, treatment?: string) => renderEmailSections([cta(btn, treatment)], {});
+
+  for (const style of EMAIL_CTA_BUTTON_STYLES) {
+    for (const { prop, desc, probe } of EMAIL_CTA_BUTTON_PROPS) {
+      it(`[${style}] ${prop} (${desc}) — 지정 값이 실제 출력에 실린다`, () => {
+        const base = rc({ style });
+        const painted = rc({ style, [prop]: probe });
+        expect(painted, `[${style}]에서 ${prop}가 소비되지 않는다`).not.toBe(base);
+        expect(painted, '지정한 색 자체가 출력에 있어야 한다').toContain(String(probe));
+      });
+    }
+
+    it(`[${style}] 색 미지정이면 옛 출력 그대로다 (회귀 0)`, () => {
+      expect(rc({ style, color: undefined })).toBe(rc({ style }));
+    });
+
+    it(`[${style}] 아웃룩(VML)에도 같은 색이 실린다 — 일부 수신자만 옛 색이 나가지 않게`, () => {
+      const painted = rc({ style, color: '#0f766e' });
+      const mso = painted.slice(painted.indexOf('<!--[if mso]>'), painted.indexOf('<![endif]-->'));
+      expect(mso, 'VML 구간에 지정색이 없으면 아웃룩에서만 색이 다르다').toContain('#0f766e');
+    });
+  }
+
+  it('구도 ghost(전 버튼 아웃라인)에서도 지정색이 반영된다', () => {
+    expect(rc({ style: 'primary', color: '#0f766e' }, 'ghost')).toContain('#0f766e');
+  });
+
+  it('구도 bar(반전 흰 버튼)에서 사람이 고른 색이 자동 반전보다 우선한다', () => {
+    const painted = rc({ style: 'primary', color: '#0f766e' }, 'bar');
+    expect(painted).toContain('#0f766e');
   });
 });

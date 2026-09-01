@@ -62,3 +62,21 @@ export const EMAIL_DESIGN_PROPS: Array<{ prop: string; desc: string; probe: stri
   { prop: 'font_family', desc: '본문 서체 (미지정 = 브랜드킷 → 기본)', probe: '"Noto Serif KR", serif' },
   { prop: 'font_display', desc: '제목 서체 (미지정 = 본문 서체)', probe: '"Black Han Sans", sans-serif' },
 ];
+
+/** 헤더 — 로고 구도에서 브랜드명에 걸리는 지정값.
+ *  ★ 2026-08-31 임은지 접수(`cmtgt4pgm0543jnot7j7j02xu`) "브랜드명 색을 바꿔도 검은색 고정" —
+ *  렌더러가 테마 본문색을 리터럴로 박아 두고 `title_color`를 읽지 않았다. DM은 같은 값을 읽고 있었다. */
+export const EMAIL_HEADER_PROPS: Array<{ prop: string; desc: string; probe: unknown }> = [
+  { prop: 'title_color', desc: '브랜드명 색 (미지정 = 테마 본문색)', probe: '#c2185b' },
+];
+
+/** CTA 버튼 — **버튼 배열 안의** 지정값이라 섹션 prop과 형태가 다르다(그래서 표를 나눴다).
+ *  ★ 2026-08-31 임은지 접수(`cmtgtxqdj054jjnot99virpq9`) "스타일 3가지 어디서도 버튼색이 안 먹는다" —
+ *  `renderButton`이 `color`를 한 번도 참조하지 않았다. 규칙은 DM `ctaBtnColorStyle`과 같은 한 벌이다.
+ *  ⛔ 스타일 3종 전부에서 반영돼야 한다 — 하나라도 빠지면 "스타일을 바꾸면 색이 사라진다"가 된다. */
+export const EMAIL_CTA_BUTTON_PROPS: Array<{ prop: string; desc: string; probe: unknown }> = [
+  { prop: 'color', desc: '버튼 색 (미지정 = 스타일 기본색 · outline은 테두리·글씨, 그 외는 배경)', probe: '#0f766e' },
+];
+
+/** CTA 버튼 스타일 = 이 셋 전부에서 지정색이 반영돼야 한다(편집기 Select의 값과 같아야 한다). */
+export const EMAIL_CTA_BUTTON_STYLES = ['primary', 'secondary', 'outline'] as const;
