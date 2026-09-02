@@ -1568,6 +1568,12 @@ const doSyncMappingSend = async (mapping: any) => {
       body: JSON.stringify({ type: 'update_config', mapping }),
     });
     const data = await res.json();
+    // ★2026-09-02 매핑 검증 실패는 사유를 줄줄이 보여준다 — "무엇이 틀렸는지"를 모르면 담당자가 고칠 수 없다.
+    //   서버가 잘못된 필드·빠진 필수 필드를 issues로 내려준다(BUGS B-0902-4 · 구매 98,600건 전량 드롭).
+    if (!res.ok && Array.isArray(data?.issues) && data.issues.length > 0) {
+      const lines = data.issues.map((it: any) => `· ${it.message}`).join('\n');
+      throw new Error(`${data.error || '매핑을 저장할 수 없습니다.'}\n\n${lines}`);
+    }
     if (!res.ok) throw new Error(data.error || '매핑 전송 실패');
     setShowSyncMappingModal(false);
     showAlert('성공', `매핑이 전송되었습니다. Agent가 다음 heartbeat(최대 60분)에 매핑을 갱신하고 바뀐 대상만 전체 재동기화합니다.${syncMapAckSupported ? '\n적용 결과는 상세 화면의 "명령 결과"에서 확인할 수 있습니다.' : ''}`, 'success');
@@ -1598,6 +1604,10 @@ const handleSyncMappingDryRun = async () => {
       body: JSON.stringify({ type: 'mapping_dryrun', mapping }),
     });
     const data = await res.json();
+    // 매핑 검증 사유도 그대로 보여준다(저장 경로와 같은 형태).
+    if (!res.ok && Array.isArray(data?.issues) && data.issues.length > 0) {
+      throw new Error(`${data.error || '매핑을 확인해 주세요.'}\n\n${data.issues.map((it: any) => `· ${it.message}`).join('\n')}`);
+    }
     if (!res.ok) throw new Error(data.error || 'dry-run 전송 실패');
     showAlert('전송됨', '매핑 미리보기(dry-run) 명령을 보냈습니다. 결과는 상세 화면의 "명령 결과"에 도착합니다(에이전트 응답 주기에 따라 수 분 소요). 저장·적용은 일어나지 않습니다.', 'success');
   } catch (e: any) {

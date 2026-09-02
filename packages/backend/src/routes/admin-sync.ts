@@ -15,6 +15,8 @@ import { query } from '../config/database';
 import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, buildReleaseDownloadUrl, isPackageKeyVerified, PlatformId } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리: 진단 명령 버전 게이트 (v1.6.1+ ACK 전용)
 import { isAgentVersionGte, ACK_MIN_AGENT_VERSION } from '../utils/agent-protocol';
+// ★ 2026-09-02 매핑 계약 — 대상별 허용 필드·필수 필드 검증 CT
+import { validateSyncMapping } from '../utils/sync-mapping-fields';
 import path from 'path';
 import fs from 'fs';
 
@@ -401,6 +403,24 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
         return res.status(400).json({
           success: false,
           error: 'mapping_dryrun에는 customers/purchases 중 하나 이상의 mapping이 필요합니다.'
+        });
+      }
+    }
+
+    // ★ 2026-09-02 매핑 값 검증 — 지금까지는 "mapping 객체가 있는가"만 보고 값은 한 번도 안 봤다.
+    //   그래서 아난티 구매 매핑이 고객 필드(phone·recent_purchase_date)로 채워진 채 저장됐고,
+    //   에이전트가 customer_phone·purchase_date를 못 찾아 98,600건을 통째로 버렸다(성공 0 · BUGS B-0902-4).
+    //   ⛔ 에이전트는 대상 단위로 매핑을 **통째 교체**하므로, 보낸 대상은 그것만으로 완결이어야 한다
+    //      → update_config는 필수 필드까지 본다(requireAll).
+    //   dryrun은 "이 매핑이 맞는지 보려는" 진단이라 필수 누락으로 막지 않는다(잘못된 필드만 거절).
+    if (type === 'update_config' || type === 'mapping_dryrun') {
+      const issues = validateSyncMapping(mapping || {}, { requireAll: type === 'update_config' });
+      if (issues.length > 0) {
+        return res.status(400).json({
+          success: false,
+          code: 'SYNC_MAPPING_INVALID',
+          error: `매핑을 저장할 수 없습니다. ${issues.length}건을 고쳐 주세요.`,
+          issues: issues.map((i) => ({ target: i.target, kind: i.kind, message: i.message })),
         });
       }
     }
