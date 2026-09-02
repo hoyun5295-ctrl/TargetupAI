@@ -30,10 +30,28 @@ export const SYNC_CUSTOMER_TARGET_FIELDS: string[] = [
   'total_purchase_amount', 'purchase_count', ...SYNC_CUSTOM_SLOTS,
 ];
 
+/**
+ * 구매 필드 설명표 — 목록과 뜻을 한자리에 둔다.
+ * ★ AI 매핑 프롬프트(`ai-mapping.ts`)가 이 표로 "구매 테이블에는 이 필드들이 있다"를 알려 준다.
+ *   종전에는 대상과 무관하게 **고객 필드 목록만** 줬고, 그래서 AI가 구매 테이블에도
+ *   `phone`·`recent_purchase_date`를 골랐다(아난티 매핑이 정확히 그 결과 · BUGS B-0902-4).
+ *   AI가 고를 수 없는 필드는 매핑에 나타날 수 없다 — 목록이 곧 게이트다.
+ */
+export const SYNC_PURCHASE_FIELD_GUIDE: Array<{ key: string; label: string; hint?: string }> = [
+  { key: 'customer_phone', label: '고객 전화번호', hint: '필수. 이 값이 없으면 그 구매 행은 통째로 버려진다' },
+  { key: 'purchase_date', label: '구매일시', hint: '필수. 날짜 또는 날짜시각' },
+  { key: 'total_amount', label: '결제 금액', hint: '그 건의 총액' },
+  { key: 'quantity', label: '수량' },
+  { key: 'store_code', label: '매장 코드' },
+  { key: 'store_name', label: '매장명' },
+  { key: 'product_code', label: '상품 코드' },
+  { key: 'product_name', label: '상품명' },
+  { key: 'unit_price', label: '단가' },
+];
+
 /** 구매 동기화에서 소스 컬럼이 갈 수 있는 표준 필드 */
 export const SYNC_PURCHASE_TARGET_FIELDS: string[] = [
-  'customer_phone', 'purchase_date', 'total_amount', 'quantity',
-  'store_code', 'store_name', 'product_code', 'product_name', 'unit_price', ...SYNC_CUSTOM_SLOTS,
+  ...SYNC_PURCHASE_FIELD_GUIDE.map((f) => f.key), ...SYNC_CUSTOM_SLOTS,
 ];
 
 /**

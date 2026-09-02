@@ -20,6 +20,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
 import { FIELD_MAP } from './standard-field-map';
 import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
+// ★2026-09-02 대상별 허용 필드 = 매핑 계약 CT(저장 검증과 같은 표를 본다)
+import { SYNC_PURCHASE_FIELD_GUIDE, SYNC_PURCHASE_TARGET_FIELDS } from './sync-mapping-fields';
 
 // ============================================================
 // 환경변수 / 모델
@@ -154,6 +156,40 @@ async function incrementQuota(companyId: string): Promise<void> {
  * Anthropic 프롬프트 캐싱: 5분 TTL, 1024 토큰 이상 필요.
  * FIELD_MAP 36개 필드 설명만으로도 1024토큰은 충분히 넘음.
  */
+/**
+ * ★ 2026-09-02 구매 대상 전용 필드표 — 종전에는 대상과 무관하게 아래 고객 필드표만 줬다.
+ *   그래서 구매 테이블을 매핑해도 AI가 고를 수 있는 것이 `phone`·`recent_purchase_date`뿐이었고,
+ *   아난티 구매 매핑이 통째로 고객 필드로 채워져 98,600건이 전량 드롭됐다(BUGS B-0902-4).
+ *   AI는 주어진 목록 밖을 고를 수 없다 — **목록이 곧 게이트다.**
+ *   목록의 단일 진실 = `sync-mapping-fields.ts`(저장 시 검증도 같은 표를 쓴다).
+ */
+function buildPurchaseFieldReference(): string {
+  const lines: string[] = [];
+  lines.push('한줄로 구매(purchases) 표준 필드 정의:');
+  lines.push('');
+  for (const f of SYNC_PURCHASE_FIELD_GUIDE) {
+    lines.push(`- ${f.key}: ${f.label}${f.hint ? ` (${f.hint})` : ''}`);
+  }
+  lines.push('- custom_1 ~ custom_15: 커스텀 슬롯 (위 필드에 해당 없는 데이터용, 최대 15개)');
+  lines.push('');
+  lines.push('매핑 규칙:');
+  lines.push('1. 이 표는 **구매 내역 테이블** 전용이다. 고객 필드(phone, name, birth_date, recent_purchase_date,');
+  lines.push('   total_purchase_amount 등)는 여기서 쓸 수 없다. 비슷해 보여도 고르지 마라.');
+  lines.push('2. 고객 전화번호는 phone이 아니라 **customer_phone**이다.');
+  lines.push('3. 구매일은 recent_purchase_date가 아니라 **purchase_date**다.');
+  lines.push('4. 그 건의 결제 금액은 total_purchase_amount(고객 누적)가 아니라 **total_amount**다.');
+  lines.push('5. customer_phone과 purchase_date는 반드시 매핑한다. 둘 중 하나라도 없으면 전량 적재 실패다.');
+  lines.push('6. 위 필드에 해당 안 되면 custom_1부터 순서대로 (최대 custom_15까지).');
+  lines.push('7. 시스템 컬럼(created_at, updated_at, is_active, 순번 등)은 null.');
+  lines.push('');
+  lines.push('응답 형식: JSON만 (설명 없이)');
+  lines.push('{"소스컬럼명": "field_key 또는 null", ...}');
+  lines.push('');
+  lines.push('예시: {"TRAN_TEL": "customer_phone", "TRAN_ADAT": "purchase_date", "TRAN_TOT": "total_amount", "TRAN_GNAME": "product_name", "TRAN_SEQ": null}');
+  lines.push('⚠️ 반드시 field_key 영문만. 한글 설명 금지.');
+  return lines.join('\n');
+}
+
 function buildFieldMapReference(): string {
   const lines: string[] = [];
   lines.push('한줄로 표준 필드 정의 (36개 필드 = 직접 컬럼 21개 + 커스텀 15개):');
@@ -215,7 +251,10 @@ interface RawCallResult {
 }
 
 async function callClaudeModel(modelId: string, input: AiMappingInput): Promise<RawCallResult> {
-  const systemBlock = buildFieldMapReference();
+  // ★2026-09-02 대상별로 필드표를 가른다 — 구매에 고객 필드표를 주면 AI가 그것밖에 못 고른다.
+  const systemBlock = input.target === 'purchases'
+    ? buildPurchaseFieldReference()
+    : buildFieldMapReference();
   const userPrompt = buildUserPrompt(input);
 
   // ★ 2026-07-06 적응형 사고 게이팅 — Sonnet 5·Opus 4.7/4.8은 thinking 생략 시 자동 ON.
@@ -270,13 +309,21 @@ function parseMappingJson(text: string): Record<string, string | null> {
 /** 매핑 결과 정리: 유효 field_key만 남기고 중복 제거 + custom_1~15 순서 재배정. */
 function sanitizeMapping(
   mapping: Record<string, string | null>,
-  columns: string[]
+  columns: string[],
+  target: MappingTarget = 'customers'
 ): Record<string, string | null> {
-  const validKeys = new Set([
-    ...FIELD_MAP.filter((f) => f.storageType === 'column').map((f) => f.fieldKey),
-    ...Array.from({ length: 15 }, (_, i) => `custom_${i + 1}`),
-    'birth_year', // 파생 필드 허용 (upload.ts와 동일)
-  ]);
+  // ★2026-09-02 대상별 허용 키 — 종전에는 고객 필드로 고정이라, 구매 매핑에서 AI가 customer_phone을
+  //   제대로 골라도 여기서 유효하지 않은 키로 보고 null로 버렸다(프롬프트만 고쳐서는 안 되는 이유).
+  //   구매 목록의 단일 진실 = sync-mapping-fields.ts(저장 검증과 같은 표).
+  const validKeys = new Set(
+    target === 'purchases'
+      ? SYNC_PURCHASE_TARGET_FIELDS
+      : [
+          ...FIELD_MAP.filter((f) => f.storageType === 'column').map((f) => f.fieldKey),
+          ...Array.from({ length: 15 }, (_, i) => `custom_${i + 1}`),
+          'birth_year', // 파생 필드 허용 (upload.ts와 동일)
+        ]
+  );
 
   // 1단계: 요청한 columns 순서로 재구성 + 유효성 검증
   const result: Record<string, string | null> = {};
@@ -394,7 +441,7 @@ export async function callAiMapping(
   if (Object.keys(rawMapping).length === 0) {
     console.warn('[AI Mapping] 응답 JSON 파싱 실패 — 전체 null 매핑 반환');
   }
-  const mapping = sanitizeMapping(rawMapping, input.columns);
+  const mapping = sanitizeMapping(rawMapping, input.columns, input.target);
 
   // 쿼터 증가 (성공 시에만)
   await incrementQuota(companyId);
