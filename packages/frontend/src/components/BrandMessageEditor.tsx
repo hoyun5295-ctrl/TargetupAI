@@ -8,7 +8,8 @@
  * (`utils/brand-message.ts` buildBrandQueuePayload)다 — 규격 값을 고칠 땐 양쪽을 같이 고친다.
  *
  * ★ 2026-09-01 전면 재작성 (Harold 승인 목업 = docs/mockups/2026-09-01-brand-send-redesign-mockup.html)
- *   ①이미지 입력 3방식: 자유 URL 한 칸 → 라이브러리 선택(공용 픽커) + 파일 업로드 + URL 직접 입력.
+ *   ①이미지 입력: 라이브러리 선택(공용 픽커) + 파일 업로드. (URL 직접 입력은 2026-09-02 제거 —
+ *     카카오는 콘텐츠 서버 업로드본만 받는다. 서버가 발송 직전 올려 준다 = brand-image-resolver)
  *     라이브러리 선택은 `asset_id`를 payload에 함께 실어 백엔드가 AI 생성 여부를 판정한다(전략 A).
  *   ②AI 생성 이미지 표시: kind='generated' 이미지를 고르면 발송 시 본문 끝에
  *     `*AI로 생성된 이미지입니다`가 자동으로 붙는다(카카오 브랜드 메시지 가이드 4-2 · 백엔드 CT-12가
@@ -21,7 +22,7 @@
 import { useRef, useState } from 'react';
 import {
   Image as ImageIcon, PanelTop, Plus, X, Ticket, MessageSquareReply, Ban, Loader2, Send,
-  FolderOpen, Upload, Link2, Sparkles, ChevronDown,
+  FolderOpen, Upload, Sparkles, ChevronDown,
 } from 'lucide-react';
 import BrandMessagePreview from './BrandMessagePreview';
 import AssetLibraryPickerModal, { type PickedAsset } from './assets/AssetLibraryPickerModal';
@@ -208,7 +209,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
   const [imageAssetId, setImageAssetId] = useState('');
   const [imageKind, setImageKind] = useState('');       // 'generated' | 'uploaded' | ... | ''(출처 모름)
   const [imageName, setImageName] = useState('');       // 표시용 파일명
-  const [showUrlInput, setShowUrlInput] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [imageError, setImageError] = useState('');
@@ -371,7 +371,9 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
     setButtons(buttons.map((b, i) => i === idx ? { ...b, [field]: value } : b));
   };
 
-  // 이미지 3방식 입력 — 상태를 바꾸는 모든 통로가 세대를 올린다(진행 중 업로드 응답 무효화)
+  // 이미지 입력 — 상태를 바꾸는 모든 통로가 세대를 올린다(진행 중 업로드 응답 무효화)
+  // ★2026-09-02 URL 직접 입력 제거: img_url에는 카카오 콘텐츠 서버 업로드본만 실을 수 있어
+  //   임의 주소는 애초에 발송이 안 된다. 라이브러리·업로드 둘 다 서버가 카카오로 올려 준다.
   const applyPickedAsset = (asset: PickedAsset) => {
     imageSeqRef.current++;
     setUploading(false);
@@ -380,7 +382,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
     setImageKind(asset.kind);
     setImageName(asset.filename || '라이브러리 이미지');
     setImageError('');
-    setShowUrlInput(false);
   };
 
   const handleUploadFile = async (file: File | null) => {
@@ -403,7 +404,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
       setImageAssetId(String(data.assetId || ''));
       setImageKind('uploaded');
       setImageName(String(data.filename || file.name));
-      setShowUrlInput(false);
     } catch (e: any) {
       if (seq === imageSeqRef.current) setImageError(e?.message || '업로드하지 못했습니다.');
     } finally {
@@ -411,22 +411,11 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
     }
   };
 
-  const setManualUrl = (v: string) => {
-    imageSeqRef.current++;
-    setUploading(false);
-    setImageUrl(v);
-    // 손으로 고친 주소는 출처를 모른다 — AI 판정 근거(assetId·kind)를 비운다.
-    // 우리 라이브러리 URL을 그대로 붙여넣은 경우는 백엔드가 URL 일치로 한 번 더 판정한다.
-    setImageAssetId('');
-    setImageKind('');
-    setImageName('');
-  };
-
   const clearImage = () => {
     imageSeqRef.current++;
     setUploading(false);
     setImageUrl(''); setImageLink(''); setImageAssetId(''); setImageKind(''); setImageName('');
-    setImageError(''); setShowUrlInput(false);
+    setImageError('');
   };
 
   // 발송 — payload 키는 백엔드 CT-12 계약 그대로 유지한다(★2026-09-01 image.asset_id만 추가).
@@ -680,15 +669,11 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
 
                   <input type="text" value={imageLink} onChange={(e) => setImageLink(e.target.value)}
                     className={FIELD} placeholder="클릭 시 이동 URL (선택)" />
-                  {showUrlInput && (
-                    <input type="text" value={imageUrl} onChange={(e) => setManualUrl(e.target.value)}
-                      className={FIELD} placeholder="이미지 URL (jpg·png · 5MB 이하 · 800x400)" />
-                  )}
                 </div>
               ) : (
                 <div>
-                  {/* 빈 상태 — 3가지 입력 방법. 라이브러리가 첫 자리다(스튜디오 AI 생성물이 거기 쌓인다) */}
-                  <div className="grid grid-cols-3 gap-2">
+                  {/* 빈 상태 — 라이브러리·업로드 2가지. 라이브러리가 첫 자리다(스튜디오 AI 생성물이 거기 쌓인다) */}
+                  <div className="grid grid-cols-2 gap-2">
                     <button type="button" onClick={() => setPickerOpen(true)}
                       className={`flex flex-col items-center gap-1.5 px-2 py-4 rounded-xl bg-white text-[12px] font-semibold transition shadow-sm ${a.actPrimary}`}>
                       <FolderOpen size={17} strokeWidth={1.8} className={a.actIcon} />
@@ -701,20 +686,9 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                         : <Upload size={17} strokeWidth={1.8} className="text-slate-400" />}
                       {uploading ? '올리는 중...' : '파일 업로드'}
                     </button>
-                    <button type="button" onClick={() => setShowUrlInput(v => !v)}
-                      className={`flex flex-col items-center gap-1.5 px-2 py-4 rounded-xl bg-white text-[12px] font-semibold transition shadow-sm ${
-                        showUrlInput ? 'ring-1 ring-slate-400 text-slate-800' : 'ring-1 ring-slate-200/80 text-slate-600 hover:ring-slate-300 hover:text-slate-800'
-                      }`}>
-                      <Link2 size={17} strokeWidth={1.8} className="text-slate-400" />
-                      URL 직접 입력
-                    </button>
                   </div>
                   <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden"
                     onChange={(e) => { handleUploadFile(e.target.files?.[0] || null); e.target.value = ''; }} />
-                  {showUrlInput && (
-                    <input type="text" value={imageUrl} onChange={(e) => setManualUrl(e.target.value)}
-                      className={`${FIELD} mt-2`} placeholder="이미지 URL (jpg·png · 5MB 이하 · 800x400)" autoFocus />
-                  )}
                   <p className="text-[11px] text-slate-400 text-center mt-2.5">
                     jpg·png · 업로드 2MB 이하 · 권장 800×400
                   </p>

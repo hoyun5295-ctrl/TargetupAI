@@ -13,6 +13,8 @@ import { getCampaignQueueTables, smsCountAll } from './sms-queue';
 import { getCompanySmsTables, smsExecAll, toKoreaTimeStr } from './sms-queue';
 import { calcSplitSendTime } from './send-time-util';
 import { processSendChunk, type ChunkRecipient } from './direct-send-processor';
+// ★2026-09-02 브랜드 이미지 preflight(AI 판정 → 카카오 URL 치환) — 캠페인당 한 번
+import { prepareBrandAttachmentForSend } from './brand-message';
 // ★ 2026-07-30 환불 축 판정 — 차감(direct-send-core)과 같은 CT
 import { resolveRefundAxes } from './billing-types';
 import { sendSystemAlert } from './system-alert';
@@ -301,6 +303,20 @@ async function processCampaign(campaignId: string): Promise<void> {
   const opt080 = finalIsAd ? await getOpt080Number(userId || null, companyId) : '';
   const useNow = !cfg.scheduled && !(cfg.splitEnabled && cfg.splitCount > 0);
 
+  // ★2026-09-02(2) 브랜드 이미지 preflight — **청크 루프 밖에서 캠페인당 한 번**이다.
+  //   Codex 2R high3: 청크마다 돌리면 같은 이미지를 청크 수만큼 올린다(processSendChunk는
+  //   CHUNK 단위로 반복 호출된다). 판정(AI 생성 여부)도 캠페인 단위 값이라 한 번이면 된다.
+  //   ⛔ 여기서 던지면 아래 루프에 들어가지 않고 실행이 중단된다 — 이미 선차감된 건은
+  //      기존 미적재 환불 축(아래 refundAxes)이 되돌린다(조립 실패와 같은 경로).
+  const brandPreflight = (cfg.sendChannel === 'kakao' || cfg.sendChannel === 'both')
+    ? await prepareBrandAttachmentForSend({
+        companyId,
+        userId: userId || null,
+        bubbleType: cfg.kakaoBubbleType || 'TEXT',
+        attachmentJson: cfg.kakaoAttachmentJson || null,
+      })
+    : { attachmentJson: (cfg.kakaoAttachmentJson || null), aiGenerated: false };
+
   let processed: number = c.processed_count || 0;
   let sent = 0;
   let brandSent = 0;   // ★ 2026-07-30 브랜드 축(msg_type='F') 적재수 — both 환불 분리용
@@ -377,13 +393,14 @@ async function processCampaign(campaignId: string): Promise<void> {
 
     const result = await processSendChunk({
       companyId, campaignId, companyTables, recipients, directFieldMappings,
+      kakaoImageAiGenerated: brandPreflight.aiGenerated,
       sendChannel: cfg.sendChannel || 'sms', msgType: cfg.msgType, message: cfg.message || '',
       subject: cfg.subject || '', callback: cfg.callback || '',
       useIndividualCallback: cfg.useIndividualCallback || false,
       finalIsAd, opt080, mmsImagePaths: cfg.mmsImagePaths || [], useNow,
       scheduled: !!cfg.scheduled,
       kakaoBubbleType: cfg.kakaoBubbleType, kakaoSenderKey: cfg.kakaoSenderKey, kakaoTargeting: cfg.kakaoTargeting,
-      kakaoAttachmentJson: cfg.kakaoAttachmentJson, kakaoCarouselJson: cfg.kakaoCarouselJson, kakaoResendType: cfg.kakaoResendType,
+      kakaoAttachmentJson: brandPreflight.attachmentJson ?? undefined, kakaoCarouselJson: cfg.kakaoCarouselJson, kakaoResendType: cfg.kakaoResendType,
       alimtalkTemplateCode: cfg.alimtalkTemplateCode, alimtalkVariableMap: cfg.alimtalkVariableMap,
       alimtalkButtonJson: cfg.alimtalkButtonJson, alimtalkNextType: cfg.alimtalkNextType,
       alimtalkNextContents: cfg.alimtalkNextContents, alimtalkNextSubject: cfg.alimtalkNextSubject,

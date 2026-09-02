@@ -23,7 +23,7 @@ import {
 } from '../middlewares/auth';
 import { query } from '../config/database';
 import * as imc from '../utils/alimtalk-api';
-import { ImcApiError } from '../utils/alimtalk-api';
+import { ImcApiError, extractImageFromAnyShape } from '../utils/alimtalk-api';
 import {
   processKakaoWebhook,
   verifyWebhookSignature,
@@ -2419,34 +2419,9 @@ function sendImcManagedResponse(
  *  단일 이미지: `{ success, imageUrl, imageName, imc }`
  *  다중 이미지: `{ success, list: [{imageUrl,imageName}], imc }`
  */
-function extractImageFromAnyShape(r: any): { imageUrl?: string; imageName?: string } {
-  if (!r) return {};
-  // 단일 이미지 추출 — 가능한 모든 위치 시도 (1중/2중/3중 래핑)
-  const cands = [
-    r?.data,
-    r?.data?.data,
-    r?.data?.data?.data,
-    r?.data?.image,
-    r,
-  ];
-  for (const c of cands) {
-    if (c && typeof c === 'object' && (c.imageUrl || c.imageName)) {
-      return { imageUrl: c.imageUrl, imageName: c.imageName };
-    }
-  }
-  // ★ D146 (2026-05-07) PDF 0506 #6/#7: IMC가 단일 'image' 키 + string URL로 보내는 변종.
-  //   raw: {"code":"0000","data":{"image":"https://mud-kage.kakao.com/dn/.../img_l.jpg"}}
-  //   imageName이 응답에 없으므로 URL 끝의 파일명을 imageName으로 사용.
-  const stringCands = [r?.data?.image, r?.image, r?.data?.imageUrl];
-  for (const url of stringCands) {
-    if (typeof url === 'string' && url.startsWith('http')) {
-      const tail = url.split('/').pop() || '';
-      const imageName = (tail.split('?')[0] || 'image').slice(0, 200);
-      return { imageUrl: url, imageName };
-    }
-  }
-  return {};
-}
+// ★2026-09-02 `extractImageFromAnyShape`는 `utils/alimtalk-api.ts`로 이동했다(브랜드 발송
+//   경로가 같은 추출을 필요로 하는데, 라우트에 두면 utils→routes 역방향 의존이 된다).
+//   상단에서 named import 한다 — 여기에 const로 두면 위쪽 호출부(persistImage)가 TDZ에 걸린다.
 
 function extractImageListFromAnyShape(r: any): { imageUrl: string; imageName: string }[] {
   if (!r) return [];

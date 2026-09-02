@@ -37,6 +37,8 @@ import { query } from '../config/database';
 import { logCampaignTraining } from './training-logger';
 // ★ 2026-09-01 AI 생성 이미지 표시 — cdp_assets.kind 판정 (설계서 docs/2026-09-01-ai-image-notice-design.md)
 import { getAssetByUrl, isAssetsTableMissing, type AssetRow } from './assets';
+// ★ 2026-09-02 자유형 이미지의 카카오 콘텐츠 서버 확정(ATTACHMENT.image.img_url 규격)
+import { resolveBrandSendImage, resolveBrandSendAttachmentJson, isOwnServingImageUrl } from './brand-image-resolver';
 
 // ============================================================
 // 상수 정의
@@ -751,6 +753,18 @@ function strFieldOrThrow(v: any, label: string): string {
 }
 
 /**
+ * 우리 서빙 URL이 이미지 자리에 남아 있으면 거절한다 — 카카오는 콘텐츠 서버 업로드본만 받는다.
+ * 판정은 `brand-image-resolver`가 소유한다(치환하는 쪽과 막는 쪽이 같은 판정을 써야 한다 —
+ * 두 벌이면 한쪽이 통과시킨 것을 다른 쪽이 막는다).
+ */
+function assertNoOwnServingImage(imgUrl: unknown, label: string): void {
+  if (!isOwnServingImageUrl(imgUrl)) return;
+  throw new BrandMessageBuildError(
+    `${label}: 이미지가 카카오에 등록되지 않았습니다. 이미지를 다시 선택한 뒤 발송해주세요`,
+  );
+}
+
+/**
  * 조립 직전 규격 검사 — 위반은 전부 throw(fail-closed).
  * 검사 대상은 **조립될 실제 값**이다(파싱된 ATTACHMENT 포함) — 타입 파라미터로 들어오든
  * 이미 만들어진 JSON 문자열로 들어오든 같은 판정을 받게 하려는 것이다.
@@ -839,6 +853,18 @@ function assertBrandContentSpec(input: {
 
   if (spec.requireImage && !required(attImage !== undefined, !!strFieldOrThrow(attImage?.img_url, '이미지 주소'))) {
     throw new BrandMessageBuildError(`${label}: 이미지가 필요합니다`);
+  }
+
+  // ★ 2026-09-02 **우리 서빙 URL은 여기서 죽는다.** `img_url`에는 카카오 콘텐츠 서버 업로드본만
+  //   실을 수 있다(IMC 회신 — 외부 URL 불가). 그대로 나가면 큐에는 들어가고 발송만 죽어서
+  //   화면에 아무 사유도 안 남는다(2026-09-01 실측 = IMAGE 2건 `status_code 9999`).
+  //   ⛔ 검사를 조립기 **밖**에 두지 마라 — 이 파일은 그 실수를 이미 한 번 했다(0818 결함 2 =
+  //      호출부 6곳 중 1곳만 검사받던 구조). 조립기를 부르는 경로는 전부 이 판정을 받는다.
+  //   치환은 각 경로가 발송 직전 `resolveBrandSendImage`/`resolveBrandSendAttachmentJson`으로 한다.
+  //   여기 걸린다는 것은 그 치환을 안 거친 경로가 있다는 뜻이다.
+  assertNoOwnServingImage(attImage?.img_url, label);
+  for (const it of Array.isArray(attItem?.list) ? attItem.list : []) {
+    assertNoOwnServingImage((it as any)?.img_url, label);
   }
   if (spec.requireVideo && !required(attVideo !== undefined, !!strFieldOrThrow(attVideo?.video_url, '동영상 주소'))) {
     throw new BrandMessageBuildError(`${label}: 동영상 주소가 필요합니다`);
@@ -1538,6 +1564,56 @@ export function appendAiImageNotice(message: string, spec: BrandBubbleSpec): str
 }
 
 /**
+ * 문자열 `attachmentJson`을 들고 다니는 발송 경로(AI 캠페인·직접발송·워커)의 **공용 preflight**.
+ *
+ * ★2026-09-02 Codex 1R high2 수용. 그 셋은 `resolveBrandSendAttachmentJson`만 부르고 있어서
+ * **AI 생성 이미지 판정을 한 번도 받지 않았다.** 판정 근거는 우리 서빙 URL인데 치환이 그 URL을
+ * 없애므로, 그대로 두면 그 경로들은 앞으로도 판정을 붙일 수 없게 **고착**된다
+ * (`kind='generated'` 소재가 안내 문구 없이 나가는 상태로 굳는다).
+ *
+ * 그래서 순서를 함수 하나가 소유한다 — **판정 먼저, 치환 나중.** `sendBrandMessage`의 객체 경로와
+ * 같은 계약이고, 호출부는 돌려받은 `aiGenerated`로 본문에 안내를 붙인다.
+ *
+ * ⛔ 수신자 루프 **밖**에서 한 번만 부른다(안에서 부르면 같은 이미지를 사람 수만큼 올린다).
+ * ⛔ 차감 **앞**에서 부른다(업로드 실패가 돈을 남기지 않게).
+ */
+export async function prepareBrandAttachmentForSend(input: {
+  companyId: string;
+  userId?: string | null;
+  bubbleType: string;
+  attachmentJson?: string | null;
+}): Promise<{ attachmentJson: string | null | undefined; aiGenerated: boolean }> {
+  const raw = input.attachmentJson;
+
+  // 1) 판정 — 치환 전 원본 URL로만 가능하다.
+  let aiGenerated = false;
+  if (raw && typeof raw === 'string' && raw.trim()) {
+    let img: any = null;
+    try {
+      img = JSON.parse(raw)?.image ?? null;
+    } catch {
+      img = null;   // 형식 오류는 조립기가 사유를 만든다 — 여기서 삼키지 않는다
+    }
+    if (img && typeof img.img_url === 'string' && img.img_url.trim()) {
+      aiGenerated = await isBrandImageAiGenerated(input.companyId, {
+        img_url: String(img.img_url).trim(),
+        asset_id: typeof img.asset_id === 'string' ? img.asset_id : undefined,
+      });
+    }
+  }
+
+  // 2) 치환 — 판정이 끝난 뒤에만.
+  const attachmentJson = await resolveBrandSendAttachmentJson({
+    companyId: input.companyId,
+    userId: input.userId,
+    bubbleType: input.bubbleType,
+    attachmentJson: raw,
+  });
+
+  return { attachmentJson, aiGenerated };
+}
+
+/**
  * 자유형 브랜드메시지 발송
  * - validation → 수신거부 필터 → 선불 차감 → SMSQ 배치 INSERT(msg_type='F') → 미적재분 환불
  */
@@ -1561,6 +1637,17 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
       // spec이 없는 유형은 바로 아래 조립기가 미지원으로 거절한다 — 판정을 두 벌 두지 않는다.
       if (spec) message = appendAiImageNotice(String(params.message || ''), spec);
     }
+    // ★ 2026-09-02 이미지를 카카오 콘텐츠 서버 URL로 확정 — `img_url`에는 업로드본만 실을 수 있다
+    //   (외부 URL 불가 · `imc.*`는 에이전트 전용이라 소켓 직연동인 우리는 못 쓴다 — IMC 회신).
+    //   ⛔ 반드시 **위 AI 생성 판정 뒤**다. 판정 근거가 우리 서빙 URL이라 먼저 치환하면 판정이
+    //      통째로 false가 되어 안내 문구가 조용히 사라진다(순서 계약 = brand-image-resolver 상단).
+    //   차감보다 앞이라 업로드 실패는 발송만 세우고 돈은 움직이지 않는다.
+    const sendImage = await resolveBrandSendImage({
+      companyId: params.companyId,
+      userId: params.userId,
+      bubbleType: params.bubbleType,
+      image: params.image,
+    });
     queuePayload = buildBrandQueuePayload({
       typeDef: 'FREE',
       senderKey: params.senderKey,
@@ -1576,7 +1663,7 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
       immediate: !params.reservedDate,
       attachmentJson: buildAttachmentJson({
         buttons: params.buttons,
-        image: params.image,
+        image: sendImage,
         coupon: params.coupon,
         itemList: params.itemList,
         commerce: params.commerce,

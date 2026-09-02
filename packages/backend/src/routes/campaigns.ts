@@ -29,7 +29,11 @@ import {
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑은 CT-12에서만 — 라우트 인라인 금지
-import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback } from '../utils/brand-message';
+import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback,
+         prepareBrandAttachmentForSend, appendAiImageNotice, BUBBLE_TYPES } from '../utils/brand-message';
+// ★ 2026-09-02 브랜드 이미지의 카카오 콘텐츠 서버 확정 — img_url에는 업로드본만 실을 수 있다(IMC 회신).
+//   조립기가 우리 서빙 URL을 거절하므로, 조립기를 부르는 경로는 그 앞에서 이 치환을 거쳐야 한다.
+// (판정 → 치환 순서는 prepareBrandAttachmentForSend가 소유한다 — brand-message에서 가져온다)
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 // ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
 //   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
@@ -972,7 +976,18 @@ const aiMsgTypeCode = toQtmsgType(campaign.message_type);
 const kakaoBubbleType = campaign.kakao_bubble_type || 'TEXT';
 const kakaoSenderKey = campaign.kakao_sender_key || '';
 const kakaoTargeting = campaign.kakao_targeting || 'I';
-const kakaoAttachmentJson = campaign.kakao_attachment_json || null;
+// ★ 2026-09-02 이미지 preflight — **AI 생성 판정 먼저, 카카오 URL 치환 나중**(순서는 그 함수가
+//   소유한다). **수신자 루프 밖에서 한 번**이고(안에서 부르면 같은 이미지를 사람 수만큼 올린다)
+//   차감 앞이라 실패해도 돈이 움직이지 않는다.
+const brandPreflight = (sendChannel === 'kakao' || sendChannel === 'both')
+  ? await prepareBrandAttachmentForSend({
+      companyId,
+      userId: userId || null,
+      bubbleType: kakaoBubbleType,
+      attachmentJson: campaign.kakao_attachment_json || null,
+    })
+  : { attachmentJson: (campaign.kakao_attachment_json || null), aiGenerated: false };
+const kakaoAttachmentJson = brandPreflight.attachmentJson;
 const kakaoCarouselJson = campaign.kakao_carousel_json || null;
 const kakaoResendType = campaign.kakao_resend_type || 'SM';
 
@@ -1014,13 +1029,18 @@ for (const customer of filteredCustomers) {
       resendType: sendChannel === 'both' ? 'NO' : kakaoResendType,
       originalMessage: personalizedMessage,
     });
+    // ★2026-09-02 AI 생성 이미지 안내 — 판정은 위 preflight가 했고 부착은 개인화 본문에 한다.
+    //   부착 실패(길이·줄바꿈 초과)는 throw = 미적재 환불 경로. 문구를 빼고 보내지 않는다.
+    const aiBrandMessage = brandPreflight.aiGenerated && BUBBLE_TYPES[String(kakaoBubbleType).toUpperCase()]
+      ? appendAiImageNotice(personalizedMessage, BUBBLE_TYPES[String(kakaoBubbleType).toUpperCase()])
+      : personalizedMessage;
     const aiBrandPayload = buildBrandQueuePayload({
       typeDef: 'FREE',
       senderKey: kakaoSenderKey,
       targeting: kakaoTargeting,
       bubbleType: kakaoBubbleType,
       isAd: campaign.is_ad === true,
-      message: personalizedMessage,
+      message: aiBrandMessage,
       sendAt: sendTime || undefined,   // 예약·분할 시각 그대로 — 발송 가능 시간 판정 기준
       immediate: !isScheduled,
       attachmentJson: kakaoAttachmentJson,
@@ -2323,6 +2343,17 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // 즉시 브랜드 발송의 기준 시각 — 요청 하나에 **한 번만** 정해 검증과 적재가 같은 값을 쓰게 한다.
     const directBrandSendAt = new Date();
     const directBrandRows: BrandQueueRow[] = [];
+    // ★ 2026-09-02 브랜드 이미지 확정 — 조립 루프 밖에서 한 번. 아래 조립기가 우리 서빙 URL을
+    //   거절하므로 이 줄이 없으면 이미지 브랜드 직접발송은 그 자리에서 사유와 함께 멈춘다.
+    const directBrandPreflight = (directChannel === 'kakao' || directChannel === 'both')
+      ? await prepareBrandAttachmentForSend({
+          companyId,
+          userId: userId || null,
+          bubbleType: kakaoBubbleType || 'TEXT',
+          attachmentJson: kakaoAttachmentJson || null,
+        })
+      : { attachmentJson: (kakaoAttachmentJson || null), aiGenerated: false };
+    const directKakaoAttachmentJson = directBrandPreflight.attachmentJson;
     // 브랜드메시지 발송 (kakao 또는 both) — 2026-07-30 재구축: SMSQ 배치(msg_type='F')
     if (directChannel === 'kakao' || directChannel === 'both') {
       for (let i = 0; i < filteredRecipients.length; i++) {
@@ -2371,16 +2402,20 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           resendType: directChannel === 'both' ? 'NO' : (kakaoResendType || 'SM'),
           originalMessage: finalMessage,
         });
+        // ★2026-09-02 AI 생성 이미지 안내 — 판정은 preflight, 부착은 개인화 본문에.
+        const directBrandMessage = directBrandPreflight.aiGenerated && BUBBLE_TYPES[String(kakaoBubbleType || 'TEXT').toUpperCase()]
+          ? appendAiImageNotice(finalMessage, BUBBLE_TYPES[String(kakaoBubbleType || 'TEXT').toUpperCase()])
+          : finalMessage;
         const directBrandPayload = buildBrandQueuePayload({
           typeDef: 'FREE',
           senderKey: kakaoSenderKey || '',
           targeting: kakaoTargeting || 'I',
           bubbleType: kakaoBubbleType || 'TEXT',
           isAd: finalIsAd,
-          message: finalMessage,
+          message: directBrandMessage,
           sendAt: kakaoSendTime || undefined,   // 예약·분할 시각 그대로 — 발송 가능 시간 판정 기준
           immediate: !isScheduledSend,
-          attachmentJson: kakaoAttachmentJson || undefined,
+          attachmentJson: directKakaoAttachmentJson || undefined,
           carouselJson: kakaoCarouselJson || undefined,
         });
         directBrandRows.push({

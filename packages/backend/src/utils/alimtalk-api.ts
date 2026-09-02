@@ -1198,6 +1198,42 @@ export interface ImageUploadResult {
   imageUrl: string;
 }
 
+/**
+ * IMC 이미지 업로드 응답에서 imageUrl·imageName 추출 — 래핑 변종을 전부 흡수한다.
+ * ★2026-09-02 `routes/alimtalk.ts`에서 **원본 그대로 이동**(복사 아님). 브랜드 발송 경로
+ *   (`brand-image-resolver`)도 같은 추출이 필요해졌는데, 라우트 안에 있으면 utils가 routes를
+ *   import하는 역방향 의존이 된다. IMC 응답 해석은 이 파일이 소유한다.
+ *   ⛔ 변종 목록(D142+ 이중 래핑 · D146 문자열 image 키)은 실측으로 늘어난 것이라 줄이지 말 것.
+ */
+export function extractImageFromAnyShape(r: any): { imageUrl?: string; imageName?: string } {
+  if (!r) return {};
+  // 단일 이미지 추출 — 가능한 모든 위치 시도 (1중/2중/3중 래핑)
+  const cands = [
+    r?.data,
+    r?.data?.data,
+    r?.data?.data?.data,
+    r?.data?.image,
+    r,
+  ];
+  for (const c of cands) {
+    if (c && typeof c === 'object' && (c.imageUrl || c.imageName)) {
+      return { imageUrl: c.imageUrl, imageName: c.imageName };
+    }
+  }
+  // ★ D146 (2026-05-07) PDF 0506 #6/#7: IMC가 단일 'image' 키 + string URL로 보내는 변종.
+  //   raw: {"code":"0000","data":{"image":"https://mud-kage.kakao.com/dn/.../img_l.jpg"}}
+  //   imageName이 응답에 없으므로 URL 끝의 파일명을 imageName으로 사용.
+  const stringCands = [r?.data?.image, r?.image, r?.data?.imageUrl];
+  for (const url of stringCands) {
+    if (typeof url === 'string' && url.startsWith('http')) {
+      const tail = url.split('/').pop() || '';
+      const imageName = (tail.split('?')[0] || 'image').slice(0, 200);
+      return { imageUrl: url, imageName };
+    }
+  }
+  return {};
+}
+
 async function uploadSingleImage(
   endpoint: string,
   fileBuffer: Buffer,

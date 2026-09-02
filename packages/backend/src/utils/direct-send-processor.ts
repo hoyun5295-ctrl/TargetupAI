@@ -15,7 +15,11 @@ import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
 import { bulkInsertSmsQueue, insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType } from './sms-queue';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑 — CT-12 단일 진입점
-import { buildBrandQueuePayload, resolveBrandFallback } from './brand-message';
+import { buildBrandQueuePayload, resolveBrandFallback,
+         appendAiImageNotice, BUBBLE_TYPES } from './brand-message';
+// ★ 2026-09-02 브랜드 이미지의 카카오 콘텐츠 서버 확정(조립기가 우리 서빙 URL을 거절한다)
+// (브랜드 이미지의 AI 판정·카카오 URL 확정은 **워커가 캠페인당 한 번** 끝낸다 — 이 파일은
+//  청크마다 호출되므로 여기서 하면 청크 수만큼 반복된다. 넘어온 값을 쓰기만 한다)
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { resolveCustomerCallback } from './callback-filter';
 // ★ 2026-07-05: 발송 피로도 카운터 (광고성 발송 기록 — 발송 무영향 fire-and-forget)
@@ -66,6 +70,12 @@ export interface SendChunkParams {
   kakaoSenderKey?: string;
   kakaoTargeting?: string;
   kakaoAttachmentJson?: string;
+  /**
+   * ★2026-09-02 워커가 **캠페인당 한 번** 판정한 AI 생성 이미지 여부.
+   * 이 함수는 청크마다 호출되므로 판정·업로드를 여기서 하면 청크 수만큼 반복된다.
+   * `kakaoAttachmentJson`은 이미 카카오 URL로 확정된 값이 넘어온다(워커가 preflight를 마쳤다).
+   */
+  kakaoImageAiGenerated?: boolean;
   kakaoCarouselJson?: string;
   kakaoResendType?: string;
 
@@ -153,6 +163,15 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
   if (p.sendChannel === 'kakao' || p.sendChannel === 'both') {
     let kakaoSent = 0;
     try {
+      // ★ 2026-09-02 이미지를 카카오 URL로 확정 — **수신자 map 밖에서 한 번**이다.
+      //   안에서 부르면 같은 이미지를 수신자 수만큼 올린다(그리고 map은 동기라 애초에 못 부른다).
+      //   여기서 throw하면 청크 전체 미적재로 잡혀 worker 환불이 되돌린다(위 주석과 같은 계약).
+      // ★2026-09-02(2) Codex 2R high3 수용 — **여기서 preflight를 돌리지 않는다.**
+      //   이 함수는 청크마다 호출되므로(worker의 CHUNK 루프) 여기서 올리면 같은 이미지를
+      //   청크 수만큼 올린다. 캠페인당 한 번 올린 결과를 워커가 넘겨준다.
+      //   ⛔ 넘어온 값이 없으면(옛 호출부) 그대로 조립기로 보내고, 우리 서빙 URL이면 조립기가 거절한다.
+      const resolvedAttachmentJson = p.kakaoAttachmentJson || null;
+      const brandSpec = BUBBLE_TYPES[String(p.kakaoBubbleType || 'TEXT').toUpperCase()];
       const brandRows: BrandQueueRow[] = recipients.map((r) => {
         const cleanPhone = normalizePhone(r.phone);
         const dbCustomer = custMap.get(cleanPhone) || null;
@@ -167,17 +186,22 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
           resendType: p.sendChannel === 'both' ? 'NO' : (p.kakaoResendType || 'SM'),
           originalMessage: finalMessage,
         });
+        // ★2026-09-02 AI 생성 이미지 안내 — 판정은 워커가 캠페인당 한 번 했고(p.kakaoImageAiGenerated),
+        //   부착만 개인화 본문에 한다.
+        const brandMessage = p.kakaoImageAiGenerated && brandSpec
+          ? appendAiImageNotice(finalMessage, brandSpec)
+          : finalMessage;
         const brandPayload = buildBrandQueuePayload({
           typeDef: 'FREE',
           senderKey: p.kakaoSenderKey || '',
           targeting: p.kakaoTargeting || 'I',
           bubbleType: p.kakaoBubbleType || 'TEXT',
           isAd: p.finalIsAd,
-          message: finalMessage,
+          message: brandMessage,
           // worker가 계산해 넘긴 발송 시각(즉시면 '') — 발송 가능 시간 판정 기준
           sendAt: r.sendTime || undefined,
           immediate: !p.scheduled,
-          attachmentJson: p.kakaoAttachmentJson || undefined,
+          attachmentJson: resolvedAttachmentJson || undefined,
           carouselJson: p.kakaoCarouselJson || undefined,
         });
         return {

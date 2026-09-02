@@ -592,9 +592,69 @@ describe('AI 안내 문구 부착 — appendAiImageNotice (부착·중복·초�
     const msg = appendAiImageNotice('본문', IMAGE);
     const { msgContents } = buildBrandQueuePayload({
       ...FREE_BASE, bubbleType: 'IMAGE', message: msg,
-      attachmentJson: buildAttachmentJson({ image: { img_url: 'https://hanjul.ai/api/cdp/inapp/image/c/f.png' } }),
+      // ★2026-09-02 fixture를 카카오 URL로 바꿨다. 조립기가 우리 서빙 URL을 거절하게 됐기 때문인데,
+      //   **게이트를 피하려고 고친 것이 아니다** — 조립기가 실제로 보는 값이 치환 뒤의 카카오 URL이라
+      //   이쪽이 현실과 맞다. 이 테스트가 보는 것은 안내 문구가 붙은 본문의 통과 여부다.
+      attachmentJson: buildAttachmentJson({ image: { img_url: 'https://mud-kage.kakao.com/dn/x/img_l.jpg' } }),
     });
     expect(msgContents.endsWith(BRAND_AI_IMAGE_NOTICE)).toBe(true);
+  });
+});
+
+/**
+ * ★2026-09-02 조립기 거부 게이트 — 우리 서빙 URL은 조립기를 통과하지 못한다.
+ *
+ * 이 게이트가 없으면 치환을 안 거친 경로가 **큐에는 들어가고 발송만 죽는다**(2026-09-01 실측 =
+ * IMAGE 2건 status_code 9999, 화면에는 사유가 안 남는다). 검사를 조립기 안에 두는 이유는
+ * 0818 결함 2와 같다 — 밖에 두면 호출부 수만큼 구멍이 생긴다.
+ */
+describe('이미지 출처 게이트 — 조립기가 우리 서빙 URL을 거절한다', () => {
+  const KAKAO = 'https://mud-kage.kakao.com/dn/x/img_l.jpg';
+
+  it('상대 경로를 거절한다', () => {
+    expect(() => buildBrandQueuePayload({
+      ...FREE_BASE, bubbleType: 'IMAGE',
+      attachmentJson: buildAttachmentJson({ image: { img_url: '/api/cdp/inapp/image/c1/f.png' } }),
+    })).toThrow(/카카오에 등록되지 않았습니다/);
+  });
+
+  it('우리 호스트 절대 URL을 거절한다', () => {
+    expect(() => buildBrandQueuePayload({
+      ...FREE_BASE, bubbleType: 'IMAGE',
+      attachmentJson: buildAttachmentJson({ image: { img_url: 'https://hanjul.ai/api/cdp/inapp/image/c1/f.png' } }),
+    })).toThrow(/카카오에 등록되지 않았습니다/);
+  });
+
+  it('WIDE도 같은 판정을 받는다 — 이미지를 쓰는 유형이 IMAGE 하나가 아니다', () => {
+    expect(() => buildBrandQueuePayload({
+      ...FREE_BASE, bubbleType: 'WIDE', message: '짧은 본문',
+      attachmentJson: buildAttachmentJson({ image: { img_url: '/api/cdp/inapp/image/c1/f.png' } }),
+    })).toThrow(/카카오에 등록되지 않았습니다/);
+  });
+
+  // 아이템 리스트 이미지에도 같은 검사를 걸어 뒀지만, 지금은 그 앞에서 유형 자체가 막힌다.
+  // 유형이 열리는 날 이 사실이 바뀌므로 "지금은 도달 불가"를 여기 못 박아 둔다.
+  it('와이드 리스트는 아직 조립기 입구에서 막힌다(이미지 검사에 닿지 않는다)', () => {
+    expect(() => buildBrandQueuePayload({
+      ...FREE_BASE, bubbleType: 'WIDE_ITEM_LIST', message: '', header: '제목',
+      attachmentJson: buildAttachmentJson({
+        itemList: [{ title: '가', img_url: '/api/cdp/inapp/image/c1/f.png', url_mobile: 'https://m' }] as any,
+      }),
+    })).toThrow(/아직 지원하지 않습니다/);
+  });
+
+  it('카카오 URL은 통과한다', () => {
+    expect(() => buildBrandQueuePayload({
+      ...FREE_BASE, bubbleType: 'IMAGE',
+      attachmentJson: buildAttachmentJson({ image: { img_url: KAKAO } }),
+    })).not.toThrow();
+  });
+
+  it('기본형(템플릿)도 값을 실었으면 같은 판정을 받는다 — 잘못된 덮어쓰기를 통과시키지 않는다', () => {
+    expect(() => buildBrandQueuePayload({
+      ...FREE_BASE, typeDef: 'BASIC' as const, templateCode: 'T1', bubbleType: 'IMAGE', message: '',
+      attachmentJson: buildAttachmentJson({ image: { img_url: 'https://hanjul.ai/api/cdp/inapp/image/c1/f.png' } }),
+    })).toThrow(/카카오에 등록되지 않았습니다/);
   });
 });
 
