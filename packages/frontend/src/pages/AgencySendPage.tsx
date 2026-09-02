@@ -24,6 +24,7 @@ import AgencyOneStepModal from '../components/agency/AgencyOneStepModal';
 import AgencySendDetail from '../components/agency/AgencySendDetail';
 // ★2026-08-26(2) 진행 레일은 공용 컴포넌트로 승격 — 슈퍼관리자 대행발송 내역과 같은 그리기를 쓴다
 import AgencyProgressRail from '../components/agency/AgencyProgressRail';
+import TablePagination from '../components/common/TablePagination';
 import {
   fetchAgencyRecipients, fetchAgencyRequests, formatWhenRelative, isApprovable, isRedoable,
   SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
@@ -80,6 +81,9 @@ function EntryButton({ tone, icon, title, sub, onClick }: {
   );
 }
 
+/** 접수 내역 한 페이지에 그릴 건수 — 슈퍼관리자 대행발송 내역과 같은 수로 맞춘다. */
+const AGENCY_PER_PAGE = 10;
+
 export default function AgencySendPage() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -91,6 +95,7 @@ export default function AgencySendPage() {
   const [composerPrefill, setComposerPrefill] = useState<AgencyComposerPrefill | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [requests, setRequests] = useState<AgencySendRequest[]>([]);
+  const [page, setPage] = useState(1);
   const [listLoading, setListLoading] = useState(false);
   const [redoLoadingId, setRedoLoadingId] = useState<string | null>(null);
 
@@ -179,6 +184,14 @@ export default function AgencySendPage() {
   };
 
   const waitingList = requests.filter((r) => isApprovable(r.status));
+
+  // ★2026-09-02 페이징 — 접수가 쌓이면 한 화면에 전부 그려 스크롤이 끝없이 늘어나던 것을 10건씩 끊는다.
+  //   목록 갱신은 최초 진입과 탭 복귀(visibilitychange)뿐이라 페이지를 자동으로 되돌리지 않는다
+  //   (보던 페이지에 그대로 머무는 쪽이 맞다). 재접수·취소로 건수가 줄어 현재 페이지가 범위를 넘으면
+  //   표시값만 마지막 페이지로 당긴다 — 렌더 중 setState를 하지 않기 위해서다.
+  //   ⛔ 위쪽 "승인 기다리는 접수" 묶음(waitingList)은 페이징하지 않는다. 처리해야 할 일감이라 전부 보여야 한다.
+  const safePage = Math.min(page, Math.max(1, Math.ceil(requests.length / AGENCY_PER_PAGE)));
+  const pagedRequests = requests.slice((safePage - 1) * AGENCY_PER_PAGE, safePage * AGENCY_PER_PAGE);
   const todo = waitingList[0] || null;
   const todoWhen = todo ? formatWhenRelative(todo.requestedAt) : null;
 
@@ -288,7 +301,7 @@ export default function AgencySendPage() {
                   <p className="text-[12.5px] text-neutral-500 tabular-nums">{requests.length}건</p>
                 </div>
                 <div className="divide-y divide-neutral-100">
-                  {requests.map((r) => {
+                  {pagedRequests.map((r) => {
                     const when = formatWhenRelative(r.requestedAt);
                     const terminal = r.status === 'cancelled' || r.status === 'expired';
                     return (
@@ -346,6 +359,14 @@ export default function AgencySendPage() {
                     );
                   })}
                 </div>
+                <TablePagination
+                  total={requests.length}
+                  page={safePage}
+                  perPage={AGENCY_PER_PAGE}
+                  onChange={setPage}
+                  unit="건"
+                  accent="indigo"
+                />
               </div>
             )}
             <p className="mt-3 text-[10px] text-neutral-400 italic">Data source: 대행발송 접수 원장</p>

@@ -529,6 +529,19 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 **★0820(2) 발급명(RSRM_SalesMst) 대표 행 적재 — 배포완료·실측 성공**(커밋 `1213675` · `GW_DEPLOY_OK` · 대표 행 `V0001/V0001/rabd-api-01 API ingress` 생성 + `UpdTm` 매분 갱신 = UPSERT 경로 실측). 한줄로 화면의 "발송ID / 발급명"·선불 잔액은 `SalesMst` 축인데 리포터가 `SalesStts`만 넣어 V0001이 이름 없이 보였다. `reportNames`(reporter.go — 매 주기, 통계와 독립 best-effort): 켠 계정의 `pay_cust_id`+`name`을 대표 행(`StoreId=CustId`) UPSERT, **CustNm·UpdTm만 쓰고 RemAmt·카운터 불가침**(잔액 오염 차단 — 계약 테스트 고정). **`CustId varchar(5)` 물리 제약 실측(SHOW CREATE TABLE)** ⇒ 발급 규칙 = `V`+4자리(상한 V9999), 5자 초과는 조용한 절단 대신 거절+Error 로그(`filterNameRows` 계약). 검증 = `GW_CHECK_OK`(vet+전체 테스트, 계약 +3).
 **잔여** = 통계 축 UPSERT 실측 1건(같은 날 추가 발송 후 `SalesStts` **행이 늘지 않고 OkCnt만 커지는지** — 발급명 축은 실측됨) · 한줄로 쪽 `V0001` ↔ 회사 매핑 + 알림톡 단가(서수란 테스트 예정) · `sales@.65` 전용 비번 로테이션(지금은 root 비번 값 — ①새 비번 ALTER ②DSN 교체 ③재시작) · **`pay_cust_id` 자동 채번(V+연번)+적재 토글 관리 화면**(지금은 발급기·화면이 없어 수동 UPDATE — 상용 전 개선 과제).
 
+## 11. 2026-09-02 서수란 접수 4건 + Agent ARM64 예외 빌드 (전량 배포·산출 완료)
+
+경위·실측·원인·정정·추가 과제는 게이트웨이 `status/BUG_HISTORY.md` 2026-09-02 항목 3개가 소유한다. 여기는 한줄로 측 판단과 포인터만.
+
+| # | 접수 | 확정 원인 | 조치 | 배포 | 남은 것 |
+|---|---|---|---|---|---|
+| 1 | 더화이트커뮤니케이션 신규 Agent, 서버 CPU aarch64 | 고객 패키지가 `linux-amd64`뿐. 정식 서명 사슬(installer·bootstrap·heartbeat·DB CHECK)은 amd64 고정 | 자식 바이너리 단독 실행형(레거시 8파일) `linux/arm64` 예외 빌드. 라벨 `1.0.23`(HEAD 소스 다이제스트가 1.0.20·1.0.22 어느 것과도 달라 새 번호) | 파일 산출 = bito-gateway `out/agent-arm64-exception-20260902/bito-agent-v1.0.23-linux-arm64.tar.gz`(gitignore) | 고객 서버 `./bito-agent version` → `doctor` 실측. arm64 정식 레인은 별도 과제 |
+| 2 | 발급 실수 Agent(testiten) 삭제 불가 | 15개 참조 카운트 중 `alert_event`(agent_disconnect 58건)만 이력으로 세어짐. 설치된 적 없는 활성 Agent에 cooldown마다 쌓이는 운영 알림 로그 | `agents.js` DELETE: 카운트 제외 + 정리 삭제. 테스트 362 pass | api 1파일 11:51:05 `GW_DEPLOY_OK`(0830 미배포 변경 동반 반영) | 서수란이 삭제 클릭 → 재카운트 0. 형제 경로(resellers 409·sender-accounts FK 500)는 승인 대기 |
+| 3 | 라우트 배정하기가 한줄로 화면으로 감 · 라우팅·바인드 지정이 상용계층 패널에 미설정 | 버튼이 고객사를 안 바꿈(`setSelectedCustomerId` 경로 없음) · 두 화면은 다른 층(Agent 전용 / 발송계정·고객사) · 게이트웨이는 카테고리별 최소 우선순위 하나만 사용 | 버튼 고객사 전환 · 저장 대상 scopeId 고정 · 라벨 3곳 "Agent ID" | dist 13:00:59 `GW_DEPLOY_OK`(manifest `bbafb2fc8249`) | 화면 재현 1회 · 운영 답 = 고객사 기본 라인그룹 한 곳만 · invitotests2는 LMS·카카오 미라우팅 상태라 즉시 저장 필요 |
+| 4 | Agent Token 재설정이 16자 직접 입력 · 설정 파일 복사 불가·잘림 | 같은 endpoint를 body만 다르게 호출(`{password}` vs `{}`). 직접 입력은 0827 C-4 의도였으나 사례 0 · yaml 상자 maxHeight 없음·복사 버튼 없음 | 자동 생성·1회 표시·복사로 통일(서버 무변경) · 패널 복사 버튼 + 자기 스크롤 · 공용 `utils/clipboard.js` | 위 dist에 포함 | 화면 확인 2곳 |
+
+⛔ 세션 판단: **정답은 매번 SQL 한 줄이 정했다**(접수자 가설은 셋 다 판정 조건에 없었다) · Codex 생략 = Harold 방침(적대 검토는 워크플로 반박 검증 + 직접 재독으로 대체) · 로컬 명령은 런북이 bash라도 PowerShell로 변환해 낸다(0902 재발).
+
 ## 9. 관련 문서
 
 **기능별 피더(스포크) — ★2026-08-15 Harold 승인 체계.** 이 허브가 총괄·전환 운영·착수 원장을, 스포크가 축별 확정 사실·결함·잔여를 소유한다. 진행 순서 = 5→1→6→2→3→4 (Harold 확정).

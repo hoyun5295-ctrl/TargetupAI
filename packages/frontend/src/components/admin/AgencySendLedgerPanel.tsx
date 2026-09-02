@@ -11,6 +11,7 @@ import { AlertTriangle, Eye, Loader2, RefreshCw, Search, Send, X } from 'lucide-
 import AgencyProgressRail from '../agency/AgencyProgressRail';
 import AgencyPreviewModal from '../agency/AgencyPreviewModal';
 import AgencyEventLog from '../agency/AgencyEventLog';
+import TablePagination from '../common/TablePagination';
 import {
   formatWhenRelative, isCancelable, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencyPreviewSample, type AgencySendEvent, type AgencySendStatus,
@@ -55,6 +56,9 @@ interface AdminAgencyRow {
 }
 
 interface Summary { status: string; c: number }
+
+/** 한 페이지에 그릴 접수 수 — 진행 레일이 한 줄을 크게 쓰므로 10건이면 한 화면에 들어온다. */
+const AGENCY_PER_PAGE = 10;
 
 /** 상태 필터에 올릴 순서(원장 상태 전체가 아니라 직원이 자주 찾는 순서) */
 const STATUS_FILTERS: Array<{ value: string; label: string }> = [
@@ -175,6 +179,21 @@ export default function AgencySendLedgerPanel() {
     });
   }, [rows, sourceFilter, keyword]);
 
+  // ★2026-09-02 페이징 — 전량을 한 화면에 그려 세로 스크롤이 끝없이 늘어나던 것을 10건씩 끊는다.
+  //   서버는 이미 최근 200건만 주고 필터도 클라이언트에서 도는 축이라 여기서만 자른다(API 무변경).
+  //   ⛔ 필터·검색이 바뀌면 반드시 1페이지로 되돌린다 — 3페이지를 보다 조건을 바꾸면 결과가 3페이지에
+  //   못 미쳐 빈 화면이 된다("검색했는데 아무것도 없다"로 접수된다).
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [statusFilter, sourceFilter, keyword]);
+
+  // 취소 처리·새로고침으로 건수가 줄어 현재 페이지가 범위를 넘으면 마지막 페이지로 당긴다.
+  // 렌더 중 setState 대신 표시값을 보정한다(사용자가 페이저를 누르면 상태도 정상 범위로 들어온다).
+  const safePage = Math.min(page, Math.max(1, Math.ceil(filtered.length / AGENCY_PER_PAGE)));
+  const paged = useMemo(
+    () => filtered.slice((safePage - 1) * AGENCY_PER_PAGE, safePage * AGENCY_PER_PAGE),
+    [filtered, safePage],
+  );
+
   const countOf = (status: string) => summary.find((s) => s.status === status)?.c || 0;
   const activeCount = countOf('awaiting_approval') + countOf('reapproval');
 
@@ -243,7 +262,7 @@ export default function AgencySendLedgerPanel() {
       ) : (
         <div className="p-6 pt-4">
           <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
-            {filtered.map((r) => {
+            {paged.map((r) => {
               const when = formatWhenRelative(r.requested_at);
               const terminal = r.status === 'cancelled' || r.status === 'expired';
               return (
@@ -296,6 +315,14 @@ export default function AgencySendLedgerPanel() {
               );
             })}
           </div>
+          <TablePagination
+            total={filtered.length}
+            page={safePage}
+            perPage={AGENCY_PER_PAGE}
+            onChange={setPage}
+            unit="건"
+            accent="indigo"
+          />
           <p className="mt-3 text-[10px] text-gray-400 italic">Data source: 대행발송 접수 원장 (최근 200건)</p>
         </div>
       )}
