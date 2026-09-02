@@ -220,6 +220,13 @@ async function checkSyncFailures(): Promise<void> {
     { name: '만성', interval: '7 days', threshold: SYNC_FAIL_CHRONIC_THRESHOLD, cooldownMs: SYNC_FAIL_CHRONIC_COOLDOWN_MS, keyPrefix: 'sync-failures-chronic' },
   ] as const;
 
+  // ★ 2026-09-02 같은 사고로 문자 2통이 오던 것 정리 — 급성을 보낸 에이전트는 이번 회차 만성을 건너뛴다.
+  //   경위: 아난티 25,244건이 전부 24시간 안에 터져 급성·만성 집계가 같은 값이 됐고, 두 통이 연달아 갔다
+  //   (기간 필터는 정상 동작이었다 — 두 창의 값이 같았을 뿐이다).
+  //   ⛔ 만성 자체를 없애지 말 것 — 하루 5건씩 새는 이새형 출혈은 급성 문턱에 걸리지 않아 만성만 잡는다.
+  //   ⛔ 급성 쿨다운(12h)이 만성 쿨다운(72h)보다 짧으므로, 급성이 잠잠해지면 만성이 다시 말한다.
+  const acuteNotified = new Set<string>();
+
   for (const tier of tiers) {
     let rows: any[] = [];
     try {
@@ -241,6 +248,12 @@ async function checkSyncFailures(): Promise<void> {
     }
 
     for (const r of rows) {
+      // 급성으로 이미 알린 에이전트는 만성을 생략한다(같은 사고 = 문자 한 통).
+      if (tier.name === '만성' && acuteNotified.has(String(r.id))) {
+        log(`싱크 실패 만성 통지 생략 — 급성으로 이미 알림 (agent=${r.id})`);
+        continue;
+      }
+
       // 대표 실패 사유 top2 — 열어보기 전에 방향을 잡게 본문에 싣는다
       let reasonTxt = '';
       try {
@@ -261,7 +274,7 @@ async function checkSyncFailures(): Promise<void> {
 
       const label = `${r.company_name || '(회사 미상)'} ${r.agent_name || ''}`.trim();
       const windowLabel = tier.name === '급성' ? '최근 24시간' : '최근 7일';
-      await sendSystemAlert({
+      const sentCount = await sendSystemAlert({
         dedupKey: `${tier.keyPrefix}:${r.id}`,
         cooldownMs: tier.cooldownMs,
         title: `싱크 적재 실패가 쌓이고 있습니다(${tier.name}).`,
@@ -272,7 +285,10 @@ async function checkSyncFailures(): Promise<void> {
         ],
         action: '싱크에이전트 화면에서 실패 내역을 확인해 주세요.',
       });
-      log(`싱크 실패 누적 통지(${tier.name}) — ${label}: ${r.fails}건`);
+      // ⛔ 실제로 나간 경우(>0)에만 만성을 막는다 — 급성이 쿨다운으로 생략됐는데 만성까지 막으면
+      //   둘 다 침묵해 사고가 조용히 진행된다(sendSystemAlert은 쿨다운 시 0을 준다).
+      if (tier.name === '급성' && sentCount > 0) acuteNotified.add(String(r.id));
+      log(`싱크 실패 누적 통지(${tier.name}) — ${label}: ${r.fails}건 (발송 ${sentCount}건)`);
     }
   }
 }

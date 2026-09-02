@@ -1644,6 +1644,9 @@ const getSyncOnlineBadge = (onlineStatus: string, dbStatus?: string) => {
   if (dbStatus === 'paused') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">⏸ 일시정지</span>;
   if (onlineStatus === 'online') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">● 정상</span>;
   if (onlineStatus === 'delayed') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">● 지연</span>;
+  // ★2026-09-02 하트비트만 끊기고 적재는 되는 반쪽 상태. 종전에는 이것도 "오프라인"이라 데이터가
+  //   2분 전까지 들어오는 에이전트를 죽은 것으로 읽게 했다. 적재 여부는 옆 "마지막 동기화" 칸이 말한다.
+  if (onlineStatus === 'sync_only') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800" title="적재는 되고 있지만 하트비트가 끊겨 원격 명령·자기 보고가 전달되지 않습니다.">● 하트비트 끊김</span>;
   return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">● 오프라인</span>;
 };
 

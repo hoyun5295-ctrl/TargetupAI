@@ -92,12 +92,21 @@ router.get('/build-tiers/download/:packageKey', authenticate, requireSuperAdmin,
 //   근거: sync-agent/src/scheduler/index.ts:125 `cron.schedule('0 * * * *', ...)` = 매 정각 1회
 //   문제: 이전 10분/30분 기준은 60분 주기 Agent를 "정상"인데도 하루의 1/3 시간 동안 "지연"으로 표시
 //   수정: online=1주기+여유(70분), delayed=2주기+여유(130분), offline=2주기 초과
-function getOnlineStatus(lastHeartbeatAt: string | null): 'online' | 'delayed' | 'offline' {
-  if (!lastHeartbeatAt) return 'offline';
-  const diffMinutes = (Date.now() - new Date(lastHeartbeatAt).getTime()) / (1000 * 60);
-  if (diffMinutes <= 70) return 'online';    // 1주기(60분) + 10분 여유
-  if (diffMinutes <= 130) return 'delayed';  // 2주기(120분) + 10분 여유 — 한 번 놓침 허용
-  return 'offline';                          // 2주기 초과 = 확실한 이상
+// ★ 2026-09-02 'sync_only' 추가 — heartbeat는 끊겼는데 **적재는 정상**인 반쪽 상태를 오프라인과 가른다.
+//   경위: 아난티가 2분 전까지 고객을 밀어 넣고 있는데 화면은 "오프라인"이었다(heartbeat만 보고 판정).
+//   heartbeat가 끊기면 명령 전달·자기 보고가 죽으므로 "정상"도 아니다. 둘 다 거짓이라 상태를 하나 더 둔다.
+//   ⛔ lastSyncAt을 online 판정에 섞지 말 것 — 적재가 된다고 명령이 가는 것은 아니다.
+function getOnlineStatus(
+  lastHeartbeatAt: string | null,
+  lastSyncAt?: string | null,
+): 'online' | 'delayed' | 'sync_only' | 'offline' {
+  const MIN = 1000 * 60;
+  const hbMinutes = lastHeartbeatAt ? (Date.now() - new Date(lastHeartbeatAt).getTime()) / MIN : Infinity;
+  if (hbMinutes <= 70) return 'online';      // 1주기(60분) + 10분 여유
+  if (hbMinutes <= 130) return 'delayed';    // 2주기(120분) + 10분 여유 — 한 번 놓침 허용
+  const syncMinutes = lastSyncAt ? (Date.now() - new Date(lastSyncAt).getTime()) / MIN : Infinity;
+  if (syncMinutes <= 130) return 'sync_only'; // 하트비트만 끊김 — 데이터는 들어오는 중
+  return 'offline';                          // 둘 다 끊김 = 확실한 이상
 }
 
 
@@ -156,7 +165,7 @@ router.get('/agents', authenticate, requireSuperAdmin, async (req: Request, res:
     errorRows.forEach((r: any) => { errorCountMap[r.agent_id] = r.cnt; });
 
     const result = agents.map((a: any) => {
-      const onlineStatus = getOnlineStatus(a.last_heartbeat_at);
+      const onlineStatus = getOnlineStatus(a.last_heartbeat_at, a.last_sync_at);
       return {
         id: a.id,
         company_id: a.company_id,
@@ -210,7 +219,7 @@ router.get('/agents/:agentId', authenticate, requireSuperAdmin, async (req: Requ
     }
 
     const agent = rows[0];
-    const onlineStatus = getOnlineStatus(agent.last_heartbeat_at);
+    const onlineStatus = getOnlineStatus(agent.last_heartbeat_at, agent.last_sync_at);
 
     // 최근 동기화 로그 20건
     // ★ 2026-06-13: failures(실패 행 상세 jsonb) 포함 — 어떤 행이 왜 실패했는지 화면에서 확인 가능하게
