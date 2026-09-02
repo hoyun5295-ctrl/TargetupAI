@@ -90,7 +90,7 @@ export const EMAIL_CTA_BUTTON_STYLES = ['primary', 'secondary', 'outline'] as co
  *  (2026-08-27 히어로와 같은 형태가 세 번째다). 공용 편집기에 속성을 더하면 DM 표와 이 표 양쪽에 등재한다.
  *  ⛔ 구도 2종 전부에서 반영돼야 한다 — 한쪽만 소비하면 "구도를 바꾸면 색이 사라진다"가 된다. */
 export const EMAIL_COUPON_PROPS: Array<{ prop: string; desc: string; probe: unknown }> = [
-  { prop: 'cta_url', desc: '연결 URL — "쿠폰 사용하기" 버튼 (미지정 = 버튼 없음 = 현행)', probe: 'https://shop.example.com/coupon' },
+  { prop: 'cta_url', desc: '연결 URL: "쿠폰 사용하기" 버튼 (미지정 = 버튼 없음 = 현행)', probe: 'https://shop.example.com/coupon' },
   { prop: 'label_color', desc: '할인 라벨 글씨색 (미지정 = 구도별 현행)', probe: '#c2185b' },
   { prop: 'card_bg_color', desc: '쿠폰 카드 배경색 (미지정 = 구도별 현행)', probe: '#fff7ed' },
   { prop: 'button_color', desc: '쿠폰코드 알약 배경 (미지정 = 구도별 현행)', probe: '#0f766e' },
