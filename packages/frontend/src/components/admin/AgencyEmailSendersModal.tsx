@@ -13,6 +13,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, Mail, Plus, Trash2, X } from 'lucide-react';
 import { CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_INPUT, CUI_LABEL, CUI_SELECT } from '../../utils/console-ui';
+import TablePagination from '../common/TablePagination';
+
+/** 등록 주소 한 페이지 건수 — 대행발송 다른 목록과 같은 수. 10개 이하면 페이저는 스스로 숨는다. */
+const SENDER_PER_PAGE = 10;
 
 interface SenderRow {
   id: string;
@@ -44,6 +48,10 @@ const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('toke
 
 export default function AgencyEmailSendersModal({ companyId, companyName, show, onClose, onChanged, showConfirm, showAlert }: Props) {
   const [senders, setSenders] = useState<SenderRow[]>([]);
+  // ★2026-09-02 페이징 — 등록 주소가 늘면 모달이 계속 길어지던 것을 10개씩 끊는다.
+  //   ⛔ 다중 등록 뱃지(shared)는 페이지가 아니라 senders 전체를 세야 한다 — 같은 주소가 다른 페이지에
+  //   있어도 "여러 귀속에 등록됨"은 사실이기 때문이다(아래 계산은 senders를 그대로 참조한다).
+  const [page, setPage] = useState(1);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -127,7 +135,9 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: v, userId, label: label.trim() || undefined }),
     }));
-    if (ok) { setEmail(''); setLabel(''); setFormError(''); emailRef.current?.focus(); }
+    // ★2026-09-02 등록 직후에는 1페이지로 돌린다 — 서버 정렬이 is_active DESC, created_at DESC라
+    //   새 주소가 목록 맨 앞에 온다. 뒤 페이지에 머물면 방금 등록한 것이 안 보여 "등록이 안 됐다"로 읽힌다.
+    if (ok) { setEmail(''); setLabel(''); setFormError(''); setPage(1); emailRef.current?.focus(); }
   };
 
   const toggleSender = (s: SenderRow) => {
@@ -160,6 +170,9 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
     const inactive = u.is_active !== true || u.status !== 'active';
     return inactive ? `${base} (비활성)` : base;
   };
+
+  const safePage = Math.min(page, Math.max(1, Math.ceil(senders.length / SENDER_PER_PAGE)));
+  const pagedSenders = senders.slice((safePage - 1) * SENDER_PER_PAGE, safePage * SENDER_PER_PAGE);
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/45 flex items-center justify-center p-4">
@@ -245,8 +258,9 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
                     등록된 주소가 없습니다. 등록 전에는 어떤 메일도 접수되지 않습니다.
                   </div>
                 ) : (
+                  <>
                   <ul className="space-y-2">
-                    {senders.map((s) => {
+                    {pagedSenders.map((s) => {
                       const ownerBroken = s.user_is_active !== true || s.user_status !== 'active';
                       // ★0827 §18-13 같은 활성 주소가 여러 귀속에 등록됐으면, 각 행의 지정 이름(표시명 · 없으면
                       //   로그인 아이디)이 담당자가 요청서 "청구 계정" 칸에 적을 값이다 — 뱃지로 보여 준다.
@@ -296,6 +310,15 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
                       );
                     })}
                   </ul>
+                  <TablePagination
+                    total={senders.length}
+                    page={safePage}
+                    perPage={SENDER_PER_PAGE}
+                    onChange={setPage}
+                    unit="개"
+                    accent="indigo"
+                  />
+                  </>
                 )}
               </div>
             </>

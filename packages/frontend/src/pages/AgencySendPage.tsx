@@ -383,12 +383,12 @@ export default function AgencySendPage() {
         show={composerOpen}
         prefill={composerPrefill}
         onClose={() => { setComposerOpen(false); setComposerPrefill(null); }}
-        onCreated={(r) => upsert(r)}
+        onCreated={(r) => { upsert(r); setPage(1); }}
       />
       <AgencyOneStepModal
         show={oneStepOpen}
         onClose={() => setOneStepOpen(false)}
-        onCreated={(list) => list.forEach(upsert)}
+        onCreated={(list) => { list.forEach(upsert); setPage(1); }}
       />
       <AgencySendDetail
         requestId={detailId}

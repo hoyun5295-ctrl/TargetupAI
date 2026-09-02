@@ -7,6 +7,10 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Inbox, Loader2, RefreshCw } from 'lucide-react';
+import TablePagination from '../common/TablePagination';
+
+/** 반려·오류 목록 한 페이지 건수 — 슈퍼관리자 다른 목록과 같은 수로 맞춘다. */
+const MAIL_PER_PAGE = 10;
 
 interface MailState { mailbox: string; last_ok_at: string | null; login_fail_count: number; paused_at: string | null; paused_reason: string | null }
 interface RejectedRow { uidl: string; from_email: string | null; reason: string | null; reply_status: string | null; claimed_at: string; company_name: string | null }
@@ -53,6 +57,9 @@ const fmt = (v: string | null) => (v ? new Date(v).toLocaleString('ko-KR', { mon
 
 export default function AgencyMailIntakePanel() {
   const [data, setData] = useState<MailIntake | null>(null);
+  // ★2026-09-02 페이징 — 반려 목록을 전량 그려 화면이 길어지던 것을 10건씩 끊는다.
+  //   새로고침으로 건수가 줄어 현재 페이지가 범위를 넘으면 표시값만 마지막 페이지로 당긴다.
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -81,6 +88,10 @@ export default function AgencyMailIntakePanel() {
   }, [load]);
 
   const countOf = (status: string) => data?.counts.find((c) => c.status === status)?.c || 0;
+
+  const rejected = data?.recentRejected || [];
+  const safePage = Math.min(page, Math.max(1, Math.ceil(rejected.length / MAIL_PER_PAGE)));
+  const pagedRejected = rejected.slice((safePage - 1) * MAIL_PER_PAGE, safePage * MAIL_PER_PAGE);
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
@@ -140,6 +151,7 @@ export default function AgencyMailIntakePanel() {
             {data.recentRejected.length === 0 ? (
               <p className="mt-2 text-sm text-gray-400">반려된 메일이 없습니다.</p>
             ) : (
+              <>
               <div className="mt-2 overflow-x-auto">
                 <table className="w-full text-[12.5px]">
                   <thead>
@@ -152,7 +164,7 @@ export default function AgencyMailIntakePanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.recentRejected.map((r) => (
+                    {pagedRejected.map((r) => (
                       <tr key={r.uidl} className="border-b border-gray-100">
                         <td className="py-2 pr-4 tabular-nums text-gray-600 whitespace-nowrap">{fmt(r.claimed_at)}</td>
                         <td className="py-2 pr-4 text-gray-800 max-w-[220px] truncate">{r.from_email || '(주소 없음)'}</td>
@@ -164,6 +176,15 @@ export default function AgencyMailIntakePanel() {
                   </tbody>
                 </table>
               </div>
+              <TablePagination
+                total={rejected.length}
+                page={safePage}
+                perPage={MAIL_PER_PAGE}
+                onChange={setPage}
+                unit="건"
+                accent="indigo"
+              />
+              </>
             )}
           </div>
         </div>
