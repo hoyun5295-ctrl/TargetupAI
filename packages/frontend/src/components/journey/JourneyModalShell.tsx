@@ -45,6 +45,20 @@ export default function JourneyModalShell({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
+  // ★2026-09-02 아래 effect가 이 둘을 **의존성으로 갖지 않기 위해** ref로 최신 값만 읽는다.
+  //   경위: 소비처는 전부 `onClose={() => ...}` 인라인이라 부모가 리렌더될 때마다 참조가 새로 생긴다.
+  //   그 참조가 의존성에 있으면 **글자 하나 칠 때마다** effect가 정리·재실행되어
+  //   정리에서 모달 밖으로 포커스를 돌려주고(restore) 재실행에서 첫 입력칸을 다시 잡았다.
+  //   결과 = 두 번째 입력칸에 글자를 못 넣고(커서가 위로 튐), 한글은 조합이 끊겨 자모가 분리됐다.
+  //   (접수 = 마케팅 여정 만들기 · 임은지 2026-09-02)
+  //   ⛔ 포커스 진입·복귀는 **열고 닫는 사건**에만 반응해야 한다. 렌더 횟수에 반응시키지 말 것.
+  const onCloseRef = useRef(onClose);
+  const disableDismissRef = useRef(disableDismiss);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    disableDismissRef.current = disableDismiss;
+  });
+
   useEffect(() => {
     if (!open) return;
     restoreRef.current = (document.activeElement as HTMLElement) || null;
@@ -61,7 +75,7 @@ export default function JourneyModalShell({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        if (!disableDismiss) onClose();   // opt-out 시 Esc 무동작(전파만 막는다 — 배경 단축키 오발동 차단)
+        if (!disableDismissRef.current) onCloseRef.current();   // opt-out 시 Esc 무동작(전파만 막는다 — 배경 단축키 오발동 차단)
         return;
       }
       if (e.key !== 'Tab') return;
@@ -92,7 +106,8 @@ export default function JourneyModalShell({
       // 닫은 뒤 열었던 자리로 돌아간다 — 안 하면 포커스가 문서 처음으로 튄다.
       restoreRef.current?.focus?.();
     };
-  }, [open, onClose, disableDismiss]);
+    // ⛔ 의존성은 `open` 하나다 — onClose·disableDismiss를 여기 넣으면 위 주석의 사고가 그대로 재현된다.
+  }, [open]);
 
   if (!open) return null;
 

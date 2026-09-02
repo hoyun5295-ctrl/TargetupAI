@@ -529,9 +529,9 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 **★0820(2) 발급명(RSRM_SalesMst) 대표 행 적재 — 배포완료·실측 성공**(커밋 `1213675` · `GW_DEPLOY_OK` · 대표 행 `V0001/V0001/rabd-api-01 API ingress` 생성 + `UpdTm` 매분 갱신 = UPSERT 경로 실측). 한줄로 화면의 "발송ID / 발급명"·선불 잔액은 `SalesMst` 축인데 리포터가 `SalesStts`만 넣어 V0001이 이름 없이 보였다. `reportNames`(reporter.go — 매 주기, 통계와 독립 best-effort): 켠 계정의 `pay_cust_id`+`name`을 대표 행(`StoreId=CustId`) UPSERT, **CustNm·UpdTm만 쓰고 RemAmt·카운터 불가침**(잔액 오염 차단 — 계약 테스트 고정). **`CustId varchar(5)` 물리 제약 실측(SHOW CREATE TABLE)** ⇒ 발급 규칙 = `V`+4자리(상한 V9999), 5자 초과는 조용한 절단 대신 거절+Error 로그(`filterNameRows` 계약). 검증 = `GW_CHECK_OK`(vet+전체 테스트, 계약 +3).
 **잔여** = 통계 축 UPSERT 실측 1건(같은 날 추가 발송 후 `SalesStts` **행이 늘지 않고 OkCnt만 커지는지** — 발급명 축은 실측됨) · 한줄로 쪽 `V0001` ↔ 회사 매핑 + 알림톡 단가(서수란 테스트 예정) · `sales@.65` 전용 비번 로테이션(지금은 root 비번 값 — ①새 비번 ALTER ②DSN 교체 ③재시작) · **`pay_cust_id` 자동 채번(V+연번)+적재 토글 관리 화면**(지금은 발급기·화면이 없어 수동 UPDATE — 상용 전 개선 과제).
 
-## 11. 2026-09-02 서수란 접수 4건 + Agent ARM64 예외 빌드 (전량 배포·산출 완료)
+## 11. 2026-09-02 서수란 접수 7건 + Agent ARM64 예외 빌드 (전량 배포·산출 완료)
 
-경위·실측·원인·정정·추가 과제는 게이트웨이 `status/BUG_HISTORY.md` 2026-09-02 항목 3개가 소유한다. 여기는 한줄로 측 판단과 포인터만.
+경위·실측·원인·정정·추가 과제는 게이트웨이 `status/BUG_HISTORY.md` 2026-09-02 항목 6개((1)~(6))가 소유한다. 여기는 한줄로 측 판단과 포인터만.
 
 | # | 접수 | 확정 원인 | 조치 | 배포 | 남은 것 |
 |---|---|---|---|---|---|
@@ -540,8 +540,11 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 | 3 | 라우트 배정하기가 한줄로 화면으로 감 · 라우팅·바인드 지정이 상용계층 패널에 미설정 | 버튼이 고객사를 안 바꿈(`setSelectedCustomerId` 경로 없음) · 두 화면은 다른 층(Agent 전용 / 발송계정·고객사) · 게이트웨이는 카테고리별 최소 우선순위 하나만 사용 | 버튼 고객사 전환 · 저장 대상 scopeId 고정 · 라벨 3곳 "Agent ID" | dist 13:00:59 `GW_DEPLOY_OK`(manifest `bbafb2fc8249`) | 화면 재현 1회 · 운영 답 = 고객사 기본 라인그룹 한 곳만 · invitotests2는 LMS·카카오 미라우팅 상태라 즉시 저장 필요 |
 | 4 | Agent Token 재설정이 16자 직접 입력 · 설정 파일 복사 불가·잘림 | 같은 endpoint를 body만 다르게 호출(`{password}` vs `{}`). 직접 입력은 0827 C-4 의도였으나 사례 0 · yaml 상자 maxHeight 없음·복사 버튼 없음 | 자동 생성·1회 표시·복사로 통일(서버 무변경) · 패널 복사 버튼 + 자기 스크롤 · 공용 `utils/clipboard.js` | 위 dist에 포함 | 화면 확인 2곳 |
 | 5 | **0901 식별코드 정정 재오픈**(등록부 갱신 뒤 사업자·계정·Agent 수정에 옛 코드) | 발급 시 등록부 값을 계정 컬럼에 복사한 스냅샷 + `048` CHECK가 `'301170011'` 리터럴 고정(invito_default 저장이 깨져 있던 상태) | 유효 코드 서버 단일 계산(`effective_sender_identity_code`·출처) · 스냅샷 저장 중단 · `migrations/054` · 화면 3파일 · 운영 스크립트 2종 | **전량 배포 완료**(054 `UPDATE 7` · api 8파일 15:27~15:28 · dist 15:30 manifest `b8bc43ba3574`) · 랩디 재시작 이후 접수 DONE | 화면 실측(목록 전 행 `205076968 공용` · Agent 수정 · invito 발송계정 저장 성공) → 서수란 접수 종결 |
+| 6 | **R9004 고객사 삭제 실패**(하위 2건이 사업자·계정에 안 보여 비활성화도 불가) | 마법사(Agent DB 폴링)가 만드는 agent형 발송계정에 삭제 경로가 없었다(서버 유형 게이트 409 + 화면 버튼 숨김). 고객사 삭제는 하위 0건(활성·비활성 불문)을 요구하므로 마법사 발급 고객사는 어떤 순서로도 못 지움. 유형 게이트는 보호가 아니었다(수정 모달로 유형을 api로 바꾸면 지워짐). alert_event는 세 경로 취급이 달랐다(sender 경로는 FK 500 · reseller 경로는 이력으로 셈) | 삭제 계약을 "비활성 + 하위 0 + 이력 0" 하나로 통일(유형 게이트 제거) · alert_event 세 경로 모두 정리 대상 · 고객사 차단 문구에 건수·다음 행동 · 화면: agent형 행 삭제 버튼 + 사업자·계정 모달 references 표시(공용 `utils/deleteReferences.js`) | api `sender-accounts.js` 16:51 · `resellers.js` 19:09 + dist 17:05 | **R9004 정리 실측 완료(판정 SQL 0·0·0)**. 삭제 모달 안내 줄 줄바꿈 정정 dist 재배포 완료 19:23(manifest `05df977572d1`) |
+| 7 | 상용계층 고객사 목록·마법사 선택에 비활성 고객사 노출 | 0827 F-4가 두 목록을 지시했는데 산출물에 상용계층이 빠짐(미구현, 회귀 아님). 서버는 이미 `is_active`를 내리고 마법사 저장은 비활성을 404로 막음 | `CommercialAccountsPage.jsx`만: "비활성 포함" 토글(기본 활성만) · 마법사 `customerOptions` 활성만 | dist 17:05 | 화면 육안(기본 목록에 R0002·R9004 없음, 체크 시 표시) |
+| 8 | **회선·라우트 지정**(라우팅·바인드에 지정했는데 계정 라우트는 "미설정·차단") | 층은 설계대로(엔진은 카테고리별 MIN(precedence) 한 층, Agent 행이 항상 이김). 화면이 자기 층(고객사·발송계정) 행만으로 "미설정·차단·미배정"을 단정해 엔진과 다른 말을 함. 발급 안내가 두 화면을 "또는"으로 안내. 식별코드 재오픈과 같은 형태 | 유효 라우트를 서버 한 곳(신규 `services/route-resolution.js` = router.go 사다리, 순수 JS·새 SQL 없음)에서 계산해 상세 API `effective_routes`로 · 라우트 패널 "실제 발송 라우트(엔진 판정)" 블록 · 하위 ID 라우팅 열 = 실제 나가는 카테고리 수 `N/3` · 발급 안내 "한 곳에서만 지정" | api 신규 서비스 16:50 · `commercialization.js` 19:11 + dist 17:05 | 화면 육안(R9006 invitotests3: SMS 대량발송_2 · Agent 전용, LMS/MMS·Kakao 발송 대기) · 운영 답 전달 |
 
-⛔ 세션 판단: **정답은 매번 SQL 한 줄이 정했다**(접수자 가설은 셋 다 판정 조건에 없었다) · Codex 생략 = Harold 방침(적대 검토는 워크플로 반박 검증 + 직접 재독으로 대체) · 로컬 명령은 런북이 bash라도 PowerShell로 변환해 낸다(0902 재발).
+⛔ 세션 판단: **정답은 매번 SQL 한 줄이 정했다**(접수자 가설은 셋 다 판정 조건에 없었다) · Codex 생략 = Harold 방침(적대 검토는 워크플로 반박 검증 + 직접 재독으로 대체) · 로컬 명령은 런북이 bash라도 PowerShell로 변환해 낸다(0902 재발 · 저녁 배포는 `Get-FileHash … .Hash.ToLower()` 판이 통했다) · **삭제 가능 여부를 계정 유형으로 가르면 사슬이 끊긴다** — 하위 0 + 이력 0 한 축만 · **화면은 자기 층 행으로 "미설정·차단"을 단정하지 않는다** — 유효 값은 서버 한 곳에서 계산해 표시(식별코드 재오픈과 같은 교훈, [[feedback_moving_a_truth_source_means_all_readers_and_constraints]]).
 
 ## 9. 관련 문서
 

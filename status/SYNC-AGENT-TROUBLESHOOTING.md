@@ -55,6 +55,11 @@ return 'offline';                            // 2주기 초과 = 확실한 이�
 
 **교훈**: Agent 주기와 서버 판정 기준은 **항상 동기화**되어야 함. 하드코딩 값 있을 경우 관련 기능 변경 시 반드시 양쪽 동시 점검.
 
+> ⚠ **2026-09-02 같은 부류가 다시 났다 → §2-10 (3)에서 상수 자체를 걷어냈다.**
+> 여기서 70/130으로 고친 것은 "heartbeat 60분"을 상수로 옮겨 적은 것일 뿐이었고, **동기화 주기는 고객사마다 다르고 기본이 360분**이라
+> 6시간 주기 고객사가 정상인데도 오프라인으로 떴다. 지금은 [sync-intervals.ts](../packages/backend/src/utils/sync-intervals.ts)가 그 에이전트의 실제 설정을 읽어 자른다.
+> **교훈 갱신: 주기는 상수로 적는 것이 아니라 원장에서 읽는다.**
+
 ---
 
 ### 2-2. customers full sync 전건 실패 — `region` 컬럼 중복
@@ -311,6 +316,80 @@ DB 컨테이너는 로컬에 이미 있다 — `mysql:8.0`·`mysql:5.7`·`postgr
 
 ---
 
+### 2-10. 2026-09-02 아난티 — 화면·알림·적재가 동시에 거짓말한 4중 사고 (전부 우리 코드)
+
+접수는 "정상으로 붙어 있는데 오프라인으로 보이고, 문자는 이상하게 오고, 적재는 실패한다"는 한 줄이었다.
+파 보니 **원인이 다른 결함 넷**이 겹쳐 있었다. 판정 = **전부 서버 코드. 에이전트 재배포 불필요**(고객사 박스 exe 무관).
+버그 등재 = [BUGS B-0902-4](BUGS.md). 배포 = 2026-09-02 `63c32340`.
+
+#### (1) 고객 25,244건 손실 — 중복 폰 1건이 청크 500건을 죽였다
+
+증상: 문자 알림 "최근 24시간 실패 25,244건(배치 47개) · 계통 오류(폴백 생략): ON CONFLICT DO UPDATE command cannot affect row a second".
+
+인과: ①한 배치에 같은 폰 2행(정상 상황 · upload 경로는 2026-08-14부터 "첫 행만 남긴다"로 처리) → ②**싱크 경로에만 dedupe가 없었다**
+→ ③충돌 축이 `(company_id, phone)`이라 PostgreSQL이 **SQLSTATE 21000** 거절 → ④`isRowLevelDbError`가 `22`·`23`만 행 수준으로 봐서
+**21000이 계통 오류로 분류** → 단건 폴백 생략 → ⑤청크 500건 통째 실패. 53청크 × 약 476건.
+
+> ④가 피해를 500배로 키웠다. 21000은 "배치 안에 중복이 있다"는 뜻이라 **단건으로 쪼개면 그냥 풀린다.**
+> 폴백이 부하를 늘리는 계통 오류(연결·구문·자원)와 정반대인데 같은 취급을 받고 있었다.
+
+해결: `isRowLevelDbError`에 `21000` 편입(sync·upload·manual 공유 CT) + 싱크에 upload와 같은 폰 dedupe.
+⛔ **매장은 dedupe 전에 `storesByPhone` Map으로 모아 보존한다** — 다매장 고객이 중복의 이유일 수 있어 첫 행만 남기고 끝내면 `customer_stores`가 사라진다.
+
+#### (2) 구매 98,600건 전량 드롭 — AI가 구매 테이블에 고객 필드를 매핑했다
+
+증상: 구매 `full` 1배치가 53초 돌고 **성공 0 / 실패 98,600**, 그런데 `failures`는 비어 있음.
+
+> **진단 함정**: `sync_logs`에 두 종류가 섞여 있다.
+> **서버 적재 로그** = `batch_index` 있음 · 사유는 `failures` jsonb
+> **에이전트 자기 보고** = `batch_index` **NULL** · 사유는 **`error_message`**
+> 이 건은 후자였다. `failures`만 보고 "사유가 없다"고 판단하면 헛돈다.
+
+`error_message` = `[NORMALIZE_FAILED] 고객 전화번호 정규화 실패 또는 누락`.
+
+근본: 매핑은 설치 시 **AI가 추천**한다(`POST /api/sync/ai-mapping`). 그런데
+①`buildFieldMapReference()`가 **인자를 안 받아** 대상과 무관하게 늘 **고객 필드표만** 줬다. `customer_phone`·`purchase_date`가 목록에 없으니
+AI가 고를 수 없고, 전화번호를 보면 `phone`, 구매일을 보면 `recent_purchase_date`를 고르는 것이 그 목록에서는 최선이다.
+②`sanitizeMapping`의 유효 키도 고객 필드 고정이라, 프롬프트만 고쳐 AI가 `customer_phone`을 골라도 **후처리에서 null로 버려진다**(이중 구멍).
+
+아난티 실제 저장값: `CHEK_TRAN_TEL -> phone` · `CHEK_TRAN_ADAT -> recent_purchase_date` · `CHEK_TRAN_TAMT -> total_purchase_amount`.
+에이전트는 구매 행에서 `customer_phone`·`purchase_date`를 찾으므로([normalize/index.ts](../sync-agent/src/normalize/index.ts) `normalizePurchaseBatch`) 둘 다 없어 **서버로 보내기도 전에** 전량 버렸다.
+
+해결: 구매 전용 필드표를 [sync-mapping-fields.ts](../packages/backend/src/utils/sync-mapping-fields.ts) `SYNC_PURCHASE_FIELD_GUIDE`(목록+뜻 단일 진실)로 세우고
+`ai-mapping.ts`가 `target === 'purchases'`면 그 표로 프롬프트를 만든다. `sanitizeMapping`도 `target`을 받아 허용 키를 가른다.
+**저장 게이트도 신설** — `update_config`가 그동안 "mapping 객체가 있는가"만 보고 값은 한 번도 안 봤다. 이제 대상 밖 필드와 필수 필드 누락을 거절한다
+("'phone'은 customers 필드입니다" · "이대로 저장하면 purchases 동기화가 전량 실패합니다").
+
+> ⛔ **AI는 주어진 목록 밖을 고를 수 없다. 목록이 곧 게이트다.** AI 잘못도 담당자 잘못도 아니었다.
+> 고친 뒤에는 매핑 화면에서 **AI 추천을 다시 받아 저장**하면 된다. 필드를 손으로 하나씩 고를 일이 아니다.
+
+#### (3) 적재 중인데 "오프라인" — 판정이 heartbeat만 봤다 (§2-1의 재발)
+
+`last_heartbeat_at`이 NULL이면 sync가 2분 전이어도 무조건 offline이었다. 그 조합이 실제로 나온다(설치 직후 첫 heartbeat 전).
+`sync_only` 상태를 신설해 **"하트비트 끊김"(앰버)** 으로 구분한다. heartbeat가 끊기면 원격 명령·자기 보고가 죽으니 "정상"도 거짓이고,
+데이터가 들어오니 "오프라인"도 거짓이다. ⛔ `lastSyncAt`을 online 판정에 섞지 않는다(적재된다고 명령이 가는 것은 아니다).
+
+**그리고 §2-1이 남긴 상수를 걷어냈다.** 70분/130분은 "heartbeat 60분 주기" 가정인데
+**동기화 주기는 고객사마다 다르고 기본이 360분(6시간)** 이다(`config` jsonb ▸ 레거시 컬럼 ▸ 기본값 3겹).
+6시간 주기 고객사는 3시간만 지나도 오프라인으로 떴다. [sync-intervals.ts](../packages/backend/src/utils/sync-intervals.ts) CT로 그 에이전트의 실제 주기를 읽어 자른다.
+덤: 상세 화면이 표시하던 주기도 컬럼만 보고 기본 60을 써서 실제(360)와 달랐다. 같은 CT로 통일.
+
+#### (4) 같은 사고에 문자 2통
+
+급성(24h)·만성(7d)이 같은 25,244건으로 두 통 왔다. **기간 필터는 정상이었다** — 실패가 전부 24시간 안에 터져 두 창의 값이 같았을 뿐이다.
+급성이 **실제로 발송된 경우에만**(`sendSystemAlert` 반환 > 0) 같은 회차 만성을 생략한다.
+⛔ 쿨다운으로 급성이 생략됐는데 만성까지 막으면 둘 다 침묵하므로 반환값으로 갈랐다. ⛔ 만성 자체는 유지(하루 5건씩 새는 이새형 출혈은 급성 문턱에 안 걸린다).
+
+#### 미해결 — 타임존 실패 소수
+
+`time zone displacement out of range: "+197005-12"` 형태가 3,999건 중 6건. 코드가 `22`라 단건 폴백이 정상 작동해 나머지는 적재됐다.
+사유 목록을 모으면 `+YYYYMM-12` 꼴이고 **월 자리가 00이거나 13 이상인 값이 섞여 있다**. `'19712312'::date`는 다른 오류(`date/time field value out of range`)라 8자리 YYYYMMDD는 아니다.
+**원본 값이 우리 로그에 남지 않아**(failures가 `rowError.message`만 저장) 고객사 데이터 문제인지 우리 변환 문제인지 아직 못 가른다.
+`dataType === 'date'` 필드는 2026-08-14부터 `normalizeDate`를 거치므로(실패 시 null) 그 경로는 안전하고, 정규화를 안 타는 `else` 분기가 의심 지점이다.
+**부수 과제 = 실패 로그에 필드명·원본 값을 남기는 것.** 지금 구조로는 같은 일이 또 나도 원인 데이터를 볼 수 없다.
+
+---
+
 ## § 3. 진단 체크리스트 (문제 발생 시 순서대로 실행)
 
 ### STEP 1. 슈퍼관리자 UI에서 상태 확인
@@ -334,6 +413,13 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "
 - **대기명령수가 계속 쌓이고 하트비트 시간이 멈춰 있으면** → Agent가 요청을 안 보내는 중 (STEP 5로)
 
 ### STEP 3. sync_logs 최근 이력 + 실패 상세
+
+> ⚠ **이 표에는 두 종류의 행이 섞여 있다(2026-09-02 실측 · §2-10 (2)).**
+> **서버 적재 로그** = `batch_index` 있음 · 실패 사유는 `failures` jsonb
+> **에이전트 자기 보고** = `batch_index` **NULL** · 실패 사유는 **`error_message`**
+> `fail_count`는 큰데 `failures`가 비어 있으면 후자다. **`error_message`를 봐라.**
+> 아난티 구매 98,600건 전량 드롭이 그 형태였고, `failures`만 보다가 "사유가 없다"고 한동안 헤맸다.
+
 ```bash
 docker exec -i targetup-postgres psql -U targetup targetup -c "
   SELECT sl.started_at AT TIME ZONE 'Asia/Seoul' AS 시작,
