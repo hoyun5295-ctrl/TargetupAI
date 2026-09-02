@@ -1650,10 +1650,13 @@ const handleSyncReleaseSubmit = async () => {
 
 // ★ D131 후속(2026-04-21): DB의 status='paused'면 online 여부와 무관하게 "일시정지" 표시
 //   Agent는 살아있으나(heartbeat 정상) 스케줄러만 pause된 상태.
-const getSyncOnlineBadge = (onlineStatus: string, dbStatus?: string) => {
+// ★2026-09-02(2) 판정 기준은 고객사마다 다르다(동기화 기본 360분). 배지에 그 에이전트의 실제 주기를
+//   담아 "1시간 전인데 왜 지연이냐"에 화면이 스스로 답하게 한다. 값은 서버가 판정에 쓴 것과 같은 것이다.
+const getSyncOnlineBadge = (onlineStatus: string, dbStatus?: string, hbMin?: number, syncMin?: number) => {
+  const cycleHint = hbMin ? `하트비트 ${hbMin}분 주기${syncMin ? ` · 동기화 ${syncMin}분 주기` : ''} 기준` : '';
   if (dbStatus === 'paused') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">⏸ 일시정지</span>;
-  if (onlineStatus === 'online') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">● 정상</span>;
-  if (onlineStatus === 'delayed') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">● 지연</span>;
+  if (onlineStatus === 'online') return <span title={cycleHint} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">● 정상</span>;
+  if (onlineStatus === 'delayed') return <span title={cycleHint ? `${cycleHint} · 한 주기를 놓쳤습니다` : ''} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">● 지연</span>;
   // ★2026-09-02 하트비트만 끊기고 적재는 되는 반쪽 상태. 종전에는 이것도 "오프라인"이라 데이터가
   //   2분 전까지 들어오는 에이전트를 죽은 것으로 읽게 했다. 적재 여부는 옆 "마지막 동기화" 칸이 말한다.
   if (onlineStatus === 'sync_only') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800" title="적재는 되고 있지만 하트비트가 끊겨 원격 명령·자기 보고가 전달되지 않습니다.">● 하트비트 끊김</span>;
@@ -13128,7 +13131,7 @@ const handleApproveRequest = async (id: string) => {
                       <td className="px-4 py-3 text-gray-700">{agent.agent_name || '-'}</td>
                       <td className="px-4 py-3 text-gray-500">{agent.agent_version || '-'}</td>
                       <td className="px-4 py-3 text-gray-500">{agent.db_type || '-'}</td>
-                      <td className="px-4 py-3 text-center">{getSyncOnlineBadge(agent.online_status, agent.status)}</td>
+                      <td className="px-4 py-3 text-center">{getSyncOnlineBadge(agent.online_status, agent.status, agent.heartbeat_interval_min, agent.sync_interval_customers_min)}</td>
                       <td className="px-4 py-3 text-gray-500">{syncTimeAgo(agent.last_heartbeat_at)}</td>
                       <td className="px-4 py-3 text-gray-500">
                         {syncTimeAgo(agent.last_sync_at)}
@@ -13549,7 +13552,7 @@ const handleApproveRequest = async (id: string) => {
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <div className="text-xs text-gray-400 mb-1">상태</div>
-                      <div>{getSyncOnlineBadge(syncAgentDetail.agent?.online_status, syncAgentDetail.agent?.status)}</div>
+                      <div>{getSyncOnlineBadge(syncAgentDetail.agent?.online_status, syncAgentDetail.agent?.status, undefined, syncAgentDetail.agent?.sync_interval_customers)}</div>
                     </div>
                   </div>
 

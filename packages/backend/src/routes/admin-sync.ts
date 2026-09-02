@@ -17,6 +17,8 @@ import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, bu
 import { isAgentVersionGte, ACK_MIN_AGENT_VERSION } from '../utils/agent-protocol';
 // ★ 2026-09-02 매핑 계약 — 대상별 허용 필드·필수 필드 검증 CT
 import { validateSyncMapping } from '../utils/sync-mapping-fields';
+// ★ 2026-09-02(2) 주기 해석 CT — 온라인 판정을 고객사별 실제 설정으로 자른다(상수 금지)
+import { resolveAgentIntervals, AGENT_INTERVAL_DEFAULTS } from '../utils/sync-intervals';
 import path from 'path';
 import fs from 'fs';
 
@@ -98,17 +100,24 @@ router.get('/build-tiers/download/:packageKey', authenticate, requireSuperAdmin,
 //   경위: 아난티가 2분 전까지 고객을 밀어 넣고 있는데 화면은 "오프라인"이었다(heartbeat만 보고 판정).
 //   heartbeat가 끊기면 명령 전달·자기 보고가 죽으므로 "정상"도 아니다. 둘 다 거짓이라 상태를 하나 더 둔다.
 //   ⛔ lastSyncAt을 online 판정에 섞지 말 것 — 적재가 된다고 명령이 가는 것은 아니다.
+// ★ 2026-09-02(2) 주기를 상수로 박지 않는다 — **동기화 주기는 고객사마다 다르고 기본이 360분(6시간)** 이다.
+//   종전 70분/130분 고정은 6시간 주기 고객사를 정상인데도 오프라인으로 표시한다.
+//   각 에이전트의 실제 설정(resolveAgentIntervals)으로 자른다: 1주기 이내 = 정상, 2주기 이내 = 한 번 놓침.
+const STATUS_GRACE_MIN = 10; // 실행 지연·시계 오차 여유
 function getOnlineStatus(
   lastHeartbeatAt: string | null,
   lastSyncAt?: string | null,
+  intervals?: { heartbeatMin: number; customersMin: number },
 ): 'online' | 'delayed' | 'sync_only' | 'offline' {
   const MIN = 1000 * 60;
+  const hbCycle = intervals?.heartbeatMin ?? AGENT_INTERVAL_DEFAULTS.heartbeatMin;
+  const syncCycle = intervals?.customersMin ?? AGENT_INTERVAL_DEFAULTS.customersMin;
   const hbMinutes = lastHeartbeatAt ? (Date.now() - new Date(lastHeartbeatAt).getTime()) / MIN : Infinity;
-  if (hbMinutes <= 70) return 'online';      // 1주기(60분) + 10분 여유
-  if (hbMinutes <= 130) return 'delayed';    // 2주기(120분) + 10분 여유 — 한 번 놓침 허용
+  if (hbMinutes <= hbCycle + STATUS_GRACE_MIN) return 'online';
+  if (hbMinutes <= hbCycle * 2 + STATUS_GRACE_MIN) return 'delayed';  // 한 번 놓침까지는 허용
   const syncMinutes = lastSyncAt ? (Date.now() - new Date(lastSyncAt).getTime()) / MIN : Infinity;
-  if (syncMinutes <= 130) return 'sync_only'; // 하트비트만 끊김 — 데이터는 들어오는 중
-  return 'offline';                          // 둘 다 끊김 = 확실한 이상
+  if (syncMinutes <= syncCycle * 2 + STATUS_GRACE_MIN) return 'sync_only'; // 하트비트만 끊김 — 데이터는 들어오는 중
+  return 'offline';                                                   // 둘 다 끊김 = 확실한 이상
 }
 
 
@@ -129,7 +138,11 @@ router.get('/agents', authenticate, requireSuperAdmin, async (req: Request, res:
         sa.last_heartbeat_at,
         sa.last_sync_at,
         sa.total_customers_synced,
-        sa.created_at
+        sa.created_at,
+        -- ★2026-09-02(2) 온라인 판정을 고객사별 실제 주기로 자르기 위해 설정을 함께 읽는다
+        sa.config,
+        sa.sync_interval_customers,
+        sa.sync_interval_purchases
       FROM sync_agents sa
       LEFT JOIN companies c ON c.id = sa.company_id
       ORDER BY sa.created_at DESC
@@ -167,7 +180,8 @@ router.get('/agents', authenticate, requireSuperAdmin, async (req: Request, res:
     errorRows.forEach((r: any) => { errorCountMap[r.agent_id] = r.cnt; });
 
     const result = agents.map((a: any) => {
-      const onlineStatus = getOnlineStatus(a.last_heartbeat_at, a.last_sync_at);
+      const intervals = resolveAgentIntervals(a.config, a);
+      const onlineStatus = getOnlineStatus(a.last_heartbeat_at, a.last_sync_at, intervals);
       return {
         id: a.id,
         company_id: a.company_id,
@@ -183,6 +197,10 @@ router.get('/agents', authenticate, requireSuperAdmin, async (req: Request, res:
         total_customers_synced: a.total_customers_synced || 0,
         today_sync_count: todaySyncMap[a.id] || 0,
         recent_error_count: errorCountMap[a.id] || 0,
+        // ★2026-09-02(2) 판정에 쓴 실제 주기를 함께 내려준다 — 화면이 "왜 지연인지"를 말할 수 있어야 한다
+        //   (1시간 전인데 지연으로 뜨는 이유가 그 에이전트의 주기 때문임을 담당자가 알 수 있게).
+        heartbeat_interval_min: intervals.heartbeatMin,
+        sync_interval_customers_min: intervals.customersMin,
         created_at: a.created_at
       };
     });
@@ -221,7 +239,7 @@ router.get('/agents/:agentId', authenticate, requireSuperAdmin, async (req: Requ
     }
 
     const agent = rows[0];
-    const onlineStatus = getOnlineStatus(agent.last_heartbeat_at, agent.last_sync_at);
+    const onlineStatus = getOnlineStatus(agent.last_heartbeat_at, agent.last_sync_at, resolveAgentIntervals(agent.config, agent));
 
     // 최근 동기화 로그 20건
     // ★ 2026-06-13: failures(실패 행 상세 jsonb) 포함 — 어떤 행이 왜 실패했는지 화면에서 확인 가능하게
@@ -263,8 +281,10 @@ router.get('/agents/:agentId', authenticate, requireSuperAdmin, async (req: Requ
         status: agent.status,
         is_online: onlineStatus === 'online',
         online_status: onlineStatus,
-        sync_interval_customers: agent.sync_interval_customers ?? 60,
-        sync_interval_purchases: agent.sync_interval_purchases ?? 30,
+        // ★2026-09-02(2) 컬럼만 보고 기본 60/30을 쓰던 자리 — config jsonb의 원격 설정이 우선이고
+        //   실제 에이전트가 받는 기본은 360이라, 화면이 실제와 다른 주기를 말하고 있었다. CT로 통일.
+        sync_interval_customers: resolveAgentIntervals(agent.config, agent).customersMin,
+        sync_interval_purchases: resolveAgentIntervals(agent.config, agent).purchasesMin,
         last_heartbeat_at: agent.last_heartbeat_at,
         last_sync_at: agent.last_sync_at,
         total_customers_synced: agent.total_customers_synced || 0,
