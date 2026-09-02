@@ -4060,7 +4060,7 @@ const campaignData = {
         <a href="/guide" className="hover:text-gray-600 transition">기능 안내</a>
         <span>|</span>
         {/* ★ 2026-08-22 (Harold 명시): 헤더에서 내려온 자리. ?v= 캐시 버스터는 LoginPage 2곳과 동시에 올린다 */}
-        <a href="/about-ai-operator.html?v=5" target="_blank" rel="noopener" className="hover:text-gray-600 transition">AI Operator 소개</a>
+        <a href="/about-ai-operator.html?v=6" target="_blank" rel="noopener" className="hover:text-gray-600 transition">AI Operator 소개</a>
         <span>|</span>
         <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">개인정보처리방침</a>
         <span>|</span>
