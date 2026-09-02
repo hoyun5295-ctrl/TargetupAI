@@ -130,7 +130,7 @@ Harold 지시대로 뷰티·패션·행사·이벤트에 51종을 몰았고, 빈
 | 클래스·체험 +5 | 16 | 소수 정예 · 주말 단기 · 초보 환영 · 재료 포함 · 수료 전시 |
 
 **검증** = BE tsc 0 · 카탈로그 계약 6건 · backend 전체 222파일 3,537건 · id 중복 0(302종).
-**남은 것 = §5 예시 실샘플 배치 53장**(장당 약 20초·약 230원 → 대략 18분·12,000원). 배치 전까지 갤러리는 카드 목업으로 뜬다.
+**§5 예시 실샘플 배치 53장 = 2026-09-02 완료**(실패 0 · `remaining` 53→0 · 전 항목 `generated` 확인). 갤러리가 302종 전부 실샘플로 뜬다.
 
 ### 4-1-A. 추천 용도(`useCase`) — 2026-08-11 신설 (Harold 지시)
 
@@ -166,11 +166,14 @@ Harold 지시대로 뷰티·패션·행사·이벤트에 51종을 몰았고, 빈
 - 토큰은 슈퍼관리자 로그인으로 받는다. **super는 단일 세션**이라 이 로그인이 열어둔 관리자 화면을 로그아웃시킨다.
 - **발급 절차·계정·호출 주소 = [OPS.md §8-B](../status/OPS.md)가 소유한다.** ★2026-08-11 — 여기에 그 링크가 없어
   매번 명령을 새로 조립하다 틀렸다(도메인으로 호출, 필드명 오기). 아래 스크립트의 `$TOKEN`은 §8-B로 받은 값이다.
+- ⛔ **★2026-09-02 정정 — 아래 스크립트가 그 경고를 스스로 어기고 있었다**(URL이 `https://hanjul.ai`였다).
+  호출은 **서버 안 `http://127.0.0.1:3000`** 이다(nginx가 `/api/`를 여기로 프록시). **위임 문구만 두고 코드블록을
+  안 맞추면 사람은 코드블록을 복사한다** — 소유 문서를 가리켰으면 블록 자체도 그 문서와 같게 유지한다.
 
 ```bash
 TOKEN="[슈퍼관리자 토큰]"
 while :; do
-  R=$(curl -s -X POST https://hanjul.ai/api/image-studio/template-samples/generate -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"limit":2}')
+  R=$(curl -s -X POST http://127.0.0.1:3000/api/image-studio/template-samples/generate -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"limit":2}')
   echo "$R"
   case "$R" in
     *'"remaining":0'*) echo "완료"; break;;
