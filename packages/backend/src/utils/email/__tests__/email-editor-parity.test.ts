@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { renderEmailSections } from '../email-section-renderer';
-import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS, EMAIL_HEADER_PROPS, EMAIL_CTA_BUTTON_PROPS, EMAIL_CTA_BUTTON_STYLES } from '../email-property-contract';
+import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS, EMAIL_HEADER_PROPS, EMAIL_CTA_BUTTON_PROPS, EMAIL_CTA_BUTTON_STYLES, EMAIL_COUPON_PROPS, EMAIL_COUPON_TREATMENTS } from '../email-property-contract';
 import type { Section } from '../../dm/dm-section-registry';
 
 const PRODUCTS = [
@@ -259,4 +259,55 @@ describe('CTA — 버튼색이 스타일 3종 전부에서 반영된다', () => 
     const painted = rc({ style: 'primary', color: '#0f766e' }, 'bar');
     expect(painted).toContain('#0f766e');
   });
+});
+
+// ────────────────────────────────────────────────────────────
+// 쿠폰 — 2026-09-02 남지현 접수(cmtjhsd8a06y9jnotvcc8pqo6)
+//   "쿠폰 탭에서 URL을 삽입해도 클릭 되는 부분이 없다. 제목·본문·버튼 모두 클릭 불가."
+//   renderCoupon이 cta_url을 한 줄도 안 읽어 <a>가 생성되지 않았고, 대조해 보니 색 4개도 같은 상태였다.
+//   DM SSR·편집 캔버스는 5개 전부 소비 중이었다 = 이메일만 죽어 있었다.
+// ────────────────────────────────────────────────────────────
+const coupon = (props: Record<string, unknown>, treatment?: string): Section =>
+  ({ id: 's-cp', type: 'coupon', order: 0, visible: true, treatment,
+     props: { discount_label: '30% 할인', discount_type: 'percent', coupon_code: 'SPRING30', ...props } } as unknown as Section);
+
+const rcp = (props: Record<string, unknown>, treatment?: string) =>
+  renderEmailSections([coupon(props, treatment)], {});
+
+describe('쿠폰 — 편집기 속성이 이메일 발송 HTML에 반영된다 (구도 전부)', () => {
+  for (const t of EMAIL_COUPON_TREATMENTS) {
+    for (const { prop, desc, probe } of EMAIL_COUPON_PROPS) {
+      it(`[${t}] ${prop} (${desc}) — 값을 주면 출력이 실제로 달라진다`, () => {
+        const base = rcp({}, t);
+        const painted = rcp({ [prop]: probe }, t);
+        expect(painted, `[${t}]에서 ${prop}가 소비되지 않는다 (등재만 하고 렌더러가 안 읽음)`).not.toBe(base);
+      });
+    }
+
+    it(`[${t}] 연결 URL이 실제 <a href>로 나간다 (접수 축 — 클릭 가능해야 한다)`, () => {
+      const html = rcp({ cta_url: 'https://shop.example.com/coupon' }, t);
+      expect(html, '<a href>가 없으면 화면에서 드래그만 되고 클릭이 안 된다').toContain('href="https://shop.example.com/coupon"');
+      expect(html).toContain('쿠폰 사용하기');
+    });
+
+    it(`[${t}] 색 지정값이 출력 문자열에 그대로 실린다`, () => {
+      const html = rcp({ label_color: '#c2185b', card_bg_color: '#fff7ed', button_color: '#0f766e', code_text_color: '#7c3aed' }, t);
+      for (const c of ['#c2185b', '#fff7ed', '#0f766e', '#7c3aed']) {
+        expect(html, `${c} 가 출력에 없다`).toContain(c);
+      }
+    });
+
+    it(`[${t}] 5개 미지정 = 옛 출력 그대로다 (회귀 0)`, () => {
+      expect(rcp({ cta_url: undefined, label_color: undefined, card_bg_color: undefined, button_color: undefined, code_text_color: undefined }, t))
+        .toBe(rcp({}, t));
+    });
+
+    it(`[${t}] 미지정이면 버튼이 생기지 않는다 (옛 캠페인에 없던 요소가 끼어들지 않게)`, () => {
+      expect(rcp({}, t)).not.toContain('쿠폰 사용하기');
+    });
+
+    it(`[${t}] http(s)가 아닌 URL은 버튼을 만들지 않는다 (renderPromoCode와 같은 가드)`, () => {
+      expect(rcp({ cta_url: 'javascript:alert(1)' }, t)).not.toContain('쿠폰 사용하기');
+    });
+  }
 });

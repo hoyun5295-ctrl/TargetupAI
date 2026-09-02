@@ -305,26 +305,51 @@ function renderCoupon(p: CouponProps, b: EmailBrand, treatment: string): string 
   if (p.expire_date) cond.push(esc(formatKoreanDateTimeDisplay(p.expire_date)) + '까지');
   if (p.usage_condition) cond.push(esc(p.usage_condition));
 
+  // ★ 2026-09-02 편집기 속성 소비(남지현 접수 cmtjhsd8a06y9jnotvcc8pqo6) — 연결 URL과 색 4개가
+  //   편집기에는 있는데 이 함수가 한 번도 안 읽던 것. 접수 원문 = "URL을 삽입해도 클릭 되는 부분이 없다".
+  //   DM SSR(dm-section-renderer 303·322·339행)과 편집 캔버스(CouponSection.tsx)는 5개 전부 소비 중이라
+  //   **이메일만** 죽어 있었다(공용 편집기 = CouponEditor.tsx 하나를 두 채널이 쓴다).
+  //   ⛔ 미지정이면 전부 옛 값이라 기존 캠페인 출력은 한 글자도 안 바뀐다(무회귀).
+  //   ⛔ 구도 2종 모두에 넣는다 — 한쪽만 소비하면 "구도를 바꾸면 색이 사라진다"가 된다.
+  //   근거표 = email-property-contract.ts EMAIL_COUPON_PROPS · 검증 = __tests__/email-editor-parity.test.ts
+  //   버튼은 renderButton CT를 그대로 쓴다(URL 정규화·https 가드·아웃룩 VML이 이미 그 안에 있다).
+  //   라벨은 DM과 같은 "쿠폰 사용하기" 고정 — 다르게 두면 편집 미리보기와 실제 메일이 갈린다.
+  //   버튼 색은 편집기 안내대로 공통 '버튼 색'(accent_color)이 담당한다(button_color = 쿠폰코드 알약 배경).
+  const ctaUrl = normalizeWebUrl(p.cta_url || '');
+  const ctaHtml = /^https?:\/\//i.test(ctaUrl)
+    ? `<div style="margin-top:${b.sp[5]}">${renderButton({ label: '쿠폰 사용하기', url: ctaUrl, style: 'primary' }, b)}</div>`
+    : '';
+
   if (treatment === 'spotlight') {
+    const cardBgS = p.card_bg_color ? esc(p.card_bg_color) : '#171717';
+    const labelColorS = p.label_color ? esc(p.label_color) : '#ffffff';
+    const codeBgS = p.button_color ? esc(p.button_color) : 'rgba(255,255,255,0.06)';
+    const codeTextS = p.code_text_color ? esc(p.code_text_color) : b.accent;
     const condLineS = cond.length ? `<div style="font-size:${b.type.tiny.size};color:rgba(255,255,255,0.66);margin-top:${b.sp[3]}">${cond.join(' · ')}</div>` : '';
     const overlineS = `<div style="font-size:${b.type.tiny.size};font-weight:800;letter-spacing:0.18em;color:${b.accent};margin-bottom:${b.sp[2]}">COUPON</div>`;
-    const labelS = label ? `<div style="font-family:${b.displayFont};font-size:34px;line-height:1.2;font-weight:800;letter-spacing:-0.02em;color:#ffffff">${label}</div>` : '';
+    const labelS = label ? `<div style="font-family:${b.displayFont};font-size:34px;line-height:1.2;font-weight:800;letter-spacing:-0.02em;color:${labelColorS}">${label}</div>` : '';
     const codeS = p.coupon_code
-      ? `<div style="margin-top:${b.sp[4]}"><span style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:rgba(255,255,255,0.06);border:1px dashed ${b.accent};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:800;letter-spacing:3px;color:${b.accent}">${esc(p.coupon_code)}</span></div>`
+      ? `<div style="margin-top:${b.sp[4]}"><span style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:${codeBgS};border:1px dashed ${b.accent};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:800;letter-spacing:3px;color:${codeTextS}">${esc(p.coupon_code)}</span></div>`
       : '';
-    return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[8]} ${b.sp[6]};background:#171717;border-radius:${b.radius.lg};text-align:center">${overlineS}${labelS}${condLineS}${codeS}</td></tr></table></td></tr>`;
+    return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[8]} ${b.sp[6]};background:${cardBgS};border-radius:${b.radius.lg};text-align:center">${overlineS}${labelS}${condLineS}${codeS}${ctaHtml}</td></tr></table></td></tr>`;
   }
 
+  const cardBg = p.card_bg_color ? esc(p.card_bg_color) : '';
+  const mainBg = cardBg || b.primarySoft;
+  const stubBg = cardBg || b.cardBg;
+  const labelColor = p.label_color ? esc(p.label_color) : b.primary;
+  const codeBg = p.button_color ? esc(p.button_color) : b.primarySoft;
+  const codeText = p.code_text_color ? esc(p.code_text_color) : b.primary;
   const condLine = cond.length ? `<div style="font-size:${b.type.tiny.size};color:${b.textMuted};margin-top:${b.sp[3]}">${cond.join(' · ')}</div>` : '';
   const overline = `<div style="font-size:${b.type.tiny.size};font-weight:800;letter-spacing:0.18em;color:${b.primary};margin-bottom:${b.sp[2]}">COUPON</div>`;
-  const labelTag = label ? `<div style="font-family:${b.displayFont};font-size:30px;line-height:1.25;font-weight:800;letter-spacing:-0.02em;color:${b.primary}">${label}</div>` : '';
+  const labelTag = label ? `<div style="font-family:${b.displayFont};font-size:30px;line-height:1.25;font-weight:800;letter-spacing:-0.02em;color:${labelColor}">${label}</div>` : '';
   const topRadius = p.coupon_code ? `${b.radius.lg} ${b.radius.lg} 0 0` : b.radius.lg;
-  const mainRow = `<tr><td style="padding:${b.sp[8]} ${b.sp[6]} ${b.sp[6]};background:${b.primarySoft};border:2px dashed ${b.primaryDashed};border-bottom:${p.coupon_code ? 'none' : `2px dashed ${b.primaryDashed}`};border-radius:${topRadius};text-align:center">${overline}${labelTag}${condLine}</td></tr>`;
+  const mainRow = `<tr><td style="padding:${b.sp[8]} ${b.sp[6]} ${b.sp[6]};background:${mainBg};border:2px dashed ${b.primaryDashed};border-bottom:${p.coupon_code ? 'none' : `2px dashed ${b.primaryDashed}`};border-radius:${topRadius};text-align:center">${overline}${labelTag}${condLine}</td></tr>`;
   const stubRow = p.coupon_code
-    ? `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};background:${b.cardBg};border:2px dashed ${b.primaryDashed};border-top:2px dashed ${b.primaryDashed};border-radius:0 0 ${b.radius.lg} ${b.radius.lg};text-align:center"><div style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:${b.primarySoft};border:1px dashed ${b.primary};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:800;letter-spacing:3px;color:${b.primary}">${esc(p.coupon_code)}</div></td></tr>`
+    ? `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};background:${stubBg};border:2px dashed ${b.primaryDashed};border-top:2px dashed ${b.primaryDashed};border-radius:0 0 ${b.radius.lg} ${b.radius.lg};text-align:center"><div style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:${codeBg};border:1px dashed ${b.primary};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:800;letter-spacing:3px;color:${codeText}">${esc(p.coupon_code)}</div></td></tr>`
     : '';
   const card = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${mainRow}${stubRow}</table>`;
-  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}">${card}</td></tr>`;
+  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}">${card}${ctaHtml}</td></tr>`;
 }
 
 function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string): string {

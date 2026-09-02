@@ -80,3 +80,22 @@ export const EMAIL_CTA_BUTTON_PROPS: Array<{ prop: string; desc: string; probe: 
 
 /** CTA 버튼 스타일 = 이 셋 전부에서 지정색이 반영돼야 한다(편집기 Select의 값과 같아야 한다). */
 export const EMAIL_CTA_BUTTON_STYLES = ['primary', 'secondary', 'outline'] as const;
+
+/** 쿠폰 — 편집기(CouponEditor)가 노출하는 속성 중 이메일 렌더러가 소비해야 하는 것.
+ *  ★ 2026-09-02 남지현 접수(`cmtjhsd8a06y9jnotvcc8pqo6`) "쿠폰 탭에서 URL을 넣어도 클릭되는 부분이 없다" —
+ *  `renderCoupon`이 `cta_url`을 한 줄도 읽지 않아 `<a>`가 아예 생성되지 않았다(제목·본문·버튼 전부 죽은 텍스트).
+ *  접수는 URL 하나였지만 대조해 보니 **색 4개도 같은 상태**였다. DM SSR(`dm-section-renderer` 303·322·339행)과
+ *  편집 캔버스(`CouponSection.tsx`)는 5개 전부 소비 중이었으니 **이메일만** 죽어 있었다.
+ *  쿠폰을 원장에 안 넣어 둔 탓에 파리티가 이 결함을 잡을 수단이 없었다 — 섹션을 빼놓으면 원장이 아니다
+ *  (2026-08-27 히어로와 같은 형태가 세 번째다). 공용 편집기에 속성을 더하면 DM 표와 이 표 양쪽에 등재한다.
+ *  ⛔ 구도 2종 전부에서 반영돼야 한다 — 한쪽만 소비하면 "구도를 바꾸면 색이 사라진다"가 된다. */
+export const EMAIL_COUPON_PROPS: Array<{ prop: string; desc: string; probe: unknown }> = [
+  { prop: 'cta_url', desc: '연결 URL — "쿠폰 사용하기" 버튼 (미지정 = 버튼 없음 = 현행)', probe: 'https://shop.example.com/coupon' },
+  { prop: 'label_color', desc: '할인 라벨 글씨색 (미지정 = 구도별 현행)', probe: '#c2185b' },
+  { prop: 'card_bg_color', desc: '쿠폰 카드 배경색 (미지정 = 구도별 현행)', probe: '#fff7ed' },
+  { prop: 'button_color', desc: '쿠폰코드 알약 배경 (미지정 = 구도별 현행)', probe: '#0f766e' },
+  { prop: 'code_text_color', desc: '쿠폰코드 글씨색 (미지정 = 구도별 현행)', probe: '#7c3aed' },
+];
+
+/** 쿠폰 구도 = 이메일 렌더러가 가르는 두 갈래(`renderCoupon`의 spotlight 분기와 그 밖). */
+export const EMAIL_COUPON_TREATMENTS = ['classic', 'spotlight'] as const;
