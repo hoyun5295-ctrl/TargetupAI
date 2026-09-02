@@ -163,6 +163,27 @@ export function parsePlannerEventInput(body: any): ParseResult {
     seen.add(key);
   }
 
+  // ★ 2026-09-02 같은 날 같은 채널·같은 대상은 하나뿐이다 — 1일 행사(시작일 = 종료일)는 앵커가 달라도 같은 날이라
+  //   앵커 중복 키만으로는 걸러지지 않고, 실행부는 하루에 채널당 한 건만 싣는다(Codex 2R). 기입 단계에서 막는다.
+  const seenDay = new Set<string>();
+  for (const t of touchpoints) {
+    const key = `${t.channel}:${computeTouchpointDate(t.timing, startsOn, endsOn)}:${t.timing.audience || 'all'}`;
+    if (seenDay.has(key)) return { ok: false, error: '같은 날에 같은 채널을 두 번 보낼 수 없습니다. 행사 기간이 하루면 시점을 하나만 골라 주세요.' };
+    seenDay.add(key);
+  }
+
+  // ★ 2026-09-02 같은 날의 문자와 모바일 DM은 문자 1통(링크 포함)으로 나간다 — 대상 축이 다르면 한 통으로 합칠 수 없어
+  //   같은 사람에게 두 통이 간다(참여자는 전체의 부분집합). 기입 단계에서 막는다(정책 = 기능 문서 §3-20).
+  for (const s of touchpoints.filter((t) => t.channel === 'sms')) {
+    const sDate = computeTouchpointDate(s.timing, startsOn, endsOn);
+    const clash = touchpoints.find((d) => d.channel === 'dm'
+      && computeTouchpointDate(d.timing, startsOn, endsOn) === sDate
+      && (d.timing.audience || 'all') !== (s.timing.audience || 'all'));
+    if (clash) {
+      return { ok: false, error: '같은 날의 문자와 모바일 DM은 같은 대상이어야 합니다. 문자 1통에 DM 링크를 실어 보냅니다.' };
+    }
+  }
+
   // 참여자 축을 고르려면 그 행사에 참여 접수 경로(이메일 안내)가 있어야 한다 — 없으면 대상이 영원히 0이다.
   const hasEmailEntry = touchpoints.some((t) => t.channel === 'email');
   const needsEntry = touchpoints.some((t) => t.timing.audience === 'participants');

@@ -112,6 +112,8 @@ export async function loadLiveTouchpoints(input: {
   monthFrom: string;
   companyId?: string;
   limit?: number;
+  /** ★ 2026-09-02 페이지 순회용(리마인드처럼 전 행을 봐야 하는 패스). 정렬은 고정(starts_on·created_at)이라 커서 대신 offset으로 충분하다. */
+  offset?: number;
 }): Promise<PlannerTouchpointRow[]> {
   const params: any[] = [input.statuses, LIVE_EVENT_STATUS, input.monthFrom];
   let companyClause = '';
@@ -125,6 +127,8 @@ export async function loadLiveTouchpoints(input: {
     channelClause = ` AND t.channel = ANY($${params.length})`;
   }
   params.push(Math.min(Math.max(1, input.limit || 500), 2000));
+  const limitIdx = params.length;
+  params.push(Math.max(0, Math.floor(input.offset || 0)));
   const r = await query(
     `SELECT t.id, t.event_id, t.company_id, t.channel, t.timing_rule, t.status,
             t.asset_ref, t.exec_ref, t.exec_meta,
@@ -135,9 +139,28 @@ export async function loadLiveTouchpoints(input: {
       WHERE t.status = ANY($1)
         AND e.status = ANY($2)
         AND e.plan_month >= $3${companyClause}${channelClause}
-      ORDER BY e.starts_on ASC, t.created_at ASC
-      LIMIT $${params.length}`,
+      ORDER BY e.starts_on ASC, t.created_at ASC, t.id ASC
+      LIMIT $${limitIdx} OFFSET $${params.length}`,
     params,
+  );
+  return (r.rows as any[]).map(mapRow);
+}
+
+/**
+ * 그 행사의 터치포인트 전부(상태 무관) — 같은 시점의 문자·DM 형제를 판정할 때 쓴다(★ 2026-09-02).
+ * ⛔ `loadLiveTouchpoints`는 상태로 거르므로 형제 판정에 쓰면 보류·발송 완료 형제가 보이지 않는다.
+ */
+export async function loadEventTouchpoints(companyId: string, eventId: string): Promise<PlannerTouchpointRow[]> {
+  const r = await query(
+    `SELECT t.id, t.event_id, t.company_id, t.channel, t.timing_rule, t.status,
+            t.asset_ref, t.exec_ref, t.exec_meta,
+            e.plan_month, e.title, e.starts_on::text AS starts_on, e.ends_on::text AS ends_on, e.benefit_text, e.products,
+            e.created_by, e.status AS event_status
+       FROM planner_touchpoints t
+       JOIN planner_events e ON e.id = t.event_id AND e.company_id = t.company_id
+      WHERE t.event_id = $1::uuid AND t.company_id = $2::uuid
+      ORDER BY t.created_at ASC`,
+    [eventId, companyId],
   );
   return (r.rows as any[]).map(mapRow);
 }
@@ -236,6 +259,99 @@ export async function stampExecMeta(companyId: string, touchpointId: string, pat
   );
 }
 
+/**
+ * 여러 행에 같은 표식을 **한 문장**으로 남긴다(상태 무변경) — ★ 2026-09-02 적대 검토(표식 두 문장의 부분 실패 창).
+ * 발송 시도 표식을 캐리어·동반 행에 따로 두 번 쓰면, 두 번째가 끊겼을 때 캠페인은 만들지도 않았는데 캐리어에만 표식이 남는다.
+ */
+export async function stampExecMetaMany(companyId: string, touchpointIds: string[], patch: Record<string, any>): Promise<void> {
+  const ids = touchpointIds.filter(Boolean);
+  if (ids.length === 0) return;
+  await query(
+    `UPDATE planner_touchpoints
+        SET exec_meta = COALESCE(exec_meta, '{}'::jsonb) || $3::jsonb
+      WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid`,
+    [ids, companyId, JSON.stringify(patch)],
+  );
+}
+
+/**
+ * 표식이 **바뀔 때만** 병합하고 그 사실을 돌려준다(상태 무변경) — ★ 2026-09-02 Codex 1R.
+ * 통지의 선점으로 쓴다: 같은 사실을 두 호출(화면 조립·워커)이 동시에 보아도 RETURNING을 받은 쪽만 알린다.
+ */
+export async function stampExecMetaIfChanged(
+  companyId: string,
+  touchpointId: string,
+  key: string,
+  value: string,
+  patch: Record<string, any> = {},
+): Promise<boolean> {
+  const r = await query(
+    `UPDATE planner_touchpoints
+        SET exec_meta = COALESCE(exec_meta, '{}'::jsonb) || jsonb_build_object($3::text, $4::text) || $5::jsonb
+      WHERE id = $1::uuid AND company_id = $2::uuid
+        AND COALESCE(exec_meta->>$3::text, '') IS DISTINCT FROM $4::text
+      RETURNING id`,
+    [touchpointId, companyId, key, value, JSON.stringify(patch)],
+  );
+  return r.rows.length > 0;
+}
+
+/**
+ * 여러 행의 상태를 **한 문장**으로 옮긴다 — ★ 2026-09-02 Codex 1R(문자·DM 쌍 마감 분리 지적).
+ * 캐리어 문자와 동반 DM은 같은 발송의 두 행이라 성공·보류·생략·잠금 마감을 따로 두 번 쓰면 그 사이에 재기동될 때
+ * 한 행만 남는다(DM만 producing → 고아 회수 → 문자 재개가 링크 없이 나간다). 단일 UPDATE는 원자적이다.
+ * `fromStatuses`에 맞지 않는 행은 건드리지 않고, 실제로 옮긴 id만 돌려준다(효과로 판정 · 6원칙 ②).
+ * lock_reason은 **항상 명시값**으로 쓴다(null = 비운다). exec_ref는 null이면 기존 값 유지.
+ */
+export async function setTouchpointStates(
+  companyId: string,
+  rows: Array<{ id: string; status: string; lockReason: string | null; execRef?: string | null; execMetaPatch?: Record<string, any> }>,
+  fromStatuses: string[],
+): Promise<string[]> {
+  if (rows.length === 0) return [];
+  const r = await query(
+    `UPDATE planner_touchpoints t
+        SET status = v.status,
+            lock_reason = v.lock_reason,
+            exec_ref = COALESCE(v.exec_ref, t.exec_ref),
+            exec_meta = COALESCE(t.exec_meta, '{}'::jsonb) || v.patch
+       FROM unnest($2::uuid[], $3::text[], $4::text[], $5::uuid[], $6::jsonb[]) AS v(id, status, lock_reason, exec_ref, patch)
+      WHERE t.id = v.id AND t.company_id = $1::uuid AND t.status = ANY($7)
+      RETURNING t.id`,
+    [
+      companyId,
+      rows.map((x) => x.id),
+      rows.map((x) => x.status),
+      rows.map((x) => (x.lockReason ? String(x.lockReason).slice(0, 300) : null)),
+      rows.map((x) => x.execRef ?? null),
+      rows.map((x) => JSON.stringify(x.execMetaPatch || {})),
+      fromStatuses,
+    ],
+  );
+  return (r.rows as any[]).map((row) => String(row.id));
+}
+
+/**
+ * exec_meta에서 키를 **지우고** 다른 표식을 남긴다(상태 무변경) — ★ 2026-09-02.
+ * 쓰는 자리 = 발송 시도 표식(`send_started_at`)을 남긴 뒤 **커밋이 확정적으로 안 된** 경우(잔액 부족 등).
+ * 표식을 그대로 두면 한 통도 안 나간 달의 대행료 환불이 "발송 시작됨"으로 막힌다(countMonthWork가 그 키를 실행으로 센다).
+ * ⛔ 커밋 여부가 **미확정**인 실패에는 쓰지 않는다 — 그때는 표식이 곧 이중 발송을 막는 유일한 근거다.
+ */
+export async function clearExecMetaKeys(
+  companyId: string,
+  touchpointId: string,
+  keys: string[],
+  patch: Record<string, any> = {},
+): Promise<void> {
+  if (keys.length === 0) return;
+  await query(
+    `UPDATE planner_touchpoints
+        SET exec_meta = (COALESCE(exec_meta, '{}'::jsonb) - $3::text[]) || $4::jsonb
+      WHERE id = $1::uuid AND company_id = $2::uuid`,
+    [touchpointId, companyId, keys, JSON.stringify(patch)],
+  );
+}
+
 /** 행사 상태 전이 — 조건부(CAS). 승인 원장이 소유한 전이(approved·cancelled)는 여기서 건드리지 않는다. */
 export async function setEventStatus(
   companyId: string,
@@ -299,7 +415,12 @@ export async function notifyPlanner(
 export async function countMonthWork(companyId: string, planMonth: string): Promise<{ produced: number; executed: number }> {
   const r = await query(
     `SELECT
-       COUNT(*) FILTER (WHERE t.asset_ref IS NOT NULL)::int AS produced,
+       -- ★ 2026-09-02 담당자가 완성·발행하지 않은 DM **초안**은 제작 실적이 아니다(생성비 5만 나갔고 고객에게 나간 것이 없다).
+       --   종전 asset_ref는 발행까지 끝난 DM을 뜻했다 — 초안을 실적으로 세면 아무것도 안 나간 달의 대행료 환불이 막힌다.
+       COUNT(*) FILTER (
+         WHERE t.asset_ref IS NOT NULL
+           AND NOT (t.channel = 'dm' AND COALESCE(t.exec_meta->>'dm_stage', '') = 'drafted' AND t.exec_ref IS NULL)
+       )::int AS produced,
        -- ⛔ **발송 시도 표식도 실행으로 센다.** 커밋은 됐는데 참조 기록이 늦거나 실패한 창이 있고,
        --    그 창에서 "아무 일도 안 했다"로 읽으면 나간 발송에 대행료를 환불한다.
        COUNT(*) FILTER (
@@ -326,11 +447,16 @@ export async function countMonthWork(companyId: string, planMonth: string): Prom
  * 잠금 순서는 **승인 원장 → companies**로 통일한다(환불도 그 트랜잭션 안에서 일어난다).
  *
  * 반환 false = 이번 주기에 손대지 않는다(취소됨·이미 선점됨·원장 없음).
+ *
+ * ★ 2026-09-02 `companions` — 같은 잠금·같은 트랜잭션에서 **함께** 선점할 형제 접점(같은 시점의 모바일 DM).
+ *   문자 1통에 DM 링크를 실어 보내려면 두 행이 같은 주인(producing)이어야 한다. 하나라도 CAS가 0행이면 **전부 되돌린다**
+ *   (한쪽만 선점된 채 나가면 "무엇을 집었는가"와 "무엇을 보내는가"가 갈린다). 동반 행에도 같은 표식 키를 새긴다.
  */
 export async function claimTouchpointUnderPlanLock(
   tp: { companyId: string; id: string; eventId: string; planMonth: string },
   fromStatuses: string[],
   stampKey = 'claimed_at',
+  companions: Array<{ id: string; fromStatuses: string[] }> = [],
 ): Promise<boolean> {
   const client = await pool.connect();
   try {
@@ -368,6 +494,21 @@ export async function claimTouchpointUnderPlanLock(
     if (claimed.rows.length === 0) {
       await client.query('ROLLBACK');
       return false;
+    }
+    // ④ 동반 접점도 같은 잠금 안에서 — 전부 성공해야 커밋한다(부분 선점 금지).
+    for (const c of companions) {
+      const co = await client.query(
+        `UPDATE planner_touchpoints
+            SET status = 'producing',
+                exec_meta = COALESCE(exec_meta, '{}'::jsonb) || jsonb_build_object($4::text, to_jsonb(NOW()))
+          WHERE id = $1::uuid AND company_id = $2::uuid AND event_id = $5::uuid AND status = ANY($3)
+          RETURNING id`,
+        [c.id, tp.companyId, c.fromStatuses, stampKey, tp.eventId],
+      );
+      if (co.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return false;
+      }
     }
     await client.query('COMMIT');
     return true;
@@ -432,13 +573,17 @@ export async function isPlannerPlanLive(companyId: string, eventId: string): Pro
 /**
  * 선점 heartbeat — 긴 단계(스팸 실테스트·대량 발송) 앞에서 소유권 시각을 갱신한다.
  * 이것이 있어야 lease 회수가 **살아 있는 작업**을 고아로 오인하지 않는다.
+ * ★ 2026-09-02 여러 행을 받는다 — 문자 1통에 실리는 DM 동반 접점도 같은 작업이라 **함께** 갱신해야
+ *   대조 워커가 동반 행만 고아로 보고 회수하는 일이 없다.
  */
-export async function touchClaim(companyId: string, touchpointId: string): Promise<void> {
+export async function touchClaim(companyId: string, touchpointIds: string | string[]): Promise<void> {
+  const ids = (Array.isArray(touchpointIds) ? touchpointIds : [touchpointIds]).filter(Boolean);
+  if (ids.length === 0) return;
   await query(
     `UPDATE planner_touchpoints
         SET exec_meta = COALESCE(exec_meta, '{}'::jsonb) || jsonb_build_object('claimed_at', to_jsonb(NOW()))
-      WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'producing'`,
-    [touchpointId, companyId],
+      WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid AND status = 'producing'`,
+    [ids, companyId],
   ).catch((e: any) => console.warn('[planner-touchpoint] heartbeat 실패:', e?.message || e));
 }
 

@@ -34,11 +34,11 @@ import {
   PlannerApprovalError,
 } from '../utils/planner-approval';
 // ★ 2026-08-13 Phase 3·4 — 제작 착수(승인 직후 best-effort) · 보류 재개 · 결과 브리핑 · 참여 착지.
-import { runPlannerProductionPass, resumeHeldTouchpoint } from '../utils/planner-production';
+import { runPlannerProductionPass, resumeHeldTouchpoint, describeMessagingTouchpoints, inspectDmForCarry, isDmCarryable, type MessagingTouchpointInfo } from '../utils/planner-production';
 import { runPlannerAlimtalkPass } from '../utils/planner-alimtalk';
 import { loadTouchpointById } from '../utils/planner-touchpoint';
 // 대상 축 판정은 실행부와 같은 순수 CT를 쓴다 — 화면에 보여주는 축과 나가는 축이 갈리지 않게.
-import { resolveAudienceMode } from '../utils/planner-execution';
+import { resolveAudienceMode, buildDmEditPath, describeDmResidue } from '../utils/planner-execution';
 import { loadMonthlyResult } from '../utils/planner-report';
 import { renderJoinLandingHtml, verifyJoinToken } from '../utils/planner-participation';
 // ★ 2026-08-13(2) 캘린더 공휴일 — 표 CT 하나가 진실이다.
@@ -151,7 +151,7 @@ router.get('/events', async (req: Request, res: Response) => {
     if (eventIds.length > 0) {
       // 회사 조건을 자식 조회에도 직접 건다 — 부모로만 격리하면 회사가 섞인 자식 행이 목록·합계에 들어온다.
       const tp = await query(
-        `SELECT id, event_id, channel, timing_rule, format, est_credits, status, lock_reason
+        `SELECT id, event_id, channel, timing_rule, format, est_credits, status, lock_reason, asset_ref, exec_meta
            FROM planner_touchpoints
           WHERE event_id = ANY($1) AND company_id = $2::uuid
           ORDER BY created_at ASC`,
@@ -163,6 +163,25 @@ router.get('/events', async (req: Request, res: Response) => {
         tpByEvent.set(String(r.event_id), arr);
       }
     }
+    // ★ 2026-09-02 DM 단계("완성 필요 / 발행 완료")와 "같은 시점 문자에 링크로 실림" 표시 — 발행 상태는 live로 읽는다.
+    //   실패해도 목록은 그대로 연다(표시 한 겹이 캘린더를 막지 않는다).
+    const evDates = new Map<string, { startsOn: string; endsOn: string }>(
+      ev.rows.map((r: any) => [String(r.id), { startsOn: String(r.starts_on).slice(0, 10), endsOn: String(r.ends_on).slice(0, 10) }]),
+    );
+    const messagingInfo: Map<string, MessagingTouchpointInfo> = await describeMessagingTouchpoints(
+      companyId,
+      Array.from(tpByEvent.values()).flat().map((t: any) => {
+        const d = evDates.get(String(t.event_id)) || { startsOn: '', endsOn: '' };
+        return {
+          id: String(t.id), eventId: String(t.event_id), channel: t.channel, timing: t.timing_rule,
+          scheduledOn: computeTouchpointDate(t.timing_rule, d.startsOn, d.endsOn),
+          status: String(t.status || 'planned'), assetRef: t.asset_ref ? String(t.asset_ref) : null, execMeta: t.exec_meta || {},
+        };
+      }),
+    ).catch((e: any) => {
+      console.warn('[marketing-planner] DM 단계 조립 실패(표시 생략):', e?.message || e);
+      return new Map();
+    });
     const events = ev.rows.map((r: any) => {
       const touchpoints = (tpByEvent.get(String(r.id)) || []).map((t: any) => ({
         id: String(t.id),
@@ -175,6 +194,7 @@ router.get('/events', async (req: Request, res: Response) => {
         scheduledOn: computeTouchpointDate(t.timing_rule, String(r.starts_on).slice(0, 10), String(r.ends_on).slice(0, 10)),
         status: t.status,
         lockReason: t.lock_reason,
+        ...(messagingInfo.get(String(t.id)) || {}),
       }));
       return {
         id: String(r.id),
@@ -512,8 +532,16 @@ router.get('/touchpoints/:id/detail', async (req: Request, res: Response) => {
         }
       }
     } else if (tp.channel === 'dm') {
-      const url = tp.execMeta?.dm_url ? String(tp.execMeta.dm_url) : null;
-      if (url) asset = { kind: 'dm', url };
+      // ★ 2026-09-02 발행·완성 확인 전에는 주소를 주지 않는다(초안 미리보기 주소가 "발행된 소재"로 보이면 사고 재현).
+      const url = String(tp.execMeta?.dm_stage || '') === 'published' && tp.execMeta?.dm_url ? String(tp.execMeta.dm_url) : null;
+      const dmId = tp.assetRef || (tp.execMeta?.dm_id ? String(tp.execMeta.dm_id) : null);
+      if (url || dmId) {
+        asset = {
+          kind: 'dm', url,
+          stage: url ? 'published' : 'drafted',
+          editPath: dmId && !['sent', 'skipped'].includes(tp.status) ? buildDmEditPath(dmId) : null,
+        };
+      }
     } else if (tp.channel === 'inapp') {
       const id = assetRef || tp.execMeta?.inapp_message_id || null;
       if (id) {
@@ -563,6 +591,30 @@ router.get('/touchpoints/:id/detail', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/marketing-planner/dm/:dmId/carry-check — 담당자가 방금 발행한 DM이 문자에 실릴 수 있는가 (★ 2026-09-02)
+ * DM 빌더의 "발행 완료" 안내가 이 값으로 "아직 채워지지 않은 자리가 있다"를 말한다 — 발행 검수에는 빈 자리 규칙이 없어
+ * 담당자는 끝났다고 믿고 손을 뗀다(조용한 증발). 읽기만 한다(상태 변경·통지 0).
+ */
+router.get('/dm/:dmId/carry-check', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  try {
+    const state = await inspectDmForCarry(companyId, String(req.params.dmId));
+    if (!state.exists) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    return res.json({
+      published: state.published,
+      stopped: state.stopped,
+      ready: isDmCarryable(state),
+      residue: state.residue.length > 0 ? describeDmResidue(state.residue) : null,
+      checkError: !!state.checkError,
+    });
+  } catch (error: any) {
+    console.error('플래너 DM 실물 확인 실패:', error);
+    return res.status(500).json({ error: 'DM 상태 확인 실패' });
+  }
+});
+
 // POST /api/marketing-planner/touchpoints/:id/resume — 보류(크레딧) 재개 1클릭
 //   같은 멱등키라 이미 낸 제작비가 다시 빠지지 않는다. 발송 자체는 예정일에 실행 워커가 한다.
 router.post('/touchpoints/:id/resume', async (req: Request, res: Response) => {
@@ -585,6 +637,10 @@ router.post('/touchpoints/:id/resume', async (req: Request, res: Response) => {
     }
     if (outcome === 'locked') {
       return res.status(409).json({ error: '다시 시작했지만 진행하지 못했습니다. 표시된 사유를 확인해 주세요.', code: 'STILL_LOCKED' });
+    }
+    // ★ 2026-09-02 모바일 DM은 초안 대기로 돌아간다 — 담당자가 완성·발행해야 예정일에 실린다(그 사실을 화면이 말한다).
+    if (outcome === 'awaiting') {
+      return res.json({ status: outcome, message: '초안 대기로 되돌렸습니다. 모바일 DM을 완성해 발행하면 예정일 문자에 실립니다.' });
     }
     return res.json({ status: outcome });
   } catch (error: any) {

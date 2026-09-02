@@ -72,7 +72,7 @@ export async function loadMonthlyResult(companyId: string, planMonth: string): P
   const eventIds = evRes.rows.map((r: any) => r.id);
   const tpRows = eventIds.length > 0
     ? (await query(
-        `SELECT id, event_id, channel, timing_rule, status, lock_reason, asset_ref, exec_ref
+        `SELECT id, event_id, channel, timing_rule, status, lock_reason, asset_ref, exec_ref, exec_meta
            FROM planner_touchpoints
           WHERE event_id = ANY($1) AND company_id = $2::uuid
           ORDER BY created_at ASC`,
@@ -101,11 +101,24 @@ export async function loadMonthlyResult(companyId: string, planMonth: string): P
     );
     for (const row of e.rows as any[]) emailMap.set(String(row.id), row);
   }
+  // ★ 2026-09-02 모바일 DM 열람 실측 — dm_pages.view_count(뷰어 비콘이 채운다). 링크가 실린 문자의 반응이 이 수다.
+  const dmIds = tpRows.filter((t: any) => t.channel === 'dm' && t.asset_ref).map((t: any) => String(t.asset_ref));
+  const dmViewMap = new Map<string, number>();
+  if (dmIds.length > 0) {
+    const d = await query(
+      `SELECT id, view_count FROM dm_pages WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid`,
+      [dmIds, companyId],
+    );
+    for (const row of d.rows as any[]) dmViewMap.set(String(row.id), Number(row.view_count) || 0);
+  }
 
   let touchpointCount = 0;
   let sentCount = 0;
   let successCount = 0;
   let participantsTotal = 0;
+  // ★ 2026-09-02 같은 캠페인을 두 접점이 참조한다(문자 1통에 DM 링크) — 합계는 **캠페인 단위로 한 번만** 더한다.
+  //   접점마다 더하면 발송·성공이 정확히 2배가 되고 그 값이 월말 통지 문자로 나간다(§3-6 실측 원칙 위반).
+  const countedCampaigns = new Set<string>();
   const events: ResultEvent[] = [];
 
   for (const ev of evRes.rows as any[]) {
@@ -130,12 +143,24 @@ export async function loadMonthlyResult(companyId: string, planMonth: string): P
         if (t.status === 'sent') metrics.push({ label: '게시', value: `${startsOn} ~ ${endsOn}` });
       } else {
         const row = campaignMap.get(String(t.exec_ref));
+        const carriedBy = t.exec_meta?.carried_by ? String(t.exec_meta.carried_by) : '';
         if (row) {
-          sentCount += Number(row.target_count) || 0;
-          successCount += Number(row.success_count) || 0;
-          metrics.push({ label: '대상', value: fmt(row.target_count) });
-          metrics.push({ label: '성공', value: fmt(row.success_count) });
-          if (Number(row.fail_count) > 0) metrics.push({ label: '실패', value: fmt(row.fail_count) });
+          if (!countedCampaigns.has(String(t.exec_ref))) {
+            countedCampaigns.add(String(t.exec_ref));
+            sentCount += Number(row.target_count) || 0;
+            successCount += Number(row.success_count) || 0;
+          }
+          if (carriedBy) {
+            // 문자 1통에 링크로 실려 나간 DM — 발송 수치는 그 문자의 것이라 여기서는 "실림"만 말한다.
+            metrics.push({ label: '문자', value: '링크로 함께 발송' });
+          } else {
+            metrics.push({ label: '대상', value: fmt(row.target_count) });
+            metrics.push({ label: '성공', value: fmt(row.success_count) });
+            if (Number(row.fail_count) > 0) metrics.push({ label: '실패', value: fmt(row.fail_count) });
+          }
+        }
+        if (channel === 'dm' && t.asset_ref && dmViewMap.has(String(t.asset_ref))) {
+          metrics.push({ label: '열람', value: fmt(dmViewMap.get(String(t.asset_ref))) });
         }
       }
       list.push({

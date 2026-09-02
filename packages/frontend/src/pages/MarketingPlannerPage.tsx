@@ -25,13 +25,21 @@ import {
 import { goBackOr } from '../lib/scroll-restoration';
 import { useToast } from '../components/ToastProvider';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+// ★ 2026-09-02 모바일 DM 단계 사전 — 브리핑 화면과 같은 라벨(두 벌 금지)
+import { DM_NEEDS_ACTION, describeDmStage, dmActionLabel, dmBadgeOf, type PlannerDmInfo } from '../constants/planner-dm';
 
 // ── 타입 (백엔드 CT와 미러 — 서버가 진실) ─────────────────────────────
 type Channel = 'sms' | 'alimtalk' | 'email' | 'dm' | 'inapp';
 type Anchor = 'start' | 'end' | 'before_start';
 
 interface Availability { channel: Channel; label: string; available: boolean; reason: string | null; estCredits: number | null }
-interface Touchpoint { id?: string; channel: Channel; label?: string; timing: { anchor: Anchor; offsetDays?: number; audience?: 'all' | 'participants' }; estCredits?: number | null; scheduledOn?: string; status?: string; lockReason?: string | null }
+interface Touchpoint {
+  id?: string; channel: Channel; label?: string;
+  timing: { anchor: Anchor; offsetDays?: number; audience?: 'all' | 'participants' };
+  estCredits?: number | null; scheduledOn?: string; status?: string; lockReason?: string | null;
+  /** ★ 2026-09-02 모바일 DM 단계(dm 채널만) · 같은 날 문자에 실림 / 문자에 DM 링크 포함 / 실을 문자가 이미 끝남 */
+  dm?: PlannerDmInfo; dmLinked?: boolean; carriedBySms?: boolean; carrierDone?: boolean;
+}
 interface PlannerEvent {
   id: string; title: string; startsOn: string; endsOn: string; benefitText: string | null;
   products: Array<{ name: string }>; status: string; touchpoints: Touchpoint[]; estCreditsTotal: number;
@@ -46,7 +54,7 @@ interface TouchpointDetail {
   audience: 'all' | 'participants'; audienceCount: number | null; audienceNote: string | null;
   sentAt: string | null; sentCount: number | null;
   message: { subject: string | null; body: string } | null;
-  asset: { kind: 'dm' | 'email' | 'inapp' | 'alimtalk'; url?: string | null; html?: string | null; title?: string | null; body?: string | null; imageUrl?: string | null; inspection?: string | null } | null;
+  asset: { kind: 'dm' | 'email' | 'inapp' | 'alimtalk'; url?: string | null; html?: string | null; title?: string | null; body?: string | null; imageUrl?: string | null; inspection?: string | null; stage?: string | null; editPath?: string | null } | null;
 }
 
 const ANCHOR_LABEL: Record<Anchor, string> = { start: '행사 시작일', end: '행사 종료일', before_start: '시작 전 사전 안내' };
@@ -165,8 +173,8 @@ export default function MarketingPlannerPage() {
     } catch { /* 가용성 로드 실패 — 기입 모달에서 재시도 */ }
   }, []);
 
-  const loadEvents = useCallback(async (m: string) => {
-    setLoading(true);
+  const loadEvents = useCallback(async (m: string, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const r = await fetch(`/api/marketing-planner/events?month=${m}`, { headers: auth() });
       if (r.status === 503) { setMigrationPending(true); setEvents([]); return; }
@@ -179,11 +187,19 @@ export default function MarketingPlannerPage() {
         setHolidaysReady(d.holidaysReady !== false);
       }
     } catch { /* 일시 오류 — 직전 목록 유지 */ }
-    finally { setLoading(false); }
+    finally { if (!opts?.silent) setLoading(false); }
   }, []);
 
   useEffect(() => { loadAvailability(); }, [loadAvailability]);
   useEffect(() => { loadEvents(month); }, [month, loadEvents]);
+
+  // ★ 2026-09-02 DM 빌더에서 완성·발행하고 돌아오면 목록을 조용히 다시 읽는다 — 배지가 "발행 완료"로 바뀌어야
+  //   담당자가 두 번째 DM을 만들거나 문의를 넣지 않는다(폴링은 두지 않는다 · 탭 복귀·포커스 때만).
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') void loadEvents(month, { silent: true }); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [month, loadEvents]);
 
   // 결재 링크 착지 — 만료·오류를 조용히 넘기지 않는다(문자 링크의 도착점이 여기 하나다).
   useEffect(() => {
@@ -283,12 +299,22 @@ export default function MarketingPlannerPage() {
     setFTouchpoints((prev) => {
       const has = prev.some((t) => t.channel === channel);
       if (has) return prev.filter((t) => t.channel !== channel);
+      // ★ 2026-09-02 문자와 모바일 DM은 같은 시점이면 문자 1통에 링크로 함께 나간다 — 한쪽을 켜면 다른 쪽 시점을 그대로 따른다.
+      //   (기본값이 서로 다르면 담당자는 "따로 나간다"고 읽고, 실제로는 DM이 캐리어 문자를 하나 더 보낸다.)
+      const mirror = channel === 'dm' ? prev.filter((t) => t.channel === 'sms') : channel === 'sms' ? prev.filter((t) => t.channel === 'dm') : [];
+      if (mirror.length > 0) return [...prev, ...mirror.map((t) => ({ channel, timing: { ...t.timing } }))];
       // 채널별 기본 시점 — 문자·인앱=시작일 / 이메일·DM=시작 5일 전 사전 안내 / 알림톡=시작일(정보성 안내)
       const timing: Touchpoint['timing'] =
         channel === 'email' || channel === 'dm' ? { anchor: 'before_start', offsetDays: 5 } : { anchor: 'start' };
       return [...prev, { channel, timing }];
     });
   };
+
+  /** ★ 2026-09-02 문자·DM이 같은 시점을 공유하는가(기입 모달 안내용 — 서버 timingKey와 같은 구성). */
+  const sharesTiming = (a: Touchpoint['timing'], b: Touchpoint['timing']) =>
+    a.anchor === b.anchor
+    && (a.anchor !== 'before_start' || (a.offsetDays || 0) === (b.offsetDays || 0))
+    && (a.audience === 'participants') === (b.audience === 'participants');
 
   /**
    * 시점 켜고 끄기 — 한 채널에 시점을 여럿 붙일 수 있다(★2026-08-25 접수 임은지).
@@ -327,10 +353,14 @@ export default function MarketingPlannerPage() {
     )));
   };
 
-  /** ★ 2026-08-13 대상 축 — 전체 / 행사 참여 신청자. 서버가 채널별로 다시 확정한다(프론트 값 그대로 믿지 않는다). */
+  /**
+   * ★ 2026-08-13 대상 축 — 전체 / 행사 참여 신청자. 서버가 채널별로 다시 확정한다(프론트 값 그대로 믿지 않는다).
+   * ★ 2026-09-02 문자와 모바일 DM은 **함께** 옮긴다 — 같은 날 대상이 갈리면 문자 1통으로 합칠 수 없어 서버가 저장을 거부한다.
+   */
   const setAudience = (channel: Channel, audience: 'all' | 'participants') => {
+    const pair: Channel[] = channel === 'sms' || channel === 'dm' ? ['sms', 'dm'] : [channel];
     setFTouchpoints((prev) => prev.map((t) => (
-      t.channel === channel
+      pair.includes(t.channel)
         ? { ...t, timing: { ...t.timing, ...(audience === 'participants' ? { audience } : { audience: undefined }) } }
         : t
     )));
@@ -581,36 +611,71 @@ export default function MarketingPlannerPage() {
                   const st = TP_STATUS[String(tp.status || 'planned')] || TP_STATUS.planned;
                   const arrived = !!tp.scheduledOn && tp.scheduledOn <= today;
                   const Icon = CHANNEL_ICON[tp.channel] || Smartphone;
+                  // ★ 2026-09-02 DM 단계 배지 — 상태 배지 옆 두 번째 배지. 담당자 할 일이 있으면 [DM 완성하기] 1클릭.
+                  //   실을 문자가 이미 끝났으면(carrierDone) 버튼 대신 그 사실을 말한다.
+                  const dmBadge = tp.channel === 'dm' && tp.dm ? dmBadgeOf(tp.dm.stage) : null;
+                  const dmAction = tp.channel === 'dm' && tp.dm && !tp.carrierDone && DM_NEEDS_ACTION.has(tp.dm.stage) && tp.dm.editPath ? tp.dm.editPath : null;
                   return (
-                    <button
-                      key={tp.id || `${ev.id}-${i}`}
-                      onClick={() => openDetail(ev, tp)}
-                      className="w-full text-left px-4 py-3 hover:bg-white/[0.04] transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded ${
-                          arrived ? 'bg-white/10 text-white/50' : 'bg-violet-500/20 text-violet-200'
-                        }`}>
-                          {tp.scheduledOn ? ddayLabel(tp.scheduledOn, today) : '-'}
-                        </span>
-                        <Icon className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />
-                        <span className="text-sm font-medium truncate">{tp.label || tp.channel}</span>
-                        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
-                      </div>
-                      <div className="mt-1 flex items-center gap-2 text-[11px] text-white/45">
-                        <span className="truncate">{ev.title}</span>
-                        <span className="tabular-nums flex-shrink-0">{tp.scheduledOn}</span>
-                        {tp.timing?.audience === 'participants' && (
-                          <span className="text-[10px] px-1.5 rounded bg-sky-500/15 text-sky-200 flex-shrink-0">참여자</span>
+                    <div key={tp.id || `${ev.id}-${i}`} className="hover:bg-white/[0.04] transition-colors">
+                      <button
+                        onClick={() => openDetail(ev, tp)}
+                        className="w-full text-left px-4 pt-3 pb-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded ${
+                            arrived ? 'bg-white/10 text-white/50' : 'bg-violet-500/20 text-violet-200'
+                          }`}>
+                            {tp.scheduledOn ? ddayLabel(tp.scheduledOn, today) : '-'}
+                          </span>
+                          <Icon className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />
+                          <span className="text-sm font-medium truncate">{tp.label || tp.channel}</span>
+                          <span className="ml-auto flex items-center gap-1 flex-shrink-0">
+                            {dmBadge && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${dmBadge.cls}`}>{dmBadge.label}</span>}
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-2 text-[11px] text-white/45">
+                          <span className="truncate">{ev.title}</span>
+                          <span className="tabular-nums flex-shrink-0">{tp.scheduledOn}</span>
+                          {tp.timing?.audience === 'participants' && (
+                            <span className="text-[10px] px-1.5 rounded bg-sky-500/15 text-sky-200 flex-shrink-0">참여자</span>
+                          )}
+                          {tp.carriedBySms && (
+                            <span className="text-[10px] px-1.5 rounded bg-violet-500/15 text-violet-200 flex-shrink-0">같은 날 문자에 링크로 실림</span>
+                          )}
+                          {tp.carrierDone && (
+                            <span className="text-[10px] px-1.5 rounded bg-white/10 text-white/50 flex-shrink-0">같은 날 문자가 이미 끝나 실리지 않음</span>
+                          )}
+                          {tp.channel === 'sms' && tp.dmLinked && (
+                            <span className="text-[10px] px-1.5 rounded bg-violet-500/15 text-violet-200 flex-shrink-0">모바일 DM 링크 포함</span>
+                          )}
+                        </div>
+                        {tp.lockReason && (
+                          <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-200/80">
+                            <PauseCircle className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+                            <span className="flex-1">{tp.lockReason}</span>
+                          </div>
                         )}
-                      </div>
-                      {tp.lockReason && (
-                        <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-200/80">
-                          <PauseCircle className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
-                          <span className="flex-1">{tp.lockReason}</span>
+                        {tp.dm && tp.dm.stage === 'incomplete' && tp.dm.residue && (
+                          <div className="mt-1.5 text-[11px] text-amber-200/80">남은 자리: {tp.dm.residue}</div>
+                        )}
+                      </button>
+                      {dmAction && tp.dm && (
+                        <div className="px-4 pb-3 flex items-center gap-2">
+                          <span className="text-[11px] text-amber-100/80 flex-1">
+                            {tp.dm.stage === 'stopped'
+                              ? '발행이 중지돼 있어 재개 전에는 문자에 실리지 않습니다.'
+                              : tp.carriedBySms ? '발행 전에는 같은 날 문자가 나가지 않습니다.' : '발행 전에는 이 문자가 나가지 않습니다.'}
+                          </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); navigate(dmAction); }}
+                            className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-50 hover:bg-amber-500/30 transition-colors"
+                          >
+                            <Smartphone className="w-3 h-3" /> {dmActionLabel(tp.dm.stage)}
+                          </button>
                         </div>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -657,6 +722,7 @@ export default function MarketingPlannerPage() {
         <p className="text-[10px] text-white/30 italic">
           Data source: 행사·채널 구성은 저장 즉시 반영, 예상 크레딧은 소재 제작 기준이며 문자·알림톡은 실행 시 별도 과금됩니다.
           공휴일은 관보 확정분이고, 발송 결과·대상 수는 실제 발송 기록입니다. 월간 결재는 브리핑 화면에서 진행합니다.
+          모바일 DM 단계는 발행 상태를 실시간으로 읽으며, 같은 날 같은 대상의 문자와 DM은 문자 1통(링크 포함)으로 나갑니다.
         </p>
       </div>
 
@@ -711,6 +777,44 @@ export default function MarketingPlannerPage() {
                         <div className="flex justify-between gap-3"><span className="text-white/45 flex-shrink-0">혜택</span><span className="text-right">{detailOf.ev.benefitText}</span></div>
                       )}
                     </div>
+
+                    {/* ★ 2026-09-02 모바일 DM 단계 — 담당자가 할 일이 있으면 여기서 바로 연다(1클릭) */}
+                    {tp.channel === 'dm' && tp.dm && (() => {
+                      const badge = dmBadgeOf(tp.dm.stage);
+                      const actionable = !tp.carrierDone && DM_NEEDS_ACTION.has(tp.dm.stage);
+                      return (
+                        <div className={`rounded-xl border px-4 py-3 space-y-2 ${
+                          actionable ? 'border-amber-400/30 bg-amber-500/[0.08]' : 'border-white/10 bg-white/[0.03]'
+                        }`}>
+                          <div className="flex items-center gap-2">
+                            {badge && <span className={`text-[11px] px-2 py-1 rounded-lg border ${badge.cls}`}>{badge.label}</span>}
+                            {tp.dm.url && (
+                              <a href={tp.dm.url} target="_blank" rel="noopener noreferrer" className="ml-auto text-[11px] text-violet-200 flex items-center gap-1 hover:underline">
+                                발행 페이지 <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                          <p className="text-[12px] text-white/75">{describeDmStage(tp.dm, !!tp.carriedBySms, !!tp.carrierDone)}</p>
+                          {tp.dm.editPath && !tp.carrierDone && (
+                            <button
+                              onClick={() => navigate(tp.dm!.editPath!)}
+                              className={`w-full flex items-center justify-center gap-1.5 text-[12px] font-semibold px-3 py-2 rounded-lg transition-colors ${
+                                actionable
+                                  ? 'bg-amber-500/25 border border-amber-400/40 text-amber-50 hover:bg-amber-500/35'
+                                  : 'border border-white/15 text-white/70 hover:bg-white/10'
+                              }`}
+                            >
+                              <Smartphone className="w-3.5 h-3.5" /> {actionable ? dmActionLabel(tp.dm.stage) : 'DM 편집 열기'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {tp.channel === 'sms' && tp.dmLinked && !arrived && (
+                      <p className="text-[11px] text-violet-200/80">
+                        같은 날의 모바일 DM 링크를 실어 문자 1통으로 보냅니다. DM이 발행돼야 이 문자가 나갑니다.
+                      </p>
+                    )}
 
                     {!arrived && (
                       <p className="text-[11px] text-white/40">
@@ -771,6 +875,13 @@ export default function MarketingPlannerPage() {
                                 <span className="text-[12px] flex-1 truncate">모바일 DM: {detail.asset.url}</span>
                                 <ExternalLink className="w-3.5 h-3.5 text-violet-200 flex-shrink-0" />
                               </a>
+                            )}
+                            {detail.asset.kind === 'dm' && !detail.asset.url && (
+                              <p className="text-[11px] text-white/45">
+                                {detail.sentAt
+                                  ? '발행이 확인되지 않아 문자에 실리지 않았습니다.'
+                                  : '아직 발행 확인 전입니다. 지금 완성해 발행하면 오늘 문자에 실립니다.'}
+                              </p>
                             )}
                             {detail.asset.kind === 'inapp' && (
                               <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
@@ -951,6 +1062,35 @@ export default function MarketingPlannerPage() {
                                 ? `고른 시점마다 따로 만들어 보냅니다. 지금 ${picked.length}회입니다.`
                                 : '시점을 여러 개 골라 시작과 종료에 나눠 보낼 수 있습니다.'}
                             </p>
+                            {/* ★ 2026-09-02 문자·DM 같은 시점 = 문자 1통(링크 포함). 정책은 서버가 소유하고 여기는 그 사실을 말한다. */}
+                            {a.channel === 'dm' && (() => {
+                              const smsPicked = fTouchpoints.filter((t) => t.channel === 'sms');
+                              const shared = picked.filter((t) => smsPicked.some((s) => sharesTiming(s.timing, t.timing))).length;
+                              return (
+                                <p className="mt-1 text-[11px] text-violet-200/80">
+                                  AI가 초안을 만들면 담당자가 사진과 문구를 채워 발행합니다.{' '}
+                                  {smsPicked.length > 0 && shared > 0
+                                    ? `문자와 같은 날(${shared}회)은 문자 1통에 링크로 함께 나갑니다. 발행 전에는 그 문자가 나가지 않습니다.`
+                                    : smsPicked.length > 0
+                                      ? '문자와 다른 날이라 각각 나갑니다. 같은 날로 맞추면 문자 1통에 링크로 함께 나갑니다.'
+                                      : '예정일에 발행 주소를 실은 문자가 나갑니다. 발행 전에는 나가지 않습니다.'}
+                                  {' '}초안 5크레딧, 발행 시 100크레딧(응모·룰렛·설문이 들어가면 120 · 담당자 발행 때 차감).
+                                </p>
+                              );
+                            })()}
+                            {a.channel === 'sms' && (() => {
+                              const dmPicked = fTouchpoints.filter((t) => t.channel === 'dm');
+                              const shared = picked.filter((t) => dmPicked.some((d) => sharesTiming(d.timing, t.timing))).length;
+                              return shared > 0 ? (
+                                <p className="mt-1 text-[11px] text-violet-200/80">
+                                  같은 날의 모바일 DM 링크를 실어 1통으로 보냅니다({shared}회). DM이 발행돼야 그 문자가 나갑니다.
+                                </p>
+                              ) : dmPicked.length > 0 ? (
+                                <p className="mt-1 text-[11px] text-amber-200/80">
+                                  모바일 DM과 다른 날이라 각각 나갑니다. 같은 날로 맞추면 문자 1통에 링크로 함께 나갑니다.
+                                </p>
+                              ) : null;
+                            })()}
                           </div>
                         )}
                         {/* ★ 2026-08-13 대상 축 — 문자·DM만 고를 수 있다.

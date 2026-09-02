@@ -158,6 +158,36 @@ lease(60분)를 넘긴 `producing`은 **`locked`로** 옮기고 담당자에게 
 **규약 = SELECT 목록에서 `starts_on::text AS starts_on`(정산 관례와 동일).** 전역 파서(1082)를 바꾸는 길은 전 라우트 영향이라 쓰지 않는다.
 계약은 `planner-date-contract.test.ts`가 고정한다(플래너 4파일의 SELECT 목록 스캔 — 캐스트 없는 읽기는 빨간불). 같은 뿌리 = LESSONS_BACKEND "PG timestamptz는 런타임 Date 객체".
 
+### 3-20. 같은 시점의 문자와 모바일 DM은 1통이다 · DM 초안은 담당자가 완성해 발행한 뒤에만 실린다 (★2026-09-02 · 접수 cmtibk3d50694jnottwllnrbg)
+
+**문자 접점이 캐리어다.** 같은 행사에서 **같은 날 같은 대상**(`carrierKey` = 발송 예정일 + 대상 — 앵커로 가르면 1일 행사의 시작일·종료일이 남으로 보인다)에 문자와 DM이 함께 있으면
+문자 1통에 DM 발행 주소를 싣는다. DM 형제가 `ready`면 **같은 승인 원장 잠금 트랜잭션에서 함께 선점**(`claimTouchpointUnderPlanLock` companions — 전부 아니면 전무)하고
+두 행을 **한 문장**(`setTouchpointStates`)으로 같은 campaign에 `sent` 마감한다. 보류·생략·잠금도 쌍을 한 문장으로 옮긴다(두 문장이면 재기동 때 한 행만 남아 문자가 링크 없이 재개된다).
+DM 접점은 문자 형제가 살아 있는 한 스스로 보내지 않는다(`decideMessagingDispatch`). 기입 검증은 같은 날의 문자·DM 대상이 갈리면 저장을 거부한다(합칠 수 없어 두 통이 된다).
+종전에는 채널별 접점이 각각 `executeMessaging`을 돌려 **같은 대상에 LMS 2통**(하나는 링크 없음)이 나갔다.
+
+**DM 제작은 초안까지다 — 자동 발행하지 않는다.** AI 초안은 이미지·문구 자리가 비어 있고 그것은 고객사 재료다(혜택 verbatim의 소재 판).
+초안 대기 접점 = `planned` + `exec_meta.dm_stage='drafted'`(알림톡 검수 단계와 같은 축 분리 §3-14). **어떤 워커도 이 행을 `producing`으로 옮기지 않는다**
+(`produceTouchpoint`는 잠금 **앞**에서 돌려보내고, 재개는 초안 대기로 복원하고, 예외 복구는 ready로 올리지 않는다).
+승격은 발행 감지 `syncDmPublishState` 하나만 만든다: `dm_pages.status='published' AND short_code` **그리고 빈 자리 0**
+(두 축 = 뷰어 렌더 결과의 문구 `findDmPlaceholderResidue` + 섹션 데이터의 빈 이미지 자리 `findDmDataResidue` — 렌더러가 문구를 안 찍는 hero split/overlap·갤러리·슬라이드·상품 이미지까지. 섹션 0개 = 내용 없음) → `planned → ready` 단일 CAS.
+CAS 0행은 재조회로 "이미 올라감"과 가른다(동시 호출의 패자가 발행됨을 미발행으로 읽지 않게). 통지는 표식이 바뀐 호출 하나만(조건부 UPDATE RETURNING).
+**화면 응답 조립(`describeMessagingTouchpoints`)은 읽기만 한다** — 승격·통지는 워커만. 발송 직전에도 실물을 **두 번**(긴 단계 앞·커밋 직전) 확인한다(중지·빈 자리 재발).
+⛔ 발행비(100·인터랙션 120)는 **플래너가 걷지 않는다** — 담당자가 DM 빌더에서 발행할 때 그 라우트가 `dm-publish:{id}`로 걷는다(§3-10). 플래너 몫은 생성비 5뿐.
+초안 단계에서 100을 먼저 걷으면 발행되지 않은 DM에 돈이 남고 담당자 발행은 영구 무과금이 된다.
+
+**발행 전에는 그 시점 문자가 나가지 않는다(fail-closed).** 링크 없는 문자를 먼저 보내면 그 DM은 영영 못 나간다. 담당자 통지 3회 = 초안 준비(승인 직후) · 예정일 하루 전 리마인드(대조 워커) · 당일 대기(실행 워커, 하루 1회).
+예정일이 지나면 대조 워커가 "DM이 마무리되지 않아 보내지 않았다"로 문자·DM 쌍을 닫고 통지 1건. 화면 = 실행 예정·상세·브리핑에 DM 단계 배지("DM 마무리 필요" 등) + [DM 완성하기] 1클릭(`/dm-builder?id=&from=planner` 딥링크 · 발행 완료 모달은 "플래너가 실어 보낸다"로 바뀌어 따로 보내지 않게 한다).
+
+**스팸 게이트는 링크가 붙은 최종 문안을 검사한다.** 종전에는 게이트 **뒤에** URL을 붙여 검사한 문안과 나가는 문안이 달랐다(스팸 테스트 폰에도 링크 없는 문자). 무료거부 번호도 발송이 쓰는 값(`getOpt080Number`)을 그대로 준다.
+
+**부수 정정(같은 축)** — ①커밋이 확정적으로 안 된 실패(`INSUFFICIENT_BALANCE`·`NIGHT_AD_RESTRICTED`·`LINK_PLACEHOLDER_UNEDITED`)는 `send_started_at`을 `send_aborted_at`으로 바꿔 무발송 달의 환불이 막히지 않게 한다(정리 실패는 재시도 뒤 통지 — 삼키지 않는다 · 그 밖 실패는 표식 유지 = 사람 판정).
+②"보냈는지 모르는" 행(`send_started_at` 있고 `exec_ref` 없음)과 취소된 달은 [다시 시작]이 되살리지 않는다. ③동반 행도 heartbeat(`touchClaim` 복수 id)를 함께 받고, 대조 워커는 동반 행을 **캐리어의 결과로 확정 복구**한다(`carried_by` → 캐리어 `exec_ref`면 sent · 보류면 ready · 생략이면 skipped).
+④결과 브리핑 합계는 campaign id로 한 번만 더한다(두 접점이 같은 campaign을 참조) + DM 열람(`dm_pages.view_count`) 실측. ⑤문안 크레딧 10은 캐리어 접점 1회(§5).
+⑥**취소 환불 자격에서 초안 대기 DM은 제작 실적이 아니다** — 생성비 5만 나갔고 고객에게 나간 것이 없다(두 집계 문이 같은 조건 · §5).
+⑦발송 시도 표식도 두 행에 한 문장으로 남긴다(두 번째 문장이 끊기면 캠페인도 없이 캐리어에만 표식이 남던 창).
+⛔ **예외로 등재** — DM 발행비는 승인 원장 잠금 밖(DM 라우트)에서 나간다(§3-9-2·§3-1의 명시적 예외). 취소된 달의 초안을 담당자가 나중에 발행하면 발행비가 나간다(플래너가 막지 못한다 — BUGS B-0902-1 ⑤). 발행 완료가 과금 완료를 뜻하지 않는 것도 DM 라우트의 성질이다(B-0902-1 ⑦).
+
 ## §4 구조
 
 ### 4-1. 파일별 소유
@@ -215,7 +245,7 @@ lease(60분)를 넘긴 `producing`은 **`locked`로** 옮기고 담당자에게 
 | 경로 | 하는 일 |
 |---|---|
 | `GET /availability` | 채널 5종 가용성 + 사유 + 예상 제작 크레딧 (기입 모달 체크박스 소스) |
-| `GET /events?month=YYYY-MM` | 그 달 행사 + 터치포인트(발송 예정일 계산 포함) + 그 달 결재 상태(배너 축) |
+| `GET /events?month=YYYY-MM` | 그 달 행사 + 터치포인트(발송 예정일 계산 포함) + 그 달 결재 상태(배너 축) · **★0902 접점마다 `dm`(단계·편집 경로·주소·남은 자리)·`dmLinked`·`carriedBySms`** — 발행 상태는 `dm_pages` live |
 | `POST /events` · `PUT /events/:id` | 기입·수정. **행사+터치포인트 단일 트랜잭션** · 잠긴 채널 서버 재검증 |
 | `DELETE /events/:id` | `draft`만 삭제 |
 | **`GET /brief?month=YYYY-MM`** | 월간 브리핑 = 결재 서류(행사·터치포인트·대상 수 실쿼리·크레딧 합계·잔액·게이트·승인 상태) |
@@ -259,7 +289,7 @@ lease(60분)를 넘긴 `producing`은 **`locked`로** 옮기고 담당자에게 
 
 | 축 | 기준 | 값 |
 |---|---|---|
-| 제작물 | AI 호출 **원가** | 이메일 완성 50 · DM 생성5+발행100 · 인앱 게시 100 · 스튜디오 이미지 2/장 · **당일 문자 문안 10**(source `planner-touchpoint-send` — 발송 접수 뒤 1회, 멱등키 `planner-send:{터치포인트}`) (단가 진실 = `getCreditCost`) |
+| 제작물 | AI 호출 **원가** | 이메일 완성 50 · DM 생성5(플래너)+발행100(**담당자 발행 시 DM 라우트가 차감** — ★0902 §3-20 · 인터랙션 섹션을 넣어 발행하면 120) · 인앱 게시 100 · 스튜디오 이미지 2/장 · **당일 문자 문안 10**(source `planner-touchpoint-send` — 발송 접수 뒤 1회, 멱등키 `planner-send:{캐리어 터치포인트}` — ★0902 같은 시점 문자+DM은 1통이라 캐리어 접점 1건에만, DM 접점 `exec_meta.copy_charged_by`가 근거) (단가 진실 = `getCreditCost`) |
 | **대행** | 대체하는 **인건비·리테이너** | **월간 승인 = 1000** (source `planner-monthly-agency` — 단가는 `CREDIT_COST_MAP`이 소유) |
 
 ⛔ **당일 문안 source도 `OPERATION_SOURCES`에 넣지 않는다** — 잔액이 없으면 그 터치포인트만 보류(`hold_credit`)되고
@@ -271,7 +301,7 @@ lease(60분)를 넘긴 `producing`은 **`locked`로** 옮기고 담당자에게 
 - **차감 시점** — 대행 1000은 월간 승인 시(멱등키 `planner:{회사}:{YYYY-MM}`), 제작물은 각 제작 시점.
 - **승인 게이트** — 잔액 ≥ (1000 + 그 달 예상 제작 합계).
 - **월 중 소진** — 그 터치포인트만 보류 + **발생 즉시 통지**(조용한 증발 금지) + 충전 후 재개 1클릭. 마이너스·자동충전 금지.
-- **취소 환불** — 그 달 제작·실행 0건이면 전액, 1건이라도 있으면 없음. 일할 계산 없음(규칙이 단순해야 분쟁이 없다).
+- **취소 환불** — 그 달 제작·실행 0건이면 전액, 1건이라도 있으면 없음. 일할 계산 없음(규칙이 단순해야 분쟁이 없다). ★0902 **담당자가 완성·발행하지 않은 DM 초안은 제작 실적으로 세지 않는다**(생성비 5만 소진 · 고객에게 나간 것이 없다).
 - **자연 게이트** — 1000이 TRIAL·BASIC(750)을 걸러내 **PRO(100만/2,400)부터 트라이 가능**. 인위 게이트 없음.
   ⚠ 자격 플래그 비대칭 — 자동마케팅 자율 발송 자격(`advanced_access_enabled`)은 PRO가 false다.
   **플래너 발송은 사람이 승인한 발송이라 그 플래그를 요구하지 않는다**(별도 진입 경로 · 영향표 선행).
@@ -365,9 +395,22 @@ Phase 1은 읽기·CRUD뿐이라 대상이 아니었다.
 - ⛔ **추가 과제**: 접수의 "행사 중간" 시점은 현재 앵커 3종(`start`·`end`·`before_start`)에 없다. 신설하면 검증·실행·발송일 계산까지 바뀌므로 별도 축이다.
 - 검증 = 검증기 계약 2건 신설(같은 채널 다른 시점 3개 통과 · 사전 안내 오프셋이 다르면 다른 발송) · BE·FE tsc 0 · vitest 201파일 3,062건. 조회·화면 축이라 Codex 대상 아님.
 
+### 2026-09-02 — 문자 1통 + 모바일 DM 완성 게이트 (접수 cmtibk3d50694jnottwllnrbg · 임은지 · 코드완료 · 배포 대기)
+
+접수 = 9/1 문자+모바일 DM 시작일 체크 → 문자 2통(하나는 링크 없음) · 단말에 링크 없는 문자 · 이미지·문구 자리가 빈 AI 초안 DM이 발행·링크 발송. 기대 = 초안 알림 → 담당자 완성·발행 → 링크 삽입 문자 1통.
+원인 3 = ①채널별 접점 독립 실행(RC1) ②`produceDm`이 `createDm` 직후 `publishDm`(RC2) ③URL을 스팸 게이트 **뒤**에 부착(검사 문안 ≠ 발송 문안 · 단말 캡처의 원인은 ①의 문자 채널 문자였다 — 읽기 전용 반박 검증 7에이전트가 확정). 구조·불변 = **§3-20**.
+
+- 신설 CT(순수) = `timingKey`·`decideMessagingDispatch`·`appendDmLink`·`dmStageOf`·`findDmPlaceholderResidue`·`buildDmEditPath`(`planner-execution.ts`) / 원장 = companions 선점·`loadEventTouchpoints`·`touchClaim` 복수·`clearExecMetaKeys`(`planner-touchpoint.ts`) / 제작 = `syncDmPublishState`·`inspectDmForCarry`·`describeMessagingTouchpoints`·`runPlannerDmReminderPass`(`planner-production.ts`).
+- 화면 = `constants/planner-dm.ts`(단계 사전 1곳) · 캘린더·브리핑 배지 + [DM 완성하기] · DM 빌더 `?id=&from=planner` 딥링크(목록 로드 후 진입 · 불러오기 실패면 편집 모드 진입 금지 · 초안 소비 effect 건너뜀 · 발행 완료 모달 플래너 판) · 기입 모달은 한쪽을 켜면 다른 쪽 시점을 따른다 + "문자 1통" 안내 · 탭 복귀 시 목록 조용히 재조회.
+- 설계 전 읽기 전용 검증(7에이전트)에서 받은 가드 6종 전부 반영 = 제작 패스·당일 실행·예외 복구·재개·과금 배열·발행 감지 단일 CAS. 코드 뒤 적대 검토 2갈래(읽기 전용 11에이전트 + Codex adversarial 1R high 4 → 3 수용·1 불수용 등재) = 쌍 마감 단일 UPDATE · 커밋 직전 실물 재확인 · CAS 패자 재조회 · 조건부 통지 · 화면 조립 읽기 전용화 · 완성 판정 데이터 축 · 캐리어 키 = 발송일+대상 · 취소 환불의 초안 제외. Codex 2R(high 3·medium 1) = 실물 확인 축을 주소 캐시가 아니라 DM 존재로 · 같은 날 같은 채널 중복 기입 거부(1일 행사) · 리마인드 페이지 순회 수용, 재개 경로의 잠금 없는 취소 경합은 기존 구조라 등재(B-0902-1 ⑨). 라운드 상한(2회)으로 종료. 검증 = BE tsc 0 · FE tsc 0 · vitest 218파일 3,446건(플래너 계약 +18) · vite production build 성공.
+- DDL 0(`exec_meta` 키 신설만: `dm_stage`·`dm_url`·`dm_residue`·`dm_edit_path`·`dm_reminded_at`·`dm_wait_notified_on`·`waiting_for_dm`·`carried_by`·`copy_charged_by`·`send_aborted_at`·`missed_reason`).
+- 범위 밖 등재 = [BUGS B-0902-1](../status/BUGS.md) 하단 추가 과제(비관리자 접근·로그인 복귀·발송 불명 행 판정 UI·인터랙션 발행비 예상치·취소된 달의 DM 발행·countMonthWork 미사용).
+
 ---
 
 ## §8 남은 것
+
+- **★0902 실측(배포 후)** — ①문자+DM 같은 시점 행사 승인 → 초안 통지 문자 1통(편집 링크 포함) · 플래너 실행 예정에 "DM 마무리 필요" 배지 + [DM 완성하기] ②DM 빌더 딥링크 진입 → 완성·발행 → 발행 완료 모달이 "플래너가 실어 보낸다" 판 → 플래너로 돌아오면 배지 "DM 발행 완료" ③예정일 당일 문자 **1통**(링크 포함) · 결과 탭 합계 1회 · DM 열람 수 ④발행 전 예정일 도래 → 문자 미발송 + 당일 대기 통지 1회 → 다음 날 "DM 마무리되지 않아" 생략 통지 1건 ⑤빈 자리 남긴 채 발행 → "DM 빈 자리 남음" 배지 + 남은 자리 문구 통지.
 
 - ~~**★2026-08-13(2) 확정 결함 — [다시 시작]이 `locked`를 되살리지 못하면서 성공으로 응답한다**~~ **정정완료**(§3-16 · §7 0813(2)행). 아래는 그때의 증거로 남긴다.
   화면은 `hold_credit`·`locked` 둘 다에 [다시 시작]을 띄우고(`PlannerBriefPage.tsx:567`), 라우트도 둘 다 받는다(`routes/marketing-planner.ts:453`).

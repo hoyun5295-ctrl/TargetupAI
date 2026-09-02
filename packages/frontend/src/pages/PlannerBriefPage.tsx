@@ -18,11 +18,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowLeft, BarChart3, CalendarDays, CheckCircle2, ClipboardCheck, Clock,
-  Coins, Loader2, PauseCircle, RotateCcw, Send, Sparkles, Users, Wallet, XCircle,
+  Coins, Loader2, PauseCircle, RotateCcw, Send, Smartphone, Sparkles, Users, Wallet, XCircle,
 } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { useToast } from '../components/ToastProvider';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+// ★ 2026-09-02 모바일 DM 단계 사전 — 캘린더 화면과 같은 라벨(두 벌 금지)
+import { DM_NEEDS_ACTION, describeDmStage, dmActionLabel, dmBadgeOf, type PlannerDmInfo } from '../constants/planner-dm';
 
 // ── 타입 (백엔드 CT 미러 — 서버가 진실) ───────────────────────────────
 /** state — known(셌다) / deferred(사후 확정 축) / error(못 셌다 = 승인 차단) */
@@ -33,6 +35,8 @@ interface BriefTouchpoint {
   scheduledOn: string; estCredits: number | null; audience: ChannelAudience;
   /** ★ Phase 3 — 실행 상태·사유. 보류면 [다시 시작]을 띄운다(조용한 증발 금지). */
   status: string; lockReason: string | null;
+  /** ★ 2026-09-02 모바일 DM 단계(dm 채널만) · 같은 날 문자에 실림 / 문자에 DM 링크 포함 / 실을 문자가 이미 끝남 */
+  dm?: PlannerDmInfo; dmLinked?: boolean; carriedBySms?: boolean; carrierDone?: boolean;
 }
 interface BriefEvent {
   id: string; title: string; startsOn: string; endsOn: string;
@@ -181,7 +185,8 @@ export default function PlannerBriefPage() {
           ? `이번 달 대행을 취소하고 ${Number(d.refundAmount || 0).toLocaleString()}크레딧을 환불했습니다`
           : `이번 달 대행을 취소했습니다: ${d.reason || '환불 대상이 아닙니다'}`);
       } else {
-        toast.success('다시 시작했습니다');
+        // ★ 2026-09-02 모바일 DM은 초안 대기로 돌아간다 — 서버 문구(발행해야 실린다)를 그대로 보여준다.
+        toast.success(d.message || '다시 시작했습니다');
       }
       await load();
       setResult(null);
@@ -235,6 +240,10 @@ export default function PlannerBriefPage() {
   const submitted = approval?.status === 'pending' || approval?.status === 'approving';
   const hasSmsLike = useMemo(
     () => (brief?.events || []).some((e) => e.touchpoints.some((t) => t.channel === 'sms' || t.channel === 'dm')),
+    [brief],
+  );
+  const hasDm = useMemo(
+    () => (brief?.events || []).some((e) => e.touchpoints.some((t) => t.channel === 'dm')),
     [brief],
   );
   // 결재에 올린 뒤 계획이 바뀌었으면 다시 올려야 한다 — 서류에 없던 행사는 승인 대상이 아니다.
@@ -493,6 +502,15 @@ export default function PlannerBriefPage() {
                 문자 문안은 통신사 필터 때문에 <b className="text-white/70">발송 당일</b>에 만듭니다. 이번 결재 대상은 계획(채널·시점·형식)입니다.
               </div>
             )}
+            {/* ★ 2026-09-02 모바일 DM은 담당자 완성·발행 뒤 같은 시점 문자 1통에 실린다 — 발행 전에는 그 문자가 나가지 않는다 */}
+            {hasDm && (
+              <div className="rounded-xl border border-violet-400/20 bg-violet-500/[0.06] px-4 py-2.5 text-[11px] text-white/60 flex items-start gap-2">
+                <Smartphone className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-violet-300" />
+                모바일 DM은 승인 뒤 AI가 <b className="text-white/80">초안</b>을 만들고, 담당자가 사진과 문구를 채워 발행합니다.
+                발행된 주소는 같은 날 문자 1통에 링크로 함께 나가며, <b className="text-white/80">발행 전에는 그 문자가 나가지 않습니다</b>.
+                아래 제작 크레딧 105는 초안 5와 발행 100의 합이고, 발행비(응모·룰렛·설문이 들어가면 120)는 담당자가 발행할 때 차감됩니다.
+              </div>
+            )}
 
             {/* ── 행사별 상세 ─────────────────────────────────────── */}
             {brief.events.length === 0 ? (
@@ -558,6 +576,21 @@ export default function PlannerBriefPage() {
                             </div>
                             <div className={`text-[11px] mt-0.5 ${t.audience.state === 'error' ? 'text-amber-200/70' : 'text-white/35'}`}>{t.audience.note}</div>
                           </div>
+                          {/* ★ 2026-09-02 DM 단계 배지 + 문자 1통 표시 */}
+                          {t.channel === 'dm' && t.dm && dmBadgeOf(t.dm.stage) && (
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${dmBadgeOf(t.dm.stage)!.cls}`}>
+                              {dmBadgeOf(t.dm.stage)!.label}
+                            </span>
+                          )}
+                          {t.carriedBySms && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-violet-500/15 text-violet-200 border border-violet-400/25">같은 날 문자에 링크로 실림</span>
+                          )}
+                          {t.carrierDone && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-white/50 border border-white/15">같은 날 문자가 이미 끝나 실리지 않음</span>
+                          )}
+                          {t.channel === 'sms' && t.dmLinked && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-violet-500/15 text-violet-200 border border-violet-400/25">모바일 DM 링크 포함</span>
+                          )}
                           {TP_STATE[t.status] && (
                             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${TP_STATE[t.status].cls}`}>
                               {TP_STATE[t.status].label}
@@ -566,6 +599,18 @@ export default function PlannerBriefPage() {
                           <div className="text-[11px] tabular-nums text-white/50 ml-auto">
                             {t.estCredits != null ? `제작 ${t.estCredits.toLocaleString()}크레딧` : '실행 시 과금'}
                           </div>
+                          {t.channel === 'dm' && t.dm && !t.carrierDone && DM_NEEDS_ACTION.has(t.dm.stage) && t.dm.editPath && (
+                            <div className="w-full flex flex-wrap items-center gap-2 pt-1">
+                              <Smartphone className="w-3.5 h-3.5 text-amber-300/70 flex-shrink-0" />
+                              <span className="text-[11px] text-amber-200/80 flex-1 min-w-[10rem]">{describeDmStage(t.dm, !!t.carriedBySms)}</span>
+                              <button
+                                onClick={() => navigate(t.dm!.editPath!)}
+                                className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-50 hover:bg-amber-500/30 transition-colors"
+                              >
+                                {dmActionLabel(t.dm.stage)}
+                              </button>
+                            </div>
+                          )}
                           {/* 보류는 사유와 [다시 시작]을 그 자리에서 준다 — 클릭 1회로 이어서 진행한다 */}
                           {(t.status === 'hold_credit' || t.status === 'locked') && (
                             <div className="w-full flex flex-wrap items-center gap-2 pt-1">

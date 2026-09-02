@@ -138,8 +138,15 @@ export interface PlannerEventFacts {
  * (순수) 당일 문자 문안 생성 지시문(orchestrate objective).
  * ⛔ 혜택은 **고객사가 쓴 문장을 그대로** 넣는다. 여기서 수치를 만들거나 다듬지 않는다.
  *   혜택 칸이 비면 지시문에 혜택을 넣지 않고, 대신 실행부가 placeholder 잔존을 검사해 보류한다.
+ * ★ 2026-09-02 `withDmLink` — 문자 끝에 모바일 DM 주소가 붙는 발송이면 그 사실을 알려 본문이 링크를 안내하게 한다
+ *   (주소 자체는 실행부가 붙인다 — AI가 URL을 쓰면 가짜 주소가 섞인다).
  */
-export function buildPlannerCopyObjective(ev: PlannerEventFacts, channelLabel: string, timingLabel: string): string {
+export function buildPlannerCopyObjective(
+  ev: PlannerEventFacts,
+  channelLabel: string,
+  timingLabel: string,
+  opts?: { withDmLink?: boolean },
+): string {
   const lines = [
     `행사 '${ev.title}' 안내 문자를 작성한다. (${channelLabel} · ${timingLabel} 발송)`,
     `행사 기간: ${ev.startsOn} ~ ${ev.endsOn}`,
@@ -149,8 +156,232 @@ export function buildPlannerCopyObjective(ev: PlannerEventFacts, channelLabel: s
   }
   const names = (ev.products || []).map((p) => p?.name).filter(Boolean).slice(0, 10);
   if (names.length > 0) lines.push(`행사 상품: ${names.join(', ')}`);
+  if (opts?.withDmLink) {
+    lines.push('문자 맨 끝에 행사 상세 모바일 페이지 주소가 자동으로 붙는다. 본문 마지막 문장에서 "아래 링크에서 자세히 확인"처럼 그 링크를 한 번 안내하되, 주소(URL)를 직접 쓰지 않는다.');
+  }
   lines.push('행사 기간과 위 내용만 근거로 쓴다. 기입되지 않은 할인율·금액·쿠폰·사은품을 만들지 않는다.');
   return lines.join('\n');
+}
+
+// ── 모바일 DM 단계 · 문자 캐리어 (★ 2026-09-02 접수 cmtibk3d50694jnottwllnrbg) ─────────────────
+/**
+ * DM 접점의 단계 — 상태(`status`)가 아니라 `exec_meta.dm_stage`가 갖는다(알림톡 검수 단계와 같은 축 분리 §3-14).
+ *   ''         = 초안 전(planned) → 제작 패스가 AI 초안을 만든다.
+ *   'drafted'  = AI 초안이 있고 **담당자 완성·발행 대기**. 이 단계의 접점은 어떤 워커도 `producing`으로 옮기지 않는다.
+ *   'published'= 발행·완성 확인됨 → `ready`(실행 대기). 이 전이는 발행 감지 sync 한 곳만 만든다.
+ * ⛔ 초안은 자동으로 발행하지 않는다 — AI 초안은 이미지·문구 자리가 비어 있고 그것은 고객사 재료다(혜택 verbatim 원칙의 소재 판).
+ */
+export type DmStage = '' | 'drafted' | 'published';
+
+export function dmStageOf(execMeta: Record<string, any> | null | undefined): DmStage {
+  const s = String(execMeta?.dm_stage || '');
+  return s === 'drafted' || s === 'published' ? s : '';
+}
+
+/** (순수) 담당자 편집 화면 경로 — 통지 문자·화면 버튼이 같은 값을 쓴다. */
+export function buildDmEditPath(dmId: string): string {
+  return `/dm-builder?id=${encodeURIComponent(dmId)}&from=planner`;
+}
+
+/**
+ * (순수) 시점 키 — 같은 행사에서 "같은 시점"을 가르는 유일한 축.
+ * 기입 검증의 중복 키(채널·앵커·오프셋·대상)에서 채널만 뺀 것이라, 문자와 DM이 같은 키면 **같은 날 같은 사람에게** 간다.
+ */
+export function timingKey(rule: TimingRule | null | undefined): string {
+  const anchor = String((rule as any)?.anchor || 'start');
+  const offset = anchor === 'before_start' ? Number((rule as any)?.offsetDays) || 0 : 0;
+  const audience = (rule as any)?.audience === 'participants' ? 'participants' : 'all';
+  return `${anchor}:${offset}:${audience}`;
+}
+
+/**
+ * (순수) 캐리어 키 — 같은 행사에서 **"같은 날 같은 사람"**을 가르는 축 = 발송 예정일 + 대상.
+ * ⛔ 앵커·오프셋으로 가르면 1일 행사(시작일 = 종료일)의 문자(시작일)와 DM(종료일)이 같은 날인데도 남으로 보여 2통이 나간다(적대 검토 지적).
+ *   예정일은 저장하지 않는 계산값(`computeTouchpointDate`)이므로 호출부가 계산해 넘긴다.
+ */
+export function carrierKey(scheduledOn: string, rule: TimingRule | null | undefined): string {
+  const audience = (rule as any)?.audience === 'participants' ? 'participants' : 'all';
+  return `${scheduledOn}:${audience}`;
+}
+
+/**
+ * (순수) 문자 끝에 DM 주소를 싣는다. **스팸 게이트는 이 결과(최종 형태)를 검사해야 한다** — 검사한 문안과 나가는 문안이 달라선 안 된다.
+ * 이미 들어 있으면 두 번 붙이지 않는다(재생성 콜백이 같은 문안을 다시 지날 수 있다).
+ */
+export function appendDmLink(body: string, url: string): string {
+  const b = String(body || '').replace(/\s+$/, '');
+  const u = String(url || '').trim();
+  if (!u) return b;
+  if (b.includes(u)) return b;
+  return `${b}\n${u}`;
+}
+
+/** (순수) 'YYYY-MM-DD' + n일 — KST 문자열 축(타임존 섞지 않는다). */
+export function addDays(date: string, n: number): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** 형제 접점(같은 행사·같은 시점 키)의 판정용 스냅샷. */
+export interface CarrierSibling {
+  id: string;
+  channel: PlannerChannel;
+  status: string;
+  stage: DmStage;
+}
+
+export type MessagingDispatch =
+  /** 지금 보낸다. attach = 함께 실을 DM 접점(같은 잠금에서 함께 선점한다) 또는 null. */
+  | { action: 'send'; attach: CarrierSibling | null }
+  /** DM이 아직 완성·발행되지 않았다 → 이번 주기는 보내지 않는다(발행되면 다음 주기가 집는다). */
+  | { action: 'wait'; reason: string; dm: CarrierSibling }
+  /** DM 접점인데 같은 시점 문자 접점이 살아 있다 → 그 문자가 링크로 실어 보낸다(스스로 보내지 않는다). */
+  | { action: 'carried'; carrier: CarrierSibling }
+  /** 실을 문자가 이미 끝났다(발송됨·생략됨) → 이 DM 접점은 생략으로 닫는다. */
+  | { action: 'skip'; reason: string };
+
+/** 아직 발송 축이 살아 있는 상태(대기·재개 가능) — 이 상태의 문자 형제가 있으면 DM은 스스로 보내지 않는다. */
+const CARRIER_ALIVE = ['planned', 'ready', 'producing', 'scheduled', 'hold_credit', 'locked'];
+/** DM이 발행을 향해 진행 중인 상태 — 문자는 이 상태의 DM 형제를 기다린다. */
+const DM_IN_PROGRESS = ['planned', 'producing'];
+
+/**
+ * (순수) 문자·DM 접점의 발송 판정 — **같은 시점의 문자와 DM은 1통이다.**
+ *
+ *  문자(sms) 접점:
+ *    - DM 형제 없음 → 그냥 보낸다.
+ *    - DM 형제가 ready(발행·완성 확인) → 함께 선점해 링크를 싣고 1통.
+ *    - DM 형제가 진행 중(planned/producing = 초안 대기·제작 중) → **기다린다**(fail-closed — 링크 없는 문자를 먼저 보내면 DM은 영영 못 나간다).
+ *    - DM 형제가 보류·잠금·생략·발송 완료 → 링크 없이 보낸다(그 DM은 사람 판정 또는 이미 끝난 것이다).
+ *  DM(dm) 접점:
+ *    - 문자 형제가 살아 있으면 → 그 문자가 실어 보낸다(carried).
+ *    - 문자 형제가 이미 발송·생략됐으면 → 링크를 실을 문자가 없다 → 생략.
+ *    - 문자 형제 없음 → 스스로 캐리어 문자를 보낸다(ready일 때만 — 발행 전이면 기다린다).
+ */
+export function decideMessagingDispatch(
+  self: { channel: 'sms' | 'dm'; status: string; stage: DmStage },
+  siblings: CarrierSibling[],
+): MessagingDispatch {
+  if (self.channel === 'sms') {
+    const dm = siblings.find((s) => s.channel === 'dm');
+    if (!dm) return { action: 'send', attach: null };
+    if (dm.status === 'ready') return { action: 'send', attach: dm };
+    if (DM_IN_PROGRESS.includes(dm.status)) {
+      return {
+        action: 'wait',
+        dm,
+        reason: dm.stage === 'drafted'
+          ? '같은 시점의 모바일 DM이 아직 완성·발행되지 않았습니다.'
+          : '같은 시점의 모바일 DM 초안을 만드는 중입니다.',
+      };
+    }
+    return { action: 'send', attach: null };
+  }
+  const sms = siblings.find((s) => s.channel === 'sms');
+  if (sms) {
+    if (CARRIER_ALIVE.includes(sms.status)) return { action: 'carried', carrier: sms };
+    if (sms.status === 'sent') return { action: 'skip', reason: '같은 시점의 문자가 이미 발송되어 모바일 DM 링크를 싣지 못했습니다.' };
+    return { action: 'skip', reason: '같은 시점의 문자가 생략되어 모바일 DM도 함께 생략했습니다.' };
+  }
+  if (self.status !== 'ready') {
+    return {
+      action: 'wait',
+      dm: { id: '', channel: 'dm', status: self.status, stage: self.stage },
+      reason: '모바일 DM이 아직 완성·발행되지 않았습니다.',
+    };
+  }
+  return { action: 'send', attach: null };
+}
+
+/**
+ * (순수) 발행된 DM 화면에 남은 빈 자리 — **고객이 보는 렌더 결과**에서 찾는다.
+ * 여기 문구는 DM 렌더러가 빈 값 자리에 실제로 찍는 문자열이다(dm-section-renderer · 섹션 기본값 · 혜택 placeholder).
+ * ⛔ "입력해주세요" 같은 일반 낱말로 잡지 않는다 — 설문 답변칸 안내처럼 정상 문구가 걸린다. 렌더러 리터럴만 본다.
+ */
+const DM_PLACEHOLDER_LITERALS: Array<{ text: string; label: string }> = [
+  { text: '[직접 작성해주세요]', label: '직접 작성 문구' },
+  { text: '[혜택 직접 작성해주세요]', label: '혜택 문구' },
+  { text: '이미지를 추가해주세요', label: '이미지' },
+  { text: '[상품을 추가해주세요]', label: '상품' },
+  { text: '[슬라이드를 추가해주세요]', label: '슬라이드' },
+  { text: '[질문을 작성해주세요]', label: '설문 질문' },
+  { text: '[설문 질문을 추가해주세요]', label: '설문 질문' },
+  { text: '[헤드라인을 작성해주세요]', label: '헤드라인' },
+  { text: '[YouTube URL을 입력해주세요]', label: '영상 주소' },
+  { text: '[Instagram URL을 입력해주세요]', label: 'SNS 주소' },
+  { text: '[매장 정보를 추가해주세요]', label: '매장 정보' },
+  { text: '[리뷰를 추가해주세요]', label: '리뷰' },
+];
+
+export interface DmPlaceholderResidue {
+  label: string;
+  count: number;
+}
+
+/** (순수) 렌더된 HTML에서 빈 자리 문구를 센다. 결과가 비면 완성이다. */
+export function findDmPlaceholderResidue(renderedHtml: string): DmPlaceholderResidue[] {
+  // 태그 제거 — 속성값(placeholder="답변을 입력해주세요")은 보지 않고 사람이 읽는 텍스트만 본다.
+  const text = String(renderedHtml || '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, ' ');
+  const byLabel = new Map<string, number>();
+  for (const { text: needle, label } of DM_PLACEHOLDER_LITERALS) {
+    let idx = text.indexOf(needle);
+    let count = 0;
+    while (idx >= 0) {
+      count++;
+      idx = text.indexOf(needle, idx + needle.length);
+    }
+    if (count > 0) byLabel.set(label, (byLabel.get(label) || 0) + count);
+  }
+  return Array.from(byLabel.entries()).map(([label, count]) => ({ label, count }));
+}
+
+/** (순수) 빈 자리 요약 문구 — 통지·화면 공용. 예: "이미지 2곳 · 직접 작성 문구 3곳". */
+export function describeDmResidue(residue: DmPlaceholderResidue[]): string {
+  return residue.map((r) => `${r.label} ${r.count}곳`).join(' · ');
+}
+
+/** 섹션이 하나도 없는 발행물 — 빈 페이지 주소를 문자에 실을 수는 없다. */
+export const DM_RESIDUE_NO_CONTENT = '내용 없음';
+
+/**
+ * (순수) **섹션 데이터**에서 빈 이미지 자리를 센다 — 렌더러가 아무 문구도 찍지 않는 빈 자리(hero 이미지 없음 = 검은 배경만,
+ * 갤러리·슬라이드의 빈 url, 상품 카드의 빈 이미지)는 렌더 결과 스캔으로는 안 잡힌다(적대 검토 critical). AI 초안은 이미지가 전부 빈 값이다.
+ * ⛔ 이미지가 설계상 없는 형태(타이포 hero·인용/리드 text_card)는 세지 않는다 — 정상 완성물을 미완성으로 읽으면 담당자가 채울 수 없는 자리를 채우라고 듣는다.
+ */
+export function findDmDataResidue(sections: any[]): DmPlaceholderResidue[] {
+  let images = 0;
+  let productImages = 0;
+  for (const s of Array.isArray(sections) ? sections : []) {
+    if (!s || typeof s !== 'object') continue;
+    const type = String((s as any).type || '');
+    const props = ((s as any).props && typeof (s as any).props === 'object') ? (s as any).props : {};
+    const treatment = String((s as any).treatment || props.treatment || '');
+    const empty = (v: unknown) => !String(v ?? '').trim();
+    if (type === 'hero') {
+      // 이미지가 레이아웃의 필수 구성인 형태(split · overlap)만 센다. classic·full_bleed는 무드 배경으로 완성되도록 설계돼 있고
+      // typographic은 이미지 자리가 없다 — 전부 세면 모든 AI 초안이 영원히 ready가 못 된다(반박 검증 지적).
+      if (['split', 'editorial_overlap', 'overlap'].includes(treatment) && empty(props.image_url)) images++;
+    } else if (type === 'gallery') {
+      for (const it of Array.isArray(props.images) ? props.images : []) if (empty(it?.url)) images++;
+    } else if (type === 'slideshow') {
+      for (const it of Array.isArray(props.slides) ? props.slides : []) if (empty(it?.image_url)) images++;
+    } else if (type === 'product_carousel') {
+      for (const it of Array.isArray(props.products) ? props.products : []) if (empty(it?.image_url)) productImages++;
+    }
+  }
+  const out: DmPlaceholderResidue[] = [];
+  if (images > 0) out.push({ label: '이미지', count: images });
+  if (productImages > 0) out.push({ label: '상품 이미지', count: productImages });
+  return out;
+}
+
+/** (순수) 두 축(렌더 문구·섹션 데이터)의 빈 자리를 라벨별로 합친다. */
+export function mergeDmResidue(...lists: DmPlaceholderResidue[][]): DmPlaceholderResidue[] {
+  const byLabel = new Map<string, number>();
+  for (const list of lists) for (const r of list || []) byLabel.set(r.label, (byLabel.get(r.label) || 0) + r.count);
+  return Array.from(byLabel.entries()).map(([label, count]) => ({ label, count }));
 }
 
 /** (순수) DM 소재 생성 지시문 — 행사 원문(eventText) 축과 같은 재료를 쓴다. */

@@ -7,7 +7,7 @@
  * 레거시(slides 모드) DM은 편집 불가 안내 + 새 에디터로 전환 버튼(15단계 구현 후 활성).
  */
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import { DmThumbnail, QuickStartThumbnail } from '../components/dm/DmThumbnails';
 import axios from 'axios';
@@ -108,6 +108,16 @@ export default function DmBuilderPage() {
   const [mode, setMode] = useState<'list' | 'edit'>('list');
   const [list, setList] = useState<DmListItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
+  // ★ 2026-09-02 딥링크 진입(/dm-builder?id=<DM>&from=planner) — 마케팅 플래너 [DM 완성하기] 1클릭.
+  //   진입 값은 마운트 때 한 번 읽어 두고 URL에서는 지운다(새로고침·뒤로가기가 같은 진입을 되풀이하지 않게).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [entry] = useState(() => ({
+    id: String(searchParams.get('id') || '').trim() || null,
+    fromPlanner: searchParams.get('from') === 'planner',
+  }));
+  const [listFetched, setListFetched] = useState(false);
+  const [listFailed, setListFailed] = useState(false);
+  const deepLinkHandled = useRef(false);
   const [legacyDmError, setLegacyDmError] = useState<string | null>(null);
   // ★ CT-17: 요금제 게이팅 (mobile_dm — PRO+)
   const [planLocked, setPlanLocked] = useState<{ msg: string } | null>(null);
@@ -170,9 +180,11 @@ export default function DmBuilderPage() {
       const res = await api.get('/dm');
       const items = Array.isArray(res.data) ? res.data : res.data.items || [];
       setList(items);
+      setListFailed(false);
       setCurrentPage(1); // ★ D216+ 목록 refresh = 첫 페이지 진입 정합
       setPlanLocked(null);
     } catch (err: any) {
+      setListFailed(true);
       // ★ CT-17: 403 PLAN_FEATURE_LOCKED → 요금제 가드 화면 표시
       if (err?.response?.status === 403 && err?.response?.data?.code === 'PLAN_FEATURE_LOCKED') {
         setPlanLocked({ msg: err.response.data.error || '모바일 DM은 프로 요금제 이상에서 이용 가능합니다.' });
@@ -181,6 +193,7 @@ export default function DmBuilderPage() {
       }
     } finally {
       setListLoading(false);
+      setListFetched(true);
     }
   }, [setToast]);
 
@@ -285,6 +298,9 @@ export default function DmBuilderPage() {
 
   // ★ 2026-07-07(4) 행사 캠페인 — EventCampaignModal이 생성해둔 DM 초안 자동 적용 (30분 TTL, 1회 소비)
   useEffect(() => {
+    // ★ 2026-09-02 딥링크로 들어온 마운트에서는 초안 소비를 건너뛴다 — createNew가 편집 대상을 갈아엎어
+    //   플래너 DM 대신 새 DM이 발행되는 경합을 막는다(초안은 스토리지에 남아 다음 일반 진입에서 소비된다).
+    if (entry.id) return;
     const d = takeEventDraft<{ prompt?: string; data?: any }>(EVENT_DM_DRAFT_KEY);
     if (!d?.data) return;
     try {
@@ -303,6 +319,7 @@ export default function DmBuilderPage() {
 
   // ★ 2026-07-19 P4: 이미지 스튜디오 소재 → 풀화면 이미지 DM 새 초안 (완성 이미지 업로드 흐름과 동일 섹션 — 검증된 선례 재사용)
   useEffect(() => {
+    if (entry.id) return; // 딥링크 진입 — 위와 같은 이유로 건너뛴다
     const d = takeEventDraft<{ imageUrl?: string; name?: string | null }>(STUDIO_DM_DRAFT_KEY);
     if (!d?.imageUrl) return;
     try {
@@ -450,8 +467,34 @@ export default function DmBuilderPage() {
       return;
     }
     await loadDm(id);
+    // ★ 2026-09-02 불러오기 실패(권한 없음·삭제됨)는 편집 모드로 들어가지 않는다 — 빈 편집기에서 자동저장이
+    //   **다른 DM**을 새로 만들고, 플래너가 참조하는 DM은 미발행으로 남는다(딥링크 진입에서 특히 위험).
+    const st = useDmBuilderStore.getState();
+    if (st.loadError || st.dmId !== id) {
+      setToast({ type: 'error', message: st.loadError || 'DM을 불러오지 못했습니다.' });
+      return;
+    }
     setMode('edit');
   };
+
+  // ★ 2026-09-02 딥링크(?id=) — 목록이 한 번 로드된 뒤 그 항목을 연다. 목록에 없으면 열 권한이 없거나 지워진 것이다.
+  useEffect(() => {
+    if (!entry.id || deepLinkHandled.current || !listFetched || listLoading) return;
+    deepLinkHandled.current = true;
+    // 목록 조회 자체가 실패했으면 권한 문제가 아니다 — 파라미터를 남겨 새로고침으로 다시 시도할 수 있게 한다.
+    if (listFailed) {
+      setToast({ type: 'error', message: 'DM 목록을 불러오지 못했습니다. 새로고침해 주세요.' });
+      return;
+    }
+    setSearchParams({}, { replace: true });
+    const item = list.find((d) => d.id === entry.id);
+    if (!item) {
+      setToast({ type: 'error', message: '이 DM을 열 수 없습니다. DM을 만든 계정으로 로그인했는지 확인해 주세요.' });
+      return;
+    }
+    void handleEdit(item.id, item.layout_mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry.id, listFetched, listLoading, listFailed, list]);
 
   const handleDelete = async (id: string) => {
     // ★ D216+ ConfirmModal (옛 native confirm 영구 폐기)
@@ -575,7 +618,7 @@ export default function DmBuilderPage() {
   if (mode === 'edit') {
     return (
       <div className="dm-builder" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-        <TopBarWithBack onBack={handleBackRequest} onPublishDone={handleBackToList} />
+        <TopBarWithBack onBack={handleBackRequest} onPublishDone={handleBackToList} fromPlanner={entry.fromPlanner} />
         {/* ★ 2026-07-16 M4 — 전역 퀵바(서체 일괄·브랜드 킷·테마) */}
         <DmQuickBar />
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -1401,7 +1444,8 @@ export default function DmBuilderPage() {
   );
 }
 
-function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPublishDone: () => void }) {
+function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false }: { onBack: () => void; onPublishDone: () => void; fromPlanner?: boolean }) {
+  const navigate = useNavigate();
   const saveStore = useDmBuilderStore((s) => s.save);
   const dmId = useDmBuilderStore((s) => s.dmId);
   const setToast = useDmBuilderStore((s) => s.setToast);
@@ -1425,6 +1469,8 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
   }, [validationOverride]);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
+  // ★ 2026-09-02 플래너에서 온 DM — 발행 직후 "문자에 실릴 수 있는가"를 서버에 묻는다(빈 자리가 남았으면 그 사실을 말해야 담당자가 손을 떼지 않는다).
+  const [carryCheck, setCarryCheck] = useState<{ ready: boolean; residue: string | null; checkError: boolean } | null>(null);
 
   // ★ 2026-07-14 발행 DM은 자동저장을 하지 않으므로(임은지 유실 방지), 미저장 편집분이 하드 새로고침/탭 닫기로
   //   조용히 사라지지 않게 브라우저 이탈 가드(beforeunload). 앱 내 뒤로가기 이탈은 기존 확인 모달이 담당.
@@ -1468,6 +1514,15 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
         const url = res?.data?.short_url || '';
         if (url) {
           // 발행 완료 → 단축 URL 확인·복사 모달. 목록 이동은 모달 확인 시.
+          if (fromPlanner) {
+            setCarryCheck(null);
+            try {
+              const chk = await api.get(`/marketing-planner/dm/${dmId}/carry-check`);
+              setCarryCheck({ ready: !!chk.data?.ready, residue: chk.data?.residue || null, checkError: !!chk.data?.checkError });
+            } catch {
+              setCarryCheck(null); // 확인 실패 = 플래너 화면이 다시 말해 준다
+            }
+          }
           setPublishedUrl(url);
           return;
         }
@@ -1525,13 +1580,34 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
         open={!!publishedUrl}
         onClose={() => { setPublishedUrl(null); onPublishDone(); }}
         title="발행 완료"
-        subtitle="아래 단축 URL을 복사해 고객에게 발송하세요."
+        // ★ 2026-09-02 플래너에서 온 DM은 플래너가 예정일 문자에 링크로 실어 보낸다 — 여기서 따로 보내면 같은 고객에게 두 통이다.
+        subtitle={fromPlanner
+          ? (carryCheck && !carryCheck.ready
+            ? (carryCheck.residue
+              ? `아직 채워지지 않은 자리가 있습니다: ${carryCheck.residue}. 채운 뒤 다시 발행해야 문자에 실립니다.`
+              : '문자에 실을 수 있는지 확인하지 못했습니다. 플래너 화면에서 상태를 확인해 주세요.')
+            : '마케팅 플래너가 예정일 문자 1통에 이 주소를 링크로 실어 보냅니다. 지금 따로 보내지 않아도 됩니다.')
+          : '아래 단축 URL을 복사해 고객에게 발송하세요.'}
         size="sm"
         footer={
-          <>
-            <ModalButton variant="secondary" onClick={() => { setPublishedUrl(null); onPublishDone(); }}>확인</ModalButton>
-            <ModalButton variant="primary" onClick={() => { setPublishedUrl(null); setSendModalOpen(true); }}>타겟 고객에게 발송</ModalButton>
-          </>
+          fromPlanner ? (
+            carryCheck && !carryCheck.ready && carryCheck.residue ? (
+              <>
+                <ModalButton variant="secondary" onClick={() => { setPublishedUrl(null); navigate('/marketing-planner'); }}>플래너로 돌아가기</ModalButton>
+                <ModalButton variant="primary" onClick={() => { setPublishedUrl(null); }}>계속 채우기</ModalButton>
+              </>
+            ) : (
+              <>
+                <ModalButton variant="secondary" onClick={() => { setPublishedUrl(null); onPublishDone(); }}>확인</ModalButton>
+                <ModalButton variant="primary" onClick={() => { setPublishedUrl(null); navigate('/marketing-planner'); }}>플래너로 돌아가기</ModalButton>
+              </>
+            )
+          ) : (
+            <>
+              <ModalButton variant="secondary" onClick={() => { setPublishedUrl(null); onPublishDone(); }}>확인</ModalButton>
+              <ModalButton variant="primary" onClick={() => { setPublishedUrl(null); setSendModalOpen(true); }}>타겟 고객에게 발송</ModalButton>
+            </>
+          )
         }
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px' }}>

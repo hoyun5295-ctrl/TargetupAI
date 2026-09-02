@@ -44,6 +44,8 @@ import {
 } from './planner-execution';
 import { refundCreditWithClient } from './ai-credit-tx';
 import { countMonthWork } from './planner-touchpoint';
+// ★ 2026-09-02 DM 단계·문자 캐리어 표시 — 화면 두 곳(캘린더 목록·결재 브리핑)이 같은 조립을 쓴다.
+import { TouchpointDmInfo, describeMessagingTouchpoints } from './planner-production';
 
 // ── 요금 축 ──────────────────────────────────────────────────────────
 /** 대행 크레딧 source. 단가는 CREDIT_COST_MAP이 소유한다. */
@@ -132,6 +134,12 @@ export interface BriefTouchpoint {
   status: string;
   /** 보류·생략 사유(고객 언어). 조용한 증발을 만들지 않는다. */
   lockReason: string | null;
+  /** ★ 2026-09-02 모바일 DM 단계·편집 경로(dm 채널만). 화면이 [DM 완성하기]와 "발행 완료"를 그린다. */
+  dm?: TouchpointDmInfo;
+  /** ★ 2026-09-02 문자 접점에 같은 시점의 DM이 링크로 실린다. */
+  dmLinked?: boolean;
+  /** ★ 2026-09-02 DM 접점이 같은 시점 문자에 실려 나간다(스스로 문자를 보내지 않는다). */
+  carriedBySms?: boolean;
 }
 
 
@@ -424,7 +432,7 @@ export async function loadMonthlyBrief(companyId: string, planMonth: string): Pr
   if (eventIds.length > 0) {
     // 회사 조건을 자식 조회에도 직접 건다 — 부모로만 격리하면 회사가 섞인 자식 행이 합계에 들어온다.
     const tp = await query(
-      `SELECT id, event_id, channel, timing_rule, format, est_credits, status, lock_reason
+      `SELECT id, event_id, channel, timing_rule, format, est_credits, status, lock_reason, asset_ref, exec_meta
          FROM planner_touchpoints
         WHERE event_id = ANY($1) AND company_id = $2::uuid
         ORDER BY created_at ASC`,
@@ -436,6 +444,24 @@ export async function loadMonthlyBrief(companyId: string, planMonth: string): Pr
       tpByEvent.set(String(row.event_id), arr);
     }
   }
+  // DM 단계·문자 캐리어 표시(live 발행 상태 포함) — 화면이 "DM 완성 필요 / 문자에 링크로 실림"을 그린다.
+  const evDates = new Map<string, { startsOn: string; endsOn: string }>(
+    (evRes.rows as any[]).map((r) => [String(r.id), { startsOn: String(r.starts_on).slice(0, 10), endsOn: String(r.ends_on).slice(0, 10) }]),
+  );
+  const messagingInfo = await describeMessagingTouchpoints(
+    companyId,
+    Array.from(tpByEvent.values()).flat().map((t: any) => {
+      const d = evDates.get(String(t.event_id)) || { startsOn: '', endsOn: '' };
+      return {
+        id: String(t.id), eventId: String(t.event_id), channel: t.channel, timing: t.timing_rule,
+        scheduledOn: computeTouchpointDate(t.timing_rule, d.startsOn, d.endsOn),
+        status: String(t.status || 'planned'), assetRef: t.asset_ref ? String(t.asset_ref) : null, execMeta: t.exec_meta || {},
+      };
+    }),
+  ).catch((e: any) => {
+    console.warn('[planner-approval] DM 단계 조립 실패(표시 생략):', e?.message || e);
+    return new Map<string, { dm?: TouchpointDmInfo; dmLinked?: boolean; carriedBySms?: boolean }>();
+  });
 
   const events: BriefEvent[] = [];
   for (const r of evRes.rows as any[]) {
@@ -468,6 +494,7 @@ export async function loadMonthlyBrief(companyId: string, planMonth: string): Pr
         audience: mode === 'participants' && channel !== 'alimtalk' ? audience.participants : audience.all[channel],
         status: String(t.status || 'planned'),
         lockReason: t.lock_reason || null,
+        ...(messagingInfo.get(String(t.id)) || {}),
       };
     });
     events.push({
@@ -920,7 +947,11 @@ export async function cancelMonthlyApproval(
     // 실적 집계 — 같은 트랜잭션·잠금 안이라 그 사이 새 선점이 끼어들 수 없다.
     const workRes = await client.query(
       `SELECT
-         COUNT(*) FILTER (WHERE t.asset_ref IS NOT NULL)::int AS produced,
+         -- ★ 2026-09-02 담당자가 완성·발행하지 않은 DM 초안은 제작 실적이 아니다(countMonthWork와 같은 조건 — 두 문이 갈리면 판정이 갈린다).
+         COUNT(*) FILTER (
+           WHERE t.asset_ref IS NOT NULL
+             AND NOT (t.channel = 'dm' AND COALESCE(t.exec_meta->>'dm_stage', '') = 'drafted' AND t.exec_ref IS NULL)
+         )::int AS produced,
          COUNT(*) FILTER (
            WHERE t.exec_ref IS NOT NULL OR t.status IN ('sent', 'scheduled', 'producing')
               OR (t.exec_meta ? 'send_started_at')
