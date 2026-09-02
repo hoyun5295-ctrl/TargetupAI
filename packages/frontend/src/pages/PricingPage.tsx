@@ -9,6 +9,7 @@ import CreditSummaryBar from '../components/credit/CreditSummaryBar';
 import CreditRechargeModal from '../components/credit/CreditRechargeModal';
 import { PLAN_INFRA, planBonusPct, dailyDbAnalysisCredits } from '../constants/credit';
 import { useToast } from '../components/ToastProvider';
+import { goBackOr } from '../lib/scroll-restoration';
 
 interface Plan {
   id: string;
@@ -58,7 +59,7 @@ const FREE_MESSAGING_NOTE = '매월 제공 · 발송 시도 시점에 차감되�
 export default function PricingPage() {
   const navigate = useNavigate();
   const toast = useToast();
-  const { user } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [myCredit, setMyCredit] = useState<any>(null);
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
@@ -81,6 +82,8 @@ export default function PricingPage() {
   const [showResultModal, setShowResultModal] = useState(false);
   // ★ 2026-08-05 요금제 무료 메시징 — 당월 제공·사용 현황 + 요금제별 제공량(서버 파생, 화면 하드코딩 금지)
   const [freeMessaging, setFreeMessaging] = useState<FreeMessagingInfo | null>(null);
+  // ★ 2026-09-03 방문자 모드 — /api/plans가 함께 주는 요금제별 무료 메시지 수량(plans 파생). 로그인은 my-free-messaging이 우선.
+  const [planQuotasPublic, setPlanQuotasPublic] = useState<Record<string, Record<string, number>> | null>(null);
 
   useEffect(() => {
     loadData();
@@ -90,9 +93,9 @@ export default function PricingPage() {
     try {
       const token = localStorage.getItem('token');
       
-      const plansRes = await fetch('/api/plans', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      // ★ 2026-09-03 방문자 모드 — /pricing이 공개 라우트가 되어 비로그인도 들어온다.
+      //   요금제 목록은 공개 API라 인증 헤더 없이 부르고, 로그인 전용 넷(크레딧·무료 현황·내 플랜·신청 상태)은 건너뛴다.
+      const plansRes = await fetch('/api/plans', isAuthenticated ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
       const plansData = await plansRes.json();
       // CT-17: FREE(미가입) + TRIAL(무료체험) 은 유료 요금제 카드에서 제외
       //   · FREE = 요금제 미가입 상태, 사용자가 선택 대상 아님
@@ -101,6 +104,8 @@ export default function PricingPage() {
         .filter((p: Plan) => isCustomerSelectablePlan(p.plan_code, p.is_active))
         .sort((a: Plan, b: Plan) => a.monthly_price - b.monthly_price);
       setPlans(sortedPlans);
+      if (plansData.planQuotas) setPlanQuotasPublic(plansData.planQuotas);
+      if (!isAuthenticated) return; // 방문자: 로그인 전용 조회 넷은 건너뛴다(finally가 loading을 내린다)
 
       // 종량제 Phase 5: 내 AI 크레딧 잔여
       try {
@@ -160,10 +165,10 @@ export default function PricingPage() {
     setShowRequestModal(true);
   };
 
-  const openInquiryModal = () => {
+  const openInquiryModal = (planInterest = '') => {
     setInquiryForm({
       companyName: (companyInfo as any)?.company_name || '',
-      contactName: '', phone: '', email: '', planInterest: '', subject: '', message: '',
+      contactName: '', phone: '', email: '', planInterest, subject: '', message: '',
     });
     setShowContactModal(true);
   };
@@ -191,7 +196,8 @@ export default function PricingPage() {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/companies/inquiry', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        // 방문자는 토큰이 없다 — /inquiry는 공개 라우트(companies.ts · authenticate 앞)
+        headers: token ? { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } : { 'Content-Type': 'application/json' },
         body: JSON.stringify(inquiryForm),
       });
       if (res.ok) {
@@ -287,7 +293,7 @@ export default function PricingPage() {
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => navigate(-1)}
+              onClick={() => goBackOr(navigate, isAuthenticated ? '/dashboard' : '/login')}
               className="text-gray-600 hover:text-gray-900"
             >
               ← 뒤로
@@ -295,7 +301,9 @@ export default function PricingPage() {
             <h1 className="text-xl font-bold text-gray-900">요금제 안내</h1>
           </div>
           <div className="text-sm text-gray-500">
-            {(companyInfo as any)?.company_name || user?.name}
+            {isAuthenticated ? ((companyInfo as any)?.company_name || user?.name) : (
+              <button onClick={() => navigate('/login')} className="text-sm font-medium text-blue-600 hover:text-blue-700">로그인</button>
+            )}
           </div>
         </div>
       </header>
@@ -553,7 +561,14 @@ export default function PricingPage() {
                   </div>
 
                   <div className="mt-auto pt-4">
-                    {isCurrentPlan ? (
+                    {!isAuthenticated ? (
+                      <button
+                        onClick={() => openInquiryModal(plan.plan_name)}
+                        className="w-full py-2 px-4 rounded-lg font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                      >
+                        이용 문의
+                      </button>
+                    ) : isCurrentPlan ? (
                       <button
                         disabled
                         className="w-full py-2 px-4 bg-gray-100 text-gray-500 rounded-lg cursor-not-allowed"
@@ -589,7 +604,7 @@ export default function PricingPage() {
 
                     {/* ★ 2026-08-05 요금제 가입 메리트 — 이 요금제에 포함된 무료 메시지. `plans` 파생이라 화면에 수량을 적지 않는다. */}
                     {(() => {
-                      const quota = freeMessaging?.planQuotas?.[plan.plan_code];
+                      const quota = (freeMessaging?.planQuotas || planQuotasPublic)?.[plan.plan_code];
                       const entries = Object.entries(quota || {}).filter(([, v]) => Number(v) > 0);
                       if (entries.length === 0) return null;
                       return (
@@ -673,7 +688,7 @@ export default function PricingPage() {
                 <div>{COMPANY_PHONE}</div>
               </a>
               <button
-                onClick={openInquiryModal}
+                onClick={() => openInquiryModal()}
                 className="px-6 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center"
               >
                 담당자 문의
@@ -766,7 +781,7 @@ export default function PricingPage() {
               <button
                 onClick={() => {
                   setShowSuccessModal(false);
-                  navigate('/dashboard');
+                  if (isAuthenticated) navigate('/dashboard'); // 방문자는 요금제 화면에 남는다
                 }}
                 className="w-full px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 transition-colors"
               >

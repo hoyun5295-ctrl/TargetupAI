@@ -655,7 +655,8 @@ function App() {
 
         <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
         <Route path="/unsubscribes" element={<PrivateRoute><Unsubscribes /></PrivateRoute>} />
-        <Route path="/pricing" element={<PrivateRoute><PricingPage /></PrivateRoute>} />
+        {/* ★ 2026-09-03 공개 라우트 — 비로그인 방문자도 요금제를 본다(소개 페이지 CTA). 로그인 전용 구역은 PricingPage가 isAuthenticated로 가른다 */}
+        <Route path="/pricing" element={<PricingPage />} />
         <Route path="/agency-send" element={<PrivateRoute><AgencySendPage /></PrivateRoute>} />
         <Route path="/guide" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
         <Route path="/guide/:jobId" element={<PrivateRoute><GuidePage /></PrivateRoute>} />

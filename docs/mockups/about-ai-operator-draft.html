@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  한줄로 AI Operator 공개 소개 페이지 (★2026-08-27 전면 재작성 · 2026-09-02 실샘플 이미지 반입 · v6)
+  한줄로 AI Operator 공개 소개 페이지 (★2026-08-27 전면 재작성 · 2026-09-02 실샘플 이미지 반입 · v7)
 
   ⛔ 이 파일을 여는 사람이 지켜야 할 것
 
@@ -10,7 +10,7 @@
      지금 실린 것 = 여정설계 · 자동마케팅 · 원스텝 생성 · 모바일 DM · 이메일 캠페인 ·
      인앱 메시지 · 이미지 스튜디오 · 브랜드보이스 · 마케팅분석과 고객 360 (아홉 가지)
      + 자사몰 연동 + 대행발송 + 도움말 봇.
-  2. 고치면 참조 세 곳의 캐시버스터를 함께 올린다(지금 v6).
+  2. 고치면 참조 세 곳의 캐시버스터를 함께 올린다(지금 v7).
      frontend/src/pages/Dashboard.tsx · LoginPage.tsx 2곳. 안 올리면 기존 방문자는 옛 판을 본다.
   3. 문안 규약: 줄표 0 · 모델명 0 · 내부 식별자 0 · 로드맵이나 미출시 기능 0.
      "발송 승인은 언제나 사람이 합니다"는 이 페이지의 뼈대다. 빼지 않는다.
@@ -466,8 +466,8 @@
   .voice { display: block; }
   .bcard { border-radius: 20px; border: 1px solid var(--line2); background: var(--panel); box-shadow: 0 30px 70px rgba(2,4,12,0.7); overflow: hidden; }
   .bcover { position: relative; height: 150px; }
-  .bcover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 40%; }
-  .bcover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5,7,13,0.04), rgba(13,18,33,0.94)); }
+  .bcover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+  .bcover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5,7,13,0) 0%, rgba(5,7,13,0.06) 42%, rgba(13,18,33,0.86) 100%); }
   .bid { position: absolute; left: 18px; right: 18px; bottom: 14px; z-index: 1; display: flex; align-items: center; gap: 11px; }
   .bid .bmark { width: 40px; height: 40px; border-radius: 12px; flex: none; display: grid; place-items: center; font-size: 13px; font-weight: 850; letter-spacing: .04em; color: #e9cfa0; background: linear-gradient(135deg, #3d2b22, #1c1410); border: 1px solid rgba(217,176,106,0.5); }
   .bid .bname b { display: block; font-size: 15px; font-weight: 820; letter-spacing: .05em; }
@@ -1021,7 +1021,7 @@
       <div class="voice rise" aria-hidden="true">
         <div class="bcard">
           <div class="bcover">
-            <img src="about-ai-operator/img/brand-cover.jpg" alt="" decoding="async" />
+            <img src="about-ai-operator/img/brand-cover-warm.jpg" alt="" decoding="async" />
             <div class="bid">
               <span class="bmark">MB</span>
               <div class="bname"><b>MAISON BLANC</b><span>대표 문안 6건에서 학습 · 발송할수록 갱신</span></div>

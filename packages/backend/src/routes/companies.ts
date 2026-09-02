@@ -1,5 +1,6 @@
 import { Request, Response, Router } from 'express';
 import nodemailer from 'nodemailer';
+import rateLimit from 'express-rate-limit';
 import pool, { query } from '../config/database';
 // ★ 2026-07-20: 회사 생성 코어 CT(시스템 user·시퀀스 부속 포함) — POST /와 게이트웨이 bill 일괄 생성 공유
 import { createCompanyCore } from '../utils/company-create';
@@ -25,6 +26,92 @@ import {
 } from '../utils/company-merge';
 
 const router = Router();
+
+// ★ 2026-09-03 공개 라우트는 아래 router.use(authenticate) 앞에 둔다 — 그 줄 뒤에 쓰면 비로그인 방문자는 401이다.
+//   /inquiry가 그 뒤(파일 끝쪽)에 있어 로그인 페이지·요금제 안내의 "이용신청 문의" 모달이 토큰 없이는 막혀 있었다(B-0903-1).
+//   공개 POST라 marketing-diagnosis-public과 같은 한도로 IP당 제한(10분 5회). 핸들러 본문은 옮기기만 했고 바꾸지 않았다.
+const publicInquiryLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.', code: 'RATE_LIMITED' },
+});
+
+// POST /api/companies/inquiry - 솔루션 문의 메일 발송
+router.post('/inquiry', publicInquiryLimiter, async (req: Request, res: Response) => {
+  try {
+    const { companyName, contactName, phone, email, planInterest, subject, message } = req.body;
+
+    if (!contactName || !phone || !email || !subject || !message) {
+      return res.status(400).json({ error: '필수 항목을 모두 입력해주세요.' });
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'smtp.hiworks.com',
+      port: Number(process.env.SMTP_PORT) || 465,
+      secure: true,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    const htmlBody = `
+      <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #3B82F6, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
+          <h2 style="color: white; margin: 0; font-size: 20px;">📩 한줄로 솔루션 문의</h2>
+        </div>
+        <div style="background: #ffffff; padding: 24px; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280; width: 100px;">회사명</td>
+              <td style="padding: 10px 0; font-weight: 600;">${companyName || '-'}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">담당자</td>
+              <td style="padding: 10px 0; font-weight: 600;">${contactName}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">연락처</td>
+              <td style="padding: 10px 0;">${phone}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">이메일</td>
+              <td style="padding: 10px 0;"><a href="mailto:${email}" style="color: #3B82F6;">${email}</a></td>
+            </tr>
+            ${planInterest ? `<tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">관심 요금제</td>
+              <td style="padding: 10px 0;"><span style="background: #EFF6FF; color: #2563EB; padding: 2px 10px; border-radius: 12px; font-size: 13px;">${planInterest}</span></td>
+            </tr>` : ''}
+          </table>
+          <div style="margin-top: 20px; padding: 16px; background: #F9FAFB; border-radius: 8px;">
+            <div style="font-size: 13px; color: #6B7280; margin-bottom: 8px;">문의 내용</div>
+            <div style="font-size: 14px; color: #111827; white-space: pre-line;">${message}</div>
+          </div>
+          <div style="margin-top: 20px; font-size: 12px; color: #9CA3AF; text-align: center;">
+            이 메일은 한줄로(hanjul.ai) 솔루션 문의 폼에서 자동 발송되었습니다.
+          </div>
+        </div>
+      </div>
+    `;
+
+    const toAddresses = (process.env.SMTP_TO || '').split(',').map(e => e.trim()).filter(Boolean);
+
+    await transporter.sendMail({
+      from: `"한줄로 문의" <${process.env.SMTP_USER}>`,
+      to: toAddresses.join(', '),
+      bcc: process.env.SMTP_BCC || '',
+      subject: `[한줄로 문의] ${subject}`,
+      html: htmlBody,
+    });
+
+    res.json({ message: '문의가 전송되었습니다.' });
+  } catch (error) {
+    console.error('문의 메일 발송 실패:', error);
+    res.status(500).json({ error: '문의 전송에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+  }
+});
 
 // 모든 라우트에 인증 필요
 router.use(authenticate);
@@ -2436,81 +2523,6 @@ router.post('/refresh-schema', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('스키마 갱신 실패:', error);
     res.status(500).json({ success: false, error: '스키마 갱신 실패' });
-  }
-});
-
-// POST /api/companies/inquiry - 솔루션 문의 메일 발송
-router.post('/inquiry', async (req: Request, res: Response) => {
-  try {
-    const { companyName, contactName, phone, email, planInterest, subject, message } = req.body;
-
-    if (!contactName || !phone || !email || !subject || !message) {
-      return res.status(400).json({ error: '필수 항목을 모두 입력해주세요.' });
-    }
-
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.hiworks.com',
-      port: Number(process.env.SMTP_PORT) || 465,
-      secure: true,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
-    const htmlBody = `
-      <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: linear-gradient(135deg, #3B82F6, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
-          <h2 style="color: white; margin: 0; font-size: 20px;">📩 한줄로 솔루션 문의</h2>
-        </div>
-        <div style="background: #ffffff; padding: 24px; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px;">
-          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-            <tr style="border-bottom: 1px solid #F3F4F6;">
-              <td style="padding: 10px 0; color: #6B7280; width: 100px;">회사명</td>
-              <td style="padding: 10px 0; font-weight: 600;">${companyName || '-'}</td>
-            </tr>
-            <tr style="border-bottom: 1px solid #F3F4F6;">
-              <td style="padding: 10px 0; color: #6B7280;">담당자</td>
-              <td style="padding: 10px 0; font-weight: 600;">${contactName}</td>
-            </tr>
-            <tr style="border-bottom: 1px solid #F3F4F6;">
-              <td style="padding: 10px 0; color: #6B7280;">연락처</td>
-              <td style="padding: 10px 0;">${phone}</td>
-            </tr>
-            <tr style="border-bottom: 1px solid #F3F4F6;">
-              <td style="padding: 10px 0; color: #6B7280;">이메일</td>
-              <td style="padding: 10px 0;"><a href="mailto:${email}" style="color: #3B82F6;">${email}</a></td>
-            </tr>
-            ${planInterest ? `<tr style="border-bottom: 1px solid #F3F4F6;">
-              <td style="padding: 10px 0; color: #6B7280;">관심 요금제</td>
-              <td style="padding: 10px 0;"><span style="background: #EFF6FF; color: #2563EB; padding: 2px 10px; border-radius: 12px; font-size: 13px;">${planInterest}</span></td>
-            </tr>` : ''}
-          </table>
-          <div style="margin-top: 20px; padding: 16px; background: #F9FAFB; border-radius: 8px;">
-            <div style="font-size: 13px; color: #6B7280; margin-bottom: 8px;">문의 내용</div>
-            <div style="font-size: 14px; color: #111827; white-space: pre-line;">${message}</div>
-          </div>
-          <div style="margin-top: 20px; font-size: 12px; color: #9CA3AF; text-align: center;">
-            이 메일은 한줄로(hanjul.ai) 솔루션 문의 폼에서 자동 발송되었습니다.
-          </div>
-        </div>
-      </div>
-    `;
-
-    const toAddresses = (process.env.SMTP_TO || '').split(',').map(e => e.trim()).filter(Boolean);
-
-    await transporter.sendMail({
-      from: `"한줄로 문의" <${process.env.SMTP_USER}>`,
-      to: toAddresses.join(', '),
-      bcc: process.env.SMTP_BCC || '',
-      subject: `[한줄로 문의] ${subject}`,
-      html: htmlBody,
-    });
-
-    res.json({ message: '문의가 전송되었습니다.' });
-  } catch (error) {
-    console.error('문의 메일 발송 실패:', error);
-    res.status(500).json({ error: '문의 전송에 실패했습니다. 잠시 후 다시 시도해주세요.' });
   }
 });
 
