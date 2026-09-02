@@ -233,8 +233,15 @@ export function buildSmsOptInBackfill(
  * 연결(08xxx)·구문(42xxx)·자원(53xxx)·운영자 개입(57xxx) 같은 계통 오류에 단건 폴백을 돌리면
  * 같은 실패를 최대 청크 크기만큼 반복해 **장애 중인 DB에 부하를 증폭**한다(5,000건 요청 = 최대 5,010회).
  * 계통 오류면 그 청크를 통째 실패로 계상하고 폴백 없이 넘어간다.
+ *
+ * ★ 2026-09-02 `21000`(cardinality_violation) 추가 — "ON CONFLICT DO UPDATE command cannot affect
+ *   row a second time". **배치 안에 같은 충돌 키가 두 번 들어왔다는 뜻이므로 단건으로 쪼개면 그냥 풀린다.**
+ *   위 계통 오류들과 정반대다(폴백이 부하를 늘리는 게 아니라 해결한다).
+ *   경위 = 아난티 싱크에서 이 코드가 계통 오류로 분류돼 폴백이 생략되고, 중복 1건 때문에 청크 500건이
+ *   통째로 버려졌다(최근 24시간 25,244건 · 53청크). 실측 SQLSTATE 21000 확인.
+ *   ⛔ 이 판정은 sync·upload·manual 세 경로가 공유한다 — 한쪽만 고치면 같은 사고가 다른 문으로 다시 온다.
  */
 export function isRowLevelDbError(err: any): boolean {
   const code = String(err?.code || '');
-  return code.startsWith('22') || code.startsWith('23');
+  return code.startsWith('22') || code.startsWith('23') || code === '21000';
 }

@@ -602,6 +602,16 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
 
     // 1단계: JS에서 phone validation + normalize + 파생 필드 계산
     const validRows: Array<Record<string, any>> = [];
+    // ★ 2026-09-02 배치 내 같은 폰 dedupe — upsert 충돌 축이 (company_id, phone)이라 한 배치에 같은 폰이
+    //   두 번 들어오면 PostgreSQL이 21000(cannot affect row a second time)으로 **청크 통째**를 거절한다.
+    //   upload 경로는 2026-08-14에 같은 규칙(첫 행만 남긴다)을 넣었는데 이 싱크 경로만 빠져 있었다.
+    //   경위 = 아난티 최근 24시간 25,244건 손실(53청크). 규칙·카운트 이름 모두 upload와 맞춘다.
+    //   ⛔ 매장은 dedupe **전에** 모은다 — 같은 사람이 여러 매장에 있는 것이 중복의 주된 이유라,
+    //   첫 행만 남기고 끝내면 나머지 매장이 customer_stores에서 통째로 사라진다(고치려다 다른 사고).
+    const seenPhones = new Set<string>();
+    let duplicateInRequest = 0;
+    /** 폰 → 그 폰이 이 배치에서 들고 온 매장 전량(중복 행 것 포함). Set이라 같은 매장이 겹쳐도 1개다. */
+    const storesByPhone = new Map<string, Set<string>>();
 
     for (const c of customers) {
       if (!c.phone) {
@@ -721,6 +731,21 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       }
       row.custom_fields = Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null;
 
+      // 매장은 dedupe 전에 모은다(같은 폰의 두 번째 행이 들고 온 매장도 살린다).
+      if (row.store_code && row.phone) {
+        const pk = String(row.phone);
+        let codes = storesByPhone.get(pk);
+        if (!codes) { codes = new Set<string>(); storesByPhone.set(pk, codes); }
+        codes.add(String(row.store_code));
+      }
+
+      // 같은 폰의 두 번째 행부터는 customers 적재에서 제외한다(첫 행만 남긴다 = upload와 같은 규칙).
+      if (seenPhones.has(row.phone)) {
+        duplicateInRequest++;
+        continue;
+      }
+      seenPhones.add(row.phone);
+
       validRows.push(row);
     }
 
@@ -741,7 +766,13 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         upsertedCount += result.rowCount || chunk.length;
 
         // customer_stores 벌크 처리 (sync 경로 전용 — upload.ts는 별도 매핑 로직 사용)
-        const storeRows = chunk.filter((r: any) => r.store_code);
+        // ★ 2026-09-02 chunk 배열이 아니라 그 폰들의 매장 전량을 쓴다 — 폰 dedupe로 두 번째 행을
+        //   customers 적재에서 뺐어도 그 행이 들고 온 매장은 살아야 한다(다매장 고객이 중복의 주된 이유).
+        const storeRows: Array<{ phone: string; store_code: string }> = [];
+        for (const r of chunk) {
+          const codes = storesByPhone.get(String(r.phone));
+          if (codes) for (const code of codes) storeRows.push({ phone: String(r.phone), store_code: code });
+        }
         if (storeRows.length > 0) {
           const storeValues: any[] = [];
           const storeValueClauses: string[] = [];
@@ -777,13 +808,18 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
             upsertedCount += rowResult.rowCount || 1;
 
             // customer_stores 단건 처리 (chunk 일괄 실패 시 fallback)
-            if (row.store_code) {
-              await query(
-                `INSERT INTO customer_stores (company_id, customer_id, store_code)
-                 VALUES ($1, (SELECT id FROM customers WHERE company_id = $1 AND phone = $2 LIMIT 1), $3)
-                 ON CONFLICT (customer_id, store_code) DO NOTHING`,
-                [companyId, row.phone, row.store_code]
-              );
+            // ★ 2026-09-02 이 폰의 매장 전량을 넣는다 — 벌크 경로와 같은 규칙이라야
+            //   "청크가 성공했을 때만 매장이 다 들어가는" 불일치가 생기지 않는다.
+            const rowCodes = storesByPhone.get(String(row.phone));
+            if (rowCodes) {
+              for (const code of rowCodes) {
+                await query(
+                  `INSERT INTO customer_stores (company_id, customer_id, store_code)
+                   VALUES ($1, (SELECT id FROM customers WHERE company_id = $1 AND phone = $2 LIMIT 1), $3)
+                   ON CONFLICT (customer_id, store_code) DO NOTHING`,
+                  [companyId, row.phone, code]
+                );
+              }
             }
           } catch (rowError: any) {
             failedCount++;
@@ -890,7 +926,11 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     // ===== Agent 설정 응답 (설정 폴링 제거 대체) =====
     const agentConfig = await getSyncConfigForAgent(companyId);
 
-    console.log(`[Sync] Customers: ${upsertedCount} upserted, ${failedCount} failed (company: ${req.companyName})`);
+    console.log(
+      `[Sync] Customers: ${upsertedCount} upserted, ${failedCount} failed`
+      + (duplicateInRequest > 0 ? `, 배치 내 같은 폰 ${duplicateInRequest}건 제외(매장은 보존)` : '')
+      + ` (company: ${req.companyName})`
+    );
     // ★ 2026-06-13: 실패 행 식별 가능하게 stdout 기록 (인비토 매시 1건 고정 실패가 어떤 행인지 기록이 없던 구멍)
     if (failedCount > 0) {
       console.log(`[Sync] Customers 실패 상세 (최대 5건): ${JSON.stringify(failures.slice(0, 5))}`);
@@ -901,6 +941,9 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       data: {
         upsertedCount,
         failedCount,
+        // ★ 2026-09-02 배치 안에서 같은 폰이라 customers 적재를 건너뛴 행 수(매장은 보존했다).
+        //   실패가 아니므로 failedCount와 섞지 않는다 — upload 응답과 같은 이름·의미다.
+        duplicateInRequest,
         failures: failures.slice(0, 50) // 최대 50건만 리턴
       },
       config: agentConfig
