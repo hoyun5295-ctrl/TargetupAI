@@ -224,6 +224,28 @@ if (corsAllowedOrigins.length === 0) {
 //   실 보안 경계는 각 endpoint 인증(public key + 등록 도메인 검증)이며 CORS는 통로만 연다.
 const CDP_BROWSER_CORS_RE = /^\/api\/cdp\/(ingest|inapp\/active|inapp\/track|push\/vapid-public-key|push\/subscribe|push\/unsubscribe|journey-variants\/[^/]+\/track)$/;
 
+// ★2026-09-02 PG 결제창 callback — 이니시스 결제창(stdpay.inicis.com 등)이 카드 인증을 마친 뒤
+//   사용자 브라우저의 form POST navigation으로 되돌아오는 자리다. 그 요청에는 Origin 헤더가 붙는데
+//   화이트리스트에 없어 아래 분기가 예외를 던졌고, 전역 에러 핸들러가 500 JSON을 반환해
+//   카드결제가 리턴 단계에서 끊겼다(2026-09-02 3건 연속 실패 · BUGS B-0902-2).
+//   CORS_ORIGIN이 비어 있던 동안은 전면 허용으로 통과하다가 값이 채워져 strict로 전환되며 막혔다.
+//   여기서 origin false = 허용 헤더를 붙이지 않고 요청만 통과시킨다(cors lib: originCallback null → next()).
+//   응답을 읽지 않고 그 페이지로 이동하는 navigation이라 헤더가 필요 없고, urlencoded simple request라
+//   preflight도 없다. ⛔ CORS_ORIGIN에 PG 도메인을 넣는 방식으로 바꾸지 말 것 — PG 도메인은 PC·모바일·
+//   카드사 인증 흐름마다 갈려 목록이 언제든 다시 새고, 그때마다 결제가 죽는다.
+//   ⛔ 이 통과를 경로 없이 전역으로 넓히지도 말 것 — 무인증 공개 라우트까지 외부 사이트의 form POST에
+//   열린다(Codex 1R high). 통과는 이 두 경로로만 한정한다.
+//   [정규식 집합 = 라우팅 집합] 이 상수의 계약은 "Express가 결제 핸들러로 보내는 경로 집합과 정확히
+//   같을 것"이다. 한쪽만 좁으면 그 형태가 예외를 놓쳐 다시 500이 나고, PG나 프록시가 경로 표기를
+//   바꾸는 순간 이번 장애가 그대로 재현된다(Codex 2R·3R medium).
+//   payments 라우터는 Router()를 옵션 없이 만들고 app에도 strict·case sensitive routing 설정이 없어
+//   /inicis/return/ 과 /inicis/Return 도 같은 핸들러로 간다 → i 플래그와 \/? 로 받는다.
+//   \/{1,2} = 마운트 경계 슬래시. express 4.22.1 실측 — app.use('/api/payments')가 end:false라
+//   /api/payments//inicis/return 은 마운트가 슬래시 하나를 소비해 핸들러까지 가지만 req.path에는
+//   중복 슬래시가 그대로 남는다. 삼중 이상과 다른 자리의 중복(/api//payments · /inicis//return)은
+//   핸들러에 도달하지 않으므로 여기서도 받지 않는다.
+const PG_CALLBACK_CORS_RE = /^\/api\/payments\/{1,2}inicis\/(?:return|close)\/?$/i;
+
 app.use(cors((req, cb) => {
   if (CDP_BROWSER_CORS_RE.test(req.path)) {
     cb(null, {
@@ -233,6 +255,10 @@ app.use(cors((req, cb) => {
       credentials: false,
       maxAge: 86400,
     });
+    return;
+  }
+  if (PG_CALLBACK_CORS_RE.test(req.path)) {
+    cb(null, { origin: false });
     return;
   }
   const origin = req.headers.origin as string | undefined;

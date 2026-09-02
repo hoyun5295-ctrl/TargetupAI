@@ -37,7 +37,19 @@ function renderResultHtml(
 ): string {
   const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c));
   const safeStatus = escape(status);
-  const dataJson = JSON.stringify({ type: 'INICIS_PAYMENT_RESULT', status, ...data });
+  // ★2026-09-02 inline script 안의 JSON은 HTML 파서가 먼저 읽는다. JSON.stringify는 '<'를 이스케이프하지
+  //   않아 값에 </script>가 들어오면 스크립트가 그 자리에서 닫히고 뒤가 새 스크립트로 실행된다
+  //   (이 페이지 CSP는 script-src 'unsafe-inline'이라 막지 못한다). resultCode·resultMsg는 callback
+  //   본문에서 온 외부 입력이고, finalizePaymentFailure는 pending 행이 없어도 예외를 던지지 않아
+  //   존재하지 않는 orderId로도 이 렌더에 도달한다(Codex 1R high). \u 이스케이프는 JS 파서가 원문자로
+  //   되돌리므로 화면에 보이는 값은 그대로다. U+2028·U+2029는 JSON에서 살아남지만 JS에서는 줄바꿈이라
+  //   스크립트를 깨뜨리므로 함께 막는다.
+  const dataJson = JSON.stringify({ type: 'INICIS_PAYMENT_RESULT', status, ...data })
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
   const statusLabel = status === 'success' ? '완료' : (status === 'cancelled' ? '취소' : '실패');
   const iconColor = status === 'success' ? '#10b981' : (status === 'cancelled' ? '#6b7280' : '#ef4444');
   const icon = status === 'success' ? '✓' : (status === 'cancelled' ? '–' : '×');
