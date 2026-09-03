@@ -15,7 +15,9 @@ import { insertCuratedSeeds, listCuratedSeeds, listCuratedSeedCounts, deleteCura
 import { startMiningJob, getMiningJob } from '../utils/best-copy-miner';
 import { INDUSTRY_CODES, INDUSTRY_LABELS, isIndustryCode } from '../utils/industry-codes';
 // ★ 2026-07-04 진화: 성과 환류(usage 집계) + 공식 증류/예시(specs/2026-07-04-best-copy-evolution-design.md)
-import { getSeedUsageStats, getIndustryFormula, listStyleExamples } from '../utils/best-copy-assets';
+import { getSeedUsageStats, getIndustryFormula, listStyleExamples, listStructureSkeletons, setStructureServing } from '../utils/best-copy-assets';
+// ★ 2026-09-03 참조 골격 학습층(docs/2026-09-03-reference-skeleton-learning-design.md §7)
+import { SKELETON_INDUSTRY_GENERAL, isSkeletonChannel, isSkeletonIndustry, listPromotionCandidates, promoteReferenceSkeleton } from '../utils/reference-skeleton-promote';
 import { distillIndustryFormula } from '../utils/industry-formula';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
@@ -5075,6 +5077,112 @@ router.post('/best-copy/mine/approve', authenticate, requireSuperAdmin, async (r
     res.json({ success: true, inserted });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || '저장 실패' });
+  }
+});
+
+// ═══ ★ 2026-09-03 참조 골격 학습층 — 슈퍼관리자 전용 · 신규 DDL 0 · 설계서 §7 ═══
+//   응답은 안전 문구만(err 원문은 console). 테이블 부재 = 503 DB_MIGRATION_PENDING(기존 best-copy 패턴).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 승격 후보 회사 — 지정 없으면 내부 전용 회사(OUTREACH_COMPANY_ID). 빈 값 = 400(추측 조회 금지). */
+function resolveSkeletonCompanyId(raw: unknown): string | null {
+  const v = String(raw || '').trim() || String(process.env.OUTREACH_COMPANY_ID || '').trim();
+  return UUID_RE.test(v) ? v : null;
+}
+
+router.get('/best-copy/skeleton', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const channel = String(req.query.channel || '').trim().toUpperCase();
+    const rows = await listStructureSkeletons();
+    const filtered = isSkeletonChannel(channel) ? rows.filter((r) => r.channel === channel) : rows;
+    res.json({
+      success: true,
+      general: SKELETON_INDUSTRY_GENERAL,
+      skeletons: filtered.map((r) => ({
+        id: r.id,
+        industryCode: r.industryCode,
+        channel: r.channel,
+        content: r.content,
+        stats: r.meta.stats,
+        serving: r.meta.serving,
+        chains: r.meta.chains.map((c) => ({
+          seq: c.seq, authorType: c.author_type, authorTypeSource: c.author_type_source, src: c.src,
+          refKind: c.ref?.kind || null, refId: c.ref?.id || null, promotedAt: c.ref?.promoted_at || null,
+        })),
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (err: any) {
+    console.error('[skeleton] 목록 실패:', err?.message);
+    res.status(500).json({ error: '참조 골격 목록을 불러오지 못했습니다.' });
+  }
+});
+
+router.get('/best-copy/skeleton/candidates', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const channel = String(req.query.channel || '').trim().toUpperCase();
+    if (!isSkeletonChannel(channel)) return res.status(400).json({ error: '채널(DM·이메일)을 선택해주세요.' });
+    const companyId = resolveSkeletonCompanyId(req.query.companyId);
+    if (!companyId) return res.status(400).json({ error: '내부 전용 회사(OUTREACH_COMPANY_ID)가 설정되지 않았습니다.' });
+    const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 50));
+    const r = await listPromotionCandidates({ companyId, channel, limit });
+    res.json({ success: true, company: r.company, candidates: r.candidates });
+  } catch (err: any) {
+    console.error('[skeleton] 후보 조회 실패:', err?.message);
+    res.status(500).json({ error: '승격 후보를 불러오지 못했습니다.' });
+  }
+});
+
+router.post('/best-copy/skeleton/promote', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const channel = String(req.body?.channel || '').trim().toUpperCase();
+    if (!isSkeletonChannel(channel)) return res.status(400).json({ error: '채널(DM·이메일)을 선택해주세요.' });
+    const industryCode = String(req.body?.industryCode || '').trim() || SKELETON_INDUSTRY_GENERAL;
+    if (!isSkeletonIndustry(industryCode)) return res.status(400).json({ error: '업종을 선택해주세요.' });
+    const companyId = resolveSkeletonCompanyId(req.body?.companyId);
+    if (!companyId) return res.status(400).json({ error: '내부 전용 회사(OUTREACH_COMPANY_ID)가 설정되지 않았습니다.' });
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items.slice(0, 50) : [];
+    const items = rawItems
+      .filter((it: any) => it && UUID_RE.test(String(it.id || '')))
+      .map((it: any) => ({
+        id: String(it.id),
+        authorTypeOverride: it.authorTypeOverride === 'media' || it.authorTypeOverride === 'catalog' ? it.authorTypeOverride : null,
+      }));
+    if (items.length === 0) return res.status(400).json({ error: '올릴 항목을 선택해주세요.' });
+    const r = await promoteReferenceSkeleton({
+      companyId, channel, industryCode, items,
+      promotedBy: req.user?.userId ? String(req.user.userId) : null,
+      nowIso: new Date().toISOString(),
+    });
+    if (!r.ok) {
+      if (r.reason === 'table_missing') {
+        return res.status(503).json({ error: 'DB 마이그레이션 필요: 운영자에게 best_copy_assets 테이블 생성 요청이 필요합니다.', code: 'DB_MIGRATION_PENDING' });
+      }
+      if (r.reason === 'nothing_to_promote') {
+        return res.status(400).json({ error: '올릴 수 있는 항목이 없습니다.', skipped: r.skipped });
+      }
+      return res.status(500).json({ error: '참조 골격 저장에 실패했습니다. 다시 시도해주세요.', skipped: r.skipped });
+    }
+    res.json({ success: true, added: r.added, skippedDuplicate: r.skippedDuplicate, total: r.total, skipped: r.skipped, previews: r.previews });
+  } catch (err: any) {
+    console.error('[skeleton] 승격 실패:', err?.message);
+    res.status(500).json({ error: '참조 골격 승격에 실패했습니다.' });
+  }
+});
+
+router.post('/best-copy/skeleton/serving', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const channel = String(req.body?.channel || '').trim().toUpperCase();
+    if (!isSkeletonChannel(channel)) return res.status(400).json({ error: '채널(DM·이메일)을 선택해주세요.' });
+    const industryCode = String(req.body?.industryCode || '').trim() || SKELETON_INDUSTRY_GENERAL;
+    if (!isSkeletonIndustry(industryCode)) return res.status(400).json({ error: '업종을 선택해주세요.' });
+    const enabled = req.body?.enabled === true;
+    const ok = await setStructureServing(industryCode, channel, enabled, req.user?.userId ? String(req.user.userId) : null, new Date().toISOString());
+    if (!ok) return res.status(404).json({ error: '참조 골격이 아직 없습니다. 먼저 실물을 올려주세요.' });
+    res.json({ success: true, enabled });
+  } catch (err: any) {
+    console.error('[skeleton] 서빙 변경 실패:', err?.message);
+    res.status(500).json({ error: '서빙 설정을 바꾸지 못했습니다.' });
   }
 });
 

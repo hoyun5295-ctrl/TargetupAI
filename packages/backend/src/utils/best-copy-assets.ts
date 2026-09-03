@@ -6,6 +6,7 @@
 import crypto from 'crypto';
 import pool from '../config/database';
 import { getTenantRef } from './training-logger';
+import { appendChains, buildSkeletonContent, type SkeletonChain, type SkeletonChannel, type SkeletonMeta } from './dm/dm-structure-resolve';
 
 const UNDEFINED_TABLE = '42P01';
 
@@ -170,5 +171,166 @@ export async function listStyleExamples(industryCode: string): Promise<StyleExam
   } catch (e: any) {
     if (!isMissingTable(e)) console.warn('[best-copy] 예시 조회 실패(빈 결과):', e?.message);
     return [];
+  }
+}
+
+// ───────────────── ★ 2026-09-03 참조 골격 (kind='structure') ─────────────────
+//   설계 = docs/2026-09-03-reference-skeleton-learning-design.md §4·§5-7
+//   행 = (industry_code, channel) 1개. meta = { v, chains, stats, perf, serving }. serving.enabled=false가 기본 — 끄면 생성 경로는 현행과 문자 단위 동일.
+//   ⛔ 저장은 append(치환 금지 · 불변 8) · 조회 실패는 null(throw 0 · 불변 5) · 상한값을 저장하지 않는다(불변 6).
+
+export const STRUCTURE_KIND = 'structure';
+
+export interface StructureSkeletonRow {
+  id: string;
+  industryCode: string;
+  channel: SkeletonChannel;
+  content: string;
+  meta: SkeletonMeta;
+  createdAt: string;
+}
+
+function parseSkeletonMeta(raw: unknown): SkeletonMeta | null {
+  const m = (typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw) as any;
+  if (!m || typeof m !== 'object' || !Array.isArray(m.chains) || !m.stats || typeof m.stats !== 'object') return null;
+  return {
+    v: 1,
+    chains: m.chains,
+    stats: m.stats,
+    perf: m.perf && typeof m.perf === 'object' ? m.perf : { basis: null, n: 0, confident: false, updated_at: null },
+    serving: m.serving && typeof m.serving === 'object'
+      ? { enabled: m.serving.enabled === true, enabled_by: m.serving.enabled_by ?? null, enabled_at: m.serving.enabled_at ?? null }
+      : { enabled: false, enabled_by: null, enabled_at: null },
+  };
+}
+
+function rowToSkeleton(row: any): StructureSkeletonRow | null {
+  const meta = parseSkeletonMeta(row?.meta);
+  if (!meta) return null;
+  return {
+    id: String(row.id),
+    industryCode: String(row.industry_code),
+    channel: row.channel === 'EMAIL' ? 'EMAIL' : 'DM',
+    content: String(row.content || ''),
+    meta,
+    createdAt: String(row.created_at),
+  };
+}
+
+/**
+ * 참조 골격 조회 — 생성 경로의 유일 입구. requireServing(기본 true)이면 serving.enabled=false는 null.
+ * 테이블 부재·예외·형식 불일치 전부 null = 현행 동작(불변 5).
+ */
+export async function getStructureSkeleton(
+  industryCode: string,
+  channel: SkeletonChannel,
+  opts?: { requireServing?: boolean },
+): Promise<StructureSkeletonRow | null> {
+  const requireServing = opts?.requireServing !== false;
+  try {
+    const r = await pool.query(
+      `SELECT id, industry_code, channel, content, meta, created_at FROM best_copy_assets
+       WHERE kind = $1 AND industry_code = $2 AND channel = $3
+       ORDER BY created_at DESC LIMIT 1`,
+      [STRUCTURE_KIND, industryCode, channel],
+    );
+    if (!r.rows.length) return null;
+    const row = rowToSkeleton(r.rows[0]);
+    if (!row) return null;
+    if (requireServing && !row.meta.serving.enabled) return null;
+    return row;
+  } catch (e: any) {
+    if (!isMissingTable(e)) console.warn('[best-copy] 참조 골격 조회 실패(null):', e?.message);
+    return null;
+  }
+}
+
+/** 채널·업종 전 행(관리자 패널용). 같은 (업종, 채널)이 여럿이면 최신 1개만. 테이블 부재 = 빈 배열. */
+export async function listStructureSkeletons(): Promise<StructureSkeletonRow[]> {
+  try {
+    const r = await pool.query(
+      `SELECT id, industry_code, channel, content, meta, created_at FROM best_copy_assets
+       WHERE kind = $1 ORDER BY industry_code, channel, created_at DESC`,
+      [STRUCTURE_KIND],
+    );
+    const out: StructureSkeletonRow[] = [];
+    const seen = new Set<string>();
+    for (const raw of r.rows) {
+      const row = rowToSkeleton(raw);
+      if (!row) continue;
+      const key = `${row.industryCode}|${row.channel}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+    }
+    return out;
+  } catch (e: any) {
+    if (!isMissingTable(e)) console.warn('[best-copy] 참조 골격 목록 실패(빈 배열):', e?.message);
+    return [];
+  }
+}
+
+export type SaveSkeletonResult =
+  | { ok: true; added: number; skippedDuplicate: number; total: number }
+  | { ok: false; reason: 'table_missing' | 'db_error' | 'conflict' };
+
+/**
+ * 참조 골격 저장 = read-modify-write **append**. 같은 ref.id 무시 · stats 재계산 · serving·perf 보존 · content 재조립(순수).
+ * 동시 저장 충돌은 jsonb 동등 비교(meta = $prev::jsonb)로 막고 1회 재시도. 테이블 부재 = table_missing.
+ */
+export async function saveStructureSkeleton(
+  industryCode: string,
+  channel: SkeletonChannel,
+  newChains: readonly SkeletonChain[],
+): Promise<SaveSkeletonResult> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const existing = await getStructureSkeleton(industryCode, channel, { requireServing: false });
+      const merged = appendChains(existing?.meta, newChains);
+      const content = buildSkeletonContent(merged.meta.stats, channel);
+      if (existing) {
+        const r = await pool.query(
+          `UPDATE best_copy_assets SET content = $1, meta = $2 WHERE id = $3 AND meta = $4::jsonb`,
+          [content, JSON.stringify(merged.meta), existing.id, JSON.stringify(existing.meta)],
+        );
+        if (r.rowCount === 1) return { ok: true, added: merged.added, skippedDuplicate: merged.skippedDuplicate, total: merged.meta.chains.length };
+        continue; // 그 사이 다른 저장이 끼어들었다 — 다시 읽어 합친다
+      }
+      await pool.query(
+        `INSERT INTO best_copy_assets (id, kind, industry_code, channel, content, meta) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [crypto.randomUUID(), STRUCTURE_KIND, industryCode, channel, content, JSON.stringify(merged.meta)],
+      );
+      return { ok: true, added: merged.added, skippedDuplicate: merged.skippedDuplicate, total: merged.meta.chains.length };
+    } catch (e: any) {
+      if (isMissingTable(e)) return { ok: false, reason: 'table_missing' };
+      console.warn('[best-copy] 참조 골격 저장 실패:', e?.message);
+      return { ok: false, reason: 'db_error' };
+    }
+  }
+  return { ok: false, reason: 'conflict' };
+}
+
+/** 서빙 토글 — 사람이 켠다(임계 상수 0 · 불변 11). 행이 없으면 false. */
+export async function setStructureServing(
+  industryCode: string,
+  channel: SkeletonChannel,
+  enabled: boolean,
+  by: string | null,
+  nowIso: string,
+): Promise<boolean> {
+  try {
+    const existing = await getStructureSkeleton(industryCode, channel, { requireServing: false });
+    if (!existing) return false;
+    const meta: SkeletonMeta = {
+      ...existing.meta,
+      serving: enabled
+        ? { enabled: true, enabled_by: by, enabled_at: nowIso }
+        : { enabled: false, enabled_by: null, enabled_at: null },
+    };
+    const r = await pool.query(`UPDATE best_copy_assets SET meta = $1 WHERE id = $2`, [JSON.stringify(meta), existing.id]);
+    return r.rowCount === 1;
+  } catch (e: any) {
+    if (!isMissingTable(e)) console.warn('[best-copy] 참조 골격 서빙 변경 실패:', e?.message);
+    return false;
   }
 }

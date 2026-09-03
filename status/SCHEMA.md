@@ -91,8 +91,8 @@
 | 74 | help_questions **(2026-08-22 신설 — 운영 CREATE 완료 · 0824 질문 이력 화면 실측)** | 도움말 봇에 들어온 질문 원장. `id uuid PK DEFAULT gen_random_uuid(), company_id uuid NOT NULL FK companies CASCADE, user_id uuid NULL(**FK 없음** — 0728 `23503` 원칙. 계정이 삭제돼도 질문 기록은 남는다), path varchar(200) NULL(질문한 화면), question varchar(240) NOT NULL, matched_ids text[] NOT NULL DEFAULT '{}'(매칭된 작업 id), answered boolean NOT NULL DEFAULT false, reason varchar(200) NULL(**★2026-08-25 ADD 대기** — 못 답함 사유 코드. 외부 오류 원문 금지 · 한글 라벨 변환 = `help-answer.ts` `helpReasonLabel` 하나 · 컬럼 부재 창은 코드가 42703 감지 후 옛 형태 INSERT 폴백), created_at timestamptz NOT NULL DEFAULT NOW()`. INDEX = (company_id, created_at DESC) · **(answered, created_at DESC) WHERE answered = false**(미답 조회 전용 부분 인덱스). **답한 질문과 못 답한 질문을 한 테이블이 갖는다** — 그래야 "미답 비율"이라는 단일 지표가 나온다. ⛔ 이 테이블이 없어도 봇 답변은 나간다(기록만 실패). "문의 남기기"만 503 `DB_MIGRATION_PENDING`. 실사용 고객 0인 지금 이 원장이 2단계 정의를 쓰는 **유일한 실측 입력**이다. 소유 = [FEATURE-HELP-CATALOG.md](../docs/FEATURE-HELP-CATALOG.md) §9-D |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 | - | ai_training_logs (클릭·전환 컬럼) | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). **★2026-08-11 information_schema 실측 = 둘 다 실존**(0704 "ADD 대기" 표기는 낡은 기록 — `operator_proposals.conversion_attributed_at`·`operator_proposal_variants.sent/click/conversion_count`도 같은 실측으로 실존 확인). ⚠값 유입은 DM·이메일 클릭뿐 — SMS/LMS 클릭(short-url→변이 테이블)은 이 원장에 미배선(자기 개선 루프 설계의 Phase 0) |
-| - | best_copy_seed_usage **(2026-07-04 CREATE 대기)** | 시드 사용 기록(성과 환류). `id bigserial PK, seed_id uuid, tenant_ref varchar(64)=getTenantRef, channel varchar(10), used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at). 코드 42P01 폴백(미생성 무영향) |
-| - | best_copy_assets **(2026-07-04 CREATE 대기)** | 업종 승리공식·AI 재창작 예시. `id uuid PK, kind varchar(20)[formula\|style_example], industry_code varchar(20), channel varchar(10), is_ad bool, content text, meta jsonb, created_at timestamptz`. INDEX(kind,industry_code). 코드 42P01 폴백 |
+| - | best_copy_seed_usage **★2026-09-03 `information_schema` 실측 존재(5컬럼)** | 시드 사용 기록(성과 환류). 실측 = `id bigint, seed_id uuid, tenant_ref varchar, channel varchar, used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at)은 미실측. 코드 42P01 폴백 유지 |
+| - | best_copy_assets **★2026-09-03 `information_schema` 실측 존재(8컬럼)** | 업종 승리공식·AI 재창작 예시. 실측 = `id uuid, kind varchar[formula\|style_example\|**structure**], industry_code varchar, channel varchar, is_ad boolean, content text, meta jsonb, created_at timestamptz`. CHECK 제약 없음(0903 `pg_constraint` 실측 = PK뿐). INDEX(kind,industry_code)는 미실측. 코드 42P01 폴백 유지. **★0903 kind='structure' = 참조 골격**(행 = industry_code(`general` 예약어 포함)×channel(`DM`\|`EMAIL`) · `meta` = `{v, chains[], stats, perf, serving}` · 저장은 append · 소유 = `utils/best-copy-assets.ts` · 설계 = [참조 골격 설계서 §4](../docs/2026-09-03-reference-skeleton-learning-design.md)) |
 | - | send_fatigue_daily **(2026-07-05 CREATE 대기)** | 발송 피로도 일일 버킷(광고성 문자+알림톡 합산, day=KST). `company_id uuid NOT NULL, phone varchar(20) NOT NULL, day date NOT NULL, sent_count int NOT NULL DEFAULT 0, PK(company_id,phone,day)` + INDEX(day). 45일 초과 프루닝(fatigue-guard 6h 워커). 코드 42P01 폴백(미생성=게이트·카운터 비활성) |
 | - | companies **(2026-07-05 ADD 대기)** | `fatigue_cap_days int` · `fatigue_cap_max int` — 발송 피로도 상한(최근 N일 M건). NULL=비활성(opt-in — 회사가 설정 화면에서 켠 경우만 게이트). 코드 42703 폴백. `ALTER TABLE companies ADD COLUMN fatigue_cap_days integer; ALTER TABLE companies ADD COLUMN fatigue_cap_max integer;` |
 | - | companies **(2026-08-04 ADD 실행완료)** | `automarketing_exclude_journey boolean` — 여정 진행 중(`journey_executions.status='active'`) 고객을 자동마케팅 대상에서 제외(Harold 확정, opt-in — NULL/false=현행 겹침 허용). 소비 = 자동마케팅 단일 문 게이트뿐(`operator-audience.getExcludeInJourneySetting`), 여정·캠페인 무관. 코드 42703 폴백 |
@@ -595,10 +595,13 @@
 id company_id caller_phone customer_id(NULL 가능) transcript ai_response duration_ms status created_at
 - INDEX 실측(★2026-08-22 `pg_indexes`): PK(id) · idx_voice_inbound_company_created(company_id, created_at DESC). ⛔ **customer_id·caller_phone 인덱스 없음**(고객 360 §4-4 후보 — 현재 규모 작음)
 
-### email_campaigns / email_events (이메일 채널) ★2026-08-22 존재 확인 (컬럼 = `utils/email-channel.ts` INSERT문 기준 부분 목록 · information_schema 미실측)
+### email_campaigns / email_events (이메일 채널) ★2026-09-03 `information_schema` 실측 등재 (email_campaigns = 26컬럼 확정 · email_events는 여전히 코드 INSERT문 기준 미실측)
 
-**email_campaigns**: id company_id created_by name subject html_body text_body from_name from_email is_ad scheduled_at status sent_count open_count click_count bounce_count unsubscribe_count ai_generated sections parent_campaign_id resend_generation (+design 컬럼) created_at updated_at
-**email_events**: id campaign_id email event_type url reason occurred_at auto_processed created_at. ⛔ 고객 키가 **email 주소**(customer_id·phone 없음) → 고객 360에서는 `customers.email`로 잇는다.
+**email_campaigns** (실측 26컬럼 · 아래는 `ordinal_position` 순):
+`id` uuid · `company_id` uuid · `created_by` uuid · `name` varchar · `subject` varchar · `html_body` text · `text_body` text · `from_name` varchar · `from_email` varchar · `is_ad` boolean · `scheduled_at` timestamptz · **`sent_at` timestamptz** · `status` varchar · `sent_count` int · `open_count` int · `click_count` int · `bounce_count` int · `unsubscribe_count` int · `created_at` timestamptz · `updated_at` timestamptz · `ai_generated` boolean · **`target_spec` jsonb** · `sections` jsonb · `parent_campaign_id` uuid · `resend_generation` int · `design` jsonb
+> ⚠ 0822 등재본(코드 INSERT문 기준)에 **없던 실재 컬럼 = `sent_at`·`target_spec`** 2개. 순서도 달랐다(`created_at`·`updated_at`이 실제로는 19·20번이고 맨 뒤가 아니다) → `SELECT *`의 열 순서에 기대는 코드가 있으면 어긋난다.
+
+**email_events**: id campaign_id email event_type url reason occurred_at auto_processed created_at (코드 INSERT문 기준 · **information_schema 미실측 — 쓰기 전 확인 필요**). ⛔ 고객 키가 **email 주소**(customer_id·phone 없음) → 고객 360에서는 `customers.email`로 잇는다.
 
 
 ### file_uploads (파일 업로드)
@@ -851,39 +854,40 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | created_at | timestamp |
 | completed_at | timestamp |
 
-### dm_pages (모바일 DM 빌더 — D119/D125/D216+) ★ D216+ 갱신
+### dm_pages (모바일 DM 빌더 — D119/D125/D216+) ★2026-09-03 `information_schema` 실측 27컬럼 (pos·타입 실측 반영)
 > **D125 마이그레이션 (옛 누락 보강) + D216+ 4 컬럼 추가.**
 > 한줄로 PRO+ 요금제 모바일 DM 빌더 핵심 테이블. 옛 slides 기반 (D119) + 신규 sections 기반 (D125) 동시 지원.
+> ⚠ 0903 실측 정정 = `layout_mode`·`approval_status`는 **`text`**(문서에 있던 varchar(20) 아님) · `created_at`·`updated_at`이 15·16번이라 뒤에 D125·D216+ 컬럼이 붙는다.
 
-| 컬럼 | 타입 | 비고 |
-|------|------|------|
-| id | uuid PK | |
-| company_id | uuid FK | |
-| created_by | uuid FK | users.id |
-| title | varchar(200) | |
-| store_name | varchar(100) | |
-| header_template | varchar(50) | D119 default/v2 등 |
-| footer_template | varchar(50) | D119 |
-| header_data | jsonb | D119 |
-| footer_data | jsonb | D119 |
-| pages | jsonb | D119 DmSlide[] 또는 D128 DmPageGroup[] |
-| settings | jsonb | |
-| short_code | varchar(20) | 단축URL (UNIQUE) |
-| status | varchar(20) | draft/published |
-| view_count | integer | |
-| **layout_mode** | **varchar(20)** | **D125: scroll/slides/scroll_snap** |
-| **sections** | **jsonb** | **D125 Section[]** |
-| **brand_kit** | **jsonb** | **D125 BrandKit 토큰** |
-| **template_id** | **text** | **D125 템플릿 참조** |
-| **ai_prompt** | **text** | **D125 자연어 프롬프트 원문** |
-| **validation_result** | **jsonb** | **D125 옛 검수 결과 (10 영역 × 3등급)** |
-| **approval_status** | **varchar(20)** | **D125 draft/review/approved/published/rejected** |
-| **event_type** | **varchar(30)** | **★ D216+ — lucky_draw/roulette/instant_coupon 등** |
-| **personalization_strategy** | **jsonb** | **★ D216+ — Liquid 변수 자동 추천 설정** |
-| **quick_start_scenario** | **varchar(30)** | **★ D216+ — 빠른 시작 시나리오** |
-| **last_diagnosed_at** | **timestamptz** | **★ D216+ — CT-86 자율 진단 최근 시각** |
-| created_at | timestamp | |
-| updated_at | timestamp | |
+| pos | 컬럼 | 타입(실측) | 비고 |
+|-----|------|------|------|
+| 1 | id | uuid | PK |
+| 2 | company_id | uuid | FK |
+| 3 | created_by | uuid | users.id |
+| 4 | title | varchar | |
+| 5 | store_name | varchar | |
+| 6 | header_template | varchar | D119 default/v2 등 |
+| 7 | footer_template | varchar | D119 |
+| 8 | header_data | jsonb | D119 |
+| 9 | footer_data | jsonb | D119 |
+| 10 | pages | jsonb | D119 DmSlide[] 또는 D128 DmPageGroup[] |
+| 11 | settings | jsonb | |
+| 12 | status | varchar | draft/published |
+| 13 | short_code | varchar | 단축URL (UNIQUE) |
+| 14 | view_count | integer | |
+| 15 | created_at | timestamptz | |
+| 16 | updated_at | timestamptz | |
+| 17 | **sections** | **jsonb** | **D125 Section[]** |
+| 18 | **brand_kit** | **jsonb** | **D125 BrandKit 토큰** |
+| 19 | **template_id** | **text** | **D125 템플릿 참조** |
+| 20 | **ai_prompt** | **text** | **D125 자연어 프롬프트 원문** |
+| 21 | **layout_mode** | **text** | **D125: scroll/slides/scroll_snap (★0903 실측 = text)** |
+| 22 | **validation_result** | **jsonb** | **D125 옛 검수 결과 (10 영역 × 3등급)** |
+| 23 | **approval_status** | **text** | **D125 draft/review/approved/published/rejected (★0903 실측 = text)** |
+| 24 | **event_type** | **varchar** | **★ D216+ — lucky_draw/roulette/instant_coupon 등** |
+| 25 | **personalization_strategy** | **jsonb** | **★ D216+ — Liquid 변수 자동 추천 설정** |
+| 26 | **quick_start_scenario** | **varchar** | **★ D216+ — 빠른 시작 시나리오** |
+| 27 | **last_diagnosed_at** | **timestamptz** | **★ D216+ — CT-86 자율 진단 최근 시각** |
 
 ### dm_versions (DM 버전 관리 — D125)
 > **옛 D125 §13 — SCHEMA.md 영구 누락 영역 보강 (D216+ 진입 직전 추가).**

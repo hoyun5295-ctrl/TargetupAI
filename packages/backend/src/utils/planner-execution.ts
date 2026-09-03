@@ -393,6 +393,23 @@ export function buildPlannerEventText(ev: PlannerEventFacts): string {
   return lines.join('\n');
 }
 
+/**
+ * (순수) ★ 2026-09-03 소재 제작 재료 확장 — 참조 골격 설계서 §6-4 묶음 ④.
+ * `buildPlannerEventText`는 문자·DM·이메일 4곳이 공유하므로 손대지 않고, **DM·이메일 제작 호출부만** 이 줄들을 덧붙인다.
+ * 재료는 회사가 이미 적어 둔 사실뿐이다(브랜드 기본정보 · 발송 시점). 혜택·수치를 여기서 만들지 않는다.
+ */
+export function buildPlannerExtraMaterial(
+  basic: { brand_name?: string | null; company_name?: string | null; business_category?: string | null } | null | undefined,
+  timing: TimingRule | null | undefined,
+): string {
+  const lines: string[] = [];
+  const brand = String(basic?.brand_name || basic?.company_name || '').trim();
+  const category = String(basic?.business_category || '').trim();
+  if (brand || category) lines.push(`[브랜드] ${[brand, category ? `종목 ${category}` : ''].filter(Boolean).join(' · ')}`);
+  lines.push(`[발송 시점] ${describeTiming(timing)} 안내`);
+  return lines.join('\n');
+}
+
 // ── 알림톡 정보성 문안 ───────────────────────────────────────────────
 /**
  * 광고로 읽히는 표현 — 알림톡 문안 조립·검수 제출 전 자가 검사에 쓴다.

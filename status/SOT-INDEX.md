@@ -84,6 +84,7 @@
 | 인앱메시지 | [인앱메세지전용.md](../docs/인앱메세지전용.md) | 해당 절 |
 | AI 규제 대응(고영향 판단·생성물 표시) | [compliance/](../docs/compliance/) | 해당 문서 (고영향AI 사전검토서 = 법 제31조 이행 기록) |
 | **AI 생성 이미지 표시**(카카오 브랜드 메시지 · 심사 기준) | [2026-09-01-ai-image-notice-design.md](../docs/2026-09-01-ai-image-notice-design.md) | 전체 — 설계 확정·구현 미착수 · 제약 §3 · 착수 순서 §6 · 호출어 **AI 이미지 표시**. ⛔ AI 기본법 계도(2027-01)와 **다른 축**(카카오는 지금 적용·발송 제한) |
+| **참조 골격 학습층**(직원 실물 → 섹션 골격 통계 → DM·이메일 생성 CT 결정적 선택 · 플래너·AI 영업 공통) | [2026-09-03-reference-skeleton-learning-design.md](../docs/2026-09-03-reference-skeleton-learning-design.md) | 전체 — 설계 확정·Harold 검토 대기 · 불변 §2 · 계약 §5 · 배선 §6 · 승격 §7 · 계약 테스트 §9 · 착수 순서 §10 · **착수 전 실측 SQL §11** · 결재 §12 · 뒤집힌 판단 §14 · 호출어 **참조 골격** |
 | 장기 로드맵·비전 | [한줄로_BEYOND_BRAZE_비전.md](../docs/한줄로_BEYOND_BRAZE_비전.md) | 해당 절 |
 | 한줄로 미러링(62→59 복제·HA) | 미착수 — 설계 없음 | `memory/project_hanjul_mirroring.md` · 호출어 **한줄로 미러링 프로젝트** |
 

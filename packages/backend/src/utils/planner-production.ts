@@ -25,6 +25,7 @@ import { generateEmailSections, hasUneditedPlaceholder } from './email-ai';
 import { renderEmailSections } from './email/email-section-renderer';
 import { createEmailCampaign } from './email-channel';
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
+import { getBrandBasicInfo } from './brand-basic-info';
 import { attachMallImagesToProductCarousels } from './mall-product-match';
 import { oneShotGenerate } from './dm/dm-ai';
 import { createDm, extractPagesFromDm, getDmDetail } from './dm/dm-builder';
@@ -52,6 +53,7 @@ import {
   addDays,
   buildDmEditPath,
   buildPlannerEventText,
+  buildPlannerExtraMaterial,
   carrierKey,
   describeDmResidue,
   describeTiming,
@@ -96,9 +98,22 @@ interface ProducedAsset {
 
 // ── 채널별 제작 ──────────────────────────────────────────────────────
 
+/**
+ * ★ 2026-09-03 소재 제작 재료 = 행사 원문 4줄 + 회사 사실(브랜드 기본정보·발송 시점) — 참조 골격 설계서 §6-4 묶음 ④.
+ * 플래너 산출물이 빈약했던 1차 원인은 재료가 4줄뿐이고 그마저 한 줄 요약으로 줄던 것이다. 공용 `buildPlannerEventText`는 그대로 두고
+ * 제작 호출부만 넓힌다. 기본정보 조회 실패 = 원문 4줄만(제작을 막지 않는다).
+ */
+async function buildPlannerProductionEventText(tp: PlannerTouchpointRow): Promise<string> {
+  const base = buildPlannerEventText(tp);
+  let basic: Awaited<ReturnType<typeof getBrandBasicInfo>> | null = null;
+  try { basic = await getBrandBasicInfo(tp.companyId); } catch { basic = null; }
+  const extra = buildPlannerExtraMaterial(basic, tp.timing);
+  return extra ? `${base}\n${extra}` : base;
+}
+
 /** 이메일 브로마이드 — 섹션 생성 → 몰 상품 이미지 매칭 → 참여 버튼 → 렌더 → 캠페인(초안) 저장. */
 async function produceEmail(tp: PlannerTouchpointRow, userId: string): Promise<ProducedAsset> {
-  const eventText = buildPlannerEventText(tp);
+  const eventText = await buildPlannerProductionEventText(tp);
   // 내부 생성 호출은 묶음(차감 0) — 과금은 아래 단일 지점(완성 50)뿐이다.
   const gen = await runInCreditBundle(() =>
     generateEmailSections({ companyId: tp.companyId, userId, isAd: true, eventText }),
@@ -140,7 +155,7 @@ async function produceEmail(tp: PlannerTouchpointRow, userId: string): Promise<P
  * 그때 확정된 주소가 같은 시점 문자에 실린다. 초안 단계에서는 `dm_url`을 기록하지 않는다(미리보기 주소가 문자에 실리면 사고 재현).
  */
 async function produceDm(tp: PlannerTouchpointRow, userId: string): Promise<ProducedAsset> {
-  const eventText = buildPlannerEventText(tp);
+  const eventText = await buildPlannerProductionEventText(tp);
   const gen = await runInCreditBundle(() =>
     oneShotGenerate({ prompt: `${tp.title} 행사 안내 모바일 페이지`, companyId: tp.companyId, eventText }),
   );

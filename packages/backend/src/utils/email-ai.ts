@@ -33,6 +33,9 @@ import { buildEventPromptBlock, validateProductsAgainstEventText } from './event
 // ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
 import { buildEventTemplateHintBlock } from './design-core/event-package';
 import { checkCopyLeak } from './copy-similarity-guard';
+// ★ 2026-09-03 참조 골격 학습층(설계서 §6-2)
+import { getStructureSkeleton } from './best-copy-assets';
+import { renderStructureBlock } from './email/email-structure-prompt';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -390,8 +393,11 @@ export async function generateEmailSections(input: {
     channels: ['EMAIL', 'LMS', 'MMS', 'SMS'],
     isAd: input.isAd,
   });
+  // ★ 2026-09-03 참조 골격(설계서 §6-2) — 통계 문장만 붙는다(시퀀스 원문 0). serving off·골격 없음 = '' → 현행 system과 문자 단위 동일.
+  const skeleton = await getStructureSkeleton('general', 'EMAIL');
+  const structureBlock = skeleton ? renderStructureBlock(skeleton.meta.stats) : '';
   const text = await callAIWithFallback({
-    system: baseSystem + brain.promptSuffix,
+    system: baseSystem + brain.promptSuffix + structureBlock,
     userMessage: `${parts.join('\n')}\n\n위 요청으로 비주얼 이메일의 블록 구성을 JSON으로 설계하세요.`,
     maxTokens: 4000,
     temperature: 0.7,

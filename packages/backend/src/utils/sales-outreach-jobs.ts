@@ -458,10 +458,15 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
           : (job.brand_profile?.excerpt || `${job.company_name} 브랜드 안내`);
         const ctx = getOutreachContext();
         if (!ctx) throw new Error('OUTREACH_COMPANY_ID·OUTREACH_USER_ID가 설정되지 않았습니다.');
-        const dm = await produceOutreachDm({ companyName: job.company_name, eventText, companyId: ctx.companyId, userId: ctx.userId });
+        const dm = await produceOutreachDm({
+          companyName: job.company_name, eventText, companyId: ctx.companyId, userId: ctx.userId,
+          // ★ 2026-09-03 참조 골격 감산 근거 — 면허 인용이 있을 때만 혜택 섹션이 남는다(설계서 §6-3)
+          benefitLicensed: !!selected?.benefitLicensed,
+        });
         // 소유권을 잃은 실행의 DM 발행(외부 효과)은 결속으로 못 막는다 — 내부 전용 회사의 draft DM 1개 잔존이
         // 전부이고(과금 0·고객 무관) 자산 결속이 화면·메일 사용을 차단하므로 위험 수용(Codex 3R 판단 기록).
-        if (!(await insertAssetOwned(jobId, 'dm', { dmId: dm.dmId, dmUrl: dm.dmUrl }, 'producing_dm', lockToken))) return;
+        // ★ 2026-09-03 structureRef = 어떤 참조 골격을 썼는가(근거 패널 문구 원천 · null = 기본형)
+        if (!(await insertAssetOwned(jobId, 'dm', { dmId: dm.dmId, dmUrl: dm.dmUrl, structureRef: dm.structureRef }, 'producing_dm', lockToken))) return;
         if (!(await advanceStage(jobId, lockToken, 'producing_dm', 'producing_email'))) return;
 
       } else if (stage === 'producing_email') {

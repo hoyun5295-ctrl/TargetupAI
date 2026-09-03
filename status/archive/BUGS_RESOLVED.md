@@ -2,6 +2,15 @@
 > 원본: status/BUGS.md — 2026-07-03 관제탑 재설계 v2로 원문 그대로 이동 (요약·재서술 없음).
 > 본문 내 상대 링크는 재설계 전 경로 기준 — 설계·핸드오프 문서는 archive/DESIGNS/ 에 있다.
 
+## 2026-09-03 ✅ 종결 — B-0903-1 비로그인 "서비스 이용신청 문의" 401 + 소개 페이지 "요금 안내 보기" 로그인 튕김 (요금제 공개 열람 배포 · Harold 실측 3건 통과)
+
+> BUGS.md §2에서 이동(2026-09-03).
+> **증상**: ①소개 페이지(about-ai-operator.html) 마지막 장 "요금 안내 보기"(`/pricing`)를 누르면 로그인 화면으로 간다. ②로그인 페이지의 "서비스 이용신청 문의" 모달은 토큰 없이 `POST /api/companies/inquiry`를 부르는데, 그 라우트가 `companies.ts`의 `router.use(authenticate)`(30행) **뒤**(2443행)에 있어 코드 경로상 401이다. ②는 실측하지 않았다(코드 경로 확정만).
+> **원인**: ①`App.tsx` `/pricing`이 `PrivateRoute`로 감싸여 있었다. ②공개 라우트를 인증 미들웨어 뒤에 정의했다(주석은 "공개 endpoint"라고 적혀 있었다).
+> **처방(0903 코드 반영)**: ①`/pricing` 공개 라우트 + PricingPage 방문자 모드(`isAuthenticated` 거짓이면 `/api/plans`만 호출 · 로그인 전용 조회 넷 생략 · 카드 버튼 "이용 문의" → 기존 문의 모달 · 헤더 "로그인" 버튼 · 뒤로가기 `goBackOr`). `/api/plans` 응답에 `planQuotas`(CT `readPlanFreeQuotas()` 재사용) 동반. ②`/inquiry` 라우트를 `router.use(authenticate)` 앞으로 이동(본문 무변경) + `express-rate-limit` IP당 10분 5회(marketing-diagnosis-public과 동일 한도).
+> **실측(배포 후 · Harold)**: 로그아웃 창 `hanjul.ai/pricing` → 카드 5종 + 포함 무료 메시지 표시 → "이용 문의" 1건 → 메일 수신. 로그인 창 `/pricing` → 현재 플랜·신청 버튼 전과 동일. 로그인 페이지 문의 모달 1건 → 메일 수신. 셋 다 확인되면 이 항목을 종결 이관.
+> **종결 경위(2026-09-03)**: 배포 후 Harold 실측 3건 통과 — ①로그아웃 창 `/pricing` 카드 5종 + 포함 무료 메시지 표시 → "이용 문의" 1건 메일 수신 ②로그인 창 `/pricing` 전과 동일 ③로그인 페이지 문의 모달 1건 메일 수신. 코드 = `companies.ts` `/inquiry`를 `router.use(authenticate)` 앞으로 이동(본문 무변경) + `express-rate-limit` IP당 10분 5회 · `plans.ts` 응답에 `planQuotas` 동반(CT `readPlanFreeQuotas()` 재사용) · `App.tsx` `/pricing` 공개 라우트 · `PricingPage.tsx` 방문자 모드(`isAuthenticated` 분기 12곳). 교훈 = 공개 라우트는 `router.use(authenticate)` 앞에 정의한다(주석에 "공개"라고 적어도 순서가 진실이다).
+
 ## 2026-08-30 ✅ 종결 — B-0825-2 JWT_SECRET 미설정 시 저장소 공개 폴백 키로 전 토큰이 서명된다 (승인 링크 보안 보강 세션에서 종결)
 
 > BUGS.md §2에서 이동(2026-08-30).

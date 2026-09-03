@@ -775,9 +775,17 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                         {imageAsset?.skippedReason && (
                           <p className="mt-2 text-xs text-amber-600">{imageAsset.skippedReason}</p>
                         )}
-                        {copyAsset?.sampleTrained === false && (
+                        {/* ★ 2026-09-03 참조 골격 — asset에 기록된 사실만 말한다(지어내지 않는다 · 설계서 §8-3) */}
+                        {dmAsset?.structureRef ? (
+                          <p className="mt-2 text-[11px] text-gray-500">
+                            참조 골격 {Number(dmAsset.structureRef.sampleCount) || 0}건 중 1건을 모바일 DM 구성으로 참고했습니다.
+                            {Array.isArray(dmAsset.structureRef.removed) && dmAsset.structureRef.removed.length > 0
+                              ? ` 행사 근거·외부 콘텐츠 규칙으로 구성 ${dmAsset.structureRef.removed.length}개를 제외했습니다.`
+                              : ''}
+                          </p>
+                        ) : copyAsset?.sampleTrained === false ? (
                           <p className="mt-2 text-[11px] text-gray-400">양식 샘플 학습 전(기본형)으로 제작되었습니다.</p>
-                        )}
+                        ) : null}
                       </div>
                       {previewUrl && (
                         <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4">

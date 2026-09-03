@@ -33,6 +33,9 @@ import { getCompanyBrandKit } from './dm-brand-kit';
 import { decideLayoutMode, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
 import { normalizeVisualConcept, applyVisualDirection, type VisualConcept } from './dm-visual-direction';
 import { normalizeSectionChain } from './dm-section-layout';
+// ★ 2026-09-03 참조 골격 학습층(설계서 §6-1) — serving off·골격 없음이면 아래 두 import는 결과에 아무 영향이 없다.
+import { getStructureSkeleton } from '../best-copy-assets';
+import { AVAIL_UNKNOWN, pickVariant, resolveStructure, seedDateKey, type Avail, type StructureSource } from './dm-structure-resolve';
 
 // ────────────── 타입 ──────────────
 
@@ -645,6 +648,8 @@ export interface OneShotResult {
   brief?: EventBrief;
   /** ★ 2026-07-16 M1 — 반영 커버리지 (missing = 보강 후에도 미반영 — 숨기지 않고 사용자에게 표시) */
   coverage?: { missing: BriefCoverageItem[] };
+  /** ★ 2026-09-03 참조 골격 — 구성이 어디서 왔는가(근거 패널이 지어내지 않게). 참조 골격을 쓴 경우에만 실린다. */
+  structureSource?: { source: StructureSource; skeletonId: string; chainIdx: number; variant: 'media' | 'catalog'; removed: SectionType[] };
 }
 
 // ────────────── ★ 2026-07-16 M1 — 브리프 → 섹션 결정적 주입/보강 (순수 — 계약 테스트 고정) ──────────────
@@ -814,6 +819,11 @@ export async function oneShotGenerate(opts: {
     toneHint?: CampaignTone;
     objective?: CampaignObjective;
   };
+  /**
+   * ★ 2026-09-03 참조 골격 탈출구(설계서 §6-1). true면 자유 프롬프트 경로에서 참조 골격을 조회하지 않고 기존 AI 설계로 간다.
+   * 기본 false. opt-in이 아니라 opt-out인 이유 = 소비처 4곳을 각각 배선하면 빠뜨린 곳이 조용히 옛 동작으로 남는다.
+   */
+  disableLearnedStructure?: boolean;
 }): Promise<OneShotResult> {
   const prompt = (opts.prompt || '').trim();
   const structure = opts.structure && Array.isArray(opts.structure.sectionTypes) && opts.structure.sectionTypes.length > 0
@@ -866,7 +876,9 @@ export async function oneShotGenerate(opts: {
   };
 
   // 2. sections chain 결정 — 빠른 시작 시나리오는 고정, 자유 프롬프트는 AI 설계 + 안전 정규화(Phase 3).
+  //   ★ 2026-09-03 사다리 = 사람이 고른 구성 > 빠른 시작 시나리오 > 참조 골격 > AI 설계(설계서 §5-5 · resolveStructure가 순위를 소유).
   let sectionTypes: SectionType[];
+  let structureSource: OneShotResult['structureSource'];
   if (structure) {
     // ⛔ AI 구조 설계를 부르지 않는다 — 사람이 고른 구성을 AI가 다시 설계하면 그 답이 덮인다.
     //   정규화는 그대로 태운다(header·footer 강제·maxCount 준수는 발송 가능성의 최소 조건이다).
@@ -874,8 +886,29 @@ export async function oneShotGenerate(opts: {
   } else if (scenarioMeta?.sections) {
     sectionTypes = scenarioMeta.sections;
   } else if (prompt) {
-    const aiChain = await designSectionLayout(spec, opts.companyId);
-    sectionTypes = normalizeSectionChain(aiChain, spec.objective);
+    // ★ 2026-09-03 참조 골격 — serving이 켜진 general 골격이 있으면 AI 설계 대신 결정적으로 고른다(temperature 0 · 더하기 없음).
+    //   조회 실패·serving off·골격 없음 = null → 아래 기존 경로와 문자 단위 동일(계약 테스트 §9-3).
+    const learned = opts.disableLearnedStructure ? null : await getStructureSkeleton('general', 'DM');
+    const avail: Avail = brief
+      ? {
+          products: brief.products.length > 0 ? 'present' : 'absent',
+          productCount: brief.products.length,
+          benefit: brief.benefits.length > 0 ? 'present' : 'absent',
+          embeds: 'unknown',
+          social: 'unknown',
+        }
+      : { ...AVAIL_UNKNOWN };
+    const seed = `${opts.companyId || ''}:${String(brief?.event_name || prompt).slice(0, 40)}:${seedDateKey(new Date())}`;
+    const picked = learned
+      ? resolveStructure({ learned: learned.meta, variant: pickVariant(avail, seed), seed, avail })
+      : null;
+    if (picked && picked.types && picked.chainIdx !== null) {
+      sectionTypes = normalizeSectionChain(picked.types, spec.objective);
+      structureSource = { source: picked.source, skeletonId: learned!.id, chainIdx: picked.chainIdx, variant: pickVariant(avail, seed), removed: picked.removed };
+    } else {
+      const aiChain = await designSectionLayout(spec, opts.companyId);
+      sectionTypes = normalizeSectionChain(aiChain, spec.objective);
+    }
   } else {
     sectionTypes = normalizeSectionChain(
       Array.isArray(spec.recommended_sections) ? (spec.recommended_sections as SectionType[]) : [],
@@ -981,6 +1014,7 @@ export async function oneShotGenerate(opts: {
   return {
     spec, sections: seeded, brandKit: enrichedKit, scenario: opts.scenario, layoutMode, pages,
     ...(brief ? { brief, coverage } : {}),
+    ...(structureSource ? { structureSource } : {}),
   };
 }
 

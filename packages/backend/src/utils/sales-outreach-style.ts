@@ -3,6 +3,8 @@
  *
  * - 구조화 상수 1파일 export. 소비처는 getActiveStyleGuide() 하나만 본다.
  *   프롬프트 문자열 여기저기에 규칙을 흩지 않는다(샘플 세트가 오면 이 파일 하나만 교체).
+ * - ★2026-09-03 실물 참조(섹션 골격)는 참조 골격 CT가 맡는다(best-copy-assets getStructureSkeleton · sales-outreach-produce pickOutreachStructure).
+ *   이 파일은 문안 규칙 층만 남는다. 설계 = docs/2026-09-03-reference-skeleton-learning-design.md §6-3.
  * - v0 = 샘플 미학습 기본형. 산출물에는 "가이드 미학습" 표시가 함께 나간다(sampleTrained=false).
  * - 테이블 승격 조건(하나라도 생기면 sales_outreach_style_guides 신설로 이관):
  *   ①샘플 세트 2개 이상 ②Harold가 화면에서 가이드 편집을 요구 ③버전 롤백 필요.

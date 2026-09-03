@@ -27,9 +27,12 @@ import { STUDIO_TEMPLATES, type StudioTemplate, type TemplateCategory } from './
 import { oneShotGenerate } from './dm/dm-ai';
 import { createDm, publishDm } from './dm/dm-builder';
 import { renderEmailSections, EMAIL_FOOTER_SLOT } from './email/email-section-renderer';
-import type { Section } from './dm/dm-section-registry';
+import type { Section, SectionType } from './dm/dm-section-registry';
 import { industryLabel } from './industry-codes';
 import type { EventCandidate } from './sales-outreach-jobs';
+// ★ 2026-09-03 참조 골격(설계서 §6-3) — 아웃리치 파일이 읽고 감산해 `structure`로 넘긴다(공용 CT는 아웃리치 사정을 모른다 · 불변 20)
+import { getStructureSkeleton } from './best-copy-assets';
+import { pickVariant, resolveStructure, seedDateKey, type Avail } from './dm/dm-structure-resolve';
 
 // ===== 회사 컨텍스트 (ENV 고정 — §15-6) =====
 
@@ -270,7 +273,9 @@ export async function produceOutreachDm(input: {
    *  미래의 호출부가 고객 companyId를 넘기는 실수를 이 비교가 잡는다. */
   companyId: string;
   userId: string;
-}): Promise<{ dmId: string; dmUrl: string }> {
+  /** ★ 2026-09-03 혜택 수치 면허(재대조 통과 + 미래 종료일) — 없으면 참조 골격에서 countdown·coupon류를 뺀다(불변 3·4·5 · 설계서 §6-3). */
+  benefitLicensed?: boolean;
+}): Promise<{ dmId: string; dmUrl: string; structureRef: OutreachStructureRef | null }> {
   const envCompanyId = (process.env.OUTREACH_COMPANY_ID || '').trim();
   const envUserId = (process.env.OUTREACH_USER_ID || '').trim();
   if (!envCompanyId || !envUserId) throw new Error('OUTREACH_COMPANY_ID·OUTREACH_USER_ID가 설정되지 않았습니다.');
@@ -278,11 +283,20 @@ export async function produceOutreachDm(input: {
     throw new Error('내부 발행은 내부 전용 회사 계정으로만 가능합니다.');
   }
 
+  // ★ 2026-09-03 참조 골격 — 아웃리치 파일이 골격을 읽어 감산한 뒤 `structure`(사람 축)로 명시 전달한다.
+  //   공용 CT는 아웃리치 사정(면허·타사 임베드)을 모른다(불변 20). 타사 채널 임베드·sns·후기는 상시 제외(불변 11 취지).
+  //   serving off·골격 없음 = structure 미전달 = 현행 경로 그대로.
+  const structureRef = await pickOutreachStructure({
+    companyName: input.companyName,
+    eventText: input.eventText,
+    benefitLicensed: input.benefitLicensed === true,
+  });
   const gen = await runInCreditBundle(() =>
     oneShotGenerate({
       prompt: `${input.companyName} 브랜드 소개와 행사 안내 모바일 페이지`,
       companyId: input.companyId,
       eventText: input.eventText,
+      ...(structureRef ? { structure: { sectionTypes: structureRef.sectionTypes } } : {}),
     } as any),
   );
   const dm = await createDm(input.companyId, input.userId, {
@@ -300,7 +314,47 @@ export async function produceOutreachDm(input: {
   const dmUrl = shortBase
     ? `${shortBase}/${published.short_code}`
     : `${PUBLIC_BASE}/api/dm/v/dm-${published.short_code}`;
-  return { dmId: String(dm.id), dmUrl };
+  return { dmId: String(dm.id), dmUrl, structureRef };
+}
+
+/** asset payload에 남기는 참조 골격 기록 — 근거 패널이 문구를 지어내지 않게(설계서 §6-3). 내부 id·타입명뿐, 문구 0. */
+export interface OutreachStructureRef {
+  skeletonId: string;
+  chainIdx: number;
+  variant: 'media' | 'catalog';
+  /** 면허·임베드 규칙으로 뺀 섹션 타입(중복 제거) */
+  removed: string[];
+  /** 참조한 골격의 표본 수(화면 문구 "참조 골격 n건") */
+  sampleCount: number;
+  /** 정규화 전 전달 구성(계약: 공용 CT는 이 배열을 human 축으로 받는다) */
+  sectionTypes: SectionType[];
+}
+
+/**
+ * 아웃리치 골격 선택 — serving이 켜진 general DM 골격이 있을 때만 값이 있다.
+ * avail: 상품은 CT의 브리프가 원문에서 검증하므로 여기서는 unknown(감산 0) · 혜택은 면허 · 임베드·sns는 상시 absent.
+ */
+async function pickOutreachStructure(input: { companyName: string; eventText: string; benefitLicensed: boolean }): Promise<OutreachStructureRef | null> {
+  const skeleton = await getStructureSkeleton('general', 'DM');
+  if (!skeleton) return null;
+  const avail: Avail = {
+    products: 'unknown',
+    benefit: input.benefitLicensed ? 'present' : 'absent',
+    embeds: 'absent',
+    social: 'absent',
+  };
+  const seed = `outreach:${input.companyName}:${input.eventText.slice(0, 40)}:${seedDateKey(new Date())}`;
+  const variant = pickVariant(avail, seed);
+  const picked = resolveStructure({ learned: skeleton.meta, variant, seed, avail });
+  if (!picked.types || picked.chainIdx === null) return null;
+  return {
+    skeletonId: skeleton.id,
+    chainIdx: picked.chainIdx,
+    variant,
+    removed: picked.removed,
+    sampleCount: skeleton.meta.stats.n,
+    sectionTypes: picked.types,
+  };
 }
 
 // ===== 제안 메일 조립 (전달용 완성본 1통 — 내부 URL 인자 없음) =====
