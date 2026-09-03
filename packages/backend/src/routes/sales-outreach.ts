@@ -17,7 +17,7 @@ import {
   sendOutreachMailForJob, confirmOutreachMailArrived, markOutreachForwarded,
   editOutreachCopy, rebuildOutreachEmail,
 } from '../utils/sales-outreach-jobs';
-import { outreachMailTo } from '../utils/outreach-mailer';
+import { outreachMailTo, outreachMailToList } from '../utils/outreach-mailer';
 import { buildOutreachTemplateXlsx, parseOutreachBulkXlsx } from '../utils/sales-outreach-bulk';
 import { XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 
@@ -50,7 +50,9 @@ function respondError(res: Response, err: any, context: string): void {
 
 // 메뉴 노출 게이팅 — 기존 /access 규약과 동일 응답 형태
 router.get('/access', async (req: Request, res: Response) => {
-  res.json({ allowed: await isSalesOutreachOperator(req.user?.userId) });
+  const allowed = await isSalesOutreachOperator(req.user?.userId);
+  // ★ 2026-09-03 수신함 목록 — 허용 계정에만 노출(확인 모달이 "누구에게 가는가"를 사실대로 적는다)
+  res.json({ allowed, ...(allowed ? { mailTo: outreachMailToList() } : {}) });
 });
 
 // 등록 — 등록만 동기(1초 내), 파이프라인은 잡으로. 202 + jobId 폴링.
@@ -179,7 +181,7 @@ router.post('/jobs/:id/send', async (req: Request, res: Response) => {
   try {
     const result = await sendOutreachMailForJob(req.params.id, req.user?.userId);
     console.log('[sales-outreach] 발송:', req.params.id, result.outcome, req.user?.userId);
-    res.json({ outcome: result.outcome, detail: result.detail, to: outreachMailTo() });
+    res.json({ outcome: result.outcome, detail: result.detail, to: outreachMailTo(), recipients: outreachMailToList() });
   } catch (err: any) {
     respondError(res, err, '발송');
   }

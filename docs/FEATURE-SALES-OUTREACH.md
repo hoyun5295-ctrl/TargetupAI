@@ -75,7 +75,7 @@
 | `SALES_OUTREACH_ALLOWED_USERS` | 사용 허용 슈퍼관리자 login_id(기본 `ceo`) | **기본값 `ceo`가 적용**(전부 차단 아님 · 불변 6 참조) |
 | `OUTREACH_COMPANY_ID` / `OUTREACH_USER_ID` | 내부 산출물 귀속 회사·사용자(주식회사 인비토 / mobile) | 기능 전체가 "준비 안 됨"으로 정직 거절 |
 | `OUTREACH_SMTP_USER` / `OUTREACH_SMTP_PASS` | 영업 전용 발신 계정(hanjul@invitocorp.com) | 발송만 잠김(제작은 정상) |
-| `OUTREACH_MAIL_TO` | 수신함(미설정 = `INVITO_INFO.email`) | 기본값 사용 |
+| `OUTREACH_MAIL_TO` | 수신함 **목록**(쉼표 구분 · ★0903 · 예 `suran@invitocorp.com,ceo@invitocorp.com`) — 미설정 = `INVITO_INFO.email` 1명. 형식 불량 제거·중복 제거는 `parseOutreachMailTo` | 기본값 1명 |
 | `OUTREACH_UNSUB_NOTICE` | 메일 하단 수신거부 안내 문구 | 발송 잠김(원칙 3) |
 
 테이블 2개(`sales_outreach_jobs` · `sales_outreach_assets`) — 컬럼은 설계서 §15-7. DDL은 **코드 배포 뒤** 실행한다. **실행 절차·검증 SQL·CREATE 원문 = [OPS.md §2-2-E](../status/OPS.md)**(그 절이 배포 인계의 유일 소유자다).

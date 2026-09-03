@@ -74,6 +74,8 @@ function latestAssetOf(job: OutreachJob | null, kind: string): any | null {
 
 export default function SalesOutreachModal({ onClose }: { onClose: () => void }) {
   const [job, setJob] = useState<OutreachJob | null>(null);
+  // ★ 2026-09-03 자사 수신함 목록(OUTREACH_MAIL_TO 쉼표 목록) — 확인 모달이 수신자를 사실대로 적는다
+  const [mailTo, setMailTo] = useState<string[]>([]);
   const [lastSummary, setLastSummary] = useState<OutreachJob | null>(null);
   const [industries, setIndustries] = useState<IndustryOption[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -135,6 +137,18 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
           }
         }
       } catch { /* 최근 건 없음 */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 수신함 목록(mount 1회) — 실패·미허용 = 빈 배열(문구는 "회사 수신함"으로 폴백)
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await authFetch('/api/sales-outreach/access');
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && Array.isArray(d?.mailTo)) setMailTo(d.mailTo.map((x: unknown) => String(x)));
+      } catch { /* 문구 폴백 */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -288,7 +302,9 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     setConfirmState({
       mode: 'warning',
       title: '자사 수신함으로 발송합니다',
-      description: '조립된 제안 메일을 회사 수신함으로 1통 발송합니다. 수신함에서 확인 후 업체에 전달하는 흐름입니다.',
+      description: mailTo.length
+        ? `조립된 제안 메일을 회사 수신함 ${mailTo.length}명(${mailTo.join(', ')})에게 보냅니다. 수신함에서 확인 후 업체에 전달하는 흐름입니다.`
+        : '조립된 제안 메일을 회사 수신함으로 1통 발송합니다. 수신함에서 확인 후 업체에 전달하는 흐름입니다.',
       confirmLabel: '발송',
       onConfirm: async () => {
         setBusy(true);
@@ -299,7 +315,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
           if (!r.ok) {
             setNotice(d?.error || '발송에 실패했습니다.');
           } else if (d.outcome === 'sent') {
-            setNotice(`발송되었습니다: ${d.to || '회사 수신함'}. 수신함 도착을 확인해주세요.`);
+            setNotice(`발송되었습니다: ${d.detail || d.to || '회사 수신함'}. 수신함 도착을 확인해주세요.`);
           } else if (d.outcome === 'rejected') {
             setNotice('수신 주소가 거부되었습니다. 수신함 주소 설정을 확인해주세요.');
           } else {

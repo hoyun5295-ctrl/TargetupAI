@@ -20,9 +20,34 @@ export function isOutreachMailerReady(): boolean {
   return !!((process.env.OUTREACH_SMTP_USER || '').trim() && (process.env.OUTREACH_SMTP_PASS || '').trim());
 }
 
-/** 자사 수신함 주소(전달용 완성본 1통의 수신처) — 기본 = INVITO_INFO.email(mobile@invitocorp.com). */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * ★ 2026-09-03 수신함 목록 파싱(순수) — 쉼표·세미콜론·공백 구분, 형식 불량 제거, 대소문자 무시 중복 제거, 순서 보존.
+ * 전부 비면 기본값 1명(INVITO_INFO.email). 외부 주소를 막는 축은 여기가 아니라 "수신처는 인자로 받지 않는다"(ENV 고정)다.
+ */
+export function parseOutreachMailTo(raw: string | null | undefined, fallback: string = INVITO_INFO.email): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of String(raw || '').split(/[,;\s]+/)) {
+    const v = part.trim();
+    if (!v || !EMAIL_RE.test(v)) continue;
+    const key = v.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+  }
+  return out.length ? out : [String(fallback || '').trim()].filter(Boolean);
+}
+
+/** 자사 수신함 주소 목록(전달용 완성본 1통의 수신처들) — OUTREACH_MAIL_TO 쉼표 목록 · 기본 = INVITO_INFO.email. */
+export function outreachMailToList(): string[] {
+  return parseOutreachMailTo(process.env.OUTREACH_MAIL_TO);
+}
+
+/** 표시·로그용 한 줄(", " 결합). 발송은 outreachMailToList()를 쓴다. */
 export function outreachMailTo(): string {
-  return (process.env.OUTREACH_MAIL_TO || INVITO_INFO.email).trim();
+  return outreachMailToList().join(', ');
 }
 
 export async function sendOutreachProposalMail(input: {
@@ -32,7 +57,7 @@ export async function sendOutreachProposalMail(input: {
   if (!isOutreachMailerReady()) {
     return { outcome: 'unknown', detail: '영업 발신 계정(OUTREACH_SMTP_USER/PASS)이 설정되지 않았습니다.' };
   }
-  const to = outreachMailTo();
+  const to = outreachMailToList();
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.hiworks.com',
     port: Number(process.env.SMTP_PORT) || 465,
@@ -51,12 +76,16 @@ export async function sendOutreachProposalMail(input: {
       html: input.html,
     });
     // nodemailer는 일부 수신자 거부여도 resolve한다 — rejected 배열을 반드시 본다(회의 R7).
-    if (isRecipientRejected(info, to)) {
-      return { outcome: 'rejected', detail: `수신 주소가 거부되었습니다: ${to}` };
+    // ★ 2026-09-03 수신자 여럿: 전원 거부 = rejected · 1명 이상 도착 = sent(거부된 주소는 detail에 남긴다) · 확인 불가 = unknown.
+    const rejectedList = to.filter((addr) => isRecipientRejected(info, addr));
+    if (rejectedList.length === to.length) {
+      return { outcome: 'rejected', detail: `수신 주소가 거부되었습니다: ${rejectedList.join(', ')}` };
     }
     const accepted: string[] = Array.isArray(info?.accepted) ? info.accepted.map((x: any) => String(x)) : [];
-    if (accepted.some((a) => a.toLowerCase().includes(to.toLowerCase()))) {
-      return { outcome: 'sent', detail: String(info?.messageId || '') };
+    const acceptedList = to.filter((addr) => accepted.some((a) => a.toLowerCase().includes(addr.toLowerCase())));
+    if (acceptedList.length > 0) {
+      const partial = rejectedList.length ? ` (거부: ${rejectedList.join(', ')})` : '';
+      return { outcome: 'sent', detail: `${acceptedList.join(', ')}${partial}` };
     }
     // accepted에도 rejected에도 없음 = 서버는 받았는데 수신자 확인 불가 — 성공으로 접지 않는다.
     return { outcome: 'unknown', detail: '발송 결과를 확인하지 못했습니다(수신함 도착을 직접 확인해주세요).' };
