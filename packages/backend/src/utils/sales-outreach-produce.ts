@@ -33,6 +33,8 @@ import type { EventCandidate } from './sales-outreach-jobs';
 // ★ 2026-09-03 참조 골격(설계서 §6-3) — 아웃리치 파일이 읽고 감산해 `structure`로 넘긴다(공용 CT는 아웃리치 사정을 모른다 · 불변 20)
 import { getStructureSkeleton } from './best-copy-assets';
 import { pickVariant, resolveStructure, seedDateKey, type Avail } from './dm/dm-structure-resolve';
+import { OUTREACH_SEED_SKELETON_ID, outreachSeedSkeleton } from './sales-outreach-skeleton-seed';
+import { pruneEmptyDmSections, rebuildDmPages } from './dm/dm-section-prune';
 
 // ===== 회사 컨텍스트 (ENV 고정 — §15-6) =====
 
@@ -275,6 +277,10 @@ export async function produceOutreachDm(input: {
   userId: string;
   /** ★ 2026-09-03 혜택 수치 면허(재대조 통과 + 미래 종료일) — 없으면 참조 골격에서 countdown·coupon류를 뺀다(불변 3·4·5 · 설계서 §6-3). */
   benefitLicensed?: boolean;
+  /** ★ 2026-09-03 앞 단계가 만든 생성 이미지(우리 서버 공개 URL) — hero 이미지 재료 */
+  posterUrl?: string | null;
+  /** ★ 2026-09-03 사람이 고른 타사 이미지 1장(불변 11 · 인물 판정은 이미지 단계가 했다) — 갤러리 재료 */
+  selectedImageUrl?: string | null;
 }): Promise<{ dmId: string; dmUrl: string; structureRef: OutreachStructureRef | null }> {
   const envCompanyId = (process.env.OUTREACH_COMPANY_ID || '').trim();
   const envUserId = (process.env.OUTREACH_USER_ID || '').trim();
@@ -294,16 +300,23 @@ export async function produceOutreachDm(input: {
   const gen = await runInCreditBundle(() =>
     oneShotGenerate({
       prompt: `${input.companyName} 브랜드 소개와 행사 안내 모바일 페이지`,
+      brandName: input.companyName,
       companyId: input.companyId,
       eventText: input.eventText,
       ...(structureRef ? { structure: { sectionTypes: structureRef.sectionTypes } } : {}),
     } as any),
   );
+  // ★ 2026-09-03 재료 채우기 → 빈 섹션 제거 → 페이지 재조립. 자동 발행되는 산출물에 "[상품을 추가해주세요]" 같은 빈 자리를 남기지 않는다.
+  const generated: Section[] = Array.isArray((gen as any).sections) ? (gen as any).sections : [];
+  const filled = fillOutreachDmMedia(generated, { posterUrl: input.posterUrl || null, selectedImageUrl: input.selectedImageUrl || null });
+  const pruned = pruneEmptyDmSections(filled.sections);
+  const rebuilt = rebuildDmPages(pruned.sections);
+  if (structureRef) structureRef.pruned = pruned.removed;
   const dm = await createDm(input.companyId, input.userId, {
     title: `[영업] ${input.companyName}`.slice(0, 200),
-    sections: (gen as any).sections || [],
-    pages: (gen as any).pages || [],
-    layout_mode: (gen as any).layoutMode,
+    sections: rebuilt.sections,
+    pages: rebuilt.pages,
+    layout_mode: rebuilt.layoutMode,
     brand_kit: (gen as any).brandKit || null,
     ai_prompt: input.eventText.slice(0, 2000),
     approval_status: 'draft',
@@ -328,15 +341,58 @@ export interface OutreachStructureRef {
   sampleCount: number;
   /** 정규화 전 전달 구성(계약: 공용 CT는 이 배열을 human 축으로 받는다) */
   sectionTypes: SectionType[];
+  /** 골격 출처 — db = 베스트 구성에서 서빙 중인 골격 · builtin = 코드 내장 실물 10건 */
+  source: 'db' | 'builtin';
+  /** 생성 뒤 데이터가 비어 지운 섹션 타입(중복 제거) */
+  pruned?: SectionType[];
 }
 
 /**
- * 아웃리치 골격 선택 — serving이 켜진 general DM 골격이 있을 때만 값이 있다.
- * avail: 상품은 CT의 브리프가 원문에서 검증하므로 여기서는 unknown(감산 0) · 혜택은 면허 · 임베드·sns는 상시 absent.
+ * ★ 2026-09-03 DM 이미지 재료 채우기(순수) — hero에 생성 이미지, 갤러리·슬라이드에는 2장 이상일 때만(1장짜리 갤러리는 의미가 없어 비워 두면 prune이 지운다).
+ * 이미지 원천은 우리 생성 이미지 + 사람이 고른 1장뿐(불변 11). 이미 값이 있는 자리는 덮지 않는다.
+ */
+export function fillOutreachDmMedia(
+  sections: readonly Section[],
+  media: { posterUrl: string | null; selectedImageUrl: string | null },
+): { sections: Section[]; filled: number } {
+  const images = [media.posterUrl, media.selectedImageUrl]
+    .map((u) => String(u || '').trim())
+    .filter((u, i, arr) => u && /^https?:\/\//i.test(u) && arr.indexOf(u) === i);
+  let filled = 0;
+  let heroDone = false;
+  const out = sections.map((s) => {
+    if (!s || typeof s !== 'object') return s;
+    const p: any = { ...((s.props as any) || {}) };
+    if (s.type === 'hero' && !heroDone && images[0] && !String(p.image_url || '').trim()) {
+      p.image_url = images[0];
+      heroDone = true;
+      filled++;
+      return { ...s, props: p } as Section;
+    }
+    if (s.type === 'gallery' && images.length >= 2 && !(Array.isArray(p.images) && p.images.some((x: any) => String(x?.url || '').trim()))) {
+      p.images = images.map((url) => ({ url, alt: '' }));
+      filled++;
+      return { ...s, props: p } as Section;
+    }
+    if (s.type === 'slideshow' && images.length >= 2 && !(Array.isArray(p.slides) && p.slides.some((x: any) => String(x?.image_url || '').trim()))) {
+      p.slides = images.map((image_url) => ({ image_url }));
+      filled++;
+      return { ...s, props: p } as Section;
+    }
+    return s;
+  });
+  return { sections: out, filled };
+}
+
+/**
+ * 아웃리치 골격 선택 — 베스트 구성에서 서빙 중인 general DM 골격이 있으면 그것, 없으면 코드 내장 실물 10건(seed).
+ * avail: 상품은 CT의 브리프가 원문에서 검증하므로 여기서는 unknown(감산 0 · 빈 상품 섹션은 생성 뒤 prune이 지운다) · 혜택은 면허 · 임베드·sns는 상시 absent.
  */
 async function pickOutreachStructure(input: { companyName: string; eventText: string; benefitLicensed: boolean }): Promise<OutreachStructureRef | null> {
-  const skeleton = await getStructureSkeleton('general', 'DM');
-  if (!skeleton) return null;
+  const fromDb = await getStructureSkeleton('general', 'DM');
+  const skeleton = fromDb
+    ? { id: fromDb.id, meta: fromDb.meta, source: 'db' as const }
+    : { id: OUTREACH_SEED_SKELETON_ID, meta: outreachSeedSkeleton(), source: 'builtin' as const };
   const avail: Avail = {
     products: 'unknown',
     benefit: input.benefitLicensed ? 'present' : 'absent',
@@ -354,6 +410,7 @@ async function pickOutreachStructure(input: { companyName: string; eventText: st
     removed: picked.removed,
     sampleCount: skeleton.meta.stats.n,
     sectionTypes: picked.types,
+    source: skeleton.source,
   };
 }
 

@@ -513,3 +513,16 @@ SELECT d.title, d.id, (d.ai_prompt IS NOT NULL) AS ai_edit, EXISTS(SELECT 1 FROM
 - 명칭 근거: 두 학습은 같은 생성 CT로 들어가는 짝이다. **문안 = 베스트 문안(copy brain) · 구성 = 베스트 구성(참조 골격)**. "생성"은 산출물 전체를 뜻해 범위가 흐리고, 저장되는 것이 섹션 구성(순서·통계)뿐이라 "구성"이 정확하다.
 - 게이트: `isBestLayoutViewer`(ENV `BEST_LAYOUT_VIEWER_IDS` 기본 `ceo` AND 등급표 `bestLayout`) → `requireBestLayoutViewer` 미들웨어를 `router.use('/best-layout', …)` 한 곳에 두어 4개 라우트 입구를 동시에 덮는다(0829 교훈). `GET /best-layout/access`는 게이트 앞(메뉴 노출 판정). 프론트 = AdminDashboard 메뉴 게이팅 + 페이지 403 안내(AiTrainingDataPage 선례). ENV 미설정 = ceo만(전부 차단 아님).
 - API 경로: `/api/admin/best-layout/skeleton` · `/candidates` · `/promote` · `/serving` · `/access`. 계약 테스트 14 추가(게이트가 모든 입구 앞에 한 번 · `/best-copy/skeleton*` 잔존 0).
+
+### 16-7. AI 영업 DM 실물 정정 (2026-09-03 · 토니모리 실측 `dm-zOjbnJz` = header + 빈 product_carousel ×3 + 안내 + footer)
+원인(코드 실측): ①DM 재료가 `selected.quote` 한 줄 또는 600자 발췌뿐이라 브리프가 행사·상품을 못 봤다 ②AI 구성 설계가 재료 없이 product_carousel을 골라 `[상품을 추가해주세요]`가 남았다 ③이미지가 어디에도 실리지 않았다(생성 이미지는 이메일에만) ④참조 골격은 승격·서빙 전이라 효과 0.
+처방(코드 완료):
+| 지점 | 변경 |
+|---|---|
+| `sales-outreach-jobs.ts` 크롤 | `brand_profile.eventTextFull`(구조화 블록 + 본문 · 최대 6000자) 저장. 크롤은 그대로 1회(불변 18) · DDL 0(jsonb 키) |
+| `sales-outreach-jobs.ts` DM 단계 | eventText = `[확인된 행사] 인용` + `[홈페이지에서 읽은 내용] 전량` · 앞 단계 생성 이미지(`studio_image.url`)와 사람이 고른 1장을 DM 제작에 전달 |
+| `sales-outreach-skeleton-seed.ts` (신설) | 직원 실물 DM 10건의 타입 순서를 코드에 내장 = 베스트 구성 서빙 전에도 실물 골격으로 만든다(DB 골격이 서빙 중이면 그것이 우선 · `structureRef.source` = db/builtin) |
+| `sales-outreach-produce.ts` | 골격은 항상 명시 전달(결정성) · `fillOutreachDmMedia`(hero = 생성 이미지 · 갤러리/슬라이드는 2장 이상일 때만) · `pruneEmptyDmSections` → `rebuildDmPages` · `brandName` 전달 |
+| `dm/dm-section-prune.ts` (신설 · 순수) | 핵심 데이터가 빈 섹션 제거(상품·이미지·슬라이드·기간·쿠폰·코드·매장·sns·탭) · header/hero/text_card/cta/footer 보존 · 규칙 없는 타입 보존 · order 재부여 + pages 재조립 |
+| 테스트 | `dm-section-prune.test.ts` 6건(데이터 판정·제거·재조립·내장 골격 10건 5:5·문구 0) |
+남는 한계(정직): 상품 카드는 홈페이지 텍스트에 상품명·가격이 있을 때만 채워진다(토니모리 공식몰은 배너 이미지 위주 · 상품은 JS 로딩 = §17-6 렌더 폴백 별건). 타사 이미지는 사람이 고른 1장만 쓴다(불변 11).

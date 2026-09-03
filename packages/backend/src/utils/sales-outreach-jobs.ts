@@ -201,6 +201,9 @@ export async function runOutreachJob(jobId: string): Promise<void> {
   const brandProfile = {
     siteTitle: titleMatch ? norm(titleMatch[1]).slice(0, 120) : null,
     excerpt: eventText ? eventText.slice(0, 600) : null,
+    // ★ 2026-09-03 홈페이지에서 읽은 행사 텍스트 전량(구조화 블록 + 본문 · 최대 6000자) — DM·이메일 제작 재료.
+    //   600자 발췌만 넘기니 브리프가 행사·상품을 못 봐 빈 껍데기 DM이 나왔다(토니모리 실측). 크롤은 그대로 1회(불변 18).
+    eventTextFull: eventText ? eventText.slice(0, 6000) : null,
     imageCandidates: page ? extractImageCandidates(page.html, page.baseUrl) : [],
     selectedImageUrl: null as string | null,
     crawledAt: new Date().toISOString(),
@@ -454,14 +457,23 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
         if (!(await advanceStage(jobId, lockToken, 'producing_image', 'producing_dm'))) return;
 
       } else if (stage === 'producing_dm') {
-        const eventText = selected ? selected.quote
-          : (job.brand_profile?.excerpt || `${job.company_name} 브랜드 안내`);
+        // ★ 2026-09-03 DM 재료 = 확인된 행사 인용 + 홈페이지에서 읽은 행사 텍스트 전량(브리프가 행사·기간·상품을 원문에서 검증해 채운다).
+        //   전에는 인용 한 줄(또는 600자 발췌)만 넘겨 섹션이 전부 빈 자리였다(토니모리 실측 · [상품을 추가해주세요] ×3).
+        const fullText = String(job.brand_profile?.eventTextFull || job.brand_profile?.excerpt || '').trim();
+        const eventText = [
+          selected ? `[확인된 행사] ${selected.quote}` : '',
+          fullText ? `[홈페이지에서 읽은 내용]\n${fullText}` : '',
+        ].filter(Boolean).join('\n\n') || `${job.company_name} 브랜드 안내`;
         const ctx = getOutreachContext();
         if (!ctx) throw new Error('OUTREACH_COMPANY_ID·OUTREACH_USER_ID가 설정되지 않았습니다.');
+        // 이미지 재료 = 앞 단계가 만든 생성 이미지(우리 것) + 사람이 고른 1장(불변 11). 그 밖 타사 이미지는 쓰지 않는다.
+        const imageAsset = await latestAsset(jobId, 'studio_image');
         const dm = await produceOutreachDm({
           companyName: job.company_name, eventText, companyId: ctx.companyId, userId: ctx.userId,
           // ★ 2026-09-03 참조 골격 감산 근거 — 면허 인용이 있을 때만 혜택 섹션이 남는다(설계서 §6-3)
           benefitLicensed: !!selected?.benefitLicensed,
+          posterUrl: imageAsset?.url ? String(imageAsset.url) : null,
+          selectedImageUrl: job.brand_profile?.selectedImageUrl ? String(job.brand_profile.selectedImageUrl) : null,
         });
         // 소유권을 잃은 실행의 DM 발행(외부 효과)은 결속으로 못 막는다 — 내부 전용 회사의 draft DM 1개 잔존이
         // 전부이고(과금 0·고객 무관) 자산 결속이 화면·메일 사용을 차단하므로 위험 수용(Codex 3R 판단 기록).
