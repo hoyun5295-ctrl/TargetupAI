@@ -109,6 +109,8 @@ export default function AdminDashboard() {
   const [outreachOpen, setOutreachOpen] = useState(false);
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
   const [aiTrainingAllowed, setAiTrainingAllowed] = useState(false);
+  // ★ 2026-09-03: 베스트 구성(참조 골격) 열람 권한 (BEST_LAYOUT_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴 노출
+  const [bestLayoutAllowed, setBestLayoutAllowed] = useState(false);
   // ★ 2026-07-17: 발송 라인 설정 권한 (LINE_GROUP_ADMIN_USERS — 기본 ceo,admin) — 허용 계정에만 메뉴/탭 노출.
   //   판정은 백엔드 GET /line-groups 응답의 canManage가 유일한 소스 — 프론트 자체 판정 금지.
   const [lineGroupCanManage, setLineGroupCanManage] = useState(false);
@@ -1076,6 +1078,13 @@ useEffect(() => {
       const d = await r.json();
       setAiTrainingAllowed(d.allowed === true);
     } catch { setAiTrainingAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-09-03: 베스트 구성 접근(mount 1회) — 허용 계정(기본 ceo)에만 메뉴 노출
+      const r = await fetch('/api/admin/best-layout/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setBestLayoutAllowed(d.allowed === true);
+    } catch { setBestLayoutAllowed(false); }
     try {
       const token = localStorage.getItem('token');
       // ★ 2026-08-24: AI 영업 아웃리치 접근(mount 1회) — 허용 계정(기본 ceo)에만 메뉴 노출
@@ -4641,6 +4650,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'geoAccess', label: '국외 접근 통제' },
                   // ★ 2026-07-04: 베스트 문안(업종 큐레이션) = 슈퍼관리자 공용(직원 큐레이션, ceo 게이트 없음)
                   { key: 'bestCopy', label: '베스트 문안', onClick: () => navigate('/admin/best-copy') },
+                  // ★ 2026-09-03: 베스트 구성(참조 골격 = DM·이메일 구성 학습) = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
+                  ...(bestLayoutAllowed ? [{ key: 'bestLayout', label: '베스트 구성', onClick: () => navigate('/admin/best-layout') }] : []),
                   // ★ 2026-06-13: AI 학습 데이터 = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
                   ...(aiTrainingAllowed ? [{ key: 'aiTraining', label: 'AI 학습 데이터', onClick: () => navigate('/admin/ai-training') }] : []),
                   { key: 'loginBlocks', label: '로그인 차단 관리' },

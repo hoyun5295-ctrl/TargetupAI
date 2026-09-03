@@ -140,6 +140,13 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
     screens: '직원 계정·권한',
     levels: { super: 'RWD', lead: 'NONE', support: 'NONE' },
   },
+  {
+    // ★ 2026-09-03 베스트 구성(참조 골격 학습층) — ENV 허용 목록(기본 ceo)과 AND. 등급표 미등록이면 전원 NONE이라 함께 등재한다.
+    key: 'bestLayout',
+    area: '베스트 구성',
+    screens: '베스트 구성(참조 골격 승격·자동 생성 적용)',
+    levels: { super: 'RWD', lead: 'NONE', support: 'NONE' },
+  },
 ];
 
 /** 모르는 값·빈 값은 최저 등급으로 접는다 — 오타가 전권이 되면 안 된다 */

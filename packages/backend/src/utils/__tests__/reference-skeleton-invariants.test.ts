@@ -138,6 +138,24 @@ describe('reference-skeleton invariants', () => {
     expect(jobs).toContain('structureRef: dm.structureRef');
   });
 
+  it('14. 베스트 구성 = ceo 전용 게이트가 모든 /best-layout 입구 앞에 한 번(라우트별 덧대기 0) · 베스트 문안 경로에는 남은 골격 라우트 0', () => {
+    const code = readCode('routes/admin.ts');
+    const gate = code.indexOf("router.use('/best-layout', authenticate, requireSuperAdmin, requireBestLayoutViewer)");
+    expect(gate).toBeGreaterThan(-1);
+    for (const p of ["'/best-layout/skeleton'", "'/best-layout/skeleton/candidates'", "'/best-layout/skeleton/promote'", "'/best-layout/skeleton/serving'"]) {
+      const at = code.indexOf(p);
+      expect(at, `${p} 라우트`).toBeGreaterThan(gate);
+    }
+    expect(code).not.toContain("'/best-copy/skeleton");
+    // access는 게이트 앞(허용 여부는 누구나 물을 수 있다)
+    expect(code.indexOf("'/best-layout/access'")).toBeLessThan(gate);
+    const auth = readCode('middlewares/auth.ts');
+    expect(auth).toContain('isBestLayoutViewer(req.user?.userId)');
+    const audit = readCode('utils/audit-log.ts');
+    expect(audit).toContain("'BEST_LAYOUT_VIEWER_IDS', 'ceo'");
+    expect(readCode('utils/admin-role.ts')).toContain("key: 'bestLayout'");
+  });
+
   it('13. 순수·승격 모듈은 props를 읽지 않는다 · 모델명 0', () => {
     for (const f of ['utils/dm/dm-structure-resolve.ts', 'utils/reference-skeleton-promote.ts']) {
       expect(readCode(f), `${f}에 .props 접근`).not.toContain('.props');

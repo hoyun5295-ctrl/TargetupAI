@@ -507,3 +507,9 @@ SELECT d.title, d.id, (d.ai_prompt IS NOT NULL) AS ai_edit, EXISTS(SELECT 1 FROM
 
 ### 16-5. 배포 뒤 순서 (Harold)
 ①`git pull` → 백엔드 빌드·재기동 + 프론트 `build:safe` ②`/admin/best-copy` → 참조 골격 패널 → [참조 골격 올리기] DM 10건(탑텐 제외)·이메일 9건 승격(업종 = 업종 공통) ③서빙 토글은 off 상태로 두고 아웃리치 본체 운영 1회 완주 ④토글 on → 편집기 자유 프롬프트·아웃리치·플래너 이메일 각 1건 실측 → 결과와 원가(§12-⑩)를 이 문서 §16에 기록.
+
+### 16-6. 화면 분리 정정 (2026-09-03 · Harold 지시 "베스트 구성이라고 나누어서 나만")
+- §8-1·§8-2의 "`/admin/best-copy` 패널 안"은 **폐기.** 참조 골격 화면은 ceo 전용 별도 메뉴 **"베스트 구성"**(`/admin/best-layout` · `pages/BestLayoutPage.tsx`)이 소유하고, 베스트 문안(`/admin/best-copy`)은 직원 공용 문안 학습으로 그대로 둔다.
+- 명칭 근거: 두 학습은 같은 생성 CT로 들어가는 짝이다. **문안 = 베스트 문안(copy brain) · 구성 = 베스트 구성(참조 골격)**. "생성"은 산출물 전체를 뜻해 범위가 흐리고, 저장되는 것이 섹션 구성(순서·통계)뿐이라 "구성"이 정확하다.
+- 게이트: `isBestLayoutViewer`(ENV `BEST_LAYOUT_VIEWER_IDS` 기본 `ceo` AND 등급표 `bestLayout`) → `requireBestLayoutViewer` 미들웨어를 `router.use('/best-layout', …)` 한 곳에 두어 4개 라우트 입구를 동시에 덮는다(0829 교훈). `GET /best-layout/access`는 게이트 앞(메뉴 노출 판정). 프론트 = AdminDashboard 메뉴 게이팅 + 페이지 403 안내(AiTrainingDataPage 선례). ENV 미설정 = ceo만(전부 차단 아님).
+- API 경로: `/api/admin/best-layout/skeleton` · `/candidates` · `/promote` · `/serving` · `/access`. 계약 테스트 14 추가(게이트가 모든 입구 앞에 한 번 · `/best-copy/skeleton*` 잔존 0).

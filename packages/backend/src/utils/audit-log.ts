@@ -117,6 +117,15 @@ export function isDiagnosisViewer(superAdminId?: string | null): Promise<boolean
 }
 
 /**
+ * ★ 2026-09-03 베스트 구성(참조 골격 학습층) 열람 권한 — BEST_LAYOUT_VIEWER_IDS(기본 'ceo').
+ * 직원 실물을 학습 골격으로 올리고 자동 생성에 켜는 축이라 소유자(ceo) 전용. 베스트 문안(직원 공용·문안 학습)과
+ * 메뉴·경로·env를 나눈다(Harold 0903). 설계 = docs/2026-09-03-reference-skeleton-learning-design.md §8.
+ */
+export function isBestLayoutViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'BEST_LAYOUT_VIEWER_IDS', 'ceo', 'best-layout', 'bestLayout');
+}
+
+/**
  * ★ 2026-08-05 총 정산표 열람 권한 — SETTLEMENT_OVERVIEW_VIEWER_IDS(기본 'ceo').
  * 전 고객사의 총 청구금·수금·미납을 한 화면에 모으는 소유자용 집계라 감사 로그와 같은 급으로 잠근다.
  * 직원 계정은 자기 담당 정산만 보고, 회사 전체 미납 총액은 보지 않는다(Harold 명시 2026-08-05).

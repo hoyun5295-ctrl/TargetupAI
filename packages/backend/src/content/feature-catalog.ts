@@ -1033,6 +1033,7 @@ export const NOT_DOCUMENTED_ROUTES: Record<string, string> = {
   '/admin/ai-training': '슈퍼관리자',
   '/admin/alimtalk-senders': '슈퍼관리자',
   '/admin/best-copy': '슈퍼관리자',
+  '/admin/best-layout': '슈퍼관리자(ceo 전용 · 베스트 구성 = 참조 골격 승격·자동 생성 적용)',
   '/admin/campaign-agency': '슈퍼관리자',
   '/ai-journeys/:id': '여정 상세(= journeys)',
   '/ai-journeys/:id/stats': '여정 통계(= journeys)',

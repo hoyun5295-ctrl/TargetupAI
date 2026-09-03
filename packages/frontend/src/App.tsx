@@ -27,6 +27,7 @@ import DiagnosisPage from './pages/DiagnosisPage';
 const AdminDashboard = lazyPage(() => import('./pages/AdminDashboard'));
 const AiTrainingDataPage = lazyPage(() => import('./pages/AiTrainingDataPage'));
 const BestCopyPage = lazyPage(() => import('./pages/BestCopyPage'));
+const BestLayoutPage = lazyPage(() => import('./pages/BestLayoutPage'));
 const Dashboard = lazyPage(() => import('./pages/Dashboard'));
 const ManagePage = lazyPage(() => import('./pages/ManagePage'));
 const CalendarPage = lazyPage(() => import('./pages/CalendarPage'));
@@ -315,6 +316,15 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['super_admin']}>
               <BestCopyPage />
+            </PrivateRoute>
+          }
+        />
+        {/* ★ 2026-09-03 베스트 구성(참조 골격) — 라우트는 super_admin, 실제 열람은 서버 게이트(BEST_LAYOUT_VIEWER_IDS 기본 ceo)가 결정 */}
+        <Route
+          path="/admin/best-layout"
+          element={
+            <PrivateRoute allowedTypes={['super_admin']}>
+              <BestLayoutPage />
             </PrivateRoute>
           }
         />

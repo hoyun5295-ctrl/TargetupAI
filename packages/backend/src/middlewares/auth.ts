@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
 import { TIMEOUTS, LIMITS } from '../config/defaults';
 import { requestContext } from '../utils/request-context';
+import { isBestLayoutViewer } from '../utils/audit-log';
 
 export interface JwtPayload {
   userId: string;
@@ -116,6 +117,17 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 export const requireSuperAdmin = (req: Request, res: Response, next: NextFunction) => {
   if (!req.user || req.user.userType !== 'super_admin') {
     return res.status(403).json({ error: 'Super admin access required' });
+  }
+  next();
+};
+
+/**
+ * ★ 2026-09-03 베스트 구성(참조 골격) 열람 게이트 — ENV 허용 계정(기본 ceo) AND 등급표. fail-closed(판정 실패 = 403).
+ * 라우트마다 덧대지 않고 `router.use('/best-layout', …)` 한 곳에서 모든 입구를 덮는다(LESSONS_BACKEND 0829).
+ */
+export const requireBestLayoutViewer = async (req: Request, res: Response, next: NextFunction) => {
+  if (!(await isBestLayoutViewer(req.user?.userId))) {
+    return res.status(403).json({ error: '베스트 구성 열람 권한이 없습니다.' });
   }
   next();
 };

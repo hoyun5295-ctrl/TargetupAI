@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
 import type { PoolClient } from 'pg';
-import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/auth';
+import { authenticate, requireSuperAdmin, requireUuidId, requireBestLayoutViewer } from '../middlewares/auth';
 import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, canDelete, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
@@ -65,7 +65,7 @@ import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, diffFields } from '../utils/audit-log';
 import { classifyHelpDbError, helpQuestionKind, helpReasonLabel, HELP_REQUEST_PHRASES } from '../utils/help-answer';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
@@ -5080,9 +5080,16 @@ router.post('/best-copy/mine/approve', authenticate, requireSuperAdmin, async (r
   }
 });
 
-// ═══ ★ 2026-09-03 참조 골격 학습층 — 슈퍼관리자 전용 · 신규 DDL 0 · 설계서 §7 ═══
-//   응답은 안전 문구만(err 원문은 console). 테이블 부재 = 503 DB_MIGRATION_PENDING(기존 best-copy 패턴).
+// ═══ ★ 2026-09-03 베스트 구성(참조 골격 학습층) — ceo 전용(BEST_LAYOUT_VIEWER_IDS 기본 ceo) · 신규 DDL 0 · 설계서 §7 ═══
+//   베스트 문안(직원 공용)과 메뉴·경로·ENV를 나눈다(Harold 0903). 응답은 안전 문구만(err 원문은 console).
+//   테이블 부재 = 503 DB_MIGRATION_PENDING(기존 best-copy 패턴).
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// 모든 /best-layout 하위 입구를 한 곳에서 덮는다(라우트별 덧대기 금지 · 0829). access는 게이트 앞에 둔다(허용 여부 자체는 누구나 물을 수 있다).
+router.get('/best-layout/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isBestLayoutViewer(req.user?.userId) });
+});
+router.use('/best-layout', authenticate, requireSuperAdmin, requireBestLayoutViewer);
 
 /** 승격 후보 회사 — 지정 없으면 내부 전용 회사(OUTREACH_COMPANY_ID). 빈 값 = 400(추측 조회 금지). */
 function resolveSkeletonCompanyId(raw: unknown): string | null {
@@ -5090,7 +5097,7 @@ function resolveSkeletonCompanyId(raw: unknown): string | null {
   return UUID_RE.test(v) ? v : null;
 }
 
-router.get('/best-copy/skeleton', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.get('/best-layout/skeleton', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const channel = String(req.query.channel || '').trim().toUpperCase();
     const rows = await listStructureSkeletons();
@@ -5098,6 +5105,7 @@ router.get('/best-copy/skeleton', authenticate, requireSuperAdmin, async (req: R
     res.json({
       success: true,
       general: SKELETON_INDUSTRY_GENERAL,
+      industries: INDUSTRY_CODES.map((code) => ({ code, label: INDUSTRY_LABELS[code] })),
       skeletons: filtered.map((r) => ({
         id: r.id,
         industryCode: r.industryCode,
@@ -5118,7 +5126,7 @@ router.get('/best-copy/skeleton', authenticate, requireSuperAdmin, async (req: R
   }
 });
 
-router.get('/best-copy/skeleton/candidates', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.get('/best-layout/skeleton/candidates', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const channel = String(req.query.channel || '').trim().toUpperCase();
     if (!isSkeletonChannel(channel)) return res.status(400).json({ error: '채널(DM·이메일)을 선택해주세요.' });
@@ -5133,7 +5141,7 @@ router.get('/best-copy/skeleton/candidates', authenticate, requireSuperAdmin, as
   }
 });
 
-router.post('/best-copy/skeleton/promote', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.post('/best-layout/skeleton/promote', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const channel = String(req.body?.channel || '').trim().toUpperCase();
     if (!isSkeletonChannel(channel)) return res.status(400).json({ error: '채널(DM·이메일)을 선택해주세요.' });
@@ -5170,7 +5178,7 @@ router.post('/best-copy/skeleton/promote', authenticate, requireSuperAdmin, asyn
   }
 });
 
-router.post('/best-copy/skeleton/serving', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.post('/best-layout/skeleton/serving', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const channel = String(req.body?.channel || '').trim().toUpperCase();
     if (!isSkeletonChannel(channel)) return res.status(400).json({ error: '채널(DM·이메일)을 선택해주세요.' });
