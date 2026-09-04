@@ -141,6 +141,36 @@ export function applyEmailTheme(current: EmailDesign | null, theme: EmailDesignT
   };
 }
 
+export type EmailAccentMotif = NonNullable<NonNullable<EmailDesign['art_direction']>['accentMotif']>;
+
+/**
+ * ★ 2026-09-04 포인트 장식(아트디렉션 모티프) 선택 — 백엔드 `EmailAccentMotif` 미러(SSOT 동기 수정 필수).
+ * 경위 = 남지현 접수 `cmtl3y8c207z2jnotlgv7nz4c` "텍스트 카드에 자동으로 숫자가 붙는다(제거 불가)".
+ * 번호는 텍스트 카드 기능이 아니라 이 축이다 — 테마 2종(볼드 세일·시티 나이트)과 AI 골든 템플릿이
+ * `index`를 함께 싣는데 **고를 입구가 없어** 색·서체까지 바뀌는 다른 테마로 갈아타야만 껐다.
+ * 렌더러(`email-tokens.resolveEmailBrand`)는 이 값을 이미 읽고 있다 — 입구만 없었다.
+ */
+export const EMAIL_MOTIF_OPTIONS: Array<{ value: EmailAccentMotif; label: string; hint: string }> = [
+  { value: 'none', label: '없음', hint: '장식 없이 제목만' },
+  { value: 'rule', label: '막대', hint: '제목 위 짧은 강조 막대' },
+  { value: 'dot', label: '점', hint: '제목 위 강조색 점' },
+  { value: 'bracket', label: '괄호', hint: '제목 왼쪽 세로 선' },
+  { value: 'index', label: '번호', hint: '제목 위 블록 순번(01·02…)' },
+];
+
+/** 라벨 조회 — 편집기가 "지금 무엇이 붙는가"를 블록 옆에서 알려줄 때 쓴다. */
+export function emailMotifLabel(motif?: string): string {
+  return EMAIL_MOTIF_OPTIONS.find((o) => o.value === motif)?.label || '없음';
+}
+
+/** 포인트 장식만 교체 — 색·서체·나머지 아트디렉션·프리헤더는 그대로(비파괴 · 테마 적용과 같은 규약). */
+export function applyEmailMotif(current: EmailDesign | null, motif: EmailAccentMotif): EmailDesign {
+  return {
+    ...(current || {}),
+    art_direction: { ...(current?.art_direction || {}), accentMotif: motif },
+  };
+}
+
 /** 이메일 안전 구도 픽커 옵션 — 백엔드 EMAIL_TREATMENTS(email-blocks.ts) 미러 (SSOT 동기 수정 필수). */
 export const EMAIL_TREATMENT_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
   hero: [

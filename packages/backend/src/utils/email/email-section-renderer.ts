@@ -148,17 +148,32 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment:
   }
 
   if (img) {
-    // 배경 이미지 + (옵션) 하단 그라데이션 오버레이 + 하단 정렬 텍스트. 아웃룩은 배경이미지 미지원 → bg색 폴백.
-    // ★ 2026-07-07(5) 디자인 2.0 — 스크림 강화(0.62) + 헤드라인 텍스트 섀도(이미지 위 가독)
-    const overlay = p.overlay_gradient !== false
-      ? 'linear-gradient(180deg,rgba(0,0,0,0) 30%,rgba(0,0,0,0.62) 100%)'
-      : 'rgba(0,0,0,0)';
-    // ★ 2026-07-02 줄바꿈(\n→<br>) + 색상 직접 지정(미지정 = 기존 기본색) + ★ 2026-07-12 크기 직접 지정(fsPx)
-    const headline = `<div style="font-family:${b.displayFont};font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || '#ffffff')};text-shadow:0 2px 14px rgba(0,0,0,0.35);margin:0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, b)}</div>`;
+    // ★ 2026-09-04 남지현 접수 `cmtl5wq5v0800jnotk46ozykf` — 기본 구도에서만 사진이 통째로 사라졌다.
+    //   원인 = 이 자리가 사진을 CSS `background-image`로 내보내고 있었던 것. CSS 배경을 지우는 수신
+    //   클라이언트에서는 폴백색(어두운 본문색)만 남아 검정 면이 된다. 같은 메일의 분할 구도(`<img>`)는
+    //   정상이었으니 URL·이미지 차단이 아니라 **태그가 갈랐다**(접수 원문이 그대로 판별식이었다).
+    //   ⛔ 이메일에서 사진은 배경이 아니라 `<img>`로 내보낸다. MSO VML 폴백은 아웃룩 데스크탑만 덮으므로
+    //     웹메일이 CSS 배경을 지우는 경우를 못 막는다. 계약 = email-property-contract.EMAIL_PHOTO_AS_IMG_TAG.
+    //   조판 = 사진 한 장 + 그 아래 텍스트 밴드(분할 구도의 이미지 셀 배관을 세로로 재사용).
+    //   오버레이 토글은 "밴드를 어둡게"로 이어받는다 — 색을 지정하지 않은 기존 캠페인의 흰 글씨가
+    //   옛 스크림 위와 같은 대비로 그대로 읽힌다(밴드를 끄면 본문색으로 내려간다).
+    const banded = p.overlay_gradient !== false;
+    // 다크 밴드는 리터럴 고정(#171717 — DM 다크 패널 원칙). 다크 테마에서도 어두운 면을 유지한다.
+    const bandBg = banded ? '#171717' : b.cardBg;
+    // ★ 2026-07-02 줄바꿈(\n→<br>) + 색상 직접 지정(미지정 = 밴드 유무별 기본색) + ★ 2026-07-12 크기 직접 지정(fsPx)
+    const headColor = esc(p.headline_color || (banded ? '#ffffff' : b.text));
+    const subColor = esc(p.sub_copy_color || (banded ? 'rgba(255,255,255,0.92)' : b.textMuted));
+    const headline = `<div style="font-family:${b.displayFont};font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${headColor};margin:0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, b)}</div>`;
     const sub = p.sub_copy
-      ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || 'rgba(255,255,255,0.92)')};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
+      ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${subColor};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
       : '';
-    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center ${focusPos};background-size:${p.image_fit === 'contain' ? 'contain' : 'cover'};background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" class="em-hero" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
+    const imgRow = `<tr><td style="padding:0"><img src="${esc(img)}" alt="${esc(p.headline || '')}" width="600" height="${minH}" style="width:100%;max-width:600px;height:${minH}px;${heroImgFit};display:block;border:0"></td></tr>`;
+    // ⛔ 문구가 없으면 밴드 자체를 안 그린다 — 문구가 들어간 완성 포스터를 통짜로 올리는 사용법(편집기
+    //   "이미지 맞춤" 안내가 권하는 그 방식)에서 사진 아래 빈 검정 띠만 남는 것을 막는다.
+    const textRow = (headEsc || p.sub_copy)
+      ? `<tr><td class="em-hero" style="background:${bandBg};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr>`
+      : '';
+    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${imgRow}${textRow}</table></td></tr>`;
   }
 
   // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경. ★ 2026-07-02 줄바꿈+색상 지정 동일 적용 + 크기(fsPx)
@@ -602,6 +617,12 @@ function renderBlock(s: Section, baseBrand: EmailBrand, ctx: EmailRenderCtx, ord
       designSansPrimary,
     );
   }
+  // ★ 2026-09-04 남지현 접수 `cmtl3y8c207z2jnotlgv7nz4c` — 블록별 포인트 장식 끄기.
+  //   테마(`design.art_direction.accentMotif`)가 번호를 붙이면 그 캠페인의 모든 텍스트 카드에 붙는데,
+  //   블록 하나만 빼는 수단이 없었다. 미설정 = 테마를 따른다(현행 출력 무변화).
+  //   ⛔ 브랜드 재해석(다크 배경면·섹션 강조색)이 design을 다시 읽어 모티프를 되살리므로 **재해석 뒤에** 덮는다.
+  //   장식 축 하나를 끄는 것이라 번호(index)만이 아니라 막대·점·괄호도 함께 꺼진다.
+  if ((s as { motif?: string }).motif === 'none' && b.motif !== 'none') b = { ...b, motif: 'none' };
   const treatment = selectEmailTreatment(s.type, (s as { treatment?: string }).treatment);
 
   let html = '';

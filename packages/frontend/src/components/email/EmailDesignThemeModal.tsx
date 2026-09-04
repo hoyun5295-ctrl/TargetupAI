@@ -3,7 +3,7 @@
 // 커스텀 다크 모달(native dialog 0 · 백드롭 클릭 닫힘 없음 — X/취소만).
 import { useEffect, type CSSProperties } from 'react';
 import { Check, Palette, RotateCcw, X } from 'lucide-react';
-import { EMAIL_DESIGN_THEMES, applyEmailTheme, type EmailDesign } from '../../utils/email-themes';
+import { EMAIL_DESIGN_THEMES, EMAIL_MOTIF_OPTIONS, applyEmailTheme, applyEmailMotif, type EmailDesign } from '../../utils/email-themes';
 import { ensureSelfHostFontsLoaded } from '../../utils/brand-fonts';
 
 export default function EmailDesignThemeModal({
@@ -75,6 +75,39 @@ export default function EmailDesignThemeModal({
               );
             })}
           </div>
+          {/* ★ 2026-09-04 포인트 장식(남지현 접수) — 테마가 함께 싣는 장식을 따로 고른다.
+              렌더러는 이 값을 이미 읽고 있었고 고를 입구만 없어서, 번호를 끄려면 테마를 갈아타야 했다.
+              테마를 다시 고르면 그 테마의 장식으로 덮인다(테마 = 룩 한 벌) — 아래 안내 한 줄로 알린다. */}
+          <div className="mt-4 pt-3.5 border-t border-white/10">
+            <div className="text-[11px] font-semibold text-white/70">포인트 장식</div>
+            <div className="text-[10px] text-white/45 mt-1 leading-relaxed">
+              제목 위에 붙는 작은 표식이에요. 번호를 고르면 블록 순번(01·02…)이 붙습니다. 테마를 다시 고르면 그 테마의 장식으로 바뀌어요.
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-2.5">
+              {EMAIL_MOTIF_OPTIONS.map((o) => {
+                const on = (current?.art_direction?.accentMotif || 'none') === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    title={o.hint}
+                    onClick={() => onApply(applyEmailMotif(current, o.value))}
+                    className={`px-3 h-8 text-[11px] rounded-lg border transition-colors ${
+                      on
+                        ? 'bg-violet-500/40 border-violet-400/60 text-white font-bold'
+                        : 'bg-white/5 border-white/10 text-white/65 hover:bg-white/10'
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-[10px] text-white/35 mt-2 leading-relaxed">
+              블록 하나만 빼려면 그 블록의 편집 패널에서 포인트 장식을 숨김으로 바꾸세요.
+            </div>
+          </div>
+
           <div className="mt-3 flex items-center justify-between gap-3">
             <div className="text-[10px] text-white/35 leading-relaxed">
               적용 후에도 블록별 구도·배경면·강조색은 편집 패널에서 개별 조정할 수 있어요. 다크 테마는 수신함에서 어두운 발송물로 보입니다.

@@ -21,7 +21,7 @@ import EmailDesignThemeModal from './EmailDesignThemeModal';
 // ★ 2026-08-27 서체 지정(임은지 접수) — DM_FONT_CATALOG 단일 소스 · 캠페인 design만 패치
 import EmailFontModal from './EmailFontModal';
 import {
-  EMAIL_TREATMENT_OPTIONS, EMAIL_BACKGROUND_OPTIONS, type EmailDesign,
+  EMAIL_TREATMENT_OPTIONS, EMAIL_BACKGROUND_OPTIONS, emailMotifLabel, type EmailDesign,
 } from '../../utils/email-themes';
 import {
   createSection, normalizeOrder, resequence, moveWithin, SECTION_META, type Section,
@@ -45,6 +45,9 @@ const EMAIL_ACCENT_AWARE = new Set<SectionType>([
 const EMAIL_BAND_AWARE = new Set<SectionType>([
   'text_card', 'cta', 'coupon', 'promo_code', 'product_carousel', 'reviews',
 ]);
+// ★ 2026-09-04 포인트 장식(모티프) 노출 대상 — 렌더러 motifHtml을 실제로 그리는 타입만(죽은 컨트롤 금지).
+//   백엔드 EMAIL_MOTIF_SECTIONS 미러 · 계약 = email/__tests__/email-editor-parity.test.ts
+const EMAIL_MOTIF_AWARE = new Set<SectionType>(['hero', 'text_card']);
 
 /** ★ 2026-08-27 미리보기 PC 폭 — 발송 셸의 모바일 분기(@media max-width:600px)보다 넓게 잡아
  *  데스크탑 레이아웃(분할 구도의 2열 등)이 확실히 걸리게 한다. */
@@ -634,7 +637,8 @@ export default function EmailVisualEditor({
                 {/* ★ 2026-07-12 블록 스타일 — 정렬(렌더러 소비 타입만) + 강조색(primary 파생 소비 타입만)
                     ★ 2026-07-13 — 구도(EMAIL_TREATMENT_OPTIONS 타입만) + 배경면(EMAIL_BAND_AWARE 타입만) */}
                 {(EMAIL_ALIGN_AWARE.has(selected.type) || EMAIL_ACCENT_AWARE.has(selected.type)
-                  || !!EMAIL_TREATMENT_OPTIONS[selected.type] || EMAIL_BAND_AWARE.has(selected.type)) && (
+                  || !!EMAIL_TREATMENT_OPTIONS[selected.type] || EMAIL_BAND_AWARE.has(selected.type)
+                  || EMAIL_MOTIF_AWARE.has(selected.type)) && (
                   <div className="mb-4 pb-4 border-b border-white/10 space-y-2.5">
                     <div className="text-[11px] font-semibold text-white/60">블록 스타일</div>
                     {EMAIL_TREATMENT_OPTIONS[selected.type] && (
@@ -684,6 +688,33 @@ export default function EmailVisualEditor({
                               onClick={() => updateSelected({ headline_emphasis: v || undefined })}
                               className={`px-2 h-7 text-[11px] rounded-lg border transition-colors ${
                                 ((selected.props as any)?.headline_emphasis || '') === v
+                                  ? 'bg-violet-500/40 border-violet-400/60 text-white font-bold'
+                                  : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* ★ 2026-09-04 포인트 장식(남지현 접수) — 테마가 붙이는 제목 위 표식을 이 블록만 끈다.
+                        "자동"은 테마를 따른다(기존 캠페인 무변화). 지금 무엇이 붙는지 옆에 밝혀 둔다 —
+                        접수 원문이 "자동으로 숫자가 붙는데 제거 불가"였고, 정체를 모르면 끌 생각도 못 한다. */}
+                    {EMAIL_MOTIF_AWARE.has(selected.type) && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-white/60 shrink-0">
+                          포인트 장식
+                          <span className="text-white/35 ml-1">(테마: {emailMotifLabel(design?.art_direction?.accentMotif)})</span>
+                        </span>
+                        <div className="flex gap-1 shrink-0">
+                          {([['', '자동'], ['none', '숨김']] as const).map(([v, lbl]) => (
+                            <button
+                              key={v || 'auto'}
+                              type="button"
+                              onClick={() => updateSelectedSection({ motif: (v || undefined) as Section['motif'] })}
+                              className={`px-2.5 h-7 text-[11px] rounded-lg border transition-colors ${
+                                (selected.motif || '') === v
                                   ? 'bg-violet-500/40 border-violet-400/60 text-white font-bold'
                                   : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
                               }`}

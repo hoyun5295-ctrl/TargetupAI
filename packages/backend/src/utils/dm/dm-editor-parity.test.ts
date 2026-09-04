@@ -11,6 +11,8 @@ import { resolve } from 'node:path';
 import { renderSection } from './dm-section-renderer';
 import { renderDmDesign3Css, renderDmBaseCss, renderDmTokensCss, renderDmDividerSvg } from './dm-tokens';
 import type { Section } from './dm-section-registry';
+import { SECTION_DEFAULTS } from './dm-section-registry';
+import { DM_REMOVED_DEAD_CONTROLS } from './dm-property-contract';
 import { DM_BACKGROUNDS, DM_DIVIDERS, DM_NEWLINE_FIELDS, DM_IMAGE_FITS, DM_GALLERY_FULL_BLEED, DM_GALLERY_CAPTION_VISIBLE, DM_SLIDESHOW_PAUSE, DM_SLIDESHOW_RATIOS, DM_STORE_INFO_NEWLINE_FIELDS, DM_STORE_INFO_LABELS, DM_PRODUCT_CAROUSEL_SWIPE_MIN, DM_PRODUCT_CAROUSEL_PER_PAGE, DM_WIRED_ORPHAN_MARKERS } from './dm-property-contract';
 import { parseTabProductList } from './dm-tab-content';
 // FE 상품 붙여넣기 파서 원본(SoT) — 백엔드 미러(parseTabProductList)와 결과 일치 교차 고정
@@ -466,7 +468,7 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
       expect(outline).toContain('border-color:#00aa88');
     });
     it('A3 쿠폰 버튼색(2026-07-23 재정의) — button_color가 쿠폰코드 알약 배경에 반영', () => {
-      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', coupon_code: 'SAVE20', button_color: '#123abc' }), {} as any);
+      const html = renderSection(mk('coupon', { discount_label: '20%', coupon_code: 'SAVE20', button_color: '#123abc' }), {} as any);
       expect(html).toContain('#123abc');
     });
     it('B2 상품 배경색·글씨공간색 — 출력에 반영', () => {
@@ -485,23 +487,23 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
   // ── 쿠폰/탭/즉시쿠폰 색·크기 분리 (2026-07-23 임은지) ──
   describe('쿠폰/탭/즉시쿠폰 색·크기 분리 (2026-07-23 임은지)', () => {
     it('쿠폰코드 알약 배경(button_color) — 반영', () => {
-      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', coupon_code: 'SAVE20', button_color: '#0a0b0c' }), {} as any);
+      const html = renderSection(mk('coupon', { discount_label: '20%', coupon_code: 'SAVE20', button_color: '#0a0b0c' }), {} as any);
       expect(html).toContain('background:#0a0b0c');
     });
     it('쿠폰코드 글씨색(code_text_color) — 반영', () => {
-      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', coupon_code: 'SAVE20', code_text_color: '#ff00aa' }), {} as any);
+      const html = renderSection(mk('coupon', { discount_label: '20%', coupon_code: 'SAVE20', code_text_color: '#ff00aa' }), {} as any);
       expect(html).toContain('color:#ff00aa');
     });
     it('할인 라벨 글씨색(label_color) — 반영', () => {
-      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', label_color: '#abccba' }), {} as any);
+      const html = renderSection(mk('coupon', { discount_label: '20%', label_color: '#abccba' }), {} as any);
       expect(html).toContain('color:#abccba');
     });
     it('쿠폰 카드 배경색(card_bg_color) — 반영', () => {
-      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', card_bg_color: '#123456' }), {} as any);
+      const html = renderSection(mk('coupon', { discount_label: '20%', card_bg_color: '#123456' }), {} as any);
       expect(html).toContain('background:#123456');
     });
     it('쿠폰 색 미지정 — 기본값 유지(회귀 0: 코드 알약 #171717·카드 var(--dm-bg))', () => {
-      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', coupon_code: 'X' }), {} as any);
+      const html = renderSection(mk('coupon', { discount_label: '20%', coupon_code: 'X' }), {} as any);
       expect(html).toContain('background:#171717');
       expect(html).toContain('background:var(--dm-bg)');
     });
@@ -594,6 +596,30 @@ describe('상품 슬라이드 제목 크기·색 — 세 구도 전부 소비', 
       const html = render({ title: '가을 감사제' }, t);
       expect(html).toContain('class="dm-text-h2"');
       expect(html).toContain('color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)"');
+    });
+  }
+});
+
+// ── 제거된 죽은 컨트롤 (2026-09-04 임은지 접수 cmtl45k4207zljnotyot1x338) ──
+// 편집기에만 있고 읽는 쪽이 없던 속성은 지운다. 다시 붙으면 여기서 깨진다 —
+// 되살리려면 세 렌더 면(캔버스·DM SSR·이메일)과 두 계약표에 함께 등재해야 한다.
+describe('제거된 죽은 컨트롤 — 되살리면 계약이 깨진다', () => {
+  const EDITOR_PATH: Record<string, string> = {
+    coupon: '../frontend/src/components/dm/panels/editors/CouponEditor.tsx',
+  };
+  for (const { section, prop, reason } of DM_REMOVED_DEAD_CONTROLS) {
+    it(`${section}.${prop} — 편집기가 다시 노출하지 않는다 (${reason})`, () => {
+      const path = EDITOR_PATH[section];
+      expect(path, `${section} 편집기 경로가 표에 없다 — 제거 항목을 늘렸으면 경로도 함께 등재한다`).toBeTruthy();
+      const src = readFileSync(resolve(process.cwd(), path), 'utf8');
+      // 주석의 "다시 넣지 말 것" 설명은 허용하고, 실제 배선(onUpdate·value 바인딩)만 잡는다.
+      const wired = src.split('\n').filter((l) => l.includes(prop) && !l.trimStart().startsWith('*') && !l.trimStart().startsWith('//'));
+      expect(wired, `${prop}가 편집기에 다시 배선됐다: ${wired.join(' | ')}`).toEqual([]);
+    });
+
+    it(`${section}.${prop} — 섹션 기본값에도 남지 않는다`, () => {
+      expect(Object.keys((SECTION_DEFAULTS as Record<string, Record<string, unknown>>)[section] || {}))
+        .not.toContain(prop);
     });
   }
 });

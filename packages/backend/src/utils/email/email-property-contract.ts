@@ -52,6 +52,27 @@ export const EMAIL_HERO_PROPS: Array<{ prop: string; desc: string }> = [
 /** 히어로 구도 = EMAIL_TREATMENTS.hero와 같아야 한다. 이미지를 쓰는 구도는 classic·split 둘. */
 export const EMAIL_HERO_IMAGE_TREATMENTS = ['classic', 'split'] as const;
 
+/** ★ 2026-09-04 남지현 접수(`cmtl5wq5v0800jnotk46ozykf`) "구도 기본으로 넣은 히어로 이미지가 수신함에서 사라진다" —
+ *  기본 구도만 사진을 CSS `background-image`로 내보내고 있었다. CSS 배경을 지우는 클라이언트에서는
+ *  폴백색만 남아 검정 면이 된다. 같은 메일의 분할 구도(`<img>`)는 정상이었으니 태그가 갈랐다.
+ *  ⛔ **이메일에서 사진은 반드시 `<img>`로 나간다.** MSO VML 폴백은 아웃룩 데스크탑만 덮으므로
+ *  웹메일이 CSS 배경을 지우는 경우를 못 막는다 — 배경 CSS는 사진 전달 수단이 아니다.
+ *  (그라데이션·단색 `background-image:linear-gradient(...)`는 장식이라 대상이 아니다. 금지 대상은 `url(...)`뿐.) */
+export const EMAIL_PHOTO_AS_IMG_TAG = true;
+
+/** ★ 2026-09-04 남지현 접수(`cmtl3y8c207z2jnotlgv7nz4c`) "텍스트 카드에 자동으로 숫자(순번)가 붙는다(제거 불가)" —
+ *  번호는 텍스트 카드 기능이 아니라 아트디렉션 모티프(`design.art_direction.accentMotif='index'`)다.
+ *  테마 2종(볼드 세일·시티 나이트)과 AI 골든 템플릿 팔레트가 이 값을 함께 싣는데 **고를 입구가 없어**
+ *  끄려면 색·서체까지 바뀌는 다른 테마로 갈아타는 수밖에 없었다(2026-08-27 서체와 같은 부류 = 입구 부재).
+ *  처방 두 축 = ①전역 = 테마 모달의 "포인트 장식" 선택(FE `EMAIL_MOTIF_OPTIONS` · 렌더러는 이미 소비 중)
+ *  ②블록별 = `section.motif='none'`(이 표). 미설정 = 테마를 따른다(현행 출력 무변화).
+ *  ⛔ 장식 축 하나를 끄는 것이라 번호만이 아니라 막대·점·괄호도 함께 꺼진다. */
+export const EMAIL_SECTION_MOTIF_OFF = 'none' as const;
+
+/** 모티프를 그리는 섹션 = 편집기 "포인트 장식" 컨트롤 노출 대상과 같아야 한다(죽은 컨트롤 금지).
+ *  히어로는 이미지가 있는 구도에서 모티프를 그리지 않으므로 텍스트만 있는 상태로 밟는다. */
+export const EMAIL_MOTIF_SECTIONS = ['hero', 'text_card'] as const;
+
 /** 히어로 높이 px — 렌더러 HERO_HEIGHT_PX와 같은 값(원장이 기대치를 소유한다). */
 export const EMAIL_HERO_HEIGHT = { sm: 200, md: 320, lg: 480, full: 600 } as const;
 

@@ -89,6 +89,19 @@ export const DM_WIRED_ORPHAN_MARKERS = {
   email_success_text: 'data-success-text',
 } as const;
 
+/** ★ 2026-09-04 (임은지 접수 `cmtl45k4207zljnotyot1x338`) 제거한 죽은 컨트롤 — **다시 넣지 않기 위한 원장**.
+ *  쿠폰 "할인 타입"(`percent|amount|free_shipping`)은 편집기(CouponEditor)만 쓰고 읽는 쪽이 한 곳도 없었다 —
+ *  편집 캔버스(`CouponSection.tsx`)·DM 발행 SSR(`renderCoupon*`)·이메일(`renderCoupon`) 전수 grep 0건.
+ *  접수 원문 그대로 "타입을 다르게 적용해도 화면에 달라지는 게 없다"였다. 혜택 표현은 `discount_label`
+ *  자유 입력이 전부 담고, 쿠폰의 시각 변형 축은 **구도**(classic·ticket·spotlight)가 이미 소유한다.
+ *  ⛔ 되살리려면 세 렌더 면과 두 계약표(이 표 + `email-property-contract`)에 함께 등재한다 —
+ *  한쪽만 넣으면 "편집기에는 있는데 발행물엔 없음"이 그대로 재생산된다.
+ *  같은 판단 선례 = 위 주석의 `show_result_after_vote`·`enable_user_location`(no_dead_controls).
+ *  게이트 = `dm-editor-parity.test.ts` "제거된 죽은 컨트롤" 절(기본값·편집기 소스 양쪽 잔존 0). */
+export const DM_REMOVED_DEAD_CONTROLS: Array<{ section: string; prop: string; reason: string }> = [
+  { section: 'coupon', prop: 'discount_type', reason: '캔버스·DM SSR·이메일 어디도 안 읽던 고아 속성(2026-09-04 제거)' },
+];
+
 /** ★ 2026-07-21 (#3 남지현) 매장/고객센터 라벨 = 구도별 발송 SSR 라벨을 캔버스가 미러해야 편집=발송.
  *  card 구도 = 웹/메일/영업(renderStoreInfoCard), classic = 홈페이지/이메일/영업시간(renderStoreInfoClassic).
  *  종전엔 캔버스(StoreInfoSection)가 구도 무관 classic 라벨 하드코딩 → card 구도서 편집창(홈페이지)≠단말(웹). 라벨 최종 통일은 브랜드보이스 합산 예정. */

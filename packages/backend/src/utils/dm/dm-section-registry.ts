@@ -103,7 +103,9 @@ export type HeroProps = {
 
 export type CouponProps = {
   discount_label: string;
-  discount_type: 'percent' | 'amount' | 'free_shipping';
+  // ★ 2026-09-04 (임은지 접수 cmtl45k4207zljnotyot1x338) `discount_type` 제거 — 편집기만 쓰고 캔버스·DM SSR·
+  //   이메일 렌더러 어디도 읽지 않던 고아 속성이었다(고르는 대로 화면이 안 바뀐다는 접수 그대로).
+  //   혜택 표현은 discount_label 자유 입력이, 시각 변형은 구도(treatment)가 소유한다. 옛 저장값은 무시된다.
   coupon_code?: string;
   expire_date?: string;
   min_purchase?: number;
@@ -492,6 +494,10 @@ export type Section = {
   background?: 'soft' | 'tint' | 'dark' | 'gradient' | 'glass';
   divider_shape?: 'wave' | 'slant' | 'curve';
   pull_up?: boolean;
+  // ★ 2026-09-04 (남지현 접수 cmtl3y8c207z2jnotlgv7nz4c) 이 블록만 포인트 장식(아트디렉션 모티프) 끄기.
+  //   미설정 = 캠페인 design의 accentMotif를 따른다(현행 출력 무변화). 'none' = 이 블록에만 장식 0.
+  //   소비 = email-section-renderer renderBlock. 계약 = email-property-contract.EMAIL_SECTION_MOTIF_OFF
+  motif?: 'none';
   // 개인화 조건부 표시 — 충족 안 하는 수신자에겐 이 섹션 제외(미설정=항상 표시). 이메일 발송 시 평가
   display_condition?: {
     field: string;
@@ -515,7 +521,6 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   },
   coupon: {
     discount_label: '',
-    discount_type: 'percent',
   },
   countdown: {
     end_datetime: '',

@@ -560,6 +560,7 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 | 6 | 커넥터·라우팅 | [bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md](bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md) | **0815 완료** (능력 라우팅 부재 소스 확정) |
 | 7 | **브랜드메시지** | [bito-gateway/FEATURE-GW-BRAND-MESSAGE.md](bito-gateway/FEATURE-GW-BRAND-MESSAGE.md) | **0815 신설**(허브 §4-6에서 분리) · 호출어 **브랜드메시지** |
 | 8 | **보안** | [bito-gateway/FEATURE-GW-SECURITY.md](bito-gateway/FEATURE-GW-SECURITY.md) | **★0828 신설** · 무인증 라우트 폐쇄·API 키 회전 완료 / bind 봉투 암호화 코드 배포·이행 대기 / 잔여 10건 · 호출어 **게이트웨이 보안** |
+| 9 | **링크가드(URL 차단 관제센터·에이전트·검사 API)** | [bito-gateway/FEATURE-GW-LINKGUARD.md](bito-gateway/FEATURE-GW-LINKGUARD.md) | **★0904 신설·착수** · 판매 상품(관제센터 + DBMS 무관 에이전트 + 검사 API + 게이트웨이 훅) · 전송자격인증 5.2·특부가 악성문자 사전차단 요건 · 호출어 **링크가드** |
 
 - 한줄로 측 라인·Agent 운영 = [status/OPS.md](../status/OPS.md) §6-3
 - 브랜드메시지 F 트랙 = [2026-07-29-brand-message-qtmsg-agent-design.md](2026-07-29-brand-message-qtmsg-agent-design.md)

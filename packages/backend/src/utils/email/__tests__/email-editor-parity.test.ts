@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { renderEmailSections } from '../email-section-renderer';
-import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS, EMAIL_HEADER_PROPS, EMAIL_CTA_BUTTON_PROPS, EMAIL_CTA_BUTTON_STYLES, EMAIL_COUPON_PROPS, EMAIL_COUPON_TREATMENTS } from '../email-property-contract';
+import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS, EMAIL_HEADER_PROPS, EMAIL_CTA_BUTTON_PROPS, EMAIL_CTA_BUTTON_STYLES, EMAIL_COUPON_PROPS, EMAIL_COUPON_TREATMENTS, EMAIL_SECTION_MOTIF_OFF, EMAIL_MOTIF_SECTIONS } from '../email-property-contract';
 import type { Section } from '../../dm/dm-section-registry';
 
 const PRODUCTS = [
@@ -154,6 +154,29 @@ describe('히어로 — 편집기 속성이 이미지 구도 전부에서 반영
     }
   });
 
+  // ★ 2026-09-04 남지현 접수 cmtl5wq5v0800jnotk46ozykf — 기본 구도만 사진이 통째로 사라졌다.
+  //   사진을 CSS 배경으로 내보내면 그 CSS를 지우는 수신 클라이언트에서 폴백색만 남는다(검정 면).
+  //   "이미지 URL이 문자열에 들어 있다"만 보는 계약은 이 형태를 못 잡으므로 **태그 축**으로 고정한다.
+  for (const t of EMAIL_HERO_IMAGE_TREATMENTS) {
+    it(`[${t}] 사진은 <img>로 나간다 — CSS 배경 이미지로 내보내지 않는다`, () => {
+      const doc = rh({}, t);
+      expect(doc, '히어로 이미지가 <img>로 나가지 않는다').toContain('<img src="https://x.example.com/hero.jpg"');
+      const cssBg = doc.match(/background-image:\s*url\([^)]*\)/g) || [];
+      expect(cssBg, `사진을 CSS 배경으로 내보내면 배경을 지우는 클라이언트에서 사라진다: ${cssBg.join(' / ')}`).toEqual([]);
+    });
+  }
+
+  it('오버레이 토글이 글자 밴드로 이어진다 (끄면 출력이 달라진다)', () => {
+    expect(rh({ overlay_gradient: false })).not.toBe(rh({}));
+  });
+
+  // 문구가 들어간 완성 포스터를 통짜로 올리는 사용법(편집기 "이미지 맞춤" 안내) — 사진 아래 빈 띠가 남으면 안 된다.
+  it('문구가 없으면 글자 밴드를 안 그린다 (완성 포스터 통짜 업로드)', () => {
+    const only = rh({ headline: '', sub_copy: '' });
+    expect(only, '사진은 그대로 나가야 한다').toContain('<img src="https://x.example.com/hero.jpg"');
+    expect(only, '문구가 없는데 빈 밴드가 남았다').not.toContain('#171717');
+  });
+
   it('원장의 히어로 속성은 전부 출력을 바꾼다 (등재만 하고 안 읽으면 실패)', () => {
     const PROBE: Record<string, unknown> = {
       height: 'lg', image_fit: 'contain', focus: 'top', align: 'left',
@@ -164,6 +187,49 @@ describe('히어로 — 편집기 속성이 이미지 구도 전부에서 반영
       expect(rh({ [prop]: PROBE[prop] }), `${prop} (${desc})가 이메일 히어로 렌더러에서 소비되지 않는다`).not.toBe(rh({}));
     }
   });
+});
+
+// ── 포인트 장식(아트디렉션 모티프) — 전역 축 + 블록별 끄기 (2026-09-04 남지현 접수 cmtl3y8c207z2jnotlgv7nz4c) ──
+describe('포인트 장식 — 테마가 붙이고 블록이 끌 수 있다', () => {
+  const INDEX_DESIGN = { art_direction: { accentMotif: 'index' as const } };
+  const card = (extra: Record<string, unknown> = {}): Section =>
+    ({ id: 's-tc', type: 'text_card', order: 0, visible: true,
+       props: { headline: '이달의 베스트 상품', body: '9월 가장 사랑받은 아이템을 모았습니다.' }, ...extra } as unknown as Section);
+
+  it('테마가 번호를 지정하면 순번이 붙는다 (접수에서 보인 그 숫자)', () => {
+    const withIndex = renderEmailSections([card()], { design: INDEX_DESIGN });
+    expect(withIndex, '모티프 index인데 순번이 안 붙는다').toContain('01');
+    expect(withIndex).not.toBe(renderEmailSections([card()], {}));
+  });
+
+  it(`블록의 motif='${EMAIL_SECTION_MOTIF_OFF}'이면 그 블록만 장식이 사라진다`, () => {
+    const on = renderEmailSections([card()], { design: INDEX_DESIGN });
+    const off = renderEmailSections([card({ motif: EMAIL_SECTION_MOTIF_OFF })], { design: INDEX_DESIGN });
+    expect(off, '블록별 끄기가 렌더러에서 소비되지 않는다').not.toBe(on);
+    // 장식 없이 렌더한 것과 같아야 한다 = 그 블록에서 모티프만 정확히 빠졌다
+    expect(off).toBe(renderEmailSections([card()], { design: { art_direction: { accentMotif: 'none' } } }));
+  });
+
+  it('배경면 다크에서도 블록별 끄기가 유지된다 (브랜드 재해석이 장식을 되살리지 않는다)', () => {
+    const off = renderEmailSections([card({ motif: EMAIL_SECTION_MOTIF_OFF, background: 'dark' })], { design: INDEX_DESIGN });
+    expect(off).toBe(renderEmailSections([card({ background: 'dark' })], { design: { art_direction: { accentMotif: 'none' } } }));
+  });
+
+  it('섹션 강조색 지정에서도 블록별 끄기가 유지된다', () => {
+    const off = renderEmailSections([card({ motif: EMAIL_SECTION_MOTIF_OFF, accent_color: '#0f766e' })], { design: INDEX_DESIGN });
+    expect(off).toBe(renderEmailSections([card({ accent_color: '#0f766e' })], { design: { art_direction: { accentMotif: 'none' } } }));
+  });
+
+  // 편집기가 "포인트 장식" 컨트롤을 노출하는 섹션 = 렌더러가 실제로 모티프를 그리는 섹션과 같아야 한다(죽은 컨트롤 금지).
+  for (const type of EMAIL_MOTIF_SECTIONS) {
+    it(`[${type}] 모티프를 실제로 그린다 (컨트롤 노출 대상과 렌더 대상이 같다)`, () => {
+      const sec = ({ id: `s-${type}`, type, order: 0, visible: true,
+                     props: { headline: '제목', body: '본문', sub_copy: '부제' } } as unknown as Section);
+      const on = renderEmailSections([sec], { design: INDEX_DESIGN });
+      const none = renderEmailSections([sec], { design: { art_direction: { accentMotif: 'none' } } });
+      expect(on, `${type}가 모티프를 안 그리는데 편집기에 컨트롤을 노출하면 죽은 컨트롤이다`).not.toBe(none);
+    });
+  }
 });
 
 // ── 캠페인 서체 (2026-08-27 임은지 접수 cmtb6kn6j0369jnotmslux7i2) ──
@@ -269,7 +335,7 @@ describe('CTA — 버튼색이 스타일 3종 전부에서 반영된다', () => 
 // ────────────────────────────────────────────────────────────
 const coupon = (props: Record<string, unknown>, treatment?: string): Section =>
   ({ id: 's-cp', type: 'coupon', order: 0, visible: true, treatment,
-     props: { discount_label: '30% 할인', discount_type: 'percent', coupon_code: 'SPRING30', ...props } } as unknown as Section);
+     props: { discount_label: '30% 할인', coupon_code: 'SPRING30', ...props } } as unknown as Section);
 
 const rcp = (props: Record<string, unknown>, treatment?: string) =>
   renderEmailSections([coupon(props, treatment)], {});

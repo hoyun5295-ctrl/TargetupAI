@@ -65,7 +65,7 @@ const visual = [
     { image_url: 'https://cdn.x/b.jpg', name: '린넨 셔츠', price: 25000 },
   ] } },
   { id: 'v2', type: 'gallery', order: 1, visible: true, props: { title: '룩북', images: [{ url: 'https://cdn.x/1.jpg' }, { url: 'https://cdn.x/2.jpg' }], layout: 'grid_2x2' } },
-  { id: 'v3', type: 'coupon', order: 2, visible: true, props: { discount_label: '여름 20% 할인', discount_type: 'percent', coupon_code: 'SUMMER20', min_purchase: 30000 } },
+  { id: 'v3', type: 'coupon', order: 2, visible: true, props: { discount_label: '여름 20% 할인', coupon_code: 'SUMMER20', min_purchase: 30000 } },
 ] as unknown as Section[];
 const vhtml = renderEmailSections(visual, { brandKit: null });
 ok(vhtml.includes('여름 원피스') && vhtml.includes('29,000원') && vhtml.includes('29,000원'), '상품 그리드 — 이름·할인가 렌더');

@@ -226,8 +226,8 @@ export function recommendLayout(spec: CampaignSpec): Section[] {
         break;
       case 'coupon':
         if (spec.benefit?.type === 'discount' || spec.benefit?.type === 'coupon') {
+          // ★ 2026-09-04 discount_type 주입 제거 — 읽는 쪽이 없는 고아 속성이었다(임은지 접수 · CouponEditor 주석)
           (base.props as any).discount_label = spec.benefit.value || '';
-          (base.props as any).discount_type = 'percent';
         }
         if (spec.urgency?.end_datetime) (base.props as any).expire_date = spec.urgency.end_datetime;
         break;

@@ -349,7 +349,7 @@ const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이�
 - text_card: { "tag": "라벨", "headline": "소제목", "body": "본문 2~3문장", "align": "left", "image_position": "top" }
 - product_carousel: { "title": "추천 상품", "products": [{ "name": "상품명", "price": 0, "discount_price": 0, "image_url": "", "link_url": "" }] }
 - gallery: { "title": "갤러리", "images": [{ "url": "" }] }
-- coupon: { "discount_label": "혜택 제목", "discount_type": "percent", "coupon_code": "" }
+- coupon: { "discount_label": "혜택 제목", "coupon_code": "" }
 - cta: { "buttons": [{ "label": "버튼 글", "url": "", "style": "primary" }], "layout": "stack" }
 - store_info: { "address": "", "phone": "", "business_hours": "" }
 - footer: { "notes": "회사 안내 한 줄", "cs_phone": "", "legal_text": "" }

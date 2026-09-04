@@ -102,7 +102,8 @@ export type HeroProps = {
 
 export type CouponProps = {
   discount_label: string;
-  discount_type: 'percent' | 'amount' | 'free_shipping';
+  // ★ 2026-09-04 (임은지 접수 cmtl45k4207zljnotyot1x338) `discount_type` 제거 — 편집기만 쓰고 캔버스·DM SSR·
+  //   이메일 렌더러 어디도 읽지 않던 고아 속성이었다. 혜택 표현은 discount_label, 시각 변형은 구도가 소유. backend 미러.
   coupon_code?: string;
   expire_date?: string;
   min_purchase?: number;
@@ -326,6 +327,8 @@ export type Section = {
   background?: 'soft' | 'tint' | 'dark' | 'gradient' | 'glass';
   divider_shape?: 'wave' | 'slant' | 'curve';
   pull_up?: boolean;
+  /** ★ 2026-09-04 (남지현 접수) 이 블록만 포인트 장식(모티프) 끄기. 미설정 = 캠페인 테마를 따름. backend 미러 */
+  motif?: 'none';
   /** 개인화 조건부 표시 — 충족 안 하는 수신자에겐 이 섹션 제외(미설정=항상 표시). 이메일 발송 시 평가 */
   display_condition?: {
     field: string;
@@ -349,7 +352,6 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   },
   coupon: {
     discount_label: '',
-    discount_type: 'percent',
   },
   countdown: {
     end_datetime: '',
