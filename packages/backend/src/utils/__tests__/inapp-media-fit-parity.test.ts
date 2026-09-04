@@ -97,3 +97,41 @@ describe('인앱 이미지 블록 전체보기(natural) — 실렌더·미리보
     }
   });
 });
+
+/**
+ * ★ 2026-09-04 CTA 배치(세로/가로)가 말풍선 카드에서는 효과가 없다 — 그러면 컨트롤도 없어야 한다.
+ *
+ * 기본 카드에서는 SDK(`inapp-blocks.ts`)와 미리보기(`BlockPreview.tsx`) 둘 다 `b.layout !== 'inline'`로
+ * 방향을 정한다(이미 미러 일치). 그런데 **말풍선(bubble)은 양쪽 다 칩을 가로로 고정**해 그리므로
+ * 그 카드에서는 「정렬」 선택이 출력을 못 바꾼다. 고르는 대로 안 바뀌는 컨트롤을 남기면
+ * DM CTA와 같은 접수가 인앱에서 다시 온다(`no_dead_controls`).
+ */
+describe('인앱 CTA 배치 — 말풍선에서는 컨트롤을 감춘다 (2026-09-04)', () => {
+  it('기본 카드는 SDK·미리보기가 같은 판정을 쓴다 (회귀 고정)', () => {
+    expect(sdkBlocks, 'SDK가 layout을 안 읽으면 편집 화면과 단말이 갈린다').toContain("b.layout !== 'inline'");
+    expect(preview, '미리보기가 layout을 안 읽으면 편집 화면과 단말이 갈린다').toContain("b.layout !== 'inline'");
+  });
+
+  it('말풍선 분기는 양쪽 다 가로 고정이다 = 배치가 무효인 근거', () => {
+    const sdkBubble = slice(sdkBlocks, "ctx.cardStyle === 'bubble'", 'buttons.slice');
+    const pvBubble = slice(preview, "ctx.cardStyle === 'bubble'", 'buttons.slice');
+    expect(sdkBubble).toContain("flexDirection: 'row'");
+    expect(pvBubble).toContain("flexDirection: 'row'");
+    expect(sdkBubble, '말풍선이 layout을 읽기 시작했으면 편집기 게이트도 함께 풀어야 한다').not.toContain('b.layout');
+    expect(pvBubble).not.toContain('b.layout');
+  });
+
+  it('편집기가 말풍선에서 배치 컨트롤을 감춘다', () => {
+    const ctaCase = slice(editor, "case 'cta_group':", '(b.buttons || []).map');
+    expect(ctaCase, '배치 컨트롤이 카드 형태를 안 본다 — 말풍선에서 죽은 컨트롤이 된다')
+      .toMatch(/cardStyle/);
+    // ⛔ "조건이 있다"만 보면 `{true && (`가 통과한다(0904 DM에서 겪고 고친 것과 같은 약점).
+    //    게이트가 **카드 형태 판정의 결과**인지까지 본다.
+    const gate = ctaCase.slice(0, ctaCase.indexOf('세로'));
+    const lastAnd = gate.lastIndexOf('&&');
+    expect(lastAnd, '조건 없이 그려지고 있다').toBeGreaterThan(-1);
+    const gateLine = gate.slice(gate.lastIndexOf('\n', lastAnd) + 1);
+    expect(gateLine, `배치 컨트롤의 게이트가 카드 형태와 무관하다: ${gateLine.trim()}`)
+      .toMatch(/cardStyle/);
+  });
+});

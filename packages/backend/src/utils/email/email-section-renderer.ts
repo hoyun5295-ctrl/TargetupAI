@@ -26,6 +26,10 @@ import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE, selectEmailTreatment } from 
 import { EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_TITLE_SIZE_KEY } from './email-property-contract';
 // ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 + 쿠폰 마감 한국어 표시 (normalize CT)
 import { normalizeWebUrl, formatKoreanDateTimeDisplay } from '../normalize';
+// ★ 2026-09-04 CTA 배치 판정 CT — 편집기(공용 CtaEditor)·DM SSR과 **같은 하나**를 쓴다.
+//   이메일 편집기가 DM의 SectionPropsEditor를 그대로 차용하므로, 여기서 다른 조건을 쓰면
+//   편집기가 감춘 컨트롤을 소비하거나 그 반대가 된다(임은지 접수 후속 — DM만 고쳤던 자리).
+import { ctaLayoutApplies } from '../dm/dm-art-direction';
 
 export interface EmailRenderCtx {
   brandKit?: DmBrandKit | null;
@@ -282,6 +286,15 @@ function renderCta(p: CtaProps, b: EmailBrand, treatment: string): string {
   if (treatment === 'bar') {
     const btns = buttons.map((btn) => `<tr><td align="center" style="padding:${b.sp[2]} 0">${renderButton(btn, b, true)}</td></tr>`).join('');
     return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="background:${b.primary};background-image:${b.btnGrad};padding:${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${btns}</table></td></tr></table></td></tr>`;
+  }
+  // ★ 2026-09-04 버튼 배치(가로/세로) — 판정은 CT가 소유하고 여기서는 사용자 선택과 합치기만 한다.
+  //   가로는 한 행에 <td>를 나란히 둔다(Outlook 호환 = 테이블 셀. flex·inline-block은 못 쓴다).
+  //   세로는 종전 마크업 그대로라 기존 메일 출력이 바이트 단위로 같다.
+  if ((p.layout || 'stack') === 'row' && ctaLayoutApplies(treatment, buttons.length)) {
+    const cells = buttons
+      .map((btn) => `<td align="center" style="padding:${b.sp[2]} 4px">${renderButton(btn, b)}</td>`)
+      .join('');
+    return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr>${cells}</tr></table></td></tr>`;
   }
   const btns = buttons.map((btn) => `<tr><td align="center" style="padding:${b.sp[2]} 0">${renderButton(btn, b)}</td></tr>`).join('');
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${btns}</table></td></tr>`;

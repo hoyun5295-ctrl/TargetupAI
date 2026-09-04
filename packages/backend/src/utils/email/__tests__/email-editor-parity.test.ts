@@ -6,6 +6,8 @@
  * (LESSONS_BACKEND 2026-08-01 · 토큰 존재만 보는 검사는 조건 반전을 못 잡는다).
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { renderEmailSections } from '../email-section-renderer';
 import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS, EMAIL_HEADER_PROPS, EMAIL_CTA_BUTTON_PROPS, EMAIL_CTA_BUTTON_STYLES, EMAIL_COUPON_PROPS, EMAIL_COUPON_TREATMENTS, EMAIL_SECTION_MOTIF_OFF, EMAIL_MOTIF_SECTIONS } from '../email-property-contract';
 import type { Section } from '../../dm/dm-section-registry';
@@ -376,4 +378,59 @@ describe('쿠폰 — 편집기 속성이 이메일 발송 HTML에 반영된다 (
       expect(rcp({ cta_url: 'javascript:alert(1)' }, t)).not.toContain('쿠폰 사용하기');
     });
   }
+});
+
+/**
+ * ★ 2026-09-04 CTA 버튼 배치 — 이메일도 소비한다(임은지 접수 후속).
+ *
+ * 이메일 편집기는 DM의 공용 `SectionPropsEditor`를 **그대로 차용**한다(EmailVisualEditor.tsx).
+ * 그래서 「버튼 배치」 컨트롤이 이메일에도 뜨는데 `renderCta`는 그 값을 읽지 않았다 —
+ * 고르는 대로 안 바뀌는 컨트롤이 채널 하나에만 남아 있던 상태다(DM만 고치고 끝냈던 자리).
+ * 판정은 DM과 **같은 CT**(`ctaLayoutApplies`)를 쓴다. 이메일 CTA 구도는 classic·bar·ghost뿐이고
+ * bar는 전폭 밴드 구조라 늘어놓을 자리가 없어 제외된다.
+ */
+describe('CTA 버튼 배치 — 이메일 발송 HTML에 반영된다 (2026-09-04)', () => {
+  const btn = (label: string) => ({ label, url: 'https://x.example.com', style: 'primary' as const });
+  const cta = (props: Record<string, unknown>, treatment?: string): Section =>
+    ({ id: 's-cta', type: 'cta', order: 0, visible: true, treatment, props } as unknown as Section);
+  const renderCtaSection = (props: Record<string, unknown>, treatment?: string) =>
+    renderEmailSections([cta(props, treatment)], {});
+
+  const two = [btn('구매하기'), btn('자세히 보기')];
+
+  for (const t of ['classic', 'ghost']) {
+    it(`[${t}] 가로 = 버튼이 한 행에 나란히 놓인다`, () => {
+      const html = renderCtaSection({ layout: 'row', buttons: two }, t);
+      // 세로는 버튼마다 <tr>, 가로는 한 <tr> 안에 <td> 여러 개다.
+      const rows = (html.match(/<tr>/g) || []).length;
+      const stackHtml = renderCtaSection({ layout: 'stack', buttons: two }, t);
+      const stackRows = (stackHtml.match(/<tr>/g) || []).length;
+      expect(rows, '가로인데 세로와 행 수가 같다 = 배치가 반영되지 않았다').toBeLessThan(stackRows);
+      expect(html).not.toBe(stackHtml);
+    });
+
+    it(`[${t}] 세로 = 종전 출력 그대로 (기존 메일 회귀 0)`, () => {
+      const html = renderCtaSection({ layout: 'stack', buttons: two }, t);
+      const noLayout = renderCtaSection({ buttons: two }, t);
+      expect(html, '미지정과 세로가 다르면 기존 문서 출력이 바뀐 것이다').toBe(noLayout);
+    });
+  }
+
+  it('[bar] 전폭 밴드는 배치와 무관하다 — 그래서 편집기가 컨트롤을 감춘다', () => {
+    const row = renderCtaSection({ layout: 'row', buttons: two }, 'bar');
+    const stack = renderCtaSection({ layout: 'stack', buttons: two }, 'bar');
+    expect(row).toBe(stack);
+  });
+
+  it('버튼 1개면 가로를 골라도 세로와 같다 — 늘어놓을 것이 없다', () => {
+    const row = renderCtaSection({ layout: 'row', buttons: [btn('구매하기')] }, 'classic');
+    const stack = renderCtaSection({ layout: 'stack', buttons: [btn('구매하기')] }, 'classic');
+    expect(row).toBe(stack);
+  });
+
+  it('두 채널이 같은 판정 CT를 쓴다 — 한쪽만 고치면 다시 갈린다', () => {
+    const src = readFileSync(resolve(process.cwd(), 'src/utils/email/email-section-renderer.ts'), 'utf8');
+    expect(src, '이메일 렌더러가 DM과 다른 조건을 쓰면 편집기가 감춘 컨트롤을 소비하거나 그 반대가 된다')
+      .toContain('ctaLayoutApplies');
+  });
 });

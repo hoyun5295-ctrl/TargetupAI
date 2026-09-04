@@ -9613,9 +9613,16 @@ const handleApproveRequest = async (id: string) => {
                             />
                             <span className="shrink-0 text-xs text-gray-400">원 / 건</span>
                           </div>
+                          {/* ★ 2026-09-04 문구 정정(서수란 접수 후속) — 종전엔 비어 있기만 하면 조건 없이
+                              "청구서 발행이 차단됩니다"라고 했다. 실제 게이트는 **그 유형으로 성공 발송이
+                              있을 때만** 막고(findUnsetPricedTypes·priceBillingRows), 테스트 단가는
+                              비면 SMS·LMS를 상속한다(TEST_SMS: testSmsRaw ?? sms). 그래서 "안 쓰는 업체는
+                              미지정인데 발행이 됐다"는 접수가 나왔다 — 화면이 거짓을 말하고 있었다. */}
                           <div className="mt-2 text-[11px] font-semibold text-emerald-700">
                             {empty
-                              ? <span className="text-gray-400">미설정. 청구서 발행이 차단됩니다</span>
+                              ? (key.startsWith('costPerTest')
+                                  ? <span className="text-gray-400">미설정. {key === 'costPerTestSms' ? 'SMS' : 'LMS'} 단가를 따릅니다</span>
+                                  : <span className="text-gray-400">미설정. 이 유형으로 발송이 있으면 청구서 발행이 차단됩니다</span>)
                               : <>VAT {fmtPrice(p.vat)}원 · <span className="text-emerald-800">VAT 포함 {fmtPrice(p.withVat)}원 차감</span></>}
                           </div>
                         </div>
@@ -12644,9 +12651,17 @@ const handleApproveRequest = async (id: string) => {
                               <li key={i} className="text-xs text-red-700 leading-relaxed">· {r}</li>
                             ))}
                           </ul>
+                          {/* ★ 2026-09-04 안내 분기(서수란 접수 후속) — 종전엔 단가 관련 차단이면 무조건
+                              "빈 단가를 채우라"고 했다. `UNBILLABLE_TYPE_KEY`는 **채울 칸 자체가 없는** 유형이라
+                              그 안내가 거짓이고, 운영자가 단가 화면을 뒤지다 시간을 버린다(0904 랩디 KL). */}
                           {(billingPreview.billing_guard.blocker_codes || []).some((c: string) => c === 'WEB_UNIT_PRICE_UNSET' || c === 'AGENT_UNIT_PRICE_MISSING') && (
                             <p className="text-xs text-red-600 mt-2 pt-2 border-t border-red-200">
                               고객사 관리 → 해당 고객사 수정 → 단가설정에서 빈 단가를 채운 뒤 다시 시도해 주세요.
+                            </p>
+                          )}
+                          {(billingPreview.billing_guard.blocker_codes || []).includes('UNBILLABLE_TYPE_KEY') && (
+                            <p className="text-xs text-red-600 mt-2 pt-2 border-t border-red-200">
+                              위 유형은 단가를 입력할 칸이 없어 화면에서 해결되지 않습니다. 개발팀에 그 유형 코드를 전달해 주세요.
                             </p>
                           )}
                         </div>

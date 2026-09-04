@@ -558,6 +558,18 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 | T2 | 업체 접속(동작) 이력 확인 | **적재하는 곳이 없었다.** Agent gRPC 는 프로세스 로그만, API 인증은 성공·실패 모두 무기록. `agent_heartbeat` 는 PK=agent_id 라 현재 1행이고 이력이 아니다 | 원장 `account_access_event`(056) 신설 + writer 2곳(Go gRPC · Node client-auth) + 조회 API 2종 + 계정 줄 "마지막 접속" 열·이력 모달 | **마이그레이션 056 선행** 후 배포 |
 | 통합 | 상용 관리 "고객사"·"사업자·계정" 2메뉴 통합 (Harold 승인 A안 3단계) | 두 메뉴가 같은 `reseller` 한 테이블을 다른 이름으로 불렀다. 삭제 한 건에 화면 2회 왕복(Agent→발송계정→고객사) | 1단계 Agent 토글·삭제·이력을 고객사 화면으로 · 2단계 고객사 생성·수정·단가·충전 이관(`components/customer-admin.jsx` 로 원본 줄 단위 이동) · 3단계 `AccountsPage.jsx` 삭제 + 메뉴 제거 + 옛 페이지 id 별칭 | 화면 육안 |
 
+### 12-1. 배포 중 실측으로 드러난 별건 2건 (다음 세션 즉시 착수)
+
+접수 범위 밖이라 이번 세션에서 착수하지 않고 소유 문서에 기록만 했다. 호출어 **게이트웨이 별건 2건**.
+
+| # | 항목 | 실측 | 소유 문서 |
+|---|---|---|---|
+| 0-A | **Agent↔Gateway gRPC TLS 미적용** | 기동 로그가 매번 `gRPC TLS 비활성 상태 — 운영에서는 GW_GRPC_TLS_ENABLED=true 필요` 를 남긴다. Agent 4대가 평문으로 접속 중이고 방어선은 `agent_id + token digest + allowed_ips` 셋뿐 | 게이트웨이 `status/SECURITY_HARDENING_PLAN.md` §2 상태표 · §3.4-6·7 |
+| 0-B | **결과코드 `519` 코드북 미등재** | `provider_result_code_map` 에 0행. 30일 3건(SK 2 · LG 1 · 최근 09-04 23:30:48 · 젬텍-단문-02). 표준 결과가 `UNMAPPED` 으로 떨어져 실패 분석에서 사유가 안 보인다 | 게이트웨이 `status/MESSAGE_RESULT_CODE_STANDARD.md` "미등재 코드" 절 |
+
+⛔ **0-A는 게이트웨이만 먼저 켜면 기존 Agent 4대가 전부 못 붙는다.** ENV·인증서와 Agent `gateway.use_tls=true` 전환 창을 함께 잡는다.
+⛔ **0-B는 추정으로 표준 코드를 붙이지 않는다.** 젬텍 규격서·중계사 회신으로 뜻을 확정한 뒤 등재한다.
+
 ⛔ 세션 판단
 - **실측 SQL 두 줄이 설계 두 곳을 확정했다.** `route_id` 를 보조 축으로 두려던 것과 T4 의 잔존 이력 처리가 그 자리에서 정리됐다.
 - **"활성"과 "접속"은 다른 말이다.** 계정 화면이 오래 보여 준 것은 `is_active` 플래그였고, 접수자가 물은 것은 실제 접속이었다. 플래그로 접속을 답하면 안 된다.

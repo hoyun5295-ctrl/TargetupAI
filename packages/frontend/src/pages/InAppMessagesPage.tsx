@@ -2048,7 +2048,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     <span className="text-[11px] font-bold text-white/70 flex items-center gap-1.5"><Layers className="w-3 h-3" /> 블록 구성</span>
                     <button onClick={() => updateField('content_blocks', [])} className="text-[10px] text-white/40 hover:text-white/70">단순 폼으로</button>
                   </div>
-                  <BlockComposer blocks={blocks} onChange={(b) => updateField('content_blocks', b)} uploadImage={uploadImage} template={(editing.template || '') as string} />
+                  <BlockComposer blocks={blocks} onChange={(b) => updateField('content_blocks', b)} uploadImage={uploadImage} template={(editing.template || '') as string} cardStyle={editing.card_style as string | undefined} />
                 </div>
               ) : (
                 <>
@@ -3721,7 +3721,7 @@ function PosterSlidesEditor({ slides, onChange, uploadImage }: { slides: any[]; 
 }
 
 // ★ 2026-07-17 template — SDK 실렌더가 템플릿 미허용 블록을 건너뛰므로(isBlockAllowed) 추가 메뉴 필터 + 기존 블록 경고에 사용
-function BlockComposer({ blocks, onChange, uploadImage, template }: { blocks: any[]; onChange: (b: any[]) => void; uploadImage: (file: File) => Promise<string | null>; template?: string }) {
+function BlockComposer({ blocks, onChange, uploadImage, template, cardStyle }: { blocks: any[]; onChange: (b: any[]) => void; uploadImage: (file: File) => Promise<string | null>; template?: string; cardStyle?: string }) {
   const [showAdd, setShowAdd] = useState(false);
   const [highlight, setHighlight] = useState<number | null>(null);
   const listEndRef = useRef<HTMLDivElement | null>(null);
@@ -3822,7 +3822,7 @@ function BlockComposer({ blocks, onChange, uploadImage, template }: { blocks: an
                     현재 표시 형태에서는 이 블록이 표시되지 않습니다. 형태를 바꾸거나 블록을 제거해주세요.
                   </div>
                 )}
-                <BlockEditor block={b} onChange={(patch) => update(i, patch)} uploadImage={uploadImage} />
+                <BlockEditor block={b} onChange={(patch) => update(i, patch)} uploadImage={uploadImage} cardStyle={cardStyle} />
               </SortableInAppBlock>
             ))}
           </div>
@@ -3987,7 +3987,9 @@ function BulletsEditor({ b, onChange }: { b: any; onChange: (patch: any) => void
   );
 }
 
-function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (patch: any) => void; uploadImage: (file: File) => Promise<string | null> }) {
+// ★ 2026-09-04 cardStyle을 받는다 — 구도에 따라 **효과가 없는 컨트롤을 감추기 위해서다**(CTA 배치).
+//   기본 카드는 SDK·미리보기 둘 다 layout으로 방향을 정하지만 말풍선은 칩을 가로로 고정한다.
+function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; onChange: (patch: any) => void; uploadImage: (file: File) => Promise<string | null>; cardStyle?: string }) {
   const b = block;
   switch (b.type) {
     case 'eyebrow':
@@ -4131,10 +4133,14 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
     case 'cta_group':
       return (
         <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-white/40">정렬</span>
-            <Seg options={[{ v: 'stack', label: '세로' }, { v: 'inline', label: '가로' }]} value={b.layout || 'stack'} onChange={(v) => onChange({ layout: v })} />
-          </div>
+          {/* ★ 2026-09-04 말풍선 카드는 SDK·미리보기 둘 다 칩을 가로로 고정해 그린다 —
+              그 형태에서는 이 선택이 출력을 못 바꾸므로 컨트롤 자체를 감춘다(no_dead_controls). */}
+          {cardStyle !== 'bubble' && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-white/40">정렬</span>
+              <Seg options={[{ v: 'stack', label: '세로' }, { v: 'inline', label: '가로' }]} value={b.layout || 'stack'} onChange={(v) => onChange({ layout: v })} />
+            </div>
+          )}
           {(b.buttons || []).map((btn: any, j: number) => {
             const setBtn = (patch: any) => { const buttons = [...(b.buttons || [])]; buttons[j] = { ...buttons[j], ...patch }; onChange({ buttons }); };
             return (
