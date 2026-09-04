@@ -23,7 +23,7 @@ import { dmIcon, dmEventCard } from './dm-render-primitives';
 // ★ 2026-07-13 디자인 3.0 — 섹션 연결부(웨이브/사선/커브) SVG
 import { renderDmDividerSvg } from './dm-tokens';
 // ★ 2026-06-25 (P1) 아트디렉션 — 섹션 구도(treatment) 선택. 미설정/미허용=classic(현행 동일).
-import { selectTreatment, type ArtDirection } from './dm-art-direction';
+import { selectTreatment, ctaLayoutApplies, type ArtDirection } from './dm-art-direction';
 // ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 — 이메일 "링크 이동 안 됨" 신고와 동일 구멍 통합 수정
 import { normalizeWebUrl } from '../normalize';
 // ★ 2026-07-22 상품 슬라이드 인디케이터 페이지 단위 상수(SoT) — 점=ceil(상품수/페이지당).
@@ -474,10 +474,22 @@ function renderCtaSticky(props: CtaProps): string {
   </div>`;
 }
 
+/**
+ * 이 CTA가 버튼을 **가로로 늘어놓는가**. (★ 2026-09-04 임은지 접수)
+ *
+ * 판정은 구도 축 CT(`ctaLayoutApplies`)가 소유하고 여기서는 사용자 선택과 합치기만 한다 —
+ * 구도별 렌더 함수가 각자 조건을 쓰면 한쪽만 고쳐진다(그래서 종전엔 classic에만 살아 있었다).
+ * CSS 자체는 구도가 소유한다(ghost의 세로는 stretch 풀폭, classic은 내용 폭 = 통일하면 회귀).
+ */
+function isCtaRow(props: CtaProps, treatment: string): boolean {
+  const count = Array.isArray(props.buttons) ? props.buttons.length : 0;
+  return (props.layout || 'stack') === 'row' && ctaLayoutApplies(treatment, count);
+}
+
 function renderCtaClassic(props: CtaProps): string {
-  const layout = props.layout || 'stack';
   const buttons = Array.isArray(props.buttons) ? props.buttons : [];
   if (buttons.length === 0) return '';
+  const row = isCtaRow(props, 'classic');
 
   const btnHtml = buttons.map((b) => {
     const styleClass = b.style === 'secondary' ? 'dm-cta-secondary' : b.style === 'outline' ? 'dm-cta-outline' : 'dm-cta-primary';
@@ -488,7 +500,7 @@ function renderCtaClassic(props: CtaProps): string {
 
   // 가로 정렬: row=주축(justify-content) / column(stack)=교차축(align-items).
   // column에서 justify-content는 세로축이라 무효 + align-items 기본 stretch가 버튼을 풀폭으로 늘려 정렬이 안 보였음.
-  const flex = layout === 'row'
+  const flex = row
     ? 'flex-direction:row;flex-wrap:wrap;justify-content:var(--dm-section-justify,center)'
     : 'flex-direction:column;align-items:var(--dm-section-justify,center)';
   return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5)">
@@ -548,15 +560,22 @@ function renderCtaBar(props: CtaProps): string {
 }
 
 // 고스트: 아웃라인 대형 라벨.
+// ★ 2026-09-04 (임은지 접수) 버튼 배치 소비 — 종전엔 세로 고정이라 가로를 골라도 그대로였다.
+//   가로일 때 버튼은 `flex:1 1 0`으로 칸을 나눠 갖는다(세로의 풀폭 인상을 가로에서도 잇는다).
+//   세로는 `display:block` + stretch 그대로라 기존 발행물 출력이 바이트 단위로 같다.
 function renderCtaGhost(props: CtaProps): string {
   const buttons = Array.isArray(props.buttons) ? props.buttons : [];
   if (buttons.length === 0) return '';
+  const row = isCtaRow(props, 'ghost');
   const btnHtml = buttons.map((b) => {
     const gc = b.color ? escapeHtml(b.color) : 'var(--dm-primary)';
-    return `<a href="${safeUrl(b.url)}" target="_blank" style="display:block;text-align:center;border:2px solid ${gc};color:${gc};border-radius:var(--dm-radius-lg);padding:var(--dm-sp-4);font-size:var(--dm-fs-body);font-weight:700;letter-spacing:0.5px">${escapeHtml(b.label || '자세히 보기')}</a>`;
+    return `<a href="${safeUrl(b.url)}" target="_blank" style="display:block;${row ? 'flex:1 1 0;min-width:0;' : ''}text-align:center;border:2px solid ${gc};color:${gc};border-radius:var(--dm-radius-lg);padding:var(--dm-sp-4);font-size:var(--dm-fs-body);font-weight:700;letter-spacing:0.5px">${escapeHtml(b.label || '자세히 보기')}</a>`;
   }).join('');
+  const flex = row
+    ? 'flex-direction:row;flex-wrap:wrap;justify-content:var(--dm-section-justify,center)'
+    : 'flex-direction:column';
   return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:calc(var(--dm-sp-6) * var(--dm-section-pad-scale)) var(--dm-sp-5)">
-    <div style="display:flex;flex-direction:column;gap:var(--dm-sp-3)">${btnHtml}</div>
+    <div style="display:flex;${flex};gap:var(--dm-sp-3)">${btnHtml}</div>
   </div>`;
 }
 

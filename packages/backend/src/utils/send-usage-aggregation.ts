@@ -896,7 +896,12 @@ export interface BillingUsageResult {
  * 원본으로 남겨야 `findUnbillableUsageKeys`가 발행 시점에 집어낸다.
  */
 export const AGENT_MSG_TYPE_TO_USAGE_KEY: Record<string, string> = Object.fromEntries(
-  BILLING_TYPES.filter((t) => t.agentCode).map((t) => [t.agentCode as string, t.key]),
+  BILLING_TYPES.flatMap((t) => {
+    // ★ 2026-09-04 별칭(카카오 실패 전환분 KS·KL)도 같은 유형키로 흡수한다 — 목록을 두 벌 두지 않는다.
+    //   축 정의(`billing-types.ts` agentCodeAliases)에만 넣으면 여기가 자동으로 넓어진다.
+    const codes = [t.agentCode, ...(t.agentCodeAliases || [])].filter(Boolean) as string[];
+    return codes.map((code) => [code, t.key] as const);
+  }),
 );
 
 /** ★ 2026-08-20 발송ID 표기 정규화 — 저장(등록 endpoint)·비교(집계) 공용. PG UNIQUE가 case-sensitive라

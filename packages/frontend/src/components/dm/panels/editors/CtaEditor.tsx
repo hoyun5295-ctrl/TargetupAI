@@ -1,9 +1,14 @@
 import type { CtaProps, CtaButton } from '../../../../utils/dm-section-defaults';
+import { ctaLayoutApplies } from '../../../../utils/dm-treatment';
 import { Field, TextInput, Select, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
-export default function CtaEditor({ props, onUpdate }: EditorProps<CtaProps>) {
+export default function CtaEditor({ props, onUpdate, treatment }: EditorProps<CtaProps>) {
   const buttons: CtaButton[] = Array.isArray(props.buttons) ? props.buttons : [];
+  // ★ 2026-09-04 (임은지 접수) 배치가 출력을 못 바꾸는 조합에서는 컨트롤을 감춘다.
+  //   바·스티키는 첫 버튼만 강조해 그리고, 버튼이 하나면 늘어놓을 것이 없다.
+  //   판정은 발행물 렌더러와 **같은 CT** — 여기서 따로 조건을 쓰면 다시 갈린다.
+  const layoutApplies = ctaLayoutApplies(treatment, buttons.length);
 
   const updateBtn = (i: number, patch: Partial<CtaButton>) => {
     const next = buttons.slice();
@@ -20,16 +25,18 @@ export default function CtaEditor({ props, onUpdate }: EditorProps<CtaProps>) {
 
   return (
     <>
-      <Field label="버튼 배치">
-        <Select
-          value={props.layout || 'stack'}
-          onChange={(v) => onUpdate({ layout: v as CtaProps['layout'] })}
-          options={[
-            { value: 'stack', label: '세로' },
-            { value: 'row', label: '가로' },
-          ]}
-        />
-      </Field>
+      {layoutApplies && (
+        <Field label="버튼 배치">
+          <Select
+            value={props.layout || 'stack'}
+            onChange={(v) => onUpdate({ layout: v as CtaProps['layout'] })}
+            options={[
+              { value: 'stack', label: '세로' },
+              { value: 'row', label: '가로' },
+            ]}
+          />
+        </Field>
+      )}
 
       {buttons.map((b, i) => (
         <div key={i} style={{ padding: 10, background: 'var(--dm-neutral-50)', borderRadius: 6, marginBottom: 8 }}>

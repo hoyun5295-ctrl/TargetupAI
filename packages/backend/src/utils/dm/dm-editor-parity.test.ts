@@ -13,6 +13,8 @@ import { renderDmDesign3Css, renderDmBaseCss, renderDmTokensCss, renderDmDivider
 import type { Section } from './dm-section-registry';
 import { SECTION_DEFAULTS } from './dm-section-registry';
 import { DM_REMOVED_DEAD_CONTROLS } from './dm-property-contract';
+// ★ 2026-09-04 CTA 배치 판정 CT — 렌더러·캔버스·편집기가 공유하는 하나(임은지 접수)
+import { CTA_LAYOUT_TREATMENTS, ctaLayoutApplies } from './dm-art-direction';
 import { DM_BACKGROUNDS, DM_DIVIDERS, DM_NEWLINE_FIELDS, DM_IMAGE_FITS, DM_GALLERY_FULL_BLEED, DM_GALLERY_CAPTION_VISIBLE, DM_SLIDESHOW_PAUSE, DM_SLIDESHOW_RATIOS, DM_STORE_INFO_NEWLINE_FIELDS, DM_STORE_INFO_LABELS, DM_PRODUCT_CAROUSEL_SWIPE_MIN, DM_PRODUCT_CAROUSEL_PER_PAGE, DM_WIRED_ORPHAN_MARKERS } from './dm-property-contract';
 import { parseTabProductList } from './dm-tab-content';
 // FE 상품 붙여넣기 파서 원본(SoT) — 백엔드 미러(parseTabProductList)와 결과 일치 교차 고정
@@ -622,4 +624,99 @@ describe('제거된 죽은 컨트롤 — 되살리면 계약이 깨진다', () =
         .not.toContain(prop);
     });
   }
+});
+
+// ── CTA 버튼 배치(가로/세로)가 구도마다 살아 있는가 (2026-09-04 임은지 접수 cmtmoior709mjjnotp6803f9j) ──
+//
+// 접수 실물 = 구도 `ghost` · 배치 `row` · 버튼 2개인데 세로로 나갔다(DB 실측).
+// 종전엔 `renderCtaClassic`만 layout을 읽었고, 실사용 구도 분포는 classic이 소수였다.
+// 판정 소유자 = `dm-art-direction.ctaLayoutApplies`. 렌더러·캔버스·편집기가 그 하나를 쓴다.
+describe('CTA 버튼 배치 — 구도마다 소비 (임은지 0904)', () => {
+  const btn = (label: string) => ({ label, url: 'https://x.com', style: 'primary' as const });
+  const two = [btn('구매하기'), btn('자세히 보기')];
+  const cta = (treatment: string, props: any) => renderSection(mk('cta', props, { treatment } as any), {} as any);
+
+  describe('판정 CT — 배치가 효과를 내는 조합만 true', () => {
+    for (const [treatment, count, want] of [
+      ['classic', 2, true], ['ghost', 2, true],
+      ['classic', 1, false], ['ghost', 1, false],
+      ['bar', 2, false], ['sticky', 2, false],
+      [undefined as any, 2, true],   // 미지정 = classic
+    ] as Array<[string | undefined, number, boolean]>) {
+      it(`${treatment ?? '미지정'} · 버튼 ${count}개 = ${want}`, () => {
+        expect(ctaLayoutApplies(treatment, count)).toBe(want);
+      });
+    }
+  });
+
+  it('ghost + row + 버튼 2개 — 가로로 나간다 (접수 실물)', () => {
+    const html = cta('ghost', { layout: 'row', buttons: two });
+    expect(html, 'ghost가 배치를 안 읽으면 접수가 그대로 재발한다').toContain('flex-direction:row');
+  });
+
+  it('ghost + stack — 세로 유지 (기존 문서 회귀 0)', () => {
+    const html = cta('ghost', { layout: 'stack', buttons: two });
+    expect(html).toContain('flex-direction:column');
+    expect(html).not.toContain('flex-direction:row');
+  });
+
+  it('ghost + row + 버튼 1개 — 늘어놓을 것이 없어 세로 그대로', () => {
+    const html = cta('ghost', { layout: 'row', buttons: [btn('구매하기')] });
+    expect(html).toContain('flex-direction:column');
+  });
+
+  it('classic + row + 버튼 2개 — 종전 동작 유지', () => {
+    const html = cta('classic', { layout: 'row', buttons: two });
+    expect(html).toContain('flex-direction:row');
+  });
+
+  it('classic + stack — 종전 동작 유지', () => {
+    const html = cta('classic', { layout: 'stack', buttons: two });
+    expect(html).toContain('flex-direction:column');
+  });
+
+  for (const treatment of ['bar', 'sticky']) {
+    it(`${treatment} — 배치를 바꿔도 출력이 같다(그래서 편집기가 컨트롤을 감춘다)`, () => {
+      const row = cta(treatment, { layout: 'row', buttons: two });
+      const stack = cta(treatment, { layout: 'stack', buttons: two });
+      expect(row).toBe(stack);
+    });
+  }
+
+  it('캔버스가 SSR과 같은 판정을 쓴다 — 편집 화면과 발행물이 갈리지 않게', () => {
+    const src = readFileSync(resolve(process.cwd(), '../frontend/src/components/dm/canvas/CtaSection.tsx'), 'utf8');
+    expect(src, '캔버스가 판정 CT를 안 쓰면 조건이 두 벌이 되어 한쪽만 고쳐진다').toContain('ctaLayoutApplies');
+    const ghostBlock = src.slice(src.indexOf("t === 'ghost'"), src.indexOf("t === 'sticky'"));
+    expect(ghostBlock, '캔버스 ghost 분기가 방향을 고정하고 있다').toContain('flexDir');
+    // ⛔ 판정을 CT로 옮겼으면 그 판정을 쓰던 자리를 **전수로** 바꾼다. 하나만 남아도 그 자리가 갈린다 —
+    //    실제로 방향은 CT로 옮기고 정렬(justifyContent·alignItems)만 옛 조건에 남아, 버튼 1개 + 가로에서
+    //    세로 배치인데 정렬은 가로 규칙을 쓰는 상태가 났다(0904 자가 검토에서 검출).
+    const rawLayoutChecks = src.split('\n').filter((l) => l.includes("layout === 'row'") && !l.includes('ctaLayoutApplies'));
+    expect(rawLayoutChecks, `배치를 CT 없이 직접 보는 자리가 남았다: ${rawLayoutChecks.join(' | ')}`).toEqual([]);
+  });
+
+  it('편집기가 효과 없는 조합에서 배치 컨트롤을 감춘다 (죽은 컨트롤 금지)', () => {
+    const src = readFileSync(resolve(process.cwd(), '../frontend/src/components/dm/panels/editors/CtaEditor.tsx'), 'utf8');
+    expect(src, '편집기가 판정 CT를 써야 렌더러와 같은 기준이 된다').toContain('ctaLayoutApplies');
+    // 게이트를 어떤 형태로 쓰든(인라인 호출·변수 경유) 좋다. 고정하는 것은 "조건 없이 그리지 않는다" 하나다.
+    const before = src.slice(0, src.indexOf('버튼 배치'));
+    const gate = before.lastIndexOf('&&');
+    expect(gate, '배치 필드 앞에 조건이 없다 — 고르는 대로 안 바뀌는 컨트롤이 남는다').toBeGreaterThan(-1);
+    expect(before.slice(gate), '조건이 배치 필드 앞에서 이미 닫혔다 = 그 필드는 게이트 밖이다')
+      .not.toContain(')}');
+    // ⛔ "조건이 있다"만 보면 `{true && (`가 통과한다(0904 회귀 주입에서 실제로 샜다).
+    //    게이트가 **판정 CT의 결과**인지까지 본다.
+    const gateLine = before.slice(before.lastIndexOf('\n', gate) + 1);
+    expect(gateLine, `배치 필드의 게이트가 판정 CT와 무관하다: ${gateLine.trim()}`)
+      .toMatch(/ctaLayoutApplies|layoutApplies/);
+  });
+
+  it('프론트 미러가 백엔드 CT와 같은 값을 쓴다', () => {
+    const src = readFileSync(resolve(process.cwd(), '../frontend/src/utils/dm-treatment.ts'), 'utf8');
+    const listed = /CTA_LAYOUT_TREATMENTS[^=]*=\s*\[([^\]]*)\]/.exec(src);
+    expect(listed, '프론트에 CTA_LAYOUT_TREATMENTS 미러가 없다').toBeTruthy();
+    const front = listed![1].split(',').map((s) => s.trim().replace(/['"]/g, '')).filter(Boolean);
+    expect(front, '미러가 갈리면 편집기가 감춘 컨트롤을 렌더러가 소비하거나 그 반대가 된다')
+      .toEqual([...CTA_LAYOUT_TREATMENTS]);
+  });
 });

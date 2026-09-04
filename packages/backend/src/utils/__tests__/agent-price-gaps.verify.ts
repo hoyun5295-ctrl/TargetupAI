@@ -36,7 +36,11 @@ ok('K → KAKAO', () => assert.strictEqual(agentUsageKey('K'), 'KAKAO'));
 ok('G → BRAND (0729 추가분)', () => assert.strictEqual(agentUsageKey('G'), 'BRAND'));
 ok('소문자도 같은 키', () => assert.strictEqual(agentUsageKey('g'), 'BRAND'));
 ok('미지 코드는 원본 보존 — 임의로 뭉치면 조용히 0원이 된다', () =>
-  assert.strictEqual(agentUsageKey('KS'), 'KS'));
+  assert.strictEqual(agentUsageKey('ZZ'), 'ZZ'));
+// ★ 2026-09-04 카카오 실패 전환분은 **문자 유형으로 흡수**한다(0904 랩디 접수 — 종전엔 원본 코드로
+//   남아 청구 단가 정의도 입력 칸도 없어 발행이 막혔다). 전환의 실체가 그 문자라 문자 단가로 청구한다.
+ok('KS → SMS (카카오 실패 SMS 전환)', () => assert.strictEqual(agentUsageKey('KS'), 'SMS'));
+ok('KL → LMS (카카오 실패 LMS 전환)', () => assert.strictEqual(agentUsageKey('KL'), 'LMS'));
 ok('빈 값 → (유형 미상)', () => assert.strictEqual(agentUsageKey(''), '(유형 미상)'));
 
 console.log('[agent-price-gaps] 단가 입력이 가능한 유형키');
@@ -45,8 +49,15 @@ ok('SMS·LMS·MMS·KAKAO·BRAND 5종이 전부 입력 가능', () =>
     [...PRICEABLE_AGENT_TYPE_KEYS].sort(),
     ['BRAND', 'KAKAO', 'LMS', 'MMS', 'SMS'],
   ));
-ok('KS(카카오 대체발송)는 단가 컬럼이 없다 — 입력으로 못 고친다', () =>
-  assert.strictEqual(PRICEABLE_AGENT_TYPE_KEYS.has('KS'), false));
+// ★ 2026-09-04 정정 — 종전엔 "KS는 단가 컬럼이 없어 입력으로 못 고친다"였다. 이제 KS·KL은
+//   **유형키가 아니라 SMS·LMS의 별칭**이라 그 문자 단가로 청구된다. 여기 없는 것은 그 사실이지
+//   결함이 아니다(`agentUsageKey`가 흡수한 뒤라 이 집합에 원본 코드가 올 일이 없다).
+ok('KS·KL은 유형키가 아니다 — 문자 유형으로 흡수돼 그 단가를 쓴다', () => {
+  assert.strictEqual(PRICEABLE_AGENT_TYPE_KEYS.has('KS'), false);
+  assert.strictEqual(PRICEABLE_AGENT_TYPE_KEYS.has('KL'), false);
+  assert.strictEqual(PRICEABLE_AGENT_TYPE_KEYS.has(agentUsageKey('KS')), true);
+  assert.strictEqual(PRICEABLE_AGENT_TYPE_KEYS.has(agentUsageKey('KL')), true);
+});
 ok('테스트·스팸은 에이전트 축이 아니다', () => {
   assert.strictEqual(PRICEABLE_AGENT_TYPE_KEYS.has('TEST_SMS'), false);
   assert.strictEqual(PRICEABLE_AGENT_TYPE_KEYS.has('SPAM_SMS'), false);
@@ -59,11 +70,15 @@ ok('agentCode 있는 유형은 전부 agentPriceColumn 보유', () => {
 });
 ok('agentCode → 유형키가 PRICEABLE에 전부 포함', () => {
   for (const t of BILLING_TYPES) {
-    if (!t.agentCode) continue;
-    assert.strictEqual(
-      PRICEABLE_AGENT_TYPE_KEYS.has(agentUsageKey(t.agentCode)), true,
-      `${t.agentCode} → ${agentUsageKey(t.agentCode)}가 입력 불가로 분류됨`,
-    );
+    // ★ 2026-09-04 별칭(카카오 전환분 KS·KL)도 같이 밟는다 — 흡수해 놓고 단가 입력이 막혀 있으면
+    //   발행은 `AGENT_UNIT_PRICE_MISSING`으로 그대로 멈춘다(0904 랩디가 그 상태였다).
+    for (const code of [t.agentCode, ...(t.agentCodeAliases || [])]) {
+      if (!code) continue;
+      assert.strictEqual(
+        PRICEABLE_AGENT_TYPE_KEYS.has(agentUsageKey(code)), true,
+        `${code} → ${agentUsageKey(code)}가 입력 불가로 분류됨`,
+      );
+    }
   }
 });
 

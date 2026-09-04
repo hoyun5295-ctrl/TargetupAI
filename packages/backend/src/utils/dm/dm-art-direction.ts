@@ -43,6 +43,27 @@ export const TREATMENTS: Record<string, readonly string[]> = {
   store_info: ['classic', 'card'],
 };
 
+/**
+ * ★ 2026-09-04 (임은지 접수) CTA "버튼 배치"(가로/세로)가 **실제로 효과를 내는 구도**.
+ *
+ * 배치는 여러 버튼을 늘어놓는 규칙이라, 버튼을 한 줄로 쌓는 구도에서만 의미가 있다.
+ *   · `classic`·`ghost` = 버튼 전부를 한 묶음으로 그린다 → 배치가 산다
+ *   · `bar`   = 첫 버튼이 단독 강조 바이고 나머지가 목록인데, 편집기 상한이 버튼 2개라
+ *               보조 버튼이 최대 1개다 → 늘어놓을 것이 없다
+ *   · `sticky`= 첫 버튼 하나만 그린다 → 배치 개념 자체가 없다
+ *
+ * 종전엔 `renderCtaClassic`만 `layout`을 읽어, ghost에서 가로를 골라도 세로로 나갔다
+ * (실사용 구도 분포는 bar·sticky·ghost가 다수이고 classic이 소수였다).
+ * **판정을 여기 하나가 소유한다** — 렌더러·캔버스·편집기가 각자 조건을 쓰면 또 한쪽만 고쳐진다.
+ * 프론트 미러 = `frontend/src/utils/dm-treatment.ts`(같은 값·같은 함수. 교차 일치는 계약 테스트가 고정).
+ */
+export const CTA_LAYOUT_TREATMENTS: readonly string[] = ['classic', 'ghost'];
+
+/** 이 구도·버튼 수에서 배치 선택이 출력을 바꾸는가. false면 편집기가 컨트롤을 감춘다(죽은 컨트롤 금지). */
+export function ctaLayoutApplies(treatment: string | undefined, buttonCount: number): boolean {
+  return CTA_LAYOUT_TREATMENTS.includes(treatment || 'classic') && buttonCount >= 2;
+}
+
 const HEX6 = /^#([0-9a-fA-F]{6})$/;
 const HEX3 = /^#([0-9a-fA-F]{3})$/;
 function safeHex(v: unknown, fallback: string): string {

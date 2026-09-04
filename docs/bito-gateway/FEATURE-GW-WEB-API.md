@@ -54,3 +54,40 @@
 5. [ ] nginx rate limit 여부 실측(§3-5) — .65 nginx 설정 확인 1회
 6. [ ] 로컬 사본 `npm install`로 테스트 실행 가능화(§3-6) — mock 테스트만이라도 green 확인
 7. [ ] 에러 핸들러 응답에서 `err.message` 제거(§3-4) — 로그에만 남긴다
+
+## 6. 2026-09-04 신설 endpoint 2종 (서수란 접수)
+
+| endpoint | 축 | 근거 |
+|---|---|---|
+| `GET /api/admin/stats/lines` | 회선(Bind)별 발송 통계 | 접수 "회선별 발송 통계 지원 요청" |
+| `GET /api/admin/access-events`<br>`GET /api/admin/access-events/summary` | 고객사 접속·동작 이력 | 접수 "업체 접속(동작) 이력 확인" |
+
+### 6-1. 회선별 통계 (`/stats/lines`)
+
+기존 `/stats/binds` 는 당일 고정·필터 없음·과금 없음이라 회선 모니터링 전용이다. 그대로 둔다.
+새 endpoint 는 사용량 통계와 **같은 필터 계약**(`from`·`to`·`customer_id`·`sender_account_id`·`msg_type`·`q`)을 쓴다.
+
+- 회선 축의 진실은 `message_request.bind_account_id` 하나다. `route_id` 는 채우는 코드가 없다
+  (2026-09-04 운영 실측: 30일 38,998건 중 `route_id` 0건 · `bind_account_id` 38,998건).
+- 성공률은 **결과가 확정된 건(성공+실패)만** 분모로 쓴다. 상위단 청구 수량과 맞춰 보는 자리라
+  아직 결과를 모르는 건을 실패처럼 깎으면 안 된다. 표본이 없으면 100%가 아니라 `null`이다.
+- `bind_account_id IS NULL`(회선 배정 전 종결) 행을 "회선 미지정"으로 그대로 낸다. 숨기면 회선 합계가
+  전체 발송량과 어긋나 대조가 깨진다.
+- 집계 범위는 `web/api/services/message-scope.js` 가 단독 소유한다. 같은 날 `/stats/customers` 와
+  `/stats/export-data` 도 이 정의로 수렴시켰다 — 축마다 WHERE 를 다시 적으면 한 화면 안의 두 표와
+  엑셀이 서로 다른 건수를 낸다.
+
+### 6-2. 접속·동작 이력 (`/access-events`)
+
+적재는 이 문서 밖의 두 곳이 한다(원장 = 게이트웨이 `status/SCHEMA.md` §2-18).
+
+| 창구 | writer | 남기는 것 |
+|---|---|---|
+| Agent gRPC | `internal/gateway/session/access_event.go` | connected · disconnected · auth_failed(사유) |
+| API 연동 | `web/api/services/access-event.js` (client-auth 미들웨어) | request(성공) · auth_failed(사유) |
+
+- 같은 분·같은 (창구·사건·계정·출발지·사유)은 한 행으로 누적한다(`event_count`). API 연동은 요청마다
+  인증을 타므로 건별 적재는 이력이 아니라 트래픽 사본이 된다.
+- 거절 사유를 catch 에서 버리지 않는다. 사유 없는 거절 이력은 원인을 못 찾는다.
+- 마이그레이션 056 전에는 두 writer 가 `42P01` 을 한 번 확인하고 조용히 멈추고, 조회 API 는
+  500 이 아니라 `503 DB_MIGRATION_PENDING` 을 돌려준다.

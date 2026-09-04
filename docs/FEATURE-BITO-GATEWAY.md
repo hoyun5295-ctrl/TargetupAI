@@ -546,6 +546,27 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 
 ⛔ 세션 판단: **정답은 매번 SQL 한 줄이 정했다**(접수자 가설은 셋 다 판정 조건에 없었다) · Codex 생략 = Harold 방침(적대 검토는 워크플로 반박 검증 + 직접 재독으로 대체) · 로컬 명령은 런북이 bash라도 PowerShell로 변환해 낸다(0902 재발 · 저녁 배포는 `Get-FileHash … .Hash.ToLower()` 판이 통했다) · **삭제 가능 여부를 계정 유형으로 가르면 사슬이 끊긴다** — 하위 0 + 이력 0 한 축만 · **화면은 자기 층 행으로 "미설정·차단"을 단정하지 않는다** — 유효 값은 서버 한 곳에서 계산해 표시(식별코드 재오픈과 같은 교훈, [[feedback_moving_a_truth_source_means_all_readers_and_constraints]]).
 
+## 12. 2026-09-04 서수란 접수 4건 + 상용 관리 통합 (코드 완료·배포 대기)
+
+경위·실측·처방의 상세는 각 축 문서가 소유한다. 여기는 판단과 포인터만.
+
+| # | 접수 | 확정 사실 | 조치 | 남은 것 |
+|---|---|---|---|---|
+| T4 | 식별코드 등록부 연장 기능 필요 없음 | 등록부 실측 `source` = `system_seed` 1건뿐. 연장으로 만들어진 행 0건 | 화면 6곳·서버 `POST /:id/renew`·테스트 전량 제거. 문구 2곳을 "새 코드 등록"으로 정정 | 화면 육안 |
+| T3 | API·Agent 계정 발급 시 고객사 검색 선택 | 발급 경로는 마법사 1곳으로 이미 일원화. 재사용 가능한 검색형 선택 컴포넌트 없음 | 신규 공용 `components/SearchSelect.jsx`(검색·키보드·목록 스크롤) + 마법사 1곳 교체. 활성 고객사만 보이는 0827 F-4 계약 유지 | 화면 육안 |
+| T1 | 회선별 발송 통계 | **`route_id` 는 0건, `bind_account_id` 는 30일 38,998건 전량**. 회선 축은 `bind_account_id` 하나 | `GET /admin/stats/lines` 신설 + 사용량 통계 "회선별 전송" 패널 + 엑셀 7번째 시트. 집계 범위를 `services/message-scope.js` 로 수렴(고객사·회선·엑셀 같은 정의) | 배포 후 실측 1건 |
+| T2 | 업체 접속(동작) 이력 확인 | **적재하는 곳이 없었다.** Agent gRPC 는 프로세스 로그만, API 인증은 성공·실패 모두 무기록. `agent_heartbeat` 는 PK=agent_id 라 현재 1행이고 이력이 아니다 | 원장 `account_access_event`(056) 신설 + writer 2곳(Go gRPC · Node client-auth) + 조회 API 2종 + 계정 줄 "마지막 접속" 열·이력 모달 | **마이그레이션 056 선행** 후 배포 |
+| 통합 | 상용 관리 "고객사"·"사업자·계정" 2메뉴 통합 (Harold 승인 A안 3단계) | 두 메뉴가 같은 `reseller` 한 테이블을 다른 이름으로 불렀다. 삭제 한 건에 화면 2회 왕복(Agent→발송계정→고객사) | 1단계 Agent 토글·삭제·이력을 고객사 화면으로 · 2단계 고객사 생성·수정·단가·충전 이관(`components/customer-admin.jsx` 로 원본 줄 단위 이동) · 3단계 `AccountsPage.jsx` 삭제 + 메뉴 제거 + 옛 페이지 id 별칭 | 화면 육안 |
+
+⛔ 세션 판단
+- **실측 SQL 두 줄이 설계 두 곳을 확정했다.** `route_id` 를 보조 축으로 두려던 것과 T4 의 잔존 이력 처리가 그 자리에서 정리됐다.
+- **"활성"과 "접속"은 다른 말이다.** 계정 화면이 오래 보여 준 것은 `is_active` 플래그였고, 접수자가 물은 것은 실제 접속이었다. 플래그로 접속을 답하면 안 된다.
+- **이력 적재가 발송을 막으면 안 된다.** 두 writer 모두 실패를 삼키고, 마이그레이션 전 배포에서도 조용히 지나간다.
+- **메뉴를 합치는 것은 화면을 옮기는 일이 아니라 코드를 옮기는 일이다.** 원본을 줄 단위로 복사하고 보존 단언을 건 뒤, 옮긴 화면을 전부 렌더해 봤다(import 성공만으로는 옮기기가 끝나지 않는다).
+- **옛 메뉴를 지울 때 그 화면이 지키던 계약도 같이 지우면 안 된다.** Token 직접 입력 금지·빈 body 계약 2건을 남은 테스트로 옮겼다.
+
+검증 = 대시보드 계약 25건 · api 400건 · Go 게이트웨이 패키지 전량 · 프로덕션 빌드 통과.
+
 ## 9. 관련 문서
 
 **기능별 피더(스포크) — ★2026-08-15 Harold 승인 체계.** 이 허브가 총괄·전환 운영·착수 원장을, 스포크가 축별 확정 사실·결함·잔여를 소유한다. 진행 순서 = 5→1→6→2→3→4 (Harold 확정).
@@ -560,7 +581,7 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 | 6 | 커넥터·라우팅 | [bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md](bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md) | **0815 완료** (능력 라우팅 부재 소스 확정) |
 | 7 | **브랜드메시지** | [bito-gateway/FEATURE-GW-BRAND-MESSAGE.md](bito-gateway/FEATURE-GW-BRAND-MESSAGE.md) | **0815 신설**(허브 §4-6에서 분리) · 호출어 **브랜드메시지** |
 | 8 | **보안** | [bito-gateway/FEATURE-GW-SECURITY.md](bito-gateway/FEATURE-GW-SECURITY.md) | **★0828 신설** · 무인증 라우트 폐쇄·API 키 회전 완료 / bind 봉투 암호화 코드 배포·이행 대기 / 잔여 10건 · 호출어 **게이트웨이 보안** |
-| 9 | **링크가드(URL 차단 관제센터·에이전트·검사 API)** | [bito-gateway/FEATURE-GW-LINKGUARD.md](bito-gateway/FEATURE-GW-LINKGUARD.md) | **★0904 신설·착수** · 판매 상품(관제센터 + DBMS 무관 에이전트 + 검사 API + 게이트웨이 훅) · 전송자격인증 5.2·특부가 악성문자 사전차단 요건 · 호출어 **링크가드** |
+| 9 | **링크가드 훅(URL 차단 · 관제센터 클라이언트)** | [bito-gateway/FEATURE-GW-LINKGUARD.md](bito-gateway/FEATURE-GW-LINKGUARD.md)(게이트웨이 접점 소유: 구조·불변 8·계약·배포·운영·실측) · 제품 SoT = `projects/linkguard/docs/FEATURE-LINKGUARD.md` | **★0904 .65 배포·차단 실측 완료** · 전역 토글 on(원장 항목만 막힘) · 빌드에 `../linkguard` 동반 · 토글 UI 미배포(SQL) · 호출어 **링크가드** / **게이트웨이 링크가드** |
 
 - 한줄로 측 라인·Agent 운영 = [status/OPS.md](../status/OPS.md) §6-3
 - 브랜드메시지 F 트랙 = [2026-07-29-brand-message-qtmsg-agent-design.md](2026-07-29-brand-message-qtmsg-agent-design.md)

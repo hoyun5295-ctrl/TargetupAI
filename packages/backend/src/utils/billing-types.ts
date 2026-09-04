@@ -208,11 +208,25 @@ export interface BillingTypeDef {
   smsqCode: string | null;
   /** 게이트웨이 `RSRM_SalesStts.MsgType`(에이전트). null = 에이전트 발송이 없는 유형 */
   agentCode: string | null;
+  /**
+   * ★ 2026-09-04 같은 유형키로 흡수할 게이트웨이 코드(별칭). 단가·청구줄을 `key`와 공유한다.
+   *
+   * 카카오 실패 전환분(`KS` = SMS 대체 · `KL` = LMS 대체)이 그것이다. 게이트웨이는 전환 자식을
+   * 별도 코드로 적재하는데(`paystats/reporter.go payMsgType`), 그 실체는 **그 문자 자체**라
+   * 문자 단가로 청구한다. 별칭을 안 두면 유형키가 원본 코드(`KL`)로 남아 청구 단가 정의도
+   * 단가 입력 칸도 없는 상태가 되고 발행이 통째로 막힌다(0904 랩디 접수).
+   *
+   * ⛔ 전용 단가 컬럼을 새로 만들지 않는다 — 쓰는 회사가 한 곳인데 전 고객사 단가 화면에
+   *   칸을 둘 늘리면 0814에 정리한 "안 쓰는 유형이 목록을 채우는" 소음이 되살아난다.
+   * ⚠ 별칭은 `agentCode`·다른 별칭과 겹치면 안 된다(겹치면 한 코드가 두 유형으로 갈린다) —
+   *   `billing-type-axis.test.ts`가 중복 0을 고정한다.
+   */
+  agentCodeAliases?: readonly string[];
 }
 
 export const BILLING_TYPES: readonly BillingTypeDef[] = [
-  { key: 'SMS',      label: 'SMS',           companyPriceColumn: 'cost_per_sms',      agentPriceColumn: 'cost_per_sms',   smsqCode: 'S',  agentCode: 'S' },
-  { key: 'LMS',      label: 'LMS',           companyPriceColumn: 'cost_per_lms',      agentPriceColumn: 'cost_per_lms',   smsqCode: 'L',  agentCode: 'L' },
+  { key: 'SMS',      label: 'SMS',           companyPriceColumn: 'cost_per_sms',      agentPriceColumn: 'cost_per_sms',   smsqCode: 'S',  agentCode: 'S', agentCodeAliases: ['KS'] },
+  { key: 'LMS',      label: 'LMS',           companyPriceColumn: 'cost_per_lms',      agentPriceColumn: 'cost_per_lms',   smsqCode: 'L',  agentCode: 'L', agentCodeAliases: ['KL'] },
   { key: 'MMS',      label: 'MMS',           companyPriceColumn: 'cost_per_mms',      agentPriceColumn: 'cost_per_mms',   smsqCode: 'M',  agentCode: 'M' },
   // ★ 2026-07-25 '카카오' → '카카오알림톡'. 같은 엑셀의 에이전트 행이 '카카오알림톡'이라
   //   한 '유형' 컬럼에 알림톡이 두 이름으로 갈리면 피벗에서 두 줄이 되어 정산 대조가 깨진다.

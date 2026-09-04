@@ -95,6 +95,9 @@ export async function fetchPayDbSnapshot(): Promise<PayDbSnapshot | null> {
 // ★ 유형 라벨 단일 소스 (MsgType 코드 → 사용자 표시명). 카카오는 알림톡.
 export const AGENT_MSG_TYPE_LABEL: Record<string, string> = {
   S: 'SMS', L: 'LMS', M: 'MMS', K: '카카오알림톡', X: '팩스',
+  // ★ 2026-09-04 발송 통계 축은 전환분을 **그대로 보여준다**(청구 축과 의도적으로 다르다).
+  //   청구(`agentUsageKey`)는 KS·KL을 SMS·LMS로 흡수해 그 문자 단가로 계산하지만, 화면에서까지
+  //   합쳐 버리면 "알림톡이 실패해 문자로 나간 건수"를 아무 데서도 볼 수 없게 된다.
   KS: '카카오(SMS대체)', KL: '카카오(LMS대체)',
   // ★ 2026-07-29 G = 브랜드메시지(구 친구톡). 라벨이 없어 화면에 코드 `G`가 그대로 노출됐다.
   G: '브랜드메시지',

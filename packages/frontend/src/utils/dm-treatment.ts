@@ -20,6 +20,18 @@ export const DM_TREATMENTS: Record<string, readonly string[]> = {
   store_info: ['classic', 'card'],
 };
 
+/**
+ * ★ 2026-09-04 (임은지 접수) CTA "버튼 배치"가 실제로 효과를 내는 구도.
+ * 백엔드 `dm-art-direction.ts` CTA_LAYOUT_TREATMENTS / ctaLayoutApplies 미러 —
+ * 값이 갈리면 편집기가 감춘 컨트롤을 발행물이 소비하거나 그 반대가 된다(교차 일치 = 계약 테스트가 고정).
+ */
+export const CTA_LAYOUT_TREATMENTS: readonly string[] = ['classic', 'ghost'];
+
+/** 이 구도·버튼 수에서 배치 선택이 출력을 바꾸는가. false면 편집기가 컨트롤을 감춘다. */
+export function ctaLayoutApplies(treatment: string | undefined, buttonCount: number): boolean {
+  return CTA_LAYOUT_TREATMENTS.includes(treatment || 'classic') && buttonCount >= 2;
+}
+
 /** 요청 treatment가 해당 섹션 허용표에 있으면 그대로, 아니면 classic. */
 export function selectTreatment(sectionType: string, requested?: string | null): string {
   const allowed = DM_TREATMENTS[sectionType];

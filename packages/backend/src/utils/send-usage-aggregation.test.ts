@@ -12,6 +12,8 @@ import {
 import type { PayAgentStoreRow } from './pay-stats';
 import { sumFlooredInvoiceLines } from './billing-invoice-lines';
 import { normalizeAgentSendId } from './send-usage-aggregation';
+// ★ 2026-09-04 별칭 흡수 계약 — 변환표의 모든 코드가 단가 붙는 유형으로 가는지 축 정의로 대조한다
+import { BILLING_TYPES } from './billing-types';
 
 /**
  * ★ 2026-08-20 발송ID 표기 정규화 CT (Harold 승인 — 예방 수정).
@@ -895,7 +897,7 @@ describe('agentUsageKey — 에이전트 MsgType → 청구 유형키', () => {
   it('모르는 코드는 원본 그대로 남는다 — 임의로 뭉치면 그 유형이 조용히 0원이 된다', () => {
     // ★ 2026-07-29 G(브랜드메시지)는 이제 아는 코드다 — 단가 축과 함께 정식 등재됐다.
     //   이 테스트의 취지는 "미지 코드를 기존 유형에 뭉치지 않는다"이므로 예시를 미등재 코드로 바꾼다.
-    expect(agentUsageKey('KS')).toBe('KS');
+    // ★ 2026-09-04 KS·KL도 아는 코드가 됐다(문자 유형 별칭 — 0904 랩디 접수). 예시에서 뺀다.
     expect(agentUsageKey('X')).toBe('X');
     expect(agentUsageKey('ZZ')).toBe('ZZ');
   });
@@ -912,8 +914,14 @@ describe('agentUsageKey — 에이전트 MsgType → 청구 유형키', () => {
     expect(agentUsageKey(undefined)).toBe('(유형 미상)');
   });
 
-  it('변환표에는 청구 단가가 있는 5종만 있다', () => {
-    expect(Object.keys(AGENT_MSG_TYPE_TO_USAGE_KEY).sort()).toEqual(['G', 'K', 'L', 'M', 'S']);
+  it('변환표에는 청구 단가가 있는 코드만 있다 — 별칭 포함', () => {
+    // ★ 2026-09-04 KS·KL(카카오 실패 전환분) 추가 — 유형키가 아니라 SMS·LMS의 별칭이라
+    //   그 문자 단가로 청구된다. 변환표에 없으면 발행이 통째로 막힌다(0904 랩디).
+    expect(Object.keys(AGENT_MSG_TYPE_TO_USAGE_KEY).sort()).toEqual(['G', 'K', 'KL', 'KS', 'L', 'M', 'S']);
+    // 변환표의 모든 코드는 단가가 붙는 유형키로 간다 — 하나라도 아니면 그 코드가 0원이 되거나 발행을 막는다.
+    for (const key of Object.values(AGENT_MSG_TYPE_TO_USAGE_KEY)) {
+      expect(BILLING_TYPES.find((t) => t.key === key)?.agentPriceColumn, `${key}에 발송ID 단가 컬럼이 없다`).toBeTruthy();
+    }
   });
 });
 
@@ -1458,5 +1466,79 @@ describe('findBlockingPendingRows — 발행 차단 대기 판정 (2026-07-31)',
   it('대기 0이거나 행이 없으면 빈 배열 = 발행 통과', () => {
     expect(findBlockingPendingRows([row({ pending: 0 })], { now: NOW })).toEqual([]);
     expect(findBlockingPendingRows([], { now: NOW })).toEqual([]);
+  });
+});
+
+/**
+ * ★ 2026-09-04 카카오 실패 전환분(KS·LMS 대체 KL) 청구 축 편입 — 서수란 접수 `cmtmlfbr108yojnot0bb4bxoi`(랩디).
+ *
+ * 게이트웨이는 알림톡 실패로 나간 문자를 `KS`(SMS 대체)·`KL`(LMS 대체)로 적재한다.
+ * 그 코드가 청구 유형 축에 없어 `agentUsageKey`가 원본 코드를 그대로 유형키로 남겼고,
+ * **단가 정의도 없고 단가를 입력할 칸도 없어** 발행이 두 사유로 동시에 막혔다
+ * (`UNBILLABLE_TYPE_KEY` + `AGENT_UNIT_PRICE_MISSING`). 실측 = 랩디 V0001 8월 KL 성공 40건.
+ *
+ * 전환분의 실체는 그 문자 자체이므로 **문자 단가로 청구한다**(별도 단가 컬럼을 만들지 않는다 —
+ * 쓰는 회사가 한 곳인데 전 고객사 단가 화면에 칸을 둘 늘리면 0814에 정리한 소음이 되살아난다).
+ */
+describe('카카오 전환분 KS·KL — 문자 유형으로 흡수 (2026-09-04 랩디)', () => {
+  it('전환 코드가 문자 유형키로 매핑된다', () => {
+    expect(agentUsageKey('KS')).toBe('SMS');
+    expect(agentUsageKey('KL')).toBe('LMS');
+    expect(AGENT_MSG_TYPE_TO_USAGE_KEY.KS).toBe('SMS');
+    expect(AGENT_MSG_TYPE_TO_USAGE_KEY.KL).toBe('LMS');
+  });
+
+  it('원래 코드는 그대로 — 흡수가 기존 매핑을 덮지 않는다', () => {
+    expect(agentUsageKey('S')).toBe('SMS');
+    expect(agentUsageKey('L')).toBe('LMS');
+    expect(agentUsageKey('K')).toBe('KAKAO');
+    expect(agentUsageKey('G')).toBe('BRAND');
+  });
+
+  it('매핑에 없는 코드는 여전히 원본 그대로 남는다 — 새 유형이 조용히 0원이 되지 않게', () => {
+    expect(agentUsageKey('ZZ')).toBe('ZZ');
+  });
+
+  it('전환 실적이 있어도 발행이 안 막힌다 — 단가 정의·발송ID 단가 둘 다 (접수 실물 재현)', () => {
+    const rows: BillingUsageRow[] = [
+      { channel: 'agent', itemDate: '2026-08-30', typeKey: agentUsageKey('KL'), userId: null, agentSendId: 'V0001', total: 14, success: 13, fail: 1, pending: 0 },
+    ];
+    const agentPrices: AgentUnitPriceRow[] = [
+      { id: 'a1', agent_send_id: 'V0001', cost_per_sms: 7.2, cost_per_lms: 23.5, cost_per_mms: 50, cost_per_kakao: 4.5, cost_per_brand: null },
+    ];
+    const priced = priceBillingRows(rows, {}, agentPrices, 'vat_excluded');
+    expect(priced.unbillableTypes, '전환분 유형에 청구 단가 정의가 없다 = 발행 차단').toEqual([]);
+    expect(priced.missingAgentPrices, '전환분에 발송ID 단가가 안 붙는다 = 발행 차단').toEqual([]);
+  });
+
+  it('전환분은 그 문자의 단가로 청구된다 — LMS 대체 = LMS 단가', () => {
+    const rows: BillingUsageRow[] = [
+      { channel: 'agent', itemDate: '2026-08-30', typeKey: agentUsageKey('KL'), userId: null, agentSendId: 'V0001', total: 14, success: 13, fail: 1, pending: 0 },
+      { channel: 'agent', itemDate: '2026-08-30', typeKey: agentUsageKey('KS'), userId: null, agentSendId: 'V0001', total: 3, success: 2, fail: 1, pending: 0 },
+    ];
+    const agentPrices: AgentUnitPriceRow[] = [
+      { id: 'a1', agent_send_id: 'V0001', cost_per_sms: 7.2, cost_per_lms: 23.5, cost_per_mms: 50, cost_per_kakao: 4.5, cost_per_brand: null },
+    ];
+    const priced = priceBillingRows(rows, {}, agentPrices, 'vat_excluded');
+    const kl = priced.items.find((i) => i.typeKey === 'LMS');
+    const ks = priced.items.find((i) => i.typeKey === 'SMS');
+    expect(kl?.unitPrice).toBe(23.5);
+    expect(kl?.amount).toBe(13 * 23.5);
+    expect(ks?.unitPrice).toBe(7.2);
+    expect(ks?.amount).toBe(2 * 7.2);
+  });
+
+  it('전환분과 일반 문자가 같은 날 같은 발송ID면 한 줄로 합쳐진다 — 청구서에 유형이 갈리지 않게', () => {
+    const rolled = rollupAgentRowsForBilling(
+      [
+        { agent_send_id: 'V0001', period: '2026-08-30', msg_type: 'L', sent: 10, success: 10, fail: 0, pending: 0 } as any,
+        { agent_send_id: 'V0001', period: '2026-08-30', msg_type: 'KL', sent: 14, success: 13, fail: 1, pending: 0 } as any,
+      ],
+      new Set(['V0001']),
+    );
+    const lms = rolled.rows.filter((r) => r.typeKey === 'LMS');
+    expect(lms, '전환분이 별도 행으로 남으면 같은 단가의 줄이 둘로 갈린다').toHaveLength(1);
+    expect(lms[0].success).toBe(23);
+    expect(lms[0].total).toBe(24);
   });
 });

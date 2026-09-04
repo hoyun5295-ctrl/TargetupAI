@@ -35,6 +35,11 @@ import ReviewsEditor from './editors/ReviewsEditor';
 export type EditorProps<P> = {
   props: P;
   onUpdate: (patch: Partial<P>) => void;
+  /**
+   * ★ 2026-09-04 섹션 구도. 구도마다 소비하는 속성이 달라 **컨트롤 표시 여부**를 가르는 편집기만 받는다
+   * (선택 속성이라 안 쓰는 편집기는 무영향). 지금 소비처 = CtaEditor 배치.
+   */
+  treatment?: string;
 };
 
 export default function SectionPropsEditor({
@@ -49,7 +54,7 @@ export default function SectionPropsEditor({
     case 'coupon':     return <CouponEditor     props={section.props as any} onUpdate={onUpdate} />;
     case 'countdown':  return <CountdownEditor  props={section.props as any} onUpdate={onUpdate} />;
     case 'text_card':  return <TextCardEditor   props={section.props as any} onUpdate={onUpdate} />;
-    case 'cta':        return <CtaEditor        props={section.props as any} onUpdate={onUpdate} />;
+    case 'cta':        return <CtaEditor        props={section.props as any} onUpdate={onUpdate} treatment={section.treatment} />;
     case 'video':      return <VideoEditor      props={section.props as any} onUpdate={onUpdate} />;
     case 'store_info': return <StoreInfoEditor  props={section.props as any} onUpdate={onUpdate} />;
     case 'sns':        return <SnsEditor        props={section.props as any} onUpdate={onUpdate} />;

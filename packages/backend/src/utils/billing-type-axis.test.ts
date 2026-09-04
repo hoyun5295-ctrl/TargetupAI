@@ -102,7 +102,16 @@ describe('청구 유형 축 — 추가 시 빠뜨림 차단', () => {
   it('큐 코드가 중복되지 않는다 — 한 코드가 두 유형으로 갈리면 매핑이 덮어써진다', () => {
     const smsq = BILLING_TYPES.map((t) => t.smsqCode).filter(Boolean);
     expect(new Set(smsq).size).toBe(smsq.length);
-    const agent = BILLING_TYPES.map((t) => t.agentCode).filter(Boolean);
-    expect(new Set(agent).size).toBe(agent.length);
+    // ★ 2026-09-04 별칭(카카오 전환분 KS·KL)도 같은 코드 공간이다 — 본 코드와도, 다른 별칭과도
+    //   겹치면 한 코드가 두 유형으로 갈리고 뒤에 등재된 쪽이 매핑을 덮는다(조용한 오청구).
+    const agent = BILLING_TYPES.flatMap((t) => [t.agentCode, ...(t.agentCodeAliases || [])]).filter(Boolean);
+    expect(new Set(agent).size, `에이전트 코드가 중복된다: ${agent.join(', ')}`).toBe(agent.length);
+  });
+
+  it('별칭은 단가 컬럼이 있는 유형에만 붙는다 — 없으면 흡수해도 발행이 그대로 막힌다', () => {
+    const broken = BILLING_TYPES
+      .filter((t) => (t.agentCodeAliases || []).length > 0 && !t.agentPriceColumn)
+      .map((t) => t.key);
+    expect(broken, `별칭을 흡수할 단가 컬럼이 없다: ${broken.join(', ')}`).toEqual([]);
   });
 });

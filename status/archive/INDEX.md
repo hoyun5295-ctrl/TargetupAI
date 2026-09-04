@@ -9,6 +9,7 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-09-04 | 🟢 직원 접수 3건(이메일 히어로 사진 유실·텍스트 카드 자동 번호·쿠폰 할인 타입) — 세션 포인트 카드 원문(0904(2) 회전) | 이메일 히어로 CSS 배경 img 태그 텍스트 밴드 수신함 누락 EMAIL_PHOTO_AS_IMG_TAG 포인트 장식 section.motif EMAIL_SECTION_MOTIF_OFF 쿠폰 할인 타입 고아 속성 DM_REMOVED_DEAD_CONTROLS B-0904-1 B-0904-2 B-0904-3 VML MSO 조건부 주석 | [TASKS_2026-09.md](TASKS_2026-09.md) |
 | 2026-08-28~29 | 🟢 접수 5건(이메일 캠페인 2·대행발송 3) + 충전 승인 문자 링크 신설 — 세션 포인트 카드 원문(0902 회전) | 이메일 편집기 닫기 버튼 min-w-0 overflow-hidden ESC 히어로 높이 em-hero !important 대행발송 치환 미리보기 메일 MMS 첨부 3장 300KB 충전 승인 문자 링크 CHARGE_APPROVAL_NOTIFY_PHONES deposit-approve agent-charge-core 무로그인 승인 단축 URL 비추적 가드 B-0829-1 B-0828-7 B-0828-8 Codex 적대 3R | [TASKS_2026-08.md](TASKS_2026-08.md) |
 | 2026-08-14(2) | 🟢 상시 로드 감축 50.0→40.0KB + 원스텝 과금 경로 정정(Codex 적대 13R approve) + Codex 런처 사망 원인 규명 | 룰 병합 상시로드 감축 harness-check grep -c 이중출력 가설 예외 no_guess_strict 설계 예외 원스텝 one-step content-interview isChargedByKey isCreditEnabledStrict deductCreditOutcome DeductOutcome not_applicable sessionDetached QUOTE_CHANGED QUOTE_REQUIRED expectedTotal generating lease 선점 토큰 advisory lock 풀 고갈 공허 통과 indexOf -1 주입 검증 codex timeout 런처 사망 | [TASKS_2026-08.md](TASKS_2026-08.md) |
 | 2026-08-14 | 🟢 STATUS §2 카드 회전 8장 + 완료분 잔여 표 폐지 (상시 로드 감축) | 마케팅 플래너 무료 메시징 REMAINING_EXPR billableQuantity 여정 trigger_event 프리셋 정산 크로커다일 failed 305 싱크에이전트 PREINSTALL-QUESTIONNAIRE 브랜드메시지 resolveRefundAxes B0227 mysql-refund-sweeper 대체문안 alimtalk-fallback refund_key image_link_url data-hanjullo-wrap 팝폰 완료분 잔여 뱃지 | [TASKS_2026-08.md](TASKS_2026-08.md) |
