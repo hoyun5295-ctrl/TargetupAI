@@ -626,3 +626,69 @@ v4에서 결재로 올렸다가 v4.1이 코드 근거로 **결정한 것**(재�
 - **테스트**: 마스커 픽스처(별칭·상품 토큰·표식·형식·위생) · 예시 CT 순수(코드 정규화·목록 파싱·제안 매칭·원천 변환·병합) · 불변식(kind 분리 · 갤러리 경로 무변경 · 마스커 DB 0 · 쓰기는 소유 CT만 · 게이트 순서).
 - **적대 리뷰(5축 53에이전트 · 2렌즈 재검증)로 확정된 13건을 뿌리 4개로 정정**: ① 마스킹이 "차단 목록 + 같은 정규식으로 검사"라 fail-open(8건: footer.notes 법정 표기 · 구분자 없는 전화·유니코드 이메일·무스킴 도메인 · caption 상품명 · 붙여쓴 상품명 · 표식 안쪽 재치환 · 날짜 표기 · 일반 명사 별칭) → 법정 영역 통째 제외 · name+caption 전량 〔상품〕 + 띄어쓰기 무시 치환 · 표식 보호(중첩 id) · 경계 규칙 · **위생 검사는 마스킹과 다른 더 넓은 탐지기**(7자리 숫자열·@·도메인 꼬리·신고번호·주소·대표자·변수·모델명) ② 근거 건수 = 원천 전량이 아니라 **실린 수**(`exemplars.picked` · `exemplarTotal` 별도) ③ 삭제 실패를 404로 접던 것 → 3값(not_found·table_missing·db_error) ④ 화면 toast 의존 재요청 루프 → ref 고정 · 같은 DM 코드 중복은 서버가 1행으로 합침 · 삭제 무장 5초 자동 해제. 부수 = 실물 예시 라우트 회사 ENV 고정(요청 companyId 무시) · 중복 판정 실패 시 저장 안 함(fail-closed) · meta.source.id = 행 id 소문자.
 - **미검증**: 운영에서 29건 코드 붙여넣기 실측(제외 사유 0인지 · 별칭 자동 추출이 각 브랜드에서 충분한지 = 마스킹본 육안) · 예시 40건 이상일 때 프롬프트 예산 9000자 안에서 어떤 5건이 뽑히는지(같은 업종군 우선 · 최신 DB 우선).
+
+## 21. 핫픽스 — 운영 첫 DM 빈 껍데기 (2026-09-05(3) · [B-0905-2](../status/BUGS.md))
+
+- **사실**: §4 A-10·A-11이 상품·이미지 후보를 넓혔지만, 그 아래 공용 크롤이 본문을 200KB에서 잘라 큰 홈페이지(이니스프리 376KB)에서는 상품 링크가 잘린 뒷부분에 있었다. 프로토타입은 이 절단 위에서 돌았고 산출물이 "재료 35% 격차"로 보였던 것의 일부가 이것이다.
+- **정정**: 공용 함수 기본값은 그대로 두고(소비처 5곳 무변경) 선택 인자로 상한을 열었다. 아웃리치 값 = `OUTREACH_FETCH_OPTS`(800KB · 10초) 한 곳 · jobs·media의 모든 `fetchHtmlGuarded` 호출이 이 값을 싣는지 불변식이 밟는다. 카운트다운은 종료일이 있을 때만. 이미지 후보에서 작은 속성·메뉴 경로(menu·nav·gnb)를 빼고 상한 24·시도 n×3.
+- **미검증**: 운영 재생성 1건(이니스프리). 800KB로도 잘리는 홈(1MB 이상 SPA)은 상품 0이 그대로다 = 재료 원천 확장(브레인스토밍 수렴안)에서 닫는다.
+
+## 22. 퀄리티 대폭 상향 — 브레인스토밍 수렴안과 구현 (2026-09-05(3) · Harold "이 퀄리티를 어마어마하게 끌어올려야 영업이 될 거 아냐 · 네이버 API · 방법을 끝까지 찾아라")
+
+### 22-1. 회의(COLLAB §1 · 5역할 읽기 전용 · 1차 → 교차 토론 1R → 회의론자 최종 검증 · 11에이전트)
+- **전제 정정(회의론자)**: 프로토 심사 63건은 0905 코드 이전 판정이라 "후처리 45 / 재료 35 / few-shot 20"을 예산 배분에 쓰면 이미 고친 자리에 다시 투자한다. 다섯 안의 최대 항목(아트디렉션)은 세 역할이 "props에 구도 키를 얹는다"고 썼는데 **두 렌더러는 섹션 최상위(`section.treatment`·`section.background`)를 읽는다** — 그대로 배포하면 출력 바이트 무변화 + fail-closed classic으로 "효과 없음"으로 오판된다.
+- **수렴(어디를 고치면 산출물이 달라지는가)**: ① 이미 모은 재료를 버리는 자리 3곳(구도 키 0건 · 갤러리 비율 폐기 · 갤러리 링크 0) ② 핫픽스 후보 24가 운영 호출부(12)에서 작동하지 않던 미완결 ③ 사람이 되돌릴 길(재료 재선택 · 블록 숨김 · 화면 안 미리보기)이 0. 공급 증산(목록 1홉·네이버)은 낭비 차단 뒤로.
+- **네이버**: 커머스 API는 판매자 본인 자격(client_credentials + type=SELF)이라 영업 대상 스토어를 못 읽는다 → 축 폐기(4역할 일치). 쇼핑 검색 API는 **권한이 붙은 새 키로 `shop.json` 1회 호출(코드 0 · 30분)** 이 선행 게이트이고, 그 전에 "우리 파서가 정가/할인가 쌍을 몇 건 내는가"를 재는 것이 먼저다(`extractProducts`·`parseProductPage`가 이미 쌍을 뽑는다). 취소선은 **수집 시점 혜택 표기**라 정책 결재 전에는 켜지 않는다.
+- **접은 것**: 재료 수집을 확정 앞으로 옮기기(상태머신 재설계 · 두 역할 자진 철회) · 캡션 키 정정(공용 렌더러 변경 · DM은 caption을 화면에 찍는다 = 별건) · EMAIL 갤러리 layout 장수 연동(perGallery 3 고정이라 효과 0) · 5어절 차용 검사·헤드라인 토큰 겹침(한국어 공백 토큰 fail-open · 재판정 데이터 뒤) · 인라인 캔버스 렌더(27종 분기 위험 · iframe이 1안) · 로고 축(불변 11).
+
+### 22-2. 구현(전량 코드 완료 · DDL 0 · ENV 0)
+| 축 | 무엇 | 어디 |
+|---|---|---|
+| C1 룩 | 순수 CT `applyOutreachLook(sections, channel, dims)` — hero(이미지 없음 typographic · 세로 split) · text_card(lead → framed → soft 리듬) · carousel(focus+soft → list) · gallery(가로 3장 mosaic · DM만) · coupon(ticket/spotlight) · countdown(banner) · cta(마지막 앞 bar+tint). 값은 `TREATMENTS`·`EMAIL_TREATMENTS`를 import해 그 안에서만 · classic 미명시 · props 무변경 · **섹션 최상위에 쓴다** | `utils/sales-outreach-look.ts` · produce.ts(prune 뒤 DM·EMAIL 각 1줄) |
+| C1-3 brand_kit | 항상 만든다(`art_direction` 그릇 · 업종군 표 fashion/beauty/commerce) · 대비 미달이면 색만 뺀다 · 키 화이트리스트 2개 · **logo_url 0**(불변 11) | `buildOutreachBrandKit` · produce.ts createDm |
+| C1-4 제안 메일 | 아트디렉션 하드코딩 한 벌 → 같은 업종군 표 | produce.ts `assembleProposalEmail` |
+| C2-1 갤러리 링크 | `link_url` = 코너 딥링크(기획전·이벤트·컬렉션·신상·베스트·룩북·세일) 없으면 홈 — 두 렌더러가 이미 읽는다 | produce.ts `galleryLinkOf` |
+| C2-2 CTA 재바인딩 | 앞 CTA와 같은 URL이면 남은 딥링크 → 홈 → 버튼 제거(첫 버튼은 유지 · 섹션 삭제 0) | produce.ts `fillCta(used)` |
+| C2-3 비율 군 | `OutreachFillMedia.gallery`가 폭·높이를 싣고, 히어로 = DM 포스터→가로형 / EMAIL 가로형 우선 · 묶음은 같은 비율 군끼리(큰 군부터 · 어느 군도 2장 미만이면 합친다) | produce.ts `aspectClassOf`·`takeGallery` |
+| C3-1 후보 24 | 운영 호출부 12 → 24(핫픽스 기본값과 일치) | jobs.ts 크롤 |
+| C3-2 예산 | `pickStoredImagesDetail(deadlineMs 45초)` · stats에 galleryTried·galleryTimedOut·elapsedMs | media.ts · produce.ts `collectOutreachMedia` |
+| C4-1 미리보기 | dm asset에 `viewerUrl`(정규 뷰어 · 단축 도메인 아님)·`sections`·`sectionsBase`·`look` 동승 → 검토 DM 탭이 sandbox iframe으로 연다(이메일 탭 선례 · 스크립트 0) | jobs.ts producing_dm · 모달 DM 탭 |
+| C4-2 재료 재선택 | `POST /jobs/:id/materials {products[], gallery[]}` — 실측 통과 사본 URL 화이트리스트 · `brand_profile.mediaSelection`(최상위 키 얕은 병합) · ready → producing_dm(regen.from=materials · 상한 5) · 제목·서두 보존 · **재수집(이미지 재생성)이면 선택을 지운다** | jobs.ts `selectOutreachMaterials` · review.ts · 모달 재료 탭 |
+| C4-3 블록 숨김 | `POST /jobs/:id/sections {kind, hidden['type#n']}` — `stage_results.section_overrides[kind]` override 데이터 · DM = 저장 섹션 재발행(AI 0) · 이메일 = 재조립(AI 0) · **다음 재생성 뒤에도 같은 순번에 재적용**(같은 조립 경로 · 불변 16) · header·footer 금지 · 3개 이상 잔존 · 재분석이면 지운다 | jobs.ts `hideOutreachSections` · produce.ts preset 경로 · 모달 숨김 목록 |
+| C4-4 품질 경고 | `assessOutreachQuality` — 상품 0/부족 · 갤러리 부족 · CTA 전부 홈 · 법정 표기 없음 · 섹션 부족 · 시안 없음 · 룩 0. GET 응답 `quality.warnings` · **잠금 5종과 별도 축(불변 3) · 발송을 막지 않는다** · 화면은 바로가기 | jobs.ts `getOutreachJob` · 모달 |
+| 재생성 축 | producing_email에서 제목·서두(regenIntro = email) ↔ 브랜드 시안(regenBrand = email·materials) 분리 · 시안 payload에 `brandSectionsBase`(override 전)·`brandSections`(후)·`brandLook` | jobs.ts |
+
+- **stage_results·brand_profile 키 추가(§8-2 사전 보강 · DDL 0)**: `stage_results.section_overrides.{dm,email}.hidden[]` · `stage_results.regen.from ∈ {copy,image,dm,email,materials,sections_dm,sections_email}` · `stage_results.regen_seq.materials` · `brand_profile.mediaSelection.{products[],gallery[],selectedAt,selectedBy}`. asset payload 추가 = dm: `viewerUrl·sections·sectionsBase·look·hiddenApplied·hiddenMissed` · email_html: `brandSectionsBase·brandLook·hiddenApplied·hiddenMissed` · studio_image.media: `galleryTried·galleryTimedOut·elapsedMs`.
+- **엔드포인트(§8-3 보강)**: `POST /api/sales-outreach/jobs/:id/materials` · `POST /api/sales-outreach/jobs/:id/sections` (둘 다 ceo 게이트 = 효과 함수 첫 await `assertOperator` · 감사 `sales_outreach.materials`·`sales_outreach.sections`).
+- **테스트**: `sales-outreach-look.test.ts`(허용표 안 · 최상위 · props 무변경 · **렌더 HTML 지표로 전후 = data-treatment 0→n · dm-bgx 0→n · 이메일 밴드 0→n** · brand_kit 키·logo_url 0 · enum) · `sales-outreach-review.test.ts`(선택 화이트리스트·순서·무효 · override 키·보호·최소 잔존·재적용·missed · 품질 경고) · produce-pure(+비율 군·링크·CTA 재바인딩) · media(+예산·시도 수) · 불변식(+구도 최상위 · 배경면 2종 · 순수 · 후보 24 · 재생성 축 · 라우트 2 · 품질은 잠금 밖).
+
+### 22-3. 미검증 · Harold가 정할 것
+- 운영 재생성 1건(이니스프리)의 육안 — 룩이 실린 화면이 "보낼 수 있는 수준"인가(예/아니오 + 사유 3개 이내). 합격선 숫자(구도 attr ≥ 섹션의 절반 · 유니크 CTA ≥ 2 · 갤러리 ≥ 4 · 섹션 ≥ 7)는 회의 초안이지 계약이 아니다 — 첫 10건 뒤 재조정.
+- **결재 2건**: ① 불변 18 개정(목록 1페이지 1홉 · 후보 선정은 상품 링크 밀도) ② 가격 취소선 = 수집 시점 혜택 표기 정책(켜면 세일이 끝난 뒤 우리 산출물이 거짓이 된다 · 고지 문구 동반).
+- **네이버**: 쇼핑 검색 권한이 실제로 붙은 새 키(Client ID/Secret) → `shop.json` 1회(코드 0). 그 전에 우리 파서 가격쌍 실측(§22-4 표의 "혜택가").
+- 문장 축(과장·상투어·어미 단조)은 이번 수렴안이 못 고친다 — 실물 예시 DB 추가분 투입 여부.
+
+### 22-4. 전후 대조 실측 (C0 · `scratch/proto/before-after.ts` · 같은 AI 산출(2회전 저장분)에 옛 후처리 ↔ 새 후처리 · 로컬 · 사본 저장 0 · 2026-09-05)
+| 업체 | 재료(갤러리 통과 · 상품 통과 · 혜택가 쌍 · 딥링크 키) | DM: 섹션 · 구도 attr 전→후 · 배경면 전→후 · 유니크 링크 전→후 · 갤러리 img | 이메일: 블록 · 구도(배정) 전→후 · 밴드 전→후 · 유니크 링크 전→후 |
+|---|---|---|---|
+| 이니스프리 | 8(시도 8) · 6 · 0 · 6 | 10 · 0→6 · 0→2 · 8→10 · 4 | 9 · 0→4 · 0→2 · 7→8 |
+| 29CM | 8(시도 9) · 4 · 0 · 6 | 10 · 0→5 · 0→3 · 6→8 · 7 | 9 · 0→3 · 0→2 · 4→5 |
+| 커버낫 | 8(시도 8) · 6 · 0 · 0 | 10 · 0→5 · 0→2 · 8→8 · 7 | 9 · 0→5 · 0→3 · 7→7 |
+- 읽는 법(after = 실제 발행 형태인 **scroll 한 페이지**로 렌더 · before = 옛 slides): **구도·배경면은 렌더 HTML에서 센 값**(DM = `data-treatment=`·`class="…dm-bgx-*"` · 이메일 = 밴드 td · 이메일 구도는 attr이 없어 배정 수). 옛 후처리에서는 세 업체 전부 0이었다 = "밋밋하다"의 실체. 유니크 링크 증가 = 갤러리 link_url + CTA 재바인딩.
+- **혜택가 쌍 = 3업체 전부 0**(800KB 상한 뒤에도). 0905 전량 null의 원인은 절단이 아니라 이 사이트들의 목록·상세 마크업에서 우리 파서가 정가/할인가 쌍을 못 뽑는 것이다 → 취소선 축은 정책 결재(§22-3)와 별개로 **재료 자체가 없다**. 네이버 쇼핑 검색이 열려도 slug 대조가 되는 상품에만 붙는다.
+- 갤러리 img 수·섹션 수는 전후 동일(룩은 구성을 바꾸지 않는다 = 의도). 커버낫은 딥링크 키 0이라 CTA가 전부 홈 → 품질 경고 `CTA_ALL_HOME`이 그 자리를 가리킨다.
+- 육안 파일(로컬): `scratch/proto/out/<업체>/ba-before-dm.html` ↔ `ba-after-dm.html` · `ba-before-email.html` ↔ `ba-after-email.html`.
+
+### 22-5. 적대 리뷰(5축 탐색 → 지적 26건 → 2렌즈 반박 · 57에이전트) 정정 기록
+| 판정 | 지적 | 정정 |
+|---|---|---|
+| critical | `resetJobTo`의 brand_profile 자리표시자 `$` 누락(재료 재선택·**다시 읽기(B-7)** 전부 500) — 패치 스크립트가 `String.replace`의 `$$` 규칙에 걸려 `$` 하나를 잃었다 | `$${params.length}` 복원 · 불변식 `[^$]${params.length}` 0건 · `= \d+::jsonb` 0건 |
+| high | 슬라이드 확장(`expandSlidePagesForSwipe`)이 갤러리의 mosaic·link_url·alt를 버린다 = C1·C2-1이 발행물에 도달하지 않는다 · sandbox iframe은 슬라이드 넘김(스크립트)이 죽어 첫 장만 보인다(3건 같은 뿌리) | **아웃리치 DM = scroll 한 페이지 고정**(`OUTREACH_DM_LAYOUT_MODE` · 룩 CT 소유 · 되돌리기 = 상수 하나) · 룩 테스트가 "갤러리 단독 페이지 배열"을 scroll로 렌더해 `data-treatment="mosaic"`·딥링크 href 3건을 센다 |
+| high | 폴링이 심은 낡은 숨김 키(재생성으로 순번 소멸)가 [숨김 반영]을 영구 400으로 막는다 | 시딩 시 현재 산출물 키(`sectionKeysOf(base)`)로 필터 |
+| medium | 재적용 바닥 부재 — 재생성으로 줄어든 배열에 저장 키를 적용하면 cta 없는 DM | `applySectionOverrides`가 최소 잔존·cta 보존을 깨면 **전부 건너뛴다**(skipped) · 화면 안내 |
+| medium | `validateSectionOverride` 상한 검사가 루프 뒤(거대 배열 O(n²)) | 상한을 루프 전에 · Set |
+| medium | preset(숨김 재발행) 경로가 근거(참조 골격·실물 예시 수·혜택 정제 수)를 0으로 덮는다 | 직전 dm 자산 값 승계(이메일 축 선례) |
+| medium | 이미지 재생성(재수집)이 `section_overrides`를 안 지운다(불변 27 문구와 불일치) | `k === 'image'`면 `section_overrides`도 clear |
+| medium | 상품을 사람이 전부 뺀 경우 NO_PRODUCTS 문구가 "실측 실패"로 읽힌다 · 재료 없는 잡으로 넘어가면 탭 죽은 상태 · '시안 다시 생성' 바로가기가 제목·서두도 지운다 | 문구를 실측 실패/제외로 분기 · 탭 초기화 + 폴백 effect · 라벨을 이메일 탭 버튼과 동일하게 |
+| low | `hideOutreachSections`에 상한 없음 · dm 숨김 반영이 확인 모달 없이 옛 DM 링크를 닫는다 · 체크박스 접근 이름 · look 통계가 숨김 전 기준 | 상한 10회(`regen_seq.sections`) · dm은 확인 모달 1회 · `<label>` · 발행본 기준 `lookStatsOf(rebuilt.sections)` |
+| 불수용 | 불변식 문자열 앵커 과결합 · `/menu|nav|gnb/` 경로 제외가 외식 업종 갤러리를 지운다 | 전자는 이 파일의 기존 규약(원문 고정 = 기능) · 후자는 재현 입력이 없고 크기 신호(isTinyByAttr)는 속성이 둘 다 있을 때만 발동해 대체가 안 된다 — 기록만 |

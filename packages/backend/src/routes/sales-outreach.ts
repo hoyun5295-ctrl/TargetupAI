@@ -16,7 +16,7 @@ import {
   OutreachError, isOutreachMigrationPending,
   sendOutreachMailForJob, sendOutreachTestMail, confirmOutreachMailArrived, markOutreachForwarded,
   editOutreachCopy, editOutreachSubject, rebuildOutreachEmail, regenerateOutreachAsset, recrawlOutreachJob,
-  dismissOutreachJob, countOutreachBadge,
+  dismissOutreachJob, countOutreachBadge, selectOutreachMaterials, hideOutreachSections,
 } from '../utils/sales-outreach-jobs';
 import { outreachMailTo, outreachMailToList, isOutreachMailerReady, outreachTestMailDomains } from '../utils/outreach-mailer';
 import { getOutreachContext } from '../utils/sales-outreach-produce';
@@ -338,6 +338,30 @@ router.post('/jobs/:id/rebuild-email', async (req: Request, res: Response) => {
 });
 
 // ★ B-13 실패 건 숨기기(뱃지 제외 · 삭제 아님)
+// ★ 0905(3) C4-2 재료 다시 고르기(ready → producing_dm · 실측 통과 사본 URL 화이트리스트 · 제목·서두 보존)
+router.post('/jobs/:id/materials', async (req: Request, res: Response) => {
+  try {
+    const r = await selectOutreachMaterials(req.params.id, req.body, req.user?.userId);
+    console.log('[sales-outreach] 재료 재선택:', req.params.id, r.products, r.gallery, r.seq, req.user?.userId);
+    audit(req, 'materials', req.params.id, { products: r.products, gallery: r.gallery, seq: r.seq });
+    res.status(202).json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, '재료 재선택');
+  }
+});
+
+// ★ 0905(3) C4-3 블록 숨기기(override 데이터 · DM 재발행/이메일 재조립 · AI 0 · 재생성 뒤 재적용)
+router.post('/jobs/:id/sections', async (req: Request, res: Response) => {
+  try {
+    const r = await hideOutreachSections(req.params.id, { kind: String(req.body?.kind || ''), hidden: req.body?.hidden }, req.user?.userId);
+    console.log('[sales-outreach] 블록 숨김:', req.params.id, req.body?.kind, r.hidden, req.user?.userId);
+    audit(req, 'sections', req.params.id, { kind: String(req.body?.kind || ''), hidden: r.hidden });
+    res.status(202).json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, '블록 숨김');
+  }
+});
+
 router.post('/jobs/:id/dismiss', async (req: Request, res: Response) => {
   try {
     await dismissOutreachJob(req.params.id, req.user?.userId);

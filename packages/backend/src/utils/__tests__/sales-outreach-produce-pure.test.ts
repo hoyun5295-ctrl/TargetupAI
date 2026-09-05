@@ -88,21 +88,27 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     sec('gallery', { title: 'g2' }, 4), sec('product_carousel', { title: 'p2' }, 5), sec('cta', { buttons: [{ label: '쿠폰 받기' }, { label: '더 보기' }] }, 6),
     sec('countdown', { urgency_text: 'x', end_datetime: '9월 30일' }, 7), sec('footer', {}, 8),
   ];
-  it('DM: hero=포스터 · 갤러리 4장/그 다음 1장은 비움 · 상품 3개/그 다음 1개는 비움 · CTA 딥링크 · countdown 형식 검증 · footer 법정 표기', () => {
+  it('DM: hero=포스터 · 갤러리 4장/그 다음 1장은 비움 · 상품 3개/그 다음 1개는 비움 · CTA 딥링크 · 마감일 없는 countdown은 섹션째 제거 · footer 법정 표기', () => {
     const r = fillOutreachDmMedia(sections, media, 'DM');
     const p = (i: number) => r.sections[i].props as any;
+    expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'product_carousel', 'gallery', 'product_carousel', 'cta', 'footer']);
     expect(p(0).brand_name).toBe('브랜드');
     expect(p(1).image_url).toBe(media.posterUrl);
     expect(p(2).images).toHaveLength(4);
     expect(p(2).images[0].alt).toBe('브랜드 이미지');
+    expect(p(2).images.every((x: any) => x.link_url === 'https://b.com/')).toBe(true); // 코너 딥링크 없음 → 홈(C2-1)
     expect(p(4).images).toEqual([]);
     expect(p(3).products).toHaveLength(3);
     expect(p(3).products[0]).toMatchObject({ name: '상품0', link_url: 'https://b.com/p/0' });
     expect(p(5).products).toEqual([]);
     expect(p(6).buttons[0]).toMatchObject({ label: '쿠폰 받기', url: 'https://b.com/coupon' });
     expect(p(6).buttons[1].url).toBe('https://b.com/');
-    expect(p(7).end_datetime).toBe('');
-    expect(p(8)).toMatchObject({ legal_text: media.legal.legal, cs_phone: '1588-1234', show_unsubscribe_link: true });
+    expect(p(7)).toMatchObject({ legal_text: media.legal.legal, cs_phone: '1588-1234', show_unsubscribe_link: true });
+  });
+  it('countdown은 실재하는 미래 종료일이 있을 때만 남는다', () => {
+    const future = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString().slice(0, 10) + 'T23:59:00';
+    const r = fillOutreachDmMedia([sec('countdown', { urgency_text: '마감 임박', end_datetime: future }, 0), sec('countdown', { urgency_text: 'x', end_datetime: '2020-01-01T00:00:00' }, 1)], media, 'DM');
+    expect(r.sections.map((s) => (s.props as any).end_datetime)).toEqual([future]);
   });
   it('EMAIL: hero=갤러리 첫 장 · 갤러리 3장씩 · 라벨 8자 · 수신거부 링크 off', () => {
     const r = fillOutreachDmMedia(sections, media, 'EMAIL');
@@ -111,7 +117,41 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     expect(p(2).images.map((x: any) => x.url)).toEqual(media.gallery.slice(1, 4));
     expect(p(4).images).toEqual([]);
     expect(p(6).buttons[0].label.length).toBeLessThanOrEqual(8);
-    expect(p(8).show_unsubscribe_link).toBe(false);
+    expect(p(7).show_unsubscribe_link).toBe(false);
+  });
+  it('C2-3 비율 군: 히어로에 쓴 사진 제외 · 같은 군끼리 묶음(큰 군부터) · EMAIL 히어로 = 첫 가로형 · 갤러리 링크 = 기획전 딥링크', () => {
+    const gal = [
+      { url: 'https://hanjul.ai/sq1.jpg', width: 800, height: 800 }, { url: 'https://hanjul.ai/land1.jpg', width: 1600, height: 900 },
+      { url: 'https://hanjul.ai/land2.jpg', width: 1500, height: 1000 }, { url: 'https://hanjul.ai/sq2.jpg', width: 900, height: 900 },
+      { url: 'https://hanjul.ai/port1.jpg', width: 800, height: 1400 }, { url: 'https://hanjul.ai/land3.jpg', width: 1400, height: 900 },
+    ];
+    const m = { ...media, posterUrl: null, gallery: gal, ctaLinks: { '기획전': 'https://b.com/plan', '쿠폰': 'https://b.com/coupon' } };
+    const secs = [sec('hero', { headline: 'h' }, 0), sec('gallery', {}, 1), sec('gallery', {}, 2), sec('gallery', {}, 3)];
+    const r = fillOutreachDmMedia(secs, m, 'EMAIL');
+    const p = (i: number) => r.sections[i].props as any;
+    expect(p(0).image_url).toBe('https://hanjul.ai/land1.jpg');          // 첫 가로형(sq1을 건너뛴다)
+    expect(p(1).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/land2.jpg', 'https://hanjul.ai/land3.jpg']); // 남은 가로형 2장
+    expect(p(2).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/sq1.jpg', 'https://hanjul.ai/sq2.jpg']);     // 정사각 2장
+    expect(p(3).images).toEqual([]);                                                                                // 세로형 1장 = 2장 미만 → 비움
+    expect(p(1).images[0].link_url).toBe('https://b.com/plan');
+    const dm = fillOutreachDmMedia(secs, { ...m, posterUrl: 'https://hanjul.ai/poster.jpg' }, 'DM');
+    expect((dm.sections[0].props as any).image_url).toBe('https://hanjul.ai/poster.jpg');
+    expect((dm.sections[1].props as any).images).toHaveLength(3); // 가로형 3장(포스터가 히어로라 land1 포함)
+  });
+  it('C2-2 CTA 같은 URL 재바인딩: 앞 CTA와 겹치면 남은 딥링크 → 홈 → 버튼 제거(첫 버튼은 유지)', () => {
+    const m = { ...media, ctaLinks: { '쿠폰': 'https://b.com/coupon', '이벤트': 'https://b.com/event' } };
+    const secs = [
+      sec('cta', { buttons: [{ label: '쿠폰 받기' }, { label: '더 보기' }] }, 0),     // coupon · home
+      sec('cta', { buttons: [{ label: '쿠폰 받기' }, { label: '자세히 보기' }] }, 1),  // coupon 중복 → event · home 중복 → 제거
+      sec('cta', { buttons: [{ label: '보기' }] }, 2),                              // home 중복 · 첫 버튼이라 유지
+    ];
+    const r = fillOutreachDmMedia(secs, m, 'DM');
+    const b = (i: number) => (r.sections[i].props as any).buttons;
+    expect(b(0).map((x: any) => x.url)).toEqual(['https://b.com/coupon', 'https://b.com/']);
+    expect(b(1).map((x: any) => x.url)).toEqual(['https://b.com/event']);
+    expect(b(1)[0].label).toBe('이벤트 보기');
+    expect(b(2)).toHaveLength(1);
+    expect(b(2)[0].url).toBe('https://b.com/');
   });
   it('sectionsFromAiJson — 허용 타입만 · 기본 props 병합', () => {
     const out = sectionsFromAiJson({ sections: [{ type: 'hero', props: { headline: 'x' } }, { type: 'roulette', props: {} }, { type: 'gallery' }] }, ['hero', 'gallery'], 'so');

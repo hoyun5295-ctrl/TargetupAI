@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  readImageSize, extractProducts, extractImageCandidates, discoverProductLinks, findLinkByText, buildCtaLinkMap,
+  readImageSize, extractProducts, extractImageCandidates, discoverProductLinks, findLinkByText, buildCtaLinkMap, pickStoredImagesDetail,
   extractLegal, parseThemeColorFromHtml, parseProductPage, absolutizeAssetUrl, cleanProductName, productKey, decodeHtmlEntities,
 } from '../sales-outreach-media';
 
@@ -108,9 +108,29 @@ describe('extractImageCandidates', () => {
     expect(out.some((u) => u.includes('logo_black'))).toBe(false);
     expect(out.some((u) => u.includes('pinterest'))).toBe(false);
   });
-  it('상한 12', () => {
-    const many = Array.from({ length: 30 }, (_, i) => `<img src="https://cdn.brand.com/${i}.jpg">`).join('');
-    expect(extractImageCandidates(many, BASE)).toHaveLength(12);
+  it('상한 24 · width/height 속성이 둘 다 200 미만이거나 경로가 menu·nav·gnb 폴더면 후보에서 뺀다(메뉴 아이콘)', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `<img src="https://cdn.brand.com/${i}.jpg">`).join('');
+    expect(extractImageCandidates(many, BASE)).toHaveLength(24);
+    const tiny = `<img src="https://cdn.brand.com/menu.jpg" width="114" height="114"><img src="https://cdn.brand.com/display/menu/a1.jpg"><img src="https://cdn.brand.com/gnb/b2.png"><img src="https://cdn.brand.com/big.jpg" width="1200" height="800"><img src="https://cdn.brand.com/unknown.jpg">`;
+    expect(extractImageCandidates(tiny, BASE)).toEqual(['https://cdn.brand.com/big.jpg', 'https://cdn.brand.com/unknown.jpg']);
+  });
+});
+
+describe('pickStoredImagesDetail (C3-2 벽시계 예산 · 시도 수)', () => {
+  const png = (w: number) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]), Buffer.from([(w >>> 24) & 255, (w >>> 16) & 255, (w >>> 8) & 255, w & 255, 0, 0, 0, 100]), Buffer.alloc(2100)]);
+  const fetcher = async (u: string) => ({ buffer: png(u.includes('big') ? 900 : 100), mime: 'image/png', ext: 'png' });
+  const store = (_b: Buffer, meta: { width: number }) => `https://hanjul.ai/c/${meta.width}.png`;
+  it('통과분만 · 시도 수 = 후보 수(상한 n×3) · 예산 0이면 timedOut · 하나도 안 본다', async () => {
+    const cands = ['https://x/small1', 'https://x/big1', 'https://x/big2', 'https://x/small2'];
+    const r = await pickStoredImagesDetail(cands, 2, 600, fetcher, store, { deadlineMs: 60_000 });
+    expect(r.images.map((i) => i.width)).toEqual([900, 900]);
+    expect(r.tried).toBe(3);
+    expect(r.timedOut).toBe(false);
+    const t = await pickStoredImagesDetail(cands, 2, 600, fetcher, store, { deadlineMs: -1 });
+    expect(t).toEqual({ images: [], tried: 0, timedOut: true });
+    const capped = await pickStoredImagesDetail(cands, 1, 600, fetcher, store, { maxTries: 1 });
+    expect(capped.tried).toBe(1);
+    expect(capped.images).toEqual([]);
   });
 });
 

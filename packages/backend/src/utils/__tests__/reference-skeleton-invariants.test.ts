@@ -138,7 +138,8 @@ describe('reference-skeleton invariants', () => {
     expect(produce).toContain('[참고 구성 순서]');
     const jobs = readCode('utils/sales-outreach-jobs.ts');
     expect(jobs).toContain('benefitLicensed: !!licensedQuote');
-    expect(jobs).toContain('structureRef: dm.structureRef');
+    // ★0905(3) 숨김 재발행(preset)은 근거를 새로 못 만들어 직전 자산 값을 승계한다 — structureRef가 asset payload에 실리는 계약은 그대로
+    expect(jobs).toContain('structureRef: carry ? (carry.structureRef ?? null) : dm.structureRef');
   });
 
   it('14. 베스트 구성 = ceo 전용 게이트가 모든 /best-layout 입구 앞에 한 번(라우트별 덧대기 0) · 베스트 문안 경로에는 남은 골격 라우트 0', () => {

@@ -15,6 +15,8 @@
  */
 import { fetchHtmlGuarded } from './dm/dm-brand-extractor';
 
+/** 아웃리치 HTML 수집 옵션 — 공용 기본(200KB · 5초)은 og 메타용이라 상품·갤러리가 잘린다(이니스프리 395KB 실측 · 0905). 홈·행사 상세·상품 상세 전부 이것으로. */
+export const OUTREACH_FETCH_OPTS = { maxBytes: 800_000, timeoutMs: 10_000 } as const;
 export const OUTREACH_GALLERY_MIN_WIDTH = 600;
 export const OUTREACH_PRODUCT_MIN_WIDTH = 400;
 /** 사본으로 저장할 원본 상한(리사이즈 없음 · 이메일 임베드 용량 고려) */
@@ -166,8 +168,15 @@ export function extractProducts(html: string, base: string, max = 12): OutreachP
   return uniq;
 }
 
-/** 이미지 후보(순수): og:image 계열 + img(src·data-src·srcset) + <source srcset>. 로고·추적 픽셀 배제 · 확장자 없는 CDN URL 허용 · 상한. */
-export function extractImageCandidates(html: string, base: string, max = 12): string[] {
+/** 태그의 width/height 속성이 둘 다 작으면 아이콘·메뉴 썸네일로 본다(실측 없이 거르는 1차 신호 · 속성이 없으면 모른다) */
+function isTinyByAttr(tag: string): boolean {
+  const w = Number((tag.match(/\swidth=["']?(\d+)/i) || [])[1]);
+  const h = Number((tag.match(/\sheight=["']?(\d+)/i) || [])[1]);
+  return Number.isFinite(w) && w > 0 && w < 200 && Number.isFinite(h) && h > 0 && h < 200;
+}
+
+/** 이미지 후보(순수): og:image 계열 + img(src·data-src·srcset) + <source srcset>. 로고·추적 픽셀·크기 속성 200px 미만 배제 · 확장자 없는 CDN URL 허용 · 상한 24(뒤 실측이 큰 것부터 고른다). */
+export function extractImageCandidates(html: string, base: string, max = 24): string[] {
   const found: string[] = [];
   for (const re of [
     /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/gi,
@@ -179,8 +188,9 @@ export function extractImageCandidates(html: string, base: string, max = 12): st
   const tagRe = /<(?:img|source)\b[^>]*>/gi;
   let m: RegExpExecArray | null;
   let scanned = 0;
-  while ((m = tagRe.exec(html)) !== null && scanned < 120) {
+  while ((m = tagRe.exec(html)) !== null && scanned < 200) {
     scanned++;
+    if (isTinyByAttr(m[0])) continue;
     const u = bestImgFromTag(m[0], base);
     if (u) found.push(u);
   }
@@ -189,7 +199,7 @@ export function extractImageCandidates(html: string, base: string, max = 12): st
   for (const raw of found) {
     const u = absolutizeAssetUrl(raw, base);
     if (!u) continue;
-    if (/(logo|icon|favicon|sprite|banner_top|btn_|\.svg(\?|$)|\.gif(\?|$)|1x1|pixel|blank|share[-_]?image|og_image|\/web\/24_renewal\/)/i.test(u)) continue;
+    if (/(logo|icon|favicon|sprite|\/(?:menu|nav|gnb)\/|banner_top|btn_|\.svg(\?|$)|\.gif(\?|$)|1x1|pixel|blank|share[-_]?image|og_image|\/web\/24_renewal\/)/i.test(u)) continue;
     if (/(ct\.pinterest\.com|facebook\.com\/tr|google-analytics|doubleclick|googletagmanager|analytics\.|\/tr\?|\/pixel)/i.test(u)) continue;
     if (seen.has(u)) continue;
     seen.add(u);
@@ -377,7 +387,7 @@ export function parseProductPage(html: string, finalUrl: string): OutreachProduc
 export async function fetchProductPageGuarded(url: string, homeHost: string): Promise<OutreachProduct | null> {
   let page: { html: string; finalUrl: string } | null = null;
   try {
-    const r = await fetchHtmlGuarded(url);
+    const r = await fetchHtmlGuarded(url, OUTREACH_FETCH_OPTS);
     page = r ? { html: r.html, finalUrl: r.finalUrl } : null;
   } catch {
     page = null;
@@ -431,17 +441,42 @@ export async function measureAndStoreImage(
   return { url: stored, width: size.width, height: size.height, bytes: img.buffer.length, srcUrl: url };
 }
 
-/** 후보 배열에서 실측 통과분만 · 면적 큰 순 · 최대 n장. 후보는 n*2까지만 시도(느린 CDN 방어). */
-export async function pickStoredImages(
+/** ★ 0905(3) C3-2 갤러리 수집 벽시계 예산 — 후보 24개 순차 fetch가 느린 CDN에서 잡을 붙잡지 않게(초과 = 그때까지 통과분으로 진행 · 실패 아님) */
+export const OUTREACH_GALLERY_DEADLINE_MS = 45_000;
+
+export interface PickStoredImagesResult {
+  images: StoredImage[];
+  /** 실제로 받아 본 후보 수 */
+  tried: number;
+  /** 벽시계 예산에 걸려 남은 후보를 보지 못했는가 */
+  timedOut: boolean;
+}
+
+/**
+ * 후보 배열에서 실측 통과분만 · 면적 큰 순 · 최대 n장. 후보는 n*3까지만 시도(느린 CDN 방어 · 메뉴 아이콘이 앞에 몰린 사이트 대비)하고
+ * deadlineMs(벽시계)를 넘기면 거기서 멈춘다. 시도 수·예산 초과는 stats로 돌려준다(호출부가 기록).
+ */
+export async function pickStoredImagesDetail(
   cands: string[], n: number, minWidth: number, fetcher: GuardedImageFetcher, store: ImageStorer,
-): Promise<StoredImage[]> {
+  opts: { deadlineMs?: number; maxTries?: number } = {},
+): Promise<PickStoredImagesResult> {
   const infos: StoredImage[] = [];
+  const maxTries = opts.maxTries ?? n * 3;
+  const deadline = Date.now() + (opts.deadlineMs ?? OUTREACH_GALLERY_DEADLINE_MS);
   let tried = 0;
+  let timedOut = false;
   for (const c of cands) {
-    if (infos.length >= n || tried >= n * 2) break;
+    if (infos.length >= n || tried >= maxTries) break;
+    if (Date.now() > deadline) { timedOut = true; break; }
     tried++;
     const i = await measureAndStoreImage(c, minWidth, fetcher, store);
     if (i) infos.push(i);
   }
-  return infos.sort((a, b) => b.width * b.height - a.width * a.height).slice(0, n);
+  return { images: infos.sort((a, b) => b.width * b.height - a.width * a.height).slice(0, n), tried, timedOut };
+}
+
+export async function pickStoredImages(
+  cands: string[], n: number, minWidth: number, fetcher: GuardedImageFetcher, store: ImageStorer,
+): Promise<StoredImage[]> {
+  return (await pickStoredImagesDetail(cands, n, minWidth, fetcher, store)).images;
 }

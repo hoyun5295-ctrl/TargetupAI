@@ -55,15 +55,16 @@
 
 ## 2) 활성 버그
 
-### 🔴 B-0905-1 가드 크롤(`fetchHtmlGuarded`)이 Node 20에서 전 사이트 null — 아웃리치 크롤 · DM 편집기 URL 불러오기 · 상품 og 이미지 자동 채움 전부 조용히 빈 결과 (🟡 코드 수정 완료·배포 대기) — 2026-09-05 프로토타입 실측에서 발견 · 운영 실측 확정
+### 🔴 B-0905-2 AI 영업 제작 — 운영 첫 실측 DM이 빈 껍데기(상품 0 · 갤러리에 메뉴 아이콘 · 마감일 없는 카운트다운 00:00) (🟡 코드 수정 완료·배포 대기) — 2026-09-05 Harold 접수(`dm-BPsb8LV` · 이니스프리)
 
-> **증상**: 운영(.62 · Node 20.20.0)에서 `fetchHtmlGuarded('https://www.innisfree.com/')` = `null`(Harold 실행 · 2026-09-05). 로컬(Node 20.19.4)도 12사이트 0/12. 예외를 삼키고 null을 돌려주는 구조라 pm2 로그에 "크롤 예외" 줄이 남지 않는다: 아웃리치 잡은 `stage_results.crawling='unavailable'`로 전진, DM 편집기 "홈페이지에서 행사 불러오기"는 빈 칸, 상품 og 이미지 자동 채움은 전부 undefined.
-> **원인(코드 실측)**: [`requestPinned`](../packages/backend/src/utils/dm/dm-brand-extractor.ts:385)의 커스텀 `lookup` 콜백이 옛 형태 `cb(err, address, family)`만 돌려줬다. Node 20은 `net.autoSelectFamily` 기본 on이라 소켓이 `lookup(host, { all: true }, cb)`로 부르고 **배열**을 기대한다 → `ERR_INVALID_IP_ADDRESS` → 연결 자체 실패. 로컬 실험(`scratch/proto/debug-pinned.ts`): 옛 형태 FAIL · 배열 형태 status 200.
-> **영향 소비처(전수 grep · 커스텀 lookup 콜백은 백엔드 1곳뿐)**: `sales-outreach-jobs.ts:193`(아웃리치 크롤) · `routes/dm.ts:1001`(`fetchEventTextFromUrl`) · `dm-ai.ts:956`·`email-ai.ts:426`·`inapp-ai-generator.ts:339`(`fetchProductOgImages`). 아웃리치 이미지 fetch(`sales-outreach-produce.ts:100`)는 `host: pinnedIp + servername` 방식이라 해당 없음.
-> **수정**: 순수 함수 `pinnedLookup(pinned)` 신설·export — `options.all`이면 `[{ address, family }]`, 아니면 `(address, family)`. `requestPinned`가 그것을 쓴다(검증 IP 고정·SNI·인증서 검증 그대로). 계약 테스트 3건 `__tests__/dm-brand-extractor-lookup.test.ts`(네트워크 0).
-> **검증**: BE tsc 0 · 신규 테스트 3/3 · 전체 스위트는 배포 직전 1회.
-> **실측(배포 후 Harold님)**: `cd /home/administrator/targetup-app/packages/backend && npx ts-node -T -P tsconfig.json -e "require('./src/utils/dm/dm-brand-extractor').fetchHtmlGuarded('https://www.innisfree.com/').then(r=>console.log(r?'ok '+r.html.length:'null'))"` → `ok 3xxxxx`면 종결.
-> **교훈**: "예외를 삼키고 null" 구조는 장애를 내용 판정으로 접는다(FEATURE-SALES-OUTREACH 불변 10의 이유가 여기서도 증명됐다). Node 메이저 업그레이드 뒤 커스텀 `lookup`·`createConnection` 콜백은 실측 1건이 필요하다.
+> **증상**: 0905 12:25 배포 뒤 운영에서 처음 만든 DM에 상품 캐러셀이 없고, 갤러리 자리에 헤더 메뉴 아이콘이 들어가고, 카운트다운이 00:00으로 나온다. Harold: "어떻게 더 구려졌냐".
+> **원인(코드·재현 실측)**: ① 공용 크롤 `fetchHtmlGuarded`가 본문을 **200KB(`MAX_HTML_BYTES`)에서 절단**한다. 이니스프리 홈은 376KB라 상품 링크·목록이 잘린 뒷부분에 있었다 → 상품 0. 재현 = 상한 200KB 상품 링크 **0** / 800KB **6**(6장 전부 1125px 이상 게이트 통과). ② 카운트다운 섹션은 행사 종료일이 없어도 넣고 있었다. ③ 이미지 후보가 문서 순서 그대로라 헤더 메뉴 아이콘(`/display/menu/` 114×114 · width 속성 없음)이 앞 8개를 차지했다(재현: 후보 12 중 8).
+> **수정**: `dm-brand-extractor.ts`에 `FetchHtmlOptions`(시간 ≤20초 · 용량 ≤2MB 클램프 · **기본값 5초/200KB 유지** = 다른 소비처 5곳 무변경) → 아웃리치 전용 `OUTREACH_FETCH_OPTS`(800KB · 10초)를 홈·하위 페이지·상품 상세 크롤 **전부**에 적용(불변식 테스트가 jobs·media의 모든 호출을 밟는다) · 카운트다운은 미래 날짜(YYYY-MM-DD)가 있을 때만 · 이미지 후보 = width/height 둘 다 200 미만 제외 + `menu`·`nav`·`gnb` 경로 제외 + 상한 12→24 + 갤러리 시도 n×3.
+> **검증**: BE tsc 0 · backend 전체 236파일 3,713건 통과 · 재현(이니스프리) 상품 링크 0→6 · 후보 22 중 메뉴 경로 0 · 커버낫 상품 10 · 갤러리 6/6.
+> **실측(배포 후 Harold님)**: 이니스프리 잡을 새로 만들어 DM에 상품 캐러셀·갤러리가 있고 카운트다운이 없으면 종결. 배포 = pull + `pm2 reload targetup-backend`(administrator · ts-node라 빌드 불필요).
+> **남는 것(별건)**: 절단 상한을 올려도 "홈에 상품이 없는 사이트"는 여전히 0이다. 재료 원천 확장은 0905(3) 브레인스토밍 수렴안이 소유한다.
+
+---
 
 ### 🟠 B-0904-1 이메일 캠페인 히어로 — 구도 '기본'으로 넣은 메인 이미지가 수신함에서 통째로 사라진다 (🟡 코드 수정 완료·배포 대기) — 2026-09-04 접수 `cmtl5wq5v0800jnotk46ozykf`(남지현 P1)
 
@@ -639,6 +640,7 @@
 > **★2026-07-20 진전 — 1.0.2 런타임 성립 확인**: 포스터형 스크림 수정분을 `eas update --branch production`으로 발행했고 **iOS·Android 단말 모두 OTA 반영 실측**(Harold "안드로이드까지 정상 확인완료"). runtimeVersion 정책이 appVersion(1.0.2)이므로 **양 OS 1.0.2 출시·설치 확정** = 해소 경로의 배포 조건은 충족됐다. **남은 것은 실측 3종뿐**(아래). 이후 JS 수정은 검수 없이 `eas update`로 배포(단 `--platform android`/`ios` 분리 실행 — `all`은 web export가 Supabase→AsyncStorage `window is not defined`로 실패).
 > **해소 경로**: 팝폰 1.0.2 빌드(iOS 빌드 22·Android) — 0717 Harold 심사 제출 완료(iOS 재업로드 2회 실패 원인=스토어 출시 버전과 동일 문자열 1.0.1 → app.json 1.0.2 상향으로 해소, 7/4 1.0.0→1.0.1 패턴 재현). **잔여 = 출시 후 실측 3종**(①완전 종료→재실행 시 재표시 ②닫기 후 같은 실행 미재표시 ③다시 보지 않기 후 영구 미표시). 1.0.2부터 EAS Update 런타임 성립 = 이후 JS 수정은 `eas update`로 검수 없이 배포. 상세=[[project_2026_0717_inapp_debug_session_incomplete]].
 
+> **2026-09-05 B-0905-1 가드 크롤 Node 20 lookup 전 사이트 null 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(pinnedLookup 배열 계약 + 테스트 3건 · 배포 후 운영 실측 `ok 197050`). 잔여 = 없음.
 > **2026-07-18 B-0718-1 프론트 스플리팅 전 고객 진입 불능 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(재발 방지 3겹 게이트 + M1 재도입 배포 eab1f413 + 라이브 전수 177건 + Harold 화면 실측 통과. 첫 로드 5MB→0.37MB).
 > **2026-07-17 B-0717-1 인앱 웹 블록 중앙정렬 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(배포 5커밋·Harold 실측 "잘 되는데" — 근본=SDK 버전 폴더 동기화 누락, 재발 방지=sync:serving). 잔여 별건 = 쿠폰·CTA 정렬+허용표 실측.
 > **2026-07-07 알림톡 강조표기형 3관문(7300 대표링크 · 9999 senderkey · 3027 버튼) 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md)(커밋 716074dc 배포·Harold "전체 발송 잘된다" 확인). 잔여 별건 = 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 정리 시 제거.

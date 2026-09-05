@@ -372,6 +372,7 @@ function requestPinned(
   urlStr: string,
   pinned: { address: string; family: number },
   timeoutMs: number,
+  maxBytes: number = MAX_HTML_BYTES,
 ): Promise<{ status: number; location?: string; body?: string }> {
   return new Promise((resolve, reject) => {
     const u = new URL(urlStr);
@@ -410,7 +411,7 @@ function requestPinned(
           return;
         }
         const declared = Number(res.headers['content-length']);
-        if (Number.isFinite(declared) && declared > MAX_HTML_BYTES) {
+        if (Number.isFinite(declared) && declared > maxBytes) {
           res.destroy();
           settleReject(new Error('response too large'));
           return;
@@ -419,7 +420,7 @@ function requestPinned(
         const chunks: Buffer[] = [];
         res.on('data', (c: Buffer) => {
           if (settled) return;
-          const room = MAX_HTML_BYTES - size;
+          const room = maxBytes - size;
           if (c.length >= room) {
             chunks.push(c.subarray(0, room));
             res.destroy(); // 상한 도달 — 여기까지만 사용(og 메타는 head에 있음)
@@ -446,7 +447,13 @@ function requestPinned(
 /** 리다이렉트 홉(최대 3)마다 호스트 가드를 재검증하는 HTML fetch — 공개 URL이 내부 주소로 redirect하는 우회 차단 (Codex 지적).
  *  ★ 2026-07-13 (Codex 2R) — 홉마다 DNS 해석 → 공인 검증 → 그 IP로 연결 고정(requestPinned) + 바이트 상한.
  *  ★ 2026-08-24 export — 영업 아웃리치 크롤이 재사용(가드 없는 extractBrandFromUrl 경로는 아웃리치에서 사용 금지). */
-export async function fetchHtmlGuarded(url: string): Promise<{ html: string; baseUrl: string; finalUrl: string } | null> {
+/** 본문 상한·타임아웃 선택 인자(★ 2026-09-05) — 기본은 현행(200KB · 5초 · og 메타용). 페이지 전체가 필요한 소비처(아웃리치 재료 수집)만 올려 쓴다.
+ *  200KB 절단이 상품·갤러리를 잘라 아웃리치 DM이 빈 껍데기가 됐다(이니스프리 395KB 실측). 기존 호출부 5곳은 인자를 안 넘기므로 동작 무변경. */
+export interface FetchHtmlOptions { maxBytes?: number; timeoutMs?: number }
+
+export async function fetchHtmlGuarded(url: string, opts?: FetchHtmlOptions): Promise<{ html: string; baseUrl: string; finalUrl: string } | null> {
+  const timeoutMs = opts?.timeoutMs && opts.timeoutMs > 0 ? Math.min(opts.timeoutMs, 20_000) : FETCH_TIMEOUT_MS;
+  const maxBytes = opts?.maxBytes && opts.maxBytes > 0 ? Math.min(opts.maxBytes, 2_000_000) : MAX_HTML_BYTES;
   let current = url;
   for (let hop = 0; hop < 3; hop++) {
     if (!isFetchableProductUrl(current)) return null;
@@ -458,7 +465,7 @@ export async function fetchHtmlGuarded(url: string): Promise<{ html: string; bas
     }
     if (!pinned) return null;
     try {
-      const res = await requestPinned(current, pinned, FETCH_TIMEOUT_MS);
+      const res = await requestPinned(current, pinned, timeoutMs, maxBytes);
       if (res.status >= 300 && res.status < 400) {
         if (!res.location) return null;
         current = new URL(res.location, current).toString();

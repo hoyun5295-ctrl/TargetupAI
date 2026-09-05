@@ -39,6 +39,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'sales_outreach.subject_edit': 'AI 영업 제목 수정',
   'sales_outreach.rebuild_email': 'AI 영업 메일 재조립',
   'sales_outreach.dismiss': 'AI 영업 실패 건 숨기기',
+  'sales_outreach.materials': 'AI 영업 재료 다시 고르기',
+  'sales_outreach.sections': 'AI 영업 블록 숨기기',
   // ★ 2026-09-05 베스트 구성 · 실물 예시(AI 영업 학습)
   'best_layout.example_promote': '실물 예시 올리기(AI 영업 학습)',
   'best_layout.example_delete': '실물 예시 삭제(AI 영업 학습)',

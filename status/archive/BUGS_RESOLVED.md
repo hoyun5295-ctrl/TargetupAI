@@ -2,6 +2,18 @@
 > 원본: status/BUGS.md — 2026-07-03 관제탑 재설계 v2로 원문 그대로 이동 (요약·재서술 없음).
 > 본문 내 상대 링크는 재설계 전 경로 기준 — 설계·핸드오프 문서는 archive/DESIGNS/ 에 있다.
 
+## 2026-09-05 ✅ 종결 — B-0905-1 가드 크롤(`fetchHtmlGuarded`)이 Node 20에서 전 사이트 null — 아웃리치 크롤 · DM 편집기 URL 불러오기 · 상품 og 이미지 자동 채움 전부 조용히 빈 결과 (🟢 종결 · 2026-09-05 12:25 배포 + 운영 실측 ok 197050) — 2026-09-05 프로토타입 실측에서 발견 · 운영 실측 확정
+
+> **증상**: 운영(.62 · Node 20.20.0)에서 `fetchHtmlGuarded('https://www.innisfree.com/')` = `null`(Harold 실행 · 2026-09-05). 로컬(Node 20.19.4)도 12사이트 0/12. 예외를 삼키고 null을 돌려주는 구조라 pm2 로그에 "크롤 예외" 줄이 남지 않는다: 아웃리치 잡은 `stage_results.crawling='unavailable'`로 전진, DM 편집기 "홈페이지에서 행사 불러오기"는 빈 칸, 상품 og 이미지 자동 채움은 전부 undefined.
+> **원인(코드 실측)**: [`requestPinned`](../packages/backend/src/utils/dm/dm-brand-extractor.ts:385)의 커스텀 `lookup` 콜백이 옛 형태 `cb(err, address, family)`만 돌려줬다. Node 20은 `net.autoSelectFamily` 기본 on이라 소켓이 `lookup(host, { all: true }, cb)`로 부르고 **배열**을 기대한다 → `ERR_INVALID_IP_ADDRESS` → 연결 자체 실패. 로컬 실험(`scratch/proto/debug-pinned.ts`): 옛 형태 FAIL · 배열 형태 status 200.
+> **영향 소비처(전수 grep · 커스텀 lookup 콜백은 백엔드 1곳뿐)**: `sales-outreach-jobs.ts:193`(아웃리치 크롤) · `routes/dm.ts:1001`(`fetchEventTextFromUrl`) · `dm-ai.ts:956`·`email-ai.ts:426`·`inapp-ai-generator.ts:339`(`fetchProductOgImages`). 아웃리치 이미지 fetch(`sales-outreach-produce.ts:100`)는 `host: pinnedIp + servername` 방식이라 해당 없음.
+> **수정**: 순수 함수 `pinnedLookup(pinned)` 신설·export — `options.all`이면 `[{ address, family }]`, 아니면 `(address, family)`. `requestPinned`가 그것을 쓴다(검증 IP 고정·SNI·인증서 검증 그대로). 계약 테스트 3건 `__tests__/dm-brand-extractor-lookup.test.ts`(네트워크 0).
+> **검증**: BE tsc 0 · 신규 테스트 3/3 · 전체 스위트는 배포 직전 1회.
+> **실측(배포 후 Harold님)**: `cd /home/administrator/targetup-app/packages/backend && npx ts-node -T -P tsconfig.json -e "require('./src/utils/dm/dm-brand-extractor').fetchHtmlGuarded('https://www.innisfree.com/').then(r=>console.log(r?'ok '+r.html.length:'null'))"` → `ok 3xxxxx`면 종결.
+> **교훈**: "예외를 삼키고 null" 구조는 장애를 내용 판정으로 접는다(FEATURE-SALES-OUTREACH 불변 10의 이유가 여기서도 증명됐다). Node 메이저 업그레이드 뒤 커스텀 `lookup`·`createConnection` 콜백은 실측 1건이 필요하다.
+> **종결 경위(2026-09-05)**: 신코드 배포(12:25 부팅 확인) 후 Harold 실측 `fetchHtmlGuarded('https://www.innisfree.com/')` = `ok 197050`(배포 전 `null`). 같은 뿌리의 소비처 5곳(아웃리치 크롤 · DM 편집기 URL 불러오기 · 상품 og 이미지 자동 채움 3경로)이 함께 살아난다.
+
+
 ## 2026-09-03 ✅ 종결 — B-0903-1 비로그인 "서비스 이용신청 문의" 401 + 소개 페이지 "요금 안내 보기" 로그인 튕김 (요금제 공개 열람 배포 · Harold 실측 3건 통과)
 
 > BUGS.md §2에서 이동(2026-09-03).

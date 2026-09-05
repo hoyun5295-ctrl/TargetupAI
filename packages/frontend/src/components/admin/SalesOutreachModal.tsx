@@ -34,6 +34,8 @@ interface OutreachJob {
     siteTitle?: string; excerpt?: string; eventTextFull?: string | null; imageCandidates?: string[]; selectedImageUrl?: string | null;
     crawledAt?: string; brand?: { primaryColor?: string | null }; subPageUrl?: string | null; extraNotes?: string | null;
     media?: { stats?: Record<string, number>; gallery?: any[]; products?: any[] } | null;
+    /** ★ 0905(3) 검토에서 고른 재료(서버 저장값 · 없으면 전량) */
+    mediaSelection?: { products?: string[]; gallery?: string[] } | null;
   } | null;
   fail_stage?: string | null;
   fail_reason?: string | null;
@@ -47,6 +49,8 @@ interface OutreachJob {
   created_at?: string;
   assets?: OutreachAsset[];
   sendLock?: { locked: boolean; reasons: string[] } | null;
+  /** ★ 0905(3) 품질 경고(서버가 센 것 · 잠금이 아니다 · 발송을 막지 않는다) */
+  quality?: { warnings: Array<{ code: string; value?: number }> } | null;
 }
 
 const ACTIVE_STAGES = ['queued', 'crawling', 'analyzing', 'producing_copy', 'producing_image', 'producing_dm', 'producing_email'];
@@ -70,6 +74,31 @@ const SEND_LOCK_LABEL: Record<string, string> = {
   PLACEHOLDER_REMAINS: '직접 채울 자리(혜택 안내)가 남아 있습니다',
   UNSUB_NOT_APPLIED: '수신거부 문구가 반영되기 전의 메일입니다',
 };
+// ★ 0905(3) 품질 경고 라벨 — 서버 코드 → 문구(숫자는 서버 value만 쓴다)
+const QUALITY_LABEL: Record<string, (v?: number) => string> = {
+  NO_PRODUCTS: () => '상품을 하나도 실측하지 못해 상품 묶음이 없습니다',
+  FEW_PRODUCTS: (v) => `실측 통과 상품이 ${v ?? 0}개라 상품 묶음이 한 개 이하입니다`,
+  FEW_GALLERY: (v) => `선명한 사진이 ${v ?? 0}장이라 갤러리가 비었습니다`,
+  CTA_ALL_HOME: () => '버튼이 전부 홈페이지 첫 화면으로만 갑니다(코너 링크를 못 찾았습니다)',
+  NO_LEGAL: () => '홈페이지에서 사업자 표기·고객센터 번호를 찾지 못했습니다',
+  FEW_SECTIONS: (v) => `모바일 DM 구성이 ${v ?? 0}섹션으로 짧습니다`,
+  NO_BRAND_EMAIL: () => '이메일 시안 블록이 비어 있습니다',
+  NO_LOOK: () => '구도·배경면이 하나도 실리지 않았습니다',
+};
+const SECTION_TYPE_LABEL: Record<string, string> = {
+  header: '머리말', hero: '메인', text_card: '텍스트 카드', product_carousel: '상품 묶음', gallery: '갤러리', coupon: '쿠폰',
+  countdown: '카운트다운', cta: '버튼', footer: '꼬리말', promo_code: '프로모션 코드', reviews: '후기', store_info: '매장 정보',
+};
+/** 서버(sales-outreach-review.sectionKeysOf)와 같은 규칙 — 같은 type 안 1-based 순번 */
+function sectionKeysOf(list: any[]): string[] {
+  const ord: Record<string, number> = {};
+  return list.map((sec) => { const t = String(sec?.type || ''); ord[t] = (ord[t] || 0) + 1; return `${t}#${ord[t]}`; });
+}
+function sectionSnippet(sec: any): string {
+  const pr = sec?.props || {};
+  const t = pr.headline || pr.title || pr.tag || pr.discount_label || pr.urgency_text || (Array.isArray(pr.buttons) ? pr.buttons.map((b: any) => b?.label).filter(Boolean).join(' · ') : '') || '';
+  return String(t).slice(0, 28);
+}
 const GROUP_CHIPS: Array<{ key: string; label: string }> = [
   { key: '', label: '전체' }, { key: 'active', label: '진행 중' }, { key: 'awaiting_confirm', label: '확인 대기' },
   { key: 'ready', label: '검토 대기' }, { key: 'sent', label: '발송됨' }, { key: 'failed', label: '실패' },
@@ -127,7 +156,14 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [recrawlUrl, setRecrawlUrl] = useState('');
 
   // 검토 단계
-  const [reviewTab, setReviewTab] = useState<'email' | 'copy' | 'dm' | 'image'>('email');
+  const [reviewTab, setReviewTab] = useState<'email' | 'copy' | 'dm' | 'image' | 'materials'>('email');
+  // ★ 0905(3) 검수 축 — 재료 재선택(우리 사본 URL 목록 · 순서 = 배열) · 블록 숨기기(type#n 키)
+  const [matProducts, setMatProducts] = useState<string[]>([]);
+  const [matGallery, setMatGallery] = useState<string[]>([]);
+  const matDirtyRef = useRef(false);
+  const [hiddenDm, setHiddenDm] = useState<string[]>([]);
+  const [hiddenEmail, setHiddenEmail] = useState<string[]>([]);
+  const hiddenDirtyRef = useRef<{ dm: boolean; email: boolean }>({ dm: false, email: false });
   const [copyDraft, setCopyDraft] = useState('');
   const [copyEditing, setCopyEditingState] = useState(false);
   const editingRef = useRef(false);
@@ -184,6 +220,22 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
         const emailAsset = latestAssetOf(d, 'email_html');
         if (emailAsset?.subject) setSubjectDraft((cur) => (cur === '' || !subjectEditing ? String(emailAsset.subject) : cur));
         if (!recrawlUrl && d?.homepage_url) setRecrawlUrl(String(d.homepage_url));
+        const media = d?.brand_profile?.media || null;
+        if (media && !matDirtyRef.current) {
+          const sel = d?.brand_profile?.mediaSelection || null;
+          const allP = (Array.isArray(media.products) ? media.products : []).map((x: any) => String(x.image_url));
+          const allG = (Array.isArray(media.gallery) ? media.gallery : []).map((x: any) => String(x.url));
+          setMatProducts(Array.isArray(sel?.products) ? sel.products.filter((u: string) => allP.includes(u)) : allP);
+          setMatGallery(Array.isArray(sel?.gallery) ? sel.gallery.filter((u: string) => allG.includes(u)) : allG);
+        }
+        const ov = d?.stage_results?.section_overrides || {};
+        const dmA = latestAssetOf(d, 'dm');
+        const emA = latestAssetOf(d, 'email_html');
+        const dmKeys = sectionKeysOf(Array.isArray(dmA?.sectionsBase) ? dmA.sectionsBase : Array.isArray(dmA?.sections) ? dmA.sections : []);
+        const emKeys = sectionKeysOf(Array.isArray(emA?.brandSectionsBase) ? emA.brandSectionsBase : Array.isArray(emA?.brandSections) ? emA.brandSections : []);
+        // 저장된 키 중 현재 산출물에 있는 것만 시딩한다(재생성으로 순번이 사라진 키가 남으면 서버가 UNKNOWN_KEY로 전량 거절한다)
+        if (!hiddenDirtyRef.current.dm) setHiddenDm((Array.isArray(ov?.dm?.hidden) ? ov.dm.hidden : []).filter((k: string) => dmKeys.includes(k)));
+        if (!hiddenDirtyRef.current.email) setHiddenEmail((Array.isArray(ov?.email?.hidden) ? ov.email.hidden : []).filter((k: string) => emKeys.includes(k)));
       } else if (d?.code === 'DB_MIGRATION_PENDING') {
         setNotice(d.error || '준비 중입니다.');
       }
@@ -356,6 +408,9 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     setRecrawlUrl('');
     setTestTo('');
     setDupState(null);
+    matDirtyRef.current = false; setMatProducts([]); setMatGallery([]);
+    hiddenDirtyRef.current = { dm: false, email: false }; setHiddenDm([]); setHiddenEmail([]);
+    setReviewTab('email');
   };
 
   const startAnalysis = async (force = false) => {
@@ -475,6 +530,60 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     if (res.ok) { toast.success('메일을 다시 조립하고 있습니다.'); await loadJob(job.id); }
   };
 
+  // ★ 0905(3) C4-2 고른 재료로 다시 만들기(확인 모달 1회 · 이미지 단계 없이 DM·시안만 · 제목·서두 보존)
+  const applyMaterials = () => {
+    if (!job) return;
+    setConfirmState({
+      mode: 'warning',
+      title: '고른 재료로 다시 만듭니다',
+      description: `상품 ${matProducts.length}개 · 사진 ${matGallery.length}장으로 모바일 DM과 이메일 시안을 다시 만들고 메일을 재조립합니다. 제목·서두·문안은 그대로 둡니다. 기존 모바일 DM 링크는 새 메일이 조립된 뒤 닫힙니다.`,
+      confirmLabel: '다시 만들기',
+      onConfirm: async () => {
+        const res = await callAction(`/api/sales-outreach/jobs/${job.id}/materials`, { products: matProducts, gallery: matGallery });
+        if (res.ok) { matDirtyRef.current = false; toast.success('고른 재료로 다시 만들고 있습니다. 창을 닫아도 계속 진행됩니다.'); await loadJob(job.id); }
+      },
+    });
+  };
+  // ★ 0905(3) C4-3 블록 숨기기 반영(DM = 재발행 · 이메일 = 재조립 · AI 호출 0 · 다음 재생성 뒤에도 같은 순번에 다시 적용)
+  const applyHidden = (kind: 'dm' | 'email') => {
+    if (!job) return;
+    const hidden = kind === 'dm' ? hiddenDm : hiddenEmail;
+    const run = async () => {
+      const res = await callAction(`/api/sales-outreach/jobs/${job.id}/sections`, { kind, hidden });
+      if (res.ok) { hiddenDirtyRef.current[kind] = false; toast.success(kind === 'dm' ? '모바일 DM을 다시 발행하고 있습니다.' : '이메일 시안을 다시 조립하고 있습니다.'); await loadJob(job.id); }
+    };
+    if (kind === 'dm') {
+      setConfirmState({
+        mode: 'warning',
+        title: '숨김을 반영해 모바일 DM을 다시 발행합니다',
+        description: `블록 ${hidden.length}개를 뺀 모바일 DM이 새로 발행되고 메일이 다시 조립됩니다. 기존 모바일 DM 링크는 새 메일이 조립된 뒤 닫힙니다.`,
+        confirmLabel: '반영',
+        onConfirm: run,
+      });
+      return;
+    }
+    run();
+  };
+  const toggleHidden = (kind: 'dm' | 'email', key: string) => {
+    hiddenDirtyRef.current[kind] = true;
+    const set = kind === 'dm' ? setHiddenDm : setHiddenEmail;
+    set((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
+  };
+  const moveMat = (kind: 'products' | 'gallery', url: string, dir: -1 | 1) => {
+    matDirtyRef.current = true;
+    const set = kind === 'products' ? setMatProducts : setMatGallery;
+    set((cur) => {
+      const i = cur.indexOf(url); const j = i + dir;
+      if (i < 0 || j < 0 || j >= cur.length) return cur;
+      const next = cur.slice(); [next[i], next[j]] = [next[j], next[i]]; return next;
+    });
+  };
+  const toggleMat = (kind: 'products' | 'gallery', url: string) => {
+    matDirtyRef.current = true;
+    const set = kind === 'products' ? setMatProducts : setMatGallery;
+    set((cur) => (cur.includes(url) ? cur.filter((u) => u !== url) : [...cur, url]));
+  };
+
   const regenerate = (kind: 'copy' | 'image' | 'dm' | 'email') => {
     if (!job) return;
     const run = async () => {
@@ -537,6 +646,69 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const chain = sr.chain && typeof sr.chain === 'object' ? sr.chain : null;
   const meta = sr.analyzing_meta && typeof sr.analyzing_meta === 'object' ? sr.analyzing_meta : null;
   const mediaStats = imageAsset?.media && typeof imageAsset.media === 'object' ? imageAsset.media : null;
+  // ★ 0905(3) 검수 축 파생값 — 서버 값만
+  const mediaAll = job?.brand_profile?.media || null;
+  const mediaProducts: any[] = Array.isArray(mediaAll?.products) ? mediaAll!.products! : [];
+  const mediaGallery: any[] = Array.isArray(mediaAll?.gallery) ? mediaAll!.gallery! : [];
+  const hasMaterials = mediaProducts.length + mediaGallery.length > 0;
+  // 재료 탭을 보던 중 재료가 없는 건으로 넘어가면 탭 버튼이 사라진다 → 기본 탭으로
+  useEffect(() => { if (reviewTab === 'materials' && !hasMaterials) setReviewTab('email'); }, [reviewTab, hasMaterials]);
+  const quality: Array<{ code: string; value?: number }> = Array.isArray(job?.quality?.warnings) ? job!.quality!.warnings : [];
+  const qualityText = (w: { code: string; value?: number }): string => {
+    if (w.code === 'NO_PRODUCTS' && mediaProducts.length > 0) return `상품을 모두 제외해 상품 묶음이 없습니다(실측 통과 ${mediaProducts.length}개 · 재료 탭에서 되돌릴 수 있습니다)`;
+    if (w.code === 'FEW_PRODUCTS' && mediaProducts.length > Number(w.value)) return `상품을 ${mediaProducts.length - Number(w.value)}개 제외해 상품 묶음이 한 개 이하입니다`;
+    if (w.code === 'FEW_GALLERY' && mediaGallery.length > Number(w.value)) return `사진을 제외해 갤러리가 비었습니다(실측 통과 ${mediaGallery.length}장)`;
+    return (QUALITY_LABEL[w.code] || (() => w.code))(w.value);
+  };
+  const dmBaseSections: any[] = Array.isArray(dmAsset?.sectionsBase) ? dmAsset.sectionsBase : Array.isArray(dmAsset?.sections) ? dmAsset.sections : [];
+  const emailBaseSections: any[] = Array.isArray(emailAsset?.brandSectionsBase) ? emailAsset.brandSectionsBase : Array.isArray(emailAsset?.brandSections) ? emailAsset.brandSections : [];
+  const savedHidden = (kind: 'dm' | 'email'): string[] => (Array.isArray(sr.section_overrides?.[kind]?.hidden) ? sr.section_overrides[kind].hidden : []);
+  const hiddenChanged = (kind: 'dm' | 'email') => {
+    const a = (kind === 'dm' ? hiddenDm : hiddenEmail).slice().sort().join('|');
+    const b = savedHidden(kind).slice().sort().join('|');
+    return a !== b;
+  };
+  const materialsSeq = Number(regenSeq.materials) || 0;
+  const materialsSaved = job?.brand_profile?.mediaSelection || null;
+  const materialsChanged = (() => {
+    const savedP = Array.isArray(materialsSaved?.products) ? materialsSaved!.products! : mediaProducts.map((x: any) => String(x.image_url));
+    const savedG = Array.isArray(materialsSaved?.gallery) ? materialsSaved!.gallery! : mediaGallery.map((x: any) => String(x.url));
+    return savedP.join('|') !== matProducts.join('|') || savedG.join('|') !== matGallery.join('|');
+  })();
+  /** 블록 숨김 목록(공용) — 저장된 섹션(override 적용 전)을 type#n으로 그린다 */
+  const hiddenList = (kind: 'dm' | 'email', base: any[]) => {
+    if (!base.length) return null;
+    const keys = sectionKeysOf(base);
+    const cur = kind === 'dm' ? hiddenDm : hiddenEmail;
+    return (
+      <div className="mt-3 bg-white/5 rounded-xl p-3 text-left">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-[11px] text-white/60">블록 숨기기 · 체크한 블록을 빼고 다시 {kind === 'dm' ? '발행' : '조립'}합니다(머리말·꼬리말 제외 · 3개 이상 남김){Number(regenSeq.sections) > 0 ? ` · ${Number(regenSeq.sections)}/10회` : ''}</span>
+          {stage === 'ready' && (
+            <button onClick={() => applyHidden(kind)} disabled={busy || !hiddenChanged(kind)} className={smallBtnDark}>
+              <EyeOff className="w-3.5 h-3.5" /> 숨김 반영{cur.length ? ` (${cur.length})` : ''}
+            </button>
+          )}
+        </div>
+        <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
+          {base.map((sec, i) => {
+            const key = keys[i];
+            const protectedType = sec?.type === 'header' || sec?.type === 'footer';
+            const on = cur.includes(key);
+            return (
+              <li key={key} className={`text-[11px] rounded-lg px-2 py-1 ${on ? 'bg-rose-500/20 text-rose-100' : 'text-white/75'}`}>
+                <label className="flex items-center gap-2 min-w-0 cursor-pointer">
+                  <input type="checkbox" checked={on} disabled={protectedType || stage !== 'ready'} onChange={() => toggleHidden(kind, key)} className="accent-rose-400" />
+                  <span className="shrink-0">{SECTION_TYPE_LABEL[String(sec?.type)] || String(sec?.type)} {key.split('#')[1]}</span>
+                  <span className="truncate text-white/45">{sectionSnippet(sec)}</span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    );
+  };
 
   const stepChip = (n: 1 | 2 | 3 | 4, label: string) => {
     const isDone = step > n || (n === 4 && stage === 'sent');
@@ -1006,7 +1178,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
               {(stage === 'ready' || stage === 'sent') && (
                 <>
                   <div className="flex items-center gap-1 border-b border-gray-200/70 overflow-x-auto">
-                    {([['email', '제안 메일'], ['copy', '문안'], ['dm', '모바일 DM'], ['image', '이미지']] as const).map(([k, label]) => (
+                    {([['email', '제안 메일'], ['copy', '문안'], ['dm', '모바일 DM'], ['image', '이미지'], ...(hasMaterials ? [['materials', '재료']] as const : [])] as ReadonlyArray<readonly [typeof reviewTab, string]>).map(([k, label]) => (
                       <button key={k} onClick={() => setReviewTab(k)}
                         className={`px-4 py-2 text-sm border-b-2 -mb-px whitespace-nowrap ${
                           reviewTab === k ? 'border-blue-600 text-blue-600 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1021,6 +1193,21 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                     <div className="space-y-1">
                       {placeholderCount > 0 && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">직접 채울 자리 {placeholderCount}곳이 메일에 남아 있습니다. 문안·제목을 고친 뒤 메일을 다시 조립하면 사라집니다.</p>}
                       {strippedTotal > 0 && <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">홈페이지에 없는 혜택 표현 {strippedTotal}곳을 모바일 DM·이메일 시안에서 자동으로 걷어냈습니다.</p>}
+                    </div>
+                  )}
+
+                  {/* ★ 0905(3) 품질 경고 — 서버가 센 것 · 잠금이 아니다(발송을 막지 않는다) · 바로가기 */}
+                  {quality.length > 0 && (
+                    <div className="text-xs rounded-lg px-3 py-2 bg-sky-50 border border-sky-200 text-sky-900 space-y-1">
+                      <p className="font-medium">보내기 전에 볼 것 {quality.length}건 · 발송은 막지 않습니다</p>
+                      {quality.map((w) => (
+                        <div key={w.code} className="flex items-center justify-between gap-2 flex-wrap">
+                          <span>{qualityText(w)}</span>
+                          {(w.code === 'NO_PRODUCTS' || w.code === 'FEW_PRODUCTS' || w.code === 'FEW_GALLERY') && hasMaterials && <button onClick={() => setReviewTab('materials')} className="text-blue-600 hover:underline">재료 보기</button>}
+                          {(w.code === 'CTA_ALL_HOME' || w.code === 'FEW_SECTIONS' || w.code === 'NO_LOOK') && <button onClick={() => setReviewTab('dm')} className="text-blue-600 hover:underline">모바일 DM 보기</button>}
+                          {w.code === 'NO_BRAND_EMAIL' && stage === 'ready' && <button onClick={() => regenerate('email')} className="text-blue-600 hover:underline">제목·서두·이메일 시안 다시 생성</button>}
+                        </div>
+                      ))}
                     </div>
                   )}
 
@@ -1062,6 +1249,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                               <button onClick={rebuildEmail} disabled={busy} className={smallBtnDark}><RefreshCw className="w-3.5 h-3.5" /> 메일 재조립</button>
                             </div>
                           )}
+                          {hiddenList('email', emailBaseSections)}
                         </div>
                       )}
                       {reviewTab === 'copy' && (
@@ -1092,18 +1280,24 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                         </div>
                       )}
                       {reviewTab === 'dm' && (
-                        <div className="text-center py-12">
-                          {dmAsset?.dmUrl ? (
-                            <a href={dmAsset.dmUrl} target="_blank" rel="noreferrer"
-                              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-white text-gray-900 text-sm font-medium hover:bg-gray-100">
-                              <ExternalLink className="w-4 h-4" /> 모바일 DM 열어보기
-                            </a>
-                          ) : <div className="text-white/40 text-sm">모바일 DM이 없습니다</div>}
-                          {dmAsset?.dmUrl && <p className="mt-3 text-xs text-white/40 break-all">{dmAsset.dmUrl}</p>}
+                        <div className="text-center">
+                          {/* ★ 0905(3) C4-1 검토 화면 안에서 본다 — 정규 뷰어 URL을 sandbox iframe으로(이메일 탭 선례 · 스크립트 0 = 열람 통계 오염 0) */}
+                          {dmAsset?.viewerUrl || dmAsset?.dmUrl ? (
+                            <iframe title="모바일 DM 미리보기" src={String(dmAsset.viewerUrl || dmAsset.dmUrl)} sandbox=""
+                              className="bg-white rounded-xl border-0 mx-auto block h-[60vh] min-h-[420px]" style={{ width: '100%', maxWidth: 375 }} />
+                          ) : <div className="text-white/40 text-sm py-12">모바일 DM이 없습니다</div>}
+                          <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
+                            {dmAsset?.dmUrl && (
+                              <a href={dmAsset.dmUrl} target="_blank" rel="noreferrer" className={smallBtnDark}><ExternalLink className="w-3.5 h-3.5" /> 새 창에서 열기</a>
+                            )}
+                            {stage === 'ready' && regenButton('dm', '모바일 DM 다시 만들기', true)}
+                          </div>
+                          {dmAsset?.dmUrl && <p className="mt-2 text-[11px] text-white/40 break-all">{dmAsset.dmUrl}</p>}
                           {Array.isArray(dmAsset?.sectionTypes) && dmAsset.sectionTypes.length > 0 && (
-                            <p className="mt-2 text-[11px] text-white/40">구성 {dmAsset.sectionTypes.length}섹션 · {dmAsset.sectionTypes.join(' → ')}</p>
+                            <p className="mt-1 text-[11px] text-white/40">구성 {dmAsset.sectionTypes.length}섹션{dmAsset.look ? ` · 구도 ${Number(dmAsset.look.treatments) || 0} · 배경면 ${Number(dmAsset.look.backgrounds) || 0}` : ''}{Number(dmAsset.hiddenApplied) > 0 ? ` · 숨김 ${Number(dmAsset.hiddenApplied)}` : ''}</p>
                           )}
-                          {stage === 'ready' && <div className="mt-4 flex justify-center">{regenButton('dm', '모바일 DM 다시 만들기', true)}</div>}
+                          {dmAsset?.hiddenSkipped && <p className="mt-2 text-[11px] text-amber-300">구성이 바뀌어 저장된 숨김을 적용하지 않았습니다. 아래 목록에서 다시 골라 반영해주세요.</p>}
+                          {hiddenList('dm', dmBaseSections)}
                         </div>
                       )}
                       {reviewTab === 'image' && (
@@ -1113,6 +1307,57 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                           ) : <div className="text-white/40 text-sm p-8">이미지가 없습니다</div>}
                           {imageAsset?.category && <p className="mt-2 text-[11px] text-white/40">템플릿 {imageAsset.category} · {imageAsset.kind === 'event' ? '행사형' : '제품형'}{imageAsset.usedCutout ? ' · 선택 이미지 누끼 사용' : ''}</p>}
                           {stage === 'ready' && <div className="mt-4 flex justify-center">{regenButton('image', '이미지 다시 만들기', true)}</div>}
+                        </div>
+                      )}
+                      {reviewTab === 'materials' && (
+                        <div className="text-left">
+                          {/* ★ 0905(3) C4-2 재료 다시 고르기 — 실측 통과 사본만(서버 화이트리스트) · 체크 = 남긴다 · 화살표 = 순서(첫 상품·첫 사진이 앞 묶음·히어로) */}
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <p className="text-[11px] text-white/60">실측을 통과한 재료입니다. 빼거나 순서를 바꾼 뒤 [고른 재료로 다시 만들기]를 누르면 모바일 DM·이메일 시안이 이 재료로 다시 만들어집니다.</p>
+                            {stage === 'ready' && (
+                              <button onClick={applyMaterials} disabled={busy || !materialsChanged || (matProducts.length + matGallery.length === 0) || materialsSeq >= 5} className={smallBtnDark}
+                                title={materialsSeq >= 5 ? '최대 5회까지 다시 고를 수 있습니다' : undefined}>
+                                <RefreshCw className="w-3.5 h-3.5" /> 고른 재료로 다시 만들기{materialsSeq ? ` (${materialsSeq}/5)` : ''}
+                              </button>
+                            )}
+                          </div>
+                          <h5 className="mt-3 text-xs font-semibold text-white/80">상품 {matProducts.length}/{mediaProducts.length}</h5>
+                          {mediaProducts.length === 0 && <p className="text-[11px] text-white/40 mt-1">실측을 통과한 상품이 없습니다.</p>}
+                          <ul className="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {[...matProducts.map((u) => mediaProducts.find((x: any) => String(x.image_url) === u)).filter(Boolean), ...mediaProducts.filter((x: any) => !matProducts.includes(String(x.image_url)))].map((x: any) => {
+                              const u = String(x.image_url); const on = matProducts.includes(u); const idx = matProducts.indexOf(u);
+                              return (
+                                <li key={u} className={`rounded-xl overflow-hidden border ${on ? 'border-blue-400 bg-white' : 'border-white/10 bg-white/5 opacity-60'}`}>
+                                  <img src={u} alt="" className="w-full aspect-square object-cover" />
+                                  <div className="p-2 text-[11px]">
+                                    <div className={`truncate ${on ? 'text-gray-800' : 'text-white/70'}`}>{String(x.name || '')}</div>
+                                    <div className={on ? 'text-gray-500' : 'text-white/40'}>{x.price ? `${Number(x.price).toLocaleString()}원` : ''}{x.width ? ` · ${x.width}px` : ''}</div>
+                                    <div className="mt-1 flex items-center gap-1">
+                                      <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={on} disabled={stage !== 'ready'} onChange={() => toggleMat('products', u)} className="accent-blue-500" /><span className={on ? 'text-gray-700' : 'text-white/60'}>{on ? '남김' : '제외'}</span></label>
+                                      {on && <span className="ml-auto flex gap-0.5"><button onClick={() => moveMat('products', u, -1)} disabled={idx <= 0 || stage !== 'ready'} className="px-1 rounded bg-gray-100 text-gray-600 disabled:opacity-30">←</button><button onClick={() => moveMat('products', u, 1)} disabled={idx >= matProducts.length - 1 || stage !== 'ready'} className="px-1 rounded bg-gray-100 text-gray-600 disabled:opacity-30">→</button></span>}
+                                    </div>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <h5 className="mt-4 text-xs font-semibold text-white/80">사진 {matGallery.length}/{mediaGallery.length}</h5>
+                          {mediaGallery.length === 0 && <p className="text-[11px] text-white/40 mt-1">실측을 통과한 사진이 없습니다.</p>}
+                          <ul className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {[...matGallery.map((u) => mediaGallery.find((x: any) => String(x.url) === u)).filter(Boolean), ...mediaGallery.filter((x: any) => !matGallery.includes(String(x.url)))].map((x: any) => {
+                              const u = String(x.url); const on = matGallery.includes(u); const idx = matGallery.indexOf(u);
+                              return (
+                                <li key={u} className={`rounded-xl overflow-hidden border ${on ? 'border-blue-400 bg-white' : 'border-white/10 bg-white/5 opacity-60'}`}>
+                                  <img src={u} alt="" className="w-full aspect-[4/3] object-cover" />
+                                  <div className="p-1.5 text-[11px] flex items-center gap-1">
+                                    <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={on} disabled={stage !== 'ready'} onChange={() => toggleMat('gallery', u)} className="accent-blue-500" /><span className={on ? 'text-gray-700' : 'text-white/60'}>{x.width && x.height ? `${x.width}×${x.height}` : (on ? '남김' : '제외')}</span></label>
+                                    {on && <span className="ml-auto flex gap-0.5"><button onClick={() => moveMat('gallery', u, -1)} disabled={idx <= 0 || stage !== 'ready'} className="px-1 rounded bg-gray-100 text-gray-600 disabled:opacity-30">←</button><button onClick={() => moveMat('gallery', u, 1)} disabled={idx >= matGallery.length - 1 || stage !== 'ready'} className="px-1 rounded bg-gray-100 text-gray-600 disabled:opacity-30">→</button></span>}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <p className="mt-3 text-[11px] text-white/40">사진·상품 이미지는 업체 홈페이지 원본의 사본이며, 메일 푸터에 활용 고지가 붙습니다(인물 사진은 자동 제외).</p>
                         </div>
                       )}
                     </div>

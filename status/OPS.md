@@ -399,6 +399,8 @@ DDL 전에 화면을 열면 라우트가 **503 `DB_MIGRATION_PENDING`**과 "DB �
 
 **⑥ 긴급 정지** — `SALES_OUTREACH_ALLOWED_USERS`를 존재하지 않는 login_id로 바꾸고 `pm2 restart targetup-backend --update-env`. 메뉴 자체가 닫힌다. 발송만 막으려면 `OUTREACH_UNSUB_NOTICE`를 비운다.
 
+**⑦-2 2026-09-05(3) 퀄리티 상향 수렴안(룩·재료·검수 축) + 핫픽스 B-0905-2 배포** = DDL 0 · ENV 0 · 순서 = git pull → backend·frontend `npm run build:safe` → `pm2 reload targetup-backend`(administrator) → 실측 = 이니스프리 잡 새로 만들어 검토 화면 DM 탭(iframe에 **세로 한 페이지 전부**가 보이고 구도 n·배경면 n 표시) · 재료 탭에서 사진 1장 제외 → [고른 재료로 다시 만들기] → 새 DM · 블록 숨김 1회(확인 모달) → 새 DM · 품질 경고 표시 · **[다시 읽기](awaiting_confirm)가 500이 아니라 202**(B-7 회귀 정정 확인). 롤백 = 코드만 되돌리면 된다(stage_results·brand_profile 새 키는 구코드가 읽지 않는다 · 구코드 dm asset에 sections가 없으면 화면은 링크만 보인다).
+
 **⑦ 2026-09-05 개정(샘플 학습 층·검수 발송·운영 조작) 배포 순서 = ALTER → 코드** (설계 = [0905 설계서 §8-1](../docs/2026-09-05-ai-sales-outreach-refinement-design.md) · 컬럼은 nullable 로그성이라 구코드에 무해하고, 신코드는 42703 폴백을 두지 않으므로 **ALTER를 코드보다 먼저** 실행한다)
 1. 확인(0행이어야 ALTER 대상):
 ```bash
