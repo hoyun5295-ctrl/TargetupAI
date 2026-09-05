@@ -322,12 +322,18 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT table_name
 | `SALES_OUTREACH_ALLOWED_USERS` | `ceo` | **키가 없어도 기본값 `ceo`가 적용된다**(전면 차단이 아니다 · `audit-log.ts:55`). fail-closed가 걸리는 곳은 미로그인·미등록·조회 실패다 |
 | `OUTREACH_COMPANY_ID` | 인비토 내부 귀속 회사 `companies.id`(uuid) | **기능 전체가 "준비 안 됨"으로 거절** |
 | `OUTREACH_USER_ID` | 그 회사의 `users.id`(uuid) | 위와 같음 |
-| `OUTREACH_SMTP_USER` | `hanjul@invitocorp.com` | 발송만 잠김(제작은 정상) |
-| `OUTREACH_SMTP_PASS` | 그 계정 **메일 전용 비밀번호** | 위와 같음 |
+| `OUTREACH_SMTP_USER` | `hanjul@invitocorp.com` — **반드시 전체 주소**(★0905 실측: `hanjul`만 넣어 hiworks `535 authentication failed`) | 발송만 잠김(제작은 정상) |
+| `OUTREACH_SMTP_PASS` | 그 계정 **메일 전용 비밀번호**(hiworks 메일 환경설정 → POP3/SMTP 설정 → [메일 전용 비밀번호 설정] · OTP 계정은 로그인 비밀번호가 거부된다) | 위와 같음 |
 | `OUTREACH_MAIL_TO` | 자사 수신함 주소 | 생략 = `INVITO_INFO.email` 기본값 사용 |
 | `OUTREACH_UNSUB_NOTICE` | 메일 하단 수신거부 안내 문구 | 발송 잠김(**지금은 이게 정상 상태**) |
 
-발신 서버는 기존 `SMTP_HOST`·`SMTP_PORT`를 그대로 쓴다(기본 `smtp.hiworks.com:465`). 공개 샘플 주소의 앞부분은 `PUBLIC_BASE_URL`(기본 `https://hanjul.ai`).
+발신 서버는 기존 `SMTP_HOST`·`SMTP_PORT`를 그대로 쓴다(기본 `smtp.hiworks.com:465` · hiworks 안내는 `smtps.hiworks.com`이지만 정산·회사 메일이 같은 값으로 나가고 있다). 공개 샘플 주소의 앞부분은 `PUBLIC_BASE_URL`(기본 `https://hanjul.ai`).
+
+발신 계정 입력은 아래 한 줄(비밀번호는 프롬프트 · 화면 미표시 · 기존 두 줄 삭제 후 재기입 · ★0905 실측 · 검수 메일 도착 확인):
+```bash
+cd /home/administrator/targetup-app/packages/backend && read -rsp "OUTREACH_SMTP_PASS: " P && echo && sed -i '/^OUTREACH_SMTP_USER=/d;/^OUTREACH_SMTP_PASS=/d' .env && printf 'OUTREACH_SMTP_USER="hanjul@invitocorp.com"\nOUTREACH_SMTP_PASS="%s"\n' "$P" >> .env && unset P && grep '^OUTREACH_SMTP_USER=' .env && grep -c '^OUTREACH_SMTP_PASS=.' .env
+```
+그 뒤 `pm2 restart targetup-backend --update-env`(reload는 env를 다시 안 읽는다). 실패 원문은 `pm2 logs targetup-backend --nostream --lines 300 | grep "메일 발송 실패"`.
 
 귀속 회사·사용자 uuid를 모를 때 찾는 SQL:
 ```bash

@@ -149,6 +149,19 @@ export function describeBillingTargets(candidates: SenderCandidate[]): string {
     .join(', ');
 }
 
+/**
+ * 접수 완료 회신에 적을 **그 건의 발송 계정** 표기 (★2026-09-05 §21-4).
+ *
+ * 경위 = 지금 접수 완료 회신에는 어느 계정으로 청구되는지가 한 글자도 없다. 계정이 하나일 때는
+ *   문제가 안 됐지만, 한 메일이 여러 건이 되면 오지정 확률이 건수만큼 늘고
+ *   **틀렸다는 사실을 아는 유일한 자리가 월말 청구서**가 된다. 표기는 위 목록과 같은 한 벌을 쓴다.
+ */
+export function describeAccountLabel(candidates: SenderCandidate[], userId: string): string {
+  const hit = candidates.find((c) => c.userId === userId);
+  if (!hit) return '';
+  return hit.label ? `${hit.label} (${hit.loginId})` : hit.loginId;
+}
+
 // ─────────────────────────────────────────────────────────────
 // MMS 이미지 첨부 규격 (★2026-08-28 서수란 접수 cmtclkuhe04iujnotbi3xbuu3 · Harold 확정)
 //   메일 접수도 이미지 최대 3장을 요청서와 별도 파일로 첨부해 MMS를 보낼 수 있다.

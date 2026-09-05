@@ -47,6 +47,17 @@ const REASON_LABEL: Record<string, string> = {
   phone_column_ambiguous: '수신자 열 판별 실패',
   callback_invalid: '회신번호 오류',
   core_rejected: '접수 검증 반려',
+  // ★2026-08-27 발송 ID(청구 계정) 지정 판정 — 라벨이 빠져 있어 화면이 코드를 그대로 보여주고 있었다
+  billing_target_required: '발송 ID 미지정(계정 여러 개)',
+  billing_target_not_found: '발송 ID 불일치',
+  billing_target_ambiguous: '발송 ID 표시명 겹침(설정 확인)',
+  billing_target_mismatch: '요청 불가 계정 지정',
+  // ★2026-09-05 §21-4 메일 한 통 = 요청서 여러 건
+  too_many_forms: '요청서 개수 초과(최대 5)',
+  duplicate_in_mail: '같은 메일 안 같은 요청서 중복',
+  multi_form_with_image: '요청서 여러 개 + 이미지 첨부',
+  multi_company_not_allowed: '한 메일에 서로 다른 회사',
+  claim_exhausted: '처리 중 반복 중단(종결)',
 };
 
 const STATUS_KO: Record<string, string> = {

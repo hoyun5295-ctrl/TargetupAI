@@ -161,24 +161,63 @@ describe('메일 워커 배선 (소스 계약) — MMS 개통이 되돌아가지
     expect(worker).toMatch(/form\.imageFileName && imageAtts\.length === 0/);
     expect(worker).toMatch(/'image_not_attached'/);
   });
-  it('저장은 청구 계정 확정 뒤이고, 반려 시 저장 파일을 지운다(고아 방지)', () => {
-    const saveAt = worker.indexOf('saveMmsImageBuffer(acct.companyId');
-    const acctAt = worker.indexOf('const acct = auth;');
+  it('저장은 발송 계정 확정 뒤이고, 반려 시 저장 파일을 지운다(고아 방지)', () => {
+    // ★2026-09-05 §21-4 계정 확정이 단위별로 옮겨졌다(auth 상속 금지). 앵커도 그 자리로 옮긴다 —
+    //   lastAcct 대입이 "이 단위의 계정이 확정된 지점"이고, 이미지 저장은 그보다 뒤여야 한다.
+    const saveAt = worker.indexOf('saveMmsImageBuffer(unitAcct.companyId');
+    const acctAt = worker.indexOf('lastAcct = unitAcct;');
+    expect(acctAt).toBeGreaterThan(0);
     expect(saveAt).toBeGreaterThan(acctAt);
     expect(worker).toMatch(/savedImagePaths\.splice\(0\)/);
   });
   it('접수 코어에는 화면 접수와 같은 형태(절대경로 배열)로 넘긴다', () => {
-    expect(worker).toMatch(/mmsImagePaths: savedImagePaths/);
-    expect(worker, 'SMS·LMS 전용 시절의 빈 배열 고정이 되살아났다').not.toMatch(/mmsImagePaths: \[\]/);
+    // 다중이면 이미지가 애초에 반려되므로 그 경로에서만 빈 배열이다. 무조건 빈 배열 고정은 여전히 금지.
+    expect(worker).toMatch(/mmsImagePaths: multi \? \[\] : savedImagePaths/);
+    expect(worker, 'SMS·LMS 전용 시절의 빈 배열 고정이 되살아났다').not.toMatch(/mmsImagePaths: \[\],/);
   });
   it('접수 완료 회신에 이미지 순서를 적는다(이 회신이 유일한 확인 자리다)', () => {
-    expect(worker).toMatch(/imageNames: savedImageNames/);
+    expect(worker).toMatch(/imageNames: multi \? \[\] : savedImageNames/);
     expect(worker).toMatch(/이 순서로 붙습니다/);
+  });
+  it('★0905 다중 접수에는 이미지를 받지 않는다(첨부 순서로 귀속을 정할 수 없다)', () => {
+    expect(worker).toMatch(/multi && imageAtts\.length > 0/);
+    expect(worker).toMatch(/'multi_form_with_image'/);
+    // 판정이 저장보다 앞이어야 고아 파일 정리에 기대지 않는다
+    expect(worker.indexOf("'multi_form_with_image'")).toBeLessThan(worker.indexOf('saveMmsImageBuffer(unitAcct.companyId'));
+  });
+  it('★0905 이미지 파일명 칸 검사는 단건·다중 공통이다(Codex 1R ② — 다중에서 건너뛰면 이미지가 빠진 채 발송된다)', () => {
+    const check = worker.indexOf("'image_not_attached'");
+    const multiOnlyBlock = worker.indexOf('if (!multi) {');
+    expect(check).toBeGreaterThan(0);
+    expect(multiOnlyBlock).toBeGreaterThan(0);
+    expect(check, '검사가 다중 전용 분기 안으로 들어갔다').toBeLessThan(multiOnlyBlock);
+  });
+  it('★0905 재시도 회신은 재발송본임을 밝힌다(스냅샷을 복원하지 않으므로 침묵하면 안 된다)', () => {
+    expect(worker).toMatch(/처음 보내드린 접수 완료 안내가 도달하지 못해/);
+  });
+  it('★0905 한 메일의 요청서는 같은 회사여야 한다(intake 원장의 회사 칸이 하나뿐이다)', () => {
+    expect(worker).toMatch(/'multi_company_not_allowed'/);
+    expect(worker).toMatch(/mailCompanyId !== unitAcct\.companyId/);
+  });
+  it('★0905 메일 안 같은 요청서 두 장은 DB로 못 잡으므로 계획 단계에서 대조한다', () => {
+    expect(worker).toMatch(/'duplicate_in_mail'/);
+    expect(worker).toMatch(/plans\.find\(\(p\) => p\.dupKey === dupKey\)/);
+  });
+  it('★0905 재시도 회신은 request_ids 전량을 읽는다(첫 건만 읽으면 N건 중 1건만 말한다)', () => {
+    expect(worker).toMatch(/id = ANY\(\$1::uuid\[\]\)/);
+    expect(worker, 'request_ids[0]만 읽던 회귀가 되살아났다').not.toMatch(/row\.request_ids\[0\]/);
   });
   it('신규 반려 코드는 슈퍼관리자 라벨표에 등재됐다(미등재 = 화면이 코드를 그대로 보여준다)', () => {
     const panel = fs.readFileSync(
       path.resolve(__dirname, '../../../../frontend/src/components/admin/AgencyMailIntakePanel.tsx'), 'utf8');
     expect(panel).toMatch(/mms_image_invalid/);
     expect(panel).toMatch(/image_not_attached/);
+    // ★2026-08-27 발송 ID 지정 판정 + ★2026-09-05 §21-4 다중 접수
+    for (const code of [
+      'billing_target_required', 'billing_target_not_found', 'billing_target_ambiguous', 'billing_target_mismatch',
+      'too_many_forms', 'duplicate_in_mail', 'multi_form_with_image', 'multi_company_not_allowed', 'claim_exhausted',
+    ]) {
+      expect(panel.includes(code), `${code} 라벨 미등재 — 화면이 코드를 그대로 노출한다`).toBe(true);
+    }
   });
 });

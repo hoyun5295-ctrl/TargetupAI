@@ -320,7 +320,10 @@ export default function AgencySendPage() {
                           <p className={`${CUI_CELL_META} mt-0.5 truncate`}>
                             {/* ★0826 §18: 출처 라벨 = SOURCE_LABEL 단일표(fileName 유무 추정 폐지 — 이메일 접수도 파일명이 있어 구분이 안 됐다) */}
                             {/* ★0826(2) 접수 계정 — 관리자 응답에만 실려 온다(관리자는 하위 전부를 보므로 누가 냈는지 표시) */}
-                            {SOURCE_LABEL[r.source] || SOURCE_LABEL.screen} · <span className="tabular-nums">{r.recipientCount.toLocaleString()}</span>명 · {r.messageType}{r.isAd ? ' · 광고' : ''}{r.createdByName ? <> · <span className="text-indigo-700 font-semibold">{r.createdByName}</span></> : null}
+                            {/* ★0905 §21-4 회신번호 — 한 요청서에서 갈라진 여러 건(회신번호 열 방식)과
+                                한 메일에서 온 여러 건은 제목·건수·타입이 같아 이 값 없이는 행이 구별되지 않는다.
+                                이미 목록 응답에 실려 오므로 서버·쿼리 변경 0. */}
+                            {SOURCE_LABEL[r.source] || SOURCE_LABEL.screen} · <span className="tabular-nums">{r.recipientCount.toLocaleString()}</span>명 · {r.messageType}{r.isAd ? ' · 광고' : ''}{r.callbackNumber ? <> · <span className="tabular-nums">{r.callbackNumber}</span></> : null}{r.createdByName ? <> · <span className="text-indigo-700 font-semibold">{r.createdByName}</span></> : null}
                           </p>
                         </div>
                         <div className="hidden md:flex flex-1 min-w-0">

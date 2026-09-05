@@ -71,7 +71,8 @@ export async function loadSendWindow(companyId: string, isAd: boolean): Promise<
  * 그냥 구식 문장), 있으면 싣는다. 음성 결과는 5분 TTL로 재탐지한다(DDL이 재기동 없이 적용되는 창 대비).
  */
 const columnCache = new Map<string, { value: boolean; checkedAt: number }>();
-async function hasAgencyColumn(client: any, column: string): Promise<boolean> {
+/** ★2026-09-05 §21-3 (2) 메일 워커의 중복 대조도 같은 탐지를 쓴다 — 판정 두 벌 금지(인라인 재정의 금지) */
+export async function hasAgencyColumn(client: any, column: string): Promise<boolean> {
   const now = Date.now();
   const hit = columnCache.get(column);
   if (hit && (hit.value || now - hit.checkedAt < 5 * 60 * 1000)) return hit.value;

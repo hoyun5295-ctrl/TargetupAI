@@ -372,3 +372,32 @@ describe('이메일 중복 차단 집합(§18-6) — queued 미도래 포함, SQ
     expect(EMAIL_DUP_BLOCKING_SQL).toContain(`status = 'queued' AND requested_at <= NOW()`);
   });
 });
+
+// ────────────── 이메일 중복 판정의 시각 축 (★2026-09-05 §21-3 (2)) ──────────────
+import { emailDupTimeSql } from '../agency-send-state';
+
+describe('emailDupTimeSql — 조정된 시각도 중복으로 잡는다', () => {
+  it('컬럼이 있으면 원본과 조정값 둘 다로 대조한다', () => {
+    const sql = emailDupTimeSql(true);
+    expect(sql).toContain('requested_at = $2::timestamptz');
+    expect(sql).toContain('requested_at_original = $2::timestamptz');
+    expect(sql).toContain('OR');
+  });
+
+  it('컬럼이 없으면 오늘 동작 그대로 — 원본 한 축만 본다', () => {
+    const sql = emailDupTimeSql(false);
+    expect(sql).toBe('requested_at = $2::timestamptz');
+    expect(sql).not.toContain('requested_at_original');
+  });
+
+  it('자리표시자는 $2 하나만 쓴다(호출부 파라미터 배열을 늘리지 않는다)', () => {
+    for (const sql of [emailDupTimeSql(true), emailDupTimeSql(false)]) {
+      const placeholders = sql.match(/\$\d+/g) || [];
+      expect(new Set(placeholders)).toEqual(new Set(['$2']));
+    }
+  });
+
+  it('⛔ 컬럼 부재 분기가 requested_at_original을 흘리면 DDL 전 환경에서 tick이 통째로 멈춘다', () => {
+    expect(emailDupTimeSql(false).includes('_original')).toBe(false);
+  });
+});

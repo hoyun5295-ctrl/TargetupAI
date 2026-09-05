@@ -1899,7 +1899,7 @@ router.post('/companies/:id/agency-send-emails', authenticate, requireSuperAdmin
         await c.query('ROLLBACK');
         return res.status(400).json({
           success: false,
-          error: '이 주소는 이미 다른 계정에 등록되어 있습니다. 여러 계정에 등록하려면 표시명(청구 계정 이름)을 적어 주세요. 담당자가 요청서의 "청구 계정" 칸에 이 이름을 적어 청구 계정을 지정합니다.',
+          error: '이 주소는 이미 다른 계정에 등록되어 있습니다. 여러 계정에 등록하려면 표시명(발송 ID)을 적어 주세요. 담당자가 요청서 "내용" 시트 맨 아래 "발송 ID" 칸에 이 이름을 적어 어느 계정으로 나갈지 지정합니다.',
         });
       }
       // 지정 대조 키 충돌 예방 — 겹치면 matchBillingTarget이 ambiguous가 되어 그 주소의 접수가 전부 반려된다

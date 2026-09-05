@@ -244,7 +244,7 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
                 {formError && <p className="mt-2 text-[12.5px] font-medium text-rose-600">{formError}</p>}
                 <p className="mt-2 text-[12px] text-neutral-500">
                   접수 메일의 보낸 주소와 글자 그대로 일치해야 합니다. 같은 주소를 여러 계정에 등록할 수 있고,
-                  그 경우 담당자가 요청서의 "청구 계정" 칸에 표시명을 적어 어느 계정으로 청구할지 지정합니다.
+                  그 경우 담당자가 요청서 "내용" 시트 맨 아래 "발송 ID" 칸에 표시명을 적어 어느 계정으로 나갈지 지정합니다.
                 </p>
               </div>
 
@@ -272,7 +272,7 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
                               <span className="text-[13.5px] font-semibold text-neutral-800 truncate">{s.email_norm}</span>
                               {shared ? (
                                 <span className="shrink-0 text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-full truncate">
-                                  청구 계정: {s.label || s.user_login_id || '(이름 없음)'}
+                                  발송 ID: {s.label || s.user_login_id || '(이름 없음)'}
                                 </span>
                               ) : (
                                 s.label && <span className="text-[12px] text-neutral-500 truncate">{s.label}</span>

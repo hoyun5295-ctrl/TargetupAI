@@ -122,6 +122,24 @@ export function needsQueueCancel(status: AgencySendStatus): boolean {
 export const EMAIL_DUP_ALLOWED_TERMINAL: readonly AgencySendStatus[] = ['expired', 'cancelled'] as const;
 export const EMAIL_DUP_BLOCKING_SQL =
   `(status NOT IN ('expired','cancelled') AND NOT (status = 'queued' AND requested_at <= NOW()))`;
+
+/**
+ * 이메일 중복 판정의 **시각 축** SQL (★2026-09-05 §21-3 (2)).
+ *
+ * 경위 = 3층 대조가 `requested_at = $2`(사용자가 적은 원본)로만 비교하는데, 코어는
+ *   `validateRequestedAt`이 리드타임 미달 건을 조정한 값을 저장한다. 두 값이 다르므로
+ *   **조정을 탄 건은 재전송해도 중복에 안 걸려 이중 접수된다**(운영 실측 = 이메일 접수 7건 중 2건 조정).
+ *
+ * ⛔ `requested_at_original`은 조정된 건에만 채우는 **조건부 기록 컬럼**이다. 컬럼이 없는 환경(DDL 전)에서
+ *   무방비로 SELECT에 넣으면 그 쿼리가 통째로 실패하고 워커 tick이 조용히 멈춘다. 그래서 존재 여부를
+ *   받아 분기한다 — 없으면 오늘 동작 그대로.
+ * ⛔ 자리표시자는 `$2` 하나를 두 번 쓴다(파라미터를 늘리지 않는다 · 호출부 배열 무변경).
+ */
+export function emailDupTimeSql(hasOriginalColumn: boolean): string {
+  return hasOriginalColumn
+    ? `(requested_at = $2::timestamptz OR requested_at_original = $2::timestamptz)`
+    : `requested_at = $2::timestamptz`;
+}
 export function isEmailDupBlocking(status: AgencySendStatus, requestedAt: Date | null | undefined, now: Date): boolean {
   if ((EMAIL_DUP_ALLOWED_TERMINAL as readonly string[]).includes(status)) return false;
   if (status === 'queued' && requestedAt && !Number.isNaN(requestedAt.getTime()) && requestedAt.getTime() <= now.getTime()) return false;
