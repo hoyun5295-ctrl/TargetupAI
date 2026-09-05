@@ -44,3 +44,6 @@ packages/backend/uploads/
 /uninstall.sh
 /README.install-linux.md
 /VERSION.txt
+
+# 폐기 전제 프로토타입·실물 덤프(직원 실물 원문 · 커밋 금지)
+scratch/

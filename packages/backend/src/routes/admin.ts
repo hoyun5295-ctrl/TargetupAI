@@ -18,6 +18,8 @@ import { INDUSTRY_CODES, INDUSTRY_LABELS, isIndustryCode } from '../utils/indust
 import { getSeedUsageStats, getIndustryFormula, listStyleExamples, listStructureSkeletons, setStructureServing } from '../utils/best-copy-assets';
 // ★ 2026-09-03 참조 골격 학습층(docs/2026-09-03-reference-skeleton-learning-design.md §7)
 import { SKELETON_INDUSTRY_GENERAL, isSkeletonChannel, isSkeletonIndustry, listPromotionCandidates, promoteReferenceSkeleton } from '../utils/reference-skeleton-promote';
+// ★ 2026-09-05 아웃리치 실물 예시 학습(베스트 구성 · ceo 전용) — 설계 = docs/2026-09-05-ai-sales-outreach-refinement-design.md §20
+import { parseCodeList, resolveOutreachExampleCodes, promoteOutreachExamples, listOutreachExamplesForAdmin, removeOutreachExample, OUTREACH_EXAMPLE_CODE_MAX } from '../utils/sales-outreach-examples';
 import { distillIndustryFormula } from '../utils/industry-formula';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
@@ -5175,6 +5177,92 @@ router.post('/best-layout/skeleton/promote', authenticate, requireSuperAdmin, as
   } catch (err: any) {
     console.error('[skeleton] 승격 실패:', err?.message);
     res.status(500).json({ error: '참조 골격 승격에 실패했습니다.' });
+  }
+});
+
+// ═══ ★ 2026-09-05 실물 예시(AI 영업 학습) — /best-layout 하위(ceo 게이트 상속) · 회사 = 내부 전용 회사 고정(요청 값 무시) · 신규 DDL 0 ═══
+//   목록 · 코드 해석(마스킹 미리보기 동봉) · 승격(서버가 게이트·위생 재검사) · 삭제. 성공 분기는 감사 로그.
+/** 실물 예시 회사 = ENV OUTREACH_COMPANY_ID뿐(골격 후보와 달리 요청 companyId를 받지 않는다 · 다른 회사 실물을 읽지 않는 계약). */
+function outreachExampleCompanyId(): string | null {
+  const v = String(process.env.OUTREACH_COMPANY_ID || '').trim();
+  return UUID_RE.test(v) ? v : null;
+}
+router.get('/best-layout/examples', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const rows = await listOutreachExamplesForAdmin();
+    res.json({
+      success: true,
+      industries: INDUSTRY_CODES.map((code) => ({ code, label: INDUSTRY_LABELS[code] })),
+      examples: rows.map((r) => ({
+        id: r.id, channel: r.channel, industryCode: r.industryCode, content: r.content, createdAt: r.createdAt,
+        source: { kind: r.meta?.source?.kind || null, title: r.meta?.source?.title || '', shortCode: r.meta?.source?.shortCode || null, createdBy: r.meta?.source?.createdBy || null },
+        chars: Number(r.meta?.chars) || r.content.length, promotedAt: r.meta?.promotedAt || null,
+      })),
+    });
+  } catch (err: any) {
+    console.error('[examples] 목록 실패:', err?.message);
+    res.status(500).json({ error: '실물 예시 목록을 불러오지 못했습니다.' });
+  }
+});
+
+router.post('/best-layout/examples/resolve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const companyId = outreachExampleCompanyId();
+    if (!companyId) return res.status(400).json({ error: '내부 전용 회사(OUTREACH_COMPANY_ID)가 설정되지 않았습니다.' });
+    const parsed = parseCodeList(String(req.body?.codes || ''));
+    if (parsed.codes.length === 0) return res.status(400).json({ error: `단축코드를 붙여넣어 주세요(최대 ${OUTREACH_EXAMPLE_CODE_MAX}개).`, invalid: parsed.invalid });
+    const r = await resolveOutreachExampleCodes({ companyId, codes: parsed.codes });
+    res.json({ success: true, company: r.company, resolved: r.resolved, emails: r.emails, invalid: parsed.invalid });
+  } catch (err: any) {
+    console.error('[examples] 코드 해석 실패:', err?.message);
+    res.status(500).json({ error: '단축코드를 확인하지 못했습니다.' });
+  }
+});
+
+router.post('/best-layout/examples/promote', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const companyId = outreachExampleCompanyId();
+    if (!companyId) return res.status(400).json({ error: '내부 전용 회사(OUTREACH_COMPANY_ID)가 설정되지 않았습니다.' });
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items.slice(0, OUTREACH_EXAMPLE_CODE_MAX * 2) : [];
+    const items = rawItems
+      .filter((it: any) => it && (it.kind === 'dm' || it.kind === 'email') && UUID_RE.test(String(it.id || '')))
+      .map((it: any) => ({
+        kind: it.kind as 'dm' | 'email',
+        id: String(it.id),
+        industryCode: String(it.industryCode || '').trim().slice(0, 20),
+        aliasesExtra: Array.isArray(it.aliasesExtra) ? it.aliasesExtra.map((a: unknown) => String(a).trim().slice(0, 40)).filter(Boolean).slice(0, 10) : null,
+      }));
+    if (items.length === 0) return res.status(400).json({ error: '올릴 항목을 선택해주세요.' });
+    const r = await promoteOutreachExamples({ companyId, items, promotedBy: req.user?.userId ? String(req.user.userId) : null, nowIso: new Date().toISOString() });
+    if (!r.ok) {
+      if (r.reason === 'table_missing') {
+        return res.status(503).json({ error: 'DB 마이그레이션 필요: 운영자에게 best_copy_assets 테이블 생성 요청이 필요합니다.', code: 'DB_MIGRATION_PENDING' });
+      }
+      return res.status(400).json({ error: '올릴 수 있는 항목이 없습니다.', skipped: r.skipped });
+    }
+    await recordAuditLog({ actorUserId: req.user?.userId, action: 'best_layout.example_promote', targetType: 'best_copy_assets', targetId: null, details: { added: r.added, skipped: r.skipped.length, rows: r.previews.map((p) => ({ id: p.rowId, kind: p.kind, title: p.title.slice(0, 40) })) }, req });
+    res.json({ success: true, added: r.added, skipped: r.skipped, previews: r.previews });
+  } catch (err: any) {
+    console.error('[examples] 승격 실패:', err?.message);
+    res.status(500).json({ error: '실물 예시 저장에 실패했습니다.' });
+  }
+});
+
+router.delete('/best-layout/examples/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!UUID_RE.test(id)) return res.status(400).json({ error: '대상이 올바르지 않습니다.' });
+    const r = await removeOutreachExample(id);
+    if (!r.ok) {
+      if (r.reason === 'not_found') return res.status(404).json({ error: '이미 없는 예시입니다.' });
+      if (r.reason === 'table_missing') return res.status(503).json({ error: 'DB 마이그레이션 필요: 운영자에게 best_copy_assets 테이블 생성 요청이 필요합니다.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(500).json({ error: '실물 예시 삭제에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+    }
+    await recordAuditLog({ actorUserId: req.user?.userId, action: 'best_layout.example_delete', targetType: 'best_copy_assets', targetId: id, req });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[examples] 삭제 실패:', err?.message);
+    res.status(500).json({ error: '실물 예시 삭제에 실패했습니다.' });
   }
 });
 

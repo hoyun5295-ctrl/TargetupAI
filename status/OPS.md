@@ -355,6 +355,7 @@ CREATE TABLE sales_outreach_jobs (
   event_quote       jsonb,
   fail_stage        text,
   fail_reason       text,
+  fail_detail       text,   -- ★2026-09-05 ⑦ ALTER로 추가(신규 CREATE면 여기 포함)
   preview_code      text UNIQUE,
   mail_sent_at      timestamptz,
   mail_result       text CHECK (mail_result IN ('sending','sent','rejected','unknown')),
@@ -383,7 +384,7 @@ SQL
 ⛔ `created_by`에 **FK를 걸지 않는다** — 슈퍼관리자는 `super_admins` 소속이라 `users` FK를 걸면 `23503`으로 터진다(2026-07-28 회사 수정 실패 사고 · SCHEMA.md 공통 원칙). 값은 `super_admins.id` uuid다.
 ⛔ CHECK 목록은 코드 실측 전수다(stage 11값 = 모달·라우트·잡·sweeper 교차 확인 · `mail_result`에 **`sending` 포함**이 핵심 — 발송 선점 CAS가 쓰는 값이라 빠뜨리면 발송이 통째로 막힌다).
 
-**④ 반영 확인** — 컬럼 수 20 · 6이 나와야 한다.
+**④ 반영 확인** — 컬럼 수 **21**(⑦ ALTER 뒤 · 0828 원본 CREATE 직후는 20) · 6이 나와야 한다.
 ```bash
 docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT table_name, COUNT(*) AS cols FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('sales_outreach_jobs','sales_outreach_assets') GROUP BY table_name ORDER BY 1;"
 ```
@@ -397,6 +398,24 @@ DDL 전에 화면을 열면 라우트가 **503 `DB_MIGRATION_PENDING`**과 "DB �
 5. `[업체에 전달함]` 표시까지 눌러야 공개 샘플 페이지 수명 기산이 설계대로 도는지 확인된다
 
 **⑥ 긴급 정지** — `SALES_OUTREACH_ALLOWED_USERS`를 존재하지 않는 login_id로 바꾸고 `pm2 restart targetup-backend --update-env`. 메뉴 자체가 닫힌다. 발송만 막으려면 `OUTREACH_UNSUB_NOTICE`를 비운다.
+
+**⑦ 2026-09-05 개정(샘플 학습 층·검수 발송·운영 조작) 배포 순서 = ALTER → 코드** (설계 = [0905 설계서 §8-1](../docs/2026-09-05-ai-sales-outreach-refinement-design.md) · 컬럼은 nullable 로그성이라 구코드에 무해하고, 신코드는 42703 폴백을 두지 않으므로 **ALTER를 코드보다 먼저** 실행한다)
+1. 확인(0행이어야 ALTER 대상):
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='sales_outreach_jobs' AND column_name='fail_detail';"
+```
+2. ALTER(nullable · 즉시 · 락 부담 0):
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "ALTER TABLE sales_outreach_jobs ADD COLUMN IF NOT EXISTS fail_detail text;"
+```
+3. 반영 확인(기대 21):
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT COUNT(*) AS cols FROM information_schema.columns WHERE table_schema='public' AND table_name='sales_outreach_jobs';"
+```
+4. ENV 추가(선택 · `packages/backend/.env`): `OUTREACH_TEST_MAIL_DOMAINS=invitocorp.com`(검수 메일 허용 도메인 · 생략 = 같은 기본값). 넣었으면 `pm2 restart targetup-backend --update-env`.
+5. 코드 배포 = §2-2 표준 순서(pull → npm install → `build:safe` → reload). 부팅 로그에 `[sales-outreach-sweeper] 시작 (주기 10분 · 좀비 15분 · 대기 초과 2시간 · 파기 30일)`이 찍히면 신코드다.
+6. 실측 1건(순서대로): (a) `fetchHtmlGuarded('https://www.innisfree.com/')` 실측 → `ok 3xxxxx`([B-0905-1](BUGS.md) 종결 기준) (b) 업체 1곳 등록 → 확인 대기 → 확정 → ready (c) 검토 화면에서 [검수 메일 보내기]에 `@invitocorp.com` 주소 입력 → 수신함 도착 (d) 근거 패널 "선명한 이미지 n장 · 상품 n개" · DM 열어 갤러리·상품 이미지가 선명한지 (e) `curl -I` 발행 DM 주소에 `X-Robots-Tag: noindex` (f) 공개 샘플 URL 61회 연타 → 429 안내 HTML.
+7. **실물 예시 학습 적재(0905(2) · Harold 화면 1회)**: `/admin/best-layout` → "실물 예시 · AI 영업 학습" 패널 → [실물 예시 올리기] → 단축코드 29줄(신규 10 + 기존 인비토 19 · 브랜드명·담당자 표기가 섞여 있어도 된다)을 붙여넣고 [찾기] → 이미 seed에 있는 9건은 그대로 올려도 되고(같은 본문은 1번만 쓴다) → 이메일 후보에서 짝(탑텐)과 추가할 것(아디제로·마리오아울렛·신규 환영)을 체크 → 일괄 업종 지정(패션 대부분 · 뷰티 7 · 식품 교촌·마리오 · 여행 아난티 · 리빙 에이스하드웨어 · 건강 덴프스) → [올리기]. 확인 = 패널 건수(DM ≥ 20 · 이메일 ≥ 4) · 제외 사유 0 · 그 뒤 AI 영업 1건 제작의 근거 패널 "실물 예시 n건"이 seed 19보다 큰가. 되돌리기 = 패널의 [삭제](두 번 클릭) 또는 `DELETE FROM best_copy_assets WHERE kind='outreach_example';`(전량).
 
 ---
 

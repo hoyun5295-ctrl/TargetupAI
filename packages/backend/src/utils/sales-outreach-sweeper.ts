@@ -1,13 +1,15 @@
 /**
- * ★ 2026-08-24 AI 영업 아웃리치 — 경량 sweeper (설계 = docs/2026-07-31-ai-sales-outreach-design.md §15-6)
+ * ★ 2026-08-24 AI 영업 아웃리치 — 경량 sweeper (설계 = docs/2026-07-31-ai-sales-outreach-design.md §15-6 · ★2026-09-05 B-4·B-5·C-3)
  *
- * 하는 일은 둘뿐이다(회의 확정 · 자동 재시도 0 · 자동 발송 0 · 자동 재생성 0):
- *  ① 좀비 잡 정직 종결 — heartbeat(lock_at) 기준 15분 초과한 producing·crawling 잡을 failed로.
+ * 하는 일은 넷뿐이다(회의 확정 · 자동 재시도 0 · 자동 발송 0 · 자동 재생성 0):
+ *  ① 좀비 잡 정직 종결 — heartbeat(lock_at) 기준 15분 초과한 producing·crawling·analyzing 잡을 failed로(markFailed 단일 함수).
  *     시작 시각이 아니라 마지막 heartbeat 기준(H9 — 살아 있는 긴 단계를 죽이지 않는다).
  *     재시도 가능 상태로 되돌리지 않는다(H·0813 lease 교훈) — 재시도는 화면 버튼만.
- *  ② 만료 파기 — 공개 수명(OUTREACH_PREVIEW_DAYS · 기산 = 전달 표시/발송 성공/생성 시각) 경과 건의
- *     포스터 공개 파일 삭제 + purged_at 스탬프(공개 페이지 즉시 차단). Harold 확정 ③(미회신 파기) 이행.
- *     temp 중간물(원본·누끼)은 스튜디오 7일 스윕이 이미 지운다. 삭제 실패 = purged_at 롤백(다음 회차 재수거 · H7).
+ *  ② 대기 초과 종결 — 미선점 queued가 2시간 넘게 시작되지 못하면(서버 재시작 등) failed(queued)로. 재시도 버튼이 크롤부터 다시.
+ *  ③ 끊긴 발송 선점(sending) 복구 — unknown으로(발송 여부는 모른다 · 판단은 사람).
+ *  ④ 만료 파기 — 공개 수명(OUTREACH_PREVIEW_DAYS · 기산 = 전달 표시/발송 성공/생성 시각) 경과 건의
+ *     포스터·재료 사본 공개 파일 삭제 + **DM 발행 중지(stopDm · 불변 23)** + purged_at 스탬프(공개 페이지 즉시 차단).
+ *     삭제·중지 실패 = purged_at 롤백(다음 회차 재수거 · H7). 회사 컨텍스트가 없으면 회차 전체를 스탬프 없이 건너뛴다(영구 누락 방지).
  *
  * 주기(10분) < 최단 임계(15분) — H10. 다중 프로세스 대비: 종결·파기 모두 조건부 UPDATE 선점이라
  * 두 프로세스가 겹쳐도 한쪽만 1행을 잡는다(파일 삭제는 멱등 — 없으면 무시 · H11).
@@ -15,10 +17,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { query } from '../config/database';
-import { OUTREACH_PREVIEW_DAYS } from './sales-outreach-produce';
+import { OUTREACH_PREVIEW_DAYS, getOutreachContext } from './sales-outreach-produce';
+import { markFailed } from './sales-outreach-jobs';
+import { stopDm } from './dm/dm-builder';
 
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 const ZOMBIE_MINUTES = 15;
+const STALE_QUEUED_HOURS = 2;
 
 // routes/cdp.ts INAPP_IMAGE_BASE와 동일 정의 미러(단일 env 소스 — utils/assets.ts와 같은 관례)
 const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
@@ -26,17 +31,17 @@ const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads
 async function sweepZombies(): Promise<void> {
   try {
     const r = await query(
-      `UPDATE sales_outreach_jobs
-          SET stage = 'failed', fail_stage = stage,
-              fail_reason = '처리 시간이 초과되어 중단되었습니다. 재시도 버튼으로 다시 시작할 수 있습니다.',
-              lock_token = NULL
-        WHERE stage IN ('queued','crawling','analyzing','producing_copy','producing_image','producing_dm','producing_email')
+      `SELECT id, stage FROM sales_outreach_jobs
+        WHERE stage IN ('crawling','analyzing','producing_copy','producing_image','producing_dm','producing_email')
           AND COALESCE(lock_at, created_at) < NOW() - ($1 || ' minutes')::interval
-        RETURNING id, fail_stage`,
+        LIMIT 50`,
       [ZOMBIE_MINUTES],
     );
     for (const row of r.rows) {
-      console.log('[sales-outreach-sweeper] 좀비 잡 종결:', row.id, row.fail_stage);
+      const ok = await markFailed(String(row.id), String(row.stage),
+        '처리 시간이 초과되어 중단되었습니다. 재시도 버튼으로 다시 시작할 수 있습니다.',
+        { allowStages: [String(row.stage)], detail: `heartbeat ${ZOMBIE_MINUTES}분 초과` });
+      if (ok) console.log('[sales-outreach-sweeper] 좀비 잡 종결:', row.id, row.stage);
     }
   } catch (err: any) {
     // 기록 실패가 순회를 멈추지 않는다(H13)
@@ -44,7 +49,43 @@ async function sweepZombies(): Promise<void> {
   }
 }
 
+/** ★ B-5 미선점 queued 대기 초과 — 시작되지 못한 건을 정직하게 종결(재시도 버튼이 회수 축) */
+async function sweepStaleQueued(): Promise<void> {
+  try {
+    const r = await query(
+      `SELECT id FROM sales_outreach_jobs
+        WHERE stage = 'queued' AND lock_token IS NULL
+          AND COALESCE(lock_at, created_at) < NOW() - ($1 || ' hours')::interval
+        LIMIT 50`,
+      [STALE_QUEUED_HOURS],
+    );
+    for (const row of r.rows) {
+      const ok = await markFailed(String(row.id), 'queued',
+        '시작되지 못했습니다(서버 재시작 등). 재시도 버튼으로 다시 시작할 수 있습니다.',
+        { allowStages: ['queued'], detail: `대기 ${STALE_QUEUED_HOURS}시간 초과` });
+      if (ok) console.log('[sales-outreach-sweeper] 대기 초과 종결:', row.id);
+    }
+  } catch (err: any) {
+    console.error('[sales-outreach-sweeper] 대기 초과 회수 실패:', err?.message);
+  }
+}
+
+/** 공개 이미지 URL(/api/cdp/inapp/image/{companyId}/{filename}) → 파일 삭제(멱등). 형식 밖 URL은 건너뜀. */
+function unlinkPublicImage(url: string): void {
+  const m = String(url || '').match(/\/api\/cdp\/inapp\/image\/([0-9a-f-]{36})\/([A-Za-z0-9._-]+)$/i);
+  if (!m) return;
+  const filePath = path.join(INAPP_IMAGE_BASE, m[1], m[2]);
+  try {
+    fs.unlinkSync(filePath);
+  } catch (e: any) {
+    if (e?.code !== 'ENOENT') throw e; // 없음 = 이미 지워짐(멱등) · 그 외 = 실패로 취급
+  }
+}
+
 async function sweepExpired(): Promise<void> {
+  // ★ C-3 회사 컨텍스트 판정은 후보 질의 **전** — null이면 회차 전체를 스탬프 없이 건너뛴다(스탬프 뒤 건너뛰기 = 영구 누락)
+  const ctx = getOutreachContext();
+  if (!ctx) return;
   try {
     const candidates = await query(
       `SELECT id FROM sales_outreach_jobs
@@ -62,25 +103,32 @@ async function sweepExpired(): Promise<void> {
       );
       if (claimed.rows.length === 0) continue;
       try {
+        // DM 중지 — not_published = 멱등 성공 · 그 밖 block = 실패(롤백 · 다음 회차)
+        const dms = await query(
+          `SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'dm'`,
+          [row.id],
+        );
+        for (const a of dms.rows) {
+          const dmId = String(a.payload?.dmId || '');
+          if (!dmId) continue;
+          const res = await stopDm(dmId, ctx.companyId);
+          if (res.block && res.block !== 'not_published') throw new Error(`DM 중지 실패(${res.block}): ${dmId}`);
+        }
+        // 포스터 + 재료 사본(brand_profile.media) 파일 삭제
         const assets = await query(
           `SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'studio_image'`,
           [row.id],
         );
-        for (const a of assets.rows) {
-          const url = String(a.payload?.url || '');
-          // /api/cdp/inapp/image/{companyId}/{filename} → 파일시스템 경로. 형식 밖 URL은 건너뜀.
-          const m = url.match(/\/api\/cdp\/inapp\/image\/([0-9a-f-]{36})\/([A-Za-z0-9._-]+)$/i);
-          if (!m) continue;
-          const filePath = path.join(INAPP_IMAGE_BASE, m[1], m[2]);
-          try {
-            fs.unlinkSync(filePath);
-          } catch (e: any) {
-            if (e?.code !== 'ENOENT') throw e; // 없음 = 이미 지워짐(멱등) · 그 외 = 실패로 취급
-          }
+        for (const a of assets.rows) unlinkPublicImage(String(a.payload?.url || ''));
+        const prof = await query(`SELECT brand_profile FROM sales_outreach_jobs WHERE id = $1`, [row.id]);
+        const media = prof.rows[0]?.brand_profile?.media;
+        if (media) {
+          for (const g of (Array.isArray(media.gallery) ? media.gallery : [])) unlinkPublicImage(String(g?.url || ''));
+          for (const p of (Array.isArray(media.products) ? media.products : [])) unlinkPublicImage(String(p?.image_url || ''));
         }
         console.log('[sales-outreach-sweeper] 만료 파기:', row.id);
       } catch (err: any) {
-        // 삭제 실패 = 스탬프 롤백 → 다음 회차가 다시 집는다(H7 — 조용히 넘기지 않는다)
+        // 삭제·중지 실패 = 스탬프 롤백 → 다음 회차가 다시 집는다(H7 — 조용히 넘기지 않는다)
         console.error('[sales-outreach-sweeper] 파기 실패(다음 회차 재시도):', row.id, err?.message);
         await query(`UPDATE sales_outreach_jobs SET purged_at = NULL WHERE id = $1`, [row.id]).catch(() => {});
       }
@@ -111,6 +159,7 @@ async function sweepStuckSending(): Promise<void> {
 
 async function sweepOnce(): Promise<void> {
   await sweepZombies();
+  await sweepStaleQueued();
   await sweepStuckSending();
   await sweepExpired();
 }
@@ -120,5 +169,5 @@ export function startSalesOutreachSweeper(): void {
   setInterval(() => {
     sweepOnce().catch((err: any) => console.error('[sales-outreach-sweeper] 순회 예외:', err?.message));
   }, SWEEP_INTERVAL_MS);
-  console.log('[sales-outreach-sweeper] 시작 (주기 10분 · 좀비 15분 · 파기 ' + OUTREACH_PREVIEW_DAYS + '일)');
+  console.log('[sales-outreach-sweeper] 시작 (주기 10분 · 좀비 15분 · 대기 초과 ' + STALE_QUEUED_HOURS + '시간 · 파기 ' + OUTREACH_PREVIEW_DAYS + '일)');
 }

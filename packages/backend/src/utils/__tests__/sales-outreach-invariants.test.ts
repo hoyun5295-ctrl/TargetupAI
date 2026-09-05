@@ -1,14 +1,19 @@
 /**
- * AI 영업 아웃리치 불변식 (2026-08-24 신설 — docs/2026-07-31-ai-sales-outreach-design.md §15-6, 회의 H11·H17·H18)
+ * AI 영업 아웃리치 불변식 (2026-08-24 신설 — docs/2026-07-31-ai-sales-outreach-design.md §15-6, 회의 H11·H17·H18 · ★2026-09-05 D-2 보강)
  *
  * 잠그는 것
  *  1. 모델명 0 — 아웃리치 축 파일 전체(주석 포함)에 모델명 문자열이 없다. 이 축은 메일·공개 페이지로
  *     외부에 나가는 문자열을 만드는 곳이라 파일 지정 전수 0을 계약으로 건다(D190→D214+ 재발 이력).
  *  2. 라우트 err 원문 미노출 — err?.message(원문)는 console 줄에서만 쓴다. 응답은 분류 오류의 안전 문구만.
  *  3. sweeper 부팅 등재 — app.ts에 startSalesOutreachSweeper() 호출이 실재한다(선언은 의도, 워커가 사실).
- *  4. 발송 경로 유일 — sendOutreachProposalMail 호출은 잡 CT의 사람 클릭 함수 1곳뿐. sweeper는 발송 능력이 없다.
+ *  4. 발송 경로 — 제안 발송 1곳(사람 클릭) + 검수 발송 1곳(사람 클릭 · 허용 도메인). sweeper는 발송 능력이 없다.
  *  5. 내부 URL 미주입 — 메일 조립 파일은 내부 API 경로(/api/sales-outreach)를 모른다(H2 — 손에 없으면 샐 수 없다).
- *  6. 게이트 fail-closed — 아웃리치 축에 super_admin 무조건 통과 분기가 없다.
+ *  6. 게이트 fail-closed — 아웃리치 축에 super_admin 무조건 통과 분기가 없다. 효과 함수는 첫 await가 assertOperator다.
+ *  7. 실패 종결 단일 함수(markFailed) — sweeper·잡 CT에 raw `stage = 'failed'` UPDATE가 markFailed 밖에 없다(불변 10·21).
+ *  8. 되돌리기 단일 함수(resetJobTo) — stage_results 키 삭제(`- '`)는 resetJobTo·advanceStage(ready) 안에만.
+ *  9. SQL 계약 — 발송 선점·자산 결속·regen 삭제 문자열이 정확히 1회.
+ * 10. noindex 소급 — DM 공개 뷰어 2곳에 아웃리치 회사 판정 헤더 1줄 · 공개 샘플 경로 리미터가 mount보다 앞.
+ * 11. 검수 발송은 stage·mail_result를 바꾸지 않는다.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
@@ -18,7 +23,9 @@ const SRC = resolve(__dirname, '../..');
 const read = (rel: string) => readFileSync(resolve(SRC, rel), 'utf8');
 /** 주석 제거 후 검사 — 이력을 적은 주석이 "호출이 남았다"로 오판되지 않게(LESSONS_BACKEND 2026-07-31) */
 const readCode = (rel: string) =>
-  read(rel).replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  read(rel).replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ').replace(/\/\/[^\n'"`]*$/gm, ' ');
+const count = (s: string, needle: string) => s.split(needle).length - 1;
+const normWs = (s: string) => s.replace(/\s+/g, ' ');
 
 const OUTREACH_FILES = [
   'utils/sales-outreach-jobs.ts',
@@ -26,10 +33,25 @@ const OUTREACH_FILES = [
   'utils/sales-outreach-produce.ts',
   'utils/sales-outreach-style.ts',
   'utils/sales-outreach-sweeper.ts',
+  'utils/sales-outreach-media.ts',
+  'utils/sales-outreach-exemplars.ts',
+  'utils/sales-outreach-exemplar-seed.ts',
+  'utils/sales-outreach-exemplar-mask.ts',
+  'utils/sales-outreach-examples.ts',
+  'utils/sales-outreach-bulk.ts',
   'utils/outreach-mailer.ts',
   'routes/sales-outreach.ts',
   'routes/outreach-public.ts',
 ];
+
+/** `export async function NAME(` 부터 다음 최상위 `export`/`async function`/`function` 선언 직전까지 */
+function fnBody(src: string, header: string): string {
+  const start = src.indexOf(header);
+  if (start < 0) return '';
+  const rest = src.slice(start + header.length);
+  const m = rest.search(/\n(?:export |async function |function |const |\/\*\*)/);
+  return src.slice(start, m < 0 ? undefined : start + header.length + m);
+}
 
 describe('sales-outreach invariants', () => {
   it('모델명 0 — 축 전체 파일(주석 포함)', () => {
@@ -45,13 +67,21 @@ describe('sales-outreach invariants', () => {
     for (const f of ['routes/sales-outreach.ts', 'routes/outreach-public.ts']) {
       const src = read(f);
       for (const line of src.split('\n')) {
-        if (line.includes('err?.message') && !line.includes('console.')) {
-          // 주석 줄은 허용
+        if (/\b(err|error|e)\??\.message\b|String\((err|error|e)\)/.test(line) && !line.includes('console.')) {
           if (line.trimStart().startsWith('*') || line.trimStart().startsWith('//')) continue;
-          throw new Error(`${f}: err?.message(원문)가 console 밖에서 쓰였다 — ${line.trim()}`);
+          // respondError 안의 분류 오류(OutreachError)의 message는 서버가 만든 안전 문구다
+          if (line.includes('err.message') && line.includes('err instanceof OutreachError')) continue;
+          if (line.includes('error: err.message')) continue;
+          throw new Error(`${f}: err 원문이 console 밖에서 쓰였다 — ${line.trim()}`);
         }
       }
     }
+    // 위 allow 줄은 respondError 함수 안에만 존재한다
+    const routes = readCode('routes/sales-outreach.ts');
+    const body = fnBody(routes, 'function respondError(');
+    expect(body).toContain('err instanceof OutreachError');
+    const outside = routes.replace(body, '');
+    expect(outside).not.toMatch(/error:\s*err\.message/);
   });
 
   it('sweeper 부팅 등재 — app.ts 실배선', () => {
@@ -59,50 +89,161 @@ describe('sales-outreach invariants', () => {
     expect(app.indexOf('startSalesOutreachSweeper()')).toBeGreaterThan(-1);
   });
 
-  it('발송 경로 유일 — 사람 클릭 함수 1곳, sweeper는 발송 능력 0', () => {
+  it('발송 경로 — 제안 1곳 + 검수 1곳(둘 다 사람 클릭 함수) · sweeper는 발송 능력 0', () => {
     const jobs = readCode('utils/sales-outreach-jobs.ts');
-    // 여는 괄호까지 매칭 = 호출부만(임포트 줄은 괄호가 없다). 존재부터 단정(공허 통과 방지).
-    const calls = jobs.match(/sendOutreachProposalMail\(/g) || [];
-    expect(calls.length, '발송 함수 호출부는 sendOutreachMailForJob 1곳이어야 한다').toBe(1);
-
+    expect((jobs.match(/sendOutreachProposalMail\(/g) || []).length, '제안 발송 호출부는 sendOutreachMailForJob 1곳').toBe(1);
+    expect((jobs.match(/mailerSendTest\(/g) || []).length, '검수 발송 호출부는 sendOutreachTestMail 1곳').toBe(1);
+    const testBody = fnBody(jobs, 'export async function sendOutreachTestMail(');
+    expect(testBody).toContain('mailerSendTest(');
+    expect(testBody).toContain('isAllowedTestRecipient(');
     const sweeper = read('utils/sales-outreach-sweeper.ts');
-    expect(sweeper).not.toMatch(/sendOutreachProposalMail|sendMail|runOutreachJob|runProduction/);
+    expect(sweeper).not.toMatch(/sendOutreachProposalMail|sendOutreachTestMail|sendMail|runOutreachJob|runProduction/);
   });
 
   it('메일 조립 파일은 내부 API 경로를 모른다(H2)', () => {
     const produce = read('utils/sales-outreach-produce.ts');
-    expect(produce).toContain('buildProposalEmail'); // 공허 통과 방지
+    expect(produce).toContain('assembleProposalEmail'); // 공허 통과 방지
     expect(produce).not.toContain('/api/sales-outreach');
   });
 
-  it('게이트 fail-closed — super_admin 무조건 통과 분기 없음', () => {
+  it('게이트 fail-closed — super_admin 무조건 통과 분기 없음 · 효과 함수 전수의 첫 await = assertOperator', () => {
     for (const f of ['utils/sales-outreach-jobs.ts', 'routes/sales-outreach.ts']) {
       const src = read(f);
       expect(src, `${f}에 super_admin 우회 분기`).not.toMatch(/userType\s*===\s*'super_admin'\s*\)\s*return\s+true/);
     }
-    // 판정은 fail-closed 코어(audit-log isSuperAdminAllowed 계열)를 쓴다
-    expect(read('utils/sales-outreach-jobs.ts')).toContain('isSalesOutreachOperator');
-  });
-
-  it('크롤 소스 1개 — 잡 CT는 같은 URL을 두 번 긁지 않는다', () => {
     const jobs = readCode('utils/sales-outreach-jobs.ts');
-    // 공허 통과 방지 — 대체 경로가 실재해야 한다
-    expect(jobs).toContain('buildOutreachEventText(');
-    expect(jobs, '잡 CT가 fetchEventTextFromUrl을 부르면 fetchHtmlGuarded와 합쳐 2회 요청이 된다')
-      .not.toContain('fetchEventTextFromUrl(');
+    expect(jobs).toContain('isSalesOutreachOperator');
+    const ALLOW = new Set(['runOutreachJob', 'markFailed', 'getPublicOutreachHtml']);
+    const re = /export async function (\w+)\(/g;
+    let m: RegExpExecArray | null;
+    let checked = 0;
+    while ((m = re.exec(jobs)) !== null) {
+      const name = m[1];
+      if (ALLOW.has(name)) continue;
+      const body = fnBody(jobs, `export async function ${name}(`);
+      const gate = body.indexOf('await assertOperator(');
+      expect(gate, `${name}: assertOperator 부재`).toBeGreaterThan(-1);
+      const firstQuery = body.indexOf('await query(');
+      const firstEnv = body.indexOf('process.env');
+      if (firstQuery > -1) expect(gate, `${name}: query가 게이트보다 앞`).toBeLessThan(firstQuery);
+      if (firstEnv > -1) expect(gate, `${name}: env 읽기가 게이트보다 앞`).toBeLessThan(firstEnv);
+      checked++;
+    }
+    expect(checked).toBeGreaterThanOrEqual(14);
   });
 
-  it('fetchEventTextFromUrl 소비처는 DM 편집기 1곳뿐', () => {
+  it('크롤 소스 — 잡 CT는 같은 URL을 두 번 긁지 않는다 · 추출기는 네트워크 0', () => {
+    const jobs = readCode('utils/sales-outreach-jobs.ts');
+    expect(jobs).toContain('buildOutreachEventMaterial(');
+    expect(jobs).not.toContain('fetchEventTextFromUrl');
     const dm = read('routes/dm.ts');
     expect(dm, 'DM 축은 이 함수를 계속 쓴다(공허 통과 방지)').toContain('fetchEventTextFromUrl(');
-    const jobs = readCode('utils/sales-outreach-jobs.ts');
-    expect(jobs).not.toContain('fetchEventTextFromUrl');
+    const ex = readCode('utils/sales-outreach-extract.ts');
+    expect(ex).toContain('extractEventTextFromHtml');
+    expect(ex).not.toMatch(/fetchHtmlGuarded\(|fetchEventTextFromUrl\(|https?\.request\(|[^a-zA-Z.]fetch\(/);
+    const media = readCode('utils/sales-outreach-media.ts');
+    expect(media, '재료 CT의 HTML fetch는 가드 경로뿐').not.toMatch(/https?\.request\(|[^a-zA-Z.]fetch\(/);
   });
 
-  it('추출기는 새 네트워크 요청을 만들지 않는다', () => {
-    const ex = readCode('utils/sales-outreach-extract.ts');
-    expect(ex).toContain('extractEventTextFromHtml'); // 공허 통과 방지
-    expect(ex, '추출기는 HTML만 받는다 — fetch·request 호출 금지')
-      .not.toMatch(/fetchHtmlGuarded\(|fetchEventTextFromUrl\(|https?\.request\(|[^a-zA-Z.]fetch\(/);
+  it('실패 종결 단일 함수 — raw stage=failed UPDATE는 markFailed 안에만', () => {
+    const jobs = readCode('utils/sales-outreach-jobs.ts');
+    const markBody = fnBody(jobs, 'export async function markFailed(');
+    expect(markBody).toContain("SET stage = 'failed'");
+    expect(count(jobs, "SET stage = 'failed'"), 'failed로 쓰는 UPDATE는 markFailed 1곳').toBe(1);
+    const sweeper = readCode('utils/sales-outreach-sweeper.ts');
+    expect(sweeper).not.toContain("SET stage = 'failed'");
+    expect(sweeper).not.toMatch(/fail_stage\s*=/);
+    expect((sweeper.match(/markFailed\(/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('되돌리기 단일 함수 — stage_results 키 삭제는 resetJobTo·advanceStage(ready) 안에만', () => {
+    const jobs = readCode('utils/sales-outreach-jobs.ts');
+    const reset = fnBody(jobs, 'async function resetJobTo(');
+    const advance = fnBody(jobs, 'async function advanceStage(');
+    expect(reset).toContain("` - '${k}'`");
+    expect(count(advance, "- 'regen'")).toBe(1);
+    const rest = jobs.replace(reset, '').replace(advance, '');
+    expect(rest).not.toMatch(/stage_results[^\n;]*\)\s*-\s*'/);
+    expect(rest).not.toContain("- 'regen'");
+    for (const fn of ['retryOutreachJob', 'recrawlOutreachJob', 'regenerateOutreachAsset', 'rebuildOutreachEmail']) {
+      expect(fnBody(jobs, `export async function ${fn}(`), `${fn}는 resetJobTo를 쓴다`).toContain('resetJobTo(');
+    }
+  });
+
+  it('SQL 계약 — 발송 선점 1회 · 원복은 선점 뒤 try 안 · 자산 결속 1회 · jsonb는 JSON.stringify', () => {
+    const jobs = normWs(readCode('utils/sales-outreach-jobs.ts'));
+    expect(count(jobs, "SET mail_result = 'sending', lock_at = NOW() WHERE id = $1 AND stage = 'ready' AND mail_sent_at IS NULL")).toBe(1);
+    const sendBody = normWs(fnBody(readCode('utils/sales-outreach-jobs.ts'), 'export async function sendOutreachMailForJob('));
+    const claimIdx = sendBody.indexOf("SET mail_result = 'sending'");
+    const revertIdx = sendBody.indexOf("SET mail_result = 'unknown' WHERE id = $1 AND mail_result = 'sending'");
+    expect(revertIdx).toBeGreaterThan(claimIdx);
+    expect(sendBody.slice(claimIdx, revertIdx)).toContain('try {');
+    expect(count(jobs, 'WHERE EXISTS (SELECT 1 FROM sales_outreach_jobs WHERE id = $1 AND stage = $4 AND lock_token = $5)')).toBe(1);
+    // jsonb 규율 — ::jsonb를 쓰는 query 조각은 JSON.stringify를 함께 쓰거나 params 배열을 넘긴다
+    const raw = readCode('utils/sales-outreach-jobs.ts');
+    const re = /await query\(([\s\S]*?)\);/g;
+    let m: RegExpExecArray | null;
+    let jsonbCalls = 0;
+    while ((m = re.exec(raw)) !== null) {
+      if (!m[1].includes('::jsonb')) continue;
+      jsonbCalls++;
+      expect(/JSON\.stringify\(|,\s*params,?\s*$/.test(m[1]), `jsonb 파라미터 직렬화 누락: ${m[1].slice(0, 80)}`).toBe(true);
+    }
+    expect(jsonbCalls).toBeGreaterThanOrEqual(8);
+  });
+
+  it('noindex 소급 — DM 공개 뷰어 2곳 · 공개 샘플 리미터가 mount보다 앞', () => {
+    const dm = readCode('routes/dm.ts');
+    const lines = dm.split('\n').filter((l) => l.includes("X-Robots-Tag") && l.includes('getOutreachContext()?.companyId'));
+    expect(lines).toHaveLength(2);
+    const app = read('app.ts');
+    const limiter = app.indexOf("app.use('/api/outreach/v', outreachPublicLimiter)");
+    const mount = app.indexOf("app.use('/api/outreach/v', outreachPublicRoutes)");
+    expect(limiter).toBeGreaterThan(-1);
+    expect(mount).toBeGreaterThan(limiter);
+  });
+
+  it('검수 발송은 stage·mail_result를 바꾸지 않는다', () => {
+    const jobs = readCode('utils/sales-outreach-jobs.ts');
+    const body = fnBody(jobs, 'export async function sendOutreachTestMail(');
+    expect(body.length).toBeGreaterThan(200);
+    expect(body).not.toMatch(/SET\s+stage\s*=/);
+    expect(body).not.toMatch(/mail_result\s*=/);
+    expect(body).not.toMatch(/mail_sent_at\s*=/);
+    expect(body).toContain('test_sends');
+  });
+
+  it('실물 예시 kind 분리 — 직원 갤러리·재증류 경로는 outreach_example을 모른다 · 마스킹 CT는 DB 0 · 승격은 best-copy CT만 쓴다', () => {
+    const assets = readCode('utils/best-copy-assets.ts');
+    expect(assets).toContain("OUTREACH_EXAMPLE_KIND = 'outreach_example'");
+    expect(readCode('utils/best-copy-assets.ts').match(/kind = 'style_example' AND industry_code = \$1\s+ORDER BY created_at ASC LIMIT 6/)).toBeTruthy(); // 갤러리 조회 무변경
+    for (const f of ['routes/ai.ts', 'utils/industry-formula.ts']) expect(read(f)).not.toContain('outreach_example');
+    const mask = readCode('utils/sales-outreach-exemplar-mask.ts');
+    expect(mask).not.toMatch(/config\/database|pool\.query|await query\(|https?\.request\(|[^a-zA-Z.]fetch\(/);
+    const ex = readCode('utils/sales-outreach-examples.ts');
+    expect(ex).not.toMatch(/INSERT INTO best_copy_assets|DELETE FROM best_copy_assets/); // 쓰기는 소유 CT(best-copy-assets)만
+    expect(ex).toContain('checkExemplarHygiene(');
+    expect(ex).toContain('findOutreachExampleBySource(');
+    const admin = read('routes/admin.ts');
+    expect(admin).toContain("router.post('/best-layout/examples/promote'");
+    expect(admin.indexOf("router.use('/best-layout', authenticate, requireSuperAdmin, requireBestLayoutViewer)")).toBeLessThan(admin.indexOf("router.post('/best-layout/examples/promote'"));
+    // 실물 예시 라우트의 회사 = ENV뿐(요청 companyId 무시) — resolve·promote 본문에 resolveSkeletonCompanyId가 없다
+    const exBlock = admin.slice(admin.indexOf("router.get('/best-layout/examples'"), admin.indexOf("router.post('/best-layout/skeleton/serving'"));
+    expect(exBlock.length).toBeGreaterThan(500);
+    expect(exBlock).not.toContain('resolveSkeletonCompanyId(');
+    expect((exBlock.match(/outreachExampleCompanyId\(\)/g) || []).length).toBeGreaterThanOrEqual(2);
+    // 생성 경로가 DB+seed 원천을 순수 빌더에 주입한다(seed-only 회귀 차단)
+    const produce = readCode('utils/sales-outreach-produce.ts');
+    expect(produce).toContain('buildDmSectionsPrompt(genInput, exemplarSource)');
+    expect(produce).toContain('buildEmailSectionsPrompt(genInput, exemplarSource)');
+    expect((produce.match(/await loadOutreachExemplarSource\(\)/g) || []).length).toBe(2);
+    expect(produce).toContain('exemplarCount: dmPrompt.exemplars.picked');
+  });
+
+  it('제작 실패 4단계 3값 — markFailed가 stage_results[failStage]=unavailable을 찍는다', () => {
+    const jobs = readCode('utils/sales-outreach-jobs.ts');
+    const body = fnBody(jobs, 'export async function markFailed(');
+    expect(body).toContain("[failStage]: 'unavailable'");
+    expect(body).toContain('fail_detail = $4');
   });
 });

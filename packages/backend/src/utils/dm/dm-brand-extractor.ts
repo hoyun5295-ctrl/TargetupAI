@@ -347,6 +347,22 @@ async function resolvePublicAddress(hostname: string): Promise<{ address: string
 
 const MAX_HTML_BYTES = 200_000;
 
+/**
+ * ★ 2026-09-05 [B-0905-1] 고정 IP lookup 콜백 — Node 20은 `autoSelectFamily`가 기본 on이라 소켓이
+ *   `lookup(host, { all: true }, cb)`로 부르고 **배열**을 기대한다. 옛 형태 `cb(err, address, family)`만 돌려주면
+ *   `ERR_INVALID_IP_ADDRESS`로 연결 자체가 실패해 fetchHtmlGuarded가 전 사이트 null을 냈다(운영 실측 2026-09-05 · 로컬 0/12).
+ *   두 호출 형태를 모두 받는다(순수 · 계약 테스트 = __tests__/dm-brand-extractor-lookup.test.ts).
+ */
+export function pinnedLookup(pinned: { address: string; family: number }) {
+  return (_hostname: string, options: unknown, cb: (...args: any[]) => void): void => {
+    if (options && typeof options === 'object' && (options as { all?: boolean }).all) {
+      cb(null, [{ address: pinned.address, family: pinned.family }]);
+      return;
+    }
+    cb(null, pinned.address, pinned.family);
+  };
+}
+
 /** 검증된 IP로 연결을 고정한 단발 GET (Codex 2R 정정) —
  *  ① lookup 콜백이 검증 주소만 돌려줘 fetch류의 자체 DNS 재해석(리바인딩 창)을 제거.
  *     TLS SNI·인증서 검증은 host(호스트명) 기준 그대로 유지.
@@ -382,8 +398,7 @@ function requestPinned(
         path: `${u.pathname}${u.search}` || '/',
         method: 'GET',
         headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
-        lookup: ((_h: string, _o: unknown, cb: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) =>
-          cb(null, pinned.address, pinned.family)) as never,
+        lookup: pinnedLookup(pinned) as never,
         timeout: timeoutMs,
       },
       (res) => {
@@ -431,7 +446,7 @@ function requestPinned(
 /** 리다이렉트 홉(최대 3)마다 호스트 가드를 재검증하는 HTML fetch — 공개 URL이 내부 주소로 redirect하는 우회 차단 (Codex 지적).
  *  ★ 2026-07-13 (Codex 2R) — 홉마다 DNS 해석 → 공인 검증 → 그 IP로 연결 고정(requestPinned) + 바이트 상한.
  *  ★ 2026-08-24 export — 영업 아웃리치 크롤이 재사용(가드 없는 extractBrandFromUrl 경로는 아웃리치에서 사용 금지). */
-export async function fetchHtmlGuarded(url: string): Promise<{ html: string; baseUrl: string } | null> {
+export async function fetchHtmlGuarded(url: string): Promise<{ html: string; baseUrl: string; finalUrl: string } | null> {
   let current = url;
   for (let hop = 0; hop < 3; hop++) {
     if (!isFetchableProductUrl(current)) return null;
@@ -450,7 +465,8 @@ export async function fetchHtmlGuarded(url: string): Promise<{ html: string; bas
         continue; // 다음 홉에서 가드·해석·고정 재검증
       }
       if (res.status < 200 || res.status >= 300 || !res.body) return null;
-      return { html: res.body, baseUrl: new URL(current).origin };
+      // ★ 2026-09-05 finalUrl = 최종 홉 전체 URL(경로 상대 자산 절대화·리다이렉트 호스트 대조용). 기존 호출부는 baseUrl만 읽는다.
+      return { html: res.body, baseUrl: new URL(current).origin, finalUrl: current };
     } catch {
       return null;
     }

@@ -1,0 +1,447 @@
+/**
+ * ★ 2026-09-05 AI 영업 아웃리치 : 재료 수집 CT (상품 · 이미지 후보 · 딥링크 · 법정 표기 · 이미지 실측)
+ * 설계 = docs/2026-09-05-ai-sales-outreach-refinement-design.md A-10 · A-10b · A-11(프로토타입 `scratch/proto/proto-lib.ts` 이식)
+ *
+ * 두 층으로 나뉜다.
+ *  ① 순수 층(HTML 문자열만 받는다 · 네트워크 0): extractProducts · discoverProductLinks · extractImageCandidates ·
+ *     findLinkByText · extractLegal · readImageSize · parseProductPage. 전부 export = 계약 테스트 대상.
+ *  ② 네트워크 층(가드 fetch 재사용): fetchProductPageGuarded(1홉 · 같은 호스트만) · measureImageGuarded(직접 받아 폭·높이 확인 · 사본 저장).
+ *
+ * 규율:
+ * - 새 fetch 경로를 만들지 않는다. HTML = `fetchHtmlGuarded`, 이미지 = 호출부가 넘긴 `fetchImageGuarded`(produce.ts 소유 · SSRF 가드 동일).
+ * - 이미지 폭 게이트(갤러리 600 · 상품 400)는 상수 1곳. 미만은 탈락(흐릿한 썸네일이 산출물에 실리던 원인).
+ * - 속성값의 HTML 엔티티(&amp;)는 절대화 직전에 푼다(29CM 전 이미지 404의 원인).
+ * - 사본 저장은 기존 스튜디오 저장 경로(writeTempBuffer/moveTempToPermanent)만 쓴다(핫링크 0 · 파기 시 함께 삭제).
+ */
+import { fetchHtmlGuarded } from './dm/dm-brand-extractor';
+
+export const OUTREACH_GALLERY_MIN_WIDTH = 600;
+export const OUTREACH_PRODUCT_MIN_WIDTH = 400;
+/** 사본으로 저장할 원본 상한(리사이즈 없음 · 이메일 임베드 용량 고려) */
+export const OUTREACH_MEDIA_MAX_BYTES = 1_500_000;
+
+export interface OutreachProduct {
+  name: string;
+  price: number | null;
+  discount_price: number | null;
+  image_url: string;
+  link_url: string;
+}
+
+// ===== 문자열 유틸 =====
+
+export function decodeHtmlEntities(s: string): string {
+  return String(s || '')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+}
+
+function stripTags(s: string): string {
+  return decodeHtmlEntities(s.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+/** 상대·엔티티 섞인 URL을 절대 URL로. CDN 리사이저 폭이 과대하면 1200으로 낮춘다(용량 상한 회피). 실패 = null. */
+export function absolutizeAssetUrl(raw: string, base: string): string | null {
+  try {
+    const u = new URL(decodeHtmlEntities(raw.trim()), base);
+    for (const k of ['width', 'w']) {
+      const v = Number(u.searchParams.get(k));
+      if (v > 1400) u.searchParams.set(k, '1200');
+    }
+    const out = u.toString();
+    return /^https?:\/\//i.test(out) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+export function cleanProductName(n: string): string {
+  return String(n || '').replace(/\s+/g, ' ')
+    .replace(/\s*(판매가|소비자가|할인가|정가|적립금|회원가|쿠폰가|리뷰\s*\d+|품절|SOLD OUT)\s*$/i, '')
+    .replace(/\s*(판매가|소비자가|할인가|정가)\s*$/i, '')
+    .trim();
+}
+
+/** 상품 식별 키(중복 병합용) : 쿼리 식별자 → 한글 slug 경로 → 경로 식별자 → 이름 앞 40자 */
+export function productKey(p: { name: string; link_url: string }): string {
+  let dec = p.link_url;
+  try { dec = decodeURIComponent(p.link_url); } catch { /* 그대로 */ }
+  const m = p.link_url.match(/(?:product_no|goodsNo|goods_no|productId|prdNo|itemId|pid|goodsId|itemNo)=(\w+)/i)
+    || dec.match(/\/product\/[^/]+\/(\d{2,})\//i)
+    || p.link_url.match(/\/(?:products?|goods|item|prd|dp\/product)\/([A-Za-z0-9_-]+)/i);
+  return m ? m[1] : p.name.slice(0, 40);
+}
+
+export function isBadProductImage(u: string): boolean {
+  return /(icon_|\/icon\/|og_image|share[-_]?image|\/web\/24_renewal\/|logo|placeholder|noimage|no_image)/i.test(u);
+}
+
+function bestImgFromTag(tag: string, base: string): string | null {
+  const m = tag.match(/(?:ec-data-src|data-src|data-original|data-lazy|data-echo|data-srcset)=["']([^"']+)["']/i)
+    || tag.match(/srcset=["']([^"']+)["']/i)
+    || tag.match(/\ssrc=["']([^"']+)["']/i);
+  if (!m) return null;
+  let cand = m[1];
+  if (/\s\d+[wx]/.test(cand)) {
+    // srcset: 가장 큰 디스크립터
+    const parts = cand.split(',').map((p) => p.trim().split(/\s+/)).map(([u, d]) => ({ u, d: Number((d || '0').replace(/[wx]/, '')) || 0 }));
+    parts.sort((a, b) => b.d - a.d);
+    cand = parts[0].u;
+  }
+  if (/^data:/.test(cand)) return null;
+  return absolutizeAssetUrl(cand, base);
+}
+
+function bestImgInBlock(inner: string, base: string): string | null {
+  const tags = inner.match(/<img[^>]*>/gi) || [];
+  for (const t of tags) {
+    const u = bestImgFromTag(t, base);
+    if (u && !isBadProductImage(u) && !/\.svg(\?|$)|\.gif(\?|$)/i.test(u)) return u;
+  }
+  return null;
+}
+
+const PRICE_RE = /(\d{1,3}(?:,\d{3})+|\d{4,7})\s*원/g;
+const NAME_NOISE_RE = /\b(SALE|BEST|NEW|HOT|장바구니|찜|리뷰|구매|바로가기|쿠폰|관심상품|미리보기)\b/gi;
+
+function pickName(text: string): string {
+  return text.replace(PRICE_RE, ' ').replace(/\d{1,3}\s*%/g, ' ').replace(NAME_NOISE_RE, ' ')
+    .split(/\s{2,}|\|/).map((s) => s.trim()).filter((s) => s.length >= 4).sort((a, b) => b.length - a.length)[0] || '';
+}
+
+function pricesOf(text: string): number[] {
+  return Array.from(text.matchAll(PRICE_RE)).map((x) => Number(x[1].replace(/,/g, ''))).filter((n) => n >= 1000 && n < 10_000_000);
+}
+
+/** 쇼핑몰 목록 마크업 휴리스틱(순수): <a> 또는 <li> 안에 <img>와 "N원"이 함께 있으면 상품 카드로 본다. */
+export function extractProducts(html: string, base: string, max = 12): OutreachProduct[] {
+  const out: OutreachProduct[] = [];
+  const seen = new Set<string>();
+  const push = (inner: string, href: string) => {
+    const text = stripTags(inner);
+    const prices = pricesOf(text);
+    if (prices.length === 0) return;
+    const link = absolutizeAssetUrl(href, base);
+    const image = bestImgInBlock(inner, base);
+    if (!link || !image) return;
+    const name = pickName(text);
+    if (!name || name.length < 4) return;
+    const key = name.slice(0, 40);
+    if (seen.has(key)) return;
+    seen.add(key);
+    const sorted = [...prices].sort((a, b) => a - b);
+    out.push({
+      name: cleanProductName(name).slice(0, 80),
+      price: sorted[sorted.length - 1],
+      discount_price: sorted.length > 1 && sorted[0] < sorted[sorted.length - 1] ? sorted[0] : null,
+      image_url: image,
+      link_url: link,
+    });
+  };
+  const aRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = aRe.exec(html)) !== null && out.length < max) {
+    if (m[2].length > 6000 || !/<img\b/i.test(m[2])) continue;
+    push(m[2], m[1]);
+  }
+  if (out.length < 3) {
+    const liRe = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+    let l: RegExpExecArray | null;
+    while ((l = liRe.exec(html)) !== null && out.length < max) {
+      const inner = l[1];
+      if (inner.length > 8000 || !/<img\b/i.test(inner)) continue;
+      const href = inner.match(/href=["']([^"'#]+)["']/i);
+      if (!href) continue;
+      push(inner, href[1]);
+    }
+  }
+  const uniq: OutreachProduct[] = [];
+  const keys = new Set<string>();
+  for (const p of out) {
+    const k = productKey(p);
+    if (keys.has(k) || isBadProductImage(p.image_url)) continue;
+    keys.add(k);
+    uniq.push(p);
+  }
+  return uniq;
+}
+
+/** 이미지 후보(순수): og:image 계열 + img(src·data-src·srcset) + <source srcset>. 로고·추적 픽셀 배제 · 확장자 없는 CDN URL 허용 · 상한. */
+export function extractImageCandidates(html: string, base: string, max = 12): string[] {
+  const found: string[] = [];
+  for (const re of [
+    /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/gi,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/gi,
+  ]) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) found.push(m[1]);
+  }
+  const tagRe = /<(?:img|source)\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  let scanned = 0;
+  while ((m = tagRe.exec(html)) !== null && scanned < 120) {
+    scanned++;
+    const u = bestImgFromTag(m[0], base);
+    if (u) found.push(u);
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of found) {
+    const u = absolutizeAssetUrl(raw, base);
+    if (!u) continue;
+    if (/(logo|icon|favicon|sprite|banner_top|btn_|\.svg(\?|$)|\.gif(\?|$)|1x1|pixel|blank|share[-_]?image|og_image|\/web\/24_renewal\/)/i.test(u)) continue;
+    if (/(ct\.pinterest\.com|facebook\.com\/tr|google-analytics|doubleclick|googletagmanager|analytics\.|\/tr\?|\/pixel)/i.test(u)) continue;
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/** 홈 HTML의 상품형 링크(같은 호스트)만 골라낸다(순수). 상세 1홉 수집의 입력. */
+export function discoverProductLinks(html: string, base: string, max = 10): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let host: string;
+  try { host = new URL(base).hostname; } catch { return []; }
+  const re = /<a\b[^>]*href=["']([^"'#?]+(?:\?[^"']*)?)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null && out.length < max) {
+    const u = absolutizeAssetUrl(m[1], base);
+    if (!u) continue;
+    try { if (new URL(u).hostname !== host) continue; } catch { continue; }
+    let dec = u;
+    try { dec = decodeURIComponent(u); } catch { /* 그대로 */ }
+    const pathOk = /\/(product|products|goods|item|items|prd|prod|detail|shop\/detail|goods\/view|shop\/goodsView|p)\/?[A-Za-z0-9_\-]*\d/i.test(u)
+      || /\/product\/[^\s"'/]+\/\d{2,}\//i.test(dec)
+      || /(goodsNo|prdNo|productId|goods_no|product_no|goodsCd|itemId|prodId|pid|goodsId|itemNo)=\w*\d/i.test(u);
+    if (!pathOk) continue;
+    const key = u.replace(/#.*$/, '').replace(/[?&](utm_[^&]+|ref=[^&]+|display_group=[^&]+)/g, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(u);
+  }
+  return out;
+}
+
+/** 앵커 텍스트 키워드 → 같은 호스트 링크(CTA 딥링크 · 순수). 로그인·장바구니류 제외. */
+export function findLinkByText(html: string, base: string, keywords: string[]): string | null {
+  let host = '';
+  try { host = new URL(base).hostname; } catch { return null; }
+  const re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const text = stripTags(m[2]).toLowerCase();
+    if (!text || text.length > 60) continue;
+    if (!keywords.some((k) => text.includes(k.toLowerCase()))) continue;
+    const u = absolutizeAssetUrl(m[1], base);
+    if (!u) continue;
+    try { if (new URL(u).hostname !== host) continue; } catch { continue; }
+    if (/\/(login|join|cart|mypage|member)/i.test(u)) continue;
+    return u;
+  }
+  return null;
+}
+
+/** CTA 버튼 라벨에서 딥링크로 이을 키워드(라벨에 포함되면 그 키워드 링크를 찾는다) */
+export const OUTREACH_CTA_KEYWORDS: readonly string[] = ['쿠폰', '기획전', '룩북', '앱', '이벤트', '랭킹', '신상', '컬렉션', '베스트', '세일', '혜택', '멤버십'];
+
+/** 홈 HTML에서 CTA 키워드별 딥링크 표(순수). 크롤 단계가 계산해 brand_profile에 남긴다(HTML은 저장하지 않으므로). */
+export function buildCtaLinkMap(html: string, base: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of OUTREACH_CTA_KEYWORDS) {
+    const u = findLinkByText(html, base, [k]);
+    if (u) out[k] = u;
+  }
+  return out;
+}
+
+/** 법정 표기(사업자·통신판매·대표·주소·CS) 원문 추출(순수). 2개 이상 잡혀야 표기로 인정. */
+export function extractLegal(text: string): { legal: string | null; csPhone: string | null } {
+  const t = String(text || '').replace(/\s+/g, ' ');
+  const parts: string[] = [];
+  const grab = (re: RegExp, label: string) => { const m = t.match(re); if (m) parts.push(label + ' ' + m[1].trim()); };
+  grab(/(?:상호|회사명|법인명)\s*[:：]?\s*((?:\(주\)|주식회사|㈜)?\s?[가-힣A-Za-z0-9&.\- ]{2,30}?)(?=\s*(?:\||·|대표|사업자|주소|$))/, '상호');
+  grab(/대표(?:이사|자)?\s*[:：]?\s*([가-힣]{2,4})/, '대표');
+  grab(/사업자\s*등록\s*번호\s*[:：]?\s*(\d{3}-\d{2}-\d{5})/, '사업자등록번호');
+  grab(/통신판매업?\s*신고(?:번호)?\s*[:：]?\s*((?:제\s*)?\d{4}-[가-힣]+-\d{3,5}(?:호)?)/, '통신판매업신고');
+  grab(/주소\s*[:：]?\s*((?:\(\d{5}\)\s*)?(?:서울|경기|인천|부산|대구|대전|광주|울산|세종|강원|충북|충남|전북|전남|경북|경남|제주)[^|·]{5,60}?)(?=\s*(?:\||·|사업자|대표|통신|호스팅|이메일|$))/, '주소');
+  const cs = t.match(/(?:고객센터|고객\s*상담|CS|문의|콜센터|대표번호)\s*[:：]?\s*((?:1\d{3}-\d{4})|(?:080-\d{3,4}-\d{4})|(?:0\d{1,2}-\d{3,4}-\d{4}))/) || t.match(/\b(1\d{3}-\d{4})\b/);
+  return { legal: parts.length >= 2 ? parts.join(' | ') : null, csPhone: cs ? cs[1] : null };
+}
+
+/** theme-color 메타(순수) : 6자리 hex로 정규화(3자리 확장). 그 외 null. */
+export function parseThemeColorFromHtml(html: string): string | null {
+  const m = html.match(/<meta[^>]+name=["']theme-color["'][^>]+content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']theme-color["']/i);
+  if (!m) return null;
+  const v = m[1].trim();
+  if (/^#[0-9a-f]{6}$/i.test(v)) return v.toLowerCase();
+  if (/^#[0-9a-f]{3}$/i.test(v)) return ('#' + v.slice(1).split('').map((c) => c + c).join('')).toLowerCase();
+  return null;
+}
+
+// ===== 이미지 헤더 실측(순수 · 외부 라이브러리 0) =====
+
+/** JPEG·PNG·GIF·WebP 헤더에서 폭·높이만 읽는다. 모르는 형식 = null. */
+export function readImageSize(b: Buffer): { width: number; height: number } | null {
+  if (b.length < 24) return null;
+  if (b[0] === 0x89 && b[1] === 0x50) return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
+  if (b[0] === 0x47 && b[1] === 0x49) return { width: b.readUInt16LE(6), height: b.readUInt16LE(8) };
+  if (b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP') {
+    const t = b.subarray(12, 16).toString();
+    if (t === 'VP8 ') return { width: b.readUInt16LE(26) & 0x3fff, height: b.readUInt16LE(28) & 0x3fff };
+    if (t === 'VP8L') { const x = b.readUInt32LE(21); return { width: (x & 0x3fff) + 1, height: ((x >> 14) & 0x3fff) + 1 }; }
+    if (t === 'VP8X') return { width: 1 + (b[24] | (b[25] << 8) | (b[26] << 16)), height: 1 + (b[27] | (b[28] << 8) | (b[29] << 16)) };
+    return null;
+  }
+  if (b[0] === 0xff && b[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const mk = b[i + 1];
+      if (mk === 0xd8 || mk === 0x01 || (mk >= 0xd0 && mk <= 0xd7)) { i += 2; continue; }
+      const len = b.readUInt16BE(i + 2);
+      if ((mk >= 0xc0 && mk <= 0xc3) || (mk >= 0xc5 && mk <= 0xc7) || (mk >= 0xc9 && mk <= 0xcb) || (mk >= 0xcd && mk <= 0xcf)) {
+        return { height: b.readUInt16BE(i + 5), width: b.readUInt16BE(i + 7) };
+      }
+      i += 2 + len;
+    }
+  }
+  return null;
+}
+
+// ===== 상품 상세 페이지 파싱(순수) + 1홉 수집(가드 fetch) =====
+
+function metaOf(h: string, p: string): string {
+  return (h.match(new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]+content=["']([^"']*)["']`, 'i'))?.[1]
+    || h.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${p}["']`, 'i'))?.[1]
+    || '').trim();
+}
+
+function numish(v: unknown): number | null {
+  if (typeof v === 'number' && v > 0) return v;
+  if (typeof v === 'string') { const n = Number(v.replace(/[^\d.]/g, '')); return n > 0 ? n : null; }
+  return null;
+}
+
+/** 상세 페이지 HTML → 상품 1건(순수). og:type product / product:price / ld+json Product / 본문 가격 순. 상품 페이지가 아니면 null. */
+export function parseProductPage(html: string, finalUrl: string): OutreachProduct | null {
+  const h = html;
+  const name = decodeHtmlEntities(metaOf(h, 'og:title') || (h.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || ''))
+    .replace(/\s+/g, ' ').replace(/\s*[|\-–:]\s*[^|\-–:]{1,30}$/, '').trim();
+  const image = absolutizeAssetUrl(metaOf(h, 'og:image') || metaOf(h, 'og:image:secure_url') || '', finalUrl);
+  let price: number | null = numish(metaOf(h, 'product:price:amount') || metaOf(h, 'product:sale_price:amount') || metaOf(h, 'og:price:amount'));
+  let orig: number | null = numish(metaOf(h, 'product:original_price:amount'));
+  if (price === null) {
+    const ld = Array.from(h.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi))
+      .map((x) => { try { return JSON.parse(x[1]); } catch { return null; } }).filter(Boolean);
+    const findOffer = (v: any, d = 0): number | null => {
+      if (!v || d > 8) return null;
+      if (Array.isArray(v)) { for (const x of v) { const r = findOffer(x, d + 1); if (r) return r; } return null; }
+      if (typeof v === 'object') {
+        if (v.offers) { const o = Array.isArray(v.offers) ? v.offers[0] : v.offers; const p = numish(o?.price || o?.lowPrice); if (p) return p; }
+        for (const k of Object.keys(v)) { const r = findOffer(v[k], d + 1); if (r) return r; }
+      }
+      return null;
+    };
+    price = findOffer(ld);
+  }
+  if (price === null) {
+    const t = stripTags(h.slice(0, 200_000));
+    const ps = pricesOf(t);
+    if (ps.length) {
+      const s = [...ps].sort((a, b) => a - b);
+      price = s[s.length - 1];
+      if (s.length > 1 && s[0] < price) { orig = price; price = s[0]; }
+    }
+  }
+  const isProductPage = /product/i.test(metaOf(h, 'og:type')) || !!metaOf(h, 'product:price:amount') || /"@type"\s*:\s*"Product"/i.test(h);
+  if (orig === null) {
+    const t = stripTags(h.slice(0, 120_000));
+    const om = t.match(/(정가|소비자가|정상가)\s*[:：]?\s*(\d{1,3}(?:,\d{3})+|\d{4,7})\s*원/);
+    if (om) { const v = Number(om[2].replace(/,/g, '')); if (price !== null && v > price) orig = v; }
+  }
+  if (!isProductPage || !name || !image || price === null || /온라인 스토어|공식몰|official/i.test(name) || isBadProductImage(image)) return null;
+  return {
+    name: cleanProductName(name).slice(0, 80),
+    price: orig && orig > price ? orig : price,
+    discount_price: orig && orig > price ? price : null,
+    image_url: image,
+    link_url: finalUrl,
+  };
+}
+
+/** 상세 1홉(가드 fetch · 같은 호스트만). 다른 호스트로 리다이렉트되면 버린다(불변 18 개정). 실패 = null. */
+export async function fetchProductPageGuarded(url: string, homeHost: string): Promise<OutreachProduct | null> {
+  let page: { html: string; finalUrl: string } | null = null;
+  try {
+    const r = await fetchHtmlGuarded(url);
+    page = r ? { html: r.html, finalUrl: r.finalUrl } : null;
+  } catch {
+    page = null;
+  }
+  if (!page) return null;
+  try { if (new URL(page.finalUrl).hostname !== homeHost) return null; } catch { return null; }
+  return parseProductPage(page.html, page.finalUrl);
+}
+
+/** 링크 목록에서 상품 want개까지 순차 수집(예의상 순차 · 식별자 중복 병합). */
+export async function collectProductsFromLinks(links: string[], homeHost: string, want = 6): Promise<OutreachProduct[]> {
+  const got: OutreachProduct[] = [];
+  const keys = new Set<string>();
+  for (const l of links) {
+    if (got.length >= want) break;
+    const p = await fetchProductPageGuarded(l, homeHost);
+    if (!p) continue;
+    const k = productKey(p);
+    if (keys.has(k)) continue;
+    keys.add(k);
+    got.push(p);
+  }
+  return got;
+}
+
+// ===== 이미지 실측 + 사본 저장(호출부가 가드 fetch·저장 함수를 주입한다 = 이 파일은 저장소·SSRF 규약을 모른다) =====
+
+export interface StoredImage {
+  /** 우리 서버 공개 URL(절대) */
+  url: string;
+  width: number;
+  height: number;
+  bytes: number;
+  /** 원 출처 URL(고지·근거용) */
+  srcUrl: string;
+}
+
+export type GuardedImageFetcher = (url: string) => Promise<{ buffer: Buffer; mime: string; ext: string } | null>;
+export type ImageStorer = (buffer: Buffer, meta: { ext: string; mime: string; width: number; height: number }) => string | null;
+
+/** 후보 1장을 받아 폭 게이트를 통과하면 사본을 저장하고 기록을 돌려준다. 미만·실패 = null. */
+export async function measureAndStoreImage(
+  url: string, minWidth: number, fetcher: GuardedImageFetcher, store: ImageStorer,
+): Promise<StoredImage | null> {
+  const img = await fetcher(url);
+  if (!img || img.buffer.length < 2_000 || img.buffer.length > OUTREACH_MEDIA_MAX_BYTES) return null;
+  const size = readImageSize(img.buffer);
+  if (!size || size.width < minWidth) return null;
+  const stored = store(img.buffer, { ext: img.ext, mime: img.mime, width: size.width, height: size.height });
+  if (!stored) return null;
+  return { url: stored, width: size.width, height: size.height, bytes: img.buffer.length, srcUrl: url };
+}
+
+/** 후보 배열에서 실측 통과분만 · 면적 큰 순 · 최대 n장. 후보는 n*2까지만 시도(느린 CDN 방어). */
+export async function pickStoredImages(
+  cands: string[], n: number, minWidth: number, fetcher: GuardedImageFetcher, store: ImageStorer,
+): Promise<StoredImage[]> {
+  const infos: StoredImage[] = [];
+  let tried = 0;
+  for (const c of cands) {
+    if (infos.length >= n || tried >= n * 2) break;
+    tried++;
+    const i = await measureAndStoreImage(c, minWidth, fetcher, store);
+    if (i) infos.push(i);
+  }
+  return infos.sort((a, b) => b.width * b.height - a.width * a.height).slice(0, n);
+}

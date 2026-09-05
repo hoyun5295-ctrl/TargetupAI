@@ -22,7 +22,11 @@ export interface OutreachBulkRow {
 export interface OutreachBulkParseResult {
   rows: OutreachBulkRow[];
   rejected: Array<{ line: number; reason: string }>;
+  /** ★ C-6 거절 목록 상한(50) 초과분 수 — 응답 크기 폭주 방지 */
+  rejectedOverflow: number;
 }
+
+export const OUTREACH_BULK_REJECT_CAP = 50;
 
 const LABEL_TO_CODE: Record<string, IndustryCode> = Object.fromEntries(
   INDUSTRY_CODES.map((c) => [INDUSTRY_LABELS[c], c]),
@@ -115,7 +119,7 @@ export async function buildOutreachTemplateXlsx(): Promise<Buffer> {
 export function parseOutreachBulkXlsx(fileBuffer: Buffer): OutreachBulkParseResult {
   const wb = XLSX.read(fileBuffer, { type: 'buffer' });
   const sheetName = wb.SheetNames[0];
-  if (!sheetName) return { rows: [], rejected: [{ line: 0, reason: '시트를 찾을 수 없습니다.' }] };
+  if (!sheetName) return { rows: [], rejected: [{ line: 0, reason: '시트를 찾을 수 없습니다.' }], rejectedOverflow: 0 };
   const raw: unknown[][] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: false, defval: '' });
 
   const rows: OutreachBulkRow[] = [];
@@ -153,5 +157,6 @@ export function parseOutreachBulkXlsx(fileBuffer: Buffer): OutreachBulkParseResu
     rows.push({ companyName: name, homepageUrl: url, industryCategory });
   }
 
-  return { rows, rejected };
+  const rejectedOverflow = Math.max(0, rejected.length - OUTREACH_BULK_REJECT_CAP);
+  return { rows, rejected: rejected.slice(0, OUTREACH_BULK_REJECT_CAP), rejectedOverflow };
 }

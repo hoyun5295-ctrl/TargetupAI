@@ -55,6 +55,16 @@
 
 ## 2) 활성 버그
 
+### 🔴 B-0905-1 가드 크롤(`fetchHtmlGuarded`)이 Node 20에서 전 사이트 null — 아웃리치 크롤 · DM 편집기 URL 불러오기 · 상품 og 이미지 자동 채움 전부 조용히 빈 결과 (🟡 코드 수정 완료·배포 대기) — 2026-09-05 프로토타입 실측에서 발견 · 운영 실측 확정
+
+> **증상**: 운영(.62 · Node 20.20.0)에서 `fetchHtmlGuarded('https://www.innisfree.com/')` = `null`(Harold 실행 · 2026-09-05). 로컬(Node 20.19.4)도 12사이트 0/12. 예외를 삼키고 null을 돌려주는 구조라 pm2 로그에 "크롤 예외" 줄이 남지 않는다: 아웃리치 잡은 `stage_results.crawling='unavailable'`로 전진, DM 편집기 "홈페이지에서 행사 불러오기"는 빈 칸, 상품 og 이미지 자동 채움은 전부 undefined.
+> **원인(코드 실측)**: [`requestPinned`](../packages/backend/src/utils/dm/dm-brand-extractor.ts:385)의 커스텀 `lookup` 콜백이 옛 형태 `cb(err, address, family)`만 돌려줬다. Node 20은 `net.autoSelectFamily` 기본 on이라 소켓이 `lookup(host, { all: true }, cb)`로 부르고 **배열**을 기대한다 → `ERR_INVALID_IP_ADDRESS` → 연결 자체 실패. 로컬 실험(`scratch/proto/debug-pinned.ts`): 옛 형태 FAIL · 배열 형태 status 200.
+> **영향 소비처(전수 grep · 커스텀 lookup 콜백은 백엔드 1곳뿐)**: `sales-outreach-jobs.ts:193`(아웃리치 크롤) · `routes/dm.ts:1001`(`fetchEventTextFromUrl`) · `dm-ai.ts:956`·`email-ai.ts:426`·`inapp-ai-generator.ts:339`(`fetchProductOgImages`). 아웃리치 이미지 fetch(`sales-outreach-produce.ts:100`)는 `host: pinnedIp + servername` 방식이라 해당 없음.
+> **수정**: 순수 함수 `pinnedLookup(pinned)` 신설·export — `options.all`이면 `[{ address, family }]`, 아니면 `(address, family)`. `requestPinned`가 그것을 쓴다(검증 IP 고정·SNI·인증서 검증 그대로). 계약 테스트 3건 `__tests__/dm-brand-extractor-lookup.test.ts`(네트워크 0).
+> **검증**: BE tsc 0 · 신규 테스트 3/3 · 전체 스위트는 배포 직전 1회.
+> **실측(배포 후 Harold님)**: `cd /home/administrator/targetup-app/packages/backend && npx ts-node -T -P tsconfig.json -e "require('./src/utils/dm/dm-brand-extractor').fetchHtmlGuarded('https://www.innisfree.com/').then(r=>console.log(r?'ok '+r.html.length:'null'))"` → `ok 3xxxxx`면 종결.
+> **교훈**: "예외를 삼키고 null" 구조는 장애를 내용 판정으로 접는다(FEATURE-SALES-OUTREACH 불변 10의 이유가 여기서도 증명됐다). Node 메이저 업그레이드 뒤 커스텀 `lookup`·`createConnection` 콜백은 실측 1건이 필요하다.
+
 ### 🟠 B-0904-1 이메일 캠페인 히어로 — 구도 '기본'으로 넣은 메인 이미지가 수신함에서 통째로 사라진다 (🟡 코드 수정 완료·배포 대기) — 2026-09-04 접수 `cmtl5wq5v0800jnotk46ozykf`(남지현 P1)
 
 > **증상**: 히어로(메인 비주얼) 이미지를 구도 **기본**으로 넣으면 편집 화면 미리보기(모바일·PC)는 정상인데, 실제 발송(테스트 발송) 수신 시 그 자리가 **검정 화면**으로만 나오고 이미지가 없다. 같은 메일에서 구도 **분할·타이포**는 정상. 환경 = 크롬 · 수신 확인은 하이웍스(Harold 확인).
@@ -104,10 +114,11 @@
 > **배포 순서가 곧 안전 게이트다**(Codex 2R): **①게이트웨이 → ②재적재·수치 확인 → ③한줄로** 순서를 지킨다. 한줄로가 먼저 올라가면 차단이 풀린 상태에서 원본이 아직 알림톡 성공으로 세어져 있어, 그때 발행하면 같은 40건이 겹쳐 청구된다. 반대 순서에서는 KL이 미정의 유형이라 발행이 막힌 채로 남아 안전하다. **롤백은 역순** — 게이트웨이를 되돌리면 한줄로 별칭도 함께 되돌린다(별칭만 남으면 이중 청구 상태가 된다).
 > ⛔ **발행을 코드로 fail-closed 시키는 장치는 만들지 않았다**(Codex 2R 권고 불수용). 그러려면 "게이트웨이가 교정됐는가"를 한줄로가 판정해야 하는데 그것은 **새 이중 진실**이고, 접수 축(랩디 발행 차단) 밖의 신규 기능이다. 실측 근거 = 정산서 최초 생성은 자동 경로가 없다(`taxbill-worker`는 이미 생성된 건의 상태 전이·팝빌 발행만 한다). 두 배포 사이에 저절로 발행되는 경로가 없으므로 순서 준수로 닫힌다.
 > **요금 결정 기록**: [DECISIONS D81](DECISIONS.md) — 전환분을 문자 단가로 청구한다는 결정이 어디에도 없었고, 게이트웨이 주석·테스트는 오히려 "전환 단가로 분리"를 전제하고 있었다(Codex high 부분 수용). 결정을 남기고 충돌하던 주석 2곳을 사실에 맞게 고쳤다. 별도 단가 컬럼 유지 권고는 불수용 — 승인된 설계이고 근거(사용 발송ID 1곳·단가 화면 소음)가 기록됐다.
+> **후속 3건 화면 확인(배포완료 · 육안 대기)**: ①고객사 단가 화면에서 빈 칸 문구가 "이 유형으로 발송이 있으면 …"으로 바뀌고, 테스트 SMS·LMS 칸은 "SMS/LMS 단가를 따릅니다"로 나오는지 ②이메일 편집기에서 CTA 버튼 2개 + 구도 기본/아웃라인 + 배치 가로 = 발송 미리보기에서 나란히 놓이는지 ③인앱 편집기에서 카드 형태를 말풍선으로 바꾸면 CTA 「정렬」 컨트롤이 사라지는지.
 > **배포·재적재 실측(2026-09-04)**: 게이트웨이 바이너리 `f9f4f0d` 배포 후 해시 대조 일치(`d4125b28…20d067`). `GW_PAY_STATS_LOOKBACK_DAYS=15`로 1주기 재적재 후 **V0001 8월 `K` = 1223/1215 → 1175/1175**(전환 원본 48건 제외 · 그중 실패 8건도 함께 빠져 fail 0). `KL` 48/40 · `S` 1936/1924 무변화. 되돌아보기는 3으로 복귀 확인(로그 `lookbackDays:3`). 한줄로는 dist 4파일 반영 확인 후 pm2 교체(23:21:34 · dist 23:16:46보다 나중) — **첫 reload는 프로세스가 안 바뀌어 옛 코드를 물고 있었다**(uptime 미리셋으로 검출 · dist 시각 대조로 확정).
 > **검증**: BE tsc 0 · backend 전체 **3,609건 통과**(226 파일) · `agent-price-gaps.verify` 20건 통과 · 게이트웨이 `gofmt`·`go vet`·`go build` 통과, paystats 테스트 통과(그 외 전체도 통과 — Windows 로컬 ACL 테스트 5건은 변경 전에도 같은 실패라 무관) · **회귀 주입 4회 전건 검출**(게이트웨이 부모 제외 삭제 · WHERE 방식 되돌림 · LMS 별칭 제거 · 별칭 코드 중복) · **Codex 적대 리뷰 1R high 2건 → 수용 1·부분 수용 1**.
 > **옛 계약 3건 정정**: `KS`를 "미지 코드"의 예시로 쓰던 단정과 "변환표는 5종뿐" 단정이 이번 흡수로 뜻이 바뀌어 사실에 맞게 고쳤다(`send-usage-aggregation.test.ts` 2건 · `agent-price-gaps.verify.ts` 2건).
-> **후속 처리(2026-09-04 · Harold 지시로 같은 날 착수·완료)**: ①②는 **접수자의 오해를 만든 화면 자체**라 축 안으로 봤어야 했다. ⇒ ①단가 카드 문구를 게이트와 맞췄다 — "미설정. **이 유형으로 발송이 있으면** 청구서 발행이 차단됩니다"(게이트는 `success > 0`인 유형만 막는다). 테스트 단가는 비면 SMS·LMS를 **상속**하는데(`TEST_SMS: testSmsRaw ?? sms`) 그것까지 "차단"이라 표시하던 것도 "SMS 단가를 따릅니다"로 정정했다 ②`UNBILLABLE_TYPE_KEY` 전용 안내를 분리했다 — 채울 칸이 없는 유형에 "단가를 채우라"고 하면 운영자가 단가 화면을 뒤지며 시간을 버린다. 계약 6건 신설(`billing-price-copy.test.ts` — 문구와 게이트가 갈라지면 깨진다).
+> **후속 처리(2026-09-04 · Harold 지시로 같은 날 착수 · 🟢 배포완료)**: ①②는 **접수자의 오해를 만든 화면 자체**라 축 안으로 봤어야 했다. ⇒ ①단가 카드 문구를 게이트와 맞췄다 — "미설정. **이 유형으로 발송이 있으면** 청구서 발행이 차단됩니다"(게이트는 `success > 0`인 유형만 막는다). 테스트 단가는 비면 SMS·LMS를 **상속**하는데(`TEST_SMS: testSmsRaw ?? sms`) 그것까지 "차단"이라 표시하던 것도 "SMS 단가를 따릅니다"로 정정했다 ②`UNBILLABLE_TYPE_KEY` 전용 안내를 분리했다 — 채울 칸이 없는 유형에 "단가를 채우라"고 하면 운영자가 단가 화면을 뒤지며 시간을 버린다. 계약 6건 신설(`billing-price-copy.test.ts` — 문구와 게이트가 갈라지면 깨진다).
 > ③`norm_status`가 두 의미를 겸하는 구조는 **그대로 남았다**(집계 쪽에서 막았을 뿐). 발송 경로를 건드리는 변경이라 별건이다.
 
 ### 🟡 B-0904-4 모바일 DM CTA — 버튼 배치(가로/세로)를 바꿔도 그대로다(구도 4개 중 1개만 읽고 있었다) (🟢 배포완료 2026-09-04 23:21 · 화면 실측 대기) — 2026-09-04 접수 `cmtmoior709mjjnotp6803f9j`(임은지 P2)
@@ -120,7 +131,7 @@
 > **계약**: `dm-editor-parity.test.ts` 17건 신설 — 판정표 7 · ghost 가로/세로/버튼1 · classic 회귀 2 · bar·sticky 출력 동일 2 · 캔버스 소스 대조(CT 사용 + 직접 검사 잔존 0) · 편집기 게이트(게이트가 **판정 CT의 결과**인지까지) · 프론트↔백 미러 값 일치.
 > **검증**: BE tsc 0 · FE tsc 0 · backend 전체 **3,602건 통과**(226 파일) · `build:safe` 성공(lazy 청크 43건 실존) · **회귀 주입 5회 전건 검출**(SSR 배치 제거 · 미러 값 갈림 · 편집기 게이트 무력화 · 캔버스 CT 미사용 · 정렬만 옛 조건). 게이트 무력화 주입은 **1차에 안 잡혀**(`{true &&`가 통과) 계약을 보강한 뒤 검출됐다.
 > **기존 문서 영향 0**: 조회한 30건 중 `row`는 접수 문서 1건뿐이고 나머지는 전부 `stack`이다. 그 1건만 의도대로 가로가 된다.
-> **후속 처리(2026-09-04 · Harold 지시로 같은 날 착수·완료)**: 처음엔 "범위 밖"으로 기록만 했는데 **①은 내 변경이 만든 불일치였다.** 이메일 편집기가 DM의 공용 `SectionPropsEditor`를 **그대로 차용**하므로(`EmailVisualEditor.tsx:16`) 내가 고친 `CtaEditor`가 이메일에도 뜨는데, `renderCta`만 배치를 안 읽어 **컨트롤은 보이고 렌더는 무시**하는 상태가 됐다. 공용 편집기를 건드려 놓고 한 채널만 맞춘 것이라 닫아야 할 자리였다(첫 보고의 "이메일 편집기에 컨트롤이 없다"는 오진 — `EmailVisualEditor`에서 `buttons`·`layout` 문자열만 grep하고 차용을 못 봤다).
+> **후속 처리(2026-09-04 · Harold 지시로 같은 날 착수 · 🟢 배포완료)**: 처음엔 "범위 밖"으로 기록만 했는데 **①은 내 변경이 만든 불일치였다.** 이메일 편집기가 DM의 공용 `SectionPropsEditor`를 **그대로 차용**하므로(`EmailVisualEditor.tsx:16`) 내가 고친 `CtaEditor`가 이메일에도 뜨는데, `renderCta`만 배치를 안 읽어 **컨트롤은 보이고 렌더는 무시**하는 상태가 됐다. 공용 편집기를 건드려 놓고 한 채널만 맞춘 것이라 닫아야 할 자리였다(첫 보고의 "이메일 편집기에 컨트롤이 없다"는 오진 — `EmailVisualEditor`에서 `buttons`·`layout` 문자열만 grep하고 차용을 못 봤다).
 > ⇒ 이메일 `renderCta`에 배치 배선(가로 = 한 행에 `<td>` 나란히 · Outlook 호환 테이블 셀. 세로는 종전 마크업 그대로라 기존 메일 출력 무변). 판정은 DM과 **같은 CT**. 계약 6건(`email-editor-parity.test.ts`).
 > **②는 오진이었다.** `BlockPreview`의 `flexDirection: 'row'`는 **말풍선(bubble) 카드 분기**였고, SDK(`inapp-blocks.ts`)도 그 분기에서 똑같이 가로 고정이라 **미러가 이미 일치**했다. 기본 카드는 양쪽 다 `b.layout !== 'inline'`을 정상 소비한다. 대신 같은 자리에서 **다른 결함**을 찾았다 — 말풍선에서는 배치가 무효인데 편집기가 「정렬」 컨트롤을 조건 없이 그렸다(죽은 컨트롤). ⇒ `BlockComposer`→`BlockEditor`로 `cardStyle`을 전달해 말풍선에서 감춘다. 계약 3건(`inapp-media-fit-parity.test.ts` — SDK·미리보기 미러 회귀까지 함께 고정).
 

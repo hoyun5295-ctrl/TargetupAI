@@ -72,16 +72,37 @@ function dedupeBlocks(blocks: string[]): string[] {
 }
 
 /**
- * HTML → 아웃리치용 행사 원문. 구조화 블록 + 기존 전체 텍스트.
- * 아무것도 못 뽑으면 null(현행 `fetchEventTextFromUrl` 실패와 같은 계약).
+ * HTML → 아웃리치용 행사 원문 + 계측. 구조화 블록 + 기존 전체 텍스트.
+ * ★ 2026-09-05(A-12) 구조화 블록이 본문에 그대로 다시 나오는 중복을 제거한다 : 잘리지 않고 온전히 실린 블록만
+ *   본문에서 첫 1회 지운 뒤 남은 예산으로 절단한다. 0건이면 본문 경로가 옛 방식과 문자 단위로 같다(무후퇴 계약 유지).
+ * 아무것도 못 뽑으면 text=null(현행 `fetchEventTextFromUrl` 실패와 같은 계약).
  */
-export function buildOutreachEventText(html: string): string | null {
+export function buildOutreachEventMaterial(html: string): { text: string | null; structuredBlocks: number } {
   const blocks = dedupeBlocks([...extractEventCards(html), ...extractDealLinks(html)]);
   const structured = blocks.join('\n').slice(0, STRUCTURED_MAX);
   // 구조화 블록이 먹은 만큼만 본문 예산에서 뺀다. 0건이면 예산이 그대로 6000이라
   // 결과가 옛 방식과 문자 단위로 같아진다(무후퇴 계약).
   const baseBudget = TOTAL_MAX - structured.length - (structured ? 1 : 0);
-  const base = baseBudget > 0 ? extractEventTextFromHtml(html, baseBudget) : null;
+  let base: string | null = null;
+  if (baseBudget > 0) {
+    if (blocks.length === 0) {
+      base = extractEventTextFromHtml(html, baseBudget);
+    } else {
+      // 온전히 실린 블록(절단된 마지막 블록 제외)만 본문에서 첫 1회 제거 → 남은 예산으로 절단
+      const whole = blocks.filter((b) => structured.includes(b));
+      let full = extractEventTextFromHtml(html, TOTAL_MAX) || '';
+      for (const b of whole) {
+        const i = full.indexOf(b);
+        if (i >= 0) full = (full.slice(0, i) + full.slice(i + b.length)).replace(/\s{2,}/g, ' ').trim();
+      }
+      base = full ? full.slice(0, baseBudget) : null;
+    }
+  }
   const merged = [structured, base].filter(Boolean).join('\n');
-  return merged || null;
+  return { text: merged || null, structuredBlocks: blocks.length };
+}
+
+/** 기존 계약(문자열 하나) 래퍼 — 테스트·호출부 유지 */
+export function buildOutreachEventText(html: string): string | null {
+  return buildOutreachEventMaterial(html).text;
 }

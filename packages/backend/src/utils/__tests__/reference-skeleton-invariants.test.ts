@@ -128,13 +128,16 @@ describe('reference-skeleton invariants', () => {
     expect(fn).not.toContain('brand_name'); // 공용 함수에 재료를 섞지 않았다
   });
 
-  it('12. 아웃리치 — 임베드·sns 상시 absent · structure 명시 전달 · asset structureRef', () => {
+  it('12. 아웃리치 — 임베드·sns 상시 absent · 골격을 구성 힌트로 명시 전달 · asset structureRef', () => {
+    // ★ 2026-09-05 아웃리치 DM은 공용 oneShotGenerate 대신 전용 few-shot 생성으로 바뀌었다(0905 설계서 §19 ①).
+    //   골격은 `skeletonTypes`(프롬프트 [참고 구성 순서])로 전달되고, 근거 기록(structureRef)은 그대로 asset에 남는다.
     const produce = readCode('utils/sales-outreach-produce.ts');
     expect(produce).toContain("embeds: 'absent'");
     expect(produce).toContain("social: 'absent'");
-    expect(produce).toContain('structure: { sectionTypes: structureRef.sectionTypes }');
+    expect(produce).toContain('skeletonTypes: structureRef ? structureRef.sectionTypes');
+    expect(produce).toContain('[참고 구성 순서]');
     const jobs = readCode('utils/sales-outreach-jobs.ts');
-    expect(jobs).toContain('benefitLicensed: !!selected?.benefitLicensed');
+    expect(jobs).toContain('benefitLicensed: !!licensedQuote');
     expect(jobs).toContain('structureRef: dm.structureRef');
   });
 

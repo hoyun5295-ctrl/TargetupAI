@@ -75,6 +75,8 @@ import { buildEventPromptBlock, normalizeEventText } from '../utils/event-brief'
 // ★ 2026-07-16 M3 — 상품 이미지 후보(네이버 쇼핑 검색 — 원탭 확정 전용) + 행사 URL 본문 수집
 import { searchNaverShopCandidates, isNaverShopSearchConfigured } from '../utils/naver-shop-search';
 import { fetchEventTextFromUrl } from '../utils/dm/dm-brand-extractor';
+// ★ 2026-09-05 아웃리치 DM noindex(불변 23) — 공개 뷰어가 요청 시각에 회사 id로 판정(저장값 아님 · 기존 발행분 소급)
+import { getOutreachContext } from '../utils/sales-outreach-produce';
 // ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
 import { buildEventTemplateHintBlock } from '../utils/design-core/event-package';
 // ★ 2026-07-16 자가 호스팅 웹폰트 @font-face 생성 (궁서 폴백 정정)
@@ -206,6 +208,7 @@ dmPublicRouter.get('/s/:code', async (req: Request, res: Response) => {
 dmPublicRouter.get('/:code', async (req: Request, res: Response) => {
   try {
     const dm = await getDmByCode(req.params.code);
+    if (dm && dm.company_id === getOutreachContext()?.companyId) res.setHeader('X-Robots-Tag', 'noindex, nofollow'); // 아웃리치 DM = noindex(불변 23)
     if (!dm) {
       // ★ 2026-08-06 없는 코드와 **내린 코드**는 고객에게 다른 말을 해야 한다(서수란 접수 — 행사 종료).
       //   이 조회는 404 경로에서만 돈다(정상 열람에는 쿼리가 늘지 않는다).
@@ -2382,6 +2385,7 @@ dmPublicRouter.get('/ab/:code', async (req: Request, res: Response) => {
       [pageId, test.company_id],
     );
     const dm = dmRes.rows[0];
+    if (dm && dm.company_id === getOutreachContext()?.companyId) res.setHeader('X-Robots-Tag', 'noindex, nofollow'); // 아웃리치 DM = noindex(불변 23)
     if (!dm) {
       let stopped = false;
       try { stopped = await isDmStopped(pageId, test.company_id); } catch { /* 기존 문구로 폴백 */ }

@@ -1,7 +1,7 @@
 /**
- * ★ 2026-08-24 AI 영업 아웃리치 — 제작 단계 헬퍼 (이미지·DM·제안 메일 조립)
- * 설계 = docs/2026-07-31-ai-sales-outreach-design.md §15-5·§15-6. 상태 전이는 sales-outreach-jobs가 소유하고
- * 이 파일은 산출물 하나를 만드는 순수 작업 함수만 둔다(성공 반환 또는 throw — 판정·기록은 호출부).
+ * ★ 2026-08-24 AI 영업 아웃리치 — 제작 단계 헬퍼 (이미지·재료·DM·브랜드 이메일·제안 메일 조립)
+ * 설계 = docs/2026-07-31-ai-sales-outreach-design.md §15-5·§15-6 · ★2026-09-05 개정 = docs/2026-09-05-ai-sales-outreach-refinement-design.md
+ * 상태 전이는 sales-outreach-jobs가 소유하고 이 파일은 산출물 하나를 만드는 작업 함수만 둔다(성공 반환 또는 throw — 판정·기록은 호출부).
  *
  * 규율:
  * - 회사 컨텍스트 = OUTREACH_COMPANY_ID/OUTREACH_USER_ID(ENV 고정). 미설정 = 정직 거절(자동 폴백 금지).
@@ -10,31 +10,50 @@
  *   /ingest-product의 가드 규약과 동일(공용 라우트는 고객 축이라 손대지 않고 이 축 CT로 둔다 · 통합 = 별도 과제).
  * - vision 인물 판정 = 보조 신호. 'person' 확정만 제외(Harold 보강 ①), 판정 불능은 사람 선택을 존중.
  * - 메일 본문 = 전달용 완성본 한 벌. 내부 URL·토큰을 이 파일 함수의 인자로 받지 않는다(H2 — 손에 없으면 샐 수 없다).
+ * - ★0905 샘플 학습 층: DM·브랜드 이메일 섹션은 직원 실물 예시(few-shot · sales-outreach-exemplars)로 직접 생성한다.
+ *   재료(상품·이미지·딥링크·법정 표기)는 코드가 채우고, 면허 밖 혜택 수치는 sanitizeDmCopyBenefits가 기계로 걷어낸다(불변 22).
+ * - ★0905 조립 함수 분할(A-2): 순수 조립(buildProposalEmailSections · 한글 리터럴 0 · 문구는 style.emailCopy) ↔ AI 호출(generateSubjectIntro)
+ *   ↔ 진입점(assembleProposalEmail = 조립 + 렌더 + 평문 + placeholder 합산).
  */
 import * as fs from 'fs';
 import * as net from 'net';
 import * as dns from 'dns';
 import * as https from 'https';
 import { callAIWithFallback } from '../services/ai';
-import { runInCreditBundle } from './ai-credit-context';
-import { stripUnauthorizedBenefits } from './copy-benefit-detector';
-import { getActiveStyleGuide } from './sales-outreach-style';
+import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
+import { getActiveStyleGuide, type OutreachStyleGuide } from './sales-outreach-style';
 import {
   isStudioReady, writeTempBuffer, allocTempPath, writeTempMeta, findTempFile, moveTempToPermanent,
   removeBackground, composeImage, generatePoster, buildPosterPrompt, resolvePreset,
+  companyTempUsageBytes, STUDIO_TEMP_CAP_BYTES,
 } from './image-studio';
 import { STUDIO_TEMPLATES, type StudioTemplate, type TemplateCategory } from './image-studio-templates';
-import { oneShotGenerate } from './dm/dm-ai';
+import { extractJson, DM_EDITABLE_TEXT_KEYS } from './dm/dm-ai';
 import { createDm, publishDm } from './dm/dm-builder';
 import { renderEmailSections, EMAIL_FOOTER_SLOT } from './email/email-section-renderer';
-import type { Section, SectionType } from './dm/dm-section-registry';
-import { industryLabel } from './industry-codes';
+import { getDefaultProps, type Section, type SectionType } from './dm/dm-section-registry';
+import { industryLabel, isIndustryCode, INDUSTRY_CODES, type IndustryCode } from './industry-codes';
 import type { EventCandidate } from './sales-outreach-jobs';
-// ★ 2026-09-03 참조 골격(설계서 §6-3) — 아웃리치 파일이 읽고 감산해 `structure`로 넘긴다(공용 CT는 아웃리치 사정을 모른다 · 불변 20)
+// ★ 2026-09-03 참조 골격(설계서 §6-3) — 아웃리치 파일이 읽고 감산해 구성 힌트로 넘긴다(공용 CT는 아웃리치 사정을 모른다 · 불변 20)
 import { getStructureSkeleton } from './best-copy-assets';
 import { pickVariant, resolveStructure, seedDateKey, type Avail } from './dm/dm-structure-resolve';
 import { OUTREACH_SEED_SKELETON_ID, outreachSeedSkeleton } from './sales-outreach-skeleton-seed';
 import { pruneEmptyDmSections, rebuildDmPages } from './dm/dm-section-prune';
+import { isBrandKitPrimaryAccessible } from './dm/dm-tokens';
+import { kstDateTag } from './ai-credit-calc';
+import {
+  pickOutreachExemplarsDetail, OUTREACH_GENERATION_RULES,
+  OUTREACH_DM_SECTION_CONTRACT, OUTREACH_EMAIL_SECTION_CONTRACT, OUTREACH_DM_TYPES, OUTREACH_EMAIL_TYPES,
+} from './sales-outreach-exemplars';
+import {
+  collectProductsFromLinks, fetchProductPageGuarded, measureAndStoreImage, pickStoredImages, productKey,
+  OUTREACH_GALLERY_MIN_WIDTH, OUTREACH_PRODUCT_MIN_WIDTH, OUTREACH_CTA_KEYWORDS,
+  type OutreachProduct, type StoredImage,
+} from './sales-outreach-media';
+// ★ 2026-09-05 실물 예시 원천 = DB(베스트 구성에서 올린 실물 · 5분 캐시) + seed. async에서 읽어 순수 프롬프트 빌더에 주입한다(pickOutreachStructure와 같은 형태).
+import { loadOutreachExemplarSource } from './sales-outreach-examples';
+
+export type ExemplarSource = Record<string, readonly string[]>;
 
 // ===== 회사 컨텍스트 (ENV 고정 — §15-6) =====
 
@@ -72,8 +91,9 @@ function isPrivateIp(ip: string): boolean {
 /** 가드 이미지 다운로드 — 실패는 null(사유 로그만). 리다이렉트는 SSRF 우회 경로라 거부.
  *  검증한 DNS 주소를 **연결에 고정**한다(host=검증 IP · servername/Host=원 호스트) — 검사 때 공인 IP,
  *  연결 때 사설 IP를 돌려주는 DNS 재해석(rebinding) 차단(Codex 2R high · dm-brand-extractor requestPinned와 같은 규약).
- *  타이머·누적 상한은 본문 소비가 끝날 때까지 유지한다(Codex 1R high). */
-async function fetchImageGuarded(rawUrl: string): Promise<{ buffer: Buffer; mime: string; ext: string } | null> {
+ *  타이머·누적 상한은 본문 소비가 끝날 때까지 유지한다(Codex 1R high).
+ *  ★ 2026-09-05 referer 옵션: 핫링크를 막는 CDN에 사이트 주소를 Referer로 준다(프로토 실측 · 재료 이미지 수집 경로). */
+export async function fetchImageGuarded(rawUrl: string, opts?: { referer?: string }): Promise<{ buffer: Buffer; mime: string; ext: string } | null> {
   let parsed: URL;
   try { parsed = new URL(rawUrl); } catch { return null; }
   if (parsed.protocol !== 'https:') return null;
@@ -102,7 +122,12 @@ async function fetchImageGuarded(rawUrl: string): Promise<{ buffer: Buffer; mime
       port: parsed.port ? Number(parsed.port) : 443,
       path: parsed.pathname + parsed.search,
       method: 'GET',
-      headers: { Host: host, 'User-Agent': 'Mozilla/5.0 (compatible; HanjulBot/1.0)' },
+      headers: {
+        Host: host,
+        'User-Agent': 'Mozilla/5.0 (compatible; HanjulBot/1.0)',
+        Accept: 'image/avif,image/webp,image/*,*/*;q=0.8',
+        ...(opts?.referer ? { Referer: opts.referer } : {}),
+      },
       timeout: 10_000,              // 소켓 유휴 타임아웃
     }, (res) => {
       const status = res.statusCode || 0;
@@ -119,8 +144,9 @@ async function fetchImageGuarded(rawUrl: string): Promise<{ buffer: Buffer; mime
         chunks.push(c);
       });
       res.on('end', () => {
-        const ext = ctype.includes('png') ? 'png' : ctype.includes('webp') ? 'webp' : 'jpeg';
-        done({ buffer: Buffer.concat(chunks), mime: ctype, ext });
+        const mime = ctype.split(';')[0].trim();
+        const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpeg';
+        done({ buffer: Buffer.concat(chunks), mime, ext });
       });
       res.on('error', () => done(null));
     });
@@ -156,21 +182,131 @@ async function judgePersonInImage(base64: string, mime: string): Promise<PersonJ
   }
 }
 
-// ===== 템플릿 선택 (업종 → 카테고리 · 결정적 — 재실행 동일 결과) =====
+// ===== 템플릿 선택 (★ A-4 업종 15종 매핑 · 결정적 — 같은 (jobId, seq) = 같은 결과) =====
 
-const INDUSTRY_TO_CATEGORY: Record<string, TemplateCategory> = {
-  fashion: '패션', beauty: '뷰티', food: '카페·음료',
+/** 업종 → {제품(누끼 있음) 카테고리, 행사(누끼 없음) 카테고리}. 초안 표(설계서 A-4 · 시장 판단은 Harold). 이름은 TemplateCategory 유니온과 글자 단위 일치. */
+export const INDUSTRY_TEMPLATE_MAP: Record<IndustryCode, { product: TemplateCategory[]; event: TemplateCategory[] }> = {
+  fashion: { product: ['패션'], event: ['시즌·명절 행사'] },
+  beauty:  { product: ['뷰티'], event: ['멤버십·고객감사'] },
+  food:    { product: ['카페·음료', '신메뉴·팝'], event: ['팝업·페스티벌'] },
+  health:  { product: ['미니멀'], event: ['멤버십·고객감사'] },
+  home:    { product: ['미니멀'], event: ['시즌·명절 행사'] },
+  digital: { product: ['세일·이벤트'], event: ['오픈·기념일'] },
+  baby:    { product: ['시즌'], event: ['데이·기념일'] },
+  pet:     { product: ['세일·이벤트'], event: ['데이·기념일'] },
+  edu:     { product: ['미니멀'], event: ['클래스·체험'] },
+  travel:  { product: ['시즌'], event: ['시즌·명절 행사'] },
+  sports:  { product: ['세일·이벤트'], event: ['팝업·페스티벌'] },
+  culture: { product: ['미니멀'], event: ['클래스·체험'] },
+  finance: { product: ['미니멀'], event: ['멤버십·고객감사'] },
+  service: { product: ['세일·이벤트'], event: ['오픈·기념일'] },
+  etc:     { product: ['세일·이벤트'], event: ['팝업·페스티벌'] },
 };
 
-function pickTemplate(industry: string | null | undefined, seed: string, needProduct: boolean): StudioTemplate {
-  const cat = (industry && INDUSTRY_TO_CATEGORY[industry]) || '세일·이벤트';
-  const wantKind = needProduct ? 'product' : 'event';
-  let pool = STUDIO_TEMPLATES.filter((t) => t.category === cat && (t.kind ?? 'product') === wantKind);
-  if (pool.length === 0) pool = STUDIO_TEMPLATES.filter((t) => (t.kind ?? 'product') === wantKind);
-  if (pool.length === 0) pool = STUDIO_TEMPLATES;
+/** 모듈 로드 시 1회 파생. 빈 풀 판정은 계약 테스트가 소유한다(import 시점 throw 금지 — app 부팅 체인). */
+export const TEMPLATE_POOLS: Record<IndustryCode, { product: StudioTemplate[]; event: StudioTemplate[] }> = Object.fromEntries(
+  INDUSTRY_CODES.map((code) => [code, {
+    product: STUDIO_TEMPLATES.filter((t) => (t.kind ?? 'product') === 'product' && INDUSTRY_TEMPLATE_MAP[code].product.includes(t.category)),
+    event: STUDIO_TEMPLATES.filter((t) => t.kind === 'event' && INDUSTRY_TEMPLATE_MAP[code].event.includes(t.category)),
+  }]),
+) as Record<IndustryCode, { product: StudioTemplate[]; event: StudioTemplate[] }>;
+
+function hashSeed(seed: string): number {
   let h = 0;
   for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return pool[h % pool.length];
+  return h;
+}
+
+export function pickTemplate(industry: string | null | undefined, seed: string, needProduct: boolean): StudioTemplate {
+  const code: IndustryCode = isIndustryCode(industry) ? industry : 'etc';
+  const wantKind = needProduct ? 'product' : 'event';
+  let pool = TEMPLATE_POOLS[code][wantKind];
+  if (pool.length === 0) pool = STUDIO_TEMPLATES.filter((t) => (t.kind ?? 'product') === wantKind);
+  if (pool.length === 0) pool = STUDIO_TEMPLATES;
+  return pool[hashSeed(seed) % pool.length];
+}
+
+// ===== 재료 수집 (★ A-10b 이미지 실측·격상·사본 — 프로토 실측으로 확정된 규칙) =====
+
+export interface OutreachMediaProduct extends OutreachProduct {
+  /** 사본 폭·높이(실측) */
+  width: number;
+  height: number;
+  /** 원 출처 이미지 URL(고지·근거) — image_url은 우리 사본 */
+  srcImageUrl: string;
+}
+
+export interface OutreachMedia {
+  /** 폭 ≥ 600 통과 · 면적 큰 순 · 최대 8장(우리 사본 URL) */
+  gallery: StoredImage[];
+  /** 이미지 폭 ≥ 400 통과 상품 · 최대 6개 */
+  products: OutreachMediaProduct[];
+  collectedAt: string;
+  stats: { galleryCandidates: number; galleryPassed: number; productLinks: number; productsFound: number; productsPassed: number };
+}
+
+/**
+ * 후보를 서버가 직접 받아 폭·높이를 읽고(갤러리 ≥600 · 상품 ≥400 미만 탈락), 상품은 목록 썸네일 대신 상세 페이지 og:image로 격상하고,
+ * 통과분을 우리 저장소에 사본으로 저장한다(핫링크 0 · 파기 시 함께 삭제). 네트워크는 순차(상대 사이트 예의).
+ */
+export async function collectOutreachMedia(input: {
+  companyId: string;
+  homepageUrl: string;
+  imageCandidates: string[];
+  productLinks: string[];
+  listProducts: OutreachProduct[];
+}): Promise<OutreachMedia> {
+  const referer = input.homepageUrl;
+  const fetcher = (u: string) => fetchImageGuarded(u, { referer });
+  const store = (buffer: Buffer, meta: { ext: string; mime: string; width: number; height: number }): string | null => {
+    const tempId = writeTempBuffer(input.companyId, buffer, { kind: 'source', ext: meta.ext, mime: meta.mime, width: meta.width, height: meta.height });
+    const moved = moveTempToPermanent(input.companyId, tempId);
+    return moved ? PUBLIC_BASE + moved.url : null;
+  };
+  let host = '';
+  try { host = new URL(input.homepageUrl).hostname; } catch { host = ''; }
+
+  const gallery = await pickStoredImages(input.imageCandidates, 8, OUTREACH_GALLERY_MIN_WIDTH, fetcher, store);
+
+  const fromPages = host ? await collectProductsFromLinks(input.productLinks, host, 6) : [];
+  const pageKeys = new Set(fromPages.map(productKey));
+  const merged: OutreachProduct[] = [...fromPages];
+  for (const p of input.listProducts) {
+    const k = productKey(p);
+    if (pageKeys.has(k)) continue;
+    pageKeys.add(k);
+    merged.push(p);
+    if (merged.length >= 10) break;
+  }
+  const products: OutreachMediaProduct[] = [];
+  const fromPageSet = new Set(fromPages);
+  for (const p of merged) {
+    if (products.length >= 6) break;
+    let info = await measureAndStoreImage(p.image_url, OUTREACH_PRODUCT_MIN_WIDTH, fetcher, store);
+    let name = p.name; let price = p.price; let discount = p.discount_price;
+    if (!info && !fromPageSet.has(p) && host) {
+      // 목록 썸네일이 저해상 → 상세 og:image로 격상(1홉)
+      const pg = await fetchProductPageGuarded(p.link_url, host);
+      if (pg && pg.image_url !== p.image_url) {
+        info = await measureAndStoreImage(pg.image_url, OUTREACH_PRODUCT_MIN_WIDTH, fetcher, store);
+        if (info) { name = pg.name || name; price = pg.price ?? price; discount = pg.discount_price ?? discount; }
+      }
+    }
+    if (!info) continue;
+    products.push({ name, price, discount_price: discount, link_url: p.link_url, image_url: info.url, srcImageUrl: info.srcUrl, width: info.width, height: info.height });
+  }
+  return {
+    gallery,
+    products,
+    collectedAt: new Date().toISOString(),
+    stats: {
+      galleryCandidates: input.imageCandidates.length,
+      galleryPassed: gallery.length,
+      productLinks: input.productLinks.length,
+      productsFound: merged.length,
+      productsPassed: products.length,
+    },
+  };
 }
 
 // ===== 대표 이미지 제작 (수급→인물 보조판정→누끼→포스터→JPEG 공개 URL) =====
@@ -185,6 +321,10 @@ export interface OutreachImageResult {
   skippedReason: string | null; // 선택 이미지를 못 쓴 사유(있으면 화면 표시)
   width: number;
   height: number;
+  /** ★ A-4 근거 패널·실측 수단 */
+  templateId: string;
+  category: string;
+  kind: 'product' | 'event';
 }
 
 export async function produceOutreachImage(input: {
@@ -192,11 +332,19 @@ export async function produceOutreachImage(input: {
   companyName: string;
   industry: string | null;
   selectedImageUrl: string | null;
+  /** ★ B-3 재생성 순번(최초 0) — 같은 (jobId, seq) = 같은 템플릿 · 다시 만들면 다른 템플릿 */
+  regenSeq?: number;
+  /** ★ A-3(5) 브랜드 색 힌트(미검증 · 실측 1건 뒤 유지 결정) */
+  brandColor?: string | null;
 }): Promise<OutreachImageResult> {
   const ctx = getOutreachContext();
   if (!ctx) throw new Error('OUTREACH_COMPANY_ID·OUTREACH_USER_ID가 설정되지 않았습니다.');
   if (!isStudioReady()) throw new Error('이미지 생성 서비스가 준비되지 않았습니다.');
   if (imageInFlight) throw new Error('다른 이미지 제작이 진행 중입니다. 잠시 후 재시도해주세요.');
+  // ★ C-7 임시 저장 용량 게이트 — 락 교체는 하지 않는다
+  if (companyTempUsageBytes(ctx.companyId) > STUDIO_TEMP_CAP_BYTES) {
+    throw new Error('이미지 임시 저장 용량이 가득 찼습니다. 잠시 후 다시 시도해주세요.');
+  }
   imageInFlight = true;
   try {
     let cutout: { base64: string; mime: string } | null = null;
@@ -229,13 +377,14 @@ export async function produceOutreachImage(input: {
       }
     }
 
-    const template = pickTemplate(input.industry, input.jobId, !!cutout);
+    const template = pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}`, !!cutout);
     const preset = resolvePreset('poster');
     const prompt = buildPosterPrompt({
       template,
       preset,
       texts: { title: input.companyName }, // 사실 문구(업체명)만 verbatim — 혜택 수치 렌더 금지 축
       hasProduct: !!cutout,
+      userHint: input.brandColor ? `brand accent color ${input.brandColor}` : null,
     });
     const poster = await generatePoster(prompt, preset, cutout);
 
@@ -259,76 +408,278 @@ export async function produceOutreachImage(input: {
       skippedReason,
       width: composed.width,
       height: composed.height,
+      templateId: template.id,
+      category: template.category,
+      kind: template.kind === 'event' ? 'event' : 'product',
     };
   } finally {
     imageInFlight = false;
   }
 }
 
-// ===== 모바일 DM 제작·발행 (CT 직접 = 미차감 · H14 자기 확인) =====
+// ===== placeholder 계수 (★ A-7 세는 곳은 이 함수 하나 — 게이트·화면은 숫자만 읽는다) =====
 
-export async function produceOutreachDm(input: {
-  companyName: string;
-  eventText: string;
-  /** H14 게이트 — 호출부가 명시적으로 넘긴 값이 내부 전용 회사(ENV)와 일치할 때만 발행한다.
-   *  함수가 스스로 ENV를 읽어 ENV와 비교하면 항상 참인 공허 게이트가 된다(Codex 1R high).
-   *  미래의 호출부가 고객 companyId를 넘기는 실수를 이 비교가 잡는다. */
-  companyId: string;
-  userId: string;
-  /** ★ 2026-09-03 혜택 수치 면허(재대조 통과 + 미래 종료일) — 없으면 참조 골격에서 countdown·coupon류를 뺀다(불변 3·4·5 · 설계서 §6-3). */
-  benefitLicensed?: boolean;
-  /** ★ 2026-09-03 앞 단계가 만든 생성 이미지(우리 서버 공개 URL) — hero 이미지 재료 */
-  posterUrl?: string | null;
-  /** ★ 2026-09-03 사람이 고른 타사 이미지 1장(불변 11 · 인물 판정은 이미지 단계가 했다) — 갤러리 재료 */
-  selectedImageUrl?: string | null;
-}): Promise<{ dmId: string; dmUrl: string; structureRef: OutreachStructureRef | null }> {
-  const envCompanyId = (process.env.OUTREACH_COMPANY_ID || '').trim();
-  const envUserId = (process.env.OUTREACH_USER_ID || '').trim();
-  if (!envCompanyId || !envUserId) throw new Error('OUTREACH_COMPANY_ID·OUTREACH_USER_ID가 설정되지 않았습니다.');
-  if (String(input.companyId) !== envCompanyId || String(input.userId) !== envUserId) {
-    throw new Error('내부 발행은 내부 전용 회사 계정으로만 가능합니다.');
-  }
-
-  // ★ 2026-09-03 참조 골격 — 아웃리치 파일이 골격을 읽어 감산한 뒤 `structure`(사람 축)로 명시 전달한다.
-  //   공용 CT는 아웃리치 사정(면허·타사 임베드)을 모른다(불변 20). 타사 채널 임베드·sns·후기는 상시 제외(불변 11 취지).
-  //   serving off·골격 없음 = structure 미전달 = 현행 경로 그대로.
-  const structureRef = await pickOutreachStructure({
-    companyName: input.companyName,
-    eventText: input.eventText,
-    benefitLicensed: input.benefitLicensed === true,
-  });
-  const gen = await runInCreditBundle(() =>
-    oneShotGenerate({
-      prompt: `${input.companyName} 브랜드 소개와 행사 안내 모바일 페이지`,
-      brandName: input.companyName,
-      companyId: input.companyId,
-      eventText: input.eventText,
-      ...(structureRef ? { structure: { sectionTypes: structureRef.sectionTypes } } : {}),
-    } as any),
-  );
-  // ★ 2026-09-03 재료 채우기 → 빈 섹션 제거 → 페이지 재조립. 자동 발행되는 산출물에 "[상품을 추가해주세요]" 같은 빈 자리를 남기지 않는다.
-  const generated: Section[] = Array.isArray((gen as any).sections) ? (gen as any).sections : [];
-  const filled = fillOutreachDmMedia(generated, { posterUrl: input.posterUrl || null, selectedImageUrl: input.selectedImageUrl || null });
-  const pruned = pruneEmptyDmSections(filled.sections);
-  const rebuilt = rebuildDmPages(pruned.sections);
-  if (structureRef) structureRef.pruned = pruned.removed;
-  const dm = await createDm(input.companyId, input.userId, {
-    title: `[영업] ${input.companyName}`.slice(0, 200),
-    sections: rebuilt.sections,
-    pages: rebuilt.pages,
-    layout_mode: rebuilt.layoutMode,
-    brand_kit: (gen as any).brandKit || null,
-    ai_prompt: input.eventText.slice(0, 2000),
-    approval_status: 'draft',
-  } as any);
-  const published = await publishDm(String(dm.id), input.companyId);
-  if (!published?.short_code) throw new Error('모바일 DM 발행 주소를 만들지 못했습니다.');
-  const shortBase = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
-  const dmUrl = shortBase
-    ? `${shortBase}/${published.short_code}`
-    : `${PUBLIC_BASE}/api/dm/v/dm-${published.short_code}`;
-  return { dmId: String(dm.id), dmUrl, structureRef };
+export function countBenefitPlaceholders(text: string | null | undefined): number {
+  const s = String(text || '');
+  if (!s) return 0;
+  return s.split(BENEFIT_PLACEHOLDER).length - 1;
 }
+
+// ===== DM·브랜드 이메일 섹션 생성 (★0905 샘플 few-shot · 재료 용량 · 규칙) =====
+
+export interface OutreachGenInput {
+  companyName: string;
+  industry: string | null;
+  homepageUrl: string;
+  siteTitle: string | null;
+  /** 프롬프트 재료(면허 밖 혜택 자리를 지운 본문 · 최대 6000) */
+  material: string;
+  /** 담당자 추가 정보(사람이 쓴 사실 · 인용 면허 없음) */
+  extraNotes?: string | null;
+  products: Array<Pick<OutreachProduct, 'name' | 'price' | 'discount_price'>>;
+  /** 실측 통과 갤러리 이미지 수 */
+  galleryCount: number;
+  /** 참조 골격이 준 구성 순서 힌트(없으면 예시 리듬) */
+  skeletonTypes?: readonly string[] | null;
+}
+
+/** 사용자 메시지(순수) — 재료 블록 + 재료 용량. */
+export function buildOutreachMaterialBlock(i: OutreachGenInput, want: string, channel: 'DM' | 'EMAIL'): string {
+  const carousels = Math.min(2, Math.floor(i.products.length / 2));
+  const perGallery = channel === 'DM' ? 2 : 2;
+  const galleries = Math.min(2, Math.floor(Math.max(0, i.galleryCount - 1) / perGallery));
+  const hasDiscount = i.products.some((p) => p.discount_price);
+  const fmt = (n: number | null) => (n === null || n === undefined ? '' : `${Number(n).toLocaleString()}원`);
+  return [
+    `[대상 업체] ${i.companyName} (업종: ${industryLabel(i.industry)}) · 홈페이지: ${i.homepageUrl}${i.siteTitle ? ` · 사이트 제목: ${i.siteTitle}` : ''}`,
+    `[홈페이지에서 읽은 내용]\n${(i.material || '').slice(0, 6000)}`,
+    i.extraNotes ? `[담당자 추가 정보]\n${i.extraNotes.slice(0, 2000)}` : '',
+    i.products.length
+      ? `[수집한 상품 ${i.products.length}개 · 이름은 이 목록에서만]\n${i.products.map((p, n) => `${n + 1}. ${p.name} (${p.discount_price ? `${fmt(p.discount_price)} · 정가 ${fmt(p.price)}` : fmt(p.price)})`).join('\n')}`
+      : '[수집한 상품] 없음(product_carousel은 넣지 마라)',
+    `[재료 용량] 실측 통과 이미지 ${i.galleryCount}장 → gallery 최대 ${galleries}개 · 상품 ${i.products.length}개 → product_carousel 최대 ${carousels}개(각 2개 이상) · ${hasDiscount ? '상품에 혜택가가 있다' : '상품 혜택가를 확보하지 못했다: 할인율·최대혜택 같은 표현을 헤드라인에 쓰지 마라'}`,
+    i.skeletonTypes && i.skeletonTypes.length ? `[참고 구성 순서] ${i.skeletonTypes.join(' → ')} (재료가 없는 섹션은 빼도 된다)` : '',
+    want,
+  ].filter(Boolean).join('\n\n');
+}
+
+export interface SectionsPrompt { system: string; user: string; exemplars: { picked: number; total: number } }
+
+/** DM 프롬프트(순수). source 미지정 = seed. exemplars.picked = 실제로 실린 예시 수(근거 문구는 이 값). */
+export function buildDmSectionsPrompt(i: OutreachGenInput, source?: ExemplarSource): SectionsPrompt {
+  const ex = pickOutreachExemplarsDetail('DM', i.industry, source ? { source } : undefined);
+  const system = [
+    '너는 국내 브랜드의 모바일 DM(모바일 랜딩 페이지) 기획자다. 아래 예시는 실제 마케터가 만든 실물의 구성과 문구다(브랜드·상품·혜택·링크는 〔〕로 가려져 있다).',
+    OUTREACH_DM_SECTION_CONTRACT,
+    OUTREACH_GENERATION_RULES,
+    '[출력] {"sections":[{"type":"header","props":{...}}, ...]} · 섹션 7~11개 · 순서는 예시의 리듬을 따르되 재료가 없는 섹션은 넣지 않는다.',
+    ex.text ? `[예시]\n${ex.text}` : '',
+  ].filter(Boolean).join('\n\n');
+  return { system, user: buildOutreachMaterialBlock(i, '위 업체의 모바일 DM 섹션 구성을 JSON으로 설계하라.', 'DM'), exemplars: { picked: ex.picked, total: ex.total } };
+}
+
+/** 브랜드 이메일 프롬프트(순수). source 미지정 = seed. */
+export function buildEmailSectionsPrompt(i: OutreachGenInput, source?: ExemplarSource): SectionsPrompt {
+  const ex = pickOutreachExemplarsDetail('EMAIL', i.industry, source ? { source } : undefined);
+  const system = [
+    '너는 국내 브랜드의 비주얼 이메일 기획자다. 아래 예시는 실제 마케터가 만든 실물의 블록 구성·제목·문구다(브랜드·상품·혜택·링크는 〔〕로 가려져 있다).',
+    OUTREACH_EMAIL_SECTION_CONTRACT,
+    OUTREACH_GENERATION_RULES,
+    '[출력] {"subject":"제목(30자 이내)","preheader":"수신함 미리보기(40자 이내)","sections":[{"type":"header","props":{...}}, ...]} · 블록 6~10개 · header로 시작.',
+    ex.text ? `[예시]\n${ex.text}` : '',
+  ].filter(Boolean).join('\n\n');
+  return { system, user: buildOutreachMaterialBlock(i, '위 업체의 이메일 블록 구성과 제목을 JSON으로 설계하라.', 'EMAIL'), exemplars: { picked: ex.picked, total: ex.total } };
+}
+
+function mkSection(type: string, props: Record<string, unknown>, order: number, idPrefix: string): Section {
+  return {
+    id: `${idPrefix}-${order}-${type}`,
+    type,
+    order,
+    visible: true,
+    props: { ...((getDefaultProps(type as SectionType) as unknown as Record<string, unknown>) || {}), ...props },
+  } as unknown as Section;
+}
+
+/** AI 응답 JSON → 허용 타입만 남긴 Section[] (순수). */
+export function sectionsFromAiJson(json: unknown, allowedTypes: readonly string[], idPrefix: string): Section[] {
+  const list = Array.isArray((json as any)?.sections) ? (json as any).sections : [];
+  return list
+    .filter((s: any) => s && typeof s === 'object' && allowedTypes.includes(String(s.type)))
+    .map((s: any, i: number) => mkSection(String(s.type), (s.props && typeof s.props === 'object') ? s.props : {}, i, idPrefix));
+}
+
+async function generateSections(prompt: { system: string; user: string }, allowedTypes: readonly string[], source: string, idPrefix: string): Promise<{ sections: Section[]; raw: any }> {
+  const text = await callAIWithFallback({
+    system: prompt.system,
+    userMessage: prompt.user,
+    maxTokens: 3500,
+    temperature: 0.6,
+    source,
+  });
+  const raw = extractJson<any>(text);
+  const sections = sectionsFromAiJson(raw, allowedTypes, idPrefix);
+  if (sections.length === 0) throw new Error('AI가 섹션을 돌려주지 않았습니다.');
+  return { sections, raw };
+}
+
+// ===== 재료 채우기 (순수) =====
+
+export interface OutreachFillMedia {
+  posterUrl: string | null;
+  gallery: string[];
+  products: OutreachProduct[];
+  ctaLinks: Record<string, string>;
+  homepageUrl: string;
+  legal: { legal: string | null; csPhone: string | null } | null;
+  companyName: string;
+}
+
+function fillCta(buttons: unknown, media: OutreachFillMedia, maxLabel: number): Array<{ label: string; url: string; style: string }> {
+  const list = Array.isArray(buttons) && buttons.length ? buttons : [{ label: '자세히 보기' }];
+  return list.slice(0, 2).map((b: any) => {
+    const label = String(b?.label || '자세히 보기').slice(0, maxLabel);
+    const kw = OUTREACH_CTA_KEYWORDS.find((k) => label.includes(k));
+    const deep = kw ? media.ctaLinks[kw] || null : null;
+    return {
+      label: deep || !kw ? label : `${media.companyName} 바로가기`.slice(0, maxLabel),
+      url: deep || media.homepageUrl,
+      style: 'primary',
+    };
+  });
+}
+
+function toProductItems(ps: OutreachProduct[]) {
+  return ps.map((x) => ({
+    image_url: x.image_url, name: x.name, price: x.price || 0,
+    ...(x.discount_price ? { discount_price: x.discount_price } : {}),
+    link_url: x.link_url,
+  }));
+}
+
+/**
+ * ★ 2026-09-05 DM·이메일 재료 채우기(순수) — header 업체명 · hero 이미지(포스터 → 갤러리 첫 장) · 갤러리(묶음마다 다른 사진 · 2장 미만이면 비움) ·
+ * 상품 묶음(3개씩 · 2개 미만이면 비움) · CTA 딥링크 · countdown 날짜 형식 검증 · footer 법정 표기. 비운 자리는 prune이 지운다.
+ * 이미지 원천 = 우리 생성 이미지 + 실측 통과 사본(불변 11 개정 A-10b · 인물 판정은 선택 이미지에만).
+ */
+export function fillOutreachDmMedia(
+  sections: readonly Section[],
+  media: OutreachFillMedia,
+  channel: 'DM' | 'EMAIL',
+): { sections: Section[]; filled: number } {
+  const heroImage = channel === 'DM'
+    ? (media.posterUrl || media.gallery[0] || media.products[0]?.image_url || '')
+    : (media.gallery[0] || media.posterUrl || media.products[0]?.image_url || '');
+  let imgCursor = heroImage && media.gallery[0] === heroImage ? 1 : 0;
+  let prodCursor = 0;
+  const perGallery = channel === 'DM' ? 4 : 3;
+  const maxLabel = channel === 'DM' ? 12 : 8;
+  let filled = 0;
+  let heroDone = false;
+  const out = sections.map((s) => {
+    if (!s || typeof s !== 'object') return s;
+    const p: any = { ...((s.props as any) || {}) };
+    switch (s.type) {
+      case 'header':
+        p.brand_name = media.companyName;
+        if (channel === 'EMAIL') { p.variant = 'logo'; p.align = 'left'; }
+        return { ...s, props: p } as Section;
+      case 'hero':
+        if (!heroDone && heroImage) { p.image_url = heroImage; heroDone = true; filled++; }
+        if (channel === 'EMAIL') { p.height = 'lg'; p.align = 'center'; }
+        return { ...s, props: p } as Section;
+      case 'gallery': {
+        const g = media.gallery.slice(imgCursor, imgCursor + perGallery);
+        imgCursor += g.length;
+        p.images = g.length >= 2 ? g.map((url) => ({ url, alt: `${media.companyName} 이미지` })) : [];
+        p.layout = channel === 'EMAIL' ? 'grid_3x3' : (g.length >= 6 ? 'grid_3x3' : 'grid_2x2');
+        if (g.length >= 2) filled++;
+        return { ...s, props: p } as Section;
+      }
+      case 'product_carousel': {
+        const ps = media.products.slice(prodCursor, prodCursor + 3);
+        prodCursor += ps.length;
+        p.products = ps.length >= 2 ? toProductItems(ps) : [];
+        if (ps.length >= 2) filled++;
+        return { ...s, props: p } as Section;
+      }
+      case 'cta':
+        p.buttons = fillCta(p.buttons, media, maxLabel);
+        return { ...s, props: p } as Section;
+      case 'countdown':
+        if (!/^\d{4}-\d{2}-\d{2}/.test(String(p.end_datetime || ''))) p.end_datetime = '';
+        return { ...s, props: p } as Section;
+      case 'footer':
+        p.notes = p.notes || '';
+        if (media.legal?.legal) p.legal_text = media.legal.legal;
+        if (media.legal?.csPhone) p.cs_phone = media.legal.csPhone;
+        p.show_unsubscribe_link = channel === 'DM';
+        return { ...s, props: p } as Section;
+      default:
+        return s;
+    }
+  });
+  return { sections: out, filled };
+}
+
+// ===== DM 카피 혜택 기계 차단 (★ A-8 · 불변 22) =====
+
+const LONG_TEXT_PROPS: ReadonlySet<string> = new Set(['body', 'description', 'instructions', 'conditions', 'usage_instructions', 'notes', 'content', 'question']);
+
+function dropPlaceholderSentences(text: string): string {
+  const parts = text.split(/(?<=[.!?。])\s+|\n/);
+  const kept = parts.filter((x) => !x.includes(BENEFIT_PLACEHOLDER)).map((x) => x.trim()).filter(Boolean);
+  return kept.join(' ').trim();
+}
+
+/**
+ * 면허(재대조 통과 + 미래 종료일) 인용 밖의 혜택 수치를 문장째(짧은 prop은 prop째) 제거한다. 대상 prop = DM_EDITABLE_TEXT_KEYS(손목록 금지).
+ * 후처리: hero.headline이 비면 업체명 · text_card 세 prop이 전부 비면 섹션 제거(ALWAYS_KEEP이라 prune이 못 지운다).
+ */
+export function sanitizeDmCopyBenefits(
+  sections: readonly Section[],
+  licensedQuote: string,
+  companyName: string,
+): { sections: Section[]; stripped: number; removed: SectionType[] } {
+  let stripped = 0;
+  const removed: SectionType[] = [];
+  const out: Section[] = [];
+  for (const s of sections) {
+    if (!s || typeof s !== 'object') continue;
+    const keys = DM_EDITABLE_TEXT_KEYS[s.type as SectionType] || [];
+    const p: any = { ...((s.props as any) || {}) };
+    for (const k of keys) {
+      if (k === 'buttons') {
+        if (Array.isArray(p.buttons)) {
+          p.buttons = p.buttons.map((b: any) => {
+            const label = String(b?.label || '');
+            const t = stripUnauthorizedBenefits(label, licensedQuote);
+            if (t !== label) stripped++;
+            return { ...b, label: t.includes(BENEFIT_PLACEHOLDER) ? '자세히 보기' : t };
+          });
+        }
+        continue;
+      }
+      if (typeof p[k] !== 'string' || !p[k]) continue;
+      const t = stripUnauthorizedBenefits(p[k], licensedQuote);
+      if (t !== p[k]) stripped++;
+      if (t.includes(BENEFIT_PLACEHOLDER)) {
+        p[k] = LONG_TEXT_PROPS.has(k) ? dropPlaceholderSentences(t) : '';
+      } else {
+        p[k] = t;
+      }
+    }
+    if (s.type === 'hero' && !String(p.headline || '').trim()) p.headline = companyName;
+    if (s.type === 'text_card' && !String(p.tag || '').trim() && !String(p.headline || '').trim() && !String(p.body || '').trim()) {
+      removed.push('text_card');
+      continue;
+    }
+    out.push({ ...s, props: p } as Section);
+  }
+  return { sections: out, stripped, removed };
+}
+
+// ===== 모바일 DM 제작·발행 (CT 직접 = 미차감 · H14 자기 확인) =====
 
 /** asset payload에 남기는 참조 골격 기록 — 근거 패널이 문구를 지어내지 않게(설계서 §6-3). 내부 id·타입명뿐, 문구 0. */
 export interface OutreachStructureRef {
@@ -348,45 +699,8 @@ export interface OutreachStructureRef {
 }
 
 /**
- * ★ 2026-09-03 DM 이미지 재료 채우기(순수) — hero에 생성 이미지, 갤러리·슬라이드에는 2장 이상일 때만(1장짜리 갤러리는 의미가 없어 비워 두면 prune이 지운다).
- * 이미지 원천은 우리 생성 이미지 + 사람이 고른 1장뿐(불변 11). 이미 값이 있는 자리는 덮지 않는다.
- */
-export function fillOutreachDmMedia(
-  sections: readonly Section[],
-  media: { posterUrl: string | null; selectedImageUrl: string | null },
-): { sections: Section[]; filled: number } {
-  const images = [media.posterUrl, media.selectedImageUrl]
-    .map((u) => String(u || '').trim())
-    .filter((u, i, arr) => u && /^https?:\/\//i.test(u) && arr.indexOf(u) === i);
-  let filled = 0;
-  let heroDone = false;
-  const out = sections.map((s) => {
-    if (!s || typeof s !== 'object') return s;
-    const p: any = { ...((s.props as any) || {}) };
-    if (s.type === 'hero' && !heroDone && images[0] && !String(p.image_url || '').trim()) {
-      p.image_url = images[0];
-      heroDone = true;
-      filled++;
-      return { ...s, props: p } as Section;
-    }
-    if (s.type === 'gallery' && images.length >= 2 && !(Array.isArray(p.images) && p.images.some((x: any) => String(x?.url || '').trim()))) {
-      p.images = images.map((url) => ({ url, alt: '' }));
-      filled++;
-      return { ...s, props: p } as Section;
-    }
-    if (s.type === 'slideshow' && images.length >= 2 && !(Array.isArray(p.slides) && p.slides.some((x: any) => String(x?.image_url || '').trim()))) {
-      p.slides = images.map((image_url) => ({ image_url }));
-      filled++;
-      return { ...s, props: p } as Section;
-    }
-    return s;
-  });
-  return { sections: out, filled };
-}
-
-/**
  * 아웃리치 골격 선택 — 베스트 구성에서 서빙 중인 general DM 골격이 있으면 그것, 없으면 코드 내장 실물 10건(seed).
- * avail: 상품은 CT의 브리프가 원문에서 검증하므로 여기서는 unknown(감산 0 · 빈 상품 섹션은 생성 뒤 prune이 지운다) · 혜택은 면허 · 임베드·sns는 상시 absent.
+ * avail: 상품은 unknown(감산 0 · 빈 상품 섹션은 생성 뒤 prune이 지운다) · 혜택은 면허 · 임베드·sns는 상시 absent.
  */
 async function pickOutreachStructure(input: { companyName: string; eventText: string; benefitLicensed: boolean }): Promise<OutreachStructureRef | null> {
   const fromDb = await getStructureSkeleton('general', 'DM');
@@ -414,12 +728,212 @@ async function pickOutreachStructure(input: { companyName: string; eventText: st
   };
 }
 
-// ===== 제안 메일 조립 (전달용 완성본 1통 — 내부 URL 인자 없음) =====
+export interface ProduceDmInput {
+  companyName: string;
+  industry: string | null;
+  homepageUrl: string;
+  siteTitle: string | null;
+  /** 프롬프트 재료(면허 밖 혜택 자리 제거본) */
+  material: string;
+  extraNotes?: string | null;
+  /** H14 게이트 — 호출부가 명시적으로 넘긴 값이 내부 전용 회사(ENV)와 일치할 때만 발행한다.
+   *  함수가 스스로 ENV를 읽어 ENV와 비교하면 항상 참인 공허 게이트가 된다(Codex 1R high). */
+  companyId: string;
+  userId: string;
+  /** 혜택 수치 면허(재대조 통과 + 미래 종료일) — 없으면 참조 골격에서 countdown·coupon류를 뺀다(불변 3·4·5). */
+  benefitLicensed: boolean;
+  /** 면허 인용 원문(면허 없으면 '') — 카피 혜택 차단의 기준. eventText 전문을 넘기지 않는다(불변 5). */
+  licensedQuote: string;
+  posterUrl: string | null;
+  media: OutreachMedia | null;
+  ctaLinks: Record<string, string>;
+  legal: { legal: string | null; csPhone: string | null } | null;
+  /** 6자리 hex(정규화 통과값) · 접근성 통과 시에만 brand_kit에 싣는다 */
+  brandColor?: string | null;
+}
+
+export interface ProduceDmResult {
+  dmId: string;
+  dmUrl: string;
+  structureRef: OutreachStructureRef | null;
+  benefitStripped: number;
+  sectionTypes: string[];
+  /** 프롬프트에 실제로 실린 예시 수(근거 문구) · exemplarTotal = 그 채널 원천 전량(DB+seed) */
+  exemplarCount: number;
+  exemplarTotal: number;
+}
+
+export async function produceOutreachDm(input: ProduceDmInput): Promise<ProduceDmResult> {
+  const envCompanyId = (process.env.OUTREACH_COMPANY_ID || '').trim();
+  const envUserId = (process.env.OUTREACH_USER_ID || '').trim();
+  if (!envCompanyId || !envUserId) throw new Error('OUTREACH_COMPANY_ID·OUTREACH_USER_ID가 설정되지 않았습니다.');
+  if (String(input.companyId) !== envCompanyId || String(input.userId) !== envUserId) {
+    throw new Error('내부 발행은 내부 전용 회사 계정으로만 가능합니다.');
+  }
+
+  const structureRef = await pickOutreachStructure({
+    companyName: input.companyName,
+    eventText: input.material,
+    benefitLicensed: input.benefitLicensed,
+  });
+  const products = input.media?.products || [];
+  const gallery = (input.media?.gallery || []).map((g) => g.url);
+  const genInput: OutreachGenInput = {
+    companyName: input.companyName,
+    industry: input.industry,
+    homepageUrl: input.homepageUrl,
+    siteTitle: input.siteTitle,
+    material: input.material,
+    extraNotes: input.extraNotes || null,
+    products,
+    galleryCount: gallery.length + (input.posterUrl ? 1 : 0),
+    skeletonTypes: structureRef ? structureRef.sectionTypes.filter((t) => OUTREACH_DM_TYPES.includes(t)) : null,
+  };
+  const exemplarSource = await loadOutreachExemplarSource();
+  const dmPrompt = buildDmSectionsPrompt(genInput, exemplarSource);
+  const gen = await generateSections(dmPrompt, OUTREACH_DM_TYPES, 'sales-outreach-dm-sections', 'so-dm');
+  const filled = fillOutreachDmMedia(gen.sections, {
+    posterUrl: input.posterUrl, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
+  }, 'DM');
+  const sanitized = sanitizeDmCopyBenefits(filled.sections, input.licensedQuote, input.companyName);
+  const pruned = pruneEmptyDmSections(sanitized.sections);
+  const rebuilt = rebuildDmPages(pruned.sections);
+  if (structureRef) structureRef.pruned = Array.from(new Set([...sanitized.removed, ...pruned.removed]));
+
+  const accessible = !!input.brandColor && isBrandKitPrimaryAccessible({ primary_color: input.brandColor } as any);
+  const dm = await createDm(input.companyId, input.userId, {
+    title: `[영업] ${input.companyName}`.slice(0, 200),
+    sections: rebuilt.sections,
+    pages: rebuilt.pages,
+    layout_mode: rebuilt.layoutMode,
+    brand_kit: accessible ? { primary_color: input.brandColor } : null,
+    ai_prompt: input.material.slice(0, 2000),
+    approval_status: 'draft',
+  } as any);
+  const published = await publishDm(String(dm.id), input.companyId);
+  if (!published?.short_code) throw new Error('모바일 DM 발행 주소를 만들지 못했습니다.');
+  const shortBase = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+  const dmUrl = shortBase
+    ? `${shortBase}/${published.short_code}`
+    : `${PUBLIC_BASE}/api/dm/v/dm-${published.short_code}`;
+  return {
+    dmId: String(dm.id),
+    dmUrl,
+    structureRef,
+    benefitStripped: sanitized.stripped,
+    sectionTypes: rebuilt.sections.map((s) => String(s.type)),
+    exemplarCount: dmPrompt.exemplars.picked,
+    exemplarTotal: dmPrompt.exemplars.total,
+  };
+}
+
+// ===== 브랜드 이메일 시안 (★0905 — 제안 메일 안에 쇼케이스로 실린다) =====
+
+export interface BrandEmailResult {
+  sections: Section[];
+  subject: string;
+  preheader: string;
+  benefitStripped: number;
+  exemplarCount: number;
+  exemplarTotal: number;
+}
+
+export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'companyId' | 'userId'>): Promise<BrandEmailResult> {
+  const products = input.media?.products || [];
+  const gallery = (input.media?.gallery || []).map((g) => g.url);
+  const genInput: OutreachGenInput = {
+    companyName: input.companyName,
+    industry: input.industry,
+    homepageUrl: input.homepageUrl,
+    siteTitle: input.siteTitle,
+    material: input.material,
+    extraNotes: input.extraNotes || null,
+    products,
+    galleryCount: gallery.length,
+    skeletonTypes: null,
+  };
+  const exemplarSource = await loadOutreachExemplarSource();
+  const emailPrompt = buildEmailSectionsPrompt(genInput, exemplarSource);
+  const gen = await generateSections(emailPrompt, OUTREACH_EMAIL_TYPES, 'sales-outreach-email-sections', 'so-brand');
+  const filled = fillOutreachDmMedia(gen.sections, {
+    posterUrl: input.posterUrl, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
+  }, 'EMAIL');
+  const sanitized = sanitizeDmCopyBenefits(filled.sections, input.licensedQuote, input.companyName);
+  const pruned = pruneEmptyDmSections(sanitized.sections);
+  const subjectRaw = String(gen.raw?.subject || '').trim();
+  const subject = stripUnauthorizedBenefits(subjectRaw, input.licensedQuote).split(BENEFIT_PLACEHOLDER).join('').trim().slice(0, 40);
+  return {
+    sections: pruned.sections,
+    subject,
+    preheader: String(gen.raw?.preheader || '').slice(0, 60),
+    benefitStripped: sanitized.stripped,
+    exemplarCount: emailPrompt.exemplars.picked,
+    exemplarTotal: emailPrompt.exemplars.total,
+  };
+}
+
+// ===== 제안 메일 (★ A-2 분할: 제목·서두 AI → 순수 조립 → 진입점) =====
 
 /** 이메일 버튼 라벨 — VML 버튼 폭 230px 하드코딩 대응, 8자 상한을 서버가 강제(디자이너 R5) */
 function assertButtonLabel(label: string): string {
   if (label.length > 8) throw new Error(`이메일 버튼 라벨은 8자 이내여야 합니다: ${label}`);
   return label;
+}
+
+export interface SubjectIntroInput {
+  companyName: string;
+  industry: string | null;
+  selectedEvent: EventCandidate | null;
+  /** 면허 밖 혜택 자리를 지운 재료(2000자) */
+  promptMaterial: string;
+}
+
+/** 제목·서두 프롬프트(순수). */
+export function buildEmailIntroPrompt(guide: OutreachStyleGuide, input: SubjectIntroInput): { system: string; user: string } {
+  const system = [
+    '너는 B2B 제안 메일의 제목과 서두를 쓰는 카피라이터다.',
+    `구성: ${guide.email.structure.join(' → ')}`,
+    `톤: ${guide.email.tone}`,
+    ...guide.prohibitions.map((p) => `금지: ${p}`),
+    '서두는 그 업체 홈페이지에서 실제로 본 것 1~2가지를 구체적으로 언급한다(없는 것을 지어내지 않는다).',
+    '출력은 JSON 하나만: {"subject":"...","intro":"..."} (subject 40자 이내 · intro 2~3문장)',
+  ].join('\n');
+  const user = [
+    `업체: ${input.companyName} (업종: ${industryLabel(input.industry)})`,
+    input.selectedEvent
+      ? `그 업체 홈페이지에서 확인한 행사(원문 인용 · 이 안의 사실만 언급 가능):\n"${input.selectedEvent.quote}"`
+      : '확인된 행사 없음: 브랜드 일반형 서두.',
+    input.promptMaterial ? `[홈페이지에서 읽은 내용]\n${input.promptMaterial.slice(0, 2000)}` : '',
+  ].filter(Boolean).join('\n');
+  return { system, user };
+}
+
+/** 제목·서두 생성 — strip → 40자 규칙(placeholder 포함 또는 40자 초과면 기본 제목 · 절단 금지) → catch 기본값. */
+export async function generateSubjectIntro(guide: OutreachStyleGuide, input: SubjectIntroInput): Promise<{ subject: string; intro: string; subjectPlaceholders: number; introPlaceholders: number; generated: boolean }> {
+  const licensedQuote = input.selectedEvent && input.selectedEvent.benefitLicensed ? input.selectedEvent.quote : '';
+  let subject = guide.emailCopy.subjectDefault(input.companyName);
+  let intro = '';
+  let generated = false;
+  try {
+    const prompt = buildEmailIntroPrompt(guide, input);
+    const raw = await callAIWithFallback({
+      system: prompt.system, userMessage: prompt.user, maxTokens: 500, temperature: 0.7, source: 'sales-outreach-email-intro',
+    });
+    const block = raw.match(/\{[\s\S]*\}/);
+    const parsed = block ? JSON.parse(block[0]) : {};
+    if (typeof parsed.subject === 'string' && parsed.subject.trim()) {
+      const s = stripUnauthorizedBenefits(parsed.subject.trim(), licensedQuote);
+      if (!s.includes(BENEFIT_PLACEHOLDER) && s.length <= 40) subject = s;
+    }
+    if (typeof parsed.intro === 'string' && parsed.intro.trim()) {
+      intro = stripUnauthorizedBenefits(parsed.intro.trim().slice(0, 500), licensedQuote);
+      generated = true;
+    }
+  } catch (err: any) {
+    console.log('[sales-outreach] 제목·서두 생성 실패(기본값 사용):', err?.message);
+  }
+  if (!intro) intro = guide.emailCopy.introDefault(input.companyName);
+  return { subject, intro, subjectPlaceholders: countBenefitPlaceholders(subject), introPlaceholders: countBenefitPlaceholders(intro), generated };
 }
 
 export interface ProposalEmailInput {
@@ -432,51 +946,26 @@ export interface ProposalEmailInput {
   previewUrl: string;       // 공개 샘플 페이지(L2 — 만료·noindex 있는 공개 URL, Harold 0824 "외부 공개 가능 주소")
   /** 수신거부 문구(§10 확정 전 = 빈 값) — 빈 값이면 발송 게이트가 잠긴다(H19). 조립 자체는 슬롯을 실재시킨다. */
   unsubscribeNotice: string;
+  /** 브랜드 이메일 시안 블록(생성·재료·차단 완료본) */
+  brandSections: Section[];
+  /** 6자리 hex(정규화 통과값) · 접근성 통과 시에만 palette.primary */
+  brandColor?: string | null;
+  /** 제목·서두(호출부가 넘긴다 = 재조립이 사람 편집분을 지우지 않는다 · B-2) */
+  subject: string;
+  intro: string;
+  /** 푸터 기준일(테스트 주입용 · 기본 = 지금) */
+  now?: Date;
 }
 
-export async function buildProposalEmail(input: ProposalEmailInput): Promise<{ subject: string; html: string; intro: string }> {
-  const guide = getActiveStyleGuide();
-  const licensedQuote = input.selectedEvent && input.selectedEvent.benefitLicensed ? input.selectedEvent.quote : '';
+function kstDateDash(d: Date): string {
+  const t = kstDateTag(d);
+  return `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}`;
+}
 
-  // 제목·서두 — JSON 계약. 혜택 수치는 면허 인용 안에서만(생성 직후 즉시 통과).
-  let subject = `${input.companyName} 맞춤 마케팅 시안이 도착했습니다`;
-  let intro = '';
-  try {
-    const raw = await callAIWithFallback({
-      system: [
-        '너는 B2B 제안 메일의 제목과 서두를 쓰는 카피라이터다.',
-        `구성: ${guide.email.structure.join(' → ')}`,
-        `톤: ${guide.email.tone}`,
-        ...guide.prohibitions.map((p) => `금지: ${p}`),
-        '출력은 JSON 하나만: {"subject":"...","intro":"..."} (subject 40자 이내 · intro 2~3문장)',
-      ].join('\n'),
-      userMessage: [
-        `업체: ${input.companyName} (업종: ${industryLabel(input.industry)})`,
-        input.selectedEvent
-          ? `그 업체 홈페이지에서 확인한 행사(원문 인용 · 이 안의 사실만 언급 가능):\n"${input.selectedEvent.quote}"`
-          : '확인된 행사 없음: 브랜드 일반형 서두.',
-      ].join('\n'),
-      maxTokens: 500,
-      temperature: 0.7,
-      source: 'sales-outreach-email-intro',
-    });
-    const block = raw.match(/\{[\s\S]*\}/);
-    const parsed = block ? JSON.parse(block[0]) : {};
-    if (typeof parsed.subject === 'string' && parsed.subject.trim()) {
-      subject = stripUnauthorizedBenefits(parsed.subject.trim().slice(0, 60), licensedQuote);
-    }
-    if (typeof parsed.intro === 'string' && parsed.intro.trim()) {
-      intro = stripUnauthorizedBenefits(parsed.intro.trim().slice(0, 500), licensedQuote);
-    }
-  } catch (err: any) {
-    console.log('[sales-outreach] 제목·서두 생성 실패(기본값 사용):', err?.message);
-  }
-  if (!intro) {
-    intro = `${input.companyName}의 홈페이지를 살펴보고, 한줄로AI로 귀사 브랜드에 맞춘 마케팅 예시를 만들어 보았습니다. 아래에서 실물 그대로 확인하실 수 있습니다.`;
-  }
-
+/** 순수 섹션 조립 — 한글 리터럴 0(문구 전부 guide.emailCopy). 렌더는 호출부. */
+export function buildProposalEmailSections(guide: OutreachStyleGuide, input: ProposalEmailInput): Section[] {
+  const c = guide.emailCopy;
   const copyForEmail = input.copyBody.replace(/\{\{DM_LINK\}\}/g, input.dmUrl);
-
   let order = 0;
   const sec = (type: string, props: Record<string, unknown>, extra?: Record<string, unknown>): Section => ({
     id: `so-${order}-${type}`,
@@ -487,64 +976,113 @@ export async function buildProposalEmail(input: ProposalEmailInput): Promise<{ s
     ...(extra || {}),
   } as unknown as Section);
 
-  const sections: Section[] = [
-    // 발신 신원 한 줄 — 얼굴 없는 포스터는 스팸으로 읽힌다(디자이너 레시피 #1)
-    sec('header', { variant: 'logo', align: 'left', brand_name: '한줄로', brand_size: 'sm', show_brand_name: true }),
-    // 첫 화면 색면 — 이미지 차단 클라이언트에서도 어두운 색면+흰 헤드라인이 남는다(headline_color 고정)
+  const head: Section[] = [
+    sec('header', { variant: 'logo', align: 'left', brand_name: c.senderBrandName, brand_size: 'sm', show_brand_name: true }),
     sec('hero', {
       image_url: input.posterUrl || undefined,
-      headline: `${input.companyName}를 위한 마케팅 시안`,
-      sub_copy: '한줄로AI가 만든 예시(시안)입니다',
-      align: 'center', height: 'lg', overlay_gradient: true, headline_color: '#ffffff', sub_copy_color: '#ffffff',
-    }),
+      headline: input.posterUrl ? c.hero.headline : c.hero.headlineNoImage(input.companyName),
+      sub_copy: c.hero.subCopy,
+      align: 'center', height: 'lg', image_fit: 'contain',
+    }, { treatment: 'split' }),
     sec('text_card', {
-      tag: '귀사 홈페이지에서 확인했습니다',
-      headline: input.selectedEvent ? '지금 진행 중인 소식에 맞춰 만들었습니다' : '귀사 브랜드에 맞춰 만들었습니다',
+      tag: c.lead.tag,
+      headline: input.selectedEvent ? c.lead.headlineWithEvent : c.lead.headlineNoEvent,
       body: [
-        intro,
-        input.selectedEvent ? `홈페이지에서 본 내용: "${input.selectedEvent.quote}"` : '',
+        input.intro,
+        input.selectedEvent ? `${c.lead.quoteLabel}: "${input.selectedEvent.quote}"` : '',
       ].filter(Boolean).join('\n\n'),
       align: 'left', image_position: 'top',
     }, { treatment: 'lead' }),
+  ];
+
+  const showcase: Section[] = [];
+  if (input.brandSections.length > 0) {
+    showcase.push(sec('text_card', {
+      tag: c.sample.tag,
+      headline: c.sample.headline(input.companyName),
+      body: c.sample.body,
+      align: 'left', image_position: 'top',
+    }, { background: 'soft' }));
+    for (const s of input.brandSections) {
+      showcase.push({ ...(s as any), id: `so-${order}-${s.type}`, order: order++ } as Section);
+    }
+  }
+
+  const tail: Section[] = [
     sec('text_card', {
-      tag: 'AI 문안 예시',
-      headline: '이 문안이 그대로 발송됩니다',
+      tag: c.showcase.tag,
+      headline: c.showcase.headline,
       body: copyForEmail,
       align: 'left', image_position: 'top',
     }),
-    // 확인 링크 — 텍스트 링크 병행은 renderButton VML+HTML 이중 출력이 담당. 라벨 8자 서버 강제.
     sec('cta', {
       layout: 'stack',
       buttons: [
-        { label: assertButtonLabel('산출물 보기'), url: input.previewUrl, style: 'primary' },
-        { label: assertButtonLabel('DM 열어보기'), url: input.dmUrl, style: 'outline' },
+        { label: assertButtonLabel(c.cta.primary), url: input.previewUrl, style: 'primary' },
+        { label: assertButtonLabel(c.cta.secondary), url: input.dmUrl, style: 'outline' },
       ],
     }, { treatment: 'bar' }),
     sec('text_card', {
-      headline: '한줄로는 이렇게 도와드립니다',
-      body: '한줄로는 문자·이메일·모바일 DM·인앱 메시지를 AI가 만들어 보내는 마케팅 자동화 서비스입니다. 이 메일의 이미지·문안·모바일 페이지 전부 한줄로AI가 귀사 홈페이지만 보고 만들었습니다.',
+      headline: c.service.headline,
+      body: c.service.body,
       align: 'left', image_position: 'top',
     }, { background: 'dark' }),
     sec('footer', {
       notes: [
-        '본 메일의 모든 산출물은 한줄로AI로 제작된 예시(시안)입니다.',
-        '귀사에 맞춤형 제안을 드리기 위하여 귀사의 이미지를 활용한 예시를 보여드렸습니다. 상업적 이용이 아닌 귀사 제안용으로만 사용되었음을 확약드립니다.',
-        `본 안내는 ${new Date().toISOString().slice(0, 10)} 기준 홈페이지 내용을 참고했습니다.`,
+        ...c.footer.notes,
+        c.footer.basisLine(kstDateDash(input.now || new Date())),
         input.unsubscribeNotice, // §10 확정 전 빈 슬롯 — 발송 게이트(H19)는 호출부가 본다
       ].filter(Boolean).join('\n'),
       cs_phone: undefined,
-      legal_text: '(주)인비토 · 한줄로(hanjul.ai)',
+      legal_text: c.footer.legal,
       show_unsubscribe_link: false,
     }),
   ];
+  return [...head, ...showcase, ...tail];
+}
 
+/** 평문 대체본(★ C-1 · 공용 extractEmailText는 cta·footer를 못 읽는다) */
+export function buildOutreachPlainText(guide: OutreachStyleGuide, input: ProposalEmailInput): string {
+  const c = guide.emailCopy;
+  const copyForEmail = input.copyBody.replace(/\{\{DM_LINK\}\}/g, input.dmUrl);
+  return [
+    input.subject,
+    '',
+    input.intro,
+    input.selectedEvent ? `${c.lead.quoteLabel}: "${input.selectedEvent.quote}"` : '',
+    '',
+    `${c.showcase.tag}:`,
+    copyForEmail,
+    '',
+    `${c.cta.primary}: ${input.previewUrl}`,
+    `${c.cta.secondary}: ${input.dmUrl}`,
+    '',
+    ...c.footer.notes,
+    c.footer.basisLine(kstDateDash(input.now || new Date())),
+    input.unsubscribeNotice,
+    c.footer.legal,
+  ].filter((l) => l !== undefined && l !== null).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** 진입점 — 조립 + 렌더 + 평문 + placeholder 합산. producing_email이 부르는 유일한 함수. */
+export function assembleProposalEmail(input: ProposalEmailInput): { subject: string; intro: string; html: string; text: string; placeholderCount: number } {
+  const guide = getActiveStyleGuide();
+  const sections = buildProposalEmailSections(guide, input);
+  const accessible = !!input.brandColor && isBrandKitPrimaryAccessible({ primary_color: input.brandColor } as any);
   const html = renderEmailSections(sections, {
     design: {
       art_direction: { typeScale: 'bold', spacingDensity: 'airy', accentMotif: 'rule', sectionDivider: 'hairline' },
-      preheader: `${input.companyName} 맞춤 시안 · 한줄로AI 제작 예시`,
-    },
+      preheader: guide.emailCopy.preheader(input.companyName),
+      ...(accessible ? { palette: { primary: input.brandColor as string } } : {}),
+    } as any,
     publicBase: PUBLIC_BASE,
   }).replace(EMAIL_FOOTER_SLOT, '');
-
-  return { subject, html, intro };
+  const text = buildOutreachPlainText(guide, input);
+  return {
+    subject: input.subject,
+    intro: input.intro,
+    html,
+    text,
+    placeholderCount: countBenefitPlaceholders(input.subject) + countBenefitPlaceholders(html),
+  };
 }

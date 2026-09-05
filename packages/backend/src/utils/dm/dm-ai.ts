@@ -577,42 +577,44 @@ function extractEditableFields(section: Section): Record<string, unknown> {
   const p = section.props as any;
   const type = section.type;
   const out: Record<string, unknown> = {};
-  const keysByType: Record<SectionType, string[]> = {
-    // 옛 11
-    header:     ['event_title', 'discount_label'],
-    hero:       ['headline', 'sub_copy'],
-    coupon:     ['discount_label', 'usage_condition'],
-    countdown:  ['urgency_text'],
-    text_card:  ['tag', 'headline', 'body'],
-    cta:        ['buttons'],
-    video:      ['caption'],
-    store_info: [],
-    sns:        [],
-    promo_code: ['description', 'instructions', 'cta_label'],
-    footer:     ['notes'],
-    // D216+ 신규 16 — AI 편집 가능 텍스트 필드
-    product_carousel:  ['title'],
-    gallery:           ['title'],
-    slideshow:         [],
-    tab_cards:         [],
-    poll:              ['question'],
-    survey:            ['title', 'completion_reward_text'],
-    email_capture:     ['headline', 'description', 'reward_description', 'success_text'],
-    click_rewards:     ['reward_description'],
-    lucky_draw:        ['title', 'description'],
-    roulette:          [],
-    instant_coupon:    ['coupon_label', 'discount_description', 'conditions', 'usage_instructions'],
-    limited_quantity:  ['title', 'description'],
-    youtube_embed:     [],
-    instagram_embed:   [],
-    map_store_locator: [],
-    reviews:           ['title'],
-  };
-  for (const k of keysByType[type] || []) {
+  for (const k of DM_EDITABLE_TEXT_KEYS[type] || []) {
     if (p[k] !== undefined && p[k] !== null && p[k] !== '') out[k] = p[k];
   }
   return out;
 }
+
+/** 섹션 타입별 AI 편집 가능 텍스트 prop 목록 (★ 2026-09-05 export : 아웃리치 DM 혜택 차단이 같은 표를 쓴다 · 값 무변경) */
+export const DM_EDITABLE_TEXT_KEYS: Record<SectionType, string[]> = {
+  // 옛 11
+  header:     ['event_title', 'discount_label'],
+  hero:       ['headline', 'sub_copy'],
+  coupon:     ['discount_label', 'usage_condition'],
+  countdown:  ['urgency_text'],
+  text_card:  ['tag', 'headline', 'body'],
+  cta:        ['buttons'],
+  video:      ['caption'],
+  store_info: [],
+  sns:        [],
+  promo_code: ['description', 'instructions', 'cta_label'],
+  footer:     ['notes'],
+  // D216+ 신규 16 — AI 편집 가능 텍스트 필드
+  product_carousel:  ['title'],
+  gallery:           ['title'],
+  slideshow:         [],
+  tab_cards:         [],
+  poll:              ['question'],
+  survey:            ['title', 'completion_reward_text'],
+  email_capture:     ['headline', 'description', 'reward_description', 'success_text'],
+  click_rewards:     ['reward_description'],
+  lucky_draw:        ['title', 'description'],
+  roulette:          [],
+  instant_coupon:    ['coupon_label', 'discount_description', 'conditions', 'usage_instructions'],
+  limited_quantity:  ['title', 'description'],
+  youtube_embed:     [],
+  instagram_embed:   [],
+  map_store_locator: [],
+  reviews:           ['title'],
+};
 
 // ────────────── Compatibility: 사용되지 않는 SECTION_DEFAULTS import 방지 ──────────────
 void SECTION_DEFAULTS;

@@ -174,6 +174,114 @@ export async function listStyleExamples(industryCode: string): Promise<StyleExam
   }
 }
 
+// ───────────────── ★ 2026-09-05 아웃리치 실물 예시 (kind='outreach_example') ─────────────────
+//   설계 = docs/2026-09-05-ai-sales-outreach-refinement-design.md §20. 행 = 예시 1개(마스킹 본문 · 머리줄 없음). channel = DM|EMAIL · industry_code = 15종.
+//   ⛔ style_example과 kind를 나눈다 — style_example은 직원 갤러리(routes/ai.ts)에 노출되고 재증류가 DELETE 후 재INSERT(replaceStyleExamples)한다.
+//   읽기 = 5분 캐시(생성 경로가 매 잡마다 부른다) · 쓰기 뒤 invalidate. 42P01 폴백 = 조회 빈 배열 · 쓰기 reason.
+
+export const OUTREACH_EXAMPLE_KIND = 'outreach_example';
+export type OutreachExampleChannel = 'DM' | 'EMAIL';
+export interface OutreachExampleMeta {
+  v: 1;
+  source: { kind: 'dm' | 'email'; id: string; shortCode: string | null; title: string; companyId: string; createdBy: string | null; createdAt: string | null };
+  aliases: string[];
+  productNames: number;
+  chars: number;
+  promotedBy: string | null;
+  promotedAt: string;
+}
+export interface OutreachExampleRow {
+  id: string;
+  channel: OutreachExampleChannel;
+  industryCode: string;
+  content: string;
+  meta: OutreachExampleMeta;
+  createdAt: string;
+}
+
+const OUTREACH_EXAMPLE_TTL_MS = 5 * 60 * 1000;
+const OUTREACH_EXAMPLE_LIMIT = 300;
+let outreachExampleCache: { at: number; rows: OutreachExampleRow[] } | null = null;
+
+export function invalidateOutreachExampleCache(): void {
+  outreachExampleCache = null;
+}
+
+/** 실물 예시 전량(최신순 · 상한 300) — 캐시 5분. 테이블 없음·오류 = 빈 배열(throw 0). */
+export async function listOutreachExamples(opts?: { force?: boolean }): Promise<OutreachExampleRow[]> {
+  if (!opts?.force && outreachExampleCache && Date.now() - outreachExampleCache.at < OUTREACH_EXAMPLE_TTL_MS) return outreachExampleCache.rows;
+  try {
+    const r = await pool.query(
+      `SELECT id, channel, industry_code, content, meta, created_at FROM best_copy_assets
+        WHERE kind = $1 ORDER BY created_at DESC LIMIT $2`,
+      [OUTREACH_EXAMPLE_KIND, OUTREACH_EXAMPLE_LIMIT],
+    );
+    const rows: OutreachExampleRow[] = r.rows
+      .filter((row: any) => (row.channel === 'DM' || row.channel === 'EMAIL') && typeof row.content === 'string' && row.content.trim())
+      .map((row: any) => ({
+        id: String(row.id),
+        channel: row.channel as OutreachExampleChannel,
+        industryCode: String(row.industry_code || 'etc'),
+        content: String(row.content),
+        meta: (row.meta && typeof row.meta === 'object' ? row.meta : { v: 1, source: { kind: 'dm', id: '', shortCode: null, title: '', companyId: '', createdBy: null, createdAt: null }, aliases: [], productNames: 0, chars: 0, promotedBy: null, promotedAt: '' }) as OutreachExampleMeta,
+        createdAt: String(row.created_at),
+      }));
+    outreachExampleCache = { at: Date.now(), rows };
+    return rows;
+  } catch (e: any) {
+    if (!isMissingTable(e)) console.warn('[best-copy] 실물 예시 조회 실패(빈 결과):', e?.message);
+    return [];
+  }
+}
+
+/** 같은 출처(dm/email id)의 예시 행 id — 중복 승격 판정. 조회 자체가 실패하면 ok:false(호출부는 저장하지 않는다 = fail-closed). */
+export async function findOutreachExampleBySource(kind: 'dm' | 'email', id: string): Promise<{ ok: true; id: string | null } | { ok: false; reason: 'table_missing' | 'db_error' }> {
+  try {
+    const r = await pool.query(
+      `SELECT id FROM best_copy_assets WHERE kind = $1 AND meta->'source'->>'kind' = $2 AND lower(meta->'source'->>'id') = lower($3) LIMIT 1`,
+      [OUTREACH_EXAMPLE_KIND, kind, id],
+    );
+    return { ok: true, id: r.rows[0]?.id ? String(r.rows[0].id) : null };
+  } catch (e: any) {
+    if (isMissingTable(e)) return { ok: false, reason: 'table_missing' };
+    console.warn('[best-copy] 실물 예시 출처 조회 실패:', e?.message);
+    return { ok: false, reason: 'db_error' };
+  }
+}
+
+/** 실물 예시 1행 append(치환 금지). is_ad는 NULL. 성공 시 캐시 무효화. */
+export async function insertOutreachExample(input: {
+  channel: OutreachExampleChannel; industryCode: string; content: string; meta: OutreachExampleMeta;
+}): Promise<{ ok: true; id: string } | { ok: false; reason: 'table_missing' | 'db_error' }> {
+  const id = crypto.randomUUID();
+  try {
+    await pool.query(
+      `INSERT INTO best_copy_assets (id, kind, industry_code, channel, content, meta) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [id, OUTREACH_EXAMPLE_KIND, input.industryCode, input.channel, input.content, JSON.stringify(input.meta)],
+    );
+    invalidateOutreachExampleCache();
+    return { ok: true, id };
+  } catch (e: any) {
+    if (isMissingTable(e)) return { ok: false, reason: 'table_missing' };
+    console.warn('[best-copy] 실물 예시 저장 실패:', e?.message);
+    return { ok: false, reason: 'db_error' };
+  }
+}
+
+/** 실물 예시 1행 삭제(kind 조건 결속 · 다른 kind는 못 지운다). 3값 — 없음·테이블 부재·오류를 구분한다(실패를 "없음"으로 접지 않는다). */
+export async function deleteOutreachExample(id: string): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'table_missing' | 'db_error' }> {
+  try {
+    const r = await pool.query(`DELETE FROM best_copy_assets WHERE id = $1 AND kind = $2 RETURNING id`, [id, OUTREACH_EXAMPLE_KIND]);
+    if (r.rows.length === 0) return { ok: false, reason: 'not_found' };
+    invalidateOutreachExampleCache();
+    return { ok: true };
+  } catch (e: any) {
+    if (isMissingTable(e)) return { ok: false, reason: 'table_missing' };
+    console.warn('[best-copy] 실물 예시 삭제 실패:', e?.message);
+    return { ok: false, reason: 'db_error' };
+  }
+}
+
 // ───────────────── ★ 2026-09-03 참조 골격 (kind='structure') ─────────────────
 //   설계 = docs/2026-09-03-reference-skeleton-learning-design.md §4·§5-7
 //   행 = (industry_code, channel) 1개. meta = { v, chains, stats, perf, serving }. serving.enabled=false가 기본 — 끄면 생성 경로는 현행과 문자 단위 동일.

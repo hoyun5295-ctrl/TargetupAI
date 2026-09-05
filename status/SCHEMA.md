@@ -89,10 +89,12 @@
 | 72 | geo_allow_cidrs **(2026-08-19 운영 CREATE 완료)** | 국내 할당 IP 대역(전송자격인증 2.2). `id uuid PK, cidr cidr NOT NULL, country_code varchar(2) NOT NULL DEFAULT 'KR', source varchar(50) DEFAULT 'apnic', updated_at timestamptz`. UNIQUE(cidr) · **GiST(cidr inet_ops)**. 판정 = `$1::inet <<= cidr`(PG 네이티브 — GeoIP 의존성 0). ⛔ **행이 0이면 판정이 통째로 `unknown`이 되어 통제가 사라진다** — 일괄 등록은 DELETE+INSERT를 한 트랜잭션으로 묶는다 |
 | 73 | access_origin_allowlist **(2026-08-19 운영 CREATE 완료)** | 접근 출발지 예외 승인(2.2). `id uuid PK, scope varchar(20) NOT NULL(user·company_api·company_agent·global), company_id uuid FK CASCADE, user_id uuid FK CASCADE, cidr cidr NOT NULL, reason text NOT NULL(**사유 없이는 등록 불가**), approved_by uuid, approved_at timestamptz, expires_at timestamptz, is_active boolean DEFAULT true, created_at`. **회수는 DELETE가 아니라 `is_active=false`** — 이력이 사라지면 심사에 낼 것이 없다. ⛔ SDK·싱크에이전트는 국가로 막지 않고 이 표의 `company_api`·`company_agent`로만 통제한다(해외 본사 고객사 대응) |
 | 74 | help_questions **(2026-08-22 신설 — 운영 CREATE 완료 · 0824 질문 이력 화면 실측)** | 도움말 봇에 들어온 질문 원장. `id uuid PK DEFAULT gen_random_uuid(), company_id uuid NOT NULL FK companies CASCADE, user_id uuid NULL(**FK 없음** — 0728 `23503` 원칙. 계정이 삭제돼도 질문 기록은 남는다), path varchar(200) NULL(질문한 화면), question varchar(240) NOT NULL, matched_ids text[] NOT NULL DEFAULT '{}'(매칭된 작업 id), answered boolean NOT NULL DEFAULT false, reason varchar(200) NULL(**★2026-08-25 ADD 대기** — 못 답함 사유 코드. 외부 오류 원문 금지 · 한글 라벨 변환 = `help-answer.ts` `helpReasonLabel` 하나 · 컬럼 부재 창은 코드가 42703 감지 후 옛 형태 INSERT 폴백), created_at timestamptz NOT NULL DEFAULT NOW()`. INDEX = (company_id, created_at DESC) · **(answered, created_at DESC) WHERE answered = false**(미답 조회 전용 부분 인덱스). **답한 질문과 못 답한 질문을 한 테이블이 갖는다** — 그래야 "미답 비율"이라는 단일 지표가 나온다. ⛔ 이 테이블이 없어도 봇 답변은 나간다(기록만 실패). "문의 남기기"만 503 `DB_MIGRATION_PENDING`. 실사용 고객 0인 지금 이 원장이 2단계 정의를 쓰는 **유일한 실측 입력**이다. 소유 = [FEATURE-HELP-CATALOG.md](../docs/FEATURE-HELP-CATALOG.md) §9-D |
+| 75-A | sales_outreach_jobs **(2026-08-28 운영 CREATE 완료 · ★2026-09-05 `fail_detail` ALTER = 배포 전 실행 대기)** | AI 영업 아웃리치 잡 원장(슈퍼관리자 ceo 전용 · 상태머신). 21컬럼 = `id uuid PK, company_name text NOT NULL, industry_category text, homepage_url text NOT NULL, stage text NOT NULL DEFAULT 'queued' CHECK(queued·crawling·analyzing·awaiting_confirm·producing_copy·producing_image·producing_dm·producing_email·ready·sent·failed), lock_token uuid, lock_at timestamptz, stage_results jsonb NOT NULL DEFAULT '{}', brand_profile jsonb, event_quote jsonb, fail_stage text, fail_reason text, **fail_detail text(0905 ALTER)**, preview_code text UNIQUE, mail_sent_at timestamptz, mail_result text CHECK(sending·sent·rejected·unknown), mail_confirmed_at timestamptz, forwarded_at timestamptz, purged_at timestamptz, created_by uuid(**FK 없음** · super_admins.id), created_at timestamptz NOT NULL DEFAULT NOW()`. INDEX(created_at DESC)·(stage)·(purged_at) WHERE purged_at IS NULL. jsonb 키 사전 = [상세 절](#sales_outreach_jobs-ai-영업-아웃리치-잡) · DDL 원문·절차 = [OPS §2-2-E](OPS.md) |
+| 75-B | sales_outreach_assets **(2026-08-28 운영 CREATE 완료)** | 아웃리치 산출물(append 전용 · 최신 = created_at DESC). 6컬럼 = `id uuid PK, job_id uuid NOT NULL FK sales_outreach_jobs CASCADE, kind text NOT NULL CHECK(copy·email_html·dm·studio_image), payload jsonb NOT NULL, regen_count int NOT NULL DEFAULT 0(★0905 = 그 시점 재생성 순번), created_at timestamptz`. INDEX(job_id, kind, created_at DESC). INSERT는 `insertAssetOwned`(소유권 결속)만 · payload 키 = [상세 절](#sales_outreach_assets-아웃리치-산출물) |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 | - | ai_training_logs (클릭·전환 컬럼) | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). **★2026-08-11 information_schema 실측 = 둘 다 실존**(0704 "ADD 대기" 표기는 낡은 기록 — `operator_proposals.conversion_attributed_at`·`operator_proposal_variants.sent/click/conversion_count`도 같은 실측으로 실존 확인). ⚠값 유입은 DM·이메일 클릭뿐 — SMS/LMS 클릭(short-url→변이 테이블)은 이 원장에 미배선(자기 개선 루프 설계의 Phase 0) |
 | - | best_copy_seed_usage **★2026-09-03 `information_schema` 실측 존재(5컬럼)** | 시드 사용 기록(성과 환류). 실측 = `id bigint, seed_id uuid, tenant_ref varchar, channel varchar, used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at)은 미실측. 코드 42P01 폴백 유지 |
-| - | best_copy_assets **★2026-09-03 `information_schema` 실측 존재(8컬럼)** | 업종 승리공식·AI 재창작 예시. 실측 = `id uuid, kind varchar[formula\|style_example\|**structure**], industry_code varchar, channel varchar, is_ad boolean, content text, meta jsonb, created_at timestamptz`. CHECK 제약 없음(0903 `pg_constraint` 실측 = PK뿐). INDEX(kind,industry_code)는 미실측. 코드 42P01 폴백 유지. **★0903 kind='structure' = 참조 골격**(행 = industry_code(`general` 예약어 포함)×channel(`DM`\|`EMAIL`) · `meta` = `{v, chains[], stats, perf, serving}` · 저장은 append · 소유 = `utils/best-copy-assets.ts` · 설계 = [참조 골격 설계서 §4](../docs/2026-09-03-reference-skeleton-learning-design.md)) |
+| - | best_copy_assets **★2026-09-03 `information_schema` 실측 존재(8컬럼) · ★2026-09-05 kind `outreach_example` 추가(DDL 0)** | 업종 승리공식·AI 재창작 예시·참조 골격·**아웃리치 실물 예시**. 실측 = `id uuid, kind varchar[formula\|style_example\|**structure**\|**outreach_example**], industry_code varchar, channel varchar, is_ad boolean, content text, meta jsonb, created_at timestamptz`. **★0905 kind='outreach_example'** = 행 1개 = 실물 예시 1개(마스킹 본문 · 머리줄 없음) · `channel`=DM\|EMAIL · `industry_code`=15종 · `is_ad` NULL · `meta`={v:1, source{kind dm\|email, id, shortCode, title, companyId, createdBy, createdAt}, aliases[], productNames, chars, promotedBy, promotedAt} · 소유 = `utils/best-copy-assets.ts`(append·삭제·5분 캐시) · 쓰기 진입 = `/api/admin/best-layout/examples/promote`(ceo 전용) · 중복 = meta.source.id 1건 · style_example과 kind를 나눈 이유 = 갤러리 노출·재증류 DELETE 회피. CHECK 제약 없음(0903 `pg_constraint` 실측 = PK뿐). INDEX(kind,industry_code)는 미실측. 코드 42P01 폴백 유지. **★0903 kind='structure' = 참조 골격**(행 = industry_code(`general` 예약어 포함)×channel(`DM`\|`EMAIL`) · `meta` = `{v, chains[], stats, perf, serving}` · 저장은 append · 소유 = `utils/best-copy-assets.ts` · 설계 = [참조 골격 설계서 §4](../docs/2026-09-03-reference-skeleton-learning-design.md)) |
 | - | send_fatigue_daily **(2026-07-05 CREATE 대기)** | 발송 피로도 일일 버킷(광고성 문자+알림톡 합산, day=KST). `company_id uuid NOT NULL, phone varchar(20) NOT NULL, day date NOT NULL, sent_count int NOT NULL DEFAULT 0, PK(company_id,phone,day)` + INDEX(day). 45일 초과 프루닝(fatigue-guard 6h 워커). 코드 42P01 폴백(미생성=게이트·카운터 비활성) |
 | - | companies **(2026-07-05 ADD 대기)** | `fatigue_cap_days int` · `fatigue_cap_max int` — 발송 피로도 상한(최근 N일 M건). NULL=비활성(opt-in — 회사가 설정 화면에서 켠 경우만 게이트). 코드 42703 폴백. `ALTER TABLE companies ADD COLUMN fatigue_cap_days integer; ALTER TABLE companies ADD COLUMN fatigue_cap_max integer;` |
 | - | companies **(2026-08-04 ADD 실행완료)** | `automarketing_exclude_journey boolean` — 여정 진행 중(`journey_executions.status='active'`) 고객을 자동마케팅 대상에서 제외(Harold 확정, opt-in — NULL/false=현행 겹침 허용). 소비 = 자동마케팅 단일 문 게이트뿐(`operator-audience.getExcludeInJourneySetting`), 여정·캠페인 무관. 코드 42703 폴백 |
@@ -1583,6 +1585,37 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | user_agent | text | 브라우저 UA |
 
 ---
+
+### sales_outreach_jobs (AI 영업 아웃리치 잡) ★2026-09-05 등재 (컬럼 = 요약 표 75-A · 소유 = `utils/sales-outreach-jobs.ts`)
+
+`stage_results` jsonb 키 사전(DDL 0 · 쓰는 곳 → 읽는 곳):
+
+| 키 | 값 | 쓰는 곳 | 읽는 곳 |
+|---|---|---|---|
+| `crawling` · `analyzing` | `ok` / `no_event` / `unavailable` | runOutreachJob | 확인 단계 배너 |
+| `producing_copy/image/dm/email` · `queued` | `ok`(advanceStage) / `unavailable`(markFailed 단일) | 제작 루프 · markFailed | 실패 배너 "일시 장애" |
+| `crawling_sub` | `ok` / `no_content` / `unavailable` | 행사 상세 1홉(A-11) | 근거 패널 |
+| `crawling_detail` · `analyzing_detail` | 정제 문자열 ≤300 | 크롤·분석 실패 | 확인 단계 unavailable 배너 |
+| `analyzing_meta` | `{ rawCandidates, matched, shortDropped, mismatched, markerDropped, structuredBlocks, materialChars }` | filterQuoteCandidates | 근거 패널 계측 |
+| `chain` | `{ batch, index, total }` | 일괄 등록 | 목록 "대기 n/N" |
+| `regen` | `{ from, at }` (advanceStage ready 분기가 제거) | regenerateOutreachAsset(resetJobTo) | runProduction 다음 단계 결정 |
+| `regen_seq` | `{ copy, image, dm, email }` 요청 횟수(상한 5) | regenerateOutreachAsset | 상한 판정 · 근거 패널 · 템플릿 seed |
+| `mail_last` | `{ outcome, detail, rejected[], at }` | sendOutreachMailForJob | 발송 패널 |
+| `test_sends` | `[{ to, outcome, at, by }]` 최대 20 | sendOutreachTestMail | 검수 이력 3줄 |
+| `dismissed_at` | ISO | dismissOutreachJob | 뱃지 제외 · 목록 회색 |
+
+`brand_profile` jsonb 키: `siteTitle · excerpt(600) · eventTextFull(≤6000 · 행사 페이지 블록 앞) · imageCandidates[] · selectedImageUrl · crawledAt · finalUrl · brand{primaryColor 6자리 hex|null} · subPageUrl · structuredBlocks · productLinks[] · listProducts[] · ctaLinks{키워드: URL} · legal{legal, csPhone} · extraNotes(등록 폼 추가 정보 · 재크롤에도 보존) · media{gallery[{url,width,height,bytes,srcUrl}], products[], collectedAt, stats}`(제작 단계가 실측·사본 저장 뒤 기록 · 파기가 함께 삭제).
+`event_quote` jsonb: `{ candidates[{quote, sourceUrl, startDate, endDate, benefitLicensed, origin}], selected, confirmedBy, confirmedAt, generatedAt }`.
+파기(`purged_at`)는 sweeper가 30일 뒤 스탬프 + 포스터·사본 파일 삭제 + DM 발행 중지(stopDm). 실패는 스탬프 롤백.
+
+### sales_outreach_assets (아웃리치 산출물) ★2026-09-05 등재
+
+kind별 payload 키:
+- `copy`: `{ body, benefitLicensed, styleGuideVersion, sampleTrained, placeholders, materialChars, regenCount }` / 사람 편집본 `{ body, editedBy, editedAt, placeholders }`
+- `studio_image`: `{ url, usedCutout, personJudge, skippedReason, width, height, templateId, category, kind, media(stats)|null, mediaError|null, regenCount }`
+- `dm`: `{ dmId, dmUrl, structureRef|null, benefitStripped, sectionTypes[], exemplarCount, regenCount }`
+- `email_html`: `{ subject, intro, html, text, placeholderCount, brandSections[], brandSubject, brandStripped, exemplarCount, subjectEditedAt?, subjectEditedBy?, regenCount }`
+`regen_count` 컬럼 = INSERT 시점의 `stage_results.regen_seq[kind]`(최초 0).
 
 ## MySQL 테이블 (QTmsg - smsdb)
 

@@ -304,6 +304,15 @@ const shortUrlLimiter = rateLimit({
   message: '요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.',
 });
 app.use('/c', shortUrlLimiter);
+// ★ 2026-09-05 아웃리치 공개 샘플 페이지(무인증 · 사람이 브라우저로 여는 경로라 응답은 HTML) — IP당 분 60(C-4 · 별도 버킷)
+const outreachPublicLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: '<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>안내</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;color:#333"><p>요청이 너무 잦습니다. 잠시 후 다시 열어주세요.</p></body></html>',
+});
+app.use('/api/outreach/v', outreachPublicLimiter);
 
 // ★ D130: IMC 웹훅은 HMAC 검증을 위해 raw body 필요
 //    express.json()이 먼저 파싱하면 rawBody 손실되므로 이 경로만 선처리
