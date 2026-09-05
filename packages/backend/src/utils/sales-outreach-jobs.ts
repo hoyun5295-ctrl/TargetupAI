@@ -40,7 +40,7 @@ import {
   outreachTestMailDomains, isAllowedTestRecipient,
 } from './outreach-mailer';
 import {
-  extractProducts, extractImageCandidates, discoverProductLinks, buildCtaLinkMap, extractLegal, resolveBrandColorGuarded,
+  extractProducts, extractImageCandidates, discoverProductLinks, buildCtaLinkMap, extractLegal, resolveBrandColorGuarded, extractLogoCandidates,
   OUTREACH_FETCH_OPTS, type OutreachProduct,
 } from './sales-outreach-media';
 import { stopDm } from './dm/dm-builder';
@@ -458,6 +458,8 @@ export async function runOutreachJob(jobId: string): Promise<void> {
     structuredBlocks: homeMaterial.structuredBlocks,
     // ★ 2026-09-05 재료(순수 추출 · 네트워크 0) — 제작 단계가 실측·사본 저장에 쓴다
     productLinks: page ? discoverProductLinks(page.html, finalUrl, 10) : [],
+    // ★ 0905(5) 헤더 로고 후보(순수 · 실물 판정은 제작 단계 collectOutreachMedia)
+    logoCandidates: page ? extractLogoCandidates(page.html, finalUrl) : [],
     listProducts,
     ctaLinks: page ? buildCtaLinkMap(page.html, finalUrl) : {},
     legal: homeText ? extractLegal(homeText) : null,
@@ -744,6 +746,7 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
               imageCandidates: Array.isArray(bp.imageCandidates) ? bp.imageCandidates : [],
               productLinks: Array.isArray(bp.productLinks) ? bp.productLinks : [],
               listProducts: Array.isArray(bp.listProducts) ? bp.listProducts : [],
+              logoCandidates: Array.isArray(bp.logoCandidates) ? bp.logoCandidates : [],
             });
             // 재수집 = 사본 URL이 전부 바뀐다 → 검토에서 고른 재료 선택은 함께 지운다(무효 선택이 재료를 0으로 만들지 않게)
             if (!(await mergeBrandProfileOwned(jobId, lockToken, { media, mediaSelection: null }))) return;

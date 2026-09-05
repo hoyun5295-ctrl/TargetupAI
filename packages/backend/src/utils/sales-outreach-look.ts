@@ -142,7 +142,7 @@ export interface OutreachLookStats {
 /**
  * 룩 배정(순수). 입력 순서를 보존하고 섹션 최상위에 treatment·background만 덧쓴다(props 무변경).
  * 규칙(재료 형태로 결정 · 채널 허용표로 검증):
- *  - hero: 이미지 없음 → typographic · 세로·정사각(비율 < 1.25 · 우리 포스터 포함) → split(브랜드 색 밴드 위 헤드라인 + 이미지 전체 · 잘림 0) · 가로·비율 미상 → classic(미설정)
+ *  - hero: 이미지 없음 → typographic · DM = 이미지가 있으면 항상 split(브랜드 색 밴드 위 헤드라인 + 배너 전체 · 잘림 0 · 배너 속 글씨 위에 글씨를 겹치지 않는다) · EMAIL = 세로·정사각 split · 가로 classic(낮은 박스)
  *  - text_card: 첫 번째 lead · 홀수 번째 framed · 그 밖 classic + soft(리듬)
  *  - product_carousel: 상품 2~3개 → focus · 4개 이상 → classic(2열 카드 스와이프 · 직원 실물 형태) · 첫 묶음 soft · list(작은 썸네일 행)는 쓰지 않는다
  *  - gallery(DM): 격자 배치에서만 3장 이상 + 첫 장 가로형 → mosaic(배너 통째 목록 list_1xN에는 얹지 않는다)
@@ -165,7 +165,7 @@ export function applyOutreachLook(sections: readonly Section[], channel: Outreac
       case 'hero': {
         const r = ratioOf(p.image_url, dims);
         if (!p.image_url) treatment = pickTreatment(channel, type, 'typographic');
-        else if (r !== null && r < LANDSCAPE_RATIO) treatment = pickTreatment(channel, type, 'split');
+        else if (channel === 'DM' || (r !== null && r < LANDSCAPE_RATIO)) treatment = pickTreatment(channel, type, 'split');
         break;
       }
       case 'text_card':

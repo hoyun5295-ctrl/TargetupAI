@@ -71,11 +71,14 @@ describe('applyOutreachLook — 값은 채널 허용표 안 · 섹션 최상위 
     }
     expect(lookStatsOf(r.sections)).toEqual(r.stats);
   });
-  it('hero: 이미지 없음 = typographic · 가로형·비율 미상 = classic(미설정) · 세로형 포스터도 split(밴드 + 이미지 전체)', () => {
+  it('hero: 이미지 없음 = typographic · DM은 이미지가 있으면 비율과 무관하게 split(배너 통째) · EMAIL은 가로형·비율 미상 = classic', () => {
     expect(applyOutreachLook(fixture(IMG('port')), 'DM', dims).sections[1].treatment).toBe('split');
     expect(applyOutreachLook(fixture(''), 'DM', dims).sections[1].treatment).toBe('typographic');
-    expect(applyOutreachLook(fixture(IMG('land')), 'DM', dims).sections[1].treatment).toBeUndefined();
-    expect(applyOutreachLook(fixture(IMG('unknown')), 'DM', dims).sections[1].treatment).toBeUndefined();
+    expect(applyOutreachLook(fixture(IMG('land')), 'DM', dims).sections[1].treatment).toBe('split');
+    expect(applyOutreachLook(fixture(IMG('unknown')), 'DM', dims).sections[1].treatment).toBe('split');
+    expect(applyOutreachLook(fixture(IMG('land')), 'EMAIL', dims).sections[1].treatment).toBeUndefined();
+    expect(applyOutreachLook(fixture(IMG('unknown')), 'EMAIL', dims).sections[1].treatment).toBeUndefined();
+    expect(applyOutreachLook(fixture(IMG('port')), 'EMAIL', dims).sections[1].treatment).toBe('split');
     expect(LANDSCAPE_RATIO).toBeGreaterThan(1);
   });
   it('EMAIL: 허용표 밖 섹션(gallery·countdown)은 건드리지 않는다 · coupon spotlight · 배경면은 EMAIL_BACKGROUNDS 안', () => {

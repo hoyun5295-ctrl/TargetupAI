@@ -315,8 +315,15 @@ describe('sales-outreach invariants', () => {
     expect(produce).toContain("p.layout = 'list_1xN';");
     expect(produce).toContain('const perCarousel = 6;');
     expect(produce).toContain('if (ctaCount < 2) {');
-    // 로고 픽셀은 산출물에 쓰지 않는다 — 색 해석 CT가 logo_url을 만들지 않는다
-    expect(readCode('utils/sales-outreach-media.ts')).not.toContain('logo_url');
+    // ★0905(5) Harold 결재 — 로고는 **헤더 섹션 prop**으로만(brand_kit 키 화이트리스트는 그대로 2개) · 크롤이 후보를 뽑고 제작이 실물 게이트를 지난 사본만 싣는다
+    expect(look).not.toContain('logo_url');
+    expect(produce).toContain('if (media.logoUrl) { p.logo_url = media.logoUrl;');
+    expect(produce).toContain('pngLooksWhite(img.buffer)');
+    expect(jobs).toContain('logoCandidates: page ? extractLogoCandidates(page.html, finalUrl) : []');
+    expect(jobs).toContain('logoCandidates: Array.isArray(bp.logoCandidates) ? bp.logoCandidates : []');
+    // 히어로 = 홈 첫 배너(문서 순서) · 포스터는 두 번째 비주얼 · 갤러리 수집은 면적 정렬 0
+    expect(produce).toContain("const heroImage = galleryAll[0]?.url || media.posterUrl || media.products[0]?.image_url || '';");
+    expect(readCode('utils/sales-outreach-media.ts')).not.toContain('b.width * b.height - a.width * a.height');
   });
 
   it('제작 실패 4단계 3값 — markFailed가 stage_results[failStage]=unavailable을 찍는다', () => {

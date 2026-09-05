@@ -41,6 +41,8 @@ import { OUTREACH_SEED_SKELETON_ID, outreachSeedSkeleton } from './sales-outreac
 import { pruneEmptyDmSections, rebuildDmPages } from './dm/dm-section-prune';
 // ★ 2026-09-05(3) 브레인스토밍 수렴안 — 룩 배정(C1)·검수 축(C4) 순수 CT. 룩은 섹션 최상위에 코드가 입히고, 사람 편집(재료 선택·섹션 숨김)은 override 데이터로 재적용한다.
 import { applyOutreachLook, buildOutreachBrandKit, outreachArtDirection, lookStatsOf, accessiblePrimaryOf, LANDSCAPE_RATIO, OUTREACH_DM_LAYOUT_MODE, type LookImageDims, type OutreachLookStats } from './sales-outreach-look';
+/** ★ 0905(5) 헤더 로고 실물 게이트 — 폭 60 이상 · 비율 0.5~8(정사각 아이콘 ~ 가로 워드마크) · 300KB 이하 · 흰 로고 제외 */
+const LOGO_MAX_BYTES = 300_000;
 import { splitSectionsIntoPages } from './dm/dm-page-split';
 import { applyOutreachMediaSelection, applySectionOverrides, type OutreachMediaSelection, type SectionOverride } from './sales-outreach-review';
 import { kstDateTag } from './ai-credit-calc';
@@ -49,7 +51,7 @@ import {
   OUTREACH_DM_SECTION_CONTRACT, OUTREACH_EMAIL_SECTION_CONTRACT, OUTREACH_DM_TYPES, OUTREACH_EMAIL_TYPES,
 } from './sales-outreach-exemplars';
 import {
-  collectProductsFromLinks, fetchProductPageGuarded, measureAndStoreImage, pickStoredImagesDetail, productKey,
+  collectProductsFromLinks, fetchProductPageGuarded, measureAndStoreImage, pickStoredImagesDetail, productKey, readImageSize, pngLooksWhite,
   OUTREACH_GALLERY_MIN_WIDTH, OUTREACH_PRODUCT_MIN_WIDTH, OUTREACH_CTA_KEYWORDS, OUTREACH_GALLERY_DEADLINE_MS,
   type OutreachProduct, type StoredImage,
 } from './sales-outreach-media';
@@ -240,8 +242,10 @@ export interface OutreachMediaProduct extends OutreachProduct {
 }
 
 export interface OutreachMedia {
-  /** 폭 ≥ 600 통과 · 면적 큰 순 · 최대 8장(우리 사본 URL) */
+  /** 폭 ≥ 600 통과 · 문서 순서(홈 첫 배너가 앞) · 최대 8장(우리 사본 URL) */
   gallery: StoredImage[];
+  /** ★ 0905(5) 헤더 로고 사본(Harold 결재 · 불변 11 개정) · 못 찾으면 null(브랜드명 글자만) · 옛 기록에는 없다 */
+  logo?: StoredImage | null;
   /** 이미지 폭 ≥ 400 통과 상품 · 최대 6개 */
   products: OutreachMediaProduct[];
   collectedAt: string;
@@ -249,6 +253,8 @@ export interface OutreachMedia {
     galleryCandidates: number; galleryPassed: number; productLinks: number; productsFound: number; productsPassed: number;
     /** ★ 0905(3) C3-2 순차 fetch 시도 수 · 벽시계 예산 초과 여부 · 수집 소요(ms) — 옛 기록에는 없다 */
     galleryTried?: number; galleryTimedOut?: boolean; elapsedMs?: number;
+    /** ★ 0905(5) 헤더 로고 확보 여부 */
+    logoFound?: boolean;
   };
 }
 
@@ -262,6 +268,8 @@ export async function collectOutreachMedia(input: {
   imageCandidates: string[];
   productLinks: string[];
   listProducts: OutreachProduct[];
+  /** ★ 0905(5) 크롤이 뽑은 로고 후보(순수 · extractLogoCandidates) */
+  logoCandidates?: string[];
 }): Promise<OutreachMedia> {
   const referer = input.homepageUrl;
   const fetcher = (u: string) => fetchImageGuarded(u, { referer });
@@ -277,6 +285,21 @@ export async function collectOutreachMedia(input: {
   // ★ 0905(3) C3-2 후보가 24개로 늘면 순차 fetch가 최대 24회 → 벽시계 예산 + 시도 수를 함께 기록한다(잡 CT 상한 12→24 정정과 한 커밋)
   const galleryPick = await pickStoredImagesDetail(input.imageCandidates, 8, OUTREACH_GALLERY_MIN_WIDTH, fetcher, store, { deadlineMs: OUTREACH_GALLERY_DEADLINE_MS });
   const gallery = galleryPick.images;
+  // ★ 0905(5) 헤더 로고 — 후보 순서대로 받아 크기·비율·흰 로고를 거른 첫 장을 사본으로. 실패 = null(글자 워드마크)
+  let logo: StoredImage | null = null;
+  for (const u of input.logoCandidates || []) {
+    try {
+      const img = await fetcher(u);
+      if (!img || img.buffer.length > LOGO_MAX_BYTES) continue;
+      const size = readImageSize(img.buffer);
+      if (!size || size.width < 60 || size.width / size.height < 0.5 || size.width / size.height > 8) continue;
+      if (img.ext === 'png' && pngLooksWhite(img.buffer)) continue;
+      const stored = store(img.buffer, { ext: img.ext, mime: img.mime, width: size.width, height: size.height });
+      if (!stored) continue;
+      logo = { url: stored, width: size.width, height: size.height, bytes: img.buffer.length, srcUrl: u };
+      break;
+    } catch { /* 다음 후보 */ }
+  }
 
   const fromPages = host ? await collectProductsFromLinks(input.productLinks, host, 6) : [];
   const pageKeys = new Set(fromPages.map(productKey));
@@ -307,6 +330,7 @@ export async function collectOutreachMedia(input: {
   }
   return {
     gallery,
+    logo,
     products,
     collectedAt: new Date().toISOString(),
     stats: {
@@ -318,6 +342,7 @@ export async function collectOutreachMedia(input: {
       galleryTried: galleryPick.tried,
       galleryTimedOut: galleryPick.timedOut,
       elapsedMs: Date.now() - t0,
+      logoFound: !!logo,
     },
   };
 }
@@ -543,8 +568,10 @@ export interface OutreachFillImage { url: string; width?: number; height?: numbe
 
 export interface OutreachFillMedia {
   posterUrl: string | null;
-  /** 포스터 실측 크기(히어로 비율 판정 · 세로형이면 contain) */
+  /** 포스터 실측 크기(갤러리 두 번째 비주얼 · 비율 표) */
   posterSize?: { width: number; height: number } | null;
+  /** ★ 0905(5) 헤더 로고 사본 URL(없으면 브랜드명 글자만) */
+  logoUrl?: string | null;
   /** 실측 통과 사본(폭·높이 동승 — 비율 군 분류·룩 배정에 쓴다). 문자열 배열도 받는다(비율 미상 = square 취급). */
   gallery: Array<OutreachFillImage | string>;
   products: OutreachProduct[];
@@ -554,15 +581,6 @@ export interface OutreachFillMedia {
   companyName: string;
 }
 
-/** 갤러리 이미지 비율 군 — 같은 군끼리 한 묶음(직원 실물 갤러리가 균일한 이유 · 수렴안 C2-3). 비율 미상 = square. */
-export type AspectClass = 'landscape' | 'portrait' | 'square';
-export function aspectClassOf(img: OutreachFillImage): AspectClass {
-  if (!(img.width && img.height)) return 'square';
-  const r = img.width / img.height;
-  if (r >= LANDSCAPE_RATIO) return 'landscape';
-  if (r <= 1 / LANDSCAPE_RATIO) return 'portrait';
-  return 'square';
-}
 const toFillImage = (x: OutreachFillImage | string): OutreachFillImage => (typeof x === 'string' ? { url: x } : x);
 
 /** 갤러리 이미지 링크(수렴안 C2-1) — 코너 딥링크(기획전·이벤트·컬렉션·신상·베스트·룩북·세일 순) 없으면 홈. 두 렌더러가 link_url을 이미 읽는다. */
@@ -617,28 +635,19 @@ export function fillOutreachDmMedia(
   channel: 'DM' | 'EMAIL',
 ): { sections: Section[]; filled: number } {
   const galleryAll = (media.gallery || []).map(toFillImage);
-  const firstLandscape = galleryAll.find((g) => aspectClassOf(g) === 'landscape') || null;
-  const heroImage = channel === 'DM'
-    ? (media.posterUrl || firstLandscape?.url || galleryAll[0]?.url || media.products[0]?.image_url || '')
-    : (firstLandscape?.url || galleryAll[0]?.url || media.posterUrl || media.products[0]?.image_url || '');
-  // 히어로에 쓴 사진은 묶음에서 뺀다 · 남은 사진은 비율 군으로 나눠 묶음마다 같은 군에서 채운다(큰 군부터 · 어느 군도 2장이 안 되면 합친다)
-  const remaining = galleryAll.filter((g) => g.url !== heroImage);
-  const groups: OutreachFillImage[][] = (['landscape', 'square', 'portrait'] as AspectClass[])
-    .map((c) => remaining.filter((g) => aspectClassOf(g) === c))
-    .filter((g) => g.length > 0)
-    .sort((a, b) => b.length - a.length);
-  const takeGallery = (n: number): OutreachFillImage[] => {
-    for (const g of groups) if (g.length >= 2) return g.splice(0, n);
-    const flat = groups.flat();
-    groups.length = 0;
-    if (flat.length >= 2) { groups.push(flat); return flat.splice(0, n); }
-    return [];
-  };
+  // ★ 0905(5) 히어로 = 홈 첫 배너(그 브랜드 디자이너의 실물 · 문서 순서 첫 장) → 없으면 포스터 → 상품. 포스터는 두 번째 비주얼(첫 갤러리 첫 장).
+  const heroImage = galleryAll[0]?.url || media.posterUrl || media.products[0]?.image_url || '';
+  const remaining: OutreachFillImage[] = galleryAll.filter((g) => g.url !== heroImage);
+  if (media.posterUrl && heroImage !== media.posterUrl) remaining.unshift({ url: media.posterUrl, ...(media.posterSize || {}) });
+  // 갤러리 = 배너 통째 목록(list_1xN)이라 비율 군 분류가 필요 없다 — 문서 순서대로 잘라 넣는다(2장 미만이면 비움)
+  const takeGallery = (n: number): OutreachFillImage[] => (remaining.length >= 2 ? remaining.splice(0, n) : []);
   const galleryLink = galleryLinkOf(media);
   // ★ 0905(3) 이미지 잘림 정정(Harold 접수 · 공개 샘플 4dbf85c91c) — 렌더러의 고정 높이 박스는 cover가 기본이라 세로형(0.86) 상품 사진이 37~47% 잘렸다.
   //   상품 캐러셀은 항상 contain(상품이 통째로 보여야 한다 · 두 렌더러가 image_fit을 읽는다) · 히어로는 세로형(비율 < 1)일 때만 contain. 공용 렌더러 무변경(불변 20).
   const heroDims = galleryAll.find((g) => g.url === heroImage) || (media.posterUrl && heroImage === media.posterUrl && media.posterSize ? { url: heroImage, ...media.posterSize } : null);
-  const heroPortrait = !!(heroDims && heroDims.width && heroDims.height && heroDims.width / heroDims.height < 1);
+  const heroRatio = heroDims && heroDims.width && heroDims.height ? heroDims.width / heroDims.height : null;
+  const heroPortrait = heroRatio !== null && heroRatio < 1;
+  const heroLandscape = heroRatio !== null && heroRatio >= LANDSCAPE_RATIO;
   const heroIsPoster = !!media.posterUrl && heroImage === media.posterUrl;
   const usedCta = new Set<string>();
   let prodCursor = 0;
@@ -655,16 +664,18 @@ export function fillOutreachDmMedia(
     switch (s.type) {
       case 'header':
         p.brand_name = media.companyName;
-        // 로고 픽셀은 못 쓰니(불변 11) 워드마크는 크게(직원 실물 헤더 = 브랜드명 대형)
+        // ★ 0905(5) 헤더 로고 사본(Harold 결재 · 불변 11 개정) — 있으면 로고 + 브랜드명, 없으면 워드마크 글자 크게
         if (channel === 'EMAIL') { p.variant = 'logo'; p.align = 'left'; } else { p.variant = 'logo'; p.align = 'center'; p.brand_size = 'lg'; }
+        if (media.logoUrl) { p.logo_url = media.logoUrl; p.logo_size = 'md'; }
         return [{ ...s, props: p } as Section];
       case 'hero':
         if (!heroDone && heroImage) {
           p.image_url = heroImage; heroDone = true; filled++;
-          // 세로형 사진 = contain(고정 박스에서 잘리지 않게). 우리 포스터는 세로형이라 룩이 split(밴드 + 이미지 전체)을 고르므로 맞춤 불필요
-          if (!heroIsPoster && heroPortrait) p.image_fit = 'contain';
+          // DM = 룩이 split(브랜드 색 밴드 + 이미지 전체 · 고정 박스 없음)이라 맞춤 불필요 · EMAIL = 고정 박스라 항상 contain(배너 속 글씨를 자르지 않는다) · 가로형은 낮은 박스(md)+classic
+          if (channel === 'EMAIL') { p.image_fit = 'contain'; }
+          else if (!heroIsPoster && heroPortrait) p.image_fit = 'contain';
         }
-        if (channel === 'EMAIL') { p.height = 'lg'; p.align = 'center'; }
+        if (channel === 'EMAIL') { p.height = heroLandscape ? 'md' : 'lg'; p.align = 'center'; }
         return [{ ...s, props: p } as Section];
       case 'gallery': {
         const g = takeGallery(perGallery);
@@ -937,7 +948,7 @@ export async function produceOutreachDm(input: ProduceDmInput): Promise<ProduceD
     exemplars = dmPrompt.exemplars;
     const gen = await generateSections(dmPrompt, OUTREACH_DM_TYPES, 'sales-outreach-dm-sections', 'so-dm');
     const filled = fillOutreachDmMedia(gen.sections, {
-      posterUrl: input.posterUrl, posterSize: input.posterSize || null, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
+      posterUrl: input.posterUrl, posterSize: input.posterSize || null, logoUrl: media?.logo?.url || null, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
     }, 'DM');
     const sanitized = sanitizeDmCopyBenefits(filled.sections, input.licensedQuote, input.companyName);
     benefitStripped = sanitized.stripped;
@@ -1025,7 +1036,7 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
   const emailPrompt = buildEmailSectionsPrompt(genInput, exemplarSource);
   const gen = await generateSections(emailPrompt, OUTREACH_EMAIL_TYPES, 'sales-outreach-email-sections', 'so-brand');
   const filled = fillOutreachDmMedia(gen.sections, {
-    posterUrl: input.posterUrl, posterSize: input.posterSize || null, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
+    posterUrl: input.posterUrl, posterSize: input.posterSize || null, logoUrl: media?.logo?.url || null, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
   }, 'EMAIL');
   const sanitized = sanitizeDmCopyBenefits(filled.sections, input.licensedQuote, input.companyName);
   const pruned = pruneEmptyDmSections(sanitized.sections);

@@ -356,6 +356,49 @@ export function dominantColorFromPng(buf: Buffer): string | null {
   return `#${hex(best.r)}${hex(best.g)}${hex(best.b)}`;
 }
 
+/** 로고로 쓰면 안 되는 이미지(흰 버전·로딩·푸터·제휴·앱 배지·SNS 아이콘) */
+const LOGO_BAD_RE = /white|_wh\b|-wh\b|loading|footer|partner|payment|app-?store|google-?play|instagram|facebook|kakao|naver|youtube|badge|sprite/i;
+
+/**
+ * ★ 0905(5) 헤더 로고 후보(순수 · Harold 결재로 불변 11 개정 = 아웃리치 헤더에 한해 브랜드 로고 사본 허용).
+ * 순서 = 헤더 영역 `<img … logo …>`(src·alt·class·id) → apple-touch-icon → og:image(PNG). 흰 버전·로딩·푸터·제휴·SNS 아이콘은 뺀다. ≤4.
+ * 실물 판정(크기·비율·흰 로고)은 네트워크 층(collectOutreachMedia)이 받아 본 뒤 한다.
+ */
+export function extractLogoCandidates(html: string, base: string): string[] {
+  const out: string[] = [];
+  const push = (u: string | null | undefined) => { const a = u ? absolutizeAssetUrl(u, base) : null; if (a && !out.includes(a) && !LOGO_BAD_RE.test(a)) out.push(a); };
+  const tags = html.match(/<img\b[^>]*>/gi) || [];
+  for (const tag of tags.slice(0, 300)) {
+    if (!/logo/i.test(tag) || LOGO_BAD_RE.test(tag)) continue;
+    push(bestImgFromTag(tag, base));
+  }
+  for (const m of html.matchAll(/<link[^>]+rel=["'][^"']*apple-touch-icon[^"']*["'][^>]*>/gi)) push(m[0].match(/href=["']([^"']+)["']/i)?.[1]);
+  const og = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i);
+  if (og && /\.png(\?|$)/i.test(og[1])) push(og[1]);
+  return out.slice(0, 4);
+}
+
+/** 흰(밝은) 로고인가 — 불투명 픽셀의 평균 명도가 0.9 이상이면 흰 배경 헤더에서 안 보인다(커버낫 실측 `woman_loading_white`). PNG가 아니면 false. */
+export function pngLooksWhite(buf: Buffer): boolean {
+  if (!buf || buf.length < 24 || buf[0] !== 0x89 || buf[1] !== 0x50) return false;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pngjs = require('pngjs') as { PNG: { sync: { read(b: Buffer): { width: number; height: number; data: Buffer } } } };
+  let png: { width: number; height: number; data: Buffer };
+  try { png = pngjs.PNG.sync.read(buf); } catch { return false; }
+  const { width, height, data } = png;
+  if (!width || !height) return false;
+  const stride = Math.max(1, Math.floor(Math.sqrt((width * height) / 4000)));
+  let n = 0, bright = 0;
+  for (let y = 0; y < height; y += stride) for (let x = 0; x < width; x += stride) {
+    const i = (y * width + x) * 4;
+    if (data[i + 3] < 128) continue;
+    n++;
+    if (Math.max(data[i], data[i + 1], data[i + 2]) / 255 >= 0.9) bright++;
+  }
+  return n >= 20 && bright / n >= 0.9;
+}
+
 export type BrandColorSource = 'meta' | 'icon' | null;
 
 /** 브랜드 색 해석(네트워크 층 · 가드 fetch 주입) — theme-color·TileColor → 아이콘 PNG 지배색. 실패 = null(뷰어 기본 토큰). source는 근거 패널용. */
@@ -536,8 +579,8 @@ export interface PickStoredImagesResult {
 }
 
 /**
- * 후보 배열에서 실측 통과분만 · 면적 큰 순 · 최대 n장. 후보는 n*3까지만 시도(느린 CDN 방어 · 메뉴 아이콘이 앞에 몰린 사이트 대비)하고
- * deadlineMs(벽시계)를 넘기면 거기서 멈춘다. 시도 수·예산 초과는 stats로 돌려준다(호출부가 기록).
+ * 후보 배열에서 실측 통과분만 · **문서(DOM) 순서 유지**(★0905(5) 홈 첫 배너가 히어로가 되게 · 면적 정렬 폐기) · 최대 n장.
+ * 후보는 n*3까지만 시도(느린 CDN 방어 · 메뉴 아이콘이 앞에 몰린 사이트 대비)하고 deadlineMs(벽시계)를 넘기면 거기서 멈춘다. 시도 수·예산 초과는 stats로 돌려준다.
  */
 export async function pickStoredImagesDetail(
   cands: string[], n: number, minWidth: number, fetcher: GuardedImageFetcher, store: ImageStorer,
@@ -555,7 +598,7 @@ export async function pickStoredImagesDetail(
     const i = await measureAndStoreImage(c, minWidth, fetcher, store);
     if (i) infos.push(i);
   }
-  return { images: infos.sort((a, b) => b.width * b.height - a.width * a.height).slice(0, n), tried, timedOut };
+  return { images: infos.slice(0, n), tried, timedOut };
 }
 
 export async function pickStoredImages(

@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   readImageSize, extractProducts, extractImageCandidates, discoverProductLinks, findLinkByText, buildCtaLinkMap, pickStoredImagesDetail,
-  extractBrandIconCandidates, dominantColorFromPng, resolveBrandColorGuarded,
+  extractBrandIconCandidates, dominantColorFromPng, resolveBrandColorGuarded, extractLogoCandidates, pngLooksWhite,
   extractLegal, parseThemeColorFromHtml, parseProductPage, absolutizeAssetUrl, cleanProductName, productKey, decodeHtmlEntities,
 } from '../sales-outreach-media';
 
@@ -164,6 +164,25 @@ describe('★0905(4) 브랜드 색 — 메타 → 아이콘 PNG 지배색(색 1�
     const transparent = makePng(20, 20, () => [200, 20, 20, 10]);
     expect(dominantColorFromPng(transparent)).toBeNull();
     expect(dominantColorFromPng(Buffer.from('not png'))).toBeNull();
+  });
+  it('★0905(5) 로고 후보 = 헤더 img(logo) → apple-touch-icon → og:image(PNG) · 흰·로딩·푸터·SNS 제외 · ≤4 · 흰 로고 판정', () => {
+    const html = `<header><a class="logo"><img src="/img/logo_black.svg" alt="브랜드"></a><img src="/web/logo/woman_loading_white_pc_.png"></header>
+      <img class="footer-logo" src="/img/footer_logo.png"><img src="/img/partner-logo.png"><img alt="instagram logo" src="/i/ig.png">
+      <link rel="apple-touch-icon" href="/apple.png"><meta property="og:image" content="/brand/logo.png"><meta property="og:image" content="/x.jpg">`;
+    expect(extractLogoCandidates(html, BASE)).toEqual(['https://www.brand.co.kr/img/logo_black.svg', 'https://www.brand.co.kr/apple.png', 'https://www.brand.co.kr/brand/logo.png']);
+    expect(extractLogoCandidates('<img src="/a.png">', BASE)).toEqual([]);
+    const white = makePng(40, 40, (x, y) => (x > 5 && x < 35 && y > 15 && y < 25 ? [255, 255, 255, 255] : [0, 0, 0, 0]));
+    expect(pngLooksWhite(white)).toBe(true);
+    const green = makePng(40, 40, () => [18, 180, 100, 255]);
+    expect(pngLooksWhite(green)).toBe(false);
+    expect(pngLooksWhite(Buffer.from('jpeg'))).toBe(false);
+  });
+  it('pickStoredImagesDetail — 문서 순서를 유지한다(면적 정렬 0 · 홈 첫 배너가 히어로)', async () => {
+    const png = (w: number) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]), Buffer.from([(w >>> 24) & 255, (w >>> 16) & 255, (w >>> 8) & 255, w & 255, 0, 0, 0, 100]), Buffer.alloc(2100)]);
+    const f = async (u: string) => ({ buffer: png(u.includes('a') ? 700 : 1400), mime: 'image/png', ext: 'png' });
+    const st = (_b: Buffer, meta: { width: number }) => `https://hanjul.ai/c/${meta.width}.png`;
+    const r = await pickStoredImagesDetail(['https://x/a', 'https://x/b'], 2, 600, f, st, { deadlineMs: 60_000 });
+    expect(r.images.map((i) => i.width)).toEqual([700, 1400]);
   });
   it('resolveBrandColorGuarded — 메타가 있으면 fetch 0 · 없으면 후보 순서대로 · 600KB 초과·실패는 건너뛴다', async () => {
     const calls: string[] = [];

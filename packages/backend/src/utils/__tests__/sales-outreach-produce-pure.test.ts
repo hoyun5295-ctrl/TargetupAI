@@ -88,16 +88,17 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     sec('gallery', { title: 'g2' }, 4), sec('product_carousel', { title: 'p2' }, 5), sec('cta', { buttons: [{ label: '쿠폰 받기' }, { label: '더 보기' }] }, 6),
     sec('countdown', { urgency_text: 'x', end_datetime: '9월 30일' }, 7), sec('footer', {}, 8),
   ];
-  it('DM: hero=포스터(lg) · 헤더 워드마크 lg · 갤러리 2장씩 통째(list_1xN · 제목 0) · 상품은 첫 묶음에 최대 6개 · CTA 1개면 첫 상품 묶음 뒤에 1개 삽입 · 마감일 없는 countdown 제거 · footer 법정 표기', () => {
+  it('DM: hero=홈 첫 배너 · 포스터는 첫 갤러리 첫 장 · 헤더 워드마크 lg(로고 없으면 글자만) · 갤러리 2장씩 통째(list_1xN · 제목 0) · 상품은 첫 묶음에 최대 6개 · CTA 1개면 첫 상품 묶음 뒤에 1개 삽입 · 마감일 없는 countdown 제거 · footer 법정 표기', () => {
     const r = fillOutreachDmMedia(sections, media, 'DM');
     const p = (i: number) => r.sections[i].props as any;
     expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'product_carousel', 'cta', 'gallery', 'product_carousel', 'cta', 'footer']);
     expect(r.sections.map((s) => s.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     expect(p(0)).toMatchObject({ brand_name: '브랜드', brand_size: 'lg', align: 'center' });
-    expect(p(1)).toMatchObject({ image_url: media.posterUrl });
+    expect(p(0).logo_url).toBeUndefined();
+    expect(p(1)).toMatchObject({ image_url: media.gallery[0] }); // 홈 첫 배너(문서 순서)
     expect(p(1).image_fit).toBeUndefined();
     expect(p(1).height).toBeUndefined();
-    expect(p(2).images).toHaveLength(2);
+    expect(p(2).images.map((x: any) => x.url)).toEqual([media.posterUrl, media.gallery[1]]); // 포스터 = 두 번째 비주얼
     expect(p(2).layout).toBe('list_1xN');
     expect(p(2).title).toBe('');
     expect(p(2).images[0].alt).toBe('브랜드 이미지');
@@ -132,21 +133,20 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     const r = fillOutreachDmMedia([sec('countdown', { urgency_text: '마감 임박', end_datetime: future }, 0), sec('countdown', { urgency_text: 'x', end_datetime: '2020-01-01T00:00:00' }, 1)], media, 'DM');
     expect(r.sections.map((s) => (s.props as any).end_datetime)).toEqual([future]);
   });
-  it('EMAIL: hero=갤러리 첫 장 · 갤러리 2장씩 · 헤더 좌측 · 라벨 8자 · 수신거부 링크 off · 삽입 CTA도 8자', () => {
-    const r = fillOutreachDmMedia(sections, media, 'EMAIL');
+  it('EMAIL: hero=갤러리 첫 장(contain · lg) · 포스터 두 번째 · 갤러리 2장씩 · 헤더 좌측+로고 · 라벨 8자 · 수신거부 링크 off · 삽입 CTA도 8자', () => {
+    const r = fillOutreachDmMedia(sections, { ...media, logoUrl: 'https://hanjul.ai/logo.png' }, 'EMAIL');
     const p = (i: number) => r.sections[i].props as any;
     expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'product_carousel', 'cta', 'gallery', 'product_carousel', 'cta', 'footer']);
-    expect(p(0)).toMatchObject({ variant: 'logo', align: 'left' });
+    expect(p(0)).toMatchObject({ variant: 'logo', align: 'left', logo_url: 'https://hanjul.ai/logo.png', logo_size: 'md' });
     expect(p(0).brand_size).toBeUndefined();
-    expect(p(1).image_url).toBe(media.gallery[0]);
-    expect(p(1).height).toBe('lg');
-    expect(p(2).images.map((x: any) => x.url)).toEqual(media.gallery.slice(1, 3));
-    expect(p(5).images.map((x: any) => x.url)).toEqual(media.gallery.slice(3, 5));
+    expect(p(1)).toMatchObject({ image_url: media.gallery[0], image_fit: 'contain', height: 'lg' });
+    expect(p(2).images.map((x: any) => x.url)).toEqual([media.posterUrl, media.gallery[1]]);
+    expect(p(5).images.map((x: any) => x.url)).toEqual(media.gallery.slice(2, 4));
     expect(p(4).buttons[0].label.length).toBeLessThanOrEqual(8);
     expect(p(7).buttons[0].label.length).toBeLessThanOrEqual(8);
     expect(p(8).show_unsubscribe_link).toBe(false);
   });
-  it('C2-3 비율 군: 히어로에 쓴 사진 제외 · 같은 군끼리 묶음(큰 군부터) · EMAIL 히어로 = 첫 가로형 · 갤러리 링크 = 기획전 딥링크', () => {
+  it('갤러리 = 문서 순서 그대로(홈 첫 배너 = 히어로 · 포스터 = 두 번째) · 가로형 EMAIL 히어로 = md 박스 · 갤러리 링크 = 기획전 딥링크', () => {
     const gal = [
       { url: 'https://hanjul.ai/sq1.jpg', width: 800, height: 800 }, { url: 'https://hanjul.ai/land1.jpg', width: 1600, height: 900 },
       { url: 'https://hanjul.ai/land2.jpg', width: 1500, height: 1000 }, { url: 'https://hanjul.ai/sq2.jpg', width: 900, height: 900 },
@@ -159,23 +159,28 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     // CTA가 0개 → 첫 갤러리 뒤에 코드가 1개 끼운다(기획전 딥링크)
     expect(r.sections.map((s) => s.type)).toEqual(['hero', 'gallery', 'cta', 'gallery', 'gallery']);
     expect(p(2).buttons[0]).toMatchObject({ label: '기획전 보기', url: 'https://b.com/plan' });
-    expect(p(0).image_url).toBe('https://hanjul.ai/land1.jpg');          // 첫 가로형(sq1을 건너뛴다)
-    expect(p(1).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/land2.jpg', 'https://hanjul.ai/land3.jpg']); // 남은 가로형 2장
-    expect(p(3).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/sq1.jpg', 'https://hanjul.ai/sq2.jpg']);     // 정사각 2장
-    expect(p(4).images).toEqual([]);                                                                                // 세로형 1장 = 2장 미만 → 비움
+    expect(p(0)).toMatchObject({ image_url: 'https://hanjul.ai/sq1.jpg', image_fit: 'contain', height: 'lg' }); // 문서 첫 장(정사각 → lg 박스)
+    expect(p(1).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/land1.jpg', 'https://hanjul.ai/land2.jpg']);
+    expect(p(3).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/sq2.jpg', 'https://hanjul.ai/port1.jpg']);
+    expect(p(4).images).toEqual([]);                                                                                // 남은 1장 = 2장 미만 → 비움
     expect(p(1).images[0].link_url).toBe('https://b.com/plan');
-    const dm = fillOutreachDmMedia(secs, { ...m, posterUrl: 'https://hanjul.ai/poster.jpg' }, 'DM');
-    expect((dm.sections[0].props as any).image_url).toBe('https://hanjul.ai/poster.jpg');
-    expect((dm.sections[1].props as any).images).toHaveLength(2); // 가로형 2장씩(포스터가 히어로라 land1 포함)
+    // 가로형이 첫 장이면 EMAIL 히어로는 낮은 박스(md)
+    const wide = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...m, gallery: [gal[1]] }, 'EMAIL');
+    expect((wide.sections[0].props as any)).toMatchObject({ image_fit: 'contain', height: 'md' });
+    const dm = fillOutreachDmMedia(secs, { ...m, posterUrl: 'https://hanjul.ai/poster.jpg', posterSize: { width: 1792, height: 2400 } }, 'DM');
+    expect((dm.sections[0].props as any).image_url).toBe('https://hanjul.ai/sq1.jpg'); // 배너가 있으면 히어로는 배너
+    expect((dm.sections[1].props as any).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/poster.jpg', 'https://hanjul.ai/land1.jpg']); // 포스터 = 두 번째 비주얼
   });
-  it('이미지 잘림 정정: 세로형(비율 < 1) 사진 히어로 = contain · 가로·정사각 = cover(미지정) · 포스터는 맞춤 없음(split)', () => {
+  it('이미지 잘림 정정: DM 세로형 사진 히어로 = contain · 정사각 = 미지정 · EMAIL은 항상 contain · 포스터는 맞춤 없음(split)', () => {
     const port = [{ url: 'https://hanjul.ai/port.jpg', width: 800, height: 1200 }, { url: 'https://hanjul.ai/sq.jpg', width: 900, height: 900 }];
-    const r = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...media, posterUrl: null, gallery: port }, 'EMAIL');
-    expect((r.sections[0].props as any)).toMatchObject({ image_url: 'https://hanjul.ai/port.jpg', image_fit: 'contain' });
-    const sq = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...media, posterUrl: null, gallery: [port[1]] }, 'EMAIL');
-    expect((sq.sections[0].props as any).image_fit).toBeUndefined();
+    const r = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...media, posterUrl: null, gallery: port }, 'DM');
+    expect((r.sections[0].props as any)).toMatchObject({ image_url: 'https://hanjul.ai/port.jpg', image_fit: 'contain' }); // DM 세로형 사진 = contain
+    const sq = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...media, posterUrl: null, gallery: [port[1]] }, 'DM');
+    expect((sq.sections[0].props as any).image_fit).toBeUndefined(); // DM 정사각 = 미지정
+    const em = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...media, posterUrl: null, gallery: [port[1]] }, 'EMAIL');
+    expect((em.sections[0].props as any).image_fit).toBe('contain'); // EMAIL은 고정 박스라 항상 contain
     const poster = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...media, posterUrl: 'https://hanjul.ai/poster.jpg', posterSize: { width: 1792, height: 2400 }, gallery: [] }, 'DM');
-    expect((poster.sections[0].props as any)).toMatchObject({ image_url: 'https://hanjul.ai/poster.jpg' }); // 포스터 = 룩이 split을 고른다(밴드 + 이미지 전체) → 맞춤 불필요
+    expect((poster.sections[0].props as any)).toMatchObject({ image_url: 'https://hanjul.ai/poster.jpg' }); // 배너가 없을 때만 포스터가 히어로 · 룩이 split → 맞춤 불필요
     expect((poster.sections[0].props as any).image_fit).toBeUndefined();
   });
   it('C2-2 CTA 같은 URL 재바인딩: 앞 CTA와 겹치면 남은 딥링크 → 홈 → 버튼 제거(첫 버튼은 유지)', () => {

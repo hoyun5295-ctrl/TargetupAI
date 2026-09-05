@@ -701,3 +701,8 @@ v4에서 결재로 올렸다가 v4.1이 코드 근거로 **결정한 것**(재�
 - **로컬 렌더 실측(이니스프리 · 2회전 AI 산출 + 운영 포스터)**: 브랜드 색 초록 밴드·버튼, 2열 카드 캐러셀(점), 초록 풀폭 CTA 2개, 배너 2장 통째, 꼬리말 중복 0 — `scratch/proto/out/이니스프리/ba-after-dm.html`. 캡처 수단 = `scratch/proto/shot.js`(puppeteer · 뷰어가 스크롤 진입 때 섹션을 드러내므로 끝까지 훑은 뒤 캡처).
 - **테스트**: look(캐러셀 classic/focus · list 0 · 포스터 split · `accessiblePrimaryOf` 명도 보정·무채색 null) · media(TileColor · 아이콘 후보 · pngjs 합성 PNG 지배색 · 해석 순서·600KB·실패 격리) · produce-pure(갤러리 2장 통째·제목 0 · 캐러셀 6/2 · CTA 삽입·순번 · notes 중복) · 불변식(보정 함수 사용 · 크롤 색 해석 · list_1xN · perCarousel 6 · CTA 보장 · media CT에 logo_url 0).
 - **미검증**: 운영 재생성 1건 육안(Harold "그대로 보낼 수 있나"). 로고가 무채색인 브랜드(패션 검정 로고)는 색 없음 → 기본 토큰이 남는다 = 그 경우의 대안(업종 팔레트)은 실측 뒤 판단.
+
+### 22-7. 히어로 = 브랜드 배너 · 헤더 로고 허용 (2026-09-05(5) · Harold "2번 진행하고 1번 로고도 허용해서 같이 넣어" · 코드 완료 · 배포 대기)
+- **히어로**: 홈 첫 배너(문서 순서 첫 장)가 히어로, 우리 포스터는 첫 갤러리 첫 장. 갤러리 수집(`pickStoredImagesDetail`)의 면적 정렬을 폐기하고 문서 순서를 지킨다(사이트가 정한 우선순위 = 메인 배너가 앞). DM 히어로는 이미지가 있으면 비율과 무관하게 split(배너 속 글씨 위에 글씨를 겹치지 않는다 · 잘림 0) · EMAIL 히어로는 항상 contain(가로형은 md 박스 + classic). 비율 군 묶음(C2-3)은 list_1xN 전환으로 의미가 없어져 제거.
+- **로고(불변 11 개정)**: 크롤이 후보(`extractLogoCandidates` · 헤더 img(logo) → apple-touch-icon → og:image PNG · 흰·로딩·푸터·제휴·SNS 제외)를 뽑고, 제작(`collectOutreachMedia`)이 폭 60·비율 0.5~8·300KB·흰 로고(`pngLooksWhite`) 게이트를 지난 첫 장을 사본으로 저장(`media.logo`) → 헤더 섹션 `logo_url`(md) + 브랜드명. brand_kit 키 화이트리스트는 그대로(2개) — 로고는 헤더 prop으로만. 실측: 이니스프리는 헤더 img가 없어 og:image 로고 타일(200×200 초록) · 커버낫은 `woman_loading_white`가 흰 로고 판정으로 제외.
+- **테스트**: produce-pure(히어로 = 첫 배너 · 포스터 두 번째 · EMAIL contain·md · 헤더 logo_url) · look(DM split 항상 · EMAIL 비율 규칙) · media(로고 후보 순서·제외 · 흰 로고 판정 · 수집 문서 순서) · 불변식(로고는 헤더 prop만 · 면적 정렬 0 · 히어로 식).
