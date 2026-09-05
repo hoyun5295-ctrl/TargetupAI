@@ -127,10 +127,10 @@ export const OUTREACH_DM_SECTION_CONTRACT = [
   '- hero: { "headline": "메인 헤드라인(18자 이내)", "sub_copy": "부제 1문장(30자 이내)" }',
   '- text_card: { "tag": "짧은 라벨", "headline": "소제목(20자 이내)", "body": "본문 1~3문장" }',
   '- product_carousel: { "title": "상품 묶음 제목" }   (products는 코드가 채운다: 넣지 마라)',
-  '- gallery: { "title": "갤러리 제목(선택)" }         (images는 코드가 채운다: 넣지 마라)',
+  '- gallery: {}                                       (제목·images는 코드가 채운다: 넣지 마라)',
   '- coupon: { "discount_label": "혜택 한 줄", "usage_condition": "조건 한 줄" }   (원문에 혜택 문구가 그대로 있을 때만)',
   '- countdown: { "urgency_text": "마감 임박 문구", "end_datetime": "YYYY-MM-DDTHH:mm:ss" }  (원문에 종료일이 있을 때만)',
-  '- cta: { "buttons": [{ "label": "버튼 글(8자 이내)" }] }   (url은 코드가 채운다)',
+  '- cta: { "buttons": [{ "label": "버튼 글(8자 이내)" }] }   (url은 코드가 채운다 · cta는 2~3개: 첫 상품 묶음 뒤 1개, 마지막 1개)',
   '- footer: { "notes": "안내 한 줄" }',
 ].join('\n');
 

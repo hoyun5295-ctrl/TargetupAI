@@ -88,36 +88,63 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     sec('gallery', { title: 'g2' }, 4), sec('product_carousel', { title: 'p2' }, 5), sec('cta', { buttons: [{ label: '쿠폰 받기' }, { label: '더 보기' }] }, 6),
     sec('countdown', { urgency_text: 'x', end_datetime: '9월 30일' }, 7), sec('footer', {}, 8),
   ];
-  it('DM: hero=포스터 · 갤러리 4장/그 다음 1장은 비움 · 상품 3개/그 다음 1개는 비움 · CTA 딥링크 · 마감일 없는 countdown은 섹션째 제거 · footer 법정 표기', () => {
+  it('DM: hero=포스터(lg) · 헤더 워드마크 lg · 갤러리 2장씩 통째(list_1xN · 제목 0) · 상품은 첫 묶음에 최대 6개 · CTA 1개면 첫 상품 묶음 뒤에 1개 삽입 · 마감일 없는 countdown 제거 · footer 법정 표기', () => {
     const r = fillOutreachDmMedia(sections, media, 'DM');
     const p = (i: number) => r.sections[i].props as any;
-    expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'product_carousel', 'gallery', 'product_carousel', 'cta', 'footer']);
-    expect(p(0).brand_name).toBe('브랜드');
-    expect(p(1).image_url).toBe(media.posterUrl);
-    expect(p(2).images).toHaveLength(4);
+    expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'product_carousel', 'cta', 'gallery', 'product_carousel', 'cta', 'footer']);
+    expect(r.sections.map((s) => s.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(p(0)).toMatchObject({ brand_name: '브랜드', brand_size: 'lg', align: 'center' });
+    expect(p(1)).toMatchObject({ image_url: media.posterUrl });
+    expect(p(1).image_fit).toBeUndefined();
+    expect(p(1).height).toBeUndefined();
+    expect(p(2).images).toHaveLength(2);
+    expect(p(2).layout).toBe('list_1xN');
+    expect(p(2).title).toBe('');
     expect(p(2).images[0].alt).toBe('브랜드 이미지');
     expect(p(2).images.every((x: any) => x.link_url === 'https://b.com/')).toBe(true); // 코너 딥링크 없음 → 홈(C2-1)
-    expect(p(4).images).toEqual([]);
-    expect(p(3).products).toHaveLength(3);
+    expect(p(5).images.map((x: any) => x.url)).toEqual(media.gallery.slice(2, 4));
+    expect(p(3).products).toHaveLength(4);
+    expect(p(3).image_fit).toBe('contain'); // 상품 사진은 잘리지 않는다(0905(3) 잘림 정정)
     expect(p(3).products[0]).toMatchObject({ name: '상품0', link_url: 'https://b.com/p/0' });
-    expect(p(5).products).toEqual([]);
-    expect(p(6).buttons[0]).toMatchObject({ label: '쿠폰 받기', url: 'https://b.com/coupon' });
-    expect(p(6).buttons[1].url).toBe('https://b.com/');
-    expect(p(7)).toMatchObject({ legal_text: media.legal.legal, cs_phone: '1588-1234', show_unsubscribe_link: true });
+    expect(p(6).products).toEqual([]);
+    // 삽입 CTA: 쿠폰 딥링크는 원래 CTA가 쓴다 → 홈 · 라벨은 코드 기본
+    expect(p(4).buttons).toEqual([{ label: '전체 상품 보기', url: 'https://b.com/', style: 'primary' }]);
+    expect(r.sections[4].id).toMatch(/^so-auto-\d+-cta$/);
+    expect(p(7).buttons[0]).toMatchObject({ label: '쿠폰 받기', url: 'https://b.com/coupon' });
+    expect(p(7).buttons[1].url).toBe('https://b.com/');
+    expect(p(8)).toMatchObject({ legal_text: media.legal.legal, cs_phone: '1588-1234', show_unsubscribe_link: true });
+    // 모델이 notes에 옮겨 적은 법정 표기는 비운다(legal_text와 3중 표기 방지) · 안내 문장은 남는다
+    const dup = fillOutreachDmMedia([sec('footer', { notes: '대표 홍길동 | 사업자등록번호 123-45-67890' }, 0), sec('footer', { notes: '본 안내는 예시입니다' }, 1)], media, 'DM');
+    expect((dup.sections[0].props as any).notes).toBe('');
+    expect((dup.sections[1].props as any).notes).toBe('본 안내는 예시입니다');
+  });
+  it('캐러셀 제목 꼬리 문장부호 제거 · 상품 8개면 두 묶음(6+2) · CTA가 이미 2개면 삽입 0', () => {
+    const many = { ...media, products: Array.from({ length: 8 }, (_, i) => ({ name: `상품${i}`, price: 1000 + i, discount_price: null, image_url: `https://hanjul.ai/q${i}.jpg`, link_url: `https://b.com/q/${i}` })) };
+    const r = fillOutreachDmMedia([sec('product_carousel', { title: '블랙티 앰플 라인.' }, 0), sec('cta', { buttons: [{ label: '보기' }] }, 1), sec('product_carousel', { title: '클렌징 & 마스크!' }, 2), sec('cta', { buttons: [{ label: '더 보기' }] }, 3)], many, 'DM');
+    expect(r.sections.map((s) => s.type)).toEqual(['product_carousel', 'cta', 'product_carousel', 'cta']);
+    expect((r.sections[0].props as any).title).toBe('블랙티 앰플 라인');
+    expect((r.sections[0].props as any).products).toHaveLength(6);
+    expect((r.sections[2].props as any).title).toBe('클렌징 & 마스크');
+    expect((r.sections[2].props as any).products).toHaveLength(2);
   });
   it('countdown은 실재하는 미래 종료일이 있을 때만 남는다', () => {
     const future = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString().slice(0, 10) + 'T23:59:00';
     const r = fillOutreachDmMedia([sec('countdown', { urgency_text: '마감 임박', end_datetime: future }, 0), sec('countdown', { urgency_text: 'x', end_datetime: '2020-01-01T00:00:00' }, 1)], media, 'DM');
     expect(r.sections.map((s) => (s.props as any).end_datetime)).toEqual([future]);
   });
-  it('EMAIL: hero=갤러리 첫 장 · 갤러리 3장씩 · 라벨 8자 · 수신거부 링크 off', () => {
+  it('EMAIL: hero=갤러리 첫 장 · 갤러리 2장씩 · 헤더 좌측 · 라벨 8자 · 수신거부 링크 off · 삽입 CTA도 8자', () => {
     const r = fillOutreachDmMedia(sections, media, 'EMAIL');
     const p = (i: number) => r.sections[i].props as any;
+    expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'product_carousel', 'cta', 'gallery', 'product_carousel', 'cta', 'footer']);
+    expect(p(0)).toMatchObject({ variant: 'logo', align: 'left' });
+    expect(p(0).brand_size).toBeUndefined();
     expect(p(1).image_url).toBe(media.gallery[0]);
-    expect(p(2).images.map((x: any) => x.url)).toEqual(media.gallery.slice(1, 4));
-    expect(p(4).images).toEqual([]);
-    expect(p(6).buttons[0].label.length).toBeLessThanOrEqual(8);
-    expect(p(7).show_unsubscribe_link).toBe(false);
+    expect(p(1).height).toBe('lg');
+    expect(p(2).images.map((x: any) => x.url)).toEqual(media.gallery.slice(1, 3));
+    expect(p(5).images.map((x: any) => x.url)).toEqual(media.gallery.slice(3, 5));
+    expect(p(4).buttons[0].label.length).toBeLessThanOrEqual(8);
+    expect(p(7).buttons[0].label.length).toBeLessThanOrEqual(8);
+    expect(p(8).show_unsubscribe_link).toBe(false);
   });
   it('C2-3 비율 군: 히어로에 쓴 사진 제외 · 같은 군끼리 묶음(큰 군부터) · EMAIL 히어로 = 첫 가로형 · 갤러리 링크 = 기획전 딥링크', () => {
     const gal = [
@@ -129,14 +156,27 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     const secs = [sec('hero', { headline: 'h' }, 0), sec('gallery', {}, 1), sec('gallery', {}, 2), sec('gallery', {}, 3)];
     const r = fillOutreachDmMedia(secs, m, 'EMAIL');
     const p = (i: number) => r.sections[i].props as any;
+    // CTA가 0개 → 첫 갤러리 뒤에 코드가 1개 끼운다(기획전 딥링크)
+    expect(r.sections.map((s) => s.type)).toEqual(['hero', 'gallery', 'cta', 'gallery', 'gallery']);
+    expect(p(2).buttons[0]).toMatchObject({ label: '기획전 보기', url: 'https://b.com/plan' });
     expect(p(0).image_url).toBe('https://hanjul.ai/land1.jpg');          // 첫 가로형(sq1을 건너뛴다)
     expect(p(1).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/land2.jpg', 'https://hanjul.ai/land3.jpg']); // 남은 가로형 2장
-    expect(p(2).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/sq1.jpg', 'https://hanjul.ai/sq2.jpg']);     // 정사각 2장
-    expect(p(3).images).toEqual([]);                                                                                // 세로형 1장 = 2장 미만 → 비움
+    expect(p(3).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/sq1.jpg', 'https://hanjul.ai/sq2.jpg']);     // 정사각 2장
+    expect(p(4).images).toEqual([]);                                                                                // 세로형 1장 = 2장 미만 → 비움
     expect(p(1).images[0].link_url).toBe('https://b.com/plan');
     const dm = fillOutreachDmMedia(secs, { ...m, posterUrl: 'https://hanjul.ai/poster.jpg' }, 'DM');
     expect((dm.sections[0].props as any).image_url).toBe('https://hanjul.ai/poster.jpg');
-    expect((dm.sections[1].props as any).images).toHaveLength(3); // 가로형 3장(포스터가 히어로라 land1 포함)
+    expect((dm.sections[1].props as any).images).toHaveLength(2); // 가로형 2장씩(포스터가 히어로라 land1 포함)
+  });
+  it('이미지 잘림 정정: 세로형(비율 < 1) 사진 히어로 = contain · 가로·정사각 = cover(미지정) · 포스터는 맞춤 없음(split)', () => {
+    const port = [{ url: 'https://hanjul.ai/port.jpg', width: 800, height: 1200 }, { url: 'https://hanjul.ai/sq.jpg', width: 900, height: 900 }];
+    const r = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...media, posterUrl: null, gallery: port }, 'EMAIL');
+    expect((r.sections[0].props as any)).toMatchObject({ image_url: 'https://hanjul.ai/port.jpg', image_fit: 'contain' });
+    const sq = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...media, posterUrl: null, gallery: [port[1]] }, 'EMAIL');
+    expect((sq.sections[0].props as any).image_fit).toBeUndefined();
+    const poster = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...media, posterUrl: 'https://hanjul.ai/poster.jpg', posterSize: { width: 1792, height: 2400 }, gallery: [] }, 'DM');
+    expect((poster.sections[0].props as any)).toMatchObject({ image_url: 'https://hanjul.ai/poster.jpg' }); // 포스터 = 룩이 split을 고른다(밴드 + 이미지 전체) → 맞춤 불필요
+    expect((poster.sections[0].props as any).image_fit).toBeUndefined();
   });
   it('C2-2 CTA 같은 URL 재바인딩: 앞 CTA와 겹치면 남은 딥링크 → 홈 → 버튼 제거(첫 버튼은 유지)', () => {
     const m = { ...media, ctaLinks: { '쿠폰': 'https://b.com/coupon', '이벤트': 'https://b.com/event' } };

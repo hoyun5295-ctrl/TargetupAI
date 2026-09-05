@@ -26,7 +26,7 @@ import { getActiveStyleGuide, type OutreachStyleGuide } from './sales-outreach-s
 import { isSalesOutreachOperator } from './audit-log';
 import { isIndustryCode, industryLabel } from './industry-codes';
 import {
-  getOutreachContext, produceOutreachImage, produceOutreachDm, produceOutreachBrandEmail, collectOutreachMedia,
+  getOutreachContext, produceOutreachImage, produceOutreachDm, produceOutreachBrandEmail, collectOutreachMedia, fetchImageGuarded,
   generateSubjectIntro, assembleProposalEmail, countBenefitPlaceholders,
   PUBLIC_BASE, OUTREACH_PREVIEW_DAYS, type OutreachMedia,
 } from './sales-outreach-produce';
@@ -40,7 +40,7 @@ import {
   outreachTestMailDomains, isAllowedTestRecipient,
 } from './outreach-mailer';
 import {
-  extractProducts, extractImageCandidates, discoverProductLinks, buildCtaLinkMap, extractLegal, parseThemeColorFromHtml,
+  extractProducts, extractImageCandidates, discoverProductLinks, buildCtaLinkMap, extractLegal, resolveBrandColorGuarded,
   OUTREACH_FETCH_OPTS, type OutreachProduct,
 } from './sales-outreach-media';
 import { stopDm } from './dm/dm-builder';
@@ -439,6 +439,10 @@ export async function runOutreachJob(jobId: string): Promise<void> {
   const crawlOutcome: StageOutcome = page ? 'ok' : 'unavailable';
   const titleMatch = page?.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const listProducts: OutreachProduct[] = page ? extractProducts(page.html, finalUrl, 12) : [];
+  // ★ 0905(4) 브랜드 색 — theme-color·TileColor → 아이콘 PNG 지배색(색 1개만 · 로고 픽셀은 산출물에 쓰지 않는다 · 불변 11). 실패 = null(기본 토큰)
+  const brandColorRes = page
+    ? await resolveBrandColorGuarded(page.html, finalUrl, (u) => fetchImageGuarded(u, { referer: finalUrl })).catch(() => ({ color: null, source: null }))
+    : { color: null, source: null };
   const brandProfile = {
     siteTitle: titleMatch ? norm(titleMatch[1]).slice(0, 120) : null,
     excerpt: homeText ? homeText.slice(0, 600) : null,
@@ -449,7 +453,7 @@ export async function runOutreachJob(jobId: string): Promise<void> {
     selectedImageUrl: null as string | null,
     crawledAt: new Date().toISOString(),
     finalUrl: page ? finalUrl : null,
-    brand: { primaryColor: page ? parseThemeColorFromHtml(page.html) : null },
+    brand: { primaryColor: brandColorRes.color, colorSource: brandColorRes.source },
     subPageUrl: subUrl,
     structuredBlocks: homeMaterial.structuredBlocks,
     // ★ 2026-09-05 재료(순수 추출 · 네트워크 0) — 제작 단계가 실측·사본 저장에 쓴다

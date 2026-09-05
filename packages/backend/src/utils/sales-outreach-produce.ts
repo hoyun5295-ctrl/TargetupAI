@@ -39,9 +39,8 @@ import { getStructureSkeleton } from './best-copy-assets';
 import { pickVariant, resolveStructure, seedDateKey, type Avail } from './dm/dm-structure-resolve';
 import { OUTREACH_SEED_SKELETON_ID, outreachSeedSkeleton } from './sales-outreach-skeleton-seed';
 import { pruneEmptyDmSections, rebuildDmPages } from './dm/dm-section-prune';
-import { isBrandKitPrimaryAccessible } from './dm/dm-tokens';
 // ★ 2026-09-05(3) 브레인스토밍 수렴안 — 룩 배정(C1)·검수 축(C4) 순수 CT. 룩은 섹션 최상위에 코드가 입히고, 사람 편집(재료 선택·섹션 숨김)은 override 데이터로 재적용한다.
-import { applyOutreachLook, buildOutreachBrandKit, outreachArtDirection, lookStatsOf, LANDSCAPE_RATIO, OUTREACH_DM_LAYOUT_MODE, type LookImageDims, type OutreachLookStats } from './sales-outreach-look';
+import { applyOutreachLook, buildOutreachBrandKit, outreachArtDirection, lookStatsOf, accessiblePrimaryOf, LANDSCAPE_RATIO, OUTREACH_DM_LAYOUT_MODE, type LookImageDims, type OutreachLookStats } from './sales-outreach-look';
 import { splitSectionsIntoPages } from './dm/dm-page-split';
 import { applyOutreachMediaSelection, applySectionOverrides, type OutreachMediaSelection, type SectionOverride } from './sales-outreach-review';
 import { kstDateTag } from './ai-credit-calc';
@@ -459,7 +458,8 @@ export interface OutreachGenInput {
 
 /** 사용자 메시지(순수) — 재료 블록 + 재료 용량. */
 export function buildOutreachMaterialBlock(i: OutreachGenInput, want: string, channel: 'DM' | 'EMAIL'): string {
-  const carousels = Math.min(2, Math.floor(i.products.length / 2));
+  // 상품 묶음 = 한 묶음에 최대 6개(직원 실물 = 6개 카드 스와이프) · 8개 이상일 때만 2묶음 · 갤러리 = 배너 2장씩(히어로 1장 제외)
+  const carousels = i.products.length >= 8 ? 2 : i.products.length >= 2 ? 1 : 0;
   const perGallery = channel === 'DM' ? 2 : 2;
   const galleries = Math.min(2, Math.floor(Math.max(0, i.galleryCount - 1) / perGallery));
   const hasDiscount = i.products.some((p) => p.discount_price);
@@ -471,7 +471,7 @@ export function buildOutreachMaterialBlock(i: OutreachGenInput, want: string, ch
     i.products.length
       ? `[수집한 상품 ${i.products.length}개 · 이름은 이 목록에서만]\n${i.products.map((p, n) => `${n + 1}. ${p.name} (${p.discount_price ? `${fmt(p.discount_price)} · 정가 ${fmt(p.price)}` : fmt(p.price)})`).join('\n')}`
       : '[수집한 상품] 없음(product_carousel은 넣지 마라)',
-    `[재료 용량] 실측 통과 이미지 ${i.galleryCount}장 → gallery 최대 ${galleries}개 · 상품 ${i.products.length}개 → product_carousel 최대 ${carousels}개(각 2개 이상) · ${hasDiscount ? '상품에 혜택가가 있다' : '상품 혜택가를 확보하지 못했다: 할인율·최대혜택 같은 표현을 헤드라인에 쓰지 마라'}`,
+    `[재료 용량] 실측 통과 이미지 ${i.galleryCount}장 → gallery 최대 ${galleries}개 · 상품 ${i.products.length}개 → product_carousel 최대 ${carousels}개(각 2개 이상 · 한 묶음 최대 6개) · cta는 2~3개(첫 상품 묶음 뒤 1개 · 마지막 1개) · ${hasDiscount ? '상품에 혜택가가 있다' : '상품 혜택가를 확보하지 못했다: 할인율·최대혜택 같은 표현을 헤드라인에 쓰지 마라'}`,
     i.skeletonTypes && i.skeletonTypes.length ? `[참고 구성 순서] ${i.skeletonTypes.join(' → ')} (재료가 없는 섹션은 빼도 된다)` : '',
     want,
   ].filter(Boolean).join('\n\n');
@@ -543,6 +543,8 @@ export interface OutreachFillImage { url: string; width?: number; height?: numbe
 
 export interface OutreachFillMedia {
   posterUrl: string | null;
+  /** 포스터 실측 크기(히어로 비율 판정 · 세로형이면 contain) */
+  posterSize?: { width: number; height: number } | null;
   /** 실측 통과 사본(폭·높이 동승 — 비율 군 분류·룩 배정에 쓴다). 문자열 배열도 받는다(비율 미상 = square 취급). */
   gallery: Array<OutreachFillImage | string>;
   products: OutreachProduct[];
@@ -633,10 +635,18 @@ export function fillOutreachDmMedia(
     return [];
   };
   const galleryLink = galleryLinkOf(media);
+  // ★ 0905(3) 이미지 잘림 정정(Harold 접수 · 공개 샘플 4dbf85c91c) — 렌더러의 고정 높이 박스는 cover가 기본이라 세로형(0.86) 상품 사진이 37~47% 잘렸다.
+  //   상품 캐러셀은 항상 contain(상품이 통째로 보여야 한다 · 두 렌더러가 image_fit을 읽는다) · 히어로는 세로형(비율 < 1)일 때만 contain. 공용 렌더러 무변경(불변 20).
+  const heroDims = galleryAll.find((g) => g.url === heroImage) || (media.posterUrl && heroImage === media.posterUrl && media.posterSize ? { url: heroImage, ...media.posterSize } : null);
+  const heroPortrait = !!(heroDims && heroDims.width && heroDims.height && heroDims.width / heroDims.height < 1);
+  const heroIsPoster = !!media.posterUrl && heroImage === media.posterUrl;
   const usedCta = new Set<string>();
   let prodCursor = 0;
-  const perGallery = channel === 'DM' ? 4 : 3;
+  // ★ 0905(4) 갤러리 = 홈페이지 배너를 통째로(1열 · 원본 비율 · 2장씩) — 격자 썸네일은 배너 속 글씨가 읽히지 않아 "썸네일 덤프"가 된다(직원 실물은 배너를 섹션처럼 쓴다)
+  const perGallery = 2;
+  const perCarousel = 6;
   const maxLabel = channel === 'DM' ? 12 : 8;
+  const stripTrailingPunct = (t: unknown) => String(t || '').replace(/[\s.·!。:]+$/g, '').trim();
   let filled = 0;
   let heroDone = false;
   const out = sections.flatMap((s): Section[] => {
@@ -645,23 +655,31 @@ export function fillOutreachDmMedia(
     switch (s.type) {
       case 'header':
         p.brand_name = media.companyName;
-        if (channel === 'EMAIL') { p.variant = 'logo'; p.align = 'left'; }
+        // 로고 픽셀은 못 쓰니(불변 11) 워드마크는 크게(직원 실물 헤더 = 브랜드명 대형)
+        if (channel === 'EMAIL') { p.variant = 'logo'; p.align = 'left'; } else { p.variant = 'logo'; p.align = 'center'; p.brand_size = 'lg'; }
         return [{ ...s, props: p } as Section];
       case 'hero':
-        if (!heroDone && heroImage) { p.image_url = heroImage; heroDone = true; filled++; }
+        if (!heroDone && heroImage) {
+          p.image_url = heroImage; heroDone = true; filled++;
+          // 세로형 사진 = contain(고정 박스에서 잘리지 않게). 우리 포스터는 세로형이라 룩이 split(밴드 + 이미지 전체)을 고르므로 맞춤 불필요
+          if (!heroIsPoster && heroPortrait) p.image_fit = 'contain';
+        }
         if (channel === 'EMAIL') { p.height = 'lg'; p.align = 'center'; }
         return [{ ...s, props: p } as Section];
       case 'gallery': {
         const g = takeGallery(perGallery);
         p.images = g.length >= 2 ? g.map((img) => ({ url: img.url, alt: `${media.companyName} 이미지`, link_url: galleryLink })) : [];
-        p.layout = channel === 'EMAIL' ? 'grid_3x3' : 'grid_2x2';
+        p.layout = 'list_1xN';
+        p.title = ''; // 모델은 이미지를 못 본다 — 지어낸 갤러리 제목("제품 사용 컷")이 배너와 어긋난다
         if (g.length >= 2) filled++;
         return [{ ...s, props: p } as Section];
       }
       case 'product_carousel': {
-        const ps = media.products.slice(prodCursor, prodCursor + 3);
+        const ps = media.products.slice(prodCursor, prodCursor + perCarousel);
         prodCursor += ps.length;
         p.products = ps.length >= 2 ? toProductItems(ps) : [];
+        p.image_fit = 'contain';
+        p.title = stripTrailingPunct(p.title);
         if (ps.length >= 2) filled++;
         return [{ ...s, props: p } as Section];
       }
@@ -676,6 +694,8 @@ export function fillOutreachDmMedia(
       }
       case 'footer':
         p.notes = p.notes || '';
+        // 모델이 notes에 법정 표기를 옮겨 적으면 legal_text·cs_phone과 같은 줄이 세 번 찍힌다(이니스프리 육안) → 겹치면 비운다
+        if (media.legal?.legal && /사업자|대표|통신판매|고객센터|d{2,4}-d{3,4}-d{4}/.test(String(p.notes))) p.notes = '';
         if (media.legal?.legal) p.legal_text = media.legal.legal;
         if (media.legal?.csPhone) p.cs_phone = media.legal.csPhone;
         p.show_unsubscribe_link = channel === 'DM';
@@ -684,7 +704,24 @@ export function fillOutreachDmMedia(
         return [s];
     }
   });
-  return { sections: out, filled };
+  // ★ 0905(4) CTA 2개 보장 — 모델이 1개만 내면 첫 상품 묶음(없으면 첫 갤러리) 뒤에 코드가 1개 끼운다(직원 실물 = CTA 2~3회)
+  const ctaCount = out.filter((s) => s.type === 'cta').length;
+  if (ctaCount < 2) {
+    const anchorIdx = out.findIndex((s) => s.type === 'product_carousel' && Array.isArray((s.props as any)?.products) && (s.props as any).products.length > 0);
+    const galleryIdx = out.findIndex((s) => s.type === 'gallery' && Array.isArray((s.props as any)?.images) && (s.props as any).images.length > 0);
+    const at = anchorIdx >= 0 ? anchorIdx : galleryIdx;
+    if (at >= 0) {
+      // 코너(기획전·이벤트·컬렉션…) 링크를 쿠폰류보다 먼저 — 삽입 CTA는 "둘러보기" 성격
+      const kw = [...GALLERY_LINK_KEYS, ...OUTREACH_CTA_KEYWORDS].find((k) => media.ctaLinks[k] && !usedCta.has(media.ctaLinks[k]));
+      const url = kw ? media.ctaLinks[kw] : media.homepageUrl;
+      const label = (kw ? `${kw} 보기` : '전체 상품 보기').slice(0, maxLabel);
+      usedCta.add(url);
+      const inserted = { id: `so-auto-${out.length}-cta`, type: 'cta', order: 0, visible: true, props: { ...((getDefaultProps('cta' as SectionType) as unknown as Record<string, unknown>) || {}), buttons: [{ label, url, style: 'primary' }] } } as unknown as Section;
+      out.splice(at + 1, 0, inserted);
+      filled++;
+    }
+  }
+  return { sections: out.map((s, i) => ({ ...s, order: i })), filled };
 }
 
 // ===== DM 카피 혜택 기계 차단 (★ A-8 · 불변 22) =====
@@ -900,7 +937,7 @@ export async function produceOutreachDm(input: ProduceDmInput): Promise<ProduceD
     exemplars = dmPrompt.exemplars;
     const gen = await generateSections(dmPrompt, OUTREACH_DM_TYPES, 'sales-outreach-dm-sections', 'so-dm');
     const filled = fillOutreachDmMedia(gen.sections, {
-      posterUrl: input.posterUrl, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
+      posterUrl: input.posterUrl, posterSize: input.posterSize || null, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
     }, 'DM');
     const sanitized = sanitizeDmCopyBenefits(filled.sections, input.licensedQuote, input.companyName);
     benefitStripped = sanitized.stripped;
@@ -919,14 +956,15 @@ export async function produceOutreachDm(input: ProduceDmInput): Promise<ProduceD
   // ★ 아웃리치 DM = 세로 한 페이지(OUTREACH_DM_LAYOUT_MODE) — slides 확장이 갤러리 구도·링크를 버리고 sandbox 미리보기가 첫 장에서 멈춘다
   const pages = splitSectionsIntoPages(rebuilt.sections, OUTREACH_DM_LAYOUT_MODE);
 
-  const accessible = !!input.brandColor && isBrandKitPrimaryAccessible({ primary_color: input.brandColor } as any);
+  // ★ 0905(4) 브랜드 색 = 접근성 보정본(대비 미달이면 명도만 낮춰 통과시킨다 · 실패 시 null = 기본 토큰)
+  const primary = accessiblePrimaryOf(input.brandColor);
   const dm = await createDm(input.companyId, input.userId, {
     title: `[영업] ${input.companyName}`.slice(0, 200),
     sections: rebuilt.sections,
     pages,
     layout_mode: OUTREACH_DM_LAYOUT_MODE,
     // ★ C1-3 brand_kit은 항상(art_direction 그릇) · 대비 미달이면 색만 뺀다 · logo_url은 어떤 경우에도 없다(불변 11)
-    brand_kit: buildOutreachBrandKit(accessible ? input.brandColor : null, input.industry),
+    brand_kit: buildOutreachBrandKit(primary, input.industry),
     ai_prompt: input.material.slice(0, 2000),
     approval_status: 'draft',
   } as any);
@@ -987,7 +1025,7 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
   const emailPrompt = buildEmailSectionsPrompt(genInput, exemplarSource);
   const gen = await generateSections(emailPrompt, OUTREACH_EMAIL_TYPES, 'sales-outreach-email-sections', 'so-brand');
   const filled = fillOutreachDmMedia(gen.sections, {
-    posterUrl: input.posterUrl, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
+    posterUrl: input.posterUrl, posterSize: input.posterSize || null, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
   }, 'EMAIL');
   const sanitized = sanitizeDmCopyBenefits(filled.sections, input.licensedQuote, input.companyName);
   const pruned = pruneEmptyDmSections(sanitized.sections);
@@ -1201,13 +1239,13 @@ export function buildOutreachPlainText(guide: OutreachStyleGuide, input: Proposa
 export function assembleProposalEmail(input: ProposalEmailInput): { subject: string; intro: string; html: string; text: string; placeholderCount: number } {
   const guide = getActiveStyleGuide();
   const sections = buildProposalEmailSections(guide, input);
-  const accessible = !!input.brandColor && isBrandKitPrimaryAccessible({ primary_color: input.brandColor } as any);
+  const primary = accessiblePrimaryOf(input.brandColor);
   const html = renderEmailSections(sections, {
     design: {
       // ★ 0905(3) C1-4 업종군 표(DM brand_kit과 같은 원천) — 업체와 무관하게 같은 옷을 입던 하드코딩 한 벌 제거
       art_direction: outreachArtDirection(input.industry),
       preheader: guide.emailCopy.preheader(input.companyName),
-      ...(accessible ? { palette: { primary: input.brandColor as string } } : {}),
+      ...(primary ? { palette: { primary } } : {}),
     } as any,
     publicBase: PUBLIC_BASE,
   }).replace(EMAIL_FOOTER_SLOT, '');

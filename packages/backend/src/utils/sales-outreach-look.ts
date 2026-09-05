@@ -22,6 +22,7 @@ import type { DmBrandKit } from './dm/dm-tokens';
 import { TREATMENTS } from './dm/dm-art-direction';
 import { EMAIL_TREATMENTS, EMAIL_BACKGROUNDS } from './email/email-blocks';
 import { exemplarGroupOf } from './sales-outreach-exemplars';
+import { getContrastRatio } from './dm/dm-tokens';
 
 export type OutreachChannel = 'DM' | 'EMAIL';
 
@@ -33,6 +34,39 @@ export type OutreachChannel = 'DM' | 'EMAIL';
  * 되돌리기 = 이 상수 하나(produce.ts가 pages·layout_mode에 같이 쓴다).
  */
 export const OUTREACH_DM_LAYOUT_MODE: 'scroll' = 'scroll';
+
+/** 흰 글자 대비 하한(dm-tokens.isBrandKitPrimaryAccessible과 같은 값) */
+const PRIMARY_MIN_CONTRAST = 4.5;
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const m = /^#([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgbToHex(r: number, g: number, b: number): string {
+  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  return `#${c(r)}${c(g)}${c(b)}`;
+}
+
+/**
+ * ★ 0905(4) 브랜드 색 접근성 보정 — 브랜드 색이 흰 글자 대비 4.5 미만이면(이니스프리 초록 실측 2.6) 버리고 기본 보라 토큰이 나가
+ * "템플릿 티"가 났다. 색상·채도는 두고 **명도만 단계적으로 낮춰** 대비를 넘기는 첫 색을 쓴다(브랜드 정체성 유지 · 결정적). 12단계 안에 못 넘기면 null.
+ */
+export function accessiblePrimaryOf(hex: string | null | undefined): string | null {
+  const rgb = hex ? hexToRgb(hex) : null;
+  if (!rgb) return null;
+  let [r, g, b] = rgb;
+  // 밝은 무채색(흰·연회색)은 브랜드 색이 아니다 — 어둡게 만들면 회색이 되어 통과해 버린다. 검정·짙은 회색은 정당한 브랜드 색(패션)이라 허용.
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  if (mx > 0 && (mx - mn) / mx < 0.1 && mx / 255 > 0.5) return null;
+  for (let i = 0; i < 12; i++) {
+    const cur = rgbToHex(r, g, b);
+    if (getContrastRatio(cur, '#ffffff') >= PRIMARY_MIN_CONTRAST) return cur;
+    r *= 0.88; g *= 0.88; b *= 0.88;
+  }
+  return null;
+}
 
 /** 이미지 URL → 실측 폭·높이(갤러리·상품 사본·포스터). 없는 URL = 비율 미상(가로형으로 간주하지 않는다). */
 export type LookImageDims = Record<string, { width: number; height: number }>;
@@ -54,7 +88,7 @@ export type OutreachArtDirection = {
 /** 업종군(예시 3군과 같은 축) → DM·이메일 공통 아트디렉션. 결정적 표 — 감각치를 런타임에 만들지 않는다. */
 export const OUTREACH_ART_DIRECTION: Record<'fashion' | 'beauty' | 'commerce', OutreachArtDirection> = {
   fashion:  { typeScale: 'editorial', headlineFont: 'sans', spacingDensity: 'airy',     accentMotif: 'rule', sectionDivider: 'hairline' },
-  beauty:   { typeScale: 'minimal',   headlineFont: 'sans', spacingDensity: 'standard', accentMotif: 'dot',  sectionDivider: 'gap' },
+  beauty:   { typeScale: 'minimal',   headlineFont: 'sans', spacingDensity: 'standard', accentMotif: 'none', sectionDivider: 'gap' }, // dot은 제목 끝 빨간 점이 문장부호처럼 보였다(이니스프리 육안)
   commerce: { typeScale: 'bold',      headlineFont: 'sans', spacingDensity: 'standard', accentMotif: 'rule', sectionDivider: 'hairline' },
 };
 
@@ -108,13 +142,13 @@ export interface OutreachLookStats {
 /**
  * 룩 배정(순수). 입력 순서를 보존하고 섹션 최상위에 treatment·background만 덧쓴다(props 무변경).
  * 규칙(재료 형태로 결정 · 채널 허용표로 검증):
- *  - hero: 이미지 없음 → typographic · 세로·정사각(비율 < 1.25) → split · 가로(≥ 1.25)·비율 미상 → classic(미설정)
+ *  - hero: 이미지 없음 → typographic · 세로·정사각(비율 < 1.25 · 우리 포스터 포함) → split(브랜드 색 밴드 위 헤드라인 + 이미지 전체 · 잘림 0) · 가로·비율 미상 → classic(미설정)
  *  - text_card: 첫 번째 lead · 홀수 번째 framed · 그 밖 classic + soft(리듬)
- *  - product_carousel: 첫 번째 focus + soft · 두 번째부터 list
- *  - gallery(DM): 3장 이상 + 첫 장 가로형 → mosaic
+ *  - product_carousel: 상품 2~3개 → focus · 4개 이상 → classic(2열 카드 스와이프 · 직원 실물 형태) · 첫 묶음 soft · list(작은 썸네일 행)는 쓰지 않는다
+ *  - gallery(DM): 격자 배치에서만 3장 이상 + 첫 장 가로형 → mosaic(배너 통째 목록 list_1xN에는 얹지 않는다)
  *  - coupon: DM ticket · EMAIL spotlight
  *  - countdown(DM): banner
- *  - cta: 마지막 cta 앞의 cta = bar + tint · 마지막 cta = classic(마무리)
+ *  - cta: 전부 bar(브랜드 색 풀폭) · 마지막 앞의 cta만 tint 밴드
  */
 export function applyOutreachLook(sections: readonly Section[], channel: OutreachChannel, dims: LookImageDims): { sections: Section[]; stats: OutreachLookStats } {
   const list = Array.isArray(sections) ? sections.filter((s) => s && typeof s === 'object') : [];
@@ -139,14 +173,18 @@ export function applyOutreachLook(sections: readonly Section[], channel: Outreac
         else if (n % 2 === 1) treatment = pickTreatment(channel, type, 'framed');
         else background = pickBackground(channel, 'soft');
         break;
-      case 'product_carousel':
-        if (n === 1) { treatment = pickTreatment(channel, type, 'focus'); background = pickBackground(channel, 'soft'); }
-        else treatment = pickTreatment(channel, type, 'list');
+      case 'product_carousel': {
+        // 상품 4개 이상 = classic(2열 카드 · 3개 초과면 가로 스와이프 + 점 = 직원 실물 형태) · 2~3개 = focus(첫 상품 대형). list(작은 썸네일 행)는 쓰지 않는다.
+        const count = Array.isArray(p.products) ? p.products.length : 0;
+        if (count > 0 && count < 4) treatment = pickTreatment(channel, type, 'focus');
+        if (n === 1) background = pickBackground(channel, 'soft');
         break;
+      }
       case 'gallery': {
         const imgs: any[] = Array.isArray(p.images) ? p.images : [];
         const r0 = ratioOf(imgs[0]?.url, dims);
-        if (imgs.length >= 3 && r0 !== null && r0 >= LANDSCAPE_RATIO) treatment = pickTreatment(channel, type, 'mosaic');
+        // 배너 통째 목록(list_1xN)에는 격자 구도를 얹지 않는다
+        if (p.layout !== 'list_1xN' && imgs.length >= 3 && r0 !== null && r0 >= LANDSCAPE_RATIO) treatment = pickTreatment(channel, type, 'mosaic');
         break;
       }
       case 'coupon':
@@ -156,7 +194,9 @@ export function applyOutreachLook(sections: readonly Section[], channel: Outreac
         treatment = pickTreatment(channel, type, 'banner');
         break;
       case 'cta':
-        if (i !== lastCtaIdx) { treatment = pickTreatment(channel, type, 'bar'); background = pickBackground(channel, 'tint'); }
+        // 전부 큰 바(brand 색 풀폭 · 직원 실물 CTA 형태) · 마지막 앞의 CTA만 tint 밴드
+        treatment = pickTreatment(channel, type, 'bar');
+        if (i !== lastCtaIdx) background = pickBackground(channel, 'tint');
         break;
       default:
         break;

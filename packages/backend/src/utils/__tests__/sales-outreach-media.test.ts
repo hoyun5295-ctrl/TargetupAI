@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   readImageSize, extractProducts, extractImageCandidates, discoverProductLinks, findLinkByText, buildCtaLinkMap, pickStoredImagesDetail,
+  extractBrandIconCandidates, dominantColorFromPng, resolveBrandColorGuarded,
   extractLegal, parseThemeColorFromHtml, parseProductPage, absolutizeAssetUrl, cleanProductName, productKey, decodeHtmlEntities,
 } from '../sales-outreach-media';
 
@@ -131,6 +132,49 @@ describe('pickStoredImagesDetail (C3-2 벽시계 예산 · 시도 수)', () => {
     const capped = await pickStoredImagesDetail(cands, 1, 600, fetcher, store, { maxTries: 1 });
     expect(capped.tried).toBe(1);
     expect(capped.images).toEqual([]);
+  });
+});
+
+describe('★0905(4) 브랜드 색 — 메타 → 아이콘 PNG 지배색(색 1개만 · 로고 픽셀은 안 쓴다)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { PNG } = require('pngjs');
+  const makePng = (w: number, h: number, paint: (x: number, y: number) => [number, number, number, number]) => {
+    const png = new PNG({ width: w, height: h });
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; const [r, g, b, a] = paint(x, y); png.data[i] = r; png.data[i + 1] = g; png.data[i + 2] = b; png.data[i + 3] = a; }
+    return PNG.sync.write(png) as Buffer;
+  };
+  it('theme-color → 없으면 msapplication-TileColor · 3자리 확장 · 그 외 null', () => {
+    expect(parseThemeColorFromHtml('<meta name="theme-color" content="#ABC">')).toBe('#aabbcc');
+    expect(parseThemeColorFromHtml('<meta name="msapplication-TileColor" content="#12B464">')).toBe('#12b464');
+    expect(parseThemeColorFromHtml('<meta name="theme-color" content="rgb(1,2,3)">')).toBeNull();
+    expect(parseThemeColorFromHtml('')).toBeNull();
+  });
+  it('아이콘 후보 = og:image(PNG일 때) · apple-touch-icon · icon(png) · PNG 아닌 것 제외 · 최대 3', () => {
+    const html = `<meta property="og:image" content="/img/brand/logo.png"><link rel="icon" type="image/x-icon" href="/favicon.ico">
+      <link rel="apple-touch-icon" sizes="180x180" href="/apple.png"><link rel="icon" type="image/png" href="https://cdn.brand.com/i.png"><link rel="icon" type="image/png" href="/d.png">`;
+    expect(extractBrandIconCandidates(html, BASE)).toEqual(['https://www.brand.co.kr/img/brand/logo.png', 'https://www.brand.co.kr/apple.png', 'https://cdn.brand.com/i.png']);
+    expect(extractBrandIconCandidates('<meta property="og:image" content="/img/hero.jpg">', BASE)).toEqual([]);
+  });
+  it('지배색 = 채도 있는 최빈 색(흰 글씨·회색·투명 제외) · 무채색 로고·비PNG = null', () => {
+    const logo = makePng(60, 60, (x, y) => (x > 10 && x < 50 && y > 25 && y < 35 ? [255, 255, 255, 255] : [18, 180, 100, 255]));
+    const c = dominantColorFromPng(logo)!;
+    expect(c).toBe('#12b464');
+    const gray = makePng(20, 20, () => [120, 120, 120, 255]);
+    expect(dominantColorFromPng(gray)).toBeNull();
+    const transparent = makePng(20, 20, () => [200, 20, 20, 10]);
+    expect(dominantColorFromPng(transparent)).toBeNull();
+    expect(dominantColorFromPng(Buffer.from('not png'))).toBeNull();
+  });
+  it('resolveBrandColorGuarded — 메타가 있으면 fetch 0 · 없으면 후보 순서대로 · 600KB 초과·실패는 건너뛴다', async () => {
+    const calls: string[] = [];
+    const logo = makePng(30, 30, () => [200, 30, 60, 255]);
+    const fetcher = async (u: string) => { calls.push(u); if (u.endsWith('big.png')) return { buffer: Buffer.alloc(700_000, 1), mime: 'image/png', ext: 'png' }; if (u.endsWith('logo.png')) return { buffer: logo, mime: 'image/png', ext: 'png' }; return null; };
+    expect(await resolveBrandColorGuarded('<meta name="theme-color" content="#000000">', BASE, fetcher)).toEqual({ color: '#000000', source: 'meta' });
+    expect(calls).toEqual([]);
+    const html = '<link rel="apple-touch-icon" href="/big.png"><link rel="icon" type="image/png" href="/none.png"><meta property="og:image" content="/logo.png">';
+    expect(await resolveBrandColorGuarded(html, BASE, fetcher)).toEqual({ color: '#c81e3c', source: 'icon' });
+    expect(calls).toEqual(['https://www.brand.co.kr/logo.png', 'https://www.brand.co.kr/big.png', 'https://www.brand.co.kr/none.png'].slice(0, calls.length));
+    expect(await resolveBrandColorGuarded('<meta property="og:image" content="/none.png">', BASE, fetcher)).toEqual({ color: null, source: null });
   });
 });
 

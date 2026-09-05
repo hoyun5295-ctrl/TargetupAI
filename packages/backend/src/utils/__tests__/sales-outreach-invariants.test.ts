@@ -270,7 +270,7 @@ describe('sales-outreach invariants', () => {
     // 룩 배정은 prune 뒤 · DM brand_kit은 항상 buildOutreachBrandKit(색은 접근성 통과 시에만) · 제안 메일 아트디렉션 하드코딩 0
     expect(produce).toContain("applyOutreachLook(pruned.sections, 'DM', dims)");
     expect(produce).toContain("applyOutreachLook(pruned.sections, 'EMAIL', dims)");
-    expect(produce).toContain('brand_kit: buildOutreachBrandKit(accessible ? input.brandColor : null, input.industry)');
+    expect(produce).toContain('brand_kit: buildOutreachBrandKit(primary, input.industry)');
     expect(produce).not.toMatch(/brand_kit: accessible \? \{ primary_color/);
     expect(produce).not.toMatch(/art_direction: \{ typeScale: 'bold', spacingDensity: 'airy'/);
     expect(produce).toContain('art_direction: outreachArtDirection(input.industry)');
@@ -308,6 +308,15 @@ describe('sales-outreach invariants', () => {
     expect(jobs).toContain('const carry = presetSections && prevDm ? prevDm : null;');
     expect(jobs).toContain('hiddenSkipped: dm.hiddenSkipped');
     expect(produce).toContain('look = lookStatsOf(rebuilt.sections);');
+    // ★0905(4) 전문가 느낌 — 브랜드 색은 접근성 보정본 · 크롤이 아이콘 PNG 지배색까지 본다 · 갤러리 배너 통째 · 캐러셀 6개 · CTA 2개 보장
+    expect(produce).toContain('accessiblePrimaryOf(input.brandColor)');
+    expect(produce).not.toContain('isBrandKitPrimaryAccessible(');
+    expect(jobs).toContain('resolveBrandColorGuarded(page.html, finalUrl');
+    expect(produce).toContain("p.layout = 'list_1xN';");
+    expect(produce).toContain('const perCarousel = 6;');
+    expect(produce).toContain('if (ctaCount < 2) {');
+    // 로고 픽셀은 산출물에 쓰지 않는다 — 색 해석 CT가 logo_url을 만들지 않는다
+    expect(readCode('utils/sales-outreach-media.ts')).not.toContain('logo_url');
   });
 
   it('제작 실패 4단계 3값 — markFailed가 stage_results[failStage]=unavailable을 찍는다', () => {

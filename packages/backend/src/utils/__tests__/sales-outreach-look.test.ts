@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })), pool: { connect: vi.fn() }, default: { connect: vi.fn(), query: vi.fn() } }));
 
 import {
-  applyOutreachLook, lookStatsOf, pickTreatment, buildOutreachBrandKit, outreachArtDirection, countLookMarkers,
+  applyOutreachLook, lookStatsOf, pickTreatment, buildOutreachBrandKit, outreachArtDirection, countLookMarkers, accessiblePrimaryOf,
   OUTREACH_BRAND_KIT_KEYS, OUTREACH_BACKGROUNDS, LANDSCAPE_RATIO, OUTREACH_ART_DIRECTION, OUTREACH_DM_LAYOUT_MODE,
 } from '../sales-outreach-look';
 import { TREATMENTS } from '../dm/dm-art-direction';
@@ -49,11 +49,13 @@ describe('applyOutreachLook — 값은 채널 허용표 안 · 섹션 최상위 
     expect(byId['t-6-text_card'].treatment).toBeUndefined();
     expect(byId['t-9-text_card'].treatment).toBe('framed');
     expect(byId['t-3-product_carousel']).toMatchObject({ treatment: 'focus', background: 'soft' });
-    expect(byId['t-7-product_carousel'].treatment).toBe('list');
+    expect(byId['t-7-product_carousel'].treatment).toBe('focus'); // 2~3개는 focus · list(작은 썸네일 행)는 쓰지 않는다
+    expect(byId['t-7-product_carousel'].background).toBeUndefined();
     expect(byId['t-5-gallery'].treatment).toBe('mosaic');
     expect(byId['t-8-coupon'].treatment).toBe('ticket');
     expect(byId['t-4-cta']).toMatchObject({ treatment: 'bar', background: 'tint' });
-    expect(byId['t-10-cta'].treatment).toBeUndefined();
+    expect(byId['t-10-cta'].treatment).toBe('bar'); // 마지막 CTA도 브랜드 색 풀폭 바
+    expect(byId['t-10-cta'].background).toBeUndefined();
     expect(byId['t-0-header'].treatment).toBeUndefined();
     expect(byId['t-11-footer'].treatment).toBeUndefined();
     // props는 한 글자도 안 바뀐다 · 순서 보존
@@ -69,7 +71,8 @@ describe('applyOutreachLook — 값은 채널 허용표 안 · 섹션 최상위 
     }
     expect(lookStatsOf(r.sections)).toEqual(r.stats);
   });
-  it('hero: 이미지 없음 = typographic · 가로형·비율 미상 = classic(미설정)', () => {
+  it('hero: 이미지 없음 = typographic · 가로형·비율 미상 = classic(미설정) · 세로형 포스터도 split(밴드 + 이미지 전체)', () => {
+    expect(applyOutreachLook(fixture(IMG('port')), 'DM', dims).sections[1].treatment).toBe('split');
     expect(applyOutreachLook(fixture(''), 'DM', dims).sections[1].treatment).toBe('typographic');
     expect(applyOutreachLook(fixture(IMG('land')), 'DM', dims).sections[1].treatment).toBeUndefined();
     expect(applyOutreachLook(fixture(IMG('unknown')), 'DM', dims).sections[1].treatment).toBeUndefined();
@@ -141,6 +144,36 @@ describe('렌더 HTML 지표 — 룩이 실제로 실린다(JSON이 아니라 �
     const htmlAfter = renderEmailSections(looked.sections, ctx);
     expect(countLookMarkers(htmlAfter).emailBands).toBe(looked.stats.backgrounds);
     expect(htmlAfter.length).toBeGreaterThan(htmlBefore.length);
+  });
+});
+
+describe('★0905(4) 전문가 느낌 — 캐러셀 구도 · 브랜드 색 보정', () => {
+  it('상품 4개 이상 = classic(미설정 · 2열 카드 스와이프) · 2~3개 = focus · 첫 묶음만 soft · list_1xN 갤러리에는 mosaic을 얹지 않는다', () => {
+    const six = Array.from({ length: 6 }, (_, i) => ({ name: `P${i}`, price: 1000, image_url: IMG('sq'), link_url: `https://b.com/${i}` }));
+    const secs = [
+      sec('product_carousel', { title: 'a', products: six }, 0),
+      sec('product_carousel', { title: 'b', products: six.slice(0, 2) }, 1),
+      sec('gallery', { layout: 'list_1xN', images: [{ url: IMG('land') }, { url: IMG('land') }, { url: IMG('land') }] }, 2),
+    ];
+    const r = applyOutreachLook(secs, 'DM', dims);
+    expect(r.sections[0].treatment).toBeUndefined();
+    expect(r.sections[0].background).toBe('soft');
+    expect(r.sections[1].treatment).toBe('focus');
+    expect(r.sections[1].background).toBeUndefined();
+    expect(r.sections[2].treatment).toBeUndefined();
+    expect(r.sections.some((s) => s.treatment === 'list')).toBe(false);
+  });
+  it('accessiblePrimaryOf — 대비 4.5 미만이면 명도만 낮춰 통과시키는 첫 색(색상 유지) · 이미 통과면 그대로 · 흰색·무효는 null', () => {
+    const green = accessiblePrimaryOf('#12b464'); // 이니스프리 로고 초록(흰 글자 대비 2.6)
+    expect(green).toMatch(/^#[0-9a-f]{6}$/);
+    expect(green).not.toBe('#12b464');
+    const [r, g, b] = [parseInt(green!.slice(1, 3), 16), parseInt(green!.slice(3, 5), 16), parseInt(green!.slice(5, 7), 16)];
+    expect(g).toBeGreaterThan(r);
+    expect(g).toBeGreaterThan(b);
+    expect(accessiblePrimaryOf('#1e3a8a')).toBe('#1e3a8a');
+    expect(accessiblePrimaryOf('#ffffff')).toBeNull();
+    expect(accessiblePrimaryOf('nope')).toBeNull();
+    expect(accessiblePrimaryOf(null)).toBeNull();
   });
 });
 

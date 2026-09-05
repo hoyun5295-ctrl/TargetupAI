@@ -281,15 +281,98 @@ export function extractLegal(text: string): { legal: string | null; csPhone: str
   return { legal: parts.length >= 2 ? parts.join(' | ') : null, csPhone: cs ? cs[1] : null };
 }
 
-/** theme-color 메타(순수) : 6자리 hex로 정규화(3자리 확장). 그 외 null. */
-export function parseThemeColorFromHtml(html: string): string | null {
-  const m = html.match(/<meta[^>]+name=["']theme-color["'][^>]+content=["']([^"']+)["']/i)
-    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']theme-color["']/i);
-  if (!m) return null;
-  const v = m[1].trim();
+function normalizeHex6(raw: string): string | null {
+  const v = String(raw || '').trim();
   if (/^#[0-9a-f]{6}$/i.test(v)) return v.toLowerCase();
   if (/^#[0-9a-f]{3}$/i.test(v)) return ('#' + v.slice(1).split('').map((c) => c + c).join('')).toLowerCase();
   return null;
+}
+
+/** theme-color 메타 → 없으면 msapplication-TileColor(순수) : 6자리 hex로 정규화(3자리 확장). 그 외 null. */
+export function parseThemeColorFromHtml(html: string): string | null {
+  const pick = (name: string) => html.match(new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`, 'i'))
+    || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${name}["']`, 'i'));
+  const m = pick('theme-color') || pick('msapplication-TileColor');
+  return m ? normalizeHex6(m[1]) : null;
+}
+
+// ===== 브랜드 색 2차 원천 — 아이콘 PNG의 지배색(★ 0905(4) "전문가가 만든 느낌" · 색이 없으면 기본 토큰 보라가 나가 템플릿 티가 난다) =====
+// ⛔ 로고 픽셀은 산출물에 쓰지 않는다(불변 11 · 상표). 여기서는 색 1개만 읽는다. PNG만(pngjs 순수 디코드 · favicon.ico·webp는 대상 밖).
+
+/** 브랜드 색을 읽을 아이콘 후보(PNG만 · ≤3) — og:image가 PNG면 로고인 경우가 많다(이니스프리 실측) · apple-touch-icon · icon(png). */
+export function extractBrandIconCandidates(html: string, base: string): string[] {
+  const out: string[] = [];
+  const push = (u: string | null | undefined) => {
+    const a = u ? absolutizeAssetUrl(u, base) : null;
+    if (a && /\.png(\?|$)/i.test(a) && !out.includes(a)) out.push(a);
+  };
+  const og = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i);
+  push(og?.[1]);
+  for (const m of html.matchAll(/<link[^>]+rel=["'][^"']*apple-touch-icon[^"']*["'][^>]*>/gi)) push(m[0].match(/href=["']([^"']+)["']/i)?.[1]);
+  for (const m of html.matchAll(/<link[^>]+rel=["'](?:icon|shortcut icon)["'][^>]*>/gi)) {
+    if (/image\/png|\.png/i.test(m[0])) push(m[0].match(/href=["']([^"']+)["']/i)?.[1]);
+  }
+  return out.slice(0, 3);
+}
+
+/**
+ * PNG 픽셀에서 지배 채도색 1개(순수). 흰·검·회색·반투명은 뺀다. 색상 12° × 채도 2단 히스토그램의 최빈 빈 평균색.
+ * 표본이 20픽셀 미만이면 null(무채색 로고 = 색 없음).
+ */
+export function dominantColorFromPng(buf: Buffer): string | null {
+  if (!buf || buf.length < 24 || buf[0] !== 0x89 || buf[1] !== 0x50) return null;
+  // pngjs는 타입 정의가 없어 require로 읽는다(순수 디코드 · 네트워크 0)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pngjs = require('pngjs') as { PNG: { sync: { read(b: Buffer): { width: number; height: number; data: Buffer } } } };
+  let png: { width: number; height: number; data: Buffer };
+  try { png = pngjs.PNG.sync.read(buf); } catch { return null; }
+  const { width, height, data } = png;
+  if (!width || !height || !data) return null;
+  const stride = Math.max(1, Math.floor(Math.sqrt((width * height) / 4000)));
+  const bins = new Map<number, { n: number; r: number; g: number; b: number }>();
+  for (let y = 0; y < height; y += stride) {
+    for (let x = 0; x < width; x += stride) {
+      const i = (y * width + x) * 4;
+      if (data[i + 3] < 128) continue;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      const v = max / 255;
+      const s = max === 0 ? 0 : (max - min) / max;
+      if (s < 0.3 || v < 0.15) continue;
+      const d = max - min;
+      let h = 0;
+      if (d) { h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4; h = (h * 60 + 360) % 360; }
+      const key = Math.floor(h / 12) * 2 + (s > 0.6 ? 1 : 0);
+      const e = bins.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+      e.n++; e.r += r; e.g += g; e.b += b;
+      bins.set(key, e);
+    }
+  }
+  let best: { n: number; r: number; g: number; b: number } | null = null;
+  for (const e of bins.values()) if (!best || e.n > best.n) best = e;
+  if (!best || best.n < 20) return null;
+  const hex = (n: number) => Math.round(n / best!.n).toString(16).padStart(2, '0');
+  return `#${hex(best.r)}${hex(best.g)}${hex(best.b)}`;
+}
+
+export type BrandColorSource = 'meta' | 'icon' | null;
+
+/** 브랜드 색 해석(네트워크 층 · 가드 fetch 주입) — theme-color·TileColor → 아이콘 PNG 지배색. 실패 = null(뷰어 기본 토큰). source는 근거 패널용. */
+export async function resolveBrandColorGuarded(
+  html: string, base: string, fetcher: GuardedImageFetcher,
+): Promise<{ color: string | null; source: BrandColorSource }> {
+  const meta = parseThemeColorFromHtml(html);
+  if (meta) return { color: meta, source: 'meta' };
+  for (const u of extractBrandIconCandidates(html, base)) {
+    try {
+      const img = await fetcher(u);
+      if (!img || img.buffer.length > 600_000) continue;
+      const c = dominantColorFromPng(img.buffer);
+      if (c) return { color: c, source: 'icon' };
+    } catch { /* 다음 후보 */ }
+  }
+  return { color: null, source: null };
 }
 
 // ===== 이미지 헤더 실측(순수 · 외부 라이브러리 0) =====
