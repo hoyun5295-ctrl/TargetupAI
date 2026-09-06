@@ -1290,6 +1290,14 @@ export function eventCtaLabel(card: { title: string }, maxLabel = 16): string {
   return (head && /[가-힣A-Za-z]{2,}/.test(head) ? `${head} 보기` : '행사 보기').slice(0, maxLabel);
 }
 
+/** 기간 줄 — "기간 " + 원문 · 원문이 이미 "기간 :"·"일정 :" 으로 시작하면 접두를 겹치지 않는다(토니모리 실측 "기간 기간 : …") */
+export function periodLineOf(periodRaw: string | null | undefined): string {
+  const raw = String(periodRaw || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return '';
+  const body = raw.replace(/^(?:기간|일정)\s*[:：]?\s*/, '');
+  return body ? `기간 ${body}`.slice(0, 60) : '';
+}
+
 /** 상품 CTA 라벨 — 앞머리 대괄호 꼬리표("[대용량]")를 떼고 낱말 경계 12자 + " 보기" */
 export function productCtaLabel(name: string, maxLabel = 16): string {
   const base = String(name || '').replace(/^\s*(?:\[[^\]]{1,12}\]\s*)+/, '').replace(/\s+/g, ' ').trim();
@@ -1396,7 +1404,7 @@ function fillOutreachDmMediaV3(sections: readonly Section[], media: OutreachFill
     const h = headlineFromCard(card, card.licensed);
     if (h.demoted) return null;
     // 기간 원문은 면허와 무관하게 싣는다(목록 페이지의 진행 중 카드 원문 · 날짜는 혜택 수치가 아니다) · 면허(종료일 검증)는 countdown 만 가른다
-    const period = card.periodRaw ? `기간 ${String(card.periodRaw).replace(/\s+/g, ' ').trim()}`.slice(0, 60) : '';
+    const period = periodLineOf(card.periodRaw);
     return mk('text_card', {
       tag: posterCategoryLabel(card.title, null) || '이벤트',
       headline: h.headline,
@@ -1438,7 +1446,7 @@ function fillOutreachDmMediaV3(sections: readonly Section[], media: OutreachFill
     if (card1) {
       const h = headlineFromCard(card1, card1.licensed);
       if (!h.demoted) p.headline = h.headline;
-      if (card1.periodRaw) p.sub_copy = `기간 ${String(card1.periodRaw).replace(/\s+/g, ' ').trim()}`.slice(0, 60);
+      if (card1.periodRaw) p.sub_copy = periodLineOf(card1.periodRaw);
     }
     if (heroImage) {
       p.image_url = heroImage; filled++;

@@ -16,7 +16,7 @@ import {
   parseLicensedEndDate, findEventPageLink, findEventListLinks, eventCandidatesFromCards, normalizeEventSelection, eventCardsOf, buildOutreachRecipe, OUTREACH_EVENT_SELECT_MAX,
 } from '../sales-outreach-jobs';
 import {
-  fillOutreachDmMedia, headlineFromCard, eventCtaLabel, productCtaLabel, assertBlockMinima, OUTREACH_BLOCK_MINIMA, OUTREACH_SECTION_MAX, insertProofCard,
+  fillOutreachDmMedia, headlineFromCard, eventCtaLabel, productCtaLabel, periodLineOf, assertBlockMinima, OUTREACH_BLOCK_MINIMA, OUTREACH_SECTION_MAX, insertProofCard,
   licensedLineOf, assertLicensedQuoteSources, autoRetryReasons, productFactKeys, DM_VISION_ITEMS, addOutreachAiCost, newOutreachAiCost, replyLineOf, OUTREACH_REPLY_LINE_MAX,
   buildOutreachMaterialBlock,
 } from '../sales-outreach-produce';
@@ -70,9 +70,10 @@ describe('★ v3 재료 층 — 이벤트 목록 카드(순수 · AI 0)', () => 
     const cards = extractEventListCards(EVENT_LIST_HTML, 'https://www.isoi.co.kr/', parseLicensedEndDate);
     const now = new Date('2026-09-06T00:00:00+09:00');
     const c = eventCandidatesFromCards(cards, 'https://www.isoi.co.kr/board/event/list', now);
-    expect(c.map((x) => x.benefitLicensed)).toEqual([true, true, true, false, false]);
-    expect(c[3]).toMatchObject({ quote: '멤버십 위크', origin: 'card', endDate: '2025-01-31', benefitLicensed: false });
-    expect(c[4]).toMatchObject({ quote: '상시 진행 · 리뷰 적립', origin: 'card', endDate: null, benefitLicensed: false });
+    // 종료일이 지난 "멤버십 위크"(2025-01-31)는 후보가 아니다(토니모리 정정) · 종료일 모르는 카드는 면허 없이 남는다
+    expect(c.map((x) => x.benefitLicensed)).toEqual([true, true, true, false]);
+    expect(c.some((x) => x.quote === '멤버십 위크')).toBe(false);
+    expect(c[3]).toMatchObject({ quote: '상시 진행 · 리뷰 적립', origin: 'card', endDate: null, benefitLicensed: false });
     expect(c[0]).toMatchObject({ origin: 'card', title: '추석선물세트 특별 기획전~50%', bannerUrl: 'https://www.isoi.co.kr/upload/ev101.jpg', detailUrl: 'https://www.isoi.co.kr/board/event/view/101' });
     expect(c[0].periodRaw).toContain('2026.08.31');
   });
@@ -110,6 +111,37 @@ describe('★ v3 재료 층 — 이벤트 목록 카드(순수 · AI 0)', () => 
     expect(eventCtaLabel({ title: '9.1(화) ~ 9.6(일)' })).toBe('행사 보기');
     expect(headlineFromCard({ title: '9.2(수) ~ 9.16(수)' }, true).demoted).toBe(true);
     expect(productCtaLabel('[대용량] 블랙티 유스 인핸싱 앰플 / 미백 탄력케어')).toBe('블랙티 유스 인핸싱 보기');
+  });
+  it('★ 토니모리 실물 목록 HTML(2026-09-06 캡처 · dm-7EHTaPI 정정) — 기간 없는 기획전은 목록과 같은 첫 경로 조각이면 카드 · 체험단 기간은 첫 범위까지(후기 작성일로 안 늘어남) · 아이콘 앵커 0 · 지난 체험단은 후보에서 제외', () => {
+    const html = readFileSync(resolve(__dirname, 'fixtures', 'tonymoly-event-list.html'), 'utf-8');
+    const cards = extractEventListCards(html, 'https://tonymoly.com/plan/shop_plan_exhb_main.do', parseLicensedEndDate);
+    expect(cards).toHaveLength(4);
+    expect(cards[0]).toMatchObject({ title: '시작과 마무리를 한 번에🎈 선케어&클렌징 WEEK', periodRaw: null, endDate: null, linkUrl: 'https://tonymoly.com/plan/shop_plan_exhb_view.do?planexhb=PEM26083114251306650', imageUrl: 'https://d384glw2wph2ce.cloudfront.net/IMG1788rX322557336.webp' });
+    expect(cards[1]).toMatchObject({ title: '미리 준비하는 추석 선물🎁', periodRaw: null, endDate: null });
+    expect(cards[2]).toMatchObject({ title: '퍼펙트립스 쇼킹립 미니 체험단 50명', periodRaw: '기간 : 2026.09.01 ~ 2026.09.14', startDate: '2026-09-01', endDate: '2026-09-14' });
+    expect(cards[3]).toMatchObject({ title: '퍼펙트립스 쇼킹립 틴트 핑크 모브 쇼킹 체험단 50명', periodRaw: '기간 : 2026.08.01 ~ 2026.08.17', endDate: '2026-08-17' });
+    expect(cards.some((c) => /cart|아이콘/.test(c.linkUrl + c.title))).toBe(false);
+    // 후보: 종료일이 지난 체험단(8/17)은 빠지고 · 면허 있는 9월 체험단이 앞 · 기간 없는 기획전 2장은 면허 없이 남는다
+    const cands = eventCandidatesFromCards(cards, 'https://tonymoly.com/plan/shop_plan_exhb_main.do', new Date('2026-09-06T00:00:00+09:00'));
+    expect(cands.map((c) => c.title)).toEqual(['퍼펙트립스 쇼킹립 미니 체험단 50명', '시작과 마무리를 한 번에🎈 선케어&클렌징 WEEK', '미리 준비하는 추석 선물🎁']);
+    expect(cands[0].benefitLicensed).toBe(true);
+    expect(cands[1].benefitLicensed).toBe(false);
+    // 기간 줄 접두 중복 0(실측 "기간 기간 : …")
+    expect(periodLineOf(cards[2].periodRaw)).toBe('기간 2026.09.01 ~ 2026.09.14');
+    expect(periodLineOf('2026.09.01 ~ 2026.09.14 까지')).toBe('기간 2026.09.01 ~ 2026.09.14 까지');
+    expect(periodLineOf('')).toBe('');
+    // 헤드라인·버튼: 기간 없는 기획전도 제목이 있으니 실린다
+    expect(headlineFromCard(cards[0], false).headline).toBe('시작과 마무리를 한 번에🎈');
+    expect(eventCtaLabel(cards[1])).toBe('미리 준비하는 추석 보기');
+  });
+  it('★ 수상 문구 — script 블록 안 JS 주석("본인인증")·"대상 고객" 은 수상이 아니다 · 피부과 테스트 인증·어워즈는 남는다(토니모리 상품 페이지 실측)', () => {
+    const junk = '<html><head><script>// ※ 파일명이 자사 문서 URL 인데 줄번호가 없는 케이스(예: 본인인증 opener 오류)는 실제 버그였다.</script><style>.a{content:"수상"}</style></head>' +
+      '<body><p>대상 고객 전원 증정</p><p>휴대폰 본인인증 후 구매</p></body></html>';
+    expect(parseProductAwards(junk)).toEqual([]);
+    const real = '<body><p>피부과 테스트 완료 · 저자극 인증</p><div>2025 뷰티 어워즈 1위 앰플</div></body>';
+    const awards = parseProductAwards(real);
+    expect(awards.some((a) => /저자극 인증/.test(a))).toBe(true);
+    expect(awards.some((a) => /어워즈/.test(a))).toBe(true);
   });
   it('★ 목록 페이지 후보 — 홈에 목록 앵커가 없고 상세 링크만 있으면 관례 주소(/event/event_list → /event → /event/list)가 상세 링크보다 앞 · 목록형 경로 앵커는 맨 앞 · 같은 호스트 · 중복 0', () => {
     const home = `<a href="/event/202609/cream_diy_event">최대 50% 크림대전</a><a href="/event/202608/nmn_event">앰플</a><a href="/event/weekend">주말특가</a><a href="/event/202609/chuseok_event">추석</a><a href="/hotdeal/hotdeal_list"></a><a href="https://other.example/event/list">타사</a>`;

@@ -66,8 +66,9 @@ export function decodeHtmlEntities(s: string): string {
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
 }
 
+/** 태그를 걷어 글만 남긴다 · script·style·noscript·template·svg 블록은 본문째 버린다(토니모리 실측: JS 주석 "본인인증" 이 수상 문구로 잡혔다) */
 function stripTags(s: string): string {
-  return decodeHtmlEntities(s.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeHtmlEntities(s.replace(/<(script|style|noscript|template|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
 /** 상대·엔티티 섞인 URL을 절대 URL로. CDN 리사이저 폭이 과대하면 1200으로 낮춘다(용량 상한 회피). 실패 = null. */
@@ -208,6 +209,8 @@ export function extractProducts(html: string, base: string, max = 12): OutreachP
 
 /** 연·월·일 표기(jobs.ts FULL_DATE_RE 와 같은 형태 · 카드 안 기간 줄 위치 찾기용) */
 const CARD_DATE_RE = /(20\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})(?!\d)/g;
+/** 첫 날짜 바로 뒤의 "(일) (시각) ~ 둘째 날짜" · 범위 끝을 정한다 */
+const CARD_RANGE_SECOND_RE = /^\s*(?:일)?\s*(?:\([월화수목금토일]\))?\s*(?:\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:[~\-–]|부터)\s*(?:[~\-–]\s*)?(?:20\d{2}\s*[.\-\/년]\s*\d{1,2}\s*[.\-\/월]\s*\d{1,2})(?!\d)/;
 const CARD_PERIOD_TAIL_RE = /^(?:\s*\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:일)?\s*(?:까지|마감|종료)?/;
 const CARD_LINK_BAD_RE = /\/(login|join|cart|mypage|member|logout)/i;
 const CARD_EVENT_LINK_RE = /event|promotion|promo|이벤트|기획전|행사/i;
@@ -224,11 +227,14 @@ function periodRawOf(text: string): string | null {
     const y = text.match(YEARLESS_RANGE_RE);
     return y ? y[0].replace(/\s+/g, ' ').trim().slice(0, 60) : null;
   }
-  const first = ms[0]; const last = ms[ms.length - 1];
+  const first = ms[0];
   const start = Math.max(0, (first.index || 0) - 8);
   const lead = text.slice(start, first.index || 0);
   const leadTrim = /(?:기간|일정)\s*[:：]?\s*$/.test(lead) ? lead.slice(lead.search(/기간|일정/)) : '';
-  const endIdx = (last.index || 0) + last[0].length;
+  // 첫 날짜 뒤에 "~ 둘째 날짜" 가 바로 이어지면 거기까지 · 아니면 첫 날짜까지(토니모리 실측: "신청 기간 : A ~ B 응모 : 88명 후기 작성 : C ~ D" 에서 D 까지 늘어나 종료일이 후기 작성일이 됐다)
+  const firstEnd = (first.index || 0) + first[0].length;
+  const second = text.slice(firstEnd, firstEnd + 40).match(CARD_RANGE_SECOND_RE);
+  const endIdx = second ? firstEnd + (second.index || 0) + second[0].length : firstEnd;
   const tail = (text.slice(endIdx, endIdx + 16).match(CARD_PERIOD_TAIL_RE) || [''])[0];
   return (leadTrim + text.slice(first.index || 0, endIdx) + tail).replace(/\s+/g, ' ').trim().slice(0, 60) || null;
 }
@@ -269,8 +275,9 @@ export function extractEventListCards(
   parsePeriod: (raw: string) => { start: string | null; end: string | null },
   max = 8,
 ): OutreachEventCard[] {
-  let host = '';
-  try { host = new URL(base).hostname; } catch { return []; }
+  let host = ''; let baseSeg = ''; let baseKey = '';
+  try { const b = new URL(base); host = b.hostname; baseSeg = (b.pathname.split('/').filter(Boolean)[0] || '').toLowerCase(); baseKey = b.origin + b.pathname; } catch { return []; }
+  const segOf = (u: string): string => { try { return (new URL(u).pathname.split('/').filter(Boolean)[0] || '').toLowerCase(); } catch { return ''; } };
   const out: OutreachEventCard[] = [];
   const seen = new Map<string, number>(); // link → out 인덱스
   // lead = 앵커 앞 감싸는 요소(<li>·<div> 여는 태그 · 속성만) — 이니스프리는 종료일이 감싸는 div 의 ap-click-data 에만 있다
@@ -284,9 +291,10 @@ export function extractEventListCards(
     if (!link) return;
     try { if (new URL(link).hostname !== host) return; } catch { return; }
     if (CARD_LINK_BAD_RE.test(link)) return;
-    // 기간이 없는 카드는 링크 자체가 행사성일 때만(아이소이 "[2026 OUTLET] 최대 83% 특가전" · 면허는 없다)
-    if (!periodRaw && !/기간/.test(text) && !CARD_EVENT_LINK_RE.test(link)) return;
     const key = link.replace(/#.*$/, '');
+    if (key.replace(/\?.*$/, '') === baseKey) return; // 목록 페이지 자기 링크(로고 등)
+    // 기간이 없는 카드는 링크가 행사성이거나(아이소이 "[2026 OUTLET] 최대 83% 특가전") 목록 페이지와 같은 첫 경로 조각일 때만(토니모리 /plan/… 기획전 · 면허는 없다)
+    if (!periodRaw && !/기간/.test(text) && !CARD_EVENT_LINK_RE.test(link) && !(baseSeg && segOf(link) === baseSeg)) return;
     const prevIdx = seen.get(key);
     // 같은 링크가 두 번(상단 배너 → 목록 카드 · 이니스프리 "추석선물" 배너 뒤에 기간 있는 같은 행사 카드): 기간이 있는 뒤 카드가 앞 배너를 덮는다(자리는 그대로)
     if (prevIdx !== undefined && (!periodRaw || out[prevIdx].periodRaw)) return;
@@ -790,7 +798,8 @@ async function fetchProductPageDetailGuarded(url: string, homeHost: string): Pro
 }
 
 /** ★ v3 어워즈·순위·인증 원문 조각(순수 · 화이트리스트 낱말이 든 40자 조각 · 최대 3 · 이미지 뱃지는 대상 밖) — 스포트라이트 카드의 tag 재료 */
-const AWARD_WORD_RE = /(어워즈|어워드|AWARDS?|Awards?|1\s*위|대상|수상|인증|비건|WINNER|Winner|위너|베스트셀러|BEST\s*SELLER)/;
+// 인증·대상은 홀로 두면 "본인인증"·"대상 고객" 이 잡힌다(토니모리 실측) → 앞 문맥이 있을 때만
+const AWARD_WORD_RE = /(어워즈|어워드|AWARDS?|Awards?|1\s*위|대상\s*(?:수상|선정)|수상|(?:피부과|더마|비건|저자극|안전성?|기능성|할랄|EWG|클린|무자극|친환경|유기농)\s*(?:테스트\s*)?(?:완료\s*)?인증|비건|WINNER|Winner|위너|베스트셀러|BEST\s*SELLER)/;
 export function parseProductAwards(html: string): string[] {
   const t = stripTags(String(html || '').slice(0, 300_000));
   const out: string[] = [];

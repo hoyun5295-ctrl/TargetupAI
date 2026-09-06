@@ -481,7 +481,8 @@ export function normalizeEventSelection(
  * ★ v3 이벤트 목록 카드 → 후보(순수) — quote = 제목 원문 · 종료일 = 카드 기간 · 면허 = isFutureDate · origin 'card' · 정렬 = 면허 있음 → 없음(카드 순서 유지).
  */
 export function eventCandidatesFromCards(cards: readonly OutreachEventCard[], sourceUrl: string, now: Date = new Date()): EventCandidate[] {
-  const list = (Array.isArray(cards) ? cards : []).filter((c) => c && String(c.title || '').trim()).map((c): EventCandidate => ({
+  // 종료일을 아는데 이미 지난 카드(토니모리 8월 체험단)는 후보가 아니다 · 종료일을 모르는 카드(기간 없는 기획전)는 면허 없이 남긴다
+  const list = (Array.isArray(cards) ? cards : []).filter((c) => c && String(c.title || '').trim() && !(c.endDate && !isFutureDate(c.endDate, now))).map((c): EventCandidate => ({
     quote: norm(c.title),
     sourceUrl,
     startDate: c.startDate,
