@@ -275,6 +275,26 @@ API 로 붙는 고객용이라 묶음과 무관하게 그대로다.
 뽑아 **화면 슬롯 패턴이 그것을 매치하는지** 검사한다. 발급 자산 3종이 같은 `versionGroup` 인지,
 설명 문구에 버전이 박혔는지, PDF 의 Content-Type 이 맞는지도 함께 고정한다.
 
-**남은 판단 = 낡은 자료 정리.** `ViTO-Agent-API-DB-Handoff-v1.2`(2026-08-13 · 31MB)와 공용 README·
-설정 예시를 화면에서 내릴지는 **다운로드 실적으로 정한다**(`audit_log` `action='CUSTOMER_ARTIFACT_DOWNLOAD'`
-· `target_id` 가 슬롯 id). 아직 조회 전이다.
+### 9-4. 안 쓰는 슬롯 6개를 내렸다 — 근거는 실적
+
+정리 여부를 취향으로 정하지 않았다. `audit_log` `action='CUSTOMER_ARTIFACT_DOWNLOAD'` 를 전수 조회했다
+(`target_id` 가 슬롯 id). **13슬롯 중 6개가 0회다.**
+
+| 슬롯 | 받아간 횟수 | 기간 |
+|---|---|---|
+| agent-linux | 4 | 2026-07-13 ~ 09-04 |
+| agent-manual | 4 | 08-14 ~ 09-04 |
+| api-manual · checksums · customer-handoff · agent-windows · agent-config | 각 1 | 08-10 ~ 08-30 |
+| **linux-readme · windows-readme · common-readme** | **0** | |
+| **agent-manual-sha256 · api-manual-sha256 · customer-handoff-sha256** | **0** | |
+
+0회인 이유가 분명하다. README 3종은 **묶음이 고객사 경로가 박힌 `README.txt` 를 만들어** 주니 공용본을
+받을 이유가 없고, 개별 체크섬 3종은 **화면이 카드마다 SHA-256 을 표시하고 「SHA 복사」 버튼을 준다.**
+마지막 다운로드가 09-04 인 것도 묶음 발급이 자리를 넘겨받은 시점과 맞는다.
+
+여섯을 내려 슬롯이 7개가 됐다. 파일은 디스크에 그대로 있어 되살릴 수 있다 — 다만 되살릴 때도
+실적을 먼저 본다. **안 쓰는 칸이 늘면 정작 봐야 할 「누락」이 그 사이에 묻힌다.**
+계약 테스트가 이 여섯의 부활을 막는다(넣으려면 테스트를 함께 고쳐야 하고, 그때 이 근거를 다시 읽게 된다).
+
+남긴 것 = 발급 자산 3종(패키지 2 · 안내서) · API 연동 매뉴얼(직접연동 고객) ·
+통합 전달 묶음(DB 권장 스키마가 여기에만 있다) · 통합 SHA-256 · 공용 설정 예시(참고용, 실적 1회).
