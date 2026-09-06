@@ -56,5 +56,33 @@ module.exports = {
         NODE_ENV: 'production',
       },
     },
+    // ★ 2026-09-06 AI 영업 아웃리치 렌더 워커 — 별도 프로세스(DB 자격 없음 · 동시 1건 · 127.0.0.1:4317 · 크롬은 워커 안 로컬 프록시 뒤).
+    //   설계 = docs/2026-09-06-campaign-engine-design.md §S1 · 운영 = status/OPS.md §2-2-E ⑧
+    //   기동(최초 1회 · delete 금지): pm2 start ecosystem.config.js --only outreach-render && pm2 save
+    //   이후 코드 변경: pm2 reload outreach-render (env 변경 시 pm2 restart outreach-render --update-env)
+    //   이 프로세스가 없어도 backend 는 정적 크롤로 정직하게 전진한다(ECONNREFUSED 즉시 폴백 · 사유 = stage_results.rendering).
+    {
+      name: 'outreach-render',
+      script: '/usr/bin/ts-node',
+      args: 'src/workers/outreach-render-worker.ts',
+      cwd: '/home/administrator/targetup-app/packages/backend',
+      node_args: '--max-old-space-size=512',
+      // 크롬 자식 프로세스는 별도라 이 값은 ts-node 프로세스 자신의 상한이다. 크롬 폭주는 워커가 컨텍스트 종료 5초 초과 시 SIGKILL 로 수거한다.
+      max_memory_restart: '900M',
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      error_file: '/home/administrator/.pm2/logs/outreach-render-error.log',
+      out_file: '/home/administrator/.pm2/logs/outreach-render-out.log',
+      merge_logs: true,
+      time: true,
+      min_uptime: '30s',
+      max_restarts: 10,
+      env: {
+        NODE_ENV: 'production',
+        OUTREACH_RENDER_PORT: '4317',
+      },
+    },
   ],
 };

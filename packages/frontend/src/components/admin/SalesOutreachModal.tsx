@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, RefreshCw, Send, Check, ExternalLink, Pencil, Upload, Download, List, Search, EyeOff, Mail, ChevronDown, ChevronUp, Smartphone, Monitor } from 'lucide-react';
+import { X, Loader2, RefreshCw, Send, Check, ExternalLink, Pencil, Upload, Download, List, Search, EyeOff, Eye, Mail, ChevronDown, ChevronUp, Smartphone, Monitor, Trash2, CheckSquare, Square } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../ConfirmModal';
 import { useToast } from '../ToastProvider';
 
@@ -36,6 +36,9 @@ interface OutreachJob {
     media?: { stats?: Record<string, number>; gallery?: any[]; products?: any[] } | null;
     /** ★ 0905(3) 검토에서 고른 재료(서버 저장값 · 없으면 전량) */
     mediaSelection?: { products?: string[]; gallery?: string[] } | null;
+
+    /** ★ 2026-09-06 S1 재료 v2(서버가 센 값 · 화면은 표시만) */
+    materials?: { v?: number; source?: 'static' | 'render' | 'mixed'; counts?: Record<string, number>; proof?: { reviewTotal?: number | null; rating?: number | null; rankLabel?: string | null } } | null;
   } | null;
   fail_stage?: string | null;
   fail_reason?: string | null;
@@ -51,6 +54,14 @@ interface OutreachJob {
   sendLock?: { locked: boolean; reasons: string[] } | null;
   /** ★ 0905(3) 품질 경고(서버가 센 것 · 잠금이 아니다 · 발송을 막지 않는다) */
   quality?: { warnings: Array<{ code: string; value?: number }> } | null;
+  /** ★ 2026-09-06 S4 열람(서버 집계 · 문장은 서버 완성 · 화면은 표시만) */
+  views?: {
+    dm?: { viewers: number; opens: number; lastAt: string | null; afterForward: number } | null;
+    preview?: { total: number; human: number; bot: number; afterForward: number; lastAt: string | null } | null;
+    unread3d?: boolean; recontact?: boolean; sentences?: string[];
+  } | null;
+  /** ★ S4 같은 주소(중복 키)로 등록된 다른 건 수(미파기) */
+  dup_count?: number;
 }
 
 const ACTIVE_STAGES = ['queued', 'crawling', 'analyzing', 'producing_copy', 'producing_image', 'producing_dm', 'producing_email'];
@@ -73,6 +84,8 @@ const SEND_LOCK_LABEL: Record<string, string> = {
   NO_EMAIL: '조립된 메일이 없습니다',
   PLACEHOLDER_REMAINS: '직접 채울 자리(혜택 안내)가 남아 있습니다',
   UNSUB_NOT_APPLIED: '수신거부 문구가 반영되기 전의 메일입니다',
+  // ★ 2026-09-06 S2 재료 게이트(상품·배너·행사 중 둘 이상 미달) — 산출물을 확인한 뒤 해제할 수 있다
+  MATERIAL_THIN: '홈페이지에서 읽은 재료가 얇습니다(상품·배너·행사 중 둘 이상 부족). 산출물을 확인한 뒤 해제할 수 있습니다',
 };
 // ★ 0905(3) 품질 경고 라벨 — 서버 코드 → 문구(숫자는 서버 value만 쓴다)
 const QUALITY_LABEL: Record<string, (v?: number) => string> = {
@@ -84,6 +97,17 @@ const QUALITY_LABEL: Record<string, (v?: number) => string> = {
   FEW_SECTIONS: (v) => `모바일 DM 구성이 ${v ?? 0}섹션으로 짧습니다`,
   NO_BRAND_EMAIL: () => '이메일 시안 블록이 비어 있습니다',
   NO_LOOK: () => '구도·배경면이 하나도 실리지 않았습니다',
+  // ★ 2026-09-06 S2
+  HERO_FALLBACK: () => '메인 헤드라인을 만들지 못해 업체명으로 채웠습니다(행사 내용을 직접 붙여넣고 다시 만들면 나아집니다)',
+  // ★ 2026-09-06 S3 발행 DM 캡처 채점(경고 · 발송을 막지 않습니다)
+  VISION_NO_HERO_IMAGE: () => '캡처 확인: 첫 화면에 폭 100% 이미지가 보이지 않습니다',
+  VISION_NO_PRICE_PAIR: () => '캡처 확인: 상품 카드에 정가·판매가 쌍이 보이지 않습니다',
+  VISION_NO_CTA_BAR: () => '캡처 확인: 브랜드 색 풀폭 버튼이 보이지 않습니다',
+  VISION_DUP_IMAGE: () => '캡처 확인: 같은 이미지가 두 번 이상 나옵니다',
+  VISION_TEXT_UNREADABLE: () => '캡처 확인: 이미지 위 글자가 배경과 겹쳐 읽기 어렵습니다',
+  VISION_GRAY_BOX: () => '캡처 확인: 회색 빈 상자(이미지 자리 비움)가 있습니다',
+  VISION_NUMBER_LEAK: () => '캡처 확인: 생성 이미지 안에 숫자·퍼센트·원 표기가 보입니다',
+  VISION_FEW_SECTIONS: () => '캡처 확인: 구획이 8개 미만으로 짧습니다',
 };
 const SECTION_TYPE_LABEL: Record<string, string> = {
   header: '머리말', hero: '메인', text_card: '텍스트 카드', product_carousel: '상품 묶음', gallery: '갤러리', coupon: '쿠폰',
@@ -103,7 +127,15 @@ const GROUP_CHIPS: Array<{ key: string; label: string }> = [
   { key: '', label: '전체' }, { key: 'active', label: '진행 중' }, { key: 'awaiting_confirm', label: '확인 대기' },
   { key: 'ready', label: '검토 대기' }, { key: 'sent', label: '발송됨' }, { key: 'failed', label: '실패' },
 ];
+/** ★ 2026-09-06 S4 열람 보조 칩(상태 칩과 겹쳐 쓴다) */
+const VIEW_CHIPS: Array<{ key: string; label: string }> = [
+  { key: '', label: '열람 전체' }, { key: 'viewed', label: '열람 있음' }, { key: 'unread3d', label: '3일 무열람' },
+];
 const LIST_PAGE = 50;
+/** 목록 "같은 주소 N건 보기" 검색어 = 호스트(www 제거) */
+function hostOfUrl(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+}
 
 async function authFetch(path: string, init?: RequestInit): Promise<Response> {
   const token = localStorage.getItem('token');
@@ -180,6 +212,10 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [listGroup, setListGroup] = useState('');
   const [listHasMore, setListHasMore] = useState(false);
   const [listBusy, setListBusy] = useState(false);
+  // ★ 2026-09-06 S4 열람 칩 · [정리] 다중선택(sent 제외)
+  const [listView, setListView] = useState('');
+  const [cleanupMode, setCleanupMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkSummary, setBulkSummary] = useState<{ accepted: number; rejected: Array<{ label: string; reason: string }>; overflow?: number } | null>(null);
 
@@ -187,8 +223,8 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const reqSeq = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const listActiveRef = useRef(false);
-  const listFilterRef = useRef({ q: '', group: '' });
-  listFilterRef.current = { q: listQ, group: listGroup };
+  const listFilterRef = useRef({ q: '', group: '', view: '' });
+  listFilterRef.current = { q: listQ, group: listGroup, view: listView };
 
   // ESC 닫기(캡처 단계 · 부모로 전파 차단) — 확인 모달이 떠 있으면 그쪽이 우선
   useEffect(() => {
@@ -278,13 +314,15 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   }, [job?.id, job?.stage, loadJob]);
 
   // 목록 — 첫 페이지 로드(필터 반영) / 더 보기(커서) / 폴링은 첫 페이지만 id upsert
-  const loadJobsList = useCallback(async (opts?: { append?: boolean; silent?: boolean }) => {
-    const { q, group } = listFilterRef.current;
+  const loadJobsList = useCallback(async (opts?: { append?: boolean; silent?: boolean; q?: string }) => {
+    const { group, view } = listFilterRef.current;
+    const q = opts?.q !== undefined ? opts.q : listFilterRef.current.q;
     if (!opts?.silent) setListBusy(true);
     try {
       const params = new URLSearchParams();
       if (q.trim()) params.set('q', q.trim());
       if (group) params.set('group', group);
+      if (view) params.set('view', view);
       params.set('limit', String(LIST_PAGE));
       if (opts?.append) {
         const last = jobsList[jobsList.length - 1];
@@ -329,7 +367,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     const t = setInterval(() => { if (listActiveRef.current) loadJobsList({ silent: true }); }, 5000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listMode, listGroup]);
+  }, [listMode, listGroup, listView]);
 
   const downloadTemplate = async () => {
     try {
@@ -611,6 +649,64 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     if (res.ok) { toast.success('목록에서 숨겼습니다(기록은 남습니다).'); await loadJob(job.id); }
   };
 
+  // ★ 2026-09-06 S4 삭제 — 커스텀 모달 2클릭(native dialog 0) · 서버가 진행 중·발송 중을 거절(409) · 파기 숫자는 서버 응답
+  const deleteJob = () => {
+    if (!job) return;
+    const sent = job.stage === 'sent';
+    setConfirmState({
+      mode: 'danger',
+      title: `${job.company_name} 건을 삭제합니다`,
+      description: (sent ? '보낸 메일은 회수되지 않습니다. ' : '') + '공개 산출물 링크와 모바일 DM 링크가 즉시 닫히고 이미지 사본이 지워집니다. 목록에서 사라지며 기록만 남습니다.',
+      confirmLabel: '링크 닫고 삭제',
+      onConfirm: async () => {
+        const r = await callAction(`/api/sales-outreach/jobs/${job.id}/delete`);
+        if (r.ok) {
+          toast.success(`삭제했습니다 · 모바일 DM ${Number(r.data?.dmsStopped) || 0}건 중지 · 파일 ${Number(r.data?.filesDeleted) || 0}개 삭제`);
+          setJob(null); setLastSummary(null); resetInputState(); setListMode(true);
+        }
+      },
+    });
+  };
+  const toggleSelected = (id: string) => setSelectedIds((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const deleteSelected = () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setConfirmState({
+      mode: 'danger',
+      title: `선택한 ${ids.length}건을 삭제합니다`,
+      description: '각 건의 공개 산출물 링크와 모바일 DM 링크가 즉시 닫히고 이미지 사본이 지워집니다. 진행 중인 건은 서버가 건너뜁니다. 발송된 건은 여기서 지울 수 없습니다.',
+      confirmLabel: '링크 닫고 삭제',
+      onConfirm: async () => {
+        const r = await callAction('/api/sales-outreach/jobs/delete-bulk', { ids });
+        if (r.ok) {
+          const deleted = Array.isArray(r.data?.deleted) ? r.data.deleted.length : 0;
+          const skipped: Array<{ id: string; reason: string }> = Array.isArray(r.data?.skipped) ? r.data.skipped : [];
+          toast.success(`${deleted}건 삭제${skipped.length ? ` · ${skipped.length}건 제외` : ''}`);
+          if (skipped.length) setNotice(`제외된 건: ${skipped.slice(0, 3).map((x) => x.reason).join(' / ')}${skipped.length > 3 ? ` 외 ${skipped.length - 3}건` : ''}`);
+          setSelectedIds(new Set()); setCleanupMode(false);
+          await loadJobsList();
+        }
+      },
+    });
+  };
+
+  // ★ 2026-09-06 S2 재료 부족 잠금 해제 — 커스텀 모달 2클릭(native dialog 0) · 서버가 ready 에서만 받는다
+  const overrideMaterialGate = () => {
+    if (!job) return;
+    const m: any = sr.material || {};
+    const c: any = m.counts || {};
+    setConfirmState({
+      mode: 'warning',
+      title: '재료 부족 잠금을 해제합니다',
+      description: `홈페이지에서 읽은 재료가 상품 ${Number(c.products) || 0}개 · 배너 ${Number(c.banners) || 0}장 · 행사 ${Number(c.events) || 0}건입니다. 산출물을 눈으로 확인했을 때만 해제하세요. 다시 읽기를 하면 다시 잠깁니다.`,
+      confirmLabel: '확인했으니 해제',
+      onConfirm: async () => {
+        const res = await callAction(`/api/sales-outreach/jobs/${job.id}/material-override`);
+        if (res.ok) { toast.success('재료 부족 잠금을 해제했습니다.'); await loadJob(job.id); }
+      },
+    });
+  };
+
   const retry = async () => {
     if (!job) return;
     const res = await callAction(`/api/sales-outreach/jobs/${job.id}/retry`);
@@ -631,6 +727,12 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const imageCandidates: string[] = Array.isArray(job?.brand_profile?.imageCandidates) ? job!.brand_profile!.imageCandidates! : [];
   const crawlUnavailable = sr.crawling === 'unavailable';
   const analyzeUnavailable = sr.analyzing === 'unavailable';
+  // ★ 2026-09-06 S1 재료 v2(brand_profile.materials · 서버가 센 값만 · 프론트가 배열 길이를 다시 세지 않는다)
+  const materials: any = job?.brand_profile?.materials || null;
+  const readModeLabel: string | null = materials
+    ? (materials.source === 'render' ? '화면을 그려서 읽음' : materials.source === 'mixed' ? '바로 읽기 + 화면을 그려서 읽음' : '바로 읽음')
+    : null;
+  const renderFailed = sr.rendering === 'unavailable' || sr.rendering === 'no_content';
   const legacyExcerptOnly = !!job?.brand_profile?.excerpt && !job?.brand_profile?.eventTextFull;
 
   const emailAsset = latestAssetOf(job, 'email_html');
@@ -855,6 +957,29 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                       ))}
                     </div>
                   </div>
+                  {/* ★ 2026-09-06 S4 열람 보조 칩 + [정리] 다중선택 */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {VIEW_CHIPS.map((g) => (
+                        <button key={g.key} onClick={() => setListView(g.key)}
+                          className={`px-2.5 py-1 rounded-full text-xs border inline-flex items-center gap-1 ${listView === g.key ? 'bg-slate-800 text-white border-slate-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                          {g.key !== '' && <Eye className="w-3 h-3" />} {g.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {cleanupMode && selectedIds.size > 0 && (
+                        <button onClick={deleteSelected} disabled={busy}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium disabled:opacity-40">
+                          <Trash2 className="w-3.5 h-3.5" /> 선택 {selectedIds.size}건 삭제
+                        </button>
+                      )}
+                      <button onClick={() => { setCleanupMode(!cleanupMode); setSelectedIds(new Set()); }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${cleanupMode ? 'border-rose-300 text-rose-700 bg-rose-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                        <Trash2 className="w-3.5 h-3.5" /> {cleanupMode ? '정리 끝내기' : '정리'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 {total === 0 ? (
                   <div className="px-4 py-10 text-center text-sm text-gray-400 bg-gray-50 rounded-2xl">
@@ -865,11 +990,27 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                     {jobsList.map((j) => {
                       const pv = j.preview_code && !j.purged_at ? `${window.location.origin}/api/outreach/v/${j.preview_code}` : null;
                       const dismissed = !!j.stage_results?.dismissed_at;
+                      const selectable = cleanupMode && j.stage !== 'sent' && !ACTIVE_STAGES.includes(j.stage);
+                      const dmViewers = Number(j.views?.dm?.viewers) || 0;
+                      const pvHuman = Number(j.views?.preview?.human) || 0;
+                      const dup = Number(j.dup_count) || 0;
                       return (
-                        <div key={j.id} className={`px-4 py-3 flex items-center gap-3 flex-wrap ${dismissed ? 'opacity-60' : ''}`}>
+                        <div key={j.id} className={`px-4 py-3 flex items-center gap-3 flex-wrap ${dismissed ? 'opacity-60' : ''} ${selectedIds.has(j.id) ? 'bg-rose-50/60' : ''}`}>
+                          {cleanupMode && (
+                            <button onClick={() => { if (selectable) toggleSelected(j.id); }} disabled={!selectable}
+                              className={`shrink-0 ${selectable ? 'text-rose-600' : 'text-gray-300'}`} aria-label={selectable ? '선택' : '선택 불가'}>
+                              {selectedIds.has(j.id) ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                            </button>
+                          )}
                           <div className="min-w-0 flex-1">
                             <div className="text-sm font-medium text-gray-900 flex items-center gap-2 flex-wrap">
                               {j.company_name} {chip(j)}
+                              {/* ★ 2026-09-06 S4 열람 2단(DM 열람 기기 · 산출물 페이지 사람 열람) · 서버 집계 */}
+                              {(j.stage === 'sent' || dmViewers + pvHuman > 0) && (
+                                <span className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded ${dmViewers + pvHuman > 0 ? 'bg-slate-100 text-slate-700' : 'bg-gray-50 text-gray-400'}`} title="모바일 DM 열람 기기 · 산출물 페이지 사람 열람">
+                                  <Eye className="w-3 h-3" /> {dmViewers} · {pvHuman}
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs text-gray-400 truncate">
                               {j.homepage_url}
@@ -877,6 +1018,16 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                               {j.stage === 'failed' && j.fail_reason ? ` · ${j.fail_reason}` : ''}
                               {j.stage === 'sent' && j.mail_result ? ` · 발송 ${j.mail_result === 'sent' ? '완료' : j.mail_result}` : ''}
                             </div>
+                            {(j.views?.unread3d || dup > 0) && (
+                              <div className="text-[11px] text-gray-500 flex items-center gap-2 flex-wrap mt-0.5">
+                                {j.views?.unread3d && <span className="text-amber-700">업체 전달 뒤 3일 무열람 · 재접촉 후보</span>}
+                                {dup > 0 && (
+                                  <button onClick={() => { const h = hostOfUrl(j.homepage_url); setListQ(h); loadJobsList({ q: h }); }} className="text-gray-500 hover:text-blue-600 hover:underline">
+                                    같은 주소 {dup}건 더 보기
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
                           {pv && (
                             <a href={pv} target="_blank" rel="noreferrer"
@@ -1007,6 +1158,39 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
           {/* ③ 읽은 것 확인 */}
           {!listMode && step === 3 && job && (
             <div className="space-y-5">
+              {/* ★ 2026-09-06 S1 홈페이지에서 읽은 재료 — 전폭 한 줄(서버가 센 숫자만 · 값이 없는 칸은 그리지 않는다) */}
+              {materials && materials.counts && (
+                <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <h3 className="text-sm font-semibold text-gray-900">홈페이지에서 읽은 재료</h3>
+                    <span className="text-[11px] text-gray-400">
+                      {readModeLabel}
+                      {renderFailed ? ' · 화면 그리기는 실패해 바로 읽은 내용으로 진행했습니다' : ''}
+                    </span>
+                  </div>
+                  <div className="mt-2.5 flex flex-wrap gap-2 text-[11px]">
+                    <span className="px-2 py-1 rounded-lg bg-gray-100 text-gray-700">
+                      상품 {Number(materials.counts.products) || 0}개{Number(materials.counts.discountPairs) > 0 ? ` · 할인가 있는 것 ${Number(materials.counts.discountPairs)}개` : ''}
+                    </span>
+                    <span className="px-2 py-1 rounded-lg bg-gray-100 text-gray-700">배너 후보 {Number(materials.counts.banners) || 0}장</span>
+                    <span className="px-2 py-1 rounded-lg bg-gray-100 text-gray-700">본문 {(Number(materials.counts.textChars) || 0).toLocaleString()}자</span>
+                    {materials.proof?.reviewTotal ? <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700">리뷰 {Number(materials.proof.reviewTotal).toLocaleString()}건</span> : null}
+                    {materials.proof?.rating ? <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700">평점 {materials.proof.rating}</span> : null}
+                    {materials.proof?.rankLabel ? <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700">{String(materials.proof.rankLabel)}</span> : null}
+                  </div>
+                  {renderFailed && sr.rendering_detail && (
+                    <p className="mt-2 text-[11px] text-amber-600">화면 그리기 실패 사유: {String(sr.rendering_detail)}</p>
+                  )}
+                  {Number(materials.counts.products) === 0 && Number(materials.counts.banners) === 0 && (
+                    <p className="mt-2 text-[11px] text-amber-600">상품·배너를 하나도 읽지 못했습니다. 주소를 확인해 다시 읽거나 행사 내용을 직접 붙여넣어 주세요.</p>
+                  )}
+                  {sr.material?.verdict === 'thin' && (
+                    <p className="mt-2 text-[11px] text-amber-700">
+                      재료가 얇습니다(상품 4개 · 배너 2장 · 행사 1건 중 둘 이상 미달). 제작은 진행되지만 발송은 잠기고, 검토 화면에서 산출물을 확인한 뒤 해제할 수 있습니다.
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {/* 행사 후보 */}
                 <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4">
@@ -1159,6 +1343,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                       {!sr.dismissed_at && (
                         <button onClick={dismissJob} disabled={busy} className={smallBtn}><EyeOff className="w-3.5 h-3.5" /> 숨기기</button>
                       )}
+                      <button onClick={deleteJob} disabled={busy} className={`${smallBtn} text-rose-700 border-rose-200 hover:bg-rose-50`}><Trash2 className="w-3.5 h-3.5" /> 삭제</button>
                     </div>
                   </div>
                   {job.fail_detail && <p className="mt-1.5 text-[11px] text-gray-500 break-all">상세: {job.fail_detail}</p>}
@@ -1364,6 +1549,15 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
 
                     {/* 근거 패널(화면에만 있는 것 · 메일에 안 들어감) */}
                     <div className="space-y-3">
+                      {/* ★ 2026-09-06 S4 열람 — 문장은 서버가 완성(새 테이블 0 · 식별자 0) */}
+                      {Array.isArray(job.views?.sentences) && job.views!.sentences!.length > 0 && (
+                        <div className={`rounded-2xl border shadow-sm p-4 ${job.views?.unread3d ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200/70'}`}>
+                          <h4 className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" /> 담당자 열람</h4>
+                          <div className="space-y-1 text-[12px] text-gray-700">
+                            {job.views!.sentences!.map((t, i) => <p key={i}>{t}</p>)}
+                          </div>
+                        </div>
+                      )}
                       <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4">
                         <h4 className="text-xs font-semibold text-gray-500 mb-2">읽은 근거</h4>
                         {job.event_quote?.selected ? (
@@ -1377,6 +1571,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                         <div className="mt-2 space-y-1 text-[11px] text-gray-500">
                           {meta && <p>후보 {Number(meta.rawCandidates) || 0}건 중 {Number(meta.matched) || 0}건이 원문과 일치 · 재료 {Number(meta.materialChars) || 0}자</p>}
                           {mediaStats && <p>선명한 이미지 {Number(mediaStats.galleryPassed) || 0}장 · 상품 {Number(mediaStats.productsPassed) || 0}개를 홈페이지에서 실측해 사본으로 썼습니다</p>}
+                          {readModeLabel && <p>홈페이지 읽기 방식: {readModeLabel}{renderFailed ? ' (화면 그리기 실패 · 바로 읽은 내용으로 진행)' : ''}</p>}
                           {imageAsset?.mediaError && <p className="text-amber-600">재료 이미지 수집이 실패해 생성 이미지 중심으로 만들었습니다.</p>}
                           {/* 참조 골격·예시 — asset에 기록된 사실만 말한다(지어내지 않는다) */}
                           {dmAsset?.structureRef && (
@@ -1387,6 +1582,15 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                           {Number(dmAsset?.exemplarCount) > 0 && <p>실물 예시 {Number(dmAsset.exemplarCount)}건(DM{Number(dmAsset.exemplarTotal) > 0 ? ` · 원천 ${Number(dmAsset.exemplarTotal)}건` : ''}){Number(emailAsset?.exemplarCount) > 0 ? ` · ${Number(emailAsset.exemplarCount)}건(이메일${Number(emailAsset.exemplarTotal) > 0 ? ` · 원천 ${Number(emailAsset.exemplarTotal)}건` : ''})` : ''}의 구성·톤을 프롬프트에 실어 참고했습니다.</p>}
                           {copyAsset?.sampleTrained === false && <p className="text-gray-400">양식 샘플 학습 전(기본형)으로 제작되었습니다.</p>}
                           {imageAsset?.templateId && <p>이미지 템플릿: {imageAsset.category}{imageAsset.regenCount ? ` · ${imageAsset.regenCount}번째 재생성` : ''}</p>}
+                          {/* ★ 2026-09-06 S3 스튜디오 활용은 장수가 아니라 칸 수로 보인다(문구 3칸 · 누끼 경로 · 배너) */}
+                          {imageAsset?.posterTexts && (
+                            <p>
+                              포스터 문구 {['label', 'title', 'subtitle'].filter((k) => imageAsset.posterTexts?.[k]).length}칸 반영
+                              {imageAsset.cutoutSource === 'alpha_png' ? ' · 홈페이지 누끼 PNG 직접 합성' : imageAsset.cutoutSource === 'rembg' ? ' · 배경 제거 합성' : ''}
+                              {imageAsset.bannerUrl ? ' · 16:9 배너 1장(실측 배너 0장 폴백)' : ''}
+                              {imageAsset.posterRegenerated ? ' · 숫자 유출 검출로 배경 1회 재생성' : ''}
+                            </p>
+                          )}
                           {chain && <p>일괄 등록 {chain.total}건 중 {chain.index}번째</p>}
                           {sr.mail_last && <p className={sr.mail_last.outcome === 'sent' ? 'text-emerald-700' : 'text-amber-700'}>직전 발송 {fmtDateTime(sr.mail_last.at)} · {sr.mail_last.outcome}{Array.isArray(sr.mail_last.rejected) && sr.mail_last.rejected.length ? ` · 거부 ${sr.mail_last.rejected.join(', ')}` : ''}</p>}
                         </div>
@@ -1431,6 +1635,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                                     <span>{SEND_LOCK_LABEL[r] || r}</span>
                                     {r === 'UNSUB_NOT_APPLIED' && <button onClick={rebuildEmail} disabled={busy} className="text-blue-600 hover:underline">메일 재조립</button>}
                                     {r === 'PLACEHOLDER_REMAINS' && <button onClick={() => { setReviewTab('copy'); setCopyEditing(true); }} className="text-blue-600 hover:underline">문안 수정</button>}
+                                    {r === 'MATERIAL_THIN' && <button onClick={overrideMaterialGate} disabled={busy} className="text-blue-600 hover:underline">확인했으니 해제</button>}
                                   </div>
                                 ))}
                               </div>
@@ -1465,6 +1670,11 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                         <button onClick={() => { setJob(null); setLastSummary(job); setCompanyName(''); setHomepageUrl(''); setIndustryCode(''); setExtraNotes(''); resetInputState(); }}
                           className="w-full px-4 py-2 rounded-lg border border-blue-200 text-sm text-blue-600 hover:bg-blue-50">
                           새 업체 시작
+                        </button>
+                        {/* ★ 2026-09-06 S4 삭제 액션 1개(sent 허용 · 링크 닫고 삭제 · 서버 파기 숫자) */}
+                        <button onClick={deleteJob} disabled={busy}
+                          className="w-full px-4 py-2 rounded-lg border border-rose-200 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-40 flex items-center justify-center gap-1.5">
+                          <Trash2 className="w-4 h-4" /> 이 건 삭제
                         </button>
                       </div>
                     </div>

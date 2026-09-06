@@ -77,6 +77,8 @@ import { searchNaverShopCandidates, isNaverShopSearchConfigured } from '../utils
 import { fetchEventTextFromUrl } from '../utils/dm/dm-brand-extractor';
 // ★ 2026-09-05 아웃리치 DM noindex(불변 23) — 공개 뷰어가 요청 시각에 회사 id로 판정(저장값 아님 · 기존 발행분 소급)
 import { getOutreachContext } from '../utils/sales-outreach-produce';
+// ★ 2026-09-06 S5 재료 입구(이미지·행사 텍스트 → 엔진 조립 · 초안 DM)
+import { generateDmFromMaterials, quickMaterialsEnabled } from '../utils/campaign-quick';
 // ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
 import { buildEventTemplateHintBlock } from '../utils/design-core/event-package';
 // ★ 2026-07-16 자가 호스팅 웹폰트 @font-face 생성 (궁서 폴백 정정)
@@ -267,8 +269,10 @@ dmPublicRouter.post('/:code/track', async (req: Request, res: Response) => {
     if (!dm) return res.status(404).json({ error: 'Not found' });
 
     const b = req.body || {};
-    const ip = req.ip || req.socket?.remoteAddress || null;
-    const ua = req.headers['user-agent'] || null;
+    // ★ 2026-09-06 S4 아웃리치(영업 샘플) DM 열람은 담당자 개인 신호라 ip·user_agent 를 남기지 않는다(횟수·시각·체류만 · 식별자 0)
+    const isOutreachDm = !!getOutreachContext() && getOutreachContext()!.companyId === String(dm.company_id);
+    const ip = isOutreachDm ? null : (req.ip || req.socket?.remoteAddress || null);
+    const ua = isOutreachDm ? null : (req.headers['user-agent'] || null);
 
     let token: string | null = typeof b.r === 'string' && b.r ? String(b.r).slice(0, 32) : null;
     let phone: string | null = null;
@@ -928,6 +932,27 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 단독 입력도 생성 가능. 브리프 블록을 프롬프트에 합성
     //   (parsePrompt가 원문 기재 혜택을 spec.benefit으로 추출 → 기재 혜택만 카피에 반영되는 기존 경로 그대로).
     const eventText = req.body?.event_text ? normalizeEventText(req.body.event_text) : '';
+
+    // ★ 2026-09-06 S5 재료 입구 — 업로드 이미지·행사 텍스트를 아웃리치 엔진(결정 구간 공용)이 조립한다. 응답 필드명 유지 + materials 계측 + draft_id.
+    //   몰 상품 자동 첨부는 이 분기에서 부르지 않는다(업로드 이미지는 상품 카드에 붙이지 않는다 · 상품은 재료 글줄). 크레딧 = 기존 키(dm-ai-generate) · 멱등 quick:{draftId}.
+    if (req.body?.materials && typeof req.body.materials === 'object') {
+      if (!quickMaterialsEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.' });
+      try {
+        const r = await generateDmFromMaterials({ companyId, userId: req.user?.userId, materials: req.body.materials, industry: typeof req.body?.industry === 'string' ? req.body.industry : null });
+        return res.json({
+          success: true,
+          data: {
+            sections: r.sections, pages: r.pages, layout_mode: r.layout_mode, brand_kit: r.brand_kit,
+            spec: null, scenario: null, brief: null, coverage: null,
+            materials: r.materialsMeta, benefitStripped: r.benefitStripped, heroFallback: r.heroFallback, look: r.look, draft_id: r.draftId,
+          },
+        });
+      } catch (err: any) {
+        if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+        console.error('[DM AI one-shot-generate materials] 오류:', err?.message);
+        return res.status(500).json({ success: false, error: '재료로 시안을 만들지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      }
+    }
 
     if (!prompt && !scenario && !eventText) {
       return res.status(400).json({ error: 'prompt 또는 scenario 영역 필요' });

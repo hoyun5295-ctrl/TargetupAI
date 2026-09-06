@@ -98,6 +98,8 @@ import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
+// ★ 2026-09-06 S6 재료 입구(이미지·행사 텍스트 → 아웃리치 브랜드 이메일 시안 경로)
+import { generateEmailFromMaterials, quickMaterialsEnabled } from '../utils/campaign-quick';
 
 const router = Router();
 
@@ -1050,6 +1052,19 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
     const isAd = !!req.body?.is_ad;
     // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 단독 입력도 생성 가능 (기재 혜택만 원문 그대로)
     const eventText = req.body?.event_text ? normalizeEventText(req.body.event_text) : '';
+    // ★ 2026-09-06 S6 재료 입구 — materials 가 오면 아웃리치 브랜드 이메일 시안 경로(이메일 독립 계약 · EMAIL 룩)로 조립한다. 재료가 없으면 아래 기존 경로 그대로(무후퇴).
+    //   응답 형태는 편집기가 읽는 그대로(sections · subjects · preheader · name) + materials 계측. 몰 상품 자동 첨부는 이 분기에서 부르지 않는다.
+    if (req.body?.materials && typeof req.body.materials === 'object') {
+      if (!quickMaterialsEnabled(auth.companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.' });
+      try {
+        const r = await generateEmailFromMaterials({ companyId: auth.companyId, userId: auth.userId, materials: req.body.materials, industry: typeof req.body?.industry === 'string' ? req.body.industry : null });
+        return res.json({ success: true, data: { sections: r.sections, subjects: [r.subject].filter(Boolean), preheader: r.preheader, name: r.name, materials: r.materialsMeta, benefitStripped: r.benefitStripped, look: r.look } });
+      } catch (err: any) {
+        if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+        console.error('[Email /ai/generate-sections materials] 오류:', err?.message);
+        return res.status(500).json({ success: false, error: '재료로 이메일을 만들지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      }
+    }
     if (!prompt && !scenario && !eventText) {
       return res.status(400).json({ success: false, error: '요청 내용 또는 시나리오를 입력해주세요.' });
     }

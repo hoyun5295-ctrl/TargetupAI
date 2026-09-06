@@ -28,7 +28,18 @@ export interface OutreachProduct {
   discount_price: number | null;
   image_url: string;
   link_url: string;
+  /** ★ 2026-09-06 재료 v2(선택 · 카드 원문에 문자열로 있을 때만 · 없으면 키 자체가 없다) */
+  discount_rate?: number;
+  rating?: number;
+  review_count?: number;
+  badges?: string[];
 }
+
+/** ★ 2026-09-06 배너 후보 상세(문서 순서 · alt 동반) — extractImageCandidates 는 이것의 url 투영이다(동작 무변경) */
+export interface ImageCandidateDetail { url: string; alt: string; order: number }
+
+/** ★ 2026-09-06 사회적 증거(원문 문자열 그대로 · 혜택 수치가 아니다 · 없으면 null) */
+export interface ProofSignals { reviewTotal: number | null; rating: number | null; rankLabel: string | null }
 
 // ===== 문자열 유틸 =====
 
@@ -132,13 +143,21 @@ export function extractProducts(html: string, base: string, max = 12): OutreachP
     if (seen.has(key)) return;
     seen.add(key);
     const sorted = [...prices].sort((a, b) => a - b);
-    out.push({
+    const item: OutreachProduct = {
       name: cleanProductName(name).slice(0, 80),
       price: sorted[sorted.length - 1],
       discount_price: sorted.length > 1 && sorted[0] < sorted[sorted.length - 1] ? sorted[0] : null,
       image_url: image,
       link_url: link,
-    });
+    };
+    // ★ 2026-09-06 재료 v2 — 카드 원문에 문자열로 있는 값만(계산·추정 0). 할인율은 가격 쌍이 있을 때만(단독 %는 잡음).
+    const rr = text.match(/(?:^|[^\d.])([1-5]\.\d)\s*\(\s*(\d{1,3}(?:,\d{3})*|\d{1,7})\s*\)/);
+    if (rr) { item.rating = Number(rr[1]); item.review_count = Number(rr[2].replace(/,/g, '')); }
+    const pr = text.match(/(?:^|[^\d])(\d{1,2})\s*%/);
+    if (pr && item.discount_price !== null) item.discount_rate = Number(pr[1]);
+    const badges = Array.from(new Set((text.match(/\b(NEW|SALE|HOT|GIFT|BEST)\b/g) || []).map((b) => b.toUpperCase())));
+    if (badges.length) item.badges = badges;
+    out.push(item);
   };
   const aRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
@@ -175,15 +194,16 @@ function isTinyByAttr(tag: string): boolean {
   return Number.isFinite(w) && w > 0 && w < 200 && Number.isFinite(h) && h > 0 && h < 200;
 }
 
-/** 이미지 후보(순수): og:image 계열 + img(src·data-src·srcset) + <source srcset>. 로고·추적 픽셀·크기 속성 200px 미만 배제 · 확장자 없는 CDN URL 허용 · 상한 24(뒤 실측이 큰 것부터 고른다). */
-export function extractImageCandidates(html: string, base: string, max = 24): string[] {
-  const found: string[] = [];
+/** 이미지 후보(순수): og:image 계열 + img(src·data-src·srcset) + <source srcset>. 로고·추적 픽셀·크기 속성 200px 미만 배제 · 확장자 없는 CDN URL 허용 · 상한 24(뒤 실측이 큰 것부터 고른다).
+ *  ★ 2026-09-06 상세 판(alt·문서 순서 동반) — 기존 extractImageCandidates 는 이것의 url 투영이라 출력이 문자 단위로 같다. */
+export function extractImageCandidatesDetailed(html: string, base: string, max = 24): ImageCandidateDetail[] {
+  const found: Array<{ raw: string; alt: string }> = [];
   for (const re of [
     /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/gi,
     /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/gi,
   ]) {
     let m: RegExpExecArray | null;
-    while ((m = re.exec(html)) !== null) found.push(m[1]);
+    while ((m = re.exec(html)) !== null) found.push({ raw: m[1], alt: '' });
   }
   const tagRe = /<(?:img|source)\b[^>]*>/gi;
   let m: RegExpExecArray | null;
@@ -192,21 +212,62 @@ export function extractImageCandidates(html: string, base: string, max = 24): st
     scanned++;
     if (isTinyByAttr(m[0])) continue;
     const u = bestImgFromTag(m[0], base);
-    if (u) found.push(u);
+    if (!u) continue;
+    const alt = decodeHtmlEntities((m[0].match(/\salt=["']([^"']*)["']/i) || [])[1] || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    found.push({ raw: u, alt });
   }
-  const out: string[] = [];
+  const out: ImageCandidateDetail[] = [];
   const seen = new Set<string>();
-  for (const raw of found) {
-    const u = absolutizeAssetUrl(raw, base);
+  for (const f of found) {
+    const u = absolutizeAssetUrl(f.raw, base);
     if (!u) continue;
     if (/(logo|icon|favicon|sprite|\/(?:menu|nav|gnb)\/|banner_top|btn_|\.svg(\?|$)|\.gif(\?|$)|1x1|pixel|blank|share[-_]?image|og_image|\/web\/24_renewal\/)/i.test(u)) continue;
     if (/(ct\.pinterest\.com|facebook\.com\/tr|google-analytics|doubleclick|googletagmanager|analytics\.|\/tr\?|\/pixel)/i.test(u)) continue;
     if (seen.has(u)) continue;
     seen.add(u);
-    out.push(u);
+    out.push({ url: u, alt: f.alt, order: out.length });
     if (out.length >= max) break;
   }
   return out;
+}
+
+export function extractImageCandidates(html: string, base: string, max = 24): string[] {
+  return extractImageCandidatesDetailed(html, base, max).map((d) => d.url);
+}
+
+/**
+ * ★ 2026-09-06 사회적 증거(순수 · 텍스트 입력) — 리뷰 총수·평점·수상/1위 표기를 원문 문자열에서만 읽는다. 혜택 수치(%·원·쿠폰)가 아니라
+ * 그 업체가 자기 홈에 공표한 실적이다(회의 수렴안 D4 · 코드가 채우는 숫자 카드의 재료). 없으면 null · 계산·추정 0.
+ */
+export function extractProofSignals(text: string): ProofSignals {
+  const t = String(text || '').replace(/\s+/g, ' ');
+  let reviewTotal: number | null = null;
+  for (const m of t.matchAll(/(\d{1,3}(?:,\d{3})+|\d{3,8})\s*(?:개|건)\s*의?\s*(?:리얼\s*|실제\s*|생생\s*)?(?:리뷰|후기|상품\s*평)/g)) {
+    const n = Number(m[1].replace(/,/g, ''));
+    if (Number.isFinite(n) && n >= 100 && (reviewTotal === null || n > reviewTotal)) reviewTotal = n;
+  }
+  if (reviewTotal === null) {
+    for (const m of t.matchAll(/(?:리뷰|후기)\s*\(?\s*(\d{1,3}(?:,\d{3})+|\d{3,8})\s*\)?/g)) {
+      const n = Number(m[1].replace(/,/g, ''));
+      if (Number.isFinite(n) && n >= 100 && (reviewTotal === null || n > reviewTotal)) reviewTotal = n;
+    }
+  }
+  let rating: number | null = null;
+  const r1 = t.match(/(?:평점|별점|만족도)\s*[:：]?\s*([1-5]\.\d)/) || t.match(/★\s*([1-5]\.\d)/);
+  if (r1) rating = Number(r1[1]);
+  else {
+    // 카드 반복형 "4.9 (20,389)" — 두 번 이상 나온 값만(단독 1회는 상품 하나의 평점일 뿐)
+    const freq = new Map<string, number>();
+    for (const m of t.matchAll(/(?:^|[^\d.])([1-5]\.\d)\s*\(\s*\d{1,3}(?:,\d{3})*\s*\)/g)) freq.set(m[1], (freq.get(m[1]) || 0) + 1);
+    let best: [string, number] | null = null;
+    for (const e of freq) if (!best || e[1] > best[1]) best = e;
+    if (best && best[1] >= 2) rating = Number(best[0]);
+  }
+  const rk = t.match(/((?:\d{1,2}\s*년\s*(?:연속|간)?\s*)?(?:누적\s*)?(?:판매|매출)\s*[_ ]?1\s*위(?:\s*[가-힣A-Za-z]{1,12})?)/)
+    || t.match(/([가-힣A-Za-z0-9 ]{2,24}\s*(?:어워즈|AWARDS?|Awards?)\s*(?:위너|WINNER|Winner|수상|대상))/)
+    || t.match(/(\d{1,2}\s*관왕)/);
+  const rankLabel = rk ? rk[1].replace(/\s+/g, ' ').trim().slice(0, 40) : null;
+  return { reviewTotal, rating, rankLabel };
 }
 
 /** 홈 HTML의 상품형 링크(같은 호스트)만 골라낸다(순수). 상세 1홉 수집의 입력. */
@@ -377,6 +438,25 @@ export function extractLogoCandidates(html: string, base: string): string[] {
     || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i);
   if (og && /\.png(\?|$)/i.test(og[1])) push(og[1]);
   return out.slice(0, 4);
+}
+
+/**
+ * ★ 2026-09-06 S3 알파 PNG 판정(순수) — 몰이 이미 누끼(투명 배경)로 준 상품 PNG(cfront `nuggi/*.png`)는 rembg(단일 워커 · 60초)를 거치지 않고 그대로 합성 재료로 쓴다.
+ * 표본 픽셀의 alpha 가 하나라도 250 미만이면 true. PNG 가 아니거나 4MB 초과(디코드 비용)면 false(보수 = rembg 경로).
+ */
+export function pngHasAlpha(buf: Buffer): boolean {
+  if (!buf || buf.length < 24 || buf.length > 4_000_000 || buf[0] !== 0x89 || buf[1] !== 0x50) return false;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pngjs = require('pngjs') as { PNG: { sync: { read(b: Buffer): { width: number; height: number; data: Buffer } } } };
+  let png: { width: number; height: number; data: Buffer };
+  try { png = pngjs.PNG.sync.read(buf); } catch { return false; }
+  const { width, height, data } = png;
+  if (!width || !height || !data) return false;
+  const stride = Math.max(1, Math.floor(Math.sqrt((width * height) / 20000)));
+  for (let y = 0; y < height; y += stride) for (let x = 0; x < width; x += stride) {
+    if (data[(y * width + x) * 4 + 3] < 250) return true;
+  }
+  return false;
 }
 
 /** 흰(밝은) 로고인가 — 불투명 픽셀의 평균 명도가 0.9 이상이면 흰 배경 헤더에서 안 보인다(커버낫 실측 `woman_loading_white`). PNG가 아니면 false. */

@@ -33,6 +33,11 @@ const OUTREACH_FILES = [
   'utils/sales-outreach-produce.ts',
   'utils/sales-outreach-style.ts',
   'utils/sales-outreach-sweeper.ts',
+  // ★ 2026-09-06 S4 파기 공용(sweeper·사람 삭제가 같은 본문)
+  'utils/sales-outreach-purge.ts',
+  // ★ 2026-09-06 S5 조립 엔진(결정 구간 공용) + 고객 재료 입구 — 같은 축, 같은 스캔(모델명 0 · 줄표 0)
+  'utils/campaign-engine.ts',
+  'utils/campaign-quick.ts',
   'utils/sales-outreach-media.ts',
   'utils/sales-outreach-exemplars.ts',
   'utils/sales-outreach-exemplar-seed.ts',
@@ -41,6 +46,10 @@ const OUTREACH_FILES = [
   'utils/sales-outreach-look.ts',
   'utils/sales-outreach-review.ts',
   'utils/sales-outreach-bulk.ts',
+  // ★ 2026-09-06 S1 렌더 크롤(가드 판정 · 클라이언트 · 워커) — 같은 축, 같은 스캔
+  'utils/sales-outreach-render-guard.ts',
+  'utils/sales-outreach-render.ts',
+  'workers/outreach-render-worker.ts',
   'utils/outreach-mailer.ts',
   'routes/sales-outreach.ts',
   'routes/outreach-public.ts',
@@ -115,7 +124,8 @@ describe('sales-outreach invariants', () => {
     }
     const jobs = readCode('utils/sales-outreach-jobs.ts');
     expect(jobs).toContain('isSalesOutreachOperator');
-    const ALLOW = new Set(['runOutreachJob', 'markFailed', 'getPublicOutreachHtml']);
+    // recordOutreachPreviewView = 공개 페이지 열람 계수(getPublicOutreachHtml 과 같은 무인증 축 · preview_code 가 게이트 · 쓰는 것은 stage_results.views_preview 뿐)
+    const ALLOW = new Set(['runOutreachJob', 'markFailed', 'getPublicOutreachHtml', 'recordOutreachPreviewView']);
     const re = /export async function (\w+)\(/g;
     let m: RegExpExecArray | null;
     let checked = 0;
@@ -248,6 +258,9 @@ describe('sales-outreach invariants', () => {
     expect((produce.match(/await loadOutreachExemplarSource\(\)/g) || []).length).toBe(2);
     expect(produce).toContain('exemplars = dmPrompt.exemplars;');
     expect(produce).toContain('exemplarCount: exemplars.picked');
+    // ★ 2026-09-06 S5 생성기는 엔진 deps 안(outreachEngineDeps) · 엔진 파일은 아웃리치 파일을 모른다(순환 0)
+    expect(produce).toContain('export function outreachEngineDeps()');
+    expect(readCode('utils/campaign-engine.ts')).not.toMatch(/sales-outreach-/);
   });
 
   it('★0905(3) 룩·검수 축 — 구도는 섹션 최상위(props 아님) · brand_kit 키 화이트리스트 · logo_url 0 · 후보 24 · 재료·섹션 라우트 · 재생성 축 분리', () => {
@@ -268,18 +281,25 @@ describe('sales-outreach invariants', () => {
     }
     const produce = readCode('utils/sales-outreach-produce.ts');
     // 룩 배정은 prune 뒤 · DM brand_kit은 항상 buildOutreachBrandKit(색은 접근성 통과 시에만) · 제안 메일 아트디렉션 하드코딩 0
-    expect(produce).toContain("applyOutreachLook(pruned.sections, 'DM', dims)");
+    // ★ S5 이관 — 룩 배정은 엔진(campaign-engine.ts)이 정리 뒤 순서에 입힌다 · produce 는 deps 로 applyOutreachLook 을 넘긴다
+    const engine = readCode('utils/campaign-engine.ts');
+    expect(engine).toContain('deps.applyLook(ordered, opts.channel, dims)');
+    expect(produce).toContain('applyLook: (sections, channel, dims) => applyOutreachLook(sections, channel, dims)');
     expect(produce).toContain("applyOutreachLook(pruned.sections, 'EMAIL', dims)");
     expect(produce).toContain('brand_kit: buildOutreachBrandKit(primary, input.industry)');
     expect(produce).not.toMatch(/brand_kit: accessible \? \{ primary_color/);
     expect(produce).not.toMatch(/art_direction: \{ typeScale: 'bold', spacingDensity: 'airy'/);
     expect(produce).toContain('art_direction: outreachArtDirection(input.industry)');
     // 섹션 override는 DM(발행 직전)·이메일(조립 직전) 둘 다 같은 함수로 재적용
-    expect(produce).toContain('applySectionOverrides(sectionsBase, input.sectionOverride || null)');
+    expect(engine).toContain('deps.applyOverride(sectionsBase, (opts.sectionOverride as TOverride | null) || null)');
+    expect(produce).toContain('sectionOverride: input.sectionOverride || null,');
     const jobs = readCode('utils/sales-outreach-jobs.ts');
     expect(jobs).toContain("applySectionOverrides(brandSectionsBase, (sr.section_overrides?.email as SectionOverride | undefined) || null)");
     // 후보 24(핫픽스 기본값과 운영 호출부 일치) · 갤러리 예산 동반
-    expect(jobs).toContain('extractImageCandidates(page.html, finalUrl, 24)');
+    // ★ 2026-09-06 S1 — 후보 24 계약은 그대로, 호출 형태만 배너 상세(alt 동반)의 두 소스 합집합으로 옮겼다(렌더 앞 · 정적 뒤)
+    expect(jobs).toContain('bannersOf(rendered.html, finalUrl, 24)');
+    expect(jobs).toContain('bannersOf(page.html, staticUrl, 24)');
+    expect(jobs).toContain('imageCandidates: banners.map((b) => b.url)');
     expect(produce).toContain('deadlineMs: OUTREACH_GALLERY_DEADLINE_MS');
     // 재생성 축 분리 — 제목·서두는 email만 · 브랜드 시안은 email+materials
     expect(jobs).toContain("const regenIntro = regenFrom === 'email' || !prevEmail;");
@@ -294,24 +314,25 @@ describe('sales-outreach invariants', () => {
     const routes = read('routes/sales-outreach.ts');
     expect(routes).toContain("router.post('/jobs/:id/materials'");
     expect(routes).toContain("router.post('/jobs/:id/sections'");
-    expect(jobs).toContain('sendLock: computeSendLock(sendLockEnv(), emailAsset), quality');
+    expect(jobs).toContain('sendLock: computeSendLock(sendLockEnv(), emailAsset, sendLockMaterialOf(rest.stage_results))');
     const lockBody = fnBody(jobs, 'export function computeSendLock(');
     expect(lockBody, '품질 경고가 잠금 5종에 섞이지 않는다(불변 3)').not.toMatch(/quality|NO_PRODUCTS|FEW_/);
     // 적대 리뷰(0905(3)) 정정 고정 — SQL 자리표시자 `$` 누락 0(재료 재선택·재분석 500) · 아웃리치 DM = scroll · 이미지 재생성이 숨김을 지운다 · 숨김 상한 · preset 근거 승계
     expect(jobs, 'params.length 자리표시자는 반드시 $ 접두').not.toMatch(/[^$]\$\{params\.length\}/);
     expect(jobs).not.toMatch(/= \d+::jsonb/);
-    expect(produce).toContain('splitSectionsIntoPages(rebuilt.sections, OUTREACH_DM_LAYOUT_MODE)');
+    expect(engine).toContain('deps.splitPages(rebuilt.sections, opts.layoutMode)');
+    expect(produce).toContain('layoutMode: OUTREACH_DM_LAYOUT_MODE,');
     expect(produce).toContain('layout_mode: OUTREACH_DM_LAYOUT_MODE');
     expect(look).toContain("OUTREACH_DM_LAYOUT_MODE: 'scroll' = 'scroll'");
     expect(jobs).toContain("clear: k === 'image' ? ['regen', 'section_overrides'] : ['regen']");
     expect(jobs).toContain("regenSeqOf(sr, 'sections') + 1");
     expect(jobs).toContain('const carry = presetSections && prevDm ? prevDm : null;');
     expect(jobs).toContain('hiddenSkipped: dm.hiddenSkipped');
-    expect(produce).toContain('look = lookStatsOf(rebuilt.sections);');
+    expect(engine).toContain('const look = deps.lookStats(rebuilt.sections);');
     // ★0905(4) 전문가 느낌 — 브랜드 색은 접근성 보정본 · 크롤이 아이콘 PNG 지배색까지 본다 · 갤러리 배너 통째 · 캐러셀 6개 · CTA 2개 보장
     expect(produce).toContain('accessiblePrimaryOf(input.brandColor)');
     expect(produce).not.toContain('isBrandKitPrimaryAccessible(');
-    expect(jobs).toContain('resolveBrandColorGuarded(page.html, finalUrl');
+    expect(jobs).toContain('resolveBrandColorGuarded(colorHtml, finalUrl');
     expect(produce).toContain("p.layout = 'list_1xN';");
     expect(produce).toContain('const perCarousel = 6;');
     expect(produce).toContain('if (ctaCount < 2) {');
@@ -319,7 +340,7 @@ describe('sales-outreach invariants', () => {
     expect(look).not.toContain('logo_url');
     expect(produce).toContain('if (media.logoUrl) { p.logo_url = media.logoUrl;');
     expect(produce).toContain('pngLooksWhite(img.buffer)');
-    expect(jobs).toContain('logoCandidates: page ? extractLogoCandidates(page.html, finalUrl) : []');
+    expect(jobs).toContain('logoCandidates: unionStrings(rendered ? extractLogoCandidates(rendered.html, finalUrl) : [], page ? extractLogoCandidates(page.html, staticUrl) : [], 4)');
     expect(jobs).toContain('logoCandidates: Array.isArray(bp.logoCandidates) ? bp.logoCandidates : []');
     // 히어로 = 홈 첫 배너(문서 순서) · 포스터는 두 번째 비주얼 · 갤러리 수집은 면적 정렬 0
     expect(produce).toContain("const heroImage = galleryAll[0]?.url || media.posterUrl || media.products[0]?.image_url || '';");

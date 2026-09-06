@@ -16,6 +16,8 @@ import { CSS } from '@dnd-kit/utilities';
 import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
 // ★ 2026-07-02 완성(50크레딧) 사전 고지 — 환불 없는 돈이라 확인 모달 의무
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
+// ★ 2026-09-06 S6 재료(이미지·행사 내용)로 블록 — 아웃리치 브랜드 이메일 시안 경로
+import MaterialQuickPanel from '../MaterialQuickPanel';
 // ★ 2026-07-13 디자인 3.0 — 테마 8종 1클릭 + 구도/배경면 픽커 + 프리헤더 (캠페인 단위 design)
 import EmailDesignThemeModal from './EmailDesignThemeModal';
 // ★ 2026-08-27 서체 지정(임은지 접수) — DM_FONT_CATALOG 단일 소스 · 캠페인 design만 패치
@@ -586,6 +588,22 @@ export default function EmailVisualEditor({
                 {aiBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}{aiBusy ? '생성 중...' : 'AI 생성 (3크레딧)'}
               </button>
               <div className="text-[10px] text-white/35 leading-relaxed">상품 이름·가격·링크를 넣으면 상품 카드가 자동으로 만들어져요. 가격·혜택은 넣어주신 원문 그대로만 사용됩니다.</div>
+              {/* ★ 2026-09-06 S6 재료 입구 — 이미지·행사 내용 → 블록 전체 교체(기존 AI 생성과 같은 적용 경로) */}
+              <MaterialQuickPanel
+                channel="email"
+                isAd={isAd}
+                disabled={aiBusy}
+                onToast={(message, type) => onToast(message, type)}
+                onDone={({ data }) => {
+                  const g = data || {};
+                  setSections(normalizeOrder(g.sections || []));
+                  setSelectedId(g.sections?.[0]?.id || null);
+                  if (!name || name === 'AI 비주얼 이메일') setName(g.name || name);
+                  if (!subject) setSubject((g.subjects && g.subjects[0]) || '');
+                  if (g.preheader) setDesign((d) => ({ ...(d || {}), preheader: String(g.preheader).slice(0, 90) }));
+                  onToast(`재료로 이메일 블록 ${Array.isArray(g.sections) ? g.sections.length : 0}개를 만들었습니다. 이미지와 문구만 다듬어 주세요.`, 'success');
+                }}
+              />
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

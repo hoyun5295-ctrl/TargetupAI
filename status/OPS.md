@@ -425,6 +425,28 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT COUNT(*) A
 6. 실측 1건(순서대로): (a) `fetchHtmlGuarded('https://www.innisfree.com/')` 실측 → `ok 3xxxxx`([B-0905-1](BUGS.md) 종결 기준) (b) 업체 1곳 등록 → 확인 대기 → 확정 → ready (c) 검토 화면에서 [검수 메일 보내기]에 `@invitocorp.com` 주소 입력 → 수신함 도착 (d) 근거 패널 "선명한 이미지 n장 · 상품 n개" · DM 열어 갤러리·상품 이미지가 선명한지 (e) `curl -I` 발행 DM 주소에 `X-Robots-Tag: noindex` (f) 공개 샘플 URL 61회 연타 → 429 안내 HTML.
 7. **실물 예시 학습 적재(0905(2) · Harold 화면 1회)**: `/admin/best-layout` → "실물 예시 · AI 영업 학습" 패널 → [실물 예시 올리기] → 단축코드 29줄(신규 10 + 기존 인비토 19 · 브랜드명·담당자 표기가 섞여 있어도 된다)을 붙여넣고 [찾기] → 이미 seed에 있는 9건은 그대로 올려도 되고(같은 본문은 1번만 쓴다) → 이메일 후보에서 짝(탑텐)과 추가할 것(아디제로·마리오아울렛·신규 환영)을 체크 → 일괄 업종 지정(패션 대부분 · 뷰티 7 · 식품 교촌·마리오 · 여행 아난티 · 리빙 에이스하드웨어 · 건강 덴프스) → [올리기]. 확인 = 패널 건수(DM ≥ 20 · 이메일 ≥ 4) · 제외 사유 0 · 그 뒤 AI 영업 1건 제작의 근거 패널 "실물 예시 n건"이 seed 19보다 큰가. 되돌리기 = 패널의 [삭제](두 번 클릭) 또는 `DELETE FROM best_copy_assets WHERE kind='outreach_example';`(전량).
 
+**⑧ 2026-09-06 S1 렌더 크롤 워커(`outreach-render`) 배포** (설계 = [캠페인 엔진 설계서 §3](../docs/2026-09-06-campaign-engine-design.md) · DDL 0 · 새 PM2 앱 1개 · 크롬 실물 = `~/.cache/puppeteer/chrome/linux-146.0.7680.153/chrome-linux64/chrome` 확인 완료 2026-09-06)
+0. (선택 · 코드 0 착수 게이트) 렌더 편차·자원 실측 — 결과 JSON 을 보고에 붙인다:
+```bash
+cd /home/administrator/targetup-app/packages/backend && node ../../scratch/proto/render-gate.js > /tmp/render-gate.json && node -e "console.log(JSON.stringify(require('/tmp/render-gate.json').summary,null,1))"
+```
+1. 코드 배포 = §2-2 표준 순서(pull → npm install → backend·frontend `build:safe` → `pm2 reload targetup-backend`). ENV(선택 · `packages/backend/.env`): `OUTREACH_RENDER_URL=http://127.0.0.1:4317`(생략 = 같은 기본값).
+2. 워커 기동(**최초 1회 · `pm2 delete` 금지**):
+```bash
+cd /home/administrator/targetup-app && pm2 start ecosystem.config.js --only outreach-render && pm2 save
+```
+3. 기동 확인 — 두 줄이 있어야 신코드다:
+```bash
+pm2 logs outreach-render --nostream --lines 30 | grep -E "\[outreach-render\] (시작|크롬 기동|sandbox)"
+```
+```bash
+curl -s http://127.0.0.1:4317/health
+```
+   `sandbox=false` 가 찍히면 서버가 비특권 사용자 네임스페이스를 막아 `--no-sandbox` 로 재시도한 것이다(트래픽은 프록시가 가둔다 · 설계서 §3-4 미검증 항목).
+4. 실측 1건 — AI 영업 화면에서 **아이소이(https://www.isoi.co.kr) 새 업체 등록** → 확인 대기 화면 "홈페이지에서 읽은 재료" 카드에 `화면을 그려서 읽음`(또는 `바로 읽기 + 화면을 그려서 읽음`) · 상품 4개 이상 · 배너 후보 5장 이상 · 리뷰 45만 · 평점 4.9 가 보이면 통과. 정적만 나오면 `pm2 logs outreach-render --nostream --lines 50` 의 `렌더 실패` 줄 사유를 본다.
+5. 이후 코드 변경 = `pm2 reload outreach-render`(env 변경 시 `pm2 restart outreach-render --update-env`). 워커가 죽어 있어도 backend 는 정적 크롤로 전진한다(대기 0 · 사유 = `stage_results.rendering='unavailable'`).
+6. 롤백 = `pm2 stop outreach-render`(정적 크롤로 즉시 복귀) + 코드 되돌리기. 새 jsonb 키는 구코드가 읽지 않는다.
+
 ---
 
 ### 2-2-F. 국외 접속 판정 대역(geo_allow_cidrs) 갱신 (★2026-08-30 신설 · 반기 권장)

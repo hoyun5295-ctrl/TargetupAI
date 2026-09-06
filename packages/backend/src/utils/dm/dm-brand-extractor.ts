@@ -333,7 +333,8 @@ export function isPrivateIp(addr: string): boolean {
 }
 
 /** 호스트명 → 검증된 공인 주소 1개 (전 해석 주소가 공인이어야 통과 — 하나라도 사설이면 차단). */
-async function resolvePublicAddress(hostname: string): Promise<{ address: string; family: number } | null> {
+/** ★ 2026-09-06 export — 아웃리치 렌더 워커의 로컬 프록시가 같은 판정기를 재사용한다(새 판정기 0 · 불변 7). 동작 무변경. */
+export async function resolvePublicAddress(hostname: string): Promise<{ address: string; family: number } | null> {
   if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) return isPrivateIpV4(hostname) ? null : { address: hostname, family: 4 };
   if (hostname.includes(':')) return isPrivateIp(hostname) ? null : { address: hostname, family: 6 }; // IPv6 리터럴(new URL이 대괄호 제거)
   try {

@@ -21,6 +21,8 @@ import { takeEventDraft, EVENT_DM_DRAFT_KEY } from '../components/EventCampaignM
 import { STUDIO_DM_DRAFT_KEY } from '../lib/studio-draft';
 import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 import ImageToCopyButton from '../components/ImageToCopyButton';
+// ★ 2026-09-06 S6 재료(이미지·행사 내용)로 초안 — 아웃리치 엔진 · 초안 id 로 이어서 편집
+import MaterialQuickPanel from '../components/MaterialQuickPanel';
 // ★ 2026-07-19: 기획전 스샷 구조화 판독 → DM 섹션 디터미니스틱 조립 (행사 N블록 = 70% 완성)
 import { buildDmSectionsFromEvents, deriveDmTitleFromEvents, summarizeEvents } from '../utils/dm-event-assembly';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
@@ -891,6 +893,18 @@ export default function DmBuilderPage() {
                 }}
                 disabled={generating}
                 className="w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-violet-400/40 bg-violet-500/10 text-violet-100 text-sm font-medium py-2.5 hover:bg-violet-500/20 disabled:opacity-40 transition-colors"
+              />
+              {/* ★ 2026-09-06 S6 재료 입구 — 이미지 몇 장 + 행사 내용 → 서버가 초안 DM 을 만들고(아웃리치 엔진) 그 id 를 그대로 연다 · 기존 두 버튼은 무접촉 */}
+              <MaterialQuickPanel
+                channel="dm"
+                disabled={generating}
+                onToast={(message, type) => setToast({ type: type === 'error' ? 'error' : type === 'warning' ? 'info' : 'success', message })}
+                onDone={async ({ draftId }) => {
+                  if (!draftId) { setToast({ type: 'error', message: '초안이 만들어지지 않았습니다. 다시 시도해주세요.' }); return; }
+                  await useDmBuilderStore.getState().loadDm(draftId);
+                  setMode('edit');
+                  setToast({ type: 'success', message: '재료로 초안을 만들었습니다. 이미지와 문구만 다듬어 주세요.' });
+                }}
               />
               <button
                 onClick={() => { if (naturalLanguage.trim() && !generating) { setPendingGen({ prompt: naturalLanguage.trim(), desc: `"${naturalLanguage.trim()}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` }); } }}

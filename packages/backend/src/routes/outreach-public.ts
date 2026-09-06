@@ -8,7 +8,7 @@
  * - 열람 로그(시각·IP) = 영업 신호.
  */
 import { Router, Request, Response } from 'express';
-import { getPublicOutreachHtml } from '../utils/sales-outreach-jobs';
+import { getPublicOutreachHtml, recordOutreachPreviewView } from '../utils/sales-outreach-jobs';
 import { isOutreachMigrationPending } from '../utils/sales-outreach-jobs';
 
 const router = Router();
@@ -22,6 +22,8 @@ router.get('/:code', async (req: Request, res: Response) => {
       return res.status(404).send('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>안내</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;color:#333"><p>페이지를 찾을 수 없거나 열람 기간이 지났습니다.</p></body></html>');
     }
     console.log('[sales-outreach] 샘플 열람:', req.params.code, req.ip);
+    // ★ 2026-09-06 S4 열람 기록(식별자 0 · UA 3분류 · 응답을 막지 않는다)
+    recordOutreachPreviewView(req.params.code, req.headers['user-agent'] || null).catch(() => {});
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(html);
   } catch (err: any) {

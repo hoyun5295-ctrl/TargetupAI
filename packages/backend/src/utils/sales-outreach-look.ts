@@ -193,11 +193,14 @@ export function applyOutreachLook(sections: readonly Section[], channel: Outreac
       case 'countdown':
         treatment = pickTreatment(channel, type, 'banner');
         break;
-      case 'cta':
+      case 'cta': {
         // 전부 큰 바(brand 색 풀폭 · 직원 실물 CTA 형태) · 마지막 앞의 CTA만 tint 밴드
-        treatment = pickTreatment(channel, type, 'bar');
+        // ★ 2026-09-06 S2 라벨 13자 초과면 bar 배정을 건너뛴다(375폭 풀폭 바에서 굵은 한글 14자+는 2줄로 접힌다 · 공용 렌더러 무변경 · 기본 버튼 구도로 둔다)
+        const labels: string[] = Array.isArray(p.buttons) ? p.buttons.map((b: any) => String(b?.label || '')) : [];
+        if (!labels.some((l) => l.length > 13)) treatment = pickTreatment(channel, type, 'bar');
         if (i !== lastCtaIdx) background = pickBackground(channel, 'tint');
         break;
+      }
       default:
         break;
     }

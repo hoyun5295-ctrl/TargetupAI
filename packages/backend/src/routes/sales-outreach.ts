@@ -16,7 +16,8 @@ import {
   OutreachError, isOutreachMigrationPending,
   sendOutreachMailForJob, sendOutreachTestMail, confirmOutreachMailArrived, markOutreachForwarded,
   editOutreachCopy, editOutreachSubject, rebuildOutreachEmail, regenerateOutreachAsset, recrawlOutreachJob,
-  dismissOutreachJob, countOutreachBadge, selectOutreachMaterials, hideOutreachSections,
+  dismissOutreachJob, countOutreachBadge, selectOutreachMaterials, hideOutreachSections, overrideOutreachMaterialGate,
+  deleteOutreachJob, deleteOutreachJobsBulk,
 } from '../utils/sales-outreach-jobs';
 import { outreachMailTo, outreachMailToList, isOutreachMailerReady, outreachTestMailDomains } from '../utils/outreach-mailer';
 import { getOutreachContext } from '../utils/sales-outreach-produce';
@@ -173,6 +174,7 @@ router.get('/jobs', async (req: Request, res: Response) => {
       jobs: await listOutreachJobs(req.user?.userId, {
         q: typeof req.query.q === 'string' ? req.query.q : null,
         group: typeof req.query.group === 'string' ? req.query.group : null,
+        view: typeof req.query.view === 'string' ? req.query.view : null,
         limit: req.query.limit ? Number(req.query.limit) : null,
         before: typeof req.query.before === 'string' ? req.query.before : null,
       }),
@@ -359,6 +361,41 @@ router.post('/jobs/:id/sections', async (req: Request, res: Response) => {
     res.status(202).json({ ok: true, ...r });
   } catch (err: any) {
     respondError(res, err, '블록 숨김');
+  }
+});
+
+// ★ 2026-09-06 S2 재료 부족 잠금 해제(사람 2클릭 · 감사 로그) — ready 에서만 · 재크롤이면 다시 잠긴다
+router.post('/jobs/:id/material-override', async (req: Request, res: Response) => {
+  try {
+    const r = await overrideOutreachMaterialGate(req.params.id, req.user?.userId);
+    console.log('[sales-outreach] 재료 부족 잠금 해제:', req.params.id, req.user?.userId);
+    audit(req, 'material_override', req.params.id);
+    res.json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, '재료 부족 잠금 해제');
+  }
+});
+
+// ★ 2026-09-06 S4 삭제 — 단건(sent 허용 · 링크 즉시 닫힘 · 파기 숫자 응답) · 다중(sent 제외 · 최대 100). 진행 중·발송 중은 409.
+router.post('/jobs/delete-bulk', async (req: Request, res: Response) => {
+  try {
+    const r = await deleteOutreachJobsBulk(req.body?.ids, req.user?.userId);
+    console.log('[sales-outreach] 선택 삭제:', r.deleted.length, '건 · 제외', r.skipped.length, req.user?.userId);
+    audit(req, 'delete_bulk', null, { deleted: r.deleted, skipped: r.skipped.length });
+    res.json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, '선택 삭제');
+  }
+});
+
+router.post('/jobs/:id/delete', async (req: Request, res: Response) => {
+  try {
+    const r = await deleteOutreachJob(req.params.id, req.user?.userId);
+    console.log('[sales-outreach] 삭제:', req.params.id, req.user?.userId);
+    audit(req, 'delete', req.params.id, r);
+    res.json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, '삭제');
   }
 });
 

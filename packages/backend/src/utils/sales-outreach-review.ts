@@ -12,6 +12,64 @@
  *   화면이 잠금 사유 목록 옆에 색만 달리해 보여주고 바로가기를 단다. 임계값은 미검증(첫 10건 뒤 재조정)이라 계약 테스트로 굳히지 않는다.
  */
 import type { Section } from './dm/dm-section-registry';
+import type { OutreachProduct, ProofSignals } from './sales-outreach-media';
+
+// ===== 재료 게이트(★ 2026-09-06 S2 · 회의 수렴안 D3) =====
+
+/** 임계 — 상품 4 · 배너 2 · 행사 1 중 **둘 이상** 충족 = enough. ⚠ 미검증(회의 합의 초안) · 첫 운영 10건 뒤 재조정. 상수는 OUTREACH_QUALITY_THRESHOLDS 이웃에 둔다. */
+export const OUTREACH_MATERIAL_GATE = { products: 4, banners: 2, events: 1, minAxes: 2 } as const;
+
+export type MaterialAxis = 'products' | 'banners' | 'events';
+export interface MaterialGateCounts { products: number; banners: number; events: number }
+export interface MaterialGate {
+  verdict: 'enough' | 'thin';
+  counts: MaterialGateCounts;
+  passed: MaterialAxis[];
+  missing: MaterialAxis[];
+  at: string;
+}
+
+/**
+ * 재료 충족 판정(순수). StageOutcome 3값을 건드리지 않는다(별 키 `stage_results.material`). 제작은 계속하고 발송만 잠근다(MATERIAL_THIN · computeSendLock 3번째 인자).
+ * 사람이 화면에서 재료 수를 보고 해제(`stage_results.material_override`)할 수 있다 — fail-closed 와 1클릭 규약이 함께 성립하는 형태.
+ */
+export function assessMaterialSufficiency(counts: MaterialGateCounts, now: Date = new Date()): MaterialGate {
+  const c: MaterialGateCounts = {
+    products: Math.max(0, Number(counts?.products) || 0),
+    banners: Math.max(0, Number(counts?.banners) || 0),
+    events: Math.max(0, Number(counts?.events) || 0),
+  };
+  const passed: MaterialAxis[] = [];
+  const missing: MaterialAxis[] = [];
+  (c.products >= OUTREACH_MATERIAL_GATE.products ? passed : missing).push('products');
+  (c.banners >= OUTREACH_MATERIAL_GATE.banners ? passed : missing).push('banners');
+  (c.events >= OUTREACH_MATERIAL_GATE.events ? passed : missing).push('events');
+  return { verdict: passed.length >= OUTREACH_MATERIAL_GATE.minAxes ? 'enough' : 'thin', counts: c, passed, missing, at: now.toISOString() };
+}
+
+// ===== 사실 수치 근거(★ 2026-09-06 S2 · 회의 수렴안 D3) =====
+
+/** 혜택어가 섞인 문자열은 근거로 넣지 않는다(면허 축은 그대로 · 사실 수치만 통과) */
+const BENEFIT_WORD_RE = /%|할인|쿠폰|증정|무료|사은품|적립|세일|특가|이벤트/;
+
+/**
+ * 재료에서 그대로 뽑은 사실 수치 문자열(가격) — `stripUnauthorizedBenefits`의 originalBody 에 면허 인용문 뒤에 이어 붙이는 근거.
+ * 공용 CT 시그니처는 바꾸지 않는다(불변 20 · 호출부가 근거 원문을 넓힌다). 코드가 만든 문장·할인율·혜택어는 넣지 않는다.
+ */
+export function factQuoteOf(materials: { products?: readonly OutreachProduct[] | null; proof?: ProofSignals | null } | null | undefined): string {
+  if (!materials) return '';
+  const out: string[] = [];
+  for (const p of materials.products || []) {
+    for (const v of [p.price, p.discount_price]) {
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+        const s = `${Math.round(v).toLocaleString('ko-KR')}원`;
+        if (!BENEFIT_WORD_RE.test(s) && !out.includes(s)) out.push(s);
+      }
+    }
+  }
+  // 구분자 ' · ' — 차단기는 공백만 있는 2자 이하 간격의 자리를 한 덩어리로 합치므로(원본 '10% 할인' 보호 규칙) 줄바꿈으로 이으면 가격 둘이 한 자리가 되어 대조에 실패한다
+  return out.slice(0, 40).join(' · ');
+}
 
 // ===== 재료 재선택 =====
 
@@ -134,7 +192,11 @@ export function applySectionOverrides(sections: readonly Section[], override: Se
 // ===== 품질 경고(세면 보이는 것 · 잠금 아님) =====
 
 export type OutreachQualityCode =
-  | 'NO_PRODUCTS' | 'FEW_PRODUCTS' | 'FEW_GALLERY' | 'CTA_ALL_HOME' | 'NO_LEGAL' | 'FEW_SECTIONS' | 'NO_BRAND_EMAIL' | 'NO_LOOK';
+  | 'NO_PRODUCTS' | 'FEW_PRODUCTS' | 'FEW_GALLERY' | 'CTA_ALL_HOME' | 'NO_LEGAL' | 'FEW_SECTIONS' | 'NO_BRAND_EMAIL' | 'NO_LOOK'
+  /** ★ 2026-09-06 S2 — 헤드라인이 비어 업체명으로 대체됐다(실물 표본 0건 형태 · 경고 · 잠금 아님) */
+  | 'HERO_FALLBACK'
+  /** ★ 2026-09-06 S3 — 발행 DM 375폭 캡처 vision 채점(디자이너 8항목) 미달(경고 · 잠금 아님 · 워커·모델 부재면 없음) */
+  | 'VISION_NO_HERO_IMAGE' | 'VISION_NO_PRICE_PAIR' | 'VISION_NO_CTA_BAR' | 'VISION_DUP_IMAGE' | 'VISION_TEXT_UNREADABLE' | 'VISION_GRAY_BOX' | 'VISION_NUMBER_LEAK' | 'VISION_FEW_SECTIONS';
 
 export interface OutreachQualityWarning { code: OutreachQualityCode; value?: number }
 
@@ -156,7 +218,23 @@ export interface QualityInput {
   homepageUrl: string;
   /** 룩 배정 수(dm asset look.treatments + backgrounds) · undefined = 옛 asset(경고 안 냄) */
   lookAssigned?: number;
+  /** ★ 2026-09-06 S2 dm asset heroFallback(sanitize 후처리가 헤드라인을 업체명으로 채웠는가) · undefined = 옛 asset */
+  heroFallback?: boolean;
+  /** ★ 2026-09-06 S3 dm asset visionScore.items(캡처 채점 2값) · null/undefined = 채점 없음 */
+  dmVision?: { items?: Partial<Record<string, boolean>> | null } | null;
 }
+
+/** vision 항목 → 경고 코드(false 일 때만) */
+export const VISION_WARNING_OF: Readonly<Record<string, OutreachQualityCode>> = {
+  hero_image_full: 'VISION_NO_HERO_IMAGE',
+  price_pair_visible: 'VISION_NO_PRICE_PAIR',
+  cta_bar_visible: 'VISION_NO_CTA_BAR',
+  no_duplicate_image: 'VISION_DUP_IMAGE',
+  text_readable: 'VISION_TEXT_UNREADABLE',
+  gray_box_zero: 'VISION_GRAY_BOX',
+  number_leak_zero: 'VISION_NUMBER_LEAK',
+  sections_enough: 'VISION_FEW_SECTIONS',
+};
 
 function normUrl(u: string): string {
   return String(u || '').trim().replace(/\/+$/, '').toLowerCase();
@@ -179,8 +257,128 @@ export function assessOutreachQuality(input: QualityInput): { warnings: Outreach
     if (ctaUrls.length > 0 && ctaUrls.every((u) => u === home)) w.push({ code: 'CTA_ALL_HOME', value: ctaUrls.length });
     if (dm.length < OUTREACH_QUALITY_THRESHOLDS.sections) w.push({ code: 'FEW_SECTIONS', value: dm.length });
     if (typeof input.lookAssigned === 'number' && input.lookAssigned === 0) w.push({ code: 'NO_LOOK', value: 0 });
+    if (input.heroFallback === true) w.push({ code: 'HERO_FALLBACK' });
+    const items = input.dmVision?.items || null;
+    if (items) for (const [k, v] of Object.entries(items)) if (v === false && VISION_WARNING_OF[k]) w.push({ code: VISION_WARNING_OF[k] });
   }
   if (!input.legal || (!input.legal.legal && !input.legal.csPhone)) w.push({ code: 'NO_LEGAL' });
   if (input.brandSections !== undefined && input.brandSections !== null && input.brandSections.length === 0) w.push({ code: 'NO_BRAND_EMAIL', value: 0 });
   return { warnings: w };
+}
+
+// ===== ★ 2026-09-06 S4 열람(순수 · 설계서 §6) — 새 테이블 0 · 식별자 0 · 문장은 서버가 완성한다 =====
+
+export type ViewerUaClass = 'mobile' | 'desktop' | 'bot';
+export const OUTREACH_PREVIEW_VIEWS_CAP = 50;
+export const OUTREACH_PREVIEW_MERGE_MS = 60_000;
+export const OUTREACH_UNREAD_DAYS = 3;
+
+/** UA 3분류 — 자동 수집기(미리보기 봇·크롤러) · 모바일 · 데스크톱. UA 원문은 저장하지 않는다(식별자 0). */
+export function classifyViewerUa(ua: string | null | undefined): ViewerUaClass {
+  const s = String(ua || '');
+  if (!s || /bot|crawl|spider|preview|fetch|slurp|facebookexternalhit|whatsapp|telegram|discord|twitter|linkedin|skype|curl|wget|python-requests|headless/i.test(s)) return 'bot';
+  if (/Mobile|Android|iPhone|iPad|iPod/i.test(s)) return 'mobile';
+  return 'desktop';
+}
+
+export interface PreviewViewEntry { at: string; ua: ViewerUaClass; n: number; last?: string }
+export interface PreviewViews { total: number; human: number; bot: number; first_at: string | null; last_at: string | null; entries: PreviewViewEntry[] }
+
+/**
+ * 산출물 페이지 열람 1건 합산 — 같은 UA 분류가 60초 안에 다시 오면 마지막 항목의 n 만 올린다(새로고침 폭주 흡수) · 항목 상한 50(오래된 것부터 버림) · 총계는 항목과 별도로 항상 +1.
+ */
+export function mergePreviewView(prev: PreviewViews | null | undefined, hit: { at: string; ua: ViewerUaClass }): PreviewViews {
+  const base: PreviewViews = prev && typeof prev === 'object'
+    ? { total: Number(prev.total) || 0, human: Number(prev.human) || 0, bot: Number(prev.bot) || 0, first_at: prev.first_at || null, last_at: prev.last_at || null, entries: Array.isArray(prev.entries) ? prev.entries.slice() : [] }
+    : { total: 0, human: 0, bot: 0, first_at: null, last_at: null, entries: [] };
+  base.total += 1;
+  if (hit.ua === 'bot') base.bot += 1; else base.human += 1;
+  if (!base.first_at) base.first_at = hit.at;
+  base.last_at = hit.at;
+  const last = base.entries[base.entries.length - 1];
+  const lastAt = last ? new Date(last.last || last.at).getTime() : NaN;
+  const hitAt = new Date(hit.at).getTime();
+  if (last && last.ua === hit.ua && Number.isFinite(lastAt) && Number.isFinite(hitAt) && hitAt - lastAt >= 0 && hitAt - lastAt <= OUTREACH_PREVIEW_MERGE_MS) {
+    base.entries[base.entries.length - 1] = { ...last, n: (Number(last.n) || 1) + 1, last: hit.at };
+  } else {
+    base.entries.push({ at: hit.at, ua: hit.ua, n: 1 });
+    if (base.entries.length > OUTREACH_PREVIEW_VIEWS_CAP) base.entries.splice(0, base.entries.length - OUTREACH_PREVIEW_VIEWS_CAP);
+  }
+  return base;
+}
+
+/** 산출물 페이지 열람 중 기준 시각 이후의 사람 열람 수(항목 n 합산 · 항목 상한에 잘린 옛 열람은 세지 않는다) */
+export function previewHumanViewsSince(pv: PreviewViews | null | undefined, sinceIso: string | null | undefined): number {
+  if (!pv || !Array.isArray(pv.entries)) return 0;
+  const since = sinceIso ? new Date(sinceIso).getTime() : NaN;
+  let n = 0;
+  for (const e of pv.entries) {
+    if (e.ua === 'bot') continue;
+    const at = new Date(e.last || e.at).getTime();
+    if (!Number.isFinite(since) || (Number.isFinite(at) && at >= since)) n += Number(e.n) || 1;
+  }
+  return n;
+}
+
+export interface DmViewAgg { viewers: number; opens: number; firstAt: string | null; lastAt: string | null; seconds: number; scroll: number | null; afterForward: number }
+export interface OutreachViewSummary {
+  dm: DmViewAgg | null;
+  preview: { total: number; human: number; bot: number; afterForward: number; firstAt: string | null; lastAt: string | null } | null;
+  /** 업체 전달 표시 뒤 3일이 지났는데 열람 신호(DM · 산출물 페이지 사람 열람)가 0 */
+  unread3d: boolean;
+  /** 재접촉 후보 = unread3d 와 같다(확정 신호 0) · 이름을 따로 둔 이유: 화면 문장·필터가 이 뜻으로 읽는다 */
+  recontact: boolean;
+  sentences: string[];
+}
+
+const kstDay = (iso: string | null | undefined): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '';
+  const k = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return `${k.getUTCMonth() + 1}월 ${k.getUTCDate()}일`;
+};
+
+/**
+ * 열람 요약 + 문장(서버 완성 · 화면은 그대로 보인다). 숫자를 지어내지 않는다: 집계가 없으면(null) 그 축 문장을 내지 않는다.
+ * 메일 픽셀은 없다(첫 오픈 = 우리 자신) · 전달 표시 전 열람은 내부 확인일 수 있어 그렇게 말한다.
+ */
+export function summarizeOutreachViews(input: {
+  dm: DmViewAgg | null; preview: PreviewViews | null; forwardedAt: string | null; stage: string; now?: Date;
+}): OutreachViewSummary {
+  const now = input.now || new Date();
+  const dm = input.dm;
+  const pvAfter = previewHumanViewsSince(input.preview, input.forwardedAt);
+  const preview = input.preview
+    ? { total: Number(input.preview.total) || 0, human: Number(input.preview.human) || 0, bot: Number(input.preview.bot) || 0, afterForward: pvAfter, firstAt: input.preview.first_at || null, lastAt: input.preview.last_at || null }
+    : null;
+  const fwdMs = input.forwardedAt ? new Date(input.forwardedAt).getTime() : NaN;
+  const forwardedLongAgo = Number.isFinite(fwdMs) && now.getTime() - fwdMs >= OUTREACH_UNREAD_DAYS * 24 * 60 * 60 * 1000;
+  const signalAfterForward = (dm ? dm.afterForward : 0) + pvAfter;
+  const unread3d = forwardedLongAgo && signalAfterForward === 0;
+  const sentences: string[] = [];
+  if (dm) {
+    if (dm.viewers > 0) {
+      const parts = [`모바일 DM을 ${dm.viewers}대 기기에서 ${Math.max(dm.opens, dm.viewers)}회 열어 보았습니다`];
+      if (dm.lastAt) parts.push(`마지막 ${kstDay(dm.lastAt)}`);
+      if (dm.seconds > 0) parts.push(`머문 시간 합계 ${dm.seconds}초`);
+      if (dm.scroll !== null && dm.scroll !== undefined) parts.push(`끝까지 본 비율 최대 ${dm.scroll}%`);
+      sentences.push(parts.join(' · ') + '.');
+      if (input.forwardedAt) sentences.push(dm.afterForward > 0 ? `업체 전달 표시 뒤 열람 ${dm.afterForward}건.` : '업체 전달 표시 뒤 모바일 DM 열람은 아직 없습니다.');
+    } else {
+      sentences.push('모바일 DM 열람 기록이 아직 없습니다.');
+    }
+  }
+  if (preview) {
+    if (preview.human > 0) {
+      const p = `산출물 페이지를 사람이 ${preview.human}회 열었습니다` + (preview.lastAt ? ` · 마지막 ${kstDay(preview.lastAt)}` : '') + (preview.bot > 0 ? ` · 자동 수집기 ${preview.bot}회 제외` : '') + '.';
+      sentences.push(p);
+      if (input.forwardedAt) sentences.push(pvAfter > 0 ? `그중 업체 전달 표시 뒤 ${pvAfter}회.` : '업체 전달 표시 전 열람만 있어 내부 확인일 수 있습니다.');
+    } else if (preview.total > 0) {
+      sentences.push(`산출물 페이지 열람은 자동 수집기 ${preview.bot}회뿐입니다.`);
+    }
+  }
+  if (unread3d) sentences.push(`업체 전달 뒤 ${OUTREACH_UNREAD_DAYS}일 동안 열람이 없습니다. 재접촉 후보입니다.`);
+  if (input.stage === 'sent' && !input.forwardedAt) sentences.push('업체 전달 표시가 없어 열람이 내부 확인인지 업체인지 가르지 못합니다.');
+  return { dm, preview, unread3d, recontact: unread3d, sentences };
 }

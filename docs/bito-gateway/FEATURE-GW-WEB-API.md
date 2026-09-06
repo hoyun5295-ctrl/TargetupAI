@@ -91,3 +91,76 @@
 - 거절 사유를 catch 에서 버리지 않는다. 사유 없는 거절 이력은 원인을 못 찾는다.
 - 마이그레이션 056 전에는 두 writer 가 `42P01` 을 한 번 확인하고 조용히 멈추고, 조회 API 는
   500 이 아니라 `503 DB_MIGRATION_PENDING` 을 돌려준다.
+
+## 7. 2026-09-06 대체발송 원본이 집계에서 성공으로 잡히던 것 (Harold 접수)
+
+발송 이력에는 「카카오 실패 후 LMS/MMS 전환 성공」으로 보이는 건이, 관제 첫 화면 유형별에서는
+알림톡 **전량 성공**으로 나왔다. 접수 = "카톡 실패면 카톡은 실패가 맞는 것 아닌가."
+
+**원인.** 전환은 행이 둘이다(원본 알림톡 · 자식 문자). 자식 결과가 오면
+`internal/gateway/engine/report.go` `markParentFallbackFinal` 이 **원본의 `norm_status` 를 DONE 으로,
+`report_code_raw` 를 7830/7831 로 덮는다**(API source 기준). 그 코드가 성공 목록에 있어서
+원본이 `kakao_alim` 성공으로 집계됐다. 컬럼 하나가 두 질문에 답한다 — API 소비자에게
+"이 요청은 최종 전달됐다"는 맞지만, 카카오로는 도달한 적이 없다.
+
+**처방.** `services/result-code.js` 에 `fallbackParentSql` 을 신설하고 집계 두 술어만 고쳤다.
+`finalSuccessSql` 에서 원본을 빼고, `finalFailedSql` 의 **DONE 구간 안에서** 실패로 센다.
+소비처 18곳(stats.js 13 · binds.js 3 · alert-worker.js 2)이 CT 하나로 따라온다.
+
+- **성공 코드 목록에서 7830·7831 을 빼지 않았다.** 그 목록은 `standardCodeSql` 의 라벨 분기와
+  Go `internal/common/resultcode` 가 함께 쓴다. 빼면 발송 이력 라벨이 「미분류 실패」가 되고
+  Go 판정과 갈라진다. `admin-messages.js`·`public-messages.js`·`workers/webhook-worker.js` 는
+  `standardCodeSql` 만 import 하므로 **고객 조회 API·웹훅 계약은 무변경**이다.
+- **DONE 구간 안에 둔 것이 계약이다.** 자식 생성 시점에 원본의 `fallback_request_id` 가 이미 채워지고
+  (`report.go` `startKakaoFallback`) 그때 원본은 REPORTED 다. 밖에 두면 전환 진행 중을 실패로 단정한다.
+- **원본을 집계에서 통째로 빼지 않는다.** 관제는 시도 축이라 카카오 회선 실패가 보여야 한다.
+  paystats(청구 축)가 원본을 세지 않는 것과 방향이 반대이고, 그쪽은 자식이 건수를 들고 있어 성립한다.
+
+**과금은 무변경.** 2026-09-06 실측 = 전환 원본 전 기간 90건(07-27~09-06)의 `billing_status` 가
+**전부 FAILED** 다. `report.go:208` 이 카카오 실패 감지 시점에 원본 과금을 닫는다. 청구 합계 필터
+(`billedFilterSql`)의 대상 집합에 FAILED 가 없으므로 게이트웨이 자체 청구에 원본이 들어간 적이 없다.
+당일 화면 청구액 375원도 ACCRUED 만의 합으로 역산이 맞는다.
+
+**같은 세션에서 `done_today` 도 닫았다(Harold 지시 "할 때 같이 해야지").** `stats.js` `agent-operational`
+의 CTE 만 CT 밖에서 `norm_status` 만 세고 있었고 그 값이 `stats.js:489`·`552` 성공률의 분자다.
+두 카운터를 `finalSuccessSql('message_request')`·`finalFailedSql('message_request')` 로 교체해
+(가)빈 REPORT 코드 DONE (나)실패 코드로 끝난 DONE (다)대체발송 원본 셋이 함께 성공에서 빠졌다.
+`failed_today` 에는 CT 정의대로 SEND_FAILED 가 편입된다 — 다른 통계 축과 같은 정의가 되는 대신
+진단 문구 「오늘 실패 N건, 전송 실패 상태 M건」의 두 수가 겹칠 수 있다(표시 문구는 무변경).
+
+**남은 축 둘도 같은 세션에서 닫았다(Harold 지시 "안 닫힌 것들 다 닫아라").**
+
+①**총계가 통화 수보다 큰 이유를 화면에 드러냈다. 숫자는 바꾸지 않았다.** 이 화면은 전송 대기·TPS·
+성공률까지 전부 **시도 축**이고 청구액만 청구 축이다. 총계만 도달 축으로 바꾸면 그것 하나만 축이 달라진다.
+대신 `today-summary` 에 `fallback_converted`(전환 원본 수)를 실어 「오늘 발송」 카드 아래
+「문자 전환 N」으로 내고, 통화 수(`total - fallback_converted`)를 tooltip 에 붙였다.
+
+②**성공률 분모를 CT `successRate` 로 옮겼다.** `agent-operational` 은 분자가 `updated_at` 기준 당일 종결,
+분모가 `created_at` 기준 접수 전체라 축이 둘이었다. `today-summary` 도 분모가 `total` 이라 같은 부류였고
+그쪽이 접수 화면이므로 함께 바꿨다. 두 곳 다 분모 = 성공+실패, 표본 0 = `null`.
+프론트 두 곳을 동반 수정했다 — `ConsolePage.jsx` 는 `Number(null)=0` 이 「—」 분기를 죽이고 있었고,
+`OperationsDashboardPage.jsx:765` 는 `??` 로 null 을 축이 다른 오늘 요약값에 폴백하고 있었다(키가 아예
+없을 때만 폴백하도록 고쳤다).
+
+**성공률 인라인 아홉 자리도 같은 세션에 닫았다(Harold 지시 "남기지 마").** 8곳이라 보고했는데
+전수를 다시 세니 아홉이었다 — `typeBucket` · `customerStatRow` 2 · `rollupCustomerRows` 2 ·
+`lineStatRow` 1 · export summary · `/stats/agents` · `/stats/today-detail`. 전부
+`successRate(success, failed)` 로 옮겼다. 이제 `stats.js` 의 성공률 열세 자리가 전부 CT 를 탄다
+(인라인 잔존 grep 0건 · **계약 테스트 10** 이 재발을 막는다 — `success_rate` 와 `* 100` 이 한 줄에
+있으면 실패한다). 종전 `lineStatRow` 주석의 "고객사 축과 분모가 다르다"는 의도가 아니라
+그 아홉 때문에 생긴 차이였다. 주석도 함께 고쳤다.
+
+카카오 계열 합산이 `customerStatRow` 와 `lineStatRow` 에 **같은 코드로 두 벌** 있었고 성공률 산식도
+각자 인라인이었다. `kakaoRollup(byType)` 하나로 합쳤다.
+
+**프론트가 null 을 받을 수 있게 된 것이 이 변경의 진짜 파급이다.** 종전에는 서버가 사실상 항상
+문자열을 줘서 「판정 전」 경로가 거의 죽어 있었다. 다섯 파일을 신설 `utils/rate.js` 하나에 맞췄다
+(`formatRate` · `hasRate` · `rateTone`/`rateColor`).
+
+| 자리 | 종전 | 지금 |
+|---|---|---|
+| `TodayPage` 카드·고객사 열 | `{summary.success_rate}%` → 「null%」 | `formatRate` |
+| `StatsPage` 고객사 열 | 회선 열만 「판정 전」을 알았다 | `rateBadge` 공용 |
+| `charts.jsx` `RateBar` | `Number(null)=0` → 빨간 0% | 막대 비우고 「판정 전」 |
+| `ConsolePage` 추이선 색 | 같은 이유로 빨강 | 판정 없으면 본문색 |
+| `OperationsDashboardPage` | `??` 로 축 다른 값에 폴백 | 키 부재일 때만 폴백 |

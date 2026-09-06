@@ -14,19 +14,15 @@
  * 주기(10분) < 최단 임계(15분) — H10. 다중 프로세스 대비: 종결·파기 모두 조건부 UPDATE 선점이라
  * 두 프로세스가 겹쳐도 한쪽만 1행을 잡는다(파일 삭제는 멱등 — 없으면 무시 · H11).
  */
-import * as fs from 'fs';
-import * as path from 'path';
 import { query } from '../config/database';
 import { OUTREACH_PREVIEW_DAYS, getOutreachContext } from './sales-outreach-produce';
 import { markFailed } from './sales-outreach-jobs';
-import { stopDm } from './dm/dm-builder';
+// ★ 2026-09-06 S4 파기 본문은 공용(사람 삭제와 같은 함수 · 두 갈래 금지)
+import { purgeOutreachJobArtifacts } from './sales-outreach-purge';
 
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 const ZOMBIE_MINUTES = 15;
 const STALE_QUEUED_HOURS = 2;
-
-// routes/cdp.ts INAPP_IMAGE_BASE와 동일 정의 미러(단일 env 소스 — utils/assets.ts와 같은 관례)
-const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
 
 async function sweepZombies(): Promise<void> {
   try {
@@ -70,18 +66,6 @@ async function sweepStaleQueued(): Promise<void> {
   }
 }
 
-/** 공개 이미지 URL(/api/cdp/inapp/image/{companyId}/{filename}) → 파일 삭제(멱등). 형식 밖 URL은 건너뜀. */
-function unlinkPublicImage(url: string): void {
-  const m = String(url || '').match(/\/api\/cdp\/inapp\/image\/([0-9a-f-]{36})\/([A-Za-z0-9._-]+)$/i);
-  if (!m) return;
-  const filePath = path.join(INAPP_IMAGE_BASE, m[1], m[2]);
-  try {
-    fs.unlinkSync(filePath);
-  } catch (e: any) {
-    if (e?.code !== 'ENOENT') throw e; // 없음 = 이미 지워짐(멱등) · 그 외 = 실패로 취급
-  }
-}
-
 async function sweepExpired(): Promise<void> {
   // ★ C-3 회사 컨텍스트 판정은 후보 질의 **전** — null이면 회차 전체를 스탬프 없이 건너뛴다(스탬프 뒤 건너뛰기 = 영구 누락)
   const ctx = getOutreachContext();
@@ -103,30 +87,9 @@ async function sweepExpired(): Promise<void> {
       );
       if (claimed.rows.length === 0) continue;
       try {
-        // DM 중지 — not_published = 멱등 성공 · 그 밖 block = 실패(롤백 · 다음 회차)
-        const dms = await query(
-          `SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'dm'`,
-          [row.id],
-        );
-        for (const a of dms.rows) {
-          const dmId = String(a.payload?.dmId || '');
-          if (!dmId) continue;
-          const res = await stopDm(dmId, ctx.companyId);
-          if (res.block && res.block !== 'not_published') throw new Error(`DM 중지 실패(${res.block}): ${dmId}`);
-        }
-        // 포스터 + 재료 사본(brand_profile.media) 파일 삭제
-        const assets = await query(
-          `SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'studio_image'`,
-          [row.id],
-        );
-        for (const a of assets.rows) unlinkPublicImage(String(a.payload?.url || ''));
-        const prof = await query(`SELECT brand_profile FROM sales_outreach_jobs WHERE id = $1`, [row.id]);
-        const media = prof.rows[0]?.brand_profile?.media;
-        if (media) {
-          for (const g of (Array.isArray(media.gallery) ? media.gallery : [])) unlinkPublicImage(String(g?.url || ''));
-          for (const p of (Array.isArray(media.products) ? media.products : [])) unlinkPublicImage(String(p?.image_url || ''));
-        }
-        console.log('[sales-outreach-sweeper] 만료 파기:', row.id);
+        // DM 중지(not_published = 멱등 성공 · 그 밖 block = 실패 → 롤백 · 다음 회차) + 포스터·배너·재료 사본 파일 삭제 — 공용 본문
+        const r = await purgeOutreachJobArtifacts(String(row.id), ctx.companyId);
+        console.log('[sales-outreach-sweeper] 만료 파기:', row.id, `DM ${r.dmsStopped} · 파일 ${r.filesDeleted}`);
       } catch (err: any) {
         // 삭제·중지 실패 = 스탬프 롤백 → 다음 회차가 다시 집는다(H7 — 조용히 넘기지 않는다)
         console.error('[sales-outreach-sweeper] 파기 실패(다음 회차 재시도):', row.id, err?.message);

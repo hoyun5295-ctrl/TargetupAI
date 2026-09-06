@@ -107,9 +107,12 @@ describe('인용 판정', () => {
 });
 
 describe('normalizeHomepageKey · findEventPageLink · appendTestSend · detailOf', () => {
-  it('호스트(www 제거) + 첫 경로 세그먼트', () => {
+  it('호스트만(www 제거) · 공유 호스트(스마트스토어 등)만 첫 경로 세그먼트 유지 (★ S4 키 정정)', () => {
     expect(normalizeHomepageKey('https://www.Brand.co.kr/')).toBe('brand.co.kr');
+    expect(normalizeHomepageKey('https://www.innisfree.com/kr/ko/main')).toBe('innisfree.com');
+    expect(normalizeHomepageKey('https://innisfree.com/')).toBe('innisfree.com');
     expect(normalizeHomepageKey('https://smartstore.naver.com/BrandShop/products/1')).toBe('smartstore.naver.com/brandshop');
+    expect(normalizeHomepageKey('https://smartstore.naver.com/other')).not.toBe(normalizeHomepageKey('https://smartstore.naver.com/BrandShop'));
     expect(normalizeHomepageKey('not a url')).toBe('not a url');
   });
   it('행사 상세 링크 1개(같은 호스트 · 홈 제외 · 로그인 제외)', () => {

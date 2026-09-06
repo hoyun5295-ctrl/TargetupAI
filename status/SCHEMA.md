@@ -1603,8 +1603,14 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | `mail_last` | `{ outcome, detail, rejected[], at }` | sendOutreachMailForJob | 발송 패널 |
 | `test_sends` | `[{ to, outcome, at, by }]` 최대 20 | sendOutreachTestMail | 검수 이력 3줄 |
 | `dismissed_at` | ISO | dismissOutreachJob | 뱃지 제외 · 목록 회색 |
+| `rendering` · `rendering_detail` · `render_meta` | ★2026-09-06 S1 · `ok` / `no_content` / `unavailable`(렌더를 시도했을 때만 키 존재) · 정제 문자열 ≤300 · `{ engine, elapsedMs, bytes, blockedRequests, navigations, textChars, imgCount, imgWide, sandbox, timedOut, reasons[], failure? }` | 크롤 단계 렌더 승격 | 확인 대기 재료 카드 · 근거 패널 |
+| `crawl_engine` | ★2026-09-06 S1 · `static` / `render` / `mixed` / `none` | 크롤 단계 | 재료 카드 읽기 방식 |
+| `material` | ★2026-09-06 S2 · `{ verdict: 'enough' \| 'thin', counts{products, banners, events}, passed[], missing[], at }`(assessMaterialSufficiency · 상품 4·배너 2·행사 1 중 둘) | 분석 종료(awaiting_confirm 전이) | 확인 대기 배너 · 발송 잠금 6번째 `MATERIAL_THIN`(computeSendLock 3번째 인자) |
+| `material_override` | ★2026-09-06 S2 · `{ by, at }` 사람이 재료 부족 잠금을 해제(ready 에서만 · 재크롤 시 resetJobTo 가 지운다) | overrideOutreachMaterialGate(라우트 `/material-override` · 감사 `sales_outreach.material_override`) | 잠금 판정 |
+| `deleted_at` · `deleted_by` | ★2026-09-06 S4 · 사람 삭제 스탬프(ISO · super_admin id) · `purged_at` 과 함께 찍힌다(만료 파기와 구분) · 파기 실패 롤백은 JSON null 로 덮는다(`->>` 는 SQL NULL) | deleteOutreachJob | 목록·최근 건 WHERE `(stage_results->>'deleted_at') IS NULL` |
+| `views_preview` | ★2026-09-06 S4 · `{ total, human, bot, first_at, last_at, entries[{at, ua('mobile'|'desktop'|'bot'), n, last?}] }` 공개 산출물 페이지 열람(식별자 0 · 60초 합산 · 항목 50) · 갱신은 총계 CAS | recordOutreachPreviewView(공개 라우트 · 비차단) | 상세·목록 `views`(문장 서버 완성) · `view=viewed|unread3d` 필터 |
 
-`brand_profile` jsonb 키: `siteTitle · excerpt(600) · eventTextFull(≤6000 · 행사 페이지 블록 앞) · imageCandidates[] · selectedImageUrl · crawledAt · finalUrl · brand{primaryColor 6자리 hex|null} · subPageUrl · structuredBlocks · productLinks[] · listProducts[] · ctaLinks{키워드: URL} · legal{legal, csPhone} · extraNotes(등록 폼 추가 정보 · 재크롤에도 보존) · media{gallery[{url,width,height,bytes,srcUrl}], products[], collectedAt, stats}`(제작 단계가 실측·사본 저장 뒤 기록 · 파기가 함께 삭제).
+`brand_profile` jsonb 키(★2026-09-06 `materials` 추가 = 재료 v2 `{ v:2, source, products[{name, price, discount_price, image_url, link_url, discount_rate?, rating?, review_count?, badges?}], banners[{url, alt, order}], proof{reviewTotal, rating, rankLabel}, counts{products, discountPairs, banners, textChars, priceMentions, staticTextChars, staticProducts}, escalation{attempted, reasons[]}, collectedAt }` · 값은 카드 원문 문자열만 · 계산 0): `siteTitle · excerpt(600) · eventTextFull(≤6000 · 행사 페이지 블록 앞) · imageCandidates[] · selectedImageUrl · crawledAt · finalUrl · brand{primaryColor 6자리 hex|null} · subPageUrl · structuredBlocks · productLinks[] · listProducts[] · ctaLinks{키워드: URL} · legal{legal, csPhone} · extraNotes(등록 폼 추가 정보 · 재크롤에도 보존) · media{gallery[{url,width,height,bytes,srcUrl}], products[], collectedAt, stats}`(제작 단계가 실측·사본 저장 뒤 기록 · 파기가 함께 삭제).
 `event_quote` jsonb: `{ candidates[{quote, sourceUrl, startDate, endDate, benefitLicensed, origin}], selected, confirmedBy, confirmedAt, generatedAt }`.
 파기(`purged_at`)는 sweeper가 30일 뒤 스탬프 + 포스터·사본 파일 삭제 + DM 발행 중지(stopDm). 실패는 스탬프 롤백.
 
@@ -1612,8 +1618,8 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 
 kind별 payload 키:
 - `copy`: `{ body, benefitLicensed, styleGuideVersion, sampleTrained, placeholders, materialChars, regenCount }` / 사람 편집본 `{ body, editedBy, editedAt, placeholders }`
-- `studio_image`: `{ url, usedCutout, personJudge, skippedReason, width, height, templateId, category, kind, media(stats)|null, mediaError|null, regenCount }`
-- `dm`: `{ dmId, dmUrl, structureRef|null, benefitStripped, sectionTypes[], exemplarCount, regenCount }`
+- `studio_image`: `{ url, usedCutout, personJudge, skippedReason, width, height, templateId, category, kind, media(stats)|null, mediaError|null, regenCount }` · ★2026-09-06 S3 `+ posterTexts{label,title,subtitle,dropped[]}, cutoutSource('alpha_png'|'rembg'|null), posterScore{outcome,digits,headlineVisible}|null, posterRegenerated, bannerUrl|null, bannerSize|null`
+- `dm`: `{ dmId, dmUrl, structureRef|null, benefitStripped, sectionTypes[], exemplarCount, regenCount }` · ★2026-09-06 `+ heroFallback(S2), visionScore{outcome,items{8항목 bool},at}|null(S3 · 채점 없음 = null)`
 - `email_html`: `{ subject, intro, html, text, placeholderCount, brandSections[], brandSubject, brandStripped, exemplarCount, subjectEditedAt?, subjectEditedBy?, regenCount }`
 `regen_count` 컬럼 = INSERT 시점의 `stage_results.regen_seq[kind]`(최초 0).
 

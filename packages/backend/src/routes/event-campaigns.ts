@@ -21,6 +21,9 @@ import { normalizeEventText } from '../utils/event-brief';
 import { extractEventsFromImages, MAX_EVENT_IMAGES } from '../utils/event-image-extract';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { InsufficientCreditError } from '../utils/ai-credit';
+// ★ 2026-09-06 S5 재료 입구(사본 저장 · 텍스트 비었을 때만 판독 · 견적)
+import { requirePlanFeature } from '../utils/plan-guard';
+import { saveMaterialImages, extractMaterialsText, quoteQuickCampaign, quickPlanLocked, quickMaterialsEnabled, QUICK_MATERIALS_MAX_IMAGES } from '../utils/campaign-quick';
 
 export const eventCampaignRouter = Router();
 eventCampaignRouter.use(authenticate);
@@ -66,6 +69,52 @@ eventCampaignRouter.post('/extract-image', (req: any, res: Response) => {
       }
       console.error('[event-campaigns extract-image] 오류:', err?.message);
       return res.status(500).json({ success: false, error: err?.message || '이미지 판독 실패' });
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// ★ 2026-09-06 S5 재료 입구 — GET /materials/quote(견적 · 노출 스위치 · 요금제 잠금) · POST /materials(사본 저장 + 텍스트 비었을 때만 판독)
+// ─────────────────────────────────────────────────────────────────────
+eventCampaignRouter.get('/materials/quote', async (req: any, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const imageCount = Math.max(0, Math.min(QUICK_MATERIALS_MAX_IMAGES, Number(req.query?.images) || 0));
+    const hasText = String(req.query?.has_text || '') === '1';
+    const quote = quoteQuickCampaign({ imageCount, hasText });
+    return res.json({ success: true, enabled: quickMaterialsEnabled(companyId), plan_locked: await quickPlanLocked(companyId), max_images: QUICK_MATERIALS_MAX_IMAGES, ...quote });
+  } catch (err: any) {
+    console.error('[event-campaigns materials/quote] 오류:', err?.message);
+    return res.status(500).json({ success: false, error: '견적을 계산하지 못했습니다.' });
+  }
+});
+
+eventCampaignRouter.post('/materials', requirePlanFeature('mobile_dm'), (req: any, res: Response) => {
+  imageUpload.array('images', MAX_EVENT_IMAGES)(req, res, async (uploadErr: any) => {
+    if (uploadErr) return res.status(400).json({ success: false, error: uploadErr.message || '이미지 업로드 오류' });
+    try {
+      const companyId = req.user?.companyId;
+      if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+      if (!quickMaterialsEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.' });
+      const files = (req.files as Express.Multer.File[]) || [];
+      const eventText = normalizeEventText(req.body?.event_text);
+      if (!files.length && !eventText) return res.status(400).json({ success: false, error: '이미지 1장 이상 또는 행사 내용을 입력해주세요.' });
+      const images = saveMaterialImages(companyId, files);
+      let text = eventText;
+      let events: unknown[] | null = null;
+      let extracted = false;
+      if (!eventText && files.length) {
+        // 텍스트가 비었을 때만 판독(3크레딧 · 성공 시만 · 판독 함수가 차감) — 판독본은 origin 'vision'(면허 아님)
+        const r = await extractMaterialsText({ companyId, userId: req.user?.userId, files });
+        text = r.eventText; events = r.events; extracted = true;
+      }
+      return res.json({ success: true, images, event_text: text, events, extracted });
+    } catch (err: any) {
+      if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+      if (err?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, error: err.message });
+      console.error('[event-campaigns materials] 오류:', err?.message);
+      return res.status(500).json({ success: false, error: '재료를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
     }
   });
 });

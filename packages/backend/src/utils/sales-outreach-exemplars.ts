@@ -116,29 +116,49 @@ export const OUTREACH_GENERATION_RULES = [
   '- 예시는 "구성·리듬·문장 길이·톤"의 참고다. 문장을 베끼지 마라. 예시에 나온 어구를 5어절 이상 그대로 쓰지 마라.',
   '- 사용 조건·기간·세트 구성 설명은 [홈페이지에서 읽은 내용]에 같은 문장이 있을 때만 쓴다. 근거 문장을 못 찾으면 그 값을 빈 문자열로 둔다. 서로 다른 혜택의 조건을 합치지 마라.',
   '- 상품 묶음·갤러리 개수는 [재료 용량]에 적힌 최대치를 넘기지 마라. 같은 상품을 두 묶음에 넣지 마라.',
-  '- 한국어 · 존댓말 · 과장·강요 없이 브랜드 중심 · 이모지 0 · 줄표 0.',
+  '- 행사가 있으면 행사 중심(행사명이 헤드라인에 그대로 · 기간·상품이 본문에) · 행사가 없을 때만 브랜드 중심. 한국어 · 존댓말 · 과장·강요 없이 · 이모지 0 · 줄표 0.',
   '- 출력은 JSON 하나만(코드블록·설명 금지).',
 ].join('\n');
 
-/** DM 섹션 계약(프롬프트용) : 이 밖의 type·props는 코드가 버린다. products·images·url은 코드가 채운다. */
+/** 채널 공통 줄(★ 2026-09-06 S2 · 실물 통계 반영: hero sub_copy 60자 · CTA 목적지 이름형 10~16자) */
+const SECTION_CONTRACT_COMMON = {
+  header: '- header: { "brand_name": "업체명" }',
+  hero: '- hero: { "headline": "메인 헤드라인(18자 이내 · 행사가 있으면 행사명 그대로)", "sub_copy": "부제 1문장(60자 이내)" }',
+  textCard: '- text_card: { "tag": "짧은 라벨", "headline": "소제목(20자 이내)", "body": "본문 1~3문장" }',
+  carousel: '- product_carousel: { "title": "상품 묶음 제목" }   (products는 코드가 채운다: 넣지 마라)',
+  gallery: '- gallery: {}                                       (제목·images는 코드가 채운다: 넣지 마라)',
+  coupon: '- coupon: { "discount_label": "혜택 한 줄", "usage_condition": "조건 한 줄" }   (원문에 혜택 문구가 그대로 있을 때만)',
+  countdown: '- countdown: { "urgency_text": "마감 임박 문구(6~14자)", "end_datetime": "YYYY-MM-DDTHH:mm:ss" }  (원문에 종료일이 있을 때만)',
+  cta: '- cta: { "buttons": [{ "label": "목적지 이름 + 동사(10~16자 · 예: 기획전 보러 가기 / 베스트 바로가기 · 자세히 보기 같은 범용어 금지)" }] }   (url은 코드가 채운다 · cta는 2~3개: 첫 상품 묶음 뒤 1개, 마지막 1개)',
+  footer: '- footer: { "notes": "안내 한 줄" }',
+} as const;
+
+/** DM 섹션 계약(프롬프트용) : 이 밖의 type·props는 코드가 버린다. products·images·url은 코드가 채운다. DM 리듬 = 이미지 블록 연속(text_card 0~1 · 실물 10건 중 2건). */
 export const OUTREACH_DM_SECTION_CONTRACT = [
   '[사용 가능한 섹션 type과 props · 이 밖의 type·props 금지]',
-  '- header: { "brand_name": "업체명" }',
-  '- hero: { "headline": "메인 헤드라인(18자 이내)", "sub_copy": "부제 1문장(30자 이내)" }',
-  '- text_card: { "tag": "짧은 라벨", "headline": "소제목(20자 이내)", "body": "본문 1~3문장" }',
-  '- product_carousel: { "title": "상품 묶음 제목" }   (products는 코드가 채운다: 넣지 마라)',
-  '- gallery: {}                                       (제목·images는 코드가 채운다: 넣지 마라)',
-  '- coupon: { "discount_label": "혜택 한 줄", "usage_condition": "조건 한 줄" }   (원문에 혜택 문구가 그대로 있을 때만)',
-  '- countdown: { "urgency_text": "마감 임박 문구", "end_datetime": "YYYY-MM-DDTHH:mm:ss" }  (원문에 종료일이 있을 때만)',
-  '- cta: { "buttons": [{ "label": "버튼 글(8자 이내)" }] }   (url은 코드가 채운다 · cta는 2~3개: 첫 상품 묶음 뒤 1개, 마지막 1개)',
-  '- footer: { "notes": "안내 한 줄" }',
+  SECTION_CONTRACT_COMMON.header,
+  SECTION_CONTRACT_COMMON.hero,
+  `${SECTION_CONTRACT_COMMON.textCard}   (DM에서는 0~1개만 · 이미지 블록 사이를 텍스트로 끊지 마라)`,
+  SECTION_CONTRACT_COMMON.carousel,
+  SECTION_CONTRACT_COMMON.gallery,
+  SECTION_CONTRACT_COMMON.coupon,
+  SECTION_CONTRACT_COMMON.countdown,
+  SECTION_CONTRACT_COMMON.cta,
+  SECTION_CONTRACT_COMMON.footer,
 ].join('\n');
 
-/** 이메일 블록 계약 = DM 계약에서 countdown 제외(이메일 클라이언트에 카운트다운 없음). */
-export const OUTREACH_EMAIL_SECTION_CONTRACT = OUTREACH_DM_SECTION_CONTRACT
-  .split('\n')
-  .filter((l) => !l.startsWith('- countdown'))
-  .join('\n');
+/** 이메일 블록 계약(★ S2 독립 문자열 · DM 파생 아님) : countdown 없음(이메일 클라이언트) · 이메일 리듬 = 상품 묶음 앞에 text_card 3칸(실물 9건 중 9건 · 17/18 세 칸 전부). */
+export const OUTREACH_EMAIL_SECTION_CONTRACT = [
+  '[사용 가능한 블록 type과 props · 이 밖의 type·props 금지]',
+  SECTION_CONTRACT_COMMON.header,
+  SECTION_CONTRACT_COMMON.hero,
+  `${SECTION_CONTRACT_COMMON.textCard}   (상품 묶음 앞에는 반드시 text_card 1개를 두고 tag·headline·body 세 칸을 모두 채워라 · 빈 칸 금지)`,
+  SECTION_CONTRACT_COMMON.carousel,
+  SECTION_CONTRACT_COMMON.gallery,
+  SECTION_CONTRACT_COMMON.coupon,
+  SECTION_CONTRACT_COMMON.cta,
+  SECTION_CONTRACT_COMMON.footer,
+].join('\n');
 
 export const OUTREACH_DM_TYPES: readonly string[] = ['header', 'hero', 'text_card', 'product_carousel', 'gallery', 'coupon', 'countdown', 'cta', 'footer'];
 export const OUTREACH_EMAIL_TYPES: readonly string[] = ['header', 'hero', 'text_card', 'product_carousel', 'gallery', 'coupon', 'cta', 'footer'];
