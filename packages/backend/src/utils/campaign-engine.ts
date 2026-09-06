@@ -13,7 +13,7 @@ import type { Section } from './dm/dm-section-registry';
 export type EngineChannel = 'DM' | 'EMAIL';
 export type EngineEntry = 'outreach' | 'customer';
 
-export interface EngineImage { url: string; width?: number; height?: number }
+export interface EngineImage { url: string; width?: number; height?: number; /** 홈페이지 배너 문구(정리본) · 캡션 원천 */ alt?: string }
 export interface EngineProduct {
   name: string; price: number | null; discount_price: number | null; image_url: string; link_url?: string;
   width?: number; height?: number; discount_rate?: number | string | null; rating?: number | string | null; review_count?: number | string | null; badges?: string[];
@@ -40,6 +40,8 @@ export interface EngineMaterials {
   /** 혜택 수치 면허 원문(없으면 '') — 차단기의 기준. 아웃리치 = 재대조 통과 인용 · 고객 입구 = 사용자가 직접 쓴 텍스트만 */
   licensedQuote: string;
   proof: unknown | null;
+  /** ★ 2026-09-06(2) 포스터 캡션(포스터 3칸의 title · 숫자 0) — 포스터 블록 아래 한 줄 */
+  posterCaption?: string | null;
 }
 
 export interface EngineOptions {
@@ -57,6 +59,8 @@ export interface EngineOptions {
 export interface EngineGenInput {
   companyName: string; industry: string | null; homepageUrl: string; siteTitle: string | null; material: string; extraNotes: string | null;
   products: EngineProduct[]; galleryCount: number; skeletonTypes: readonly string[] | null; entry: EngineEntry;
+  /** 홈페이지 배너 문구 목록(정리본) — 갤러리 앞 설명 카드는 이 안에서만 */
+  bannerCaptions: readonly string[];
 }
 
 /** 주입 의존 — 구현은 호출자 축 파일이 소유한다(아웃리치 = sales-outreach-produce.ts `outreachEngineDeps`) */
@@ -120,6 +124,7 @@ export async function assembleDmCampaign<TStats, TDims, TOverride>(
     const gen = await deps.generate({
       companyName: m.companyName, industry: m.industry, homepageUrl: m.homepageUrl, siteTitle: m.siteTitle, material: m.material, extraNotes: m.extraNotes,
       products: m.products, galleryCount: m.gallery.length + (m.posterUrl ? 1 : 0), skeletonTypes: opts.skeletonTypes, entry: opts.entry,
+      bannerCaptions: m.gallery.map((g) => String(g.alt || '').trim()).filter(Boolean),
     });
     generated = true;
     exemplars = gen.exemplars;

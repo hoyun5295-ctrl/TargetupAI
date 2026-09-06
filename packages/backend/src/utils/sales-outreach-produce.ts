@@ -272,6 +272,8 @@ export async function collectOutreachMedia(input: {
   companyId: string;
   homepageUrl: string;
   imageCandidates: string[];
+  /** ★ 2026-09-06(2) 배너 원 URL → alt(홈페이지 문구) · 사본에 정리본을 붙인다(캡션·설명 카드 원천) */
+  imageAlts?: Record<string, string>;
   productLinks: string[];
   listProducts: OutreachProduct[];
   /** ★ 0905(5) 크롤이 뽑은 로고 후보(순수 · extractLogoCandidates) */
@@ -290,7 +292,11 @@ export async function collectOutreachMedia(input: {
   const t0 = Date.now();
   // ★ 0905(3) C3-2 후보가 24개로 늘면 순차 fetch가 최대 24회 → 벽시계 예산 + 시도 수를 함께 기록한다(잡 CT 상한 12→24 정정과 한 커밋)
   const galleryPick = await pickStoredImagesDetail(input.imageCandidates, 8, OUTREACH_GALLERY_MIN_WIDTH, fetcher, store, { deadlineMs: OUTREACH_GALLERY_DEADLINE_MS });
-  const gallery = galleryPick.images;
+  // ★ 2026-09-06(2) 홈페이지 배너 문구(alt)를 사본에 붙인다 — 정리본만(파일명·"배너"류 잡음·업체명 단독은 버림)
+  const gallery = galleryPick.images.map((g) => {
+    const caption = cleanBannerCaption(input.imageAlts?.[g.srcUrl], input.listProducts.length ? undefined : undefined);
+    return caption ? { ...g, alt: caption } : g;
+  });
   // ★ 0905(5) 헤더 로고 — 후보 순서대로 받아 크기·비율·흰 로고를 거른 첫 장을 사본으로. 실패 = null(글자 워드마크)
   let logo: StoredImage | null = null;
   for (const u of input.logoCandidates || []) {
@@ -395,6 +401,21 @@ export function posterCategoryLabel(quote: string | null | undefined, industry: 
 
 /** 스튜디오 공용 혜택 패턴이 안 보는 아웃리치 혜택어(면허 없는 판촉 낱말) — 이미지 글자 게이트 전용 */
 const POSTER_EXTRA_REJECT_RE = /특가|핫딜/;
+/** 쇼핑몰 옵션·SKU 낱말 — 포스터 subtitle 로 쓰지 않는다 */
+const POSTER_SUBTITLE_NOISE_RE = /옵션|선택|택\s*\d|단품|더블|기획세트|리필용|본품|증정/;
+/** 숫자 앞 절단 뒤 매달리는 수식어·조사 제거(순수) — 남는 마지막 낱말이 2자 이상일 때만 조사를 뗀다("사과"의 과는 보존) */
+export function trimDanglingTail(text: string): string {
+  let t = String(text || '').trim();
+  for (let i = 0; i < 3; i++) {
+    const n = t.replace(/\s*(최대|최소|단|총|무려|오직|단돈|약|평균|까지|부터|및|또는|그리고|에서|대비)$/, '').trim();
+    if (n === t) break;
+    t = n;
+  }
+  const m = t.match(/([가-힣]+)$/);
+  if (m && m[1].length >= 3 && /[을를은는의와과]$/.test(m[1])) t = t.slice(0, -1).trim();
+  return t.replace(/[\s.·!。:,]+$/g, '').trim();
+}
+
 /** 이미지 안 글자 게이트 — 혜택 패턴 0 · 숫자 0(발송 잠금이 이미지 글자를 못 보므로 조립기 안에서 거부 · 회의 수렴안 D5) · 2자 이상 */
 function posterTextOk(v: string | null | undefined): v is string {
   return !!v && v.trim().length >= 2 && !hasBenefitPattern(v) && !POSTER_EXTRA_REJECT_RE.test(v) && !/\d/.test(v);
@@ -412,15 +433,19 @@ export function buildOutreachPosterTexts(input: {
   let title: string | null = null;
   if (quote) {
     const seg = quote.split(/[~·|,/\n]|\s-\s|\s–\s/)[0].replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim();
-    const cut = seg.replace(/\s*\d[\s\S]*$/, '').trim();
+    // ★ 2026-09-06(2) 숫자 앞에서 잘랐으면 매달린 수식어("혜택 최대")와 조사를 걷는다(아이소이 실측 "풍성한 한가위 보름달 혜택 최대")
+    const cutRaw = seg.replace(/\s*\d[\s\S]*$/, '').trim();
+    const cut = cutRaw !== seg ? trimDanglingTail(cutRaw) : cutRaw;
     const cand = posterTextOk(cut) ? cut : (posterTextOk(seg) ? seg : null);
     if (cand && cand.length <= 40 && quote.includes(cand)) title = cand; else dropped.push('title');
   }
   if (!title) title = input.companyName;
   let label = posterCategoryLabel(quote || null, input.industry);
   if (label && !posterTextOk(label)) { dropped.push('label'); label = null; }
-  const prod = (input.products || []).map((p) => String(p.name || '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/\s+/g, ' ').trim())
-    .find((n) => posterTextOk(n) && n.length <= 30) || null;
+  // ★ 2026-09-06(2) subtitle 후보에서 쇼핑몰 옵션 낱말(옵션·선택·택1·단품·더블)을 거르고 짧은 이름을 앞세운다(실측 "올세라 탄력 옵션 선택")
+  const prodNames = (input.products || []).map((p) => String(p.name || '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/\s+/g, ' ').trim())
+    .filter((n) => posterTextOk(n) && n.length <= 30 && !POSTER_SUBTITLE_NOISE_RE.test(n));
+  const prod = prodNames.slice().sort((a, b) => a.length - b.length).find((n) => n.length <= 14) || prodNames[0] || null;
   const site = input.siteTitle ? String(input.siteTitle).replace(/\s+/g, ' ').trim() : '';
   let subtitle: string | null = prod || (posterTextOk(site) && site !== input.companyName && site.length <= 40 ? site : null);
   if (subtitle && subtitle === title) subtitle = null;
@@ -433,10 +458,13 @@ export function buildPosterTypography(texts: OutreachPosterTexts, opts: { brandC
   const out: Array<ComposeTypography & { role?: string; badgeColor?: string; weight?: string }> = [];
   const top = opts.zone === 'top';
   const title = texts.title || '';
-  const titleSize = top ? (title.length > 14 ? 0.052 : title.length > 9 ? 0.062 : 0.072) : (title.length > 14 ? 0.09 : 0.12);
+  // ★ 2026-09-06(2) 폭 맞춤 — 한글 한 글자 폭 ≈ size×H 이므로 글자수×size×H ≤ 0.9×W 가 되게 상한(포스터 3:4 · 배너 16:9). 실측 17자가 포스터 양끝을 넘었다.
+  const wh = top ? 1792 / 2400 : 16 / 9;
+  const fit = (base: number, len: number) => Math.max(0.02, Math.min(base, (0.9 * wh) / Math.max(1, len)));
+  const titleSize = fit(top ? (title.length > 14 ? 0.052 : title.length > 9 ? 0.062 : 0.072) : (title.length > 14 ? 0.09 : 0.12), title.length);
   if (texts.label) out.push({ text: texts.label, fontPath: opts.fontPath, size: top ? 0.022 : 0.045, color: '#ffffff', align: 'center', x: 0.5, y: top ? 0.065 : 0.60, role: 'badge', badgeColor: opts.brandColor || '#111111', weight: 'bold' });
   if (title) out.push({ text: title, fontPath: opts.fontPath, size: titleSize, color: '#111111', align: 'center', x: 0.5, y: top ? 0.115 : 0.69, weight: 'bold' });
-  if (texts.subtitle) out.push({ text: texts.subtitle, fontPath: opts.fontPath, size: top ? 0.03 : 0.055, color: '#333333', align: 'center', x: 0.5, y: top ? (0.115 + titleSize + 0.035) : 0.86, weight: 'bold' });
+  if (texts.subtitle) out.push({ text: texts.subtitle, fontPath: opts.fontPath, size: fit(top ? 0.03 : 0.055, texts.subtitle.length), color: '#333333', align: 'center', x: 0.5, y: top ? (0.115 + titleSize + 0.035) : 0.86, weight: 'bold' });
   return out as ComposeTypography[];
 }
 
@@ -719,6 +747,37 @@ export interface OutreachGenInput {
   galleryCount: number;
   /** 참조 골격이 준 구성 순서 힌트(없으면 예시 리듬) */
   skeletonTypes?: readonly string[] | null;
+  /** ★ 2026-09-06(2) 홈페이지 배너 문구(정리본) — 갤러리 앞 설명 카드는 이 목록 안에서만 */
+  bannerCaptions?: readonly string[] | null;
+}
+
+// ===== ★ 2026-09-06(2) 배너 문구(alt) 정리 — 갤러리 캡션·설명 카드의 사실 원천(순수) =====
+
+const BANNER_ALT_NOISE_RE = /^(main|top|sub|pc|mobile|mo|banner|bnr|slide|img|image|visual|kv|배너|메인|비주얼|슬라이드|이미지|사진)?[\s_\-\d.]*$|\.(jpe?g|png|webp|gif|svg)$|^(banner|bnr|slide|img|kv|main)[\s_\-\d]*$/i;
+
+/** alt 원문 → 캡션 정리본. 4자 미만 · 파일명 · "배너1"류 · 업체명 단독 · 글자(한글·영문) 없음 = null. 60자 상한. */
+export function cleanBannerCaption(raw: string | null | undefined, companyName?: string): string | null {
+  const t = String(raw || '').replace(/\s+/g, ' ').replace(/[\u200b\u00a0]/g, ' ').trim();
+  if (!t || t.length < 4 || t.length > 200) return null;
+  if (BANNER_ALT_NOISE_RE.test(t)) return null;
+  // 잡음 낱말·숫자만으로 이뤄진 문구("메인 비주얼 2")도 버린다
+  if (t.split(/[\s_\-.]+/).filter(Boolean).every((w) => /^(main|top|sub|pc|mobile|mo|banner|bnr|slide|img|image|visual|kv|배너|메인|비주얼|슬라이드|이미지|사진|\d+)$/i.test(w))) return null;
+  if (!/[가-힣A-Za-z]{2,}/.test(t)) return null;
+  if (companyName && t.replace(/\s+/g, '') === String(companyName).replace(/\s+/g, '')) return null;
+  return t.slice(0, 60).replace(/[\s.·!。:]+$/g, '').trim() || null;
+}
+
+/** 크롤 재료 v2(materials.banners[{url, alt}]) → url → alt 사전(수집 단계 입력) */
+export function bannerAltMapOf(materials: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const banners = (materials as any)?.banners;
+  if (!Array.isArray(banners)) return out;
+  for (const b of banners) {
+    const url = String(b?.url || '').trim();
+    const alt = String(b?.alt || '').trim();
+    if (url && alt && !out[url]) out[url] = alt;
+  }
+  return out;
 }
 
 /** 사용자 메시지(순수) — 재료 블록 + 재료 용량. */
@@ -737,6 +796,9 @@ export function buildOutreachMaterialBlock(i: OutreachGenInput, want: string, ch
       ? `[수집한 상품 ${i.products.length}개 · 이름은 이 목록에서만]\n${i.products.map((p, n) => `${n + 1}. ${p.name} (${p.discount_price ? `${fmt(p.discount_price)} · 정가 ${fmt(p.price)}` : fmt(p.price)})`).join('\n')}`
       : '[수집한 상품] 없음(product_carousel은 넣지 마라)',
     `[재료 용량] 실측 통과 이미지 ${i.galleryCount}장 → gallery 최대 ${galleries}개 · 상품 ${i.products.length}개 → product_carousel 최대 ${carousels}개(각 2개 이상 · 한 묶음 최대 6개) · cta는 2~3개(첫 상품 묶음 뒤 1개 · 마지막 1개) · ${hasDiscount ? '상품에 혜택가가 있다' : '상품 혜택가를 확보하지 못했다: 할인율·최대혜택 같은 표현을 헤드라인에 쓰지 마라'}`,
+    i.bannerCaptions && i.bannerCaptions.length
+      ? `[배너 문구 · 홈페이지 배너에 적힌 글 그대로 · gallery 바로 앞 text_card 의 headline·body 는 이 안의 말과 홈페이지 본문에서만]\n${i.bannerCaptions.map((c, n) => `${n + 1}. ${c}`).join('\n')}`
+      : '',
     i.skeletonTypes && i.skeletonTypes.length ? `[참고 구성 순서] ${i.skeletonTypes.join(' → ')} (재료가 없는 섹션은 빼도 된다)` : '',
     want,
   ].filter(Boolean).join('\n\n');
@@ -804,7 +866,7 @@ export async function generateSections(prompt: { system: string; user: string },
 
 // ===== 재료 채우기 (순수) =====
 
-export interface OutreachFillImage { url: string; width?: number; height?: number }
+export interface OutreachFillImage { url: string; width?: number; height?: number; /** 배너 문구 정리본(캡션) */ alt?: string }
 
 export interface OutreachFillMedia {
   posterUrl: string | null;
@@ -813,6 +875,9 @@ export interface OutreachFillMedia {
   bannerSize?: { width: number; height: number } | null;
   /** 포스터 실측 크기(갤러리 두 번째 비주얼 · 비율 표) */
   posterSize?: { width: number; height: number } | null;
+  /** ★ 2026-09-06(2) 포스터 캡션(3칸 title · 숫자 0) · 면허 인용(캡션 혜택 차단 기준 · 없으면 '') */
+  posterCaption?: string | null;
+  licensedQuote?: string;
   /** ★ 0905(5) 헤더 로고 사본 URL(없으면 브랜드명 글자만) */
   logoUrl?: string | null;
   /** 실측 통과 사본(폭·높이 동승 — 비율 군 분류·룩 배정에 쓴다). 문자열 배열도 받는다(비율 미상 = square 취급). */
@@ -885,7 +950,16 @@ export function fillOutreachDmMedia(
   // ★ 0905(5) 히어로 = 홈 첫 배너(그 브랜드 디자이너의 실물 · 문서 순서 첫 장) → 없으면 포스터 → 상품. 포스터는 두 번째 비주얼(첫 갤러리 첫 장).
   const heroImage = galleryAll[0]?.url || media.posterUrl || media.products[0]?.image_url || '';
   const remaining: OutreachFillImage[] = galleryAll.filter((g) => g.url !== heroImage);
-  if (media.posterUrl && heroImage !== media.posterUrl) remaining.unshift({ url: media.posterUrl, ...(media.posterSize || {}) });
+  // ★ 2026-09-06(2) 포스터(3:4)는 16:9 배너 갤러리에 섞지 않는다 — hero 가 있으면 그 다음 자기 블록(캡션 1줄)으로 코드가 넣는다(아래 posterBlock) · hero 가 없는 조각이면 옛 자리(첫 갤러리 첫 장)
+  const posterAsBlock = !!media.posterUrl && heroImage !== media.posterUrl && sections.some((s) => s && typeof s === 'object' && s.type === 'hero');
+  if (media.posterUrl && heroImage !== media.posterUrl && !posterAsBlock) remaining.unshift({ url: media.posterUrl, ...(media.posterSize || {}) });
+  const quoteForCaption = media.licensedQuote || '';
+  const captionOf = (alt: string | null | undefined): string | null => {
+    const c = cleanBannerCaption(alt, media.companyName);
+    if (!c) return null;
+    const t = stripUnauthorizedBenefits(c, quoteForCaption);
+    return t.includes(BENEFIT_PLACEHOLDER) ? null : t.trim() || null;
+  };
   // 갤러리 = 배너 통째 목록(list_1xN)이라 비율 군 분류가 필요 없다 — 문서 순서대로 잘라 넣는다(2장 미만이면 비움)
   const takeGallery = (n: number): OutreachFillImage[] => (remaining.length >= 2 ? remaining.splice(0, n) : []);
   const galleryLink = galleryLinkOf(media);
@@ -927,7 +1001,8 @@ export function fillOutreachDmMedia(
         return [{ ...s, props: p } as Section];
       case 'gallery': {
         const g = takeGallery(perGallery);
-        p.images = g.length >= 2 ? g.map((img) => ({ url: img.url, alt: `${media.companyName} 이미지`, link_url: galleryLink })) : [];
+        // ★ 2026-09-06(2) 이미지별 캡션 = 홈페이지 배너 문구(사실 · 면허 밖 혜택 수치는 차단) — 렌더러가 caption 을 그린다
+        p.images = g.length >= 2 ? g.map((img) => { const caption = captionOf(img.alt); return { url: img.url, alt: caption || `${media.companyName} 이미지`, link_url: galleryLink, ...(caption ? { caption } : {}) }; }) : [];
         p.layout = 'list_1xN';
         p.title = ''; // 모델은 이미지를 못 본다 — 지어낸 갤러리 제목("제품 사용 컷")이 배너와 어긋난다
         if (g.length >= 2) filled++;
@@ -963,11 +1038,40 @@ export function fillOutreachDmMedia(
         return [s];
     }
   });
+  // ★ 2026-09-06(2) 포스터 블록 — 히어로 다음 두 번째 비주얼(히어로가 포스터면 없음) · 캡션 = 포스터 title(숫자 0)
+  if (posterAsBlock && media.posterUrl) {
+    const heroIdx = out.findIndex((s) => s.type === 'hero');
+    const headerIdx = out.findIndex((s) => s.type === 'header');
+    const at = heroIdx >= 0 ? heroIdx + 1 : headerIdx >= 0 ? headerIdx + 1 : 0;
+    const caption = media.posterCaption ? captionOf(media.posterCaption) : null;
+    const posterBlock = {
+      id: `so-poster-${out.length}-gallery`, type: 'gallery', order: 0, visible: true,
+      props: { ...((getDefaultProps('gallery' as SectionType) as unknown as Record<string, unknown>) || {}), images: [{ url: media.posterUrl, alt: caption || media.companyName, link_url: galleryLink, ...(caption ? { caption } : {}) }], layout: 'list_1xN', title: '' },
+    } as unknown as Section;
+    out.splice(at, 0, posterBlock);
+    filled++;
+  }
+  // ★ 2026-09-06(2) 갤러리 앞 설명 카드 — 모델이 안 넣었고 캡션(사실)이 있으면 코드가 배너 문구로 채운다(실물 DM = 비주얼 블록 앞에 한 줄 헤드라인)
+  for (let i = 0; i < out.length; i++) {
+    const s = out[i];
+    if (s.type !== 'gallery' || String((s as any).id || '').startsWith('so-poster-')) continue;
+    const caps = (Array.isArray((s.props as any)?.images) ? (s.props as any).images : []).map((im: any) => String(im?.caption || '').trim()).filter(Boolean);
+    if (caps.length === 0) continue;
+    const prev = out[i - 1];
+    if (prev && prev.type === 'text_card') continue;
+    const lead = {
+      id: `so-lead-${i}-text_card`, type: 'text_card', order: 0, visible: true,
+      props: { ...((getDefaultProps('text_card' as SectionType) as unknown as Record<string, unknown>) || {}), tag: posterCategoryLabel(caps.join(' '), null) || '', headline: caps[0].slice(0, 28), body: caps.slice(1).join(' · ') },
+    } as unknown as Section;
+    out.splice(i, 0, lead);
+    i++;
+    filled++;
+  }
   // ★ 0905(4) CTA 2개 보장 — 모델이 1개만 내면 첫 상품 묶음(없으면 첫 갤러리) 뒤에 코드가 1개 끼운다(직원 실물 = CTA 2~3회)
   const ctaCount = out.filter((s) => s.type === 'cta').length;
   if (ctaCount < 2) {
     const anchorIdx = out.findIndex((s) => s.type === 'product_carousel' && Array.isArray((s.props as any)?.products) && (s.props as any).products.length > 0);
-    const galleryIdx = out.findIndex((s) => s.type === 'gallery' && Array.isArray((s.props as any)?.images) && (s.props as any).images.length > 0);
+    const galleryIdx = out.findIndex((s) => s.type === 'gallery' && !String((s as any).id || '').startsWith('so-poster-') && Array.isArray((s.props as any)?.images) && (s.props as any).images.length > 0);
     const at = anchorIdx >= 0 ? anchorIdx : galleryIdx;
     if (at >= 0) {
       // 코너(기획전·이벤트·컬렉션…) 링크를 쿠폰류보다 먼저 — 삽입 CTA는 "둘러보기" 성격
@@ -1067,9 +1171,11 @@ export function insertProofCard(sections: readonly Section[], proof: OutreachPro
   const rank = proof?.rankLabel ? String(proof.rankLabel).trim().slice(0, 40) : '';
   if (!total && !rating) return { sections: list.slice(), inserted: false };
   if (list.some((s) => String((s as any).id || '') === 'so-proof-card')) return { sections: list.slice(), inserted: false };
-  const tag = total ? `리뷰 ${total.toLocaleString('ko-KR')}건` : (rank || `${companyName} 고객 후기`);
-  const headline = rating ? `평점 ${rating}` : (rank || `${companyName} 고객 후기`);
-  const body = `${kstDateOf(proof?.collectedAt)} ${companyName} 홈페이지 기준`;
+  // ★ 2026-09-06(2) 숫자만 나열하지 않고 한 문장으로(실측 "리뷰 455,089건 / 평점 4.9 / 기준일" 이 설명 없이 섰다)
+  const facts = [total ? `리뷰 ${total.toLocaleString('ko-KR')}건` : '', rating ? `평점 ${rating}` : ''].filter(Boolean);
+  const tag = rank || '고객 후기';
+  const headline = facts.join(' · ');
+  const body = `고객이 남긴 리뷰와 평점입니다 · ${kstDateOf(proof?.collectedAt)} ${companyName} 홈페이지 기준`;
   const card = {
     id: 'so-proof-card', type: 'text_card', order: 0, visible: true, treatment: 'framed',
     props: { ...((getDefaultProps('text_card' as SectionType) as unknown as Record<string, unknown>) || {}), tag, headline, body },
@@ -1180,6 +1286,8 @@ export interface ProduceDmInput {
   /** ★ 2026-09-06 S3 생성 배너(실측 배너 0장일 때만 존재) */
   bannerUrl?: string | null;
   bannerSize?: { width: number; height: number } | null;
+  /** ★ 2026-09-06(2) 포스터 캡션(studio_image.posterTexts.title · 숫자 0) */
+  posterCaption?: string | null;
 }
 
 export interface ProduceDmResult {
@@ -1226,6 +1334,7 @@ export function outreachEngineDeps(): EngineDeps<OutreachLookStats, LookImageDim
       const genInput: OutreachGenInput = {
         companyName: engineInput.companyName, industry: engineInput.industry, homepageUrl: engineInput.homepageUrl, siteTitle: engineInput.siteTitle,
         material: engineInput.material, extraNotes: engineInput.extraNotes, products: engineInput.products, galleryCount: engineInput.galleryCount, skeletonTypes: engineInput.skeletonTypes,
+        bannerCaptions: engineInput.bannerCaptions,
       };
       const exemplarSource = await loadOutreachExemplarSource();
       const dmPrompt = buildDmSectionsPrompt(genInput, exemplarSource);
@@ -1237,6 +1346,7 @@ export function outreachEngineDeps(): EngineDeps<OutreachLookStats, LookImageDim
     fill: (sections, m, channel: EngineChannel) => fillOutreachDmMedia(sections, {
       posterUrl: m.posterUrl, posterSize: m.posterSize, bannerUrl: m.bannerUrl, bannerSize: m.bannerSize, logoUrl: m.logoUrl, gallery: m.gallery,
       products: m.products as unknown as OutreachMediaProduct[], ctaLinks: m.ctaLinks, homepageUrl: m.homepageUrl, legal: m.legal, companyName: m.companyName,
+      posterCaption: m.posterCaption || null, licensedQuote: m.licensedQuote,
     }, channel),
     sanitize: (sections, licensedQuote, companyName) => sanitizeDmCopyBenefits(sections, licensedQuote, companyName),
     prune: (sections) => pruneEmptyDmSections([...sections]),
@@ -1261,7 +1371,7 @@ export async function produceOutreachDm(input: ProduceDmInput): Promise<ProduceD
   // ★ C4-2 사람이 고른 재료만(선택이 없거나 재수집으로 전부 무효면 전량)
   const media = applyOutreachMediaSelection(input.media, input.mediaSelection || null);
   const products = media?.products || [];
-  const gallery: OutreachFillImage[] = (media?.gallery || []).map((g) => ({ url: g.url, width: g.width, height: g.height }));
+  const gallery: OutreachFillImage[] = (media?.gallery || []).map((g) => ({ url: g.url, width: g.width, height: g.height, ...(g.alt ? { alt: g.alt } : {}) }));
 
   // 아웃리치 전용 = 참조 골격(베스트 구성 서빙 · seed) · 엔진에는 순서 힌트만 넘긴다
   let structureRef: OutreachStructureRef | null = null;
@@ -1278,6 +1388,7 @@ export async function produceOutreachDm(input: ProduceDmInput): Promise<ProduceD
     products, gallery, logoUrl: media?.logo?.url || null,
     posterUrl: input.posterUrl, posterSize: input.posterSize || null, bannerUrl: input.bannerUrl || null, bannerSize: input.bannerSize || null,
     ctaLinks: input.ctaLinks, legal: input.legal, licensedQuote: input.licensedQuote, proof: input.proof || null,
+    posterCaption: input.posterCaption || null,
   };
   const engine = await assembleDmCampaign(engineMaterials, {
     entry: 'outreach', channel: 'DM',
@@ -1352,7 +1463,7 @@ export interface BrandEmailResult {
 export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>): Promise<BrandEmailResult> {
   const media = applyOutreachMediaSelection(input.media, input.mediaSelection || null);
   const products = media?.products || [];
-  const gallery: OutreachFillImage[] = (media?.gallery || []).map((g) => ({ url: g.url, width: g.width, height: g.height }));
+  const gallery: OutreachFillImage[] = (media?.gallery || []).map((g) => ({ url: g.url, width: g.width, height: g.height, ...(g.alt ? { alt: g.alt } : {}) }));
   const dims = buildLookDims(gallery, products, input.posterUrl, input.posterSize);
   const genInput: OutreachGenInput = {
     companyName: input.companyName,
@@ -1364,12 +1475,14 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
     products,
     galleryCount: gallery.length,
     skeletonTypes: null,
+    bannerCaptions: gallery.map((g) => g.alt || '').filter(Boolean),
   };
   const exemplarSource = await loadOutreachExemplarSource();
   const emailPrompt = buildEmailSectionsPrompt(genInput, exemplarSource);
   const gen = await generateSections(emailPrompt, OUTREACH_EMAIL_TYPES, 'sales-outreach-email-sections', 'so-brand');
   const filled = fillOutreachDmMedia(gen.sections, {
     posterUrl: input.posterUrl, posterSize: input.posterSize || null, bannerUrl: input.bannerUrl || null, bannerSize: input.bannerSize || null, logoUrl: media?.logo?.url || null, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
+    posterCaption: input.posterCaption || null, licensedQuote: input.licensedQuote,
   }, 'EMAIL');
   const sanitized = sanitizeDmCopyBenefits(filled.sections, input.licensedQuote, input.companyName);
   const pruned = pruneEmptyDmSections(sanitized.sections);
@@ -1530,6 +1643,18 @@ export function buildProposalEmailSections(guide: OutreachStyleGuide, input: Pro
       body: copyForEmail,
       align: 'left', image_position: 'top',
     }),
+    sec('text_card', {
+      tag: c.features.tag,
+      headline: c.features.headline(input.companyName),
+      body: c.features.body,
+      align: 'left', image_position: 'top',
+    }),
+    ...c.features.items.map((f) => sec('text_card', {
+      tag: f.tag,
+      headline: f.headline(!!input.posterUrl),
+      body: f.body(input.companyName),
+      align: 'left', image_position: 'top',
+    }, { background: 'soft' })),
     sec('cta', {
       layout: 'stack',
       buttons: [
@@ -1571,6 +1696,9 @@ export function buildOutreachPlainText(guide: OutreachStyleGuide, input: Proposa
     '',
     `${c.cta.primary}: ${input.previewUrl}`,
     `${c.cta.secondary}: ${input.dmUrl}`,
+    '',
+    `${c.features.tag}: ${c.features.headline(input.companyName)}`,
+    ...c.features.items.map((f) => `- ${f.tag}: ${f.headline(!!input.posterUrl)} ${f.body(input.companyName)}`),
     '',
     ...c.footer.notes,
     c.footer.basisLine(kstDateDash(input.now || new Date())),

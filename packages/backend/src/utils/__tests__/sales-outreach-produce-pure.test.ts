@@ -88,32 +88,37 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     sec('gallery', { title: 'g2' }, 4), sec('product_carousel', { title: 'p2' }, 5), sec('cta', { buttons: [{ label: '쿠폰 받기' }, { label: '더 보기' }] }, 6),
     sec('countdown', { urgency_text: 'x', end_datetime: '9월 30일' }, 7), sec('footer', {}, 8),
   ];
-  it('DM: hero=홈 첫 배너 · 포스터는 첫 갤러리 첫 장 · 헤더 워드마크 lg(로고 없으면 글자만) · 갤러리 2장씩 통째(list_1xN · 제목 0) · 상품은 첫 묶음에 최대 6개 · CTA 1개면 첫 상품 묶음 뒤에 1개 삽입 · 마감일 없는 countdown 제거 · footer 법정 표기', () => {
+  it('DM: hero=홈 첫 배너 · 포스터는 히어로 다음 자기 블록(★0906(2)) · 헤더 워드마크 lg(로고 없으면 글자만) · 갤러리 2장씩 통째(list_1xN · 제목 0) · 상품은 첫 묶음에 최대 6개 · CTA 1개면 첫 상품 묶음 뒤에 1개 삽입 · 마감일 없는 countdown 제거 · footer 법정 표기', () => {
     const r = fillOutreachDmMedia(sections, media, 'DM');
     const p = (i: number) => r.sections[i].props as any;
-    expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'product_carousel', 'cta', 'gallery', 'product_carousel', 'cta', 'footer']);
-    expect(r.sections.map((s) => s.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'gallery', 'product_carousel', 'cta', 'gallery', 'product_carousel', 'cta', 'footer']);
+    expect(r.sections.map((s) => s.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(p(0)).toMatchObject({ brand_name: '브랜드', brand_size: 'lg', align: 'center' });
     expect(p(0).logo_url).toBeUndefined();
     expect(p(1)).toMatchObject({ image_url: media.gallery[0] }); // 홈 첫 배너(문서 순서)
     expect(p(1).image_fit).toBeUndefined();
     expect(p(1).height).toBeUndefined();
-    expect(p(2).images.map((x: any) => x.url)).toEqual([media.posterUrl, media.gallery[1]]); // 포스터 = 두 번째 비주얼
-    expect(p(2).layout).toBe('list_1xN');
-    expect(p(2).title).toBe('');
-    expect(p(2).images[0].alt).toBe('브랜드 이미지');
-    expect(p(2).images.every((x: any) => x.link_url === 'https://b.com/')).toBe(true); // 코너 딥링크 없음 → 홈(C2-1)
-    expect(p(5).images.map((x: any) => x.url)).toEqual(media.gallery.slice(2, 4));
-    expect(p(3).products).toHaveLength(4);
-    expect(p(3).image_fit).toBe('contain'); // 상품 사진은 잘리지 않는다(0905(3) 잘림 정정)
-    expect(p(3).products[0]).toMatchObject({ name: '상품0', link_url: 'https://b.com/p/0' });
-    expect(p(6).products).toEqual([]);
+    // ★ 0906(2) 포스터(3:4) = 히어로 다음 자기 블록 1장 · 배너 갤러리에 섞지 않는다 · 캡션 없으면 alt = 업체명
+    expect(r.sections[2].id).toMatch(/^so-poster-\d+-gallery$/);
+    expect(p(2).images.map((x: any) => x.url)).toEqual([media.posterUrl]);
+    expect(p(2).images[0].alt).toBe('브랜드');
+    expect(p(2).images[0].caption).toBeUndefined();
+    expect(p(3).images.map((x: any) => x.url)).toEqual([media.gallery[1], media.gallery[2]]);
+    expect(p(3).layout).toBe('list_1xN');
+    expect(p(3).title).toBe('');
+    expect(p(3).images[0].alt).toBe('브랜드 이미지');
+    expect(p(3).images.every((x: any) => x.link_url === 'https://b.com/')).toBe(true); // 코너 딥링크 없음 → 홈(C2-1)
+    expect(p(6).images.map((x: any) => x.url)).toEqual(media.gallery.slice(3, 5));
+    expect(p(4).products).toHaveLength(4);
+    expect(p(4).image_fit).toBe('contain'); // 상품 사진은 잘리지 않는다(0905(3) 잘림 정정)
+    expect(p(4).products[0]).toMatchObject({ name: '상품0', link_url: 'https://b.com/p/0' });
+    expect(p(7).products).toEqual([]);
     // 삽입 CTA: 쿠폰 딥링크는 원래 CTA가 쓴다 → 홈 · 라벨은 코드 기본
-    expect(p(4).buttons).toEqual([{ label: '전체 상품 보기', url: 'https://b.com/', style: 'primary' }]);
-    expect(r.sections[4].id).toMatch(/^so-auto-\d+-cta$/);
-    expect(p(7).buttons[0]).toMatchObject({ label: '쿠폰 받기', url: 'https://b.com/coupon' });
-    expect(p(7).buttons[1].url).toBe('https://b.com/');
-    expect(p(8)).toMatchObject({ legal_text: media.legal.legal, cs_phone: '1588-1234', show_unsubscribe_link: true });
+    expect(p(5).buttons).toEqual([{ label: '전체 상품 보기', url: 'https://b.com/', style: 'primary' }]);
+    expect(r.sections[5].id).toMatch(/^so-auto-\d+-cta$/);
+    expect(p(8).buttons[0]).toMatchObject({ label: '쿠폰 받기', url: 'https://b.com/coupon' });
+    expect(p(8).buttons[1].url).toBe('https://b.com/');
+    expect(p(9)).toMatchObject({ legal_text: media.legal.legal, cs_phone: '1588-1234', show_unsubscribe_link: true });
     // 모델이 notes에 옮겨 적은 법정 표기는 비운다(legal_text와 3중 표기 방지) · 안내 문장은 남는다
     const dup = fillOutreachDmMedia([sec('footer', { notes: '대표 홍길동 | 사업자등록번호 123-45-67890' }, 0), sec('footer', { notes: '본 안내는 예시입니다' }, 1)], media, 'DM');
     expect((dup.sections[0].props as any).notes).toBe('');
@@ -133,18 +138,19 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     const r = fillOutreachDmMedia([sec('countdown', { urgency_text: '마감 임박', end_datetime: future }, 0), sec('countdown', { urgency_text: 'x', end_datetime: '2020-01-01T00:00:00' }, 1)], media, 'DM');
     expect(r.sections.map((s) => (s.props as any).end_datetime)).toEqual([future]);
   });
-  it('EMAIL: hero=갤러리 첫 장(contain · lg) · 포스터 두 번째 · 갤러리 2장씩 · 헤더 좌측+로고 · 라벨 8자 · 수신거부 링크 off · 삽입 CTA도 8자', () => {
+  it('EMAIL: hero=갤러리 첫 장(contain · lg) · 포스터 = 히어로 다음 자기 블록 · 갤러리 2장씩 · 헤더 좌측+로고 · 라벨 8자 · 수신거부 링크 off · 삽입 CTA도 8자', () => {
     const r = fillOutreachDmMedia(sections, { ...media, logoUrl: 'https://hanjul.ai/logo.png' }, 'EMAIL');
     const p = (i: number) => r.sections[i].props as any;
-    expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'product_carousel', 'cta', 'gallery', 'product_carousel', 'cta', 'footer']);
+    expect(r.sections.map((s) => s.type)).toEqual(['header', 'hero', 'gallery', 'gallery', 'product_carousel', 'cta', 'gallery', 'product_carousel', 'cta', 'footer']);
     expect(p(0)).toMatchObject({ variant: 'logo', align: 'left', logo_url: 'https://hanjul.ai/logo.png', logo_size: 'md' });
     expect(p(0).brand_size).toBeUndefined();
     expect(p(1)).toMatchObject({ image_url: media.gallery[0], image_fit: 'contain', height: 'lg' });
-    expect(p(2).images.map((x: any) => x.url)).toEqual([media.posterUrl, media.gallery[1]]);
-    expect(p(5).images.map((x: any) => x.url)).toEqual(media.gallery.slice(2, 4));
-    expect(p(4).buttons[0].label.length).toBeLessThanOrEqual(8);
-    expect(p(7).buttons[0].label.length).toBeLessThanOrEqual(8);
-    expect(p(8).show_unsubscribe_link).toBe(false);
+    expect(p(2).images.map((x: any) => x.url)).toEqual([media.posterUrl]);
+    expect(p(3).images.map((x: any) => x.url)).toEqual([media.gallery[1], media.gallery[2]]);
+    expect(p(6).images.map((x: any) => x.url)).toEqual(media.gallery.slice(3, 5));
+    expect(p(5).buttons[0].label.length).toBeLessThanOrEqual(8);
+    expect(p(8).buttons[0].label.length).toBeLessThanOrEqual(8);
+    expect(p(9).show_unsubscribe_link).toBe(false);
   });
   it('갤러리 = 문서 순서 그대로(홈 첫 배너 = 히어로 · 포스터 = 두 번째) · 가로형 EMAIL 히어로 = md 박스 · 갤러리 링크 = 기획전 딥링크', () => {
     const gal = [
@@ -167,9 +173,12 @@ describe('A-10b fillOutreachDmMedia (재료 채우기 · 묶음마다 다른 재
     // 가로형이 첫 장이면 EMAIL 히어로는 낮은 박스(md)
     const wide = fillOutreachDmMedia([sec('hero', { headline: 'h' }, 0)], { ...m, gallery: [gal[1]] }, 'EMAIL');
     expect((wide.sections[0].props as any)).toMatchObject({ image_fit: 'contain', height: 'md' });
-    const dm = fillOutreachDmMedia(secs, { ...m, posterUrl: 'https://hanjul.ai/poster.jpg', posterSize: { width: 1792, height: 2400 } }, 'DM');
+    const dm = fillOutreachDmMedia(secs, { ...m, posterUrl: 'https://hanjul.ai/poster.jpg', posterSize: { width: 1792, height: 2400 }, posterCaption: '풍성한 한가위 보름달 혜택' }, 'DM');
     expect((dm.sections[0].props as any).image_url).toBe('https://hanjul.ai/sq1.jpg'); // 배너가 있으면 히어로는 배너
-    expect((dm.sections[1].props as any).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/poster.jpg', 'https://hanjul.ai/land1.jpg']); // 포스터 = 두 번째 비주얼
+    // ★ 0906(2) 포스터 = 히어로 다음 자기 블록(캡션 = 포스터 title) · 배너 갤러리는 16:9 만
+    expect((dm.sections[1].props as any).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/poster.jpg']);
+    expect((dm.sections[1].props as any).images[0].caption).toBe('풍성한 한가위 보름달 혜택');
+    expect((dm.sections[2].props as any).images.map((x: any) => x.url)).toEqual(['https://hanjul.ai/land1.jpg', 'https://hanjul.ai/land2.jpg']);
   });
   it('이미지 잘림 정정: DM 세로형 사진 히어로 = contain · 정사각 = 미지정 · EMAIL은 항상 contain · 포스터는 맞춤 없음(split)', () => {
     const port = [{ url: 'https://hanjul.ai/port.jpg', width: 800, height: 1200 }, { url: 'https://hanjul.ai/sq.jpg', width: 900, height: 900 }];

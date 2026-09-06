@@ -42,6 +42,16 @@ export interface OutreachStyleGuide {
     showcase: { tag: string; headline: string };
     cta: { primary: string; secondary: string };
     service: { headline: string; body: string };
+    /**
+     * ★ 2026-09-06(2) Harold 지시 — 제안 메일 본문에 한줄로 기능 3가지(여정 · 자동마케팅 · 이미지 스튜디오)를 실물 근거와 함께 섞어 넣는다.
+     * 사실만(기능 상설 SoT 문서의 정의 · 로드맵 0 · 모델명 0). 이미지 스튜디오 headline 은 포스터가 있으면 "이 메일의 이미지가 그 결과물"이라고 가리킨다(호기심 축).
+     */
+    features: {
+      tag: string;
+      headline: (companyName: string) => string;
+      body: string;
+      items: Array<{ tag: string; headline: (hasPoster: boolean) => string; body: (companyName: string) => string }>;
+    };
     footer: { notes: string[]; basisLine: (kstDate: string) => string; legal: string };
     /** 검수 테스트 발송 제목 접두 */
     testSubjectPrefix: string;
@@ -102,6 +112,28 @@ const STYLE_GUIDE_V1: OutreachStyleGuide = {
     service: {
       headline: '한줄로는 이렇게 도와드립니다',
       body: '한줄로는 문자·이메일·모바일 DM·인앱 메시지를 AI가 만들어 보내는 마케팅 자동화 서비스입니다. 이 안내의 이미지·문안·모바일 페이지 전부 한줄로AI가 귀사 홈페이지만 보고 만들었습니다.',
+    },
+    features: {
+      tag: '한줄로로 할 수 있는 것',
+      headline: (c) => `${c} 담당자님이 바로 쓸 수 있는 세 가지`,
+      body: '이 시안을 만든 같은 도구가 매일의 고객 관계와 반복 캠페인, 그리고 이미지 제작까지 맡습니다.',
+      items: [
+        {
+          tag: '여정',
+          headline: () => '고객 한 사람의 시계에 맞춰 보냅니다',
+          body: (c) => `첫 구매·재구매·오랜 미방문처럼 고객이 무언가를 한 그 순간을 출발점으로, ${c} 이름의 문자·모바일 DM·이메일이 정해진 순서로 그 고객에게만 나갑니다. 조건과 대기 시간은 말로 설명하면 AI가 여정으로 설계합니다.`,
+        },
+        {
+          tag: '자동마케팅',
+          headline: () => '목표만 정하면 회차마다 제안서가 도착합니다',
+          body: (c) => `"이번에 등급이 오른 분", "요즘 발길이 끊긴 분"처럼 지난 회차와 달라진 고객을 AI가 골라내고, 그 시점의 계절과 ${c} 소식에 맞춘 캠페인을 제안합니다. 담당자님이 확인하면 발송까지 이어집니다.`,
+        },
+        {
+          tag: '이미지 스튜디오',
+          headline: (hasPoster) => (hasPoster ? '이 메일 맨 위 이미지도 그렇게 만들었습니다' : '상품 사진 한 장으로 포스터가 나옵니다'),
+          body: (c) => `${c} 홈페이지의 상품 사진 한 장을 올리면 배경을 걷어내고 300여 가지 연출 템플릿으로 포스터와 배너를 만듭니다. 문구는 담당자님이 쓴 그대로만 들어가 지어낸 혜택이 실릴 일이 없습니다.`,
+        },
+      ],
     },
     footer: {
       notes: [

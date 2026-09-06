@@ -66,7 +66,8 @@ describe('조립 엔진 골든(아웃리치 deps + 고정 생성 픽스처)', ()
     expect(r.exemplars).toEqual({ picked: 3, total: 12 });
     // 스냅샷 — 이 배열이 바뀌면 두 입구(아웃리치·고객 재료)가 함께 바뀐 것이다
     // 증거 카드(text_card)가 첫 상품 묶음 뒤 · 모델 CTA 1개 + 코드가 보장한 CTA 1개(첫 상품 묶음 뒤)가 이어진다 · 카운트다운은 종료일이 없어 빠졌다
-    expect(r.sectionTypes).toEqual(['header', 'hero', 'text_card', 'product_carousel', 'text_card', 'cta', 'cta', 'gallery', 'text_card', 'footer']);
+    // ★ 0906(2) 포스터는 히어로 다음 자기 블록(gallery 1장)
+    expect(r.sectionTypes).toEqual(['header', 'hero', 'gallery', 'text_card', 'product_carousel', 'text_card', 'cta', 'cta', 'gallery', 'text_card', 'footer']);
     expect(r.sectionTypes.filter((t) => t === 'cta').length).toBe(2);
     expect(r.sectionTypes).not.toContain('countdown');
     const hero = r.sections.find((s) => s.type === 'hero') as any;

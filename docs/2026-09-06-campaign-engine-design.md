@@ -199,6 +199,23 @@ outreach-render(별도 PM2 프로세스 · DB 자격 없음 · 동시 1건)
 
 `routes/email.ts:1044` 에 같은 `materials` 분기(재료 0이면 generateEmailSections 문자 단위 동일 · 무후퇴 계약) · 이메일 독립 계약 · MaterialInput 을 DM 빌더(:870 ImageToCopyButton 자리)·EmailVisualEditor(:344) 에 꽂고 ImageToCopyModal 사본 삭제 · 원스텝은 무접촉(엔진 진입 계약에 "structure 가 오면 그것이 이긴다") · 플래너 무인 제작(planner-production.ts:160)은 범위 밖 등재.
 
+## 9-1. 2026-09-06(2) 배포 뒤 첫 육안 정정 (Harold "이미지만 나열 · 설명 없음" · 구현 완료)
+
+실측(https://hanjul.ai/api/dm/v/dm-QJ2m5IL · 375폭 캡처): 9블록 · 문장 블록 = 첫 화면 1줄 · 갤러리 4장(생성 포스터 1 + 홈 배너 3) 글자 0 · 포스터 title "풍성한 한가위 보름달 혜택 최대"(절단 잔재 · 폭 초과) · subtitle "올세라 탄력 옵션 선택" · 증거 카드 숫자만.
+
+| 파일 | 변경 |
+|---|---|
+| `utils/sales-outreach-media.ts` · `produce.ts`(collectOutreachMedia) · `jobs.ts` | `StoredImage.alt`(배너 문구 정리본) · `bannerAltMapOf(materials)` → `imageAlts` → 사본에 붙인다 · `cleanBannerCaption`(파일명·배너N·업체명 단독·잡음 낱말만 = null) |
+| `utils/sales-outreach-produce.ts`(fill) | 갤러리 images[].caption = 배너 문구(면허 밖 혜택 수치는 `stripUnauthorizedBenefits` 로 차단 → 캡션 없음) · 갤러리 앞 설명 카드(`so-lead-*` · 모델이 안 두었고 캡션이 있을 때만 · tag 카테고리 · headline 첫 문구 · body 나머지) · 포스터 = hero 다음 자기 블록(`so-poster-*` · 캡션 = 포스터 title · hero 없는 조각은 옛 자리) · 자동 CTA 앵커는 포스터 블록을 건너뛴다 |
+| `utils/sales-outreach-produce.ts`(포스터) | `trimDanglingTail`(절단 뒤 수식어 최대·단·총·무려·오직 등 + 조사 · 마지막 낱말 2자면 보존) · subtitle 후보에서 옵션·선택·택N·단품·더블 제외 · 14자 이하 우선 · 타이포 폭 맞춤 size ≤ 0.9×(W/H)/글자수 |
+| `utils/sales-outreach-produce.ts`(insertProofCard) | tag = 1위 표기 또는 "고객 후기" · headline "리뷰 N건 · 평점 R" · body "고객이 남긴 리뷰와 평점입니다 · 날짜 업체 홈페이지 기준" |
+| `utils/sales-outreach-exemplars.ts` · `OutreachGenInput.bannerCaptions` · 엔진 `EngineGenInput.bannerCaptions` | DM 계약 "각 gallery 바로 앞에 text_card 1개씩 · headline·body 는 [배너 문구]·홈페이지 본문에 있는 말만" · 프롬프트 [배너 문구] 목록 |
+| `utils/sales-outreach-style.ts` · `produce.ts`(buildProposalEmailSections·평문) | ★ Harold 지시 제안 메일 기능 소개 = `emailCopy.features`(소개 카드 1 + 여정 · 자동마케팅 · 이미지 스튜디오 3칸 · CTA 앞 · 사실만 · 포스터가 있으면 "이 메일 맨 위 이미지도 그렇게 만들었습니다") · 조립 함수 한글 리터럴 0 유지 |
+| 테스트 | `sales-outreach-s7.test.ts` 신설(12건) · produce-pure 포스터 위치 3건 · s2 증거 카드·계약 · 골든 순서 |
+
+확인된 사실(테스트로 고정): 갤러리 렌더러는 이미지별 `caption` 을 그리고 섹션 제목은 그리지 않는다 · `DM_EDITABLE_TEXT_KEYS.gallery = ['title']` 이라 캡션은 공용 차단기 밖 → 채우기 단계가 직접 차단한다 · 배너 alt 는 크롤 재료 v2 까지만 오고 사본에는 없었다(그래서 캡션에 쓸 사실이 손에 없었다).
+미검증(재생성 뒤 캡처 대조): 아이소이 배너 alt 실측(문구가 있는가 · 잡음인가) · 설명 카드가 실물 리듬으로 보이는가 · 포스터 블록 3:4 가 히어로 다음에서 자연스러운가 · 기능 3칸이 메일 길이를 과하게 늘리지 않는가.
+
 ## 9. 범위 밖(등재만)
 
 플래너 무인 제작 엔진 합류 · 원스텝 대행 델타 50 재정의 · 무료 회차 · 기존 dm_views 외부인 IP 행 정리 · `produce.ts:709` 정규식 역슬래시 누락 · `:627` JSDoc 반대 · `media.ts:202` 특정 사이트 경로 하드코딩 · 상품 상세 1홉 벽시계 예산 없음 · crawlSub 두 사실 합침 · 사본 1.5MB 상한 탈락 사유 미기록.

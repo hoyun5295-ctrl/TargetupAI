@@ -629,6 +629,8 @@ export interface StoredImage {
   bytes: number;
   /** 원 출처 URL(고지·근거용) */
   srcUrl: string;
+  /** ★ 2026-09-06(2) 홈페이지가 배너에 쓴 문구(alt · 정리본) — 갤러리 캡션·설명 카드의 사실 원천. 없으면 캡션 없음 */
+  alt?: string;
 }
 
 export type GuardedImageFetcher = (url: string) => Promise<{ buffer: Buffer; mime: string; ext: string } | null>;

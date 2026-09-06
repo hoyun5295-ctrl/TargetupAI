@@ -118,9 +118,10 @@ describe('코드가 채우는 블록 — 사회적 증거 카드 · 카운트다
     expect(card.type).toBe('text_card');
     expect(card.id).toBe('so-proof-card');
     expect(card.treatment).toBe('framed');
-    expect(card.props.tag).toBe('리뷰 455,083건');
-    expect(card.props.headline).toBe('평점 4.9');
-    expect(card.props.body).toBe('2026-09-06 아이소이 홈페이지 기준');
+    // ★ 2026-09-06(2) 숫자 나열 → 한 문장(tag 는 1위 표기 우선 · 없으면 "고객 후기")
+    expect(card.props.tag).toBe('누적판매 1위');
+    expect(card.props.headline).toBe('리뷰 455,083건 · 평점 4.9');
+    expect(card.props.body).toBe('고객이 남긴 리뷰와 평점입니다 · 2026-09-06 아이소이 홈페이지 기준');
     expect(r.sections.map((s) => s.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     expect(insertProofCard(r.sections, { reviewTotal: 455083, rating: 4.9 }, '아이소이').inserted).toBe(false);
     expect(insertProofCard(base, { reviewTotal: 12, rating: null }, '아이소이').inserted).toBe(false);
@@ -165,7 +166,7 @@ describe('프롬프트 계약 S2', () => {
     expect(OUTREACH_GENERATION_RULES).not.toMatch(/없이 브랜드 중심 ·/);
     expect(OUTREACH_EMAIL_SECTION_CONTRACT).toContain('상품 묶음 앞에는 반드시 text_card 1개');
     expect(OUTREACH_EMAIL_SECTION_CONTRACT).not.toContain('countdown');
-    expect(OUTREACH_DM_SECTION_CONTRACT).toContain('DM에서는 0~1개만');
+    expect(OUTREACH_DM_SECTION_CONTRACT).toContain('각 gallery 바로 앞에 1개씩');
     expect(OUTREACH_DM_SECTION_CONTRACT).toContain('10~16자');
     expect(OUTREACH_DM_SECTION_CONTRACT).toContain('60자 이내');
     expect(OUTREACH_DM_SECTION_CONTRACT).not.toContain('버튼 글(8자 이내)');

@@ -27,7 +27,7 @@ import { isSalesOutreachOperator } from './audit-log';
 import { isIndustryCode, industryLabel } from './industry-codes';
 import {
   getOutreachContext, produceOutreachImage, produceOutreachDm, produceOutreachBrandEmail, collectOutreachMedia, fetchImageGuarded,
-  generateSubjectIntro, assembleProposalEmail, countBenefitPlaceholders, captureAndScoreDm,
+  generateSubjectIntro, assembleProposalEmail, countBenefitPlaceholders, captureAndScoreDm, bannerAltMapOf,
   PUBLIC_BASE, OUTREACH_PREVIEW_DAYS, type OutreachMedia,
 } from './sales-outreach-produce';
 // ★ 2026-09-05(3) 브레인스토밍 수렴안 C4 — 재료 재선택·섹션 숨김 override·품질 경고(순수 CT · 잠금 0)
@@ -936,6 +936,8 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
               companyId: ctx.companyId,
               homepageUrl,
               imageCandidates: Array.isArray(bp.imageCandidates) ? bp.imageCandidates : [],
+              // ★ 2026-09-06(2) 배너 문구(alt · 재료 v2)를 사본에 붙인다 — 갤러리 캡션·설명 카드의 사실 원천
+              imageAlts: bannerAltMapOf(bp.materials),
               productLinks: Array.isArray(bp.productLinks) ? bp.productLinks : [],
               listProducts: Array.isArray(bp.listProducts) ? bp.listProducts : [],
               logoCandidates: Array.isArray(bp.logoCandidates) ? bp.logoCandidates : [],
@@ -1000,6 +1002,7 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
           posterSize: imageAsset?.width && imageAsset?.height ? { width: Number(imageAsset.width), height: Number(imageAsset.height) } : null,
           bannerUrl: imageAsset?.bannerUrl ? String(imageAsset.bannerUrl) : null,
           bannerSize: imageAsset?.bannerSize && typeof imageAsset.bannerSize === 'object' ? imageAsset.bannerSize : null,
+          posterCaption: imageAsset?.posterTexts?.title ? String(imageAsset.posterTexts.title) : null,
           media: bp.media || null,
           mediaSelection: bp.mediaSelection || null,
           sectionOverride: sr.section_overrides?.dm || null,
@@ -1078,6 +1081,7 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
             posterSize: imageAsset?.width && imageAsset?.height ? { width: Number(imageAsset.width), height: Number(imageAsset.height) } : null,
             bannerUrl: imageAsset?.bannerUrl ? String(imageAsset.bannerUrl) : null,
             bannerSize: imageAsset?.bannerSize && typeof imageAsset.bannerSize === 'object' ? imageAsset.bannerSize : null,
+            posterCaption: imageAsset?.posterTexts?.title ? String(imageAsset.posterTexts.title) : null,
             media: bp.media || null, mediaSelection: bp.mediaSelection || null,
             ctaLinks: bp.ctaLinks && typeof bp.ctaLinks === 'object' ? bp.ctaLinks : {}, legal: bp.legal || null, brandColor,
           });
