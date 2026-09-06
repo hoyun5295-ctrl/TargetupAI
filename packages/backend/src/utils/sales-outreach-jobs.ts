@@ -360,6 +360,59 @@ export function findEventPageLink(html: string, homeUrl: string): string | null 
   return (scopes ? pick(scopes, false) : null) || pick(html, true) || pick(html, false);
 }
 
+/** 목록 페이지로 보이는 경로(끝이 event · event_list · events/list · list) */
+const EVENT_LIST_PATH_RE = /\/(?:events?|promotions?|이벤트|기획전)\/?$|(?:events?|promotion|promo|이벤트|기획전)[_-]?list\/?$|\/(?:events?|promotions?)\/list\/?$/i;
+
+/**
+ * ★ v3 이벤트 **목록** 페이지 후보(순수 · 순서대로 시도 · 아이소이 첫 실측 정정) — 홈에 목록 앵커가 없는 SPA 몰(메뉴가 버튼)에서는
+ * 상세 링크들의 공통 접두(/event/…)로 관례 주소를 만들어 본다: `${prefix}/${seg}_list` → `${prefix}` → `${prefix}/list`(아이소이 = /event/event_list · 같은 몰의 /hotdeal/hotdeal_list 관례).
+ * 순서 = 목록형 경로 앵커 → findEventPageLink(메뉴·정확 텍스트·첫 매치) → 관례 주소. 중복 제거 · 같은 호스트 · 홈 제외.
+ */
+export function findEventListLinks(html: string, homeUrl: string): string[] {
+  let origin = ''; let host = ''; let homeKey = '';
+  try { const h = new URL(homeUrl); origin = h.origin; host = h.hostname; homeKey = h.origin + h.pathname.replace(/\/+$/, ''); } catch { return []; }
+  const out: string[] = [];
+  const push = (u: string | null | undefined) => {
+    if (!u) return;
+    let abs: URL;
+    try { abs = new URL(u, homeUrl); } catch { return; }
+    if (!/^https?:$/.test(abs.protocol) || abs.hostname !== host) return;
+    if (abs.origin + abs.pathname.replace(/\/+$/, '') === homeKey) return;
+    if (/\/(login|join|cart|mypage|member)/i.test(abs.pathname)) return;
+    const s = abs.toString();
+    if (!out.includes(s)) out.push(s);
+  };
+  const detailPaths: string[] = [];
+  const re = /<a\b[^>]*href=["']([^"'#]+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const href = m[1].replace(/&amp;/g, '&').trim();
+    if (/^(javascript:|mailto:|tel:)/i.test(href)) continue;
+    let abs: URL;
+    try { abs = new URL(href, homeUrl); } catch { continue; }
+    if (abs.hostname !== host) continue;
+    if (EVENT_LIST_PATH_RE.test(abs.pathname)) push(abs.toString());
+    else if (EVENT_LINK_RE.test(abs.pathname)) detailPaths.push(abs.pathname);
+  }
+  push(findEventPageLink(html, homeUrl));
+  // 관례 주소 — 상세 링크 3개 이상이 같은 첫 세그먼트를 쓸 때만
+  const firstSeg = (p: string) => (p.split('/').filter(Boolean)[0] || '').toLowerCase();
+  const segCount: Record<string, number> = {};
+  for (const p of detailPaths) { const s = firstSeg(p); if (s && EVENT_LINK_RE.test(s)) segCount[s] = (segCount[s] || 0) + 1; }
+  const seg = Object.entries(segCount).sort((a, b) => b[1] - a[1])[0];
+  if (seg && seg[1] >= 3) {
+    const prefix = `${origin}/${seg[0]}`;
+    // 관례 주소는 첫 매치(상세 페이지)보다 앞에 둔다 — 목록이 있어야 카드가 나온다
+    const probes = [`${prefix}/${seg[0]}_list`, prefix, `${prefix}/list`];
+    const detailFirst = out.find((u) => !EVENT_LIST_PATH_RE.test(new URL(u).pathname));
+    const listLike = out.filter((u) => EVENT_LIST_PATH_RE.test(new URL(u).pathname));
+    const rest = out.filter((u) => u !== detailFirst && !listLike.includes(u));
+    out.length = 0;
+    for (const u of [...listLike, ...probes, ...(detailFirst ? [detailFirst] : []), ...rest]) push(u);
+  }
+  return out;
+}
+
 export interface QuoteFilterMeta {
   rawCandidates: number;
   matched: number;
@@ -634,7 +687,8 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   if (page || rendered) {
     const hb = startLockHeartbeat(jobId, lockToken, 'crawling');
     try {
-      const ps = await renderPageGuarded(job.homepage_url, { screenshot: false, screenshotViewport: true, viewportWidth: 375, deadlineMs: 12_000 });
+      // 예산 25초(본 렌더와 같다) — 12초는 SPA 몰이 첫 화면을 그리기 전에 끝나 팔레트·캡처가 비었다(아이소이 첫 실측)
+      const ps = await renderPageGuarded(job.homepage_url, { screenshot: false, screenshotViewport: true, viewportWidth: 375, deadlineMs: 25_000 });
       if (ps.ok) { paletteShot = ps.result; paletteOutcome = ps.result.screenshotViewportBase64 || (Array.isArray(ps.result.palette) && ps.result.palette.length) ? 'ok' : 'no_content'; }
     } catch (err: any) {
       console.log('[sales-outreach] 팔레트 렌더 건너뜀:', jobId, err?.message);
@@ -664,48 +718,62 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   let cardProductLinks: string[] = [];
   let cardsOutcome: 'ok' | 'no_content' | 'unavailable' | null = null;
   if (hasSource) {
-    const link = (rendered ? findEventPageLink(rendered.html, finalUrl) : null) || (page ? findEventPageLink(page.html, staticUrl) : null);
-    if (link) {
+    // ★ v3 목록 페이지 후보를 순서대로 최대 3개 시도(아이소이 첫 실측: 홈에 목록 앵커가 없어 상세 1장을 읽었다 → 관례 주소 /event/event_list 가 목록) · 카드가 나오면 멈춘다 · 카드 0이면 첫 성공 페이지가 옛 방식의 행사 상세 원문
+    const links = (rendered ? findEventListLinks(rendered.html, finalUrl) : []).concat(page ? findEventListLinks(page.html, staticUrl) : []).filter((u, i, arr) => arr.indexOf(u) === i).slice(0, 3);
+    if (links.length) {
       let host = '';
       try { host = new URL(finalUrl).hostname; } catch { host = ''; }
-      // ★ 2026-09-06 홈을 렌더로 읽었으면 행사 상세도 렌더 우선(아이소이 행사 페이지 정적 = 6.9KB 껍데기 · 기간 문자열은 렌더 뒤에만 있다)
       let subHtml: string | null = null;
       let subFinal: string | null = null;
       let subSameHost = false;
-      if (rendered) {
-        const hb = startLockHeartbeat(jobId, lockToken, 'crawling');
-        try {
-          const rs = await renderPageGuarded(link, { deadlineMs: 20_000, screenshot: false });
-          if (rs.ok && rs.result.html.length >= 2_000) {
-            subHtml = rs.result.html; subFinal = rs.result.finalUrl;
-            let subHost = ''; try { subHost = new URL(subFinal).hostname; } catch { subHost = ''; }
-            subSameHost = !!host && isSameSite(host, subHost);
+      let anyFetched = false;
+      const tried: string[] = [];
+      for (const link of links) {
+        tried.push(link);
+        // ★ 2026-09-06 홈을 렌더로 읽었으면 행사 페이지도 렌더 우선(아이소이 행사 페이지 정적 = 6.9KB 껍데기 · 기간 문자열은 렌더 뒤에만 있다)
+        let html: string | null = null;
+        let final: string | null = null;
+        let same = false;
+        if (rendered) {
+          const hb = startLockHeartbeat(jobId, lockToken, 'crawling');
+          try {
+            const rs = await renderPageGuarded(link, { deadlineMs: 20_000, screenshot: false });
+            if (rs.ok && rs.result.html.length >= 2_000) {
+              html = rs.result.html; final = rs.result.finalUrl;
+              let subHost = ''; try { subHost = new URL(final).hostname; } catch { subHost = ''; }
+              same = !!host && isSameSite(host, subHost);
+            }
+          } catch (err: any) {
+            console.error('[sales-outreach] 행사 페이지 렌더 예외(정적 폴백):', jobId, err?.message);
+          } finally {
+            hb.stop();
           }
-        } catch (err: any) {
-          console.error('[sales-outreach] 행사 상세 렌더 예외(정적 폴백):', jobId, err?.message);
-        } finally {
-          hb.stop();
         }
-      }
-      if (!subHtml) {
-        try {
-          const sub = await fetchHtmlGuarded(link, OUTREACH_FETCH_OPTS);
-          if (sub) {
-            subHtml = sub.html; subFinal = sub.finalUrl;
-            let subHost = ''; try { subHost = new URL(sub.finalUrl).hostname; } catch { subHost = ''; }
-            subSameHost = !!host && subHost === host;
+        if (!html) {
+          try {
+            const sub = await fetchHtmlGuarded(link, OUTREACH_FETCH_OPTS);
+            if (sub) {
+              html = sub.html; final = sub.finalUrl;
+              let subHost = ''; try { subHost = new URL(sub.finalUrl).hostname; } catch { subHost = ''; }
+              same = !!host && subHost === host;
+            }
+          } catch (err: any) {
+            console.error('[sales-outreach] 행사 페이지 1홉 예외:', jobId, err?.message);
           }
-        } catch (err: any) {
-          console.error('[sales-outreach] 행사 상세 1홉 예외:', jobId, err?.message);
         }
+        if (!html || !final || !same) continue;
+        anyFetched = true;
+        const cards = extractEventListCards(html, final, parseLicensedEndDate);
+        if (cards.length > 0) { subHtml = html; subFinal = final; subSameHost = true; eventCards = cards; break; }
+        if (!subHtml) { subHtml = html; subFinal = final; subSameHost = true; }
       }
-      if (!subHtml || !subFinal || !subSameHost) {
+      renderMeta = { ...(renderMeta || {}), eventListTried: tried };
+      if (!anyFetched || !subHtml || !subFinal || !subSameHost) {
         crawlSub = 'unavailable';
         eventListOutcome = 'unavailable';
       } else {
         const t = buildOutreachEventMaterial(subHtml).text;
         if (t) { subUrl = subFinal; subText = t.slice(0, 2000); crawlSub = 'ok'; } else { crawlSub = 'no_content'; }
-        eventCards = extractEventListCards(subHtml, subFinal, parseLicensedEndDate);
         eventListOutcome = eventCards.length ? 'ok' : 'no_content';
         // 카드 상세 1홉 — 면허(미래 종료일) 있는 카드 상위 2 · 정적만 · 벽시계 30초
         const licensedCards = eventCards.filter((c) => isFutureDate(c.endDate)).slice(0, 2);
@@ -771,8 +839,10 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   // ★ 0905(4) 브랜드 색 — theme-color·TileColor → 아이콘 PNG 지배색(색 1개만 · 로고 픽셀은 산출물에 쓰지 않는다 · 불변 11). 실패 = null(기본 토큰)
   //   메타는 정적 <head>가 먼저(렌더 HTML 은 그 뒤 폴백)
   const colorHtml = page?.html || rendered?.html || null;
+  // ★ v3 헤더 로고 PNG 도 색 원천(지배색 1개 · 픽셀은 안 쓴다) — 아이콘이 .ico 뿐인 몰(아이소이)에서 3순위가 비었다
+  const logoCandidatesForColor = unionStrings(rendered ? extractLogoCandidates(rendered.html, finalUrl) : [], page ? extractLogoCandidates(page.html, staticUrl) : [], 4);
   const brandColorRes = colorHtml
-    ? await resolveBrandColorGuarded(colorHtml, finalUrl, (u) => fetchImageGuarded(u, { referer: finalUrl })).catch(() => ({ color: null, source: null }))
+    ? await resolveBrandColorGuarded(colorHtml, finalUrl, (u) => fetchImageGuarded(u, { referer: finalUrl }), logoCandidatesForColor).catch(() => ({ color: null, source: null }))
     : { color: null, source: null };
   const brandProfile = {
     siteTitle: titleMatch ? norm(titleMatch[1]).slice(0, 120) : null,

@@ -484,6 +484,17 @@ SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 's
 | R8 | 파기가 뷰포트 캡처(홈 · DM 첫 화면)를 안 지움 | medium | `purgeOutreachJobArtifacts` 가 `brand_profile.homeCaptureUrl` · dm asset `captureUrl` 도 unlink |
 | R9 | 재료 재선택 회차에 `auto_seq` 잔존 → 자동 재조립 0회(검증자는 기각했으나 수용) | low | `selectOutreachMaterials` clear 에 `auto_seq` |
 
+### 17-5. 첫 실측(아이소이 · 2026-09-06 배포 직후) 결과와 정정
+
+실측 SQL 결과 = `event_list no_content · crawling_cards null · palette_render no_content · colorSource neutral · n_cards 0 · ai_calls 11 · home_capture f`. 주재자가 아이소이 실물 DOM 을 열어 원인을 특정했다(브라우저 도구 · 읽기만).
+
+| 원인 | 실측 사실 | 정정 |
+|---|---|---|
+| 목록 페이지 주소 | 홈에 이벤트 **목록** 으로 가는 `<a>` 가 없다(메뉴가 앵커가 아닌 SPA) · `findEventPageLink` 가 첫 상세 링크(`/event/202609/cream_diy_event`)를 골라 카드 0 · 실제 목록 = `/event/event_list`(같은 몰 `/hotdeal/hotdeal_list` 관례) | `findEventListLinks`(순수): 목록형 경로 앵커 → 옛 첫 매치 → **관례 주소 3개**(`/{seg}/{seg}_list` · `/{seg}` · `/{seg}/list` · 상세 링크 3개 이상이 같은 첫 세그먼트일 때) · 크롤이 최대 3개를 순서대로 시도해 카드가 나오면 멈춘다(`render_meta.eventListTried`) |
+| 카드 상한 · 기간 없는 카드 | 실물 카드 7장(기간 6 + OUTLET 기간 없음) · 실물 DOM = `<li>` 안 `<a><img></a>` + 형제 `<span class=…tit>` + `<span class=…date>기간 : … 까지</span>` | 상한 6 → 8 · 기간 없는 카드는 링크가 행사성이면 받는다(면허 0) · **실물 HTML 을 픽스처로 고정**(`__tests__/fixtures/isoi-event-list.html` · 7장 · 제목·기간·배너 절대 URL) |
+| 팔레트 렌더 비었음 | 예산 12초 = SPA 첫 화면 전에 종료(워커는 남은 시간 1.5초 미만이면 캡처를 건너뛴다) | 예산 25초(본 렌더와 같다) |
+| 브랜드 색 neutral | 아이소이 계산 스타일에 채도 있는 큰 면이 없다(핑크 뱃지 1개뿐) · theme-color 0 · 아이콘 = `.ico`(PNG 0) · 헤더 로고 = `logo_blk.png`(검정) | 헤더 로고 PNG 를 4순위 색 원천으로(지배색 1개 · 픽셀 사용 0) · 아이소이는 그래도 neutral 이 맞다(흑백 브랜드) |
+
 ### 17-3. 배포 뒤 실측(Harold)
 
 1. 아이소이 재크롤 → 확인 대기에서 **행사 카드 격자**(이벤트 목록 카드 N건 · 배너·기간·상세)가 뜨는가 · `stage_results.event_list` 가 `ok` 인가 · `palette_render` 3값 · `brand.colorSource` 4값.

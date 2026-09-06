@@ -210,6 +210,7 @@ export function extractProducts(html: string, base: string, max = 12): OutreachP
 const CARD_DATE_RE = /(20\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})(?!\d)/g;
 const CARD_PERIOD_TAIL_RE = /^(?:\s*\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:일)?\s*(?:까지|마감|종료)?/;
 const CARD_LINK_BAD_RE = /\/(login|join|cart|mypage|member|logout)/i;
+const CARD_EVENT_LINK_RE = /event|promotion|promo|이벤트|기획전|행사/i;
 
 /** 카드 텍스트에서 기간 줄 원문(첫 날짜부터 마지막 날짜 + 시각·까지 꼬리) · 없으면 null */
 function periodRawOf(text: string): string | null {
@@ -232,7 +233,7 @@ function periodRawOf(text: string): string | null {
 export function extractEventListCards(
   html: string, base: string,
   parsePeriod: (raw: string) => { start: string | null; end: string | null },
-  max = 6,
+  max = 8,
 ): OutreachEventCard[] {
   let host = '';
   try { host = new URL(base).hostname; } catch { return []; }
@@ -244,11 +245,12 @@ export function extractEventListCards(
     const text = stripTags(inner);
     if (!text || text.length < 4) return;
     const periodRaw = periodRawOf(text);
-    if (!periodRaw && !/기간/.test(text)) return;
     const link = absolutizeAssetUrl(href, base);
     if (!link) return;
     try { if (new URL(link).hostname !== host) return; } catch { return; }
     if (CARD_LINK_BAD_RE.test(link)) return;
+    // 기간이 없는 카드는 링크 자체가 행사성일 때만(아이소이 "[2026 OUTLET] 최대 83% 특가전" · 면허는 없다)
+    if (!periodRaw && !/기간/.test(text) && !CARD_EVENT_LINK_RE.test(link)) return;
     const key = link.replace(/#.*$/, '');
     if (seen.has(key)) return;
     const body = periodRaw ? text.replace(periodRaw, ' ') : text;
@@ -575,13 +577,17 @@ export function pngLooksWhite(buf: Buffer): boolean {
 
 export type BrandColorSource = 'meta' | 'icon' | null;
 
-/** 브랜드 색 해석(네트워크 층 · 가드 fetch 주입) — theme-color·TileColor → 아이콘 PNG 지배색. 실패 = null(뷰어 기본 토큰). source는 근거 패널용. */
+/**
+ * 브랜드 색 해석(네트워크 층 · 가드 fetch 주입) — theme-color·TileColor → 아이콘 PNG 지배색 → ★ v3 헤더 로고 PNG 지배색(extraPngCandidates · 색 1개만 읽는다 · 로고 픽셀은 산출물에 쓰지 않는다 · 불변 11).
+ * 실패 = null(제작이 무채색 주색). source는 근거 패널용.
+ */
 export async function resolveBrandColorGuarded(
-  html: string, base: string, fetcher: GuardedImageFetcher,
+  html: string, base: string, fetcher: GuardedImageFetcher, extraPngCandidates: readonly string[] = [],
 ): Promise<{ color: string | null; source: BrandColorSource }> {
   const meta = parseThemeColorFromHtml(html);
   if (meta) return { color: meta, source: 'meta' };
-  for (const u of extractBrandIconCandidates(html, base)) {
+  const extras = extraPngCandidates.filter((u) => /\.png(\?|$)/i.test(u));
+  for (const u of [...extractBrandIconCandidates(html, base), ...extras].filter((u, i, arr) => arr.indexOf(u) === i)) {
     try {
       const img = await fetcher(u);
       if (!img || img.buffer.length > 600_000) continue;

@@ -13,7 +13,7 @@ vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(async () => '') 
 
 import { extractEventListCards, parseProductAwards, collectProductsFromLinks } from '../sales-outreach-media';
 import {
-  parseLicensedEndDate, findEventPageLink, eventCandidatesFromCards, normalizeEventSelection, eventCardsOf, buildOutreachRecipe, OUTREACH_EVENT_SELECT_MAX,
+  parseLicensedEndDate, findEventPageLink, findEventListLinks, eventCandidatesFromCards, normalizeEventSelection, eventCardsOf, buildOutreachRecipe, OUTREACH_EVENT_SELECT_MAX,
 } from '../sales-outreach-jobs';
 import {
   fillOutreachDmMedia, headlineFromCard, eventCtaLabel, assertBlockMinima, OUTREACH_BLOCK_MINIMA, OUTREACH_SECTION_MAX, insertProofCard,
@@ -51,17 +51,18 @@ const EVENT_LIST_HTML = `
 </div>`;
 
 describe('★ v3 재료 층 — 이벤트 목록 카드(순수 · AI 0)', () => {
-  it('카드 = 제목·기간 원문·배너·링크 · 기간 없는 카드 제외 · 같은 링크·타 호스트·로그인 제외 · 순서 유지 · endDate 는 주입 파서', () => {
+  it('카드 = 제목·기간 원문·배너·링크 · 기간 없는 카드는 링크가 행사성일 때만(면허 없음) · 같은 링크·타 호스트·로그인 제외 · 순서 유지 · endDate 는 주입 파서', () => {
     const cards = extractEventListCards(EVENT_LIST_HTML, 'https://www.isoi.co.kr/', parseLicensedEndDate);
     expect(cards.map((c) => c.linkUrl)).toEqual([
-      'https://www.isoi.co.kr/board/event/view/101', 'https://www.isoi.co.kr/board/event/view/102', 'https://www.isoi.co.kr/board/event/view/103', 'https://www.isoi.co.kr/board/event/view/105',
+      'https://www.isoi.co.kr/board/event/view/101', 'https://www.isoi.co.kr/board/event/view/102', 'https://www.isoi.co.kr/board/event/view/103', 'https://www.isoi.co.kr/board/event/view/104', 'https://www.isoi.co.kr/board/event/view/105',
     ]);
+    expect(cards[3]).toMatchObject({ title: '상시 진행 · 리뷰 적립', periodRaw: null, endDate: null });
     expect(cards[0]).toMatchObject({ title: '추석선물세트 특별 기획전~50%', startDate: '2026-08-31', endDate: '2099-09-18', imageUrl: 'https://www.isoi.co.kr/upload/ev101.jpg', order: 0 });
     expect(cards[0].periodRaw).toBe('기간 : 2026.08.31 ~ 2099-09-18 08:59:59');
     expect(cards[1]).toMatchObject({ title: '고함량 50,000ppm 백광기미앰플 출시 이벤트', endDate: '2099-09-30' });
     expect(cards[1].periodRaw).toBe('2026-09-01 ~ 2099-09-30 13:59:59 까지');
     expect(cards[2]).toMatchObject({ title: '멤버십 위크', endDate: '2025-01-31' });
-    expect(cards[3]).toMatchObject({ title: '가을 신상 오픈', startDate: '2026-09-10', endDate: '2099-10-31' });
+    expect(cards[4]).toMatchObject({ title: '가을 신상 오픈', startDate: '2026-09-10', endDate: '2099-10-31' });
     expect(extractEventListCards('<div>없음</div>', 'https://a.com/', parseLicensedEndDate)).toEqual([]);
     expect(extractEventListCards(EVENT_LIST_HTML, 'not a url', parseLicensedEndDate)).toEqual([]);
   });
@@ -69,10 +70,36 @@ describe('★ v3 재료 층 — 이벤트 목록 카드(순수 · AI 0)', () => 
     const cards = extractEventListCards(EVENT_LIST_HTML, 'https://www.isoi.co.kr/', parseLicensedEndDate);
     const now = new Date('2026-09-06T00:00:00+09:00');
     const c = eventCandidatesFromCards(cards, 'https://www.isoi.co.kr/board/event/list', now);
-    expect(c.map((x) => x.benefitLicensed)).toEqual([true, true, true, false]);
+    expect(c.map((x) => x.benefitLicensed)).toEqual([true, true, true, false, false]);
     expect(c[3]).toMatchObject({ quote: '멤버십 위크', origin: 'card', endDate: '2025-01-31', benefitLicensed: false });
+    expect(c[4]).toMatchObject({ quote: '상시 진행 · 리뷰 적립', origin: 'card', endDate: null, benefitLicensed: false });
     expect(c[0]).toMatchObject({ origin: 'card', title: '추석선물세트 특별 기획전~50%', bannerUrl: 'https://www.isoi.co.kr/upload/ev101.jpg', detailUrl: 'https://www.isoi.co.kr/board/event/view/101' });
     expect(c[0].periodRaw).toContain('2026.08.31');
+  });
+  it('★ 아이소이 실물 목록 HTML(2026-09-06 캡처) — 카드 7(기간 6 + OUTLET 기간 없음 · 상세 링크 행사성) · 제목·기간 원문 · 배너 절대 URL · 순서', () => {
+    const html = readFileSync(resolve(__dirname, 'fixtures', 'isoi-event-list.html'), 'utf-8');
+    const cards = extractEventListCards(html, 'https://www.isoi.co.kr/event/event_list', parseLicensedEndDate);
+    expect(cards).toHaveLength(7);
+    expect(cards[0]).toMatchObject({ title: '기능성 크림대전, 최대 50%', periodRaw: '기간 : 2026-09-30 13:59:59 까지', endDate: '2026-09-30', imageUrl: 'https://cfront.isoi.co.kr/renewal_2021/event/ogimagebanner/202609cream_diy_event.jpg', linkUrl: 'https://www.isoi.co.kr/event/202609/cream_diy_event' });
+    expect(cards[1]).toMatchObject({ title: '항산화 200시간, 백광기미앰플 출시!', endDate: '2026-09-14' });
+    expect(cards[3]).toMatchObject({ title: '추석선물세트 특별 기획전~50%', endDate: '2026-09-18' });
+    expect(cards[4]).toMatchObject({ title: '[2026 OUTLET] 최대 83% 특가전', periodRaw: null, endDate: null, linkUrl: 'https://www.isoi.co.kr/event/outlet' });
+    expect(cards[6]).toMatchObject({ title: '[V.VVIP전용] 프리미엄 라운지', endDate: '2026-09-14', linkUrl: 'https://www.isoi.co.kr/product/premium_shop' });
+    expect(cards.map((c) => c.order)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    const c = eventCandidatesFromCards(cards, 'https://www.isoi.co.kr/event/event_list', new Date('2026-09-06T00:00:00+09:00'));
+    expect(c.filter((x) => x.benefitLicensed)).toHaveLength(6);
+    expect(c[c.length - 1].quote).toBe('[2026 OUTLET] 최대 83% 특가전');
+  });
+  it('★ 목록 페이지 후보 — 홈에 목록 앵커가 없고 상세 링크만 있으면 관례 주소(/event/event_list → /event → /event/list)가 상세 링크보다 앞 · 목록형 경로 앵커는 맨 앞 · 같은 호스트 · 중복 0', () => {
+    const home = `<a href="/event/202609/cream_diy_event">최대 50% 크림대전</a><a href="/event/202608/nmn_event">앰플</a><a href="/event/weekend">주말특가</a><a href="/event/202609/chuseok_event">추석</a><a href="/hotdeal/hotdeal_list"></a><a href="https://other.example/event/list">타사</a>`;
+    expect(findEventListLinks(home, 'https://www.isoi.co.kr/')).toEqual([
+      'https://www.isoi.co.kr/event/event_list', 'https://www.isoi.co.kr/event', 'https://www.isoi.co.kr/event/list', 'https://www.isoi.co.kr/event/202609/cream_diy_event',
+    ]);
+    const withList = `<a href="/promotion/list">프로모션 전체</a>${home}`;
+    expect(findEventListLinks(withList, 'https://www.isoi.co.kr/')[0]).toBe('https://www.isoi.co.kr/promotion/list');
+    // 상세 링크 3개 미만이면 관례 주소를 만들지 않는다(옛 동작 = 첫 매치 1개)
+    expect(findEventListLinks('<a href="/event/1">이벤트 하나</a>', 'https://a.com/')).toEqual(['https://a.com/event/1']);
+    expect(findEventListLinks('<a href="/about">회사</a>', 'https://a.com/')).toEqual([]);
   });
   it('행사 링크 정렬 — nav·header 안 링크 → 텍스트가 정확히 이벤트·기획전·프로모션 → 나머지 첫 매치(옛 동작)', () => {
     expect(findEventPageLink(EVENT_LIST_HTML, 'https://www.isoi.co.kr/')).toBe('https://www.isoi.co.kr/board/event/list');
