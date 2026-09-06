@@ -11,12 +11,12 @@ import { resolve } from 'path';
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })), pool: { connect: vi.fn() }, default: { connect: vi.fn(), query: vi.fn() } }));
 vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(async () => '') }));
 
-import { extractEventListCards, parseProductAwards, collectProductsFromLinks } from '../sales-outreach-media';
+import { extractEventListCards, parseProductAwards, collectProductsFromLinks, isDateLikeText } from '../sales-outreach-media';
 import {
   parseLicensedEndDate, findEventPageLink, findEventListLinks, eventCandidatesFromCards, normalizeEventSelection, eventCardsOf, buildOutreachRecipe, OUTREACH_EVENT_SELECT_MAX,
 } from '../sales-outreach-jobs';
 import {
-  fillOutreachDmMedia, headlineFromCard, eventCtaLabel, assertBlockMinima, OUTREACH_BLOCK_MINIMA, OUTREACH_SECTION_MAX, insertProofCard,
+  fillOutreachDmMedia, headlineFromCard, eventCtaLabel, productCtaLabel, assertBlockMinima, OUTREACH_BLOCK_MINIMA, OUTREACH_SECTION_MAX, insertProofCard,
   licensedLineOf, assertLicensedQuoteSources, autoRetryReasons, productFactKeys, DM_VISION_ITEMS, addOutreachAiCost, newOutreachAiCost, replyLineOf, OUTREACH_REPLY_LINE_MAX,
   buildOutreachMaterialBlock,
 } from '../sales-outreach-produce';
@@ -89,6 +89,27 @@ describe('★ v3 재료 층 — 이벤트 목록 카드(순수 · AI 0)', () => 
     const c = eventCandidatesFromCards(cards, 'https://www.isoi.co.kr/event/event_list', new Date('2026-09-06T00:00:00+09:00'));
     expect(c.filter((x) => x.benefitLicensed)).toHaveLength(6);
     expect(c[c.length - 1].quote).toBe('[2026 OUTLET] 최대 83% 특가전');
+  });
+  it('★ 이니스프리 실물 목록 HTML(2026-09-06 캡처) — 첫 줄이 연도 없는 날짜 · 제목 = strong · 종료일 = 속성의 두 자리 연도 · 기간 원문은 연도 없는 표기 그대로 · 상세가 상품 페이지여도 카드', () => {
+    const html = readFileSync(resolve(__dirname, 'fixtures', 'innisfree-event-list.html'), 'utf-8');
+    const cards = extractEventListCards(html, 'https://www.innisfree.com/kr/ko/ca/event', parseLicensedEndDate);
+    // 실물 페이지 순서 = 상단 배너("추석선물" · 기간 0 · 같은 행사 링크) → 목록 카드. 기간 있는 목록 카드가 배너 자리를 덮는다(2026-09-06 실물 앵커 순서 실측)
+    expect(cards).toHaveLength(3);
+    expect(cards[0]).toMatchObject({ title: '추석선물 기획세트 한정특가 ~35%', periodRaw: '9.1(화) ~ 9.30(수)', endDate: '2026-09-30', order: 0, linkUrl: 'https://www.innisfree.com/kr/ko/ca/event/105869' });
+    expect(cards[0].imageUrl).toBe('https://inm-cdn.innisfree.com/origin-image/event/20260831/7f7a6dc4-7ac8-453b-bd3e-b6ade4613710.webp');
+    expect(cards[1]).toMatchObject({ title: '6주년 감사제 ~50% 혜태마켓X블랙티', periodRaw: '9.1(화) ~ 9.6(일)', startDate: '2026-09-01', endDate: '2026-09-06', order: 1, linkUrl: 'https://www.innisfree.com/kr/ko/ca/event/105865' });
+    expect(cards[1].imageUrl).toBe('https://inm-cdn.innisfree.com/origin-image/event/20260831/767cacbf-6bdb-4e38-a750-3278ed479e38.webp');
+    expect(cards[2]).toMatchObject({ title: '클렌징 신상템 출시🎉 세안 밴드 추가 증정!', endDate: '2026-09-16', order: 2, linkUrl: 'https://www.innisfree.com/kr/ko/dp/product/105478' });
+    for (const c of cards) expect(isDateLikeText(c.title)).toBe(false);
+    // 헤드라인·버튼은 날짜가 아니다(실측 "9.1(화) 9.6(일) 보기")
+    expect(headlineFromCard(cards[1], true).headline).toBe('6주년 감사제 ~50%');
+    expect(headlineFromCard(cards[1], false).headline).toBe('6주년 감사제 혜태마켓X블랙티');
+    expect(eventCtaLabel(cards[1])).toBe('6주년 감사제 보기');
+    expect(headlineFromCard(cards[0], true).headline).toBe('추석선물 기획세트 한정특가');
+    expect(eventCtaLabel(cards[0])).toBe('추석선물 기획세트 보기');
+    expect(eventCtaLabel({ title: '9.1(화) ~ 9.6(일)' })).toBe('행사 보기');
+    expect(headlineFromCard({ title: '9.2(수) ~ 9.16(수)' }, true).demoted).toBe(true);
+    expect(productCtaLabel('[대용량] 블랙티 유스 인핸싱 앰플 / 미백 탄력케어')).toBe('블랙티 유스 인핸싱 보기');
   });
   it('★ 목록 페이지 후보 — 홈에 목록 앵커가 없고 상세 링크만 있으면 관례 주소(/event/event_list → /event → /event/list)가 상세 링크보다 앞 · 목록형 경로 앵커는 맨 앞 · 같은 호스트 · 중복 0', () => {
     const home = `<a href="/event/202609/cream_diy_event">최대 50% 크림대전</a><a href="/event/202608/nmn_event">앰플</a><a href="/event/weekend">주말특가</a><a href="/event/202609/chuseok_event">추석</a><a href="/hotdeal/hotdeal_list"></a><a href="https://other.example/event/list">타사</a>`;

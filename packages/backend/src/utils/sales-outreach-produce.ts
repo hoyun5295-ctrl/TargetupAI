@@ -1075,9 +1075,11 @@ function fillCta(buttons: unknown, media: OutreachFillMedia, maxLabel: number, u
 function toProductItems(ps: OutreachProduct[]) {
   return ps.map((x) => ({
     image_url: x.image_url, name: x.name, price: x.price || 0,
-    ...(x.discount_price ? { discount_price: x.discount_price } : {}),
+    // 할인가는 정가보다 낮을 때만(같으면 같은 가격이 두 번 찍힌다 · 이니스프리 첫 실측)
+    ...(x.discount_price && x.price && x.discount_price < x.price ? { discount_price: x.discount_price } : {}),
     // ★ 2026-09-06 S2 카드 원문에 있던 할인율(문자열)만 — 렌더러 computeDmDiscountRate 가 수동값 우선 · 없으면 가격 쌍으로 계산(공용 규칙 그대로)
-    ...(typeof x.discount_rate === 'number' && x.discount_rate > 0 && x.discount_rate < 100 ? { discount_rate: x.discount_rate } : {}),
+    // ★ v3 정정(이니스프리 첫 실측 "28% 19,200원 19,200원"): 할인가 쌍이 없는 상품에 목록 할인율만 덧입히면 같은 가격이 두 번 찍힌다 → 할인가가 있을 때만
+    ...(x.discount_price && x.price && x.discount_price < x.price && typeof x.discount_rate === 'number' && x.discount_rate > 0 && x.discount_rate < 100 ? { discount_rate: x.discount_rate } : {}),
     link_url: x.link_url,
   }));
 }
@@ -1251,28 +1253,48 @@ export const OUTREACH_CAROUSEL_FOCUS = 2;
 export const OUTREACH_CAROUSEL_CLASSIC = 4;
 
 /** 면허 없는 카드 제목에서 걷어낼 수치와 수치 수식어(차단기가 prop 째 비우기 전에 코드가 먼저 정리한다 · 검증 B7). "세일·할인" 같은 낱말은 수치가 아니라 남긴다(차단기도 걷지 않는다). */
-const CARD_BENEFIT_TOKEN_RE = /\d[\d,.]*\s*(?:%|원|만원|천원|퍼센트)|\d\s*\+\s*\d|(?:^|\s)(?:최대|단돈|무려|최저|OFF|off|~)(?=\s|$)/g;
+const CARD_BENEFIT_TOKEN_RE = /~?\s*\d[\d,.]*\s*(?:%|원|만원|천원|퍼센트)\s*~?|\d\s*\+\s*\d|(?:^|\s)(?:최대|단돈|무려|최저|OFF|off|~)(?=\s|$)/g;
 
 /**
  * 행사 카드 → 헤드라인(순수). 면허 있음 = 제목 원문 18자 · 없음 = 수치·판촉 낱말을 뺀 앞머리 18자 · 6자 미만이면 강등(demoted · 호출자가 hero 대신 text_card 로 내리거나 카드를 생략).
  * 면허 없는 "최대 50% 기획전" 을 원문으로 실으면 차단기가 headline 을 prop 째 비워 업체명이 대체된다(HERO_FALLBACK 상시) — 그 자리를 막는다.
  */
+/** 연도 없는 날짜·기간 조각("9.1(화) ~ 9.6(일)" · "~ 9/30") — 제목·라벨에서 걷는다(이니스프리 첫 실측: 카드 첫 줄이 날짜라 헤드라인·버튼이 날짜가 됐다) */
+const CARD_DATE_TOKEN_RE = /(?:\d{1,2}\s*[./]\s*\d{1,2}|\d{1,2}월\s*\d{1,2}일)(?:\s*\([월화수목금토일]\))?(?:\s*[~\-–]\s*(?:\d{1,2}\s*[./]\s*\d{1,2}|\d{1,2}월\s*\d{1,2}일)(?:\s*\([월화수목금토일]\))?)?|\([월화수목금토일]\)/g;
+
+/** 낱말 경계에서 자른다(n자 안에서 마지막 공백 · 공백이 앞 절반 안에 없으면 그냥 자른다) */
+function cutAtWord(s: string, n: number): string {
+  const t = String(s || '').trim();
+  if (t.length <= n) return t;
+  const cut = t.slice(0, n);
+  const sp = cut.lastIndexOf(' ');
+  return (sp >= Math.floor(n / 2) ? cut.slice(0, sp) : cut).replace(/[\s~·\-–:,]+$/g, '').trim();
+}
+
 export function headlineFromCard(card: { title: string } | null | undefined, licensed: boolean): { headline: string; demoted: boolean } {
-  const raw = String(card?.title || '').replace(/\s+/g, ' ').trim();
-  if (!raw) return { headline: '', demoted: true };
-  if (licensed) return { headline: raw.slice(0, 18).trim(), demoted: false };
-  const base = raw.replace(CARD_BENEFIT_TOKEN_RE, ' ').replace(/^[\s~·\-–:]+|[\s~·\-–:]+$/g, '').replace(/\s+/g, ' ').trim();
-  const head = base.slice(0, 18).trim();
-  if (head.length < 6) return { headline: '', demoted: true };
+  // 날짜 조각은 면허와 무관하게 제목이 아니다(기간은 sub_copy·body 가 따로 든다)
+  const raw = String(card?.title || '').replace(CARD_DATE_TOKEN_RE, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
+  if (!raw || !/[가-힣A-Za-z]{2,}/.test(raw)) return { headline: '', demoted: true };
+  if (licensed) return { headline: cutAtWord(raw, 18), demoted: false };
+  const base = raw.replace(CARD_BENEFIT_TOKEN_RE, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
+  const head = cutAtWord(base, 18);
+  if (head.length < 6 || !/[가-힣A-Za-z]{2,}/.test(head)) return { headline: '', demoted: true };
   return { headline: head, demoted: false };
 }
 
-/** 행사 CTA 라벨(목적지 이름형 · ≤maxLabel) — 수치를 뺀 제목 앞 12자 + " 보기" */
+/** 행사 CTA 라벨(목적지 이름형 · ≤maxLabel) — 날짜·수치를 뺀 제목 앞머리(낱말 경계) + " 보기" · 못 만들면 "행사 보기" */
 export function eventCtaLabel(card: { title: string }, maxLabel = 16): string {
-  // 수치가 든 라벨은 차단기가 '자세히 보기' 로 바꾼다 — 처음부터 수치 없는 제목만 쓴다(못 만들면 '행사 보기')
+  // 수치가 든 라벨은 차단기가 '자세히 보기' 로 바꾼다 — 처음부터 수치 없는 제목만 쓴다
   const base = headlineFromCard(card, false).headline;
-  const head = base.slice(0, Math.max(4, maxLabel - 3)).trim().replace(/[\s~·\-–:]+$/g, '');
-  return (head ? `${head} 보기` : '행사 보기').slice(0, maxLabel);
+  const head = cutAtWord(base, Math.max(4, maxLabel - 3));
+  return (head && /[가-힣A-Za-z]{2,}/.test(head) ? `${head} 보기` : '행사 보기').slice(0, maxLabel);
+}
+
+/** 상품 CTA 라벨 — 앞머리 대괄호 꼬리표("[대용량]")를 떼고 낱말 경계 12자 + " 보기" */
+export function productCtaLabel(name: string, maxLabel = 16): string {
+  const base = String(name || '').replace(/^\s*(?:\[[^\]]{1,12}\]\s*)+/, '').replace(/\s+/g, ' ').trim();
+  const head = cutAtWord(base, Math.max(4, maxLabel - 3));
+  return (head ? `${head} 보기` : '상품 보기').slice(0, maxLabel);
 }
 
 /** 블록 최소 요건(경고만 · 삭제 0 · 설계서 §7-6) — 임계는 미검증이라 상수 1곳 · 375폭 캡처 3건 뒤 조정 */
@@ -1373,7 +1395,8 @@ function fillOutreachDmMediaV3(sections: readonly Section[], media: OutreachFill
   const eventCardSection = (card: EngineEventCard, tagId: string): Section | null => {
     const h = headlineFromCard(card, card.licensed);
     if (h.demoted) return null;
-    const period = card.licensed && card.periodRaw ? `기간 ${String(card.periodRaw).replace(/\s+/g, ' ').trim()}`.slice(0, 60) : '';
+    // 기간 원문은 면허와 무관하게 싣는다(목록 페이지의 진행 중 카드 원문 · 날짜는 혜택 수치가 아니다) · 면허(종료일 검증)는 countdown 만 가른다
+    const period = card.periodRaw ? `기간 ${String(card.periodRaw).replace(/\s+/g, ' ').trim()}`.slice(0, 60) : '';
     return mk('text_card', {
       tag: posterCategoryLabel(card.title, null) || '이벤트',
       headline: h.headline,
@@ -1415,7 +1438,7 @@ function fillOutreachDmMediaV3(sections: readonly Section[], media: OutreachFill
     if (card1) {
       const h = headlineFromCard(card1, card1.licensed);
       if (!h.demoted) p.headline = h.headline;
-      if (card1.licensed && card1.periodRaw) p.sub_copy = `기간 ${String(card1.periodRaw).replace(/\s+/g, ' ').trim()}`.slice(0, 60);
+      if (card1.periodRaw) p.sub_copy = `기간 ${String(card1.periodRaw).replace(/\s+/g, ' ').trim()}`.slice(0, 60);
     }
     if (heroImage) {
       p.image_url = heroImage; filled++;
@@ -1449,8 +1472,8 @@ function fillOutreachDmMediaV3(sections: readonly Section[], media: OutreachFill
   const spot = media.products.find((p) => Array.isArray(p.awards) && p.awards.length > 0) || null;
   const pool = media.products.filter((p) => p !== spot);
   if (spot) {
-    out.push(mk('text_card', { tag: String(spot.awards![0]).slice(0, 20), headline: String(spot.name || '').slice(0, 28), body: priceLine(spot), align: 'left', image_url: spot.image_url, image_position: 'left' }, 'spot'));
-    out.push(ctaOf(`${String(spot.name || '').slice(0, 12)} 보기`, spot.link_url || galleryLink, 'cta-spot'));
+    out.push(mk('text_card', { tag: String(spot.awards![0]).slice(0, 20), headline: cutAtWord(String(spot.name || ''), 28), body: priceLine(spot), align: 'left', image_url: spot.image_url, image_position: 'left' }, 'spot'));
+    out.push(ctaOf(productCtaLabel(String(spot.name || ''), maxLabel), spot.link_url || galleryLink, 'cta-spot'));
     filled++;
   }
   // 6 carousel focus(2 · 정확히 3개 남으면 3) · 8 carousel classic(4 · 아니면 2 · 홀수 금지)

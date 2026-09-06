@@ -212,10 +212,18 @@ const CARD_PERIOD_TAIL_RE = /^(?:\s*\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:일)?\s*(?:�
 const CARD_LINK_BAD_RE = /\/(login|join|cart|mypage|member|logout)/i;
 const CARD_EVENT_LINK_RE = /event|promotion|promo|이벤트|기획전|행사/i;
 
-/** 카드 텍스트에서 기간 줄 원문(첫 날짜부터 마지막 날짜 + 시각·까지 꼬리) · 없으면 null */
+/** 연도 없는 기간 표기("9.1(화) ~ 9.6(일)" · "9/1 ~ 9/30" · "9월 1일 ~ 9월 30일") — 표시용 원문일 뿐 면허(종료일) 판정에는 쓰지 않는다 */
+const YEARLESS_RANGE_RE = /(\d{1,2}\s*(?:[./]|월\s*)\s*\d{1,2}\s*일?(?:\s*\([월화수목금토일]\))?)\s*[~\-–]\s*(\d{1,2}\s*(?:[./]|월\s*)\s*\d{1,2}\s*일?(?:\s*\([월화수목금토일]\))?)/;
+/** 두 자리 연도 + 요일 괄호("26.9.6(일)") — 마크업 속성(ap-click-data 등)에만 있는 몰(이니스프리)의 종료일 원천 · 요일 괄호가 있어야 날짜다 */
+const YY_DATE_RE = /\b(2\d)\.(\d{1,2})\.(\d{1,2})(?=\s*\([월화수목금토일]\))/g;
+
+/** 카드 텍스트에서 기간 줄 원문(첫 날짜부터 마지막 날짜 + 시각·까지 꼬리) · 연도 있는 표기가 없으면 연도 없는 범위 표기 · 없으면 null */
 function periodRawOf(text: string): string | null {
   const ms = Array.from(text.matchAll(CARD_DATE_RE));
-  if (ms.length === 0) return null;
+  if (ms.length === 0) {
+    const y = text.match(YEARLESS_RANGE_RE);
+    return y ? y[0].replace(/\s+/g, ' ').trim().slice(0, 60) : null;
+  }
   const first = ms[0]; const last = ms[ms.length - 1];
   const start = Math.max(0, (first.index || 0) - 8);
   const lead = text.slice(start, first.index || 0);
@@ -223,6 +231,32 @@ function periodRawOf(text: string): string | null {
   const endIdx = (last.index || 0) + last[0].length;
   const tail = (text.slice(endIdx, endIdx + 16).match(CARD_PERIOD_TAIL_RE) || [''])[0];
   return (leadTrim + text.slice(first.index || 0, endIdx) + tail).replace(/\s+/g, ' ').trim().slice(0, 60) || null;
+}
+
+/** 날짜·구분자만으로 된 글인가(제목으로 쓰면 안 되는 것 · "9.1(화) ~ 9.6(일)") — 글자(한글·영문) 2자 미만 */
+export function isDateLikeText(t: string): boolean {
+  const rest = String(t || '').replace(/\([월화수목금토일]\)/g, '').replace(/[\d\s.\-–~/:()년월일시분초까지기간부터]/g, '');
+  return !/[가-힣A-Za-z]{2,}/.test(rest);
+}
+
+/**
+ * 카드 제목(순수) — 제목 요소가 먼저: class 에 tit·title·subject 가 든 요소 → strong·h1~6 → img alt(4자 이상 · 파일명 아님) → 기간을 뺀 본문 첫 조각. 날짜만인 후보는 건너뛴다.
+ * 이니스프리 = `<strong>6주년 감사제 ~50%<br>혜태마켓X블랙티</strong>`(첫 줄은 `<p class="date">`) · 아이소이 = `<span class="…_tit__">`.
+ */
+function titleFromCardBlock(inner: string, textMinusPeriod: string): string {
+  const cands: string[] = [];
+  const byClass = inner.match(/<(span|p|div|h[1-6]|strong|em|b|dt|dd)\b[^>]*class=["'][^"']*(?:tit|title|subject|subj)[^"']*["'][^>]*>([\s\S]*?)<\/\1>/i);
+  if (byClass) cands.push(stripTags(byClass[2]));
+  const byStrong = inner.match(/<(strong|h[1-6])\b[^>]*>([\s\S]*?)<\/\1>/i);
+  if (byStrong) cands.push(stripTags(byStrong[2]));
+  const byAlt = inner.match(/<img\b[^>]*\salt=["']([^"']{4,})["']/i);
+  if (byAlt) { const a = decodeHtmlEntities(byAlt[1]).replace(/\s+/g, ' ').trim(); if (!/\.(jpe?g|png|webp|gif)$/i.test(a)) cands.push(a); }
+  cands.push(...textMinusPeriod.replace(/(?:기간|일정)\s*[:：]?/g, ' ').replace(/\s+/g, ' ').trim().split(/\s{2,}|\|/).map((s) => s.trim()));
+  for (const c of cands) {
+    const t = String(c || '').replace(/\s+/g, ' ').trim();
+    if (t.length >= 2 && !isDateLikeText(t)) return t;
+  }
+  return '';
 }
 
 /**
@@ -238,8 +272,9 @@ export function extractEventListCards(
   let host = '';
   try { host = new URL(base).hostname; } catch { return []; }
   const out: OutreachEventCard[] = [];
-  const seen = new Set<string>();
-  const push = (inner: string, href: string) => {
+  const seen = new Map<string, number>(); // link → out 인덱스
+  // lead = 앵커 앞 감싸는 요소(<li>·<div> 여는 태그 · 속성만) — 이니스프리는 종료일이 감싸는 div 의 ap-click-data 에만 있다
+  const push = (inner: string, href: string, lead = '') => {
     if (out.length >= max) return;
     if (inner.length > 12_000 || !/<img\b/i.test(inner)) return;
     const text = stripTags(inner);
@@ -252,26 +287,38 @@ export function extractEventListCards(
     // 기간이 없는 카드는 링크 자체가 행사성일 때만(아이소이 "[2026 OUTLET] 최대 83% 특가전" · 면허는 없다)
     if (!periodRaw && !/기간/.test(text) && !CARD_EVENT_LINK_RE.test(link)) return;
     const key = link.replace(/#.*$/, '');
-    if (seen.has(key)) return;
+    const prevIdx = seen.get(key);
+    // 같은 링크가 두 번(상단 배너 → 목록 카드 · 이니스프리 "추석선물" 배너 뒤에 기간 있는 같은 행사 카드): 기간이 있는 뒤 카드가 앞 배너를 덮는다(자리는 그대로)
+    if (prevIdx !== undefined && (!periodRaw || out[prevIdx].periodRaw)) return;
     const body = periodRaw ? text.replace(periodRaw, ' ') : text;
-    const title = body.replace(/(?:기간|일정)\s*[:：]?/g, ' ').replace(/\s+/g, ' ').trim()
-      .split(/\s{2,}|\|/).map((s) => s.trim()).filter((s) => s.length >= 2)[0] || '';
+    const title = titleFromCardBlock(inner, body);
     if (!title || title.length < 2) return;
-    const p = periodRaw ? parsePeriod(periodRaw) : { start: null, end: null };
-    seen.add(key);
-    out.push({
+    let p = periodRaw ? parsePeriod(periodRaw) : { start: null, end: null };
+    if (!p.end) {
+      // 연도가 본문에 없으면 마크업 속성의 두 자리 연도 날짜("26.9.1(화) ~ 26.9.6(일)")로 종료일을 읽는다(원문 문자열 · 계산 0)
+      const yy = Array.from((lead + inner).matchAll(YY_DATE_RE)).map((m) => `20${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`);
+      if (yy.length) p = parsePeriod(yy.length >= 2 ? `${yy[0]} ~ ${yy[yy.length - 1]}` : `${yy[0]} 까지`);
+    }
+    const card: OutreachEventCard = {
       title: title.slice(0, 80),
       periodRaw,
       startDate: p.start,
       endDate: p.end,
       imageUrl: bestImgInBlock(inner, base),
       linkUrl: link,
-      order: out.length,
-    });
+      order: prevIdx !== undefined ? prevIdx : out.length,
+    };
+    if (prevIdx !== undefined) { out[prevIdx] = card; return; }
+    seen.set(key, out.length);
+    out.push(card);
   };
   const aRe = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
-  while ((m = aRe.exec(html)) !== null && out.length < max) push(m[2], m[1]);
+  while ((m = aRe.exec(html)) !== null && out.length < max) {
+    const before = html.slice(Math.max(0, m.index - 800), m.index);
+    const li = before.lastIndexOf('<li');
+    push(m[2], m[1], li >= 0 ? before.slice(li) : before.slice(-300));
+  }
   if (out.length < 2) {
     const liRe = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
     let l: RegExpExecArray | null;
