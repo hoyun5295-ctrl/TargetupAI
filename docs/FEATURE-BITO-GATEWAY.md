@@ -585,7 +585,7 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 
 | # | 축 | 문서 | 상태 |
 |---|---|---|---|
-| 1 | 관리 플레인(web/api) | [bito-gateway/FEATURE-GW-WEB-API.md](bito-gateway/FEATURE-GW-WEB-API.md) | **0815 점검·문서화 완료** · ★0906 대체발송 원본이 알림톡 성공으로 집계되던 것 정정 배포(§7) |
+| 1 | 관리 플레인(web/api) | [bito-gateway/FEATURE-GW-WEB-API.md](bito-gateway/FEATURE-GW-WEB-API.md) | **0815 점검·문서화 완료** · ★0906 통계 판정 축 종결·상태 한글화·고객 배포자료 감시 축 정정 전량 배포(§7 전환 원본 · §8 상태 한글화와 조회 축 2종 · §9 배포자료 슬롯 13→7) |
 | 2 | 설치·전환·업데이트 | [bito-gateway/FEATURE-GW-AGENT-DEPLOY.md](bito-gateway/FEATURE-GW-AGENT-DEPLOY.md) | **0815 완료** (결함 6종은 이 허브 §4가 계속 소유) |
 | 3 | 에이전트 코어(poller·journal) | [bito-gateway/FEATURE-GW-AGENT-CORE.md](bito-gateway/FEATURE-GW-AGENT-CORE.md) | **0815 완료** |
 | 4 | 발송·결과 엔진 | [bito-gateway/FEATURE-GW-ENGINE.md](bito-gateway/FEATURE-GW-ENGINE.md) | **0815 완료** · ★0828 고객 웹훅 종결 계약 배포(§6 — 두 경계 동시 잠금·남은 축 §6-5) |

@@ -41,10 +41,13 @@ export async function purgeOutreachJobArtifacts(jobId: string, companyId: string
   const dms = await query(`SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'dm'`, [jobId]);
   for (const a of dms.rows) {
     const dmId = String(a.payload?.dmId || '');
-    if (!dmId) continue;
-    const res = await stopDm(dmId, companyId);
-    if (res.block && res.block !== 'not_published') throw new Error(`DM 중지 실패(${res.block}): ${dmId}`);
-    if (!res.block) dmsStopped += 1;
+    if (dmId) {
+      const res = await stopDm(dmId, companyId);
+      if (res.block && res.block !== 'not_published') throw new Error(`DM 중지 실패(${res.block}): ${dmId}`);
+      if (!res.block) dmsStopped += 1;
+    }
+    // ★ v3 DM 첫 화면 캡처 사본(제안 메일 대조 오른쪽)도 같은 저장소 · 같이 지운다(리뷰 #10)
+    if (a.payload?.captureUrl && unlinkPublicImage(String(a.payload.captureUrl))) filesDeleted += 1;
   }
   const images = await query(`SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'studio_image'`, [jobId]);
   for (const a of images.rows) {
@@ -53,6 +56,8 @@ export async function purgeOutreachJobArtifacts(jobId: string, companyId: string
     if (a.payload?.bannerUrl && unlinkPublicImage(String(a.payload.bannerUrl))) filesDeleted += 1;
   }
   const prof = await query(`SELECT brand_profile FROM sales_outreach_jobs WHERE id = $1`, [jobId]);
+  // ★ v3 홈 첫 화면 캡처 사본(제안 메일 대조 왼쪽)
+  if (prof.rows[0]?.brand_profile?.homeCaptureUrl && unlinkPublicImage(String(prof.rows[0].brand_profile.homeCaptureUrl))) filesDeleted += 1;
   const media = prof.rows[0]?.brand_profile?.media;
   if (media) {
     for (const g of (Array.isArray(media.gallery) ? media.gallery : [])) if (unlinkPublicImage(String(g?.url || ''))) filesDeleted += 1;

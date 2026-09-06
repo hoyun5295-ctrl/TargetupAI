@@ -25,8 +25,8 @@ const TOTAL_MAX = 6000;
 /** 구조화 블록이 쓸 수 있는 상한. 나머지가 본문 예산이다 */
 const STRUCTURED_MAX = 1500;
 
-/** 1단계 — 행사성 class·id를 단 요소의 내부 텍스트 */
-function extractEventCards(html: string): string[] {
+/** 1단계 — 행사성 class·id를 단 요소의 내부 텍스트(★ v3 개명: 옛 extractEventCards · 카드 구조 추출기 `extractEventListCards`(media.ts)와 이름을 가른다) */
+function sliceEventBlocks(html: string): string[] {
   // 태그 이름 alternation은 긴 것부터 — article이 a보다 먼저 걸려야 역참조 </article>가 맞는다.
   const re = new RegExp(
     '<(div|ul|ol|section|article|li|a)[^>]*(?:class|id)=["\'][^"\']*(?:'
@@ -78,7 +78,7 @@ function dedupeBlocks(blocks: string[]): string[] {
  * 아무것도 못 뽑으면 text=null(현행 `fetchEventTextFromUrl` 실패와 같은 계약).
  */
 export function buildOutreachEventMaterial(html: string): { text: string | null; structuredBlocks: number } {
-  const blocks = dedupeBlocks([...extractEventCards(html), ...extractDealLinks(html)]);
+  const blocks = dedupeBlocks([...sliceEventBlocks(html), ...extractDealLinks(html)]);
   const structured = blocks.join('\n').slice(0, STRUCTURED_MAX);
   // 구조화 블록이 먹은 만큼만 본문 예산에서 뺀다. 0건이면 예산이 그대로 6000이라
   // 결과가 옛 방식과 문자 단위로 같아진다(무후퇴 계약).

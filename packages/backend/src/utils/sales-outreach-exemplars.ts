@@ -14,6 +14,8 @@
  */
 import { OUTREACH_EXEMPLAR_SEED } from './sales-outreach-exemplar-seed';
 import { withExemplarHeader } from './sales-outreach-exemplar-mask';
+// ★ v3 입구 타입(엔진 소유 · 엔진은 이 파일을 모른다 · 타입만)
+import type { EngineEntry } from './campaign-engine';
 
 export type ExemplarChannel = 'DM' | 'EMAIL';
 
@@ -117,6 +119,8 @@ export const OUTREACH_GENERATION_RULES = [
   '- 사용 조건·기간·세트 구성 설명은 [홈페이지에서 읽은 내용]에 같은 문장이 있을 때만 쓴다. 근거 문장을 못 찾으면 그 값을 빈 문자열로 둔다. 서로 다른 혜택의 조건을 합치지 마라.',
   '- 상품 묶음·갤러리 개수는 [재료 용량]에 적힌 최대치를 넘기지 마라. 같은 상품을 두 묶음에 넣지 마라.',
   '- 행사가 있으면 행사 중심(행사명이 헤드라인에 그대로 · 기간·상품이 본문에) · 행사가 없을 때만 브랜드 중심. 한국어 · 존댓말 · 과장·강요 없이 · 이모지 0 · 줄표 0.',
+  '- 헤드라인·태그·본문의 어투와 길이는 [배너 문구]·[홈페이지에서 읽은 내용]의 브랜드 말투를 따른다. "지금 만나보는 인기 라인", "많은 고객이 남긴 후기"처럼 어느 브랜드에나 맞는 범용 문구를 쓰지 마라.',
+  '- 리뷰 수·평점·판매 순위 같은 사회적 증거 수치는 코드가 따로 카드로 싣는다: 그 수치로 text_card 를 만들지 마라.',
   '- 출력은 JSON 하나만(코드블록·설명 금지).',
 ].join('\n');
 
@@ -160,7 +164,37 @@ export const OUTREACH_EMAIL_SECTION_CONTRACT = [
   SECTION_CONTRACT_COMMON.footer,
 ].join('\n');
 
+/**
+ * ★ 2026-09-06 v3 아웃리치 DM 계약(설계서 §7-2 · 불변 35) — gallery 0. 설명 없는 이미지 블록은 존재 자체가 결함이라(Harold 실측) 모델에게 gallery 자리를 주지 않는다.
+ * 이미지는 코드가 행사 카드 → text_card(image) + cta 로 세운다. text_card 는 행사·상품 설명용 0~2개(headline·body 는 [진행 중 행사]·[배너 문구]·홈페이지 본문의 말만).
+ */
+const OUTREACH_DM_SECTION_CONTRACT_OUTREACH = [
+  '[사용 가능한 섹션 type과 props · 이 밖의 type·props 금지]',
+  SECTION_CONTRACT_COMMON.header,
+  SECTION_CONTRACT_COMMON.hero,
+  `${SECTION_CONTRACT_COMMON.textCard}   (0~2개 · headline·body 는 [진행 중 행사]·[배너 문구]와 홈페이지 본문에 있는 말만 · 이미지 블록은 코드가 채운다: gallery 타입은 쓰지 마라)`,
+  SECTION_CONTRACT_COMMON.carousel,
+  SECTION_CONTRACT_COMMON.coupon,
+  SECTION_CONTRACT_COMMON.countdown,
+  SECTION_CONTRACT_COMMON.cta,
+  SECTION_CONTRACT_COMMON.footer,
+].join('\n');
+
+/**
+ * ★ v3 입구별 DM 계약(함수) — 두 입구가 상수 1벌을 공유하던 자리(최종 검증 B2). 고객 입구는 현행 문자열 그대로 · 아웃리치는 gallery 줄 0.
+ * 인자가 비면 customer(옛 호출 = 옛 출력).
+ */
+export function dmSectionContract(entry: EngineEntry | null | undefined): string {
+  return entry === 'outreach' ? OUTREACH_DM_SECTION_CONTRACT_OUTREACH : OUTREACH_DM_SECTION_CONTRACT;
+}
+
 export const OUTREACH_DM_TYPES: readonly string[] = ['header', 'hero', 'text_card', 'product_carousel', 'gallery', 'coupon', 'countdown', 'cta', 'footer'];
+/** ★ v3 아웃리치 DM 허용 타입 — gallery 제외(sectionsFromAiJson 이 모델의 gallery 를 버린다 · 계약 문자열과 한 쌍) */
+export const OUTREACH_DM_TYPES_OUTREACH: readonly string[] = OUTREACH_DM_TYPES.filter((t) => t !== 'gallery');
+/** ★ v3 입구별 허용 타입(함수) — 계약과 같은 분기 1곳 */
+export function dmAllowedTypes(entry: EngineEntry | null | undefined): readonly string[] {
+  return entry === 'outreach' ? OUTREACH_DM_TYPES_OUTREACH : OUTREACH_DM_TYPES;
+}
 export const OUTREACH_EMAIL_TYPES: readonly string[] = ['header', 'hero', 'text_card', 'product_carousel', 'gallery', 'coupon', 'cta', 'footer'];
 
 /** 예시 문자열에 남아 있으면 안 되는 것(계약 테스트가 seed 전량에 건다 · 모델명 0은 불변식 테스트가 축 파일 전체에 건다) */

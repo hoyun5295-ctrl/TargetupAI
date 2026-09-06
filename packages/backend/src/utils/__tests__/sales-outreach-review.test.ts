@@ -98,7 +98,8 @@ describe('품질 경고 — 세면 보이는 것 · 잠금 아님', () => {
     expect(r.warnings.map((w) => w.code)).toEqual(['NO_PRODUCTS', 'FEW_GALLERY', 'CTA_ALL_HOME', 'FEW_SECTIONS', 'NO_LOOK', 'NO_LEGAL', 'NO_BRAND_EMAIL']);
   });
   it('재료가 충분하고 딥링크가 하나라도 있으면 경고 0 · 옛 asset(look 없음)은 NO_LOOK을 내지 않는다 · FEW_PRODUCTS 값', () => {
-    const good = [...dm.slice(0, 3), sec('gallery', {}, 5), sec('product_carousel', {}, 6), sec('cta', { buttons: [{ label: 'a', url: 'https://b.com/event' }] }, 7), sec('footer', {}, 8)];
+    // ★ v3 FEW_SECTIONS 하한 9(표준 13행) — 건강한 DM 은 9 이상
+    const good = [...dm.slice(0, 3), sec('gallery', {}, 5), sec('product_carousel', {}, 6), sec('cta', { buttons: [{ label: 'a', url: 'https://b.com/event' }] }, 7), sec('text_card', {}, 8), sec('cta', { buttons: [{ label: 'b', url: 'https://b.com/event2' }] }, 9), sec('footer', {}, 10)];
     const products = Array.from({ length: OUTREACH_QUALITY_THRESHOLDS.products }, (_, i) => ({ image_url: `https://hanjul.ai/p${i}.jpg` }));
     const r = assessOutreachQuality({ dmSections: good, brandSections: [sec('hero', {}, 0)], media: { gallery: media.gallery, products }, legal: { legal: '사업자 1', csPhone: null }, homepageUrl: 'https://b.com/' });
     expect(r.warnings).toEqual([]);

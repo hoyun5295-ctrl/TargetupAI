@@ -196,9 +196,18 @@ export type OutreachQualityCode =
   /** ★ 2026-09-06 S2 — 헤드라인이 비어 업체명으로 대체됐다(실물 표본 0건 형태 · 경고 · 잠금 아님) */
   | 'HERO_FALLBACK'
   /** ★ 2026-09-06 S3 — 발행 DM 375폭 캡처 vision 채점(디자이너 8항목) 미달(경고 · 잠금 아님 · 워커·모델 부재면 없음) */
-  | 'VISION_NO_HERO_IMAGE' | 'VISION_NO_PRICE_PAIR' | 'VISION_NO_CTA_BAR' | 'VISION_DUP_IMAGE' | 'VISION_TEXT_UNREADABLE' | 'VISION_GRAY_BOX' | 'VISION_NUMBER_LEAK' | 'VISION_FEW_SECTIONS';
+  | 'VISION_NO_HERO_IMAGE' | 'VISION_NO_PRICE_PAIR' | 'VISION_NO_CTA_BAR' | 'VISION_DUP_IMAGE' | 'VISION_TEXT_UNREADABLE' | 'VISION_GRAY_BOX' | 'VISION_NUMBER_LEAK' | 'VISION_FEW_SECTIONS'
+  /** ★ 2026-09-06 v3 — 채점 12항목 개정(설계서 §7-7 · 불변 36): 설명 없는 이미지 · 첫 화면 헤드라인 · 브랜드 색 일관 · 글자 잘림 */
+  | 'VISION_UNCAPTIONED_IMAGE' | 'VISION_NO_FIRST_HEADLINE' | 'VISION_COLOR_MIXED' | 'VISION_TEXT_CLIPPED'
+  /** ★ v3 브랜드 색을 한 곳(팔레트·메타·아이콘)에서도 못 뽑아 무채색 주색으로 갔다(경고 · 잠금 아님) */
+  | 'BRAND_COLOR_FALLBACK'
+  /** ★ v3 블록 최소 요건 미달(경고만 · 삭제 승격은 실측 3건 뒤 · 설계서 §7-6) */
+  | 'BLOCK_MINIMA_SHORT';
 
 export interface OutreachQualityWarning { code: OutreachQualityCode; value?: number }
+
+/** 브랜드 색 출처 4값(★ v3 · 못 뽑으면 'neutral' · 옛 기록 null) */
+export type BrandColorSource4 = 'render' | 'meta' | 'icon' | 'neutral';
 
 /** 임계값 — ⚠ 미검증(회의 합의 초안). 첫 운영 10건 뒤 재조정 · 계약 테스트로 굳히지 않는다. */
 export const OUTREACH_QUALITY_THRESHOLDS = {
@@ -206,8 +215,8 @@ export const OUTREACH_QUALITY_THRESHOLDS = {
   products: 4,
   /** 갤러리 이 수 미만 = FEW_GALLERY(갤러리 1묶음도 안 찬다) */
   gallery: 2,
-  /** DM 섹션 이 수 미만 = FEW_SECTIONS */
-  sections: 6,
+  /** DM 섹션 이 수 미만 = FEW_SECTIONS(★ v3 표준 13행 · 하한 9 = 조립 결과 경고 · 채점 sections_enough 9~13 과는 다른 축) */
+  sections: 9,
 } as const;
 
 export interface QualityInput {
@@ -222,9 +231,13 @@ export interface QualityInput {
   heroFallback?: boolean;
   /** ★ 2026-09-06 S3 dm asset visionScore.items(캡처 채점 2값) · null/undefined = 채점 없음 */
   dmVision?: { items?: Partial<Record<string, boolean>> | null } | null;
+  /** ★ v3 brand_profile.brand.colorSource(4값) · 'neutral' = BRAND_COLOR_FALLBACK · null/undefined = 옛 기록(경고 안 냄) */
+  colorSource?: BrandColorSource4 | null;
+  /** ★ v3 stage_results.dm_block_gate.short 길이(블록 최소 요건 미달 수) · undefined = 옛 기록 */
+  blockShort?: number;
 }
 
-/** vision 항목 → 경고 코드(false 일 때만) */
+/** vision 항목 → 경고 코드(false 일 때만) · ★ v3 12항목(채점기 DM_VISION_ITEMS 와 파리티 테스트로 결속) */
 export const VISION_WARNING_OF: Readonly<Record<string, OutreachQualityCode>> = {
   hero_image_full: 'VISION_NO_HERO_IMAGE',
   price_pair_visible: 'VISION_NO_PRICE_PAIR',
@@ -234,6 +247,10 @@ export const VISION_WARNING_OF: Readonly<Record<string, OutreachQualityCode>> = 
   gray_box_zero: 'VISION_GRAY_BOX',
   number_leak_zero: 'VISION_NUMBER_LEAK',
   sections_enough: 'VISION_FEW_SECTIONS',
+  uncaptioned_image_zero: 'VISION_UNCAPTIONED_IMAGE',
+  first_screen_has_headline: 'VISION_NO_FIRST_HEADLINE',
+  brand_color_consistent: 'VISION_COLOR_MIXED',
+  text_clipping_zero: 'VISION_TEXT_CLIPPED',
 };
 
 function normUrl(u: string): string {
@@ -260,7 +277,11 @@ export function assessOutreachQuality(input: QualityInput): { warnings: Outreach
     if (input.heroFallback === true) w.push({ code: 'HERO_FALLBACK' });
     const items = input.dmVision?.items || null;
     if (items) for (const [k, v] of Object.entries(items)) if (v === false && VISION_WARNING_OF[k]) w.push({ code: VISION_WARNING_OF[k] });
+    // ★ v3 블록 최소 요건(경고만 · 삭제 0)
+    if (typeof input.blockShort === 'number' && input.blockShort > 0) w.push({ code: 'BLOCK_MINIMA_SHORT', value: input.blockShort });
   }
+  // ★ v3 브랜드 색 폴백 — 산출물 유무와 무관(크롤 직후에도 보인다 · 화면이 확인 대기에서 1줄로 알린다)
+  if (input.colorSource === 'neutral') w.push({ code: 'BRAND_COLOR_FALLBACK' });
   if (!input.legal || (!input.legal.legal && !input.legal.csPhone)) w.push({ code: 'NO_LEGAL' });
   if (input.brandSections !== undefined && input.brandSections !== null && input.brandSections.length === 0) w.push({ code: 'NO_BRAND_EMAIL', value: 0 });
   return { warnings: w };

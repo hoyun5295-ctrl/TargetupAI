@@ -33,10 +33,27 @@ export interface OutreachProduct {
   rating?: number;
   review_count?: number;
   badges?: string[];
+  /** ★ v3 수상·순위·인증 원문 조각(상세 페이지 · ≤3 · parseProductAwards) */
+  awards?: string[];
 }
 
 /** ★ 2026-09-06 배너 후보 상세(문서 순서 · alt 동반) — extractImageCandidates 는 이것의 url 투영이다(동작 무변경) */
 export interface ImageCandidateDetail { url: string; alt: string; order: number }
+
+/**
+ * ★ 2026-09-06 v3 이벤트 목록 카드(재료 1순위 · 설계서 §5-1) — 카드 1개 = 행사 1개 = {제목 · 기간 원문 · 배너 원 URL · 상세 링크}.
+ * title·periodRaw 는 HTML 원문 문자열이라 재대조를 통과하고, endDate 가 미래면 면허가 AI 0회로 난다(판정은 호출자 isFutureDate).
+ */
+export interface OutreachEventCard {
+  title: string;
+  periodRaw: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  /** 배너 원 URL(사본은 제작 단계 · 확인 화면은 원 URL 표시만) */
+  imageUrl: string | null;
+  linkUrl: string;
+  order: number;
+}
 
 /** ★ 2026-09-06 사회적 증거(원문 문자열 그대로 · 혜택 수치가 아니다 · 없으면 null) */
 export interface ProofSignals { reviewTotal: number | null; rating: number | null; rankLabel: string | null }
@@ -185,6 +202,83 @@ export function extractProducts(html: string, base: string, max = 12): OutreachP
     uniq.push(p);
   }
   return uniq;
+}
+
+// ===== ★ 2026-09-06 v3 이벤트 목록 카드(순수 · 네트워크 0 · 설계서 §5-1) =====
+
+/** 연·월·일 표기(jobs.ts FULL_DATE_RE 와 같은 형태 · 카드 안 기간 줄 위치 찾기용) */
+const CARD_DATE_RE = /(20\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})(?!\d)/g;
+const CARD_PERIOD_TAIL_RE = /^(?:\s*\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:일)?\s*(?:까지|마감|종료)?/;
+const CARD_LINK_BAD_RE = /\/(login|join|cart|mypage|member|logout)/i;
+
+/** 카드 텍스트에서 기간 줄 원문(첫 날짜부터 마지막 날짜 + 시각·까지 꼬리) · 없으면 null */
+function periodRawOf(text: string): string | null {
+  const ms = Array.from(text.matchAll(CARD_DATE_RE));
+  if (ms.length === 0) return null;
+  const first = ms[0]; const last = ms[ms.length - 1];
+  const start = Math.max(0, (first.index || 0) - 8);
+  const lead = text.slice(start, first.index || 0);
+  const leadTrim = /(?:기간|일정)\s*[:：]?\s*$/.test(lead) ? lead.slice(lead.search(/기간|일정/)) : '';
+  const endIdx = (last.index || 0) + last[0].length;
+  const tail = (text.slice(endIdx, endIdx + 16).match(CARD_PERIOD_TAIL_RE) || [''])[0];
+  return (leadTrim + text.slice(first.index || 0, endIdx) + tail).replace(/\s+/g, ' ').trim().slice(0, 60) || null;
+}
+
+/**
+ * 이벤트 목록 페이지 HTML → 카드 배열(순수). 카드 = `<a href>`(안에 img + 기간 표기 또는 "기간" 낱말) → 부족하면 `<li>`(안의 첫 href).
+ * title = 기간 줄을 뺀 첫 조각(80자) · periodRaw = 기간 줄 원문(60자) · 날짜 파서는 주입(parsePeriod · jobs.ts parseLicensedEndDate) · 같은 호스트 · 같은 링크 중복 제거 · 최대 6.
+ * 카드 제목·기간은 HTML 원문 문자열이라 재대조를 통과하고, 종료일이 미래면 면허가 AI 0회로 난다(판정은 호출자).
+ */
+export function extractEventListCards(
+  html: string, base: string,
+  parsePeriod: (raw: string) => { start: string | null; end: string | null },
+  max = 6,
+): OutreachEventCard[] {
+  let host = '';
+  try { host = new URL(base).hostname; } catch { return []; }
+  const out: OutreachEventCard[] = [];
+  const seen = new Set<string>();
+  const push = (inner: string, href: string) => {
+    if (out.length >= max) return;
+    if (inner.length > 12_000 || !/<img\b/i.test(inner)) return;
+    const text = stripTags(inner);
+    if (!text || text.length < 4) return;
+    const periodRaw = periodRawOf(text);
+    if (!periodRaw && !/기간/.test(text)) return;
+    const link = absolutizeAssetUrl(href, base);
+    if (!link) return;
+    try { if (new URL(link).hostname !== host) return; } catch { return; }
+    if (CARD_LINK_BAD_RE.test(link)) return;
+    const key = link.replace(/#.*$/, '');
+    if (seen.has(key)) return;
+    const body = periodRaw ? text.replace(periodRaw, ' ') : text;
+    const title = body.replace(/(?:기간|일정)\s*[:：]?/g, ' ').replace(/\s+/g, ' ').trim()
+      .split(/\s{2,}|\|/).map((s) => s.trim()).filter((s) => s.length >= 2)[0] || '';
+    if (!title || title.length < 2) return;
+    const p = periodRaw ? parsePeriod(periodRaw) : { start: null, end: null };
+    seen.add(key);
+    out.push({
+      title: title.slice(0, 80),
+      periodRaw,
+      startDate: p.start,
+      endDate: p.end,
+      imageUrl: bestImgInBlock(inner, base),
+      linkUrl: link,
+      order: out.length,
+    });
+  };
+  const aRe = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = aRe.exec(html)) !== null && out.length < max) push(m[2], m[1]);
+  if (out.length < 2) {
+    const liRe = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+    let l: RegExpExecArray | null;
+    while ((l = liRe.exec(html)) !== null && out.length < max) {
+      const href = l[1].match(/href=["']([^"'#]+)["']/i);
+      if (href) push(l[1], href[1]);
+    }
+  }
+  return out;
 }
 
 /** 태그의 width/height 속성이 둘 다 작으면 아이콘·메뉴 썸네일로 본다(실측 없이 거르는 1차 신호 · 속성이 없으면 모른다) */
@@ -603,20 +697,68 @@ export async function fetchProductPageGuarded(url: string, homeHost: string): Pr
   return parseProductPage(page.html, page.finalUrl);
 }
 
-/** 링크 목록에서 상품 want개까지 순차 수집(예의상 순차 · 식별자 중복 병합). */
-export async function collectProductsFromLinks(links: string[], homeHost: string, want = 6): Promise<OutreachProduct[]> {
+/**
+ * 링크 목록에서 상품 want개까지 순차 수집(예의상 순차 · 식별자 중복 병합).
+ * ★ v3 벽시계 예산(opts.deadlineMs) — 초과 = 그때까지 수집분으로 전진(실패 아님) · timedOut 으로 남긴다. 상세 페이지 HTML 에서 어워즈 조각도 함께 읽는다(네트워크 추가 0).
+ */
+export async function collectProductsFromLinks(links: string[], homeHost: string, want = 6, opts: { deadlineMs?: number } = {}): Promise<{ products: OutreachProduct[]; timedOut: boolean }> {
   const got: OutreachProduct[] = [];
   const keys = new Set<string>();
+  const deadline = opts.deadlineMs ? Date.now() + opts.deadlineMs : null;
+  let timedOut = false;
   for (const l of links) {
     if (got.length >= want) break;
-    const p = await fetchProductPageGuarded(l, homeHost);
+    if (deadline !== null && Date.now() > deadline) { timedOut = true; break; }
+    const p = await fetchProductPageDetailGuarded(l, homeHost);
     if (!p) continue;
     const k = productKey(p);
     if (keys.has(k)) continue;
     keys.add(k);
     got.push(p);
   }
-  return got;
+  return { products: got, timedOut };
+}
+
+/** 상세 1홉 + 어워즈(같은 HTML 재파싱 · 네트워크 0 추가) */
+async function fetchProductPageDetailGuarded(url: string, homeHost: string): Promise<OutreachProduct | null> {
+  let page: { html: string; finalUrl: string } | null = null;
+  try {
+    const r = await fetchHtmlGuarded(url, OUTREACH_FETCH_OPTS);
+    page = r ? { html: r.html, finalUrl: r.finalUrl } : null;
+  } catch {
+    page = null;
+  }
+  if (!page) return null;
+  try { if (new URL(page.finalUrl).hostname !== homeHost) return null; } catch { return null; }
+  const p = parseProductPage(page.html, page.finalUrl);
+  if (!p) return null;
+  const awards = parseProductAwards(page.html);
+  return awards.length ? { ...p, awards } : p;
+}
+
+/** ★ v3 어워즈·순위·인증 원문 조각(순수 · 화이트리스트 낱말이 든 40자 조각 · 최대 3 · 이미지 뱃지는 대상 밖) — 스포트라이트 카드의 tag 재료 */
+const AWARD_WORD_RE = /(어워즈|어워드|AWARDS?|Awards?|1\s*위|대상|수상|인증|비건|WINNER|Winner|위너|베스트셀러|BEST\s*SELLER)/;
+export function parseProductAwards(html: string): string[] {
+  const t = stripTags(String(html || '').slice(0, 300_000));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = new RegExp(AWARD_WORD_RE.source, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(t)) !== null && out.length < 3) {
+    const start = Math.max(0, m.index - 20);
+    const end = Math.min(t.length, m.index + m[0].length + 20);
+    // 낱말 경계로 다듬은 40자 조각 · 숫자만·짧은 조각은 뺀다
+    let piece = t.slice(start, end).trim();
+    if (start > 0) piece = piece.replace(/^\S*\s/, '');
+    if (end < t.length) piece = piece.replace(/\s\S*$/, '');
+    piece = piece.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (piece.length < 4 || !/[가-힣A-Za-z]{2,}/.test(piece)) continue;
+    const key = piece.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(piece);
+  }
+  return out;
 }
 
 // ===== 이미지 실측 + 사본 저장(호출부가 가드 fetch·저장 함수를 주입한다 = 이 파일은 저장소·SSRF 규약을 모른다) =====

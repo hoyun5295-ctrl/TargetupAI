@@ -97,7 +97,8 @@ describe('합집합 · 재료 v2', () => {
       now: new Date('2026-09-06T00:00:00Z'),
     });
     expect(m.v).toBe(2);
-    expect(m.counts).toEqual({ products: 1, discountPairs: 1, banners: 1, textChars: m.counts.textChars, priceMentions: 1, staticTextChars: 385, staticProducts: 0 });
+    expect(m.counts).toEqual({ products: 1, discountPairs: 1, banners: 1, textChars: m.counts.textChars, priceMentions: 1, staticTextChars: 385, staticProducts: 0, eventCards: 0 });
+    expect(m.eventCards).toEqual([]);
     expect(m.proof.reviewTotal).toBe(455083);
     expect(m.proof.rating).toBe(4.9);
     expect(m.escalation.attempted).toBe(true);

@@ -23,7 +23,7 @@ import { handleDbMigrationError } from '../utils/db-migration-error';
 import { InsufficientCreditError } from '../utils/ai-credit';
 // ★ 2026-09-06 S5 재료 입구(사본 저장 · 텍스트 비었을 때만 판독 · 견적)
 import { requirePlanFeature } from '../utils/plan-guard';
-import { saveMaterialImages, extractMaterialsText, quoteQuickCampaign, quickPlanLocked, quickMaterialsEnabled, QUICK_MATERIALS_MAX_IMAGES } from '../utils/campaign-quick';
+import { saveMaterialImages, extractMaterialsText, quoteQuickCampaign, quickPlanLocked, quickMaterialsEnabled, QUICK_MATERIALS_MAX_IMAGES, QUICK_CARD_UPLOAD_MAX, QUICK_EVENT_CARDS_MAX, QUICK_EVENT_CARD_IMAGES } from '../utils/campaign-quick';
 
 export const eventCampaignRouter = Router();
 eventCampaignRouter.use(authenticate);
@@ -80,18 +80,31 @@ eventCampaignRouter.get('/materials/quote', async (req: any, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const imageCount = Math.max(0, Math.min(QUICK_MATERIALS_MAX_IMAGES, Number(req.query?.images) || 0));
+    const imageCount = Math.max(0, Math.min(QUICK_CARD_UPLOAD_MAX, Number(req.query?.images) || 0));
     const hasText = String(req.query?.has_text || '') === '1';
-    const quote = quoteQuickCampaign({ imageCount, hasText });
-    return res.json({ success: true, enabled: quickMaterialsEnabled(companyId), plan_locked: await quickPlanLocked(companyId), max_images: QUICK_MATERIALS_MAX_IMAGES, ...quote });
+    // ★ v3 reads = 판독 호출 수(카드 대표 이미지 묶음 1회 · 있으면 1 · 곱셈 0) · 없으면 옛 판정(텍스트 비고 이미지 있음)
+    const reads = req.query?.reads !== undefined ? Math.max(0, Math.min(1, Number(req.query.reads) || 0)) : undefined;
+    const quote = quoteQuickCampaign({ imageCount, hasText, reads });
+    return res.json({ success: true, enabled: quickMaterialsEnabled(companyId), plan_locked: await quickPlanLocked(companyId), max_images: QUICK_MATERIALS_MAX_IMAGES, max_cards: QUICK_EVENT_CARDS_MAX, max_card_images: QUICK_EVENT_CARD_IMAGES, ...quote });
   } catch (err: any) {
     console.error('[event-campaigns materials/quote] 오류:', err?.message);
     return res.status(500).json({ success: false, error: '견적을 계산하지 못했습니다.' });
   }
 });
 
+// ★ v3 행사 카드 업로드(카드당 3장 × 3카드 = 9) — 같은 저장 경로 · 판독은 read 파라미터로만(read=0 = 업로드 전용 · 기본 1 = 현행)
+const cardImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: QUICK_CARD_UPLOAD_MAX },
+  fileFilter: (_req, file, cb) => {
+    const mime = (file.mimetype || '').toLowerCase();
+    if (['image/jpeg', 'image/png', 'image/webp'].includes(mime)) cb(null, true);
+    else cb(new Error('JPG, PNG, WebP 이미지만 업로드 가능합니다.'));
+  },
+});
+
 eventCampaignRouter.post('/materials', requirePlanFeature('mobile_dm'), (req: any, res: Response) => {
-  imageUpload.array('images', MAX_EVENT_IMAGES)(req, res, async (uploadErr: any) => {
+  cardImageUpload.array('images', QUICK_CARD_UPLOAD_MAX)(req, res, async (uploadErr: any) => {
     if (uploadErr) return res.status(400).json({ success: false, error: uploadErr.message || '이미지 업로드 오류' });
     try {
       const companyId = req.user?.companyId;
@@ -99,12 +112,14 @@ eventCampaignRouter.post('/materials', requirePlanFeature('mobile_dm'), (req: an
       if (!quickMaterialsEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.' });
       const files = (req.files as Express.Multer.File[]) || [];
       const eventText = normalizeEventText(req.body?.event_text);
+      // ★ v3 read=0 이면 판독하지 않는다(카드 이미지 즉시 저장 · 판독은 [제작] 때 대표 이미지 묶음 1회) · 기본 1 = 현행 무변경
+      const wantRead = String(req.body?.read ?? '1') !== '0';
       if (!files.length && !eventText) return res.status(400).json({ success: false, error: '이미지 1장 이상 또는 행사 내용을 입력해주세요.' });
-      const images = saveMaterialImages(companyId, files);
+      const images = saveMaterialImages(companyId, files, QUICK_CARD_UPLOAD_MAX);
       let text = eventText;
       let events: unknown[] | null = null;
       let extracted = false;
-      if (!eventText && files.length) {
+      if (wantRead && !eventText && files.length) {
         // 텍스트가 비었을 때만 판독(3크레딧 · 성공 시만 · 판독 함수가 차감) — 판독본은 origin 'vision'(면허 아님)
         const r = await extractMaterialsText({ companyId, userId: req.user?.userId, files });
         text = r.eventText; events = r.events; extracted = true;

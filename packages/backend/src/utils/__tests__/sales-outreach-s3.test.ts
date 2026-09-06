@@ -104,8 +104,8 @@ describe('fillOutreachDmMedia 배너 폴백', () => {
 describe('vision 채점 → 품질 경고 매핑', () => {
   const dm = [sec('header', {}, 0), sec('hero', { headline: 'X' }, 1), sec('cta', { buttons: [{ url: 'https://b.com/plan' }] }, 2), sec('footer', {}, 3), sec('gallery', {}, 4), sec('text_card', {}, 5)];
   const media = { gallery: [{ url: 'a' }, { url: 'b' }], products: [{ image_url: '1' }, { image_url: '2' }, { image_url: '3' }, { image_url: '4' }] };
-  it('false 항목만 경고 · true·누락은 경고 없음 · 항목 8개 전부 코드가 있다', () => {
-    expect(Object.keys(VISION_WARNING_OF).length).toBe(8);
+  it('false 항목만 경고 · true·누락은 경고 없음 · 항목 12개(★ v3) 전부 코드가 있다', () => {
+    expect(Object.keys(VISION_WARNING_OF).length).toBe(12);
     const w = assessOutreachQuality({ dmSections: dm, brandSections: null, media, legal: { legal: 'x', csPhone: null }, homepageUrl: 'https://b.com/', dmVision: { items: { hero_image_full: true, gray_box_zero: false, number_leak_zero: false } } });
     const codes = w.warnings.map((x) => x.code);
     expect(codes).toContain('VISION_GRAY_BOX');

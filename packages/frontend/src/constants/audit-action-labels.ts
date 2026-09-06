@@ -44,6 +44,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'sales_outreach.delete_bulk': 'AI 영업 선택 삭제',
   'sales_outreach.materials': 'AI 영업 재료 다시 고르기',
   'sales_outreach.sections': 'AI 영업 블록 숨기기',
+  // ★ 2026-09-06 v3
+  'sales_outreach.reply_line': 'AI 영업 회신 문장 수정',
+  'sales_outreach.promote_recipe': 'AI 영업 레시피 승격(학습)',
   // ★ 2026-09-05 베스트 구성 · 실물 예시(AI 영업 학습)
   'best_layout.example_promote': '실물 예시 올리기(AI 영업 학습)',
   'best_layout.example_delete': '실물 예시 삭제(AI 영업 학습)',

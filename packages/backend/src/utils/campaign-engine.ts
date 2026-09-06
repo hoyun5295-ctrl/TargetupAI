@@ -6,17 +6,42 @@
  *  - 이 파일은 `sales-outreach-*` 를 하나도 import 하지 않는다(순환 참조 차단 · 계약 테스트). 생성기·채우기·차단기·룩은 전부 **주입(deps)** 이다.
  *  - 아웃리치(영업 샘플)와 고객 입구(재료 업로드)가 같은 순서를 탄다. 순서가 갈라지면 한쪽만 고쳐진다.
  *  - 발행·DB·크레딧은 여기 없다(호출자 소유). 엔진은 섹션·페이지·통계만 돌려준다.
- *  - `options.entry` 로 규칙 분기가 가능하되 지금은 두 입구가 같은 규칙이다(분기 0 = 골든 하나로 회귀).
+ *  - `options.entry` 는 채우기(fill)의 4번째 인자로 그대로 전달된다 — ★ v3 아웃리치 = gallery 0(행사 카드 → text_card+cta) · 고객 = 현행. 엔진 순서는 분기 0.
  */
 import type { Section } from './dm/dm-section-registry';
 
 export type EngineChannel = 'DM' | 'EMAIL';
 export type EngineEntry = 'outreach' | 'customer';
 
-export interface EngineImage { url: string; width?: number; height?: number; /** 홈페이지 배너 문구(정리본) · 캡션 원천 */ alt?: string }
+export interface EngineImage {
+  url: string; width?: number; height?: number; /** 홈페이지 배너 문구(정리본) · 캡션 원천 */ alt?: string;
+  /** ★ v3 고객 재료 카드 묶음 식별자(행사 카드별 이미지) · 없으면 옛 경로(히어로 + 갤러리) */
+  group?: string;
+}
 export interface EngineProduct {
   name: string; price: number | null; discount_price: number | null; image_url: string; link_url?: string;
   width?: number; height?: number; discount_rate?: number | string | null; rating?: number | string | null; review_count?: number | string | null; badges?: string[];
+  /** ★ v3 수상·순위 원문 조각(≤3 · 스포트라이트 카드 재료) */
+  awards?: string[];
+}
+
+/**
+ * ★ 2026-09-06 v3 행사 카드(이벤트 목록 페이지 카드 1개 = 행사 1개) — 아웃리치(크롤 · 사본 URL)와 고객 입구(업로드)가 같은 모양.
+ * title·periodRaw 는 원문 문자열(재대조 통과) · bannerUrl 은 우리 사본(또는 업로드 서빙 경로) · endDate 는 YYYY-MM-DD(면허 판정은 호출자).
+ */
+export interface EngineEventCard {
+  title: string;
+  periodRaw: string | null;
+  endDate: string | null;
+  bannerUrl: string | null;
+  bannerSize?: { width: number; height: number } | null;
+  detailUrl: string | null;
+  /** 면허(원문 재대조 + 미래 종료일 · 고객 입구 = 사용자가 "그대로 씁니다" 체크) */
+  licensed: boolean;
+  /** ★ 고객 입구 — 이 카드에 묶인 업로드 이미지 묶음 식별자(EngineImage.group 과 짝) · 아웃리치는 없음 */
+  group?: string;
+  /** ★ 고객 입구 — 카드 본문(사용자가 쓴 행사 내용 · 카드 text_card body) */
+  text?: string;
 }
 
 /** 조립 재료 — 원천(크롤·업로드)이 무엇이든 여기서는 같은 모양이다 */
@@ -42,6 +67,8 @@ export interface EngineMaterials {
   proof: unknown | null;
   /** ★ 2026-09-06(2) 포스터 캡션(포스터 3칸의 title · 숫자 0) — 포스터 블록 아래 한 줄 */
   posterCaption?: string | null;
+  /** ★ v3 행사 카드(선택 순서 = DM 등장 순서 · ≤3 · 없으면 옛 경로) */
+  eventCards?: EngineEventCard[];
 }
 
 export interface EngineOptions {
@@ -61,13 +88,16 @@ export interface EngineGenInput {
   products: EngineProduct[]; galleryCount: number; skeletonTypes: readonly string[] | null; entry: EngineEntry;
   /** 홈페이지 배너 문구 목록(정리본) — 갤러리 앞 설명 카드는 이 안에서만 */
   bannerCaptions: readonly string[];
+  /** ★ v3 행사 카드(제목·기간 원문) — 프롬프트 재료 블록 [진행 중 행사] */
+  eventCards?: readonly EngineEventCard[];
 }
 
 /** 주입 의존 — 구현은 호출자 축 파일이 소유한다(아웃리치 = sales-outreach-produce.ts `outreachEngineDeps`) */
 export interface EngineDeps<TStats = unknown, TDims = unknown, TOverride = unknown> {
   generate(input: EngineGenInput): Promise<{ sections: Section[]; exemplars: { picked: number; total: number } }>;
   buildDims(gallery: readonly EngineImage[], products: readonly EngineProduct[], posterUrl: string | null, posterSize: { width: number; height: number } | null): TDims;
-  fill(sections: readonly Section[], materials: EngineMaterials, channel: EngineChannel): { sections: Section[]; filled: number };
+  /** ★ v3 entry 가 4번째(마지막) 인자 — 아웃리치 = gallery 0 · 행사 카드 → text_card+cta / 고객 = 현행 */
+  fill(sections: readonly Section[], materials: EngineMaterials, channel: EngineChannel, entry: EngineEntry): { sections: Section[]; filled: number };
   sanitize(sections: readonly Section[], licensedQuote: string, companyName: string): { sections: Section[]; stripped: number; removed: string[]; heroFallback: boolean };
   prune(sections: readonly Section[]): { sections: Section[]; removed: string[] };
   orderCountdown(sections: readonly Section[]): Section[];
@@ -125,10 +155,11 @@ export async function assembleDmCampaign<TStats, TDims, TOverride>(
       companyName: m.companyName, industry: m.industry, homepageUrl: m.homepageUrl, siteTitle: m.siteTitle, material: m.material, extraNotes: m.extraNotes,
       products: m.products, galleryCount: m.gallery.length + (m.posterUrl ? 1 : 0), skeletonTypes: opts.skeletonTypes, entry: opts.entry,
       bannerCaptions: m.gallery.map((g) => String(g.alt || '').trim()).filter(Boolean),
+      eventCards: m.eventCards || [],
     });
     generated = true;
     exemplars = gen.exemplars;
-    const filledR = deps.fill(gen.sections, m, opts.channel);
+    const filledR = deps.fill(gen.sections, m, opts.channel, opts.entry);
     filled = filledR.filled;
     const sanitized = deps.sanitize(filledR.sections, m.licensedQuote, m.companyName);
     benefitStripped = sanitized.stripped;

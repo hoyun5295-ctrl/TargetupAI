@@ -18,6 +18,8 @@ import {
   editOutreachCopy, editOutreachSubject, rebuildOutreachEmail, regenerateOutreachAsset, recrawlOutreachJob,
   dismissOutreachJob, countOutreachBadge, selectOutreachMaterials, hideOutreachSections, overrideOutreachMaterialGate,
   deleteOutreachJob, deleteOutreachJobsBulk,
+  // ★ v3 회신 문장 · 레시피 승격
+  editOutreachReplyLine, promoteOutreachRecipe,
 } from '../utils/sales-outreach-jobs';
 import { outreachMailTo, outreachMailToList, isOutreachMailerReady, outreachTestMailDomains } from '../utils/outreach-mailer';
 import { getOutreachContext } from '../utils/sales-outreach-produce';
@@ -207,12 +209,14 @@ router.post('/jobs/:id/confirm', async (req: Request, res: Response) => {
   try {
     const { warnings } = await confirmOutreachSelection(req.params.id, {
       eventIndex: req.body?.eventIndex ?? null,
+      // ★ v3 다중 선택(배열 · 서버가 정수·범위·중복을 걸러 앞 3개)
+      eventIndexes: Array.isArray(req.body?.eventIndexes) ? req.body.eventIndexes : null,
       manualEventText: req.body?.manualEventText,
       imageUrl: req.body?.imageUrl ?? null,
       industryCategory: req.body?.industryCategory,
     }, req.user?.userId);
     console.log('[sales-outreach] 확정:', req.params.id, req.user?.userId);
-    audit(req, 'confirm', req.params.id, { eventIndex: req.body?.eventIndex ?? null, manual: !!req.body?.manualEventText, image: !!req.body?.imageUrl });
+    audit(req, 'confirm', req.params.id, { eventIndex: req.body?.eventIndex ?? null, events: Array.isArray(req.body?.eventIndexes) ? req.body.eventIndexes.length : null, manual: !!req.body?.manualEventText, image: !!req.body?.imageUrl });
     res.status(202).json({ ok: true, warnings });
   } catch (err: any) {
     respondError(res, err, '확정');
@@ -327,6 +331,30 @@ router.post('/jobs/:id/subject', async (req: Request, res: Response) => {
   }
 });
 
+// ★ v3 회신 유도 문장 편집(0~60자 · 비우면 기본 문장) → 메일 재조립(AI 0)
+router.post('/jobs/:id/reply-line', async (req: Request, res: Response) => {
+  try {
+    await editOutreachReplyLine(req.params.id, String(req.body?.text || ''), req.user?.userId);
+    console.log('[sales-outreach] 회신 문장 수정:', req.params.id, req.user?.userId);
+    audit(req, 'reply_line', req.params.id);
+    res.status(202).json({ ok: true });
+  } catch (err: any) {
+    respondError(res, err, '회신 문장 수정');
+  }
+});
+
+// ★ v3 레시피 승격(학습 원장 · 원문 0 · best_copy_assets kind recipe · 같은 잡 중복 0)
+router.post('/jobs/:id/promote-recipe', async (req: Request, res: Response) => {
+  try {
+    const r = await promoteOutreachRecipe(req.params.id, req.user?.userId);
+    console.log('[sales-outreach] 레시피 승격:', req.params.id, r.id, req.user?.userId);
+    audit(req, 'promote_recipe', req.params.id, { assetId: r.id });
+    res.json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, '레시피 승격');
+  }
+});
+
 // 메일 재조립 — 수신거부 문구(ENV) 반영 등(제목·서두는 보존)
 router.post('/jobs/:id/rebuild-email', async (req: Request, res: Response) => {
   try {
@@ -355,7 +383,7 @@ router.post('/jobs/:id/materials', async (req: Request, res: Response) => {
 // ★ 0905(3) C4-3 블록 숨기기(override 데이터 · DM 재발행/이메일 재조립 · AI 0 · 재생성 뒤 재적용)
 router.post('/jobs/:id/sections', async (req: Request, res: Response) => {
   try {
-    const r = await hideOutreachSections(req.params.id, { kind: String(req.body?.kind || ''), hidden: req.body?.hidden }, req.user?.userId);
+    const r = await hideOutreachSections(req.params.id, { kind: String(req.body?.kind || ''), hidden: req.body?.hidden, reason: req.body?.reason }, req.user?.userId);
     console.log('[sales-outreach] 블록 숨김:', req.params.id, req.body?.kind, r.hidden, req.user?.userId);
     audit(req, 'sections', req.params.id, { kind: String(req.body?.kind || ''), hidden: r.hidden });
     res.status(202).json({ ok: true, ...r });

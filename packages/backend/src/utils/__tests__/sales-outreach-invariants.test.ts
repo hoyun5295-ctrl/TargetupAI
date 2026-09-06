@@ -257,7 +257,8 @@ describe('sales-outreach invariants', () => {
     expect(produce).toContain('buildEmailSectionsPrompt(genInput, exemplarSource)');
     expect((produce.match(/await loadOutreachExemplarSource\(\)/g) || []).length).toBe(2);
     expect(produce).toContain('exemplars = dmPrompt.exemplars;');
-    expect(produce).toContain('exemplarCount: exemplars.picked');
+    // ★ v3 조립/발행 분리 — 근거 수치는 조립 결과(AssembledDm.exemplars)에서 옛 결과 모양으로 옮긴다
+    expect(produce).toContain('exemplarCount: a.exemplars.picked');
     // ★ 2026-09-06 S5 생성기는 엔진 deps 안(outreachEngineDeps) · 엔진 파일은 아웃리치 파일을 모른다(순환 0)
     expect(produce).toContain('export function outreachEngineDeps()');
     expect(readCode('utils/campaign-engine.ts')).not.toMatch(/sales-outreach-/);
@@ -286,7 +287,9 @@ describe('sales-outreach invariants', () => {
     expect(engine).toContain('deps.applyLook(ordered, opts.channel, dims)');
     expect(produce).toContain('applyLook: (sections, channel, dims) => applyOutreachLook(sections, channel, dims)');
     expect(produce).toContain("applyOutreachLook(pruned.sections, 'EMAIL', dims)");
-    expect(produce).toContain('brand_kit: buildOutreachBrandKit(primary, input.industry)');
+    // ★ v3 brand_kit 은 조립 결과(brandKit)가 들고 발행이 그대로 싣는다(색 = 접근성 보정본 · logo_url 0)
+    expect(produce).toContain('brandKit: buildOutreachBrandKit(primary, input.industry)');
+    expect(produce).toContain('brand_kit: a.brandKit,');
     expect(produce).not.toMatch(/brand_kit: accessible \? \{ primary_color/);
     expect(produce).not.toMatch(/art_direction: \{ typeScale: 'bold', spacingDensity: 'airy'/);
     expect(produce).toContain('art_direction: outreachArtDirection(input.industry)');
@@ -299,7 +302,8 @@ describe('sales-outreach invariants', () => {
     // ★ 2026-09-06 S1 — 후보 24 계약은 그대로, 호출 형태만 배너 상세(alt 동반)의 두 소스 합집합으로 옮겼다(렌더 앞 · 정적 뒤)
     expect(jobs).toContain('bannersOf(rendered.html, finalUrl, 24)');
     expect(jobs).toContain('bannersOf(page.html, staticUrl, 24)');
-    expect(jobs).toContain('imageCandidates: banners.map((b) => b.url)');
+    // ★ v3 카드 배너 원 URL 을 후보 합집합 뒤에(홈 첫 배너 우선 · 상한 30) — 제작이 사본을 만들고 조립은 srcUrl 로 되찾는다
+    expect(jobs).toContain('const imageCandidates = unionStrings(banners.map((b) => b.url), unionStrings(cardBannerUrls, cardBanners.map((b) => b.url), 12), 30);');
     expect(produce).toContain('deadlineMs: OUTREACH_GALLERY_DEADLINE_MS');
     // 재생성 축 분리 — 제목·서두는 email만 · 브랜드 시안은 email+materials
     expect(jobs).toContain("const regenIntro = regenFrom === 'email' || !prevEmail;");
@@ -324,7 +328,8 @@ describe('sales-outreach invariants', () => {
     expect(produce).toContain('layoutMode: OUTREACH_DM_LAYOUT_MODE,');
     expect(produce).toContain('layout_mode: OUTREACH_DM_LAYOUT_MODE');
     expect(look).toContain("OUTREACH_DM_LAYOUT_MODE: 'scroll' = 'scroll'");
-    expect(jobs).toContain("clear: k === 'image' ? ['regen', 'section_overrides'] : ['regen']");
+    // ★ v3 dm·image 재생성은 auto_seq(자동 재조립 카운터)도 지운다
+    expect(jobs).toContain("clear: k === 'image' ? ['regen', 'section_overrides', 'auto_seq'] : k === 'dm' ? ['regen', 'auto_seq'] : ['regen']");
     expect(jobs).toContain("regenSeqOf(sr, 'sections') + 1");
     expect(jobs).toContain('const carry = presetSections && prevDm ? prevDm : null;');
     expect(jobs).toContain('hiddenSkipped: dm.hiddenSkipped');
@@ -342,9 +347,61 @@ describe('sales-outreach invariants', () => {
     expect(produce).toContain('pngLooksWhite(img.buffer)');
     expect(jobs).toContain('logoCandidates: unionStrings(rendered ? extractLogoCandidates(rendered.html, finalUrl) : [], page ? extractLogoCandidates(page.html, staticUrl) : [], 4)');
     expect(jobs).toContain('logoCandidates: Array.isArray(bp.logoCandidates) ? bp.logoCandidates : []');
-    // 히어로 = 홈 첫 배너(문서 순서) · 포스터는 두 번째 비주얼 · 갤러리 수집은 면적 정렬 0
+    // 히어로 = 홈 첫 배너(문서 순서) · 포스터는 두 번째 비주얼 · 갤러리 수집은 면적 정렬 0 (고객 입구 채우기 · 옛 문자열 유지)
     expect(produce).toContain("const heroImage = galleryAll[0]?.url || media.posterUrl || media.products[0]?.image_url || '';");
+    // ★ v3 아웃리치 채우기 — 히어로 = 카드1 배너(비율 통과) → 홈 첫 배너 → 포스터 → 상품 · gallery 0
+    expect(produce).toContain("const heroImage = card1Hero ? String(card1!.bannerUrl) : (galleryAll.find((g) => !cardBannerSet.has(g.url))?.url || media.posterUrl || media.products[0]?.image_url || '');");
+    // 카드 배너 사본은 전용 예산 · 카드 배너는 사람 재료 선택을 거친다 · 재료 게이트는 카드 상세 배너까지 같은 합집합
+    expect(produce).toContain('cardBannerUrls?: string[];');
+    expect(jobs).toContain('eventCardsOf(selectedList, applyOutreachMediaSelection(bp.media || null, bp.mediaSelection || null))');
+    expect(jobs).toContain('banners: allBanners.length, events: candidates.length');
     expect(readCode('utils/sales-outreach-media.ts')).not.toContain('b.width * b.height - a.width * a.height');
+  });
+
+  it('★ v3 — 입구 분기 1곳 · 계약 2벌 · 조립/발행 분리 · 자동 재조립 1회 · AI 호출은 계수기 진입점만 · 새 stage_results 키는 RESETTABLE_KEYS 등재 · 전사문 가드', () => {
+    const produce = readCode('utils/sales-outreach-produce.ts');
+    const jobs = readCode('utils/sales-outreach-jobs.ts');
+    const exemplars = readCode('utils/sales-outreach-exemplars.ts');
+    // 계약·허용 타입은 함수 1곳에서 갈린다(두 입구 공용 상수 1벌 회귀 차단)
+    expect(exemplars).toContain('export function dmSectionContract(');
+    expect(exemplars).toContain('export function dmAllowedTypes(');
+    expect(produce).toContain('dmSectionContract(i.entry)');
+    expect(produce).toContain('generateSections(dmPrompt, dmAllowedTypes(engineInput.entry)');
+    // 채우기 4번째 인자(기본 customer) · 아웃리치는 v3 채우기
+    expect(produce).toContain("entry: EngineEntry = 'customer',");
+    expect(produce).toContain("if (entry === 'outreach') return fillOutreachDmMediaV3(sections, media, channel);");
+    // 조립/발행 분리 · 자동 재조립은 같은 dmId 갱신(createDm·publishDm 재호출 0)
+    expect(produce).toContain('export async function assembleOutreachDm(');
+    expect(produce).toContain('export async function publishOutreachDm(');
+    expect(produce).toContain('export async function updateOutreachDm(');
+    expect(count(produce, 'await createDm(')).toBe(1);
+    expect(count(produce, 'await publishDm(')).toBe(1);
+    expect(jobs).toContain('await updateOutreachDm(pub.dmId, second, dmInput)');
+    expect(jobs).toContain('autoSeqDm < 1 && Date.now() - dmT0 < 60_000');
+    expect(jobs).not.toContain('await produceOutreachDm(');
+    // AI 호출은 계수기 진입점만(아웃리치 두 파일에 공용 호출기 직접 호출 0)
+    expect(jobs).not.toContain('callAIWithFallback(');
+    expect(count(produce, 'await callAIWithFallback(')).toBe(1); // callOutreachAi 안 1곳
+    expect(jobs).toContain('withOutreachAiMeter(meter,');
+    // 새 stage_results 키 전부 등재
+    const keysLine = jobs.slice(jobs.indexOf('const RESETTABLE_KEYS = ['), jobs.indexOf('] as const;', jobs.indexOf('const RESETTABLE_KEYS = [')));
+    for (const k of ['event_list', 'crawling_cards', 'palette_render', 'auto_seq', 'ai_cost', 'edits', 'reply_line']) expect(keysLine, k).toContain(`'${k}'`);
+    // 배너 전사문은 면허 인용에 못 들어간다(가드가 조립 앞에 선다)
+    // 출처 가드(리뷰 R1) — 근거(quoteBasis)에 섞인 전사 수치의 출처는 선택 후보 인용문·사실 수치뿐 · 조립 앞에 선다
+    expect(jobs).toContain('assertLicensedQuoteSources(quoteBasis, bannerLines, [...selectedList.map((c) => c.quote), factQuote]);');
+    expect(jobs.indexOf('assertLicensedQuoteSources(quoteBasis, bannerLines,')).toBeLessThan(jobs.indexOf('await assembleOutreachDm(dmInput)'));
+    // 팔레트 렌더는 별 변수(rendered 에 대입 0)
+    expect(jobs).toContain('let paletteShot: RenderResult | null = null;');
+    expect(jobs).not.toMatch(/rendered\s*=\s*ps\.result/);
+    // 사람 수정 원장(edits)은 append CT 1곳만 쓴다(얕은 병합으로 배열을 통째 덮는 자리 0) · 기록 호출부 ≥ 5(숨김 · 재선택 · 문안 · 제목 · 회신)
+    const appendBody = fnBody(jobs, 'async function appendStageResultArray(');
+    expect(appendBody).toContain('jsonb_set(');
+    expect(count(jobs, "'edits'")).toBeLessThanOrEqual(3); // RESETTABLE_KEYS 등재 + recordOutreachEdit 안 + (설명 문자열 0)
+    expect(jobs.replace(appendBody, '')).not.toMatch(/stage_results->'edits'|\{\s*edits\s*:/);
+    expect((jobs.match(/await recordOutreachEdit\(/g) || []).length).toBeGreaterThanOrEqual(5);
+    // 레시피 승격은 best-copy CT 의 insert 만(jobs 에 INSERT INTO best_copy_assets 0)
+    expect(jobs).not.toContain('INSERT INTO best_copy_assets');
+    expect(jobs).toContain('await insertOutreachRecipe({');
   });
 
   it('제작 실패 4단계 3값 — markFailed가 stage_results[failStage]=unavailable을 찍는다', () => {

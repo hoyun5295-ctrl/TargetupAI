@@ -53,6 +53,9 @@ function rgbToHex(r: number, g: number, b: number): string {
  * ★ 0905(4) 브랜드 색 접근성 보정 — 브랜드 색이 흰 글자 대비 4.5 미만이면(이니스프리 초록 실측 2.6) 버리고 기본 보라 토큰이 나가
  * "템플릿 티"가 났다. 색상·채도는 두고 **명도만 단계적으로 낮춰** 대비를 넘기는 첫 색을 쓴다(브랜드 정체성 유지 · 결정적). 12단계 안에 못 넘기면 null.
  */
+/** ★ 0906(3) 브랜드 색을 못 뽑았을 때의 주색 — 기본 보라 토큰 대신 무채색(짙은 슬레이트). 어느 브랜드에 얹어도 "남의 색"이 되지 않는다. */
+export const OUTREACH_NEUTRAL_PRIMARY = '#1f2937';
+
 export function accessiblePrimaryOf(hex: string | null | undefined): string | null {
   const rgb = hex ? hexToRgb(hex) : null;
   if (!rgb) return null;
@@ -76,6 +79,13 @@ export const OUTREACH_BACKGROUNDS: readonly string[] = ['soft', 'tint'];
 
 /** 가로형 판정 경계(폭/높이). 이 이상 = 가로 배너 → 사진 위 밴드(classic) · 미만 = 세로·정사각 → 분할(split). */
 export const LANDSCAPE_RATIO = 1.25;
+
+/** ★ v3 히어로 자격 하한(폭/높이) — 이 미만(세로형 카드 배너)은 히어로 대신 text_card(top)로 강등 · dims 없음 = false(fail-closed) · 설계서 §7-5 */
+export const OUTREACH_HERO_MIN_RATIO = 0.8;
+export function heroEligible(url: string | null | undefined, dims: LookImageDims): boolean {
+  const r = ratioOf(url, dims);
+  return r !== null && r >= OUTREACH_HERO_MIN_RATIO;
+}
 
 export type OutreachArtDirection = {
   typeScale: 'editorial' | 'bold' | 'minimal';
@@ -155,6 +165,8 @@ export function applyOutreachLook(sections: readonly Section[], channel: Outreac
   const ordinal: Record<string, number> = {};
   const lastCtaIdx = list.reduce((acc, s, i) => (s.type === 'cta' ? i : acc), -1);
   const stats: OutreachLookStats = { treatments: 0, backgrounds: 0, assigned: [] };
+  // ★ v3 이미지 없는 text_card 의 서수(lead·framed 는 글자 카드에만 · 이미지 카드는 classic 고정 = lead·quote 가 image_url 을 그리지 않는 렌더러 사실)
+  let textOnlyOrdinal = 0;
   const out = list.map((s, i): Section => {
     const type = String(s.type);
     const n = (ordinal[type] = (ordinal[type] || 0) + 1);
@@ -169,8 +181,14 @@ export function applyOutreachLook(sections: readonly Section[], channel: Outreac
         break;
       }
       case 'text_card':
-        if (n === 1) treatment = pickTreatment(channel, type, 'lead');
-        else if (n % 2 === 1) treatment = pickTreatment(channel, type, 'framed');
+        if (p.image_url) {
+          // 이미지가 실린 카드 = classic 고정(DM lead·quote 구도는 image_url 을 읽지 않아 배너가 조용히 사라진다 · 설계서 §7-3) · 리듬은 배경면으로만
+          if (n % 2 === 0) background = pickBackground(channel, 'soft');
+          break;
+        }
+        textOnlyOrdinal++;
+        if (textOnlyOrdinal === 1) treatment = pickTreatment(channel, type, 'lead');
+        else if (textOnlyOrdinal % 2 === 1) treatment = pickTreatment(channel, type, 'framed');
         else background = pickBackground(channel, 'soft');
         break;
       case 'product_carousel': {

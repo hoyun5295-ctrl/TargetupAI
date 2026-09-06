@@ -133,15 +133,15 @@ describe('제안 메일 기능 소개 3칸(여정 · 자동마케팅 · 이미�
     const features = s.slice(ctaIdx - 4, ctaIdx) as any[];
     expect(features.map((x) => x.type)).toEqual(['text_card', 'text_card', 'text_card', 'text_card']);
     expect(features[0].props.tag).toBe(guide.emailCopy.features.tag);
-    expect(features.slice(1).map((x) => x.props.tag)).toEqual(['여정', '자동마케팅', '이미지 스튜디오']);
-    expect(features[3].props.headline).toBe('이 메일 맨 위 이미지도 그렇게 만들었습니다');
-    expect(features[1].props.body).toContain('아이소이 이름의');
+    expect(features.slice(1).map((x) => x.props.tag)).toEqual(['이미지 스튜디오', '문안과 여정', '자동마케팅']);
+    expect(features[1].props.headline).toBe('이 메일 맨 위 이미지도 그렇게 만들었습니다');
+    expect(features[1].props.body).toContain('아이소이 상품 사진');
     for (const f of features) { expect(String(f.props.body)).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic|—/); }
     const noPoster = buildProposalEmailSections(guide, { ...base, posterUrl: null }) as any[];
     const studio = noPoster.find((x) => x.props?.tag === '이미지 스튜디오');
     expect(studio.props.headline).toBe('상품 사진 한 장으로 포스터가 나옵니다');
     const text = buildOutreachPlainText(guide, base);
-    expect(text).toContain('- 여정:');
+    expect(text).toContain('- 문안과 여정:');
     expect(text).toContain('- 자동마케팅:');
     expect(text).toContain('- 이미지 스튜디오:');
     expect(types[types.length - 1]).toBe('footer');

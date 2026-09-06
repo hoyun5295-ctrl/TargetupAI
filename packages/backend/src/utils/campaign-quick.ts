@@ -23,7 +23,7 @@ import { loadPlanContext, canUseFeature } from './plan-guard';
 import { normalizeEventText, EVENT_TEXT_MAX } from './event-brief';
 import { extractEventsFromImages, sniffImageMediaType, MAX_EVENT_IMAGES, type ExtractedEvent } from './event-image-extract';
 import { readImageSize } from './sales-outreach-media';
-import { assembleDmCampaign, type EngineMaterials, type EngineResult } from './campaign-engine';
+import { assembleDmCampaign, type EngineMaterials, type EngineResult, type EngineEventCard } from './campaign-engine';
 import { outreachEngineDeps, produceOutreachBrandEmail } from './sales-outreach-produce';
 import { OUTREACH_DM_LAYOUT_MODE, type OutreachLookStats } from './sales-outreach-look';
 
@@ -31,6 +31,10 @@ import { OUTREACH_DM_LAYOUT_MODE, type OutreachLookStats } from './sales-outreac
 const DM_IMAGE_DIR = path.join(process.cwd(), 'uploads', 'dm-images');
 
 export const QUICK_MATERIALS_MAX_IMAGES = MAX_EVENT_IMAGES;
+/** ★ v3 행사 카드 상한 · 카드당 이미지 상한(총 9 · 설계서 §10) */
+export const QUICK_EVENT_CARDS_MAX = 3;
+export const QUICK_EVENT_CARD_IMAGES = 3;
+export const QUICK_CARD_UPLOAD_MAX = QUICK_EVENT_CARDS_MAX * QUICK_EVENT_CARD_IMAGES;
 
 /** ENV 회사 목록 — 비면 전 회사 노출 · 있으면 목록 회사만(노출 스위치이자 효과 함수 안 판정) */
 export function quickMaterialsEnabled(companyId: string | null | undefined, env: string | undefined = process.env.CAMPAIGN_MATERIALS_COMPANY_IDS): boolean {
@@ -41,10 +45,14 @@ export function quickMaterialsEnabled(companyId: string | null | undefined, env:
 
 export interface QuickQuote { total: number; parts: Array<{ key: string; label: string; cost: number }> }
 
-/** 견적(순수) — 생성 1건(dm-ai-generate) + 텍스트가 비고 이미지가 있으면 판독(event-image-extract). 신규 키 0. */
-export function quoteQuickCampaign(input: { imageCount: number; hasText: boolean }): QuickQuote {
+/**
+ * 견적(순수) — 생성 1건(dm-ai-generate) + 텍스트가 비고 이미지가 있으면 판독(event-image-extract). 신규 키 0.
+ * ★ v3 reads = 판독 호출 수(카드 대표 이미지 묶음 1회 · 호출 1회 = 3크레딧 고정 · 곱셈 금지) · 옛 호출(hasText/imageCount)은 reads 를 그 둘로 정한다.
+ */
+export function quoteQuickCampaign(input: { imageCount: number; hasText: boolean; reads?: number }): QuickQuote {
   const parts: QuickQuote['parts'] = [];
-  if (!input.hasText && input.imageCount > 0) parts.push({ key: 'event-image-extract', label: '이미지 판독', cost: getCreditCost('event-image-extract') });
+  const reads = typeof input.reads === 'number' ? Math.max(0, Math.min(1, Math.floor(input.reads))) : (!input.hasText && input.imageCount > 0 ? 1 : 0);
+  if (reads > 0) parts.push({ key: 'event-image-extract', label: '이미지 판독', cost: getCreditCost('event-image-extract') });
   parts.push({ key: 'dm-ai-generate', label: '모바일 DM 생성', cost: getCreditCost('dm-ai-generate') });
   return { total: parts.reduce((a, p) => a + p.cost, 0), parts };
 }
@@ -62,12 +70,12 @@ export async function quickPlanLocked(companyId: string): Promise<boolean> {
 
 export interface SavedMaterialImage { url: string; width: number | null; height: number | null }
 
-/** 업로드 이미지 사본 저장(매직 바이트 판별 · 5장 · 크기 실측) — 저장 경로·서빙 URL 은 DM 업로드와 동일 */
-export function saveMaterialImages(companyId: string, files: ReadonlyArray<{ buffer: Buffer; originalname?: string }>): SavedMaterialImage[] {
+/** 업로드 이미지 사본 저장(매직 바이트 판별 · 5장(카드 업로드는 9) · 크기 실측) — 저장 경로·서빙 URL 은 DM 업로드와 동일 */
+export function saveMaterialImages(companyId: string, files: ReadonlyArray<{ buffer: Buffer; originalname?: string }>, max = QUICK_MATERIALS_MAX_IMAGES): SavedMaterialImage[] {
   const dir = path.join(DM_IMAGE_DIR, companyId);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const out: SavedMaterialImage[] = [];
-  for (const f of files.slice(0, QUICK_MATERIALS_MAX_IMAGES)) {
+  for (const f of files.slice(0, max)) {
     const mt = sniffImageMediaType(f.buffer);
     if (!mt) continue; // 위장 업로드 · 미지원 형식은 조용히 건너뛴다(응답 images 수로 드러난다)
     const ext = mt === 'image/png' ? '.png' : mt === 'image/webp' ? '.webp' : '.jpg';
@@ -121,6 +129,97 @@ export function normalizeQuickMaterials(raw: unknown, companyId: string): QuickM
   return { images, event_text: eventText, origin, events: events && events.length ? events : null, link, brand_name: brand };
 }
 
+// ===== ★ 2026-09-06 v3 행사 카드(고객 재료 페이지 · 설계서 §10) =====
+
+export interface QuickEventCard {
+  id: string;
+  title: string;
+  text: string;
+  /** 사용자가 "이 문구를 그대로 씁니다" 를 체크 = 면허(수치 그대로) */
+  licensed: boolean;
+  images: Array<{ url: string; width: number | null; height: number | null }>;
+  link: string | null;
+}
+
+/**
+ * 요청 eventCards 정규화(순수 · normalizeQuickMaterials 의 형제 · 기존 함수 무변경) — 카드 ≤3 · 카드당 이미지 ≤3 · 이 회사 서빙 경로만 · 제목 40자 · 본문 EVENT_TEXT_MAX · 링크 http(s).
+ * 제목도 이미지도 없는 카드는 버린다. id 는 클라이언트 값(문자·숫자·-_ 만 · 40자) 없으면 순번.
+ */
+export function normalizeQuickEventCards(raw: unknown, companyId: string): QuickEventCard[] {
+  const prefix = `/api/dm/v/images/${companyId}/`;
+  const list = Array.isArray(raw) ? raw : [];
+  const out: QuickEventCard[] = [];
+  for (const c of list) {
+    if (!c || typeof c !== 'object') continue;
+    const r = c as Record<string, unknown>;
+    const title = String(r.title || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    const images = (Array.isArray(r.images) ? r.images : [])
+      .map((im: any) => {
+        const url = String(im?.url || '').trim();
+        if (!url.startsWith(prefix) || !/^[A-Za-z0-9._-]+$/.test(url.slice(prefix.length))) return null;
+        const w = Number(im?.width); const h = Number(im?.height);
+        return { url, width: Number.isFinite(w) && w > 0 ? Math.floor(w) : null, height: Number.isFinite(h) && h > 0 ? Math.floor(h) : null };
+      })
+      .filter((x): x is { url: string; width: number | null; height: number | null } => !!x)
+      .slice(0, QUICK_EVENT_CARD_IMAGES);
+    if (!title && images.length === 0) continue;
+    let link: string | null = null;
+    const rawLink = String(r.link || '').trim();
+    if (rawLink) { try { const u = new URL(rawLink); if (u.protocol === 'http:' || u.protocol === 'https:') link = u.toString().slice(0, 500); } catch { link = null; } }
+    const idRaw = String(r.id || '').trim();
+    out.push({
+      id: /^[A-Za-z0-9_-]{1,40}$/.test(idRaw) ? idRaw : `card${out.length + 1}`,
+      title,
+      text: normalizeEventText(r.text).slice(0, EVENT_TEXT_MAX),
+      licensed: r.licensed === true,
+      images,
+      link,
+    });
+    if (out.length >= QUICK_EVENT_CARDS_MAX) break;
+  }
+  return out;
+}
+
+/**
+ * 행사 카드 → 엔진 재료 조각(순수) — gallery(group) · material('[행사 1] …') · ctaLinks[group] · licensedQuote(면허 카드 text ' · ') · eventCards(엔진 카드 · 첫 이미지 = 배너 · group 결속).
+ * 기존 경로(normalizeQuickMaterials)와 같은 모양으로 펴서 같은 엔진에 태운다.
+ */
+export function materialsFromEventCards(cards: readonly QuickEventCard[]): {
+  gallery: Array<{ url: string; width?: number; height?: number; group: string }>;
+  material: string;
+  ctaLinks: Record<string, string>;
+  licensedQuote: string;
+  eventCards: EngineEventCard[];
+  link: string | null;
+} {
+  const gallery: Array<{ url: string; width?: number; height?: number; group: string }> = [];
+  const lines: string[] = [];
+  const ctaLinks: Record<string, string> = {};
+  const licensed: string[] = [];
+  const eventCards: EngineEventCard[] = [];
+  cards.forEach((c, i) => {
+    const group = c.id;
+    for (const im of c.images) gallery.push({ url: im.url, width: im.width ?? undefined, height: im.height ?? undefined, group });
+    const head = c.title || `행사 ${i + 1}`;
+    lines.push(`[행사 ${i + 1}] ${head}${c.text ? `\n${c.text}` : ''}`);
+    if (c.link) ctaLinks[group] = c.link;
+    if (c.licensed && c.text) licensed.push(c.text);
+    if (c.licensed && c.title) licensed.push(c.title);
+    eventCards.push({
+      title: head,
+      periodRaw: null,
+      endDate: null,
+      bannerUrl: c.images[0]?.url || null,
+      bannerSize: c.images[0]?.width && c.images[0]?.height ? { width: c.images[0].width, height: c.images[0].height } : null,
+      detailUrl: c.link,
+      licensed: c.licensed,
+      group,
+      text: c.text || undefined,
+    });
+  });
+  return { gallery, material: lines.join('\n\n').slice(0, 6000), ctaLinks, licensedQuote: licensed.join(' · '), eventCards, link: cards.find((c) => c.link)?.link || null };
+}
+
 /** 판독 구조(events) → 프롬프트 재료 텍스트(사실만 · 이미지 없는 상품은 카드가 아니라 글줄) */
 export function materialTextFromEvents(events: ExtractedEvent[] | null, eventText: string): string {
   const lines: string[] = [];
@@ -146,7 +245,7 @@ export interface QuickGenerateResult {
   look: OutreachLookStats;
   benefitStripped: number;
   heroFallback: boolean;
-  materialsMeta: { images: number; imagesUsed: number; textChars: number; origin: QuickMaterials['origin']; licensed: boolean; products: number; sections: number; ctaCount: number };
+  materialsMeta: { images: number; imagesUsed: number; textChars: number; origin: QuickMaterials['origin']; licensed: boolean; products: number; sections: number; ctaCount: number; eventCards?: number };
 }
 
 /**
@@ -157,32 +256,39 @@ export async function generateDmFromMaterials(input: { companyId: string; userId
   const companyId = String(input.companyId);
   if (!quickMaterialsEnabled(companyId)) throw new Error('이 기능은 아직 열리지 않았습니다.');
   const m = normalizeQuickMaterials(input.materials, companyId);
-  if (m.images.length === 0 && !m.event_text) throw new Error('이미지 1장 이상 또는 행사 내용을 입력해주세요.');
+  // ★ v3 행사 카드(≤3) — 있으면 카드가 재료의 1순위(옛 images·event_text 는 카드가 없을 때의 경로 그대로)
+  const cards = normalizeQuickEventCards((input.materials as any)?.eventCards, companyId);
+  const fromCards = cards.length ? materialsFromEventCards(cards) : null;
+  if (!fromCards && m.images.length === 0 && !m.event_text) throw new Error('이미지 1장 이상 또는 행사 내용을 입력해주세요.');
   const genCost = getCreditCost('dm-ai-generate');
   await checkCredit(companyId, genCost);
 
   const brandKit = await getCompanyBrandKit(companyId);
   const basic = await getBrandBasicInfo(companyId).catch(() => null);
   const companyName = m.brand_name || String(basic?.brand_name || '').trim() || String(basic?.company_name || '').trim() || '우리 브랜드';
-  const material = materialTextFromEvents(m.events, m.event_text) || '(행사 텍스트 없음 · 올린 이미지 중심으로 구성)';
+  const material = fromCards
+    ? [fromCards.material, materialTextFromEvents(m.events, m.event_text)].filter(Boolean).join('\n\n').slice(0, 6000)
+    : (materialTextFromEvents(m.events, m.event_text) || '(행사 텍스트 없음 · 올린 이미지 중심으로 구성)');
   const engineMaterials: EngineMaterials = {
     companyName,
     industry: input.industry || String(basic?.industry_code || '').trim() || null,
-    homepageUrl: m.link || '',
+    homepageUrl: fromCards?.link || m.link || '',
     siteTitle: null,
     material,
     extraNotes: null,
     products: [],
-    gallery: m.images.map((im) => ({ url: im.url, width: im.width ?? undefined, height: im.height ?? undefined })),
+    gallery: fromCards ? fromCards.gallery : m.images.map((im) => ({ url: im.url, width: im.width ?? undefined, height: im.height ?? undefined })),
     logoUrl: null,
     posterUrl: null,
     posterSize: null,
     bannerUrl: null,
     bannerSize: null,
-    ctaLinks: {},
+    ctaLinks: fromCards ? fromCards.ctaLinks : {},
     legal: null,
-    licensedQuote: m.origin === 'user' ? m.event_text : '',
+    // 면허 = 사용자가 직접 쓴 텍스트만(카드 = "그대로 씁니다" 체크한 카드의 문구 · 옛 경로 = origin user)
+    licensedQuote: [fromCards?.licensedQuote || '', m.origin === 'user' ? m.event_text : ''].filter(Boolean).join(' · '),
     proof: null,
+    eventCards: fromCards ? fromCards.eventCards : undefined,
   };
   const r = await assembleDmCampaign(engineMaterials, {
     entry: 'customer', channel: 'DM', skeletonTypes: null, sectionOverride: null, presetSections: null, layoutMode: OUTREACH_DM_LAYOUT_MODE,
@@ -216,14 +322,15 @@ export async function generateDmFromMaterials(input: { companyId: string; userId
     benefitStripped: r.benefitStripped,
     heroFallback: r.heroFallback,
     materialsMeta: {
-      images: m.images.length,
-      imagesUsed: m.images.filter((im) => imagesUsed.has(im.url)).length,
-      textChars: m.event_text.length,
+      images: fromCards ? fromCards.gallery.length : m.images.length,
+      imagesUsed: (fromCards ? fromCards.gallery : m.images).filter((im) => imagesUsed.has(im.url)).length,
+      textChars: fromCards ? fromCards.material.length : m.event_text.length,
       origin: m.origin,
-      licensed: m.origin === 'user',
+      licensed: !!(fromCards?.licensedQuote) || m.origin === 'user',
       products: (m.events || []).reduce((a, e) => a + (e.products || []).length, 0),
       sections: r.sections.length,
       ctaCount: r.sections.filter((s) => String((s as any).type) === 'cta').length,
+      eventCards: cards.length,
     },
   };
 }
@@ -267,6 +374,7 @@ export async function generateEmailFromMaterials(input: { companyId: string; use
     posterUrl: null, posterSize: null, bannerUrl: null, bannerSize: null,
     media: { gallery: m.images.map((im) => ({ url: im.url, width: im.width || 0, height: im.height || 0, srcUrl: im.url } as any)), products: [], collectedAt: new Date().toISOString(), stats: { galleryCandidates: m.images.length, galleryPassed: m.images.length, productLinks: 0, productsFound: 0, productsPassed: 0 } },
     mediaSelection: null, ctaLinks: {}, legal: null, brandColor: null, proof: null,
+    entry: 'customer',
   });
   await deductCreditSafe({ companyId, cost, source: 'email-ai-generate', createdBy: input.userId || null });
   return {

@@ -29,16 +29,19 @@ interface OutreachJob {
   homepage_url: string;
   stage: string;
   stage_results?: Record<string, any> | null;
-  event_quote?: { candidates?: any[]; selected?: any } | null;
+  /** ★ v3 selectedList = 다중 선택(≤3 · 누른 순서) · selected = 대표 1건(옛 기록 호환) */
+  event_quote?: { candidates?: any[]; selected?: any; selectedList?: any[] } | null;
   brand_profile?: {
     siteTitle?: string; excerpt?: string; eventTextFull?: string | null; imageCandidates?: string[]; selectedImageUrl?: string | null;
-    crawledAt?: string; brand?: { primaryColor?: string | null }; subPageUrl?: string | null; extraNotes?: string | null;
+    crawledAt?: string; brand?: { primaryColor?: string | null; colorSource?: string | null }; subPageUrl?: string | null; extraNotes?: string | null;
+    /** ★ v3 홈 첫 화면 캡처(375×900 공개 사본 · 제안 메일 대조 왼쪽) */
+    homeCaptureUrl?: string | null;
     media?: { stats?: Record<string, number>; gallery?: any[]; products?: any[] } | null;
     /** ★ 0905(3) 검토에서 고른 재료(서버 저장값 · 없으면 전량) */
     mediaSelection?: { products?: string[]; gallery?: string[] } | null;
 
     /** ★ 2026-09-06 S1 재료 v2(서버가 센 값 · 화면은 표시만) */
-    materials?: { v?: number; source?: 'static' | 'render' | 'mixed'; counts?: Record<string, number>; proof?: { reviewTotal?: number | null; rating?: number | null; rankLabel?: string | null } } | null;
+    materials?: { v?: number; source?: 'static' | 'render' | 'mixed'; counts?: Record<string, number>; proof?: { reviewTotal?: number | null; rating?: number | null; rankLabel?: string | null }; eventCards?: any[] } | null;
   } | null;
   fail_stage?: string | null;
   fail_reason?: string | null;
@@ -107,8 +110,19 @@ const QUALITY_LABEL: Record<string, (v?: number) => string> = {
   VISION_TEXT_UNREADABLE: () => '캡처 확인: 이미지 위 글자가 배경과 겹쳐 읽기 어렵습니다',
   VISION_GRAY_BOX: () => '캡처 확인: 회색 빈 상자(이미지 자리 비움)가 있습니다',
   VISION_NUMBER_LEAK: () => '캡처 확인: 생성 이미지 안에 숫자·퍼센트·원 표기가 보입니다',
-  VISION_FEW_SECTIONS: () => '캡처 확인: 구획이 8개 미만으로 짧습니다',
+  VISION_FEW_SECTIONS: () => '캡처 확인: 구획이 9개 미만이거나 13개를 넘습니다',
+  // ★ 2026-09-06 v3 채점 12항목 · 브랜드 색 폴백 · 블록 최소 요건(전부 경고 · 발송을 막지 않습니다)
+  VISION_UNCAPTIONED_IMAGE: () => '캡처 확인: 설명 글자가 없는 이미지 블록이 있습니다',
+  VISION_NO_FIRST_HEADLINE: () => '캡처 확인: 첫 화면에 읽을 수 있는 헤드라인이 없습니다',
+  VISION_COLOR_MIXED: () => '캡처 확인: 버튼·밴드·태그의 강조색이 한 계열이 아닙니다',
+  VISION_TEXT_CLIPPED: () => '캡처 확인: 잘리거나 겹쳐 끝이 보이지 않는 글자가 있습니다',
+  BRAND_COLOR_FALLBACK: () => '홈페이지에서 브랜드 색을 읽지 못해 무채색 주색으로 만들었습니다',
+  BLOCK_MINIMA_SHORT: (v) => `블록 ${v ?? 0}곳의 글자·상품 수가 최소 요건에 못 미칩니다(경고만)`,
 };
+/** ★ v3 사람 수정 사유 5값(서버 화이트리스트와 같은 값 · 학습 원장) */
+const EDIT_REASON_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'no_text', label: '설명 글자가 없음' }, { value: 'duplicate', label: '중복' }, { value: 'blurry', label: '흐림·품질' }, { value: 'wrong', label: '내용 틀림' }, { value: 'tone', label: '톤이 다름' },
+];
 const SECTION_TYPE_LABEL: Record<string, string> = {
   header: '머리말', hero: '메인', text_card: '텍스트 카드', product_carousel: '상품 묶음', gallery: '갤러리', coupon: '쿠폰',
   countdown: '카운트다운', cta: '버튼', footer: '꼬리말', promo_code: '프로모션 코드', reviews: '후기', store_info: '매장 정보',
@@ -180,8 +194,9 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [notesOpen, setNotesOpen] = useState(false);
   const [dupState, setDupState] = useState<{ existingJobId: string; existingStage?: string } | null>(null);
 
-  // 확인 단계 선택
-  const [eventChoice, setEventChoice] = useState<string>('none'); // 'none' | index 문자열 | 'manual'
+  // 확인 단계 선택 — ★ v3 행사는 다중 선택(≤3 · 누른 순서 = DM 등장 순서) · 'manual' 은 직접 붙여넣기 · 'none' 은 선택 0
+  const [eventChoice, setEventChoice] = useState<string>('none'); // 'none' | 'manual'
+  const [eventPicks, setEventPicks] = useState<number[]>([]);
   const [manualEventText, setManualEventText] = useState('');
   const [imageChoice, setImageChoice] = useState<string>('');     // '' = 이미지 없이
   const [materialOpen, setMaterialOpen] = useState(false);
@@ -204,6 +219,11 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [subjectEditing, setSubjectEditing] = useState(false);
   const [previewWidth, setPreviewWidth] = useState<600 | 375>(600);
   const [testTo, setTestTo] = useState('');
+  // ★ v3 회신 문장 편집(60자 · 저장 = 메일 재조립) · DM 탭 폭 토글 · 사람 수정 사유(학습 원장 · 기본 = 사유 안 남김)
+  const [replyDraft, setReplyDraft] = useState('');
+  const [replyEditing, setReplyEditing] = useState(false);
+  const [dmWidth, setDmWidth] = useState<375 | 600>(375);
+  const [editReason, setEditReason] = useState('');
 
   // 대량 업로드 · 진행 목록(0824 Harold: 일괄 등록 + 진행률 + 이력 + 건별 산출물 링크·메일 미리보기)
   const [listMode, setListMode] = useState(false);
@@ -437,6 +457,9 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
 
   const resetInputState = () => {
     setEventChoice('none');
+    setEventPicks([]);
+    setReplyEditing(false);
+    setEditReason('');
     setManualEventText('');
     setImageChoice('');
     setMaterialOpen(false);
@@ -482,8 +505,9 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const confirmSelection = async () => {
     if (!job) return;
     const body: any = { imageUrl: imageChoice || null, industryCategory: industryCode || undefined };
+    // ★ v3 다중 선택 배열(누른 순서) · 직접 붙여넣기 우선 · 선택 0 = 행사 없음
     if (eventChoice === 'manual') body.manualEventText = manualEventText;
-    else if (eventChoice !== 'none') body.eventIndex = Number(eventChoice);
+    else if (eventPicks.length) { body.eventIndexes = eventPicks; body.eventIndex = eventPicks[0]; }
     else body.eventIndex = null;
     const res = await callAction(`/api/sales-outreach/jobs/${job.id}/confirm`, body);
     if (res.ok) {
@@ -496,7 +520,32 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const recrawl = async () => {
     if (!job) return;
     const res = await callAction(`/api/sales-outreach/jobs/${job.id}/recrawl`, { homepageUrl: recrawlUrl.trim() || null });
-    if (res.ok) { toast.success('홈페이지를 다시 읽습니다.'); setEventChoice('none'); setImageChoice(''); await loadJob(job.id); }
+    if (res.ok) { toast.success('홈페이지를 다시 읽습니다.'); setEventChoice('none'); setEventPicks([]); setImageChoice(''); await loadJob(job.id); }
+  };
+  /** ★ v3 행사 체크(누른 순서 유지 · 최대 3) */
+  const toggleEventPick = (i: number) => {
+    setEventChoice('none');
+    setEventPicks((cur) => (cur.includes(i) ? cur.filter((x) => x !== i) : cur.length >= 3 ? cur : [...cur, i]));
+  };
+  /** ★ v3 회신 문장 저장(0~60자 · 비우면 기본 문장 · 메일 재조립 AI 0) */
+  const saveReply = async () => {
+    if (!job) return;
+    const res = await callAction(`/api/sales-outreach/jobs/${job.id}/reply-line`, { text: replyDraft.trim() });
+    if (res.ok) { setReplyEditing(false); toast.success('회신 문장을 반영해 메일을 다시 조립합니다.'); await loadJob(job.id); }
+  };
+  /** ★ v3 레시피 승격(학습 원장 · 원문 0 · 같은 건 1회) */
+  const promoteRecipe = () => {
+    if (!job) return;
+    setConfirmState({
+      mode: 'warning',
+      title: '이 건의 제작 레시피를 학습 저장소에 올립니다',
+      description: '재료 수 · 블록 순서 · 블록별 출처 · 판정 · 사람 수정 통계만 올라갑니다(문구·이미지 원문은 올라가지 않습니다). 같은 건은 한 번만 올릴 수 있습니다.',
+      confirmLabel: '승격',
+      onConfirm: async () => {
+        const r = await callAction(`/api/sales-outreach/jobs/${job.id}/promote-recipe`);
+        if (r.ok) toast.success('레시피를 올렸습니다.');
+      },
+    });
   };
 
   const sendMail = () => {
@@ -577,7 +626,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
       description: `상품 ${matProducts.length}개 · 사진 ${matGallery.length}장으로 모바일 DM과 이메일 시안을 다시 만들고 메일을 재조립합니다. 제목·서두·문안은 그대로 둡니다. 기존 모바일 DM 링크는 새 메일이 조립된 뒤 닫힙니다.`,
       confirmLabel: '다시 만들기',
       onConfirm: async () => {
-        const res = await callAction(`/api/sales-outreach/jobs/${job.id}/materials`, { products: matProducts, gallery: matGallery });
+        const res = await callAction(`/api/sales-outreach/jobs/${job.id}/materials`, { products: matProducts, gallery: matGallery, reason: editReason || undefined });
         if (res.ok) { matDirtyRef.current = false; toast.success('고른 재료로 다시 만들고 있습니다. 창을 닫아도 계속 진행됩니다.'); await loadJob(job.id); }
       },
     });
@@ -587,7 +636,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     if (!job) return;
     const hidden = kind === 'dm' ? hiddenDm : hiddenEmail;
     const run = async () => {
-      const res = await callAction(`/api/sales-outreach/jobs/${job.id}/sections`, { kind, hidden });
+      const res = await callAction(`/api/sales-outreach/jobs/${job.id}/sections`, { kind, hidden, reason: editReason || undefined });
       if (res.ok) { hiddenDirtyRef.current[kind] = false; toast.success(kind === 'dm' ? '모바일 DM을 다시 발행하고 있습니다.' : '이메일 시안을 다시 조립하고 있습니다.'); await loadJob(job.id); }
     };
     if (kind === 'dm') {
@@ -787,9 +836,16 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-[11px] text-white/60">블록 숨기기 · 체크한 블록을 빼고 다시 {kind === 'dm' ? '발행' : '조립'}합니다(머리말·꼬리말 제외 · 3개 이상 남김){Number(regenSeq.sections) > 0 ? ` · ${Number(regenSeq.sections)}/10회` : ''}</span>
           {stage === 'ready' && (
-            <button onClick={() => applyHidden(kind)} disabled={busy || !hiddenChanged(kind)} className={smallBtnDark}>
-              <EyeOff className="w-3.5 h-3.5" /> 숨김 반영{cur.length ? ` (${cur.length})` : ''}
-            </button>
+            <span className="flex items-center gap-1.5">
+              {/* ★ v3 사유(학습 원장 · 선택) */}
+              <select value={editReason} onChange={(e) => setEditReason(e.target.value)} className="px-2 py-1.5 rounded-lg text-[11px] bg-white/10 text-white/80 border border-white/20 outline-none">
+                <option value="">사유 안 남김</option>
+                {EDIT_REASON_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <button onClick={() => applyHidden(kind)} disabled={busy || !hiddenChanged(kind)} className={smallBtnDark}>
+                <EyeOff className="w-3.5 h-3.5" /> 숨김 반영{cur.length ? ` (${cur.length})` : ''}
+              </button>
+            </span>
           )}
         </div>
         <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
@@ -1189,6 +1245,13 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                       재료가 얇습니다(상품 4개 · 배너 2장 · 행사 1건 중 둘 이상 미달). 제작은 진행되지만 발송은 잠기고, 검토 화면에서 산출물을 확인한 뒤 해제할 수 있습니다.
                     </p>
                   )}
+                  {/* ★ v3 이벤트 목록 카드 수 · 브랜드 색 폴백 1줄(서버 값만) */}
+                  {Number(materials.counts.eventCards) > 0 && (
+                    <p className="mt-2 text-[11px] text-indigo-700">이벤트 목록 페이지에서 행사 카드 {Number(materials.counts.eventCards)}건(제목 · 기간 · 배너 · 링크)을 읽었습니다. 아래에서 최대 3개를 고르면 그 순서로 모바일 DM에 실립니다.</p>
+                  )}
+                  {job.brand_profile?.brand?.colorSource === 'neutral' && (
+                    <p className="mt-2 text-[11px] text-amber-700">홈페이지에서 브랜드 색을 읽지 못했습니다. 무채색 주색으로 제작됩니다.</p>
+                  )}
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -1212,35 +1275,56 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                       </div>
                     </div>
                   )}
-                  <div className="space-y-2">
-                    {candidates.map((c, i) => (
-                      <label key={i} className={`block p-3 rounded-lg border cursor-pointer text-sm ${
-                        eventChoice === String(i) ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
-                      }`}>
-                        <input type="radio" name="so-event" className="mr-2" checked={eventChoice === String(i)}
-                          onChange={() => setEventChoice(String(i))} />
-                        <span className="text-gray-800">"{c.quote}"</span>
-                        <div className="mt-1 flex items-center gap-2 flex-wrap">
-                          {c.endDate && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">종료 {c.endDate}</span>}
-                          {c.sourceUrl && c.sourceUrl !== job.homepage_url && c.sourceUrl !== 'manual' && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">행사 페이지에서</span>}
-                          {c.benefitLicensed
-                            ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">혜택 문구 인용 가능</span>
-                            : <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">혜택 숫자는 직접 입력 자리로</span>}
-                        </div>
-                      </label>
-                    ))}
+                  {/* ★ v3 행사 카드 격자 — 다중 선택(≤3 · 누른 순서 = DM 등장 순서 · 1·2번은 DM 블록 · 3번은 마지막 버튼 목적지) · 카드 후보(origin card)는 배너·제목·기간·상세 링크 · 옛 후보는 인용문 행 */}
+                  {candidates.length > 0 && (
+                    <p className="mb-2 text-[11px] text-gray-500">행사를 최대 3개까지 고를 수 있습니다. 누른 순서대로 모바일 DM에 실립니다(1·2번은 블록 · 3번은 마지막 버튼). {eventPicks.length ? `${eventPicks.length}개 선택` : '아무것도 고르지 않으면 서버 기본 선택으로 시작합니다'}.</p>
+                  )}
+                  <div className={`grid gap-2 ${candidates.some((c) => c?.origin === 'card') ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                    {candidates.map((c, i) => {
+                      const on = eventPicks.includes(i);
+                      const order = eventPicks.indexOf(i);
+                      const full = !on && eventPicks.length >= 3;
+                      const isCard = c?.origin === 'card';
+                      return (
+                        <label key={i} title={full ? '행사는 3개까지 담깁니다' : undefined}
+                          className={`relative block rounded-xl border text-sm overflow-hidden ${on ? 'border-blue-500 bg-blue-50' : full ? 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed' : 'border-gray-200 hover:bg-gray-50 cursor-pointer'}`}>
+                          {isCard && c.bannerUrl && (
+                            <img src={String(c.bannerUrl)} alt="" loading="lazy" className="w-full aspect-[16/7] object-cover bg-gray-100" />
+                          )}
+                          <div className="p-3">
+                            <div className="flex items-start gap-2">
+                              <input type="checkbox" className="mt-0.5 accent-blue-600" checked={on} disabled={full || eventChoice === 'manual'} onChange={() => toggleEventPick(i)} />
+                              <span className="text-gray-800 min-w-0">{isCard ? String(c.title || c.quote) : `"${c.quote}"`}</span>
+                              {on && <span className="ml-auto shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-semibold">{order + 1}</span>}
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                              {isCard && c.periodRaw && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{String(c.periodRaw)}</span>}
+                              {!isCard && c.endDate && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">종료 {c.endDate}</span>}
+                              {isCard && <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">이벤트 목록 카드</span>}
+                              {!isCard && c.sourceUrl && c.sourceUrl !== job.homepage_url && c.sourceUrl !== 'manual' && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">행사 페이지에서</span>}
+                              {c.benefitLicensed
+                                ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">혜택 문구 인용 가능</span>
+                                : <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">혜택 숫자는 직접 입력 자리로</span>}
+                              {isCard && c.detailUrl && <a href={String(c.detailUrl)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="ml-auto text-[11px] text-blue-600 hover:underline inline-flex items-center gap-0.5"><ExternalLink className="w-3 h-3" /> 상세</a>}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 space-y-2">
                     <label className={`block p-3 rounded-lg border cursor-pointer text-sm ${
-                      eventChoice === 'none' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
+                      eventChoice === 'none' && eventPicks.length === 0 ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
                     }`}>
-                      <input type="radio" name="so-event" className="mr-2" checked={eventChoice === 'none'}
-                        onChange={() => setEventChoice('none')} />
+                      <input type="radio" name="so-event" className="mr-2" checked={eventChoice === 'none' && eventPicks.length === 0}
+                        onChange={() => { setEventChoice('none'); setEventPicks([]); }} />
                       행사 없음 · 브랜드 일반형으로 제작
                     </label>
                     <label className={`block p-3 rounded-lg border cursor-pointer text-sm ${
                       eventChoice === 'manual' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
                     }`}>
                       <input type="radio" name="so-event" className="mr-2" checked={eventChoice === 'manual'}
-                        onChange={() => setEventChoice('manual')} />
+                        onChange={() => { setEventChoice('manual'); setEventPicks([]); }} />
                       행사 내용 직접 붙여넣기
                     </label>
                     {eventChoice === 'manual' && (
@@ -1389,7 +1473,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                         <div key={w.code} className="flex items-center justify-between gap-2 flex-wrap">
                           <span>{qualityText(w)}</span>
                           {(w.code === 'NO_PRODUCTS' || w.code === 'FEW_PRODUCTS' || w.code === 'FEW_GALLERY') && hasMaterials && <button onClick={() => setReviewTab('materials')} className="text-blue-600 hover:underline">재료 보기</button>}
-                          {(w.code === 'CTA_ALL_HOME' || w.code === 'FEW_SECTIONS' || w.code === 'NO_LOOK') && <button onClick={() => setReviewTab('dm')} className="text-blue-600 hover:underline">모바일 DM 보기</button>}
+                          {(w.code === 'CTA_ALL_HOME' || w.code === 'FEW_SECTIONS' || w.code === 'NO_LOOK' || w.code === 'BLOCK_MINIMA_SHORT' || w.code.startsWith('VISION_')) && <button onClick={() => setReviewTab('dm')} className="text-blue-600 hover:underline">모바일 DM 보기</button>}
                           {w.code === 'NO_BRAND_EMAIL' && stage === 'ready' && <button onClick={() => regenerate('email')} className="text-blue-600 hover:underline">제목·서두·이메일 시안 다시 생성</button>}
                         </div>
                       ))}
@@ -1423,6 +1507,25 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                               <button onClick={() => setPreviewWidth(375)} className={`p-1.5 rounded-lg ${previewWidth === 375 ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white'}`} title="모바일 폭"><Smartphone className="w-4 h-4" /></button>
                             </div>
                           </div>
+                          {/* ★ v3 회신 유도 문장(마지막 카드 마지막 줄 · 60자 · 저장 = 재조립 AI 0) */}
+                          {emailAsset?.html && (
+                            <div className="flex items-center gap-2 flex-wrap text-[11px] text-white/70">
+                              {replyEditing ? (
+                                <>
+                                  <input value={replyDraft} onChange={(e) => setReplyDraft(e.target.value.slice(0, 60))} placeholder="비우면 기본 문장으로 돌아갑니다"
+                                    className="flex-1 min-w-[220px] px-3 py-1.5 rounded-lg text-xs bg-white text-gray-800 outline-none" />
+                                  <span className="text-white/40">{replyDraft.length}/60</span>
+                                  <button onClick={saveReply} disabled={busy} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs disabled:opacity-40">저장하고 재조립</button>
+                                  <button onClick={() => setReplyEditing(false)} className="px-2 py-1.5 rounded-lg text-white/70 hover:text-white">취소</button>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="truncate min-w-0">회신 문장: {sr.reply_line?.text ? String(sr.reply_line.text) : '기본 문장(이미지 2장과 자사몰 주소 회신 요청)'}</span>
+                                  {stage === 'ready' && <button onClick={() => { setReplyDraft(String(sr.reply_line?.text || '')); setReplyEditing(true); }} className={smallBtnDark}><Pencil className="w-3.5 h-3.5" /> 회신 문장 편집</button>}
+                                </>
+                              )}
+                            </div>
+                          )}
                           {emailAsset?.html ? (
                             <iframe title="제안 메일 미리보기" srcDoc={emailAsset.html} sandbox=""
                               className="bg-white rounded-xl border-0 mx-auto block h-[60vh] min-h-[420px] transition-all"
@@ -1467,9 +1570,14 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                       {reviewTab === 'dm' && (
                         <div className="text-center">
                           {/* ★ 0905(3) C4-1 검토 화면 안에서 본다 — 정규 뷰어 URL을 sandbox iframe으로(이메일 탭 선례 · 스크립트 0 = 열람 통계 오염 0) */}
+                          {/* ★ v3 폭 토글(375 = 담당자 손 안 · 600 = 데스크탑) */}
+                          <div className="mb-2 flex items-center justify-end gap-1">
+                            <button onClick={() => setDmWidth(600)} className={`p-1.5 rounded-lg ${dmWidth === 600 ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white'}`} title="데스크탑 폭"><Monitor className="w-4 h-4" /></button>
+                            <button onClick={() => setDmWidth(375)} className={`p-1.5 rounded-lg ${dmWidth === 375 ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white'}`} title="모바일 폭"><Smartphone className="w-4 h-4" /></button>
+                          </div>
                           {dmAsset?.viewerUrl || dmAsset?.dmUrl ? (
                             <iframe title="모바일 DM 미리보기" src={String(dmAsset.viewerUrl || dmAsset.dmUrl)} sandbox=""
-                              className="bg-white rounded-xl border-0 mx-auto block h-[60vh] min-h-[420px]" style={{ width: '100%', maxWidth: 375 }} />
+                              className="bg-white rounded-xl border-0 mx-auto block h-[60vh] min-h-[420px] transition-all" style={{ width: '100%', maxWidth: dmWidth }} />
                           ) : <div className="text-white/40 text-sm py-12">모바일 DM이 없습니다</div>}
                           <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
                             {dmAsset?.dmUrl && (
@@ -1506,6 +1614,15 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                               </button>
                             )}
                           </div>
+                          {stage === 'ready' && (
+                            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-white/60">
+                              다시 고르는 사유(선택 · 학습에 쓰입니다)
+                              <select value={editReason} onChange={(e) => setEditReason(e.target.value)} className="px-2 py-1 rounded-lg bg-white/10 text-white/80 border border-white/20 outline-none">
+                                <option value="">사유 안 남김</option>
+                                {EDIT_REASON_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                              </select>
+                            </div>
+                          )}
                           <h5 className="mt-3 text-xs font-semibold text-white/80">상품 {matProducts.length}/{mediaProducts.length}</h5>
                           {mediaProducts.length === 0 && <p className="text-[11px] text-white/40 mt-1">실측을 통과한 상품이 없습니다.</p>}
                           <ul className="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -1516,7 +1633,16 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                                   <img src={u} alt="" className="w-full aspect-square object-cover" />
                                   <div className="p-2 text-[11px]">
                                     <div className={`truncate ${on ? 'text-gray-800' : 'text-white/70'}`}>{String(x.name || '')}</div>
-                                    <div className={on ? 'text-gray-500' : 'text-white/40'}>{x.price ? `${Number(x.price).toLocaleString()}원` : ''}{x.width ? ` · ${x.width}px` : ''}</div>
+                                    <div className={on ? 'text-gray-500' : 'text-white/40'}>{x.discount_price ? `${Number(x.discount_price).toLocaleString()}원 · 정가 ${Number(x.price || 0).toLocaleString()}원` : x.price ? `${Number(x.price).toLocaleString()}원` : ''}{x.width ? ` · ${x.width}px` : ''}</div>
+                                    {/* ★ v3 카드 원문 사실(뱃지 · 평점 · 리뷰 수 · 할인율 · 수상) — 서버가 상세·목록에서 읽은 값만 */}
+                                    {(Array.isArray(x.badges) && x.badges.length > 0 || x.rating || x.review_count || x.discount_rate || (Array.isArray(x.awards) && x.awards.length > 0)) && (
+                                      <div className="mt-1 flex flex-wrap gap-1">
+                                        {(Array.isArray(x.badges) ? x.badges : []).slice(0, 4).map((b: string) => <span key={b} className={`px-1 rounded ${on ? 'bg-gray-100 text-gray-600' : 'bg-white/10 text-white/60'}`}>{b}</span>)}
+                                        {x.discount_rate ? <span className={`px-1 rounded ${on ? 'bg-rose-50 text-rose-600' : 'bg-white/10 text-white/60'}`}>{Number(x.discount_rate)}%</span> : null}
+                                        {x.rating ? <span className={`px-1 rounded ${on ? 'bg-emerald-50 text-emerald-700' : 'bg-white/10 text-white/60'}`}>평점 {x.rating}{x.review_count ? ` (${Number(x.review_count).toLocaleString()})` : ''}</span> : null}
+                                        {(Array.isArray(x.awards) ? x.awards : []).slice(0, 1).map((a: string) => <span key={a} className={`px-1 rounded truncate max-w-full ${on ? 'bg-amber-50 text-amber-700' : 'bg-white/10 text-white/60'}`}>{a}</span>)}
+                                      </div>
+                                    )}
                                     <div className="mt-1 flex items-center gap-1">
                                       <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={on} disabled={stage !== 'ready'} onChange={() => toggleMat('products', u)} className="accent-blue-500" /><span className={on ? 'text-gray-700' : 'text-white/60'}>{on ? '남김' : '제외'}</span></label>
                                       {on && <span className="ml-auto flex gap-0.5"><button onClick={() => moveMat('products', u, -1)} disabled={idx <= 0 || stage !== 'ready'} className="px-1 rounded bg-gray-100 text-gray-600 disabled:opacity-30">←</button><button onClick={() => moveMat('products', u, 1)} disabled={idx >= matProducts.length - 1 || stage !== 'ready'} className="px-1 rounded bg-gray-100 text-gray-600 disabled:opacity-30">→</button></span>}
@@ -1560,11 +1686,17 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                       )}
                       <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4">
                         <h4 className="text-xs font-semibold text-gray-500 mb-2">읽은 근거</h4>
-                        {job.event_quote?.selected ? (
-                          <p className="text-sm text-gray-700">"{job.event_quote.selected.quote}"</p>
+                        {/* ★ v3 다중 선택(선택 순서 = DM 등장 순서) · 옛 기록은 selected 1건 */}
+                        {Array.isArray(job.event_quote?.selectedList) && job.event_quote!.selectedList!.length > 1 ? (
+                          <ol className="text-sm text-gray-700 space-y-0.5 list-decimal pl-5">
+                            {job.event_quote!.selectedList!.map((c: any, i: number) => <li key={i}>{c.origin === 'card' ? String(c.title || c.quote) : `"${c.quote}"`}{c.periodRaw ? <span className="text-gray-400"> · {String(c.periodRaw)}</span> : null}</li>)}
+                          </ol>
+                        ) : job.event_quote?.selected ? (
+                          <p className="text-sm text-gray-700">{job.event_quote.selected.origin === 'card' ? String(job.event_quote.selected.title || job.event_quote.selected.quote) : `"${job.event_quote.selected.quote}"`}</p>
                         ) : (
                           <p className="text-sm text-gray-400">행사 없이 일반형으로 제작했습니다.</p>
                         )}
+                        {dmAsset?.bannerFallback && <p className="mt-1 text-[11px] text-gray-500">이벤트 카드가 없어 홈 배너의 글자를 읽어 행사 카드로 세웠습니다(면허 없음 · 수치는 원문 재대조 통과분만).</p>}
                         {imageAsset?.skippedReason && (
                           <p className="mt-2 text-xs text-amber-600">{imageAsset.skippedReason}</p>
                         )}
@@ -1592,17 +1724,44 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                             </p>
                           )}
                           {chain && <p>일괄 등록 {chain.total}건 중 {chain.index}번째</p>}
+                          {/* ★ v3 관측 1줄 — 서버가 센 AI 호출 수 · 자동 재조립 · 사람 재생성(값이 없으면 안 그린다) */}
+                          {sr.ai_cost && typeof sr.ai_cost === 'object' && Number(sr.ai_cost.calls) > 0 && (
+                            <p>이 건에 쓴 AI 호출 {Number(sr.ai_cost.calls)}회 · 자동 재조립 {Number(sr.auto_seq?.dm) || 0}/1{Array.isArray(dmAsset?.autoRetry?.reasons) && dmAsset.autoRetry.reasons.length ? `(${dmAsset.autoRetry.reasons.join(', ')})` : ''} · 모바일 DM 사람 재생성 {Number(regenSeq.dm) || 0}/5</p>
+                          )}
+                          {Number(dmAsset?.eventCards) > 0 && <p>행사 카드 {Number(dmAsset.eventCards)}건을 모바일 DM 블록으로 세웠습니다(설명 없는 이미지 블록 0).</p>}
+                          {Array.isArray(dmAsset?.blockGate?.short) && dmAsset.blockGate.short.length > 0 && <p className="text-amber-600">블록 최소 요건 미달 {dmAsset.blockGate.short.length}곳(경고만 · 삭제하지 않았습니다)</p>}
                           {sr.mail_last && <p className={sr.mail_last.outcome === 'sent' ? 'text-emerald-700' : 'text-amber-700'}>직전 발송 {fmtDateTime(sr.mail_last.at)} · {sr.mail_last.outcome}{Array.isArray(sr.mail_last.rejected) && sr.mail_last.rejected.length ? ` · 거부 ${sr.mail_last.rejected.join(', ')}` : ''}</p>}
                         </div>
+                        {job.brand_profile?.homeCaptureUrl && (
+                          <div className="mt-3 flex items-start gap-2">
+                            <img src={String(job.brand_profile.homeCaptureUrl)} alt="" className="w-14 rounded-md border border-gray-200 bg-gray-50" />
+                            <p className="text-[11px] text-gray-500">담당자 홈 첫 화면 캡처(375폭) · 제안 메일 1막 대조의 왼쪽 그림입니다.</p>
+                          </div>
+                        )}
                       </div>
-                      {previewUrl && (
-                        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4">
-                          <h4 className="text-xs font-semibold text-gray-500 mb-2">공개 샘플 주소</h4>
-                          <a href={previewUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 break-all hover:underline">{previewUrl}</a>
-                          <p className="mt-1 text-[11px] text-gray-400">메일 속 [산출물 보기] 버튼이 여는 주소입니다. 기간이 지나면 닫힙니다.</p>
+                      {/* ★ v3 담당자가 열 주소 2줄(모바일 DM · 공개 샘플) + 복사 · 레시피 승격 */}
+                      {(dmAsset?.dmUrl || previewUrl) && (
+                        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4 space-y-2">
+                          <h4 className="text-xs font-semibold text-gray-500">담당자가 열 주소</h4>
+                          {dmAsset?.dmUrl && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="shrink-0 text-gray-400 w-16">모바일 DM</span>
+                              <a href={String(dmAsset.dmUrl)} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate text-blue-600 hover:underline">{String(dmAsset.dmUrl)}</a>
+                              <button onClick={() => { navigator.clipboard?.writeText(String(dmAsset.dmUrl)).then(() => toast.success('주소를 복사했습니다.')).catch(() => {}); }} className="shrink-0 text-gray-500 hover:text-gray-800">복사</button>
+                            </div>
+                          )}
+                          {previewUrl && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="shrink-0 text-gray-400 w-16">공개 샘플</span>
+                              <a href={previewUrl} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate text-blue-600 hover:underline">{previewUrl}</a>
+                              <button onClick={() => { navigator.clipboard?.writeText(previewUrl).then(() => toast.success('주소를 복사했습니다.')).catch(() => {}); }} className="shrink-0 text-gray-500 hover:text-gray-800">복사</button>
+                            </div>
+                          )}
+                          {(stage === 'ready' || stage === 'sent') && dmAsset?.recipe && (
+                            <button onClick={promoteRecipe} disabled={busy} className={`${smallBtn} mt-1`}><Upload className="w-3.5 h-3.5" /> 이 건의 레시피를 학습에 올리기</button>
+                          )}
                         </div>
                       )}
-
                       {/* 검수 메일 — 우리 담당자에게 먼저(허용 도메인만) */}
                       <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4 space-y-2">
                         <h4 className="text-xs font-semibold text-gray-500 flex items-center gap-1"><Mail className="w-3.5 h-3.5" /> 검수 메일 보내기</h4>

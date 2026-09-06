@@ -14,7 +14,7 @@
 import http from 'node:http';
 import {
   extractProducts, extractImageCandidates, extractImageCandidatesDetailed, extractProofSignals, productKey,
-  type OutreachProduct, type ImageCandidateDetail, type ProofSignals,
+  type OutreachProduct, type ImageCandidateDetail, type ProofSignals, type OutreachEventCard,
 } from './sales-outreach-media';
 import type { RenderMeta } from './sales-outreach-render-guard';
 
@@ -22,12 +22,44 @@ export const OUTREACH_RENDER_URL = (process.env.OUTREACH_RENDER_URL || 'http://1
 /** 워커 응답 대기 상한 — 워커 벽시계(최대 45초)보다 길게. 워커 미기동은 ECONNREFUSED 즉시라 이 값과 무관하다. */
 export const OUTREACH_RENDER_REQUEST_TIMEOUT_MS = 60_000;
 
+export interface RenderPaletteEntry { hex: string; weight: number; sources: string[] }
 export interface RenderResult {
   finalUrl: string;
   html: string;
   text: string;
   screenshotBase64: string | null;
   meta: RenderMeta;
+  /** ★ 0906(3) 렌더된 페이지의 브랜드 팔레트(계산된 스타일 · 채도 있는 색 · 면적 가중 · 최대 8) */
+  palette: RenderPaletteEntry[];
+  /** ★ 0906(3) 첫 화면(뷰포트 · 900px)만 담은 JPEG */
+  screenshotViewportBase64: string | null;
+}
+
+const hexRgb = (hex: string): [number, number, number] | null => {
+  const m = /^#([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+
+/**
+ * 팔레트 → 브랜드 주색 1개(순수). 채도 0.25 이상 · 밝기 0.08~0.78(흰 배경·검정 글자 제외) 중 가중치 최대. 없으면 null(호출부가 무채색 톤으로 간다 · 기본 보라 금지).
+ */
+export function pickBrandColorFromPalette(palette: ReadonlyArray<RenderPaletteEntry> | null | undefined): string | null {
+  if (!Array.isArray(palette) || palette.length === 0) return null;
+  const scored = palette.map((p) => {
+    const rgb = hexRgb(p.hex);
+    if (!rgb) return null;
+    const [r, g, b] = rgb.map((v) => v / 255) as [number, number, number];
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const sat = mx === 0 ? 0 : (mx - mn) / mx;
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    if (sat < 0.25 || lum < 0.08 || lum > 0.78) return null;
+    return { hex: p.hex.toLowerCase(), weight: Number(p.weight) || 0 };
+  }).filter((x): x is { hex: string; weight: number } => !!x);
+  if (scored.length === 0) return null;
+  scored.sort((a, b) => b.weight - a.weight);
+  return scored[0].hex;
 }
 export type RenderFailureReason = 'unavailable' | 'busy' | 'blocked' | 'timeout' | 'error';
 export type RenderOutcome =
@@ -35,13 +67,13 @@ export type RenderOutcome =
   | { ok: false; failure: { reason: RenderFailureReason; detail: string } };
 
 /** 워커에 렌더 1건을 요청한다. 워커 부재·점유·차단·시간 초과는 전부 {ok:false}로 돌아온다(throw 0). */
-export function renderPageGuarded(url: string, opts: { deadlineMs?: number; screenshot?: boolean; requestTimeoutMs?: number; baseUrl?: string; viewportWidth?: number } = {}): Promise<RenderOutcome> {
+export function renderPageGuarded(url: string, opts: { deadlineMs?: number; screenshot?: boolean; requestTimeoutMs?: number; baseUrl?: string; viewportWidth?: number; screenshotViewport?: boolean } = {}): Promise<RenderOutcome> {
   return new Promise((resolve) => {
     let settled = false;
     const done = (v: RenderOutcome) => { if (!settled) { settled = true; resolve(v); } };
     let endpoint: URL;
     try { endpoint = new URL('/render', (opts.baseUrl || OUTREACH_RENDER_URL).replace(/\/+$/, '')); } catch { done({ ok: false, failure: { reason: 'error', detail: 'OUTREACH_RENDER_URL 형식 불명' } }); return; }
-    const body = JSON.stringify({ url, deadlineMs: opts.deadlineMs, screenshot: !!opts.screenshot, viewportWidth: opts.viewportWidth });
+    const body = JSON.stringify({ url, deadlineMs: opts.deadlineMs, screenshot: !!opts.screenshot, viewportWidth: opts.viewportWidth, screenshotViewport: !!opts.screenshotViewport });
     const timeoutMs = opts.requestTimeoutMs && opts.requestTimeoutMs > 0 ? opts.requestTimeoutMs : OUTREACH_RENDER_REQUEST_TIMEOUT_MS;
     const req = http.request(
       {
@@ -58,7 +90,7 @@ export function renderPageGuarded(url: string, opts: { deadlineMs?: number; scre
           try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
           if (res.statusCode !== 200 || !parsed) { done({ ok: false, failure: { reason: 'error', detail: `워커 응답 ${res.statusCode || 0}` } }); return; }
           if (parsed.ok === true && typeof parsed.html === 'string') {
-            done({ ok: true, result: { finalUrl: String(parsed.finalUrl || url), html: parsed.html, text: String(parsed.text || ''), screenshotBase64: parsed.screenshotBase64 || null, meta: parsed.meta } });
+            done({ ok: true, result: { finalUrl: String(parsed.finalUrl || url), html: parsed.html, text: String(parsed.text || ''), screenshotBase64: parsed.screenshotBase64 || null, meta: parsed.meta, palette: Array.isArray(parsed.palette) ? parsed.palette : [], screenshotViewportBase64: parsed.screenshotViewportBase64 || null } });
             return;
           }
           const reason: RenderFailureReason = parsed.reason === 'blocked' || parsed.reason === 'timeout' ? parsed.reason : 'error';
@@ -194,10 +226,14 @@ export interface OutreachMaterialsV2 {
   banners: ImageCandidateDetail[];
   /** 사회적 증거(원문 문자열 그대로 · 없으면 null) */
   proof: ProofSignals;
+  /** ★ v3 이벤트 목록 카드(행사 페이지 1홉 HTML 에서 · 원 URL · 최대 6) · 옛 기록에는 없다 */
+  eventCards: OutreachEventCard[];
   counts: {
     products: number; discountPairs: number; banners: number; textChars: number; priceMentions: number;
     /** 정적 계측(승격 판정 입력) · 렌더가 없으면 counts 와 같다 */
     staticTextChars: number; staticProducts: number;
+    /** ★ v3 카드 수 */
+    eventCards: number;
   };
   escalation: { attempted: boolean; reasons: EscalationReason[] };
   collectedAt: string;
@@ -210,15 +246,19 @@ export function buildMaterialsV2(input: {
   text: string;
   staticCounts: MaterialCounts | null;
   escalation: { attempted: boolean; reasons: EscalationReason[] };
+  /** ★ v3 이벤트 목록 카드(없으면 []) */
+  eventCards?: OutreachEventCard[];
   now?: Date;
 }): OutreachMaterialsV2 {
   const proof = extractProofSignals(input.text || '');
+  const eventCards = Array.isArray(input.eventCards) ? input.eventCards : [];
   return {
     v: 2,
     source: input.source,
     products: input.products,
     banners: input.banners,
     proof,
+    eventCards,
     counts: {
       products: input.products.length,
       discountPairs: input.products.filter((p) => p.discount_price !== null && p.price !== null && (p.discount_price as number) < (p.price as number)).length,
@@ -227,6 +267,7 @@ export function buildMaterialsV2(input: {
       priceMentions: (String(input.text || '').match(PRICE_MENTION_RE) || []).length,
       staticTextChars: input.staticCounts?.textChars ?? 0,
       staticProducts: input.staticCounts?.products ?? 0,
+      eventCards: eventCards.length,
     },
     escalation: input.escalation,
     collectedAt: (input.now || new Date()).toISOString(),

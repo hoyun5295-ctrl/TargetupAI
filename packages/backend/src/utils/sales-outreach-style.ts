@@ -37,6 +37,28 @@ export interface OutreachStyleGuide {
     preheader: (companyName: string) => string;
     introDefault: (companyName: string) => string;
     hero: { headline: string; headlineNoImage: (companyName: string) => string; subCopy: string };
+    /**
+     * ★ 0906(3) Harold 스토리라인 — 1) 홈페이지만 읽고 자동으로 이만큼(기술력) 2) 자사몰 연동·이미지 몇 장이면 훨씬 위 3) 5분이면 브로마이드급(features).
+     * 사실만 · 로드맵 0 · 모델명 0. 캡처 갤러리 문구는 이미지 렌더러가 title 과 caption 을 그린다.
+     */
+    story: {
+      auto: { tag: string; headline: string; body: (companyName: string) => string };
+      /**
+       * ★ v3 대조 2장(설계서 §8) — 왼쪽 = 담당자 홈 첫 화면 캡처(있을 때만) · 오른쪽 = 자동으로 만든 모바일 DM 첫 화면 캡처 · 포스터 카드. 전부 이미지 위 text_card(gallery 0).
+       * 캡처 위에는 글자를 얹지 않는다(카드의 headline·body 가 설명).
+       */
+      capture: {
+        title: string;
+        homeHeadline: (companyName: string) => string; homeBody: string;
+        dmHeadline: string; dmBody: (companyName: string) => string;
+        posterHeadline: string; posterBody: string;
+        /** 옛 키(갤러리 캡션) — 평문 대체본이 계속 쓴다 */
+        dmCaption: string; posterCaption: string;
+      };
+      compare: { tag: string; headline: string; body: (companyName: string) => string; imageTitle: string; imageCaption: string };
+    };
+    /** ★ v3 회신 유도 1문장(마지막 카드 body 마지막 줄 · 검토 화면에서 60자까지 편집 = stage_results.reply_line) */
+    reply: string;
     lead: { tag: string; headlineWithEvent: string; headlineNoEvent: string; quoteLabel: string };
     sample: { tag: string; headline: (companyName: string) => string; body: string };
     showcase: { tag: string; headline: string };
@@ -92,10 +114,36 @@ const STYLE_GUIDE_V1: OutreachStyleGuide = {
     preheader: (c) => `${c} 맞춤 시안 · 한줄로AI 제작 예시`,
     introDefault: (c) => `${c} 홈페이지를 살펴보고, 한줄로AI로 귀사 브랜드에 맞춘 마케팅 예시를 만들어 보았습니다. 아래에서 실물 그대로 확인하실 수 있습니다.`,
     hero: {
-      headline: '귀사 브랜드로 만든 마케팅 시안',
-      headlineNoImage: (c) => `${c} 맞춤 마케팅 시안`,
-      subCopy: '한줄로AI가 만든 예시(시안)입니다',
+      headline: '귀사 홈페이지만 읽고 AI가 자동으로 만든 시안입니다',
+      headlineNoImage: (c) => `${c} 홈페이지만 읽고 AI가 자동으로 만든 시안입니다`,
+      subCopy: '이미지 · 문안 · 모바일 페이지 전부 사람 손 없이 만들어졌습니다(예시 · 시안)',
     },
+    story: {
+      auto: {
+        tag: '1. 홈페이지 주소 하나로',
+        headline: '사람 손 없이 여기까지 만들었습니다',
+        body: (c) => `${c} 홈페이지를 AI가 읽고 대표 이미지 · 모바일 DM · 브랜드 이메일 · 문자 문안을 자동으로 만들었습니다. 아래 화면 캡처와 시안이 그 결과입니다.`,
+      },
+      capture: {
+        title: '자동으로 만든 모바일 DM(화면 캡처)와 대표 이미지',
+        homeHeadline: (c) => `${c} 홈페이지 첫 화면(읽은 원본)`,
+        homeBody: 'AI가 읽은 출발점입니다. 이 화면의 배너 · 행사 · 상품 정보만으로 아래 시안을 만들었습니다.',
+        dmHeadline: '자동으로 만든 모바일 DM 첫 화면',
+        dmBody: (c) => `${c} 홈페이지의 행사와 상품을 그대로 옮긴 모바일 DM 시안입니다. 아래 버튼으로 실제 페이지가 열립니다.`,
+        posterHeadline: '대표 이미지 · 이미지 스튜디오 자동 제작',
+        posterBody: '홈페이지 상품 사진 한 장으로 배경을 걷어내고 연출 템플릿에 얹어 만든 이미지입니다.',
+        dmCaption: '모바일 DM 시안 · 누르면 실제 페이지가 열립니다',
+        posterCaption: '대표 이미지 · 이미지 스튜디오 자동 제작',
+      },
+      compare: {
+        tag: '2. 자사몰 연동과 이미지 몇 장이면',
+        headline: '지금 보신 것은 시작점입니다',
+        body: (c) => `홈페이지만 읽어 만든 결과가 이 정도입니다. ${c} 자사몰을 연동하고 행사 이미지 몇 장만 올리면 상품 · 가격 · 행사를 그대로 읽어 훨씬 뛰어난 품질의 DM과 이메일이 자동으로 나옵니다.`,
+        imageTitle: '이미지 스튜디오 실제 산출물 예시',
+        imageCaption: '한줄로 이미지 스튜디오가 만든 실제 결과물입니다(예시)',
+      },
+    },
+    reply: '이 메일에 행사 이미지 2장과 자사몰 주소만 회신해 주시면 시안 3벌을 더 만들어 보내드립니다.',
     lead: {
       tag: '귀사 홈페이지에서 확인했습니다',
       headlineWithEvent: '지금 진행 중인 소식에 맞춰 만들었습니다',
@@ -114,24 +162,24 @@ const STYLE_GUIDE_V1: OutreachStyleGuide = {
       body: '한줄로는 문자·이메일·모바일 DM·인앱 메시지를 AI가 만들어 보내는 마케팅 자동화 서비스입니다. 이 안내의 이미지·문안·모바일 페이지 전부 한줄로AI가 귀사 홈페이지만 보고 만들었습니다.',
     },
     features: {
-      tag: '한줄로로 할 수 있는 것',
-      headline: (c) => `${c} 담당자님이 바로 쓸 수 있는 세 가지`,
-      body: '이 시안을 만든 같은 도구가 매일의 고객 관계와 반복 캠페인, 그리고 이미지 제작까지 맡습니다.',
+      tag: '3. 5분만 투자하면 브로마이드급',
+      headline: (c) => `${c} 담당자님이 5분으로 바꿀 수 있는 세 가지`,
+      body: '지금 보신 자동 시안 위에 세 가지만 더하면 결과물이 달라집니다.',
       items: [
-        {
-          tag: '여정',
-          headline: () => '고객 한 사람의 시계에 맞춰 보냅니다',
-          body: (c) => `첫 구매·재구매·오랜 미방문처럼 고객이 무언가를 한 그 순간을 출발점으로, ${c} 이름의 문자·모바일 DM·이메일이 정해진 순서로 그 고객에게만 나갑니다. 조건과 대기 시간은 말로 설명하면 AI가 여정으로 설계합니다.`,
-        },
-        {
-          tag: '자동마케팅',
-          headline: () => '목표만 정하면 회차마다 제안서가 도착합니다',
-          body: (c) => `"이번에 등급이 오른 분", "요즘 발길이 끊긴 분"처럼 지난 회차와 달라진 고객을 AI가 골라내고, 그 시점의 계절과 ${c} 소식에 맞춘 캠페인을 제안합니다. 담당자님이 확인하면 발송까지 이어집니다.`,
-        },
         {
           tag: '이미지 스튜디오',
           headline: (hasPoster) => (hasPoster ? '이 메일 맨 위 이미지도 그렇게 만들었습니다' : '상품 사진 한 장으로 포스터가 나옵니다'),
-          body: (c) => `${c} 홈페이지의 상품 사진 한 장을 올리면 배경을 걷어내고 300여 가지 연출 템플릿으로 포스터와 배너를 만듭니다. 문구는 담당자님이 쓴 그대로만 들어가 지어낸 혜택이 실릴 일이 없습니다.`,
+          body: (c) => `${c} 상품 사진을 올리면 배경을 자동으로 걷어내고(누끼) 300여 종 연출 템플릿 중 골라 포스터와 배너를 바로 산출물로 씁니다. 문구는 담당자님이 쓴 그대로만 들어가 지어낸 혜택이 실릴 일이 없습니다.`,
+        },
+        {
+          tag: '문안과 여정',
+          headline: () => '귀사 문자를 학습해 귀사 목소리로 씁니다',
+          body: (c) => `${c} 대표 문안을 학습한 AI가 그 어투로 문자 · 모바일 DM · 이메일 문안을 쓰고, 첫 구매 · 재구매 · 오랜 미방문 같은 고객의 순간을 출발점으로 여정을 설계합니다. 조건과 대기 시간은 말로 설명하면 됩니다.`,
+        },
+        {
+          tag: '자동마케팅',
+          headline: () => '매달 생일자 같은 반복 마케팅은 자동으로',
+          body: (c) => `이달 생일 고객, 등급이 오른 고객, 발길이 끊긴 고객처럼 회차마다 달라지는 대상을 AI가 골라 ${c} 소식에 맞춘 캠페인을 제안하고, 담당자님이 확인하면 발송까지 이어집니다.`,
         },
       ],
     },

@@ -268,6 +268,45 @@ export async function insertOutreachExample(input: {
   }
 }
 
+// ===== ★ 2026-09-06 v3 레시피 승격(설계서 §9 · 불변 39) — kind 'recipe' · 원문 0(content = 섹션 타입 순서 문자열 · meta = 레시피 요약·수정 통계·출처 잡) · CHECK 없음(pg_constraint 실측 2026-09-06 = PK 만) =====
+
+export const OUTREACH_RECIPE_KIND = 'recipe';
+export interface OutreachRecipeMeta {
+  v: 1;
+  source: { jobId: string; dmId: string | null; companyName: string; industryCode: string };
+  recipe: Record<string, unknown>;
+  edits: { total: number; byKind: Record<string, number>; byReason: Record<string, number> };
+  promotedBy: string | null;
+  promotedAt: string;
+}
+
+/** 레시피 1행 append(치환 금지 · 같은 잡의 중복 승격은 호출자가 meta.source.jobId 로 막는다). */
+export async function insertOutreachRecipe(input: { industryCode: string; sectionTypes: readonly string[]; meta: OutreachRecipeMeta }): Promise<{ ok: true; id: string } | { ok: false; reason: 'table_missing' | 'db_error' }> {
+  const id = crypto.randomUUID();
+  try {
+    await pool.query(
+      `INSERT INTO best_copy_assets (id, kind, industry_code, channel, content, meta) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [id, OUTREACH_RECIPE_KIND, input.industryCode, 'DM', input.sectionTypes.join(' → '), JSON.stringify(input.meta)],
+    );
+    return { ok: true, id };
+  } catch (e: any) {
+    if (isMissingTable(e)) return { ok: false, reason: 'table_missing' };
+    console.warn('[best-copy] 레시피 저장 실패:', e?.message);
+    return { ok: false, reason: 'db_error' };
+  }
+}
+
+/** 같은 잡의 레시피가 이미 승격됐는가(중복 방지 · 조회 실패 = ok:false → 저장하지 않는다) */
+export async function findOutreachRecipeByJob(jobId: string): Promise<{ ok: true; id: string | null } | { ok: false; reason: 'table_missing' | 'db_error' }> {
+  try {
+    const r = await pool.query(`SELECT id FROM best_copy_assets WHERE kind = $1 AND meta->'source'->>'jobId' = $2 LIMIT 1`, [OUTREACH_RECIPE_KIND, jobId]);
+    return { ok: true, id: r.rows[0]?.id ? String(r.rows[0].id) : null };
+  } catch (e: any) {
+    if (isMissingTable(e)) return { ok: false, reason: 'table_missing' };
+    return { ok: false, reason: 'db_error' };
+  }
+}
+
 /** 실물 예시 1행 삭제(kind 조건 결속 · 다른 kind는 못 지운다). 3값 — 없음·테이블 부재·오류를 구분한다(실패를 "없음"으로 접지 않는다). */
 export async function deleteOutreachExample(id: string): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'table_missing' | 'db_error' }> {
   try {

@@ -60,18 +60,22 @@ function depsWithFixture() {
 }
 
 describe('조립 엔진 골든(아웃리치 deps + 고정 생성 픽스처)', () => {
-  it('순서·룩·CTA·차단이 고정된다 — 히어로=첫 배너 · 카운트다운(종료일 없음) 제거 · 면허 없는 30%는 차단 · CTA 2개 보장 · 증거 카드 삽입', async () => {
+  it('★ v3 아웃리치 골든(행사 카드 없음) — gallery 0 · 히어로=첫 배너 · 포스터는 이미지 위 text_card · 카운트다운(종료일 없음) 제거 · 면허 없는 30%는 차단 · CTA 2개 보장 · 증거 카드 삽입', async () => {
     const r = await assembleDmCampaign(MATERIALS, { entry: 'outreach', channel: 'DM', skeletonTypes: null, sectionOverride: null, presetSections: null, layoutMode: 'scroll' }, depsWithFixture());
     expect(r.generated).toBe(true);
     expect(r.exemplars).toEqual({ picked: 3, total: 12 });
-    // 스냅샷 — 이 배열이 바뀌면 두 입구(아웃리치·고객 재료)가 함께 바뀐 것이다
-    // 증거 카드(text_card)가 첫 상품 묶음 뒤 · 모델 CTA 1개 + 코드가 보장한 CTA 1개(첫 상품 묶음 뒤)가 이어진다 · 카운트다운은 종료일이 없어 빠졌다
-    // ★ 0906(2) 포스터는 히어로 다음 자기 블록(gallery 1장)
-    expect(r.sectionTypes).toEqual(['header', 'hero', 'gallery', 'text_card', 'product_carousel', 'text_card', 'cta', 'cta', 'gallery', 'text_card', 'footer']);
+    // 스냅샷(아웃리치 v3) — header · hero(b1) · 포스터 text_card · 모델 text_card#1 · 상품 3개 focus 묶음 · 증거 카드 · 코너 CTA(기획전) · 모델 text_card#2(30% 차단) · 대표 목적지 CTA(쿠폰) · footer
+    expect(r.sectionTypes).toEqual(['header', 'hero', 'text_card', 'text_card', 'product_carousel', 'text_card', 'cta', 'text_card', 'cta', 'footer']);
+    expect(r.sectionTypes).not.toContain('gallery');
     expect(r.sectionTypes.filter((t) => t === 'cta').length).toBe(2);
     expect(r.sectionTypes).not.toContain('countdown');
     const hero = r.sections.find((s) => s.type === 'hero') as any;
     expect(hero.props.image_url).toBe('https://hanjul.ai/api/cdp/inapp/image/c/b1.jpg');
+    const poster = r.sections[2] as any;
+    expect(poster.props.image_url).toBe('https://hanjul.ai/api/cdp/inapp/image/c/poster.jpg');
+    expect(poster.props.image_position).toBe('top');
+    expect(String(poster.props.headline || '').length).toBeGreaterThan(0); // 설명 없는 이미지 0
+    expect(poster.treatment).toBeUndefined(); // 이미지 카드 = classic(lead·quote 는 image_url 을 안 그린다)
     const benefitCard = r.sections.filter((s) => s.type === 'text_card').map((s: any) => String(s.props.headline || ''));
     expect(benefitCard.join(' ')).not.toContain('30%');
     expect(r.benefitStripped).toBeGreaterThanOrEqual(1);
@@ -80,6 +84,40 @@ describe('조립 엔진 골든(아웃리치 deps + 고정 생성 픽스처)', ()
     expect((r.look as any).treatments + (r.look as any).backgrounds).toBeGreaterThan(0);
     expect(Array.isArray(r.pages) && r.pages.length).toBe(1);
     expect(r.heroFallback).toBe(false);
+    // 모델 CTA 라벨은 목적지가 홈일 때만 살고, 코너 링크가 있으면 코드 라벨 · 두 CTA 의 URL 은 다르다
+    const ctas = r.sections.filter((s) => s.type === 'cta').map((s: any) => s.props.buttons[0].url);
+    expect(new Set(ctas).size).toBe(2);
+  });
+  it('★ v3 행사 카드 2건 — 카드1 배너(가로형)가 히어로 · 제목·기간 원문 · 카드2는 이미지 위 text_card + cta · 카운트다운은 면허 종료일 · 대표 목적지 CTA 는 코너 링크', async () => {
+    const m: EngineMaterials = {
+      ...MATERIALS,
+      eventCards: [
+        { title: '추석선물세트 특별 기획전', periodRaw: '2026.09.01 ~ 2099.12.31', endDate: '2099-12-31', bannerUrl: 'https://hanjul.ai/api/cdp/inapp/image/c/b2.jpg', bannerSize: { width: 1920, height: 800 }, detailUrl: 'https://brand.example/event/1', licensed: true },
+        { title: '가을 신상 오픈 이벤트 최대 50%', periodRaw: null, endDate: null, bannerUrl: 'https://hanjul.ai/api/cdp/inapp/image/c/b3.jpg', bannerSize: { width: 1920, height: 800 }, detailUrl: 'https://brand.example/event/2', licensed: false },
+      ],
+    };
+    const r = await assembleDmCampaign(m, { entry: 'outreach', channel: 'DM', skeletonTypes: null, sectionOverride: null, presetSections: null, layoutMode: 'scroll' }, depsWithFixture());
+    expect(r.sectionTypes).toEqual(['header', 'hero', 'text_card', 'cta', 'text_card', 'product_carousel', 'text_card', 'text_card', 'cta', 'text_card', 'countdown', 'cta', 'footer']);
+    expect(r.sectionTypes.length).toBeLessThanOrEqual(13);
+    const hero = r.sections[1] as any;
+    expect(hero.props.image_url).toBe('https://hanjul.ai/api/cdp/inapp/image/c/b2.jpg');
+    expect(hero.props.headline).toBe('추석선물세트 특별 기획전');
+    expect(hero.props.sub_copy).toBe('기간 2026.09.01 ~ 2099.12.31');
+    expect(r.heroFallback).toBe(false);
+    const cta1 = r.sections[3] as any;
+    expect(cta1.props.buttons[0]).toMatchObject({ url: 'https://brand.example/event/1', label: '추석선물세트 특별 기획전 보기' });
+    // 카드2 — 면허 없는 "최대 50%" 는 코드가 먼저 걷어낸 제목(차단기가 prop 째 비우지 않는다) · 이미지 위 · 기간 없음
+    const card2 = r.sections[7] as any;
+    expect(card2.props.image_url).toBe('https://hanjul.ai/api/cdp/inapp/image/c/b3.jpg');
+    expect(card2.props.headline).toBe('가을 신상 오픈 이벤트');
+    expect(card2.props.body).toBe('');
+    expect((r.sections[8] as any).props.buttons[0].url).toBe('https://brand.example/event/2');
+    const cd = r.sections.find((s) => s.type === 'countdown') as any;
+    expect(cd.props.end_datetime).toBe('2099-12-31T23:59:59');
+    const last = r.sections[11] as any;
+    expect(last.props.buttons[0].url).toBe('https://brand.example/event'); // 3번째 카드 없음 → 코너(기획전)
+    expect(r.sectionTypes).not.toContain('gallery');
+    expect(r.proofInserted).toBe(true);
   });
   it('면허 인용이 있으면 그 수치는 남는다 · preset 재발행은 생성·채우기를 건너뛴다', async () => {
     const licensed = await assembleDmCampaign({ ...MATERIALS, licensedQuote: '전 상품 30% 할인 · 2026.09.01 ~ 2026.12.31' }, { entry: 'outreach', channel: 'DM', skeletonTypes: null, sectionOverride: null, presetSections: null, layoutMode: 'scroll' }, depsWithFixture());
@@ -90,7 +128,7 @@ describe('조립 엔진 골든(아웃리치 deps + 고정 생성 픽스처)', ()
     expect(preset.generated).toBe(false);
     expect(preset.sectionTypes).toEqual(licensed.sectionTypes);
   });
-  it('고객 입구(entry customer) = 같은 순서 · 업로드 이미지 3장 → 히어로 1 + 갤러리 2장 · 상품 카드 0(이미지 없는 상품은 카드 금지)', async () => {
+  it('고객 입구(entry customer) = 현행 채우기 그대로(바이트 동일 계약) · 업로드 이미지 3장 → 히어로 1 + 갤러리 2장 · 상품 카드 0(이미지 없는 상품은 카드 금지)', async () => {
     const m: EngineMaterials = {
       ...MATERIALS, products: [], posterUrl: null, posterSize: null, ctaLinks: {}, homepageUrl: 'https://shop.example/', legal: null, proof: null,
       gallery: [
@@ -167,7 +205,9 @@ describe('소스 계약 — 엔진 격리 · 라우트 분기', () => {
   it('재료 입구 라우트 — 요금제 게이트는 dm 라우터 것과 같은 함수 · 텍스트 비었을 때만 판독 · 견적에 plan_locked·enabled', () => {
     const ec = code('routes/event-campaigns.ts');
     expect(ec).toContain("eventCampaignRouter.post('/materials', requirePlanFeature('mobile_dm')");
-    expect(ec).toContain('if (!eventText && files.length) {');
+    // ★ v3 read=0(업로드 전용)이면 판독하지 않는다 · 기본 1 = 현행
+    expect(ec).toContain('if (wantRead && !eventText && files.length) {');
+    expect(ec).toContain("const wantRead = String(req.body?.read ?? '1') !== '0';");
     expect(ec).toContain("eventCampaignRouter.get('/materials/quote'");
     expect(ec).toContain('plan_locked: await quickPlanLocked(companyId)');
     expect(ec).toContain('enabled: quickMaterialsEnabled(companyId)');

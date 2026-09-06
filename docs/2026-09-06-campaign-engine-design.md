@@ -216,6 +216,24 @@ outreach-render(별도 PM2 프로세스 · DB 자격 없음 · 동시 1건)
 확인된 사실(테스트로 고정): 갤러리 렌더러는 이미지별 `caption` 을 그리고 섹션 제목은 그리지 않는다 · `DM_EDITABLE_TEXT_KEYS.gallery = ['title']` 이라 캡션은 공용 차단기 밖 → 채우기 단계가 직접 차단한다 · 배너 alt 는 크롤 재료 v2 까지만 오고 사본에는 없었다(그래서 캡션에 쓸 사실이 손에 없었다).
 미검증(재생성 뒤 캡처 대조): 아이소이 배너 alt 실측(문구가 있는가 · 잡음인가) · 설명 카드가 실물 리듬으로 보이는가 · 포스터 블록 3:4 가 히어로 다음에서 자연스러운가 · 기능 3칸이 메일 길이를 과하게 늘리지 않는가.
 
+## 9-2. 2026-09-06(3) Harold 스토리라인 정정 (구현 완료)
+
+Harold 판정(dm-7ZcaTxq · 공개 샘플 b06c56c938 실측 동의): 브랜드 색 기본 보라 · 아트 디렉션 없음 · 증거 카드 중복 · 공개 샘플에 자리표시자 노출 · "만든 것 나열"이라 담당자가 움직이지 않는다. 명세 = Harold 스토리라인(1 자동으로 이만큼 → 2 자사몰 연동·이미지 몇 장이면 훨씬 위 → 3 5분이면 브로마이드급).
+
+| 파일 | 변경 |
+|---|---|
+| `workers/outreach-render-worker.ts` · `utils/sales-outreach-render.ts` | 렌더된 페이지의 **브랜드 팔레트**(버튼·링크·헤더 배경 + :root 변수 primary/brand/accent · 채도 0.15 이상 · 면적 가중 · 최대 8) + **첫 화면 캡처**(375×900 JPEG) 반환 · `pickBrandColorFromPalette`(채도 0.25 · 밝기 0.08~0.78 · 가중치 최대 · 없으면 null) · 페이지 쪽 코드는 백슬래시 없는 정규식만 |
+| `utils/sales-outreach-jobs.ts` | 브랜드 색 1순위 팔레트(`colorSource: 'render'` · `brand.palette` 기록) → 메타 → 아이콘 · producing_dm 캡처 URL 저장·승계(`captureUrl`) · producing_email 에 `dmCaptureUrl`·`showcaseImageUrl` 전달 |
+| `utils/sales-outreach-look.ts` · `produce.ts` | `OUTREACH_NEUTRAL_PRIMARY`(#1f2937) — 색을 못 뽑으면 기본 보라가 아니라 무채색 주색(DM brand_kit · 메일 palette 둘 다) · 포스터 프롬프트 힌트 `posterStyleHint`(브랜드 톤 배경 · 깨끗한 스튜디오 · 상단 30% 문구 자리) |
+| `utils/sales-outreach-produce.ts` | `captureAndScoreDm(viewerUrl, {companyId})` → `{score, captureUrl}`(첫 화면 캡처를 공개 사본으로) · `insertProofCard` 가 리뷰 수·평점·순위 숫자로 만든 모델 text_card 를 제거 · `dropPlaceholderSentences` 로 서두·문안의 자리표시자 문장 제외(문안이 비면 블록 생략 · 서두가 비면 기본 서두 · 인용 원문은 유지) · `pickShowcaseExampleUrl`(업종 매칭 스튜디오 템플릿 실샘플 · 공개 라우트 `/api/image-studio/template-sample/:id`) · `buildProposalEmailSections` 스토리라인 재구성 · 평문 동반 |
+| `utils/sales-outreach-style.ts` | hero "귀사 홈페이지만 읽고 AI가 자동으로 만든 시안입니다" · `emailCopy.story`(auto · capture · compare) · features 를 "3. 5분만 투자하면 브로마이드급"(이미지 스튜디오 누끼·300여 종 · 귀사 문자 학습 목소리 문안 + 여정 · 매달 생일자 자동마케팅) |
+| `utils/sales-outreach-exemplars.ts` | 생성 규칙 +톤(배너 문구·홈페이지 말투 · 범용 문구 금지) · +사회적 증거 수치는 코드 카드(모델 카드 금지) |
+| 테스트 | `sales-outreach-s8.test.ts` 신설(10건) · s7 기능 순서 · produce-pure 자리표시자 합산(html 0 · 제목만) |
+
+메일 순서 = header · hero(포스터) · 서두+인용 · **[1] 자동으로 이만큼** · DM 캡처 + 대표 이미지 갤러리 · 브랜드 이메일 시안 · 문안(자리표시자 0일 때만) · **[2] 자사몰 연동·이미지 몇 장이면** + 이미지 스튜디오 실샘플 · **[3] 5분이면 브로마이드급** + 3칸 · CTA · 서비스 · footer.
+확인된 사실: 공개 샘플의 자리표시자는 `intro`(AI 서두 차단 결과)와 `copy`(문안)에서 왔다(인용 원문이 아니다) · 발송 잠금은 제목의 자리표시자로 유지되고 html 에서는 0 이 된다 · 실샘플 공개 라우트는 인증 앞에 있다(이메일 `<img>` 로 열린다).
+미검증(재생성 뒤 캡처 대조): 아이소이 팔레트가 실제로 잡히는가(버튼 배경이 채도 있는 색인가) · 캡처 사본이 메일에서 열리는가(2열 갤러리) · 업종 매칭 실샘플 파일 존재(`uploads/studio-samples`) · 렌더 승격이 안 된 사이트(정적으로 충분한 대형몰)는 팔레트가 없어 메타·아이콘 경로로 간다.
+
 ## 9. 범위 밖(등재만)
 
 플래너 무인 제작 엔진 합류 · 원스텝 대행 델타 50 재정의 · 무료 회차 · 기존 dm_views 외부인 IP 행 정리 · `produce.ts:709` 정규식 역슬래시 누락 · `:627` JSDoc 반대 · `media.ts:202` 특정 사이트 경로 하드코딩 · 상품 상세 1홉 벽시계 예산 없음 · crawlSub 두 사실 합침 · 사본 1.5MB 상한 탈락 사유 미기록.

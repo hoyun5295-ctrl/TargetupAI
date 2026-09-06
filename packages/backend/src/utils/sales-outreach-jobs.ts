@@ -18,7 +18,7 @@
  */
 import { randomUUID } from 'crypto';
 import { query } from '../config/database';
-import { callAIWithFallback } from '../services/ai';
+// ★ v3 AI 호출은 아웃리치 계수기 진입점(callOutreachAi · produce.ts)만 — 공용 호출기 직접 호출 0
 import { fetchHtmlGuarded } from './dm/dm-brand-extractor';
 import { buildOutreachEventMaterial } from './sales-outreach-extract';
 import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
@@ -26,16 +26,20 @@ import { getActiveStyleGuide, type OutreachStyleGuide } from './sales-outreach-s
 import { isSalesOutreachOperator } from './audit-log';
 import { isIndustryCode, industryLabel } from './industry-codes';
 import {
-  getOutreachContext, produceOutreachImage, produceOutreachDm, produceOutreachBrandEmail, collectOutreachMedia, fetchImageGuarded,
-  generateSubjectIntro, assembleProposalEmail, countBenefitPlaceholders, captureAndScoreDm, bannerAltMapOf,
-  PUBLIC_BASE, OUTREACH_PREVIEW_DAYS, type OutreachMedia,
+  getOutreachContext, produceOutreachImage, produceOutreachBrandEmail, collectOutreachMedia, fetchImageGuarded,
+  generateSubjectIntro, assembleProposalEmail, countBenefitPlaceholders, captureAndScoreDm, bannerAltMapOf, pickShowcaseExampleUrl,
+  storeViewportCapture,
+  // ★ v3 조립/발행 분리 · 자동 재조립 · 배너 전사 폴백 · AI 계수기
+  assembleOutreachDm, publishOutreachDm, updateOutreachDm, produceResultOf, autoRetryReasons, bannerCardsFromTranscripts, assertLicensedQuoteSources,
+  callOutreachAi, withOutreachAiMeter, newOutreachAiCost, addOutreachAiCost,
+  PUBLIC_BASE, OUTREACH_PREVIEW_DAYS, type OutreachMedia, type OutreachAiCost,
 } from './sales-outreach-produce';
 // ★ 2026-09-05(3) 브레인스토밍 수렴안 C4 — 재료 재선택·섹션 숨김 override·품질 경고(순수 CT · 잠금 0)
 import {
   validateOutreachMediaSelection, applyOutreachMediaSelection, validateSectionOverride, applySectionOverrides, assessOutreachQuality,
   assessMaterialSufficiency, factQuoteOf,
   classifyViewerUa, mergePreviewView, summarizeOutreachViews, OUTREACH_UNREAD_DAYS, type PreviewViews, type DmViewAgg, type OutreachViewSummary,
-  type OutreachMediaSelection, type SectionOverride, type MaterialGate,
+  type OutreachMediaSelection, type SectionOverride, type MaterialGate, type BrandColorSource4,
 } from './sales-outreach-review';
 import {
   sendOutreachProposalMail, sendOutreachTestMail as mailerSendTest, isOutreachMailerReady, outreachMailTo,
@@ -43,17 +47,21 @@ import {
 } from './outreach-mailer';
 import {
   extractProducts, extractImageCandidates, discoverProductLinks, buildCtaLinkMap, extractLegal, resolveBrandColorGuarded, extractLogoCandidates,
-  OUTREACH_FETCH_OPTS, type OutreachProduct,
+  extractEventListCards,
+  OUTREACH_FETCH_OPTS, type OutreachProduct, type OutreachEventCard,
 } from './sales-outreach-media';
 import { stopDm } from './dm/dm-builder';
 // ★ 2026-09-06 S1 렌더 승격 — 워커 클라이언트(127.0.0.1) + 순수 계측·합집합·재료 v2
 import {
-  renderPageGuarded, countMaterials, shouldEscalateToRender, unionStrings, unionProducts, unionImageDetails, mergeCtaLinks, buildMaterialsV2, bannersOf,
+  renderPageGuarded, countMaterials, shouldEscalateToRender, unionStrings, unionProducts, unionImageDetails, mergeCtaLinks, buildMaterialsV2, bannersOf, pickBrandColorFromPalette,
   type RenderResult, type MaterialSource,
 } from './sales-outreach-render';
 import { isSameSite } from './sales-outreach-render-guard';
 // ★ 2026-09-06 S4 파기 공용(sweeper 와 같은 본문)
 import { purgeOutreachJobArtifacts } from './sales-outreach-purge';
+// ★ 2026-09-06 v3 행사 카드(엔진 타입 · 엔진은 이 파일을 모른다) · 레시피 승격(best-copy CT · 쓰기는 그 CT 만)
+import type { EngineEventCard } from './campaign-engine';
+import { insertOutreachRecipe, findOutreachRecipeByJob } from './best-copy-assets';
 
 // ===== 타입 =====
 
@@ -77,13 +85,20 @@ export interface EventCandidate {
   endDate: string | null;
   /** 종료일이 실재(YYYY-MM-DD)하고 미래일 때만 true — 혜택 수치 인용 면허 */
   benefitLicensed: boolean;
-  /** 'crawl' = 자동 추출·재대조 통과 / 'manual' = Harold 직접 붙여넣기 */
-  origin: 'crawl' | 'manual';
+  /** 'crawl' = 자동 추출·재대조 통과 / 'manual' = Harold 직접 붙여넣기 / ★ v3 'card' = 이벤트 목록 카드(제목·기간 원문 · AI 0회) */
+  origin: 'crawl' | 'manual' | 'card';
+  /** ★ v3 카드 후보 전용(옛 항목에는 없다 = 인용문 행) — 제목 · 기간 원문 · 배너 원 URL · 상세 링크 */
+  title?: string;
+  periodRaw?: string | null;
+  bannerUrl?: string | null;
+  detailUrl?: string | null;
 }
 
 export interface OutreachSelection {
-  /** event_quote.candidates 배열 인덱스. null = 행사 없음(일반형) */
+  /** event_quote.candidates 배열 인덱스. null = 행사 없음(일반형) · ★ v3 eventIndexes 가 있으면 그것이 우선(하위 호환용) */
   eventIndex: number | null;
+  /** ★ v3 다중 선택(누른 순서 = DM 등장 순서 · 서버가 정수·범위·중복을 걸러 앞 3개) */
+  eventIndexes?: number[] | null;
   /** 봇 차단 등 크롤 실패 시 직접 붙여넣는 행사 원문(있으면 eventIndex 무시) */
   manualEventText?: string;
   /** 선택 이미지 URL. null = 이미지 없이 진행 */
@@ -317,25 +332,32 @@ function hostOfKey(key: string): string { return key.split('/')[0]; }
 
 /** 홈 HTML에서 행사 상세 링크 1개(같은 호스트 · href 또는 텍스트가 행사성 · 홈과 다른 URL) — A-11 */
 const EVENT_LINK_RE = /event|promotion|sale|이벤트|기획전|행사|프로모션/i;
+/** ★ v3 메뉴 링크 텍스트(정확히 이 낱말 = 이벤트 목록 페이지일 확률이 가장 높다 · 설계서 §5-1) */
+const EVENT_MENU_TEXTS = new Set(['이벤트', '기획전', '프로모션', 'event', 'events', 'promotion', 'promotions']);
 export function findEventPageLink(html: string, homeUrl: string): string | null {
   let host = '';
   let homeKey = '';
   try { const h = new URL(homeUrl); host = h.hostname; homeKey = h.origin + h.pathname.replace(/\/+$/, ''); } catch { return null; }
-  const re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const href = m[1].replace(/&amp;/g, '&').trim();
-    const text = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!EVENT_LINK_RE.test(href) && !EVENT_LINK_RE.test(text)) continue;
-    if (/^(javascript:|mailto:|tel:)/i.test(href)) continue;
-    let abs: URL;
-    try { abs = new URL(href, homeUrl); } catch { continue; }
-    if (!/^https?:$/.test(abs.protocol) || abs.hostname !== host) continue;
-    if (abs.origin + abs.pathname.replace(/\/+$/, '') === homeKey) continue;
-    if (/\/(login|join|cart|mypage|member)/i.test(abs.pathname)) continue;
-    return abs.toString();
-  }
-  return null;
+  const pick = (scope: string, exactOnly: boolean): string | null => {
+    const re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(scope)) !== null) {
+      const href = m[1].replace(/&amp;/g, '&').trim();
+      const text = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (exactOnly ? !EVENT_MENU_TEXTS.has(text.toLowerCase()) : (!EVENT_LINK_RE.test(href) && !EVENT_LINK_RE.test(text))) continue;
+      if (/^(javascript:|mailto:|tel:)/i.test(href)) continue;
+      let abs: URL;
+      try { abs = new URL(href, homeUrl); } catch { continue; }
+      if (!/^https?:$/.test(abs.protocol) || abs.hostname !== host) continue;
+      if (abs.origin + abs.pathname.replace(/\/+$/, '') === homeKey) continue;
+      if (/\/(login|join|cart|mypage|member)/i.test(abs.pathname)) continue;
+      return abs.toString();
+    }
+    return null;
+  };
+  // ★ v3 정렬: <nav>·<header> 안의 행사성 링크(메뉴 = 목록 페이지) → 텍스트가 정확히 "이벤트·기획전·프로모션" 인 링크 → 나머지 첫 매치(옛 동작)
+  const scopes = [...(html.match(/<nav\b[\s\S]*?<\/nav>/gi) || []), ...(html.match(/<header\b[\s\S]*?<\/header>/gi) || [])].join('\n');
+  return (scopes ? pick(scopes, false) : null) || pick(html, true) || pick(html, false);
 }
 
 export interface QuoteFilterMeta {
@@ -375,6 +397,71 @@ export function filterQuoteCandidates(
     candidates.push({ quote, sourceUrl, startDate, endDate, benefitLicensed: isFutureDate(endDate, now), origin: 'crawl' });
   }
   return { candidates, meta };
+}
+
+/** ★ v3 행사 다중 선택 상한(확인 화면 체크박스 · DM 반영은 2 + 3번째는 마지막 CTA 목적지) */
+export const OUTREACH_EVENT_SELECT_MAX = 3;
+
+/**
+ * ★ v3 확인 요청의 행사 선택 정규화(순수 · 설계서 §6-1) — 우선순위 manualEventText > eventIndexes > eventIndex.
+ * 정수 · 0 이상 · 후보 수 미만만 남기고(범위 밖은 그것만 버리고 warning 1줄) · 중복 제거 · 앞 3개(배열 순서 = 누른 순서 = DM 등장 순서).
+ */
+export function normalizeEventSelection(
+  selection: Pick<OutreachSelection, 'eventIndex' | 'eventIndexes'>,
+  candidateCount: number,
+): { indexes: number[]; dropped: number } {
+  const raw: unknown[] = Array.isArray(selection.eventIndexes)
+    ? selection.eventIndexes
+    : (selection.eventIndex !== null && selection.eventIndex !== undefined ? [selection.eventIndex] : []);
+  const out: number[] = [];
+  let dropped = 0;
+  for (const v of raw) {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 0 || n >= candidateCount) { dropped++; continue; }
+    if (out.includes(n)) continue;
+    out.push(n);
+  }
+  return { indexes: out.slice(0, OUTREACH_EVENT_SELECT_MAX), dropped };
+}
+
+/**
+ * ★ v3 이벤트 목록 카드 → 후보(순수) — quote = 제목 원문 · 종료일 = 카드 기간 · 면허 = isFutureDate · origin 'card' · 정렬 = 면허 있음 → 없음(카드 순서 유지).
+ */
+export function eventCandidatesFromCards(cards: readonly OutreachEventCard[], sourceUrl: string, now: Date = new Date()): EventCandidate[] {
+  const list = (Array.isArray(cards) ? cards : []).filter((c) => c && String(c.title || '').trim()).map((c): EventCandidate => ({
+    quote: norm(c.title),
+    sourceUrl,
+    startDate: c.startDate,
+    endDate: c.endDate,
+    benefitLicensed: isFutureDate(c.endDate, now),
+    origin: 'card',
+    title: String(c.title).trim(),
+    periodRaw: c.periodRaw,
+    bannerUrl: c.imageUrl,
+    detailUrl: c.linkUrl,
+  }));
+  return [...list.filter((c) => c.benefitLicensed), ...list.filter((c) => !c.benefitLicensed)];
+}
+
+/**
+ * ★ v3 선택 후보 → 엔진 행사 카드(순수) — origin 'card' 만 · 배너 사본은 media.gallery 의 srcUrl 로 되찾는다(없으면 글자 카드 · 히어로는 다른 원천으로).
+ */
+export function eventCardsOf(selectedList: readonly EventCandidate[], media: OutreachMedia | null | undefined): EngineEventCard[] {
+  const gallery = Array.isArray(media?.gallery) ? media!.gallery : [];
+  return (Array.isArray(selectedList) ? selectedList : [])
+    .filter((c) => c && c.origin === 'card' && String(c.title || '').trim())
+    .map((c) => {
+      const copy = c.bannerUrl ? gallery.find((g) => g && g.srcUrl === c.bannerUrl) : undefined;
+      return {
+        title: String(c.title).trim(),
+        periodRaw: c.periodRaw ? String(c.periodRaw) : null,
+        endDate: c.endDate || null,
+        bannerUrl: copy?.url || null,
+        bannerSize: copy && copy.width > 0 && copy.height > 0 ? { width: copy.width, height: copy.height } : null,
+        detailUrl: c.detailUrl || null,
+        licensed: !!c.benefitLicensed,
+      };
+    });
 }
 
 /** 오류 원문 정제본(DB 저장용 · 300자) */
@@ -479,12 +566,18 @@ export async function enqueueOutreachJob(
 
 /** 큐 선점 → 크롤(홈 + 행사 상세 1홉) → 재료 추출 → AI 인용 → 서버 재대조 → awaiting_confirm 정지. 전이는 전부 lock_token CAS. */
 export async function runOutreachJob(jobId: string): Promise<void> {
+  // ★ v3 관측 — 크롤·분석 구간의 AI 호출(분석 1회)도 같은 계수기(awaiting_confirm 전이 UPDATE 에 실린다)
+  const meter = newOutreachAiCost();
+  return withOutreachAiMeter(meter, () => runCrawlAndAnalyzeMetered(jobId, meter));
+}
+
+async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): Promise<void> {
   const lockToken = randomUUID();
   const claimed = await query(
     `UPDATE sales_outreach_jobs
         SET stage = 'crawling', lock_token = $2, lock_at = NOW()
       WHERE id = $1 AND stage = 'queued'
-      RETURNING company_name, homepage_url, industry_category, brand_profile`,
+      RETURNING company_name, homepage_url, industry_category, brand_profile, stage_results`,
     [jobId, lockToken],
   );
   if (claimed.rows.length === 0) return; // 다른 실행이 선점 — 아무것도 바꾸지 않는다
@@ -534,6 +627,21 @@ export async function runOutreachJob(jobId: string): Promise<void> {
       hb.stop();
     }
   }
+  // ★ v3 팔레트·홈 첫 화면 캡처 목적 렌더 1회(설계서 §5-4 · 불변 28 개정) — 별 변수 paletteShot. 재료 원문·재대조·행사 상세 렌더 분기(rendered)에 절대 대입하지 않는다.
+  //   375폭 뷰포트 캡처(제안 메일 대조 왼쪽) + 계산된 스타일 팔레트(rendered 에 팔레트가 없을 때 2순위). 실패·409 = 즉시 전진 · 3값 palette_render.
+  let paletteShot: RenderResult | null = null;
+  let paletteOutcome: 'ok' | 'no_content' | 'unavailable' = 'unavailable';
+  if (page || rendered) {
+    const hb = startLockHeartbeat(jobId, lockToken, 'crawling');
+    try {
+      const ps = await renderPageGuarded(job.homepage_url, { screenshot: false, screenshotViewport: true, viewportWidth: 375, deadlineMs: 12_000 });
+      if (ps.ok) { paletteShot = ps.result; paletteOutcome = ps.result.screenshotViewportBase64 || (Array.isArray(ps.result.palette) && ps.result.palette.length) ? 'ok' : 'no_content'; }
+    } catch (err: any) {
+      console.log('[sales-outreach] 팔레트 렌더 건너뜀:', jobId, err?.message);
+    } finally {
+      hb.stop();
+    }
+  }
   // 소스 확정 — 렌더가 앞 · 정적이 뒤(합집합). 둘 다 없으면 크롤 unavailable.
   const hasSource = !!(rendered || page);
   const finalUrl = rendered?.finalUrl || staticUrl;
@@ -547,6 +655,14 @@ export async function runOutreachJob(jobId: string): Promise<void> {
   let subUrl: string | null = null;
   let subText: string | null = null;
   let crawlSub: 'ok' | 'no_content' | 'unavailable' = 'no_content';
+  // ★ v3 이벤트 목록 카드(재료 1순위 · 설계서 §5-1) — 행사 페이지 HTML 에서 카드(제목·기간·배너·링크)를 뽑는다(AI 0회). 3값 event_list 는 링크가 있었을 때만 찍는다.
+  let eventCards: OutreachEventCard[] = [];
+  let eventListOutcome: 'ok' | 'no_content' | 'unavailable' | null = null;
+  // ★ v3 카드 상세 1홉(면허 있는 카드 상위 2 · 정적 · 카드당 10초 · 총 30초 · 재료 게이트 앞) — 상품 링크·배너를 합집합에 더한다
+  let cardProducts: OutreachProduct[] = [];
+  let cardBanners: ReturnType<typeof bannersOf> = [];
+  let cardProductLinks: string[] = [];
+  let cardsOutcome: 'ok' | 'no_content' | 'unavailable' | null = null;
   if (hasSource) {
     const link = (rendered ? findEventPageLink(rendered.html, finalUrl) : null) || (page ? findEventPageLink(page.html, staticUrl) : null);
     if (link) {
@@ -585,9 +701,39 @@ export async function runOutreachJob(jobId: string): Promise<void> {
       }
       if (!subHtml || !subFinal || !subSameHost) {
         crawlSub = 'unavailable';
+        eventListOutcome = 'unavailable';
       } else {
         const t = buildOutreachEventMaterial(subHtml).text;
         if (t) { subUrl = subFinal; subText = t.slice(0, 2000); crawlSub = 'ok'; } else { crawlSub = 'no_content'; }
+        eventCards = extractEventListCards(subHtml, subFinal, parseLicensedEndDate);
+        eventListOutcome = eventCards.length ? 'ok' : 'no_content';
+        // 카드 상세 1홉 — 면허(미래 종료일) 있는 카드 상위 2 · 정적만 · 벽시계 30초
+        const licensedCards = eventCards.filter((c) => isFutureDate(c.endDate)).slice(0, 2);
+        if (licensedCards.length) {
+          const hb = startLockHeartbeat(jobId, lockToken, 'crawling');
+          const deadline = Date.now() + 30_000;
+          let got = 0;
+          try {
+            for (const c of licensedCards) {
+              if (Date.now() > deadline) break;
+              try {
+                const d = await fetchHtmlGuarded(c.linkUrl, OUTREACH_FETCH_OPTS);
+                if (!d) continue;
+                let dHost = ''; try { dHost = new URL(d.finalUrl).hostname; } catch { dHost = ''; }
+                if (!host || !isSameSite(host, dHost)) continue;
+                got++;
+                cardProducts = unionProducts(cardProducts, extractProducts(d.html, d.finalUrl, 12), 12);
+                cardBanners = unionImageDetails(cardBanners, bannersOf(d.html, d.finalUrl, 12), 12);
+                cardProductLinks = unionStrings(cardProductLinks, discoverProductLinks(d.html, d.finalUrl, 10), 10);
+              } catch (err: any) {
+                console.error('[sales-outreach] 카드 상세 1홉 예외(계속):', jobId, err?.message);
+              }
+            }
+          } finally {
+            hb.stop();
+          }
+          cardsOutcome = got === 0 ? 'unavailable' : (cardProducts.length || cardBanners.length ? 'ok' : 'no_content');
+        }
       }
     }
   }
@@ -600,15 +746,28 @@ export async function runOutreachJob(jobId: string): Promise<void> {
   }
 
   const crawlOutcome: StageOutcome = hasSource ? 'ok' : 'unavailable';
+  // ★ v3 홈 첫 화면 캡처 공개 사본(팔레트 렌더의 뷰포트 JPEG) — 실패 = null(계속)
+  const homeCaptureUrl: string | null = paletteShot?.screenshotViewportBase64
+    ? await storeViewportCapture(paletteShot.screenshotViewportBase64, getOutreachContext()?.companyId || null).catch(() => null)
+    : null;
   const primaryHtml = rendered?.html || page?.html || '';
   const titleMatch = primaryHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   // ★ 2026-09-06 추출기는 두 소스에 각각 돌려 합집합(렌더 앞 · 정적 뒤 · 키 = productKey/URL). 정적 0건이면 결과는 렌더만, 렌더 0건이면 옛 방식과 같다.
   const listProducts: OutreachProduct[] = unionProducts(
-    rendered ? extractProducts(rendered.html, finalUrl, 12) : [],
-    page ? extractProducts(page.html, staticUrl, 12) : [],
-    12,
+    unionProducts(
+      rendered ? extractProducts(rendered.html, finalUrl, 12) : [],
+      page ? extractProducts(page.html, staticUrl, 12) : [],
+      12,
+    ),
+    // ★ v3 카드 상세 1홉의 상품은 뒤에(홈 목록 우선) · 합집합 상한 12 유지
+    cardProducts, 12,
   );
   const banners = unionImageDetails(rendered ? bannersOf(rendered.html, finalUrl, 24) : [], page ? bannersOf(page.html, staticUrl, 24) : [], 24);
+  // ★ v3 카드 배너 원 URL 을 후보 합집합 **뒤**에 붙인다(홈 첫 배너 우선 규칙 유지 · 중복 제거 · 상한 24 → 30). 사본은 제작 단계가 **카드 전용 예산**(collectOutreachMedia.cardBannerUrls)으로 따로 받는다(꼬리 자리만으로는 시도 상한에 걸려 못 받는다 · 리뷰 #2)
+  const cardBannerUrls = eventCards.map((c) => c.imageUrl).filter((u): u is string => !!u);
+  const imageCandidates = unionStrings(banners.map((b) => b.url), unionStrings(cardBannerUrls, cardBanners.map((b) => b.url), 12), 30);
+  // ★ v3 재료 게이트·저장은 같은 배너 합집합(홈 + 카드 상세 1홉)을 본다(리뷰 #5 · 화면 숫자 = 게이트 숫자)
+  const allBanners = unionImageDetails(banners, cardBanners, 30);
   // ★ 0905(4) 브랜드 색 — theme-color·TileColor → 아이콘 PNG 지배색(색 1개만 · 로고 픽셀은 산출물에 쓰지 않는다 · 불변 11). 실패 = null(기본 토큰)
   //   메타는 정적 <head>가 먼저(렌더 HTML 은 그 뒤 폴백)
   const colorHtml = page?.html || rendered?.html || null;
@@ -621,16 +780,29 @@ export async function runOutreachJob(jobId: string): Promise<void> {
     // 홈페이지에서 읽은 행사 텍스트 전량(구조화 블록 + 본문 · 최대 6000자) — 문안·DM·이메일 제작 재료(A-1)
     eventTextFull,
     // ★ 0905(3) C3-1 후보 24 — 순수 함수 기본값(24)과 호출부(12)가 어긋나 핫픽스가 운영에서 작동하지 않던 자리. 갤러리 8장 확보 = 시도 n×3(24)과 같은 축.
-    //   ★ 2026-09-06 배너 상세(alt·순서)의 url 투영 — 제작 단계 소비처(collectOutreachMedia) 무변경
-    imageCandidates: banners.map((b) => b.url),
+    //   ★ 2026-09-06 배너 상세(alt·순서)의 url 투영 + ★ v3 카드 배너(뒤) — 제작 단계 소비처(collectOutreachMedia) 무변경
+    imageCandidates,
     selectedImageUrl: null as string | null,
     crawledAt: new Date().toISOString(),
     finalUrl: hasSource ? finalUrl : null,
-    brand: { primaryColor: brandColorRes.color, colorSource: brandColorRes.source },
+    // ★ 0906(3) 브랜드 색 1순위 = 렌더된 페이지의 계산된 스타일 팔레트(버튼·링크·헤더 · 채도 있는 색) · 2순위 = theme-color 메타 · 3순위 = 아이콘 PNG 지배색. 못 뽑으면 null → 제작이 무채색 톤으로 간다(기본 보라 0)
+    //   ★ v3 팔레트 렌더(paletteShot)는 rendered 에 팔레트가 없을 때의 같은 1순위(둘 다 "렌더된 페이지의 계산된 스타일")
+    brand: (() => {
+      const paletteSrc = rendered && Array.isArray(rendered.palette) && rendered.palette.length ? rendered.palette : (paletteShot?.palette || []);
+      const fromPalette = pickBrandColorFromPalette(paletteSrc);
+      return {
+        primaryColor: fromPalette || brandColorRes.color,
+        // ★ v3 4값 확정('neutral' = 못 뽑음 → 제작이 무채색 주색 · 품질 경고 BRAND_COLOR_FALLBACK)
+        colorSource: (fromPalette ? 'render' : brandColorRes.source || 'neutral') as BrandColorSource4,
+        palette: Array.isArray(paletteSrc) ? paletteSrc.slice(0, 8) : [],
+      };
+    })(),
+    // ★ v3 홈 첫 화면 캡처(375×900 공개 사본 · 제안 메일 대조 왼쪽) · 못 만들면 null
+    homeCaptureUrl,
     subPageUrl: subUrl,
     structuredBlocks: homeMaterial.structuredBlocks,
-    // ★ 2026-09-05 재료(순수 추출 · 네트워크 0) — 제작 단계가 실측·사본 저장에 쓴다
-    productLinks: unionStrings(rendered ? discoverProductLinks(rendered.html, finalUrl, 10) : [], page ? discoverProductLinks(page.html, staticUrl, 10) : [], 10),
+    // ★ 2026-09-05 재료(순수 추출 · 네트워크 0) — 제작 단계가 실측·사본 저장에 쓴다 (★ v3 카드 상세 링크는 뒤)
+    productLinks: unionStrings(unionStrings(rendered ? discoverProductLinks(rendered.html, finalUrl, 10) : [], page ? discoverProductLinks(page.html, staticUrl, 10) : [], 10), cardProductLinks, 10),
     // ★ 0905(5) 헤더 로고 후보(순수 · 실물 판정은 제작 단계 collectOutreachMedia)
     logoCandidates: unionStrings(rendered ? extractLogoCandidates(rendered.html, finalUrl) : [], page ? extractLogoCandidates(page.html, staticUrl) : [], 4),
     listProducts,
@@ -642,16 +814,19 @@ export async function runOutreachJob(jobId: string): Promise<void> {
       ? buildMaterialsV2({
         source: materialSource,
         products: listProducts,
-        banners,
+        banners: allBanners,
         text: [homeText || '', subText || '', rendered?.text || ''].filter(Boolean).join('\n'),
         staticCounts,
         escalation: { attempted: escalation.escalate, reasons: escalation.reasons },
+        eventCards,
       })
       : null,
   };
-  // 렌더 3값 별 키(시도했을 때만) + 읽기 방식
-  const renderKeys: Record<string, unknown> = { crawl_engine: hasSource ? materialSource : 'none' };
+  // 렌더 3값 별 키(시도했을 때만) + 읽기 방식 + ★ v3 이벤트 목록·카드 상세·팔레트 렌더 3값
+  const renderKeys: Record<string, unknown> = { crawl_engine: hasSource ? materialSource : 'none', palette_render: paletteOutcome };
   if (renderingOutcome) { renderKeys.rendering = renderingOutcome; renderKeys.rendering_detail = renderingDetail; renderKeys.render_meta = renderMeta; }
+  if (eventListOutcome) renderKeys.event_list = eventListOutcome;
+  if (cardsOutcome) renderKeys.crawling_cards = cardsOutcome;
 
   if (crawlOutcome === 'unavailable') {
     // 봇 차단·타임아웃 — 행사 후보 없이 확정 대기로(화면에서 직접 붙여넣기 폴백). "확인 실패"를 "행사 없음"으로 접지 않는다.
@@ -688,7 +863,7 @@ export async function runOutreachJob(jobId: string): Promise<void> {
   let meta: Record<string, unknown> = { rawCandidates: 0, matched: 0, shortDropped: 0, mismatched: 0, markerDropped: 0, structuredBlocks: homeMaterial.structuredBlocks, materialChars: (eventTextFull || '').length };
   if (eventTextFull) {
     try {
-      const raw = await callAIWithFallback({
+      const raw = await callOutreachAi({
         system: [
           '너는 웹페이지 본문에서 "지금 진행 중인 행사·이벤트·프로모션"을 찾아 인용하는 분석기다.',
           '규칙:',
@@ -717,9 +892,17 @@ export async function runOutreachJob(jobId: string): Promise<void> {
       candidates = [];
     }
   }
+  // ★ v3 카드 후보(origin 'card' · AI 0회) 를 앞에 — 면허 있음 → 면허 없음 → AI 후보(카드 제목과 겹치는 인용은 뺀다). 카드는 재대조가 자기 카드 텍스트 안(제목 = 원문)이라 findPeriodNear 를 부르지 않는다.
+  const cardCandidates = eventCandidatesFromCards(eventCards, subUrl || finalUrl);
+  if (cardCandidates.length) {
+    const cardTitles = cardCandidates.map((c) => norm(c.quote));
+    candidates = [...cardCandidates, ...candidates.filter((c) => !cardTitles.some((t) => t.includes(norm(c.quote)) || norm(c.quote).includes(t)))].slice(0, 9);
+    if (analyzeOutcome === 'no_event') analyzeOutcome = 'ok';
+    meta = { ...meta, cardCandidates: cardCandidates.length };
+  }
 
   // ★ 2026-09-06 S2 재료 게이트 — 별 키(3값 무변경) · 제작은 계속 · 발송 잠금 6번째 사유의 원천 · 화면 확인 대기 배너. 해제 키(material_override)는 재크롤 시 resetJobTo 가 지운다(키 삭제는 그 함수 안에만).
-  const materialGate: MaterialGate = assessMaterialSufficiency({ products: listProducts.length, banners: banners.length, events: candidates.length });
+  const materialGate: MaterialGate = assessMaterialSufficiency({ products: listProducts.length, banners: allBanners.length, events: candidates.length });
   await query(
     `UPDATE sales_outreach_jobs
         SET stage = 'awaiting_confirm',
@@ -728,7 +911,7 @@ export async function runOutreachJob(jobId: string): Promise<void> {
             lock_at = NOW()
       WHERE id = $1 AND stage = 'analyzing' AND lock_token = $4`,
     [jobId, JSON.stringify({ candidates, generatedAt: new Date().toISOString() }),
-     JSON.stringify({ analyzing: analyzeOutcome, analyzing_meta: meta, material: materialGate, ...(analyzeDetail ? { analyzing_detail: analyzeDetail } : {}) }), lockToken],
+     JSON.stringify({ analyzing: analyzeOutcome, analyzing_meta: meta, material: materialGate, ...(analyzeDetail ? { analyzing_detail: analyzeDetail } : {}), ...(meter.calls > 0 ? { ai_cost: addOutreachAiCost(job.stage_results?.ai_cost, meter) } : {}) }), lockToken],
   );
 }
 
@@ -754,20 +937,25 @@ export async function confirmOutreachSelection(
   const allCandidates: EventCandidate[] = Array.isArray(eventQuote.candidates) ? eventQuote.candidates : [];
   const warnings: string[] = [];
 
-  let selected: EventCandidate | null = null;
+  // ★ v3 다중 선택(설계서 §6-1) — manual > eventIndexes > eventIndex · 범위 밖은 그것만 버리고 warning · 앞 3개 · selected = selectedList[0](카피·포스터 하류 무변경)
+  let selectedList: EventCandidate[] = [];
   const manual = norm(String(selection.manualEventText || ''));
   if (manual) {
     if (manual.length > 2000) throw new OutreachError('VALIDATION', '직접 입력 행사 원문은 2000자 이내로 입력해주세요.');
     // 사람이 붙여넣은 원문 = 사실 확인 책임이 사람에게 있는 인용. 날짜 검증이 없으므로 혜택 수치 면허는 없다.
-    selected = { quote: manual, sourceUrl: 'manual', startDate: null, endDate: null, benefitLicensed: false, origin: 'manual' };
+    selectedList = [{ quote: manual, sourceUrl: 'manual', startDate: null, endDate: null, benefitLicensed: false, origin: 'manual' }];
     if (hasDisqualifyingMarker(manual)) warnings.push('직접 입력한 행사 원문에 종료·마감·제외 같은 표현이 있습니다. 진행 중인 행사가 맞는지 확인해주세요.');
-  } else if (selection.eventIndex !== null && selection.eventIndex !== undefined) {
-    const idx = Number(selection.eventIndex);
-    if (!Number.isInteger(idx) || idx < 0 || idx >= allCandidates.length) {
+  } else {
+    const hadAny = Array.isArray(selection.eventIndexes) ? selection.eventIndexes.length > 0 : (selection.eventIndex !== null && selection.eventIndex !== undefined);
+    const picked = normalizeEventSelection(selection, allCandidates.length);
+    // 단수 요청(옛 화면)의 범위 밖은 옛 계약 그대로 거절 · 다중 요청은 범위 밖만 버리고 진행
+    if (hadAny && picked.indexes.length === 0 && !Array.isArray(selection.eventIndexes)) {
       throw new OutreachError('VALIDATION', '행사 선택이 올바르지 않습니다.');
     }
-    selected = allCandidates[idx];
+    if (picked.dropped > 0) warnings.push(`행사 선택 ${picked.dropped}건이 후보 목록과 맞지 않아 제외했습니다.`);
+    selectedList = picked.indexes.map((i) => allCandidates[i]);
   }
+  const selected: EventCandidate | null = selectedList[0] ?? null;
 
   const profile = cur.rows[0].brand_profile || {};
   let selectedImageUrl: string | null = null;
@@ -792,7 +980,8 @@ export async function confirmOutreachSelection(
       WHERE id = $1 AND stage = 'awaiting_confirm'
       RETURNING id`,
     [jobId,
-     JSON.stringify({ candidates: allCandidates, selected, confirmedBy: operatorSuperAdminId, confirmedAt: new Date().toISOString() }),
+     // ★ v3 selectedList(≤3 · 누른 순서) 를 함께 싣는다 · selected 는 대표 1건(하류 무변경)
+     JSON.stringify({ candidates: allCandidates, selectedList, selected, confirmedBy: operatorSuperAdminId, confirmedAt: new Date().toISOString() }),
      JSON.stringify({ ...profile, selectedImageUrl }),
      industry, lockToken],
   );
@@ -835,6 +1024,101 @@ async function insertAssetOwned(
   return r.rows.length > 0;
 }
 
+// ===== ★ 2026-09-06 v3 학습 원장 — 사람 수정 append(설계서 §9 · 불변 39) =====
+
+export const OUTREACH_EDITS_CAP = 100;
+export type OutreachEditKind = 'hide' | 'reselect' | 'edit' | 'reply';
+export type OutreachEditReason = 'no_text' | 'duplicate' | 'blurry' | 'wrong' | 'tone';
+const OUTREACH_EDIT_REASONS: readonly string[] = ['no_text', 'duplicate', 'blurry', 'wrong', 'tone'];
+export interface OutreachEditEntry {
+  kind: OutreachEditKind;
+  /** 숨김 = type#n 키 목록 · 재선택 = 남긴 수 · 편집 = 필드 경로 */
+  keys?: string[]; counts?: { products: number; gallery: number }; fieldPath?: string;
+  reason?: OutreachEditReason | null;
+  beforeLen?: number; afterLen?: number;
+  at: string; by: string | null;
+}
+
+/** 요청 body 의 사유(5값 화이트리스트 · 그 밖 = null) */
+export function normalizeEditReason(raw: unknown): OutreachEditReason | null {
+  const s = String(raw || '').trim();
+  return OUTREACH_EDIT_REASONS.includes(s) ? (s as OutreachEditReason) : null;
+}
+
+/**
+ * stage_results 배열 키에 항목 1개를 SQL 한 문장으로 append + 상한 절단(왕복 0 · 동시성 안전 · 얕은 병합이 배열을 통째 덮는 자리 대체 · 검증 GAP5).
+ * 키 삭제(` - '`) 0 = resetJobTo 계약 밖. 이 함수만 edits 를 쓴다(소스 스캔 테스트).
+ */
+async function appendStageResultArray(jobId: string, key: string, entry: unknown, cap = OUTREACH_EDITS_CAP): Promise<boolean> {
+  const r = await query(
+    `UPDATE sales_outreach_jobs
+        SET stage_results = jsonb_set(
+              COALESCE(stage_results, '{}'::jsonb), ARRAY[$2]::text[],
+              COALESCE((
+                SELECT jsonb_agg(e ORDER BY ord)
+                  FROM (SELECT e, ord FROM jsonb_array_elements(COALESCE(stage_results->$2, '[]'::jsonb) || $3::jsonb) WITH ORDINALITY AS t(e, ord)
+                        ORDER BY ord DESC LIMIT $4) s
+              ), '[]'::jsonb), true)
+      WHERE id = $1
+      RETURNING id`,
+    [jobId, key, JSON.stringify([entry]), cap],
+  );
+  return r.rows.length > 0;
+}
+
+/** 사람 수정 원장 1건 — 실패는 로그만(원장이 조작을 막지 않는다) */
+async function recordOutreachEdit(jobId: string, entry: OutreachEditEntry): Promise<void> {
+  try { await appendStageResultArray(jobId, 'edits', entry); } catch (err: any) { console.error('[sales-outreach] edits 기록 실패(계속):', jobId, err?.message); }
+}
+
+/** ★ v3 stage_results 최상위 키 얕은 병합(소유권 조건 · 키 삭제 0 = resetJobTo 계약 밖) — auto_seq · ai_cost 가 쓴다 */
+async function mergeStageResultsOwned(jobId: string, lockToken: string, patch: Record<string, unknown>): Promise<boolean> {
+  const r = await query(
+    `UPDATE sales_outreach_jobs
+        SET stage_results = COALESCE(stage_results, '{}'::jsonb) || $2::jsonb, lock_at = NOW()
+      WHERE id = $1 AND lock_token = $3
+      RETURNING id`,
+    [jobId, JSON.stringify(patch), lockToken],
+  );
+  return r.rows.length > 0;
+}
+
+/**
+ * ★ v3 학습 원장 레시피(순수 · 설계서 §9) — 재료(읽은 것) · 블록 대응(bindings: 어느 재료가 어느 블록이 됐나) · 게이트 · 룩 · 판정. 원문 0(길이·수·URL 여부만).
+ * bindings.src = card|product|proof|poster|quote|code · reader = html(카드·상품 원문)|vision(전사·채점)|code(코드가 채운 것) · 섹션 최상위 provenance 는 두지 않는다(Section 은 공용 닫힌 타입).
+ */
+export function buildOutreachRecipe(input: {
+  sections: readonly any[]; cards: readonly EngineEventCard[]; media: OutreachMedia | null; licensedQuote: string; look: unknown;
+  colorSource: string | null; benefitStripped: number; heroFallback: boolean; eventList: unknown; bannerRead: boolean; vision: unknown; aiCost: OutreachAiCost | null;
+}): Record<string, unknown> {
+  const cardBanners = new Set(input.cards.map((c) => c.bannerUrl).filter(Boolean));
+  const productImgs = new Set((input.media?.products || []).map((p) => p.image_url));
+  const bindings = input.sections.map((s) => {
+    const id = String(s?.id || ''); const type = String(s?.type || ''); const p: any = s?.props || {};
+    let src: string = 'code'; let reader: string = 'code'; let ref: string | null = null;
+    if (id === 'so-proof-card') { src = 'proof'; reader = 'html'; }
+    else if (id.startsWith('so-v3-poster')) { src = 'poster'; reader = 'vision'; }
+    else if (id.startsWith('so-v3-event') || id.startsWith('so-v3-cta-event') || (type === 'hero' && cardBanners.has(p.image_url))) { src = 'card'; reader = input.bannerRead ? 'vision' : 'html'; ref = p.image_url ? 'banner' : 'title'; }
+    else if (id.startsWith('so-v3-spot') || id.startsWith('so-v3-cta-spot') || type === 'product_carousel' || (type === 'text_card' && productImgs.has(p.image_url))) { src = 'product'; reader = 'html'; ref = type === 'product_carousel' ? `n=${Array.isArray(p.products) ? p.products.length : 0}` : null; }
+    else if (type === 'countdown') { src = 'card'; reader = 'html'; ref = 'endDate'; }
+    else if (!id.startsWith('so-')) { src = 'quote'; reader = 'html'; }
+    return { sectionId: id, type, src, reader, ...(ref ? { ref } : {}) };
+  });
+  return {
+    v: 1,
+    materials: {
+      products: input.media?.products?.length || 0, banners: input.media?.gallery?.length || 0, eventCards: input.cards.length,
+      licensed: input.licensedQuote.length > 0, licensedChars: input.licensedQuote.length,
+    },
+    sectionTypes: input.sections.map((s) => String(s?.type || '')),
+    bindings,
+    gates: { benefitStripped: input.benefitStripped, heroFallback: input.heroFallback, eventList: input.eventList, bannerRead: input.bannerRead },
+    look: { ...(input.look && typeof input.look === 'object' ? { treatments: (input.look as any).treatments, backgrounds: (input.look as any).backgrounds } : {}), colorSource: input.colorSource },
+    vision: input.vision && typeof input.vision === 'object' ? { outcome: (input.vision as any).outcome, items: (input.vision as any).items } : null,
+    cost: input.aiCost,
+  };
+}
+
 /** brand_profile 부분 갱신(소유권 조건) — 제작 단계가 수집한 재료를 남긴다 */
 async function mergeBrandProfileOwned(jobId: string, lockToken: string, patch: Record<string, unknown>): Promise<boolean> {
   const r = await query(
@@ -873,6 +1157,12 @@ async function stopSupersededDms(jobId: string, companyId: string): Promise<void
 
 /** 현재 stage 하나를 처리하고 다음 stage로 CAS 전이. 소유권 상실 = false(즉시 중단). */
 async function runProduction(jobId: string, lockToken: string): Promise<void> {
+  // ★ v3 관측(설계서 §7-9 · 불변 38) — 이 실행의 AI 호출 수·source·소요를 계수기가 세고, 종점(ready) 또는 실패 종결 직전에 stage_results.ai_cost 에 누적한다(companyId 주입 0)
+  const meter = newOutreachAiCost();
+  return withOutreachAiMeter(meter, () => runProductionMetered(jobId, lockToken, meter));
+}
+
+async function runProductionMetered(jobId: string, lockToken: string, meter: OutreachAiCost): Promise<void> {
   for (let guard = 0; guard < 8; guard++) {
     const cur = await query(
       `SELECT stage, company_name, industry_category, event_quote, brand_profile, preview_code, stage_results, homepage_url
@@ -884,12 +1174,18 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
     const stage: string = job.stage;
     if (!String(stage).startsWith('producing_')) return; // ready·failed 등 — 여기 소관 아님
     const selected: EventCandidate | null = job.event_quote?.selected || null;
+    // ★ v3 다중 선택(≤3 · 누른 순서 = DM 등장 순서 · 옛 기록은 selected 1건) — 면허 인용 = 면허 있는 것들의 quote 를 ' · ' 로 결합(줄바꿈은 차단기가 인접 자리를 합친다 · 설계서 §6-1)
+    const selectedList: EventCandidate[] = Array.isArray(job.event_quote?.selectedList) && job.event_quote.selectedList.length
+      ? job.event_quote.selectedList.slice(0, OUTREACH_EVENT_SELECT_MAX) : (selected ? [selected] : []);
     const bp: any = job.brand_profile || {};
     const sr: any = job.stage_results || {};
     const regenFrom: string | null = sr.regen?.from || null;
-    const licensedQuote = selected && selected.benefitLicensed ? selected.quote : '';
+    const licensedQuote = selectedList.filter((c) => c && c.benefitLicensed).map((c) => c.quote).join(' · ');
+    // ★ v3 행사 카드(origin 'card' 만) → 엔진 카드(배너 사본은 srcUrl 로 되찾는다 · 없으면 글자 카드) · 사람이 뺀 재료(mediaSelection)는 카드 배너에도 적용(리뷰 #3)
+    const eventCards: EngineEventCard[] = eventCardsOf(selectedList, applyOutreachMediaSelection(bp.media || null, bp.mediaSelection || null));
     // ★ 2026-09-06 S2 근거 원문 = 면허 인용문 + 재료에서 그대로 뽑은 사실 수치(가격). 면허(benefitLicensed) 판정은 licensedQuote 로만 · 차단기 originalBody 만 넓힌다(공용 CT 무변경 · 불변 20).
-    const quoteBasis = [licensedQuote, factQuoteOf({ products: Array.isArray(bp.materials?.products) ? bp.materials.products : (Array.isArray(bp.listProducts) ? bp.listProducts : []), proof: bp.materials?.proof || null })].filter(Boolean).join('\n');
+    const factQuote = factQuoteOf({ products: Array.isArray(bp.materials?.products) ? bp.materials.products : (Array.isArray(bp.listProducts) ? bp.listProducts : []), proof: bp.materials?.proof || null });
+    const quoteBasis = [licensedQuote, factQuote].filter(Boolean).join('\n');
     const proof = bp.materials?.proof && typeof bp.materials.proof === 'object' ? { ...bp.materials.proof, collectedAt: bp.materials.collectedAt || null } : null;
     const brandColor: string | null = bp.brand?.primaryColor || null;
     const homepageUrl: string = String(bp.finalUrl || job.homepage_url);
@@ -900,7 +1196,7 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
         const material = materialText(bp.eventTextFull, bp.excerpt, 3000);
         const promptMaterial = stripMaterialForPrompt(material, quoteBasis);
         const prompt = buildCopyPrompt(guide, { companyName: job.company_name, industry: job.industry_category, selected, promptMaterial, extraNotes: bp.extraNotes || null });
-        const aiText = await callAIWithFallback({
+        const aiText = await callOutreachAi({
           system: prompt.system, userMessage: prompt.user, maxTokens: 1000, temperature: 0.7, source: 'sales-outreach-copy',
         });
         // 혜택 수치 게이트 — 면허(검증 통과 + 종료일 미래) 있는 인용만 원본으로 인정. 나머지는 전부 placeholder.
@@ -941,6 +1237,8 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
               productLinks: Array.isArray(bp.productLinks) ? bp.productLinks : [],
               listProducts: Array.isArray(bp.listProducts) ? bp.listProducts : [],
               logoCandidates: Array.isArray(bp.logoCandidates) ? bp.logoCandidates : [],
+              // ★ v3 카드 배너는 전용 예산으로 사본을 만든다(후보 꼬리 자리는 시도 상한 밖 · 리뷰 #2)
+              cardBannerUrls: Array.isArray(bp.materials?.eventCards) ? bp.materials.eventCards.map((c: any) => String(c?.imageUrl || '')).filter(Boolean) : [],
             });
             // 재수집 = 사본 URL이 전부 바뀐다 → 검토에서 고른 재료 선택은 함께 지운다(무효 선택이 재료를 0으로 만들지 않게)
             if (!(await mergeBrandProfileOwned(jobId, lockToken, { media, mediaSelection: null }))) return;
@@ -950,29 +1248,43 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
             media = null;
           }
         }
-        const img = await produceOutreachImage({
-          jobId,
-          companyName: job.company_name,
-          industry: job.industry_category,
-          selectedImageUrl: bp.selectedImageUrl || null,
-          regenSeq: regenSeqOf(sr, 'image'),
-          brandColor,
-          // ★ 2026-09-06 S3 문구 3칸 재료 · 실측 배너 0장이면 16:9 배너 1장
-          eventQuote: selected?.quote || null,
-          products: media?.products?.length ? media.products : (Array.isArray(bp.listProducts) ? bp.listProducts : []),
-          siteTitle: bp.siteTitle || null,
-          wantBanner: !(media && Array.isArray(media.gallery) && media.gallery.length > 0),
-        });
-        if (!(await insertAssetOwned(jobId, 'studio_image', {
-          url: img.publicUrl, usedCutout: img.usedCutout, personJudge: img.personJudge,
-          skippedReason: img.skippedReason, width: img.width, height: img.height,
-          templateId: img.templateId, category: img.category, kind: img.kind,
-          media: media ? media.stats : null, mediaError,
-          // ★ S3 근거 패널·이메일 히어로 폴백
-          posterTexts: img.posterTexts, cutoutSource: img.cutoutSource, posterScore: img.posterScore, posterRegenerated: img.posterRegenerated,
-          bannerUrl: img.bannerUrl, bannerSize: img.bannerSize,
-          regenCount: regenSeqOf(sr, 'image'),
-        }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
+        // ★ v3 포스터 생략 조건(설계서 §7-4 · 불변 30 개정) — 실측 배너 ≥3 이고 이벤트 카드 ≥1 이면 생성물을 만들지 않는다(asset 행은 url null 로 남긴다 · 하류 null 분기 실재)
+        const skipPoster = eventCards.length >= 1 && !!(media && Array.isArray(media.gallery) && media.gallery.length >= 3);
+        if (skipPoster) {
+          if (!(await insertAssetOwned(jobId, 'studio_image', {
+            url: null, usedCutout: false, personJudge: null,
+            skippedReason: '홈페이지 배너와 행사 카드가 충분해 생성 이미지를 만들지 않았습니다(실물 우선).',
+            width: 0, height: 0, templateId: null, category: null, kind: null,
+            media: media ? media.stats : null, mediaError,
+            posterTexts: null, cutoutSource: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
+            skipped: 'banners_and_cards',
+            regenCount: regenSeqOf(sr, 'image'),
+          }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
+        } else {
+          const img = await produceOutreachImage({
+            jobId,
+            companyName: job.company_name,
+            industry: job.industry_category,
+            selectedImageUrl: bp.selectedImageUrl || null,
+            regenSeq: regenSeqOf(sr, 'image'),
+            brandColor,
+            // ★ 2026-09-06 S3 문구 3칸 재료 · 실측 배너 0장이면 16:9 배너 1장
+            eventQuote: selected?.quote || null,
+            products: media?.products?.length ? media.products : (Array.isArray(bp.listProducts) ? bp.listProducts : []),
+            siteTitle: bp.siteTitle || null,
+            wantBanner: !(media && Array.isArray(media.gallery) && media.gallery.length > 0),
+          });
+          if (!(await insertAssetOwned(jobId, 'studio_image', {
+            url: img.publicUrl, usedCutout: img.usedCutout, personJudge: img.personJudge,
+            skippedReason: img.skippedReason, width: img.width, height: img.height,
+            templateId: img.templateId, category: img.category, kind: img.kind,
+            media: media ? media.stats : null, mediaError,
+            // ★ S3 근거 패널·이메일 히어로 폴백
+            posterTexts: img.posterTexts, cutoutSource: img.cutoutSource, posterScore: img.posterScore, posterRegenerated: img.posterRegenerated,
+            bannerUrl: img.bannerUrl, bannerSize: img.bannerSize,
+            regenCount: regenSeqOf(sr, 'image'),
+          }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
+        }
         if (!(await advanceStage(jobId, lockToken, 'producing_image', 'producing_dm'))) return;
 
       } else if (stage === 'producing_dm') {
@@ -987,7 +1299,18 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
         // ★ C4-3 섹션 숨김 재실행 = 저장된 섹션(override 적용 전)을 그대로 재발행(AI 0)
         const prevDm = regenFrom === 'sections_dm' ? await latestAsset(jobId, 'dm') : null;
         const presetSections = prevDm && Array.isArray(prevDm.sectionsBase || prevDm.sections) ? (prevDm.sectionsBase || prevDm.sections) : null;
-        const dm = await produceOutreachDm({
+        // ★ v3 배너 전사 폴백(설계서 §5-2) — 카드 0건 · 실측 배너 ≥1 · preset 아님 일 때만 상위 2장을 전사해 폴백 카드로(면허 0 · 전사문은 licensedQuote 에 섞이지 않는다 = 가드)
+        let dmCards: EngineEventCard[] = eventCards;
+        let bannerLines: string[] = [];
+        if (!presetSections && eventCards.length === 0 && Array.isArray(bp.media?.gallery) && bp.media.gallery.length > 0) {
+          const crawlText = String(bp.eventTextFull || bp.excerpt || '');
+          const linkUrl = (bp.ctaLinks && typeof bp.ctaLinks === 'object' && (bp.ctaLinks['기획전'] || bp.ctaLinks['이벤트'])) || homepageUrl;
+          const fb = await bannerCardsFromTranscripts(bp.media.gallery, crawlText, String(linkUrl)).catch(() => ({ cards: [], bannerLines: [] }));
+          dmCards = fb.cards; bannerLines = fb.bannerLines;
+        }
+        // 출처 가드 — 조립에 넘기는 근거(quoteBasis)에 전사 줄이 있다면 그 출처는 선택 후보 인용문·사실 수치여야 한다(겹침은 정상 · 출처 없는 섞임만 throw)
+        assertLicensedQuoteSources(quoteBasis, bannerLines, [...selectedList.map((c) => c.quote), factQuote]);
+        const dmInput = {
           companyName: job.company_name,
           industry: job.industry_category,
           homepageUrl,
@@ -1010,13 +1333,39 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
           ctaLinks: bp.ctaLinks && typeof bp.ctaLinks === 'object' ? bp.ctaLinks : {},
           legal: bp.legal || null,
           brandColor,
-        });
+          entry: 'outreach' as const,
+          eventCards: dmCards,
+        };
+        // ★ v3 조립 → 발행(1회) → 캡처·채점 → 트리거면 조립 1회 더 → 같은 dmId 갱신(updateDm · 재발행 0) → 재캡처(워커가 되면) (설계서 §7-8 · 불변 1·37 개정)
+        //   상한 = 조립 2회 · 단계 벽시계 60초 · 카운터 auto_seq.dm(사람 regen_seq 와 분리) · preset(숨김 재실행)은 자동 재조립 0
+        const dmT0 = Date.now();
+        let assembled = await assembleOutreachDm(dmInput);
+        const pub = await publishOutreachDm(assembled, dmInput);
         // 소유권을 잃은 실행의 DM 발행(외부 효과)은 결속으로 못 막는다 — 내부 전용 회사의 draft DM 1개 잔존이
         // 전부이고(과금 0·고객 무관) 자산 결속이 화면·메일 사용을 차단하므로 위험 수용(Codex 3R 판단 기록).
         // 섹션 숨김 재발행(preset · AI 0)은 근거(참조 골격·실물 예시 수·혜택 정제 수)를 새로 만들 수 없다 → 직전 자산 값을 승계(이메일 축 선례)
         const carry = presetSections && prevDm ? prevDm : null;
-        // ★ 2026-09-06 S3 발행 DM 375폭 캡처 → vision 8항목 2값(경고 · 잠금 아님 · 워커·모델 부재 = null). 숨김 재실행은 직전 값 승계.
-        const dmVision = carry ? (carry.visionScore || null) : await captureAndScoreDm(dm.viewerUrl).catch(() => null);
+        // ★ 2026-09-06 S3 발행 DM 375폭 캡처 → vision 12항목 2값(경고 · 잠금 아님 · 워커·모델 부재 = null). 숨김 재실행은 직전 값 승계.
+        let captured = carry ? null : await captureAndScoreDm(pub.viewerUrl, { companyId: ctx.companyId }).catch(() => null);
+        let autoSeqDm = Number(sr.auto_seq?.dm) || 0;
+        let autoReasons: string[] = [];
+        const retryReasons = carry ? [] : autoRetryReasons(captured?.score);
+        if (retryReasons.length && autoSeqDm < 1 && Date.now() - dmT0 < 60_000) {
+          autoReasons = retryReasons;
+          const second = await assembleOutreachDm(dmInput);
+          if (await updateOutreachDm(pub.dmId, second, dmInput)) {
+            assembled = second;
+            autoSeqDm += 1;
+            if (!(await mergeStageResultsOwned(jobId, lockToken, { auto_seq: { ...(sr.auto_seq && typeof sr.auto_seq === 'object' ? sr.auto_seq : {}), dm: autoSeqDm, dm_reasons: autoReasons, at: new Date().toISOString() } }))) return;
+            // 재캡처 1회(발행본과 채점이 일치해야 한다 · 워커 409 = 첫 캡처 유지)
+            const re = await captureAndScoreDm(pub.viewerUrl, { companyId: ctx.companyId }).catch(() => null);
+            if (re && (re.score || re.captureUrl)) captured = { score: re.score || captured?.score || null, captureUrl: re.captureUrl || captured?.captureUrl || null };
+          }
+        }
+        const dm = produceResultOf(assembled, pub);
+        const dmVision = carry ? (carry.visionScore || null) : (captured?.score || null);
+        // ★ 0906(3) 첫 화면 캡처 공개 사본 — 제안 메일 "자동으로 만든 모바일 DM" 블록이 읽는다(숨김 재실행은 승계)
+        const captureUrl = carry ? (carry.captureUrl || null) : (captured?.captureUrl || null);
         if (!(await insertAssetOwned(jobId, 'dm', {
           dmId: dm.dmId, dmUrl: dm.dmUrl, viewerUrl: dm.viewerUrl,
           structureRef: carry ? (carry.structureRef ?? null) : dm.structureRef,
@@ -1024,11 +1373,18 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
           // ★ 2026-09-06 S2 헤드라인 업체명 대체 여부(품질 경고 HERO_FALLBACK 의 원천 · 경고 · 잠금 아님)
           heroFallback: carry ? (carry.heroFallback === true) : dm.heroFallback,
           visionScore: dmVision,
+          captureUrl,
           sectionTypes: dm.sectionTypes,
           exemplarCount: carry ? (Number(carry.exemplarCount) || 0) : dm.exemplarCount,
           exemplarTotal: carry ? (Number(carry.exemplarTotal) || 0) : dm.exemplarTotal,
           // ★ 0905(3) 검토 화면(iframe·섹션 숨김)·품질 경고·전후 대조가 읽는다. sectionsBase = override 적용 전(다음 숨김의 기준)
           sections: dm.sections, sectionsBase: dm.sectionsBase, look: dm.look, hiddenApplied: dm.hiddenApplied, hiddenMissed: dm.hiddenMissed, hiddenSkipped: dm.hiddenSkipped,
+          // ★ v3 블록 최소 요건(경고만) · 이 회차가 쓴 행사 카드 수(전사 폴백 포함) · 자동 재조립 여부·사유 · 레시피(학습 원장 · 원문 0 · 설계서 §9)
+          blockGate: carry ? (carry.blockGate ?? null) : dm.blockGate,
+          eventCards: dmCards.length,
+          bannerFallback: eventCards.length === 0 && dmCards.length > 0,
+          autoRetry: autoReasons.length ? { n: autoSeqDm, reasons: autoReasons } : null,
+          recipe: carry ? (carry.recipe ?? null) : buildOutreachRecipe({ sections: dm.sections, cards: dmCards, media: bp.media || null, licensedQuote, look: dm.look, colorSource: bp.brand?.colorSource || null, benefitStripped: dm.benefitStripped, heroFallback: dm.heroFallback, eventList: sr.event_list || null, bannerRead: bannerLines.length > 0, vision: dmVision, aiCost: null }),
           regenCount: regenSeqOf(sr, 'dm'),
         }, 'producing_dm', lockToken, regenSeqOf(sr, 'dm')))) return;
         if (!(await advanceStage(jobId, lockToken, 'producing_dm', 'producing_email'))) return;
@@ -1084,6 +1440,7 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
             posterCaption: imageAsset?.posterTexts?.title ? String(imageAsset.posterTexts.title) : null,
             media: bp.media || null, mediaSelection: bp.mediaSelection || null,
             ctaLinks: bp.ctaLinks && typeof bp.ctaLinks === 'object' ? bp.ctaLinks : {}, legal: bp.legal || null, brandColor,
+            entry: 'outreach', eventCards,
           });
           brandSectionsBase = brand.sections; brandSubject = brand.subject; brandStripped = brand.benefitStripped; exemplarCount = brand.exemplarCount; exemplarTotal = brand.exemplarTotal; brandLook = brand.look;
         } else {
@@ -1106,6 +1463,12 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
           brandColor,
           subject,
           intro,
+          // ★ 0906(3) 스토리라인 재료 — DM 첫 화면 캡처 · 이미지 스튜디오 실샘플(업종 매칭 · 공개 라우트)
+          dmCaptureUrl: dmAsset?.captureUrl ? String(dmAsset.captureUrl) : null,
+          showcaseImageUrl: pickShowcaseExampleUrl(job.industry_category),
+          // ★ v3 대조 왼쪽(홈 첫 화면 캡처 · 있을 때만) · 회신 문장(검토 화면 편집분)
+          homeCaptureUrl: bp.homeCaptureUrl ? String(bp.homeCaptureUrl) : null,
+          replyLine: sr.reply_line?.text ? String(sr.reply_line.text) : null,
         });
         if (!(await insertAssetOwned(jobId, 'email_html', {
           subject: email.subject, intro: email.intro, html: email.html, text: email.text, placeholderCount: email.placeholderCount,
@@ -1116,6 +1479,8 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
         }, 'producing_email', lockToken, regenSeqOf(sr, 'email')))) return;
         // ★ B-3 새 메일이 선 뒤 옛 DM을 내린다(옛 dmUrl은 새 email_html 전까지 최신 메일·공개 샘플에 살아 있다)
         await stopSupersededDms(jobId, ctx.companyId);
+        // ★ v3 이 실행의 AI 호출 계수 누적(ready 로 가면 lock_token 이 풀려 더는 쓸 수 없다 · 여기가 마지막 소유 구간)
+        if (meter.calls > 0 && !(await mergeStageResultsOwned(jobId, lockToken, { ai_cost: addOutreachAiCost(sr.ai_cost, meter) }))) return;
         if (!(await advanceStage(jobId, lockToken, 'producing_email', 'ready'))) return;
         return; // 파이프라인 종점
 
@@ -1130,6 +1495,8 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
         producing_dm: '모바일 DM 제작에 실패했습니다. 다시 시도해주세요.',
         producing_email: '제안 메일 조립에 실패했습니다. 다시 시도해주세요.',
       };
+      // ★ v3 실패 종결 직전에도 이 실행의 AI 계수를 남긴다(소유권이 아직 있다 · 실패해도 쓴 호출은 쓴 것)
+      if (meter.calls > 0) await mergeStageResultsOwned(jobId, lockToken, { ai_cost: addOutreachAiCost(sr.ai_cost, meter) }).catch(() => {});
       await markFailed(jobId, stage, reasonMap[stage] || '제작에 실패했습니다.', { lockToken, detail: detailOf(err) });
       return;
     }
@@ -1183,7 +1550,9 @@ function startLockHeartbeat(jobId: string, lockToken: string, stage: OutreachSta
 
 const RESETTABLE_KEYS = ['regen', 'crawling', 'analyzing', 'crawling_sub', 'analyzing_meta', 'crawling_detail', 'analyzing_detail', 'section_overrides',
   // ★ 2026-09-06 S1 렌더 3값 별 키 · S2 재료 게이트
-  'rendering', 'rendering_detail', 'render_meta', 'crawl_engine', 'material', 'material_override'] as const;
+  'rendering', 'rendering_detail', 'render_meta', 'crawl_engine', 'material', 'material_override',
+  // ★ 2026-09-06 v3 — 새 stage_results 키는 전부 여기 등재(타입이 막는다 · 재크롤 뒤 잔존 0 · 설계서 §7-8): 이벤트 목록 3값 · 카드 상세 3값 · 팔레트 렌더 3값 · 자동 재조립 카운터 · AI 호출 계수 · 사람 수정 원장 · 회신 문장
+  'event_list', 'crawling_cards', 'palette_render', 'auto_seq', 'ai_cost', 'edits', 'reply_line'] as const;
 type ResettableKey = (typeof RESETTABLE_KEYS)[number];
 
 /**
@@ -1447,7 +1816,64 @@ export async function editOutreachCopy(jobId: string, body: string, operatorSupe
   if (inserted.rows.length === 0) {
     throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.');
   }
+  await recordOutreachEdit(jobId, { kind: 'edit', fieldPath: 'copy.body', afterLen: text.length, at: new Date().toISOString(), by: operatorSuperAdminId || null });
   await rebuildOutreachEmail(jobId, operatorSuperAdminId);
+}
+
+/**
+ * ★ v3 회신 유도 문장 편집(설계서 §8) — 1~60자 · stage_results.reply_line 저장 → 메일 재조립(AI 0 · 제목·서두·시안 보존). 비우면 기본 문장으로 되돌린다.
+ */
+export async function editOutreachReplyLine(jobId: string, text: string, operatorSuperAdminId: string | null | undefined): Promise<void> {
+  await assertOperator(operatorSuperAdminId);
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (t.length > 60) throw new OutreachError('VALIDATION', '회신 문장은 60자 이내로 입력해주세요.');
+  const cur = await query(`SELECT stage, mail_result, purged_at FROM sales_outreach_jobs WHERE id = $1`, [jobId]);
+  if (cur.rows.length === 0) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
+  if (cur.rows[0].stage !== 'ready' || cur.rows[0].mail_result === 'sending' || cur.rows[0].purged_at) {
+    throw new OutreachError('CONFLICT', '제작 완료 상태에서만 회신 문장을 수정할 수 있습니다.');
+  }
+  const at = new Date().toISOString();
+  const upd = await query(
+    `UPDATE sales_outreach_jobs SET stage_results = COALESCE(stage_results, '{}'::jsonb) || $2::jsonb
+      WHERE id = $1 AND stage = 'ready' AND mail_result IS DISTINCT FROM 'sending' RETURNING id`,
+    [jobId, JSON.stringify({ reply_line: t ? { text: t, at, by: operatorSuperAdminId || null } : null })],
+  );
+  if (upd.rows.length === 0) throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.');
+  await recordOutreachEdit(jobId, { kind: 'reply', fieldPath: 'email.reply', afterLen: t.length, at, by: operatorSuperAdminId || null });
+  await rebuildOutreachEmail(jobId, operatorSuperAdminId);
+}
+
+/**
+ * ★ v3 레시피 승격(설계서 §9 · 불변 39) — 최신 dm asset 의 recipe(원문 0) + edits 통계를 best_copy_assets kind 'recipe' 로. 같은 잡 중복 승격 0 · 조회 실패 = 저장하지 않는다(fail-closed).
+ */
+export async function promoteOutreachRecipe(jobId: string, operatorSuperAdminId: string | null | undefined): Promise<{ id: string }> {
+  await assertOperator(operatorSuperAdminId);
+  const cur = await query(`SELECT stage, company_name, industry_category, stage_results FROM sales_outreach_jobs WHERE id = $1`, [jobId]);
+  if (cur.rows.length === 0) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
+  if (cur.rows[0].stage !== 'ready' && cur.rows[0].stage !== 'sent') throw new OutreachError('CONFLICT', '제작이 끝난 건만 승격할 수 있습니다.');
+  const dmAsset = await latestAsset(jobId, 'dm');
+  const recipe = dmAsset?.recipe && typeof dmAsset.recipe === 'object' ? dmAsset.recipe : null;
+  if (!recipe || !Array.isArray(recipe.sectionTypes) || recipe.sectionTypes.length === 0) throw new OutreachError('CONFLICT', '이 건에는 승격할 레시피가 없습니다(v3 이전 산출물).');
+  const dup = await findOutreachRecipeByJob(jobId);
+  if (!dup.ok) throw new OutreachError('NOT_READY', '레시피 저장소를 확인하지 못해 승격하지 않았습니다. 잠시 후 다시 시도해주세요.');
+  if (dup.id) throw new OutreachError('CONFLICT', '이 건의 레시피는 이미 승격되어 있습니다.');
+  const edits: OutreachEditEntry[] = Array.isArray(cur.rows[0].stage_results?.edits) ? cur.rows[0].stage_results.edits : [];
+  const byKind: Record<string, number> = {}; const byReason: Record<string, number> = {};
+  for (const e of edits) { byKind[e.kind] = (byKind[e.kind] || 0) + 1; if (e.reason) byReason[e.reason] = (byReason[e.reason] || 0) + 1; }
+  const r = await insertOutreachRecipe({
+    industryCode: isIndustryCode(cur.rows[0].industry_category) ? String(cur.rows[0].industry_category) : 'etc',
+    sectionTypes: recipe.sectionTypes.map((t: unknown) => String(t)),
+    meta: {
+      v: 1,
+      source: { jobId, dmId: dmAsset?.dmId ? String(dmAsset.dmId) : null, companyName: String(cur.rows[0].company_name || ''), industryCode: String(cur.rows[0].industry_category || 'etc') },
+      recipe,
+      edits: { total: edits.length, byKind, byReason },
+      promotedBy: operatorSuperAdminId || null,
+      promotedAt: new Date().toISOString(),
+    },
+  });
+  if (!r.ok) throw new OutreachError('NOT_READY', r.reason === 'table_missing' ? '레시피 저장소(best_copy_assets)가 없습니다.' : '레시피 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+  return { id: r.id };
 }
 
 /** ★ B-9 메일 제목 편집(1~40자) — 최신 email_html payload를 복사해 subject만 바꾼 새 asset. 낙관 잠금(읽은 asset id 결속). */
@@ -1485,6 +1911,7 @@ export async function editOutreachSubject(jobId: string, subject: string, operat
   if (inserted.rows.length === 0) {
     throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.');
   }
+  await recordOutreachEdit(jobId, { kind: 'edit', fieldPath: 'email.subject', beforeLen: String(prev.subject || '').length, afterLen: text.length, at: new Date().toISOString(), by: operatorSuperAdminId || null });
 }
 
 /** 메일 재조립(ready → producing_email 재실행) — 수신거부 문구 반영·문안 수정 반영 경로. 제목·서두·브랜드 시안은 보존(B-2). */
@@ -1517,7 +1944,8 @@ export async function regenerateOutreachAsset(jobId: string, kind: string, opera
     to: `producing_${k}`,
     lockToken,
     // 이미지 재생성 = 재료 재수집 → 사본 URL·섹션 구성이 바뀐다 → 저장된 블록 숨김도 지운다(불변 27 · 재료 선택은 producing_image가 지운다)
-    clear: k === 'image' ? ['regen', 'section_overrides'] : ['regen'],
+    // ★ v3 dm·image 재생성은 자동 재조립 카운터(auto_seq)도 지운다(사람 회차마다 자동 1회 · 사람 회차 regen_seq 와 분리)
+    clear: k === 'image' ? ['regen', 'section_overrides', 'auto_seq'] : k === 'dm' ? ['regen', 'auto_seq'] : ['regen'],
     set: { stageResults: { regen: { from: k, at: new Date().toISOString() }, regen_seq: { ...(sr.regen_seq || {}), [k]: seq } } },
   });
   if (!ok) throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.');
@@ -1534,6 +1962,7 @@ export async function regenerateOutreachAsset(jobId: string, kind: string, opera
  * 상한 = 같은 표(regen_seq.materials · 5회). 제목·서두는 보존(producing_email regenIntro=false).
  */
 export async function selectOutreachMaterials(jobId: string, raw: unknown, operatorSuperAdminId: string | null | undefined): Promise<{ products: number; gallery: number; seq: number }> {
+  const editReason = normalizeEditReason((raw as any)?.reason);
   await assertOperator(operatorSuperAdminId);
   const cur = await query(`SELECT stage, brand_profile, stage_results FROM sales_outreach_jobs WHERE id = $1`, [jobId]);
   if (cur.rows.length === 0) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
@@ -1556,13 +1985,15 @@ export async function selectOutreachMaterials(jobId: string, raw: unknown, opera
     expect: ['ready'],
     to: 'producing_dm',
     lockToken,
-    clear: ['regen'],
+    // ★ v3 재료를 다시 고른 회차도 자동 재조립 1회를 새로 받는다(리뷰 지적 수용)
+    clear: ['regen', 'auto_seq'],
     set: {
       stageResults: { regen: { from: 'materials', at: selection.selectedAt }, regen_seq: { ...(sr.regen_seq || {}), materials: seq } },
       brandProfilePatch: { mediaSelection: selection },
     },
   });
   if (!ok) throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.');
+  await recordOutreachEdit(jobId, { kind: 'reselect', counts: { products: selection.products.length, gallery: selection.gallery.length }, reason: editReason, at: selection.selectedAt || new Date().toISOString(), by: operatorSuperAdminId || null });
   runProduction(jobId, lockToken).catch((err: any) => {
     console.error('[sales-outreach] 재료 재선택 실행 실패:', jobId, err?.message);
     markFailed(jobId, 'producing_dm', '고른 재료로 다시 만들기를 시작하지 못했습니다.', { lockToken, detail: detailOf(err) }).catch(() => {});
@@ -1575,7 +2006,7 @@ export async function selectOutreachMaterials(jobId: string, raw: unknown, opera
  * → DM은 저장된 섹션을 그대로 재발행(AI 0) · 이메일은 재조립(AI 0). 다음 재생성 뒤에도 같은 순번에 재적용된다(같은 조립 경로 · 불변 16).
  * 줄이는 방향만(숨기기) · header·footer는 못 숨긴다 · 3섹션 미만으로는 못 줄인다.
  */
-export async function hideOutreachSections(jobId: string, input: { kind: string; hidden: unknown }, operatorSuperAdminId: string | null | undefined): Promise<{ hidden: number }> {
+export async function hideOutreachSections(jobId: string, input: { kind: string; hidden: unknown; reason?: unknown }, operatorSuperAdminId: string | null | undefined): Promise<{ hidden: number }> {
   await assertOperator(operatorSuperAdminId);
   const kind = input.kind === 'dm' || input.kind === 'email' ? input.kind : null;
   if (!kind) throw new OutreachError('VALIDATION', '숨길 산출물 종류가 올바르지 않습니다.');
@@ -1610,6 +2041,7 @@ export async function hideOutreachSections(jobId: string, input: { kind: string;
     set: { stageResults: { regen: { from: kind === 'dm' ? 'sections_dm' : 'sections_email', at }, regen_seq: { ...(sr.regen_seq || {}), sections: seq }, section_overrides: overrides } },
   });
   if (!ok) throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.');
+  await recordOutreachEdit(jobId, { kind: 'hide', keys: v.override.hidden.slice(0, 20), fieldPath: kind, reason: normalizeEditReason(input.reason), at, by: operatorSuperAdminId || null });
   runProduction(jobId, lockToken).catch((err: any) => {
     console.error('[sales-outreach] 섹션 숨김 실행 실패:', jobId, kind, err?.message);
     markFailed(jobId, kind === 'dm' ? 'producing_dm' : 'producing_email', '블록 숨김 반영을 시작하지 못했습니다.', { lockToken, detail: detailOf(err) }).catch(() => {});
@@ -1852,7 +2284,7 @@ export async function retryOutreachJob(jobId: string, operatorSuperAdminId: stri
   }
 
   // 수집·분석·대기(queued) 실패 = 수집부터 다시
-  const ok = await resetJobTo(jobId, { expect: ['failed'], to: 'queued', lockToken: null, clear: ['crawling', 'analyzing', 'crawling_sub', 'analyzing_meta', 'crawling_detail', 'analyzing_detail', 'rendering', 'rendering_detail', 'render_meta', 'crawl_engine', 'material', 'material_override'] });
+  const ok = await resetJobTo(jobId, { expect: ['failed'], to: 'queued', lockToken: null, clear: ['crawling', 'analyzing', 'crawling_sub', 'analyzing_meta', 'crawling_detail', 'analyzing_detail', 'rendering', 'rendering_detail', 'render_meta', 'crawl_engine', 'material', 'material_override', 'event_list', 'crawling_cards', 'palette_render'] });
   if (!ok) throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다.');
   runOutreachJob(jobId).catch((err: any) => {
     console.error('[sales-outreach] 재시도 실행 실패:', jobId, err?.message);
@@ -1886,6 +2318,9 @@ export async function getOutreachJob(jobId: string, operatorSuperAdminId: string
     lookAssigned: dmAsset?.look && typeof dmAsset.look === 'object' ? (Number(dmAsset.look.treatments) || 0) + (Number(dmAsset.look.backgrounds) || 0) : undefined,
     heroFallback: typeof dmAsset?.heroFallback === 'boolean' ? dmAsset.heroFallback : undefined,
     dmVision: dmAsset?.visionScore && typeof dmAsset.visionScore === 'object' ? dmAsset.visionScore : null,
+    // ★ v3 브랜드 색 출처(4값 · 옛 기록 null 은 경고 없음) · 블록 최소 요건 미달 수(dm asset blockGate.short)
+    colorSource: typeof bp.brand?.colorSource === 'string' ? bp.brand.colorSource : null,
+    blockShort: Array.isArray(dmAsset?.blockGate?.short) ? dmAsset.blockGate.short.length : undefined,
   });
   // ★ 2026-09-06 S4 열람(DM = dm_views 조인 · 산출물 페이지 = stage_results.views_preview) · 문장은 서버 완성
   const ctx = getOutreachContext();

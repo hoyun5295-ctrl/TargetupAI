@@ -196,9 +196,12 @@ function reapOrphans(): number {
 
 // ===== 렌더 1건 =====
 
-interface RenderRequest { url: string; deadlineMs?: number; screenshot?: boolean; viewportWidth?: number }
+interface RenderRequest { url: string; deadlineMs?: number; screenshot?: boolean; viewportWidth?: number; /** ★ 0906(3) 첫 화면(뷰포트)만 따로 1장 */ screenshotViewport?: boolean }
 interface RenderOk {
   ok: true; finalUrl: string; html: string; text: string; screenshotBase64: string | null; meta: RenderMeta;
+  /** ★ 0906(3) 브랜드 팔레트(버튼·링크·헤더 배경 + :root 변수 · 채도 있는 색만 · 면적 가중) */
+  palette: Array<{ hex: string; weight: number; sources: string[] }>;
+  screenshotViewportBase64: string | null;
 }
 interface RenderFail { ok: false; reason: 'blocked' | 'timeout' | 'error'; detail: string; meta?: Partial<RenderMeta> }
 
@@ -281,6 +284,55 @@ async function renderOnce(input: RenderRequest, proxyPort: number): Promise<Rend
       };
     })()`)) as { html: string; text: string; imgCount: number; imgWide: number; scrollHeight: number };
 
+    // ★ 0906(3) 브랜드 팔레트 — 계산된 스타일에서 버튼·링크·헤더 배경색과 :root 변수(primary·brand·accent…)를 면적 가중으로 센다.
+    //   흰·검·회색(채도 0.15 미만)은 브랜드 색이 아니다. 백엔드 tsconfig 에 DOM 이 없어 문자열 평가 · 백슬래시 없는 정규식만(템플릿 리터럴 escape 회피).
+    let palette: Array<{ hex: string; weight: number; sources: string[] }> = [];
+    try {
+      palette = (await page.evaluate(`(() => {
+        const toHex = (c) => { const m = String(c || '').match(/rgba?[(]([0-9]+),[ ]*([0-9]+),[ ]*([0-9]+)(?:,[ ]*([0-9.]+))?[)]/); if (!m) return null; if (m[4] !== undefined && Number(m[4]) < 0.99) return null; return '#' + [m[1], m[2], m[3]].map((v) => Number(v).toString(16).padStart(2, '0')).join(''); };
+        const sat = (hex) => { const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); return mx === 0 ? 0 : (mx - mn) / mx; };
+        const acc = {};
+        const add = (hex, w, src) => { if (!hex || sat(hex) < 0.15) return; const e = acc[hex] || (acc[hex] = { hex, weight: 0, sources: {} }); e.weight += w; e.sources[src] = (e.sources[src] || 0) + 1; };
+        const els = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="submit"], header, nav, .btn, [class*="btn"], [class*="button"], [class*="badge"], [class*="tag"]')).slice(0, 4000);
+        for (const el of els) {
+          const r = el.getBoundingClientRect(); if (r.width < 24 || r.height < 12) continue;
+          const cs = getComputedStyle(el);
+          const area = Math.min(r.width * r.height, 40000);
+          add(toHex(cs.backgroundColor), area / 1000 + 1, el.tagName.toLowerCase());
+          if (el.tagName === 'A' || el.tagName === 'BUTTON') add(toHex(cs.borderColor), 0.5, 'border');
+        }
+        const rs = getComputedStyle(document.documentElement);
+        for (const sheet of Array.from(document.styleSheets)) {
+          try {
+            for (const rule of Array.from(sheet.cssRules || [])) {
+              const sel = rule.selectorText || '';
+              if (sel !== ':root' && sel !== 'html' && sel !== 'body') continue;
+              for (const name of Array.from(rule.style)) {
+                if (!/^--.*(primary|brand|main|accent|point|key|theme)/i.test(name)) continue;
+                const v = rs.getPropertyValue(name).trim();
+                const hex = v.startsWith('#') ? (v.length === 4 ? ('#' + v[1] + v[1] + v[2] + v[2] + v[3] + v[3]) : v.slice(0, 7)) : toHex(v);
+                if (hex && /^#[0-9a-fA-F]{6}$/.test(hex)) add(hex.toLowerCase(), 40, 'cssvar');
+              }
+            }
+          } catch (e) { /* cross-origin sheet */ }
+        }
+        return Object.values(acc).sort((a, b) => b.weight - a.weight).slice(0, 8).map((e) => ({ hex: e.hex, weight: Math.round(e.weight), sources: Object.keys(e.sources).slice(0, 3) }));
+      })()`)) as Array<{ hex: string; weight: number; sources: string[] }>;
+      if (!Array.isArray(palette)) palette = [];
+    } catch (e: any) {
+      console.warn(`${LOG} 팔레트 추출 실패(계속): ${String(e?.message || e).slice(0, 120)}`);
+      palette = [];
+    }
+
+    let screenshotViewportBase64: string | null = null;
+    if (input.screenshotViewport && remaining() > 1_500) {
+      try {
+        const shot = await page.screenshot({ type: 'jpeg', quality: 70, clip: { x: 0, y: 0, width: viewportWidth, height: 900 }, captureBeyondViewport: true });
+        screenshotViewportBase64 = Buffer.from(shot).toString('base64');
+      } catch (e: any) {
+        console.warn(`${LOG} 뷰포트 스크린샷 실패(계속): ${String(e?.message || e).slice(0, 120)}`);
+      }
+    }
     let screenshotBase64: string | null = null;
     if (wantShot && remaining() > 1_500) {
       try {
@@ -303,7 +355,7 @@ async function renderOnce(input: RenderRequest, proxyPort: number): Promise<Rend
       sandbox: browserSandbox,
       timedOut,
     };
-    return { ok: true, finalUrl, html: dom.html, text: dom.text, screenshotBase64, meta };
+    return { ok: true, finalUrl, html: dom.html, text: dom.text, screenshotBase64, meta, palette, screenshotViewportBase64 };
   } catch (e: any) {
     return { ok: false, reason: 'error', detail: String(e?.message || e).slice(0, 160), meta: { elapsedMs: Date.now() - t0, blockedRequests: active?.blocked || 0 } };
   } finally {

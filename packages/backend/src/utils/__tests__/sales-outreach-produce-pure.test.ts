@@ -312,8 +312,10 @@ describe('A-2 제안 메일 조립', () => {
     expect(r.html).not.toContain('/api/sales-outreach');
     expect(r.text).toContain(base.previewUrl);
     expect(r.placeholderCount).toBe(0);
+    // ★ 0906(3) 문안의 자리표시자 문장은 메일·공개 페이지에서 빼고 조립한다(노출 0) → html 에는 남지 않고 제목의 것만 센다(제목은 사람이 고친다 · 잠금 유지)
     const r2 = assembleProposalEmail({ ...base, subject: `${BENEFIT_PLACEHOLDER} 시안`, copyBody: `${BENEFIT_PLACEHOLDER} 문안 {{DM_LINK}}` });
-    expect(r2.placeholderCount).toBe(2);
+    expect(r2.placeholderCount).toBe(1);
+    expect(r2.html).not.toContain(BENEFIT_PLACEHOLDER);
     expect(countBenefitPlaceholders(`${BENEFIT_PLACEHOLDER}a${BENEFIT_PLACEHOLDER}`)).toBe(2);
     expect(buildOutreachPlainText(guide, base)).toContain(base.subject);
   });
