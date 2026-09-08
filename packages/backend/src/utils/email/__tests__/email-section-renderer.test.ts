@@ -143,3 +143,33 @@ describe('renderEmailSections — 디자인 2.0 골격', () => {
     expect(html).toMatch(/COUPON/);                        // 쿠폰 블록은 기본 브랜드 색으로 렌더됨
   });
 });
+
+/**
+ * ★ 2026-09-08 (남지현 접수 `cmtqsp5uw09yujnot3k93uh62` "메일 수신 시 가로 폭 정렬")
+ * 셸 폭 계약 — 600px를 지키는 근거가 `max-width` 하나뿐이면, 그 속성을 해석하지 않는 뷰어에서는
+ * 인라인 `width:100%`만 남아 카드가 **부모 컨테이너 폭까지 늘어난다**(로컬 측정 600 → 976).
+ * 그래서 폭은 px로 싣고(`width:600px`), 좁은 화면은 미디어쿼리가 푼다(덮는 쪽도 함께 고정).
+ */
+describe('셸 폭 계약 — 뷰어의 max-width 해석에 기대지 않는다', () => {
+  const SHELL_SAMPLE: Section[] = [sec('hero', { headline: '폭 계약' }, 0)];
+
+  it('셸 인라인 = width:600px (px 고정) + max-width:600px 병기', () => {
+    const html = renderEmailSections(SHELL_SAMPLE, {});
+    const shell = html.match(/<table[^>]*class="em-shell"[^>]*>/)?.[0] || '';
+    expect(shell).toMatch(/(^|;|")width:600px/);          // max-width:600px에 묻히지 않게 선언 자체를 본다
+    expect(shell).toContain('max-width:600px');
+    expect(shell).toContain('width="600"');               // 속성도 유지(CSS 미해석 클라이언트 폴백)
+  });
+
+  it('셸 인라인에 width:100%를 두지 않는다 (부모 폭을 따라가면 계약이 사라진다)', () => {
+    const html = renderEmailSections(SHELL_SAMPLE, {});
+    const shell = html.match(/<table[^>]*class="em-shell"[^>]*>/)?.[0] || '';
+    expect(shell).not.toMatch(/(^|;|\s)width:\s*100%/);
+  });
+
+  it('덮는 쪽 — 좁은 화면(@media)에서는 .em-shell이 100%로 풀린다', () => {
+    const html = renderEmailSections(SHELL_SAMPLE, {});
+    expect(html).toContain('@media (max-width:600px)');
+    expect(html).toMatch(/\.em-shell\{width:100% !important/);
+  });
+});

@@ -125,6 +125,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   // ★ 2026-07-02(3) 발신번호 선택 — 회사 등록 번호 목록(기본 = is_default). 발송·스팸테스트 공용.
   const [callbackList, setCallbackList] = useState<Array<{ phone: string; isDefault: boolean }>>([]);
   const [callback, setCallback] = useState('');
+  // 목록이 빈 이유를 가른다 — 등록이 0건인 것과 조회가 실패한 것은 사용자가 할 일이 다르다.
+  const [callbackLoadFailed, setCallbackLoadFailed] = useState(false);
   // ★ 2026-07-02(5) 고객사 보유 필드 — 꾸미기 활용 다중 선택 (AI 오퍼레이터 '활용 가능 컬럼' 패턴 미러).
   //   token/label = %변수% 안쪽 표시명(예 '고객명'). 시스템 변수 제외한 실제 고객 데이터 필드만.
   const [companyFields, setCompanyFields] = useState<Array<{ token: string; label: string; category: string }>>([]);
@@ -134,17 +136,23 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     if (!show) return;
     (async () => {
       try {
-        const res = await fetch('/api/manage/callbacks', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
-        const data = await res.json();
-        // 응답 키 = callbackNumbers (manage-callbacks.ts:76) — 구 callbacks 파싱이 항상 빈 목록이던 결함 수정
-        const list: any[] = Array.isArray(data?.callbackNumbers) ? data.callbackNumbers
-          : Array.isArray(data?.callbacks) ? data.callbacks
-          : Array.isArray(data) ? data : [];
+        // ★ 2026-09-08 (임은지 접수 `cmtqtes9k09zjjnot8lsitg9k` "타겟 발송 시 하단에 발신번호")
+        //   조회 경로를 회사 표준 `/api/companies/callback-numbers`로 되돌린다. 종전 `/api/manage/callbacks`는
+        //   `requireCompanyAdmin` 라우터라 **담당자 계정(JWT company_user)이 403**을 받는다. 그런데 아래에서
+        //   res.ok를 안 보고 바로 파싱해 빈 배열로 떨어뜨렸기 때문에, 화면에는 오류가 아니라
+        //   "등록된 번호 없음"만 남아 발신번호를 고를 수 없었다(= 발송 불가).
+        //   실측: 같은 회사에서 sgbaek·gwchae(user_type 'user')만 막히고 mobile('admin')은 정상.
+        //   표준 경로는 인증만 요구하고 배정(assignment_scope)·매장(store_codes) 필터까지 적용한다
+        //   = 대시보드·직접발송·자동발송·설정이 이미 쓰는 그 경로(응답 키 = `numbers`).
+        const res = await fetch('/api/companies/callback-numbers', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+        const data = res.ok ? await res.json() : null;
+        const list: any[] = Array.isArray(data?.numbers) ? data.numbers : [];
         const mapped = list.filter((c: any) => c?.phone).map((c: any) => ({ phone: String(c.phone), isDefault: !!c.is_default }));
         setCallbackList(mapped);
+        setCallbackLoadFailed(!res.ok);   // 조회 실패를 "등록 0건"으로 위장하지 않는다
         const def = mapped.find((c) => c.isDefault) || mapped[0];
         setCallback((prev) => prev || def?.phone || '');
-      } catch { /* 목록 조회 실패 = 발송 시 백엔드가 기본 번호 사용 */ }
+      } catch { setCallbackLoadFailed(true); }
       try {
         // reject_number = 설정 화면과 동일한 우선순위(getOpt080Number: user → 회사)로 확정된 080 번호
         const sres = await fetch('/api/companies/settings', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
@@ -863,7 +871,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                 className="bg-slate-950/60 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-400/60"
               >
                 {callbackList.length === 0
-                  ? <option value="">등록된 번호 없음</option>
+                  ? <option value="">{callbackLoadFailed ? '번호를 불러오지 못했어요' : '등록된 번호 없음'}</option>
                   : callbackList.map((cb) => <option key={cb.phone} value={cb.phone}>{cb.phone}{cb.isDefault ? ' (기본)' : ''}</option>)}
                 <option value={INDIVIDUAL_CB}>고객별 매장번호 (개별 회신)</option>
               </select>

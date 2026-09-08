@@ -69,6 +69,19 @@ function fsPx(n: number | undefined, fallback: string): string {
   return `${Math.round(Math.min(Math.max(v, 10), 64))}px`;
 }
 
+/** ★ 2026-09-08 (남지현 접수 `cmtqtw3m00a07jnotpv8cfrcu` "CTA 버튼 가이드 라인 표시")
+ *  둥근 모서리 셀을 담는 표에 **반드시 함께 실어야 하는** 스타일.
+ *
+ *  이 문서는 전역으로 `table{border-collapse:collapse}`를 건다(아웃룩 셀 간격 방지). 그런데
+ *  collapse 표에서는 셀의 `border-radius`가 **테두리에 적용되지 않는다** — 배경만 둥글게 남고
+ *  테두리는 직각으로 그려져, 둥근 버튼·카드 바깥에 사각 선이 하나 더 보인다(접수 원문 = "가이드 라인").
+ *  구도·색과 무관하게 재현되며, 접수는 CTA 하나였지만 상품 카드·리뷰·매장 정보·쿠폰·framed 텍스트도 같았다.
+ *
+ *  ⛔ 전역 규칙을 separate로 돌리는 처방은 택하지 않는다 — 이 문서 밖의 표(청구서·정산 메일)까지 바뀐다.
+ *  ⛔ `border-spacing:0`을 빼면 separate 표의 기본 셀 간격(2px)이 살아나 여백이 어긋난다. 항상 한 쌍이다.
+ *  계약 고정 = `__tests__/email-round-cell-contract.test.ts`(border+radius 셀을 전수로 훑어 부모 표를 검사). */
+const ROUND_CELL_TABLE = 'border-collapse:separate;border-spacing:0';
+
 // ────────────── ★ 2026-07-13 디자인 3.0 헬퍼 ──────────────
 
 /** 헤드라인 강조 — 마커펜(그라데이션 워시)/밑줄. DM emphasizeHead의 인라인 스타일판(클래스 불가). */
@@ -240,7 +253,7 @@ function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx, tr
     inner = textHtml;
   }
   if (treatment === 'framed') {
-    inner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border:2px solid ${b.border};border-radius:${b.radius.md};padding:${b.sp[6]}">${inner}</td></tr></table>`;
+    inner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${ROUND_CELL_TABLE}"><tr><td style="border:2px solid ${b.border};border-radius:${b.radius.md};padding:${b.sp[6]}">${inner}</td></tr></table>`;
   }
   const pad = treatment === 'lead' ? `${b.sp[8]} ${b.sp[6]}` : b.sp[6];
   return `<tr><td style="padding:${pad}">${inner}</td></tr>`;
@@ -273,7 +286,7 @@ function renderButton(btn: CtaButton, b: EmailBrand, invert = false): string {
     }
   }
   const vml = `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${esc(url)}" style="height:46px;v-text-anchor:middle;width:230px" arcsize="30%" fillcolor="${vmlFill}" ${vmlStroke ? `strokecolor="${vmlStroke}"` : 'stroke="f"'}><w:anchorlock/><center style="color:${color};font-family:sans-serif;font-size:15px;font-weight:800">${esc(btn.label)}</center></v:roundrect><![endif]-->`;
-  const htmlBtn = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr><td style="border-radius:14px;background:${bg};background-image:${bgImage};border:1px solid ${border};box-shadow:${shadow}"><a href="${esc(url)}" style="display:inline-block;padding:14px 34px;font-size:${b.type.body.size};font-weight:800;letter-spacing:-0.01em;color:${color};text-decoration:none">${esc(btn.label)}</a></td></tr></table>`;
+  const htmlBtn = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;${ROUND_CELL_TABLE}"><tr><td style="border-radius:14px;background:${bg};background-image:${bgImage};border:1px solid ${border};box-shadow:${shadow}"><a href="${esc(url)}" style="display:inline-block;padding:14px 34px;font-size:${b.type.body.size};font-weight:800;letter-spacing:-0.01em;color:${color};text-decoration:none">${esc(btn.label)}</a></td></tr></table>`;
   return `${vml}<!--[if !mso]><!-->${htmlBtn}<!--<![endif]-->`;
 }
 
@@ -376,7 +389,7 @@ function renderCoupon(p: CouponProps, b: EmailBrand, treatment: string): string 
   const stubRow = p.coupon_code
     ? `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};background:${stubBg};border:2px dashed ${b.primaryDashed};border-top:2px dashed ${b.primaryDashed};border-radius:0 0 ${b.radius.lg} ${b.radius.lg};text-align:center"><div style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:${codeBg};border:1px dashed ${b.primary};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:800;letter-spacing:3px;color:${codeText}">${esc(p.coupon_code)}</div></td></tr>`
     : '';
-  const card = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${mainRow}${stubRow}</table>`;
+  const card = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${ROUND_CELL_TABLE}">${mainRow}${stubRow}</table>`;
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}">${card}${ctaHtml}</td></tr>`;
 }
 
@@ -427,7 +440,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
       : `<div style="width:100%;height:${imgH}px;background:${b.bg};border-radius:${b.radius.sm};font-size:0;line-height:0">&nbsp;</div>`;
     const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4;min-height:37px">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
-    const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[3]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
+    const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[3]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
     return `<td width="50%" valign="top" class="em-stack" style="padding:${b.sp[2]}">${cardTable}</td>`;
   };
 
@@ -439,7 +452,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
       const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="${thumbH}" style="width:${thumbH}px;height:${thumbH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}">` : '';
       const meta = `<div style="font-size:${b.type.body.size};color:${b.text};font-weight:700;line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
       const rowInner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${imgTag ? `<td width="${thumbH}" valign="top" style="padding-right:${b.sp[4]}">${imgTag}</td>` : ''}<td valign="middle">${url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${meta}</a>` : meta}</td></tr></table>`;
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${rowInner}</td></tr></table>`;
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]};${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${rowInner}</td></tr></table>`;
     };
     return `<tr><td style="padding:${b.sp[6]}${sectionBg}">${title}${items.map(rowFor).join('')}</td></tr>`;
   }
@@ -463,7 +476,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
     const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="${bigStyle}">` : '';
     const meta = `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};color:${b.text};font-weight:700;margin-top:${b.sp[3]};line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it, true)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
-    focusHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[4]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
+    focusHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]};${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[4]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
   }
 
   const rows: string[] = [];
@@ -520,7 +533,7 @@ function renderStoreInfo(p: StoreInfoProps, b: EmailBrand): string {
   }
   if (rows.length === 0) return '';
   // ★ 2026-07-07(5) 디자인 2.0 — 평면 전폭 블록 → 헤어라인 보더 카드
-  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[5]} ${b.sp[6]};background:${b.bg};border:1px solid ${b.border};border-radius:14px;text-align:center">${rows.join('')}</td></tr></table></td></tr>`;
+  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[5]} ${b.sp[6]};background:${b.bg};border:1px solid ${b.border};border-radius:14px;text-align:center">${rows.join('')}</td></tr></table></td></tr>`;
 }
 
 function renderSns(p: SnsProps, b: EmailBrand): string {
@@ -540,7 +553,7 @@ function renderReviews(p: ReviewsProps, b: EmailBrand): string {
   const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
   const stars = (n: number) => { const r = Math.max(0, Math.min(5, Math.round(Number(n) || 0))); return '★★★★★'.slice(0, r) + '☆☆☆☆☆'.slice(0, 5 - r); };
   // ★ 2026-07-07(5) 디자인 2.0 — 리뷰 = 흰 카드 + 헤어라인 보더 (면 위 면 대비)
-  const cards = items.map((r) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[3]}"><tr><td style="padding:${b.sp[4]} ${b.sp[5]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px"><div style="color:${b.accent};font-size:${b.type.body.size};letter-spacing:2px">${stars(r.rating)}</div><div style="font-size:${b.type.body.size};color:${b.text};margin:${b.sp[2]} 0;line-height:1.6">${esc(r.body)}</div><div style="font-size:${b.type.tiny.size};font-weight:600;color:${b.textMuted}">${esc(r.author)}${r.date ? ' · ' + esc(r.date) : ''}</div></td></tr></table>`).join('');
+  const cards = items.map((r) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[3]};${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[4]} ${b.sp[5]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px"><div style="color:${b.accent};font-size:${b.type.body.size};letter-spacing:2px">${stars(r.rating)}</div><div style="font-size:${b.type.body.size};color:${b.text};margin:${b.sp[2]} 0;line-height:1.6">${esc(r.body)}</div><div style="font-size:${b.type.tiny.size};font-weight:600;color:${b.textMuted}">${esc(r.author)}${r.date ? ' · ' + esc(r.date) : ''}</div></td></tr></table>`).join('');
   return `<tr><td style="padding:${b.sp[6]}">${title}${cards}</td></tr>`;
 }
 
@@ -589,7 +602,7 @@ function renderMapStatic(p: MapStoreLocatorProps, b: EmailBrand): string {
   const stores = (p.stores || []).filter((s) => s && s.name).slice(0, 5);
   if (stores.length === 0) return '';
   // ★ 2026-07-07(5) 디자인 2.0 — 매장별 헤어라인 보더 카드
-  const rows = stores.map((s) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${b.bg};border:1px solid ${b.border};border-radius:12px"><div style="font-size:${b.type.body.size};font-weight:700;color:${b.text}">${esc(s.name)}</div><div style="font-size:${b.type.small.size};color:${b.textMuted};margin-top:2px">${esc(s.address)}${s.phone ? ' · ' + esc(s.phone) : ''}</div></td></tr></table>`).join('');
+  const rows = stores.map((s) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]};${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${b.bg};border:1px solid ${b.border};border-radius:12px"><div style="font-size:${b.type.body.size};font-weight:700;color:${b.text}">${esc(s.name)}</div><div style="font-size:${b.type.small.size};color:${b.textMuted};margin-top:2px">${esc(s.address)}${s.phone ? ' · ' + esc(s.phone) : ''}</div></td></tr></table>`).join('');
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}">${rows}</td></tr>`;
 }
 
@@ -717,7 +730,13 @@ export function renderEmailSections(sections: Section[], ctx: EmailRenderCtx): s
     ? `<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">${esc(preText)}${'&nbsp;&zwnj;'.repeat(24)}</div>`
     : '';
   const bandRow = `<tr><td style="height:6px;font-size:0;line-height:0;background:${b.primary};background-image:${b.bandGrad};border-radius:${b.radius.xl} ${b.radius.xl} 0 0">&nbsp;</td></tr>`;
-  const shellStyle = `max-width:600px;width:100%;background:${b.cardBg};border:1px solid ${b.border};border-radius:${b.radius.xl};overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.08),0 2px 6px rgba(15,23,42,0.05);font-family:${b.fontFamily}`;
+  // ★ 2026-09-08 (남지현 접수 `cmtqsp5uw09yujnot3k93uh62` "메일 수신 시 가로 폭 정렬") 폭을 px로 싣는다.
+  //   종전 `max-width:600px;width:100%`는 600을 지키는 근거가 max-width 하나뿐이었다 — 인라인 `width:100%`가
+  //   HTML `width="600"` 속성을 덮으므로, max-width를 해석하지 않는 뷰어에서는 카드가 **부모 컨테이너 폭까지**
+  //   늘어난다(부모 1000px 가정 로컬 측정: 600 → 976 · 접수 원문 = "가로 폭이 넓게 보입니다").
+  //   좁은 화면은 아래 `@media (max-width:600px){.em-shell{width:100% !important}}`가 푼다(덮는 쪽 = 그 규칙).
+  //   ⛔ 그 미디어쿼리를 지우면 좁은 화면이 600px에 갇힌다. 폭 계약은 이 두 줄이 한 쌍이다.
+  const shellStyle = `width:600px;max-width:600px;background:${b.cardBg};border:1px solid ${b.border};border-radius:${b.radius.xl};overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.08),0 2px 6px rgba(15,23,42,0.05);font-family:${b.fontFamily}`;
   const outer = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${b.shellBg};margin:0;padding:0"><tr><td align="center" class="em-outer" style="padding:${b.sp[6]} ${b.sp[3]} ${b.sp[8]}"><table role="presentation" width="600" cellpadding="0" cellspacing="0" class="em-shell" style="${shellStyle}">${bandRow}${inner}</table></td></tr></table>`;
   // 다크모드: 셸이 이미 다크면 그대로, 라이트면 다크 선호 클라이언트에서 바깥 배경만 짙게(카드는 설계 색 유지).
   const darkPrefBg = b.dark ? b.shellBg : '#18181b';

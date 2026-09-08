@@ -4,6 +4,12 @@
  * design-core 이관(M1~M3) 전 이메일 렌더러 출력을 동결.
  * 값 무변 이관 원칙 — M2(코어 소비 전환) 후에도 이 스냅샷은 그대로 통과해야 한다.
  * 시간 종속 요소(쿠폰 마감 표시 등)는 fixture에서 제외 — 스냅샷 결정성 보장.
+ *
+ * ★ 2026-09-08 스냅샷 갱신 1회 (남지현 접수 2건 정정 · 의도된 출력 변경):
+ *   ①셸 폭을 `max-width:600px;width:100%` → `width:600px;max-width:600px`로 (가로 폭 접수)
+ *   ②둥근 모서리 셀을 담는 표에 `border-collapse:separate;border-spacing:0` (CTA 사각 테두리 접수)
+ *   그 밖의 값은 한 글자도 바뀌지 않았다(diff 확인). 계약 = `email-round-cell-contract.test.ts` ·
+ *   `email-section-renderer.test.ts`의 "셸 폭 계약" 절.
  */
 import { describe, it, expect } from 'vitest';
 import { renderEmailSections } from '../email-section-renderer';
