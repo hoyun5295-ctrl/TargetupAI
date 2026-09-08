@@ -111,7 +111,7 @@ import {
 } from '../utils/dm/dm-interaction';
 import { parseWinnerRows, buildEventInsight } from '../utils/dm/dm-interaction-core';
 import * as XLSX from 'xlsx';
-import { getServePath } from '../utils/image-serve';
+import { getServePath, parseFitOption } from '../utils/image-serve';
 
 // ────────────── D216+ 503 안전망 helper (db_alter_safety_net 영구 룰) ──────────────
 function isDbMigrationPendingError(err: any): boolean {
@@ -153,7 +153,8 @@ dmPublicRouter.get('/images/:companyId/:filename', async (req: Request, res: Res
   // ★ 2026-09-08 표시 기준(1400px) 변환본 서빙 — 원본은 그대로 두고 CT가 캐시본을 만든다.
   //   경위 = 2.4MB 원본이 메일에 그대로 실려 나가던 것(utils/image-serve.ts 주석).
   //   변환 불필요·실패 시 CT가 원본 경로를 돌려주므로 이 줄로 이미지가 안 나가는 일은 없다.
-  res.sendFile(await getServePath(filePath));
+  //   `?fit=1x1&bg=<hex>` = 상품 카드가 요청하는 비율 맞춤(형식 위반·미지원 값은 CT가 무시한다).
+  res.sendFile(await getServePath(filePath, parseFitOption(req.query)));
 });
 
 // ★ 2026-07-16 자가 호스팅 웹폰트 — 발행 뷰어·편집 캔버스·이메일 공용 (구글 CDN 미로드 궁서 폴백 정정).

@@ -10,7 +10,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import sharp from 'sharp';
-import { getServePath, SERVE_MAX_WIDTH, SERVE_JPEG_QUALITY, isOptimizableImage } from '../image-serve';
+import { getServePath, parseFitOption, SERVE_MAX_WIDTH, SERVE_JPEG_QUALITY, isOptimizableImage } from '../image-serve';
+import { PRODUCT_GRID_ASPECT } from '../image-fit-spec';
 
 let dir = '';
 
@@ -98,6 +99,73 @@ describe('서빙 이미지 최적화 — 품질 기준과 폴백', () => {
 
     const missing = path.join(dir, 'nope.jpg');
     expect(await getServePath(missing)).toBe(missing);
+  });
+
+  it('비율 맞춤 — 비율이 다른 원본들이 같은 비율로 구워진다 (잘림 0 · 확대 0)', async () => {
+    const wide = await makeJpeg('wide.jpg', 763, 244);     // 가로형(신발·배너)
+    const tall = await makeJpeg('tall.jpg', 425, 638);     // 세로형(의류)
+    const fit = { aspect: PRODUCT_GRID_ASPECT };
+
+    const a = await sharp(await getServePath(wide, fit)).metadata();
+    const b = await sharp(await getServePath(tall, fit)).metadata();
+    expect(a.width).toBe(a.height);                        // 정사각으로 구워졌다
+    expect(b.width).toBe(b.height);
+    // 픽셀 크기는 원본마다 달라도 **비율이 같으므로** 화면에서 같은 크기로 보인다.
+    expect((a.width || 0) / (a.height || 1)).toBe((b.width || 0) / (b.height || 1));
+    // 원본을 확대하지 않는다 = 캔버스 한 변은 원본 긴 변 이하.
+    expect(a.width).toBeLessThanOrEqual(763);
+    expect(b.width).toBeLessThanOrEqual(638);
+  });
+
+  it('채우기 ① 단색 배경 사진 = 가장자리 색으로 이어 붙인다 (이음매가 안 보인다)', async () => {
+    // makeJpeg는 단색 이미지 = 가장자리 흩어짐 0 → 색 채우기 경로
+    const src = await makeJpeg('studio.jpg', 800, 200);
+    const served = await getServePath(src, { aspect: PRODUCT_GRID_ASPECT });
+    // 여백 구역(맨 위)과 사진 구역(중앙)의 색이 사실상 같아야 이음매가 없다.
+    const top = await sharp(served).extract({ left: 10, top: 2, width: 4, height: 4 }).raw().toBuffer();
+    const mid = await sharp(served).resize(1, 1).raw().toBuffer();
+    for (let c = 0; c < 3; c++) expect(Math.abs(top[c] - mid[c])).toBeLessThan(12);
+  });
+
+  it('채우기 ② 복잡한 배경 사진 = 블러 확장 (단색 판이 붙지 않는다)', async () => {
+    // 좌표마다 색이 요동치는 그림 → 가장자리 흩어짐이 크다 = 블러 경로
+    const W = 600, H = 200;
+    const raw = Buffer.alloc(W * H * 3);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const o = (y * W + x) * 3;
+        raw[o] = (x * 7 + y * 13) % 256;
+        raw[o + 1] = (x * 29 + y * 3) % 256;
+        raw[o + 2] = (x * 11 + y * 47) % 256;
+      }
+    }
+    const noisy = path.join(dir, 'noisy.jpg');
+    await sharp(raw, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality: 95 }).toFile(noisy);
+
+    const served = await getServePath(noisy, { aspect: PRODUCT_GRID_ASPECT });
+    const meta = await sharp(served).metadata();
+    expect(meta.width).toBe(meta.height);
+    // 여백 구역이 단색이 아니어야 한다(블러된 사진이 깔린 것) — 두 지점 색이 서로 다르다.
+    const p1 = await sharp(served).extract({ left: 20, top: 5, width: 2, height: 2 }).raw().toBuffer();
+    const p2 = await sharp(served).extract({ left: meta.width! - 30, top: 5, width: 2, height: 2 }).raw().toBuffer();
+    const diff = Math.abs(p1[0] - p2[0]) + Math.abs(p1[1] - p2[1]) + Math.abs(p1[2] - p2[2]);
+    expect(diff).toBeGreaterThan(10);
+  });
+
+  it('비율 맞춤 — 캐시가 비율마다 따로 쌓인다 (맞춤 없는 변환본과 섞이지 않는다)', async () => {
+    const src = await makeJpeg('two-variant.jpg', 900, 300);
+    const fitted = await getServePath(src, { aspect: PRODUCT_GRID_ASPECT });
+    const plain = await getServePath(src);
+    expect(fitted).not.toBe(plain);
+    expect(fitted).toContain(PRODUCT_GRID_ASPECT);
+  });
+
+  it('요청 파싱 — 화이트리스트 밖은 무시한다 (캐시 디렉터리 이름에 들어가는 값이다)', () => {
+    expect(parseFitOption({ fit: '1x1' })).toEqual({ aspect: '1x1' });
+    expect(parseFitOption({ fit: '16x9' })).toBeNull();          // 미등재 비율
+    expect(parseFitOption({ fit: '../../etc' })).toBeNull();     // 경로 조작
+    expect(parseFitOption({ fit: '1x1; rm -rf' })).toBeNull();   // 덧붙인 문자열
+    expect(parseFitOption({})).toBeNull();
   });
 
   it('PNG는 무손실로 줄인다 (투명도·경계 보존)', async () => {

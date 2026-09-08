@@ -173,3 +173,58 @@ describe('셸 폭 계약 — 뷰어의 max-width 해석에 기대지 않는다',
     expect(html).toMatch(/\.em-shell\{width:100% !important/);
   });
 });
+
+/**
+ * ★ 2026-09-08(2) 상품 격자 비율 맞춤 — 맞추기(contain)에서 사진 크기가 제각각으로 보이던 것.
+ * 서버(`utils/image-serve.ts`)가 같은 비율로 구워 주도록 렌더러가 URL에 지시를 붙인다.
+ * 잘림을 되살리지 않으면서(0905 지적 유지) 크기만 맞추는 방식이라, 이 계약이 깨지면 둘 중 하나가 되돌아간다.
+ */
+describe('상품 격자 — 비율 맞춤 요청', () => {
+  const grid = (props: Record<string, unknown>): string =>
+    renderEmailSections([sec('product_carousel', {
+      products: [
+        { image_url: '/api/dm/v/images/co/a.jpg', name: '가로형 상품', price: 1000 },
+        { image_url: '/api/dm/v/images/co/b.jpg', name: '세로형 상품', price: 2000 },
+      ],
+      ...props,
+    }, 0)], {});
+
+  it('맞추기(contain) = 우리 서버 이미지에 fit을 붙인다', () => {
+    const html = grid({ image_fit: 'contain' });
+    const imgs = html.match(/<img[^>]*a\.jpg[^>]*>/g) || [];
+    expect(imgs.length).toBe(1);
+    expect(imgs[0]).toContain('a.jpg?fit=1x1');
+    // CSS 쪽(구형 뷰어용 폴백)도 그대로 남는다 — 싣는 쪽과 덮는 쪽을 함께 둔다.
+    expect(imgs[0]).toContain('object-fit:contain');
+  });
+
+  it('여백 색을 렌더러가 정해 보내지 않는다 — 사진을 보고 서버가 고른다', () => {
+    // 색을 실어 보내면 야외컷에 색 덩어리가 붙는다(2026-09-08 비교 캡처). URL에는 비율만 담긴다.
+    const html = grid({ image_fit: 'contain', background_color: '#123456' });
+    const img = (html.match(/<img[^>]*a\.jpg[^>]*>/) || [''])[0];
+    expect(img).toContain('fit=1x1');
+    expect(img).not.toContain('bg=');
+    expect(img).toContain('background:#123456');   // CSS 폴백은 종전대로 섹션 배경을 쓴다
+  });
+
+  it('채우기(cover)는 손대지 않는다 — 이미 크기가 맞고, 옛 출력이 한 글자도 안 바뀌어야 한다', () => {
+    const html = grid({});
+    expect(html).not.toContain('fit=1x1');
+    expect(html).toContain('object-fit:cover');
+  });
+
+  it('외부 주소에는 붙이지 않는다 — 우리 서버를 거치지 않아 무의미하고 그쪽 URL을 깨뜨린다', () => {
+    const html = renderEmailSections([sec('product_carousel', {
+      image_fit: 'contain',
+      products: [{ image_url: 'https://cdn.other.example.com/x.jpg?sig=abc', name: '외부', price: 100 }],
+    }, 0)], {});
+    expect(html).toContain('https://cdn.other.example.com/x.jpg?sig=abc');
+    expect(html).not.toContain('fit=1x1');
+  });
+
+  it('섹션 배경이 CSS 함수·색 이름이어도 맞춤은 그대로 요청한다 (색은 서버가 정하므로 무관)', () => {
+    const html = grid({ image_fit: 'contain', background_color: 'rgba(0,0,0,0.5)' });
+    expect(html).toContain('fit=1x1');
+    expect(html).toContain('object-fit:contain');
+  });
+});

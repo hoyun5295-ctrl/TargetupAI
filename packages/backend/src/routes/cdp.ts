@@ -105,7 +105,7 @@ import {
 import { query } from '../config/database';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
-import { getServePath } from '../utils/image-serve';
+import { getServePath, parseFitOption } from '../utils/image-serve';
 
 const router = Router();
 
@@ -572,7 +572,8 @@ router.get('/inapp/image/:companyId/:filename', async (req: any, res: any) => {
   // ★ 2026-09-08 표시 기준(1400px) 변환본 서빙 — 원본 보존 + 캐시(utils/image-serve.ts).
   //   이번 접수의 1792×2400 · 2.4MB 이미지가 이 경로로 나가고 있었다. 변환 불필요·실패 시 원본 경로가 온다.
   //   Content-Type은 위에서 확장자로 정하고 변환본도 같은 확장자라 헤더는 그대로 유효하다.
-  res.sendFile(path.resolve(await getServePath(filePath)));
+  //   `?fit=1x1&bg=<hex>` = 상품 카드가 요청하는 비율 맞춤(형식 위반·미지원 값은 CT가 무시한다).
+  res.sendFile(path.resolve(await getServePath(filePath, parseFitOption(req.query))));
 });
 
 router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {

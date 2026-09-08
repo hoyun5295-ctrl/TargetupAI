@@ -24,6 +24,7 @@ import type { DmBrandKit } from '../dm/dm-tokens';
 import { resolveEmailBrand, emailSelfHostFontImport, type EmailBrand, type EmailDesign } from './email-tokens';
 import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE, selectEmailTreatment } from './email-blocks';
 import { EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_TITLE_SIZE_KEY } from './email-property-contract';
+import { PRODUCT_GRID_ASPECT } from '../image-fit-spec';
 // ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 + 쿠폰 마감 한국어 표시 (normalize CT)
 import { normalizeWebUrl, formatKoreanDateTimeDisplay } from '../normalize';
 // ★ 2026-09-04 CTA 배치 판정 CT — 편집기(공용 CtaEditor)·DM SSR과 **같은 하나**를 쓴다.
@@ -59,6 +60,21 @@ function emailImg(src: string | undefined, publicBase?: string): string {
   if (/^https?:\/\//i.test(src)) return src;
   const base = (publicBase || 'https://hanjul.ai').replace(/\/$/, '');
   return base + '/' + String(src).replace(/^\//, '');
+}
+
+/**
+ * ★ 2026-09-08(2) 비율 맞춤 이미지 URL — 우리 서버가 서빙하는 것에만 `?fit=…`을 붙인다.
+ *   서버(`utils/image-serve.ts`)가 그 비율의 캔버스에 원본을 통째로 넣고(잘림 0) 남는 자리를 채운다.
+ *   무엇으로 채울지는 **사진을 보고 서버가 고른다**(단색 배경이면 그 색 · 복잡하면 블러 확장) —
+ *   렌더러가 색을 정해 보내면 야외컷에 색 덩어리가 붙는다(2026-09-08 비교 캡처).
+ * ⛔ 외부 주소(원본 src가 이미 절대 URL)에는 붙이지 않는다 — 우리 서버를 거치지 않아 파라미터가 무의미하고,
+ *   남의 URL에 우리 쿼리를 얹으면 그쪽 캐시·서명을 깨뜨릴 수 있다.
+ */
+function emailImgFitted(src: string | undefined, publicBase: string | undefined): string {
+  const url = emailImg(src, publicBase);
+  if (!url) return '';
+  if (/^https?:\/\//i.test(String(src))) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}fit=${PRODUCT_GRID_ASPECT}`;
 }
 
 /** ★ 2026-07-12 편집기 폰트 크기(headline_size/body_size 등) 소비 — DM 렌더러 fsDecl 미러.
@@ -411,8 +427,10 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
   const thumbH = EMAIL_PRODUCT_LIST_THUMB[hKey];
   // 맞추기(contain)는 여백이 생기므로 그 여백을 배경색으로 채운다(미지정이면 테마 배경).
   // 채우기(cover)에서 정렬이 가운데면 아무것도 덧붙이지 않는다 — 옛 출력과 문자 단위로 같게.
-  const imgFitCss = p.image_fit === 'contain'
-    ? `object-fit:contain;background:${p.background_color ? esc(p.background_color) : b.bg}`
+  const isContain = p.image_fit === 'contain';
+  const containBg = p.background_color ? esc(p.background_color) : b.bg;
+  const imgFitCss = isContain
+    ? `object-fit:contain;background:${containBg}`
     : `object-fit:cover${p.image_focus === 'top' || p.image_focus === 'bottom' ? `;object-position:center ${p.image_focus}` : ''}`;
 
   // 제목 크기·색 — md = h3 = 현행이라 미지정이면 옛 출력 그대로.
@@ -436,7 +454,12 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
   //   상품명 2줄 확보(min-height 37px) → 옆 카드와 가격 줄·하단 정렬(DM SSR 고정 박스 방식 미러).
   //   object-fit 미지원 구형 클라이언트는 이미지가 늘어질 뿐 칸 정렬은 유지된다.
   const cellFor = (it: ProductCarouselItem): string => {
-    const img = emailImg(it.image_url, ctx.publicBase);
+    // ★ 2026-09-08(2) 맞추기(contain)에서 사진 크기가 제각각으로 보이던 것 — 이미지를 서버가 같은 비율로 구워 준다.
+    //   원본 비율이 보존되므로 잘림은 0이고(0905 지적 유지), 모든 상품이 같은 크기로 보인다.
+    //   ⛔ 채우기(cover)는 이미 크기가 맞으므로 손대지 않는다(옛 출력 무변화).
+    const img = isContain
+      ? emailImgFitted(it.image_url, ctx.publicBase)
+      : emailImg(it.image_url, ctx.publicBase);
     const url = linkOf(it);
     const imgTag = img
       ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="100%" height="${imgH}" style="width:100%;height:${imgH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}">`
