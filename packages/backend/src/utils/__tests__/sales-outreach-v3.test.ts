@@ -418,12 +418,15 @@ describe('★ v3 전사 가드 · 자동 재조립 트리거 · AI 계수 · 회
       { id: 'so-v3-header-header', type: 'header', props: {} }, { id: 'g-1-hero', type: 'hero', props: { image_url: 'https://hanjul.ai/copy/ev.jpg', headline: '추석 기획전' } },
       { id: 'so-v3-cta-event1-cta', type: 'cta', props: {} }, { id: 'so-v3-carousel1-product_carousel', type: 'product_carousel', props: { products: [{}, {}] } },
       { id: 'so-proof-card', type: 'text_card', props: {} }, { id: 'g-2-text_card', type: 'text_card', props: { headline: '모델 카드' } },
+      // ★ 2026-09-09 기획전 슬라이스 모드 블록(src 'slice' · ref = 슬라이스 수)
+      { id: 'so-slice-gallery', type: 'gallery', props: { images: [{}, {}, {}] } },
     ];
     const cards = [{ title: '추석 기획전', periodRaw: null, endDate: '2099-01-01', bannerUrl: 'https://hanjul.ai/copy/ev.jpg', detailUrl: 'x', licensed: true }];
     const r: any = buildOutreachRecipe({ sections, cards, media: null, licensedQuote: '추석 기획전 30%', look: { treatments: 3, backgrounds: 2 }, colorSource: 'render', benefitStripped: 1, heroFallback: false, eventList: 'ok', bannerRead: false, vision: { outcome: 'ok', items: { hero_image_full: true } }, aiCost: null });
     expect(r.materials).toEqual({ products: 0, banners: 0, eventCards: 1, licensed: true, licensedChars: 10 });
-    expect(r.bindings.map((b: any) => b.src)).toEqual(['code', 'card', 'card', 'product', 'proof', 'quote']);
+    expect(r.bindings.map((b: any) => b.src)).toEqual(['code', 'card', 'card', 'product', 'proof', 'quote', 'slice']);
     expect(r.bindings[3].ref).toBe('n=2');
+    expect(r.bindings[6].ref).toBe('n=3');
     expect(JSON.stringify(r)).not.toContain('추석 기획전');
     expect(r.look).toEqual({ treatments: 3, backgrounds: 2, colorSource: 'render' });
   });

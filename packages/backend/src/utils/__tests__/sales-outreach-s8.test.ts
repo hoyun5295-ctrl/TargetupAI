@@ -42,7 +42,8 @@ describe('브랜드 팔레트 → 주색', () => {
   it('워커는 팔레트·뷰포트 캡처를 돌려주고 클라이언트가 그대로 매핑한다 · 페이지 쪽 코드에 백슬래시 정규식 0(템플릿 리터럴)', () => {
     const worker = code('workers/outreach-render-worker.ts');
     expect(worker).toContain('screenshotViewportBase64');
-    expect(worker).toContain("palette, screenshotViewportBase64 };");
+    // ★ 2026-09-09 넓은 이미지 기하(images)도 같은 반환에 실린다(기획전 슬라이스 판정 재료)
+    expect(worker).toContain("palette, screenshotViewportBase64, images: Array.isArray(dom.images) ? dom.images : [] };");
     const start = worker.indexOf('const toHex = (c) =>');
     const end = worker.indexOf('.map((e) => ({ hex: e.hex', start);
     expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start);

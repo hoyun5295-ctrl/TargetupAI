@@ -251,6 +251,8 @@ export type GalleryProps = {
   layout: 'grid_2x2' | 'grid_3x3' | 'list_1xN' | 'masonry';
   enable_zoom?: boolean;
   enable_fullscreen?: boolean;
+  /** ★ 2026-07-15 풀화면(패딩·테두리·라운드·간격 0) — DM 렌더러가 읽어 왔고 ★ 2026-09-09 이메일 렌더러도 세로 1열에서 읽는다(타입만 뒤늦게 등재 · 동작 무변경) */
+  full_bleed?: boolean;
 };
 
 export type SlideshowSlide = {

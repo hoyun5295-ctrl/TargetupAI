@@ -529,23 +529,27 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
 }
 
 function renderGallery(p: GalleryProps, b: EmailBrand, ctx: EmailRenderCtx): string {
-  const imgs = (p.images || []).filter((x) => x && x.url).slice(0, 9);
+  // ★ 2026-09-09 full_bleed(세로 1열) — DM 렌더러(2026-07-15 · 패딩·테두리·라운드·간격 0)와 짝. 이메일만 무시하고 있어
+  //   기획전 슬라이스(AI 영업 슬라이스 모드)가 셀 패딩·라운드 때문에 벌어지고 모서리가 깎였다. 미설정 = 옛 출력 그대로(회귀 0).
+  //   세로 1열에서는 장수 상한도 DM 과 같이 20(슬라이스는 9장을 넘는다) · 격자는 현행 9.
+  const seamless = p.layout === 'list_1xN' && p.full_bleed === true;
+  const imgs = (p.images || []).filter((x) => x && x.url).slice(0, seamless ? 20 : 9);
   if (imgs.length === 0) return '';
   const perRow = p.layout === 'grid_3x3' ? 3 : p.layout === 'list_1xN' ? 1 : 2;
   const w = Math.floor(100 / perRow);
-  const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
+  const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:${seamless ? `${b.sp[4]} ${b.sp[4]}` : `0 0 ${b.sp[4]}`};text-align:center">${esc(p.title)}</div>` : '';
   const cellFor = (im: GalleryImage): string => {
     const img = emailImg(im.url, ctx.publicBase);
-    const tag = `<img src="${esc(img)}" alt="${esc(im.caption || '')}" width="100%" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">`;
+    const tag = `<img src="${esc(img)}" alt="${esc(im.caption || '')}" width="100%" style="width:100%;display:block;border:0;border-radius:${seamless ? '0' : b.radius.sm}">`;
     const galleryLink = normalizeWebUrl(im.link_url || '');
     const wrapped = /^https?:\/\//i.test(galleryLink) ? `<a href="${esc(galleryLink)}">${tag}</a>` : tag;
-    return `<td width="${w}%" valign="top" style="padding:${b.sp[1]}">${wrapped}</td>`;
+    return `<td width="${w}%" valign="top" style="padding:${seamless ? '0' : b.sp[1]}">${wrapped}</td>`;
   };
   const rows: string[] = [];
   for (let i = 0; i < imgs.length; i += perRow) {
     rows.push(`<tr>${imgs.slice(i, i + perRow).map(cellFor).join('')}</tr>`);
   }
-  return `<tr><td style="padding:${b.sp[6]} ${b.sp[4]}">${title}<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows.join('')}</table></td></tr>`;
+  return `<tr><td style="padding:${seamless ? '0' : `${b.sp[6]} ${b.sp[4]}`}">${title}<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows.join('')}</table></td></tr>`;
 }
 
 function renderPromoCode(p: PromoCodeProps, b: EmailBrand): string {

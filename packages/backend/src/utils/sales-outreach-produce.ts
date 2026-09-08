@@ -21,6 +21,7 @@ import * as dns from 'dns';
 import * as https from 'https';
 import * as path from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
+import helmet from 'helmet';
 import { callAIWithFallback } from '../services/ai';
 import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
 import { getActiveStyleGuide, type OutreachStyleGuide } from './sales-outreach-style';
@@ -64,6 +65,8 @@ import { hasBenefitPattern, findTemplateSample, type ComposeTypography } from '.
 import { renderPageGuarded } from './sales-outreach-render';
 // ★ 2026-09-06 S5 조립 엔진(결정 구간 공용) — 엔진은 이 파일을 모른다(deps 주입 · 순환 0)
 import { assembleDmCampaign, type EngineDeps, type EngineGenInput, type EngineMaterials, type EngineChannel, type EngineEntry, type EngineEventCard } from './campaign-engine';
+// ★ 2026-09-09 기획전 슬라이스 조립 모드(재료 판정·자격·구성 CT · AI 0)
+import { sliceModeCard, composeSliceSections, OUTREACH_SLICE_MAX, OUTREACH_SLICE_MIN_WIDTH, type EventSliceMaterial } from './sales-outreach-slices';
 // ★ 2026-09-05 실물 예시 원천 = DB(베스트 구성에서 올린 실물 · 5분 캐시) + seed. async에서 읽어 순수 프롬프트 빌더에 주입한다(pickOutreachStructure와 같은 형태).
 import { loadOutreachExemplarSource } from './sales-outreach-examples';
 
@@ -110,6 +113,19 @@ export function getOutreachContext(): { companyId: string; userId: string } | nu
 }
 
 export const PUBLIC_BASE = (process.env.PUBLIC_BASE_URL || 'https://hanjul.ai').replace(/\/+$/, '');
+
+/**
+ * ★ 2026-09-09 공개 샘플 페이지 CSP — helmet 기본 directive 는 그대로 두고 img-src 에만 PUBLIC_BASE 를 더한다.
+ *   경위: 페이지 HTML 은 호스트 무관인데 이미지는 PUBLIC_BASE 절대 주소라, PUBLIC_BASE 와 다른 호스트
+ *   (sys.hanjullo.com 관리자 미리보기)에서 열면 helmet 기본 `img-src 'self'` 가 이미지 9장을 전부 차단했다(아이소이 실측 · curl 은 200).
+ *   helmet 앞 마운트(DM 뷰어 방식)를 쓰지 않는 이유: 크롤한 외부 문구를 담는 페이지라 script-src 'self' 방어를 남긴다.
+ *   라우터 범위(router.use)에만 붙여 다른 라우트 영향 0. 계약 테스트 = __tests__/outreach-public-csp.test.ts
+ */
+export function outreachPublicPageCsp() {
+  return helmet.contentSecurityPolicy({
+    directives: { 'img-src': ["'self'", 'data:', PUBLIC_BASE] },
+  });
+}
 
 /** 공개 샘플 페이지 수명(일) — 기산점은 메일 발송 성공 시각(H15). 상수 1곳 소유. */
 export const OUTREACH_PREVIEW_DAYS = 30;
@@ -289,6 +305,8 @@ export interface OutreachMedia {
   logo?: StoredImage | null;
   /** 이미지 폭 ≥ 400 통과 상품 · 최대 6개 */
   products: OutreachMediaProduct[];
+  /** ★ 2026-09-09 기획전 슬라이스 사본(brand_profile.eventSlices.images 순서 그대로 · 폭 ≥600 · 최대 20) · 갤러리와 분리(AI 경로·재료 선택 화면 무접촉) · 옛 기록에는 없다 */
+  slices?: StoredImage[];
   collectedAt: string;
   stats: {
     galleryCandidates: number; galleryPassed: number; productLinks: number; productsFound: number; productsPassed: number;
@@ -299,6 +317,8 @@ export interface OutreachMedia {
     /** ★ v3 상품 상세 1홉이 벽시계 예산에 걸려 남은 링크를 보지 못했는가 · 카드 배너 사본 시도·통과 수 */
     productsTimedOut?: boolean;
     cardBannersTried?: number; cardBannersPassed?: number;
+    /** ★ 2026-09-09 슬라이스 사본 시도·통과·예산 초과 */
+    slicesTried?: number; slicesPassed?: number; slicesTimedOut?: boolean;
   };
 }
 
@@ -318,6 +338,8 @@ export async function collectOutreachMedia(input: {
   logoCandidates?: string[];
   /** ★ v3 이벤트 카드 배너 원 URL(전용 예산으로 사본 · 폭 ≥400 · 최대 6 · 갤러리 뒤에 붙는다 · srcUrl 로 되찾는다) */
   cardBannerUrls?: string[];
+  /** ★ 2026-09-09 기획전 슬라이스 원 URL(brand_profile.eventSlices.images 순서 · 전용 예산 · 갤러리에 섞지 않는다 · srcUrl 로 되찾는다) */
+  sliceUrls?: string[];
 }): Promise<OutreachMedia> {
   const referer = input.homepageUrl;
   const fetcher = (u: string) => fetchImageGuarded(u, { referer });
@@ -343,6 +365,12 @@ export async function collectOutreachMedia(input: {
     ? await pickStoredImagesDetail(cardUrls, OUTREACH_CARD_BANNER_MAX, OUTREACH_CARD_BANNER_MIN_WIDTH, fetcher, store, { deadlineMs: 20_000, maxTries: cardUrls.length })
     : { images: [] as StoredImage[], tried: 0, timedOut: false };
   const gallery = [...homeGallery, ...cardPick.images];
+  // ★ 2026-09-09 기획전 슬라이스 사본 — 전용 예산 · 재료 순서 유지(pickStoredImagesDetail 은 문서 순서를 지킨다) · 폭 ≥600 · 최대 20 · 갤러리에 섞지 않는다.
+  //   한 장이 실패하면 그 자리만 빠진다(이야기 흐름은 끊겨도 레이아웃은 안 깨진다 · 자격 판정은 사본 ≥3).
+  const sliceUrls = (input.sliceUrls || []).filter(Boolean).slice(0, OUTREACH_SLICE_MAX);
+  const slicePick = sliceUrls.length
+    ? await pickStoredImagesDetail(sliceUrls, OUTREACH_SLICE_MAX, OUTREACH_SLICE_MIN_WIDTH, fetcher, store, { deadlineMs: OUTREACH_GALLERY_DEADLINE_MS, maxTries: sliceUrls.length })
+    : { images: [] as StoredImage[], tried: 0, timedOut: false };
   // ★ 0905(5) 헤더 로고 — 후보 순서대로 받아 크기·비율·흰 로고를 거른 첫 장을 사본으로. 실패 = null(글자 워드마크)
   let logo: StoredImage | null = null;
   for (const u of input.logoCandidates || []) {
@@ -397,8 +425,12 @@ export async function collectOutreachMedia(input: {
     gallery,
     logo,
     products,
+    slices: slicePick.images,
     collectedAt: new Date().toISOString(),
     stats: {
+      slicesTried: slicePick.tried,
+      slicesPassed: slicePick.images.length,
+      slicesTimedOut: slicePick.timedOut,
       galleryCandidates: input.imageCandidates.length,
       galleryPassed: gallery.length,
       productLinks: input.productLinks.length,
@@ -1871,6 +1903,8 @@ export interface ProduceDmInput {
   entry: EngineEntry;
   /** ★ v3 행사 카드(선택 순서 · ≤3 · bannerUrl 은 사본으로 되찾은 값) */
   eventCards?: EngineEventCard[] | null;
+  /** ★ 2026-09-09 기획전 슬라이스 재료(brand_profile.eventSlices · 원 URL) — 사본은 media.slices · 자격은 sliceModeCard 가 판정 */
+  eventSlices?: EventSliceMaterial | null;
 }
 
 export interface ProduceDmResult {
@@ -1961,6 +1995,9 @@ export interface AssembledDm {
   blockGate: BlockMinimaResult;
   /** brand_kit(주색 = 접근성 보정본 · 없으면 무채색) */
   brandKit: ReturnType<typeof buildOutreachBrandKit>;
+  /** ★ 2026-09-09 기획전 슬라이스 모드로 조립했는가(AI 0 · 골격 0 · 자동 재조립 0) · 실린 슬라이스 수 */
+  sliceMode: boolean;
+  sliceCount: number;
 }
 
 function assertOutreachPublisher(input: Pick<ProduceDmInput, 'companyId' | 'userId'>): void {
@@ -1980,9 +2017,21 @@ export async function assembleOutreachDm(input: ProduceDmInput): Promise<Assembl
   const products = media?.products || [];
   const gallery: OutreachFillImage[] = (media?.gallery || []).map((g) => ({ url: g.url, width: g.width, height: g.height, ...(g.alt ? { alt: g.alt } : {}) }));
 
+  // ★ 2026-09-09 기획전 슬라이스 모드(설계서 §18 · 불변 40) — 사람이 고른 면허 카드의 상세 슬라이스 사본이 ≥3 이면 AI 생성 0 · 참조 골격 0:
+  //   슬라이스를 그대로 이어 붙인 4블록(header · gallery · cta · footer)을 preset 으로 엔진에 넘긴다(숨김 override · 재구성 · 페이지만 탄다).
+  //   증거 카드는 넣지 않는다(이음새 사이에 글 카드가 서면 슬라이스가 끊긴다) · 숨김 재실행(preset 입력)은 그대로 preset 이 이긴다.
+  const hasPreset = !!(input.presetSections && input.presetSections.length > 0);
+  const slice = input.entry === 'outreach' && !hasPreset ? sliceModeCard(input.eventCards || [], input.eventSlices || null, media?.slices || []) : null;
+  const sliceSections = slice
+    ? composeSliceSections({
+      companyName: input.companyName, logoUrl: media?.logo?.url || null, slices: slice.slices, detailUrl: String(slice.card.detailUrl),
+      ctaLabel: eventCtaLabel(slice.card), legal: input.legal, channel: 'DM',
+    })
+    : null;
+
   // 아웃리치 전용 = 참조 골격(베스트 구성 서빙 · seed) · 엔진에는 순서 힌트만 넘긴다
   let structureRef: OutreachStructureRef | null = null;
-  if (!(input.presetSections && input.presetSections.length > 0)) {
+  if (!hasPreset && !sliceSections) {
     structureRef = await pickOutreachStructure({
       companyName: input.companyName,
       eventText: input.material,
@@ -1994,7 +2043,7 @@ export async function assembleOutreachDm(input: ProduceDmInput): Promise<Assembl
     companyName: input.companyName, industry: input.industry, homepageUrl: input.homepageUrl, siteTitle: input.siteTitle, material: input.material, extraNotes: input.extraNotes || null,
     products, gallery, logoUrl: media?.logo?.url || null,
     posterUrl: input.posterUrl, posterSize: input.posterSize || null, bannerUrl: input.bannerUrl || null, bannerSize: input.bannerSize || null,
-    ctaLinks: input.ctaLinks, legal: input.legal, licensedQuote: input.licensedQuote, proof: input.proof || null,
+    ctaLinks: input.ctaLinks, legal: input.legal, licensedQuote: input.licensedQuote, proof: sliceSections ? null : (input.proof || null),
     posterCaption: input.posterCaption || null,
     eventCards: input.eventCards || undefined,
   };
@@ -2002,7 +2051,7 @@ export async function assembleOutreachDm(input: ProduceDmInput): Promise<Assembl
     entry: input.entry, channel: 'DM',
     skeletonTypes: structureRef ? structureRef.sectionTypes.filter((t) => dmAllowedTypes(input.entry).includes(t)) : null,
     sectionOverride: input.sectionOverride || null,
-    presetSections: input.presetSections || null,
+    presetSections: sliceSections || input.presetSections || null,
     // ★ 아웃리치 DM = 세로 한 페이지(OUTREACH_DM_LAYOUT_MODE) — slides 확장이 갤러리 구도·링크를 버리고 sandbox 미리보기가 첫 장에서 멈춘다
     layoutMode: OUTREACH_DM_LAYOUT_MODE,
   }, outreachEngineDeps());
@@ -2024,6 +2073,8 @@ export async function assembleOutreachDm(input: ProduceDmInput): Promise<Assembl
     blockGate: assertBlockMinima(engine.sections),
     // ★ C1-3 brand_kit은 항상(art_direction 그릇) · 대비 미달이면 색만 뺀다 · logo_url은 어떤 경우에도 없다(불변 11)
     brandKit: buildOutreachBrandKit(primary, input.industry),
+    sliceMode: !!sliceSections,
+    sliceCount: sliceSections ? (((sliceSections[1].props as unknown as { images?: unknown[] }).images || []).length) : 0,
   };
 }
 
@@ -2103,12 +2154,34 @@ export interface BrandEmailResult {
   exemplarCount: number;
   exemplarTotal: number;
   look: OutreachLookStats;
+  /** ★ 2026-09-09 기획전 슬라이스 모드(DM 과 같은 기준 · AI 0) · 실린 슬라이스 수 */
+  sliceMode: boolean;
+  sliceCount: number;
 }
 
 export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>): Promise<BrandEmailResult> {
   const media = applyOutreachMediaSelection(input.media, input.mediaSelection || null);
   const products = media?.products || [];
   const gallery: OutreachFillImage[] = (media?.gallery || []).map((g) => ({ url: g.url, width: g.width, height: g.height, ...(g.alt ? { alt: g.alt } : {}) }));
+  // ★ 2026-09-09 기획전 슬라이스 모드 — DM 과 같은 자격·같은 구성(헤더 정렬만 다르다) · AI 0 · 룩 0 · 제목 = 카드 제목 원문(수치 없음 = eventCtaLabel 과 같은 원천)
+  const slice = input.entry === 'outreach' ? sliceModeCard(input.eventCards || [], input.eventSlices || null, media?.slices || []) : null;
+  if (slice) {
+    const sections = composeSliceSections({
+      companyName: input.companyName, logoUrl: media?.logo?.url || null, slices: slice.slices, detailUrl: String(slice.card.detailUrl),
+      ctaLabel: eventCtaLabel(slice.card), legal: input.legal, channel: 'EMAIL',
+    });
+    return {
+      sections,
+      subject: headlineFromCard(slice.card, slice.card.licensed).headline.slice(0, 40),
+      preheader: '',
+      benefitStripped: 0,
+      exemplarCount: 0,
+      exemplarTotal: 0,
+      look: lookStatsOf(sections),
+      sliceMode: true,
+      sliceCount: (((sections[1].props as unknown as { images?: unknown[] }).images || []).length),
+    };
+  }
   const dims = buildLookDims(gallery, products, input.posterUrl, input.posterSize);
   const genInput: OutreachGenInput = {
     companyName: input.companyName,
@@ -2145,6 +2218,8 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
     exemplarCount: emailPrompt.exemplars.picked,
     exemplarTotal: emailPrompt.exemplars.total,
     look: looked.stats,
+    sliceMode: false,
+    sliceCount: 0,
   };
 }
 

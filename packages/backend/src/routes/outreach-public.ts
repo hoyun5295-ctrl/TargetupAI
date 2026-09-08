@@ -10,8 +10,13 @@
 import { Router, Request, Response } from 'express';
 import { getPublicOutreachHtml, recordOutreachPreviewView } from '../utils/sales-outreach-jobs';
 import { isOutreachMigrationPending } from '../utils/sales-outreach-jobs';
+import { outreachPublicPageCsp } from '../utils/sales-outreach-produce';
 
 const router = Router();
+
+// ★ 2026-09-09 이 라우터는 app.ts 에서 helmet 뒤에 마운트되어 SPA 용 CSP(img-src 'self')를 물려받는다.
+//   이미지는 PUBLIC_BASE 절대 주소라 다른 호스트(sys 관리자 미리보기)에서 열면 전부 차단됐다 → img-src 에 PUBLIC_BASE 추가.
+router.use(outreachPublicPageCsp());
 
 router.get('/:code', async (req: Request, res: Response) => {
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');

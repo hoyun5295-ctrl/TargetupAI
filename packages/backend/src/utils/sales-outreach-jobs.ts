@@ -56,6 +56,8 @@ import {
   renderPageGuarded, countMaterials, shouldEscalateToRender, unionStrings, unionProducts, unionImageDetails, mergeCtaLinks, buildMaterialsV2, bannersOf, pickBrandColorFromPalette,
   type RenderResult, type MaterialSource,
 } from './sales-outreach-render';
+// ★ 2026-09-09 기획전 슬라이스 재료 판정(렌더 기하 → 세로로 이어진 넓은 이미지 묶음)
+import { detectEventSlices, type EventSliceMaterial } from './sales-outreach-slices';
 import { isSameSite } from './sales-outreach-render-guard';
 // ★ 2026-09-06 S4 파기 공용(sweeper 와 같은 본문)
 import { purgeOutreachJobArtifacts } from './sales-outreach-purge';
@@ -718,6 +720,11 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   let cardBanners: ReturnType<typeof bannersOf> = [];
   let cardProductLinks: string[] = [];
   let cardsOutcome: 'ok' | 'no_content' | 'unavailable' | null = null;
+  // ★ 2026-09-09 기획전 슬라이스 재료(설계서 §18) — 면허 카드 1번의 상세를 렌더 워커로 1회 그려 넓은 이미지 기하를 받는다(정적 HTML 에는 기하가 없다).
+  //   3값 event_slices 는 면허 카드가 있었을 때만 찍는다 · 워커 부재·차단·시간 초과 = unavailable(즉시 전진) · 묶음 없음 = no_content.
+  let eventSlices: EventSliceMaterial | null = null;
+  let slicesOutcome: 'ok' | 'no_content' | 'unavailable' | null = null;
+  let slicesDetail: string | null = null;
   if (hasSource) {
     // ★ v3 목록 페이지 후보를 순서대로 최대 3개 시도(아이소이 첫 실측: 홈에 목록 앵커가 없어 상세 1장을 읽었다 → 관례 주소 /event/event_list 가 목록) · 카드가 나오면 멈춘다 · 카드 0이면 첫 성공 페이지가 옛 방식의 행사 상세 원문
     const links = (rendered ? findEventListLinks(rendered.html, finalUrl) : []).concat(page ? findEventListLinks(page.html, staticUrl) : []).filter((u, i, arr) => arr.indexOf(u) === i).slice(0, 3);
@@ -779,6 +786,36 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
         // 카드 상세 1홉 — 면허(미래 종료일) 있는 카드 상위 2 · 정적만 · 벽시계 30초
         const licensedCards = eventCards.filter((c) => isFutureDate(c.endDate)).slice(0, 2);
         if (licensedCards.length) {
+          // ★ 2026-09-09 면허 카드 1번 상세 렌더 1회(20초 · 같은 호스트만) — 슬라이스 기하 + 그 HTML 은 아래 1홉 합집합에도 쓴다(정적 껍데기 대체 · 같은 주소 2회 요청 0).
+          //   홈이 정적으로 끝난 몰(서버 렌더 대형몰)도 여기서는 렌더한다: 슬라이스 판정은 렌더 기하가 유일한 재료라서다.
+          let detailRendered: { html: string; finalUrl: string } | null = null;
+          {
+            const c0 = licensedCards[0];
+            const hb0 = startLockHeartbeat(jobId, lockToken, 'crawling');
+            try {
+              const rs = await renderPageGuarded(c0.linkUrl, { deadlineMs: 20_000, screenshot: false });
+              if (rs.ok) {
+                let dHost = ''; try { dHost = new URL(rs.result.finalUrl).hostname; } catch { dHost = ''; }
+                if (host && isSameSite(host, dHost)) {
+                  if (rs.result.html.length >= 2_000) detailRendered = { html: rs.result.html, finalUrl: rs.result.finalUrl };
+                  const shots = Array.isArray(rs.result.images) ? rs.result.images : [];
+                  const det = detectEventSlices(shots);
+                  if (det) {
+                    eventSlices = { detailUrl: c0.linkUrl, finalUrl: rs.result.finalUrl, images: det.images, candidates: det.candidates, at: new Date().toISOString() };
+                    slicesOutcome = 'ok';
+                  } else {
+                    slicesOutcome = 'no_content';
+                    slicesDetail = shots.length ? `넓은 이미지 ${shots.length}장 · 세로로 이어진 묶음 없음` : '워커가 이미지 기하를 주지 않음(렌더 워커 갱신 필요)';
+                  }
+                } else { slicesOutcome = 'unavailable'; slicesDetail = '상세 호스트 이탈'; }
+              } else { slicesOutcome = 'unavailable'; slicesDetail = `${rs.failure.reason}: ${rs.failure.detail}`.slice(0, 300); }
+            } catch (err: any) {
+              slicesOutcome = 'unavailable'; slicesDetail = detailOf(err);
+              console.error('[sales-outreach] 카드 상세 렌더 예외(정적 폴백):', jobId, err?.message);
+            } finally {
+              hb0.stop();
+            }
+          }
           const hb = startLockHeartbeat(jobId, lockToken, 'crawling');
           const deadline = Date.now() + 30_000;
           let got = 0;
@@ -786,7 +823,7 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
             for (const c of licensedCards) {
               if (Date.now() > deadline) break;
               try {
-                const d = await fetchHtmlGuarded(c.linkUrl, OUTREACH_FETCH_OPTS);
+                const d = c === licensedCards[0] && detailRendered ? detailRendered : await fetchHtmlGuarded(c.linkUrl, OUTREACH_FETCH_OPTS);
                 if (!d) continue;
                 let dHost = ''; try { dHost = new URL(d.finalUrl).hostname; } catch { dHost = ''; }
                 if (!host || !isSameSite(host, dHost)) continue;
@@ -870,6 +907,8 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
     })(),
     // ★ v3 홈 첫 화면 캡처(375×900 공개 사본 · 제안 메일 대조 왼쪽) · 못 만들면 null
     homeCaptureUrl,
+    // ★ 2026-09-09 기획전 슬라이스 재료(원 URL · 문서 순서 · 면허 카드 1번 상세) · 사본은 제작 단계 media.slices · 없으면 null
+    eventSlices,
     subPageUrl: subUrl,
     structuredBlocks: homeMaterial.structuredBlocks,
     // ★ 2026-09-05 재료(순수 추출 · 네트워크 0) — 제작 단계가 실측·사본 저장에 쓴다 (★ v3 카드 상세 링크는 뒤)
@@ -898,6 +937,7 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   if (renderingOutcome) { renderKeys.rendering = renderingOutcome; renderKeys.rendering_detail = renderingDetail; renderKeys.render_meta = renderMeta; }
   if (eventListOutcome) renderKeys.event_list = eventListOutcome;
   if (cardsOutcome) renderKeys.crawling_cards = cardsOutcome;
+  if (slicesOutcome) { renderKeys.event_slices = slicesOutcome; if (slicesDetail) renderKeys.event_slices_detail = slicesDetail; }
 
   if (crawlOutcome === 'unavailable') {
     // 봇 차단·타임아웃 — 행사 후보 없이 확정 대기로(화면에서 직접 붙여넣기 폴백). "확인 실패"를 "행사 없음"으로 접지 않는다.
@@ -1168,6 +1208,8 @@ export function buildOutreachRecipe(input: {
     const id = String(s?.id || ''); const type = String(s?.type || ''); const p: any = s?.props || {};
     let src: string = 'code'; let reader: string = 'code'; let ref: string | null = null;
     if (id === 'so-proof-card') { src = 'proof'; reader = 'html'; }
+    // ★ 2026-09-09 기획전 슬라이스 블록 — 출처는 브랜드 기획전 페이지 이미지(읽기 = 렌더 기하) · ref = 실린 장수
+    else if (id.startsWith('so-slice')) { src = 'slice'; reader = 'html'; ref = type === 'gallery' ? `n=${Array.isArray(p.images) ? p.images.length : 0}` : null; }
     else if (id.startsWith('so-v3-poster')) { src = 'poster'; reader = 'vision'; }
     else if (id.startsWith('so-v3-event') || id.startsWith('so-v3-cta-event') || (type === 'hero' && cardBanners.has(p.image_url))) { src = 'card'; reader = input.bannerRead ? 'vision' : 'html'; ref = p.image_url ? 'banner' : 'title'; }
     else if (id.startsWith('so-v3-spot') || id.startsWith('so-v3-cta-spot') || type === 'product_carousel' || (type === 'text_card' && productImgs.has(p.image_url))) { src = 'product'; reader = 'html'; ref = type === 'product_carousel' ? `n=${Array.isArray(p.products) ? p.products.length : 0}` : null; }
@@ -1310,6 +1352,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               logoCandidates: Array.isArray(bp.logoCandidates) ? bp.logoCandidates : [],
               // ★ v3 카드 배너는 전용 예산으로 사본을 만든다(후보 꼬리 자리는 시도 상한 밖 · 리뷰 #2)
               cardBannerUrls: Array.isArray(bp.materials?.eventCards) ? bp.materials.eventCards.map((c: any) => String(c?.imageUrl || '')).filter(Boolean) : [],
+              // ★ 2026-09-09 기획전 슬라이스 원 URL(재료 순서 그대로 · 전용 예산 · 갤러리와 분리)
+              sliceUrls: Array.isArray(bp.eventSlices?.images) ? bp.eventSlices.images.map((i: any) => String(i?.url || '')).filter(Boolean) : [],
             });
             // 재수집 = 사본 URL이 전부 바뀐다 → 검토에서 고른 재료 선택은 함께 지운다(무효 선택이 재료를 0으로 만들지 않게)
             if (!(await mergeBrandProfileOwned(jobId, lockToken, { media, mediaSelection: null }))) return;
@@ -1406,6 +1450,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           brandColor,
           entry: 'outreach' as const,
           eventCards: dmCards,
+          // ★ 2026-09-09 기획전 슬라이스 재료 — 자격(면허 카드 · 사본 ≥3)은 assembleOutreachDm 안 sliceModeCard 가 판정
+          eventSlices: bp.eventSlices || null,
         };
         // ★ v3 조립 → 발행(1회) → 캡처·채점 → 트리거면 조립 1회 더 → 같은 dmId 갱신(updateDm · 재발행 0) → 재캡처(워커가 되면) (설계서 §7-8 · 불변 1·37 개정)
         //   상한 = 조립 2회 · 단계 벽시계 60초 · 카운터 auto_seq.dm(사람 regen_seq 와 분리) · preset(숨김 재실행)은 자동 재조립 0
@@ -1420,7 +1466,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
         let captured = carry ? null : await captureAndScoreDm(pub.viewerUrl, { companyId: ctx.companyId }).catch(() => null);
         let autoSeqDm = Number(sr.auto_seq?.dm) || 0;
         let autoReasons: string[] = [];
-        const retryReasons = carry ? [] : autoRetryReasons(captured?.score);
+        // ★ 2026-09-09 슬라이스 모드는 자동 재조립 0 — 채점 항목(가격 쌍·섹션 수)은 우리 골격 기준이라 슬라이스 DM 에 맞지 않고, 재조립해도 같은 슬라이스가 나온다(AI 0)
+        const retryReasons = carry || assembled.sliceMode ? [] : autoRetryReasons(captured?.score);
         if (retryReasons.length && autoSeqDm < 1 && Date.now() - dmT0 < 60_000) {
           autoReasons = retryReasons;
           const second = await assembleOutreachDm(dmInput);
@@ -1455,6 +1502,9 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           eventCards: dmCards.length,
           bannerFallback: eventCards.length === 0 && dmCards.length > 0,
           autoRetry: autoReasons.length ? { n: autoSeqDm, reasons: autoReasons } : null,
+          // ★ 2026-09-09 기획전 슬라이스 모드 여부·장수(숨김 재실행은 직전 값 승계) — 근거 패널 1줄 · 레시피 bindings src 'slice'
+          sliceMode: carry ? carry.sliceMode === true : assembled.sliceMode,
+          sliceCount: carry ? (Number(carry.sliceCount) || 0) : assembled.sliceCount,
           recipe: carry ? (carry.recipe ?? null) : buildOutreachRecipe({ sections: dm.sections, cards: dmCards, media: bp.media || null, licensedQuote, look: dm.look, colorSource: bp.brand?.colorSource || null, benefitStripped: dm.benefitStripped, heroFallback: dm.heroFallback, eventList: sr.event_list || null, bannerRead: bannerLines.length > 0, vision: dmVision, aiCost: null }),
           regenCount: regenSeqOf(sr, 'dm'),
         }, 'producing_dm', lockToken, regenSeqOf(sr, 'dm')))) return;
@@ -1500,6 +1550,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           intro = String(prevEmail.intro || guide.emailCopy.introDefault(job.company_name));
         }
         let brandSectionsBase: any[]; let brandSubject: string; let brandStripped: number; let exemplarCount: number; let exemplarTotal: number; let brandLook: any;
+        let brandSliceMode = false; let brandSliceCount = 0;
         if (regenBrand) {
           const brand = await produceOutreachBrandEmail({
             companyName: job.company_name, industry: job.industry_category, homepageUrl, siteTitle: bp.siteTitle || null,
@@ -1512,11 +1563,15 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             media: bp.media || null, mediaSelection: bp.mediaSelection || null,
             ctaLinks: bp.ctaLinks && typeof bp.ctaLinks === 'object' ? bp.ctaLinks : {}, legal: bp.legal || null, brandColor,
             entry: 'outreach', eventCards,
+            // ★ 2026-09-09 기획전 슬라이스 재료(DM 과 같은 자격 · 같은 구성)
+            eventSlices: bp.eventSlices || null,
           });
           brandSectionsBase = brand.sections; brandSubject = brand.subject; brandStripped = brand.benefitStripped; exemplarCount = brand.exemplarCount; exemplarTotal = brand.exemplarTotal; brandLook = brand.look;
+          brandSliceMode = brand.sliceMode; brandSliceCount = brand.sliceCount;
         } else {
           brandSectionsBase = Array.isArray(prevEmail.brandSectionsBase) ? prevEmail.brandSectionsBase : (Array.isArray(prevEmail.brandSections) ? prevEmail.brandSections : []);
           brandSubject = String(prevEmail.brandSubject || ''); brandStripped = Number(prevEmail.brandStripped) || 0; exemplarCount = Number(prevEmail.exemplarCount) || 0; exemplarTotal = Number(prevEmail.exemplarTotal) || 0; brandLook = prevEmail.brandLook || null;
+          brandSliceMode = prevEmail.brandSliceMode === true; brandSliceCount = Number(prevEmail.brandSliceCount) || 0;
         }
         // ★ C4-3 사람이 숨긴 시안 블록은 override 데이터로 재적용(같은 조립 경로 · 불변 16)
         const brandApplied = applySectionOverrides(brandSectionsBase, (sr.section_overrides?.email as SectionOverride | undefined) || null);
@@ -1544,6 +1599,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
         if (!(await insertAssetOwned(jobId, 'email_html', {
           subject: email.subject, intro: email.intro, html: email.html, text: email.text, placeholderCount: email.placeholderCount,
           brandSections, brandSectionsBase, brandSubject, brandStripped, exemplarCount, exemplarTotal, brandLook,
+          brandSliceMode, brandSliceCount,
           hiddenApplied: brandApplied.applied, hiddenMissed: brandApplied.missed, hiddenSkipped: brandApplied.skipped === true,
           ...(prevEmail?.subjectEditedAt && !regenIntro ? { subjectEditedAt: prevEmail.subjectEditedAt, subjectEditedBy: prevEmail.subjectEditedBy || null } : {}),
           regenCount: regenSeqOf(sr, 'email'),

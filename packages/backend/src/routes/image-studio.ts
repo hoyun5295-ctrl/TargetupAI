@@ -54,6 +54,9 @@ imageStudioRouter.get('/template-sample/:id', (req: any, res: Response) => {
   if (!sample) return res.status(404).json({ success: false, error: '예시 이미지가 아직 없습니다.' });
   res.setHeader('Content-Type', sample.mime);
   res.setHeader('Cache-Control', 'public, max-age=3600');
+  // ★ 2026-09-09 아웃리치 공개 샘플 페이지가 PUBLIC_BASE 와 다른 호스트에서 <img> 로 불러온다 —
+  //   helmet 기본 Cross-Origin-Resource-Policy(same-origin)가 교차 로드를 막으므로 명시 허용(cdp.ts 인앱 이미지 서빙과 동일).
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   return res.sendFile(sample.absPath);
 });
 

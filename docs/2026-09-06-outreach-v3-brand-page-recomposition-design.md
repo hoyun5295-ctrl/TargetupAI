@@ -535,3 +535,42 @@ DM 실물 = 헤더 · 히어로(체험단 제목 + sub_copy "기간 기간 : 202
 4. 제안 메일 검수 발송 1통: 1막 대조 2장(홈 캡처 왼쪽 · DM 캡처 오른쪽 · 220px 열) · 마지막 카드 회신 문장 · gallery 0.
 5. 원클릭 캠페인: 카드 2개(각 이미지 2장 · 하나는 내용 비움) → 견적에 판독 1회 → 제작 → 시안 · 크레딧 차감 = 견적.
 6. §11 SQL 은 이미 실측(PK 만 · CHECK 4값) → 레시피 승격 1회 → `best_copy_assets` kind `recipe` 1행.
+
+## 18. 기획전 슬라이스 조립 모드 (2026-09-09 · 코드 완료 · 배포 대기 · DDL 0 · 워커 변경)
+
+### 18-1. 경위
+- 0908 sys 관리자 미리보기의 이미지 9장이 전부 깨져 있었다. 원인 = helmet 기본 CSP `img-src 'self'`(페이지 호스트 sys ≠ 이미지 호스트 hanjul.ai). 라우터 범위 CSP 로 정정한 뒤 이미지가 정상인 상태의 현재 산출물(8,085px)을 캡처했다.
+- 같은 아이소이 재료로 두 번째 실물을 만들었다: 추석 기획전 상세 페이지(Next.js SPA · 960px 세로 슬라이스 15장)에서 슬라이스 7장을 그대로 이어 붙이고 로고 + 버튼 1개 + 푸터만 얹은 프로토타입(scratchpad · 운영 코드 편입 0). 캡처 대조 → Harold "비교로 만든 DM 이 압도적으로 좋다 · 이메일도 같은 기준".
+- 뿌리: 재료를 우리 골격 슬롯에 다시 그리면 상한이 골격이다. 브랜드 디자이너의 산출물을 그대로 쓰면 상한이 디자이너다. 모델의 일은 그리기에서 고르기(어느 묶음 · 몇 장 · 버튼 문구)로 줄어 오히려 안정적이다.
+
+### 18-2. 명세(6문장)
+1. 사람이 고른 행사 카드 중 면허(미래 종료일) 있는 첫 카드의 상세를 렌더 워커로 1회 그린다(20초 · 같은 호스트만 · 홈이 정적으로 끝난 몰도 여기서는 렌더한다: 슬라이스 판정은 렌더 기하가 유일한 재료라서다). 그 HTML 은 카드 상세 1홉 합집합에도 쓴다(같은 주소 2회 요청 0).
+2. 워커가 돌려준 넓은 이미지 기하(`images` · 원본 ≥600 · 최대 80 · 스크롤을 끝까지 훑은 뒤)에서 세로로 이어진 묶음(렌더 ≥480 · 가로세로비 ≤3.2 · 간격 ≤80px · 폭 ±15% · 같은 주소 연속 1번)을 찾아 가장 긴 것을 재료로 잡는다(3장 이상 · 최대 20 · `detectEventSlices`). 아이소이 실측 = 15장 · 하단 띠 배너(543×91 · 1100×300)는 비율로 빠진다.
+3. 제작 단계(`collectOutreachMedia`)가 슬라이스 사본을 전용 예산(폭 ≥600 · 최대 20 · 45초 · 시도 = 장수)으로 저장한다(`media.slices` · 갤러리와 분리 = AI 경로·재료 선택 화면 무접촉 · 되찾기는 `srcUrl`).
+4. 조립은 AI 0 · 참조 골격 0(`sliceModeCard` → `composeSliceSections`): header(로고 사본 · DM 가운데 lg · EMAIL 왼쪽) · gallery(list_1xN · full_bleed · 슬라이스마다 상세 링크 · 캡션 0 · 600폭 환산 누적 5,400px 예산 · 최소 3장) · cta(라벨 = `eventCtaLabel(card)` · 목적지 = 상세) · footer(법정 표기). 엔진에는 preset 으로 넘겨 숨김 override · 재구성 · 페이지만 탄다(채우기·차단·룩 0 · 증거 카드 0 · `proof` null).
+5. DM 과 브랜드 이메일은 같은 함수(헤더 정렬만 다르다). 자동 재조립 0(채점 항목은 골격 기준이라 맞지 않고 재조립해도 같은 슬라이스). 캡처·채점은 그대로(제안 메일 DM 캡처가 그것을 읽는다 · 경고만).
+6. 자격 미달(면허 없음 · 상세 주소 불일치 · 사본 <3 · 워커 부재 = `event_slices` 3값)은 §7 13행 표준 그대로(무후퇴 · 골든 무변경).
+
+### 18-3. 파일 · 테스트
+- 신설 `utils/sales-outreach-slices.ts`(순수 CT · produce 를 import 하지 않는다) · `workers/outreach-render-worker.ts`(`images` 기하 · 문자열 평가 안 백슬래시 0) · `utils/sales-outreach-render.ts`(`RenderResult.images?` · 옛 워커 = []) · `utils/sales-outreach-produce.ts`(`OutreachMedia.slices` · `collectOutreachMedia.sliceUrls` · `ProduceDmInput.eventSlices` · `assembleOutreachDm`/`produceOutreachBrandEmail` 분기 · `AssembledDm.sliceMode/sliceCount` · `BrandEmailResult` 같은 2키) · `utils/sales-outreach-jobs.ts`(카드 1번 상세 렌더 · `brand_profile.eventSlices` · 3값 `event_slices` · `sliceUrls` · 자동 재조립 0 · payload · 레시피 src `slice`) · `utils/email/email-section-renderer.ts`(`full_bleed` 세로 1열 = 패딩·라운드·간격 0 · 상한 20) · `dm/dm-section-registry.ts`(`GalleryProps.full_bleed?` 타입 등재) · `SalesOutreachModal.tsx`(근거 패널 1줄).
+- 테스트: `sales-outreach-slices.test.ts` 11건(픽스처 `fixtures/isoi-chuseok-event-images.json` = 아이소이 상세 1280폭 렌더 img 73장 실측 기하) · `email/__tests__/email-gallery-full-bleed.test.ts` 3건(회귀 0 포함) · `sales-outreach-v3.test.ts` 레시피 1건 확장.
+
+### 18-4. 데이터(DDL 0 · jsonb 키 = SCHEMA 75-A)
+`brand_profile.eventSlices` · `brand_profile.media.slices[]` + `stats.slicesTried/Passed/TimedOut` · `stage_results.event_slices` · `event_slices_detail` · dm payload `sliceMode`·`sliceCount` · email_html `brandSliceMode`·`brandSliceCount` · 레시피 bindings src `slice`(ref `n=장수`).
+
+### 18-5. 한계(알고 시작한다)
+1. 슬라이스 안 글자·가격·버튼은 이미지라 편집 0. 그려진 장바구니·제품보기 버튼은 카드 전체 링크로만 동작한다.
+2. 이미지 속 혜택은 혜택 차단기가 못 읽는다. 그래서 면허(미래 종료일) 있는 카드에만 허용한다. 기간이 끝나면 다음 재크롤에서 카드가 면허를 잃어 자동으로 골격 모드로 돌아간다.
+3. HTML 텍스트형 기획전(슬라이스 0)은 폴백. 섹션 단위 스크린샷을 이미지로 굽는 방식은 별도 축(미착수).
+4. 문자(MMS · 브랜드메시지)는 대상이 아니다(이미지 1~3장 제한).
+5. 모바일용 슬라이스를 따로 주는 몰도 PC 슬라이스(1280폭 렌더)를 쓴다(아이소이는 375폭에서도 같은 슬라이스).
+6. 재생성 [모바일 DM 다시 만들기] 는 슬라이스 모드에서 같은 결과를 낸다(AI 0). 바꾸려면 재료 선택(카드 재선택)으로.
+
+### 18-6. 배포 · 실측(Harold)
+- 배포 = 백엔드 reload + **`pm2 restart outreach-render`**(워커 코드 변경 · `images` 기하 없이는 3값 `no_content` + "워커 갱신 필요" 사유가 남는다) + 프론트 빌드(모달 1줄).
+- 실측 1건 = 아이소이 [다시 읽기](재크롤 · 옛 잡에는 `eventSlices` 가 없다) → 확인 대기에서 추석 기획전 카드 선택 → 제작 →
+  `stage_results.event_slices = ok` · `brand_profile.eventSlices.images` 15 · `media.slices` 15(stats.slicesPassed) · dm payload `sliceMode true` · `sliceCount 10`(600폭 환산 누적: 676+327+396+442+457+409+418+410+877+877 = 5,289 ≤ 5,400 · 11번째 902 초과) · 근거 패널 "기획전 페이지의 디자인 이미지 10장을 그대로 이어 붙였습니다" · DM 375폭 캡처 = 슬라이스 스택 + 보라 버튼 · 제안 메일 검수 발송 1통(브랜드 시안 = 같은 슬라이스 · 이음새 0).
+- SQL(서버 psql): `SELECT stage_results->>'event_slices', jsonb_array_length(brand_profile->'eventSlices'->'images'), jsonb_array_length(brand_profile->'media'->'slices') FROM sales_outreach_jobs WHERE company_name LIKE '%아이소이%' ORDER BY created_at DESC LIMIT 1;`
+
+### 18-7. 미검증
+- 서버 크롬에서 워커 `images` 기하 실측(로컬 puppeteer 로는 아이소이 73장 확인) · 서버 렌더형 몰(카페24·고도몰)의 슬라이스 판정 · 이메일 클라이언트(지메일·네이버·하이웍스)에서 full_bleed 셀 렌더 · 5,400 예산의 적정(DM 길이 체감) · 슬라이스 사본 20장 × 최대 1.5MB 저장 용량.

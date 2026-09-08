@@ -17,6 +17,7 @@ import {
   type OutreachProduct, type ImageCandidateDetail, type ProofSignals, type OutreachEventCard,
 } from './sales-outreach-media';
 import type { RenderMeta } from './sales-outreach-render-guard';
+import type { RenderImage } from './sales-outreach-slices';
 
 export const OUTREACH_RENDER_URL = (process.env.OUTREACH_RENDER_URL || 'http://127.0.0.1:4317').replace(/\/+$/, '');
 /** 워커 응답 대기 상한 — 워커 벽시계(최대 45초)보다 길게. 워커 미기동은 ECONNREFUSED 즉시라 이 값과 무관하다. */
@@ -33,6 +34,8 @@ export interface RenderResult {
   palette: RenderPaletteEntry[];
   /** ★ 0906(3) 첫 화면(뷰포트 · 900px)만 담은 JPEG */
   screenshotViewportBase64: string | null;
+  /** ★ 2026-09-09 넓은 이미지 기하(원본 ≥600 · 최대 80 · 문서 순서) — 기획전 슬라이스 판정 재료. 옛 워커(갱신 전)는 키가 없어 [] */
+  images?: RenderImage[];
 }
 
 const hexRgb = (hex: string): [number, number, number] | null => {
@@ -90,7 +93,7 @@ export function renderPageGuarded(url: string, opts: { deadlineMs?: number; scre
           try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
           if (res.statusCode !== 200 || !parsed) { done({ ok: false, failure: { reason: 'error', detail: `워커 응답 ${res.statusCode || 0}` } }); return; }
           if (parsed.ok === true && typeof parsed.html === 'string') {
-            done({ ok: true, result: { finalUrl: String(parsed.finalUrl || url), html: parsed.html, text: String(parsed.text || ''), screenshotBase64: parsed.screenshotBase64 || null, meta: parsed.meta, palette: Array.isArray(parsed.palette) ? parsed.palette : [], screenshotViewportBase64: parsed.screenshotViewportBase64 || null } });
+            done({ ok: true, result: { finalUrl: String(parsed.finalUrl || url), html: parsed.html, text: String(parsed.text || ''), screenshotBase64: parsed.screenshotBase64 || null, meta: parsed.meta, palette: Array.isArray(parsed.palette) ? parsed.palette : [], screenshotViewportBase64: parsed.screenshotViewportBase64 || null, images: Array.isArray(parsed.images) ? parsed.images : [] } });
             return;
           }
           const reason: RenderFailureReason = parsed.reason === 'blocked' || parsed.reason === 'timeout' ? parsed.reason : 'error';

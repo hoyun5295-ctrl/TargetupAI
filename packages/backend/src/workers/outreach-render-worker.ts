@@ -202,6 +202,8 @@ interface RenderOk {
   /** ★ 0906(3) 브랜드 팔레트(버튼·링크·헤더 배경 + :root 변수 · 채도 있는 색만 · 면적 가중) */
   palette: Array<{ hex: string; weight: number; sources: string[] }>;
   screenshotViewportBase64: string | null;
+  /** ★ 2026-09-09 넓은 이미지 기하(원본 폭 ≥600 · 최대 80 · 문서 순서) — 기획전 슬라이스 판정 재료(utils/sales-outreach-slices.ts). 스크롤을 끝까지 훑은 뒤 재서 지연 로딩분도 들어 있다 */
+  images: Array<{ src: string; w: number; h: number; rw: number; rh: number; top: number }>;
 }
 interface RenderFail { ok: false; reason: 'blocked' | 'timeout' | 'error'; detail: string; meta?: Partial<RenderMeta> }
 
@@ -275,14 +277,19 @@ async function renderOnce(input: RenderRequest, proxyPort: number): Promise<Rend
       const html = document.documentElement ? document.documentElement.outerHTML : '';
       const text = (document.body && document.body.innerText) || '';
       const imgs = Array.from(document.images);
+      const wide = imgs.filter((i) => i.naturalWidth >= 600);
       return {
         html: html.slice(0, ${maxHtml}),
         text: text.slice(0, ${maxText}),
         imgCount: imgs.length,
-        imgWide: imgs.filter((i) => i.naturalWidth >= 600).length,
+        imgWide: wide.length,
         scrollHeight: document.documentElement.scrollHeight,
+        images: wide.slice(0, 80).map((i) => {
+          const r = i.getBoundingClientRect();
+          return { src: i.currentSrc || i.src || '', w: i.naturalWidth, h: i.naturalHeight, rw: Math.round(r.width), rh: Math.round(r.height), top: Math.round(r.top + window.scrollY) };
+        }),
       };
-    })()`)) as { html: string; text: string; imgCount: number; imgWide: number; scrollHeight: number };
+    })()`)) as { html: string; text: string; imgCount: number; imgWide: number; scrollHeight: number; images: RenderOk['images'] };
 
     // ★ 0906(3) 브랜드 팔레트 — 계산된 스타일에서 버튼·링크·헤더 배경색과 :root 변수(primary·brand·accent…)를 면적 가중으로 센다.
     //   흰·검·회색(채도 0.15 미만)은 브랜드 색이 아니다. 백엔드 tsconfig 에 DOM 이 없어 문자열 평가 · 백슬래시 없는 정규식만(템플릿 리터럴 escape 회피).
@@ -355,7 +362,7 @@ async function renderOnce(input: RenderRequest, proxyPort: number): Promise<Rend
       sandbox: browserSandbox,
       timedOut,
     };
-    return { ok: true, finalUrl, html: dom.html, text: dom.text, screenshotBase64, meta, palette, screenshotViewportBase64 };
+    return { ok: true, finalUrl, html: dom.html, text: dom.text, screenshotBase64, meta, palette, screenshotViewportBase64, images: Array.isArray(dom.images) ? dom.images : [] };
   } catch (e: any) {
     return { ok: false, reason: 'error', detail: String(e?.message || e).slice(0, 160), meta: { elapsedMs: Date.now() - t0, blockedRequests: active?.blocked || 0 } };
   } finally {
