@@ -226,7 +226,10 @@ function renderHeader(p: HeaderProps, b: EmailBrand, ctx: EmailRenderCtx): strin
 function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string, ordinal: number): string {
   const align = p.align || 'left';
   const img = p.image_url ? emailImg(p.image_url, ctx.publicBase) : '';
-  const imgTag = img ? `<img src="${esc(img)}" alt="${esc(p.headline || '')}" style="width:100%;max-width:552px;display:block;border:0;border-radius:${b.radius.md}">` : '';
+  // ★ 2026-09-08 (남지현 접수 `cmtqsp5uw09yujnot3k93uh62`) HTML `width` 속성 = 인라인 style을 못 읽는 뷰어의 유일한 폭 계약.
+  //   실측 원인: 이 태그에 속성이 하나도 없어, 1792×2400 원본이 그대로 펴지며 문서 폭을 1792px로 벌렸다
+  //   (탑텐 캠페인 쿠폰 이미지 `334c6f5e…` · 하이웍스 수신에서 좌우 스크롤). CSS가 살아 있으면 style이 이겨 출력 무변화.
+  const imgTag = img ? `<img src="${esc(img)}" alt="${esc(p.headline || '')}" width="552" style="width:100%;max-width:552px;display:block;border:0;border-radius:${b.radius.md}">` : '';
   // ★ 2026-07-07(5) 디자인 2.0 — 태그 = 자간 넓은 오버라인 (쿠폰 COUPON 인장과 동일 언어)
   const tag = p.tag ? `<div style="font-size:${b.type.tiny.size};font-weight:800;letter-spacing:0.18em;color:${b.primary};margin-bottom:${b.sp[2]}">${esc(p.tag)}</div>` : '';
   const headEsc = p.headline ? esc(p.headline).replace(/\n/g, '<br>') : '';
@@ -473,7 +476,8 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
     const bigStyle = focusTouched
       ? `width:100%;height:${bigH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}`
       : `width:100%;display:block;border:0;border-radius:${b.radius.sm}`;
-    const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="${bigStyle}">` : '';
+    // width 속성 = style을 못 읽는 뷰어의 폭 계약(위 552 주석과 같은 축). 격자 구도(439행)와 같은 방식.
+    const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="100%" style="${bigStyle}">` : '';
     const meta = `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};color:${b.text};font-weight:700;margin-top:${b.sp[3]};line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it, true)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
     focusHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]};${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[4]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
@@ -495,7 +499,7 @@ function renderGallery(p: GalleryProps, b: EmailBrand, ctx: EmailRenderCtx): str
   const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
   const cellFor = (im: GalleryImage): string => {
     const img = emailImg(im.url, ctx.publicBase);
-    const tag = `<img src="${esc(img)}" alt="${esc(im.caption || '')}" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">`;
+    const tag = `<img src="${esc(img)}" alt="${esc(im.caption || '')}" width="100%" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">`;
     const galleryLink = normalizeWebUrl(im.link_url || '');
     const wrapped = /^https?:\/\//i.test(galleryLink) ? `<a href="${esc(galleryLink)}">${tag}</a>` : tag;
     return `<td width="${w}%" valign="top" style="padding:${b.sp[1]}">${wrapped}</td>`;

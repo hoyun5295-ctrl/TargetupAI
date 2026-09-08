@@ -105,6 +105,7 @@ import {
 import { query } from '../config/database';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
+import { getServePath } from '../utils/image-serve';
 
 const router = Router();
 
@@ -554,7 +555,7 @@ const INAPP_IMAGE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 
 // GET /api/cdp/inapp/image/:companyId/:filename — 인앱 이미지 공개 서빙 (자사몰 방문자 img 직접 GET, 인증 X)
 //   ★ /uploads 정적 서빙이 없어 저장 URL이 404로 깨지던 문제 차단. mms-images.ts GET 서빙 패턴.
-router.get('/inapp/image/:companyId/:filename', (req: any, res: any) => {
+router.get('/inapp/image/:companyId/:filename', async (req: any, res: any) => {
   const { companyId, filename } = req.params;
   if (!INAPP_IMAGE_UUID.test(companyId)) return res.status(400).json({ success: false, error: '잘못된 요청' });
   if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
@@ -568,7 +569,10 @@ router.get('/inapp/image/:companyId/:filename', (req: any, res: any) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   // 자사몰(타 도메인)의 <img>로 로드 — helmet 기본 Cross-Origin-Resource-Policy: same-origin이 cross-origin 이미지를 막으므로 명시 허용
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.sendFile(path.resolve(filePath));
+  // ★ 2026-09-08 표시 기준(1400px) 변환본 서빙 — 원본 보존 + 캐시(utils/image-serve.ts).
+  //   이번 접수의 1792×2400 · 2.4MB 이미지가 이 경로로 나가고 있었다. 변환 불필요·실패 시 원본 경로가 온다.
+  //   Content-Type은 위에서 확장자로 정하고 변환본도 같은 확장자라 헤더는 그대로 유효하다.
+  res.sendFile(path.resolve(await getServePath(filePath)));
 });
 
 router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {

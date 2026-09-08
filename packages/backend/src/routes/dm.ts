@@ -111,6 +111,7 @@ import {
 } from '../utils/dm/dm-interaction';
 import { parseWinnerRows, buildEventInsight } from '../utils/dm/dm-interaction-core';
 import * as XLSX from 'xlsx';
+import { getServePath } from '../utils/image-serve';
 
 // ────────────── D216+ 503 안전망 helper (db_alter_safety_net 영구 룰) ──────────────
 function isDbMigrationPendingError(err: any): boolean {
@@ -141,11 +142,18 @@ export const dmPublicRouter = Router();
 dmPublicRouter.use(json({ limit: '1mb' }));
 
 // DM 이미지 서빙
-dmPublicRouter.get('/images/:companyId/:filename', (req: Request, res: Response) => {
+dmPublicRouter.get('/images/:companyId/:filename', async (req: Request, res: Response) => {
   const { companyId, filename } = req.params;
+  // ★ 2026-09-08 경로 조작 차단 — 인앱 서빙(cdp.ts `/inapp/image/:companyId/:filename`)에는 있고 여기만 없었다.
+  //   `.opt`(서빙 변환 캐시) 직접 접근도 이 검사에 함께 걸린다.
+  if (!/^[0-9a-f-]{36}$/i.test(companyId)) return res.status(400).send('bad request');
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) return res.status(400).send('bad request');
   const filePath = path.join(DM_IMAGE_DIR, companyId, filename);
   if (!fs.existsSync(filePath)) return res.status(404).send('Not found');
-  res.sendFile(filePath);
+  // ★ 2026-09-08 표시 기준(1400px) 변환본 서빙 — 원본은 그대로 두고 CT가 캐시본을 만든다.
+  //   경위 = 2.4MB 원본이 메일에 그대로 실려 나가던 것(utils/image-serve.ts 주석).
+  //   변환 불필요·실패 시 CT가 원본 경로를 돌려주므로 이 줄로 이미지가 안 나가는 일은 없다.
+  res.sendFile(await getServePath(filePath));
 });
 
 // ★ 2026-07-16 자가 호스팅 웹폰트 — 발행 뷰어·편집 캔버스·이메일 공용 (구글 CDN 미로드 궁서 폴백 정정).
