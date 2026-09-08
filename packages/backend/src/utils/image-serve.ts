@@ -51,7 +51,7 @@ const CACHE_DIR_NAME = '.opt';
  * 규격(비율 표·기본 키·판별 기준)은 `image-fit-spec.ts`가 소유한다 - 렌더러가 sharp를 끌어오지 않게 뗀 것이다.
  */
 export { ASPECT_RATIOS, PRODUCT_GRID_ASPECT } from './image-fit-spec';
-import { ASPECT_RATIOS, EDGE_UNIFORM_THRESHOLD } from './image-fit-spec';
+import { ASPECT_RATIOS, EDGE_UNIFORM_THRESHOLD, FIT_MODES, type FitMode } from './image-fit-spec';
 
 /** 변환 대상 확장자 — 정지 이미지만. gif는 애니메이션일 수 있어 제외한다. */
 const OPTIMIZABLE = new Set(['.jpg', '.jpeg', '.png', '.webp']);
@@ -63,11 +63,13 @@ export function isOptimizableImage(filename: string): boolean {
 
 /** 요청 쿼리에서 비율 맞춤 지시를 읽어 정규화한다. 화이트리스트 밖·형식 위반은 **무시**(= 맞춤 없음).
  *  여백을 무엇으로 채울지는 요청이 정하지 않는다 — 사진을 보고 서버가 고른다(위 주석 ①②). */
-export function parseFitOption(query: unknown): { aspect: string } | null {
+export function parseFitOption(query: unknown): { aspect: string; mode: FitMode } | null {
   const q = (query || {}) as Record<string, unknown>;
   const aspect = String(q.fit || '').trim();
   if (!ASPECT_RATIOS[aspect]) return null;
-  return { aspect };
+  const raw = String(q.mode || 'pad').trim();
+  const mode = (FIT_MODES as readonly string[]).includes(raw) ? (raw as FitMode) : 'pad';
+  return { aspect, mode };
 }
 
 /** 가장자리 픽셀의 평균색과 흩어진 정도. 흩어짐이 작다 = 단색 배경 사진이라 그 색으로 이어 붙일 수 있다. */
@@ -87,8 +89,11 @@ async function edgeStats(buf: Buffer): Promise<{ rgb: [number, number, number]; 
   return { rgb: mean.map(Math.round) as [number, number, number], deviation: Math.sqrt(variance) };
 }
 
-/** 비율 캔버스에 원본을 통째로 넣고(잘림 0) 남는 자리를 사진에 맞는 방식으로 채운 버퍼를 만든다. */
-async function fitToCanvas(buf: Buffer, canvasW: number, canvasH: number): Promise<Buffer> {
+/** 비율 캔버스로 굽는다. `crop`이면 꽉 채우고 넘치는 가장자리를 자른다(편집기의 "채우기" 선택 그대로). */
+async function fitToCanvas(buf: Buffer, canvasW: number, canvasH: number, mode: FitMode): Promise<Buffer> {
+  if (mode === 'crop') {
+    return sharp(buf).resize({ width: canvasW, height: canvasH, fit: 'cover', position: 'centre' }).toBuffer();
+  }
   const { rgb, deviation } = await edgeStats(buf);
   if (deviation < EDGE_UNIFORM_THRESHOLD) {
     // 단색 배경 — 그 색으로 이어 붙이면 이음매가 보이지 않는다.
@@ -111,7 +116,7 @@ async function fitToCanvas(buf: Buffer, canvasW: number, canvasH: number): Promi
  */
 export async function getServePath(
   originalPath: string,
-  fit?: { aspect: string } | null,
+  fit?: { aspect: string; mode?: FitMode } | null,
 ): Promise<string> {
   try {
     const ext = path.extname(originalPath).toLowerCase();
@@ -119,7 +124,8 @@ export async function getServePath(
     if (!fs.existsSync(originalPath)) return originalPath;
 
     const ratio = fit && ASPECT_RATIOS[fit.aspect] ? ASPECT_RATIOS[fit.aspect] : null;
-    const variant = ratio ? `${SERVE_MAX_WIDTH}-${fit!.aspect}` : String(SERVE_MAX_WIDTH);
+    const mode: FitMode = fit?.mode === 'crop' ? 'crop' : 'pad';
+    const variant = ratio ? `${SERVE_MAX_WIDTH}-${fit!.aspect}-${mode}` : String(SERVE_MAX_WIDTH);
 
     const dir = path.dirname(originalPath);
     const base = path.basename(originalPath);
@@ -144,14 +150,19 @@ export async function getServePath(
     // 할 일이 없으면 원본을 그대로 낸다(재인코딩은 품질만 깎는다).
     //   비율 맞춤이 없으면 = 이미 표시 기준 안일 때 / 있으면 = 이미 그 비율이고 표시 기준 안일 때.
     const alreadyRatio = ratio ? meta.width * ratio.h === meta.height * ratio.w : false;
-    if (meta.width <= SERVE_MAX_WIDTH && (!ratio || alreadyRatio)) return originalPath;
+    if (meta.width <= SERVE_MAX_WIDTH && meta.height <= SERVE_MAX_WIDTH && (!ratio || alreadyRatio)) return originalPath;
 
     let pipeline: Sharp;
     if (ratio) {
-      // 캔버스 = 원본의 긴 변 기준(표시 상한으로 자름) → 원본을 확대하지 않고 짧은 변만 채운다.
-      const canvasW = Math.min(SERVE_MAX_WIDTH, Math.max(meta.width, meta.height));
+      // 캔버스 크기는 **모드에 따라 다르다** — 어느 쪽도 원본을 확대하지 않아야 화질이 안 깎인다.
+      //   pad(맞추기)  = 긴 변 기준. 원본이 통째로 들어가고 짧은 쪽만 채워진다.
+      //   crop(채우기) = 짧은 변 기준. 긴 쪽을 잘라내기만 한다(긴 변 기준으로 잡으면 원본을 확대해 자르게 된다).
+      const canvasW = Math.min(
+        SERVE_MAX_WIDTH,
+        mode === 'crop' ? Math.min(meta.width, meta.height) : Math.max(meta.width, meta.height),
+      );
       const canvasH = Math.round((canvasW * ratio.h) / ratio.w);
-      pipeline = sharp(await fitToCanvas(srcBuf, canvasW, canvasH));
+      pipeline = sharp(await fitToCanvas(srcBuf, canvasW, canvasH, mode));
     } else {
       pipeline = sharp(srcBuf).resize({ width: SERVE_MAX_WIDTH, withoutEnlargement: true });
     }

@@ -14,11 +14,33 @@ export const ASPECT_RATIOS: Record<string, { w: number; h: number }> = {
 };
 
 /**
+ * 맞추는 방법 — 편집기의 "이미지 맞춤" 선택을 그대로 이미지에 굽는다.
+ *   `pad`  = 맞추기(contain) · 원본을 통째로 넣고 남는 자리를 채운다(잘림 0)
+ *   `crop` = 채우기(cover) · 캔버스를 꽉 채우고 넘치는 가장자리를 잘라낸다(사용자가 고른 동작 그대로)
+ *
+ * ⛔ 두 갈래를 모두 구워야 한다 — 2026-09-08 서수란 접수(`cmtsb9vg30b8wjnott3tdvqe3`)의 캠페인들이
+ *   채우기 설정이었고, 그 뷰어(Outlook 계열)가 `height`·`object-fit`을 둘 다 무시해 카드가 계단처럼 어긋났다.
+ *   맞추기만 구우면 채우기 캠페인은 그대로 깨진다.
+ */
+export const FIT_MODES = ['pad', 'crop'] as const;
+export type FitMode = (typeof FIT_MODES)[number];
+
+/**
  * 상품 격자가 쓰는 비율.
  * 1:1로 정한 이유 = 상품 사진은 가로형(신발)과 세로형(의류)이 섞인다. 4:3으로 구우면 세로형만 크게 손해를 본다.
  * 정사각은 손해가 대칭이고 커머스 썸네일 관행이기도 하다.
  */
 export const PRODUCT_GRID_ASPECT = '1x1';
+
+/**
+ * 상품명 표시 상한(글자). 넘으면 잘라서 말줄임표를 붙인다.
+ *
+ * 경위 = 2026-09-08 서수란 접수. 이미지 높이를 맞춰도 **상품명 줄 수가 다르면** 카드 높이가 어긋난다
+ *   (접수 캡처: 왼쪽 4줄 · 오른쪽 2줄). 카드 폭 약 210px에 14px 한글이면 한 줄에 14자 안팎이라 2줄 = 28자.
+ * ⛔ CSS 말줄임(`-webkit-line-clamp`·`text-overflow`)에 기대지 않는다 — 이 접수의 뷰어처럼
+ *   height·object-fit조차 무시하는 클라이언트가 있다. 자를 거면 서버가 자른다.
+ */
+export const PRODUCT_NAME_MAX_CHARS = 30;
 
 /**
  * 여백을 무엇으로 채울지 가르는 기준(가장자리 색의 흩어진 정도).

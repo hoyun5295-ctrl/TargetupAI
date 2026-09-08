@@ -1,1 +1,5 @@
-{"Replace":{"C:Usersceoprojects\bito-gatewaycmdprobeinstallercfgmain.go":"C:UsersceoAppDataLocalTempclaudeC--Users-ceo-projects-targetup90752b5b-8ff2-4013-8089-9e927ddff470scratchpadprobemain.go"}}
+{
+  "Replace": {
+    "C:Usersceoprojects\bito-gatewayinternalagentpollerzz_orphan_probe_test.go": "C:UsersceoAppDataLocalTempclaudeC--Users-ceo-projects-targetup90752b5b-8ff2-4013-8089-9e927ddff470scratchpadorphan_probe_test.go"
+  }
+}

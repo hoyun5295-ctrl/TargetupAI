@@ -207,10 +207,35 @@ describe('상품 격자 — 비율 맞춤 요청', () => {
     expect(img).toContain('background:#123456');   // CSS 폴백은 종전대로 섹션 배경을 쓴다
   });
 
-  it('채우기(cover)는 손대지 않는다 — 이미 크기가 맞고, 옛 출력이 한 글자도 안 바뀌어야 한다', () => {
+  it('채우기(cover)도 굽는다 — 잘라서 꽉 채우는 동작 그대로 mode=crop', () => {
+    // ⛔ 여기를 "cover는 손대지 않는다"로 되돌리지 마라 — 서수란 접수(2026-09-08)의 캠페인들이 채우기였고,
+    //   그 뷰어가 height·object-fit을 둘 다 무시해 이미지가 원본 비율로 그려지며 카드가 계단처럼 어긋났다.
     const html = grid({});
-    expect(html).not.toContain('fit=1x1');
-    expect(html).toContain('object-fit:cover');
+    expect(html).toContain('fit=1x1');
+    expect(html).toContain('mode=crop');
+    expect(html).toContain('object-fit:cover');   // CSS 폴백은 그대로
+  });
+
+  it('맞추기는 mode=pad — 잘림 0(0905 지적 유지)', () => {
+    const html = grid({ image_fit: 'contain' });
+    expect(html).toContain('mode=pad');
+    expect(html).not.toContain('mode=crop');
+  });
+
+  it('상품명은 2줄 분량으로 잘린다 — 줄 수가 다르면 이미지를 맞춰도 카드 높이가 어긋난다', () => {
+    const long = '[스판최고/완전하이웨스트]스판 포켓 부츠컷데님 1color 주인장소장 키큰녀 강추 스판데님 롱다리핏';
+    const html = renderEmailSections([sec('product_carousel', {
+      products: [{ image_url: '/api/dm/v/images/co/a.jpg', name: long, price: 1000 }],
+    }, 0)], {});
+    expect(html).not.toContain(long);
+    expect(html).toContain('…');
+  });
+
+  it('사용자가 넣은 줄바꿈은 지우지 않는다 (2026-07-22 직원 요청 기능)', () => {
+    const html = renderEmailSections([sec('product_carousel', {
+      products: [{ image_url: '/api/dm/v/images/co/a.jpg', name: '줄1\n줄2', price: 1000 }],
+    }, 0)], {});
+    expect(html).toContain('줄1<br>줄2');
   });
 
   it('외부 주소에는 붙이지 않는다 — 우리 서버를 거치지 않아 무의미하고 그쪽 URL을 깨뜨린다', () => {

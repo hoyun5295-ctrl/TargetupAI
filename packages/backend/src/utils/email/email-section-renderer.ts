@@ -24,7 +24,7 @@ import type { DmBrandKit } from '../dm/dm-tokens';
 import { resolveEmailBrand, emailSelfHostFontImport, type EmailBrand, type EmailDesign } from './email-tokens';
 import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE, selectEmailTreatment } from './email-blocks';
 import { EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_TITLE_SIZE_KEY } from './email-property-contract';
-import { PRODUCT_GRID_ASPECT } from '../image-fit-spec';
+import { PRODUCT_GRID_ASPECT, PRODUCT_NAME_MAX_CHARS } from '../image-fit-spec';
 // ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 + 쿠폰 마감 한국어 표시 (normalize CT)
 import { normalizeWebUrl, formatKoreanDateTimeDisplay } from '../normalize';
 // ★ 2026-09-04 CTA 배치 판정 CT — 편집기(공용 CtaEditor)·DM SSR과 **같은 하나**를 쓴다.
@@ -63,18 +63,31 @@ function emailImg(src: string | undefined, publicBase?: string): string {
 }
 
 /**
- * ★ 2026-09-08(2) 비율 맞춤 이미지 URL — 우리 서버가 서빙하는 것에만 `?fit=…`을 붙인다.
- *   서버(`utils/image-serve.ts`)가 그 비율의 캔버스에 원본을 통째로 넣고(잘림 0) 남는 자리를 채운다.
- *   무엇으로 채울지는 **사진을 보고 서버가 고른다**(단색 배경이면 그 색 · 복잡하면 블러 확장) —
- *   렌더러가 색을 정해 보내면 야외컷에 색 덩어리가 붙는다(2026-09-08 비교 캡처).
+ * ★ 2026-09-08(2) 비율 맞춤 이미지 URL — 우리 서버가 서빙하는 것에만 `?fit=…&mode=…`를 붙인다.
+ *   서버(`utils/image-serve.ts`)가 그 비율의 캔버스로 이미지를 굽는다.
+ *   `pad`(맞추기) = 원본을 통째로 넣고 남는 자리를 채운다. 무엇으로 채울지는 **사진을 보고 서버가 고른다**
+ *     (단색 배경이면 그 색 · 복잡하면 블러 확장) — 렌더러가 색을 정해 보내면 야외컷에 색 덩어리가 붙는다.
+ *   `crop`(채우기) = 꽉 채우고 넘치는 가장자리를 자른다(사용자가 고른 동작 그대로).
+ *
+ * ★ 왜 CSS로 안 되나 = 이 접수(2026-09-08 서수란)의 뷰어는 `height`도 `object-fit`도 무시한다.
+ *   그러면 이미지가 원본 비율로 그려져 카드 높이가 제각각이 된다. 이미지 자체를 구워야 어느 뷰어에서든 같다.
  * ⛔ 외부 주소(원본 src가 이미 절대 URL)에는 붙이지 않는다 — 우리 서버를 거치지 않아 파라미터가 무의미하고,
  *   남의 URL에 우리 쿼리를 얹으면 그쪽 캐시·서명을 깨뜨릴 수 있다.
  */
-function emailImgFitted(src: string | undefined, publicBase: string | undefined): string {
+function emailImgFitted(src: string | undefined, publicBase: string | undefined, mode: 'pad' | 'crop'): string {
   const url = emailImg(src, publicBase);
   if (!url) return '';
   if (/^https?:\/\//i.test(String(src))) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}fit=${PRODUCT_GRID_ASPECT}`;
+  return `${url}${url.includes('?') ? '&' : '?'}fit=${PRODUCT_GRID_ASPECT}&mode=${mode}`;
+}
+
+/** 상품명 표시 상한 — 줄 수가 카드마다 다르면 이미지를 맞춰도 카드 높이가 어긋난다(접수 캡처: 4줄 vs 2줄).
+ *  ⛔ CSS 말줄임에 기대지 않는다. 이 접수의 뷰어는 height·object-fit조차 무시한다. */
+function clampProductName(name: string): string {
+  // ⛔ 사용자가 넣은 줄바꿈은 지우지 않는다 — 상품명 개행 반영은 2026-07-22 직원 요청으로 들어간 기능이다.
+  //   길이만 제한하고 `\n`은 그대로 넘겨 호출부가 <br>로 바꾼다.
+  const s = String(name || '').trim();
+  return s.length > PRODUCT_NAME_MAX_CHARS ? `${s.slice(0, PRODUCT_NAME_MAX_CHARS - 1)}…` : s;
 }
 
 /** ★ 2026-07-12 편집기 폰트 크기(headline_size/body_size 등) 소비 — DM 렌더러 fsDecl 미러.
@@ -454,17 +467,18 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
   //   상품명 2줄 확보(min-height 37px) → 옆 카드와 가격 줄·하단 정렬(DM SSR 고정 박스 방식 미러).
   //   object-fit 미지원 구형 클라이언트는 이미지가 늘어질 뿐 칸 정렬은 유지된다.
   const cellFor = (it: ProductCarouselItem): string => {
-    // ★ 2026-09-08(2) 맞추기(contain)에서 사진 크기가 제각각으로 보이던 것 — 이미지를 서버가 같은 비율로 구워 준다.
-    //   원본 비율이 보존되므로 잘림은 0이고(0905 지적 유지), 모든 상품이 같은 크기로 보인다.
-    //   ⛔ 채우기(cover)는 이미 크기가 맞으므로 손대지 않는다(옛 출력 무변화).
-    const img = isContain
-      ? emailImgFitted(it.image_url, ctx.publicBase)
-      : emailImg(it.image_url, ctx.publicBase);
+    // ★ 2026-09-08(2)(3) 카드 높이가 제각각이던 것 — 이미지를 서버가 같은 비율로 구워 준다.
+    //   맞추기는 원본 통째로(잘림 0 · 0905 지적 유지) · 채우기는 잘라서 꽉(사용자가 고른 동작 그대로).
+    //   ⛔ 두 갈래 모두 구워야 한다 — 서수란 접수의 캠페인들이 채우기였고, 그 뷰어는 height·object-fit을
+    //     둘 다 무시해 이미지가 원본 비율로 그려졌다(맞추기만 구우면 그 캠페인은 그대로 깨진다).
+    const img = emailImgFitted(it.image_url, ctx.publicBase, isContain ? 'pad' : 'crop');
     const url = linkOf(it);
     const imgTag = img
-      ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="100%" height="${imgH}" style="width:100%;height:${imgH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}">`
+      // alt도 같은 길이로 자른다 — 이미지 차단 환경에서는 alt가 그 자리에 표시되므로 여기가 길면 또 어긋난다.
+      ? `<img src="${esc(img)}" alt="${esc(clampProductName(it.name))}" width="100%" height="${imgH}" style="width:100%;height:${imgH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}">`
       : `<div style="width:100%;height:${imgH}px;background:${b.bg};border-radius:${b.radius.sm};font-size:0;line-height:0">&nbsp;</div>`;
-    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4;min-height:37px">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
+    // 상품명은 2줄 분량으로 잘라 카드 높이를 맞춘다(줄 수가 다르면 이미지를 맞춰도 어긋난다).
+    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4;min-height:37px">${esc(clampProductName(it.name)).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
     const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[3]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
     return `<td width="50%" valign="top" class="em-stack" style="padding:${b.sp[2]}">${cardTable}</td>`;

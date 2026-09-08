@@ -161,11 +161,29 @@ describe('서빙 이미지 최적화 — 품질 기준과 폴백', () => {
   });
 
   it('요청 파싱 — 화이트리스트 밖은 무시한다 (캐시 디렉터리 이름에 들어가는 값이다)', () => {
-    expect(parseFitOption({ fit: '1x1' })).toEqual({ aspect: '1x1' });
+    expect(parseFitOption({ fit: '1x1' })).toEqual({ aspect: '1x1', mode: 'pad' });          // 기본 = 맞추기
+    expect(parseFitOption({ fit: '1x1', mode: 'crop' })).toEqual({ aspect: '1x1', mode: 'crop' });
+    expect(parseFitOption({ fit: '1x1', mode: 'zzz' })).toEqual({ aspect: '1x1', mode: 'pad' }); // 미지원 모드 = 맞추기로
     expect(parseFitOption({ fit: '16x9' })).toBeNull();          // 미등재 비율
     expect(parseFitOption({ fit: '../../etc' })).toBeNull();     // 경로 조작
     expect(parseFitOption({ fit: '1x1; rm -rf' })).toBeNull();   // 덧붙인 문자열
     expect(parseFitOption({})).toBeNull();
+  });
+
+  it('채우기(crop) — 캔버스를 꽉 채우고 넘치는 쪽을 자른다 (사용자가 고른 동작 그대로)', async () => {
+    const wide = await makeJpeg('crop-wide.jpg', 800, 200);
+    const served = await getServePath(wide, { aspect: PRODUCT_GRID_ASPECT, mode: 'crop' });
+    const meta = await sharp(served).metadata();
+    expect(meta.width).toBe(meta.height);                        // 정사각
+    // 짧은 변(200)에 맞춰 채우므로 캔버스 한 변은 200 = 여백이 생기지 않는다.
+    expect(meta.width).toBe(200);
+  });
+
+  it('맞추기와 채우기는 캐시가 따로 쌓인다 (같은 사진이 두 캠페인에서 다르게 쓰인다)', async () => {
+    const src = await makeJpeg('modes.jpg', 900, 300);
+    const pad = await getServePath(src, { aspect: PRODUCT_GRID_ASPECT, mode: 'pad' });
+    const crop = await getServePath(src, { aspect: PRODUCT_GRID_ASPECT, mode: 'crop' });
+    expect(pad).not.toBe(crop);
   });
 
   it('PNG는 무손실로 줄인다 (투명도·경계 보존)', async () => {
