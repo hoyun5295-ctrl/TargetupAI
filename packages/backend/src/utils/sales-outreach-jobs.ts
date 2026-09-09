@@ -57,7 +57,7 @@ import {
   type RenderResult, type MaterialSource, type EscalationReason,
 } from './sales-outreach-render';
 // ★ 2026-09-09 기획전 슬라이스 재료 판정(렌더 기하 → 세로로 이어진 넓은 이미지 묶음) · ★ v4 홈 상단 배너
-import { detectEventSlices, heroBannersOf, promoCardTitleOf, type EventSliceMaterial, type HeroBanner } from './sales-outreach-slices';
+import { detectEventSlices, heroBannersOf, promoCardTitleOf, normalizeUrlKey, type EventSliceMaterial, type HeroBanner } from './sales-outreach-slices';
 
 /** ★ 2026-09-09 v4 홈에 걸린 프로모션 페이지 시도 상한 · 페이지당 렌더 예산 · 총 벽시계 */
 const OUTREACH_PROMO_PAGES_MAX = 3;
@@ -544,13 +544,23 @@ export function eventCandidatesFromCards(cards: readonly OutreachEventCard[], so
 }
 
 /**
- * ★ v3 선택 후보 → 엔진 행사 카드(순수) — origin 'card' 만 · 배너 사본은 media.gallery 의 srcUrl 로 되찾는다(없으면 글자 카드 · 히어로는 다른 원천으로).
+ * ★ v3 선택 후보 → 엔진 행사 카드(순수) — 누른 순서 그대로. 카드 후보(origin 'card')는 제목·기간·배너 사본(media.gallery 의 srcUrl 로 되찾는다 · 없으면 글자 카드)·상세 링크.
+ * ★ 2026-09-09(5) 인용문 후보(origin 'crawl'·'manual')도 글자 카드로 싣는다 — 사람이 확정한 행사가 표준 조립(AI 0)에서 통째로 사라지던 것을 막는다
+ *   (톤28 실측: 확정 3건 중 "오늘핫딜 …" 2건이 카드가 아니라 DM 에 0). 제목 = 인용문 · 링크 = 인용 출처 페이지 · 배너 0.
  */
 export function eventCardsOf(selectedList: readonly EventCandidate[], media: OutreachMedia | null | undefined): EngineEventCard[] {
   const gallery = Array.isArray(media?.gallery) ? media!.gallery : [];
   return (Array.isArray(selectedList) ? selectedList : [])
-    .filter((c) => c && c.origin === 'card' && String(c.title || '').trim())
+    .filter((c) => c && (c.origin === 'card' ? String(c.title || '').trim() : String(c.quote || '').trim()))
     .map((c) => {
+      if (c.origin !== 'card') {
+        return {
+          title: String(c.quote).replace(/\s+/g, ' ').trim().slice(0, 60),
+          periodRaw: null, endDate: c.endDate || null, bannerUrl: null, bannerSize: null,
+          detailUrl: c.sourceUrl ? String(c.sourceUrl) : null,
+          licensed: !!c.benefitLicensed,
+        };
+      }
       const copy = c.bannerUrl ? gallery.find((g) => g && g.srcUrl === c.bannerUrl) : undefined;
       return {
         title: String(c.title).trim(),
@@ -1457,6 +1467,30 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
         let media: OutreachMedia | null = bp.media || null;
         let mediaError: string | null = null;
         if (!media || regenFrom === 'image') {
+          // ★ 2026-09-09(5) 확정 행사 우선 — 사람이 1번으로 고른 행사의 상세가 크롤 때 그린 묶음(카드 1번·홈 기획 페이지)과 다르면 그 페이지를 지금 1회 그려 그 행사의 이미지 묶음으로 바꾼다.
+          //   (톤28 실측: 확정 "9월 가입 한정 혜택" 페이지는 한 번도 렌더되지 않아 행사 블록이 제목 한 줄이었다.) 못 찾으면 옛 묶음 유지 · 실패는 격리(단계 실패 아님).
+          const topCard = eventCards.find((c) => c.detailUrl);
+          if (topCard?.detailUrl && normalizeUrlKey(topCard.detailUrl) !== normalizeUrlKey(bp.eventSlices?.detailUrl || '')) {
+            const hb = startLockHeartbeat(jobId, lockToken, 'producing_image');
+            try {
+              const rs = await renderPageGuarded(topCard.detailUrl, { deadlineMs: OUTREACH_PROMO_RENDER_MS, screenshot: false });
+              let host = ''; try { host = new URL(homepageUrl).hostname; } catch { host = ''; }
+              let pHost = ''; try { pHost = rs.ok ? new URL(rs.result.finalUrl).hostname : ''; } catch { pHost = ''; }
+              const det = rs.ok && host && pHost && isSameSite(host, pHost) ? detectEventSlices(Array.isArray(rs.result.images) ? rs.result.images : []) : null;
+              if (rs.ok && det) {
+                const next: EventSliceMaterial = { detailUrl: topCard.detailUrl, finalUrl: rs.result.finalUrl, images: det.images, candidates: det.candidates, at: new Date().toISOString(), source: 'event_card' };
+                if (!(await mergeBrandProfileOwned(jobId, lockToken, { eventSlices: next }))) return;
+                if (!(await mergeStageResultsOwned(jobId, lockToken, { event_slices: 'ok', event_slices_detail: `확정 행사 상세 ${det.images.length}장(제작 단계)` }))) return;
+                bp.eventSlices = next;
+              } else {
+                console.log('[sales-outreach] 확정 행사 상세 묶음 없음(옛 묶음 유지):', jobId, topCard.detailUrl, rs.ok ? `이미지 ${Array.isArray(rs.result.images) ? rs.result.images.length : 0}장` : `${rs.failure.reason}: ${rs.failure.detail}`);
+              }
+            } catch (err: any) {
+              console.error('[sales-outreach] 확정 행사 상세 렌더 예외(계속):', jobId, err?.message);
+            } finally {
+              hb.stop();
+            }
+          }
           try {
             media = await collectOutreachMedia({
               companyId: ctx.companyId,

@@ -28,8 +28,9 @@ import { getActiveStyleGuide, type OutreachStyleGuide } from './sales-outreach-s
 import {
   isStudioReady, writeTempBuffer, allocTempPath, writeTempMeta, findTempFile, moveTempToPermanent,
   removeBackground, composeImage, generatePoster, buildPosterPrompt, resolvePreset,
-  companyTempUsageBytes, STUDIO_TEMP_CAP_BYTES,
+  companyTempUsageBytes, STUDIO_TEMP_CAP_BYTES, StudioError,
 } from './image-studio';
+import sharp from 'sharp';
 import { STUDIO_TEMPLATES, type StudioTemplate, type TemplateCategory } from './image-studio-templates';
 import { extractJson, DM_EDITABLE_TEXT_KEYS } from './dm/dm-ai';
 import { createDm, publishDm, updateDm } from './dm/dm-builder';
@@ -80,9 +81,20 @@ export const OUTREACH_IMAGE_KIND_MAX_BYTES = 1_200_000;
  * ★ v4-3 이미지 종류 판정(모델 1회 · 분류만 · 문안 0) — 슬라이스·홈 배너 사본을 한 호출에 보내 {광고 배너 · 상품 사진 · 문서 · 분위기 사진 · 그 외, 글자 유무}를 받는다.
  * 고르기는 코드(`selectSliceImages`). 실패·형식 불명 = null(선별 없이 폴백 · 산출물은 나온다).
  */
+/** ★ 2026-09-09(5) 판정용 축소본 — 긴 변 640px JPEG. 원본이 크면(톤28 홈 배너 1.0~1.8MB) 상한에 걸려 판정 자체가 0건이 되던 것을 막는다. 축소 실패 = 원본이 상한 안이면 원본, 아니면 제외. */
+export const OUTREACH_IMAGE_KIND_EDGE = 640;
+async function shrinkForJudge(x: { url: string; buffer: Buffer; mime: string }): Promise<{ url: string; buffer: Buffer; mime: string } | null> {
+  try {
+    const out = await sharp(x.buffer, { failOn: 'none' }).rotate().resize({ width: OUTREACH_IMAGE_KIND_EDGE, height: OUTREACH_IMAGE_KIND_EDGE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 72 }).toBuffer();
+    if (out.length > 0 && out.length <= OUTREACH_IMAGE_KIND_MAX_BYTES) return { url: x.url, buffer: out, mime: 'image/jpeg' };
+  } catch { /* 축소 실패 → 아래 원본 판정 */ }
+  return x.buffer.length <= OUTREACH_IMAGE_KIND_MAX_BYTES ? x : null;
+}
+
 export async function classifyOutreachImages(items: ReadonlyArray<{ url: string; buffer: Buffer; mime: string }>): Promise<Record<string, ImageKindJudge> | null> {
-  const list = items.filter((x) => x && x.url && x.buffer && x.buffer.length > 0 && x.buffer.length <= OUTREACH_IMAGE_KIND_MAX_BYTES).slice(0, OUTREACH_IMAGE_KIND_MAX);
-  if (!list.length) return null;
+  const raw0 = items.filter((x) => x && x.url && x.buffer && x.buffer.length > 0).slice(0, OUTREACH_IMAGE_KIND_MAX);
+  const list = (await Promise.all(raw0.map(shrinkForJudge))).filter((x): x is { url: string; buffer: Buffer; mime: string } => !!x);
+  if (!list.length) { if (raw0.length) console.log('[sales-outreach] 이미지 종류 판정 대상 0(축소 실패 · 상한 초과):', raw0.length); return null; }
   try {
     const raw = await callOutreachAi({
       system: [
@@ -102,7 +114,7 @@ export async function classifyOutreachImages(items: ReadonlyArray<{ url: string;
       images: list.map((x) => ({ media_type: x.mime, data: x.buffer.toString('base64') })),
     });
     const judged = parseImageKinds(raw, list.length);
-    if (!judged) return null;
+    if (!judged) { console.log('[sales-outreach] 이미지 종류 판정 응답 해석 실패(선별 없이 진행):', String(raw || '').replace(/\s+/g, ' ').slice(0, 160)); return null; }
     const out: Record<string, ImageKindJudge> = {};
     list.forEach((x, i) => { out[x.url] = judged[i]; });
     return out;
@@ -806,6 +818,23 @@ async function scoreDmCapture(screenshotBase64: string): Promise<DmVisionScore> 
   }
 }
 
+/** ★ 2026-09-09(5) 스튜디오 일시 장애(모델 과부하 503 · 한도 429 · 게이트웨이 502)만 재시도 대상. 세이프티 거부·미준비·저장 실패는 즉시 포기. (톤28 실측: 503 1회에 포스터를 접어 히어로가 글자 없는 정물 배너로 떨어졌다) */
+export const OUTREACH_POSTER_RETRY_DELAYS_MS: readonly number[] = [4_000, 10_000];
+export function isTransientStudioError(err: unknown): boolean {
+  return err instanceof StudioError && (err.httpStatus === 503 || err.httpStatus === 429 || err.httpStatus === 502) && err.code !== 'STUDIO_NOT_READY';
+}
+async function generatePosterWithRetry<T>(run: () => Promise<T>, jobId: string, delays: readonly number[] = OUTREACH_POSTER_RETRY_DELAYS_MS): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run();
+    } catch (err: any) {
+      if (attempt >= delays.length || !isTransientStudioError(err)) throw err;
+      console.log(`[sales-outreach] 포스터 생성 일시 장애 → ${delays[attempt] / 1000}초 뒤 재시도(${attempt + 1}/${delays.length}):`, jobId, err?.message);
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+    }
+  }
+}
+
 export async function produceOutreachImage(input: {
   jobId: string;
   companyName: string;
@@ -897,7 +926,7 @@ export async function produceOutreachImage(input: {
     void cutoutPath;
 
     const renderPoster = async (prompt: string): Promise<{ absPath: string; tempId: string; composed: { width: number; height: number } }> => {
-      const poster = await generatePoster(prompt, preset, cutout);
+      const poster = await generatePosterWithRetry(() => generatePoster(prompt, preset, cutout), input.jobId);
       const posterExt = poster.mime.includes('png') ? 'png' : 'jpeg';
       const posterTempId = writeTempBuffer(ctx.companyId, Buffer.from(poster.base64, 'base64'),
         { kind: 'poster', ext: posterExt, mime: poster.mime, prompt, presetKey: 'poster', channelSpec: 'poster', width: null, height: null });

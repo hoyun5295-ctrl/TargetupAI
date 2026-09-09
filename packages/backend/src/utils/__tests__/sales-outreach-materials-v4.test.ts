@@ -15,6 +15,20 @@ import { shouldEscalateToRender } from '../sales-outreach-render';
  */
 const HOME = 'https://www.toun28.com/';
 
+// ★ 2026-09-09(5) B-0909-3 계약 — 사람이 확정한 1번 행사의 상세를 제작 단계에서 1회 그려 그 행사의 묶음으로 바꾼다(크롤 때 묶음과 다를 때만 · 실패 격리)
+describe('확정 행사 우선 — producing_image 진입 시 확정 1번 카드 상세 렌더(계약)', () => {
+  const jobs = readFileSync(resolve(__dirname, '..', 'sales-outreach-jobs.ts'), 'utf-8');
+  it('확정 카드 상세 키가 현재 묶음과 다르면 렌더 → eventSlices(event_card) + event_slices ok 교체 · 같으면 건너뜀', () => {
+    expect(jobs).toContain("normalizeUrlKey(topCard.detailUrl) !== normalizeUrlKey(bp.eventSlices?.detailUrl || '')");
+    expect(jobs).toContain("renderPageGuarded(topCard.detailUrl, { deadlineMs: OUTREACH_PROMO_RENDER_MS, screenshot: false })");
+    expect(jobs).toContain("source: 'event_card' };");
+    expect(jobs).toContain("mergeStageResultsOwned(jobId, lockToken, { event_slices: 'ok', event_slices_detail:");
+    // 렌더 결과가 없으면 옛 묶음 유지(로그) · 예외는 격리(단계 실패 아님)
+    expect(jobs).toContain('확정 행사 상세 묶음 없음(옛 묶음 유지)');
+    expect(jobs).toContain('확정 행사 상세 렌더 예외(계속)');
+  });
+});
+
 describe('findPromoPageLinks — 홈에 걸린 프로모션·기획 페이지 후보', () => {
   const html = `
     <nav><a href="/renew/product">전체상품</a><a href="/promotion/benefit">혜택</a><a href="/renew/mission/main">미션</a></nav>

@@ -640,3 +640,16 @@ A1 행사별 근거 묶음(혜택·상품·목적지 동일 행사 귀속 검사
 - 배포 = 백엔드 reload + **`pm2 reload outreach-render`**(images.href·alt) + 프론트 빌드(후보 라벨).
 - 톤28 [다시 읽기] → 확인 대기에서 기대: 재료 카드 "화면을 그려서 읽음" · 배너 후보 앞쪽에 9월 8일 슬라이드 · 상품 3+(히알시카 수분진정 SET · 펩타시카 선세럼 세트 · 묵상 세트 · 가격 없음) · 행사 카드에 **"홈에 걸린 기획 페이지 · 디자인 그대로"** 라벨 1장(펩타시카) → 그 카드 선택 → 제작 → DM = 슬라이스 6장 스택 + 버튼 · 근거 패널 "디자인 이미지 6장을 그대로 이어 붙였습니다".
 - SQL: `SELECT stage_results->>'rendering' r, stage_results->>'event_slices' s, stage_results->>'promo_pages' p, brand_profile->'eventSlices'->>'source' src, jsonb_array_length(brand_profile->'heroBanners') hero, jsonb_array_length(brand_profile->'listProducts') prods FROM sales_outreach_jobs WHERE company_name LIKE '%톤28%' ORDER BY created_at DESC LIMIT 1;` 기대 = ok · ok · ok · promo_page · 7 · 3 이상.
+
+### 19-11. 톤28 2차 실측 정정 — "순서는 맞는데 내용이 비었다" (2026-09-09(5) · [B-0909-3](../status/BUGS.md) · 코드 완료 · 배포 대기 · DDL 0)
+실측(`f94c25f923` · DM `dm-sqk82HT`): 히어로 = 글자 없는 홈 정물 슬라이드 · 행사 = "9월 가입 한정 혜택" 제목 한 줄 + 버튼 · 확정 3건 중 "오늘핫딜 …" 2건은 DM 에 없음 · 상품 4개(가격)만 정상.
+SQL·pm2 로 확인한 원인 4가지와 수정(각 1곳):
+| # | 실측 | 원인 | 수정 |
+|---|---|---|---|
+| 1 | `studio_image.skipped=studio_error` · `[image-studio] Gemini HTTP 503 high demand` 1회 | 스튜디오 일시 장애를 재시도하지 않음 → 히어로가 홈 배너로 | `generatePosterWithRetry`(503·429·502 만 · 4초·10초 2회 · 세이프티·미준비 즉시 포기 · `isTransientStudioError`) |
+| 2 | 확정 카드 `/promotion/benefit` 워커 렌더 0회 · `eventSlices` = peptacica(선택 안 된 홈 기획 페이지) | 슬라이스는 크롤 때 카드 1번·홈 기획 페이지에서만 · **사람이 확정한 행사**의 페이지는 안 그림 | producing_image 진입 시 확정 1번 카드 상세가 현재 묶음과 다르면 1회 렌더(20초 · 같은 사이트) → `eventSlices`(source `event_card`) + `event_slices='ok'` 교체 · 못 찾으면 옛 묶음 유지 |
+| 3 | `selectedList` = 카드 1 + 인용문 2 · dm `events=1` | `eventCardsOf` 가 origin `card` 만 카드로 → 표준 조립(AI 0)에서 인용문 후보 소실 | 인용문 후보도 글자 카드(제목 = 인용문 · 링크 = 출처 페이지 · 누른 순서) |
+| 4 | `media.imageKinds` 0건 · 로그 0 | 원본 버퍼(홈 배너 1.0~1.8MB)가 판정 상한 1.2MB 초과 → 대상 0 | 긴 변 640px JPEG 축소본(sharp)으로 판정 + 대상 0·해석 실패 로그 |
+히어로 폴백 순서(포스터 → 글자 있는 홈 배너 → 카드 배너)는 그대로다. 톤28 처럼 홈 슬라이드 글자가 HTML 로 얹힌 몰은 이미지에 글자가 없어 포스터가 없으면 히어로가 항상 무의미하므로 1번이 핵심이다.
+**남은 결함(기록만)**: 홈 첫 화면의 출시 티저(SUPER NATURAL · 9월 11일 카운트다운)가 행사 후보에 없다. 분석 단계 후보 추출이 "혜택" 문구만 잡는다. 브랜드 대표 소식을 후보로 올리는 규칙은 별건(착수 = Harold).
+불변 43(`FEATURE-SALES-OUTREACH.md`).

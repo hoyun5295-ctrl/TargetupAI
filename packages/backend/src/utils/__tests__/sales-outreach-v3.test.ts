@@ -193,7 +193,7 @@ describe('★ v3 선택 층 — 다중 선택 정규화 · 카드 → 엔진', (
     expect(normalizeEventSelection({ eventIndex: null, eventIndexes: [0, 1, 2, 3] }, 5).indexes).toHaveLength(OUTREACH_EVENT_SELECT_MAX);
     expect(normalizeEventSelection({ eventIndex: null, eventIndexes: null }, 5)).toEqual({ indexes: [], dropped: 0 });
   });
-  it('카드 후보 → 엔진 카드(origin card 만) · 배너 사본은 media.gallery 의 srcUrl 로 되찾는다 · 없으면 글자 카드', () => {
+  it('선택 후보 → 엔진 카드(누른 순서) · 카드 후보는 배너 사본을 media.gallery 의 srcUrl 로 되찾는다 · 인용문 후보(crawl)는 글자 카드(★0909(5) 확정 행사가 표준 조립에서 사라지지 않게)', () => {
     const list = [
       { quote: 'A', sourceUrl: 'x', startDate: null, endDate: '2099-01-01', benefitLicensed: true, origin: 'card' as const, title: 'A 기획전', periodRaw: '2026.09.01 ~ 2099.01.01', bannerUrl: 'https://isoi.co.kr/ev.jpg', detailUrl: 'https://isoi.co.kr/ev/1' },
       { quote: 'B', sourceUrl: 'x', startDate: null, endDate: null, benefitLicensed: false, origin: 'crawl' as const },
@@ -201,9 +201,13 @@ describe('★ v3 선택 층 — 다중 선택 정규화 · 카드 → 엔진', (
     ];
     const media = { gallery: [{ url: 'https://hanjul.ai/copy/ev.jpg', width: 1920, height: 800, bytes: 1, srcUrl: 'https://isoi.co.kr/ev.jpg' }], products: [], collectedAt: '', stats: {} } as any;
     const cards = eventCardsOf(list, media);
-    expect(cards).toHaveLength(2);
+    expect(cards).toHaveLength(3);
     expect(cards[0]).toEqual({ title: 'A 기획전', periodRaw: '2026.09.01 ~ 2099.01.01', endDate: '2099-01-01', bannerUrl: 'https://hanjul.ai/copy/ev.jpg', bannerSize: { width: 1920, height: 800 }, detailUrl: 'https://isoi.co.kr/ev/1', licensed: true });
-    expect(cards[1]).toMatchObject({ title: 'C 이벤트', bannerUrl: null, bannerSize: null, licensed: false });
+    // 인용문 후보 = 제목은 인용문 · 링크는 출처 페이지 · 배너 0 · 순서 유지(B 가 C 앞)
+    expect(cards[1]).toEqual({ title: 'B', periodRaw: null, endDate: null, bannerUrl: null, bannerSize: null, detailUrl: 'x', licensed: false });
+    expect(cards[2]).toMatchObject({ title: 'C 이벤트', bannerUrl: null, bannerSize: null, licensed: false });
+    // 빈 인용문·빈 제목은 카드가 아니다
+    expect(eventCardsOf([{ quote: '  ', sourceUrl: 'x', startDate: null, endDate: null, benefitLicensed: false, origin: 'crawl' as const }], null)).toEqual([]);
     expect(eventCardsOf([], null)).toEqual([]);
   });
 });
