@@ -604,7 +604,39 @@ DM 실물 = 헤더 · 히어로(체험단 제목 + sub_copy "기간 기간 : 202
 - 톤28 상세 렌더에도 "원" 표기가 없어 가격 채우기는 0 이었다(로컬 실측). 가격이 있는 몰에서의 실효는 미검증.
 - 서버 워커에서 톤28 홈·프로모션 렌더는 미실측(로컬 크롬 확인만).
 
+### 19-7. v4-2 조립 정정(2026-09-09 · 톤28 첫 실측 "제품 링크 0" · 같은 날)
+- 실측: v4 가 톤28 홈에서 /promotion/product/peptacica(브랜드 스토리 페이지)를 찾아 사진 6장만 이어 붙였다. 상품 카드(그 페이지 8개 · 홈 3개)는 슬라이스 모드가 버렸고, 버튼 문구는 페이지 title("톤28 공식몰 보기")이었다. 캡처 = 헤더 · 사진 6 · 버튼 · 푸터 = 판매 포인트 0.
+- 정정(조립 규칙 · `composeSliceSections`): 구성 = header · gallery · **product_carousel(최대 4 · 사본·링크 있는 상품 · 가격 없으면 0 = 가격 줄 0)** · cta · footer. 상품이 하나라도 있으면 반드시 싣는다(DM·이메일 같은 함수). 프로모션·스토리 페이지 슬라이스는 `OUTREACH_SLICE_PROMO_MAX`(4)까지. 그 페이지의 상품 카드(`promoProducts`)가 홈 카드보다 앞.
+- 제목(`promoCardTitleOf`): 슬라이스 alt("Farm to Product 사진" → "Farm to Product") → 경로 조각 → 페이지 title → "기획 페이지". 사이트명·공식몰 류 제외. 버튼(`sliceCtaLabel`): 제목형(`eventCtaLabel`), 제목이 사이트명이거나 절단으로 70% 미만 남으면 "상품 자세히 보기". 워커 images 에 `alt` 추가.
+- "원" 없는 몰(톤28: "펩타시카 새벽크림 2.0 50g 34,200"): 카드 문구 **끝**의 천 단위 숫자 1~2개만 가격(리뷰·평점·개수 뒤 숫자 제외) · 이름에서 뗀다.
+- 로컬 실물 렌더(`scratch/proto/slice-preview.ts` · 실제 톤28 재료 · DB 0): 헤더 → 스토리 사진 4 → 펩타시카 새벽크림 2.0 34,200원 · 크림 인텐시브 40,500원 (+2 스와이프) → "상품 자세히 보기" → 푸터. 캡처 = 세션 산출물. **이번부터 캡처 없이 인계하지 않는다.**
+- 레시피 bindings: `so-slice-products` → src `product`(ref n).
+
+### 19-8. v4-3 이미지 판정 선별(2026-09-09 · Harold "인증서·성분표가 왜 들어가나 · 이게 잘 나온 건가" · 같은 날)
+- 솔직한 평가: v4-2 캡처는 상품 카드가 붙어 "쓸 수 있는 최소"였지 좋은 DM 이 아니었다. 위 4장이 분위기 사진 3 + 인증서 1(375px 에서 안 읽힘)이었고, 규칙이 이미지 내용을 안 봤다(묶음의 앞 4장).
+- 정정 = **모델은 분류만, 고르기는 코드**. 제작 단계(`collectOutreachMedia`)가 슬라이스 전부 + 홈 갤러리 앞 8장의 사본 버퍼를 한 호출에 보내 `{banner | product | document | photo | other, text}` 를 받는다(`classifyOutreachImages` · 상한 14장 · 장당 1.2MB · 실패 = 판정 없음). `media.imageKinds`(사본 URL 키) 저장.
+- 선별(`selectSliceImages` · 순수): 프로모션·스토리 페이지 = 글자 있는 홈 상단 배너 먼저(≤2) → 배너·상품 슬라이스 → 분위기 사진 ≤1 · 문서 제외 · 상한 4. 기획전(이벤트 카드) = 문서만 제외(3장 미만이 되면 원래대로). 판정 없음 = 홈 배너 2 + 슬라이스 순서대로. 결과 2장 미만이면 선별 전으로(산출물을 비우지 않는다).
+- 홈 배너 사본은 `brand_profile.heroBanners[].url` ↔ `media.gallery[].srcUrl` 로 되찾는다(`ProduceDmInput.heroBanners`).
+- 톤28 기대: 헤더 → 9월 8일 캠페인 배너 2장(글자) → 수확 사진 1 → 펩타시카 상품 4 → 버튼 "상품 자세히 보기" → 푸터. 아이소이 추석: 문서 없음 = 변화 0.
+- 미검증: 모델 분류 정확도(인증서 = document · 캠페인 배너 = banner) · 호출 1회 비용(이미지 ≤14장) · 판정 실패율. 근거 = `media.stats.imageKindsJudged`.
+
+### 19-9. v5 표준 조립(2026-09-09 · Harold "스튜디오 히어로 → 상품 큐레이션 → 이벤트 나열 · 직원이 만든 걸 학습해서" · 같은 날 · 코드 완료)
+- 슬라이스만 세우는 조립을 폐기하고 **직원 DM 공식**을 표준으로: header · 히어로 1장(gallery 풀폭 · 스튜디오 포스터 = 행사 문구를 얹어 생성 → 없으면 홈 캠페인 배너(판정 배너·글자 우선) → 카드 배너) · product_carousel(≤6) · [행사 N ≤3: text_card(제목·기간·배너) + gallery(그 기획전 슬라이스 선별 ≤3) + cta] · 대표 cta(마지막 행사와 같으면 생략) · footer. `composeOutreachStandard`(순수) · 재료 = `standardMaterialsOf`(produce · DM·이메일 공용). 상품·행사가 둘 다 없으면 옛 AI 골격.
+- 포스터 생략 조건(v3 §7-4 · 배너 ≥3·카드 ≥1)은 폐지 = 항상 생성(실패 = 히어로 폴백). 3칸 문구는 §C 자문대로 "단일 검증 행사 객체" 계약으로 바꾸는 것이 다음 축.
+- 코덱스 자문(0909 · 읽기 전용) 수용 1: 정제에서 탈락한 카드 제목을 원문으로 되살리던 자리 정정(preset 경로는 차단기를 안 탄다). 자문 나머지(행사별 근거 묶음 · 직원 레시피 파라미터 · 채널별 품질 판정 · 결과 원장 학습 · homeLinked 예외 위험)는 §19-10 후속 축.
+- 로컬 실물 렌더(톤28 · 포스터 없음 = 배너 히어로): 헤더 → 9월 8일 캠페인 배너 → 펩타시카 상품 4 → 행사 카드(Farm to Product · 사진) → 사진 2 → 버튼 → 푸터. 서버에서는 히어로가 스튜디오 포스터가 된다(미검증).
+- 근거: dm payload `stdHero('poster'|'banner'|'card')` · `stdProducts` · `stdEvents` · `sliceCount`(행사 슬라이스 합) · 레시피 bindings `so-std-*`(hero=poster · event/cta-event=card · slices=slice · products=product).
+
+### 19-9-1. 코덱스 2차 자문(브리프 기반 · 2026-09-09) 즉시 수용 2건
+- 브리프 = `docs/2026-09-09-ai-sales-outreach-consult-brief.md` · 회신 원문 = `docs/2026-09-09-ai-sales-outreach-consult-codex-reply.md`(Q1~Q6).
+- 수용 1(Q6): 포스터 항상 생성으로 바꾸면서 스튜디오 예외가 잡 전체 실패로 번지던 자리 → try/catch 격리 · asset `{url null, skipped: 'studio_error', studioError}` · 히어로는 홈 배너 폴백(브리프 §3-3 설명과 구현 일치).
+- 수용 2(Q3): 히어로 섹션 id 를 `so-std-hero-{poster|banner|card}` 로 나눠 레시피가 실제 히어로 종류를 기록(배너 폴백을 poster 로 적던 라벨 오류 제거).
+- 나머지(Q1 포스터 3칸 계약 · Q2 역할 적합성·채널 판정 · Q3 레시피 파라미터·결과 원장 · Q4 아웃리치 검증기 1곳 + homeLinked 를 면허에서 분리 · Q5 제안 메일 한 장면)는 §19-10 순서로.
+
+### 19-10. 후속 축(코덱스 자문 · 기록만 · 착수 = Harold)
+A1 행사별 근거 묶음(혜택·상품·목적지 동일 행사 귀속 검사) · A2 직원 레시피 → 조립 파라미터(상품 수·순서·히어로 구도 · 대순서 고정) · A3 채널별 렌더 품질 판정(첫 화면 행사 설명 · 상품 식별 · 글자 잘림 · 중복 · 링크 일치) · B 결과 원장 학습(검수·봇 제외 · 대조군) · C 포스터 3칸 = 단일 검증 행사 객체 + 문구 검사 + OCR 보조 · D homeLinked 면허 예외 재검토 · preset 경로 차단기.
+
 ### 19-6. 배포 · 실측(Harold)
-- 배포 = 백엔드 reload + **`pm2 reload outreach-render`**(images.href) + 프론트 빌드(후보 라벨).
+- 배포 = 백엔드 reload + **`pm2 reload outreach-render`**(images.href·alt) + 프론트 빌드(후보 라벨).
 - 톤28 [다시 읽기] → 확인 대기에서 기대: 재료 카드 "화면을 그려서 읽음" · 배너 후보 앞쪽에 9월 8일 슬라이드 · 상품 3+(히알시카 수분진정 SET · 펩타시카 선세럼 세트 · 묵상 세트 · 가격 없음) · 행사 카드에 **"홈에 걸린 기획 페이지 · 디자인 그대로"** 라벨 1장(펩타시카) → 그 카드 선택 → 제작 → DM = 슬라이스 6장 스택 + 버튼 · 근거 패널 "디자인 이미지 6장을 그대로 이어 붙였습니다".
 - SQL: `SELECT stage_results->>'rendering' r, stage_results->>'event_slices' s, stage_results->>'promo_pages' p, brand_profile->'eventSlices'->>'source' src, jsonb_array_length(brand_profile->'heroBanners') hero, jsonb_array_length(brand_profile->'listProducts') prods FROM sales_outreach_jobs WHERE company_name LIKE '%톤28%' ORDER BY created_at DESC LIMIT 1;` 기대 = ok · ok · ok · promo_page · 7 · 3 이상.

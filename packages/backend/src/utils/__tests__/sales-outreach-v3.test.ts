@@ -420,13 +420,21 @@ describe('★ v3 전사 가드 · 자동 재조립 트리거 · AI 계수 · 회
       { id: 'so-proof-card', type: 'text_card', props: {} }, { id: 'g-2-text_card', type: 'text_card', props: { headline: '모델 카드' } },
       // ★ 2026-09-09 기획전 슬라이스 모드 블록(src 'slice' · ref = 슬라이스 수)
       { id: 'so-slice-gallery', type: 'gallery', props: { images: [{}, {}, {}] } },
+      // ★ v4-2 슬라이스 모드 상품 카드(src 'product' · ref = 상품 수)
+      { id: 'so-slice-products', type: 'product_carousel', props: { products: [{}, {}] } },
+      // ★ v5 표준 조립 — 히어로 poster · 행사 카드·버튼 card · 슬라이스 slice · 대표 버튼 code
+      { id: 'so-std-hero-poster', type: 'gallery', props: { images: [{}] } }, { id: 'so-std-event1', type: 'text_card', props: {} }, { id: 'so-std-slices1', type: 'gallery', props: { images: [{}, {}] } }, { id: 'so-std-cta-event1', type: 'cta', props: {} }, { id: 'so-std-cta', type: 'cta', props: {} },
+      { id: 'so-std-hero-banner', type: 'gallery', props: { images: [{}] } },
     ];
     const cards = [{ title: '추석 기획전', periodRaw: null, endDate: '2099-01-01', bannerUrl: 'https://hanjul.ai/copy/ev.jpg', detailUrl: 'x', licensed: true }];
     const r: any = buildOutreachRecipe({ sections, cards, media: null, licensedQuote: '추석 기획전 30%', look: { treatments: 3, backgrounds: 2 }, colorSource: 'render', benefitStripped: 1, heroFallback: false, eventList: 'ok', bannerRead: false, vision: { outcome: 'ok', items: { hero_image_full: true } }, aiCost: null });
     expect(r.materials).toEqual({ products: 0, banners: 0, eventCards: 1, licensed: true, licensedChars: 10 });
-    expect(r.bindings.map((b: any) => b.src)).toEqual(['code', 'card', 'card', 'product', 'proof', 'quote', 'slice']);
+    expect(r.bindings.map((b: any) => b.src)).toEqual(['code', 'card', 'card', 'product', 'proof', 'quote', 'slice', 'product', 'poster', 'card', 'slice', 'card', 'code', 'slice']);
+    expect(r.bindings[13].ref).toBe('hero=banner');
     expect(r.bindings[3].ref).toBe('n=2');
     expect(r.bindings[6].ref).toBe('n=3');
+    expect(r.bindings[7].ref).toBe('n=2');
+    expect(r.bindings[10].ref).toBe('n=2');
     expect(JSON.stringify(r)).not.toContain('추석 기획전');
     expect(r.look).toEqual({ treatments: 3, backgrounds: 2, colorSource: 'render' });
   });

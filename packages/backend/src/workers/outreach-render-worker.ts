@@ -203,7 +203,7 @@ interface RenderOk {
   palette: Array<{ hex: string; weight: number; sources: string[] }>;
   screenshotViewportBase64: string | null;
   /** ★ 2026-09-09 넓은 이미지 기하(원본 폭 ≥600 · 최대 80 · 문서 순서) — 기획전 슬라이스 판정 재료(utils/sales-outreach-slices.ts). 스크롤을 끝까지 훑은 뒤 재서 지연 로딩분도 들어 있다 */
-  images: Array<{ src: string; w: number; h: number; rw: number; rh: number; top: number; href: string | null }>;
+  images: Array<{ src: string; w: number; h: number; rw: number; rh: number; top: number; href: string | null; alt: string }>;
 }
 interface RenderFail { ok: false; reason: 'blocked' | 'timeout' | 'error'; detail: string; meta?: Partial<RenderMeta> }
 
@@ -287,7 +287,7 @@ async function renderOnce(input: RenderRequest, proxyPort: number): Promise<Rend
         images: wide.slice(0, 80).map((i) => {
           const r = i.getBoundingClientRect();
           const a = i.closest('a');
-          return { src: i.currentSrc || i.src || '', w: i.naturalWidth, h: i.naturalHeight, rw: Math.round(r.width), rh: Math.round(r.height), top: Math.round(r.top + window.scrollY), href: a && a.href ? String(a.href) : null };
+          return { src: i.currentSrc || i.src || '', w: i.naturalWidth, h: i.naturalHeight, rw: Math.round(r.width), rh: Math.round(r.height), top: Math.round(r.top + window.scrollY), href: a && a.href ? String(a.href) : null, alt: String(i.alt || '').slice(0, 120) };
         }),
       };
     })()`)) as { html: string; text: string; imgCount: number; imgWide: number; scrollHeight: number; images: RenderOk['images'] };

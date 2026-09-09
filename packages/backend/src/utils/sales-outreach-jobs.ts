@@ -57,7 +57,7 @@ import {
   type RenderResult, type MaterialSource, type EscalationReason,
 } from './sales-outreach-render';
 // ★ 2026-09-09 기획전 슬라이스 재료 판정(렌더 기하 → 세로로 이어진 넓은 이미지 묶음) · ★ v4 홈 상단 배너
-import { detectEventSlices, heroBannersOf, type EventSliceMaterial, type HeroBanner } from './sales-outreach-slices';
+import { detectEventSlices, heroBannersOf, promoCardTitleOf, type EventSliceMaterial, type HeroBanner } from './sales-outreach-slices';
 
 /** ★ 2026-09-09 v4 홈에 걸린 프로모션 페이지 시도 상한 · 페이지당 렌더 예산 · 총 벽시계 */
 const OUTREACH_PROMO_PAGES_MAX = 3;
@@ -772,6 +772,8 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   let eventSlices: EventSliceMaterial | null = null;
   let slicesOutcome: 'ok' | 'no_content' | 'unavailable' | null = null;
   let slicesDetail: string | null = null;
+  // ★ v4-2 프로모션 페이지 안의 상품 카드(그 기획의 상품 · 홈 카드보다 앞)
+  let promoProducts: OutreachProduct[] = [];
   if (hasSource) {
     // ★ v3 목록 페이지 후보를 순서대로 최대 3개 시도(아이소이 첫 실측: 홈에 목록 앵커가 없어 상세 1장을 읽었다 → 관례 주소 /event/event_list 가 목록) · 카드가 나오면 멈춘다 · 카드 0이면 첫 성공 페이지가 옛 방식의 행사 상세 원문
     const links = (rendered ? findEventListLinks(rendered.html, finalUrl) : []).concat(page ? findEventListLinks(page.html, staticUrl) : []).filter((u, i, arr) => arr.indexOf(u) === i).slice(0, 3);
@@ -917,10 +919,14 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
             const det = detectEventSlices(Array.isArray(rs.result.images) ? rs.result.images : []);
             if (!det) continue;
             eventSlices = { detailUrl: link, finalUrl: rs.result.finalUrl, images: det.images, candidates: det.candidates, at: new Date().toISOString(), source: 'promo_page' };
-            const titleRaw = (rs.result.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/\s+/g, ' ').replace(/\s*[|\-–:]\s*[^|\-–:]{1,30}$/, '').trim();
-            const seg = decodeURIComponent((new URL(link).pathname.split('/').filter(Boolean).pop() || '')).replace(/[-_]+/g, ' ').trim();
+            // ★ v4-2 제목 = 슬라이스 alt("Farm to Product") → 경로 조각 → 페이지 title(사이트명·공식몰은 제외) · 그 페이지의 상품 카드는 홈 카드보다 앞
+            const shotsHtml = rs.result.html;
+            const pageTitle = (shotsHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '');
+            const siteName = (shotsHtml.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']*)["']/i)?.[1] || job.company_name);
+            const sliceShots = (Array.isArray(rs.result.images) ? rs.result.images : []).filter((i) => det.images.some((d) => d.url === i.src));
+            promoProducts = extractRenderedProductCards(shotsHtml, rs.result.finalUrl, 12);
             eventCards = [...eventCards, {
-              title: (titleRaw || seg || '기획 페이지').slice(0, 80), periodRaw: null, startDate: null, endDate: null,
+              title: promoCardTitleOf(sliceShots, link, pageTitle, siteName), periodRaw: null, startDate: null, endDate: null,
               imageUrl: det.images[0].url, linkUrl: link, order: eventCards.length, source: 'promo_page', homeLinked: true,
             }];
             break;
@@ -963,8 +969,8 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
       // ★ v3 카드 상세 1홉의 상품은 뒤에(홈 목록 우선) · 합집합 상한 12 유지
       cardProducts, 12,
     ),
-    // ★ 2026-09-09 v4 렌더 DOM 의 상품 카드(가격 없어도 · SPA 몰의 유일한 상품 재료) — 가격 있는 카드 뒤 · 같은 키(이름+링크)는 앞이 이긴다
-    rendered ? extractRenderedProductCards(rendered.html, finalUrl, 12) : [], 12,
+    // ★ 2026-09-09 v4 렌더 DOM 의 상품 카드(가격 없어도 · SPA 몰의 유일한 상품 재료) — 가격 있는 카드 뒤 · ★ v4-2 프로모션 페이지의 상품이 홈 카드보다 앞 · 같은 키(이름+링크)는 앞이 이긴다
+    unionProducts(promoProducts, rendered ? extractRenderedProductCards(rendered.html, finalUrl, 12) : [], 12), 12,
   );
   // ★ 2026-09-09 v4 홈 상단 배너(렌더 기하 · 슬라이더 중복 접음 · 앵커 href 동반) — 갤러리 후보의 **맨 앞**(히어로 = 홈 첫 배너 · 불변 26). 렌더가 없으면 [] = 옛 순서 그대로.
   const heroBanners: HeroBanner[] = rendered ? heroBannersOf(Array.isArray(rendered.images) ? rendered.images : []) : [];
@@ -1314,7 +1320,13 @@ export function buildOutreachRecipe(input: {
     let src: string = 'code'; let reader: string = 'code'; let ref: string | null = null;
     if (id === 'so-proof-card') { src = 'proof'; reader = 'html'; }
     // ★ 2026-09-09 기획전 슬라이스 블록 — 출처는 브랜드 기획전 페이지 이미지(읽기 = 렌더 기하) · ref = 실린 장수
-    else if (id.startsWith('so-slice')) { src = 'slice'; reader = 'html'; ref = type === 'gallery' ? `n=${Array.isArray(p.images) ? p.images.length : 0}` : null; }
+    else if (id === 'so-slice-products' || id === 'so-std-products') { src = 'product'; reader = 'html'; ref = `n=${Array.isArray(p.products) ? p.products.length : 0}`; }
+    else if (id.startsWith('so-slice') || id.startsWith('so-std-slices')) { src = 'slice'; reader = 'html'; ref = type === 'gallery' ? `n=${Array.isArray(p.images) ? p.images.length : 0}` : null; }
+    // ★ v5 표준 조립 — 히어로(포스터=vision 생성물 · 배너=html) · 행사 카드·버튼 = card · 대표 버튼·헤더·푸터 = code
+    else if (id === 'so-std-hero-poster') { src = 'poster'; reader = 'vision'; }
+    else if (id === 'so-std-hero-banner') { src = 'slice'; reader = 'html'; ref = 'hero=banner'; }
+    else if (id === 'so-std-hero-card') { src = 'card'; reader = 'html'; ref = 'hero=card'; }
+    else if (/^so-std-(event|cta-event)\d+$/.test(id)) { src = 'card'; reader = 'html'; }
     else if (id.startsWith('so-v3-poster')) { src = 'poster'; reader = 'vision'; }
     else if (id.startsWith('so-v3-event') || id.startsWith('so-v3-cta-event') || (type === 'hero' && cardBanners.has(p.image_url))) { src = 'card'; reader = input.bannerRead ? 'vision' : 'html'; ref = p.image_url ? 'banner' : 'title'; }
     else if (id.startsWith('so-v3-spot') || id.startsWith('so-v3-cta-spot') || type === 'product_carousel' || (type === 'text_card' && productImgs.has(p.image_url))) { src = 'product'; reader = 'html'; ref = type === 'product_carousel' ? `n=${Array.isArray(p.products) ? p.products.length : 0}` : null; }
@@ -1470,8 +1482,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             media = null;
           }
         }
-        // ★ v3 포스터 생략 조건(설계서 §7-4 · 불변 30 개정) — 실측 배너 ≥3 이고 이벤트 카드 ≥1 이면 생성물을 만들지 않는다(asset 행은 url null 로 남긴다 · 하류 null 분기 실재)
-        const skipPoster = eventCards.length >= 1 && !!(media && Array.isArray(media.gallery) && media.gallery.length >= 3);
+        // ★ v3 포스터 생략 조건(실측 배너 ≥3 · 카드 ≥1)은 ★ 2026-09-09 v5 로 폐지 — 표준 조립의 히어로가 "행사 문구를 얹은 스튜디오 포스터"라 항상 만든다(실패 = asset url null → 히어로는 홈 배너로).
+        const skipPoster = false;
         if (skipPoster) {
           if (!(await insertAssetOwned(jobId, 'studio_image', {
             url: null, usedCutout: false, personJudge: null,
@@ -1483,20 +1495,38 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             regenCount: regenSeqOf(sr, 'image'),
           }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
         } else {
-          const img = await produceOutreachImage({
-            jobId,
-            companyName: job.company_name,
-            industry: job.industry_category,
-            selectedImageUrl: bp.selectedImageUrl || null,
-            regenSeq: regenSeqOf(sr, 'image'),
-            brandColor,
-            // ★ 2026-09-06 S3 문구 3칸 재료 · 실측 배너 0장이면 16:9 배너 1장
-            eventQuote: selected?.quote || null,
-            products: media?.products?.length ? media.products : (Array.isArray(bp.listProducts) ? bp.listProducts : []),
-            siteTitle: bp.siteTitle || null,
-            wantBanner: !(media && Array.isArray(media.gallery) && media.gallery.length > 0),
-          });
-          if (!(await insertAssetOwned(jobId, 'studio_image', {
+          // ★ 2026-09-09 v5(코덱스 자문 Q6 수용) — 포스터를 항상 만들게 되면서 스튜디오 예외가 잡 전체 실패(markFailed)로 번지면 안 된다 → 격리: 실패 = url null 행(표준 조립 히어로는 홈 배너로 폴백)
+          let img: Awaited<ReturnType<typeof produceOutreachImage>> | null = null;
+          let studioError: string | null = null;
+          try {
+            img = await produceOutreachImage({
+              jobId,
+              companyName: job.company_name,
+              industry: job.industry_category,
+              selectedImageUrl: bp.selectedImageUrl || null,
+              regenSeq: regenSeqOf(sr, 'image'),
+              brandColor,
+              // ★ 2026-09-06 S3 문구 3칸 재료 · 실측 배너 0장이면 16:9 배너 1장
+              eventQuote: selected?.quote || null,
+              products: media?.products?.length ? media.products : (Array.isArray(bp.listProducts) ? bp.listProducts : []),
+              siteTitle: bp.siteTitle || null,
+              wantBanner: !(media && Array.isArray(media.gallery) && media.gallery.length > 0),
+            });
+          } catch (err: any) {
+            studioError = detailOf(err);
+            console.error('[sales-outreach] 포스터 생성 실패(격리 · 히어로는 배너로):', jobId, err?.message);
+          }
+          if (!img) {
+            if (!(await insertAssetOwned(jobId, 'studio_image', {
+              url: null, usedCutout: false, personJudge: null,
+              skippedReason: `생성 이미지를 만들지 못했습니다(${studioError || '원인 미상'}). 히어로는 홈 배너로 대신합니다.`,
+              width: 0, height: 0, templateId: null, category: null, kind: null,
+              media: media ? media.stats : null, mediaError,
+              posterTexts: null, cutoutSource: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
+              skipped: 'studio_error', studioError,
+              regenCount: regenSeqOf(sr, 'image'),
+            }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
+          } else if (!(await insertAssetOwned(jobId, 'studio_image', {
             url: img.publicUrl, usedCutout: img.usedCutout, personJudge: img.personJudge,
             skippedReason: img.skippedReason, width: img.width, height: img.height,
             templateId: img.templateId, category: img.category, kind: img.kind,
@@ -1559,6 +1589,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           eventCards: dmCards,
           // ★ 2026-09-09 기획전 슬라이스 재료 — 자격(면허 카드 · 사본 ≥3)은 assembleOutreachDm 안 sliceModeCard 가 판정
           eventSlices: bp.eventSlices || null,
+          // ★ v4-3 홈 상단 배너(프로모션 슬라이스 앞자리 · 갤러리 사본을 srcUrl 로 되찾는다)
+          heroBanners: Array.isArray(bp.heroBanners) ? bp.heroBanners : null,
         };
         // ★ v3 조립 → 발행(1회) → 캡처·채점 → 트리거면 조립 1회 더 → 같은 dmId 갱신(updateDm · 재발행 0) → 재캡처(워커가 되면) (설계서 §7-8 · 불변 1·37 개정)
         //   상한 = 조립 2회 · 단계 벽시계 60초 · 카운터 auto_seq.dm(사람 regen_seq 와 분리) · preset(숨김 재실행)은 자동 재조립 0
@@ -1612,6 +1644,10 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           // ★ 2026-09-09 기획전 슬라이스 모드 여부·장수(숨김 재실행은 직전 값 승계) — 근거 패널 1줄 · 레시피 bindings src 'slice'
           sliceMode: carry ? carry.sliceMode === true : assembled.sliceMode,
           sliceCount: carry ? (Number(carry.sliceCount) || 0) : assembled.sliceCount,
+          // ★ v5 표준 조립 근거(히어로 종류 · 상품 · 행사 수)
+          stdHero: carry ? (carry.stdHero ?? null) : assembled.stdHero,
+          stdProducts: carry ? (Number(carry.stdProducts) || 0) : assembled.stdProducts,
+          stdEvents: carry ? (Number(carry.stdEvents) || 0) : assembled.stdEvents,
           recipe: carry ? (carry.recipe ?? null) : buildOutreachRecipe({ sections: dm.sections, cards: dmCards, media: bp.media || null, licensedQuote, look: dm.look, colorSource: bp.brand?.colorSource || null, benefitStripped: dm.benefitStripped, heroFallback: dm.heroFallback, eventList: sr.event_list || null, bannerRead: bannerLines.length > 0, vision: dmVision, aiCost: null }),
           regenCount: regenSeqOf(sr, 'dm'),
         }, 'producing_dm', lockToken, regenSeqOf(sr, 'dm')))) return;
@@ -1670,8 +1706,9 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             media: bp.media || null, mediaSelection: bp.mediaSelection || null,
             ctaLinks: bp.ctaLinks && typeof bp.ctaLinks === 'object' ? bp.ctaLinks : {}, legal: bp.legal || null, brandColor,
             entry: 'outreach', eventCards,
-            // ★ 2026-09-09 기획전 슬라이스 재료(DM 과 같은 자격 · 같은 구성)
+            // ★ 2026-09-09 기획전 슬라이스 재료(DM 과 같은 자격 · 같은 구성) · ★ v4-3 홈 상단 배너
             eventSlices: bp.eventSlices || null,
+            heroBanners: Array.isArray(bp.heroBanners) ? bp.heroBanners : null,
           });
           brandSectionsBase = brand.sections; brandSubject = brand.subject; brandStripped = brand.benefitStripped; exemplarCount = brand.exemplarCount; exemplarTotal = brand.exemplarTotal; brandLook = brand.look;
           brandSliceMode = brand.sliceMode; brandSliceCount = brand.sliceCount;

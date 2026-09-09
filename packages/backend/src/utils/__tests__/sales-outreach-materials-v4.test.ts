@@ -79,6 +79,18 @@ describe('extractRenderedProductCards — 렌더 DOM 의 상품 카드(가격이
     expect(extractRenderedProductCards(html, HOME, 1)).toHaveLength(1);
     expect(extractRenderedProductCards('', HOME)).toEqual([]);
   });
+  it('★ v4-2 "원" 없는 몰 — 카드 문구 끝의 천 단위 숫자만 가격 · 이름에서 뗀다 · 리뷰 수 뒤 숫자는 가격이 아니다', () => {
+    const h = `
+      <a href="/renew/product/1598"><img src="https://cdn/1598.png" alt="베스트 셀러 이미지"><div>펩타시카 새벽크림 2.0 50g 34,200</div></a>
+      <a href="/renew/product/1579"><img src="https://cdn/1579.png" alt="베스트 셀러 이미지"><div>펩타시카 크림 인텐시브 50g</div><div>45,000 40,500</div></a>
+      <a href="/renew/product/1584"><img src="https://cdn/1584.png" alt="베스트 셀러 이미지"><div>펩타시카 토너 250ml</div><div>리뷰 1,234</div></a>`;
+    const cards = extractRenderedProductCards(h, HOME);
+    expect(cards.map((c) => [c.name, c.price, c.discount_price])).toEqual([
+      ['펩타시카 새벽크림 2.0 50g', 34200, null],
+      ['펩타시카 크림 인텐시브 50g', 45000, 40500],
+      ['펩타시카 토너 250ml', null, null],
+    ]);
+  });
 });
 
 describe('eventCandidatesFromCards — 홈 게시 = 진행 중(종료일이 없을 때만 · 있으면 종료일이 이긴다)', () => {

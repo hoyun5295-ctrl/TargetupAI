@@ -280,9 +280,16 @@ export function extractRenderedProductCards(html: string, base: string, max = 12
       name = text.replace(PRICE_RE, ' ').replace(/\d{1,3}\s*%/g, ' ').replace(NAME_NOISE_RE, ' ')
         .split(/\s{2,}|\|/).map((s) => s.trim()).filter((s) => s.length >= 4 && !isDateLikeText(s)).sort((a, b) => b.length - a.length)[0] || '';
     }
-    name = cleanProductName(name).slice(0, 80);
+    const cardText = stripTags(inner);
+    let prices = pricesOf(cardText);
+    // ★ v4-2 "원" 없는 몰(톤28: "펩타시카 새벽크림 2.0 50g 34,200") — 카드 문구 **끝**의 천 단위 숫자 1~2개만 가격으로 본다(리뷰·평점·개수 뒤의 숫자는 제외). 이름에서 그 숫자를 뗀다.
+    const tail = cardText.match(/(?:^|\s)((?:\d{1,3}(?:,\d{3})+)(?:\s+\d{1,3}(?:,\d{3})+)?)\s*$/);
+    if (!prices.length && tail && !/(?:리뷰|후기|평점|개|건|명|점)\s*$/.test(cardText.slice(0, cardText.length - tail[1].length).trim())) {
+      prices = tail[1].split(/\s+/).map((s) => Number(s.replace(/,/g, ''))).filter((n) => n >= 1000 && n < 10_000_000);
+    }
+    // 이름 꼬리의 가격·리뷰 수("… 34,200" · "… 리뷰 1,234" · "… 45,000 40,500")를 뗀다
+    name = cleanProductName(name.replace(/(?:\s+(?:리뷰|후기|평점|구매|판매)?\s*\d{1,3}(?:,\d{3})+\s*(?:개|건|명|점|원)?)+\s*$/, '')).slice(0, 80);
     if (!name || name.length < 2) continue;
-    const prices = pricesOf(stripTags(inner));
     const sorted = [...prices].sort((a, b) => a - b);
     const price = sorted.length ? sorted[sorted.length - 1] : null;
     const discount = sorted.length > 1 && sorted[0] < (price as number) ? sorted[0] : null;

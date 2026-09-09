@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import {
-  detectEventSlices, sliceModeCard, composeSliceSections, sliceHeightAt600, heroBannersOf,
-  OUTREACH_SLICE_MIN, OUTREACH_SLICE_HEIGHT_BUDGET_600, OUTREACH_SLICE_GAP_MAX, type RenderImage, type EventSliceMaterial,
+  detectEventSlices, sliceModeCard, composeSliceSections, composeOutreachStandard, sliceHeightAt600, heroBannersOf, promoCardTitleOf, sliceCtaLabel, selectSliceImages, selectEventSlices, parseImageKinds,
+  OUTREACH_SLICE_MIN, OUTREACH_SLICE_HEIGHT_BUDGET_600, OUTREACH_SLICE_GAP_MAX, OUTREACH_SLICE_PROMO_MAX, type RenderImage, type EventSliceMaterial, type ImageKindJudge,
 } from '../sales-outreach-slices';
 
 function fixtureImages(name: string): RenderImage[] {
@@ -183,5 +183,148 @@ describe('composeSliceSections — header · gallery(list_1xN · full_bleed) · 
     expect((secs[0].props as any).logo_url).toBeUndefined();
     expect((secs[0].props as any).brand_name).toBe('아이소이');
     expect((secs[3].props as any).legal_text).toBeUndefined();
+  });
+
+  it('★ v4-2 상품이 있으면 슬라이스 뒤에 상품 카드(최대 4 · 링크·이름 필수 · 가격 없으면 0) · 순서 header·gallery·products·cta·footer', () => {
+    const products = [1, 2, 3, 4, 5].map((n) => ({ name: `펩타시카 상품 ${n}`, image_url: `https://hanjul.ai/copy/p${n}.png`, link_url: `https://www.toun28.com/renew/product/${n}`, price: n === 2 ? 34200 : null, discount_price: n === 2 ? 30000 : null }));
+    const secs = composeSliceSections({ ...base, channel: 'DM', products: [...products, { name: '', image_url: 'x', link_url: 'y', price: null, discount_price: null }] });
+    expect(secs.map((s) => s.type)).toEqual(['header', 'gallery', 'product_carousel', 'cta', 'footer']);
+    expect(secs.map((s) => s.id)).toEqual(['so-slice-header', 'so-slice-gallery', 'so-slice-products', 'so-slice-cta', 'so-slice-footer']);
+    expect(secs.map((s) => s.order)).toEqual([0, 1, 2, 3, 4]);
+    const pc: any = secs[2].props;
+    expect(pc.products).toHaveLength(4);
+    expect(pc.products[0]).toEqual({ name: '펩타시카 상품 1', image_url: 'https://hanjul.ai/copy/p1.png', link_url: 'https://www.toun28.com/renew/product/1', price: 0 });
+    expect(pc.products[1]).toMatchObject({ price: 34200, discount_price: 30000 });
+    expect(pc.title).toBe('');
+  });
+
+  it('★ v4-2 프로모션·스토리 페이지 슬라이스는 maxSlices(4)까지 · 최소 3 은 지킨다', () => {
+    const secs = composeSliceSections({ ...base, channel: 'DM', maxSlices: OUTREACH_SLICE_PROMO_MAX });
+    expect((secs[1].props as any).images).toHaveLength(4);
+    expect((composeSliceSections({ ...base, channel: 'DM', maxSlices: 1 })[1].props as any).images).toHaveLength(OUTREACH_SLICE_MIN);
+  });
+});
+
+describe('★ v4-3 이미지 판정 선별 — 모델은 분류만 · 고르기는 코드', () => {
+  const st = (name: string, w = 1920, h = 734): StoredImage => ({ url: `https://hanjul.ai/copy/${name}`, width: w, height: h, bytes: 1000, srcUrl: `https://c/${name}` });
+  const slices = [st('s1.jpg'), st('s2.jpg'), st('cert.jpg'), st('s4.jpg'), st('s5.jpg'), st('s6.jpg')];
+  const heroes = [st('hero-a.jpg', 1920, 1080), st('hero-b.jpg', 1920, 1080), st('hero-c.jpg', 1920, 1080)];
+  const kinds: Record<string, ImageKindJudge> = {
+    [slices[0].url]: { kind: 'photo', text: false }, [slices[1].url]: { kind: 'photo', text: false }, [slices[2].url]: { kind: 'document', text: true },
+    [slices[3].url]: { kind: 'photo', text: false }, [slices[4].url]: { kind: 'banner', text: true }, [slices[5].url]: { kind: 'photo', text: false },
+    [heroes[0].url]: { kind: 'banner', text: false }, [heroes[1].url]: { kind: 'banner', text: true }, [heroes[2].url]: { kind: 'photo', text: false },
+  };
+  it('parseImageKinds — JSON items → n장 · 빠진 칸 other · 잘못된 종류 other · 형식 아님 null', () => {
+    expect(parseImageKinds('결과: {"items":[{"i":0,"kind":"banner","text":true},{"i":2,"kind":"weird","text":"true"}]}', 3)).toEqual([
+      { kind: 'banner', text: true }, { kind: 'other', text: false }, { kind: 'other', text: true },
+    ]);
+    expect(parseImageKinds('그냥 글', 2)).toBeNull();
+    expect(parseImageKinds('{"foo":1}', 2)).toBeNull();
+  });
+  it('프로모션 페이지 + 판정 있음 = 글자 있는 홈 배너 먼저(≤2) → 배너·상품 슬라이스 → 분위기 사진 1 · 문서 제외 · 상한 4', () => {
+    const picked = selectSliceImages(slices, kinds, { source: 'promo_page', heroBanners: heroes, maxSlices: 4 });
+    expect(picked.map((s) => s.url.split('/').pop())).toEqual(['hero-b.jpg', 'hero-a.jpg', 's5.jpg', 's1.jpg']);
+  });
+  it('프로모션 페이지 + 판정 없음 = 홈 배너 2 + 슬라이스 2 · 홈 배너 없으면 슬라이스 앞 4', () => {
+    expect(selectSliceImages(slices, null, { source: 'promo_page', heroBanners: heroes, maxSlices: 4 }).map((s) => s.url.split('/').pop())).toEqual(['hero-a.jpg', 'hero-b.jpg', 's1.jpg', 's2.jpg']);
+    expect(selectSliceImages(slices, null, { source: 'promo_page', heroBanners: [], maxSlices: 4 })).toHaveLength(4);
+  });
+  it('기획전(event_card) = 문서만 빼고 그대로 · 문서를 빼서 3장 미만이면 원래대로', () => {
+    expect(selectSliceImages(slices, kinds, { source: 'event_card', heroBanners: heroes, maxSlices: 20 }).map((s) => s.url.split('/').pop())).toEqual(['s1.jpg', 's2.jpg', 's4.jpg', 's5.jpg', 's6.jpg']);
+    const few = [st('a.jpg'), st('b.jpg'), st('c.jpg')];
+    const k2: Record<string, ImageKindJudge> = { [few[2].url]: { kind: 'document', text: true } };
+    expect(selectSliceImages(few, k2, { source: 'event_card', heroBanners: [], maxSlices: 20 })).toHaveLength(3);
+    expect(selectSliceImages(few, null, { source: undefined, heroBanners: [], maxSlices: 2 })).toHaveLength(2);
+  });
+  it('선별 결과가 2장 미만이면 선별 전으로 되돌린다(산출물을 비우지 않는다)', () => {
+    const only = [st('d1.jpg'), st('d2.jpg'), st('d3.jpg')];
+    const allDocs: Record<string, ImageKindJudge> = Object.fromEntries(only.map((s) => [s.url, { kind: 'document', text: true }]));
+    expect(selectSliceImages(only, allDocs, { source: 'promo_page', heroBanners: [], maxSlices: 4 })).toHaveLength(3);
+  });
+});
+
+describe('★ v5 행사 블록 슬라이스 선별 — 문서 제외 · 배너·상품 → 분위기 ≤2 · 문서만이면 0장', () => {
+  const st = (name: string): StoredImage => ({ url: `https://hanjul.ai/copy/${name}`, width: 1920, height: 734, bytes: 1000, srcUrl: `https://c/${name}` });
+  const s = [st('p1.jpg'), st('p2.jpg'), st('cert.jpg'), st('p3.jpg'), st('b1.jpg')];
+  const kinds: Record<string, ImageKindJudge> = {
+    [s[0].url]: { kind: 'photo', text: false }, [s[1].url]: { kind: 'photo', text: false }, [s[2].url]: { kind: 'document', text: true },
+    [s[3].url]: { kind: 'photo', text: false }, [s[4].url]: { kind: 'banner', text: true },
+  };
+  it('판정 있음 = 배너 먼저 · 사진 2 · 인증서 0 · 상한', () => {
+    expect(selectEventSlices(s, kinds, 3).map((x) => x.url.split('/').pop())).toEqual(['b1.jpg', 'p1.jpg', 'p2.jpg']);
+    expect(selectEventSlices(s, kinds, 10).map((x) => x.url.split('/').pop())).toEqual(['b1.jpg', 'p1.jpg', 'p2.jpg']);
+  });
+  it('판정 없음 = 순서대로 상한 · 문서만이면 0장', () => {
+    expect(selectEventSlices(s, null, 2).map((x) => x.url.split('/').pop())).toEqual(['p1.jpg', 'p2.jpg']);
+    const docs: Record<string, ImageKindJudge> = { [s[0].url]: { kind: 'document', text: true }, [s[1].url]: { kind: 'document', text: true } };
+    expect(selectEventSlices(s.slice(0, 2), docs, 3)).toEqual([]);
+  });
+});
+
+describe('★ v5 표준 조립 — 스튜디오 히어로 → 상품 큐레이션 → 행사 나열 → 버튼 (직원 DM 공식 · AI 0)', () => {
+  const st = (name: string): StoredImage => ({ url: `https://hanjul.ai/copy/${name}`, width: 1920, height: 734, bytes: 1000, srcUrl: `https://c/${name}` });
+  const products = [1, 2, 3, 4, 5, 6, 7].map((n) => ({ name: `상품 ${n}`, image_url: `https://hanjul.ai/copy/p${n}.png`, link_url: `https://shop/p/${n}`, price: n * 1000, discount_price: null }));
+  const events = [
+    { title: '추석선물세트 특별 기획전', periodLine: '기간 2026.09.01 ~ 2026.10.05', imageUrl: 'https://hanjul.ai/copy/ev1.jpg', linkUrl: 'https://shop/event/1', ctaLabel: '추석선물세트 특별 보기', slices: [st('s1.jpg'), st('s2.jpg'), st('s3.jpg'), st('s4.jpg')] },
+    { title: '가을 신상', periodLine: '', imageUrl: null, linkUrl: 'https://shop/event/2', ctaLabel: '가을 신상 보기' },
+    { title: '멤버십 혜택', periodLine: '', imageUrl: null, linkUrl: 'https://shop/event/3', ctaLabel: '멤버십 혜택 보기' },
+    { title: '넘치는 4번째', periodLine: '', imageUrl: null, linkUrl: 'https://shop/event/4', ctaLabel: 'x' },
+  ];
+  const base = { companyName: '아이소이', logoUrl: 'https://hanjul.ai/logo.png', legal: { legal: '(주)아이소이', csPhone: null }, ctaLabel: '아이소이 바로가기', ctaUrl: 'https://shop/' };
+
+  it('순서 = header · hero(gallery 1장 풀폭) · products(≤6) · [행사 text_card + slices(≤3) + cta] × ≤3 · 대표 cta · footer · id 접두 so-std-', () => {
+    const secs = composeOutreachStandard({ ...base, channel: 'DM', hero: { url: 'https://hanjul.ai/copy/poster.png', kind: 'poster', linkUrl: 'https://shop/event/1' }, products, events });
+    expect(secs.map((s) => s.type)).toEqual([
+      'header', 'gallery', 'product_carousel',
+      'text_card', 'gallery', 'cta',
+      'text_card', 'cta',
+      'text_card', 'cta',
+      'cta', 'footer',
+    ]);
+    expect(secs.every((s) => String(s.id).startsWith('so-std-'))).toBe(true);
+    expect(secs.map((s) => s.order)).toEqual(secs.map((_, i) => i));
+    const hero: any = secs[1].props;
+    expect(hero.layout).toBe('list_1xN'); expect(hero.full_bleed).toBe(true); expect(hero.images).toEqual([{ url: 'https://hanjul.ai/copy/poster.png', link_url: 'https://shop/event/1', caption: '' }]);
+    expect((secs[2].props as any).products).toHaveLength(6);
+    const ev1: any = secs[3].props;
+    expect(ev1).toMatchObject({ tag: '이벤트', headline: '추석선물세트 특별 기획전', body: '기간 2026.09.01 ~ 2026.10.05', image_url: 'https://hanjul.ai/copy/ev1.jpg', image_position: 'top' });
+    expect((secs[4].props as any).images).toHaveLength(3);
+    expect((secs[4].props as any).images.every((i: any) => i.link_url === 'https://shop/event/1')).toBe(true);
+    expect((secs[5].props as any).buttons).toEqual([{ label: '추석선물세트 특별 보기', url: 'https://shop/event/1', style: 'primary' }]);
+    expect((secs[10].props as any).buttons[0]).toEqual({ label: '아이소이 바로가기', url: 'https://shop/', style: 'primary' });
+    expect((secs[0].props as any).align).toBe('center');
+  });
+  it('히어로 없음 · 행사 없음 = 상품 + 대표 버튼 · EMAIL 헤더 왼쪽 · 마지막 행사 버튼과 대표 버튼 목적지가 같으면 대표 버튼 생략', () => {
+    const secs = composeOutreachStandard({ ...base, channel: 'EMAIL', hero: null, products: products.slice(0, 2), events: [] });
+    expect(secs.map((s) => s.type)).toEqual(['header', 'product_carousel', 'cta', 'footer']);
+    expect((secs[0].props as any).align).toBe('left');
+    const same = composeOutreachStandard({ ...base, channel: 'DM', hero: null, products: [], events: [events[1]], ctaUrl: 'https://shop/event/2' });
+    expect(same.map((s) => s.type)).toEqual(['header', 'text_card', 'cta', 'footer']);
+  });
+  it('슬라이스가 행사 배너와 같은 주소면 뺀다 · 상품 이름·링크 없는 항목 제외', () => {
+    const secs = composeOutreachStandard({ ...base, channel: 'DM', hero: null, products: [{ name: '', image_url: 'x', link_url: 'y', price: null, discount_price: null }], events: [{ ...events[0], imageUrl: 'https://hanjul.ai/copy/s1.jpg', slices: [st('s1.jpg'), st('s2.jpg')] }] });
+    expect(secs.map((s) => s.type)).toEqual(['header', 'text_card', 'gallery', 'cta', 'cta', 'footer']);
+    expect((secs[2].props as any).images.map((i: any) => i.url)).toEqual(['https://hanjul.ai/copy/s2.jpg']);
+  });
+});
+
+describe('★ v4-2 코드가 세우는 프로모션 카드 제목 · 버튼 문구', () => {
+  const img = (alt: string): RenderImage => ({ src: 'https://c/s.jpg', w: 1920, h: 734, rw: 1280, rh: 490, top: 100, alt });
+  it('슬라이스 alt 가 1순위("Farm to Product 사진" → "Farm to Product") · 일반 alt 는 건너뛴다', () => {
+    expect(promoCardTitleOf([img('배너'), img('Farm to Product 사진')], 'https://www.toun28.com/promotion/product/peptacica', '톤28 공식몰 - 의식있는 아름다움', '톤28')).toBe('Farm to Product');
+  });
+  it('alt 없음 → 경로 조각("peptacica") · 경로도 없으면 페이지 title(사이트명·공식몰은 제외) → "기획 페이지"', () => {
+    expect(promoCardTitleOf([img('')], 'https://www.toun28.com/promotion/product/peptacica', '톤28 공식몰', '톤28')).toBe('peptacica');
+    expect(promoCardTitleOf([], 'https://www.toun28.com/', '추석 기획전 | 브랜드', '브랜드')).toBe('추석 기획전');
+    expect(promoCardTitleOf([], 'https://www.toun28.com/', '톤28 공식몰 - 의식있는 아름다움', '톤28')).toBe('기획 페이지');
+  });
+  it('sliceCtaLabel — 제목이 사이트명·공식몰 류면 "상품 자세히 보기" · 아니면 제목형 라벨', () => {
+    expect(sliceCtaLabel('톤28 공식몰', '톤28', '톤28 공식몰 보기')).toBe('상품 자세히 보기');
+    expect(sliceCtaLabel('톤28', '톤28', 'x')).toBe('상품 자세히 보기');
+    expect(sliceCtaLabel('기획 페이지', '톤28', 'x')).toBe('상품 자세히 보기');
+    expect(sliceCtaLabel('Farm to Product', '톤28', 'Farm to Product 보기')).toBe('Farm to Product 보기');
+    // 낱말 경계 절단으로 제목이 반 토막 났으면("Farm to 보기") 상품형으로 · 70% 이상 남은 절단("추석선물세트 특별 보기")은 그대로
+    expect(sliceCtaLabel('Farm to Product', '톤28', 'Farm to 보기')).toBe('상품 자세히 보기');
+    expect(sliceCtaLabel('추석선물세트 특별 기획전', '아이소이', '추석선물세트 특별 보기')).toBe('추석선물세트 특별 보기');
   });
 });

@@ -1732,7 +1732,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                           )}
                           {Number(dmAsset?.eventCards) > 0 && <p>행사 카드 {Number(dmAsset.eventCards)}건을 모바일 DM 블록으로 세웠습니다(설명 없는 이미지 블록 0).</p>}
                           {/* ★ 2026-09-09 기획전 슬라이스 모드 — 브랜드가 만든 기획전 페이지 이미지를 그대로 이어 붙인 회차(문안 생성 0) */}
-                          {dmAsset?.sliceMode === true && <p className="text-indigo-700">기획전 페이지의 디자인 이미지 {Number(dmAsset.sliceCount) || 0}장을 그대로 이어 붙였습니다(문안 생성 0 · 버튼만 추가).</p>}
+                          {dmAsset?.sliceMode === true && <p className="text-indigo-700">표준 순서로 조립했습니다(문안 생성 0): 히어로 {dmAsset.stdHero === 'poster' ? '생성 포스터' : dmAsset.stdHero === 'banner' ? '홈 캠페인 배너' : dmAsset.stdHero === 'card' ? '행사 배너' : '없음'} · 상품 {Number(dmAsset.stdProducts) || 0}개 · 행사 {Number(dmAsset.stdEvents) || 0}건{Number(dmAsset.sliceCount) > 0 ? ` · 기획전 이미지 ${Number(dmAsset.sliceCount)}장` : ''}.</p>}
                           {Array.isArray(dmAsset?.blockGate?.short) && dmAsset.blockGate.short.length > 0 && <p className="text-amber-600">블록 최소 요건 미달 {dmAsset.blockGate.short.length}곳(경고만 · 삭제하지 않았습니다)</p>}
                           {sr.mail_last && <p className={sr.mail_last.outcome === 'sent' ? 'text-emerald-700' : 'text-amber-700'}>직전 발송 {fmtDateTime(sr.mail_last.at)} · {sr.mail_last.outcome}{Array.isArray(sr.mail_last.rejected) && sr.mail_last.rejected.length ? ` · 거부 ${sr.mail_last.rejected.join(', ')}` : ''}</p>}
                         </div>

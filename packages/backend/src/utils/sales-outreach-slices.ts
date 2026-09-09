@@ -20,7 +20,7 @@ import type { EngineEventCard } from './campaign-engine';
 import type { StoredImage } from './sales-outreach-media';
 
 /** 렌더 워커가 준 이미지 1장의 기하 — src · 원본 폭(w)·높이(h) · 렌더 폭(rw)·높이(rh) · 문서 위 세로 위치(top) · ★ v4 감싸는 앵커 href(없으면 null · 옛 워커 = 키 없음) */
-export interface RenderImage { src: string; w: number; h: number; rw: number; rh: number; top: number; href?: string | null }
+export interface RenderImage { src: string; w: number; h: number; rw: number; rh: number; top: number; href?: string | null; alt?: string }
 /** 재료(brand_profile.eventSlices.images) — 원 URL · 원본 크기 · 문서 순서 */
 export interface EventSliceImage { url: string; width: number; height: number; order: number }
 /** brand_profile.eventSlices — 슬라이스 묶음(원 URL · 사본은 media.slices). ★ v4 source = 어느 입구에서 찾았나(면허 카드 상세 · 홈에 걸린 프로모션 페이지) */
@@ -50,6 +50,13 @@ export const OUTREACH_HERO_MAX = 8;
 export const OUTREACH_SLICE_WIDTH_TOLERANCE = 0.15;
 /** 600폭 환산 누적 높이 예산(px) — 아이소이 실측: 히어로 1 + 혜택 7 + 상품 카드 2 = 5,290 */
 export const OUTREACH_SLICE_HEIGHT_BUDGET_600 = 5400;
+/** ★ v4-2 프로모션·스토리 페이지에서 온 슬라이스 상한(사진이 DM 을 다 먹지 않게 · 상품 카드 자리를 남긴다 · 톤28 실측) */
+export const OUTREACH_SLICE_PROMO_MAX = 4;
+/** ★ v4-2 슬라이스 모드에 싣는 상품 카드 상한 */
+export const OUTREACH_SLICE_PRODUCTS_MAX = 4;
+/** ★ v4-2 사이트명·공식몰 같은 제목(카드 제목으로 못 쓴다 · 버튼 문구도 상품형으로) */
+const SITE_LIKE_TITLE_RE = /공식몰|공식\s*스토어|온라인\s*스토어|official|store|shop|홈페이지|mall/i;
+const GENERIC_ALT_WORD_RE = /^(?:이미지|배너|썸네일|사진|image\d*|img\d*|banner\d*|photo\d*|thumb(?:nail)?\d*)$/i;
 
 const EXCLUDE_RE = /(logo|favicon|sprite|btn_|icon|\.svg(\?|$)|\.gif(\?|$)|1x1|pixel|blank)/i;
 
@@ -116,6 +123,199 @@ export function heroBannersOf(images: readonly RenderImage[]): HeroBanner[] {
   return out;
 }
 
+const squashText = (s: string) => String(s || '').replace(/\s+/g, '').toLowerCase();
+
+/**
+ * ★ v4-2 코드가 세우는 프로모션 카드의 제목(순수) — 슬라이스 첫 장들의 alt("Farm to Product 사진" → "Farm to Product") → 경로 마지막 조각("peptacica") → 페이지 title 앞부분 → "기획 페이지".
+ * 사이트명·"공식몰" 류(톤28 실측: title "톤28 공식몰")는 제목이 아니다. AI 0.
+ */
+export function promoCardTitleOf(images: readonly RenderImage[], pageUrl: string, pageTitle: string | null | undefined, siteName: string | null | undefined): string {
+  const site = squashText(siteName || '');
+  const siteLike = (t: string) => !t || t.length < 2 || SITE_LIKE_TITLE_RE.test(t) || (!!site && (squashText(t) === site || squashText(t).replace(site, '').length < 2));
+  for (const i of Array.isArray(images) ? images : []) {
+    const raw = String(i?.alt || '').replace(/\s+/g, ' ').trim();
+    if (!raw || GENERIC_ALT_WORD_RE.test(raw)) continue;
+    const t = raw.replace(/\s*(?:사진|이미지|배너|썸네일|image|banner|photo)\s*$/i, '').trim();
+    if (t.length >= 2 && !siteLike(t) && !/^\d+$/.test(t)) return t.slice(0, 80);
+  }
+  let seg = '';
+  try { seg = decodeURIComponent(new URL(pageUrl).pathname.split('/').filter(Boolean).pop() || '').replace(/[-_]+/g, ' ').replace(/\.[a-z0-9]{2,5}$/i, '').trim(); } catch { seg = ''; }
+  if (seg.length >= 2 && !/^\d+$/.test(seg) && !siteLike(seg)) return seg.slice(0, 80);
+  const title = String(pageTitle || '').replace(/\s+/g, ' ').replace(/\s*[|\-–:]\s*[^|\-–:]{1,30}$/, '').trim();
+  if (title.length >= 2 && !siteLike(title)) return title.slice(0, 80);
+  return '기획 페이지';
+}
+
+/** ★ v4-2 슬라이스 모드 버튼 문구 — 제목이 사이트명·공식몰 류면 "상품 자세히 보기", 아니면 호출부가 만든 제목형 라벨 */
+export function sliceCtaLabel(title: string | null | undefined, companyName: string, fallbackLabel: string): string {
+  const t = String(title || '').trim();
+  const comp = squashText(companyName);
+  if (!t || SITE_LIKE_TITLE_RE.test(t) || (!!comp && squashText(t) === comp) || t === '기획 페이지') return '상품 자세히 보기';
+  // 제목형 라벨이 낱말 경계 절단으로 제목의 60% 미만만 남았으면("Farm to Product" → "Farm to 보기" = 47%) 상품형으로 · "추석선물세트 특별 기획전" → "추석선물세트 특별 보기"(69%)는 그대로
+  const kept = String(fallbackLabel || '').replace(/\s*보기$/, '').trim();
+  if (kept.length < t.length * 0.6) return '상품 자세히 보기';
+  return fallbackLabel;
+}
+
+// ===== ★ v4-3 이미지 판정 선별(모델은 분류만 · 고르기는 코드) =====
+
+/** 이미지 종류 — 광고 배너(디자인·글자) / 상품 사진 / 문서(인증서·표·글 캡처) / 풍경·인물 분위기 사진 / 그 외 */
+export type OutreachImageKind = 'banner' | 'product' | 'document' | 'photo' | 'other';
+export interface ImageKindJudge { kind: OutreachImageKind; text: boolean }
+const IMAGE_KINDS: readonly OutreachImageKind[] = ['banner', 'product', 'document', 'photo', 'other'];
+
+/** 모델 응답(JSON) → n장 판정 배열(순수). 형식이 아니면 null · 빠진 칸은 other/false. */
+export function parseImageKinds(raw: string, n: number): ImageKindJudge[] | null {
+  const m = String(raw || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let j: any;
+  try { j = JSON.parse(m[0]); } catch { return null; }
+  const items = Array.isArray(j?.items) ? j.items : null;
+  if (!items) return null;
+  const out: ImageKindJudge[] = Array.from({ length: Math.max(0, n) }, () => ({ kind: 'other', text: false }));
+  for (const it of items) {
+    const i = Number(it?.i);
+    if (!Number.isInteger(i) || i < 0 || i >= n) continue;
+    const kind = String(it?.kind || '').toLowerCase() as OutreachImageKind;
+    out[i] = { kind: IMAGE_KINDS.includes(kind) ? kind : 'other', text: it?.text === true || String(it?.text).toLowerCase() === 'true' };
+  }
+  return out;
+}
+
+/** ★ v4-3 슬라이스 선별 상한 — 홈 배너 앞자리 2 · 분위기 사진 1 */
+export const OUTREACH_SLICE_LEAD_BANNERS = 2;
+export const OUTREACH_SLICE_PHOTO_MAX = 1;
+
+/**
+ * ★ v4-3 슬라이스 선별(순수) — 판정(kinds · 사본 URL 키)이 있으면 문서를 빼고, 프로모션·스토리 페이지면 홈 상단 배너(글자 있는 것 우선 · ≤2)를 앞에 두고
+ * 배너·상품 → 분위기 사진(≤1) 순으로 고른다(같은 종류 안에서는 문서 순서). 판정이 없으면(모델 부재) 프로모션 = 홈 배너 2 + 슬라이스 2, 기획전 = 그대로.
+ * 결과가 2장 미만이면 선별 전 슬라이스로 되돌린다(선별이 산출물을 비우지 않게). 상한 maxSlices · 같은 주소 1번.
+ */
+export function selectSliceImages(
+  slices: readonly StoredImage[],
+  kinds: Readonly<Record<string, ImageKindJudge>> | null | undefined,
+  opts: { source: 'event_card' | 'promo_page' | undefined; heroBanners: readonly StoredImage[]; maxSlices: number },
+): StoredImage[] {
+  const max = Math.max(1, opts.maxSlices);
+  const kindOf = (s: StoredImage): ImageKindJudge | null => (kinds && s && kinds[s.url]) ? kinds[s.url] : null;
+  const dedupe = (list: StoredImage[]) => { const seen = new Set<string>(); return list.filter((s) => s && s.url && !seen.has(s.url) && (seen.add(s.url), true)); };
+  const fallback = () => dedupe([...slices]).slice(0, max);
+  if (opts.source !== 'promo_page') {
+    if (!kinds) return fallback();
+    const kept = slices.filter((s) => kindOf(s)?.kind !== 'document');
+    return dedupe(kept.length >= OUTREACH_SLICE_MIN ? kept : [...slices]).slice(0, max);
+  }
+  const heroes = (opts.heroBanners || []).filter((h) => h && h.url);
+  // 판정 없음 = 홈 배너 앞자리(≤2) 뒤에 슬라이스를 순서대로(상한까지) — 홈 배너가 없으면 슬라이스만 상한까지
+  if (!kinds) return dedupe([...heroes.slice(0, OUTREACH_SLICE_LEAD_BANNERS), ...slices]).slice(0, max);
+  const heroLead = heroes
+    .filter((h) => { const k = kindOf(h); return !k || k.kind === 'banner' || k.kind === 'product'; })
+    .sort((a, b) => Number(kindOf(b)?.text === true) - Number(kindOf(a)?.text === true))
+    .slice(0, OUTREACH_SLICE_LEAD_BANNERS);
+  const body = slices.filter((s) => kindOf(s)?.kind !== 'document');
+  const strong = body.filter((s) => { const k = kindOf(s)?.kind; return k === 'banner' || k === 'product'; });
+  const photos = body.filter((s) => kindOf(s)?.kind === 'photo').slice(0, OUTREACH_SLICE_PHOTO_MAX);
+  const picked = dedupe([...heroLead, ...strong, ...photos]).slice(0, max);
+  return picked.length >= 2 ? picked : fallback();
+}
+
+/** ★ v5 행사 블록 안 슬라이스 선별 상한 — 분위기 사진 2 */
+export const OUTREACH_EVENT_PHOTO_MAX = 2;
+
+/**
+ * ★ v5 행사 블록 안 슬라이스 선별(순수) — 홈 배너는 히어로 자리라 여기 안 들어온다. 판정이 있으면 문서 제외 · 배너·상품 → 분위기 사진(≤2) 순 · 상한 max.
+ * 판정이 없으면 순서대로 max. 문서만 남아 0장이면 0장(문서를 되살리지 않는다 · 톤28 인증서 실측).
+ */
+export function selectEventSlices(slices: readonly StoredImage[], kinds: Readonly<Record<string, ImageKindJudge>> | null | undefined, max: number): StoredImage[] {
+  const cap = Math.max(0, max);
+  const list = (Array.isArray(slices) ? slices : []).filter((s) => s && s.url);
+  const seen = new Set<string>();
+  const dedupe = (l: StoredImage[]) => l.filter((s) => !seen.has(s.url) && (seen.add(s.url), true));
+  if (!kinds) return dedupe([...list]).slice(0, cap);
+  const kindOf = (s: StoredImage) => kinds[s.url] || null;
+  const body = list.filter((s) => kindOf(s)?.kind !== 'document');
+  const strong = body.filter((s) => { const k = kindOf(s)?.kind; return k === 'banner' || k === 'product'; });
+  const photos = body.filter((s) => { const k = kindOf(s)?.kind; return k === 'photo' || k === 'other' || !k; }).slice(0, OUTREACH_EVENT_PHOTO_MAX);
+  return dedupe([...strong, ...photos]).slice(0, cap);
+}
+
+// ===== ★ v5 표준 조립(직원 DM 공식 · Harold 0909) — 스튜디오 히어로 → 상품 큐레이션 → 행사 나열 → 버튼 · AI 0 =====
+
+/** 히어로 1장 — 스튜디오 포스터(행사 문구를 얹어 생성) 우선 · 없으면 홈 캠페인 배너 사본 · 없으면 카드 배너 */
+export interface StandardHero { url: string; kind: 'poster' | 'banner' | 'card'; linkUrl: string }
+/** 행사 1건 — 제목·기간 줄(호출부가 만든다 · 수치 검증은 호출부) · 배너 사본 · 링크 · 그 행사의 슬라이스(선별 뒤 · ≤3) */
+export interface StandardEvent { title: string; periodLine: string; imageUrl: string | null; linkUrl: string; ctaLabel: string; slices?: readonly StoredImage[] }
+export interface ComposeStandardInput {
+  companyName: string;
+  logoUrl: string | null;
+  channel: 'DM' | 'EMAIL';
+  hero: StandardHero | null;
+  products: readonly SliceProduct[];
+  events: readonly StandardEvent[];
+  /** 마지막 버튼(대표 목적지) */
+  ctaLabel: string;
+  ctaUrl: string;
+  legal: { legal: string | null; csPhone: string | null } | null;
+}
+export const OUTREACH_STD_PRODUCTS_MAX = 6;
+export const OUTREACH_STD_EVENTS_MAX = 3;
+export const OUTREACH_STD_EVENT_SLICES_MAX = 3;
+
+/**
+ * 표준 순서(고정 · AI 0): header · hero(gallery 1장 풀폭 · 포스터/배너 원본 비율) · product_carousel(≤6) · [행사 N: text_card(배너·제목·기간) + gallery(슬라이스 ≤3) + cta] · cta · footer.
+ * id 접두 `so-std-` = 레시피 provenance. 상품·행사가 둘 다 없으면 호출부가 이 조립을 쓰지 않는다(옛 AI 골격).
+ */
+export function composeOutreachStandard(input: ComposeStandardInput): Section[] {
+  const out: Section[] = [];
+  let order = 0;
+  out.push(mk('header', 'so-std-header', order++, {
+    variant: 'logo', align: input.channel === 'EMAIL' ? 'left' : 'center', brand_name: input.companyName,
+    ...(input.logoUrl ? { logo_url: input.logoUrl } : {}), ...(input.channel === 'DM' ? { brand_size: 'lg' } : {}),
+  }));
+  if (input.hero && input.hero.url) {
+    // id 에 히어로 종류를 싣는다(코덱스 자문 Q3 수용 · 레시피가 poster/banner/card 를 정확히 기록해야 학습 라벨이 맞다)
+    out.push(mk('gallery', `so-std-hero-${input.hero.kind}`, order++, {
+      title: '', images: [{ url: input.hero.url, link_url: input.hero.linkUrl, caption: '' }], layout: 'list_1xN', full_bleed: true, enable_zoom: false, enable_fullscreen: false,
+    }));
+  }
+  const products = (input.products || []).filter((p) => p && p.image_url && p.link_url && String(p.name || '').trim()).slice(0, OUTREACH_STD_PRODUCTS_MAX);
+  if (products.length) {
+    out.push(mk('product_carousel', 'so-std-products', order++, {
+      title: '',
+      products: products.map((p) => ({
+        name: String(p.name).trim().slice(0, 60), image_url: p.image_url, link_url: p.link_url,
+        price: p.price !== null && p.price > 0 ? p.price : 0,
+        ...(p.discount_price !== null && p.discount_price > 0 ? { discount_price: p.discount_price } : {}),
+      })),
+      layout: 'grid', show_indicator: true, auto_slide: false,
+    }));
+  }
+  const events = (input.events || []).filter((e) => e && String(e.title || '').trim() && e.linkUrl).slice(0, OUTREACH_STD_EVENTS_MAX);
+  events.forEach((e, i) => {
+    const n = i + 1;
+    out.push(mk('text_card', `so-std-event${n}`, order++, {
+      tag: '이벤트', headline: String(e.title).trim().slice(0, 40), body: e.periodLine || '', align: 'left',
+      ...(e.imageUrl ? { image_url: e.imageUrl, image_position: 'top' } : {}),
+    }));
+    const slices = (e.slices || []).filter((s) => s && s.url && s.url !== e.imageUrl).slice(0, OUTREACH_STD_EVENT_SLICES_MAX);
+    if (slices.length) {
+      out.push(mk('gallery', `so-std-slices${n}`, order++, {
+        title: '', images: slices.map((s) => ({ url: s.url, link_url: e.linkUrl, caption: '' })), layout: 'list_1xN', full_bleed: true, enable_zoom: false, enable_fullscreen: false,
+      }));
+    }
+    out.push(mk('cta', `so-std-cta-event${n}`, order++, { buttons: [{ label: e.ctaLabel, url: e.linkUrl, style: 'primary' }], layout: 'stack' }));
+  });
+  // 대표 버튼 — 마지막 행사 버튼과 목적지가 같으면 겹치지 않게 생략
+  const lastEvent = events[events.length - 1];
+  if (!lastEvent || lastEvent.linkUrl !== input.ctaUrl) {
+    out.push(mk('cta', 'so-std-cta', order++, { buttons: [{ label: input.ctaLabel, url: input.ctaUrl, style: 'primary' }], layout: 'stack' }));
+  }
+  out.push(mk('footer', 'so-std-footer', order++, {
+    ...(input.legal?.legal ? { legal_text: input.legal.legal } : {}), ...(input.legal?.csPhone ? { cs_phone: input.legal.csPhone } : {}), show_unsubscribe_link: true,
+  }));
+  return out;
+}
+
 /** 상세 주소 대조 키 — 해시·끝 슬래시·대소문자 차이를 무시한다 */
 export function normalizeUrlKey(u: string | null | undefined): string {
   return String(u || '').trim().replace(/#.*$/, '').replace(/\/+$/, '').toLowerCase();
@@ -153,7 +353,14 @@ export interface ComposeSliceInput {
   channel: 'DM' | 'EMAIL';
   /** 600폭 환산 누적 높이 예산 · 기본 OUTREACH_SLICE_HEIGHT_BUDGET_600 · 최소 3장은 예산과 무관하게 싣는다 */
   heightBudget600?: number;
+  /** ★ v4-2 슬라이스 장수 상한(프로모션·스토리 페이지 = OUTREACH_SLICE_PROMO_MAX) · 없으면 OUTREACH_SLICE_MAX */
+  maxSlices?: number;
+  /** ★ v4-2 상품 카드(사본 URL · 링크 · 가격은 있을 때만) — 1개 이상이면 슬라이스 뒤에 product_carousel 로 싣는다(최대 4) */
+  products?: readonly SliceProduct[];
 }
+
+/** ★ v4-2 슬라이스 모드 상품 카드 재료(media.products 의 사본 URL) */
+export interface SliceProduct { name: string; image_url: string; link_url: string; price: number | null; discount_price: number | null }
 
 function mk(type: SectionType, id: string, order: number, props: Record<string, unknown>): Section {
   return {
@@ -168,6 +375,7 @@ function mk(type: SectionType, id: string, order: number, props: Record<string, 
  */
 export function composeSliceSections(input: ComposeSliceInput): Section[] {
   const budget = typeof input.heightBudget600 === 'number' && input.heightBudget600 > 0 ? input.heightBudget600 : OUTREACH_SLICE_HEIGHT_BUDGET_600;
+  const maxSlices = Math.max(OUTREACH_SLICE_MIN, Math.min(OUTREACH_SLICE_MAX, typeof input.maxSlices === 'number' && input.maxSlices > 0 ? input.maxSlices : OUTREACH_SLICE_MAX));
   const kept: StoredImage[] = [];
   let total = 0;
   for (const s of input.slices) {
@@ -176,8 +384,10 @@ export function composeSliceSections(input: ComposeSliceInput): Section[] {
     if (kept.length >= OUTREACH_SLICE_MIN && total + h > budget) break;
     kept.push(s);
     total += h;
-    if (kept.length >= OUTREACH_SLICE_MAX) break;
+    if (kept.length >= maxSlices) break;
   }
+  // ★ v4-2 상품 카드(있을 때만 · 최대 4 · 사본 URL·링크 있는 것만 · 가격 없으면 0 = 렌더러가 가격 줄을 비운다)
+  const products = (input.products || []).filter((p) => p && p.image_url && p.link_url && String(p.name || '').trim()).slice(0, OUTREACH_SLICE_PRODUCTS_MAX);
   const header = mk('header', 'so-slice-header', 0, {
     variant: 'logo',
     align: input.channel === 'EMAIL' ? 'left' : 'center',
@@ -193,14 +403,27 @@ export function composeSliceSections(input: ComposeSliceInput): Section[] {
     enable_zoom: false,
     enable_fullscreen: false,
   });
-  const cta = mk('cta', 'so-slice-cta', 2, {
+  const productSection = products.length
+    ? mk('product_carousel', 'so-slice-products', 2, {
+      title: '',
+      products: products.map((p) => ({
+        name: String(p.name).trim().slice(0, 60), image_url: p.image_url, link_url: p.link_url,
+        price: p.price !== null && p.price > 0 ? p.price : 0,
+        ...(p.discount_price !== null && p.discount_price > 0 ? { discount_price: p.discount_price } : {}),
+      })),
+      layout: 'grid',
+      show_indicator: true,
+      auto_slide: false,
+    })
+    : null;
+  const cta = mk('cta', 'so-slice-cta', productSection ? 3 : 2, {
     buttons: [{ label: input.ctaLabel, url: input.detailUrl, style: 'primary' }],
     layout: 'stack',
   });
-  const footer = mk('footer', 'so-slice-footer', 3, {
+  const footer = mk('footer', 'so-slice-footer', productSection ? 4 : 3, {
     ...(input.legal?.legal ? { legal_text: input.legal.legal } : {}),
     ...(input.legal?.csPhone ? { cs_phone: input.legal.csPhone } : {}),
     show_unsubscribe_link: true,
   });
-  return [header, gallery, cta, footer];
+  return productSection ? [header, gallery, productSection, cta, footer] : [header, gallery, cta, footer];
 }
