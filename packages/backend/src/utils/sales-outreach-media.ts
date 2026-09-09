@@ -697,11 +697,44 @@ function numish(v: unknown): number | null {
   return null;
 }
 
-/** 상세 페이지 HTML → 상품 1건(순수). og:type product / product:price / ld+json Product / 본문 가격 순. 상품 페이지가 아니면 null. */
+/**
+ * ★ 2026-09-09 본문 가격 = 라벨이 붙은 "N원"만(허용 목록 · B-0909-1 톤28 실측). 라벨 없는 "N원"은 배송·쿠폰·적립 문구라 가격이 아니다
+ * ("15,000원 담으면 무료배송" · "40,000원 이상 주문 시 무료 배송" 이 판매가·정가로 읽혔다). 긴 라벨을 앞에(할인 가격 ⊃ 할인가).
+ */
+const PRICE_LABEL_SALE_RE = /(판매\s*가격|판매가|할인\s*가격|할인가|특가|회원가|SALE\s*PRICE|PRICE)\s*[:：]?\s*(\d{1,3}(?:,\d{3})+|\d{4,7})\s*원/gi;
+const PRICE_LABEL_ORIG_RE = /(권장\s*소비자가|소비자가|정상가|정가)\s*[:：]?\s*(\d{1,3}(?:,\d{3})+|\d{4,7})\s*원/g;
+
+function labeledPricesOf(text: string): { sale: number[]; orig: number[] } {
+  const num = (s: string) => Number(s.replace(/,/g, ''));
+  const inRange = (n: number) => n >= 1000 && n < 10_000_000;
+  return {
+    sale: Array.from(text.matchAll(PRICE_LABEL_SALE_RE)).map((m) => num(m[2])).filter(inRange),
+    orig: Array.from(text.matchAll(PRICE_LABEL_ORIG_RE)).map((m) => num(m[2])).filter(inRange),
+  };
+}
+
+/** schema.org 마이크로데이터 가격(구조화 증거) — content 속성 · 텍스트 둘 다 */
+function itempropPriceOf(h: string): number | null {
+  const m = h.match(/itemprop=["']price["'][^>]*\scontent=["']([\d.,]+)["']/i)
+    || h.match(/\scontent=["']([\d.,]+)["'][^>]*itemprop=["']price["']/i)
+    || h.match(/itemprop=["']price["'][^>]*>\s*([\d,]+(?:\.\d+)?)\s*</i);
+  return m ? numish(m[1]) : null;
+}
+
+/**
+ * 상세 페이지 HTML → 상품 1건(순수). 상품 페이지가 아니면 null.
+ * ★ 2026-09-09 판정 = 증거 허용 목록(B-0909-1 톤28 실측 · FEATURE 불변 41):
+ *   - 이름: og:title(또는 title). **og:site_name 과 같으면 상품명이 아니다**(톤28 상세 = 브랜드명 · 브랜드 SEO 이미지 · 가격 메타 0 인 껍데기).
+ *   - 가격: 구조화(product:price:amount > 0 · ld+json offers · itemprop=price) → 없으면 **라벨 붙은 본문 가격만**(판매가·정가 …).
+ *   - 상품 페이지 증거 = og:type product **또는** ld+json Product **또는** 0 보다 큰 구조화 가격 **또는** 라벨 가격. "가격 메타 키가 있다(값 0)"는 증거가 아니다.
+ */
 export function parseProductPage(html: string, finalUrl: string): OutreachProduct | null {
   const h = html;
   const name = decodeHtmlEntities(metaOf(h, 'og:title') || (h.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || ''))
     .replace(/\s+/g, ' ').replace(/\s*[|\-–:]\s*[^|\-–:]{1,30}$/, '').trim();
+  const siteName = decodeHtmlEntities(metaOf(h, 'og:site_name')).replace(/\s+/g, ' ').trim();
+  const squash = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+  if (!name || (siteName && squash(name) === squash(siteName))) return null;
   const image = absolutizeAssetUrl(metaOf(h, 'og:image') || metaOf(h, 'og:image:secure_url') || '', finalUrl);
   let price: number | null = numish(metaOf(h, 'product:price:amount') || metaOf(h, 'product:sale_price:amount') || metaOf(h, 'og:price:amount'));
   let orig: number | null = numish(metaOf(h, 'product:original_price:amount'));
@@ -719,22 +752,26 @@ export function parseProductPage(html: string, finalUrl: string): OutreachProduc
     };
     price = findOffer(ld);
   }
+  if (price === null) price = itempropPriceOf(h);
+  const structured = price !== null;
+  let labeled = false;
   if (price === null) {
-    const t = stripTags(h.slice(0, 200_000));
-    const ps = pricesOf(t);
-    if (ps.length) {
-      const s = [...ps].sort((a, b) => a - b);
-      price = s[s.length - 1];
-      if (s.length > 1 && s[0] < price) { orig = price; price = s[0]; }
+    const lp = labeledPricesOf(stripTags(h.slice(0, 200_000)));
+    if (lp.sale.length || lp.orig.length) {
+      labeled = true;
+      const sale = lp.sale.length ? Math.min(...lp.sale) : null;
+      const o = lp.orig.length ? Math.max(...lp.orig) : null;
+      if (sale !== null) { price = sale; if (o !== null && o > sale) orig = o; } else { price = o; }
     }
   }
-  const isProductPage = /product/i.test(metaOf(h, 'og:type')) || !!metaOf(h, 'product:price:amount') || /"@type"\s*:\s*"Product"/i.test(h);
+  const isProductType = /product/i.test(metaOf(h, 'og:type')) || /"@type"\s*:\s*"Product"/i.test(h);
+  const hasEvidence = isProductType || structured || labeled;
   if (orig === null) {
     const t = stripTags(h.slice(0, 120_000));
     const om = t.match(/(정가|소비자가|정상가)\s*[:：]?\s*(\d{1,3}(?:,\d{3})+|\d{4,7})\s*원/);
     if (om) { const v = Number(om[2].replace(/,/g, '')); if (price !== null && v > price) orig = v; }
   }
-  if (!isProductPage || !name || !image || price === null || /온라인 스토어|공식몰|official/i.test(name) || isBadProductImage(image)) return null;
+  if (!hasEvidence || !image || price === null || /온라인 스토어|공식몰|official/i.test(name) || isBadProductImage(image)) return null;
   return {
     name: cleanProductName(name).slice(0, 80),
     price: orig && orig > price ? orig : price,
@@ -777,7 +814,19 @@ export async function collectProductsFromLinks(links: string[], homeHost: string
     keys.add(k);
     got.push(p);
   }
-  return { products: got, timedOut };
+  // ★ 2026-09-09 같은 이름·같은 이미지가 2개 이상이면 껍데기(링크만 다른 같은 페이지) → 전부 버린다(B-0909-1 · productKey 는 링크가 달라 6개를 통과시켰다)
+  return { products: rejectShellDuplicates(got), timedOut };
+}
+
+/**
+ * ★ 2026-09-09 껍데기 중복 거부(순수) — 상세 1홉 결과 중 이름·이미지가 같은 묶음(2개 이상)은 상품이 아니라 같은 페이지 껍데기라 **묶음째** 버린다.
+ * 이름이 같아도 이미지가 다르면 남긴다(같은 이름의 용량 차이 상품). 순서 유지.
+ */
+export function rejectShellDuplicates(products: readonly OutreachProduct[]): OutreachProduct[] {
+  const keyOf = (p: OutreachProduct) => `${String(p.name || '').replace(/\s+/g, '').toLowerCase()}|${String(p.image_url || '')}`;
+  const counts = new Map<string, number>();
+  for (const p of products) { const k = keyOf(p); counts.set(k, (counts.get(k) || 0) + 1); }
+  return products.filter((p) => (counts.get(keyOf(p)) || 0) < 2);
 }
 
 /** 상세 1홉 + 어워즈(같은 HTML 재파싱 · 네트워크 0 추가) */
