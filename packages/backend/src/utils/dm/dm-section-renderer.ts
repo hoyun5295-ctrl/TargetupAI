@@ -776,11 +776,15 @@ function renderProductCarousel(p: any, treatment?: string): string {
   const cards = products.map((it: any) => {
     const price = Number(it.price || 0);
     const discount = Number(it.discount_price || 0);
-    const rate = computeDmDiscountRate(price, discount, it.discount_rate);
+    // ★ 2026-09-09 v4 정가가 없으면 할인율·취소선도 없다(할인가만 있는 상품 = 그 값이 가격)
+    const rate = price > 0 ? computeDmDiscountRate(price, discount, it.discount_rate) : null;
     const finalPrice = discount > 0 ? discount : price;
     // ★ 2026-07-10 임은지 건의: 가격 줄 = 카드 하단 고정(margin-top:auto) — 제품명 길이가 달라도
     //   같은 행 카드들의 가격 위치가 일정(flex row 기본 stretch = 행 높이 동일). 캔버스 미러.
-    const priceHtml = rate !== null
+    // ★ 2026-09-09 v4 가격이 없는 상품(렌더 DOM 카드 · SPA 몰)은 가격 줄 0 — "0원" 은 가격이 없는 것과 다르다
+    const priceHtml = finalPrice <= 0
+      ? ''
+      : rate !== null
       ? `<div style="display:flex;gap:6px;align-items:baseline;margin-top:auto;padding-top:4px;flex-wrap:wrap;font-variant-numeric:tabular-nums">
           <span style="font-size:var(--dm-fs-h3);font-weight:800;color:var(--dm-error)">${rate}%</span>
           <span style="font-size:var(--dm-fs-body);font-weight:800;color:var(--dm-neutral-900)">${finalPrice.toLocaleString('ko-KR')}원</span>
@@ -834,10 +838,13 @@ function renderProductCarousel(p: any, treatment?: string): string {
 function productPriceHtml(it: any, big: boolean): string {
   const price = Number(it.price || 0);
   const discount = Number(it.discount_price || 0);
-  const rate = computeDmDiscountRate(price, discount, it.discount_rate);
+  // ★ 2026-09-09 v4 정가가 없으면 할인율·취소선도 없다
+  const rate = price > 0 ? computeDmDiscountRate(price, discount, it.discount_rate) : null;
   const finalPrice = discount > 0 ? discount : price;
   const rateFs = big ? 'var(--dm-fs-h2)' : 'var(--dm-fs-small)';
   const priceFs = big ? 'var(--dm-fs-h3)' : 'var(--dm-fs-small)';
+  // ★ 2026-09-09 v4 가격 없음 = 가격 줄 0(그리드와 같다)
+  if (finalPrice <= 0) return '';
   return rate !== null
     ? `<div style="display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;font-variant-numeric:tabular-nums">
         <span style="font-size:${rateFs};font-weight:800;color:var(--dm-error)">${rate}%</span>

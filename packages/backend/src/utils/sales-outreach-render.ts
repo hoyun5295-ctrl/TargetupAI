@@ -152,7 +152,8 @@ export function countMaterials(html: string, base: string): MaterialCounts {
 /** 승격 임계(회의 수렴안) — 하나라도 미달이면 렌더 */
 export const RENDER_ESCALATION = { minProducts: 4, minImages: 2, minTextChars: 1500, minDiscountPairs: 1 } as const;
 
-export type EscalationReason = 'static_unavailable' | 'few_products' | 'few_images' | 'thin_text' | 'no_discount_pairs';
+/** ★ 2026-09-09 v4 'material_first' = 정적이 두꺼워도 렌더한다(홈 상단 배너·렌더 DOM 상품 카드·프로모션 페이지가 렌더 기하에서만 나온다 · 설계서 §19) */
+export type EscalationReason = 'static_unavailable' | 'few_products' | 'few_images' | 'thin_text' | 'no_discount_pairs' | 'material_first';
 
 export function shouldEscalateToRender(counts: MaterialCounts | null): { escalate: boolean; reasons: EscalationReason[] } {
   if (!counts) return { escalate: true, reasons: ['static_unavailable'] };

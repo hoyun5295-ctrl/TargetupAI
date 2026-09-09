@@ -304,6 +304,9 @@ describe('sales-outreach invariants', () => {
     expect(jobs).toContain('bannersOf(page.html, staticUrl, 24)');
     // ★ v3 카드 배너 원 URL 을 후보 합집합 뒤에(홈 첫 배너 우선 · 상한 30) — 제작이 사본을 만들고 조립은 srcUrl 로 되찾는다
     expect(jobs).toContain('const imageCandidates = unionStrings(banners.map((b) => b.url), unionStrings(cardBannerUrls, cardBanners.map((b) => b.url), 12), 30);');
+    // ★ 2026-09-09 v4 홈 상단 배너(렌더 기하)가 후보 맨 앞 · brand_profile 에는 그 합집합이 실린다
+    expect(jobs).toContain('const imageCandidatesV4 = unionStrings(heroBanners.map((b) => b.url), imageCandidates, 30);');
+    expect(jobs).toContain('imageCandidates: imageCandidatesV4,');
     expect(produce).toContain('deadlineMs: OUTREACH_GALLERY_DEADLINE_MS');
     // 재생성 축 분리 — 제목·서두는 email만 · 브랜드 시안은 email+materials
     expect(jobs).toContain("const regenIntro = regenFrom === 'email' || !prevEmail;");

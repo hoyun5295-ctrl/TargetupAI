@@ -53,6 +53,10 @@ export interface OutreachEventCard {
   imageUrl: string | null;
   linkUrl: string;
   order: number;
+  /** ★ 2026-09-09 v4 카드 출처 — 이벤트 목록(기본 · 키 없음) / 홈에 걸린 프로모션·기획 페이지(슬라이스 판정 통과 · 코드가 세운 카드) */
+  source?: 'event_list' | 'promo_page';
+  /** ★ v4 오늘 홈에 링크돼 있었는가 — 종료일이 없을 때 "진행 중" 판정의 근거(불변 42) */
+  homeLinked?: boolean;
 }
 
 /** ★ 2026-09-06 사회적 증거(원문 문자열 그대로 · 혜택 수치가 아니다 · 없으면 null) */
@@ -240,6 +244,54 @@ function periodRawOf(text: string): string | null {
 }
 
 /** 날짜·구분자만으로 된 글인가(제목으로 쓰면 안 되는 것 · "9.1(화) ~ 9.6(일)") — 글자(한글·영문) 2자 미만 */
+/** ★ v4 상품 링크로 보이는 경로(상세 id 동반) */
+const RENDERED_PRODUCT_LINK_RE = /\/(?:products?|goods|item|detail|prd)(?:\/|\?)[^\s"']*\d|goods_no=|productNo=|goodsNo=|prdNo=|itemNo=/i;
+/** ★ v4 이름이 못 되는 alt(일반 낱말) — 앵커 문구로 폴백하고, 그것도 없으면 카드가 아니다 */
+const GENERIC_ALT_RE = /^(?:이미지|배너|썸네일|상품\s*이미지|베스트\s*셀러\s*이미지|대표\s*이미지|product\s*image\d*|image\d*|img\d*|banner\d*|thumb(?:nail)?\d*|photo\d*)$/i;
+
+/**
+ * ★ 2026-09-09 v4 렌더 DOM 의 상품 카드(순수) — SPA 몰의 홈은 정적 HTML 에 상품이 없고, 렌더된 DOM 의 카드에는 가격이 없는 경우가 많다(톤28).
+ * 상품 링크 + <img> 가 있는 앵커를 카드로 본다. 이름 = img alt(일반 alt 면 앵커 문구 · 그것도 없으면 제외) · 가격 = 카드 안 "N원"(없으면 null) · 이미지 = 카드 첫 이미지(로고류 제외) · 같은 링크 1번 · 같은 호스트 · 문서 순서.
+ * 가격이 없는 상품은 렌더러가 가격 줄을 비운다(dm/email 캐러셀 · 0원 표기 0).
+ */
+export function extractRenderedProductCards(html: string, base: string, max = 12): OutreachProduct[] {
+  let host = '';
+  try { host = new URL(base).hostname; } catch { return []; }
+  const out: OutreachProduct[] = [];
+  const seen = new Set<string>();
+  const re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  let scanned = 0;
+  while ((m = re.exec(html)) !== null && scanned < 600 && out.length < max) {
+    scanned++;
+    const inner = m[2];
+    if (inner.length > 20_000 || !/<img\b/i.test(inner)) continue;
+    const link = absolutizeAssetUrl(m[1].replace(/&amp;/g, '&').trim(), base);
+    if (!link || !RENDERED_PRODUCT_LINK_RE.test(link)) continue;
+    try { if (new URL(link).hostname !== host) continue; } catch { continue; }
+    const key = link.replace(/#.*$/, '');
+    if (seen.has(key)) continue;
+    const image = bestImgInBlock(inner, base);
+    if (!image) continue;
+    const alt = decodeHtmlEntities((inner.match(/<img\b[^>]*\salt=["']([^"']*)["']/i) || [])[1] || '').replace(/\s+/g, ' ').trim();
+    let name = alt && !GENERIC_ALT_RE.test(alt) ? alt : '';
+    if (!name) {
+      const text = stripTags(inner.replace(/<img\b[^>]*>/gi, ' '));
+      name = text.replace(PRICE_RE, ' ').replace(/\d{1,3}\s*%/g, ' ').replace(NAME_NOISE_RE, ' ')
+        .split(/\s{2,}|\|/).map((s) => s.trim()).filter((s) => s.length >= 4 && !isDateLikeText(s)).sort((a, b) => b.length - a.length)[0] || '';
+    }
+    name = cleanProductName(name).slice(0, 80);
+    if (!name || name.length < 2) continue;
+    const prices = pricesOf(stripTags(inner));
+    const sorted = [...prices].sort((a, b) => a - b);
+    const price = sorted.length ? sorted[sorted.length - 1] : null;
+    const discount = sorted.length > 1 && sorted[0] < (price as number) ? sorted[0] : null;
+    seen.add(key);
+    out.push({ name, price, discount_price: discount, image_url: image, link_url: key });
+  }
+  return out;
+}
+
 export function isDateLikeText(t: string): boolean {
   const rest = String(t || '').replace(/\([월화수목금토일]\)/g, '').replace(/[\d\s.\-–~/:()년월일시분초까지기간부터]/g, '');
   return !/[가-힣A-Za-z]{2,}/.test(rest);

@@ -56,7 +56,7 @@ import {
   dmSectionContract, dmAllowedTypes,
 } from './sales-outreach-exemplars';
 import {
-  collectProductsFromLinks, fetchProductPageGuarded, measureAndStoreImage, pickStoredImagesDetail, productKey, readImageSize, pngLooksWhite, pngHasAlpha,
+  collectProductsFromLinks, fetchProductPageGuarded, measureAndStoreImage, pickStoredImagesDetail, productKey, readImageSize, pngLooksWhite, pngHasAlpha, parseProductPage,
   OUTREACH_GALLERY_MIN_WIDTH, OUTREACH_PRODUCT_MIN_WIDTH, OUTREACH_CTA_KEYWORDS, OUTREACH_GALLERY_DEADLINE_MS,
   type OutreachProduct, type StoredImage,
 } from './sales-outreach-media';
@@ -319,8 +319,14 @@ export interface OutreachMedia {
     cardBannersTried?: number; cardBannersPassed?: number;
     /** ★ 2026-09-09 슬라이스 사본 시도·통과·예산 초과 */
     slicesTried?: number; slicesPassed?: number; slicesTimedOut?: boolean;
+    /** ★ 2026-09-09 v4 가격 없는 상품의 상세 렌더 가격 채우기 시도·성공 */
+    priceRenderTried?: number; priceRenderFilled?: number;
   };
 }
+
+/** ★ 2026-09-09 v4 상세 렌더 가격 채우기 예산 — 상위 3개 · 총 40초 */
+export const OUTREACH_PRICE_RENDER_MAX = 3;
+export const OUTREACH_PRICE_RENDER_BUDGET_MS = 40_000;
 
 /**
  * 후보를 서버가 직접 받아 폭·높이를 읽고(갤러리 ≥600 · 상품 ≥400 미만 탈락), 상품은 목록 썸네일 대신 상세 페이지 og:image로 격상하고,
@@ -340,6 +346,8 @@ export async function collectOutreachMedia(input: {
   cardBannerUrls?: string[];
   /** ★ 2026-09-09 기획전 슬라이스 원 URL(brand_profile.eventSlices.images 순서 · 전용 예산 · 갤러리에 섞지 않는다 · srcUrl 로 되찾는다) */
   sliceUrls?: string[];
+  /** ★ 2026-09-09 v4 가격 없는 상품의 상세를 렌더해 주는 함수(호출부 주입 · 워커) — 없으면 가격 채우기 0 */
+  renderHtml?: (url: string) => Promise<string | null>;
 }): Promise<OutreachMedia> {
   const referer = input.homepageUrl;
   const fetcher = (u: string) => fetchImageGuarded(u, { referer });
@@ -421,6 +429,23 @@ export async function collectOutreachMedia(input: {
       ...productFactKeys(listByKey.get(productKey(p))), ...productFactKeys(p),
     });
   }
+  // ★ 2026-09-09 v4 가격 채우기 — 렌더 DOM 카드(가격 없음)의 상세를 워커로 그려 증거 규칙(parseProductPage)으로 가격만 받는다. 상위 3 · 벽시계 40초 · 실패 = 가격 없음 유지(렌더러가 가격 줄을 비운다).
+  let priceRenderTried = 0; let priceRenderFilled = 0;
+  if (input.renderHtml) {
+    const deadline = Date.now() + OUTREACH_PRICE_RENDER_BUDGET_MS;
+    for (const p of products) {
+      if (priceRenderTried >= OUTREACH_PRICE_RENDER_MAX || Date.now() > deadline) break;
+      if (p.price !== null || !p.link_url) continue;
+      priceRenderTried++;
+      try {
+        const html = await input.renderHtml(p.link_url);
+        const parsed = html ? parseProductPage(html, p.link_url) : null;
+        if (parsed && parsed.price !== null) { p.price = parsed.price; p.discount_price = parsed.discount_price; priceRenderFilled++; }
+      } catch (err: any) {
+        console.log('[sales-outreach] 상세 렌더 가격 채우기 실패(계속):', p.link_url, err?.message);
+      }
+    }
+  }
   return {
     gallery,
     logo,
@@ -431,6 +456,8 @@ export async function collectOutreachMedia(input: {
       slicesTried: slicePick.tried,
       slicesPassed: slicePick.images.length,
       slicesTimedOut: slicePick.timedOut,
+      priceRenderTried,
+      priceRenderFilled,
       galleryCandidates: input.imageCandidates.length,
       galleryPassed: gallery.length,
       productLinks: input.productLinks.length,

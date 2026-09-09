@@ -2,9 +2,45 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import {
-  detectEventSlices, sliceModeCard, composeSliceSections, sliceHeightAt600,
-  OUTREACH_SLICE_MIN, OUTREACH_SLICE_HEIGHT_BUDGET_600, type RenderImage, type EventSliceMaterial,
+  detectEventSlices, sliceModeCard, composeSliceSections, sliceHeightAt600, heroBannersOf,
+  OUTREACH_SLICE_MIN, OUTREACH_SLICE_HEIGHT_BUDGET_600, OUTREACH_SLICE_GAP_MAX, type RenderImage, type EventSliceMaterial,
 } from '../sales-outreach-slices';
+
+function fixtureImages(name: string): RenderImage[] {
+  const j = JSON.parse(readFileSync(resolve(__dirname, 'fixtures', name), 'utf-8'));
+  return (j.items as any[]).filter((i) => i.kind === 'img').map((i) => ({ src: String(i.src), w: Number(i.nw), h: Number(i.nh), rw: Number(i.w), rh: Number(i.h), top: Number(i.top), href: i.href ?? null }));
+}
+
+describe('★ 재료 축 v4 — 슬라이스 간격 완화(글 블록 사이 허용) · 홈 상단 배너', () => {
+  it('간격 상한은 600px — 톤28 펩타시카 프로모션 페이지(넓은 이미지 6장 · 사이에 글 블록 220~475px) = 슬라이스 6장', () => {
+    expect(OUTREACH_SLICE_GAP_MAX).toBe(600);
+    const r = detectEventSlices(fixtureImages('toun28-peptacica-images.json'));
+    expect(r).not.toBeNull();
+    expect(r!.images).toHaveLength(6);
+    expect(r!.images[0].url).toContain('img_stn02_pc.jpg');
+    expect(r!.images[5].url).toContain('img_stn07_pc.jpg');
+  });
+  it('heroBannersOf — 톤28 홈 상단 슬라이드: 원본 폭 ≥900 · 가로형 · 위쪽 300px 안 · 같은 주소 1번 · 문서 순서', () => {
+    const banners = heroBannersOf(fixtureImages('toun28-home-images.json'));
+    expect(banners.length).toBeGreaterThanOrEqual(5);
+    expect(banners.length).toBeLessThanOrEqual(8);
+    expect(new Set(banners.map((b) => b.url)).size).toBe(banners.length);
+    expect(banners.every((b) => b.width >= 900 && b.width / b.height >= 1.2)).toBe(true);
+    expect(banners.every((b) => /\/data\/banner\//.test(b.url))).toBe(true);
+    expect(banners.map((b) => b.order)).toEqual(banners.map((_, i) => i));
+  });
+  it('heroBannersOf — 세로형·작은 이미지·아래쪽 이미지는 배너가 아니다 · 앵커 href 를 싣는다', () => {
+    const list: RenderImage[] = [
+      { src: 'https://a/hero1.jpg', w: 1920, h: 1080, rw: 1280, rh: 720, top: 0, href: 'https://a/event/1' },
+      { src: 'https://a/portrait.jpg', w: 1080, h: 1920, rw: 500, rh: 900, top: 0, href: null },
+      { src: 'https://a/small.jpg', w: 600, h: 300, rw: 600, rh: 300, top: 10, href: null },
+      { src: 'https://a/low.jpg', w: 1920, h: 800, rw: 1280, rh: 533, top: 2400, href: null },
+      { src: 'https://a/hero1.jpg', w: 1920, h: 1080, rw: 1280, rh: 720, top: 0, href: 'https://a/event/1' },
+    ];
+    expect(heroBannersOf(list)).toEqual([{ url: 'https://a/hero1.jpg', width: 1920, height: 1080, href: 'https://a/event/1', order: 0 }]);
+    expect(heroBannersOf([])).toEqual([]);
+  });
+});
 import type { EngineEventCard } from '../campaign-engine';
 import type { StoredImage } from '../sales-outreach-media';
 

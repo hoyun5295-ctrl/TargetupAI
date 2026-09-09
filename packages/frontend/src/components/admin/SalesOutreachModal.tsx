@@ -1299,6 +1299,8 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                             </div>
                             <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                               {isCard && c.periodRaw && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{String(c.periodRaw)}</span>}
+                              {/* ★ 2026-09-09 v4 홈에 걸린 프로모션·기획 페이지(슬라이스 그대로 이어 붙이는 카드 · 종료일 없음 = 홈 게시가 진행 중의 근거) */}
+                              {isCard && c.source === 'promo_page' && <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">홈에 걸린 기획 페이지 · 디자인 그대로</span>}
                               {!isCard && c.endDate && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">종료 {c.endDate}</span>}
                               {isCard && <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">이벤트 목록 카드</span>}
                               {!isCard && c.sourceUrl && c.sourceUrl !== job.homepage_url && c.sourceUrl !== 'manual' && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">행사 페이지에서</span>}

@@ -574,3 +574,37 @@ DM 실물 = 헤더 · 히어로(체험단 제목 + sub_copy "기간 기간 : 202
 
 ### 18-7. 미검증
 - 서버 크롬에서 워커 `images` 기하 실측(로컬 puppeteer 로는 아이소이 73장 확인) · 서버 렌더형 몰(카페24·고도몰)의 슬라이스 판정 · 이메일 클라이언트(지메일·네이버·하이웍스)에서 full_bleed 셀 렌더 · 5,400 예산의 적정(DM 길이 체감) · 슬라이스 사본 20장 × 최대 1.5MB 저장 용량.
+
+## 19. 재료 축 v4 — "브랜드가 이미 만든 것을 전부 가져온다" (2026-09-09 · Harold "제대로" · 코드 완료 · 배포 대기 · DDL 0 · 워커 변경)
+
+### 19-1. 경위(톤28 실측이 드러낸 구멍 4개)
+- 톤28(toun28.com · SPA)은 이벤트 목록 페이지가 없어 §18 슬라이스 입구(면허 카드 상세)가 열리지 않았고, 정적 HTML 에 상품이 없어 골격 모드도 빈 껍데기였다(상품 0 · 히어로 1 · 글 카드 3).
+- 그런데 렌더하면 재료가 있었다: 홈 슬라이드 배너 7장(1920×1080 · 9월 8일자 포함) · 홈 상품 카드(이름·이미지·링크 · 가격 없음) · 프로모션 페이지 /promotion/product/peptacica(넓은 이미지 6장 · 사이에 글 블록).
+- 브랜드스토어(brand.naver.com)는 robots 전면 금지 + 429, 쇼핑 검색 API 는 2026-07-31 종료. 남은 길은 브랜드 자기 사이트 렌더뿐이다.
+- 근본: 우리 크롤은 "정적 → 얇으면 렌더" · "이벤트 목록 → 카드 → 상세" 한 경로만 알았다. 재료가 다른 자리에 있는 몰은 전부 빈손이었다.
+
+### 19-2. 명세(6문장)
+1. **렌더는 항상 1회**(`material_first`). 정적이 두꺼워도 홈을 워커로 그린다. 워커 부재·차단·시간 초과는 종전대로 정적 전진(3값 `rendering`).
+2. **홈 상단 배너 = 렌더 기하**(`heroBannersOf` · 문서 위 300px 안 · 원본 폭 ≥900 · 가로형 ≥1.2 · 같은 주소 1번 · 최대 8 · 앵커 href). 갤러리 후보의 **맨 앞**에 서서 불변 26(히어로 = 홈 첫 배너)이 그대로 작동한다. `brand_profile.heroBanners`.
+3. **슬라이스 입구 2 = 홈에 걸린 프로모션·기획 페이지**(`findPromoPageLinks` · 경로 조각 event/promotion/plan/special/campaign/collection/lookbook/benefit/hotdeal/sale 또는 앵커 문구 기획전/이벤트/프로모션… · 상품 상세(id 동반)·회원·게시판·목록형 경로 제외 · 최대 3 · 20초씩 · 총 50초). 슬라이스가 나오면 **코드가 카드를 세운다**(`source: 'promo_page'` · `homeLinked: true` · 제목 = 페이지 title 앞부분 · 배너 = 첫 슬라이스) → 후보·사본·조립이 이벤트 카드와 같은 길을 탄다. 3값 `promo_pages`(후보가 있었을 때만).
+4. **슬라이스 간격 80 → 600px**(글 블록 사이 허용 · 폭 ±15% · 비율 ≤3.2 는 그대로). 아이소이 15장 무변경 · 펩타시카 6장.
+5. **렌더 DOM 상품 카드**(`extractRenderedProductCards` · 상품 링크 + img · 이름 = alt · 일반 alt("베스트 셀러 이미지") 는 앵커 문구 폴백 · 로고 제외 · 가격은 있으면) 를 가격 있는 카드 뒤에 붙이고, 가격 없는 상위 3개는 **상세를 워커로 그려 증거 규칙(§B-0909-1)으로 가격만** 채운다(15초씩 · 총 40초). 못 채우면 **가격 줄 0**(DM·이메일 캐러셀 · 옛 "0원"·"NaN원" 표기 폐지).
+6. **면허(불변 42)**: 종료일이 없는 카드라도 **오늘 홈에 링크돼 있었으면 진행 중**. 종료일이 있으면 그것이 이긴다(지난 것은 후보에서 빠진다).
+
+### 19-3. 파일 · 테스트
+- `utils/sales-outreach-slices.ts`(GAP 600 · `heroBannersOf` · `RenderImage.href` · `EventSliceMaterial.source`) · `workers/outreach-render-worker.ts`(images.href) · `utils/sales-outreach-render.ts`(`material_first`) · `utils/sales-outreach-media.ts`(`extractRenderedProductCards` · `OutreachEventCard.source/homeLinked`) · `utils/sales-outreach-jobs.ts`(항상 렌더 · `heroBanners` · `findPromoPageLinks` + 프로모션 루프 · 렌더 DOM 카드 합류 · `EventCandidate.source` · 면허 규칙 · `renderHtml` 주입) · `utils/sales-outreach-produce.ts`(`collectOutreachMedia.renderHtml` 가격 채우기 · stats) · `dm/dm-section-renderer.ts` · `email/email-section-renderer.ts`(가격 없음 = 가격 줄 0) · `SalesOutreachModal.tsx`(후보 카드 라벨 "홈에 걸린 기획 페이지 · 디자인 그대로").
+- 테스트: `sales-outreach-slices.test.ts` +3(펩타시카 6장 · 홈 배너 실물 · 합성) · `sales-outreach-materials-v4.test.ts` 9건(프로모션 링크 합성+톤28 실물 · 렌더 DOM 카드 · 면허 · 승격 사유) · `dm/product-carousel-price-null.test.ts` 3 · `email/__tests__/email-carousel-price-null.test.ts` 2 · invariants 2줄. 픽스처 = `toun28-peptacica-images.json` · `toun28-home-images.json` · `toun28-home.html`.
+
+### 19-4. 데이터(DDL 0 · SCHEMA 75-A)
+`brand_profile.heroBanners[{url,width,height,href,order}]` · `brand_profile.eventSlices.source('event_card'|'promo_page')` · `brand_profile.materials.eventCards[].source/homeLinked` · `event_quote.candidates[].source` · `stage_results.promo_pages`(3값)·`promo_pages_detail` · `render_meta.promoTried[]` · `media.stats.priceRenderTried/priceRenderFilled` · `rendering` 사유에 `material_first`.
+
+### 19-5. 알고 시작하는 한계 · 미검증
+- 프로모션 페이지 제목은 페이지 title 앞부분이라 "톤28 공식몰"처럼 사이트명이 될 수 있다(그 경우 경로 마지막 조각 폴백 · 화면에서 제목이 어색하면 편집). 슬라이스 안 글자는 이미지라 못 고친다(§18-5).
+- 홈 배너 href 는 저장만 한다(CTA 목적지 배선은 다음 축). 렌더 상시로 잡당 +25초 · 프로모션 3곳 +최대 50초 · 가격 채우기 +최대 40초.
+- 톤28 상세 렌더에도 "원" 표기가 없어 가격 채우기는 0 이었다(로컬 실측). 가격이 있는 몰에서의 실효는 미검증.
+- 서버 워커에서 톤28 홈·프로모션 렌더는 미실측(로컬 크롬 확인만).
+
+### 19-6. 배포 · 실측(Harold)
+- 배포 = 백엔드 reload + **`pm2 reload outreach-render`**(images.href) + 프론트 빌드(후보 라벨).
+- 톤28 [다시 읽기] → 확인 대기에서 기대: 재료 카드 "화면을 그려서 읽음" · 배너 후보 앞쪽에 9월 8일 슬라이드 · 상품 3+(히알시카 수분진정 SET · 펩타시카 선세럼 세트 · 묵상 세트 · 가격 없음) · 행사 카드에 **"홈에 걸린 기획 페이지 · 디자인 그대로"** 라벨 1장(펩타시카) → 그 카드 선택 → 제작 → DM = 슬라이스 6장 스택 + 버튼 · 근거 패널 "디자인 이미지 6장을 그대로 이어 붙였습니다".
+- SQL: `SELECT stage_results->>'rendering' r, stage_results->>'event_slices' s, stage_results->>'promo_pages' p, brand_profile->'eventSlices'->>'source' src, jsonb_array_length(brand_profile->'heroBanners') hero, jsonb_array_length(brand_profile->'listProducts') prods FROM sales_outreach_jobs WHERE company_name LIKE '%톤28%' ORDER BY created_at DESC LIMIT 1;` 기대 = ok · ok · ok · promo_page · 7 · 3 이상.

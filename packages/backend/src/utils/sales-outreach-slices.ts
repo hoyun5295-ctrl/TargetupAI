@@ -19,12 +19,14 @@ import { getDefaultProps } from './dm/dm-section-registry';
 import type { EngineEventCard } from './campaign-engine';
 import type { StoredImage } from './sales-outreach-media';
 
-/** 렌더 워커가 준 이미지 1장의 기하 — src · 원본 폭(w)·높이(h) · 렌더 폭(rw)·높이(rh) · 문서 위 세로 위치(top) */
-export interface RenderImage { src: string; w: number; h: number; rw: number; rh: number; top: number }
+/** 렌더 워커가 준 이미지 1장의 기하 — src · 원본 폭(w)·높이(h) · 렌더 폭(rw)·높이(rh) · 문서 위 세로 위치(top) · ★ v4 감싸는 앵커 href(없으면 null · 옛 워커 = 키 없음) */
+export interface RenderImage { src: string; w: number; h: number; rw: number; rh: number; top: number; href?: string | null }
 /** 재료(brand_profile.eventSlices.images) — 원 URL · 원본 크기 · 문서 순서 */
 export interface EventSliceImage { url: string; width: number; height: number; order: number }
-/** brand_profile.eventSlices — 면허 카드 1번 상세를 렌더해 찾은 슬라이스 묶음(원 URL · 사본은 media.slices) */
-export interface EventSliceMaterial { detailUrl: string; finalUrl: string; images: EventSliceImage[]; candidates: number; at: string }
+/** brand_profile.eventSlices — 슬라이스 묶음(원 URL · 사본은 media.slices). ★ v4 source = 어느 입구에서 찾았나(면허 카드 상세 · 홈에 걸린 프로모션 페이지) */
+export interface EventSliceMaterial { detailUrl: string; finalUrl: string; images: EventSliceImage[]; candidates: number; at: string; source?: 'event_card' | 'promo_page' }
+/** ★ v4 홈 상단 배너(렌더 기하 · 원 URL · 감싸는 앵커 href) — 갤러리 후보의 맨 앞(히어로 = 홈 첫 배너 · 불변 26) */
+export interface HeroBanner { url: string; width: number; height: number; href: string | null; order: number }
 
 export const OUTREACH_SLICE_MIN = 3;
 export const OUTREACH_SLICE_MAX = 20;
@@ -34,8 +36,16 @@ export const OUTREACH_SLICE_MIN_WIDTH = 600;
 export const OUTREACH_SLICE_MIN_RENDER_WIDTH = 480;
 /** 가로세로비 상한 — 3.2 를 넘으면 띠 배너(메뉴·하단 배너)라 슬라이스가 아니다(아이소이 실측: 슬라이스 0.68~1.84 · 하단 배너 3.67·5.94) */
 export const OUTREACH_SLICE_MAX_ASPECT = 3.2;
-/** 세로 간격 허용(px) — 슬라이스는 0 간격으로 이어진다 · 여백·구분선 정도만 허용 */
-export const OUTREACH_SLICE_GAP_MAX = 80;
+/**
+ * 세로 간격 허용(px) — ★ v4 600 으로 넓힘(재료 축 · 설계서 §19). 기획전 슬라이스는 0 간격으로 이어지지만(아이소이),
+ * 프로모션·스토리 페이지는 넓은 이미지 사이에 글 블록이 선다(톤28 펩타시카 220~475px). 폭 일치(±15%)와 비율 게이트가 띠 배너·상품 격자를 거른다.
+ */
+export const OUTREACH_SLICE_GAP_MAX = 600;
+/** ★ v4 홈 상단 배너 판정 — 문서 위쪽(px) · 원본 폭 하한 · 가로형 하한(폭/높이) · 최대 장수 */
+export const OUTREACH_HERO_TOP_MAX = 300;
+export const OUTREACH_HERO_MIN_WIDTH = 900;
+export const OUTREACH_HERO_MIN_ASPECT = 1.2;
+export const OUTREACH_HERO_MAX = 8;
 /** 같은 묶음의 렌더 폭 허용 오차(비율) */
 export const OUTREACH_SLICE_WIDTH_TOLERANCE = 0.15;
 /** 600폭 환산 누적 높이 예산(px) — 아이소이 실측: 히어로 1 + 혜택 7 + 상품 카드 2 = 5,290 */
@@ -84,6 +94,26 @@ export function detectEventSlices(images: readonly RenderImage[]): { images: Eve
     images: best.slice(0, OUTREACH_SLICE_MAX).map((i, idx) => ({ url: i.src, width: Number(i.w), height: Number(i.h), order: idx })),
     candidates: dedup.length,
   };
+}
+
+/**
+ * ★ v4 홈 상단 배너(순수) — 렌더 기하에서 문서 위쪽(≤300px)에 놓인 넓은(원본 ≥900) 가로형(폭/높이 ≥1.2) 이미지. 같은 주소 1번 · 문서 순서 · 최대 8.
+ * 슬라이더는 같은 이미지를 앞뒤로 복제해 두므로(톤28 홈 14장 → 7장) 주소로 중복을 접는다. 세로형(모바일용 복제)과 작은 로고·아이콘은 빠진다.
+ */
+export function heroBannersOf(images: readonly RenderImage[]): HeroBanner[] {
+  const out: HeroBanner[] = [];
+  const seen = new Set<string>();
+  for (const i of Array.isArray(images) ? images : []) {
+    if (!i || typeof i.src !== 'string' || !/^https?:\/\//i.test(i.src) || EXCLUDE_RE.test(i.src)) continue;
+    const w = Number(i.w) || 0; const h = Number(i.h) || 0;
+    if (w < OUTREACH_HERO_MIN_WIDTH || h <= 0 || w / h < OUTREACH_HERO_MIN_ASPECT) continue;
+    if (Number(i.top) > OUTREACH_HERO_TOP_MAX) continue;
+    if (seen.has(i.src)) continue;
+    seen.add(i.src);
+    out.push({ url: i.src, width: w, height: h, href: i.href && /^https?:\/\//i.test(String(i.href)) ? String(i.href) : null, order: out.length });
+    if (out.length >= OUTREACH_HERO_MAX) break;
+  }
+  return out;
 }
 
 /** 상세 주소 대조 키 — 해시·끝 슬래시·대소문자 차이를 무시한다 */

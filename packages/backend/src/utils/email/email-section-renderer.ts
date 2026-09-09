@@ -453,8 +453,12 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
 
   const priceOf = (it: ProductCarouselItem, big = false): string => {
     const fs = big ? b.type.h3.size : b.type.body.size;
-    return it.discount_price != null
-      ? `<span style="font-size:${fs};color:${b.primary};font-weight:800">${formatWon(it.discount_price)}</span> <span style="color:${b.textMuted};text-decoration:line-through;font-size:${b.type.small.size}">${formatWon(it.price)}</span>`
+    // ★ 2026-09-09 v4 가격이 없는 상품(렌더 DOM 카드 · SPA 몰)은 가격 줄 0 — 옛 출력은 "0원"·"NaN원"(DM 렌더러와 짝)
+    const hasPrice = Number.isFinite(Number(it.price)) && Number(it.price) > 0;
+    const hasDiscount = it.discount_price != null && Number.isFinite(Number(it.discount_price)) && Number(it.discount_price) > 0;
+    if (!hasPrice && !hasDiscount) return '';
+    return hasDiscount
+      ? `<span style="font-size:${fs};color:${b.primary};font-weight:800">${formatWon(it.discount_price)}</span>${hasPrice ? ` <span style="color:${b.textMuted};text-decoration:line-through;font-size:${b.type.small.size}">${formatWon(it.price)}</span>` : ''}`
       : `<span style="font-size:${fs};color:${b.text};font-weight:800">${formatWon(it.price)}</span>`;
   };
   const linkOf = (it: ProductCarouselItem): string => {

@@ -47,17 +47,22 @@ import {
 } from './outreach-mailer';
 import {
   extractProducts, extractImageCandidates, discoverProductLinks, buildCtaLinkMap, extractLegal, resolveBrandColorGuarded, extractLogoCandidates,
-  extractEventListCards,
+  extractEventListCards, extractRenderedProductCards,
   OUTREACH_FETCH_OPTS, type OutreachProduct, type OutreachEventCard,
 } from './sales-outreach-media';
 import { stopDm } from './dm/dm-builder';
 // ★ 2026-09-06 S1 렌더 승격 — 워커 클라이언트(127.0.0.1) + 순수 계측·합집합·재료 v2
 import {
   renderPageGuarded, countMaterials, shouldEscalateToRender, unionStrings, unionProducts, unionImageDetails, mergeCtaLinks, buildMaterialsV2, bannersOf, pickBrandColorFromPalette,
-  type RenderResult, type MaterialSource,
+  type RenderResult, type MaterialSource, type EscalationReason,
 } from './sales-outreach-render';
-// ★ 2026-09-09 기획전 슬라이스 재료 판정(렌더 기하 → 세로로 이어진 넓은 이미지 묶음)
-import { detectEventSlices, type EventSliceMaterial } from './sales-outreach-slices';
+// ★ 2026-09-09 기획전 슬라이스 재료 판정(렌더 기하 → 세로로 이어진 넓은 이미지 묶음) · ★ v4 홈 상단 배너
+import { detectEventSlices, heroBannersOf, type EventSliceMaterial, type HeroBanner } from './sales-outreach-slices';
+
+/** ★ 2026-09-09 v4 홈에 걸린 프로모션 페이지 시도 상한 · 페이지당 렌더 예산 · 총 벽시계 */
+const OUTREACH_PROMO_PAGES_MAX = 3;
+const OUTREACH_PROMO_RENDER_MS = 20_000;
+const OUTREACH_PROMO_BUDGET_MS = 50_000;
 import { isSameSite } from './sales-outreach-render-guard';
 // ★ 2026-09-06 S4 파기 공용(sweeper 와 같은 본문)
 import { purgeOutreachJobArtifacts } from './sales-outreach-purge';
@@ -94,6 +99,8 @@ export interface EventCandidate {
   periodRaw?: string | null;
   bannerUrl?: string | null;
   detailUrl?: string | null;
+  /** ★ v4 카드 출처(홈에 걸린 프로모션 페이지 = 슬라이스 그대로 · 화면 라벨) · 옛 항목에는 없다 */
+  source?: 'event_list' | 'promo_page';
 }
 
 export interface OutreachSelection {
@@ -362,6 +369,41 @@ export function findEventPageLink(html: string, homeUrl: string): string | null 
   return (scopes ? pick(scopes, false) : null) || pick(html, true) || pick(html, false);
 }
 
+/** ★ v4 프로모션·기획 페이지로 보이는 경로 조각(첫 세그먼트 또는 중간) · 앵커 문구 */
+const PROMO_PATH_RE = /\/(?:events?|promotions?|promo|plan|planning|exhibit|exhibition|special|campaign|collection|lookbook|benefit|hotdeal|sale|이벤트|기획전)(?:\/|$|\?)/i;
+const PROMO_TEXT_RE = /기획전|이벤트|프로모션|기획|캠페인|룩북|핫딜|특가|컬렉션|event|promotion|campaign|lookbook/i;
+/** 상품 상세 링크(id 동반)·회원·게시판 경로는 프로모션 페이지가 아니다 — "/promotion/product/peptacica" 처럼 id 없는 경로는 기획 페이지일 수 있다(톤28) */
+const PROMO_EXCLUDE_RE = /\/(?:products?|goods|item|prd)\/[^/?#]*\d|goods_no=|productNo=|goodsNo=|prdNo=|\/(login|join|cart|mypage|member|logout|board|notice|faq|review)(?:\/|$|\?)/i;
+
+/**
+ * ★ 2026-09-09 v4 홈에 걸린 프로모션·기획 페이지 후보(순수 · 설계서 §19) — 이벤트 목록이 없는 몰(톤28 = /promotion/benefit · /promotion/product/peptacica)의 슬라이스 입구.
+ * 경로 조각이 행사성이거나 앵커 문구가 행사성인 같은 호스트 링크 · 목록형 경로(EVENT_LIST_PATH_RE) · 상품·회원 경로 · 홈 자기 링크 · exclude(이미 시도한 주소) 제외 · 해시 제거 · 문서 순서 · 최대 max.
+ */
+export function findPromoPageLinks(html: string, homeUrl: string, exclude: readonly string[] = [], max = 4): string[] {
+  let host = ''; let homeKey = '';
+  try { const h = new URL(homeUrl); host = h.hostname; homeKey = h.origin + h.pathname.replace(/\/+$/, ''); } catch { return []; }
+  const skip = new Set(exclude.map((u) => u.replace(/#.*$/, '').replace(/\/+$/, '')));
+  const out: string[] = [];
+  const re = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  let scanned = 0;
+  while ((m = re.exec(html)) !== null && scanned < 800 && out.length < max) {
+    scanned++;
+    const href = m[1].replace(/&amp;/g, '&').replace(/#.*$/, '').trim();
+    if (!href || /^(javascript:|mailto:|tel:)/i.test(href)) continue;
+    let abs: URL;
+    try { abs = new URL(href, homeUrl); } catch { continue; }
+    if (!/^https?:$/.test(abs.protocol) || abs.hostname !== host) continue;
+    const key = abs.origin + abs.pathname.replace(/\/+$/, '') + abs.search;
+    if (key === homeKey || skip.has(key) || out.includes(key)) continue;
+    if (PROMO_EXCLUDE_RE.test(abs.pathname + abs.search) || EVENT_LIST_PATH_RE.test(abs.pathname)) continue;
+    const text = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!PROMO_PATH_RE.test(abs.pathname) && !PROMO_TEXT_RE.test(text)) continue;
+    out.push(key);
+  }
+  return out;
+}
+
 /** 목록 페이지로 보이는 경로(끝이 event · event_list · events/list · list) */
 const EVENT_LIST_PATH_RE = /\/(?:events?|promotions?|이벤트|기획전)\/?$|(?:events?|promotion|promo|이벤트|기획전)[_-]?list\/?$|\/(?:events?|promotions?)\/list\/?$/i;
 
@@ -489,12 +531,14 @@ export function eventCandidatesFromCards(cards: readonly OutreachEventCard[], so
     sourceUrl,
     startDate: c.startDate,
     endDate: c.endDate,
-    benefitLicensed: isFutureDate(c.endDate, now),
+    // ★ 2026-09-09 v4(불변 42) 홈 게시 = 진행 중: 종료일이 없는 카드라도 오늘 홈에 링크돼 있었으면(homeLinked · 프로모션 페이지) 면허. 종료일이 있으면 그것이 이긴다(지난 것은 위 filter 가 뺀다)
+    benefitLicensed: isFutureDate(c.endDate, now) || (!c.endDate && c.homeLinked === true),
     origin: 'card',
     title: String(c.title).trim(),
     periodRaw: c.periodRaw,
     bannerUrl: c.imageUrl,
     detailUrl: c.linkUrl,
+    ...(c.source ? { source: c.source } : {}),
   }));
   return [...list.filter((c) => c.benefitLicensed), ...list.filter((c) => !c.benefitLicensed)];
 }
@@ -658,7 +702,10 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   //   SPA 몰(아이소이 정적 = 텍스트 385자 · 상품 0)은 반드시 승격되고, 서버 렌더 대형몰은 정적으로 끝난다(큐 점유 0).
   const staticUrl = page?.finalUrl || job.homepage_url;
   const staticCounts = page ? countMaterials(page.html, staticUrl) : null;
-  const escalation = shouldEscalateToRender(staticCounts);
+  // ★ 2026-09-09 v4 재료 축 — 렌더는 항상 1회(설계서 §19). 홈 상단 배너·렌더 DOM 상품 카드·프로모션 페이지 링크는 렌더 기하·렌더 DOM 에서만 나온다.
+  //   얇음 판정은 사유 기록으로만 남고(material_first = 두꺼워도 렌더), 워커 부재·차단·시간 초과는 종전대로 즉시 정적 전진.
+  const thin = shouldEscalateToRender(staticCounts);
+  const escalation: { escalate: boolean; reasons: EscalationReason[] } = { escalate: true, reasons: thin.reasons.length ? thin.reasons : ['material_first'] };
   let rendered: RenderResult | null = null;
   let renderingOutcome: 'ok' | 'no_content' | 'unavailable' | null = null;
   let renderingDetail: string | null = null;
@@ -843,6 +890,53 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
       }
     }
   }
+  // ★ 2026-09-09 v4 슬라이스 입구 2 — 이벤트 목록 경로에서 슬라이스를 못 찾았으면 홈에 걸린 프로모션·기획 페이지를 순서대로(최대 3 · 20초씩 · 총 50초) 렌더해 본다(톤28).
+  //   통과하면 코드가 카드를 세운다(source promo_page · homeLinked = 면허 근거 · 제목 = 페이지 title 앞부분) → 후보·재료·사본이 이벤트 카드와 같은 길을 탄다. 3값 promo_pages 는 후보가 있었을 때만.
+  let promoOutcome: 'ok' | 'no_content' | 'unavailable' | null = null;
+  let promoDetail: string | null = null;
+  const promoTried: string[] = [];
+  if (hasSource && !eventSlices) {
+    const homeHtmlForPromo = rendered?.html || page?.html || '';
+    const promoLinks = findPromoPageLinks(homeHtmlForPromo, finalUrl, [...(Array.isArray(renderMeta?.eventListTried) ? (renderMeta!.eventListTried as string[]) : []), ...eventCards.map((c) => c.linkUrl)], OUTREACH_PROMO_PAGES_MAX);
+    if (promoLinks.length) {
+      let host = ''; try { host = new URL(finalUrl).hostname; } catch { host = ''; }
+      const hb = startLockHeartbeat(jobId, lockToken, 'crawling');
+      const deadline = Date.now() + OUTREACH_PROMO_BUDGET_MS;
+      let anyRendered = false;
+      let lastFail: string | null = null;
+      try {
+        for (const link of promoLinks) {
+          if (Date.now() > deadline) { lastFail = '프로모션 페이지 벽시계 초과'; break; }
+          promoTried.push(link);
+          try {
+            const rs = await renderPageGuarded(link, { deadlineMs: OUTREACH_PROMO_RENDER_MS, screenshot: false });
+            if (!rs.ok) { lastFail = `${rs.failure.reason}: ${rs.failure.detail}`.slice(0, 200); if (rs.failure.reason === 'unavailable' || rs.failure.reason === 'busy') break; continue; }
+            let pHost = ''; try { pHost = new URL(rs.result.finalUrl).hostname; } catch { pHost = ''; }
+            if (!host || !isSameSite(host, pHost)) { lastFail = '프로모션 페이지 호스트 이탈'; continue; }
+            anyRendered = true;
+            const det = detectEventSlices(Array.isArray(rs.result.images) ? rs.result.images : []);
+            if (!det) continue;
+            eventSlices = { detailUrl: link, finalUrl: rs.result.finalUrl, images: det.images, candidates: det.candidates, at: new Date().toISOString(), source: 'promo_page' };
+            const titleRaw = (rs.result.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/\s+/g, ' ').replace(/\s*[|\-–:]\s*[^|\-–:]{1,30}$/, '').trim();
+            const seg = decodeURIComponent((new URL(link).pathname.split('/').filter(Boolean).pop() || '')).replace(/[-_]+/g, ' ').trim();
+            eventCards = [...eventCards, {
+              title: (titleRaw || seg || '기획 페이지').slice(0, 80), periodRaw: null, startDate: null, endDate: null,
+              imageUrl: det.images[0].url, linkUrl: link, order: eventCards.length, source: 'promo_page', homeLinked: true,
+            }];
+            break;
+          } catch (err: any) {
+            lastFail = detailOf(err);
+            console.error('[sales-outreach] 프로모션 페이지 렌더 예외(계속):', jobId, err?.message);
+          }
+        }
+      } finally {
+        hb.stop();
+      }
+      if (eventSlices) { promoOutcome = 'ok'; slicesOutcome = 'ok'; slicesDetail = null; }
+      else if (anyRendered) { promoOutcome = 'no_content'; promoDetail = `프로모션 후보 ${promoTried.length}곳 · 세로로 이어진 묶음 없음`; }
+      else { promoOutcome = 'unavailable'; promoDetail = lastFail; }
+    }
+  }
   // 재료 합류 = 상세 앞에 싣고 총량 6000 유지
   let eventTextFull: string | null = null;
   if (homeText || subText) {
@@ -861,17 +955,25 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   // ★ 2026-09-06 추출기는 두 소스에 각각 돌려 합집합(렌더 앞 · 정적 뒤 · 키 = productKey/URL). 정적 0건이면 결과는 렌더만, 렌더 0건이면 옛 방식과 같다.
   const listProducts: OutreachProduct[] = unionProducts(
     unionProducts(
-      rendered ? extractProducts(rendered.html, finalUrl, 12) : [],
-      page ? extractProducts(page.html, staticUrl, 12) : [],
-      12,
+      unionProducts(
+        rendered ? extractProducts(rendered.html, finalUrl, 12) : [],
+        page ? extractProducts(page.html, staticUrl, 12) : [],
+        12,
+      ),
+      // ★ v3 카드 상세 1홉의 상품은 뒤에(홈 목록 우선) · 합집합 상한 12 유지
+      cardProducts, 12,
     ),
-    // ★ v3 카드 상세 1홉의 상품은 뒤에(홈 목록 우선) · 합집합 상한 12 유지
-    cardProducts, 12,
+    // ★ 2026-09-09 v4 렌더 DOM 의 상품 카드(가격 없어도 · SPA 몰의 유일한 상품 재료) — 가격 있는 카드 뒤 · 같은 키(이름+링크)는 앞이 이긴다
+    rendered ? extractRenderedProductCards(rendered.html, finalUrl, 12) : [], 12,
   );
+  // ★ 2026-09-09 v4 홈 상단 배너(렌더 기하 · 슬라이더 중복 접음 · 앵커 href 동반) — 갤러리 후보의 **맨 앞**(히어로 = 홈 첫 배너 · 불변 26). 렌더가 없으면 [] = 옛 순서 그대로.
+  const heroBanners: HeroBanner[] = rendered ? heroBannersOf(Array.isArray(rendered.images) ? rendered.images : []) : [];
   const banners = unionImageDetails(rendered ? bannersOf(rendered.html, finalUrl, 24) : [], page ? bannersOf(page.html, staticUrl, 24) : [], 24);
   // ★ v3 카드 배너 원 URL 을 후보 합집합 **뒤**에 붙인다(홈 첫 배너 우선 규칙 유지 · 중복 제거 · 상한 24 → 30). 사본은 제작 단계가 **카드 전용 예산**(collectOutreachMedia.cardBannerUrls)으로 따로 받는다(꼬리 자리만으로는 시도 상한에 걸려 못 받는다 · 리뷰 #2)
   const cardBannerUrls = eventCards.map((c) => c.imageUrl).filter((u): u is string => !!u);
   const imageCandidates = unionStrings(banners.map((b) => b.url), unionStrings(cardBannerUrls, cardBanners.map((b) => b.url), 12), 30);
+  // ★ 2026-09-09 v4 홈 상단 배너를 후보의 **맨 앞**에(렌더 기하 = 슬라이더의 실제 이미지 · 정적 <img> 순서보다 앞) · 상한 30 유지
+  const imageCandidatesV4 = unionStrings(heroBanners.map((b) => b.url), imageCandidates, 30);
   // ★ v3 재료 게이트·저장은 같은 배너 합집합(홈 + 카드 상세 1홉)을 본다(리뷰 #5 · 화면 숫자 = 게이트 숫자)
   const allBanners = unionImageDetails(banners, cardBanners, 30);
   // ★ 0905(4) 브랜드 색 — theme-color·TileColor → 아이콘 PNG 지배색(색 1개만 · 로고 픽셀은 산출물에 쓰지 않는다 · 불변 11). 실패 = null(기본 토큰)
@@ -888,8 +990,8 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
     // 홈페이지에서 읽은 행사 텍스트 전량(구조화 블록 + 본문 · 최대 6000자) — 문안·DM·이메일 제작 재료(A-1)
     eventTextFull,
     // ★ 0905(3) C3-1 후보 24 — 순수 함수 기본값(24)과 호출부(12)가 어긋나 핫픽스가 운영에서 작동하지 않던 자리. 갤러리 8장 확보 = 시도 n×3(24)과 같은 축.
-    //   ★ 2026-09-06 배너 상세(alt·순서)의 url 투영 + ★ v3 카드 배너(뒤) — 제작 단계 소비처(collectOutreachMedia) 무변경
-    imageCandidates,
+    //   ★ 2026-09-06 배너 상세(alt·순서)의 url 투영 + ★ v3 카드 배너(뒤) — 제작 단계 소비처(collectOutreachMedia) 무변경 · ★ v4 홈 상단 배너가 맨 앞
+    imageCandidates: imageCandidatesV4,
     selectedImageUrl: null as string | null,
     crawledAt: new Date().toISOString(),
     finalUrl: hasSource ? finalUrl : null,
@@ -907,8 +1009,10 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
     })(),
     // ★ v3 홈 첫 화면 캡처(375×900 공개 사본 · 제안 메일 대조 왼쪽) · 못 만들면 null
     homeCaptureUrl,
-    // ★ 2026-09-09 기획전 슬라이스 재료(원 URL · 문서 순서 · 면허 카드 1번 상세) · 사본은 제작 단계 media.slices · 없으면 null
+    // ★ 2026-09-09 기획전 슬라이스 재료(원 URL · 문서 순서 · 면허 카드 1번 상세 또는 ★ v4 홈에 걸린 프로모션 페이지 · source) · 사본은 제작 단계 media.slices · 없으면 null
     eventSlices,
+    // ★ 2026-09-09 v4 홈 상단 배너(렌더 기하 · 원 URL · href) — 갤러리 후보 맨 앞에 이미 실렸다 · 근거 패널·CTA 목적지 후보
+    heroBanners,
     subPageUrl: subUrl,
     structuredBlocks: homeMaterial.structuredBlocks,
     // ★ 2026-09-05 재료(순수 추출 · 네트워크 0) — 제작 단계가 실측·사본 저장에 쓴다 (★ v3 카드 상세 링크는 뒤)
@@ -938,6 +1042,7 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   if (eventListOutcome) renderKeys.event_list = eventListOutcome;
   if (cardsOutcome) renderKeys.crawling_cards = cardsOutcome;
   if (slicesOutcome) { renderKeys.event_slices = slicesOutcome; if (slicesDetail) renderKeys.event_slices_detail = slicesDetail; }
+  if (promoOutcome) { renderKeys.promo_pages = promoOutcome; if (promoDetail) renderKeys.promo_pages_detail = promoDetail; renderMeta = { ...(renderMeta || {}), promoTried }; renderKeys.render_meta = renderMeta; }
 
   if (crawlOutcome === 'unavailable') {
     // 봇 차단·타임아웃 — 행사 후보 없이 확정 대기로(화면에서 직접 붙여넣기 폴백). "확인 실패"를 "행사 없음"으로 접지 않는다.
@@ -1354,6 +1459,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               cardBannerUrls: Array.isArray(bp.materials?.eventCards) ? bp.materials.eventCards.map((c: any) => String(c?.imageUrl || '')).filter(Boolean) : [],
               // ★ 2026-09-09 기획전 슬라이스 원 URL(재료 순서 그대로 · 전용 예산 · 갤러리와 분리)
               sliceUrls: Array.isArray(bp.eventSlices?.images) ? bp.eventSlices.images.map((i: any) => String(i?.url || '')).filter(Boolean) : [],
+              // ★ 2026-09-09 v4 가격 없는 상품(렌더 DOM 카드)의 상세를 워커로 그려 가격을 채운다(상위 3 · 15초씩 · 증거 규칙은 parseProductPage 그대로 · 실패 = 가격 없음 유지)
+              renderHtml: async (u: string) => { const r = await renderPageGuarded(u, { deadlineMs: 15_000, screenshot: false }); return r.ok && r.result.html.length >= 2_000 ? r.result.html : null; },
             });
             // 재수집 = 사본 URL이 전부 바뀐다 → 검토에서 고른 재료 선택은 함께 지운다(무효 선택이 재료를 0으로 만들지 않게)
             if (!(await mergeBrandProfileOwned(jobId, lockToken, { media, mediaSelection: null }))) return;
