@@ -10,6 +10,7 @@
  *    그 검증 IP로만 소켓을 연다(pinnedLookup). 크롬 자체 DNS 0 → 재바인딩 창 0. 포트는 80·443·8080·8443 만.
  *  - page.on('request') 의 resourceType 차단·같은 사이트 문서 이동 판정은 보조층(sales-outreach-render-guard · 순수).
  *  - 다운로드 거부(Browser.setDownloadBehavior deny) · 잡당 바이트·벽시계 상한 · 렌더 중이 아닐 때 프록시는 전부 403.
+ *    바이트 상한 도달 = 이후 로딩만 끊고 그 시점 DOM 으로 계속(실패 아님 · meta.overBudget · ★0909 톤28 홈 27.7MB 실측).
  *
  * 프로세스 규율: 브라우저 1개 재사용 · 잡마다 BrowserContext 생성→종료 · 종료가 5초 안에 안 끝나면 SIGKILL 후 재기동 ·
  *  잡 시작마다 옛 프로필 디렉터리를 단 크롬 고아 프로세스(300초 초과) 수거.
@@ -269,7 +270,10 @@ async function renderOnce(input: RenderRequest, proxyPort: number): Promise<Rend
       })()`).catch(() => undefined);
       await new Promise((r) => setTimeout(r, Math.min(1_200, remaining() - 500)));
     }
-    if (active?.overBudget) return { ok: false, reason: 'error', detail: `바이트 상한 초과(${active.maxBytes})` };
+    // ★ 2026-09-09 바이트 상한 도달 = 실패가 아니다. 프록시가 그 뒤 로딩만 끊었고(소켓 파기) DOM 은 이미 그려져 있다 —
+    //   버리면 홈 배너·상품 카드·375 캡처를 전부 잃는다(톤28 홈 27.7MB · 실측 3회 전부 여기서 실패). 그 시점 DOM 으로 계속하고 meta 에 남긴다.
+    const overBudget = !!active?.overBudget;
+    if (overBudget) console.warn(`${LOG} 바이트 상한 도달(${active?.maxBytes}) · 이후 로딩 중단 · 그린 DOM 으로 계속 ${target.toString().slice(0, 120)}`);
 
     const maxHtml = RENDER_DEFAULTS.maxHtmlChars;
     const maxText = RENDER_DEFAULTS.maxTextChars;
@@ -362,6 +366,7 @@ async function renderOnce(input: RenderRequest, proxyPort: number): Promise<Rend
       imgWide: dom.imgWide,
       sandbox: browserSandbox,
       timedOut,
+      overBudget,
     };
     return { ok: true, finalUrl, html: dom.html, text: dom.text, screenshotBase64, meta, palette, screenshotViewportBase64, images: Array.isArray(dom.images) ? dom.images : [] };
   } catch (e: any) {
@@ -420,7 +425,7 @@ async function main(): Promise<void> {
           const body = (await readJson(req)) as RenderRequest;
           if (!body || typeof body.url !== 'string') { send(res, 400, { ok: false, reason: 'error', detail: 'url 필요' }); return; }
           const out = await renderOnce(body, proxyPort);
-          if (out.ok) console.log(`${LOG} 렌더 ok ${body.url} · ${out.meta.elapsedMs}ms · ${out.meta.bytes}B · 차단 ${out.meta.blockedRequests} · 텍스트 ${out.meta.textChars}자`);
+          if (out.ok) console.log(`${LOG} 렌더 ok ${body.url} · ${out.meta.elapsedMs}ms · ${out.meta.bytes}B · 차단 ${out.meta.blockedRequests} · 텍스트 ${out.meta.textChars}자${out.meta.overBudget ? ' · 바이트 상한 도달(이후 로딩 중단)' : ''}`);
           else console.warn(`${LOG} 렌더 실패 ${body.url} · ${out.reason} · ${out.detail}`);
           send(res, 200, out);
         } catch (e: any) {

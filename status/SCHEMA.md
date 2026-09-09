@@ -1603,7 +1603,7 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | `mail_last` | `{ outcome, detail, rejected[], at }` | sendOutreachMailForJob | 발송 패널 |
 | `test_sends` | `[{ to, outcome, at, by }]` 최대 20 | sendOutreachTestMail | 검수 이력 3줄 |
 | `dismissed_at` | ISO | dismissOutreachJob | 뱃지 제외 · 목록 회색 |
-| `rendering` · `rendering_detail` · `render_meta` | ★2026-09-06 S1 · `ok` / `no_content` / `unavailable`(렌더를 시도했을 때만 키 존재) · 정제 문자열 ≤300 · `{ engine, elapsedMs, bytes, blockedRequests, navigations, textChars, imgCount, imgWide, sandbox, timedOut, reasons[], failure? }` | 크롤 단계 렌더 승격 | 확인 대기 재료 카드 · 근거 패널 |
+| `rendering` · `rendering_detail` · `render_meta` | ★2026-09-06 S1 · `ok` / `no_content` / `unavailable`(렌더를 시도했을 때만 키 존재) · 정제 문자열 ≤300 · `{ engine, elapsedMs, bytes, blockedRequests, navigations, textChars, imgCount, imgWide, sandbox, timedOut, overBudget?(★0909 · 바이트 상한 도달 = 이후 로딩만 끊고 DOM 으로 계속 · 옛 행 없음), reasons[], failure? }` | 크롤 단계 렌더 승격 | 확인 대기 재료 카드 · 근거 패널 |
 | `crawl_engine` | ★2026-09-06 S1 · `static` / `render` / `mixed` / `none` | 크롤 단계 | 재료 카드 읽기 방식 |
 | `material` | ★2026-09-06 S2 · `{ verdict: 'enough' \| 'thin', counts{products, banners, events}, passed[], missing[], at }`(assessMaterialSufficiency · 상품 4·배너 2·행사 1 중 둘) | 분석 종료(awaiting_confirm 전이) | 확인 대기 배너 · 발송 잠금 6번째 `MATERIAL_THIN`(computeSendLock 3번째 인자) |
 | `material_override` | ★2026-09-06 S2 · `{ by, at }` 사람이 재료 부족 잠금을 해제(ready 에서만 · 재크롤 시 resetJobTo 가 지운다) | overrideOutreachMaterialGate(라우트 `/material-override` · 감사 `sales_outreach.material_override`) | 잠금 판정 |

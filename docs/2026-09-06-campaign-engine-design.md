@@ -53,7 +53,7 @@ backend(runOutreachJob 크롤 단계)
 
 outreach-render(별도 PM2 프로세스 · DB 자격 없음 · 동시 1건)
   POST /render {url, deadlineMs, screenshot} → 크롬(BrowserContext 1개/잡) ─proxy─▶ 로컬 CONNECT/HTTP 프록시
-  프록시: resolvePublicAddress(사설·예약 거절) → 검증 IP로만 net.connect(pinnedLookup) · 포트 80/443/8080/8443 · 바이트 20MB · 렌더 중이 아니면 403
+  프록시: resolvePublicAddress(사설·예약 거절) → 검증 IP로만 net.connect(pinnedLookup) · 포트 80/443/8080/8443 · 바이트 20MB(도달 = 이후 로딩만 끊고 그 시점 DOM 으로 계속 · meta.overBudget · ★0909 톤28 홈 27.7MB) · 렌더 중이 아니면 403
   보조층: page.on('request') decideRequest(문서 이동 = 같은 사이트 + 메인 프레임만 · media/websocket/eventsource/ping/other 차단) · 다운로드 deny · 최종 호스트 이탈 = blocked
 ```
 

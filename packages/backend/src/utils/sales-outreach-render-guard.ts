@@ -82,7 +82,7 @@ export function isAllowedProxyPort(port: number): boolean {
   return ALLOWED_PROXY_PORTS.has(port);
 }
 
-/** 렌더 예산 기본값 — 잡당 벽시계 25초(sweeper 좀비 15분 대비 충분히 짧다) · 총 바이트 20MB · HTML 직렬화 3MB · 텍스트 20,000자 */
+/** 렌더 예산 기본값 — 잡당 벽시계 25초(sweeper 좀비 15분 대비 충분히 짧다) · 총 바이트 20MB(도달 = 이후 로딩만 끊고 그린 DOM 으로 계속 · 실패 아님 ★0909 톤28 홈 27.7MB 실측) · HTML 직렬화 3MB · 텍스트 20,000자 */
 export const RENDER_DEFAULTS = {
   deadlineMs: 25_000,
   maxDeadlineMs: 45_000,
@@ -115,4 +115,6 @@ export interface RenderMeta {
   /** 크롬 sandbox 사용 여부 — false 는 서버가 사용자 네임스페이스를 막아 --no-sandbox 로 기동한 경우(로그·문서로 남긴다) */
   sandbox: boolean;
   timedOut: boolean;
+  /** ★ 2026-09-09 바이트 상한 도달 — 프록시가 그 뒤 로딩만 끊었고 그 시점까지 그린 DOM 으로 계속했다(실패 아님 · 옛 행에는 키 없음) */
+  overBudget?: boolean;
 }

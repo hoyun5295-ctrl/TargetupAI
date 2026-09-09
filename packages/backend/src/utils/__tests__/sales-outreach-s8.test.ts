@@ -48,6 +48,10 @@ describe('브랜드 팔레트 → 주색', () => {
     const end = worker.indexOf('.map((e) => ({ hex: e.hex', start);
     expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start);
     expect(worker.slice(start, end)).not.toContain('\\');
+    // ★ 2026-09-09 바이트 상한 도달은 실패가 아니다 — 그린 DOM 으로 계속하고 meta.overBudget 에 남긴다(톤28 홈 27.7MB 실측 · 서버 3회 전부 여기서 실패)
+    expect(worker).not.toContain("detail: `바이트 상한 초과(");
+    expect(worker).toContain('const overBudget = !!active?.overBudget;');
+    expect(worker).toMatch(/timedOut,\s*overBudget,\s*\};/);
     const client = code('utils/sales-outreach-render.ts');
     expect(client).toContain("palette: Array.isArray(parsed.palette) ? parsed.palette : []");
     expect(client).toContain('screenshotViewport: !!opts.screenshotViewport');
