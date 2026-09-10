@@ -2872,6 +2872,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
       SELECT
         c.id, c.company_id, c.created_by, c.message_type,
         c.result_final, c.sent_count, c.success_count, c.fail_count,
+        jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         ${groupCol} as period,
         co.company_name,
         lg.group_name as line_group_name
@@ -3056,6 +3057,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         c.id, c.company_id, c.created_by, c.campaign_name, c.send_type, c.message_content,
         c.message_type, c.send_channel, c.is_ad, c.callback_number, c.target_count, c.created_at, c.sent_at,
         c.result_final, c.sent_count, c.success_count, c.fail_count,
+        jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         ${CAMPAIGN_OPT080_SELECT_EXPR},
         u.id as user_id, u.name as user_name, u.login_id, u.department, u.store_codes
       FROM campaigns c
@@ -3263,6 +3265,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
         c.id, c.campaign_name as name, c.status, c.send_type, c.send_channel, c.created_at,
         c.company_id, c.created_by, c.message_type, c.send_channel, c.scheduled_at, c.sent_at,
         c.result_final, c.sent_count, c.success_count, c.fail_count,
+        jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         co.company_name, co.company_code,
         u.name as created_by_name, u.login_id as created_by_login,
         (SELECT cr.target_count FROM campaign_runs cr WHERE cr.campaign_id = c.id ORDER BY cr.run_number DESC LIMIT 1) as last_target_count,

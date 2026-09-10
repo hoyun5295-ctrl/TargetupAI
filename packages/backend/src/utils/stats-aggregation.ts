@@ -529,6 +529,7 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
     SELECT
       c.id, c.company_id, c.created_by, c.message_type,
       c.result_final, c.sent_count, c.success_count, c.fail_count,
+      jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
       ${groupCol} as period
     FROM campaigns c
     WHERE ${baseWhereSql}
@@ -653,6 +654,7 @@ export async function querySendStatsDetail(
       c.id, c.company_id, c.created_by, c.campaign_name, c.send_type, c.message_content,
       c.message_type, c.is_ad, c.callback_number, c.target_count, c.sent_at,
       c.result_final, c.sent_count, c.success_count, c.fail_count,
+      jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
       ${CAMPAIGN_OPT080_SELECT_EXPR},
       u.id as user_id, u.name as user_name, u.login_id, u.department, u.store_codes
     FROM campaigns c
