@@ -26,7 +26,7 @@ export interface EventSliceImage { url: string; width: number; height: number; o
 /** brand_profile.eventSlices — 슬라이스 묶음(원 URL · 사본은 media.slices). ★ v4 source = 어느 입구에서 찾았나(면허 카드 상세 · 홈에 걸린 프로모션 페이지) */
 export interface EventSliceMaterial { detailUrl: string; finalUrl: string; images: EventSliceImage[]; candidates: number; at: string; source?: 'event_card' | 'promo_page' }
 /** ★ v4 홈 상단 배너(렌더 기하 · 원 URL · 감싸는 앵커 href) — 갤러리 후보의 맨 앞(히어로 = 홈 첫 배너 · 불변 26) */
-export interface HeroBanner { url: string; width: number; height: number; href: string | null; order: number }
+export interface HeroBanner { url: string; width: number; height: number; href: string | null; order: number; /** ★ 2026-09-10 렌더 alt(글자 카드 ↔ 배너 대조 원천 · 없으면 키 없음) */ alt?: string }
 
 export const OUTREACH_SLICE_MIN = 3;
 export const OUTREACH_SLICE_MAX = 20;
@@ -117,10 +117,23 @@ export function heroBannersOf(images: readonly RenderImage[]): HeroBanner[] {
     if (Number(i.top) > OUTREACH_HERO_TOP_MAX) continue;
     if (seen.has(i.src)) continue;
     seen.add(i.src);
-    out.push({ url: i.src, width: w, height: h, href: i.href && /^https?:\/\//i.test(String(i.href)) ? String(i.href) : null, order: out.length });
+    const alt = String(i.alt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    out.push({ url: i.src, width: w, height: h, href: i.href && /^https?:\/\//i.test(String(i.href)) ? String(i.href) : null, order: out.length, ...(alt ? { alt } : {}) });
     if (out.length >= OUTREACH_HERO_MAX) break;
   }
   return out;
+}
+
+/** ★ 2026-09-10 행사 대표 이미지(순수) — 렌더한 행사 페이지에서 원본 폭 ≥600 · 비율 ≤4(띠 배너 제외) · 문서 위쪽(top)이 가장 앞선 것 1장. 없으면 null. */
+export const OUTREACH_EVENT_BANNER_MAX_ASPECT = 4;
+export function pickEventBannerImage(images: readonly RenderImage[]): RenderImage | null {
+  const list = (Array.isArray(images) ? images : []).filter((i) => {
+    if (!i || typeof i.src !== 'string' || !/^https?:\/\//i.test(i.src) || EXCLUDE_RE.test(i.src)) return false;
+    const w = Number(i.w) || 0; const h = Number(i.h) || 0;
+    return w >= OUTREACH_SLICE_MIN_WIDTH && h > 0 && w / h <= OUTREACH_EVENT_BANNER_MAX_ASPECT;
+  });
+  if (!list.length) return null;
+  return [...list].sort((a, b) => (Number(a.top) || 0) - (Number(b.top) || 0))[0];
 }
 
 const squashText = (s: string) => String(s || '').replace(/\s+/g, '').toLowerCase();

@@ -16,6 +16,22 @@ import { shouldEscalateToRender } from '../sales-outreach-render';
 const HOME = 'https://www.toun28.com/';
 
 // ★ 2026-09-09(5) B-0909-3 계약 — 사람이 확정한 1번 행사의 상세를 제작 단계에서 1회 그려 그 행사의 묶음으로 바꾼다(크롤 때 묶음과 다를 때만 · 실패 격리)
+describe('★ 0910 확정 행사 2·3번 대표 이미지 · 출시 티저 후보 · 상품 우선(계약)', () => {
+  const jobs = readFileSync(resolve(__dirname, '..', 'sales-outreach-jobs.ts'), 'utf-8');
+  it('배너 없는 확정 행사의 페이지를 15초씩(총 40초) 그려 첫 넓은 이미지를 bannerUrl 로 · event_quote 소유권 갱신 · 사본은 cardBannerUrls · 제목 상품 우선', () => {
+    expect(jobs).toContain("renderPageGuarded(url, { deadlineMs: OUTREACH_EVENT_BANNER_RENDER_MS, screenshot: false })");
+    expect(jobs).toContain('const pick = pickEventBannerImage(');
+    expect(jobs).toContain('selectedList[i] = { ...c, bannerUrl: pick.src };');
+    expect(jobs).toContain('await setEventQuoteOwned(jobId, lockToken, nextQuote)');
+    expect(jobs).toContain('...extraBannerUrls],');
+    expect(jobs).toContain("preferTitles: selectedList.map((c) => String(c?.title || c?.quote || '')).filter(Boolean),");
+    expect(jobs).toMatch(/const OUTREACH_EVENT_BANNER_RENDER_MS = 15_000;\s*const OUTREACH_EVENT_BANNER_BUDGET_MS = 40_000;/);
+  });
+  it('분석 프롬프트 — 날짜가 명시된 출시·오픈·티저는 혜택이 없어도 후보(톤28 홈 첫 화면 카운트다운)', () => {
+    expect(jobs).toContain('신제품 출시·오픈·선공개·티저처럼 날짜가 명시된 브랜드 소식은 혜택 문구가 없어도 후보로 넣는다');
+  });
+});
+
 describe('확정 행사 우선 — producing_image 진입 시 확정 1번 카드 상세 렌더(계약)', () => {
   const jobs = readFileSync(resolve(__dirname, '..', 'sales-outreach-jobs.ts'), 'utf-8');
   it('확정 카드 상세 키가 현재 묶음과 다르면 렌더 → eventSlices(event_card) + event_slices ok 교체 · 같으면 건너뜀', () => {

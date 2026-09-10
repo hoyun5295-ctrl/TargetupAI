@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import {
-  detectEventSlices, sliceModeCard, composeSliceSections, composeOutreachStandard, sliceHeightAt600, heroBannersOf, promoCardTitleOf, sliceCtaLabel, selectSliceImages, selectEventSlices, parseImageKinds,
+  detectEventSlices, sliceModeCard, composeSliceSections, composeOutreachStandard, sliceHeightAt600, heroBannersOf, promoCardTitleOf, sliceCtaLabel, selectSliceImages, selectEventSlices, parseImageKinds, pickEventBannerImage,
   OUTREACH_SLICE_MIN, OUTREACH_SLICE_HEIGHT_BUDGET_600, OUTREACH_SLICE_GAP_MAX, OUTREACH_SLICE_PROMO_MAX, type RenderImage, type EventSliceMaterial, type ImageKindJudge,
 } from '../sales-outreach-slices';
 
@@ -39,6 +39,20 @@ describe('★ 재료 축 v4 — 슬라이스 간격 완화(글 블록 사이 허
     ];
     expect(heroBannersOf(list)).toEqual([{ url: 'https://a/hero1.jpg', width: 1920, height: 1080, href: 'https://a/event/1', order: 0 }]);
     expect(heroBannersOf([])).toEqual([]);
+    // ★ 0910 alt 는 있을 때만 키로 실린다(글자 카드 ↔ 배너 대조 원천 · 공백 정리 · 120자)
+    expect(heroBannersOf([{ src: 'https://a/hero1.jpg', w: 1920, h: 1080, rw: 1280, rh: 720, top: 0, href: 'https://a/event/1', alt: '  SUPER   NATURAL 9월 11일 출시  ' }])[0]).toMatchObject({ url: 'https://a/hero1.jpg', alt: 'SUPER NATURAL 9월 11일 출시' });
+  });
+  it('★ 0910 pickEventBannerImage — 행사 페이지의 대표 이미지 = 폭 ≥600 · 비율 ≤4 · 문서 위쪽 1장(로고·아이콘·띠 배너 제외)', () => {
+    const imgs = [
+      { src: 'https://a/logo.png', w: 800, h: 200, rw: 200, rh: 50, top: 0, href: null },
+      { src: 'https://a/strip.jpg', w: 1920, h: 300, rw: 1280, rh: 200, top: 100, href: null },
+      { src: 'https://a/body.jpg', w: 960, h: 1200, rw: 960, rh: 1200, top: 900, href: null },
+      { src: 'https://a/top.jpg', w: 1200, h: 600, rw: 1200, rh: 600, top: 300, href: null },
+      { src: 'https://a/small.jpg', w: 400, h: 400, rw: 400, rh: 400, top: 200, href: null },
+    ];
+    expect(pickEventBannerImage(imgs)?.src).toBe('https://a/top.jpg');
+    expect(pickEventBannerImage([imgs[0], imgs[1], imgs[4]])).toBeNull();
+    expect(pickEventBannerImage([])).toBeNull();
   });
 });
 import type { EngineEventCard } from '../campaign-engine';

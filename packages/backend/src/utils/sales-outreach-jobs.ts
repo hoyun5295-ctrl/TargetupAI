@@ -57,12 +57,15 @@ import {
   type RenderResult, type MaterialSource, type EscalationReason,
 } from './sales-outreach-render';
 // ★ 2026-09-09 기획전 슬라이스 재료 판정(렌더 기하 → 세로로 이어진 넓은 이미지 묶음) · ★ v4 홈 상단 배너
-import { detectEventSlices, heroBannersOf, promoCardTitleOf, normalizeUrlKey, type EventSliceMaterial, type HeroBanner } from './sales-outreach-slices';
+import { detectEventSlices, heroBannersOf, promoCardTitleOf, normalizeUrlKey, pickEventBannerImage, type EventSliceMaterial, type HeroBanner } from './sales-outreach-slices';
 
 /** ★ 2026-09-09 v4 홈에 걸린 프로모션 페이지 시도 상한 · 페이지당 렌더 예산 · 총 벽시계 */
 const OUTREACH_PROMO_PAGES_MAX = 3;
 const OUTREACH_PROMO_RENDER_MS = 20_000;
 const OUTREACH_PROMO_BUDGET_MS = 50_000;
+/** ★ 2026-09-10 확정 행사 대표 이미지 렌더 — 행사당 · 총 벽시계(제작 단계 · 확정 2·3번) */
+const OUTREACH_EVENT_BANNER_RENDER_MS = 15_000;
+const OUTREACH_EVENT_BANNER_BUDGET_MS = 40_000;
 import { isSameSite } from './sales-outreach-render-guard';
 // ★ 2026-09-06 S4 파기 공용(sweeper 와 같은 본문)
 import { purgeOutreachJobArtifacts } from './sales-outreach-purge';
@@ -1101,6 +1104,8 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
           '규칙:',
           '- 본문에 실제로 있는 문장을 글자 그대로(띄어쓰기 포함 원문 그대로) 인용한다. 요약·의역·창작 금지.',
           '- 진행 중인지 불분명하거나 종료된 행사는 제외한다.',
+          // ★ 2026-09-10 브랜드 대표 소식(톤28 실측: 홈 첫 화면의 출시 카운트다운이 후보에 없었다) — 혜택이 없어도 날짜가 명시된 출시·오픈·티저는 후보다
+          '- 신제품 출시·오픈·선공개·티저처럼 날짜가 명시된 브랜드 소식은 혜택 문구가 없어도 후보로 넣는다(시작 전이면 start_date 에 그 날짜 · 홈 첫 화면의 큰 소식을 우선).',
           '- 날짜는 본문에 명시된 것만 YYYY-MM-DD로 적고, 없으면 null.',
           '- 최대 3개. 없으면 빈 배열.',
           '- 출력은 JSON 배열 하나만: [{"quote":"...","start_date":null,"end_date":null}]',
@@ -1304,6 +1309,18 @@ async function recordOutreachEdit(jobId: string, entry: OutreachEditEntry): Prom
 }
 
 /** ★ v3 stage_results 최상위 키 얕은 병합(소유권 조건 · 키 삭제 0 = resetJobTo 계약 밖) — auto_seq · ai_cost 가 쓴다 */
+/** ★ 2026-09-10 event_quote 전체 갱신(소유권 조건) — 제작 단계가 찾은 확정 행사 대표 이미지(selectedList[i].bannerUrl)를 남긴다 */
+async function setEventQuoteOwned(jobId: string, lockToken: string, eventQuote: Record<string, unknown>): Promise<boolean> {
+  const r = await query(
+    `UPDATE sales_outreach_jobs
+        SET event_quote = $2::jsonb, lock_at = NOW()
+      WHERE id = $1 AND lock_token = $3
+      RETURNING id`,
+    [jobId, JSON.stringify(eventQuote), lockToken],
+  );
+  return r.rows.length > 0;
+}
+
 async function mergeStageResultsOwned(jobId: string, lockToken: string, patch: Record<string, unknown>): Promise<boolean> {
   const r = await query(
     `UPDATE sales_outreach_jobs
@@ -1491,6 +1508,48 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               hb.stop();
             }
           }
+          // ★ 2026-09-10 확정 행사(≤3)의 대표 이미지 — 상세가 있고 배너가 없는 행사의 페이지를 15초씩(총 40초) 그려 첫 넓은 이미지를 배너로 삼는다(묶음이 있는 행사는 슬라이스가 이미지라 건너뜀).
+          //   저장 = event_quote.selectedList[i].bannerUrl(원 URL) · 사본은 아래 cardBannerUrls · 실패는 격리(그 카드는 글자만). 톤28 3차 실측: 2·3번 행사가 제목만이었다.
+          const extraBannerUrls: string[] = [];
+          {
+            const hb2 = startLockHeartbeat(jobId, lockToken, 'producing_image');
+            const deadline = Date.now() + OUTREACH_EVENT_BANNER_BUDGET_MS;
+            let changed = false;
+            try {
+              for (let i = 0; i < selectedList.length; i++) {
+                const c = selectedList[i];
+                if (!c || c.bannerUrl) continue;
+                const url = c.origin === 'card' ? String(c.detailUrl || '') : String(c.sourceUrl || '');
+                if (!/^https?:\/\//i.test(url) || normalizeUrlKey(url) === normalizeUrlKey(homepageUrl)) continue;
+                if (bp.eventSlices?.detailUrl && normalizeUrlKey(url) === normalizeUrlKey(String(bp.eventSlices.detailUrl))) continue;
+                if (Date.now() > deadline) break;
+                try {
+                  const rs = await renderPageGuarded(url, { deadlineMs: OUTREACH_EVENT_BANNER_RENDER_MS, screenshot: false });
+                  if (!rs.ok) {
+                    console.log('[sales-outreach] 확정 행사 대표 이미지 렌더 실패(글자 카드 유지):', jobId, url, `${rs.failure.reason}: ${rs.failure.detail}`);
+                    if (rs.failure.reason === 'unavailable' || rs.failure.reason === 'busy') break;
+                    continue;
+                  }
+                  let host = ''; try { host = new URL(homepageUrl).hostname; } catch { host = ''; }
+                  let pHost = ''; try { pHost = new URL(rs.result.finalUrl).hostname; } catch { pHost = ''; }
+                  if (!host || !pHost || !isSameSite(host, pHost)) continue;
+                  const pick = pickEventBannerImage(Array.isArray(rs.result.images) ? rs.result.images : []);
+                  if (!pick) { console.log('[sales-outreach] 확정 행사 대표 이미지 없음(글자 카드 유지):', jobId, url); continue; }
+                  selectedList[i] = { ...c, bannerUrl: pick.src };
+                  extraBannerUrls.push(pick.src);
+                  changed = true;
+                } catch (err: any) {
+                  console.error('[sales-outreach] 확정 행사 대표 이미지 렌더 예외(계속):', jobId, err?.message);
+                }
+              }
+            } finally {
+              hb2.stop();
+            }
+            if (changed) {
+              const nextQuote = { ...(job.event_quote && typeof job.event_quote === 'object' ? job.event_quote : {}), selectedList, selected: selectedList[0] || null };
+              if (!(await setEventQuoteOwned(jobId, lockToken, nextQuote))) return;
+            }
+          }
           try {
             media = await collectOutreachMedia({
               companyId: ctx.companyId,
@@ -1502,7 +1561,9 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               listProducts: Array.isArray(bp.listProducts) ? bp.listProducts : [],
               logoCandidates: Array.isArray(bp.logoCandidates) ? bp.logoCandidates : [],
               // ★ v3 카드 배너는 전용 예산으로 사본을 만든다(후보 꼬리 자리는 시도 상한 밖 · 리뷰 #2)
-              cardBannerUrls: Array.isArray(bp.materials?.eventCards) ? bp.materials.eventCards.map((c: any) => String(c?.imageUrl || '')).filter(Boolean) : [],
+              cardBannerUrls: [...(Array.isArray(bp.materials?.eventCards) ? bp.materials.eventCards.map((c: any) => String(c?.imageUrl || '')).filter(Boolean) : []), ...extraBannerUrls],
+              // ★ 2026-09-10 확정 행사 제목에 나오는 상품을 사본 상한 앞으로
+              preferTitles: selectedList.map((c) => String(c?.title || c?.quote || '')).filter(Boolean),
               // ★ 2026-09-09 기획전 슬라이스 원 URL(재료 순서 그대로 · 전용 예산 · 갤러리와 분리)
               sliceUrls: Array.isArray(bp.eventSlices?.images) ? bp.eventSlices.images.map((i: any) => String(i?.url || '')).filter(Boolean) : [],
               // ★ 2026-09-09 v4 가격 없는 상품(렌더 DOM 카드)의 상세를 워커로 그려 가격을 채운다(상위 3 · 15초씩 · 증거 규칙은 parseProductPage 그대로 · 실패 = 가격 없음 유지)
@@ -1524,7 +1585,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             skippedReason: '홈페이지 배너와 행사 카드가 충분해 생성 이미지를 만들지 않았습니다(실물 우선).',
             width: 0, height: 0, templateId: null, category: null, kind: null,
             media: media ? media.stats : null, mediaError,
-            posterTexts: null, cutoutSource: null, cutoutFrom: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
+            posterTexts: null, cutoutSource: null, cutoutFrom: null, cutoutMode: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
             skipped: 'banners_and_cards',
             regenCount: regenSeqOf(sr, 'image'),
           }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
@@ -1564,7 +1625,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               skippedReason: `생성 이미지를 만들지 못했습니다(${studioError || '원인 미상'}). 히어로는 홈 배너로 대신합니다.`,
               width: 0, height: 0, templateId: null, category: null, kind: null,
               media: media ? media.stats : null, mediaError,
-              posterTexts: null, cutoutSource: null, cutoutFrom: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
+              posterTexts: null, cutoutSource: null, cutoutFrom: null, cutoutMode: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
               skipped: 'studio_error', studioError,
               regenCount: regenSeqOf(sr, 'image'),
             }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
@@ -1574,7 +1635,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             templateId: img.templateId, category: img.category, kind: img.kind,
             media: media ? media.stats : null, mediaError,
             // ★ S3 근거 패널·이메일 히어로 폴백
-            posterTexts: img.posterTexts, cutoutSource: img.cutoutSource, cutoutFrom: img.cutoutFrom, posterScore: img.posterScore, posterRegenerated: img.posterRegenerated,
+            posterTexts: img.posterTexts, cutoutSource: img.cutoutSource, cutoutFrom: img.cutoutFrom, cutoutMode: img.cutoutMode, posterScore: img.posterScore, posterRegenerated: img.posterRegenerated,
             bannerUrl: img.bannerUrl, bannerSize: img.bannerSize,
             regenCount: regenSeqOf(sr, 'image'),
           }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;

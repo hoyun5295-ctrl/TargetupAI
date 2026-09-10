@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })), pool: { connect: vi.fn() }, default: { connect: vi.fn(), query: vi.fn() } }));
 vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(async () => '') }));
 
-import { standardMaterialsOf, matchProductInTitle } from '../sales-outreach-produce';
+import { standardMaterialsOf, matchProductInTitle, titleMentionsProduct, orderProductsByPreference, matchHeroBannerInTitle } from '../sales-outreach-produce';
 
 const HOME = 'https://www.toun28.com';
 const st = (name: string, src: string) => ({ url: `https://hanjul.ai/copy/${name}`, width: 960, height: 1200, bytes: 1, srcUrl: src });
@@ -22,6 +22,24 @@ describe('matchProductInTitle', () => {
     expect(matchProductInTitle('세럼 특가', products)).toBeNull();
     expect(matchProductInTitle('9월 가입 한정 혜택', products)).toBeNull();
     expect(matchProductInTitle('', products)).toBeNull();
+  });
+});
+
+describe('★ 0910 확정 행사 제목의 상품을 사본 상한 앞으로 · 배너 alt 대조', () => {
+  it('orderProductsByPreference — 제목에 나오는 상품이 앞(안정 정렬) · 제목이 없으면 그대로', () => {
+    const list = [{ name: '세럼' }, { name: '글로우 크림' }, { name: '지성두피 다시마 샴푸바' }, { name: '펩타시카 새벽크림' }];
+    expect(orderProductsByPreference(list, ['오늘핫딜 글로우 크림 앤 세럼 50ml 기획팩', '오늘핫딜 <3+1> 지성두피 다시마 샴푸바']).map((p) => p.name))
+      .toEqual(['글로우 크림', '지성두피 다시마 샴푸바', '세럼', '펩타시카 새벽크림']);
+    expect(orderProductsByPreference(list, []).map((p) => p.name)).toEqual(list.map((p) => p.name));
+    expect(titleMentionsProduct('9월 가입 한정 혜택', '세럼')).toBe(false);
+  });
+  it('matchHeroBannerInTitle — alt 4자 이상이 제목과 서로 품으면 그 배너의 갤러리 사본 · href 는 http 만', () => {
+    const banners = [{ url: `${HOME}/img/hero1.jpg`, alt: 'SUPER NATURAL 9월 11일 출시', href: `${HOME}/promotion/super-natural` }, { url: `${HOME}/img/hero2.jpg`, alt: '', href: null }];
+    const gallery = [{ url: 'https://hanjul.ai/copy/h1.jpg', srcUrl: `${HOME}/img/hero1.jpg` }];
+    expect(matchHeroBannerInTitle('9월 11일 새롭게 만나는 SUPER NATURAL', banners, gallery)).toBeNull(); // 제목이 alt 를 통째로 품지 않고 alt 도 제목을 품지 않는다
+    expect(matchHeroBannerInTitle('SUPER NATURAL 9월 11일 출시 카운트다운', banners, gallery)).toEqual({ url: 'https://hanjul.ai/copy/h1.jpg', href: `${HOME}/promotion/super-natural` });
+    expect(matchHeroBannerInTitle('SUPER NATURAL 9월 11일 출시', banners, [])).toBeNull(); // 사본이 없으면 못 쓴다
+    expect(matchHeroBannerInTitle('가입 혜택', banners, gallery)).toBeNull();
   });
 });
 

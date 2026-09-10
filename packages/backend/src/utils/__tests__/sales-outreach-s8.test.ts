@@ -87,6 +87,10 @@ describe('증거 카드 중복 제거 · 포스터 배경 힌트 · 톤 규칙',
     expect(posterStyleHint('#2f7d5b', true)).toContain('the attached product is the ONLY product');
     expect(posterStyleHint('#2f7d5b', false)).toContain('no products at all');
     expect(posterStyleHint('#2f7d5b')).not.toMatch(/ONLY product|no products at all/);
+    // ★ 0910 서버 합성용 무대 — 상품 0 + 빈 진열면(제품은 서버가 누끼를 픽셀 그대로 얹는다)
+    expect(posterStyleHint('#2f7d5b', false, true)).toMatch(/no products at all/);
+    expect(posterStyleHint('#2f7d5b', false, true)).toContain('empty, clean, evenly lit display surface');
+    expect(posterStyleHint('#2f7d5b', false)).not.toContain('display surface');
     expect(posterStyleHint(null)).toContain('neutral soft backdrop');
     expect(OUTREACH_GENERATION_RULES).toContain('범용 문구를 쓰지 마라');
     expect(OUTREACH_GENERATION_RULES).toContain('그 수치로 text_card 를 만들지 마라');

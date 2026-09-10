@@ -410,6 +410,8 @@ export async function collectOutreachMedia(input: {
   logoCandidates?: string[];
   /** ★ v3 이벤트 카드 배너 원 URL(전용 예산으로 사본 · 폭 ≥400 · 최대 6 · 갤러리 뒤에 붙는다 · srcUrl 로 되찾는다) */
   cardBannerUrls?: string[];
+  /** ★ 2026-09-10 사람이 확정한 행사 제목·인용문 — 제목에 나오는 상품을 사본 상한 앞으로 당긴다(orderProductsByPreference) */
+  preferTitles?: string[];
   /** ★ 2026-09-09 기획전 슬라이스 원 URL(brand_profile.eventSlices.images 순서 · 전용 예산 · 갤러리에 섞지 않는다 · srcUrl 로 되찾는다) */
   sliceUrls?: string[];
   /** ★ 2026-09-09 v4 가격 없는 상품의 상세를 렌더해 주는 함수(호출부 주입 · 워커) — 없으면 가격 채우기 0 */
@@ -467,17 +469,19 @@ export async function collectOutreachMedia(input: {
 
   const fromPages = host ? await collectProductsFromLinks(input.productLinks, host, 6, { deadlineMs: PRODUCT_DETAIL_BUDGET_MS }) : { products: [], timedOut: false };
   const pageKeys = new Set(fromPages.products.map(productKey));
-  const merged: OutreachProduct[] = [...fromPages.products];
+  // ★ 2026-09-10 확정 행사 제목에 나오는 상품을 앞으로(상세 상품·목록 상품 각각 안정 정렬 · 상한 6 안에 들게)
+  const merged: OutreachProduct[] = orderProductsByPreference(fromPages.products, input.preferTitles);
   // ★ v3 P0(검증 B6) — 상세 1홉 파서는 5키만 돌려주고 상세가 먼저 채워지므로, 목록 카드가 가진 4키(뱃지·평점·리뷰수·할인율)를 같은 productKey 의 상세 상품에 덧입힌다
   const listByKey = new Map<string, OutreachProduct>();
   for (const p of input.listProducts) { const k = productKey(p); if (!listByKey.has(k)) listByKey.set(k, p); }
-  for (const p of input.listProducts) {
+  for (const p of orderProductsByPreference(input.listProducts, input.preferTitles)) {
     const k = productKey(p);
     if (pageKeys.has(k)) continue;
     pageKeys.add(k);
     merged.push(p);
     if (merged.length >= 10) break;
   }
+  if (input.preferTitles?.length) merged.splice(0, merged.length, ...orderProductsByPreference(merged, input.preferTitles));
   const products: OutreachMediaProduct[] = [];
   const fromPageSet = new Set(fromPages.products);
   for (const p of merged) {
@@ -592,6 +596,8 @@ export interface OutreachImageResult {
   cutoutSource: 'alpha_png' | 'rembg' | null;
   /** ★ 2026-09-09(6) 누끼를 딴 원천 URL(선택 이미지 또는 상품 사본) · 누끼 0 = null */
   cutoutFrom: string | null;
+  /** ★ 2026-09-10 제품이 그림에 실린 방식 — server_compose = 서버가 누끼를 픽셀 그대로 얹음(라벨 보존) · null = 누끼 0(배경만) */
+  cutoutMode: 'server_compose' | null;
   posterScore: PosterScore | null;
   posterRegenerated: boolean;
   bannerUrl: string | null;
@@ -618,12 +624,17 @@ const POSTER_EXTRA_REJECT_RE = /특가|핫딜/;
 /** ★ 0906(3) 포스터 배경 지시 — 브랜드 팔레트 톤 + 깨끗한 스튜디오(히어로 밴드 · 카드 · CTA 와 한 색 체계) · 문구 자리는 비워 둔다(서버 타이포) */
 /** ★ 2026-09-09(6) 누끼 유무별 상품 금지 지시 — 모델이 병·튜브·상자를 지어내 브랜드 것처럼 실은 실측(톤28 2차) 차단. 첨부 상품만 상품이다 · 첨부가 없으면 상품 0. */
 export const OUTREACH_CUTOUT_TRY_MAX = 3;
-export function posterStyleHint(brandColor: string | null, hasProduct: boolean | null = null): string {
+/** ★ 2026-09-10 서버 합성 배치(0~1 · 중심 x · 바닥 y · 폭 비율) — 포스터(3:4) 는 아래 가운데 · 문구는 위 · 배너(16:9) 는 오른쪽 · 문구는 아래 가운데 */
+export const OUTREACH_POSTER_CUTOUT_LAYOUT: { x: number; y: number; scale: number } = { x: 0.5, y: 0.86, scale: 0.62 };
+export const OUTREACH_BANNER_CUTOUT_LAYOUT: { x: number; y: number; scale: number } = { x: 0.78, y: 0.9, scale: 0.3 };
+export function posterStyleHint(brandColor: string | null, hasProduct: boolean | null = null, stage = false): string {
   return [
     brandColor ? `brand accent color ${brandColor}, backdrop tinted softly toward this color` : 'neutral soft backdrop in warm off-white',
     'clean studio lighting, minimal props, no text, keep the top 30% calm and uncluttered for typography',
     ...(hasProduct === true ? ['the attached product is the ONLY product in the scene: do not add, invent or draw any other bottles, jars, tubes, boxes, packaging, containers or labels'] : []),
     ...(hasProduct === false ? ['no products at all: no bottles, jars, tubes, boxes, packaging, containers or labels of any kind, scenery, materials and light only'] : []),
+    // ★ 2026-09-10 서버 합성용 무대 — 제품은 서버가 누끼를 픽셀 그대로 얹는다(모델이 라벨을 다시 그려 뭉개던 톤28 실측 차단). 배경은 아래 2/3 가운데에 빈 진열면만 둔다.
+    ...(stage ? ['leave an empty, clean, evenly lit display surface (table, podium or floor) centered in the lower two thirds of the frame where a product will be placed later: nothing standing on that surface, no props there, soft even light on it'] : []),
   ].join(' · ');
 }
 
@@ -933,14 +944,16 @@ export async function produceOutreachImage(input: {
       template: seedSuffix ? pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}:${seedSuffix}`, !!cutout) : template,
       preset,
       texts: {},
-      hasProduct: !!cutout,
-      userHint: posterStyleHint(input.brandColor || null, !!cutout),
+      // 배경만 생성 — 제품은 서버 합성(누끼 있으면 빈 진열면을 요구하고, 없으면 상품 0)
+      hasProduct: false,
+      userHint: posterStyleHint(input.brandColor || null, false, !!cutout),
       textPosition: 'top',
     });
-    void cutoutPath;
 
-    const renderPoster = async (prompt: string): Promise<{ absPath: string; tempId: string; composed: { width: number; height: number } }> => {
-      const poster = await generatePosterWithRetry(() => generatePoster(prompt, preset, cutout), input.jobId);
+    // ★ 2026-09-10 제품은 모델에게 맡기지 않는다 — 배경만 생성(누끼 미첨부 · 빈 진열면 요구)하고 서버가 누끼 PNG 를 픽셀 그대로 얹는다(라벨 글자 보존 · 지어낸 제품 0).
+    //   유출 검사(숫자)는 배경에만 한다(제품 라벨의 "50ml" 는 사실이지 유출이 아니다).
+    const renderPoster = async (prompt: string): Promise<{ absPath: string; tempId: string; composed: { width: number; height: number }; bgPath: string }> => {
+      const poster = await generatePosterWithRetry(() => generatePoster(prompt, preset, null), input.jobId);
       const posterExt = poster.mime.includes('png') ? 'png' : 'jpeg';
       const posterTempId = writeTempBuffer(ctx.companyId, Buffer.from(poster.base64, 'base64'),
         { kind: 'poster', ext: posterExt, mime: poster.mime, prompt, presetKey: 'poster', channelSpec: 'poster', width: null, height: null });
@@ -949,22 +962,22 @@ export async function produceOutreachImage(input: {
       // 이메일 삽입은 JPEG만(알파 PNG 직삽 금지 — 다크 클라이언트 흰 프린지·용량) · 문구는 서버 타이포(코드 보증)
       const out = allocTempPath(ctx.companyId, 'jpeg');
       const composed = await composeImage({
-        bgPath: posterFile.absPath, cutoutPath: null, outPath: out.absPath, format: 'jpeg',
+        bgPath: posterFile.absPath, cutoutPath: cutoutPath, layout: cutoutPath ? OUTREACH_POSTER_CUTOUT_LAYOUT : null, outPath: out.absPath, format: 'jpeg',
         typography: buildPosterTypography(posterTexts, { brandColor: input.brandColor || null, zone: 'top', fontPath }),
       });
       writeTempMeta(ctx.companyId, out.tempId, { kind: 'composite', ext: 'jpeg', mime: 'image/jpeg', width: composed.width, height: composed.height });
-      return { absPath: out.absPath, tempId: out.tempId, composed };
+      return { absPath: out.absPath, tempId: out.tempId, composed, bgPath: posterFile.absPath };
     };
 
     let made = await renderPoster(buildPrompt(''));
-    // ★ S3 유출 검사(1순위 숫자·%·원) — 걸리면 배경만 1회 다시 만든다(기존 재생성 상한과 별개 · 자동 1회)
+    // ★ S3 유출 검사(1순위 숫자·%·원) — 배경에 걸리면 배경만 1회 다시 만든다(기존 재생성 상한과 별개 · 자동 1회)
     let posterScore: PosterScore | null = null;
     let posterRegenerated = false;
     try {
-      posterScore = await scoreOutreachPoster(fs.readFileSync(made.absPath).toString('base64'), 'image/jpeg');
+      posterScore = await scoreOutreachPoster(fs.readFileSync(made.bgPath).toString('base64'), 'image/jpeg');
       if (posterScore.digits === true) {
         const retry = await renderPoster(buildPrompt('retry'));
-        const again = await scoreOutreachPoster(fs.readFileSync(retry.absPath).toString('base64'), 'image/jpeg');
+        const again = await scoreOutreachPoster(fs.readFileSync(retry.bgPath).toString('base64'), 'image/jpeg');
         posterRegenerated = true;
         if (again.digits !== true) { made = retry; posterScore = again; }
       }
@@ -981,15 +994,16 @@ export async function produceOutreachImage(input: {
       try {
         const bPreset = resolvePreset('email-hero');
         const bTemplate = pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}:banner`, !!cutout);
-        const bPrompt = buildPosterPrompt({ template: bTemplate, preset: bPreset, texts: {}, hasProduct: !!cutout, userHint: posterStyleHint(input.brandColor || null, !!cutout), textPosition: 'bottom' });
-        const b = await generatePoster(bPrompt, bPreset, cutout);
+        // ★ 2026-09-10 배너도 배경만 생성 + 서버 합성(제품 오른쪽 · 문구 아래)
+        const bPrompt = buildPosterPrompt({ template: bTemplate, preset: bPreset, texts: {}, hasProduct: false, userHint: posterStyleHint(input.brandColor || null, false, !!cutout), textPosition: 'bottom' });
+        const b = await generatePosterWithRetry(() => generatePoster(bPrompt, bPreset, null), input.jobId);
         const bExt = b.mime.includes('png') ? 'png' : 'jpeg';
         const bTempId = writeTempBuffer(ctx.companyId, Buffer.from(b.base64, 'base64'), { kind: 'poster', ext: bExt, mime: b.mime, prompt: bPrompt, presetKey: 'email-hero', channelSpec: 'email', width: null, height: null });
         const bFile = findTempFile(ctx.companyId, bTempId);
         if (bFile) {
           const bOut = allocTempPath(ctx.companyId, 'jpeg');
           const bComposed = await composeImage({
-            bgPath: bFile.absPath, cutoutPath: null, outPath: bOut.absPath, format: 'jpeg',
+            bgPath: bFile.absPath, cutoutPath: cutoutPath, layout: cutoutPath ? OUTREACH_BANNER_CUTOUT_LAYOUT : null, outPath: bOut.absPath, format: 'jpeg',
             typography: buildPosterTypography(posterTexts, { brandColor: input.brandColor || null, zone: 'bottom', fontPath }),
           });
           writeTempMeta(ctx.companyId, bOut.tempId, { kind: 'composite', ext: 'jpeg', mime: 'image/jpeg', width: bComposed.width, height: bComposed.height });
@@ -1014,6 +1028,7 @@ export async function produceOutreachImage(input: {
       posterTexts,
       cutoutSource,
       cutoutFrom,
+      cutoutMode: cutoutPath ? 'server_compose' : null,
       posterScore,
       posterRegenerated,
       bannerUrl,
@@ -2071,17 +2086,41 @@ function heroBannerCopyOf(input: Pick<ProduceDmInput, 'heroBanners'>, media: Out
  * 히어로 = 스튜디오 포스터(행사 문구를 얹어 생성 · input.posterUrl) → 홈 캠페인 배너 사본 → 카드1 배너 사본. 상품 = 사람이 고른 재료 상위 6.
  * 행사 = 선택 카드(≤3 · 제목·기간 줄·배너 사본·링크) + 그 카드의 슬라이스(판정 선별 · ≤3). 상품·행사가 둘 다 없으면 null(옛 AI 골격으로).
  */
-/** ★ 2026-09-09(6) 제목 안 상품명 대조(순수) — 공백·괄호·구두점을 뺀 4자 이상 상품명이 제목에 그대로 들어 있으면 그 상품(사본 URL·링크 있는 것만 · 가장 긴 이름 우선) */
+/** ★ 2026-09-09(6) 제목·상품명 대조 키 — 공백·괄호·구두점을 뺀 소문자 */
+const squashForMatch = (s: string) => String(s || '').toLowerCase().replace(/[\s\[\]()<>【】（）［］·,.\-_/:|+]+/g, '');
+/** 제목에 상품명(괄호 꼬리표 제외 · 4자 이상)이 그대로 들어 있는가(순수) */
+export function titleMentionsProduct(title: string, productName: string): boolean {
+  const t = squashForMatch(title);
+  const key = squashForMatch(String(productName || '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, ''));
+  return t.length >= 4 && key.length >= 4 && t.includes(key);
+}
+/** ★ 2026-09-10 사람이 확정한 행사 제목에 나오는 상품을 앞으로(순수 · 안정 정렬) — 사본 상한(6)에 걸려 빠지던 것을 막는다(톤28 "오늘핫딜 글로우 크림" = 사진 0) */
+export function orderProductsByPreference<T extends Pick<OutreachProduct, 'name'>>(products: readonly T[], preferTitles: readonly string[] | null | undefined): T[] {
+  const titles = (preferTitles || []).map((t) => String(t || '')).filter((t) => t.trim());
+  if (!titles.length) return [...products];
+  const hit = (p: T) => titles.some((t) => titleMentionsProduct(t, String(p?.name || '')));
+  return [...products.filter(hit), ...products.filter((p) => !hit(p))];
+}
+/** ★ 2026-09-09(6) 제목 안 상품명 대조(순수) — 4자 이상 상품명이 제목에 그대로 들어 있으면 그 상품(사본 URL·링크 있는 것만 · 가장 긴 이름 우선) */
 export function matchProductInTitle(title: string, products: ReadonlyArray<Pick<OutreachProduct, 'name' | 'image_url' | 'link_url'>>): { image_url: string; link_url: string; name: string } | null {
-  const squash = (s: string) => String(s || '').toLowerCase().replace(/[\s\[\]()<>【】（）［］·,.\-_/:|+]+/g, '');
-  const t = squash(title);
-  if (t.length < 4) return null;
   const hits = (products || [])
-    .filter((p) => p && p.image_url && p.link_url)
-    .map((p) => ({ p, key: squash(String(p.name || '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '')) }))
-    .filter((x) => x.key.length >= 4 && t.includes(x.key))
-    .sort((a, b) => b.key.length - a.key.length);
+    .filter((p) => p && p.image_url && p.link_url && titleMentionsProduct(title, String(p.name || '')))
+    .map((p) => ({ p, len: squashForMatch(String(p.name || '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '')).length }))
+    .sort((a, b) => b.len - a.len);
   return hits.length ? { image_url: String(hits[0].p.image_url), link_url: String(hits[0].p.link_url), name: String(hits[0].p.name) } : null;
+}
+/** ★ 2026-09-10 제목 ↔ 홈 상단 배너 alt 대조(순수) — 글자 카드에 그 배너 사본을 붙인다(출시 티저처럼 상품도 상세도 없는 소식 · alt 4자 이상 · 어느 쪽이 다른 쪽을 품어도 됨) */
+export function matchHeroBannerInTitle(title: string, banners: ReadonlyArray<{ url: string; alt?: string | null; href?: string | null }> | null | undefined, gallery: ReadonlyArray<Pick<StoredImage, 'url' | 'srcUrl'>> | null | undefined): { url: string; href: string | null } | null {
+  const t = squashForMatch(title);
+  if (t.length < 4) return null;
+  for (const b of banners || []) {
+    const a = squashForMatch(String(b?.alt || ''));
+    if (a.length < 4) continue;
+    if (!(t.includes(a) || (t.length >= 6 && a.includes(t)))) continue;
+    const copy = (gallery || []).find((g) => g && g.srcUrl === b.url);
+    if (copy) return { url: copy.url, href: b.href && /^https?:\/\//i.test(String(b.href)) ? String(b.href) : null };
+  }
+  return null;
 }
 
 export function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>, media: OutreachMedia | null): { hero: StandardHero | null; products: SliceProduct[]; events: StandardEvent[]; ctaLabel: string; ctaUrl: string } | null {
@@ -2115,6 +2154,11 @@ export function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput,
     if (!imageUrl) {
       const matched = matchProductInTitle(c.title, media?.products || []);
       if (matched) { imageUrl = matched.image_url; if (!c.detailUrl || normalizeUrlKey(c.detailUrl) === normalizeUrlKey(homeUrl)) linkUrl = matched.link_url; }
+    }
+    // ★ 2026-09-10 상품도 없으면 홈 상단 배너 alt 대조(출시 티저 같은 소식 · 링크는 배너가 가리키는 곳 · 카드 링크가 홈일 때만)
+    if (!imageUrl) {
+      const hb = matchHeroBannerInTitle(c.title, input.heroBanners || null, media?.gallery || []);
+      if (hb) { imageUrl = hb.url; if (hb.href && (!c.detailUrl || normalizeUrlKey(c.detailUrl) === normalizeUrlKey(homeUrl))) linkUrl = hb.href; }
     }
     return {
       title, periodLine: periodLineOf(c.periodRaw), imageUrl, linkUrl,
