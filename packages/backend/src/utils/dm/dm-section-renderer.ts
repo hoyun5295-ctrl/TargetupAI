@@ -1063,6 +1063,19 @@ function renderTabPanelContent(t: any): string {
   return `<div style="font-size:var(--dm-fs-small);line-height:1.7;white-space:pre-wrap;color:var(--dm-neutral-700)">${escapeHtml(content)}</div>`;
 }
 
+/**
+ * ★2026-09-10 탭 카드 알약 색 한 벌 (임은지 접수 cmtth8w0x0c7pjnotfj7ho1pp).
+ * 발행 렌더(renderTabCards)와 발행 뷰어 클릭 전환(dm-viewer `dm-tab-switch` 블록)이 이 값을 함께 쓴다.
+ * 편집 캔버스(frontend NewSections TabCardsSection)는 같은 리터럴을 쓴다(교차 고정 = dm-tab-viewer-parity.test.ts).
+ * ⛔ 둘 중 한 곳만 바꾸지 마라 — 07-02 알약 전환 때 뷰어가 밑줄 방식으로 남아 단말에서만 탭 표시가 깨졌다.
+ */
+export const DM_TAB_PILL = {
+  onBg: '#171717',
+  onFg: '#fff',
+  offBg: 'var(--dm-neutral-100)',
+  offFg: 'var(--dm-neutral-600)',
+} as const;
+
 function renderTabCards(p: any): string {
   const tabs = Array.isArray(p?.tabs) ? p.tabs : [];
   if (tabs.length === 0) return '';
@@ -1072,11 +1085,12 @@ function renderTabCards(p: any): string {
   // ★ 2026-07-13 활성 알약 = 리터럴 고정(#171717 = 기존 var 값 동일 — 다크 테마 반전 시에도 어두운 알약 + 흰 글자 유지)
   // ★ 2026-07-23 (임은지) 활성 탭 배경/글씨색 지정(미지정=현행) + 탭 버튼 글씨 크기 = 섹션 '제목 크기'(--dm-fs-tab, 기본 13px = 옛 fs-small).
   //   탭 내용(renderTabPanelContent)은 '본문 크기'(fs-small) → 크기 컨트롤 분리(옛: 둘 다 fs-small이라 본문 크기가 버튼까지 바꿈).
-  const activeBg = colorOr(p.tab_active_bg, '#171717');
-  const activeText = colorOr(p.tab_active_text_color, '#fff');
-  const btns = tabs.map((t: any, i: number) => `<span data-dm-tab="${i}" style="padding:9px 16px;cursor:pointer;border-radius:999px;background:${i === di ? activeBg : 'var(--dm-neutral-100)'};color:${i === di ? activeText : 'var(--dm-neutral-600)'};font-size:var(--dm-fs-tab, 13px);font-weight:600;transition:all 150ms">${escapeHtml(t.label || '')}</span>`).join('');
+  // ★ 2026-09-10 색은 DM_TAB_PILL 한 벌 + 활성 색을 탭 묶음 속성으로 싣는다 — 뷰어가 누를 때 같은 값으로 옮긴다
+  const activeBg = colorOr(p.tab_active_bg, DM_TAB_PILL.onBg);
+  const activeText = colorOr(p.tab_active_text_color, DM_TAB_PILL.onFg);
+  const btns = tabs.map((t: any, i: number) => `<span data-dm-tab="${i}" style="padding:9px 16px;cursor:pointer;border-radius:999px;background:${i === di ? activeBg : DM_TAB_PILL.offBg};color:${i === di ? activeText : DM_TAB_PILL.offFg};font-size:var(--dm-fs-tab, 13px);font-weight:600;transition:all 150ms">${escapeHtml(t.label || '')}</span>`).join('');
   const panels = tabs.map((t: any, i: number) => `<div data-dm-tab-panel="${i}" style="display:${i === di ? 'block' : 'none'}">${renderTabPanelContent(t)}</div>`).join('');
-  return `<div class="dm-section dm-tab-cards" data-dm-tabs style="padding:var(--dm-sp-6) var(--dm-sp-5)">
+  return `<div class="dm-section dm-tab-cards" data-dm-tabs data-dm-tab-on-bg="${activeBg}" data-dm-tab-on-fg="${activeText}" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
     <div style="display:flex;gap:8px;margin-bottom:var(--dm-sp-4);flex-wrap:wrap">${btns}</div>
     ${panels}
   </div>`;

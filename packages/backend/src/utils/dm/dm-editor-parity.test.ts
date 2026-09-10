@@ -359,6 +359,33 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
       const fmt = '상품A\n10,000원\nhttps://ex.com/a\n\n상품B\n20,000원 → 10% 18,000원\nhttps://ex.com/b';
       expect(parseTabProductList(fmt)).toEqual(parsePastedProducts(fmt));
     });
+    it('★0910 발행용 복제본 본체가 원본과 글자 단위로 같다(함수·타입 이름만 다르다 · 표본 밖 입력에서도 갈리지 않게)', () => {
+      const body = (p: string) => { const s = readFileSync(resolve(process.cwd(), p), 'utf8'); return s.slice(s.indexOf('const URL_RE')); };
+      const fe = body('../frontend/src/utils/product-paste.ts')
+        .replace('export function parsePastedProducts(', 'export function parseTabProductList(')
+        .replace(/PastedProduct/g, 'TabProduct');
+      const be = body('src/utils/dm/dm-tab-content.ts');
+      expect(fe.length).toBeGreaterThan(500);
+      expect(be, '백엔드 복제본을 손으로 고쳤다 — 원본(FE)을 고치고 다시 복사할 것').toBe(fe);
+    });
+    it('★0910 가격 줄 끝 규칙도 두 파서가 같다(임은지 접수 · 발행 행 = 편집 행)', () => {
+      const U = 'https://ex.com/p';
+      const inputs = [
+        `리플렉션 쿠션\n35,000\n${U}`,
+        `헤라 파운데이션 35,000\n${U}`,
+        `헤라 파운데이션 35,000원\n${U}`,
+        `블랙 쿠션 45,000원\n${U}/1\n리플렉션 쿠션 38,500\n${U}/2`,
+        '쿠션\n₩35,000',
+        `블랙 쿠션 2025\n${U}`,
+        '글로우 파운데이션\n정가 85,000원',
+      ];
+      for (const t of inputs) expect(parseTabProductList(t), t).toEqual(parsePastedProducts(t));
+      expect(parseTabProductList(`리플렉션 쿠션\n35,000\n${U}`)).toEqual([{ name: '리플렉션 쿠션', price: 35000, link_url: U }]);
+      // 발행 행에 이름과 가격이 함께 나간다(접수 증상 = 가격만 보임)
+      const html = renderSection(mk('tab_cards', { tabs: [{ label: '탭 1', content_type: 'product_list', content: `리플렉션 쿠션\n35,000\n${U}` }] }), {} as any);
+      expect(html).toContain('리플렉션 쿠션');
+      expect(html).toContain('35,000원');
+    });
     it('탭 카드 — 캔버스가 content_type(image/product_list) 분기 미러', () => {
       const tab = block('TabCardsSection', 'PollSection');
       expect(tab, "캔버스가 content_type='image'(이미지) 렌더 미러").toContain("=== 'image'");

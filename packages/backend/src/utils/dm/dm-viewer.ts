@@ -9,7 +9,7 @@
  * 폰트: Pretendard CDN + 시스템 폰트 fallback 체인.
  */
 import { inlineImage, publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
-import { renderSections, COUNTDOWN_SCRIPT, escapeHtml } from './dm-section-renderer';
+import { renderSections, COUNTDOWN_SCRIPT, escapeHtml, DM_TAB_PILL } from './dm-section-renderer';
 import { renderDmTokensCss, renderDmBaseCss, renderDmDesign3Css, renderDmVariantCss } from './dm-tokens';
 // ★ 2026-07-16 자가 호스팅 웹폰트 — 발행 서체를 우리 서버 @font-face로 로드(구글 CDN 미로드 궁서 폴백 정정)
 import { selfHostPreloadUrls } from '../design-core/fonts';
@@ -790,16 +790,23 @@ ${counterHtml}
   // ── ★ 2026-07-02(3) 발행물에서 죽어있던 섹션 동작 일괄 배선 ──
 
   // 탭 카드 — 클릭 전환
+  // ★2026-09-10 (임은지 접수 cmtth8w0x0c7pjnotfj7ho1pp) 발행 렌더와 같은 알약 규칙으로 옮긴다.
+  //   옛 코드는 07-02 이전 밑줄 탭 방식(밑줄 + 브랜드 기본색 글씨)이라 배경을 안 바꿔, 누른 탭은 회색 바탕에
+  //   흰 글씨가 되고 검정 배경은 처음 탭에 남았다. 활성 색 = 발행 렌더가 탭 묶음에 실은 값 · 비활성 = DM_TAB_PILL.
+  //   ⛔ 이 블록은 dm-tab-viewer-parity.test.ts가 표식 사이를 떼어 실제로 클릭 실행한다 — 표식을 지우지 마라.
+  /* dm-tab-switch:begin */
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-tabs]'), function (box) {
     var btns = box.querySelectorAll('[data-dm-tab]');
     var panels = box.querySelectorAll('[data-dm-tab-panel]');
+    var onBg = box.getAttribute('data-dm-tab-on-bg') || '${DM_TAB_PILL.onBg}';
+    var onFg = box.getAttribute('data-dm-tab-on-fg') || '${DM_TAB_PILL.onFg}';
     Array.prototype.forEach.call(btns, function (btn) {
       btn.addEventListener('click', function () {
         var i = btn.getAttribute('data-dm-tab');
         Array.prototype.forEach.call(btns, function (b) {
           var on = b.getAttribute('data-dm-tab') === i;
-          b.style.borderBottom = on ? '2px solid var(--dm-primary)' : '2px solid transparent';
-          b.style.color = on ? 'var(--dm-primary)' : 'var(--dm-neutral-600)';
+          b.style.background = on ? onBg : '${DM_TAB_PILL.offBg}';
+          b.style.color = on ? onFg : '${DM_TAB_PILL.offFg}';
         });
         Array.prototype.forEach.call(panels, function (pn) {
           pn.style.display = pn.getAttribute('data-dm-tab-panel') === i ? 'block' : 'none';
@@ -807,6 +814,7 @@ ${counterHtml}
       });
     });
   });
+  /* dm-tab-switch:end */
 
   // 슬라이드쇼 — 자동 전환 + 인디케이터 클릭
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-slideshow]'), function (box) {
