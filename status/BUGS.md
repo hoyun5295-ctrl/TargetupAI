@@ -55,6 +55,47 @@
 
 ## 2) 활성 버그
 
+### 🔴 B-0910-1 발송 결과 화면 — 비토 라인으로 나간 캠페인이 성공·실패·대기 전부 0 (✅ 배포 완료) — 2026-09-10 Harold 실측(리스킨_대행 18,005건)
+
+**증상**: 전송 18,005만 뜨고 성공·실패·대기 0. MySQL `SMSQ_SEND_14` 에는 `status_code` 6 이 17,133건 정상 기록. 발송도 결과 수신도 정상이었고 화면만 못 읽었다. 같은 대량발송(2) 라인이라도 env 안 테이블에 적재된 미구하라_대행(30,721건)은 정상 표시됐다 — 갈린 축은 라인이 아니라 적재 테이블이다.
+
+**원인 두 겹**:
+1. 통계 SELECT 5곳이 `send_config` 컬럼을 아예 안 가져왔다. `recordedLiveTables(c)` 가 `c.send_config?.sentTables` 를 읽는데 컬럼이 없으니 늘 빈 배열 → 전 캠페인이 현재 라인그룹 fallback 으로 떨어졌다. 이 화면은 `sentTables` 를 한 번도 본 적이 없다.
+2. `getAllSmsTablesWithLogs()` 의 LIVE 축이 env(`SMS_TABLES`, 1~11)였다. MySQL 에 실존하는 `SMSQ_SEND_14` 가 "미실존" 판정을 받아 기록이 버려졌다.
+
+**수정**: `stats-aggregation.ts` 532·657 / `admin.ts` 2875·3059·3266 에 `jsonb_build_object('sentTables', c.send_config->'sentTables')` 추가. `sms-queue.ts` 에 `loadSmsTableSets()` 신설 — 실존 LIVE 를 `information_schema` 에서 읽는다(같은 조회 재사용, 신규 쿼리 0).
+
+⛔ **env `SMS_TABLES` 에 비토 라인(13·14·15)을 넣으면 안 된다.** `ensureMonthlyLogTables` 가 env 축으로 월별 LOG 를 만들고, 비토 라인에 LOG 가 생기면 `classifyResultTables` 가 그 LIVE 를 대기 전용으로 강등한다. 결과는 LOG 에서만 세는데 비토는 QTmsg 의 `rsv1=5` 이관을 쓰지 않아 LOG 가 영영 비고 성공이 다시 0 이 된다. 계약 테스트 `sms-table-existence.test.ts` 가 그 경계를 고정한다.
+
+> **검증**: tsc 0 · 전체 4,022건 통과 · RED 확인(수정 전 코드로 되돌리면 `expected [...] to include 'SMSQ_SEND_14'` 로 실패) · 실측 기준값 성공 17,133 · 실패 435 · 대기 437.
+> **경위 상세** = memory `project_2026_0910_send_result_and_agent_cursor`
+
+---
+
+### 🔴 B-0910-2 비토 Agent — 예약 발송이 정각에 안 나가고 커서에 갇힌다 (🟡 1.0.27 승인 완료·rollout 대기) — 2026-09-10 실측(10:00 예약 18,005건이 10:07:03 까지 미발송)
+
+**증상**: 예약 시각이 지나도 발송 0. 그 7분간 폴링은 정상이었고(`pollCycles` 250065→250903) `lastFetchCount` 만 0. stale 정리가 6건을 해제하며 커서를 비우자 10:08 부터 분당 3,877건으로 쏟아졌다. 적재는 전날 18:48:43 에 이미 끝나 있었다.
+
+**원인**: 예약 건은 커서 스캔에서 두 번 배제된다. 시각 미도래 구간에는 `sendreq_time <= NOW()` 에 안 걸려 건너뛰어지고 커서만 앞서가고, 정각이 되면 이번엔 `seq > 커서` 에 걸린다. 리셋 조건이 `activeClaimCount() < BatchSize` 인데 `final_result_only` 는 전송 후에도 리포트가 올 때까지 claim 을 쥐어 in-flight 가 상시 BatchSize 를 넘는다 → 커서가 영영 안 풀린다. 실측: 858건 seq 37385~38242(11:30 예약)는 갇히고, 나중에 들어온 seq 38243·38244 는 나갔다.
+
+**수정**(별도 저장소 `bito-gateway`): `internal/agent/poller/poller.go:1495` 의 `activeClaimCount() < p.cfg.BatchSize` 조건 제거. 되돌려도 안전하다 — 다시 읽은 행이 전부 claim 상태여도 `len(rows) > 0` 이라 커서는 다시 전진한다.
+
+**남은 것**: 1.0.27 rollout(hanjul02 → hanjul01). 확인 = 다음 예약 시각에 `lastFetchCount` 가 0 에 머물지 않는지.
+
+---
+
+### 🔴 B-0910-3 게이트웨이 — 검증 오류를 재시도 대상으로 분류해 반려 건이 저널에 갇힌다 (🔵 Open) — 2026-09-10 실측(시세이도 MMS 864건)
+
+**증상**: 본문 en dash(U+2013) 때문에 게이트웨이가 `result_code=-2` `EUC-KR 인코딩 불가` 로 864건 전량 반려. 반려분은 Agent 저널에 `claimed` 로 남아 재시도만 돌고, stale 정리(10분)가 우연히 풀 때까지 큐에 갇힌다. 담당자에게는 "대기에서 안 빠진다" 로만 보이고 원인을 알 방법이 없다.
+
+**원인**: 게이트웨이가 검증 오류 응답에 `ErrorCode` 를 안 채운다. Agent 는 `ErrorCode` 가 비면 `SendAckError` 를 안 만들어 영구 거부 판정을 못 한다(`grpc_client.go:626`). `sendAckPolicyDetails`(`grpc_server.go:354`)가 허용 목록 방식이라 목록에 없는 검증 오류는 전부 "재시도 가능" 으로 떨어진다. 0904 링크가드 때 `URL_BLOCKED` 한 건만 넣고 구조를 안 고쳤고 오늘 인코딩에서 똑같이 터졌다.
+
+⛔ **게이트웨이만 고치면 Agent 재배포 없이 닫힌다.** `ErrorCode` + `Retryable=false` 를 실으면 현재 1.0.26 이 그대로 영구 거부로 처리한다(`markClaimedFailed` → 고객 DB 실패 마킹 + claim 해제).
+
+**별건**: en dash 자체는 문안 문제가 아니다. `encoding=1`(UTF-8) 통로가 이미 있고 지금 기본값이 0(EUC-KR)이라 막힌 것이다. ⛔ 고객 문안을 발송 직전에 치환하지 않는다(memory `feedback_never_alter_customer_copy_silently`).
+
+---
+
 ### 🔴 B-0909-3 AI 영업 산출물 공백 — 포스터 503 한 번에 포기 · 확정 행사 페이지 미렌더 · 확정 인용문 탈락 · 판정 이미지 상한 초과 (🟡 코드 수정 완료·배포 대기) — 2026-09-09 Harold 실측(톤28 `f94c25f923` · DM `dm-sqk82HT`)
 
 > **증상**: 표준 순서는 맞는데 내용이 비었다. 히어로 = 글자 없는 홈 정물 슬라이드(S21) · 행사 = "9월 가입 한정 혜택" 제목 한 줄 + 버튼 · 확정 3건 중 "오늘핫딜 …" 2건은 DM 에 없음. 상품 4개(가격)만 정상.
