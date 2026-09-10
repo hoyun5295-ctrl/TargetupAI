@@ -1,7 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { calculateSmsBytes, buildAdSubjectFront } from '../utils/formatDate';
-import { resolveChannelLabel } from '../utils/campaign-axis';
+import { resolveChannelLabel, isKakaoFamilyChannel } from '../utils/campaign-axis';
 import MmsImagePreview from './shared/MmsImagePreview';
+import SmsCharsetNotice from './SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 
 interface ScheduledCampaignModalProps {
   show: boolean;
@@ -469,6 +471,21 @@ export default function ScheduledCampaignModal({
                 {/* ★ D95: 바이트 계산 — formatDate.ts 컨트롤타워 사용 */}
                 {calculateSmsBytes(editMessage)} bytes
               </div>
+              {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다 */}
+              {/* 알림톡·브랜드메시지 전용 캠페인은 문자 규격이 아니다(message_type 이 'LMS'로 저장돼 send_channel 로 가른다) */}
+              {!isKakaoFamilyChannel(selectedScheduled) && (() => {
+                const longType = selectedScheduled?.message_type === 'LMS' || selectedScheduled?.message_type === 'MMS';
+                return (
+                  <SmsCharsetNotice
+                    className="mt-2"
+                    texts={[editMessage, longType ? editSubject : '']}
+                    onApply={(fix) => {
+                      setEditMessage((prev) => fix(prev));
+                      if (longType) setEditSubject((prev) => fix(prev));
+                    }}
+                  />
+                );
+              })()}
             </div>
             {messageEditing && (
               <div className="bg-blue-50 rounded-lg p-3">
@@ -504,7 +521,16 @@ export default function ScheduledCampaignModal({
                   setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
                   return;
                 }
-                
+                // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 저장하지 않는다(설계 D2 · 본문 아래 안내에서 바꾼다)
+                if (!isKakaoFamilyChannel(selectedScheduled) && hasUnsupportedSmsChars(
+                  editMessage,
+                  selectedScheduled?.message_type === 'LMS' || selectedScheduled?.message_type === 'MMS' ? editSubject : '',
+                )) {
+                  setToast({ show: true, type: 'error', message: SMS_CHARSET_BLOCK_MESSAGE });
+                  setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+                  return;
+                }
+
                 setMessageEditing(true);
                 setMessageEditProgress(0);
                 

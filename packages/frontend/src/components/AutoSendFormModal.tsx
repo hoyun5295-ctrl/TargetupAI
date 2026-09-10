@@ -20,6 +20,8 @@ import { insertAtCursorPos } from '../utils/textInsert';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
 import TargetRecipientsModal, { type TargetPageLoader } from './TargetRecipientsModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
+import SmsCharsetNotice from './SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 // ★ D123 P11: 미등록 회신번호 확인 모달 (한줄로 발송과 동일 패턴)
 import CallbackConfirmModal, { CallbackConfirmData } from './CallbackConfirmModal';
 // ★ D130: 알림톡 공용 패널 (설계서 §6-3-D)
@@ -75,12 +77,6 @@ const DEFAULT_CATEGORY_LABELS: Record<string, string> = {
 function getToken(): string {
   return localStorage.getItem('token') || '';
 }
-
-// 이모지 감지 (B13-06 패턴)
-const hasEmoji = (text: string): boolean => {
-  const emojiPattern = /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2300-\u23FF]|[\u2B50-\u2BFF]|[\uFE00-\uFE0F]|[\u200D]|[\u20E3]|[\uE000-\uF8FF]/g;
-  return emojiPattern.test(text);
-};
 
 const TOTAL_STEPS = 6;
 
@@ -492,6 +488,12 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
     if (!useIndividualCallback && !callbackNumber) { setError('발신번호를 선택해주세요.'); setStep(5); return; }
     if (channel === 'sms' && messageType === 'MMS' && mmsUploadedImages.length === 0 && !aiGenerateEnabled) { setError('MMS 이미지를 첨부해주세요.'); setStep(5); return; }
     if (channel === 'sms' && (messageType === 'LMS' || messageType === 'MMS') && !messageSubject.trim() && !aiGenerateEnabled) { setError('LMS/MMS는 제목을 입력해주세요.'); setStep(5); return; }
+    // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 저장하지 않는다(설계 D2 · 작성 칸 아래 안내에서 바꾼다)
+    if (channel === 'sms' && (aiGenerateEnabled
+      ? hasUnsupportedSmsChars(fallbackMessageContent)
+      : hasUnsupportedSmsChars(messageContent, messageType === 'SMS' ? '' : messageSubject))) {
+      setError(SMS_CHARSET_BLOCK_MESSAGE); setStep(5); return;
+    }
 
     // ★ D123 P11: force=true일 때 미등록 회신번호 검증 스킵 (사용자가 "제외하고 생성" 선택한 경우)
     await submitWithForce(false);
@@ -1124,6 +1126,12 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                         className="w-full border border-violet-300 rounded-lg px-3 py-2.5 text-sm resize-none h-[60px] focus:ring-2 focus:ring-violet-500 focus:border-violet-500 outline-none bg-white"
                       />
                       <p className="text-xs text-gray-400 mt-1">%이름% 등 변수 사용 가능</p>
+                      {/* ★ 2026-09-10 AI 실패 때 나가는 문안도 같은 규격 — 누르면 대체표로 바꾼다 */}
+                      <SmsCharsetNotice
+                        className="mt-2"
+                        texts={[fallbackMessageContent]}
+                        onApply={(fix) => setFallbackMessageContent((prev: string) => fix(prev || ''))}
+                      />
                     </div>
                   </div>
                 )}
@@ -1204,6 +1212,15 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                         <p className="text-xs text-gray-400 mt-1">JPG/PNG 300KB 이하</p>
                       </div>
                     )}
+                    {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다 */}
+                    <SmsCharsetNotice
+                      className="mt-3"
+                      texts={[messageContent, messageType === 'SMS' ? '' : messageSubject]}
+                      onApply={(fix) => {
+                        setMessageContent((prev: string) => fix(prev || ''));
+                        if (messageType !== 'SMS') setMessageSubject((prev: string) => fix(prev || ''));
+                      }}
+                    />
                   </div>
 
                   {/* 바이트 표시 */}

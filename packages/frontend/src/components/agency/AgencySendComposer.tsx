@@ -23,6 +23,8 @@ import {
 import { useToast } from '../ToastProvider';
 import { useMmsUpload } from '../../hooks/useMmsUpload';
 import MmsUploadModal from '../MmsUploadModal';
+import SmsCharsetNotice from '../SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 import {
   CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_DANGER_BOX, CUI_DANGER_ICON, CUI_DANGER_TEXT,
   CUI_HINT, CUI_INPUT, CUI_LABEL, CUI_MODAL, CUI_MODAL_BODY, CUI_MODAL_CLOSE, CUI_MODAL_DESC,
@@ -343,6 +345,8 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
       toast.error(`제목에는 항목을 넣을 수 없습니다: ${subjectVars.map((v) => `%${v}%`).join(' ')}`);
       return;
     }
+    // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 다음 단계로 가지 않는다(설계 D2 · 문안 아래 안내에서 바꾼다)
+    if (hasUnsupportedSmsChars(content, subject)) { toast.error(SMS_CHARSET_BLOCK_MESSAGE); return; }
     // 자동 매핑: 문안 변수와 같은 이름의 열이 있으면 맞춰 둔다
     const next = { ...varMapping };
     for (const v of usedVars) {
@@ -625,6 +629,12 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
                         </p>
                       </div>
                     )}
+                    {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 문안·제목을 대체표로 바꾼다 */}
+                    <SmsCharsetNotice
+                      className="mt-2"
+                      texts={[content, subject]}
+                      onApply={(fix) => { setContent((prev) => fix(prev)); setSubject((prev) => fix(prev)); }}
+                    />
                   </div>
 
                   {usedVars.length > 0 && headers.length > 0 && usedVars.some((v) => !varMapping[v] && !headers.find((h) => h.replace(/\s+/g, '') === v.replace(/\s+/g, ''))) && (

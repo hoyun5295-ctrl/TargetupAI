@@ -36,6 +36,8 @@ import AiProposalSummaryModal from '../components/AiProposalSummaryModal';
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 // ★ 2026-07-02 문안 전용 편집기 모달 — 변수·브랜드 링크·회사 표현·특수문자 커서 삽입 + 미리보기
 import MessageEditorModal from '../components/MessageEditorModal';
+import SmsCharsetNotice from '../components/SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
 import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
@@ -718,6 +720,8 @@ export default function AiOperatorPage() {
       if (isLmsOrMms && !subject.trim()) {
         throw new Error('제목이 비어있습니다. 본문 위 제목 입력창에 제목을 입력해주세요.');
       }
+      // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 발송하지 않는다(설계 D2 · 본문 아래 안내에서 바꾼다)
+      if (hasUnsupportedSmsChars(body, subject)) throw new Error(SMS_CHARSET_BLOCK_MESSAGE);
 
       // 2026-07-09: MMS 이미지 필수 사전 차단 — 백엔드 도달 전 친절 안내 + 첨부 모달 오픈
       const mmsImagePaths = channel === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [];
@@ -1376,6 +1380,25 @@ export default function AiOperatorPage() {
                             </button>
                           )}
                         </div>
+
+                        {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다(발송 값 = refinedOverrides·resolveSubject) */}
+                        {(activeChannel === 'SMS' || activeChannel === 'LMS' || activeChannel === 'MMS') && (() => {
+                          const longType = activeChannel === 'LMS' || activeChannel === 'MMS';
+                          const subject = longType ? resolveSubject(safeIdx) : '';
+                          return (
+                            <SmsCharsetNotice
+                              tone="dark"
+                              className="mb-3"
+                              texts={[rawActiveBody, subject]}
+                              onApply={(fix) => {
+                                const nextBody = fix(rawActiveBody);
+                                if (nextBody !== rawActiveBody) setRefinedOverrides((prev) => ({ ...prev, [safeIdx]: nextBody }));
+                                const nextSubject = fix(subject);
+                                if (longType && nextSubject !== subject) setSubjectOverrides((prev) => ({ ...prev, [safeIdx]: nextSubject }));
+                              }}
+                            />
+                          );
+                        })()}
 
                         {/* 메시지 액션 */}
                         <div className="flex gap-2 flex-wrap">

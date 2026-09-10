@@ -10,6 +10,8 @@ import { OperatorProposal, ProposalVariant, BanditRecommendation, ProposalApprov
 import StatusBadge from './StatusBadge';
 // ★ 2026-07-10 [타겟확인] — 발송 대상 명단 모달 (SoT: docs/superpowers/specs/2026-07-10-send-target-list-three-phase-design.md §3-2①)
 import TargetRecipientsModal, { arrayPager, TargetRecipient } from '../TargetRecipientsModal';
+import SmsCharsetNotice from '../SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 
 // [타겟확인] 응답 — 1회 로드(LIMIT 100) 후 클라 페이징(서버 재호출 0)
 interface TargetListInfo {
@@ -122,12 +124,15 @@ export default function ProposalDecisionCard({
   const effectiveSubject = editedSubject != null ? editedSubject : (effectiveMsg?.subject || '');
   // 실발송 제목이 비면 승인 차단(여정 LMS/MMS 필수 규칙과 동일) — Codex 지적: 편집값만 검사하면 AI 제목 부재 제안이 빈 제목으로 발송됨.
   const subjectInvalid = isLongType && canApprove && !effectiveSubject.trim();
+  // ★ 2026-09-10 발송할 문안에 문자로 보낼 수 없는 글자가 남아 있으면 승인 차단(설계 D2 · 문안 아래 안내에서 바꾼다)
+  const charsetInvalid = canApprove && ['SMS', 'LMS', 'MMS'].includes(channelName)
+    && hasUnsupportedSmsChars(effectiveBody, isLongType ? effectiveSubject : '');
   const selectVariant = (i: number) => { setSelectedIdx(i); setEditedBody(null); setEditedSubject(null); setEditing(false); };
   // ★ Codex P3 (2026-07-09): 사용자가 명시적으로 선택/편집한 경우에만 selection 전송.
   //   미조작 승인에 selection을 실으면 변형 데이터 로딩 전(recommendedIdx=undefined)엔 변형 A(0)가 강제되어
   //   백엔드 Bandit 추천을 우회한다 — 미조작 = undefined로 보내 백엔드가 Bandit으로 결정(자동 경로 동일).
   const submitApprove = () => {
-    if (subjectInvalid) return;
+    if (subjectInvalid || charsetInvalid) return;
     if (selectedIdx == null && editedBody == null && editedSubject == null) { onApprove(); return; }
     onApprove({ variantIndex: effectiveIdx, body: effectiveBody, subject: editedSubject != null ? editedSubject : effectiveMsg?.subject });
   };
@@ -229,7 +234,7 @@ export default function ProposalDecisionCard({
       )}
       {canApprove && (
         <>
-          <button onClick={submitApprove} disabled={busy || subjectInvalid} className="inline-flex items-center gap-1.5 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-40 text-indigo-50 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <button onClick={submitApprove} disabled={busy || subjectInvalid || charsetInvalid} title={charsetInvalid ? SMS_CHARSET_BLOCK_MESSAGE : undefined} className="inline-flex items-center gap-1.5 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-40 text-indigo-50 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
             <Send className="w-4 h-4" />승인하고 발송
           </button>
           <button onClick={onReject} disabled={busy} className="inline-flex items-center gap-1.5 border border-rose-400/30 hover:bg-rose-500/20 disabled:opacity-40 text-rose-300 text-sm px-3 py-2 rounded-lg transition-colors">
@@ -321,6 +326,20 @@ export default function ProposalDecisionCard({
                     />
                   ) : (
                     <div className="text-white/70 whitespace-pre-wrap leading-relaxed">{isSel ? effectiveBody : (m.body || m.message || '')}</div>
+                  )}
+                  {/* ★ 2026-09-10 발송할 문안에 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다(편집값으로 승인) */}
+                  {isSel && ['SMS', 'LMS', 'MMS'].includes(channelName) && (
+                    <SmsCharsetNotice
+                      tone="dark"
+                      className="mt-1.5"
+                      texts={[effectiveBody, isLongType ? effectiveSubject : '']}
+                      onApply={(fix) => {
+                        const nextBody = fix(effectiveBody);
+                        if (nextBody !== effectiveBody) setEditedBody(nextBody);
+                        const nextSubject = fix(effectiveSubject);
+                        if (isLongType && nextSubject !== effectiveSubject) setEditedSubject(nextSubject);
+                      }}
+                    />
                   )}
                   {isSel && (
                     <div className="mt-1.5 flex items-center gap-2">

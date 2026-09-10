@@ -12,6 +12,8 @@ import { AlertTriangle, Check, Eye, Loader2, Send, X } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import AgencyPreviewModal from './AgencyPreviewModal';
 import AgencyEventLog from './AgencyEventLog';
+import SmsCharsetNotice from '../SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 import {
   CUI_BTN_DANGER, CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_CELL_META, CUI_DANGER_BOX, CUI_DANGER_ICON,
   CUI_DANGER_TEXT, CUI_HINT, CUI_INFO, CUI_INFO_ICON, CUI_INFO_TEXT, CUI_INPUT, CUI_LABEL, CUI_MODAL,
@@ -98,6 +100,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
 
   const doApprove = async () => {
     if (!req || busy) return;
+    // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 승인하지 않는다(설계 D2 · 문안 아래 안내에서 바꾼 뒤 저장)
+    if (hasUnsupportedSmsChars(req.currentContent)) { toast.error(SMS_CHARSET_BLOCK_MESSAGE); return; }
     setBusy(true);
     try {
       apply(await approveAgencyRequest(req.id, req.revision));
@@ -110,6 +114,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
 
   const doSaveContent = async () => {
     if (!req || busy) return;
+    if (hasUnsupportedSmsChars(draft)) { toast.error(SMS_CHARSET_BLOCK_MESSAGE); return; }
     setBusy(true);
     try {
       apply(await updateAgencyContent(req.id, draft, req.revision));
@@ -228,6 +233,12 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                     {req.subject && <div className="font-semibold text-neutral-900 mb-1.5">{req.subject}</div>}
                     {req.currentContent}
                   </div>
+                )}
+                {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 대체표로 바꾼 문안을 고치기 칸에 넣는다(저장해야 검사를 다시 한다) */}
+                {editing ? (
+                  <SmsCharsetNotice className="mt-2" texts={[draft]} onApply={(fix) => setDraft((prev) => fix(prev))} />
+                ) : isEditableStatus(req.status) && (
+                  <SmsCharsetNotice className="mt-2" texts={[req.currentContent]} onApply={(fix) => { setDraft(fix(req.currentContent)); setEditing(true); }} />
                 )}
               </div>
 

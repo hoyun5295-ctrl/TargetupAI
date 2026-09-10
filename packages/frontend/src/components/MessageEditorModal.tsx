@@ -6,7 +6,8 @@
  *
  * 구성
  *   좌측 = 큰 본문 편집 + 실시간 바이트 게이지 + 스마트 경고
- *          ((광고)/수신거부 직접 입력 감지 · EUC-KR 비호환 이모지 감지 · 채널 한도 초과)
+ *          ((광고)/수신거부 직접 입력 감지 · 채널 한도 초과)
+ *          + 문자로 보낼 수 없는 글자 알림·한 번에 바꾸기(SmsCharsetNotice · 2026-09-10)
  *        + 휴대폰 미리보기 탭(실제 수신 모습 — (광고)·무료거부 자동 부착 + 상위 고객 데이터 머지)
  *   우측 = 삽입 도구 패널: 개인화 변수 칩 · 우리 회사 CTA/빈출 표현 칩(브랜드보이스 가이드라인 자동 로드)
  *          · 브랜드 링크(커서 삽입) · 특수문자함(회사 이모지 우선 + EUC-KR 안전 세트)
@@ -19,9 +20,10 @@ import {
   Pencil, X, Eye, Type, Sparkles, Link2, Hash, AtSign, RotateCcw, Check, AlertTriangle, Smartphone,
 } from 'lucide-react';
 import { insertAtCursor } from '../utils/textInsert';
-import { SMS_SAFE_CHARS, koreanBytes, hasIncompatibleEmoji } from '../utils/smsSafeChars';
+import { SMS_SAFE_CHARS, koreanBytes, isSmsEncodableChar } from '../utils/smsSafeChars';
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 import BrandLinkChips from './BrandLinkChips';
+import SmsCharsetNotice from './SmsCharsetNotice';
 
 interface MessageEditorModalProps {
   open: boolean;
@@ -81,6 +83,7 @@ export default function MessageEditorModal({
   }, [open, brandExpr]);
 
   const channelUpper = String(channel || 'LMS').toUpperCase();
+  const isSmsFamily = channelUpper === 'SMS' || channelUpper === 'LMS' || channelUpper === 'MMS';
   const byteLimit = channelUpper === 'SMS' ? 90 : 2000;
   const bytes = useMemo(() => koreanBytes(draft), [draft]);
   const bytePercent = Math.min(100, Math.round((bytes / byteLimit) * 100));
@@ -90,7 +93,6 @@ export default function MessageEditorModal({
     const list: string[] = [];
     if (/\(광고\)/.test(draft)) list.push('"(광고)"는 발송 시 자동으로 붙습니다. 본문에서 빼주세요.');
     if (/무료수신거부|무료거부|080[- ]?\d{3,4}[- ]?\d{4}/.test(draft)) list.push('무료수신거부 번호는 발송 시 자동으로 붙습니다. 본문에서 빼주세요.');
-    if (hasIncompatibleEmoji(draft)) list.push('문자에서 깨질 수 있는 이모지가 있습니다. 특수문자함의 기호로 바꿔주세요.');
     if (overLimit) list.push(`${channelUpper} 한도(${byteLimit.toLocaleString()}바이트)를 초과했습니다.`);
     return list;
   }, [draft, overLimit, channelUpper, byteLimit]);
@@ -112,8 +114,10 @@ export default function MessageEditorModal({
     ? `(광고)\n${draft}${rejectNumber ? `\n무료거부 ${rejectNumber}` : ''}`
     : draft;
 
-  const specialChars = brandExpr && brandExpr.emojiWhitelist.length > 0
-    ? [...brandExpr.emojiWhitelist, ...SMS_SAFE_CHARS.filter((c) => !brandExpr.emojiWhitelist.includes(c))]
+  // 회사 이모지는 문자로 보낼 수 있는 것만 싣는다 — 특수문자함은 "문자 발송 안전 기호만"을 약속한다(2026-09-10).
+  const brandSafe = brandExpr ? brandExpr.emojiWhitelist.filter((c) => Array.from(c).every(isSmsEncodableChar)) : [];
+  const specialChars = brandSafe.length > 0
+    ? [...brandSafe, ...SMS_SAFE_CHARS.filter((c) => !brandSafe.includes(c))]
     : SMS_SAFE_CHARS;
 
   const hasBrandExpr = !!brandExpr && (brandExpr.ctaPatterns.length > 0 || brandExpr.frequentExpressions.length > 0);
@@ -234,6 +238,9 @@ export default function MessageEditorModal({
                     </div>
                   ))}
                 </div>
+              )}
+              {isSmsFamily && (
+                <SmsCharsetNotice tone="dark" className="mt-2" texts={[draft]} onApply={(fix) => setDraft((prev) => fix(prev))} />
               )}
             </div>
           </div>

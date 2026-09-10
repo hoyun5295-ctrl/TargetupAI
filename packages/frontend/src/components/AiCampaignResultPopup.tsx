@@ -8,6 +8,8 @@ import {
 import { buildAdMessageFront, buildAdSubjectFront, replaceVarsBySampleCustomer } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 import MmsImagePreview from './shared/MmsImagePreview';
+import SmsCharsetNotice from './SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import TargetRecipientsModal, { arrayPager } from './TargetRecipientsModal';
 import { AI_MESSAGE_CHANNELS, type AiMessageChannel } from '../utils/campaign-axis';
 
@@ -146,7 +148,15 @@ export default function AiCampaignResultPopup({
   };
 
   // 캠페인 확정 진입 흐름 (SMS bytes > 90 시 LMS sub-modal — B-D75-01 흐름 유지)
+  // ★ 2026-09-10 선택한 문안에 문자로 보낼 수 없는 글자가 남아 있으면 캠페인 확정을 막는다(설계 D2 · 문안 아래 안내에서 바꾼다)
+  const selectedForCharset = aiResult?.messages?.[selectedAiMsgIdx];
+  const charsetBlocked = !!selectedForCharset && hasUnsupportedSmsChars(
+    selectedForCharset.message_text,
+    selectedChannel === 'LMS' || selectedChannel === 'MMS' ? selectedForCharset.subject : '',
+  );
+
   const handleConfirmClick = () => {
+    if (charsetBlocked) return;
     const selectedMsg = aiResult?.messages?.[selectedAiMsgIdx];
     if (selectedChannel === 'SMS') {
       const msg = selectedMsg?.message_text || '';
@@ -579,6 +589,30 @@ export default function AiCampaignResultPopup({
                   </div>
                 )}
               </div>
+              {/* ★ 2026-09-10 선택한 문안에 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다(한 번에 한 상태로) */}
+              {(() => {
+                const sel = aiResult?.messages?.[selectedAiMsgIdx];
+                if (!sel) return null;
+                const longType = selectedChannel === 'LMS' || selectedChannel === 'MMS';
+                return (
+                  <SmsCharsetNotice
+                    tone="dark"
+                    className="mt-4"
+                    texts={[sel.message_text, longType ? sel.subject : '']}
+                    onApply={(fix) => {
+                      const updated = [...aiResult.messages];
+                      const text = fix(sel.message_text || '');
+                      updated[selectedAiMsgIdx] = {
+                        ...sel,
+                        message_text: text,
+                        byte_count: calculateBytes(text),
+                        ...(longType && typeof sel.subject === 'string' ? { subject: fix(sel.subject) } : {}),
+                      };
+                      setAiResult({ ...aiResult, messages: updated });
+                    }}
+                  />
+                );
+              })()}
             </div>
 
             {/* MMS 이미지 첨부 — MMS 선택 시만 (B4 D141 흐름 유지) */}
@@ -663,7 +697,9 @@ export default function AiCampaignResultPopup({
 
               <button
                 onClick={handleConfirmClick}
-                className="rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/10 border border-emerald-400/40 hover:from-emerald-500/30 hover:to-emerald-500/20 hover:border-emerald-400/60 p-4 text-left transition-all shadow-lg shadow-emerald-500/20"
+                disabled={charsetBlocked}
+                title={charsetBlocked ? SMS_CHARSET_BLOCK_MESSAGE : undefined}
+                className="rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/10 border border-emerald-400/40 hover:from-emerald-500/30 hover:to-emerald-500/20 hover:border-emerald-400/60 p-4 text-left transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-emerald-500/30 flex items-center justify-center">

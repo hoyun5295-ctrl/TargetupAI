@@ -7,6 +7,8 @@ import { formatPreviewValue, formatByType, buildAdMessageFront, replaceVarsByFie
 import { insertAtCursor } from '../utils/textInsert';
 import BrandLinkChips from './BrandLinkChips';
 import MmsImagePreview from './shared/MmsImagePreview';
+import SmsCharsetNotice from './SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import AlimtalkChannelPanel, {
   validateAlimtalkChannelState,
   type AlimtalkChannelState,
@@ -260,12 +262,6 @@ export default function TargetSendModal({
     fm.field_key !== 'phone' && fm.field_key !== 'sms_opt_in'
   );
 
-  // B13-06: 이모지 감지 함수
-  const hasEmoji = (text: string): boolean => {
-    const emojiPattern = /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2300-\u23FF]|[\u2B50-\u2BFF]|[\uFE00-\uFE0F]|[\u200D]|[\u20E3]|[\uE000-\uF8FF]/g;
-    return emojiPattern.test(text);
-  };
-
   // ====== ★ 커서 위치에 변수 삽입 — D124 컨트롤타워(insertAtCursor) ======
   //   setter는 props로 내려받은 (msg: string) => void 형태라 updater 패턴 불가 → currentValue 직접 사용
   const insertVariable = (variable: string, target: 'sms' | 'kakao') => {
@@ -324,6 +320,11 @@ export default function TargetSendModal({
     }
     if ((targetMsgType === 'LMS' || targetMsgType === 'MMS') && !targetSubject.trim()) {
       setToast({ show: true, type: 'error', message: '제목을 입력해주세요' });
+      return;
+    }
+    // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 발송하지 않는다(설계 D2 · 본문 아래 안내에서 바꾼다)
+    if (hasUnsupportedSmsChars(targetMessage, targetMsgType === 'SMS' ? '' : targetSubject)) {
+      setToast({ show: true, type: 'error', message: SMS_CHARSET_BLOCK_MESSAGE });
       return;
     }
 
@@ -518,6 +519,16 @@ export default function TargetSendModal({
                   : `무료수신거부 ${formatRejectNumber(optOutNumber)}`}
               </div>
             )}
+            {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다 */}
+            <SmsCharsetNotice
+              className="mt-3"
+              texts={[targetMessage, targetMsgType === 'SMS' ? '' : targetSubject]}
+              onApply={(fix) => {
+                const nextMessage = fix(targetMessage);
+                if (nextMessage !== targetMessage) { setTargetMessage(nextMessage); if (decorateUndo != null) setDecorateUndo(null); }
+                if (targetMsgType !== 'SMS' && fix(targetSubject) !== targetSubject) setTargetSubject(fix(targetSubject));
+              }}
+            />
           </div>
 
           {/* 도구줄 — 윗줄 = AI(추천·꾸미기) + 바이트 / 아랫줄 = 작성 도구(특수문자·보관함·문자 저장).

@@ -43,6 +43,8 @@ import {
 import { insertAtCursorPos } from '../utils/textInsert';
 import MmsImagePreview from './shared/MmsImagePreview';
 import AiRefineModal from './AiRefineModal';
+import SmsCharsetNotice from './SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import AlimtalkChannelPanel, {
   validateAlimtalkChannelState,
   type AlimtalkChannelState,
@@ -332,6 +334,11 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     }
     if ((directMsgType === 'LMS' || directMsgType === 'MMS') && !directSubject.trim()) {
       setToast({ show: true, type: 'error', message: '제목을 입력해주세요' });
+      return;
+    }
+    // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 발송하지 않는다(설계 D2 · 본문 아래 안내에서 바꾼다)
+    if (hasUnsupportedSmsChars(directMessage, directMsgType === 'SMS' ? '' : directSubject)) {
+      setToast({ show: true, type: 'error', message: SMS_CHARSET_BLOCK_MESSAGE });
       return;
     }
 
@@ -745,6 +752,15 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     </span>
                   </div>
                 </div>
+
+                {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다 */}
+                <SmsCharsetNotice
+                  texts={[directMessage, directMsgType === 'SMS' ? '' : directSubject]}
+                  onApply={(fix) => {
+                    setDirectMessage((prev) => fix(prev));
+                    if (directMsgType !== 'SMS' && fix(directSubject) !== directSubject) setDirectSubject(fix(directSubject));
+                  }}
+                />
 
                 {/* 발신번호 — 커스텀 드롭다운 (검색 + 스크롤) */}
                 {(() => {

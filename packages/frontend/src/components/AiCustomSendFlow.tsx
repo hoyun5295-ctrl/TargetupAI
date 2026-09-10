@@ -22,6 +22,8 @@ import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessa
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 import { toMmsImagePaths } from '../utils/mmsImage';
 import MmsImagePreview from './shared/MmsImagePreview';
+import SmsCharsetNotice from './SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 // ★ 2026-07-19 P4: 라이브러리 소재 → MMS 자동 변환 첨부
 import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
 import TargetRecipientsModal, { type TargetPageLoader } from './TargetRecipientsModal';
@@ -464,6 +466,10 @@ export default function AiCustomSendFlow({
     { key: 'minPurchaseAmount', label: '최소 구매금액', icon: '💰' },
     { key: 'extra', label: '기타 조건', icon: '📌' },
   ];
+
+  // ★ 2026-09-10 선택한 문안에 문자로 보낼 수 없는 글자가 남아 있으면 발송 확정을 막는다(설계 D2)
+  const selectedCharsetBlocked = !!variants[selectedVariantIdx]
+    && hasUnsupportedSmsChars(variants[selectedVariantIdx].message_text, channel === 'SMS' ? '' : variants[selectedVariantIdx].subject);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -1000,6 +1006,18 @@ export default function AiCustomSendFlow({
               ) : (
                 <div className="text-center py-8 text-gray-400">메시지를 불러오는 중...</div>
               )}
+              {/* ★ 2026-09-10 선택한 문안에 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다 */}
+              {!isGenerating && variants[selectedVariantIdx] && (
+                <SmsCharsetNotice
+                  className="mt-4"
+                  texts={[variants[selectedVariantIdx].message_text, channel === 'SMS' ? '' : variants[selectedVariantIdx].subject]}
+                  onApply={(fix) => setVariants((prev) => prev.map((v, i) => (i !== selectedVariantIdx ? v : {
+                    ...v,
+                    message_text: fix(v.message_text || ''),
+                    ...(channel !== 'SMS' && typeof v.subject === 'string' ? { subject: fix(v.subject) } : {}),
+                  })))}
+                />
+              )}
               {/* B16-03 + B17-12: 담당자 테스트 결과 표시 (자체 핸들러 결과 사용) */}
               {customTestResult && (
                 <div className="mt-3 mx-1 p-3 bg-gray-50 rounded-lg text-sm whitespace-pre-wrap border">
@@ -1075,8 +1093,9 @@ export default function AiCustomSendFlow({
                     {isSpamFilterLocked ? '🔒' : '🛡️'} 스팸필터
                   </button>
                 )}
-                {/* 발송 확정 버튼 */}
+                {/* 발송 확정 버튼 — ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 누를 수 없다(설계 D2 · 문안 아래 안내에서 바꾼다) */}
                 <button onClick={() => {
+                  if (selectedCharsetBlocked) return;
                   if (onConfirmSend && variants[selectedVariantIdx]) {
                     // ★ D91: SMS 바이트 초과 시 LMS 전환 확인 모달 (경고 대신 전환 옵션 제공)
                     const selectedMsg = variants[selectedVariantIdx].message_text || '';
@@ -1100,7 +1119,8 @@ export default function AiCustomSendFlow({
                       isAd: isAdLocal,
                     });
                   }
-                }} disabled={variants.length === 0}
+                }} disabled={variants.length === 0 || selectedCharsetBlocked}
+                  title={selectedCharsetBlocked ? SMS_CHARSET_BLOCK_MESSAGE : undefined}
                   className="flex items-center gap-2 px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white text-sm font-medium rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                   <CheckCircle2 className="w-4 h-4" /> 발송 확정 ({estimatedCount.toLocaleString()}명)
                 </button>

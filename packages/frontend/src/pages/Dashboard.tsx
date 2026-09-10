@@ -1008,12 +1008,6 @@ export default function Dashboard() {
     if (t.show && t.message) _toast[t.type](t.message);
   };
 
-  // B13-06: 이모지 감지 함수
-  const hasEmoji = (text: string): boolean => {
-    const emojiPattern = /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2300-\u23FF]|[\u2B50-\u2BFF]|[\uFE00-\uFE0F]|[\u200D]|[\u20E3]|[\uE000-\uF8FF]/g;
-    return emojiPattern.test(text);
-  };
-
   const [optOutNumber, setOptOutNumber] = useState('');
 
   // v1.5.0: 파일 업로드 오픈 전 싱크 차단 체크 (설계서 §4-4)

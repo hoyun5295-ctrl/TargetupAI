@@ -15,6 +15,8 @@ import { useToast } from './ToastProvider';
 import DmPublicLinkStatsPanel from './dm/DmPublicLinkStatsPanel';
 import TargetExtractModal, { type ExtractedTarget } from './TargetExtractModal';
 import AiRefineModal from './AiRefineModal';
+import SmsCharsetNotice from './SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import SpamFilterTestModal from './SpamFilterTestModal';
 import ConfirmModal, { type ConfirmState } from './ConfirmModal';
 import CreditConfirmModal from './credit/CreditConfirmModal';
@@ -377,6 +379,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     const isResend = !!resendIds && resendIds.length > 0;
     if (!isResend && (!target || target.channelEligibleCount === 0)) { toast.warning('먼저 타겟을 추출해주세요.'); return; }
     if (!messageText.trim()) { toast.warning('문자 본문을 작성해주세요.'); return; }
+    // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 발송하지 않는다(설계 D2 · 본문 아래 안내에서 바꾼다)
+    if (hasUnsupportedSmsChars(messageText)) { toast.warning(SMS_CHARSET_BLOCK_MESSAGE); return; }
     if (!callback) { toast.warning('발신번호를 선택해주세요. (발신번호 관리에서 등록)'); return; }
     if (isAd && opt080Loaded && !opt080) { toast.warning('광고성 발송은 무료수신거부(080) 번호가 필요합니다. 수신거부번호 설정에서 등록해주세요.'); return; }
     const scheduledAtVal = scheduleMode === 'immediate' ? null : scheduledAt;
@@ -524,6 +528,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                         <button key={v} onClick={() => insertVar(v)} title="커서 위치에 삽입" className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${v === '%DM링크%' ? 'border-fuchsia-400/40 text-fuchsia-200 bg-fuchsia-500/10' : 'border-white/10 text-white/60 bg-white/5 hover:bg-white/10'}`}>{v}</button>
                       ))}
                     </div>
+                    {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문을 대체표로 바꾼다 */}
+                    <SmsCharsetNotice tone="dark" className="mt-2" texts={[messageText]} onApply={(fix) => setMessageText((prev) => fix(prev))} />
                   </div>
 
                   {/* ★ 2026-07-02(5) 꾸미기 활용 필드 — 고객사 보유 필드 별도 선택(본문에 쓰인 필드 자동 선택 + 추가 토글). AI 오퍼레이터 '활용 가능 컬럼' 미러. */}
