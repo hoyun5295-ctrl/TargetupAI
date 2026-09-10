@@ -16,8 +16,6 @@ import { toQtmsgType } from './qtmsg-type';
 import { withSenderKey } from './alimtalk-emphasize';
 // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
 import { logCampaignTraining, getSourceRef } from './training-logger';
-// ★ 2026-09-10 통신사 규격 외 문자 정리(CT-46) — 배선 경위는 bulkInsertSmsQueue 주석.
-import { sanitizeForSms } from './message-sanitizer';
 
 export type { CampaignAggCounts } from './sms-table-split';
 
@@ -1320,37 +1318,6 @@ export async function bulkInsertSmsQueue(
   ctx?: SpamBlockContext,
 ): Promise<number> {
   if (rows.length === 0) return 0;
-
-  // ★ 2026-09-10 통신사 규격 외 문자 정리 — 적재 직전 마지막 관문.
-  //   ⛔ 0910 시세이도 MMS 864건: 본문에 en dash(U+2013 "–")가 들어가 게이트웨이가
-  //      "EUC-KR 인코딩 불가"로 전량 반려했다. 반려분은 Agent 저널에 claimed 로 남아
-  //      재시도만 돌고, stale 정리(10분 주기)가 우연히 풀 때까지 큐에 갇힌다. 그동안
-  //      담당자는 "대기에서 안 빠진다"만 보고 원인을 알 수 없다.
-  //   ⛔ 치환표(CT-46 message-sanitizer)는 이미 그 문자를 갖고 있었다. 그런데 부르는 곳이
-  //      저니·AI 경로 5곳뿐이라, 일반 캠페인 발송은 정리를 한 번도 안 거쳤다. 부품은 다 있는데
-  //      배선이 없어 죽어 있던 검사다.
-  //   여기는 소비처 17곳이 전부 지나는 길목이라 한 곳만 배선하면 전 발송 경로가 닫힌다.
-  //   막지 않고 고쳐서 보낸다 — 거부하면 발송이 멈추고, 통신사가 못 싣는 글자는 어차피 못 나간다.
-  //   금칙어 스냅샷보다 앞에 둔다: 탐지도 실제 나가는 문안을 봐야 한다.
-  let sanitizedFields = 0;
-  const sanitizeSamples = new Set<string>();
-  for (const row of rows) {
-    for (const idx of [2, 4]) {  // 2 = msg_contents, 4 = title_str
-      const value = row[idx];
-      if (typeof value !== 'string' || value === '') continue;
-      const cleaned = sanitizeForSms(value);
-      if (!cleaned.hadChanges) continue;
-      row[idx] = cleaned.sanitized;
-      sanitizedFields++;
-      for (const ch of [...cleaned.removedEmojis, ...cleaned.replacedChars]) {
-        if (sanitizeSamples.size < 10) sanitizeSamples.add(ch);
-      }
-    }
-  }
-  if (sanitizedFields > 0) {
-    console.log(`[sms-queue] 통신사 규격 외 문자 정리 ${sanitizedFields}건 `
-      + `(예: ${Array.from(sanitizeSamples).join(' ')})`);
-  }
 
   // ★ 2026-08-18 전송자격인증 5.2 — 금칙어 **탐지**(0819 탐지 전용 · 임계 경로 밖).
   //   발송이 실제로 시작되는 길목이 여기다(소비처 17곳이 전부 이 함수를 지난다).
