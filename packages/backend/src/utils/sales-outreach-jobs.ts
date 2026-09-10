@@ -32,7 +32,7 @@ import {
   // ★ v3 조립/발행 분리 · 자동 재조립 · 배너 전사 폴백 · AI 계수기
   assembleOutreachDm, publishOutreachDm, updateOutreachDm, produceResultOf, autoRetryReasons, bannerCardsFromTranscripts, assertLicensedQuoteSources,
   callOutreachAi, withOutreachAiMeter, newOutreachAiCost, addOutreachAiCost,
-  PUBLIC_BASE, OUTREACH_PREVIEW_DAYS, type OutreachMedia, type OutreachAiCost,
+  PUBLIC_BASE, OUTREACH_PREVIEW_DAYS, OUTREACH_CUTOUT_TRY_MAX, type OutreachMedia, type OutreachAiCost,
 } from './sales-outreach-produce';
 // ★ 2026-09-05(3) 브레인스토밍 수렴안 C4 — 재료 재선택·섹션 숨김 override·품질 경고(순수 CT · 잠금 0)
 import {
@@ -1524,7 +1524,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             skippedReason: '홈페이지 배너와 행사 카드가 충분해 생성 이미지를 만들지 않았습니다(실물 우선).',
             width: 0, height: 0, templateId: null, category: null, kind: null,
             media: media ? media.stats : null, mediaError,
-            posterTexts: null, cutoutSource: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
+            posterTexts: null, cutoutSource: null, cutoutFrom: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
             skipped: 'banners_and_cards',
             regenCount: regenSeqOf(sr, 'image'),
           }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
@@ -1532,12 +1532,20 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           // ★ 2026-09-09 v5(코덱스 자문 Q6 수용) — 포스터를 항상 만들게 되면서 스튜디오 예외가 잡 전체 실패(markFailed)로 번지면 안 된다 → 격리: 실패 = url null 행(표준 조립 히어로는 홈 배너로 폴백)
           let img: Awaited<ReturnType<typeof produceOutreachImage>> | null = null;
           let studioError: string | null = null;
+          // ★ 2026-09-09(6) 누끼 후보 순서 — 사람이 고른 이미지가 판정상 상품(또는 판정 없음)이면 앞, 배너·사진·문서면 상품 사본 뒤.
+          //   배너·정물을 누끼 따거나 누끼 없이 만들면 모델이 병·패키지를 지어내 브랜드 것처럼 실린다(톤28 2차 실측 B-0909-3).
+          const selectedSrc: string | null = bp.selectedImageUrl ? String(bp.selectedImageUrl) : null;
+          const selectedCopy = selectedSrc && media ? (media.gallery || []).find((g) => g.srcUrl === selectedSrc) : undefined;
+          const selectedKind = selectedCopy && media?.imageKinds ? (media.imageKinds[selectedCopy.url]?.kind || null) : null;
+          const productCutouts = (media?.products || []).map((p) => String(p.image_url || '')).filter(Boolean).slice(0, OUTREACH_CUTOUT_TRY_MAX);
+          const cutoutOrder = (selectedKind === null || selectedKind === 'product' ? [selectedSrc, ...productCutouts] : [...productCutouts, selectedSrc]).filter((u): u is string => !!u);
           try {
             img = await produceOutreachImage({
               jobId,
               companyName: job.company_name,
               industry: job.industry_category,
-              selectedImageUrl: bp.selectedImageUrl || null,
+              selectedImageUrl: cutoutOrder[0] || null,
+              cutoutCandidates: cutoutOrder.slice(1),
               regenSeq: regenSeqOf(sr, 'image'),
               brandColor,
               // ★ 2026-09-06 S3 문구 3칸 재료 · 실측 배너 0장이면 16:9 배너 1장
@@ -1556,7 +1564,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               skippedReason: `생성 이미지를 만들지 못했습니다(${studioError || '원인 미상'}). 히어로는 홈 배너로 대신합니다.`,
               width: 0, height: 0, templateId: null, category: null, kind: null,
               media: media ? media.stats : null, mediaError,
-              posterTexts: null, cutoutSource: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
+              posterTexts: null, cutoutSource: null, cutoutFrom: null, posterScore: null, posterRegenerated: false, bannerUrl: null, bannerSize: null,
               skipped: 'studio_error', studioError,
               regenCount: regenSeqOf(sr, 'image'),
             }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
@@ -1566,7 +1574,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             templateId: img.templateId, category: img.category, kind: img.kind,
             media: media ? media.stats : null, mediaError,
             // ★ S3 근거 패널·이메일 히어로 폴백
-            posterTexts: img.posterTexts, cutoutSource: img.cutoutSource, posterScore: img.posterScore, posterRegenerated: img.posterRegenerated,
+            posterTexts: img.posterTexts, cutoutSource: img.cutoutSource, cutoutFrom: img.cutoutFrom, posterScore: img.posterScore, posterRegenerated: img.posterRegenerated,
             bannerUrl: img.bannerUrl, bannerSize: img.bannerSize,
             regenCount: regenSeqOf(sr, 'image'),
           }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;

@@ -83,6 +83,10 @@ describe('증거 카드 중복 제거 · 포스터 배경 힌트 · 톤 규칙',
   it('포스터 배경 힌트 = 브랜드 색 톤 + 깨끗한 스튜디오 + 상단 문구 자리 · 색이 없으면 중립 배경', () => {
     expect(posterStyleHint('#2f7d5b')).toContain('brand accent color #2f7d5b');
     expect(posterStyleHint('#2f7d5b')).toContain('top 30% calm');
+    // ★ 0909(6) 누끼 유무별 상품 금지 — 첨부 상품만 상품 · 첨부 없으면 상품 0(모델이 병·패키지를 지어내던 톤28 실측 차단) · 미지정은 옛 문구 그대로
+    expect(posterStyleHint('#2f7d5b', true)).toContain('the attached product is the ONLY product');
+    expect(posterStyleHint('#2f7d5b', false)).toContain('no products at all');
+    expect(posterStyleHint('#2f7d5b')).not.toMatch(/ONLY product|no products at all/);
     expect(posterStyleHint(null)).toContain('neutral soft backdrop');
     expect(OUTREACH_GENERATION_RULES).toContain('범용 문구를 쓰지 마라');
     expect(OUTREACH_GENERATION_RULES).toContain('그 수치로 text_card 를 만들지 마라');

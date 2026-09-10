@@ -568,21 +568,43 @@ export async function smsExecAll(tables: string[], sqlTemplate: string, params: 
 // QTmsg Agent가 처리 완료(rsv1=5) 시 LIVE → LOG(SMSQ_SEND_X_YYYYMM) 이동
 // 결과 조회 시 LIVE + LOG 모두 조회해야 정확한 성공/실패 집계 가능
 let _logTableCache: Set<string> | null = null;
+let _liveTableCache: Set<string> | null = null;
 let _logTableCacheTs = 0;
 
-async function getExistingLogTables(): Promise<Set<string>> {
+/**
+ * ★ 2026-09-10 — information_schema 1회 조회로 실존 SMSQ_SEND_*를 LIVE/LOG로 갈라 캐시(5분).
+ *
+ * 종전에는 같은 조회 결과에서 LOG만 남기고 LIVE를 버렸다. 그 탓에 getAllSmsTablesWithLogs의
+ * LIVE 축이 env(SMS_TABLES)가 됐고, env에 없는 비토 라인(SMSQ_SEND_13·14·15)은 MySQL에
+ * 실존하는데도 "미실존" 판정을 받았다. 그 판정 하나로 resolveCampaignTableGroups가 캠페인의
+ * send_config.sentTables 기록을 통째로 버리고 현재 라인그룹 fallback으로 떨어져, 실제 적재
+ * 테이블을 못 보고 성공·실패·대기가 전부 0이 됐다 (0910 리스킨_대행 18,005건 — 전송만 표시,
+ * MySQL에는 status_code 6이 17,065건 정상 기록. 발송도 결과 기록도 멀쩡한데 화면만 0).
+ *
+ * 실존 판정은 DB에 묻는다. env는 "발송 대상 라인 풀"을 정하는 축이지 실존 목록이 아니다.
+ */
+async function loadSmsTableSets(): Promise<{ live: Set<string>; logs: Set<string> }> {
   const now = Date.now();
-  if (_logTableCache && (now - _logTableCacheTs) < 5 * 60 * 1000) {
-    return _logTableCache;
+  if (_logTableCache && _liveTableCache && (now - _logTableCacheTs) < 5 * 60 * 1000) {
+    return { live: _liveTableCache, logs: _logTableCache };
   }
   const rows = await mysqlQuery(
     `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'SMSQ_SEND_%'`
   ) as any[];
   const logPattern = /^SMSQ_SEND_\d+_\d{6}$/;
-  const tables = new Set(rows.map((r: any) => r.TABLE_NAME).filter((n: string) => logPattern.test(n)));
-  _logTableCache = tables;
+  const livePattern = /^SMSQ_SEND_\d+$/;
+  const names = rows.map((r: any) => String(r.TABLE_NAME));
+  const logs = new Set(names.filter((n: string) => logPattern.test(n)));
+  const live = new Set(names.filter((n: string) => livePattern.test(n)));
+  _logTableCache = logs;
+  _liveTableCache = live;
   _logTableCacheTs = now;
-  return tables;
+  return { live, logs };
+}
+
+/** 실존 LOG 테이블 집합. 반환 계약은 종전과 동일(LOG만) — 소비처 5곳 무접촉. */
+async function getExistingLogTables(): Promise<Set<string>> {
+  return (await loadSmsTableSets()).logs;
 }
 
 /**
@@ -623,8 +645,17 @@ export async function getCompanySmsTablesWithLogsRange(companyId: string, months
  * admin.ts의 sms-detail 등 어드민 범위 조회에서 사용.
  */
 export async function getAllSmsTablesWithLogs(): Promise<string[]> {
-  const existingLogs = await getExistingLogTables();
-  return [...ALL_SMS_TABLES, ...Array.from(existingLogs)];
+  // ★ 2026-09-10: LIVE 축을 env(ALL_SMS_TABLES) → MySQL 실측으로 교체.
+  //   이 함수의 유일 소비처는 stats-aggregation.resolveCampaignTableGroups의 실존 교차 검증이라
+  //   "실존"을 실제 DB에 물어야 한다. 경위·증상은 loadSmsTableSets 주석.
+  //   ⛔ env(SMS_TABLES)는 그대로 둔다. ensureMonthlyLogTables(월별 LOG 자동 생성)와
+  //   BULK_ONLY_TABLES(미할당 고객사의 비토 유입 차단)가 env를 축으로 삼고 있고, env에 비토 라인을
+  //   넣으면 그 라인에 LOG가 생겨 classifyResultTables가 LIVE를 대기 전용으로 강등한다 — 결과는
+  //   LOG에서만 세는데 비토는 QTmsg의 rsv1=5 이관을 쓰지 않아 LOG가 영영 비고 성공이 다시 0이 된다.
+  const { live, logs } = await loadSmsTableSets();
+  // 실측이 비면(조회 실패 등) env로 물러선다 — 종전 동작과 같아질 뿐 악화하지 않는다.
+  const liveTables = live.size > 0 ? Array.from(live) : ALL_SMS_TABLES;
+  return [...liveTables, ...Array.from(logs)];
 }
 
 /**
@@ -866,8 +897,9 @@ export async function ensureMonthlyLogTables(): Promise<void> {
       }
     }
 
-    // 캐시 무효화
+    // 캐시 무효화 — LIVE·LOG는 같은 조회로 채우므로 함께 비운다
     _logTableCache = null;
+    _liveTableCache = null;
     _logTableCacheTs = 0;
   } catch (err) {
     console.error('[QTmsg] 로그 테이블 자동 생성 에러:', err);

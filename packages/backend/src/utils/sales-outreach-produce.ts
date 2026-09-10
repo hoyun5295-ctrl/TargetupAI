@@ -590,6 +590,8 @@ export interface OutreachImageResult {
   /** ★ 2026-09-06 S3 포스터 문구 3칸(코드가 찍은 것 · 비운 칸은 null) · 누끼 경로 · 유출 검사 · 16:9 배너 */
   posterTexts: OutreachPosterTexts;
   cutoutSource: 'alpha_png' | 'rembg' | null;
+  /** ★ 2026-09-09(6) 누끼를 딴 원천 URL(선택 이미지 또는 상품 사본) · 누끼 0 = null */
+  cutoutFrom: string | null;
   posterScore: PosterScore | null;
   posterRegenerated: boolean;
   bannerUrl: string | null;
@@ -614,10 +616,14 @@ export function posterCategoryLabel(quote: string | null | undefined, industry: 
 /** 스튜디오 공용 혜택 패턴이 안 보는 아웃리치 혜택어(면허 없는 판촉 낱말) — 이미지 글자 게이트 전용 */
 const POSTER_EXTRA_REJECT_RE = /특가|핫딜/;
 /** ★ 0906(3) 포스터 배경 지시 — 브랜드 팔레트 톤 + 깨끗한 스튜디오(히어로 밴드 · 카드 · CTA 와 한 색 체계) · 문구 자리는 비워 둔다(서버 타이포) */
-export function posterStyleHint(brandColor: string | null): string {
+/** ★ 2026-09-09(6) 누끼 유무별 상품 금지 지시 — 모델이 병·튜브·상자를 지어내 브랜드 것처럼 실은 실측(톤28 2차) 차단. 첨부 상품만 상품이다 · 첨부가 없으면 상품 0. */
+export const OUTREACH_CUTOUT_TRY_MAX = 3;
+export function posterStyleHint(brandColor: string | null, hasProduct: boolean | null = null): string {
   return [
     brandColor ? `brand accent color ${brandColor}, backdrop tinted softly toward this color` : 'neutral soft backdrop in warm off-white',
     'clean studio lighting, minimal props, no text, keep the top 30% calm and uncluttered for typography',
+    ...(hasProduct === true ? ['the attached product is the ONLY product in the scene: do not add, invent or draw any other bottles, jars, tubes, boxes, packaging, containers or labels'] : []),
+    ...(hasProduct === false ? ['no products at all: no bottles, jars, tubes, boxes, packaging, containers or labels of any kind, scenery, materials and light only'] : []),
   ].join(' · ');
 }
 
@@ -850,6 +856,8 @@ export async function produceOutreachImage(input: {
   siteTitle?: string | null;
   /** ★ S3 실측 배너가 0장일 때만 16:9 배너 1장을 더 만든다(회의 수렴안 · 원가 = 그때만) */
   wantBanner?: boolean;
+  /** ★ 2026-09-09(6) 누끼 후보(순서 · 선택 이미지 뒤) — 상품 사본 상위 3. 선택 이미지가 배너·사진이면 호출부가 상품을 앞에 둔다 */
+  cutoutCandidates?: readonly string[];
 }): Promise<OutreachImageResult> {
   const ctx = getOutreachContext();
   if (!ctx) throw new Error('OUTREACH_COMPANY_ID·OUTREACH_USER_ID가 설정되지 않았습니다.');
@@ -867,8 +875,12 @@ export async function produceOutreachImage(input: {
     let personJudge: PersonJudge | null = null;
     let skippedReason: string | null = null;
 
-    if (input.selectedImageUrl) {
-      const img = await fetchImageGuarded(input.selectedImageUrl);
+    // ★ 2026-09-09(6) 누끼 원천 = 순서 있는 후보 목록(사람이 고른 이미지 → 상품 사본 상위 3 · 최대 3번 시도). 첫 후보가 배너·사진이라 누끼가 안 나오면
+    //   상품 사진에서 딴다(톤28 2차 실측: 누끼 없이 '이벤트' 템플릿으로 가 모델이 지어낸 병·패키지가 히어로에 실렸다). 누끼가 나오면 멈춘다.
+    let cutoutFrom: string | null = null;
+    const cutoutSources = [input.selectedImageUrl, ...(input.cutoutCandidates || [])].filter((u, i, arr): u is string => !!u && arr.indexOf(u) === i).slice(0, OUTREACH_CUTOUT_TRY_MAX);
+    for (const srcUrl of cutoutSources) {
+      const img = await fetchImageGuarded(srcUrl);
       if (!img) {
         skippedReason = '선택한 이미지를 내려받지 못해 생성 이미지로만 제작했습니다.';
       } else {
@@ -906,6 +918,8 @@ export async function produceOutreachImage(input: {
           }
         }
       }
+      if (cutout) { cutoutFrom = srcUrl; skippedReason = null; break; }
+      console.log('[sales-outreach] 누끼 후보 건너뜀(다음 후보):', input.jobId, srcUrl.slice(0, 120), skippedReason);
     }
 
     // ★ S3 문구 3칸(원문 대조본만 · 숫자·혜택어 0) — 프롬프트에는 문구를 넘기지 않고(배경만 생성 · 상단 문구 구역 확보) 서버 합성이 코드로 찍는다(오철자 0 · 잠금이 못 보는 면에 글자를 코드가 보증)
@@ -920,7 +934,7 @@ export async function produceOutreachImage(input: {
       preset,
       texts: {},
       hasProduct: !!cutout,
-      userHint: posterStyleHint(input.brandColor || null),
+      userHint: posterStyleHint(input.brandColor || null, !!cutout),
       textPosition: 'top',
     });
     void cutoutPath;
@@ -967,7 +981,7 @@ export async function produceOutreachImage(input: {
       try {
         const bPreset = resolvePreset('email-hero');
         const bTemplate = pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}:banner`, !!cutout);
-        const bPrompt = buildPosterPrompt({ template: bTemplate, preset: bPreset, texts: {}, hasProduct: !!cutout, userHint: posterStyleHint(input.brandColor || null), textPosition: 'bottom' });
+        const bPrompt = buildPosterPrompt({ template: bTemplate, preset: bPreset, texts: {}, hasProduct: !!cutout, userHint: posterStyleHint(input.brandColor || null, !!cutout), textPosition: 'bottom' });
         const b = await generatePoster(bPrompt, bPreset, cutout);
         const bExt = b.mime.includes('png') ? 'png' : 'jpeg';
         const bTempId = writeTempBuffer(ctx.companyId, Buffer.from(b.base64, 'base64'), { kind: 'poster', ext: bExt, mime: b.mime, prompt: bPrompt, presetKey: 'email-hero', channelSpec: 'email', width: null, height: null });
@@ -999,6 +1013,7 @@ export async function produceOutreachImage(input: {
       kind: template.kind === 'event' ? 'event' : 'product',
       posterTexts,
       cutoutSource,
+      cutoutFrom,
       posterScore,
       posterRegenerated,
       bannerUrl,
@@ -1430,7 +1445,8 @@ export function headlineFromCard(card: { title: string } | null | undefined, lic
   const raw = String(card?.title || '').replace(CARD_DATE_TOKEN_RE, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
   if (!raw || !/[가-힣A-Za-z]{2,}/.test(raw)) return { headline: '', demoted: true };
   if (licensed) return { headline: cutAtWord(raw, 18), demoted: false };
-  const base = raw.replace(CARD_BENEFIT_TOKEN_RE, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
+  // ★ 2026-09-09(6) 수치를 걷어낸 뒤 비어 버린 괄호("<3+1>" → "< >")는 찌꺼기다 → 통째로 뺀다(톤28 실측 "오늘핫딜 < > 지성두피")
+  const base = raw.replace(CARD_BENEFIT_TOKEN_RE, ' ').replace(/[<(\[［（【]\s*[>)\]］）】]/g, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
   const head = cutAtWord(base, 18);
   if (head.length < 6 || !/[가-힣A-Za-z]{2,}/.test(head)) return { headline: '', demoted: true };
   return { headline: head, demoted: false };
@@ -2055,7 +2071,20 @@ function heroBannerCopyOf(input: Pick<ProduceDmInput, 'heroBanners'>, media: Out
  * 히어로 = 스튜디오 포스터(행사 문구를 얹어 생성 · input.posterUrl) → 홈 캠페인 배너 사본 → 카드1 배너 사본. 상품 = 사람이 고른 재료 상위 6.
  * 행사 = 선택 카드(≤3 · 제목·기간 줄·배너 사본·링크) + 그 카드의 슬라이스(판정 선별 · ≤3). 상품·행사가 둘 다 없으면 null(옛 AI 골격으로).
  */
-function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>, media: OutreachMedia | null): { hero: StandardHero | null; products: SliceProduct[]; events: StandardEvent[]; ctaLabel: string; ctaUrl: string } | null {
+/** ★ 2026-09-09(6) 제목 안 상품명 대조(순수) — 공백·괄호·구두점을 뺀 4자 이상 상품명이 제목에 그대로 들어 있으면 그 상품(사본 URL·링크 있는 것만 · 가장 긴 이름 우선) */
+export function matchProductInTitle(title: string, products: ReadonlyArray<Pick<OutreachProduct, 'name' | 'image_url' | 'link_url'>>): { image_url: string; link_url: string; name: string } | null {
+  const squash = (s: string) => String(s || '').toLowerCase().replace(/[\s\[\]()<>【】（）［］·,.\-_/:|+]+/g, '');
+  const t = squash(title);
+  if (t.length < 4) return null;
+  const hits = (products || [])
+    .filter((p) => p && p.image_url && p.link_url)
+    .map((p) => ({ p, key: squash(String(p.name || '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '')) }))
+    .filter((x) => x.key.length >= 4 && t.includes(x.key))
+    .sort((a, b) => b.key.length - a.key.length);
+  return hits.length ? { image_url: String(hits[0].p.image_url), link_url: String(hits[0].p.link_url), name: String(hits[0].p.name) } : null;
+}
+
+export function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>, media: OutreachMedia | null): { hero: StandardHero | null; products: SliceProduct[]; events: StandardEvent[]; ctaLabel: string; ctaUrl: string } | null {
   const cards = (input.eventCards || []).filter((c) => c && String(c.title || '').trim());
   const products = sliceProductsOf(media?.products || []).slice(0, OUTREACH_STD_PRODUCTS_MAX);
   if (!products.length && !cards.length) return null;
@@ -2079,8 +2108,16 @@ function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput, 'compa
     const slices = isSliceCard ? selectEventSlices(media?.slices || [], media?.imageKinds || null, OUTREACH_STD_EVENT_SLICES_MAX) : [];
     // ★ 코덱스 자문(0909) 수용 — 정제에서 탈락(demoted)한 제목을 원문으로 되살리면 면허 없는 수치가 preset 경로(차단기 0)로 나간다 → 정제본이 짧으면 중립 문구
     const title = h.demoted ? (h.headline.length >= 2 ? h.headline : '진행 중인 행사') : h.headline;
+    // ★ 2026-09-09(6) 슬라이스가 있으면 카드 이미지 = 첫 슬라이스(카드 배너 사본과 같은 원본이 두 번 실리던 실측 차단 · 갤러리는 나머지)
+    let imageUrl: string | null = slices[0]?.url || c.bannerUrl || null;
+    let linkUrl = String(c.detailUrl || homeUrl);
+    // ★ 2026-09-09(6) 글자 카드(인용문 후보)에 상품명이 들어 있으면 그 상품의 사진·링크를 붙인다(톤28 "오늘핫딜 … 다시마 샴푸바" = 사진 0 · 링크 홈)
+    if (!imageUrl) {
+      const matched = matchProductInTitle(c.title, media?.products || []);
+      if (matched) { imageUrl = matched.image_url; if (!c.detailUrl || normalizeUrlKey(c.detailUrl) === normalizeUrlKey(homeUrl)) linkUrl = matched.link_url; }
+    }
     return {
-      title, periodLine: periodLineOf(c.periodRaw), imageUrl: c.bannerUrl || (slices[0]?.url || null), linkUrl: String(c.detailUrl || homeUrl),
+      title, periodLine: periodLineOf(c.periodRaw), imageUrl, linkUrl,
       ctaLabel: sliceCtaLabel(c.title, input.companyName, eventCtaLabel(c)), slices,
     };
   });
