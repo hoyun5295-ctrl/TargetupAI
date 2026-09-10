@@ -14,6 +14,7 @@ import AgencyPreviewModal from './AgencyPreviewModal';
 import AgencyEventLog from './AgencyEventLog';
 import SmsCharsetNotice from '../SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
+import { withMmsImageNames } from '../../utils/mmsImage';
 import {
   CUI_BTN_DANGER, CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_CELL_META, CUI_DANGER_BOX, CUI_DANGER_ICON,
   CUI_DANGER_TEXT, CUI_HINT, CUI_INFO, CUI_INFO_ICON, CUI_INFO_TEXT, CUI_INPUT, CUI_LABEL, CUI_MODAL,
@@ -307,7 +308,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
           total={preview?.total || req.recipientCount}
           messageType={req.messageType}
           callbackNumber={req.callbackNumber}
-          images={Array.isArray(req.mmsImagePaths) ? req.mmsImagePaths : []}
+          // ★2026-09-10 저장한 원본 파일명으로 보인다(없는 옛 접수는 저장 파일명 그대로)
+          images={Array.isArray(req.mmsImagePaths) ? withMmsImageNames(req.mmsImagePaths, req.mmsImageNames) : []}
           loading={previewLoading}
           error={previewError}
         />

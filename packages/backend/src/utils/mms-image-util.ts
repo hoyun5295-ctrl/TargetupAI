@@ -38,6 +38,28 @@ export function getMmsImageDisplayName(item: MmsImageItem): string {
 }
 
 /**
+ * ★2026-09-10 표시용 원본 파일명 배열을 경로 배열과 같은 길이로 맞춘다(대행발송 `mms_image_names` · 임은지 접수).
+ * 모자라면 빈칸 · 넘치면 자름 · 문자열이 아니면 빈칸 · 장당 200자. 빈칸은 표시 CT가 저장 파일명으로 대신한다.
+ * ⛔ 이 값은 표시 전용이다. 발송 배관(QTmsg file_name)은 경로 배열만 읽는다.
+ */
+export function alignMmsImageNames(names: unknown, count: number): string[] {
+  const src = Array.isArray(names) ? names : [];
+  return Array.from({ length: Math.max(0, count) }, (_, i) =>
+    (typeof src[i] === 'string' ? toDisplayName(src[i] as string) : ''));
+}
+
+/**
+ * 코드 포인트 단위로 200자에서 자르고, 짝 없는 서로게이트는 버린다.
+ * ⛔ UTF-16 단위로 자르면 이모지가 반쪽으로 남고, PG jsonb가 그 값을 거절해 **접수 INSERT가 통째로 실패**한다.
+ */
+function toDisplayName(raw: string): string {
+  return Array.from(raw.trim())
+    .filter((ch) => !/^[\uD800-\uDFFF]$/.test(ch))
+    .slice(0, 200)
+    .join('');
+}
+
+/**
  * 배열 전체를 절대경로 string[]로 정규화 (QTmsg용).
  * null/undefined 항목 제거.
  */

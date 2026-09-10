@@ -5,6 +5,12 @@
  * ⛔ 프론트가 자격을 다시 계산하지 않는다. `agency_send_allowed`와 API 응답만 믿는다.
  */
 
+/**
+ * ★2026-09-10 대행발송 이미지 업로드 = 서버가 규격(JPG · 300KB)에 맞춰 받는다(임은지 접수 cmttqx2gy0c8sjnotlvs441r1).
+ * 화면 접수·원스텝 두 화면이 이 한 벌로 공용 업로드 훅(useMmsUpload)에 넘긴다. 메일 접수와 같은 서버 함수를 지난다.
+ */
+export const AGENCY_MMS_UPLOAD = { uploadUrl: '/api/agency-send/mms-image', autoFit: true } as const;
+
 export type AgencySendStatus =
   | 'received' | 'testing' | 'awaiting_approval' | 'test_failed' | 'approved'
   | 'final_testing' | 'queued' | 'reapproval' | 'expired' | 'cancelling' | 'cancelled' | 'sent';
@@ -31,6 +37,8 @@ export interface AgencySendRequest {
    */
   revision: number;
   mmsImagePaths: string[];
+  /** ★2026-09-10 이미지 원본 파일명(경로와 같은 순서 · 표시 전용). 옛 접수·DDL 전은 null */
+  mmsImageNames?: string[] | null;
   requestedAt: string;
   recipientCount: number;
   fileName: string | null;
@@ -148,6 +156,8 @@ export interface CreateAgencyRequestInput {
   managerPhones: string[];
   requestedAt: string;
   mmsImagePaths?: string[];
+  /** ★2026-09-10 이미지 원본 파일명(경로와 같은 순서 · 상세 미리보기 표시용) */
+  mmsImageNames?: string[];
   fileName?: string | null;
   phoneColumn: string;
   varMapping: Record<string, string>;
@@ -241,6 +251,8 @@ export interface OneStepOverrides {
   /** 항상 보낸다. 빈 배열 = 전부 지웠다는 의도이고 서버가 반려한다 */
   managerPhones?: string[];
   mmsImagePaths?: string[];
+  /** ★2026-09-10 이미지 원본 파일명(경로와 같은 순서 · 표시 전용) */
+  mmsImageNames?: string[];
   /** 수신자(휴대폰 번호) 열 직접 선택. 자동 선정이 애매한 파일 대비 */
   phoneColumn?: string;
   /**

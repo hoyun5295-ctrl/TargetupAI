@@ -15,7 +15,7 @@
  */
 import { query } from '../config/database';
 import { LIMITS } from '../config/defaults';
-import { isJpegBuffer } from './mms-image-util';
+import { describeMmsFitFailure, fitMmsImage } from './mms-image-fit';
 
 /**
  * 발신 주소 정규화: `"홍길동" <a@b.com>` 에서 주소만 추출 → lower → trim. plus-tag 보존.
@@ -163,10 +163,13 @@ export function describeAccountLabel(candidates: SenderCandidate[], userId: stri
 }
 
 // ─────────────────────────────────────────────────────────────
-// MMS 이미지 첨부 규격 (★2026-08-28 서수란 접수 cmtclkuhe04iujnotbi3xbuu3 · Harold 확정)
+// MMS 이미지 첨부 (★2026-08-28 서수란 접수 cmtclkuhe04iujnotbi3xbuu3 · Harold 확정)
 //   메일 접수도 이미지 최대 3장을 요청서와 별도 파일로 첨부해 MMS를 보낼 수 있다.
-//   규격이면 그대로 접수, 벗어나면 파일별 사유로 반려한다(변환하지 않는다 · 파이썬 서비스 의존 0).
-//   ⛔ 판정은 확장자·MIME이 아니라 파일 실체(JPG SOI 바이트)로 한다 — 무인증에 가까운 입구에서
+//   ★2026-09-10 임은지 접수 cmttqx2gy0c8sjnotlvs441r1 · Harold 확정 "변환은 문제가 아니다":
+//     규격(JPG 실체 · 300KB)이면 원본 그대로, 벗어나면 `fitMmsImage`가 맞춘다(화면 접수와 같은 함수).
+//     맞추지 못한 파일(못 읽는 형식·손상·HEIC)만 파일별 사유로 반려한다. 변환은 같은 프로세스의 sharp다
+//     (파이썬 서비스 의존 0 — 옛 "변환하지 않는다"의 근거였던 외부 서비스 장애 전파가 없다).
+//   ⛔ 규격 판정은 확장자·MIME이 아니라 파일 실체(JPG SOI 바이트)로 한다 — 무인증에 가까운 입구에서
 //     받은 바이너리가 디스크에 닿는 첫 경로다(화면 업로드보다 한 단계 강하게).
 // ─────────────────────────────────────────────────────────────
 
@@ -192,32 +195,37 @@ export function mailImageName(att: MailImageAttachment, index: number): string {
   return n || `이미지 ${index + 1}`;
 }
 
+/** 접수에 실을 이미지 한 장(맞춘 뒤의 바이트) */
+export interface PreparedMailImage {
+  name: string;
+  buffer: Buffer;
+  /** 원본을 바꿨는가(규격 안 JPG면 false = 원본 바이트 그대로) */
+  converted: boolean;
+  fromBytes: number;
+  toBytes: number;
+}
+
 /**
- * 이미지 첨부 규격 검사: 최대 장수(LIMITS.mmsImageCount) · 각각 JPG 실체 · 장당 300KB(LIMITS.mmsImageSize).
+ * 이미지 첨부 준비: 최대 장수(LIMITS.mmsImageCount)를 먼저 보고, 장마다 규격에 맞춘다(`fitMmsImage`).
  * 반려 사유는 파일별로 만든다(어느 파일이 왜 걸렸는지 없이는 사용자가 고칠 수 없다).
+ * ⛔ 장수 초과면 변환을 시작하지 않는다(어차피 반려할 메일에 CPU를 쓰지 않는다).
  */
-export function validateMailMmsImages(atts: MailImageAttachment[]): { ok: boolean; reasons: string[] } {
-  const reasons: string[] = [];
+export async function prepareMailMmsImages(
+  atts: MailImageAttachment[],
+): Promise<{ ok: boolean; reasons: string[]; images: PreparedMailImage[] }> {
   if (atts.length > LIMITS.mmsImageCount) {
-    reasons.push(`이미지가 ${atts.length}장입니다. 최대 ${LIMITS.mmsImageCount}장까지 첨부할 수 있습니다.`);
+    return { ok: false, reasons: [`이미지가 ${atts.length}장입니다. 최대 ${LIMITS.mmsImageCount}장까지 첨부할 수 있습니다.`], images: [] };
   }
-  const maxKb = Math.floor(LIMITS.mmsImageSize / 1024);
-  let oversize = false;
-  atts.forEach((att, i) => {
-    const name = mailImageName(att, i);
-    const buf = att.content || null;
-    if (!isJpegBuffer(buf)) {
-      reasons.push(`${name}: JPG 파일만 받습니다. JPG로 저장해 다시 첨부해 주세요.`);
-      return;
+  const reasons: string[] = [];
+  const images: PreparedMailImage[] = [];
+  for (let i = 0; i < atts.length; i++) {
+    const name = mailImageName(atts[i], i);
+    const r = await fitMmsImage(atts[i].content || Buffer.alloc(0));
+    if (!r.ok) {
+      reasons.push(describeMmsFitFailure(name, r.reason));
+      continue;
     }
-    const size = buf ? buf.length : (att.size || 0);
-    if (size > LIMITS.mmsImageSize) {
-      oversize = true;
-      reasons.push(`${name}: ${Math.ceil(size / 1024)}KB입니다. ${maxKb}KB 이하로 줄여 주세요.`);
-    }
-  });
-  if (oversize) {
-    reasons.push('용량이 큰 이미지는 화면 접수에서 라이브러리 소재로 올리면 규격에 맞게 자동 변환됩니다.');
+    images.push({ name, buffer: r.buffer, converted: r.converted, fromBytes: r.fromBytes, toBytes: r.toBytes });
   }
-  return { ok: reasons.length === 0, reasons };
+  return { ok: reasons.length === 0, reasons, images: reasons.length === 0 ? images : [] };
 }

@@ -7,7 +7,7 @@ import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
 interface MmsUploadModalProps {
   show: boolean;
   onClose: () => void;
-  mmsUploadedImages: { serverPath: string; url: string; filename: string; originalName?: string; size: number }[];
+  mmsUploadedImages: { serverPath: string; url: string; filename: string; originalName?: string; size: number; converted?: boolean }[];
   mmsUploading: boolean;
   handleMmsSlotUpload: (file: File, slotIdx: number) => void;
   handleMmsMultiUpload: (files: FileList) => void;
@@ -18,6 +18,11 @@ interface MmsUploadModalProps {
   errorMessage?: string | null;
   /** ★ 2026-07-19 P4: 라이브러리 소재 → MMS 자동 변환 첨부 (useMmsUpload.handleMmsFromAsset). 미전달 = 버튼 미노출(하위호환). */
   handleMmsFromAsset?: (assetId: string) => void;
+  /**
+   * ★2026-09-10 서버가 규격(JPG · 300KB)에 맞춰 받는 업로드(대행발송 · useMmsUpload autoFit과 짝).
+   * 규격 안내·파일 선택 형식이 바뀌고, 서버가 바꾼 사진에 "자동 맞춤" 표시가 붙는다. 미전달 = 지금 그대로.
+   */
+  autoFit?: boolean;
 }
 
 /**
@@ -35,6 +40,7 @@ export default function MmsUploadModal({
   onConfirm,
   errorMessage,
   handleMmsFromAsset,
+  autoFit = false,
 }: MmsUploadModalProps) {
   // ★ 훅은 조기 return 위에 (조건부 렌더 컴포넌트 훅 개수 불일치 크래시 차단 — 2026-07-06 교훈)
   const [libOpen, setLibOpen] = useState(false);
@@ -42,6 +48,8 @@ export default function MmsUploadModal({
   if (!show) return null;
 
   const remaining = 3 - mmsUploadedImages.length;
+  // 자동 맞춤이면 사진 형식은 서버가 판정한다(브라우저 선택창은 사진 전체를 보여 준다)
+  const accept = autoFit ? 'image/*' : '.jpg,.jpeg';
 
   return createPortal(
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -64,12 +72,21 @@ export default function MmsUploadModal({
 
         {/* 규격 안내 */}
         <div className="px-6 py-3 border-b border-white/10 bg-white/[0.03]">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-white/55">
-            <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 형식 <span className="font-semibold text-white/85">JPG/JPEG</span></div>
-            <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 용량 <span className="font-semibold text-white/85">300KB 이하</span></div>
-            <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 최대 <span className="font-semibold text-white/85">3장</span></div>
-            <div className="flex items-center gap-1.5"><span className="text-white/25">•</span> <span className="text-white/40">PNG/GIF 미지원</span></div>
-          </div>
+          {autoFit ? (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-white/55">
+              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 형식 <span className="font-semibold text-white/85">JPG · PNG 등 사진</span></div>
+              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 용량 <span className="font-semibold text-white/85">큰 사진도 가능</span></div>
+              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 최대 <span className="font-semibold text-white/85">3장</span></div>
+              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> <span className="text-white/70">규격(JPG · 300KB)에 맞게 자동으로 줄입니다</span></div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-white/55">
+              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 형식 <span className="font-semibold text-white/85">JPG/JPEG</span></div>
+              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 용량 <span className="font-semibold text-white/85">300KB 이하</span></div>
+              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 최대 <span className="font-semibold text-white/85">3장</span></div>
+              <div className="flex items-center gap-1.5"><span className="text-white/25">•</span> <span className="text-white/40">PNG/GIF 미지원</span></div>
+            </div>
+          )}
         </div>
 
         {/* 슬롯 영역 */}
@@ -100,7 +117,7 @@ export default function MmsUploadModal({
               <span className="text-sm font-medium text-violet-200">여러 장 한번에 첨부 (최대 {remaining}장)</span>
               <input
                 type="file"
-                accept=".jpg,.jpeg"
+                accept={accept}
                 multiple
                 className="hidden"
                 onChange={(e) => {
@@ -136,6 +153,11 @@ export default function MmsUploadModal({
                         <div className="absolute top-1 left-1 bg-emerald-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">
                           {slotIdx + 1}
                         </div>
+                        {img.converted && (
+                          <div className="absolute top-1 right-1 bg-violet-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold" title="규격(JPG · 300KB)에 맞게 자동으로 줄인 사진입니다">
+                            자동 맞춤
+                          </div>
+                        )}
                       </div>
                     ) : isLockedSlot ? (
                       /* 잠긴 슬롯 */
@@ -149,10 +171,10 @@ export default function MmsUploadModal({
                       <label className={`w-full h-full rounded-xl border-2 border-dashed border-white/15 bg-white/[0.03] flex flex-col items-center justify-center cursor-pointer hover:border-violet-400/50 hover:bg-violet-500/[0.06] transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
                         <Plus className="w-7 h-7 text-white/30 mb-2" />
                         <div className="text-xs text-white/45 font-medium">이미지 {slotIdx + 1}</div>
-                        <div className="text-[10px] text-white/25 mt-1">JPG · 300KB</div>
+                        <div className="text-[10px] text-white/25 mt-1">{autoFit ? '큰 사진도 가능' : 'JPG · 300KB'}</div>
                         <input
                           type="file"
-                          accept=".jpg,.jpeg"
+                          accept={accept}
                           className="hidden"
                           onChange={(e) => {
                             const file = e.target.files?.[0];

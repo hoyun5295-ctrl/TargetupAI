@@ -48,6 +48,42 @@ export function getMmsImageDisplayName(item: MmsImageItem | any, fallback = ''):
  *         예약대기/발송결과/캘린더에서 3장 카운트 + 빈 슬롯 엑박 표시 버그.
  *   수정: filter로 빈 슬롯 제거 → 실제 업로드된 이미지만 순서대로 압축. UI는 그대로 유지.
  */
+/**
+ * ★2026-09-10 경로 배열 + 원본 파일명 배열(같은 순서)을 표시용 항목으로 묶는다(대행발송 `mms_image_names` · 임은지 접수).
+ * 이름이 있는 칸만 `{ path, originalName }`이 되고, 없는 칸·옛 접수(null)는 원래 항목 그대로다(표시 = 저장 파일명).
+ * 결과는 공용 `MmsImagePreview`·`getMmsImageDisplayName`이 그대로 읽는다.
+ */
+export function withMmsImageNames(paths: MmsImageItem[], names?: string[] | null): MmsImageItem[] {
+  if (!Array.isArray(paths)) return [];
+  if (!Array.isArray(names)) return paths;
+  return paths.map((item, i) => {
+    const name = typeof names[i] === 'string' ? names[i].trim() : '';
+    return name ? { path: getMmsImagePath(item), originalName: name } : item;
+  });
+}
+
+/**
+ * ★2026-09-10 자동 맞춤 업로드(대행발송 화면 접수) 원본 한 장 상한.
+ * 서버 `utils/mms-image-fit.ts MMS_FIT_MAX_UPLOAD_BYTES`와 같은 값이어야 한다(계약 테스트 · 갈리면 한쪽이 거짓 안내).
+ */
+export const MMS_AUTOFIT_MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+const PHOTO_EXT_RE = /\.(jpe?g|png|webp|gif|heic|heif|avif|tiff?)$/i;
+
+/**
+ * 자동 맞춤 업로드의 브라우저 사전 검사. 사진이 아닌 파일과 상한 초과만 막는다.
+ * JPG·300KB 규격은 서버가 맞춘다(여기서 막으면 맞춤 기능이 죽는다). 형식 최종 판정도 서버가 한다.
+ * @returns 막을 사유(없으면 null)
+ */
+export function precheckMmsAutoFitFile(file: { name: string; size: number; type?: string }): string | null {
+  const isPhoto = String(file.type || '').toLowerCase().startsWith('image/') || PHOTO_EXT_RE.test(file.name || '');
+  if (!isPhoto) return `${file.name}: 사진 파일만 첨부할 수 있습니다(JPG·PNG 등)`;
+  if (file.size > MMS_AUTOFIT_MAX_UPLOAD_BYTES) {
+    return `${file.name}: ${(file.size / (1024 * 1024)).toFixed(1)}MB입니다. 한 장 ${MMS_AUTOFIT_MAX_UPLOAD_BYTES / (1024 * 1024)}MB까지 올릴 수 있습니다`;
+  }
+  return null;
+}
+
 export function toMmsImagePaths(
   images: Array<{ serverPath?: string; path?: string; originalName?: string } | any>,
 ): Array<{ path: string; originalName: string }> {

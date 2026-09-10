@@ -300,6 +300,44 @@ describe('대행발송 §17-5 계약 — 배포 양식 파서 왕복(재생성�
 });
 
 /**
+ * ★2026-09-10 작성 안내 시트는 실제 동작과 같은 말을 해야 한다(직원 접수 2건).
+ *   양식을 받은 담당자는 이 시트만 보고 채운다. 여기 적힌 말이 동작과 다르면 접수가 반려되고 이유를 모른다.
+ */
+function guideRowOf(label: string): string {
+  const formPath = path.resolve(__dirname, '../../../../frontend/public/agency-request-form.xlsx');
+  const wb = XLSX.read(fs.readFileSync(formPath), { type: 'buffer' });
+  const ws = wb.Sheets['작성 안내'];
+  expect(ws, '작성 안내 시트가 없다').toBeTruthy();
+  // 사용 범위가 B열부터라 열 번호가 고정이 아니다 — 라벨 칸을 찾아 그 오른쪽 칸을 읽는다
+  const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: null });
+  for (const r of rows) {
+    const i = (r || []).findIndex((c) => String(c ?? '').trim() === label);
+    if (i >= 0) return String(r[i + 1] ?? '');
+  }
+  expect.fail(`작성 안내에 "${label}" 행이 없다`);
+  return '';
+}
+
+describe('작성 안내 시트 = 실제 동작 (★2026-09-10)', () => {
+  it('문안 항목: 화면 접수(AI가 열을 골라 둠)와 메일 접수(이름이 같아야 이어짐)를 나눠 알린다 · 남지현 접수', () => {
+    const v = guideRowOf('문안 항목');
+    expect(v).toContain('화면 접수: 열 이름과 달라도 됩니다');
+    expect(v).toContain('메일 접수: 메시지 내용과 열이름이 동일해야 접수 및 매핑이 가능합니다.');
+    expect(v).toContain('예: 메시지 내용 - %이름%, %매장명% / 열이름 - 이름, 매장명 동일하게 기재.');
+    expect(v, '메일 접수에도 "달라도 된다"로 읽히는 옛 문장이 남아 있다').not.toMatch(/^열 이름과 달라도 됩니다/m);
+  });
+
+  it('이미지 문자: 화면·메일 모두 큰 사진과 JPG가 아닌 사진을 규격에 맞춰 받는다 · 임은지 접수', () => {
+    const v = guideRowOf('이미지 문자');
+    expect(v).toContain('화면 접수: 확인 단계에서 "이미지 넣기"로 첨부합니다');
+    expect(v).toContain('메일 접수: 요청서와 함께 이미지 파일을 별도로 첨부합니다');
+    expect(v).toContain('큰 사진이나 JPG가 아닌 사진도 규격(JPG, 한 장 300KB 이하)에 맞게 자동으로 줄여 접수합니다');
+    expect(v, '메일은 규격에 안 맞으면 반려된다는 옛 문장이 남아 있다').not.toContain('규격에 맞지 않으면 접수되지 않고');
+    expect(v, '화면 접수만 변환된다고 읽히는 옛 문장이 남아 있다').not.toContain('큰 사진도 규격에 맞게 자동 변환됩니다');
+  });
+});
+
+/**
  * ★2026-08-26(2) 통일 양식 계약 — 업계 실물 레이아웃(카카오톡 수신 파일 실측)을 그대로 본뜬 픽스처.
  *   A열 비움 · B열 라벨(줄바꿈·괄호 부연 포함) · C열 값 · 시트1 "내용" + 시트2 "고객리스트".
  */

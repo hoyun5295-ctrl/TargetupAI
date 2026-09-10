@@ -27,7 +27,7 @@ import {
   CUI_MODAL_FOOT, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_SELECT,
 } from '../../utils/console-ui';
 import {
-  formatWhen, previewOneStep, submitOneStep, toLocalInput,
+  AGENCY_MMS_UPLOAD, formatWhen, previewOneStep, submitOneStep, toLocalInput,
   type AgencySendRequest, type OneStepAnalysisView, type OneStepOverrides,
 } from './agency-send-api';
 
@@ -104,7 +104,8 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
   // 명단 미리보기(엑셀 모양 상위 50행) 창. CUI_MODAL 껍데기가 overflow-hidden이라 포탈로 띄운다
   const [previewOpen, setPreviewOpen] = useState(false);
   const [mmsOpen, setMmsOpen] = useState(false);
-  const mms = useMmsUpload((m) => toast.error(m));
+  // ★2026-09-10 큰 사진·PNG도 서버가 규격에 맞춰 받는다. 바꿨으면 안내를 띄운다(조용히 바꾸지 않는다)
+  const mms = useMmsUpload((m) => toast.error(m), { ...AGENCY_MMS_UPLOAD, onNotice: (m) => toast.info(m) });
   // 재분석 응답의 세대 번호 — 늦게 도착한 옛 응답이 최신 화면을 덮지 못하게 한다
   const analyzeSeq = useRef(0);
 
@@ -146,6 +147,8 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
   const currentOverrides = (a: OneStepAnalysisView | null): OneStepOverrides => {
     const o: OneStepOverrides = {
       mmsImagePaths: mms.mmsUploadedImages.map((i) => i.serverPath),
+      // ★2026-09-10 올린 사진의 원본 파일명(상세 미리보기 표시용 · 경로와 같은 순서)
+      mmsImageNames: mms.mmsUploadedImages.map((i) => i.originalName || i.filename),
       requestedAt: requestedAt ? new Date(requestedAt).toISOString() : '',
       managerPhones,
       // 항목이 없어도 빈 객체를 보낸다 — 접수 확정은 화면이 보여준 매핑으로만 간다
@@ -557,6 +560,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
       )}
 
       <MmsUploadModal
+        autoFit
         show={mmsOpen}
         onClose={() => setMmsOpen(false)}
         mmsUploadedImages={mms.mmsUploadedImages}

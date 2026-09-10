@@ -9,6 +9,9 @@
  * ⛔ `createPortal`로 body에 붙인다. 이 모달은 **상세 모달 안에서** 열리는 중첩 오버레이인데,
  *   부모 `CUI_MODAL`에 `overflow-hidden`이 있어 그대로 두면 부모 박스 크기로 잘린다(console-ui 주석 · 2026-08-18 P0 선례).
  * ⛔ 톤은 부모(대행발송 인디고 콘솔)와 같게. 줄표 0 · native dialog 0.
+ * ★2026-09-10 이미지 = 저장한 원본 파일명 + 눌러서 크게 보기(임은지 접수 cmtuvoicy0crcjnot7ohbi79s).
+ *   확대 창은 발송 결과 창(ResultsModal)과 같은 모습이다. 원본명은 부모가 `withMmsImageNames`로 묶어 넘긴다.
+ *   ⛔ 확대 창도 중첩 오버레이라 body로 뺀다(이 모달 안에 두면 부모 박스에 갇힐 수 있다).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -35,7 +38,10 @@ interface Props {
   total: number;
   messageType: string;
   callbackNumber?: string | null;
-  /** MMS 이미지(원장 `mms_image_paths` 그대로). 공용 MmsImagePreview가 서버 경로를 서빙 URL로 바꿔 그린다 */
+  /**
+   * MMS 이미지(원장 `mms_image_paths` · ★0910 원본명이 있으면 `{ path, originalName }`로 묶여 온다).
+   * 공용 MmsImagePreview가 서버 경로를 서빙 URL로 바꿔 그리고, 이름은 원본명을 쓴다
+   */
   images?: any[];
   loading?: boolean;
   error?: string;
@@ -48,10 +54,13 @@ export default function AgencyPreviewModal({
   const imageList = Array.isArray(images) ? images : [];
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState(0);
+  // ★0910 눌러서 크게 보기 — 훅은 조기 return 위에 둔다(2026-07-06 훅 개수 불일치 백지 교훈)
+  const [enlarged, setEnlarged] = useState<{ url: string; filename: string } | null>(null);
 
   // 접수가 바뀌면 첫 사람부터 다시 본다(앞 접수의 선택이 남으면 엉뚱한 사람이 켜져 있다)
   useEffect(() => {
     if (show) { setPage(0); setSelected(0); }
+    setEnlarged(null);
   }, [show, samples]);
 
   const pageCount = Math.max(1, Math.ceil(samples.length / PREVIEW_PAGE_SIZE));
@@ -156,10 +165,10 @@ export default function AgencyPreviewModal({
                       <div className="min-w-0 rounded-2xl rounded-tl-md border border-neutral-200 bg-white px-3.5 py-3 shadow-sm">
                         {imageList.length > 0 && (
                           <div className="mb-2">
-                            {/* 실제 붙어 나갈 이미지 그대로. 공용 CT가 서버 경로를 서빙 URL로 바꾼다 */}
-                            <MmsImagePreview images={imageList} size="full" maxHeight="200px" compact borderColor="border border-neutral-200" />
+                            {/* 실제 붙어 나갈 이미지 그대로. 공용 CT가 서버 경로를 서빙 URL로 바꾼다 · 누르면 크게 본다 */}
+                            <MmsImagePreview images={imageList} size="full" maxHeight="200px" compact borderColor="border border-neutral-200" onImageClick={(url, filename) => setEnlarged({ url, filename })} />
                             <span className="mt-1 inline-flex items-center gap-1 text-[11.5px] text-neutral-500">
-                              <ImageIcon className="w-3 h-3" strokeWidth={2} />이미지 {imageList.length}장이 함께 나갑니다
+                              <ImageIcon className="w-3 h-3" strokeWidth={2} />이미지 {imageList.length}장이 함께 나갑니다 · 누르면 크게 보입니다
                             </span>
                           </div>
                         )}
@@ -187,6 +196,29 @@ export default function AgencyPreviewModal({
           )}
         </div>
       </div>
+
+      {/* ★0910 이미지 크게 보기 — 발송 결과 창(ResultsModal)과 같은 모습. 중첩 오버레이라 body로 뺀다 */}
+      {enlarged && createPortal(
+        <div className="fixed inset-0 z-[1600] bg-black/80 flex items-center justify-center p-6 animate-in fade-in duration-150" role="dialog" aria-modal="true" aria-label="이미지 크게 보기">
+          <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center">
+            <button
+              type="button"
+              onClick={() => setEnlarged(null)}
+              className="absolute top-2 right-2 z-10 w-9 h-9 bg-white/90 rounded-full grid place-items-center text-neutral-700 transition hover:bg-white shadow"
+              aria-label="닫기"
+            ><X className="w-[17px] h-[17px]" /></button>
+            <img
+              src={enlarged.url}
+              alt={enlarged.filename}
+              className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200"
+            />
+            <div className="mt-3 max-w-[90vw] truncate px-4 py-2 bg-white/90 rounded-lg text-sm text-neutral-700 font-medium shadow">
+              {enlarged.filename}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>,
     document.body,
   );

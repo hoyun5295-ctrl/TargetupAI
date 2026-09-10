@@ -14,6 +14,7 @@ import {
   formatWhen, STATUS_LABEL, STATUS_TONE, type AgencySendStatus,
 } from '../components/agency/agency-send-api';
 import { CUI_BTN_PRIMARY, CUI_PILL_BASE, CUI_PILL_TONE } from '../utils/console-ui';
+import { buildAdSubjectFront } from '../utils/formatDate';
 import { useApproveToken } from '../hooks/useApproveToken';
 
 interface ApprovalView {
@@ -177,7 +178,8 @@ export default function AgencyApprovePage() {
         <div className="px-5 pb-5">
           <div className="rounded-xl bg-neutral-100 px-4 py-3.5 text-[13px] leading-relaxed text-neutral-900">
             {(r.messageType === 'LMS' || r.messageType === 'MMS') && (
-              <p className="font-extrabold mb-1.5">{r.isAd ? '(광고) ' : ''}{r.subject || ''}</p>
+              // ★2026-09-10 발송과 같은 규칙(이미 (광고)로 시작하는 제목에는 다시 안 붙인다 · 남지현 접수)
+              <p className="font-extrabold mb-1.5">{buildAdSubjectFront(r.subject || '', r.messageType, r.isAd)}</p>
             )}
             <p className="whitespace-pre-wrap break-words">{r.content}</p>
             <p className="mt-2.5 text-[11.5px] text-neutral-500">

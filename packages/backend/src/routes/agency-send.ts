@@ -13,6 +13,10 @@ import pool, { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { canUseAgencySend, loadPlanContext } from '../utils/plan-guard';
 import multer from 'multer';
+import { saveMmsImageBuffer } from '../utils/mms-image-util';
+import {
+  describeMmsFitFailure, describeMmsFitNote, fitMmsImage, MMS_FIT_MAX_UPLOAD_BYTES, restoreUploadFileName,
+} from '../utils/mms-image-fit';
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import {
   isEditable, isSameKstDay, validateRequestedAt,
@@ -133,6 +137,8 @@ function toPublic(row: any) {
     // 행 수정 번호. 화면이 이 값을 되돌려주고 서버가 조건으로 쓴다(낙관적 잠금).
     revision: row.revision,
     mmsImagePaths: row.mms_image_paths || [],
+    // ★2026-09-10 이미지 원본 파일명(경로와 같은 순서). DDL 전 행·옛 접수는 null — 화면이 저장 파일명으로 대신한다
+    mmsImageNames: Array.isArray(row.mms_image_names) ? row.mms_image_names : null,
     requestedAt: row.requested_at,
     recipientCount: row.recipient_count,
     fileName: row.file_name,
@@ -350,6 +356,8 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
           managerPhones: analysis.managerPhones,
           requestedAt: analysis.requestedAtIso,
           mmsImagePaths: Array.isArray(overrides.mmsImagePaths) ? overrides.mmsImagePaths : [],
+          // ★2026-09-10 원본 파일명(표시 전용) — 확인 화면이 업로드 응답의 이름을 함께 보낸다
+          mmsImageNames: Array.isArray(overrides.mmsImageNames) ? overrides.mmsImageNames : [],
           fileName: analysis.fileName,
           phoneColumn: analysis.phoneColumn || '전화번호',
           varMapping: Object.fromEntries(analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
@@ -385,6 +393,70 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 원스텝 접수 실패:', err);
     return res.status(500).json({ success: false, error: '접수하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// POST /api/agency-send/mms-image — 화면 접수 이미지 업로드 (★2026-09-10 자동 맞춤 · 임은지 접수 cmttqx2gy0c8sjnotlvs441r1)
+//   공용 업로드(/api/mms-images/upload)는 JPG·300KB가 아니면 막는다. 대행발송은 규격 밖 사진을 서버가
+//   맞춰 받는다(메일 접수와 같은 `fitMmsImage`). 응답 모양은 공용 업로드와 같다 — 화면 훅·모달이 그대로 쓴다.
+//   ⛔ 자격 확인은 파일을 받기 전이다(requireAgencySendMw · 무자격 계정이 메모리부터 점유하지 않게).
+//   ⛔ 저장 경로·파일명 규약은 saveMmsImageBuffer 하나다(발송은 이 절대경로를 그대로 읽는다 · 배관 무변경).
+// ════════════════════════════════════════════════════════════
+const mmsImageMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MMS_FIT_MAX_UPLOAD_BYTES, files: 1 },
+}).single('images');
+
+function mmsImageUpload(req: Request, res: Response, next: () => void): void {
+  mmsImageMulter(req as any, res as any, (err: any) => {
+    if (err) {
+      const tooBig = err?.code === 'LIMIT_FILE_SIZE';
+      console.warn(`[agency-send] 이미지 업로드 거절 company=${(req as any).agencyAuth?.companyId} code=${err?.code || err?.message}`);
+      res.status(tooBig ? 413 : 400).json({
+        success: false,
+        code: tooBig ? 'FILE_TOO_LARGE' : 'UPLOAD_INVALID',
+        error: tooBig
+          ? `사진이 너무 큽니다. 한 장 ${MMS_FIT_MAX_UPLOAD_BYTES / (1024 * 1024)}MB까지 올릴 수 있습니다.`
+          : '이미지는 한 번에 한 장씩 올려 주세요.',
+      });
+      return;
+    }
+    next();
+  });
+}
+
+router.post('/mms-image', requireAgencySendMw, mmsImageUpload, async (req: Request, res: Response) => {
+  const auth = (req as any).agencyAuth as { companyId: string; userId: string };
+  const file = (req as any).file as { buffer?: Buffer; originalname?: string } | undefined;
+  if (!file?.buffer?.length) {
+    return res.status(400).json({ success: false, error: '이미지 파일을 선택해 주세요.' });
+  }
+  const originalName = restoreUploadFileName(file.originalname) || '이미지';
+  try {
+    const fit = await fitMmsImage(file.buffer);
+    if (!fit.ok) {
+      console.warn(`[agency-send] 이미지 맞춤 실패 company=${auth.companyId} reason=${fit.reason} bytes=${file.buffer.length}`);
+      return res.status(400).json({ success: false, code: 'MMS_IMAGE_UNFIT', error: describeMmsFitFailure(originalName, fit.reason) });
+    }
+    const saved = saveMmsImageBuffer(auth.companyId, fit.buffer);
+    console.log(`[agency-send] 이미지 업로드 company=${auth.companyId} ${fit.converted ? `맞춤 ${fit.fromBytes}B → ${fit.toBytes}B` : `원본 ${fit.toBytes}B`}`);
+    return res.json({
+      success: true,
+      images: [{
+        serverPath: saved.serverPath,
+        url: `/api/mms-images/${auth.companyId}/${saved.filename}`,
+        filename: saved.filename,
+        originalName,
+        size: fit.toBytes,
+        converted: fit.converted,
+        // 조용히 바꾸지 않는다 — 바꿨으면 화면이 이 문장을 띄운다
+        notice: fit.converted ? `규격에 맞게 바꿨습니다: ${describeMmsFitNote(originalName, fit.fromBytes, fit.toBytes)}` : null,
+      }],
+    });
+  } catch (err: any) {
+    console.error('[agency-send] 이미지 업로드 실패:', err);
+    return res.status(500).json({ success: false, error: '이미지를 올리지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });
 

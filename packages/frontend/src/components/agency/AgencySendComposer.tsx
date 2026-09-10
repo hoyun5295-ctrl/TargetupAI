@@ -12,7 +12,8 @@
  *   4. 시각 후보 칩 + "접수하면 이렇게 진행됩니다" 예고 — 접수 후 다음이 안 보이는 불안을 없앤다
  *
  * ⛔ 사용자에게 추가 입력을 요구하지 않는다 — 틀린 것만 고치게 한다.
- * ⛔ 접수 payload·검증 규칙은 개편 전과 같다(서버 계약 무변경). MMS 이미지는 기존 `MmsUploadModal` 그대로.
+ * ⛔ 접수 payload·검증 규칙은 개편 전과 같다(서버 계약 무변경). MMS 이미지는 기존 `MmsUploadModal`을 쓰되
+ *   ★2026-09-10 대행발송 전용 업로드(서버가 규격에 맞춰 받음 · AGENCY_MMS_UPLOAD)로 연다.
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔(`CUI_*`).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -25,13 +26,14 @@ import { useMmsUpload } from '../../hooks/useMmsUpload';
 import MmsUploadModal from '../MmsUploadModal';
 import SmsCharsetNotice from '../SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
+import { buildAdSubjectFront, startsWithAdMark } from '../../utils/formatDate';
 import {
   CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_DANGER_BOX, CUI_DANGER_ICON, CUI_DANGER_TEXT,
   CUI_HINT, CUI_INPUT, CUI_LABEL, CUI_MODAL, CUI_MODAL_BODY, CUI_MODAL_CLOSE, CUI_MODAL_DESC,
   CUI_MODAL_FOOT, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_SELECT, CUI_TEXTAREA,
 } from '../../utils/console-ui';
 import {
-  aiGuessPhoneColumn, createAgencyRequest, extractAgencyVars, MAX_AGENCY_VARS, toLocalInput,
+  AGENCY_MMS_UPLOAD, aiGuessPhoneColumn, createAgencyRequest, extractAgencyVars, MAX_AGENCY_VARS, toLocalInput,
   type AgencySendRequest,
 } from './agency-send-api';
 
@@ -143,7 +145,8 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   const [varMapping, setVarMapping] = useState<Record<string, string>>({});
   const [mmsOpen, setMmsOpen] = useState(false);
   const [previewIdx, setPreviewIdx] = useState(0);
-  const mms = useMmsUpload((m) => toast.error(m));
+  // ★2026-09-10 큰 사진·PNG도 서버가 규격에 맞춰 받는다. 바꿨으면 안내를 띄운다(조용히 바꾸지 않는다)
+  const mms = useMmsUpload((m) => toast.error(m), { ...AGENCY_MMS_UPLOAD, onNotice: (m) => toast.info(m) });
 
   // ③ 시각·담당자
   const [requestedAt, setRequestedAt] = useState('');
@@ -382,6 +385,8 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
         managerPhones,
         requestedAt: new Date(requestedAt).toISOString(),
         mmsImagePaths: mms.mmsUploadedImages.map((i) => i.serverPath),
+        // ★2026-09-10 올린 사진의 원본 파일명(상세 미리보기 표시용 · 경로와 같은 순서)
+        mmsImageNames: mms.mmsUploadedImages.map((i) => i.originalName || i.filename),
         fileName,
         phoneColumn: phoneColumn || '직접 입력',
         varMapping,
@@ -816,10 +821,11 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
                         <span className="text-[11.5px] font-bold text-neutral-600 tabular-nums">{callbackNumber || '보내는 번호'}</span>
                       </div>
                       <div className="rounded-tr-xl rounded-b-xl bg-neutral-100 px-3 py-2.5 text-[12px] leading-relaxed text-neutral-900 break-words">
+                        {/* ★2026-09-10 (광고) 표기는 발송과 같은 규칙: 이미 (광고)로 시작하면 다시 붙이지 않는다(남지현 접수) */}
                         {(messageType === 'LMS' || messageType === 'MMS') && (
-                          <p className="font-extrabold mb-1">{isAd ? '(광고) ' : ''}{subject || '제목'}</p>
+                          <p className="font-extrabold mb-1">{buildAdSubjectFront(subject || '제목', messageType, isAd)}</p>
                         )}
-                        {messageType === 'SMS' && isAd && <span className="font-extrabold">(광고) </span>}
+                        {messageType === 'SMS' && isAd && !startsWithAdMark(content) && <span className="font-extrabold">(광고) </span>}
                         {mms.mmsUploadedImages.length > 0 && (
                           <span className="inline-flex items-center gap-1 mb-1 mr-1 h-[20px] px-1.5 rounded bg-white text-neutral-500 text-[11px] font-semibold">
                             <ImageIcon className="w-3 h-3" strokeWidth={2} />이미지 {mms.mmsUploadedImages.length}장
@@ -909,6 +915,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
       </div>
 
       <MmsUploadModal
+        autoFit
         show={mmsOpen}
         onClose={() => setMmsOpen(false)}
         mmsUploadedImages={mms.mmsUploadedImages}

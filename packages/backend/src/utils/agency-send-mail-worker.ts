@@ -24,9 +24,10 @@ import { LIMITS } from '../config/defaults';
 import { Pop3Client, Pop3Error } from './pop3-client';
 import {
   resolveEmailSender, matchBillingTarget, describeBillingTargets, describeAccountLabel, type SenderCandidate,
-  isImageAttachment, mailImageName, validateMailMmsImages,
+  isImageAttachment, prepareMailMmsImages, type PreparedMailImage,
 } from './agency-send-email';
 import { saveMmsImageBuffer } from './mms-image-util';
+import { describeMmsFitNote } from './mms-image-fit';
 import { canUseAgencySend, loadPlanContext } from './plan-guard';
 import { getRegisteredCallbackSet } from './callback-filter';
 import {
@@ -165,6 +166,8 @@ function buildAcceptedReply(input: {
   originalAtIso?: string | null;
   /** ★2026-08-28 MMS 이미지 원본 파일명(첨부 순서 그대로). 순서 고지는 이 회신이 유일한 확인 자리다 */
   imageNames?: string[];
+  /** ★2026-09-10 규격에 맞게 바꾼 이미지("이름 (원래 → 줄인 크기)"). 확인 화면이 없는 경로라 이 회신이 유일한 고지다 */
+  imageFitNotes?: string[];
   /** ★2026-09-05 §21-4 이 건이 나가는 발송 계정. 오지정을 월말 청구서 전에 알아채는 유일한 자리다 */
   billingLabel?: string;
   /** ★2026-09-05 §21-4 다건일 때의 순번·파일명. 있으면 머리말이 블록 제목이 되고 꼬리 안내는 빠진다(바깥에서 한 번만 말한다) */
@@ -190,6 +193,9 @@ function buildAcceptedReply(input: {
     ...(input.billingLabel ? [`발송 ID: ${input.billingLabel}`] : []),
     ...(input.imageNames && input.imageNames.length > 0
       ? [`첨부 이미지: ${input.imageNames.length}장, 이 순서로 붙습니다: ${input.imageNames.join(', ')}`]
+      : []),
+    ...(input.imageFitNotes && input.imageFitNotes.length > 0
+      ? [`규격에 맞게 바꿔 붙인 이미지: ${input.imageFitNotes.join(', ')} (실제 모습은 담당자 테스트 문자에서 확인해 주세요)`]
       : []),
     `보낼 인원: ${input.valid.toLocaleString()}명 (명단 ${input.total.toLocaleString()}행, 중복 ${input.dup}건, 형식 오류 ${input.invalid}건 제외)`,
     '',
@@ -665,7 +671,8 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   const mail: ParsedMail = await simpleParser(raw);
   const atts = (mail.attachments || []).filter((a) => a.contentDisposition !== 'inline' && !a.cid);
   // ★2026-08-28 MMS 개통(서수란 접수 cmtclkuhe04iujnotbi3xbuu3) — 이미지를 요청서와 별도 첨부로 받는다.
-  //   규격(JPG 실체·300KB·3장)이면 그대로 접수하고, 벗어나면 파일별 사유로 반려한다(변환 없음).
+  //   ★2026-09-10 규격(JPG 실체·300KB)이면 그대로, 벗어나면 맞춰서 접수한다(fitMmsImage · 화면 접수와 같은 함수).
+  //   맞추지 못한 파일만 파일별 사유로 반려한다. 장수 상한(3장)은 그대로다.
   //   저장은 청구 계정 확정 뒤에만 하고, 저장 뒤 반려로 빠지면 그 자리에서 지운다(고아 파일 방지).
   /** 이 메일이 귀속되는 회사·계정 — 단위가 확정하면 채워진다. 반려 기록도 이 값을 쓴다(★0905 §21-4).
    *  ⛔ reject보다 **앞에** 선언한다: 3번째 요청서가 계정을 확정한 뒤 5번째가 실패해 전량 반려될 때
@@ -674,6 +681,8 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   let lastAcct: { companyId: string; userId: string } | null = auth;
   const savedImagePaths: string[] = [];
   const savedImageNames: string[] = [];
+  /** ★0910 규격에 맞게 바꾼 이미지의 고지 조각. 접수 완료 회신이 유일한 확인 자리다(조용히 바꾸지 않는다) */
+  const savedImageFitNotes: string[] = [];
   // 청구 계정 미확정(auth null) 반려는 회사·사용자 없이 기록한다 — 후보가 여러 회사일 수 있어 추정 기록은 오귀속이다
   const reject = async (reasons: string[], reasonCode: string, headers?: string[]) => {
     for (const p of savedImagePaths.splice(0)) {
@@ -684,12 +693,15 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   };
 
   const imageAtts = atts.filter((a) => isImageAttachment(a));
+  /** 접수에 실을 이미지(맞춘 뒤의 바이트 · 첨부 순서 그대로). 저장은 아래 단건 경로에서만 한다 */
+  let preparedImages: PreparedMailImage[] = [];
   if (imageAtts.length > 0) {
-    const check = validateMailMmsImages(imageAtts);
-    if (!check.ok) {
-      await reject(check.reasons, 'mms_image_invalid');
+    const prepared = await prepareMailMmsImages(imageAtts);
+    if (!prepared.ok) {
+      await reject(prepared.reasons, 'mms_image_invalid');
       return;
     }
+    preparedImages = prepared.images;
   }
   if (atts.some((a) => /\.zip$/i.test(String(a.filename || '')))) {
     await reject(['압축(zip) 파일은 받지 않습니다. 요청서와 명단을 각각 엑셀 또는 CSV로 첨부해 주세요.'], 'zip_not_allowed');
@@ -826,10 +838,13 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       continue;
     }
     if (!multi) {
-      for (let i = 0; i < imageAtts.length; i++) {
-        const saved = saveMmsImageBuffer(unitAcct.companyId, imageAtts[i].content as Buffer);
+      for (let i = 0; i < preparedImages.length; i++) {
+        const saved = saveMmsImageBuffer(unitAcct.companyId, preparedImages[i].buffer);
         savedImagePaths.push(saved.serverPath);
-        savedImageNames.push(mailImageName(imageAtts[i], i));
+        savedImageNames.push(preparedImages[i].name);
+        if (preparedImages[i].converted) {
+          savedImageFitNotes.push(describeMmsFitNote(preparedImages[i].name, preparedImages[i].fromBytes, preparedImages[i].toBytes));
+        }
       }
     }
 
@@ -979,6 +994,8 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
         // ★2026-08-28 형태 = 화면 접수와 같은 절대경로 문자열 배열(발송 배관 계약 무변경)
         //   다중이면 이미지가 없다(위에서 반려) — 그래서 이 배열은 단건에서만 채워진다
         mmsImagePaths: multi ? [] : savedImagePaths,
+        // ★2026-09-10 첨부 원본 파일명(표시 전용 · 상세 미리보기가 이 이름을 보인다)
+        mmsImageNames: multi ? [] : savedImageNames,
         fileName: p.analysis.fileName,
         phoneColumn: p.analysis.phoneColumn || '전화번호',
         varMapping: Object.fromEntries(p.analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
@@ -1031,6 +1048,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     phoneColumn: p.analysis.phoneColumn || '전화번호', autoPickedPhoneColumn: p.autoPickedPhoneColumn,
     total: p.analysis.counts.total, valid: p.analysis.counts.valid, dup: p.analysis.counts.dup, invalid: p.analysis.counts.invalid,
     imageNames: multi ? [] : savedImageNames,
+    imageFitNotes: multi ? [] : savedImageFitNotes,
     billingLabel: describeAccountLabel(candidates, p.acct.userId),
     seq: multi ? { index: i + 1, total: plans.length, fileName: p.unit.fileName } : undefined,
   }));
@@ -1061,7 +1079,7 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
     //   5건 중 1건만 말했다(첫 회신이 실패한 담당자가 받는 유일한 확인이 잘못된 내용이 된다).
     //   순서는 접수 순서 그대로 — 순번 표기가 담당자 문자와 같은 번호를 가리켜야 한다.
     const req = await query(
-      `SELECT id, subject, current_content, requested_at, callback_number, manager_phones, phone_column, recipient_count, file_name
+      `SELECT id, subject, current_content, requested_at, callback_number, manager_phones, phone_column, recipient_count, file_name, mms_image_paths
          FROM agency_send_requests WHERE id = ANY($1::uuid[])
         ORDER BY array_position($1::uuid[], id)`, [row.request_ids],
       // ⛔ 재시도 회신에 requested_at_original을 넣지 않는다 — 컬럼 부재(DDL 전) 시 이 SELECT가 통째로
@@ -1078,9 +1096,14 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
     // ★0905 Codex 1R 지적 ③ — 재시도는 **정본이 아니라 복구 경로**다. 접수 시점의 스킵 목록과
     //   확정 발송 계정은 원장에 스냅샷으로 남기지 않으므로(그러려면 컬럼 신설이 필요하다) 여기서 복원하지 않는다.
     //   대신 재발송본임을 밝히고 자세한 내역은 화면으로 유도한다 — 침묵하지 않는 것이 계약이다.
+    // ★2026-09-10 Codex 1R medium — 이미지를 규격에 맞게 바꾼 내역(원래 크기)은 첫 회신만 알고 원장에 없다.
+    //   복원하지 않되 이미지가 있는 접수면 규칙을 알린다(조용히 바꾸지 않는다 · 확인 = 담당자 테스트 MMS).
+    //   ⛔ 여기서 mms_image_names 같은 새 컬럼을 읽지 않는다 — DDL 전이면 이 SELECT가 통째로 실패해 재시도 패스가 멈춘다.
+    const hasImages = req.rows.some((r: any) => Array.isArray(r.mms_image_paths) && r.mms_image_paths.length > 0);
     const retryNotice = [
       '처음 보내드린 접수 완료 안내가 도달하지 못해 다시 보내드립니다.',
       '접수는 정상입니다. 건너뛴 요청서나 발송 계정 같은 자세한 내역은 아래 진행 상황 주소에서 확인해 주세요.',
+      ...(hasImages ? ['첨부 이미지는 규격(JPG · 장당 300KB)에 맞지 않으면 자동으로 줄여 붙였습니다. 실제 모습은 담당자 테스트 문자에서 확인해 주세요.'] : []),
       '',
     ].join('\n');
     await sendReplyAndRecord(row.id, mailbox, row.from_email,

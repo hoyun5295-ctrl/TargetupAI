@@ -6276,6 +6276,8 @@ router.get('/agency-send/:id/preview', authenticate, requireSuperAdmin, async (r
         currentContent: row.current_content, originalContent: row.original_content,
         companyName: row.company_name, userName: row.user_name || row.user_login || null,
         mmsImagePaths: row.mms_image_paths || [],
+        // ★2026-09-10 이미지 원본 파일명(고객 상세와 같은 값 · a.* 로 실린다 · DDL 전 행은 null)
+        mmsImageNames: Array.isArray(row.mms_image_names) ? row.mms_image_names : null,
       },
       samples, shown: samples.length, total: row.recipient_count,
     });

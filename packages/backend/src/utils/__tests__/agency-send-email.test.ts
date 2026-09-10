@@ -83,18 +83,30 @@ describe('활성 집합 지정 키 겹침(senderKeyClash) — 등록 POST·재�
 });
 
 // ─────────────────────────────────────────────────────────────
-// MMS 이미지 첨부 규격 (★2026-08-28 서수란 접수 cmtclkuhe04iujnotbi3xbuu3)
-//   메일 접수 MMS 개통: 규격(JPG 실체·300KB·3장)이면 접수, 벗어나면 파일별 사유 반려.
-//   판정은 확장자·MIME이 아니라 파일 첫 바이트(SOI)다 — 무인증 입구의 위장 파일 방어.
+// MMS 이미지 첨부 (★2026-08-28 서수란 접수 cmtclkuhe04iujnotbi3xbuu3 · ★2026-09-10 자동 맞춤)
+//   메일 접수 MMS 개통: 이미지는 요청서와 별도 첨부 최대 3장.
+//   ★0910 임은지 접수 · Harold 확정: 규격(JPG 실체·300KB)이면 그대로, 벗어나면 **맞춰서** 접수한다.
+//   맞추지 못한 파일(못 읽는 형식·손상·HEIC)만 파일별 사유로 반려한다.
+//   규격 판정은 확장자·MIME이 아니라 파일 첫 바이트(SOI)다 — 무인증 입구의 위장 파일 방어.
 // ─────────────────────────────────────────────────────────────
-import { isImageAttachment, mailImageName, validateMailMmsImages } from '../agency-send-email';
+import { isImageAttachment, mailImageName, prepareMailMmsImages } from '../agency-send-email';
 import { isJpegBuffer } from '../mms-image-util';
+import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
 
 const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, 1)]);
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100, 1)]);
 const att = (filename: string, content: Buffer, contentType = '') => ({ filename, content, contentType, size: content.length });
+/** 실제로 디코드되는 사진(용량 큰 잡음 · 투명 PNG) */
+function noiseRaw(w: number, h: number): Buffer {
+  const b = Buffer.alloc(w * h * 3);
+  let s = 7;
+  for (let i = 0; i < b.length; i++) { s = (s * 1103515245 + 12345) >>> 0; b[i] = s >>> 24; }
+  return b;
+}
+const realBigJpeg = () => sharp(noiseRaw(1600, 1200), { raw: { width: 1600, height: 1200, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+const realPng = () => sharp({ create: { width: 800, height: 600, channels: 4, background: { r: 10, g: 20, b: 30, alpha: 0.5 } } }).png().toBuffer();
 
 describe('이미지 첨부 판정(isImageAttachment) — 표 파일과 가른다', () => {
   it('contentType image/* 또는 이미지 확장자면 이미지 후보다', () => {
@@ -109,35 +121,42 @@ describe('이미지 첨부 판정(isImageAttachment) — 표 파일과 가른다
   });
 });
 
-describe('MMS 규격 검사(validateMailMmsImages)', () => {
-  it('규격 안(JPG 실체 · 300KB 이하 · 3장 이하) = 통과', () => {
-    const r = validateMailMmsImages([att('a.jpg', JPG), att('b.jpg', JPG), att('c.jpg', JPG)]);
+describe('MMS 이미지 준비(prepareMailMmsImages) — 규격이면 그대로, 벗어나면 맞춘다 (★0910)', () => {
+  it('규격 안(JPG 실체 · 300KB 이하 · 3장 이하)은 원본 그대로 받는다', async () => {
+    const r = await prepareMailMmsImages([att('a.jpg', JPG), att('b.jpg', JPG), att('c.jpg', JPG)]);
     expect(r.ok).toBe(true);
     expect(r.reasons).toEqual([]);
+    expect(r.images.map((i) => i.name)).toEqual(['a.jpg', 'b.jpg', 'c.jpg']);
+    expect(r.images.every((i) => !i.converted && i.buffer.equals(JPG))).toBe(true);
   });
-  it('PNG는 파일별 사유로 반려된다', () => {
-    const r = validateMailMmsImages([att('a.jpg', JPG), att('포스터.png', PNG)]);
+  it('PNG는 JPG로 맞춰 받는다(예전에는 반려)', async () => {
+    const png = await realPng();
+    const r = await prepareMailMmsImages([att('a.jpg', JPG), att('포스터.png', png)]);
+    expect(r.ok).toBe(true);
+    expect(r.images[1].name).toBe('포스터.png');
+    expect(r.images[1].converted).toBe(true);
+    expect(isJpegBuffer(r.images[1].buffer)).toBe(true);
+  });
+  it('300KB 넘는 사진은 300KB 이하로 줄여 받는다(예전에는 반려)', async () => {
+    const big = await realBigJpeg();
+    const r = await prepareMailMmsImages([att('큰사진.jpg', big)]);
+    expect(r.ok).toBe(true);
+    expect(r.images[0].converted).toBe(true);
+    expect(r.images[0].fromBytes).toBe(big.length);
+    expect(r.images[0].buffer.length).toBeLessThanOrEqual(300 * 1024);
+  });
+  it('확장자만 이미지인 손상 파일은 파일별 사유로 반려한다 — 실체 판정', async () => {
+    const r = await prepareMailMmsImages([att('위장.jpg', PNG), att('정상.jpg', JPG)]);
     expect(r.ok).toBe(false);
-    expect(r.reasons.join('\n')).toContain('포스터.png');
-    expect(r.reasons.join('\n')).toContain('JPG 파일만');
+    expect(r.reasons).toHaveLength(1);
+    expect(r.reasons[0]).toContain('위장.jpg');
+    expect(r.reasons[0]).toContain('읽지 못했습니다');
   });
-  it('확장자만 jpg인 위장 파일(내용 PNG)도 반려된다 — 실체 판정', () => {
-    const r = validateMailMmsImages([att('위장.jpg', PNG)]);
-    expect(r.ok).toBe(false);
-    expect(r.reasons.join('\n')).toContain('위장.jpg');
-  });
-  it('300KB 초과는 실측 KB와 함께 반려되고, 변환 출구(화면 접수)를 안내한다', () => {
-    const big = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(310 * 1024, 1)]);
-    const r = validateMailMmsImages([att('큰사진.jpg', big)]);
-    expect(r.ok).toBe(false);
-    expect(r.reasons.join('\n')).toContain('큰사진.jpg');
-    expect(r.reasons.join('\n')).toContain('300KB 이하');
-    expect(r.reasons.join('\n')).toContain('화면 접수');
-  });
-  it('4장은 장수 사유로 반려된다', () => {
-    const r = validateMailMmsImages([att('a.jpg', JPG), att('b.jpg', JPG), att('c.jpg', JPG), att('d.jpg', JPG)]);
+  it('4장은 장수 사유로 반려하고 변환은 하지 않는다', async () => {
+    const r = await prepareMailMmsImages([att('a.jpg', JPG), att('b.jpg', JPG), att('c.jpg', JPG), att('d.jpg', PNG)]);
     expect(r.ok).toBe(false);
     expect(r.reasons.join('\n')).toContain('최대 3장');
+    expect(r.images).toEqual([]);
   });
   it('파일명 없는 첨부는 순번으로 부른다', () => {
     expect(mailImageName({ content: JPG }, 1)).toBe('이미지 2');
@@ -152,9 +171,9 @@ describe('MMS 규격 검사(validateMailMmsImages)', () => {
 describe('메일 워커 배선 (소스 계약) — MMS 개통이 되돌아가지 않는다', () => {
   const worker = fs.readFileSync(path.resolve(__dirname, '../agency-send-mail-worker.ts'), 'utf8');
 
-  it('이미지 무조건 반려(has_image)가 되살아나지 않았다 — 규격 게이트만 있다', () => {
+  it('이미지 무조건 반려(has_image)가 되살아나지 않았다 — 맞춤 준비만 있다(★0910)', () => {
     expect(worker).not.toMatch(/'has_image'/);
-    expect(worker).toMatch(/validateMailMmsImages\(imageAtts\)/);
+    expect(worker).toMatch(/prepareMailMmsImages\(imageAtts\)/);
     expect(worker).toMatch(/'mms_image_invalid'/);
   });
   it('이미지 파일명 칸만 있고 첨부 0장이면 반려한다(첨부 없는 이미지 지정 = 기대와 다른 발송)', () => {

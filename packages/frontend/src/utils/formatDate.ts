@@ -977,6 +977,15 @@ export function buildAdSubjectFront(subject: string, msgType: string, isAd: bool
 }
 
 /**
+ * ★ 2026-09-10 문장이 이미 (광고)로 시작하는가 (반각·전각 · 괄호 안팎 공백 허용)
+ * - 발송 CT(백엔드 buildAdSubject·buildAdMessage)가 "이미 붙어 있으니 다시 안 붙인다"고 보는 판정과 같다
+ * - 화면이 (광고) 표기를 문장과 따로 그릴 때 쓴다(대행발송 화면 접수 미리보기 SMS 본문 앞)
+ */
+export function startsWithAdMark(text: string): boolean {
+  return /^\s*[(（]\s*광고\s*[)）]/.test(text || '');
+}
+
+/**
  * ★ B2 후속: D103 위반 데이터(message_content에 (광고)/무료거부가 이미 포함된 캠페인) 정규화
  *
  * 컨트롤타워가 표시 직전에 본문에서 (광고) 접두사 + 무료거부 푸터를 제거하여

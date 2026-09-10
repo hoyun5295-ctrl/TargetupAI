@@ -17,6 +17,7 @@ import {
   type AgencyPreviewSample, type AgencySendEvent, type AgencySendStatus,
 } from '../agency/agency-send-api';
 import { CUI_PILL_BASE, CUI_PILL_TONE } from '../../utils/console-ui';
+import { withMmsImageNames, type MmsImageItem } from '../../utils/mmsImage';
 
 
 interface AdminAgencyDetail {
@@ -25,6 +26,8 @@ interface AdminAgencyDetail {
     isAd: boolean; callbackNumber: string | null; requestedAt: string; recipientCount: number;
     fileName: string | null; currentContent: string; originalContent: string;
     companyName: string | null; userName: string | null; mmsImagePaths: unknown[];
+    /** ★2026-09-10 이미지 원본 파일명(경로와 같은 순서 · 옛 접수는 null) */
+    mmsImageNames?: string[] | null;
   };
   events: AgencySendEvent[];
   samples: AgencyPreviewSample[];
@@ -412,7 +415,8 @@ export default function AgencySendLedgerPanel() {
           total={detail.total}
           messageType={detail.request.messageType}
           callbackNumber={detail.request.callbackNumber}
-          images={Array.isArray(detail.request.mmsImagePaths) ? detail.request.mmsImagePaths : []}
+          // ★2026-09-10 저장한 원본 파일명으로 보인다(고객 상세와 같은 CT)
+          images={Array.isArray(detail.request.mmsImagePaths) ? withMmsImageNames(detail.request.mmsImagePaths as MmsImageItem[], detail.request.mmsImageNames) : []}
         />
       )}
 

@@ -14,6 +14,7 @@
 import pool, { query } from '../config/database';
 import { getRegisteredCallbackSet, isCallbackRegistered } from './callback-filter';
 import { validateMmsPayload } from './mms-validator';
+import { alignMmsImageNames } from './mms-image-util';
 import {
   parseAgencyRequestForm, parseAgencyRecipientList, pickPhoneColumn, resolveCallbackPlan, matchHeader,
   hasRecipientSheet,
@@ -123,6 +124,11 @@ export async function createRequestCore(
     messageType = 'SMS', subject, content, isAd = false, callbackNumber,
     managerPhone, managerPhones, requestedAt, mmsImagePaths, fileName, phoneColumn, varMapping,
     recipients,
+    /**
+     * ★2026-09-10 이미지 원본 파일명(경로와 같은 순서 · 표시 전용 · 임은지 접수). 상세 미리보기가 이 이름을 보인다.
+     * ⛔ 경로 배열(mmsImagePaths)은 문자열 그대로 둔다 — 발송 배관이 그것을 읽는다(불변 23).
+     */
+    mmsImageNames,
     /**
      * 접수 출처(★0826 §18 · 'screen' | 'one_step' | 'email'). ⛔ 배포 순서 안전 규약(회의론자 필수 8 · 적대 2R 정정):
      * 컬럼 존재를 탐지(hasSourceColumn)해 **있을 때만** INSERT에 싣는다 — DDL 전에 코드가 떠도 전 입구가 안 죽고,
@@ -235,6 +241,11 @@ export async function createRequestCore(
       extraCols.push('requested_at_original');
       extraVals.push(when.originalAt);
     }
+    // ★2026-09-10 이미지 원본 파일명(표시 전용) — 컬럼이 있을 때만 싣는다(DDL 후행 안전 · 없으면 지금처럼 UUID로 보인다)
+    if (images.length > 0 && await hasAgencyColumn(client, 'mms_image_names')) {
+      extraCols.push('mms_image_names');
+      extraVals.push(JSON.stringify(alignMmsImageNames(mmsImageNames, images.length)));
+    }
     const colSql = extraCols.length > 0 ? `, ${extraCols.join(', ')}` : '';
     const valSql = extraCols.map((_, i) => `, $${base.length + 1 + i}`).join('');
     const inserted = await client.query(
@@ -342,6 +353,8 @@ export function parseOneStepOverrides(raw: any): {
   requestedAt?: string; callback?: { mode: string; number?: string; column?: string };
   managerPhones?: string[]; mmsImagePaths?: string[]; phoneColumn?: string;
   varMapping?: Record<string, string>;
+  /** ★2026-09-10 이미지 원본 파일명(표시 전용 · 코어가 경로 수에 맞춘다) */
+  mmsImageNames?: string[];
 } {
   try {
     const o = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});

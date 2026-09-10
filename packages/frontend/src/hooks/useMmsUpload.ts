@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { precheckMmsAutoFitFile } from '../utils/mmsImage';
 
 /**
  * useMmsUpload — MMS 이미지 업로드 공용 훅 (컨트롤타워)
@@ -13,6 +14,7 @@ import { useState } from 'react';
  *  - 최대 3장, 왼쪽(앞) 슬롯부터 순서대로 등록 강제 (빈 앞슬롯 있는 상태에서 뒷슬롯 업로드 차단)
  *
  * @param onError 검증/업로드 실패 시 사용자 안내 콜백 (화면별 토스트/배너로 표시)
+ * @param opts ★2026-09-10 선택. 넘기지 않으면 지금 동작 그대로(공용 규격 업로드 · 브라우저 JPG·300KB 사전 차단).
  */
 export interface MmsUploadImage {
   serverPath: string;
@@ -20,6 +22,20 @@ export interface MmsUploadImage {
   filename: string;
   originalName?: string;
   size: number;
+  /** ★2026-09-10 서버가 규격에 맞게 바꾼 사진이면 true(자동 맞춤 업로드만 채운다) */
+  converted?: boolean;
+}
+
+export interface MmsUploadOptions {
+  /** 업로드 주소. 기본 = 공용 규격 업로드(/api/mms-images/upload) */
+  uploadUrl?: string;
+  /**
+   * 서버가 규격에 맞춰 받는 업로드(대행발송 · 임은지 접수 cmttqx2gy0c8sjnotlvs441r1).
+   * 브라우저의 JPG·300KB 사전 차단을 끄고 "사진인가 · 원본 상한"만 본다(맞춤은 서버가 한다).
+   */
+  autoFit?: boolean;
+  /** 서버가 사진을 바꿨을 때 띄울 안내(조용히 바꾸지 않는다) */
+  onNotice?: (msg: string) => void;
 }
 
 const MAX_SLOTS = 3;
@@ -30,9 +46,10 @@ function isJpg(name: string): boolean {
   return n.endsWith('.jpg') || n.endsWith('.jpeg');
 }
 
-export function useMmsUpload(onError: (msg: string) => void) {
+export function useMmsUpload(onError: (msg: string) => void, opts?: MmsUploadOptions) {
   const [mmsUploadedImages, setMmsUploadedImages] = useState<MmsUploadImage[]>([]);
   const [mmsUploading, setMmsUploading] = useState(false);
+  const uploadUrl = opts?.uploadUrl || '/api/mms-images/upload';
 
   // 단일 슬롯 업로드
   const handleMmsSlotUpload = async (file: File, slotIndex: number) => {
@@ -41,13 +58,18 @@ export function useMmsUpload(onError: (msg: string) => void) {
       onError(`이미지 ${mmsUploadedImages.length + 1}번부터 순서대로 등록해주세요`);
       return;
     }
-    if (!isJpg(file.name)) {
-      onError('JPG 파일만 업로드 가능합니다 (PNG/GIF 미지원)');
-      return;
-    }
-    if (file.size > MAX_BYTES) {
-      onError(`${(file.size / 1024).toFixed(0)}KB. 300KB 이하만 가능합니다`);
-      return;
+    if (opts?.autoFit) {
+      const reason = precheckMmsAutoFitFile(file);
+      if (reason) { onError(reason); return; }
+    } else {
+      if (!isJpg(file.name)) {
+        onError('JPG 파일만 업로드 가능합니다 (PNG/GIF 미지원)');
+        return;
+      }
+      if (file.size > MAX_BYTES) {
+        onError(`${(file.size / 1024).toFixed(0)}KB. 300KB 이하만 가능합니다`);
+        return;
+      }
     }
 
     setMmsUploading(true);
@@ -55,7 +77,7 @@ export function useMmsUpload(onError: (msg: string) => void) {
       const formData = new FormData();
       formData.append('images', file);
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/mms-images/upload', {
+      const res = await fetch(uploadUrl, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -68,6 +90,7 @@ export function useMmsUpload(onError: (msg: string) => void) {
           updated[slotIndex] = data.images[0];
           return updated;
         });
+        if (data.images[0].notice) opts?.onNotice?.(data.images[0].notice);
       } else {
         onError(data.error || '업로드 실패');
       }
@@ -88,6 +111,11 @@ export function useMmsUpload(onError: (msg: string) => void) {
     }
     const filesToUpload = Array.from(files).slice(0, available);
     for (const file of filesToUpload) {
+      if (opts?.autoFit) {
+        const reason = precheckMmsAutoFitFile(file);
+        if (reason) { onError(reason); return; }
+        continue;
+      }
       if (!isJpg(file.name)) {
         onError(`${file.name}: JPG 파일만 업로드 가능합니다`);
         return;
@@ -103,7 +131,7 @@ export function useMmsUpload(onError: (msg: string) => void) {
         const formData = new FormData();
         formData.append('images', file);
         const token = localStorage.getItem('token');
-        const res = await fetch('/api/mms-images/upload', {
+        const res = await fetch(uploadUrl, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: formData,
@@ -111,6 +139,10 @@ export function useMmsUpload(onError: (msg: string) => void) {
         const data = await res.json();
         if (res.ok && data.success && data.images.length > 0) {
           setMmsUploadedImages(prev => [...prev, data.images[0]]);
+          if (data.images[0].notice) opts?.onNotice?.(data.images[0].notice);
+        } else if (opts?.autoFit) {
+          // 자동 맞춤은 서버가 형식을 최종 판정한다(HEIC·손상 파일). 거절 사유를 삼키면 "올렸는데 안 붙었다"가 된다
+          onError(data.error || '업로드 실패');
         }
       }
     } catch {
