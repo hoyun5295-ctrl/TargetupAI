@@ -9,11 +9,13 @@ import { rotateUserSession, normalizeAppSource, newSessionId, verifyPasswordChan
 import { resolveCompanyAccessDenial } from '../utils/company-access';
 import { issueUserLogin } from '../utils/login-issue';
 import {
-  isMfaEnforced, isMfaSchemaMissing, isTrustedDevice, issueMfaChallenge, issueMfaTicket,
+  isMfaRequiredFor, isMfaSchemaMissing, isTrustedDevice, issueMfaChallenge, issueMfaTicket,
   verifyMfaTicket, verifyMfaChallenge, registerTrustedDevice, lockAccountForMfaFailure,
   MFA_CODE_TTL_MINUTES,
 } from '../utils/mfa';
 import { isBlocked, recordFailureAndMaybeBlock, clearBlocksOnSuccess } from '../utils/login-block';
+// ★ 2026-09-11 서비스 페이지 접속 기록(전송자격인증 4.1)
+import { normalizePagePath, recordPageView } from '../utils/access-log';
 import { evaluateLoginOrigin } from '../utils/geo-access';
 import {
   generateTotpSecret,
@@ -363,9 +365,10 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
     // ===== ★ 2026-08-18 다중 인증(MFA) — 전송자격인증 3.4 =====
     //   [시행일] `MFA_ENFORCE_FROM` 이전에는 번호가 등록돼 있어도 묻지 않는다 — 사전 고지 기간(Harold 확정: 9/1 시행).
     //   [전환기] 주 인증번호가 등록된 계정만 태운다. 전면 적용하면 시행 즉시 전 고객이 못 들어온다.
+    //   [시범 명단] ★2026-09-11 `MFA_PILOT_LOGIN_IDS`가 있으면 그 계정만(담당자 번호 미기입 계정이 많아 전면 시행은 혼란).
     //   [면제] 이 기기·IP 대역이 24시간 신뢰 안이면 코드를 묻지 않는다.
-    //   컨트롤타워 = utils/mfa.ts
-    if (user.mfa_phone && isMfaEnforced()) {
+    //   컨트롤타워 = utils/mfa.ts `isMfaRequiredFor` — 판정 조건을 여기서 다시 조립하지 않는다.
+    if (isMfaRequiredFor(user)) {
       const trusted = await isTrustedDevice(user.id, req.body.mfaDeviceToken, req);
       if (!trusted) {
         const issued = await issueMfaChallenge(user.id, user.mfa_phone, req);
@@ -451,6 +454,22 @@ router.post('/logout', async (req: Request, res: Response) => {
     console.error('[logout]', error);
     return res.json({ success: true });
   }
+});
+
+// ============================================================
+// ★ 2026-09-11 서비스 페이지 접속 기록 — 전송자격인증 4.1
+//   화면(라우터)이 이동할 때마다 한 번 부른다. 누가·어느 화면·IP·브라우저를 감사 기록에 남긴다.
+//   판정·정규화·묶음은 CT(utils/access-log.ts)가 소유한다. 여기서는 받은 경로를 넘기기만 한다.
+//   응답은 항상 204 — 기록할 수 없는 경로여도 화면 이용을 막지 않는다.
+// ============================================================
+router.post('/page-view', authenticate, async (req: Request, res: Response) => {
+  try {
+    const path = normalizePagePath(req.body?.path);
+    if (path) await recordPageView({ req, path });
+  } catch (error) {
+    console.error('[page-view]', error);
+  }
+  return res.status(204).end();
 });
 
 // ============================================================

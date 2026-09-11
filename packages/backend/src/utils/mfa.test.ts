@@ -17,12 +17,18 @@ vi.hoisted(() => {
 });
 
 vi.mock('../config/database', () => ({ query: vi.fn(), mysqlQuery: vi.fn(), pool: { connect: vi.fn() } }));
-vi.mock('./sms-queue', () => ({ getAuthSmsTable: vi.fn(async () => 'SMSQ_SEND_11') }));
+// ★ 2026-09-11 인증번호 발송 = 담당자 테스트 라인(Harold 확정). 인증 라인 mock은 account-action(계정 잠금 안내)이 쓰므로 함께 둔다.
+vi.mock('./sms-queue', () => ({
+  getAuthSmsTable: vi.fn(async () => 'SMSQ_SEND_11'),
+  getTestSmsTables: vi.fn(async () => ['SMSQ_SEND_10']),
+}));
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import jwt from 'jsonwebtoken';
 import { query, mysqlQuery } from '../config/database';
 import {
-  isMfaEnforced, maskPhone, ipPrefix, generateMfaCode,
+  isMfaEnforced, isMfaPilotTarget, isMfaRequiredFor, maskPhone, ipPrefix, generateMfaCode,
   issueMfaTicket, verifyMfaTicket, issueMfaChallenge, verifyMfaChallenge,
   isTrustedDevice, MFA_MAX_ATTEMPTS,
 } from './mfa';
@@ -58,6 +64,70 @@ describe('시행일 게이트 — 고지 기간에는 아무도 막히지 않는
   it('값이 날짜가 아니면 미시행 — 오타로 전 고객을 막지 않는다', () => {
     process.env.MFA_ENFORCE_FROM = '구월일일';
     expect(isMfaEnforced(new Date('2026-12-31T00:00:00+09:00'))).toBe(false);
+  });
+});
+
+/**
+ * ★ 2026-09-11 시범 명단 (Harold 확정) — 담당자 번호가 전 계정에 기입되지 않아 전면 시행하면 혼란이 온다.
+ * 전송자격인증 4.1 다중인증 로그 증적을 위해 명단 계정(hoyun·psy5868·suran)에만 인증을 건다.
+ * 못 박는 것: 명단 밖 계정은 번호가 등록돼 있고 스위치가 켜져 있어도 인증을 요구받지 않는다.
+ */
+describe('시범 명단 — 명단 계정에만 인증을 요구한다', () => {
+  const savedFrom = process.env.MFA_ENFORCE_FROM;
+  const savedPilot = process.env.MFA_PILOT_LOGIN_IDS;
+  const NOW = new Date('2026-09-12T01:00:00+09:00');
+  afterEach(() => {
+    if (savedFrom === undefined) delete process.env.MFA_ENFORCE_FROM;
+    else process.env.MFA_ENFORCE_FROM = savedFrom;
+    if (savedPilot === undefined) delete process.env.MFA_PILOT_LOGIN_IDS;
+    else process.env.MFA_PILOT_LOGIN_IDS = savedPilot;
+  });
+
+  it('명단이 비어 있으면 명단 제한이 없다 (종전 동작 · 전면 시행 때는 명단을 지운다)', () => {
+    delete process.env.MFA_PILOT_LOGIN_IDS;
+    expect(isMfaPilotTarget('anyone')).toBe(true);
+    process.env.MFA_PILOT_LOGIN_IDS = '  ';
+    expect(isMfaPilotTarget('anyone')).toBe(true);
+  });
+
+  it('명단이 있으면 명단 계정만 대상 · 대소문자와 공백은 무시한다', () => {
+    process.env.MFA_PILOT_LOGIN_IDS = 'hoyun, psy5868 ,suran';
+    expect(isMfaPilotTarget('psy5868')).toBe(true);
+    expect(isMfaPilotTarget(' HOYUN ')).toBe(true);
+    expect(isMfaPilotTarget('suran')).toBe(true);
+    expect(isMfaPilotTarget('kumkang4')).toBe(false);
+    expect(isMfaPilotTarget('')).toBe(false);
+    expect(isMfaPilotTarget(null)).toBe(false);
+  });
+
+  it('스위치 + 명단 + 번호가 다 맞아야 인증을 요구한다', () => {
+    process.env.MFA_ENFORCE_FROM = '2026-09-11T00:00:00+09:00';
+    process.env.MFA_PILOT_LOGIN_IDS = 'hoyun,psy5868,suran';
+    expect(isMfaRequiredFor({ login_id: 'hoyun', mfa_phone: '01052958517' }, NOW)).toBe(true);
+  });
+
+  it('★명단 밖 고객은 번호가 있고 스위치가 켜져 있어도 인증을 요구받지 않는다', () => {
+    process.env.MFA_ENFORCE_FROM = '2026-09-11T00:00:00+09:00';
+    process.env.MFA_PILOT_LOGIN_IDS = 'hoyun,psy5868,suran';
+    expect(isMfaRequiredFor({ login_id: 'kumkang4', mfa_phone: '01012345678' }, NOW)).toBe(false);
+  });
+
+  it('번호가 없으면 명단 계정이어도 인증을 요구하지 않는다 (보낼 곳이 없다)', () => {
+    process.env.MFA_ENFORCE_FROM = '2026-09-11T00:00:00+09:00';
+    process.env.MFA_PILOT_LOGIN_IDS = 'hoyun';
+    expect(isMfaRequiredFor({ login_id: 'hoyun', mfa_phone: null }, NOW)).toBe(false);
+  });
+
+  it('스위치가 없으면 명단이 있어도 아무도 인증을 요구받지 않는다', () => {
+    delete process.env.MFA_ENFORCE_FROM;
+    process.env.MFA_PILOT_LOGIN_IDS = 'hoyun';
+    expect(isMfaRequiredFor({ login_id: 'hoyun', mfa_phone: '01052958517' }, NOW)).toBe(false);
+  });
+
+  it('[소스 스캔] 로그인 게이트는 판정 CT 하나(isMfaRequiredFor)만 부른다 — 라우트가 조건을 다시 조립하지 않는다', () => {
+    const authSrc = readFileSync(resolve(__dirname, '../routes/auth.ts'), 'utf8');
+    expect(authSrc).toMatch(/if \(isMfaRequiredFor\(user\)\)/);
+    expect(authSrc).not.toMatch(/isMfaEnforced\(/);
   });
 });
 
@@ -154,7 +224,11 @@ describe('인증번호 발급', () => {
     await issueMfaChallenge(USER, '010-5295-8517', REQ);
 
     const [sql, params] = mq.mock.calls[0];
-    expect(String(sql)).toContain('SMSQ_SEND_11');
+    // ★ 2026-09-11 발송 라인 = 담당자 테스트 라인(Harold 확정 · 비밀번호 초기화 문자와 같은 라인)
+    expect(String(sql)).toContain('INSERT INTO SMSQ_SEND_10 ');
+    expect(String(sql)).not.toContain('SMSQ_SEND_11');
+    // 테스트발송 청구 조건(app_etc1='test' AND app_etc2=회사)에 걸리지 않게 식별 컬럼을 싣지 않는다 — 고객사 청구 0
+    expect(String(sql)).not.toMatch(/app_etc1|app_etc2|bill_id/);
     expect(String(params[0])).toBe('01052958517'); // 하이픈 제거
     expect(String(params[2])).toMatch(/\d{6}/);
   });

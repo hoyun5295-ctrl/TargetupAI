@@ -10,7 +10,8 @@
  *   남기는 것은 **누가·언제·무엇을·몇 건**이다. 전화번호·이름 자체를 details에 넣으면
  *   개인정보를 지키려고 만든 로그가 개인정보 사본이 된다.
  *
- * 저장 위치 = `audit_logs`(신규 테이블 없음). action = `privacy_export` / `privacy_purge`.
+ * 저장 위치 = `audit_logs`(신규 테이블 없음). action = `privacy_export` / `privacy_purge`
+ *   + ★2026-09-11 `privacy_view`(조회) / `privacy_edit`(등록·수정) — 아래 절.
  */
 
 import type { Request } from 'express';
@@ -101,6 +102,83 @@ export async function logPrivacyPurge(params: {
     );
   } catch (err: any) {
     console.error('[privacy-audit] purge 기록 실패:', kind, err?.message || err);
+  }
+}
+
+// ============================================================
+//  ★ 2026-09-11 조회·수정 이력 (전송자격인증 4.2 반려 대응)
+// ============================================================
+// 심사 반려 = "개인정보 조회·수정·삭제 이력을 보관하고 있는가". 그전에는 반출·삭제만 남겼다.
+// 조회를 행 단위로 남기면 로그가 폭발하므로 **요청 단위**로 남긴다 — 누가·언제·어느 화면·몇 건.
+// ⛔ 원문 값은 넣지 않는다(반출 기록과 같은 원칙). 필터는 값이 아니라 축 이름만.
+
+/** 개인정보가 화면으로 나가는 경로(조회) — 화면·심사 자료에서 이 이름으로 구분한다 */
+//   ⚠ 건수만 돌려주는 경로(조건 미리보기 `POST /filter`·`/filter-count`·통계)는 개인정보가 나가지 않아 대상이 아니다.
+export type PrivacyViewKind =
+  | 'customers'            // 고객 DB 목록·검색
+  | 'customer_extract'     // 발송 대상 추출(수신번호)
+  | 'customer_detail'      // 고객 상세
+  | 'customer_purchases'   // 고객 한 명의 구매 이력
+  | 'customer_timeline'    // 고객 한 명의 활동 기록
+  | 'purchases_overview';  // 구매 통합조회(고객 이름·번호 포함)
+
+/** 개인정보를 바꾸는 경로(등록·수정) */
+export type PrivacyEditKind =
+  | 'customer_single'      // 고객 1명 등록·수정
+  | 'customer_bulk'        // 고객 일괄 등록·수정
+  | 'customer_upload';     // 고객 파일 업로드(등록·수정)
+
+interface PrivacyAccessParams<K extends string> {
+  req: Request;
+  kind: K;
+  /** 보여준·바꾼 행 수. 모르면 생략 */
+  count?: number;
+  /** 대상 식별자(고객 id 등). uuid만 target_id로 간다 */
+  targetId?: string | null;
+  /** 적용된 필터 요약 — 값이 아니라 어떤 축을 걸었는지만 */
+  filterKeys?: string[];
+  /** 누구의 데이터인가 — 슈퍼관리자가 다른 회사를 볼 때 그 회사. 생략하면 요청자 회사 */
+  companyId?: string | null;
+}
+
+/** 개인정보 조회 기록 — 실패해도 조회를 막지 않는다 */
+export async function logPrivacyView(params: PrivacyAccessParams<PrivacyViewKind>): Promise<void> {
+  await writePrivacyAccessLog('privacy_view', params);
+}
+
+/** 개인정보 등록·수정 기록 — 실패해도 저장을 막지 않는다 */
+export async function logPrivacyEdit(params: PrivacyAccessParams<PrivacyEditKind>): Promise<void> {
+  await writePrivacyAccessLog('privacy_edit', params);
+}
+
+async function writePrivacyAccessLog(
+  action: 'privacy_view' | 'privacy_edit',
+  params: PrivacyAccessParams<string>,
+): Promise<void> {
+  const { req, kind, count, targetId, filterKeys, companyId } = params;
+  const user = (req as any).user || {};
+  try {
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW())`,
+      [
+        user.userId || null,
+        action,
+        kind,
+        isUuid(targetId) ? targetId : null,
+        JSON.stringify({
+          kind,
+          companyId: companyId || user.companyId || null,
+          userType: user.userType || null,
+          count: typeof count === 'number' ? count : null,
+          filterKeys: filterKeys && filterKeys.length ? filterKeys : undefined,
+        }),
+        req.ip,
+        req.headers['user-agent'] || '',
+      ]
+    );
+  } catch (err: any) {
+    console.error(`[privacy-audit] ${action} 기록 실패:`, kind, err?.message || err);
   }
 }
 

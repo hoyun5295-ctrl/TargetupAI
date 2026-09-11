@@ -17,8 +17,10 @@
  *   지금 전 계정에 번호가 없다. 전면 적용하면 배포 즉시 전 고객이 못 들어온다.
  *   슈퍼관리자가 순차 등록하고, 전량 등록 후에 "번호 없으면 로그인 불가"로 전환한다.
  *
- * 발송 = 인증 전용 라인(`getAuthSmsTable()` = SMSQ_SEND_11) + `SYSTEM_SMS_CALLBACK`(1800-8125).
- * 인증번호 발송분은 고객사 청구에 잡히지 않는다(운영 라인을 점유하지 않는 별도 라인이라 집계 축이 다르다).
+ * 발송 = 담당자 테스트 라인(`getTestSmsTables()` 첫 테이블 · 기본 SMSQ_SEND_10) + `SYSTEM_SMS_CALLBACK`(1800-8125).
+ *   ★ 2026-09-11 인증 라인 → 담당자 테스트 라인(Harold 확정 · 앞으로도 이 라인). 비밀번호 초기화 문자와 같은 라인·같은 적재 형태다.
+ * 인증번호 발송분은 고객사 청구에 잡히지 않는다 — 식별 컬럼(app_etc1·app_etc2·bill_id)을 싣지 않아
+ *   테스트발송 청구 조건(`app_etc1='test' AND app_etc2=회사`)에 걸리지 않는다. 식별 컬럼을 붙이면 그 순간 청구된다.
  */
 
 import bcrypt from 'bcryptjs';
@@ -26,7 +28,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import type { Request } from 'express';
 import { query, mysqlQuery } from '../config/database';
-import { getAuthSmsTable } from './sms-queue';
+import { getTestSmsTables } from './sms-queue';
 import { restrictAccount } from './account-action';
 
 /** 코드 유효시간(분) */
@@ -58,6 +60,37 @@ export function isMfaEnforced(now: Date = new Date()): boolean {
   const from = new Date(raw);
   if (Number.isNaN(from.getTime())) return false;
   return now.getTime() >= from.getTime();
+}
+
+/**
+ * ★ 2026-09-11 시범 명단 (Harold 확정 · 전송자격인증 4.1 다중인증 로그 증적)
+ *
+ * 왜 명단인가
+ *   담당자 번호가 전 계정에 기입되지 않아 전면 시행하면 혼란이 온다. 시행은 명단 계정에만 건다.
+ *   `MFA_PILOT_LOGIN_IDS=hoyun,psy5868,suran` 처럼 로그인 아이디를 쉼표로 적는다(대소문자·공백 무시).
+ *
+ * ⚠ 비어 있으면 명단 제한이 없다 = 시행일 스위치만으로 번호 등록 계정 전체(종전 동작, 전면 시행 때의 형태).
+ *   그래서 시범 운영 중에는 `MFA_ENFORCE_FROM`과 이 값을 **반드시 함께** 넣는다.
+ */
+export function isMfaPilotTarget(loginId: string | null | undefined): boolean {
+  const raw = String(process.env.MFA_PILOT_LOGIN_IDS || '').trim();
+  if (!raw) return true;
+  const list = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (list.length === 0) return true;
+  return list.includes(String(loginId || '').trim().toLowerCase());
+}
+
+/**
+ * 이 계정에 로그인 인증번호를 요구하는가 — 판정은 여기 하나다(로그인 게이트 `auth.ts`가 이것만 부른다).
+ *   시행일 스위치 AND 시범 명단 AND 주 인증번호 등록. 셋 중 하나라도 아니면 묻지 않는다.
+ */
+export function isMfaRequiredFor(
+  user: { mfa_phone?: string | null; login_id?: string | null },
+  now: Date = new Date()
+): boolean {
+  if (!user?.mfa_phone) return false;
+  if (!isMfaEnforced(now)) return false;
+  return isMfaPilotTarget(user.login_id);
 }
 
 /** DDL 미적용 감지 — 호출부가 503 DB_MIGRATION_PENDING으로 돌려주기 위한 판정 */
@@ -208,11 +241,12 @@ export async function issueMfaChallenge(userId: string, phone: string, req: Requ
 }
 
 /**
- * 인증번호 발송 — 인증 전용 라인(SMSQ_SEND_11).
+ * 인증번호 발송 — 담당자 테스트 라인(★2026-09-11 Harold 확정 · 머리주석 참조).
  * ⚠ 발송이 실패하면 로그인이 불가능해지므로 오류를 삼키지 않고 그대로 올린다(호출부가 사용자에게 알린다).
+ * ⛔ 식별 컬럼(app_etc1·app_etc2·bill_id)을 싣지 않는다 — 실으면 테스트발송으로 고객사에 청구된다.
  */
 async function sendMfaCode(phone: string, code: string): Promise<void> {
-  const table = await getAuthSmsTable();
+  const [table] = await getTestSmsTables();
   const callback = process.env.SYSTEM_SMS_CALLBACK;
   if (!callback) throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다');
   const message = `[한줄로] 인증번호 ${code}\n${MFA_CODE_TTL_MINUTES}분 안에 입력해주세요.`;

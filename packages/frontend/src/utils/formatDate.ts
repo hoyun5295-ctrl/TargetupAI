@@ -758,6 +758,17 @@ export function normalizePhoneKr(value: any): string {
 }
 
 /**
+ * ★ 2026-09-11 화면 표시용 번호 가림 — 가운데를 가린다(010-****-1234). 숫자가 7자리 미만이면 '***'.
+ * 백엔드 `utils/mfa.ts` `maskPhone`과 같은 규칙. 감사 로그의 옛 원문 기록(2026-09-11 이전 고객 삭제)을
+ * 화면에서 가리는 용도로 만들었다 — 이미 가린 값을 다시 넣어도 같은 결과가 나온다.
+ */
+export function maskPhoneForDisplay(raw: unknown): string {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  if (digits.length < 7) return '***';
+  return `${digits.slice(0, 3)}-****-${digits.slice(-4)}`;
+}
+
+/**
  * ★ D97: 전화번호 포맷팅 컨트롤타워
  * 하이픈 없는 번호 → 하이픈 포함 포맷. 이미 하이픈이 있으면 정규화 후 재포맷.
  * 사용처: Dashboard, DirectSendPanel, AiCampaignSendModal,

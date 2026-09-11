@@ -15,6 +15,8 @@ import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { dropEmptyColumns, dropEmptyHeaderColumns, isFirstRowHeaderRow } from '../utils/excel-columns';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
+// ★ 2026-09-11 전송자격인증 4.2 — 고객 파일 업로드(등록·수정) 이력(누가·언제·몇 건 · 원문 없음)
+import { logPrivacyEdit } from '../utils/privacy-audit';
 
 // ★ D79: 날짜 정규화는 컨트롤타워(normalize.ts)의 normalizeDate() 사용
 // 인라인 normalizeDate 제거 — 컨트롤타워 원칙 위반이었음
@@ -481,6 +483,9 @@ router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: 
       startedAt,
       message: '처리 시작...'
     }), 'EX', CACHE_TTL.uploadProgress);
+
+    // ★ 2026-09-11 전송자격인증 4.2 — 등록·수정 이력은 요청 시점에 남긴다(처리는 백그라운드라 결과 건수는 진행 상태가 소유)
+    await logPrivacyEdit({ req, kind: 'customer_upload', count: totalRows, companyId });
 
     // 즉시 응답 (1초 이내)
     res.json({ success: true, fileId, totalRows, message: '백그라운드 처리 시작' });

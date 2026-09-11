@@ -6,6 +6,7 @@
  * ⛔ 백엔드에 새 액션을 적기 시작하면 여기에 라벨을 함께 등록한다. 등록을 잊어도 화면은 죽지 않고
  *   원문 코드를 그대로 보여준다(숨기는 것보다 보이는 낡음이 낫다).
  */
+import { maskPhoneForDisplay } from '../utils/formatDate';
 
 /** 액션 → 한글 라벨 */
 export const AUDIT_ACTION_LABEL: Record<string, string> = {
@@ -16,6 +17,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   logout: '로그아웃',
   login_session_conflict: '동시 접속 감지',
   login_takeover: '접속 인계',
+  // ★ 2026-09-11 서비스 페이지 접속 기록(전송자격인증 4.1)
+  page_view: '화면 접속',
   // 2차 인증(MFA·OTP)
   mfa_challenge: '2차 인증 요청',
   mfa_success: '2차 인증 성공',
@@ -66,6 +69,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   customer_delete_by_user: '사용자별 고객 삭제',
   privacy_export: '개인정보 내보내기',
   privacy_purge: '개인정보 파기',
+  // ★ 2026-09-11 개인정보 조회·수정 이력(전송자격인증 4.2)
+  privacy_view: '개인정보 조회',
+  privacy_edit: '개인정보 등록·수정',
   // 계정·회사 관리
   user_update: '사용자 수정',
   account_restricted: '계정 제한',
@@ -143,6 +149,31 @@ const REASON_LABEL: Record<string, string> = {
   foreign_access_blocked: '국외 접속 차단',
 };
 
+/**
+ * ★ 2026-09-11 개인정보 이력의 화면·경로 이름 → 한글(전송자격인증 4.2).
+ * ⛔ 원본은 백엔드 `utils/privacy-audit.ts`의 종류 목록(PrivacyExportKind·PrivacyViewKind·PrivacyEditKind)이다.
+ *   새 종류를 백엔드에 넣으면 여기에도 넣는다 — 빠지면 화면이 영문 코드를 그대로 보여준다.
+ */
+const PRIVACY_KIND_LABEL: Record<string, string> = {
+  // 내보내기
+  send_results: '발송 결과',
+  send_detail: '발송 상세',
+  unsubscribes: '수신거부 목록',
+  address_book: '주소록',
+  agent_stats: '에이전트 발송통계',
+  // 조회
+  customers: '고객 DB 목록',
+  customer_extract: '발송 대상 추출',
+  customer_detail: '고객 상세',
+  customer_purchases: '고객 구매 이력',
+  customer_timeline: '고객 활동 기록',
+  purchases_overview: '구매 통합조회',
+  // 등록·수정
+  customer_single: '고객 1명 등록·수정',
+  customer_bulk: '고객 일괄 등록·수정',
+  customer_upload: '고객 파일 업로드',
+};
+
 /** 상세 JSON의 값 몇 가지 → 한글 */
 const SCOPE_LABEL: Record<string, string> = {
   company_agent: '발송 에이전트',
@@ -197,7 +228,21 @@ export function formatAuditDetail(action: string, details: any): string {
     case 'foreign_access_blocked':
       return [d.loginId, d.country && `국가: ${d.country}`].filter(Boolean).join(' · ');
     case 'customer_delete':
-      return `${d.company_name || ''} · ${d.phone || ''} 삭제`;
+      // ★ 2026-09-11 번호는 가려서 보여준다 — 새 기록은 가린 값(phone_masked), 옛 기록(원문 phone)은 화면에서 가린다
+      return `${d.company_name || ''} · ${d.phone_masked || (d.phone ? maskPhoneForDisplay(d.phone) : '')} 삭제`;
+    // ★ 2026-09-11 서비스 페이지 접속 기록(전송자격인증 4.1)
+    case 'page_view':
+      return [d.path, d.userType && (USER_TYPE_LABEL[d.userType] || d.userType)].filter(Boolean).join(' · ');
+    // ★ 2026-09-11 개인정보 이력(전송자격인증 4.2) — 어느 화면·경로에서 몇 건
+    case 'privacy_export':
+    case 'privacy_purge':
+    case 'privacy_view':
+    case 'privacy_edit':
+      return [
+        PRIVACY_KIND_LABEL[d.kind] || d.kind,
+        typeof d.count === 'number' && `${d.count.toLocaleString()}건`,
+        d.userType && (USER_TYPE_LABEL[d.userType] || d.userType),
+      ].filter(Boolean).join(' · ');
     case 'customer_bulk_delete':
       return `${d.company_name || ''} · ${Number(d.deleted_count || d.count || 0).toLocaleString()}명 선택삭제`;
     case 'customer_delete_all':

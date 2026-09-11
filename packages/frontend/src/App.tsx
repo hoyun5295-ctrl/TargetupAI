@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, createContext, useContext, Suspense, lazy } from 'react';
+import { useEffect, useState, useCallback, useRef, createContext, useContext, Suspense, lazy } from 'react';
 // ★ 2026-08-22 도움말 봇 — 런처는 정적, 패널은 lazy. **동적 import 리터럴은 이 파일 안에 둔다**(vite 난독화 exclude 4종 중 하나, 0718 경위)
 import HelpDock from './components/help/HelpDock';
 const HelpPanel = lazy(() => import('./components/help/HelpPanel'));
@@ -181,6 +181,35 @@ function SessionGuard() {
   );
 }
 
+// ★ 2026-09-11 서비스 페이지 접속 기록(전송자격인증 4.1) — 로그인 상태에서 화면이 바뀔 때 한 번 알린다.
+//   판정·정규화·묶음은 서버 CT(backend utils/access-log.ts)가 한다. 여기서는 경로만 보낸다(쿼리·해시 제외).
+//   실패는 무시한다 — 접속 기록이 화면 이용을 막으면 안 된다.
+function PageViewTracker() {
+  const location = useLocation();
+  const { isAuthenticated } = useAuthStore();
+  const lastSentRef = useRef('');
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      lastSentRef.current = '';
+      return;
+    }
+    const path = location.pathname;
+    if (path === lastSentRef.current) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    lastSentRef.current = path;
+    fetch('/api/auth/page-view', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ path }),
+      keepalive: true,
+    }).catch(() => { /* 접속 기록 실패는 화면에 영향 없음 */ });
+  }, [location.pathname, isAuthenticated]);
+
+  return null;
+}
+
 // 세션 타임아웃 (비활동 감지 → 자동 로그아웃) + Context Provider
 function SessionTimeoutGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
@@ -285,6 +314,8 @@ function App() {
       <ToastProvider>
       {/* 세션 감시 (로그인 상태일 때만 활성) */}
       <SessionGuard />
+      {/* ★ 2026-09-11 서비스 페이지 접속 기록 (전송자격인증 4.1 · 로그인 상태에서만) */}
+      <PageViewTracker />
       <SessionTimeoutGuard>
 
       {/* ★ 2026-07-17 축 A — lazy 페이지 청크 로딩 경계 (fallback = 다크 스피너) + 지속 실패 복구 화면 */}

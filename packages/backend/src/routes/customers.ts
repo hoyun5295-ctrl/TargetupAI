@@ -1,5 +1,8 @@
 import { Request, Response, Router } from 'express';
-import { logPrivacyExport } from '../utils/privacy-audit';
+// ★ 2026-09-11 전송자격인증 4.2 — 조회(logPrivacyView)·등록/수정(logPrivacyEdit) 이력 추가(누가·어느 화면·몇 건 · 원문 없음)
+import { logPrivacyExport, logPrivacyView, logPrivacyEdit } from '../utils/privacy-audit';
+// ★ 2026-09-11 전송자격인증 4.2 — 삭제 감사 기록의 전화번호는 저장 시점에 가린다(마스킹 CT 재사용)
+import { maskPhone } from '../utils/mfa';
 import * as XLSX from 'xlsx';
 import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -180,6 +183,8 @@ if (smsOptIn === 'true') {
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       params
     );
+
+    await logPrivacyView({ req, kind: 'customers', count: result.rows.length, companyId, filterKeys: Object.keys(req.query || {}) });
 
     return res.json({
       customers: result.rows,
@@ -545,6 +550,8 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
     // ★ 2026-07-03: 수동 등록도 필드 구성 변경 가능 — 활성 필드 캐시 무효화
     clearEnabledFieldsCache(companyId);
 
+    await logPrivacyEdit({ req, kind: 'customer_single', count: 1, targetId: customerId, companyId });
+
     return res.status(201).json({
       message: '고객이 추가되었습니다',
       customer: result.rows[0],
@@ -665,6 +672,8 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
 
     // ★ 2026-07-03: 일괄 등록 = 필드 구성 변경 가능 — 활성 필드 캐시 무효화
     clearEnabledFieldsCache(companyId);
+
+    await logPrivacyEdit({ req, kind: 'customer_bulk', count: successCount, companyId });
 
     return res.json({
       message: `${successCount}건 성공, ${failCount}건 실패${duplicateInRequest > 0 ? `, 요청 내 중복 ${duplicateInRequest}건 제외` : ''}`,
@@ -1078,6 +1087,8 @@ router.post('/extract', async (req: Request, res: Response) => {
       return flat;
     });
 
+    await logPrivacyView({ req, kind: 'customer_extract', count: flatRecipients.length, companyId, filterKeys: Object.keys(req.body || {}) });
+
     res.json({
       success: true,
       count: flatRecipients.length,
@@ -1250,6 +1261,8 @@ router.delete('/:id', blockIfSyncActive, async (req: Request, res: Response) => 
     clearEnabledFieldsCache(companyId);
 
     // 감사 로그
+    //   ★ 2026-09-11 전송자격인증 4.2 — 이름·전화번호 원문을 남기지 않는다. 감사 기록은 열람 대상이라
+    //   원문을 넣으면 개인정보를 지키려는 기록이 개인정보 사본이 된다(privacy-audit.ts 원칙). 번호는 가운데를 가린다.
     await query(
       `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -1258,7 +1271,7 @@ router.delete('/:id', blockIfSyncActive, async (req: Request, res: Response) => 
         'customer_delete',
         'customer',
         id,
-        JSON.stringify({ name: customer.name, phone: customer.phone, delete_type: 'individual' }),
+        JSON.stringify({ phone_masked: maskPhone(customer.phone), delete_type: 'individual' }),
         req.ip,
         req.headers['user-agent'] || ''
       ]
@@ -1329,7 +1342,8 @@ router.post('/bulk-delete', blockIfSyncActive, async (req: Request, res: Respons
           delete_type: 'bulk',
           requested_count: ids.length,
           deleted_count: deleteResult.rowCount,
-          sample_phones: existing.rows.slice(0, 5).map((r: any) => r.phone)
+          // ★ 2026-09-11 전송자격인증 4.2 — 표본 번호도 저장 시점에 가린다(원문 금지 · 개별 삭제와 같은 규칙)
+          sample_phones_masked: existing.rows.slice(0, 5).map((r: any) => maskPhone(r.phone))
         }),
         req.ip,
         req.headers['user-agent'] || ''
@@ -1614,6 +1628,8 @@ router.get('/purchases/overview', async (req: Request, res: Response) => {
       rows = list.rows;
     }
 
+    await logPrivacyView({ req, kind: 'purchases_overview', count: rows.length, companyId, filterKeys: Object.keys(req.query || {}) });
+
     res.json({
       mode, groupBy, summary, rows,
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
@@ -1682,6 +1698,7 @@ router.get('/:id/purchases', async (req: Request, res: Response) => {
     ]);
 
     const totalCount = summary.rows[0]?.total_count || 0;
+    await logPrivacyView({ req, kind: 'customer_purchases', count: list.rows.length, targetId: id, companyId });
     res.json({
       customer: cust.rows[0],
       summary: { totalCount, totalAmount: Number(summary.rows[0]?.total_amount || 0) },
@@ -1742,6 +1759,7 @@ router.get('/:id/timeline', requirePlanFeature('customer_db_view'), async (req: 
     });
 
     if (!result) return res.status(404).json({ success: false, error: '고객을 찾을 수 없습니다.' });
+    await logPrivacyView({ req, kind: 'customer_timeline', count: 1, targetId: String(id), companyId });
     return res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('[고객 타임라인] 오류:', err);
@@ -1777,6 +1795,8 @@ router.get('/:id', async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '고객을 찾을 수 없습니다.' });
     }
+
+    await logPrivacyView({ req, kind: 'customer_detail', count: 1, targetId: id, companyId });
 
     res.json({ customer: result.rows[0] });
   } catch (error) {

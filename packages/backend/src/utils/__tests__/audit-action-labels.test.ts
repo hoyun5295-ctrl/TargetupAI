@@ -41,6 +41,8 @@ const DIRECT_INSERT_ACTIONS = [
   'machine_origin_detected', 'machine_origin_blocked', 'foreign_access_detected', 'foreign_access_blocked', 'pre_auth_effect',
   'customer_delete', 'customer_bulk_delete', 'customer_delete_all', 'customer_delete_by_user',
   'privacy_export', 'privacy_purge', 'account_restricted', 'company_terminated',
+  // ★ 2026-09-11 전송자격인증 4.2 — 개인정보 조회·수정 이력(privacy-audit.ts 직접 INSERT)
+  'privacy_view', 'privacy_edit',
 ];
 
 describe('감사 로그 액션 한글 라벨 커버리지', () => {
