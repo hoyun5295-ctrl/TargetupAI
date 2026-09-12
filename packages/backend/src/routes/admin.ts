@@ -68,6 +68,8 @@ import { grantFreeTrial } from '../utils/basic-trial';
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, diffFields } from '../utils/audit-log';
+// ★ 2026-09-12 발신 프로필 사용 중지(직원 접수 4번) — 판정·기록은 CT가 소유한다
+import { disableSenderProfile } from '../utils/kakao-sender-profile-admin';
 import { classifyHelpDbError, helpQuestionKind, helpReasonLabel, HELP_REQUEST_PHRASES } from '../utils/help-answer';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
@@ -5761,15 +5763,25 @@ router.post('/kakao-profiles', authenticate, requireSuperAdmin, async (req: Requ
   }
 });
 
-// DELETE /api/admin/kakao-profiles/:id — 슈퍼관리자가 발신 프로필 삭제
+// DELETE /api/admin/kakao-profiles/:id — 슈퍼관리자가 발신 프로필 사용 중지
+//
+// ⛔ 하드 삭제하지 않는다 (2026-09-12 pg_constraint 실측)
+//   `campaigns.kakao_profile_id`가 ON DELETE 없이 이 표를 참조해서, 그 프로필로 발송한 캠페인이
+//   하나라도 있으면 삭제가 23503으로 막힌다. 뚫으려면 발송·정산 원장인 캠페인을 지워야 한다.
+//   `brand_message_templates`는 CASCADE라 경고 없이 함께 사라진다. 그래서 상태만 내린다.
+//   판정·기록은 CT가 소유한다 — 여기서 직접 UPDATE하지 않는다.
 router.delete('/kakao-profiles/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await query('DELETE FROM kakao_sender_profiles WHERE id = $1', [id]);
-    res.json({ success: true });
+    const result = await disableSenderProfile({ profileId: id, actorUserId: req.user?.userId || null, req });
+    if (!result.ok) {
+      const message = result.reason === 'not_found' ? '발신 프로필을 찾을 수 없습니다' : '이미 사용 중지된 발신 프로필입니다';
+      return res.status(result.reason === 'not_found' ? 404 : 409).json({ success: false, error: message, code: result.reason });
+    }
+    return res.json({ success: true, profile: result.profile });
   } catch (error) {
-    console.error('[Admin] 발신 프로필 삭제 실패:', error);
-    res.status(500).json({ success: false, error: '삭제 실패' });
+    console.error('[Admin] 발신 프로필 사용 중지 실패:', error);
+    res.status(500).json({ success: false, error: '사용 중지 처리에 실패했습니다' });
   }
 });
 

@@ -2546,7 +2546,7 @@ router.get('/kakao-profiles', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT id, profile_key, profile_name, is_active, created_at
        FROM kakao_sender_profiles
-       WHERE company_id = $1
+       WHERE company_id = $1 AND COALESCE(is_active, true) = true
        ORDER BY created_at ASC`,
       [companyId]
     );

@@ -28,6 +28,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // ★ 2026-09-12 발신 인증(추가 인증 · 전송자격인증 3.5) — 발송 시 발신번호·계정 연계 확인
   sender_auth_challenge: '발신 인증 요청',
   sender_auth_success: '발신 인증 성공',
+  // ★ 2026-09-12 발신 프로필 사용 중지(슈퍼관리자 · 직원 접수 4번)
+  kakao_profile_disabled: '카카오 발신 프로필 사용 중지',
   totp_enroll_start: 'OTP 등록 시작',
   totp_enrolled: 'OTP 등록 완료',
   // ★ 2026-09-05 AI 영업 아웃리치(ceo 전용 · routes/sales-outreach.ts 성공 분기)
@@ -234,6 +236,12 @@ export function formatAuditDetail(action: string, details: any): string {
     case 'customer_delete':
       // ★ 2026-09-11 번호는 가려서 보여준다 — 새 기록은 가린 값(phone_masked), 옛 기록(원문 phone)은 화면에서 가린다
       return `${d.company_name || ''} · ${d.phone_masked || (d.phone ? maskPhoneForDisplay(d.phone) : '')} 삭제`;
+    // ★ 2026-09-12 발신 프로필 사용 중지 — 어느 고객사의 어느 채널을, 템플릿 몇 건을 달고 내렸는지
+    case 'kakao_profile_disabled':
+      return [
+        d.company_name, d.profile_name, d.yellow_id,
+        typeof d.template_count === 'number' && `템플릿 ${d.template_count}건`,
+      ].filter(Boolean).join(' · ');
     // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 어느 발신번호로, 어느 담당자 번호에 물었는지
     case 'sender_auth_challenge':
     case 'sender_auth_success':

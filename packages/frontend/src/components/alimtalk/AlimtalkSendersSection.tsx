@@ -197,6 +197,39 @@ export default function AlimtalkSendersSection() {
     });
   };
 
+  /**
+   * ★ 2026-09-12 발신 프로필 사용 중지 (직원 접수 4번 · 박성용 과장)
+   *   휴머스온에서 장기미사용으로 휴면삭제된 프로필을 우리쪽에서도 못 쓰게 내린다.
+   *   ⛔ 지우지 않는다 — 캠페인·템플릿 원장이 이 프로필을 참조한다. 상태만 내리고 기록을 남긴다.
+   *   중지 뒤 같은 채널을 다시 등록할 수 있다(채널 중복 검사는 활성 프로필만 본다).
+   */
+  const disableSender = (s: Sender) => {
+    setConfirm({
+      mode: 'warning',
+      title: '발신프로필 사용 중지',
+      description: `'${s.profile_name}'${s.yellow_id ? ` (${s.yellow_id})` : ''} 을 사용 중지합니다.
+고객사 화면에서 숨겨지고 발송에 쓸 수 없게 됩니다.
+지금까지의 발송·템플릿 기록은 그대로 남고, 같은 채널을 다시 등록할 수 있습니다.`,
+      confirmLabel: '사용 중지',
+      onConfirm: async () => {
+        setSubmittingAction(true);
+        try {
+          const res = await fetch(`/api/admin/kakao-profiles/${s.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${getToken()}` },
+          });
+          const data = await res.json();
+          setToast(data.success ? '사용 중지 처리 완료' : data?.error || '처리 실패');
+          load();
+        } catch (e: any) {
+          setToast(e?.message || '처리 실패');
+        } finally {
+          setSubmittingAction(false);
+        }
+      },
+    });
+  };
+
   const approveSender = (s: Sender) => {
     setConfirm({
       mode: 'default',
@@ -519,6 +552,18 @@ export default function AlimtalkSendersSection() {
                             className="text-[11px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded"
                           >
                             휴면해제
+                          </button>
+                        )}
+                        {s.is_active === false ? (
+                          <span className="text-[11px] px-2 py-0.5 bg-gray-200 text-gray-600 rounded">사용불가</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => disableSender(s)}
+                            disabled={submittingAction}
+                            className="text-[11px] px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded disabled:opacity-50"
+                          >
+                            사용 중지
                           </button>
                         )}
                       </td>

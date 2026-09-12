@@ -210,10 +210,14 @@ router.post(
 
       // D131: 동일 회사 내 동일 yellow_id 발신프로필 중복 등록 방지 (Harold님 지시).
       //       IMC 측에서 동일 채널로 재등록 시도해도 key가 바뀌어 DB에 row만 늘어나는 문제 방지.
+      // ★ 2026-09-12 중복 검사는 **활성 프로필만** 본다 (직원 접수 4번 · 박성용 과장)
+      //   휴면삭제된 프로필을 사용불가로 내린 뒤 같은 채널을 다시 등록하는 것이 정상 절차다.
+      //   중지된 옛 프로필까지 중복으로 보면 재등록이 영원히 막힌다.
+      //   ⛔ 발신키(profile_key) 전역 가드는 좁히지 않는다 — 재등록은 새 키를 받아 충돌하지 않는다.
       const dup = await query(
         `SELECT id, profile_key, approval_status, status
            FROM kakao_sender_profiles
-          WHERE company_id = $1 AND yellow_id = $2
+          WHERE company_id = $1 AND yellow_id = $2 AND COALESCE(is_active, true) = true
           LIMIT 1`,
         [targetCompanyId, yellowId],
       );
@@ -356,6 +360,9 @@ router.get('/senders', async (req: Request, res: Response) => {
     if (userType === 'super_admin') {
       // 전체 목록 + 회사명 조인
       const r = await query(
+        // ★ 2026-09-12 슈퍼 목록은 **중지된 프로필도 보여준다** (직원 접수 4번 · 박성용 과장
+        //   "이력 아예 삭제가 아닌 관리를 위해서 사용불가 표기"). 화면이 사용불가로 표기한다.
+        //   고객사 목록(아래 분기)에서는 숨긴다 — 고객은 못 쓰는 프로필을 볼 이유가 없다.
         `SELECT p.*, c.company_name
            FROM kakao_sender_profiles p
            LEFT JOIN companies c ON c.id = p.company_id
@@ -367,7 +374,7 @@ router.get('/senders', async (req: Request, res: Response) => {
       if (!companyId) return;
       const r = await query(
         `SELECT p.* FROM kakao_sender_profiles p
-          WHERE p.company_id = $1
+          WHERE p.company_id = $1 AND COALESCE(p.is_active, true) = true
           ORDER BY p.created_at DESC`,
         [companyId],
       );
