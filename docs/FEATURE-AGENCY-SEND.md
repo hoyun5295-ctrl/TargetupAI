@@ -64,6 +64,8 @@
 21. **⛔ 막을 것이 없었으면 「취소됨」으로 적지 않는다**(★0828 `alreadySent`). 큐에 대기도 픽업도 0이면 이미 전량 나간 것이다. 그때 취소로 확정하면 **고객은 받았는데 화면은 취소**가 된다. 원래 상태로 되돌리고 「이미 발송이 끝나 취소할 수 없습니다」를 알린다. ⛔ 그리고 `inspectAttemptCampaign`을 고쳐 발송 종결을 `stopped`로 보게 만들지 마라 — 적재가 끝나도 큐가 남아 있으면 더 나가므로 `live`가 맞고, 바꾸면 워커 D가 취소 건의 큐 회수를 놓친다.
 22. **⛔ 회신 상한에 걸려도 침묵하지 않는다**(★0828 B-0828-2). 요청서를 고쳐 다시 보내는 것이 정상 흐름인데 답이 없으면 사용자는 무엇이 잘못됐는지 알 수 없다. 상한은 ENV로 조이되(`AGENCY_MAIL_REPLY_RATE_PER_HOUR` · 0 = 무제한 기본) 상한에 닿은 첫 회차에는 그 사실을 한 통 알린다.
 23. **⛔ MMS 이미지는 규격이면 원본 그대로, 벗어나면 맞춰서 받는다. 맞추지 못한 파일만 파일별 사유로 반려한다**(★0828(2) 서수란 접수 `cmtclkuhe04iujnotbi3xbuu3` · **★0910 개정** = 임은지 접수 `cmttqx2gy0c8sjnotlvs441r1` · Harold 확정 "변환은 문제가 아니다"). 규격 = **JPG 실체(SOI 바이트 판정 · 확장자·MIME 불신) · 장당 300KB · 3장**(`LIMITS` 재사용). 맞춤은 `utils/mms-image-fit.ts` `fitMmsImage` **한 벌**이고 화면 접수(`POST /api/agency-send/mms-image`)·메일 접수(`prepareMailMmsImages`)가 같은 함수를 지난다. **같은 프로세스의 sharp로 한다 — 파이썬 서비스를 부르지 않는다**(0828의 "변환하지 않는다"는 변환을 파이썬 서비스에 맡기면 그 장애가 접수 장애가 된다는 근거였다. 그 근거가 없어졌다). ⛔ **조용히 바꾸지 않는다** = 화면 안내 토스트·슬롯 "자동 맞춤" 표시 · 메일 회신 "규격에 맞게 바꿔 붙인 이미지" 줄 · 담당자 테스트 MMS가 변환본이다. 이미지는 요청서와 **별도 첨부** 최대 3장(요청서 파일 안에 넣지 않는다). 요청서 "이미지 파일명" 칸은 **첨부가 있으면 무시**(순서 = 첨부 순서 · 접수 완료 회신이 순서를 고지 · 최종 확인 = 담당자 테스트 MMS)하고, **칸만 있고 첨부 0장이면 반려**(`image_not_attached`). 저장은 청구 계정 확정 뒤에만 하고 반려로 빠지면 그 자리에서 지운다. 코어에는 화면 접수와 같은 형태(**절대경로 문자열 배열**)로 넘긴다 = 발송·테스트 문자·청구 배관 무변경. **원본 파일명은 경로와 따로** `mms_image_names`(표시 전용 · 경로와 같은 순서)에 둔다 — 경로 배열에 이름을 섞으면 발송 배관이 그 모양을 읽게 된다. 옛 "메일 = SMS·LMS만"(설계서 §18-3 9)은 0828에 폐기.
+24. **⛔ 회신번호가 고객마다 달라도 접수는 하나다**(★2026-09-12 · 임은지 접수 `cmtwbtpby00atjnlu0rh5c9jc`). 고객별 번호는 수신자 행(`agency_send_recipients.callback`)이 들고, 적재가 그것을 `campaign_send_staging.callback`으로 옮겨 `useIndividualCallback`으로 보낸다. **접수를 회신번호로 쪼개지 마라** — 쪼개면 스팸 검사·담당자 테스트 문자·승인이 종류 수만큼 반복된다(16종 = 16번이었다). 종전 근거였던 "적재 배관이 수신자별 회신번호를 나르지 못한다"(설계서 §17)는 **사실이 아니었다**: 발송 워커는 staging의 `callback`을 함께 읽고(`direct-send-worker` 청크 SELECT), 프로세서가 `resolveCustomerCallback`으로 행마다 싣는다. 그 경로는 고객DB와 무관하다. ⛔ 그리고 **발송 직전에 등록을 다시 확인한다** — 배관은 회신번호 등록 검증을 하지 않는다고 계약에 적혀 있고(`direct-send-core` 머리 주석) 호출부가 그 책임을 진다. 미등록이 섞이면 **대표 번호로 조용히 바꾸지 말고** 멈추고 알린다(`dispatch_callback_unregistered`). 양식 "내용" 시트가 원래 고객별 발신번호 기재를 안내하고 고객리스트 헤더에도 `매장전화번호 (회신번호)` 열이 있다 — 그 사용법이 표준이다.
+25. **⛔ 수신자 적재는 앱 메모리를 거치지 않는다**(★2026-09-12 · 남지현 접수 `cmtwlz0sf00kkjnlusipmsof8`). `agency_send_recipients` → `campaign_send_staging`은 **한 문장(INSERT SELECT)**으로 옮긴다. 종전에는 전량을 앱 배열 다섯 벌로 올려 되넣었고, 그것이 접수 상한(3만)의 실제 이유였다(근거로 적혀 있던 "엑셀 업로드 권장값"은 관례였다). **건수 상한을 다시 만들지 마라** — 같은 발송 배관은 직접발송에서 42만 건을 처리한 실적이 있다(0912 실측). 슬롯 치환은 `toSlotValues`와 같은 규칙을 SQL로 쓴다(`COALESCE(vars->>키, '')` · 키가 없으면 빈 문자열). **행수로 막는 상한은 전부 없앴다**(접수 상한·파서 행 상한 `MAX_LIST_ROWS = 0`) — 실질 방어선은 파일·메일 크기다(§4 "명단 크기"). ⛔ 시간과 메모리를 근거로 행 상한을 되살리지 마라: 이메일 워커는 백그라운드이고 겹침 가드(`running` + advisory lock)가 있어 한 통이 오래 걸려도 다음 틱이 겹치지 않으며, 100만 행 파싱 RSS 피크는 310MB로 접수가 끝나면 회수된다(0912 실측 · 서버 가용 46Gi). ⛔ **exceljs 스트리밍 리더로 바꾸지 마라** — 같은 실측에서 메모리를 5배 썼다(1,574MB 대 310MB). 엑셀이 반복 문자열을 한 표에 모으는 구조라 행 단위로 읽어도 그 표를 통째로 들고 있어야 한다.
 
 ---
 
@@ -76,7 +78,7 @@
 | `utils/agency-send-form.ts` | 요청서·명단 파서. ★0826(2) **통일 양식**(시트 "내용"+"고객리스트" 한 파일 · 업계 라벨 별칭 · 괄호 부연 제거 대조 · 플레이스홀더 빈칸 처리 · 한국어 시각 표기 · 문자타입 알림톡 반려 · `hasRecipientSheet`) + 구양식(시트 "요청서"+별도 명단) 하위호환 · 무헤더 감지와 열 이름 합성 · 열 점수표(`scorePhoneColumns` 한 벌 + 임계 둘: 화면 0.5 / 이메일 0.9+격차) · 회신번호 칸 해석 |
 | `utils/agency-send-vars.ts` | 문안 항목 ↔ 명단 열 매칭(`resolveVarColumns`) + 주소록 슬롯 번역(`buildSlotPlan`) |
 | **`utils/agency-send-preview.ts`** | ★0828(2) **실물 문장 조립 CT**(`buildRenderedSample` 1행 = 검사·테스트 문자 / `buildRenderedSamples` 상위 N = 상세 미리보기). 조립은 `prepareSendMessage` 한 벌 · 워커 옛 `buildSample`이 여기로 이동. 소비 = 고객 `GET /:id/preview`(소유자 술어) + 관리자 `GET /api/admin/agency-send/:id/preview`(super_admin) 둘 다 **같은 CT** |
-| `utils/agency-send-worker.ts` | 5분 워커 A~F(1차 검사·당일 재검사·적재·만료·대조·lock 복구). 적재는 `createDirectSendCampaign`에 위임 |
+| `utils/agency-send-worker.ts` | 5분 워커 A~F(1차 검사·당일 재검사·적재·만료·대조·lock 복구). 적재는 **DB 안 한 문장**(`INSERT INTO campaign_send_staging SELECT … FROM agency_send_recipients` · ★2026-09-12 불변 25)으로 옮긴 뒤 `createDirectSendCampaign`에 위임. 고객별 회신번호가 실렸으면 `useIndividualCallback`으로 보내고, 그 앞에 등록 재검증을 한다(불변 24) |
 | `utils/agency-send-approve.ts` | 승인 효과 CT(한 트랜잭션). 입구 둘(로그인 화면·문자 링크)이 같은 함수를 지난다 |
 | `utils/agency-send-cancel.ts` | ★0826(3) 취소 효과 CT. 입구 둘(고객 화면·슈퍼관리자 운영 취소)이 같은 함수를 지난다. cancelling 선점 → 큐 삭제 확인 → 확정 · tooLate만 되돌림 · 실패는 워커 F 인계 |
 | `utils/agency-send-link.ts` | 담당자 링크 승인 토큰(번호별 서명 · fragment 주소 · 헤더 운반) |
@@ -107,6 +109,7 @@
 | ENV | `AGENCY_MAIL_ENABLED` · `AGENCY_MAIL_USER` · `AGENCY_MAIL_PASS`(메일 전용 비밀번호). 없으면 워커가 시작하지 않는다(부팅 로그 1회) |
 | 운영 명령 | **[OPS.md §2-2-D](../status/OPS.md)** — 정지·재개·긴급 정지 3단·현황 SQL·경보 3종 |
 | 경보 | `agency-mail-login-fail`(즉시·정지 동반) / `agency-mail-unknown-sender`(6시간 요약) / `agency-mail-poll-fail`(30분 정체) |
+| **명단 크기** | ★2026-09-12 **행수 제한 없음**(불변 25). 실질 상한은 파일 크기 하나이고 두 입구가 같은 값이다 = 메일 첨부 합계 **50MB**(`MAX_ATTACH_TOTAL` · 메일 전체는 그 1.67배) · 화면 요청서 업로드 한 파일 **50MB**(`ONE_STEP_FILE_LIMIT`). 실측 = 명단 xlsx 6열 20만행 7.5MB · 50만행 18.7MB · 100만행 37.4MB(12열 약 2배). ⛔ 우리 값 위에 **메일 서버가 받아 주는 첨부 크기**가 따로 있다(하이웍스 상한 확인 중 · 확인되면 낮은 쪽에 맞춘다) |
 
 ---
 

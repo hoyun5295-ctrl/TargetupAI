@@ -20,7 +20,11 @@
  *   지금은 `campaign_send_staging`에 넣고 `createDirectSendCampaign`을 부른다. 차감·정제·적재·
  *   미적재분 환불·`sentTables` 기록·적재 중 취소 감지는 전부 그쪽 CT가 소유한다.
  */
-import { query } from '../config/database';
+import pool, { query } from '../config/database';
+// ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
+import { hasAgencyColumn } from './agency-send-intake';
+// ★2026-09-12 발신번호 등록 집합 — 접수 때 쓰는 그 함수를 발송 직전에도 쓴다(판정 두 벌 금지)
+import { getRegisteredCallbackSet } from './callback-filter';
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { refineForSpam } from './agency-send-refine';
 import {
@@ -710,44 +714,71 @@ async function dispatchToPipeline(row: any, content: string, token: string): Pro
     return;
   }
 
-  const recipients = await query(
-    `SELECT phone, vars FROM agency_send_recipients WHERE request_id = $1::uuid ORDER BY row_no`,
-    [row.id],
+  // ★2026-09-12 적재를 **DB 안에서** 옮긴다(2026-09-11 접수 `cmtwlz0sf00kkjnlusipmsof8`).
+  //   종전에는 수신자 전량을 앱 배열 다섯 벌로 올린 뒤 UNNEST로 되넣어, 명단 크기가 곧 프로세스 메모리였다.
+  //   그것이 접수 상한(3만)의 실제 이유였다. 두 테이블이 같은 DB에 있으므로 한 문장으로 옮기면
+  //   앱 메모리 사용이 0이 되고 건수가 상수로 남지 않는다.
+  //   ⛔ 슬롯 치환은 `toSlotValues`와 같은 규칙이다 — 키가 없거나 값이 null이면 빈 문자열(COALESCE).
+  //      `plan.order`가 네 개 미만이면 그 자리 파라미터가 null이고, `vars->>null`은 null이라 같은 결과다.
+  //   ⛔ 전화번호를 다시 정규화하지 않는다 — 접수 코어가 `normalizeAgencyPhone`으로 정규화해 저장한 값이고,
+  //      옛 코드의 `normalizePhone`은 이미 숫자만 남은 값에 다시 걸던 것이라 결과가 같다.
+  const hasRecipientCallback = await hasAgencyColumn(pool, 'callback', 'agency_send_recipients');
+
+  await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
+  const staged = await query(
+    `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1, extra2, extra3${hasRecipientCallback ? ', callback' : ''})
+     SELECT $1::uuid, $2::uuid, r.phone,
+            COALESCE(r.vars->>($4::text), ''), COALESCE(r.vars->>($5::text), ''),
+            COALESCE(r.vars->>($6::text), ''), COALESCE(r.vars->>($7::text), '')
+            ${hasRecipientCallback ? ', r.callback' : ''}
+       FROM agency_send_recipients r
+      WHERE r.request_id = $3::uuid
+      ORDER BY r.row_no`,
+    [
+      stagingId, row.company_id, row.id,
+      plan.order[0] ?? null, plan.order[1] ?? null, plan.order[2] ?? null, plan.order[3] ?? null,
+    ],
   );
-  const phones: string[] = [];
-  const names: string[] = [];
-  const extra1s: string[] = [];
-  const extra2s: string[] = [];
-  const extra3s: string[] = [];
-  for (const r of recipients.rows) {
-    const phone = normalizePhone(r.phone);
-    if (!phone) continue;
-    const v = toSlotValues(r.vars, plan.order);
-    phones.push(phone); names.push(v.name); extra1s.push(v.extra1); extra2s.push(v.extra2); extra3s.push(v.extra3);
-  }
+  const stagedCount = staged.rowCount || 0;
   // 문안 문제가 아니라 보낼 대상이 없는 것이다. "문안 확인 필요"로 적으면 담당자가 엉뚱한 곳을 본다.
-  if (phones.length === 0) {
+  if (stagedCount === 0) {
     await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token);
     await notifyFailed('dispatch_no_recipient', {});
     return;
   }
 
-  await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
-  // 컬럼·UNNEST 형태는 `/direct-send/stage`(routes/campaigns.ts) 원본과 같다. 개별 회신번호는 쓰지 않는다.
-  await query(
-    `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1, extra2, extra3)
-     SELECT $1::uuid, $2::uuid, u.phone, u.name, u.extra1, u.extra2, u.extra3
-     FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
-       AS u(phone, name, extra1, extra2, extra3)`,
-    [stagingId, row.company_id, phones, names, extra1s, extra2s, extra3s],
-  );
+  // 고객별 회신번호가 하나라도 실렸는가 = 발송 배관에 수신자별 번호로 보내라고 알리는 축.
+  //   ⛔ 없으면 종전처럼 접수 대표 번호 하나로 나간다(고정 번호 방식 · 옛 접수 행 모두 이 길이다).
+  const distinctCallbacks = hasRecipientCallback
+    ? (await query(
+        `SELECT DISTINCT callback FROM agency_send_recipients WHERE request_id = $1::uuid AND callback IS NOT NULL`,
+        [row.id],
+      )).rows.map((r: any) => String(r.callback))
+    : [];
+  const individualCallback = distinctCallbacks.length > 0;
+
+  // ⛔ 등록 검증을 **발송 직전에 한 번 더** 한다(★2026-09-12). 접수 때 전수 확인하지만, 그 뒤 발신번호가
+  //   지워지면 미등록 번호로 나간다(발신번호 사전등록제 위반). 배관은 이 검증을 하지 않는다 —
+  //   `direct-send-core`가 "회신번호 등록 검증은 호출부가 선행한다"고 계약에 적어 두었고, 여기가 그 호출부다.
+  //   ⛔ 미등록을 대표 번호로 조용히 바꾸지 않는다 — 고객이 정하지 않은 번호로 나가는 것이 더 나쁘다.
+  if (individualCallback) {
+    const registered = await getRegisteredCallbackSet(row.company_id, row.created_by);
+    const missing = distinctCallbacks.filter((cb) => !registered.has(cb));
+    if (missing.length > 0) {
+      await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
+      await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token);
+      // notifyFailed가 이벤트 기록까지 한다(따로 logEvent를 부르면 같은 줄이 두 번 남는다)
+      await notifyFailed('dispatch_callback_unregistered', { missing: missing.slice(0, 20), total: missing.length });
+      return;
+    }
+  }
 
   // 정제 후 실제 발송 수(수신거부·중복 제외). 차감·청구가 이 수를 쓴다.
   const { sendCount } = await countStagingFiltered(stagingId, row.company_id, row.created_by, true, true);
   if (sendCount === 0) {
     await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
     await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token);
-    await notifyFailed('dispatch_zero_after_filter', { staged: phones.length });
+    await notifyFailed('dispatch_zero_after_filter', { staged: stagedCount });
     return;
   }
 
@@ -762,6 +793,10 @@ async function dispatchToPipeline(row: any, content: string, token: string): Pro
         message: plan.slotContent,
         subject: row.subject || null,
         callback: row.callback_number,
+        // ★2026-09-12 고객별 회신번호가 실린 접수는 수신자별 번호로 나간다.
+        //   배관은 staging 행의 `callback`을 읽어 큐에 싣고(direct-send-processor `resolveCustomerCallback`),
+        //   값이 빈 행은 위 대표 번호로 떨어진다. 고정 번호 접수는 false라 종전과 같다.
+        useIndividualCallback: individualCallback,
         sendChannel: 'sms',
         adEnabled: !!row.is_ad,
         scheduled: true,
@@ -776,7 +811,7 @@ async function dispatchToPipeline(row: any, content: string, token: string): Pro
     // 상태를 적는다. **이 쓰기가 실패해도 발송이 미아가 되지 않는다** — 캠페인이 시도 키를 들고 있고
     //   대조(워커 D)가 그것을 보고 수렴시킨다. 그래서 여기서 고아 판정·중화를 하지 않는다.
     await setStatus(row.id, 'queued', { ...RELEASE, campaign_id: campaignId, queued_at: new Date() }, token);
-    await logEvent(row.id, 'queued', { campaignId, count: sendCount, staged: phones.length });
+    await logEvent(row.id, 'queued', { campaignId, count: sendCount, staged: stagedCount, individualCallback });
     console.log(`${LOG} 예약 생성 완료 request=${row.id} campaign=${campaignId} ${sendCount}건`);
   } catch (err: any) {
     // 배관이 거절했다(잔액 부족·야간 광고 제한·미완성 링크 등). 캠페인 정리는 그쪽이 소유한다.

@@ -52,6 +52,8 @@ const EVENT_LABEL: Record<string, string> = {
   dispatch_no_recipient: '보낼 번호가 남지 않았습니다',
   dispatch_zero_after_filter: '수신거부를 빼고 나니 보낼 번호가 없습니다',
   dispatch_var_overflow: '문안에 넣을 항목이 너무 많습니다',
+  // ★2026-09-12 고객별 회신번호 중 등록이 풀린 번호가 있어 보내지 않았다
+  dispatch_callback_unregistered: '명단의 회신번호 중 등록되지 않은 번호가 있습니다',
   dispatch_no_owner: '접수자 정보를 찾지 못했습니다',
   dispatch_error: '예약을 만들지 못해 다시 시도합니다',
   dispatch_incomplete: '예약이 끝나지 않아 발송하지 않았습니다',

@@ -35,7 +35,14 @@ function fakeClient(existingColumns: string[]) {
     calls,
     async query(sql: string, params: any[] = []) {
       calls.push({ sql, params });
-      if (sql.includes('information_schema.columns')) return { rows: existingColumns.includes(params[0]) ? [{ ok: 1 }] : [] };
+      // ★2026-09-12 컬럼 탐지는 테이블까지 대조한다(`hasAgencyColumn`이 두 테이블을 본다).
+      //   목록에 'x'만 적으면 `agency_send_requests.x`로 읽고, 다른 테이블은 'table.column'으로 적는다.
+      if (sql.includes('information_schema.columns')) {
+        const [table, column] = params;
+        const known = existingColumns.includes(`${table}.${column}`)
+          || (table === 'agency_send_requests' && existingColumns.includes(column));
+        return { rows: known ? [{ ok: 1 }] : [] };
+      }
       if (sql.includes('INSERT INTO agency_send_requests')) return { rows: [{ id: 'req-1' }] };
       if (sql.includes('SELECT COUNT(*)')) return { rows: [{ c: 1 }] };
       return { rows: [] };

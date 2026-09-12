@@ -8,7 +8,8 @@
  *
  * ⛔ 문안·제목·광고는 요청서가 진실이다 — 여기서 고치지 않는다(고치려면 요청서를 고쳐 다시 올린다).
  *   확인 화면에서 바꿀 수 있는 것 = 보낼 시각 · 회신번호 선택 · 담당자 번호 · 이미지.
- * ⛔ 회신번호를 열로 지정하면 접수가 회신번호별로 나뉜다 — 그 사실을 화면이 숫자로 안내한다.
+ * ⛔ 회신번호를 열로 지정해도 접수는 하나다(★2026-09-12) — 고객마다 그 번호로 나간다.
+ *   종류와 건수는 화면이 숫자로 보여 주되, "나뉜다"고 적지 않는다.
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔(CUI_*).
  */
 import { useRef, useState } from 'react';
@@ -367,7 +368,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                       <option key={`col:${h}`} value={`col:${h}`}>명단의 열: {h}</option>
                     ))}
                   </select>
-                  <p className={CUI_HINT}>명단의 열을 고르면 회신번호별로 접수가 나뉩니다. 바꾸면 집계를 다시 계산합니다.</p>
+                  <p className={CUI_HINT}>명단의 열을 고르면 고객마다 그 번호로 나갑니다. 접수는 하나입니다. 바꾸면 집계를 다시 계산합니다.</p>
                 </div>
 
                 <div>
@@ -415,8 +416,8 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
 
                 {columnMode && a.groups.length > 0 && (
                   <div className="rounded-xl border border-indigo-600/20 bg-indigo-50/50 p-4">
-                    <p className="text-[13px] font-bold text-indigo-900 mb-1">회신번호 {a.groups.length}종, 접수가 {a.groups.length}건으로 나뉩니다</p>
-                    <p className="text-[12px] text-indigo-900/70 leading-snug mb-2.5">각 건마다 문안 검사와 담당자 문자, 승인이 따로 갑니다.</p>
+                    <p className="text-[13px] font-bold text-indigo-900 mb-1">회신번호 {a.groups.length}종 · 접수는 1건입니다</p>
+                    <p className="text-[12px] text-indigo-900/70 leading-snug mb-2.5">고객마다 아래 번호로 나갑니다. 문안 검사와 담당자 문자, 승인은 한 번입니다.</p>
                     <div className="space-y-1.5">
                       {a.groups.slice(0, 8).map((g) => (
                         <p key={g.callback} className="flex items-center justify-between text-[12.5px]">

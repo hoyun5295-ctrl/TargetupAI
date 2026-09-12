@@ -228,9 +228,16 @@ router.post('/', async (req: Request, res: Response) => {
 //     수신자별 회신번호를 나르지 못한다(agency-send-worker 적재부 주석 소유). 나뉜 각 건은
 //     기존 파이프라인(검사·담당자 문자·승인)을 각각 그대로 탄다 — 확인 화면이 그 사실을 안내한다.
 // ════════════════════════════════════════════════════════════
+/**
+ * 요청서 업로드 한 파일 상한.
+ * ★2026-09-12 15MB → **50MB**(Harold 지시). 명단 행수로 막지 않기로 했으므로 여기가 화면 접수의 실질 상한이고,
+ *   이메일 입구의 첨부 상한과 같은 값이어야 한다(같은 요청서 파일을 두 입구가 받는다 · 비대칭이면
+ *   "메일로는 되는데 화면에서는 안 되는" 파일이 생긴다). 실측 = 6열 100만 행 명단이 37.4MB.
+ */
+const ONE_STEP_FILE_LIMIT = 50 * 1024 * 1024;
 const oneStepMulter = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 2 },
+  limits: { fileSize: ONE_STEP_FILE_LIMIT, files: 2 },
 }).fields([{ name: 'form', maxCount: 1 }, { name: 'list', maxCount: 1 }]);
 
 /** 자격을 **파일을 받기 전에** 확인한다(★Codex 적대 1R — 무자격 계정이 메모리부터 점유하면 안 된다) */
@@ -249,7 +256,9 @@ function oneStepUpload(req: Request, res: Response, next: () => void): void {
       res.status(tooBig ? 413 : 400).json({
         success: false,
         code: tooBig ? 'FILE_TOO_LARGE' : 'UPLOAD_INVALID',
-        error: tooBig ? '파일이 너무 큽니다. 한 파일 15MB까지 올릴 수 있습니다.' : '파일 업로드 형식이 올바르지 않습니다.',
+        error: tooBig
+          ? `파일이 너무 큽니다. 한 파일 ${Math.round(ONE_STEP_FILE_LIMIT / 1024 / 1024)}MB까지 올릴 수 있습니다.`
+          : '파일 업로드 형식이 올바르지 않습니다.',
       });
       return;
     }
@@ -299,7 +308,7 @@ router.post('/one-step/preview', requireAgencySendMw, oneStepUpload, async (req:
   }
 });
 
-// 확정 — 같은 파일을 다시 받아 같은 분석을 거치고, 회신번호 그룹마다 접수를 만든다
+// 확정 — 같은 파일을 다시 받아 같은 분석을 거치고, 접수 **하나**를 만든다(★2026-09-12 · 종전에는 회신번호 그룹마다 만들었다)
 router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request, res: Response) => {
   const auth = (req as any).agencyAuth as { companyId: string; userId: string };
   try {
@@ -346,34 +355,35 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      for (const group of analysis.groups) {
-        const result = await createRequestCore(auth, {
-          messageType: analysis.messageType,
-          subject: analysis.subject || undefined,
-          content: analysis.content,
-          isAd: analysis.isAd,
-          callbackNumber: group.callback,
-          managerPhones: analysis.managerPhones,
-          requestedAt: analysis.requestedAtIso,
-          mmsImagePaths: Array.isArray(overrides.mmsImagePaths) ? overrides.mmsImagePaths : [],
-          // ★2026-09-10 원본 파일명(표시 전용) — 확인 화면이 업로드 응답의 이름을 함께 보낸다
-          mmsImageNames: Array.isArray(overrides.mmsImageNames) ? overrides.mmsImageNames : [],
-          fileName: analysis.fileName,
-          phoneColumn: analysis.phoneColumn || '전화번호',
-          varMapping: Object.fromEntries(analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
-          recipients: group.recipients,
-          source: 'one_step',
-        }, client, pre);
-        if (!result.ok) {
-          await client.query('ROLLBACK');
-          return res.status(result.status).json({
-            success: false,
-            error: analysis.groups.length > 1 ? `회신번호 ${group.callback} 건: ${result.error} (아무것도 접수되지 않았습니다)` : result.error,
-            ...(result.code ? { code: result.code } : {}),
-          });
-        }
-        created.push(result.request);
+      // ★2026-09-12 접수는 **하나**다(2026-09-11 접수 `cmtwbtpby00atjnlu0rh5c9jc`).
+      //   종전에는 회신번호 종류마다 접수를 만들어, 16종이면 스팸 검사·담당자 문자·승인이 16번이었다.
+      //   고객별 회신번호는 수신자 행이 들고 가고, 적재가 그것을 그대로 발송 배관에 실어 보낸다.
+      const result = await createRequestCore(auth, {
+        messageType: analysis.messageType,
+        subject: analysis.subject || undefined,
+        content: analysis.content,
+        isAd: analysis.isAd,
+        callbackNumber: analysis.primaryCallback,
+        managerPhones: analysis.managerPhones,
+        requestedAt: analysis.requestedAtIso,
+        mmsImagePaths: Array.isArray(overrides.mmsImagePaths) ? overrides.mmsImagePaths : [],
+        // ★2026-09-10 원본 파일명(표시 전용) — 확인 화면이 업로드 응답의 이름을 함께 보낸다
+        mmsImageNames: Array.isArray(overrides.mmsImageNames) ? overrides.mmsImageNames : [],
+        fileName: analysis.fileName,
+        phoneColumn: analysis.phoneColumn || '전화번호',
+        varMapping: Object.fromEntries(analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
+        recipients: analysis.allRecipients,
+        source: 'one_step',
+      }, client, pre);
+      if (!result.ok) {
+        await client.query('ROLLBACK');
+        return res.status(result.status).json({
+          success: false,
+          error: result.error,
+          ...(result.code ? { code: result.code } : {}),
+        });
       }
+      created.push(result.request);
       await client.query('COMMIT');
     } catch (txErr) {
       await client.query('ROLLBACK').catch(() => {});
@@ -387,7 +397,7 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
       await logEvent(r.id, 'received', { recipientCount: r.recipient_count, messageType: r.message_type, via: 'one-step' });
       kickFirstTest(r.id);
     }
-    console.log(`[agency-send] 원스텝 접수 company=${auth.companyId} ${created.length}건(회신번호 ${analysis.groups.length}종)`);
+    console.log(`[agency-send] 원스텝 접수 company=${auth.companyId} ${created.length}건(회신번호 ${analysis.groups.length}종 · 인원 ${analysis.counts.valid})`);
     return res.status(201).json({ success: true, requests: created.map(toPublic) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);

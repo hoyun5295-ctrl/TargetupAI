@@ -17,7 +17,7 @@ import { validateMmsPayload } from './mms-validator';
 import { alignMmsImageNames } from './mms-image-util';
 import {
   parseAgencyRequestForm, parseAgencyRecipientList, pickPhoneColumn, resolveCallbackPlan, matchHeader,
-  hasRecipientSheet,
+  hasRecipientSheet, MAX_LIST_ROWS,
   type AgencyFormError, type CallbackPlan,
 } from './agency-send-form';
 import { normalizePhone, normalizeAgencyPhone } from './normalize-phone';
@@ -26,19 +26,27 @@ import { buildSlotPlan, extractAgencyVars, resolveVarColumns } from './agency-se
 import { suggestVarColumnsWithAi } from './ai-column-mapper';
 import { SEND_HOURS } from '../config/defaults';
 
-/** 접수 1건에 담을 수 있는 수신자 상한. 그 이상은 나눠 접수한다(엑셀 업로드 권장값과 같은 축) */
-export const MAX_RECIPIENTS = 30000;
+// ★2026-09-12 접수 1건 수신자 상한(3만)을 없앴다. 근거는 "엑셀 업로드 권장값"이라는 관례였고,
+//   실제로 막던 것은 적재가 앱 메모리를 거치는 구조였다. 그 구조를 DB 안 복사로 바꿔 상한이 필요 없다.
+//   남은 실질 상한은 파서의 행 상한(`MAX_LIST_ROWS`) 하나이고, 그것도 다음 단계에서 없앤다.
 export const MAX_CONTENT = 2000;
 /**
  * 수신자 INSERT 한 문장에 넣을 행 수.
- * ⛔ PostgreSQL 바인드 파라미터 상한은 65535다. 행마다 3개를 쓰므로 3만 건을 한 문장에 넣으면 9만 개가 되어
- *   상한을 넘긴다(적재가 통째로 실패한다). 나눠 넣되 **한 트랜잭션 안**에서 처리해 부분 적재를 만들지 않는다.
+ * ⛔ PostgreSQL 바인드 파라미터 상한은 65535다. 행마다 3~4개를 쓰므로(★2026-09-12 회신번호 컬럼이 있으면 4개)
+ *   큰 명단을 한 문장에 넣으면 상한을 넘긴다(적재가 통째로 실패한다).
+ *   나눠 넣되 **한 트랜잭션 안**에서 처리해 부분 적재를 만들지 않는다. 2000행 × 4 = 8000으로 상한 안이다.
  */
 const RECIPIENT_INSERT_CHUNK = 2000;
 /** 테스트 문자를 받을 담당자 수 상한. 그 이상은 실수로 명단을 넣은 것이다 */
 export const MAX_MANAGER_PHONES = 10;
-/** 회신번호 종류(=나뉘는 접수 수) 상한. 이 위는 사람이 승인할 수 있는 규모가 아니다 */
-export const MAX_CALLBACK_GROUPS = 20;
+/**
+ * 회신번호 종류 상한.
+ * ★2026-09-12 근거가 바뀌었다. 종전(20)은 "접수가 그만큼 나뉘어 사람이 승인할 수 없다"였는데,
+ * 접수를 나누지 않게 되어 승인 부담이 사라졌다. 지금 남은 목적은 **열을 잘못 지정한 파일 방어** 하나다
+ * (고객 전화번호 열을 회신번호로 적으면 종류가 명단 크기만큼 생기며 집계·등록 조회 자원을 태운다).
+ * 매장 수가 그 아래인 현실을 감안한 방어선이고, 실질 상한은 회사에 등록된 발신번호다(미등록은 반려).
+ */
+export const MAX_CALLBACK_GROUPS = 500;
 
 /**
  * 회사 발송 허용 시간(없으면 CT 기본값).
@@ -72,21 +80,31 @@ export async function loadSendWindow(companyId: string, isAd: boolean): Promise<
  * 그냥 구식 문장), 있으면 싣는다. 음성 결과는 5분 TTL로 재탐지한다(DDL이 재기동 없이 적용되는 창 대비).
  */
 const columnCache = new Map<string, { value: boolean; checkedAt: number }>();
-/** ★2026-09-05 §21-3 (2) 메일 워커의 중복 대조도 같은 탐지를 쓴다 — 판정 두 벌 금지(인라인 재정의 금지) */
-export async function hasAgencyColumn(client: any, column: string): Promise<boolean> {
+/**
+ * ★2026-09-05 §21-3 (2) 메일 워커의 중복 대조도 같은 탐지를 쓴다 — 판정 두 벌 금지(인라인 재정의 금지)
+ * ★2026-09-12 수신자 테이블(`agency_send_recipients.callback`)도 같은 탐지를 쓰므로 대상 테이블을 받는다.
+ *   기본값은 종전 그대로 `agency_send_requests`라 기존 호출부의 동작은 바뀌지 않는다.
+ *   ⛔ 캐시 키에 테이블을 넣는다 — 두 테이블에 같은 이름 컬럼이 있으면 한쪽 판정이 다른 쪽을 덮는다.
+ */
+export async function hasAgencyColumn(
+  client: any,
+  column: string,
+  table: 'agency_send_requests' | 'agency_send_recipients' = 'agency_send_requests',
+): Promise<boolean> {
   const now = Date.now();
-  const hit = columnCache.get(column);
+  const key = `${table}.${column}`;
+  const hit = columnCache.get(key);
   if (hit && (hit.value || now - hit.checkedAt < 5 * 60 * 1000)) return hit.value;
   try {
     const r = await client.query(
-      `SELECT 1 FROM information_schema.columns WHERE table_name = 'agency_send_requests' AND column_name = $1`,
-      [column],
+      `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+      [table, column],
     );
-    columnCache.set(column, { value: r.rows.length > 0, checkedAt: now });
+    columnCache.set(key, { value: r.rows.length > 0, checkedAt: now });
   } catch {
-    columnCache.set(column, { value: false, checkedAt: now });
+    columnCache.set(key, { value: false, checkedAt: now });
   }
-  return columnCache.get(column)!.value;
+  return columnCache.get(key)!.value;
 }
 
 export async function logEvent(requestId: string, kind: string, payload: Record<string, any> = {}): Promise<void> {
@@ -197,15 +215,23 @@ export async function createRequestCore(
   if (!when.valid) return { ok: false, status: 400, error: when.error || '보낼 시각을 확인해 주세요.' };
 
   // ── 수신자
-  const rows: Array<{ phone: string; vars: Record<string, any> }> = [];
+  // ★2026-09-12 `callback` = 고객별 회신번호(명단 열 방식). 없으면 접수의 대표 번호로 나간다.
+  const rows: Array<{ phone: string; vars: Record<string, any>; callback: string | null }> = [];
   const seen = new Set<string>();
   for (const raw of Array.isArray(recipients) ? recipients : []) {
     // 0 유실 복원 포함(★0826 §18-4) — 명단 값이 엑셀 숫자 셀이면 앞 0이 떨어져 온다
     const phone = normalizeAgencyPhone(raw?.phone ?? raw ?? '');
     if (!phone || phone.length < 10 || seen.has(phone)) continue;
     seen.add(phone);
-    rows.push({ phone, vars: raw?.vars && typeof raw.vars === 'object' ? raw.vars : {} });
-    if (rows.length >= MAX_RECIPIENTS) break;
+    const cb = normalizePhone(String(raw?.callback ?? ''));
+    rows.push({
+      phone,
+      vars: raw?.vars && typeof raw.vars === 'object' ? raw.vars : {},
+      callback: cb.length >= 8 ? cb : null,
+    });
+    // ★2026-09-12 종전에는 여기서 3만 번째에 `break` 했다 — 넘긴 명단이 **아무 말 없이 잘려**
+    //   사용자는 전체를 접수한 줄 알고 일부만 나갔다(화면 접수에는 앞단 검사도 없었다).
+    //   적재가 앱 메모리를 거치지 않게 되어 건수로 끊을 이유가 사라졌으므로 자르지 않는다.
   }
   if (rows.length === 0) {
     return { ok: false, status: 400, error: '보낼 번호가 없습니다. 명단을 확인해 주세요.' };
@@ -259,17 +285,26 @@ export async function createRequestCore(
     );
     request = inserted.rows[0];
 
+    // ★2026-09-12 고객별 회신번호는 컬럼이 있을 때만 싣는다(DDL 후행 안전 — 없으면 종전 문장 그대로).
+    //   ⛔ 행마다 쓰는 파라미터 수가 달라지므로 자리표시자도 같은 분기에서 만든다.
+    const hasRecipientCallback = await hasAgencyColumn(client, 'callback', 'agency_send_recipients');
+    const perRow = hasRecipientCallback ? 4 : 3;
     for (let offset = 0; offset < rows.length; offset += RECIPIENT_INSERT_CHUNK) {
       const slice = rows.slice(offset, offset + RECIPIENT_INSERT_CHUNK);
       const values: any[] = [];
       const chunks: string[] = [];
       slice.forEach((r, i) => {
-        const base = i * 3;
-        chunks.push(`($1::uuid, $${base + 2}, $${base + 3}, $${base + 4}::jsonb)`);
-        values.push(offset + i + 1, r.phone, JSON.stringify(r.vars));
+        const base = i * perRow;
+        if (hasRecipientCallback) {
+          chunks.push(`($1::uuid, $${base + 2}, $${base + 3}, $${base + 4}::jsonb, $${base + 5})`);
+          values.push(offset + i + 1, r.phone, JSON.stringify(r.vars), r.callback);
+        } else {
+          chunks.push(`($1::uuid, $${base + 2}, $${base + 3}, $${base + 4}::jsonb)`);
+          values.push(offset + i + 1, r.phone, JSON.stringify(r.vars));
+        }
       });
       await client.query(
-        `INSERT INTO agency_send_recipients (request_id, row_no, phone, vars) VALUES ${chunks.join(',')}`,
+        `INSERT INTO agency_send_recipients (request_id, row_no, phone, vars${hasRecipientCallback ? ', callback' : ''}) VALUES ${chunks.join(',')}`,
         [request.id, ...values],
       );
     }
@@ -318,6 +353,9 @@ export function kickFirstTest(requestId: string): void {
 // ════════════════════════════════════════════════════════════
 export interface OneStepGroup { callback: string; count: number; registered: boolean; recipients: Array<{ phone: string; vars: Record<string, any> }> }
 
+/** 접수에 실제로 넘기는 수신자 한 명. `callback`은 고객별 회신번호(열 방식일 때만 채워진다) */
+export interface OneStepRecipient { phone: string; vars: Record<string, any>; callback: string | null }
+
 export interface OneStepAnalysis {
   subject: string;
   content: string;
@@ -336,6 +374,17 @@ export interface OneStepAnalysis {
   varsMatched: Array<{ name: string; column: string | null; via: 'same' | 'override' | 'ai' | null }>;
   counts: { total: number; valid: number; dup: number; invalid: number; callbackMissing: number };
   groups: OneStepGroup[];
+  /**
+   * ★2026-09-12 접수에 넘기는 **전체 수신자**(명단 순서 그대로 · 고객별 회신번호 포함).
+   *   종전에는 `groups`를 그대로 접수 단위로 썼기 때문에 회신번호 종류만큼 접수가 쪼개졌다.
+   *   이제 접수는 하나이고, `groups`는 화면에 종류·건수를 보여 주는 집계로만 쓴다.
+   */
+  allRecipients: OneStepRecipient[];
+  /**
+   * 접수 대표 회신번호. 열 방식이면 **명단 첫 행의 번호**다(접수자 요청 · 담당자 테스트 문자와 스팸 검사가
+   * 이 번호로 한 번 나간다). 고정 번호 방식이면 그 번호다.
+   */
+  primaryCallback: string;
   sample: Array<{ phone: string; callback?: string }>;
   /**
    * 명단 미리보기용 **파일 순서 그대로**의 상위 50행 전체 열 값(★2026-08-25(5) · Harold "엑셀 형식 뷰").
@@ -389,7 +438,8 @@ export async function analyzeOneStep(
     subject: '', content: '', isAd: true, requestedAtIso: null, managerPhones: [],
     callback: { mode: 'none' }, headers: [], phoneColumn: null, varsMatched: [],
     counts: { total: 0, valid: 0, dup: 0, invalid: 0, callbackMissing: 0 },
-    groups: [], sample: [], sampleRows: [], messageType: 'SMS', fileName: listName, errors,
+    groups: [], allRecipients: [], primaryCallback: '',
+    sample: [], sampleRows: [], messageType: 'SMS', fileName: listName, errors,
   };
   if (!formBuf) { errors.push({ field: '요청서', error: '요청서 파일을 올려 주세요.' }); return empty; }
   // ★2026-08-26(2) 통일 양식 = 한 파일(시트1 내용 + 시트2 고객리스트). 명단 파일이 따로 없으면
@@ -412,7 +462,11 @@ export async function analyzeOneStep(
     rows = list.rows;
     // ⛔ 같은 이름의 열·상한 초과는 조용히 못 넘어간다(★Codex 적대 1R — 열이 밀리거나 잘리면 다른 사람에게 간다)
     for (const d of list.duplicates) errors.push({ field: '명단', error: `명단에 "${d}" 열이 두 개 있습니다. 하나만 남겨 주세요.` });
-    if (list.truncated) errors.push({ field: '명단', error: `명단이 너무 큽니다. 한 번에 ${MAX_RECIPIENTS.toLocaleString()}명까지 접수할 수 있으니 나눠 주세요.` });
+    // ★2026-09-12 행 상한은 없앴다(`MAX_LIST_ROWS = 0`). 실질 방어선은 파일·메일 크기다.
+    //   상한을 다시 켜는 날을 대비해 분기는 남겨 두되, 꺼져 있으면 이 줄은 돌지 않는다.
+    if (list.truncated && MAX_LIST_ROWS > 0) {
+      errors.push({ field: '명단', error: `명단이 너무 큽니다. 한 번에 ${MAX_LIST_ROWS.toLocaleString()}명까지 읽을 수 있으니 나눠 주세요.` });
+    }
     if (list.columnsOverflow) errors.push({ field: '명단', error: '명단의 열이 100개를 넘습니다. 발송에 쓸 열만 남겨 주세요.' });
   } catch {
     errors.push({ field: '명단', error: '명단 파일을 읽지 못했습니다. 엑셀 또는 CSV인지 확인해 주세요.' });
@@ -516,6 +570,9 @@ export async function analyzeOneStep(
   let dup = 0; let invalid = 0; let callbackMissing = 0;
   const groupMap = new Map<string, Array<{ phone: string; vars: Record<string, any> }>>();
   let groupsOverflow = false;
+  // ★2026-09-12 접수는 하나다 — 명단 순서 그대로의 전체 수신자와, 첫 행의 회신번호(대표 번호)를 함께 모은다.
+  const allRecipients: OneStepRecipient[] = [];
+  let firstCallback = '';
   const sample: Array<{ phone: string; callback?: string }> = [];
   const ONLY_DIGITS = (s: any) => String(s ?? '').replace(/[^0-9]/g, '');
   if (phoneColumn) {
@@ -540,6 +597,9 @@ export async function analyzeOneStep(
       }
       if (!groupMap.has(groupKey)) groupMap.set(groupKey, []);
       groupMap.get(groupKey)!.push({ phone, vars });
+      // 열 방식일 때만 고객별 번호를 싣는다. 고정 번호면 접수 대표 번호로 나가므로 비워 둔다(종전 동작).
+      allRecipients.push({ phone, vars, callback: callback.mode === 'column' ? groupKey : null });
+      if (!firstCallback) firstCallback = groupKey;
       if (sample.length < 50) sample.push({ phone, ...(callback.mode === 'column' ? { callback: groupKey } : {}) });
     }
   }
@@ -548,21 +608,20 @@ export async function analyzeOneStep(
     errors.push({ field: '명단', error: '보낼 수 있는 번호가 없습니다.' });
   }
 
-  // 회신번호 그룹(열 방식이면 접수가 이 수만큼 나뉜다) + 등록 여부.
+  // 회신번호 그룹 = **화면에 종류와 건수를 보여 주는 집계**다(★2026-09-12부터 접수를 가르지 않는다) + 등록 여부.
   //   등록 검증은 **집합 1회 조회**로 한다(★2R — 그룹마다 조회하면 열 오지정 한 번에 수만 조회가 된다)
+  //   ⛔ 건수 상한은 여기서 보지 않는다 — 종전에는 그룹마다 3만을 넘으면 반려했는데, 접수가 하나가 되고
+  //      적재도 앱 메모리를 거치지 않게 되어 나눌 이유가 없다(2026-09-11 접수 `cmtwlz0sf00kkjnlusipmsof8`).
   const groups: OneStepGroup[] = [];
   const overLimit = groupsOverflow || groupMap.size > MAX_CALLBACK_GROUPS;
   const registeredSet = overLimit ? new Set<string>() : await getRegisteredCallbackSet(auth.companyId, auth.userId);
   for (const [cb, recipients] of groupMap) {
     if (!cb) continue;
     groups.push({ callback: cb, count: recipients.length, registered: overLimit ? false : registeredSet.has(cb), recipients });
-    if (recipients.length > MAX_RECIPIENTS) {
-      errors.push({ field: '명단', error: `회신번호 ${cb} 건이 ${recipients.length.toLocaleString()}명입니다. 한 접수는 ${MAX_RECIPIENTS.toLocaleString()}명까지라 명단을 나눠 주세요.` });
-    }
   }
   groups.sort((a, b) => b.count - a.count);
   if (overLimit) {
-    errors.push({ field: '회신번호', error: `회신번호가 ${MAX_CALLBACK_GROUPS}종을 넘습니다. 접수가 그만큼 나뉘어 승인이 어렵습니다. 회신번호 열이 맞는지 확인하시고, 맞다면 ${MAX_CALLBACK_GROUPS}종 이하로 나눠 주세요.` });
+    errors.push({ field: '회신번호', error: `회신번호가 ${MAX_CALLBACK_GROUPS}종을 넘습니다. 회신번호 열이 맞는지 확인해 주세요.` });
   }
   const unregistered = overLimit ? [] : groups.filter((g) => !g.registered);
   if (unregistered.length > 0) {
@@ -598,7 +657,11 @@ export async function analyzeOneStep(
     timeShifted, shiftedAtIso,
     managerPhones, callback, headers, phoneColumn, varsMatched,
     counts: { total: rows.length, valid, dup, invalid, callbackMissing },
-    groups, sample,
+    groups,
+    allRecipients,
+    // 열 방식이면 명단 첫 행의 번호, 고정 번호 방식이면 그 번호(그룹 키가 곧 번호라 같은 값이다)
+    primaryCallback: callback.mode === 'fixed' ? callback.number : firstCallback,
+    sample,
     sampleRows: rows.slice(0, 50).map((r) => headers.map((h) => r[h] ?? null)),
     messageType, fileName: listName, errors,
   };

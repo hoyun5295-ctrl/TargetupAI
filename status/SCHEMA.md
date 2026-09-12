@@ -3218,7 +3218,8 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 > **`final_test_at timestamptz`** = **이 문안이 발송일 당일 검사를 통과한 시각**(★2026-08-23(2) 뜻 확정). 값이 있으면 재검사를 건너뛰고 적재로 간다. ⛔ **통과 분기에서만 찍는다** — 시도 시각인 `last_test_at`은 차단된 회차에도 갱신되므로 이 판정에 쓰면 **차단된 문안이 검사 없이 예약된다.** 찍는 자리 = 워커 A(접수일 = 발송일일 때)·워커 B(통과). 지우는 자리 = 문안 수정(무조건)·시각 변경(새 시각이 다른 날일 때). 상세 = 대행발송 설계서 §14.
 > `lock_at` = 선점 시각. **만료 판정(30분)에만** 쓴다. 소유권 비교에는 쓰지 않는다.
 
-**agency_send_recipients**: `id bigserial PK, request_id uuid NOT NULL REFERENCES agency_send_requests(id) ON DELETE CASCADE, row_no integer NOT NULL, phone varchar(20) NOT NULL, vars jsonb NOT NULL DEFAULT '{}'`. 인덱스 `(request_id, row_no)`.
+**agency_send_recipients**: `id bigserial PK, request_id uuid NOT NULL REFERENCES agency_send_requests(id) ON DELETE CASCADE, row_no integer NOT NULL, phone varchar(20) NOT NULL, vars jsonb NOT NULL DEFAULT '{}'` + **`callback varchar(20) NULL`**(★2026-09-12 ALTER 실행완료 · information_schema 실측 = character varying(20) · is_nullable YES). 인덱스 `(request_id, row_no)`.
+> `callback` = 고객별 회신번호(명단 열 방식). 값이 있으면 적재가 `campaign_send_staging.callback`으로 옮기고 `useIndividualCallback`으로 발송한다(폭 20 = staging·requests와 동일해 복사 시 잘림 없음). 비어 있으면 접수 대표 번호(`agency_send_requests.callback_number`)로 나간다 = 옛 행 전부. 코어가 컬럼 존재를 확인한 뒤에만 INSERT에 싣는다. 상세 = `docs/FEATURE-AGENCY-SEND.md` 불변 24.
 
 **agency_send_events**: `id bigserial PK, request_id uuid NOT NULL REFERENCES agency_send_requests(id) ON DELETE CASCADE, kind varchar(32) NOT NULL, payload jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT NOW()`. 인덱스 `(request_id, created_at DESC)`.
 

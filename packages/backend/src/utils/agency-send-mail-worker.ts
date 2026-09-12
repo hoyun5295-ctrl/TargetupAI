@@ -45,10 +45,24 @@ import { sendSystemAlert } from './system-alert';
 const TICK_MS = 60_000;
 /** 한 틱 처리 통수 상한(재기동 후에도 동일 · 반려 회신 폭주 완충 · §18-7) */
 const MAX_PER_TICK = 10;
-/** RETR 전에 거르는 메일 전체 크기 상한(첨부 합계 15MB + 인코딩 여유) */
-const MAX_MESSAGE_OCTETS = 25 * 1024 * 1024;
-const MAX_ATTACH_TOTAL = 15 * 1024 * 1024;
+/**
+ * 첨부 합계 상한.
+ * ★2026-09-12 15MB → **50MB**(Harold 지시 · 남지현 접수 `cmtwlz0sf00kkjnlusipmsof8`).
+ *   명단 행수로 막지 않기로 했으므로(파서 `MAX_LIST_ROWS = 0`) 이메일 입구의 실질 상한은 이 값이다.
+ *   실측(0912 · 명단 xlsx): 6열 20만행 7.5MB · 50만행 18.7MB · 100만행 37.4MB(12열은 약 2배).
+ *   50MB면 6열 기준 100만 행이 넉넉히 들어온다.
+ *   ⛔ 그 위에 **메일 서버가 받아 주는 첨부 크기**가 따로 있다 — 우리 값을 올려도 서버가 거절하면
+ *      메일 자체가 도착하지 않는다(하이웍스 상한 확인 중 · 확인되면 낮은 쪽에 맞춘다).
+ */
+const MAX_ATTACH_TOTAL = 50 * 1024 * 1024;
+/**
+ * RETR 전에 거르는 **메일 전체** 크기 상한(첨부는 base64로 실려 약 1.33배가 되고, 헤더·본문·경계가 더 붙는다).
+ * 첨부 상한의 1.67배를 유지한다(종전 25/15와 같은 비율).
+ */
+const MAX_MESSAGE_OCTETS = Math.round(MAX_ATTACH_TOTAL * 5 / 3);
 const MAX_ATTACH_FILES = 5;
+/** 안내 문구에 쓰는 표기(상한을 바꾸면 문구가 저절로 따라온다 — 숫자를 문장에 다시 적지 않는다) */
+const ATTACH_LIMIT_LABEL = `${Math.round(MAX_ATTACH_TOTAL / 1024 / 1024)}MB`;
 /**
  * 일일 상한 = KST 당일 **메일 통수** 기준(§18-7).
  *
@@ -662,7 +676,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   if (octets > MAX_MESSAGE_OCTETS) {
     await finalizeIntake(claimed.id, 'rejected', { reason: 'too_large', companyId: auth?.companyId ?? null, userId: auth?.userId ?? null, replyStatus: 'pending' });
     await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
-      buildRejectedReply(['메일이 너무 큽니다. 요청서 양식 파일 하나만 첨부해 다시 보내주세요(15MB 이내).']), messageId);
+      buildRejectedReply([`메일이 너무 큽니다. 요청서 양식 파일 하나만 첨부해 다시 보내주세요(${ATTACH_LIMIT_LABEL} 이내).`]), messageId);
     return;
   }
 
@@ -712,7 +726,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     return;
   }
   if (atts.reduce((a, b) => a + (b.size || b.content?.length || 0), 0) > MAX_ATTACH_TOTAL) {
-    await reject(['첨부 용량이 큽니다. 15MB 이내로 보내주세요.'], 'attachments_too_large');
+    await reject([`첨부 용량이 큽니다. ${ATTACH_LIMIT_LABEL} 이내로 보내주세요.`], 'attachments_too_large');
     return;
   }
   // ★2026-08-26(2) 표준 = 통일 양식 **한 파일**(시트1 내용 + 시트2 고객리스트). 요청서와 명단을

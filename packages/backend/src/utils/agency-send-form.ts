@@ -296,8 +296,19 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
   };
 }
 
-/** 명단 상한. 접수 상한(3만)의 두 배까지 읽고 그 위는 자른다(초과는 분석 단계가 반려한다) */
-export const MAX_LIST_ROWS = 60000;
+/**
+ * 명단 행 상한.
+ *
+ * ★2026-09-12 6만에서 **없앴다**(0 = 제한 없음 · 남지현 접수 `cmtwlz0sf00kkjnlusipmsof8`).
+ *   종전 근거는 "접수 상한(3만)의 두 배"였는데 그 접수 상한부터가 관례값이었고, 실측으로 둘 다 근거가 없다.
+ *     - 시간: 이메일 접수는 1분 워커가 백그라운드로 돌고 겹침 가드(`running` + advisory lock)가 있어
+ *       한 통이 오래 걸려도 다음 틱이 겹치지 않는다. 사용자가 기다리는 화면이 없다.
+ *     - 메모리: 100만 행(6열 · 37MB 파일) 파싱 RSS 피크 310MB이고 접수가 끝나면 회수된다(서버 가용 46Gi).
+ *   ⛔ **행수로 막지 않는다. 실질 방어선은 파일·메일 크기다** — 메일은 첨부 합계 상한, 화면 접수는
+ *      업로드 파일 크기 상한이 먼저 건다. 행 상한을 다시 만들면 그 두 상한 안에 드는 정상 파일이 잘린다.
+ *   실측(0912): 6열 5만=1.9MB · 20만=7.5MB · 50만=18.7MB · 100만=37.4MB (12열은 약 2배)
+ */
+export const MAX_LIST_ROWS = 0;
 export const MAX_LIST_COLUMNS = 100;
 
 /**
@@ -342,9 +353,11 @@ export function parseAgencyRecipientList(buffer: Buffer): {
 
   const dataStart = headerless ? 0 : 1;
   const columnsOverflow = (aoa[0] || []).length > MAX_LIST_COLUMNS;
-  const truncated = aoa.length - dataStart > MAX_LIST_ROWS;
+  // ★2026-09-12 `MAX_LIST_ROWS = 0` = 제한 없음(상수 주석 참조). 0이면 자르지도, 잘렸다고 알리지도 않는다.
+  const rowLimit = MAX_LIST_ROWS > 0 ? MAX_LIST_ROWS : Infinity;
+  const truncated = aoa.length - dataStart > rowLimit;
   const rows: Record<string, any>[] = [];
-  const end = Math.min(aoa.length, MAX_LIST_ROWS + dataStart);
+  const end = Math.min(aoa.length, rowLimit + dataStart);
   for (let i = dataStart; i < end; i++) {
     const r = aoa[i];
     if (!Array.isArray(r) || r.every((c) => c === null || String(c).trim() === '')) continue;
