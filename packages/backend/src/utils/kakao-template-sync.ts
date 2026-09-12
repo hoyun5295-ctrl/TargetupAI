@@ -21,6 +21,11 @@
 
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
+// ★ 2026-09-12 검수상태 정규화는 5분 폴링과 **같은 함수**를 쓴다 — 두 경로가 다른 어휘를 쓰면 갈린다
+import { normalizeImcTemplateStatus } from './alimtalk-jobs';
+
+/** IMC 검수 진행 중 상태 — 이 상태의 행만 목록 안전망이 건드린다(종결 행 뒤집기 금지) */
+const IMC_IN_PROGRESS_STATUSES = new Set(['REQUESTED', 'REVIEWING', 'REG', 'REQ', 'REV', 'KREQ']);
 
 export interface SyncResult {
   scanned: number;       // 옛 Tmp_xxx 영역 조회 영역 (스캔 영역)
@@ -284,23 +289,31 @@ export async function syncTemplateStatuses(): Promise<{
   updated: number;
   skipped: boolean;
 }> {
-  // 0) 컬럼 존재 안전 확인 겸 현재 값 로드 (ALTER 전이면 여기서 column 오류 → skip)
+  // 0) 현재 값 로드
+  //
+  // ⛔ 활성상태 컬럼 하나가 함수를 통째로 멈추게 두지 않는다 (★2026-09-12 직원 접수 4번 재발 방지)
+  //   옛 코드는 첫 SELECT에 `imc_template_status`를 넣어, 그 컬럼이 없으면 **검수상태·반려사유
+  //   동기화까지 함께 멎었다**. 로그는 "활성상태 동기화 skip"이라 적어 축소 보고했고,
+  //   그래서 단건 조회가 4011로 죽은 6일 동안 이 안전망이 한 번도 돌지 않았다.
+  //   이제 컬럼은 별도로 시도하고, 없으면 **활성상태 갱신만** 건너뛴다.
   let pgRows;
+  let hasActiveCol = true;
   try {
     pgRows = await query(
-      `SELECT id, template_key, template_code, imc_template_status, reject_reason
+      `SELECT id, template_key, template_code, status, imc_template_status, reject_reason
          FROM kakao_templates
         WHERE template_key IS NOT NULL`
     );
   } catch (err: any) {
     const msg = err?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      console.log(
-        '[kakao-template-sync] imc_template_status 컬럼 없음 — ALTER 실행 전까지 활성상태 동기화 skip'
-      );
-      return { scanned: 0, updated: 0, skipped: true };
-    }
-    throw err;
+    if (!(msg.includes('column') && msg.includes('does not exist'))) throw err;
+    hasActiveCol = false;
+    console.log('[kakao-template-sync] imc_template_status 컬럼 없음 — 활성상태만 빼고 검수상태 동기화는 계속한다');
+    pgRows = await query(
+      `SELECT id, template_key, template_code, status, reject_reason
+         FROM kakao_templates
+        WHERE template_key IS NOT NULL`
+    );
   }
   if (pgRows.rows.length === 0) return { scanned: 0, updated: 0, skipped: false };
 
@@ -332,23 +345,71 @@ export async function syncTemplateStatuses(): Promise<{
     if (!item) continue;
     const imcStatus: string | null = item.status ? String(item.status) : null;
     const imcReject: string | null = item.rejectReason ? String(item.rejectReason) : null;
-    const statusChanged = imcStatus !== (row.imc_template_status || null);
+
+    /**
+     * ★ 2026-09-12 목록으로 **검수상태**도 메운다(직원 접수 4번 재발 방지).
+     *   옛 코드는 활성상태(`item.status`)만 읽고 검수상태(`item.inspectionStatus`)를 읽지 않아,
+     *   단건 조회가 죽으면 검수 결과가 영원히 미반영이었다. 5분 폴링이 2026-05-12에 고친 것과 같은 축이다.
+     *
+     * ⛔ **진행 중인 행만** 바꾼다. 이미 종결(승인·반려)된 행을 목록이 뒤집지 않는다 —
+     *   이 경로는 단건이 못 고친 것을 메우는 안전망이지 판정의 주인이 아니다.
+     *   `status`는 발송 가능 여부를 가르는 값이라, 뒤집히면 멀쩡한 템플릿의 발송이 막힌다.
+     */
+    const rawInspection = (item as any).inspectionStatus ?? null;
+    const inProgress = IMC_IN_PROGRESS_STATUSES.has(String(row.status || '').toUpperCase());
+    const nextStatus = rawInspection && inProgress
+      ? normalizeImcTemplateStatus(String(rawInspection))
+      : null;
+    const inspectionChanged = !!nextStatus && nextStatus !== String(row.status || '');
+
+    const statusChanged = hasActiveCol && imcStatus !== (row.imc_template_status || null);
     const rejectChanged = !!imcReject && imcReject !== (row.reject_reason || null);
-    if (!statusChanged && !rejectChanged) continue;
+    if (!statusChanged && !rejectChanged && !inspectionChanged) continue;
+
+    // 컬럼 부재·검수상태 미변경에 따라 SET 절을 조립한다 — 없는 컬럼을 쓰지 않고, 종결 행을 뒤집지 않는다
+    const sets: string[] = [];
+    const params: any[] = [];
+    if (inspectionChanged) {
+      params.push(nextStatus);
+      sets.push(`status = $${params.length}`);
+      params.push(nextStatus);
+      sets.push(`reviewed_at = CASE WHEN $${params.length}::text IN ('APPROVED','REJECTED','KREJ','HREJ') THEN COALESCE(reviewed_at, now()) ELSE reviewed_at END`);
+    }
+    if (statusChanged) {
+      params.push(imcStatus);
+      sets.push(`imc_template_status = $${params.length}`);
+    }
+    if (rejectChanged) {
+      params.push(imcReject);
+      sets.push(`reject_reason = COALESCE($${params.length}, reject_reason)`);
+    }
+    sets.push('last_synced_at = now()', 'updated_at = now()');
+    params.push(row.id);
+    let where = `id = $${params.length}::uuid`;
+    /**
+     * ⛔ 진행 중 조건을 **UPDATE 시점에도** 건다 (Codex 1R high 수용).
+     *   진행 여부는 목록 페이지를 돌기 전 SELECT 값으로 정했다. 그 사이 몇 분 동안 5분 폴링이
+     *   승인을 저장했으면, id만 보고 덮어쓰는 순간 승인된 템플릿이 다시 진행 중으로 돌아가
+     *   발송이 막힌다. 조건에 걸려 0행이면 그대로 두는 것이 맞다 — 이 경로는 안전망이지 주인이 아니다.
+     */
+    if (inspectionChanged) {
+      params.push(row.status);
+      where += ` AND status = $${params.length}`;
+    }
+
     try {
-      await query(
-        `UPDATE kakao_templates
-            SET imc_template_status = $1,
-                reject_reason = COALESCE($2, reject_reason),
-                last_synced_at = now(),
-                updated_at = now()
-          WHERE id = $3::uuid`,
-        [imcStatus, imcReject, row.id]
-      );
+      const res = await query(`UPDATE kakao_templates SET ${sets.join(', ')} WHERE ${where}`, params);
+      if (inspectionChanged && (res.rowCount ?? (res.rows?.length || 0)) === 0) {
+        console.log(`[kakao-template-sync][status] ${row.template_code} 그 사이 상태가 바뀌어 건너뜀 (안전망이 주인을 덮지 않는다)`);
+        continue;
+      }
       updated++;
-      console.log(
-        `[kakao-template-sync][status] ${row.template_code} 활성상태 ${row.imc_template_status || '(없음)'} → ${imcStatus || '(없음)'}`
-      );
+      if (inspectionChanged) {
+        console.log(`[kakao-template-sync][status] ${row.template_code} 검수상태 ${row.status || '(없음)'} → ${nextStatus} (목록 안전망)`);
+      }
+      if (statusChanged) {
+        console.log(`[kakao-template-sync][status] ${row.template_code} 활성상태 ${row.imc_template_status || '(없음)'} → ${imcStatus || '(없음)'}`);
+      }
     } catch (err: any) {
       console.log(`[kakao-template-sync][status] UPDATE 실패 id=${row.id}: ${err?.message || err}`);
     }

@@ -257,6 +257,14 @@ export async function syncPendingTemplatesJob(): Promise<void> {
 
   let updated = 0;
   let notified = 0;
+  /**
+   * ★ 2026-09-12 건너뛴 건을 센다 (직원 접수 4번 재발 방지).
+   *   옛 코드는 IMC가 0000이 아닌 코드를 주면 **아무 기록 없이** 다음 행으로 갔다.
+   *   발신프로필이 삭제돼 키가 바뀌자 4011이 6일 내내 반복됐는데 로그가 한 줄도 없었다.
+   *   사이클마다 코드별 건수를 남기고, 첫 건만 상세를 남긴다(5분 주기라 폭주하면 안 된다).
+   */
+  const skippedByCode = new Map<string, number>();
+  let skipDetailLogged = false;
   for (const row of rows) {
     try {
       // ★ 2026-06-10 정정: IMC GET 경로 파라미터 = templateKey.
@@ -266,7 +274,15 @@ export async function syncPendingTemplatesJob(): Promise<void> {
         row.profile_key,
         row.template_key || row.template_code,
       );
-      if (res.code !== '0000' || !res.data) continue;
+      if (res.code !== '0000' || !res.data) {
+        const code = String(res.code || 'no-data');
+        skippedByCode.set(code, (skippedByCode.get(code) || 0) + 1);
+        if (!skipDetailLogged) {
+          skipDetailLogged = true;
+          log('pendingTemplateSync', `IMC 단건 조회 건너뜀 — ${row.template_code} code=${code} (발신프로필 키 변경·삭제 가능성)`);
+        }
+        continue;
+      }
 
       // ★ D152-4 추가 fix (2026-05-12 자기검증) — D135부터 4주 반복의 진짜 진짜 root cause.
       //   kakao_alimtalk.md 매뉴얼 정독 결과 IMC 응답 스펙:
@@ -378,9 +394,13 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       // 개별 템플릿 실패해도 계속
     }
   }
+  const skippedTotal = Array.from(skippedByCode.values()).reduce((a, b) => a + b, 0);
   log(
     'pendingTemplateSync',
-    `${updated}/${rows.length}건 상태 갱신 (담당자 알림 ${notified}건)`,
+    `${updated}/${rows.length}건 상태 갱신 (담당자 알림 ${notified}건)`
+    + (skippedTotal > 0
+      ? ` · 건너뜀 ${skippedTotal}건 [${Array.from(skippedByCode.entries()).map(([c, n]) => `${c}:${n}`).join(' ')}]`
+      : ''),
   );
 }
 
@@ -601,10 +621,21 @@ export async function syncSenderStatusJob(): Promise<void> {
 
   let updated = 0;
   let rawLogged = false;
+  // ★ 2026-09-12 침묵 제거 — 키가 바뀐 프로필(휴면삭제 뒤 `_unused`)이 여기서 조용히 빠졌다
+  const skippedByCode = new Map<string, number>();
+  let skipDetailLogged = false;
   for (const row of rows) {
     try {
       const res = await imc.getSender(row.profile_key);
-      if (res.code !== '0000' || !res.data) continue;
+      if (res.code !== '0000' || !res.data) {
+        const code = String(res.code || 'no-data');
+        skippedByCode.set(code, (skippedByCode.get(code) || 0) + 1);
+        if (!skipDetailLogged) {
+          skipDetailLogged = true;
+          log('senderStatusSync', `IMC 발신프로필 조회 건너뜀 — key=${String(row.profile_key).slice(0, 8)}… code=${code} (키 변경·삭제 가능성)`);
+        }
+        continue;
+      }
       const d = res.data;
 
       // ★ 2026-06-17: IMC 발신프로필 응답 raw 1회 로그 — block/dormant/brandMessage/createdAt
@@ -642,7 +673,11 @@ export async function syncSenderStatusJob(): Promise<void> {
       logErr(`senderStatusSync-${row.profile_key}`, err);
     }
   }
-  log('senderStatusSync', `${updated}/${rows.length}건 상태 갱신`);
+  const senderSkipped = Array.from(skippedByCode.values()).reduce((a, b) => a + b, 0);
+  log('senderStatusSync', `${updated}/${rows.length}건 상태 갱신`
+    + (senderSkipped > 0
+      ? ` · 건너뜀 ${senderSkipped}건 [${Array.from(skippedByCode.entries()).map(([c, n]) => `${c}:${n}`).join(' ')}]`
+      : ''));
 }
 
 // ════════════════════════════════════════════════════════════
