@@ -4,6 +4,8 @@ import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache, GEO_BLOCK_N
 import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy } from '../utils/sender-line-limit';
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
+// ★2026-09-12 싱크에이전트 시크릿 해시(원문 미저장 · 발급 시 1회 노출)
+import { hashSecret } from '../utils/secret-hash';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
 import type { PoolClient } from 'pg';
@@ -5651,8 +5653,13 @@ router.delete('/line-groups/:id', authenticate, requireSuperAdmin, async (req: R
 router.get('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
+    // ★2026-09-12 시크릿 원문은 더 이상 돌려주지 않는다(저장도 하지 않는다 · Harold 확정).
+    //   발급·재발급 때 **한 번만** 보여 주고, 이후에는 "발급됨"인지만 알린다(자사몰 키와 같은 방식).
+    //   `api_secret`(옛 원문 컬럼)은 마이그레이션으로 비워지므로 있으면 있는 대로 "발급됨"으로 친다.
     const result = await query(
-      'SELECT api_key, api_secret, use_db_sync FROM companies WHERE id = $1',
+      `SELECT api_key, use_db_sync,
+              (api_secret_hash IS NOT NULL OR api_secret IS NOT NULL) AS has_secret
+         FROM companies WHERE id = $1`,
       [id]
     );
     if (result.rows.length === 0) {
@@ -5677,15 +5684,22 @@ router.post('/companies/:id/sync-keys/regenerate', authenticate, requireSuperAdm
     const newApiKey = `tk_${crypto.randomBytes(24).toString('hex')}`;
     const newApiSecret = crypto.randomBytes(32).toString('hex');
 
+    // ★2026-09-12 **해시만 저장하고 원문은 이 응답에만 싣는다**(Harold 확정 · 자사몰 키와 같은 방식).
+    //   옛 원문 컬럼은 같은 자리에서 비운다 — 재발급한 회사가 평문을 그대로 들고 있으면 전환한 의미가 없다.
     const result = await query(
       `UPDATE companies
-       SET api_key = $1, api_secret = $2, updated_at = NOW()
+       SET api_key = $1, api_secret_hash = $2, api_secret = NULL, updated_at = NOW()
        WHERE id = $3
-       RETURNING api_key, api_secret, use_db_sync`,
-      [newApiKey, newApiSecret, id]
+       RETURNING api_key, use_db_sync`,
+      [newApiKey, hashSecret(newApiSecret), id]
     );
 
-    res.json({ syncKeys: result.rows[0], message: 'API Key가 재발급되었습니다. 기존 키는 즉시 무효화됩니다.' });
+    res.json({
+      // 원문은 지금 이 응답이 유일한 전달 경로다(서버에 남지 않는다)
+      syncKeys: { ...result.rows[0], api_secret: newApiSecret, has_secret: true },
+      secretShownOnce: true,
+      message: 'API Key가 재발급되었습니다. 기존 키는 즉시 무효화됩니다. 시크릿은 지금만 확인할 수 있으니 복사해 두세요.',
+    });
   } catch (error) {
     console.error('SyncAgent 키 재발급 실패:', error);
     res.status(500).json({ error: 'SyncAgent 키 재발급 실패' });
@@ -5706,7 +5720,8 @@ router.put('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (r
       `UPDATE companies
        SET use_db_sync = $1, updated_at = NOW()
        WHERE id = $2
-       RETURNING api_key, api_secret, use_db_sync`,
+       RETURNING api_key, use_db_sync,
+                 (api_secret_hash IS NOT NULL OR api_secret IS NOT NULL) AS has_secret`,
       [useDbSync, id]
     );
 

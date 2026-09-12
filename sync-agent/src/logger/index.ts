@@ -16,11 +16,23 @@ import { maskSensitiveData } from './masking';
 // ★ v1.6.1: report_logs 명령(logger/tail.ts)이 같은 경로를 읽도록 export (경로 상수 단일 소스)
 export const LOG_DIR = path.resolve(process.cwd(), 'logs');
 
-/** 민감정보 마스킹 포맷 */
+/**
+ * 민감정보 마스킹 포맷
+ *
+ * ★2026-09-12 **한 번도 동작하지 않던 것을 살렸다.** 종전에는 `info.meta`만 마스킹했는데,
+ *   호출부는 전부 `logger.info(메시지, { ... })` 형태이고 winston은 그 객체를 **info 최상위에 병합**한다.
+ *   `info.meta`는 어디에서도 만들어지지 않아 마스킹이 늘 건너뛰어졌다(실행 확인: `password`가 평문 기록).
+ *   같은 형태로 넘기는 호출이 소스 전체에 0건이었다 = 있으나 마나 한 안전망이었다.
+ *
+ * ⛔ **새 객체로 바꿔치지 않는다.** winston은 `Symbol.for('level')`·`Symbol.for('message')`·splat 같은
+ *   심볼 키로 동작하는데, `Object.entries`로 만든 새 객체에는 그것들이 없어 transport가 깨진다.
+ *   제자리에서 **값만** 바꾼다 = 키·구조·순서 무변경(로그를 줄 단위로 읽는 `tail.ts`도 영향 없다).
+ * ⛔ 마스킹 대상은 `masking.ts`의 `SENSITIVE_KEYS`가 소유한다. 여기서 키 목록을 다시 만들지 않는다.
+ */
 const maskingFormat = winston.format((info) => {
-  // meta 객체 내 민감정보 마스킹
-  if (info.meta && typeof info.meta === 'object') {
-    info.meta = maskSensitiveData(info.meta as Record<string, unknown>);
+  const masked = maskSensitiveData(info as unknown as Record<string, unknown>);
+  for (const key of Object.keys(masked)) {
+    (info as unknown as Record<string, unknown>)[key] = masked[key];
   }
   return info;
 });

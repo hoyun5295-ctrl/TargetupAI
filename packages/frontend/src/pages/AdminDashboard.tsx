@@ -457,7 +457,8 @@ export default function AdminDashboard() {
   const [enabledFields, setEnabledFields] = useState<string[]>([]);
   const [fieldDataCheck, setFieldDataCheck] = useState<Record<string, { hasData: boolean; count: number }>>({});
   // SyncAgent API Key 관리
-  const [syncKeys, setSyncKeys] = useState<{ api_key: string | null; api_secret: string | null; use_db_sync: boolean }>({ api_key: null, api_secret: null, use_db_sync: false });
+  // ★2026-09-12 `api_secret`은 재발급 응답에만 실려 온다(서버에 원문 미저장). 평소에는 `has_secret`만 온다.
+  const [syncKeys, setSyncKeys] = useState<{ api_key: string | null; api_secret?: string | null; has_secret?: boolean; use_db_sync: boolean }>({ api_key: null, api_secret: null, has_secret: false, use_db_sync: false });
   const [syncKeyVisible, setSyncKeyVisible] = useState(false);
   const [syncSecretVisible, setSyncSecretVisible] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -10416,12 +10417,15 @@ const handleApproveRequest = async (id: string) => {
                           </div>
                         </div>
 
+                        {/* ★2026-09-12 시크릿은 서버에 원문으로 남지 않는다. 재발급 직후 이 화면에서만 보인다. */}
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">API Secret</label>
                           <div className="flex gap-2">
                             <div className="flex-1 relative">
                               <input type="text" readOnly
-                                value={syncKeys.api_secret ? (syncSecretVisible ? syncKeys.api_secret : '••••••••••••••••••••') : '(미발급)'}
+                                value={syncKeys.api_secret
+                                  ? (syncSecretVisible ? syncKeys.api_secret : '••••••••••••••••••••')
+                                  : (syncKeys.has_secret ? '발급되어 있습니다 (다시 볼 수 없음)' : '(미발급)')}
                                 className="w-full px-3 py-2 border rounded-lg bg-gray-50 text-sm font-mono pr-10"
                               />
                               {syncKeys.api_secret && (
@@ -10439,6 +10443,11 @@ const handleApproveRequest = async (id: string) => {
                               </button>
                             )}
                           </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {syncKeys.api_secret
+                              ? '지금 화면을 벗어나면 다시 볼 수 없습니다. 설치에 쓸 값을 복사해 두세요.'
+                              : '보안을 위해 서버에 원문을 두지 않습니다. 값이 필요하면 아래에서 재발급하세요.'}
+                          </p>
                         </div>
 
                         {/* 재발급 버튼 */}

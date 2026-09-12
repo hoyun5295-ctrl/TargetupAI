@@ -325,7 +325,8 @@
 | use_product_category_medium | boolean | |
 | use_product_category_small | boolean | |
 | api_key | varchar(100) | ★ 싱크에이전트 인증 전용 (CDP 아님) |
-| api_secret | varchar(100) | ★ 싱크에이전트 인증 전용 (CDP 아님) |
+| api_secret | varchar(100) | ★ 싱크에이전트 인증 전용 (CDP 아님) · **★2026-09-12 폐기 예정 — 원문 미저장으로 전환**(마이그레이션으로 NULL). 남아 있으면 전환 전 행이다 |
+| api_secret_hash | varchar(64) | ★2026-09-12 ALTER 실행완료(information_schema 실측 = character varying(64)) · 싱크에이전트 시크릿 **sha256 hex**. 인증은 `api_key`(유일)로 찾아 이 값과 고정 시간 비교(`utils/secret-hash.ts`). 발급·재발급 때 원문을 **1회만** 응답에 싣고 서버에는 남기지 않는다(자사몰 `cdp_api_secret_hash`와 같은 방식) |
 | cdp_api_key | varchar(100) | ★ D172 (CDP 전용 public key — 자사몰 클라이언트 호출 식별) |
 | cdp_api_secret_hash | varchar(255) | ★ D172 (CDP server-side 인증 bcrypt 해시 — raw 1회 노출 후 미저장) |
 | cdp_api_key_issued_at | timestamptz | ★ D172 (CDP key 발급 시각) |

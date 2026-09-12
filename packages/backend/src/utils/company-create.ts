@@ -13,6 +13,8 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import pool, { query } from '../config/database';
 import { ensureSystemSyncUser } from './system-sync-user';
+// ★2026-09-12 싱크에이전트 시크릿은 해시만 저장한다(원문 미저장)
+import { hashSecret } from './secret-hash';
 import { recordPlanChange } from './plan-change-log';
 
 export interface CreateCompanyParams {
@@ -32,7 +34,10 @@ export interface CreateCompanyParams {
 
 export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
   const apiKey = `tk_${crypto.randomBytes(24).toString('hex')}`;
-  const apiSecret = crypto.randomBytes(32).toString('hex');
+  // ★2026-09-12 싱크에이전트 시크릿은 **해시만 저장**한다(원문 미저장 · Harold 확정).
+  //   회사 생성 호출부 3곳(companies·gateway-templates·pay-mappings) 어디도 원문을 쓰지 않는다(실측).
+  //   실제로 필요한 시점은 에이전트를 설치할 때이고, 그때는 슈퍼관리자 화면에서 재발급해 1회 받아 간다.
+  const apiSecretHash = hashSecret(crypto.randomBytes(32).toString('hex'));
   const dbName = `targetup_${p.companyCode.toLowerCase()}`;
 
   // ★ 2026-07-25 회사 생성과 최초 요금제 이력을 한 트랜잭션으로(Codex 지적 C).
@@ -46,14 +51,14 @@ export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
       `INSERT INTO companies (
         name, company_code, company_name, business_number, ceo_name,
         contact_name, contact_email, contact_phone, address,
-        plan_id, data_input_method, api_key, api_secret, db_name,
+        plan_id, data_input_method, api_key, api_secret_hash, db_name,
         created_by, usage_type
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *`,
       [
         p.companyName, p.companyCode, p.companyName, p.businessNumber ?? null, p.ceoName ?? null,
         p.contactName ?? null, p.contactEmail ?? null, p.contactPhone ?? null, p.address ?? null,
-        p.planId ?? null, p.dataInputMethod ?? 'file', apiKey, apiSecret, dbName,
+        p.planId ?? null, p.dataInputMethod ?? 'file', apiKey, apiSecretHash, dbName,
         p.createdBy ?? null, p.usageType ?? 'web',
       ],
     );

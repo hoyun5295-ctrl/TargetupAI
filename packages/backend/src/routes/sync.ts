@@ -19,6 +19,9 @@ import {
 } from '../utils/standard-field-map';
 import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedDbType, MappingTarget } from '../utils/ai-mapping';
 import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError } from '../utils/customer-upsert';
+// ★2026-09-12 시크릿 해시 비교 · 컬럼 존재 탐지(DDL과 배포 순서가 어긋나도 인증이 살아 있게)
+import { hashSecret, verifySecret } from '../utils/secret-hash';
+import { hasColumn } from '../utils/db-column-probe';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 import { resolveBuildTierFromOsInfo } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리 P1: 명령 큐 정책 CT — ACK 반영·At-Least-Once 전달·버전 분기(구버전=기존 동작 불변)
@@ -146,14 +149,50 @@ async function syncAuth(req: SyncAuthRequest, res: Response, next: Function) {
       });
     }
 
-    const result = await query(
-      `SELECT id, name, company_name, status, use_db_sync 
-       FROM companies 
-       WHERE api_key = $1 AND api_secret = $2`,
-      [apiKey, apiSecret]
-    );
+    // ★2026-09-12 시크릿을 **원문 일치 조회에서 해시 비교로** 옮긴다(발급 84곳 운영 중 · 기능 보존 최우선).
+    //   종전에는 `WHERE api_key = $1 AND api_secret = $2`로 원문을 SQL에 그대로 넣어 맞췄고,
+    //   `companies.api_secret`이 평문이라 DB가 새면 전 고객사 키가 그대로 드러났다
+    //   (같은 표의 자사몰 키는 이미 `cdp_api_secret_hash`로 해시 저장이다 — 이 축만 비대칭이었다).
+    //   ⛔ 한 번에 갈아끼우지 않는다. 세 갈래 모두 살아 있어야 이미 나간 에이전트가 멈추지 않는다:
+    //     ① 컬럼이 아직 없다(DDL 전) = 옛 쿼리 그대로
+    //     ② 해시가 있다 = 해시끼리 고정 시간 비교
+    //     ③ 해시가 비었다 = 원문으로 맞춘 뒤 그 자리에서 해시를 채운다(접속하는 대로 점진 전환)
+    //   `api_key`는 유일하다(2026-09-12 실측 중복 0) — 그래서 키로 찾고 시크릿은 값으로만 본다.
+    const hashColumnReady = await hasColumn('companies', 'api_secret_hash');
+    let company: any = null;
 
-    if (result.rows.length === 0) {
+    if (!hashColumnReady) {
+      const legacy = await query(
+        `SELECT id, name, company_name, status, use_db_sync
+           FROM companies
+          WHERE api_key = $1 AND api_secret = $2`,
+        [apiKey, apiSecret]
+      );
+      company = legacy.rows[0] || null;
+    } else {
+      const found = await query(
+        `SELECT id, name, company_name, status, use_db_sync, api_secret, api_secret_hash
+           FROM companies
+          WHERE api_key = $1`,
+        [apiKey]
+      );
+      const row = found.rows[0];
+      if (row) {
+        const { ok, needsUpgrade } = verifySecret(apiSecret, { hash: row.api_secret_hash, plain: row.api_secret });
+        if (ok) {
+          company = row;
+          if (needsUpgrade) {
+            // 채우기가 실패해도 이 요청의 인증은 이미 통과했다 — 다음 접속에서 다시 시도한다.
+            void query(
+              `UPDATE companies SET api_secret_hash = $1 WHERE id = $2 AND api_secret_hash IS NULL`,
+              [hashSecret(apiSecret), row.id]
+            ).catch((e: any) => console.warn('[sync] api_secret_hash 채우기 실패(다음 접속에 재시도):', e?.message));
+          }
+        }
+      }
+    }
+
+    if (!company) {
       const ip = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
       recordIpFailure(ip);
       return res.status(401).json({
@@ -161,8 +200,6 @@ async function syncAuth(req: SyncAuthRequest, res: Response, next: Function) {
         error: 'Invalid API credentials'
       });
     }
-
-    const company = result.rows[0];
 
     if (company.status !== 'active') {
       return res.status(403).json({
