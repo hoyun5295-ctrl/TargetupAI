@@ -21,6 +21,8 @@ import SpamFilterTestModal from './SpamFilterTestModal';
 import ConfirmModal, { type ConfirmState } from './ConfirmModal';
 import CreditConfirmModal from './credit/CreditConfirmModal';
 import { DateTimeField, isoToLocalInput, localInputToIso } from './DateTimeField';
+// 광고 제목 합성은 화면마다 다시 쓰지 않는다 — 발송 CT(백엔드 buildAdSubject)와 같은 판정의 프론트 CT.
+import { buildAdSubjectFront } from '../utils/formatDate';
 
 /** 발신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) */
 const INDIVIDUAL_CB = '__individual__';
@@ -108,6 +110,13 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   const [extractOpen, setExtractOpen] = useState(false);
   const [target, setTarget] = useState<ExtractedTarget | null>(null);
 
+  /**
+   * ★ 2026-09-12 (접수 `cmtwbdljp00a7jnlu4508oiik`) 문자 제목 — DM 제목과 분리한다.
+   *   종전에는 서버가 DM 템플릿 제목을 제목으로 고정해, 수신함에 "(광고) <DM 제목>"이 그대로 찍혔다.
+   *   기본값은 DM 제목이라 그냥 보내면 종전과 같고, 이 자리에서 고치면 그 제목으로 나간다.
+   */
+  const [subject, setSubject] = useState('');
+
   // 문안 — 2모드
   const [mode, setMode] = useState<'ai' | 'direct'>('ai');
   const [prompt, setPrompt] = useState('');
@@ -133,6 +142,13 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   //   token/label = %변수% 안쪽 표시명(예 '고객명'). 시스템 변수 제외한 실제 고객 데이터 필드만.
   const [companyFields, setCompanyFields] = useState<Array<{ token: string; label: string; category: string }>>([]);
   const [decorateVars, setDecorateVars] = useState<Set<string>>(new Set());
+
+  // ★ 2026-09-12 제목 기본값 = DM 제목. 열 때 한 번만 채우므로, 고쳐 둔 제목은 그대로 남는다.
+  useEffect(() => {
+    if (!show) return;
+    // 서버가 40자에서 자르므로 기본값도 같은 길이로 넣는다 — 미리보기와 실제 발송이 어긋나지 않게.
+    setSubject((dmTitle || '').trim().slice(0, 40));
+  }, [show, dmId, dmTitle]);
 
   useEffect(() => {
     if (!show) return;
@@ -311,6 +327,9 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   const previewText = isAd && previewBody.trim()
     ? `(광고) ${previewBody}\n무료수신거부 ${opt080 || '(080 미등록, 수신거부번호 설정 필요)'}`
     : previewBody;
+  // ★ 2026-09-12 미리보기 제목도 실발송과 같은 CT를 거친다(광고면 (광고) 접두 · 이미 있으면 중복 없음).
+  //   DM 발송은 LMS 고정이라 msgType도 그대로 맞춘다.
+  const previewSubject = buildAdSubjectFront(subject.trim(), 'LMS', isAd);
   // ★ 2026-07-02(3) 스팸테스트 본문 = 첫 샘플 고객 치환본 (원본 변수 그대로 들어가던 결함 수정).
   //   링크는 실발송 개인화 링크와 같은 길이 구조의 자리값 — 바이트·스팸 판정 정확도 유지.
   const spamTestMessage = substituteVars(messageText, samples[0], 'https://hanjul.ai/api/dm/v/dm-XXXXXXX?r=XXXXXXXXXXXXXXXXXXXXXXXX');
@@ -379,8 +398,13 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     const isResend = !!resendIds && resendIds.length > 0;
     if (!isResend && (!target || target.channelEligibleCount === 0)) { toast.warning('먼저 타겟을 추출해주세요.'); return; }
     if (!messageText.trim()) { toast.warning('문자 본문을 작성해주세요.'); return; }
+    // ★ 2026-09-12 제목은 DM 제목이 기본값이라 보통 차 있다. 지운 채 보내면 수신함에 제목이 빈다.
+    if (!subject.trim()) { toast.warning('문자 제목을 입력해주세요.'); return; }
+    // 변수 이름 형태(%고객명%)만 본다 — "30%~50%" 같은 할인 표기를 막지 않기 위해 글자 종류를 좁혔다.
+    if (/%[0-9A-Za-z가-힣_]{1,30}%/.test(subject)) { toast.warning('제목에는 %항목%을 넣을 수 없습니다. 모든 수신자에게 같은 문장으로 나갑니다.'); return; }
     // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 발송하지 않는다(설계 D2 · 본문 아래 안내에서 바꾼다)
-    if (hasUnsupportedSmsChars(messageText)) { toast.warning(SMS_CHARSET_BLOCK_MESSAGE); return; }
+    //   ★ 2026-09-12 제목도 함께 본다 — 제목만 못 보내는 글자여도 발송이 반려된다.
+    if (hasUnsupportedSmsChars(messageText, subject)) { toast.warning(SMS_CHARSET_BLOCK_MESSAGE); return; }
     if (!callback) { toast.warning('발신번호를 선택해주세요. (발신번호 관리에서 등록)'); return; }
     if (isAd && opt080Loaded && !opt080) { toast.warning('광고성 발송은 무료수신거부(080) 번호가 필요합니다. 수신거부번호 설정에서 등록해주세요.'); return; }
     const scheduledAtVal = scheduleMode === 'immediate' ? null : scheduledAt;
@@ -402,6 +426,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
             ? { resendCustomerIds: resendIds }
             : { filter: target!.filter, allCustomers: !!target!.isAll }),
           messageText: messageText.trim(),
+          // ★ 2026-09-12 문자 제목(DM 제목과 별개). 서버는 공백이면 DM 제목으로 폴백한다.
+          subject: subject.trim(),
           isAd,
           // 개별 회신 = 고객별 등록매장 번호(store_phone) — 미등록 번호 고객은 백엔드 CT-08이 제외(확인 후 발송)
           callback: isIndividualCb ? undefined : callback,
@@ -520,6 +546,27 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                     </div>
                   )}
 
+                  {/* ★ 2026-09-12 (접수 `cmtwbdljp00a7jnlu4508oiik`) 문자 제목 — DM 제목과 별개로 정한다.
+                      종전에는 DM 제목이 그대로 수신함에 찍혔다. 기본값이 DM 제목이라 안 고치면 종전과 같다. */}
+                  <div>
+                    <label className="text-[11px] text-white/60 mb-1 block">문자 제목 <span className="text-white/35">(수신함에 표시)</span></label>
+                    <div className="relative">
+                      {isAd && (
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-fuchsia-300 pointer-events-none select-none">(광고)</span>
+                      )}
+                      <input
+                        type="text"
+                        value={subject}
+                        onChange={(e) => setSubject(e.target.value)}
+                        maxLength={40}
+                        placeholder="예: 신상품 입고 안내"
+                        style={isAd ? { paddingLeft: '58px' } : undefined}
+                        className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-indigo-400/60"
+                      />
+                    </div>
+                    <p className="mt-1 text-[10px] text-white/35">DM 제목과 따로 정합니다. 모든 수신자에게 같은 문장으로 나가므로 %항목%은 쓸 수 없습니다.</p>
+                  </div>
+
                   <div>
                     <label className="text-[11px] text-white/60 mb-1 block">문자 본문 {mode === 'ai' ? '(생성 후 편집 가능)' : ''}</label>
                     <textarea ref={messageRef} value={messageText} onChange={(e) => setMessageText(e.target.value)} rows={5} placeholder="문안을 작성하거나 AI로 생성하세요. %DM링크% 위치에 수신자별 개인화 링크가 들어갑니다." className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-indigo-400/60 resize-none" />
@@ -529,7 +576,16 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                       ))}
                     </div>
                     {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문을 대체표로 바꾼다 */}
-                    <SmsCharsetNotice tone="dark" className="mt-2" texts={[messageText]} onApply={(fix) => setMessageText((prev) => fix(prev))} />
+                    {/* ★ 2026-09-12 제목도 문자로 나가므로 같은 글자 검사를 받는다(제목만 못 보내는 글자면 발송이 반려된다). */}
+                    <SmsCharsetNotice
+                      tone="dark"
+                      className="mt-2"
+                      texts={[messageText, subject]}
+                      onApply={(fix) => {
+                        setMessageText((prev) => fix(prev));
+                        setSubject((prev) => fix(prev));
+                      }}
+                    />
                   </div>
 
                   {/* ★ 2026-07-02(5) 꾸미기 활용 필드 — 고객사 보유 필드 별도 선택(본문에 쓰인 필드 자동 선택 + 추가 토글). AI 오퍼레이터 '활용 가능 컬럼' 미러. */}
@@ -600,8 +656,14 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                 <div className="w-full max-w-[380px] rounded-[34px] border-4 border-slate-700 bg-slate-950 p-4 shadow-2xl">
                   <div className="h-6 flex items-center justify-center"><div className="w-20 h-1.5 rounded-full bg-slate-700" /></div>
                   <div className="mt-2 min-h-[500px] bg-slate-800/50 rounded-2xl p-4">
-                    <div className="max-w-[92%] bg-white text-slate-900 rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-[14px] leading-relaxed whitespace-pre-wrap break-words shadow">
-                      {previewText || <span className="text-slate-400">문안을 작성하면 여기에 미리보기가 나타납니다.</span>}
+                    <div className="max-w-[92%] bg-white text-slate-900 rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-[14px] leading-relaxed break-words shadow">
+                      {/* ★ 2026-09-12 제목은 본문과 따로 나간다 — 단말이 본문 위에 굵게 보여 주는 그 자리 */}
+                      {previewSubject && (
+                        <p className="font-extrabold mb-1 whitespace-pre-wrap break-words">{previewSubject}</p>
+                      )}
+                      <div className="whitespace-pre-wrap break-words">
+                        {previewText || <span className="text-slate-400">문안을 작성하면 여기에 미리보기가 나타납니다.</span>}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -908,10 +970,11 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
           </div>
         )}
 
-        <TargetExtractModal show={extractOpen} channel="dm" onClose={() => setExtractOpen(false)} onApply={(t) => { setTarget(t); setSampleIdx(0); setExtractOpen(false); }} />
+        {/* ★ 2026-09-12 (접수 `cmtwb4drj009rjnluzpgntxkt`) 조건 직접 선택 탭은 이 화면에서만 연다 */}
+        <TargetExtractModal show={extractOpen} channel="dm" allowDirectPick onClose={() => setExtractOpen(false)} onApply={(t) => { setTarget(t); setSampleIdx(0); setExtractOpen(false); }} />
         <AiRefineModal isOpen={refineOpen} originalMessage={messageText} onClose={() => setRefineOpen(false)} onApply={(text) => { setMessageText(text); setRefineOpen(false); }} />
         {spamOpen && (
-          <SpamFilterTestModal onClose={() => setSpamOpen(false)} messageContentLms={spamTestMessage} callbackNumber={isIndividualCb ? defaultRegisteredCb : callback} messageType="LMS" subject={dmTitle} isAd={isAd} />
+          <SpamFilterTestModal onClose={() => setSpamOpen(false)} messageContentLms={spamTestMessage} callbackNumber={isIndividualCb ? defaultRegisteredCb : callback} messageType="LMS" subject={subject.trim() || dmTitle} isAd={isAd} />
         )}
         <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
         {/* ★ 2026-07-12 D-1: 발행비 미확정 DM — 발행 크레딧 확인 시 confirmPublishFee 재요청(서버가 확정 후 발송 진행) */}

@@ -18,6 +18,7 @@ import { requirePlanFeature } from '../utils/plan-guard';
 import { convertNaturalLanguageToFilter, SegmentGenerationError } from '../utils/ai-segment-generator';
 import { buildCustomerFilter } from '../utils/customer-filter';
 import { buildChannelEligibilityWhere, type ChannelKey } from '../utils/channel-eligibility';
+import { countTargetByFilter } from '../utils/target-count';
 import { query } from '../config/database';
 
 const router = Router();
@@ -58,35 +59,9 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
       customFieldKeys: Array.isArray(customFieldKeys) ? customFieldKeys : undefined,
     });
 
-    // 2. filter → 안전 SQL ($1 = companyId, $2~ = filter 값)
-    const { sql: filterSql, params } = buildCustomerFilter(filter, {
-      tableAlias: 'c',
-      startParamIndex: 2,
-      storeCodeMode: 'skip',
-      inputFormat: 'structured',
-    });
-    const channelWhere = buildChannelEligibilityWhere(ch, 'c');
-    const fullParams = [companyId, ...params];
-
-    // 3. 전체 매칭 + 채널 자격 + 샘플 (채널 자격자 기준 5건)
-    const matchSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid${filterSql}`;
-    const eligSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}`;
-    // ★ 2026-07-02(3) grade 동봉 — 발송 모달 미리보기가 하드코딩 샘플 대신 실제 추출 타겟으로 치환 (SCHEMA.md:418 실측)
-    const sampleSql = `
-      SELECT c.id, c.phone, c.name, c.gender, c.grade, c.region, c.last_purchase_date, c.total_purchase_amount
-        FROM customers c
-       WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}
-       ORDER BY c.id ASC
-       LIMIT 5`;
-
-    const [matchRes, eligRes, sampleRes] = await Promise.all([
-      query(matchSql, fullParams),
-      query(eligSql, fullParams),
-      query(sampleSql, fullParams),
-    ]);
-
-    const matchCount = Number(matchRes.rows[0]?.cnt ?? 0);
-    const channelEligibleCount = Number(eligRes.rows[0]?.cnt ?? 0);
+    // 2~3. 조건 → 인원수 2종 + 샘플. ★ 2026-09-12 SQL은 CT 한 벌(`countTargetByFilter`)로 옮겼다 —
+    //      직접 선택(/count)과 자연어(/extract)가 같은 숫자를 내야 발송 인원과 어긋나지 않는다.
+    const { matchCount, channelEligibleCount, samples } = await countTargetByFilter(companyId, ch, filter);
 
     // 4. 0건 자동완화 X (D171) — 조건 자체가 0이면 조건 정정 안내
     if (matchCount === 0) {
@@ -96,17 +71,6 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
         error: '조건에 맞는 고객이 0명입니다. 조건을 더 넓혀주세요. (자동 완화는 마케팅 의도 보호를 위해 차단됩니다)',
       });
     }
-
-    const samples = sampleRes.rows.map((r: any) => ({
-      id: r.id,
-      phone: r.phone,
-      name: r.name,
-      gender: r.gender,
-      grade: r.grade,
-      region: r.region,
-      last_purchase_date: r.last_purchase_date,
-      total_purchase_amount: r.total_purchase_amount != null ? Number(r.total_purchase_amount) : null,
-    }));
 
     return res.json({
       success: true,
@@ -132,6 +96,55 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
     }
     console.error('[targets/extract] 실패:', err);
     return res.status(500).json({ success: false, error: '타겟 추출 실패' });
+  }
+});
+
+/**
+ * POST /api/targets/count — 화면에서 직접 고른 조건의 인원수·샘플 (★ 2026-09-12 · 접수 `cmtwb4drj009rjnluzpgntxkt`)
+ *   { channel, filter } → { matchCount, channelEligibleCount, samples, isAll }
+ *
+ *   - /extract에서 **자연어 변환 단계만 뺀 것**이다. 숫자를 내는 SQL은 같은 CT 한 벌(countTargetByFilter)을 쓴다.
+ *   - 0건이어도 400이 아니라 0을 그대로 돌려준다 — 조건을 고쳐 가며 인원을 확인하는 화면이라 여기서 막으면
+ *     "왜 0인지"를 볼 수 없다. 0건 발송 차단(D171)은 진행 버튼(프론트)과 send-to-target(서버)이 종전대로 한다.
+ *   - 게이트는 /extract와 같다 — 같은 모달의 두 탭이 서로 다른 요금제 조건을 갖지 않는다.
+ */
+router.post('/count', requirePlanFeature('ai_messaging'), async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ success: false, error: '인증 필요' });
+    }
+
+    const { channel, filter } = req.body as { channel?: string; filter?: Record<string, unknown> };
+    if (!channel || !VALID_CHANNELS.includes(channel as ChannelKey)) {
+      return res.status(400).json({ success: false, error: '지원하지 않는 채널입니다. (email / dm / inapp / kakao)' });
+    }
+    const ch = channel as ChannelKey;
+    const safeFilter = filter && typeof filter === 'object' && !Array.isArray(filter) ? filter : {};
+
+    const { matchCount, channelEligibleCount, samples } = await countTargetByFilter(companyId, ch, safeFilter);
+
+    return res.json({
+      success: true,
+      channel: ch,
+      filter: safeFilter,
+      // 조건을 하나도 안 고르면 "전체 고객"이다 — 발송 경로는 빈 filter를 allCustomers로만 받는다.
+      isAll: Object.keys(safeFilter).length === 0,
+      matchCount,
+      channelEligibleCount,
+      samples,
+    });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        code: 'DB_MIGRATION_PENDING',
+        error: 'DB 마이그레이션 필요: 운영자에게 customers 컬럼 확인을 요청해주세요.',
+      });
+    }
+    console.error('[targets/count] 실패:', err);
+    return res.status(500).json({ success: false, error: '타겟 인원 조회 실패' });
   }
 });
 

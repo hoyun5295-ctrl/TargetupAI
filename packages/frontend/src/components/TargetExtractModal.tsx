@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { Sparkles, Users, Eye, RefreshCw, Check, AlertCircle, X, Bookmark } from 'lucide-react';
 import { useToast } from './ToastProvider';
 import TargetRecipientsModal, { type TargetPageLoader } from './TargetRecipientsModal';
+import TargetDirectPickPanel from './TargetDirectPickPanel';
 
 export type ExtractChannel = 'email' | 'dm' | 'inapp' | 'kakao';
 
@@ -41,6 +42,11 @@ interface Props {
   channel: ExtractChannel;
   onClose: () => void;
   onApply: (target: ExtractedTarget) => void;
+  /**
+   * ★ 2026-09-12 (접수 `cmtwb4drj009rjnluzpgntxkt`) 조건을 직접 골라 잡는 탭을 연다.
+   *   접수는 모바일DM 한 건이라 그 호출부에서만 켠다 — 이메일·인앱은 종전 그대로 자연어만 쓴다.
+   */
+  allowDirectPick?: boolean;
 }
 
 const CHANNEL_LABEL: Record<ExtractChannel, string> = {
@@ -66,11 +72,14 @@ const EXAMPLES = [
   '결혼기념일이 이번 달인 고객',
 ];
 
-export default function TargetExtractModal({ show, channel, onClose, onApply }: Props) {
+export default function TargetExtractModal({ show, channel, onClose, onApply, allowDirectPick = false }: Props) {
   const toast = useToast();
   const [input, setInput] = useState('');
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<ExtractedTarget | null>(null);
+  // ★ 2026-09-12 잡는 방법 — 자연어로 쓰거나, 조건을 직접 고르거나
+  const [pickMode, setPickMode] = useState<'ai' | 'direct'>('ai');
+  const [directCounting, setDirectCounting] = useState(false);
   // ★ 2026-07-02(3) 추출 실패를 토스트(3초)로만 보여줘 놓치던 문제 — 모달 안 지속 표시
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -84,6 +93,8 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
     setResult(null);
     setError(null);
     setShowList(false);
+    setPickMode('ai');
+    setDirectCounting(false);
   };
 
   const close = () => {
@@ -139,7 +150,8 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
       const res = await fetch('/api/saved-segments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, segmentType: 'custom', prompt: input.trim(), filter: result.filter }),
+        // 직접 선택은 자연어 입력이 없다 — 고른 조건 설명을 그 자리에 남긴다(빈 값으로 저장하지 않는다)
+        body: JSON.stringify({ name, segmentType: 'custom', prompt: input.trim() || result.explanation, filter: result.filter }),
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -190,7 +202,9 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
                   {CHANNEL_LABEL[channel]}
                 </span>
               </h3>
-              <p className="text-[11px] text-white/50">자연어로 조건을 입력하면 보낼 대상을 정확히 추출합니다</p>
+              <p className="text-[11px] text-white/50">
+                {pickMode === 'direct' ? '조건을 골라 보낼 대상을 정확히 잡습니다' : '자연어로 조건을 입력하면 보낼 대상을 정확히 추출합니다'}
+              </p>
             </div>
           </div>
           <button onClick={close} className="w-8 h-8 flex items-center justify-center rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors">
@@ -199,7 +213,28 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* 자연어 입력 */}
+          {/* ★ 2026-09-12 잡는 방법 2가지. 접수 채널에서만 탭이 보이고, 그 외 채널은 종전처럼 자연어 하나다. */}
+          {allowDirectPick && (
+            <div className="flex gap-1">
+              {([['ai', 'AI 자연어'], ['direct', '조건 직접 선택']] as const).map(([m, label]) => (
+                <button
+                  key={m}
+                  /* 세는 중에 탭을 옮기면 그 상태가 남아 자연어 쪽 진행까지 잠긴다 — 함께 푼다 */
+                  onClick={() => { setPickMode(m); setResult(null); setError(null); setDirectCounting(false); }}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    pickMode === m ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white' : 'bg-white/5 text-white/50 hover:text-white/80'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {pickMode === 'direct' ? (
+            <TargetDirectPickPanel channel={channel} onResult={setResult} onCountingChange={setDirectCounting} />
+          ) : (
+          /* 자연어 입력 */
           <div className="rounded-xl border border-white/10 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 p-4">
             <label className="text-[11px] text-white/60 mb-1.5 block">조건 자연어 입력</label>
             <textarea
@@ -235,6 +270,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
               </button>
             </div>
           </div>
+          )}
 
           {/* 추출 실패 — 모달 안 지속 표시 (토스트만으로는 놓침) */}
           {error && !result && (
@@ -262,15 +298,26 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
                 </div>
               </div>
 
-              {/* AI 해석 */}
+              {/* 해석 — 자연어는 AI가 읽은 내용, 직접 선택은 고른 조건 */}
               {result.explanation && (
                 <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                  <p className="text-[11px] text-white/70 leading-relaxed"><span className="font-semibold text-white/80">해석:</span> {result.explanation}</p>
+                  <p className="text-[11px] text-white/70 leading-relaxed">
+                    <span className="font-semibold text-white/80">{pickMode === 'direct' ? '고른 조건:' : '해석:'}</span> {result.explanation}
+                  </p>
+                </div>
+              )}
+
+              {/* ★ 2026-09-12 조건 자체가 0건 — 직접 선택은 고치는 대로 숫자를 보여 주므로 여기서 사유를 가른다.
+                  (자연어 경로는 서버가 0건을 400으로 돌려줘 여기까지 오지 않는다) */}
+              {result.matchCount === 0 && (
+                <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-200">조건에 맞는 고객이 0명입니다. 조건을 더 넓혀주세요. (자동 완화는 마케팅 의도 보호를 위해 차단됩니다)</p>
                 </div>
               )}
 
               {/* 채널 자격 0건 안내 */}
-              {result.channelEligibleCount === 0 && (
+              {result.matchCount > 0 && result.channelEligibleCount === 0 && (
                 <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-amber-200">이 채널로 보낼 수 있는 고객이 없습니다. 조건을 조정하거나 다른 채널을 이용해주세요. (자동 완화는 마케팅 의도 보호를 위해 차단됩니다)</p>
@@ -307,7 +354,9 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
                 </div>
               )}
 
-              <p className="text-[10px] text-white/30 italic text-center">Data source: AI 자연어 변환 + 검증된 SQL 필터 + 채널 발송 자격</p>
+              <p className="text-[10px] text-white/30 italic text-center">
+                Data source: {pickMode === 'direct' ? '화면에서 고른 조건' : 'AI 자연어 변환'} + 검증된 SQL 필터 + 채널 발송 자격
+              </p>
             </div>
           )}
         </div>
@@ -316,7 +365,9 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
         <div className="px-5 py-3.5 border-t border-white/10 bg-slate-950/60 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           <div className="flex items-center gap-2 text-white/50 text-xs mr-auto">
             <Users className="w-4 h-4" />
-            {result ? `${result.channelEligibleCount.toLocaleString()}명 발송 가능` : '조건을 입력하고 추출하세요'}
+            {result
+              ? `${result.channelEligibleCount.toLocaleString()}명 발송 가능`
+              : pickMode === 'direct' ? '조건을 골라 대상을 확인하세요' : '조건을 입력하고 추출하세요'}
           </div>
           {result && (
             <button
@@ -330,7 +381,8 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
           )}
           <button
             onClick={handleApply}
-            disabled={!result || result.channelEligibleCount === 0}
+            /* ★ 2026-09-12 직접 선택은 고르는 동안 숫자가 갱신된다 — 세는 중에는 확정하지 않는다 */
+            disabled={!result || result.channelEligibleCount === 0 || directCounting}
             className="flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
           >
             <Check className="w-4 h-4" />

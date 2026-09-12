@@ -1155,9 +1155,15 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     const userId = req.user?.userId || companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
-    const { filter, messageText, isAd, scheduledAt, allCustomers, callback: callbackReq, useIndividualCallback, confirmCallbackExclusion, resendCustomerIds } = req.body as {
+    const { filter, messageText, subject: subjectReq, isAd, scheduledAt, allCustomers, callback: callbackReq, useIndividualCallback, confirmCallbackExclusion, resendCustomerIds } = req.body as {
       filter?: Record<string, { operator: string; value: any }>;
       messageText?: string;
+      /**
+       * ★ 2026-09-12 (접수 `cmtwbdljp00a7jnlu4508oiik`) 발송 화면에서 입력한 문자 제목.
+       *   종전에는 DM 템플릿 제목(dm.title)을 서버가 고정해, 수신함에 DM 제목이 그대로 찍혔다.
+       *   미전달·공백이면 종전과 같이 dm.title로 폴백한다(구 화면·외부 호출 동작 보존).
+       */
+      subject?: string;
       isAd?: boolean;
       scheduledAt?: string | null;
       allCustomers?: boolean;
@@ -1375,6 +1381,17 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     //   buildAdMessage가 이미 붙은 것으로 판단해 설정된 080 합성을 건너뛰어 임의 번호가 그대로 발송됨.
     const bodyText = isAd ? stripAdPartsDeep(messageText.trim()) : messageText.trim();
     if (!bodyText) return res.status(400).json({ error: '문자 본문을 입력해주세요.' });
+    // ★ 2026-09-12 문자 제목 = 발송 화면 입력값(미전달·공백이면 DM 제목 폴백 = 종전 동작). 자르는 길이도 종전 그대로.
+    //   (광고) 접두는 여기서 붙이지 않는다 — 발송 직전 CT(buildAdSubject)가 중복 없이 합성한다.
+    const subjectText = (String(subjectReq ?? '').trim() || dm.title || 'DM').slice(0, 40);
+    // 제목은 수신자별 치환을 하지 않는다(prepareSendMessage 규약). %항목%을 그대로 두면 모든 수신자에게 변수 문자열이 나간다.
+    //   변수 이름 형태만 본다 — "30%~50%" 같은 할인 표기까지 막지 않도록 글자 종류를 좁혔다(화면 검사와 같은 식).
+    if (/%[0-9A-Za-z가-힣_]{1,30}%/.test(subjectText)) {
+      return res.status(400).json({
+        error: '제목에는 %항목%을 넣을 수 없습니다. 제목은 모든 수신자에게 같은 문장으로 나갑니다.',
+        code: 'SUBJECT_VARS',
+      });
+    }
     const finalMessage = bodyText.includes('%DM링크%')
       ? bodyText.split('%DM링크%').join('%기타1%')
       : `${bodyText}\n%기타1%`;
@@ -1387,7 +1404,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
           campaignName: `DM 발송 · ${dm.title || ''} · ${new Date().toLocaleDateString('ko-KR')}`,
           msgType: 'LMS',
           message: finalMessage,
-          subject: (dm.title || 'DM').slice(0, 40),
+          subject: subjectText,
           callback: callback || '',
           useIndividualCallback: !!useIndividualCallback,
           sendChannel: 'sms',
