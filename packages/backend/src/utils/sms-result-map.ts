@@ -52,6 +52,19 @@ export const STATUS_CODE_MAP: Record<number, StatusCodeInfo> = {
   4000: { label: '전송 시간 초과',   type: 'fail' },
   9999: { label: '기타 오류',        type: 'fail' },
 
+  // ── 비토 게이트웨이 접수 단계 영구 거부(P3-2 · 2026-09-12) ──
+  // Agent 가 게이트웨이 거부 코드를 이 숫자로 바꿔 status_code 에 쓴다(Agent 설정 ack_result_codes).
+  // 등록부 소유 = 게이트웨이 status/MESSAGE_RESULT_CODE_STANDARD.md. 숫자는 그쪽과 같아야 한다.
+  9401: { label: '문자로 보낼 수 없는 글자(작성 화면에서 확인)', type: 'fail' },
+  9402: { label: '본문 길이 초과',        type: 'fail' },
+  9403: { label: 'MMS 첨부 누락',         type: 'fail' },
+  9404: { label: '수신번호 형식 오류',     type: 'fail' },
+  9405: { label: '메시지 유형 오류',       type: 'fail' },
+  9406: { label: '필수 항목 누락',         type: 'fail' },
+  9407: { label: '차단된 URL',            type: 'fail' },
+  9408: { label: '발신사업자 식별코드 오류', type: 'fail' },
+  9409: { label: '중복 접수(같은 번호 다른 내용)', type: 'fail' },
+
   // ── SMS/LMS 추가 코드 (QTmsg 매뉴얼 ver4.0) ──
   1:    { label: '시스템 장애',       type: 'fail' },
   92:   { label: '전송 실패(코드 92)', type: 'fail' }, // ★ 2026-06-11 폴라초이스 6/8 실측 214건 — 매뉴얼 정의 확인 시 라벨 정정

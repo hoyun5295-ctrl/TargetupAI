@@ -107,9 +107,21 @@ export async function list080Numbers(): Promise<Billing080Number[]> {
 //  KT 명세서 판독 (vision) + 검산 (코드)
 // ============================================================
 
+/** 통화료 한 줄 — KT는 번호 하나에 통화료 줄이 여럿일 수 있다(시외·이동전화 등) */
+export interface KtCallLine {
+  label: string;
+  amount: number;
+}
+
 export interface KtStatementEntry {
   number: string;        // 숫자만
-  call_fee: number;      // 통화료 공급가 (없으면 0)
+  /**
+   * ★ 2026-09-12 통화료 줄 전수 전사(직원 접수 3번).
+   * 번호 하나에 통화료 줄이 여럿인 명세서에서 한 줄이 떨어져 검산이 막혔다(시외 45 + 이동전화).
+   * **합은 코드가 낸다** — AI에게 더하게 시키지 않는다. 화면 표시·전사 검증용이며 서명 대상은 아니다.
+   */
+  call_lines?: KtCallLine[];
+  call_fee: number;      // 통화료 공급가 (줄이 여럿이면 그 합 · 없으면 0)
   svc_fee: number;       // 부가서비스이용료 공급가
   vat: number;           // 부가가치세
   subtotal: number;      // 번호별 소계 (call+svc+vat)
@@ -125,12 +137,15 @@ export interface KtStatementParse {
 const KT_SYSTEM_PROMPT = `당신은 KT 전화요금 명세서(스캔 이미지 PDF)의 "이용상세내역"에서 080 서비스 번호별 금액을 "그대로 옮겨 적는" 전사 담당입니다.
 
 [출력: 반드시 아래 JSON 형식만. 다른 텍스트·코드펜스·설명 금지]
-{"usage_period":"","count_080":0,"total_080":0,"entries":[{"number":"","call_fee":0,"svc_fee":0,"vat":0,"subtotal":0}]}
+{"usage_period":"","count_080":0,"total_080":0,"entries":[{"number":"","call_lines":[{"label":"","amount":0}],"svc_fee":0,"vat":0,"subtotal":0}]}
 
 [규칙]
 - entries에는 상품명이 "080서비스"인 서비스번호만 넣습니다. 일반전화(02 등)는 제외합니다.
 - number = 서비스번호를 보이는 그대로 (예: 080-284-1300).
-- call_fee = 그 번호의 통화료(예: "이동전화에 건 통화료"). 통화료 줄이 없으면 0.
+- call_lines = 그 번호 아래 **통화료 줄을 빠짐없이** 그대로 옮겨 적습니다.
+  번호 하나에 통화료 줄이 여럿일 수 있습니다(예: "시외통화료", "이동전화에 건 통화료").
+  줄마다 {"label":"줄 이름","amount":금액}. 통화료 줄이 하나도 없으면 빈 배열 [].
+  ⛔ 줄을 합치거나 빼지 마십시오. 더하기는 하지 않습니다: 보이는 줄을 그대로만 옮깁니다.
 - svc_fee = 부가서비스이용료. vat = 부가가치세. subtotal = 그 번호의 소계.
 - count_080 = 080서비스 소계 줄의 서비스번호 수 (예: "서비스번호수 18대"의 18).
 - total_080 = 080서비스 전체 소계 금액(납부금액 열). 일반전화 제외.
@@ -152,10 +167,40 @@ export function parseKtStatementJson(raw: string): KtStatementParse | null {
       const n = Number(String(v ?? '').replace(/[,\s원]/g, ''));
       return Number.isFinite(n) ? Math.round(n) : NaN;
     };
+    /**
+     * ★ 2026-09-12 통화료 줄이 여럿이면 **코드가 합한다**(직원 접수 3번).
+     *   줄 하나라도 금액을 못 읽으면 합을 NaN으로 둔다 — 0으로 뭉개면 누락이 정상으로 통과한다.
+     *   줄 목록이 없으면 옛 판독과 같게 `call_fee` 칸을 그대로 쓴다(호환).
+     */
+    /**
+     * 줄 금액 — **미판독과 명시적 0을 구분한다**(Codex 1R medium 수용).
+     * `toInt`는 `String(null ?? '')` 경유로 빈 값을 0으로 접는다. 그대로 쓰면 못 읽은 줄이
+     * "0원 줄"이 되어 검산·서명을 그대로 통과하고 불완전한 전사가 정상 결과로 확정된다.
+     */
+    const lineAmount = (v: any): number => {
+      // 타입부터 막는다 — 배열 [1,2]는 '1,2'를 거쳐 12가 되고, 객체·불리언도 숫자처럼 흘러든다
+      if (typeof v !== 'number' && typeof v !== 'string') return NaN;
+      // toInt와 **같은 문자를 먼저 걷어낸 뒤** 비었는지 본다 — '원'·','는 걷어내면 아무것도 안 남는다
+      const t = String(v).replace(/[,\s원]/g, '');
+      if (t === '') return NaN;
+      const n = toInt(t);
+      // 줄 단위로 막는다 — 음수·과대값은 다른 줄과 상쇄돼 합계만 정상으로 보인다(Codex 3R 범위 밖 지적 수용).
+      // 통화료 줄에 음수는 없다. 합친 뒤에는 이 이상을 알아볼 수 없다.
+      return Number.isSafeInteger(n) && n >= 0 ? n : NaN;
+    };
+    const readCall = (r: any): { call_fee: number; call_lines?: KtCallLine[] } => {
+      if (!Array.isArray(r?.call_lines)) return { call_fee: toInt(r?.call_fee) };
+      const lines: KtCallLine[] = r.call_lines.map((l: any) => ({
+        label: String(l?.label ?? '').slice(0, 40),
+        amount: lineAmount(l?.amount),
+      }));
+      const sum = lines.reduce((acc, l) => acc + l.amount, 0);
+      return { call_fee: lines.some((l) => !Number.isFinite(l.amount)) ? NaN : sum, call_lines: lines };
+    };
     const entries: KtStatementEntry[] = (Array.isArray(obj?.entries) ? obj.entries : [])
       .map((r: any) => ({
         number: normalize080Number(r?.number),
-        call_fee: toInt(r?.call_fee),
+        ...readCall(r),
         svc_fee: toInt(r?.svc_fee),
         vat: toInt(r?.vat),
         subtotal: toInt(r?.subtotal),
@@ -327,7 +372,9 @@ export async function extractKtStatement(params: { image: EventImageInput; admin
 export interface KtReconcileRow {
   number: string;             // 숫자만
   display_number: string;     // 080-XXX-XXXX
-  call_fee: number;           // 통화료 공급가 (명세서)
+  call_fee: number;           // 통화료 공급가 (명세서 · 줄이 여럿이면 그 합)
+  /** 통화료 줄이 둘 이상일 때만 — 화면이 "줄이 다 옮겨졌는가"를 보여주기 위한 표시용 */
+  call_lines?: KtCallLine[];
   mapped: boolean;
   company_id?: string;
   company_name?: string;
@@ -347,6 +394,9 @@ export async function reconcileKtStatement(entries: KtStatementEntry[]): Promise
       number: e.number,
       display_number: format080Number(e.number),
       call_fee: e.call_fee,
+      // ★ 2026-09-12 통화료 줄 내역을 화면까지 올린다(직원 접수 3번) — 사람이 [반영] 전에
+      //   "줄이 다 옮겨졌는가"를 눈으로 확인해야 한다. 금액의 진실은 서명된 call_fee다.
+      ...(e.call_lines && e.call_lines.length > 1 ? { call_lines: e.call_lines } : {}),
       mapped: !!m,
       ...(m ? {
         company_id: m.company_id,

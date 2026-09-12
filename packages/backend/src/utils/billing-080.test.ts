@@ -236,3 +236,209 @@ describe('KT 명세서 검산 (명세서 자체 합계 대조 — 실측 수치)
     expect(v.errors.join(' ')).toContain('다른 번호');
   });
 });
+
+/**
+ * ★ 2026-09-12 직원 접수 3번 — 번호 하나에 통화료 줄이 여럿인 명세서.
+ *
+ * 무슨 일이 있었나
+ *   판독 규칙이 통화료를 **칸 하나**로 받고 예시를 "이동전화에 건 통화료" 하나만 들어서,
+ *   시외통화료 줄이 함께 있는 번호에서 한 줄이 떨어졌다(080-377-7070 = 시외 45 + 이동전화 26,055).
+ *   검산 ①(call+svc+vat = subtotal)이 이를 잡아 **반영이 막혔다** — 틀린 금액이 청구된 게 아니라
+ *   매달 수작업으로 되돌아갔다. 고칠 곳은 판독 규칙이지 검산이 아니다.
+ *
+ * 못 박는 것:
+ *   1. 통화료 줄을 전부 옮겨 적고 **합은 코드가** 낸다(AI에게 더하게 시키지 않는다).
+ *   2. 옮겨 적은 줄의 합이 통화료와 다르면 반영 불가 — 전사 누락을 검산이 다시 잡는다.
+ *   3. 줄 목록은 서명 대상이 아니다 — 금액의 진실은 서명된 `call_fee`뿐이다.
+ */
+describe('통화료 여러 줄 — 전사 + 코드 합산 (접수 3번)', () => {
+  const withLines = (lines: Array<{ label: string; amount: number }>) => JSON.stringify({
+    usage_period: '6.1 ~ 6.30', count_080: 3, total_080: 44799,
+    entries: [
+      { number: '080-284-1300', call_fee: 672, svc_fee: 4000, vat: 467, subtotal: 5139 },
+      { number: '080-377-7070', call_lines: lines, svc_fee: 4000, vat: 3179, subtotal: 34969 },
+      { number: '080-520-6000', call_fee: 265, svc_fee: 4000, vat: 426, subtotal: 4691 },
+    ],
+  });
+
+  it('★통화료 줄이 여럿이면 합을 통화료로 삼는다', () => {
+    const p = parseKtStatementJson(withLines([
+      { label: '시외통화료', amount: 45 },
+      { label: '이동전화에 건 통화료', amount: 27745 },
+    ]))!;
+    expect(p).not.toBeNull();
+    const pk = p.entries.find((e) => e.number === '0803777070')!;
+    expect(pk.call_fee).toBe(27790);
+    expect(pk.call_lines).toHaveLength(2);
+  });
+
+  it('★한 줄만 있어도 합산 결과는 같다', () => {
+    const p = parseKtStatementJson(withLines([{ label: '이동전화에 건 통화료', amount: 27790 }]))!;
+    expect(p.entries.find((e) => e.number === '0803777070')!.call_fee).toBe(27790);
+  });
+
+  it('줄 목록이 없으면 기존 통화료 칸을 그대로 쓴다 (옛 판독 호환)', () => {
+    const p = parseKtStatementJson(JSON.stringify({
+      usage_period: '6.1 ~ 6.30', count_080: 1, total_080: 5139,
+      entries: [{ number: '080-284-1300', call_fee: 672, svc_fee: 4000, vat: 467, subtotal: 5139 }],
+    }))!;
+    expect(p.entries[0].call_fee).toBe(672);
+    expect(p.entries[0].call_lines).toBeUndefined();
+  });
+
+  it('★전사한 줄의 합이 통화료와 다르면 반영 불가 — 누락을 검산이 다시 잡는다', () => {
+    const p = parseKtStatementJson(withLines([
+      { label: '이동전화에 건 통화료', amount: 27745 },
+    ]))!;
+    // 판독은 합(27,745)을 통화료로 삼지만 소계는 27,790 기준이라 행 내부 합이 깨진다
+    const v = validateKtStatement(p);
+    expect(v.ok).toBe(false);
+    expect(v.errors.join(' ')).toContain('080-377-7070');
+  });
+
+  it('★줄 목록을 손대도 서명은 통화료 합만 본다 — 금액의 진실은 서명된 값뿐', () => {
+    const p = parseKtStatementJson(withLines([
+      { label: '시외통화료', amount: 45 },
+      { label: '이동전화에 건 통화료', amount: 27745 },
+    ]))!;
+    const sig = signKtStatement(p);
+    const tampered = { ...p, entries: p.entries.map((e) => ({ ...e, call_lines: [{ label: '조작', amount: 1 }] })) };
+    expect(verifyKtStatementSignature(tampered, sig)).toBe(true);
+  });
+
+  it('줄 금액이 정수가 아니면 그 줄은 버리지 않고 판독 실패로 본다', () => {
+    const p = parseKtStatementJson(withLines([
+      { label: '시외통화료', amount: 'abc' as any },
+      { label: '이동전화에 건 통화료', amount: 27745 },
+    ]));
+    const pk = p?.entries.find((e) => e.number === '0803777070');
+    expect(Number.isFinite(pk?.call_fee as number)).toBe(false);
+  });
+
+  it('[소스 스캔] 판독 규칙이 통화료 줄을 전부 적으라고 지시한다', () => {
+    const src = readFileSync(resolve(__dirname, './billing-080.ts'), 'utf8');
+    const prompt = src.slice(src.indexOf('const KT_SYSTEM_PROMPT'), src.indexOf('/** 방어 파싱'));
+    expect(prompt, '통화료 줄 전수 전사 지시가 없다').toContain('통화료 줄을 빠짐없이');
+    expect(prompt, '줄을 합치지 말라는 금지가 없다').toContain('줄을 합치거나 빼지 마십시오');
+    expect(prompt, 'AI에게 합계를 계산시키고 있다').not.toMatch(/합계를 계산|더해서|합산해/);
+  });
+});
+
+/**
+ * 줄 내역은 **사람이 확인하는 자리**까지 올라가야 한다.
+ * 판독이 줄을 빠뜨려도 합계 한 숫자만 보면 눈으로 잡을 수 없다 — 접수 3번이 그렇게 지나갔다.
+ */
+describe('[소스 스캔] 통화료 줄 내역 표시 배선', () => {
+  const ct = readFileSync(resolve(__dirname, './billing-080.ts'), 'utf8');
+  const fe = readFileSync(
+    resolve(__dirname, '../../../frontend/src/components/Billing080Modal.tsx'), 'utf8');
+
+  it('★귀속 행이 줄이 여럿일 때만 내역을 실어 보낸다', () => {
+    const seg = ct.slice(ct.indexOf('export async function reconcileKtStatement'), ct.indexOf('export async function reconcileKtStatement') + 900);
+    expect(seg).toMatch(/call_lines/);
+    expect(seg, '한 줄뿐인 행까지 내역을 실으면 표가 시끄러워진다').toMatch(/length > 1/);
+  });
+
+  it('★확인 화면이 줄 내역을 보여준다', () => {
+    expect(fe, '줄 내역 렌더가 꺼져 있다').toContain('{r.call_lines && r.call_lines.length > 1 && (');
+    expect(fe).toMatch(/\{l\.label\}/);
+  });
+
+  it('★금액의 진실은 서명된 통화료다 — 정규형에 줄 목록이 들어가지 않는다', () => {
+    const seg = ct.slice(ct.indexOf('export function canonicalKtStatement'), ct.indexOf('export function signKtStatement'));
+    expect(seg, '줄 목록이 서명 대상에 들어갔다').not.toMatch(/call_lines/);
+  });
+});
+
+/**
+ * ★ Codex 적대검토 1R(medium 수용) — 미판독과 명시적 0을 구분한다.
+ * `toInt(null)`은 `Number('')` 경유로 0을 돌려준다. 그대로 두면 판독 못 한 줄이 "0원 줄"이 되어
+ * 검산·서명을 그대로 통과하고, 화면에는 0원으로 찍힌다. 불완전한 전사가 정상 결과로 확정된다.
+ */
+describe('통화료 줄 — 미판독과 0원의 구분 (Codex 1R)', () => {
+  const one = (lines: any) => JSON.stringify({
+    usage_period: '6.1 ~ 6.30', count_080: 1, total_080: 34969,
+    entries: [{ number: '080-377-7070', call_lines: lines, svc_fee: 4000, vat: 3179, subtotal: 34969 }],
+  });
+  const callFee = (lines: any) => parseKtStatementJson(one(lines))!.entries[0].call_fee;
+
+  it('★금액이 null이면 합을 확정하지 않는다', () => {
+    expect(Number.isFinite(callFee([{ label: '시외통화료', amount: null }, { label: '이동전화', amount: 27790 }]))).toBe(false);
+  });
+
+  it('★금액 칸이 아예 없으면 합을 확정하지 않는다', () => {
+    expect(Number.isFinite(callFee([{ label: '시외통화료' }, { label: '이동전화', amount: 27790 }]))).toBe(false);
+  });
+
+  it('★금액이 빈 문자열·공백이면 합을 확정하지 않는다', () => {
+    expect(Number.isFinite(callFee([{ label: '시외통화료', amount: '' }, { label: '이동전화', amount: 27790 }]))).toBe(false);
+    expect(Number.isFinite(callFee([{ label: '시외통화료', amount: '   ' }, { label: '이동전화', amount: 27790 }]))).toBe(false);
+  });
+
+  it('명시적 0원 줄은 정상이다 — 0으로 적힌 줄과 못 읽은 줄은 다르다', () => {
+    expect(callFee([{ label: '시외통화료', amount: 0 }, { label: '이동전화', amount: 27790 }])).toBe(27790);
+    expect(callFee([{ label: '시외통화료', amount: '0' }, { label: '이동전화', amount: 27790 }])).toBe(27790);
+  });
+
+  it('통화료 줄이 하나도 없으면 0원이다', () => {
+    expect(callFee([])).toBe(0);
+  });
+});
+
+/**
+ * ★ Codex 적대검토 2R(medium 수용) — 타입과 "제거 후 빈 값"까지 막는다.
+ * `'원'`·`','`은 trim을 통과한 뒤 toInt의 문자 제거로 빈 문자열이 되어 0이 된다.
+ * 배열 `[1,2]`는 `'1,2'`를 거쳐 12가 된다. 둘 다 유한수라 앞선 NaN 차단을 그대로 통과했다.
+ */
+describe('통화료 줄 — 타입·제거 후 빈 값 (Codex 2R)', () => {
+  const one = (amount: any) => JSON.stringify({
+    usage_period: '6.1 ~ 6.30', count_080: 1, total_080: 34969,
+    entries: [{ number: '080-377-7070', call_lines: [{ label: '시외통화료', amount }, { label: '이동전화', amount: 27790 }], svc_fee: 4000, vat: 3179, subtotal: 34969 }],
+  });
+  const callFee = (amount: any) => parseKtStatementJson(one(amount))!.entries[0].call_fee;
+
+  it('★단위 문자만 있는 값은 금액이 아니다', () => {
+    expect(Number.isFinite(callFee('원'))).toBe(false);
+    expect(Number.isFinite(callFee(','))).toBe(false);
+    expect(Number.isFinite(callFee(' , '))).toBe(false);
+  });
+
+  it('★숫자·문자열이 아닌 타입은 금액이 아니다', () => {
+    expect(Number.isFinite(callFee([1, 2]))).toBe(false);
+    expect(Number.isFinite(callFee([null, null]))).toBe(false);
+    expect(Number.isFinite(callFee({}))).toBe(false);
+    expect(Number.isFinite(callFee(true))).toBe(false);
+  });
+
+  it('쉼표 있는 문자열 금액은 그대로 읽는다 (명세서 표기 그대로)', () => {
+    expect(callFee('45')).toBe(27835);
+    expect(callFee('1,205')).toBe(28995);
+  });
+});
+
+/**
+ * ★ Codex 3R 범위 밖 지적 수용 — 줄 금액의 음수·과대값은 상쇄로 정상 합계를 만든다.
+ * 예: [-100, 27890]의 합은 27,790이라 행 내부 합·소계 검산을 그대로 통과한다.
+ * 통화료 줄에 음수는 없다. 합치기 전에 줄 단위로 막는다.
+ */
+describe('통화료 줄 — 음수·과대값 상쇄 차단 (Codex 3R)', () => {
+  const two = (a: any, b: any) => JSON.stringify({
+    usage_period: '6.1 ~ 6.30', count_080: 1, total_080: 34969,
+    entries: [{ number: '080-377-7070', call_lines: [{ label: 'A', amount: a }, { label: 'B', amount: b }], svc_fee: 4000, vat: 3179, subtotal: 34969 }],
+  });
+  const callFee = (a: any, b: any) => parseKtStatementJson(two(a, b))!.entries[0].call_fee;
+
+  it('★음수 줄은 금액이 아니다 — 상쇄로 정상 합계를 만들 수 없다', () => {
+    expect(Number.isFinite(callFee(-100, 27890))).toBe(false);
+    expect(Number.isFinite(callFee('-100', 27890))).toBe(false);
+  });
+
+  it('★안전 정수 범위를 넘는 줄은 금액이 아니다', () => {
+    expect(Number.isFinite(callFee(1e20, -1e20 + 27790))).toBe(false);
+  });
+
+  it('정상 두 줄은 그대로 합산된다', () => {
+    expect(callFee(45, 27745)).toBe(27790);
+    expect(callFee(0, 27790)).toBe(27790);
+  });
+});

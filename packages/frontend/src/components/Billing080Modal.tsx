@@ -39,6 +39,8 @@ interface ParseRow {
   number: string;
   display_number: string;
   call_fee: number;
+  /** ★ 2026-09-12 통화료 줄이 둘 이상일 때만 내려온다 — 전사 누락을 눈으로 확인하는 자리 */
+  call_lines?: Array<{ label: string; amount: number }>;
   mapped: boolean;
   company_id?: string;
   company_name?: string;
@@ -507,7 +509,16 @@ export default function Billing080Modal({ open, onClose, companies }: {
                           <tr key={r.number} className={`border-t ${r.mapped ? '' : 'bg-amber-50'}`}>
                             <td className="px-3 py-2 font-mono">{r.display_number}</td>
                             <td className="px-3 py-2">{r.mapped ? `${r.company_name}${r.label ? ` (${r.label})` : ''}` : '-'}</td>
-                            <td className="px-3 py-2 text-right">{won(r.call_fee)}</td>
+                            <td className="px-3 py-2 text-right">
+                              {won(r.call_fee)}
+                              {r.call_lines && r.call_lines.length > 1 && (
+                                <div className="text-[10px] text-gray-400 font-normal mt-0.5 leading-tight">
+                                  {r.call_lines.map((l, i) => (
+                                    <div key={i}>{l.label} {won(l.amount)}</div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
                             <td className="px-3 py-2 text-right text-gray-500">{r.mapped ? won(r.monthly_fee_supply || 0) : '-'}</td>
                             <td className="px-3 py-2 text-right text-gray-500">{r.mapped ? won(r.kt_fee_supply || 0) : '-'}</td>
                             <td className="px-3 py-2">
