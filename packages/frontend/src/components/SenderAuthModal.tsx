@@ -12,9 +12,9 @@
  *     매번 6자리를 묻지 않는 것이 기준 위반이 아니라, 기준이 명시한 "일정 시간 유지"다.
  *  3. **네이티브 dialog를 쓰지 않는다.**
  *
- * ⚠ 2026-08-27 현재 이 컴포넌트는 **발송 경로에 배선되어 있지 않다.**
- *   OTP 발급·검증과 발송 preflight 연결은 별도 작업이다(발송 파이프라인은 영향표 없이 손대지 않는다).
- *   지금은 `?senderAuthPreview=1`로만 열린다.
+ * ★ 2026-09-12 발송 경로에 배선됐다. 흐름은 `hooks/useSenderAuth.ts`가 갖는다 —
+ *   서버가 발송을 세우면서 인증번호를 이미 보냈고, 통과하면 눌렀던 발송이 그대로 이어진다.
+ *   `?senderAuthPreview=1|2`는 화면 캡처용으로 남긴다.
  */
 import React from 'react';
 
@@ -24,13 +24,16 @@ export type SenderAuthState =
   /** 인증이 필요하다 — 6자리 입력 */
   | { kind: 'required'; callback: string; maskedPhone: string; expiresInMinutes: number; reason: SenderAuthReason };
 
-/** 재인증을 요구한 이유 — 기준 3.5가 요구하는 재인증 조건을 화면이 그대로 밝힌다 */
-export type SenderAuthReason = 'first' | 'expired' | 'bulk' | 'environment';
+/**
+ * 재인증을 요구한 이유 — 기준 3.5가 요구하는 재인증 조건을 화면이 그대로 밝힌다.
+ * ★2026-09-12 `bulk`(대량 발송) 제거 — 건수로 다시 물으면 인증에 성공해도 같은 건수라 또 걸려
+ *   발송을 끝낼 수 없다(일회성 승인 소비 장치가 선행이다). 서버가 이 값을 내보내지 않는다.
+ */
+export type SenderAuthReason = 'first' | 'expired' | 'environment';
 
 const REASON_TEXT: Record<SenderAuthReason, string> = {
   first: '오늘 첫 발송이라 발신번호 담당자 확인이 필요합니다.',
   expired: '인증 후 24시간이 지나 다시 확인이 필요합니다.',
-  bulk: '대량 발송이라 발신번호 담당자 확인이 필요합니다.',
   environment: '접속 환경이 바뀌어 다시 확인이 필요합니다.',
 };
 

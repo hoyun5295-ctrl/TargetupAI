@@ -16,6 +16,8 @@ import {
 import { isBlocked, recordFailureAndMaybeBlock, clearBlocksOnSuccess } from '../utils/login-block';
 // ★ 2026-09-11 서비스 페이지 접속 기록(전송자격인증 4.1)
 import { normalizePagePath, recordPageView } from '../utils/access-log';
+// ★ 2026-09-12 발신 인증(추가 인증) 검증(전송자격인증 3.5)
+import { verifySenderAuthChallenge, isSenderAuthSchemaMissing } from '../utils/sender-auth';
 import { evaluateLoginOrigin } from '../utils/geo-access';
 import {
   generateTotpSecret,
@@ -470,6 +472,45 @@ router.post('/page-view', authenticate, async (req: Request, res: Response) => {
     console.error('[page-view]', error);
   }
   return res.status(204).end();
+});
+
+// ============================================================
+// ★ 2026-09-12 발신 인증(추가 인증) 인증번호 확인 — 전송자격인증 3.5
+//   발급은 발송 게이트(`checkSenderAuthGate`)가 한다. 이 endpoint는 확인만 한다.
+//   판정·기록은 전부 CT가 소유한다 — 여기서 조건을 다시 조립하지 않는다.
+// ============================================================
+router.post('/sender-auth/verify', authenticate, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    const { challengeId, code } = req.body || {};
+    if (!userId) return res.status(401).json({ success: false, error: '인증이 필요합니다.' });
+    if (!challengeId || !code) return res.status(400).json({ success: false, error: '인증번호를 입력해주세요.' });
+
+    const verdict = await verifySenderAuthChallenge({ challengeId: String(challengeId), userId, code: String(code), req });
+
+    if (verdict.status === 'ok') return res.json({ success: true, callback: verdict.callbackNumber });
+    if (verdict.status === 'expired') {
+      return res.status(400).json({ success: false, code: 'SENDER_AUTH_EXPIRED', error: '인증번호가 만료되었습니다. 재발송을 눌러주세요.' });
+    }
+    if (verdict.status === 'locked') {
+      return res.status(400).json({ success: false, code: 'SENDER_AUTH_LOCKED', error: '인증 시도 횟수를 넘었습니다. 재발송을 눌러주세요.' });
+    }
+    return res.status(400).json({
+      success: false,
+      code: 'SENDER_AUTH_INVALID',
+      error: `인증번호가 일치하지 않습니다. (남은 시도 ${verdict.remaining}회)`,
+    });
+  } catch (error: any) {
+    if (isSenderAuthSchemaMissing(error)) {
+      return res.status(503).json({
+        success: false,
+        code: 'DB_MIGRATION_PENDING',
+        error: 'DB 마이그레이션 필요: sender_auth_challenges 생성 요청',
+      });
+    }
+    console.error('[발신인증 검증]', error);
+    return res.status(500).json({ success: false, error: '인증 처리 중 오류가 발생했습니다.' });
+  }
 });
 
 // ============================================================

@@ -25,6 +25,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   mfa_fail: '2차 인증 실패',
   mfa_locked: '2차 인증 잠김',
   mfa_phone_changed: '2차 인증 번호 변경',
+  // ★ 2026-09-12 발신 인증(추가 인증 · 전송자격인증 3.5) — 발송 시 발신번호·계정 연계 확인
+  sender_auth_challenge: '발신 인증 요청',
+  sender_auth_success: '발신 인증 성공',
   totp_enroll_start: 'OTP 등록 시작',
   totp_enrolled: 'OTP 등록 완료',
   // ★ 2026-09-05 AI 영업 아웃리치(ceo 전용 · routes/sales-outreach.ts 성공 분기)
@@ -104,6 +107,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
 export const AUDIT_ACTION_COLOR: Record<string, string> = {
   login_success: 'bg-green-100 text-green-700',
   mfa_success: 'bg-green-100 text-green-700',
+  sender_auth_success: 'bg-green-100 text-green-700',
   totp_enrolled: 'bg-green-100 text-green-700',
   login_fail: 'bg-red-100 text-red-700',
   mfa_fail: 'bg-red-100 text-red-700',
@@ -230,6 +234,10 @@ export function formatAuditDetail(action: string, details: any): string {
     case 'customer_delete':
       // ★ 2026-09-11 번호는 가려서 보여준다 — 새 기록은 가린 값(phone_masked), 옛 기록(원문 phone)은 화면에서 가린다
       return `${d.company_name || ''} · ${d.phone_masked || (d.phone ? maskPhoneForDisplay(d.phone) : '')} 삭제`;
+    // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 어느 발신번호로, 어느 담당자 번호에 물었는지
+    case 'sender_auth_challenge':
+    case 'sender_auth_success':
+      return [d.callback_number && `발신번호 ${d.callback_number}`, d.phone_masked].filter(Boolean).join(' · ');
     // ★ 2026-09-11 서비스 페이지 접속 기록(전송자격인증 4.1)
     case 'page_view':
       return [d.path, d.userType && (USER_TYPE_LABEL[d.userType] || d.userType)].filter(Boolean).join(' · ');

@@ -29,6 +29,8 @@ import { DateTimeField, isoToLocalInput, localInputToIso } from '../components/D
 import TargetRecipientsModal, { type TargetPageLoader, type TargetRecipient } from '../components/TargetRecipientsModal';
 import ImageToCopyButton from '../components/ImageToCopyButton';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
+import SenderAuthModal from '../components/SenderAuthModal';
+import { useSenderAuth } from '../hooks/useSenderAuth';
 import CreditHistoryModal from '../components/credit/CreditHistoryModal';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
 import AiProposalSummaryModal from '../components/AiProposalSummaryModal';
@@ -324,6 +326,8 @@ export default function AiOperatorPage() {
   // ★ D166: 승인 → 발송 흐름 (preview-recipients + /direct-send 2-step)
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 승인 발송도 같은 경로(/direct-send)를 쓴다
+  const senderAuth = useSenderAuth();
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [sendResult, setSendResult] = useState<{
     campaignId: string;
@@ -658,6 +662,8 @@ export default function AiOperatorPage() {
         body: JSON.stringify(sendBody),
       });
       const sendData = await sendRes.json();
+      // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 인증 뒤 이 발송을 그대로 다시 실행한다
+      if (senderAuth.handleResponse(sendData, () => performDirectSend(sendBody, suggestedName))) return;
       if (!sendRes.ok || !sendData.success) {
         throw new Error(sendData.error || '발송 처리 실패');
       }
@@ -1975,6 +1981,21 @@ export default function AiOperatorPage() {
 
       {/* ★ D193 (2026-05-22) Phase D-1 사용자 안내: 첫 진입 walkthrough 5단계 안내 (localStorage 1회 표시) */}
       <AiOperatorWalkthroughModal />
+
+      {/* ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 통과하면 승인 발송이 그대로 이어진다 */}
+      {senderAuth.state && (
+        <SenderAuthModal
+          state={senderAuth.state}
+          code={senderAuth.code}
+          onCodeChange={senderAuth.setCode}
+          error={senderAuth.error}
+          busy={senderAuth.busy}
+          onVerify={senderAuth.verify}
+          onResend={senderAuth.resend}
+          onProceed={senderAuth.cancel}
+          onCancel={senderAuth.cancel}
+        />
+      )}
     </div>
   );
 }

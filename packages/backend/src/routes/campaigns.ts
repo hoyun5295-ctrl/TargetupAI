@@ -59,6 +59,8 @@ import { countStagingFiltered, createDirectSendCampaign } from '../utils/direct-
 import { DirectSendError } from '../utils/direct-send-spec';
 import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from '../utils/brand-link-core';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
+// ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 판정·응답 모두 CT가 소유한다
+import { checkSenderAuthGate, senderAuthRejection } from '../utils/sender-auth';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -761,6 +763,18 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     if (!defaultCallback && !campaign.callback_number && !useIndividualCallback) {
       return res.status(400).json({ error: '기본 회신번호가 설정되지 않았습니다. 회사 설정에서 기본 회신번호를 등록해주세요.', code: 'NO_DEFAULT_CALLBACK' });
     }
+
+    // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 차감·실행 선점(`campaign_runs`) **앞**에서만 세운다.
+    //   ⛔ 자리가 곧 정확성이다 (Codex 적대검토 2R high) — 개별 모드 확정(D100)과 기본 회신번호 폴백을
+    //     지난 **뒤**에 세운다. 앞에 두면 게이트는 원본 값·빈 번호를 보고, 실제 발송은 확정된 다른 번호로 나간다.
+    //   판정은 CT 하나가 소유한다. 스위치가 꺼져 있으면 DB를 건드리지 않고 즉시 통과한다.
+    const senderGate = await checkSenderAuthGate({
+      req, userId: userId!, companyId,
+      callback: campaign.callback_number || defaultCallback,
+      useIndividualCallback,
+      recipientCount: Number(campaign.target_count || 0),
+    });
+    if (!senderGate.ok) return res.status(403).json(senderAuthRejection(senderGate));
 
     // ★ #4: 회신번호 등록 여부 검증 (개별회신번호가 아닌 경우)
     if (!useIndividualCallback) {
@@ -1683,6 +1697,17 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '적재된 수신자가 없습니다' });
     }
 
+    // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 차감 함수보다 앞에서 세운다.
+    //   ⛔ 알림톡은 개별 회신번호 축이 아니다 (Codex 적대검토 3R) — 적재가 공통 회신번호 하나로 고정이라,
+    //     개별 모드로 보면 계정 축 인증으로 그 번호 발송이 통과한다. 발송이 쓰는 축을 그대로 따른다.
+    const commitIndividualCallback = !!useIndividualCallback && commitChannel.channel !== 'alimtalk';
+    const commitSenderGate = await checkSenderAuthGate({
+      req, userId: userId!, companyId, callback,
+      useIndividualCallback: commitIndividualCallback,
+      recipientCount: Number(stagedCount.rows[0]?.c || 0),
+    });
+    if (!commitSenderGate.ok) return res.status(403).json(senderAuthRejection(commitSenderGate));
+
     // 검증 (즉시 피드백) — 제목 / 회신번호 등록 / 알림톡 승인
     const isAlimtalkSend = commitChannel.channel === 'alimtalk';
     if (isAlimtalkSend) {
@@ -1933,6 +1958,16 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (!recipients || recipients.length === 0) {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
     }
+
+    // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 차감·적재 앞에서 세운다.
+    //   ⛔ 알림톡은 개별 회신번호 축이 아니다(commit 쪽 주석과 같은 이유).
+    const directIndividualCallback = !!useIndividualCallback && directChannel !== 'alimtalk';
+    const directSenderGate = await checkSenderAuthGate({
+      req, userId: userId!, companyId, callback,
+      useIndividualCallback: directIndividualCallback,
+      recipientCount: recipients.length,
+    });
+    if (!directSenderGate.ok) return res.status(403).json(senderAuthRejection(directSenderGate));
 
     // ★ D131: MMS 이미지 첨부 필수 가드 — mms-validator 컨트롤타워
     const directMmsCheck = validateMmsPayload(msgType, mmsImagePaths);

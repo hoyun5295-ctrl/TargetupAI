@@ -30,6 +30,7 @@ import type { Request } from 'express';
 import { query, mysqlQuery } from '../config/database';
 import { getTestSmsTables } from './sms-queue';
 import { restrictAccount } from './account-action';
+import { isEnforcedFrom, isPilotTarget } from './rollout-gate';
 
 /** 코드 유효시간(분) */
 export const MFA_CODE_TTL_MINUTES = 5;
@@ -55,11 +56,7 @@ const MFA_PURPOSE = 'mfa_pending';
  *   `MFA_ENFORCE_FROM=2026-09-01` 를 넣는 순간 시행된다. 되돌리려면 그 값을 지우면 된다.
  */
 export function isMfaEnforced(now: Date = new Date()): boolean {
-  const raw = String(process.env.MFA_ENFORCE_FROM || '').trim();
-  if (!raw) return false;
-  const from = new Date(raw);
-  if (Number.isNaN(from.getTime())) return false;
-  return now.getTime() >= from.getTime();
+  return isEnforcedFrom(process.env.MFA_ENFORCE_FROM, now);
 }
 
 /**
@@ -73,11 +70,7 @@ export function isMfaEnforced(now: Date = new Date()): boolean {
  *   그래서 시범 운영 중에는 `MFA_ENFORCE_FROM`과 이 값을 **반드시 함께** 넣는다.
  */
 export function isMfaPilotTarget(loginId: string | null | undefined): boolean {
-  const raw = String(process.env.MFA_PILOT_LOGIN_IDS || '').trim();
-  if (!raw) return true;
-  const list = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (list.length === 0) return true;
-  return list.includes(String(loginId || '').trim().toLowerCase());
+  return isPilotTarget(process.env.MFA_PILOT_LOGIN_IDS, loginId);
 }
 
 /**
@@ -246,10 +239,18 @@ export async function issueMfaChallenge(userId: string, phone: string, req: Requ
  * ⛔ 식별 컬럼(app_etc1·app_etc2·bill_id)을 싣지 않는다 — 실으면 테스트발송으로 고객사에 청구된다.
  */
 async function sendMfaCode(phone: string, code: string): Promise<void> {
+  await sendAuthCodeSms(phone, `[한줄로] 인증번호 ${code}\n${MFA_CODE_TTL_MINUTES}분 안에 입력해주세요.`);
+}
+
+/**
+ * 인증 계열 문자 발송 — 로그인 다중인증(3.4)과 발신 인증(3.5)이 **같은 라인·같은 적재 형태**를 쓴다.
+ * 심사에서 "인증수단이 하나로 관리된다"가 성립하려면 두 인증이 다른 경로로 나가면 안 된다.
+ * ⛔ 식별 컬럼 금지 규율은 위 주석과 동일 — 이 함수 하나가 그 규율을 소유한다.
+ */
+export async function sendAuthCodeSms(phone: string, message: string): Promise<void> {
   const [table] = await getTestSmsTables();
   const callback = process.env.SYSTEM_SMS_CALLBACK;
   if (!callback) throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다');
-  const message = `[한줄로] 인증번호 ${code}\n${MFA_CODE_TTL_MINUTES}분 안에 입력해주세요.`;
   await mysqlQuery(
     `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
     [String(phone).replace(/\D/g, ''), String(callback).replace(/\D/g, ''), message]

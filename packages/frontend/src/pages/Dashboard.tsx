@@ -5,6 +5,7 @@ import { useToast } from '../components/ToastProvider';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
 import AddressBookModal from '../components/AddressBookModal';
 import SenderAuthModal, { type SenderAuthState } from '../components/SenderAuthModal';
+import { useSenderAuth } from '../hooks/useSenderAuth';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
@@ -171,18 +172,25 @@ export default function Dashboard() {
   // ★ 2026-06-25: CustomerDataGate "올리러 가기" 진입(/dashboard?upload=1) → 고객 DB 업로드 모달 자동 오픈
   const [searchParams, setSearchParams] = useSearchParams();
   /**
-   * ★ 2026-08-27 발신 인증(전송자격인증 3.5) 팝업 — **발송 경로에 배선되어 있지 않다.**
-   *   `?senderAuthPreview=1`(요구) / `=2`(인증됨)로만 열린다. 발송 흐름에는 영향이 0이다.
-   *   OTP 발급·검증과 발송 preflight 연결은 별도 작업(발송 파이프라인은 영향표 없이 손대지 않는다).
+   * ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 발송 경로에 배선됐다.
+   *   서버가 발송을 세우면서 인증번호를 이미 보냈고, 여기는 6자리를 받아 확인한 뒤
+   *   **눌렀던 발송을 그대로 다시 실행한다**(사용자가 처음부터 다시 입력하지 않는다).
+   *   `?senderAuthPreview=1|2`는 화면 캡처용으로 남긴다.
    */
   const senderAuthPreview = searchParams.get('senderAuthPreview');
-  const [senderAuthCode, setSenderAuthCode] = useState('');
+  const senderAuth = useSenderAuth();
   const senderAuthState: SenderAuthState | null =
-    senderAuthPreview === '1'
+    senderAuth.state
+    ?? (senderAuthPreview === '1'
       ? { kind: 'required', callback: '1800-8125', maskedPhone: '010-****-1234', expiresInMinutes: 5, reason: 'first' }
       : senderAuthPreview === '2'
         ? { kind: 'verified', callback: '1800-8125', verifiedAt: '오늘 09:12', remainingHours: 23 }
-        : null;
+        : null);
+
+  const closeSenderAuth = () => {
+    senderAuth.cancel();
+    if (senderAuthPreview) { searchParams.delete('senderAuthPreview'); setSearchParams(searchParams); }
+  };
   const { user, logout } = useAuthStore();
 
   // 기능 제한 체크 헬퍼
@@ -661,6 +669,12 @@ export default function Dashboard() {
         setDirectSending(false);
         return;
       }
+      // ★ 2026-09-12 발신 인증(3.5) — 인증 뒤 이 발송을 그대로 다시 실행한다
+      if (senderAuth.handleResponse(data, () => executeDirectSend(confirmCallbackExclusion, confirmNameEmpty))) {
+        setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
+        setDirectSending(false);
+        return;
+      }
       if (!data.success) {
         setToast({show: true, type: 'error', message: data.error || '발송 접수에 실패했습니다.'});
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 4000);
@@ -821,6 +835,12 @@ export default function Dashboard() {
         setTargetSending(false);
         return;
       }
+      // ★ 2026-09-12 발신 인증(3.5) — 인증 뒤 이 발송을 그대로 다시 실행한다
+      if (senderAuth.handleResponse(data, () => executeTargetSend(confirmCallbackExclusion, confirmNameEmpty))) {
+        setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
+        setTargetSending(false);
+        return;
+      }
       // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
       if (data.callbackConfirmRequired) {
         setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
@@ -864,6 +884,43 @@ export default function Dashboard() {
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
   
+  /**
+   * ★ 2026-09-12 이미 만들어 둔 AI 캠페인을 그대로 다시 보낸다.
+   *   발송이 한 번 세워졌다가 이어지는 경로가 둘이다 — 미등록 회신번호 확인, 발신 인증(3.5).
+   *   ⛔ 캠페인을 다시 만들지 않는다. 다시 만들면 캠페인 행이 둘이 되고 차감도 둘이 된다.
+   */
+  const resumeAiCampaignSend = async (campaignId: string, body?: any) => {
+    try {
+      setIsSending(true);
+      await campaignsApi.send(campaignId, body);
+      setPendingAiCampaignId(null);
+
+      // 성공 후 UI 초기화
+      setShowPreview(false);
+      setShowAiResult(false);
+      setShowAiSendModal(false);
+      setShowCustomSendModal(false);
+      setShowAiCustomFlow(false);
+      setAiStep(1);
+      setAiCampaignPrompt('');
+      setAiResult(null);
+      setSelectedAiMsgIdx(0);
+      setCustomSendData(null);
+
+      setToast({ show: true, type: 'success', message: '발송이 시작되었습니다.' });
+      setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+      loadRecentCampaigns();
+      loadScheduledCampaigns();
+    } catch (error: any) {
+      // 발신 인증이 필요하면 팝업을 띄우고, 통과하면 같은 캠페인을 다시 보낸다
+      if (senderAuth.handleError(error, () => { void resumeAiCampaignSend(campaignId, body); })) return;
+      console.error('발송 이어하기 실패:', error);
+      setToast({ show: true, type: 'error', message: error.response?.data?.error || '발송에 실패했습니다.' });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   // ★ 미등록 회신번호 확인 모달 — "제외하고 발송" 핸들러
   const handleCallbackConfirmSend = async () => {
     // ★ D100: 이중 호출 방지 — isSending 체크로 더블클릭 차단
@@ -878,34 +935,7 @@ export default function Dashboard() {
       // 타겟추출 발송 재호출
       await executeTargetSend(true);
     } else if ((sendType === 'ai' || sendType === 'aiCustom') && pendingAiCampaignId) {
-      // AI 캠페인 재발송 (confirmCallbackExclusion=true)
-      try {
-        setIsSending(true);
-        await campaignsApi.send(pendingAiCampaignId, { confirmCallbackExclusion: true });
-        setPendingAiCampaignId(null);
-
-        // 성공 후 UI 초기화
-        setShowPreview(false);
-        setShowAiResult(false);
-        setShowAiSendModal(false);
-        setShowCustomSendModal(false);
-        setShowAiCustomFlow(false);
-        setAiStep(1);
-        setAiCampaignPrompt('');
-        setAiResult(null);
-        setSelectedAiMsgIdx(0);
-        setCustomSendData(null);
-
-        setToast({ show: true, type: 'success', message: '발송이 시작되었습니다.' });
-        setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
-        loadRecentCampaigns();
-        loadScheduledCampaigns();
-      } catch (error: any) {
-        console.error('미등록 회신번호 확인 후 발송 실패:', error);
-        setToast({ show: true, type: 'error', message: error.response?.data?.error || '발송에 실패했습니다.' });
-      } finally {
-        setIsSending(false);
-      }
+      await resumeAiCampaignSend(pendingAiCampaignId, { confirmCallbackExclusion: true });
     }
   };
 
@@ -1791,7 +1821,18 @@ const campaignData = {
     // 캠페인 발송 API 호출 (예약/즉시 모두)
     const campaignId = response.data.campaign?.id;
     if (campaignId) {
-      const sendResult = await campaignsApi.send(campaignId);
+      let sendResult;
+      try {
+        sendResult = await campaignsApi.send(campaignId);
+      } catch (sendErr: any) {
+        // ★ 2026-09-12 발신 인증(3.5) — 캠페인을 다시 만들지 않고 이 캠페인만 다시 보낸다
+        if (senderAuth.handleError(sendErr, () => { void resumeAiCampaignSend(campaignId); })) {
+          setPendingAiCampaignId(campaignId);
+          setIsSending(false);
+          return;
+        }
+        throw sendErr;
+      }
       // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
       if (sendResult.data?.callbackConfirmRequired) {
         setPendingAiCampaignId(campaignId);
@@ -1932,7 +1973,18 @@ const campaignData = {
 
       const campaignId = response.data.campaign?.id;
       if (campaignId) {
-        const sendResult = await campaignsApi.send(campaignId);
+        let sendResult;
+        try {
+          sendResult = await campaignsApi.send(campaignId);
+        } catch (sendErr: any) {
+          // ★ 2026-09-12 발신 인증(3.5) — 캠페인을 다시 만들지 않고 이 캠페인만 다시 보낸다
+          if (senderAuth.handleError(sendErr, () => { void resumeAiCampaignSend(campaignId); })) {
+            setPendingAiCampaignId(campaignId);
+            setIsSending(false);
+            return;
+          }
+          throw sendErr;
+        }
         // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
         if (sendResult.data?.callbackConfirmRequired) {
           setPendingAiCampaignId(campaignId);
@@ -4039,12 +4091,14 @@ const campaignData = {
       {senderAuthState && (
         <SenderAuthModal
           state={senderAuthState}
-          code={senderAuthCode}
-          onCodeChange={setSenderAuthCode}
-          onVerify={() => {}}
-          onResend={() => {}}
-          onProceed={() => {}}
-          onCancel={() => { searchParams.delete('senderAuthPreview'); setSearchParams(searchParams); }}
+          code={senderAuth.code}
+          onCodeChange={senderAuth.setCode}
+          error={senderAuth.error}
+          busy={senderAuth.busy}
+          onVerify={senderAuth.verify}
+          onResend={senderAuth.resend}
+          onProceed={closeSenderAuth}
+          onCancel={closeSenderAuth}
         />
       )}
 
