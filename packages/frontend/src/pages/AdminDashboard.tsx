@@ -188,6 +188,7 @@ export default function AdminDashboard() {
     costPerKakao: '' as string | number,
     // ★ 2026-07-29 브랜드메시지(구 친구톡) — 알림톡과 다른 단가다. 비우면 청구·차감이 막힌다.
     costPerBrand: '' as string | number,
+    costPerBrandNonfriend: '' as string | number,
     costPerTestSms: '' as string | number,
     costPerTestLms: '' as string | number,
     unitPriceBasis: 'vat_included' as 'vat_included' | 'vat_excluded',
@@ -2749,6 +2750,8 @@ const billingStatusBadge = (s: string) => {
 //   스팸필터 유형키 추가. PDF·이메일(billing-invoice-lines CT)과 같은 이름이라야 화면=청구서다.
 const billingTypeLabel: Record<string, string> = {
   SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오알림톡',
+  // ★ 2026-09-13 브랜드 두 줄 — 없으면 상세 행에 원문 키가 보인다(청구서 라벨 = billing-types.ts label)
+  BRAND: '브랜드메시지', BRAND_NF: '브랜드메시지(비친구)',
   TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS', SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS',
 };
 // 상세 행 '구분' 라벨 — ★2026-07-31부터 **서버가 내리는 `scope_label`이 단일 진실**이다
@@ -4203,6 +4206,7 @@ const handleApproveRequest = async (id: string) => {
           mms: editCompany.costPerMms,
           kakao: editCompany.costPerKakao,
           brand: editCompany.costPerBrand,
+          brandNonfriend: editCompany.costPerBrandNonfriend,
           testSms: editCompany.costPerTestSms,
           testLms: editCompany.costPerTestLms,
         },
@@ -9603,7 +9607,8 @@ const handleApproveRequest = async (id: string) => {
                       ['costPerLms', 'LMS', '장문 문자'],
                       ['costPerMms', 'MMS', '이미지 문자'],
                       ['costPerKakao', '알림톡', '카카오 알림톡'],
-                      ['costPerBrand', '브랜드메시지', '구 친구톡 · 알림톡과 별도 단가'],
+                      ['costPerBrand', '브랜드메시지 친구', '채널 친구 대상 · 알림톡과 별도'],
+                      ['costPerBrandNonfriend', '브랜드메시지 비친구', '마수동 전체·비친구 대상'],
                       ['costPerTestSms', '테스트 SMS', '비우면 SMS 단가'],
                       ['costPerTestLms', '테스트 LMS', '비우면 LMS 단가'],
                     ] as const).map(([key, label, hint]) => {
@@ -9620,7 +9625,7 @@ const handleApproveRequest = async (id: string) => {
                             <input
                               type="number" step="0.01" min="0" inputMode="decimal"
                               value={raw as any}
-                              placeholder={key.startsWith('costPerTest') ? '비우면 상속' : '0.00'}
+                              placeholder={key.startsWith('costPerTest') || key === 'costPerBrandNonfriend' ? '비우면 상속' : '0.00'}
                               onChange={(e) => setEditCompany({ ...editCompany, [key]: e.target.value === '' ? '' : e.target.value })}
                               className="w-full bg-transparent text-lg font-bold text-gray-900 outline-none"
                             />
@@ -9635,7 +9640,9 @@ const handleApproveRequest = async (id: string) => {
                             {empty
                               ? (key.startsWith('costPerTest')
                                   ? <span className="text-gray-400">미설정. {key === 'costPerTestSms' ? 'SMS' : 'LMS'} 단가를 따릅니다</span>
-                                  : <span className="text-gray-400">미설정. 이 유형으로 발송이 있으면 청구서 발행이 차단됩니다</span>)
+                                  : key === 'costPerBrandNonfriend'
+                                    ? <span className="text-gray-400">미설정. 브랜드메시지 친구 단가를 따릅니다</span>
+                                    : <span className="text-gray-400">미설정. 이 유형으로 발송이 있으면 청구서 발행이 차단됩니다</span>)
                               : <>VAT {fmtPrice(p.vat)}원 · <span className="text-emerald-800">VAT 포함 {fmtPrice(p.withVat)}원 차감</span></>}
                           </div>
                         </div>

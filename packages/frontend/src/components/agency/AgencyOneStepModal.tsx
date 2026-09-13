@@ -477,7 +477,8 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
           ) : (
             <button type="button" onClick={submit} disabled={saving || loading || !a || a.errors.length > 0} className={CUI_BTN_PRIMARY}>
               {saving ? <Loader2 className="w-[15px] h-[15px] animate-spin" /> : <Send className="w-[15px] h-[15px]" />}
-              {a && a.groups.length > 1 ? `${a.groups.length}건 접수하기` : '접수하기'}
+              {/* ★2026-09-13 회신번호가 여러 종류여도 접수는 하나다(불변 24) · 종전 "N건 접수하기"는 분할 시절 문구 */}
+              접수하기
             </button>
           )}
         </div>

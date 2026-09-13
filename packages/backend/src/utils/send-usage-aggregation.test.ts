@@ -4,7 +4,7 @@ import {
   agentUsageKey, AGENT_MSG_TYPE_TO_USAGE_KEY, rollupAgentRowsForBilling, findUnbillableBillingRows,
   diffBillingRowsVsDayData, sortBillingUsageRows, priceBillingRows, toDayKey,
   billingRowKey, resolveBillingUnitPricesDetailed, findUnsetPricedTypes, summarizeBlockList,
-  nullifyUnknownUserIds, checkBillingAmountIdentity, chunkArray,
+  nullifyUnknownUserIds, checkBillingAmountIdentity, chunkArray, BILLING_MSG_TYPE_SQL,
   splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems, aggregateBillingSendIds, partitionBillingSendIds, findBlockingPendingRows,
   buildExtraBillingItems, extraRowUserId, extraRowsBlockingIssue,
   type BillingUsageRow, type AgentUnitPriceRow, type PricedBillingItem, type ExtraItemSourceRow,
@@ -106,32 +106,58 @@ describe('rollupUsageByPeriod — 청구 사용량 일자 집계 → 기간×유
 });
 
 describe('MSG_TYPE_TO_USAGE_KEY — SMSQ 유형코드 → 청구 유형키 (2026-07-25)', () => {
-  it('S/L/M/K/F 다섯 코드가 모두 청구 키로 변환된다', () => {
+  it('S/L/M/K/F/FN 여섯 코드가 모두 청구 키로 변환된다', () => {
     expect(MSG_TYPE_TO_USAGE_KEY.S).toBe('SMS');
     expect(MSG_TYPE_TO_USAGE_KEY.L).toBe('LMS');
     expect(MSG_TYPE_TO_USAGE_KEY.M).toBe('MMS');
     expect(MSG_TYPE_TO_USAGE_KEY.K).toBe('KAKAO');
     // ★ 2026-07-30 브랜드 SMSQ 합류 — 'F'가 빠지면 브랜드 발송이 통째로 0원 청구된다.
     expect(MSG_TYPE_TO_USAGE_KEY.F).toBe('BRAND');
+    // ★ 2026-09-13 비친구 브랜드 — 큐에는 없는 집계용 코드. 집계 SQL이 F 행을 TARGETING으로 갈라 낸다.
+    expect(MSG_TYPE_TO_USAGE_KEY.FN).toBe('BRAND_NF');
   });
 
   it('청구 합산이 읽는 키와 정확히 일치한다 — 어긋나면 그 유형이 0원 청구된다', () => {
-    // billing.ts 합산부가 읽는 키: SMS·LMS·MMS·KAKAO·BRAND.
+    // billing.ts 합산부가 읽는 키: SMS·LMS·MMS·KAKAO·BRAND·BRAND_NF.
     // 과거 'M'·'K'가 변환되지 않아 MMS·알림톡이 통째로 청구에서 빠졌다.
-    const billingKeys = ['SMS', 'LMS', 'MMS', 'KAKAO', 'BRAND'];
+    const billingKeys = ['SMS', 'LMS', 'MMS', 'KAKAO', 'BRAND', 'BRAND_NF'];
     for (const v of Object.values(MSG_TYPE_TO_USAGE_KEY)) {
       expect(billingKeys).toContain(v);
     }
-    expect(new Set(Object.values(MSG_TYPE_TO_USAGE_KEY)).size).toBe(5); // 중복 매핑 없음
+    expect(new Set(Object.values(MSG_TYPE_TO_USAGE_KEY)).size).toBe(6); // 중복 매핑 없음
+  });
+});
+
+describe('BILLING_MSG_TYPE_SQL — 브랜드 F 행을 친구·비친구로 가르는 집계 식 (2026-09-13)', () => {
+  it('F 행만 TARGETING으로 가르고 나머지는 msg_type 그대로다', () => {
+    expect(BILLING_MSG_TYPE_SQL).toMatch(/^CASE WHEN msg_type = 'F' THEN/);
+    expect(BILLING_MSG_TYPE_SQL).toMatch(/ELSE msg_type END$/);
+  });
+
+  it('친구 목록(I·F)만 F로 남고 그 밖은 FN이다', () => {
+    expect(BILLING_MSG_TYPE_SQL).toContain("IN ('I', 'F') THEN 'F' ELSE 'FN'");
+  });
+
+  it('JSON이 깨졌거나 비어 있으면 비친구(FN) — JSON_EXTRACT보다 JSON_VALID가 먼저다', () => {
+    // 깨진 JSON에 JSON_EXTRACT를 부르면 MySQL이 오류를 던져 정산 전체가 멈춘다. 중첩 CASE로 순서를 강제한다.
+    const validAt = BILLING_MSG_TYPE_SQL.indexOf('JSON_VALID(k_etc_json) = 1');
+    const extractAt = BILLING_MSG_TYPE_SQL.indexOf('JSON_EXTRACT(k_etc_json');
+    expect(validAt).toBeGreaterThan(-1);
+    expect(extractAt).toBeGreaterThan(validAt);
+    expect(BILLING_MSG_TYPE_SQL).toMatch(/END\) ELSE 'FN' END\)/);
+  });
+
+  it('FN은 청구 유형키로 변환된다', () => {
+    expect(MSG_TYPE_TO_USAGE_KEY.FN).toBe('BRAND_NF');
   });
 });
 
 describe('buildBillingTotals — 청구 수량 합산 (2026-07-25)', () => {
   const day = (t: number, s: number, f = 0, p = 0) => ({ total: t, success: s, fail: f, pending: p });
 
-  it('빈 입력 — 9개 유형키가 전부 0으로 존재한다', () => {
+  it('빈 입력 — 10개 유형키가 전부 0으로 존재한다', () => {
     const t = buildBillingTotals({});
-    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, BRAND: 0, TEST_SMS: 0, TEST_LMS: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
+    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, BRAND: 0, BRAND_NF: 0, TEST_SMS: 0, TEST_LMS: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
     expect(buildBillingTotals(undefined as any).SMS).toBe(0);
   });
 
@@ -767,8 +793,10 @@ describe('resolveBillingUnitPricesDetailed — 미설정 유형키 색출 (2026-
     const { prices, unsetKeys } = resolveBillingUnitPricesDetailed({
       cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8, cost_per_brand: null,
     });
-    expect(unsetKeys).toEqual(['BRAND']);
+    // ★ 2026-09-13 비친구 칸도 비어 있고 친구 단가로 떨어질 곳도 없으니 BRAND_NF도 함께 미설정이다.
+    expect(unsetKeys).toEqual(['BRAND', 'BRAND_NF']);
     expect(prices.BRAND).toBe(0);   // 알림톡 8원이 새어 들어오면 안 된다
+    expect(prices.BRAND_NF).toBe(0);
   });
 
   it('명시적 0원은 미설정이 아니다', () => {
@@ -788,7 +816,39 @@ describe('resolveBillingUnitPricesDetailed — 미설정 유형키 색출 (2026-
 
   it('자기도 비고 상속원도 비면 테스트·스팸까지 잡힌다', () => {
     const { unsetKeys } = resolveBillingUnitPricesDetailed({ cost_per_mms: 90, cost_per_kakao: 8 });
-    expect(unsetKeys).toEqual(['SMS', 'LMS', 'BRAND', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS']);
+    expect(unsetKeys).toEqual(['SMS', 'LMS', 'BRAND', 'BRAND_NF', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS']);
+  });
+
+  // ★ 2026-09-13 브랜드 비친구 — 비친구 칸은 비면 친구 단가(cost_per_brand)를 따른다(테스트 단가 상속과 같은 방식).
+  it('비친구 단가가 있으면 BRAND_NF는 그 값의 공급가다', () => {
+    const { prices, unsetKeys } = resolveBillingUnitPricesDetailed({
+      unit_price_basis: 'vat_excluded', cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8,
+      cost_per_brand: 15, cost_per_brand_nonfriend: 20,
+    });
+    expect(prices.BRAND).toBe(15);
+    expect(prices.BRAND_NF).toBe(20);
+    expect(unsetKeys).toEqual([]);
+  });
+
+  it('비친구 칸이 비면 BRAND_NF는 친구 단가다 — 배포 직후 청구액 불변', () => {
+    const { prices, unsetKeys } = resolveBillingUnitPricesDetailed({
+      unit_price_basis: 'vat_excluded', cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8,
+      cost_per_brand: 15, cost_per_brand_nonfriend: null,
+    });
+    expect(prices.BRAND_NF).toBe(15);
+    expect(unsetKeys).toEqual([]);
+  });
+
+  it('비친구 단가도 부가세 기준을 따른다(전환 전 회사는 ÷1.1)', () => {
+    const { prices } = resolveBillingUnitPricesDetailed({ unit_price_basis: 'vat_included', cost_per_brand: 16.5, cost_per_brand_nonfriend: 22 });
+    expect(prices.BRAND).toBe(15);
+    expect(prices.BRAND_NF).toBe(20);
+  });
+
+  it('비친구 명시적 0원은 0원 — 친구 단가로 되살아나지 않는다', () => {
+    const { prices, unsetKeys } = resolveBillingUnitPricesDetailed({ cost_per_brand: 15, cost_per_brand_nonfriend: 0 });
+    expect(prices.BRAND_NF).toBe(0);
+    expect(unsetKeys).not.toContain('BRAND_NF');
   });
 
   it('기존 함수와 단가 값이 같다 — 시그니처 호환', () => {

@@ -21,12 +21,12 @@ import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats'
 import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
 import { floorWon } from './money';
 import { mapWithConcurrency } from './concurrency';
-import { normalizeUnitPriceBasis, toSupplyPrice, type UnitPriceBasis } from './unit-price';
+import { normalizeUnitPriceBasis, toSupplyPrice, pickBrandPriceRaw, BRAND_FRIEND_TARGETINGS, type UnitPriceBasis } from './unit-price';
 // ★ 2026-08-05 요금제 무료 제공 배분 — 순수 CT(DB 접근 없음)
 import { allocateFreeToRows } from './free-messaging';
 import type { PlanSegment } from './plan-proration';
 import {
-  BILLING_TYPES, billableQuantity,
+  BILLING_TYPES, billableQuantity, BRAND_NONFRIEND_SMSQ_CODE,
   type BillingTypeDef, type AgentPriceColumn, type AgentUnitPriceRow,
 } from './billing-types';
 import { DIRECT_PIPELINE_SEND_TYPES_SQL } from './send-type-axis';
@@ -40,6 +40,28 @@ export type { BillingTypeDef, AgentPriceColumn, AgentUnitPriceRow };
 export const MSG_TYPE_TO_USAGE_KEY: Record<string, string> = Object.fromEntries(
   BILLING_TYPES.filter((t) => t.smsqCode).map((t) => [t.smsqCode as string, t.key]),
 );
+
+const BRAND_SMSQ_CODE = BILLING_TYPES.find((t) => t.key === 'BRAND')?.smsqCode || 'F';
+
+/**
+ * ★ 2026-09-13 청구 집계용 msg_type 식 — 브랜드 `F` 행을 친구·비친구로 가른다.
+ *
+ * 큐에는 `F` 하나로 적재되고 대상은 `k_etc_json.TARGETING`에만 있다. 게이트웨이가 실제로 읽고 보내는 값이
+ * 그 행의 TARGETING이라, 캠페인 컬럼(`kakao_targeting` = 복사본)이 아니라 행을 기준으로 삼는다.
+ *   - 친구 목록(unit-price.ts `BRAND_FRIEND_TARGETINGS`) → `F`(BRAND)
+ *   - 그 밖·빈 값·JSON 아님 → `FN`(BRAND_NF). 섞인 `M`과 미지정은 비친구다.
+ *   ⛔ 중첩 CASE로 JSON_VALID를 JSON_EXTRACT보다 먼저 판정한다 — 깨진 JSON에 EXTRACT를 부르면
+ *      MySQL이 오류를 던져 그 회사 정산 전체가 멈춘다.
+ *   ⛔ GROUP BY에도 이 식을 그대로 쓴다 — MySQL GROUP BY는 같은 이름의 원 컬럼을 별칭보다 먼저 찾아
+ *      `GROUP BY msg_type`이면 F·FN이 한 그룹으로 합쳐진다.
+ * 전제(2026-09-13 Harold 실측): `msg_type` 컬럼이 있는 smsdb 테이블 115개 전부 `k_etc_json` 보유.
+ */
+export const BILLING_MSG_TYPE_SQL =
+  `CASE WHEN msg_type = '${BRAND_SMSQ_CODE}' THEN `
+  + `(CASE WHEN JSON_VALID(k_etc_json) = 1 THEN `
+  + `(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(k_etc_json, '$.TARGETING')) IN (${BRAND_FRIEND_TARGETINGS.map((t) => `'${t}'`).join(', ')}) `
+  + `THEN '${BRAND_SMSQ_CODE}' ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) `
+  + `ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) ELSE msg_type END`;
 
 export interface UsageDayCounts { total: number; success: number; fail: number; pending: number }
 /** 일자(YYYY-MM-DD) → 유형키 → 카운트 */
@@ -97,7 +119,9 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
   const mmsRaw = supply(co?.cost_per_mms);
   const kakaoRaw = supply(co?.cost_per_kakao);
   // ★ 2026-07-29 브랜드메시지 — 알림톡과 다른 단가다. 그 전에는 브랜드 발송이 KAKAO 단가로 청구됐다.
-  const brandRaw = supply(co?.cost_per_brand);
+  // ★ 2026-09-13 친구·비친구 — 컬럼은 순서표(unit-price.ts)가 고른다. 비친구 칸이 비면 친구 단가를 따른다.
+  const brandRaw = supply(pickBrandPriceRaw(co, { targeting: 'I' }));
+  const brandNfRaw = supply(pickBrandPriceRaw(co, { targeting: 'N' }));
   const testSmsRaw = supply(co?.cost_per_test_sms);
   const testLmsRaw = supply(co?.cost_per_test_lms);
 
@@ -109,6 +133,7 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
     MMS: mmsRaw ?? 0,
     KAKAO: kakaoRaw ?? 0,
     BRAND: brandRaw ?? 0,
+    BRAND_NF: brandNfRaw ?? 0,
     TEST_SMS: testSmsRaw ?? sms,
     TEST_LMS: testLmsRaw ?? lms,
     SPAM_SMS: sms,
@@ -122,6 +147,7 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
   if (kakaoRaw === null) unsetKeys.push('KAKAO');
   // 브랜드 단가는 알림톡을 상속하지 않는다 — 상속시키면 미설정이 조용히 알림톡 단가로 청구된다.
   if (brandRaw === null) unsetKeys.push('BRAND');
+  if (brandNfRaw === null) unsetKeys.push('BRAND_NF');   // 비친구·친구 칸이 모두 빌 때만
   if (testSmsRaw === null && smsRaw === null) unsetKeys.push('TEST_SMS');
   if (testLmsRaw === null && lmsRaw === null) unsetKeys.push('TEST_LMS');
   if (smsRaw === null) unsetKeys.push('SPAM_SMS');
@@ -260,13 +286,13 @@ export async function smsAggByRunDateType(
   const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
     return await queryWithIndexHint(
       (hint) =>
-        `SELECT app_etc1 as run_id, msg_type, DATE(sendreq_time) as send_date,
+        `SELECT app_etc1 as run_id, ${BILLING_MSG_TYPE_SQL} AS msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
               SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
               SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
        FROM ${t}${hint} WHERE ${whereClause}
-       GROUP BY app_etc1, msg_type, DATE(sendreq_time)`,
+       GROUP BY app_etc1, ${BILLING_MSG_TYPE_SQL}, DATE(sendreq_time)`,
       params,
       indexHint,
     );
@@ -310,13 +336,13 @@ export async function smsAggByDateType(
   const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
     return await queryWithIndexHint(
       (hint) =>
-        `SELECT msg_type, DATE(sendreq_time) as send_date,
+        `SELECT ${BILLING_MSG_TYPE_SQL} AS msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
               SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
               SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
        FROM ${t}${hint} WHERE ${whereClause}
-       GROUP BY msg_type, DATE(sendreq_time)`,
+       GROUP BY ${BILLING_MSG_TYPE_SQL}, DATE(sendreq_time)`,
       params,
       indexHint,
     );

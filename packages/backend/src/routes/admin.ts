@@ -6,6 +6,7 @@ import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
 // ★2026-09-12 싱크에이전트 시크릿 해시(원문 미저장 · 발급 시 1회 노출)
 import { hashSecret } from '../utils/secret-hash';
+import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
 import type { PoolClient } from 'pg';
@@ -621,6 +622,19 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
     if (!Number.isFinite(n) || n < 0) { invalid.push(key); continue; }
     values[col] = round2(n);
   }
+  // ★ 2026-09-13 비친구 브랜드 단가 — **선택 키**다. 위 전체 교체 목록(FIELDS)에 넣지 않는다.
+  //   넣으면 이 키를 모르는 요청이 전부 422가 되고, 받고도 무시하면 저장할 때마다 값이 지워진다(게이트웨이 0906 같은 부류).
+  //   키 없음 = 기존 값 유지 · 빈 값 = 미설정(친구 단가 적용) · 숫자 = 그 값(0은 0원 계약이라 지우지 않는다).
+  const hasBrandNonfriend = Object.prototype.hasOwnProperty.call(prices, 'brandNonfriend');
+  let brandNonfriend: number | null = null;
+  if (hasBrandNonfriend) {
+    const raw = prices.brandNonfriend;
+    if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) invalid.push('brandNonfriend');
+      else brandNonfriend = round2(n);
+    }
+  }
   if (invalid.length > 0) {
     return res.status(422).json({
       success: false,
@@ -635,7 +649,7 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
     await client.query('BEGIN');
     const before = await client.query(
       `SELECT company_name, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
-              cost_per_brand, cost_per_test_sms, cost_per_test_lms
+              cost_per_brand, cost_per_brand_nonfriend, cost_per_test_sms, cost_per_test_lms
          FROM companies WHERE id = $1::uuid FOR UPDATE`,
       [id]
     );
@@ -649,13 +663,15 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
       `UPDATE companies
           SET cost_per_sms = $2, cost_per_lms = $3, cost_per_mms = $4, cost_per_kakao = $5,
               cost_per_test_sms = $6, cost_per_test_lms = $7, cost_per_brand = $8,
+              cost_per_brand_nonfriend = CASE WHEN $9::boolean THEN $10::numeric ELSE cost_per_brand_nonfriend END,
               unit_price_basis = 'vat_excluded',
               updated_at = NOW()
         WHERE id = $1::uuid
         RETURNING company_name, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
-                  cost_per_brand, cost_per_test_sms, cost_per_test_lms`,
+                  cost_per_brand, cost_per_brand_nonfriend, cost_per_test_sms, cost_per_test_lms`,
       [id, values.cost_per_sms, values.cost_per_lms, values.cost_per_mms, values.cost_per_kakao,
-       values.cost_per_test_sms, values.cost_per_test_lms, values.cost_per_brand]
+       values.cost_per_test_sms, values.cost_per_test_lms, values.cost_per_brand,
+       hasBrandNonfriend, brandNonfriend]
     );
 
     // 발송ID 단가는 **상속시키지 않는다** — 발송ID마다 계약이 다를 수 있고, 암묵 상속은
@@ -710,7 +726,7 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요: 운영자에게 companies.unit_price_basis ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 companies.unit_price_basis·cost_per_brand_nonfriend ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -5667,6 +5683,7 @@ router.get('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (r
     }
     res.json({ syncKeys: result.rows[0] });
   } catch (error) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('companies.api_secret_hash ALTER'));
     console.error('SyncAgent 키 조회 실패:', error);
     res.status(500).json({ error: 'SyncAgent 키 조회 실패' });
   }
@@ -5701,6 +5718,7 @@ router.post('/companies/:id/sync-keys/regenerate', authenticate, requireSuperAdm
       message: 'API Key가 재발급되었습니다. 기존 키는 즉시 무효화됩니다. 시크릿은 지금만 확인할 수 있으니 복사해 두세요.',
     });
   } catch (error) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('companies.api_secret_hash ALTER'));
     console.error('SyncAgent 키 재발급 실패:', error);
     res.status(500).json({ error: 'SyncAgent 키 재발급 실패' });
   }
@@ -5731,6 +5749,7 @@ router.put('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (r
 
     res.json({ syncKeys: result.rows[0], message: useDbSync ? 'SyncAgent가 활성화되었습니다.' : 'SyncAgent가 비활성화되었습니다.' });
   } catch (error) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('companies.api_secret_hash ALTER'));
     console.error('SyncAgent 설정 변경 실패:', error);
     res.status(500).json({ error: 'SyncAgent 설정 변경 실패' });
   }

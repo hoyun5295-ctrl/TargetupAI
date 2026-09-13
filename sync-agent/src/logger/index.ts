@@ -29,23 +29,41 @@ export const LOG_DIR = path.resolve(process.cwd(), 'logs');
  *   제자리에서 **값만** 바꾼다 = 키·구조·순서 무변경(로그를 줄 단위로 읽는 `tail.ts`도 영향 없다).
  * ⛔ 마스킹 대상은 `masking.ts`의 `SENSITIVE_KEYS`가 소유한다. 여기서 키 목록을 다시 만들지 않는다.
  */
-const maskingFormat = winston.format((info) => {
-  const masked = maskSensitiveData(info as unknown as Record<string, unknown>);
-  for (const key of Object.keys(masked)) {
-    (info as unknown as Record<string, unknown>)[key] = masked[key];
+export const maskingFormat = winston.format((info) => {
+  const target = info as unknown as Record<string, unknown>;
+  try {
+    const masked = maskSensitiveData(target);
+    for (const key of Object.keys(masked)) {
+      target[key] = masked[key];
+    }
+  } catch {
+    // ⛔ 마스킹이 실패해도 로그 호출이 예외를 던지면 안 된다(★2026-09-13). winston은 포맷 예외를 호출부로 다시 던지고,
+    //   그 호출부 뒤에 등록 실패 시 로컬 모드 계속·오프라인 큐 저장이 있다. 원문을 흘리지도 않는다:
+    //   메시지·레벨·모듈만 남기고 나머지 필드는 비운다.
+    for (const key of Object.keys(target)) {
+      if (key !== 'level' && key !== 'message' && key !== 'module') delete target[key];
+    }
+    target.maskError = 'masking_failed';
   }
   return info;
 });
 
 /** 콘솔 출력 포맷 */
-const consoleFormat = winston.format.combine(
+export const consoleFormat = winston.format.combine(
   winston.format.colorize(),
   winston.format.timestamp({ format: 'HH:mm:ss' }),
   winston.format.printf(({ timestamp, level, message, module, ...rest }) => {
     const mod = module ? `[${module}]` : '';
-    const extra = Object.keys(rest).length > 0
-      ? ` ${JSON.stringify(rest)}`
-      : '';
+    // ★2026-09-13 순환 참조가 남은 값이면 JSON.stringify가 던진다. 출력 한 줄 때문에 로그 호출이 죽지 않게 필드만 생략한다
+    //   (파일 포맷은 winston json이 순환을 스스로 처리한다).
+    let extra = '';
+    if (Object.keys(rest).length > 0) {
+      try {
+        extra = ` ${JSON.stringify(rest)}`;
+      } catch {
+        extra = ' [직렬화할 수 없는 필드 생략]';
+      }
+    }
     return `${timestamp} ${level} ${mod} ${message}${extra}`;
   }),
 );

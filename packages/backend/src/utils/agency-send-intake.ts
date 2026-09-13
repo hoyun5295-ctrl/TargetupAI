@@ -95,16 +95,15 @@ export async function hasAgencyColumn(
   const key = `${table}.${column}`;
   const hit = columnCache.get(key);
   if (hit && (hit.value || now - hit.checkedAt < 5 * 60 * 1000)) return hit.value;
-  try {
-    const r = await client.query(
-      `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
-      [table, column],
-    );
-    columnCache.set(key, { value: r.rows.length > 0, checkedAt: now });
-  } catch {
-    columnCache.set(key, { value: false, checkedAt: now });
-  }
-  return columnCache.get(key)!.value;
+  // ⛔ 조회가 **실패**하면 캐시하지 않고 그대로 던진다(★2026-09-13 Codex 적대 high).
+  //   종전에는 실패도 "컬럼 없음"으로 5분 굳혀, 컬럼이 이미 있는데도 그동안 고객별 회신번호를 빼고 접수·적재했다
+  //   (A·B 번호 명단이 대표 번호 A 하나로 나간다). 컬럼이 **정말 없을 때만** 없음이다.
+  const r = await client.query(
+    `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+    [table, column],
+  );
+  columnCache.set(key, { value: r.rows.length > 0, checkedAt: now });
+  return r.rows.length > 0;
 }
 
 export async function logEvent(requestId: string, kind: string, payload: Record<string, any> = {}): Promise<void> {
@@ -288,6 +287,12 @@ export async function createRequestCore(
     // ★2026-09-12 고객별 회신번호는 컬럼이 있을 때만 싣는다(DDL 후행 안전 — 없으면 종전 문장 그대로).
     //   ⛔ 행마다 쓰는 파라미터 수가 달라지므로 자리표시자도 같은 분기에서 만든다.
     const hasRecipientCallback = await hasAgencyColumn(client, 'callback', 'agency_send_recipients');
+    // ★2026-09-13 ⛔ 고객별 번호가 있는데 저장할 컬럼이 없으면 **조용히 버리지 않는다**(Codex 2R high).
+    //   버리면 대표 번호 하나로 나가는데 확인 화면·회신 메일은 고객별로 나간다고 안내한다.
+    //   던져서 접수 자체를 되돌린다(화면은 재시도 안내 · 메일 워커는 백오프 재시도라 반려 메일이 가지 않는다).
+    if (!hasRecipientCallback && rows.some((r) => r.callback)) {
+      throw new Error('agency_send_recipients.callback 컬럼이 없어 고객별 회신번호를 저장할 수 없습니다(DB 마이그레이션 필요)');
+    }
     const perRow = hasRecipientCallback ? 4 : 3;
     for (let offset = 0; offset < rows.length; offset += RECIPIENT_INSERT_CHUNK) {
       const slice = rows.slice(offset, offset + RECIPIENT_INSERT_CHUNK);
@@ -432,6 +437,11 @@ export async function analyzeOneStep(
   aiSuggest: boolean,
   /** 입구별 최소 리드타임(비우면 `MIN_LEAD_MINUTES` · ★0826(6) 현재 40분 통일). 판정 구현은 `validateRequestedAt` 한 벌이다 */
   minLeadMinutes?: number,
+  /**
+   * ★2026-09-13 호출부가 **같은 버퍼로** 이미 읽은 요청서·명단. 이메일 워커는 사전 게이트에서 둘 다 읽는데
+   *   여기서 다시 읽으면 큰 명단을 두 번 파싱한다(적대검토 medium · 워커가 API와 같은 프로세스라 그동안 전부 멈춘다).
+   */
+  pre?: { form?: ReturnType<typeof parseAgencyRequestForm>; list?: ReturnType<typeof parseAgencyRecipientList> },
 ): Promise<OneStepAnalysis> {
   const errors: AgencyFormError[] = [];
   const empty: OneStepAnalysis = {
@@ -451,13 +461,13 @@ export async function analyzeOneStep(
     return empty;
   }
 
-  const form = parseAgencyRequestForm(formBuf);
+  const form = pre?.form ?? parseAgencyRequestForm(formBuf);
   errors.push(...form.errors);
 
   let headers: string[] = [];
   let rows: Record<string, any>[] = [];
   try {
-    const list = parseAgencyRecipientList(effectiveListBuf);
+    const list = pre?.list ?? parseAgencyRecipientList(effectiveListBuf);
     headers = list.headers;
     rows = list.rows;
     // ⛔ 같은 이름의 열·상한 초과는 조용히 못 넘어간다(★Codex 적대 1R — 열이 밀리거나 잘리면 다른 사람에게 간다)

@@ -186,13 +186,18 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
   const errors: AgencyFormError[] = [];
   let rows: any[][] = [];
   try {
-    const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true, cellFormula: false, cellHTML: false, sheetStubs: false });
+    // ★2026-09-13 **요청서 시트만** 읽는다(적대검토 medium). 통일 양식은 한 파일에 고객리스트 시트가 같이 있어
+    //   워크북 전체를 읽으면 명단을 한 번 더 파싱한다(0913 실측 20만 행: 전체 4,174ms · 시트 이름만 2ms · 요청서 시트만 1ms).
+    //   시트 고르는 규칙은 종전 그대로이고, 형식상 시트만 골라 읽기가 안 되면 종전처럼 전체를 읽는다.
+    const names = XLSX.read(buffer, { type: 'buffer', bookSheets: true }).SheetNames;
     // ⛔ 시트는 이름으로 먼저 찾는다(★Codex 적대 1R) — 첫 시트만 읽으면 숨김·잔여 시트가
     //   보이는 값과 다른 값을 진실로 만들 수 있다. "요청서"(구양식) → "내용"(통일 양식) → 첫 시트.
-    const sheetName = wb.SheetNames.find((n) => normLabel(n) === '요청서')
-      || wb.SheetNames.find((n) => normLabel(n) === '내용')
-      || wb.SheetNames[0];
-    const sheet = wb.Sheets[sheetName];
+    const sheetName = names.find((n) => normLabel(n) === '요청서')
+      || names.find((n) => normLabel(n) === '내용')
+      || names[0];
+    const readOpts = { type: 'buffer' as const, cellDates: true, cellFormula: false, cellHTML: false, sheetStubs: false };
+    let sheet = XLSX.read(buffer, { ...readOpts, sheets: [sheetName] }).Sheets[sheetName];
+    if (!sheet) sheet = XLSX.read(buffer, readOpts).Sheets[sheetName];
     rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
   } catch {
     return {

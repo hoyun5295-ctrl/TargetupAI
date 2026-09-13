@@ -154,6 +154,19 @@ describe('단가 읽기 — 돈에 닿는 경로는 전부 CT를 지난다 (2026
     expect(adminSrc).toContain('UNIT_PRICE_INCOMPLETE');
   });
 
+  it('비친구 브랜드 단가는 선택 키다 — 필수 목록에 넣으면 기존 요청이 422, 무시하면 저장마다 지워진다 (2026-09-13)', () => {
+    // 게이트웨이 0906 Codex 뿌리 1과 같은 결함 부류: 키 없음 = 무변경 · 빈 값 = 미설정 · 숫자 = 그 값.
+    const start = adminSrc.indexOf("router.put('/companies/:id/unit-prices'");
+    const body = adminSrc.slice(start, adminSrc.indexOf("router.put('/companies/:id'", start));
+    const fields = body.slice(body.indexOf('const FIELDS'), body.indexOf('];', body.indexOf('const FIELDS')));
+    expect(fields, '필수 목록(FIELDS)에 선택 키가 들어가 있다').not.toContain('brandNonfriend');
+    expect(body).toMatch(/hasOwnProperty\.call\(prices, 'brandNonfriend'\)/);
+    const updateStart = body.indexOf('UPDATE companies');
+    const stmt = body.slice(updateStart, body.indexOf('RETURNING', updateStart));
+    expect(stmt, '비친구 단가도 기준과 같은 UPDATE 문에서 써야 한다').toContain('cost_per_brand_nonfriend =');
+    expect(stmt).toContain("unit_price_basis = 'vat_excluded'");
+  });
+
   it('잔액 화면 단가는 부가세 포함가다 — 공급가를 내리면 발송 가능 건수가 10% 과대 표시된다', () => {
     expect(balanceSrc).toContain('resolveChargeUnitPrice');
     expect(balanceSrc).toContain('unit_price_basis');

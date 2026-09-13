@@ -18,7 +18,8 @@
  * ⛔ 승인 외의 일(문안 수정·시각 변경·취소)은 로그인 화면 소유 — 이 경로에 만들지 않는다.
  */
 import { Router, Request, Response } from 'express';
-import { query } from '../config/database';
+import pool, { query } from '../config/database';
+import { hasAgencyColumn } from '../utils/agency-send-intake';
 import {
   AGENCY_APPROVE_TOKEN_HEADER, agencyManagerPhones, verifyAgencyApproveToken,
 } from '../utils/agency-send-link';
@@ -66,6 +67,25 @@ function toApprovalView(row: any) {
   };
 }
 
+/**
+ * 고객별 회신번호 종류 수(★2026-09-13 적대검토). 승인 화면이 대표 번호 하나만 보여 주면
+ * 승인자는 다른 번호로도 나간다는 것을 모른 채 승인한다. 번호 목록은 내보내지 않는다(건수만).
+ * 실패해도 승인 화면·승인 결과를 막지 않는다(0 = 표시 안 함).
+ */
+async function loadCallbackKinds(requestId: string): Promise<number> {
+  try {
+    if (!await hasAgencyColumn(pool, 'callback', 'agency_send_recipients')) return 0;
+    const r = await query(
+      `SELECT COUNT(DISTINCT callback)::int AS n FROM agency_send_recipients WHERE request_id = $1::uuid AND callback IS NOT NULL`,
+      [requestId],
+    );
+    return Number(r.rows[0]?.n || 0);
+  } catch (err: any) {
+    console.warn('[agency-approve] 회신번호 종류 조회 실패(표시 생략):', err?.message);
+    return 0;
+  }
+}
+
 router.get('/info', async (req: Request, res: Response) => {
   try {
     const resolved = await resolveToken(req);
@@ -83,7 +103,7 @@ router.get('/info', async (req: Request, res: Response) => {
     );
     return res.json({
       success: true,
-      request: toApprovalView(row),
+      request: { ...toApprovalView(row), callbackKinds: await loadCallbackKinds(row.id) },
       approvable: check.ok,
       blockReason: check.ok ? null : check.error,
     });
@@ -142,7 +162,7 @@ router.post('/approve', async (req: Request, res: Response) => {
       req,
     });
 
-    return res.json({ success: true, request: toApprovalView(outcome.row) });
+    return res.json({ success: true, request: { ...toApprovalView(outcome.row), callbackKinds: await loadCallbackKinds(outcome.row.id) } });
   } catch (err: any) {
     if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
     console.error('[agency-approve] 승인 실패:', err);

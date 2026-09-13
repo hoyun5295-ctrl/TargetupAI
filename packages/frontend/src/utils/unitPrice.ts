@@ -58,6 +58,8 @@ export function toSupplyInputs(company: Record<string, any> | null | undefined) 
     costPerMms: conv(company?.cost_per_mms),
     costPerKakao: conv(company?.cost_per_kakao),
     costPerBrand: conv(company?.cost_per_brand),
+    // ★ 2026-09-13 비친구 브랜드 — 비어 있으면 빈 칸(= 친구 단가 적용). 0으로 채우면 0원 계약으로 저장된다.
+    costPerBrandNonfriend: conv(company?.cost_per_brand_nonfriend),
     costPerTestSms: conv(company?.cost_per_test_sms),
     costPerTestLms: conv(company?.cost_per_test_lms),
   };

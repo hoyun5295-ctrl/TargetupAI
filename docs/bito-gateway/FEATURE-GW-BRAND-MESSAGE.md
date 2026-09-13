@@ -750,7 +750,8 @@ null·빈 문자열   → null         (미설정으로 되돌림 = 친구 단�
 
 남은 것:
 
-- **한줄로 쪽 같은 축**: `companies.cost_per_brand` 1칸을 자유형·기본형 × 친구·비친구 4칸으로. `company_agent_ids`도 같이. 게이트웨이에서 확정한 형태(기존 컬럼 = 친구 단가 · 비친구만 신설 · nullable 폴백)를 그대로 옮긴다. 소비처 = `unit-price.ts` `MESSAGE_TYPE_PRICE_COLUMN` · `prepaid.ts` 3곳 · `mysql-refund-sweeper.ts` · `billing-types.ts` · `results.ts` · `defaults.ts` · `admin.ts` · `companies.ts` · `AdminDashboard.tsx` 2곳
+- **★2026-09-13 한줄로 쪽 같은 축 = 코드완료·배포 대기**(DDL `companies.cost_per_brand_nonfriend` 실행완료) → [FEATURE-BILLING §3-3·§8](../FEATURE-BILLING.md). 확정 형태 = 비친구 1칸만 신설(자유형·기본형은 현재 같은 단가라 순서표 `BRAND_PRICE_COLUMN_CHAIN`의 BASIC 줄로 확장) · `company_agent_ids`는 제외(에이전트 브랜드 발송 경로 없음). 아래는 착수 전 원문이다.
+- ~~**한줄로 쪽 같은 축**: `companies.cost_per_brand` 1칸을 자유형·기본형 × 친구·비친구 4칸으로.~~ `company_agent_ids`도 같이. 게이트웨이에서 확정한 형태(기존 컬럼 = 친구 단가 · 비친구만 신설 · nullable 폴백)를 그대로 옮긴다. 소비처 = `unit-price.ts` `MESSAGE_TYPE_PRICE_COLUMN` · `prepaid.ts` 3곳 · `mysql-refund-sweeper.ts` · `billing-types.ts` · `results.ts` · `defaults.ts` · `admin.ts` · `companies.ts` · `AdminDashboard.tsx` 2곳
 - 화면 육안: 단가 화면 3곳이 브랜드 4칸으로 보이는지 · 발송 이력에서 `7831`·mock `6`·젬텍 `212` 가 제 사유로 뜨는지
 - ~~젬텍 결과코드 규격서 수령~~ **종결** — `.58` `~/ngen/gmt/code_sms.txt` 에 원본이 있었다(§9-4)
 - 매입 정산서 대조: `M` 발송을 실제 도달 기준으로 청구받는지(그렇다면 `friend_yn` 축으로 사후 정산을 붙일 수 있다)

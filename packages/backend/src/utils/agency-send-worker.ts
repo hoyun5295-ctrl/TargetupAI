@@ -644,6 +644,38 @@ async function dispatchToPipeline(row: any, content: string, token: string): Pro
   }
   const stagingId = keyed.rows[0].dispatch_key;
 
+  // ⛔ 같은 시도 키의 "조회 → 적재 → 캠페인 생성"을 한 줄로 세운다(★2026-09-13 Codex 적대 high).
+  //   위 소유권 확인은 그 순간만 본다. 그 뒤 적재가 lock 만료(LOCK_STALE_MINUTES)를 넘기면 복구가 건을 되돌리고,
+  //   다음 tick이 같은 시도 키로 들어와 **앞 실행이 만든 캠페인이 읽고 있는 staging을 지우고 다시 쓸 수 있었다**.
+  //   세션 advisory lock은 연결이 끊기면(프로세스 사망 포함) 저절로 풀린다. 못 잡으면 이번 tick은 넘긴다.
+  const lockKey = `agency-dispatch:${stagingId}`;
+  const lockClient = await pool.connect();
+  let held = false;
+  let unlockFailed = false;
+  try {
+    const got = await lockClient.query(`SELECT pg_try_advisory_lock(hashtext($1::text)) AS ok`, [lockKey]);
+    held = got.rows[0]?.ok === true;
+    if (!held) {
+      console.warn(`${LOG} 같은 시도가 아직 진행 중이라 이번 tick은 넘긴다 request=${row.id}`);
+      await setStatus(row.id, 'approved', { ...RELEASE }, token);
+      await logEvent(row.id, 'dispatch_retry', { code: 'ATTEMPT_BUSY' });
+      return;
+    }
+    await dispatchAttempt(row, content, token, stagingId, label, notifyFailed);
+  } finally {
+    if (held) {
+      await lockClient.query(`SELECT pg_advisory_unlock(hashtext($1::text))`, [lockKey]).catch(() => { unlockFailed = true; });
+    }
+    // 풀기에 실패한 연결은 풀로 돌려보내지 않는다. 잠금을 쥔 채 재사용되면 그 시도 키가 계속 막힌다
+    lockClient.release(unlockFailed ? true : undefined);
+  }
+}
+
+/** 시도 키 잠금을 쥔 채로만 부른다(`dispatchToPipeline`). 본문은 종전 `dispatchToPipeline` 뒷부분 그대로다 */
+async function dispatchAttempt(
+  row: any, content: string, token: string, stagingId: string, label: string,
+  notifyFailed: (kind: string, payload: Record<string, any>) => Promise<void>,
+): Promise<void> {
   // ⛔ 멱등 — 앞선 시도가 예약을 만들어 두고 원장에 적기 전에 죽었을 수 있다.
   //   그때 그냥 다시 만들면 같은 발송이 두 벌 나간다. **캠페인을 만들기 전에** 이번 시도 키로 먼저 찾는다.
   //   근거는 시도 키 하나다(원장의 `campaign_id`는 나중에 적히므로 근거가 못 된다).
@@ -761,9 +793,14 @@ async function dispatchToPipeline(row: any, content: string, token: string): Pro
   //   지워지면 미등록 번호로 나간다(발신번호 사전등록제 위반). 배관은 이 검증을 하지 않는다 —
   //   `direct-send-core`가 "회신번호 등록 검증은 호출부가 선행한다"고 계약에 적어 두었고, 여기가 그 호출부다.
   //   ⛔ 미등록을 대표 번호로 조용히 바꾸지 않는다 — 고객이 정하지 않은 번호로 나가는 것이 더 나쁘다.
-  if (individualCallback) {
+  // ★2026-09-13 접수 대표 번호도 함께 본다(적대검토 medium). 고정 번호 방식은 그 번호 하나로 나가는데
+  //   종전에는 고객별 번호가 있을 때만 확인해, 접수 뒤 지워진 고정 번호가 그대로 나갔다.
+  //   판정 함수는 접수 때와 같은 한 벌(`getRegisteredCallbackSet` · 같은 회사·같은 접수자)이라 등록된 번호가 새로 막히지 않는다.
+  const primaryCallback = normalizePhone(String(row.callback_number || ''));
+  const callbacksToVerify = [...new Set([...distinctCallbacks, ...(primaryCallback ? [primaryCallback] : [])])];
+  if (callbacksToVerify.length > 0) {
     const registered = await getRegisteredCallbackSet(row.company_id, row.created_by);
-    const missing = distinctCallbacks.filter((cb) => !registered.has(cb));
+    const missing = callbacksToVerify.filter((cb) => !registered.has(cb));
     if (missing.length > 0) {
       await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
       await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token);

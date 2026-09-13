@@ -25,6 +25,8 @@ interface ApprovalView {
   content: string;
   isAd: boolean;
   callbackNumber: string;
+  /** ★2026-09-13 고객별 회신번호 종류 수(0·1 = 번호 하나로 나감) */
+  callbackKinds?: number;
   requestedAt: string;
   recipientCount: number;
   imageCount: number;
@@ -172,7 +174,7 @@ export default function AgencyApprovePage() {
             <span className="text-neutral-500">형식</span>
             <b className="text-neutral-900">{r.messageType}{r.isAd ? ' · 광고' : ''}{r.imageCount > 0 ? ` · 이미지 ${r.imageCount}장` : ''}</b>
           </p>
-          <p className="flex justify-between gap-4"><span className="text-neutral-500">보내는 번호</span><b className="text-neutral-900 tabular-nums">{r.callbackNumber}</b></p>
+          <p className="flex justify-between gap-4"><span className="text-neutral-500">보내는 번호</span><b className="text-neutral-900 tabular-nums">{(r.callbackKinds ?? 0) > 1 ? `고객별 ${r.callbackKinds}종 (명단의 회신번호대로)` : r.callbackNumber}</b></p>
         </div>
 
         <div className="px-5 pb-5">

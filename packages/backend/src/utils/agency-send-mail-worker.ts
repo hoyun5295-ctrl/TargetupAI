@@ -176,6 +176,10 @@ function buildAcceptedReply(input: {
   subject: string; content: string; requestedAtIso: string; callback: string;
   managerPhones: string[]; phoneColumn: string; autoPickedPhoneColumn: boolean;
   total: number; valid: number; dup: number; invalid: number;
+  /** ★2026-09-13 회신번호 열 방식의 고객별 번호 종류 수(2 이상이면 대표 번호 하나로 적지 않는다) */
+  callbackKinds?: number;
+  /** ★2026-09-13 회신번호 열이 빈 행 수. 조용히 빠지지 않게 제외 사유에 적는다 */
+  callbackMissing?: number;
   /** ★2026-08-26(6) 촉박해서 시각을 자동 조정했으면 원본 시각. 이메일은 확인 화면이 없어 이 회신이 유일한 고지다 */
   originalAtIso?: string | null;
   /** ★2026-08-28 MMS 이미지 원본 파일명(첨부 순서 그대로). 순서 고지는 이 회신이 유일한 확인 자리다 */
@@ -201,7 +205,9 @@ function buildAcceptedReply(input: {
     '',
     `제목: ${input.subject || '(없음)'}`,
     shiftedNote,
-    `회신번호: ${input.callback}`,
+    (input.callbackKinds ?? 0) > 1
+      ? `회신번호: 고객별 ${input.callbackKinds}종, 명단의 회신번호 열대로 나갑니다 (대표 번호 ${input.callback})`
+      : `회신번호: ${input.callback}`,
     `담당자 번호: ${input.managerPhones.join(', ')}`,
     `수신자 열: ${input.phoneColumn}${input.autoPickedPhoneColumn ? ' (자동 선정)' : ''}`,
     ...(input.billingLabel ? [`발송 ID: ${input.billingLabel}`] : []),
@@ -211,7 +217,7 @@ function buildAcceptedReply(input: {
     ...(input.imageFitNotes && input.imageFitNotes.length > 0
       ? [`규격에 맞게 바꿔 붙인 이미지: ${input.imageFitNotes.join(', ')} (실제 모습은 담당자 테스트 문자에서 확인해 주세요)`]
       : []),
-    `보낼 인원: ${input.valid.toLocaleString()}명 (명단 ${input.total.toLocaleString()}행, 중복 ${input.dup}건, 형식 오류 ${input.invalid}건 제외)`,
+    `보낼 인원: ${input.valid.toLocaleString()}명 (명단 ${input.total.toLocaleString()}행, 중복 ${input.dup}건, 형식 오류 ${input.invalid}건${(input.callbackMissing ?? 0) > 0 ? `, 회신번호 빈 행 ${input.callbackMissing}건` : ''} 제외)`,
     '',
     '문안:',
     input.content,
@@ -760,7 +766,6 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     unit: IntakeUnit;
     acct: { companyId: string; userId: string };
     analysis: Awaited<ReturnType<typeof analyzeOneStep>>;
-    group: { callback: string; recipients: Array<{ phone: string; vars: Record<string, any> }> };
     autoPickedPhoneColumn: boolean;
     /** 내용 4요소 해시 — 메일 안 형제 건과의 대조(3.5층) 전용 */
     dupKey: string;
@@ -869,10 +874,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
         fail('명단 첫 줄에 열 이름이 없어서 문안의 %항목%을 연결할 수 없습니다. 첫 줄에 열 이름을 넣거나 문안에서 항목을 빼 주세요.', 'headerless_with_vars');
         continue;
       }
-      if (!form.errors.some((e) => e.field === '회신번호') && resolveCallbackPlan(form.callbackRaw, list.headers).mode === 'column') {
-        fail('회신번호가 명단 열로 지정되어 접수가 여러 건으로 나뉩니다. 이 방식은 나뉘는 건수를 확인해야 해서 화면 접수에서 진행해 주세요.', 'callback_column_mode', list.headers);
-        continue;
-      }
+      // ★2026-09-13 회신번호 열 방식 반려를 없앴다. 반려 근거("접수가 여러 건으로 나뉜다")는 0912에 사실이 아니게 됐다(불변 24).
     }
     let autoPickedPhoneColumn = false;
     const overridesRaw: Record<string, any> = {};
@@ -890,7 +892,10 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     //   이미지가 있으면 분석·코어가 화면 접수와 같은 결정(타입 = MMS · validateMmsPayload)을 그대로 탄다
     if (!multi && savedImagePaths.length > 0) overridesRaw.mmsImagePaths = [...savedImagePaths];
     const overrides = parseOneStepOverrides(overridesRaw);
-    const analysis = await analyzeOneStep(unitAcct, u.formBuf, u.listBuf, u.listName, overrides, false, EMAIL_MIN_LEAD_MINUTES);
+    // ★2026-09-13 위 사전 게이트가 같은 버퍼로 읽은 요청서·명단을 넘긴다(큰 명단을 다시 파싱하지 않는다).
+    //   명단을 못 읽었으면(list = null) 넘기지 않아 분석이 종전처럼 스스로 읽고 그 사유를 반려에 싣는다.
+    const analysis = await analyzeOneStep(unitAcct, u.formBuf, u.listBuf, u.listName, overrides, false, EMAIL_MIN_LEAD_MINUTES,
+      { form, ...(list ? { list } : {}) });
     if (analysis.errors.length > 0) {
       fail(analysis.errors.map((e) => `[${e.field}] ${e.error}`).join(' / '), 'form_invalid', analysis.headers);
       continue;
@@ -899,14 +904,19 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       fail('보낼 수 있는 번호가 없습니다. 명단 파일에 휴대폰 번호가 든 행이 있는지 확인해 주세요.', 'no_recipients');
       continue;
     }
-    if (analysis.callback.mode !== 'fixed' || analysis.groups.length !== 1) {
-      fail('회신번호를 확인하지 못했습니다. 등록된 발신번호 하나를 적어 주세요.', 'callback_invalid');
+    // ★2026-09-13 회신번호 열 방식도 받는다(화면 원스텝과 같은 계약 · 불변 24). 접수는 하나이고 고객별 번호는
+    //   수신자 행이 들고 간다. 종류 상한 초과·미등록 번호는 분석(`analyzeOneStep`)이 이미 오류로 올려 위에서 반려됐다.
+    const callbackOk = analysis.callback.mode === 'fixed'
+      ? analysis.groups.length === 1
+      : analysis.callback.mode === 'column' && analysis.groups.length >= 1 && !!analysis.primaryCallback;
+    if (!callbackOk) {
+      fail('회신번호를 확인하지 못했습니다. 등록된 발신번호 하나를 적거나, 고객마다 다르면 명단의 회신번호 열 이름을 적어 주세요.', 'callback_invalid');
       continue;
     }
-    const group = analysis.groups[0];
 
     // 10) 멱등 — 내용 4요소(회사·문안·시각·정렬된 번호 집합)
-    const phones = group.recipients.map((r) => r.phone).sort();
+    //   고정 번호 방식에서 전체 수신자 = 유일한 그룹의 수신자라 종전 키와 같다.
+    const phones = analysis.allRecipients.map((r) => r.phone).sort();
     const recipientsHash = sha256(phones.join(','));
     // 구분자 충돌을 피하려고 **고정 형식 값을 앞에** 둔다(uuid · ISO 시각 · 해시). 자유 문자열인 문안이 마지막이다
     const dupKey = sha256([unitAcct.companyId, analysis.requestedAtIso, recipientsHash, analysis.content].join('|'));
@@ -942,7 +952,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       continue;
     }
 
-    plans.push({ unit: u, acct: unitAcct, analysis, group, autoPickedPhoneColumn, dupKey });
+    plans.push({ unit: u, acct: unitAcct, analysis, autoPickedPhoneColumn, dupKey });
   }
 
   // ⛔ 오류가 하나라도 있으면 전량 반려. 스킵 계산은 여기서 통째로 버린다.
@@ -1002,7 +1012,8 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
         subject: p.analysis.subject || undefined,
         content: p.analysis.content,
         isAd: p.analysis.isAd,
-        callbackNumber: p.group.callback,
+        // ★2026-09-13 화면 원스텝과 같다: 대표 번호 = 고정 번호 또는 명단 첫 행의 번호, 고객별 번호는 수신자 행이 들고 간다
+        callbackNumber: p.analysis.primaryCallback,
         managerPhones: p.analysis.managerPhones,
         requestedAt: p.analysis.requestedAtIso,
         // ★2026-08-28 형태 = 화면 접수와 같은 절대경로 문자열 배열(발송 배관 계약 무변경)
@@ -1013,7 +1024,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
         fileName: p.analysis.fileName,
         phoneColumn: p.analysis.phoneColumn || '전화번호',
         varMapping: Object.fromEntries(p.analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
-        recipients: p.group.recipients,
+        recipients: p.analysis.allRecipients,
         source: 'email',
       }, txClient, pres[i]);
       if (!result.ok) {
@@ -1058,7 +1069,9 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     subject: p.analysis.subject, content: p.analysis.content,
     requestedAtIso: new Date(requestRows[i].requested_at).toISOString(),
     originalAtIso: requestRows[i].requested_at_original ? new Date(requestRows[i].requested_at_original).toISOString() : null,
-    callback: p.group.callback, managerPhones: p.analysis.managerPhones,
+    callback: p.analysis.primaryCallback, managerPhones: p.analysis.managerPhones,
+    callbackKinds: p.analysis.callback.mode === 'column' ? p.analysis.groups.length : 0,
+    callbackMissing: p.analysis.counts.callbackMissing,
     phoneColumn: p.analysis.phoneColumn || '전화번호', autoPickedPhoneColumn: p.autoPickedPhoneColumn,
     total: p.analysis.counts.total, valid: p.analysis.counts.valid, dup: p.analysis.counts.dup, invalid: p.analysis.counts.invalid,
     imageNames: multi ? [] : savedImageNames,
@@ -1100,10 +1113,26 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
       //   실패해 재시도 패스가 멈춘다. 조정 고지는 첫 회신이 이미 했고, 여기는 도달 실패의 복구 경로다.
     );
     if (req.rows.length === 0) continue;
+    // ★2026-09-13 고객별 회신번호 종류는 수신자 행에서 다시 센다(Codex 2R medium). 첫 회신을 못 받은 담당자에게
+    //   대표 번호 하나로 나간다고 적으면 사실과 다르다. 컬럼이 없거나 조회가 실패하면 종전처럼 대표 번호만 적는다.
+    const kindsById = new Map<string, number>();
+    try {
+      if (await hasAgencyColumn(pool, 'callback', 'agency_send_recipients')) {
+        const kinds = await query(
+          `SELECT request_id, COUNT(DISTINCT callback)::int AS n FROM agency_send_recipients
+            WHERE request_id = ANY($1::uuid[]) AND callback IS NOT NULL GROUP BY request_id`,
+          [row.request_ids],
+        );
+        for (const k of kinds.rows) kindsById.set(String(k.request_id), Number(k.n) || 0);
+      }
+    } catch (kindsErr: any) {
+      log(`재시도 회신 회신번호 종류 조회 실패(대표 번호로 적는다): ${kindsErr?.message}`);
+    }
     const isMulti = req.rows.length > 1;
     const blocks = req.rows.map((r: any, i: number) => buildAcceptedReply({
       subject: r.subject || '', content: r.current_content || '', requestedAtIso: new Date(r.requested_at).toISOString(),
-      callback: r.callback_number, managerPhones: r.manager_phones || [], phoneColumn: r.phone_column || '전화번호',
+      callback: r.callback_number, callbackKinds: kindsById.get(String(r.id)) || 0,
+      managerPhones: r.manager_phones || [], phoneColumn: r.phone_column || '전화번호',
       autoPickedPhoneColumn: false, total: r.recipient_count, valid: r.recipient_count, dup: 0, invalid: 0,
       seq: isMulti ? { index: i + 1, total: req.rows.length, fileName: String(r.file_name || '요청서') } : undefined,
     }));

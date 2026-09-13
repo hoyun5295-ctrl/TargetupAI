@@ -279,6 +279,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   const totalSms = totals.SMS, totalLms = totals.LMS, totalMms = totals.MMS, totalKakao = totals.KAKAO;
   // ★ 2026-07-29 브랜드메시지 — 항등식에서 빠지면 상세합과 공급가액이 갈려 BILLING_AMOUNT_MISMATCH로 발행이 막힌다.
   const totalBrand = totals.BRAND;
+  const totalBrandNf = totals.BRAND_NF;   // ★ 2026-09-13 비친구 브랜드 — 빠지면 같은 이유로 발행이 막힌다
   const totalTestSms = totals.TEST_SMS, totalTestLms = totals.TEST_LMS;
   const totalSpamSms = totals.SPAM_SMS, totalSpamLms = totals.SPAM_LMS;
 
@@ -661,7 +662,7 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     //   대조는 **절사 전** 값끼리 한다.
     const subtotalExact =
       (totalSms * prices.SMS) + (totalLms * prices.LMS) +
-      (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) + (totalBrand * prices.BRAND) +
+      (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) + (totalBrand * prices.BRAND) + (totalBrandNf * prices.BRAND_NF) +
       (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) +
       (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
       agentAmountExact +
@@ -915,7 +916,7 @@ ${EXTRA_ITEM_SOURCE_JOIN}
   return {
     billing,
     items_count: itemsCount,
-    summary: { totalSms, totalLms, totalMms, totalKakao, totalBrand, totalTestSms, totalTestLms, totalSpamSms, totalSpamLms, subtotal, vat, totalAmount },
+    summary: { totalSms, totalLms, totalMms, totalKakao, totalBrand, totalBrandNf, totalTestSms, totalTestLms, totalSpamSms, totalSpamLms, subtotal, vat, totalAmount },
     // ★ 2026-07-26 발행 단위 결과 — 계정별이면 계정 장 N개 + 공통 장 1개가 한 묶음.
     scope,
     batch_id: batchIdIssued,

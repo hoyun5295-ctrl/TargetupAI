@@ -1699,7 +1699,8 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
 
   // 5. 선불 차감 — 원장 키는 정규형 'BRAND' 하나만 쓴다(취소·sweeper·환불 축과 동일 문자열이어야
   //    같은 원장으로 수렴한다. 소문자 'brand'로 쓰면 후속 환불이 원장을 못 찾는다 — 0730 적대검증 수용).
-  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'BRAND', params.campaignId || '', params.userId);
+  //    ★ 2026-09-13 단가는 대상(친구·비친구)으로 갈린다 — 위 적재 조립과 같은 params.targeting.
+  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'BRAND', params.campaignId || '', params.userId, 'campaign', { targeting: params.targeting, form: 'FREE' });
   if (!deduct.ok) {
     return { success: false, sentCount: 0, failCount: 0, error: deduct.error || '잔액 부족' };
   }
@@ -1829,8 +1830,8 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
     return { success: false, sentCount: 0, failCount: 0, error: '대체발송 회신번호가 없습니다. 기본 회신번호를 등록해주세요.' };
   }
 
-  // 선불 차감 — 원장 키는 정규형 'BRAND' (자유형과 동일 근거)
-  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'BRAND', params.campaignId || '', params.userId);
+  // 선불 차감 — 원장 키는 정규형 'BRAND' (자유형과 동일 근거) · 단가는 대상·기본형으로 고른다(2026-09-13)
+  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'BRAND', params.campaignId || '', params.userId, 'campaign', { targeting: params.targeting, form: 'BASIC' });
   if (!deduct.ok) {
     return { success: false, sentCount: 0, failCount: 0, error: deduct.error || '잔액 부족' };
   }

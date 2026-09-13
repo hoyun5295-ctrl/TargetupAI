@@ -29,7 +29,7 @@ import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 // ★2026-08-26 §18 승격 — 접수 코어·원스텝 분석은 CT(utils/agency-send-intake.ts)가 소유한다.
 //   입구 = 화면 접수 · 원스텝 · 이메일 접수 워커. 이 파일에 코어를 다시 정의하지 마라(두 벌 금지).
 import {
-  analyzeOneStep, createRequestCore, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
+  analyzeOneStep, createRequestCore, hasAgencyColumn, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
   MAX_CONTENT, type OneStepAnalysis,
 } from '../utils/agency-send-intake';
 
@@ -514,8 +514,11 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       [req.params.id, auth.companyId, ownerParam(auth)],
     );
     if (own.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
+    // ★2026-09-13 고객별 회신번호도 싣는다(Codex 적대 high). 한 접수에 여러 번호가 섞이므로 빼면
+    //   재접수가 대표 번호 하나로 나간다. 컬럼이 있을 때만 싣는다(DDL 후행 안전 · 판정은 접수 코어와 같은 한 벌).
+    const hasCallback = await hasAgencyColumn(pool, 'callback', 'agency_send_recipients');
     const r = await query(
-      `SELECT phone, vars FROM agency_send_recipients WHERE request_id = $1::uuid ORDER BY row_no`,
+      `SELECT phone, vars${hasCallback ? ', callback' : ''} FROM agency_send_recipients WHERE request_id = $1::uuid ORDER BY row_no`,
       [req.params.id],
     );
     return res.json({ success: true, recipients: r.rows });

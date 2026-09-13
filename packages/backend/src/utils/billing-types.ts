@@ -204,7 +204,10 @@ export interface BillingTypeDef {
   companyPriceColumn: string | null;
   /** 발송ID 단가 컬럼(`company_agent_ids`). null = 에이전트 축에 없는 유형 */
   agentPriceColumn: AgentPriceColumn | null;
-  /** SMSQ `msg_type`(웹 일반발송 큐). null = 그 큐로 나가지 않는 유형 */
+  /**
+   * SMSQ `msg_type`(웹 일반발송 큐). null = 그 큐로 나가지 않는 유형.
+   * ★ 2026-09-13 `BRAND_NF`의 `FN`만 예외다 — 큐 값이 아니라 청구 집계 식(BILLING_MSG_TYPE_SQL)이 F 행을 갈라 만드는 코드다.
+   */
   smsqCode: string | null;
   /** 게이트웨이 `RSRM_SalesStts.MsgType`(에이전트). null = 에이전트 발송이 없는 유형 */
   agentCode: string | null;
@@ -224,6 +227,12 @@ export interface BillingTypeDef {
   agentCodeAliases?: readonly string[];
 }
 
+/**
+ * ★ 2026-09-13 비친구 브랜드메시지 집계 코드. 큐에는 여전히 `F` 하나로 적재된다 —
+ * 청구 집계 SQL이 `F` 행을 `k_etc_json.TARGETING`으로 갈라 비친구분을 이 코드로 낸다.
+ */
+export const BRAND_NONFRIEND_SMSQ_CODE = 'FN';
+
 export const BILLING_TYPES: readonly BillingTypeDef[] = [
   { key: 'SMS',      label: 'SMS',           companyPriceColumn: 'cost_per_sms',      agentPriceColumn: 'cost_per_sms',   smsqCode: 'S',  agentCode: 'S', agentCodeAliases: ['KS'] },
   { key: 'LMS',      label: 'LMS',           companyPriceColumn: 'cost_per_lms',      agentPriceColumn: 'cost_per_lms',   smsqCode: 'L',  agentCode: 'L', agentCodeAliases: ['KL'] },
@@ -235,6 +244,10 @@ export const BILLING_TYPES: readonly BillingTypeDef[] = [
   //   ★ 2026-07-30 재구축: 웹도 SMSQ 큐에 `msg_type='F'`로 적재된다 — smsqCode 'F' 등재로
   //   일자·상세 정산 두 축의 유형키 맵(MSG_TYPE_TO_USAGE_KEY)이 자동 확장된다(전용 IMC arm 폐기).
   { key: 'BRAND',    label: '브랜드메시지',    companyPriceColumn: 'cost_per_brand',    agentPriceColumn: 'cost_per_brand', smsqCode: 'F',  agentCode: 'G' },
+  // ★ 2026-09-13 브랜드메시지 비친구(M·N·미지정). 매입이 친구·비친구로 갈려 단가가 다르다.
+  //   비친구 칸이 비면 친구 단가로 청구된다(resolveBillingUnitPricesDetailed). 발송ID(에이전트) 축은 두지 않는다 —
+  //   에이전트로는 브랜드를 보낼 수 없고 게이트웨이 통계에 대상 구분이 없어 읽을 곳이 없다.
+  { key: 'BRAND_NF', label: '브랜드메시지(비친구)', companyPriceColumn: 'cost_per_brand_nonfriend', agentPriceColumn: null, smsqCode: BRAND_NONFRIEND_SMSQ_CODE, agentCode: null },
   { key: 'TEST_SMS', label: '테스트 SMS',     companyPriceColumn: 'cost_per_test_sms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
   { key: 'TEST_LMS', label: '테스트 LMS',     companyPriceColumn: 'cost_per_test_lms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
   // 스팸테스트는 전용 단가가 없고 일반 SMS/LMS 단가를 그대로 쓴다(D16) — 그래서 컬럼이 없다.

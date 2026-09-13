@@ -84,7 +84,7 @@ async function getUnitPrice(companyId: string, messageType: string, cache: Map<s
   const key = `${companyId}:${messageType}`;
   if (cache.has(key)) return cache.get(key)!;
   const r = await query(
-    `SELECT unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand
+    `SELECT unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend
      FROM companies WHERE id = $1`,
     [companyId]
   );

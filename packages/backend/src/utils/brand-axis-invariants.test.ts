@@ -23,6 +23,8 @@ import { channelPlainLabel } from './campaign-list-csv';
 import { mergeByChannelLabel } from './next-action-advisor';
 import { CHANNEL_SOURCE_FIELD } from './performance-explainer';
 import { getCompanyCosts } from '../config/defaults';
+import { BRAND_PRICE_COLUMNS, BRAND_FRIEND_TARGETINGS, resolveBrandAudience } from './unit-price';
+import { toSupplyInputs } from '../../../frontend/src/utils/unitPrice';
 // 테스트 전용 import — 화면 CT의 **실제 값**을 비교한다(문자열 매칭은 주석만으로도 통과한다).
 import * as frontAxis from '../../../frontend/src/utils/campaign-axis';
 
@@ -331,6 +333,145 @@ describe('화면 표시 축 — 채널·발송유형 판정이 한 곳이다 (20
     expect(results).toContain('cost_per_brand');
     expect(results).toContain('perBrand');
     expect(getCompanyCosts({ cost_per_brand: 0, unit_price_basis: 'vat_included' }).brand).toBe(0);
+  });
+});
+
+/** `fn(` 호출마다 괄호 짝이 맞는 호출 전문을 뽑는다(주석 제거 후). 함수 정의는 제외한다. */
+function extractCalls(rawSrc: string, fn: string): string[] {
+  const code = stripComments(rawSrc);
+  const out: string[] = [];
+  let i = 0;
+  while ((i = code.indexOf(`${fn}(`, i)) !== -1) {
+    if (/function\s+$/.test(code.slice(Math.max(0, i - 20), i))) { i += fn.length; continue; }
+    let depth = 0;
+    let j = i + fn.length;
+    for (; j < code.length; j++) {
+      if (code[j] === '(') depth++;
+      else if (code[j] === ')' && --depth === 0) break;
+    }
+    out.push(code.slice(i, j + 1));
+    i = j + 1;
+  }
+  return out;
+}
+
+describe('브랜드 친구·비친구 단가 배선 (2026-09-13 · 소스 스캔)', () => {
+  // 대상 정보를 안 넘긴 차감은 비친구 단가로 깎인다(싸게 깎이지는 않는다). 그래도 친구 발송이
+  // 비친구 단가로 나가면 고객 과차감이다 — BRAND가 흘러갈 수 있는 호출은 전부 대상을 넘겨야 한다.
+  const BRAND_DEDUCT_FILES: Array<[string, number]> = [
+    ['../routes/campaigns.ts', 5],   // 테스트 발송 · AI 캠페인 2 · 직접발송 2
+    ['./brand-message.ts', 2],       // 자유형 · 기본형
+    ['./direct-send-core.ts', 1],    // 대량 직접발송 공용 길목
+  ];
+
+  it('BRAND가 흘러갈 수 있는 차감 호출은 전부 대상(targeting)을 넘긴다', () => {
+    for (const [rel, expected] of BRAND_DEDUCT_FILES) {
+      const calls = extractCalls(read(rel), 'prepaidDeduct');
+      expect(calls.length, `${rel} 차감 호출 수가 바뀌었다 — 새 호출도 대상 전달 여부를 확인할 것`).toBe(expected);
+      for (const c of calls) expect(c, `${rel}: ${c}`).toContain('targeting:');
+    }
+  });
+
+  it('그 밖의 파일은 BRAND로 차감하지 않는다 — 새 브랜드 경로가 생기면 위 목록에 올려야 한다', () => {
+    const listed = BRAND_DEDUCT_FILES.map(([rel]) => join(__dirname, rel).replace(/\\/g, '/'));
+    const offenders: string[] = [];
+    for (const { path: file, src } of srcOf(join(__dirname, '..'))) {
+      const norm = file.replace(/\\/g, '/');
+      if (listed.includes(norm) || norm.endsWith('/utils/prepaid.ts')) continue;
+      for (const c of extractCalls(src, 'prepaidDeduct')) {
+        // 'BRAND' 리터럴 또는 채널 축 CT(resolveRefundAxes)가 내는 axis.type — 둘 다 BRAND를 실을 수 있다.
+        if (/'BRAND'|axis\.type/.test(c)) offenders.push(`${file}: ${c}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  }, SCAN_TIMEOUT_MS);
+
+  it('차감 함수가 받은 대상을 단가 해석에 그대로 넘긴다', () => {
+    const prepaid = stripComments(read('./prepaid.ts'));
+    expect(prepaid).toContain('resolveChargeUnitPriceDetailed(c, messageType, brand)');
+  });
+
+  it('청구 집계 두 함수가 msg_type 원값이 아니라 친구·비친구 식으로 묶는다 — 한쪽만 바꾸면 일자축·상세축이 422로 갈린다', () => {
+    const agg = stripComments(read('./send-usage-aggregation.ts'));
+    for (const fn of ['smsAggByRunDateType', 'smsAggByDateType']) {
+      const start = agg.indexOf(`export async function ${fn}(`);
+      expect(start, fn).toBeGreaterThan(-1);
+      const rest = agg.slice(start);
+      const body = rest.slice(0, rest.search(/\r?\n\}\r?\n/));   // 함수 끝(CRLF 저장소)
+      // MySQL GROUP BY는 같은 이름의 원 컬럼을 별칭보다 먼저 찾는다 — 식 자체로 묶어야 F·FN이 합쳐지지 않는다.
+      expect(body, `${fn} SELECT`).toContain('${BILLING_MSG_TYPE_SQL} AS msg_type');
+      expect(body, `${fn} GROUP BY`).toMatch(/GROUP BY [^`]*\$\{BILLING_MSG_TYPE_SQL\}/);
+      expect(body, `${fn}가 원 msg_type으로 묶고 있다`).not.toMatch(/GROUP BY [^`]*\bmsg_type\b/);
+    }
+  });
+
+  it('회사 단가가 있는 청구 유형은 발행 항등식(공급가액)에 전부 들어간다 — 빠지면 BILLING_AMOUNT_MISMATCH', () => {
+    const issue = stripComments(read('./billing-issue.ts'));
+    const start = issue.indexOf('const subtotalExact =');
+    const expr = issue.slice(start, issue.indexOf(';', start));
+    for (const t of BILLING_TYPES.filter((b) => b.companyPriceColumn)) {
+      expect(expr, `공급가액 식에 prices.${t.key} 누락`).toContain(`prices.${t.key}`);
+    }
+  });
+
+  it('매장별 정산 미리보기가 비친구 브랜드 줄을 센다 — 빠지면 매장 합계가 combined와 갈린다', () => {
+    const billing = stripComments(read('../routes/billing.ts'));
+    expect(billing).toContain("case 'BRAND_NF':");
+    expect(billing).toContain('brand_nf_success');
+  });
+
+  it('선불·sweeper의 회사 단가 SELECT가 브랜드 순서표 컬럼을 전부 읽는다 — 빠지면 비친구 칸이 없는 것으로 보인다', () => {
+    for (const rel of ['./prepaid.ts', './mysql-refund-sweeper.ts']) {
+      const selects = stripComments(read(rel)).match(/SELECT[^`]*cost_per_brand[^`]*FROM companies/g) || [];
+      expect(selects.length, rel).toBeGreaterThan(0);
+      for (const s of selects) {
+        for (const col of BRAND_PRICE_COLUMNS) expect(s, `${rel} SELECT에 ${col} 누락`).toContain(col);
+      }
+    }
+  });
+});
+
+describe('브랜드 친구·비친구 단가 — 표시·입력 (2026-09-13)', () => {
+  it('화면 단가(getCompanyCosts)가 비친구 단가를 부가세 포함가로 내고, 비면 친구 단가를 따른다', () => {
+    expect(getCompanyCosts({ unit_price_basis: 'vat_included', cost_per_brand: 16.5, cost_per_brand_nonfriend: 22 }).brandNonfriend).toBe(22);
+    expect(getCompanyCosts({ unit_price_basis: 'vat_included', cost_per_brand: 16.5, cost_per_brand_nonfriend: null }).brandNonfriend).toBe(16.5);
+    expect(getCompanyCosts({ unit_price_basis: 'vat_excluded', cost_per_brand: 15, cost_per_brand_nonfriend: 20 }).brandNonfriend).toBe(22);
+    expect(getCompanyCosts({ cost_per_brand: 0, cost_per_brand_nonfriend: 0 }).brandNonfriend).toBe(0);
+  });
+
+  it('발송결과가 비친구 단가와 캠페인 대상을 함께 실어 보낸다 — 없으면 화면이 친구 단가로 계산한다', () => {
+    const results = stripComments(readFileSync(join(__dirname, '../routes/results.ts'), 'utf8'));
+    expect(results).toContain('cost_per_brand_nonfriend');
+    expect(results).toContain('perBrandNonfriend');
+    const at = results.indexOf('c.id, c.company_id, c.created_by, c.campaign_name');
+    const select = results.slice(at, results.indexOf('FROM campaigns c', at));
+    expect(select).toContain('c.kakao_targeting');
+  });
+
+  it('화면의 친구 판정 목록이 백엔드와 같고 같은 답을 낸다', () => {
+    expect([...frontAxis.BRAND_FRIEND_TARGETINGS].sort()).toEqual([...BRAND_FRIEND_TARGETINGS].sort());
+    for (const t of ['I', 'F', 'N', 'M', '', null, 'i']) {
+      expect(frontAxis.isBrandFriendTargeting(t as any), String(t)).toBe(resolveBrandAudience(t as any) === 'friend');
+    }
+  });
+
+  it('발송결과 예상 비용이 브랜드 전용 캠페인을 대상별 단가로 센다', () => {
+    const modal = stripComments(readFileSync(join(__dirname, '../../../frontend/src/components/ResultsModal.tsx'), 'utf8'));
+    expect(modal).toContain('perBrandNonfriend');
+    expect(modal).toContain('isBrandFriendTargeting(c.kakao_targeting)');
+  });
+
+  it('단가 입력칸이 비친구 단가를 공급가로 채운다 — 전환 전 회사는 ÷1.1, 비면 빈 칸', () => {
+    expect(toSupplyInputs({ unit_price_basis: 'vat_included', cost_per_brand_nonfriend: 22 }).costPerBrandNonfriend).toBe(20);
+    expect(toSupplyInputs({ unit_price_basis: 'vat_excluded', cost_per_brand_nonfriend: 20 }).costPerBrandNonfriend).toBe(20);
+    expect(toSupplyInputs({ cost_per_brand_nonfriend: null }).costPerBrandNonfriend).toBe('');
+  });
+
+  it('단가 저장 요청이 비친구 칸을 싣는다 — 안 실으면 입력해도 저장되지 않는다', () => {
+    const dash = stripComments(readFileSync(join(__dirname, '../../../frontend/src/pages/AdminDashboard.tsx'), 'utf8'));
+    const start = dash.indexOf('const handleSaveUnitPrices');
+    const body = dash.slice(start, dash.indexOf('applyUnitPriceToAgents,', start));
+    expect(body).toContain('brandNonfriend: editCompany.costPerBrandNonfriend');
   });
 });
 

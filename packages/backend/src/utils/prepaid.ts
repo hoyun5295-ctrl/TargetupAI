@@ -8,7 +8,7 @@ import { buildDeductDescription } from './deduct-reference';
 // ★ 2026-07-26 단가의 부가세 기준(`companies.unit_price_basis`)을 해석하는 유일한 경로.
 //   선불 잔액은 고객이 입금한 현금이라 **부가세 포함가**로 깎아야 한다.
 //   전환 전 회사는 저장값이 곧 포함가라 이 배선으로 차감액이 바뀌지 않는다.
-import { resolveChargeUnitPrice, resolveChargeUnitPriceDetailed } from './unit-price';
+import { resolveChargeUnitPrice, resolveChargeUnitPriceDetailed, type BrandPricingInput } from './unit-price';
 import { sendSystemAlert } from './system-alert';
 import { parseDeductDescription, parseFreeCount } from './deduct-reference';
 // ★ 2026-08-05 요금제 무료 메시징 — 소진 길목은 이 파일 하나다(설계 §5-1).
@@ -103,7 +103,12 @@ async function warnUnresolvedLedger(companyId: string, referenceId: string, mess
  */
 export async function prepaidDeduct(
   companyId: string, count: number, messageType: string, referenceId: string, createdBy?: string,
-  referenceType: string = 'campaign'
+  referenceType: string = 'campaign',
+  // ★ 2026-09-13 브랜드메시지 대상(친구·비친구)·형태. BRAND일 때만 단가에 쓰인다.
+  //   원장 키(message_type)는 그대로 BRAND 하나다 — 환불·sweeper·취소가 이 키로 묶여 있고,
+  //   환불 단가는 차감 설명의 "건당 X원"을 되읽으므로 여기서 고른 단가를 그대로 따라간다.
+  //   안 넘기면 비친구로 해석된다(싸게 깎이지 않는 쪽).
+  brand?: BrandPricingInput | null,
 ): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean; freeUsed?: number }> {
   // 후불은 트랜잭션을 열지 않는다 — 발송마다 부르는 경로라 103사(후불)의 비용을 늘리지 않는다.
   const pre = await query('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
@@ -129,7 +134,7 @@ export async function prepaidDeduct(
   try {
     await client.query('BEGIN');
     const co = await client.query(
-      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand
+      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend
          FROM companies WHERE id = $1 FOR UPDATE`,
       [companyId]
     );
@@ -145,7 +150,7 @@ export async function prepaidDeduct(
 
     // ★ 2026-07-26 단가 미설정이면 **발송을 막는다**(Codex #2). 전에는 0원으로 통과시켜
     //   단가가 비어 있는 선불 회사가 공짜로 발송했다. 명시적 0원 계약은 그대로 통과시킨다.
-    const resolved = resolveChargeUnitPriceDetailed(c, messageType);
+    const resolved = resolveChargeUnitPriceDetailed(c, messageType, brand);
     if (resolved.unset) {
       await client.query('ROLLBACK');
       console.error(`[선불차감차단] company=${companyId} ${messageType} 단가 미설정 — 차감 없이 발송되는 것을 막았다`);
@@ -294,7 +299,7 @@ export async function prepaidRefund(
   try {
     await client.query('BEGIN');
     const co = await client.query(
-      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand
+      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend
          FROM companies WHERE id = $1 FOR UPDATE`,
       [companyId]
     );
@@ -442,7 +447,7 @@ export async function prepaidReverseOverRefund(
   try {
     await client.query('BEGIN');
     const co = await client.query(
-      `SELECT billing_type, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand
+      `SELECT billing_type, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend
          FROM companies WHERE id = $1 FOR UPDATE`,
       [companyId]
     );

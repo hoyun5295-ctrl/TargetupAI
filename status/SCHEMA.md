@@ -294,6 +294,8 @@
 | cost_per_lms | numeric(6,2) | |
 | cost_per_mms | numeric(6,2) | |
 | cost_per_kakao | numeric(6,2) | |
+| cost_per_brand | numeric NULL | 브랜드메시지 **친구 단가**(TARGETING `I`·`F`). ★2026-09-13 information_schema 실측(Harold) — 자릿수 제한 없는 numeric |
+| cost_per_brand_nonfriend | numeric NULL | ★2026-09-13 DDL 실행완료(Harold) — 브랜드메시지 **비친구 단가**(`N`·`M`·미지정). **NULL = 친구 단가 적용**(배포 직후 금액 불변). 해석 순서표 = `utils/unit-price.ts` `BRAND_PRICE_COLUMN_CHAIN` · 청구 유형 `BRAND_NF` · 에이전트(`company_agent_ids`)에는 없음 |
 | billing_type | varchar(20) | postpaid/prepaid (기본 postpaid) |
 | balance | numeric(15,2) | 선불 잔액 (기본 0) |
 | deposit_account_info | text | 무통장입금 계좌 안내 |

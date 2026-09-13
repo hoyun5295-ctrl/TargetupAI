@@ -49,7 +49,8 @@ export interface AgencyComposerPrefill {
   varMapping: Record<string, string>;
   fileName: string | null;
   messageType: 'SMS' | 'LMS' | 'MMS';
-  recipients: Array<{ phone: string; vars: Record<string, any> }>;
+  // ★2026-09-13 `callback` = 고객별 회신번호(한 접수에 여러 번호). 빠지면 재접수가 대표 번호 하나로 나간다
+  recipients: Array<{ phone: string; vars: Record<string, any>; callback?: string | null }>;
   hadImages: boolean;
 }
 
@@ -135,7 +136,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   const [aiMapping, setAiMapping] = useState(false);
   const [aiPicked, setAiPicked] = useState(false);
   // 재접수 명단(서버에서 받아 온 이전 접수 수신자). 새 파일을 올리면 버린다
-  const [prefillRecipients, setPrefillRecipients] = useState<Array<{ phone: string; vars: Record<string, any> }> | null>(null);
+  const [prefillRecipients, setPrefillRecipients] = useState<Array<{ phone: string; vars: Record<string, any>; callback?: string | null }> | null>(null);
 
   // ② 문안
   const [content, setContent] = useState('');
@@ -163,7 +164,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   /** 파일·붙여넣기·재접수 명단을 하나로 정리하고, 왜 몇 건이 빠졌는지도 같이 센다 */
   const recipientInfo = useMemo(() => {
     const seen = new Set<string>();
-    const list: Array<{ phone: string; vars: Record<string, any> }> = [];
+    const list: Array<{ phone: string; vars: Record<string, any>; callback?: string | null }> = [];
     let dup = 0;
     let invalid = 0;
     if (prefillRecipients) {
@@ -172,7 +173,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
         if (phone.length < 10) { invalid++; continue; }
         if (seen.has(phone)) { dup++; continue; }
         seen.add(phone);
-        list.push({ phone, vars: r.vars || {} });
+        list.push({ phone, vars: r.vars || {}, callback: r.callback ?? null });
       }
       return { list, dup, invalid, total: prefillRecipients.length, source: 'prefill' as const };
     }
@@ -205,6 +206,11 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   }, [rows, phoneColumn, pasted, varMapping, prefillRecipients]);
 
   const recipients = recipientInfo.list;
+  /** 재접수 명단에 실린 고객별 회신번호 종류 수. 있으면 "보내는 번호"는 대표 번호일 뿐이라 화면에 알린다 */
+  const prefillCallbackKinds = useMemo(
+    () => new Set((prefillRecipients || []).map((r) => r.callback).filter(Boolean)).size,
+    [prefillRecipients],
+  );
   const usedVars = useMemo(() => extractAgencyVars(content), [content]);
   /** 문안 칩으로 쓸 열(전화번호 열은 뺀다) */
   const varColumns = useMemo(() => headers.filter((h) => h !== phoneColumn), [headers, phoneColumn]);
@@ -723,6 +729,9 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
                       ))}
                     </select>
                     {senders.length === 0 && <p className={CUI_HINT}>등록된 번호가 없습니다. 발신번호 등록을 먼저 해 주세요.</p>}
+                    {prefillCallbackKinds > 0 && (
+                      <p className={CUI_HINT}>이전 접수의 고객별 회신번호 <b className="tabular-nums">{prefillCallbackKinds}</b>종이 명단대로 그대로 나갑니다. 여기서 고른 번호는 담당자 테스트 문자와 대표 번호로 쓰입니다.</p>
+                    )}
                   </div>
 
                   <div>

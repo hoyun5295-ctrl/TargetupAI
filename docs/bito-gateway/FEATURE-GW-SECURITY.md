@@ -169,3 +169,108 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 |---|---|
 | 2026-08-27 | 무인증 라우트 7개 폐쇄(`19933f0`). 관리자 API 키 회전. 외부 `200`→`401` 실측 |
 | 2026-08-28 | bind 봉투 암호화 코드 배포(`0584b68`, API 6파일). Codex 11라운드. 이행은 미실행 |
+| 2026-09-13 | Agent 역분석·서명 공급망 전수 점검(출고 바이너리·서버 실측). 강화 설계 §8 신설. 코드 변경 0 |
+
+## 8. Agent 역분석·서명 공급망 강화 (설계 · 2026-09-13)
+
+> 착수 계기 = Harold "에이전트를 보고 리버스엔지니어링 가능성은? 강화작업 설계서 써야겠다".
+> 이 절이 Agent 바이너리·서명 키·배포 무결성 축의 사실·잔여·처방을 소유한다. 게이트웨이 저장소 `status/STATUS.md` 미해결 index `0-G`는 여기를 가리키기만 한다.
+> ⛔ 아래 판정은 전부 0913 실측이다. 표에 없는 것은 미검증으로 본다.
+
+### 8-1. 결론
+
+**역분석으로 구조와 프로토콜은 읽힌다. 그러나 접근과 권한은 얻지 못한다.**
+바이너리를 끝까지 뜯어도 게이트웨이에 붙으려면 발급 토큰 + 등록된 출발지 IP + TLS가 모두 필요하고, 에이전트에 코드를 밀어 넣으려면 ed25519 서명 + 관리 화면 승인이 필요하다. 바이너리 안에 그 어느 것의 비밀도 들어 있지 않다.
+**남는 실질 위험은 역분석이 아니라 서명 권한의 보관 방식과 Windows 배포 무결성이다**(8-3 A1·A2).
+
+### 8-2. 실측 사실
+
+대상 = Linux `out/agent-amd64-standalone-v1.0.25/stage/bito-agent` · Windows `deploy/agent/windows-amd64/versions/1.0.20/bito-agent.exe`(+ 같은 폴더 `bito-agent-bootstrap.exe`·`bito-agent-installer.exe`).
+
+| 축 | 사실 | 확인 방법 |
+|---|---|---|
+| 심볼 | 두 출고본 모두 심볼 섹션 없음 · `-trimpath` | `go tool nm` = `no symbols` · `go version -m` |
+| 모듈 경로 | `public.bito/agent/runtime/core`로 치환 · 원래 저장소명 0건 | `go version -m` · `grep -aic invito/bito-gateway` |
+| 남는 단서 | 함수명(치환 경로 포함) 16~17 · gRPC 메서드 2(`/bito.v1.BitoGateway/ConnectGateway`·`SendMessage`) · 한글 오류문 86~87줄 · `SELECT` 33(Linux) · 타입명(`*poller.Poller`·`dbWriteBatcher` 등) | `grep -a` 계수 |
+| 내부 이름 | `message_request`·`report_queue`·`agent_account`·`bind_pw_hash`·`hanjulgw`·`humuson`·`gemtek` 0건 · **`invito` 1건 = `gw.invito.local`** | `grep -aic` |
+| 개인키 | PEM 개인키 블록 0건. `PRIVATE KEY` 4건은 Go 표준 라이브러리의 형식 이름·오류 문구 | `grep -ac -e '-----BEGIN [A-Z ]*PRIVATE KEY-----'` · 문맥 추출 |
+| Windows 코드 서명 | **bootstrap·installer·agent 3종 전부 `NotSigned`** | PowerShell `Get-AuthenticodeSignature` |
+| 기동 무결성 | 슈퍼바이저 시작(`supervisor.go:128` → `Recover`)과 활성화·롤백에서 자식 파일 SHA-256을 디스크에서 다시 계산해 서명된 `ChildDigest`와 대조 | `bootstrap/handoff.go` `Resolve` · `recovery.go:66` |
+| 업데이트 서명 | ed25519 검증 5곳(매니페스트·신뢰 정책·스냅샷) · 서명 대상마다 도메인 분리 문자열 | `grep -rn ed25519.Verify` |
+| 다운그레이드 | 업데이트는 엄격히 큰 버전만(`plan.go:49`·`child_executor.go:405`) · 롤백은 기록된 직전 버전만(`bootstrap/activation.go:30`) · 신뢰 정책 세대 역행 거부(`release/trust.go:60`) · `AllowDowngrade` 필드는 정의만 있고 읽는 코드 0곳 | 코드 |
+| 인증 | 토큰 `randomBytes(32)` · 서버는 SHA-256만 저장 · `subtle.ConstantTimeCompare` · 허용 IP 목록이 비면 거부 | `web/api/routes/agents.js:25` · `session/grpc_server.go` `verifyAgent` |
+| 전송 | **운영 게이트웨이(.65)에 9443만 LISTEN, 9090 없음**(0913 `ss -tln`) · mTLS는 코드 준비·미설정(`0-E`) | 서버 실측 |
+| 파일 권한 | Windows 설정 파일 = 상속 끊은 DACL(SYSTEM·Administrators 전체 · 에이전트 전용 SID 읽기) · Linux = 전용 UID 읽기 · 자식은 root 아닌 계정 | `installer/windows.go:620` · `linux.go:679` |
+| 로컬 데이터 | 상태 저널 필드 = `agent_id`·`table`·`source_seq`·`state`·`msg_type`·`updated_at`(번호·본문 없음) · **설정 YAML에 `source.password`·`gateway.token` 평문** · `cfgcrypt`는 수동 CLI에만 있고 설치 흐름 미사용 | `poller/state_journal.go:24` · `config.go:205·252` |
+| 서명 권한 | `deploy/build-agent.sh init-authority`가 `release.pem`·`recovery.pem`을 **같은 `AUTHORITY_ROOT/private`**에 생성(기본 `/var/lib/bito-agent-release/authority`) · `build`는 복구 **공개키**만 읽고 `public/` 출처를 강제(263줄) · **.65에 `/var/lib/bito-agent-release` 존재**(일반 계정 `Permission denied`로 확인 · 내부 키 파일 존재는 root 확인 필요) · 보관 서버·복구 키 분리를 적은 문서 0건 | 스크립트 · 서버 실측 · 문서 grep |
+| 경계 검사 | 빌드가 6개 바이너리 전부에 `sanitize_agent_binary.py` + `verify_customer_delivery_full_boundary.py` 실행 · **금지 목록에 단독 `invito`가 없어 `gw.invito.local`이 통과** | `build-agent.sh:141·304·307·345` · 검사기 `FORBIDDEN_BYTES` |
+
+**이미 내려진 결정(뒤집지 않는다)**: Garble 난독화는 Windows Defender가 실제로 PUA 차단해 고객 배포본에 쓰지 않는다(게이트웨이 저장소 `status/AGENT_MANUAL.md:1589` · `docs/superpowers/specs/2026-07-17-customer-delivery-zero-internal-strings-v208-design.md`).
+
+### 8-3. 잔여와 처방 (위험 큰 순)
+
+**A1. 복구 루트 개인키 오프라인 분리 — 최우선 · 코드 변경 0**
+- 위험: 서명 키 두 벌과 승인 기록 DB가 같은 서버에 있다. 서버를 장악당하면 승인 행을 직접 쓰고 릴리스 키로 서명해 전 에이전트에 코드를 내릴 수 있다. 여기까지는 구조상 막기 어렵다. **복구 키까지 그 서버에 있으면 회복 수단도 함께 넘어간다**(새 세대 신뢰 정책을 공격자가 먼저 서명한다).
+- 처방: `private/recovery.pem`만 서버에서 떼어 오프라인 매체 두 곳에 보관한다. `release.pem`은 평소 서명에 필요하므로 남긴다.
+- 영향: **평소 릴리스 무영향**(`build`는 복구 공개키만 읽음 · 코드 확인). 복구 개인키가 필요한 때 = 신뢰 정책 재발급(`build-trust-policy`)뿐 = 릴리스 키 교체·유출 회복.
+- 절차: root 작업이라 대표님 운영 절차로 한다. ①오프라인 매체 2곳 복사 ②두 사본 해시를 원본과 대조 ③서버에서 삭제 ④다음 릴리스 `build`가 정상인지로 확인 ⑤보관 위치·보관자·해시를 이 절에 기록(키 값은 기록하지 않는다).
+- ⛔ `init-authority`는 키를 새로 만드는 명령이다. 운영 중 재실행하지 않는다(지금 이 경고가 어디에도 없다).
+
+**A2. Windows 실행 파일 코드 서명**
+- 위험: 업데이트는 ed25519로 막혀 있지만 **고객사가 처음 받는 설치 파일은 발행자를 운영체제가 확인할 수 없다.** 전달 중 바꿔치기돼도 고객사는 모르고, SmartScreen·백신 경고도 여기서 난다.
+- 후보: OV 코드서명 인증서 / EV 코드서명 인증서. **추천 = 설치기·부트스트랩부터 서명 + RFC 3161 타임스탬프.** 인증서 종류별 비용·발급 기간·SmartScreen 평판 차이, 서명이 Defender PUA 판정에 주는 영향은 **미검증**(조달 전 확인).
+- ⛔ **순서 고정: 정리기 → 경계 검사 → Authenticode 서명 → 서명 검증 → SHA-256 산출 → 서명 매니페스트.** 서명은 바이트를 바꾼다. 서명 전 해시를 매니페스트에 실으면 부트스트랩 `Resolve`가 기동 때 해시 불일치로 자식을 거부한다.
+- 확인 필요(미검증): 경계 검사기가 서명 블록의 인증서 문자열을 금지 패턴으로 오탐하지 않는지.
+
+**A3. 설치 묶음 해시 공개**
+- 사실: `deploy/agent/*windows-amd64.zip` 옆에 `.sha256`이 없다(0913 확인 범위). 안내서 PDF에는 있다.
+- 처방: 발급 화면과 안내서에 설치 묶음 SHA-256과 대조 방법(PowerShell `Get-FileHash`)을 싣는다. A2 서명 이후 해시로 싣는다.
+
+**A4. 출고본의 회사명 잔존과 검사기 누락**
+- 사실: `gw.invito.local`이 소스 3곳에서 기본값·예시로 들어가 두 출고본에 남는다 — `internal/agent/onboarding/install_bundle.go:160` · `internal/agent/setup/wizard.go:95` · `cmd/agent/main.go:2446`. 검사기는 `github.com/invito/bito-gateway`·`INVITO_MMS`만 막는다.
+- 처방: 세 곳을 중립 예시 호스트로 바꾸고, 검사기 `internal customer/provider`에 금지 패턴을 더한다. 추가 뒤 기존 공개자료 전체를 재검사해 오탐을 확인한다.
+- Go 소스 변경이라 재빌드·릴리즈가 따른다. **단독 릴리즈를 만들지 않고 다음 릴리즈(1.0.28은 이미 롤아웃 · `0-F`)에 합류**한다.
+- **★0913 소스 반영(게이트웨이 저장소 미커밋)**: 세 곳 기본값 = `gateway.invalid`(예약 도메인이라 해석되지 않음 · 종전 값도 해석되지 않는 자리표시자라 동작 차이 없음 · 이 문자열을 읽는 로직 0곳 전수 확인). 검사기 = `invito\.local`. ⛔ **처음 설계한 단어 경계 `invito`는 기각**: 공개자료 재검사에서 안내서 9건이 걸렸다(발급 주체로 `INVITO`를 적는다). 막을 것은 회사명이 아니라 내부 호스트명이다. 검증 = 공개자료 `CUSTOMER_DELIVERY_BOUNDARY_OK files=14` · 1.0.20 출고본 `--blob` 차단 확인 · 계약 테스트 23건 통과(표본 차단 + 안내서 문장 통과 신설) · 검사기 호출처 전수(`build-agent.sh`·`build-agent.ps1`·`build-bito-agent.ps1`·arm64 예외 빌드 = 전부 **새로 빌드한 산출물**만 검사 · `scripts/gw/check.sh` = 공개자료 폴더) = 이미 빌드된 1.0.28 출고본을 다시 검사하는 경로 없음.
+
+**A5. 설치 마법사 TLS 기본값**
+- 사실: `setup/wizard.go:98` 기본 `false` · `configs/agents/sample-agent.yaml` `false` · 발급 경로(`system_config`)는 `true`.
+- 판정: 게이트웨이 평문이 닫혀 있어 `false`면 접속 실패로 끝난다(fail-closed) = 보안 구멍이 아니라 사용성 문제.
+- 처방: 기본값을 `true`로. A4와 같은 릴리즈에 합류.
+- **★0913 소스 반영(미커밋)**: `setup/wizard.go` 기본 선택 = TLS 사용. 이 마법사는 `agent setup` 대화형 한 곳에서만 불린다(자동 입력으로 부르는 설치 스크립트 0곳 전수 확인). 이미 설치된 Agent의 설정 파일과 발급 경로는 무변경. `sample-agent.yaml`은 손대지 않았다(출고 자료 아님).
+
+**A6. `AllowDowngrade` 필드**
+- 사실: `release/types.go:55` 정의만 있고 읽는 코드 0곳. 다운그레이드는 plan·claim 단계에서 무조건 거부된다.
+- 처방: **바로 지우지 않는다.** 서명 JSON은 엄격 디코딩 경로(`DisallowUnknownFields`)가 있어, 기존 서명 산출물에 이 키가 들어 있으면 필드 제거가 디코딩 실패가 된다(해당 구조체가 그 경로를 타는지 미검증). 먼저 "소비처 없음 · 다운그레이드는 plan/claim이 거부" 주석으로 고정하고, 기존 산출물 키 존재를 확인한 뒤에만 제거한다.
+- **★0913 확인·반영(미커밋)**: 기존 서명 산출물에 키가 **있다**(`deploy/agent/.release-build/1.0.20/signed/*/release-descriptor.json` `"allow_downgrade":false`) · 엄격 디코딩 경로 `bootstrap/handoff.go:222`·`store.go:382`. **따라서 필드는 영구히 지우지 않는다.** 주석은 구조체 위에 달았다(필드 사이에 달면 gofmt가 정렬을 다시 잡아 diff가 커진다) · 코드 동작 변경 0.
+
+**A7. 역분석 잔여 단서 — 수용**
+- 함수명·gRPC 메서드·한글 오류문·SQL 문장은 남는다. 알아도 8-1의 관문(토큰·허용 IP·TLS·서명·승인)을 넘지 못한다.
+- 난독화는 0717 결정(Defender PUA 차단)대로 쓰지 않는다. 오류문을 숨기면 고객사 현장 진단이 막히는 비용이 더 크다.
+
+**A8. 설정 파일 평문 — 수용**
+- DB 비밀번호·게이트웨이 토큰이 YAML 평문이다. 방어는 파일 권한(8-2)이 맡고, 토큰은 허용 IP에 묶여 새도 다른 곳에서 못 쓴다.
+- 같은 서버에 키를 두는 암호화(`cfgcrypt` 기본화)는 로컬 관리자에게 무의미해 실익이 작다. 토큰 단독 의존을 줄이는 길은 mTLS(`0-E`)다.
+
+### 8-4. 적용 순서
+
+| 순서 | 항목 | 성격 | 선행 조건 |
+|---:|---|---|---|
+| 1 | A1 복구 키 분리 | 운영 · 코드 0 | 오프라인 매체 2곳 |
+| 2 | A4·A5 + A6 주석 | 소스 · 다음 릴리즈 합류 | 1.0.28 창(`0-F`) |
+| 3 | A2 코드 서명 파이프라인 | 빌드 스크립트 · 인증서 | 인증서 조달 · 오탐 확인 |
+| 4 | A3 해시 공개 | 발급 화면·안내서 | A2 완료(서명 후 해시) |
+
+### 8-5. 완료 판정
+
+- **A1**: root 세션에서 `private/`에 `release.pem`만 남음 · 다음 릴리스 `build` 성공 · 이 절에 보관 기록.
+- **A2**: 로컬 PowerShell `Get-AuthenticodeSignature`가 3종 모두 `Valid` · 서명본으로 만든 릴리스를 부트스트랩이 기동해 `Recover` 해시 대조 통과.
+- **A3**: 발급 화면·안내서 해시 = 실제 묶음 `Get-FileHash` 값.
+- **A4**: 새 출고본 `grep -aic invito.local` = 0 · 검사기에 `gw.invito.local`을 넣은 표본이 차단되는지 계약 확인(**0913 계약 확인 완료** · 새 출고본 확인은 다음 릴리즈 빌드 때).
+- **A5**: 마법사 기본 선택이 TLS 사용(**0913 소스 반영** · 단위 테스트 통과).
+- **공통 회귀 기준(Harold 0913 "기존에 잘 되던 게 안 되면 안 된다")**: 수정 패키지 `go test`(setup·onboarding·release·cmd/agent) 통과 · 전체 `go test ./...`의 실패 2패키지(`cmd/agent-bootstrap`·`internal/agent/bootstrap`)는 Windows 로컬의 권한·파일 모드 테스트이고 이번 변경 파일을 포함하지 않는다(릴리즈 빌드 환경 Linux에서 재확인 대상).
+
+### 8-6. 하지 않는 것
+
+- Garble 등 난독화(0717 결정).
+- 디버거 탐지·안티 디버깅(현재 코드에 없음 · 고객사 운영 도구와 충돌 위험 대비 효과 낮음).
+- 설정 파일 암호화 기본화(A8).

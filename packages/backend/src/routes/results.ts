@@ -167,7 +167,7 @@ router.get('/summary', async (req: Request, res: Response) => {
     const costResult = await query(
       // ★ 2026-07-31 cost_per_brand 동반 조회 — 브랜드는 BRAND 단가로 차감되는데 표시 축에만 없어
       //   화면이 알림톡 단가로 계산하고 있었다(실차감·환불 원장과 불일치).
-      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, unit_price_basis FROM companies WHERE id = $1`,
+      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend, unit_price_basis FROM companies WHERE id = $1`,
       [companyId]
     );
     // ★ 2026-07-26 화면 비용은 고객이 실제로 지불하는 금액(부가세 포함)이다 — CT가 기준을 해석한다.
@@ -216,6 +216,8 @@ router.get('/summary', async (req: Request, res: Response) => {
         perMms: costs.mms,
         perKakao: costs.kakao,
         perBrand: costs.brand,
+        // ★ 2026-09-13 비친구 브랜드 단가 — 화면이 캠페인 대상(kakao_targeting)으로 둘 중 하나를 고른다.
+        perBrandNonfriend: costs.brandNonfriend,
       },
       // ★ 2026-07-23 에이전트(엔진) 발송 유형별 (agent·both만 채워짐)
       agent: { summary: agentSummary, byType: agentByType },
@@ -329,7 +331,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         c.id, c.company_id, c.created_by, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
         c.target_count,
         c.sent_count, c.success_count, c.fail_count, c.result_final,
-        c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number,
+        c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number, c.kakao_targeting,
         c.subject, c.message_subject, c.mms_image_paths,
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,

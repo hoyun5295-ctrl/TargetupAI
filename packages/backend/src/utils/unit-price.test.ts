@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizeUnitPriceBasis, toSupplyPrice, toVatIncludedPrice, vatOfUnitPrice,
   previewUnitPrice, resolveChargeUnitPrice, round2, DEFAULT_UNIT_PRICE_BASIS,
+  resolveChargeUnitPriceDetailed, resolveBrandAudience, pickBrandPriceRaw,
 } from './unit-price';
 
 describe('normalizeUnitPriceBasis — 모르는 값은 전환 전으로 (2026-07-26)', () => {
@@ -123,6 +124,76 @@ describe('resolveChargeUnitPrice — 선불 차감·환불·회수가 쓰는 단
 
   it('PG numeric 문자열도 받는다', () => {
     expect(resolveChargeUnitPrice(co({ cost_per_lms: '27.50' }), 'LMS')).toBe(27.5);
+  });
+});
+
+describe('브랜드메시지 친구·비친구 단가 (2026-09-13)', () => {
+  // 매입이 채널 친구·비친구로 갈려 청구된다. 게이트웨이 0906 규칙을 그대로 옮긴다:
+  // 기존 cost_per_brand = 친구 단가 · 비친구 칸만 신설 · 비면 친구 단가 · M과 미지정은 비친구.
+  const co = (o: Record<string, any> = {}) => ({
+    unit_price_basis: 'vat_included', cost_per_brand: 16.5, cost_per_brand_nonfriend: 22, ...o,
+  });
+
+  it('대상 판정: I·F는 친구, N·M·빈값·모르는 값은 비친구', () => {
+    expect(resolveBrandAudience('I')).toBe('friend');
+    expect(resolveBrandAudience('f')).toBe('friend');
+    for (const t of ['N', 'M', '', null, undefined, 'X']) {
+      expect(resolveBrandAudience(t as any), String(t)).toBe('nonfriend');
+    }
+  });
+
+  it('비친구(N)·마수동 전체(M)는 비친구 단가로 차감한다', () => {
+    expect(resolveChargeUnitPrice(co(), 'BRAND', { targeting: 'N' })).toBe(22);
+    expect(resolveChargeUnitPrice(co(), 'BRAND', { targeting: 'M' })).toBe(22);
+  });
+
+  it('채널 친구(I)는 친구 단가로 차감한다', () => {
+    expect(resolveChargeUnitPrice(co(), 'BRAND', { targeting: 'I' })).toBe(16.5);
+  });
+
+  it('비친구 칸이 비면 친구 단가로 떨어진다: 배포 직후 차감액이 1원도 안 바뀐다', () => {
+    for (const empty of [null, undefined, '']) {
+      const r = resolveChargeUnitPriceDetailed(co({ cost_per_brand_nonfriend: empty }), 'BRAND', { targeting: 'N' });
+      expect(r).toEqual({ price: 16.5, unset: false, unknownType: false });
+    }
+  });
+
+  it('대상 정보를 안 넘기면 비친구로 본다: 빠진 호출부가 싸게 깎지 못한다', () => {
+    expect(resolveChargeUnitPrice(co(), 'BRAND')).toBe(22);
+  });
+
+  it('친구 단가가 비어 있으면 친구 발송은 미설정이다', () => {
+    const r = resolveChargeUnitPriceDetailed(co({ cost_per_brand: null }), 'BRAND', { targeting: 'I' });
+    expect(r.unset).toBe(true);
+  });
+
+  it('두 칸이 모두 비면 비친구 발송도 미설정이다', () => {
+    const r = resolveChargeUnitPriceDetailed(co({ cost_per_brand: null, cost_per_brand_nonfriend: null }), 'BRAND', { targeting: 'N' });
+    expect(r.unset).toBe(true);
+  });
+
+  it('명시적 0원 비친구 단가는 0원 그대로다(친구 단가로 되살아나지 않는다)', () => {
+    const r = resolveChargeUnitPriceDetailed(co({ cost_per_brand_nonfriend: 0 }), 'BRAND', { targeting: 'N' });
+    expect(r).toEqual({ price: 0, unset: false, unknownType: false });
+  });
+
+  it('기본형도 지금은 자유형과 같은 순서표를 쓴다', () => {
+    expect(resolveChargeUnitPrice(co(), 'BRAND', { targeting: 'N', form: 'BASIC' })).toBe(22);
+    expect(resolveChargeUnitPrice(co(), 'BRAND', { targeting: 'I', form: 'BASIC' })).toBe(16.5);
+  });
+
+  it('부가세 기준 전환이 비친구 단가에도 걸린다', () => {
+    expect(resolveChargeUnitPrice(co({ unit_price_basis: 'vat_excluded', cost_per_brand_nonfriend: 20 }), 'BRAND', { targeting: 'N' })).toBe(22);
+  });
+
+  it('BRAND가 아닌 유형은 브랜드 인자를 무시한다', () => {
+    expect(resolveChargeUnitPrice({ ...co(), cost_per_sms: 8.8 }, 'SMS', { targeting: 'N' })).toBe(8.8);
+  });
+
+  it('pickBrandPriceRaw는 순서표의 첫 설정값을 저장값 그대로 돌려준다(기준 변환 전)', () => {
+    expect(pickBrandPriceRaw(co({ unit_price_basis: 'vat_excluded' }), { targeting: 'N' })).toBe(22);
+    expect(pickBrandPriceRaw(co({ cost_per_brand_nonfriend: '' }), { targeting: 'N' })).toBe(16.5);
+    expect(pickBrandPriceRaw(co({ cost_per_brand: null, cost_per_brand_nonfriend: null }), { targeting: 'I' })).toBeNull();
   });
 });
 

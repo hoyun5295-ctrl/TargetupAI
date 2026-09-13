@@ -95,6 +95,69 @@ export const MESSAGE_TYPE_PRICE_COLUMN: Record<string, string> = {
   BRAND: 'cost_per_brand',
 };
 
+// ============================================================
+//  브랜드메시지 친구·비친구 단가 (★ 2026-09-13)
+// ============================================================
+//
+// 매입이 채널 친구·비친구로 갈려 청구된다. 게이트웨이 0906 규칙(FEATURE-GW-BRAND-MESSAGE §9-2)을 그대로 옮긴다.
+//   ① 기존 `cost_per_brand`가 곧 친구 단가다. 친구 컬럼을 새로 만들면 같은 값이 두 곳에 생긴다.
+//   ② 비친구 칸(`cost_per_brand_nonfriend`)은 비어 있으면 친구 단가로 떨어진다 — 배포 직후 금액 불변.
+//   ③ 판정은 발송이 싣는 TARGETING 하나. `M`(마수동 전체)은 친구·비친구가 섞여 비친구로 본다
+//      (싼 쪽을 매기면 매입 정산 차액을 우리가 문다). 값이 없어도 비친구다.
+// 차감(부가세 포함가)·청구(공급가)·화면 표시가 전부 아래 순서표 하나를 읽는다.
+
+/** 친구 단가로 매기는 TARGETING 값. SQL 집계(`send-usage-aggregation.ts`)도 이 목록으로 조건을 만든다. */
+export const BRAND_FRIEND_TARGETINGS: readonly string[] = ['I', 'F'];
+
+export type BrandAudience = 'friend' | 'nonfriend';
+export type BrandForm = 'FREE' | 'BASIC';
+
+/** 브랜드 단가를 고르는 데 필요한 발송 정보. 모르면 비워 둔다(비친구로 해석된다). */
+export interface BrandPricingInput {
+  targeting?: string | null;
+  form?: BrandForm | null;
+}
+
+/** (순수) TARGETING → 친구/비친구. 모르는 값·빈 값은 비친구. */
+export function resolveBrandAudience(targeting: string | null | undefined): BrandAudience {
+  const t = String(targeting ?? '').trim().toUpperCase();
+  return BRAND_FRIEND_TARGETINGS.includes(t) ? 'friend' : 'nonfriend';
+}
+
+/**
+ * (형태 × 대상) → 단가 컬럼 **폴백 순서**.
+ *
+ * 기본형 단가가 자유형과 달라지는 날에는 컬럼을 추가하고 BASIC 줄만 바꾼다.
+ * 호출부는 이미 형태를 넘기고 있어 다시 고칠 곳이 없다.
+ */
+export const BRAND_PRICE_COLUMN_CHAIN: Readonly<Record<BrandForm, Readonly<Record<BrandAudience, readonly string[]>>>> = {
+  FREE: { friend: ['cost_per_brand'], nonfriend: ['cost_per_brand_nonfriend', 'cost_per_brand'] },
+  BASIC: { friend: ['cost_per_brand'], nonfriend: ['cost_per_brand_nonfriend', 'cost_per_brand'] },
+};
+
+/** 순서표가 읽는 회사 단가 컬럼 전체(중복 제거). SELECT 목록 검사에 쓴다. */
+export const BRAND_PRICE_COLUMNS: readonly string[] = [
+  ...new Set(Object.values(BRAND_PRICE_COLUMN_CHAIN).flatMap((byAudience) => Object.values(byAudience).flat())),
+];
+
+function isUnsetRaw(raw: any): boolean {
+  return raw === null || raw === undefined || String(raw).trim() === '' || !Number.isFinite(Number(raw));
+}
+
+/**
+ * (순수) 순서표의 첫 설정값을 **저장값 그대로** 돌려준다(부가세 기준 변환 전). 전부 비면 null.
+ * 명시적 0원은 설정값이다 — 친구 단가로 되살리지 않는다.
+ */
+export function pickBrandPriceRaw(companyRow: any, input?: BrandPricingInput | null): number | null {
+  const form: BrandForm = input?.form === 'BASIC' ? 'BASIC' : 'FREE';
+  const chain = BRAND_PRICE_COLUMN_CHAIN[form][resolveBrandAudience(input?.targeting)];
+  for (const col of chain) {
+    const raw = companyRow?.[col];
+    if (!isUnsetRaw(raw)) return Number(raw);
+  }
+  return null;
+}
+
 /**
  * 회사 행 + 메시지 유형 → **고객이 실제로 차감·환불받는 건별 금액(부가세 포함)**.
  *
@@ -106,8 +169,8 @@ export const MESSAGE_TYPE_PRICE_COLUMN: Record<string, string> = {
  * 다만 전환한 회사에서 그러면 10% 덜 깎이므로, SELECT 누락은 아래 테스트가 아니라
  * `unit-price-invariants` 소스 스캔이 잡는다.
  */
-export function resolveChargeUnitPrice(companyRow: any, messageType: string): number {
-  return resolveChargeUnitPriceDetailed(companyRow, messageType).price;
+export function resolveChargeUnitPrice(companyRow: any, messageType: string, brand?: BrandPricingInput | null): number {
+  return resolveChargeUnitPriceDetailed(companyRow, messageType, brand).price;
 }
 
 export interface ChargeUnitPrice {
@@ -131,16 +194,16 @@ export interface ChargeUnitPrice {
  * 유형을 모르는 경우(`unknownType`)는 막지 않는다 — 예상 못 한 유형 하나 때문에 발송이 전부 서는 편이
  * 더 나쁘고, 그 상황은 경고 로그로 드러난다.
  */
-export function resolveChargeUnitPriceDetailed(companyRow: any, messageType: string): ChargeUnitPrice {
-  const col = MESSAGE_TYPE_PRICE_COLUMN[String(messageType || '').toUpperCase()];
+export function resolveChargeUnitPriceDetailed(
+  companyRow: any, messageType: string, brand?: BrandPricingInput | null,
+): ChargeUnitPrice {
+  const type = String(messageType || '').toUpperCase();
+  const col = MESSAGE_TYPE_PRICE_COLUMN[type];
   if (!col) return { price: 0, unset: false, unknownType: true };
-  const raw = companyRow?.[col];
-  if (raw === null || raw === undefined || String(raw).trim() === '') {
-    return { price: 0, unset: true, unknownType: false };
-  }
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return { price: 0, unset: true, unknownType: false };
-  const price = toVatIncludedPrice(n, normalizeUnitPriceBasis(companyRow?.unit_price_basis)) ?? 0;
+  // ★ 2026-09-13 브랜드는 대상(친구·비친구)에 따라 컬럼이 달라진다 — 순서표가 고른다.
+  const raw = type === 'BRAND' ? pickBrandPriceRaw(companyRow, brand) : companyRow?.[col];
+  if (isUnsetRaw(raw)) return { price: 0, unset: true, unknownType: false };
+  const price = toVatIncludedPrice(Number(raw), normalizeUnitPriceBasis(companyRow?.unit_price_basis)) ?? 0;
   return { price, unset: false, unknownType: false };
 }
 

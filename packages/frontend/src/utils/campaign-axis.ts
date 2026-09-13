@@ -84,6 +84,17 @@ export function isBrandOnlyChannel(c: CampaignAxisRow | null | undefined): boole
   return v === 'kakao' || v === 'kakao_brand';
 }
 
+/**
+ * ★ 2026-09-13 브랜드 단가를 **친구 단가**로 매기는 대상값 (백엔드 `utils/unit-price.ts` `BRAND_FRIEND_TARGETINGS` 미러).
+ * `M`(마수동 전체)·`N`·빈 값은 비친구 단가다. 두 목록의 일치는 `brand-axis-invariants.test.ts`가 확인한다.
+ */
+export const BRAND_FRIEND_TARGETINGS = ['I', 'F'] as const;
+
+export function isBrandFriendTargeting(targeting: string | null | undefined): boolean {
+  const t = String(targeting ?? '').trim().toUpperCase();
+  return (BRAND_FRIEND_TARGETINGS as readonly string[]).includes(t);
+}
+
 /** 문자와 브랜드메시지가 함께 나가는 캠페인인가 */
 export function isBothChannel(c: CampaignAxisRow | null | undefined): boolean {
   return channelOf(c) === 'both';

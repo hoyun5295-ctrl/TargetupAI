@@ -47,13 +47,22 @@ function unstuff(body: Buffer): Buffer {
 
 export class Pop3Client {
   private buf: Buffer = Buffer.alloc(0);
+  /**
+   * 긴 multiline 응답(RETR)을 받는 동안에는 조각을 여기 쌓는다(★2026-09-13 적대검토 medium).
+   * 종전에는 조각이 올 때마다 버퍼 전체를 이어 붙이고 처음부터 끝 표시를 찾아, 메일 크기의 제곱으로 느려졌다
+   * (첨부 50MB = 메일 약 83MB에서 API 프로세스를 수십 초 붙잡는다).
+   */
+  private collector: Buffer[] | null = null;
+  /** collector 중 끝 표시를 이미 찾아본 조각 수 */
+  private collectorScanned = 0;
   private waiter: { resolve: () => void } | null = null;
   private closed = false;
   private closeErr: Error | null = null;
 
   private constructor(private socket: tls.TLSSocket, private commandTimeoutMs: number) {
     socket.on('data', (chunk: Buffer) => {
-      this.buf = Buffer.concat([this.buf, chunk]);
+      if (this.collector) this.collector.push(chunk);
+      else this.buf = Buffer.concat([this.buf, chunk]);
       this.waiter?.resolve();
     });
     const onGone = (err?: Error) => {
@@ -117,7 +126,9 @@ export class Pop3Client {
         },
       };
     });
-    if (this.closed && this.buf.length === 0) {
+    // 끊겼어도 아직 읽지 않은 조각이 있으면 먼저 읽게 둔다(마지막 조각과 닫힘이 한 번에 올 수 있다)
+    const unscanned = this.collector !== null && this.collector.length > this.collectorScanned;
+    if (this.closed && this.buf.length === 0 && !unscanned) {
       throw new Pop3Error(`연결이 끊겼습니다: ${this.closeErr?.message || 'closed'}`, 'network');
     }
   }
@@ -136,19 +147,52 @@ export class Pop3Client {
 
   /** 첫 줄이 +OK인 multiline 응답의 본문(dot-unstuffed)을 모은다 */
   private async readMultiline(): Promise<Buffer> {
-    for (;;) {
-      // 본문이 비어 곧장 종료되는 경우: 남은 버퍼가 ".\r\n"으로 시작
-      if (this.buf.length >= 3 && this.buf[0] === 0x2e && this.buf[1] === 0x0d && this.buf[2] === 0x0a) {
-        this.buf = this.buf.subarray(3);
-        return Buffer.alloc(0);
+    // 본문 머리 3바이트까지는 종전처럼 기다린다(빈 본문 ".\r\n" 판정 · 비어 있지 않은 본문도 끝 표시까지 3바이트를 넘는다)
+    while (this.buf.length < 3) await this.waitData();
+    // 본문이 비어 곧장 종료되는 경우: 남은 버퍼가 ".\r\n"으로 시작
+    if (this.buf[0] === 0x2e && this.buf[1] === 0x0d && this.buf[2] === 0x0a) {
+      this.buf = this.buf.subarray(3);
+      return Buffer.alloc(0);
+    }
+    const quick = this.buf.indexOf(TERM);
+    if (quick >= 0) {
+      const body = this.buf.subarray(0, quick);
+      this.buf = this.buf.subarray(quick + TERM.length);
+      return unstuff(body);
+    }
+
+    // 긴 응답: 조각을 모으며 **새로 온 조각만** 끝 표시를 찾는다. 경계에 걸친 끝 표시는 앞 조각 꼬리(4바이트)로 잡는다.
+    //   이어 붙이기는 끝 표시를 찾은 뒤 한 번뿐이다.
+    const parts: Buffer[] = [this.buf];
+    this.buf = Buffer.alloc(0);
+    this.collector = parts;
+    this.collectorScanned = 0;
+    let offset = 0; // 이미 찾아본 조각들의 누적 길이
+    let tail = Buffer.alloc(0);
+    try {
+      for (;;) {
+        while (this.collectorScanned < parts.length) {
+          const part = parts[this.collectorScanned];
+          const window = tail.length > 0 ? Buffer.concat([tail, part]) : part;
+          const idx = window.indexOf(TERM);
+          if (idx >= 0) {
+            const end = offset - tail.length + idx;
+            this.collector = null;
+            const all = Buffer.concat(parts);
+            // 끝 표시 뒤에 이어 온 다음 응답은 짧은 버퍼로 옮긴다(큰 버퍼 전체를 붙잡지 않게 복사)
+            this.buf = Buffer.from(all.subarray(end + TERM.length));
+            return unstuff(all.subarray(0, end));
+          }
+          offset += part.length;
+          const keep = TERM.length - 1;
+          tail = Buffer.from(window.length > keep ? window.subarray(window.length - keep) : window);
+          this.collectorScanned++;
+        }
+        await this.waitData();
       }
-      const idx = this.buf.indexOf(TERM);
-      if (idx >= 0) {
-        const body = this.buf.subarray(0, idx);
-        this.buf = this.buf.subarray(idx + TERM.length);
-        return unstuff(body);
-      }
-      await this.waitData();
+    } finally {
+      this.collector = null;
+      this.collectorScanned = 0;
     }
   }
 

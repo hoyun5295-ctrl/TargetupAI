@@ -2886,7 +2886,7 @@ router.get('/preview', async (req: Request, res: Response) => {
       const brandMap: Record<string, any> = {};
       const ensureStore = (code: string, name: string) => {
         if (!brandMap[code]) {
-          brandMap[code] = { store_code: code, store_name: name, sms_success: 0, lms_success: 0, mms_success: 0, kakao_success: 0, brand_success: 0 };
+          brandMap[code] = { store_code: code, store_name: name, sms_success: 0, lms_success: 0, mms_success: 0, kakao_success: 0, brand_success: 0, brand_nf_success: 0 };
         }
         return brandMap[code];
       };
@@ -2928,6 +2928,8 @@ router.get('/preview', async (req: Request, res: Response) => {
             case 'KAKAO': b.kakao_success += n; break;
             // ★ 2026-07-30 (2R): 브랜드 F행 — 빠지면 매장별 상세 합이 combined 합계와 갈린다.
             case 'BRAND': b.brand_success += n; break;
+            // ★ 2026-09-13 비친구 브랜드(FN) — 단가가 달라 친구 줄과 합치지 않는다.
+            case 'BRAND_NF': b.brand_nf_success += n; break;
           }
         });
       }
@@ -2941,6 +2943,7 @@ router.get('/preview', async (req: Request, res: Response) => {
         mms_amount: b.mms_success * prices.MMS,
         kakao_amount: b.kakao_success * prices.KAKAO,
         brand_amount: b.brand_success * prices.BRAND,
+        brand_nf_amount: b.brand_nf_success * prices.BRAND_NF,
       }));
 
       return res.json({ type: 'brand', brands, test, spam, agent, plan, ai_credit, amounts, billing_guard });
@@ -2964,11 +2967,13 @@ router.get('/preview', async (req: Request, res: Response) => {
       mms_success: billableQty('MMS'),
       kakao_success: billableQty('KAKAO'),
       brand_success: totals.BRAND,
+      brand_nf_success: totals.BRAND_NF,
       sms_amount: billableQty('SMS') * prices.SMS,
       lms_amount: billableQty('LMS') * prices.LMS,
       mms_amount: billableQty('MMS') * prices.MMS,
       kakao_amount: billableQty('KAKAO') * prices.KAKAO,
       brand_amount: totals.BRAND * prices.BRAND,
+      brand_nf_amount: totals.BRAND_NF * prices.BRAND_NF,
     };
 
     return res.json({ type: 'combined', summary, test, spam, agent, plan, ai_credit, amounts, billing_guard });

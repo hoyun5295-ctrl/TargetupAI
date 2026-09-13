@@ -361,10 +361,12 @@ router.post('/test-send', async (req: Request, res: Response) => {
     //   옛 코드는 both 브랜드분이 무료였고, kakao 단독은 문자 단가로 깎였다.
     const testMsgType = (messageType || 'SMS') as string;
     const TEST_REF = '00000000-0000-0000-0000-000000000000';
+    // 테스트 브랜드 발송은 담당자에게 채널 친구 대상으로 나간다 — 적재 조립과 차감 단가가 같은 값을 쓴다.
+    const TEST_BRAND_TARGETING = 'I';
     const testAxes = resolveRefundAxes(testChannel, testMsgType);
     const testDeductedTypes: string[] = [];
     for (const axis of testAxes) {
-      const testDeduct = await prepaidDeduct(companyId, managerContacts.length, axis.type, TEST_REF, userId, 'test');
+      const testDeduct = await prepaidDeduct(companyId, managerContacts.length, axis.type, TEST_REF, userId, 'test', { targeting: TEST_BRAND_TARGETING, form: 'FREE' });
       if (!testDeduct.ok) {
         for (const doneType of testDeductedTypes) {
           // ★ 2026-07-30 (2R): 보상은 ok까지 확인한다. 이 경로는 의무를 붙일 캠페인 레코드가 없으므로
@@ -433,7 +435,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
             // 브랜드메시지 테스트 발송 — SMSQ msg_type='F' (★2026-08-15 규약 정정: 본문/제어 필드 분리 조립)
             // sendAt 미지정 = 즉시 발송 — 조립기가 현재 시각으로 발송 가능 시간을 판정한다.
             const testBrandPayload = buildBrandQueuePayload({
-              typeDef: 'FREE', senderKey: testKakaoSenderKey, targeting: 'I',
+              typeDef: 'FREE', senderKey: testKakaoSenderKey, targeting: TEST_BRAND_TARGETING,
               bubbleType: testKakaoBubbleType, isAd: isAd || false, message: testMsg,
             });
             await insertBrandQueue(testTables, [{
@@ -1080,7 +1082,8 @@ for (const customer of filteredCustomers) {
 // ★ 선불 잔액 체크 + 차감 (MySQL INSERT 전에 atomic 차감)
 // 채널·유형·카카오 활성 여부는 전부 run INSERT **앞**에서 확정됐다(2026-08-17) —
 // 여기서 실패할 수 있는 것은 차감 하나뿐이고, 그 실패는 실행 행을 종결시켜 캠페인을 풀어 준다.
-const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id, userId);
+// ★ 2026-09-13 브랜드 단가는 대상(친구·비친구)으로 갈린다 — 적재 조립(위 buildBrandQueuePayload)과 같은 값.
+const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id, userId, 'campaign', { targeting: kakaoTargeting, form: 'FREE' });
 if (sendDeduct.ok) aiDeductedAxes.add(deductType);
 if (!sendDeduct.ok) {
   // 실행 행을 남겨 두면 위쪽 중복 발송 방지 검사가 이후 발송을 영구히 막는다(충전해도 못 보낸다).
@@ -1099,7 +1102,7 @@ if (!sendDeduct.ok) {
 //   두 축 모두 차감하고, 뒤가 실패하면 **앞선 차감을 되돌린다** — 한쪽만 깎인 채로 발송하면
 //   그 캠페인의 회계가 영구히 어긋나고 환불 sweeper도 짝을 못 찾는다.
 if (sendChannel === 'both') {
-  const brandDeduct = await prepaidDeduct(companyId, filteredCustomers.length, 'BRAND', id, userId);
+  const brandDeduct = await prepaidDeduct(companyId, filteredCustomers.length, 'BRAND', id, userId, 'campaign', { targeting: kakaoTargeting, form: 'FREE' });
   if (brandDeduct.ok) aiDeductedAxes.add('BRAND');
   if (!brandDeduct.ok) {
     // ★ 2026-08-17 (Codex 2R high) 회수 **결과**를 봐야 한다. `prepaidRefund`는 실패를 던지지 않고
@@ -2471,7 +2474,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     //   위 preflight를 통과했으므로 이 아래에서 규격 위반으로 throw할 일은 없다.
     // ★ 선불 잔액 체크 + 차감
     // 유형은 위 게이트가 확정한 값을 쓴다 — 원본을 다시 읽으면 게이트를 우회한 값이 과금 축이 된다.
-    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId);
+    // ★ 2026-09-13 브랜드 단가는 대상(친구·비친구)으로 갈린다 — 적재 조립(위 directBrandPayload)과 같은 값.
+    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId, 'campaign', { targeting: kakaoTargeting || 'I', form: 'FREE' });
     if (directDeduct.ok) directDeductedAxes.add(directDeductType);
     if (!directDeduct.ok) {
       // 캠페인 레코드 롤백
@@ -2490,7 +2494,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     //   차감은 위 한 번뿐이라 브랜드 발송분이 무료로 나갔다. 두 축 모두 차감하고, 뒤가 실패하면
     //   앞선 차감과 캠페인 레코드를 함께 되돌린다(한쪽만 깎인 채로 남기지 않는다).
     if (directChannel === 'both') {
-      const brandDeduct = await prepaidDeduct(companyId, filteredRecipients.length, 'BRAND', campaignId, userId);
+      const brandDeduct = await prepaidDeduct(companyId, filteredRecipients.length, 'BRAND', campaignId, userId, 'campaign', { targeting: kakaoTargeting || 'I', form: 'FREE' });
       if (brandDeduct.ok) directDeductedAxes.add('BRAND');
       if (!brandDeduct.ok) {
         // ★ 2026-08-18 회수 **결과**를 본다 — prepaidRefund는 실패를 던지지 않고 ok:false로도 돌아온다.

@@ -66,7 +66,8 @@ export const unitPriceApi = {
   save: (
     companyId: string,
     // ★ 2026-07-29 brand(브랜드메시지) 추가. 백엔드는 **전체 교체**라 이 키가 빠지면 422다.
-    prices: { sms?: string | number; lms?: string | number; mms?: string | number; kakao?: string | number; brand?: string | number; testSms?: string | number; testLms?: string | number },
+    // ★ 2026-09-13 brandNonfriend(비친구 브랜드)는 **선택 키** — 빠지면 서버가 기존 값을 그대로 둔다.
+    prices: { sms?: string | number; lms?: string | number; mms?: string | number; kakao?: string | number; brand?: string | number; brandNonfriend?: string | number; testSms?: string | number; testLms?: string | number },
     applyToUnsetAgents?: boolean,
   ) => api.put(`/admin/companies/${companyId}/unit-prices`, { prices, applyToUnsetAgents: !!applyToUnsetAgents }),
 };

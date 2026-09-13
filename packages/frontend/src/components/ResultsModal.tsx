@@ -23,6 +23,7 @@ import {
   SEND_TYPE_FILTERS,
   SEND_TYPE_LABEL,
   isAlimtalkChannel,
+  isBrandFriendTargeting,
   isBrandOnlyChannel,
   matchesSendTypeFilter,
   resolveChannelChipClass,
@@ -531,6 +532,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 const perMms = summary?.costs?.perMms ?? 50;
                 const perKakao = summary?.costs?.perKakao ?? 7.5;
                 const perBrand = summary?.costs?.perBrand ?? perKakao;
+                // ★ 2026-09-13 비친구 브랜드(M·N) 단가 — 구버전 응답엔 없으니 친구 단가로 떨어진다.
+                const perBrandNonfriend = summary?.costs?.perBrandNonfriend ?? perBrand;
                 const estimatedCost = filteredCampaigns.reduce((sum, c) => {
                   const success = c.success_count || 0;
                   const type = (c.message_type || 'SMS').toUpperCase();
@@ -539,7 +542,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   //   브랜드는 BRAND 단가(cost_per_brand)로 차감되므로 그 단가로 센다 — 알림톡 단가가 아니다.
                   //   ⚠ 'both'는 문자·브랜드가 섞여 있는데 성공 건수가 채널별로 안 나뉜다. 아래 문자 단가로
                   //     계산되는 것은 기존 동작 그대로이고, 분리는 서버 실측 축이 필요한 별건이다.
-                  if (isBrandOnlyChannel(c)) return sum + success * perBrand;
+                  //   ★ 2026-09-13 친구·비친구 단가가 다르다 — 캠페인 대상(kakao_targeting)으로 고른다(차감과 같은 판정).
+                  if (isBrandOnlyChannel(c)) return sum + success * (isBrandFriendTargeting(c.kakao_targeting) ? perBrand : perBrandNonfriend);
                   if (isAlimtalkChannel(c)) return sum + success * perKakao;
                   if (type === 'MMS') return sum + success * perMms;
                   if (type === 'LMS') return sum + success * perLms;

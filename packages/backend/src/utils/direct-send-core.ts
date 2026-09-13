@@ -100,7 +100,8 @@ export async function createDirectSendCampaign(
   const deductAxes = resolveRefundAxes(directChannel, spec.msgType);
   const deductedTypes: string[] = [];
   for (const axis of deductAxes) {
-    const deduct = await prepaidDeduct(ctx.companyId, spec.total, axis.type, campaignId, ctx.userId);
+    // ★ 2026-09-13 브랜드 축 단가는 대상(친구·비친구)으로 갈린다 — 적재(direct-send-processor)와 같은 기본값 'I'.
+    const deduct = await prepaidDeduct(ctx.companyId, spec.total, axis.type, campaignId, ctx.userId, 'campaign', { targeting: spec.kakaoTargeting || 'I', form: 'FREE' });
     if (!deduct.ok) {
       // ★ 2026-07-30 (2R): 보상은 ok까지 확인한다 — prepaidRefund는 실패해도 throw 없이 ok=false로 돌아온다.
       //   회수가 하나라도 미완이면 캠페인을 지우지 않는다(지우면 durable 의무를 붙일 곳이 사라져 영구 미환불).

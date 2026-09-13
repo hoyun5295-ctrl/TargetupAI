@@ -119,7 +119,8 @@ export async function fetchAgencyPreview(id: string): Promise<{ samples: AgencyP
 }
 
 /** 재접수(같은 내용으로 다시 접수)용 수신자 목록. 읽기 전용이고, 새 접수는 기존 접수 API를 그대로 탄다 */
-export async function fetchAgencyRecipients(id: string): Promise<Array<{ phone: string; vars: Record<string, any> }>> {
+// ★2026-09-13 `callback` = 고객별 회신번호. 한 접수에 여러 번호가 섞일 수 있어 재접수도 그대로 나른다
+export async function fetchAgencyRecipients(id: string): Promise<Array<{ phone: string; vars: Record<string, any>; callback?: string | null }>> {
   const res = await fetch(`/api/agency-send/${id}/recipients`, { headers: auth() });
   const data = await unwrap(res);
   return data.recipients || [];
@@ -161,7 +162,7 @@ export interface CreateAgencyRequestInput {
   fileName?: string | null;
   phoneColumn: string;
   varMapping: Record<string, string>;
-  recipients: Array<{ phone: string; vars: Record<string, any> }>;
+  recipients: Array<{ phone: string; vars: Record<string, any>; callback?: string | null }>;
 }
 
 export async function createAgencyRequest(input: CreateAgencyRequestInput): Promise<AgencySendRequest> {

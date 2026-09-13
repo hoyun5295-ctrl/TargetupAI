@@ -7,7 +7,7 @@
  */
 
 import Redis from 'ioredis';
-import { normalizeUnitPriceBasis, toVatIncludedPrice } from '../utils/unit-price';
+import { normalizeUnitPriceBasis, toVatIncludedPrice, pickBrandPriceRaw } from '../utils/unit-price';
 
 // ============================================================
 // Redis 공통 인스턴스
@@ -108,6 +108,8 @@ export function getCompanyCosts(company: Record<string, any>) {
     mms: pick(company?.cost_per_mms, DEFAULT_COSTS.mms),
     kakao: pick(company?.cost_per_kakao, DEFAULT_COSTS.kakao),
     brand: pick(company?.cost_per_brand, DEFAULT_COSTS.brand),
+    // ★ 2026-09-13 비친구 브랜드(M·N·미지정) — 비친구 칸이 비면 친구 단가를 따른다(순서표 = unit-price.ts).
+    brandNonfriend: pick(pickBrandPriceRaw(company, { targeting: 'N' }), DEFAULT_COSTS.brand),
   };
 }
 
