@@ -18,7 +18,7 @@ import { normalizeArtDirection, artDirectionToCssVars } from './dm-art-direction
 import { resolveSections } from './dm-variable-resolver';
 import type { Section } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
-import { expandSlidePagesForSwipe } from './dm-slides-expand';
+import { expandSlidePagesForSwipe, isSwipeImagePage } from './dm-slides-expand';
 
 export { inlineImage, youtubeEmbedUrl };
 
@@ -372,7 +372,9 @@ function renderPagesHtml(
       isPreview: !!resolvedPages,
       artDirection,
     });
-    return `<section class="dm-page" data-page-idx="${i}" data-page-id="${escapeHtml(page.id)}">${secHtml}</section>`;
+    // ★ 2026-09-14 (박성용 접수) 슬라이드 모드에서 이미지 1장짜리 장 = 무대(dm-page--stage). 판정 = dm-slides-expand 순수 함수.
+    const stage = mode === 'slides' && isSwipeImagePage(page as any);
+    return `<section class="dm-page${stage ? ' dm-page--stage' : ''}" data-page-idx="${i}" data-page-id="${escapeHtml(page.id)}">${secHtml}</section>`;
   }).join('');
 
   const tokensCss = renderDmTokensCss(brandKit);
@@ -385,12 +387,31 @@ function renderPagesHtml(
 html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 .dm-viewer{height:100%;display:flex;flex-direction:row;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .dm-viewer::-webkit-scrollbar{display:none}
-.dm-page{flex:0 0 100%;width:100vw;height:100vh;scroll-snap-align:start;scroll-snap-stop:always;overflow-y:auto;position:relative;-webkit-overflow-scrolling:touch}
+/* ★ 2026-09-14 (박성용 접수 · 슬라이드 기능 개선) 장 폭 = 열 폭(100%). 옛 100vw 는 PC에서 430px 열 밖으로 넘쳐 스냅이 어긋났다. */
+.dm-page{flex:0 0 100%;width:100%;height:100vh;scroll-snap-align:start;scroll-snap-stop:always;overflow-y:auto;position:relative;-webkit-overflow-scrolling:touch}
 .dm-page::-webkit-scrollbar{display:none}
-.dm-page-dots{position:fixed;left:0;right:0;bottom:14px;display:flex;flex-direction:row;gap:6px;justify-content:center;z-index:50}
-.dm-page-dots .dot{width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms;cursor:pointer}
-.dm-page-dots .dot.active{background:var(--dm-primary);width:20px;border-radius:3px}
-.dm-page-counter{position:fixed;top:12px;right:12px;background:rgba(0,0,0,0.55);color:#fff;font-size:11px;padding:4px 10px;border-radius:12px;z-index:60}
+/* 이미지 1장 장 = 무대: 상하 중앙·화면 맞춤(크롭 0)·장 안 스크롤 0. 갤러리 inline 스타일(폭 100%·grid)을 이겨야 해서 !important. 아래 44px = 점 스트립 자리. */
+.dm-page--stage{display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;padding:0 0 44px}
+.dm-page--stage .dm-section-wrap{width:100%;display:flex;justify-content:center}
+.dm-page--stage .dm-gallery{padding:0!important;max-width:100%}
+.dm-page--stage .dm-gal-grid{display:flex!important;flex-direction:column;align-items:center}
+.dm-page--stage .dm-gal-grid img{width:auto!important;height:auto!important;max-width:100%;max-height:calc(100vh - 44px);max-height:calc(100dvh - 44px)}
+.dm-page--stage .dm-gal-caption{text-align:center}
+/* 점 = 이미지 갯수만큼 두되 가로 스크롤 스트립(잘리지 않음 · 활성 점은 스크립트가 가운데로). 열 폭 안에 둔다. */
+.dm-page-dots{position:fixed;left:0;right:0;bottom:12px;max-width:var(--dm-mobile-max,430px);margin:0 auto;overflow-x:auto;white-space:nowrap;text-align:center;padding:6px 16px;scrollbar-width:none;z-index:50}
+.dm-page-dots::-webkit-scrollbar{display:none}
+.dm-page-dots-in{display:inline-flex;gap:8px;vertical-align:middle}
+.dm-page-dots .dot{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms;cursor:pointer}
+.dm-page-dots .dot.active{background:var(--dm-primary);width:20px;border-radius:4px}
+/* 카운터도 열 안(PC에서 화면 끝이 아니라 열 오른쪽 위). */
+.dm-page-counter{position:fixed;top:12px;right:calc(50% - min(50%, var(--dm-mobile-max,430px)/2) + 12px);background:rgba(0,0,0,0.55);color:#fff;font-size:11px;padding:4px 10px;border-radius:12px;z-index:60}
+/* PC 좌우 화살표 = 포인터 장치에서만. 모바일은 스와이프 그대로. */
+.dm-page-nav{display:none;position:fixed;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,0.35);color:#fff;font-size:22px;line-height:1;align-items:center;justify-content:center;cursor:pointer;z-index:60;border:0;transition:background .2s;user-select:none}
+.dm-page-nav:hover{background:rgba(0,0,0,0.6)}
+.dm-page-nav[disabled]{opacity:0.25;cursor:default}
+.dm-page-nav[data-dm-page-nav="prev"]{left:max(8px, calc(50% - var(--dm-mobile-max,430px)/2 - 56px))}
+.dm-page-nav[data-dm-page-nav="next"]{right:max(8px, calc(50% - var(--dm-mobile-max,430px)/2 - 56px))}
+@media (hover:hover) and (pointer:fine){.dm-page-nav{display:flex}}
 .dm-section-wrap{position:relative}
 `;
     }
@@ -404,11 +425,16 @@ html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 
   const dotsHtml =
     mode !== 'scroll' && totalPages > 0
-      ? `<div class="dm-page-dots">${pages.map((_, i) => `<span class="dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}</div>`
+      ? `<div class="dm-page-dots"><div class="dm-page-dots-in">${pages.map((_, i) => `<span class="dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}</div></div>`
       : '';
   const counterHtml =
     mode === 'slides' && totalPages > 0
       ? `<div class="dm-page-counter"><span id="dm-cur">1</span> / ${totalPages}</div>`
+      : '';
+  // ★ 2026-09-14 PC 좌우 화살표(포인터 장치에서만 CSS로 표시) — 스크립트가 배선. 2장 이상일 때만.
+  const navHtml =
+    mode === 'slides' && totalPages > 1
+      ? `<button type="button" class="dm-page-nav" data-dm-page-nav="prev" aria-label="이전" disabled>&lsaquo;</button><button type="button" class="dm-page-nav" data-dm-page-nav="next" aria-label="다음">&rsaquo;</button>`
       : '';
 
   return `<!DOCTYPE html>
@@ -451,6 +477,7 @@ ${pagesHtml}
 ${artDirection.grain ? '<div class="dm-grain" aria-hidden="true"></div>' : ''}
 ${dotsHtml}
 ${counterHtml}
+${navHtml}
 
 <script>
 (function(){
@@ -479,6 +506,8 @@ ${counterHtml}
   var sectionEls = Array.prototype.slice.call(document.querySelectorAll('.dm-section-wrap'));
   var dots = Array.prototype.slice.call(document.querySelectorAll('.dm-page-dots .dot'));
   var counter = document.getElementById('dm-cur');
+  var navPrev = document.querySelector('[data-dm-page-nav="prev"]');
+  var navNext = document.querySelector('[data-dm-page-nav="next"]');
 
   function bumpSection(sid, field) {
     if (!sid) return;
@@ -542,6 +571,22 @@ ${counterHtml}
     updateScrollPct();
     dots.forEach(function(d, i){ d.classList.toggle('active', i === idx); });
     if (counter) counter.textContent = String(idx + 1);
+    // ★ 2026-09-14 활성 점을 스트립 가운데로(34장이어도 안 잘림) + 첫/끝 장에서 화살표 비활성
+    var ad = dots[idx];
+    if (ad && ad.scrollIntoView) { try { ad.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); } catch (e) {} }
+    if (navPrev) navPrev.disabled = idx === 0;
+    if (navNext) navNext.disabled = idx >= pageEls.length - 1;
+  }
+
+  // 장 이동 한 곳 — 점 클릭·화살표·키보드가 같이 쓴다
+  function goToPage(i) {
+    if (!pageEls[i]) return;
+    if (MODE === 'slides') {
+      var viewer = document.querySelector('.dm-viewer');
+      if (viewer) viewer.scrollTo({ left: i * viewer.clientWidth, behavior: 'smooth' });
+    } else {
+      pageEls[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   // 페이지 단위 가시성 → 현재 페이지 추적 + dots/counter 갱신
@@ -593,16 +638,19 @@ ${counterHtml}
 
   // dots 클릭 → 해당 페이지로 이동
   dots.forEach(function(d, i){
-    d.addEventListener('click', function(){
-      if (!pageEls[i]) return;
-      if (MODE === 'slides') {
-        var viewer = document.querySelector('.dm-viewer');
-        if (viewer) viewer.scrollTo({ left: i * viewer.clientWidth, behavior: 'smooth' });
-      } else {
-        pageEls[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
+    d.addEventListener('click', function(){ goToPage(i); });
   });
+  // ★ 2026-09-14 PC 화살표 + 키보드 ←/→ (슬라이드 모드만). 입력칸에 포커스가 있으면 키는 넘기지 않는다.
+  if (navPrev) navPrev.addEventListener('click', function(){ goToPage(currentIdx - 1); });
+  if (navNext) navNext.addEventListener('click', function(){ goToPage(currentIdx + 1); });
+  if (MODE === 'slides') {
+    document.addEventListener('keydown', function(e){
+      var t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.key === 'ArrowRight') goToPage(currentIdx + 1);
+      else if (e.key === 'ArrowLeft') goToPage(currentIdx - 1);
+    });
+  }
 
   // 섹션 클릭 → 클릭 카운트 + 요소(버튼/링크/옵션/탭) 라벨 카운트.
   // 외부 링크/CTA는 클릭 즉시 이탈 — 떠나기 전에 비콘으로 클릭 보존.

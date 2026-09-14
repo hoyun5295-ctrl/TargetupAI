@@ -66,3 +66,19 @@ export function expandSlidePagesForSwipe(pages: SlidePage[]): SlidePage[] {
   }
   return changed ? out : pages;
 }
+
+/**
+ * ★ 2026-09-14 (박성용 접수 · 슬라이드 기능 개선) 이미지 무대 판정 (순수).
+ *   장이 "list_1xN 갤러리 1장"뿐이면(= 위 펼침 산출물 또는 좌우 슬라이드 업로드) 뷰어가 그 장을
+ *   화면 무대(dm-page--stage)로 그린다 — 상하 중앙·화면 맞춤·장 안 스크롤 0. 제목·버튼·상품이 섞인 장,
+ *   격자 갤러리(1:1 크롭이 의도), 2장 이상은 대상이 아니다(현행 그대로).
+ */
+export function isSwipeImagePage(page: SlidePage): boolean {
+  const secs = Array.isArray(page?.sections) ? page.sections : [];
+  if (secs.length !== 1) return false;
+  const s = secs[0];
+  if (String(s?.type) !== 'gallery') return false;
+  if (s?.props?.layout !== 'list_1xN') return false;
+  const imgs = Array.isArray(s.props?.images) ? s.props.images : [];
+  return imgs.length === 1 && String(imgs[0]?.url || '') !== '';
+}
