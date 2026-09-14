@@ -130,3 +130,30 @@ export function shouldFinalizeCampaign(i: FinalizeCheckInput): boolean {
   if (benchmark <= 0) return false;
   return resolved >= benchmark;
 }
+
+export interface ReconcileWriteInput {
+  /** MySQL 실측 합계(성공+실패+대기, 만료 실패 포함). 행을 못 찾으면 0. */
+  aggTotal: number;
+  pgSentCount: number | null | undefined;
+  pgSuccessCount: number | null | undefined;
+  pgFailCount: number | null | undefined;
+  /** send_config.sentTables 에 기록된 LIVE 테이블 수(recordedLiveTables). */
+  recordedTableCount: number;
+}
+
+/**
+ * ★ 2026-09-14 (B-0914-1) 재대조 0건 가드 (순수) — 실측 0건은 "발송 0"이 아니라 "못 찾음"일 수 있다.
+ *   금강제화 9/4 33,346건: SMSQ_SEND_13 에 적재됐는데 회사 라인이 재배정되자 조회 합집합에서 그 테이블이
+ *   빠졌고, 재대조 워커가 0건을 읽어 sent/success/fail 을 0 으로 덮고 굳혔다(9/10 11:57 KST).
+ *   적재 증거(PG 카운트 > 0 또는 sentTables 기록)가 있는데 실측이 비면 덮지 않는다.
+ *   증거가 전혀 없는 진짜 0건(적재 실패 failed)은 종전대로 써서 72h 굳힘이 유지된다.
+ * @returns true = 이번 재대조는 UPDATE 하지 않는다(로그만)
+ */
+export function shouldSkipReconcileWrite(i: ReconcileWriteInput): boolean {
+  if (Math.max(0, Number(i.aggTotal) || 0) > 0) return false;
+  const pgEvidence =
+    Math.max(0, Number(i.pgSentCount) || 0) > 0 ||
+    Math.max(0, Number(i.pgSuccessCount) || 0) > 0 ||
+    Math.max(0, Number(i.pgFailCount) || 0) > 0;
+  return pgEvidence || Math.max(0, Number(i.recordedTableCount) || 0) > 0;
+}

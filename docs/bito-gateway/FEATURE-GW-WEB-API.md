@@ -298,3 +298,52 @@ API 로 붙는 고객용이라 묶음과 무관하게 그대로다.
 
 남긴 것 = 발급 자산 3종(패키지 2 · 안내서) · API 연동 매뉴얼(직접연동 고객) ·
 통합 전달 묶음(DB 권장 스키마가 여기에만 있다) · 통합 SHA-256 · 공용 설정 예시(참고용, 실적 1회).
+
+### 9-5. 2026-09-14 릴리즈 승인 ≠ 고객 배포자료 게시 — 1.0.28 발급이 막혀 있었다
+
+발견 = 보안 §8 A3 실측(시험 Agent `bito-test-99` 발급)이 「고객 배포자료에 Bito-Agent-v1.0.28-linux-amd64.tar.gz이 없습니다」로 실패. 발급은 **승인된 릴리즈 버전 이름**으로 패키지·안내서를 `/opt/bito-gateway/app/Bito Agent/`에서 읽는다(`services/agent-install-bundle.js:747·778-785` · `CUSTOMER_DOWNLOAD_DIR` 미설정 = 기본 경로, 프로세스 환경 실측). 1.0.28은 0912 21:32:47 승인(release_set 32)됐는데 이 폴더는 1.0.26에서 멈춰 있었다(1.0.27·1.0.28 없음) → 그 뒤 신규 발급은 전부 같은 오류.
+
+왜 몰랐나(두 겹):
+- 빌드(`deploy/build-agent.sh:404-406`)는 `deploy/agent/`에 소문자 `bito-agent-v<ver>-…`로만 게시한다. 발급 폴더로 옮기는 스크립트가 없다(0904부터 「직접 올려야 반영」).
+- 이 화면의 `bundle_ready`는 폴더 파일의 최고 버전(1.0.26)으로 판정하고 승인 릴리즈 버전을 보지 않았다. 승인만 하고 게시를 빠뜨려도 화면은 준비됨이라 말했다. → **★0914(2) 정정(아래 9-6)**.
+
+0914 게시(Harold 승인 · 서버 실행 Harold):
+| 파일 | 출처 | SHA-256 |
+|---|---|---|
+| `Bito-Agent-v1.0.28-linux-amd64.tar.gz` | 빌드 산출물(빌드 체크섬 `OK`) · 이름만 대문자 | `05e8f3ce917667f7b5a4f2efda0387812d627132681c48672aab5e6f0d602a32` |
+| `Bito-Agent-v1.0.28-windows-amd64.zip` | 같음 | `3acb446705bdd4196c86e21e04cb90ae02249996a0a956a1fd80ae7f285e7b6a` |
+| `Bito-Agent-Install-Manual-v1.0.28.pdf` + `.sha256` | 생성기 재생성(아래) · 로컬 저장소 `Bito Agent/`도 같은 판으로 교체 | `aed92147678e9e4f7a7469a123457bf1744f75cda9233b618af70737d07b99b3` |
+| `Bito-Agent-v1.0.28-checksums.sha256` | 서버 실제 파일 12항목에서 계산(1.0.26과 같은 구성) · 대조 12/12 `OK` | — |
+
+안내서를 새로 만든 이유(추측 아님 · 본문 대조):
+- 로컬에 있던 1.0.28 PDF(0908 12:49판)는 낡았다 — 새 판 대비 **Windows 최초 설치 절 · `bill_id` 매장 구분 안내 · PostgreSQL TLS 주의**가 빠져 있었다(231줄 vs 248줄).
+- 생성기 재현성 확인 = 새로 만든 1.0.26 ↔ 게시 1.0.26 본문 차이 0.
+- 운영값 = 게시 1.0.26 본문(`edge.hanjulgw.com` · `9443`) + 1.0.28 빌드 기록 `bootstrap_version=1.0.27`(`build-agent.sh:350`이 패키지 속 부트스트랩 버전을 검사). 결과 = 게시 1.0.26 대비 차이는 Agent 버전 표기와 머리말 `supervisor bootstrap v1.0.27` 한 줄뿐.
+
+게시 뒤 = 경계 검사기 `CUSTOMER_DELIVERY_BOUNDARY_OK files=14`(로컬) · A3 실측 발급 성공(묶음 속 패키지·안내서 = 위 해시).
+
+**[범위 밖 · 기록만]**
+- 게시된 `Bito-Agent-v1.0.26-checksums.sha256`의 안내서 줄(`5b2f3752…`)이 현재 1.0.26 안내서(`59127193…` · `.pdf.sha256`·로컬 실측 일치)와 다르다 — 체크섬 파일을 안내서 재생성 전에 만들고 갱신하지 않았다.
+- 게시 1.0.26 안내서도 `supervisor bootstrap v1.0.28`을 인쇄한다. 1.0.26 패키지 속 실제 부트스트랩 버전은 미확인.
+
+⛔ 다음 릴리즈부터: 승인 전에 `Bito Agent/`에 그 버전 패키지 2 · 안내서(+`.sha256`) · 체크섬 파일을 게시하고, 안내서는 **그 빌드 기록의 `bootstrap_version`**으로 만든다.
+
+### 9-6. 2026-09-14(2) 「묶음 발급」 KPI를 승인 버전 기준으로 (Harold "남은 거 전부")
+
+| 고친 것 | 내용 |
+|---|---|
+| `routes/customer-downloads.js` | `bundleReadiness`·`loadApprovedVersions` 신설. 승인 릴리즈 조회는 발급이 쓰는 `loadApprovedRelease`(`services/agent-install-bundle.js`)를 그대로 부른다(새 SQL 0 · 운영 발급에서 이미 도는 조회). 파일명은 슬롯 패턴(`findArtifactFile`)이 소유 · 새로 조립하지 않는다. OS 레인(linux·windows · amd64)마다 「승인 버전 패키지 + 같은 버전 안내서」가 있어야 `ready`. 승인 없는 레인은 판정에서 뺀다 · 전부 없으면 불가 |
+| 응답 | `summary.bundle_assets` = 레인별 `{approved_version, package, manual, ready}`(종전 불리언 3개 폐기 · 소비처 = 이 화면 1곳) · `approved_lookup_failed` 신설. 조회가 실패해도 파일 목록은 200으로 내고 발급은 「불가」 |
+| `CustomerDownloadsPage.jsx` | KPI 부제 = `리눅스 v1.0.28 O · 윈도우 v1.0.28 O` / `… 패키지·안내서 없음` / `승인 없음` / `승인 릴리즈 조회 실패` |
+
+검증 = 계약 테스트(0914 재현: 승인 1.0.28·게시 1.0.26 → 불가 · 게시 뒤 가능 · 조회 실패 → 200·목록 유지·불가 · 순수 판정 5장면) · API `npm test` exit 0 · 대시보드 `npm test` 25건 실패 0 · 빌드 exit 0.
+
+**배포 기록(0914 11:07~11:08 · 런북 §3-1·§3-2 · 명령 하나씩)**: 사전 대조 = 서버 `agents.js` `f0520aecc459`(0913 배포본) · `customer-downloads.js` `d2bc7453d384` = 로컬 수정 전 내용과 일치 · `check.sh` `GW_CHECK_OK` · `customer-downloads.js` `6a86e7153a91` `GW_DEPLOY_OK`(백업 `deploy-backups/20260914-110711`) → `agents.js` `49982e018c55`(감사 기록 `bundle_sha256` · §8 A3) `GW_DEPLOY_OK`(백업 `110730`) → 대시보드 manifest `ee143054bb4e` 46 files `GW_DEPLOY_OK`(백업 `110852/dist`) · 재대조 = 서버 해시 두 파일 일치 · live 번들 `CustomerDownloadsPage-BZOFYoj6.js`에 새 문구 · `bito-admin-api` active · 업로드 정리. **화면 확인(Harold)** = 「묶음 발급 가능 · 리눅스 v1.0.28 O · 윈도우 v1.0.28 O」 · 공개자료 7/7 · 카드 SHA = 게시 해시(`05e8f3ce…` · `3acb4467…`).
+- 감사 기록 `bundle_sha256`은 배포 뒤 발급이 아직 없어 운영 기록으로는 미확인(라우트 테스트로만 확인). 다음 발급 한 건의 `ISSUE_INSTALL_BUNDLE` detail로 확인한다.
+- 같은 화면 안내 박스 「설치·API 연동용 **13개** 공개 파일만 표시합니다」가 고정 문구였다(0906 에 슬롯 7개로 줄었는데 그대로). → **★0914(3) 정정(Harold 지시)**: 서버 슬롯 수 `{totalCount}`를 그린다 · 화면 테스트가 「숫자+개 공개 파일」 고정 문구를 막는다.
+- **★0914(3) 안 돌던 `web/api/test/customer-downloads-test.js` 현행화·등록(Harold 지시)**: 다운로드 경로(감사 기록·`X-Artifact-SHA256`·내부 파일과 0906 내린 슬롯 비노출·404·버전 잠금)를 검사하는 유일한 테스트라 지우지 않았다. 슬롯 7 · 안내서 pdf · `bootstrap_version` 부재 · 통합 묶음 v1.2(종전 기대값 v1.1은 파일 목록과도 맞지 않았다) · 승인 릴리즈 조회 응답 · 승인 버전 판정(리눅스 패키지 제거 → 불가 · 윈도우 준비)으로 맞추고 `npm test`에 등록. 검증 = 단독 `CUSTOMER_DOWNLOADS_TEST_OK` · API `npm test` exit 0 · 대시보드 `npm test` 25건 실패 0 · 빌드 번들에 「13개」 0.
+
+**남긴 것(기록)**
+- **게시 자동화는 만들지 않았다.** 빌드(`build-agent.sh`)는 `/home/invito/bito-gateway/deploy/agent/`, 발급 폴더는 `/opt/bito-gateway/app/Bito Agent/`이고 안내서는 로컬 생성기(한글 폰트) 산출물이라, 자동화하려면 새 배포 스크립트가 필요하다 → 게이트웨이 `CODEX.md` 규율 2(새 배포 스크립트 = 근거 보고 먼저). 이번 KPI 정정으로 누락은 화면에서 즉시 「불가」로 보인다.
+- **[범위 밖] `web/api/test/customer-downloads-test.js`는 한 번도 실행되지 않는다**(`npm test` 목록에 없음 · 0906 슬롯 13→7·`bootstrap_version` 제거를 반영하지 않아 돌리면 실패). 아무도 안 부르는 낡은 검사 — 정리·등록 판단 대기.
+- 게시 1.0.26 체크섬 파일·안내서 부트스트랩 표기(9-5 범위 밖 2건)는 **소비처 없음으로 닫는다**: 게시 뒤 화면·발급 모두 1.0.28 그룹만 읽는다(버전 잠금).

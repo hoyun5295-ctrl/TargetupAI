@@ -6086,6 +6086,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       `SELECT
         c.id, c.company_id, c.created_by, c.target_count, c.message_type, c.send_channel, c.send_type,
         c.result_final, c.sent_count, c.success_count, c.fail_count,
+        jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         TO_CHAR(${STAT_DATE_EXPR} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') as send_date,
         co.company_name,
         co.company_code,

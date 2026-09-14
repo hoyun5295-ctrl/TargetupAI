@@ -170,6 +170,7 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 | 2026-08-27 | 무인증 라우트 7개 폐쇄(`19933f0`). 관리자 API 키 회전. 외부 `200`→`401` 실측 |
 | 2026-08-28 | bind 봉투 암호화 코드 배포(`0584b68`, API 6파일). Codex 11라운드. 이행은 미실행 |
 | 2026-09-13 | Agent 역분석·서명 공급망 전수 점검(출고 바이너리·서버 실측). 강화 설계 §8 신설. 코드 변경 0 |
+| 2026-09-14 | §8 A3 발급 묶음 해시 표시 배포(0913)·운영 실측 통과. 실측 선행 조건으로 1.0.28 고객 배포자료 게시 누락 발견·게시(`FEATURE-GW-WEB-API.md` §9-5) |
 
 ## 8. Agent 역분석·서명 공급망 강화 (설계 · 2026-09-13)
 
@@ -236,15 +237,17 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 - 사실: `deploy/agent/*windows-amd64.zip` 옆에 `.sha256`이 없다(0913 확인 범위). 안내서 PDF에는 있다.
 - 처방: 발급 화면과 안내서에 설치 묶음 SHA-256과 대조 방법(PowerShell `Get-FileHash`)을 싣는다. A2 서명 이후 해시로 싣는다.
 - **정정(0913 코드 확인)**: 고객 다운로드 화면은 이미 Windows zip을 포함한 파일마다 SHA-256을 표시한다(`web/api/routes/customer-downloads.js:44` · `CustomerDownloadsPage.jsx:268`). 빠진 곳은 **발급 묶음 zip**이다 — `POST /agents/:id/install-bundle` 응답 헤더에 해시가 없다(`routes/agents.js:728-733`). 발급 묶음은 발급 때마다 조립되므로 A2를 기다릴 이유가 없다 → 순서를 A2 앞으로 옮긴다(8-4).
-- **★0913 코드 반영(게이트웨이 저장소 미커밋 · 11:41~11:44 .65 배포 완료 · 실측 남음)**: 서비스 `buildInstallBundle` 반환에 zip 실제 바이트 해시 `sha256` · 발급 응답 헤더 `X-Bundle-SHA256`(`X-Artifact-SHA256`과 같은 형식) · Agent 수정 모달 발급 성공 뒤 결과 패널(해시 전체 · SHA 복사 · 전달 문구 복사: Windows `Get-FileHash -LiteralPath` · Linux `sha256sum` 두 명령). 패널은 새 발급·Token 재발급 **시작 시**(커밋 여부를 화면이 모르므로)와 설정 파일 보기 때 지운다. 헤더가 없거나 64자 hex가 아니면 전달 문구를 만들지 않는다.
+- **★0913 코드 반영(게이트웨이 저장소 미커밋 · 11:41~11:44 .65 배포 완료 · ★0914 실측 통과 = 종결)**: 서비스 `buildInstallBundle` 반환에 zip 실제 바이트 해시 `sha256` · 발급 응답 헤더 `X-Bundle-SHA256`(`X-Artifact-SHA256`과 같은 형식) · Agent 수정 모달 발급 성공 뒤 결과 패널(해시 전체 · SHA 복사 · 전달 문구 복사: Windows `Get-FileHash -LiteralPath` · Linux `sha256sum` 두 명령). 패널은 새 발급·Token 재발급 **시작 시**(커밋 여부를 화면이 모르므로)와 설정 파일 보기 때 지운다. 헤더가 없거나 64자 hex가 아니면 전달 문구를 만들지 않는다.
 - **원문 정정 = 안내서에는 싣지 않는다(Harold 0913 승인)**: 안내서 PDF는 묶음 안에 들어가 바꿔치기 때 함께 바뀌므로 검증 수단이 못 되고, 발급마다 해시가 달라 값을 실을 수도 없다. 해시와 확인 명령은 담당자가 묶음과 다른 경로로 보낸다(패널 안내 문구).
 - 영향: 반환값 소비처 = `routes/agents.js` 1곳 · 서비스 소스를 텍스트로 읽는 테스트 3곳(`customer-downloads-contract-test.js` 파일명 · `customer-schema-consistency-test.js` 스키마명 · Go `issued_config_contract_test.go` = `buildInstallerYaml`만 호출) 읽는 대상 무변경 · 묶음 바이트·토큰 회전·트랜잭션 순서 무변경 · Go 바이너리·릴리스·운영 Agent 무관.
 - **★0913 같은 날 정정 = 응답 헤더를 토큰 UPDATE 전에 확정**: 첫 반영은 헤더를 커밋 뒤에 붙였다. 헤더 값이 틀리면 `setHeader`가 던지고(값 `undefined` = `ERR_HTTP_INVALID_HEADER_VALUE` 실행 확인) 그때는 토큰만 바뀌고 묶음은 전달되지 않는다 → 재발급(force)한 운영 Agent가 끊긴다. API 배포가 파일 하나씩이라 "라우트만 새 것"인 사이에도 난다. 처방 = 서비스 `bundleResponseHeaders(bundle)`가 헤더 6개(종전 5개 값 그대로 + 해시)를 만들고 `http.validateHeaderValue`·해시 형식·본문 Buffer를 검사 → 라우트가 **UPDATE 전에** 호출(틀리면 `BUNDLE_RESPONSE_INVALID` 롤백) → 커밋 뒤에는 그 목록을 붙이기만 한다. 서비스가 옛 것이면 함수가 없어 역시 UPDATE 전에 멈춘다 = 배포 순서 무관.
 - 검증: 신규 `test/agent-install-bundle-route-test.js`(실제 라우트 호출: 정상 발급 = 응답 해시가 받은 바이트 해시·종전 헤더 5개 값 동일 · 해시 없는 묶음 force 재발급 = `UPDATE_CREDENTIAL` 0 · 서비스 함수 없음 = `UPDATE_CREDENTIAL` 0) · **변이 확인**: 검사를 커밋 뒤로 되돌린 라우트를 로더로 끼워 돌리면 이 테스트가 `UPDATE_CREDENTIAL·AUDIT·COMMIT`을 잡아 실패(exit 1) · 계약 테스트에 헤더 목록·잘못된 값 4종 거부 · API `npm test` 전체 exit 0 · 대시보드 `npm test` 25건 실패 0 · `test-agent-token-tools` 10건 통과(헤더 이름 대조는 서비스 함수를 실제로 불러 확인) · 대시보드 빌드 exit 0.
-- 같은 구조 전수(`res.setHeader` grep · web/api/routes): `customer-downloads.js:370` = 감사 INSERT 뒤지만 자격증명 변경 없음 · **[범위 밖] `agent-control-enrollment.js:44` `sendBootstrapCredential`** = `issueLegacyBootstrapCredential` 발급 뒤 결과값으로 헤더 13개를 붙인다. 서비스가 그 값을 사전 검증하는지 읽지 않아 결함 여부 미판정.
+- 같은 구조 전수(`res.setHeader` grep · web/api/routes): `customer-downloads.js:370` = 감사 INSERT 뒤지만 자격증명 변경 없음 · `agent-control-enrollment.js:44` `sendBootstrapCredential` = 발급 커밋 뒤 결과값으로 헤더 13개를 붙인다. **★0914(2) 판정 = 결함 아님**: 헤더 값이 전부 커밋 전에 형식 검사를 통과한 값이다(`services/agent-credential-service.js:27-28` 정규식 · `:148-178` 모드 2종·ID 영숫자·os `linux`·arch `amd64`·release_id 양의 정수·해시 64자 소문자 hex · `:218-234` `child_digest` = 입력값 일치 · 시각 = DB 시각 ISO). 커밋 뒤 `setHeader`가 던질 값이 없다.
 - **배포 기록(0913 · 런북 §3-1·§3-2)**: 사전 대조 = 서버 두 파일이 로컬 수정 전 내용과 SHA-256 일치(`agents.js` CRLF `8e2439614efd` · 서비스 LF `707a10b4ebb3` = 서버 직접 수정 없음) · `check.sh` = `GW_CHECK_OK` · 서비스 `bad3a308c0c9` `GW_DEPLOY_OK`(백업 `deploy-backups/20260913-114118`) → 라우트 `f0520aecc459` `GW_DEPLOY_OK`(백업 `20260913-114143`) → 대시보드 manifest `e21f9ee29134` 46 files `GW_DEPLOY_OK`(백업 `20260913-114405/dist`) · 재대조 = 서버 해시 두 파일 일치 · live 번들 `CommercialAccountsPage-BrSWYkAG.js`·`api-XFz4Zetm.js`에 문구·헤더명 존재 · `bito-admin-api` active · 업로드 잔여물 정리.
+- **★0914 운영 실측 통과**: 시험 Agent `bito-test-99`(heartbeat 이력 없음 · 허용 IP `203.0.113.10` 문서 예시 대역) Linux 발급 → 모달 전달 문구 SHA-256 `80fc4ca8f807dc1784225f4c2946dad721dcaaa84df1c60c0e0d9268884db3fc` = 받은 zip `Get-FileHash`(16,107,471바이트) 일치. 묶음 내부 = CRC 정상 · 10항목(최초 설치라 `first-install.sh` 포함) · 내부 `checksums.sha256` 9항목 불일치 0 · 패키지·안내서 = 게시본 해시 일치 · 토큰 채워짐. 선행 조건이던 1.0.28 고객 배포자료 게시 누락은 `FEATURE-GW-WEB-API.md` §9-5가 소유한다(첫 발급 시도는 그 누락으로 토큰 UPDATE 전에 실패·롤백 = 새 라우트의 실패 경로가 운영에서 한 번 돈 것).
 - 배포: API 파일 2개 = 재기동 2회(`deploy.sh:140` restart). 같은 프로세스가 고객 REST 접수(`server.js:878`)·Agent 제어/heartbeat(`server.js:876-877`)를 받으므로 발송 적은 시간대. 재기동 중 요청의 처리 결과는 미검증.
-- 하지 않은 것: 감사 기록(`ISSUE_INSTALL_BUNDLE`)에 해시 저장(추가 과제 후보: 모달을 닫은 뒤 고객사가 대조를 물으면 서버에서 찾을 곳이 없다) · 브라우저에서 받은 blob 해시 재계산 대조.
+- 하지 않은 것: 브라우저에서 받은 blob 해시 재계산 대조.
+- **★0914(2) 추가 과제 반영(Harold "남은 거 전부")**: 감사 기록 `ISSUE_INSTALL_BUNDLE` detail에 `bundle_sha256`(응답 헤더와 같은 값 · 라우트 테스트가 대조). 모달을 닫은 뒤 고객사가 대조를 물으면 여기서 찾는다. zip 해시는 자격증명이 아니다(토큰은 zip 안 · 해시로 되돌릴 수 없음).
 
 **A4. 출고본의 회사명 잔존과 검사기 누락**
 - 사실: `gw.invito.local`이 소스 3곳에서 기본값·예시로 들어가 두 출고본에 남는다 — `internal/agent/onboarding/install_bundle.go:160` · `internal/agent/setup/wizard.go:95` · `cmd/agent/main.go:2446`. 검사기는 `github.com/invito/bito-gateway`·`INVITO_MMS`만 막는다.
@@ -284,7 +287,7 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 | 순서 | 항목 | 성격 | 선행 조건 |
 |---:|---|---|---|
 | 1 | A1 복구 키 분리 **(0913 분리 완료 · `build` 확인은 5번에서)** | 운영 · 코드 0 | — |
-| 2 | A3 발급 묶음 zip 해시 표시 **(0913 배포 완료 · 실측 남음)** | 게이트웨이 API 헤더 · 발급 모달 | 없음 |
+| 2 | A3 발급 묶음 zip 해시 표시 **(0913 배포 · 0914 실측 통과 · 종결)** | 게이트웨이 API 헤더 · 발급 모달 | 없음 |
 | 3 | A9-나 유출 시 재설치 절차 + 시험 에이전트 리허설 | 문서 · 운영 리허설 | 운영 authority·게시 폴더와 분리된 작업 폴더 |
 | 4 | A2 인증서 조사·조달 | 조달 | Harold 구매 결정 |
 | 5 | 릴리스 1.0.29 = A2 서명 + A4·A5·A6 · **새 설치용 게시만, 기존 4대 롤아웃 없음** · A1 `build` 확인 | 빌드 스크립트 · 릴리스 | A2 인증서 · 새 릴리스 승인이 1.0.28 상태(되돌리기 조건)를 바꾸는지 확인 |
@@ -297,7 +300,7 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 
 - **A1**: root 세션에서 `private/`에 `release.pem`만 남음 · 다음 릴리스 `build` 성공 · 이 절에 보관 기록. (**0913 = 1·3번 충족** · `build` 성공은 다음 릴리스 때 확인)
 - **A2**: 로컬 PowerShell `Get-AuthenticodeSignature`가 3종 모두 `Valid` · 서명본으로 만든 릴리스를 부트스트랩이 기동해 `Recover` 해시 대조 통과.
-- **A3**: 발급 화면 해시 = 실제 묶음 `Get-FileHash` 값(안내서는 0913 정정으로 제외). 실측은 **heartbeat 이력 없는 시험 Agent**로 한다. 발급이 토큰을 회전하므로 운영 Agent로 하면 연결이 끊긴다.
+- **A3**: 발급 화면 해시 = 실제 묶음 `Get-FileHash` 값(안내서는 0913 정정으로 제외). 실측은 **heartbeat 이력 없는 시험 Agent**로 한다. 발급이 토큰을 회전하므로 운영 Agent로 하면 연결이 끊긴다. (**0914 충족** = `bito-test-99` 모달 `80fc4ca8…` = 받은 zip `Get-FileHash`)
 - **A9**: 재설치 절차 문서 · 시험용 키 2세대 정책을 박은 설치 파일로 시험 에이전트를 재설치해 기동·heartbeat·업데이트 서명 검증까지 통과한 증거.
 - **A4**: 새 출고본 `grep -aic invito.local` = 0 · 검사기에 `gw.invito.local`을 넣은 표본이 차단되는지 계약 확인(**0913 계약 확인 완료** · 새 출고본 확인은 다음 릴리즈 빌드 때).
 - **A5**: 마법사 기본 선택이 TLS 사용(**0913 소스 반영** · 단위 테스트 통과).

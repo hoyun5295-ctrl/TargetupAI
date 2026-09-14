@@ -96,3 +96,36 @@ describe('shouldFinalizeCampaign — 결과 캐시 확정 판정 (조기 확정 
     }))).toBe(false);
   });
 });
+
+// ★ 2026-09-14 금강제화 9/4 33,346건(B-0914-1) — 재대조 워커가 MySQL 0건을 "발송 0"으로 읽고
+//   sent/success/fail 을 0 으로 덮어 굳힌 사고. 0건은 증거가 아니다 — 적재 증거가 있으면 덮지 않는다.
+import { shouldSkipReconcileWrite } from './sms-table-split';
+
+describe('shouldSkipReconcileWrite — 실측 0건은 "못 찾음"이지 "발송 0"이 아니다', () => {
+  test('금강제화 사고: 실측 0 + PG 카운트 있음 → 덮지 않는다', () => {
+    expect(shouldSkipReconcileWrite({
+      aggTotal: 0, pgSentCount: 33346, pgSuccessCount: 28423, pgFailCount: 4921, recordedTableCount: 1,
+    })).toBe(true);
+  });
+  test('복구 뒤 재대조: 실측 0 + PG 0 이어도 적재 기록(sentTables)이 있으면 덮지 않는다', () => {
+    expect(shouldSkipReconcileWrite({
+      aggTotal: 0, pgSentCount: 0, pgSuccessCount: 0, pgFailCount: 0, recordedTableCount: 1,
+    })).toBe(true);
+  });
+  test('진짜 0건(적재 기록 없음 + PG 0) → 종전대로 쓴다 (failed 0건 유지·72h 굳힘 불변)', () => {
+    expect(shouldSkipReconcileWrite({
+      aggTotal: 0, pgSentCount: 0, pgSuccessCount: 0, pgFailCount: 0, recordedTableCount: 0,
+    })).toBe(false);
+    expect(shouldSkipReconcileWrite({
+      aggTotal: 0, pgSentCount: null, pgSuccessCount: undefined, pgFailCount: null, recordedTableCount: 0,
+    })).toBe(false);
+  });
+  test('실측이 하나라도 있으면 쓴다 (정상 교정 경로 불변)', () => {
+    expect(shouldSkipReconcileWrite({
+      aggTotal: 1, pgSentCount: 33346, pgSuccessCount: 28423, pgFailCount: 4921, recordedTableCount: 1,
+    })).toBe(false);
+    expect(shouldSkipReconcileWrite({
+      aggTotal: 5, pgSentCount: 0, pgSuccessCount: 0, pgFailCount: 0, recordedTableCount: 0,
+    })).toBe(false);
+  });
+});

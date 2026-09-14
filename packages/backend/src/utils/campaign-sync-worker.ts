@@ -21,7 +21,8 @@ import { query } from '../config/database';
 import { syncCampaignResults } from './campaign-lifecycle';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, getPlatformNoticeCallback } from './sms-queue';
-import { shouldFinalizeCampaign } from './sms-table-split';
+import { shouldFinalizeCampaign, shouldSkipReconcileWrite } from './sms-table-split';
+import { recordedLiveTables } from './stats-table-scope';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 const BOOT_DELAY_MS = 60 * 1000;   // 서버 startup 안정화 후 첫 실행
@@ -391,6 +392,7 @@ const FINALIZE_FALLBACK_MS = 72 * 60 * 60 * 1000;
 async function reconcileFinalizedCampaigns(): Promise<void> {
   const targets = await query(`
     SELECT id, company_id, status, result_final, success_count, fail_count, sent_count,
+           jsonb_build_object('sentTables', send_config->'sentTables') AS send_config,
            COALESCE(scheduled_at, sent_at) AS send_base
       FROM campaigns
      WHERE (
@@ -422,6 +424,7 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
 
   let fixed = 0;
   let finalized = 0;
+  let skipped = 0;
   for (const camp of targets.rows) {
     try {
       const tables = await getCompanySmsTablesWithLogs(camp.company_id);
@@ -431,6 +434,29 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
       const sentCount = (counts?.total || 0);
       const successCount = (counts?.success || 0);
       const failCount = (counts?.fail || 0);
+
+      // ★ 2026-09-14 (B-0914-1) 0건 가드 — 실측 0은 "발송 0"이 아니라 "못 찾음"일 수 있다.
+      //   금강제화 9/4 33,346건: 적재 라인(SMSQ_SEND_13)이 회사 라인 재배정으로 조회 합집합에서 빠지자
+      //   이 자리가 0건을 읽어 sent/success/fail 을 0 으로 덮고 굳혔다(9/10 11:57 KST). 적재 증거
+      //   (PG 카운트 또는 sentTables 기록)가 있는데 실측이 비면 쓰지 않고 로그만 남긴다.
+      //   판정은 순수 함수(sms-table-split)가 소유한다. 증거 없는 진짜 0건은 종전대로 쓴다.
+      const recorded = recordedLiveTables(camp);
+      if (shouldSkipReconcileWrite({
+        aggTotal: sentCount,
+        pgSentCount: camp.sent_count,
+        pgSuccessCount: camp.success_count,
+        pgFailCount: camp.fail_count,
+        recordedTableCount: recorded.length,
+      })) {
+        skipped++;
+        // 보류해도 재대조 시각은 찍는다(Codex 1R high) — 위 SELECT 의 `result_synced_at < NOW() - 1 hour` 제한이
+        //   보류 건에도 걸려야 같은 캠페인이 매 5분 배치(LIMIT 50 · 오래된 순)를 점유해 뒤 캠페인의 교정·복구를
+        //   막지 않는다. 카운트·result_final 은 건드리지 않는다 — 시각만.
+        await query(`UPDATE campaigns SET result_synced_at = NOW() WHERE id = $1`, [camp.id]);
+        log(`재대조 0건 — 적재 증거가 있어 덮지 않음(보류) campaign=${camp.id} 기록=${recorded.join(',') || '없음'} ` +
+            `PG sent=${camp.sent_count} succ=${camp.success_count} fail=${camp.fail_count} 조회=${tables.join(',')}`);
+        continue;
+      }
 
       // 발송 기록이 있는 failed = 오판 → completed 복원. 진짜 0건 실패는 failed 유지.
       const newStatus = (camp.status === 'failed' && sentCount > 0) ? 'completed' : camp.status;
@@ -465,7 +491,7 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
       log(`재대조 1건 오류 campaign=${camp.id} (skip):`, oneErr?.message || oneErr);
     }
   }
-  if (fixed > 0 || finalized > 0) log(`재대조 사이클 — 대상 ${targets.rows.length}건 중 ${fixed}건 교정, ${finalized}건 굳힘(72h 탈출구)`);
+  if (fixed > 0 || finalized > 0 || skipped > 0) log(`재대조 사이클 — 대상 ${targets.rows.length}건 중 ${fixed}건 교정, ${finalized}건 굳힘(72h 탈출구), ${skipped}건 0건 보류`);
 }
 
 export function startCampaignSyncWorker(): void {

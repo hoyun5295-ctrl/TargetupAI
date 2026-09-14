@@ -108,7 +108,8 @@ router.get('/summary', async (req: Request, res: Response) => {
     //   result_final/sent/success/fail을 함께 SELECT → 완료분은 PG, 진행 중분만 MySQL.
     let summaryQuery = `SELECT
         c.id, c.company_id, c.created_by, c.target_count,
-        c.sent_count, c.success_count, c.fail_count, c.result_final
+        c.sent_count, c.success_count, c.fail_count, c.result_final,
+        jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config
        FROM campaigns c
        WHERE c.company_id = $1`;
 
@@ -331,6 +332,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         c.id, c.company_id, c.created_by, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
         c.target_count,
         c.sent_count, c.success_count, c.fail_count, c.result_final,
+        jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number, c.kakao_targeting,
         c.subject, c.message_subject, c.mms_image_paths,
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
@@ -351,7 +353,9 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     // ★ 2026-07-30: 브랜드 행이 SMSQ(msg_type='F')로 합류 — SMS 집계가 전 채널을 담는다.
     const campListSmsMap = await aggregateSmsCountsByCampaign(campListNonFinal);
     const campListSentTimeMap = await aggregateSmsSendTimesByCampaign(campListNonFinal);
-    const campaigns = result.rows.map((c: any) => {
+    const campaigns = result.rows.map((row: any) => {
+      // ★ 2026-09-14: send_config(sentTables)는 집계 테이블 해석용으로만 싣는다 — 응답에는 내지 않는다(내부 테이블명).
+      const { send_config: _sentTables, ...c } = row;
       if (c.result_final) {
         // PG 캐시 — 6h 경과 완료 캠페인 (워커 확정값). 대기는 정의상 0.
         const dc = computeDisplayCounts(true, c.sent_count, Number(c.success_count || 0), Number(c.fail_count || 0), 0);
@@ -475,6 +479,7 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
       `SELECT
         c.id, c.company_id, c.created_by, c.message_type, c.message_content, c.status,
         c.target_count, c.sent_count, c.success_count, c.fail_count, c.result_final,
+        jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         c.scheduled_at, c.sent_at, c.created_at, c.send_channel,
         u.login_id as created_by_name
        FROM campaigns c

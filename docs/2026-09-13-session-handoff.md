@@ -1,4 +1,4 @@
-# 0913 세션 인계: 대행발송·싱크에이전트 적대검토 종결 · 비토 Agent §8 A4~A6 소스 반영 (2026-09-13 작성)
+# 0913 세션 인계: 대행발송·싱크에이전트 적대검토 종결 · 비토 Agent §8 A4~A6 소스 반영 (2026-09-13 작성 · 0914 배포·원문 시크릿 제거 반영)
 
 > 이 문서는 **Harold님이 실행할 순서와 명령**, 다음 세션이 이어받을 자리만 담는다. 사실·경위의 소유 문서는 아래 링크가 가진다.
 > 착수 첫 명령은 **현재 상태 확인**이다(이 문서의 상태는 작성 시점 값).
@@ -50,6 +50,16 @@
   - 남은 것 = 수용 위험 2가지(FEATURE-AGENCY-SEND 불변 26 ③ 끝) · 범위 밖 발견(§2-6)
 
 ## 2. Harold님 실행 순서
+
+### 2-★ 0914 진행 상태 (Harold님 실행 결과 · 다음 세션은 여기부터)
+
+| 단계 | 결과 |
+|---|---|
+| §2-1 커밋·푸시 | 완료. 첫 push는 pre-push 전체 테스트에서 2건이 5초 제한시간에 걸려 막힘(테스트 안 첫 모듈 로딩 · 코드 결함 아님) → 해당 묶음 3곳 30초 상한으로 정정 · 로컬 전체 282파일 4,398건 통과 뒤 재푸시 |
+| §2-2 배포 | 백엔드 09:59:36 KST 기동 · `✅ MySQL(QTmsg) 연결됨` · pm2 `targetup-backend` fork 1개 online. 배포본 소스 grep = worker 인수·활성화 가드·staging 정리 7곳 · 날짜 셀 처리 4곳. 09:57:28 기동의 MySQL 연결 시간 초과는 그 전 프로세스 기동 기록(그 프로세스도 뒤이어 직접발송 1/1 완료) |
+| §2-3 실측 | 대행 조회 3개 기대값(대조가 못 찾는 캠페인 0행 · 진행 중 접수 숫자 저장값 0 · `campaign_send_staging_pkey` 유일) · 이새 실제 키 `HTTP 200` · 이새 에이전트 동기화 복귀(해시전환 t) · 서버 보관 로그 인증값 흔적 두 회사 모두 f/f. 아난티 마지막 통신 09-02(0912 이전 · 이번 변경과 무관 · 설치 재시도 회신 대기) |
+| §2-4 원문 시크릿 | R0 = PG 150015 · 원문 84 · 해시 1 · 불일치 0 · 중복키 0 · 유일 인덱스 0 → R1 `UPDATE 83`(확인 0·0) → R2 `UPDATE 84` → R3 원문잔존 0. **남은 확인 = R2 뒤 이새 통신 갱신**(조회 시점 마지막 통신 01:30:06 UTC · 지금 01:39:53 UTC · 약 1시간 주기). R3 명령의 `updated_at` 모호 오류는 문서 SQL을 `s.updated_at`로 정정 |
+| 남은 것 | R3 재확인 → §2-5 운영 실측 → 게이트웨이 저장소 커밋(대표님 직접) → §2-6 판단 대기 |
 
 ### 2-0. 현재 상태 확인
 
@@ -165,7 +175,7 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "UPDATE companies 
 
 **R3 · 확인**: §2-3의 이새 인증 명령은 DB 원문을 읽으므로 R2 뒤에는 쓸 수 없다. 원문 0과, 이새 에이전트가 R2 뒤에도 계속 접속하는지로 확인한다.
 ```bash
-docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT (SELECT COUNT(*) FROM companies WHERE api_secret IS NOT NULL) AS 원문잔존, (SELECT MAX(updated_at) FROM sync_agents s JOIN companies c ON c.id = s.company_id WHERE c.name = '이새에프앤씨') AS 이새_마지막통신;"
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT (SELECT COUNT(*) FROM companies WHERE api_secret IS NOT NULL) AS 원문잔존, (SELECT MAX(s.updated_at) FROM sync_agents s JOIN companies c ON c.id = s.company_id WHERE c.name = '이새에프앤씨') AS 이새_마지막통신, NOW() AS 지금;"
 ```
 기대 = 원문잔존 0 · 이새 마지막 통신이 R2 이후에도 계속 갱신(1시간 주기).
 
@@ -213,7 +223,7 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT (SELECT CO
 
 **한줄로 세션** (작업 디렉터리 `C:\Users\ceo\projects\targetup`)
 ```text
-0913 인계 이어가자. docs/2026-09-13-session-handoff.md 먼저 정독하고 §2-0 현재 상태 확인부터 시작해
+0913 인계 이어가자. docs/2026-09-13-session-handoff.md §2-★ 0914 진행 상태부터 읽고 R3 이새 통신 재확인과 §2-5 운영 실측을 이어가자
 ```
 
 **비토 게이트웨이 세션** (작업 디렉터리 `C:\Users\ceo\projects\bito-gateway`)

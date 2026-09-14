@@ -815,7 +815,17 @@ export async function getCompanyAllLiveSmsTables(companyId: string, userId?: str
   const companyLive = userId ? await getCompanySmsTables(companyId) : userLive;
   const allUserLive = await getAllCompanyUserLineTables(companyId);
   const allBulk = await getAllBulkSmsTables();
-  return mergeLineTables(mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive), allBulk);
+  // ★ 2026-09-14 (B-0914-1): 전 bito 라인도 합친다 — 0717 정산(getBillingCompanyTables)과 같은 처방.
+  //   전 bulk 는 넣으면서 bito 는 현재 배정분만 넣던 탓에, 금강제화 9/4 33,346건(SMSQ_SEND_13)이
+  //   회사 라인 재배정(→ 대량발송(2){4,5,6}) 뒤 이 합집합에서 사라졌다. 재대조 워커가 0건을 읽어
+  //   PG 카운트를 0/0/0 으로 덮었고 목록·상세 분포·발송내역·엑셀·통계가 전부 0 이 됐다.
+  //   "라인 해제/재배정 후에도 과거 발송 라인이 항상 보인다"는 이 함수의 약속을 bito 에도 지킨다.
+  //   발송 경로(getCompanySmsTables)는 그대로다 — 여기는 집계·큐 작업 전용이다.
+  const allBito = await getBitoSmsTables();
+  return mergeLineTables(
+    mergeLineTables(mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive), allBulk),
+    allBito,
+  );
 }
 
 /**

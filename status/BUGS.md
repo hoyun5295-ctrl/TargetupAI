@@ -55,6 +55,21 @@
 
 ## 2) 활성 버그
 
+### 🔴 B-0914-1 발송 결과 — 라인 재배정 뒤 과거 발송이 조회에서 사라지고, 재대조 워커가 그 0건을 PG에 굳힌다 (🟡 코드 수정 완료·배포 대기·PG 복구 SQL 대기) — 2026-09-09 접수 `cmttqx4vp0c93jnot0c3z0xqe`(서수란 P2 · 0914 재오픈) 금강제화 kumkang4 9/4 예약 33,346건
+
+- **증상**: 목록·채널통합·슈퍼관리자 목록·발송통계 엑셀이 전송 33,346 / 성공 0 / 실패 0 / 대기 0. 상세 상단 카드만 성공 28,423 / 실패 4,923. 통신사·실패사유 분포 "없음", 발송내역 총 0건. 담당자는 "대기 2건이 사라지면서 0이 됐다"로 봤다.
+- **실측(PG 0914 Harold)**: 캠페인 `8aa1dccf-4057-4ea4-8b7d-e5da0d86b4b2` `sentTables=["SMSQ_SEND_13"]`(비토 1번) · 회사 라인 = 대량발송(2) bulk `{4,5,6}` · 사용자 라인 없음 · PG `sent 0 · success 0 · fail 0 · result_final t · result_synced_at 2026-09-10 02:57 UTC(11:57 KST)` · 후불.
+- **원인 두 겹**: ① "현재 라인 합집합"(`sms-queue.ts getCompanyAllLiveSmsTables`)이 전 bulk 라인은 다 넣으면서 bito 라인은 **현재 배정분만** 넣었다 → 라인 재배정 뒤 13이 빠짐. ② 재대조 워커(`campaign-sync-worker.ts reconcileFinalizedCampaigns`)가 그 합집합으로 0건을 읽고 `sent_count·success_count·fail_count`를 0으로 UPDATE(카운트와 `result_synced_at`을 함께 쓰는 유일한 문 · 6h 확정문은 `sent_count > 0` 요구 + 카운트 미변경). 그 뒤 PG 캐시(`result_final=t`)를 읽는 화면 전부 0, `sentTables`로 읽는 상세 상단만 실값. 대기 2건 소멸(게이트웨이 `5b3d48e` 20:31)보다 앞이라 무관. 정산은 0717에 bulk+bito 합집합(`getBillingCompanyTables`)이라 청구 누락 없음 — 담당자가 본 "청구 수량 제외"는 발송통계 엑셀이다.
+- **같은 뿌리 3회째**: 0605 hpio(집계 라인 한정) · 0717 정산(bulk만) · 0910 [B-0910-1](#)(통계 sentTables 미조회 · 5곳만 고치고 4곳 남김).
+- **수정 4곳**: ① `getCompanyAllLiveSmsTables`에 `getBitoSmsTables()` 합류 — 소비처 14곳(results 상세 분포·발송내역·엑셀 · campaign-sms-export · 재대조 · 여정 알림 · lifecycle 3 · 선불 sweeper · copy-label · 큐 작업 7 · customer-timeline 2)이 한 번에 닫힘, 발송 경로(`getCompanySmsTables`) 불변 ② `sms-table-split.ts shouldSkipReconcileWrite`(순수) + 재대조 워커 0건 가드 — 적재 증거(PG 카운트 > 0 또는 `sentTables` 기록)가 있는데 실측 0이면 UPDATE 하지 않고 `재대조 0건 — 적재 증거가 있어 덮지 않음` 로그 ③ `send_config`를 안 싣던 SELECT 4곳(results.ts `/summary`·`/campaigns`·`/campaigns/export`, admin.ts `/stats/export`)에 `jsonb_build_object('sentTables', …)` 추가 · `/campaigns` 응답에서는 spread 전에 제거(내부 테이블명 노출 0) ④ 테스트 — `sms-table-split.test.ts` +4 · `utils/__tests__/line-reassignment-resilience.test.ts` 신설(합집합 bito 포함 3 · 발송 경로 불변 1 · SELECT 계약 5 · 가드 배선 2).
+- **복구(배포 뒤 · Harold 실행)**: 오염 후보 SELECT(`completed · result_final · sent_count 0 · target_count > 0 · sentTables 있음`) → `result_final=false, result_synced_at=NULL`로만 되돌림 → 재대조 72h 갈래가 5분 안에 실측값을 다시 쓰고 굳힘(숫자를 손으로 쓰지 않는다) → Redis `result_chart:<company>:<id>`·`result_msg_count:<company>:<id>` 삭제(완료 캠페인 24h 캐시).
+- **검증**: backend tsc 0 · 신규·인접 4파일 38건 통과 · 전체 suite 283파일 4,414건 통과(0914 11:16 · 가드 시각 기록 정정 뒤 재실행) · 실측 = PG 카운트 = `SMSQ_SEND_13` `status_code` GROUP BY 합 · 채널통합 33,346/성공/실패/대기 0 · 발송내역 총 33,346건 · 분포 표시.
+- **Codex 적대 1R(0914)**: high 1건 수용 — 0건 보류가 `result_synced_at` 갱신을 건너뛰어 1시간 제한이 안 걸리고 같은 캠페인이 매 5분 배치(LIMIT 50 · 오래된 순)를 점유할 수 있었다 → 보류 블록에서 시각만 `NOW()`로 찍는다(카운트·`result_final` 불변 · 계약 테스트 +1). 불수용(범위 밖 등재) = 별도 재시도 컬럼·백오프·격리·경보 — 기존 72h 갈래도 같은 1시간 제한만으로 운영돼 왔고 시간당 처리 상한 600건(5분 × 12 × 50).
+- **Codex 적대 2R(0914 · 라운드 상한)**: 1R high 닫힘 확인. 새 high 1건 = "`completed·result_final=true` 캠페인이 발송 7일 창 밖에서 보류되면 `result_synced_at` 이 앞당겨져 `< send_base + 7 days` 조건을 영구히 못 채우고 자동 재대조에서 빠진다" → **불수용(Harold 판단 대기)**. 근거: ①7일 창은 정상 재대조도 `NOW()` 를 찍어 첫 재대조에서 닫히는 기존 설계의 종료 방식이라 보류가 새로 만든 손실이 아니다 ②합집합 bito 합류(수정 ①) 뒤 보류는 라인그룹 비활성·삭제 또는 행 소멸에서만 남고, 그 복구는 운영 행위(라인 재활성)와 복구 SQL(`result_final=false, result_synced_at=NULL`)이 여는 길과 같다 ③Codex 권고(불일치 확정 건을 21일까지 시간당 재선정)는 기존 갈래의 부하·동작을 바꾸는 별도 축. 추가 과제로 등재.
+- **범위 밖(기록만)**: `expired-pending-sweeper.ts:32`·`system-monitor-worker.ts:62` bulk-only(STATUS ⑥-③ 기등재) · 재대조 0건 가드는 로그만(경보 없음 · 가드에 걸린 캠페인은 `result_final=false`로 남아 시간당 재확인) · 상세 3경로(results.ts 555·713·975)는 합집합 스캔(sentTables 정밀화 가능) · 선불 sweeper(14일 창)가 라인 이동 bito 캠페인의 실패분 환불을 시작함(방향은 맞음 · 배포 전 대상 SELECT로 범위 확인) · 재대조 보류 백오프·경보·확정 불일치 건 21일 재선정(Codex 1R·2R 권고).
+
+---
+
 ### 🟠 B-0912-1 알림톡 중계사 내부 반려(HREJ)가 담당자 문자 알림 대상에서 빠져 있다 (🔵 Open · 기록만) — 2026-09-12 코드 확인
 
 - **어디**: `utils/alimtalk-jobs.ts:245` 5분 폴링의 행 선택 조건이 `t.status IN ('APPROVED','REJECTED','KREJ') AND alarm_notified_status IS NULL` 이다. **`HREJ`가 없다.**
@@ -795,7 +810,7 @@
 > **위치**: 대행발송 전 경로(화면·원스텝 · 삭제 로직 자체가 부재). 이메일 접수 축(설계서 §18)은 반려 건이 접수 행을 만들지 않아 이 문제를 가속하지 않는다(그래서 그 축에서 분리).
 > **수정 방향**: 종결 상태(`expired`·`cancelled` 등) N일 경과 건의 수신자 행 purge 워커 단계. ⛔ 지우는 코드라 대상 상태 목록을 상수+테스트로 고정하고, 재접수(redo)가 이전 명단을 되살리는 화면 경로가 있어 purge된 건은 그 버튼을 막는 프론트 작업이 동반돼야 한다(설계서 §18-13 · 프론트 역할 지적). 별도 세션에서 영향표와 함께.
 
-### ✅ B-0825-7 대행발송 5분 워커에 겹침 방지 가드가 없다 (★2026-09-13(3) 코드완료 · 미커밋·배포 대기) — 2026-08-25 (이메일 접수 브레인스토밍 중 발견)
+### ✅ B-0825-7 대행발송 5분 워커에 겹침 방지 가드가 없다 (★2026-09-13(3) 코드완료 · 0914 배포완료 · 실측 대기) — 2026-08-25 (이메일 접수 브레인스토밍 중 발견)
 
 > **★2026-09-13(3) 닫음**: tick 전체가 아니라 **같은 단계끼리만** 막는다(`utils/stage-guard.ts` `createStageGuard` · `runAgencySendWorker`). 전체를 막으면 긴 1차 검사 동안 취소 마무리·만료·대조·당일 재검사가 멈춰 적재 여유 10분 안에 되돌아온 건이 만료된다. 건너뛴 단계는 앞 실행이 끝난 직후 한 번 이어 돈다. 즉시 진입점(승인·접수 직후 trigger)은 가드를 보지 않는다(중복은 선점 CAS·시도 키 잠금이 막는다). 같은 자리에서 단계 격리(한 단계 예외가 뒤 단계를 막지 않음)·행 격리도 함께 들어갔다. 상세 = FEATURE-AGENCY-SEND 불변 26 · §5 0913(3) 행. 아래 원문은 당시 기록이다.
 
