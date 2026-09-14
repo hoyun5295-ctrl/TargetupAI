@@ -26,6 +26,13 @@ export interface PendingBadgeCounts {
   agentChargeOrders: number | null;
   /** AI 크레딧 충전 요청 대기 — `ai_credit_requests.status='pending'` */
   credits: number | null;
+  /**
+   * 발신프로필 등록 승인 대기 — `kakao_sender_profiles` 의 `approval_status` 가 비었거나 `PENDING_APPROVAL`.
+   * ★ 2026-09-14 신설(Harold): 승인 요청이 와 있는데 "발송 관리" 메뉴에 불이 안 켜졌다 — 세는 축이 없었다.
+   *   산식은 화면 승인대기 탭(AlimtalkSendersSection · `approval_status || 'PENDING_APPROVAL'`)과 같다.
+   *   슈퍼 목록은 중지(is_active=false)된 프로필도 보여주므로 여기도 거르지 않는다 — 뱃지와 탭 숫자가 같아야 한다.
+   */
+  senderProfiles: number | null;
 }
 
 /** 한 축을 세고, 실패하면 null. 로그는 남긴다 — 조용히 사라지는 뱃지를 만들지 않는다. */
@@ -44,18 +51,28 @@ async function countPending(table: 'plan_requests' | 'deposit_requests' | 'agent
   return Number(r.rows[0]?.n) || 0;
 }
 
+/** 발신프로필 승인 대기 — 화면 승인대기 탭과 같은 산식(비었으면 대기로 본다). 컬럼 실존 = 0914 information_schema 실측. */
+async function countSenderProfilesPending(): Promise<number> {
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM kakao_sender_profiles
+      WHERE COALESCE(approval_status, 'PENDING_APPROVAL') = 'PENDING_APPROVAL'`,
+  );
+  return Number(r.rows[0]?.n) || 0;
+}
+
 /**
- * 요금/정산 뱃지 4축을 한 번에 센다 — 60초 주기로 도는 경량 조회.
+ * 요금/정산 뱃지 4축 + 발신프로필 1축을 한 번에 센다 — 60초 주기로 도는 경량 조회.
  *
  * 목록을 함께 가져오지 않는다. 충전 관리 목록 로더(`/charge-management`)는 거래 이력 페이지까지
  * 같이 끌어오므로, 뱃지 하나 때문에 그 무거운 쿼리를 주기로 돌리면 안 된다.
  */
 export async function getPendingBadgeCounts(): Promise<PendingBadgeCounts> {
-  const [planRequests, deposits, agentChargeOrders, credits] = await Promise.all([
+  const [planRequests, deposits, agentChargeOrders, credits, senderProfiles] = await Promise.all([
     countOne('plan_requests', () => countPending('plan_requests')),
     countOne('deposit_requests', () => countPending('deposit_requests')),
     countOne('agent_charge_orders', () => countPending('agent_charge_orders')),
     countOne('ai_credit_requests', () => countRechargeRequests('pending')),
+    countOne('kakao_sender_profiles', countSenderProfilesPending),
   ]);
-  return { planRequests, deposits, agentChargeOrders, credits };
+  return { planRequests, deposits, agentChargeOrders, credits, senderProfiles };
 }

@@ -4680,7 +4680,7 @@ router.get('/pending-badges', authenticate, requireSuperAdmin, async (_req: Requ
   } catch (error: any) {
     // CT가 축별로 이미 격리하므로 여기까지 오면 예상 밖이다 — 전 축 null로 내려 화면이 직전 값을 지킨다.
     console.error('대기 뱃지 카운트 실패:', error);
-    return res.json({ planRequests: null, deposits: null, agentChargeOrders: null, credits: null });
+    return res.json({ planRequests: null, deposits: null, agentChargeOrders: null, credits: null, senderProfiles: null });
   }
 });
 

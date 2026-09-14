@@ -654,6 +654,10 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | **dormant_yn** | char(1) DEFAULT 'N' | **2026-06-17: IMC 휴면 여부** |
 | **brand_message_yn** | char(1) DEFAULT 'N' | **2026-06-17: IMC 브랜드메시지 사용 여부 (brand_targeting_yn과 별개)** |
 | **channel_created_at** | timestamptz | **2026-06-17: 카카오 채널 생성일 (IMC createdAt)** |
+| **approval_status** | varchar | **★2026-09-14 information_schema 실측 등재** — 한줄로 내부 승인 워크플로우(`PENDING_APPROVAL`/`APPROVED`/`REJECTED` · NULL = 대기로 본다). IMC `status`와 별개. 슈퍼관리자 승인대기 뱃지(`utils/pending-badges.ts senderProfiles`)와 화면 승인대기 탭이 같은 산식 |
+| **approved_at** | timestamptz | ★2026-09-14 실측 등재 — 승인 시각 |
+| **approved_by** | uuid | ★2026-09-14 실측 등재 — 승인한 슈퍼관리자 users.id |
+| **reject_reason** | text | ★2026-09-14 실측 등재 — 반려 사유(3자 이상·500자 절단) |
 
 인덱스: `idx_ksp_company_status(company_id, status)`, **`idx_ksp_yellow_id_active(company_id, yellow_id) UNIQUE WHERE yellow_id IS NOT NULL AND COALESCE(is_active,true)=true`** (★2026-09-12 교체 실행완료 — 옛 `idx_ksp_yellow_id`는 DROP. 조건 없는 유니크라 **사용 중지한 프로필이 채널ID를 붙들어 재등록이 23505로 막혔다**. 휴면삭제 프로필을 사용불가로 내린 뒤 같은 채널을 다시 등록하는 것이 정상 절차라 활성 한정으로 좁혔다. 발신키 유니크 `kakao_sender_profiles_company_id_profile_key_key`는 그대로 — 재등록은 새 키를 받아 충돌하지 않는다)
 

@@ -107,17 +107,8 @@ export default function AdminDashboard() {
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
   const [outreachAllowed, setOutreachAllowed] = useState(false);
   const [outreachOpen, setOutreachOpen] = useState(false);
-  // ★ 2026-09-05 AI 영업 뱃지 = 숨기지 않은 실패 + 수신 미확인 발송(mount 1회 + 모달 닫힐 때 갱신 · 비허용 404 = 0 유지)
-  const [outreachBadge, setOutreachBadge] = useState(0);
-  const loadOutreachBadge = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const r = await fetch('/api/sales-outreach/badge', { headers: { Authorization: `Bearer ${token}` } });
-      if (!r.ok) return;
-      const d = await r.json();
-      if (d?.success) setOutreachBadge(Number(d.count) || 0);
-    } catch { /* 뱃지 실패 = 0 유지 */ }
-  };
+  // ★ 2026-09-14 (Harold) AI 영업 뱃지 제거 — 실패·미확인 수가 "고객 관리" 메뉴에 빨간 점으로 상시 켜져 있었다.
+  //   AI 영업은 ceo 전용 작업 화면이라 상단 메뉴 알림 축이 아니다(옛 /api/sales-outreach/badge 소비 0).
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
   const [aiTrainingAllowed, setAiTrainingAllowed] = useState(false);
   // ★ 2026-09-03: 베스트 구성(참조 골격) 열람 권한 (BEST_LAYOUT_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴 노출
@@ -631,6 +622,8 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [depositPendingCount, setDepositPendingCount] = useState(0);
   const [agentOrderPendingCount, setAgentOrderPendingCount] = useState(0);
   const [creditPendingCount, setCreditPendingCount] = useState(0);
+  // ★ 2026-09-14 (Harold) 발신프로필 승인 대기 — 발송 관리 > 템플릿 관리 뱃지. /pending-badges 의 senderProfiles 축.
+  const [senderProfilePendingCount, setSenderProfilePendingCount] = useState(0);
   const [showDepositApproveModal, setShowDepositApproveModal] = useState(false);
   const [showDepositRejectModal, setShowDepositRejectModal] = useState(false);
   const [depositTarget, setDepositTarget] = useState<any>(null);
@@ -1104,7 +1097,6 @@ useEffect(() => {
       const r = await fetch('/api/sales-outreach/access', { headers: { Authorization: `Bearer ${token}` } });
       const d = await r.json();
       setOutreachAllowed(d.allowed === true);
-      if (d.allowed === true) loadOutreachBadge();
     } catch { setOutreachAllowed(false); }
     try {
       const token = localStorage.getItem('token');
@@ -3206,6 +3198,8 @@ const handleSendBillingEmail = async (resend = false) => {
       if (d.deposits != null) setDepositPendingCount(Number(d.deposits) || 0);
       if (d.agentChargeOrders != null) setAgentOrderPendingCount(Number(d.agentChargeOrders) || 0);
       if (d.credits != null) setCreditPendingCount(Number(d.credits) || 0);
+      // ★ 2026-09-14 발신프로필 승인 대기(발송 관리 > 템플릿 관리 뱃지) — 같은 주기·같은 null 규칙.
+      if (d.senderProfiles != null) setSenderProfilePendingCount(Number(d.senderProfiles) || 0);
     } catch { /* 일시 오류 — 직전 값 유지, 다음 주기 재시도 */ }
   };
 
@@ -4616,7 +4610,7 @@ const handleApproveRequest = async (id: string) => {
                   // ★ 2026-08-16: 신규마케팅진단 = 허용 계정(기본 ceo)에만 노출 · 뱃지 = 신규 리드 수
                   ...(diagnosisAllowed ? [{ key: 'marketingDiagnosis', label: '신규마케팅진단', badge: diagnosisBadge }] : []),
                   // ★ 2026-08-24: AI 영업 = 허용 계정(기본 ceo)에만 노출 · 별도 모달(탭 아님 — 닫으면 고객사 탭 복귀)
-                  ...(outreachAllowed ? [{ key: 'salesOutreach', label: 'AI 영업', badge: outreachBadge, onClick: () => setOutreachOpen(true) }] : []),
+                  ...(outreachAllowed ? [{ key: 'salesOutreach', label: 'AI 영업', onClick: () => setOutreachOpen(true) }] : []),
                 ],
               },
               {
@@ -4635,7 +4629,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'agencyLedger', label: '대행발송 내역' },
                   // ★ 2026-08-26 §18 이메일 접수 관제 — 반려·격리 메일의 유일한 노출면
                   { key: 'agencyMail', label: '대행발송 접수' },
-                  { key: 'templates', label: '템플릿 관리' },
+                  // ★ 2026-09-14 (Harold) 발신프로필 승인 대기 = 이 탭(발신 프로필 화면)에 뱃지 — 60초 주기 + 승인·반려 직후.
+                  { key: 'templates', label: '템플릿 관리', badge: senderProfilePendingCount },
                 ],
               },
               {
@@ -4738,7 +4733,7 @@ const handleApproveRequest = async (id: string) => {
         <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
         {/* ★ 2026-08-24 AI 영업 아웃리치 모달 — 메뉴 클릭이 activeTab을 'salesOutreach'로 바꾸므로 닫을 때 고객사 탭으로 복귀 */}
         {outreachOpen && (
-          <SalesOutreachModal onClose={() => { setOutreachOpen(false); loadOutreachBadge(); if ((activeTab as string) === 'salesOutreach') setActiveTab('companies'); }} />
+          <SalesOutreachModal onClose={() => { setOutreachOpen(false); if ((activeTab as string) === 'salesOutreach') setActiveTab('companies'); }} />
         )}
         {/* 고객사 관리 탭 */}
         {activeTab === 'companies' && (
@@ -7341,7 +7336,7 @@ const handleApproveRequest = async (id: string) => {
       {activeTab === 'templates' && (
         <div className="space-y-4">
         {/* 발신 프로필 관리 — D130 AlimtalkSendersSection (IMC 연동 + 승인 워크플로우) */}
-        <AlimtalkSendersSection />
+        <AlimtalkSendersSection onChanged={loadPendingBadges} />
 
         {/* 템플릿 관리 */}
         <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">

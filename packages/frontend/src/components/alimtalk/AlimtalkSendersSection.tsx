@@ -80,7 +80,15 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'REJECTED',          label: '반려' },
 ];
 
-export default function AlimtalkSendersSection() {
+interface AlimtalkSendersSectionProps {
+  /**
+   * ★ 2026-09-14 승인·반려가 끝난 직후 부모가 상단 메뉴 뱃지(발신프로필 승인 대기)를 다시 세게 한다.
+   *   60초 주기를 기다리지 않게 하는 즉시 반영 축 — 없으면(독립 페이지) 아무 일도 하지 않는다.
+   */
+  onChanged?: () => void;
+}
+
+export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSectionProps = {}) {
   const [senders, setSenders] = useState<Sender[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -246,6 +254,7 @@ export default function AlimtalkSendersSection() {
           const data = await res.json();
           setToast(data.success ? '승인 처리 완료' : data?.error || '승인 실패');
           load();
+          if (data.success) onChanged?.();
         } catch (e: any) {
           setToast(e?.message || '승인 실패');
         } finally {
@@ -277,6 +286,7 @@ export default function AlimtalkSendersSection() {
       setRejectTarget(null);
       setRejectReason('');
       load();
+      if (data.success) onChanged?.();
     } catch (e: any) {
       setToast(e?.message || '반려 실패');
     } finally {
