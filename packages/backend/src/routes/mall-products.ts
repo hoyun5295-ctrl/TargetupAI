@@ -11,6 +11,16 @@ import { authenticate } from '../middlewares/auth';
 import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsRaw, fetchCafe24Products } from '../utils/cafe24-client';
 import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProductsRaw, fetchNaverProducts } from '../utils/naver-commerce-client';
 import { matchMallProductByName } from '../utils/mall-product-match';
+// ★ 2026-09-14 W5 우커머스 — Store API 공개 조회(키 불필요) · 몰별 탭 provider = woocommerce:{mall}
+import { listWooIntegrations, getWooIntegration, fetchWooStoreProducts, fetchWooStoreProductsRaw } from '../utils/woocommerce-client';
+import { normalizeWooMallId } from '../utils/woocommerce-core';
+
+const WOO_PREFIX = 'woocommerce:';
+/** provider 'woocommerce:{mall}' → 이 회사 소속 몰 행(없으면 undefined). 타사 몰 주소로 조회하는 길을 막는다. */
+async function wooMallOf(companyId: string, provider: string) {
+  const mallId = normalizeWooMallId(provider.slice(WOO_PREFIX.length));
+  return mallId ? getWooIntegration(companyId, mallId) : undefined;
+}
 
 export const mallProductsRouter = Router();
 mallProductsRouter.use(authenticate);
@@ -25,6 +35,9 @@ mallProductsRouter.get('/providers', async (req: any, res: Response) => {
     if (cafe) providers.push({ provider: 'cafe24', label: '카페24' });
     const naver = await getNaverCommerceIntegration(companyId).catch(() => null);
     if (naver) providers.push({ provider: 'naver', label: '네이버 스마트스토어' });
+    // 우커머스 — 몰별 탭(해제 몰 제외). Store API 가 공개라 연결 검증 전이라도 상품은 읽힌다.
+    const woo = await listWooIntegrations(companyId).catch(() => []);
+    for (const m of woo) providers.push({ provider: `woocommerce:${m.mallId}`, label: `우커머스 · ${m.mallId}` });
     return res.json({ success: true, providers });
   } catch (err: any) {
     console.error('[mall-products providers] 오류:', err?.message);
@@ -56,9 +69,16 @@ mallProductsRouter.get('/preview', async (req: any, res: Response) => {
       return res.json({ success: true, provider, storeId: integ.storeId, raw });
     }
 
+    if (provider.startsWith('woocommerce:')) {
+      const integ = await wooMallOf(companyId, provider);
+      if (!integ) return res.status(404).json({ success: false, error: '우커머스 연동이 없는 몰입니다.' });
+      const raw = await fetchWooStoreProductsRaw(integ.siteUrl, { q, limit: 5 });
+      return res.json({ success: true, provider, mallId: integ.mallId, raw });
+    }
+
     return res.status(400).json({
       success: false,
-      error: 'provider는 cafe24 또는 naver만 지원합니다 (메이크샵·고도몰·아임웹은 상품 API 조사 후 추가).',
+      error: 'provider는 cafe24 · naver · woocommerce:{몰}만 지원합니다 (메이크샵·고도몰·아임웹은 상품 API 조사 후 추가).',
     });
   } catch (err: any) {
     // 실측 라우트 — 몰 API 에러(스코프 미동의·필수 body 누락 등)를 그대로 노출해 매핑 확정에 쓴다.
@@ -94,9 +114,16 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
       return res.json({ success: true, provider, products });
     }
 
+    if (provider.startsWith('woocommerce:')) {
+      const integ = await wooMallOf(companyId, provider);
+      if (!integ) return res.status(404).json({ success: false, error: '우커머스 연동이 없는 몰입니다.' });
+      const products = await fetchWooStoreProducts(integ.siteUrl, { q, limit });
+      return res.json({ success: true, provider, products });
+    }
+
     return res.status(400).json({
       success: false,
-      error: '현재 상품 불러오기는 카페24·네이버만 지원합니다 (메이크샵·고도몰·아임웹은 실측 후 추가).',
+      error: '현재 상품 불러오기는 카페24·네이버·우커머스만 지원합니다 (메이크샵·고도몰·아임웹은 실측 후 추가).',
     });
   } catch (err: any) {
     console.error('[mall-products search] 오류:', err?.message);

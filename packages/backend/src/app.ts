@@ -80,6 +80,8 @@ import naverCommerceRoutes from './routes/naver-commerce';
 import imwebRoutes, { imwebCallbackRouter } from './routes/imweb';
 // ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터
 import godoRoutes from './routes/godo';
+// ★ 2026-09-14 우커머스(워드프레스) — REST 키 주기 수집 + 기본 웹훅 수신(몰별 행)
+import woocommerceRoutes from './routes/woocommerce';
 import makeshopRoutes from './routes/makeshop';
 // ★ 2026-06-25 (gap 7): CDP Provider 등록 단일 출처 — routes import 부수효과 의존 제거
 import { registerAllProviders } from './utils/register-providers';
@@ -146,6 +148,7 @@ import { startCdpWebhookRetryWorker } from './utils/cdp-webhook-retry-worker';
 import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-worker';
 // ★ 2026-08-10: 고도몰 주기 수집 (30분) — 웹훅이 없는 몰이라 당겨오지 않으면 연결 후 신규 주문이 영영 안 들어온다
 import { startGodoSyncWorker } from './utils/godo-sync-worker';
+import { startWoocommerceSyncWorker } from './utils/woocommerce-sync-worker';
 // ★ 2026-06-13: 시스템 크리티컬 감지 워커 (발송 큐 지연 정체 + 싱크에이전트 중단 → 운영자 문자 통지)
 import { startSystemMonitorWorker } from './utils/system-monitor-worker';
 // ★ 2026-07-05: 발송 피로도 보호 — send_fatigue_daily 45일 초과 버킷 프루닝 (6시간 주기)
@@ -279,7 +282,7 @@ const cdpPublicLimiter = rateLimit({
   legacyHeaders: false,
   message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.', code: 'RATE_LIMITED' },
 });
-app.use(['/api/cdp/ingest', '/api/cdp/webhook', '/api/cafe24/webhook', '/api/naver-commerce/webhook', '/api/imweb/webhook'], cdpPublicLimiter);
+app.use(['/api/cdp/ingest', '/api/cdp/webhook', '/api/cafe24/webhook', '/api/naver-commerce/webhook', '/api/imweb/webhook', '/api/woocommerce/webhook'], cdpPublicLimiter);
 
 // ★2026-08-30 보안 보강 C5 — 무로그인 승인류(충전·대행발송)와 단축 URL 리다이렉트에 IP당 리미터.
 //   토큰은 서명이라 추측이 안 되고 단축 해시도 62^8이지만, 무제한 시도 자체를 두지 않는 방어 깊이다.
@@ -320,7 +323,7 @@ app.use('/api/alimtalk/webhook', express.raw({ type: '*/*', limit: '10mb' }));
 // ★ 2026-06-10: 자사몰 webhook 3경로도 동일 — 전역 json이 먼저 파싱하면 라우트 verify가 실행되지 않아
 //    HMAC을 재직렬화 문자열(JSON.stringify)로 계산하던 결함 정정. 서명은 원본 바이트(rawBody) 기준이 정답.
 app.use(
-  ['/api/cdp/webhook/custom', '/api/cafe24/webhook', '/api/naver-commerce/webhook'],
+  ['/api/cdp/webhook/custom', '/api/cafe24/webhook', '/api/naver-commerce/webhook', '/api/woocommerce/webhook'],
   express.json({ limit: '1mb', verify: (req: any, _res, buf) => { req.rawBody = buf; } })
 );
 // ★ 2026-08-16 마케팅 진단 공개 축 — 미인증 입력이라 본문 상한 32kb(전역 상한보다 좁게). 라우터 자체는
@@ -478,6 +481,8 @@ app.use('/api/imweb', imwebRoutes);
 app.use('/api/popbill', popbillWebhookRouter);
 // ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터 (OAuth/Webhook 없음 — callback 라우터 불필요)
 app.use('/api/godo', godoRoutes);
+// ★ 2026-09-14: 우커머스(워드프레스) — /webhook/:mallId 공개(rawBody 선처리 위 블록) + 관리자 라우트
+app.use('/api/woocommerce', woocommerceRoutes);
 // ★ 2026-07-06: 메이크샵 커머스 API 폴링 커넥터 (client_credentials 자격 입력 — OAuth/webhook 없음)
 app.use('/api/makeshop', makeshopRoutes);
 // ★ D178: 인바운드 AI 음성 응답 (통신사 webhook + 회사 admin 토글/이력)
@@ -661,6 +666,9 @@ app.listen(PORT, () => {
   // ★ 2026-08-10: 고도몰 주기 수집 (30분) — 연결 시 백필 1회가 전부였던 것을 정정.
   //   소급분이 발송이 되지 않는 근거 = 여정 발생 시각 창(journey-target-extractor).
   startGodoSyncWorker();
+
+  // ★ 2026-09-14: 우커머스 주기 수집 (30분 · modified_after) — 웹훅은 가속일 뿐, 이 워커가 유일한 보장 경로.
+  startWoocommerceSyncWorker();
 
   // ★ 2026-06-13: 시스템 크리티컬 감지 (5분 주기) — 발송 큐 지연 정체 + 싱크에이전트 중단을
   //   운영자 문자(SYSTEM_ALERT_PHONES)로 직접 통지. 톤28 지연 실발송·인비토 동기화 중단 실측 후속.

@@ -448,3 +448,30 @@ describe('★ Codex 2R(0914) — buildBillingHash: 정규화 입력 전체(이�
     expect(buildBillingHash(ok(base({ eventCards: [{ id: 'c1', title: '가을 세일', text: T40, licensed: false, images: [HERO] }] })))).not.toBe(buildBillingHash(a));
   });
 });
+
+describe('★ W5(0914) 우커머스 몰 상품 — provider "woocommerce:{mall}" 을 몰 상품으로 인정한다(다몰 · 상품번호는 몰 안에서만 고유)', () => {
+  it('woocommerce:ilbonimo.com + 상품번호 → mall(provider 그대로) · 몰 없는 woocommerce · 빈 호스트 · 이상한 호스트 → manual', () => {
+    const m = ok(base({ products: [
+      { source: 'mall', provider: 'woocommerce:ilbonimo.com', code: '93', name: '원데이 렌즈', price: 9000, imageUrl: 'https://www.ilbonimo.com/u/93.jpg' },
+      { source: 'mall', provider: 'woocommerce', code: '94', name: '케이스', price: 1000 },
+      { source: 'mall', provider: 'woocommerce:', code: '95', name: '용액', price: 1000 },
+      { source: 'mall', provider: 'woocommerce:10.0.0.1', code: '96', name: '내부망', price: 1000 },
+    ] }));
+    expect(m.products.map((p) => [p.source, p.provider, p.code, p.imageUrl])).toEqual([
+      ['mall', 'woocommerce:ilbonimo.com', '93', 'https://www.ilbonimo.com/u/93.jpg'],
+      ['manual', null, null, null],
+      ['manual', null, null, null],
+      ['manual', null, null, null],
+    ]);
+  });
+  it('같은 상품번호라도 몰이 다르면 다른 상품(병합 키 = provider:번호) · 재조회 결과는 몰 provider 키로 받는다', () => {
+    const a: BuildProduct = { source: 'mall', provider: 'woocommerce:ilbonimo.com', code: '93', name: 'A', price: 9000, salePrice: null, discountRate: null, url: null, imageUrl: 'https://a/1.jpg' };
+    const b: BuildProduct = { ...a, provider: 'woocommerce:lens007.net', name: 'B', imageUrl: 'https://b/1.jpg' };
+    const r = resolveBuildProducts([a, b], {
+      'woocommerce:ilbonimo.com': { failed: false, byCode: { '93': { status: 'ok', name: 'A(재조회)', price: 9000, salePrice: 8000, discountRate: 11, imageUrl: 'https://a/1.jpg', productUrl: 'https://www.ilbonimo.com/product/a/' } } },
+      'woocommerce:lens007.net': { failed: false, byCode: { '93': { status: 'unavailable', reason: '품절' } } },
+    });
+    expect(r.cards.map((c) => [c.name, c.discount_price, c.link_url])).toEqual([['A(재조회)', 8000, 'https://www.ilbonimo.com/product/a/']]);
+    expect(r.excluded).toEqual([{ code: '93', name: 'B', reason: '품절' }]);
+  });
+});

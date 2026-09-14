@@ -9,7 +9,8 @@
  *
  * 📋 등록된 Provider (등록 출처 = app.ts registerAllProviders() / utils/register-providers.ts 단일 출처. 2026-06-25 갱신)
  *   - 'cafe24'(oauth) / 'naver_smart_store'(polling) / 'makeshop'(polling) / 'godo'(polling) / 'imweb'(oauth) / 'custom'(webhook) = 사용 가능(available)
- *   - 'makeshop' = skeleton(available:false → coming_soon). 'imweb'(oauth)는 imweb-client.ts에서 실 어댑터로 등록. shopify/sixshop/woocommerce는 자체 호스팅 webhook으로 흡수(2026-07-04 제거)
+ *   - 'makeshop' = skeleton(available:false → coming_soon). 'imweb'(oauth)는 imweb-client.ts에서 실 어댑터로 등록. shopify/sixshop는 자체 호스팅 webhook으로 흡수(2026-07-04 제거)
+ *   - 'woocommerce'(polling + 기본 웹훅 수신) = 2026-09-14 전용 어댑터 신설(woocommerce-adapter.ts · 몰별 행 · docs/2026-09-14-woocommerce-integration-design.md)
  *   - 어댑터가 connectMethod/available을 직접 선언 → listProvidersForUI가 추론 없이 그대로 노출(D189 추론 폐기)
  *
  * ⛔ 영구 원칙

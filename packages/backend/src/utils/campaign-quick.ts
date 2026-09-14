@@ -30,7 +30,10 @@ import { createEmailCampaign, deleteEmailCampaign, type CreateCampaignInput } fr
 import { isSmtpConfigured } from './company-smtp-client';
 import { renderEmailSections, extractEmailText } from './email/email-section-renderer';
 import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsByNoRaw } from './cafe24-client';
-import { cafe24ProductAvailability, normalizeCafe24Product } from './mall-product-normalize';
+import { cafe24ProductAvailability, normalizeCafe24Product, wooStoreProductAvailability, normalizeWooStoreProduct } from './mall-product-normalize';
+// ★ 2026-09-14 W5 우커머스 — 몰별 Store API(공개) 상품번호 재조회(include) · 회사 소속 몰만
+import { getWooIntegration, fetchWooStoreProductsRaw } from './woocommerce-client';
+import { normalizeWooMallId } from './woocommerce-core';
 import { parseLicensedEndDate } from './sales-outreach-jobs';
 import { runInCreditBundle } from './ai-credit-context';
 import type { Section } from './dm/dm-section-registry';
@@ -475,6 +478,23 @@ function readBuildImage(url: string, companyId: string): BuildReadImage {
  * 품절·미전시 = unavailable + 사유 · 응답에 없음 = 못 찾음. 호출부가 예외를 failed 로 접는다(502 금지).
  */
 async function lookupMallProductsByNo(companyId: string, provider: BuildMallProvider, productNos: readonly string[]): Promise<BuildMallLookup> {
+  if (provider.startsWith('woocommerce:')) {
+    const mallId = normalizeWooMallId(provider.slice('woocommerce:'.length));
+    const integ = mallId ? await getWooIntegration(companyId, mallId) : undefined;
+    if (!integ) return { failed: true, byCode: {} };
+    const rawList = await fetchWooStoreProductsRaw(integ.siteUrl, { ids: productNos, limit: productNos.length });
+    const byCode: BuildMallLookup['byCode'] = {};
+    for (const p of rawList) {
+      const no = p?.id != null ? String(p.id) : '';
+      if (!no) continue;
+      const avail = wooStoreProductAvailability(p);
+      if (avail !== 'ok') { byCode[no] = { status: 'unavailable', reason: avail === 'sold_out' ? '품절' : '판매 중지' }; continue; }
+      const norm = normalizeWooStoreProduct(p, integ.mallId);
+      if (!norm) continue;
+      byCode[no] = { status: 'ok', name: norm.name, price: norm.price, salePrice: norm.salePrice, discountRate: norm.discountRate, imageUrl: norm.imageUrl, productUrl: norm.productUrl };
+    }
+    return { failed: false, byCode };
+  }
   if (provider !== 'cafe24') return { failed: false, byCode: {} };
   const integ = await getCafe24Integration(companyId);
   if (!integ || integ.status !== 'active') return { failed: true, byCode: {} };

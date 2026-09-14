@@ -18,7 +18,7 @@
  *   custom-self-hosted-adapter('custom') · cdp-events(브라우저 수집 'sdk')
  */
 
-export type CdpProviderKey = 'cafe24' | 'naver' | 'godo' | 'imweb' | 'makeshop' | 'custom';
+export type CdpProviderKey = 'cafe24' | 'naver' | 'godo' | 'imweb' | 'makeshop' | 'custom' | 'woocommerce';
 
 /** 이벤트 적재 상태(설계서 §2-3). 'pending_mapping' = 인증·조회는 되나 CDP 매핑이 아직(의도된 보류). */
 export type CdpIngestKind = 'events' | 'pending_mapping';
@@ -61,6 +61,8 @@ export const CDP_PROVIDER_KEYS: readonly CdpProviderKeyEntry[] = [
   { key: 'imweb',    dbProvider: 'imweb',             eventSources: ['imweb'],             ingest: 'events',          collect: 'auto' },
   { key: 'makeshop', dbProvider: 'makeshop',          eventSources: [],                    ingest: 'pending_mapping', collect: null },
   { key: 'custom',   dbProvider: 'custom',            eventSources: ['custom', 'sdk'],     ingest: 'events',          collect: 'developer' },
+  // ★2026-09-14 우커머스(워드프레스) — REST 주기 수집 + 기본 웹훅 수신 = 우리가 가져온다(auto). source 실값 = woocommerce-core WOO_SOURCE.
+  { key: 'woocommerce', dbProvider: 'woocommerce',    eventSources: ['woocommerce'],       ingest: 'events',          collect: 'auto' },
 ] as const;
 
 const BY_KEY = new Map<CdpProviderKey, CdpProviderKeyEntry>(CDP_PROVIDER_KEYS.map((e) => [e.key, e]));

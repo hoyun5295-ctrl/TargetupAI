@@ -8,6 +8,9 @@
 import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24Products } from './cafe24-client';
 import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProducts } from './naver-commerce-client';
 import { type MallProduct, normalizeNameForMatch, extractMallProductNo } from './mall-product-normalize';
+// ★ 2026-09-14 W5 우커머스 — 몰별(woocommerce:{mall}) Store API 공개 조회 · provider 미지정 시 회사의 몰 전부 순회
+import { listWooIntegrations, getWooIntegration, fetchWooStoreProducts } from './woocommerce-client';
+import { normalizeWooMallId } from './woocommerce-core';
 
 const SUPPORTED_PROVIDERS = ['cafe24', 'naver'];
 
@@ -21,7 +24,8 @@ export async function matchMallProductByName(companyId: string, name: string, pr
   const target = normalizeNameForMatch(name);
   if (!companyId || target.length < 2) return null;
   const linkNo = extractMallProductNo(linkUrl);
-  const providers = provider ? [provider] : SUPPORTED_PROVIDERS;
+  const wooMalls = provider ? [] : await listWooIntegrations(companyId).then((l) => l.map((m) => `woocommerce:${m.mallId}`)).catch(() => [] as string[]);
+  const providers = provider ? [provider] : [...SUPPORTED_PROVIDERS, ...wooMalls];
   for (const prov of providers) {
     try {
       let products: MallProduct[] = [];
@@ -35,6 +39,11 @@ export async function matchMallProductByName(companyId: string, name: string, pr
         if (!integ) continue;
         const creds = (await getNaverCommerceCredentials(companyId).catch(() => null)) || undefined;
         products = await fetchNaverProducts(integ, { q: name, size: 20 }, creds);
+      } else if (prov.startsWith('woocommerce:')) {
+        const mallId = normalizeWooMallId(prov.slice('woocommerce:'.length));
+        const integ = mallId ? await getWooIntegration(companyId, mallId).catch(() => undefined) : undefined;
+        if (!integ) continue;
+        products = await fetchWooStoreProducts(integ.siteUrl, { q: name, limit: 20 });
       }
       if (linkNo) {
         const byId = products.find((p) => String(p.code) === linkNo || extractMallProductNo(p.productUrl) === linkNo);

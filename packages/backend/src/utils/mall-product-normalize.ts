@@ -112,3 +112,45 @@ export function cafe24ProductAvailability(p: any): Cafe24Availability {
   if (String(p.selling) !== 'T' || String(p.display) !== 'T') return 'hidden';
   return 'ok';
 }
+
+/**
+ * ★ 2026-09-14 W5 우커머스 Store API 상품(GET /wp-json/wc/store/v1/products 항목 · 공개 · 키 불필요) → MallProduct.
+ * 실측 확정(0914 ilbonimo.com): id · name · permalink · prices{price·regular_price·sale_price = 문자열 최소단위 · currency_minor_unit} ·
+ *   images[].src · is_purchasable · is_in_stock. provider = "woocommerce:{mall}"(다몰 · 상품번호는 몰 안에서만 고유).
+ * 구매 가능 + 재고 있음만 통과(품절·구매불가는 wooStoreProductAvailability 가 사유를 드러낸다).
+ */
+export function normalizeWooStoreProduct(p: any, mallId: string): MallProduct | null {
+  if (!p || typeof p !== 'object') return null;
+  if (wooStoreProductAvailability(p) !== 'ok') return null;
+  const id = p.id !== undefined && p.id !== null ? String(p.id).trim() : '';
+  const name = String(p.name || '').trim();
+  if (!id || !name) return null;
+  const prices = p.prices && typeof p.prices === 'object' ? p.prices : {};
+  const unit = Math.pow(10, Math.max(0, Math.min(6, Number(prices.currency_minor_unit) || 0)));
+  const toAmount = (v: unknown) => Math.round((Number(String(v ?? '').replace(/[^\d.-]/g, '')) || 0) / unit);
+  const sale = toAmount(prices.price);
+  const regular = toAmount(prices.regular_price);
+  if (sale <= 0) return null;
+  const price = regular > 0 ? regular : sale;
+  const discountRate = price > sale && price > 0 ? Math.round((1 - sale / price) * 100) : 0;
+  const img = Array.isArray(p.images) && p.images[0] && p.images[0].src ? String(p.images[0].src) : null;
+  return {
+    provider: `woocommerce:${mallId}`,
+    code: id,
+    name: name.slice(0, 120),
+    price,
+    salePrice: sale,
+    discountRate,
+    imageUrl: img,
+    productUrl: p.permalink ? String(p.permalink) : null,
+  };
+}
+
+/** 우커머스 Store API 상품 가용성 — 재고 없음 = sold_out · 구매 불가 = hidden · 비객체 = hidden(AI 자동제작 "품절 = 제외 + 사유"). */
+export type WooStoreAvailability = 'ok' | 'sold_out' | 'hidden';
+export function wooStoreProductAvailability(p: any): WooStoreAvailability {
+  if (!p || typeof p !== 'object') return 'hidden';
+  if (p.is_purchasable === false) return 'hidden';
+  if (p.is_in_stock === false) return 'sold_out';
+  return 'ok';
+}

@@ -54,8 +54,9 @@ import { GuideStep } from '../components/cdp/CdpFormPrimitives';
 import { CdpCustomWebhookGuide, CdpCustomDeliveries, CdpCustomAppGuide } from '../components/cdp/CdpCustomHostingDocs';
 // ★ 2026-08-10 Phase 5-3 — 몰별 연결 폼 마크업 분리(상태·핸들러는 페이지 잔류 = 동작 무변경).
 import {
-  CdpCafe24ConnectForm, CdpNaverConnectForm, CdpMakeshopConnectForm, CdpImwebConnectForm, CdpGodoConnectForm,
+  CdpCafe24ConnectForm, CdpNaverConnectForm, CdpMakeshopConnectForm, CdpImwebConnectForm, CdpGodoConnectForm, CdpWooConnectForm,
   type Cafe24Status, type NaverCommerceStatus, type MakeshopStatus, type ImwebStatus, type GodoStatus,
+  type WooStatus, type WooIssuedSecret,
 } from '../components/cdp/CdpConnectForms';
 import type {
   CdpDiagnostics, CdpFunnel, CdpTimelineBucket, CdpActiveCustomers,
@@ -124,7 +125,7 @@ interface CustomIssuedSecret {
 //   표시 라벨·포맷은 `utils/cdp-display.ts`가 소유한다. 여기 다시 선언하면 곧 한쪽만 고쳐진다.
 
 // 자사몰 선택 카드 — 카드 클릭 시 해당 업체 전용 연동 모달 (가로 2열 그리드)
-type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'imweb' | 'makeshop' | 'custom';
+type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'imweb' | 'makeshop' | 'custom' | 'woocommerce';
 
 const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full?: boolean }> = [
   { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동: 코딩 없이 회원·주문 동기화' },
@@ -132,6 +133,7 @@ const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full
   { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키 입력: 주문·고객 자동 동기화' },
   { key: 'imweb', name: '아임웹', desc: 'OAuth 자동 연동: 회원·주문·수신동의 동기화' },
   { key: 'makeshop', name: '메이크샵', desc: '커머스 API: 회원·주문·SMS수신동의 동기화' },
+  { key: 'woocommerce', name: '우커머스(워드프레스)', desc: 'REST 키·웹훅: 몰 여러 개 주문·회원 자동 동기화' },
   { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰: webhook 방식', full: true },
 ];
 
@@ -143,6 +145,7 @@ const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
   godo: { title: '고도몰 연동', note: '고도몰 쇼핑몰 인증키(key)를 입력하면 주문·고객 데이터가 자동으로 동기화됩니다.' },
   imweb: { title: '아임웹 연동', note: '아임웹 사이트 코드(siteCode)를 입력하면 OAuth 인증 후 회원·주문·수신동의·장바구니가 동기화됩니다. 사이트 코드는 아임웹 앱스토어에서 한줄로를 추가할 때 전달됩니다.' },
   makeshop: { title: '메이크샵 연동', note: '메이크샵 파트너센터에서 만든 App의 Client ID·Secret과 상점 ID를 입력하면 회원·주문이 동기화됩니다. 회원 데이터에 SMS 수신동의 여부가 포함되어 광고 발송 대상을 정확히 가려낼 수 있습니다.' },
+  woocommerce: { title: '우커머스 연동', note: '워드프레스 우커머스 몰의 주소와 REST API 읽기 키를 입력하면 주문·회원이 자동으로 동기화됩니다. 몰이 여러 개면 몰마다 추가하세요. 웹훅 주소와 비밀키는 저장 직후 한 번 표시되며, 고객사 개발자가 우커머스 관리자에서 웹훅 4개를 만들면 실시간으로도 들어옵니다.' },
   custom: { title: '자체 호스팅 / 그 외 자사몰 연동', note: '직접 개발했거나 목록에 없는 자사몰은 webhook 방식으로 연동합니다. 환경이 특수해 막히면 고객센터로 문의 주세요.' },
 };
 
@@ -162,6 +165,7 @@ const BACKEND_ID_TO_KEY: Record<string, ProviderKey> = {
   imweb: 'imweb',
   makeshop: 'makeshop',
   custom: 'custom',
+  woocommerce: 'woocommerce',
   // gabia는 2026-07-06 제거(퍼스트몰 개방 API 폐쇄형) — 자체호스팅으로 흡수.
 };
 
@@ -178,7 +182,7 @@ function providerBrand(key: string, name: string): { Icon: typeof Store; badge: 
   if (n.includes('메이크샵') || n.includes('makeshop')) return { Icon: Palette, badge: 'from-rose-500 to-red-600 shadow-rose-500/25' };
   if (n.includes('imweb') || n.includes('아임웹')) return { Icon: LayoutTemplate, badge: 'from-indigo-500 to-violet-600 shadow-indigo-500/25' };
   if (n.includes('식스샵') || n.includes('sixshop') || n.includes('six')) return { Icon: Package, badge: 'from-slate-500 to-slate-700 shadow-slate-500/25' };
-  if (n.includes('woo')) return { Icon: Blocks, badge: 'from-purple-500 to-fuchsia-600 shadow-purple-500/25' };
+  if (key === 'woocommerce' || n.includes('woo') || n.includes('우커머스')) return { Icon: Blocks, badge: 'from-purple-500 to-fuchsia-600 shadow-purple-500/25' };
   if (key === 'custom') return { Icon: Database, badge: 'from-violet-500 to-fuchsia-600 shadow-violet-500/25' };
   return { Icon: Database, badge: 'from-slate-500 to-slate-700 shadow-slate-500/25' };
 }
@@ -231,6 +235,15 @@ export default function CdpSettingsPage() {
   const [godoKey, setGodoKey] = useState('');
   const [godoConnecting, setGodoConnecting] = useState(false);
   const [showGodoKey, setShowGodoKey] = useState(false);
+  // ★ 2026-09-14 W4 우커머스 — 몰 여러 개(목록은 status 응답) + 추가 폼 입력 + 저장 직후 1회 노출 secret
+  const [wooStatus, setWooStatus] = useState<WooStatus | null>(null);
+  const [wooSiteUrl, setWooSiteUrl] = useState('');
+  const [wooConsumerKey, setWooConsumerKey] = useState('');
+  const [wooConsumerSecret, setWooConsumerSecret] = useState('');
+  const [wooConsentMetaKey, setWooConsentMetaKey] = useState('');
+  const [showWooSecret, setShowWooSecret] = useState(false);
+  const [wooConnecting, setWooConnecting] = useState(false);
+  const [wooIssued, setWooIssued] = useState<WooIssuedSecret | null>(null);
   const [imwebStatus, setImwebStatus] = useState<ImwebStatus | null>(null);
   const [imwebSiteCode, setImwebSiteCode] = useState('');
   const [imwebConnecting, setImwebConnecting] = useState(false);
@@ -260,7 +273,7 @@ export default function CdpSettingsPage() {
   // ★ 2026-06-25 (gap 3): 백엔드 provider 목록(동적). null = 미로드(폴백).
   const [providerList, setProviderList] = useState<ProviderApiEntry[] | null>(null);
   const [customTab, setCustomTab] = useState<'connect' | 'web' | 'app' | 'verify'>('connect');
-  const closeModal = () => { setActiveModal(null); setConnectProvider(null); setCustomTab('connect'); setConnectStepOpen(false); };
+  const closeModal = () => { setActiveModal(null); setConnectProvider(null); setCustomTab('connect'); setConnectStepOpen(false); setWooIssued(null); };
   const webhookProviderOpen = connectProvider === 'custom';
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
@@ -274,7 +287,8 @@ export default function CdpSettingsPage() {
     imweb: !!imwebStatus?.connected,
     makeshop: !!makeshopStatus?.connected,
     custom: !!customInfo?.hasSecret,
-  }), [cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected, imwebStatus?.connected, makeshopStatus?.connected, customInfo?.hasSecret]);
+    woocommerce: !!wooStatus?.connected,
+  }), [cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected, imwebStatus?.connected, makeshopStatus?.connected, customInfo?.hasSecret, wooStatus?.connected]);
 
   // ★ 2026-08-10 — 조치 필요(인증 끊김) 축. 판정 문자열은 훅의 CT가 소유하고 여기선 몰별로 모으기만 한다.
   //   고도몰은 토큰이 없는 키 방식이라 만료 개념이 없다 — 대신 주기 수집이 남긴 실패 사유가 그 신호다.
@@ -285,7 +299,9 @@ export default function CdpSettingsPage() {
     imweb: isIntegrationAuthBroken(imwebStatus?.status),
     makeshop: isIntegrationAuthBroken(makeshopStatus?.status),
     custom: false,   // 자체 호스팅은 시크릿 방식이라 만료가 없다(재발급은 담당자 의사)
-  }), [cafe24Status?.status, naverStatus?.status, godoStatus?.syncError, imwebStatus?.status, makeshopStatus?.status]);
+    // 우커머스는 키 방식이라 만료가 없다 — 주기 수집이 남긴 실패 사유(몰 하나라도)가 그 신호다(고도몰과 같은 축)
+    woocommerce: !!wooStatus?.malls?.some((m) => m.syncError),
+  }), [cafe24Status?.status, naverStatus?.status, godoStatus?.syncError, imwebStatus?.status, makeshopStatus?.status, wooStatus?.malls]);
 
   const integrationStatus = useCdpIntegrationStatus({
     connected: dashboardConnected,
@@ -332,8 +348,9 @@ export default function CdpSettingsPage() {
     if (godoStatus?.connected) list.push('고도몰');
     if (imwebStatus?.connected) list.push('아임웹');
     if (makeshopStatus?.connected) list.push('메이크샵');
+    if (wooStatus?.connected) list.push('우커머스');
     return list;
-  }, [customInfo?.hasSecret, cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected, imwebStatus?.connected, makeshopStatus?.connected]);
+  }, [customInfo?.hasSecret, cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected, imwebStatus?.connected, makeshopStatus?.connected, wooStatus?.connected]);
   const isConnected = connectedProviders.length > 0 || !!usage?.has_key;
   const hasCdpData = isConnected || (diagnostics?.events30d ?? 0) > 0;
 
@@ -443,7 +460,7 @@ export default function CdpSettingsPage() {
       const headers = { Authorization: `Bearer ${token()}` };
       const [
         usageRes, diagRes, funnelRes, timelineRes, activeRes, chDistRes,
-        cafe24Res, naverRes, godoRes, imwebRes, makeshopRes, customRes, providersRes,
+        cafe24Res, naverRes, godoRes, imwebRes, makeshopRes, wooRes, customRes, providersRes,
       ] = await Promise.all([
         fetch('/api/cdp/usage', { headers }),
         fetch('/api/cdp/diagnostics', { headers }),
@@ -458,6 +475,7 @@ export default function CdpSettingsPage() {
         fetch('/api/godo/status', { headers }),
         fetch('/api/imweb/status', { headers }),
         fetch('/api/makeshop/status', { headers }),
+        fetch('/api/woocommerce/status', { headers }),
         fetch('/api/cdp/custom/info', { headers }),
         fetch('/api/cdp/providers', { headers }),
       ]);
@@ -472,6 +490,7 @@ export default function CdpSettingsPage() {
       const godoData = await godoRes.json();
       const imwebData = await imwebRes.json();
       const makeshopData = await makeshopRes.json();
+      const wooData = await wooRes.json();
       const customData = await customRes.json();
       const providersData = await providersRes.json();
 
@@ -489,6 +508,7 @@ export default function CdpSettingsPage() {
       if (godoData.success) setGodoStatus(godoData);
       if (imwebData.success) setImwebStatus(imwebData);
       if (makeshopData.success) setMakeshopStatus(makeshopData);
+      if (wooData.success) setWooStatus(wooData);
       if (customData.success) {
         setCustomInfo({
           hasSecret: customData.hasSecret,
@@ -817,6 +837,63 @@ export default function CdpSettingsPage() {
     });
   };
 
+  // 우커머스 — 몰 저장(웹훅 URL·secret 1회 노출) → REST 키가 있으면 연결 확인 1콜 + 백필. 키가 없으면 첫 웹훅이 연결 신호.
+  const wooJsonHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` });
+  const handleWooConnect = async () => {
+    const siteUrl = wooSiteUrl.trim();
+    if (!siteUrl) { toast.error('쇼핑몰 주소를 입력해주세요.'); return; }
+    setWooConnecting(true);
+    try {
+      const saveRes = await fetch('/api/woocommerce/credentials', {
+        method: 'POST',
+        headers: wooJsonHeaders(),
+        body: JSON.stringify({ site_url: siteUrl, consumer_key: wooConsumerKey.trim(), consumer_secret: wooConsumerSecret.trim(), consent_meta_key: wooConsentMetaKey.trim() }),
+      });
+      const saveData = await saveRes.json();
+      if (!saveData.success) { toast.error(saveData.error || '몰 저장 실패'); return; }
+      setWooIssued({ mallId: saveData.mall_id, webhookUrl: saveData.webhook_url, webhookSecret: saveData.webhook_secret });
+
+      const res = await fetch('/api/woocommerce/connect', { method: 'POST', headers: wooJsonHeaders(), body: JSON.stringify({ mall_id: saveData.mall_id }) });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || (data.verified ? '우커머스 연동을 시작했습니다.' : '몰을 저장했습니다.'));
+        setWooSiteUrl(''); setWooConsumerKey(''); setWooConsumerSecret(''); setWooConsentMetaKey('');
+      } else {
+        // 저장은 됐고 연결 확인만 실패 — 몰은 대기 상태로 남고 웹훅 secret 은 위에 떠 있다
+        toast.error(data.error || '우커머스 연결 확인 실패');
+      }
+      await loadAll();
+    } catch (e: any) { toast.error(e?.message || '우커머스 연동 처리 오류'); }
+    finally { setWooConnecting(false); }
+  };
+  const handleWooDisconnect = (mallId: string) => {
+    setConfirm({
+      mode: 'danger',
+      title: '우커머스 몰 해제',
+      description: `${mallId} 몰의 주문·회원 동기화와 웹훅 수신이 중단됩니다.`,
+      onConfirm: async () => {
+        const res = await fetch(`/api/woocommerce/disconnect?mall_id=${encodeURIComponent(mallId)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
+        const data = await res.json();
+        if (data.success) { await loadAll(); toast.success('우커머스 몰 해제 완료'); }
+        else { toast.error(data.error || '해제 실패'); }
+      },
+    });
+  };
+  const handleWooRotateSecret = (mallId: string) => {
+    setConfirm({
+      mode: 'danger',
+      title: '웹훅 비밀키 재발급',
+      description: '기존 비밀키가 즉시 폐기됩니다. 우커머스 관리자의 웹훅 4개에 새 비밀키를 넣기 전까지 웹훅이 거부됩니다.',
+      confirmLabel: '재발급',
+      onConfirm: async () => {
+        const res = await fetch('/api/woocommerce/rotate-secret', { method: 'POST', headers: wooJsonHeaders(), body: JSON.stringify({ mall_id: mallId }) });
+        const data = await res.json();
+        if (data.success) { setWooIssued({ mallId: data.mall_id, webhookUrl: data.webhook_url, webhookSecret: data.webhook_secret }); toast.success('새 비밀키를 발급했습니다.'); }
+        else { toast.error(data.error || '재발급 실패'); }
+      },
+    });
+  };
+
   // 자체 호스팅
   const handleCustomIssue = async () => {
     if (customInfo?.hasSecret) {
@@ -1020,6 +1097,7 @@ export default function CdpSettingsPage() {
                   : p.modalKey === 'godo' ? !!godoStatus?.connected
                   : p.modalKey === 'imweb' ? !!imwebStatus?.connected
                   : p.modalKey === 'makeshop' ? !!makeshopStatus?.connected
+                  : p.modalKey === 'woocommerce' ? !!wooStatus?.connected
                   : false;
                 const { Icon, badge } = providerBrand(p.key, p.name);
                 const clickable = p.available && p.modalKey !== null;
@@ -1349,6 +1427,32 @@ export default function CdpSettingsPage() {
             onToggleKey={() => setShowGodoKey((v) => !v)}
             onConnect={handleGodoConnect}
             onDisconnect={handleGodoDisconnect}
+            publicKey={usage?.public_key}
+            onCopy={copyText}
+          />
+        )}
+
+        {/* 우커머스 — 몰별 REST 키 + 우리가 발급한 웹훅 secret(1회 노출) · 몰 여러 개 */}
+        {connectProvider === 'woocommerce' && (
+          <CdpWooConnectForm
+            status={wooStatus}
+            isAdmin={isAdmin}
+            connecting={wooConnecting}
+            siteUrl={wooSiteUrl}
+            onSiteUrlChange={setWooSiteUrl}
+            consumerKey={wooConsumerKey}
+            onConsumerKeyChange={setWooConsumerKey}
+            consumerSecret={wooConsumerSecret}
+            onConsumerSecretChange={setWooConsumerSecret}
+            consentMetaKey={wooConsentMetaKey}
+            onConsentMetaKeyChange={setWooConsentMetaKey}
+            showSecret={showWooSecret}
+            onToggleSecret={() => setShowWooSecret((v) => !v)}
+            onConnect={handleWooConnect}
+            onDisconnect={handleWooDisconnect}
+            onRotateSecret={handleWooRotateSecret}
+            issued={wooIssued}
+            onDismissIssued={() => setWooIssued(null)}
             publicKey={usage?.public_key}
             onCopy={copyText}
           />

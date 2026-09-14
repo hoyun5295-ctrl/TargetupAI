@@ -11,6 +11,8 @@ import { customSelfHostedAdapter } from './custom-self-hosted-adapter';
 import { godoAdapter } from './godo-adapter';
 import { imwebAdapter } from './imweb-client';
 import { makeshopAdapter } from './makeshop-client';
+// ★ 2026-09-14 우커머스(워드프레스) 전용 어댑터 — 0704 "자체 호스팅 웹훅 흡수"를 뒤집음(우커머스 기본 웹훅은 우리 표준 헤더·본문이 아니라 그대로 안 붙는다)
+import { woocommerceAdapter } from './woocommerce-adapter';
 
 let registered = false;
 
@@ -23,5 +25,6 @@ export function registerAllProviders(): void {
   registerProvider(godoAdapter);
   registerProvider(imwebAdapter);
   registerProvider(makeshopAdapter);
+  registerProvider(woocommerceAdapter);
   registered = true;
 }

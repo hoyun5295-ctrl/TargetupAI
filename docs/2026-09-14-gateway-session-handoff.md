@@ -29,6 +29,7 @@
 | 게이트웨이 저장소 미커밋 | **없음**(`a33262b` push 뒤 `git status --short` 빈 출력) | Harold 실행 출력 |
 | 한줄로 저장소 미커밋(문서) | `docs/bito-gateway/FEATURE-GW-SECURITY.md`·`FEATURE-GW-WEB-API.md`·`FEATURE-GW-LINKGUARD.md` · 이 인계 문서 | **게이트웨이 세션에서는 `tp-push`를 요청하지 않는다** — 한줄로 세션의 다음 `tp-push`에 실린다 |
 | 링크가드 저장소(신규 파일) | `docs/handoff/2026-09-14-bito-external3-pilot-result.md` = 링크가드 쪽 결과 전달 문서 · 커밋은 링크가드 쪽 | Harold 가 링크가드 담당에게 전달 |
+| **링크가드 external4 설치 관통 시험** | **★0914 중단·원복.** ZIP 해시 일치(`98e3009d…`) 뒤 한글 이름 항목 2개가 python 해제에서 깨져 `SHA256SUMS` 대조 2건 FAILED → `install-agent.sh` 미실행. .65 입력 토큰 `shred`·업로드 폴더 삭제·로컬 사본 삭제 확인 · **관제 시험 자격 `lg-6d18c5ab15fc783e` 회수 미확인** · 게이트웨이 무변경. 전달 = `linkguard/docs/handoff/2026-09-14-bito-external4-install-test-result.md`. **재시험 = 링크가드 수정본 수령 때(Harold)** | Harold 실행 출력 |
 | 이터널그룹 | 전달 자료 준비 완료: `C:\Users\ceo\Downloads\Bito-Agent-Integration-20260914.zip`(148,954바이트 · 6파일 · 원본 해시 일치). **발송은 Harold · 회신 대기** | 이 문서 §3 |
 
 ## 2. 트랙 A — 링크가드 external3 시험 연결 (★0914 종결·원복 · 아래는 다시 켤 때의 절차 기록)
@@ -187,7 +188,7 @@ profiles:
 
 | # | 항목 | 상태 |
 |---:|---|---|
-| 3 | A9-나 유출 시 재설치 절차 + 시험 에이전트 리허설 | 미착수 · **다음 세션 첫 작업**(§7) |
+| 3 | A9-나 유출 시 재설치 절차 + 시험 에이전트 리허설 | **★0914 보류(Harold)** · 절차 초안 = FEATURE-GW-SECURITY §8-7(미검증) · 보류 사유·재개 조건 = §8-8 |
 | 4 | A2 Windows 코드서명 인증서 | Harold 구매 결정 대기 |
 | 5 | 1.0.29 릴리즈(A2 서명 + A4·A5·A6 · 새 설치 게시만) · A1 `build` 확인 | A2 뒤 · **승인 전에 고객 배포자료 게시 먼저**(FEATURE-GW-WEB-API §9-5 규칙) |
 | 6 | .66 백업 | 별도 축 |
@@ -216,8 +217,10 @@ profiles:
 **작업 디렉터리 `C:\Users\ceo\projects\targetup`**
 
 ```text
-0914 게이트웨이 인계 이어가자. docs/2026-09-14-gateway-session-handoff.md 먼저 정독하고 §4 게이트웨이 보안 §8 A9-나(릴리스 키 유출 시 재설치 절차 + 시험 에이전트 리허설)부터 시작해. 설계 근거는 docs/bito-gateway/FEATURE-GW-SECURITY.md §8-3 A9
+0914 게이트웨이 인계 이어가자. docs/2026-09-14-gateway-session-handoff.md 먼저 정독하고 현재 상태 확인부터 시작해
 ```
 
+- ★0914 갱신: A9-나는 **보류**(FEATURE-GW-SECURITY §8-8 재개 조건). §4 3번으로 시작하지 않는다.
+- ★0914 external4: 링크가드 수정 패키지가 오면 설치 관통 시험을 **처음부터** 다시 한다(범위 = 게이트웨이 연결·재기동·실발송 없음 · 단계 = 결과 문서 §1·§6). 첫 조치 = 관제 자격 `lg-6d18c5ab15fc783e` 회수 여부 확인.
 - external3 시험 연결은 종결이다. 링크가드 쪽 회신이 오면 그 내용만 검토한다(재시험은 Harold 지시 때만 · §2 절차).
 - 이터널그룹 회신이 오면 §3 순서.

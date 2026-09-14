@@ -14,6 +14,7 @@
  *
  * 상한(카드 3 · 카드당 이미지 3 · 상품 12)은 campaign-quick.ts 의 QUICK_* 와 같은 값이어야 한다. 그 파일이 T3 에서 이 파일을 import 하므로(순환 방지) 여기서는 import 하지 않고 값을 따로 둔다 · 계약 테스트가 동치를 건다.
  */
+import { normalizeWooMallId } from './woocommerce-core';
 import { createHash } from 'crypto';
 import { normalizeEventText } from './event-brief';
 import { heroEligible, type LookImageDims } from './sales-outreach-look';
@@ -30,6 +31,8 @@ export const AI_AUTO_BUILD_PRODUCTS_MAX = 12;
 export const AI_AUTO_BUILD_LOGO_MIN_RATIO = 3;
 
 const MALL_PROVIDERS: readonly string[] = ['cafe24', 'naver'];
+/** ★ 2026-09-14 W5 우커머스 — 몰별 provider "woocommerce:{mall}"(다몰 · 상품번호는 몰 안에서만 고유). 호스트는 몰 식별자 함수 하나로 검증. */
+const WOO_PROVIDER_PREFIX = 'woocommerce:';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IMAGE_FILENAME_RE = /^[A-Za-z0-9._-]+$/;
 const CARD_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
@@ -76,7 +79,15 @@ export interface BuildEventCard {
   link: string | null;
 }
 export type BuildProductSource = 'mall' | 'manual';
-export type BuildMallProvider = 'cafe24' | 'naver';
+export type BuildMallProvider = 'cafe24' | 'naver' | `woocommerce:${string}`;
+
+/** 몰 provider 인정 — 고정 2종 + 우커머스 몰별. 그 밖(godo · 빈 호스트 · IP)은 manual 로 접는다. */
+export function isBuildMallProvider(p: string): p is BuildMallProvider {
+  if (MALL_PROVIDERS.includes(p)) return true;
+  if (!p.startsWith(WOO_PROVIDER_PREFIX)) return false;
+  const host = p.slice(WOO_PROVIDER_PREFIX.length);
+  return !!host && normalizeWooMallId(host) === host;
+}
 export interface BuildProduct {
   source: BuildProductSource;
   provider: BuildMallProvider | null;
@@ -195,7 +206,7 @@ function normalizeProducts(raw: unknown): BuildProduct[] {
     if (!name) continue;
     const providerRaw = String(r.provider ?? '').trim().toLowerCase();
     const codeRaw = String(r.code ?? '').trim();
-    const isMall = MALL_PROVIDERS.includes(providerRaw) && PRODUCT_CODE_RE.test(codeRaw);
+    const isMall = isBuildMallProvider(providerRaw) && PRODUCT_CODE_RE.test(codeRaw);
     out.push({
       source: isMall ? 'mall' : 'manual',
       provider: isMall ? (providerRaw as BuildMallProvider) : null,

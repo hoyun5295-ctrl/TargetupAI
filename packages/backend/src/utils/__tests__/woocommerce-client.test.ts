@@ -1,0 +1,318 @@
+/**
+ * woocommerce-client.test.ts — 우커머스 IO 클라이언트(W2 · 설계서 docs/2026-09-14-woocommerce-integration-design.md §3)
+ *  REST v3 URL·Basic 인증(순수) · 자격 저장(pending · 웹훅 secret 발급) · 연결 검증 1콜 · 백필(페이지 순회 · identify/syncOrder) · 상태.
+ *  DB·HTTP는 mock — 적재 CT 호출 인자로 계약을 고정한다. 실 응답 형태는 게이트 ② 실측으로 확정.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
+vi.mock('axios', () => ({ default: { get: vi.fn() } }));
+vi.mock('../cdp-identity', async (orig) => ({ ...(await orig<any>()), identifyCustomer: vi.fn(async () => ({ customerId: 'c', linkId: 'l', wasCreated: true, wasMerged: false })) }));
+vi.mock('../cdp-orders', async (orig) => ({ ...(await orig<any>()), syncOrder: vi.fn(async () => ({ customerId: 'c', linkId: 'l', wasCustomerCreated: false, rfmUpdated: true })) }));
+
+import axios from 'axios';
+import { query } from '../../config/database';
+import { identifyCustomer } from '../cdp-identity';
+import { syncOrder } from '../cdp-orders';
+import {
+  WOO_PROVIDER,
+  DEFAULT_BACKFILL_DAYS,
+  PAGE_SIZE,
+  WooApiError,
+  wooRestUrl,
+  wooStoreUrl,
+  wooSiteOrigin,
+  wooBasicAuth,
+  buildWooWebhookUrl,
+  saveWooCredentials,
+  getWooIntegration,
+  listWooIntegrationsByMallId,
+  verifyWooConnection,
+  backfillWooOrders,
+  backfillWooCustomers,
+  syncWooOrdersSince,
+  processWooResource,
+  getWooStatus,
+  fetchWooStoreProducts,
+  fetchWooStoreProductsRaw,
+} from '../woocommerce-client';
+
+const COMPANY = '11111111-1111-4111-8111-111111111111';
+const MALL = 'ilbonimo.com';
+const q = query as unknown as ReturnType<typeof vi.fn>;
+const get = (axios as any).get as ReturnType<typeof vi.fn>;
+
+function row(over: Record<string, any> = {}) {
+  return {
+    id: 'row-1', company_id: COMPANY, mall_id: MALL, status: 'active', connected_at: new Date('2026-09-01T00:00:00Z'), last_synced_at: null,
+    webhook_secret: 'a'.repeat(64),
+    meta: { woo_site_url: 'https://www.ilbonimo.com/', woo_consumer_key: 'ck_x', woo_consumer_secret: 'cs_y', woo_consent_meta_key: 'marketing_agree' },
+    ...over,
+  };
+}
+
+function order(id: number, over: Record<string, any> = {}) {
+  return {
+    id, status: 'processing', currency: 'KRW', date_created_gmt: '2026-09-14T09:28:02', total: '1000', customer_id: 25,
+    billing: { first_name: '길동', last_name: '홍', email: 'h@example.invalid', phone: '010-0000-0001' },
+    meta_data: [{ id: 1, key: 'marketing_agree', value: 'Y' }],
+    line_items: [{ id: 1, name: '상품', product_id: 93, quantity: 1, total: '1000', price: 1000 }],
+    ...over,
+  };
+}
+
+beforeEach(() => {
+  q.mockReset();
+  q.mockImplementation(async () => ({ rows: [] }));
+  get.mockReset();
+  (identifyCustomer as any).mockClear();
+  (syncOrder as any).mockClear();
+});
+
+describe('순수 — URL · 인증 헤더 · 웹훅 URL', () => {
+  it("WOO_PROVIDER = 'woocommerce' · 백필 90일 · 페이지 100", () => {
+    expect(WOO_PROVIDER).toBe('woocommerce');
+    expect(DEFAULT_BACKFILL_DAYS).toBe(90);
+    expect(PAGE_SIZE).toBe(100);
+  });
+  it('REST v3 URL = https://{mall}/wp-json/wc/v3/{자원}?params(undefined 생략 · 인코딩)', () => {
+    expect(wooRestUrl(MALL, 'orders', { per_page: 100, page: 2, after: '2026-06-16T00:00:00Z', modified_after: undefined }))
+      .toBe('https://ilbonimo.com/wp-json/wc/v3/orders?per_page=100&page=2&after=2026-06-16T00%3A00%3A00Z');
+    expect(wooRestUrl(MALL, 'customers', {})).toBe('https://ilbonimo.com/wp-json/wc/v3/customers');
+  });
+  it('Store API URL = /wp-json/wc/store/v1/products(공개 · 키 없음) · include 는 콤마 목록', () => {
+    expect(wooStoreUrl(MALL, { search: '렌즈', per_page: 20 })).toBe('https://ilbonimo.com/wp-json/wc/store/v1/products?search=%EB%A0%8C%EC%A6%88&per_page=20');
+    expect(wooStoreUrl(MALL, { include: ['93', '94'] })).toBe('https://ilbonimo.com/wp-json/wc/store/v1/products?include=93%2C94');
+  });
+  it('Basic 인증 = base64(consumer_key:consumer_secret) · 비밀은 URL 에 싣지 않는다', () => {
+    expect(wooBasicAuth('ck_x', 'cs_y')).toBe('Basic ' + Buffer.from('ck_x:cs_y').toString('base64'));
+    expect(wooRestUrl(MALL, 'orders', { per_page: 1 })).not.toMatch(/consumer_/);
+  });
+  it('요청 기준 주소: 몰 주소(URL)면 그 호스트를 https 로 · 호스트만이면 https://{host} · 저장 주소의 호스트가 식별자 밖이면 https://{mallId}', () => {
+    expect(wooSiteOrigin('https://www.ilbonimo.com/')).toBe('https://www.ilbonimo.com');
+    expect(wooSiteOrigin('http://www.ilbonimo.com/shop')).toBe('https://www.ilbonimo.com');
+    expect(wooSiteOrigin('ilbonimo.com')).toBe('https://ilbonimo.com');
+    expect(wooRestUrl('https://www.ilbonimo.com/', 'orders', { per_page: 1 })).toBe('https://www.ilbonimo.com/wp-json/wc/v3/orders?per_page=1');
+  });
+  it('몰별 웹훅 URL = {APP_BASE_URL}/api/woocommerce/webhook/{mallId}', () => {
+    expect(buildWooWebhookUrl(MALL, 'https://app.hanjul.ai/')).toBe('https://app.hanjul.ai/api/woocommerce/webhook/ilbonimo.com');
+  });
+});
+
+describe('자격 저장 — 몰 1개 = 행 1개 · pending · 웹훅 secret 은 우리가 발급(1회 노출)', () => {
+  it('저장 = INSERT ... ON CONFLICT (company_id, provider, mall_id) · status pending · meta 에 키·수신동의 메타키 · webhook_secret 64 hex', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('INSERT INTO company_integrations') ? { rows: [{ webhook_secret: 'b'.repeat(64), created: true }] } : { rows: [] }));
+    const r = await saveWooCredentials(COMPANY, { siteUrl: 'https://www.ilbonimo.com/', consumerKey: 'ck_x', consumerSecret: 'cs_y', consentMetaKey: 'marketing_agree' });
+    expect(r.mallId).toBe(MALL);
+    expect(r.webhookUrl).toContain('/api/woocommerce/webhook/ilbonimo.com');
+    expect(r.webhookSecret).toMatch(/^[0-9a-f]{64}$/);
+    const insert = q.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO company_integrations'));
+    expect(insert).toBeDefined();
+    expect(insert![0]).toContain("'woocommerce'");
+    expect(insert![0]).toContain('ON CONFLICT (company_id, provider, mall_id)');
+    expect(insert![0]).toContain("'pending'");
+    const meta = JSON.parse(insert![1][2]);
+    expect(meta).toMatchObject({ woo_site_url: 'https://www.ilbonimo.com/', woo_consumer_key: 'ck_x', woo_consumer_secret: 'cs_y', woo_consent_meta_key: 'marketing_agree' });
+    expect(insert![1][1]).toBe(MALL);
+  });
+  it('저장 시 몰 도메인을 수집 허용 도메인(companies.cdp_allowed_origins)에 등록한다(https://{mall} · https://www.{mall}) · 그 실패는 저장을 막지 않는다', async () => {
+    q.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO company_integrations')) return { rows: [{ webhook_secret: 'b'.repeat(64) }] };
+      if (sql.includes('cdp_allowed_origins')) throw new Error('column "cdp_allowed_origins" does not exist');
+      return { rows: [] };
+    });
+    const r = await saveWooCredentials(COMPANY, { siteUrl: 'https://www.ilbonimo.com/', consumerKey: '', consumerSecret: '', consentMetaKey: '' });
+    expect(r.mallId).toBe(MALL);
+    const upd = q.mock.calls.find((c: any[]) => String(c[0]).includes('cdp_allowed_origins'));
+    expect(upd).toBeDefined();
+    expect(upd![0]).toContain('UPDATE companies');
+    expect(upd![1]).toEqual([COMPANY, ['https://ilbonimo.com', 'https://www.ilbonimo.com']]);
+  });
+  it('몰 주소가 식별자로 접히지 않으면 WooApiError(invalid_site)', async () => {
+    await expect(saveWooCredentials(COMPANY, { siteUrl: 'localhost', consumerKey: '', consumerSecret: '', consentMetaKey: '' })).rejects.toBeInstanceOf(WooApiError);
+    expect(q).not.toHaveBeenCalled();
+  });
+  it('조회는 revoked 를 제외하고 meta 를 필드로 푼다', async () => {
+    q.mockImplementation(async () => ({ rows: [row()] }));
+    const r = await getWooIntegration(COMPANY, MALL);
+    expect(r).toMatchObject({ companyId: COMPANY, mallId: MALL, status: 'active', consumerKey: 'ck_x', consumerSecret: 'cs_y', consentMetaKey: 'marketing_agree', webhookSecret: 'a'.repeat(64) });
+    q.mockImplementation(async () => ({ rows: [row({ status: 'revoked' })] }));
+    expect(await getWooIntegration(COMPANY, MALL)).toBeUndefined();
+  });
+  it('웹훅 수신용 몰 조회는 pending 도 포함한다(REST 키 없이 웹훅만 붙인 몰의 첫 수신이 검증 신호) · revoked 제외', async () => {
+    q.mockImplementation(async (sql: string) => {
+      expect(sql).toMatch(/status IN \('active', 'pending'\)/);
+      return { rows: [row(), row({ id: 'row-2', company_id: '22222222-2222-4222-8222-222222222222', status: 'pending' })] };
+    });
+    const rows = await listWooIntegrationsByMallId(MALL);
+    expect(rows).toHaveLength(2);
+  });
+});
+
+describe('연결 검증 1콜 — 주문 1건 읽기 · 실패 코드 매핑 · 성공 시에만 active + connected_at', () => {
+  it('200 → active 갱신 UPDATE 1회(connected_at COALESCE)', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row({ status: 'pending', connected_at: null })] } : { rows: [] }));
+    get.mockResolvedValueOnce({ status: 200, headers: { 'x-wp-totalpages': '1' }, data: [order(1)] });
+    await verifyWooConnection(COMPANY, MALL);
+    const upd = q.mock.calls.filter((c: any[]) => String(c[0]).includes("status = 'active'"));
+    expect(upd).toHaveLength(1);
+    expect(upd[0][0]).toContain('connected_at = COALESCE(connected_at, NOW())');
+    const call = get.mock.calls[0];
+    // 기준 주소 = 저장된 몰 주소(www 포함) — 식별자(www 뗀 값)로 보내면 301 에 Authorization 이 묻힌다(리다이렉트 0)
+    expect(call[0]).toBe('https://www.ilbonimo.com/wp-json/wc/v3/orders?per_page=1');
+    expect(call[1].headers.Authorization).toBe(wooBasicAuth('ck_x', 'cs_y'));
+    expect(call[1].maxRedirects).toBe(0);
+  });
+  it('401 → unauthorized · 404 → not_found · 비배열 200 → bad_response · 네트워크 → network · active 갱신 0', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row({ status: 'pending' })] } : { rows: [] }));
+    get.mockResolvedValueOnce({ status: 401, headers: {}, data: { code: 'woocommerce_rest_cannot_view' } });
+    await expect(verifyWooConnection(COMPANY, MALL)).rejects.toMatchObject({ code: 'unauthorized' });
+    get.mockResolvedValueOnce({ status: 404, headers: {}, data: { code: 'rest_no_route' } });
+    await expect(verifyWooConnection(COMPANY, MALL)).rejects.toMatchObject({ code: 'not_found' });
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: '<html>' });
+    await expect(verifyWooConnection(COMPANY, MALL)).rejects.toMatchObject({ code: 'bad_response' });
+    get.mockRejectedValueOnce(Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' }));
+    await expect(verifyWooConnection(COMPANY, MALL)).rejects.toMatchObject({ code: 'network' });
+    // 301(www 유무·http→https) 은 따라가지 않고 주소를 고쳐 달라고 말한다 — Authorization 이 리다이렉트에 묻히지 않게
+    get.mockResolvedValueOnce({ status: 301, headers: { location: 'https://www.ilbonimo.com/' }, data: '' });
+    await expect(verifyWooConnection(COMPANY, MALL)).rejects.toMatchObject({ code: 'redirect' });
+    expect(q.mock.calls.filter((c: any[]) => String(c[0]).includes("status = 'active'"))).toHaveLength(0);
+  });
+  it('REST 키가 없는 몰은 no_keys(웹훅 수신으로만 연결되는 몰)', async () => {
+    q.mockImplementation(async () => ({ rows: [row({ meta: { woo_site_url: 'https://www.ilbonimo.com/' } })] }));
+    await expect(verifyWooConnection(COMPANY, MALL)).rejects.toMatchObject({ code: 'no_keys' });
+    expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe('processWooResource — 매핑 → identify(수신동의 있을 때) → syncOrder · 회원은 identify 만', () => {
+  it('주문: 수신동의 Y → identifyCustomer(smsOptIn true) 뒤 syncOrder(orderId 몰 접두)', async () => {
+    const r = await processWooResource(COMPANY, MALL, 'order', order(727), 'marketing_agree');
+    expect(r).toBe('synced');
+    expect(identifyCustomer).toHaveBeenCalledTimes(1);
+    expect((identifyCustomer as any).mock.calls[0][1]).toMatchObject({ source: 'woocommerce', externalId: 'ilbonimo.com:25', phone: '010-0000-0001', smsOptIn: true });
+    expect((syncOrder as any).mock.calls[0][1]).toMatchObject({ source: 'woocommerce', orderId: 'ilbonimo.com:727', status: 'paid', totalAmount: 1000 });
+  });
+  it('주문: 수신동의 메타키 미설정 → identify 0 · syncOrder 1(식별은 syncOrder 가 한다)', async () => {
+    await processWooResource(COMPANY, MALL, 'order', order(727), null);
+    expect(identifyCustomer).not.toHaveBeenCalled();
+    expect(syncOrder).toHaveBeenCalledTimes(1);
+  });
+  it('회원: identify 1 · syncOrder 0 · 식별 수단 없는 회원({id}) 은 skipped', async () => {
+    const c = { id: 25, email: 'h@example.invalid', first_name: '길동', last_name: '홍', billing: { phone: '010-0000-0001' }, meta_data: [{ key: 'marketing_agree', value: 'N' }] };
+    expect(await processWooResource(COMPANY, MALL, 'customer', c, 'marketing_agree')).toBe('synced');
+    expect((identifyCustomer as any).mock.calls[0][1]).toMatchObject({ externalId: 'ilbonimo.com:25', smsOptIn: false });
+    expect(syncOrder).not.toHaveBeenCalled();
+    expect(await processWooResource(COMPANY, MALL, 'customer', { id: 26 }, 'marketing_agree')).toBe('skipped');
+  });
+  it('삭제 페이로드({id}만) 주문은 skipped(적재 불가 · 던지지 않는다)', async () => {
+    expect(await processWooResource(COMPANY, MALL, 'order', { id: 727 }, null)).toBe('skipped');
+    expect(syncOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe('백필 — X-WP-TotalPages 로 끝까지(첫 페이지에서 멈추지 않는다) · after 90일 · 성공 뒤 active', () => {
+  it('주문 백필: 2페이지 순회 · 주문 3건 syncOrder · 1페이지 URL 에 after·orderby·per_page 100', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    get.mockResolvedValueOnce({ status: 200, headers: { 'x-wp-totalpages': '2' }, data: [order(1), order(2)] });
+    get.mockResolvedValueOnce({ status: 200, headers: { 'x-wp-totalpages': '2' }, data: [order(3)] });
+    const r = await backfillWooOrders(COMPANY, MALL, { days: 90 });
+    expect(r).toEqual({ imported: 3, pages: 2 });
+    expect(syncOrder).toHaveBeenCalledTimes(3);
+    const u1 = new URL(get.mock.calls[0][0]);
+    expect(u1.pathname).toBe('/wp-json/wc/v3/orders');
+    expect(u1.searchParams.get('per_page')).toBe('100');
+    expect(u1.searchParams.get('page')).toBe('1');
+    expect(u1.searchParams.get('orderby')).toBe('date');
+    expect(u1.searchParams.get('order')).toBe('asc');
+    expect(u1.searchParams.get('dates_are_gmt')).toBe('true');
+    const after = new Date(u1.searchParams.get('after')!);
+    expect(Math.round((Date.now() - after.getTime()) / 86400000)).toBe(90);
+    expect(new URL(get.mock.calls[1][0]).searchParams.get('page')).toBe('2');
+    expect(q.mock.calls.filter((c: any[]) => String(c[0]).includes("status = 'active'"))).toHaveLength(1);
+  });
+  it('회원 백필: 페이지 순회 · identify 만 · 상한(MAX_CUSTOMER_PAGES) 넘으면 truncated', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    const c = (id: number) => ({ id, email: `u${id}@example.invalid`, first_name: 'A', last_name: 'B', billing: { phone: '' }, meta_data: [] });
+    get.mockResolvedValue({ status: 200, headers: { 'x-wp-totalpages': '999' }, data: [c(1)] });
+    const r = await backfillWooCustomers(COMPANY, MALL);
+    expect(r.truncated).toBe(true);
+    expect(r.pages).toBe(50);
+    expect(r.imported).toBe(50);
+    expect(identifyCustomer).toHaveBeenCalledTimes(50);
+    expect(syncOrder).not.toHaveBeenCalled();
+  });
+  it('주기 수집(syncWooOrdersSince): modified_after = since · after = 90일 바닥(미지 파라미터 무시돼도 범위가 묶인다)', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    get.mockResolvedValueOnce({ status: 200, headers: { 'x-wp-totalpages': '1' }, data: [order(9, { status: 'completed' })] });
+    const since = new Date(Date.now() - 2 * 3600 * 1000);
+    const r = await syncWooOrdersSince(COMPANY, MALL, since);
+    expect(r.imported).toBe(1);
+    const u = new URL(get.mock.calls[0][0]);
+    expect(u.searchParams.get('modified_after')).toBe(since.toISOString().replace(/\.\d{3}Z$/, ''));
+    expect(u.searchParams.get('after')).not.toBeNull();
+    expect(u.searchParams.get('dates_are_gmt')).toBe('true');
+    expect(u.searchParams.get('orderby')).toBe('date');
+    // 주기 수집은 연결 상태를 건드리지 않는다(active 갱신은 연결 검증·백필 몫)
+    expect(q.mock.calls.filter((c: any[]) => String(c[0]).includes("status = 'active'"))).toHaveLength(0);
+  });
+  it('백필 중 401 은 WooApiError 로 올라온다(부분 적재는 syncOrder 멱등이 감당)', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    get.mockResolvedValueOnce({ status: 401, headers: {}, data: {} });
+    await expect(backfillWooOrders(COMPANY, MALL)).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+});
+
+describe('getWooStatus — 몰 목록 · connected = active+connected_at 인 몰이 하나라도 · 수집 실패 사유 · 비밀값 0', () => {
+  it('두 몰(active·pending) → connected true · 몰별 webhookUrl · hasRestKeys · consentMetaKey · syncError · 키·secret 값은 없다', async () => {
+    q.mockImplementation(async () => ({ rows: [
+      row({ meta: { ...row().meta, woo_sync_error: '401', woo_sync_error_code: 'unauthorized', woo_sync_error_at: '2026-09-14T10:00:00' } }),
+      row({ id: 'row-2', mall_id: 'lens007.net', status: 'pending', connected_at: null, meta: { woo_site_url: 'https://www.lens007.net/' } }),
+    ] }));
+    const s = await getWooStatus(COMPANY);
+    expect(s.connected).toBe(true);
+    expect(s.malls).toHaveLength(2);
+    expect(s.malls[0]).toMatchObject({ mallId: MALL, status: 'active', connected: true, hasRestKeys: true, consentMetaKey: 'marketing_agree', syncError: { code: 'unauthorized' } });
+    expect(s.malls[0].webhookUrl).toContain('/api/woocommerce/webhook/ilbonimo.com');
+    expect(s.malls[1]).toMatchObject({ mallId: 'lens007.net', status: 'pending', connected: false, hasRestKeys: false, syncError: null });
+    expect(JSON.stringify(s)).not.toMatch(/ck_x|cs_y|aaaaaaaa/);
+  });
+  it('행이 없으면 connected false · malls []', async () => {
+    expect(await getWooStatus(COMPANY)).toEqual({ connected: false, malls: [] });
+  });
+});
+
+describe('Store API 상품(공개 · 키 없음) — fetchWooStoreProducts / fetchWooStoreProductsRaw (W5 · AI 자동제작 접점)', () => {
+  const product = (id: number, over: Record<string, any> = {}) => ({
+    id, name: `상품 ${id}`, permalink: `https://www.ilbonimo.com/product/p${id}/`,
+    prices: { price: '1000', regular_price: '1000', sale_price: '1000', currency_minor_unit: 0 },
+    images: [{ src: `https://www.ilbonimo.com/u/${id}.jpg` }], is_purchasable: true, is_in_stock: true, ...over,
+  });
+  it('검색: search·per_page 로 Store API 호출 · Authorization 헤더 없음 · 정규화 MallProduct(provider woocommerce:{mall}) · 품절 제외', async () => {
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: [product(1), product(2, { is_in_stock: false })] });
+    const list = await fetchWooStoreProducts(MALL, { q: '렌즈', limit: 20 });
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ provider: 'woocommerce:ilbonimo.com', code: '1', salePrice: 1000 });
+    const [url, opts] = get.mock.calls[0];
+    const u = new URL(url);
+    expect(u.pathname).toBe('/wp-json/wc/store/v1/products');
+    expect(u.searchParams.get('search')).toBe('렌즈');
+    expect(u.searchParams.get('per_page')).toBe('20');
+    expect(opts.headers.Authorization).toBeUndefined();
+  });
+  it('상품번호 재조회: include=ids · raw 그대로(가용성 판정은 호출부)', async () => {
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: [product(93), product(94, { is_purchasable: false })] });
+    const raw = await fetchWooStoreProductsRaw(MALL, { ids: ['93', '94'] });
+    expect(raw).toHaveLength(2);
+    expect(new URL(get.mock.calls[0][0]).searchParams.get('include')).toBe('93,94');
+  });
+  it('per_page 상한 100 · 비배열 응답 bad_response · 404 not_found', async () => {
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: [] });
+    await fetchWooStoreProducts(MALL, { limit: 500 });
+    expect(new URL(get.mock.calls[0][0]).searchParams.get('per_page')).toBe('100');
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: { code: 'x' } });
+    await expect(fetchWooStoreProducts(MALL, {})).rejects.toMatchObject({ code: 'bad_response' });
+    get.mockResolvedValueOnce({ status: 404, headers: {}, data: {} });
+    await expect(fetchWooStoreProducts(MALL, {})).rejects.toMatchObject({ code: 'not_found' });
+  });
+});

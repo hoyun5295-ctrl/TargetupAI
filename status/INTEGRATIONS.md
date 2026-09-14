@@ -17,6 +17,7 @@
 | 고도몰 | 폴링 키 (partner_key + 몰별 key) | polling | 없음(키) | 불요 | 주문 조회(**30분 주기 수집** — 0810 신설) | ★ active (godo, 키 검증 — 연동 테스트용, 실주문 없음) |
 | 아임웹 | OAuth authorization_code | oauth | 2h / refresh 90d | 불요 | webhook + admin API | 코드완료 · **앱 승인(0719)** · 스토어 등록·실측 잔여 |
 | 자체 호스팅(custom) | webhook (HMAC-SHA256) | webhook | 없음 | 불요 | webhook 수신 | ★ active (self, 2개 회사) |
+| **우커머스(워드프레스)** | REST 키(consumer key/secret · Basic 헤더 · 몰별) + 기본 웹훅(HMAC-SHA256 · secret 은 우리 발급) | polling | 없음(키) | 불요 | **30분 주기 수집(modified_after) + 웹훅 수신** · Store API 상품(공개) | **코드완료 0914 · 배포 대기 · 실측 게이트 ②③ = 고객사 키·웹훅 의존**(일본이모 4몰) |
 | ~~가비아(퍼스트몰)~~ | — | — | — | — | — | **2026-07-06 제거 — 자체호스팅 흡수(§5)** |
 
 > **인증 3계열**: ① OAuth 리다이렉트(카페24·아임웹) ② client_credentials 자격입력·polling(네이버·메이크샵·고도몰) ③ webhook 수신(custom). 같은 client_credentials여도 서명 방식(bcrypt vs Basic)·토큰 수명(3h vs 5분)·IP 정책이 provider마다 다르다 — 추측 금지, 이 표가 실측 확정값.
@@ -103,6 +104,17 @@ polling/webhook 전용 provider는 OAuth 메서드를 throw, webhook 없는 prov
 
 ---
 
+### 우커머스(워드프레스 · REST 키 + 기본 웹훅) — ★ 2026-09-14 신규
+- **설계서·착수 원장**: [2026-09-14-woocommerce-integration-design.md](../docs/2026-09-14-woocommerce-integration-design.md)(불변 9 · 매핑 계약 · W1~W8 · 미검증 · 고객사 후속). 0704 "자체호스팅 웹훅 흡수"를 뒤집음(우커머스 기본 웹훅은 우리 표준 헤더·본문이 아니라 그대로 안 붙는다).
+- **코드**: `utils/woocommerce-core.ts`(순수 매핑) · `utils/woocommerce-client.ts`(REST·백필·주기 수집·Store API) · `utils/woocommerce-adapter.ts` · `utils/woocommerce-sync-worker.ts` · `routes/woocommerce.ts`
+- **인증**: 몰별 consumer key/secret(고객사가 우커머스 관리자 → 설정 → 고급 → REST API 에서 읽기 권한 발급) → `company_integrations.meta`(woo_consumer_key · woo_consumer_secret · woo_consent_meta_key · woo_site_url). HTTPS Basic 헤더만(쿼리스트링 인증 금지) · 리다이렉트 0 · 기준 주소 = 저장 몰 주소.
+- **행 = 몰 1개**(mall_id = 호스트 · www 제거 · UNIQUE(company_id, provider, mall_id)) · externalId·orderId = `{mall}:{id}`(워드프레스 id 는 몰마다 겹친다) · webhook_secret = 우리 발급 64 hex.
+- **엔드포인트**: POST `/api/woocommerce/webhook/:mallId`(공개 · rawBody 서명 · 후보 행마다 대조 · 미연동 200 무시 · 서명 실패 401 · 주제 없음 200) · POST `/credentials`(저장 = pending · secret 1회 응답) · POST `/connect`(검증 1콜 → active → 회원·주문 90일 백필) · POST `/rotate-secret` · GET `/status`(몰 목록) · DELETE `/disconnect?mall_id=`
+- **CDP 매핑**: 상태 processing → paid · completed → completed · cancelled/refunded 그대로 · 그 밖 pending. 수신동의 = 고객사가 폼에 적은 meta_data 키(회원·주문 어느 쪽이든) → `parseConsentValue`. 회원은 email·phone 둘 다 없으면 적재 안 함.
+- **주기 수집**: `woocommerce-sync-worker`(30분 · REST 키 있는 몰만 · modified_after + after 90일 + dates_are_gmt · 상한 50쪽 · 겹침 12시간 · 실패 = `meta.woo_sync_error` 만 · 커서 전진은 성공 1곳). 웹훅 전용 몰은 첫 웹훅 서명 통과가 연결 신호.
+- **상품**: Store API `/wp-json/wc/store/v1/products`(공개 · 키 불필요 · 실측 200 · search 동작) → `normalizeWooStoreProduct` · 피커 탭 provider = `woocommerce:{mall}` · AI 자동제작 재조회 = include.
+- **⛔ 미검증(게이트 ② 웹훅 1건 실측 전)**: 웹훅 헤더명·서명 인코딩(base64 추정 · hex 도 받음)·ping 본문 · modified_after/dates_are_gmt 지원 · 수신동의 메타키 위치·이름 · 한글 이름 칸.
+
 ## 4) 프론트 연동 UI
 
 - `packages/frontend/src/pages/CdpSettingsPage.tsx` — 좌측 대형 "자체 호스팅"(모든 목록 외 몰 흡수) + 우측 그리드(카페24·네이버·고도몰·아임웹·메이크샵).
@@ -125,6 +137,7 @@ polling/webhook 전용 provider는 OAuth 메서드를 throw, webhook 없는 prov
 | Provider | 회원/고객 매핑 | 주문 매핑 | 상태 |
 |----------|----------------|-----------|------|
 | 카페24·아임웹·custom·고도몰 | processWebhookEvent/backfill에서 완료 | 완료 | 운영 중 |
+| 우커머스 | `woocommerce-core.mapWooCustomerToCdp`(공식 REST v3 문서 형태 · 실 raw 미확정) | `mapWooOrderToCdp`(같음) | 코드완료 0914 · **게이트 ② 실 raw 1건으로 최종 확정** |
 | 네이버 | preview raw만 — 매핑 미확정 | preview raw만 | ⛔ 실데이터 스키마 확정 후 후속 |
 | 메이크샵 | 문서 스키마 확인(hname·mobile·sms_receive 등) — preview 매핑 후속 | 문서 스키마 확인 — 후속 | ⛔ 실고객사 데이터로 최종 검증 후 매핑 |
 

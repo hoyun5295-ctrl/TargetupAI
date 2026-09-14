@@ -21,9 +21,9 @@ const read = (p: string) => readFileSync(p, 'utf8');
 const keysFile = () => read(path.join(FRONTEND_SRC, 'utils/cdp-provider-keys.ts'));
 
 describe('자사몰 식별자 매핑 CT', () => {
-  it('provider 6종을 전부 등재한다 — 하나라도 빠지면 그 몰은 현황판에서 사라진다', () => {
+  it('provider 7종을 전부 등재한다 — 하나라도 빠지면 그 몰은 현황판에서 사라진다(★0914 우커머스 합류)', () => {
     const src = keysFile();
-    for (const key of ['cafe24', 'naver', 'godo', 'imweb', 'makeshop', 'custom']) {
+    for (const key of ['cafe24', 'naver', 'godo', 'imweb', 'makeshop', 'custom', 'woocommerce']) {
       expect(src).toContain(`key: '${key}'`);
     }
   });
@@ -48,7 +48,10 @@ describe('자사몰 식별자 매핑 CT', () => {
     expect(read(path.join(BACKEND_SRC, 'utils/imweb-client.ts'))).toContain("source: 'imweb'");
     expect(read(path.join(BACKEND_SRC, 'utils/godo-parse.ts'))).toContain("GODO_SOURCE = 'godo'");
     expect(read(path.join(BACKEND_SRC, 'utils/custom-self-hosted-adapter.ts'))).toContain("source: 'custom'");
-    for (const s of ["'cafe24'", "'imweb'", "'godo'"]) {
+    // ★0914 우커머스 — source 상수는 순수 코어가 소유하고 클라이언트·어댑터가 그 값을 쓴다
+    expect(read(path.join(BACKEND_SRC, 'utils/woocommerce-core.ts'))).toContain("WOO_SOURCE = 'woocommerce'");
+    expect(src).toMatch(/key: 'woocommerce',\s*dbProvider: 'woocommerce',\s*eventSources: \['woocommerce'\]/);
+    for (const s of ["'cafe24'", "'imweb'", "'godo'", "'woocommerce'"]) {
       expect(src).toContain(s);
     }
   });
@@ -236,10 +239,13 @@ describe('수집 방식 축 (★2026-08-10 — 화면 문구가 몰 유형과 �
     expect(read(path.join(BACKEND_SRC, 'utils/custom-self-hosted-adapter.ts'))).toContain("connectMethod: 'webhook'");
   });
 
-  it('카페24·아임웹은 자동 수집이다 — 웹훅을 우리가 받는다', () => {
+  it('카페24·아임웹·우커머스는 자동 수집이다 — 웹훅을 우리가 받는다(우커머스는 REST 주기 수집도)', () => {
     const src = keys();
     expect(src).toMatch(/key: 'cafe24',[\s\S]{0,200}collect: 'auto'/);
     expect(src).toMatch(/key: 'imweb',[\s\S]{0,200}collect: 'auto'/);
+    expect(src).toMatch(/key: 'woocommerce',[\s\S]{0,200}collect: 'auto'/);
+    expect(read(path.join(BACKEND_SRC, 'utils/woocommerce-adapter.ts'))).toContain("connectMethod: 'polling'");
+    expect(existsSync(path.join(BACKEND_SRC, 'utils/woocommerce-sync-worker.ts'))).toBe(true);
     expect(read(path.join(BACKEND_SRC, 'utils/cafe24-client.ts'))).toContain("connectMethod: 'oauth'");
     expect(read(path.join(BACKEND_SRC, 'utils/imweb-client.ts'))).toContain("connectMethod: 'oauth'");
   });
@@ -352,7 +358,7 @@ describe('조치 필요 배지 (★2026-08-10 — 근거 확정)', () => {
 });
 
 describe('접근 권한 격리 (★2026-08-10 — 화면이 담당자에게 열려 있다)', () => {
-  const PROVIDER_ROUTES = ['cafe24.ts', 'naver-commerce.ts', 'godo.ts', 'imweb.ts', 'makeshop.ts'];
+  const PROVIDER_ROUTES = ['cafe24.ts', 'naver-commerce.ts', 'godo.ts', 'imweb.ts', 'makeshop.ts', 'woocommerce.ts'];
 
   it('연동 화면은 담당자에게 열려 있다 — 그래서 아래 격리가 성립해야 한다', () => {
     const app = read(path.join(FRONTEND_SRC, 'App.tsx'));
@@ -368,7 +374,7 @@ describe('접근 권한 격리 (★2026-08-10 — 화면이 담당자에게 열�
     expect(page).toMatch(/isAdmin && \([\s\S]{0,200}setActiveModal\('customers'\)/);
   });
 
-  it('연결·해제·자격 저장은 provider 5종 전부 관리자 전용이다', () => {
+  it('연결·해제·자격 저장은 provider 6종 전부 관리자 전용이다', () => {
     for (const f of PROVIDER_ROUTES) {
       expect(read(path.join(BACKEND_SRC, 'routes', f)), `${f}에 관리자 게이트가 없다`).toContain('company_admin');
     }
@@ -419,9 +425,9 @@ describe('페이지 분해 (Phase 5 · ★2026-08-10)', () => {
     expect(read(path.join(FRONTEND_SRC, 'utils/cdp-sdk-script.ts'))).toMatch(/CDP_SDK_VERSION = 'v\d+\.\d+\.\d+'/);
   });
 
-  it('몰별 연결 폼 5종이 분리돼 있다 — 페이지는 표시 조건과 상태만 통제한다', () => {
+  it('몰별 연결 폼 6종이 분리돼 있다 — 페이지는 표시 조건과 상태만 통제한다', () => {
     const src = page();
-    for (const c of ['CdpCafe24ConnectForm', 'CdpNaverConnectForm', 'CdpMakeshopConnectForm', 'CdpImwebConnectForm', 'CdpGodoConnectForm']) {
+    for (const c of ['CdpCafe24ConnectForm', 'CdpNaverConnectForm', 'CdpMakeshopConnectForm', 'CdpImwebConnectForm', 'CdpGodoConnectForm', 'CdpWooConnectForm']) {
       expect(src, `${c}를 쓰지 않는다`).toContain(`<${c}`);
     }
     // 스테퍼 ① 표시 조건은 페이지에 남아야 한다(계약 대상)
@@ -460,5 +466,46 @@ describe('install-status source 분리 (Phase 0)', () => {
     // 기존 소비처가 보던 키가 그대로 남아 있어야 한다(additive 보장)
     expect(src).toMatch(/firstEventAt: row\.first_event_at/);
     expect(src).toMatch(/count24h: parseInt\(row\.count_24h/);
+  });
+});
+
+describe('우커머스 연동 화면 (★2026-09-14 W4 · 설계서 docs/2026-09-14-woocommerce-integration-design.md §3 화면 층)', () => {
+  const page = () => read(path.join(FRONTEND_SRC, 'pages/CdpSettingsPage.tsx'));
+  const forms = () => read(path.join(FRONTEND_SRC, 'components/cdp/CdpConnectForms.tsx'));
+
+  it('페이지가 우커머스 상태를 조회하고 훅에 연결·조치 필요 축을 넘긴다', () => {
+    const src = page();
+    expect(src).toContain("fetch('/api/woocommerce/status'");
+    expect(src).toMatch(/woocommerce: !!wooStatus\?\.connected/);
+    expect(src).toMatch(/woocommerce: !!wooStatus\?\.malls\?\.some\(\(m\) => m\.syncError\)/);
+  });
+  it('카드·모달 표에 우커머스가 있고 백엔드 식별자 매핑이 있다', () => {
+    const src = page();
+    expect(src).toMatch(/key: 'woocommerce', name: '우커머스/);
+    expect(src).toMatch(/woocommerce: \{ title: '우커머스/);
+    expect(src).toMatch(/^\s*woocommerce: 'woocommerce',/m);
+  });
+  it('폼은 몰 여러 개를 다룬다(몰별 저장·연결·해제 · 웹훅 secret 1회 표시 · 개발자 전달) · 비밀은 화면에 다시 표시하지 않는다', () => {
+    const src = forms();
+    expect(src).toMatch(/export function CdpWooConnectForm/);
+    expect(src).toMatch(/malls\.map\(/);
+    expect(src).toContain('onDisconnect(m.mallId)');
+    expect(src).toContain('buildWooDeveloperText(');
+    // secret 은 저장 응답에서 받은 값(issued)만 1회 보여준다 — 상태 응답에는 secret 이 없다
+    expect(src).not.toMatch(/status\.[a-zA-Z]*[sS]ecret/);
+  });
+  it('개발자 전달 문안 CT 는 값 없는 자리(secret)를 채우지 않고 웹훅 주제 4종과 SDK 스크립트 자리를 갖는다', () => {
+    const guide = read(path.join(FRONTEND_SRC, 'utils/woocommerce-guide.ts'));
+    for (const t of ['order.created', 'order.updated', 'customer.created', 'customer.updated']) expect(guide).toContain(t);
+    expect(guide).toMatch(/if \(input\.sdkKey\)/);
+    // 서버 IP 를 담지 않는다(공개 시 전 고객사가 우리 IP 를 안다)
+    const code = guide.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).not.toMatch(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/);
+  });
+  it('모델명·내부 코드명 0(사용자 노출 문안)', () => {
+    for (const f of ['components/cdp/CdpConnectForms.tsx', 'utils/woocommerce-guide.ts']) {
+      const code = read(path.join(FRONTEND_SRC, f)).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+      expect(code).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic|claude-/);
+    }
   });
 });

@@ -14,9 +14,12 @@
 import {
   Check, Loader2, Link2, Unlink, Eye, EyeOff, Code2, Copy,
   ShoppingCart, Palette, LayoutTemplate, Server, Boxes, Store, ChevronUp, ChevronDown, ExternalLink,
+  Blocks, RefreshCw, AlertCircle, X, FileText,
 } from 'lucide-react';
 import { GuideStep } from './CdpFormPrimitives';
 import { buildSdkScriptTag } from '../../utils/cdp-sdk-script';
+// ★ 2026-09-14 W4 우커머스 — 개발자 전달 문안·워드프레스 조각은 CT 가 만든다(폼은 그리기만)
+import { buildWooDeveloperText, buildWooBodyAttrsSnippet, WOO_WEBHOOK_TOPICS, WOO_TOPIC_LABEL } from '../../utils/woocommerce-guide';
 
 // ════════════════════════════════════════════════════════════════════
 // 상태 타입 — 각 provider `/status` 응답
@@ -687,6 +690,243 @@ export function CdpGodoConnectForm(p: CdpGodoConnectFormProps) {
           {blk('③ 장바구니 담기: 상품상세(goods_view) 스킨', godoCart, '고도몰 장바구니 코드')}
           {blk('④ 구매 완료: 주문완료(order_end) 스킨', godoPurchase, '고도몰 구매 완료 코드')}
           <div className="text-[10px] text-amber-300/70 italic">PC·모바일 스킨 양쪽에 넣어야 합니다. 그리고 "수집 허용 도메인"에 몰 도메인을 등록해야 수집이 시작됩니다.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 우커머스(워드프레스) — 몰별 REST 키 + 우리가 발급한 웹훅 secret (★2026-09-14 W4)
+//   설계서 = docs/2026-09-14-woocommerce-integration-design.md §3 화면 층
+//   한 회사가 몰 여러 개(고객사 4몰)를 붙인다 — 목록 + 추가 폼. 상태 응답에는 키·secret 값이 없고,
+//   secret 은 저장·재발급 응답(issued)에서 한 번만 보여준다.
+// ════════════════════════════════════════════════════════════════════
+
+export interface WooMallStatus {
+  mallId: string;
+  siteUrl: string;
+  status: string;
+  connected: boolean;
+  connectedAt: string | null;
+  lastSyncedAt: string | null;
+  webhookUrl: string;
+  hasRestKeys: boolean;
+  consentMetaKey: string | null;
+  syncError: { message: string; code: string; at: string | null } | null;
+}
+
+export interface WooStatus {
+  connected: boolean;
+  malls: WooMallStatus[];
+}
+
+/** 저장·재발급 응답에서 받은 1회 노출 값 */
+export interface WooIssuedSecret {
+  mallId: string;
+  webhookUrl: string;
+  webhookSecret: string;
+}
+
+export interface CdpWooConnectFormProps {
+  status: WooStatus | null;
+  isAdmin: boolean;
+  connecting: boolean;
+  siteUrl: string;
+  onSiteUrlChange: (v: string) => void;
+  consumerKey: string;
+  onConsumerKeyChange: (v: string) => void;
+  consumerSecret: string;
+  onConsumerSecretChange: (v: string) => void;
+  consentMetaKey: string;
+  onConsentMetaKeyChange: (v: string) => void;
+  showSecret: boolean;
+  onToggleSecret: () => void;
+  /** 저장 → (키 있으면) 연결 확인 + 백필 */
+  onConnect: () => void;
+  onDisconnect: (mallId: string) => void;
+  onRotateSecret: (mallId: string) => void;
+  issued: WooIssuedSecret | null;
+  onDismissIssued: () => void;
+  publicKey: string | null | undefined;
+  onCopy: (text: string, label: string) => void;
+}
+
+const fmtKo = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString('ko-KR') : '-');
+
+export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
+  const malls = p.status?.malls ?? [];
+  const wooHead = buildSdkScriptTag(p.publicKey);
+  const wooBody = buildWooBodyAttrsSnippet();
+  const guideFor = (m: { mallId: string; siteUrl: string; webhookUrl: string; hasRestKeys: boolean; consentMetaKey: string | null }) =>
+    buildWooDeveloperText({ mallId: m.mallId, siteUrl: m.siteUrl, webhookUrl: m.webhookUrl, sdkKey: p.publicKey || null, consentMetaKey: m.consentMetaKey, needsRestKeys: !m.hasRestKeys });
+  const issuedMall = p.issued ? malls.find((m) => m.mallId === p.issued!.mallId) : undefined;
+
+  const blk = (label: string, code: string, copyLabel: string) => (
+    <div key={copyLabel}>
+      <div className="text-xs font-medium text-white/70 mb-1.5">{label}</div>
+      <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{code}</pre>
+      <button type="button" onClick={() => p.onCopy(code, copyLabel)} className="mt-2 px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
+        <Copy className="w-3.5 h-3.5" />복사
+      </button>
+    </div>
+  );
+
+  return (
+    <div id="section-woocommerce" className="bg-white/5 border border-white/10 rounded-xl p-6">
+      <div className="flex items-center gap-2 mb-4">
+        <Blocks className="w-5 h-5 text-fuchsia-300" />
+        <h2 className="text-base font-bold text-white">우커머스 연동</h2>
+        <span className="text-xs bg-fuchsia-500/20 text-fuchsia-200 px-2 py-0.5 rounded-full font-medium">REST 키 + 웹훅 · 몰별</span>
+      </div>
+
+      {/* 1회 노출 — 저장·재발급 직후 웹훅 주소와 비밀키 */}
+      {p.issued && (
+        <div className="mb-5 bg-amber-500/10 border border-amber-400/40 rounded-xl p-4 space-y-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
+            <div className="flex-1 text-xs text-amber-100 leading-relaxed">
+              <strong className="text-white">{p.issued.mallId}</strong> 웹훅 비밀키입니다. 이 화면을 닫으면 다시 볼 수 없습니다(재발급은 가능). 고객사 개발자에게 사적 경로로 전달하세요.
+            </div>
+            <button type="button" onClick={p.onDismissIssued} className="p-1 text-white/40 hover:text-white/80" title="닫기"><X className="w-4 h-4" /></button>
+          </div>
+          <div>
+            <div className="text-[11px] text-white/50 mb-1">웹훅 전송 URL</div>
+            <div className="flex gap-2">
+              <code className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-emerald-200 break-all">{p.issued.webhookUrl}</code>
+              <button type="button" onClick={() => p.onCopy(p.issued!.webhookUrl, '웹훅 URL')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />복사</button>
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-white/50 mb-1">웹훅 비밀키(Secret)</div>
+            <div className="flex gap-2">
+              <code className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-amber-200 font-mono break-all">{p.issued.webhookSecret}</code>
+              <button type="button" onClick={() => p.onCopy(p.issued!.webhookSecret, '웹훅 비밀키')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />복사</button>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => p.onCopy(guideFor({ mallId: p.issued!.mallId, siteUrl: issuedMall?.siteUrl || `https://${p.issued!.mallId}/`, webhookUrl: p.issued!.webhookUrl, hasRestKeys: issuedMall?.hasRestKeys ?? !!p.consumerKey.trim(), consentMetaKey: issuedMall?.consentMetaKey ?? (p.consentMetaKey.trim() || null) }), '개발자 전달용 안내')}
+            className="w-full px-4 py-2.5 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 text-sm font-medium rounded-lg inline-flex items-center justify-center gap-2"
+          >
+            <FileText className="w-4 h-4" /> 개발자에게 보낼 안내 복사(비밀키 제외)
+          </button>
+        </div>
+      )}
+
+      {/* 연결된 몰 목록 */}
+      {malls.length > 0 && (
+        <div className="space-y-3 mb-5">
+          {malls.map((m) => (
+            <div key={m.mallId} className={`rounded-xl border p-4 ${m.connected ? 'bg-emerald-500/[0.06] border-emerald-400/25' : 'bg-white/[0.03] border-white/10'}`}>
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-white truncate">{m.mallId}</span>
+                    {m.connected
+                      ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연결됨</span>
+                      : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-200 border border-amber-400/25 font-medium">첫 웹훅·연결 확인 대기</span>}
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/50 border border-white/10">{m.hasRestKeys ? '주기 수집 + 웹훅' : '웹훅 전용'}</span>
+                  </div>
+                  <div className="text-[11px] text-white/45 mt-1">
+                    연결 {fmtKo(m.connectedAt)} · 마지막 수집 {fmtKo(m.lastSyncedAt)}{m.consentMetaKey ? ` · 수신동의 키 ${m.consentMetaKey}` : ' · 수신동의 키 미설정'}
+                  </div>
+                  {m.syncError && (
+                    <div className="mt-2 text-[11px] text-rose-200 bg-rose-500/10 border border-rose-400/30 rounded-lg px-3 py-2 inline-flex items-start gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> 수집 실패 · {m.syncError.message}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => p.onCopy(guideFor(m), '개발자 전달용 안내')} className="px-3 py-1.5 bg-violet-500/25 hover:bg-violet-500/40 text-violet-100 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />개발자 안내 복사</button>
+                <button type="button" onClick={() => p.onCopy(m.webhookUrl, '웹훅 URL')} className="px-3 py-1.5 bg-indigo-500/25 hover:bg-indigo-500/40 text-indigo-100 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />웹훅 URL</button>
+                {p.isAdmin && (
+                  <>
+                    <button type="button" onClick={() => p.onRotateSecret(m.mallId)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" />비밀키 재발급</button>
+                    <button type="button" onClick={() => p.onDisconnect(m.mallId)} className="px-3 py-1.5 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Unlink className="w-3.5 h-3.5" />해제</button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 몰 추가 */}
+      <div className="space-y-4">
+        <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
+          <div className="text-xs font-semibold text-violet-100">{malls.length > 0 ? '몰 추가' : '몰 연결 · 3단계'}</div>
+          <GuideStep n={1}>우커머스 관리자 → 설정 → 고급 → <strong className="text-white/90">REST API</strong> 에서 읽기 권한 키를 만들어 아래에 넣습니다. 키가 아직 없으면 몰 주소만 저장해도 됩니다(웹훅으로만 받습니다).</GuideStep>
+          <GuideStep n={2}>저장하면 웹훅 주소와 비밀키가 한 번 표시됩니다. "개발자 안내 복사"로 전달하면 개발자가 우커머스 관리자에서 웹훅 {WOO_WEBHOOK_TOPICS.length}개({WOO_WEBHOOK_TOPICS.map((t) => WOO_TOPIC_LABEL[t].split('(')[0]).join('·')})를 만듭니다.</GuideStep>
+          <GuideStep n={3}>마케팅 수신동의를 커스텀 필드로 받고 있다면 그 필드의 메타키를 적어 주세요. 비워 두면 수신동의는 반영되지 않습니다(기본 미동의).</GuideStep>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2">
+            <label className="block text-[11px] text-white/50 mb-1">쇼핑몰 주소</label>
+            <input
+              type="text"
+              value={p.siteUrl}
+              onChange={(e) => p.onSiteUrlChange(e.target.value)}
+              placeholder="https://www.example.com"
+              className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-white/50 mb-1">Consumer key(읽기)</label>
+            <input
+              type="text"
+              value={p.consumerKey}
+              onChange={(e) => p.onConsumerKeyChange(e.target.value)}
+              placeholder="ck_ 로 시작"
+              className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-white/50 mb-1">Consumer secret</label>
+            <div className="relative">
+              <input
+                type={p.showSecret ? 'text' : 'password'}
+                value={p.consumerSecret}
+                onChange={(e) => p.onConsumerSecretChange(e.target.value)}
+                placeholder="cs_ 로 시작"
+                className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+              />
+              <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={p.showSecret ? '숨기기' : '보기'}>
+                {p.showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-[11px] text-white/50 mb-1">마케팅 수신동의 메타키(선택)</label>
+            <input
+              type="text"
+              value={p.consentMetaKey}
+              onChange={(e) => p.onConsentMetaKeyChange(e.target.value)}
+              placeholder="예: marketing_agree"
+              className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+            />
+          </div>
+        </div>
+
+        <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+          {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 저장하고 연결 확인 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 연결 확인</>}
+        </button>
+        {!p.isAdmin && NOT_ADMIN_NOTE}
+        <div className="text-[10px] text-white/30 italic">REST 키는 한줄로 서버에 보관되며 화면에 다시 표시되지 않습니다. 몰 주소는 수집 허용 도메인에 자동 등록됩니다.</div>
+      </div>
+
+      {/* SDK 설치 — 주문 API 와 별개(방문·장바구니 수집). 워드프레스는 테마 <head> 한 줄. */}
+      <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
+        <div className="flex items-center gap-2">
+          <Code2 className="w-4 h-4 text-violet-300" />
+          <h3 className="text-sm font-bold text-white">SDK 설치: 방문·회원·장바구니 수집</h3>
+        </div>
+        <div className="text-[11px] text-white/50 -mt-2">주문(위)과 별개입니다. 테마의 &lt;head&gt; 에 아래 한 줄을 넣으면 방문·장바구니가 들어옵니다. 회원 식별(②)은 선택이며 테마 &lt;body&gt; 태그 한 줄을 바꿉니다.</div>
+        <div className="space-y-4">
+          {blk('① 설치 스크립트: 테마 header.php 의 <head> 안(모든 페이지)', wooHead, '우커머스 설치 스크립트')}
+          {blk('② 회원 식별(선택): 테마 <body> 태그를 이렇게 바꿉니다', wooBody, '우커머스 회원 식별 코드')}
         </div>
       </div>
     </div>

@@ -101,7 +101,7 @@ export default function ProductPickList({ value, onChange, mallAvailable, onOpen
               <div className="min-w-0 flex-1">
                 <div className="text-[12px] text-white/90 truncate" title={p.name}>{p.name}</div>
                 <div className="text-[11px] text-white/60 truncate">{won(p.salePrice ?? p.price) || '가격 없음'}</div>
-                <div className="text-[10px] text-white/35">{p.source === 'mall' ? `${p.provider === 'naver' ? '네이버' : '카페24'} 상품` : '직접 입력'}{p.source === 'manual' ? ' · 카드 대신 글로' : ''}</div>
+                <div className="text-[10px] text-white/35">{p.source === 'mall' ? `${p.provider === 'naver' ? '네이버' : p.provider?.startsWith('woocommerce') ? '우커머스' : '카페24'} 상품` : '직접 입력'}{p.source === 'manual' ? ' · 카드 대신 글로' : ''}</div>
               </div>
               {!disabled && (
                 <button type="button" onClick={() => onChange(value.filter((x) => x.key !== p.key))} aria-label="이 상품 제외"
