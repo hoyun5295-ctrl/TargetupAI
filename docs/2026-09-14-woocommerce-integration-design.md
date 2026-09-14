@@ -77,9 +77,9 @@
 | W5 | Store API 실측(ilbonimo.com 상품 1건 raw · search 54 vs 21,648 vs 0) → `normalizeWooStoreProduct`(테스트 4) · `fetchWooStoreProducts[Raw]`(테스트 3) · mall-products 3 라우트 분기 · 이름 매칭 순회 · AI 자동제작 `woocommerce:{mall}` 인정(테스트 2) + 재조회 분기 | **완료 0914** |
 | W6 | 내 적대 검토 → 정정 4: ①리다이렉트 0 + 기준 주소 = 저장 몰 주소(www) · 식별자 밖 호스트 차단(SSRF) ②`orderby=modified` 폐기(문서 밖) → `date` + `dates_are_gmt` ③주기 수집 상한 50쪽(modified_after 무시 시 90일치 폭주 차단) ④301 = `redirect` 코드로 주소 정정 안내. 그 밖 = §6 미검증 | **완료 0914** |
 | W7 | backend tsc 0 · 전체 295 파일 / 4,633 통과 · frontend tsc 0 · build:safe 통과 · DDL 0 · Codex 대상 아님(돈·국세청·DDL 경로 없음). **배포완료 0914**(Harold · pm2 restart 688 · dist `api/woocommerce` 3 · `[Woo Sync] 워커 시작` 1 · 프론트 청크 `우커머스 연동` 1 · online) | **배포완료 0914** |
-| W9 ① | 1클릭 연결: `woocommerce-auth-state.ts`(테스트 6) · client 키 저장·웹훅 생성·제거·설정 실패(테스트 6) · 라우트 3 + disconnect 웹훅 제거(소스 계약 6) · 화면(계약 2) · RED → GREEN · backend tsc 0 · frontend tsc 0 · 전체 297 파일 / 4,660 | **코드완료 0914(2) · 배포 대기** |
-| W10 ② | 플러그인: PHP 1파일 + readme · `zip-store.ts`(테스트 4 · unzip -t 실물) · `woocommerce-plugin-zip.ts` · `GET /plugin.zip` · 소스 계약 3 · **PHP 문법 린트 미실행**(도커 이미지 다운로드 3회 실패 · 로컬 php 없음) → 배포 뒤 워드프레스 실환경 활성화가 첫 검증 | **코드완료 0914(2) · 배포 대기 · 워드프레스 실환경 검증 대기** |
-| W8 | 고객사 키 도착 시 실측 게이트 ②(웹훅 1건 수신 → 헤더·서명·본문·수신동의 메타키 확정) · ③(SDK 삽입 리허설). 순서 = 화면에서 몰 4개 저장(REST 키 없이도 됨) → 웹훅 URL·secret·개발자 안내 전달 → 첫 웹훅 도착 시 `pm2 logs --nostream | grep WooCommerce` 로 헤더·본문 실측 → `cdp_webhook_deliveries` 행 확인 | **대기 · 고객사 의존(다음 세션 첫 일)** |
+| W9 ① | 1클릭 연결: `woocommerce-auth-state.ts`(테스트 6) · client 키 저장·웹훅 생성·제거·설정 실패(테스트 6) · 라우트 3 + disconnect 웹훅 제거(소스 계약 6) · 화면(계약 2) · RED → GREEN · backend tsc 0 · frontend tsc 0 · 전체 297 파일 / 4,660 | **배포완료 0914(2)**(pm2 restart 690 · dist `auth-callback` 7 · 프론트 빌드 17:25) |
+| W10 ② | 플러그인: PHP 1파일 + readme · `zip-store.ts`(테스트 4 · unzip -t 실물) · `woocommerce-plugin-zip.ts` · `GET /plugin.zip` · 소스 계약 3 · **PHP 문법 린트 미실행**(도커 이미지 다운로드 3회 실패 · 로컬 php 없음) → 배포 뒤 워드프레스 실환경 활성화가 첫 검증 | **배포완료 0914(2)**(`GET /api/woocommerce/plugin.zip` 200 · application/zip · 11,977 bytes = 로컬 산출물과 동일 · 오류 로그 0) · 워드프레스 실환경 검증 대기 |
+| W8 | 실측 게이트 ②③. **①이 배포됐으니 순서가 바뀐다**: 관리 → 자사몰 연동 → 우커머스 → 몰 주소 입력 → "관리자 승인으로 연결" → 몰 워드프레스 관리자(고객사 담당자)가 승인 → `pm2 logs --nostream | grep "WooCommerce auth-callback"` 에서 키 수신·웹훅 +4·백필 건수 확인 → 첫 웹훅 도착 시 `grep "WooCommerce Webhook"` 로 헤더·본문 실측 → `cdp_webhook_deliveries` 행. 플러그인은 zip 을 고객사에 전달해 활성화 → WooCommerce → 한줄로 화면에 "연결됨 · 웹훅 4개" 가 뜨는지 | **대기 · 고객사 몰 관리자 승인 의존(다음 세션 첫 일)** |
 
 ### 5-0. W2~W6 설계 결정(브리핑 기록)
 

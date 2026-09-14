@@ -12,6 +12,9 @@ describe('expandSlidePagesForSwipe — 슬라이드 모드: 이미지 N장을 �
     expect(out[0].sections[0].props.images).toEqual([{ url: 'a.jpg', caption: undefined }]);
     expect(out[3].sections[0].props.images[0].url).toBe('d.jpg');
     expect(out[0].sections[0].props.layout).toBe('list_1xN');
+    // ★ 재오픈 정정 — 뷰어는 visible 아닌 섹션을 안 그린다. 펼친 장은 보이는 섹션이어야 한다.
+    expect(out[0].sections[0].visible).toBe(true);
+    expect(out[3].sections[0].visible).toBe(true);
   });
 
   test('이미 이미지당 1페이지(좌우 슬라이드 업로드)면 변화 없음(원본 반환)', () => {

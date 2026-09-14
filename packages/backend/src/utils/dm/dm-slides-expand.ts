@@ -9,7 +9,7 @@
  *   - 헤더 등 다른 섹션이 섞인 페이지는 그대로 둔다(이미지 전용 페이지만 대상).
  *   - 슬라이드쇼(첫 장만 16:9 크롭 렌더 버그)도 각 장을 원본 비율 갤러리 페이지로 펼쳐 함께 해결.
  */
-type SlideSection = { id?: string; type?: string; order?: number; props?: any };
+type SlideSection = { id?: string; type?: string; order?: number; visible?: boolean; props?: any };
 export type SlidePage = { id: string; name?: string; sections: SlideSection[] };
 
 const IMAGE_SECTION_TYPES = new Set(['gallery', 'slideshow']);
@@ -58,6 +58,9 @@ export function expandSlidePagesForSwipe(pages: SlidePage[]): SlidePage[] {
             id: `${page.id}-s${i}-img`,
             type: 'gallery',
             order: 0,
+            // ★ 2026-09-14 재오픈 정정 — 뷰어 renderSections 는 visible 이 아닌 섹션을 그리지 않는다(dm-section-renderer). 펼친 장에 visible 이 없어
+            //   갤러리 N장 DM 이 슬라이드 모드에서 빈 장 N개로 나왔다(실측: 3장 갤러리 → 무대 3장 · <img> 0). 원본이 보이는 섹션이었으니 펼친 장도 보인다.
+            visible: true,
             props: { images: [{ url: img.url, caption: img.caption }], layout: 'list_1xN', ...(img.full_bleed ? { full_bleed: true } : {}) },
           },
         ],

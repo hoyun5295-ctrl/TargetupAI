@@ -385,26 +385,30 @@ function renderPagesHtml(
     if (mode === 'slides') {
       return `
 html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
-.dm-viewer{height:100%;display:flex;flex-direction:row;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+/* ★ 2026-09-14 재오픈 정정(박성용 16:15 "이미지가 하단으로 고정되고 확대되어 상하가 잘렸습니다") — 높이 기준을 100vh 에서 실제 보이는 높이(--dm-vh · 스크립트가 innerHeight 로 갱신)로.
+   100vh 는 모바일 브라우저 툴바를 포함한 큰 뷰포트라, 뷰어(height:100%)보다 장이 커져 아래가 잘렸다. 스크립트 전이면 100vh/100% 폴백. */
+.dm-viewer{height:var(--dm-vh,100%);display:flex;flex-direction:row;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .dm-viewer::-webkit-scrollbar{display:none}
 /* ★ 2026-09-14 (박성용 접수 · 슬라이드 기능 개선) 장 폭 = 열 폭(100%). 옛 100vw 는 PC에서 430px 열 밖으로 넘쳐 스냅이 어긋났다. */
-.dm-page{flex:0 0 100%;width:100%;height:100vh;scroll-snap-align:start;scroll-snap-stop:always;overflow-y:auto;position:relative;-webkit-overflow-scrolling:touch}
+.dm-page{flex:0 0 100%;width:100%;height:var(--dm-vh,100vh);scroll-snap-align:start;scroll-snap-stop:always;overflow-y:auto;position:relative;-webkit-overflow-scrolling:touch}
 .dm-page::-webkit-scrollbar{display:none}
-/* 이미지 1장 장 = 무대: 상하 중앙·화면 맞춤(크롭 0)·장 안 스크롤 0. 갤러리 inline 스타일(폭 100%·grid)을 이겨야 해서 !important. 아래 44px = 점 스트립 자리. */
-.dm-page--stage{display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;padding:0 0 44px}
+/* 이미지 1장 장 = 무대: 상하 중앙·화면 맞춤(크롭 0)·장 안 스크롤 0. 갤러리 inline 스타일(폭 100%·grid)을 이겨야 해서 !important. 위 12px 여백 · 아래 56px = 띠(진행 막대·점·카운터) 자리. */
+.dm-page--stage{display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;padding:12px 0 56px}
 .dm-page--stage .dm-section-wrap{width:100%;display:flex;justify-content:center}
 .dm-page--stage .dm-gallery{padding:0!important;max-width:100%}
 .dm-page--stage .dm-gal-grid{display:flex!important;flex-direction:column;align-items:center}
-.dm-page--stage .dm-gal-grid img{width:auto!important;height:auto!important;max-width:100%;max-height:calc(100vh - 44px);max-height:calc(100dvh - 44px)}
+.dm-page--stage .dm-gal-grid img{width:auto!important;height:auto!important;max-width:100%;max-height:calc(var(--dm-vh,100vh) - 68px);object-fit:contain}
 .dm-page--stage .dm-gal-caption{text-align:center}
-/* 점 = 이미지 갯수만큼 두되 가로 스크롤 스트립(잘리지 않음 · 활성 점은 스크립트가 가운데로). 열 폭 안에 둔다. */
-.dm-page-dots{position:fixed;left:0;right:0;bottom:12px;max-width:var(--dm-mobile-max,430px);margin:0 auto;overflow-x:auto;white-space:nowrap;text-align:center;padding:6px 16px;scrollbar-width:none;z-index:50}
-.dm-page-dots::-webkit-scrollbar{display:none}
-.dm-page-dots-in{display:inline-flex;gap:8px;vertical-align:middle}
-.dm-page-dots .dot{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms;cursor:pointer}
-.dm-page-dots .dot.active{background:var(--dm-primary);width:20px;border-radius:4px}
-/* 카운터도 열 안(PC에서 화면 끝이 아니라 열 오른쪽 위). */
-.dm-page-counter{position:fixed;top:12px;right:calc(50% - min(50%, var(--dm-mobile-max,430px)/2) + 12px);background:rgba(0,0,0,0.55);color:#fff;font-size:11px;padding:4px 10px;border-radius:12px;z-index:60}
+/* 아래 띠(56px · 열 폭 안) = 진행 막대(현재/전체) + 점 스트립(5px · 가로 스크롤 · 활성 점 가운데) + 카운터. 이미지 위에 아무것도 얹지 않는다(제품 코드 글자를 가리던 우상단 카운터 폐기). */
+.dm-page-dots{position:fixed;left:0;right:0;bottom:0;height:56px;max-width:var(--dm-mobile-max,430px);margin:0 auto;display:flex;align-items:center;justify-content:center;background:linear-gradient(to top,rgba(255,255,255,0.96) 70%,rgba(255,255,255,0));z-index:50}
+.dm-page-bar{position:absolute;left:16px;right:16px;top:0;height:2px;background:rgba(0,0,0,0.08);border-radius:1px;overflow:hidden}
+.dm-page-bar-in{height:100%;width:0;background:var(--dm-primary);transition:width 200ms}
+.dm-page-dots-strip{max-width:calc(100% - 112px);overflow-x:auto;white-space:nowrap;scrollbar-width:none;padding:6px 0}
+.dm-page-dots-strip::-webkit-scrollbar{display:none}
+.dm-page-dots-in{display:inline-flex;gap:6px;vertical-align:middle}
+.dm-page-dots .dot{flex:0 0 auto;width:5px;height:5px;border-radius:50%;background:rgba(0,0,0,0.22);transition:all 200ms;cursor:pointer}
+.dm-page-dots .dot.active{background:var(--dm-primary);width:14px;border-radius:3px}
+.dm-page-counter{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.55);color:#fff;font-size:11px;line-height:1;padding:5px 9px;border-radius:12px}
 /* PC 좌우 화살표 = 포인터 장치에서만. 모바일은 스와이프 그대로. */
 .dm-page-nav{display:none;position:fixed;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,0.35);color:#fff;font-size:22px;line-height:1;align-items:center;justify-content:center;cursor:pointer;z-index:60;border:0;transition:background .2s;user-select:none}
 .dm-page-nav:hover{background:rgba(0,0,0,0.6)}
@@ -423,13 +427,14 @@ html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 `;
   })();
 
-  const dotsHtml =
-    mode !== 'scroll' && totalPages > 0
-      ? `<div class="dm-page-dots"><div class="dm-page-dots-in">${pages.map((_, i) => `<span class="dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}</div></div>`
-      : '';
+  // ★ 2026-09-14 재오픈 정정 — 카운터는 이미지 위(우상단)가 아니라 아래 띠 안. 띠 = 진행 막대 + 점 스트립 + 카운터.
   const counterHtml =
     mode === 'slides' && totalPages > 0
       ? `<div class="dm-page-counter"><span id="dm-cur">1</span> / ${totalPages}</div>`
+      : '';
+  const dotsHtml =
+    mode !== 'scroll' && totalPages > 0
+      ? `<div class="dm-page-dots"><div class="dm-page-bar"><div class="dm-page-bar-in"></div></div><div class="dm-page-dots-strip"><div class="dm-page-dots-in">${pages.map((_, i) => `<span class="dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}</div></div>${counterHtml}</div>`
       : '';
   // ★ 2026-09-14 PC 좌우 화살표(포인터 장치에서만 CSS로 표시) — 스크립트가 배선. 2장 이상일 때만.
   const navHtml =
@@ -476,7 +481,6 @@ ${pagesHtml}
 </div>
 ${artDirection.grain ? '<div class="dm-grain" aria-hidden="true"></div>' : ''}
 ${dotsHtml}
-${counterHtml}
 ${navHtml}
 
 <script>
@@ -508,6 +512,22 @@ ${navHtml}
   var counter = document.getElementById('dm-cur');
   var navPrev = document.querySelector('[data-dm-page-nav="prev"]');
   var navNext = document.querySelector('[data-dm-page-nav="next"]');
+  var barIn = null;
+${mode === 'slides' ? `
+  // ★ 2026-09-14 재오픈 정정 — 장·이미지 높이 기준 = 실제 보이는 높이. 100vh 는 브라우저 툴바를 포함해 아래가 잘렸다(삼성 인터넷·크롬 모바일).
+  //   innerHeight 는 툴바를 뺀 값이고 툴바가 접히면 resize 가 온다. 폭이 바뀌면(회전) 현재 장 위치도 다시 맞춘다.
+  barIn = document.querySelector('.dm-page-bar-in');
+  function setViewportHeight() {
+    var h = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (h > 0) document.documentElement.style.setProperty('--dm-vh', Math.round(h) + 'px');
+    var viewer = document.querySelector('.dm-viewer');
+    if (viewer && viewer.clientWidth > 0) viewer.scrollLeft = currentIdx * viewer.clientWidth;
+  }
+  setViewportHeight();
+  window.addEventListener('resize', setViewportHeight);
+  window.addEventListener('orientationchange', setViewportHeight);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', setViewportHeight);
+` : ''}
 
   function bumpSection(sid, field) {
     if (!sid) return;
@@ -571,6 +591,7 @@ ${navHtml}
     updateScrollPct();
     dots.forEach(function(d, i){ d.classList.toggle('active', i === idx); });
     if (counter) counter.textContent = String(idx + 1);
+    if (barIn) barIn.style.width = (TOTAL_PAGES > 0 ? Math.round(((idx + 1) / TOTAL_PAGES) * 100) : 0) + '%';
     // ★ 2026-09-14 활성 점을 스트립 가운데로(34장이어도 안 잘림) + 첫/끝 장에서 화살표 비활성
     var ad = dots[idx];
     if (ad && ad.scrollIntoView) { try { ad.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); } catch (e) {} }

@@ -17,7 +17,7 @@
 | 고도몰 | 폴링 키 (partner_key + 몰별 key) | polling | 없음(키) | 불요 | 주문 조회(**30분 주기 수집** — 0810 신설) | ★ active (godo, 키 검증 — 연동 테스트용, 실주문 없음) |
 | 아임웹 | OAuth authorization_code | oauth | 2h / refresh 90d | 불요 | webhook + admin API | 코드완료 · **앱 승인(0719)** · 스토어 등록·실측 잔여 |
 | 자체 호스팅(custom) | webhook (HMAC-SHA256) | webhook | 없음 | 불요 | webhook 수신 | ★ active (self, 2개 회사) |
-| **우커머스(워드프레스)** | **앱 인증(`/wc-auth/v1/authorize` · 관리자 승인 1클릭 → 키 자동 전달 · 웹훅 4개 REST 자동 생성)** · 직접 입력(REST 키 Basic 헤더) 병행 · 기본 웹훅(HMAC-SHA256 · secret 은 우리 발급) · 플러그인 zip(선택 · 스크립트·회원 식별·수신동의 노출) | polling | 없음(키) | 불요 | **30분 주기 수집(modified_after) + 웹훅 수신** · Store API 상품(공개) | W1~W7 배포완료 0914 · **① 1클릭·② 플러그인 코드완료 0914(2) · 배포 대기** · 실측 = 운영 첫 승인 1건(일본이모 4몰) |
+| **우커머스(워드프레스)** | **앱 인증(`/wc-auth/v1/authorize` · 관리자 승인 1클릭 → 키 자동 전달 · 웹훅 4개 REST 자동 생성)** · 직접 입력(REST 키 Basic 헤더) 병행 · 기본 웹훅(HMAC-SHA256 · secret 은 우리 발급) · 플러그인 zip(선택 · 스크립트·회원 식별·수신동의 노출) | polling | 없음(키) | 불요 | **30분 주기 수집(modified_after) + 웹훅 수신** · Store API 상품(공개) | W1~W7 배포완료 0914 · **① 1클릭·② 플러그인 배포완료 0914(2)**(plugin.zip 200 · restart 690) · 실측 = 운영 첫 승인 1건(일본이모 4몰 · 몰 관리자 승인 필요) |
 | ~~가비아(퍼스트몰)~~ | — | — | — | — | — | **2026-07-06 제거 — 자체호스팅 흡수(§5)** |
 
 > **인증 3계열**: ① OAuth 리다이렉트(카페24·아임웹) ② client_credentials 자격입력·polling(네이버·메이크샵·고도몰) ③ webhook 수신(custom). 같은 client_credentials여도 서명 방식(bcrypt vs Basic)·토큰 수명(3h vs 5분)·IP 정책이 provider마다 다르다 — 추측 금지, 이 표가 실측 확정값.
