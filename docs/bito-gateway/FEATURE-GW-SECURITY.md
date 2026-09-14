@@ -253,18 +253,18 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 - 사실: `gw.invito.local`이 소스 3곳에서 기본값·예시로 들어가 두 출고본에 남는다 — `internal/agent/onboarding/install_bundle.go:160` · `internal/agent/setup/wizard.go:95` · `cmd/agent/main.go:2446`. 검사기는 `github.com/invito/bito-gateway`·`INVITO_MMS`만 막는다.
 - 처방: 세 곳을 중립 예시 호스트로 바꾸고, 검사기 `internal customer/provider`에 금지 패턴을 더한다. 추가 뒤 기존 공개자료 전체를 재검사해 오탐을 확인한다.
 - Go 소스 변경이라 재빌드·릴리즈가 따른다. **단독 릴리즈를 만들지 않고 다음 릴리즈(1.0.28은 이미 롤아웃 · `0-F`)에 합류**한다.
-- **★0913 소스 반영(게이트웨이 저장소 미커밋)**: 세 곳 기본값 = `gateway.invalid`(예약 도메인이라 해석되지 않음 · 종전 값도 해석되지 않는 자리표시자라 동작 차이 없음 · 이 문자열을 읽는 로직 0곳 전수 확인). 검사기 = `invito\.local`. ⛔ **처음 설계한 단어 경계 `invito`는 기각**: 공개자료 재검사에서 안내서 9건이 걸렸다(발급 주체로 `INVITO`를 적는다). 막을 것은 회사명이 아니라 내부 호스트명이다. 검증 = 공개자료 `CUSTOMER_DELIVERY_BOUNDARY_OK files=14` · 1.0.20 출고본 `--blob` 차단 확인 · 계약 테스트 23건 통과(표본 차단 + 안내서 문장 통과 신설) · 검사기 호출처 전수(`build-agent.sh`·`build-agent.ps1`·`build-bito-agent.ps1`·arm64 예외 빌드 = 전부 **새로 빌드한 산출물**만 검사 · `scripts/gw/check.sh` = 공개자료 폴더) = 이미 빌드된 1.0.28 출고본을 다시 검사하는 경로 없음.
+- **★0913 소스 반영(0914 커밋 `bb79582` push · 게이트웨이 실행파일 무영향 · 출고본 반영은 1.0.29)**: 세 곳 기본값 = `gateway.invalid`(예약 도메인이라 해석되지 않음 · 종전 값도 해석되지 않는 자리표시자라 동작 차이 없음 · 이 문자열을 읽는 로직 0곳 전수 확인). 검사기 = `invito\.local`. ⛔ **처음 설계한 단어 경계 `invito`는 기각**: 공개자료 재검사에서 안내서 9건이 걸렸다(발급 주체로 `INVITO`를 적는다). 막을 것은 회사명이 아니라 내부 호스트명이다. 검증 = 공개자료 `CUSTOMER_DELIVERY_BOUNDARY_OK files=14` · 1.0.20 출고본 `--blob` 차단 확인 · 계약 테스트 23건 통과(표본 차단 + 안내서 문장 통과 신설) · 검사기 호출처 전수(`build-agent.sh`·`build-agent.ps1`·`build-bito-agent.ps1`·arm64 예외 빌드 = 전부 **새로 빌드한 산출물**만 검사 · `scripts/gw/check.sh` = 공개자료 폴더) = 이미 빌드된 1.0.28 출고본을 다시 검사하는 경로 없음.
 
 **A5. 설치 마법사 TLS 기본값**
 - 사실: `setup/wizard.go:98` 기본 `false` · `configs/agents/sample-agent.yaml` `false` · 발급 경로(`system_config`)는 `true`.
 - 판정: 게이트웨이 평문이 닫혀 있어 `false`면 접속 실패로 끝난다(fail-closed) = 보안 구멍이 아니라 사용성 문제.
 - 처방: 기본값을 `true`로. A4와 같은 릴리즈에 합류.
-- **★0913 소스 반영(미커밋)**: `setup/wizard.go` 기본 선택 = TLS 사용. 이 마법사는 `agent setup` 대화형 한 곳에서만 불린다(자동 입력으로 부르는 설치 스크립트 0곳 전수 확인). 이미 설치된 Agent의 설정 파일과 발급 경로는 무변경. `sample-agent.yaml`은 손대지 않았다(출고 자료 아님).
+- **★0913 소스 반영(0914 커밋 `bb79582`)**: `setup/wizard.go` 기본 선택 = TLS 사용. 이 마법사는 `agent setup` 대화형 한 곳에서만 불린다(자동 입력으로 부르는 설치 스크립트 0곳 전수 확인). 이미 설치된 Agent의 설정 파일과 발급 경로는 무변경. `sample-agent.yaml`은 손대지 않았다(출고 자료 아님).
 
 **A6. `AllowDowngrade` 필드**
 - 사실: `release/types.go:55` 정의만 있고 읽는 코드 0곳. 다운그레이드는 plan·claim 단계에서 무조건 거부된다.
 - 처방: **바로 지우지 않는다.** 서명 JSON은 엄격 디코딩 경로(`DisallowUnknownFields`)가 있어, 기존 서명 산출물에 이 키가 들어 있으면 필드 제거가 디코딩 실패가 된다(해당 구조체가 그 경로를 타는지 미검증). 먼저 "소비처 없음 · 다운그레이드는 plan/claim이 거부" 주석으로 고정하고, 기존 산출물 키 존재를 확인한 뒤에만 제거한다.
-- **★0913 확인·반영(미커밋)**: 기존 서명 산출물에 키가 **있다**(`deploy/agent/.release-build/1.0.20/signed/*/release-descriptor.json` `"allow_downgrade":false`) · 엄격 디코딩 경로 `bootstrap/handoff.go:222`·`store.go:382`. **따라서 필드는 영구히 지우지 않는다.** 주석은 구조체 위에 달았다(필드 사이에 달면 gofmt가 정렬을 다시 잡아 diff가 커진다) · 코드 동작 변경 0.
+- **★0913 확인·반영(0914 커밋 `bb79582`)**: 기존 서명 산출물에 키가 **있다**(`deploy/agent/.release-build/1.0.20/signed/*/release-descriptor.json` `"allow_downgrade":false`) · 엄격 디코딩 경로 `bootstrap/handoff.go:222`·`store.go:382`. **따라서 필드는 영구히 지우지 않는다.** 주석은 구조체 위에 달았다(필드 사이에 달면 gofmt가 정렬을 다시 잡아 diff가 커진다) · 코드 동작 변경 0.
 
 **A7. 역분석 잔여 단서 — 수용**
 - 함수명·gRPC 메서드·한글 오류문·SQL 문장은 남는다. 알아도 8-1의 관문(토큰·허용 IP·TLS·서명·승인)을 넘지 못한다.
@@ -288,7 +288,7 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 |---:|---|---|---|
 | 1 | A1 복구 키 분리 **(0913 분리 완료 · `build` 확인은 5번에서)** | 운영 · 코드 0 | — |
 | 2 | A3 발급 묶음 zip 해시 표시 **(0913 배포 · 0914 실측 통과 · 종결)** | 게이트웨이 API 헤더 · 발급 모달 | 없음 |
-| 3 | A9-나 유출 시 재설치 절차 + 시험 에이전트 리허설 | 문서 · 운영 리허설 | 운영 authority·게시 폴더와 분리된 작업 폴더 |
+| 3 | A9-나 유출 시 재설치 절차 + 시험 에이전트 리허설 **(★0914 코드 확인 · 절차 초안 §8-7 · 리허설 계획 §8-8 · ★0914 Harold "지금은 보류" = 리허설 보류 · 재개 조건 §8-8)** | 문서 · 운영 리허설 | 운영 authority·게시 폴더와 분리된 작업 폴더 |
 | 4 | A2 인증서 조사·조달 | 조달 | Harold 구매 결정 |
 | 5 | 릴리스 1.0.29 = A2 서명 + A4·A5·A6 · **새 설치용 게시만, 기존 4대 롤아웃 없음** · A1 `build` 확인 | 빌드 스크립트 · 릴리스 | A2 인증서 · 새 릴리스 승인이 1.0.28 상태(되돌리기 조건)를 바꾸는지 확인 |
 | 6 | .66 백업 | 별도 축 | — |
@@ -311,3 +311,68 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 - Garble 등 난독화(0717 결정).
 - 디버거 탐지·안티 디버깅(현재 코드에 없음 · 고객사 운영 도구와 충돌 위험 대비 효과 낮음).
 - 설정 파일 암호화 기본화(A8).
+
+### 8-7. 릴리스 키 유출 대응 절차 (★0914 초안 · 코드 근거 · **리허설 전이라 전 단계 미검증**)
+
+> 이 절이 A9-나의 운영 절차를 소유한다. 표의 "근거"는 0914 코드 확인(게이트웨이 `a33262b`)이고, 실행 결과는 §8-8 리허설이 채운다. 리허설이 끝나기 전에는 운영에 쓰지 않는다.
+
+**8-7-1. 전제 (0914 코드 확인)**
+
+| # | 사실 | 근거 |
+|---|---|---|
+| 1 | 원격 업데이트를 받는 것은 bootstrap 관리형뿐이다(0912 기준 `hanjul01`·`hanjul02`·`hanjul03`·`bito-agent-01`). 발급 묶음 최초 설치(`first-install.sh`)는 `bito-agent run` 단독 실행이라 업데이트 계층이 만들어지지 않는다 | `cmd/agent/main.go:271` · `agent-install-bundle.js:455` · 게이트웨이 STATUS fleet 표 |
+| 2 | 업데이트 서명 검증은 빌드 때 들어간 정책(메모리)으로만 한다. 설치 폴더 `<base_root>/instances/<sha256(agent_id)>/trust/` 3파일을 다시 읽는 코드는 grep 0건이고, 다른 정책으로 같은 폴더에 설치하면 `protected trust material conflict`로 막는 역할만 한다 | `bootstrap/handoff.go:82·124` · `control/update_client.go:384` · `trustbundle/bundle.go:144-147` · `bootstrap/process.go:37` |
+| 3 | 2세대 정책은 기존 도구로 만든다(`bito-agent-release build-trust-policy --generation 2`, 활성 키 1개짜리 정책). 빌드·기동 검증은 "세대 > 0" 기준이다 | `cmd/agent-release/main.go:66-143` · `build-agent.sh:289` · `trustbundle/bundle.go:59` |
+| 4 | 서버 신뢰 상태는 세 곳이다. ①`agent_signing_key`(릴리스 승인은 active 키만) ②`agent_trust_policy` 단일 행(읽는 곳 = `GET /api/agent/control/trust-policy` 한 곳 · Agent 쪽 호출 grep 0건) ③업로드 검증 파일 `/opt/bito-gateway/app/agent-releases/trust-policy.json` 1개(업로드·세트 생성·승인 때 재검증에 쓴다). 게이트웨이 Go 코드는 ①②를 읽지 않는다(grep 0건) | `agent-release-service.js:254-258` · `agent-control-heartbeats.js:321` · `agent-artifact-store.js:160-222` · `migrations/041:72-91` |
+| 5 | 키를 `revoked`로 바꾸면 명령 수령이 `RELEASE_REVOKED`(410)로 거부되고 대기 중 rollout 대상은 `stale_blocked`가 된다. 세트 `revoke`는 그 세트의 명령을 `canceled`로 만든다 | `agent-command-service.js:188` · `agent-rollout-worker.js:190` · `agent-release-service.js:306-314` |
+| 6 | 업데이트 명령·설명서·파일은 전부 관제 서버에서 받고, 운영 빌드는 https만 허용한다 | `control/update_client.go:43·54·116-160` |
+| 7 | 이미 관리형인 Agent를 새 정책으로 다시 설치하는 전용 도구는 없다. 설치기 명령은 `account-profile`·`migrate`·`recover`이고, `migrate`는 **돌고 있는 단독 서비스**를 조사해(`systemctl is-active`·`ExecStart`·`AGENT_CONFIG`) bootstrap 드롭인(`/etc/systemd/system/<서비스>.service.d/99-vito-bootstrap.conf`)으로 바꾼다. 인스턴스에 migration journal이 있으면 `ErrJournalConflict`로 시작하지 않는다 | `cmd/agent-installer/main.go:39-49` · `installer/linux.go:46·50-100·175-211` · `installer/migrate.go:31-33` |
+| 8 | 등록 nonce는 제어 자격이 없거나 `revoked`이고 `legacy_bootstrap_status`가 `issued`·`enrolled`가 아니며 대상 릴리스 세트가 `approved`일 때만 발급된다. 자격 폐기(`credentials/revoke`)가 두 조건을 함께 푼다 | `agent-credential-service.js:456-481·1041-1055` |
+| 9 | 업데이트 안정화 판정은 게이트웨이 연결과 관제 heartbeat 응답이 둘 다 필요하다 | `update/probation.go:54` · `bootstrap/process.go:320` |
+| 10 | 원격 배포 변경 API(`/api/admin/agent-upgrades/*`)는 소유자 세션 · 5분 이내 비밀번호 재인증 · CSRF가 필요하다 | `server.js:850-857` · `middleware/remote-deploy-admin-auth.js:17-41` |
+
+**8-7-2. 절차 (운영 · Harold 실행 · 명령은 착수 때 하나씩)**
+
+| 단계 | 할 일 | 실행 위치 | 확인할 것 (전부 미검증) |
+|---:|---|---|---|
+| 0 | **차단**: 진행 중 rollout `abort` → 유출 키 `agent_signing_key.status='revoked'`·`revoked_at` | 관리 화면 · .65 root(SQL) | 대기 대상 `stale_blocked` · 신규 claim 410 · 발송량 무변화(발송은 게이트웨이 토큰 경로 · 전제 4) |
+| 1 | **원인 분기**: 유출 원인이 .65 장악이면 복구 키를 .65에 올리지 않는다. 서버 재구축이 먼저이며 이 절 범위 밖이다 | 판단 | — |
+| 2 | **복구 키 반입**: USB 사본 → root 전용 임시 폴더 → SHA-256 = §8-3 A1 기록값 `7c184803…0bc6` 대조 | .65 root | 해시 일치 |
+| 3 | **새 키·2세대 정책**: `keygen --out <임시>/release-g2.pem` → `build-trust-policy --release-key-file <새 키> --recovery-key-file <복구 키> --generation 2 …` → `verify-trust-policy --current-generation 1 --json` | .65 root(임시 폴더) | `generation=2` · 복구 키 ID 불변 |
+| 4 | **서버 신뢰 상태 3곳 교체**: ①새 키 행 추가(`active`·`generation=2`) ②`agent_trust_policy` 1행을 세대 2·새 활성 키·정책 JSON·서명으로 갱신 ③검증 파일 `agent-releases/trust-policy.json`(+`.sig`) 교체(원본 보관) | .65 root | ③ 뒤 이미 게시된 1세대 산출물 재검증이 실패하는지(`rollback-exact-previous`·세트 조회 영향) · 관리형 heartbeat 무변화 |
+| 5 | **authority 교체**: `private/release.pem` = 새 키(유출 키 파일은 `shred -u`) · `public/` 정책·서명 교체(`recovery-root-public.pem` 불변). ⛔ `init-authority` 재실행 금지(키를 새로 만든다) | .65 root | 파일 소유·권한 `0600`·`0644` |
+| 6 | **새 릴리스**: 현재보다 큰 버전으로 `build-agent.sh build` → `private-incoming/v<버전>/<os>-amd64/` 3파일을 `agent-releases/incoming/ready/<업로드ID>/`로 → 관리 화면 검증·세트 생성·승인. ⛔ `build`는 게시 폴더를 비운다 | .65 root · 관리 화면 | `BUILD_AGENT_SERVER_OK` · 세트 `approved` · `signing_key_id` = 새 키 |
+| 7 | **관리형 Agent별 재설치(Linux)**: ①`credentials/revoke` ②서비스 정지 → 드롭인 `99-vito-bootstrap.conf` 제거 → `daemon-reload` → 인스턴스 폴더를 보관 위치로 이동(journal·`trust/` 포함) → 설치 폴더 `bito-agent`를 새 릴리스 child로 교체 → 단독 서비스 기동 ③`enrollment-nonces` 발급(새 `release_id`·child digest) ④새 패키지에서 `install.sh --config <installer-config>` + nonce 숨김 입력 ⑤스모크 뒤 `bootstrap-finalize` | 관리 화면 · 고객 서버 root | **리허설로 확정할 핵심**: 단독 복귀가 되는가 · 기존 installer config 재사용 가능 여부(발급 묶음은 토큰을 회전하므로 운영 Agent에 쓰지 않는다) · 대당 발송 중단 시간 · `BITO_AGENT_MIGRATION_OK` |
+| 8 | **확인**: `agent_heartbeat` 활성 릴리스 = 새 릴리스 · `account_access_event` `connected` · 발송 1건 결과 반영 | .65 root(SQL) · 고객 DB | 4대 전부 |
+| 9 | **정리**: 고객 배포자료를 새 패키지로 게시하고 1세대 패키지 내림(1세대 설치기로 나중에 전환하면 유출 키를 믿는다 · 게시 규칙 = FEATURE-GW-WEB-API §9-5) → 유출 키로 서명된 세트 `revoke`(모든 관리형이 새 세트로 옮긴 뒤 · 활성 세트 revoke 영향 미검증) → 복구 키 임시 사본 `shred -u` → 이 절에 실행 기록 | .65 root · 관리 화면 | 게시 체크섬 · 복구 키 잔존 0 |
+
+- 단독 설치 고객사 Agent(전제 1)는 업데이트 경로가 없어 키 유출로 코드가 내려가지 않는다. 재설치 대상이 아니다. 다만 나중에 관리형으로 전환할 때는 반드시 새 패키지를 쓴다(9단계).
+- Windows 관리형: 설치기가 bootstrap 서비스가 이미 있으면 거부한다(`installer/windows.go:179`). 0914 기준 관리형 4대는 Linux 서버에 있어(SERVERS.md .62·.66) 이번 리허설 범위에서 뺀다. Windows 관리형이 생기면 그때 절차를 추가한다.
+
+### 8-8. A9 리허설 계획·기록 (★0914 Harold 동의 = 격리 스택 → **같은 날 보류**)
+
+> **★0914 보류(Harold "지금은 보류하자")**. 근거: ①서명 키는 .65 root 전용 폴더에만 있고 서버 백업이 없어(0913 기록) 유출 경로가 사실상 .65 장악인데, 그 경우는 서버 재구축이 먼저라 리허설로 미리 막는 것이 없다 ②키만 샌 경우 업데이트는 관제 서버를 거쳐야 하고(전제 6) 유출 키는 `agent_signing_key` 폐기로 즉시 막히므로(전제 5) 재설치는 급하지 않다 ③대상 4대가 전부 우리 서버의 우리 Agent다(0912 fleet 기록 · 운영 DB 재확인 안 함) ④복제 환경 구성 비용과 호스트 위험이 크다(R0를 .65에서 실행해 보니 운영 게이트웨이와 한 기계라 제외 필요 · 조회만 해서 변경 0).
+> **재개 조건**(둘 중 하나가 생기면 리허설을 먼저 한다): ⓐ고객사 서버에 원격 업데이트형(bootstrap 관리형) Agent가 처음 설치될 때 ⓑ.66 백업에 `release.pem`을 넣기로 할 때.
+> 보류 동안: §8-7은 "미검증" 초안으로 둔다(사고 때 출발점) · §8-5 A9 완료 판정 미충족.
+
+> 목적 = §8-5 A9 완료 판정(시험용 키 2세대 정책 설치 파일로 시험 Agent 재설치 → 기동·heartbeat·업데이트 서명 검증) + §8-7-2 단계를 실제로 한 번 통과시켜 "미검증"을 지운다.
+> 운영 관제(.65)를 쓰지 않는 이유 = 업로드 검증 파일이 하나라(전제 4-③) 시험 키 서명본을 올리려면 운영 검증 파일·서명키 원장을 바꿔야 한다. 그 사이 운영 릴리스 업로드가 깨지거나 시험 키가 운영 승인 권한을 갖는다.
+
+**불변**: 운영 .65 접속·운영 DB·운영 authority(`/var/lib/bito-agent-release/authority`)·운영 게시 폴더·보관 중인 실제 복구 키 미사용 · 실발송 0(mock 회선만) · 격리 호스트 포트는 `127.0.0.1` 바인딩 · 끝나면 격리 호스트에서 전부 제거.
+
+| 단계 | 내용 | 완료 증거 |
+|---:|---|---|
+| R0 | 격리 호스트 읽기 전용 상태 확인(OS·docker·Go·python3·포트·디스크·기존 서비스) | 출력 |
+| R1 | 게이트웨이 소스 사본(`a33262b`)을 격리 폴더에 둔다. 빌드는 이 사본의 `deploy/build-agent.sh`로만(게시 폴더가 사본 안에 생긴다 · `build-agent.sh:395-403`) | 사본 커밋·경로 |
+| R2 | 격리 관제: PostgreSQL 컨테이너 + `migrations/*.sql` 전량 → 소유자 관리자 계정 → `web/api` 기동(`DB_*`·`API_PORT`·`AGENT_RELEASE_STORE_ROOT`·`AGENT_RELEASE_VERIFIER_PATH`) → https 종단(사설 CA · Agent 쪽 `control.tls_ca_file`) | `/api/agent/control` https 응답 |
+| R3 | 격리 게이트웨이: redis + 게이트웨이 바이너리(`GW_DB_DSN`·`GW_REDIS_ADDR`·`GW_GRPC_TLS_*` 사설 CA) + mock 회선 · 시험 고객사·발송계정·Agent 계정·허용 IP | gRPC TLS 리슨 |
+| R4 | 시험 authority 1세대: `BITO_AGENT_AUTHORITY_ROOT=/var/lib/bito-agent-release/a9-rehearsal` `init-authority` → 버전 `1.0.101` 빌드 → 서버 신뢰 상태 3곳에 1세대 적재 | `AGENT_AUTHORITY_INIT_OK` · `BUILD_AGENT_SERVER_OK` |
+| R5 | 시험 Agent 단독 설치(시험 MySQL 원천 테이블) → 게이트웨이 연결 · mock 발송 1건 결과 반영 | `connected` · 결과 행 |
+| R6 | 관리형 전환(1세대): 업로드·세트·승인 → nonce → `install.sh` → `bootstrap-finalize` → heartbeat | `BITO_AGENT_MIGRATION_OK` · heartbeat 활성 릴리스 1.0.101 |
+| R7 | 유출 가정: §8-7-2 0~6단계를 시험 키로 그대로 실행 → `1.0.102`(2세대 키 서명) 승인. **음성 확인** ⓐ1세대 Agent에 1.0.102 rollout → 거부 사유 기록 ⓑ1세대 키 서명본 업로드 → `ARTIFACT_VERIFY_FAILED` | 거부 로그 두 건 · 세트 approved |
+| R8 | 재설치: 먼저 **음성 확인** = 인스턴스 폴더를 그대로 둔 채 1.0.102 설치기 `migrate` → `materialize installer trust` 실패(서비스 무변경 확인). 그다음 §8-7-2 7단계 | 실패 출력 · `BITO_AGENT_MIGRATION_OK` · heartbeat 1.0.102 |
+| R9 | 2세대 업데이트: `1.0.103` 빌드·승인 → rollout(대상 1대) → 활성화 | rollout `succeeded` · heartbeat 1.0.103 · mock 발송 1건 |
+| R10 | 정리: 격리 호스트의 컨테이너·서비스·계정·폴더·시험 키 제거 → 잔존 0 확인 → 결과를 이 절과 §8-7에 반영(미검증 표기 제거) | 잔존 0 출력 |
+
+- 리허설 중 7단계 경로(단독 복귀 → 재전환)가 막히면 그 자리에서 멈추고 보고한다. 그 경우 A9 결정 "나"(코드 변경 없이 재설치)의 전제가 바뀐다.
+- 실행 기록은 이 표 아래에 단계별로 적는다(키 값·토큰·nonce는 적지 않는다).

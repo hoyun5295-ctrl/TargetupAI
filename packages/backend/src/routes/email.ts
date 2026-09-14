@@ -99,7 +99,10 @@ import type { Section } from '../utils/dm/dm-section-registry';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
 // ★ 2026-09-06 S6 재료 입구(이미지·행사 텍스트 → 아웃리치 브랜드 이메일 시안 경로)
-import { generateEmailFromMaterials, quickMaterialsEnabled } from '../utils/campaign-quick';
+import { generateEmailFromMaterials, quickMaterialsEnabled, generateFromBuildMaterials, buildGenerateResponse } from '../utils/campaign-quick';
+// ★ 2026-09-14 T4 AI 자동제작 v1(materials.version === 1) — 신규 ENV 게이트 · 회사 단위 in-flight 잠금 · 오류 status 매핑
+import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, buildInflightKey } from '../utils/ai-auto-build-materials';
+import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
 
 const router = Router();
 
@@ -1052,6 +1055,25 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
     const isAd = !!req.body?.is_ad;
     // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 단독 입력도 생성 가능 (기재 혜택만 원문 그대로)
     const eventText = req.body?.event_text ? normalizeEventText(req.body.event_text) : '';
+    // ★ 2026-09-14 T4 AI 자동제작 v1(materials.version === 1 · 설계서 §6-5 · §6-6 · §6-7) — 신규 ENV AND · 회사 단위 in-flight 409 · SMTP 게이트·is_ad·멱등키·eventCards·제목 산출은 오케스트레이터 ·
+    //   결과 = draft 행(campaign_id) · 오류는 AiAutoBuildError.status 그대로 → 402 잔액 → 503 마이그레이션(email_campaigns) → 500 · v0 경로는 아래 그대로.
+    if (req.body?.materials && isBuildMaterialsV1(req.body.materials)) {
+      if (!aiAutoBuildEnabled(auth.companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' });
+      const lockKey = buildInflightKey(auth.companyId);
+      if (!tryAcquireInflight(lockKey)) return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
+      try {
+        const r = await generateFromBuildMaterials({ companyId: auth.companyId, userId: auth.userId, materials: req.body.materials, industry: typeof req.body?.industry === 'string' ? req.body.industry : null, channel: 'email' });
+        return res.json({ success: true, data: buildGenerateResponse(r) });
+      } catch (err: any) {
+        const mapped = aiAutoBuildErrorResponse(err);
+        if (mapped) return res.status(mapped.status).json(mapped.body);
+        if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+        if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+        console.error('[Email /ai/generate-sections build-v1] 오류:', err?.message);
+        return res.status(500).json({ success: false, error: '재료로 이메일을 만들지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      } finally { releaseInflight(lockKey); }
+    }
+
     // ★ 2026-09-06 S6 재료 입구 — materials 가 오면 아웃리치 브랜드 이메일 시안 경로(이메일 독립 계약 · EMAIL 룩)로 조립한다. 재료가 없으면 아래 기존 경로 그대로(무후퇴).
     //   응답 형태는 편집기가 읽는 그대로(sections · subjects · preheader · name) + materials 계측. 몰 상품 자동 첨부는 이 분기에서 부르지 않는다.
     if (req.body?.materials && typeof req.body.materials === 'object') {

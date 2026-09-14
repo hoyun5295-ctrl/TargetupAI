@@ -23,7 +23,10 @@ import { handleDbMigrationError } from '../utils/db-migration-error';
 import { InsufficientCreditError } from '../utils/ai-credit';
 // ★ 2026-09-06 S5 재료 입구(사본 저장 · 텍스트 비었을 때만 판독 · 견적)
 import { requirePlanFeature } from '../utils/plan-guard';
-import { saveMaterialImages, extractMaterialsText, quoteQuickCampaign, quickPlanLocked, quickMaterialsEnabled, QUICK_MATERIALS_MAX_IMAGES, QUICK_CARD_UPLOAD_MAX, QUICK_EVENT_CARDS_MAX, QUICK_EVENT_CARD_IMAGES } from '../utils/campaign-quick';
+import { saveMaterialImages, extractMaterialsText, quoteQuickCampaign, quickPlanLocked, quickMaterialsEnabled, quoteFromBuildMaterials, QUICK_MATERIALS_MAX_IMAGES, QUICK_CARD_UPLOAD_MAX, QUICK_EVENT_CARDS_MAX, QUICK_EVENT_CARD_IMAGES } from '../utils/campaign-quick';
+// ★ 2026-09-14 T4 AI 자동제작 v1 견적(POST · 재료 본문) — 신규 ENV 게이트 · 화면 배지·버튼 잠금·금액의 단일 출처
+import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, AI_AUTO_BUILD_CARDS_MAX, AI_AUTO_BUILD_CARD_IMAGES, AI_AUTO_BUILD_PRODUCTS_MAX, AI_AUTO_BUILD_MIN_TEXT_CHARS } from '../utils/ai-auto-build-materials';
+import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 
 export const eventCampaignRouter = Router();
 eventCampaignRouter.use(authenticate);
@@ -85,9 +88,35 @@ eventCampaignRouter.get('/materials/quote', async (req: any, res: Response) => {
     // ★ v3 reads = 판독 호출 수(카드 대표 이미지 묶음 1회 · 있으면 1 · 곱셈 0) · 없으면 옛 판정(텍스트 비고 이미지 있음)
     const reads = req.query?.reads !== undefined ? Math.max(0, Math.min(1, Number(req.query.reads) || 0)) : undefined;
     const quote = quoteQuickCampaign({ imageCount, hasText, reads });
-    return res.json({ success: true, enabled: quickMaterialsEnabled(companyId), plan_locked: await quickPlanLocked(companyId), max_images: QUICK_MATERIALS_MAX_IMAGES, max_cards: QUICK_EVENT_CARDS_MAX, max_card_images: QUICK_EVENT_CARD_IMAGES, ...quote });
+    // ★ 2026-09-14 T6 auto_build_enabled = 신규 ENV(AI_AUTO_BUILD_COMPANY_IDS) 노출 스위치 — 화면(카드띠·패널 링크·페이지 분기)이 묻는 값 · enabled(v0)와 별개
+    return res.json({ success: true, enabled: quickMaterialsEnabled(companyId), auto_build_enabled: aiAutoBuildEnabled(companyId), plan_locked: await quickPlanLocked(companyId), max_images: QUICK_MATERIALS_MAX_IMAGES, max_cards: QUICK_EVENT_CARDS_MAX, max_card_images: QUICK_EVENT_CARD_IMAGES, ...quote });
   } catch (err: any) {
     console.error('[event-campaigns materials/quote] 오류:', err?.message);
+    return res.status(500).json({ success: false, error: '견적을 계산하지 못했습니다.' });
+  }
+});
+
+// ★ 2026-09-14 T4 AI 자동제작 v1 견적 — POST(재료 본문 그대로 · attemptToken 은 화면이 이미 가진 값 · expectedTotal 0) · 정규화·이미지 실물·역할·최소 재료 게이트·견적을
+//   생성 경로와 같은 함수로(단일 출처) · 차감·AI·초안 0 · 게이트 미달은 결과(gate.missing = 버튼 잠금 사유) · 이메일이면 SMTP 상태(세그먼트 비활성 사유) · 요금제 잠금은 채널별.
+eventCampaignRouter.post('/materials/quote', async (req: any, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (!aiAutoBuildEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' });
+    if (!req.body?.materials || !isBuildMaterialsV1(req.body.materials)) return res.status(400).json({ success: false, error: '요청 형식이 맞지 않아요. 화면을 새로고침한 뒤 다시 시도해 주세요.', code: 'MATERIALS_INVALID' });
+    const q = await quoteFromBuildMaterials({ companyId, materials: req.body.materials });
+    const planLocked = q.channel === 'dm' ? await quickPlanLocked(companyId) : !(await isCdpEnabledForPlan(companyId));
+    return res.json({
+      success: true, enabled: true, version: 1, channel: q.channel,
+      total: q.quote.total, parts: q.quote.parts, credit_enabled: q.creditEnabled,
+      gate: q.gate, image_roles: q.imageRoles, text_chars: q.textChars, images: q.images, images_dropped: q.imagesDropped, materials_hash: q.materialsHash,
+      plan_locked: planLocked, smtp_configured: q.smtpConfigured,
+      max_cards: AI_AUTO_BUILD_CARDS_MAX, max_card_images: AI_AUTO_BUILD_CARD_IMAGES, max_products: AI_AUTO_BUILD_PRODUCTS_MAX, min_text_chars: AI_AUTO_BUILD_MIN_TEXT_CHARS,
+    });
+  } catch (err: any) {
+    const mapped = aiAutoBuildErrorResponse(err);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
+    console.error('[event-campaigns materials/quote v1] 오류:', err?.message);
     return res.status(500).json({ success: false, error: '견적을 계산하지 못했습니다.' });
   }
 });

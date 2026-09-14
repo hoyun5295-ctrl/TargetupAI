@@ -467,6 +467,16 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT COUNT(*) A
 
 ---
 
+### 2-2-G. 발송결과 상세 캐시 삭제 — Redis (★2026-09-14 신설 · [B-0914-1](BUGS.md))
+
+발송결과 상세의 통신사·실패사유 분포(`result_chart:{companyId}:{campaignId}`)와 발송내역 건수(`result_msg_count:{companyId}:{campaignId}`)는 **완료 캠페인이면 24시간 캐시**다([results.ts](../packages/backend/src/routes/results.ts) `CACHE_TTL.resultChartCompleted`). PG·MySQL을 고쳐도 상세가 옛값(빈 분포·0건)으로 보이면 이 키를 지운다. 캠페인 id만 알면 회사 id 없이 패턴으로 지울 수 있다.
+
+▶ 실행 위치: .62 · administrator
+```bash
+docker exec -i targetup-redis sh -c "redis-cli --scan --pattern 'result_*<campaignId>' | xargs -r redis-cli DEL"
+```
+출력 = 지운 키 수(없으면 빈 출력). `REDIS_URL`에 비밀번호가 있으면 `redis-cli -a` 필요(0914 실측은 무인증으로 2키 삭제).
+
 ### 2-3. QTmsg 발송 엔진 (로컬 - 개발용)
 ```bash
 cd C:\projects\qtmsg\bin

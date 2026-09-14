@@ -157,14 +157,29 @@ export function assignProductLinksFromText(products: ExtractedEventProduct[], ev
  * - 수치·혜택 토큰(20%, 5만원, 1+1, 무료배송, 쿠폰, 사은품, 적립 등)이 있으면 전 토큰이 원문에 실존해야 통과
  * - 토큰이 없으면 정규화(공백 제거) 부분 문자열로 판정
  */
+/** 혜택 핵심 토큰 표(수치·%·원·1+1·무료·쿠폰·사은품·적립) — benefitMatchesEventText · firstBenefitPhrase 가 같은 표를 쓴다(★2026-09-14 T2 상수화 · 판정 동일) */
+export const BENEFIT_TOKEN_RE = /\d[\d.,]*\s*(?:%|퍼센트|원|만원|천원)|1\s*\+\s*1|무료\s*배송|무료|쿠폰|사은품|적립/g;
+
 export function benefitMatchesEventText(benefitText: any, eventText: any): boolean {
   const norm = (s: any) => String(s ?? '').toLowerCase().replace(/\s+/g, '');
   const b = norm(benefitText);
   const e = norm(eventText);
   if (!b || !e) return false;
-  const tokens = String(benefitText ?? '').match(/\d[\d.,]*\s*(?:%|퍼센트|원|만원|천원)|1\s*\+\s*1|무료\s*배송|무료|쿠폰|사은품|적립/g);
+  const tokens = String(benefitText ?? '').match(BENEFIT_TOKEN_RE);
   if (tokens && tokens.length > 0) return tokens.every((tk) => e.includes(norm(tk)));
   return e.includes(b);
+}
+
+/**
+ * ★ 2026-09-14 T2 — 면허 문구(licensedQuote · 사용자가 직접 쓴 텍스트)에서 혜택 토큰이 든 **첫 구절**을 원문 그대로 돌려준다(카피 생성 0).
+ * 구분 = 줄바꿈 · '·' · '|' · 문장 끝 부호 뒤 공백. 토큰이 없으면 null. AI 자동제작 쿠폰 칩(applyDmFeatures)의 discount_label 재료.
+ */
+export function firstBenefitPhrase(text: any, max = 60): string | null {
+  const segments = String(text ?? '').split(/[\n·|]|(?<=[.!?。])\s+/).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  for (const seg of segments) {
+    if (seg.match(BENEFIT_TOKEN_RE)) return seg.slice(0, max);
+  }
+  return null;
 }
 
 // ════════════════════════════════════════════════════════════════════

@@ -253,3 +253,127 @@ Harold 요구(2026-09-14 원문 요지):
 | T6 | 프 입구 | 카드띠 2곳 · 패널 링크 1줄 · "직접 제작" 개명 · 금액 하드코딩 0 · NEW | grep 계약 |
 | T7 | 검토 | 내 적대 검토 → Codex `adversarial-review`(돈 경로: 요금·멱등·게이트 · 라운드 ≤2) | high 0 |
 | T8 | 배포·실측 | OPS §2-2(백·프 build:safe) · ENV 1회사 · §9 실측 1건 | 통과 시 회사 확대 |
+
+## 13. 구현 기록(2026-09-14 · 2세션)
+
+| T | 상태 | 산출물 | 검증 |
+|---|---|---|---|
+| T0 | ①·② 통과 · ③ 미검증(카페24 활성 연동 0 · `디버깅테스트` gyunoo83 `token_expired` 2026-07-21) | `email_campaigns.sections/ai_generated/is_ad` 실존(`ai_generated` NOT NULL) · `quick:{draftId}` 원장 5행 | ③ = 재인증 뒤 T3 착수 전 다시 본다(Harold 결정) |
+| T1 | 완료 | `utils/ai-auto-build-materials.ts` + `__tests__/ai-auto-build-materials.test.ts` 36건 | RED→GREEN · 전체 4,460 · tsc 0 |
+| T2 | 완료 | `campaign-engine.ts`(`EngineOptions.features?` · `EngineDeps.applyFeatures` · `EngineResult.features` · 순서 채우기→기능 칩→차단) · `sales-outreach-produce.ts applyDmFeatures`(deps 배선) · `event-brief.ts BENEFIT_TOKEN_RE·firstBenefitPhrase` · 테스트 9건 | RED→GREEN · 전체 4,469 · tsc 0 · 아웃리치 골든 무변경 |
+| T3 | 완료 | `campaign-quick.ts`: `generateFromBuildMaterials`(v1 오케스트레이터 · `BuildDeps` 주입 · `defaultBuildDeps` 실물) · `quoteBuildMaterials`(채널 키 · 판독 분리 · creditEnabled 0) · 판독 캐시 10분 · `ai-auto-build-materials.ts`: `AiAutoBuildError`·`buildIdempotencyKey`·`mallProductNoOf`·`resolveBuildProducts` · `cafe24-client.ts fetchCafe24ProductsByNoRaw`(`product_no` 콤마 · **미검증**) · `mall-product-normalize.ts cafe24ProductAvailability` · `sales-outreach-produce.ts`: `applyDmFeatures` EMAIL 채널 + `produceOutreachBrandEmail` features 배선(`ProduceDmInput.features?` · `BrandEmailResult.features`) · 테스트 34건(계약 2·4·9·10·12·15·16) | RED→GREEN · 전체 288파일 4,504 · tsc 0 · v0 경로 문자열 계약 그대로 |
+
+| T4 | 완료 | `routes/dm.ts`·`routes/email.ts`: materials v1 분기(v0 앞 · `isBuildMaterialsV1`) · `aiAutoBuildEnabled` 403 · 회사 단위 in-flight 409(`utils/inflight-lock.ts` 신설 · `buildInflightKey`) · 채널 고정(dm/email) · 오류 매핑(`aiAutoBuildErrorResponse` → 402 → 503 `dm_pages`/`email_campaigns` → 500) · `routes/event-campaigns.ts`: **POST** `/materials/quote` v1(재료 본문 · 게이트·역할·견적·SMTP·요금제 잠금 · 차감 0) · `campaign-quick.ts`: `prepareBuildMaterials`(견적·생성 공통 앞단) · `quoteFromBuildMaterials` · `buildGenerateResponse` · 원장 조회 실패 503 `CREDIT_LOOKUP_UNAVAILABLE` · 테스트 12건(라우트 소스 계약 4 · 잠금 2 · 매핑 2 · 오케스트레이터 4) | RED→GREEN · 전체 290파일 4,516 · tsc 0 · v0 경로 무후퇴 |
+
+| T5 | 완료 | `pages/QuickCampaignPage.tsx` 승격(1열 `OUI_WRAP_NARROW` · 채널 세그먼트 · 행사 카드 → 상품 → 칩 → 이메일 광고 1행 · sticky 바 = 서버 견적 1줄 + [AI 자동제작] → `CreditConfirmModal` 1회 → 편집기 착지 · 진행 카드 = 실제 단계만 · 오류 코드 매핑 · 로컬 초안 복구 · `?regen=1` 재생성 · 옛 3채널 세트는 보조 줄 1개) · **신규 5**(`ai-build/BuildCardsInput`(즉시 업로드·라이브러리·드래그 정렬·서버 판정 배지) · `FeatureChips` · `ProductPickList` · `BuildResultBar` · `AiBuildEntryStrip`) · `utils/ai-build.ts`(화면 CT: 재료 계약 조립·칩 재료 거울·오류 문구·초안·결과 전달·노출 스위치 훅) · `pages/QuickCampaignLegacyPage.tsx`(v0 원본 파일째 복사 · 신규 ENV 미개방 회사가 보는 화면) · `DmBuilderPage`·`EmailVisualEditor` 캔버스 위 결과 바(편집 시작 = isDirty 로 접힘 · [다시 만들기] = ConfirmModal 1회 → 새 토큰) · `EmailCampaignsPage` `?edit=` 딥링크 | frontend tsc 0 · build:safe 성공(lazy 청크 43건 실존) · 검출기 1건 정정(로고 배지 색) · 모델명·native dialog·박-단어·금액 하드코딩 0 |
+| T6 | 완료 | 카드띠 2곳(`DmBuilderPage` 목록 상단 · `EmailCampaignsPage` 상단 · ENV 미개방 = 미렌더) · `MaterialQuickPanel` = 개방 회사에서 링크 1줄(렌더 플래그 · 제거 0) · "질문 몇 개로" 접힘 줄로 강등 · "자유 시작"·"비주얼로 만들기" → "직접 제작" · 허브 타일 "원클릭 캠페인" → "AI 자동제작"(NEW) · 금액 하드코딩 3곳(`AiPromptModal`·`EmailVisualEditor`·`EmailCampaignsPage`) → `constants/credit.ts AI_GENERATE_COSTS`(백엔드 CREDIT_COST_MAP 미러 · 옛 "3크레딧" 표기는 DM 생성 5로 오른 뒤에도 남아 있던 오표기) · 백엔드 GET `/materials/quote` 응답에 `auto_build_enabled` 추가(노출 스위치의 화면 원천) | frontend tsc 0 · backend tsc 0 · 전체 4,516 |
+
+| T7 | 완료(Codex 2R 상한) | 내 적대 검토 25항 → Codex `adversarial-review` 돈 경로 1R(high 2 · medium 1 · 전부 수용) → 2R(증분 · high 2 · 전부 수용 · 라운드 상한 도달) · 수용분은 테스트로 고정(quick 테스트 +7 · materials +2) | 전체 290파일 4,525 · tsc 0 · **3R 은 Harold 판단**(2R 지적은 내 테스트로만 닫음) |
+
+**★ Codex 적대검토(0914 T7 · 1R 3건 + 2R 2건 전부 수용) = §5 정정 4건(뿌리 = 돈 단위가 토큰뿐 · 판독비가 원장 밖 캐시)**:
+1. **멱등키 = `quick:{companyId}:{channel}:{attemptToken}:{과금 지문 16자}`**(§2-9·§5 "지문은 키가 아니다" 정정 · 1R high → 2R high 로 지문 범위 확대). 토큰만 키면 결제한 토큰으로 재료를 바꿔 보내는 요청이 duplicate(무료)로 통과한다. **과금 지문(`buildBillingHash`) = 정규화 입력 전체**(채널·광고·카드 제목·내용·링크·면허·이미지 URL·치수·상품 전부·칩·브랜드명 · 토큰·견적 합계·카드 id 제외) — 견적 결박용 지문(`buildMaterialsHash` · uuid 불변 · 세 요소)과 **분리**한다(1R 뒤 견적 지문을 키에 넣었더니 히어로 이미지만 바꾼 요청이 같은 키였다 = 2R high). "같은 재료 재시도 = 원장 1행 · 이미지·면허·칩 하나라도 다르면 새 차감"을 원장이 지킨다. 화면도 재료가 바뀌면 토큰을 버린다(이중 안전).
+2. **판독(이미지 글자 읽기 3)은 `runInCreditBundle` 안에서 돌려 AI 호출의 자체 차감을 끄고, 초안이 생긴 뒤 `quick-read:{companyId}:{처음 읽은 시도 토큰}:{이미지 지문 16자}` 키로 원장에 차감한다**(1R high · §5 "판독 함수 안에서 차감" 정정). 조립 실패 = 판독비 0(산출물 없는 차감 0 · 회의론자 최종 6 잔여 위험 해소). 생성비 차감 뒤 판독비 차감이 실패하면 행은 남기고 `[CREDIT][MISS] ai-auto-build-read` 로 키·토큰·초안 id 를 남긴다.
+3. **판독 캐시는 정산 상태를 든다**(2R high). 판독 직후 = 미정산(readKey 보관). 초안이 안 생겨 미정산으로 남은 캐시는 견적에 판독 부품을 **그대로 남기고**(표시 = 차감) 다음 초안 성공 때 그 readKey 로 멱등 차감한 뒤 정산으로 전이한다. 정산된 캐시만 무료 재사용(견적에서 판독 제외).
+4. **캐시(정산) 적중 = 견적에서 판독 부품이 빠진다**(1R medium). 견적(POST quote)과 생성이 같은 `freshVisionCache(...).settled` 판정을 읽어 표시 = 차감. 견적 뒤 캐시가 만료되면 합계가 달라져 409 → 화면이 견적을 다시 받는다. 화면의 "이미지 글자 읽기" 표시는 서버 견적 부품으로만 판단한다.
+- 2R 이 확인해 준 것: 캐시 만료 시 409 처리 · `runInCreditBundle` 안 creditCost 0 · 판독비 failed 의 식별 로그·초안 유지는 타당.
+
+**T5·T6 에서 설계와 다르게 한 것(근거)**:
+1. 신규 컴포넌트 4 → 5. `EventCardsInput`(v0 · File 보유)을 "그대로" 쓰면 §4-2의 "이미지는 고르는 즉시 업로드해 url 만"·라이브러리·드래그 정렬·서버 판정 배지가 안 들어간다. v0 화면이 그 컴포넌트를 그대로 쓰므로 후계 `BuildCardsInput` 을 새로 두고 v0 는 무접촉.
+2. `/quick-campaign` 은 신규 ENV 미개방 회사에 **옛 화면(v0)** 을 그대로 보인다(`QuickCampaignLegacyPage` · 원본 파일째 복사). 설계 §6-7 "승격 시점부터 신규 ENV 가 지배" 를 글자대로 하면 ENV 를 열기 전까지 모든 회사의 원클릭 캠페인이 사라진다(회귀 창). 개방 회사만 새 화면.
+3. 옛 3채널 세트(EventCampaignModal)·임시 보관 재개는 새 화면 맨 아래 보조 줄 1개로 남겼다(허브 진입이 이 페이지뿐 · 입구 8개 정리는 §9 2차).
+4. 이메일 [직접 제작] = 옛 [비주얼로 만들기]와 같은 동작(빈 블록 편집기) · DM [직접 제작] = 옛 [자유 시작].
+5. 판독(이미지 글자 읽기)은 별도 요청 없이 생성 호출 안에서 서버가 한 번에 잇는다(§5 "판독→생성 한 번에") · 견적 줄에 "이미지 글자 읽기 3(지금 차감)" 분리 표기.
+
+## 14. T8 배포·ENV·실측 원장(Harold 실행 · 명령마다 실행 위치)
+
+### 14-1. 커밋·push
+▶ 실행 위치: 로컬 PowerShell (`C:\Users\ceo\projects\targetup`)
+```powershell
+tp-push "0914 AI 자동제작 T1~T7 - 재료 코어·엔진 칩·조립·라우트·프론트 승격·입구·Codex 적대검토(tsc 0 · backend 4,516 · frontend build:safe · DDL 0 · ENV 비면 옛 화면)"
+```
+
+### 14-2. 배포(OPS §2-2 · 백엔드 + 프론트 둘 다)
+▶ 실행 위치: .62 · administrator
+```bash
+cd /home/administrator/targetup-app && git pull
+```
+```bash
+cd /home/administrator/targetup-app/packages/backend && npm run build:safe
+```
+```bash
+cd /home/administrator/targetup-app/packages/frontend && npm run build:safe
+```
+```bash
+pm2 reload targetup-backend
+```
+배포 확인(둘 다 1 이상 + online · ENV 를 아직 안 넣었으니 화면은 전 회사 옛 화면 그대로):
+```bash
+grep -c "generateFromBuildMaterials" /home/administrator/targetup-app/packages/backend/dist/routes/dm.js; grep -c "generateFromBuildMaterials" /home/administrator/targetup-app/packages/backend/dist/routes/email.js; grep -l "AI 자동제작" /home/administrator/targetup-app/packages/frontend/dist/assets/QuickCampaignPage-*.js | wc -l; pm2 status targetup-backend
+```
+(프론트 청크는 문자열 표 난독화라 속성명(`auto_build_enabled`)으로는 못 찾는다 · 화면 문구 "AI 자동제작"으로 본다)
+```bash
+true
+```
+
+### 14-3. ENV(1회사 · 카페24 재인증 뒤 T0 ③ 실측이 먼저)
+1. 카페24 재인증: 디버깅테스트(gyunoo83) 회사로 로그인 → 자사몰 연동 화면에서 카페24 재연결(OAuth). 그 뒤 T0 ③ 확인:
+▶ 실행 위치: .62 · administrator
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT company_id, mall_id, status, connected_at, token_expires_at FROM company_integrations WHERE provider='cafe24';"
+```
+`status='active'` 가 아니면 ENV 를 열지 않는다(몰 재조회는 "가격 확인 못함"으로 접히지만 실측 1건의 ②(가격 자릿수) 항목을 볼 수 없다).
+2. ENV 추가(값에 비밀 없음 · 회사 UUID 목록):
+▶ 실행 위치: .62 · administrator
+```bash
+grep -c '^AI_AUTO_BUILD_COMPANY_IDS=' /home/administrator/targetup-app/packages/backend/.env
+```
+0 이면:
+```bash
+echo 'AI_AUTO_BUILD_COMPANY_IDS=a0990249-3550-4baa-92ca-32e45b185e83' >> /home/administrator/targetup-app/packages/backend/.env && pm2 reload targetup-backend
+```
+확인(값 자체는 찍지 않는다):
+```bash
+grep -c '^AI_AUTO_BUILD_COMPANY_IDS=' /home/administrator/targetup-app/packages/backend/.env; pm2 status targetup-backend
+```
+
+### 14-4. 실측 1건(§9 · 도달 불가 값 · 디버깅테스트 회사)
+화면: AI Operator → [AI 자동제작](NEW) → 행사 카드 1장(제목 + 60자 텍스트 + "그대로 씁니다" 체크 + 이미지 3장 = 가로형 배너 1 · 상품 사진 1 · 로고 1) + [연동몰에서 불러오기] 상품 2개 + 칩 "AI가 알아서" → [AI 자동제작] → 확인 모달(금액 = 서버 견적 5) → 편집기 착지.
+판정:
+1. 편집기 첫 화면(hero)에 로고가 오지 않는다(썸네일 배지 "로고 추정" 확인 · 결과 바 미반영 목록에 사유).
+2. 상품 카드 가격 = 몰 값 자릿수까지(카드 2개 · 링크 버튼).
+3. 같은 초안 화면에서 [다시 만들기] 는 새 토큰이라 새 차감 · 브라우저 [뒤로] 뒤 같은 재료로 [AI 자동제작] 재클릭도 새 토큰. 멱등 실측은 원장에서: 
+▶ 실행 위치: .62 · administrator
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT idempotency_key, source, amount, created_at FROM ai_credit_transactions WHERE company_id='a0990249-3550-4baa-92ca-32e45b185e83' AND idempotency_key LIKE 'quick:%' ORDER BY created_at DESC LIMIT 5;"
+```
+키 형식 `quick:{회사}:dm:{uuid}` · 한 번 누름당 1행.
+4. 행사 카드에 두 줄(20자)만 적고 이미지 0 → sticky 바에 "행사 내용 40자 이상 또는 첫 화면 사진 1장" 안내 + 버튼 비활성(400 은 서버 · 화면은 견적 응답 gate 로 먼저 막는다).
+5. 채널 [이메일] → 광고 체크 → [AI 자동제작] → 이메일 편집기 착지(`/email-campaigns?edit=`) · 목록에 draft 행 1개(`ai_generated=true` · `is_ad=true`) · 완성 저장 시 50 별도 차감:
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT id, status, is_ad, ai_generated, (sections IS NOT NULL) AS has_sections, created_at FROM email_campaigns WHERE company_id='a0990249-3550-4baa-92ca-32e45b185e83' ORDER BY created_at DESC LIMIT 3;"
+```
+하나라도 어긋나면 ENV 에서 회사를 빼고(`AI_AUTO_BUILD_COMPANY_IDS=` 빈 값 · pm2 reload) 보고한다.
+
+**T4 응답 계약(프론트 T5 가 읽는 것)**: 생성 = `data.{channel, draft_id, campaign_id(email), attempt_token, deduct_outcome, quote, sections, pages, layout_mode, brand_kit, look, benefitStripped, heroFallback, subjects[], preheader, name, materials(=materialsMeta: imageRoles·features·mallUnverified·excluded·imagesDropped·reads·materialsHash)}` · 오류 = `{ success:false, error, code, ...extra }`(400 `MATERIALS_INVALID`{field} · 400 `MATERIAL_THIN`{missing} · 400 `SMTP_REQUIRED` · 403 `FEATURE_DISABLED` · 409 `QUOTE_CHANGED`{quote} · 409 `IN_FLIGHT` · 402 `INSUFFICIENT_CREDIT` · 503 `CREDIT_LOOKUP_UNAVAILABLE` · 503 `DB_MIGRATION_PENDING`). 견적 = `POST /api/event-campaigns/materials/quote` 본문 `{ materials }`(attemptToken = 화면이 가진 값 · expectedTotal 0) → `{ total, parts, credit_enabled, gate{ok,missing}, image_roles, text_chars, images, images_dropped, materials_hash, plan_locked, smtp_configured, max_cards, max_card_images, max_products, min_text_chars }`. 옛 GET 견적·v0 materials 분기는 그대로.
+
+**T3 순서(코드)**: 개방(403) → 정규화(400 `MATERIALS_INVALID`) → 이미지 실물(없는 장 제외 `imagesDropped` · 치수 빈 값만 실측) → 최소 재료 게이트(400 `MATERIAL_THIN` + missing) → 이메일면 SMTP(400 `SMTP_REQUIRED`) → 몰 재조회(상품번호 · 장애 = `mallFailed` · 생성 계속) → 견적 결박(409 `QUOTE_CHANGED` + quote) → `checkCredit`(402) → 판독(텍스트 0 + 이미지 · 같은 조합 10분 재사용) → 조립(DM `assembleDmCampaign` / 이메일 `produceOutreachBrandEmail`) → 초안 행(DM `createDm` draft · 이메일 렌더 → `createEmailCampaign` draft + `is_ad`·`ai_generated`·`sections`) → 차감(`deductCreditOutcome` · 키 `quick:{company}:{channel}:{attemptToken}` · duplicate 무료 · failed = 행 유지 + `[CREDIT][MISS]` 키·토큰·초안 id). 차감 호출 자체가 던지면 행 회수(고아 0).
+
+**T3 에서 설계와 다르게 한 것(근거)**:
+1. 수동 상품에 `validateProductsAgainstEventText`(원문 대조)를 걸지 않았다. 대조는 판독본(AI 추출)의 환각을 거르는 장치인데 수동 상품은 사용자가 직접 친 값이라 면허다(불변 1). 수동·상품번호 없는 몰·이미지 없는 몰 상품은 글줄로 재료와 `licensedQuote` 에 합류한다.
+2. `produceOutreachBrandEmail` 에 `isAd` 파라미터를 추가하지 않았다(프롬프트·조립에 소비처가 없어 죽은 인자가 된다). `is_ad` 는 행 저장으로 충족하고 표기 부착은 발송 단계 그대로(회의론자 최종 8의 뒷부분).
+3. 이메일 칩 후처리는 이메일 생성 함수 안(채우기 뒤·차단 앞)에 같은 `applyDmFeatures` 를 EMAIL 채널로 붙였다. 이메일 허용 타입에 countdown 이 없어 ON 카운트다운은 사유("이메일에는 카운트다운을 넣을 수 없어요")만 남긴다 → T5 는 이메일 선택 시 카운트다운 칩을 숨긴다.
+4. 카운트다운 재료 = 면허 카드 본문의 연도 있는 날짜(`parseLicensedEndDate` · jobs.ts 기존 파서 · 연도 없는 표기는 잡지 않는다) → `eventCards[].endDate`.
+
+**미검증(T0 ③ 재인증 뒤 실측)**: 카페24 `GET /products?product_no=1,2,3` 콤마 목록 파라미터. 실패·무응답·다른 상품 반환 어느 경우도 "가격 확인 못함"(피커 값 유지)으로 접히고 생성은 계속된다(테스트 "몰 장애"). 네이버는 상품번호 조회 API 가 없어 재조회 없이 피커 값 + `mallUnverified`.
+
+**알려진 한계(현행과 동일 · T5 이후 판단)**: 몰 상품 이미지는 몰 외부 URL 그대로 카드에 실린다(`attachMallImagesToProductCarousels` 와 같은 관행 · 사본 복사 0) · 카드 링크가 하나도 없으면 CTA URL 이 빈 값이 될 수 있다(v0 동일 · T5 폼에서 링크 입력 유도).
+
+**T2 규칙(코드로 확인한 채우기 사실에 맞춘 것 · §6-2 보강)**: 고객 입구 `fillOutreachDmMediaV3`가 상품 2개 이상 → 캐러셀, 카드 잔여 이미지 → 갤러리, 미래 종료일 → 카운트다운을 이미 데이터로 만든다. 후처리는 OFF 제거 · ON 은 있으면 유지 · 없으면 **쿠폰만** 삽입(`discount_label` = 면허 문구의 혜택 첫 구절 원문 · 마지막 CTA 앞 · 상한 13) · 나머지 ON 은 `skipped[{type, reason}]`(고객 언어 사유). 허용 4종 밖 타입은 무시.
+
+**설계서 정정(코드 실측)**:
+1. §6-1 예시 이미지 1200x1600(비율 0.75)은 현행 `heroEligible` 하한 0.8 미만이라 히어로 후보가 아니다 → 배지 "사진". 하한은 아웃리치 공용이라 이번 트랙 무변경.
+2. §4-2 "쿠폰 칩 = 발행 때 120" 은 사실과 다르다. `coupon` 은 인터랙션 타입이 아니다(`dm-interaction.ts INTERACTION_SECTION_TYPES`). T5 에서 그 고지를 넣지 않는다.
+3. 고객 카드는 `endDate` 가 항상 null(`materialsFromEventCards`) → 카운트다운 칩 재료는 T3 에서 카드 본문 날짜를 결정적으로 뽑아야 생긴다(파서 유무 T3 grep).
+4. 이메일 경로(`produceOutreachBrandEmail`)는 `assembleDmCampaign` 을 타지 않아 T2 후처리가 닿지 않는다 → T3 에서 같은 자리(채우기 뒤·차단 앞)에 `applyDmFeatures` 를 붙이거나 이메일 칩 범위를 정한다.
+
+**범위 밖 기록(착수 판단 = Harold)**: `cafe24-client.ts:238 getCafe24Integration` 이 status 를 안 걸러 `token_expired` 회사도 `/api/mall-products/providers` 에 카페24 탭이 뜬다(LESSONS_BACKEND "연동 상태 = active + 검증 신호" 위반). 이번 트랙은 T3 호출부에서 `status='active'` 판정으로 막는다.

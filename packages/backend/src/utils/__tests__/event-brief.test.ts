@@ -1,5 +1,31 @@
 import { describe, it, expect } from 'vitest';
-import { buildEventPromptBlock, benefitMatchesEventText, normalizeEventText, EVENT_TEXT_MAX, validateProductsAgainstEventText, assignProductLinksFromText } from '../event-brief';
+import { buildEventPromptBlock, benefitMatchesEventText, normalizeEventText, EVENT_TEXT_MAX, validateProductsAgainstEventText, assignProductLinksFromText, firstBenefitPhrase, BENEFIT_TOKEN_RE } from '../event-brief';
+
+/**
+ * ★ 2026-09-14 T2 — 면허 문구에서 혜택 토큰이 든 첫 구절(AI 자동제작 쿠폰 칩 · 카피 생성 0 · 설계서 §6-2)
+ */
+describe('firstBenefitPhrase', () => {
+  it('구분자(· 줄바꿈 | 문장 끝)로 나눠 혜택 토큰이 든 첫 구절을 원문 그대로', () => {
+    expect(firstBenefitPhrase('가을 세일 · 10/1~10/15 전 품목 30% 할인 · 사은품 증정')).toBe('10/1~10/15 전 품목 30% 할인');
+    expect(firstBenefitPhrase('신상 오픈\n구매 고객 사은품 증정')).toBe('구매 고객 사은품 증정');
+    expect(firstBenefitPhrase('오늘만 무료 배송. 내일은 정상가')).toBe('오늘만 무료 배송.');
+  });
+  it('혜택 토큰이 없으면 null · 빈 값 null · 상한 60자', () => {
+    expect(firstBenefitPhrase('가을 신상 컬렉션 오픈')).toBeNull();
+    expect(firstBenefitPhrase('')).toBeNull();
+    expect(firstBenefitPhrase(null)).toBeNull();
+    expect(firstBenefitPhrase(undefined)).toBeNull();
+    expect(firstBenefitPhrase(`${'가'.repeat(70)} 30% 할인`)!.length).toBe(60);
+  });
+  it('benefitMatchesEventText 와 같은 토큰 표(BENEFIT_TOKEN_RE) · 기존 판정 불변', () => {
+    expect(BENEFIT_TOKEN_RE.flags).toContain('g');
+    expect(benefitMatchesEventText('전 품목 20% 할인', '여름맞이\n전 품목 20% 할인')).toBe(true);
+    expect(benefitMatchesEventText('전 품목 30% 할인', '여름맞이\n전 품목 20% 할인')).toBe(false);
+    // /g 정규식을 연달아 써도 상태(lastIndex)가 판정을 흔들지 않는다
+    expect(firstBenefitPhrase('무료 배송')).toBe('무료 배송');
+    expect(firstBenefitPhrase('무료 배송')).toBe('무료 배송');
+  });
+});
 
 /**
  * 행사 캠페인 브리프 CT (2026-07-07(4)) — 혜택 실존 검증은 AI 임의 혜택 금지 영구 룰의 기계 게이트.

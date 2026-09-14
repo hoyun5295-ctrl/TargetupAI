@@ -12,7 +12,7 @@ vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] }
 vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(async () => '') }));
 
 import { assembleDmCampaign, type EngineMaterials } from '../campaign-engine';
-import { outreachEngineDeps } from '../sales-outreach-produce';
+import { outreachEngineDeps, applyDmFeatures } from '../sales-outreach-produce';
 import { quoteQuickCampaign, quickMaterialsEnabled, normalizeQuickMaterials, materialTextFromEvents } from '../campaign-quick';
 import type { Section } from '../dm/dm-section-registry';
 
@@ -180,6 +180,101 @@ describe('재료 입구 순수 함수', () => {
     expect(t).toContain('혜택: 전 상품 30%');
     expect(t).toContain('- 수분 크림 25,000원 (정가 32,000원)');
     expect(t.split('\n').filter((l) => l === '추석 기획전 · 한가위').length).toBe(1);
+  });
+});
+
+/**
+ * ★ 2026-09-14 T2 기능 칩 후처리(EngineOptions.features · EngineDeps.applyFeatures) — 설계서 docs/2026-09-14-ai-auto-build-design.md §6-2 · 계약 6.
+ *  고객 입구(행사 카드)에서 채우기가 데이터로 만드는 것(캐러셀·갤러리·카운트다운)은 그대로 두고, 후처리는 OFF 제거 · ON 쿠폰 삽입(면허 문구) · 재료 없는 ON 은 사유만.
+ */
+describe('★ T2 기능 칩 후처리 — features 없음/null = 현행 · OFF 제거 · ON 쿠폰 삽입 · 재료 없으면 skipped', () => {
+  const CARD_MATERIALS: EngineMaterials = {
+    ...MATERIALS, proof: null, posterUrl: null, posterSize: null, legal: null, ctaLinks: {}, homepageUrl: 'https://shop.example/',
+    products: [
+      { name: '수분 크림', price: 32000, discount_price: 25000, image_url: 'https://mall.example/p1.jpg', link_url: 'https://mall.example/p/1', width: 800, height: 800 },
+      { name: '세럼', price: 45000, discount_price: null, image_url: 'https://mall.example/p2.jpg', link_url: 'https://mall.example/p/2', width: 800, height: 800 },
+    ],
+    gallery: [
+      { url: '/api/dm/v/images/c/h.jpg', width: 1600, height: 1200, group: 'c1' },
+      { url: '/api/dm/v/images/c/g1.jpg', width: 1080, height: 1080, group: 'c1' },
+      { url: '/api/dm/v/images/c/g2.jpg', width: 1080, height: 1080, group: 'c1' },
+    ],
+    licensedQuote: '가을 세일 · 10/1~10/15 전 품목 30% 할인 · 사은품 증정',
+    eventCards: [{ title: '가을 세일', periodRaw: null, endDate: null, bannerUrl: '/api/dm/v/images/c/h.jpg', bannerSize: { width: 1600, height: 1200 }, detailUrl: 'https://shop.example/event', licensed: true, group: 'c1', text: '10/1~10/15 전 품목 30% 할인 · 사은품 증정' }],
+  };
+  const OPTS = { entry: 'customer' as const, channel: 'DM' as const, skeletonTypes: null, sectionOverride: null, presetSections: null, layoutMode: 'scroll' };
+
+  it('features 없음 · null = 현행 출력과 sections 동등 · features 결과는 빈 값 · 기준선은 채우기가 캐러셀·갤러리를 만든 상태', async () => {
+    const a = await assembleDmCampaign(CARD_MATERIALS, OPTS, depsWithFixture());
+    const b = await assembleDmCampaign(CARD_MATERIALS, { ...OPTS, features: null }, depsWithFixture());
+    expect(b.sections).toEqual(a.sections);
+    expect(a.features).toEqual({ applied: [], removed: [], skipped: [] });
+    expect(a.sectionTypes).toContain('product_carousel');
+    expect(a.sectionTypes).toContain('gallery');
+    expect(a.sectionTypes).not.toContain('coupon');
+    expect(a.sectionTypes).not.toContain('countdown');
+  });
+  it('OFF(features: []) = 4종 전부 제거 · removed 에는 실제 있던 타입만 · skipped 0', async () => {
+    const r = await assembleDmCampaign(CARD_MATERIALS, { ...OPTS, features: [] }, depsWithFixture());
+    for (const t of ['product_carousel', 'gallery', 'countdown', 'coupon']) expect(r.sectionTypes).not.toContain(t);
+    expect([...r.features.removed].sort()).toEqual(['gallery', 'product_carousel']);
+    expect(r.features.skipped).toEqual([]);
+    expect(r.features.applied).toEqual([]);
+  });
+  it('ON 쿠폰 = 모델이 안 냈어도 면허 문구로 1개 삽입(카피 생성 0) · 마지막 CTA 앞 · 차단기를 지나도 문구 유지', async () => {
+    const r = await assembleDmCampaign(CARD_MATERIALS, { ...OPTS, features: ['product_carousel', 'gallery', 'coupon'] }, depsWithFixture());
+    const idx = r.sectionTypes.indexOf('coupon');
+    expect(idx).toBeGreaterThan(0);
+    expect(r.sectionTypes.lastIndexOf('coupon')).toBe(idx);
+    expect(idx).toBeLessThan(r.sectionTypes.lastIndexOf('cta'));
+    expect((r.sections[idx] as any).props.discount_label).toBe('10/1~10/15 전 품목 30% 할인');
+    expect([...r.features.applied].sort()).toEqual(['coupon', 'gallery', 'product_carousel']);
+    expect(r.features.removed).toEqual([]);
+    expect(r.sectionTypes).not.toContain('countdown');
+  });
+  it('ON 인데 재료가 없으면 삽입하지 않고 사유만 · 목록 밖 타입은 OFF', async () => {
+    const m: EngineMaterials = { ...CARD_MATERIALS, products: [], licensedQuote: '', eventCards: [{ ...CARD_MATERIALS.eventCards![0], licensed: false }] };
+    const r = await assembleDmCampaign(m, { ...OPTS, features: ['countdown', 'product_carousel', 'coupon'] }, depsWithFixture());
+    for (const t of ['countdown', 'coupon', 'product_carousel', 'gallery']) expect(r.sectionTypes).not.toContain(t);
+    expect(r.features.skipped.map((s) => s.type).sort()).toEqual(['countdown', 'coupon', 'product_carousel']);
+    expect(r.features.skipped.every((s) => s.reason.trim().length > 0)).toBe(true);
+    expect(r.features.removed).toEqual(['gallery']);
+  });
+  it('허용 밖 타입은 무시(header 는 지워지지 않는다) · preset 재발행은 features 를 적용하지 않는다', async () => {
+    const r = await assembleDmCampaign(CARD_MATERIALS, { ...OPTS, features: ['header', 'roulette', 'gallery'] }, depsWithFixture());
+    expect(r.sectionTypes[0]).toBe('header');
+    expect(r.sectionTypes).toContain('gallery');
+    expect(r.sectionTypes).not.toContain('product_carousel');
+    const deps = depsWithFixture();
+    deps.generate = async () => { throw new Error('preset 재발행은 생성기를 부르지 않는다'); };
+    const preset = await assembleDmCampaign(CARD_MATERIALS, { ...OPTS, features: [], presetSections: r.sectionsBase }, deps);
+    expect(preset.sectionTypes).toEqual(r.sectionTypes);
+    expect(preset.features).toEqual({ applied: [], removed: [], skipped: [] });
+  });
+  it('소스 계약 — 순서 채우기 → features → 차단 · 구현은 produce 의 applyDmFeatures 를 deps 로 넘긴다', () => {
+    const engine = code('utils/campaign-engine.ts');
+    expect(engine).toContain('deps.applyFeatures(filledR.sections, opts.features ?? null, m)');
+    expect(engine.indexOf('deps.applyFeatures(')).toBeLessThan(engine.indexOf('deps.sanitize('));
+    const produce = code('utils/sales-outreach-produce.ts');
+    expect(produce).toContain('applyFeatures: (sections, features, m) => applyDmFeatures(sections, features, m)');
+  });
+});
+
+describe('★ T3 이메일 칩 후처리 — applyDmFeatures EMAIL 채널 · 이메일 생성 경로 배선(소스 계약)', () => {
+  it('EMAIL 에서 ON 카운트다운 = 넣지 않고 사유(이메일 미지원) · OFF 제거는 그대로', () => {
+    const sections: Section[] = [sec('header', {}, 0), sec('hero', { headline: 'A' }, 1), sec('product_carousel', { products: [{ name: '수분 크림' }] }, 2), sec('cta', { buttons: [] }, 3), sec('footer', {}, 4)];
+    const r = applyDmFeatures(sections, ['countdown'], { licensedQuote: '' }, 'EMAIL');
+    expect(r.sections.map((s) => String(s.type))).toEqual(['header', 'hero', 'cta', 'footer']);
+    expect(r.removed).toEqual(['product_carousel']);
+    expect(r.skipped).toEqual([{ type: 'countdown', reason: expect.stringContaining('이메일') }]);
+    // DM 은 종료일 사유(현행)
+    expect(applyDmFeatures(sections, ['countdown'], { licensedQuote: '' }).skipped[0].reason).not.toContain('이메일');
+  });
+  it('소스 계약 — 이메일 생성 경로도 채우기 → features → 차단 · 결과에 features 를 싣는다', () => {
+    const produce = code('utils/sales-outreach-produce.ts');
+    expect(produce).toContain("applyDmFeatures(filled.sections, input.features ?? null, { licensedQuote: input.licensedQuote }, 'EMAIL')");
+    expect(produce.indexOf('applyDmFeatures(filled.sections')).toBeLessThan(produce.indexOf('sanitizeDmCopyBenefits(featured.sections'));
+    expect(produce).toContain('features: { applied: featured.applied, removed: featured.removed, skipped: featured.skipped }');
   });
 });
 

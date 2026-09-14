@@ -59,7 +59,8 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "DROP TABLE IF EXI
 
 ## 3. 다음 세션 착수 원장
 
-1. **AI 자동제작 T0** = 설계서 §9 착수 전 실측 3건(Harold SQL·API) → §12 T1~T8. 첫 코드는 `utils/ai-auto-build-materials.ts`(순수 · RED→GREEN).
+0. **★2026-09-14 2세션 진행분(이 문서 작성 뒤)** = AI 자동제작 T0(①·② 통과 · ③ 미검증 = 카페24 활성 연동 0) → T1~T6 코드 완료 → T7 Codex 적대검토 → T8 배포·ENV·실측. 상태·명령·실측 시나리오의 소유 = [설계서 §13·§14](2026-09-14-ai-auto-build-design.md). 인계 원장은 이 항목 하나로 갈음한다(중복 기록 0).
+1. ~~**AI 자동제작 T0** = 설계서 §9 착수 전 실측 3건(Harold SQL·API) → §12 T1~T8. 첫 코드는 `utils/ai-auto-build-materials.ts`(순수 · RED→GREEN).~~ (완료 · 0번 참조)
 2. 우커머스 회신이 오면: 설계서 §9 2차 목록의 "우커머스 어댑터"와 별개로, 답 7개를 실측 게이트(REST 401 · 웹훅 1건 · SDK 삽입 리허설)로 판정 → 어댑터 설계서.
 3. 범위 밖 기록(착수 판단 = Harold): `expired-pending-sweeper`·`system-monitor-worker` bulk-only(STATUS ⑥-③) · 재대조 보류 백오프·경보 · 확정 불일치 21일 재선정 · 상세 3경로 합집합 스캔 · 백엔드 `/api/sales-outreach/badge` 소비처 0 · 메이크뷰식 PC 2쪽 펼침·썸네일.
 

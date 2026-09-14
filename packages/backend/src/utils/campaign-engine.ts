@@ -81,6 +81,18 @@ export interface EngineOptions {
   /** 저장된 최종 섹션으로 재발행(AI 0 · 채우기 0 · 숨김 재실행 전용) */
   presetSections: Section[] | null;
   layoutMode: string;
+  /**
+   * ★ 2026-09-14 T2 기능 칩(AI 자동제작 · 설계서 §6-2) — 사용자가 고른 섹션 타입 목록. 없음/null = 후처리 no-op(아웃리치·옛 호출 = 현행 출력).
+   * 값의 존중은 프롬프트 힌트가 아니라 결정적 후처리(deps.applyFeatures)가 맡는다. 허용 목록·삽입 규칙은 구현(deps)이 소유한다.
+   */
+  features?: readonly string[] | null;
+}
+
+/** ★ T2 기능 칩 후처리 결과 — applied = 결과에 실린 ON 타입 · removed = OFF 로 지운 타입 · skipped = ON 인데 재료가 없어 못 넣은 타입과 사유(화면 "미반영" 목록의 원천) */
+export interface EngineFeaturesResult {
+  applied: string[];
+  removed: string[];
+  skipped: Array<{ type: string; reason: string }>;
 }
 
 export interface EngineGenInput {
@@ -98,6 +110,8 @@ export interface EngineDeps<TStats = unknown, TDims = unknown, TOverride = unkno
   buildDims(gallery: readonly EngineImage[], products: readonly EngineProduct[], posterUrl: string | null, posterSize: { width: number; height: number } | null): TDims;
   /** ★ v3 entry 가 4번째(마지막) 인자 — 아웃리치 = gallery 0 · 행사 카드 → text_card+cta / 고객 = 현행 */
   fill(sections: readonly Section[], materials: EngineMaterials, channel: EngineChannel, entry: EngineEntry): { sections: Section[]; filled: number };
+  /** ★ T2 기능 칩 후처리(채우기 뒤 · 차단 앞) — features null = 입력 그대로 · OFF 제거 · ON 은 재료가 있을 때만 삽입(카피 생성 0) */
+  applyFeatures(sections: readonly Section[], features: readonly string[] | null, materials: EngineMaterials): { sections: Section[] } & EngineFeaturesResult;
   sanitize(sections: readonly Section[], licensedQuote: string, companyName: string): { sections: Section[]; stripped: number; removed: string[]; heroFallback: boolean };
   prune(sections: readonly Section[]): { sections: Section[]; removed: string[] };
   orderCountdown(sections: readonly Section[]): Section[];
@@ -127,11 +141,13 @@ export interface EngineResult<TStats = unknown> {
   hidden: { applied: number; missed: string[]; skipped: boolean };
   /** 이번 조립이 AI 생성을 거쳤는가(preset 재발행 = false) */
   generated: boolean;
+  /** ★ T2 기능 칩 후처리 결과(features 없음·preset 재발행 = 전부 빈 배열) */
+  features: EngineFeaturesResult;
 }
 
 /**
- * DM 조립(결정 구간). 순서는 아웃리치 0905(3)~S2 에서 실측으로 굳힌 그대로:
- *  생성 → 채우기 → 차단 → 정리 → 카운트다운 위치 → 룩 → [override] → 증거 카드 → 재구성 → 통계 → 페이지.
+ * DM 조립(결정 구간). 순서는 아웃리치 0905(3)~S2 에서 실측으로 굳힌 그대로(★T2 기능 칩 1스텝 추가 · features 없으면 no-op):
+ *  생성 → 채우기 → 기능 칩 → 차단 → 정리 → 카운트다운 위치 → 룩 → [override] → 증거 카드 → 재구성 → 통계 → 페이지.
  * override 는 룩 뒤(숨김은 발행 직전의 사람 결정) · 증거 카드는 override 뒤(숨김 순번 보존) · 통계는 발행본 기준.
  */
 export async function assembleDmCampaign<TStats, TDims, TOverride>(
@@ -147,6 +163,7 @@ export async function assembleDmCampaign<TStats, TDims, TOverride>(
   let removed: string[] = [];
   let sectionsBase: Section[];
   let generated = false;
+  let features: EngineFeaturesResult = { applied: [], removed: [], skipped: [] };
   if (opts.presetSections && opts.presetSections.length > 0) {
     // 섹션 숨김 재실행 — 저장된 최종 섹션(룩 이미 실림)을 그대로 다시(AI 0 · 채우기 0)
     sectionsBase = opts.presetSections;
@@ -161,7 +178,10 @@ export async function assembleDmCampaign<TStats, TDims, TOverride>(
     exemplars = gen.exemplars;
     const filledR = deps.fill(gen.sections, m, opts.channel, opts.entry);
     filled = filledR.filled;
-    const sanitized = deps.sanitize(filledR.sections, m.licensedQuote, m.companyName);
+    // ★ T2 기능 칩 — 채우기가 데이터로 만든 결과 위에서 OFF 제거 · ON 삽입(재료 있을 때만) · features 없으면 입력 그대로
+    const featured = deps.applyFeatures(filledR.sections, opts.features ?? null, m);
+    features = { applied: featured.applied, removed: featured.removed, skipped: featured.skipped };
+    const sanitized = deps.sanitize(featured.sections, m.licensedQuote, m.companyName);
     benefitStripped = sanitized.stripped;
     heroFallback = sanitized.heroFallback;
     const pruned = deps.prune(sanitized.sections);
@@ -194,5 +214,6 @@ export async function assembleDmCampaign<TStats, TDims, TOverride>(
     filled,
     hidden: { applied: overridden.applied, missed: overridden.missed, skipped: overridden.skipped === true },
     generated,
+    features,
   };
 }

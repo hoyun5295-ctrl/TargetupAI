@@ -126,6 +126,16 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
  *   CreditConfirmModal 의무. 신규 기능이 20 이상 차감이면 여기 등록 + 트리거 지점에 모달 필수.
  *   (자동/백그라운드 차감 — 예측 일일·여정 운영·자율발송 — 은 모달 불가 → 설정 화면 안내로 고지.)
  */
+/**
+ * ★ 2026-09-14 T6 — 작은 생성 차감의 화면 표기 단가(백엔드 CREDIT_COST_MAP 미러 · 버튼 라벨 "(N크레딧)"의 단일 출처).
+ * 라벨에 숫자를 손으로 적지 않는다(옛 "3크레딧" 표기가 DM 생성 5로 오른 뒤에도 남아 있었다). 실제 차감은 서버 견적·원장이 정한다.
+ */
+export const AI_GENERATE_COSTS: Record<string, number> = {
+  'dm-ai-generate': 5,
+  'email-ai-generate': 3,
+  'event-image-extract': 3,
+};
+
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'dm-ai-generate': 5,           // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
   'dm-builder': 100,             // DM 발행

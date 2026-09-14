@@ -1,7 +1,11 @@
 import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
 import OperatorAura from '../components/operator/OperatorAura';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+// ★ 2026-09-14 T5·T6 AI 자동제작 — 상단 카드띠(입구) · ?edit={campaignId} 딥링크(완성본 착지) · 생성 금액 단일 출처
+import AiBuildEntryStrip from '../components/ai-build/AiBuildEntryStrip';
+import { useAiAutoBuildEnabled } from '../utils/ai-build';
+import { AI_GENERATE_COSTS } from '../constants/credit';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   AlertCircle, AlertTriangle, ArrowLeft, BarChart3, Check, ChevronDown, ChevronUp, Clock,
@@ -124,6 +128,11 @@ const EMPTY_SMTP_FORM = {
 
 export default function EmailCampaignsPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // ★ 2026-09-14 T5 딥링크(/email-campaigns?edit=<campaignId>) — AI 자동제작 완성본 착지. 마운트 때 한 번 읽고 URL 에서 지운다(새로고침이 되풀이하지 않게).
+  const [editEntryId] = useState(() => String(searchParams.get('edit') || '').trim() || null);
+  const editEntryHandled = useRef(false);
+  const autoBuild = useAiAutoBuildEnabled();
   const customerGate = useCustomerDataGate(localStorage.getItem('token'));
   const [showDataGate, setShowDataGate] = useState(false);
   const toast = useToast();
@@ -497,6 +506,24 @@ export default function EmailCampaignsPage() {
     }
   };
 
+  // ★ 2026-09-14 T5 딥링크 — 목록이 한 번 로드된 뒤 그 캠페인을 단건 조회해 편집기로 연다(목록 50건 밖이어도 열린다). 없으면 안내만.
+  useEffect(() => {
+    if (!editEntryId || editEntryHandled.current || loading) return;
+    editEntryHandled.current = true;
+    setSearchParams({}, { replace: true });
+    (async () => {
+      try {
+        const r = await fetch(`/api/email/campaigns/${encodeURIComponent(editEntryId)}`, { headers: authHeaders() });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d?.success || !d?.campaign) { showToast('이 캠페인을 열 수 없습니다. 캠페인을 만든 계정으로 로그인했는지 확인해 주세요.', 'error'); return; }
+        openEditor(d.campaign as EmailCampaign);
+      } catch {
+        showToast('캠페인을 불러오지 못했습니다. 새로고침해 주세요.', 'error');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editEntryId, loading]);
+
   const openRecipientsModal = (c: EmailCampaign) => {
     // ★ 2026-07-02(3) 미완성 = 발송 진입 차단 (버튼 미노출 + 함수 가드 + 백엔드 CAMPAIGN_NOT_COMPLETED 3중)
     if (!c.completed) {
@@ -840,6 +867,12 @@ export default function EmailCampaignsPage() {
 
         {/* SMTP 상태·테스트 발송은 헤더의 칩·작은 모달로 이동 — 가로 큰 배너/카드 제거 */}
 
+        {/* ★ 2026-09-14 T6 카드띠 [AI 자동제작 | 직접 제작] — 신규 ENV 미개방 회사는 그리지 않는다(설계서 §3-1 · §4-1) */}
+        {smtpConfigured && (
+          <AiBuildEntryStrip channel="email" enabled={autoBuild === true} disabled={genStep !== null}
+            onDirect={() => setVisualEditor({ sections: [], isAd: true, aiGenerated: false })}
+            directDesc="빈 블록에서 시작해 제목·본문·이미지를 직접 채워요. 템플릿·라이브러리는 아래에서 고를 수 있어요." />
+        )}
         {/* ★ 2026-07-02(3): AI 원샷 생성 — 자연어 프롬프트 1개만 (빠른 시작 카드 제거, 결과는 비주얼 편집기로) */}
         {smtpConfigured && (
           <div className="bg-gradient-to-br from-fuchsia-600/20 via-purple-600/15 to-indigo-600/20 border border-fuchsia-400/30 rounded-2xl p-5">
@@ -850,7 +883,7 @@ export default function EmailCampaignsPage() {
               </div>
               <div>
                 <div className="text-sm font-bold text-white">AI로 이메일 만들기</div>
-                <div className="text-[11px] text-white/50">한 줄만 입력하면 제목·본문·HTML까지 한 번에 (3 크레딧)</div>
+                <div className="text-[11px] text-white/50">한 줄만 입력하면 제목·본문·HTML까지 한 번에 ({AI_GENERATE_COSTS['email-ai-generate']} 크레딧)</div>
               </div>
             </div>
             <div className="flex flex-col md:flex-row gap-2 mb-3">
@@ -906,7 +939,7 @@ export default function EmailCampaignsPage() {
                   <Sparkles className="w-4 h-4 text-white" />
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-white">비주얼로 만들기</div>
+                  <div className="text-xs font-bold text-white">직접 제작</div>
                   <div className="text-[10px] text-white/45 mt-0.5">빈 캔버스에서 블록 직접 조립</div>
                 </div>
               </button>

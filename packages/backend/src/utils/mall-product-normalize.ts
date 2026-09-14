@@ -100,3 +100,15 @@ export function normalizeNaverProduct(cp: any, storeUrl?: string): MallProduct |
     productUrl,
   };
 }
+
+/**
+ * ★ 2026-09-14 T3 카페24 상품 재조회 분류 — normalizeCafe24Product 가 null 로 버리는 사유(품절 · 판매중지·미전시)를 드러낸다.
+ * AI 자동제작 §6-5 "품절·미전시 = 그 상품만 제외 + 사유"의 판정 원천(정규화와 같은 필드 · 같은 값). 비객체 = hidden.
+ */
+export type Cafe24Availability = 'ok' | 'sold_out' | 'hidden';
+export function cafe24ProductAvailability(p: any): Cafe24Availability {
+  if (!p || typeof p !== 'object') return 'hidden';
+  if (String(p.sold_out) === 'T') return 'sold_out';
+  if (String(p.selling) !== 'T' || String(p.display) !== 'T') return 'hidden';
+  return 'ok';
+}

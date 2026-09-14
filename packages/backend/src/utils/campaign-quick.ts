@@ -14,18 +14,32 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { createDm } from './dm/dm-builder';
+import { createDm, deleteDm } from './dm/dm-builder';
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
 import { getBrandBasicInfo } from './brand-basic-info';
 import { getCreditCost } from './ai-credit-calc';
-import { checkCredit, deductCreditSafe } from './ai-credit';
+import { checkCredit, deductCreditSafe, deductCreditOutcome, getCreditState, InsufficientCreditError, type DeductOutcome } from './ai-credit';
 import { loadPlanContext, canUseFeature } from './plan-guard';
 import { normalizeEventText, EVENT_TEXT_MAX } from './event-brief';
 import { extractEventsFromImages, sniffImageMediaType, MAX_EVENT_IMAGES, type ExtractedEvent } from './event-image-extract';
 import { readImageSize } from './sales-outreach-media';
-import { assembleDmCampaign, type EngineMaterials, type EngineResult, type EngineEventCard } from './campaign-engine';
-import { outreachEngineDeps, produceOutreachBrandEmail } from './sales-outreach-produce';
+import { assembleDmCampaign, type EngineMaterials, type EngineResult, type EngineEventCard, type EngineOptions, type EngineFeaturesResult } from './campaign-engine';
+import { outreachEngineDeps, produceOutreachBrandEmail, type BrandEmailResult } from './sales-outreach-produce';
 import { OUTREACH_DM_LAYOUT_MODE, type OutreachLookStats } from './sales-outreach-look';
+import { createEmailCampaign, deleteEmailCampaign, type CreateCampaignInput } from './email-channel';
+import { isSmtpConfigured } from './company-smtp-client';
+import { renderEmailSections, extractEmailText } from './email/email-section-renderer';
+import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsByNoRaw } from './cafe24-client';
+import { cafe24ProductAvailability, normalizeCafe24Product } from './mall-product-normalize';
+import { parseLicensedEndDate } from './sales-outreach-jobs';
+import { runInCreditBundle } from './ai-credit-context';
+import type { Section } from './dm/dm-section-registry';
+import {
+  aiAutoBuildEnabled, normalizeBuildMaterials, judgeImageRoles, checkMinimumMaterials, buildMaterialsHash, buildBillingHash, buildIdempotencyKey, buildReadIdempotencyKey, imagesHashOf, mallProductNoOf, resolveBuildProducts,
+  companyImagePrefixes, AiAutoBuildError,
+  type BuildChannel, type BuildEventCard, type BuildMallProvider, type BuildMallLookup, type BuildImageRoleJudgement,
+  type BuildMaterials, type BuildImage, type BuildGateResult,
+} from './ai-auto-build-materials';
 
 // routes/dm.ts · utils/dm/dm-viewer-utils.ts 와 동일 정의 미러(서빙 경로 /api/dm/v/images/{companyId}/{filename})
 const DM_IMAGE_DIR = path.join(process.cwd(), 'uploads', 'dm-images');
@@ -385,5 +399,524 @@ export async function generateEmailFromMaterials(input: { companyId: string; use
     benefitStripped: r.benefitStripped,
     look: r.look,
     materialsMeta: { images: m.images.length, textChars: m.event_text.length, origin: m.origin, licensed: m.origin === 'user', sections: r.sections.length },
+  };
+}
+
+// ===== ★ 2026-09-14 T3 AI 자동제작 v1(materials.version === 1) — 설계서 docs/2026-09-14-ai-auto-build-design.md §2-9·§2-10·§5·§6-5·§6-6 =====
+//  옛 요청(version 없음)은 위 v0 함수 그대로. v1 = 판정(정규화·이미지 실물·게이트·SMTP·몰 재조회·견적 결박) → checkCredit → 판독(텍스트 0) → 조립 → 초안 행 → 차감(키 = attemptToken).
+//  I/O 경계는 BuildDeps 로 주입(계약 테스트가 순서·키·행 수를 검증) · defaultBuildDeps 가 실물 배선.
+
+/** 인앱(소재 라이브러리) 이미지 실물 경로 — `utils/assets.ts`·`routes/cdp.ts` 와 동일 정의(단일 env 소스) */
+const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
+/**
+ * 판독 결과 재사용(같은 회사 · 같은 이미지 조합 · 10분 · §5 "재차감 0").
+ * ★Codex 1R(0914) medium 수용 — 캐시 적중 여부를 **견적·잔액 확인·실차감이 같은 판정**으로 읽는다(적중 = 판독 부품 자체가 빠진다 · 표시 = 차감).
+ */
+const BUILD_VISION_TTL_MS = 10 * 60 * 1000;
+/**
+ * 캐시 항목은 **정산 상태**를 든다(★Codex 2R 0914 high 수용): 판독 직후 = 미정산(readKey 보관). 조립 실패로 초안이 안 생기면 미정산이 남고,
+ * 미정산 캐시는 견적에 판독 부품을 그대로 남기며(표시 = 차감) 다음 초안 성공 때 **처음 읽은 시도의 readKey** 로 멱등 차감한 뒤 정산으로 전이한다.
+ * 정산된 캐시만 무료 재사용(견적에서 판독 제외)이다.
+ */
+interface VisionCacheEntry { at: number; eventText: string; events: ExtractedEvent[] | null; settled: boolean; readKey: string }
+const buildVisionCache = new Map<string, VisionCacheEntry>();
+export function clearBuildVisionCache(): void { buildVisionCache.clear(); }
+function visionCacheKeyOf(companyId: string, urls: readonly string[]): string { return `${companyId}|${imagesHashOf(urls)}`; }
+function freshVisionCache(key: string): VisionCacheEntry | null {
+  const hit = buildVisionCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at >= BUILD_VISION_TTL_MS) { buildVisionCache.delete(key); return null; }
+  return hit;
+}
+
+export interface BuildReadImage { exists: boolean; buffer: Buffer | null; mediaType?: string | null; width: number | null; height: number | null }
+export interface BuildDeps {
+  enabled(companyId: string): boolean;
+  creditEnabled(companyId: string): Promise<boolean>;
+  checkCredit(companyId: string, cost: number): Promise<void>;
+  deductOutcome(opts: Parameters<typeof deductCreditOutcome>[0]): Promise<DeductOutcome>;
+  smtpConfigured(companyId: string): Promise<boolean>;
+  lookupMall(companyId: string, provider: BuildMallProvider, productNos: readonly string[]): Promise<BuildMallLookup>;
+  readImage(url: string, companyId: string): BuildReadImage;
+  extractFromImages(input: { images: Array<{ media_type: string; data: string }>; companyId: string; userId?: string }): Promise<{ eventText: string; events: ExtractedEvent[] | null }>;
+  brandKit(companyId: string): Promise<Record<string, unknown>>;
+  basicInfo(companyId: string): Promise<{ brand_name?: unknown; company_name?: unknown; industry_code?: unknown } | null>;
+  assembleDm(materials: EngineMaterials, opts: EngineOptions): Promise<EngineResult<OutreachLookStats>>;
+  produceEmail(input: Parameters<typeof produceOutreachBrandEmail>[0]): Promise<BrandEmailResult>;
+  createDm(companyId: string, userId: string, data: Record<string, unknown>): Promise<{ id: string }>;
+  deleteDm(id: string, companyId: string): Promise<boolean>;
+  createEmail(input: CreateCampaignInput): Promise<{ id: string }>;
+  deleteEmail(companyId: string, campaignId: string): Promise<boolean>;
+  renderEmail(sections: Section[], brandKit: Record<string, unknown>): { html: string; text: string };
+}
+
+/** 서빙 URL → 디스크 경로(파일명 문자 제한은 isCompanyImageUrl 이 이미 걸렀다) */
+function buildImageDiskPath(url: string, companyId: string): string | null {
+  const [dmPrefix, libPrefix] = companyImagePrefixes(companyId);
+  if (url.startsWith(dmPrefix)) return path.join(DM_IMAGE_DIR, companyId, url.slice(dmPrefix.length));
+  if (url.startsWith(libPrefix)) return path.join(INAPP_IMAGE_BASE, companyId, url.slice(libPrefix.length));
+  return null;
+}
+
+function readBuildImage(url: string, companyId: string): BuildReadImage {
+  const p = buildImageDiskPath(url, companyId);
+  if (!p || !fs.existsSync(p)) return { exists: false, buffer: null, width: null, height: null };
+  try {
+    const buffer = fs.readFileSync(p);
+    const size = readImageSize(buffer);
+    return { exists: true, buffer, mediaType: sniffImageMediaType(buffer), width: size?.width ?? null, height: size?.height ?? null };
+  } catch {
+    return { exists: false, buffer: null, width: null, height: null };
+  }
+}
+
+/**
+ * 몰 재조회(상품번호 기준 · 불변 3) — 카페24만(네이버는 단건 조회 API 가 없어 피커 값 + "가격 확인 못함") · 연동 상태 active 만 인정(LESSONS_BACKEND) ·
+ * 품절·미전시 = unavailable + 사유 · 응답에 없음 = 못 찾음. 호출부가 예외를 failed 로 접는다(502 금지).
+ */
+async function lookupMallProductsByNo(companyId: string, provider: BuildMallProvider, productNos: readonly string[]): Promise<BuildMallLookup> {
+  if (provider !== 'cafe24') return { failed: false, byCode: {} };
+  const integ = await getCafe24Integration(companyId);
+  if (!integ || integ.status !== 'active') return { failed: true, byCode: {} };
+  const creds = await getCafe24ByoCredentials(companyId, integ.mallId).catch(() => undefined);
+  const rawList = await fetchCafe24ProductsByNoRaw(integ, productNos, creds);
+  const byCode: BuildMallLookup['byCode'] = {};
+  for (const p of rawList) {
+    const no = p?.product_no != null ? String(p.product_no) : '';
+    if (!no) continue;
+    const avail = cafe24ProductAvailability(p);
+    if (avail !== 'ok') { byCode[no] = { status: 'unavailable', reason: avail === 'sold_out' ? '품절' : '판매 중지 또는 미전시' }; continue; }
+    const norm = normalizeCafe24Product(p, integ.mallId);
+    if (!norm) continue;
+    byCode[no] = { status: 'ok', name: norm.name, price: norm.price, salePrice: norm.salePrice, discountRate: norm.discountRate, imageUrl: norm.imageUrl, productUrl: norm.productUrl };
+  }
+  return { failed: false, byCode };
+}
+
+export function defaultBuildDeps(): BuildDeps {
+  return {
+    enabled: (companyId) => aiAutoBuildEnabled(companyId),
+    creditEnabled: async (companyId) => (await getCreditState(companyId)).creditEnabled,
+    checkCredit: (companyId, cost) => checkCredit(companyId, cost),
+    deductOutcome: (o) => deductCreditOutcome(o),
+    smtpConfigured: (companyId) => isSmtpConfigured(companyId),
+    lookupMall: (companyId, provider, nos) => lookupMallProductsByNo(companyId, provider, nos),
+    readImage: (url, companyId) => readBuildImage(url, companyId),
+    extractFromImages: (input) => extractEventsFromImages(input),
+    brandKit: async (companyId) => (await getCompanyBrandKit(companyId)) as unknown as Record<string, unknown>,
+    basicInfo: (companyId) => getBrandBasicInfo(companyId),
+    assembleDm: (m, opts) => assembleDmCampaign(m, opts, outreachEngineDeps()),
+    produceEmail: (input) => produceOutreachBrandEmail(input),
+    createDm: (companyId, userId, data) => createDm(companyId, userId, data as any),
+    deleteDm: (id, companyId) => deleteDm(id, companyId),
+    createEmail: (input) => createEmailCampaign(input),
+    deleteEmail: (companyId, campaignId) => deleteEmailCampaign(companyId, campaignId),
+    renderEmail: (sections, brandKit) => ({
+      html: renderEmailSections(sections, { brandKit: brandKit as any, design: null, publicBase: process.env.PUBLIC_BASE_URL }),
+      text: extractEmailText(sections),
+    }),
+  };
+}
+
+/**
+ * v1 견적(순수 · §5) — 채널 키 그대로(dm 5 · email 3) + 판독은 텍스트 0 이고 이미지가 있을 때만 1회(분리 표기 "이미지 글자 읽기") · 신규 키 0 · 크레딧제 미적용 = 0.
+ * 화면 금액의 단일 출처. 생성 라우트는 같은 함수로 expectedTotal 을 결박한다(다르면 409).
+ */
+export function quoteBuildMaterials(input: { channel: BuildChannel; textChars: number; imageCount: number; creditEnabled?: boolean; visionCached?: boolean }): QuickQuote {
+  const priced = input.creditEnabled !== false;
+  const costOf = (key: string) => (priced ? getCreditCost(key) : 0);
+  const parts: QuickQuote['parts'] = [];
+  // 판독 부품 = 텍스트 0 + 이미지 있음 + **캐시에 없음**(적중이면 판독도 차감도 없다 · 견적과 생성이 같은 판정)
+  if (input.textChars <= 0 && input.imageCount > 0 && !input.visionCached) parts.push({ key: 'event-image-extract', label: '이미지 글자 읽기', cost: costOf('event-image-extract') });
+  if (input.channel === 'email') parts.push({ key: 'email-ai-generate', label: '이메일 생성', cost: costOf('email-ai-generate') });
+  else parts.push({ key: 'dm-ai-generate', label: '모바일 DM 생성', cost: costOf('dm-ai-generate') });
+  return { total: parts.reduce((a, p) => a + p.cost, 0), parts };
+}
+
+export interface BuildMaterialsMeta {
+  images: number;
+  imagesUsed: number;
+  /** 실물 파일이 없어 뺀 장 수(§6-5 "이미지 일부 실패 = 그 장만 제외") */
+  imagesDropped: number;
+  textChars: number;
+  origin: 'user' | 'empty';
+  licensed: boolean;
+  reads: 0 | 1;
+  visionCached: boolean;
+  /** 카드가 된 상품 수 · 글줄로만 들어간 상품 수 */
+  products: number;
+  productsText: number;
+  mallUnverified: string[];
+  mallFailed: boolean;
+  excluded: Array<{ code: string; name: string; reason: string }>;
+  sections: number;
+  ctaCount: number;
+  eventCards: number;
+  /** 화면 썸네일 배지의 단일 출처(§6-3) */
+  imageRoles: BuildImageRoleJudgement[];
+  features: EngineFeaturesResult;
+  /** 견적 결박용 지문(uuid 불변 · 세 요소) */
+  materialsHash: string;
+  /** 과금용 지문(정규화 입력 전체 · 멱등키 뒷부분) */
+  billingHash: string;
+}
+
+export interface BuildGenerateResult {
+  channel: BuildChannel;
+  /** 결과 참조 = DM 초안 id 또는 이메일 campaignId(돈 단위 아님) */
+  draftId: string;
+  attemptToken: string;
+  idempotencyKey: string;
+  deductOutcome: DeductOutcome;
+  /** 이번 시도에서 판독을 실제로 했을 때만(캐시 적중·판독 없음 = null) */
+  readDeductOutcome: DeductOutcome | null;
+  quote: QuickQuote;
+  sections: Section[];
+  pages: unknown[];
+  layout_mode: string;
+  brand_kit: Record<string, unknown>;
+  look: OutreachLookStats;
+  benefitStripped: number;
+  heroFallback: boolean;
+  subject: string | null;
+  preheader: string | null;
+  name: string;
+  materialsMeta: BuildMaterialsMeta;
+}
+
+interface BuildPrepared {
+  m: BuildMaterials;
+  cards: BuildEventCard[];
+  images: BuildImage[];
+  roles: BuildImageRoleJudgement[];
+  gate: BuildGateResult;
+  imagesDropped: number;
+  files: Map<string, BuildReadImage>;
+}
+
+/**
+ * 공통 앞단(견적·생성이 같은 함수 = 화면 배지·버튼 잠금·금액의 단일 출처) — 개방(403) → 정규화(400) → 라우트 채널 고정(400) →
+ * 이미지 실물(없는 장 제외 · 치수는 빈 값만 실측) → 역할 판정 → 최소 재료 게이트(결과만 · 던지는 것은 호출부).
+ */
+function prepareBuildMaterials(rawMaterials: unknown, companyId: string, deps: BuildDeps, channel?: BuildChannel): BuildPrepared {
+  if (!deps.enabled(companyId)) throw new AiAutoBuildError(403, 'FEATURE_DISABLED', '이 기능은 아직 열리지 않았습니다.');
+  const norm = normalizeBuildMaterials(rawMaterials, companyId);
+  if (!norm.ok) throw new AiAutoBuildError(400, 'MATERIALS_INVALID', norm.error, { field: norm.field });
+  const m = norm.materials;
+  // 라우트가 고정한 채널(DM 라우트 = dm · 이메일 라우트 = email)과 재료의 채널이 다르면 거부 — 다른 채널의 행·차감을 만들지 않는다
+  if (channel && m.channel !== channel) throw new AiAutoBuildError(400, 'MATERIALS_INVALID', '요청한 채널과 재료의 채널이 다릅니다.', { field: 'channel' });
+  let imagesDropped = 0;
+  const files = new Map<string, BuildReadImage>();
+  const cards: BuildEventCard[] = m.eventCards.map((c) => ({
+    ...c,
+    images: c.images.flatMap((im) => {
+      const f = deps.readImage(im.url, companyId);
+      if (!f.exists) { imagesDropped++; return []; }
+      files.set(im.url, f);
+      return [{ url: im.url, width: im.width ?? f.width, height: im.height ?? f.height }];
+    }),
+  }));
+  const images = cards.flatMap((c) => c.images);
+  const roles = judgeImageRoles(images);
+  return { m, cards, images, roles, gate: checkMinimumMaterials(m, roles), imagesDropped, files };
+}
+
+/** 원장 조회 실패 = 503(§6-5 · "모르는 것을 미차감으로 접지 않는다") · 잔액 부족(InsufficientCreditError)은 그대로 */
+async function creditEnabledOrThrow(deps: BuildDeps, companyId: string): Promise<boolean> {
+  try {
+    return await deps.creditEnabled(companyId);
+  } catch (err: any) {
+    console.log(`[ai-auto-build] 크레딧 상태 조회 실패 company=${companyId} err=${err?.message}`);
+    throw new AiAutoBuildError(503, 'CREDIT_LOOKUP_UNAVAILABLE', '크레딧 잔액을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
+  }
+}
+
+export interface BuildQuoteResult {
+  channel: BuildChannel;
+  quote: QuickQuote;
+  gate: BuildGateResult;
+  imageRoles: BuildImageRoleJudgement[];
+  textChars: number;
+  images: number;
+  imagesDropped: number;
+  creditEnabled: boolean;
+  /** 이메일만 · DM 은 null */
+  smtpConfigured: boolean | null;
+  materialsHash: string;
+}
+
+/**
+ * v1 견적(§4-2 sticky 바 · §5 화면 금액의 단일 출처) — 생성과 같은 앞단(정규화 · 이미지 실물 · 역할 · 게이트)을 지나 견적만 낸다.
+ * 차감 · AI · 초안 0. 게이트 미달은 오류가 아니라 결과(버튼 잠금 사유) · 이메일이면 SMTP 상태를 함께(세그먼트 비활성 사유).
+ */
+export async function quoteFromBuildMaterials(
+  input: { companyId: string; materials: unknown; channel?: BuildChannel },
+  deps: BuildDeps = defaultBuildDeps(),
+): Promise<BuildQuoteResult> {
+  const companyId = String(input.companyId);
+  const { m, images, roles, gate, imagesDropped } = prepareBuildMaterials(input.materials, companyId, deps, input.channel);
+  const creditEnabled = await creditEnabledOrThrow(deps, companyId);
+  // 정산된 캐시만 판독 부품을 뺀다(미정산 = 판독비가 아직 남아 있다)
+  const visionCached = !!freshVisionCache(visionCacheKeyOf(companyId, images.map((im) => im.url)))?.settled;
+  const quote = quoteBuildMaterials({ channel: m.channel, textChars: m.textChars, imageCount: images.length, creditEnabled, visionCached });
+  const smtpConfigured = m.channel === 'email' ? await deps.smtpConfigured(companyId) : null;
+  return { channel: m.channel, quote, gate, imageRoles: roles, textChars: m.textChars, images: images.length, imagesDropped, creditEnabled, smtpConfigured, materialsHash: buildMaterialsHash(m, roles) };
+}
+
+/** 라우트 응답(편집기 착지 키 draft_id · campaign_id · 옛 응답 키 유지) — DM·이메일 라우트가 같은 매핑을 쓴다 */
+export function buildGenerateResponse(r: BuildGenerateResult): Record<string, unknown> {
+  return {
+    channel: r.channel,
+    draft_id: r.draftId,
+    campaign_id: r.channel === 'email' ? r.draftId : null,
+    attempt_token: r.attemptToken,
+    idempotency_key: r.idempotencyKey,
+    deduct_outcome: r.deductOutcome,
+    quote: r.quote,
+    sections: r.sections,
+    pages: r.pages,
+    layout_mode: r.layout_mode,
+    brand_kit: r.brand_kit,
+    spec: null,
+    scenario: null,
+    brief: null,
+    coverage: null,
+    look: r.look,
+    benefitStripped: r.benefitStripped,
+    heroFallback: r.heroFallback,
+    subjects: r.subject ? [r.subject] : [],
+    preheader: r.preheader,
+    name: r.name,
+    materials: r.materialsMeta,
+  };
+}
+
+/**
+ * v1 조립 — 모든 판정은 차감 앞(§2-10) · 돈 단위 = attemptToken(§2-9) · 실패 계약(§6-5).
+ *  순서: 개방 → 정규화 → 채널 고정 → 이미지 실물(없는 장 제외 · 치수 실측) → 최소 재료 게이트 → (이메일) SMTP → 몰 재조회 → 견적 결박(409) → checkCredit(402 · 원장 조회 실패 503)
+ *        → 판독(텍스트 0 · 캐시) → 조립(AI) → 초안 행 → 차감(deductCreditOutcome · duplicate 무료 · failed 는 행 유지 + [CREDIT][MISS]).
+ *  차감 호출 자체가 던지면(원장 이전 실패) 만든 행을 거둔다(고아 0). 그 밖의 오류는 던지고 라우트가 status 로 답한다.
+ */
+export async function generateFromBuildMaterials(
+  input: { companyId: string; userId: string | null | undefined; materials: unknown; industry?: string | null; channel?: BuildChannel },
+  deps: BuildDeps = defaultBuildDeps(),
+): Promise<BuildGenerateResult> {
+  const companyId = String(input.companyId);
+  const userId = input.userId ? String(input.userId) : '';
+  const { m, cards, images, roles, gate, imagesDropped, files } = prepareBuildMaterials(input.materials, companyId, deps, input.channel);
+  if (!gate.ok) throw new AiAutoBuildError(400, 'MATERIAL_THIN', '재료가 부족해요. 행사 내용 40자 이상 또는 첫 화면이 될 사진 1장을 넣어 주세요.', { missing: gate.missing });
+  if (m.channel === 'email' && !(await deps.smtpConfigured(companyId))) {
+    throw new AiAutoBuildError(400, 'SMTP_REQUIRED', '이메일 발신 설정이 먼저 필요해요. 설정 메뉴에서 발신 메일을 등록해 주세요.');
+  }
+
+  // 몰 재조회(상품번호) — 장애는 "가격 확인 못함"으로 접는다(생성 계속 · 502 금지)
+  const byProvider = new Map<BuildMallProvider, string[]>();
+  for (const p of m.products) {
+    const no = mallProductNoOf(p);
+    if (p.source !== 'mall' || !p.provider || !no) continue;
+    const list = byProvider.get(p.provider) || [];
+    if (!list.includes(no)) list.push(no);
+    byProvider.set(p.provider, list);
+  }
+  const lookups: Record<string, BuildMallLookup> = {};
+  for (const [provider, nos] of byProvider) {
+    try {
+      lookups[provider] = await deps.lookupMall(companyId, provider, nos);
+    } catch (err: any) {
+      console.log(`[ai-auto-build] 몰 재조회 실패(가격 확인 못함으로 계속) company=${companyId} provider=${provider} n=${nos.length} err=${err?.message}`);
+      lookups[provider] = { failed: true, byCode: {} };
+    }
+  }
+  const resolved = resolveBuildProducts(m.products, lookups);
+
+  // 견적 결박(표시 ≠ 차감 차단) → 잔액(402 는 InsufficientCreditError)
+  const creditEnabled = await creditEnabledOrThrow(deps, companyId);
+  // 판독 여부는 견적과 같은 판정(캐시 적중 = 판독 없음 · 견적에 판독 부품 없음). 견적 뒤 캐시가 만료됐으면 합계가 달라져 409 → 화면이 견적을 다시 받는다.
+  const imageUrls = images.map((im) => im.url);
+  const visionKey = visionCacheKeyOf(companyId, imageUrls);
+  const cachedVision = freshVisionCache(visionKey);
+  // 판독 부품(reads) = 텍스트 0 + 이미지 있음 + **정산된 캐시 없음**(미정산 캐시 = 재료는 재사용해도 판독비는 이번 초안에서 청구) · 견적과 같은 판정
+  const visionSettled = !!cachedVision?.settled;
+  const reads: 0 | 1 = m.textChars <= 0 && images.length > 0 && !visionSettled ? 1 : 0;
+  const quote = quoteBuildMaterials({ channel: m.channel, textChars: m.textChars, imageCount: images.length, creditEnabled, visionCached: visionSettled });
+  if (quote.total !== m.expectedTotal) throw new AiAutoBuildError(409, 'QUOTE_CHANGED', '견적이 바뀌었어요. 금액을 다시 확인하고 눌러 주세요.', { quote });
+  try {
+    await deps.checkCredit(companyId, quote.total);
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) throw err;
+    console.log(`[ai-auto-build] 잔액 확인 실패 company=${companyId} err=${err?.message}`);
+    throw new AiAutoBuildError(503, 'CREDIT_LOOKUP_UNAVAILABLE', '크레딧 잔액을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
+  }
+
+  // 판독(텍스트 0 + 이미지 + 캐시 없음) — **크레딧 묶음 안**에서 돌려 AI 호출의 자체 차감(3)을 끄고, 판독비는 초안이 생긴 뒤 시도 토큰 멱등키로 따로 차감한다
+  //   (★Codex 1R 0914 high 수용: 산출물 없는 판독비 0 · 같은 시도 재요청 재차감 0). 캐시 적중 = 재료만 재사용(판독·차감 0) · 판독본은 재료로만(면허 0).
+  let visionText = '';
+  let visionEvents: ExtractedEvent[] | null = null;
+  /** 이번 초안에서 판독비를 청구해야 하는가(방금 읽었거나 미정산 캐시를 썼다) · 키 = 처음 읽은 시도의 것 */
+  let readKeyToCharge: string | null = null;
+  if (cachedVision) {
+    visionText = cachedVision.eventText; visionEvents = cachedVision.events;
+    if (!cachedVision.settled) readKeyToCharge = cachedVision.readKey;
+  } else if (reads) {
+    const payload = images
+      .map((im) => files.get(im.url))
+      .filter((f): f is BuildReadImage => !!f && !!f.buffer)
+      .map((f) => ({ media_type: f.mediaType || 'image/jpeg', data: (f.buffer as Buffer).toString('base64') }));
+    const r = await runInCreditBundle(() => deps.extractFromImages({ images: payload, companyId, userId: userId || undefined }));
+    visionText = r.eventText; visionEvents = r.events;
+    readKeyToCharge = buildReadIdempotencyKey(companyId, m.attemptToken, imagesHashOf(imageUrls));
+    buildVisionCache.set(visionKey, { at: Date.now(), eventText: r.eventText, events: r.events, settled: false, readKey: readKeyToCharge });
+  }
+
+  // 엔진 재료 — 카드 → 같은 조각(materialsFromEventCards) · 면허 카드 종료일(연도 있는 표기만) → 카운트다운 재료 · 상품 = 카드(몰 이미지) + 글줄(면허)
+  const brandKit = await deps.brandKit(companyId);
+  const basic = await deps.basicInfo(companyId).catch(() => null);
+  const companyName = m.brandName || String(basic?.brand_name || '').trim() || String(basic?.company_name || '').trim() || '우리 브랜드';
+  const industry = input.industry || String(basic?.industry_code || '').trim() || null;
+  const fromCards = materialsFromEventCards(cards);
+  const eventCards: EngineEventCard[] = fromCards.eventCards.map((ec, i) => {
+    const c = cards[i];
+    if (!c || !c.licensed || !c.text) return ec;
+    const d = parseLicensedEndDate(c.text);
+    return d.end ? { ...ec, endDate: d.end } : ec;
+  });
+  const productText = resolved.textLines.join('\n');
+  const material = [fromCards.material, productText, materialTextFromEvents(visionEvents, visionText)].filter(Boolean).join('\n\n').slice(0, 6000)
+    || '(행사 텍스트 없음 · 올린 이미지 중심으로 구성)';
+  const licensedQuote = [fromCards.licensedQuote, ...resolved.textLines.map((l) => l.replace(/^- /, ''))].filter(Boolean).join(' · ');
+  const engineMaterials: EngineMaterials = {
+    companyName, industry, homepageUrl: fromCards.link || '', siteTitle: null, material, extraNotes: null,
+    products: resolved.cards, gallery: fromCards.gallery, logoUrl: null, posterUrl: null, posterSize: null, bannerUrl: null, bannerSize: null,
+    ctaLinks: fromCards.ctaLinks, legal: null, licensedQuote, proof: null, eventCards,
+  };
+  const materialsHash = buildMaterialsHash(m, roles);
+  const billingHash = buildBillingHash(m);
+  const idempotencyKey = buildIdempotencyKey(companyId, m.channel, m.attemptToken, billingHash);
+  const genKey = m.channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate';
+  const genCost = getCreditCost(genKey);
+
+  // 조립 → 초안 행 → 차감. 이메일 렌더는 행 앞(렌더 실패 = 행 0).
+  let draftId = '';
+  let sections: Section[] = [];
+  let pages: unknown[] = [];
+  let look: OutreachLookStats;
+  let benefitStripped = 0;
+  let heroFallback = false;
+  let features: EngineFeaturesResult;
+  let subject: string | null = null;
+  let preheader: string | null = null;
+  let name = '';
+  if (m.channel === 'dm') {
+    const r = await deps.assembleDm(engineMaterials, {
+      entry: 'customer', channel: 'DM', skeletonTypes: null, sectionOverride: null, presetSections: null, layoutMode: OUTREACH_DM_LAYOUT_MODE, features: m.features,
+    });
+    sections = r.sections; pages = r.pages; look = r.look; benefitStripped = r.benefitStripped; heroFallback = r.heroFallback; features = r.features;
+    name = `[AI 자동제작] ${companyName}`.slice(0, 200);
+    const dm = await deps.createDm(companyId, userId, {
+      title: name, sections, pages, layout_mode: OUTREACH_DM_LAYOUT_MODE, brand_kit: brandKit, ai_prompt: material.slice(0, 2000), approval_status: 'draft',
+    });
+    draftId = String(dm.id);
+  } else {
+    const r = await deps.produceEmail({
+      companyName, industry, homepageUrl: fromCards.link || '', siteTitle: null, material, extraNotes: null,
+      benefitLicensed: !!licensedQuote, licensedQuote, posterUrl: null, posterSize: null, bannerUrl: null, bannerSize: null,
+      media: {
+        gallery: fromCards.gallery.map((g) => ({ url: g.url, width: g.width || 0, height: g.height || 0, srcUrl: g.url } as any)),
+        products: resolved.cards as any,
+        collectedAt: new Date().toISOString(),
+        stats: { galleryCandidates: fromCards.gallery.length, galleryPassed: fromCards.gallery.length, productLinks: resolved.cards.length, productsFound: resolved.cards.length, productsPassed: resolved.cards.length },
+      },
+      mediaSelection: null, ctaLinks: fromCards.ctaLinks, legal: null, brandColor: null, proof: null, entry: 'customer', eventCards, features: m.features,
+    });
+    sections = r.sections; pages = []; look = r.look; benefitStripped = r.benefitStripped; features = r.features; subject = r.subject; preheader = r.preheader;
+    name = `AI 자동제작 · ${companyName}`.slice(0, 60);
+    const rendered = deps.renderEmail(sections, brandKit);
+    const campaign = await deps.createEmail({
+      companyId, createdBy: userId, name, subject: subject || name, htmlBody: rendered.html, textBody: rendered.text,
+      isAd: m.isAd === true, aiGenerated: true, sections,
+    });
+    draftId = String(campaign.id);
+  }
+
+  let deductOutcome: DeductOutcome;
+  try {
+    deductOutcome = await deps.deductOutcome({ companyId, cost: genCost, source: genKey, createdBy: userId || null, idempotencyKey });
+  } catch (err) {
+    // 원장 호출 자체가 던진 것 = 차감 이전 실패 → 만든 행을 거둔다(고아 0). 결말(failed)은 여기 오지 않는다(행 유지).
+    try {
+      if (m.channel === 'dm') await deps.deleteDm(draftId, companyId);
+      else await deps.deleteEmail(companyId, draftId);
+    } catch (cleanupErr: any) {
+      console.log(`[ai-auto-build] 초안 회수 실패 company=${companyId} draft=${draftId} err=${cleanupErr?.message}`);
+    }
+    throw err;
+  }
+  if (deductOutcome === 'failed') {
+    console.log(`[CREDIT][MISS] ai-auto-build company=${companyId} channel=${m.channel} key=${idempotencyKey} attemptToken=${m.attemptToken} draft=${draftId} cost=${genCost}`);
+  }
+  // 판독비 — 방금 읽었거나 미정산 캐시를 썼을 때 · 키 = 처음 읽은 시도의 것(멱등) · 성공·중복 = 캐시 정산 전이 · 생성비 차감 뒤 실패 = 행 유지(회수 0) · 던지면 failed 로 접고 [CREDIT][MISS]
+  let readDeductOutcome: DeductOutcome | null = null;
+  if (readKeyToCharge) {
+    const readCost = getCreditCost('event-image-extract');
+    try {
+      readDeductOutcome = await deps.deductOutcome({ companyId, cost: readCost, source: 'event-image-extract', createdBy: userId || null, idempotencyKey: readKeyToCharge });
+    } catch (err: any) {
+      console.log(`[ai-auto-build] 판독비 차감 호출 실패 company=${companyId} key=${readKeyToCharge} err=${err?.message}`);
+      readDeductOutcome = 'failed';
+    }
+    if (readDeductOutcome === 'failed') {
+      console.log(`[CREDIT][MISS] ai-auto-build-read company=${companyId} key=${readKeyToCharge} attemptToken=${m.attemptToken} draft=${draftId} cost=${readCost}`);
+    } else {
+      const entry = buildVisionCache.get(visionKey);
+      if (entry) entry.settled = true;
+    }
+  }
+
+  const imagesUsed = new Set<string>();
+  for (const s of sections) {
+    const p: any = (s as any).props || {};
+    if (typeof p.image_url === 'string' && p.image_url) imagesUsed.add(p.image_url);
+    if (Array.isArray(p.images)) for (const im of p.images) if (im?.url) imagesUsed.add(String(im.url));
+  }
+  return {
+    channel: m.channel,
+    draftId,
+    attemptToken: m.attemptToken,
+    idempotencyKey,
+    deductOutcome,
+    readDeductOutcome,
+    quote,
+    sections,
+    pages,
+    layout_mode: OUTREACH_DM_LAYOUT_MODE,
+    brand_kit: brandKit,
+    look,
+    benefitStripped,
+    heroFallback,
+    subject,
+    preheader,
+    name,
+    materialsMeta: {
+      images: images.length,
+      imagesUsed: images.filter((im) => imagesUsed.has(im.url)).length,
+      imagesDropped,
+      textChars: m.textChars,
+      origin: m.origin,
+      licensed: !!fromCards.licensedQuote,
+      reads,
+      visionCached: !!cachedVision,
+      products: resolved.cards.length,
+      productsText: resolved.textLines.length,
+      mallUnverified: resolved.mallUnverified,
+      mallFailed: resolved.mallFailed,
+      excluded: resolved.excluded,
+      sections: sections.length,
+      ctaCount: sections.filter((s) => String((s as any).type) === 'cta').length,
+      eventCards: cards.length,
+      imageRoles: roles,
+      features,
+      materialsHash,
+      billingHash,
+    },
   };
 }

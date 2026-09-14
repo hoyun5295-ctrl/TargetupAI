@@ -440,7 +440,7 @@ export async function cafe24ApiCall<T = unknown>(
 /** 상품 목록 raw — 스키마 실측용(매핑 전 raw 그대로). limit 1~100. */
 export async function fetchCafe24ProductsRaw(
   integration: Cafe24Integration,
-  opts: { limit?: number; offset?: number; productName?: string } = {},
+  opts: { limit?: number; offset?: number; productName?: string; productNo?: string } = {},
   creds?: ProviderOAuthCredentials,
 ): Promise<unknown> {
   return cafe24ApiCall<unknown>(
@@ -452,10 +452,27 @@ export async function fetchCafe24ProductsRaw(
         limit: Math.min(Math.max(opts.limit ?? 5, 1), 100),
         offset: Math.max(opts.offset ?? 0, 0),
         product_name: opts.productName,
+        // ★ 2026-09-14 T3 상품번호 목록(콤마) 검색 — ⚠ 미검증 파라미터(실측 = AI 자동제작 설계서 T0 ③ · 카페24 재인증 뒤). 실패는 호출부가 "가격 확인 못함"으로 접는다(502 금지).
+        product_no: opts.productNo,
       },
     },
     creds,
   );
+}
+
+/**
+ * ★ 2026-09-14 T3 상품번호 목록 → raw 상품 배열(AI 자동제작 몰 재조회 · 불변 3 "몰 값은 믿지 않고 다시 읽는다").
+ * 숫자 상품번호만 · 100개 상한 · 분류(품절·미전시)는 호출부가 cafe24ProductAvailability 로 한다(raw 그대로 = 응답 스키마 추측 0).
+ */
+export async function fetchCafe24ProductsByNoRaw(
+  integration: Cafe24Integration,
+  productNos: readonly string[],
+  creds?: ProviderOAuthCredentials,
+): Promise<any[]> {
+  const nos = Array.from(new Set(productNos.map((n) => String(n).trim()).filter((n) => /^\d+$/.test(n)))).slice(0, 100);
+  if (nos.length === 0) return [];
+  const raw = (await fetchCafe24ProductsRaw(integration, { limit: nos.length, productNo: nos.join(',') }, creds)) as { products?: any[] };
+  return Array.isArray(raw?.products) ? raw.products : [];
 }
 
 /** 상품 목록 → 정규화 MallProduct[] (판매·전시중 + 품절 아님만). DM 상품 피커 소스. */

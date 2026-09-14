@@ -1,400 +1,428 @@
-import { OUI_BACK, OUI_CARD, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SRC, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
 /**
- * QuickCampaignPage — 원클릭 캠페인 (2026-07-08 · ★ 2026-09-06 S5 재료 입구 인라인 · ★ v3 행사 카드 페이지 = 설계서 docs/2026-09-06-outreach-v3-brand-page-recomposition-design.md §10)
+ * QuickCampaignPage — AI 자동제작(재료만 넣으면 모바일 DM·이메일 완성본까지) ★ 2026-09-14 T5 승격 · 설계서 docs/2026-09-14-ai-auto-build-design.md §4 · §5 · §13 T4 응답 계약
  *
- * SUB_MODULE_CARDS "원클릭 캠페인" 타일(/quick-campaign)의 집.
- * ★ v3: 첫 화면 = 브랜드 줄(브랜드명 · 주색 · 로고 · 서버 브랜드 킷 그대로) → 행사 카드 목록(최대 3 · 카드 = 제목 · 내용 · 이미지 ≤3 · 링크 · "그대로 씁니다") → [행사 추가] → 하단 바(견적 1줄 + [제작] 1개).
- *   클릭 즉시: ① 카드 이미지 전부 업로드(read=0 · 판독 0) ② 내용이 빈 카드가 있으면 그 카드들의 대표 이미지만 묶어 판독 1회(3크레딧 고정) ③ 아웃리치 엔진(같은 표준 · 행사 카드 → 첫 화면·설명 카드·버튼) → 초안 DM ④ 시안 렌더.
- *   결과는 같은 페이지 본문 2열(쓴 재료 · 판정 줄 / 다크 액자 시안 · 폭 토글 375·600) · [DM 편집으로]는 같은 초안 id 로 연다. 크레딧은 서버 견적(costOverride) 그대로.
- * 옛 3채널 흐름(EventCampaignModal)은 아래 카드의 버튼으로 그대로 열린다(무접촉). 임시 보관 세트 재개(EventCampaignResumeBar)도 그대로.
+ * 1열(OUI_WRAP_NARROW) · 시각 무게 4:2:2:1 = ① 행사 카드(≤3 · 이미지는 고르는 즉시 업로드해 url 만 · 서버 판정 배지 · 드래그 정렬) ② 상품(연동몰 불러오기 + 붙여넣기) ③ 기능 칩 4 + "AI가 알아서"
+ * ④ 채널 세그먼트 [모바일 DM | 이메일](이메일 = 광고 여부 1행) · 하단 sticky 바 = 서버 견적 1줄 + [AI 자동제작] 1개 → CreditConfirmModal 1회 → 완성본 → 편집기 착지(DM /dm-builder?id= · 이메일 /email-campaigns?edit=).
+ * 돈 단위 = attemptToken(누름마다 uuid · 같은 누름의 재시도는 같은 값 = 원장 duplicate 무료) · 금액은 서버 견적(POST /materials/quote)만 · 생성 중 차단(입력 disabled · 이탈 확인) · 진행 문구는 실제 단계만(타이머 연출 0).
+ * 신규 ENV 미개방 회사 = 옛 화면(QuickCampaignLegacyPage · v0 그대로). native dialog 0 · 모델명 0 · 하드코딩 금액 0.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
-import { ArrowLeft, Sparkles, Wand2, Loader2, PencilLine, ImagePlus, RotateCcw, Lock, Smartphone, Monitor } from 'lucide-react';
-import EventCampaignModal from '../components/EventCampaignModal';
-import EventCampaignResumeBar from '../components/EventCampaignResumeBar';
-import EventCardsInput, { newEventCard, type EventCardValue } from '../components/EventCardsInput';
+import { ArrowLeft, Sparkles, Wand2, Loader2, Lock, Check, Smartphone, Mail, RotateCcw, AlertTriangle } from 'lucide-react';
+import { OUI_BACK, OUI_BADGE_NEW, OUI_CARD, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_PAGE_CENTER, OUI_SRC, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_NARROW } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
+import BuildCardsInput, { BUILD_CARD_IMAGES_MAX } from '../components/ai-build/BuildCardsInput';
+import FeatureChips from '../components/ai-build/FeatureChips';
+import ProductPickList, { AI_BUILD_PRODUCTS_MAX } from '../components/ai-build/ProductPickList';
+import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
+import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
+import QuickCampaignLegacyPage from './QuickCampaignLegacyPage';
+// 옛 3채널 세트(DM·이메일·인앱 한 번에)와 임시 보관 재개는 입구 정리 2차(§9)까지 그대로 열린다 — 조용한 보조 줄 하나
+import EventCampaignModal from '../components/EventCampaignModal';
+import EventCampaignResumeBar from '../components/EventCampaignResumeBar';
+import {
+  buildErrorMessage, buildMaterialsPayload, cardIsFilled, clearBuildDraft, featureAvailability, loadBuildDraft, newAttemptToken, newBuildCard,
+  saveBuildDraft, saveBuildResult,
+  type BuildCardValue, type BuildChannel, type BuildImageRole, type BuildImageValue, type BuildProductValue,
+} from '../utils/ai-build';
 
-interface Quote { enabled: boolean; plan_locked: boolean; total: number; parts: Array<{ key: string; label: string; cost: number }> }
-interface QuickResult {
-  draftId: string;
-  html: string | null;
-  cards: Array<{ title: string; images: Array<{ url: string }>; textChars: number; licensed: boolean; read: boolean }>;
-  meta: { images: number; imagesUsed: number; textChars: number; origin: string; licensed: boolean; products: number; sections: number; ctaCount: number; eventCards?: number };
-  benefitStripped: number;
-  heroFallback: boolean;
-  look: { treatments?: number; backgrounds?: number } | null;
+interface ServerQuote {
+  total: number;
+  parts: Array<{ key: string; label: string; cost: number }>;
+  gate: { ok: boolean; missing?: string[] };
+  imageRoles: Array<{ url: string; role: BuildImageRole }>;
+  creditEnabled: boolean;
+  smtpConfigured: boolean | null;
+  planLocked: boolean;
+  textChars: number;
+  images: number;
 }
-interface BrandLine { name: string; primary: string | null; logo: string | null }
-type Phase = 'idle' | 'materials' | 'read' | 'generate' | 'render';
-const PHASE_TEXT: Record<Phase, string> = {
-  idle: '',
-  materials: '재료를 저장하고 있습니다',
-  read: '비어 있는 행사 내용을 이미지에서 읽고 있습니다',
-  generate: '구성과 문구를 만들고 있습니다',
-  render: '시안을 그리고 있습니다',
-};
+type Phase = 'idle' | 'running' | 'done';
 
 const token = () => localStorage.getItem('token');
 const jsonHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` });
-// "내용이 있다" 판정은 카드 컴포넌트의 체크박스 활성 조건과 같은 하나(비어 있지 않음) — 짧은 문구를 빈 것으로 보고 판독으로 덮지 않는다(리뷰 #14)
-const hasCardText = (c: EventCardValue) => c.text.trim().length > 0;
-const cardIsFilled = (c: EventCardValue) => c.files.length > 0 || hasCardText(c) || c.title.trim().length > 0;
 
 export default function QuickCampaignPage() {
   const navigate = useNavigate();
   const toast = useToast();
-  const [open, setOpen] = useState(false);
-  const [resumeDraftId, setResumeDraftId] = useState<string | null>(null);
-  const [resumeRefresh, setResumeRefresh] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [entry] = useState(() => ({
+    channel: (searchParams.get('channel') === 'email' ? 'email' : searchParams.get('channel') === 'dm' ? 'dm' : null) as BuildChannel | null,
+    regen: searchParams.get('regen') === '1',
+  }));
 
-  // ★ v3 행사 카드 재료 입구
-  const [cards, setCards] = useState<EventCardValue[]>([newEventCard()]);
-  const [brand, setBrand] = useState<BrandLine | null>(null);
-  const [quote, setQuote] = useState<Quote | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [elapsed, setElapsed] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<QuickResult | null>(null);
-  const [previewWidth, setPreviewWidth] = useState<375 | 600>(375);
-  const inputCardRef = useRef<HTMLDivElement>(null);
-
-  const filled = cards.filter(cardIsFilled);
-  const imageCount = filled.reduce((a, c) => a + c.files.length, 0);
-  const anyText = filled.some(hasCardText);
-  // 판독 = 이미지는 있는데 내용이 빈 카드가 하나라도 있으면 1회(대표 이미지 묶음 · 곱셈 0)
-  const readsNeeded = filled.some((c) => c.files.length > 0 && !hasCardText(c)) ? 1 : 0;
-  const canRun = filled.some((c) => c.files.length > 0 || hasCardText(c));
-  const busy = phase !== 'idle';
-
-  // 브랜드 줄 — 서버 브랜드 킷 그대로(표시만 · 편집은 DM 빌더 브랜드 킷)
+  // 노출 스위치(신규 ENV) — 서버가 정한다. 미개방 = 옛 화면 그대로.
+  const [flag, setFlag] = useState<'loading' | 'on' | 'off'>('loading');
   useEffect(() => {
     const ctrl = new AbortController();
     (async () => {
       try {
-        const r = await fetch('/api/dm/brand-kit', { headers: jsonHeaders(), signal: ctrl.signal });
+        const r = await fetch('/api/event-campaigns/materials/quote?images=0&has_text=1', { headers: jsonHeaders(), signal: ctrl.signal });
         const d = await r.json().catch(() => ({}));
-        if (!r.ok) return;
-        const kit: any = d?.brand_kit || {};
-        setBrand({ name: String(kit.brand_name || kit.store_name || ''), primary: typeof kit.primary_color === 'string' && /^#[0-9a-f]{6}$/i.test(kit.primary_color) ? kit.primary_color : null, logo: typeof kit.logo_url === 'string' && kit.logo_url ? kit.logo_url : null });
-      } catch { /* 브랜드 줄은 표시만 · 실패 = 줄 생략 */ }
+        setFlag(r.ok && d?.auto_build_enabled === true ? 'on' : 'off');
+      } catch { setFlag('off'); }
     })();
     return () => ctrl.abort();
   }, []);
 
-  // 견적 — 입력이 바뀔 때마다(서버 견적 · 화면은 표시만)
+  // 재료 상태(로컬 초안 복구 · 이미지는 url 만)
+  const [restored] = useState(() => loadBuildDraft());
+  const [channel, setChannel] = useState<BuildChannel>(entry.channel || restored?.channel || 'dm');
+  const [isAd, setIsAd] = useState<boolean>(restored ? restored.isAd : true);
+  const [cards, setCards] = useState<BuildCardValue[]>(restored?.cards?.length ? restored.cards : [newBuildCard()]);
+  const [products, setProducts] = useState<BuildProductValue[]>(restored?.products || []);
+  const [features, setFeatures] = useState<string[] | null>(restored?.features ?? null);
+  const [mallAvailable, setMallAvailable] = useState(false);
+  const [mallOpen, setMallOpen] = useState(false);
+  const [libraryFor, setLibraryFor] = useState<string | null>(null);
+  const [quote, setQuote] = useState<ServerQuote | null>(null);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [elapsed, setElapsed] = useState(0);
+  const [error, setError] = useState<{ message: string; code: string } | null>(null);
+  const [regenPending, setRegenPending] = useState(entry.regen && !!restored);
+  const attemptRef = useRef<string | null>(null);
+  const skipPersist = useRef(true);
+  const [setOpen, setSetOpen] = useState(false);
+  const [resumeDraftId, setResumeDraftId] = useState<string | null>(null);
+  const [resumeRefresh, setResumeRefresh] = useState(0);
+
+  useEffect(() => { if (entry.channel || entry.regen) setSearchParams({}, { replace: true }); }, [entry.channel, entry.regen, setSearchParams]);
+
+  const filledCards = useMemo(() => cards.filter(cardIsFilled), [cards]);
+  const imageCount = useMemo(() => filledCards.reduce((a, c) => a + c.images.length, 0), [filledCards]);
+  // 판독 여부는 서버 견적 부품이 정한다(캐시 적중이면 부품 자체가 빠진다 · 화면이 따로 셈하지 않는다)
+  const reads = quote?.parts.some((p) => p.key === 'event-image-extract') ? 1 : 0;
+  const availability = useMemo(() => featureAvailability({ cards: filledCards, products }, channel), [filledCards, products, channel]);
+  const busy = phase !== 'idle';
+  const planLocked = !!quote?.planLocked;
+  const smtpMissing = channel === 'email' && quote?.smtpConfigured === false;
+  const canRun = !!quote && quote.gate.ok && !planLocked && !smtpMissing && !busy;
+
+  // 연동 몰 유무(피커 탭 구성과 같은 API)
   useEffect(() => {
+    if (flag !== 'on') return;
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        const r = await fetch('/api/mall-products/providers', { headers: jsonHeaders(), signal: ctrl.signal });
+        const d = await r.json().catch(() => ({}));
+        setMallAvailable(r.ok && Array.isArray(d?.providers) && d.providers.length > 0);
+      } catch { setMallAvailable(false); }
+    })();
+    return () => ctrl.abort();
+  }, [flag]);
+
+  // 로컬 초안 보관(새로고침 복구 · 첫 렌더는 건너뛴다)
+  useEffect(() => {
+    if (flag !== 'on') return;
+    if (skipPersist.current) { skipPersist.current = false; return; }
+    // 재료가 바뀌면 다른 시도다 — 같은 토큰으로 다른 재료를 무료(duplicate)로 만들지 않는다. [다시 시도]는 재료가 그대로일 때만 같은 토큰.
+    if (!busy) attemptRef.current = null;
+    const t = setTimeout(() => saveBuildDraft({ channel, isAd, cards, products, features }), 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flag, channel, isAd, cards, products, features]);
+
+  // 서버 견적(단일 출처) — 재료가 바뀔 때마다 · 게이트·역할 배지·SMTP·요금제 잠금까지 한 번에
+  const [quoteSeq, setQuoteSeq] = useState(0);
+  useEffect(() => {
+    if (flag !== 'on') return;
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/event-campaigns/materials/quote?images=${imageCount}&has_text=${anyText ? 1 : 0}&reads=${readsNeeded}`, { headers: jsonHeaders(), signal: ctrl.signal });
-        const d = await r.json();
-        if (r.ok && d?.success) setQuote({ enabled: d.enabled !== false, plan_locked: !!d.plan_locked, total: Number(d.total) || 0, parts: Array.isArray(d.parts) ? d.parts : [] });
-      } catch { /* 견적 실패 = 버튼에 금액을 표시하지 않는다(차감은 서버가 정한다) */ }
-    }, 250);
+        const materials = buildMaterialsPayload({ channel, isAd, cards, products, features }, attemptRef.current || newAttemptToken(), 0);
+        const r = await fetch('/api/event-campaigns/materials/quote', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ materials }), signal: ctrl.signal });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d?.success === false) {
+          if (d?.code === 'FEATURE_DISABLED') { setFlag('off'); return; }
+          setQuote(null);
+          setQuoteError(buildErrorMessage(d?.code, d?.error, '견적을 계산하지 못했어요.'));
+          return;
+        }
+        setQuoteError(null);
+        setQuote({
+          total: Number(d.total) || 0,
+          parts: Array.isArray(d.parts) ? d.parts : [],
+          gate: d.gate && typeof d.gate === 'object' ? { ok: d.gate.ok === true, missing: Array.isArray(d.gate.missing) ? d.gate.missing : [] } : { ok: false, missing: [] },
+          imageRoles: Array.isArray(d.image_roles) ? d.image_roles : [],
+          creditEnabled: d.credit_enabled !== false,
+          smtpConfigured: typeof d.smtp_configured === 'boolean' ? d.smtp_configured : null,
+          planLocked: !!d.plan_locked,
+          textChars: Number(d.text_chars) || 0,
+          images: Number(d.images) || 0,
+        });
+      } catch { /* 취소·네트워크 = 이전 견적 유지 */ }
+    }, 350);
     return () => { clearTimeout(t); ctrl.abort(); };
-  }, [imageCount, anyText, readsNeeded]);
+  }, [flag, channel, isAd, cards, products, features, quoteSeq]);
 
-  // 로딩 3층 — 경과 초(3초 스피너 · 이후 단계 텍스트 · 15초 넘으면 안심 문구)
+  // 서버 판정 배지(image_roles) → 카드 썸네일(읽기 전용)
+  const cardsWithRoles = useMemo(() => {
+    const roleOf = new Map<string, BuildImageRole>((quote?.imageRoles || []).map((r) => [r.url, r.role]));
+    if (roleOf.size === 0) return cards;
+    return cards.map((c) => ({ ...c, images: c.images.map((im) => ({ ...im, role: roleOf.get(im.url) })) }));
+  }, [cards, quote?.imageRoles]);
+
+  // 생성 중 = 경과 초(15초 넘으면 보조 문구 1줄) + 이탈 확인
   useEffect(() => {
     if (!busy) { setElapsed(0); return; }
     const t = setInterval(() => setElapsed((v) => v + 1), 1000);
-    return () => clearInterval(t);
+    const onLeave = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onLeave);
+    return () => { clearInterval(t); window.removeEventListener('beforeunload', onLeave); };
   }, [busy]);
+
+  const upload = useCallback(async (files: File[]): Promise<BuildImageValue[]> => {
+    const fd = new FormData();
+    files.forEach((f, i) => fd.append('images', f, f.name || `image_${i + 1}`));
+    fd.append('read', '0');
+    const r = await fetch('/api/event-campaigns/materials', { method: 'POST', headers: { Authorization: `Bearer ${token()}` }, body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d?.success === false) throw new Error(String(d?.error || '이미지를 올리지 못했습니다.'));
+    return (Array.isArray(d.images) ? d.images : []).map((im: any) => ({ url: String(im.url), width: im.width ?? null, height: im.height ?? null }));
+  }, []);
+
+  const addLibraryImages = (assets: PickedAsset[]) => {
+    if (!libraryFor) return;
+    setCards((cur) => cur.map((c) => {
+      if (c.id !== libraryFor) return c;
+      const room = BUILD_CARD_IMAGES_MAX - c.images.length;
+      const add = assets.filter((a) => a.url && !c.images.some((im) => im.url === a.url)).slice(0, Math.max(0, room)).map((a) => ({ url: a.url, width: null, height: null }));
+      if (assets.length > add.length) toast.warning(`카드당 최대 ${BUILD_CARD_IMAGES_MAX}장이라 ${assets.length - add.length}장은 담지 않았어요.`);
+      return { ...c, images: [...c.images, ...add] };
+    }));
+    setLibraryFor(null);
+  };
+
+  const addMallProducts = (picked: PickedMallProduct[]) => {
+    setProducts((cur) => {
+      const keys = new Set(cur.map((p) => p.key));
+      const next = cur.slice();
+      for (const p of picked) {
+        const key = `${p.provider}:${p.code}`;
+        if (keys.has(key)) continue;
+        keys.add(key);
+        next.push({ key, source: 'mall', provider: p.provider, code: p.code, name: p.name, price: p.price || null, salePrice: p.salePrice || null, discountRate: p.discountRate || null, url: p.productUrl, imageUrl: p.imageUrl });
+        if (next.length >= AI_BUILD_PRODUCTS_MAX) break;
+      }
+      return next;
+    });
+  };
 
   const run = useCallback(async () => {
     setConfirmOpen(false);
+    if (!quote) return;
+    const attempt = attemptRef.current || newAttemptToken();
+    attemptRef.current = attempt;
+    setPhase('running');
     setError(null);
-    setResult(null);
     try {
-      const use = cards.filter(cardIsFilled);
-      // 1) 카드 이미지 업로드(read=0 · 판독 0) — **카드마다 요청 1개**(서버가 형식 판별로 한 장을 빼도 다른 카드로 밀리지 않는다 · 리뷰 #4)
-      setPhase('materials');
-      const cardImages: Array<Array<{ url: string; width?: number | null; height?: number | null }>> = [];
-      let skipped = 0;
-      for (const [ci, c] of use.entries()) {
-        if (c.files.length === 0) { cardImages.push([]); continue; }
-        const fd = new FormData();
-        c.files.forEach((f, i) => fd.append('images', f, f.name || `card${ci + 1}_${i + 1}`));
-        fd.append('read', '0');
-        const mr = await fetch('/api/event-campaigns/materials', { method: 'POST', headers: { Authorization: `Bearer ${token()}` }, body: fd });
-        const md = await mr.json().catch(() => ({}));
-        if (!mr.ok || md?.success === false) throw new Error(String(md?.error || '재료를 저장하지 못했습니다.'));
-        const imgs = Array.isArray(md.images) ? md.images : [];
-        if (imgs.length < c.files.length) skipped += c.files.length - imgs.length;
-        cardImages.push(imgs);
+      const materials = buildMaterialsPayload({ channel, isAd, cards, products, features }, attempt, quote.total);
+      const url = channel === 'dm' ? '/api/dm/ai/one-shot-generate' : '/api/email/ai/generate-sections';
+      const r = await fetch(url, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ materials }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d?.success === false) {
+        const code = String(d?.code || '');
+        if (code === 'QUOTE_CHANGED') setQuoteSeq((v) => v + 1);
+        throw Object.assign(new Error(buildErrorMessage(code, d?.error, '완성본을 만들지 못했어요. 잠시 후 다시 시도해 주세요.')), { code });
       }
-      if (skipped > 0) toast.error(`${skipped}장은 이미지 형식을 확인하지 못해 제외했습니다.`);
-
-      // 2) 내용이 빈 카드의 대표 이미지만 묶어 판독 1회(3크레딧 고정) — 읽은 글은 첫 빈 카드의 내용으로(면허 아님 · 확인 뒤 다시 만들면 면허)
-      const texts = use.map((c) => c.text.trim());
-      const readIdx = use.map((c, i) => (cardImages[i].length > 0 && !hasCardText(c) ? i : -1)).filter((i) => i >= 0);
-      let readText = '';
-      if (readIdx.length) {
-        setPhase('read');
-        const fd = new FormData();
-        readIdx.forEach((i) => { const f = use[i].files[0]; if (f) fd.append('images', f, f.name || `card${i + 1}_1`); });
-        const rr = await fetch('/api/event-campaigns/materials', { method: 'POST', headers: { Authorization: `Bearer ${token()}` }, body: fd });
-        const rd = await rr.json().catch(() => ({}));
-        if (rd?.code === 'INSUFFICIENT_CREDIT') throw new Error('크레딧이 부족합니다. 충전 후 이용해주세요.');
-        if (!rr.ok || rd?.success === false) throw new Error(String(rd?.error || '이미지에서 내용을 읽지 못했습니다.'));
-        readText = String(rd.event_text || '');
-        if (readText) texts[readIdx[0]] = readText;
-      }
-
-      // 3) 엔진 조립 → 초안 DM(행사 카드 ≤3 · 카드당 이미지 ≤3 · 면허 = 체크한 카드만)
-      setPhase('generate');
-      const eventCards = use.map((c, i) => ({
-        id: c.id, title: c.title.trim(), text: texts[i], licensed: c.licensed && hasCardText(c), link: c.link.trim() || null,
-        images: cardImages[i].map((im) => ({ url: im.url, width: im.width ?? null, height: im.height ?? null })),
-      }));
-      const firstLink = use.find((c) => c.link.trim())?.link.trim() || null;
-      const gr = await fetch('/api/dm/ai/one-shot-generate', {
-        method: 'POST', headers: jsonHeaders(),
-        body: JSON.stringify({ materials: { eventCards, images: [], event_text: '', extracted: false, events: null, link: firstLink } }),
-      });
-      const gd = await gr.json().catch(() => ({}));
-      if (gd?.code === 'INSUFFICIENT_CREDIT') throw new Error('크레딧이 부족합니다. 충전 후 이용해주세요.');
-      if (!gr.ok || gd?.success === false || !gd?.data?.draft_id) throw new Error(String(gd?.error || '시안을 만들지 못했습니다.'));
-      const data = gd.data;
-
-      // 판독본은 카드 입력칸에 채워 보여준다(확인·수정하고 다시 만들면 면허로 승격)
-      if (readText) setCards((cur) => cur.map((c) => (c.id === use[readIdx[0]].id ? { ...c, text: readText } : c)));
-
-      // 4) 시안 렌더(샘플 고객 기준 · 같은 초안 id)
-      setPhase('render');
-      let html: string | null = null;
-      try {
-        const rr = await fetch(`/api/dm/${data.draft_id}/render-sample`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({}) });
-        const rd = await rr.json().catch(() => ({}));
-        if (rr.ok && rd?.html) html = String(rd.html);
-      } catch { /* 렌더 실패 = 판정 줄만 · 편집으로는 열린다 */ }
-
-      setResult({
-        draftId: String(data.draft_id), html,
-        cards: use.map((c, i) => ({ title: c.title.trim() || `행사 ${i + 1}`, images: cardImages[i], textChars: texts[i].length, licensed: c.licensed && hasCardText(c), read: readIdx.includes(i) })),
-        meta: data.materials || { images: imageCount, imagesUsed: 0, textChars: texts.join('').length, origin: readText ? 'vision' : 'user', licensed: use.some((c) => c.licensed), products: 0, sections: Array.isArray(data.sections) ? data.sections.length : 0, ctaCount: 0, eventCards: use.length },
-        benefitStripped: Number(data.benefitStripped) || 0,
-        heroFallback: data.heroFallback === true,
-        look: data.look || null,
-      });
-      toast.success('시안이 만들어졌습니다. 아래에서 확인하세요.');
-      setResumeRefresh((v) => v + 1);
+      const data = d?.data || {};
+      const draftId = String(data.draft_id || '');
+      if (!draftId) throw new Error('완성본은 만들었지만 초안을 찾지 못했어요. 목록에서 확인해 주세요.');
+      saveBuildResult({ channel, draftId, materials: data.materials || {}, quoteTotal: quote.total, heroFallback: data.heroFallback === true, benefitStripped: Number(data.benefitStripped) || 0, createdAt: Date.now() });
+      attemptRef.current = null;
+      setPhase('done');
+      toast.success(channel === 'dm' ? '모바일 DM 완성본을 만들었어요. 편집기에서 이어서 다듬어 주세요.' : '이메일 완성본을 만들었어요. 편집기에서 이어서 다듬어 주세요.');
+      navigate(channel === 'dm' ? `/dm-builder?id=${encodeURIComponent(draftId)}` : `/email-campaigns?edit=${encodeURIComponent(draftId)}`);
     } catch (e: any) {
-      setError(e?.message || '시안을 만들지 못했습니다. 잠시 후 다시 시도해주세요.');
-    } finally {
+      setError({ message: e?.message || '완성본을 만들지 못했어요. 잠시 후 다시 시도해 주세요.', code: String(e?.code || '') });
       setPhase('idle');
     }
-  }, [cards, imageCount, toast]);
+  }, [quote, channel, isAd, cards, products, features, navigate, toast]);
 
-  const startNew = () => { setResumeDraftId(null); setOpen(true); };
-  const backToInput = () => { inputCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-  const resetAll = () => { setResult(null); setError(null); setCards([newEventCard()]); backToInput(); };
+  // 편집기 [다시 만들기] → 같은 재료 · 새 시도 토큰 · 확인은 편집기의 ConfirmModal 이 이미 받았다(1회)
+  useEffect(() => {
+    if (!regenPending || !quote || busy) return;
+    if (!quote.gate.ok || planLocked || smtpMissing) { setRegenPending(false); return; }
+    setRegenPending(false);
+    attemptRef.current = newAttemptToken();
+    void run();
+  }, [regenPending, quote, busy, planLocked, smtpMissing, run]);
 
-  const enabled = quote ? quote.enabled : true;
-  const planLocked = !!quote?.plan_locked;
-  const verdicts = result ? [
-    { label: '행사 카드', value: `${Number(result.meta.eventCards ?? result.cards.length)}건 반영`, ok: Number(result.meta.eventCards ?? result.cards.length) > 0 },
-    { label: '올린 이미지', value: `${result.meta.imagesUsed}/${result.meta.images}장 배치`, ok: result.meta.images === 0 || result.meta.imagesUsed > 0 },
-    { label: '구획', value: `${result.meta.sections}개`, ok: result.meta.sections >= 9 && result.meta.sections <= 13 },
-    { label: '버튼', value: `${result.meta.ctaCount}개`, ok: result.meta.ctaCount >= 2 },
-    { label: '혜택 수치', value: result.meta.licensed ? '체크한 문구 그대로 반영' : (result.benefitStripped > 0 ? `${result.benefitStripped}곳 비움(그대로 쓰려면 카드에서 체크)` : '해당 없음'), ok: result.meta.licensed || result.benefitStripped === 0 },
-    { label: '헤드라인', value: result.heroFallback ? '브랜드명으로 대체(행사 제목을 쓰고 다시 만들면 나아집니다)' : '행사 제목 반영', ok: !result.heroFallback },
-    { label: '구도', value: `${(Number(result.look?.treatments) || 0) + (Number(result.look?.backgrounds) || 0)}곳 배정`, ok: (Number(result.look?.treatments) || 0) + (Number(result.look?.backgrounds) || 0) > 0 },
-  ] : [];
+  const resetAll = () => {
+    clearBuildDraft();
+    attemptRef.current = null;
+    setCards([newBuildCard()]); setProducts([]); setFeatures(null); setError(null);
+  };
+
+  if (flag === 'off') return <QuickCampaignLegacyPage />;
+  if (flag === 'loading') {
+    return <div className={OUI_PAGE_CENTER}><Loader2 className="w-6 h-6 animate-spin text-violet-300" /></div>;
+  }
+
+  const missing = new Set(quote?.gate.missing || []);
+  const gateText = !quote ? null
+    : quote.gate.ok ? null
+      : missing.has('text') && missing.has('hero') ? '행사 내용 40자 이상 또는 첫 화면이 될 사진 1장이 필요해요'
+        : missing.has('hero') ? '첫 화면이 될 사진 1장이 필요해요(로고·세로형은 첫 화면이 되지 않아요)' : '행사 내용을 40자 이상 적어 주세요';
+  const readPart = quote?.parts.find((p) => p.key === 'event-image-extract') || null;
+  const genPart = quote?.parts.find((p) => p.key !== 'event-image-extract') || null;
+  const progressRows: Array<{ label: string; state: 'done' | 'now' | 'todo' }> = [
+    { label: '재료 확인', state: 'done' },
+    ...(reads ? [{ label: '이미지 글자 읽기', state: 'now' as const }] : []),
+    { label: '구성과 문구 만들기', state: reads ? 'todo' : 'now' },
+    { label: channel === 'dm' ? '초안 저장 · 편집기 열기' : '초안 저장 · 편집기 열기', state: phase === 'done' ? 'done' : 'todo' },
+  ];
 
   return (
     <div className={OUI_PAGE}>
       <OperatorAura />
-      {/* 헤더 (sticky) */}
       <div className={OUI_HEADER}>
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
-          <button
-            onClick={() => goBackOr(navigate, '/ai-operator')}
-            className={OUI_BACK}
-            aria-label="AI Operator로 돌아가기"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-amber-400 to-fuchsia-500`}>
-            <Wand2 className="w-5 h-5 text-white" />
+        <div className={`${OUI_WRAP_NARROW} py-3 md:py-4 flex items-center gap-3`}>
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="돌아가기"><ArrowLeft className="w-5 h-5" /></button>
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-amber-400 to-fuchsia-500`}><Wand2 className="w-5 h-5 text-white" /></div>
+          <div className="min-w-0">
+            <h1 className={`${OUI_TITLE} flex items-center gap-2`}>AI 자동제작 <span className={OUI_BADGE_NEW}>NEW</span></h1>
+            <p className={OUI_SUBTITLE}>재료만 넣으면 완성본까지. 버튼 하나로 편집기에 열립니다.</p>
           </div>
+          <div className="ml-auto inline-flex rounded-xl border border-white/10 bg-white/5 p-0.5 shrink-0" role="tablist" aria-label="채널">
+            {([['dm', '모바일 DM', Smartphone], ['email', '이메일', Mail]] as const).map(([key, label, Icon]) => {
+              const on = channel === key;
+              const emailBlocked = key === 'email' && quote?.smtpConfigured === false && channel !== 'email';
+              return (
+                <button key={key} type="button" role="tab" aria-selected={on} disabled={busy}
+                  onClick={() => setChannel(key)}
+                  title={emailBlocked ? '이메일 발신 설정이 먼저 필요해요' : undefined}
+                  className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold transition-colors disabled:opacity-50 ${on ? 'bg-violet-600 text-white' : 'text-white/60 hover:text-white hover:bg-white/10'} ${emailBlocked ? 'opacity-50' : ''}`}>
+                  <Icon className="w-3.5 h-3.5" /><span className="hidden sm:inline">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className={`${OUI_WRAP_NARROW} py-6 md:py-8 space-y-4 pb-28`}>
+        {planLocked && (
+          <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 px-4 py-3 text-[12px] text-amber-100 inline-flex items-center gap-2"><Lock className="w-4 h-4" /> {channel === 'dm' ? '모바일 DM 요금제에서 열립니다.' : '이메일 캠페인은 유료 요금제에서 열립니다.'}</div>
+        )}
+        {smtpMissing && (
+          <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 px-4 py-3 text-[12px] text-amber-100 flex items-center gap-2 flex-wrap">
+            <AlertTriangle className="w-4 h-4 shrink-0" /> 이메일 발신 설정이 먼저 필요해요.
+            <button type="button" onClick={() => navigate('/email-campaigns')} className="underline underline-offset-2 hover:text-white">발신 설정으로</button>
+          </div>
+        )}
+
+        {busy && (
+          <div className={`${OUI_CARD} p-5 space-y-3 border-violet-400/30`} aria-live="polite">
+            <div className="text-sm font-bold text-white flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin text-violet-300" /> 완성본을 만들고 있어요</div>
+            <ul className="space-y-1.5">
+              {progressRows.map((row) => (
+                <li key={row.label} className="flex items-center gap-2 text-[13px]">
+                  {row.state === 'done' ? <Check className="w-4 h-4 text-emerald-400" /> : row.state === 'now' ? <Loader2 className="w-4 h-4 animate-spin text-violet-300" /> : <span className="w-4 h-4 inline-flex items-center justify-center"><span className="w-1.5 h-1.5 rounded-full bg-white/25" /></span>}
+                  <span className={row.state === 'todo' ? 'text-white/40' : 'text-white/85'}>{row.label}</span>
+                </li>
+              ))}
+            </ul>
+            {elapsed >= 15 && <p className="text-[12px] text-white/50">보통 20~40초 걸려요. 창을 닫지 말고 잠시만 기다려 주세요.</p>}
+          </div>
+        )}
+
+        {/* ① 행사 카드 */}
+        <section className={`${OUI_CARD} p-5 md:p-6 space-y-4`}>
           <div>
-            <h1 className={OUI_TITLE}>원클릭 캠페인</h1>
-            <p className={OUI_SUBTITLE}>행사를 카드로 올려 두고 [제작] 하나로 모바일 DM 시안을 받습니다</p>
+            <div className="text-sm font-bold text-white flex items-center gap-2"><Sparkles className="w-4 h-4 text-fuchsia-300" /> 행사 재료</div>
+            <p className="text-[12px] text-white/50 mt-1">행사마다 카드 하나. 첫 카드의 첫 사진이 첫 화면이 되고, 다음 카드는 설명 카드와 버튼으로 이어져요. 필수는 하나: 행사 내용 또는 사진.</p>
           </div>
+          <BuildCardsInput value={cardsWithRoles} onChange={setCards} disabled={busy || planLocked} onUpload={upload} onOpenLibrary={(id) => setLibraryFor(id)} onReject={(m) => toast.warning(m)} />
+          <p className="text-[11px] text-white/40">쓸 사진이 없으면 <button type="button" onClick={() => navigate('/image-studio')} className="underline underline-offset-2 hover:text-white/80">이미지 스튜디오에서 만들기</button></p>
+        </section>
+
+        {/* ② 상품 */}
+        <section className={`${OUI_CARD} p-5 md:p-6 space-y-3`}>
+          <div>
+            <div className="text-sm font-bold text-white">상품</div>
+            <p className="text-[12px] text-white/50 mt-1">몰에서 불러온 상품은 사진·가격·바로가기 버튼이 있는 카드가 되고, 직접 적은 상품은 글로 실려요. 가격은 만들 때 몰에서 다시 확인해요.</p>
+          </div>
+          <ProductPickList value={products} onChange={setProducts} mallAvailable={mallAvailable} onOpenMall={() => setMallOpen(true)} disabled={busy || planLocked} onNotice={(m) => toast.warning(m)} />
+        </section>
+
+        {/* ③ 기능 칩 */}
+        <section className={`${OUI_CARD} p-5 md:p-6 space-y-3`}>
+          <div>
+            <div className="text-sm font-bold text-white">넣고 싶은 기능</div>
+            <p className="text-[12px] text-white/50 mt-1">고른 것은 꼭 넣고, 고르지 않은 것은 빼요. 재료가 없는 기능은 켜지지 않아요.</p>
+          </div>
+          <FeatureChips value={features} onChange={setFeatures} availability={availability} channel={channel} disabled={busy || planLocked} />
+        </section>
+
+        {/* ④ 채널 부가 1행(이메일만) */}
+        {channel === 'email' && (
+          <section className={`${OUI_CARD} px-5 py-3 md:px-6`}>
+            <label className="inline-flex items-center gap-2 text-[12px] text-white/75 cursor-pointer">
+              <input type="checkbox" className="accent-violet-500" checked={isAd} disabled={busy} onChange={(e) => setIsAd(e.target.checked)} />
+              광고 메일로 보내기(발송 때 "(광고)" 표기와 수신거부가 자동으로 붙어요)
+            </label>
+          </section>
+        )}
+
+        {error && (
+          <div className="rounded-xl bg-rose-500/10 border border-rose-400/30 px-4 py-3 text-[13px] text-rose-100 flex items-start gap-2 flex-wrap">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span className="flex-1 min-w-[200px]">{error.message}</span>
+            {error.code !== 'FEATURE_DISABLED' && error.code !== 'INSUFFICIENT_CREDIT' && (
+              <button type="button" onClick={() => { if (canRun) void run(); }} disabled={!canRun}
+                className="inline-flex items-center gap-1 h-8 px-3 rounded-lg text-[12px] font-semibold text-white bg-white/10 hover:bg-white/15 disabled:opacity-50"><RotateCcw className="w-3.5 h-3.5" /> 다시 시도</button>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className={OUI_SRC}>Data source: 넣어 주신 재료 · 서버 견적 · 만든 초안은 {channel === 'dm' ? '모바일 DM' : '이메일 캠페인'} 목록에 저장됩니다</p>
+          <button type="button" onClick={resetAll} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-white/45 hover:text-white/80 disabled:opacity-50"><RotateCcw className="w-3 h-3" /> 새로 시작</button>
         </div>
+
+        <EventCampaignResumeBar refreshKey={resumeRefresh} onResume={(id) => { setResumeDraftId(id); setSetOpen(true); }} />
+        <p className="text-[11px] text-white/35">
+          DM·이메일·인앱 세트를 한 번에 만드는 옛 방식은 <button type="button" disabled={busy} onClick={() => { setResumeDraftId(null); setSetOpen(true); }} className="underline underline-offset-2 hover:text-white/70 disabled:opacity-50">여기</button>에서 열려요.
+        </p>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-5">
-        {/* ★ v3 재료 페이지 — 브랜드 줄 · 행사 카드 목록 · 하단 바 */}
-        {enabled && (
-          <div ref={inputCardRef} className={`${OUI_CARD} p-5 md:p-6 space-y-4`}>
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-              <div>
-                <div className="text-sm font-bold text-white flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-fuchsia-300" /> 행사 재료로 시안 만들기
-                </div>
-                <p className="text-[12px] text-white/50 mt-1">행사마다 카드 하나(제목 · 내용 · 이미지 · 링크). 카드가 여러 개면 첫 카드가 첫 화면, 다음 카드는 설명 카드와 버튼으로 이어집니다. 설명 없는 이미지 블록은 만들지 않습니다.</p>
-              </div>
-              {planLocked && (
-                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-amber-500/15 text-amber-200 border border-amber-400/30"><Lock className="w-3 h-3" /> 모바일 DM 요금제에서 열립니다</span>
-              )}
-            </div>
+      <EventCampaignModal open={setOpen} resumeDraftId={resumeDraftId || undefined} onClose={() => { setSetOpen(false); setResumeDraftId(null); setResumeRefresh((v) => v + 1); }} />
 
-            {/* 브랜드 줄 — 서버 브랜드 킷 그대로(표시만) */}
-            {brand && (brand.name || brand.primary || brand.logo) && (
-              <div className="flex items-center gap-3 rounded-xl bg-white/[0.03] border border-white/10 px-3 py-2">
-                {brand.logo ? <img src={brand.logo} alt="" className="h-6 max-w-[96px] object-contain" /> : null}
-                <span className="text-sm text-white/85 font-medium">{brand.name || '우리 브랜드'}</span>
-                {brand.primary ? (
-                  <span className="inline-flex items-center gap-1.5 text-[11px] text-white/60"><span className="w-4 h-4 rounded-full border border-white/20" style={{ background: brand.primary }} /> 주색 {brand.primary}</span>
-                ) : (
-                  <span className="text-[11px] text-white/45">주색 미설정 · 무채색으로 만들고 DM 빌더의 브랜드 킷에서 바꿀 수 있습니다</span>
-                )}
-                <span className="ml-auto text-[11px] text-white/35">브랜드 킷 기준</span>
-              </div>
-            )}
-
-            <EventCardsInput value={cards} onChange={setCards} disabled={busy || planLocked} onReject={(m) => toast.error(m)} />
-
-            {/* 하단 바 — 견적 1줄 + [제작] 1개 */}
-            <div className="sticky bottom-3 z-10 rounded-2xl bg-slate-950/90 backdrop-blur border border-white/10 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-              <p className="text-[11px] text-white/55">
-                {quote ? (
-                  <>
-                    {quote.parts.map((p) => `${p.label} ${p.cost}`).join(' + ')} = <span className="text-white/85 font-medium">{quote.total} 크레딧</span>
-                    {readsNeeded ? ' · 내용이 빈 카드의 대표 이미지에서 내용을 먼저 읽습니다(1회)' : ''}
-                    {` · 행사 ${filled.length}건 · 이미지 ${imageCount}장`}
-                  </>
-                ) : '크레딧 견적을 계산하는 중입니다'}
-              </p>
-              <button
-                onClick={() => setConfirmOpen(true)}
-                disabled={!canRun || busy || planLocked}
-                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-fuchsia-500 text-indigo-950 text-sm font-bold hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition-all"
-              >
-                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                {busy ? '만드는 중' : '제작'}
-              </button>
-            </div>
-            {busy && (
-              <div className="rounded-xl bg-violet-500/10 border border-violet-400/20 px-4 py-3 text-sm text-violet-100 flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                <span>
-                  {elapsed < 3 ? '시작합니다' : PHASE_TEXT[phase]}
-                  {elapsed >= 15 ? ' · 보통 20~40초 걸립니다. 창을 닫지 말고 잠시만 기다려 주세요.' : ''}
-                </span>
-              </div>
-            )}
-            {error && (
-              <div className="rounded-xl bg-rose-500/10 border border-rose-400/30 px-4 py-3 text-sm text-rose-100">{error}</div>
-            )}
+      {/* 하단 sticky 바 — 서버 견적 1줄 + 버튼 1개 */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-slate-950/90 backdrop-blur">
+        <div className={`${OUI_WRAP_NARROW} py-3 flex items-center justify-between gap-3 flex-wrap`}>
+          <div className="text-[11px] text-white/55 min-w-0">
+            {quote ? (
+              <>
+                <span className="text-white/85 font-medium">{genPart ? `${genPart.label} ${genPart.cost}` : ''}{readPart ? ` + ${readPart.label} ${readPart.cost}(지금 차감)` : ''} = {quote.total} 크레딧</span>
+                <span> · 이미지 {imageCount}장 · 상품 {products.length}개 · 발행 시 별도</span>
+                {!quote.creditEnabled && <span> · 요금제 포함(차감 없음)</span>}
+                {gateText && <span className="block text-amber-200 mt-0.5">{gateText}</span>}
+              </>
+            ) : (quoteError || '견적을 계산하는 중이에요')}
           </div>
-        )}
-
-        {/* 결과 2열 — 쓴 재료(카드별) · 판정 / 다크 액자 시안(폭 토글) */}
-        {result && (
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_420px] gap-4">
-            <div className="space-y-4">
-              <div className={`${OUI_CARD} p-5 space-y-3`}>
-                <div className="text-sm font-bold text-white">쓴 재료</div>
-                <ul className="space-y-2">
-                  {result.cards.map((c, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-500/30 text-violet-100 text-[10px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[13px] text-white/90 truncate">{c.title}</div>
-                        <div className="text-[11px] text-white/50">
-                          이미지 {c.images.length}장 · 내용 {c.textChars}자{c.licensed ? ' · 문구 그대로' : ''}{c.read ? ' · 이미지에서 읽음(확인 뒤 체크하면 그대로 반영)' : ''}
-                        </div>
-                        {c.images.length > 0 && (
-                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                            {c.images.map((im) => <img key={im.url} src={im.url} alt="" className="w-12 h-12 rounded-md object-cover border border-white/10 bg-slate-900" />)}
-                          </div>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className={`${OUI_CARD} p-5 space-y-2`}>
-                <div className="text-sm font-bold text-white">판정</div>
-                <ul className="space-y-1.5">
-                  {verdicts.map((v) => (
-                    <li key={v.label} className="flex items-start gap-2 text-[12px]">
-                      <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${v.ok ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                      <span className="text-white/50 w-20 shrink-0">{v.label}</span>
-                      <span className="text-white/85">{v.value}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="flex items-center gap-2 flex-wrap pt-2">
-                  <button onClick={() => navigate(`/dm-builder?id=${encodeURIComponent(result.draftId)}`)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold">
-                    <PencilLine className="w-4 h-4" /> DM 편집으로
-                  </button>
-                  <button onClick={backToInput}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-violet-400/30 text-violet-100 text-sm hover:bg-violet-500/15">
-                    <ImagePlus className="w-4 h-4" /> 카드 고치고 다시 만들기
-                  </button>
-                  <button onClick={resetAll} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-white/60 text-sm hover:bg-white/10">
-                    <RotateCcw className="w-4 h-4" /> 새로 시작
-                  </button>
-                </div>
-                <p className={OUI_SRC}>Data source: 올린 행사 카드 · 서버가 조립한 초안(초안은 모바일 DM 목록에 저장됩니다)</p>
-              </div>
-            </div>
-            <div className="bg-slate-950 rounded-2xl border border-white/10 p-3 md:p-4 min-h-[560px]">
-              <div className="mb-2 flex items-center justify-end gap-1">
-                <button onClick={() => setPreviewWidth(600)} className={`p-1.5 rounded-lg ${previewWidth === 600 ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white'}`} title="데스크탑 폭"><Monitor className="w-4 h-4" /></button>
-                <button onClick={() => setPreviewWidth(375)} className={`p-1.5 rounded-lg ${previewWidth === 375 ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white'}`} title="모바일 폭"><Smartphone className="w-4 h-4" /></button>
-              </div>
-              {result.html ? (
-                <iframe title="모바일 DM 시안" srcDoc={result.html} sandbox="allow-same-origin" className="mx-auto block max-w-full h-[720px] rounded-xl bg-white border border-white/10 transition-all" style={{ width: previewWidth }} />
-              ) : (
-                <div className="text-sm text-white/50 py-20 text-center">시안 미리보기를 그리지 못했습니다. [DM 편집으로]에서 확인할 수 있습니다.</div>
-              )}
-            </div>
-          </div>
-        )}
-
-        <EventCampaignResumeBar
-          refreshKey={resumeRefresh}
-          onResume={(id) => { setResumeDraftId(id); setOpen(true); }}
-        />
-
-        {/* 3채널(DM·이메일·인앱) 세트 시작 카드 — 옛 흐름 그대로 */}
-        <div className="rounded-2xl border border-violet-400/30 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 p-6 text-center">
-          <div className="w-12 h-12 mx-auto rounded-2xl bg-gradient-to-br from-amber-400 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/25 mb-3">
-            <Sparkles className="w-6 h-6 text-white" />
-          </div>
-          <div className="text-sm font-bold text-white">DM·이메일·인앱 한 번에</div>
-          <p className="text-[12px] text-white/50 mt-1 mb-4">행사 내용을 붙여넣거나 이미지를 올리면, 고른 채널(DM·이메일·인앱) 초안을 한 번에 만들어 드려요.</p>
-          <button
-            onClick={startNew}
-            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl border border-violet-400/40 text-violet-100 text-sm font-semibold hover:bg-violet-500/15 transition-colors"
-          >
-            <Wand2 className="w-4 h-4" /> 3채널 세트 만들기
+          <button type="button" onClick={() => setConfirmOpen(true)} disabled={!canRun}
+            className="inline-flex items-center gap-1.5 h-11 px-6 rounded-xl bg-gradient-to-r from-amber-400 to-fuchsia-500 text-indigo-950 text-sm font-bold hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition-all shrink-0">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+            {busy ? '만드는 중' : 'AI 자동제작'}
           </button>
         </div>
       </div>
 
-      <EventCampaignModal
-        open={open}
-        resumeDraftId={resumeDraftId || undefined}
-        onClose={() => { setOpen(false); setResumeDraftId(null); setResumeRefresh((v) => v + 1); }}
-      />
+      <MallProductPickerModal open={mallOpen} onClose={() => setMallOpen(false)} onPick={addMallProducts} />
+      <AssetLibraryPickerModal open={!!libraryFor} onClose={() => setLibraryFor(null)} onPick={(a) => addLibraryImages([a])} multiSelect onPickMany={addLibraryImages} />
       <CreditConfirmModal
         open={confirmOpen}
-        source="dm-ai-generate"
+        source={channel === 'dm' ? 'dm-ai-generate' : 'email-ai-generate'}
         costOverride={quote ? quote.total : undefined}
-        description={quote ? `${quote.parts.map((p) => p.label).join(' + ')} · 행사 ${filled.length}건 · 초안은 모바일 DM 목록에 저장되고 편집기에서 이어서 손볼 수 있습니다.` : undefined}
+        description={quote ? `${quote.parts.map((p) => `${p.label} ${p.cost}`).join(' + ')} · 행사 ${filledCards.length}건 · 이미지 ${imageCount}장 · 상품 ${products.length}개. 완성본은 ${channel === 'dm' ? '모바일 DM' : '이메일'} 편집기에 바로 열리고 목록에 저장돼요. 발행은 별도예요.` : undefined}
         onConfirm={run}
         onCancel={() => setConfirmOpen(false)}
       />

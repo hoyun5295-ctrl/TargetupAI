@@ -1,4 +1,4 @@
-# 0914 게이트웨이 세션 인계: 링크가드 external3 시험 연결(코드 반영·미검증) · §8 A3·고객 배포자료 종결 · 이터널그룹 자료 (2026-09-14 12:1x 작성)
+# 0914 게이트웨이 세션 인계: 링크가드 external3 시험 연결 종결·원복 · §8 A3·고객 배포자료 종결 · 이터널그룹 자료 · 다음 = §4 A9-나 (2026-09-14 12:1x 작성 · 14:2x 갱신)
 
 > 이 문서는 **다음 세션이 바로 이어받을 자리와 Harold님이 실행할 순서**만 담는다. 사실·경위의 소유 문서는 링크가 가진다.
 > 착수 첫 명령은 **현재 상태 확인**이다(아래 상태는 작성 시점 값).
@@ -13,23 +13,27 @@
 4. external3 호출 계약: `C:/Users/ceo/projects/linkguard/docs/integrations/LOCAL-MESSAGE-CHECK.md` · 소스 `linkguard/tmp/external-agent-minimal-20260912/source/internal/agent/local_http.go`·`local_mapping.go`·`local_customer_auth.go`·`config_external.go`
 5. external3 설치 안내(ZIP 해제본, 4쪽): `C:\Users\ceo\Downloads\linkguard-external3-review\LinkGuard_설치_안내.pdf`
 
-## 1. 현재 상태 스냅샷 (0914 12:1x)
+## 1. 현재 상태 스냅샷 (0914 14:2x 갱신)
 
 | 구분 | 상태 | 근거 |
 |---|---|---|
-| 게이트웨이 `origin/main` | **`108443e`** push 완료(`c18d587..108443e`) — §8 A3 + 고객 배포자료 판정·문구·테스트 | Harold 실행 출력 |
+| 게이트웨이 `origin/main` | **`a33262b`** push 완료(`108443e` §8 A3 → `bb79582` §8 A4~A6 소스 → `0b4e839` external3 시험 연결 → `a4a93c9`·`a33262b` STATUS) · 미커밋 0 | Harold 실행 출력 |
+| .65 게이트웨이 실행파일 | `0b4e839` = SHA256 `e22745e2…d530`(13:47:26 배포 · 롤백 백업 `deploy-backups/20260914-134715`) · 14:14:11 ENV 원복 재기동 · Agent 4대 재연결 · 외부 검사 ENV 없음 = 기존 동작 | Harold 실행 출력 |
 | .65 운영 API | `routes/agents.js` `49982e018c55` · `services/agent-install-bundle.js` `bad3a308c0c9` · `routes/customer-downloads.js` `6a86e7153a91` | 재대조 출력 |
 | .65 대시보드 | manifest `e44e03932ff1`(11:20 · 「7개 공개 파일」·묶음 발급 승인 버전 판정) | `GW_DEPLOY_OK` · 화면 확인 |
 | 고객 배포자료 | **1.0.28 게시 완료**: 패키지 `05e8f3ce…`(linux)·`3acb4467…`(windows) · 안내서 `aed92147…`(부트스트랩 1.0.27 표기) · 체크섬 12/12 | FEATURE-GW-WEB-API §9-5 |
 | §8 A3 | **종결**(시험 Agent `bito-test-99` 모달 해시 = `Get-FileHash`) | FEATURE-GW-SECURITY §8-3 A3 |
-| **링크가드 external3 시험 연결** | **게이트웨이 코드 반영 · 미커밋 · (0914 오후) A1 gofmt·vet·test 통과 · A2 시험 경로 확정 · A3 hanjul03 확인 → 다음 = A4**(이 작업은 AI 명령 실행 금지 조건) | 이 문서 §2 · 결과 = FEATURE-GW-LINKGUARD §9-4 |
-| .65 external3 설치 | **없음**(0914 사전 확인: 8471 비어 있음 · `linkguard` 계정·`/opt/linkguard`·`/etc/linkguard`·`/var/lib/linkguard` 없음 · 유닛은 `linkguard-control`만) | Harold 실행 출력 |
+| **링크가드 external3 시험 연결** | **★0914 14:16 종결.** A1~A9 실측 완료(`0b4e839` 배포 · 8 캐시 차단 유지 · 9 ready false 미검사 통과) → **시험분 전부 원복**(ENV 제거·external3 삭제·시험 자격 회수·시험 URL 해제 · 코드는 ENV 없으면 기존 동작이라 유지). 링크가드 쪽 결과 문서 = `C:/Users/ceo/projects/linkguard/docs/handoff/2026-09-14-bito-external3-pilot-result.md`. 이 문서 §2 는 다시 켤 때의 절차로만 남는다 | 결과 = FEATURE-GW-LINKGUARD §9-4 |
+| .65 external3 설치 | **없음**(13:0x 설치 → 14:16 삭제 확인: `uninstall-service` exit 0 · 8471 0 · `linkguard` 계정·그룹·폴더 3개 없음 · 유닛은 `linkguard-control`만) · 관제 시험 자격 `lg-e116e71296a7dc98` 회수 14:14:47 · 시험 URL 비활성 14:15:16 · 운영 `bito-gateway` 자격 정상 동기화 | Harold 실행 출력 |
 | .65 자원 | CPU 20 · 메모리 31.8GiB(가용 28GiB) · 디스크 여유 825G · `bito-gateway` = `User=ubuntu` · 상한 없음 | 같은 출력 |
-| 게이트웨이 저장소 미커밋 | ① 링크가드 시험 5파일(§2-1) ② A4~A6 Go·검사기 7파일(1.0.29 릴리즈 대기) ③ `status/STATUS.md`(0913 + 0914 갱신) | `git status`(0914) + 이번 수정 |
+| 게이트웨이 저장소 미커밋 | **없음**(`a33262b` push 뒤 `git status --short` 빈 출력) | Harold 실행 출력 |
 | 한줄로 저장소 미커밋(문서) | `docs/bito-gateway/FEATURE-GW-SECURITY.md`·`FEATURE-GW-WEB-API.md`·`FEATURE-GW-LINKGUARD.md` · 이 인계 문서 | **게이트웨이 세션에서는 `tp-push`를 요청하지 않는다** — 한줄로 세션의 다음 `tp-push`에 실린다 |
+| 링크가드 저장소(신규 파일) | `docs/handoff/2026-09-14-bito-external3-pilot-result.md` = 링크가드 쪽 결과 전달 문서 · 커밋은 링크가드 쪽 | Harold 가 링크가드 담당에게 전달 |
 | 이터널그룹 | 전달 자료 준비 완료: `C:\Users\ceo\Downloads\Bito-Agent-Integration-20260914.zip`(148,954바이트 · 6파일 · 원본 해시 일치). **발송은 Harold · 회신 대기** | 이 문서 §3 |
 
-## 2. 트랙 A — 링크가드 external3 시험 연결 (다음 세션 첫 작업)
+## 2. 트랙 A — 링크가드 external3 시험 연결 (★0914 종결·원복 · 아래는 다시 켤 때의 절차 기록)
+
+> 결과 = [FEATURE-GW-LINKGUARD.md](bito-gateway/FEATURE-GW-LINKGUARD.md) §9-4 · 링크가드 전달 = `linkguard/docs/handoff/2026-09-14-bito-external3-pilot-result.md`. 다시 켤 때 실제로 달랐던 점: 설치 파일은 한글 이름 2개를 빼고 올림(PowerShell 5.1) · 호출 인증 파일은 게이트웨이가 ENV 로 받으므로 `/etc/linkguard` 700 유지 · 방화벽 적용 직후 첫 동기화 실패는 10초 시간초과(열린 연결) · 9 사유 = `customer_policy_unavailable` · 게이트웨이 재기동 = Agent 4대 1초 안 재연결(3회) · 랩디(REST) 는 재기동 중 503 · 우리 쪽 자동 재발송 없음 → 배포 직전 `message_request` 최근 접수 확인.
 
 ### 2-0. 합의된 범위 (Harold 0914 "네 추천하는 방식으로 진행")
 
@@ -183,7 +187,7 @@ profiles:
 
 | # | 항목 | 상태 |
 |---:|---|---|
-| 3 | A9-나 유출 시 재설치 절차 + 시험 에이전트 리허설 | 미착수 · §8 다음 순서 |
+| 3 | A9-나 유출 시 재설치 절차 + 시험 에이전트 리허설 | 미착수 · **다음 세션 첫 작업**(§7) |
 | 4 | A2 Windows 코드서명 인증서 | Harold 구매 결정 대기 |
 | 5 | 1.0.29 릴리즈(A2 서명 + A4·A5·A6 · 새 설치 게시만) · A1 `build` 확인 | A2 뒤 · **승인 전에 고객 배포자료 게시 먼저**(FEATURE-GW-WEB-API §9-5 규칙) |
 | 6 | .66 백업 | 별도 축 |
@@ -212,5 +216,8 @@ profiles:
 **작업 디렉터리 `C:\Users\ceo\projects\targetup`**
 
 ```text
-0914 게이트웨이 인계 이어가자. docs/2026-09-14-gateway-session-handoff.md 먼저 정독하고 §2-2 A1(링크가드 external3 시험 연결 gofmt·vet·test)부터 시작해
+0914 게이트웨이 인계 이어가자. docs/2026-09-14-gateway-session-handoff.md 먼저 정독하고 §4 게이트웨이 보안 §8 A9-나(릴리스 키 유출 시 재설치 절차 + 시험 에이전트 리허설)부터 시작해. 설계 근거는 docs/bito-gateway/FEATURE-GW-SECURITY.md §8-3 A9
 ```
+
+- external3 시험 연결은 종결이다. 링크가드 쪽 회신이 오면 그 내용만 검토한다(재시험은 Harold 지시 때만 · §2 절차).
+- 이터널그룹 회신이 오면 §3 순서.

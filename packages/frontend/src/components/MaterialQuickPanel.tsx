@@ -7,9 +7,11 @@
  * 크레딧은 서버 견적(costOverride) 그대로 · native dialog 0 · 모델명 0. 원클릭 캠페인 페이지는 결과 2열 화면이 따로 있어 이 패널을 쓰지 않는다.
  */
 import { useEffect, useState } from 'react';
-import { Loader2, Sparkles, ChevronDown, ChevronUp, Lock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Loader2, Sparkles, ChevronDown, ChevronUp, Lock, ArrowRight } from 'lucide-react';
 import MaterialInput, { type MaterialValue } from './MaterialInput';
 import CreditConfirmModal from './credit/CreditConfirmModal';
+import { useAiAutoBuildEnabled } from '../utils/ai-build';
 
 interface Quote { enabled: boolean; plan_locked: boolean; total: number; parts: Array<{ key: string; label: string; cost: number }> }
 export interface MaterialQuickDone { channel: 'dm' | 'email'; data: any; draftId: string | null; extracted: boolean; text: string }
@@ -25,6 +27,9 @@ export default function MaterialQuickPanel({ channel, isAd, disabled, onDone, on
   onToast: (message: string, type: 'success' | 'error' | 'warning') => void;
   defaultOpen?: boolean;
 }) {
+  const navigate = useNavigate();
+  // ★ 2026-09-14 T6 AI 자동제작이 열린 회사 = 펼침 패널 대신 링크 1줄(설계서 §3-2 · 렌더 플래그 · 제거 0) · 미개방 = 현행 패널 그대로
+  const autoBuild = useAiAutoBuildEnabled();
   const [open, setOpen] = useState(!!defaultOpen);
   const [material, setMaterial] = useState<MaterialValue>({ files: [], text: '', link: '' });
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -84,6 +89,15 @@ export default function MaterialQuickPanel({ channel, isAd, disabled, onDone, on
     }
   };
 
+  if (autoBuild === true) {
+    return (
+      <button type="button" disabled={disabled} onClick={() => navigate(`/quick-campaign?channel=${channel}`)}
+        className="w-full flex items-center gap-2 px-3 py-2.5 rounded-[10px] border border-violet-400/30 bg-violet-500/5 text-sm font-medium text-violet-100 hover:bg-violet-500/10 disabled:opacity-40 transition-colors">
+        <Sparkles className="w-4 h-4 text-fuchsia-300" /> AI 자동제작으로 만들기
+        <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-white/45">재료만 넣으면 완성본까지 <ArrowRight className="w-3 h-3" /></span>
+      </button>
+    );
+  }
   if (quote && !quote.enabled) return null;
   const planLocked = !!quote?.plan_locked;
 

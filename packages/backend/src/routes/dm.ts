@@ -78,7 +78,11 @@ import { fetchEventTextFromUrl } from '../utils/dm/dm-brand-extractor';
 // ★ 2026-09-05 아웃리치 DM noindex(불변 23) — 공개 뷰어가 요청 시각에 회사 id로 판정(저장값 아님 · 기존 발행분 소급)
 import { getOutreachContext } from '../utils/sales-outreach-produce';
 // ★ 2026-09-06 S5 재료 입구(이미지·행사 텍스트 → 엔진 조립 · 초안 DM)
-import { generateDmFromMaterials, quickMaterialsEnabled } from '../utils/campaign-quick';
+import { generateDmFromMaterials, quickMaterialsEnabled, generateFromBuildMaterials, buildGenerateResponse } from '../utils/campaign-quick';
+// ★ 2026-09-14 T4 AI 자동제작 v1(materials.version === 1) — 신규 ENV 게이트 · 회사 단위 in-flight 잠금 · 오류 status 매핑
+import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, buildInflightKey } from '../utils/ai-auto-build-materials';
+import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
+import { handleDbMigrationError } from '../utils/db-migration-error';
 // ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
 import { buildEventTemplateHintBlock } from '../utils/design-core/event-package';
 // ★ 2026-07-16 자가 호스팅 웹폰트 @font-face 생성 (궁서 폴백 정정)
@@ -941,6 +945,25 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 단독 입력도 생성 가능. 브리프 블록을 프롬프트에 합성
     //   (parsePrompt가 원문 기재 혜택을 spec.benefit으로 추출 → 기재 혜택만 카피에 반영되는 기존 경로 그대로).
     const eventText = req.body?.event_text ? normalizeEventText(req.body.event_text) : '';
+
+    // ★ 2026-09-14 T4 AI 자동제작 v1(materials.version === 1 · 설계서 §6-5 · §6-7) — 신규 ENV(AI_AUTO_BUILD_COMPANY_IDS · 비면 403) AND · 회사 단위 in-flight 409 ·
+    //   판정(정규화·게이트·몰 재조회·견적 결박) → checkCredit 순서는 오케스트레이터가 소유 · 오류는 AiAutoBuildError.status 그대로 → 402 잔액 → 503 마이그레이션 → 500 · 몰 자동 첨부 0 · v0 경로는 아래 그대로.
+    if (req.body?.materials && isBuildMaterialsV1(req.body.materials)) {
+      if (!aiAutoBuildEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' });
+      const lockKey = buildInflightKey(companyId);
+      if (!tryAcquireInflight(lockKey)) return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
+      try {
+        const r = await generateFromBuildMaterials({ companyId, userId: req.user?.userId, materials: req.body.materials, industry: typeof req.body?.industry === 'string' ? req.body.industry : null, channel: 'dm' });
+        return res.json({ success: true, data: buildGenerateResponse(r) });
+      } catch (err: any) {
+        const mapped = aiAutoBuildErrorResponse(err);
+        if (mapped) return res.status(mapped.status).json(mapped.body);
+        if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+        if (handleDbMigrationError(err, res, 'dm_pages')) return;
+        console.error('[DM AI one-shot-generate build-v1] 오류:', err?.message);
+        return res.status(500).json({ success: false, error: '재료로 시안을 만들지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      } finally { releaseInflight(lockKey); }
+    }
 
     // ★ 2026-09-06 S5 재료 입구 — 업로드 이미지·행사 텍스트를 아웃리치 엔진(결정 구간 공용)이 조립한다. 응답 필드명 유지 + materials 계측 + draft_id.
     //   몰 상품 자동 첨부는 이 분기에서 부르지 않는다(업로드 이미지는 상품 카드에 붙이지 않는다 · 상품은 재료 글줄). 크레딧 = 기존 키(dm-ai-generate) · 멱등 quick:{draftId}.

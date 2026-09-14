@@ -3,6 +3,11 @@
 // DM 섹션 편집기(SectionPropsEditor)·이미지 업로더(ImageUploader 내장)·헬퍼를 차용(props 기반이라 스토어 불요).
 // 렌더는 백엔드 단일 진실원(POST /api/email/render-preview). 다크 + violet 톤.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useNavigate } from 'react-router-dom';
+// ★ 2026-09-14 T5·T6 AI 자동제작 — 결과 바(캔버스 위) · 생성 버튼 금액 = 단일 출처
+import BuildResultBar from '../ai-build/BuildResultBar';
+import { peekBuildResult, clearBuildResult, type BuildResultHandoff } from '../../utils/ai-build';
+import { AI_GENERATE_COSTS } from '../../constants/credit';
 import {
   ArrowDown, ArrowUp, Copy, Eye, GripVertical, Loader2, Monitor, Palette, Plus, Save, Sparkles, Trash2, Type, Wand2, X,
 } from 'lucide-react';
@@ -162,6 +167,10 @@ export default function EmailVisualEditor({
     initialSnapshotRef.current = JSON.stringify({ name, subject, isAd, sections, design });
   }
   const isDirty = () => JSON.stringify({ name, subject, isAd, sections, design }) !== initialSnapshotRef.current;
+  // ★ 2026-09-14 T5 AI 자동제작 결과 바 — 이 캠페인이 방금 만든 완성본이면 판정·미반영·[다시 만들기] · 편집을 시작하면 접힘
+  const navigate = useNavigate();
+  const [buildBar, setBuildBar] = useState<BuildResultHandoff | null>(() => (campaignId ? peekBuildResult(campaignId) : null));
+  const buildBarCollapsed = !!buildBar && isDirty();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -362,8 +371,8 @@ export default function EmailVisualEditor({
         setAiPrompt('');
         onToast(
           aiEventText.trim()
-            ? 'AI가 행사·상품 정보로 이메일을 만들었어요. 상품 카드·가격·링크는 넣어주신 원문 기준입니다. (3 크레딧)'
-            : 'AI가 비주얼 이메일을 만들었어요. 이미지를 채우고 다듬어주세요. (3 크레딧)',
+            ? `AI가 행사·상품 정보로 이메일을 만들었어요. 상품 카드·가격·링크는 넣어주신 원문 기준입니다. (${AI_GENERATE_COSTS['email-ai-generate']} 크레딧)`
+            : `AI가 비주얼 이메일을 만들었어요. 이미지를 채우고 다듬어주세요. (${AI_GENERATE_COSTS['email-ai-generate']} 크레딧)`,
           'success',
         );
       } else {
@@ -549,6 +558,14 @@ export default function EmailVisualEditor({
           </div>
         </div>
 
+        {buildBar && (
+          <BuildResultBar
+            handoff={buildBar}
+            collapsed={buildBarCollapsed}
+            onDismiss={() => { clearBuildResult(); setBuildBar(null); }}
+            onRegenerate={() => { clearBuildResult(); setBuildBar(null); onClose(); navigate('/quick-campaign?channel=email&regen=1'); }}
+          />
+        )}
         <div className="flex-1 flex min-h-0">
           {/* 좌: 블록 리스트 + 추가 + AI */}
           <div className="w-60 shrink-0 border-r border-white/10 flex flex-col bg-slate-900/60">
@@ -585,7 +602,7 @@ export default function EmailVisualEditor({
                 className="w-full text-xs bg-slate-950/60 border border-white/10 rounded-lg px-2 py-1.5 text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 resize-none"
               />
               <button onClick={handleAi} disabled={aiBusy || (!aiPrompt.trim() && !aiEventText.trim())} className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 px-3 py-1.5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-40">
-                {aiBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}{aiBusy ? '생성 중...' : 'AI 생성 (3크레딧)'}
+                {aiBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}{aiBusy ? '생성 중...' : `AI 생성 (${AI_GENERATE_COSTS['email-ai-generate']}크레딧)`}
               </button>
               <div className="text-[10px] text-white/35 leading-relaxed">상품 이름·가격·링크를 넣으면 상품 카드가 자동으로 만들어져요. 가격·혜택은 넣어주신 원문 그대로만 사용됩니다.</div>
               {/* ★ 2026-09-06 S6 재료 입구 — 이미지·행사 내용 → 블록 전체 교체(기존 AI 생성과 같은 적용 경로) */}

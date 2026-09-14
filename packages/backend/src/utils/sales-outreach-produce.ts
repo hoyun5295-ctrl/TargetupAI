@@ -35,7 +35,9 @@ import { STUDIO_TEMPLATES, type StudioTemplate, type TemplateCategory } from './
 import { extractJson, DM_EDITABLE_TEXT_KEYS } from './dm/dm-ai';
 import { createDm, publishDm, updateDm } from './dm/dm-builder';
 import { renderEmailSections, EMAIL_FOOTER_SLOT } from './email/email-section-renderer';
-import { getDefaultProps, type Section, type SectionType } from './dm/dm-section-registry';
+import { getDefaultProps, createSection, type Section, type SectionType } from './dm/dm-section-registry';
+import { firstBenefitPhrase } from './event-brief';
+import { AI_AUTO_BUILD_FEATURES } from './ai-auto-build-materials';
 import { industryLabel, isIndustryCode, INDUSTRY_CODES, type IndustryCode } from './industry-codes';
 import type { EventCandidate } from './sales-outreach-jobs';
 // ★ 2026-09-03 참조 골격(설계서 §6-3) — 아웃리치 파일이 읽고 감산해 구성 힌트로 넘긴다(공용 CT는 아웃리치 사정을 모른다 · 불변 20)
@@ -65,7 +67,7 @@ import {
 import { hasBenefitPattern, findTemplateSample, type ComposeTypography } from './image-studio';
 import { renderPageGuarded } from './sales-outreach-render';
 // ★ 2026-09-06 S5 조립 엔진(결정 구간 공용) — 엔진은 이 파일을 모른다(deps 주입 · 순환 0)
-import { assembleDmCampaign, type EngineDeps, type EngineGenInput, type EngineMaterials, type EngineChannel, type EngineEntry, type EngineEventCard } from './campaign-engine';
+import { assembleDmCampaign, type EngineDeps, type EngineGenInput, type EngineMaterials, type EngineChannel, type EngineEntry, type EngineEventCard, type EngineFeaturesResult } from './campaign-engine';
 // ★ 2026-09-09 기획전 슬라이스 조립 모드(재료 판정·자격·구성 CT · AI 0)
 import {
   sliceModeCard, composeSliceSections, composeOutreachStandard, sliceCtaLabel, selectSliceImages, selectEventSlices, parseImageKinds, normalizeUrlKey,
@@ -1966,6 +1968,61 @@ export function moveCountdownBeforeLastCta(sections: readonly Section[]): Sectio
   return out.map((s, i) => ({ ...s, order: i }));
 }
 
+// ===== ★ 2026-09-14 T2 기능 칩 후처리(순수) — AI 자동제작 설계서 §6-2 · 엔진 deps.applyFeatures 구현 =====
+
+export interface DmFeaturesResult { sections: Section[]; applied: string[]; removed: string[]; skipped: Array<{ type: string; reason: string }> }
+
+/** ON 인데 채우기가 만들지 못한 타입의 사유(화면 노출 문구 · 고객 언어 · 내부 용어 0) */
+const FEATURE_SKIP_REASON: Record<string, string> = {
+  product_carousel: '이미지가 있는 상품이 2개 이상 있어야 상품 카드를 넣을 수 있어요.',
+  gallery: '첫 화면 사진 외에 사진이 더 있어야 갤러리를 넣을 수 있어요.',
+  countdown: '행사 종료일이 있어야 카운트다운을 넣을 수 있어요.',
+};
+
+/**
+ * 기능 칩 후처리 — 채우기(fill) **뒤**, 차단(sanitize) **앞**에서 돈다(엔진 순서). 사용자가 고른 값을 프롬프트 힌트가 아니라 코드가 지킨다.
+ *  - features === null/undefined → 입력 그대로(아웃리치·옛 호출 회귀 0).
+ *  - OFF(허용 4종 중 목록에 없는 타입) → 그 타입 섹션 전부 제거.
+ *  - ON → 이미 있으면 유지(채우기가 상품 2개 이상·카드 잔여 이미지·미래 종료일을 데이터로 이미 만든다). 없으면 **쿠폰만** 삽입:
+ *    discount_label = 면허 문구(licensedQuote)에서 혜택 토큰이 든 첫 구절 원문(카피 생성 0 · 차단기 통과) · 자리 = 마지막 CTA 앞(없으면 footer 앞) · 상한 OUTREACH_SECTION_MAX.
+ *    캐러셀·갤러리·카운트다운은 채우기 규칙 밖에서 만들지 않는다(같은 섹션을 두 곳이 만들면 규칙이 둘이 된다) → skipped 에 사유(화면 "미반영" 목록).
+ *  - 허용 4종 밖 타입(header·roulette 등)은 무시한다(죽은 컨트롤 금지 · 칩은 4종뿐).
+ */
+export function applyDmFeatures(sections: readonly Section[], features: readonly string[] | null | undefined, m: Pick<EngineMaterials, 'licensedQuote'>, channel: 'DM' | 'EMAIL' = 'DM'): DmFeaturesResult {
+  const list = (Array.isArray(sections) ? sections : []).filter((s) => s && typeof s === 'object');
+  if (features === null || features === undefined) return { sections: list.slice(), applied: [], removed: [], skipped: [] };
+  const on = new Set(features.map((f) => String(f)).filter((f) => AI_AUTO_BUILD_FEATURES.includes(f)));
+  const removed: string[] = [];
+  const out: Section[] = list.filter((s) => {
+    const t = String(s.type);
+    if (!AI_AUTO_BUILD_FEATURES.includes(t) || on.has(t)) return true;
+    if (!removed.includes(t)) removed.push(t);
+    return false;
+  });
+  const applied: string[] = [];
+  const skipped: Array<{ type: string; reason: string }> = [];
+  for (const type of AI_AUTO_BUILD_FEATURES) {
+    if (!on.has(type)) continue;
+    // ★ T3 이메일 허용 타입(OUTREACH_EMAIL_TYPES)에 countdown 이 없다 — 이메일 ON 은 데이터와 무관하게 사유만
+    if (channel === 'EMAIL' && type === 'countdown') { skipped.push({ type, reason: '이메일에는 카운트다운을 넣을 수 없어요.' }); continue; }
+    if (out.some((s) => String(s.type) === type)) { applied.push(type); continue; }
+    if (type === 'coupon') {
+      const label = firstBenefitPhrase(m.licensedQuote);
+      if (!label) { skipped.push({ type, reason: '그대로 쓸 혜택 문구가 없어요. 행사 카드에 할인·증정 내용을 적고 "그대로 씁니다"를 체크해 주세요.' }); continue; }
+      if (out.length >= OUTREACH_SECTION_MAX) { skipped.push({ type, reason: '구성이 이미 가득 차서 쿠폰을 더 넣지 못했어요.' }); continue; }
+      const card = createSection('coupon', 'so-feature-coupon', 0, { discount_label: label });
+      const lastCta = out.reduce((acc, s, i) => (String(s.type) === 'cta' ? i : acc), -1);
+      const footerIdx = out.findIndex((s) => String(s.type) === 'footer');
+      const at = lastCta >= 0 ? lastCta : footerIdx >= 0 ? footerIdx : out.length;
+      out.splice(at, 0, card);
+      applied.push(type);
+      continue;
+    }
+    skipped.push({ type, reason: FEATURE_SKIP_REASON[type] || '재료가 부족해 넣지 못했어요.' });
+  }
+  return { sections: out.map((s, i) => ({ ...s, order: i })), applied, removed, skipped };
+}
+
 // ===== 모바일 DM 제작·발행 (CT 직접 = 미차감 · H14 자기 확인) =====
 
 /** asset payload에 남기는 참조 골격 기록 — 근거 패널이 문구를 지어내지 않게(설계서 §6-3). 내부 id·타입명뿐, 문구 0. */
@@ -2056,6 +2113,8 @@ export interface ProduceDmInput {
   entry: EngineEntry;
   /** ★ v3 행사 카드(선택 순서 · ≤3 · bannerUrl 은 사본으로 되찾은 값) */
   eventCards?: EngineEventCard[] | null;
+  /** ★ 2026-09-14 T3 AI 자동제작 기능 칩(이메일 경로 · applyDmFeatures EMAIL) · 없음/null = 현행 */
+  features?: readonly string[] | null;
   /** ★ 2026-09-09 기획전 슬라이스 재료(brand_profile.eventSlices · 원 URL) — 사본은 media.slices · 자격은 sliceModeCard 가 판정 */
   eventSlices?: EventSliceMaterial | null;
   /** ★ v4-3 홈 상단 배너(brand_profile.heroBanners · 원 URL) — 사본은 갤러리에서 srcUrl 로 되찾아 프로모션 슬라이스 앞자리에 둔다 */
@@ -2231,6 +2290,7 @@ export function outreachEngineDeps(): EngineDeps<OutreachLookStats, LookImageDim
       products: m.products as unknown as OutreachMediaProduct[], ctaLinks: m.ctaLinks, homepageUrl: m.homepageUrl, legal: m.legal, companyName: m.companyName,
       posterCaption: m.posterCaption || null, licensedQuote: m.licensedQuote, eventCards: m.eventCards || null,
     }, channel, entry),
+    applyFeatures: (sections, features, m) => applyDmFeatures(sections, features, m),
     sanitize: (sections, licensedQuote, companyName) => sanitizeDmCopyBenefits(sections, licensedQuote, companyName),
     prune: (sections) => pruneEmptyDmSections([...sections]),
     orderCountdown: (sections) => moveCountdownBeforeLastCta([...sections]),
@@ -2425,6 +2485,8 @@ export interface BrandEmailResult {
   /** ★ 2026-09-09 기획전 슬라이스 모드(DM 과 같은 기준 · AI 0) · 실린 슬라이스 수 */
   sliceMode: boolean;
   sliceCount: number;
+  /** ★ 2026-09-14 T3 기능 칩 후처리 결과(features 없음·슬라이스 모드 = 빈 값) */
+  features: EngineFeaturesResult;
 }
 
 export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>): Promise<BrandEmailResult> {
@@ -2445,6 +2507,7 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
       look: lookStatsOf(sections),
       sliceMode: true,
       sliceCount: std.events.reduce((n, e) => n + (e.slices?.length || 0), 0),
+      features: { applied: [], removed: [], skipped: [] },
     };
   }
   const dims = buildLookDims(gallery, products, input.posterUrl, input.posterSize);
@@ -2470,7 +2533,9 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
     posterUrl: input.posterUrl, posterSize: input.posterSize || null, bannerUrl: input.bannerUrl || null, bannerSize: input.bannerSize || null, logoUrl: media?.logo?.url || null, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
     posterCaption: input.posterCaption || null, licensedQuote: input.licensedQuote, eventCards: input.eventCards || null,
   }, 'EMAIL', input.entry);
-  const sanitized = sanitizeDmCopyBenefits(filled.sections, input.licensedQuote, input.companyName);
+  // ★ T3 기능 칩(AI 자동제작 이메일) — DM 엔진과 같은 자리(채우기 뒤 · 차단 앞) · features 없으면 입력 그대로
+  const featured = applyDmFeatures(filled.sections, input.features ?? null, { licensedQuote: input.licensedQuote }, 'EMAIL');
+  const sanitized = sanitizeDmCopyBenefits(featured.sections, input.licensedQuote, input.companyName);
   const pruned = pruneEmptyDmSections(sanitized.sections);
   const looked = applyOutreachLook(pruned.sections, 'EMAIL', dims);
   const subjectRaw = String(gen.raw?.subject || '').trim();
@@ -2485,6 +2550,7 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
     look: looked.stats,
     sliceMode: false,
     sliceCount: 0,
+    features: { applied: featured.applied, removed: featured.removed, skipped: featured.skipped },
   };
 }
 

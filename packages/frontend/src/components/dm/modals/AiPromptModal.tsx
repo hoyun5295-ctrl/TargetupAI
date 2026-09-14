@@ -13,6 +13,7 @@ import type { Section } from '../../../utils/dm-section-defaults';
 import { SECTION_META } from '../../../utils/dm-section-defaults';
 import { useDmBuilderStore, type LayoutMode } from '../../../stores/dmBuilderStore';
 import ModalBase, { ModalButton } from './ModalBase';
+import { AI_GENERATE_COSTS } from '../../../constants/credit';
 import { downscaleToJpeg } from '../../../utils/image-downscale';
 // 고객 데이터 없으면 AI 문안 생성 전 차단 안내 (공용 게이트 — 모달만, 다크 오버레이)
 import { useCustomerDataGate, CustomerDataRequiredModal } from '../../CustomerDataGate';
@@ -180,7 +181,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
           loading={step === 'generating'}
           disabled={(!eventText.trim() && !extraPrompt.trim()) || step === 'generating'}
         >
-          ⚡ DM 만들기 (3크레딧)
+          ⚡ DM 만들기 ({AI_GENERATE_COSTS['dm-ai-generate']}크레딧)
         </ModalButton>
       )}
     </>
@@ -227,7 +228,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
               disabled={imgExtracting || step === 'generating'}
               style={helperBtnStyle}
             >
-              {imgExtracting ? '이미지 읽는 중...' : '🖼 이미지로 채우기 (3크레딧)'}
+              {imgExtracting ? '이미지 읽는 중...' : `🖼 이미지로 채우기 (${AI_GENERATE_COSTS['event-image-extract']}크레딧)`}
             </button>
             <button
               type="button"
@@ -235,7 +236,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
               disabled={imgExtracting || step === 'generating'}
               style={helperBtnStyle}
             >
-              🗂 라이브러리에서 (3크레딧)
+              🗂 라이브러리에서 ({AI_GENERATE_COSTS['event-image-extract']}크레딧)
             </button>
             <AssetLibraryPickerModal
               open={libOpen}

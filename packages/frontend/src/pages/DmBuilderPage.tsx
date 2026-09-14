@@ -47,6 +47,10 @@ import { Wand2 } from 'lucide-react';
 // ★ 2026-08-13 원스텝 AI 컨텐츠 생성 (설계서 = docs/2026-08-13-one-step-content-interview-design.md)
 import OneStepInterviewModal from '../components/dm/OneStepInterviewModal';
 import DmQuickBar from '../components/dm/DmQuickBar';
+// ★ 2026-09-14 T5·T6 AI 자동제작 — 목록 카드띠(입구) · 편집 캔버스 위 결과 바 · 노출 스위치(신규 ENV)
+import AiBuildEntryStrip from '../components/ai-build/AiBuildEntryStrip';
+import BuildResultBar from '../components/ai-build/BuildResultBar';
+import { peekBuildResult, clearBuildResult, useAiAutoBuildEnabled, type BuildResultHandoff } from '../utils/ai-build';
 import AbTestModal from '../components/dm/modals/AbTestModal';
 import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
@@ -120,11 +124,16 @@ export default function DmBuilderPage() {
   const [listFetched, setListFetched] = useState(false);
   const [listFailed, setListFailed] = useState(false);
   const deepLinkHandled = useRef(false);
+  // ★ 2026-09-14 T5 AI 자동제작 — 방금 만든 초안이면 결과 바(판정·미반영·다시 만들기) · 편집을 시작하면(isDirty) 접힘 · T6 목록 카드띠 노출 스위치
+  const autoBuild = useAiAutoBuildEnabled();
+  const isDirtyForBar = useDmBuilderStore((s) => s.isDirty);
+  const [buildBar, setBuildBar] = useState<BuildResultHandoff | null>(null);
   const [legacyDmError, setLegacyDmError] = useState<string | null>(null);
   // ★ CT-17: 요금제 게이팅 (mobile_dm — PRO+)
   const [planLocked, setPlanLocked] = useState<{ msg: string } | null>(null);
 
   const dmId = useDmBuilderStore((s) => s.dmId);
+  useEffect(() => { setBuildBar(mode === 'edit' && dmId ? peekBuildResult(dmId) : null); }, [mode, dmId]);
   const layoutMode = useDmBuilderStore((s) => s.layoutMode);
   const loadError = useDmBuilderStore((s) => s.loadError);
   const loadDm = useDmBuilderStore((s) => s.loadDm);
@@ -623,6 +632,14 @@ export default function DmBuilderPage() {
         <TopBarWithBack onBack={handleBackRequest} onPublishDone={handleBackToList} fromPlanner={entry.fromPlanner} />
         {/* ★ 2026-07-16 M4 — 전역 퀵바(서체 일괄·브랜드 킷·테마) */}
         <DmQuickBar />
+        {buildBar && (
+          <BuildResultBar
+            handoff={buildBar}
+            collapsed={isDirtyForBar}
+            onDismiss={() => { clearBuildResult(); setBuildBar(null); }}
+            onRegenerate={() => { clearBuildResult(); setBuildBar(null); navigate('/quick-campaign?channel=dm&regen=1'); }}
+          />
+        )}
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           <DmLeftPanel />
           <DmCanvas />
@@ -813,6 +830,8 @@ export default function DmBuilderPage() {
       )}
 
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 32px' }}>
+        {/* ★ 2026-09-14 T6 카드띠 [AI 자동제작 | 직접 제작] — 신규 ENV 미개방 회사는 그리지 않는다(설계서 §3-1 · §4-1) */}
+        <AiBuildEntryStrip channel="dm" enabled={autoBuild === true} disabled={generating} onDirect={handleCreateNew} directDesc="빈 캔버스에서 섹션을 직접 추가해요. 템플릿·완성 슬라이드·라이브러리도 아래에서 고를 수 있어요." />
         {/* ★ D216+ Journey 동급 디자인 — 자연어 입력 + 빠른 시작 7 카드 */}
         <div style={{
           background: 'linear-gradient(135deg, rgba(217,70,239,0.10), rgba(168,85,247,0.08), rgba(99,102,241,0.10))',
@@ -860,14 +879,17 @@ export default function DmBuilderPage() {
               />
               {/* ★ 2026-08-13 원스텝 — 자유 입력이 어려운 담당자를 위한 별도 경로(설계서 §5).
                   기존 [자동 생성] 1클릭 흐름은 손대지 않는다 — 형제 버튼으로만 선다. */}
+              {/* ★ 2026-09-14 T6 AI 자동제작이 열린 회사에서는 접힘 줄 [더 정확하게 만들기]로 강등(설계서 §3-2 · 제거 0) */}
               <button
                 onClick={() => { if (!generating) setOneStepOpen(true); }}
                 disabled={generating}
-                className="w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-fuchsia-400/40 bg-fuchsia-500/10 text-fuchsia-100 text-sm font-medium py-2.5 hover:bg-fuchsia-500/20 disabled:opacity-40 transition-colors"
+                className={autoBuild === true
+                  ? 'w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] text-white/55 text-[12px] py-1.5 hover:text-white hover:bg-white/5 disabled:opacity-40 transition-colors'
+                  : 'w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-fuchsia-400/40 bg-fuchsia-500/10 text-fuchsia-100 text-sm font-medium py-2.5 hover:bg-fuchsia-500/20 disabled:opacity-40 transition-colors'}
               >
                 <Wand2 className="w-4 h-4" />
-                질문 몇 개로 정확하게 만들기
-                <span className="text-[11px] text-fuchsia-200/70">생성 5 + 오토설계 50</span>
+                {autoBuild === true ? '더 정확하게 만들기(질문 몇 개)' : '질문 몇 개로 정확하게 만들기'}
+                <span className={autoBuild === true ? 'text-[11px] text-white/35' : 'text-[11px] text-fuchsia-200/70'}>생성 5 + 오토설계 50</span>
               </button>
               <ImageToCopyButton
                 label="이미지로 불러오기"
@@ -953,7 +975,7 @@ export default function DmBuilderPage() {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
                     <span style={{ fontSize: 15 }}>📄</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>자유 시작</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>직접 제작</span>
                   </div>
                   <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>빈 캔버스에서<br />직접 섹션 추가</div>
                 </button>

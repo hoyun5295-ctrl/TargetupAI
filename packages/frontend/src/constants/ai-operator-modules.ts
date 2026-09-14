@@ -50,7 +50,8 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',      label: 'Email 캠페인',   description: '이메일 자동 발송 + 트래킹',      path: '/email-campaigns' },
   { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',      label: '인앱메시지',     description: '자사몰 배너·모달 자동 표시',     path: '/inapp-messages',   adminOnly: true },
   // 3행 — 제작 도구·AI 두뇌 (중앙 슬롯 = P4에서 이미지 스튜디오로 카드 교체)
-  { icon: Wand2,        gradient: 'from-amber-400 to-fuchsia-500', label: '원클릭 캠페인',  description: '행사·이미지 → 채널 초안',        path: '/quick-campaign' },
+  // ★ 2026-09-14 T6 "AI 자동제작" 승격(설계서 §3-3) — 같은 경로 · 신규 ENV 미개방 회사는 옛 화면(원클릭 캠페인)이 그대로 열린다
+  { icon: Wand2,        gradient: 'from-amber-400 to-fuchsia-500', label: 'AI 자동제작',    description: '재료만 넣으면 완성본까지',        path: '/quick-campaign', badge: 'NEW' },
   // ★ 2026-07-19 P4: 3행 중앙 슬롯 = 마케팅 캘린더 → 이미지 스튜디오 교체 (라우트 /marketing-calendar는 유지, 카드 진입만 제거 — 비파괴).
   { icon: ImagePlus,    gradient: 'from-violet-400 to-fuchsia-500', label: '이미지 스튜디오', description: '상품→AI 배경 소재 완성',         path: '/image-studio', badge: 'NEW' },
   { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',   label: 'AI 메모리',      description: '회사별 누적 학습 정확도↑',       path: '/ai-memory' },
