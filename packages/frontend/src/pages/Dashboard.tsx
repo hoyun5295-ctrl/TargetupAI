@@ -609,6 +609,11 @@ export default function Dashboard() {
 
       // 2) 발송 커밋 (설정만 — recipients 제외. 수신거부·중복제거·차감은 서버가 전체 1회 처리)
       const isAlimtalk = directSendChannel === 'kakao_alimtalk';
+      // ★ 2026-09-14 박성용 접수(알림톡 예약·분할): 알림톡은 알림톡 창이 확인 창으로 넘긴 값만 쓴다.
+      //   전역 reserveEnabled·splitEnabled는 직접발송 패널 값이라, 쓰면 패널에서 켜 둔 예약이 알림톡에 섞인다(확인 창은 즉시인데 서버는 예약).
+      const alimScheduled = isAlimtalk && sendConfirm.type === 'scheduled' && !!sendConfirm.dateTime;
+      const alimSplitEnabled = isAlimtalk && (sendConfirm as any).alimtalkSplitEnabled === true;
+      const alimSplitCount = Number((sendConfirm as any).alimtalkSplitCount) || 0;
       const convertButtonsToQTmsg = (buttons: any[]) => {
         if (!buttons || buttons.length === 0) return null;
         const obj: Record<string, string> = {};
@@ -633,10 +638,12 @@ export default function Dashboard() {
         useIndividualCallback: isAlimtalk ? false : useIndividualCallback,
         individualCallbackColumn: (!isAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
         adEnabled: isAlimtalk ? false : adTextEnabled,
-        scheduled: reserveEnabled,
-        scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
-        splitEnabled: isAlimtalk ? false : splitEnabled,
-        splitCount: isAlimtalk ? null : (splitEnabled ? splitCount : null),
+        scheduled: isAlimtalk ? alimScheduled : reserveEnabled,
+        scheduledAt: isAlimtalk
+          ? (alimScheduled ? new Date(sendConfirm.dateTime as string).toISOString() : null)
+          : (reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null),
+        splitEnabled: isAlimtalk ? alimSplitEnabled : splitEnabled,
+        splitCount: isAlimtalk ? (alimSplitEnabled ? alimSplitCount : null) : (splitEnabled ? splitCount : null),
         mmsImagePaths: (isAlimtalk || directMsgType !== 'MMS') ? [] : toMmsImagePaths(mmsUploadedImages),
         dedupEnabled: sendConfirm.dedupEnabled ?? true,
         unsubFilterEnabled: sendConfirm.unsubFilterEnabled ?? true,
@@ -3818,6 +3825,10 @@ const campaignData = {
             msgType: '알림톡',
             // ★ 2026-06-05: stage 적재 stagingId 전달 — 없으면 executeDirectSend commit이 "발송 준비 정보 없음" 차단.
             stagingId: data.stagingId,
+            // ★ 2026-09-14 알림톡 예약·분할(박성용 접수): 알림톡 창의 값을 확인 창 상태에 싣는다. executeDirectSend 알림톡 분기가 이 값만 쓴다.
+            dateTime: data.dateTime,
+            alimtalkSplitEnabled: data.splitEnabled,
+            alimtalkSplitCount: data.splitCount,
           } as any);
           // ★ D225+ (2026-05-28 영업팀장 박성용 신고 재발 fix): 알림톡 팝업 close 호출 제거 — 옛 흐름 = 모달 유지 (executeDirectSend line 556 주석 정합).
           //   옛 D224+ 후속 사고 = setShowAlimtalkSend(false) 호출 = 발송 후 알림톡 팝업 닫힘 + 직접발송 팝업 복귀 사고.

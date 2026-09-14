@@ -14,7 +14,7 @@
  */
 
 import { useState, useMemo, useEffect } from 'react';
-import { Bell, X, Contact } from 'lucide-react';
+import { Bell, X, Contact, CalendarClock, Layers } from 'lucide-react';
 import AlimtalkChannelPanel, {
   validateAlimtalkChannelState,
   type AlimtalkChannelState,
@@ -23,6 +23,7 @@ import AlimtalkChannelPanel, {
 } from './alimtalk/AlimtalkChannelPanel';
 import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 import AddressBookModal from './AddressBookModal';
+import ScheduleTimeModal from './ScheduleTimeModal';
 import { normalizePhoneKr } from '../utils/formatDate';
 import { validateAlimtalkVariables } from '../utils/alimtalkVars';
 
@@ -60,7 +61,7 @@ export interface AlimtalkSendModalProps {
   // 발송 핸들러 — Dashboard에서 위임받아 SendConfirm 모달 진입
   onSendConfirm: (data: {
     show: boolean;
-    type: 'immediate';
+    type: 'immediate' | 'scheduled';
     count: number;
     unsubscribeCount: number;
     duplicateCount: number;
@@ -76,6 +77,11 @@ export interface AlimtalkSendModalProps {
     profileId: string;
     /** ★ 2026-06-05: stage 적재로 생성된 stagingId — Dashboard commit이 이 값으로 발송(staging 기반). */
     stagingId?: string;
+    /** ★ 2026-09-14 알림톡 예약·분할(박성용 접수): 예약 시각(ScheduleTimeModal의 로컬 시각 문자열). 즉시 발송이면 없음. */
+    dateTime?: string;
+    /** 분할전송 여부·분당 건수. Dashboard 전역(직접발송 패널) 값이 아니라 이 창의 값이다. */
+    splitEnabled: boolean;
+    splitCount: number;
   }) => void;
 
   setToast: (t: { show: boolean; type: 'success' | 'error' | 'warning'; message: string }) => void;
@@ -121,6 +127,13 @@ export default function AlimtalkSendModal({
   const [sending, setSending] = useState(false);
   // ★ D162-4 (2026-05-15) 2차: 주소록 진입 — Harold님 명시 정합. AddressBookModal 재사용 (recipients/setRecipients 위임).
   const [showAddressBook, setShowAddressBook] = useState(false);
+  // ★ 2026-09-14 박성용 접수(알림톡 예약·분할): 예약·분할 값은 이 창이 직접 들고 있다.
+  //   Dashboard의 reserveEnabled·splitEnabled는 직접발송 패널 값이라, 그걸 쓰면 패널에서 켜 둔 예약이 알림톡에 섞인다.
+  const [reserveEnabled, setReserveEnabled] = useState(false);
+  const [reserveDateTime, setReserveDateTime] = useState('');
+  const [showReservePicker, setShowReservePicker] = useState(false);
+  const [splitEnabled, setSplitEnabled] = useState(false);
+  const [splitCount, setSplitCount] = useState(1000);
 
   // ★ D162-4 (2026-05-15) 5차: Harold님 명시 정합 — 알림톡 모달 진입 시 매핑/state 전체 reset.
   //   기존엔 Dashboard 전역 state(kakaoTemplateVars/kakaoSelectedTemplate/등)가 직접발송 ↔ 직접타겟발송 간 유출되어
@@ -143,6 +156,12 @@ export default function AlimtalkSendModal({
       setShowMapping(false);
       setDirectInput('');
       setInputMode('direct');
+      // 예약·분할도 창을 열 때마다 끈 상태로 시작한다(지난 창의 예약이 다음 발송에 남지 않게)
+      setReserveEnabled(false);
+      setReserveDateTime('');
+      setShowReservePicker(false);
+      setSplitEnabled(false);
+      setSplitCount(1000);
       // ★ 2026-06-05: 직접발송 알림톡은 사용자가 올린 데이터(recipients keys)만 변수 매칭 옵션으로 사용.
       //   기존 고객 DB 표준 필드 fetch는 수신자 0건에도 DB 필드가 노출돼
       //   #{고객명}→name 자동 매핑·고정 발송을 유발해 제거(직원 신고).
@@ -363,6 +382,10 @@ export default function AlimtalkSendModal({
     if (resetSignal && resetSignal > 0) {
       setRecipients([]);
       setDirectInput('');
+      // 발송이 접수되면 예약·분할도 끈다(같은 창에서 이어 보내는 다음 건이 지난 예약 시각을 물려받지 않게)
+      setReserveEnabled(false);
+      setReserveDateTime('');
+      setSplitEnabled(false);
     }
   }, [resetSignal]);
 
@@ -380,6 +403,19 @@ export default function AlimtalkSendModal({
     if (!['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate.status)) {
       setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다.' });
       return;
+    }
+    // ★ 2026-09-14 알림톡 예약: 시각 없는 예약·이미 지난 시각은 수신자 적재 전에 막는다(서버 validateScheduledAt이 최종 판정).
+    if (reserveEnabled) {
+      if (!reserveDateTime) {
+        setToast({ show: true, type: 'error', message: '예약 시각을 선택해주세요.' });
+        setShowReservePicker(true);
+        return;
+      }
+      if (new Date(reserveDateTime) <= new Date()) {
+        setToast({ show: true, type: 'error', message: '예약 시각이 이미 지났습니다. 다시 선택해주세요.' });
+        setShowReservePicker(true);
+        return;
+      }
     }
     // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L(LMS 대체) + B(LMS+문구) 시 LMS 제목 필수.
     // ★ 2026-07-27: 전환재발송 검증을 공용 CT(validateAlimtalkChannelState)로 통일 — 백엔드 규칙과 동일.
@@ -483,7 +519,10 @@ export default function AlimtalkSendModal({
       }
       onSendConfirm({
         show: true,
-        type: 'immediate',
+        type: reserveEnabled ? 'scheduled' : 'immediate',
+        dateTime: reserveEnabled ? reserveDateTime : undefined,
+        splitEnabled,
+        splitCount,
         count: recipients.length - unsubCount - dupCount,
         unsubscribeCount: unsubCount,
         duplicateCount: dupCount,
@@ -553,7 +592,7 @@ export default function AlimtalkSendModal({
             <div>
               <h2 className="text-lg font-bold text-gray-900">알림톡 발송</h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                승인된 템플릿으로 즉시 발송합니다. 카카오톡 알림톡 전용 화면입니다.
+                승인된 템플릿으로 바로 보내거나 원하는 시각에 예약해 보냅니다. 카카오톡 알림톡 전용 화면입니다.
               </p>
             </div>
           </div>
@@ -578,6 +617,89 @@ export default function AlimtalkSendModal({
               onChange={handleChannelChange}
               sampleRecipient={recipients[0] || null}
             />
+
+            {/* ★ 2026-09-14 박성용 접수: 문자 직접발송과 같은 예약전송·분할전송(부달 설정 아래).
+                AlimtalkChannelPanel은 여정·자동발송 등 6곳 공용이라 손대지 않고 이 창에 둔다. */}
+            <div className="mt-4 border-t border-gray-100 pt-4">
+              <div className="text-xs font-medium text-gray-600 mb-1.5">발송 시점</div>
+              <p className="text-[11px] text-gray-400 mb-2">
+                예약하면 정한 시각에, 분할하면 분당 정한 건수씩 나눠 보냅니다.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* 예약전송 */}
+                <div
+                  className={`rounded-xl border px-3 py-2.5 transition-all ${
+                    reserveEnabled
+                      ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-300/50 shadow-sm'
+                      : 'bg-white border-gray-200 hover:border-blue-300'
+                  }`}
+                >
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="w-3.5 h-3.5 accent-blue-600"
+                      checked={reserveEnabled}
+                      onChange={(e) => {
+                        setReserveEnabled(e.target.checked);
+                        if (e.target.checked) setShowReservePicker(true);
+                      }}
+                    />
+                    <CalendarClock size={13} strokeWidth={1.9} className={reserveEnabled ? 'text-blue-600' : 'text-gray-400'} />
+                    <span className={`text-xs font-bold ${reserveEnabled ? 'text-blue-900' : 'text-gray-700'}`}>예약전송</span>
+                  </label>
+                  <button
+                    type="button"
+                    disabled={!reserveEnabled}
+                    onClick={() => setShowReservePicker(true)}
+                    className={`mt-1.5 text-left text-[11px] leading-tight ${
+                      reserveEnabled ? 'text-blue-700 font-medium hover:underline' : 'text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {reserveEnabled && reserveDateTime
+                      ? new Date(reserveDateTime).toLocaleString('ko-KR', {
+                          timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                        })
+                      : '예약 시각 선택'}
+                  </button>
+                </div>
+
+                {/* 분할전송 */}
+                <div
+                  className={`rounded-xl border px-3 py-2.5 transition-all ${
+                    splitEnabled
+                      ? 'bg-violet-50 border-violet-400 ring-2 ring-violet-300/50 shadow-sm'
+                      : 'bg-white border-gray-200 hover:border-violet-300'
+                  }`}
+                >
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="w-3.5 h-3.5 accent-violet-600"
+                      checked={splitEnabled}
+                      onChange={(e) => setSplitEnabled(e.target.checked)}
+                    />
+                    <Layers size={13} strokeWidth={1.9} className={splitEnabled ? 'text-violet-600' : 'text-gray-400'} />
+                    <span className={`text-xs font-bold ${splitEnabled ? 'text-violet-900' : 'text-gray-700'}`}>분할전송</span>
+                  </label>
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-500">
+                    {/* 직접발송 분할과 같은 범위(1~9999건/분 · 기본 1000) */}
+                    <input
+                      type="number"
+                      min={1}
+                      max={9999}
+                      value={splitCount}
+                      disabled={!splitEnabled}
+                      onChange={(e) => {
+                        const n = Number(e.target.value) || 1000;
+                        setSplitCount(Math.max(1, Math.min(9999, n)));
+                      }}
+                      className="w-20 rounded-md border border-gray-300 px-2 py-0.5 text-xs text-gray-800 disabled:bg-gray-100 disabled:text-gray-400"
+                    />
+                    <span>건/분</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* 우측: 수신자 + 변수 매칭 */}
@@ -792,7 +914,9 @@ export default function AlimtalkSendModal({
                   ? '수신자를 추가해주세요'
                   : !kakaoSelectedTemplate
                     ? '템플릿을 선택해주세요'
-                    : `${recipients.length.toLocaleString()}명에게 알림톡 발송하기`}
+                    : reserveEnabled
+                      ? `${recipients.length.toLocaleString()}명에게 알림톡 예약 발송하기`
+                      : `${recipients.length.toLocaleString()}명에게 알림톡 발송하기`}
             </span>
           </button>
         </div>
@@ -812,6 +936,15 @@ export default function AlimtalkSendModal({
         directRecipients={recipients}
         setDirectRecipients={setRecipients}
         setToast={setToast}
+      />
+
+      {/* ★ 2026-09-14 알림톡 예약 시각 선택: 직접발송과 같은 창(z-[2150]이라 이 창 위에 뜬다). 값은 이 창의 상태에만 쓴다. */}
+      <ScheduleTimeModal
+        show={showReservePicker}
+        reserveDateTime={reserveDateTime}
+        setReserveDateTime={setReserveDateTime}
+        setReserveEnabled={setReserveEnabled}
+        onClose={() => setShowReservePicker(false)}
       />
 
       {/* ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".

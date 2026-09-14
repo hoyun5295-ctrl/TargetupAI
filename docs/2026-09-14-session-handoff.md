@@ -59,7 +59,7 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "DROP TABLE IF EXI
 
 ## 3. 다음 세션 착수 원장
 
-0. **★2026-09-14 2세션 진행분(이 문서 작성 뒤)** = AI 자동제작 T0(①·② 통과 · ③ 미검증 = 카페24 활성 연동 0) → T1~T6 코드 완료 → T7 Codex 적대검토 → T8 배포·ENV·실측. 상태·명령·실측 시나리오의 소유 = [설계서 §13·§14](2026-09-14-ai-auto-build-design.md). 인계 원장은 이 항목 하나로 갈음한다(중복 기록 0).
+0. ~~**★2026-09-14 2세션 진행분** = AI 자동제작 T0 → T1~T7 → T8 배포·ENV·실측.~~ (완료 · **§5 로 이동** · 실측 5건만 남음) 상태·명령·실측 시나리오의 소유 = [설계서 §13·§14](2026-09-14-ai-auto-build-design.md). 인계 원장은 이 항목 하나로 갈음한다(중복 기록 0).
 1. ~~**AI 자동제작 T0** = 설계서 §9 착수 전 실측 3건(Harold SQL·API) → §12 T1~T8. 첫 코드는 `utils/ai-auto-build-materials.ts`(순수 · RED→GREEN).~~ (완료 · 0번 참조)
 2. 우커머스 회신이 오면: 설계서 §9 2차 목록의 "우커머스 어댑터"와 별개로, 답 7개를 실측 게이트(REST 401 · 웹훅 1건 · SDK 삽입 리허설)로 판정 → 어댑터 설계서.
 3. 범위 밖 기록(착수 판단 = Harold): `expired-pending-sweeper`·`system-monitor-worker` bulk-only(STATUS ⑥-③) · 재대조 보류 백오프·경보 · 확정 불일치 21일 재선정 · 상세 3경로 합집합 스캔 · 백엔드 `/api/sales-outreach/badge` 소비처 0 · 메이크뷰식 PC 2쪽 펼침·썸네일.
@@ -69,3 +69,27 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "DROP TABLE IF EXI
 - 집계 합집합(`getCompanyAllLiveSmsTables`)에서 bito 라인을 다시 빼지 않는다. 라인 종류가 늘면 그 함수를 먼저 본다.
 - 재대조 워커는 실측 0건에 적재 증거가 맞서면 덮지 않는다(시각만 기록). 0을 읽었다 ≠ 없다.
 - AI 자동제작은 설계서 §2 불변 14개 밖으로 나가지 않는다. 특히 신규 크레딧 키·DDL·역할 지정 UI·이름 매칭 자동 첨부는 이번 트랙에 없다.
+
+---
+
+## 5. ★ 2세션(0914 오후~저녁) 결과 · 다음 세션 착수 원장
+
+| 축 | 결과 | 소유 문서 |
+|---|---|---|
+| AI 자동제작 | T1~T8 **배포완료**(restart 687 · ENV 디버깅테스트 1회사 · 카페24 `hanjulai` active) · Codex 적대 2R(돈 경로 · 정정 4) · **실측 5건 미실행** | **상설 [FEATURE-AI-AUTO-BUILD.md](FEATURE-AI-AUTO-BUILD.md) 신설**(§5 실측 · §6 이력 · §7 남은 것) · 시점 = [설계서](2026-09-14-ai-auto-build-design.md) §13·§14 |
+| 우커머스 연동 | 고객사 회신 5/7 → 설계안 동의 → **W1~W7 배포**(restart 688) → 고객사 "플러그인 아니면 불가?" → **① wc-auth 관리자 승인 1클릭(키 자동 전달 · 웹훅 4개 REST 자동 생성 · 백필) + ② 플러그인 zip 배포**(restart 690 · plugin.zip 200) · 4몰 실측(회원가입 폼 수신동의 `mssms_agreement` 4몰 공통 · 앱 인증 302) · 고객사 회신 문안 작성 | [설계서](2026-09-14-woocommerce-integration-design.md)(§1 실측 · §2 불변 12 · §3 구조 · §5 W1~W10 · §6 미검증 · §7 후속) · [INTEGRATIONS.md 우커머스 절](../status/INTEGRATIONS.md) |
+| B-0914-3 DM 슬라이드 뷰어 | 1차 배포 → 16:15 재오픈(툴바 `100vh` 잘림 · 카운터가 제품 코드 가림 · 점 "확대") → 정정 배포(restart 691 · 높이 기준 `innerHeight` → `--dm-vh` · 아래 띠 = 진행 막대·5px 점·카운터) + 펼친 갤러리 장 `visible` 누락(빈 장) 동봉 · 단축 URL 375×640 실측 통과 | [BUGS B-0914-3](../status/BUGS.md) |
+| B-0914-2 슈퍼관리자 뱃지 | 배포완료(1차 배포에 동승) · 실측 대기 | [BUGS B-0914-2](../status/BUGS.md) |
+
+검증(마지막 실행): backend 297파일 4,661건 · tsc 0 · frontend tsc 0 · build:safe 둘 다 · harness-check 통과 · DDL 0.
+
+**다음 세션 착수 순서**
+1. **우커머스 운영 첫 승인 1건**(고객사 회신 = 4몰 관리자 승인 담당자 · 주문 단계 수신동의 · 규모): 관리 → 자사몰 연동 → 우커머스 → 몰 주소 → "관리자 승인으로 연결" → 승인 뒤 서버 `pm2 logs targetup-backend --nostream | grep "WooCommerce auth-callback"`(키 수신 · 웹훅 +4 · 백필 건수) → 첫 웹훅 `grep "WooCommerce Webhook"` 로 헤더·본문 실측 → 설계서 §6 미검증을 한 줄씩 닫는다. 플러그인 zip 전달 → WooCommerce → 한줄로 화면 "연결됨 · 웹훅 4개" 확인.
+2. **AI 자동제작 실측 5건**(FEATURE-AI-AUTO-BUILD §5 · 디버깅테스트 · 도달 불가 값) → 통과 시 ENV 확대 판단.
+3. **B-0914-3 박성용 재확인 회신**(툴바 있는 폰 · 아래 띠 · 5장 제품 코드).
+4. 범위 밖 기록(착수 판단 = Harold): FEATURE-AI-AUTO-BUILD §7 · 우커머스 설계서 §5-0 범위 밖 · 재대조 보류 백오프·경보·21일 재선정 · `expired-pending-sweeper`·`system-monitor` bulk-only · 메모리 인덱스 회전(28KB · 종결 트랙을 `archive/INDEX.md` 로).
+
+**⛔ 이번 2세션에서 확정된 규칙**
+- 우커머스 externalId·orderId 는 `{mall}:{id}` 접두(워드프레스 id 는 몰마다 겹친다) · 몰 식별자는 `normalizeWooMallId` 한 함수 · 앱 인증 state 는 서명·1회용·TTL 셋 다 · 콜백은 즉시 200 · 플러그인은 비밀 0.
+- DM 슬라이드 뷰어 높이 기준은 `100vh` 가 아니라 보이는 높이(`--dm-vh`) · 이미지 위에 아무것도 얹지 않는다.
+- AI 자동제작 돈 단위 = attemptToken + 과금 지문 · 판독비는 초안 뒤 정산(FEATURE §2-9·10).

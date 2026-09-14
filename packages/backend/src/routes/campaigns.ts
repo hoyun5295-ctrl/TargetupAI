@@ -3217,6 +3217,15 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     //   문자(SMS/LMS) 규약(광고 문구·080·제목)이라 브랜드 행 본문·제어 규약을 오염시키고,
     //   F행만 건너뛰면 캠페인 원장·문자 행은 새 문안, 브랜드 행은 옛 문안으로 갈라진 채 성공 표시가 된다(적대 검증 지적).
     //   원장 변경 전 전체 거부가 원자적이다. 아래 UPDATE의 F 제외 조건은 경합 대비 이중 방어로 유지.
+    // ★ 2026-09-14 알림톡 예약·분할(박성용 접수): 알림톡 예약이 생기면서 이 경로가 알림톡 행을 만날 수 있다.
+    //   알림톡 본문은 검수 승인된 템플릿과 같아야 카카오가 받는다. 문자 문안으로 덮으면 템플릿 불일치로 반려된다.
+    //   화면에서 이 창을 여는 곳은 없지만(ScheduledCampaignModal 문안 수정 창 여는 호출 0) API로 닿을 수 있어 원장 변경 전에 거부한다.
+    if (campaign.rows[0].send_channel === 'alimtalk' || recipients.some((r: any) => r.msg_type === 'K')) {
+      return res.status(400).json({
+        success: false,
+        error: '알림톡 예약 캠페인은 문안 수정을 지원하지 않습니다. 알림톡은 승인된 템플릿 그대로 발송됩니다. 예약을 취소한 뒤 다시 발송해주세요.',
+      });
+    }
     if (recipients.some((r: any) => r.msg_type === 'F')) {
       return res.status(400).json({
         success: false,
@@ -3325,7 +3334,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
         // ★ 2026-08-15 브랜드 행(msg_type='F') 제외 — 이 경로는 문자(SMS/LMS) 문안 수정이라
         //   (광고)·080 부착과 제목 갱신이 문자 규약 기준이다. F 행에 닿으면 본문·제어 규약이 오염된다
         //   (규약 정정 전에는 JSON 전문을 평문으로 덮어 무로그 폐기까지 갔다). 브랜드 예약 문안 수정은 미지원.
-        updateQuery += ` WHERE seqno IN (${seqnos.join(',')}) AND status_code = 100 AND msg_type <> 'F'`;
+        // ★ 2026-09-14 알림톡 행(msg_type='K')도 같은 이유로 제외(위 거부의 경합 대비 이중 방어).
+        updateQuery += ` WHERE seqno IN (${seqnos.join(',')}) AND status_code = 100 AND msg_type NOT IN ('F', 'K')`;
 
         await mysqlQuery(updateQuery, []);
 

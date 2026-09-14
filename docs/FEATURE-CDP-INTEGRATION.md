@@ -63,6 +63,8 @@ provider 목록의 단일 출처는 화면의 `PROVIDER_CARDS`다. 검색 결과
 
 ## §4 provider 현황 (2026-08-10 실측)
 
+> **★2026-09-14 7종째 = 우커머스(워드프레스)** — 전용 어댑터(고도몰 뼈대 · 몰별 행 · `{mall}:{id}` 접두) + **앱 인증 1클릭**(`/wc-auth/v1/authorize` 관리자 승인 → 키 자동 전달 → 웹훅 4개 REST 자동 생성 → 백필) + 플러그인 zip(선택) · 배포완료 · 실측 = 운영 첫 승인. 화면 키 `woocommerce`(collect auto · source `woocommerce`). 상세 = [INTEGRATIONS.md 우커머스 절](../status/INTEGRATIONS.md) · 설계·원장 = [0914 우커머스 설계서](2026-09-14-woocommerce-integration-design.md). 0704 「자체호스팅 웹훅 흡수」 판단은 뒤집혔다(§6-2 참조 대상).
+
 | 몰 | 이벤트 적재 | 오늘 붙일 수 있나 | 온보딩 시 우리가 할 일 |
 |---|---|---|---|
 | 카페24 | 함 (`cafe24`) | **가능** — 실수신 이력 있음(유일하게 끝까지 검증됨) | 없음 |

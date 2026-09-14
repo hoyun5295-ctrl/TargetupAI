@@ -1128,7 +1128,11 @@ export async function insertAlimtalkQueue(
           console.error(`[QTmsg] ⚠️ k_etc_json 1024자 초과(${mergedEtc.length}) — SENDER_KEY 미주입(원본 유지), template=${r.templateCode}`);
         }
       }
-      values.push(`(?, ?, ?, 'K', ?, ?, ?, ?, ?, NOW(), NOW(), '1', ?, ?, ?)`);
+      // ★ 2026-09-14 알림톡 예약·분할(박성용 접수): 예약·분할 시각이 있으면 그 시각, 없으면 NOW(). insertBrandQueue와 같은 기준.
+      //   전에는 reservedDate를 받기만 하고 NOW()로 고정해, 예약으로 접수된 알림톡이 즉시 나갔다.
+      //   시각을 넘기는 호출부는 direct-send-processor뿐이고 자동캠페인·여정·옛 직접발송은 넘기지 않는다(NOW() 그대로).
+      const reservedExpr = r.reservedDate ? '?' : 'NOW()';
+      values.push(`(?, ?, ?, 'K', ?, ?, ?, ?, ?, ${reservedExpr}, NOW(), '1', ?, ?, ?)`);
       params.push(
         r.phone,                       // dest_no
         r.callback,                    // call_back
@@ -1138,6 +1142,9 @@ export async function insertAlimtalkQueue(
         r.nextType || 'L',             // k_next_type
         r.nextContents || null,        // k_next_contents
         r.buttonJson || null,          // k_button_json
+      );
+      if (r.reservedDate) params.push(r.reservedDate); // sendreq_time
+      params.push(
         rowEtcJson,                    // k_etc_json (비토 라인 = SENDER_KEY 병합 / 표준 라인 = 원본)
         appEtc1 || null,               // app_etc1 (캠페인/추적 식별자 — #4-c 결과 매칭 fix)
         r.companyId || null,           // app_etc2 (companyId 추적용)

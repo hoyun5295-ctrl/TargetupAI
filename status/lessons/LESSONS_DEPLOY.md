@@ -123,6 +123,11 @@ pm2 logs hanjuldm-api --lines 100
 
 ---
 
+## 프론트 배포 확인 — 난독화 산출물의 문자열 grep 은 확률적이다 (★2026-09-14)
+
+- `vite.config.ts` 난독화가 `stringArray: true` + `stringArrayEncoding: ['base64']`(threshold 확률적)라 **문자열 리터럴의 약 절반이 빌드마다 다른 선택으로 배열에 인코딩**된다. 같은 한글 문구가 어느 빌드에선 grep 1, 다음 빌드에선 0 이다(0914 "관리자 승인으로 연결" 로컬·서버 모두 0 · "우커머스 연동" 은 1).
+- **처방**: 프론트 반영 확인은 ①`stat -c %y dist/index.html`(빌드 시각) + build:safe 성공 로그 ②화면 육안(해당 버튼·문구) ③꼭 문자열로 보려면 후보 3개 이상을 OR 로 묶는다. 백엔드 dist(tsc 산출물 · 난독화 0)는 문자열 grep 이 확정적이다.
+
 ## 금지 사항
 
 - `tp-deploy-full` 안내 (D145 9시간 사고)

@@ -55,7 +55,25 @@
 
 ## 2) 활성 버그
 
-### 🟠 B-0914-3 모바일 DM 슬라이드 뷰어 — 이미지가 위에 붙고, 점이 34장이면 잘리고, PC에서 장이 열 밖으로 넘친다 (🟡 1차 배포 → 0914 16:15 재오픈 → 재오픈 정정 코드완료·배포 대기) — 2026-09-14 접수 `cmu0ns23o01owjnlui3wdhe94`(박성용 P2 · 참고 = 메이크뷰 DM)
+### 🟠 B-0914-5 알림톡 발송: 예약·분할이 없고, 예약으로 접수돼도 큐에는 즉시 시각으로 들어간다 (🟡 코드완료·배포 대기 0914 · 실측 대기) — 2026-09-14 접수 `cmu0zpd0z02gyjnluuclvxk9r`(박성용 P2)
+
+- **원인 2**: ①알림톡 창에 예약·분할 입력이 없고, Dashboard 발송 실행이 알림톡이면 분할을 `false`로 막고 예약은 **직접발송 패널 전역값**(`reserveEnabled`)을 실었다. 패널에서 예약을 켜 둔 채 알림톡 창으로 넘어가면 확인 창은 즉시, 서버는 예약으로 접수된다 ②워커가 계산한 수신자별 시각을 `direct-send-processor` 알림톡 행이 버리고, `insertAlimtalkQueue`(CT-04)가 `sendreq_time`을 `NOW()`로 고정했다(`reservedDate` 선언만 있음).
+- **운영 표본**: 0914 PG 조회 `send_channel='alimtalk' AND send_config.scheduled=true` = 1건(`a8cf5f94-605f-4b6f-829a-1a26b3afe474` · 예약 17:35 KST · 등록 17:29 · status completed). 실제 큐 적재 시각은 미확인.
+- **수정**: 알림톡 창에 예약전송·분할전송(부달 설정 아래 · 값은 창이 보관 · `ScheduleTimeModal` 재사용) → 확인 창에 type·dateTime·분할값 → Dashboard 알림톡 분기가 그 값만 사용 · processor 알림톡 행 `reservedDate` · CT-04 `reservedDate` 있으면 그 시각(없으면 NOW(), 다른 호출부 3곳은 시각을 안 넘겨 불변) · 예약 문안 수정 `/:id/message`는 알림톡 캠페인·K행이면 거부 + UPDATE `msg_type NOT IN ('F','K')`.
+- **영향 없음 확인**: 예약 취소(`cancelCampaign` app_etc1 전 행 DELETE·잔존 0 검증)·수신자 삭제·`/reschedule`(전 행 시각 이동)·환불 축(message_type 동일).
+- **테스트**: `alimtalk-queue-reserved` · `direct-send-processor-alimtalk-reserved` · `alimtalk-reserve-split-contract` (backend 전체 301파일 4,677건 통과 · tsc 0 · build:safe 양쪽 성공).
+- **실측 남음**: 예약 1건 → 큐 K행 `sendreq_time`=예약 시각·100 → 도래 후 수신 / 예약 1건 취소 → 잔존 0 / 분할 3건 1건/분 → 1분 간격 / 표준 QTmsg 라인·비토 라인 각 1회(표준 라인 에이전트의 예약 보류는 서버 select_sql이라 코드로 확인 불가).
+- **범위 밖(기록만)**: 옛 `/direct-send` 알림톡 분기(`campaigns.ts` 알림톡 적재)도 시각을 싣지 않는다. 화면에서 `targetSendChannel`이 `'sms'`로만 설정돼 도달 경로 0.
+
+### 🟠 B-0914-4 주소록: 엑셀·CSV의 번호 앞 0이 빠진 채 저장되고 발송이 "수신번호 형식 오류"로 실패한다 (🟡 코드완료·배포 대기 0914 · 실측 대기) — 2026-09-14 접수 `cmu0wlphl02fxjnlucoe2mbh1`(박성용 P2)
+
+- **원인**: 업로드 파서(`upload.ts` `raw:false`)가 CSV 원문 `01000000000`도 숫자로 읽어 0을 떨어뜨린다(로컬 실측 · XLSX 숫자 셀 동일). 직접발송·알림톡의 파일등록은 화면에서 `normalizePhoneKr`로 되살리는데, 주소록은 저장·추가·조회·다운로드 어디에서도 되살리지 않았다. 발송 적재 `normalizePhone`은 숫자만 남긴다.
+- **수정**: `routes/address-books.ts` 저장·추가(중복 판정 포함)·조회·다운로드 4곳이 CT `normalizeAgencyPhone`(숫자 10자리 `1[016789]`만 0 복원)을 쓴다. 옛 저장분은 DB UPDATE 없이 읽을 때 복원. 파서는 공용이라 무변경.
+- **테스트**: `routes/address-books.test.ts` 5건.
+- **실측 남음**: 0 빠진 CSV로 주소록 등록 → 조회 번호 `010…` → 불러오기 발송 성공 1건 / 기존 0 빠진 그룹 불러오기 발송 1건.
+- **범위 밖(기록만)**: 한줄전단 주소록(`/api/flyer/address-books`)은 별도 경로 · 동일 결함 여부 미확인.
+
+### 🟠 B-0914-3 모바일 DM 슬라이드 뷰어 — 이미지가 위에 붙고, 점이 34장이면 잘리고, PC에서 장이 열 밖으로 넘친다 (🟢 1차 배포 → 0914 16:15 재오픈 → 재오픈 정정 배포완료 0914 20:54(restart 691 · 단축 URL 375×640 실측 이미지 28~568·띠 584~640·겹침 0) · 박성용 재확인 대기) — 2026-09-14 접수 `cmu0ns23o01owjnlui3wdhe94`(박성용 P2 · 참고 = 메이크뷰 DM)
 
 - **원인 3(전부 `dm-viewer.ts` 슬라이드 모드 CSS)**: ①장이 `height:100vh` 세로 스크롤 상자라 펼쳐진 이미지가 위에서부터 흐르고 세로 사진이면 아래가 빈다 ②`.dm-page-dots`가 고정폭 한 줄이라 34장이면 양끝이 잘린다 ③장 폭이 `100vw`라 430px 열 밖으로 넘치고(스냅 어긋남) PC에 화살표·키보드가 없다.
 - **수정(목업 승인 뒤)**: `dm-slides-expand.ts isSwipeImagePage`(순수) — list_1xN 갤러리 1장 장만 무대 · `dm-viewer.ts` ①`dm-page--stage` = 상하 중앙·화면 맞춤(크롭 0)·장 안 스크롤 0(갤러리 inline 폭 100%·grid를 `!important`로 이김 · 아래 44px 점 자리) ②점 스트립 = 갯수 유지 + 가로 스크롤 + 활성 점 `scrollIntoView(inline:'center')` + 열 폭 안 ③장 폭 100% · 카운터 열 안 · `@media (hover:hover) and (pointer:fine)` 화살표 + ←/→(입력칸 포커스 제외) · 장 이동 `goToPage` 한 곳. 혼합 장·scroll 모드·편집기 캔버스 무접촉. 발행물은 요청 시 렌더라 배포 즉시 기존 DM 적용(저장본 재생성 0).
@@ -70,7 +88,7 @@
 
 ---
 
-### 🟡 B-0914-2 슈퍼관리자 상단 메뉴 — 발신프로필 승인 요청이 와도 "발송 관리"에 불이 안 켜지고, "고객 관리"에는 AI 영업 수가 상시 켜져 있다 (🟡 코드 수정 완료·배포 대기 · 프론트 빌드 필요) — 2026-09-14 Harold 직접 접수
+### 🟡 B-0914-2 슈퍼관리자 상단 메뉴 — 발신프로필 승인 요청이 와도 "발송 관리"에 불이 안 켜지고, "고객 관리"에는 AI 영업 수가 상시 켜져 있다 (🟢 배포완료 0914(B-0914-3 1차 배포에 동승 · frontend dist 확인) · 실측 대기 = 발신프로필 승인 요청 시 "발송 관리" 뱃지 점등·승인 뒤 즉시 소등) — 2026-09-14 Harold 직접 접수
 
 - **원인**: ①발신프로필 승인 대기를 세는 축이 없었다(`/api/admin/pending-badges`는 요금/정산 4축뿐) ②`AI 영업` 항목 뱃지(실패·미확인 발송 수)가 0보다 크면 그룹 점이 켜지는 구조라 ceo 작업 화면의 숫자가 알림처럼 상시 표시됐다.
 - **수정**: `utils/pending-badges.ts`에 `senderProfiles` 축 신설(`kakao_sender_profiles` · `COALESCE(approval_status,'PENDING_APPROVAL')='PENDING_APPROVAL'` = 화면 승인대기 탭과 같은 산식 · 실패 null 격리) · `admin.ts` 폴백에 `senderProfiles: null` · `AdminDashboard.tsx` 상태 + `템플릿 관리` 항목 뱃지 + `AlimtalkSendersSection onChanged={loadPendingBadges}`(승인·반려 직후 즉시) · AI 영업 뱃지·로더 제거. 갱신 = 진입 1회 + 60초 주기 + 탭 복귀 + 승인·반려 직후(기존 주기 재사용 · 새 타이머 0). 컬럼 4개 `information_schema` 실측 후 SCHEMA.md 등재.

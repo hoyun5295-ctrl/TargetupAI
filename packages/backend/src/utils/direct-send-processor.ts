@@ -322,6 +322,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
           },
         }),
         companyId: p.companyId,
+        // ★ 2026-09-14 알림톡 예약·분할(박성용 접수): 워커가 계산한 수신자별 시각을 싣는다(브랜드 행과 같은 기준).
+        //   즉시 발송이면 싣지 않아 큐가 NOW()를 쓴다.
+        reservedDate: p.useNow ? undefined : (recipient.sendTime || undefined),
       };
     });
     if (alimDowngradedCount > 0) {

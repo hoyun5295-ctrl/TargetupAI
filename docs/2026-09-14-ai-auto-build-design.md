@@ -1,6 +1,6 @@
 # AI 자동제작 설계서: 재료만 넣으면 모바일 DM·이메일 완성본까지 (2026-09-14)
 
-> **이 문서가 소유하는 것** = 2026-09-14 브레인스토밍(5역할 · 1차 → 교차 토론 1라운드 → 주재자 수렴 → 회의론자 최종 검증)의 **수렴안 · 계약 · 착수 원장**. 구현 종결 뒤 상설 문서 `FEATURE-AI-AUTO-BUILD.md`를 신설하고 이 문서는 시점 근거로 남긴다.
+> **이 문서가 소유하는 것** = 2026-09-14 브레인스토밍(5역할 · 1차 → 교차 토론 1라운드 → 주재자 수렴 → 회의론자 최종 검증)의 **수렴안 · 계약 · 착수 원장**. 구현 종결 뒤 상설 문서 `FEATURE-AI-AUTO-BUILD.md`를 신설하고 이 문서는 시점 근거로 남긴다. **★0914(2) 신설됨 = [FEATURE-AI-AUTO-BUILD.md](FEATURE-AI-AUTO-BUILD.md)** — 구조·불변·운영 실측·이력은 그 문서가 소유하고 STATUS 는 포인터만 둔다. 이 문서는 시점 근거(요구 원문·회의·계약·구현 기록 원문).
 > 발동 = Harold 2026-09-14 "브레인스토밍 완벽하게 끝내고 설계서까지 작성완료해서 다음 세션에 인계". 회의 원문 = 세션 scratchpad `meeting/`(r1-*.md · r2-*.md · converged-v1.md · final-skeptic.md).
 > 관련 상설 문서 = [FEATURE-SALES-OUTREACH.md](FEATURE-SALES-OUTREACH.md)(캠페인 엔진 소유) · [FEATURE-CDP-INTEGRATION.md](FEATURE-CDP-INTEGRATION.md)(몰 연동) · [FEATURE-IMAGE-STUDIO.md](FEATURE-IMAGE-STUDIO.md)(소재 라이브러리). 시점 근거 = [캠페인 엔진 설계서](2026-09-06-campaign-engine-design.md) §7·§8(S5·S6 고객 입구) · [원스텝 인터뷰 설계서](2026-08-13-one-step-content-interview-design.md) §0·§6·§9(요금·세션 교훈).
 
@@ -269,6 +269,7 @@ Harold 요구(2026-09-14 원문 요지):
 | T6 | 완료 | 카드띠 2곳(`DmBuilderPage` 목록 상단 · `EmailCampaignsPage` 상단 · ENV 미개방 = 미렌더) · `MaterialQuickPanel` = 개방 회사에서 링크 1줄(렌더 플래그 · 제거 0) · "질문 몇 개로" 접힘 줄로 강등 · "자유 시작"·"비주얼로 만들기" → "직접 제작" · 허브 타일 "원클릭 캠페인" → "AI 자동제작"(NEW) · 금액 하드코딩 3곳(`AiPromptModal`·`EmailVisualEditor`·`EmailCampaignsPage`) → `constants/credit.ts AI_GENERATE_COSTS`(백엔드 CREDIT_COST_MAP 미러 · 옛 "3크레딧" 표기는 DM 생성 5로 오른 뒤에도 남아 있던 오표기) · 백엔드 GET `/materials/quote` 응답에 `auto_build_enabled` 추가(노출 스위치의 화면 원천) | frontend tsc 0 · backend tsc 0 · 전체 4,516 |
 
 | T7 | 완료(Codex 2R 상한) | 내 적대 검토 25항 → Codex `adversarial-review` 돈 경로 1R(high 2 · medium 1 · 전부 수용) → 2R(증분 · high 2 · 전부 수용 · 라운드 상한 도달) · 수용분은 테스트로 고정(quick 테스트 +7 · materials +2) | 전체 290파일 4,525 · tsc 0 · **3R 은 Harold 판단**(2R 지적은 내 테스트로만 닫음) |
+| T8 | 배포완료(0914 · Harold) · ENV 1회사 · **실측 5건 미실행** | tp-push → .62 pull·backend/frontend build:safe·reload(restart 687) · frontend dist "AI 자동제작" 1 · ENV `AI_AUTO_BUILD_COMPANY_IDS`=디버깅테스트 · 카페24 `hanjulai` 재인증 active(T0 ③ 전제 충족) | §14-4 실측 5건 = Harold 뒤로 미룸(우커머스 우선) · 상태 소유 = FEATURE-AI-AUTO-BUILD §5 |
 
 **★ Codex 적대검토(0914 T7 · 1R 3건 + 2R 2건 전부 수용) = §5 정정 4건(뿌리 = 돈 단위가 토큰뿐 · 판독비가 원장 밖 캐시)**:
 1. **멱등키 = `quick:{companyId}:{channel}:{attemptToken}:{과금 지문 16자}`**(§2-9·§5 "지문은 키가 아니다" 정정 · 1R high → 2R high 로 지문 범위 확대). 토큰만 키면 결제한 토큰으로 재료를 바꿔 보내는 요청이 duplicate(무료)로 통과한다. **과금 지문(`buildBillingHash`) = 정규화 입력 전체**(채널·광고·카드 제목·내용·링크·면허·이미지 URL·치수·상품 전부·칩·브랜드명 · 토큰·견적 합계·카드 id 제외) — 견적 결박용 지문(`buildMaterialsHash` · uuid 불변 · 세 요소)과 **분리**한다(1R 뒤 견적 지문을 키에 넣었더니 히어로 이미지만 바꾼 요청이 같은 키였다 = 2R high). "같은 재료 재시도 = 원장 1행 · 이미지·면허·칩 하나라도 다르면 새 차감"을 원장이 지킨다. 화면도 재료가 바뀌면 토큰을 버린다(이중 안전).

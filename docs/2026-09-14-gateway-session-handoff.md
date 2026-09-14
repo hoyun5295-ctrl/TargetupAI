@@ -29,6 +29,7 @@
 | 게이트웨이 저장소 미커밋 | **없음**(`a33262b` push 뒤 `git status --short` 빈 출력) | Harold 실행 출력 |
 | 한줄로 저장소 미커밋(문서) | `docs/bito-gateway/FEATURE-GW-SECURITY.md`·`FEATURE-GW-WEB-API.md`·`FEATURE-GW-LINKGUARD.md` · 이 인계 문서 | **게이트웨이 세션에서는 `tp-push`를 요청하지 않는다** — 한줄로 세션의 다음 `tp-push`에 실린다 |
 | 링크가드 저장소(신규 파일) | `docs/handoff/2026-09-14-bito-external3-pilot-result.md` = 링크가드 쪽 결과 전달 문서 · 커밋은 링크가드 쪽 | Harold 가 링크가드 담당에게 전달 |
+| **아이티앤 결과 「진행 중」 26건(서수란 접수)** | **★0914 web/api 배포 완료 · 화면 확인 대기.** 원인 = 26건 전부 젬텍 결과 수신 완료(`REPORTED`) · 24건은 고객사 DB 반영 행이 없어 Agent 가 ACK 없이 끊고 게이트웨이가 재전달 20회 뒤 포기 · 종결 처리 부재. 정정 = 판정 CT `settledReportedSql`(상태·과금 불변 · 집계만) + Agent 운용 상태 대기 제외 · 배포 = `result-code.js`(백업 `20260914-213430`) → `stats.js`(`20260914-213531`) · 운영 DB 판정식 사전 실행 = 진행 중 26 → 0. 남은 것 = Agent dead-letter(1.0.29) · 기록만 7건 = 게이트웨이 `status/BUG_HISTORY.md` 2026-09-14 · 게이트웨이 저장소 변경 미커밋(4파일 + status 3) | Harold 실행 출력 |
 | **링크가드 external4 r1 설치 관통 시험** | **★0914 17:1x 통과·제거 완료.** r1 ZIP `99e1c842…` · 설치(`INSTALL_READY`)·점검·잠금(종료 1)·`/check`(200 pass · 401)·단절 재시작 사유 `credential_scope_unconfirmed`·`sync-once` 종료 4·README 제거 절차 전부 통과 · .65 잔존 0 · 게이트웨이 가동 시각 불변 · **관제 자격 `lg-6d18c5ab15fc783e`(토큰 회전 재사용) 회수 확인 대기**. 전달 = `linkguard/docs/handoff/2026-09-14-bito-external4-r1-install-test-result.md` | Harold 실행 출력 |
 | 링크가드 external4 첫 판 설치 시험 | **★0914 중단·원복.** ZIP 해시 일치(`98e3009d…`) 뒤 한글 이름 항목 2개가 python 해제에서 깨져 `SHA256SUMS` 대조 2건 FAILED → `install-agent.sh` 미실행. .65 입력 토큰 `shred`·업로드 폴더 삭제·로컬 사본 삭제 확인 · **관제 시험 자격 `lg-6d18c5ab15fc783e` 회수 미확인** · 게이트웨이 무변경. 전달 = `linkguard/docs/handoff/2026-09-14-bito-external4-install-test-result.md`. **재시험 = 링크가드 수정본 수령 때(Harold)** | Harold 실행 출력 |
 | 이터널그룹 | 전달 자료 준비 완료: `C:\Users\ceo\Downloads\Bito-Agent-Integration-20260914.zip`(148,954바이트 · 6파일 · 원본 해시 일치). **발송은 Harold · 회신 대기** | 이 문서 §3 |
@@ -222,6 +223,7 @@ profiles:
 ```
 
 - ★0914 갱신: A9-나는 **보류**(FEATURE-GW-SECURITY §8-8 재개 조건). §4 3번으로 시작하지 않는다.
+- ★0914 아이티앤 진행 중 26건: web/api 배포 완료. 첫 조치 = 사용량 통계 9/9 진행 중 0 · 운영 대시보드 itensms03 지연 해소 화면 확인(미확인이면). 다음 축 = Agent 반영 불가 결과 dead-letter(1.0.29 · 게이트웨이 `grpc_server.go:405-412` 실패 ACK 수용과 함께 설계). 접수 2번(72시간 자체 실패)은 별도 축.
 - ★0914 external4: r1 설치 관통 시험 **통과·제거 완료**(§1 표). 남은 것 = 관제 자격 `lg-6d18c5ab15fc783e` 회수 여부 확인 한 가지. 게이트웨이 연결 실시험은 Harold 지시 때만.
 - external3 시험 연결은 종결이다. 링크가드 쪽 회신이 오면 그 내용만 검토한다(재시험은 Harold 지시 때만 · §2 절차).
 - 이터널그룹 회신이 오면 §3 순서.

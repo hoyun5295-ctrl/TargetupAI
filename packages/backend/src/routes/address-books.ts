@@ -4,6 +4,9 @@ import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { cellToString } from '../utils/normalize';
+// ★ 2026-09-14 박성용 접수(주소록 번호 앞 0 생략): 업로드 파서가 CSV·엑셀의 앞 0을 숫자로 떨어뜨린다.
+//   저장·추가·조회·다운로드 네 곳이 같은 복원 규칙(휴대폰 10자리만 0 붙임)을 쓴다. 옛 저장분은 DB를 고치지 않고 읽을 때 붙인다.
+import { normalizeAgencyPhone as normalizeBookPhone } from '../utils/normalize-phone';
 
 const router = Router();
 
@@ -62,7 +65,8 @@ router.get('/:groupName', async (req: Request, res: Response) => {
       params
     );
 
-    return res.json({ success: true, contacts: result.rows });
+    const contacts = result.rows.map((r: any) => ({ ...r, phone: normalizeBookPhone(r.phone) }));
+    return res.json({ success: true, contacts });
   } catch (error) {
     console.error('주소록 연락처 조회 에러:', error);
     return res.status(500).json({ error: '서버 오류' });
@@ -110,7 +114,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     let insertCount = 0;
     for (const contact of contacts) {
-      const phone = String(contact.phone || '').replace(/\D/g, '');
+      const phone = normalizeBookPhone(contact.phone);
       if (phone.length >= 10) {
         // ★ D150-3 (2026-05-09) PDF #5: cellToString 컨트롤타워(normalize.ts) 사용 — 인라인 safeStr 폐기
         await query(
@@ -163,7 +167,7 @@ router.get('/:groupName/export', async (req: Request, res: Response) => {
 
     // xlsx 변환 — 컬럼 라벨 한국어 명시
     const rows = result.rows.map((r: any) => ({
-      '번호': r.phone || '',
+      '번호': normalizeBookPhone(r.phone),
       '이름': r.name || '',
       '기타1': r.extra1 || '',
       '기타2': r.extra2 || '',
@@ -243,7 +247,7 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
       ownerParams,
     );
     const existingPhones = new Set<string>(
-      existingRes.rows.map((r: any) => String(r.phone || '')),
+      existingRes.rows.map((r: any) => normalizeBookPhone(r.phone)),
     );
 
     let appendedCount = 0;
@@ -251,7 +255,7 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
     let invalidCount = 0;
 
     for (const contact of contacts) {
-      const phone = String(contact.phone || '').replace(/\D/g, '');
+      const phone = normalizeBookPhone(contact.phone);
       if (phone.length < 10) {
         invalidCount++;
         continue;

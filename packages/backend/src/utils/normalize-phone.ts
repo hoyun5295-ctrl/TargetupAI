@@ -30,7 +30,10 @@ export function restoreMobileLeadingZero(digits: string): string {
   return /^1[016789]\d{8}$/.test(String(digits || '')) ? `0${digits}` : String(digits || '');
 }
 
-/** 대행발송 명단·요청서 번호 정규화 = 숫자만 남기고 휴대폰 0 유실 복원. 소비처 = 대행발송 접수·파서 경로만 */
+/**
+ * 명단 번호 정규화 = 숫자만 남기고 휴대폰 0 유실 복원.
+ * 소비처 = 대행발송 접수·파서 경로 + 주소록(routes/address-books.ts 저장·추가·조회·다운로드 · ★2026-09-14 박성용 접수).
+ */
 export function normalizeAgencyPhone(raw: any): string {
   return restoreMobileLeadingZero(normalizePhone(String(raw ?? '')));
 }
