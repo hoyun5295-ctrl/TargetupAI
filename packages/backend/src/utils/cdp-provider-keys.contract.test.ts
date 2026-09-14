@@ -509,3 +509,22 @@ describe('우커머스 연동 화면 (★2026-09-14 W4 · 설계서 docs/2026-09
     }
   });
 });
+
+describe('우커머스 1클릭 연결 화면 (★2026-09-14 ① · wc-auth 관리자 승인)', () => {
+  const page = () => read(path.join(FRONTEND_SRC, 'pages/CdpSettingsPage.tsx'));
+  const forms = () => read(path.join(FRONTEND_SRC, 'components/cdp/CdpConnectForms.tsx'));
+  it('페이지가 연결 URL 을 받아 새 창(팝업)으로 열고 · 승인 완료 메시지를 받아 상태를 다시 읽는다', () => {
+    const src = page();
+    expect(src).toContain("fetch('/api/woocommerce/connect-url'");
+    expect(src).toMatch(/window\.open\([^)]*'woocommerce_auth'/);
+    expect(src).toContain("hanjullo:woocommerce");
+    expect(src).toMatch(/addEventListener\('message'/);
+  });
+  it('폼의 1순위 동작은 관리자 승인 연결 1클릭 · REST 키 직접 입력은 접힌 고급 옵션', () => {
+    const src = forms();
+    expect(src).toContain('onAuthorize');
+    expect(src).toMatch(/관리자 승인/);
+    expect(src).toMatch(/직접 입력/);
+    expect(src).toContain('plugin.zip');
+  });
+});

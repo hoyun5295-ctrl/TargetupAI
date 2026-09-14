@@ -116,3 +116,92 @@ describe('W5 — 상품 API 접점(mall-products · 이름 매칭 · AI 자동�
     expect(block).toContain('normalizeWooStoreProduct(');
   });
 });
+
+describe('① 1클릭 연결 라우트 — connect-url(관리자) · auth-callback(공개 · 우커머스 서버가 POST) · auth-return(공개 · 브라우저) · plugin.zip', () => {
+  const route = () => code('routes/woocommerce.ts');
+  it('공개 라우트(auth-callback · auth-return · plugin.zip)는 authenticate 앞에 있다', () => {
+    const r = route();
+    const auth = r.indexOf('router.use(authenticate)');
+    for (const p of ["'/auth-callback'", "'/auth-return'", "'/plugin.zip'"]) {
+      expect(r.indexOf(p), p).toBeGreaterThan(-1);
+      expect(r.indexOf(p), `${p} 가 authenticate 뒤에 있다`).toBeLessThan(auth);
+    }
+    expect(r.indexOf("'/connect-url'")).toBeGreaterThan(auth);
+  });
+  it('connect-url: 몰 저장(pending) → 서명 state + 1회용 state 행(oauth_state) → authorize_url(몰 식별자로만 만든다 · 입력 URL 그대로 리다이렉트 금지)', () => {
+    const r = route();
+    const block = r.slice(r.indexOf("'/connect-url'"), r.indexOf("'/rotate-secret'"));
+    expect(block).toContain('saveWooCredentials(');
+    expect(block).toContain('signWooAuthState(');
+    expect(block).toContain("'oauth_state'");
+    expect(block).toContain('buildWooAuthorizeUrl(integ.siteUrl');
+    expect(block).toContain('authorize_url:');
+  });
+  it('auth-callback: state 서명 검증 → 1회용 행 삭제 → 키 저장 → 즉시 200 → 뒤에 검증 1콜·웹훅 4개 생성·백필(백그라운드)', () => {
+    const r = route();
+    const block = r.slice(r.indexOf("'/auth-callback'"), r.indexOf("'/auth-return'"));
+    expect(block).toContain('verifyWooAuthState(');
+    expect(block).toContain('DELETE FROM cdp_webhook_deliveries');
+    expect(block).toContain('saveWooRestKeysFromAuth(');
+    const respond = block.indexOf('res.json({ success: true');
+    expect(respond).toBeGreaterThan(block.indexOf('saveWooRestKeysFromAuth('));
+    expect(block.indexOf('verifyWooConnection(')).toBeGreaterThan(respond);
+    expect(block.indexOf('ensureWooWebhooks(')).toBeGreaterThan(block.indexOf('verifyWooConnection('));
+    expect(block.indexOf('backfillWooCustomers(')).toBeGreaterThan(block.indexOf('ensureWooWebhooks('));
+    expect(block).toContain('recordWooSetupError(');
+    // 검증 실패 state 는 400 · 위조된 콜백이 키를 꽂지 못한다
+    expect(block).toMatch(/status\(400\)/);
+  });
+  it('auth-return: DB 쓰기 없이 서명만 보고 HTML(부모 창에 postMessage · 자동 닫기) · success=0 은 취소 안내', () => {
+    const r = route();
+    const block = r.slice(r.indexOf("'/auth-return'"), r.indexOf("'/plugin.zip'"));
+    expect(block).not.toMatch(/INSERT|UPDATE|DELETE/);
+    expect(block).toContain('renderWooReturnHtml(');
+    expect(r).toContain('postMessage');
+    expect(r).toContain("hanjullo:woocommerce");
+    expect(block).toMatch(/취소/);
+  });
+  it('plugin.zip: 저장 zip 작성기로 wp-plugin 폴더를 묶어 application/zip 으로 준다(비밀 없음 · 캐시)', () => {
+    const r = route();
+    expect(r).toContain('buildWooPluginZip(');
+    expect(r).toContain("'application/zip'");
+  });
+  it('disconnect 는 몰의 웹훅을 먼저 지우려 시도한다(실패해도 해제는 진행)', () => {
+    const r = route();
+    const block = r.slice(r.indexOf("'/disconnect'"), r.indexOf('export default router'));
+    expect(block.indexOf('removeWooWebhooks(')).toBeLessThan(block.indexOf('disconnectWoo('));
+  });
+});
+
+describe('② 플러그인 — wp-plugin/hanjullo-woocommerce 소스 계약', () => {
+  const PLUGIN = resolve(SRC, '..', 'wp-plugin', 'hanjullo-woocommerce');
+  const php = () => readFileSync(resolve(PLUGIN, 'hanjullo-woocommerce.php'), 'utf-8');
+  it('플러그인 헤더 · 직접 접근 차단 · 설정 화면 · head 스크립트 · 회원 식별 · REST 수신동의 노출 필터 2종', () => {
+    const p = php();
+    expect(p).toMatch(/^\s*<\?php/);
+    expect(p).toMatch(/Plugin Name:\s*한줄로/);
+    expect(p).toContain("defined( 'ABSPATH' ) || exit");
+    expect(p).toContain("add_action( 'wp_head'");
+    expect(p).toContain("add_action( 'wp_footer'");
+    expect(p).toContain('data-hjl-key=');
+    expect(p).toContain('window.hjl.identify(');
+    expect(p).toContain("add_filter( 'woocommerce_rest_prepare_customer'");
+    expect(p).toContain("add_filter( 'woocommerce_rest_prepare_shop_order_object'");
+    expect(p).toContain('mssms_agreement');
+    expect(p).toContain("add_action( 'admin_menu'");
+  });
+  it('SDK 경로·버전은 서버(cdp-sdk-script 와 같은 값)를 쓰고 · 모델명·서버 IP·비밀값이 없다', () => {
+    const p = php();
+    expect(p).toMatch(/https:\/\/app\.hanjul\.ai\/api\/cdp\/sdk\/v\d+\.\d+\.\d+\/hanjul\.min\.js/);
+    expect(p).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic/);
+    expect(p).not.toMatch(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
+    expect(p).not.toMatch(/consumer_secret|webhook_secret/);
+    // 출력 이스케이프
+    expect(p).toContain('esc_attr(');
+    expect(p).toContain('esc_url(');
+  });
+  it('readme.txt 가 있고 플러그인 폴더 파일이 zip 작성기 입력이 된다(routes 가 buildWooPluginZip 을 부른다)', () => {
+    expect(existsSync(resolve(PLUGIN, 'readme.txt'))).toBe(true);
+    expect(code('utils/woocommerce-plugin-zip.ts')).toContain('buildStoredZip(');
+  });
+});

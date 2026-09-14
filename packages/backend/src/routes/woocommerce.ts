@@ -19,6 +19,7 @@
  */
 
 import { Router, Request, Response, json } from 'express';
+import { randomBytes } from 'crypto';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
@@ -36,7 +37,14 @@ import {
   backfillWooOrders,
   getWooStatus,
   disconnectWoo,
+  saveWooRestKeysFromAuth,
+  ensureWooWebhooks,
+  removeWooWebhooks,
+  recordWooSetupError,
 } from '../utils/woocommerce-client';
+// ★ ① 1클릭 연결 — 우커머스 내장 앱 인증(/wc-auth/v1/authorize) · state 서명 CT · 플러그인 zip
+import { signWooAuthState, verifyWooAuthState, buildWooAuthorizeUrl } from '../utils/woocommerce-auth-state';
+import { buildWooPluginZip, WOO_PLUGIN_ZIP_NAME } from '../utils/woocommerce-plugin-zip';
 
 const router = Router();
 
@@ -128,7 +136,133 @@ router.post(['/webhook/:mallId', '/webhook'], json({ limit: '1mb', verify: (req:
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 회사 admin 인증 — credentials / connect / rotate-secret / status / disconnect
+// 앱 인증(wc-auth) 콜백 · 되돌아오는 화면 · 플러그인 zip — 공개(인증 미들웨어 앞)
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /api/woocommerce/auth-callback  (우커머스 서버가 JSON POST — 관리자가 승인한 직후)
+ * body: { key_id, user_id(=우리 state), consumer_key, consumer_secret, key_permissions }
+ * → state 서명 검증 → 1회용 state 행 삭제 → 키 저장 → 즉시 200(우커머스가 200 을 받아야 승인 화면이 끝난다)
+ * → 뒤에서 검증 1콜 · 웹훅 4개 자동 생성 · 회원·주문 백필. 실패는 meta.woo_sync_error(화면 "조치 필요").
+ */
+router.post('/auth-callback', async (req: Request, res: Response) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const st = verifyWooAuthState(String(body.user_id || ''));
+    if (!st) {
+      console.warn('[WooCommerce auth-callback] state 검증 실패 — 위조·만료 가능. keys=', Object.keys(body).slice(0, 6).join(','));
+      return res.status(400).json({ success: false, error: 'state 검증 실패' });
+    }
+    const consumed = await query(
+      `DELETE FROM cdp_webhook_deliveries
+       WHERE company_id = $1::uuid AND source = 'woocommerce' AND webhook_event = 'oauth_state' AND idempotency_key = $2
+       RETURNING id`,
+      [st.companyId, `state:${st.nonce}`],
+    );
+    if (consumed.rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'state 가 이미 사용됐거나 발급되지 않았습니다.' });
+    }
+    const consumerKey = String(body.consumer_key || '').trim();
+    const consumerSecret = String(body.consumer_secret || '').trim();
+    if (!consumerKey || !consumerSecret) {
+      return res.status(400).json({ success: false, error: 'consumer_key 또는 consumer_secret 이 없습니다.' });
+    }
+    const ok = await saveWooRestKeysFromAuth(st.companyId, st.mallId, { consumerKey, consumerSecret, permissions: String(body.key_permissions || '') });
+    if (!ok) return res.status(400).json({ success: false, error: '연동 행이 없습니다(해제됐거나 저장 전).' });
+    console.log(`[WooCommerce auth-callback] 키 수신 company=${st.companyId} mall=${st.mallId} permissions=${String(body.key_permissions || '')}`);
+    res.json({ success: true });
+
+    // 무거운 일은 응답 뒤 — 검증 1콜(active) → 웹훅 4개 → 회원 → 주문
+    void (async () => {
+      try {
+        await verifyWooConnection(st.companyId, st.mallId);
+        const w = await ensureWooWebhooks(st.companyId, st.mallId);
+        const c = await backfillWooCustomers(st.companyId, st.mallId);
+        const o = await backfillWooOrders(st.companyId, st.mallId);
+        console.log(`[WooCommerce auth-callback] 자동 설정 완료 mall=${st.mallId} webhooks +${w.created}/=${w.existing} customers=${c.imported}${c.truncated ? '(truncated)' : ''} orders=${o.imported}`);
+      } catch (e: any) {
+        const code = e instanceof WooApiError ? e.code : 'unknown';
+        await recordWooSetupError(st.companyId, st.mallId, code, String(e?.message || 'unknown')).catch(() => undefined);
+        console.error(`[WooCommerce auth-callback] 자동 설정 실패 mall=${st.mallId} code=${code} — ${e?.message || e}`);
+      }
+    })();
+    return;
+  } catch (err: any) {
+    console.error('[WooCommerce auth-callback] 오류:', err);
+    if (!res.headersSent) return res.status(500).json({ success: false, error: err?.message || '콜백 처리 실패' });
+    return;
+  }
+});
+
+/**
+ * GET /api/woocommerce/auth-return?success=1&user_id=<state>  (관리자 브라우저 — 승인 뒤 돌아오는 창)
+ * → DB 쓰기 없음. 서명만 보고 안내 HTML(부모 창에 postMessage · 자동 닫기). success=0 = 승인 취소.
+ */
+router.get('/auth-return', (req: Request, res: Response) => {
+  const st = verifyWooAuthState(String(req.query?.user_id || ''));
+  const success = String(req.query?.success || '') === '1';
+  if (!st) {
+    return res.status(400).send(renderWooReturnHtml('error', '연결 정보를 확인할 수 없습니다. 한줄로 화면에서 다시 시도해주세요.', null, false));
+  }
+  if (!success) {
+    return res.send(renderWooReturnHtml('error', `${st.mallId} 연결 승인이 취소되었습니다. 이 창을 닫고 다시 시도해주세요.`, st.mallId, false));
+  }
+  return res.send(renderWooReturnHtml('ok', `${st.mallId} 우커머스 관리자 승인이 완료되었습니다. 주문·회원을 가져오는 중입니다. 이 창은 자동으로 닫힙니다.`, st.mallId, true));
+});
+
+/**
+ * GET /api/woocommerce/plugin.zip  (공개 · 비밀값 없음)
+ * → 한줄로 우커머스 플러그인(수집 스크립트 자동 삽입 · 회원 식별 · 수신동의 REST 노출). 워드프레스 "플러그인 업로드"에 그대로.
+ */
+router.get('/plugin.zip', (_req: Request, res: Response) => {
+  try {
+    const zip = buildWooPluginZip();
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${WOO_PLUGIN_ZIP_NAME}"`);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    return res.send(zip);
+  } catch (err: any) {
+    console.error('[WooCommerce plugin.zip] 오류:', err);
+    return res.status(500).json({ success: false, error: '플러그인 파일을 준비하지 못했습니다.' });
+  }
+});
+
+/** 승인 뒤 돌아오는 창(카페24 콜백 HTML 과 같은 형태). 부모 창(한줄로 관리)에 완료 신호를 보내고 성공이면 닫는다. */
+function renderWooReturnHtml(status: 'ok' | 'error', message: string, mallId: string | null, success: boolean): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const color = status === 'ok' ? '#059669' : '#dc2626';
+  const icon = status === 'ok' ? '✓' : '✕';
+  const title = status === 'ok' ? '우커머스 연결 완료' : '우커머스 연결 실패';
+  const payload = JSON.stringify({ type: 'hanjullo:woocommerce', mallId, success });
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 · ${title}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f9fafb; margin: 0; padding: 60px 20px; }
+  .card { max-width: 480px; margin: 0 auto; background: white; border-radius: 16px; padding: 40px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); text-align: center; }
+  .icon { width: 56px; height: 56px; border-radius: 50%; background: ${color}; color: white; font-size: 28px; line-height: 56px; margin: 0 auto 20px; }
+  h1 { font-size: 20px; margin: 0 0 12px; color: #111827; }
+  p { color: #6b7280; font-size: 14px; line-height: 1.6; margin: 0; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${icon}</div>
+    <h1>${esc(title)}</h1>
+    <p>${esc(message)}</p>
+  </div>
+  <script>
+    try { if (window.opener) { window.opener.postMessage(${payload}, '*'); } } catch (e) {}
+    ${success ? 'setTimeout(function () { window.close(); }, 1500);' : ''}
+  </script>
+</body>
+</html>`;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 회사 admin 인증 — connect-url / credentials / connect / rotate-secret / status / disconnect
 // ════════════════════════════════════════════════════════════════════
 
 router.use(authenticate);
@@ -234,6 +368,46 @@ router.post('/connect', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/woocommerce/connect-url   (★ ① 1클릭 연결 시작)
+ * body: { site_url, consent_meta_key? }
+ * → 몰 행 저장(pending · 키 없이) → 서명 state + 1회용 state 행 → 몰의 앱 인증 URL(관리자가 새 창에서 승인).
+ *   authorize URL 은 저장된 몰 주소로만 만든다(입력값을 그대로 리다이렉트하지 않는다 · 오픈 리다이렉트 차단).
+ */
+router.post('/connect-url', async (req: Request, res: Response) => {
+  try {
+    const companyId = gateAdmin(req, res);
+    if (!companyId) return;
+    if (!(await isCdpEnabledForPlan(companyId))) return res.status(403).json(PLAN_LOCKED);
+    const siteUrl = String(req.body?.site_url || '').trim();
+    if (!siteUrl) return res.status(400).json({ success: false, error: '쇼핑몰 주소(site_url)를 입력해주세요.' });
+    const saved = await saveWooCredentials(companyId, { siteUrl, consumerKey: '', consumerSecret: '', consentMetaKey: String(req.body?.consent_meta_key || '') });
+    const integ = await getWooIntegration(companyId, saved.mallId);
+    if (!integ) return res.status(500).json({ success: false, error: '몰 저장 뒤 조회에 실패했습니다.' });
+
+    const nonce = randomBytes(16).toString('hex');
+    await query(
+      `INSERT INTO cdp_webhook_deliveries (
+        id, company_id, source, webhook_event, idempotency_key, payload, status, created_at
+      ) VALUES (
+        gen_random_uuid(), $1::uuid, 'woocommerce', 'oauth_state', $2, $3::jsonb, 'received', NOW()
+      )
+      ON CONFLICT (company_id, source, idempotency_key) DO UPDATE SET payload = EXCLUDED.payload, created_at = NOW()`,
+      [companyId, `state:${nonce}`, JSON.stringify({ mall_id: saved.mallId })],
+    );
+    const state = signWooAuthState({ companyId, mallId: saved.mallId, nonce, ts: Date.now() });
+    return res.json({
+      success: true,
+      mall_id: saved.mallId,
+      authorize_url: buildWooAuthorizeUrl(integ.siteUrl, state),
+      webhook_url: saved.webhookUrl,
+    });
+  } catch (err) {
+    console.error('[WooCommerce /connect-url] 오류:', err);
+    return sendWooError(res, err);
+  }
+});
+
+/**
  * POST /api/woocommerce/rotate-secret
  * body: { mall_id } → 웹훅 secret 재발급(옛 secret 즉시 폐기 · 고객사가 우커머스 웹훅 설정을 갱신해야 다시 받는다).
  */
@@ -277,6 +451,9 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
     if (!companyId) return;
     const mallId = normalizeWooMallId(String(req.query?.mall_id || ''));
     if (!mallId) return res.status(400).json({ success: false, error: '몰 식별자(mall_id)가 올바르지 않습니다.' });
+    // 1클릭 연결이 만든 웹훅은 몰에서도 지운다(최선 노력 · 실패해도 해제는 진행)
+    const removed = await removeWooWebhooks(companyId, mallId).catch(() => 0);
+    if (removed > 0) console.log(`[WooCommerce /disconnect] 웹훅 ${removed}개 제거 mall=${mallId}`);
     const ok = await disconnectWoo(companyId, mallId);
     return res.json({ success: ok });
   } catch (err: any) {

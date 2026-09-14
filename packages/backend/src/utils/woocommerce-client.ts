@@ -22,7 +22,8 @@ import { randomBytes } from 'crypto';
 import { query } from '../config/database';
 import { syncOrder } from './cdp-orders';
 import { identifyCustomer, parseConsentValue } from './cdp-identity';
-import { WOO_SOURCE, normalizeWooMallId, mapWooCustomerToCdp, mapWooOrderToCdp, type WooTopicResource } from './woocommerce-core';
+import { WOO_SOURCE, normalizeWooMallId, wooSiteOrigin, mapWooCustomerToCdp, mapWooOrderToCdp, type WooTopicResource } from './woocommerce-core';
+export { wooSiteOrigin };
 import { normalizeWooStoreProduct, type MallProduct } from './mall-product-normalize';
 
 // ════════════════════════════════════════════════════════════════════
@@ -36,6 +37,8 @@ export const MAX_CUSTOMER_PAGES = 50;               // 회원 백필 상한(5,00
 export const MAX_ORDER_PAGES = 400;          // 연결 시 백필 주문 상한(40,000건)
 export const MAX_SYNC_PAGES = 50;            // 주기 수집 한 회차 상한(5,000건) — modified_after 를 서버가 모를 때 90일치가 통째로 오는 것을 막는다
 export const STORE_PAGE_MAX = 100;                  // Store API per_page 상한
+/** 우리가 받는 웹훅 주제 4종 — 1클릭 연결이 REST 로 자동 생성한다(화면 안내 문안과 같은 목록) */
+export const WOO_WEBHOOK_TOPICS = ['order.created', 'order.updated', 'customer.created', 'customer.updated'] as const;
 const HTTP_TIMEOUT_MS = 20000;
 const USER_AGENT = 'Hanjullo-CDP/1.0';
 
@@ -79,20 +82,8 @@ function withParams(base: string, params: UrlParams): string {
   return u.toString();
 }
 
-/**
- * 요청 기준 주소(origin). 몰 주소(URL)면 그 origin 을 https 로, 호스트만 오면 https://{host}.
- * 저장된 몰 주소(www 포함)를 그대로 쓰는 이유: 식별자는 www 를 뗀 값이라 그리로 보내면 301 → Authorization 헤더가 리다이렉트에 묻힌다.
- */
-export function wooSiteOrigin(siteOrHost: string): string {
-  const s = String(siteOrHost || '').trim();
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
-    try { return `https://${new URL(s).hostname.toLowerCase()}`; } catch { /* 아래 폴백 */ }
-  }
-  return `https://${s.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase()}`;
-}
-
 /** REST v3 = {origin}/wp-json/wc/v3/{자원}. 인증은 헤더로만 — 여기엔 비밀이 없다. */
-export function wooRestUrl(siteOrHost: string, resource: 'orders' | 'customers' | 'products', params: UrlParams): string {
+export function wooRestUrl(siteOrHost: string, resource: 'orders' | 'customers' | 'products' | 'webhooks' | `webhooks/${string}`, params: UrlParams): string {
   return withParams(`${wooSiteOrigin(siteOrHost)}/wp-json/wc/v3/${resource}`, params);
 }
 
@@ -136,6 +127,10 @@ export interface WooIntegration {
   consumerKey: string;
   consumerSecret: string;
   consentMetaKey: string | null;
+  /** 앱 인증으로 받은 키 권한(read · write · read_write) · 직접 입력이면 '' */
+  keyPermissions: string;
+  /** 1클릭 연결이 만든 웹훅 id(해제 시 제거) */
+  webhookIds: number[];
   syncError: { message: string; code: string; at: string | null } | null;
 }
 
@@ -143,6 +138,8 @@ interface WooMeta {
   woo_site_url?: string;
   woo_consumer_key?: string;
   woo_consumer_secret?: string;
+  woo_key_permissions?: string;
+  woo_webhook_ids?: number[];
   woo_consent_meta_key?: string;
   woo_sync_error?: string;
   woo_sync_error_code?: string;
@@ -165,6 +162,8 @@ function toIntegration(r: any): WooIntegration {
     consumerKey: meta.woo_consumer_key || '',
     consumerSecret: meta.woo_consumer_secret || '',
     consentMetaKey: meta.woo_consent_meta_key || null,
+    keyPermissions: meta.woo_key_permissions || '',
+    webhookIds: Array.isArray(meta.woo_webhook_ids) ? meta.woo_webhook_ids.map(Number).filter((n) => Number.isFinite(n)) : [],
     syncError: meta.woo_sync_error
       ? { message: meta.woo_sync_error, code: meta.woo_sync_error_code || 'unknown', at: meta.woo_sync_error_at || null }
       : null,
@@ -260,6 +259,39 @@ export async function rotateWooWebhookSecret(companyId: string, mallId: string):
   );
   if (r.rows.length === 0) throw new WooApiError('no_integration');
   return { webhookSecret: secret, webhookUrl: buildWooWebhookUrl(mallId) };
+}
+
+/**
+ * 앱 인증(wc-auth) 콜백이 준 REST 키 저장 — 해제(revoked) 아닌 행에만 병합. 행이 없으면 false(콜백 위조·해제 뒤 도착).
+ */
+export async function saveWooRestKeysFromAuth(
+  companyId: string,
+  mallId: string,
+  keys: { consumerKey: string; consumerSecret: string; permissions: string },
+): Promise<boolean> {
+  const r = await query(
+    `UPDATE company_integrations
+     SET meta = COALESCE(meta, '{}'::jsonb) || $3::jsonb, updated_at = NOW()
+     WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2 AND status <> 'revoked'
+     RETURNING id`,
+    [companyId, mallId, JSON.stringify({ woo_consumer_key: keys.consumerKey, woo_consumer_secret: keys.consumerSecret, woo_key_permissions: keys.permissions })],
+  );
+  return r.rows.length > 0;
+}
+
+/** 자동 설정(검증·웹훅 생성·백필) 실패 사유 — 주기 수집 실패와 같은 meta 키에 남겨 화면 "조치 필요" 경로 하나로 보이게 한다. */
+export async function recordWooSetupError(companyId: string, mallId: string, code: string, message: string): Promise<void> {
+  await query(
+    `UPDATE company_integrations
+        SET meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object(
+              'woo_sync_error', $3::text,
+              'woo_sync_error_code', $4::text,
+              'woo_sync_error_at', to_char(NOW() AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD"T"HH24:MI:SS')
+            ),
+            updated_at = NOW()
+      WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2`,
+    [companyId, mallId, String(message || '').slice(0, 500), code],
+  );
 }
 
 /** 회사 + 몰 행(해제된 몰은 없음으로). 어댑터·워커·라우트가 전부 이 함수로 몰을 잡는다(타사 몰 오적재 차단). */
@@ -363,9 +395,7 @@ interface WooPage { items: any[]; totalPages: number }
 async function fetchWooPage(integ: WooIntegration, resource: 'orders' | 'customers', params: UrlParams): Promise<WooPage> {
   if (!hasKeys(integ)) throw new WooApiError('no_keys');
   const url = wooRestUrl(wooRestBase(integ), resource, params);
-  const res = await wooGet(url, {
-    Authorization: wooBasicAuth(integ.consumerKey, integ.consumerSecret),
-  }, 0 /* 리다이렉트 따라가면 Authorization 헤더가 타 호스트로 흘러갈 수 있다 */);
+  const res = await wooRequest('GET', url, authHeaders(integ), undefined, 0 /* 리다이렉트 따라가면 Authorization 헤더가 타 호스트로 흘러갈 수 있다 */);
   if (!Array.isArray(res.data)) throw new WooApiError('bad_response', undefined, Number(res.status));
   const totalPages = parseInt(String(res.headers?.['x-wp-totalpages'] ?? ''), 10);
   return { items: res.data, totalPages: Number.isFinite(totalPages) && totalPages > 0 ? totalPages : 1 };
@@ -381,16 +411,24 @@ function wooRestBase(integ: Pick<WooIntegration, 'mallId' | 'siteUrl'>): string 
   return normalizeWooMallId(host) === integ.mallId ? origin : `https://${integ.mallId}`;
 }
 
-/** GET 1회 — 네트워크 오류·HTTP 상태를 WooApiError 로 통일. Authorization 은 호출부가 headers 로 넣는다. */
-async function wooGet(url: string, headers: Record<string, string>, maxRedirects: number): Promise<any> {
+const authHeaders = (integ: WooIntegration): Record<string, string> => ({ Authorization: wooBasicAuth(integ.consumerKey, integ.consumerSecret) });
+
+/**
+ * HTTP 1회 — 네트워크 오류·HTTP 상태를 WooApiError 로 통일. Authorization 은 호출부가 headers 로 넣는다.
+ * GET 은 axios.get · 그 밖(POST·PUT·DELETE)은 axios.request(JSON 본문).
+ */
+async function wooRequest(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, headers: Record<string, string>, body: unknown, maxRedirects: number): Promise<any> {
   let res: any;
   try {
-    res = await axios.get(url, {
+    const common = {
       headers: { Accept: 'application/json', 'User-Agent': USER_AGENT, ...headers },
       timeout: HTTP_TIMEOUT_MS,
       validateStatus: () => true,
       maxRedirects,
-    });
+    };
+    res = method === 'GET'
+      ? await axios.get(url, common)
+      : await axios.request({ ...common, method, url, data: body === undefined ? undefined : JSON.stringify(body), headers: { ...common.headers, 'Content-Type': 'application/json' } });
   } catch (err: any) {
     throw new WooApiError('network', `${ERROR_MESSAGE.network} (${err?.code || err?.message || 'unknown'})`);
   }
@@ -420,7 +458,7 @@ export interface WooStoreQuery {
 export async function fetchWooStoreProductsRaw(siteOrHost: string, opts: WooStoreQuery): Promise<any[]> {
   const perPage = Math.min(Math.max(opts.limit ?? 50, 1), STORE_PAGE_MAX);
   const url = wooStoreUrl(siteOrHost, { search: opts.q, per_page: perPage, page: opts.page, include: opts.ids });
-  const res = await wooGet(url, {}, 3);
+  const res = await wooRequest('GET', url, {}, undefined, 3);
   if (!Array.isArray(res.data)) throw new WooApiError('bad_response', undefined, Number(res.status));
   return res.data;
 }
@@ -534,6 +572,76 @@ export async function backfillWooOrders(companyId: string, mallId: string, opts?
 export async function backfillWooCustomers(companyId: string, mallId: string): Promise<WooSyncResult & { truncated: boolean }> {
   const integ = await requireIntegration(companyId, mallId);
   return walkPages(integ, 'customers', 'customer', { per_page: PAGE_SIZE, orderby: 'registered_date', order: 'desc' }, MAX_CUSTOMER_PAGES);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 웹훅 자동 생성·제거(REST · 1클릭 연결) — 고객사가 관리자에서 4개를 손으로 만들지 않게
+// ════════════════════════════════════════════════════════════════════
+
+export interface WooWebhookEnsureResult { created: number; existing: number; ids: number[] }
+
+/**
+ * 몰에 우리 웹훅 4개가 있게 한다(멱등): 목록에서 같은 수신 주소·주제가 있으면 두고, 없으면 만든다.
+ * 필요 권한 = 쓰기(앱 인증 scope read_write). secret = 이 몰 행의 webhook_secret(수신 라우트가 대조하는 값).
+ * ⛔ 웹훅 REST 본문 필드(name · topic · delivery_url · secret · status · api_version)는 문서 기준 · 실 응답 1건으로 확정(게이트 ②).
+ */
+export async function ensureWooWebhooks(companyId: string, mallId: string): Promise<WooWebhookEnsureResult> {
+  const integ = await requireIntegration(companyId, mallId);
+  if (!hasKeys(integ)) throw new WooApiError('no_keys');
+  if (!integ.webhookSecret) throw new WooApiError('no_integration', '웹훅 secret 이 없습니다. 몰을 다시 저장해주세요.');
+  const base = wooRestBase(integ);
+  const deliveryUrl = buildWooWebhookUrl(mallId);
+  const listRes = await wooRequest('GET', wooRestUrl(base, 'webhooks', { per_page: 100 }), authHeaders(integ), undefined, 0);
+  const existingList: any[] = Array.isArray(listRes.data) ? listRes.data : [];
+  const ids: number[] = [];
+  let created = 0;
+  let existing = 0;
+  for (const topic of WOO_WEBHOOK_TOPICS) {
+    const found = existingList.find((w) => String(w?.topic) === topic && String(w?.delivery_url) === deliveryUrl);
+    if (found) {
+      existing++;
+      if (found.id != null) ids.push(Number(found.id));
+      continue;
+    }
+    const res = await wooRequest('POST', wooRestUrl(base, 'webhooks', {}), authHeaders(integ), {
+      name: `한줄로 · ${topic}`,
+      topic,
+      delivery_url: deliveryUrl,
+      secret: integ.webhookSecret,
+      status: 'active',
+      api_version: 'wp_api_v3',
+    }, 0);
+    created++;
+    if (res.data?.id != null) ids.push(Number(res.data.id));
+  }
+  await query(
+    `UPDATE company_integrations SET meta = COALESCE(meta, '{}'::jsonb) || $3::jsonb, updated_at = NOW()
+     WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2`,
+    [companyId, mallId, JSON.stringify({ woo_webhook_ids: ids })],
+  );
+  return { created, existing, ids };
+}
+
+/** 해제 시 우리가 만든 웹훅을 몰에서 지운다(최선 노력 · 실패는 건너뜀 · 지운 개수 반환). 키 없으면 0. */
+export async function removeWooWebhooks(companyId: string, mallId: string): Promise<number> {
+  const integ = await getWooIntegration(companyId, mallId);
+  if (!integ || !hasKeys(integ) || integ.webhookIds.length === 0) return 0;
+  const base = wooRestBase(integ);
+  let removed = 0;
+  for (const id of integ.webhookIds) {
+    try {
+      await wooRequest('DELETE', wooRestUrl(base, `webhooks/${id}`, { force: 'true' }), authHeaders(integ), undefined, 0);
+      removed++;
+    } catch (err: any) {
+      console.log(`[WooCommerce] 웹훅 제거 건너뜀 mall=${mallId} id=${id} err=${err?.code || err?.message}`);
+    }
+  }
+  await query(
+    `UPDATE company_integrations SET meta = COALESCE(meta, '{}'::jsonb) - 'woo_webhook_ids', updated_at = NOW()
+     WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2`,
+    [companyId, mallId],
+  ).catch(() => undefined);
+  return removed;
 }
 
 /**

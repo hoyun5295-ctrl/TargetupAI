@@ -243,6 +243,7 @@ export default function CdpSettingsPage() {
   const [wooConsentMetaKey, setWooConsentMetaKey] = useState('');
   const [showWooSecret, setShowWooSecret] = useState(false);
   const [wooConnecting, setWooConnecting] = useState(false);
+  const [wooAuthorizing, setWooAuthorizing] = useState(false);
   const [wooIssued, setWooIssued] = useState<WooIssuedSecret | null>(null);
   const [imwebStatus, setImwebStatus] = useState<ImwebStatus | null>(null);
   const [imwebSiteCode, setImwebSiteCode] = useState('');
@@ -528,6 +529,20 @@ export default function CdpSettingsPage() {
   }, [isAdmin]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // ★ 2026-09-14 ① 우커머스 앱 인증 — 승인 뒤 돌아오는 창(/api/woocommerce/auth-return)이 부모 창에 완료 신호를 보낸다.
+  //   메시지 내용은 몰 식별자·성공 여부뿐이라 출처 검증 없이 형태만 본다(비밀값 없음). 받으면 상태를 다시 읽는다.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const d = e?.data as { type?: string; mallId?: string | null; success?: boolean } | null;
+      if (!d || d.type !== 'hanjullo:woocommerce') return;
+      if (d.success) toast.success(`${d.mallId || '우커머스 몰'} 승인 완료. 회원·주문을 가져오는 중입니다.`);
+      else toast.error('우커머스 승인이 취소되었습니다.');
+      loadAll();
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [loadAll]);
 
   // AI 진단 (비동기 로드 — 모델 영역 backend 분리 정합)
   const loadExplanation = async () => {
@@ -839,6 +854,25 @@ export default function CdpSettingsPage() {
 
   // 우커머스 — 몰 저장(웹훅 URL·secret 1회 노출) → REST 키가 있으면 연결 확인 1콜 + 백필. 키가 없으면 첫 웹훅이 연결 신호.
   const wooJsonHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` });
+  // ★ ① 1클릭 — 몰 저장 → 우커머스 앱 인증 URL → 새 창(관리자 로그인·승인) → 우커머스가 키를 우리 서버로 → 웹훅·백필 자동
+  const handleWooAuthorize = async () => {
+    const siteUrl = wooSiteUrl.trim();
+    if (!siteUrl) { toast.error('쇼핑몰 주소를 입력해주세요.'); return; }
+    setWooAuthorizing(true);
+    try {
+      const res = await fetch('/api/woocommerce/connect-url', {
+        method: 'POST',
+        headers: wooJsonHeaders(),
+        body: JSON.stringify({ site_url: siteUrl, consent_meta_key: wooConsentMetaKey.trim() }),
+      });
+      const data = await res.json();
+      if (!data.success || !data.authorize_url) { toast.error(data.error || '연결 시작 실패'); return; }
+      window.open(data.authorize_url, 'woocommerce_auth', 'width=760,height=880');
+      toast.info('새 창에서 몰 관리자로 로그인해 "승인"을 누르면 자동으로 연결됩니다.');
+      await loadAll();
+    } catch (e: any) { toast.error(e?.message || '우커머스 연결 시작 오류'); }
+    finally { setWooAuthorizing(false); }
+  };
   const handleWooConnect = async () => {
     const siteUrl = wooSiteUrl.trim();
     if (!siteUrl) { toast.error('쇼핑몰 주소를 입력해주세요.'); return; }
@@ -1448,6 +1482,8 @@ export default function CdpSettingsPage() {
             onConsentMetaKeyChange={setWooConsentMetaKey}
             showSecret={showWooSecret}
             onToggleSecret={() => setShowWooSecret((v) => !v)}
+            onAuthorize={handleWooAuthorize}
+            authorizing={wooAuthorizing}
             onConnect={handleWooConnect}
             onDisconnect={handleWooDisconnect}
             onRotateSecret={handleWooRotateSecret}

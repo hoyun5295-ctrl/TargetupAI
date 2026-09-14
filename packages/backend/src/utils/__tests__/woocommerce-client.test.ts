@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
-vi.mock('axios', () => ({ default: { get: vi.fn() } }));
+vi.mock('axios', () => ({ default: { get: vi.fn(), request: vi.fn() } }));
 vi.mock('../cdp-identity', async (orig) => ({ ...(await orig<any>()), identifyCustomer: vi.fn(async () => ({ customerId: 'c', linkId: 'l', wasCreated: true, wasMerged: false })) }));
 vi.mock('../cdp-orders', async (orig) => ({ ...(await orig<any>()), syncOrder: vi.fn(async () => ({ customerId: 'c', linkId: 'l', wasCustomerCreated: false, rfmUpdated: true })) }));
 
@@ -35,6 +35,11 @@ import {
   getWooStatus,
   fetchWooStoreProducts,
   fetchWooStoreProductsRaw,
+  WOO_WEBHOOK_TOPICS,
+  saveWooRestKeysFromAuth,
+  ensureWooWebhooks,
+  removeWooWebhooks,
+  recordWooSetupError,
 } from '../woocommerce-client';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
@@ -314,5 +319,89 @@ describe('Store API 상품(공개 · 키 없음) — fetchWooStoreProducts / fet
     await expect(fetchWooStoreProducts(MALL, {})).rejects.toMatchObject({ code: 'bad_response' });
     get.mockResolvedValueOnce({ status: 404, headers: {}, data: {} });
     await expect(fetchWooStoreProducts(MALL, {})).rejects.toMatchObject({ code: 'not_found' });
+  });
+});
+
+describe('① 1클릭 연결 — 앱 인증 콜백 키 저장 · 웹훅 자동 생성(REST) · 해제 시 웹훅 제거', () => {
+  const request = (axios as any).request as ReturnType<typeof vi.fn>;
+  beforeEach(() => { request.mockReset(); });
+
+  it('saveWooRestKeysFromAuth: 해제 아닌 행의 meta 에 키·권한 병합(UPDATE ... RETURNING) · 행 없으면 false', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('UPDATE company_integrations') ? { rows: [{ id: 'row-1' }] } : { rows: [] }));
+    expect(await saveWooRestKeysFromAuth(COMPANY, MALL, { consumerKey: 'ck_a', consumerSecret: 'cs_b', permissions: 'read_write' })).toBe(true);
+    const upd = q.mock.calls.find((c: any[]) => String(c[0]).includes('UPDATE company_integrations'));
+    expect(upd![0]).toMatch(/status <> 'revoked'/);
+    expect(JSON.parse(upd![1][2])).toEqual({ woo_consumer_key: 'ck_a', woo_consumer_secret: 'cs_b', woo_key_permissions: 'read_write' });
+    q.mockImplementation(async () => ({ rows: [] }));
+    expect(await saveWooRestKeysFromAuth(COMPANY, MALL, { consumerKey: 'ck', consumerSecret: 'cs', permissions: 'read' })).toBe(false);
+  });
+
+  it('ensureWooWebhooks: 목록에 없으면 주제 4개를 POST 로 만든다(delivery_url = 몰별 수신 주소 · secret = 행 webhook_secret · active · wp_api_v3) · id 를 meta 에 기록', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: [] });
+    let nextId = 100;
+    request.mockImplementation(async (cfg: any) => ({ status: 201, headers: {}, data: { id: nextId++, topic: JSON.parse(cfg.data).topic, status: 'active' } }));
+    const r = await ensureWooWebhooks(COMPANY, MALL);
+    expect(r).toEqual({ created: 4, existing: 0, ids: [100, 101, 102, 103] });
+    expect(request).toHaveBeenCalledTimes(4);
+    const bodies = request.mock.calls.map((c: any[]) => JSON.parse(c[0].data));
+    expect(bodies.map((b: any) => b.topic)).toEqual(WOO_WEBHOOK_TOPICS);
+    for (const b of bodies) {
+      expect(b.delivery_url).toBe(buildWooWebhookUrl(MALL));
+      expect(b.secret).toBe('a'.repeat(64));
+      expect(b.status).toBe('active');
+      expect(b.api_version).toBe('wp_api_v3');
+      expect(b.name).toContain('한줄로');
+    }
+    const cfg = request.mock.calls[0][0];
+    expect(cfg.method).toBe('POST');
+    expect(cfg.url).toBe('https://www.ilbonimo.com/wp-json/wc/v3/webhooks');
+    expect(cfg.headers.Authorization).toBe(wooBasicAuth('ck_x', 'cs_y'));
+    expect(cfg.maxRedirects).toBe(0);
+    // id 목록은 jsonb 파라미터($3)로 병합된다 — SQL 문자열이 아니라 인자에서 찾는다
+    const upd = q.mock.calls.find((c: any[]) => String(c[0]).includes('UPDATE company_integrations') && String(c[1]?.[2] || '').includes('woo_webhook_ids'));
+    expect(upd).toBeDefined();
+    expect(JSON.parse(upd![1][2])).toEqual({ woo_webhook_ids: [100, 101, 102, 103] });
+  });
+
+  it('ensureWooWebhooks: 같은 수신 주소·주제가 이미 있으면 만들지 않고 셈(재연결 멱등) · 목록 조회는 per_page 100', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: [
+      { id: 7, topic: 'order.created', delivery_url: buildWooWebhookUrl(MALL), status: 'active' },
+      { id: 8, topic: 'order.created', delivery_url: 'https://other.example/hook', status: 'active' },
+    ] });
+    request.mockImplementation(async (cfg: any) => ({ status: 201, headers: {}, data: { id: 200, topic: JSON.parse(cfg.data).topic } }));
+    const r = await ensureWooWebhooks(COMPANY, MALL);
+    expect(r.created).toBe(3);
+    expect(r.existing).toBe(1);
+    expect(r.ids).toContain(7);
+    expect(new URL(get.mock.calls[0][0]).searchParams.get('per_page')).toBe('100');
+  });
+
+  it('ensureWooWebhooks: 쓰기 권한 없는 키(401/403) → WooApiError · REST 키 없는 몰 → no_keys', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    get.mockResolvedValueOnce({ status: 403, headers: {}, data: { code: 'woocommerce_rest_cannot_view' } });
+    await expect(ensureWooWebhooks(COMPANY, MALL)).rejects.toMatchObject({ code: 'forbidden' });
+    q.mockImplementation(async () => ({ rows: [row({ meta: { woo_site_url: 'https://www.ilbonimo.com/' } })] }));
+    await expect(ensureWooWebhooks(COMPANY, MALL)).rejects.toMatchObject({ code: 'no_keys' });
+  });
+
+  it('removeWooWebhooks: meta 의 id 마다 DELETE ?force=true · 실패는 건너뛰고 개수만 · 키 없으면 0', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row({ meta: { ...row().meta, woo_webhook_ids: [100, 101] } })] } : { rows: [] }));
+    request.mockResolvedValueOnce({ status: 200, headers: {}, data: { id: 100 } });
+    request.mockResolvedValueOnce({ status: 404, headers: {}, data: {} });
+    const n = await removeWooWebhooks(COMPANY, MALL);
+    expect(n).toBe(1);
+    expect(request.mock.calls[0][0].method).toBe('DELETE');
+    expect(request.mock.calls[0][0].url).toBe('https://www.ilbonimo.com/wp-json/wc/v3/webhooks/100?force=true');
+    q.mockImplementation(async () => ({ rows: [row({ meta: { woo_site_url: 'https://www.ilbonimo.com/', woo_webhook_ids: [1] } })] }));
+    expect(await removeWooWebhooks(COMPANY, MALL)).toBe(0);
+  });
+
+  it('recordWooSetupError: 자동 설정 실패 사유를 수집 실패와 같은 meta 키(woo_sync_error*)에 남긴다 → 화면 "조치 필요" 한 경로', async () => {
+    await recordWooSetupError(COMPANY, MALL, 'forbidden', '쓰기 권한 없음');
+    const upd = q.mock.calls.find((c: any[]) => String(c[0]).includes('woo_sync_error'));
+    expect(upd).toBeDefined();
+    expect(upd![1]).toEqual([COMPANY, MALL, '쓰기 권한 없음', 'forbidden']);
   });
 });

@@ -742,7 +742,10 @@ export interface CdpWooConnectFormProps {
   onConsentMetaKeyChange: (v: string) => void;
   showSecret: boolean;
   onToggleSecret: () => void;
-  /** 저장 → (키 있으면) 연결 확인 + 백필 */
+  /** 1순위: 몰 저장 → 우커머스 관리자 승인 창(앱 인증) → 키·웹훅 자동 */
+  onAuthorize: () => void;
+  authorizing: boolean;
+  /** 고급: REST 키 직접 입력 → 저장 → 연결 확인 + 백필 */
   onConnect: () => void;
   onDisconnect: (mallId: string) => void;
   onRotateSecret: (mallId: string) => void;
@@ -853,17 +856,17 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
         </div>
       )}
 
-      {/* 몰 추가 */}
+      {/* 몰 추가 — 1순위 = 관리자 승인(앱 인증 · 키·웹훅 자동) · 고급 = REST 키 직접 입력 */}
       <div className="space-y-4">
         <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-          <div className="text-xs font-semibold text-violet-100">{malls.length > 0 ? '몰 추가' : '몰 연결 · 3단계'}</div>
-          <GuideStep n={1}>우커머스 관리자 → 설정 → 고급 → <strong className="text-white/90">REST API</strong> 에서 읽기 권한 키를 만들어 아래에 넣습니다. 키가 아직 없으면 몰 주소만 저장해도 됩니다(웹훅으로만 받습니다).</GuideStep>
-          <GuideStep n={2}>저장하면 웹훅 주소와 비밀키가 한 번 표시됩니다. "개발자 안내 복사"로 전달하면 개발자가 우커머스 관리자에서 웹훅 {WOO_WEBHOOK_TOPICS.length}개({WOO_WEBHOOK_TOPICS.map((t) => WOO_TOPIC_LABEL[t].split('(')[0]).join('·')})를 만듭니다.</GuideStep>
-          <GuideStep n={3}>마케팅 수신동의를 커스텀 필드로 받고 있다면 그 필드의 메타키를 적어 주세요. 비워 두면 수신동의는 반영되지 않습니다(기본 미동의).</GuideStep>
+          <div className="text-xs font-semibold text-violet-100">{malls.length > 0 ? '몰 추가' : '몰 연결 · 클릭 1회'}</div>
+          <GuideStep n={1}>쇼핑몰 주소를 넣고 <strong className="text-white/90">관리자 승인으로 연결</strong>을 누르면 그 몰의 우커머스 승인 창이 열립니다.</GuideStep>
+          <GuideStep n={2}>몰 관리자로 로그인해 "승인"을 누르면 REST 키와 웹훅 {WOO_WEBHOOK_TOPICS.length}개({WOO_WEBHOOK_TOPICS.map((t) => WOO_TOPIC_LABEL[t].split('(')[0]).join('·')})가 자동으로 만들어지고 최근 90일 회원·주문이 들어옵니다.</GuideStep>
+          <GuideStep n={3}>마케팅 수신동의를 커스텀 필드로 받고 있다면 그 필드의 메타키를 적어 주세요(코드엠샵 회원가입 폼이면 <code className="text-emerald-200">mssms_agreement</code>). 비워 두면 수신동의는 반영되지 않습니다(기본 미동의).</GuideStep>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2">
+          <div>
             <label className="block text-[11px] text-white/50 mb-1">쇼핑몰 주소</label>
             <input
               type="text"
@@ -874,47 +877,69 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
             />
           </div>
           <div>
-            <label className="block text-[11px] text-white/50 mb-1">Consumer key(읽기)</label>
-            <input
-              type="text"
-              value={p.consumerKey}
-              onChange={(e) => p.onConsumerKeyChange(e.target.value)}
-              placeholder="ck_ 로 시작"
-              className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] text-white/50 mb-1">Consumer secret</label>
-            <div className="relative">
-              <input
-                type={p.showSecret ? 'text' : 'password'}
-                value={p.consumerSecret}
-                onChange={(e) => p.onConsumerSecretChange(e.target.value)}
-                placeholder="cs_ 로 시작"
-                className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
-              />
-              <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={p.showSecret ? '숨기기' : '보기'}>
-                {p.showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-          <div className="sm:col-span-2">
             <label className="block text-[11px] text-white/50 mb-1">마케팅 수신동의 메타키(선택)</label>
             <input
               type="text"
               value={p.consentMetaKey}
               onChange={(e) => p.onConsentMetaKeyChange(e.target.value)}
-              placeholder="예: marketing_agree"
+              placeholder="예: mssms_agreement"
               className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
             />
           </div>
         </div>
 
-        <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
-          {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 저장하고 연결 확인 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 연결 확인</>}
+        <button onClick={p.onAuthorize} disabled={p.authorizing || p.connecting || !p.isAdmin || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-fuchsia-500/30 hover:bg-fuchsia-500/50 text-fuchsia-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+          {p.authorizing ? <><Loader2 className="w-4 h-4 animate-spin" /> 승인 창을 여는 중...</> : <><ExternalLink className="w-4 h-4" /> 우커머스 관리자 승인으로 연결</>}
         </button>
         {!p.isAdmin && NOT_ADMIN_NOTE}
-        <div className="text-[10px] text-white/30 italic">REST 키는 한줄로 서버에 보관되며 화면에 다시 표시되지 않습니다. 몰 주소는 수집 허용 도메인에 자동 등록됩니다.</div>
+        <div className="text-[10px] text-white/30 italic">승인 창에서 몰 관리자 로그인이 필요합니다. 키는 우커머스가 한줄로 서버로 직접 전달하며 화면에 표시되지 않습니다. 몰 주소는 수집 허용 도메인에 자동 등록됩니다.</div>
+
+        <details className="group rounded-xl border border-white/10 bg-white/[0.03]">
+          <summary className="cursor-pointer select-none px-4 py-3 text-xs font-medium text-white/60 hover:text-white/80 flex items-center gap-2">
+            <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" /> 직접 입력(고급): REST 키를 우커머스에서 직접 발급해 넣기
+          </summary>
+          <div className="px-4 pb-4 space-y-3">
+            <div className="text-[11px] text-white/45">우커머스 관리자 → 설정 → 고급 → REST API 에서 <strong className="text-white/70">읽기/쓰기</strong> 권한 키를 만들어 넣으면, 저장 뒤 연결 확인과 웹훅 생성을 한줄로가 시도합니다. 읽기 전용 키면 웹훅은 위 안내대로 개발자가 직접 만듭니다.</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] text-white/50 mb-1">Consumer key</label>
+                <input
+                  type="text"
+                  value={p.consumerKey}
+                  onChange={(e) => p.onConsumerKeyChange(e.target.value)}
+                  placeholder="ck_ 로 시작"
+                  className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-white/50 mb-1">Consumer secret</label>
+                <div className="relative">
+                  <input
+                    type={p.showSecret ? 'text' : 'password'}
+                    value={p.consumerSecret}
+                    onChange={(e) => p.onConsumerSecretChange(e.target.value)}
+                    placeholder="cs_ 로 시작"
+                    className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+                  />
+                  <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={p.showSecret ? '숨기기' : '보기'}>
+                    {p.showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <button onClick={p.onConnect} disabled={p.connecting || p.authorizing || !p.isAdmin || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+              {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 저장하고 연결 확인 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 연결 확인</>}
+            </button>
+            <div className="text-[10px] text-white/30 italic">REST 키는 한줄로 서버에 보관되며 화면에 다시 표시되지 않습니다. 키 없이 주소만 저장하면 웹훅 첫 수신이 연결 신호가 됩니다.</div>
+          </div>
+        </details>
+
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/50">
+          <a href="/api/woocommerce/plugin.zip" download className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/75 font-medium">
+            <Blocks className="w-3.5 h-3.5" /> 한줄로 플러그인 다운로드(선택)
+          </a>
+          <span>워드프레스 플러그인 업로드에 그대로 올리면 수집 스크립트 삽입·회원 식별·수신동의 REST 노출이 자동입니다. 주문·회원 동기화는 위 승인 연결만으로 됩니다.</span>
+        </div>
       </div>
 
       {/* SDK 설치 — 주문 API 와 별개(방문·장바구니 수집). 워드프레스는 테마 <head> 한 줄. */}

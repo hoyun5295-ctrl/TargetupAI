@@ -76,6 +76,18 @@ export function normalizeWooMallId(siteUrl: unknown): string | null {
   return HOST_RE.test(host) ? host : null;
 }
 
+/**
+ * 요청 기준 주소(origin). 몰 주소(URL)면 그 호스트를 https 로, 호스트만 오면 https://{host}.
+ * 저장된 몰 주소(www 포함)를 그대로 쓰는 이유: 식별자는 www 를 뗀 값이라 그리로 보내면 301 → Authorization 헤더가 리다이렉트에 묻힌다.
+ */
+export function wooSiteOrigin(siteOrHost: string): string {
+  const s = String(siteOrHost || '').trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
+    try { return `https://${new URL(s).hostname.toLowerCase()}`; } catch { /* 아래 폴백 */ }
+  }
+  return `https://${s.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase()}`;
+}
+
 // ════════════════════════════════════════════════════════════════════
 // 필드 도우미
 // ════════════════════════════════════════════════════════════════════
