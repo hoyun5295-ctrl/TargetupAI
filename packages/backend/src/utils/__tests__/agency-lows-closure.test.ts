@@ -71,7 +71,8 @@ describe('멈춘 시도 인수: 접수 행을 잠그는 트랜잭션 + 배관 �
   });
 });
 
-describe('대행 ② 회신번호 종류 표시', () => {
+// 모듈을 테스트 안에서 처음 불러온다. 전체 스위트 부하(pre-push)에서 첫 import가 5초를 넘길 수 있어 상한을 넉넉히 둔다
+describe('대행 ② 회신번호 종류 표시', { timeout: 30_000 }, () => {
   it('규칙: 빈 번호는 대표 번호로 세고, 한 종류면 그 번호를 준다', async () => {
     const { countCallbackKinds } = await import('../agency-send-intake');
     expect(countCallbackKinds([null, null], '0212345678')).toEqual({ callbackKinds: 1, callbackSole: '0212345678' });
@@ -131,7 +132,7 @@ describe('대행 ② 회신번호 종류 표시', () => {
   });
 });
 
-describe('대행 ③ 시각·문안 변경 때 회신번호 재검증', () => {
+describe('대행 ③ 시각·문안 변경 때 회신번호 재검증', { timeout: 30_000 }, () => {
   for (const marker of ["router.post('/:id/content'", "router.post('/:id/reschedule'"]) {
     it(`${marker}: 두 벌 발송 판정 앞에서 같은 CT로 막는다`, () => {
       const s = route.indexOf(marker);

@@ -166,7 +166,8 @@ describe('복구 확인과 상태 변경 사이 틈(복구 표시)', () => {
   });
 });
 
-describe('대조·취소 마무리·취소 CT', () => {
+// 모듈을 테스트 안에서 처음 불러온다. 전체 스위트 부하(pre-push)에서 첫 import가 5초를 넘길 수 있어 상한을 넉넉히 둔다
+describe('대조·취소 마무리·취소 CT', { timeout: 30_000 }, () => {
   it('중화 회차는 막은 것이 있거나 실패한 때만 기록하고, 캐시는 비어 있을 때만 채운다(30일 창 고착 방지)', () => {
     const rec = between(src, 'async function runReconcile(', '// ────────────── F. 취소 마무리');
     expect(rec).toMatch(/if \(!ok \|\| !alreadySent \|\| !row\.campaign_id\) \{\s*await logEvent\(row\.id, ok \? 'reconciled_neutralize' : 'reconciled_neutralize_failed'/);
