@@ -24,6 +24,7 @@
  */
 import * as XLSX from 'xlsx';
 import { normalizePhone, normalizeAgencyPhone, restoreMobileLeadingZero } from './normalize-phone';
+import { formatSheetDateCode } from './normalize';
 
 export interface AgencyFormError { field: string; error: string }
 
@@ -87,13 +88,36 @@ const isPlaceholderValue = (v: string) => {
 /** 명단 시트 이름(정확 일치만 · "고객 명단 예시" 같은 예시 시트가 명단으로 오인되면 안 된다) */
 const RECIPIENT_SHEET_NAMES = new Set(['고객리스트', '고객명단']);
 
-/** 셀 값 → 문자열(셀이 Date면 KST 문자로) */
+/** 셀 값 → 문자열. 날짜 셀은 읽을 때 이미 벽시계 글자다(sheetDatesToText) */
 function cellText(v: any): string {
-  if (v instanceof Date) {
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())} ${p(v.getHours())}:${p(v.getMinutes())}`;
-  }
   return String(v ?? '').trim();
+}
+
+/**
+ * 시트 읽기 옵션(★2026-09-13(3)). 날짜 셀을 Date로 만들지 않고 서식(z)을 받아 날짜를 가른다.
+ * ⛔ `cellDates:true`로 되돌리지 마라. xlsx 0.18.5는 서버 시간대(KST)에서 52초 이른 Date를 만든다(0913 실측):
+ *   요청서 14:30 셀이 14:29로, 날짜만 적힌 셀이 전날 23:59로 조용히 접수됐고, 명단 날짜는 UTC ISO 글자로 고객 문자에 들어갔다.
+ */
+const SHEET_READ_OPTS = {
+  type: 'buffer' as const, cellDates: false, cellNF: true, cellFormula: false, cellHTML: false, sheetStubs: false,
+};
+
+/**
+ * 날짜 서식의 숫자 셀을 엑셀에 보이는 벽시계 글자로 바꾼다(제자리 · sheet_to_json 전에 부른다).
+ * 일련번호를 달력 산술(SSF)로 풀어 시간대를 거치지 않는다. 글자 규칙 = normalize.formatSheetDateCode.
+ * 날짜 서식이 아닌 숫자·문자·불리언 셀은 건드리지 않는다(값 형태가 종전과 같다).
+ */
+function sheetDatesToText(sheet: XLSX.WorkSheet | undefined): void {
+  if (!sheet) return;
+  // 대용량 명단에서 키 배열을 만들지 않게 for...in으로 돈다
+  for (const addr in sheet) {
+    if (addr[0] === '!') continue;
+    const cell = sheet[addr] as XLSX.CellObject;
+    if (!cell || cell.t !== 'n' || typeof cell.v !== 'number' || cell.z === undefined || !XLSX.SSF.is_date(cell.z)) continue;
+    const code = XLSX.SSF.parse_date_code(cell.v);
+    if (!code) continue;
+    sheet[addr] = { t: 's', v: formatSheetDateCode(code) };
+  }
 }
 
 /**
@@ -195,9 +219,9 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
     const sheetName = names.find((n) => normLabel(n) === '요청서')
       || names.find((n) => normLabel(n) === '내용')
       || names[0];
-    const readOpts = { type: 'buffer' as const, cellDates: true, cellFormula: false, cellHTML: false, sheetStubs: false };
-    let sheet = XLSX.read(buffer, { ...readOpts, sheets: [sheetName] }).Sheets[sheetName];
-    if (!sheet) sheet = XLSX.read(buffer, readOpts).Sheets[sheetName];
+    let sheet = XLSX.read(buffer, { ...SHEET_READ_OPTS, sheets: [sheetName] }).Sheets[sheetName];
+    if (!sheet) sheet = XLSX.read(buffer, SHEET_READ_OPTS).Sheets[sheetName];
+    sheetDatesToText(sheet);
     rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
   } catch {
     return {
@@ -330,11 +354,13 @@ export function parseAgencyRecipientList(buffer: Buffer): {
   /** 첫 줄이 데이터(무헤더)로 판정됐는가. 열 이름은 합성("열N")이다 */
   headerless: boolean;
 } {
-  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true, cellFormula: false, cellHTML: false, sheetStubs: false });
+  const wb = XLSX.read(buffer, SHEET_READ_OPTS);
   // ★2026-08-26(2) 통일 양식(한 파일)은 "고객리스트" 시트가 명단이다. 이름 정확 일치가 없을 때만
   //   첫 시트(별도 명단 파일 = 구양식·자유형 하위호환). "고객 명단 예시" 같은 예시 시트는 일치하지 않는다.
   const sheetName = wb.SheetNames.find((n) => RECIPIENT_SHEET_NAMES.has(normLabel(n))) || wb.SheetNames[0];
   const sheet = wb.Sheets[sheetName];
+  // ★2026-09-13(3) 날짜 셀 = 엑셀에 보이는 벽시계 글자(SHEET_READ_OPTS 주석 · 종전에는 UTC ISO로 저장돼 문자에 들어갔다)
+  sheetDatesToText(sheet);
   const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
   if (aoa.length === 0) return { headers: [], rows: [], duplicates: [], truncated: false, columnsOverflow: false, headerless: false };
 

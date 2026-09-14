@@ -14,7 +14,7 @@
  */
 import { query } from '../config/database';
 import { canCancel, NOT_CANCELABLE_SQL } from './agency-send-state';
-import { findAttemptCampaignId } from './agency-send-campaign';
+import { campaignMayHaveSent, inspectAttemptCampaign } from './agency-send-campaign';
 import { logEvent } from './agency-send-intake';
 
 export type CancelTxResult =
@@ -72,34 +72,46 @@ export async function cancelAgencyRequestTx(opts: {
   }
 
   const claimedRow = claimed.rows[0];
-  const campaignId = await findAttemptCampaignId(opts.companyId, claimedRow.dispatch_key);
+  // ★2026-09-13(3) 종류·상태까지 한 번에 본다(멈춘 캠페인을 "이미 발송"으로 되돌리지 않고, 이미 취소된 캠페인에서 취소가 갇히지 않게)
+  const attempt = await inspectAttemptCampaign(opts.companyId, claimedRow.dispatch_key);
+  const campaignId = attempt.id;
 
   // 예약이 만들어진 뒤의 취소는 **큐 삭제까지 끝나야** 취소다.
   if (campaignId) {
     let result: { success: boolean; error?: string; tooLate?: boolean; alreadySent?: boolean };
-    try {
-      const { cancelCampaign } = await import('./campaign-lifecycle');
-      // ⛔ `queueOnly` — 대행발송 캠페인은 적재를 끝내면 `completed`가 된다(예약 시각은 큐 행이 든다).
-      //   이 옵션이 없으면 상태 게이트에 막혀 **예약이 잡힌 접수를 아무도 취소할 수 없다**(0828 확정).
-      //   15분 게이트(`skipTimeCheck`)는 켜지 않는다 — 그건 사용자 정책이고 여기는 사용자 입구다.
-      result = await cancelCampaign(campaignId, opts.companyId, {
-        cancelledBy: opts.cancelledBy,
-        cancelledByType: opts.cancelledByType,
-        queueOnly: true,
-      });
-    } catch (cancelErr: any) {
-      result = { success: false, error: String(cancelErr?.message || '취소 처리 중 오류가 발생했습니다.') };
+    if (attempt.status === 'cancelled') {
+      // 이미 취소된 캠페인은 막을 것이 없다(큐는 그 취소가 지웠다). 캠페인 취소 CT는 이 경우를 실패로 돌려줘
+      //   접수가 취소 중에 갇혔다 → 성공으로 보고 아래 취소 확정으로 간다.
+      result = { success: true };
+    } else {
+      try {
+        const { cancelCampaign } = await import('./campaign-lifecycle');
+        // ⛔ `queueOnly` — 대행발송 캠페인은 적재를 끝내면 `completed`가 된다(예약 시각은 큐 행이 든다).
+        //   이 옵션이 없으면 상태 게이트에 막혀 **예약이 잡힌 접수를 아무도 취소할 수 없다**(0828 확정).
+        //   15분 게이트(`skipTimeCheck`)는 켜지 않는다 — 그건 사용자 정책이고 여기는 사용자 입구다.
+        result = await cancelCampaign(campaignId, opts.companyId, {
+          cancelledBy: opts.cancelledBy,
+          cancelledByType: opts.cancelledByType,
+          queueOnly: true,
+        });
+      } catch (cancelErr: any) {
+        result = { success: false, error: String(cancelErr?.message || '취소 처리 중 오류가 발생했습니다.') };
+      }
     }
 
     // ⛔ **막을 것이 없었다 = 이미 나갔다.** 여기서 `cancelled`로 확정하면 화면이 거짓말을 한다
     //   (고객은 메시지를 받았는데 접수는 취소됨). 원래 상태로 되돌리고 사실을 알린다.
     //   되돌리기가 안전한 이유 = 큐를 건드린 것이 0건이라 상태를 유지해도 어긋나지 않는다(`tooLate`와 같다).
-    if (result.success && result.alreadySent) {
+    //   ★2026-09-13(3) **한 통이라도 나갔을 수 있는 캠페인일 때만**이다(`campaignMayHaveSent`). 활성화 전(preparing)은 막을 것이 없어도
+    //   "나갔다"가 아니다 → 아래 취소 확정으로 간다. 일부 적재 뒤 종결된 failed는 나갔을 수 있어 여기로 온다(Codex 적대 1R medium).
+    //   되돌릴 때는 캐시(campaign_id)를 채운다(캠페인이 있다는 사실이 수정·재예약 차단 근거다).
+    if (result.success && result.alreadySent && campaignMayHaveSent(attempt)) {
       const reverted = await query(
         `UPDATE agency_send_requests
-            SET status = $1, cancel_reason = NULL, revision = revision + 1, updated_at = NOW()
+            SET status = $1, cancel_reason = NULL, campaign_id = COALESCE(campaign_id, $5::uuid),
+                revision = revision + 1, updated_at = NOW()
           WHERE id = $2::uuid AND company_id = $3::uuid AND status = 'cancelling' AND revision = $4`,
-        [claimedRow.prev_status, opts.requestId, opts.companyId, claimedRow.revision],
+        [claimedRow.prev_status, opts.requestId, opts.companyId, claimedRow.revision, campaignId],
       );
       await logEvent(opts.requestId, 'cancel_already_sent', {
         campaignId, reverted: reverted.rowCount || 0,
@@ -117,9 +129,10 @@ export async function cancelAgencyRequestTx(opts: {
       if (result.tooLate) {
         const reverted = await query(
           `UPDATE agency_send_requests
-              SET status = $1, cancel_reason = NULL, revision = revision + 1, updated_at = NOW()
+              SET status = $1, cancel_reason = NULL, campaign_id = COALESCE(campaign_id, $5::uuid),
+                  revision = revision + 1, updated_at = NOW()
             WHERE id = $2::uuid AND company_id = $3::uuid AND status = 'cancelling' AND revision = $4`,
-          [claimedRow.prev_status, opts.requestId, opts.companyId, claimedRow.revision],
+          [claimedRow.prev_status, opts.requestId, opts.companyId, claimedRow.revision, campaignId],
         );
         await logEvent(opts.requestId, 'cancel_rejected', {
           campaignId, error: result.error, reverted: reverted.rowCount || 0,

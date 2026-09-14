@@ -206,9 +206,8 @@ export function normalizePhone(value: any): string | null {
   let v = String(value).trim();
   // 특수문자 제거
   v = v.replace(/[\s\-\(\)\+\.]/g, '');
-  // 국가코드 +82 → 0
+  // 국가코드 82 → 0. '+'는 바로 위에서 지웠으므로 '+82…'와 '82…'가 여기서 같은 문자열이다(★2026-09-13(3) 도달하지 않던 +82 분기 제거)
   if (v.startsWith('82')) v = '0' + v.slice(2);
-  if (v.startsWith('+82')) v = '0' + v.slice(3);
   // 숫자만 남기기
   v = v.replace(/\D/g, '');
   // ★ D137 D5: Excel 숫자 저장 등으로 앞 0 빠짐 보정 — 휴대폰 + 서울/지방 지역번호 + 070/050X 전수
@@ -660,6 +659,22 @@ export function formatKoreanDateTimeDisplay(value: any): string {
   const datePart = `${get('year')}. ${Number(get('month'))}. ${Number(get('day'))}`;
   if (((hh === '00' || hh === '24') && mm === '00') || (hh === '23' && mm === '59')) return datePart;
   return `${datePart} ${hh}:${mm}`;
+}
+
+// ============================================================
+// 엑셀 날짜 셀 → 벽시계 글자 — ★ 2026-09-13(3) (대행발송 명단·요청서)
+// 입력 = 엑셀 일련번호를 달력 산술로 푼 조각(SheetJS `SSF.parse_date_code` 결과 · 시간대를 거치지 않는다).
+// ⛔ Date 객체로 받지 않는다. xlsx 0.18.5 `cellDates:true`는 서버 시간대(KST)에서 52초 이른 Date를 만든다
+//   (0913 실측: 14:30 셀 → 14:29:08, 날짜만 셀 → 전날 23:59:08). UTC에서는 정확해 시간대마다 결과가 갈린다.
+// 규칙: 날짜만 = "YYYY-MM-DD" · 날짜+시각 = "YYYY-MM-DD HH:mm" · 시각만(일련번호 1 미만) = "HH:mm" · 초가 있으면 ":ss"를 붙인다.
+// 소비처: agency-send-form.ts(명단 값 · 요청서 보낼 시각)
+// ============================================================
+export function formatSheetDateCode(code: { D: number; y: number; m: number; d: number; H: number; M: number; S: number }): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  const time = `${p(code.H)}:${p(code.M)}${code.S ? `:${p(code.S)}` : ''}`;
+  if (code.D === 0) return time;
+  const date = `${code.y}-${p(code.m)}-${p(code.d)}`;
+  return code.H === 0 && code.M === 0 && code.S === 0 ? date : `${date} ${time}`;
 }
 
 // ============================================================

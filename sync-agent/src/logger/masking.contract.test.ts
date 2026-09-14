@@ -18,6 +18,7 @@ import winston from 'winston';
 import { Writable } from 'stream';
 import { AxiosError, AxiosHeaders } from 'axios';
 import { maskingFormat, consoleFormat } from './index';
+import { scrubText, maskRecordKey, maskPhone } from './masking';
 
 /** 한 줄을 찍어 최종 출력 문자열을 돌려준다(index.ts 루트 로거와 같은 순서: 마스킹 → errors → json) */
 function logOnce(meta: Record<string, unknown>, level: 'info' | 'error' = 'info'): string {
@@ -143,8 +144,250 @@ describe('로그 마스킹: 순환·오류 객체에서 로그 호출이 예외�
     expect(out).toContain('순환 인스턴스');
   });
 
+  it('같은 객체를 두 필드에 넘겨도(순환 아님) 둘 다 제대로 찍힌다', () => {
+    const shared = { tableName: 'CUSTOMER' };
+    const out = logOnce({ source: shared, target: shared });
+    expect(out).not.toContain('[Circular]');
+    expect(out.match(/"tableName":"CUSTOMER"/g)?.length).toBe(2);
+  });
+
+  it('DB 드라이버 오류의 구조화된 진단 값은 남고, 쿼리 원문·자유 문장(행 값이 들어가는 detail)은 남지 않는다', () => {
+    const dbErr = Object.assign(new Error('Invalid column name'), {
+      number: 207, state: 1, lineNumber: 3, serverName: 'DBSRV', sqlState: '42S22', constraint: 'customers_email_key',
+      detail: 'Key (email)=(row-value@example.com) already exists.', hint: 'HINT-ROW-VALUE', sqlMessage: 'MSG-ROW-VALUE',
+      sql: 'SELECT secret_col FROM t',
+    });
+    const out = logOnce({ error: dbErr }, 'error');
+    expect(out).toContain('"number":207');
+    expect(out).toContain('"sqlState":"42S22"');
+    expect(out).toContain('"constraint":"customers_email_key"');
+    expect(out).not.toContain('row-value@example.com');
+    expect(out).not.toContain('HINT-ROW-VALUE');
+    expect(out).not.toContain('MSG-ROW-VALUE');
+    expect(out).not.toContain('SELECT secret_col FROM t');
+  });
+
+  it('실제 드라이버처럼 message·sqlMessage·stack에 같은 행 값이 들어 있어도 이메일·휴대폰 번호는 가리고 오류 문장은 남긴다(Codex 5R)', () => {
+    // ★2026-09-13(3) 드라이버 문장 모양 그대로(끝 구문이 메시지 끝) · 값 안에 이메일과 번호가 함께 있는 경우
+    const text = "Duplicate entry 'row-value@example.com 01000001234' for key 'email'";
+    const dbErr = Object.assign(new Error(text), { code: 'ER_DUP_ENTRY', errno: 1062, sqlState: '23000', sqlMessage: text });
+    const out = logOnce({ error: dbErr }, 'error');
+    expect(out, '이메일 원문이 남았다').not.toContain('row-value@example.com');
+    expect(out, '휴대폰 번호 원문이 남았다').not.toContain('01000001234');
+    expect(out).toContain('Duplicate entry');
+    // ★2026-09-13(3) 중복 키 값 자리는 통째로 가린다(이메일만이 아니라 이름 같은 값도 남지 않게)
+    expect(out).toContain("Duplicate entry '***' for key 'email'");
+    expect(out).toContain('"errno":1062');
+  });
+
+  it('문장 안 휴대폰 번호는 흔한 표기(공백·괄호·+82)도 가리고, 유닉스 시각 같은 숫자는 건드리지 않는다(Codex 6R)', () => {
+    for (const raw of ['010 0000 1234', '(010)0000-1234', '+82-10-0000-1234', '+821000001234', '010-0000-1234', '+82 (0)10-0000-1234']) {
+      const out = scrubText(`dup value ${raw} end`);
+      expect(out, raw).not.toContain(raw);
+      expect(out, raw).toContain('****1234');
+    }
+    expect(scrubText('ts=1694567890 port=5432 v1.10.12')).toBe('ts=1694567890 port=5432 v1.10.12');
+  });
+
+  it('긴 토큰에서도 이메일 탐색이 오래 걸리지 않고, 서버 안내 문장은 가린 뒤 자른다(Codex 6R)', () => {
+    const long = 'a'.repeat(200_000) + '@';
+    const started = Date.now();
+    scrubText(long);
+    expect(Date.now() - started, '긴 토큰 처리 시간').toBeLessThan(1000);
+
+    const config = { method: 'post', url: '/api/sync/customers' };
+    const response = { status: 400, data: { error: `${' '.repeat(286)}alice@example.com 오류` }, headers: {}, config, statusText: 'Bad Request' };
+    const err = new AxiosError('Request failed with status code 400', 'ERR_BAD_REQUEST', config as any, {}, response as any);
+    const out = logOnce({ error: err }, 'error');
+    expect(out, '잘린 경계의 이메일 앞부분이 남았다').not.toContain('alice@');
+  });
+
   it('일반 Error는 메시지가 남는다(종전에는 JSON에서 {}로 비었다)', () => {
     const out = logOnce({ error: new Error('연결 거부') }, 'error');
     expect(out).toContain('연결 거부');
+  });
+});
+
+describe('★2026-09-13 적대검토 등재분: 시크릿은 앞뒤도 남기지 않고, 행 식별값의 번호는 표기와 무관하게 가린다', () => {
+  it('apiSecret·api_secret은 전부 가린다(앞뒤 4자도 남기지 않는다 · 등재 ⑤)', () => {
+    const out = logOnce({
+      apiSecret: 'zzzz0000111122223333444455556666',
+      api_secret: 'yyyy0000111122223333444455557777',
+      apiKey: 'tk_abcd00001111wxyz',
+    });
+    expect(out).not.toContain('zzzz');
+    expect(out).not.toContain('6666');
+    expect(out).not.toContain('yyyy');
+    expect(out).toContain('"apiSecret":"********"');
+    expect(out).toContain('"api_secret":"********"');
+    // 키는 식별값이라 종전대로 앞뒤 4자를 남긴다(현장에서 어느 키인지 대조한다)
+    expect(out).toContain('"apiKey":"tk_a****wxyz"');
+  });
+
+  it('행 식별값(recordKey)은 정규화에 실패한 표기의 번호도 가린다(등재 ⑥)', () => {
+    // 번호로 보이는 조각은 뒤 4자리만 남긴다(행 대조용). 공용 maskPhone(앞 3 + 뒤 4)은 8~9자리에서 한두 자리만 가린다(워크플로 2R)
+    expect(maskRecordKey('010-0000-1234')).toBe('****1234');
+    expect(maskRecordKey('10 0000 1234')).toBe('****1234'); // 앞 0이 빠진 엑셀 숫자 표기
+    expect(maskRecordKey('ORD-77|01000001234')).toBe('ORD-77|****1234'); // 원본 PK를 이은 값
+    expect(maskRecordKey('2345-6789')).toBe('****6789'); // 국번 없는 유선 4+4
+    expect(maskRecordKey('02-123-4567')).toBe('****4567');
+    // 전각 숫자로 적힌 번호(워크플로 3R low · 정규화도 실패해 원문 그대로 식별값이 된다)
+    expect(maskRecordKey('０１０００００１２３４')).toBe('****1234');
+    // ★워크플로 1R: 가장 짧은 온전한 국내 번호(국번 없는 유선 3+4 = 7자리)는 통째로 가린다
+    expect(maskRecordKey('234-5678')).toBe('****');
+    expect(maskRecordKey('unknown')).toBe('unknown');
+    expect(maskRecordKey('row@example.com')).toBe('r***@example.com');
+  });
+});
+
+describe('★2026-09-13(3) 수용 위험 제거: DB 오류 문장의 행 값 자리 · ICU 없는 숫자 · 진단 필드', () => {
+  it('드라이버가 행 값을 싣는 자리는 값이 무엇이든 가리고, 오류 종류·키·열 이름은 남긴다', () => {
+    const cases: Array<[string, string, string]> = [
+      ["Duplicate entry '홍길동-서울' for key 'uk_name'", '홍길동', "Duplicate entry '***' for key 'uk_name'"],
+      ["Incorrect integer value: '홍길동' for column 'age' at row 1", '홍길동', "Incorrect integer value: '***' for column 'age'"],
+      // 끝 모양(' for column)이 없는 문장은 문장 끝까지 가린다
+      ["Truncated incorrect DOUBLE value: '홍길동'", '홍길동', "Truncated incorrect DOUBLE value: '***"],
+      ['invalid input syntax for type integer: "홍길동"', '홍길동', 'invalid input syntax for type integer: "***"'],
+      ['invalid input value for enum gender: "홍길동"', '홍길동', 'invalid input value for enum gender: "***"'],
+      ['Key (name)=(홍길동) already exists.', '홍길동', 'Key (name)=(***) already exists'],
+      ["Cannot insert duplicate key row in object 'dbo.customers' with unique index 'ix_name'. The duplicate key value is (홍길동, 서울).", '홍길동', 'The duplicate key value is (***).'],
+      ["Conversion failed when converting the nvarchar value '홍길동' to data type int.", '홍길동', "converting the nvarchar value '***' to data type int"],
+    ];
+    for (const [raw, secret, kept] of cases) {
+      const out = scrubText(raw);
+      expect(out, raw).not.toContain(secret);
+      expect(out, raw).toContain(kept);
+    }
+  });
+
+  it('값 안의 따옴표·개행·끝 모양·긴 값, 끝 모양이 없는 문장에서도 값이 남지 않는다(Codex 적대 1R high)', () => {
+    const cases: Array<[string, string]> = [
+      ['invalid input syntax for type integer: "x"홍길동"', '홍길동'],
+      ["Duplicate entry '홍\n길동' for key 'uk_name'", '길동'],
+      ["Duplicate entry 'a' for key b 홍길동' for key 'uk_name'", '홍길동'],
+      [`Duplicate entry '${'가'.repeat(600)}홍길동' for key 'uk_name'`, '홍길동'],
+      ["Duplicate entry '홍길동", '홍길동'],
+      ['Key (name)=(홍길동) already exists 뒤) already exists', '뒤'],
+      ["Conversion failed when converting the nvarchar value 'a' to data type 홍길동' to data type int.", '홍길동'],
+      // Codex 2R high: 끝 구문이 없는 형식에 끝 모양 조각이 섞인 값
+      ["Truncated incorrect DOUBLE value: 'aaa' for column SECRET'", 'SECRET'],
+      // 값 안의 가짜 끝 구문이 줄 끝에 오고 다음 줄에 비밀값이 이어진다(진짜 끝 구문은 그 뒤에 있다)
+      ["Incorrect integer value: 'aaa' for column 'x' at row 1\nSECRET' for column 'age' at row 1", 'SECRET'],
+      ["Duplicate entry 'a' for key 'k'\nSECRET' for key 'uk_name'", 'SECRET'],
+      // Codex 3R medium: 진짜 끝 구문이 모양에서 벗어나면(키 이름에 따옴표) 앞줄 가짜 끝 구문으로 물러나지 않는다
+      ["Duplicate entry 'a' for key 'k'\nSECRET' for key 't.uk'name'", 'SECRET'],
+      ["Duplicate entry 'a' for key 'k'\nSECRET' for key 'uk'\n    at 가짜 줄", 'SECRET'],
+      // Codex 6R medium: 서로 다른 DB 오류가 합쳐진 문장(앞 형식 치환이 뒤 형식의 시작 표식을 지우던 것)
+      ["Duplicate entry 'x' for key 'uk'\nTruncated incorrect DOUBLE value: 'a' for key '홍길동'", '홍길동'],
+      ["Truncated incorrect DOUBLE value: 'a'\nDuplicate entry '홍길동' for key 'uk'", '홍길동'],
+      ['invalid input syntax for type integer: "x"\nKey (name)=(홍길동) already exists.', '홍길동'],
+    ];
+    for (const [raw, secret] of cases) {
+      expect(scrubText(raw), raw.slice(0, 40)).not.toContain(secret);
+    }
+    expect(scrubText("Duplicate entry 'a' for key b 홍길동' for key 'uk_name'")).toContain("for key 'uk_name'");
+  });
+
+  it('로그의 오류 스택은 통째로 가린다: DB 값 자리가 있으면 값이 남지 않고, 보통 오류는 프레임이 남는다(Codex 5R medium)', () => {
+    const err = new Error("Duplicate entry '홍길동' for key 'uk_name'");
+    err.stack = `Error: ${err.message}\n    at Query.execute (/app/node_modules/mysql2/lib/query.js:10:5)\n    at run (/app/sync.js:3:1)`;
+    const out = logOnce({ error: err }, 'error');
+    expect(out).not.toContain('홍길동');
+    expect(out).toContain('"message":"Duplicate entry \'***\' for key \'uk_name\'"');
+    // 스택 생성 뒤 메시지가 바뀌어도 스택의 값이 남지 않는다
+    const changed = new Error("Duplicate entry '홍길동' for key 'uk_name'");
+    changed.stack = `Error: ${changed.message}\n    at run (sync.js:1:1)`;
+    changed.message = 'Duplicate entry';
+    expect(logOnce({ error: changed }, 'error')).not.toContain('홍길동');
+    // DB 값 자리가 없는 보통 오류는 프레임이 그대로다
+    const plain = new Error('연결 거부');
+    plain.stack = 'Error: 연결 거부\n    at connect (/app/db.js:7:3)';
+    expect(logOnce({ error: plain }, 'error')).toContain('at connect (/app/db.js:7:3)');
+  });
+
+  it('Codex 4R medium: 경계를 모르는 문자열은 스택 모양 줄을 믿지 않는다(값 안에서 잘린 가짜 스택 줄)', () => {
+    for (const raw of [
+      "Duplicate entry 'x' for key 'k'\n    at 홍길동:1:2",
+      "Incorrect integer value: 'x' for column 'c' at row 1\n    at 홍길동 (a.js:1:2)",
+      'invalid input syntax for type integer: "x"\n    at 홍길동:1:2',
+    ]) {
+      expect(scrubText(raw), raw.slice(0, 30)).not.toContain('홍길동');
+    }
+    // 로그 경로도 원본 메시지가 스택에 그대로 있으면 그 경계만 믿는다(메시지 자체가 잘린 값이면 끝까지 가린다)
+    const err = new Error("Duplicate entry 'x' for key 'k'\n    at 홍길동:1:2");
+    expect(logOnce({ error: err }, 'error')).not.toContain('홍길동');
+  });
+
+  it('로그 경로(message·stack)에서도 값 자리가 가려진다', () => {
+    const text = "Duplicate entry '홍길동' for key 'uk_name'";
+    const out = logOnce({ error: Object.assign(new Error(text), { code: 'ER_DUP_ENTRY', errno: 1062 }) }, 'error');
+    expect(out).not.toContain('홍길동');
+  });
+
+  it('긴 값·닫는 따옴표가 없는 문장에서도 오래 걸리지 않는다', () => {
+    const started = Date.now();
+    scrubText(`Duplicate entry '${'x'.repeat(200_000)}`);
+    scrubText(`Key (a)=(${'y'.repeat(200_000)}`);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('행 식별값: 아랍-인도 숫자도 번호로 센다(NFKC로 바뀌지 않는 블록)', () => {
+    expect(maskRecordKey('٠١٠٠٠٠٠١٢٣٤')).toBe('****1234');
+    expect(maskRecordKey('۰۱۰۰۰۰۰۱۲۳۴')).toBe('****1234');
+  });
+
+  it('행 식별값: NFKC가 아무 일도 하지 않는 환경(ICU 없는 빌드)에서도 전각 숫자를 센다', () => {
+    const original = String.prototype.normalize;
+    String.prototype.normalize = function (this: string) { return String(this); } as any;
+    try {
+      expect(maskRecordKey('０１０００００１２３４')).toBe('****1234');
+    } finally {
+      String.prototype.normalize = original;
+    }
+  });
+
+  it('PostgreSQL 진단 위치·형식과 mysql2 fatal(불리언)은 남긴다', () => {
+    const pgErr = Object.assign(new Error('value too long'), { code: '22001', file: 'varchar.c', line: '638', dataType: 'character varying', internalPosition: '3' });
+    const out = logOnce({ error: pgErr }, 'error');
+    expect(out).toContain('"file":"varchar.c"');
+    expect(out).toContain('"line":"638"');
+    expect(out).toContain('"dataType":"character varying"');
+    expect(out).toContain('"internalPosition":"3"');
+    const myErr = Object.assign(new Error('Connection lost'), { code: 'PROTOCOL_CONNECTION_LOST', fatal: true });
+    expect(logOnce({ error: myErr }, 'error')).toContain('"fatal":true');
+  });
+});
+
+describe('★2026-09-13(3) 공용 maskPhone: 11자리 이상은 종전 모양, 8~10자리는 뒤 4자리만(싱크 ⓓ)', () => {
+  it('11자리 이상 모양은 그대로다(기존 로그·미리보기 무변경)', () => {
+    expect(maskPhone('01000001234')).toBe('010****1234');
+    expect(maskPhone('010-0000-1234')).toBe('010****1234');
+  });
+
+  it('8~10자리는 앞자리를 남기지 않는다(종전은 8자리에서 1자리만 가렸다)', () => {
+    expect(maskPhone('1588-1234')).toBe('****1234');
+    expect(maskPhone('2345-6789')).toBe('****6789');
+    expect(maskPhone('02-123-4567')).toBe('****4567');
+    expect(maskPhone('02-1234-5678')).toBe('****5678');
+    expect(maskPhone('031-123-4567')).toBe('****4567');
+  });
+
+  it('7자리 이하·빈 값은 통째로 가린다', () => {
+    expect(maskPhone('234-5678')).toBe('****');
+    expect(maskPhone('')).toBe('****');
+  });
+
+  it('어느 길이든 최소 4자리를 가린다', () => {
+    for (let len = 8; len <= 13; len++) {
+      const raw = '0' + '123456789012'.slice(0, len - 1);
+      const shown = maskPhone(raw).replace(/\D/g, '').length;
+      expect(len - shown, `len=${len}`).toBeGreaterThanOrEqual(4);
+    }
+  });
+
+  it('로그 phone 키 경로에서도 짧은 번호의 앞자리가 남지 않는다', () => {
+    const out = logOnce({ phone: '02-123-4567', customer_phone: '1588-1234' });
+    expect(out).toContain('"phone":"****4567"');
+    expect(out).toContain('"customer_phone":"****1234"');
   });
 });

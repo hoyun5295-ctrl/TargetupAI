@@ -2649,7 +2649,12 @@ const handleSyncToggle = async (useDbSync: boolean) => {
     });
     if (res.ok) {
       const data = await res.json();
-      setSyncKeys(data.syncKeys);
+      // ★2026-09-13(3) 토글 응답에는 시크릿 원문이 없다(서버에 남지 않는다 · 싱크 등재분 ③).
+      //   방금 재발급해 한 번만 보여 주던 원문을 토글 한 번에 지우지 않는다(같은 키일 때만 이어 둔다).
+      setSyncKeys((prev) => ({
+        ...data.syncKeys,
+        ...(prev.api_secret && prev.api_key === data.syncKeys?.api_key ? { api_secret: prev.api_secret } : {}),
+      }));
     }
   } catch (error) {
     console.error('SyncAgent 토글 실패:', error);

@@ -27,7 +27,9 @@ import { validatePurchases } from '../types/purchase';
 import { SyncStateManager } from './state';
 import { getLogger } from '../logger';
 // ★ v1.6.1: mapping_dryrun 미리보기 마스킹 (서버 저장 payload — 개인정보 최소화)
-import { maskPhone, maskEmail, maskSensitiveData } from '../logger/masking';
+import { maskPhone, maskEmail, maskSensitiveData, maskRecordKey } from '../logger/masking';
+// ★2026-09-13(3) 싱크 ⓐ 오류 문장 단일 창구(서버 전송·로컬 로그·알림)
+import { formatValidationIssues, safeErrorText, buildSyncLogErrorMessage } from './error-text';
 
 const logger = getLogger('sync:engine');
 
@@ -905,7 +907,7 @@ export class SyncEngine {
 
     // ② 데이터 정규화
     const normalizeResult = target === 'customers'
-      ? normalizeCustomerBatch(mapped)
+      ? normalizeCustomerBatch(mapped, { dbType: this.db.dbType })
       : normalizePurchaseBatch(mapped);
 
     // 정규화 실패 건 로깅
@@ -925,7 +927,7 @@ export class SyncEngine {
       for (const invalid of validation.invalid) {
         errors.push({
           code: 'VALIDATION_FAILED',
-          message: invalid.errors.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
+          message: formatValidationIssues(invalid.errors.issues),
           recordKey: String(invalid.raw.phone || 'unknown'),
         });
       }
@@ -935,7 +937,7 @@ export class SyncEngine {
       for (const invalid of validation.invalid) {
         errors.push({
           code: 'VALIDATION_FAILED',
-          message: invalid.errors.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
+          message: formatValidationIssues(invalid.errors.issues),
           recordKey: String(invalid.raw.customer_phone || 'unknown'),
         });
       }
@@ -950,7 +952,8 @@ export class SyncEngine {
         logger.info(`🧪 [DRY RUN] API 전송 스킵 — ${validData.length}건`);
         logger.info('📋 정규화 결과 샘플 (최대 3건):');
         for (const item of validData.slice(0, 3)) {
-          logger.info(JSON.stringify(item, null, 2));
+          // ★2026-09-13 문자열로 찍으면 키 기준 마스킹을 거치지 않는다(적대검토 등재분 ⑩). 가린 뒤 같은 모양으로 찍는다
+          logger.info(JSON.stringify(maskSensitiveData(item), null, 2));
         }
         successCount = validData.length;
       } else if (this.apiClient) {
@@ -1013,7 +1016,11 @@ export class SyncEngine {
     if (result.errors.length > 0) {
       logger.warn(`오류 상세 (${result.errors.length}건):`);
       for (const err of result.errors.slice(0, 10)) {
-        logger.warn(`  [${err.code}] ${err.message}`, { key: err.recordKey });
+        // ★2026-09-13 행 식별값은 고객 전화번호 원문일 수 있다(적대검토 등재분 ⑥). 로그 요청 명령이 이 줄을 서버로 올린다.
+        //   ⛔ `key`를 마스킹 키 목록에 넣지 않는다 — 흔한 이름이라 다른 로그의 `key`까지 가린다. 여기서 가린다.
+        logger.warn(`  [${err.code}] ${safeErrorText(err.message)}`, {
+          key: err.recordKey === undefined ? undefined : maskRecordKey(err.recordKey),
+        });
       }
       if (result.errors.length > 10) {
         logger.warn(`  ... 외 ${result.errors.length - 10}건`);
@@ -1025,7 +1032,7 @@ export class SyncEngine {
       const hasApiError = result.errors.some(e => e.code === 'API_SEND_FAILED');
       const success = result.failCount === 0 && !hasApiError;
       const details = hasApiError
-        ? result.errors.filter(e => e.code === 'API_SEND_FAILED').map(e => e.message).join('; ')
+        ? result.errors.filter(e => e.code === 'API_SEND_FAILED').map(e => safeErrorText(e.message)).join('; ')
         : undefined;
       this.alertManager.onSyncResult(success, details);
     }
@@ -1048,9 +1055,7 @@ export class SyncEngine {
         successCount: result.successCount,
         failCount: result.failCount,
         durationMs: result.durationMs,
-        errorMessage: result.errors.length > 0
-          ? result.errors.slice(0, 5).map(e => `[${e.code}] ${e.message}`).join('; ')
-          : undefined,
+        errorMessage: buildSyncLogErrorMessage(result.errors),
         startedAt: result.startedAt,
         completedAt: result.completedAt,
       });

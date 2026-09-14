@@ -46,19 +46,39 @@ export type CampaignKind = 'live' | 'stopped' | 'missing';
  */
 export async function inspectAttemptCampaign(
   companyId: string, dispatchKey: string | null,
-): Promise<{ id: string | null; kind: CampaignKind }> {
-  if (!dispatchKey) return { id: null, kind: 'missing' };
+  // ★2026-09-13(3) status·phase도 함께 돌려준다(이미 취소된 캠페인을 가려 취소가 갇히지 않게 · 한 통이라도 나갔을 수 있는지 가르게 ·
+  //   기존 소비처는 id·kind만 읽는다)
+): Promise<{ id: string | null; kind: CampaignKind; status: string | null; phase: string | null }> {
+  if (!dispatchKey) return classifyAttemptCampaign(undefined);
   const r = await query(
     `SELECT id, status, send_phase FROM campaigns
       WHERE staging_id = $1::uuid AND company_id = $2::uuid
       ORDER BY created_at DESC LIMIT 1`,
     [dispatchKey, companyId],
   );
-  if (r.rows.length === 0) return { id: null, kind: 'missing' };
-  const { id, status, send_phase: phase } = r.rows[0];
-  // 배관은 `send_phase='queued'`만 집는다. `preparing`·`failed`는 더 나가지 않는다.
-  if (status === 'cancelled' || phase === 'failed' || phase === 'preparing') return { id, kind: 'stopped' };
-  return { id, kind: 'live' };
+  return classifyAttemptCampaign(r.rows[0]);
+}
+
+/**
+ * 캠페인 행 → 분류(★2026-09-13(3) · 조회와 멈춘 시도 인수 트랜잭션이 같은 규칙 한 벌을 쓴다).
+ * 배관은 `send_phase='queued'`만 집는다. `preparing`·`failed`는 더 나가지 않는다.
+ */
+export function classifyAttemptCampaign(
+  row: { id: string; status: string | null; send_phase: string | null } | undefined,
+): { id: string | null; kind: CampaignKind; status: string | null; phase: string | null } {
+  if (!row) return { id: null, kind: 'missing', status: null, phase: null };
+  const { id, status, send_phase: phase } = row;
+  if (status === 'cancelled' || phase === 'failed' || phase === 'preparing') return { id, kind: 'stopped', status: status ?? null, phase: phase ?? null };
+  return { id, kind: 'live', status: status ?? null, phase: phase ?? null };
+}
+
+/**
+ * 이 캠페인이 한 통이라도 나갔을 수 있는가(★2026-09-13(3) · Codex 적대 1R medium).
+ * `preparing`만 아니다(차감 완료 전 · 활성화 전이라 워커가 집지 않는다). `failed`는 적재 도중 종결이라 **일부가 나갔을 수 있다**.
+ * ⛔ `kind === 'live'`로 대신하지 마라: `stopped`에는 일부 발송된 `failed`가 들어 있어, 막을 것이 없을 때 취소로 확정하면 화면이 거짓말을 한다.
+ */
+export function campaignMayHaveSent(found: { id: string | null; phase: string | null }): boolean {
+  return !!found.id && found.phase !== 'preparing';
 }
 
 /**
@@ -75,6 +95,10 @@ export async function neutralizeCampaign(
   let error = '';
   let alreadySent = false;
   try {
+    // ★2026-09-13(3) 이미 취소된 캠페인은 막을 것이 없다(큐는 그 취소가 지웠다). 캠페인 취소 CT는 이 경우를 실패로 돌려줘
+    //   (중복 환불 방지) 취소 마무리가 영원히 재시도하며 경보를 보냈다 → 성공으로 보고, "이미 발송"으로도 보지 않는다.
+    const current = await query(`SELECT status FROM campaigns WHERE id = $1::uuid AND company_id = $2::uuid`, [campaignId, companyId]);
+    if (current.rows[0]?.status === 'cancelled') return { ok: true, error: '', alreadySent: false };
     const { cancelCampaign } = await import('./campaign-lifecycle');
     // ⛔ `skipTimeCheck` — 15분 게이트는 사용자 정책이지 안전장치가 아니다. 여기서 멈추면 나가면 안 되는 발송이 나간다.
     // ⛔ `queueOnly` — 대행발송은 캠페인 생성 직후 적재를 끝내고 `completed`가 된다(예약 시각은 큐 행이 든다).

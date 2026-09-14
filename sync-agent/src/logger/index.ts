@@ -8,6 +8,7 @@
 
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
+import fs from 'node:fs';
 import path from 'node:path';
 import { maskSensitiveData } from './masking';
 
@@ -15,6 +16,34 @@ import { maskSensitiveData } from './masking';
 
 // ★ v1.6.1: report_logs 명령(logger/tail.ts)이 같은 경로를 읽도록 export (경로 상수 단일 소스)
 export const LOG_DIR = path.resolve(process.cwd(), 'logs');
+
+/**
+ * 마스킹이 동작하는 빌드가 이 설치에서 **처음** 로그를 쓰기 시작한 시각(★2026-09-13(3) · 싱크 등재분 ⑦).
+ * 1.5.7·1.7.1은 마스킹이 동작하지 않던 빌드라, 새 빌드를 깐 당일 파일에는 그 전에 쓰인 원문 줄이 섞여 있다.
+ * 로그 요청 명령(tail.ts)은 이 시각 이전 줄을 올리지 않는다.
+ * ⛔ 이미 있으면 덮지 않는다(첫 기록 시각이 기준이다 · 재시작마다 덮으면 정상 줄까지 숨는다).
+ */
+export const MASKED_SINCE_FILE = path.join(LOG_DIR, '.masked-since');
+const PROCESS_STARTED_AT = Date.now();
+
+export function markMaskedSince(): void {
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    fs.writeFileSync(MASKED_SINCE_FILE, String(PROCESS_STARTED_AT), { flag: 'wx' });
+  } catch {
+    // 이미 있거나 쓸 수 없다. 읽을 수 없으면 readMaskedSince가 이 프로세스 시작 시각으로 대신한다
+  }
+}
+
+/** 기준 시각(epoch ms). 파일이 없거나 읽을 수 없으면 이 프로세스 시작 시각(이 빌드가 쓴 줄만 남는다) */
+export function readMaskedSince(): number {
+  try {
+    const v = Number(fs.readFileSync(MASKED_SINCE_FILE, 'utf8').trim());
+    return Number.isFinite(v) && v > 0 ? v : PROCESS_STARTED_AT;
+  } catch {
+    return PROCESS_STARTED_AT;
+  }
+}
 
 /**
  * 민감정보 마스킹 포맷
@@ -90,6 +119,7 @@ let rootLogger: winston.Logger | null = null;
  */
 export function initLogger(config: LoggerConfig = {}): winston.Logger {
   const { level = 'info', maxFiles = 30, maxSize = '20m' } = config;
+  markMaskedSince();
 
   rootLogger = winston.createLogger({
     level,

@@ -22,7 +22,7 @@ import {
 } from './agency-send-form';
 import { normalizePhone, normalizeAgencyPhone } from './normalize-phone';
 import { validateRequestedAt } from './agency-send-state';
-import { buildSlotPlan, extractAgencyVars, resolveVarColumns } from './agency-send-vars';
+import { buildSlotPlan, extractAgencyVars, resolveVarColumns, toStoredVars } from './agency-send-vars';
 import { suggestVarColumnsWithAi } from './ai-column-mapper';
 import { SEND_HOURS } from '../config/defaults';
 
@@ -75,6 +75,115 @@ export async function loadSendWindow(companyId: string, isAd: boolean): Promise<
 }
 
 /**
+ * 접수의 회신번호 중 **지금** 등록되지 않은 번호(★2026-09-13(3) · 대행 등재분 ③).
+ * 발송 직전 재검증(워커)과 시각·문안 변경(라우트)이 같은 판정 한 벌을 쓴다. 판정 함수는 접수 때와 같은
+ * `getRegisteredCallbackSet`(같은 회사·같은 접수자)라 등록된 번호가 새로 막히지 않는다.
+ * 대표 번호도 함께 본다(고정 번호 방식은 그 번호 하나로 나간다).
+ * @returns rowCallbacks = 수신자 행의 고객별 번호(중복 제거 · 저장 컬럼이 없으면 빈 배열) · missing = 미등록 번호
+ */
+export async function findUnregisteredRequestCallbacks(req: {
+  id: string; company_id: string; created_by: string | null; callback_number: string | null;
+}): Promise<{ rowCallbacks: string[]; missing: string[] }> {
+  const rowCallbacks = await hasAgencyColumn(pool, 'callback', 'agency_send_recipients')
+    ? (await query(
+        `SELECT DISTINCT callback FROM agency_send_recipients WHERE request_id = $1::uuid AND callback IS NOT NULL`,
+        [req.id],
+      )).rows.map((r: any) => String(r.callback))
+    : [];
+  const primary = normalizePhone(String(req.callback_number || ''));
+  const toVerify = [...new Set([...rowCallbacks, ...(primary ? [primary] : [])])];
+  if (toVerify.length === 0) return { rowCallbacks, missing: [] };
+  const registered = await getRegisteredCallbackSet(req.company_id, req.created_by || undefined);
+  return { rowCallbacks, missing: toVerify.filter((cb) => !registered.has(cb)) };
+}
+
+/** 미등록 회신번호 안내 문장(접수·시각 변경·문안 수정이 같은 문장 · 번호 20개까지) */
+export function unregisteredCallbackError(missing: string[]): string {
+  return `등록되지 않은 회신번호가 있습니다: ${missing.slice(0, 20).join(', ')}${missing.length > 20 ? ` 외 ${missing.length - 20}개` : ''}. 발신번호 등록을 먼저 해 주세요.`;
+}
+
+/** 실제로 나가는 회신번호 종류(화면 표시 재료) */
+export interface AgencyCallbackKinds {
+  /** 종류 수(0 = 수신자 없음 또는 모름) */
+  callbackKinds: number;
+  /** 한 종류일 때 그 번호(대표 번호와 다를 수 있다) */
+  callbackSole: string | null;
+}
+
+/**
+ * 수신자 번호들 → 실제로 나가는 번호 종류(★2026-09-13(3) · 대행 등재분 ②).
+ * ⛔ 번호가 빈 행은 **발송과 같은 규칙으로** 대표 번호로 센다(`resolveCustomerCallback` 폴백 · Codex 4R medium).
+ * ⛔ 종류가 하나여도 대표 번호와 같다고 가정하지 않는다(재접수에서 대표 번호만 바꾸면 A 한 종류 + 대표 C · 적대검토 2R).
+ * 규칙은 아래 `loadAgencyCallbackKinds`의 SQL과 같다(COALESCE(callback, 대표 번호, '')).
+ */
+export function countCallbackKinds(callbacks: Array<string | null | undefined>, primary: string | null): AgencyCallbackKinds {
+  const kinds = new Set(callbacks.map((cb) => cb || primary || ''));
+  return { callbackKinds: kinds.size, callbackSole: kinds.size === 1 ? ([...kinds][0] || null) : null };
+}
+
+/**
+ * 고객별 회신번호 저장 컬럼이 생긴 날(★2026-09-12 ALTER 실행완료 · SCHEMA.md agency_send_recipients 절).
+ * 이 날 이전에 만든 접수는 수신자 행에 번호가 없어 전부 대표 번호로 나갔다 → 수신자 행을 세지 않는다.
+ * 경계일 당일은 세는 쪽에 둔다(ALTER 시각 이전 접수를 세어도 결과는 같다).
+ */
+const RECIPIENT_CALLBACK_SINCE = new Date('2026-09-12T00:00:00+09:00').getTime();
+
+/**
+ * 목록·상세·승인 화면이 보일 회신번호 종류(★2026-09-13(3) · 대행 등재분 ②: 승인 링크 화면만 알고 목록·상세는 대표 번호 하나만 보였다).
+ * 읽는 순서: ①접수 이력(`received` payload) 스냅숏 = 수신자 행은 접수 뒤 바뀌지 않아 그때 센 값이 곧 사실이다(큰 명단을 매번 세지 않는다)
+ * ②스냅숏이 없는 옛 접수 중 컬럼이 생기기 전 접수 = 대표 번호 한 종류 ③그 밖(0912~배포 전 접수) = 수신자 행을 센다.
+ * 실패해도 화면을 막지 않는다(그 접수는 결과에 없고 화면은 대표 번호를 보인다).
+ */
+export async function loadAgencyCallbackKinds(
+  requests: Array<{ id: string; callback_number: string | null; created_at: string | Date | null }>,
+): Promise<Map<string, AgencyCallbackKinds>> {
+  const out = new Map<string, AgencyCallbackKinds>();
+  if (requests.length === 0) return out;
+  try {
+    const snap = await query(
+      `SELECT DISTINCT ON (request_id) request_id, payload FROM agency_send_events
+        WHERE request_id = ANY($1::uuid[]) AND kind = 'received' AND payload ? 'callbackKinds'
+        ORDER BY request_id, created_at ASC`,
+      [requests.map((r) => r.id)],
+    );
+    for (const s of snap.rows) {
+      out.set(String(s.request_id), {
+        callbackKinds: Number(s.payload?.callbackKinds) || 0,
+        callbackSole: s.payload?.callbackSole ? String(s.payload.callbackSole) : null,
+      });
+    }
+    const toCount: string[] = [];
+    for (const r of requests) {
+      if (out.has(r.id)) continue;
+      const createdAt = r.created_at ? new Date(r.created_at).getTime() : NaN;
+      if (Number.isFinite(createdAt) && createdAt < RECIPIENT_CALLBACK_SINCE) {
+        out.set(r.id, countCallbackKinds([null], r.callback_number));
+      } else {
+        toCount.push(r.id);
+      }
+    }
+    if (toCount.length > 0 && await hasAgencyColumn(pool, 'callback', 'agency_send_recipients')) {
+      const counted = await query(
+        `SELECT r.request_id, COUNT(DISTINCT COALESCE(r.callback, q.callback_number, ''))::int AS n,
+                MIN(COALESCE(r.callback, q.callback_number, '')) AS sole
+           FROM agency_send_recipients r
+           JOIN agency_send_requests q ON q.id = r.request_id
+          WHERE r.request_id = ANY($1::uuid[])
+          GROUP BY r.request_id`,
+        [toCount],
+      );
+      for (const c of counted.rows) {
+        const n = Number(c.n) || 0;
+        out.set(String(c.request_id), { callbackKinds: n, callbackSole: n === 1 ? (String(c.sole || '') || null) : null });
+      }
+    }
+  } catch (err: any) {
+    console.warn('[agency-send] 회신번호 종류 조회 실패(표시 생략):', err?.message);
+  }
+  return out;
+}
+
+/**
  * ★0826(적대 2R) source 컬럼 존재 탐지 — 배포(코드) → DDL 순서에서 기존 입구가 죽지 않으면서도
  * 화면('screen')·원스텝('one_step') 라벨이 살아야 한다. 컬럼이 없으면 INSERT에서 빼고(DEFAULT 없음이므로
  * 그냥 구식 문장), 있으면 싣는다. 음성 결과는 5분 TTL로 재탐지한다(DDL이 재기동 없이 적용되는 창 대비).
@@ -121,7 +230,8 @@ export async function logEvent(requestId: string, kind: string, payload: Record<
 //   ③이메일 접수 워커. 입구가 늘어도 검증은 이 한 곳이다.
 // ════════════════════════════════════════════════════════════
 export type CreateCoreResult =
-  | { ok: true; request: any }
+  // ★2026-09-13(3) callbackKinds = 이 접수가 실제로 나갈 회신번호 종류(외부 트랜잭션 입구는 received 이력에 싣는다)
+  | { ok: true; request: any; callbackKinds: AgencyCallbackKinds }
   | { ok: false; status: number; error: string; code?: string };
 
 export async function createRequestCore(
@@ -225,7 +335,8 @@ export async function createRequestCore(
     const cb = normalizePhone(String(raw?.callback ?? ''));
     rows.push({
       phone,
-      vars: raw?.vars && typeof raw.vars === 'object' ? raw.vars : {},
+      // ★2026-09-13 저장형(문자열)으로 넣는다. 발송 적재(`vars->>`)와 미리보기(`toSlotValues`)가 같은 글자를 만든다(등재분 ⑤)
+      vars: toStoredVars(raw?.vars),
       callback: cb.length >= 8 ? cb : null,
     });
     // ★2026-09-12 종전에는 여기서 3만 번째에 `break` 했다 — 넘긴 명단이 **아무 말 없이 잘려**
@@ -234,6 +345,21 @@ export async function createRequestCore(
   }
   if (rows.length === 0) {
     return { ok: false, status: 400, error: '보낼 번호가 없습니다. 명단을 확인해 주세요.' };
+  }
+
+  // ★2026-09-13 고객별 회신번호도 **접수 때** 등록을 확인한다(적대검토 2R medium). 원스텝·메일은 분석이 이미 봤지만
+  //   화면 접수(재접수 포함)는 대표 번호만 봐서, 등록되지 않았거나 이 접수자에게 배정되지 않은 번호가 스팸 검사·승인을
+  //   다 돈 뒤 발송 직전에야 멈췄다. 판정 함수는 대표 번호·발송 직전 재검증과 같은 한 벌이다.
+  const rowCallbacks = [...new Set(rows.map((r) => r.callback).filter((cb): cb is string => !!cb))];
+  if (rowCallbacks.length > 0) {
+    if (rowCallbacks.length > MAX_CALLBACK_GROUPS) {
+      return { ok: false, status: 400, error: `회신번호가 ${MAX_CALLBACK_GROUPS}종을 넘습니다. 회신번호 열이 맞는지 확인해 주세요.` };
+    }
+    const regSet = pre?.registeredSet ?? await getRegisteredCallbackSet(auth.companyId, auth.userId);
+    const unregisteredRows = rowCallbacks.filter((cb) => !regSet.has(cb));
+    if (unregisteredRows.length > 0) {
+      return { ok: false, status: 400, error: unregisteredCallbackError(unregisteredRows) };
+    }
   }
 
   // ⛔ 접수 행과 수신자는 **한 트랜잭션**이다. 나뉘면 수신자 0건짜리 접수가 남고,
@@ -289,9 +415,14 @@ export async function createRequestCore(
     const hasRecipientCallback = await hasAgencyColumn(client, 'callback', 'agency_send_recipients');
     // ★2026-09-13 ⛔ 고객별 번호가 있는데 저장할 컬럼이 없으면 **조용히 버리지 않는다**(Codex 2R high).
     //   버리면 대표 번호 하나로 나가는데 확인 화면·회신 메일은 고객별로 나간다고 안내한다.
-    //   던져서 접수 자체를 되돌린다(화면은 재시도 안내 · 메일 워커는 백오프 재시도라 반려 메일이 가지 않는다).
+    //   던져서 접수 자체를 되돌린다(화면 = 503 마이그레이션 대기 · 메일 워커 = 스키마 부재로 보고 그 tick을 멈추며
+    //   반려 메일은 가지 않고, 선점 만료(10분) 뒤 다시 집는다 · 운영은 0912에 컬럼이 추가돼 이 분기에 닿지 않는다).
     if (!hasRecipientCallback && rows.some((r) => r.callback)) {
-      throw new Error('agency_send_recipients.callback 컬럼이 없어 고객별 회신번호를 저장할 수 없습니다(DB 마이그레이션 필요)');
+      // PG가 없는 컬럼에 던지는 것과 같은 모양으로 던진다(Codex 3R medium) — 라우트의 스키마 부재 분기가 503
+      //   `DB_MIGRATION_PENDING`으로 답하고, 메일 워커는 기존 스키마 부재 분기(마이그레이션 전 멈춤)를 탄다.
+      const schemaErr: any = new Error('column "callback" of relation "agency_send_recipients" does not exist (고객별 회신번호를 저장할 수 없다 · DB 마이그레이션 필요)');
+      schemaErr.code = '42703';
+      throw schemaErr;
     }
     const perRow = hasRecipientCallback ? 4 : 3;
     for (let offset = 0; offset < rows.length; offset += RECIPIENT_INSERT_CHUNK) {
@@ -329,17 +460,21 @@ export async function createRequestCore(
     if (own) client.release();
   }
 
+  // ★2026-09-13(3) 실제로 나갈 회신번호 종류를 접수 이력에 스냅숏으로 남긴다(목록·상세·승인 화면이 큰 명단을 매번 세지 않게 ·
+  //   수신자 행은 접수 뒤 바뀌지 않는다). 규칙은 발송과 같다(빈 번호 = 대표 번호 · countCallbackKinds).
+  const callbackKinds = countCallbackKinds(rows.map((r) => r.callback), callback);
   if (own) {
     await logEvent(request.id, 'received', {
       recipientCount: rows.length, messageType: type,
       ...(when.shifted ? { timeShifted: true, originalAt: when.originalAt?.toISOString() } : {}),
+      ...callbackKinds,
     });
     console.log(`[agency-send] 접수 company=${auth.companyId} id=${request.id} ${type} ${rows.length}건${when.shifted ? ' (시각 자동 조정)' : ''}`);
     // ★0826(6) 커밋 뒤에 1차 검사를 즉시 깨운다(리드타임 40분 체계 — 워커 주기 5분이 곧 승인 시간이다).
     //   ⛔ 커밋 전에 부르면 워커가 아직 없는 행을 찾는다. 외부 트랜잭션(원스텝 다건)은 호출부가 커밋 뒤에 부른다.
     kickFirstTest(request.id);
   }
-  return { ok: true, request };
+  return { ok: true, request, callbackKinds };
 }
 
 /**

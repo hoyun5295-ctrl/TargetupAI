@@ -357,6 +357,8 @@ async function processCampaign(campaignId: string): Promise<void> {
   //    send_phase='sent' AND status='completed'만 본다.) 예외를 여기서 잡아 아래 종결 블록을 그대로 태운다 —
   //   중단 지점까지 적재된 건은 정상 발송분으로 집계되고, 나머지는 정상 경로와 같은 산식으로 환불된다.
   let failureReason: string | null = null;
+  // ★2026-09-13(3) 키 기준 페이지(대행 등재분 ⑥). 직전 청크의 마지막 id. null = 아직 읽은 청크가 없다
+  let lastId: string | null = null;
   try {
   while (processed < total) {
     // ★ 2026-06-11: 적재 중 취소 감지 — 취소되면 이미 넣은 큐 행을 지우고 중단 (취소-적재 경합 차단).
@@ -368,12 +370,32 @@ async function processCampaign(campaignId: string): Promise<void> {
       console.log(`[direct-send-worker] 캠페인 ${campaignId} 적재 중 취소 감지 — 적재분 큐 삭제 후 중단`);
       return;
     }
-    const chunkRes = await query(
-      `SELECT id, phone, name, extra1, extra2, extra3, callback
-       FROM campaign_send_staging WHERE staging_id = $1 ORDER BY id ASC LIMIT $2 OFFSET $3`,
-      [stagingId, CHUNK, processed]
-    );
+    // ★2026-09-13(3) OFFSET 대신 직전 청크의 마지막 id 뒤를 읽는다(대행 등재분 ⑥). OFFSET은 앞 행을 청크마다 다시 세어
+    //   100만 건이면 뒤로 갈수록 한 청크가 느려지고 그만큼 이 루프가 워커를 붙잡았다.
+    //   ⛔ 같은 행·같은 순서다: 정렬 키 id는 PK(유일)이고, 이 루프 동안 staging 행을 지우는 곳은 위 정제(처음 한 번 · 루프 전)와
+    //      취소 감지(지우고 곧바로 return)뿐이다. 재시작(processed > 0)이면 처음 한 번만 OFFSET으로 이어 볼 자리를 찾는다
+    //      (processed_count 멱등 계약 그대로 · 전역 순번 globalIndex도 그대로다).
+    if (lastId === null && processed > 0) {
+      const resume = await query(
+        `SELECT id FROM campaign_send_staging WHERE staging_id = $1 ORDER BY id ASC LIMIT 1 OFFSET $2`,
+        [stagingId, processed - 1]
+      );
+      if (resume.rows.length === 0) break;
+      lastId = String(resume.rows[0].id);
+    }
+    const chunkRes: Awaited<ReturnType<typeof query>> = lastId === null
+      ? await query(
+          `SELECT id, phone, name, extra1, extra2, extra3, callback
+           FROM campaign_send_staging WHERE staging_id = $1 ORDER BY id ASC LIMIT $2`,
+          [stagingId, CHUNK]
+        )
+      : await query(
+          `SELECT id, phone, name, extra1, extra2, extra3, callback
+           FROM campaign_send_staging WHERE staging_id = $1 AND id > $3::bigint ORDER BY id ASC LIMIT $2`,
+          [stagingId, CHUNK, lastId]
+        );
     if (chunkRes.rows.length === 0) break;
+    lastId = String(chunkRes.rows[chunkRes.rows.length - 1].id);
 
     const recipients: ChunkRecipient[] = chunkRes.rows.map((r: any, i: number) => {
       const globalIndex = processed + i;

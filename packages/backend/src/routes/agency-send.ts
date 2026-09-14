@@ -26,10 +26,12 @@ import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
 import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples } from '../utils/agency-send-preview';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
+import { ATTEMPT_LOCK_PREFIX, attemptBlocksChange, attemptIdleSql } from '../utils/agency-send-worker';
 // ★2026-08-26 §18 승격 — 접수 코어·원스텝 분석은 CT(utils/agency-send-intake.ts)가 소유한다.
 //   입구 = 화면 접수 · 원스텝 · 이메일 접수 워커. 이 파일에 코어를 다시 정의하지 마라(두 벌 금지).
 import {
   analyzeOneStep, createRequestCore, hasAgencyColumn, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
+  findUnregisteredRequestCallbacks, loadAgencyCallbackKinds, unregisteredCallbackError, type AgencyCallbackKinds,
   MAX_CONTENT, type OneStepAnalysis,
 } from '../utils/agency-send-intake';
 
@@ -67,8 +69,31 @@ function rejectSubjectVars(subject: any, res: Response): boolean {
  * 그 상태에서 시각만 바꿔 다시 보내면 같은 사람에게 두 번 가고 요금도 두 번 나간다.
  * 다시 보내야 하면 결과를 확인한 뒤 **새 접수**로 간다.
  */
+/**
+ * 접수의 회신번호 중 지금 등록되지 않은 번호가 있으면 400으로 돌려보낸다(★2026-09-13(3) · 대행 등재분 ③).
+ * 판정은 발송 직전 재검증과 같은 CT(`findUnregisteredRequestCallbacks`) · 문장도 접수와 같은 CT다.
+ */
+async function rejectUnregisteredCallbacks(
+  requestId: string, row: { company_id: string; created_by: string | null; callback_number: string | null }, res: Response,
+): Promise<boolean> {
+  const { missing } = await findUnregisteredRequestCallbacks({ id: requestId, ...row });
+  if (missing.length === 0) return false;
+  res.status(400).json({ success: false, code: 'CALLBACK_UNREGISTERED', error: unregisteredCallbackError(missing) });
+  return true;
+}
+
 function rejectAlreadyDispatched(campaignId: any, res: Response): boolean {
   if (!campaignId) return false;
+  // ★2026-09-13(3) 진행 중 시도(attemptBlocksChange 'in_flight')는 캠페인이 없을 수 있다. "새로 접수하라"는 안내가 사실과 달라
+  //   처리 중 안내로 가른다(실패 안내를 보내는 몇 초 동안 켜져 있다 · 두 벌 발송 적대검토 1R).
+  if (campaignId === 'in_flight') {
+    res.status(409).json({
+      success: false,
+      code: 'ATTEMPT_IN_PROGRESS',
+      error: '예약을 처리하는 중입니다. 잠시 후 화면을 새로 고치고 다시 시도해 주세요.',
+    });
+    return true;
+  }
   res.status(400).json({
     success: false,
     code: 'ALREADY_DISPATCHED',
@@ -165,7 +190,19 @@ function toPublic(row: any) {
     // ★2026-08-26(2) 접수 계정 — 관리자 조회(users JOIN이 실린 SELECT)에만 값이 있다.
     //   일반 사용자 응답에는 키 자체가 없다(본인 것만 보이므로 표시할 이유가 없다).
     ...(row.created_by_name !== undefined ? { createdByName: row.created_by_name || row.created_by_login || null } : {}),
+    // ★2026-09-13(3) 실제로 나가는 회신번호 종류(대행 등재분 ②). 실린 응답에만 키가 있다(없으면 화면이 대표 번호를 보인다)
+    ...(row.callback_kinds !== undefined ? { callbackKinds: Number(row.callback_kinds) || 0, callbackSole: row.callback_sole ?? null } : {}),
   };
+}
+
+/** 회신번호 종류를 응답 행에 싣는다(toPublic이 읽는다 · 모르면 행 그대로) */
+function withCallbackKinds(row: any, kinds: AgencyCallbackKinds | undefined): any {
+  return kinds ? { ...row, callback_kinds: kinds.callbackKinds, callback_sole: kinds.callbackSole } : row;
+}
+
+/** 단건 응답: 회신번호 종류를 조회해 싣고 공개형으로 바꾼다(조회 실패는 CT가 흡수 · 대표 번호 표시) */
+async function toPublicWithKinds(row: any) {
+  return toPublic(withCallbackKinds(row, (await loadAgencyCallbackKinds([row])).get(row.id)));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -191,7 +228,9 @@ router.get('/', async (req: Request, res: Response) => {
             ORDER BY created_at DESC LIMIT 100`,
           [auth.companyId, auth.userId],
         );
-    return res.json({ success: true, requests: r.rows.map(toPublic) });
+    // ★2026-09-13(3) 목록도 실제로 나가는 회신번호 종류를 보인다(대행 등재분 ② · 스냅숏 우선이라 큰 명단을 매번 세지 않는다)
+    const kinds = await loadAgencyCallbackKinds(r.rows);
+    return res.json({ success: true, requests: r.rows.map((row: any) => toPublic(withCallbackKinds(row, kinds.get(row.id)))) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 목록 조회 실패:', err);
@@ -210,7 +249,7 @@ router.post('/', async (req: Request, res: Response) => {
     if (!result.ok) {
       return res.status(result.status).json({ success: false, error: result.error, ...(result.code ? { code: result.code } : {}) });
     }
-    return res.status(201).json({ success: true, request: toPublic(result.request) });
+    return res.status(201).json({ success: true, request: toPublic(withCallbackKinds(result.request, result.callbackKinds)) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 접수 실패:', err);
@@ -347,6 +386,7 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
     //   남는 잔여 위험 = 성공 응답이 유실된 뒤 통째로 다시 제출하는 경우이며, 이는 화면 접수의
     //   재클릭과 같은 부류다(§17에 수용 위험으로 기록).
     const created: any[] = [];
+    const createdKinds: AgencyCallbackKinds[] = [];
     // 트랜잭션을 열기 **전에** 검증 재료를 같은 함수로 조회해 둔다(★2R — 연결을 쥔 채 풀을 다시 기다리지 않는다)
     const pre = {
       registeredSet: await getRegisteredCallbackSet(auth.companyId, auth.userId),
@@ -384,6 +424,7 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
         });
       }
       created.push(result.request);
+      createdKinds.push(result.callbackKinds);
       await client.query('COMMIT');
     } catch (txErr) {
       await client.query('ROLLBACK').catch(() => {});
@@ -393,12 +434,13 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
     }
     // 이력은 커밋 뒤에 적는다(커밋 전 별도 연결로 적으면 아직 없는 행을 가리킨다)
     // ★0826(6) 같은 자리에서 1차 검사를 즉시 깨운다 — 원스텝은 외부 트랜잭션이라 코어가 못 한다(코어 주석)
-    for (const r of created) {
-      await logEvent(r.id, 'received', { recipientCount: r.recipient_count, messageType: r.message_type, via: 'one-step' });
+    for (const [i, r] of created.entries()) {
+      // ★2026-09-13(3) 회신번호 종류 스냅숏(코어 주석 · 목록·상세·승인 화면 표시 재료)
+      await logEvent(r.id, 'received', { recipientCount: r.recipient_count, messageType: r.message_type, via: 'one-step', ...createdKinds[i] });
       kickFirstTest(r.id);
     }
     console.log(`[agency-send] 원스텝 접수 company=${auth.companyId} ${created.length}건(회신번호 ${analysis.groups.length}종 · 인원 ${analysis.counts.valid})`);
-    return res.status(201).json({ success: true, requests: created.map(toPublic) });
+    return res.status(201).json({ success: true, requests: created.map((r, i) => toPublic(withCallbackKinds(r, createdKinds[i]))) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 원스텝 접수 실패:', err);
@@ -491,7 +533,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       `SELECT kind, payload, created_at FROM agency_send_events WHERE request_id = $1::uuid ORDER BY created_at DESC LIMIT 50`,
       [req.params.id],
     );
-    return res.json({ success: true, request: toPublic(r.rows[0]), events: events.rows });
+    return res.json({ success: true, request: await toPublicWithKinds(r.rows[0]), events: events.rows });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 상세 조회 실패:', err);
@@ -585,7 +627,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     if (!outcome.ok) {
       return res.status(outcome.status).json({ success: false, error: outcome.error, ...(outcome.code ? { code: outcome.code } : {}) });
     }
-    return res.json({ success: true, request: toPublic(outcome.row) });
+    return res.json({ success: true, request: await toPublicWithKinds(outcome.row) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 승인 실패:', err);
@@ -606,7 +648,7 @@ router.post('/:id/content', async (req: Request, res: Response) => {
     if (req.body?.subject != null && rejectSubjectVars(req.body.subject, res)) return;
 
     const r = await query(
-      `SELECT status, var_mapping, revision, campaign_id FROM agency_send_requests
+      `SELECT status, var_mapping, revision, campaign_id, dispatch_key, company_id, created_by, callback_number FROM agency_send_requests
         WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
       [req.params.id, auth.companyId, ownerParam(auth)],
     );
@@ -635,12 +677,21 @@ router.post('/:id/content', async (req: Request, res: Response) => {
       });
     }
 
+    // ★2026-09-13(3) 회신번호 등록을 고칠 때 다시 본다(대행 등재분 ③). 미등록 번호로 만료된 건을 고치면 검사·승인을 다 돈 뒤
+    //   발송 직전 재검증에서 또 멈췄다(오발송은 없지만 담당자가 같은 일을 두 번 한다). 판정은 발송 직전과 같은 CT 한 벌이다.
+    if (await rejectUnregisteredCallbacks(req.params.id, r.rows[0], res)) return;
+
     // 원문도 함께 바꾼다 — 사용자가 새로 쓴 문장이 이번 접수의 원문이다(AI가 다듬을 때의 기준선).
     // 승인 흔적을 지워 옛 승인이 남지 않게 한다(불변 7).
     // ⛔ `final_test_at`도 지운다 — 바뀐 문안은 당일 검사를 통과한 적이 없다(그대로 두면 검사 없이 나간다).
     // ⛔ `dispatch_key`·`campaign_id`도 지운다 — 문안이 바뀌면 앞선 시도와는 다른 발송이다(새 시도 키를 받는다).
     // ⛔ **관찰한 상태·버전을 조건에 넣는다.** 조건 없이 덮으면 워커가 잡고 있는 건의 lock을 깨고,
     //   그 워커가 뒤늦게 옛 문안으로 상태를 되돌려 **고친 적 없는 문장이 나가는** 경로가 생긴다.
+    // ★2026-09-13(3) 대행 ⓔ 두 벌 발송 차단: 위 `campaign_id`는 캐시다. 이 축의 진실인 시도 키로 캠페인을 직접 찾고,
+    //   같은 프로세스에서 그 시도가 돌고 있는지 본다. 캠페인이 있는데 캐시만 비어 있는 틈에 시도 키를 비우면
+    //   대조가 옛 캠페인을 못 찾아 새 시도와 두 벌로 나간다. ⛔ 이 판정과 아래 UPDATE 사이에 다른 대기를 두지 않는다.
+    //   다른 연결이 쥔 시도 키 잠금은 UPDATE 조건(`attemptIdleSql`)이 본다(쥐고 있으면 0행 → 상태 변경 안내).
+    if (rejectAlreadyDispatched(await attemptBlocksChange(auth.companyId, req.params.id, r.rows[0].dispatch_key), res)) return;
     const updated = await query(
       `UPDATE agency_send_requests
           SET original_content = $1, current_content = $1, content_version = content_version + 1,
@@ -650,8 +701,10 @@ router.post('/:id/content', async (req: Request, res: Response) => {
               subject = COALESCE($2, subject), expired_at = NULL,
               lock_at = NULL, lock_token = NULL, revision = revision + 1, updated_at = NOW()
         WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5
+          AND campaign_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = agency_send_requests.dispatch_key AND c.company_id = agency_send_requests.company_id)${attemptIdleSql(6)}
         RETURNING *`,
-      [body, req.body?.subject ?? null, req.params.id, auth.companyId, observedRevision],
+      [body, req.body?.subject ?? null, req.params.id, auth.companyId, observedRevision, ATTEMPT_LOCK_PREFIX],
     );
     if (updated.rows.length === 0) {
       return res.status(409).json({
@@ -662,7 +715,7 @@ router.post('/:id/content', async (req: Request, res: Response) => {
     }
 
     await logEvent(req.params.id, 'content_edited', { version: updated.rows[0]?.content_version });
-    return res.json({ success: true, request: toPublic(updated.rows[0]) });
+    return res.json({ success: true, request: await toPublicWithKinds(updated.rows[0]) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 문안 수정 실패:', err);
@@ -678,7 +731,7 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
   if (!auth) return;
   try {
     const r = await query(
-      `SELECT status, revision, is_ad, campaign_id, final_test_at
+      `SELECT status, revision, is_ad, campaign_id, final_test_at, dispatch_key, company_id, created_by, callback_number
          FROM agency_send_requests
         WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
       [req.params.id, auth.companyId, ownerParam(auth)],
@@ -714,6 +767,12 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
       && !!when.at
       && isSameKstDay(priorFinalTest, when.at);
 
+    // ★2026-09-13(3) 회신번호 등록을 시각을 고칠 때 다시 본다(대행 등재분 ③ · 문안 수정과 같은 이유 · 같은 CT).
+    if (await rejectUnregisteredCallbacks(req.params.id, r.rows[0], res)) return;
+
+    // ★2026-09-13(3) 대행 ⓔ 두 벌 발송 차단(문안 수정과 같은 이유 · 같은 판정 함수 · 같은 잠금 조건).
+    //   ⛔ 이 판정과 아래 UPDATE 사이에 다른 대기를 두지 않는다.
+    if (rejectAlreadyDispatched(await attemptBlocksChange(auth.companyId, req.params.id, r.rows[0].dispatch_key), res)) return;
     const updated = await query(
       `UPDATE agency_send_requests
           SET requested_at = $1, status = $2, expired_at = NULL,
@@ -722,8 +781,10 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
               dispatch_key = NULL, campaign_id = NULL, lock_at = NULL, lock_token = NULL,
               revision = revision + 1, updated_at = NOW()
         WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5
+          AND campaign_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = agency_send_requests.dispatch_key AND c.company_id = agency_send_requests.company_id)${attemptIdleSql(7)}
         RETURNING *`,
-      [when.at, backTo, req.params.id, auth.companyId, observedRevision, keepFinalTest ? priorFinalTest : null],
+      [when.at, backTo, req.params.id, auth.companyId, observedRevision, keepFinalTest ? priorFinalTest : null, ATTEMPT_LOCK_PREFIX],
     );
     if (updated.rows.length === 0) {
       return res.status(409).json({
@@ -741,7 +802,7 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
     //   응답에 사실을 실어 화면이 그 자리에서 알린다(접수 경로는 확인 화면이 미리 안내한다).
     return res.json({
       success: true,
-      request: toPublic(updated.rows[0]),
+      request: await toPublicWithKinds(updated.rows[0]),
       ...(when.shifted ? { timeShifted: true } : {}),
     });
   } catch (err: any) {
@@ -777,9 +838,9 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     }
     if (result.pending) {
       // 화면에는 현재 상태(`cancelling` = "취소 중")를 그대로 준다. 워커가 마무리하면 상태가 따라온다.
-      return res.status(202).json({ success: true, pending: true, code: 'CANCEL_IN_PROGRESS', request: toPublic(result.row) });
+      return res.status(202).json({ success: true, pending: true, code: 'CANCEL_IN_PROGRESS', request: await toPublicWithKinds(result.row) });
     }
-    return res.json({ success: true, request: toPublic(result.row) });
+    return res.json({ success: true, request: await toPublicWithKinds(result.row) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 취소 실패:', err);

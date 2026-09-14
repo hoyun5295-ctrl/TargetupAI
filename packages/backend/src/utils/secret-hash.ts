@@ -63,3 +63,20 @@ export function verifySecret(
   }
   return { ok: false, needsUpgrade: false };
 }
+
+/**
+ * 고객사 행을 응답에 실을 때 빼는 비밀값 컬럼(★2026-09-13 적대검토 등재분 ①).
+ * 슈퍼관리자 목록·상세·생성 응답이 `SELECT c.*`·`RETURNING *` 행을 그대로 내려 원문 시크릿과 해시가 브라우저까지 갔다.
+ * 화면은 이 값들을 읽지 않는다(싱크 시크릿은 재발급 응답의 `syncKeys`로만 1회 받는다 · grep 실측).
+ * ⛔ 해시도 뺀다. 256비트 난수라 되돌리기 어렵지만 응답에 실을 이유가 없는 값은 싣지 않는다.
+ * ⛔ 고객사 표에 비밀값 컬럼을 새로 만들면 같은 커밋에서 여기에 올린다.
+ */
+export const COMPANY_SECRET_COLUMNS = ['api_secret', 'api_secret_hash', 'cdp_api_secret_hash', 'smtp_password_encrypted'] as const;
+
+/** 고객사 행에서 비밀값 컬럼을 뺀 새 객체(넘긴 행은 바꾸지 않는다) */
+export function omitCompanySecrets<T extends Record<string, any>>(row: T): T {
+  if (!row || typeof row !== 'object') return row;
+  const out: Record<string, any> = { ...row };
+  for (const c of COMPANY_SECRET_COLUMNS) delete out[c];
+  return out as T;
+}

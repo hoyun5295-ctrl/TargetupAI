@@ -32,6 +32,7 @@ import { canUseAgencySend, loadPlanContext } from './plan-guard';
 import { getRegisteredCallbackSet } from './callback-filter';
 import {
   analyzeOneStep, createRequestCore, hasAgencyColumn, loadSendWindow, logEvent, parseOneStepOverrides,
+  type AgencyCallbackKinds,
 } from './agency-send-intake';
 import {
   parseAgencyRequestForm, parseAgencyRecipientList, pickPhoneColumnStrict, resolveCallbackPlan,
@@ -97,6 +98,13 @@ const isMissingRelation = (err: any) => {
   const msg = String(err?.message || '');
   return (msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist');
 };
+/**
+ * 고객별 회신번호 저장 컬럼이 없어 접수 코어가 되돌린 경우(★2026-09-13(3) · 대행 등재분 ⑧).
+ * 그 메일만의 사정이다(회신번호 열이 없는 메일은 접수된다). tick을 끝내지 않고 이 메일은 선점 그대로 두어 만료(10분) 뒤 다시 집고,
+ * 나머지 메일은 계속 처리한다. ⛔ 실패 계단(재시도 횟수)에 태우지 않는다: 횟수를 다 쓰면 마이그레이션 뒤에도 영영 접수되지 않는다.
+ */
+const isRecipientCallbackColumnMissing = (err: any) =>
+  String(err?.message || '').includes('column "callback" of relation "agency_send_recipients" does not exist');
 
 const sha256 = (v: string | Buffer) => crypto.createHash('sha256').update(v).digest('hex');
 
@@ -1003,6 +1011,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   }
   const txClient = await pool.connect();
   const requestRows: any[] = [];
+  const requestKinds: AgencyCallbackKinds[] = [];
   try {
     await txClient.query('BEGIN');
     for (let i = 0; i < plans.length; i++) {
@@ -1034,6 +1043,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
         return;
       }
       requestRows.push(result.request);
+      requestKinds.push(result.callbackKinds);
     }
     // accepted는 접수와 한 트랜잭션 — 성공 분기에서만(통과 스탬프 원칙 · §18-6)
     //   ⛔ 부분 커밋이 구조적으로 없다: 3번째에서 죽으면 1·2번도 롤백되어 재개 판정이 필요 없다.
@@ -1059,6 +1069,8 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       recipientCount: requestRows[i].recipient_count, messageType: requestRows[i].message_type,
       via: 'email', fromEmail: fromAddr, autoPickedPhoneColumn: plans[i].autoPickedPhoneColumn,
       ...(multi ? { mailSeq: i + 1, mailTotal: requestRows.length, formFileName: plans[i].unit.fileName } : {}),
+      // ★2026-09-13(3) 회신번호 종류 스냅숏(접수 코어 주석)
+      ...requestKinds[i],
     });
   }
   log(`이메일 접수 company=${plans[0].acct.companyId} ${requestRows.length}건 [${requestRows.map((r) => r.id).join(', ')}] from=${fromAddr}${dupSkipped.length > 0 ? ` (중복 건너뜀 ${dupSkipped.length})` : ''}`);
@@ -1126,7 +1138,10 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
         for (const k of kinds.rows) kindsById.set(String(k.request_id), Number(k.n) || 0);
       }
     } catch (kindsErr: any) {
-      log(`재시도 회신 회신번호 종류 조회 실패(대표 번호로 적는다): ${kindsErr?.message}`);
+      // ⛔ 조회 실패를 "번호 하나"로 확정해 보내지 않는다(Codex 3R medium). 보내면 sent로 기록돼 틀린 안내가 굳는다.
+      //   이 건은 이번 패스에서 건너뛰고 다음 패스가 다시 한다(재시도 횟수는 실제로 보냈을 때만 오른다).
+      log(`재시도 회신 회신번호 종류 조회 실패(이번 패스 건너뜀): ${kindsErr?.message}`);
+      continue;
     }
     const isMulti = req.rows.length > 1;
     const blocks = req.rows.map((r: any, i: number) => buildAcceptedReply({
@@ -1241,6 +1256,10 @@ export async function runAgencyMailTick(): Promise<void> {
         try {
           await processMessage({ client: pop, mailbox, octets, now }, u.seq, u.uidl);
         } catch (err: any) {
+          if (isRecipientCallbackColumnMissing(err)) {
+            log(`고객별 회신번호 저장 컬럼이 없어 이 메일은 선점 만료 뒤 다시 집는다(나머지 메일은 계속): uidl=${u.uidl}`);
+            continue;
+          }
           if (isMissingRelation(err)) return; // 마이그레이션 전 — 다음 배포 순서에 맡긴다
           // 통 단위 격리: 우리 쪽 일시 장애만 백오프 재시도(파싱·신원 반려는 위에서 이미 확정됐다)
           log(`통 처리 실패(재시도 예약): uidl=${u.uidl} ${err?.message || err}`);

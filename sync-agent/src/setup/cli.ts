@@ -29,7 +29,7 @@ import {
   saveConfigJson,
   type AgentConfig,
 } from '../config';
-import { initLogger, getLogger } from '../logger';
+import { initLogger, getLogger, maskApiKey } from '../logger';
 import { AGENT_VERSION } from '../version';
 // ★ 2026-08-13 아난티 — 마법사가 어떤 콘솔에서 뜨든 한글이 깨지지 않게 exe가 스스로 코드페이지를 맞춘다.
 import { ensureUtf8Console } from './console-encoding';
@@ -209,7 +209,8 @@ async function stepApiConnection(): Promise<{
   console.log('');
   console.log(`  ✅ API 연결 정보 입력 완료`);
   console.log(`     서버: ${serverUrl}`);
-  console.log(`     API Key: ${apiKey.substring(0, 8)}...`);
+  // ★2026-09-13(3) 싱크 ⓑ 키 표시 모양은 masking.ts 규칙(앞뒤 4자)을 따른다
+  console.log(`     API Key: ${maskApiKey(apiKey)}`);
 
   return { serverUrl, apiKey, apiSecret };
 }

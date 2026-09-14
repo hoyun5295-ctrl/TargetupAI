@@ -82,6 +82,24 @@ describe('Pop3Client multiline 수신', () => {
     expect(await client.list()).toEqual([{ seq: 1, octets: 100 }, { seq: 2, octets: 200 }]);
   });
 
+  it('마지막 조각과 연결 닫힘이 한 번에 와도 본문을 끝까지 읽는다', async () => {
+    const body = 'z'.repeat(4000);
+    const sock = new FakeSocket();
+    const client = makeClient(sock);
+    sock.onWrite = (line) => {
+      if (line.startsWith('RETR')) {
+        void (async () => {
+          await feedChunks(sock, [Buffer.from(`+OK\r\n${body.slice(0, 2000)}`, 'binary')]);
+          await new Promise((r) => setImmediate(r));
+          sock.emit('data', Buffer.from(`${body.slice(2000)}\r\n.\r\n`, 'binary'));
+          sock.emit('close');
+        })();
+      }
+    };
+    const got = await client.retr(1);
+    expect(got.toString('binary')).toBe(body);
+  });
+
   it('본문 도중 연결이 끊기면 network 오류로 끝난다(멈추지 않는다)', async () => {
     const sock = new FakeSocket();
     const client = makeClient(sock);

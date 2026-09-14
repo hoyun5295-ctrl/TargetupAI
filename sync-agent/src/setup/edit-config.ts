@@ -20,6 +20,8 @@ import {
   saveConfigEncrypted,
   type AgentConfig,
 } from '../config';
+// ★2026-09-13(3) 싱크 ⓑ 가리는 모양은 masking.ts 한 곳이 정한다(키 = 앞뒤 4자 · 시크릿·비밀번호 = 전부)
+import { maskApiKey, maskPassword } from '../logger/masking';
 
 // ─── readline 유틸 ──────────────────────────────────────
 
@@ -77,16 +79,28 @@ function askConfirm(question: string, defaultYes: boolean = true): Promise<boole
   });
 }
 
-// ─── 마스킹 유틸 ────────────────────────────────────────
+// ─── 비밀값 입력 ────────────────────────────────────────
 
-function mask(value: string, showFirst: number = 4): string {
-  if (!value || value.length <= showFirst) return '****';
-  return value.substring(0, showFirst) + '*'.repeat(Math.min(value.length - showFirst, 20));
+/**
+ * 비밀값 입력(★2026-09-13(3) 싱크 ⓑ). 종전 ask는 현재 값 **원문 전체**를 기본값 괄호에 보였다.
+ * 현재 값은 화면에 싣지 않고, 부르는 쪽이 masking.ts 규칙으로 만든 힌트만 보인다. Enter = 현재 값 유지(ask와 같은 결과).
+ */
+function askSecret(question: string, currentValue: string, hint: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(`  ${question} (${hint} · Enter=유지): `, (answer) => {
+      resolve(answer.trim() || currentValue);
+    });
+  });
+}
+
+function secretStateHint(value: string): string {
+  return value ? '설정됨' : '미설정';
 }
 
 // ─── 현재 설정 출력 ─────────────────────────────────────
 
-function printConfig(config: AgentConfig, showSecrets: boolean = false): void {
+/** ⛔ 원문 보기 인자를 되살리지 마라(켜는 호출처가 없었고, 켜는 순간 콘솔에 원문이 나간다) */
+export function printConfig(config: AgentConfig): void {
   const s = config.server;
   const d = config.database;
   const y = config.sync;
@@ -102,8 +116,8 @@ function printConfig(config: AgentConfig, showSecrets: boolean = false): void {
   console.log('');
   console.log('  ┌── [1] 서버 연결 ──────────────────────────────┐');
   console.log(`  │  서버 URL:    ${s.baseUrl}`);
-  console.log(`  │  API Key:     ${showSecrets ? s.apiKey : mask(s.apiKey)}`);
-  console.log(`  │  API Secret:  ${showSecrets ? s.apiSecret : mask(s.apiSecret)}`);
+  console.log(`  │  API Key:     ${maskApiKey(s.apiKey)}`);
+  console.log(`  │  API Secret:  ${maskPassword(s.apiSecret)}`);
   console.log('  └───────────────────────────────────────────────┘');
 
   // ② DB
@@ -113,7 +127,7 @@ function printConfig(config: AgentConfig, showSecrets: boolean = false): void {
   console.log(`  │  호스트:      ${d.host}:${d.port}`);
   console.log(`  │  DB 이름:     ${d.database}`);
   console.log(`  │  사용자:      ${d.username}`);
-  console.log(`  │  비밀번호:    ${showSecrets ? d.password : mask(d.password)}`);
+  console.log(`  │  비밀번호:    ${maskPassword(d.password)}`);
   console.log(`  │  쿼리 타임아웃: ${d.queryTimeout}ms`);
   console.log(`  │  암호화(TLS): ${d.ssl ? (d.sslCaPath ? '사용 (인증서 검증)' : '사용 (검증 안 함)') : '사용 안 함'}`);
   console.log('  └───────────────────────────────────────────────┘');
@@ -181,8 +195,8 @@ async function editServer(config: AgentConfig): Promise<AgentConfig> {
   console.log('');
 
   const baseUrl = await ask('서버 URL', config.server.baseUrl);
-  const apiKey = await ask('API Key', config.server.apiKey);
-  const apiSecret = await ask('API Secret', config.server.apiSecret);
+  const apiKey = await askSecret('API Key', config.server.apiKey, maskApiKey(config.server.apiKey));
+  const apiSecret = await askSecret('API Secret', config.server.apiSecret, secretStateHint(config.server.apiSecret));
 
   return {
     ...config,
@@ -202,7 +216,7 @@ async function editDatabase(config: AgentConfig): Promise<AgentConfig> {
   const portStr = await ask('포트', String(d.port));
   const database = await ask('DB 이름', d.database);
   const username = await ask('사용자', d.username);
-  const password = await ask('비밀번호', d.password);
+  const password = await askSecret('비밀번호', d.password, secretStateHint(d.password));
   // ★ 2026-07-27 클라우드 DB(Aurora/RDS·Azure)는 암호화 연결만 허용하는 경우가 있다(MySQL 3159).
   const ssl = await askConfirm('암호화(TLS) 연결을 사용할까요? (클라우드 DB면 예)', d.ssl === true);
   const sslCaPath = ssl
@@ -473,7 +487,7 @@ export async function startEditConfig(
 
   // 2) 조회 전용 모드
   if (showOnly) {
-    printConfig(config, false);
+    printConfig(config);
     process.exit(0);
   }
 
@@ -482,7 +496,7 @@ export async function startEditConfig(
 
   try {
     while (true) {
-      printConfig(config, false);
+      printConfig(config);
 
       const section = await askSelect('수정할 섹션을 선택하세요:', [
         { name: '[1] 서버 연결 (URL, API Key/Secret)', value: 'server' },

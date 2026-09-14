@@ -67,6 +67,24 @@ export interface AgencySendRequest {
    * 값이 있으면 목록·상세가 "누가 낸 접수인지"를 보여준다.
    */
   createdByName?: string | null;
+  /**
+   * ★2026-09-13(3) 실제로 나가는 회신번호 종류(빈 번호 = 대표 번호로 센다 · 서버 CT 한 벌).
+   * 실린 응답에만 있다. 없으면 대표 번호를 보인다(agencyCallbackLabel).
+   */
+  callbackKinds?: number;
+  /** 한 종류일 때 그 번호(대표 번호와 다를 수 있다) */
+  callbackSole?: string | null;
+}
+
+/**
+ * 화면에 보일 "보내는 번호"(★2026-09-13(3) · 대행 등재분 ②). 목록·상세·운영 화면·승인 링크 화면이 같은 규칙으로 보인다:
+ * 여러 종류면 "고객별 N종", 한 종류면 실제로 나가는 그 번호, 모르면 대표 번호.
+ */
+export function agencyCallbackLabel(r: { callbackNumber?: string | null; callbackKinds?: number; callbackSole?: string | null }): string {
+  const n = r.callbackKinds ?? 0;
+  if (n > 1) return `고객별 ${n}종`;
+  if (n === 1 && r.callbackSole) return r.callbackSole;
+  return r.callbackNumber || '';
 }
 
 export interface AgencySendEvent {

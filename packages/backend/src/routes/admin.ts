@@ -5,7 +5,7 @@ import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy } f
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
 // ★2026-09-12 싱크에이전트 시크릿 해시(원문 미저장 · 발급 시 1회 노출)
-import { hashSecret } from '../utils/secret-hash';
+import { hashSecret, omitCompanySecrets } from '../utils/secret-hash';
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
@@ -70,6 +70,7 @@ import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
+import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, diffFields } from '../utils/audit-log';
 // ★ 2026-09-12 발신 프로필 사용 중지(직원 접수 4번) — 판정·기록은 CT가 소유한다
 import { disableSenderProfile } from '../utils/kakao-sender-profile-admin';
@@ -566,7 +567,8 @@ router.get('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
     }
     
-    res.json({ company: result.rows[0] });
+    // ★2026-09-13 `c.*`에 실린 비밀값 컬럼(원문·해시)은 응답에서 뺀다(적대검토 등재분 ① · 화면 소비 0)
+    res.json({ company: omitCompanySecrets(result.rows[0]) });
   } catch (error) {
     console.error('회사 조회 실패:', error);
     res.status(500).json({ error: '회사 조회 실패' });
@@ -1686,7 +1688,8 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
       });
     }
 
-    res.json({ company: result.rows[0], message: '수정되었습니다.' });
+    // ★2026-09-13 `RETURNING *`에 실린 비밀값 컬럼은 응답에서 뺀다(적대검토 등재분 ① · 워크플로 1R)
+    res.json({ company: omitCompanySecrets(result.rows[0]), message: '수정되었습니다.' });
   } catch (error: any) {
     console.error('회사 수정 실패:', error);
     // ★ 2026-07-03 db_alter_safety_net: usage_type 컬럼 미마이그레이션 서버 방어
@@ -5711,6 +5714,17 @@ router.post('/companies/:id/sync-keys/regenerate', authenticate, requireSuperAdm
       [newApiKey, hashSecret(newApiSecret), id]
     );
 
+    // ★2026-09-13(3) 재발급 감사 기록(싱크 등재분 ④). 키 교체는 고객사 에이전트 연결을 즉시 끊는 조치라 누가 언제 했는지 남긴다.
+    //   ⛔ 키·시크릿 원문을 싣지 않는다(키 끝 4자리만 · 에이전트 설정과 대조용). 기록 실패는 CT가 흡수한다.
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'sync_key_regenerate',
+      targetType: 'company',
+      targetId: id,
+      details: { apiKeyTail: newApiKey.slice(-4) },
+      req,
+    });
+
     res.json({
       // 원문은 지금 이 응답이 유일한 전달 경로다(서버에 남지 않는다)
       syncKeys: { ...result.rows[0], api_secret: newApiSecret, has_secret: true },
@@ -6305,6 +6319,8 @@ router.get('/agency-send/:id/preview', authenticate, requireSuperAdmin, async (r
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
     const row = r.rows[0];
     const samples = await buildRenderedSamples(row, AGENCY_PREVIEW_LIMIT);
+    // ★2026-09-13(3) 실제로 나가는 회신번호 종류(대행 등재분 ② · 고객 상세·승인 화면과 같은 CT)
+    const callbackKinds = (await loadAgencyCallbackKinds([row])).get(row.id);
     // ★2026-08-28(2) 진행 기록 동승(Harold 지적) — 링크 승인은 **어느 담당자 번호가 눌렀는지**가 여기 남는다.
     //   운영 문의의 절반이 "누가 언제 승인했나"라 직원 화면에 이력이 없으면 고객 화면을 대신 열어야 한다.
     //   고객 상세(GET /api/agency-send/:id)와 같은 조회·같은 정렬·같은 상한.
@@ -6318,6 +6334,7 @@ router.get('/agency-send/:id/preview', authenticate, requireSuperAdmin, async (r
       request: {
         id: row.id, status: row.status, messageType: row.message_type, subject: row.subject,
         isAd: row.is_ad, callbackNumber: row.callback_number, requestedAt: row.requested_at,
+        ...(callbackKinds ? { callbackKinds: callbackKinds.callbackKinds, callbackSole: callbackKinds.callbackSole } : {}),
         recipientCount: row.recipient_count, fileName: row.file_name,
         currentContent: row.current_content, originalContent: row.original_content,
         companyName: row.company_name, userName: row.user_name || row.user_login || null,

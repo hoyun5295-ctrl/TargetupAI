@@ -13,7 +13,7 @@ import AgencyPreviewModal from '../agency/AgencyPreviewModal';
 import AgencyEventLog from '../agency/AgencyEventLog';
 import TablePagination from '../common/TablePagination';
 import {
-  formatWhenRelative, isCancelable, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
+  agencyCallbackLabel, formatWhenRelative, isCancelable, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencyPreviewSample, type AgencySendEvent, type AgencySendStatus,
 } from '../agency/agency-send-api';
 import { CUI_PILL_BASE, CUI_PILL_TONE } from '../../utils/console-ui';
@@ -24,6 +24,8 @@ interface AdminAgencyDetail {
   request: {
     id: string; status: AgencySendStatus; messageType: string; subject: string | null;
     isAd: boolean; callbackNumber: string | null; requestedAt: string; recipientCount: number;
+    /** ★2026-09-13(3) 실제로 나가는 회신번호 종류(고객 화면과 같은 CT) */
+    callbackKinds?: number; callbackSole?: string | null;
     fileName: string | null; currentContent: string; originalContent: string;
     companyName: string | null; userName: string | null; mmsImagePaths: unknown[];
     /** ★2026-09-10 이미지 원본 파일명(경로와 같은 순서 · 옛 접수는 null) */
@@ -414,7 +416,7 @@ export default function AgencySendLedgerPanel() {
           shown={detail.shown}
           total={detail.total}
           messageType={detail.request.messageType}
-          callbackNumber={detail.request.callbackNumber}
+          callbackNumber={agencyCallbackLabel(detail.request)}
           // ★2026-09-10 저장한 원본 파일명으로 보인다(고객 상세와 같은 CT)
           images={Array.isArray(detail.request.mmsImagePaths) ? withMmsImageNames(detail.request.mmsImagePaths as MmsImageItem[], detail.request.mmsImageNames) : []}
         />

@@ -33,8 +33,12 @@ const EVENT_LABEL: Record<string, string> = {
   cancel_sweep_retry: '취소를 마무리하는 중입니다',
   cancel_swept: '남은 취소를 마무리했습니다',
   cancel_rejected: '발송이 임박해 취소하지 못했습니다',
+  // ★2026-09-13(3) 종전부터 기록되던 kind인데 문장표에 없어 "진행 상황을 기록했습니다"로 뭉개졌다
+  cancel_already_sent: '이미 발송되어 취소하지 못했습니다',
   cancel_pending_dispatch: '예약을 만드는 중이라 취소를 이어서 처리합니다',
   reconciled_neutralize: '나가지 않아야 할 예약을 되돌렸습니다',
+  // ★2026-09-13(3) 중화가 실패한 회차(다음 tick이 다시 한다 · 종전에는 성공과 같은 문장으로 적혔다)
+  reconciled_neutralize_failed: '나가지 않아야 할 예약을 되돌리지 못해 다시 시도합니다',
   reconciled_queued: '예약 상태를 확인해 맞췄습니다',
   cancel_finalized_elsewhere: '취소가 이미 마무리되었습니다',
   queued_by_other: '예약이 이미 연결되어 있습니다',
@@ -54,6 +58,10 @@ const EVENT_LABEL: Record<string, string> = {
   dispatch_var_overflow: '문안에 넣을 항목이 너무 많습니다',
   // ★2026-09-12 고객별 회신번호 중 등록이 풀린 번호가 있어 보내지 않았다
   dispatch_callback_unregistered: '명단의 회신번호 중 등록되지 않은 번호가 있습니다',
+  // ★2026-09-13 예약을 만드는 사이 발송 시각이 지났다. 이어서 만료 기록과 미발송 안내가 남는다
+  dispatch_deadline_passed: '예약을 만드는 사이 발송 시각이 지나 예약하지 않았습니다',
+  // ★2026-09-13(3) 예약 처리가 끝나지 않아 멈춘 것으로 처리했다(예약 시각이 30분 넘게 지남 · 이어서 미발송 안내)
+  dispatch_stuck_recovered: '예약 처리가 끝나지 않아 멈춘 것으로 처리했습니다',
   dispatch_no_owner: '접수자 정보를 찾지 못했습니다',
   dispatch_error: '예약을 만들지 못해 다시 시도합니다',
   dispatch_incomplete: '예약이 끝나지 않아 발송하지 않았습니다',

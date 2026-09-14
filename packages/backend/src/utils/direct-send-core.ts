@@ -61,7 +61,16 @@ export async function countStagingFiltered(
  */
 export async function createDirectSendCampaign(
   spec: DirectSendSpec,
-  ctx: { companyId: string; userId: string },
+  ctx: {
+    companyId: string; userId: string;
+    /**
+     * ★2026-09-13(3) 활성화 조건(선택). `preparing → queued` 전환 UPDATE에 AND로 붙는다(파라미터 번호는 $2부터).
+     * 조건이 거짓이면 전환이 0행 → 아래 실패 분기가 preparing 캠페인을 중화하고 차감을 환불 의무로 남긴다(한 통도 안 나간다).
+     * 대행발송은 "이 시도가 아직 접수를 소유하는가"를 접수 행 FOR SHARE로 건다(멈춘 시도 인수와 직렬화 · agency-send-worker).
+     * 비우면 종전 문장 그대로다(다른 호출부 무변경).
+     */
+    activationGuard?: { sql: string; params: any[] };
+  },
   training?: { finalSource?: 'manual' | 'selected_as_is' | 'edited'; userPrompt?: string; aiMessages?: string[] },
 ): Promise<{ campaignId: string; accepted: number }> {
   // ★ 2026-07-02 링크 placeholder 발송 가드 — [링크를 입력해주세요]/{{LINK: 잔존 시 실발송 차단.
@@ -163,9 +172,10 @@ export async function createDirectSendCampaign(
   //   - preparing = 진짜 실패 → preparing 가드 원자 중화+의무 기록 후 COMMIT_FAILED
   //   - 재확인 불능/그 외 = 미확정 → 경보로 사람 호출 후 COMMIT_FAILED(자동 환불 기록 금지)
   try {
+    const guard = ctx.activationGuard;
     const activated = await query(
-      `UPDATE campaigns SET send_phase = 'queued', updated_at = NOW() WHERE id = $1 AND send_phase = 'preparing'`,
-      [campaignId],
+      `UPDATE campaigns SET send_phase = 'queued', updated_at = NOW() WHERE id = $1 AND send_phase = 'preparing'${guard ? ` AND ${guard.sql}` : ''}`,
+      [campaignId, ...(guard ? guard.params : [])],
     );
     if (activated.rowCount !== 1) throw new Error(`queued 전환 rowCount=${activated.rowCount}`);
   } catch (activateErr: any) {

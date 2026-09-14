@@ -202,7 +202,7 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 | 전송 | **운영 게이트웨이(.65)에 9443만 LISTEN, 9090 없음**(0913 `ss -tln`) · mTLS는 코드 준비·미설정(`0-E`) | 서버 실측 |
 | 파일 권한 | Windows 설정 파일 = 상속 끊은 DACL(SYSTEM·Administrators 전체 · 에이전트 전용 SID 읽기) · Linux = 전용 UID 읽기 · 자식은 root 아닌 계정 | `installer/windows.go:620` · `linux.go:679` |
 | 로컬 데이터 | 상태 저널 필드 = `agent_id`·`table`·`source_seq`·`state`·`msg_type`·`updated_at`(번호·본문 없음) · **설정 YAML에 `source.password`·`gateway.token` 평문** · `cfgcrypt`는 수동 CLI에만 있고 설치 흐름 미사용 | `poller/state_journal.go:24` · `config.go:205·252` |
-| 서명 권한 | `deploy/build-agent.sh init-authority`가 `release.pem`·`recovery.pem`을 **같은 `AUTHORITY_ROOT/private`**에 생성(기본 `/var/lib/bito-agent-release/authority`) · `build`는 복구 **공개키**만 읽고 `public/` 출처를 강제(263줄) · **.65에 `/var/lib/bito-agent-release` 존재**(일반 계정 `Permission denied`로 확인 · 내부 키 파일 존재는 root 확인 필요) · 보관 서버·복구 키 분리를 적은 문서 0건 | 스크립트 · 서버 실측 · 문서 grep |
+| 서명 권한 | `deploy/build-agent.sh init-authority`가 `release.pem`·`recovery.pem`을 **같은 `AUTHORITY_ROOT/private`**에 생성(기본 `/var/lib/bito-agent-release/authority`) · `build`는 복구 **공개키**만 읽고 `public/` 출처를 강제(263줄) · **.65에 `/var/lib/bito-agent-release` 존재**(일반 계정 `Permission denied`로 확인 · 내부 키 파일 존재는 root 확인 필요) · 보관 서버·복구 키 분리를 적은 문서 0건 · **→ ★0913 복구 개인키 서버 분리 완료(8-3 A1 실행 기록)** | 스크립트 · 서버 실측 · 문서 grep |
 | 경계 검사 | 빌드가 6개 바이너리 전부에 `sanitize_agent_binary.py` + `verify_customer_delivery_full_boundary.py` 실행 · **금지 목록에 단독 `invito`가 없어 `gw.invito.local`이 통과** | `build-agent.sh:141·304·307·345` · 검사기 `FORBIDDEN_BYTES` |
 
 **이미 내려진 결정(뒤집지 않는다)**: Garble 난독화는 Windows Defender가 실제로 PUA 차단해 고객 배포본에 쓰지 않는다(게이트웨이 저장소 `status/AGENT_MANUAL.md:1589` · `docs/superpowers/specs/2026-07-17-customer-delivery-zero-internal-strings-v208-design.md`).
@@ -214,7 +214,17 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 - 처방: `private/recovery.pem`만 서버에서 떼어 오프라인 매체 두 곳에 보관한다. `release.pem`은 평소 서명에 필요하므로 남긴다.
 - 영향: **평소 릴리스 무영향**(`build`는 복구 공개키만 읽음 · 코드 확인). 복구 개인키가 필요한 때 = 신뢰 정책 재발급(`build-trust-policy`)뿐 = 릴리스 키 교체·유출 회복.
 - 절차: root 작업이라 대표님 운영 절차로 한다. ①오프라인 매체 2곳 복사 ②두 사본 해시를 원본과 대조 ③서버에서 삭제 ④다음 릴리스 `build`가 정상인지로 확인 ⑤보관 위치·보관자·해시를 이 절에 기록(키 값은 기록하지 않는다).
-- ⛔ `init-authority`는 키를 새로 만드는 명령이다. 운영 중 재실행하지 않는다(지금 이 경고가 어디에도 없다).
+- ⛔ `init-authority`는 키를 새로 만드는 명령이다. 운영 중 재실행하지 않는다. **정정(0913)**: 코드 차단은 있다 = `build-agent.sh:209`가 authority 폴더가 이미 있으면 `initialization is one-time only`로 중단한다. 문서 경고가 없었을 뿐이다.
+- **★0913 실행 기록 (Harold 운영 · 코드 변경 0)**
+  - 착수 전 코드 확인: 평소 `build`는 `private/release.pem`과 `public/` 세 파일만 읽는다(`build-agent.sh:253-267` · `scripts/test_agent_release_signing.py:63`이 빌드의 복구 개인키 사용을 막음). 복구 개인키를 읽는 곳은 `cmd/agent-release/main.go:95` `build-trust-policy` 하나이고, 이 명령은 릴리스·복구 개인키 둘 다 필수(`main.go:81`)다. 운영 스크립트 중 `recovery.pem` 존재를 요구하는 곳 0(gate4 인계 스크립트 `:240`은 `release.pem`만 검사 · 나머지 언급은 출고물 개인키 혼입 차단).
+  - 서버 실측(.65): 분리 전 `private/`에 `recovery.pem`·`release.pem` 둘(root `0600` · `Aug 4 08:14` 최초 생성 뒤 재생성 흔적 없음) · 짝 대조 `openssl pkey -pubout | cmp` = `RECOVERY_PAIR_MATCH`(서버 개인키 = 에이전트에 박힌 복구 공개키의 짝).
+  - 원본 SHA-256 = `7c184803b327a3d871c4b4d54cca8490ee3b1bfc520e5c0c5a9a49c741b60bc6` (키 값은 기록하지 않는다).
+  - 보관자 = Harold. 보관 위치 두 곳 · 두 사본 모두 크기 119 · 해시 원본 일치:
+    - Harold 전용 노트북 `C:\Users\ceo\OneDrive\문서\보관\r1.pem` — 이 폴더는 문서 폴더 리디렉션 경로다. 0913 기준 OneDrive 계정 등록 0 · 실행 중 아님 = 동기화 안 됨. **OneDrive에 다시 로그인하면 클라우드로 올라간다.**
+    - USB `D:\보관\r1.pem` (보관 장소는 Harold).
+  - 서버 정리: `invito` 홈 임시 사본 `shred -u` → `TEMP_REMOVED` · 원본 `shred -u` → `private/`에 `release.pem`만 남음 · 서버 전체(`/proc`·`/sys`·`/dev`·`/run` 제외) 2KiB 미만 `BEGIN PRIVATE KEY` 파일의 공개키를 복구 공개키와 대조 = 일치 0(`SCAN_DONE`). `shred`가 이 서버 디스크에서 흔적까지 없애는지는 미검증.
+  - 남은 완료 조건 = 다음 릴리스 `build` 성공(8-5).
+  - 기록만 하는 잔여: ①2세대 신뢰 정책 재발급 절차·스크립트가 없다(`build-trust-policy` 호출처 = `init_authority` 1세대뿐). 릴리스 키를 바꿔야 할 때 복구 키를 가져와 쓰는 절차는 그때 설계한다. ②.65 백업 없음 · .66 백업 신설 검토 중(Harold 0913). 설계 때 `release.pem` 포함 여부를 정한다.
 
 **A2. Windows 실행 파일 코드 서명**
 - 위험: 업데이트는 ed25519로 막혀 있지만 **고객사가 처음 받는 설치 파일은 발행자를 운영체제가 확인할 수 없다.** 전달 중 바꿔치기돼도 고객사는 모르고, SmartScreen·백신 경고도 여기서 난다.
@@ -225,6 +235,16 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 **A3. 설치 묶음 해시 공개**
 - 사실: `deploy/agent/*windows-amd64.zip` 옆에 `.sha256`이 없다(0913 확인 범위). 안내서 PDF에는 있다.
 - 처방: 발급 화면과 안내서에 설치 묶음 SHA-256과 대조 방법(PowerShell `Get-FileHash`)을 싣는다. A2 서명 이후 해시로 싣는다.
+- **정정(0913 코드 확인)**: 고객 다운로드 화면은 이미 Windows zip을 포함한 파일마다 SHA-256을 표시한다(`web/api/routes/customer-downloads.js:44` · `CustomerDownloadsPage.jsx:268`). 빠진 곳은 **발급 묶음 zip**이다 — `POST /agents/:id/install-bundle` 응답 헤더에 해시가 없다(`routes/agents.js:728-733`). 발급 묶음은 발급 때마다 조립되므로 A2를 기다릴 이유가 없다 → 순서를 A2 앞으로 옮긴다(8-4).
+- **★0913 코드 반영(게이트웨이 저장소 미커밋 · 11:41~11:44 .65 배포 완료 · 실측 남음)**: 서비스 `buildInstallBundle` 반환에 zip 실제 바이트 해시 `sha256` · 발급 응답 헤더 `X-Bundle-SHA256`(`X-Artifact-SHA256`과 같은 형식) · Agent 수정 모달 발급 성공 뒤 결과 패널(해시 전체 · SHA 복사 · 전달 문구 복사: Windows `Get-FileHash -LiteralPath` · Linux `sha256sum` 두 명령). 패널은 새 발급·Token 재발급 **시작 시**(커밋 여부를 화면이 모르므로)와 설정 파일 보기 때 지운다. 헤더가 없거나 64자 hex가 아니면 전달 문구를 만들지 않는다.
+- **원문 정정 = 안내서에는 싣지 않는다(Harold 0913 승인)**: 안내서 PDF는 묶음 안에 들어가 바꿔치기 때 함께 바뀌므로 검증 수단이 못 되고, 발급마다 해시가 달라 값을 실을 수도 없다. 해시와 확인 명령은 담당자가 묶음과 다른 경로로 보낸다(패널 안내 문구).
+- 영향: 반환값 소비처 = `routes/agents.js` 1곳 · 서비스 소스를 텍스트로 읽는 테스트 3곳(`customer-downloads-contract-test.js` 파일명 · `customer-schema-consistency-test.js` 스키마명 · Go `issued_config_contract_test.go` = `buildInstallerYaml`만 호출) 읽는 대상 무변경 · 묶음 바이트·토큰 회전·트랜잭션 순서 무변경 · Go 바이너리·릴리스·운영 Agent 무관.
+- **★0913 같은 날 정정 = 응답 헤더를 토큰 UPDATE 전에 확정**: 첫 반영은 헤더를 커밋 뒤에 붙였다. 헤더 값이 틀리면 `setHeader`가 던지고(값 `undefined` = `ERR_HTTP_INVALID_HEADER_VALUE` 실행 확인) 그때는 토큰만 바뀌고 묶음은 전달되지 않는다 → 재발급(force)한 운영 Agent가 끊긴다. API 배포가 파일 하나씩이라 "라우트만 새 것"인 사이에도 난다. 처방 = 서비스 `bundleResponseHeaders(bundle)`가 헤더 6개(종전 5개 값 그대로 + 해시)를 만들고 `http.validateHeaderValue`·해시 형식·본문 Buffer를 검사 → 라우트가 **UPDATE 전에** 호출(틀리면 `BUNDLE_RESPONSE_INVALID` 롤백) → 커밋 뒤에는 그 목록을 붙이기만 한다. 서비스가 옛 것이면 함수가 없어 역시 UPDATE 전에 멈춘다 = 배포 순서 무관.
+- 검증: 신규 `test/agent-install-bundle-route-test.js`(실제 라우트 호출: 정상 발급 = 응답 해시가 받은 바이트 해시·종전 헤더 5개 값 동일 · 해시 없는 묶음 force 재발급 = `UPDATE_CREDENTIAL` 0 · 서비스 함수 없음 = `UPDATE_CREDENTIAL` 0) · **변이 확인**: 검사를 커밋 뒤로 되돌린 라우트를 로더로 끼워 돌리면 이 테스트가 `UPDATE_CREDENTIAL·AUDIT·COMMIT`을 잡아 실패(exit 1) · 계약 테스트에 헤더 목록·잘못된 값 4종 거부 · API `npm test` 전체 exit 0 · 대시보드 `npm test` 25건 실패 0 · `test-agent-token-tools` 10건 통과(헤더 이름 대조는 서비스 함수를 실제로 불러 확인) · 대시보드 빌드 exit 0.
+- 같은 구조 전수(`res.setHeader` grep · web/api/routes): `customer-downloads.js:370` = 감사 INSERT 뒤지만 자격증명 변경 없음 · **[범위 밖] `agent-control-enrollment.js:44` `sendBootstrapCredential`** = `issueLegacyBootstrapCredential` 발급 뒤 결과값으로 헤더 13개를 붙인다. 서비스가 그 값을 사전 검증하는지 읽지 않아 결함 여부 미판정.
+- **배포 기록(0913 · 런북 §3-1·§3-2)**: 사전 대조 = 서버 두 파일이 로컬 수정 전 내용과 SHA-256 일치(`agents.js` CRLF `8e2439614efd` · 서비스 LF `707a10b4ebb3` = 서버 직접 수정 없음) · `check.sh` = `GW_CHECK_OK` · 서비스 `bad3a308c0c9` `GW_DEPLOY_OK`(백업 `deploy-backups/20260913-114118`) → 라우트 `f0520aecc459` `GW_DEPLOY_OK`(백업 `20260913-114143`) → 대시보드 manifest `e21f9ee29134` 46 files `GW_DEPLOY_OK`(백업 `20260913-114405/dist`) · 재대조 = 서버 해시 두 파일 일치 · live 번들 `CommercialAccountsPage-BrSWYkAG.js`·`api-XFz4Zetm.js`에 문구·헤더명 존재 · `bito-admin-api` active · 업로드 잔여물 정리.
+- 배포: API 파일 2개 = 재기동 2회(`deploy.sh:140` restart). 같은 프로세스가 고객 REST 접수(`server.js:878`)·Agent 제어/heartbeat(`server.js:876-877`)를 받으므로 발송 적은 시간대. 재기동 중 요청의 처리 결과는 미검증.
+- 하지 않은 것: 감사 기록(`ISSUE_INSTALL_BUNDLE`)에 해시 저장(추가 과제 후보: 모달을 닫은 뒤 고객사가 대조를 물으면 서버에서 찾을 곳이 없다) · 브라우저에서 받은 blob 해시 재계산 대조.
 
 **A4. 출고본의 회사명 잔존과 검사기 누락**
 - 사실: `gw.invito.local`이 소스 3곳에서 기본값·예시로 들어가 두 출고본에 남는다 — `internal/agent/onboarding/install_bundle.go:160` · `internal/agent/setup/wizard.go:95` · `cmd/agent/main.go:2446`. 검사기는 `github.com/invito/bito-gateway`·`INVITO_MMS`만 막는다.
@@ -251,20 +271,34 @@ sudo awk -v t="$(date '+%d/%b/%Y:%H')" '$0 ~ t {print $9}' /var/log/nginx/access
 - DB 비밀번호·게이트웨이 토큰이 YAML 평문이다. 방어는 파일 권한(8-2)이 맡고, 토큰은 허용 IP에 묶여 새도 다른 곳에서 못 쓴다.
 - 같은 서버에 키를 두는 암호화(`cfgcrypt` 기본화)는 로컬 관리자에게 무의미해 실익이 작다. 토큰 단독 의존을 줄이는 길은 mTLS(`0-E`)다.
 
+**A9. 설치된 에이전트의 신뢰 정책 교체 경로 없음 — 0913 발견**
+- 사실: 부트스트랩·설치기·자식은 신뢰 정책을 빌드 때 박힌 값에서만 읽고 세대 0 기준으로 검증한다(`internal/agent/trustbundle/bundle.go:59` · 호출 = `cmd/agent-bootstrap/main.go:76` · `installerruntime/runtime.go:76` · `cmd/agent/safe_update_runtime.go:267`). 업데이트 경로(`update/`·`control/`)에 신뢰 정책 세대를 올리는 코드 0건. 설치 폴더에 한 번 풀어 둔 신뢰 파일은 내용이 다르면 거부한다(`bundle.go:144-147` · `Materialize` 호출 = `installerruntime/runtime.go:90`). 같은 ID 재설치(`internal/agent/reinstaller`)에 신뢰 파일 처리 0건.
+- 뜻: 릴리스 키가 새면 복구 키로 2세대 정책은 만들 수 있으나 **설치된 에이전트에 넣을 경로가 없다.** 회복 = 새 정책을 박은 설치 파일로 재설치.
+- 선택지: 가 = 업데이트로 새 세대 정책을 받는 코드 신설(운영 업데이트 경로 변경 · 비상시에만 쓰여 죽어 있어도 모름) / 나 = 유출 시 재설치 절차 문서 + 시험 에이전트에서 시험용 키로 1회 리허설(운영 코드 무변경).
+- **결정 = 나 (Harold 0913 승인).** 리허설은 운영 서명 권한(`/var/lib/bito-agent-release/authority`)과 운영 게시 폴더를 쓰지 않는 별도 작업 폴더에서 한다. 보관 중인 실제 복구 키는 쓰지 않는다. 같은 설치 폴더 재설치가 `bundle.go:144-147`에서 막히는지는 리허설로 확인한다(미검증).
+
 ### 8-4. 적용 순서
+
+**★0913 Harold 승인 순서.** 기준 = 운영 중인 에이전트 4대·게이트웨이 동작 무변경("기존에 잘 되던 게 안 되면 안 된다").
 
 | 순서 | 항목 | 성격 | 선행 조건 |
 |---:|---|---|---|
-| 1 | A1 복구 키 분리 | 운영 · 코드 0 | 오프라인 매체 2곳 |
-| 2 | A4·A5 + A6 주석 | 소스 · 다음 릴리즈 합류 | 1.0.28 창(`0-F`) |
-| 3 | A2 코드 서명 파이프라인 | 빌드 스크립트 · 인증서 | 인증서 조달 · 오탐 확인 |
-| 4 | A3 해시 공개 | 발급 화면·안내서 | A2 완료(서명 후 해시) |
+| 1 | A1 복구 키 분리 **(0913 분리 완료 · `build` 확인은 5번에서)** | 운영 · 코드 0 | — |
+| 2 | A3 발급 묶음 zip 해시 표시 **(0913 배포 완료 · 실측 남음)** | 게이트웨이 API 헤더 · 발급 모달 | 없음 |
+| 3 | A9-나 유출 시 재설치 절차 + 시험 에이전트 리허설 | 문서 · 운영 리허설 | 운영 authority·게시 폴더와 분리된 작업 폴더 |
+| 4 | A2 인증서 조사·조달 | 조달 | Harold 구매 결정 |
+| 5 | 릴리스 1.0.29 = A2 서명 + A4·A5·A6 · **새 설치용 게시만, 기존 4대 롤아웃 없음** · A1 `build` 확인 | 빌드 스크립트 · 릴리스 | A2 인증서 · 새 릴리스 승인이 1.0.28 상태(되돌리기 조건)를 바꾸는지 확인 |
+| 6 | .66 백업 | 별도 축 | — |
+
+- 기존 4대 롤아웃을 안 하는 근거: A4·A5·A6은 새 설정 파일을 만들 때만 쓰인다(기본 호스트 · 마법사 기본값 · 주석). 롤아웃은 명시 생성만 된다(`web/api/services/agent-rollout-service.js:342` 한 곳 · 호출 = `routes/agent-upgrade-fleet.js`·`agent-upgrade-rollouts.js`).
+- ⛔ `build`는 게시 폴더를 비우고 다시 채우는 실제 릴리스다(`build-agent.sh:398-403`). 확인용으로 돌리지 않는다.
 
 ### 8-5. 완료 판정
 
-- **A1**: root 세션에서 `private/`에 `release.pem`만 남음 · 다음 릴리스 `build` 성공 · 이 절에 보관 기록.
+- **A1**: root 세션에서 `private/`에 `release.pem`만 남음 · 다음 릴리스 `build` 성공 · 이 절에 보관 기록. (**0913 = 1·3번 충족** · `build` 성공은 다음 릴리스 때 확인)
 - **A2**: 로컬 PowerShell `Get-AuthenticodeSignature`가 3종 모두 `Valid` · 서명본으로 만든 릴리스를 부트스트랩이 기동해 `Recover` 해시 대조 통과.
-- **A3**: 발급 화면·안내서 해시 = 실제 묶음 `Get-FileHash` 값.
+- **A3**: 발급 화면 해시 = 실제 묶음 `Get-FileHash` 값(안내서는 0913 정정으로 제외). 실측은 **heartbeat 이력 없는 시험 Agent**로 한다. 발급이 토큰을 회전하므로 운영 Agent로 하면 연결이 끊긴다.
+- **A9**: 재설치 절차 문서 · 시험용 키 2세대 정책을 박은 설치 파일로 시험 에이전트를 재설치해 기동·heartbeat·업데이트 서명 검증까지 통과한 증거.
 - **A4**: 새 출고본 `grep -aic invito.local` = 0 · 검사기에 `gw.invito.local`을 넣은 표본이 차단되는지 계약 확인(**0913 계약 확인 완료** · 새 출고본 확인은 다음 릴리즈 빌드 때).
 - **A5**: 마법사 기본 선택이 TLS 사용(**0913 소스 반영** · 단위 테스트 통과).
 - **공통 회귀 기준(Harold 0913 "기존에 잘 되던 게 안 되면 안 된다")**: 수정 패키지 `go test`(setup·onboarding·release·cmd/agent) 통과 · 전체 `go test ./...`의 실패 2패키지(`cmd/agent-bootstrap`·`internal/agent/bootstrap`)는 Windows 로컬의 권한·파일 모드 테스트이고 이번 변경 파일을 포함하지 않는다(릴리즈 빌드 환경 Linux에서 재확인 대상).

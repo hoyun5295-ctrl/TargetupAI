@@ -26,7 +26,7 @@ import AgencySendDetail from '../components/agency/AgencySendDetail';
 import AgencyProgressRail from '../components/agency/AgencyProgressRail';
 import TablePagination from '../components/common/TablePagination';
 import {
-  fetchAgencyRecipients, fetchAgencyRequests, formatWhenRelative, isApprovable, isRedoable,
+  agencyCallbackLabel, fetchAgencyRecipients, fetchAgencyRequests, formatWhenRelative, isApprovable, isRedoable,
   SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencySendRequest,
 } from '../components/agency/agency-send-api';
@@ -323,7 +323,7 @@ export default function AgencySendPage() {
                             {/* ★0905 §21-4 회신번호 — 한 요청서에서 갈라진 여러 건(회신번호 열 방식)과
                                 한 메일에서 온 여러 건은 제목·건수·타입이 같아 이 값 없이는 행이 구별되지 않는다.
                                 이미 목록 응답에 실려 오므로 서버·쿼리 변경 0. */}
-                            {SOURCE_LABEL[r.source] || SOURCE_LABEL.screen} · <span className="tabular-nums">{r.recipientCount.toLocaleString()}</span>명 · {r.messageType}{r.isAd ? ' · 광고' : ''}{r.callbackNumber ? <> · <span className="tabular-nums">{r.callbackNumber}</span></> : null}{r.createdByName ? <> · <span className="text-indigo-700 font-semibold">{r.createdByName}</span></> : null}
+                            {SOURCE_LABEL[r.source] || SOURCE_LABEL.screen} · <span className="tabular-nums">{r.recipientCount.toLocaleString()}</span>명 · {r.messageType}{r.isAd ? ' · 광고' : ''}{agencyCallbackLabel(r) ? <> · <span className="tabular-nums">{agencyCallbackLabel(r)}</span></> : null}{r.createdByName ? <> · <span className="text-indigo-700 font-semibold">{r.createdByName}</span></> : null}
                           </p>
                         </div>
                         <div className="hidden md:flex flex-1 min-w-0">

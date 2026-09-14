@@ -103,6 +103,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // ★ 2026-08-30 승인 링크 보안 보강 — 무로그인 링크로 실행된 승인의 감사 노출
   charge_link_approved: '충전 링크 승인',
   agency_link_approved: '대행발송 링크 승인',
+  // ★ 2026-09-13(3) 싱크에이전트 키 재발급(기존 키 즉시 무효)
+  sync_key_regenerate: '싱크 키 재발급',
 };
 
 /** 액션 → 뱃지 색(등록 없으면 회색). 성공=초록 · 실패·차단·파기=빨강 · 감지·주의=호박 · 인계·변경=파랑 */
@@ -130,6 +132,7 @@ export const AUDIT_ACTION_COLOR: Record<string, string> = {
   company_terminated: 'bg-red-100 text-red-700',
   charge_link_approved: 'bg-green-100 text-green-700',
   agency_link_approved: 'bg-green-100 text-green-700',
+  sync_key_regenerate: 'bg-blue-100 text-blue-700',
 };
 
 const USER_TYPE_LABEL: Record<string, string> = {
@@ -290,6 +293,8 @@ export function formatAuditDetail(action: string, details: any): string {
         .filter(Boolean).join(' · ');
     case 'agency_link_approved':
       return [d.label, d.phone && `승인 번호 ${d.phone}`].filter(Boolean).join(' · ');
+    case 'sync_key_regenerate':
+      return d.apiKeyTail ? `새 키 끝자리 ${d.apiKeyTail}` : '';
     default: {
       const parts = Object.entries(d)
         .filter(([, v]) => v != null && v !== '' && typeof v !== 'object')

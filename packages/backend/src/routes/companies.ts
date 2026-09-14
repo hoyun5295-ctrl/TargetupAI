@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit';
 import pool, { query } from '../config/database';
 // ★ 2026-07-20: 회사 생성 코어 CT(시스템 user·시퀀스 부속 포함) — POST /와 게이트웨이 bill 일괄 생성 공유
 import { createCompanyCore } from '../utils/company-create';
+import { omitCompanySecrets } from '../utils/secret-hash';
 import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/auth';
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope } from '../utils/store-scope';
@@ -1665,7 +1666,8 @@ router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
     );
 
     return res.json({
-      companies: result.rows,
+      // ★2026-09-13 `c.*`에 실린 비밀값 컬럼(원문·해시)은 응답에서 뺀다(적대검토 등재분 ① · 화면 소비 0)
+      companies: result.rows.map(omitCompanySecrets),
       pagination: {
         total,
         page: Number(page),
@@ -1702,7 +1704,7 @@ router.get('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
       return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
     }
 
-    return res.json({ company: result.rows[0] });
+    return res.json({ company: omitCompanySecrets(result.rows[0]) });
   } catch (error) {
     console.error('고객사 상세 조회 에러:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -1750,7 +1752,7 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
 
     return res.status(201).json({
       message: '고객사가 생성되었습니다.',
-      company,
+      company: omitCompanySecrets(company),
     });
   } catch (error: any) {
     console.error('고객사 생성 에러:', error);
@@ -2231,7 +2233,8 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
 
     return res.json({
       message: '고객사가 수정되었습니다.',
-      company: result.rows[0],
+      // ★2026-09-13 `RETURNING *`에 실린 비밀값 컬럼은 응답에서 뺀다(적대검토 등재분 ① · 워크플로 1R)
+      company: omitCompanySecrets(result.rows[0]),
     });
   } catch (error: any) {
     console.error('고객사 수정 에러:', error);

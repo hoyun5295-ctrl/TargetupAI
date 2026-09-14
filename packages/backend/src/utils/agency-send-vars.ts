@@ -126,6 +126,29 @@ export interface SlotValues {
   extra3: string;
 }
 
+/**
+ * 수신자 값의 **저장형**(★2026-09-13 적대검토 등재분 ⑤). `agency_send_recipients.vars`에 넣기 직전에 거친다.
+ * 이 컬럼은 두 경로가 읽는다: 미리보기·담당자 테스트 문자(`toSlotValues` = JS `String`)와 발송 적재(SQL `vars->>'키'`).
+ * 엑셀 숫자 셀이 jsonb 숫자로 저장되면 둘이 갈린다(1e21 → JS "1e+21" · PostgreSQL numeric 출력은 지수 표기를 쓰지 않는다,
+ * 운영 DB 미실측). 문자열로 저장하면 `->>`는 그 문자열을 그대로 돌려주므로 **미리보기 = 나가는 문장**이 유지된다(불변 4).
+ * 엑셀 날짜 셀은 명단을 읽을 때 이미 벽시계 글자다(★2026-09-13(3) agency-send-form `sheetDatesToText`).
+ * ⛔ Date 분기는 명단 파서 밖에서 Date가 들어올 때의 종전 저장값(`JSON.stringify` = ISO 문자열) 유지용이다. `String(date)`로 바꾸면 쓰던 표기가 달라진다.
+ * ⛔ undefined 키는 싣지 않는다(종전 `JSON.stringify`와 같다). null은 null로 둔다(두 경로 모두 빈 문자열).
+ */
+export function toStoredVars(vars: unknown): Record<string, string | null> {
+  if (!vars || typeof vars !== 'object' || Array.isArray(vars)) return {};
+  const out: Record<string, string | null> = {};
+  for (const [k, v] of Object.entries(vars as Record<string, unknown>)) {
+    if (v === undefined) continue;
+    if (v === null) out[k] = null;
+    else if (typeof v === 'string') out[k] = v;
+    else if (v instanceof Date) out[k] = Number.isNaN(v.getTime()) ? null : v.toISOString();
+    else if (typeof v === 'object') out[k] = JSON.stringify(v);
+    else out[k] = String(v);
+  }
+  return out;
+}
+
 export function toSlotValues(vars: Record<string, any> | null | undefined, order: string[]): SlotValues {
   const pick = (i: number): string => {
     const key = order[i];

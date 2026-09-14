@@ -735,8 +735,8 @@ export function normalizePhoneKr(value: any): string {
   if (value == null || value === '') return '';
   let v = String(value).trim();
   v = v.replace(/[\s\-()+.]/g, '');
-  if (v.startsWith('+82')) v = '0' + v.slice(3);
-  else if (v.startsWith('82')) v = '0' + v.slice(2);
+  // 국가코드 82 → 0. '+'는 바로 위에서 지웠다(★2026-09-13(3) 도달하지 않던 +82 분기 제거 · 백엔드 원본과 같은 모양)
+  if (v.startsWith('82')) v = '0' + v.slice(2);
   v = v.replace(/\D/g, '');
   // ★ D142 (2026-04-28): regex 정밀화 — backend normalize.ts/normalizePhone 미러.
   //   PDF 0428 #2 "1800-8125 → 018008125" 사고 차단.

@@ -22,7 +22,7 @@ import {
   CUI_PILL_BASE, CUI_PILL_TONE, CUI_SEC_TITLE, CUI_TEXTAREA,
 } from '../../utils/console-ui';
 import {
-  approveAgencyRequest, cancelAgencyRequest, fetchAgencyPreview, fetchAgencyRequest, formatWhen,
+  agencyCallbackLabel, approveAgencyRequest, cancelAgencyRequest, fetchAgencyPreview, fetchAgencyRequest, formatWhen,
   isApprovable, isCancelable, isEditableStatus, rescheduleAgencyRequest, SOURCE_LABEL, STATUS_LABEL,
   STATUS_TONE, toLocalInput, updateAgencyContent, type AgencyPreviewSample, type AgencySendEvent,
   type AgencySendRequest,
@@ -159,6 +159,9 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   if (!requestId) return null;
 
   const refined = !!req && req.currentContent !== req.originalContent;
+  // ★2026-09-13(3) 예약이 한 번이라도 만들어진 접수는 서버가 문안·시각 변경을 막는다(시도 키 보존 · 두 벌 발송 차단).
+  //   누르고 거절당하지 않게 버튼을 처음부터 보이지 않는다. 판정 원본은 서버다(이 값이 비어 있어도 서버가 막는다).
+  const changeable = !!req && isEditableStatus(req.status) && !req.campaignId;
 
   return (
     <div className="fixed inset-0 z-[60] bg-neutral-900/45 flex items-center justify-center p-4">
@@ -216,7 +219,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <h4 className={CUI_SEC_TITLE}>{isApprovable(req.status) ? '승인할 문안' : '지금 문안'}</h4>
-                  {isEditableStatus(req.status) && !editing && (
+                  {changeable && !editing && (
                     <button type="button" onClick={() => setEditing(true)} className={CUI_BTN_GHOST}>고치기</button>
                   )}
                 </div>
@@ -238,7 +241,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                 {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 대체표로 바꾼 문안을 고치기 칸에 넣는다(저장해야 검사를 다시 한다) */}
                 {editing ? (
                   <SmsCharsetNotice className="mt-2" texts={[draft]} onApply={(fix) => setDraft((prev) => fix(prev))} />
-                ) : isEditableStatus(req.status) && (
+                ) : changeable && (
                   <SmsCharsetNotice className="mt-2" texts={[req.currentContent]} onApply={(fix) => { setDraft(fix(req.currentContent)); setEditing(true); }} />
                 )}
               </div>
@@ -268,7 +271,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                 </div>
               )}
 
-              {isEditableStatus(req.status) && (
+              {changeable && (
                 <div>
                   <label className={CUI_LABEL}>보낼 시각</label>
                   <div className="flex items-center gap-2">
@@ -307,7 +310,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
           shown={preview?.shown || 0}
           total={preview?.total || req.recipientCount}
           messageType={req.messageType}
-          callbackNumber={req.callbackNumber}
+          callbackNumber={agencyCallbackLabel(req)}
           // ★2026-09-10 저장한 원본 파일명으로 보인다(없는 옛 접수는 저장 파일명 그대로)
           images={Array.isArray(req.mmsImagePaths) ? withMmsImageNames(req.mmsImagePaths, req.mmsImageNames) : []}
           loading={previewLoading}

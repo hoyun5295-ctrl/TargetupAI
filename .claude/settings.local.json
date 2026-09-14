@@ -3,8 +3,8 @@
     "allow": [
       "Bash(pip install:*)",
       "Bash(python -m markitdown \"C:\\\\Users\\\\ceo\\\\OneDrive\\\\문서\\\\카카오톡 받은 파일\\\\한줄로_20260323.pptx\")",
-"Write(C:/Users/ceo/projects/hanjulDM/packages/pos-agent/**)",
-"Edit(C:/Users/ceo/projects/hanjulDM/packages/pos-agent/**)",
+      "Write(C:/Users/ceo/projects/hanjulDM/packages/pos-agent/**)",
+      "Edit(C:/Users/ceo/projects/hanjulDM/packages/pos-agent/**)",
       "Bash(python -c \":*)",
       "Read(//c/tmp/**)",
       "Bash(python -u -c \":*)",
@@ -216,7 +216,24 @@
       "Bash(pdftotext -layout \"C:/Users/ceo/OneDrive/바탕 화면/bito-gateway/[휴머스온]브랜드메시지 Agent 사용 메뉴얼_20260209.pdf\" \"C:/Users/ceo/projects/targetup/status/_bm_manual.txt\")",
       "Bash(xargs -I{} grep -l \"CHAT_BUBBLE_TYPE\\\\|IMC_BM_FREE_BIZ_MSG\\\\|IMC_BM_BASIC_BIZ_MSG\" {})",
       "Bash(xargs -I{} grep -l \"Agent\\\\|발송 가능\\\\|CHAT_BUBBLE\\\\|TARGETING\" {})",
-      "Bash(awk '/^router\\\\.\\(post|put|delete\\)\\\\\\(/{getline; print NR\": \"$0}' \"C:/Users/ceo/projects/targetup/packages/backend/src/routes/alimtalk.ts\")"
+      "Bash(awk '/^router\\\\.\\(post|put|delete\\)\\\\\\(/{getline; print NR\": \"$0}' \"C:/Users/ceo/projects/targetup/packages/backend/src/routes/alimtalk.ts\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\api; node test/agent-install-bundle-contract-test.js; \"exit=$LASTEXITCODE\"; node test/customer-downloads-contract-test.js; \"exit=$LASTEXITCODE\"; node test/customer-schema-consistency-test.js; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\dashboard; node --test scripts/test-agent-token-tools.mjs 2>&1 | Select-String -Pattern '^# |not ok|^ok ' ; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\api; npm test 2>&1 | Select-Object -Last 25; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\dashboard; npm test 2>&1 | Select-Object -Last 30; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\dashboard; npm run build 2>&1 | Select-Object -Last 12; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\api; node test/agent-install-bundle-contract-test.js; \"exit=$LASTEXITCODE\"; node test/agent-install-bundle-route-test.js; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\dashboard; node --test scripts/test-agent-token-tools.mjs 2>&1 | Select-String -Pattern '^not ok|^# \\(pass|fail\\)|Error' ; \"exit=$LASTEXITCODE\")",
+      "PowerShell(node \"C:\\\\Users\\\\ceo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-ceo-projects-targetup\\\\f68b678e-b460-4cb8-9201-8173a3cb7cdc\\\\scratchpad\\\\mutant-bundle-route.js\" 2>&1 | Select-Object -Last 12; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\api; npm test 2>&1 | Select-String -Pattern 'AGENT_INSTALL_BUNDLE_ROUTE_TEST_OK|agent-install-bundle-contract-test|결과:|Error|failed' ; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\dashboard; npm test 2>&1 | Select-Object -Last 3; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Set-Location C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\dashboard; npm run build 2>&1 | Select-Object -Last 3; \"exit=$LASTEXITCODE\")",
+      "PowerShell($root='C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway'; if \\(Test-Path \"$root\\\\.gitattributes\"\\) { Get-Content \"$root\\\\.gitattributes\" } else { 'NO_GITATTRIBUTES' }; foreach \\($f in 'web\\\\api\\\\routes\\\\agents.js','web\\\\api\\\\services\\\\agent-install-bundle.js'\\) { $b=[IO.File]::ReadAllBytes\\(\"$root\\\\$f\"\\); $cr=\\($b | Where-Object { $_ -eq 13 }\\).Count; \"$f CR=$cr bytes=$\\($b.Length\\)\" })",
+      "PowerShell(node \"C:\\\\Users\\\\ceo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-ceo-projects-targetup\\\\f68b678e-b460-4cb8-9201-8173a3cb7cdc\\\\scratchpad\\\\a3-server-baseline.js\"; \"exit=$LASTEXITCODE\")",
+      "PowerShell($d='C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\web\\\\dashboard\\\\dist'; Get-ChildItem -LiteralPath $d -Force | ForEach-Object Name; \\(Get-FileHash -LiteralPath \"$d\\\\.gw-manifest.sha256\" -Algorithm SHA256\\).Hash.ToLower\\(\\); \\(Get-Content -LiteralPath \"$d\\\\.gw-manifest.sha256\" | Where-Object { $_.Trim\\(\\) }\\).Count)",
+      "PowerShell(Get-ChildItem -LiteralPath \"C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\Bito Agent\" -File | Sort-Object Name | Select-Object @{n='Modified';e={$_.LastWriteTime.ToString\\('yyyy-MM-dd HH:mm'\\)}}, Length, Name | Format-Table -AutoSize | Out-String -Width 200)",
+      "PowerShell(foreach \\($py in 'python3','python'\\) { $cmd = Get-Command $py -ErrorAction SilentlyContinue; if \\($cmd\\) { \"$py -> $\\($cmd.Source\\)\"; & $py -c \"import importlib.util as u; print\\('reportlab', bool\\(u.find_spec\\('reportlab'\\)\\), 'pypdf', bool\\(u.find_spec\\('pypdf'\\)\\), 'fitz', bool\\(u.find_spec\\('fitz'\\)\\)\\)\" } })",
+      "PowerShell($d='C:\\\\Users\\\\ceo\\\\projects\\\\bito-gateway\\\\Bito Agent'; foreach \\($v in '1.0.26','1.0.28'\\) { $f=\"$d\\\\Bito-Agent-Install-Manual-v$v.pdf\"; \"v$v 실제 해시 = \" + \\(Get-FileHash -LiteralPath $f -Algorithm SHA256\\).Hash.ToLower\\(\\); \"v$v .sha256 기재 = \" + \\(Get-Content -LiteralPath \"$f.sha256\" -Raw\\).Trim\\(\\) })"
     ]
   },
   "skillOverrides": {

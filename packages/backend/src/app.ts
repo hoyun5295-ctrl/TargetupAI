@@ -333,6 +333,20 @@ app.use('/api/public/marketing-diagnosis', (err: any, _req: express.Request, res
   return next(err);
 });
 app.use(express.json({ limit: LIMITS.requestBodySize }));
+// ★2026-09-13(3) 대행발송 화면 접수의 본문 상한을 숨기지 않는다(대행 등재분 ④). 명단을 JSON으로 싣는 화면 접수·재접수는
+//   본문 상한(50mb · 6열 약 32만 명 실측 계산)에서 막히는데, 종전에는 기본 오류 페이지가 나가 화면이 "접수하지 못했습니다"만 보였다.
+//   ⛔ 상한을 올리지 않는다: API 프로세스 힙이 2048MB이고 1700M에서 재시작된다(ecosystem.config.js). 수백 MB 본문을 파싱하면
+//   발송 워커가 같은 프로세스에서 멈추거나 재시작된다. 큰 명단은 서버가 파일을 한 번 파싱하는 원스텝·이메일 입구로 받는다.
+app.use('/api/agency-send', (err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+    return res.status(413).json({
+      success: false,
+      code: 'BODY_TOO_LARGE',
+      error: '명단이 커서 화면에서 한 번에 보낼 수 없습니다. 요청서 파일 접수(원스텝)나 이메일 접수로 보내 주세요.',
+    });
+  }
+  return next(err);
+});
 
 // ★ 2026-07-17 느린 요청 상시 계측 — 500ms 초과 API 요청을 로깅(경로·소요·회사·상태).
 //   이새(13.7만 고객) 대시보드 지연 진단 + 대형 연동사 증가 대비: "무엇이 느린지"를 추측이 아니라

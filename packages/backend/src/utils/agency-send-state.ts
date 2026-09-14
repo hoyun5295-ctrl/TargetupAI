@@ -458,6 +458,18 @@ export function lockRecoveryStatus(status: AgencySendStatus): AgencySendStatus |
   return null;
 }
 
+/**
+ * 예약 시도가 멈춘 것으로 보는가(★2026-09-13(3) · 불변 26 수용 위험 제거).
+ * 시도 안의 대기가 끝나지 않으면 진행 중 표시와 시도 키 잠금이 남아 lock 복구가 그 접수를 영영 건너뛰었다
+ * (복구도 만료 안내도 없음). 예약 시각이 지나고도 이만큼 더 지난 진행 중 시도는 제시간 발송이 이미 불가능하므로 멈춘 것으로 인수한다.
+ * ⛔ 기준을 예약 시각 **경과**로 둔다. 적재가 느린 정상 시도(예약 시각 전)는 건드리지 않는다.
+ */
+export const ATTEMPT_STUCK_AFTER_DUE_MINUTES = 30;
+
+export function isAttemptStuck(requestedAt: Date, now: Date): boolean {
+  return (now.getTime() - requestedAt.getTime()) / 60000 > ATTEMPT_STUCK_AFTER_DUE_MINUTES;
+}
+
 // ────────────── 검사 회차 ──────────────
 
 /** 원문 1회 + 다듬기 1회 + 표현만 최소 수정 1회 = 3회까지 본다(설계서 §4-4 A) */

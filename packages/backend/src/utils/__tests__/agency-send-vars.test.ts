@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  buildSlotPlan, extractAgencyVars, toSlotValues, resolveVarColumns, sameNameColumn,
+  buildSlotPlan, extractAgencyVars, toSlotValues, resolveVarColumns, sameNameColumn, toStoredVars,
   MAX_AGENCY_VARS, SLOT_VARS,
 } from '../agency-send-vars';
 import { normalizeVarSuggestions } from '../ai-column-mapper';
@@ -71,6 +71,41 @@ describe('수신자 값 옮기기', () => {
     expect(toSlotValues({ 포인트: 0 }, plan.order).name).toBe('0');
     expect(toSlotValues({}, plan.order).name).toBe('');
     expect(toSlotValues(null, plan.order).name).toBe('');
+  });
+});
+
+/**
+ * ★2026-09-13 적대검토 등재분 ⑤: 같은 `vars` 컬럼을 두 경로가 다르게 읽었다.
+ *   미리보기·담당자 테스트 문자는 `toSlotValues`(JS `String`)로, 발송 적재는 SQL `vars->>'키'`로 읽는다.
+ *   숫자가 jsonb 숫자로 저장되면 둘이 갈린다(1e21 → JS "1e+21" · PostgreSQL 숫자 출력은 지수 표기를 쓰지 않는다).
+ *   저장할 때 문자열로 맞추면 `->>`는 그 문자열을 그대로 돌려주므로 두 경로가 같은 글자를 만든다.
+ */
+describe('수신자 값 저장형: 발송 SQL과 미리보기가 같은 글자를 만든다', () => {
+  it('숫자·참거짓·날짜·객체를 미리보기와 같은 문자열로 바꾸고, null은 null로 둔다', () => {
+    const stored = toStoredVars({
+      큰수: 1e21, 작은수: 1e-7, 포인트: 0, 참: true, 날짜: new Date('2026-09-01T05:00:00.000Z'),
+      빈값: null, 이름: '홍길동', 객체: { a: 1 },
+    });
+    expect(stored).toEqual({
+      큰수: '1e+21', 작은수: '1e-7', 포인트: '0', 참: 'true', 날짜: '2026-09-01T05:00:00.000Z',
+      빈값: null, 이름: '홍길동', 객체: '{"a":1}',
+    });
+  });
+
+  it('DB를 거친 모양(JSON 왕복)에서 모든 값이 문자열 또는 null이라 `->>`와 `toSlotValues`가 같다', () => {
+    const stored = toStoredVars({ 큰수: 1e21, 작은수: 1e-7, 소수: 12.5, 이름: '홍길동', 빈값: null });
+    const roundTrip = JSON.parse(JSON.stringify(stored)) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(roundTrip)) {
+      expect(v === null || typeof v === 'string', k).toBe(true);
+      // `COALESCE(vars->>k, '')` = 문자열이면 그 문자열, null이면 ''
+      expect(toSlotValues(roundTrip, [k]).name, k).toBe(v === null ? '' : v);
+    }
+  });
+
+  it('undefined 값은 싣지 않고(JSON.stringify와 같다), 배열·비객체는 빈 값으로 본다', () => {
+    expect(toStoredVars({ 없음: undefined, 이름: 'A' })).toEqual({ 이름: 'A' });
+    expect(toStoredVars(['a'] as any)).toEqual({});
+    expect(toStoredVars(null)).toEqual({});
   });
 });
 

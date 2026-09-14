@@ -144,8 +144,8 @@ export function normalizePhone(value: any): string | null {
   if (value == null || value === '') return null;
   let v = String(value).trim();
   v = v.replace(/[\s\-\(\)\+\.]/g, '');
+  // 국가코드 82 → 0. '+'는 바로 위에서 지웠으므로 '+82…'와 '82…'가 여기서 같은 문자열이다(★2026-09-13(3) 도달하지 않던 +82 분기 제거)
   if (v.startsWith('82')) v = '0' + v.slice(2);
-  if (v.startsWith('+82')) v = '0' + v.slice(3);
   v = v.replace(/\D/g, '');
   // ★ D142 (2026-04-28): 한줄로 backend normalize.ts와 미러. prefix별 정확한 자릿수 강제.
   //   PDF 0428 #2 "1800-8125 → 018008125" 사고 차단.
@@ -384,6 +384,50 @@ export function normalizeCustomFieldValue(val: any): string {
   return String(val);
 }
 
+/**
+ * 동기화 경로 custom_1~15 값 정리(★2026-09-13(3) 싱크 ⓒ · 동기화 전용 · 백엔드 원본 함수는 위 normalizeCustomFieldValue 그대로).
+ *
+ * 원칙 = custom 원본 100% 보존(memory `feedback_custom_field_raw_preserve`): 문자열·숫자·불리언은 한 글자도 바꾸지 않는다.
+ * 날짜 컬럼만 되돌린다: 드라이버가 준 JS Date를 그대로 직렬화하면 **UTC ISO 문자열**이 되어(KST 자정 날짜가 전날 15:00Z)
+ * 원본 DB에 없는 글자가 저장·발송된다 → 원본 DB가 보여 주는 벽시계 글자로 되돌린다.
+ * 드라이버별 벽시계 성분(라이브러리 소스 확인):
+ *  - mysql2: timezone 기본 'local'(connection_config.js) → 로컬 성분
+ *  - tedious(mssql): useUTC 기본 true(connection.js) → UTC 성분(어댑터가 useUTC를 바꾸지 않는다)
+ *  - PostgreSQL·Oracle 어댑터: 로컬 Date를 toISOString으로 넘긴다(postgres-date 로컬 · oracledb DATE/TIMESTAMP 로컬) → 되돌린 뒤 로컬 성분
+ * ⛔ 백엔드 normalizeCustomFieldValue를 쓰지 마라: UTC 올림·ISO 앞 10자리 자르기라 날짜가 하루 밀리고 시각이 사라진다.
+ * ⛔ PostgreSQL·Oracle의 ISO 되돌림은 toISOString 모양(밀리초 3자리 + Z)만이다. 다른 모양의 문자열은 원본이다.
+ */
+const CONNECTOR_ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+function wallClockText(d: Date, utc: boolean): string {
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  const Y = utc ? d.getUTCFullYear() : d.getFullYear();
+  const M = utc ? d.getUTCMonth() : d.getMonth();
+  const D = utc ? d.getUTCDate() : d.getDate();
+  const h = utc ? d.getUTCHours() : d.getHours();
+  const mi = utc ? d.getUTCMinutes() : d.getMinutes();
+  const s = utc ? d.getUTCSeconds() : d.getSeconds();
+  const ms = utc ? d.getUTCMilliseconds() : d.getMilliseconds();
+  const date = `${Y}-${p(M + 1)}-${p(D)}`;
+  if (!h && !mi && !s && !ms) return date;
+  return `${date} ${p(h)}:${p(mi)}:${p(s)}${ms ? `.${p(ms, 3)}` : ''}`;
+}
+
+export function normalizeSyncCustomFieldValue(v: unknown, dbType?: string): unknown {
+  if (v === null || v === undefined || v === '') return v;
+  if (typeof v === 'bigint') return v.toString(); // JSON 직렬화 예외 방지
+  let d: Date | null = null;
+  let utc = false;
+  if (v instanceof Date) {
+    d = v;
+    utc = dbType === 'mssql';
+  } else if ((dbType === 'postgresql' || dbType === 'oracle') && typeof v === 'string' && CONNECTOR_ISO_RE.test(v)) {
+    d = new Date(v);
+  }
+  if (!d || Number.isNaN(d.getTime())) return v;
+  return wallClockText(d, utc);
+}
+
 // ============================================================
 // 이메일 정규화
 // ============================================================
@@ -439,6 +483,8 @@ export function normalizeByFieldKey(fieldKey: string, value: any): any {
 // ============================================================
 export function normalizeCustomer(
   mapped: Record<string, unknown>,
+  // ★2026-09-13(3) 동기화 경로는 원본 DB 종류를 넘긴다(custom_fields 날짜 되돌림 · 없으면 날짜 되돌림 없이 원형 그대로)
+  opts?: { dbType?: string },
 ): Record<string, unknown> {
   const result: Record<string, unknown> = { ...mapped };
 
@@ -471,6 +517,19 @@ export function normalizeCustomer(
     if (key in result && result[key] != null && result[key] !== '') {
       result[key] = normalizeCustomFieldValue(result[key]);
     }
+  }
+
+  // ★2026-09-13(3) 싱크 ⓒ 동기화 매핑(mapRow)은 custom 슬롯을 custom_fields 아래에 넣는다 — 위 최상위 루프가 닿지 않던 자리.
+  //   ⛔ 새 객체로 만든다(위 `{ ...mapped }`는 얕은 복사라 제자리 수정은 넘긴 행을 바꾼다).
+  //   ⛔ Buffer 값은 키를 뺀다. null로 보내면 서버 병합이 저장된 값을 지운다.
+  const cf = result.custom_fields;
+  if (cf && typeof cf === 'object' && !Array.isArray(cf)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(cf as Record<string, unknown>)) {
+      if (Buffer.isBuffer(val)) continue;
+      out[k] = normalizeSyncCustomFieldValue(val, opts?.dbType);
+    }
+    result.custom_fields = out;
   }
 
   return result;
@@ -522,12 +581,12 @@ export interface NormalizationResult {
   }>;
 }
 
-export function normalizeCustomerBatch(rows: Record<string, unknown>[]): NormalizationResult {
+export function normalizeCustomerBatch(rows: Record<string, unknown>[], opts?: { dbType?: string }): NormalizationResult {
   const normalized: Record<string, unknown>[] = [];
   const dropped: NormalizationResult['dropped'] = [];
 
   for (const row of rows) {
-    const result = normalizeCustomer(row);
+    const result = normalizeCustomer(row, opts);
 
     if (!result.phone) {
       dropped.push({ row, reason: '전화번호 정규화 실패 또는 누락' });
