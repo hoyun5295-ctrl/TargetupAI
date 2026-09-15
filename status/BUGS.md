@@ -55,7 +55,7 @@
 
 ## 2) 활성 버그
 
-### 🟠 B-0915-3 이메일 캠페인 리뷰: 별점이 흰색이라 미리보기에서 안 보이고, 평균 별점 표시를 미사용으로 눌러도 그대로다 (🟡 코드 수정 완료 · 배포 대기 · 실측 = 0916 직원) — 2026-09-15 임은지 접수 `cmu2ao5qn02tjjnlu1spouqzy`
+### 🟠 B-0915-3 이메일 캠페인 리뷰: 별점이 흰색이라 미리보기에서 안 보이고, 평균 별점 표시를 미사용으로 눌러도 그대로다 (🟡 0915 배포완료 · 실측 대기 = 0916 직원) — 2026-09-15 임은지 접수 `cmu2ao5qn02tjjnlu1spouqzy`
 
 - **원인(코드)**: 이메일 별 색은 강조색 한 줄에서만 왔다(`email-section-renderer.ts renderReviews` · 우선순위 `design.palette.accent → 회사 킷 accent_color → 기본` `email-tokens.ts:237`). 리뷰 블록에는 색 입구가 없었다(공용 편집 패널 `ReviewsEditor` · 이메일 블록 "버튼·강조색"은 `EMAIL_ACCENT_AWARE`에 리뷰가 없고 그 값도 primary만 바꾼다). `show_average_rating`은 이메일 렌더러가 한 번도 읽지 않았고 평균 줄 자체가 없었다(DM SSR·캔버스는 소비 중). 접수 캠페인의 흰색이 캠페인 `palette.accent`인지 회사 킷 `accent_color`인지는 미검증(테마 프리셋에 흰 강조색 0 · grep).
 - **수정**: 공용 편집 패널에 "별점 색"(`star_color` · 미지정 = 강조색) → 이메일 렌더러(리뷰별 별 · 평균 별)·DM SSR(classic·quote)·편집 캔버스가 함께 소비. 이메일에 평균 별점 줄 추가(`show_average_rating` · 미지정 = 표시 = 편집기 기본값 · DM classic 미러). 원장 `EMAIL_REVIEWS_PROPS`·`DM_REVIEWS_PROPS` 등재. 테스트 +9(`email-editor-parity`·`dm-editor-parity` · 실패 7 확인 후 구현) · 백엔드 305파일 4,750 · tsc 0(백·프) · DDL 0.

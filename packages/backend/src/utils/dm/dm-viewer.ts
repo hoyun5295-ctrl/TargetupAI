@@ -19,6 +19,8 @@ import { resolveSections } from './dm-variable-resolver';
 import type { Section } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
 import { expandSlidePagesForSwipe, isSwipeImagePage } from './dm-slides-expand';
+// ★ 2026-09-15 카탈로그 보기(PC 책 펼침) — 게이트·og 메타·viewport·CSS/HTML/스크립트 조각. 조건 밖 DM 출력은 바이트 동일.
+import { isCatalogDm, catalogFirstImageUrl, CATALOG_VIEWPORT_META, renderCatalogOgMeta, renderCatalogCss, renderCatalogHtml, renderCatalogScript, renderCatalogMobileGridButton } from './dm-viewer-catalog';
 
 export { inlineImage, youtubeEmbedUrl };
 
@@ -358,6 +360,8 @@ function renderPagesHtml(
   const allSections: Section[] = pages.flatMap((p) => p.sections);
   const hasCountdown = allSections.some((s) => s.type === 'countdown');
   const totalPages = pages.length;
+  // ★ 2026-09-15 카탈로그 보기 게이트 — slides · 펼친 뒤 전 장이 이미지 무대 · 2장 이상(isCatalogDm). 조건 밖 = 아래 삽입 전부 빈 문자열.
+  const catalog = mode === 'slides' && isCatalogDm(pages as any);
 
   // ★ 2026-07-13 디자인 3.0 — brand_kit.art_direction 영속분 실주입(옛 Task 7 완결).
   //   미설정 DM = tone 기반 정규화 기본값... 이 아니라 중립 기본과 동일 출력을 위해 raw 없으면 null 정규화(기존 발행물 무변화).
@@ -434,7 +438,7 @@ html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
       : '';
   const dotsHtml =
     mode !== 'scroll' && totalPages > 0
-      ? `<div class="dm-page-dots"><div class="dm-page-bar"><div class="dm-page-bar-in"></div></div><div class="dm-page-dots-strip"><div class="dm-page-dots-in">${pages.map((_, i) => `<span class="dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}</div></div>${counterHtml}</div>`
+      ? `<div class="dm-page-dots">${catalog ? renderCatalogMobileGridButton() : ''}<div class="dm-page-bar"><div class="dm-page-bar-in"></div></div><div class="dm-page-dots-strip"><div class="dm-page-dots-in">${pages.map((_, i) => `<span class="dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}</div></div>${counterHtml}</div>`
       : '';
   // ★ 2026-09-14 PC 좌우 화살표(포인터 장치에서만 CSS로 표시) — 스크립트가 배선. 2장 이상일 때만.
   const navHtml =
@@ -446,9 +450,9 @@ html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+${catalog ? CATALOG_VIEWPORT_META : '<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">'}
 <meta name="format-detection" content="telephone=no">
-<title>${escapeHtml(storeName ? `${storeName} - ${title}` : title)}</title>
+<title>${escapeHtml(storeName ? `${storeName} - ${title}` : title)}</title>${catalog ? '\n' + renderCatalogOgMeta(storeName ? `${storeName} - ${title}` : title, catalogFirstImageUrl(pages as any)) : ''}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" onerror="this.remove()">
 ${(() => {
     // ★ 2026-07-16 자가 호스팅 — 브랜드킷 선택 서체(명조 등)를 우리 서버 @font-face(/api/dm/v/fonts.css)로 로드.
@@ -472,16 +476,16 @@ ${renderDmVariantCss()}
 .cd-unit{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:var(--dm-sp-4) var(--dm-sp-3);min-width:76px}
 .cd-num{font-size:34px;font-weight:800;font-family:var(--dm-font-display);font-variant-numeric:tabular-nums;letter-spacing:1px;color:var(--dm-cd-num,#fff);line-height:1.1}
 .cd-lbl{font-size:11px;opacity:0.55;margin-top:6px;letter-spacing:2px}
-${modeCss}
+${modeCss}${catalog ? renderCatalogCss() : ''}
 </style>
 </head>
-<body data-layout-mode="${mode}"${artDirection.accentMotif !== 'none' ? ` data-dm-motif="${artDirection.accentMotif}"` : ''}${artDirection.sectionDivider !== 'none' ? ` data-dm-divider="${artDirection.sectionDivider}"` : ''}>
+<body data-layout-mode="${mode}"${artDirection.accentMotif !== 'none' ? ` data-dm-motif="${artDirection.accentMotif}"` : ''}${artDirection.sectionDivider !== 'none' ? ` data-dm-divider="${artDirection.sectionDivider}"` : ''}${catalog ? ' data-dm-catalog="1"' : ''}>
 <div class="dm-viewer">
 ${pagesHtml}
 </div>
 ${artDirection.grain ? '<div class="dm-grain" aria-hidden="true"></div>' : ''}
 ${dotsHtml}
-${navHtml}
+${navHtml}${catalog ? '\n' + renderCatalogHtml(totalPages) : ''}
 
 <script>
 (function(){
@@ -668,11 +672,11 @@ ${mode === 'slides' ? `
     document.addEventListener('keydown', function(e){
       var t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      if (e.key === 'ArrowRight') goToPage(currentIdx + 1);
+${catalog ? '      if (dmCatalogOn) return;\n' : ''}      if (e.key === 'ArrowRight') goToPage(currentIdx + 1);
       else if (e.key === 'ArrowLeft') goToPage(currentIdx - 1);
     });
   }
-
+${catalog ? renderCatalogScript() : ''}
   // 섹션 클릭 → 클릭 카운트 + 요소(버튼/링크/옵션/탭) 라벨 카운트.
   // 외부 링크/CTA는 클릭 즉시 이탈 — 떠나기 전에 비콘으로 클릭 보존.
   document.addEventListener('click', function(e){
