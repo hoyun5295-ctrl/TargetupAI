@@ -55,17 +55,29 @@
 
 ## 2) 활성 버그
 
-### 🟠 B-0914-5 알림톡 발송: 예약·분할이 없고, 예약으로 접수돼도 큐에는 즉시 시각으로 들어간다 (🟡 코드완료·배포 대기 0914 · 실측 대기) — 2026-09-14 접수 `cmu0zpd0z02gyjnluuclvxk9r`(박성용 P2)
+### 🟠 B-0915-1 로그인: 24시간 안에 인증번호를 다시 묻고, 인증 뒤 "이 아이디로 지금 다른 곳에서 사용 중입니다"에 막혀 들어갈 수 없다 (🟡 코드 수정 완료 · 배포 대기) — 2026-09-15 Harold 직접 접수(hoyun)
+
+- **실측(0915 운영 PG)**: 09-14 13:57 KST `mfa_success`(115.138.27.202) 뒤 같은 날 로그인 4회는 인증 면제. 09-14 21:54 로그인은 `/dashboard` page_view 1건 뒤 로그아웃 없음. 09-15 09:30:11 180.226.236.94에서 어제 토큰으로 `/login` page_view → 그 세션 `last_activity_at`이 같은 시각으로 갱신 → 4초 뒤 `mfa_challenge` → `mfa_success`·`login_session_conflict` 3회 반복.
+- **원인 1(재인증)**: 신뢰 기기 판정 = 토큰·IP 앞 두 자리·UA 모두 일치(`mfa.ts isTrustedDevice`). IP 대역이 115.138 → 180.226으로 바뀌었다. 방지계획서 §7 "IP 대역 변경 시 다중 인증 재수행"대로의 동작이라 고치지 않는다.
+- **원인 2(끝난 세션 부활)**: `login-issue.ts`가 세션 만료를 24시간으로 만들고, 30분으로 줄이는 것은 로그인 5분 뒤 첫 요청(미들웨어 갱신)뿐이었다. 로그인 직후 창을 닫으면 서버 세션이 24시간 유효 → 다음 날 옛 토큰 요청 1건에 되살아나 본인 로그인이 "사용 중"으로 막혔다. 슈퍼관리자 2경로는 처음부터 세션 시간이었다.
+- **원인 3(인증번호 창 막힘)**: `/auth/mfa/verify`는 인증번호 소비·신뢰 기기 등록 뒤 409를 돌려주는데 `LoginPage handleMfaVerify`가 409를 처리하지 않고 문구만 띄웠다. 인계 동의를 보낼 수 없고, 다시 누르면 만료, 재발송해 넣으면 또 409. 409 응답에 신뢰 기기 토큰이 없어 저장도 안 됐다. `SESSION_IN_USE` 소비처 3곳 중 이 한 곳만 누락(일반 로그인·슈퍼관리자 OTP 등록은 처리).
+- **수정**: ①`login-issue.ts` 세션 생성 만료 = 회사 `session_timeout_minutes`(없으면 30) · 조회를 세션 회전 앞으로 이동 ②`auth.ts /mfa/verify` 409 응답에 `mfaDeviceToken` 동봉(`/auth/login` 409는 무변경) ③`LoginPage.tsx` 인증번호 창이 409 `SESSION_IN_USE`를 받으면 토큰 보관(`rememberMfaDevice` · 성공 경로와 공용) → 창 닫기 → 기존 인계 창(retry `login`) → 동의 시 `doLogin`이 보관 토큰으로 인증번호 없이 통과. DDL 0.
+- **영향 확인**: 만료 판정(`middlewares/auth.ts:84`)·활동 갱신(:106)·세션 연장(`/auth/extend-session`)·"사용 중" 판정(`findLiveSession`)은 읽는 방식 무변경 · 호출부 2곳(`/auth/login`·`/mfa/verify`) 모두 이 CT 경유 · 슈퍼관리자 2경로 무관.
+- **테스트**: 신규 `utils/login-issue.test.ts` 3건 · `utils/login-mfa-takeover-contract.test.ts` 7건 · backend 전체 303파일 4,687건 통과(첫 실행에서 `__tests__/audit-action-labels.test.ts` 추출 0으로 1건 실패 → 단독 실행·전체 재실행 2회 모두 통과 · 이번 변경 파일과 무관) · backend·frontend tsc 0 · build:safe 양쪽 성공 · LoginPage 모델명·native dialog grep 0. Codex = 돈·DB 마이그레이션 경로가 아니라 대상 제외.
+- **실측 남음**: ①로그인 직후(5분 안) 창 닫기 → 회사 세션 시간 + 5분 뒤 같은 브라우저로 사이트 열고 로그인 → "사용 중" 없이 진행 · PG `user_sessions.expires_at` = 로그인 시각 + 회사 세션 시간 ②서로 다른 네트워크의 두 브라우저에서 같은 아이디: 뒤 브라우저에서 인증번호 입력 → "이미 접속 중" 창 → "기존 접속 종료하고 로그인" → 인증번호 재입력 없이 로그인 · 앞 브라우저 강제 로그아웃 ③②의 뒤 브라우저에서 로그아웃 후 재로그인 → 인증번호 묻지 않음.
+- **범위 밖(기록만)**: 미들웨어 활동 갱신이 고객사 사용자에 30분 고정(`middlewares/auth.ts:104`) → 회사 세션 시간이 30분보다 긴 회사는 서버 만료가 화면 타이머보다 먼저 온다(이번 수정 전부터 동일).
+
+### 🟠 B-0914-5 알림톡 발송: 예약·분할이 없고, 예약으로 접수돼도 큐에는 즉시 시각으로 들어간다 (🟢 배포완료 0914(Harold 보고) · 실측 대기) — 2026-09-14 접수 `cmu0zpd0z02gyjnluuclvxk9r`(박성용 P2)
 
 - **원인 2**: ①알림톡 창에 예약·분할 입력이 없고, Dashboard 발송 실행이 알림톡이면 분할을 `false`로 막고 예약은 **직접발송 패널 전역값**(`reserveEnabled`)을 실었다. 패널에서 예약을 켜 둔 채 알림톡 창으로 넘어가면 확인 창은 즉시, 서버는 예약으로 접수된다 ②워커가 계산한 수신자별 시각을 `direct-send-processor` 알림톡 행이 버리고, `insertAlimtalkQueue`(CT-04)가 `sendreq_time`을 `NOW()`로 고정했다(`reservedDate` 선언만 있음).
-- **운영 표본**: 0914 PG 조회 `send_channel='alimtalk' AND send_config.scheduled=true` = 1건(`a8cf5f94-605f-4b6f-829a-1a26b3afe474` · 예약 17:35 KST · 등록 17:29 · status completed). 실제 큐 적재 시각은 미확인.
+- **운영 실발생 1건(0914 실측 확정)**: PG `send_channel='alimtalk' AND send_config.scheduled=true` = 1건(`a8cf5f94-605f-4b6f-829a-1a26b3afe474` · company `d284960d-960a-4c67-85ec-03d0376b75ae` · 예약 17:35 KST · 등록 17:29). MySQL `SMSQ_SEND_14`(비토 라인) seqno 47238 = `msg_type K · sendreq_time 17:29:08 · mobsend_time 17:29:09 · status 1800` → **예약 캠페인이 등록 1초 뒤 즉시 발송됐다.** 화면에서 알림톡이 예약으로 접수되는 경로는 코드상 직접발송 패널 예약 값 유출뿐이다.
 - **수정**: 알림톡 창에 예약전송·분할전송(부달 설정 아래 · 값은 창이 보관 · `ScheduleTimeModal` 재사용) → 확인 창에 type·dateTime·분할값 → Dashboard 알림톡 분기가 그 값만 사용 · processor 알림톡 행 `reservedDate` · CT-04 `reservedDate` 있으면 그 시각(없으면 NOW(), 다른 호출부 3곳은 시각을 안 넘겨 불변) · 예약 문안 수정 `/:id/message`는 알림톡 캠페인·K행이면 거부 + UPDATE `msg_type NOT IN ('F','K')`.
 - **영향 없음 확인**: 예약 취소(`cancelCampaign` app_etc1 전 행 DELETE·잔존 0 검증)·수신자 삭제·`/reschedule`(전 행 시각 이동)·환불 축(message_type 동일).
 - **테스트**: `alimtalk-queue-reserved` · `direct-send-processor-alimtalk-reserved` · `alimtalk-reserve-split-contract` (backend 전체 301파일 4,677건 통과 · tsc 0 · build:safe 양쪽 성공).
 - **실측 남음**: 예약 1건 → 큐 K행 `sendreq_time`=예약 시각·100 → 도래 후 수신 / 예약 1건 취소 → 잔존 0 / 분할 3건 1건/분 → 1분 간격 / 표준 QTmsg 라인·비토 라인 각 1회(표준 라인 에이전트의 예약 보류는 서버 select_sql이라 코드로 확인 불가).
 - **범위 밖(기록만)**: 옛 `/direct-send` 알림톡 분기(`campaigns.ts` 알림톡 적재)도 시각을 싣지 않는다. 화면에서 `targetSendChannel`이 `'sms'`로만 설정돼 도달 경로 0.
 
-### 🟠 B-0914-4 주소록: 엑셀·CSV의 번호 앞 0이 빠진 채 저장되고 발송이 "수신번호 형식 오류"로 실패한다 (🟡 코드완료·배포 대기 0914 · 실측 대기) — 2026-09-14 접수 `cmu0wlphl02fxjnlucoe2mbh1`(박성용 P2)
+### 🟠 B-0914-4 주소록: 엑셀·CSV의 번호 앞 0이 빠진 채 저장되고 발송이 "수신번호 형식 오류"로 실패한다 (🟢 배포완료 0914(Harold 보고) · 실측 대기) — 2026-09-14 접수 `cmu0wlphl02fxjnlucoe2mbh1`(박성용 P2)
 
 - **원인**: 업로드 파서(`upload.ts` `raw:false`)가 CSV 원문 `01000000000`도 숫자로 읽어 0을 떨어뜨린다(로컬 실측 · XLSX 숫자 셀 동일). 직접발송·알림톡의 파일등록은 화면에서 `normalizePhoneKr`로 되살리는데, 주소록은 저장·추가·조회·다운로드 어디에서도 되살리지 않았다. 발송 적재 `normalizePhone`은 숫자만 남긴다.
 - **수정**: `routes/address-books.ts` 저장·추가(중복 판정 포함)·조회·다운로드 4곳이 CT `normalizeAgencyPhone`(숫자 10자리 `1[016789]`만 0 복원)을 쓴다. 옛 저장분은 DB UPDATE 없이 읽을 때 복원. 파서는 공용이라 무변경.

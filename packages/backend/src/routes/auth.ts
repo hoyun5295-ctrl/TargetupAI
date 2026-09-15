@@ -593,7 +593,9 @@ router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => 
       ipForBlock: req.ip || '',
       mfaDeviceToken,
     });
-    if (issue.status === 'conflict') return res.status(409).json(issue.conflict);
+    // ★ 2026-09-15 인증번호는 위에서 이미 소비됐다. 신뢰 기기 토큰을 함께 줘야 인계 동의 뒤 재시도(/auth/login)가
+    //   인증번호 없이 통과한다. 토큰이 없으면 창이 다시 인증번호를 묻고 또 409로 막히는 순환이었다(0915 hoyun).
+    if (issue.status === 'conflict') return res.status(409).json({ ...issue.conflict, mfaDeviceToken });
     if (issue.status === 'geo_blocked') return res.status(403).json({ error: issue.message });
     return res.json(issue.body);
   } catch (error) {

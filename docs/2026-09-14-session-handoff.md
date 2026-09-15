@@ -93,3 +93,42 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "DROP TABLE IF EXI
 - 우커머스 externalId·orderId 는 `{mall}:{id}` 접두(워드프레스 id 는 몰마다 겹친다) · 몰 식별자는 `normalizeWooMallId` 한 함수 · 앱 인증 state 는 서명·1회용·TTL 셋 다 · 콜백은 즉시 200 · 플러그인은 비밀 0.
 - DM 슬라이드 뷰어 높이 기준은 `100vh` 가 아니라 보이는 높이(`--dm-vh`) · 이미지 위에 아무것도 얹지 않는다.
 - AI 자동제작 돈 단위 = attemptToken + 과금 지문 · 판독비는 초안 뒤 정산(FEATURE §2-9·10).
+
+---
+
+## 6. ★ 3세션(0914 밤) 결과 · 다음 세션 착수 원장
+
+박성용 접수 2건(`cmu0wlphl02fxjnlucoe2mbh1` · `cmu0zpd0z02gyjnluuclvxk9r`). 원인·수정·영향 확인·범위 밖 = [BUGS B-0914-4·5](../status/BUGS.md)가 소유.
+
+| 축 | 결과 |
+|---|---|
+| B-0914-4 주소록 번호 앞 0 | 업로드 파서가 CSV 원문 `0100…`도 숫자로 읽어 0 소실(로컬 실측) · 주소록만 되살리는 곳이 없었다 → `routes/address-books.ts` 저장·추가(중복 판정)·조회·다운로드 4곳이 `normalizeAgencyPhone`(휴대폰 10자리만 복원) · 옛 저장분은 읽을 때 복원 · 파서·화면 무변경 · **배포완료** |
+| B-0914-5 알림톡 예약·분할 | 알림톡 창에 입력 없음 + Dashboard가 알림톡이면 분할 `false`·예약은 직접발송 패널 전역값 + processor가 알림톡 행 시각 버림 + CT-04 `sendreq_time=NOW()` 고정 → 알림톡 창 로컬 상태(부달 아래 카드 2 · `ScheduleTimeModal` 재사용) → 확인 창 → Dashboard 알림톡 분기는 확인 창 값만 · processor `reservedDate` · CT-04 시각 있으면 `?` · `/:id/message` 알림톡 거부 + `msg_type NOT IN ('F','K')` · **배포완료** |
+| 운영 실발생 1건 | PG `a8cf5f94-605f-4b6f-829a-1a26b3afe474`(예약 17:35 · 등록 17:29 · `sentTables=["SMSQ_SEND_14"]`) · MySQL seqno 47238 `K · sendreq_time 17:29:08 · mobsend_time 17:29:09 · 1800` = 예약이 즉시 발송 |
+
+검증(마지막 실행): 새 테스트 4파일 16건(RED 확인 후 GREEN) · backend 301파일 4,677건 · tsc 0(양쪽) · build:safe 둘 다 · 산출물 확인(백엔드 dist 4파일 · 프론트 `alimtalkSplitEnabled`) · 서버 배포 확인(src grep 4·1·6·2 = 로컬 동일 · 프론트 `Dashboard-CB1fZZTv.js` · restart 692 online) · harness-check 통과 · DDL 0 · Codex 미실행(규칙상 대상 = 돈·국세청·DDL, 이번 변경은 해당 없음).
+
+**다음 세션 착수 순서 (운영 검증 = Harold)**
+1. 알림톡 20분 뒤 예약 1건(본인 번호) → 아래 PG 조회로 `status=scheduled`·예약 시각 확인 → MySQL로 K행 `sendreq_time`=예약 시각·`status_code=100` → 도래 후 수신.
+2. 같은 조건 1건 예약 후 취소 → 같은 MySQL 조회 결과 0행.
+3. 3건 분할 1건/분 → `sendreq_time` 1분 간격.
+4. 1~3을 표준 QTmsg 라인 1회·비토 라인 1회(표준 라인의 예약 보류는 서버 에이전트 설정이라 이 실측이 유일한 증거).
+5. 0 빠진 CSV로 주소록 등록 → 조회 번호 `010…` → 불러오기 발송 성공 1건.
+
+▶ 실행 위치: .62 (한줄로 서버) · administrator 셸
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT id, status, scheduled_at, created_at, send_config->'sentTables' AS sent_tables, target_count FROM campaigns WHERE send_channel = 'alimtalk' AND send_config->>'scheduled' = 'true' ORDER BY created_at DESC LIMIT 3;"
+```
+
+▶ 실행 위치: .62 (한줄로 서버) · administrator 셸 (비밀번호 프롬프트 입력 · `<N>`·`<캠페인 id>`는 위 조회 결과)
+```bash
+docker exec -it targetup-mysql mysql -usmsuser -p smsdb -e "SELECT seqno, msg_type, sendreq_time, mobsend_time, status_code FROM SMSQ_SEND_<N> WHERE app_etc1 = '<캠페인 id>';"
+```
+
+**⛔ 이번 3세션에서 확정된 규칙**
+- 알림톡 예약·분할 값은 `AlimtalkSendModal`이 소유한다. Dashboard 전역 `reserveEnabled`·`splitEnabled`를 알림톡 발송에 쓰지 않는다(계약 = `alimtalk-reserve-split-contract.test.ts`).
+- 큐 적재 CT가 시각 필드를 받으면 SQL도 그 필드를 읽는다(`insertAlimtalkQueue`·`insertBrandQueue` 같은 형태 · `alimtalk-queue-reserved.test.ts`).
+- 예약 문안 수정은 브랜드(F)·알림톡(K) 행을 덮지 않는다.
+- 주소록 번호 복원 = `routes/address-books.ts` 한 파일. 업로드 파서(`upload.ts`)는 공용이라 손대지 않는다.
+
+**범위 밖 기록(착수 판단 = Harold)**: 옛 `/direct-send` 알림톡 분기 시각 미적재(화면 도달 0) · 한줄전단 주소록(`/api/flyer/address-books`) 동일 결함 여부 · 예약 분할의 21시 이월 규칙(`calcSplitSendTime`)을 알림톡(정보성)에도 그대로 적용 중.

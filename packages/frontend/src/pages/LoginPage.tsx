@@ -90,11 +90,15 @@ export default function LoginPage() {
    * 로그인 성공 처리 — 일반 로그인과 MFA 통과가 같은 것을 쓴다.
    * 두 벌이 되면 한쪽만 고쳐지는 날이 온다(비밀번호 변경·에이전트 랜딩·카페24 복귀 분기가 조용히 갈린다).
    */
+  /** 이 기기를 24시간 신뢰 — 다음 로그인 때 인증번호를 묻지 않는다. 로그인 성공과 인계 분기가 같은 것을 쓴다 */
+  const rememberMfaDevice = (deviceToken?: string) => {
+    if (deviceToken) localStorage.setItem('mfaDeviceToken', deviceToken);
+  };
+
   const applyLoginSuccess = (data: any) => {
     const { token, user, sessionTimeoutMinutes, mfaDeviceToken } = data;
     localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || 30));
-    // 이 기기를 24시간 신뢰 — 다음 로그인 때 인증번호를 묻지 않는다
-    if (mfaDeviceToken) localStorage.setItem('mfaDeviceToken', mfaDeviceToken);
+    rememberMfaDevice(mfaDeviceToken);
 
     if (user.mustChangePassword) {
       setTempUser(user);
@@ -218,6 +222,17 @@ export default function LoginPage() {
       });
       const data = await res.json().catch(() => ({} as any));
       if (!res.ok) {
+        // ★ 2026-09-15 인증은 통과했는데 같은 아이디가 접속 중이다. 인증번호는 서버에서 이미 소비돼
+        //   이 창에 머물면 빠져나갈 길이 없다 → 신뢰 기기 토큰을 보관하고 일반 로그인과 같은 인계 창으로 넘긴다
+        //   (동의하면 doLogin 재시도가 보관한 토큰으로 인증번호 없이 통과한다)
+        if (res.status === 409 && data?.code === 'SESSION_IN_USE') {
+          rememberMfaDevice(data.mfaDeviceToken);
+          setMfa(null);
+          setMfaCode('');
+          setMfaResendMsg('');
+          setTakeover({ ticket: data.takeoverTicket, session: data.activeSession, retry: 'login' });
+          return;
+        }
         // 티켓이 죽었거나 계정이 잠겼으면 처음부터 다시 — 입력창을 닫고 사유를 로그인 화면에 남긴다
         if (data?.code === 'MFA_TICKET_INVALID' || data?.code === 'ACCOUNT_LOCKED') {
           setMfa(null);

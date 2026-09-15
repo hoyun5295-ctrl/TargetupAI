@@ -49,13 +49,24 @@ export async function issueUserLogin(params: {
 
   const token = generateToken(payload);
 
+  // ★ 2026-09-15 서버 세션 만료 = 처음부터 회사 세션 시간(화면 타이머와 같은 값). 슈퍼관리자 경로와 같은 규칙.
+  //   종전 24시간은 "로그인 5분 뒤 첫 요청"(미들웨어 갱신)이 와야 30분으로 줄었다. 로그인 직후 창을 닫으면
+  //   세션이 하루 살아 있다가 다음 날 옛 토큰 요청 1건에 되살아나 본인 로그인을 "사용 중"으로 막았다(0915 hoyun).
+  //   ⛔ 이 조회를 세션 회전 뒤로 옮기지 말 것. 만료 값이 회전의 입력이다.
+  const timeoutResult = await query(
+    'SELECT session_timeout_minutes, kakao_enabled FROM companies WHERE id = $1',
+    [user.company_id]
+  );
+  const sessionTimeoutMinutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
+  const kakaoEnabled = timeoutResult.rows[0]?.kakao_enabled || false;
+
   const rotate = await rotateUserSession({
     sessionId,
     userId: user.id,
     token,
     appSource,
     req,
-    expiresInMinutes: 24 * 60, // 24시간
+    expiresInMinutes: sessionTimeoutMinutes,
     takeoverTicket,
     companyId: user.company_id,   // 회사 범위 예외 판정 입력
   });
@@ -104,14 +115,6 @@ export async function issueUserLogin(params: {
     'UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1',
     [user.id]
   );
-
-  // 세션 타임아웃 조회
-  const timeoutResult = await query(
-    'SELECT session_timeout_minutes, kakao_enabled FROM companies WHERE id = $1',
-    [user.company_id]
-  );
-  const sessionTimeoutMinutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
-  const kakaoEnabled = timeoutResult.rows[0]?.kakao_enabled || false;
 
   return {
     status: 'ok',

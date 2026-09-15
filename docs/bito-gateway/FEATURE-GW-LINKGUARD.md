@@ -205,3 +205,15 @@ docker exec bito-bench-postgres psql -U bito -d bito_gateway -c "SELECT created_
 | 오후 | A2 시험 경로 확정 | 시험 수신번호 = Harold 지정 1개(끝 4자리 8517 · 원문은 서버 ENV 에만) · 발송 = 한줄로 시험 계정 `hoyun` 의 라인그룹을 `한줄로03`(= Agent `hanjul03`)으로 설정해 보낸다 | Harold 지정 |
 
 (A4 이후 미실측 — 인계 §2-4 표대로 채운다. **가동 중 관제 단절 = 캐시 차단 유지** 와 **단절 상태 재시작 = `ready=false` 미검사 bypass** 를 따로 적는다. external3 는 내장 검사와 기능상 중복이며 시험 성공은 운영 검사 교체 필요를 뜻하지 않는다.)
+
+### 9-5. external4 설치 관통 시험 (★2026-09-14 · 게이트웨이 연결·ENV·코드 변경 없음 · 첫 판 중단 → r1 통과·제거)
+
+> 시험 순서·명령 = [2026-09-14 게이트웨이 인계](../2026-09-14-gateway-session-handoff.md) §10 · 링크가드 전달 = `projects/linkguard/docs/handoff/2026-09-14-bito-external4-install-test-result.md`(첫 판) · `2026-09-14-bito-external4-r1-install-test-result.md`(r1). 모든 값은 Harold .65·로컬 실행 출력.
+
+| 항목 | 결과 |
+|---|---|
+| 범위(Harold) | 게이트웨이↔Agent 호출 계약이 external3 와 같아 **설치 스크립트가 실제 서버에서 끝까지 도는지**만 본다. 게이트웨이 연결·재기동·실발송 없음 |
+| 첫 판 ZIP `98e3009d…` | 한글 이름 항목 2개(안내 PDF·시작 안내)가 UTF-8 이름 표시 없이 들어가 `python3 -m zipfile` 해제에서 이름이 깨짐 → `SHA256SUMS` 대조 2건 실패 → `install-agent.sh` 첫 단계(19행)에서 멈출 구조 → **설치 전 중단·원복·결함 전달**(링크가드 쪽 확인 = 로컬·중앙 헤더 flags 0 · 만든 쪽 검수가 UTF-8 강제 읽기로 가렸다) |
+| r1 ZIP `99e1c842…` | 파일명 ASCII · 같은 해제로 대조 5/5 OK → `INSTALL_READY` · 서비스 `User/Group=linkguard` · `MemoryMax=512M`·`CPUQuota=100%`·`TasksMax=128` · 호출 토큰 사본 `/etc/linkguard-caller/caller.token`(발송 계정 `ubuntu` 400 · Agent 사본과 동일 · `ubuntu` 는 `/etc/linkguard` 못 읽음) · 8471 = 127.0.0.1 만 · 가동 중 `sync-once` 잠금 거절(종료 1) · `ubuntu` 로 `/check` 200 `pass` · 인증 없음 401 · 단절 상태 재시작 = `ready=false`·**`credential_scope_unconfirmed`**(external3 의 `customer_policy_unavailable` 표기 정정 확인) · 자격 「차단 사용」 끔 `sync-once` **종료 4** · README 제거 절차 뒤 잔존 0 · 게이트웨이 가동 시각 불변 |
+| 게이트웨이 호환(소스 대조 · 미실측) | `/check` 응답 키 5개 external3 와 동일(`local_http.go:24-32`) · 새 사유는 `urlGuardExternalReasonPattern`(`^[a-z_]{1,40}$` · `urlguard_external.go:47`) 통과 · `GW_LINKGUARD_EXTERNAL_CALLER_TOKEN_FILE` 은 권한 검사 없이 읽고 공백 제거(`cmd/gateway/main.go:845-851`) → 발송 계정을 `ubuntu` 로 설치하면 §2-1 의 ENV 원문 우회 없이 파일로 연결 가능 |
+| 남은 것 | 관제 시험 자격 `lg-6d18c5ab15fc783e`(`bito-external4-install` · 토큰 회전 재사용) 회수 확인 · 게이트웨이 연결 실시험은 Harold 지시 때만 · 운영 관제 발급 창의 토큰 평문 설정 조각은 여전(관제 미갱신) |
