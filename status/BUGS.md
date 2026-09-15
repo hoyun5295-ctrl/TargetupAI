@@ -55,7 +55,18 @@
 
 ## 2) 활성 버그
 
-### 🟠 B-0915-1 로그인: 24시간 안에 인증번호를 다시 묻고, 인증 뒤 "이 아이디로 지금 다른 곳에서 사용 중입니다"에 막혀 들어갈 수 없다 (🟡 코드 수정 완료 · 배포 대기) — 2026-09-15 Harold 직접 접수(hoyun)
+### 🟠 B-0915-2 AI 자동제작 DM·이메일: CTA 버튼·라벨 글자가 흰색이라 제작이 안 된 것처럼 보인다 (🟡 코드 수정 완료 · 배포 대기) — 2026-09-15 임은지 접수 `cmu27bvxq02srjnluxi30j3a1`
+
+- **실측(0915 운영 PG · Harold)**: `주식회사 인비토` `companies.brand_kit.primary_color = #ffffff` · 같은 날 `[AI 자동제작]` DM 초안 2건(13:25·13:50) `dm_pages.brand_kit.primary_color = #ffffff` · 13:50 초안 CTA 2섹션(`so-v3-cta-event2-cta`·`so-v3-cta-final-cta` · bar)에 `buttons[].color = #ffffff`(13:25 초안 0 · 둘 다 13:55 수정 · 버전 기록 0) · `email_campaigns.design` = jsonb.
+- **원인**: AI 자동제작(`campaign-quick.ts`)이 회사 킷 주색을 보정 없이 DM 초안 `brand_kit`과 이메일 렌더에 실었다. DM CTA 바는 글자 `#fff` 고정(`dm-section-renderer.ts:552-554`) · 이메일 bar는 흰 버튼에 글자 = 주색(`email-section-renderer.ts:304`·`:331-333`). 흰색 보정 `accessiblePrimaryOf`는 AI 영업 조립 두 곳(`sales-outreach-produce.ts:2386`·`:2836`)에만 있었다. 이메일은 미리보기·발송이 회사 킷 + `design`으로 다시 렌더한다(`routes/email.ts:1121-1129` · `email-channel.ts:373`·`:411` · 우선순위 `email-tokens.ts:236`).
+- **13:50 초안 버튼 색 `#ffffff`**: 버튼 색을 쓰는 코드는 편집기 입력(`CtaEditor.tsx:69`) 1곳뿐이다(프론트·백엔드 grep). 편집 중 입력값이라 코드 결함이 아니다.
+- **수정**: `readableCustomerBrandKit`(주색 = `accessiblePrimaryOf || #1f2937` · 회사 킷 원장 무변경)을 새 경로 DM·이메일(`campaign-quick.ts:803`)과 옛 재료 경로 DM(`:294`)에 적용 · 이메일 캠페인 `design.palette.primary`에 같은 값 저장. 파일 = `campaign-quick.ts` 1 + 테스트 6(`ai-auto-build-quick.test.ts` · 실패 5 확인 후 구현). 백엔드 tsc 0 · 전체 304파일 4,708 · 프론트·DDL·크레딧 0 · Codex 대상 제외(돈·DDL 경로 아님).
+- **남는 것**: 기존 초안 2건은 저장값이라 흰색 그대로다(직원 재생성 · 운영 DB 직접 수정 없음). 인비토 회사 킷 자체의 흰색도 그대로다(브랜드 학습 화면에서 바꿀지는 Harold 판단). 같은 패턴 범위 밖 = [FEATURE-AI-AUTO-BUILD §7](../docs/FEATURE-AI-AUTO-BUILD.md). 첫 텍스트 카드 빈 본문·AI 영업 대비 품질 격차는 별개 축(설계 진행 중).
+- **배포 뒤 실측**: 흰 킷 회사로 AI 자동제작 DM 1건 → `dm_pages.brand_kit->>'primary_color' = '#1f2937'` · 이메일 1건 → `email_campaigns.design->'palette'->>'primary' = '#1f2937'` · 편집기·미리보기에서 CTA 글자가 보인다.
+
+### 🟠 B-0915-1 로그인: 24시간 안에 인증번호를 다시 묻고, 인증 뒤 "이 아이디로 지금 다른 곳에서 사용 중입니다"에 막혀 들어갈 수 없다 (🟢 배포완료 0915 10:01 · restart 693 · Harold 확인: 백엔드 기동 10:01:14 > `login-issue.js` 빌드 10:00:10 · 실측 대기) — 2026-09-15 Harold 직접 접수(hoyun)
+
+- **배포 직후 "로그인에 실패했습니다" 1회(0915 Harold)**: 서버 로그·감사 기록에 그 시도가 없다(10:00:21 다음 로그인 요청 = 10:01:47 · 백엔드 재기동 10:01:14) → 재기동 창에 요청이 서버에 닿지 않은 것으로 판정. 같은 시간대 고객사 로그인은 정상(soongsil·bhappy4·toun28 등 성공 · 409→200 인계 정상). 화면 문구는 응답에 오류 문구가 없을 때의 기본값이다(`LoginPage.tsx` 오류 폴백).
 
 - **실측(0915 운영 PG)**: 09-14 13:57 KST `mfa_success`(115.138.27.202) 뒤 같은 날 로그인 4회는 인증 면제. 09-14 21:54 로그인은 `/dashboard` page_view 1건 뒤 로그아웃 없음. 09-15 09:30:11 180.226.236.94에서 어제 토큰으로 `/login` page_view → 그 세션 `last_activity_at`이 같은 시각으로 갱신 → 4초 뒤 `mfa_challenge` → `mfa_success`·`login_session_conflict` 3회 반복.
 - **원인 1(재인증)**: 신뢰 기기 판정 = 토큰·IP 앞 두 자리·UA 모두 일치(`mfa.ts isTrustedDevice`). IP 대역이 115.138 → 180.226으로 바뀌었다. 방지계획서 §7 "IP 대역 변경 시 다중 인증 재수행"대로의 동작이라 고치지 않는다.

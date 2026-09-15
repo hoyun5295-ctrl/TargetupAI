@@ -1258,7 +1258,7 @@ function fillCta(buttons: unknown, media: OutreachFillMedia, maxLabel: number, u
   return out;
 }
 
-function toProductItems(ps: OutreachProduct[]) {
+export function toProductItems(ps: OutreachProduct[]) {
   return ps.map((x) => ({
     image_url: x.image_url, name: x.name, price: x.price || 0,
     // 할인가는 정가보다 낮을 때만(같으면 같은 가격이 두 번 찍힌다 · 이니스프리 첫 실측)
@@ -1429,6 +1429,12 @@ export function fillOutreachDmMedia(
   return { sections: out.map((s, i) => ({ ...s, order: i })), filled };
 }
 
+/** 상품 가격 줄(순수) · 할인가가 정가보다 낮을 때만 "할인가 · 정가 …" · 가격은 코드가 싣는다(AI 미경유) · 아웃리치 채우기와 고객 채우기가 같이 쓴다 */
+export function productPriceLine(p: { price: number | null; discount_price: number | null }): string {
+  const fmt = (n: number | null | undefined) => (typeof n === 'number' && n > 0 ? `${Math.round(n).toLocaleString('ko-KR')}원` : '');
+  return p.discount_price && p.price && p.discount_price < p.price ? `${fmt(p.discount_price)} · 정가 ${fmt(p.price)}` : fmt(p.price);
+}
+
 // ===== ★ 2026-09-06 v3 아웃리치 DM 채우기(entry outreach · 설계서 §7 블록 표준 13행 · 불변 35) =====
 
 /** 섹션 상한(증거 카드 포함) · 절단 순서 = 증거 카드(insertProofCard 가 스스로 건너뛴다) → 둘째 상품 묶음 → 둘째 행사 카드(+cta) → 모델 text_card */
@@ -1449,7 +1455,7 @@ const CARD_BENEFIT_TOKEN_RE = /~?\s*\d[\d,.]*\s*(?:%|원|만원|천원|퍼센트
 const CARD_DATE_TOKEN_RE = /(?:\d{1,2}\s*[./]\s*\d{1,2}|\d{1,2}월\s*\d{1,2}일)(?:\s*\([월화수목금토일]\))?(?:\s*[~\-–]\s*(?:\d{1,2}\s*[./]\s*\d{1,2}|\d{1,2}월\s*\d{1,2}일)(?:\s*\([월화수목금토일]\))?)?|\([월화수목금토일]\)/g;
 
 /** 낱말 경계에서 자른다(n자 안에서 마지막 공백 · 공백이 앞 절반 안에 없으면 그냥 자른다) */
-function cutAtWord(s: string, n: number): string {
+export function cutAtWord(s: string, n: number): string {
   const t = String(s || '').trim();
   if (t.length <= n) return t;
   const cut = t.slice(0, n);
@@ -1457,7 +1463,7 @@ function cutAtWord(s: string, n: number): string {
   return (sp >= Math.floor(n / 2) ? cut.slice(0, sp) : cut).replace(/[\s~·\-–:,]+$/g, '').trim();
 }
 
-export function headlineFromCard(card: { title: string } | null | undefined, licensed: boolean): { headline: string; demoted: boolean } {
+export function headlineFromCard(card: { title: string } | null | undefined, licensed: boolean, minLen = 6): { headline: string; demoted: boolean } {
   // 날짜 조각은 면허와 무관하게 제목이 아니다(기간은 sub_copy·body 가 따로 든다)
   const raw = String(card?.title || '').replace(CARD_DATE_TOKEN_RE, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
   if (!raw || !/[가-힣A-Za-z]{2,}/.test(raw)) return { headline: '', demoted: true };
@@ -1465,7 +1471,7 @@ export function headlineFromCard(card: { title: string } | null | undefined, lic
   // ★ 2026-09-09(6) 수치를 걷어낸 뒤 비어 버린 괄호("<3+1>" → "< >")는 찌꺼기다 → 통째로 뺀다(톤28 실측 "오늘핫딜 < > 지성두피")
   const base = raw.replace(CARD_BENEFIT_TOKEN_RE, ' ').replace(/[<(\[［（【]\s*[>)\]］）】]/g, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
   const head = cutAtWord(base, 18);
-  if (head.length < 6 || !/[가-힣A-Za-z]{2,}/.test(head)) return { headline: '', demoted: true };
+  if (head.length < minLen || !/[가-힣A-Za-z]{2,}/.test(head)) return { headline: '', demoted: true };
   return { headline: head, demoted: false };
 }
 
@@ -1582,10 +1588,7 @@ function fillOutreachDmMediaV3(sections: readonly Section[], media: OutreachFill
     usedCta.add(url);
     return mk('cta', { buttons: [{ label: label.slice(0, maxLabel), url, style: 'primary' }] }, tagId);
   };
-  const priceLine = (p: OutreachProduct): string => {
-    const fmt = (n: number | null | undefined) => (typeof n === 'number' && n > 0 ? `${Math.round(n).toLocaleString('ko-KR')}원` : '');
-    return p.discount_price && p.price && p.discount_price < p.price ? `${fmt(p.discount_price)} · 정가 ${fmt(p.price)}` : fmt(p.price);
-  };
+  const priceLine = (p: OutreachProduct): string => productPriceLine(p);
   /** 행사 카드 → text_card(이미지 위 · 제목 · 기간) · 제목을 못 만들면 null(설명 없는 이미지 0) */
   const eventCardSection = (card: EngineEventCard, tagId: string): Section | null => {
     const h = headlineFromCard(card, card.licensed);
@@ -1974,7 +1977,7 @@ export interface DmFeaturesResult { sections: Section[]; applied: string[]; remo
 
 /** ON 인데 채우기가 만들지 못한 타입의 사유(화면 노출 문구 · 고객 언어 · 내부 용어 0) */
 const FEATURE_SKIP_REASON: Record<string, string> = {
-  product_carousel: '이미지가 있는 상품이 2개 이상 있어야 상품 카드를 넣을 수 있어요.',
+  product_carousel: '이미지가 있는 상품이 있어야 상품 카드를 넣을 수 있어요.',
   gallery: '첫 화면 사진 외에 사진이 더 있어야 갤러리를 넣을 수 있어요.',
   countdown: '행사 종료일이 있어야 카운트다운을 넣을 수 있어요.',
 };
@@ -1983,7 +1986,7 @@ const FEATURE_SKIP_REASON: Record<string, string> = {
  * 기능 칩 후처리 — 채우기(fill) **뒤**, 차단(sanitize) **앞**에서 돈다(엔진 순서). 사용자가 고른 값을 프롬프트 힌트가 아니라 코드가 지킨다.
  *  - features === null/undefined → 입력 그대로(아웃리치·옛 호출 회귀 0).
  *  - OFF(허용 4종 중 목록에 없는 타입) → 그 타입 섹션 전부 제거.
- *  - ON → 이미 있으면 유지(채우기가 상품 2개 이상·카드 잔여 이미지·미래 종료일을 데이터로 이미 만든다). 없으면 **쿠폰만** 삽입:
+ *  - ON → 이미 있으면 유지(채우기가 상품·카드 잔여 이미지·미래 종료일을 데이터로 이미 만든다 · 고객 채우기는 상품 1개부터 슬라이드). 없으면 **쿠폰만** 삽입:
  *    discount_label = 면허 문구(licensedQuote)에서 혜택 토큰이 든 첫 구절 원문(카피 생성 0 · 차단기 통과) · 자리 = 마지막 CTA 앞(없으면 footer 앞) · 상한 OUTREACH_SECTION_MAX.
  *    캐러셀·갤러리·카운트다운은 채우기 규칙 밖에서 만들지 않는다(같은 섹션을 두 곳이 만들면 규칙이 둘이 된다) → skipped 에 사유(화면 "미반영" 목록).
  *  - 허용 4종 밖 타입(header·roulette 등)은 무시한다(죽은 컨트롤 금지 · 칩은 4종뿐).
@@ -2489,7 +2492,10 @@ export interface BrandEmailResult {
   features: EngineFeaturesResult;
 }
 
-export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>): Promise<BrandEmailResult> {
+/** ★ 2026-09-15 고객 입구(AI 자동제작) 채우기 주입 · 없으면 현행 채우기 그대로(아웃리치·옛 재료 경로 무변경) */
+export interface BrandEmailImpl { fill?: (sections: readonly Section[], channel: 'EMAIL') => { sections: Section[]; filled: number } }
+
+export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>, impl?: BrandEmailImpl): Promise<BrandEmailResult> {
   const media = applyOutreachMediaSelection(input.media, input.mediaSelection || null);
   const products = media?.products || [];
   const gallery: OutreachFillImage[] = (media?.gallery || []).map((g) => ({ url: g.url, width: g.width, height: g.height, ...(g.alt ? { alt: g.alt } : {}) }));
@@ -2529,7 +2535,7 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
   const emailPrompt = buildEmailSectionsPrompt(genInput, exemplarSource);
   // ★ v3 아웃리치 브랜드 이메일도 gallery 0(설명 없는 이미지 블록 0 · 불변 35) · 고객 입구 이메일은 현행 유지
   const gen = await generateSections(emailPrompt, input.entry === 'outreach' ? OUTREACH_EMAIL_TYPES.filter((t) => t !== 'gallery') : OUTREACH_EMAIL_TYPES, 'sales-outreach-email-sections', 'so-brand');
-  const filled = fillOutreachDmMedia(gen.sections, {
+  const filled = impl?.fill ? impl.fill(gen.sections, 'EMAIL') : fillOutreachDmMedia(gen.sections, {
     posterUrl: input.posterUrl, posterSize: input.posterSize || null, bannerUrl: input.bannerUrl || null, bannerSize: input.bannerSize || null, logoUrl: media?.logo?.url || null, gallery, products, ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl, legal: input.legal, companyName: input.companyName,
     posterCaption: input.posterCaption || null, licensedQuote: input.licensedQuote, eventCards: input.eventCards || null,
   }, 'EMAIL', input.entry);

@@ -48,6 +48,7 @@
 | 순수 코어(백) | `utils/ai-auto-build-materials.ts` | 재료 계약 v1 정규화 · 이미지 역할 판정 · 최소 재료 게이트 · 견적 지문/과금 지문/멱등키 · `AiAutoBuildError`·응답 매핑 · 상품 병합(`resolveBuildProducts`) · `isBuildMallProvider`(cafe24·naver·`woocommerce:{mall}`) · `aiAutoBuildEnabled` |
 | 오케스트레이터(백) | `utils/campaign-quick.ts` | `generateFromBuildMaterials`(BuildDeps 주입 · `defaultBuildDeps`) · `quoteBuildMaterials`·`quoteFromBuildMaterials` · `prepareBuildMaterials` · 판독 캐시(settled/readKey) · 몰 재조회 `lookupMallProductsByNo`(카페24 상품번호 · 우커머스 Store API include) |
 | 엔진 접점(백) | `utils/campaign-engine.ts` · `utils/sales-outreach-produce.ts` · `utils/event-brief.ts` | `EngineOptions.features` · `applyDmFeatures`(DM/EMAIL · OFF 제거 · ON 유지 또는 쿠폰만 삽입 · `firstBenefitPhrase`) |
+| 고객 채우기(백) ★0915 | `utils/campaign-customer-fill.ts` | `fillCustomerStandard`(사용자 카드 제목·본문 줄·사진·자기 링크 · 몰 상품이 먼저 자리를 잡는다 · 모델 조각은 히어로 문구 폴백과 마무리 카드 1장만 · 상한 15) · `customerEngineDeps`(채우기만 고객 규칙 · 생성·칩·차단·정리·룩은 아웃리치 묶음 그대로) · `customerFillNotes`(결과 바 사유) · `keepLastCtaBar`(이메일 띠 1개) · `licensedPreheaderOf`. 옛 재료 경로(`generateDmFromMaterials`)는 V3 그대로 |
 | 라우트(백) | `routes/dm.ts` · `routes/email.ts` · `routes/event-campaigns.ts` | materials v1 분기(v0 앞) · ENV 403 · 회사 in-flight 409(`utils/inflight-lock.ts`) · 오류 매핑 · `POST /materials/quote` v1 · GET 견적 `auto_build_enabled` |
 | 몰 접점(백) | `utils/cafe24-client.ts fetchCafe24ProductsByNoRaw` · `utils/mall-product-normalize.ts`(카페24·우커머스 가용성·정규화) | 상품번호 재조회 · 품절/미전시 사유 |
 | 화면(프) | `pages/QuickCampaignPage.tsx`(승격) · `pages/QuickCampaignLegacyPage.tsx`(v0 · ENV 미개방 회사) · `components/ai-build/{BuildCardsInput,FeatureChips,ProductPickList,BuildResultBar,AiBuildEntryStrip}.tsx` · `utils/ai-build.ts`(화면 CT) · `constants/credit.ts AI_GENERATE_COSTS` | 1열 폼 → 서버 견적 sticky 바 → `CreditConfirmModal` → 편집기 착지(`sessionStorage` 결과 전달 · 이메일 `?edit=`) · 카드띠·링크 1줄·"직접 제작" 개명 |
@@ -66,7 +67,9 @@
 ## §5 운영 · 실측 (배포 뒤 · 미실행)
 
 배포 = 2026-09-14(frontend dist "AI 자동제작" 1 · restart 687) · ENV = 디버깅테스트(`a0990249-3550-4baa-92ca-32e45b185e83`) · 카페24 `hanjulai` 재인증 active.
-**실측 5건(설계서 §14-4 · 전부 미실행 · Harold 뒤로 미룸)**: ①로고가 첫 화면에 오지 않음(배지 "로고 추정") ②상품 카드 가격 = 몰 값 · 링크 버튼 ③[다시 만들기]·뒤로가기 재클릭 = 새 토큰 = 원장 새 행(`ai_credit_transactions` `quick:%`) ④20자 + 이미지 0 = 안내 + 버튼 비활성 ⑤이메일 광고 체크 → `?edit=` 착지 · `email_campaigns` draft(`ai_generated`·`is_ad`). 하나라도 어긋나면 ENV 비우고 reload.
+**★0915 ENV = `*`(전 회사 · Harold 적용 · 직원 노출 확인) · 요금제 미가입 회사는 AI Operator 공통 안내 창·기능 화면 입구(`PlanGate`)가 먼저 받는다([D90](../status/DECISIONS.md))** · 0915 오전 운영 차감 원장은 전부 옛 키(`quick:{초안id}` · 옛 원클릭 화면)였고 새 키 행은 아직 0.
+**실측 5건(설계서 §14-4 · 전부 미실행 · Harold 뒤로 미룸)**: ①로고가 첫 화면에 오지 않음(배지 "로고 추정") ②상품 카드 가격 = 몰 값 · 링크 버튼 ③[다시 만들기]·뒤로가기 재클릭 = 새 토큰 = 원장 새 행(`ai_credit_transactions` `quick:%`) ④20자 + 이미지 0 = 안내 + 버튼 비활성 ⑤이메일 광고 체크 → `?edit=` 착지 · `email_campaigns` draft(`ai_generated`·`is_ad`). ~~하나라도 어긋나면 ENV 비우고 reload~~(1회사 시절 규칙 · 폐기).
+**★0915 이 5건은 §7대로 직원 테스트로 대체한다. ENV가 `*`라 ENV를 비우면 전 회사에서 기능이 내려간다. 어긋남이 나오면 ENV는 건드리지 않고 Harold 판단을 받는다.**
 **T0 ③(카페24 `product_no` 콤마 목록 조회)은 실측 ②가 겸한다.**
 
 ---
@@ -79,15 +82,23 @@
 - **설계서 정정(코드 실측)**: 1200×1600은 히어로 후보 아님(0.8 하한) · 쿠폰은 인터랙션 타입이 아니라 "발행 120" 고지 없음 · 고객 카드 `endDate`는 항상 null이라 본문 날짜 파서로 · 이메일 경로는 엔진을 안 타서 같은 자리에 후처리 별도 부착.
 - **2026-09-14(2) 우커머스 접점 합류**: 상품 provider `woocommerce:{mall}`을 몰 상품으로 인정 · Store API 재조회(품절 = 제외 + 사유). 상세 = [우커머스 설계서 §5 W5](2026-09-14-woocommerce-integration-design.md).
 - **2026-09-15 전 회사 개방**(Harold "크레딧 차감만 제대로 체크하고 다 오픈 · 직원 테스트"): `aiAutoBuildEnabled`에 `*` = 전 회사(회사 없는 요청은 여전히 false) · 테스트 +1. 차감 경로 코드 점검 = 판정 → `checkCredit` → 조립 → 초안 → 차감(키 `quick:{company}:{channel}:{token}:{billing16}` 102자 · varchar 150 안) · 같은 재료 재시도 duplicate · 크레딧제 미적용 = 견적 0·원장 `not_applicable` · 조립 엔진 AI 호출 source(`sales-outreach-*`·`campaign-materials-dm-sections`·`dm-event-brief`)는 단가표 미등록 = 자체 차감 0이라 이중 차감 없음 · 판독만 `runInCreditBundle`로 자체 차감을 끄고 초안 뒤 `quick-read:` 키로 정산. 요금제 노출은 [D90](../status/DECISIONS.md)(AI Operator 공통 안내 창)을 따른다.
+- **2026-09-15 흰 CTA 정정**([B-0915-2](../status/BUGS.md) · 임은지 접수): 회사 브랜드 킷 주색 `#ffffff`(주식회사 인비토 실측)가 DM 초안 `brand_kit`과 이메일 렌더에 그대로 실려, DM CTA 바(글자 `#fff` 고정)와 이메일 반전 버튼(글자 = 주색)이 흰 바탕 흰 글자가 됐다. 산출물에만 AI 영업과 같은 규칙(`accessiblePrimaryOf` · 못 쓰면 `#1f2937`)으로 보정한다(`readableCustomerBrandKit` · 새 경로 DM·이메일 + 옛 재료 경로 DM). 이메일은 미리보기·발송이 회사 킷으로 다시 렌더하므로 캠페인 `design.palette.primary`에 같은 값을 저장한다. 회사 킷 원장 무변경 · 기존 초안은 저장값이라 다시 만들어야 한다 · 테스트 +6(백엔드 304파일 4,708).
+- **2026-09-15 품질 설계 · 고객 채우기 분리**(Harold "재료를 떠먹여 주는데 왜 퀄리티가 저 모양이냐 · 설계 제대로 해서 구현까지"): 원인 = 재료 부족이 아니라 고객 입구가 아웃리치 채우기(V3 · 크롤 재료 전제)를 `groupGallery` 분기로 빌려 써서 사용자 재료를 버렸다(카드3 미적재 · 수치 한 줄에 본문 전체 삭제 · 6자 미만 제목 강등 · 남의 카드 링크 · 히어로 사진 중복 · 빈 모델 카드 · 상품 1·5·7+개 누락). 설계 = 읽기 전용 현황 4축 → 설계안 3(표준 조립 재사용 · 위험 최소 · 품질 우선) → 심사 수렴. 구현 = `campaign-customer-fill.ts`(§3) 를 엔진 `deps.fill`·이메일 `impl.fill` 로 주입 · 업종 아트디렉션(회사 저장값 우선) · 회사 서빙 경로 로고만 헤더 · 이메일 CTA 띠 마지막 1개 · 프리헤더(면허 거른 값)·아트디렉션을 `design` 에 저장(렌더·저장 동일) · 결과 바 사유 문장(`materialsMeta.notes`). 엔진·AI 호출 수·크레딧 키·DDL·아웃리치 채우기·옛 재료 경로 무변경. **뺀 것(Harold 결정 대상 · §7)**: 초안 캡처 채점 루프 · 서버 타이포 포스터.
+  적대 검토 1라운드 실제 결함 5건을 뿌리 하나(채우기가 차단기 판정을 모르고 구조를 먼저 정함)로 묶어 고쳤다 = 채우기가 `survivesSanitize`(차단기와 같은 판정)로 부제·본문 카드·카드 생략을 정한다 · 상품 1개도 상품 슬라이드(가격이 문안 차단기를 안 거친다) · 상한 = `OUTREACH_SECTION_MAX - 1`(쿠폰 칩 자리) · 빠진 카드엔 링크 문장 0 · 뺀 사진 수 문장. 테스트 +30(백엔드 305파일 4,738 · 새 재현 테스트는 수정과 같은 차례에 작성 · 결함 재현 근거 = 검토 반박 검증). `survivesSanitize`는 2라운드에서 대체(아래).
+  적대 검토 2라운드(1라운드 수정 줄만 · 반박 검증 6건 모두 재현 · critical·high 0): 1라운드 B(태그만 남는 카드)가 카드2·3에 남았다 = 줄마다 따로 짐작한 판정이 필드 전체 판정·짧은 필드 통째 비움·'할인' 같은 낱말을 놓쳤다(같은 뿌리 두 번째). 짐작을 지우고 채우기가 후보 섹션 하나에 엔진 차단기(`sanitizeDmCopyBenefits`)를 그 자리에서 돌려 본 결과로 부제·카드1 본문 카드·카드2·3 생략을 정한다(결과에는 원문 · 제거·계측은 엔진 차단기 그대로). 상품 1개 슬라이드가 칩을 고르면 지워지던 것 = 화면 칩 조건(`featureAvailability`)과 서버 미반영 사유를 상품 1개 이상으로 맞춤. 사유 문장의 상품 수 = 실제 채우기 결과와 대조(상한 절단으로 빠진 둘째 묶음 포함). 테스트 +4(RED 4건 확인 뒤 수정 · 백엔드 305파일 4,741).
+
 
 ---
 
 ## §7 남은 것 · 범위 밖(착수 판단 = Harold)
 
-- **§5 실측 5건** — ★0915 전 회사 개방 뒤 직원 테스트로 대신한다. 차감 확인 조회 = `ai_credit_transactions`에서 `idempotency_key LIKE 'quick:%'`.
+- **§5 실측 5건** — ★0915 전 회사 개방 뒤 직원 테스트로 대신한다. 차감 확인 조회 = `ai_credit_transactions`에서 `idempotency_key LIKE 'quick%'`(`quick-read:` 판독 정산 행 포함 · 조회문 = [0915 인계 §2](2026-09-15-session-handoff.md) 6번).
 - Codex 3R(2R 지적은 내 테스트로만 닫음 · 라운드 상한).
 - 범위 밖 기록: `cafe24-client.ts getCafe24Integration`이 status를 안 걸러 `token_expired` 회사에도 카페24 탭이 뜬다(호출부 `status='active'` 판정으로 막았음) · `DmSendAndTrackModal` "(3크레딧)" 토스트 표기 · 입구 8개 정리 2차 · 몰 상품 이미지 외부 URL 그대로(사본 복사 0) · 카드 링크 0이면 CTA URL 빈 값 가능(v0 동일).
 - 요금 인상·대행 델타 = 계측(생성→발행률) 뒤 Harold 결정.
+- ★0915 흰 킷 같은 패턴 범위 밖([B-0915-2](../status/BUGS.md) · 기록만): 옛 재료 경로 이메일(`generateEmailFromMaterials` · 편집기 저장이 회사 킷으로 렌더해 호출부로 못 막음) · 템플릿 DM 만들기(`routes/dm.ts` from-template) · 플래너 이메일(`planner-production.ts`) · 이메일 편집기 새 캠페인(design null) · 회사 킷 저장과 홈페이지 색 추출의 흰색 무검증 · 이메일 테마 초기화가 `palette`를 지워 회사 킷으로 되돌림(`EmailVisualEditor.tsx:947`).
+- ★0915 품질 설계에서 뺀 것(Harold 결정 · 돈·대기 시간): ①초안 375폭 캡처 채점 + 자동 보정 1회(동기 대기 최대 약 45초 증가 · 채점 원가 회사 흡수 · 렌더 워커에 html 입력 추가 필요) ②서버 타이포 포스터(세로 사진만 올린 고객의 첫 화면용 · 합성 대기·원가). ③옛 재료 경로(`generateDmFromMaterials` · DM 편집기 재료 패널)는 V3 채우기 그대로라 두 고객 경로의 산출 모양이 다르다 · 거둘 시점 = Harold. ④사용자 제목이 비고 첫 줄이 18자를 넘으면 헤드라인(잘린 앞머리)과 본문 첫 줄이 겹쳐 보인다(글 유실 방지를 택함 · 표현 조정은 실측 뒤). ⑤(2라운드 low · 기록만) 상품명에 '1+1'·'할인'이 들면 상품 버튼 라벨이 차단기에서 '자세히 보기'로 바뀐다(링크 유지 · 아웃리치 V3 `cta-spot`도 같은 규칙 · 행사 버튼 라벨도 '할인' 같은 낱말은 걷지 않아 같다).
+- ★0915 2라운드 범위 밖 기록: `sales-outreach-produce.ts:1447` 주석("세일·할인 같은 낱말은 차단기도 걷지 않는다")이 실제 차단기(`copy-benefit-detector.ts` 키워드 목록에 '할인')와 다르다.
 
 ---
 

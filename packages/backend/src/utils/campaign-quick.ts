@@ -24,11 +24,14 @@ import { normalizeEventText, EVENT_TEXT_MAX } from './event-brief';
 import { extractEventsFromImages, sniffImageMediaType, MAX_EVENT_IMAGES, type ExtractedEvent } from './event-image-extract';
 import { readImageSize } from './sales-outreach-media';
 import { assembleDmCampaign, type EngineMaterials, type EngineResult, type EngineEventCard, type EngineOptions, type EngineFeaturesResult } from './campaign-engine';
-import { outreachEngineDeps, produceOutreachBrandEmail, type BrandEmailResult } from './sales-outreach-produce';
-import { OUTREACH_DM_LAYOUT_MODE, type OutreachLookStats } from './sales-outreach-look';
+import { outreachEngineDeps, produceOutreachBrandEmail, type BrandEmailResult, type BrandEmailImpl } from './sales-outreach-produce';
+// ★ 2026-09-15 AI 자동제작 고객 채우기(사용자 재료 우선 · 아웃리치 채우기 무변경) · 이메일 후처리 순수 함수
+import { customerEngineDeps, fillCustomerStandard, customerFillNotes, keepLastCtaBar, licensedPreheaderOf } from './campaign-customer-fill';
+import { OUTREACH_DM_LAYOUT_MODE, OUTREACH_NEUTRAL_PRIMARY, accessiblePrimaryOf, outreachArtDirection, lookStatsOf, type OutreachLookStats } from './sales-outreach-look';
 import { createEmailCampaign, deleteEmailCampaign, type CreateCampaignInput } from './email-channel';
 import { isSmtpConfigured } from './company-smtp-client';
 import { renderEmailSections, extractEmailText } from './email/email-section-renderer';
+import { normalizeEmailDesign } from './email/email-tokens';
 import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsByNoRaw } from './cafe24-client';
 import { cafe24ProductAvailability, normalizeCafe24Product, wooStoreProductAvailability, normalizeWooStoreProduct } from './mall-product-normalize';
 // ★ 2026-09-14 W5 우커머스 — 몰별 Store API(공개) 상품번호 재조회(include) · 회사 소속 몰만
@@ -39,13 +42,24 @@ import { runInCreditBundle } from './ai-credit-context';
 import type { Section } from './dm/dm-section-registry';
 import {
   aiAutoBuildEnabled, normalizeBuildMaterials, judgeImageRoles, checkMinimumMaterials, buildMaterialsHash, buildBillingHash, buildIdempotencyKey, buildReadIdempotencyKey, imagesHashOf, mallProductNoOf, resolveBuildProducts,
-  companyImagePrefixes, AiAutoBuildError,
+  companyImagePrefixes, isCompanyImageUrl, AiAutoBuildError,
   type BuildChannel, type BuildEventCard, type BuildMallProvider, type BuildMallLookup, type BuildImageRoleJudgement,
   type BuildMaterials, type BuildImage, type BuildGateResult,
 } from './ai-auto-build-materials';
 
 // routes/dm.ts · utils/dm/dm-viewer-utils.ts 와 동일 정의 미러(서빙 경로 /api/dm/v/images/{companyId}/{filename})
 const DM_IMAGE_DIR = path.join(process.cwd(), 'uploads', 'dm-images');
+
+/**
+ * ★ 2026-09-15 임은지 접수(흰 CTA) · 고객 입구 산출물의 주색 보정.
+ * 회사 브랜드 킷 주색을 그대로 실으면 흰색·연한 색일 때 DM CTA 바(글자 #fff 고정)와 이메일 반전 버튼(글자 = 주색)이 흰 바탕 흰 글자가 된다.
+ * AI 영업과 같은 규칙(accessiblePrimaryOf · 못 쓰면 무채색 OUTREACH_NEUTRAL_PRIMARY)을 산출물에만 적용한다. 회사 킷 원장은 바꾸지 않는다.
+ * 이메일은 미리보기·발송이 회사 킷으로 다시 렌더하므로 호출부가 같은 값을 캠페인 design.palette.primary 에도 싣는다.
+ */
+export function readableCustomerBrandKit<T extends { primary_color?: unknown }>(kit: T): T & { primary_color: string } {
+  const raw = typeof kit?.primary_color === 'string' ? kit.primary_color : null;
+  return { ...kit, primary_color: accessiblePrimaryOf(raw) || OUTREACH_NEUTRAL_PRIMARY } as T & { primary_color: string };
+}
 
 export const QUICK_MATERIALS_MAX_IMAGES = MAX_EVENT_IMAGES;
 /** ★ v3 행사 카드 상한 · 카드당 이미지 상한(총 9 · 설계서 §10) */
@@ -280,7 +294,7 @@ export async function generateDmFromMaterials(input: { companyId: string; userId
   const genCost = getCreditCost('dm-ai-generate');
   await checkCredit(companyId, genCost);
 
-  const brandKit = await getCompanyBrandKit(companyId);
+  const brandKit = readableCustomerBrandKit(await getCompanyBrandKit(companyId));
   const basic = await getBrandBasicInfo(companyId).catch(() => null);
   const companyName = m.brand_name || String(basic?.brand_name || '').trim() || String(basic?.company_name || '').trim() || '우리 브랜드';
   const material = fromCards
@@ -445,12 +459,12 @@ export interface BuildDeps {
   brandKit(companyId: string): Promise<Record<string, unknown>>;
   basicInfo(companyId: string): Promise<{ brand_name?: unknown; company_name?: unknown; industry_code?: unknown } | null>;
   assembleDm(materials: EngineMaterials, opts: EngineOptions): Promise<EngineResult<OutreachLookStats>>;
-  produceEmail(input: Parameters<typeof produceOutreachBrandEmail>[0]): Promise<BrandEmailResult>;
+  produceEmail(input: Parameters<typeof produceOutreachBrandEmail>[0], impl?: BrandEmailImpl): Promise<BrandEmailResult>;
   createDm(companyId: string, userId: string, data: Record<string, unknown>): Promise<{ id: string }>;
   deleteDm(id: string, companyId: string): Promise<boolean>;
   createEmail(input: CreateCampaignInput): Promise<{ id: string }>;
   deleteEmail(companyId: string, campaignId: string): Promise<boolean>;
-  renderEmail(sections: Section[], brandKit: Record<string, unknown>): { html: string; text: string };
+  renderEmail(sections: Section[], brandKit: Record<string, unknown>, design?: ReturnType<typeof normalizeEmailDesign>): { html: string; text: string };
 }
 
 /** 서빙 URL → 디스크 경로(파일명 문자 제한은 isCompanyImageUrl 이 이미 걸렀다) */
@@ -525,14 +539,14 @@ export function defaultBuildDeps(): BuildDeps {
     extractFromImages: (input) => extractEventsFromImages(input),
     brandKit: async (companyId) => (await getCompanyBrandKit(companyId)) as unknown as Record<string, unknown>,
     basicInfo: (companyId) => getBrandBasicInfo(companyId),
-    assembleDm: (m, opts) => assembleDmCampaign(m, opts, outreachEngineDeps()),
-    produceEmail: (input) => produceOutreachBrandEmail(input),
+    assembleDm: (m, opts) => assembleDmCampaign(m, opts, customerEngineDeps()),
+    produceEmail: (input, impl) => produceOutreachBrandEmail(input, impl),
     createDm: (companyId, userId, data) => createDm(companyId, userId, data as any),
     deleteDm: (id, companyId) => deleteDm(id, companyId),
     createEmail: (input) => createEmailCampaign(input),
     deleteEmail: (companyId, campaignId) => deleteEmailCampaign(companyId, campaignId),
-    renderEmail: (sections, brandKit) => ({
-      html: renderEmailSections(sections, { brandKit: brandKit as any, design: null, publicBase: process.env.PUBLIC_BASE_URL }),
+    renderEmail: (sections, brandKit, design) => ({
+      html: renderEmailSections(sections, { brandKit: brandKit as any, design: design || null, publicBase: process.env.PUBLIC_BASE_URL }),
       text: extractEmailText(sections),
     }),
   };
@@ -575,6 +589,8 @@ export interface BuildMaterialsMeta {
   /** 화면 썸네일 배지의 단일 출처(§6-3) */
   imageRoles: BuildImageRoleJudgement[];
   features: EngineFeaturesResult;
+  /** ★ 2026-09-15 고객 채우기 사유 문장(링크 없는 카드 · 자리가 없어 뺀 상품) · 결과 바 "미반영" 목록이 그대로 싣는다 */
+  notes: string[];
   /** 견적 결박용 지문(uuid 불변 · 세 요소) */
   materialsHash: string;
   /** 과금용 지문(정규화 입력 전체 · 멱등키 뒷부분) */
@@ -789,10 +805,12 @@ export async function generateFromBuildMaterials(
   }
 
   // 엔진 재료 — 카드 → 같은 조각(materialsFromEventCards) · 면허 카드 종료일(연도 있는 표기만) → 카운트다운 재료 · 상품 = 카드(몰 이미지) + 글줄(면허)
-  const brandKit = await deps.brandKit(companyId);
+  const brandKit = readableCustomerBrandKit(await deps.brandKit(companyId));
   const basic = await deps.basicInfo(companyId).catch(() => null);
   const companyName = m.brandName || String(basic?.brand_name || '').trim() || String(basic?.company_name || '').trim() || '우리 브랜드';
   const industry = input.industry || String(basic?.industry_code || '').trim() || null;
+  // ★ 2026-09-15 업종 아트디렉션(타이포 스케일·여백·구분선) · 회사 킷에 저장값이 있으면 그 값 · DM 킷과 이메일 design 이 같은 값을 쓴다(원장 무변경)
+  const artDirection = brandKit.art_direction && typeof brandKit.art_direction === 'object' ? brandKit.art_direction : outreachArtDirection(industry);
   const fromCards = materialsFromEventCards(cards);
   const eventCards: EngineEventCard[] = fromCards.eventCards.map((ec, i) => {
     const c = cards[i];
@@ -806,7 +824,8 @@ export async function generateFromBuildMaterials(
   const licensedQuote = [fromCards.licensedQuote, ...resolved.textLines.map((l) => l.replace(/^- /, ''))].filter(Boolean).join(' · ');
   const engineMaterials: EngineMaterials = {
     companyName, industry, homepageUrl: fromCards.link || '', siteTitle: null, material, extraNotes: null,
-    products: resolved.cards, gallery: fromCards.gallery, logoUrl: null, posterUrl: null, posterSize: null, bannerUrl: null, bannerSize: null,
+    // ★ 2026-09-15 로고 = 회사 킷 로고 중 이 회사 서빙 경로만(외부 핫링크·파비콘 0)
+    products: resolved.cards, gallery: fromCards.gallery, logoUrl: isCompanyImageUrl(brandKit.logo_url, companyId) ? String(brandKit.logo_url).trim() : null, posterUrl: null, posterSize: null, bannerUrl: null, bannerSize: null,
     ctaLinks: fromCards.ctaLinks, legal: null, licensedQuote, proof: null, eventCards,
   };
   const materialsHash = buildMaterialsHash(m, roles);
@@ -833,7 +852,7 @@ export async function generateFromBuildMaterials(
     sections = r.sections; pages = r.pages; look = r.look; benefitStripped = r.benefitStripped; heroFallback = r.heroFallback; features = r.features;
     name = `[AI 자동제작] ${companyName}`.slice(0, 200);
     const dm = await deps.createDm(companyId, userId, {
-      title: name, sections, pages, layout_mode: OUTREACH_DM_LAYOUT_MODE, brand_kit: brandKit, ai_prompt: material.slice(0, 2000), approval_status: 'draft',
+      title: name, sections, pages, layout_mode: OUTREACH_DM_LAYOUT_MODE, brand_kit: { ...brandKit, art_direction: artDirection }, ai_prompt: material.slice(0, 2000), approval_status: 'draft',
     });
     draftId = String(dm.id);
   } else {
@@ -847,13 +866,17 @@ export async function generateFromBuildMaterials(
         stats: { galleryCandidates: fromCards.gallery.length, galleryPassed: fromCards.gallery.length, productLinks: resolved.cards.length, productsFound: resolved.cards.length, productsPassed: resolved.cards.length },
       },
       mediaSelection: null, ctaLinks: fromCards.ctaLinks, legal: null, brandColor: null, proof: null, entry: 'customer', eventCards, features: m.features,
-    });
-    sections = r.sections; pages = []; look = r.look; benefitStripped = r.benefitStripped; features = r.features; subject = r.subject; preheader = r.preheader;
+    }, { fill: (s, ch) => fillCustomerStandard(s, engineMaterials, ch) });
+    // ★ 2026-09-15 CTA 풀폭 띠는 마지막 1개만(공용 룩 무변경) · 프리헤더는 면허 밖 수치를 거른 값만
+    sections = keepLastCtaBar(r.sections); pages = []; look = lookStatsOf(sections); benefitStripped = r.benefitStripped; features = r.features; subject = r.subject; preheader = licensedPreheaderOf(r.preheader, licensedQuote) || null;
     name = `AI 자동제작 · ${companyName}`.slice(0, 60);
-    const rendered = deps.renderEmail(sections, brandKit);
+    // 미리보기·발송은 캠페인 design 으로 다시 렌더한다 · 생성 렌더와 저장이 같은 design 을 쓴다(주색 보정 · 업종 아트디렉션 · 프리헤더)
+    const design = normalizeEmailDesign({ palette: { primary: brandKit.primary_color }, art_direction: artDirection, ...(preheader ? { preheader } : {}) });
+    const rendered = deps.renderEmail(sections, brandKit, design);
     const campaign = await deps.createEmail({
       companyId, createdBy: userId, name, subject: subject || name, htmlBody: rendered.html, textBody: rendered.text,
       isAd: m.isAd === true, aiGenerated: true, sections,
+      design,
     });
     draftId = String(campaign.id);
   }
@@ -935,6 +958,7 @@ export async function generateFromBuildMaterials(
       eventCards: cards.length,
       imageRoles: roles,
       features,
+      notes: customerFillNotes(engineMaterials, m.channel === 'email' ? 'EMAIL' : 'DM'),
       materialsHash,
       billingHash,
     },

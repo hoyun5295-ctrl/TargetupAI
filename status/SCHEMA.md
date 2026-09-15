@@ -1102,14 +1102,15 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 > **CT-17 정책 (2026-04-22 Harold님 확정):**
 > - FREE(미가입) = 레거시 이관 고객 중 유료 미가입 상태. 직접발송·수신거부·발송결과·예약(직접) + 직접발송 주소록 99,999건까지. 나머지 전부 잠금.
 > - STARTER+ = 고객DB·직접타겟발송·AI 자동매핑·스팸필터 수동 테스트
-> - BASIC+ = AI 메시지·AI 타겟·엑셀AI매핑(generateMessages/recommendTarget/parseBriefing)
-> - PRO+ = 자동발송·모바일DM·AI 프리미엄(auto-relax 등)·스팸자동화
+> - ~~BASIC+ = AI 메시지·AI 타겟·엑셀AI매핑(generateMessages/recommendTarget/parseBriefing)~~ (옛 구분 · 아래 ★0915)
+> - ~~PRO+ = 자동발송·모바일DM·AI 프리미엄(auto-relax 등)·스팸자동화~~ (옛 구분 · 아래 ★0915)
 > - 판정은 plans 플래그가 진실의 원천. plan_code 하드코딩 금지 (`utils/plan-guard.ts` 경유).
+> - **★2026-09-15 실측(plans SELECT · Harold)**: BASIC+·PRO+ 구분은 현행과 다르다. `customer_db`·`target_send`·`ai_mapping`·`spam_filter`·`ai_messaging`·`mobile_dm`·`ai_premium`·`auto_spam_test` 플래그 = FREE만 false(TRIAL·STAFF·STARTER~ENTERPRISE true). `auto_campaign_enabled`만 ENTERPRISE·STAFF true. 서버 판정도 종량제 전환(Phase 3) 뒤 AI·자동발송·모바일 DM·CDP는 플래그가 아니라 FREE 여부만 본다(`plan-guard.ts canUseFeature` · `cdp-auth.ts isCdpEnabledForPlan` · AI Operator = `isAiOperatorAllowed`). 플래그를 직접 읽는 서버 분기 = 고객 DB 조회·타겟발송·AI 매핑·스팸필터·스팸 자동화.
 
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
 | id | uuid PK | |
-| plan_code | varchar(20) | FREE/**TRIAL**/STARTER/BASIC/PRO/BUSINESS/ENTERPRISE (D132 TRIAL 추가) |
+| plan_code | varchar(20) | FREE/**TRIAL**/**STAFF**/STARTER/BASIC/PRO/BUSINESS/ENTERPRISE (D132 TRIAL 추가 · 2026-07-28 STAFF 추가) |
 | plan_name | varchar(50) | FREE="미가입", **TRIAL="무료체험"** (PRO와 기능 동일, D132) |
 | max_customers | integer | 고객DB 관리 최대 인원 |
 | monthly_price | numeric(12,2) | |
@@ -1120,12 +1121,12 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | **target_send_enabled** | **boolean DEFAULT false** | **CT-17: 직접타겟발송(필터 추출 발송). STARTER+ true** |
 | **ai_mapping_enabled** | **boolean DEFAULT false** | **CT-17: 엑셀 업로드 AI 자동매핑. STARTER+ true** |
 | spam_filter_enabled | boolean | 스팸필터 수동 테스트. FREE=false, STARTER+ true |
-| ai_messaging_enabled | boolean | AI 메시지 생성/AI 타겟 추천/엑셀AI매핑. BASIC+ true |
-| auto_campaign_enabled | boolean | 자동발송. PRO+ true |
+| ai_messaging_enabled | boolean | AI 메시지 생성/AI 타겟 추천/엑셀AI매핑. ~~BASIC+ true~~ **★0915 실측 = FREE만 false**(서버 판정 `canUseFeature` ai_messaging = FREE 여부 · 프론트 `Dashboard.tsx` 잠금 표시는 이 플래그) |
+| auto_campaign_enabled | boolean | 자동발송. ~~PRO+ true~~ **★0915 실측 = ENTERPRISE·STAFF만 true**(TRIAL·STARTER~BUSINESS false). 서버 판정 `canUseFeature('auto_campaign')`은 이 플래그를 읽지 않는다(회사 오버라이드 → FREE 여부). 원값을 읽는 곳 = 요금제 추천(`plan-recommend.ts`) |
 | max_auto_campaigns | integer | 동시 활성 자동캠페인 (PRO:5, BUSINESS:10, ENTERPRISE:NULL=무제한) |
-| auto_spam_test_enabled | boolean DEFAULT false | 자동 스팸필터 테스트. PRO+ true |
-| ai_premium_enabled | boolean DEFAULT false | AI 프리미엄 (auto-relax/추천캠페인/AI문안생성). PRO+ true |
-| **mobile_dm_enabled** | **boolean DEFAULT false** | **CT-17: 모바일 DM 빌더. PRO+ true** |
+| auto_spam_test_enabled | boolean DEFAULT false | 자동 스팸필터 테스트. ~~PRO+ true~~ **★0915 실측 = FREE만 false**(서버 판정이 이 플래그를 읽는다) |
+| ai_premium_enabled | boolean DEFAULT false | AI 프리미엄 (auto-relax/추천캠페인/AI문안생성). ~~PRO+ true~~ **★0915 실측 = FREE만 false**(서버 판정 = FREE 여부) |
+| **mobile_dm_enabled** | **boolean DEFAULT false** | **CT-17: 모바일 DM 빌더. ~~PRO+ true~~ ★0915 실측 = FREE만 false(서버 판정 `canUseFeature` mobile_dm = FREE 여부)** |
 | **direct_recipient_limit** | **integer** | **CT-17: 직접발송 주소록 최대 건수. FREE=99,999, 나머지 NULL(무제한)** |
 | **cdp_enabled** | **boolean DEFAULT false** | **★ D172: 한줄로 CDP (자사몰 → 한줄로 customers/이벤트 sync) feature 플래그. BUSINESS+ true** |
 | **cdp_events_per_month** | **integer** | **★ D172: CDP API 월 호출 한도. BASIC=10,000 / PRO=100,000 / BUSINESS=1,000,000 / ENTERPRISE NULL(무제한)** |

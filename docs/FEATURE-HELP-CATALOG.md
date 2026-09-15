@@ -216,6 +216,7 @@ export type PublicFeatureJob = Omit<FeatureJob, 'sourceFile' | 'status' | 'stubU
 - **2026-08-22 밤 배포완료 · Harold 1차 육안 확인 완료.** 그 자리에서 나온 접수 3건 = §10.
 - **2026-08-22(2) 발견성 축 구현 완료 · 배포 대기**(§10-2). 바뀐 파일 = `lib/help-open.ts`(신설) · `components/help/HelpDock.tsx` · `components/help/help-ui.ts` · `components/DashboardHeader.tsx` · `lib/surface-flags.ts` · `components/ToastProvider.tsx` · `pages/SegmentsPage.tsx`. 백엔드·DB 변경 0.
 - **2026-08-22(2) 답변 품질 축 구현 완료 · 배포 대기**(§10-1). 백엔드 = `content/feature-catalog.ts`(27개 승격 · stub 0 · `/diagnosis` 비문서 사유 · send-direct 질문형 키워드 2) · `utils/help-answer.ts`(관련 기능 title 전달 · `direct` 답변 틀 · `HELP_DIRECT_MARGIN`) · `routes/help.ts`(`direct` 응답). 프론트 = `components/help/help-api.ts` · `HelpPanel.tsx`(direct면 산문 0 · 첫 카드 펼침). 게이트 = 백엔드 tsc 0 · 프론트 tsc 0 · vitest 193파일 2,934건(불변식 8 + 답변 조립 13 + 라벨 계약 2 포함). DDL 0.
+- **2026-09-15 `quick-campaign` 항목 = AI 자동제작 기준으로 다시 씀 · 배포완료(Harold)** — 0914 원클릭 캠페인이 AI 자동제작으로 승격됐는데 항목이 옛 화면(전 채널 초안 · 인앱 · 재개 표시)을 설명해 봇이 옛 사용법을 답하고 있었다. 제목·목표·단계 6·막히는 경우 3(재료 부족 안내 · 이메일 발신 설정 · 만드는 중) · `planKey` `ai_premium`→`mobile_dm` · `creditSource` `one-step-interview`→`dm-ai-generate` · 인용 버튼 이름은 실제 화면 문구만. 불변식 11 통과 · 옛 화면 설명 재발 계약 = `plan-feature-modal-contract.test.ts`. 같은 날 요금제 공통 안내 창(D90)의 설명 원장은 이 카탈로그가 아니라 `frontend/constants/plan-feature-intros.ts`다(카탈로그 API는 유료 회사만 열려 미가입 회사가 받을 수 없다).
 
 ### 9-D) 배포 전 실행 DDL (Harold · 서버 psql)
 

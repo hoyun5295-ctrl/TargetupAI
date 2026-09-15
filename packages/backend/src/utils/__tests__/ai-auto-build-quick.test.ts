@@ -290,6 +290,121 @@ describe('계약 4·9 — 이메일: 채널 독립 키·소스 · is_ad 행 저�
   });
 });
 
+// ★ 2026-09-15 임은지 접수 cmu27bvxq02srjnluxi30j3a1 · 회사 브랜드 킷 주색 #ffffff 가 그대로 실려 DM CTA 바(글자 #fff 고정)와
+//   이메일 CTA 반전 버튼(글자 = 주색)이 흰 바탕 흰 글자가 됐다. 산출물에는 AI 영업과 같은 규칙(accessiblePrimaryOf · 무채색 폴백)으로 보정한 주색을 싣는다.
+//   이메일은 미리보기·발송이 회사 킷으로 다시 렌더하므로 캠페인 design.palette.primary 에 같은 값을 저장해야 끝까지 간다.
+describe('흰 브랜드 킷 · 산출물 주색은 흰 글자가 읽히는 색', () => {
+  it('DM: 회사 킷 #ffffff → 초안 brand_kit 주색 #1f2937 · 나머지 키 유지 · 응답도 같은 킷', async () => {
+    const { deps, drafts } = makeDeps({ brandKit: async () => ({ primary_color: '#ffffff', tone: 'friendly', accent_color: '#f59e0b' }) });
+    const r = await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, deps);
+    expect(drafts.dm[0].brand_kit).toMatchObject({ primary_color: '#1f2937', tone: 'friendly', accent_color: '#f59e0b' });
+    expect((r.brand_kit as any).primary_color).toBe('#1f2937');
+  });
+  it('DM: 이미 흰 글자가 읽히는 진한 주색은 그대로', async () => {
+    const { deps, drafts } = makeDeps();
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, deps);
+    expect(drafts.dm[0].brand_kit.primary_color).toBe('#123456');
+  });
+  it('DM: 밝은 유색은 버리지 않고 명도만 낮춘 색으로 싣는다', async () => {
+    const { deps, drafts } = makeDeps({ brandKit: async () => ({ primary_color: '#ffd6e7' }) });
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, deps);
+    const primary = String(drafts.dm[0].brand_kit.primary_color);
+    expect(primary).toMatch(/^#[0-9a-f]{6}$/);
+    expect(primary).not.toBe('#ffd6e7');
+  });
+  it('이메일: 렌더는 보정 킷 · 캠페인 design.palette.primary = 보정값(미리보기·발송 재렌더가 같은 색)', async () => {
+    let renderedKit: any = null;
+    const { deps, drafts } = makeDeps({
+      brandKit: async () => ({ primary_color: '#ffffff' }),
+      renderEmail: (_s, kit) => { renderedKit = kit; return { html: '<p>x</p>', text: 'x' }; },
+    });
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ channel: 'email', expectedTotal: 3 }) }, deps);
+    expect(renderedKit.primary_color).toBe('#1f2937');
+    expect(drafts.email[0].design).toMatchObject({ palette: { primary: '#1f2937' } });
+  });
+  it('옛 재료 경로 DM(generateDmFromMaterials)도 같은 보정을 지난다', () => {
+    const quick = code('utils/campaign-quick.ts');
+    const start = quick.indexOf('export async function generateDmFromMaterials(');
+    const end = quick.indexOf('export async function generateEmailFromMaterials(', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = quick.slice(start, end);
+    expect(block).toContain('readableCustomerBrandKit(await getCompanyBrandKit(companyId))');
+    expect(block).not.toMatch(/brand_kit:\s*\(?await getCompanyBrandKit/);
+  });
+  it('readableCustomerBrandKit: 흰색·3자리 hex·주색 없음 = 무채색 · 입력 객체는 바꾸지 않는다', async () => {
+    const { readableCustomerBrandKit } = await import('../campaign-quick');
+    const white = { primary_color: '#ffffff', tone: 'friendly' };
+    expect(readableCustomerBrandKit(white)).toEqual({ primary_color: '#1f2937', tone: 'friendly' });
+    expect(white.primary_color).toBe('#ffffff');
+    expect(readableCustomerBrandKit({ primary_color: '#fff' }).primary_color).toBe('#1f2937');
+    expect(readableCustomerBrandKit({}).primary_color).toBe('#1f2937');
+    expect(readableCustomerBrandKit({ primary_color: '#4f46e5' }).primary_color).toBe('#4f46e5');
+  });
+});
+
+// ★ 2026-09-15 AI 자동제작 품질 설계 · 고객 표준 채우기(campaign-customer-fill.ts) 배선 · 업종 아트디렉션 · 로고 · 이메일 띠·프리헤더·design
+describe('고객 표준 채우기 배선 · 아트디렉션 · 로고 · 이메일 후처리', () => {
+  it('DM 기본 의존성은 고객 채우기를 쓴다 · 옛 재료 경로는 아웃리치 채우기 그대로', () => {
+    const quick = code('utils/campaign-quick.ts');
+    expect(quick).toContain('assembleDm: (m, opts) => assembleDmCampaign(m, opts, customerEngineDeps())');
+    const start = quick.indexOf('export async function generateDmFromMaterials(');
+    const end = quick.indexOf('export async function generateEmailFromMaterials(', start);
+    expect(quick.slice(start, end)).toContain('outreachEngineDeps()');
+  });
+  it('DM 브랜드 킷: 회사 킷에 아트디렉션이 없으면 업종 표 값 · 있으면 회사 값', async () => {
+    const { outreachArtDirection } = await import('../sales-outreach-look');
+    const a = makeDeps();
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, a.deps);
+    expect(a.drafts.dm[0].brand_kit.art_direction).toEqual(outreachArtDirection('beauty'));
+    const own = { typeScale: 'editorial', headlineFont: 'sans', spacingDensity: 'airy', accentMotif: 'rule', sectionDivider: 'hairline' };
+    const b = makeDeps({ brandKit: async () => ({ primary_color: '#123456', art_direction: own }) });
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, b.deps);
+    expect(b.drafts.dm[0].brand_kit.art_direction).toEqual(own);
+  });
+  it('로고: 이 회사 서빙 경로의 회사 킷 로고만 헤더 재료로 넘긴다', async () => {
+    const a = makeDeps({ brandKit: async () => ({ primary_color: '#123456', logo_url: dm('logo.png') }) });
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, a.deps);
+    expect(a.captured.dm[0].m.logoUrl).toBe(dm('logo.png'));
+    const b = makeDeps({ brandKit: async () => ({ primary_color: '#123456', logo_url: 'https://ext.example/logo.png' }) });
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, b.deps);
+    expect(b.captured.dm[0].m.logoUrl).toBeNull();
+  });
+  it('이메일: 고객 채우기 주입 · CTA 띠는 마지막 1개 · 면허 밖 수치 프리헤더는 버린다 · 렌더와 저장이 같은 design', async () => {
+    const barCta = (i: number) => ({ id: `c${i}`, type: 'cta', order: i, visible: true, treatment: 'bar', background: 'tint', props: { buttons: [{ label: '보기', url: `https://shop.example/${i}` }] } }) as any;
+    let impl: any = null;
+    let renderedDesign: any = null;
+    const { deps, drafts } = makeDeps({
+      produceEmail: (async (_input: any, i: any) => {
+        impl = i;
+        return { sections: [sec('header', {}, 0), barCta(1), barCta(2), barCta(3), sec('footer', {}, 4)], subject: '제목', preheader: '전 제품 30% 할인 진행 중', benefitStripped: 0, exemplarCount: 0, exemplarTotal: 0, look: { treatments: 0, backgrounds: 0, assigned: [] }, sliceMode: false, sliceCount: 0, features: { applied: [], removed: [], skipped: [] } } as any;
+      }) as any,
+      renderEmail: ((_s: any, _k: any, design: any) => { renderedDesign = design; return { html: '<p>x</p>', text: 'x' }; }) as any,
+    });
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ channel: 'email', expectedTotal: 3 }) }, deps);
+    expect(typeof impl?.fill).toBe('function');
+    const ctas = drafts.email[0].sections.filter((s: any) => s.type === 'cta');
+    expect(ctas.map((s: any) => s.treatment)).toEqual([undefined, undefined, 'bar']);
+    expect(drafts.email[0].design).toMatchObject({ palette: { primary: '#123456' } });
+    expect(drafts.email[0].design.art_direction).toBeTruthy();
+    expect(drafts.email[0].design.preheader).toBeUndefined();
+    expect(renderedDesign).toEqual(drafts.email[0].design);
+  });
+  it('이메일: 수치 없는 프리헤더는 design.preheader 로 저장된다', async () => {
+    const { deps, drafts } = makeDeps({
+      produceEmail: (async () => ({ sections: SECTIONS, subject: '제목', preheader: '가을 한정 컬러를 만나 보세요', benefitStripped: 0, exemplarCount: 0, exemplarTotal: 0, look: { treatments: 0, backgrounds: 0, assigned: [] }, sliceMode: false, sliceCount: 0, features: { applied: [], removed: [], skipped: [] } }) as any) as any,
+    });
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ channel: 'email', expectedTotal: 3 }) }, deps);
+    expect(drafts.email[0].design.preheader).toBe('가을 한정 컬러를 만나 보세요');
+  });
+  it('결과 계측 notes: 링크 없는 카드는 버튼을 넣지 않은 사유 문장', async () => {
+    const { deps } = makeDeps();
+    const r = await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ eventCards: [{ id: 'c1', title: '가을 세일', text: T40, licensed: true, images: [HERO] }] }) }, deps);
+    const notes: string[] = (r.materialsMeta as any).notes || [];
+    expect(notes.some((n) => n.includes('링크'))).toBe(true);
+  });
+});
+
 describe('계약 10·16 — 실패 위치에 따라 초안 행: 차감 전 실패 = 행 0 · 차감 뒤(차감 실패 포함) = 행 유지', () => {
   it('조립 실패 = 초안 0 · 차감 0 · 오류 전파', async () => {
     const { deps, drafts, ledger } = makeDeps({ assembleDm: async () => { throw new Error('모델 실패'); } });

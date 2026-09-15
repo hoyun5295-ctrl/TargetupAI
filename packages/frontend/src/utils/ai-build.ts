@@ -45,7 +45,7 @@ export interface BuildProductValue {
 export interface BuildFeatureDef { key: string; label: string; hint: string }
 /** 기능 칩 4종 — 서버 허용 목록(AI_AUTO_BUILD_FEATURES)과 같은 키·같은 순서 */
 export const AI_BUILD_FEATURES: readonly BuildFeatureDef[] = [
-  { key: 'product_carousel', label: '상품 카드', hint: '몰에서 불러온 상품(이미지 있음) 2개 이상' },
+  { key: 'product_carousel', label: '상품 카드', hint: '몰에서 불러온 상품(이미지 있음) 1개 이상' },
   { key: 'countdown', label: '카운트다운', hint: '"그대로 씁니다"를 체크한 카드에 연도가 있는 종료일' },
   { key: 'coupon', label: '쿠폰', hint: '"그대로 씁니다"를 체크한 카드에 할인·증정 문구' },
   { key: 'gallery', label: '갤러리', hint: '한 카드에 사진 2장 이상' },
@@ -125,7 +125,7 @@ export function featureAvailability(state: Pick<BuildDraftState, 'cards' | 'prod
   const mallWithImage = state.products.filter((p) => p.source === 'mall' && !!p.imageUrl).length;
   const galleryOk = state.cards.some((c) => c.images.length >= 2);
   return {
-    product_carousel: mallWithImage >= 2 ? { ok: true, reason: null } : { ok: false, reason: '이미지가 있는 몰 상품이 2개 이상 있어야 해요' },
+    product_carousel: mallWithImage >= 1 ? { ok: true, reason: null } : { ok: false, reason: '이미지가 있는 몰 상품이 있어야 해요' },
     countdown: channel === 'email'
       ? { ok: false, reason: '이메일에는 넣을 수 없어요' }
       : (FULL_DATE_RE.test(licensedText) ? { ok: true, reason: null } : { ok: false, reason: '"그대로 씁니다"를 체크한 카드에 연도가 있는 종료일(예: 2026.10.15)이 있어야 해요' }),
@@ -226,6 +226,9 @@ export function unappliedItemsOf(r: BuildResultHandoff): string[] {
   }
   const excluded: Array<{ name: string; reason: string }> = Array.isArray(m.excluded) ? m.excluded : [];
   for (const e of excluded) out.push(`상품 "${e.name}" 제외: ${e.reason}`);
+  // ★ 2026-09-15 고객 채우기 사유(링크 없는 카드 · 자리가 없어 뺀 상품) · 서버 문장 그대로
+  const notes: string[] = Array.isArray(m.notes) ? m.notes : [];
+  for (const n of notes) out.push(String(n));
   const unverified: string[] = Array.isArray(m.mallUnverified) ? m.mallUnverified : [];
   if (m.mallFailed) out.push('몰 상품 가격을 확인하지 못해 불러온 값을 그대로 썼어요');
   else if (unverified.length > 0) out.push(`상품 ${unverified.length}개는 몰에서 다시 확인하지 못해 불러온 값을 그대로 썼어요`);

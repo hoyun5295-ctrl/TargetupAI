@@ -643,7 +643,7 @@ Codex 적대 리뷰 2라운드(상한). **수정 1·2는 1R에서 통과**했다
 2. **ACK 전용 사유가 고객에게 미분류로 간다** — `2000`·`2001`·`2002`·`8002`(인증 실패 계열)는 1번이 선행돼야 등재 가능
 3. **마이그레이션 배포 경로가 없다** — `check.sh`·`deploy.sh`가 SQL을 검사·적용하지 않는다. 051·052도 수동 적용이었다. 체계 확장은 별도 과제
 
-## 9. 친구·비친구 단가 축 (★2026-09-06 게이트웨이 전량 배포완료 · 한줄로는 다음 세션)
+## 9. 친구·비친구 단가 축 (★2026-09-06 게이트웨이 전량 배포완료 · 한줄로 0913 배포완료 · §9-5)
 
 **접수** = "브랜드메시지는 친구에게 보내는 것과 비친구에게 보내는 것의 단가가 다른데, 우리가 그 정보를 제대로 받고 처리하고 있는가. 단가 설정 화면에도 자유형·기본형 둘 다 구분이 필요하다"(Harold, 0906).
 **전제(Harold 확정)** = 매입이 실제로 그 구분으로 우리에게 청구된다.
@@ -750,7 +750,7 @@ null·빈 문자열   → null         (미설정으로 되돌림 = 친구 단�
 
 남은 것:
 
-- **★2026-09-13 한줄로 쪽 같은 축 = 코드완료·배포 대기**(DDL `companies.cost_per_brand_nonfriend` 실행완료) → [FEATURE-BILLING §3-3·§8](../FEATURE-BILLING.md). 확정 형태 = 비친구 1칸만 신설(자유형·기본형은 현재 같은 단가라 순서표 `BRAND_PRICE_COLUMN_CHAIN`의 BASIC 줄로 확장) · `company_agent_ids`는 제외(에이전트 브랜드 발송 경로 없음). 아래는 착수 전 원문이다.
+- **★2026-09-13 한줄로 쪽 같은 축 = 배포완료**(★0915 서버 확인 · Harold: 소스 `29536cb7` 포함 · 프론트·백엔드 빌드 반영 · 남은 것 = 실측 psy5868 선불 `N` 1건)(DDL `companies.cost_per_brand_nonfriend` 실행완료) → [FEATURE-BILLING §3-3·§8](../FEATURE-BILLING.md). 확정 형태 = 비친구 1칸만 신설(자유형·기본형은 현재 같은 단가라 순서표 `BRAND_PRICE_COLUMN_CHAIN`의 BASIC 줄로 확장) · `company_agent_ids`는 제외(에이전트 브랜드 발송 경로 없음). 아래는 착수 전 원문이다.
 - ~~**한줄로 쪽 같은 축**: `companies.cost_per_brand` 1칸을 자유형·기본형 × 친구·비친구 4칸으로.~~ `company_agent_ids`도 같이. 게이트웨이에서 확정한 형태(기존 컬럼 = 친구 단가 · 비친구만 신설 · nullable 폴백)를 그대로 옮긴다. 소비처 = `unit-price.ts` `MESSAGE_TYPE_PRICE_COLUMN` · `prepaid.ts` 3곳 · `mysql-refund-sweeper.ts` · `billing-types.ts` · `results.ts` · `defaults.ts` · `admin.ts` · `companies.ts` · `AdminDashboard.tsx` 2곳
 - 화면 육안: 단가 화면 3곳이 브랜드 4칸으로 보이는지 · 발송 이력에서 `7831`·mock `6`·젬텍 `212` 가 제 사유로 뜨는지
 - ~~젬텍 결과코드 규격서 수령~~ **종결** — `.58` `~/ngen/gmt/code_sms.txt` 에 원본이 있었다(§9-4)
