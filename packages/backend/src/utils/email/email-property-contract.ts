@@ -118,5 +118,13 @@ export const EMAIL_COUPON_PROPS: Array<{ prop: string; desc: string; probe: unkn
   { prop: 'code_text_color', desc: '쿠폰코드 글씨색 (미지정 = 구도별 현행)', probe: '#7c3aed' },
 ];
 
+/** ★ 2026-09-15 리뷰(임은지 접수 `cmu2ao5qn02tjjnlu1spouqzy`) "별점이 흰색이라 안 보인다 · 평균 별점 표시를 꺼도 그대로다".
+ *  별 색은 강조색 한 줄에서만 와서 고를 입구가 없었고, show_average_rating 은 이메일 렌더러가 한 번도 읽지 않았다(평균 줄 자체가 없었다).
+ *  편집 패널은 DM과 공용이라 DM 표(`DM_REVIEWS_PROPS`)와 함께 등재한다. 평균 줄 기본 = 표시(편집기 기본값 `?? true`와 같다). */
+export const EMAIL_REVIEWS_PROPS: Array<{ prop: string; desc: string; probe: unknown }> = [
+  { prop: 'star_color', desc: '별점 색: 리뷰별 별 · 평균 별 (미지정 = 강조색)', probe: '#b45309' },
+  { prop: 'show_average_rating', desc: '평균 별점 줄 (미지정 = 표시)', probe: false },
+];
+
 /** 쿠폰 구도 = 이메일 렌더러가 가르는 두 갈래(`renderCoupon`의 spotlight 분기와 그 밖). */
 export const EMAIL_COUPON_TREATMENTS = ['classic', 'spotlight'] as const;

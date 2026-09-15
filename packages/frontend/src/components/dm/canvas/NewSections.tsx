@@ -813,6 +813,8 @@ export function ReviewsSection({ props, treatment }: { props: ReviewsProps; trea
   const avg = reviews.length > 0
     ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
     : '0.0';
+  // ★ 2026-09-15 별점 색(star_color) · SSR reviewStarColor 미러 · 미지정 = 강조색(현행)
+  const starColor = props?.star_color || 'var(--dm-accent)';
   // ★ 2026-07-13 디자인 3.0 — quote 구도 미러 (SSR renderReviewsQuote와 구조 동일)
   if (treatment === 'quote' && reviews.length > 0) {
     const [first, ...rest] = reviews.slice(0, 3);
@@ -822,14 +824,14 @@ export function ReviewsSection({ props, treatment }: { props: ReviewsProps; trea
         <div aria-hidden="true" style={{ fontFamily: 'var(--dm-font-display)', fontSize: 52, lineHeight: 0.6, color: 'var(--dm-accent)', opacity: 0.85 }}>&ldquo;</div>
         <div style={{ marginTop: 'var(--dm-sp-3)', fontSize: 'var(--dm-fs-h2)', fontWeight: 700, lineHeight: 1.55, fontFamily: 'var(--dm-font-display)', color: 'var(--dm-neutral-900)' }}>{first.body}</div>
         <div style={{ marginTop: 'var(--dm-sp-3)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
-          <span style={{ color: 'var(--dm-accent)', letterSpacing: 2, fontSize: 'var(--dm-fs-small)' }}>{'★'.repeat(first.rating || 0)}{'☆'.repeat(Math.max(0, 5 - (first.rating || 0)))}</span>
+          <span style={{ color: starColor, letterSpacing: 2, fontSize: 'var(--dm-fs-small)' }}>{'★'.repeat(first.rating || 0)}{'☆'.repeat(Math.max(0, 5 - (first.rating || 0)))}</span>
           <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)' }}>{first.author}</span>
         </div>
         {rest.length > 0 && (
           <div style={{ marginTop: 'var(--dm-sp-5)' }}>
             {rest.map((r, i) => (
               <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '10px 0', borderTop: '1px solid var(--dm-neutral-200)', textAlign: 'left' }}>
-                <span style={{ color: 'var(--dm-accent)', fontSize: 'var(--dm-fs-tiny)', letterSpacing: 1, flexShrink: 0 }}>{'★'.repeat(r.rating || 0)}</span>
+                <span style={{ color: starColor, fontSize: 'var(--dm-fs-tiny)', letterSpacing: 1, flexShrink: 0 }}>{'★'.repeat(r.rating || 0)}</span>
                 <span style={{ flex: 1, fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', lineHeight: 1.6 }}>{r.body}</span>
                 <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', flexShrink: 0 }}>{r.author}</span>
               </div>
@@ -850,7 +852,7 @@ export function ReviewsSection({ props, treatment }: { props: ReviewsProps; trea
       {props.show_average_rating !== false && reviews.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 'var(--dm-sp-3)' }}>
           <span style={{ fontSize: 'var(--dm-fs-h1)', fontWeight: 700, color: 'var(--dm-neutral-900)' }}>{avg}</span>
-          <span style={{ color: 'var(--dm-accent)' }}>★★★★★</span>
+          <span style={{ color: starColor }}>★★★★★</span>
           <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)' }}>({reviews.length}건)</span>
         </div>
       )}
@@ -861,7 +863,7 @@ export function ReviewsSection({ props, treatment }: { props: ReviewsProps; trea
           {reviews.slice(0, 3).map((r, i) => (
             <div key={i} style={{ padding: 'var(--dm-sp-3)', background: 'var(--dm-neutral-50)', borderRadius: 'var(--dm-radius-md)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <span style={{ color: 'var(--dm-accent)', fontSize: 'var(--dm-fs-small)', letterSpacing: 1 }}>{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</span>
+                <span style={{ color: starColor, fontSize: 'var(--dm-fs-small)', letterSpacing: 1 }}>{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</span>
                 <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)' }}>{r.author}</span>
               </div>
               <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-800)', lineHeight: 1.5 }}>{r.body}</div>

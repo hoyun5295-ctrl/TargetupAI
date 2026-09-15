@@ -185,3 +185,11 @@ export const DM_PRODUCT_TITLE_PROPS: Array<{ section: string; prop: string; desc
 export const DM_TAB_ITEM_PROPS: Array<{ section: string; prop: string; desc: string }> = [
   { section: 'tab_cards', prop: 'tabs[].link_url', desc: '이미지 탭을 눌렀을 때 이동할 주소 (content_type=image 전용 · 미지정 = 링크 없음)' },
 ];
+
+/** ★ 2026-09-15 리뷰 별점 색(임은지 접수 cmu2ao5qn02tjjnlu1spouqzy) · 별이 강조색(회사 킷 accent_color)에서만 와서
+ *  흰 강조색에서는 흰 카드 위 별이 안 보였고 고를 입구가 없었다. 편집 패널(ReviewsEditor)은 DM·이메일 공용이라
+ *  **두 렌더러·편집 캔버스가 함께 소비한다**(이메일 원장 = EMAIL_REVIEWS_PROPS). 미지정 = 강조색 그대로(회귀 0).
+ *  소비 검증 = dm-editor-parity.test.ts · email/__tests__/email-editor-parity.test.ts */
+export const DM_REVIEWS_PROPS: Array<{ section: string; prop: string; desc: string }> = [
+  { section: 'reviews', prop: 'star_color', desc: '별점 색: 리뷰별 별 · 평균 별 (미지정 = 강조색)' },
+];

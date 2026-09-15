@@ -12,7 +12,7 @@ import { renderSection } from './dm-section-renderer';
 import { renderDmDesign3Css, renderDmBaseCss, renderDmTokensCss, renderDmDividerSvg } from './dm-tokens';
 import type { Section } from './dm-section-registry';
 import { SECTION_DEFAULTS } from './dm-section-registry';
-import { DM_REMOVED_DEAD_CONTROLS } from './dm-property-contract';
+import { DM_REMOVED_DEAD_CONTROLS, DM_REVIEWS_PROPS } from './dm-property-contract';
 // ★ 2026-09-04 CTA 배치 판정 CT — 렌더러·캔버스·편집기가 공유하는 하나(임은지 접수)
 import { CTA_LAYOUT_TREATMENTS, ctaLayoutApplies } from './dm-art-direction';
 import { DM_BACKGROUNDS, DM_DIVIDERS, DM_NEWLINE_FIELDS, DM_IMAGE_FITS, DM_GALLERY_FULL_BLEED, DM_GALLERY_CAPTION_VISIBLE, DM_SLIDESHOW_PAUSE, DM_SLIDESHOW_RATIOS, DM_STORE_INFO_NEWLINE_FIELDS, DM_STORE_INFO_LABELS, DM_PRODUCT_CAROUSEL_SWIPE_MIN, DM_PRODUCT_CAROUSEL_PER_PAGE, DM_WIRED_ORPHAN_MARKERS } from './dm-property-contract';
@@ -745,5 +745,30 @@ describe('CTA 버튼 배치 — 구도마다 소비 (임은지 0904)', () => {
     const front = listed![1].split(',').map((s) => s.trim().replace(/['"]/g, '')).filter(Boolean);
     expect(front, '미러가 갈리면 편집기가 감춘 컨트롤을 렌더러가 소비하거나 그 반대가 된다')
       .toEqual([...CTA_LAYOUT_TREATMENTS]);
+  });
+});
+
+// ── 리뷰 별점 색(star_color) · 2026-09-15 임은지 접수(cmu2ao5qn02tjjnlu1spouqzy) ──
+//   접수는 이메일이지만 편집 패널(ReviewsEditor)은 DM과 공용이다. 한 채널만 읽으면 DM에서 "골라도 안 바뀌는" 컨트롤이 된다.
+describe('리뷰 별점 색 — 발행 SSR 구도 전부·편집 캔버스가 소비한다', () => {
+  const rv = (props: Record<string, unknown>, treatment?: string) =>
+    renderSection(mk('reviews', { title: '후기', reviews: [{ rating: 5, author: '김', body: '좋아요' }, { rating: 4, author: '이', body: '만족' }], ...props }, treatment ? ({ treatment } as any) : {}), {} as any);
+
+  it('원장 등재 = DM 표에 star_color', () => {
+    expect(DM_REVIEWS_PROPS.map((p) => p.prop)).toContain('star_color');
+  });
+  for (const t of ['classic', 'quote']) {
+    it(`[${t}] star_color가 별 색으로 실린다 · 미지정 = var(--dm-accent)`, () => {
+      const tr = t === 'classic' ? undefined : t;
+      expect(rv({ star_color: '#b45309' }, tr)).toContain('color:#b45309');
+      expect(rv({}, tr)).not.toContain('#b45309');
+      expect(rv({}, tr)).toContain('color:var(--dm-accent)');
+    });
+  }
+  it('편집 캔버스(ReviewsSection)도 star_color를 읽는다', () => {
+    const src = readFileSync(resolve(process.cwd(), '../frontend/src/components/dm/canvas/NewSections.tsx'), 'utf8');
+    const a = src.indexOf('export function ReviewsSection');
+    const b = src.indexOf('export function', a + 1);
+    expect(src.slice(a, b === -1 ? undefined : b), '캔버스가 안 읽으면 편집 화면만 강조색으로 남는다').toContain('star_color');
   });
 });

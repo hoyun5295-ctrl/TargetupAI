@@ -55,7 +55,15 @@
 
 ## 2) 활성 버그
 
-### 🟠 B-0915-2 AI 자동제작 DM·이메일: CTA 버튼·라벨 글자가 흰색이라 제작이 안 된 것처럼 보인다 (🟡 코드 수정 완료 · 배포 대기) — 2026-09-15 임은지 접수 `cmu27bvxq02srjnluxi30j3a1`
+### 🟠 B-0915-3 이메일 캠페인 리뷰: 별점이 흰색이라 미리보기에서 안 보이고, 평균 별점 표시를 미사용으로 눌러도 그대로다 (🟡 코드 수정 완료 · 배포 대기 · 실측 = 0916 직원) — 2026-09-15 임은지 접수 `cmu2ao5qn02tjjnlu1spouqzy`
+
+- **원인(코드)**: 이메일 별 색은 강조색 한 줄에서만 왔다(`email-section-renderer.ts renderReviews` · 우선순위 `design.palette.accent → 회사 킷 accent_color → 기본` `email-tokens.ts:237`). 리뷰 블록에는 색 입구가 없었다(공용 편집 패널 `ReviewsEditor` · 이메일 블록 "버튼·강조색"은 `EMAIL_ACCENT_AWARE`에 리뷰가 없고 그 값도 primary만 바꾼다). `show_average_rating`은 이메일 렌더러가 한 번도 읽지 않았고 평균 줄 자체가 없었다(DM SSR·캔버스는 소비 중). 접수 캠페인의 흰색이 캠페인 `palette.accent`인지 회사 킷 `accent_color`인지는 미검증(테마 프리셋에 흰 강조색 0 · grep).
+- **수정**: 공용 편집 패널에 "별점 색"(`star_color` · 미지정 = 강조색) → 이메일 렌더러(리뷰별 별 · 평균 별)·DM SSR(classic·quote)·편집 캔버스가 함께 소비. 이메일에 평균 별점 줄 추가(`show_average_rating` · 미지정 = 표시 = 편집기 기본값 · DM classic 미러). 원장 `EMAIL_REVIEWS_PROPS`·`DM_REVIEWS_PROPS` 등재. 테스트 +9(`email-editor-parity`·`dm-editor-parity` · 실패 7 확인 후 구현) · 백엔드 305파일 4,750 · tsc 0(백·프) · DDL 0.
+- **바뀌는 기존 동작**: 리뷰 블록이 있는 기존 이메일 캠페인은 미리보기·발송 때 다시 렌더되므로 평균 별점 줄이 새로 보인다(끄려면 미사용). 리뷰별 별과 제목·따옴표 장식 색은 그대로. 대상 실측(0915 운영 PG · Harold) = 리뷰 블록 있는 이메일 캠페인 `draft` 2건뿐(예약·발송 상태 0).
+- **범위 밖 기록**: 리뷰 블록이 이메일 속성 원장에 없어 파리티가 못 잡았다(원장 누락 부류 · 2026-08-27 교훈 "원장에 섹션을 골라 넣으면 원장이 아니다"). 이메일이 렌더하는 섹션 전부를 원장과 대조하는 전수 작업은 별도 과제. 흰 강조색 기본값 자체(회사 킷 색 무검증)는 B-0915-2(아래) 범위 밖과 같은 뿌리.
+- **실측(0916 직원)**: 별이 안 보이던 이메일 캠페인 리뷰 블록 → 별점 색 지정 → 미리보기 별이 그 색 · 평균 별점 표시 미사용 → 평균 줄이 사라지고 리뷰별 별은 남는다 · DM 편집기 리뷰 블록에서도 별점 색이 캔버스·발행물에 반영.
+
+### 🟠 B-0915-2 AI 자동제작 DM·이메일: CTA 버튼·라벨 글자가 흰색이라 제작이 안 된 것처럼 보인다 (🟡 0915 배포완료 · 실측 대기 · 기존 초안 2건은 재생성 필요) — 2026-09-15 임은지 접수 `cmu27bvxq02srjnluxi30j3a1`
 
 - **실측(0915 운영 PG · Harold)**: `주식회사 인비토` `companies.brand_kit.primary_color = #ffffff` · 같은 날 `[AI 자동제작]` DM 초안 2건(13:25·13:50) `dm_pages.brand_kit.primary_color = #ffffff` · 13:50 초안 CTA 2섹션(`so-v3-cta-event2-cta`·`so-v3-cta-final-cta` · bar)에 `buttons[].color = #ffffff`(13:25 초안 0 · 둘 다 13:55 수정 · 버전 기록 0) · `email_campaigns.design` = jsonb.
 - **원인**: AI 자동제작(`campaign-quick.ts`)이 회사 킷 주색을 보정 없이 DM 초안 `brand_kit`과 이메일 렌더에 실었다. DM CTA 바는 글자 `#fff` 고정(`dm-section-renderer.ts:552-554`) · 이메일 bar는 흰 버튼에 글자 = 주색(`email-section-renderer.ts:304`·`:331-333`). 흰색 보정 `accessiblePrimaryOf`는 AI 영업 조립 두 곳(`sales-outreach-produce.ts:2386`·`:2836`)에만 있었다. 이메일은 미리보기·발송이 회사 킷 + `design`으로 다시 렌더한다(`routes/email.ts:1121-1129` · `email-channel.ts:373`·`:411` · 우선순위 `email-tokens.ts:236`).

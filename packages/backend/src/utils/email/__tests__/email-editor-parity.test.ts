@@ -9,7 +9,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderEmailSections } from '../email-section-renderer';
-import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS, EMAIL_HEADER_PROPS, EMAIL_CTA_BUTTON_PROPS, EMAIL_CTA_BUTTON_STYLES, EMAIL_COUPON_PROPS, EMAIL_COUPON_TREATMENTS, EMAIL_SECTION_MOTIF_OFF, EMAIL_MOTIF_SECTIONS } from '../email-property-contract';
+import { EMAIL_PRODUCT_TREATMENTS, EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_CAROUSEL_PROPS, EMAIL_HERO_PROPS, EMAIL_HERO_IMAGE_TREATMENTS, EMAIL_HERO_HEIGHT, EMAIL_DESIGN_PROPS, EMAIL_HEADER_PROPS, EMAIL_CTA_BUTTON_PROPS, EMAIL_CTA_BUTTON_STYLES, EMAIL_COUPON_PROPS, EMAIL_COUPON_TREATMENTS, EMAIL_SECTION_MOTIF_OFF, EMAIL_MOTIF_SECTIONS, EMAIL_REVIEWS_PROPS } from '../email-property-contract';
+import { resolveEmailBrand } from '../email-tokens';
 import type { Section } from '../../dm/dm-section-registry';
 
 const PRODUCTS = [
@@ -432,5 +433,43 @@ describe('CTA 버튼 배치 — 이메일 발송 HTML에 반영된다 (2026-09-0
     const src = readFileSync(resolve(process.cwd(), 'src/utils/email/email-section-renderer.ts'), 'utf8');
     expect(src, '이메일 렌더러가 DM과 다른 조건을 쓰면 편집기가 감춘 컨트롤을 소비하거나 그 반대가 된다')
       .toContain('ctaLayoutApplies');
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// 리뷰 · 2026-09-15 임은지 접수(cmu2ao5qn02tjjnlu1spouqzy)
+//   "별점이 흰색이라 미리보기에서 안 보인다(드래그하면 보인다) · 평균 별점 표시를 미사용으로 눌러도 안 없어진다."
+//   별 색은 강조색(palette.accent → 회사 킷 accent_color) 한 줄에서만 왔고 고를 입구가 없었다.
+//   show_average_rating 은 이메일 렌더러가 한 번도 읽지 않았고 평균 줄 자체가 없었다(DM SSR·캔버스는 소비 중).
+// ────────────────────────────────────────────────────────────
+const reviewsSection = (props: Record<string, unknown>): Section =>
+  ({ id: 's-rv', type: 'reviews', order: 0, visible: true,
+     props: { title: '고객 후기', reviews: [{ rating: 5, body: '좋아요', author: '김**' }, { rating: 4, body: '만족해요', author: '이**' }], ...props } } as unknown as Section);
+
+const rrv = (props: Record<string, unknown>) => renderEmailSections([reviewsSection(props)], {});
+
+describe('리뷰 — 별점 색·평균 별점이 이메일 발송 HTML에 반영된다', () => {
+  for (const { prop, desc, probe } of EMAIL_REVIEWS_PROPS) {
+    it(`${prop} (${desc}) · 값을 주면 출력이 실제로 달라진다`, () => {
+      expect(rrv({ [prop]: probe }), `${prop}가 소비되지 않는다 (등재만 하고 렌더러가 안 읽음)`).not.toBe(rrv({}));
+    });
+  }
+
+  it('별점 색을 지정하면 리뷰 별과 평균 별 모두 그 색이다', () => {
+    const html = rrv({ star_color: '#b45309' });
+    expect(html.split('color:#b45309').length - 1, '리뷰 2건 + 평균 1줄 = 별 3곳').toBe(3);
+  });
+
+  it('별점 색 미지정 = 강조색 그대로(회귀 0)', () => {
+    expect(rrv({})).toContain(`color:${resolveEmailBrand(null, null).accent}`);
+  });
+
+  it('평균 별점 표시: 미지정·사용이면 평균과 건수가 나오고 미사용이면 사라진다 · 리뷰별 별점은 남는다', () => {
+    expect(rrv({})).toContain('(2건)');
+    expect(rrv({})).toContain('>4.5<');
+    expect(rrv({ show_average_rating: true })).toBe(rrv({}));
+    const off = rrv({ show_average_rating: false });
+    expect(off).not.toContain('(2건)');
+    expect(off).toContain('★★★★☆');
   });
 });

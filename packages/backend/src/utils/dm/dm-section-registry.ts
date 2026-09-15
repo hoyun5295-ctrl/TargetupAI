@@ -428,6 +428,8 @@ export type ReviewsProps = {
   reviews: ReviewItem[];
   show_average_rating?: boolean;
   show_more_link?: string;
+  /** ★ 2026-09-15 별점 색(미지정 = 강조색) · DM·이메일 렌더러·캔버스 소비 · 원장 DM_REVIEWS_PROPS·EMAIL_REVIEWS_PROPS */
+  star_color?: string;
 };
 
 // ────────────── Props 맵 (타입 레벨) ──────────────

@@ -261,7 +261,7 @@ export type MapStore = { id: string; name: string; address: string; lat: number;
 export type MapStoreLocatorProps = { stores: MapStore[]; enable_user_location?: boolean; default_zoom?: number; };
 
 export type ReviewItem = { rating: number; author: string; body: string; date?: string; };
-export type ReviewsProps = { title?: string; reviews: ReviewItem[]; show_average_rating?: boolean; show_more_link?: string; };
+export type ReviewsProps = { title?: string; reviews: ReviewItem[]; show_average_rating?: boolean; show_more_link?: string; star_color?: string; };
 
 export type SectionPropsMap = {
   // 옛 11

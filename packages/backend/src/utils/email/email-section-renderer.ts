@@ -601,9 +601,16 @@ function renderReviews(p: ReviewsProps, b: EmailBrand): string {
   if (items.length === 0) return '';
   const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
   const stars = (n: number) => { const r = Math.max(0, Math.min(5, Math.round(Number(n) || 0))); return '★★★★★'.slice(0, r) + '☆☆☆☆☆'.slice(0, 5 - r); };
+  // ★ 2026-09-15 임은지 접수(cmu2ao5qn02tjjnlu1spouqzy) · 별 색 = 편집기 별점 색(star_color) → 없으면 강조색(흰 강조색이면 흰 카드 위 별이 안 보였다) ·
+  //   평균 줄 = show_average_rating(미지정 = 표시 · 편집기 기본값 · DM SSR renderReviews 미러 · 전에는 이메일이 한 번도 안 읽었다)
+  const starColor = p.star_color ? esc(p.star_color) : b.accent;
+  const avg = (items.reduce((sum, r) => sum + Math.max(0, Math.min(5, Number(r.rating) || 0)), 0) / items.length).toFixed(1);
+  const average = p.show_average_rating !== false
+    ? `<div style="padding:0 0 ${b.sp[4]};text-align:center"><span style="font-family:${b.displayFont};font-size:${b.type.h2.size};font-weight:800;color:${b.text}">${avg}</span><span style="color:${starColor};font-size:${b.type.body.size};letter-spacing:2px;margin-left:${b.sp[2]}">★★★★★</span><span style="font-size:${b.type.tiny.size};color:${b.textMuted};margin-left:${b.sp[2]}">(${items.length}건)</span></div>`
+    : '';
   // ★ 2026-07-07(5) 디자인 2.0 — 리뷰 = 흰 카드 + 헤어라인 보더 (면 위 면 대비)
-  const cards = items.map((r) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[3]};${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[4]} ${b.sp[5]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px"><div style="color:${b.accent};font-size:${b.type.body.size};letter-spacing:2px">${stars(r.rating)}</div><div style="font-size:${b.type.body.size};color:${b.text};margin:${b.sp[2]} 0;line-height:1.6">${esc(r.body)}</div><div style="font-size:${b.type.tiny.size};font-weight:600;color:${b.textMuted}">${esc(r.author)}${r.date ? ' · ' + esc(r.date) : ''}</div></td></tr></table>`).join('');
-  return `<tr><td style="padding:${b.sp[6]}">${title}${cards}</td></tr>`;
+  const cards = items.map((r) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[3]};${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[4]} ${b.sp[5]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px"><div style="color:${starColor};font-size:${b.type.body.size};letter-spacing:2px">${stars(r.rating)}</div><div style="font-size:${b.type.body.size};color:${b.text};margin:${b.sp[2]} 0;line-height:1.6">${esc(r.body)}</div><div style="font-size:${b.type.tiny.size};font-weight:600;color:${b.textMuted}">${esc(r.author)}${r.date ? ' · ' + esc(r.date) : ''}</div></td></tr></table>`).join('');
+  return `<tr><td style="padding:${b.sp[6]}">${title}${average}${cards}</td></tr>`;
 }
 
 // ── 정적 대체(이메일 비호환 블록 → 깨지지 않는 요약 렌더) ──

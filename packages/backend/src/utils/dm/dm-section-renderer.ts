@@ -1293,16 +1293,22 @@ function renderMapStoreLocator(p: any): string {
   </div>`;
 }
 
+// ★ 2026-09-15 리뷰 별점 색(임은지 접수 cmu2ao5qn02tjjnlu1spouqzy) · 편집기 별점 색 → 없으면 강조색(현행) · 캔버스 ReviewsSection·이메일 renderReviews 미러
+function reviewStarColor(p: any): string {
+  return p?.star_color ? escapeHtml(p.star_color) : 'var(--dm-accent)';
+}
+
 // ★ 2026-07-13 디자인 3.0 — reviews treatment (classic / quote 대표 후기 인용 강조)
 function renderReviews(p: any, treatment?: string): string {
   const reviews = Array.isArray(p?.reviews) ? p.reviews : [];
   if (treatment === 'quote' && reviews.length > 0) return renderReviewsQuote(p, reviews);
   const avg = reviews.length > 0 ? (reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1) : '0.0';
+  const starColor = reviewStarColor(p);
   // ★ 2026-07-02 v2 — 리뷰 카드 라운드/여백/평점 타이포 격상
   const items = reviews.slice(0, 3).map((r: any) => `
     <div style="padding:var(--dm-sp-4) var(--dm-sp-5);background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:14px;margin-bottom:var(--dm-sp-2);box-shadow:var(--dm-shadow-sm)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="color:var(--dm-accent);font-size:var(--dm-fs-small);letter-spacing:2px">${'★'.repeat(r.rating || 0)}${'☆'.repeat(5 - (r.rating || 0))}</span>
+        <span style="color:${starColor};font-size:var(--dm-fs-small);letter-spacing:2px">${'★'.repeat(r.rating || 0)}${'☆'.repeat(5 - (r.rating || 0))}</span>
         <span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">${escapeHtml(r.author || '')}</span>
       </div>
       <div style="font-size:var(--dm-fs-small);line-height:1.7;color:var(--dm-neutral-700)">${escapeHtml(r.body || '')}</div>
@@ -1310,7 +1316,7 @@ function renderReviews(p: any, treatment?: string): string {
     </div>`).join('');
   return `<div class="dm-section dm-reviews" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
     ${p.title ? `<div class="dm-text-h2" style="display:flex;align-items:center;gap:8px;color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-3)"><span style="color:var(--dm-accent)">${dmIcon('star', 20)}</span>${escapeHtml(p.title)}</div>` : ''}
-    ${reviews.length > 0 && p.show_average_rating !== false ? `<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:var(--dm-sp-4)"><span style="font-size:var(--dm-fs-hero);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-0.02em">${avg}</span><span style="color:var(--dm-accent);letter-spacing:2px">★★★★★</span><span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">(${reviews.length}건)</span></div>` : ''}
+    ${reviews.length > 0 && p.show_average_rating !== false ? `<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:var(--dm-sp-4)"><span style="font-size:var(--dm-fs-hero);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-0.02em">${avg}</span><span style="color:${starColor};letter-spacing:2px">★★★★★</span><span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">(${reviews.length}건)</span></div>` : ''}
     ${items || `<div class="dm-mood-slot" style="text-align:center;color:var(--dm-neutral-400);padding:var(--dm-sp-6)">[리뷰를 추가해주세요]</div>`}
   </div>`;
 }
@@ -1320,7 +1326,7 @@ function renderReviewsQuote(p: any, reviews: any[]): string {
   const [first, ...rest] = reviews.slice(0, 3);
   const restRows = rest.map((r: any) => `
     <div style="display:flex;gap:10px;align-items:baseline;padding:10px 0;border-top:1px solid var(--dm-neutral-200);text-align:left">
-      <span style="color:var(--dm-accent);font-size:var(--dm-fs-tiny);letter-spacing:1px;flex-shrink:0">${'★'.repeat(r.rating || 0)}</span>
+      <span style="color:${reviewStarColor(p)};font-size:var(--dm-fs-tiny);letter-spacing:1px;flex-shrink:0">${'★'.repeat(r.rating || 0)}</span>
       <span style="flex:1;font-size:var(--dm-fs-small);color:var(--dm-neutral-700);line-height:1.6">${escapeHtml(r.body || '')}</span>
       <span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);flex-shrink:0">${escapeHtml(r.author || '')}</span>
     </div>`).join('');
@@ -1329,7 +1335,7 @@ function renderReviewsQuote(p: any, reviews: any[]): string {
     <div aria-hidden="true" style="font-family:var(--dm-font-display);font-size:52px;line-height:0.6;color:var(--dm-accent);opacity:0.85">&ldquo;</div>
     <div style="margin-top:var(--dm-sp-3);font-size:var(--dm-fs-h2);font-weight:700;line-height:1.55;font-family:var(--dm-font-display);color:var(--dm-neutral-900)">${escapeHtml(first.body || '')}</div>
     <div style="margin-top:var(--dm-sp-3);display:flex;gap:8px;align-items:baseline">
-      <span style="color:var(--dm-accent);letter-spacing:2px;font-size:var(--dm-fs-small)">${'★'.repeat(first.rating || 0)}${'☆'.repeat(Math.max(0, 5 - (first.rating || 0)))}</span>
+      <span style="color:${reviewStarColor(p)};letter-spacing:2px;font-size:var(--dm-fs-small)">${'★'.repeat(first.rating || 0)}${'☆'.repeat(Math.max(0, 5 - (first.rating || 0)))}</span>
       <span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">${escapeHtml(first.author || '')}</span>
     </div>
     ${restRows ? `<div style="margin-top:var(--dm-sp-5)">${restRows}</div>` : ''}
