@@ -6,7 +6,7 @@
  * - QuickStartThumbnail: 빠른 시작 7 시나리오용 — 시나리오마다 고유 미니 화면 일러스트(SVG)
  *   (룰렛=회전판 / 매장안내=지도+핀 / 시즌세일=카운트다운+할인뱃지 등 — 시나리오가 한눈에 와닿게)
  */
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 // ── 공용 폰 프레임 ───────────────────────────────────────────────
 function PhoneFrame({ children }: { children: ReactNode }) {
@@ -50,6 +50,34 @@ export function DmThumbnail({ types, accent, pageCount }: { types?: string[]; ac
         ))}
       </div>
     </PhoneFrame>
+  );
+}
+
+// ── 목록 리스트형 대표 이미지 (★ 2026-09-16 Harold A안) ─────────────
+/** DM 안 첫 이미지(서버 section_summary.cover)를 작은 썸네일로. 없거나 못 불러오면 섹션 색 블록(SECTION_THUMB 공용 색)으로 대체 */
+export function DmMiniCover({ cover, types, accent, pageCount, width = 44, height = 56 }: {
+  cover?: string | null; types?: string[]; accent?: string | null; pageCount?: number; width?: number; height?: number;
+}) {
+  const [broken, setBroken] = useState(false);
+  const box = { width, height, borderRadius: 8, overflow: 'hidden', flexShrink: 0, background: '#1e1b4b', border: '1px solid rgba(255,255,255,0.08)' } as const;
+  if (cover && !broken) {
+    return (
+      <div style={box}>
+        <img src={cover} alt="" loading="lazy" onError={() => setBroken(true)} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }} />
+      </div>
+    );
+  }
+  const keys = types && types.length > 0
+    ? types.slice(0, 4)
+    : Array.from({ length: Math.min(Math.max(pageCount || 1, 1), 3) }, (_, i) => (i === 0 ? 'hero' : 'text_card'));
+  return (
+    <div style={{ ...box, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3, padding: '0 8px' }}>
+      {keys.map((t, i) => {
+        const v = SECTION_THUMB[t] || { color: '#cbd5e1', h: 12 };
+        const color = (t === 'hero' || t === 'cta') && accent ? accent : v.color;
+        return <div key={i} style={{ height: Math.max(4, Math.round(v.h / 3)), borderRadius: 2, background: color, opacity: 0.85, flexShrink: 0 }} />;
+      })}
+    </div>
   );
 }
 

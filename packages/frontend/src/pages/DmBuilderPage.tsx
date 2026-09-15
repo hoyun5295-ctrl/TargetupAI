@@ -9,11 +9,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
-import { DmThumbnail, QuickStartThumbnail } from '../components/dm/DmThumbnails';
+import { DmMiniCover, QuickStartThumbnail } from '../components/dm/DmThumbnails';
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
 import { useDmBuilderStore } from '../stores/dmBuilderStore';
 import { createSection } from '../utils/dm-section-defaults';
+import { formatDateTimeShort } from '../utils/formatDate';
 import { uploadOne } from '../components/dm/panels/FormControls';
 import { useDmKeyboardShortcuts } from '../hooks/useDmKeyboardShortcuts';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
@@ -68,6 +69,8 @@ type DmSectionSummary = {
   headline: string | null;
   accent: string | null;
   count: number;
+  /** ★ 2026-09-16 목록 리스트형 대표 이미지(서버 buildSectionSummary · 공개 서빙 경로). 없으면 null */
+  cover?: string | null;
 };
 
 type DmListItem = {
@@ -175,7 +178,8 @@ export default function DmBuilderPage() {
   const [showAiFloatingBar, setShowAiFloatingBar] = useState(false);
   const [floatingActionLoading, setFloatingActionLoading] = useState<string | null>(null);
   // ★ D216+ 목록 페이징 (Harold 명시 2026-05-25 — 가로 3개 × 2열 = 6개 영역)
-  const DM_PAGE_SIZE = 6;
+  // ★ 2026-09-16 리스트형(Harold A안) — 한 줄 높이가 작아 한 페이지 10개
+  const DM_PAGE_SIZE = 10;
   const [currentPage, setCurrentPage] = useState(1);
   // 빠른시작·자연어 생성 전 5크레딧 차감 확인 (Harold 명시 — 즉시 차감 X)
   const [pendingGen, setPendingGen] = useState<{ prompt?: string; scenario?: string; desc: string } | null>(null);
@@ -1189,68 +1193,8 @@ export default function DmBuilderPage() {
           ))}
         </div>
 
-        {/* AI 진단 카드 — 항상 표시 (자연 한국어) */}
-        <div style={{
-          background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(168, 85, 247, 0.10), rgba(217, 70, 239, 0.15))',
-          border: '1px solid rgba(168, 85, 247, 0.3)',
-          borderRadius: 14,
-          padding: 18,
-          marginBottom: 20,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <span style={{ fontSize: 18 }}>✨</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>AI 진단</span>
-            <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(168, 85, 247, 0.3)', color: '#e9d5ff', borderRadius: 10, fontWeight: 700 }}>실시간</span>
-          </div>
-          <div style={{ fontSize: 14, color: '#fff', lineHeight: 1.6, marginBottom: 6 }}>
-            {(() => {
-              if (metricsLoading) return '현황을 불러오는 중이에요.';
-              if (ov.total_dm === 0) return '아직 만든 DM이 없어요. 위 빠른 시작 카드를 누르면 AI가 1분 만에 만들어 드려요.';
-              if (ov.published_dm === 0) return `DM ${ov.total_dm}개를 작성 중이에요. 검수 후 발행하면 고객에게 보낼 수 있어요.`;
-              if (ov.total_views_30d < 50) return `발행한 DM의 열람이 쌓이는 중이에요. 데이터가 더 모이면 정확히 분석해 드릴게요.`;
-              if (ov.avg_ctr_30d >= 5) return `평균 클릭률 ${ov.avg_ctr_30d}%, 아주 좋아요. 성과 좋은 DM의 구성을 다른 캠페인에도 활용해 보세요.`;
-              if (ov.avg_ctr_30d >= 2) return `평균 클릭률 ${ov.avg_ctr_30d}%, 무난해요. AI 카피 다듬기로 더 끌어올릴 수 있어요.`;
-              return `평균 클릭률 ${ov.avg_ctr_30d}%, 개선 여지가 있어요. CTA 위치와 카피, 이미지를 점검해 보세요.`;
-            })()}
-          </div>
-          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontStyle: 'italic', marginTop: 8 }}>
-            집계: 최근 30일 열람·이벤트 응답 데이터
-          </div>
-        </div>
-
-        {/* 1-click 액션 3 카드 — DM이 1개 이상일 때 (로딩 중엔 숨김) */}
-        {!metricsLoading && ov.total_dm > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 20 }}>
-            {[
-              { icon: '✍️', label: 'AI 카피 다듬기',   desc: '전체 섹션 카피 톤을 하나로', gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.2), rgba(239, 68, 68, 0.1))',  border: 'rgba(244, 63, 94, 0.4)',  action: 'ai_refine' },
-              { icon: '🎨', label: '디자인 맞추기',    desc: '브랜드 색상 자동 적용',     gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(20, 184, 166, 0.1))', border: 'rgba(16, 185, 129, 0.4)', action: 'design_align' },
-              { icon: '🔗', label: '변수 채우기',      desc: '빈 변수에 기본값 자동 보완', gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(249, 115, 22, 0.1))', border: 'rgba(245, 158, 11, 0.4)', action: 'variable_consistency' },
-            ].map((a) => (
-              <button
-                key={a.action}
-                onClick={() => setToast({ type: 'info', message: 'DM 편집 화면에서 바로 쓸 수 있어요. 먼저 DM을 선택해 주세요.' })}
-                style={{
-                  padding: 14,
-                  background: a.gradient,
-                  border: `1px solid ${a.border}`,
-                  borderRadius: 12,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.25s',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.25)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)'; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                  <span style={{ fontSize: 22 }}>{a.icon}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{a.label}</span>
-                </div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>{a.desc}</div>
-              </button>
-            ))}
-          </div>
-        )}
+        {/* ★ 2026-09-16 Harold — 목록 화면 "AI 진단"(고정 문장 분기) 카드와 1-click 액션 3카드(토스트 안내만)를 메뉴에서 숨김.
+            실제 기능(편집 화면 AI 추천 액션 → POST /dm/:id/quick-action)은 그대로 둔다. */}
 
         {/* 자세히 보기 토글 — 항상 표시 */}
         <div style={{ marginBottom: 20 }}>
@@ -1332,16 +1276,38 @@ export default function DmBuilderPage() {
                 <span>{startIdx}–{endIdx} 표시 중</span>
               </div>
 
-              {/* 카드 영역 — 고정 트랙 + 가운데 정렬(카드 1~2개여도 중앙). 모바일 1열 자동 */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 264px))',
-                justifyContent: 'center',
-                gap: 16,
-                marginBottom: 20,
-              }}>
+              {/* ★ 2026-09-16 Harold A안 — 폰목업 카드 3열 → 리스트형 줄(대표 이미지 · 상태 · 열람 · 섹션 · 수정 · 자주 쓰는 버튼 + ⋯ 메뉴) */}
+              <style>{`
+                .dm-list { border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; background: rgba(255,255,255,0.03); margin-bottom: 20px; }
+                .dm-list-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 84px 64px 56px 92px 250px; align-items: center; gap: 14px; padding: 10px 16px; border-top: 1px solid rgba(255,255,255,0.06); }
+                .dm-list-row:first-child { border-top: 0; }
+                .dm-list-row.is-body { cursor: pointer; transition: background 0.15s; }
+                .dm-list-row.is-body:hover { background: rgba(168,85,247,0.07); }
+                .dm-list-head { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: 600; }
+                .dm-list-act { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+                .dm-menu-item:hover:not(:disabled) { background: rgba(255,255,255,0.08) !important; }
+                .dm-col-narrow, .dm-menu-narrow { display: none; }
+                .dm-list-ghost { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 0; border-top: 1px dashed rgba(255,255,255,0.14); background: transparent; color: #fff; text-align: left; transition: background 0.15s; }
+                .dm-list-ghost:hover:not(:disabled) { background: rgba(168,85,247,0.07); }
+                @media (max-width: 767px) {
+                  .dm-list-row { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; padding: 10px 12px; }
+                  .dm-list-head, .dm-col-wide, .dm-act-wide { display: none; }
+                  .dm-col-narrow { display: inline-block; }
+                  .dm-menu-narrow { display: block; }
+                }
+              `}</style>
+              <div className="dm-list">
+                <div className="dm-list-row dm-list-head">
+                  <span />
+                  <span>DM</span>
+                  <span className="dm-col-wide">상태</span>
+                  <span className="dm-col-wide">열람</span>
+                  <span className="dm-col-wide">섹션</span>
+                  <span className="dm-col-wide">수정</span>
+                  <span />
+                </div>
                 {paginatedList.map((dm) => (
-                  <DmCard
+                  <DmListRow
                     key={dm.id}
                     dm={dm}
                     onEdit={handleEdit}
@@ -1355,29 +1321,23 @@ export default function DmBuilderPage() {
                     cloning={cloningId === dm.id}
                   />
                 ))}
-                {/* 희소 상태 — 1~2개면 빈칸을 다음 추천 DM ghost 카드로 (첫 페이지만) */}
+                {/* 희소 상태 — 1~2개면 목록 끝에 다음 추천 DM 줄 (첫 페이지만) */}
                 {safePage === 1 && list.length > 0 && list.length < 3 && (() => {
                   const used = new Set(list.map((d) => (d.title || '').replace(/ 사본$/, '')));
                   const next = QUICK_STARTS.find((q) => !used.has(q.label)) || QUICK_STARTS[1];
                   return (
                     <button
+                      type="button"
+                      className="dm-list-ghost"
                       onClick={() => { if (!generating) setPendingGen({ scenario: next.label, desc: `${next.label}: ${next.hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
                       disabled={generating}
-                      style={{
-                        border: '1px dashed rgba(255,255,255,0.2)',
-                        borderRadius: 14,
-                        background: 'rgba(255,255,255,0.02)',
-                        cursor: generating ? 'not-allowed' : 'pointer',
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        gap: 10, padding: 16, minHeight: 240, textAlign: 'center',
-                        opacity: generating ? 0.5 : 1, transition: 'all 0.2s',
-                      }}
-                      onMouseEnter={(e) => { if (!generating) e.currentTarget.style.borderColor = 'rgba(168,85,247,0.5)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
+                      style={{ borderRadius: '0 0 14px 14px', cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1 }}
                     >
-                      <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(168,85,247,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>{next.icon}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>다음 추천: {next.label}</div>
-                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>클릭하면 AI가 바로 만들어 드려요</div>
+                      <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(168,85,247,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>{next.icon}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>다음 추천: {next.label}</div>
+                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5, marginTop: 2 }}>클릭하면 AI가 바로 만들어 드려요</div>
+                      </div>
                     </button>
                   );
                 })()}
@@ -1757,7 +1717,7 @@ function EditorModals() {
 
 // EmptyList 영역 영구 폐기 (D216+ 정합 — 자연어 입력 + 빠른 시작 + 자유롭게 DM 생성 영역 흐름 정합)
 
-function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAlias, onStop, onResume, cloning }: {
+function DmListRow({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAlias, onStop, onResume, cloning }: {
   dm: DmListItem;
   onEdit: (id: string, mode?: string) => void;
   onDelete: (id: string) => void;
@@ -1790,187 +1750,137 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAli
     }
   })();
 
-  return (
-    <div
-      style={{
-        background: 'rgba(255,255,255,0.04)',
-        borderRadius: 14,
-        border: '1px solid rgba(255,255,255,0.1)',
-        padding: 14,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-        cursor: 'pointer',
-        transition: 'all 0.25s ease',
-      }}
-      onClick={() => onEdit(dm.id, dm.layout_mode)}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'rgba(168, 85, 247, 0.08)';
-        e.currentTarget.style.borderColor = 'rgba(168, 85, 247, 0.3)';
-        e.currentTarget.style.boxShadow = '0 8px 24px rgba(168, 85, 247, 0.15), 0 1px 3px rgba(0,0,0,0.3)';
-        e.currentTarget.style.transform = 'translateY(-2px)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
-        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)';
-        e.currentTarget.style.transform = 'translateY(0)';
-      }}
-    >
-      {/* 폰목업 썸네일 */}
-      <div style={{ background: 'rgba(0,0,0,0.15)', borderRadius: 10, padding: '12px 0' }}>
-        <DmThumbnail types={summary?.types} accent={summary?.accent} pageCount={dm.page_count} />
-      </div>
+  // ★ 2026-09-16 Harold A안 — 리스트형 한 줄. 자주 쓰는 버튼(추적·주소 복사·편집)만 줄 끝에 두고 나머지(한글 주소·복제·중지/재개·삭제)는 ⋯ 메뉴로 접는다.
+  //   버튼마다 부르는 핸들러·잠금 조건(중지 = 주소 버튼 잠금 · 발행만 중지 · 중지만 재개)은 옛 카드와 같다.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [menuOpen]);
+  const closeThen = (fn: () => void) => { setMenuOpen(false); fn(); };
+  const hasUrl = !!dm.short_code;
+  const views = typeof dm.view_count === 'number' ? dm.view_count : 0;
+  const menuItemStyle = { width: '100%', textAlign: 'left', height: 32, padding: '0 10px', border: 0, background: 'transparent', borderRadius: 6, fontSize: 12, color: 'rgba(255,255,255,0.85)', cursor: 'pointer', whiteSpace: 'nowrap' } as const;
+  const chipStyle = { fontSize: 10, padding: '3px 8px', background: statusLabel.bg, border: `1px solid ${statusLabel.border}`, color: statusLabel.text, borderRadius: 6, fontWeight: 700, whiteSpace: 'nowrap' } as const;
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {dm.title || '(제목 없음)'}
-        </div>
-        {isLegacy && (
-          <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(245, 158, 11, 0.2)', border: '1px solid rgba(245, 158, 11, 0.4)', color: '#fcd34d', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 700 }}>레거시</span>
-        )}
-        {dm.catalog && (
-          // ★ 2026-09-15 카탈로그 DM 뱃지(settings.catalog · 목록 API 판정) — PC 책 펼침으로 발행되는 DM 표시
-          <span title="휴대폰은 슬라이드, PC는 책처럼 펼쳐 보이는 카탈로그 DM" style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(139, 92, 246, 0.2)', border: '1px solid rgba(139, 92, 246, 0.45)', color: '#c4b5fd', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 700 }}>카탈로그</span>
-        )}
-      </div>
-      {(dm.store_name || summary?.headline) && (
-        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: -4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {dm.store_name || summary?.headline}
-        </div>
-      )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 10, padding: '3px 8px', background: statusLabel.bg, border: `1px solid ${statusLabel.border}`, color: statusLabel.text, borderRadius: 6, fontWeight: 700 }}>
-          {statusLabel.label}
-        </span>
-        {typeof dm.view_count === 'number' && dm.view_count > 0 && (
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>열람 {dm.view_count.toLocaleString()}</span>
-        )}
-        {summary && summary.count > 0 && (
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>섹션 {summary.count}개</span>
-        )}
-      </div>
-      <div style={{ flex: 1 }} />
-      {dm.short_code && (
-        // ★ 2026-08-06 중지 상태에서는 주소 버튼을 잠근다.
-        //   [발행 주소 복사]는 `POST /dm/:id/publish`를 부르므로 열어 두면 **복사가 곧 재개**가 된다.
-        //   서버도 409로 막지만, 눌리는 버튼을 남겨 두면 담당자가 실패 토스트로 배우게 된다.
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            onClick={(e) => { e.stopPropagation(); if (!isStopped) onCopyUrl(dm.id); }}
-            disabled={isStopped}
-            title={isStopped ? '중지된 DM입니다. [재개] 후 복사할 수 있어요.' : '발행 주소 복사 (추가 과금 없음)'}
-            style={{ flex: 1, height: 32, background: 'rgba(16,185,129,0.12)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: isStopped ? 'not-allowed' : 'pointer', transition: 'all 0.2s', opacity: isStopped ? 0.35 : 1 }}
-            onMouseEnter={(e) => { if (!isStopped) e.currentTarget.style.background = 'rgba(16,185,129,0.2)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.12)'; }}
-          >
-            발행 주소 복사
-          </button>
-          {onKoreanAlias && (
-            <button
-              onClick={(e) => { e.stopPropagation(); if (!isStopped) onKoreanAlias(dm.id, dm.title); }}
-              disabled={isStopped}
-              title={isStopped ? '중지된 DM입니다. [재개] 후 사용할 수 있어요.' : '한글 주소: hlj.kr/반짝세일_07처럼 기억하기 쉬운 공용 주소 (무료)'}
-              style={{ height: 32, padding: '0 10px', background: 'rgba(56,189,248,0.12)', color: '#7dd3fc', border: '1px solid rgba(56,189,248,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: isStopped ? 'not-allowed' : 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', opacity: isStopped ? 0.35 : 1 }}
-              onMouseEnter={(e) => { if (!isStopped) e.currentTarget.style.background = 'rgba(56,189,248,0.2)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(56,189,248,0.12)'; }}
-            >
-              한글 주소
-            </button>
+  return (
+    <div className="dm-list-row is-body" onClick={() => onEdit(dm.id, dm.layout_mode)}>
+      <DmMiniCover key={summary?.cover || 'none'} cover={summary?.cover} types={summary?.types} accent={summary?.accent} pageCount={dm.page_count} />
+
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#fff', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {dm.title || '(제목 없음)'}
+          </span>
+          {isLegacy && (
+            <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(245, 158, 11, 0.2)', border: '1px solid rgba(245, 158, 11, 0.4)', color: '#fcd34d', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 700, flexShrink: 0 }}>레거시</span>
+          )}
+          {dm.catalog && (
+            // ★ 2026-09-15 카탈로그 DM 뱃지(settings.catalog · 목록 API 판정) — PC 책 펼침으로 발행되는 DM 표시
+            <span title="휴대폰은 슬라이드, PC는 책처럼 펼쳐 보이는 카탈로그 DM" style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(139, 92, 246, 0.2)', border: '1px solid rgba(139, 92, 246, 0.45)', color: '#c4b5fd', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 700, flexShrink: 0 }}>카탈로그</span>
           )}
         </div>
-      )}
-      {dm.has_send_history && onTrack && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, minWidth: 0 }}>
+          {/* 휴대폰 폭에서는 상태 열이 숨으므로 제목 아래에 같은 칩을 둔다 */}
+          <span className="dm-col-narrow" style={chipStyle}>{statusLabel.label}</span>
+          {(dm.store_name || summary?.headline) && (
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {dm.store_name || summary?.headline}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="dm-col-wide"><span style={chipStyle}>{statusLabel.label}</span></div>
+      <div className="dm-col-wide" style={{ fontSize: 13, color: views > 0 ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.3)', fontVariantNumeric: 'tabular-nums' }}>{views.toLocaleString()}</div>
+      <div className="dm-col-wide" style={{ fontSize: 13, color: 'rgba(255,255,255,0.8)', fontVariantNumeric: 'tabular-nums' }}>{summary?.count ?? 0}</div>
+      <div className="dm-col-wide" style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', whiteSpace: 'nowrap' }}>{formatDateTimeShort(dm.updated_at)}</div>
+
+      <div className="dm-list-act" onClick={(e) => e.stopPropagation()}>
+        {dm.has_send_history && onTrack && (
+          <button
+            type="button"
+            className="dm-act-wide"
+            onClick={() => onTrack(dm.id, dm.title)}
+            title="발송 추적: 수신자별 열람·깊이·클릭·응모 현황"
+            style={{ height: 30, padding: '0 10px', background: 'rgba(139,92,246,0.12)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            추적
+          </button>
+        )}
+        {hasUrl && (
+          // ★ 2026-08-06 중지 상태에서는 주소 버튼을 잠근다 — [발행 주소 복사]는 `POST /dm/:id/publish`를 부르므로 열어 두면 복사가 곧 재개가 된다.
+          <button
+            type="button"
+            className="dm-act-wide"
+            onClick={() => { if (!isStopped) onCopyUrl(dm.id); }}
+            disabled={isStopped}
+            title={isStopped ? '중지된 DM입니다. [재개] 후 복사할 수 있어요.' : '발행 주소 복사 (추가 과금 없음)'}
+            style={{ height: 30, padding: '0 10px', background: 'rgba(16,185,129,0.12)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: isStopped ? 'not-allowed' : 'pointer', opacity: isStopped ? 0.35 : 1, whiteSpace: 'nowrap' }}
+          >
+            주소 복사
+          </button>
+        )}
         <button
-          onClick={(e) => { e.stopPropagation(); onTrack(dm.id, dm.title); }}
-          title="발송 추적: 수신자별 열람·깊이·클릭·응모 현황"
-          style={{ height: 32, width: '100%', background: 'rgba(139,92,246,0.12)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(139,92,246,0.2)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(139,92,246,0.12)'; }}
-        >
-          발송 추적
-        </button>
-      )}
-      <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
-        <button
+          type="button"
           onClick={() => onEdit(dm.id, dm.layout_mode)}
-          style={{
-            flex: 1, height: 32,
-            background: 'linear-gradient(135deg, #8b5cf6, #a855f7)',
-            color: '#fff', border: 'none', borderRadius: 8,
-            fontSize: 12, fontWeight: 700, cursor: 'pointer',
-            transition: 'all 0.2s', boxShadow: '0 1px 3px rgba(168, 85, 247, 0.3)',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(168, 85, 247, 0.5)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(168, 85, 247, 0.3)'; }}
+          style={{ height: 30, padding: '0 14px', background: 'linear-gradient(135deg, #8b5cf6, #a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', boxShadow: '0 1px 3px rgba(168, 85, 247, 0.3)' }}
         >
           편집
         </button>
-        <button
-          onClick={() => onClone(dm.id)}
-          disabled={cloning}
-          title="복제"
-          style={{
-            height: 32, padding: '0 10px',
-            background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.8)',
-            border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8,
-            fontSize: 12, fontWeight: 600, cursor: cloning ? 'wait' : 'pointer',
-            transition: 'all 0.2s', opacity: cloning ? 0.5 : 1,
-          }}
-          onMouseEnter={(e) => { if (!cloning) e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
-        >
-          {cloning ? '복제 중' : '복제'}
-        </button>
-        {/* ★ 2026-08-06 중지 / 재개 — 접수 그대로 삭제 버튼 옆.
-            발행된 DM에만 [중지]가, 중지된 DM에만 [재개]가 보인다(임시저장에는 둘 다 없다 — 막을 주소가 없다). */}
-        {isStopped && onResume && (
+        <div ref={menuRef} style={{ position: 'relative' }}>
           <button
-            onClick={() => onResume(dm.id)}
-            title="재개: 같은 주소로 다시 열어요 (추가 과금 없음)"
-            style={{
-              height: 32, padding: '0 10px',
-              background: 'rgba(16, 185, 129, 0.12)', color: '#6ee7b7',
-              border: '1px solid rgba(16, 185, 129, 0.35)', borderRadius: 8,
-              fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.22)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.12)'; }}
+            type="button"
+            aria-label="더 보기"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+            style={{ width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: menuOpen ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, color: 'rgba(255,255,255,0.8)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
           >
-            재개
+            ⋯
           </button>
-        )}
-        {!isStopped && dm.status === 'published' && onStop && (
-          <button
-            onClick={() => onStop(dm.id)}
-            title="중지: 고객 접속을 막아요. 이력은 그대로 남아요."
-            style={{
-              height: 32, padding: '0 10px',
-              background: 'rgba(245, 158, 11, 0.12)', color: '#fcd34d',
-              border: '1px solid rgba(245, 158, 11, 0.35)', borderRadius: 8,
-              fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(245, 158, 11, 0.22)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(245, 158, 11, 0.12)'; }}
-          >
-            중지
-          </button>
-        )}
-        <button
-          onClick={() => onDelete(dm.id)}
-          title="삭제"
-          style={{
-            height: 32, padding: '0 10px',
-            background: 'rgba(244, 63, 94, 0.1)', color: '#fda4af',
-            border: '1px solid rgba(244, 63, 94, 0.3)', borderRadius: 8,
-            fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(244, 63, 94, 0.2)'; e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.5)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(244, 63, 94, 0.1)'; e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.3)'; }}
-        >
-          삭제
-        </button>
+          {menuOpen && (
+            <div role="menu" style={{ position: 'absolute', right: 0, top: 36, zIndex: 30, width: 160, padding: 6, borderRadius: 10, background: '#0f172a', border: '1px solid rgba(255,255,255,0.14)', boxShadow: '0 12px 32px rgba(0,0,0,0.5)' }}>
+              {/* 휴대폰 폭에서는 줄 끝 버튼(추적·주소 복사)이 숨으므로 메뉴에 같은 동작을 둔다(.dm-menu-narrow = 휴대폰 폭에서만 보임) */}
+              {dm.has_send_history && onTrack && (
+                <button type="button" role="menuitem" className="dm-menu-item dm-menu-narrow" style={menuItemStyle} onClick={() => closeThen(() => onTrack(dm.id, dm.title))}>발송 추적</button>
+              )}
+              {hasUrl && (
+                <button type="button" role="menuitem" className="dm-menu-item dm-menu-narrow" style={{ ...menuItemStyle, opacity: isStopped ? 0.35 : 1, cursor: isStopped ? 'not-allowed' : 'pointer' }} disabled={isStopped} onClick={() => { if (!isStopped) closeThen(() => onCopyUrl(dm.id)); }}>발행 주소 복사</button>
+              )}
+              {hasUrl && onKoreanAlias && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="dm-menu-item"
+                  style={{ ...menuItemStyle, opacity: isStopped ? 0.35 : 1, cursor: isStopped ? 'not-allowed' : 'pointer' }}
+                  disabled={isStopped}
+                  title={isStopped ? '중지된 DM입니다. [재개] 후 사용할 수 있어요.' : '한글 주소: hlj.kr/반짝세일_07처럼 기억하기 쉬운 공용 주소 (무료)'}
+                  onClick={() => { if (!isStopped) closeThen(() => onKoreanAlias(dm.id, dm.title)); }}
+                >
+                  한글 주소
+                </button>
+              )}
+              <button type="button" role="menuitem" className="dm-menu-item" style={{ ...menuItemStyle, opacity: cloning ? 0.5 : 1, cursor: cloning ? 'wait' : 'pointer' }} disabled={cloning} onClick={() => closeThen(() => onClone(dm.id))}>
+                {cloning ? '복제 중' : '복제'}
+              </button>
+              {/* ★ 2026-08-06 중지 / 재개 — 발행된 DM에만 [중지]가, 중지된 DM에만 [재개]가 보인다(임시저장에는 둘 다 없다 — 막을 주소가 없다). */}
+              {isStopped && onResume && (
+                <button type="button" role="menuitem" className="dm-menu-item" style={{ ...menuItemStyle, color: '#6ee7b7' }} title="재개: 같은 주소로 다시 열어요 (추가 과금 없음)" onClick={() => closeThen(() => onResume(dm.id))}>재개</button>
+              )}
+              {!isStopped && dm.status === 'published' && onStop && (
+                <button type="button" role="menuitem" className="dm-menu-item" style={{ ...menuItemStyle, color: '#fcd34d' }} title="중지: 고객 접속을 막아요. 이력은 그대로 남아요." onClick={() => closeThen(() => onStop(dm.id))}>중지</button>
+              )}
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '4px 2px' }} />
+              <button type="button" role="menuitem" className="dm-menu-item" style={{ ...menuItemStyle, color: '#fda4af' }} onClick={() => closeThen(() => onDelete(dm.id))}>삭제</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

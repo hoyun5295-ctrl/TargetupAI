@@ -9,6 +9,7 @@ import { query } from '../../config/database';
 import { normalizeDmShortCode } from './dm-code';
 // ★ 2026-09-15 카탈로그 DM 판정(settings.catalog) — 목록 카드 뱃지 · 판정 한 곳(뷰어와 같은 함수)
 import { isCatalogEnabled } from './dm-viewer-catalog';
+import { publicImageUrl } from './dm-viewer-utils';
 import {
   clampPageReached, clampTotalPages, clampDurationDelta, clampScrollPct,
   sanitizeSectionInteractions, mergeSectionInteractions,
@@ -393,15 +394,64 @@ export interface DmSectionSummary {
   headline: string | null;
   accent: string | null;  // brand_kit primary_color
   count: number;          // 전체 섹션(또는 legacy 슬라이드) 수
+  /** ★ 2026-09-16 목록 리스트형(Harold A안) 대표 이미지 — 보이는 섹션 order 순 첫 이미지(공개 서빙 경로). 없으면 null */
+  cover: string | null;
 }
 
 const SECTION_SUMMARY_MAX_TYPES = 6;
+/** 목록 응답에 싣는 대표 이미지 주소 상한 — data: URL·비정상 값이 목록 payload 를 키우지 않게 */
+const COVER_URL_MAX_LEN = 1000;
+
+/** 섹션 한 개의 대표 이미지 후보(섹션 안 순서). 헤더 로고는 대표 이미지가 아니라 뺀다 */
+function sectionImageCandidates(s: any): unknown[] {
+  const p = (s && s.props) || {};
+  switch (s?.type) {
+    case 'hero':
+    case 'text_card': return [p.image_url];
+    case 'header': return [p.banner_image_url];
+    case 'video': return [p.thumbnail_url];
+    case 'gallery': return Array.isArray(p.images) ? p.images.map((i: any) => i?.url) : [];
+    case 'slideshow': return Array.isArray(p.slides) ? p.slides.map((x: any) => x?.image_url || x?.url) : [];
+    case 'product_carousel': return Array.isArray(p.products) ? p.products.map((x: any) => x?.image_url) : [];
+    default: return [];
+  }
+}
+
+/** 후보 → 목록에 실어도 되는 주소. 공개 서빙 경로로 정규화(<img>는 인증 헤더를 못 싣는다) · 사이트 상대경로 또는 http(s)만 · 길이 상한 */
+function toCoverUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const v = publicImageUrl(raw.trim());
+  if (!v || v.length > COVER_URL_MAX_LEN) return null;
+  if (v.startsWith('/') && !v.startsWith('//')) return v;
+  return /^https?:\/\//i.test(v) ? v : null;
+}
+
+function firstCoverFromSections(sections: unknown): string | null {
+  if (!Array.isArray(sections)) return null;
+  const visible = sections
+    .filter((s: any) => s && s.type && s.visible !== false)
+    .sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  for (const s of visible) {
+    for (const c of sectionImageCandidates(s)) {
+      const url = toCoverUrl(c);
+      if (url) return url;
+    }
+  }
+  return null;
+}
+
+/** 섹션에 이미지가 없을 때 첫 장에서 고른다. getDmList 는 pages->0 만 SELECT(first_page) · 순수 호출은 pages[0] */
+function firstPageCover(row: { pages?: any; first_page?: any }): string | null {
+  const page = row.first_page ?? (Array.isArray(row.pages) ? row.pages[0] : null);
+  if (!page || typeof page !== 'object') return null;
+  return firstCoverFromSections(page.sections) ?? toCoverUrl(page.imageUrl);
+}
 
 /**
  * dm_pages 한 행(sections/pages/brand_kit) → 썸네일 요약. 순수(DB/AI 의존 0) — verify 스크립트 대상.
  * sections(D125) 우선, 없으면 legacy pages 길이만 count.
  */
-export function buildSectionSummary(row: { sections?: any; pages?: any; brand_kit?: any }): DmSectionSummary {
+export function buildSectionSummary(row: { sections?: any; pages?: any; brand_kit?: any; first_page?: any }): DmSectionSummary {
   const bk = row.brand_kit && typeof row.brand_kit === 'object' ? row.brand_kit : null;
   const accent = bk && bk.primary_color ? String(bk.primary_color) : null;
 
@@ -417,11 +467,11 @@ export function buildSectionSummary(row: { sections?: any; pages?: any; brand_ki
       const cand = p.headline || p.brand_name || p.body || p.title || null;
       if (cand && String(cand).trim()) { headline = String(cand).trim().slice(0, 60); break; }
     }
-    return { types, headline, accent, count: visible.length };
+    return { types, headline, accent, count: visible.length, cover: firstCoverFromSections(visible) ?? firstPageCover(row) };
   }
 
   const pages = Array.isArray(row.pages) ? row.pages : null;
-  return { types: [], headline: null, accent, count: pages ? pages.length : 0 };
+  return { types: [], headline: null, accent, count: pages ? pages.length : 0, cover: firstPageCover(row) };
 }
 
 export async function getDmList(companyId: string, ownerUserId?: string | null) {
@@ -438,6 +488,7 @@ export async function getDmList(companyId: string, ownerUserId?: string | null) 
       `SELECT id, title, store_name, status, approval_status, layout_mode,
               short_code, view_count, sections, brand_kit, settings,
               COALESCE(jsonb_array_length(pages), 0) as page_count,
+              pages->0 AS first_page,
               EXISTS (SELECT 1 FROM dm_recipient_tokens t WHERE t.dm_id = dm_pages.id) AS has_send_history,
               created_at, updated_at
        FROM dm_pages WHERE company_id = $1${ownerSql}
@@ -451,6 +502,7 @@ export async function getDmList(companyId: string, ownerUserId?: string | null) 
       `SELECT id, title, store_name, status, approval_status, layout_mode,
               short_code, view_count, sections, brand_kit, settings,
               COALESCE(jsonb_array_length(pages), 0) as page_count,
+              pages->0 AS first_page,
               false AS has_send_history,
               created_at, updated_at
        FROM dm_pages WHERE company_id = $1${ownerSql}
