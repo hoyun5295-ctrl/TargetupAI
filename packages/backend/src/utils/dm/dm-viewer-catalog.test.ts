@@ -3,7 +3,8 @@
  *
  * 접수(Harold · 참고 = 메이크뷰 DM): 완성 이미지 슬라이드 DM을 PC에서 열면 430px 한 열이라 카탈로그 느낌이 없다.
  * 여기서 고정하는 것 —
- *   ① 게이트 = layout_mode slides · 펼친 뒤 전 장이 이미지 무대(isSwipeImagePage) · 2장 이상. 조건 밖 DM은 카탈로그 표식 0(기존 출력 그대로).
+ *   ① 게이트 = **settings.catalog === true(고른 DM만 · Harold 정정 : 자동 아님)** AND layout_mode slides AND 펼친 뒤 전 장이 이미지 무대(isSwipeImagePage) · 2장 이상.
+ *      조건 밖 DM은 카탈로그 표식 0(기존 출력 그대로) · 플래그가 없으면 전 장 이미지라도 현행 슬라이드.
  *   ② 게이트 on = body 표식 + 책 크롬 마크업 + og 메타(제목·첫 장 절대 URL) + 핀치 확대 허용 viewport.
  *   ③ 추적은 기존 함수(updateCurrent·bumpSection)를 호출한다(비콘 본문 무변경) · 기존 키보드 핸들러는 카탈로그 활성 시 넘긴다(이중 처리 0).
  *   ④ PC 판정 = 폭 768 이상(터치형은 1024 이상) · PC에서 기존 뷰어·띠·화살표는 숨긴다 · 모바일 띠에는 전체보기 버튼만 더한다.
@@ -18,7 +19,7 @@ const gallery = (id: string, urls: string[], layout: string | undefined = 'list_
 });
 
 // short_code 에 'cat' 이 들어가면 스크립트의 CODE = 'dm-cat001' 이 표식 검사(not.toContain('dm-cat'))에 걸린다 — 픽스처는 'book'.
-const base = { short_code: 'book001', title: '카탈로그 DM', store_name: '테스트몰', layout_mode: 'slides' };
+const base = { short_code: 'book001', title: '카탈로그 DM', store_name: '테스트몰', layout_mode: 'slides', settings: { catalog: true } };
 
 /** 완성 이미지 업로드(슬라이드) 형태 — 장마다 이미지 1장 갤러리 */
 const imageDm = {
@@ -60,10 +61,24 @@ function catalogBlock(html: string): string {
   return html.slice(s1, e1) + '\n' + html.slice(s2, e2);
 }
 
-describe('카탈로그 보기 게이트 — 전 장 이미지 무대 · 2장 이상', () => {
-  it('장마다 이미지 1장인 슬라이드 DM = 게이트 on', () => {
+describe('카탈로그 보기 게이트 — 고른 DM(settings.catalog)만 · 전 장 이미지 무대 · 2장 이상', () => {
+  it('플래그 있고 장마다 이미지 1장인 슬라이드 DM = 게이트 on', () => {
     const html = renderDmViewerHtml(imageDm, '/api/dm/v');
     for (const m of CATALOG_MARKS) expect(html).toContain(m);
+  });
+
+  it('★ 플래그가 없으면 전 장 이미지 슬라이드라도 현행 슬라이드(자동 적용 0 · 기존 발행물 무변경)', () => {
+    for (const settings of [undefined, {}, { catalog: false }, { catalog: 'true' }, null, '{}']) {
+      const html = renderDmViewerHtml({ ...imageDm, settings }, '/api/dm/v');
+      for (const m of CATALOG_MARKS) expect(html).not.toContain(m);
+      expect(html).not.toContain('dm-cat');
+      expect(html).toContain('maximum-scale=1.0,user-scalable=no');
+    }
+  });
+
+  it('settings 가 JSON 문자열(pg 드라이버 폴백)이어도 catalog:true 를 읽는다', () => {
+    const html = renderDmViewerHtml({ ...imageDm, settings: '{"catalog":true}' }, '/api/dm/v');
+    expect(html).toContain('data-dm-catalog="1"');
   });
 
   it('갤러리 N장 한 장 DM = 펼친 뒤(3장 무대) 판정 = on', () => {
@@ -72,7 +87,7 @@ describe('카탈로그 보기 게이트 — 전 장 이미지 무대 · 2장 이
     expect(html).toContain('data-dm-catalog="1"');
   });
 
-  it('혼합 장 · scroll 모드 · 1장 = 게이트 off — 카탈로그 표식 0 · viewport 현행(user-scalable=no) · og 0', () => {
+  it('플래그가 있어도 혼합 장 · scroll 모드 · 1장 = 게이트 off — 카탈로그 표식 0 · viewport 현행(user-scalable=no) · og 0', () => {
     for (const dm of [mixedDm, { ...imageDm, layout_mode: 'scroll' }, oneDm]) {
       const html = renderDmViewerHtml(dm, '/api/dm/v');
       for (const m of CATALOG_MARKS) expect(html).not.toContain(m);

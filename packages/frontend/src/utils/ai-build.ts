@@ -7,8 +7,11 @@
  */
 import { useEffect, useState } from 'react';
 
-export type BuildChannel = 'dm' | 'email';
+/** ★ 2026-09-15 'catalog' = 카탈로그 DM(쪽 이미지 N장 · 수량 제한 없음 → 장당 1쪽 슬라이드 DM + PC 책 펼침 · 서버 키 catalog-dm-build). DM 라우트로 간다. */
+export type BuildChannel = 'dm' | 'email' | 'catalog';
 export type BuildImageRole = 'hero' | 'photo' | 'logo' | 'unknown';
+/** 카탈로그 쪽 이미지 업로드는 서버 재료 업로드 1회 상한(9장)에 맞춰 나눠 올린다 — 업무 상한은 없다 */
+export const AI_BUILD_CATALOG_UPLOAD_CHUNK = 9;
 
 export interface BuildImageValue {
   /** 이 회사 서빙 경로(업로드 즉시 받은 값) */
@@ -63,6 +66,10 @@ export interface BuildDraftState {
   products: BuildProductValue[];
   /** null = "AI가 알아서"(서버 후처리 no-op) */
   features: string[] | null;
+  /** ★ 카탈로그 채널 재료 — 쪽 순서 그대로(url 만) · 다른 채널은 [] */
+  catalogImages: BuildImageValue[];
+  /** ★ 카탈로그 채널 선택 제목(비우면 서버가 "[카탈로그] 브랜드") */
+  catalogTitle: string;
   savedAt: number;
 }
 
@@ -91,14 +98,16 @@ export function cardIsFilled(c: BuildCardValue): boolean {
 }
 
 /** 서버 재료 계약 v1 — 견적은 expectedTotal 0 · 생성은 서버 견적 합계 */
-export function buildMaterialsPayload(state: Pick<BuildDraftState, 'channel' | 'isAd' | 'cards' | 'products' | 'features'>, attemptToken: string, expectedTotal: number) {
+export function buildMaterialsPayload(state: Pick<BuildDraftState, 'channel' | 'isAd' | 'cards' | 'products' | 'features' | 'catalogImages' | 'catalogTitle'>, attemptToken: string, expectedTotal: number) {
+  const catalog = state.channel === 'catalog';
   return {
     version: 1,
     attemptToken,
     expectedTotal,
     channel: state.channel,
     isAd: state.channel === 'email' ? state.isAd : null,
-    eventCards: state.cards.filter(cardIsFilled).map((c) => ({
+    // ★ 카탈로그 채널은 쪽 이미지만 재료(카드·상품·칩은 보내지 않는다 · 서버도 같은 규칙으로 비운다)
+    eventCards: catalog ? [] : state.cards.filter(cardIsFilled).map((c) => ({
       id: c.id,
       title: c.title.trim(),
       text: c.text.trim(),
@@ -106,12 +115,14 @@ export function buildMaterialsPayload(state: Pick<BuildDraftState, 'channel' | '
       licensed: c.licensed && (c.text.trim().length > 0 || c.title.trim().length > 0),
       images: c.images.map((im) => ({ url: im.url, width: im.width, height: im.height })),
     })),
-    products: state.products.map((p) => ({
+    products: catalog ? [] : state.products.map((p) => ({
       source: p.source, provider: p.provider, code: p.code, name: p.name,
       price: p.price, salePrice: p.salePrice, discountRate: p.discountRate, url: p.url, imageUrl: p.imageUrl,
     })),
-    features: state.features,
+    features: catalog ? null : state.features,
     brandName: null,
+    catalogImages: catalog ? state.catalogImages.map((im) => ({ url: im.url, width: im.width, height: im.height })) : [],
+    catalogTitle: catalog ? (state.catalogTitle.trim() || null) : null,
   };
 }
 
@@ -160,11 +171,13 @@ export function loadBuildDraft(): BuildDraftState | null {
     if (!d || typeof d !== 'object' || !Array.isArray(d.cards)) return null;
     if (!d.savedAt || Date.now() - d.savedAt > DRAFT_TTL_MS) { localStorage.removeItem(AI_BUILD_DRAFT_KEY); return null; }
     return {
-      channel: d.channel === 'email' ? 'email' : 'dm',
+      channel: d.channel === 'email' ? 'email' : d.channel === 'catalog' ? 'catalog' : 'dm',
       isAd: d.isAd !== false,
       cards: d.cards.map((c) => ({ id: String(c.id || newCardId()), title: String(c.title || ''), text: String(c.text || ''), link: String(c.link || ''), licensed: c.licensed === true, images: Array.isArray(c.images) ? c.images.filter((im) => im && typeof im.url === 'string').map((im) => ({ url: im.url, width: im.width ?? null, height: im.height ?? null })) : [] })),
       products: Array.isArray(d.products) ? d.products.filter((p) => p && typeof p.name === 'string') : [],
       features: Array.isArray(d.features) ? d.features.map(String) : null,
+      catalogImages: Array.isArray(d.catalogImages) ? d.catalogImages.filter((im) => im && typeof im.url === 'string').map((im) => ({ url: im.url, width: im.width ?? null, height: im.height ?? null })) : [],
+      catalogTitle: typeof d.catalogTitle === 'string' ? d.catalogTitle : '',
       savedAt: d.savedAt,
     };
   } catch {

@@ -110,6 +110,11 @@ export type DmBuilderState = {
   sections: Section[];
   brandKit: DmBrandKit;
   layoutMode: LayoutMode;
+  /**
+   * ★ 2026-09-15 카탈로그 DM(고른 DM만 · Harold) — 저장값 = dm_pages.settings.catalog. slides 위에서만 켜진다.
+   * 뷰어(dm-viewer-catalog)가 이 플래그로 PC 책 펼침을 판정한다(휴대폰은 슬라이드 그대로). 자동 판정 없음.
+   */
+  catalogView: boolean;
   approvalStatus: ApprovalStatus;
   /** ★ 2026-07-02(3) 실제 발행 여부(dm.status='published'/short_code 축) — 발행(100크레딧) 완료 = 버튼 [발송] 전환·크레딧 모달 미노출 */
   isPublished: boolean;
@@ -166,6 +171,8 @@ export type DmBuilderState = {
   applyBrandKit: (kit: DmBrandKit) => void;
   updateBrandKit: (patch: Partial<DmBrandKit>) => void;
   setLayoutMode: (mode: LayoutMode) => void;
+  /** ★ 2026-09-15 카탈로그 켜기 = slides 보장 + settings.catalog true · 끄기 = 플래그만 해제(슬라이드 유지) */
+  setCatalogView: (on: boolean) => void;
   setAiPrompt: (prompt: string) => void;
 
   // ── Actions: Page CRUD (D128 V4) ──
@@ -200,12 +207,12 @@ export type DmBuilderState = {
   setValidationOverride: (v: DmBuilderState['validationOverride']) => void;
 
   // ── Actions: AI 적용 ──
-  applyAiGenerated: (sections: Section[], brandKit?: DmBrandKit, prompt?: string, opts?: { pages?: Section[][]; layoutMode?: LayoutMode }) => void;
+  applyAiGenerated: (sections: Section[], brandKit?: DmBrandKit, prompt?: string, opts?: { pages?: Section[][]; layoutMode?: LayoutMode; catalogView?: boolean }) => void;
 
   // ── Actions: Persistence ──
   loadDm: (id: string) => Promise<void>;
   save: (opts?: { silent?: boolean }) => Promise<void>;
-  createNew: (opts?: { title?: string; storeName?: string; layoutMode?: LayoutMode }) => void;
+  createNew: (opts?: { title?: string; storeName?: string; layoutMode?: LayoutMode; catalogView?: boolean }) => void;
   reset: () => void;
 
   // ── Actions: Validation ──
@@ -229,9 +236,17 @@ function emptyPage(name?: string): DmPage {
   return { id: newPageId(), name, sections: [] };
 }
 
+/** ★ 2026-09-15 dm_pages.settings.catalog 읽기(객체 또는 JSON 문자열) — 서버 dm-viewer-catalog isCatalogEnabled 와 같은 판정 */
+function readCatalogFlag(raw: unknown): boolean {
+  if (!raw) return false;
+  let obj: unknown = raw;
+  if (typeof raw === 'string') { try { obj = JSON.parse(raw); } catch { return false; } }
+  return !!obj && typeof obj === 'object' && (obj as Record<string, unknown>).catalog === true;
+}
+
 const INITIAL_STATE: Pick<
   DmBuilderState,
-  | 'dmId' | 'title' | 'storeName' | 'pages' | 'currentPageIndex' | 'sections' | 'brandKit' | 'layoutMode'
+  | 'dmId' | 'title' | 'storeName' | 'pages' | 'currentPageIndex' | 'sections' | 'brandKit' | 'layoutMode' | 'catalogView'
   | 'approvalStatus' | 'isPublished' | 'isStopped' | 'templateId' | 'aiPrompt'
   | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt'
   | 'isSaving' | 'loadError' | 'aiGenerating' | 'validationResult'
@@ -246,6 +261,7 @@ const INITIAL_STATE: Pick<
   sections: [],
   brandKit: { ...DEFAULT_BRAND_KIT },
   layoutMode: 'scroll',
+  catalogView: false,
   approvalStatus: 'draft',
   isPublished: false,
   isStopped: false,
@@ -477,10 +493,15 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         const pages = splitSectionsForMode(allSections, 'slides').map((secs) => ({ id: newPageId(), sections: normalizeOrder(secs) }));
         return markDirty({ layoutMode, pages, currentPageIndex: 0, sections: pages[0]?.sections || [], selectedSectionId: null });
       }
-      // scroll 전환: 전체 섹션을 한 페이지로 병합
+      // scroll 전환: 전체 섹션을 한 페이지로 병합 · 카탈로그는 slides 위에서만 살므로 함께 내린다
       const merged = { id: newPageId(), sections: normalizeOrder(allSections) };
-      return markDirty({ layoutMode, pages: [merged], currentPageIndex: 0, sections: merged.sections, selectedSectionId: null });
+      return markDirty({ layoutMode, pages: [merged], currentPageIndex: 0, sections: merged.sections, selectedSectionId: null, catalogView: false });
     });
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+  setCatalogView: (on) => {
+    if (on && get().layoutMode !== 'slides') get().setLayoutMode('slides');
+    set((s) => (s.catalogView === on ? s : markDirty({ catalogView: on })));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
   setAiPrompt: (aiPrompt) => set(markDirty({ aiPrompt })),
@@ -814,6 +835,8 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   applyAiGenerated: (sections, brandKit, prompt, opts) => {
     set((s) => {
       const layoutMode = opts?.layoutMode || s.layoutMode;
+      // ★ 2026-09-15 카탈로그 플래그 = 호출부가 지정하면 그 값 · 아니면 slides 유지 시 현재 값, scroll 이면 해제
+      const catalogView = opts?.catalogView !== undefined ? opts.catalogView : (layoutMode === 'slides' ? s.catalogView : false);
       // slides면 backend가 내려준 페이지 그룹(opts.pages)으로 여러 페이지, 아니면 전체 한 페이지
       const groups = (opts?.pages && opts.pages.length > 0) ? opts.pages : [sections];
       const pages = groups.map((secs) => ({ id: newPageId(), sections: normalizeOrder(secs) }));
@@ -822,6 +845,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         currentPageIndex: 0,
         sections: pages[0]?.sections || [],
         layoutMode,
+        catalogView,
         brandKit: brandKit ? { ...s.brandKit, ...brandKit } : s.brandKit,
         aiPrompt: prompt !== undefined ? prompt : s.aiPrompt,
         selectedSectionId: null,
@@ -850,6 +874,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         sections: pages[0]?.sections || [],
         brandKit: { ...DEFAULT_BRAND_KIT, ...rawBrand },
         layoutMode: dm.layout_mode || 'scroll',
+        catalogView: dm.layout_mode === 'slides' && readCatalogFlag(dm.settings),
         approvalStatus: dm.approval_status || 'draft',
         // ★ 발행 여부 = 발행 축(status/short_code)으로 판정 — approval_status(검수 축)와 별개
         isPublished: dm.status === 'published' || !!dm.short_code,
@@ -888,6 +913,8 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         sections: flatSections,
         brand_kit: s.brandKit,
         layout_mode: s.layoutMode,
+        // ★ 2026-09-15 카탈로그 플래그 — settings jsonb 는 이 키 전에 어떤 소비처도 없어 화면이 통째로 소유한다(뷰어·목록 뱃지가 읽는다)
+        settings: { catalog: s.layoutMode === 'slides' && s.catalogView },
         template_id: s.templateId,
         ai_prompt: s.aiPrompt,
       };
@@ -914,6 +941,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
       title: opts?.title || '',
       storeName: opts?.storeName || '',
       layoutMode: opts?.layoutMode || 'scroll',
+      catalogView: !!opts?.catalogView && (opts?.layoutMode || 'scroll') === 'slides',
       pages: [initialPage],
       currentPageIndex: 0,
       sections: initialPage.sections,

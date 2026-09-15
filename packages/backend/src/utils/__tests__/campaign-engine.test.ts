@@ -312,7 +312,9 @@ describe('소스 계약 — 엔진 격리 · 라우트 분기', () => {
     expect(quick.indexOf('await createDm(')).toBeLessThan(quick.indexOf('await deductCreditSafe('));
     expect(quick).toContain("licensedQuote: m.origin === 'user' ? m.event_text : ''");
     expect(quick).toContain("approval_status: 'draft'");
-    expect(quick).not.toMatch(/getCreditCost\('(?!dm-ai-generate'|event-image-extract'|email-ai-generate')/);
+    // ★ 2026-09-15 예외 1개 = 카탈로그 DM 채널 생성 키 'catalog-dm-build'(Harold 확정 10 · FEATURE-AI-AUTO-BUILD §2-8 예외). 그 밖 신규 키는 여전히 0.
+    expect(quick).not.toMatch(/getCreditCost\('(?!dm-ai-generate'|event-image-extract'|email-ai-generate'|catalog-dm-build')/);
+    expect(quick).toContain("getCreditCost('catalog-dm-build')");
   });
   it('★ S6 이메일 합류 — 같은 재료 · 브랜드 이메일 시안 함수 재사용 · 재료 없으면 기존 경로(분기 뒤에 옛 검사가 그대로) · 402 · 몰 첨부 0', () => {
     const quick = code('utils/campaign-quick.ts');

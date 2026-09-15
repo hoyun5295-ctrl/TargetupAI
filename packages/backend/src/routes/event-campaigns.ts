@@ -105,7 +105,8 @@ eventCampaignRouter.post('/materials/quote', async (req: any, res: Response) => 
     if (!aiAutoBuildEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' });
     if (!req.body?.materials || !isBuildMaterialsV1(req.body.materials)) return res.status(400).json({ success: false, error: '요청 형식이 맞지 않아요. 화면을 새로고침한 뒤 다시 시도해 주세요.', code: 'MATERIALS_INVALID' });
     const q = await quoteFromBuildMaterials({ companyId, materials: req.body.materials });
-    const planLocked = q.channel === 'dm' ? await quickPlanLocked(companyId) : !(await isCdpEnabledForPlan(companyId));
+    // 카탈로그 DM 은 DM 가족(mobile_dm 요금제) — 이메일만 CDP 축
+    const planLocked = q.channel === 'email' ? !(await isCdpEnabledForPlan(companyId)) : await quickPlanLocked(companyId);
     return res.json({
       success: true, enabled: true, version: 1, channel: q.channel,
       total: q.quote.total, parts: q.quote.parts, credit_enabled: q.creditEnabled,

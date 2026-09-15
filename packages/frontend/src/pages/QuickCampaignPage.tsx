@@ -9,11 +9,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
-import { ArrowLeft, Sparkles, Wand2, Loader2, Lock, Check, Smartphone, Mail, RotateCcw, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Sparkles, Wand2, Loader2, Lock, Check, Smartphone, Mail, BookOpen, RotateCcw, AlertTriangle } from 'lucide-react';
 import { OUI_BACK, OUI_BADGE_NEW, OUI_CARD, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_PAGE_CENTER, OUI_SRC, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_NARROW } from '../utils/operator-ui';
 import OperatorAura from '../components/operator/OperatorAura';
 import BuildCardsInput, { BUILD_CARD_IMAGES_MAX } from '../components/ai-build/BuildCardsInput';
 import FeatureChips from '../components/ai-build/FeatureChips';
+// ★ 2026-09-15 카탈로그 DM 채널(Harold) — 쪽 이미지 N장(수량 제한 없음) → 장당 1쪽 슬라이드 DM + PC 책 펼침 · 서버 키 catalog-dm-build
+import CatalogPagesInput from '../components/ai-build/CatalogPagesInput';
 import ProductPickList, { AI_BUILD_PRODUCTS_MAX } from '../components/ai-build/ProductPickList';
 import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
 import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
@@ -50,7 +52,7 @@ export default function QuickCampaignPage() {
   const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [entry] = useState(() => ({
-    channel: (searchParams.get('channel') === 'email' ? 'email' : searchParams.get('channel') === 'dm' ? 'dm' : null) as BuildChannel | null,
+    channel: (searchParams.get('channel') === 'email' ? 'email' : searchParams.get('channel') === 'catalog' ? 'catalog' : searchParams.get('channel') === 'dm' ? 'dm' : null) as BuildChannel | null,
     regen: searchParams.get('regen') === '1',
   }));
 
@@ -75,6 +77,10 @@ export default function QuickCampaignPage() {
   const [cards, setCards] = useState<BuildCardValue[]>(restored?.cards?.length ? restored.cards : [newBuildCard()]);
   const [products, setProducts] = useState<BuildProductValue[]>(restored?.products || []);
   const [features, setFeatures] = useState<string[] | null>(restored?.features ?? null);
+  // ★ 카탈로그 채널 재료(쪽 이미지 · 선택 제목) · 라이브러리 피커는 libraryFor '__catalog__' 로 이쪽에 담는다
+  const [catalogImages, setCatalogImages] = useState<BuildImageValue[]>(restored?.catalogImages || []);
+  const [catalogTitle, setCatalogTitle] = useState<string>(restored?.catalogTitle || '');
+  const CATALOG_LIB = '__catalog__';
   const [mallAvailable, setMallAvailable] = useState(false);
   const [mallOpen, setMallOpen] = useState(false);
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
@@ -94,7 +100,7 @@ export default function QuickCampaignPage() {
   useEffect(() => { if (entry.channel || entry.regen) setSearchParams({}, { replace: true }); }, [entry.channel, entry.regen, setSearchParams]);
 
   const filledCards = useMemo(() => cards.filter(cardIsFilled), [cards]);
-  const imageCount = useMemo(() => filledCards.reduce((a, c) => a + c.images.length, 0), [filledCards]);
+  const imageCount = useMemo(() => (channel === 'catalog' ? catalogImages.length : filledCards.reduce((a, c) => a + c.images.length, 0)), [channel, catalogImages, filledCards]);
   // 판독 여부는 서버 견적 부품이 정한다(캐시 적중이면 부품 자체가 빠진다 · 화면이 따로 셈하지 않는다)
   const reads = quote?.parts.some((p) => p.key === 'event-image-extract') ? 1 : 0;
   const availability = useMemo(() => featureAvailability({ cards: filledCards, products }, channel), [filledCards, products, channel]);
@@ -123,10 +129,10 @@ export default function QuickCampaignPage() {
     if (skipPersist.current) { skipPersist.current = false; return; }
     // 재료가 바뀌면 다른 시도다 — 같은 토큰으로 다른 재료를 무료(duplicate)로 만들지 않는다. [다시 시도]는 재료가 그대로일 때만 같은 토큰.
     if (!busy) attemptRef.current = null;
-    const t = setTimeout(() => saveBuildDraft({ channel, isAd, cards, products, features }), 400);
+    const t = setTimeout(() => saveBuildDraft({ channel, isAd, cards, products, features, catalogImages, catalogTitle }), 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flag, channel, isAd, cards, products, features]);
+  }, [flag, channel, isAd, cards, products, features, catalogImages, catalogTitle]);
 
   // 서버 견적(단일 출처) — 재료가 바뀔 때마다 · 게이트·역할 배지·SMTP·요금제 잠금까지 한 번에
   const [quoteSeq, setQuoteSeq] = useState(0);
@@ -135,7 +141,7 @@ export default function QuickCampaignPage() {
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const materials = buildMaterialsPayload({ channel, isAd, cards, products, features }, attemptRef.current || newAttemptToken(), 0);
+        const materials = buildMaterialsPayload({ channel, isAd, cards, products, features, catalogImages, catalogTitle }, attemptRef.current || newAttemptToken(), 0);
         const r = await fetch('/api/event-campaigns/materials/quote', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ materials }), signal: ctrl.signal });
         const d = await r.json().catch(() => ({}));
         if (!r.ok || d?.success === false) {
@@ -159,7 +165,7 @@ export default function QuickCampaignPage() {
       } catch { /* 취소·네트워크 = 이전 견적 유지 */ }
     }, 350);
     return () => { clearTimeout(t); ctrl.abort(); };
-  }, [flag, channel, isAd, cards, products, features, quoteSeq]);
+  }, [flag, channel, isAd, cards, products, features, catalogImages, catalogTitle, quoteSeq]);
 
   // 서버 판정 배지(image_roles) → 카드 썸네일(읽기 전용)
   const cardsWithRoles = useMemo(() => {
@@ -189,6 +195,12 @@ export default function QuickCampaignPage() {
 
   const addLibraryImages = (assets: PickedAsset[]) => {
     if (!libraryFor) return;
+    if (libraryFor === CATALOG_LIB) {
+      // 카탈로그 쪽 = 상한 없음 · 같은 url 은 한 번만
+      setCatalogImages((cur) => [...cur, ...assets.filter((a) => a.url && !cur.some((im) => im.url === a.url)).map((a) => ({ url: a.url, width: null, height: null }))]);
+      setLibraryFor(null);
+      return;
+    }
     setCards((cur) => cur.map((c) => {
       if (c.id !== libraryFor) return c;
       const room = BUILD_CARD_IMAGES_MAX - c.images.length;
@@ -222,8 +234,9 @@ export default function QuickCampaignPage() {
     setPhase('running');
     setError(null);
     try {
-      const materials = buildMaterialsPayload({ channel, isAd, cards, products, features }, attempt, quote.total);
-      const url = channel === 'dm' ? '/api/dm/ai/one-shot-generate' : '/api/email/ai/generate-sections';
+      const materials = buildMaterialsPayload({ channel, isAd, cards, products, features, catalogImages, catalogTitle }, attempt, quote.total);
+      // 카탈로그 DM 은 DM 라우트 가족(dm_pages 행 · 요금제 게이트 mobile_dm)
+      const url = channel === 'email' ? '/api/email/ai/generate-sections' : '/api/dm/ai/one-shot-generate';
       const r = await fetch(url, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ materials }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || d?.success === false) {
@@ -237,13 +250,17 @@ export default function QuickCampaignPage() {
       saveBuildResult({ channel, draftId, materials: data.materials || {}, quoteTotal: quote.total, heroFallback: data.heroFallback === true, benefitStripped: Number(data.benefitStripped) || 0, createdAt: Date.now() });
       attemptRef.current = null;
       setPhase('done');
-      toast.success(channel === 'dm' ? '모바일 DM 완성본을 만들었어요. 편집기에서 이어서 다듬어 주세요.' : '이메일 완성본을 만들었어요. 편집기에서 이어서 다듬어 주세요.');
-      navigate(channel === 'dm' ? `/dm-builder?id=${encodeURIComponent(draftId)}` : `/email-campaigns?edit=${encodeURIComponent(draftId)}`);
+      toast.success(
+        channel === 'email' ? '이메일 완성본을 만들었어요. 편집기에서 이어서 다듬어 주세요.'
+          : channel === 'catalog' ? '카탈로그 DM을 만들었어요. 휴대폰은 슬라이드, PC는 책처럼 펼쳐 보여요. 편집기에서 순서를 확인해 주세요.'
+            : '모바일 DM 완성본을 만들었어요. 편집기에서 이어서 다듬어 주세요.',
+      );
+      navigate(channel === 'email' ? `/email-campaigns?edit=${encodeURIComponent(draftId)}` : `/dm-builder?id=${encodeURIComponent(draftId)}`);
     } catch (e: any) {
       setError({ message: e?.message || '완성본을 만들지 못했어요. 잠시 후 다시 시도해 주세요.', code: String(e?.code || '') });
       setPhase('idle');
     }
-  }, [quote, channel, isAd, cards, products, features, navigate, toast]);
+  }, [quote, channel, isAd, cards, products, features, catalogImages, catalogTitle, navigate, toast]);
 
   // 편집기 [다시 만들기] → 같은 재료 · 새 시도 토큰 · 확인은 편집기의 ConfirmModal 이 이미 받았다(1회)
   useEffect(() => {
@@ -257,7 +274,7 @@ export default function QuickCampaignPage() {
   const resetAll = () => {
     clearBuildDraft();
     attemptRef.current = null;
-    setCards([newBuildCard()]); setProducts([]); setFeatures(null); setError(null);
+    setCards([newBuildCard()]); setProducts([]); setFeatures(null); setCatalogImages([]); setCatalogTitle(''); setError(null);
   };
 
   if (flag === 'off') return <QuickCampaignLegacyPage />;
@@ -266,18 +283,27 @@ export default function QuickCampaignPage() {
   }
 
   const missing = new Set(quote?.gate.missing || []);
+  const isCatalog = channel === 'catalog';
   const gateText = !quote ? null
     : quote.gate.ok ? null
-      : missing.has('text') && missing.has('hero') ? '행사 내용 40자 이상 또는 첫 화면이 될 사진 1장이 필요해요'
-        : missing.has('hero') ? '첫 화면이 될 사진 1장이 필요해요(로고·세로형은 첫 화면이 되지 않아요)' : '행사 내용을 40자 이상 적어 주세요';
+      : missing.has('pages') ? '카탈로그 쪽 이미지를 2장 이상 올려 주세요'
+        : missing.has('text') && missing.has('hero') ? '행사 내용 40자 이상 또는 첫 화면이 될 사진 1장이 필요해요'
+          : missing.has('hero') ? '첫 화면이 될 사진 1장이 필요해요(로고·세로형은 첫 화면이 되지 않아요)' : '행사 내용을 40자 이상 적어 주세요';
   const readPart = quote?.parts.find((p) => p.key === 'event-image-extract') || null;
   const genPart = quote?.parts.find((p) => p.key !== 'event-image-extract') || null;
-  const progressRows: Array<{ label: string; state: 'done' | 'now' | 'todo' }> = [
-    { label: '재료 확인', state: 'done' },
-    ...(reads ? [{ label: '이미지 글자 읽기', state: 'now' as const }] : []),
-    { label: '구성과 문구 만들기', state: reads ? 'todo' : 'now' },
-    { label: channel === 'dm' ? '초안 저장 · 편집기 열기' : '초안 저장 · 편집기 열기', state: phase === 'done' ? 'done' : 'todo' },
-  ];
+  const progressRows: Array<{ label: string; state: 'done' | 'now' | 'todo' }> = isCatalog
+    ? [
+      { label: '쪽 이미지 확인', state: 'done' },
+      { label: '쪽 순서대로 카탈로그 구성', state: 'now' },
+      { label: '초안 저장 · 편집기 열기', state: phase === 'done' ? 'done' : 'todo' },
+    ]
+    : [
+      { label: '재료 확인', state: 'done' },
+      ...(reads ? [{ label: '이미지 글자 읽기', state: 'now' as const }] : []),
+      { label: '구성과 문구 만들기', state: reads ? 'todo' : 'now' },
+      { label: '초안 저장 · 편집기 열기', state: phase === 'done' ? 'done' : 'todo' },
+    ];
+  const channelNoun = channel === 'email' ? '이메일' : isCatalog ? '카탈로그 DM' : '모바일 DM';
 
   return (
     <div className={OUI_PAGE}>
@@ -291,7 +317,7 @@ export default function QuickCampaignPage() {
             <p className={OUI_SUBTITLE}>재료만 넣으면 완성본까지. 버튼 하나로 편집기에 열립니다.</p>
           </div>
           <div className="ml-auto inline-flex rounded-xl border border-white/10 bg-white/5 p-0.5 shrink-0" role="tablist" aria-label="채널">
-            {([['dm', '모바일 DM', Smartphone], ['email', '이메일', Mail]] as const).map(([key, label, Icon]) => {
+            {([['dm', '모바일 DM', Smartphone], ['email', '이메일', Mail], ['catalog', '카탈로그 DM', BookOpen]] as const).map(([key, label, Icon]) => {
               const on = channel === key;
               const emailBlocked = key === 'email' && quote?.smtpConfigured === false && channel !== 'email';
               return (
@@ -309,7 +335,7 @@ export default function QuickCampaignPage() {
 
       <div className={`${OUI_WRAP_NARROW} py-6 md:py-8 space-y-4 pb-28`}>
         {planLocked && (
-          <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 px-4 py-3 text-[12px] text-amber-100 inline-flex items-center gap-2"><Lock className="w-4 h-4" /> {channel === 'dm' ? '모바일 DM 요금제에서 열립니다.' : '이메일 캠페인은 유료 요금제에서 열립니다.'}</div>
+          <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 px-4 py-3 text-[12px] text-amber-100 inline-flex items-center gap-2"><Lock className="w-4 h-4" /> {channel === 'email' ? '이메일 캠페인은 유료 요금제에서 열립니다.' : '모바일 DM 요금제에서 열립니다.'}</div>
         )}
         {smtpMissing && (
           <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 px-4 py-3 text-[12px] text-amber-100 flex items-center gap-2 flex-wrap">
@@ -333,6 +359,17 @@ export default function QuickCampaignPage() {
           </div>
         )}
 
+        {isCatalog ? (
+          /* ★ 2026-09-15 카탈로그 DM 채널 — 쪽 이미지만 재료(카드·상품·칩 없음 · 수량 제한 없음) */
+          <section className={`${OUI_CARD} p-5 md:p-6 space-y-4`}>
+            <div>
+              <div className="text-sm font-bold text-white flex items-center gap-2"><BookOpen className="w-4 h-4 text-violet-300" /> 카탈로그 쪽 이미지</div>
+              <p className="text-[12px] text-white/50 mt-1">쪽 이미지를 순서대로 올리면 그대로 카탈로그 DM이 돼요. 휴대폰에서는 슬라이드로 넘기고, PC에서는 책처럼 두 쪽씩 펼쳐 보여요. 글자 읽기나 문구 생성은 하지 않아요.</p>
+            </div>
+            <CatalogPagesInput value={catalogImages} onChange={setCatalogImages} title={catalogTitle} onTitleChange={setCatalogTitle} disabled={busy || planLocked} onUpload={upload} onOpenLibrary={() => setLibraryFor(CATALOG_LIB)} onReject={(m) => toast.warning(m)} />
+            <p className="text-[11px] text-white/40">쓸 이미지가 없으면 <button type="button" onClick={() => navigate('/image-studio')} className="underline underline-offset-2 hover:text-white/80">이미지 스튜디오에서 만들기</button></p>
+          </section>
+        ) : (<>
         {/* ① 행사 카드 */}
         <section className={`${OUI_CARD} p-5 md:p-6 space-y-4`}>
           <div>
@@ -360,6 +397,7 @@ export default function QuickCampaignPage() {
           </div>
           <FeatureChips value={features} onChange={setFeatures} availability={availability} channel={channel} disabled={busy || planLocked} />
         </section>
+        </>)}
 
         {/* ④ 채널 부가 1행(이메일만) */}
         {channel === 'email' && (
@@ -383,7 +421,7 @@ export default function QuickCampaignPage() {
         )}
 
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <p className={OUI_SRC}>Data source: 넣어 주신 재료 · 서버 견적 · 만든 초안은 {channel === 'dm' ? '모바일 DM' : '이메일 캠페인'} 목록에 저장됩니다</p>
+          <p className={OUI_SRC}>Data source: 넣어 주신 재료 · 서버 견적 · 만든 초안은 {channel === 'email' ? '이메일 캠페인' : '모바일 DM'} 목록에 저장됩니다</p>
           <button type="button" onClick={resetAll} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-white/45 hover:text-white/80 disabled:opacity-50"><RotateCcw className="w-3 h-3" /> 새로 시작</button>
         </div>
 
@@ -402,7 +440,7 @@ export default function QuickCampaignPage() {
             {quote ? (
               <>
                 <span className="text-white/85 font-medium">{genPart ? `${genPart.label} ${genPart.cost}` : ''}{readPart ? ` + ${readPart.label} ${readPart.cost}(지금 차감)` : ''} = {quote.total} 크레딧</span>
-                <span> · 이미지 {imageCount}장 · 상품 {products.length}개 · 발행 시 별도</span>
+                <span>{isCatalog ? ` · 쪽 ${imageCount}장 · 발행 시 별도` : ` · 이미지 ${imageCount}장 · 상품 ${products.length}개 · 발행 시 별도`}</span>
                 {!quote.creditEnabled && <span> · 요금제 포함(차감 없음)</span>}
                 {gateText && <span className="block text-amber-200 mt-0.5">{gateText}</span>}
               </>
@@ -420,9 +458,13 @@ export default function QuickCampaignPage() {
       <AssetLibraryPickerModal open={!!libraryFor} onClose={() => setLibraryFor(null)} onPick={(a) => addLibraryImages([a])} multiSelect onPickMany={addLibraryImages} />
       <CreditConfirmModal
         open={confirmOpen}
-        source={channel === 'dm' ? 'dm-ai-generate' : 'email-ai-generate'}
+        source={channel === 'email' ? 'email-ai-generate' : isCatalog ? 'catalog-dm-build' : 'dm-ai-generate'}
         costOverride={quote ? quote.total : undefined}
-        description={quote ? `${quote.parts.map((p) => `${p.label} ${p.cost}`).join(' + ')} · 행사 ${filledCards.length}건 · 이미지 ${imageCount}장 · 상품 ${products.length}개. 완성본은 ${channel === 'dm' ? '모바일 DM' : '이메일'} 편집기에 바로 열리고 목록에 저장돼요. 발행은 별도예요.` : undefined}
+        description={quote
+          ? (isCatalog
+            ? `${quote.parts.map((p) => `${p.label} ${p.cost}`).join(' + ')} · 쪽 ${imageCount}장. 카탈로그 DM은 모바일 DM 편집기에 바로 열리고 목록에 저장돼요. 발행은 별도예요.`
+            : `${quote.parts.map((p) => `${p.label} ${p.cost}`).join(' + ')} · 행사 ${filledCards.length}건 · 이미지 ${imageCount}장 · 상품 ${products.length}개. 완성본은 ${channelNoun} 편집기에 바로 열리고 목록에 저장돼요. 발행은 별도예요.`)
+          : undefined}
         onConfirm={run}
         onCancel={() => setConfirmOpen(false)}
       />

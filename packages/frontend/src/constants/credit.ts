@@ -98,6 +98,8 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'planner-touchpoint-send': '마케팅 플래너 발송 문안',
   'predictive-daily': '예측 분석',
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행', 'dm-interaction-publish': '인터랙션 DM 발행',
+  // ★ 2026-09-15 AI 자동제작 카탈로그 채널(쪽 이미지 → 카탈로그 DM · Harold 확정 10)
+  'catalog-dm-build': '카탈로그 DM 생성',
   // ★ 2026-08-22: 백엔드 CREDIT_COST_MAP에만 있고 여기 라벨이 없어 사용 내역에 "AI 작업"으로 뜨던 유일한 키.
   'dm-custom-short-link': '단축 URL 발급',
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
@@ -134,10 +136,12 @@ export const AI_GENERATE_COSTS: Record<string, number> = {
   'dm-ai-generate': 5,
   'email-ai-generate': 3,
   'event-image-extract': 3,
+  'catalog-dm-build': 10,
 };
 
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'dm-ai-generate': 5,           // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
+  'catalog-dm-build': 10,        // ★ 2026-09-15 카탈로그 DM 생성(AI 자동제작 카탈로그 채널 · Harold 확정 10 · 자동제작 흐름의 확인 모달 1회에 라벨·단가 공급)
   'dm-builder': 100,             // DM 발행
   'dm-interaction-publish': 120, // 인터랙션 발행 (룰렛·추첨·설문)
   'dm-custom-short-link': 100,   // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 발급 확정 차감

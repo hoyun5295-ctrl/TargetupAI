@@ -108,24 +108,31 @@ cd /home/administrator/targetup-app && git log --oneline -3; grep -c "sanitizedP
 ```
 기대 = 4 · 3 · 2 · 1 · 1.
 
-## 6. 3세션(같은 날 이어서): 카탈로그 보기(PC 책 펼침) · 코드 완료 · 배포 대기
+## 6. 3세션(같은 날 이어서): 카탈로그 DM(고른 DM만 PC 책 펼침 · DM 메뉴 · AI 자동제작 채널 10크레딧) · 코드 완료 · 배포 대기
+
+> ⚠ **커밋 `a99cef1a`(Harold 커밋)는 1차 판 = 자동 게이트**(전 장 이미지 슬라이드 DM이면 PC 책 자동 · published 19건 영향). Harold 정정("고른 DM만 · DM 메뉴 추가 · AI 자동제작에도") → 이 작업 트리가 정정판. **`a99cef1a`가 서버에 배포됐다면 이번 커밋 배포가 우선**(배포 뒤 19건은 현행 슬라이드로 돌아간다 · 카탈로그는 플래그를 켠 DM만).
 
 ### 6-1. 한 것
 - 접수(Harold · 참고 = 메이크뷰 `jessi.makevu.me/26win-1/jn109/5`): 완성 이미지 슬라이드 DM(`hlj.kr/uFKZAtH` · 34장)이 PC에서 430px 한 열이라 카탈로그 느낌이 없다. 목업(`~/Downloads/2026-09-15-dm-catalog-view-mock.html`) Harold 승인 뒤 구현. 메이크뷰 실측·비교·제안 3축 = memory `project_2026_0915_catalog_dm_review`.
-- 신규 CT `packages/backend/src/utils/dm/dm-viewer-catalog.ts`(순수 · DB import 0 · 7 export): 게이트 `isCatalogDm`(slides · 펼친 뒤 전 장 `isSwipeImagePage` · 2장 이상) · og 메타(상호 - 제목 · 첫 장 절대 URL · `HANJUL_BASE_URL` 폴백 hanjul.ai) · 핀치 허용 viewport · CSS/HTML/스크립트 조각(접두 `dm-cat-`).
-- `dm-viewer.ts renderPagesHtml`(+12/-8): 게이트 on 일 때만 삽입 = viewport 교체 · og · CSS · `body[data-dm-catalog="1"]` · 띠 왼쪽 전체보기 버튼 · 마크업 · 스크립트 · 기존 ←/→ 핸들러 가드 `if (dmCatalogOn) return;`. **조건 밖 DM 출력 = 바이트 동일**(삽입 전부 빈 문자열).
+- **① 선택형 게이트**: 저장값 = `dm_pages.settings.catalog === true`(jsonb 기존 컬럼 · 이 키 전에 어떤 코드도 settings 를 읽지 않았다 · DDL 0). 뷰어 게이트 = 플래그 AND slides AND 펼친 뒤 전 장 `isSwipeImagePage`(2장 이상). 판정 한 곳 = `dm-viewer-catalog.ts isCatalogEnabled`(뷰어·목록 뱃지 공용). 플래그 없는 DM은 전 장 이미지라도 현행 슬라이드(출력 바이트 동일).
+- 신규 CT `packages/backend/src/utils/dm/dm-viewer-catalog.ts`(순수 · DB import 0): `isCatalogEnabled`·`catalogSettingsOf`·`isCatalogDm` · og 메타(상호 - 제목 · 첫 장 절대 URL · `HANJUL_BASE_URL` 폴백 hanjul.ai) · 핀치 허용 viewport · CSS/HTML/스크립트 조각(접두 `dm-cat-`).
+- `dm-viewer.ts renderPagesHtml`: 게이트 on 일 때만 삽입 = viewport 교체 · og · CSS · `body[data-dm-catalog="1"]` · 띠 왼쪽 전체보기 버튼 · 마크업 · 스크립트 · 기존 ←/→ 핸들러 가드 `if (dmCatalogOn) return;`.
+- **② DM 화면 메뉴**: 목록 카드띠 4번째 카드 **카탈로그 DM**(쪽 이미지 업로드 → 장당 1쪽 slides + 플래그 · `DmBuilderPage handleCompletedImagesSelected 'catalog'`) · 편집기 상단 토글 3안(스크롤·슬라이드·**카탈로그** = slides + 플래그 · 슬라이드/스크롤로 바꾸면 해제 · `DmTopBar`) · 캔버스 모드 라벨(`DmCanvas`) · 목록 카드 뱃지 "카탈로그"(`getDmList` SELECT `settings` + `catalog`) · 저장 body `settings: { catalog }`(`dmBuilderStore` · 로드는 `dm.settings` 읽기).
+- **③ AI 자동제작 카탈로그 채널**(`BuildChannel 'catalog'`): 채널 탭 3번째 · 재료 = 쪽 이미지 N장(**업무 상한 없음** · 서버 보호 기술 상한 500 · 5MB/장 · 업로드는 9장씩 나눠 기존 `/materials` 로) + 선택 제목(`CatalogPagesInput`) · 카드·상품·칩 숨김. 서버 = `normalizeBuildMaterials` 채널 허용·`catalogImages`·`catalogTitle` · `prepareBuildMaterials` 카탈로그 분기(실물 확인 · 역할 판정 0 · 게이트 = 쪽 2장 `checkCatalogMinimum` · missing `pages`) · `buildCatalogDm`(엔진·판독·몰·SMTP 0 · 장 구조 = 완성 이미지 업로드와 동일 · `createDm` slides + `settings.catalog`) · DM 라우트 가족(`channel: 'dm'` 라우트가 catalog 재료를 통과 · `requirePlanFeature mobile_dm`).
+- **요금(Harold 확정 10)**: 신규 키 `catalog-dm-build` 10(`ai-credit-calc.ts` · FEATURE-AI-AUTO-BUILD §2-8 예외). 돈 흐름 = DM 채널과 같은 자리 = 견적 결박(409) → `checkCredit`(402 · 원장 조회 실패 503) → 초안 행 → `deductCreditOutcome`(멱등키 `quick:{company}:catalog:{token}:{과금 지문16}` · duplicate 무료) → 차감 호출이 던지면 행 회수 · failed 는 행 유지 + `[CREDIT][MISS]`. 판독 0. 크레딧제 미적용 = 견적 0 · 원장 `not_applicable`. 프론트 표기 = `constants/credit.ts` 라벨·`AI_GENERATE_COSTS`·`CONFIRM_CREDIT_COSTS` 10.
+- 도움말 원장 `content/feature-catalog.ts` 문구 2곳(모바일 DM 만들기 · AI 자동제작 채널).
 - 화면: PC(폭 768 이상 · 터치형 1024 이상) = 표지 단독 → 2쪽 펼침 · 낱장 넘김(동작 축소 설정은 크로스페이드) · 전체보기 썸네일 · 처음/마지막 · 확대(폭 맞춤 · 더블클릭) · 한쪽/두쪽 · 전체화면 · 안내 모달 · 방향키·휠·드래그 · 3초 뒤 컨트롤 흐림. 모바일 = 현행 무대 그대로 + 띠 왼쪽 전체보기 + 두 손가락 확대.
 - 추적 무변경: 책이 쪽을 보일 때 기존 `updateCurrent`(도달 장·진행률)·`bumpSection`(장별 조회)을 호출. 비콘 본문·주기(sendTrack) 그대로. PC에서 기존 `.dm-viewer`는 `display:none`이라 IntersectionObserver 이중 집계 0.
-- 검증: `dm-viewer-catalog.test.ts` 10건(게이트 on/off · 펼침 뒤 판정 · og 절대 URL · viewport · 추적 배선·키보드 가드 · PC 판정 규칙 · 구성 요소 · 문구 금지어) · backend tsc 0 · vitest **306파일 4,760건** · 실물 렌더(7장 픽스처 · 운영 이미지 URL)를 로컬 정적 서버로 열어 PC 책·키보드 1단계 이동·전체보기 강조·마지막 100%·모바일 복귀(현재 장 정렬 · 이미지 375×539 top 114 = 운영과 동일)·스크립트 오류 0 확인.
-- 운영 규모(Harold SQL 0915): 게이트에 드는 슬라이드 DM **published 19 / total 22**. 배포 즉시 그 19건의 PC 화면이 바뀐다(모바일 무변경). 박성용 재확인 중인 `uFKZAtH` 포함.
-- Codex 대상 아님(돈·DDL·쓰기 경로 아님) · DDL 0 · ENV 신설 0 · 프론트 0.
-- 부수: `.claude/launch.json`에 `mockups-static`(python http.server · 127.0.0.1:8791 · docs/mockups 만) 추가 = 목업·렌더 확인용. 남겨도 무해.
+- 검증: `dm-viewer-catalog.test.ts` 12건(플래그 없으면 off · 문자열 settings · on/off · og · viewport · 추적 배선 · 문구) · `ai-auto-build-catalog.test.ts` 12건(정규화 · 상한 · 게이트 · 견적 10/0 · checkCredit→createDm→차감 순서·멱등키 · duplicate · 차감 장애 회수 · 409 · 이메일 라우트 400) · `campaign-engine.test.ts` 크레딧 키 소스 계약에 `catalog-dm-build` 예외 1개 등재 · backend tsc 0 · vitest **307파일 4,774건** · frontend tsc 0 · 실물 렌더(7장 픽스처 · 운영 이미지 URL)를 로컬 정적 서버로 열어 PC 책·키보드 1단계 이동·전체보기 강조·마지막 100%·모바일 복귀·스크립트 오류 0 확인(1차 판 · DOM·스크립트 동일 · 게이트만 바뀜).
+- 운영 규모(Harold SQL 0915): 전 장 이미지 슬라이드 DM published 19 / total 22 = **이번 정정판에서는 무변경**(플래그 0). 1차 판 배포 상태였다면 정정판 배포로 현행 복귀.
+- Codex: 돈 경로(카탈로그 채널 차감) 신설 = 대상. 이 세션은 자체 계약 테스트(순서·멱등·회수)로 닫았고 `/codex:review` 는 미실행(스킬 미탑재 · **Harold 판단**). DDL 0 · ENV 신설 0.
+- 부수: `.claude/launch.json`에 `mockups-static`(python http.server · 127.0.0.1:8791 · docs/mockups 만) 추가 = 목업·렌더 확인용(1차 커밋에 포함됨). 남겨도 무해.
 
-### 6-2. 배포 (OPS §2-2 · 단계별)
+### 6-2. 배포 (OPS §2-2 · 단계별 · **프론트 변경 있음 = 둘 다 build**)
 
 ▶ 실행 위치: 로컬 PowerShell
 ```powershell
-tp-push "0915 모바일 DM 카탈로그 보기(PC 책 펼침) 신설 · dm-viewer-catalog CT + renderPagesHtml 게이트 삽입(조건 밖 바이트 동일) · og 메타·핀치 허용 · 테스트 10건 (backend tsc 0 · 306/4,760 · DDL 0)"
+tp-push "0915 카탈로그 DM 정정 · 자동 게이트 → 고른 DM만(settings.catalog) + DM 카드띠 카탈로그 DM 카드·편집기 토글 3안·목록 뱃지 + AI 자동제작 카탈로그 채널(쪽 이미지 수량 제한 없이 · 키 catalog-dm-build 10 · 멱등 차감) · 테스트 +14 (backend tsc 0 · frontend tsc 0 · DDL 0)"
 ```
 
 ▶ 실행 위치: .62 (한줄로 서버) · administrator 셸
@@ -136,25 +143,36 @@ cd /home/administrator/targetup-app && git pull
 cd /home/administrator/targetup-app/packages/backend && npm run build:safe
 ```
 ```bash
+cd /home/administrator/targetup-app/packages/frontend && npm run build:safe
+```
+```bash
 pm2 reload targetup-backend && pm2 status
 ```
 
 ### 6-3. 실측 순서 (한 번에 하나)
 1. 배포본 확인 ▶ .62 · administrator 셸
 ```bash
-cd /home/administrator/targetup-app && git log --oneline -1; grep -c "isCatalogDm" packages/backend/src/utils/dm/dm-viewer.ts; grep -c "dmCatalogOn" packages/backend/src/utils/dm/dm-viewer.ts; ls packages/backend/dist/utils/dm/dm-viewer-catalog.js
+cd /home/administrator/targetup-app && git log --oneline -1; grep -c "isCatalogEnabled(dm)" packages/backend/src/utils/dm/dm-viewer.ts; grep -c "catalog-dm-build" packages/backend/src/utils/ai-credit-calc.ts; ls packages/backend/dist/utils/dm/dm-viewer-catalog.js; grep -c "카탈로그 DM" packages/frontend/dist/assets/*.js | awk -F: '{s+=$2} END {print s}'
 ```
-기대 = 3 · 1 · 파일 존재.
-2. PC 크롬 `https://hlj.kr/uFKZAtH`: 어두운 무대에 표지 단독 → 화살표 또는 → 키로 2·3 펼침(낱장 넘김) → 전체보기 34장(현재 쪽 강조) → 확대(폭 맞춤) → 전체화면 → 마지막 34 단독 · 진행 막대 100%.
-3. 같은 DM 발송 추적 탭 [공용 링크] 축: 열람 +1 · 평균 스크롤에 도달 장이 반영(34장 중 5장이면 15% 근처).
-4. 삼성 인터넷 실기기: 현행 무대 그대로(상하 중앙 · 아래 띠) + 띠 왼쪽 전체보기 버튼 + 두 손가락 확대가 된다.
-5. 카카오톡 나에게 보내기로 `hlj.kr/uFKZAtH`: 첫 장 미리보기가 뜨는지(og · hlj.kr 302 경유 스크래퍼 동작은 미검증).
-6. 게이트 밖 DM 1건(섹션형 slides 또는 scroll)을 PC에서 열어 현행 그대로인지.
+기대 = 1 · 1 · 파일 존재 · 1 이상.
+2. PC 크롬 `https://hlj.kr/uFKZAtH`(플래그 없는 기존 DM): **현행 슬라이드 그대로**(430px 한 열 · 화살표). 1차 판 배포 뒤였다면 책에서 슬라이드로 돌아온 것을 확인.
+3. DM 목록 카드띠 [카탈로그 DM] → 쪽 이미지 3장 이상 업로드 → 편집기 열림(상단 토글 = 카탈로그 · 캔버스 라벨 "카탈로그") → 발행 → PC 크롬에서 표지 단독 → 2·3 펼침 · 전체보기 · 확대 · 전체화면 · 마지막 단독 → 휴대폰(삼성 인터넷)에서 현행 무대 + 띠 왼쪽 전체보기 + 두 손가락 확대 → 목록 카드에 "카탈로그" 뱃지.
+4. 같은 DM 편집기에서 토글을 [슬라이드]로 → 저장 → PC 새로고침 = 현행 슬라이드(플래그 해제) → 다시 [카탈로그] → 책 복귀.
+5. AI 자동제작 → 채널 [카탈로그 DM] → 쪽 이미지 12장(9장 초과 = 나눠 올림) → 견적 바 "카탈로그 DM 생성 10 = 10 크레딧 · 쪽 12장" → 확인 창 → 편집기 착지(카탈로그 토글 on) → 원장 확인 ▶ .62
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT to_char(created_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS kst, source, cost, idempotency_key FROM ai_credit_transactions WHERE source='catalog-dm-build' ORDER BY created_at DESC LIMIT 5;"
+```
+기대 = 1행 · cost 10 · 키 `quick:{회사}:catalog:{토큰}:{16자}`. 편집기 [다시 만들기] 1회 = 새 토큰 = 2행.
+6. 카탈로그 채널에 쪽 1장만 = 버튼 잠김 + "카탈로그 쪽 이미지를 2장 이상 올려 주세요".
+7. 발송 추적 탭 [공용 링크] 축: 3번 DM 열람 +1 · 평균 스크롤에 도달 장 반영.
+8. 카카오톡 나에게 보내기로 3번 DM 링크: 첫 장 미리보기(og · hlj.kr 302 경유 스크래퍼 동작은 미검증).
 
 ### 6-4. 범위 밖 · 추가 과제 (착수 판단 = Harold)
-- 2축 장별 체류·열람 순서(`section_interactions` jsonb 확장 · DDL 0) · 3축 이미지 위 핫스팟 레이어(편집기 축) · og 메타를 전 DM으로 확대 · 발행 모달에 "PC에서는 책처럼 보입니다" 안내.
+- 카탈로그 DM 상설 문서(`docs/FEATURE-CATALOG-DM.md` 신설 · SOT-INDEX 등재) — 이번은 인계 §6 + FEATURE-AI-AUTO-BUILD §6 기록만.
+- Codex 적대검토(카탈로그 채널 차감 경로) — 스킬 미탑재로 미실행.
+- 2축 장별 체류·열람 순서(`section_interactions` jsonb 확장 · DDL 0) · 3축 이미지 위 핫스팟 레이어(편집기 축) · og 메타를 전 DM으로 확대 · 발행 모달에 "PC에서는 책처럼 보입니다" 안내 · `EventCampaignModal` 결과 라벨(슬라이드형/스크롤형)에 카탈로그 미표시.
 - 갤러리 N장 펼침 DM은 장 섹션 id에 `-sN-img` 접미가 붙어 수신자 상세 "섹션 여정"에 "(삭제된 섹션)"으로 나오고 이탈 집계에서 빠진다(`extractFlatSectionsFromDm` 원본만 · `dm.ts recipient-detail`). 이번 34장 DM(장마다 섹션)은 해당 없음. 기록만.
 - 메이크뷰 "좌우 맞춤"이 한 쪽 보기에서 확대로 동작하는지 미검증.
 
 ### 6-5. 되돌리기
-- 커밋 revert → `build:safe` → `pm2 reload`. 발행물은 요청 시 렌더라 즉시 원복. DB 무접촉.
+- 커밋 revert → backend·frontend `build:safe` → `pm2 reload`. 발행물은 요청 시 렌더라 즉시 원복. DB 무접촉(플래그를 켠 DM 의 `settings.catalog` 는 남지만 읽는 코드가 없어지면 무해 · 카탈로그 채널 차감 행은 원장 그대로).

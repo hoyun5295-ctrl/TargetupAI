@@ -7,6 +7,8 @@
 import crypto from 'crypto';
 import { query } from '../../config/database';
 import { normalizeDmShortCode } from './dm-code';
+// ★ 2026-09-15 카탈로그 DM 판정(settings.catalog) — 목록 카드 뱃지 · 판정 한 곳(뷰어와 같은 함수)
+import { isCatalogEnabled } from './dm-viewer-catalog';
 import {
   clampPageReached, clampTotalPages, clampDurationDelta, clampScrollPct,
   sanitizeSectionInteractions, mergeSectionInteractions,
@@ -434,7 +436,7 @@ export async function getDmList(companyId: string, ownerUserId?: string | null) 
   try {
     result = await query(
       `SELECT id, title, store_name, status, approval_status, layout_mode,
-              short_code, view_count, sections, brand_kit,
+              short_code, view_count, sections, brand_kit, settings,
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               EXISTS (SELECT 1 FROM dm_recipient_tokens t WHERE t.dm_id = dm_pages.id) AS has_send_history,
               created_at, updated_at
@@ -447,7 +449,7 @@ export async function getDmList(companyId: string, ownerUserId?: string | null) 
     if (!(msg.includes('relation') && msg.includes('does not exist'))) throw e;
     result = await query(
       `SELECT id, title, store_name, status, approval_status, layout_mode,
-              short_code, view_count, sections, brand_kit,
+              short_code, view_count, sections, brand_kit, settings,
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               false AS has_send_history,
               created_at, updated_at
@@ -470,6 +472,8 @@ export async function getDmList(companyId: string, ownerUserId?: string | null) 
       status: row.status,
       approval_status: row.approval_status,
       layout_mode: row.layout_mode,
+      // ★ 2026-09-15 카탈로그 DM(settings.catalog · 고른 DM만) — 목록 카드 뱃지용. 판정 한 곳 = dm-viewer-catalog isCatalogEnabled
+      catalog: isCatalogEnabled(row),
       short_code: row.short_code,
       view_count: row.view_count,
       page_count: row.page_count,

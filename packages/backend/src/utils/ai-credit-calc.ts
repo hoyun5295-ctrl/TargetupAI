@@ -128,6 +128,9 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'predictive-daily': 3,
   // 모바일 DM 생성(돌려보기) 5 — 자연어→sections + 슬라이드 분할 + 전 섹션 카피까지 생성(범위 넓음). 호출마다 5. 발행은 'dm-builder' 30 별도.
   'dm-ai-generate': 5,
+  // ★ 2026-09-15 카탈로그 DM 생성 10 — Harold 확정. AI 자동제작 카탈로그 채널(쪽 이미지 N장 · 수량 제한 없음 → 장당 1쪽 슬라이드 DM + settings.catalog).
+  //   AI·판독 0(쪽을 그대로 싣는다) · 멱등키 quick:{company}:catalog:{attemptToken}:{과금 지문16}(duplicate 무료) · 발행은 'dm-builder' 별도.
+  'catalog-dm-build': 10,
   // 모바일 DM 발행(확정) 30 — 단축URL 발행 최초 1회만(멱등키=dm-publish:dmId). test-send 자동발행은 미과금.
   'dm-builder': 100,
   // 인터랙션 캠페인 발행(룰렛/추첨/투표/설문/이메일수집 등) 50 — 일반 발행보다 높게(F 안1 정액). 발행 최초 1회만(멱등키=dm-publish:dmId). 당첨 통보 발송은 기존 발송 크레딧 별도(발송은 발송대로). 베타 동안 하향 조정 가능(config가 진실).

@@ -29,6 +29,7 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
   const brandKit = useDmBuilderStore((s) => s.brandKit);
   const updateSectionProps = useDmBuilderStore((s) => s.updateSectionProps);
   const layoutMode = useDmBuilderStore((s) => s.layoutMode);
+  const catalogView = useDmBuilderStore((s) => s.catalogView);
   const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
   const selectPage = useDmBuilderStore((s) => s.selectPage);
   const handlePromptClick = onPromptClick || (() => setOpenModal('ai-prompt'));
@@ -122,7 +123,7 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
           }}
           title="발행되면 이 방식으로 페이지가 전환돼요"
         >
-          {modeLabel[layoutMode] || layoutMode}
+          {catalogView ? '📖 카탈로그 (휴대폰 슬라이드 · PC 책 펼침)' : (modeLabel[layoutMode] || layoutMode)}
         </span>
       </div>
 

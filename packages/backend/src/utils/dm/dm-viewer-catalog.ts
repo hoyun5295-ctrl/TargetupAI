@@ -13,10 +13,25 @@ import { isSwipeImagePage, type SlidePage } from './dm-slides-expand';
 import { publicImageUrl } from './dm-viewer-utils';
 import { escapeHtml } from './dm-section-renderer';
 
-/** 게이트 : 2장 이상이고 전 장이 이미지 1장 무대일 때만 책이 된다 */
+/** 기술 조건 : 2장 이상이고 전 장이 이미지 1장 무대일 때만 책이 될 수 있다(선택 플래그와 AND · 단독으로는 게이트가 아니다) */
 export function isCatalogDm(pages: SlidePage[]): boolean {
   if (!Array.isArray(pages) || pages.length < 2) return false;
   return pages.every((p) => isSwipeImagePage(p));
+}
+
+/** dm_pages.settings(jsonb · 객체 또는 JSON 문자열) → 객체. 못 읽으면 빈 객체 */
+export function catalogSettingsOf(raw: unknown): Record<string, unknown> {
+  if (!raw) return {};
+  if (typeof raw === 'string') { try { const p = JSON.parse(raw); return p && typeof p === 'object' ? p : {}; } catch { return {}; } }
+  return typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+}
+
+/**
+ * ★ 2026-09-15 Harold 정정 : 카탈로그는 **고른 DM만**. 자동 판정이 아니라 `settings.catalog === true`(편집기 토글 · 카탈로그 DM 카드 · AI 자동제작 카탈로그 채널이 심는다)가 있어야 한다.
+ * settings 컬럼은 이 키 전에 어떤 코드도 읽지 않았다(dm-builder 저장만) · DDL 0.
+ */
+export function isCatalogEnabled(dm: { settings?: unknown } | null | undefined): boolean {
+  return catalogSettingsOf(dm?.settings).catalog === true;
 }
 
 /** 첫 장 이미지의 절대 URL(og:image). 상대 경로는 서비스 주소(HANJUL_BASE_URL · 폴백 hanjul.ai)를 붙인다. */

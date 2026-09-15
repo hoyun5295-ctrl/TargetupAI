@@ -27,6 +27,9 @@ export const AI_AUTO_BUILD_MIN_TEXT_CHARS = 40;
 export const AI_AUTO_BUILD_CARDS_MAX = 3;
 export const AI_AUTO_BUILD_CARD_IMAGES = 3;
 export const AI_AUTO_BUILD_PRODUCTS_MAX = 12;
+/** ★ 2026-09-15 카탈로그 DM 채널(Harold 지시 · 쪽 이미지 수량 제한 없음) — 아래는 업무 상한이 아니라 서버 보호용 기술 상한과 책의 최소 쪽수 */
+export const AI_AUTO_BUILD_CATALOG_IMAGES_MAX = 500;
+export const AI_AUTO_BUILD_CATALOG_MIN_IMAGES = 2;
 /** 로고 추정 하한(폭/높이) — 미검증 수치(§11) · 화면은 "추정" 배지 */
 export const AI_AUTO_BUILD_LOGO_MIN_RATIO = 3;
 
@@ -105,7 +108,8 @@ export interface BuildProduct {
   /** 몰 이미지만(불변 5) · manual 은 항상 null */
   imageUrl: string | null;
 }
-export type BuildChannel = 'dm' | 'email';
+/** ★ 2026-09-15 'catalog' = 카탈로그 DM(쪽 이미지 N장 → 장당 1쪽 슬라이드 DM + settings.catalog · AI 0 · 판독 0 · 차감 0). DM 라우트(requirePlanFeature mobile_dm)로 들어온다. */
+export type BuildChannel = 'dm' | 'email' | 'catalog';
 export interface BuildMaterials {
   version: 1;
   /** 돈 단위(불변 9) · uuid 소문자 */
@@ -125,6 +129,10 @@ export interface BuildMaterials {
   /** 카드 제목+내용을 합쳐 공백을 접은 사용자 텍스트(게이트·지문의 기준) */
   userText: string;
   textChars: number;
+  /** ★ 카탈로그 채널만 · 쪽 순서 그대로(이 회사 서빙 경로만 · 기술 상한 AI_AUTO_BUILD_CATALOG_IMAGES_MAX) · 다른 채널은 [] */
+  catalogImages: BuildImage[];
+  /** ★ 카탈로그 채널만 · 선택 제목(TITLE_MAX) · 없으면 null */
+  catalogTitle: string | null;
 }
 export type BuildNormalizeField = 'version' | 'attemptToken' | 'expectedTotal' | 'channel';
 export type BuildNormalizeResult =
@@ -247,11 +255,13 @@ export function normalizeBuildMaterials(raw: unknown, companyId: string): BuildN
   const tokenRaw = String(r.attemptToken ?? '').trim();
   if (!UUID_RE.test(tokenRaw)) return { ok: false, field: 'attemptToken', error: '시도 토큰이 없거나 형식이 맞지 않습니다.' };
   const channelRaw = String(r.channel ?? '').trim().toLowerCase();
-  if (channelRaw !== 'dm' && channelRaw !== 'email') return { ok: false, field: 'channel', error: '채널은 모바일 DM 또는 이메일만 고를 수 있습니다.' };
+  if (channelRaw !== 'dm' && channelRaw !== 'email' && channelRaw !== 'catalog') return { ok: false, field: 'channel', error: '채널은 모바일 DM · 이메일 · 카탈로그 DM만 고를 수 있습니다.' };
   const total = r.expectedTotal;
   if (typeof total !== 'number' || !Number.isInteger(total) || total < 0) return { ok: false, field: 'expectedTotal', error: '견적 금액이 없거나 형식이 맞지 않습니다.' };
 
-  const eventCards = normalizeEventCards(r.eventCards, companyId);
+  // ★ 카탈로그 채널 = 쪽 이미지만 재료(카드·상품·칩은 비운다 · 지문·게이트가 다른 채널의 것을 섞지 않게)
+  const isCatalog = channelRaw === 'catalog';
+  const eventCards = isCatalog ? [] : normalizeEventCards(r.eventCards, companyId);
   const userText = collapseWs(eventCards.flatMap((c) => [c.title, c.text]).join(' '));
   return {
     ok: true,
@@ -262,12 +272,14 @@ export function normalizeBuildMaterials(raw: unknown, companyId: string): BuildN
       channel: channelRaw,
       isAd: typeof r.isAd === 'boolean' ? r.isAd : null,
       eventCards,
-      products: normalizeProducts(r.products),
-      features: normalizeFeatures(r.features),
+      products: isCatalog ? [] : normalizeProducts(r.products),
+      features: isCatalog ? null : normalizeFeatures(r.features),
       brandName: collapseWs(r.brandName).slice(0, BRAND_MAX) || null,
       origin: userText ? 'user' : 'empty',
       userText,
       textChars: userText.length,
+      catalogImages: isCatalog ? normalizeImages(r.catalogImages, companyId, AI_AUTO_BUILD_CATALOG_IMAGES_MAX) : [],
+      catalogTitle: isCatalog ? (collapseWs(r.catalogTitle).slice(0, TITLE_MAX) || null) : null,
     },
   };
 }
@@ -316,12 +328,19 @@ export function buildMaterialsHash(m: BuildMaterials, roles: readonly BuildImage
   const products = m.products
     .map((p) => (p.source === 'mall' ? `mall:${p.provider}:${p.code}` : `manual:${p.name}:${p.price ?? ''}:${p.salePrice ?? ''}:${p.discountRate ?? ''}`))
     .sort();
-  const payload = { text: m.userText, products, roles: roles.map((r) => r.role) };
+  // 카탈로그 채널 = 쪽 수·제목(URL 은 계약 3 대로 넣지 않는다 · 견적은 0 이라 결박은 형식 유지)
+  const payload = { text: m.userText, products, roles: roles.map((r) => r.role), catalogPages: m.catalogImages.length, catalogTitle: m.catalogTitle };
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-export type BuildMissing = 'text' | 'hero';
+/** 'pages' = 카탈로그 채널 최소 쪽수 미달(AI_AUTO_BUILD_CATALOG_MIN_IMAGES) */
+export type BuildMissing = 'text' | 'hero' | 'pages';
 export type BuildGateResult = { ok: true } | { ok: false; missing: BuildMissing[] };
+
+/** ★ 카탈로그 채널 최소 재료 게이트(차감 앞 · 순수) — 실물이 있는 쪽 이미지 2장 이상 */
+export function checkCatalogMinimum(images: readonly BuildImage[]): BuildGateResult {
+  return images.length >= AI_AUTO_BUILD_CATALOG_MIN_IMAGES ? { ok: true } : { ok: false, missing: ['pages'] };
+}
 
 /**
  * 최소 재료 게이트(§6-4 · 차감 앞) — 통과 = 사용자 텍스트 40자 이상 **또는** 히어로 후보 1장 이상(= 이미지 1장 이상).
@@ -386,6 +405,9 @@ export function buildBillingHash(m: BuildMaterials): string {
     products: m.products.map((p) => [p.source, p.provider, p.code, p.name, p.price, p.salePrice, p.discountRate, p.url, p.imageUrl]),
     features: m.features,
     brandName: m.brandName,
+    // ★ 카탈로그 채널 재료(쪽 이미지 URL 순서 · 제목) — 다른 채널은 []·null 이라 기존 지문과 같은 입력 · 값은 달라져도 차감 0 이라 돈 영향 없음
+    catalogImages: m.catalogImages.map((im) => im.url),
+    catalogTitle: m.catalogTitle,
   };
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }

@@ -41,7 +41,7 @@ import { parseLicensedEndDate } from './sales-outreach-jobs';
 import { runInCreditBundle } from './ai-credit-context';
 import type { Section } from './dm/dm-section-registry';
 import {
-  aiAutoBuildEnabled, normalizeBuildMaterials, judgeImageRoles, checkMinimumMaterials, buildMaterialsHash, buildBillingHash, buildIdempotencyKey, buildReadIdempotencyKey, imagesHashOf, mallProductNoOf, resolveBuildProducts,
+  aiAutoBuildEnabled, normalizeBuildMaterials, judgeImageRoles, checkMinimumMaterials, checkCatalogMinimum, buildMaterialsHash, buildBillingHash, buildIdempotencyKey, buildReadIdempotencyKey, imagesHashOf, mallProductNoOf, resolveBuildProducts,
   companyImagePrefixes, isCompanyImageUrl, AiAutoBuildError,
   type BuildChannel, type BuildEventCard, type BuildMallProvider, type BuildMallLookup, type BuildImageRoleJudgement,
   type BuildMaterials, type BuildImage, type BuildGateResult,
@@ -558,6 +558,11 @@ export function defaultBuildDeps(): BuildDeps {
  */
 export function quoteBuildMaterials(input: { channel: BuildChannel; textChars: number; imageCount: number; creditEnabled?: boolean; visionCached?: boolean }): QuickQuote {
   const priced = input.creditEnabled !== false;
+  // ★ 2026-09-15 카탈로그 DM 채널 = 생성 키 'catalog-dm-build'(Harold 확정 10 · ai-credit-calc 원장) 1부품 · 판독 0(쪽 이미지를 읽지 않는다) · 크레딧제 미적용 = 0
+  if (input.channel === 'catalog') {
+    const cost = priced ? getCreditCost('catalog-dm-build') : 0;
+    return { total: cost, parts: [{ key: 'catalog-dm-build', label: '카탈로그 DM 생성', cost }] };
+  }
   const costOf = (key: string) => (priced ? getCreditCost(key) : 0);
   const parts: QuickQuote['parts'] = [];
   // 판독 부품 = 텍스트 0 + 이미지 있음 + **캐시에 없음**(적중이면 판독도 차감도 없다 · 견적과 생성이 같은 판정)
@@ -639,8 +644,21 @@ function prepareBuildMaterials(rawMaterials: unknown, companyId: string, deps: B
   const norm = normalizeBuildMaterials(rawMaterials, companyId);
   if (!norm.ok) throw new AiAutoBuildError(400, 'MATERIALS_INVALID', norm.error, { field: norm.field });
   const m = norm.materials;
-  // 라우트가 고정한 채널(DM 라우트 = dm · 이메일 라우트 = email)과 재료의 채널이 다르면 거부 — 다른 채널의 행·차감을 만들지 않는다
-  if (channel && m.channel !== channel) throw new AiAutoBuildError(400, 'MATERIALS_INVALID', '요청한 채널과 재료의 채널이 다릅니다.', { field: 'channel' });
+  // 라우트가 고정한 채널(DM 라우트 = dm · 이메일 라우트 = email)과 재료의 채널이 다르면 거부 — 다른 채널의 행·차감을 만들지 않는다.
+  // ★ 카탈로그 DM 은 DM 라우트 가족(dm_pages 행 · mobile_dm 요금제 게이트)이라 DM 라우트로 들어온다.
+  if (channel && m.channel !== channel && !(channel === 'dm' && m.channel === 'catalog')) throw new AiAutoBuildError(400, 'MATERIALS_INVALID', '요청한 채널과 재료의 채널이 다릅니다.', { field: 'channel' });
+  // ★ 카탈로그 채널 = 쪽 이미지 실물만 확인(없는 장 제외) · 역할 판정 0 · 게이트 = 쪽 2장 이상
+  if (m.channel === 'catalog') {
+    let catalogDropped = 0;
+    const catalogFiles = new Map<string, BuildReadImage>();
+    const catalogImages = m.catalogImages.flatMap((im) => {
+      const f = deps.readImage(im.url, companyId);
+      if (!f.exists) { catalogDropped++; return []; }
+      catalogFiles.set(im.url, f);
+      return [{ url: im.url, width: im.width ?? f.width, height: im.height ?? f.height }];
+    });
+    return { m, cards: [], images: catalogImages, roles: [], gate: checkCatalogMinimum(catalogImages), imagesDropped: catalogDropped, files: catalogFiles };
+  }
   let imagesDropped = 0;
   const files = new Map<string, BuildReadImage>();
   const cards: BuildEventCard[] = m.eventCards.map((c) => ({
@@ -728,6 +746,82 @@ export function buildGenerateResponse(r: BuildGenerateResult): Record<string, un
 }
 
 /**
+ * ★ 2026-09-15 카탈로그 DM 채널(Harold 지시 · 쪽 이미지 수량 제한 없이) — 쪽 이미지 N장을 장당 1쪽 슬라이드 DM으로 만들고 `settings.catalog` 를 심는다
+ *  (PC 책 펼침은 뷰어 dm-viewer-catalog 가 이 플래그로 판정 · 편집기 토글·카탈로그 DM 카드와 같은 저장값).
+ *  AI 호출 0 · 판독 0 · 차감 = 생성 키 'catalog-dm-build'(Harold 확정 10) 1회 · 엔진·몰·SMTP 무접촉.
+ *  돈 흐름은 DM 채널과 같은 자리·같은 규칙 = 견적 결박(409) → checkCredit(402 · 원장 조회 실패 503) → 초안 행 → deductCreditOutcome(멱등키 quick:{company}:catalog:{token}:{지문} · duplicate 무료)
+ *  → 차감 호출이 던지면 행 회수(고아 0) · failed 는 행 유지 + [CREDIT][MISS].
+ *  장 구조 = DM 편집기 "완성 이미지 업로드(슬라이드)"와 같은 모양(장당 갤러리 1장 · list_1xN · full_bleed) → 뷰어 isSwipeImagePage 무대 판정 통과.
+ *  개방·정규화·이미지 실물·최소 쪽수 게이트는 공통 앞단(prepareBuildMaterials)이 이미 지났다.
+ */
+async function buildCatalogDm(input: { m: BuildMaterials; images: BuildImage[]; imagesDropped: number; companyId: string; userId: string; deps: BuildDeps }): Promise<BuildGenerateResult> {
+  const { m, images, imagesDropped, companyId, userId, deps } = input;
+  const creditEnabled = await creditEnabledOrThrow(deps, companyId);
+  const quote = quoteBuildMaterials({ channel: 'catalog', textChars: 0, imageCount: images.length, creditEnabled });
+  if (quote.total !== m.expectedTotal) throw new AiAutoBuildError(409, 'QUOTE_CHANGED', '견적이 바뀌었어요. 금액을 다시 확인하고 눌러 주세요.', { quote });
+  try {
+    await deps.checkCredit(companyId, quote.total);
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) throw err;
+    console.log(`[ai-auto-build] 잔액 확인 실패(catalog) company=${companyId} err=${err?.message}`);
+    throw new AiAutoBuildError(503, 'CREDIT_LOOKUP_UNAVAILABLE', '크레딧 잔액을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
+  }
+  const brandKit = readableCustomerBrandKit(await deps.brandKit(companyId));
+  const basic = await deps.basicInfo(companyId).catch(() => null);
+  const companyName = m.brandName || String(basic?.brand_name || '').trim() || String(basic?.company_name || '').trim() || '우리 브랜드';
+  const name = (m.catalogTitle || `[카탈로그] ${companyName}`).slice(0, 200);
+  const pages = images.map((im, i) => ({
+    id: `catalog-p${i + 1}`,
+    sections: [{ id: `catalog-p${i + 1}-img`, type: 'gallery', order: 0, visible: true, props: { images: [{ url: im.url }], layout: 'list_1xN', full_bleed: true } }],
+  }));
+  const sections = pages.flatMap((p) => p.sections) as unknown as Section[];
+  const dm = await deps.createDm(companyId, userId, {
+    title: name, sections, pages, layout_mode: 'slides', settings: { catalog: true }, brand_kit: brandKit, ai_prompt: '', approval_status: 'draft',
+  });
+  const draftId = String(dm.id);
+  const materialsHash = buildMaterialsHash(m, []);
+  const billingHash = buildBillingHash(m);
+  const idempotencyKey = buildIdempotencyKey(companyId, 'catalog', m.attemptToken, billingHash);
+  const genKey = 'catalog-dm-build';
+  const genCost = getCreditCost(genKey);
+  let deductOutcome: DeductOutcome;
+  try {
+    deductOutcome = await deps.deductOutcome({ companyId, cost: genCost, source: genKey, createdBy: userId || null, idempotencyKey });
+  } catch (err) {
+    // 원장 호출 자체가 던진 것 = 차감 이전 실패 → 만든 행을 거둔다(고아 0 · DM 채널과 같은 규칙)
+    try { await deps.deleteDm(draftId, companyId); } catch (cleanupErr: any) { console.log(`[ai-auto-build] 카탈로그 초안 회수 실패 company=${companyId} draft=${draftId} err=${cleanupErr?.message}`); }
+    throw err;
+  }
+  if (deductOutcome === 'failed') {
+    console.log(`[CREDIT][MISS] ai-auto-build company=${companyId} channel=catalog key=${idempotencyKey} attemptToken=${m.attemptToken} draft=${draftId} cost=${genCost}`);
+  }
+  return {
+    channel: 'catalog',
+    draftId,
+    attemptToken: m.attemptToken,
+    idempotencyKey,
+    deductOutcome,
+    readDeductOutcome: null,
+    quote,
+    sections,
+    pages,
+    layout_mode: 'slides',
+    brand_kit: brandKit,
+    look: lookStatsOf(sections),
+    benefitStripped: 0,
+    heroFallback: false,
+    subject: null,
+    preheader: null,
+    name,
+    materialsMeta: {
+      images: images.length, imagesUsed: images.length, imagesDropped, textChars: 0, origin: 'empty', licensed: false, reads: 0, visionCached: false,
+      products: 0, productsText: 0, mallUnverified: [], mallFailed: false, excluded: [], sections: sections.length, ctaCount: 0, eventCards: 0,
+      imageRoles: [], features: { applied: [], removed: [], skipped: [] }, notes: [], materialsHash, billingHash,
+    },
+  };
+}
+
+/**
  * v1 조립 — 모든 판정은 차감 앞(§2-10) · 돈 단위 = attemptToken(§2-9) · 실패 계약(§6-5).
  *  순서: 개방 → 정규화 → 채널 고정 → 이미지 실물(없는 장 제외 · 치수 실측) → 최소 재료 게이트 → (이메일) SMTP → 몰 재조회 → 견적 결박(409) → checkCredit(402 · 원장 조회 실패 503)
  *        → 판독(텍스트 0 · 캐시) → 조립(AI) → 초안 행 → 차감(deductCreditOutcome · duplicate 무료 · failed 는 행 유지 + [CREDIT][MISS]).
@@ -740,7 +834,13 @@ export async function generateFromBuildMaterials(
   const companyId = String(input.companyId);
   const userId = input.userId ? String(input.userId) : '';
   const { m, cards, images, roles, gate, imagesDropped, files } = prepareBuildMaterials(input.materials, companyId, deps, input.channel);
-  if (!gate.ok) throw new AiAutoBuildError(400, 'MATERIAL_THIN', '재료가 부족해요. 행사 내용 40자 이상 또는 첫 화면이 될 사진 1장을 넣어 주세요.', { missing: gate.missing });
+  if (!gate.ok) {
+    throw new AiAutoBuildError(400, 'MATERIAL_THIN',
+      m.channel === 'catalog' ? '카탈로그 쪽 이미지를 2장 이상 올려 주세요.' : '재료가 부족해요. 행사 내용 40자 이상 또는 첫 화면이 될 사진 1장을 넣어 주세요.',
+      { missing: gate.missing });
+  }
+  // ★ 2026-09-15 카탈로그 DM 채널 — 엔진·몰·SMTP·판독·차감 전부 지나지 않는다(아래 공통 흐름과 분리 · 견적 결박만 유지)
+  if (m.channel === 'catalog') return buildCatalogDm({ m, images, imagesDropped, companyId, userId, deps });
   if (m.channel === 'email' && !(await deps.smtpConfigured(companyId))) {
     throw new AiAutoBuildError(400, 'SMTP_REQUIRED', '이메일 발신 설정이 먼저 필요해요. 설정 메뉴에서 발신 메일을 등록해 주세요.');
   }

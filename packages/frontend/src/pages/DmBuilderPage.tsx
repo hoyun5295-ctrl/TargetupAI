@@ -75,6 +75,8 @@ type DmListItem = {
   title: string;
   store_name?: string;
   layout_mode?: string;
+  /** ★ 2026-09-15 카탈로그 DM(settings.catalog · 고른 DM만) — 목록 API getDmList 가 판정해 내려준다 */
+  catalog?: boolean;
   approval_status?: string;
   /**
    * ★ 2026-08-06 발행 축(`dm_pages.status`) — `draft` / `published` / `stopped`.
@@ -242,7 +244,8 @@ export default function DmBuilderPage() {
   //   layoutMode 변경 영역 = 편집 모드 안 DmTopBar 토글 영역 활용 정합
   // ★ 2026-06-19: 완성 이미지(디자인 시안) 업로드 → slideshow 섹션 자동 생성 진입
   const completedImagesInputRef = useRef<HTMLInputElement>(null);
-  const uploadModeRef = useRef<'slides' | 'scroll'>('scroll'); // 완성 이미지 업로드: 좌우 슬라이드 / 세로 스크롤 선택
+  // 완성 이미지 업로드: 좌우 슬라이드 / 세로 스크롤 / ★ 2026-09-15 카탈로그(= 슬라이드 + settings.catalog · PC 책 펼침) 선택
+  const uploadModeRef = useRef<'slides' | 'scroll' | 'catalog'>('scroll');
   const [uploadingImages, setUploadingImages] = useState(false);
 
   const handleCreateNew = () => {
@@ -347,7 +350,7 @@ export default function DmBuilderPage() {
   }, []);
 
   // ★ 2026-06-19: 완성 이미지 업로드 → 슬라이드 DM 자동 생성 (외주 완성 시안 대응 — 신규 섹션 타입 불요, slideshow 재사용)
-  const handleCompletedImagesSelected = useCallback(async (files: FileList | null, mode: 'slides' | 'scroll' = 'scroll') => {
+  const handleCompletedImagesSelected = useCallback(async (files: FileList | null, mode: 'slides' | 'scroll' | 'catalog' = 'scroll') => {
     if (!files || files.length === 0) return;
     if (uploadingImages || generating) return;
     setUploadingImages(true);
@@ -365,11 +368,13 @@ export default function DmBuilderPage() {
       }
       // 완성 이미지 N장 → 좌우 슬라이드(이미지당 1페이지 스와이프) 또는 세로 스크롤(1열 갤러리). 사용자 선택(mode).
       // ★ 슬라이드쇼 섹션은 16:9 크롭 + 발송 시 첫 장만 렌더 버그 → 페이지 스와이프(layoutMode 'slides')로 원본 비율·전 장 렌더.
-      createNew({ title: '완성 이미지 DM' });
+      const isCatalog = mode === 'catalog';
+      createNew({ title: isCatalog ? '카탈로그 DM' : '완성 이미지 DM' });
       // ★ 2026-07-15 완성 이미지 = 외주가 디자인 다 한 전체 이미지 → 풀화면(full_bleed) 자동 지정(카드 여백 X, 화면 꽉)
-      if (mode === 'slides') {
+      // ★ 2026-09-15 카탈로그 = 같은 장 구조(장당 이미지 1장) + settings.catalog(뷰어가 PC 에서 책 펼침 · 휴대폰은 슬라이드)
+      if (mode === 'slides' || isCatalog) {
         const pages = urls.map((u) => [createSection('gallery', 0, { images: [{ url: u }], layout: 'list_1xN', full_bleed: true })]);
-        applyAiGenerated(pages[0], undefined, '완성 이미지 업로드', { pages, layoutMode: 'slides' });
+        applyAiGenerated(pages[0], undefined, isCatalog ? '카탈로그 이미지 업로드' : '완성 이미지 업로드', { pages, layoutMode: 'slides', catalogView: isCatalog });
       } else {
         const gallery = createSection('gallery', 0, { images: urls.map((u) => ({ url: u })), layout: 'list_1xN', full_bleed: true });
         applyAiGenerated([gallery], undefined, '완성 이미지 업로드', { layoutMode: 'scroll' });
@@ -378,7 +383,9 @@ export default function DmBuilderPage() {
       setMode('edit');
       setToast({
         type: 'success',
-        message: `완성 이미지 ${urls.length}장으로 이미지 DM을 만들었어요${failed ? ` (${failed}장 실패)` : ''}. 편집에서 순서·캡션을 조정할 수 있어요.`,
+        message: isCatalog
+          ? `쪽 이미지 ${urls.length}장으로 카탈로그 DM을 만들었어요${failed ? ` (${failed}장 실패)` : ''}. 휴대폰은 슬라이드, PC는 책처럼 펼쳐 보여요. 순서는 편집에서 바꿀 수 있어요.`
+          : `완성 이미지 ${urls.length}장으로 이미지 DM을 만들었어요${failed ? ` (${failed}장 실패)` : ''}. 편집에서 순서·캡션을 조정할 수 있어요.`,
       });
     } catch (err: any) {
       setToast({ type: 'error', message: err?.response?.data?.error || err?.message || '이미지 DM 생성 실패' });
@@ -848,7 +855,9 @@ export default function DmBuilderPage() {
           {/* ★ 2026-07-02(5) Harold 지시 재배치 — 좌: 프롬프트 단독(크게) / 우: 빠른 시작(위) + 자유 시작·완성 슬라이드(아래) */}
           <style>{`
             .dm-hub-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
-            .dm-hub-bottom { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+            .dm-hub-bottom { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+            /* ★ 2026-09-15 카탈로그 DM 카드가 4번째로 들어와 좁은 폭에서는 2×2 */
+            @media (max-width: 1023px) { .dm-hub-bottom { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
             /* ★ 2026-08-21 한글은 기본 줄바꿈이 글자 단위라 "추 가"·"슬라 이드"·"불러 오기"처럼 낱말이 잘렸다.
                keep-all = 띄어쓰기에서만 끊는다(줄 위치는 아래 타일이 <br/>로 직접 정한다). */
             .dm-hub-bottom button { word-break: keep-all; }
@@ -993,6 +1002,23 @@ export default function DmBuilderPage() {
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 슬라이드'}</span>
                   </div>
                   <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>완성 이미지 업로드<br />→ 슬라이드 DM</div>
+                </button>
+                {/* ★ 2026-09-15 카탈로그 DM(Harold) — 쪽 이미지 N장(장수 제한 없음) → 휴대폰 슬라이드 · PC 책 펼침. 완성 슬라이드와 같은 업로드 입구 · settings.catalog 만 다르다 */}
+                <button
+                  onClick={() => { uploadModeRef.current = 'catalog'; completedImagesInputRef.current?.click(); }}
+                  disabled={generating || uploadingImages}
+                  title="쪽 이미지를 순서대로 올리면 휴대폰에서는 슬라이드로, PC에서는 책처럼 두 쪽씩 펼쳐 보이는 카탈로그 DM이 됩니다"
+                  style={{
+                    minHeight: 84, padding: '12px 14px', textAlign: 'center',
+                    background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
+                    cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
+                    <span style={{ fontSize: 15 }}>📖</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '카탈로그 DM'}</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>쪽 이미지 업로드<br />→ PC 책 펼침</div>
                 </button>
                 {/* ★ 2026-07-19 P4: 라이브러리 불러오기 — 저장 소재 다중 선택 → 이미지 DM */}
                 <button
@@ -1799,6 +1825,10 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAli
         </div>
         {isLegacy && (
           <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(245, 158, 11, 0.2)', border: '1px solid rgba(245, 158, 11, 0.4)', color: '#fcd34d', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 700 }}>레거시</span>
+        )}
+        {dm.catalog && (
+          // ★ 2026-09-15 카탈로그 DM 뱃지(settings.catalog · 목록 API 판정) — PC 책 펼침으로 발행되는 DM 표시
+          <span title="휴대폰은 슬라이드, PC는 책처럼 펼쳐 보이는 카탈로그 DM" style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(139, 92, 246, 0.2)', border: '1px solid rgba(139, 92, 246, 0.45)', color: '#c4b5fd', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 700 }}>카탈로그</span>
         )}
       </div>
       {(dm.store_name || summary?.headline) && (

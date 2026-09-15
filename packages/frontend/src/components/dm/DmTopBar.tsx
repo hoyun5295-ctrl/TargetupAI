@@ -33,6 +33,9 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
   const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
   const layoutMode = useDmBuilderStore((s) => s.layoutMode);
   const setLayoutMode = useDmBuilderStore((s) => s.setLayoutMode);
+  // ★ 2026-09-15 카탈로그(고른 DM만) — slides + settings.catalog. 토글 3안 중 하나로 보인다.
+  const catalogView = useDmBuilderStore((s) => s.catalogView);
+  const setCatalogView = useDmBuilderStore((s) => s.setCatalogView);
   // ★ D216+ undo/redo
   const undo = useDmBuilderStore((s) => s.undo);
   const redo = useDmBuilderStore((s) => s.redo);
@@ -142,8 +145,15 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
         </button>
       </div>
 
-      {/* 레이아웃 모드 세그먼트 토글 */}
-      <LayoutModeToggle value={layoutMode} onChange={setLayoutMode} />
+      {/* 레이아웃 모드 세그먼트 토글 — 스크롤 · 슬라이드 · 카탈로그(= 슬라이드 + settings.catalog · PC 책 펼침) */}
+      <LayoutModeToggle
+        value={catalogView ? 'catalog' : layoutMode}
+        onChange={(m) => {
+          if (m === 'catalog') { setCatalogView(true); return; }
+          if (catalogView) setCatalogView(false);
+          setLayoutMode(m);
+        }}
+      />
 
       {/* ★ 2026-07-16 M4 (설계서 §1-1·§1-2) — [도구] 드롭다운 9종·정예 템플릿 폐기.
           AI 초안 = [⚡ AI로 만들기]로 승격 / 검수 = 발행에 내장 / AI개선 = 우패널 인라인 /
@@ -195,10 +205,14 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
   );
 }
 
-function LayoutModeToggle({ value, onChange }: { value: LayoutMode; onChange: (m: LayoutMode) => void }) {
-  const MODES: Array<{ key: LayoutMode; icon: string; label: string; tooltip: string }> = [
+/** 토글 값 = 저장 layout_mode 2종 + 카탈로그(slides 위 settings.catalog 플래그) */
+type ViewChoice = LayoutMode | 'catalog';
+
+function LayoutModeToggle({ value, onChange }: { value: ViewChoice; onChange: (m: ViewChoice) => void }) {
+  const MODES: Array<{ key: ViewChoice; icon: string; label: string; tooltip: string }> = [
     { key: 'scroll', icon: '📜', label: '스크롤',  tooltip: '긴 세로 스크롤' },
     { key: 'slides', icon: '🎴', label: '슬라이드', tooltip: '좌우 스와이프 슬라이드' },
+    { key: 'catalog', icon: '📖', label: '카탈로그', tooltip: '휴대폰은 슬라이드, PC는 책처럼 두 쪽 펼침(장마다 이미지 1장인 DM)' },
   ];
   return (
     <div

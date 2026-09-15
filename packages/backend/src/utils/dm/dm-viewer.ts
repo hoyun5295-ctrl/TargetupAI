@@ -20,7 +20,7 @@ import type { Section } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
 import { expandSlidePagesForSwipe, isSwipeImagePage } from './dm-slides-expand';
 // ★ 2026-09-15 카탈로그 보기(PC 책 펼침) — 게이트·og 메타·viewport·CSS/HTML/스크립트 조각. 조건 밖 DM 출력은 바이트 동일.
-import { isCatalogDm, catalogFirstImageUrl, CATALOG_VIEWPORT_META, renderCatalogOgMeta, renderCatalogCss, renderCatalogHtml, renderCatalogScript, renderCatalogMobileGridButton } from './dm-viewer-catalog';
+import { isCatalogDm, isCatalogEnabled, catalogFirstImageUrl, CATALOG_VIEWPORT_META, renderCatalogOgMeta, renderCatalogCss, renderCatalogHtml, renderCatalogScript, renderCatalogMobileGridButton } from './dm-viewer-catalog';
 
 export { inlineImage, youtubeEmbedUrl };
 
@@ -360,8 +360,8 @@ function renderPagesHtml(
   const allSections: Section[] = pages.flatMap((p) => p.sections);
   const hasCountdown = allSections.some((s) => s.type === 'countdown');
   const totalPages = pages.length;
-  // ★ 2026-09-15 카탈로그 보기 게이트 — slides · 펼친 뒤 전 장이 이미지 무대 · 2장 이상(isCatalogDm). 조건 밖 = 아래 삽입 전부 빈 문자열.
-  const catalog = mode === 'slides' && isCatalogDm(pages as any);
+  // ★ 2026-09-15 카탈로그 보기 게이트 — **고른 DM만**(settings.catalog · Harold 정정 : 자동 아님) AND slides AND 펼친 뒤 전 장이 이미지 무대 · 2장 이상(isCatalogDm). 조건 밖 = 아래 삽입 전부 빈 문자열.
+  const catalog = mode === 'slides' && isCatalogEnabled(dm) && isCatalogDm(pages as any);
 
   // ★ 2026-07-13 디자인 3.0 — brand_kit.art_direction 영속분 실주입(옛 Task 7 완결).
   //   미설정 DM = tone 기반 정규화 기본값... 이 아니라 중립 기본과 동일 출력을 위해 raw 없으면 null 정규화(기존 발행물 무변화).
