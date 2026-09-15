@@ -16,6 +16,7 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { createDm, deleteDm } from './dm/dm-builder';
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
+import { catalogPagesOf } from './dm/dm-catalog-pages';
 import { getBrandBasicInfo } from './brand-basic-info';
 import { getCreditCost } from './ai-credit-calc';
 import { checkCredit, deductCreditSafe, deductCreditOutcome, getCreditState, InsufficientCreditError, type DeductOutcome } from './ai-credit';
@@ -770,10 +771,8 @@ async function buildCatalogDm(input: { m: BuildMaterials; images: BuildImage[]; 
   const basic = await deps.basicInfo(companyId).catch(() => null);
   const companyName = m.brandName || String(basic?.brand_name || '').trim() || String(basic?.company_name || '').trim() || '우리 브랜드';
   const name = (m.catalogTitle || `[카탈로그] ${companyName}`).slice(0, 200);
-  const pages = images.map((im, i) => ({
-    id: `catalog-p${i + 1}`,
-    sections: [{ id: `catalog-p${i + 1}-img`, type: 'gallery', order: 0, visible: true, props: { images: [{ url: im.url }], layout: 'list_1xN', full_bleed: true } }],
-  }));
+  // ★ 2026-09-15 쪽 조립은 CT(dm-catalog-pages.ts · 아웃리치 카탈로그와 공용) · id 접두 'catalog' = 종전 그대로
+  const pages = catalogPagesOf(images.map((im) => ({ url: im.url })));
   const sections = pages.flatMap((p) => p.sections) as unknown as Section[];
   const dm = await deps.createDm(companyId, userId, {
     title: name, sections, pages, layout_mode: 'slides', settings: { catalog: true }, brand_kit: brandKit, ai_prompt: '', approval_status: 'draft',

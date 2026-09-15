@@ -171,8 +171,50 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT to_char(cr
 - 카탈로그 DM 상설 문서(`docs/FEATURE-CATALOG-DM.md` 신설 · SOT-INDEX 등재) — 이번은 인계 §6 + FEATURE-AI-AUTO-BUILD §6 기록만.
 - Codex 적대검토(카탈로그 채널 차감 경로) — 스킬 미탑재로 미실행.
 - 2축 장별 체류·열람 순서(`section_interactions` jsonb 확장 · DDL 0) · 3축 이미지 위 핫스팟 레이어(편집기 축) · og 메타를 전 DM으로 확대 · 발행 모달에 "PC에서는 책처럼 보입니다" 안내 · `EventCampaignModal` 결과 라벨(슬라이드형/스크롤형)에 카탈로그 미표시.
+- **AI 영업 × 카탈로그(Harold 아이디어 · 설계 필요)**: 크롤 상품(이미지·이름·가격)을 장당 1쪽으로 서버 합성 → `settings.catalog` slides DM → 제안 메일 3번째 버튼. 근거·범위 = [FEATURE-SALES-OUTREACH 5) 2026-09-15 행](FEATURE-SALES-OUTREACH.md). 같은 실측에서 등재한 결함 2 = [B-0915-4](../status/BUGS.md)(포스터 글자색 `#111111` 고정 · 어두운 배경에서 브랜드명 소실) · [B-0915-5](../status/BUGS.md)(웹 보기에서 "산출물 보기"가 자기 자신 링크).
 - 갤러리 N장 펼침 DM은 장 섹션 id에 `-sN-img` 접미가 붙어 수신자 상세 "섹션 여정"에 "(삭제된 섹션)"으로 나오고 이탈 집계에서 빠진다(`extractFlatSectionsFromDm` 원본만 · `dm.ts recipient-detail`). 이번 34장 DM(장마다 섹션)은 해당 없음. 기록만.
 - 메이크뷰 "좌우 맞춤"이 한 쪽 보기에서 확대로 동작하는지 미검증.
 
 ### 6-5. 되돌리기
 - 커밋 revert → backend·frontend `build:safe` → `pm2 reload`. 발행물은 요청 시 렌더라 즉시 원복. DB 무접촉(플래그를 켠 DM 의 `settings.catalog` 는 남지만 읽는 코드가 없어지면 무해 · 카탈로그 채널 차감 행은 원장 그대로).
+
+## 7. 3세션 이어서(압축 뒤): AI 영업 결함 2건 수정 + 아웃리치 카탈로그 DM · 코드 완료 · 배포 대기
+
+Harold 「진행해 전체 끝까지 닫고 브리핑보고해」. 경위·상세 = [FEATURE-SALES-OUTREACH 5) 2026-09-15(2) 행](FEATURE-SALES-OUTREACH.md) · [B-0915-4·B-0915-5](../status/BUGS.md). AI 호출 0 · 크레딧 0 · DDL 0.
+
+### 7-1. 한 것
+- **② B-0915-5 웹 보기 자기 링크**: `stripSelfLinkButtons`(순수 · `sales-outreach-produce.ts`) → `getPublicOutreachHtml` 반환 직전. 저장본·메일·관리자 미리보기 무변경 · 기존 발송 건(시세이도 `137c25fd33`) 배포 즉시 적용.
+- **① B-0915-4 포스터 글자색**: `measurePosterInkZone`(sharp · 글자 띠 평균 밝기) + `posterInkFor`(`< 120` = light) → `buildPosterTypography ink` · 포스터·배너 2곳 · `studio_image + posterInk, bannerInk`. 기존 건은 재생성해야 바뀐다.
+- **③ 아웃리치 카탈로그 DM**: `sales-outreach-catalog.ts` 신설 + `dm/dm-catalog-pages.ts`(쪽 조립 CT · AI 자동제작과 공용) + `image-studio.ts inappImageLocalPath` · `producing_dm` 배선(실패 격리) · `dm` payload 6키 · `stopSupersededDms`·purge · 메일 3번째 버튼 「카탈로그 보기」 · 검토 화면 카탈로그 행(프론트 1파일).
+- 테스트 +28 · 계약 정정 1(`sales-outreach-invariants` 주소 헬퍼) · backend 310파일 4,802 · tsc 0(백·프).
+
+### 7-2. 배포 (OPS §2-2 · 단계별 · **프론트 변경 있음 = 둘 다 build**)
+§6-2 와 같은 순서(tp-push → .62 git pull → backend `build:safe` → frontend `build:safe` → `pm2 reload`). 파이썬 합성기(`image_studio_service.py`)는 무변경(shadow 효과는 이미 있었다).
+
+### 7-3. 실측 순서 (한 번에 하나)
+1. 배포본 확인 ▶ .62 · administrator 셸
+```bash
+cd /home/administrator/targetup-app && git log --oneline -1; grep -c "stripSelfLinkButtons" packages/backend/dist/utils/sales-outreach-jobs.js; ls packages/backend/dist/utils/sales-outreach-catalog.js packages/backend/dist/utils/dm/dm-catalog-pages.js; grep -c "카탈로그 보기" packages/backend/dist/utils/sales-outreach-style.js
+```
+기대 = 1 · 파일 2개 존재 · 1.
+2. **B-0915-5 즉시 확인**: PC 크롬 `https://sys.hanjullo.com/api/outreach/v/137c25fd33` 하단 버튼 = 「DM 열어보기」 하나만(「산출물 보기」 없음) · 위쪽 내용은 그대로. 슈퍼관리자 AI 영업 검토 화면의 메일 미리보기에는 여전히 버튼 2개(메일은 무변경).
+3. **카탈로그 + B-0915-4**: 시세이도 건 검토 화면 → 「고른 재료로 다시 만들기」(이미지부터 재생성) → 완료 뒤 ①포스터: 배경이 어두우면 「시세이도」 흰 글자 + 그림자 · 밝으면 검은 글자(근거 패널이 아니라 자산 payload 로 확인 ▶ 아래 SQL) ②"담당자가 열 주소" 에 「카탈로그」 행 → PC 크롬 = 표지(포스터) 단독 → 상품 카드 2쪽 펼침(흰 바탕 · 브랜드색 틴트 · 상품명) → 행사 슬라이스 → 휴대폰 = 슬라이드 · 상품 쪽 탭 = 상품 페이지 이동 ③메일 미리보기 버튼 3개 「산출물 보기 · 카탈로그 보기 · DM 열어보기」 · 공개 웹 보기는 「카탈로그 보기 · DM 열어보기」 2개.
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT kind, to_char(created_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS kst, payload->>'posterInk' AS poster_ink, payload->>'bannerInk' AS banner_ink, payload->>'catalogPages' AS cat_pages, payload->>'catalogSkipped' AS cat_skip, payload->>'catalogUrl' AS cat_url FROM sales_outreach_assets WHERE job_id = (SELECT id FROM sales_outreach_jobs WHERE preview_code='137c25fd33') AND kind IN ('studio_image','dm') ORDER BY created_at DESC LIMIT 4;"
+```
+기대 = studio_image 행 `poster_ink` dark|light(배경 밝기에 따라) · dm 행 `cat_pages` ≥ 2 · `cat_skip` 비어 있음 · `cat_url` hlj.kr 주소. `cat_skip = too_few_images` 면 재료(상품 사본·슬라이스)가 1장 이하인 건 = 정상 생략 · `error` 면 pm2 로그 `[sales-outreach] 카탈로그 DM 생성 실패` 1줄 확인.
+4. 재생성 한 번 더 → 옛 카탈로그 DM 이 중지됐는지 ▶ .62
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT d.id, d.status, d.title, to_char(d.created_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS kst FROM dm_pages d WHERE d.title LIKE '[영업 카탈로그] %' ORDER BY d.created_at DESC LIMIT 4;"
+```
+기대 = 최신 1건만 발행 상태 · 이전 것은 중지.
+5. 새 회사 1건 처음부터(크롤 → 확인 → 제작): 상품 사본이 6개 넘는 몰이면 카탈로그 상품 쪽 = 6 · 상품명에 숫자(50ml)가 있으면 그 쪽은 글자 없이 사진만.
+
+### 7-4. 범위 밖 · 추가 과제 (착수 판단 = Harold)
+- 카탈로그 DM 열람이 아웃리치 열람 집계 SQL(`dm_views` ↔ `payload->>'dmId'` 조인)에 안 잡힌다 → `catalogDmId` 도 조인하려면 집계 축 수정(별도).
+- PC 책 펼침에서 쪽 링크(핫스팟) 없음(이미지 복제 렌더) = §6-4 3축과 같은 과제.
+- 메일 1순위 버튼 라벨 「산출물 보기」 문구 자체(메일 안에서는 "웹에서 보기" 뜻) · 상품 카드 디자인 고도화(로고 · 가격 표기 정책) · 캡션 폰트 미탑재 서버 폴백 실측.
+- **아이디어(이미지만 · AI 토큰 0 · 크레딧)**: 추천 = 상세페이지 한 장 → 여백 행 분할 → 카탈로그·슬라이드 DM(10크레딧) / 상품 카드 합성 개방(장당 1) / 모션 티저 GIF·WebP(이메일 히어로 · sharp 애니메이션 출력 미검증) / QR 포스터(2).
+
+### 7-5. 되돌리기
+- 커밋 revert → backend·frontend `build:safe` → `pm2 reload`. 웹 보기 버튼은 즉시 원복(응답 시 처리). 이미 만들어진 카탈로그 DM(dm_pages 행 · `[영업 카탈로그] ` 제목)과 합성 카드 파일은 남는다 = 무해(다음 재생성·파기 때 정리 · 코드가 없어지면 메일 버튼도 사라진다).

@@ -1754,6 +1754,14 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                               <button onClick={() => { navigator.clipboard?.writeText(String(dmAsset.dmUrl)).then(() => toast.success('주소를 복사했습니다.')).catch(() => {}); }} className="shrink-0 text-gray-500 hover:text-gray-800">복사</button>
                             </div>
                           )}
+                          {/* ★ 2026-09-15 카탈로그 DM(크롤 사본으로 장마다 1장 · PC 책 펼침) · 만들어진 건에만 */}
+                          {dmAsset?.catalogUrl && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="shrink-0 text-gray-400 w-16">카탈로그</span>
+                              <a href={String(dmAsset.catalogUrl)} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate text-blue-600 hover:underline">{String(dmAsset.catalogUrl)}</a>
+                              <button onClick={() => { navigator.clipboard?.writeText(String(dmAsset.catalogUrl)).then(() => toast.success('주소를 복사했습니다.')).catch(() => {}); }} className="shrink-0 text-gray-500 hover:text-gray-800">복사</button>
+                            </div>
+                          )}
                           {previewUrl && (
                             <div className="flex items-center gap-2 text-xs">
                               <span className="shrink-0 text-gray-400 w-16">공개 샘플</span>

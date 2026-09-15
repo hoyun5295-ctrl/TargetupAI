@@ -48,6 +48,16 @@ export async function purgeOutreachJobArtifacts(jobId: string, companyId: string
     }
     // ★ v3 DM 첫 화면 캡처 사본(제안 메일 대조 오른쪽)도 같은 저장소 · 같이 지운다(리뷰 #10)
     if (a.payload?.captureUrl && unlinkPublicImage(String(a.payload.captureUrl))) filesDeleted += 1;
+    // ★ 2026-09-15 카탈로그 DM(같은 회차의 짝) 중지 + 서버가 합성한 상품 카드 파일 삭제
+    const catalogDmId = String(a.payload?.catalogDmId || '');
+    if (catalogDmId) {
+      const res = await stopDm(catalogDmId, companyId);
+      if (res.block && res.block !== 'not_published') throw new Error(`카탈로그 DM 중지 실패(${res.block}): ${catalogDmId}`);
+      if (!res.block) dmsStopped += 1;
+    }
+    for (const u of (Array.isArray(a.payload?.catalogImageUrls) ? a.payload.catalogImageUrls : [])) {
+      if (unlinkPublicImage(String(u || ''))) filesDeleted += 1;
+    }
   }
   const images = await query(`SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'studio_image'`, [jobId]);
   for (const a of images.rows) {

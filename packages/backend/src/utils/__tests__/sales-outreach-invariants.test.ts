@@ -316,7 +316,10 @@ describe('sales-outreach invariants', () => {
     // dm asset이 뷰어 URL·섹션·룩을 싣는다(검토 화면 iframe·숨김·품질 경고의 원천)
     expect(jobs).toContain('viewerUrl: dm.viewerUrl');
     expect(jobs).toContain('sections: dm.sections, sectionsBase: dm.sectionsBase, look: dm.look');
-    expect(produce).toContain('viewerUrl: `${PUBLIC_BASE}/api/dm/v/dm-${published.short_code}`');
+    // ★ 2026-09-15 주소 한 벌은 outreachDmUrlsOf 하나(영업 DM · 카탈로그 DM 공용) · 정규 뷰어 = 우리 호스트
+    expect(produce).toContain('return { dmUrl, viewerUrl: `${PUBLIC_BASE}/api/dm/v/dm-${shortCode}` };');
+    expect(produce).toContain('return { dmId: String(dm.id), ...outreachDmUrlsOf(published.short_code) };');
+    expect(read('utils/sales-outreach-catalog.ts')).toContain('return { dmId: String(dm.id), ...outreachDmUrlsOf(published.short_code) };');
     // 라우트 2개 존재 · 품질 경고는 잠금과 별도 키
     const routes = read('routes/sales-outreach.ts');
     expect(routes).toContain("router.post('/jobs/:id/materials'");

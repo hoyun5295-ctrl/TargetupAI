@@ -534,6 +534,16 @@ export function findTempFile(companyId: string, tempId: string): { absPath: stri
   return { absPath: abs, ext: meta.ext, mime: meta.mime };
 }
 
+/**
+ * ★ 2026-09-15 우리 서빙 URL(`…/api/cdp/inapp/image/{companyId}/{filename}` · 절대·상대 모두) → 실물 경로. 형식이 아니면 null(호출부는 HTTP 폴백).
+ *   routes/cdp.ts 서빙 경로와 같은 결합(INAPP_IMAGE_BASE/companyId/filename) · 경로 조작 문자는 정규식이 막는다.
+ */
+export function inappImageLocalPath(url: string): string | null {
+  const m = String(url || '').match(/\/api\/cdp\/inapp\/image\/([0-9a-f-]{36})\/([A-Za-z0-9._-]+)(?:[?#].*)?$/i);
+  if (!m) return null;
+  return path.join(INAPP_IMAGE_BASE, m[1], m[2]);
+}
+
 /** temp → 영구(INAPP_IMAGE_BASE) 이동 + tempId 1회성 소비(사이드카·원본 삭제). URL·bytes 반환. */
 export function moveTempToPermanent(companyId: string, tempId: string): { url: string; filename: string; bytes: number; ext: string } | null {
   const found = findTempFile(companyId, tempId);

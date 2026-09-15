@@ -55,6 +55,20 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-0915-4 AI 영업 포스터: 헤드라인 글자색이 `#111111` 고정이라 어두운 배경에서 브랜드명이 안 보인다 (🟡 0915 수정 · 배포 대기 · 실측 = [인계 §7-3](../docs/2026-09-15-session-handoff.md)) — 2026-09-15 Harold 접수(시세이도 `137c25fd33`)
+
+- **실측**: 포스터 `fee57413…jpeg`(1400×1875) = 진갈색 스튜디오 배경 위 "시세이도" 검은 글자 → 거의 안 보인다. 배지 "뷰티/화장품"(파란 바탕 흰 글자)만 보인다. 같은 포스터가 제안 메일 맨 위 · "대표 이미지" 블록 · 이메일 시안 히어로 3곳에 실린다.
+- **원인(코드)**: `sales-outreach-produce.ts buildPosterTypography` 가 title `#111111` · subtitle `#333333` 고정. 배경 지시(`posterStyleHint`)는 "keep the top 30% calm"만 있고 밝기 조건이 없다. 유출 검사(`scoreOutreachPoster`)는 숫자·헤드라인 존재만 보고 대비는 안 본다.
+- **처방(1개)**: 합성 직전 배경 상단 30% 평균 밝기를 실측(배경 버퍼가 이미 손에 있다)해 어두우면 글자 `#ffffff` + 얇은 그림자, 밝으면 현행. 배경 지시에 "light airy top area" 추가는 모델 재량이라 보조.
+- **수정(0915 · Harold 「진행해」)**: `measurePosterInkZone(bgPath, zone)`(sharp · 포스터 = 상단 30% · 배너 = 하단 45% 띠를 회색 raw 로 실체화해 평균 · 알파 제거) + 순수 `posterInkFor(mean)`(`< 120` = light · 근거 = 검은 글자와 흰 글자의 WCAG 대비가 뒤집히는 상대휘도 0.19 ≈ sRGB 118) → `buildPosterTypography(..., ink)`: light = 제목 `#ffffff` · 부제 `#f1f5f9` · 파이썬 합성기 `effect:'shadow'` / dark = 현행 그대로(출력 동일 · 기존 s3·s7 테스트 무변경). 포스터·배너 2곳 배선 · 측정 실패 = 현행 · `studio_image` payload `+ posterInk, bannerInk`(근거). 배경 지시문 무변경. 테스트 `sales-outreach-poster-ink.test.ts` 8(경계 · light/dark · 생략 = dark 동일 · sharp 실측 어두운/밝은/알파 · 파일 없음 null). 기존 발송 건은 재생성해야 바뀐다(포스터는 저장 파일).
+
+### 🟡 B-0915-5 AI 영업 공개 웹 보기: 하단 "산출물 보기" 버튼이 자기 자신을 가리킨다 (🟡 0915 수정 · 배포 대기 · 실측 = [인계 §7-3](../docs/2026-09-15-session-handoff.md) · 기존 발송 건에도 즉시) — 2026-09-15 Harold 접수
+
+- **실측**: `sys.hanjullo.com/api/outreach/v/137c25fd33` 하단 CTA 2개 = "산출물 보기"(→ `hanjul.ai/api/outreach/v/137c25fd33` = 지금 보는 페이지) · "DM 열어보기"(→ `hlj.kr/LQ8AqAE`).
+- **원인(코드)**: 공개 웹 보기는 메일 HTML 을 그대로 낸다(`sales-outreach-jobs.ts getPublicOutreachHtml`). 1순위 CTA 는 메일 클라이언트용 "웹에서 보기"(`sales-outreach-produce.ts:2778 url: input.previewUrl`)라 웹 보기 안에서는 자기 링크가 된다.
+- **처방(1개)**: 웹 보기 응답 단계에서 previewUrl 을 가리키는 버튼만 빼고 "DM 열어보기" 하나를 남긴다(메일 본문·조립 무변경 · 계약 테스트 1건).
+- **수정(0915)**: 순수 CT `stripSelfLinkButtons(html, selfUrl)`(`sales-outreach-produce.ts`) = renderCta 버튼 행(`<tr><td align="center" style="padding:…">` … `<!--<![endif]--></td></tr>` · VML 짝 포함) 중 `href="{selfUrl}"`(렌더러와 같은 이스케이프)를 가진 행만 제거 · 나머지 바이트 동일 · `getPublicOutreachHtml` 반환 직전 적용(`PUBLIC_BASE/api/outreach/v/{code}`). 저장본·메일 본문·관리자 메일 미리보기 무변경 → 시세이도 건도 배포 즉시 적용. 테스트 `sales-outreach-public-view.test.ts` 4(실제 조립 HTML 기준 · 버튼 1 감소 · tr/table 짝 유지 · 자기 링크 0 = 원문 동일 · `&amp;` 이스케이프).
+
 ### 🟠 B-0915-3 이메일 캠페인 리뷰: 별점이 흰색이라 미리보기에서 안 보이고, 평균 별점 표시를 미사용으로 눌러도 그대로다 (🟡 0915 배포완료 · 실측 대기 = 0916 직원) — 2026-09-15 임은지 접수 `cmu2ao5qn02tjjnlu1spouqzy`
 
 - **원인(코드)**: 이메일 별 색은 강조색 한 줄에서만 왔다(`email-section-renderer.ts renderReviews` · 우선순위 `design.palette.accent → 회사 킷 accent_color → 기본` `email-tokens.ts:237`). 리뷰 블록에는 색 입구가 없었다(공용 편집 패널 `ReviewsEditor` · 이메일 블록 "버튼·강조색"은 `EMAIL_ACCENT_AWARE`에 리뷰가 없고 그 값도 primary만 바꾼다). `show_average_rating`은 이메일 렌더러가 한 번도 읽지 않았고 평균 줄 자체가 없었다(DM SSR·캔버스는 소비 중). 접수 캠페인의 흰색이 캠페인 `palette.accent`인지 회사 킷 `accent_color`인지는 미검증(테마 프리셋에 흰 강조색 0 · grep).

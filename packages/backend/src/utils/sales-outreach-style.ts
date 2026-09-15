@@ -62,7 +62,8 @@ export interface OutreachStyleGuide {
     lead: { tag: string; headlineWithEvent: string; headlineNoEvent: string; quoteLabel: string };
     sample: { tag: string; headline: (companyName: string) => string; body: string };
     showcase: { tag: string; headline: string };
-    cta: { primary: string; secondary: string };
+    /** ★ 2026-09-15 catalog = 아웃리치 카탈로그 DM 버튼(카탈로그가 만들어진 건에만 실린다) */
+    cta: { primary: string; secondary: string; catalog: string };
     service: { headline: string; body: string };
     /**
      * ★ 2026-09-06(2) Harold 지시 — 제안 메일 본문에 한줄로 기능 3가지(여정 · 자동마케팅 · 이미지 스튜디오)를 실물 근거와 함께 섞어 넣는다.
@@ -156,7 +157,7 @@ const STYLE_GUIDE_V1: OutreachStyleGuide = {
       body: '아래는 귀사 홈페이지의 상품·이미지·문구만으로 한줄로AI가 구성한 이메일 시안입니다. 실제 발송 전에는 담당자님이 자유롭게 고칠 수 있습니다.',
     },
     showcase: { tag: 'AI 문안 예시', headline: '이런 문안으로 보낼 수 있습니다' },
-    cta: { primary: '산출물 보기', secondary: 'DM 열어보기' },
+    cta: { primary: '산출물 보기', secondary: 'DM 열어보기', catalog: '카탈로그 보기' },
     service: {
       headline: '한줄로는 이렇게 도와드립니다',
       body: '한줄로는 문자·이메일·모바일 DM·인앱 메시지를 AI가 만들어 보내는 마케팅 자동화 서비스입니다. 이 안내의 이미지·문안·모바일 페이지 전부 한줄로AI가 귀사 홈페이지만 보고 만들었습니다.',

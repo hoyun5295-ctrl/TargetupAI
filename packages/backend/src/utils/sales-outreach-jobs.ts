@@ -28,12 +28,14 @@ import { isIndustryCode, industryLabel } from './industry-codes';
 import {
   getOutreachContext, produceOutreachImage, produceOutreachBrandEmail, collectOutreachMedia, fetchImageGuarded,
   generateSubjectIntro, assembleProposalEmail, countBenefitPlaceholders, captureAndScoreDm, bannerAltMapOf, pickShowcaseExampleUrl,
-  storeViewportCapture,
+  storeViewportCapture, stripSelfLinkButtons,
   // ★ v3 조립/발행 분리 · 자동 재조립 · 배너 전사 폴백 · AI 계수기
   assembleOutreachDm, publishOutreachDm, updateOutreachDm, produceResultOf, autoRetryReasons, bannerCardsFromTranscripts, assertLicensedQuoteSources,
   callOutreachAi, withOutreachAiMeter, newOutreachAiCost, addOutreachAiCost,
   PUBLIC_BASE, OUTREACH_PREVIEW_DAYS, OUTREACH_CUTOUT_TRY_MAX, type OutreachMedia, type OutreachAiCost,
 } from './sales-outreach-produce';
+// ★ 2026-09-15 아웃리치 카탈로그 DM(AI 0 · 크레딧 0) — 계획(순수) → 상품 카드 합성 → 발행 · 실패는 여기서 격리(DM 단계 실패 0)
+import { planOutreachCatalog, buildOutreachCatalog, type CatalogBuildResult } from './sales-outreach-catalog';
 // ★ 2026-09-05(3) 브레인스토밍 수렴안 C4 — 재료 재선택·섹션 숨김 override·품질 경고(순수 CT · 잠금 0)
 import {
   validateOutreachMediaSelection, applyOutreachMediaSelection, validateSectionOverride, applySectionOverrides, assessOutreachQuality,
@@ -1401,13 +1403,15 @@ async function stopSupersededDms(jobId: string, companyId: string): Promise<void
   );
   const olds = r.rows.slice(1);
   for (const row of olds) {
-    const dmId = String(row.payload?.dmId || '');
-    if (!dmId) continue;
-    try {
-      const res = await stopDm(dmId, companyId);
-      if (res.block && res.block !== 'not_published') console.error('[sales-outreach] 옛 DM 중지 실패:', jobId, dmId, res.block);
-    } catch (err: any) {
-      console.error('[sales-outreach] 옛 DM 중지 예외:', jobId, dmId, err?.message);
+    // ★ 2026-09-15 카탈로그 DM(catalogDmId)도 같은 회차의 짝 · 함께 내린다
+    for (const dmId of [String(row.payload?.dmId || ''), String(row.payload?.catalogDmId || '')]) {
+      if (!dmId) continue;
+      try {
+        const res = await stopDm(dmId, companyId);
+        if (res.block && res.block !== 'not_published') console.error('[sales-outreach] 옛 DM 중지 실패:', jobId, dmId, res.block);
+      } catch (err: any) {
+        console.error('[sales-outreach] 옛 DM 중지 예외:', jobId, dmId, err?.message);
+      }
     }
   }
 }
@@ -1637,6 +1641,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             // ★ S3 근거 패널·이메일 히어로 폴백
             posterTexts: img.posterTexts, cutoutSource: img.cutoutSource, cutoutFrom: img.cutoutFrom, cutoutMode: img.cutoutMode, posterScore: img.posterScore, posterRegenerated: img.posterRegenerated,
             bannerUrl: img.bannerUrl, bannerSize: img.bannerSize,
+            // ★ 2026-09-15 B-0915-4 글자색 근거(배경 밝기 실측 · light = 흰 글자)
+            posterInk: img.posterInk, bannerInk: img.bannerInk,
             regenCount: regenSeqOf(sr, 'image'),
           }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
         }
@@ -1723,11 +1729,26 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           }
         }
         const dm = produceResultOf(assembled, pub);
+        // ★ 2026-09-15 카탈로그 DM(AI 0) — 포스터 → 상품 카드(서버 합성) → 행사 슬라이스 · 2쪽 미만 = 생략 · 예외 = 격리(catalogSkipped 'error' · DM 단계는 그대로 간다)
+        //   숨김 재실행(preset)도 다시 만든다(AI 0 · 합성만 · 새 id 라 stopSupersededDms 가 옛 것을 닫는다)
+        let catalog: CatalogBuildResult = { catalogDmId: null, catalogUrl: null, catalogViewerUrl: null, catalogPages: 0, catalogImageUrls: [], catalogSkipped: 'error' };
+        try {
+          const plan = planOutreachCatalog({
+            posterUrl: dmInput.posterUrl, media: applyOutreachMediaSelection(dmInput.media, dmInput.mediaSelection || null),
+            eventCards: dmCards, eventSlices: dmInput.eventSlices, ctaLinks: dmInput.ctaLinks, homepageUrl,
+          });
+          catalog = await buildOutreachCatalog({ companyId: ctx.companyId, userId: ctx.userId, companyName: job.company_name, brandColor, brandKit: assembled.brandKit, plan });
+        } catch (err: any) {
+          console.error('[sales-outreach] 카탈로그 DM 생성 실패(격리 · 메일은 버튼 2개):', jobId, err?.message);
+        }
         const dmVision = carry ? (carry.visionScore || null) : (captured?.score || null);
         // ★ 0906(3) 첫 화면 캡처 공개 사본 — 제안 메일 "자동으로 만든 모바일 DM" 블록이 읽는다(숨김 재실행은 승계)
         const captureUrl = carry ? (carry.captureUrl || null) : (captured?.captureUrl || null);
         if (!(await insertAssetOwned(jobId, 'dm', {
           dmId: dm.dmId, dmUrl: dm.dmUrl, viewerUrl: dm.viewerUrl,
+          // ★ 2026-09-15 카탈로그 DM(없으면 null · catalogSkipped = 'too_few_images' | 'error') · 합성 카드 파일은 파기 때 지운다
+          catalogDmId: catalog.catalogDmId, catalogUrl: catalog.catalogUrl, catalogViewerUrl: catalog.catalogViewerUrl,
+          catalogPages: catalog.catalogPages, catalogImageUrls: catalog.catalogImageUrls, catalogSkipped: catalog.catalogSkipped,
           structureRef: carry ? (carry.structureRef ?? null) : dm.structureRef,
           benefitStripped: carry ? (Number(carry.benefitStripped) || 0) : dm.benefitStripped,
           // ★ 2026-09-06 S2 헤드라인 업체명 대체 여부(품질 경고 HERO_FALLBACK 의 원천 · 경고 · 잠금 아님)
@@ -1830,6 +1851,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           copyBody: String(copyAsset.body),
           posterUrl: imageAsset?.url || null,
           dmUrl: String(dmAsset.dmUrl),
+          // ★ 2026-09-15 카탈로그 DM 이 있으면 3번째 버튼(없으면 종전 2개)
+          catalogUrl: dmAsset?.catalogUrl ? String(dmAsset.catalogUrl) : null,
           previewUrl: `${PUBLIC_BASE}/api/outreach/v/${previewCode}`,
           unsubscribeNotice: (process.env.OUTREACH_UNSUB_NOTICE || '').trim(),
           brandSections,
@@ -2630,7 +2653,9 @@ export async function getPublicOutreachHtml(code: string): Promise<string | null
     return null;
   }
   const emailAsset = await latestAsset(job.id, 'email_html');
-  return emailAsset?.html ? String(emailAsset.html) : null;
+  if (!emailAsset?.html) return null;
+  // ★ 2026-09-15 B-0915-5 메일용 1순위 버튼(previewUrl = 이 페이지)은 웹 보기 안에서 자기 링크 → 응답 직전 그 버튼 행만 뺀다(저장본 무수정 · 메일·관리자 미리보기 무변경)
+  return stripSelfLinkButtons(String(emailAsset.html), `${PUBLIC_BASE}/api/outreach/v/${c}`);
 }
 
 // ===== 재시도·조회 =====

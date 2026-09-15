@@ -34,7 +34,7 @@ import sharp from 'sharp';
 import { STUDIO_TEMPLATES, type StudioTemplate, type TemplateCategory } from './image-studio-templates';
 import { extractJson, DM_EDITABLE_TEXT_KEYS } from './dm/dm-ai';
 import { createDm, publishDm, updateDm } from './dm/dm-builder';
-import { renderEmailSections, EMAIL_FOOTER_SLOT } from './email/email-section-renderer';
+import { renderEmailSections, EMAIL_FOOTER_SLOT, esc as escHtml } from './email/email-section-renderer';
 import { getDefaultProps, createSection, type Section, type SectionType } from './dm/dm-section-registry';
 import { firstBenefitPhrase } from './event-brief';
 import { AI_AUTO_BUILD_FEATURES } from './ai-auto-build-materials';
@@ -604,6 +604,9 @@ export interface OutreachImageResult {
   posterRegenerated: boolean;
   bannerUrl: string | null;
   bannerSize: { width: number; height: number } | null;
+  /** ★ 2026-09-15 B-0915-4 실측 근거 — 글자 띠 밝기로 고른 글자색(포스터 · 배너는 만들었을 때만) */
+  posterInk: PosterInk;
+  bannerInk: PosterInk | null;
 }
 
 // ===== ★ 2026-09-06 S3 포스터 문구 3칸(순수 · 회의 수렴안 D5) =====
@@ -668,8 +671,8 @@ export function trimDanglingTail(text: string): string {
   return t.replace(/[\s.·!。:,]+$/g, '').trim();
 }
 
-/** 이미지 안 글자 게이트 — 혜택 패턴 0 · 숫자 0(발송 잠금이 이미지 글자를 못 보므로 조립기 안에서 거부 · 회의 수렴안 D5) · 2자 이상 */
-function posterTextOk(v: string | null | undefined): v is string {
+/** 이미지 안 글자 게이트 — 혜택 패턴 0 · 숫자 0(발송 잠금이 이미지 글자를 못 보므로 조립기 안에서 거부 · 회의 수렴안 D5) · 2자 이상. ★ 2026-09-15 카탈로그 쪽 캡션도 같은 게이트(export). */
+export function posterTextOk(v: string | null | undefined): v is string {
   return !!v && v.trim().length >= 2 && !hasBenefitPattern(v) && !POSTER_EXTRA_REJECT_RE.test(v) && !/\d/.test(v);
 }
 
@@ -705,18 +708,61 @@ export function buildOutreachPosterTexts(input: {
   return { label, title, subtitle, dropped };
 }
 
-/** 서버 합성 타이포(순수) — 문구는 코드가 찍는다(모델 한글 렌더 실패·오철자 0). 위치 = zone(top 포스터 · bottom 16:9 배너) · 크기는 높이 비율. */
-export function buildPosterTypography(texts: OutreachPosterTexts, opts: { brandColor: string | null; zone: 'top' | 'bottom'; fontPath: string | null }): ComposeTypography[] {
-  const out: Array<ComposeTypography & { role?: string; badgeColor?: string; weight?: string }> = [];
+// ===== ★ 2026-09-15 B-0915-4 글자색 = 배경 밝기 실측(시세이도 실측 : 진갈색 배경 위 #111111 브랜드명 소실) =====
+
+export type PosterInk = 'dark' | 'light';
+/** 이 값 미만(0~255 평균 밝기)이면 흰 글자. 근거 = 검은 글자(#111111)와 흰 글자의 WCAG 대비가 뒤집히는 배경 상대휘도 0.19 ≈ sRGB 118. */
+export const POSTER_INK_LIGHT_BELOW = 120;
+/** 글자 띠(높이 비율) — 타이포 y 와 같은 구역: 포스터(top) 상단 30%(배경 지시 "top 30% calm" 과 일치) · 배너(bottom) 하단 45%(y 0.60~0.86). */
+export const POSTER_INK_ZONE: Record<'top' | 'bottom', { from: number; to: number }> = { top: { from: 0, to: 0.3 }, bottom: { from: 0.55, to: 1 } };
+
+/** 평균 밝기 → 글자색(순수). 측정 실패(null·NaN)는 현행(dark). */
+export function posterInkFor(meanLuma: number | null | undefined): PosterInk {
+  return typeof meanLuma === 'number' && Number.isFinite(meanLuma) && meanLuma < POSTER_INK_LIGHT_BELOW ? 'light' : 'dark';
+}
+
+/** 배경 파일의 글자 띠 평균 밝기(0~255 · greyscale 평균). 파일 부재·디코드 실패 = null(던지지 않는다 · 호출부는 현행 색). */
+export async function measurePosterInkZone(bgPath: string, zone: 'top' | 'bottom'): Promise<number | null> {
+  try {
+    const img = sharp(bgPath, { failOn: 'none' });
+    const meta = await img.metadata();
+    const w = Number(meta.width) || 0;
+    const h = Number(meta.height) || 0;
+    if (!w || !h) return null;
+    const z = POSTER_INK_ZONE[zone];
+    const top = Math.min(h - 1, Math.floor(h * z.from));
+    const height = Math.max(1, Math.min(h - top, Math.floor(h * z.to) - top));
+    // sharp stats() 는 입력 원본을 보므로(extract 미적용) 띠를 잘라 회색 raw 로 실체화한 뒤 평균을 낸다 · 폭 128 로 줄여 비용 고정
+    const band = await img.extract({ left: 0, top, width: w, height }).removeAlpha().greyscale().resize({ width: Math.min(128, w) }).raw().toBuffer();
+    if (!band.length) return null;
+    let sum = 0;
+    for (let i = 0; i < band.length; i++) sum += band[i];
+    return sum / band.length;
+  } catch (err: any) {
+    console.log('[sales-outreach] 포스터 글자 띠 밝기 측정 실패(현행 색으로):', err?.message);
+    return null;
+  }
+}
+
+/**
+ * 서버 합성 타이포(순수) — 문구는 코드가 찍는다(모델 한글 렌더 실패·오철자 0). 위치 = zone(top 포스터 · bottom 16:9 배너) · 크기는 높이 비율.
+ * ★ 2026-09-15 ink: light = 제목 흰색 · 부제 밝은 회색 + 그림자(파이썬 합성기 effect 'shadow') · dark(기본) = 현행 그대로(출력 동일). 배지는 브랜드색 바탕 흰 글자라 불변.
+ */
+export function buildPosterTypography(texts: OutreachPosterTexts, opts: { brandColor: string | null; zone: 'top' | 'bottom'; fontPath: string | null; ink?: PosterInk }): ComposeTypography[] {
+  const out: Array<ComposeTypography & { role?: string; badgeColor?: string; weight?: string; effect?: 'shadow' }> = [];
   const top = opts.zone === 'top';
   const title = texts.title || '';
+  const light = opts.ink === 'light';
+  const titleColor = light ? '#ffffff' : '#111111';
+  const subColor = light ? '#f1f5f9' : '#333333';
+  const effect = light ? { effect: 'shadow' as const } : {};
   // ★ 2026-09-06(2) 폭 맞춤 — 한글 한 글자 폭 ≈ size×H 이므로 글자수×size×H ≤ 0.9×W 가 되게 상한(포스터 3:4 · 배너 16:9). 실측 17자가 포스터 양끝을 넘었다.
   const wh = top ? 1792 / 2400 : 16 / 9;
   const fit = (base: number, len: number) => Math.max(0.02, Math.min(base, (0.9 * wh) / Math.max(1, len)));
   const titleSize = fit(top ? (title.length > 14 ? 0.052 : title.length > 9 ? 0.062 : 0.072) : (title.length > 14 ? 0.09 : 0.12), title.length);
   if (texts.label) out.push({ text: texts.label, fontPath: opts.fontPath, size: top ? 0.022 : 0.045, color: '#ffffff', align: 'center', x: 0.5, y: top ? 0.065 : 0.60, role: 'badge', badgeColor: opts.brandColor || '#111111', weight: 'bold' });
-  if (title) out.push({ text: title, fontPath: opts.fontPath, size: titleSize, color: '#111111', align: 'center', x: 0.5, y: top ? 0.115 : 0.69, weight: 'bold' });
-  if (texts.subtitle) out.push({ text: texts.subtitle, fontPath: opts.fontPath, size: fit(top ? 0.03 : 0.055, texts.subtitle.length), color: '#333333', align: 'center', x: 0.5, y: top ? (0.115 + titleSize + 0.035) : 0.86, weight: 'bold' });
+  if (title) out.push({ text: title, fontPath: opts.fontPath, size: titleSize, color: titleColor, align: 'center', x: 0.5, y: top ? 0.115 : 0.69, weight: 'bold', ...effect });
+  if (texts.subtitle) out.push({ text: texts.subtitle, fontPath: opts.fontPath, size: fit(top ? 0.03 : 0.055, texts.subtitle.length), color: subColor, align: 'center', x: 0.5, y: top ? (0.115 + titleSize + 0.035) : 0.86, weight: 'bold', ...effect });
   return out as ComposeTypography[];
 }
 
@@ -954,7 +1000,7 @@ export async function produceOutreachImage(input: {
 
     // ★ 2026-09-10 제품은 모델에게 맡기지 않는다 — 배경만 생성(누끼 미첨부 · 빈 진열면 요구)하고 서버가 누끼 PNG 를 픽셀 그대로 얹는다(라벨 글자 보존 · 지어낸 제품 0).
     //   유출 검사(숫자)는 배경에만 한다(제품 라벨의 "50ml" 는 사실이지 유출이 아니다).
-    const renderPoster = async (prompt: string): Promise<{ absPath: string; tempId: string; composed: { width: number; height: number }; bgPath: string }> => {
+    const renderPoster = async (prompt: string): Promise<{ absPath: string; tempId: string; composed: { width: number; height: number }; bgPath: string; ink: PosterInk }> => {
       const poster = await generatePosterWithRetry(() => generatePoster(prompt, preset, null), input.jobId);
       const posterExt = poster.mime.includes('png') ? 'png' : 'jpeg';
       const posterTempId = writeTempBuffer(ctx.companyId, Buffer.from(poster.base64, 'base64'),
@@ -963,12 +1009,14 @@ export async function produceOutreachImage(input: {
       if (!posterFile) throw new Error('포스터 임시 저장에 실패했습니다.');
       // 이메일 삽입은 JPEG만(알파 PNG 직삽 금지 — 다크 클라이언트 흰 프린지·용량) · 문구는 서버 타이포(코드 보증)
       const out = allocTempPath(ctx.companyId, 'jpeg');
+      // ★ 2026-09-15 B-0915-4 글자 띠(상단 30%) 밝기 실측 → 어두우면 흰 글자 + 그림자(측정 실패 = 현행)
+      const ink = posterInkFor(await measurePosterInkZone(posterFile.absPath, 'top'));
       const composed = await composeImage({
         bgPath: posterFile.absPath, cutoutPath: cutoutPath, layout: cutoutPath ? OUTREACH_POSTER_CUTOUT_LAYOUT : null, outPath: out.absPath, format: 'jpeg',
-        typography: buildPosterTypography(posterTexts, { brandColor: input.brandColor || null, zone: 'top', fontPath }),
+        typography: buildPosterTypography(posterTexts, { brandColor: input.brandColor || null, zone: 'top', fontPath, ink }),
       });
       writeTempMeta(ctx.companyId, out.tempId, { kind: 'composite', ext: 'jpeg', mime: 'image/jpeg', width: composed.width, height: composed.height });
-      return { absPath: out.absPath, tempId: out.tempId, composed, bgPath: posterFile.absPath };
+      return { absPath: out.absPath, tempId: out.tempId, composed, bgPath: posterFile.absPath, ink };
     };
 
     let made = await renderPoster(buildPrompt(''));
@@ -992,6 +1040,7 @@ export async function produceOutreachImage(input: {
     // ★ S3 16:9 배너 — 실측 배너 0장일 때만(첫 화면 폴백 · 이메일 히어로) · 실패는 격리(포스터 결과에 영향 0)
     let bannerUrl: string | null = null;
     let bannerSize: { width: number; height: number } | null = null;
+    let bannerInk: PosterInk | null = null;
     if (input.wantBanner) {
       try {
         const bPreset = resolvePreset('email-hero');
@@ -1004,13 +1053,15 @@ export async function produceOutreachImage(input: {
         const bFile = findTempFile(ctx.companyId, bTempId);
         if (bFile) {
           const bOut = allocTempPath(ctx.companyId, 'jpeg');
+          // ★ 2026-09-15 B-0915-4 배너 글자 띠(하단 45%)도 같은 규칙
+          const bInk = posterInkFor(await measurePosterInkZone(bFile.absPath, 'bottom'));
           const bComposed = await composeImage({
             bgPath: bFile.absPath, cutoutPath: cutoutPath, layout: cutoutPath ? OUTREACH_BANNER_CUTOUT_LAYOUT : null, outPath: bOut.absPath, format: 'jpeg',
-            typography: buildPosterTypography(posterTexts, { brandColor: input.brandColor || null, zone: 'bottom', fontPath }),
+            typography: buildPosterTypography(posterTexts, { brandColor: input.brandColor || null, zone: 'bottom', fontPath, ink: bInk }),
           });
           writeTempMeta(ctx.companyId, bOut.tempId, { kind: 'composite', ext: 'jpeg', mime: 'image/jpeg', width: bComposed.width, height: bComposed.height });
           const bMoved = moveTempToPermanent(ctx.companyId, bOut.tempId);
-          if (bMoved) { bannerUrl = PUBLIC_BASE + bMoved.url; bannerSize = { width: bComposed.width, height: bComposed.height }; }
+          if (bMoved) { bannerUrl = PUBLIC_BASE + bMoved.url; bannerSize = { width: bComposed.width, height: bComposed.height }; bannerInk = bInk; }
         }
       } catch (err: any) {
         console.log('[sales-outreach] 16:9 배너 생성 실패(격리):', err?.message);
@@ -1035,6 +1086,8 @@ export async function produceOutreachImage(input: {
       posterRegenerated,
       bannerUrl,
       bannerSize,
+      posterInk: made.ink,
+      bannerInk,
     };
   } finally {
     imageInFlight = false;
@@ -2329,7 +2382,7 @@ export interface AssembledDm {
   stdEvents: number;
 }
 
-function assertOutreachPublisher(input: Pick<ProduceDmInput, 'companyId' | 'userId'>): void {
+export function assertOutreachPublisher(input: Pick<ProduceDmInput, 'companyId' | 'userId'>): void {
   const envCompanyId = (process.env.OUTREACH_COMPANY_ID || '').trim();
   const envUserId = (process.env.OUTREACH_USER_ID || '').trim();
   if (!envCompanyId || !envUserId) throw new Error('OUTREACH_COMPANY_ID·OUTREACH_USER_ID가 설정되지 않았습니다.');
@@ -2425,9 +2478,14 @@ export async function publishOutreachDm(a: AssembledDm, input: Pick<ProduceDmInp
   } as any);
   const published = await publishDm(String(dm.id), input.companyId);
   if (!published?.short_code) throw new Error('모바일 DM 발행 주소를 만들지 못했습니다.');
+  return { dmId: String(dm.id), ...outreachDmUrlsOf(published.short_code) };
+}
+
+/** 발행 DM 주소 한 벌 — dmUrl = 단축 도메인(DM_SHORT_LINK_BASE · 없으면 정규) · viewerUrl = 정규 공개 뷰어(검토 화면 iframe). ★ 2026-09-15 카탈로그 DM 과 공용(코드 이동). */
+export function outreachDmUrlsOf(shortCode: string): { dmUrl: string; viewerUrl: string } {
   const shortBase = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
-  const dmUrl = shortBase ? `${shortBase}/${published.short_code}` : `${PUBLIC_BASE}/api/dm/v/dm-${published.short_code}`;
-  return { dmId: String(dm.id), dmUrl, viewerUrl: `${PUBLIC_BASE}/api/dm/v/dm-${published.short_code}` };
+  const dmUrl = shortBase ? `${shortBase}/${shortCode}` : `${PUBLIC_BASE}/api/dm/v/dm-${shortCode}`;
+  return { dmUrl, viewerUrl: `${PUBLIC_BASE}/api/dm/v/dm-${shortCode}` };
 }
 
 /** ★ v3 자동 재조립 2회차 — 같은 dmId 의 섹션·페이지만 갈아끼운다(createDm·publishDm 재호출 0 · short_code 유지 · updateDm 은 status 를 건드리지 않는다) */
@@ -2651,6 +2709,8 @@ export interface ProposalEmailInput {
   homeCaptureUrl?: string | null;
   /** ★ v3 회신 유도 문장(검토 화면 편집분 · 없으면 emailCopy.reply) */
   replyLine?: string | null;
+  /** ★ 2026-09-15 아웃리치 카탈로그 DM 주소(hlj.kr) · 없으면 버튼 2개 현행 그대로 */
+  catalogUrl?: string | null;
 }
 
 function kstDateDash(d: Date): string {
@@ -2776,6 +2836,8 @@ export function buildProposalEmailSections(guide: OutreachStyleGuide, input: Pro
       layout: 'stack',
       buttons: [
         { label: assertButtonLabel(c.cta.primary), url: input.previewUrl, style: 'primary' },
+        // ★ 2026-09-15 카탈로그 DM 이 만들어진 건에만 3번째 버튼(없으면 종전 2개 그대로)
+        ...(input.catalogUrl ? [{ label: assertButtonLabel(c.cta.catalog), url: input.catalogUrl, style: 'outline' }] : []),
         { label: assertButtonLabel(c.cta.secondary), url: input.dmUrl, style: 'outline' },
       ],
     }, { treatment: 'bar' }),
@@ -2820,6 +2882,7 @@ export function buildOutreachPlainText(guide: OutreachStyleGuide, input: Proposa
     c.story.compare.body(input.companyName),
     '',
     `${c.cta.primary}: ${input.previewUrl}`,
+    ...(input.catalogUrl ? [`${c.cta.catalog}: ${input.catalogUrl}`] : []),
     `${c.cta.secondary}: ${input.dmUrl}`,
     '',
     `${c.features.tag}: ${c.features.headline(input.companyName)}`,
@@ -2833,6 +2896,23 @@ export function buildOutreachPlainText(guide: OutreachStyleGuide, input: Proposa
     input.unsubscribeNotice,
     c.footer.legal,
   ].filter((l) => l !== undefined && l !== null).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * ★ 2026-09-15 B-0915-5 공개 웹 보기 자기 링크 제거(순수) — 웹 보기는 저장된 메일 HTML 을 그대로 내므로 메일용 1순위 버튼(previewUrl)이
+ *   그 페이지 안에서는 자기 자신을 가리킨다(시세이도 실측). 응답 직전 그 href 를 가진 버튼 행(renderCta 의 `<tr><td align="center" style="padding:…">`
+ *   + VML + 표 + `<!--<![endif]--></td></tr>`)만 뺀다 · 나머지 바이트 동일 · 저장본 무수정(기존 발송 건에도 즉시).
+ *   href 대조는 렌더러와 같은 이스케이프(esc)로 맞춘다(`&` → `&amp;`).
+ */
+export function stripSelfLinkButtons(html: string, selfUrl: string): string {
+  const src = String(html || '');
+  const self = String(selfUrl || '').trim();
+  if (!src || !self) return src;
+  const needle = `href="${escHtml(self)}"`;
+  if (!src.includes(needle)) return src;
+  // 버튼 행 = `<tr><td align="center" style="padding:…">` 에서 시작해 `<!--<![endif]--></td></tr>` 로 끝난다. 안에 다른 버튼 행이 시작되면 그 매치는 버린다(겹침 방지).
+  const rowRe = /<tr><td align="center" style="padding:[^"]*">(?:(?!<tr><td align="center")[\s\S])*?<!--<!\[endif\]--><\/td><\/tr>/g;
+  return src.replace(rowRe, (row) => (row.includes(needle) ? '' : row));
 }
 
 /** 진입점 — 조립 + 렌더 + 평문 + placeholder 합산. producing_email이 부르는 유일한 함수. */

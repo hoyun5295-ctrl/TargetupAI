@@ -43,8 +43,8 @@ export interface EmailRenderCtx {
 /** 광고 footer 삽입 자리 — email-channel이 발송 시 치환(</body> 앞·수신거부 링크 법 준수 위치 보장). */
 export const EMAIL_FOOTER_SLOT = '<!--EMAIL_FOOTER_SLOT-->';
 
-/** HTML 이스케이프(로컬 — DB-free 격리). */
-function esc(input: unknown): string {
+/** HTML 이스케이프(로컬 — DB-free 격리). ★ 2026-09-15 아웃리치 웹 보기 자기 링크 대조(stripSelfLinkButtons)가 같은 규칙으로 href 를 맞춰야 해 export. */
+export function esc(input: unknown): string {
   if (input === null || input === undefined) return '';
   return String(input)
     .replace(/&/g, '&amp;')
