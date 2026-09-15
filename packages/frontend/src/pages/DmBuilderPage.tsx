@@ -855,9 +855,8 @@ export default function DmBuilderPage() {
           {/* ★ 2026-07-02(5) Harold 지시 재배치 — 좌: 프롬프트 단독(크게) / 우: 빠른 시작(위) + 자유 시작·완성 슬라이드(아래) */}
           <style>{`
             .dm-hub-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
-            .dm-hub-bottom { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-            /* ★ 2026-09-15 카탈로그 DM 카드가 4번째로 들어와 좁은 폭에서는 2×2 */
-            @media (max-width: 1023px) { .dm-hub-bottom { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+            /* ★ 2026-09-16 Harold — 가로 4칸은 타일이 좁아 제목이 꺾였다 → 항상 2×2 · 빠른 시작 대신 이 2×2가 남는 높이를 나눠 갖는다 */
+            .dm-hub-bottom { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; flex: 1; }
             /* ★ 2026-08-21 한글은 기본 줄바꿈이 글자 단위라 "추 가"·"슬라 이드"·"불러 오기"처럼 낱말이 잘렸다.
                keep-all = 띄어쓰기에서만 끊는다(줄 위치는 아래 타일이 <br/>로 직접 정한다). */
             .dm-hub-bottom button { word-break: keep-all; }
@@ -959,7 +958,7 @@ export default function DmBuilderPage() {
                 onClick={() => { if (!generating) setQuickStartOpen(true); }}
                 disabled={generating}
                 style={{
-                  flex: 1, minHeight: 104, padding: '14px 16px', textAlign: 'center',
+                  minHeight: 104, padding: '14px 16px', textAlign: 'center',
                   background: 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(217,70,239,0.12))',
                   border: '1px solid rgba(168,85,247,0.45)', borderRadius: 14,
                   cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
@@ -977,31 +976,34 @@ export default function DmBuilderPage() {
                   onClick={handleCreateNew}
                   disabled={generating}
                   style={{
-                    minHeight: 84, padding: '12px 14px', textAlign: 'center',
+                    minHeight: 84, padding: '14px 16px', textAlign: 'center',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
                     background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
                     cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
-                    <span style={{ fontSize: 15 }}>📄</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>직접 제작</span>
+                  {/* ★ 2026-09-16 2×2로 높이가 늘어난 만큼 아이콘을 위로 올려 키우고 세로 쌓기 · 상하 중앙 */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 26, lineHeight: 1 }}>📄</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>직접 제작</span>
                   </div>
-                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>빈 캔버스에서<br />직접 섹션 추가</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>빈 캔버스에서<br />직접 섹션 추가</div>
                 </button>
                 <button
                   onClick={() => { uploadModeRef.current = 'slides'; completedImagesInputRef.current?.click(); }}
                   disabled={generating || uploadingImages}
                   style={{
-                    minHeight: 84, padding: '12px 14px', textAlign: 'center',
+                    minHeight: 84, padding: '14px 16px', textAlign: 'center',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
                     background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
                     cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
-                    <span style={{ fontSize: 15 }}>🖼️</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 슬라이드'}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 26, lineHeight: 1 }}>🖼️</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 슬라이드'}</span>
                   </div>
-                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>완성 이미지 업로드<br />→ 슬라이드 DM</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>완성 이미지 업로드<br />→ 슬라이드 DM</div>
                 </button>
                 {/* ★ 2026-09-15 카탈로그 DM(Harold) — 쪽 이미지 N장(장수 제한 없음) → 휴대폰 슬라이드 · PC 책 펼침. 완성 슬라이드와 같은 업로드 입구 · settings.catalog 만 다르다 */}
                 <button
@@ -1009,32 +1011,34 @@ export default function DmBuilderPage() {
                   disabled={generating || uploadingImages}
                   title="쪽 이미지를 순서대로 올리면 휴대폰에서는 슬라이드로, PC에서는 책처럼 두 쪽씩 펼쳐 보이는 카탈로그 DM이 됩니다"
                   style={{
-                    minHeight: 84, padding: '12px 14px', textAlign: 'center',
+                    minHeight: 84, padding: '14px 16px', textAlign: 'center',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
                     background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
                     cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
-                    <span style={{ fontSize: 15 }}>📖</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '카탈로그 DM'}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 26, lineHeight: 1 }}>📖</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '카탈로그 DM'}</span>
                   </div>
-                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>쪽 이미지 업로드<br />→ PC 책 펼침</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>쪽 이미지 업로드<br />→ PC 책 펼침</div>
                 </button>
                 {/* ★ 2026-07-19 P4: 라이브러리 불러오기 — 저장 소재 다중 선택 → 이미지 DM */}
                 <button
                   onClick={() => { if (!generating && !uploadingImages) setLibPickerOpen(true); }}
                   disabled={generating || uploadingImages}
                   style={{
-                    minHeight: 84, padding: '12px 14px', textAlign: 'center',
+                    minHeight: 84, padding: '14px 16px', textAlign: 'center',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
                     background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
                     cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
-                    <span style={{ fontSize: 15 }}>🗂️</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>라이브러리 불러오기</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 26, lineHeight: 1 }}>🗂️</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>라이브러리 불러오기</span>
                   </div>
-                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>저장 소재 다중선택<br />→ 이미지 DM</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>저장 소재 다중선택<br />→ 이미지 DM</div>
                 </button>
               </div>
             </div>

@@ -55,14 +55,14 @@
 
 ## 2) 활성 버그
 
-### 🟠 B-0915-4 AI 영업 포스터: 헤드라인 글자색이 `#111111` 고정이라 어두운 배경에서 브랜드명이 안 보인다 (🟡 0915 수정 · 배포 대기 · 실측 = [인계 §7-3](../docs/2026-09-15-session-handoff.md)) — 2026-09-15 Harold 접수(시세이도 `137c25fd33`)
+### 🟠 B-0915-4 AI 영업 포스터: 헤드라인 글자색이 `#111111` 고정이라 어두운 배경에서 브랜드명이 안 보인다 (🟡 0915 수정 · 배포 `d12997a2` · 실측 대기 = [인계 §7-3 3번](../docs/2026-09-15-session-handoff.md) `posterInk` SQL · 새 잡 실측에서 글자색은 미확인) — 2026-09-15 Harold 접수(시세이도 `137c25fd33`)
 
 - **실측**: 포스터 `fee57413…jpeg`(1400×1875) = 진갈색 스튜디오 배경 위 "시세이도" 검은 글자 → 거의 안 보인다. 배지 "뷰티/화장품"(파란 바탕 흰 글자)만 보인다. 같은 포스터가 제안 메일 맨 위 · "대표 이미지" 블록 · 이메일 시안 히어로 3곳에 실린다.
 - **원인(코드)**: `sales-outreach-produce.ts buildPosterTypography` 가 title `#111111` · subtitle `#333333` 고정. 배경 지시(`posterStyleHint`)는 "keep the top 30% calm"만 있고 밝기 조건이 없다. 유출 검사(`scoreOutreachPoster`)는 숫자·헤드라인 존재만 보고 대비는 안 본다.
 - **처방(1개)**: 합성 직전 배경 상단 30% 평균 밝기를 실측(배경 버퍼가 이미 손에 있다)해 어두우면 글자 `#ffffff` + 얇은 그림자, 밝으면 현행. 배경 지시에 "light airy top area" 추가는 모델 재량이라 보조.
 - **수정(0915 · Harold 「진행해」)**: `measurePosterInkZone(bgPath, zone)`(sharp · 포스터 = 상단 30% · 배너 = 하단 45% 띠를 회색 raw 로 실체화해 평균 · 알파 제거) + 순수 `posterInkFor(mean)`(`< 120` = light · 근거 = 검은 글자와 흰 글자의 WCAG 대비가 뒤집히는 상대휘도 0.19 ≈ sRGB 118) → `buildPosterTypography(..., ink)`: light = 제목 `#ffffff` · 부제 `#f1f5f9` · 파이썬 합성기 `effect:'shadow'` / dark = 현행 그대로(출력 동일 · 기존 s3·s7 테스트 무변경). 포스터·배너 2곳 배선 · 측정 실패 = 현행 · `studio_image` payload `+ posterInk, bannerInk`(근거). 배경 지시문 무변경. 테스트 `sales-outreach-poster-ink.test.ts` 8(경계 · light/dark · 생략 = dark 동일 · sharp 실측 어두운/밝은/알파 · 파일 없음 null). 기존 발송 건은 재생성해야 바뀐다(포스터는 저장 파일).
 
-### 🟡 B-0915-5 AI 영업 공개 웹 보기: 하단 "산출물 보기" 버튼이 자기 자신을 가리킨다 (🟡 0915 수정 · 배포 대기 · 실측 = [인계 §7-3](../docs/2026-09-15-session-handoff.md) · 기존 발송 건에도 즉시) — 2026-09-15 Harold 접수
+### 🟢 B-0915-5 AI 영업 공개 웹 보기: 하단 "산출물 보기" 버튼이 자기 자신을 가리킨다 (🟢 0915 수정 · 배포 `d12997a2` · **Harold 실측 통과(22:3x · 시세이도 건 버튼 1개) · 종결**) — 2026-09-15 Harold 접수
 
 - **실측**: `sys.hanjullo.com/api/outreach/v/137c25fd33` 하단 CTA 2개 = "산출물 보기"(→ `hanjul.ai/api/outreach/v/137c25fd33` = 지금 보는 페이지) · "DM 열어보기"(→ `hlj.kr/LQ8AqAE`).
 - **원인(코드)**: 공개 웹 보기는 메일 HTML 을 그대로 낸다(`sales-outreach-jobs.ts getPublicOutreachHtml`). 1순위 CTA 는 메일 클라이언트용 "웹에서 보기"(`sales-outreach-produce.ts:2778 url: input.previewUrl`)라 웹 보기 안에서는 자기 링크가 된다.

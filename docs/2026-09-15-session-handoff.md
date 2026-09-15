@@ -178,7 +178,9 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT to_char(cr
 ### 6-5. 되돌리기
 - 커밋 revert → backend·frontend `build:safe` → `pm2 reload`. 발행물은 요청 시 렌더라 즉시 원복. DB 무접촉(플래그를 켠 DM 의 `settings.catalog` 는 남지만 읽는 코드가 없어지면 무해 · 카탈로그 채널 차감 행은 원장 그대로).
 
-## 7. 3세션 이어서(압축 뒤): AI 영업 결함 2건 수정 + 아웃리치 카탈로그 DM · 코드 완료 · 배포 대기
+## 7. 3세션 이어서(압축 뒤): AI 영업 결함 2건 수정 + 아웃리치 카탈로그 DM · **배포 완료(0915 22:23 · `d12997a2` · §7-3 1번 판정 4항목 통과) · 실측 = 2번 통과 · 3번 카탈로그 생성 확인(Harold 「아직 좀 수정이 필요」 · 항목 접수 대기) · 글자색·4·5 미확인**
+
+> 상설 문서 = [FEATURE-CATALOG-DM.md](FEATURE-CATALOG-DM.md)(0915 신설 · SOT-INDEX §0 등재 · 뷰어·입구 3곳·요금·추적·실측 원장·이력 소유). 이 절은 시점 기록이다.
 
 Harold 「진행해 전체 끝까지 닫고 브리핑보고해」. 경위·상세 = [FEATURE-SALES-OUTREACH 5) 2026-09-15(2) 행](FEATURE-SALES-OUTREACH.md) · [B-0915-4·B-0915-5](../status/BUGS.md). AI 호출 0 · 크레딧 0 · DDL 0.
 
@@ -209,6 +211,12 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT d.id, d.st
 ```
 기대 = 최신 1건만 발행 상태 · 이전 것은 중지.
 5. 새 회사 1건 처음부터(크롤 → 확인 → 제작): 상품 사본이 6개 넘는 몰이면 카탈로그 상품 쪽 = 6 · 상품명에 숫자(50ml)가 있으면 그 쪽은 글자 없이 사진만.
+
+**실측 결과(0915 22:3x · Harold)** : 1번 4항목 기대값 · **2번 통과**(버튼 1개 · B-0915-5 종결) · 5번에 해당하는 새 잡을 처음부터 돌려 **카탈로그 DM 생성 확인** · Harold 「아직 좀 수정이 필요하네」 = 어떤 점인지 다음 세션 첫 접수(그때 [FEATURE-CATALOG-DM §9](FEATURE-CATALOG-DM.md)로 옮긴다) · 3번의 포스터 글자색(B-0915-4)·SQL 확인 · 4번 옛 카탈로그 중지는 미실측.
+
+### 7-3-1. 다음 세션 첫 자리
+1. Harold 「수정 필요」 항목 접수(화면·쪽 순서·카드 디자인·캡션·링크 중 무엇인지) → FEATURE-CATALOG-DM §9 항목화 → 설계안 → 동의 → 착수.
+2. 그 뒤 §7-3 3·4 잔여(글자색 `posterInk` SQL · 옛 카탈로그 중지) · §6-3 5~8(AI 자동제작 채널 원장 SQL · 쪽 1장 게이트 · 추적 · og).
 
 ### 7-4. 범위 밖 · 추가 과제 (착수 판단 = Harold)
 - 카탈로그 DM 열람이 아웃리치 열람 집계 SQL(`dm_views` ↔ `payload->>'dmId'` 조인)에 안 잡힌다 → `catalogDmId` 도 조인하려면 집계 축 수정(별도).

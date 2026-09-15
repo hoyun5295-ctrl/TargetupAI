@@ -2,7 +2,7 @@
 
 > **호출어 = "AI 자동제작"**. 이 문서가 이 기능의 **정체성·불변 원칙·구조·요금·운영 실측·이력**을 소유한다. STATUS는 카드 3줄로 참조만 한다.
 > 시점 설계 근거·회의 수렴·착수 원장·구현 기록 원문 = [0914 설계서](2026-09-14-ai-auto-build-design.md)(§2 불변 원본 · §3 수렴 · §5 요금 · §6 서버 계약 · §10 회의론자 · §13 구현 기록 · §14 배포 원장). 이 문서는 그 결과를 상설로 정리한 것이고, 두 문서가 다르면 **현재 코드가 진실**이다.
-> 관련 상설 = [FEATURE-SALES-OUTREACH.md](FEATURE-SALES-OUTREACH.md)(캠페인 엔진 소유) · [FEATURE-CDP-INTEGRATION.md](FEATURE-CDP-INTEGRATION.md)(몰 연동 · 상품 재조회 출처) · [FEATURE-IMAGE-STUDIO.md](FEATURE-IMAGE-STUDIO.md)(소재 라이브러리).
+> 관련 상설 = [FEATURE-SALES-OUTREACH.md](FEATURE-SALES-OUTREACH.md)(캠페인 엔진 소유) · [FEATURE-CDP-INTEGRATION.md](FEATURE-CDP-INTEGRATION.md)(몰 연동 · 상품 재조회 출처) · [FEATURE-IMAGE-STUDIO.md](FEATURE-IMAGE-STUDIO.md)(소재 라이브러리) · **[FEATURE-CATALOG-DM.md](FEATURE-CATALOG-DM.md)(★0915 카탈로그 DM 채널의 뷰어·입구 3곳·추적 소유 · 이 문서는 요금·재료 계약만)**.
 
 ---
 
