@@ -111,7 +111,8 @@ export interface DirectSendPanelProps {
   isAiMessagingLocked?: boolean;
 
   // ★ 2026-07-04 미가입 보조기능 잠금 통일 — 스팸필터/AI 다듬기 클릭 시 요금제 업그레이드 모달(PlanUpgradeModal)
-  onLockedFeature: (feature: string, requiredPlan: string) => void;
+  /** 요금제가 필요한 기능을 눌렀을 때 — 공통 안내 창(PlanFeatureModal)의 기능 id(constants/plan-feature-intros.ts) */
+  onLockedFeature: (featureId: string) => void;
 
   // 카카오 (알림톡 전용 — 문자는 건드리지 않음)
   kakaoTemplates: any[];
@@ -443,7 +444,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
 
   // 스팸필터
   const handleSpamFilter = () => {
-    if (isSpamFilterLocked) { onLockedFeature('스팸필터 테스트', '스타터'); return; }
+    if (isSpamFilterLocked) { onLockedFeature('check-spam'); return; }
     if (!directRecipients || directRecipients.length === 0) {
       setToast({ show: true, type: 'error', message: '발송리스트를 먼저 업로드해주세요.' });
       return;
@@ -954,9 +955,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     data-ai-refine-btn
                     className="ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 hover:from-violet-100 hover:to-fuchsia-100 hover:border-violet-300 text-violet-700 font-semibold transition-all"
                     onClick={() => {
-                      // ★ 2026-07-04 미가입 잠금 시 — 요금제 업그레이드 모달(PlanUpgradeModal) 통일
+                      // ★ 2026-07-04 미가입 잠금 시 — 요금제 안내 창 통일(★ 2026-09-15 공통 안내 창 PlanFeatureModal)
                       if (isAiMessagingLocked) {
-                        onLockedFeature('AI 문안 다듬기', '스타터');
+                        onLockedFeature('ai-refine');
                         return;
                       }
                       if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '다듬을 메시지를 입력해주세요' }); return; }

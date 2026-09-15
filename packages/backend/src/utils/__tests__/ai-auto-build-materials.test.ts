@@ -94,6 +94,15 @@ describe('aiAutoBuildEnabled — §6-7 신규 ENV · 비면 미노출(현행 qui
     expect(aiAutoBuildEnabled(null, COMPANY)).toBe(false);
     expect(aiAutoBuildEnabled(undefined, COMPANY)).toBe(false);
   });
+  // ★ 2026-09-15 전 회사 개방(Harold 지시 · 직원 테스트) — 회사를 일일이 적으면 새로 가입한 회사가 빠진다
+  it("'*' = 전 회사 true · 회사 없는 요청은 여전히 false · 목록에 섞여도 전체", () => {
+    expect(aiAutoBuildEnabled(COMPANY, '*')).toBe(true);
+    expect(aiAutoBuildEnabled(OTHER, ' * ')).toBe(true);
+    expect(aiAutoBuildEnabled(OTHER, `${COMPANY},*`)).toBe(true);
+    expect(aiAutoBuildEnabled(null, '*')).toBe(false);
+    expect(aiAutoBuildEnabled(undefined, '*')).toBe(false);
+    expect(aiAutoBuildEnabled('', '*')).toBe(false);
+  });
 });
 
 describe('isBuildMaterialsV1 — 옛 요청(version 없음)은 현행 경로', () => {

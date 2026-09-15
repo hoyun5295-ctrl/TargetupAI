@@ -13,6 +13,7 @@ import {
   Image as ImageIcon,
   LineChart,
   Loader2,
+  Lock,
   MessageSquare,
   RefreshCw,
   Send,
@@ -43,6 +44,8 @@ import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsS
 import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
 import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
+import PlanFeatureModal from '../components/PlanFeatureModal';
+import { planFeatureIdForPath, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
@@ -297,6 +300,21 @@ export default function AiOperatorPage() {
       } catch { /* 조회 실패 시 칩 숨김 */ }
     })();
   }, []);
+  // ★ 2026-09-15 AI Operator = 요금제와 상관없이 누구나 들어온다(Harold 지시). 기능을 쓸 수 있는지는 서버가 정한다
+  //   (`/api/ai/operator/access` = isAiOperatorAllowed · 유료 요금제·AI 오퍼레이션 체험·슈퍼관리자).
+  //   못 쓰는 회사가 카드나 [생성]을 누르면 이동·호출 대신 공통 안내 창을 연다. 판정 전·조회 실패는 잠그지 않는다(서버가 다시 막는다).
+  const [planLocked, setPlanLocked] = useState(false);
+  const [planFeatureId, setPlanFeatureId] = useState<string | null>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/ai/operator/access', { headers: { Authorization: `Bearer ${token}` } });
+        const d = await res.json();
+        if (d?.success) setPlanLocked(d.allowed === false);
+      } catch { /* 조회 실패 = 잠그지 않음 */ }
+    })();
+  }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // ★ D174 (2026-05-19): PerformancePage가 sessionStorage에 저장한 prefill objective 자동 로드
   // ★ 2026-07-08 행사 캠페인은 "원클릭 캠페인" 타일(/quick-campaign)로 이전 — 여기선 입력창 이미지 버튼만.
@@ -511,6 +529,7 @@ export default function AiOperatorPage() {
   //   본 영역 = 옛 useEffect 폐기 정합 (handleSubmit 안 fetch 정합).
 
   const handleSubmit = async () => {
+    if (planLocked) { setPlanFeatureId('ai-operator'); return; }
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (objective.trim().length < 5) {
       setError('마케팅 목표를 한 줄로 입력해주세요 (5자 이상).');
@@ -866,6 +885,8 @@ export default function AiOperatorPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+      {/* ★ 2026-09-15 요금제 공통 안내 창 — 못 쓰는 회사가 카드·[생성]·[이미지]를 눌렀을 때 */}
+      <PlanFeatureModal featureId={planFeatureId} onClose={() => setPlanFeatureId(null)} />
       {/* 배경 글로우 — D222+ Phase 1 톤 다운 정정 */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-fuchsia-400/15 blur-3xl" />
@@ -1003,12 +1024,24 @@ export default function AiOperatorPage() {
                 rows={1}
                 className="flex-1 bg-transparent text-white placeholder-white/30 px-1 py-3 resize-none focus:outline-none text-base leading-relaxed min-h-[44px] max-h-[200px] disabled:opacity-50"
               />
-              <ImageToCopyButton
-                label="이미지"
-                onExtracted={(t) => setObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
-                disabled={loading}
-                className="flex-shrink-0 px-5 py-3 inline-flex items-center gap-2 rounded-xl bg-violet-500/20 border border-violet-400/40 text-violet-100 font-semibold hover:bg-violet-500/30 hover:border-violet-400/60 disabled:opacity-40 transition-all"
-              />
+              {planLocked ? (
+                // ★ 2026-09-15 이미지 글자 읽기도 크레딧 기능 — 못 쓰는 회사는 파일 선택 대신 안내 창
+                <button
+                  type="button"
+                  onClick={() => setPlanFeatureId('ai-operator')}
+                  className="flex-shrink-0 px-5 py-3 inline-flex items-center gap-2 rounded-xl bg-violet-500/20 border border-violet-400/40 text-violet-100 font-semibold hover:bg-violet-500/30 hover:border-violet-400/60 transition-all"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                  이미지
+                </button>
+              ) : (
+                <ImageToCopyButton
+                  label="이미지"
+                  onExtracted={(t) => setObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                  disabled={loading}
+                  className="flex-shrink-0 px-5 py-3 inline-flex items-center gap-2 rounded-xl bg-violet-500/20 border border-violet-400/40 text-violet-100 font-semibold hover:bg-violet-500/30 hover:border-violet-400/60 disabled:opacity-40 transition-all"
+                />
+              )}
               <button
                 type="button"
                 onClick={handleSubmit}
@@ -1798,27 +1831,32 @@ export default function AiOperatorPage() {
         {showAbout && (
           <>
             {/* ★ D209+ (Harold 명시 2026-05-22): 좌우 분할 매트릭스 — 좌측 AI 자율 진단 세로 길게 / 우측 SUB_MODULE_CARDS 2열 세로. */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-14">
+            {/* ★ 2026-09-15 요금제를 못 쓰는 회사 = 왼쪽 AI 진단(서버가 막는 조회)을 그리지 않고 기능 카드를 한 줄 4개로 넓게 편다(목업 승인안) */}
+            <div className={`grid grid-cols-1 ${planLocked ? '' : 'lg:grid-cols-2'} gap-6 mb-14`}>
               {/* 좌측 — AI 자율 진단 (세로 길게) */}
-              <div>
-                {/* ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 — 회사 admin 첫 진입 시 자동 제안 */}
-                <AiSelfDiagnosisCards
-                  onApply={(objectiveText) => {
-                    setObjective(objectiveText);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                    setTimeout(() => textareaRef.current?.focus(), 200);
-                  }}
-                />
-              </div>
+              {!planLocked && (
+                <div>
+                  {/* ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 — 회사 admin 첫 진입 시 자동 제안 */}
+                  <AiSelfDiagnosisCards
+                    onApply={(objectiveText) => {
+                      setObjective(objectiveText);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                      setTimeout(() => textareaRef.current?.focus(), 200);
+                    }}
+                  />
+                </div>
+              )}
 
               {/* 우측 — SUB_MODULE_CARDS 2열 세로 나열 */}
               {/* ★ D177-ux2: AI Operator 페이지 안 sub-module 배치 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴) */}
               <div>
                 <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">AI Operator Modules</p>
                 <h2 className="text-xl font-bold mb-1.5 text-white">함께 사용하는 AI 영역</h2>
-                <p className="text-sm text-white/50 mb-6">자연어 한 줄 진입 외에도 AI Operator 안에 내장된 기능입니다. 클릭하면 바로 이동합니다</p>
+                <p className="text-sm text-white/50 mb-6">
+                  자연어 한 줄 진입 외에도 AI Operator 안에 내장된 기능입니다. {planLocked ? '누르면 어떤 기능인지 바로 볼 수 있어요' : '클릭하면 바로 이동합니다'}
+                </p>
                 {/* ★ D209+ (Harold 명시 2026-05-22): 우측 3열 세로 나열 매트릭스 + description \n 줄바꿈 정합 (whitespace-pre-line). */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className={`grid grid-cols-1 sm:grid-cols-2 ${planLocked ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3`}>
                   {SUB_MODULE_CARDS
                     .filter((card) => !card.adminOnly || (user as any)?.userType === 'company_admin')
                     .map((card) => {
@@ -1826,7 +1864,12 @@ export default function AiOperatorPage() {
                       return (
                         <button
                           key={card.label}
-                          onClick={() => navigate(card.path)}
+                          onClick={() => {
+                            // ★ 2026-09-15 못 쓰는 회사 = 이동 대신 그 기능의 안내(요금제 공통 안내 창)
+                            const featureId = planFeatureIdForPath(card.path);
+                            if (planLocked && featureId) { setPlanFeatureId(featureId); return; }
+                            navigate(card.path);
+                          }}
                           // ★ D209+ (Harold 명시 2026-05-22): 호버 효과 강화 — shadow + glow + scale + 색감 강화.
                           className="group relative p-4 rounded-2xl bg-white/[0.07] backdrop-blur-xl border border-white/15 hover:bg-white/[0.18] hover:border-violet-400/50 hover:scale-[1.04] hover:shadow-2xl hover:shadow-violet-500/30 hover:-translate-y-0.5 transition-all duration-300 text-left"
                         >
@@ -1837,9 +1880,16 @@ export default function AiOperatorPage() {
                             <h3 className="text-white font-semibold text-sm">{card.label}</h3>
                           </div>
                           <p className="text-white/60 text-[11px] leading-relaxed">{card.description}</p>
-                          <div className="absolute top-4 right-4 text-white/30 group-hover:text-white/70 group-hover:translate-x-0.5 transition-all text-base">
-                            →
-                          </div>
+                          {planLocked ? (
+                            <span className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold text-amber-200 bg-amber-300/[0.12] border border-amber-300/[0.28]">
+                              <Lock className="w-3 h-3" />
+                              {PLAN_FEATURE_MIN_PLAN}부터
+                            </span>
+                          ) : (
+                            <div className="absolute top-4 right-4 text-white/30 group-hover:text-white/70 group-hover:translate-x-0.5 transition-all text-base">
+                              →
+                            </div>
+                          )}
                         </button>
                       );
                     })}

@@ -36,8 +36,8 @@ export interface BrandSendModalProps {
   initialRecipients?: string[];
   /** AI 타겟추출 잠금 — 스팸필터·AI 다듬기와 같은 기준을 부모가 그대로 넘긴다 */
   isAiTargetLocked: boolean;
-  /** 잠금 시 부모가 PlanUpgradeModal을 띄운다 */
-  onLockedFeature: (feature: string, requiredPlan: string) => void;
+  /** 잠금 시 부모가 공통 안내 창(PlanFeatureModal)을 띄운다 — 기능 id(constants/plan-feature-intros.ts) */
+  onLockedFeature: (featureId: string) => void;
   /** 실제 발송 — BrandMessageEditor가 만든 payload에 수신자를 얹어 부모가 보낸다 */
   onSend: (payload: any) => Promise<void> | void;
   sending?: boolean;
@@ -174,7 +174,7 @@ export default function BrandSendModal({
   };
 
   const runAiTarget = async () => {
-    if (isAiTargetLocked) { onLockedFeature('AI 타겟추출', '베이직'); return; }
+    if (isAiTargetLocked) { onLockedFeature('ai-target'); return; }
     if (!aiPrompt.trim()) { setAiError('찾을 대상을 한 줄로 입력해 주세요.'); return; }
     const seq = ++reqSeqRef.current;
     setAiLoading(true); setAiError(''); setAiResult(null);
@@ -323,7 +323,7 @@ export default function BrandSendModal({
             const active = mode === t.key;
             return (
               <button key={t.key} type="button"
-                onClick={() => { if (t.locked) { onLockedFeature('AI 타겟추출', '베이직'); return; } setMode(t.key); }}
+                onClick={() => { if (t.locked) { onLockedFeature('ai-target'); return; } setMode(t.key); }}
                 className={`flex-1 px-2 py-2 rounded-lg text-[12px] font-medium inline-flex items-center justify-center gap-1.5 transition ${
                   active ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'
                 }`}>

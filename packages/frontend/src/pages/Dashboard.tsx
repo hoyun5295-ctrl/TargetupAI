@@ -36,7 +36,7 @@ import MmsUploadModal from '../components/MmsUploadModal';
 import { useMmsUpload } from '../hooks/useMmsUpload';
 import PlanApprovalModal from '../components/PlanApprovalModal';
 import PlanLimitModal from '../components/PlanLimitModal';
-import PlanUpgradeModal from '../components/PlanUpgradeModal';
+import PlanFeatureModal from '../components/PlanFeatureModal';
 import RecentCampaignModal from '../components/RecentCampaignModal';
 import RecommendTemplateModal from '../components/RecommendTemplateModal';
 import ResultsModal from '../components/ResultsModal';
@@ -64,8 +64,6 @@ import DirectSendPanel from '../components/DirectSendPanel';
 import AlimtalkSendModal from '../components/AlimtalkSendModal';
 // ★ 2026-07-29 브랜드메시지 발송 풀 화면 — 알림톡과 같은 진입 패턴, 성격은 다르다(템플릿 검수 불필요)
 import BrandSendModal from '../components/BrandSendModal';
-// ★ D209+ (Harold 명시 2026-05-23): BetaFeatureModal → AiOperatorWalkthroughModal 정합 (AI Operator 메뉴 클릭 시 walkthrough + 특별혜택 안내 본질).
-import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
 import AgencySendIntroModal from '../components/agency/AgencySendIntroModal';
 // ★ 2026-08-16 AI 마케팅 진단(퍼널 A — 설계서 §5-2·§5-3): FREE 진단 → TRIAL 7일 자동 지급
 import DiagnosisModal from '../components/marketing-diagnosis/DiagnosisModal';
@@ -204,7 +202,6 @@ export default function Dashboard() {
   const [showPlanApproval, setShowPlanApproval] = useState(false);
   const [planApproval, setPlanApproval] = useState<{requestId: string; planName: string} | null>(null);
   // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 모달 (전체 등급 노출, ENT+만 실제 진입)
-  const [showWalkthroughModal, setShowWalkthroughModal] = useState(false);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
@@ -486,7 +483,7 @@ export default function Dashboard() {
   const handleAiMsgHelper = () => {
     // D53: DB 플래그 기반 게이팅
     if (isAiMessagingLocked) {
-      setShowPlanUpgradeModal(true);
+      openPlanFeature('write-copy-ai');
       return;
     }
     setShowAiMsgHelper(true);
@@ -534,11 +531,7 @@ export default function Dashboard() {
   //   AI Operator·여정·DM 편집기가 쓰는 같은 API(3크레딧). 게이트는 AI 추천과 같은 isAiMessagingLocked → 업그레이드 모달.
   //   백엔드 라우트 변경 0. 돌려주는 값 = 꾸민 문안, 막혔거나 실패하면 null(호출부는 원문을 건드리지 않는다).
   const handleAiDecorate = async (message: string, tokens: string[]): Promise<string | null> => {
-    const openUpgrade = () => {
-      setPlanUpgradeFeature('AI 꾸미기');
-      setPlanUpgradeRequired('스타터');
-      setShowPlanUpgradeModal(true);
-    };
+    const openUpgrade = () => openPlanFeature('ai-decorate');
     if (isAiMessagingLocked) { openUpgrade(); return null; }
     const fail = (msg: string) => {
       setToast({ show: true, type: 'error', message: msg });
@@ -991,10 +984,9 @@ export default function Dashboard() {
   const [aiHelperLoading, setAiHelperLoading] = useState(false);
   const [aiHelperResults, setAiHelperResults] = useState<any[]>([]);
   const [aiHelperRecommendation, setAiHelperRecommendation] = useState('');
-  const [showPlanUpgradeModal, setShowPlanUpgradeModal] = useState(false);
-  // D53: 범용 업그레이드 모달 — featureName/requiredPlan
-  const [planUpgradeFeature, setPlanUpgradeFeature] = useState('');
-  const [planUpgradeRequired, setPlanUpgradeRequired] = useState('');
+  // ★ 2026-09-15 요금제 공통 안내 창 — 기능 id 하나만 든다(옛 기능명+요금제 문자열 두 값은 창과 어긋났다)
+  const [planFeatureId, setPlanFeatureId] = useState<string | null>(null);
+  const openPlanFeature = (id: string) => setPlanFeatureId(id);
   // ★ D96: showDirectInput → DirectSendPanel로 이동
   const [showSpecialChars, setShowSpecialChars] = useState<'target' | 'direct' | null>(null);
   const [showTemplateBox, setShowTemplateBox] = useState<'target' | 'direct' | null>(null);
@@ -1068,9 +1060,7 @@ export default function Dashboard() {
   const openCustomerDb = (customerId?: string | null) => {
     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return false; }
     if (isCustomerDbLocked) {
-      setPlanUpgradeFeature('고객 DB');
-      setPlanUpgradeRequired('스타터');
-      setShowPlanUpgradeModal(true);
+      openPlanFeature('view-customer');
       return false;
     }
     setCustomerDbInitialId(customerId || null);
@@ -2381,28 +2371,11 @@ const campaignData = {
         onAgencySendBlocked={() => setShowAgencyIntro(true)}
         // ★ D220+ Task 8 (2026-05-27): 세그먼트 메뉴 잠금 게이팅 (ai_messaging — BASIC+)
         aiMessagingEnabled={planInfo?.ai_messaging_enabled}
-        onAiOperatorClick={async () => {
-          // ★ D178 (2026-05-19) + D209+ (Harold 명시 2026-05-23) AI Operator 메뉴 클릭 — backend isAiOperatorAllowed 호출 결과 처리.
-          //   ENV AI_OPERATOR_ALLOWED_USERS 설정 시 본 list 등록 사용자만 진입, 그 외 모두 AiOperatorWalkthroughModal 표시.
-          //   ENV 미설정 시 모두 차단 (개발 진행 영역 — 클릭 시 walkthrough + 특별혜택 안내 표시).
-          try {
-            const t = localStorage.getItem('token');
-            const res = await fetch('/api/ai/operator/access', {
-              headers: { Authorization: `Bearer ${t}` },
-            });
-            const data = await res.json();
-            if (data.success && data.allowed) {
-              navigate('/ai-operator');
-            } else if (diagnosisState?.eligible) {
-              // ★ 2026-08-16 진단 분기(설계서 §5-1 C): 미개방 + FREE 진단 대상 = 진단이 안내를 대체
-              setShowDiagnosisWizard(true);
-            } else {
-              setShowWalkthroughModal(true);
-            }
-          } catch {
-            // 네트워크 실패 시 안전 default = walkthrough 표시
-            setShowWalkthroughModal(true);
-          }
+        onAiOperatorClick={() => {
+          // ★ 2026-09-15 Harold 지시 — AI Operator는 요금제와 상관없이 누구나 들어간다. 기능을 쓸 수 있는지는 허브 안에서
+          //   서버 판정으로 가르고, 못 쓰면 공통 안내 창을 연다(옛 진입 확인·진단 분기·안내 모달 분기 제거).
+          if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
+          navigate('/ai-operator');
         }}
         onDirectSend={async () => {
           setShowDirectSend(true);
@@ -2444,11 +2417,6 @@ const campaignData = {
         customerDbEnabled={planInfo?.customer_db_enabled}
         isSubscriptionLocked={isSubscriptionLocked}
         onSubscriptionLocked={() => setShowSubscriptionLock(true)}
-        onFeatureLocked={(feature, required) => {
-          setPlanUpgradeFeature(feature);
-          setPlanUpgradeRequired(required);
-          setShowPlanUpgradeModal(true);
-        }}
       />
 
       {/* ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 무료체험 사용자 Wizard 진입 안내 카드 */}
@@ -2934,29 +2902,13 @@ const campaignData = {
               <>
                 {/* AI Operator — D222+ Phase 1 정정: 라벨 "AI Operator" + 보라 그라데이션 + navigate('/ai-operator') 직접 진입 */}
                 <button
-                  onClick={async () => {
+                  onClick={() => {
+                    // ★ 2026-09-15 Harold 지시 — 요금제와 상관없이 허브로 들어간다. 기능 사용 가부는 허브가 서버 판정으로 가르고
+                    //   못 쓰면 공통 안내 창을 연다(옛 요금제 잠금·진입 확인·진단 분기·안내 모달 분기 제거). 구독 만료·정지만 여기서 막는다.
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    if (isAiMessagingLocked) { setPlanUpgradeFeature('AI Operator'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
-                    // ★ D222+ Phase 1: AI Operator access 게이팅 + 진입 (기존 헤더 메뉴 흐름 정합)
-                    try {
-                      const t = localStorage.getItem('token');
-                      const res = await fetch('/api/ai/operator/access', {
-                        headers: { Authorization: `Bearer ${t}` },
-                      });
-                      const data = await res.json();
-                      if (data.success && data.allowed) {
-                        navigate('/ai-operator');
-                      } else if (diagnosisState?.eligible) {
-                        // ★ 2026-08-16 진단 분기(설계서 §5-1 C)
-                        setShowDiagnosisWizard(true);
-                      } else {
-                        setShowWalkthroughModal(true);
-                      }
-                    } catch {
-                      setShowWalkthroughModal(true);
-                    }
+                    navigate('/ai-operator');
                   }}
-                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-violet-700 via-purple-700 to-fuchsia-600 hover:from-violet-600 hover:via-purple-600 hover:to-fuchsia-500 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl hover:shadow-violet-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isAiMessagingLocked ? 'opacity-60' : ''}`}
+                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-violet-700 via-purple-700 to-fuchsia-600 hover:from-violet-600 hover:via-purple-600 hover:to-fuchsia-500 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl hover:shadow-violet-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked ? 'opacity-60' : ''}`}
                 >
                   <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
                   <Sparkles className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
@@ -2965,7 +2917,7 @@ const campaignData = {
                       <Sparkles className="w-5 h-5 text-white" />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isAiMessagingLocked) ? '🔒 ' : ''}AI Operator</div>
+                      <div className="text-xl font-bold text-white mb-1">{isSubscriptionLocked ? '🔒 ' : ''}AI Operator</div>
                       <div className="text-sm text-white/75">자연어 한 줄로 AI가 자동 설계</div>
                     </div>
                   </div>
@@ -2978,7 +2930,7 @@ const campaignData = {
                 <button
                   onClick={() => {
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    if (isCustomerDbLocked) { setPlanUpgradeFeature('직접 타겟 발송'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
+                    if (isCustomerDbLocked) { openPlanFeature('send-target'); return; }
                     setShowDirectTargeting(true);
                   }}
                   className={`group relative overflow-hidden p-5 bg-gradient-to-br from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
@@ -3004,7 +2956,7 @@ const campaignData = {
                   onClick={() => {
                     if (syncBlockActive) { setShowSyncActiveBlock(true); return; }
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    if (isCustomerDbLocked) { setPlanUpgradeFeature('고객 DB 업로드'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
+                    if (isCustomerDbLocked) { openPlanFeature('upload-customers'); return; }
                     setShowFileUpload(true);
                   }}
                   className={`group relative overflow-hidden p-5 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
@@ -3698,7 +3650,7 @@ const campaignData = {
           mmsUploadedImages={mmsUploadedImages} setMmsUploadedImages={setMmsUploadedImages}
           setShowMmsUploadModal={setShowMmsUploadModal}
           isSpamFilterLocked={isSpamFilterLocked}
-          onLockedFeature={(f, p) => { setPlanUpgradeFeature(f); setPlanUpgradeRequired(p); setShowPlanUpgradeModal(true); }}
+          onLockedFeature={openPlanFeature}
           isAiMessagingLocked={isAiMessagingLocked}
           setSpamFilterData={setSpamFilterData} setShowSpamFilter={setShowSpamFilter}
           kakaoTemplates={kakaoTemplates}
@@ -3752,7 +3704,7 @@ const campaignData = {
         initialRecipients={brandInitialRecipients}
         entry={brandEntry}
         isAiTargetLocked={isAiMessagingLocked}
-        onLockedFeature={(f, p) => { setPlanUpgradeFeature(f); setPlanUpgradeRequired(p); setShowPlanUpgradeModal(true); }}
+        onLockedFeature={openPlanFeature}
         sending={brandSending}
         onSend={async (payload: any) => {
           if (!payload?.senderKey) { setToast({ show: true, type: 'error', message: '발신 프로필을 선택해주세요' }); return; }
@@ -4038,7 +3990,7 @@ const campaignData = {
         msgType={targetMsgType}
       />
 
-      <PlanUpgradeModal show={showPlanUpgradeModal} onClose={() => setShowPlanUpgradeModal(false)} featureName={planUpgradeFeature} requiredPlan={planUpgradeRequired} />
+      <PlanFeatureModal featureId={planFeatureId} onClose={() => setPlanFeatureId(null)} />
 
       <LineGroupErrorModal show={showLineGroupError} onClose={() => setShowLineGroupError(false)} />
 
@@ -4090,7 +4042,6 @@ const campaignData = {
 
       {/* ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 안내 모달.
           ENT/BUSINESS 외 등급 사용자가 헤더 "AI Operator" 메뉴 클릭 시 노출. */}
-      <AiOperatorWalkthroughModal forceShow={showWalkthroughModal} onClose={() => setShowWalkthroughModal(false)} />
 
       {/* ★ 2026-08-22 대행발송 안내 — 요금제 가입 여부로만 두 갈래(설계서 §4-8) */}
       <AgencySendIntroModal

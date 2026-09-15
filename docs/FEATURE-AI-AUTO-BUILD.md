@@ -10,7 +10,7 @@
 
 - **무엇**: 재료 4칸(행사 카드[내용+이미지 ≤3장×3] · 몰 상품 ≤12 · 기능 칩 4종 · 채널 DM/이메일) → 버튼 1개 → 완성본이 편집기에 열린다. 옛 `/quick-campaign`(원클릭 캠페인)의 **승격**이며 신규 조립 엔진·크레딧 키·DDL은 0이다.
 - **어디**: AI Operator 허브 타일 "AI 자동제작"(NEW) · 모바일 DM 목록 상단 카드띠 · 이메일 캠페인 상단 카드띠 · 두 편집기의 "재료" 링크 1줄.
-- **누가 보나**: `AI_AUTO_BUILD_COMPANY_IDS`에 있는 회사만(비면 전 회사 미노출 · 옛 화면 그대로). 2026-09-14 기준 디버깅테스트 1회사.
+- **누가 보나**: `AI_AUTO_BUILD_COMPANY_IDS`에 있는 회사만(비면 전 회사 미노출 · 옛 화면 그대로 · `*` = 전 회사). 2026-09-14 테스트계정 1회사(`a0990249…` · 0915 실측 회사명 = 테스트계정) → **2026-09-15 `*` 전체 개방(Harold 지시 · 직원 테스트)**.
 - **상태**: 2026-09-14 T1~T8 배포완료. **§5 실측 5건은 미실행**(Harold가 뒤로 미룸). Codex 적대검토 2R 종결(3R은 Harold 판단).
 
 ---
@@ -58,7 +58,7 @@
 ## §4 요금 · ENV · 응답 계약
 
 - 요금 = 설계서 §5 표 그대로(신규 키 0). 크레딧제 미적용 회사 = 0 표시. 재생성 = 매회 생성비(새 토큰). 더블클릭·응답 유실 재시도 = 무료(같은 토큰·같은 지문).
-- ENV = `AI_AUTO_BUILD_COMPANY_IDS`(회사 UUID 콤마 목록). 반영 = `pm2 restart targetup-backend --update-env`(reload는 env를 다시 안 읽는다).
+- ENV = `AI_AUTO_BUILD_COMPANY_IDS`(회사 UUID 콤마 목록 · `*` = 전 회사 · 비면 미노출). 반영 = `pm2 restart targetup-backend --update-env`(reload는 env를 다시 안 읽는다).
 - 응답·오류 코드 계약 = 설계서 §13 "T4 응답 계약"(400 `MATERIALS_INVALID`·`MATERIAL_THIN`·`SMTP_REQUIRED` · 403 `FEATURE_DISABLED` · 409 `QUOTE_CHANGED`·`IN_FLIGHT` · 402 · 503 `CREDIT_LOOKUP_UNAVAILABLE`·`DB_MIGRATION_PENDING`).
 
 ---
@@ -78,12 +78,13 @@
 - **Codex 적대검토 2R(돈 경로)로 뒤집힌 것 4**: 멱등키에 과금 지문 합류(토큰만이면 결제 토큰으로 재료를 바꿔 무료 통과) · 판독비는 초안 뒤 정산 · 캐시 정산 상태 · 정산 캐시만 견적에서 판독 제외. 1R 수용분 테스트는 구현과 같은 배치에 쓰여 RED를 못 봤다(정직 기록) · 2R 수용분은 RED 8 → GREEN.
 - **설계서 정정(코드 실측)**: 1200×1600은 히어로 후보 아님(0.8 하한) · 쿠폰은 인터랙션 타입이 아니라 "발행 120" 고지 없음 · 고객 카드 `endDate`는 항상 null이라 본문 날짜 파서로 · 이메일 경로는 엔진을 안 타서 같은 자리에 후처리 별도 부착.
 - **2026-09-14(2) 우커머스 접점 합류**: 상품 provider `woocommerce:{mall}`을 몰 상품으로 인정 · Store API 재조회(품절 = 제외 + 사유). 상세 = [우커머스 설계서 §5 W5](2026-09-14-woocommerce-integration-design.md).
+- **2026-09-15 전 회사 개방**(Harold "크레딧 차감만 제대로 체크하고 다 오픈 · 직원 테스트"): `aiAutoBuildEnabled`에 `*` = 전 회사(회사 없는 요청은 여전히 false) · 테스트 +1. 차감 경로 코드 점검 = 판정 → `checkCredit` → 조립 → 초안 → 차감(키 `quick:{company}:{channel}:{token}:{billing16}` 102자 · varchar 150 안) · 같은 재료 재시도 duplicate · 크레딧제 미적용 = 견적 0·원장 `not_applicable` · 조립 엔진 AI 호출 source(`sales-outreach-*`·`campaign-materials-dm-sections`·`dm-event-brief`)는 단가표 미등록 = 자체 차감 0이라 이중 차감 없음 · 판독만 `runInCreditBundle`로 자체 차감을 끄고 초안 뒤 `quick-read:` 키로 정산. 요금제 노출은 [D90](../status/DECISIONS.md)(AI Operator 공통 안내 창)을 따른다.
 
 ---
 
 ## §7 남은 것 · 범위 밖(착수 판단 = Harold)
 
-- **§5 실측 5건**(다음 세션 첫 일 후보) → 통과 뒤 ENV 확대 여부.
+- **§5 실측 5건** — ★0915 전 회사 개방 뒤 직원 테스트로 대신한다. 차감 확인 조회 = `ai_credit_transactions`에서 `idempotency_key LIKE 'quick:%'`.
 - Codex 3R(2R 지적은 내 테스트로만 닫음 · 라운드 상한).
 - 범위 밖 기록: `cafe24-client.ts getCafe24Integration`이 status를 안 걸러 `token_expired` 회사에도 카페24 탭이 뜬다(호출부 `status='active'` 판정으로 막았음) · `DmSendAndTrackModal` "(3크레딧)" 토스트 표기 · 입구 8개 정리 2차 · 몰 상품 이미지 외부 URL 그대로(사본 복사 0) · 카드 링크 0이면 CTA URL 빈 값 가능(v0 동일).
 - 요금 인상·대행 델타 = 계측(생성→발행률) 뒤 Harold 결정.

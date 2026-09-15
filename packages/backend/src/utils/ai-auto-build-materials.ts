@@ -42,11 +42,15 @@ const BRAND_MAX = 60;
 const PRODUCT_NAME_MAX = 120;
 const URL_MAX = 500;
 
-/** ENV 회사 목록 — 비면 **미노출**(false). 카드띠 노출 + materials v1 분기 3곳(DM 생성·이메일 생성·견적)이 같은 함수를 쓴다(§6-7). */
+/**
+ * ENV 회사 목록 — 비면 **미노출**(false). 카드띠 노출 + materials v1 분기 3곳(DM 생성·이메일 생성·견적)이 같은 함수를 쓴다(§6-7).
+ * ★ 2026-09-15 `*` = 전 회사(Harold 지시 · 직원 테스트용 전체 개방). 회사를 일일이 적으면 새로 가입한 회사가 빠진다.
+ *   되돌리기 = ENV 를 회사 목록이나 빈 값으로 바꾸고 pm2 restart --update-env.
+ */
 export function aiAutoBuildEnabled(companyId: string | null | undefined, env: string | undefined = process.env.AI_AUTO_BUILD_COMPANY_IDS): boolean {
   const list = String(env || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (list.length === 0) return false;
-  return !!companyId && list.includes(String(companyId));
+  if (list.length === 0 || !companyId) return false;
+  return list.includes('*') || list.includes(String(companyId));
 }
 
 /** 요청이 v1 재료인가(version === 1). 아니면 현행 경로(옛 요청) 그대로. */
