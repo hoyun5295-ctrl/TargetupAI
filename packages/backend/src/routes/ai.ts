@@ -1091,7 +1091,7 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
 
 // ============================================================
 // ★ D178 (2026-05-19) — AI Operator 진입 가능 여부 (Harold 박힘 검증 단계 hoyun 박음)
-//   Frontend가 메뉴 클릭 시 본 endpoint 박음 → allowed=true 면 /ai-operator 진입, false 면 BetaFeatureModal 박음
+//   ★ 2026-09-15 허브 진입은 요금제와 무관. 화면(허브 카드·[생성]·기능 화면 입구 PlanGate)이 이 값으로 기능 사용 가부를 가르고, false면 요금제 공통 안내 창을 연다
 // ============================================================
 router.get('/operator/access', async (req: Request, res: Response) => {
   try {
@@ -1100,7 +1100,7 @@ router.get('/operator/access', async (req: Request, res: Response) => {
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.json({ success: true, allowed: false });
     const allowed = isAiOperatorAllowed(planCtx, req.user);
-    // ★ D209+ (Harold 명시 2026-05-23): 응답 확장 — frontend BetaFeatureModal 정확 안내 정합
+    // ★ D209+ (Harold 명시 2026-05-23): 응답 확장 — planCode·legacyGrandfathered 동봉
     return res.json({
       success: true,
       allowed,

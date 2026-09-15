@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -45,7 +45,8 @@ import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
 import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
 import PlanFeatureModal from '../components/PlanFeatureModal';
-import { planFeatureIdForPath, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
+import { findPlanFeatureIntro, planFeatureIdForPath, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
+import { fetchAiOperatorAccess } from '../utils/ai-operator-access';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
@@ -305,15 +306,25 @@ export default function AiOperatorPage() {
   //   못 쓰는 회사가 카드나 [생성]을 누르면 이동·호출 대신 공통 안내 창을 연다. 판정 전·조회 실패는 잠그지 않는다(서버가 다시 막는다).
   const [planLocked, setPlanLocked] = useState(false);
   const [planFeatureId, setPlanFeatureId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
-    (async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/ai/operator/access', { headers: { Authorization: `Bearer ${token}` } });
-        const d = await res.json();
-        if (d?.success) setPlanLocked(d.allowed === false);
-      } catch { /* 조회 실패 = 잠그지 않음 */ }
-    })();
+    let alive = true;
+    fetchAiOperatorAccess().then((allowed) => {
+      if (!alive) return;
+      const locked = allowed === false;
+      setPlanLocked(locked);
+      // 기능 화면 주소로 직접 들어왔다가 입구(PlanGate)에서 돌아온 경우 = 그 기능의 안내를 바로 연다
+      const intro = searchParams.get('intro');
+      if (intro) {
+        if (locked && findPlanFeatureIntro(intro)) setPlanFeatureId(intro);
+        const next = new URLSearchParams(searchParams);
+        next.delete('intro');
+        setSearchParams(next, { replace: true });
+      }
+    });
+    return () => { alive = false; };
+    // 진입 1회만 판정한다(쿼리 정리로 searchParams가 바뀌어도 다시 묻지 않는다)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // ★ D174 (2026-05-19): PerformancePage가 sessionStorage에 저장한 prefill objective 자동 로드

@@ -18,8 +18,6 @@ interface DashboardHeaderProps {
   onResults: () => void;
   onAnalysis: () => void;
   onLogout: () => void;
-  // D53: 게이팅 콜백 — 잠긴 기능 클릭 시 업그레이드 모달
-  onFeatureLocked?: (featureName: string, requiredPlan: string) => void;
   customerDbEnabled?: boolean;
   // ★ D220+ Task 8 (2026-05-27): ai_messaging 게이팅 — BASIC+ 영역 (세그먼트 메뉴 등)
   aiMessagingEnabled?: boolean;
@@ -34,10 +32,6 @@ interface DashboardHeaderProps {
   //   판정 원천 = 서버 my-plan의 agency_send_allowed(canUseAgencySend). 프론트가 다시 조합하지 않는다.
   agencySendAllowed?: boolean;
   onAgencySendBlocked?: () => void;
-  // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 메뉴.
-  //   클릭 시 Dashboard.tsx에서 isBetaAccessAllowed 게이팅:
-  //   ENTERPRISE/BUSINESS = /ai-operator 진입 / 그 외 = BetaFeatureModal 표시.
-  onAiOperatorClick?: () => void;
 }
 
 // ★ D222+ Phase 1 (2026-05-27): AI Operator 메뉴 제거. 2026-07-05 매뉴얼 메뉴 → 푸터 이동(Dashboard.tsx).
@@ -77,7 +71,6 @@ export default function DashboardHeader({
   onResults,
   onAnalysis,
   onLogout,
-  onFeatureLocked,
   customerDbEnabled,
   aiMessagingEnabled,
   isSubscriptionLocked,
@@ -85,7 +78,6 @@ export default function DashboardHeader({
   advancedAccess,
   agencySendAllowed,
   onAgencySendBlocked,
-  onAiOperatorClick,
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -109,7 +101,6 @@ export default function DashboardHeader({
 
   const menuItems: MenuItem[] = [
     // ★ D222+ Phase 1 (2026-05-27): AI Operator (BETA) 메뉴 영구 제거 — Dashboard 우측 카드 "AI Operator" 라벨 통합 진입.
-    //   onAiOperatorClick prop = 호환성 유지 (Dashboard 우측 카드 클릭 callback). 헤더 메뉴 영역 = 제거.
     // ★ 2026-07-05 (Harold 명시): 헤더 '매뉴얼' 메뉴 제거 → 하단 푸터 링크로 복귀 (Dashboard.tsx 푸터). 헤더 간소화.
     // ★ 2026-08-22 (Harold 명시): 'AI Operator 소개' 메뉴 제거 → 대시보드 푸터로 이동(매뉴얼과 같은 처리).
     //   로그인 전 영업용이라 로그인 화면 2곳에 이미 걸려 있다. 매일 여는 헤더 자리는 업무 메뉴에 준다.

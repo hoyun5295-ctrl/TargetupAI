@@ -283,7 +283,7 @@ export function canUseAgencySend(ctx: PlanContext | null): boolean {
  *
  * 정책 (D162-5 Harold님 확정):
  *   - ENTERPRISE / BUSINESS = 베타 기능 실제 진입 허용
- *   - 그 외 (TRIAL/FREE/STARTER/BASIC/PRO) = BetaFeatureModal 표시
+ *   - 그 외 (TRIAL/FREE/STARTER/BASIC/PRO) = 베타 기능 미개방
  *
  * 안정성 검증 후 단계적 확장 예정 (PRO → BASIC).
  *
@@ -304,7 +304,7 @@ export function isBetaAccessAllowed(ctx: PlanContext): boolean {
  *   2. ENV `AI_OPERATOR_ALLOWED_USERS` 설정 + 본 list 사용자 → true (베타/디버깅 화이트리스트)
  *   3. 전 유료 플랜(FREE 아님) → true (종량제 전환 Phase 3 — 기존 ENTERPRISE 전용 폐지)
  *   4. ai_operator_trial_until > NOW() → true (FREE라도 1-click 부여한 30일 무료체험)
- *   그 외(FREE + 체험 없음) → false (BetaFeatureModal 표시)
+ *   그 외(FREE + 체험 없음) → false (★2026-09-15 허브는 열리고, 기능을 누르거나 기능 화면으로 들어오면 요금제 공통 안내 창)
  *
  *   ※ 기존 PRO 무료체험(plan_code='TRIAL' + trial_expires_at) = 본 함수 무관.
  *     TRIAL 플랜은 PRO 기능 전체 무료 + AI 오퍼레이션은 별도 부여 흐름.

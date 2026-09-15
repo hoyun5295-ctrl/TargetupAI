@@ -23,6 +23,7 @@ import PaymentResultPage from './pages/PaymentResultPage';
 import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정지 페이지 (인증 X)
 // ★ 2026-08-16 AI 마케팅 진단 공개 페이지(퍼널 B — 영업 링크 착지) — 공개 동선이라 정적 import(0718 사고 전례)
 import DiagnosisPage from './pages/DiagnosisPage';
+import PlanGate from './components/PlanGate'; // ★ 2026-09-15 AI Operator 기능 화면 입구(못 쓰는 회사 = 허브 요금제 안내로)
 
 const AdminDashboard = lazyPage(() => import('./pages/AdminDashboard'));
 const AiTrainingDataPage = lazyPage(() => import('./pages/AiTrainingDataPage'));
@@ -450,7 +451,7 @@ function App() {
           path="/cdp-settings"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <CdpSettingsPage />
+              <PlanGate featureId="connect-shop"><CdpSettingsPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -460,7 +461,7 @@ function App() {
           path="/performance"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <PerformancePage />
+              <PlanGate featureId="performance"><PerformancePage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -480,7 +481,7 @@ function App() {
           path="/inapp-messages"
           element={
             <PrivateRoute allowedTypes={['company_admin']}>
-              <InAppMessagesPage />
+              <PlanGate featureId="inapp-message"><InAppMessagesPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -490,7 +491,7 @@ function App() {
           path="/continuous-operator"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <ContinuousOperatorPage />
+              <PlanGate featureId="auto-marketing"><ContinuousOperatorPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -499,7 +500,7 @@ function App() {
           path="/marketing-planner"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <MarketingPlannerPage />
+              <PlanGate featureId="marketing-planner"><MarketingPlannerPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -508,7 +509,7 @@ function App() {
           path="/marketing-planner/brief/:month"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <PlannerBriefPage />
+              <PlanGate featureId="marketing-planner"><PlannerBriefPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -526,7 +527,7 @@ function App() {
           path="/image-studio"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <ImageStudioPage />
+              <PlanGate featureId="image-studio"><ImageStudioPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -546,7 +547,7 @@ function App() {
           path="/email-campaigns"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <EmailCampaignsPage />
+              <PlanGate featureId="email-campaign"><EmailCampaignsPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -556,7 +557,7 @@ function App() {
           path="/ai-memory"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <AiMemoryPage />
+              <PlanGate featureId="ai-memory"><AiMemoryPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -604,7 +605,7 @@ function App() {
           path="/ai-journeys"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <JourneysPage />
+              <PlanGate featureId="journeys"><JourneysPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -613,7 +614,7 @@ function App() {
           path="/ai-journeys/:id"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <JourneyDetailPage />
+              <PlanGate featureId="journeys"><JourneyDetailPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -622,7 +623,7 @@ function App() {
           path="/ai-journeys/:id/stats"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <JourneyStatsPage />
+              <PlanGate featureId="journeys"><JourneyStatsPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -631,7 +632,7 @@ function App() {
           path="/predictive"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <PredictiveDashboardPage />
+              <PlanGate featureId="predictive"><PredictiveDashboardPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -651,7 +652,7 @@ function App() {
           path="/quick-campaign"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <QuickCampaignPage />
+              <PlanGate featureId="quick-campaign"><QuickCampaignPage /></PlanGate>
             </PrivateRoute>
           }
         />
@@ -689,7 +690,7 @@ function App() {
           path="/dm-builder"
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
-              <DmBuilderPage />
+              <PlanGate featureId="mobile-dm"><DmBuilderPage /></PlanGate>
             </PrivateRoute>
           }
         />

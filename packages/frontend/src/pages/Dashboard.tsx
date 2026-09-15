@@ -2371,12 +2371,6 @@ const campaignData = {
         onAgencySendBlocked={() => setShowAgencyIntro(true)}
         // ★ D220+ Task 8 (2026-05-27): 세그먼트 메뉴 잠금 게이팅 (ai_messaging — BASIC+)
         aiMessagingEnabled={planInfo?.ai_messaging_enabled}
-        onAiOperatorClick={() => {
-          // ★ 2026-09-15 Harold 지시 — AI Operator는 요금제와 상관없이 누구나 들어간다. 기능을 쓸 수 있는지는 허브 안에서
-          //   서버 판정으로 가르고, 못 쓰면 공통 안내 창을 연다(옛 진입 확인·진단 분기·안내 모달 분기 제거).
-          if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-          navigate('/ai-operator');
-        }}
         onDirectSend={async () => {
           setShowDirectSend(true);
           // ★ D162-4 (2026-05-15): 직접발송 모달 진입 시 채널 강제 SMS reset.

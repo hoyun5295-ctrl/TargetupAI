@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { ArrowRight, BarChart3, Edit2, LayoutGrid, MessageSquareText, Play, Sparkles, X } from 'lucide-react';
 // ★ D210+ (Harold 명시 2026-05-23): STEP 6 메뉴 매트릭스 = AiOperatorPage와 단일 source 공통 사용.
 import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
+import { PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
 
 interface WalkthroughStep {
   icon: typeof Sparkles;
@@ -58,15 +59,16 @@ const STEPS: WalkthroughStep[] = [
     description: '어떤 고객이 받았고, 누가 열어봤고, 누가 실제로 구매했는지 한 화면에서 확인하세요.\n발송이 쌓일수록 AI가 우리 회사 고객 패턴을 더 정확하게 학습합니다.',
     highlight: '시간대·요일·등급별 클릭률·구매율까지 한눈에',
   },
-  // ★ D210+ (Harold 명시 2026-05-23): STEP 6 = AI Operator 전체 메뉴 매트릭스 + 기존 고객사 특별 혜택 안내 통합.
+  // ★ D210+ (Harold 명시 2026-05-23): STEP 6 = AI Operator 전체 메뉴 매트릭스 + 하단 안내 박스 통합(★2026-09-15 박스 = 요금제 안내).
   //   본문 영역 = SUB_MODULE_CARDS 10건 4열 그리드 (lg:grid-cols-4 × 3행) + 하단 안내 박스.
   //   사용자 본질 = 옛 영역 진입 시 어떤 메뉴 있는지 한 눈에 확인.
   {
     icon: LayoutGrid,
     gradient: 'from-amber-400 to-fuchsia-500',
     title: '6. AI Operator 전체 메뉴',
-    description: '자연어 한 줄 외에도 쓸 수 있는 AI 기능 모음입니다.\n원하는 메뉴를 클릭하면 바로 해당 페이지로 이동돼요.',
-    highlight: '기존 고객사는 PRO 요금제 사용 시 특별 혜택 받으실 수 있어요.\n자세한 내용은 운영팀에 문의해주세요.',
+    description: '자연어 한 줄 외에도 쓸 수 있는 AI 기능 모음입니다.\n메뉴를 누르면 해당 기능으로 이동하고, 요금제가 필요한 기능은 먼저 어떤 기능인지 보여드려요.',
+    // ★ 2026-09-15 옛 "기존 고객사 PRO 요금제 특별 혜택" 문구 교체 — 허브가 요금제 미가입에도 열리면서 모두가 이 장을 본다
+    highlight: `모든 메뉴는 요금제 없이도 둘러볼 수 있어요.\n기능은 ${PLAN_FEATURE_MIN_PLAN} 요금제부터 쓸 수 있고, 매달 들어오는 크레딧 안에서 바로 이용합니다.`,
   },
 ];
 
@@ -180,7 +182,7 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
                 <div className="rounded-xl p-3 bg-gradient-to-r from-amber-500/15 to-fuchsia-500/15 border border-amber-400/30 text-left">
                   <p className="text-xs font-semibold text-amber-200 mb-1 flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5" />
-                    기존 고객사 특별 혜택
+                    요금제 안내
                   </p>
                   <p className="text-[11px] text-white/70 leading-relaxed whitespace-pre-line">{step.highlight}</p>
                 </div>
