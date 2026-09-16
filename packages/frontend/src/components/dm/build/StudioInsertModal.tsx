@@ -101,8 +101,8 @@ export default function StudioInsertModal({
     >
       {made ? (
         <div className="space-y-3">
-          <img src={made.url} alt="" className="w-full max-h-[52vh] object-contain rounded-xl border border-white/10 bg-black/30" />
-          <button type="button" onClick={() => setMade(null)} className="text-[12px] text-white/50 hover:text-white">다시 만들기</button>
+          <img src={made.url} alt="" className="w-full max-h-[52vh] object-contain rounded-xl border border-slate-200 bg-slate-100" />
+          <button type="button" onClick={() => setMade(null)} className="text-[12px] text-slate-500 hover:text-slate-800">다시 만들기</button>
         </div>
       ) : (
         <div className="space-y-3">
@@ -112,29 +112,29 @@ export default function StudioInsertModal({
                 key={t.id}
                 type="button"
                 onClick={() => setPicked(t.id)}
-                className={`rounded-xl overflow-hidden border text-left transition ${picked === t.id ? 'border-violet-400 ring-2 ring-violet-500/35' : 'border-white/10 hover:border-white/25'}`}
+                className={`rounded-xl overflow-hidden border text-left transition ${picked === t.id ? 'border-violet-500 ring-2 ring-violet-200' : 'border-slate-200 hover:border-slate-300'}`}
               >
                 {t.exampleUrl
                   ? <img src={t.exampleUrl} alt={t.name} loading="lazy" className="w-full aspect-[3/4] object-cover" />
-                  : <div className="w-full aspect-[3/4] bg-white/5" />}
+                  : <div className="w-full aspect-[3/4] bg-slate-50" />}
                 <div className="px-2 py-1.5 text-[11px] font-semibold truncate">{t.name}</div>
               </button>
             ))}
-            {templates.length === 0 && <div className="col-span-full text-[12px] text-white/40 py-6 text-center">템플릿을 불러오는 중이에요</div>}
+            {templates.length === 0 && <div className="col-span-full text-[12px] text-slate-400 py-6 text-center">템플릿을 불러오는 중이에요</div>}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
-              <span className="block text-[11px] text-white/50 mb-1">제목</span>
+              <span className="block text-[11px] text-slate-500 mb-1">제목</span>
               <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="가을 신상 20종 입고"
-                className="w-full px-3 py-2 rounded-[10px] bg-slate-950/60 border border-white/15 text-[13px] outline-none" />
+                className="w-full px-3 py-2 rounded-[10px] bg-white border border-slate-300 text-[13px] text-slate-900 placeholder-slate-400 outline-none" />
             </label>
             <label className="block">
-              <span className="block text-[11px] text-white/50 mb-1">부제</span>
+              <span className="block text-[11px] text-slate-500 mb-1">부제</span>
               <input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="이번 주말까지 무료 배송"
-                className="w-full px-3 py-2 rounded-[10px] bg-slate-950/60 border border-white/15 text-[13px] outline-none" />
+                className="w-full px-3 py-2 rounded-[10px] bg-white border border-slate-300 text-[13px] text-slate-900 placeholder-slate-400 outline-none" />
             </label>
           </div>
-          <p className="text-[11px] text-white/35 leading-relaxed">
+          <p className="text-[11px] text-slate-400 leading-relaxed">
             넣은 문구만 그림에 새겨집니다. 가격·할인율은 새기지 않아요. 만든 그림은 라이브러리에도 보관됩니다.
           </p>
         </div>

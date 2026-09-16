@@ -4,7 +4,8 @@
  * 블록을 누르면 "그 블록에 필요한 것만" 묻는다. 입력 폼은 **기존 섹션 편집기**(SectionPropsEditor)를 그대로 쓴다.
  * 여기서 폼을 다시 만들지 않는다 — 만들면 편집기와 두 벌이 되어 한쪽만 고쳐진다.
  *
- * 사진 자리가 있는 블록(헤드라인·설명)은 위에 **이미지 스튜디오에서 제작 후 삽입** 줄이 붙는다.
+ * ⚠ 색: ModalBase 본문은 **흰 표면(#fff)**이다. 다크 전제 색(text-white/·bg-white/[…]·slate-950)을 쓰면 글씨가 묻힌다.
+ *    이 규약은 `dm-build-light-surface.test.ts` 가 기계로 지킨다.
  */
 import { useState } from 'react';
 import ModalBase, { ModalButton } from '../modals/ModalBase';
@@ -35,17 +36,17 @@ export default function BlockEditModal({
         subtitle={def?.desc}
         size="md"
         badge={ready
-          ? <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-400/30">내용 채움</span>
-          : <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-400/30">{def?.need} 필요</span>}
+          ? <span className="text-[11px] font-bold px-2 py-0.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-700">내용 채움</span>
+          : <span className="text-[11px] font-bold px-2 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700">{def?.need} 필요</span>}
         footer={<ModalButton variant="primary" onClick={onClose}>저장하고 닫기</ModalButton>}
       >
         {def?.photo && (
-          <div className="mb-3 rounded-xl border border-violet-400/35 bg-violet-500/10 p-3">
-            <div className="text-[11px] text-white/55 mb-2">사진이 없으면 여기서 바로 만들 수 있어요</div>
+          <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+            <div className="text-[11.5px] text-slate-600 mb-2">사진이 없으면 여기서 바로 만들 수 있어요</div>
             <button
               type="button"
               onClick={() => setStudioOpen(true)}
-              className="w-full h-10 rounded-[10px] border border-violet-400/45 bg-gradient-to-r from-violet-500/25 to-fuchsia-500/15 text-[12.5px] font-bold hover:from-violet-500/35 transition-colors"
+              className="w-full h-10 rounded-[10px] border border-violet-300 bg-violet-100 text-violet-700 text-[12.5px] font-bold hover:bg-violet-200 transition-colors"
             >
               ✨ 이미지 스튜디오에서 제작 후 삽입
             </button>

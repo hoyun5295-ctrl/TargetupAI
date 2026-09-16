@@ -83,22 +83,22 @@ export default function CatalogPageModal({
       >
         <div className="space-y-3">
           {Array.from({ length: def.photos }, (_, i) => (
-            <div key={i} className="rounded-xl border border-white/12 bg-white/[0.03] p-3">
-              <div className="text-[11px] text-white/50 mb-2">사진 {def.photos > 1 ? i + 1 : ''}</div>
+            <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-[11px] text-slate-500 mb-2">사진 {def.photos > 1 ? i + 1 : ''}</div>
               {photos[i] ? (
                 <div className="flex items-center gap-3">
-                  <img src={photos[i]} alt="" className="w-16 h-20 object-cover rounded-lg border border-white/10" />
-                  <button type="button" onClick={() => setPhotoAt(i, '')} className="h-8 px-3 rounded-lg border border-white/14 bg-white/5 text-[12px] font-bold">바꾸기</button>
+                  <img src={photos[i]} alt="" className="w-16 h-20 object-cover rounded-lg border border-slate-200" />
+                  <button type="button" onClick={() => setPhotoAt(i, '')} className="h-8 px-3 rounded-lg border border-slate-300 bg-slate-50 text-[12px] font-bold">바꾸기</button>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
                   <label className="block">
-                    <span className="block text-center text-[12px] text-white/45 border border-dashed border-white/20 rounded-[10px] py-4 cursor-pointer hover:bg-white/[0.04]">
+                    <span className="block text-center text-[12px] text-slate-500 border border-dashed border-slate-300 rounded-[10px] py-4 cursor-pointer hover:bg-slate-100">
                       사진 고르기
                     </span>
                     <input type="file" accept="image/*" className="hidden" onChange={(e) => { void pickFile(i, e.target.files?.[0] || null); e.currentTarget.value = ''; }} />
                   </label>
-                  <button type="button" onClick={() => setStudioAt(i)} className="h-9 rounded-[10px] border border-violet-400/45 bg-violet-500/12 text-[12px] font-bold">
+                  <button type="button" onClick={() => setStudioAt(i)} className="h-9 rounded-[10px] border border-violet-300 bg-violet-100 text-[12px] font-bold">
                     ✨ 이미지 스튜디오에서 제작 후 삽입
                   </button>
                 </div>
@@ -108,53 +108,53 @@ export default function CatalogPageModal({
 
           {def.texts.map((t) => (
             <label key={t.k} className="block">
-              <span className="block text-[11px] text-white/50 mb-1">{t.l}</span>
+              <span className="block text-[11px] text-slate-500 mb-1">{t.l}</span>
               <input
                 value={texts[t.k] || ''}
                 onChange={(e) => setTexts((p) => ({ ...p, [t.k]: e.target.value }))}
                 placeholder={t.ph}
-                className="w-full px-3 py-2 rounded-[10px] bg-slate-950/60 border border-white/15 text-[13px] outline-none"
+                className="w-full px-3 py-2 rounded-[10px] bg-white border border-slate-300 text-[13px] text-slate-900 placeholder-slate-400 outline-none"
               />
             </label>
           ))}
 
-          <div className="rounded-xl border border-white/12 bg-white/[0.03] p-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-[11px] text-white/55">상품 정보 (쪽 아래 칩으로 붙어요)</span>
+              <span className="text-[11px] text-slate-600">상품 정보 (쪽 아래 칩으로 붙어요)</span>
               {chips.length < 2 && (
                 <button
                   type="button"
                   onClick={() => setChips((p2) => [...p2, { label: '', price: '', url: '' }])}
-                  className="ml-auto h-7 px-2.5 rounded-lg border border-white/14 bg-white/5 text-[11.5px] font-bold"
+                  className="ml-auto h-7 px-2.5 rounded-lg border border-slate-300 bg-slate-50 text-[11.5px] font-bold"
                 >
                   + 상품 넣기
                 </button>
               )}
             </div>
-            {chips.length === 0 && <div className="text-[11px] text-white/35">넣지 않아도 됩니다. 넣으면 누를 수 있는 알약 버튼이 쪽 아래에 붙어요.</div>}
+            {chips.length === 0 && <div className="text-[11px] text-slate-400">넣지 않아도 됩니다. 넣으면 누를 수 있는 알약 버튼이 쪽 아래에 붙어요.</div>}
             {chips.map((c, i) => (
               <div key={i} className="grid grid-cols-[1fr_88px_28px] gap-1.5 mb-1.5">
                 <input
                   value={c.label} placeholder="상품명"
                   onChange={(e) => setChips((p2) => p2.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-                  className="px-2.5 py-2 rounded-[9px] bg-slate-950/60 border border-white/15 text-[12.5px] outline-none"
+                  className="px-2.5 py-2 rounded-[9px] bg-white border border-slate-300 text-[12.5px] text-slate-900 placeholder-slate-400 outline-none"
                 />
                 <input
                   value={c.price} placeholder="가격"
                   onChange={(e) => setChips((p2) => p2.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))}
-                  className="px-2.5 py-2 rounded-[9px] bg-slate-950/60 border border-white/15 text-[12.5px] outline-none"
+                  className="px-2.5 py-2 rounded-[9px] bg-white border border-slate-300 text-[12.5px] text-slate-900 placeholder-slate-400 outline-none"
                 />
-                <button type="button" onClick={() => setChips((p2) => p2.filter((_, j) => j !== i))} className="rounded-[9px] border border-rose-400/30 bg-rose-500/10 text-rose-200 text-[12px]" aria-label="빼기">✕</button>
+                <button type="button" onClick={() => setChips((p2) => p2.filter((_, j) => j !== i))} className="rounded-[9px] border border-rose-200 bg-rose-50 text-rose-600 text-[12px]" aria-label="빼기">✕</button>
                 <input
                   value={c.url} placeholder="상품 주소 (선택)"
                   onChange={(e) => setChips((p2) => p2.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))}
-                  className="col-span-3 px-2.5 py-2 rounded-[9px] bg-slate-950/60 border border-white/15 text-[12.5px] outline-none"
+                  className="col-span-3 px-2.5 py-2 rounded-[9px] bg-white border border-slate-300 text-[12.5px] text-slate-900 placeholder-slate-400 outline-none"
                 />
               </div>
             ))}
           </div>
 
-          <p className="text-[11px] text-white/35 leading-relaxed">
+          <p className="text-[11px] text-slate-400 leading-relaxed">
             가격·할인율은 쪽 이미지에 새기지 않아요. 값이 바뀌면 이미지가 거짓말을 하기 때문입니다. 칩은 글자라 나중에 고칠 수 있어요.
           </p>
         </div>
