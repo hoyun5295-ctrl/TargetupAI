@@ -853,7 +853,7 @@ export default function DmBuilderPage() {
           directIcon={<span className="text-[15px]">🧱</span>}
           directLabel="블록으로 만들기"
           directSub="고르면 필요한 것만 물어봐요"
-          directDesc="헤드라인·상품·쿠폰·추첨 같은 블록을 고르면 그 블록에 필요한 것만 물어봐요. 저장하면 바로 쌓입니다."
+          directDesc="헤드라인·상품·쿠폰 같은 블록을 골라 쌓으면 DM이 됩니다."
         />
         {/* 자연어 한 줄 입력 + 블록으로 만들기 + 완성 이미지 (★ 2026-09-16 블록 조립 전환) */}
         <div style={{
