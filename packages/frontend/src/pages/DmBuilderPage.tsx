@@ -9,7 +9,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
-import { DmMiniCover, QuickStartThumbnail } from '../components/dm/DmThumbnails';
+import { DmMiniCover } from '../components/dm/DmThumbnails';
 import DmBlockBuilder from '../components/dm/build/DmBlockBuilder';
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
@@ -97,21 +97,6 @@ type DmListItem = {
   updated_at?: string;
 };
 
-// 빠른 시작 12 시나리오 — key = QuickStartThumbnail 시나리오 일러스트 매핑 (label은 backend scenario 전달용)
-const QUICK_STARTS: Array<{ key: 'cart' | 'sale' | 'draw' | 'store' | 'survey' | 'welcome' | 'roulette' | 'lookbook' | 'reviews' | 'flashsale' | 'poll' | 'vip'; icon: string; label: string; hint: string; gradient: string; border: string; hover: string }> = [
-  { key: 'cart',     icon: '🛍️', label: '신상품 출시', hint: '상품 슬라이드 + 구매 유도',  gradient: 'linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(168, 85, 247, 0.15))', border: 'rgba(168, 85, 247, 0.4)',  hover: 'rgba(168, 85, 247, 0.30)' },
-  { key: 'sale',     icon: '🏷️', label: '시즌 세일',  hint: '카운트다운 + 쿠폰 + CTA',     gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.25), rgba(239, 68, 68, 0.15))',  border: 'rgba(244, 63, 94, 0.4)',  hover: 'rgba(244, 63, 94, 0.30)' },
-  { key: 'draw',     icon: '🎁', label: '추첨 이벤트', hint: '응모 form + 자동 추첨',       gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(249, 115, 22, 0.15))', border: 'rgba(245, 158, 11, 0.4)', hover: 'rgba(245, 158, 11, 0.30)' },
-  { key: 'store',    icon: '🗺️', label: '매장 안내',  hint: '지도 + 매장 위치',            gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(20, 184, 166, 0.15))', border: 'rgba(16, 185, 129, 0.4)', hover: 'rgba(16, 185, 129, 0.30)' },
-  { key: 'survey',   icon: '📝', label: '설문 + 보상', hint: '설문 + 즉시 쿠폰 발급',       gradient: 'linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(6, 182, 212, 0.15))',  border: 'rgba(14, 165, 233, 0.4)', hover: 'rgba(14, 165, 233, 0.30)' },
-  { key: 'welcome',  icon: '✉️', label: '신규 환영',  hint: '이메일 수집 + 쿠폰',          gradient: 'linear-gradient(135deg, rgba(217, 70, 239, 0.25), rgba(236, 72, 153, 0.15))', border: 'rgba(217, 70, 239, 0.4)', hover: 'rgba(217, 70, 239, 0.30)' },
-  { key: 'roulette', icon: '🎡', label: '룰렛 이벤트', hint: '8개 칸 회전 + 자동 당첨',     gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.15))',  border: 'rgba(99, 102, 241, 0.4)', hover: 'rgba(99, 102, 241, 0.30)' },
-  { key: 'lookbook',  icon: '🖼️', label: '갤러리 룩북',   hint: '화보 갤러리 + 상품',     gradient: 'linear-gradient(135deg, rgba(236, 72, 153, 0.25), rgba(168, 85, 247, 0.15))', border: 'rgba(236, 72, 153, 0.4)', hover: 'rgba(236, 72, 153, 0.30)' },
-  { key: 'reviews',   icon: '⭐', label: '리뷰 모음',     hint: '고객 후기 + 전환',       gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(234, 179, 8, 0.15))',  border: 'rgba(245, 158, 11, 0.4)', hover: 'rgba(245, 158, 11, 0.30)' },
-  { key: 'flashsale', icon: '⏳', label: '선착순 한정특가', hint: '잔여 수량 + 카운트다운',  gradient: 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(249, 115, 22, 0.15))',  border: 'rgba(239, 68, 68, 0.4)',  hover: 'rgba(239, 68, 68, 0.30)' },
-  { key: 'poll',      icon: '📊', label: '실시간 투표',   hint: '투표 + 실시간 결과',      gradient: 'linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(59, 130, 246, 0.15))',  border: 'rgba(6, 182, 212, 0.4)',  hover: 'rgba(6, 182, 212, 0.30)' },
-  { key: 'vip',       icon: '👑', label: 'VIP 초대',     hint: '프로모션 코드 + 고급 톤',  gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(129, 140, 248, 0.15))', border: 'rgba(99, 102, 241, 0.4)', hover: 'rgba(99, 102, 241, 0.30)' },
-];
 
 export default function DmBuilderPage() {
   const navigate = useNavigate();
@@ -186,8 +171,6 @@ export default function DmBuilderPage() {
   const [pendingGen, setPendingGen] = useState<{ prompt?: string; scenario?: string; desc: string } | null>(null);
   // ★ 2026-08-13 원스텝 — 질문에 답하면 그 답이 마스터프롬프트가 되어 생성으로 이어진다.
   const [oneStepOpen, setOneStepOpen] = useState(false);
-  // ★ 2026-07-02(5) Harold 지시 — 빠른 시작 12 시나리오는 모달로 분리 (프롬프트 입력이 묻히지 않게)
-  const [quickStartOpen, setQuickStartOpen] = useState(false);
 
   // ★ D216+ 키보드 단축키 활성 (편집 모드 한정)
   useDmKeyboardShortcuts({ enabled: mode === 'edit' });
@@ -275,7 +258,7 @@ export default function DmBuilderPage() {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (generating) return;
     if (!opts.prompt && !opts.scenario) {
-      setToast({ type: 'error', message: '만들 내용을 한 줄로 입력하거나 빠른 시작을 골라주세요.' });
+      setToast({ type: 'error', message: '만들 내용을 한 줄로 적어주세요.' });
       return;
     }
     setGenerating(true);
@@ -650,6 +633,7 @@ export default function DmBuilderPage() {
     return (
       <DmBlockBuilder
         onBack={() => setMode('list')}
+        onBlankCanvas={() => setMode('edit')}
         onDone={() => { void save({ silent: true }); setMode('edit'); }}
       />
     );
@@ -861,7 +845,7 @@ export default function DmBuilderPage() {
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 32px' }}>
         {/* ★ 2026-09-14 T6 카드띠 [AI 자동제작 | 직접 제작] — 신규 ENV 미개방 회사는 그리지 않는다(설계서 §3-1 · §4-1) */}
         <AiBuildEntryStrip channel="dm" enabled={autoBuild === true} disabled={generating} onDirect={handleCreateNew} directDesc="빈 캔버스에서 섹션을 직접 추가해요. 템플릿·완성 슬라이드·라이브러리도 아래에서 고를 수 있어요." />
-        {/* ★ D216+ Journey 동급 디자인 — 자연어 입력 + 빠른 시작 7 카드 */}
+        {/* 자연어 한 줄 입력 + 블록으로 만들기 + 완성 이미지 (★ 2026-09-16 블록 조립 전환) */}
         <div style={{
           background: 'linear-gradient(135deg, rgba(217,70,239,0.10), rgba(168,85,247,0.08), rgba(99,102,241,0.10))',
           border: '1px solid rgba(255,255,255,0.1)',
@@ -874,15 +858,15 @@ export default function DmBuilderPage() {
             <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>자연어 한 줄로 DM 자동 생성</span>
           </div>
           {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-3" />}
-          {/* ★ 2026-07-02(5) Harold 지시 재배치 — 좌: 프롬프트 단독(크게) / 우: 빠른 시작(위) + 자유 시작·완성 슬라이드(아래) */}
+          {/* 좌: 한 줄 입력 · 우: 블록으로 만들기(위) + 완성 이미지(아래) */}
           <style>{`
             .dm-hub-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
-            /* ★ 2026-09-16 Harold — 가로 4칸은 타일이 좁아 제목이 꺾였다 → 항상 2×2 · 빠른 시작 대신 이 2×2가 남는 높이를 나눠 갖는다 */
-            .dm-hub-bottom { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; flex: 1; }
+            /* ★ 2026-09-16 아래 타일은 남는 높이를 나눠 갖는다(블록 카드는 내용 높이만) */
+            .dm-hub-bottom { display: grid; grid-template-columns: 1fr; gap: 10px; flex: 1; }
             /* ★ 2026-08-21 한글은 기본 줄바꿈이 글자 단위라 "추 가"·"슬라 이드"·"불러 오기"처럼 낱말이 잘렸다.
                keep-all = 띄어쓰기에서만 끊는다(줄 위치는 아래 타일이 <br/>로 직접 정한다). */
             .dm-hub-bottom button { word-break: keep-all; }
-            @media (max-width: 767px) { .dm-hub-grid { grid-template-columns: 1fr; } .dm-hub-bottom { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+            @media (max-width: 767px) { .dm-hub-grid { grid-template-columns: 1fr; } }
           `}</style>
           <div className="dm-hub-grid">
             {/* 좌 — 프롬프트 입력 */}
@@ -974,7 +958,7 @@ export default function DmBuilderPage() {
               </button>
             </div>
 
-            {/* 우 — 위: 빠른 시작 / 아래: 자유 시작 · 완성 슬라이드 */}
+            {/* 우 — 위: 블록으로 만들기 / 아래: 완성 이미지로 만들기 */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {/* ★ 2026-09-16 Harold — 빠른 시작(시나리오만 넘겨 AI가 전부 지어내던 경로) 자리를 블록 조립이 대신한다.
                   블록을 누르면 필요한 것만 묻는 창이 뜨고, 넣은 재료로 쌓인다(사진 0장으로 만들어지지 않는다). */}
@@ -995,39 +979,11 @@ export default function DmBuilderPage() {
                 <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', lineHeight: 1.5 }}>헤드라인·상품·쿠폰·추첨 같은 블록을 고르면 필요한 것만 물어봐요. 저장하면 바로 쌓입니다</div>
                 <div style={{ fontSize: 13, marginTop: 8, letterSpacing: 2 }}>🖼️ ✍️ 🛍️ 🔗 ▶️ 🎟️ 🎁 📊 🗺️ 👉</div>
               </button>
-              <button
-                onClick={() => { if (!generating) setQuickStartOpen(true); }}
-                disabled={generating}
-                style={{
-                  background: 'transparent', border: 0, color: 'rgba(255,255,255,0.5)',
-                  fontSize: 11.5, padding: '2px 0 4px', cursor: generating ? 'not-allowed' : 'pointer', textAlign: 'center',
-                }}
-              >
-                시나리오 12종으로 시작하기 (AI가 구성까지 제안)
-              </button>
               <div className="dm-hub-bottom">
-                <button
-                  onClick={handleCreateNew}
-                  disabled={generating}
-                  style={{
-                    minHeight: 84, padding: '14px 16px', textAlign: 'center',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
-                    cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
-                  }}
-                >
-                  {/* ★ 2026-09-16 2×2로 높이가 늘어난 만큼 아이콘을 위로 올려 키우고 세로 쌓기 · 상하 중앙 */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 26, lineHeight: 1 }}>📄</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>직접 제작</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>빈 캔버스에서<br />직접 섹션 추가</div>
-                </button>
-                {/* ★ 2026-09-16 Harold — [완성 슬라이드]와 [카탈로그 DM]은 만드는 결과가 같았다(장마다 이미지 1장).
-                    차이는 settings.catalog(PC 책 펼침) 하나뿐이라 입구를 합치고, 책 펼침은 편집기 토글로 켠다. */}
-                <button
-                  onClick={() => { uploadModeRef.current = 'catalog'; completedImagesInputRef.current?.click(); }}
-                  disabled={generating || uploadingImages}
+                {/* ★ 2026-09-16(2) Harold — [라이브러리 불러오기]도 결과가 같은 이미지 DM 이었다(사진 출처만 다르다).
+                    타일을 합치고 라이브러리는 이 카드 안 보조 입구로 둔다. 블록 창의 사진 자리에도 라이브러리 입구가 이미 있다. */}
+                <div
+                  onClick={() => { if (!generating && !uploadingImages) { uploadModeRef.current = 'catalog'; completedImagesInputRef.current?.click(); } }}
                   title="완성된 이미지를 순서대로 올리면 휴대폰은 슬라이드, PC는 책처럼 두 쪽씩 펼쳐 보입니다. 편집기에서 끌 수 있어요"
                   style={{
                     minHeight: 84, padding: '14px 16px', textAlign: 'center',
@@ -1038,27 +994,21 @@ export default function DmBuilderPage() {
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 26, lineHeight: 1 }}>🖼️</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 이미지 올리기'}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 이미지로 만들기'}</span>
                   </div>
                   <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>이미지 그대로 슬라이드<br />PC는 책 펼침</div>
-                </button>
-                {/* ★ 2026-07-19 P4: 라이브러리 불러오기 — 저장 소재 다중 선택 → 이미지 DM */}
-                <button
-                  onClick={() => { if (!generating && !uploadingImages) setLibPickerOpen(true); }}
-                  disabled={generating || uploadingImages}
-                  style={{
-                    minHeight: 84, padding: '14px 16px', textAlign: 'center',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
-                    cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
-                  }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 26, lineHeight: 1 }}>🗂️</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>라이브러리 불러오기</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>저장 소재 다중선택<br />→ 이미지 DM</div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); if (!generating && !uploadingImages) setLibPickerOpen(true); }}
+                    disabled={generating || uploadingImages}
+                    style={{
+                      marginTop: 4, background: 'transparent', border: 0, color: 'rgba(255,255,255,0.5)',
+                      fontSize: 11, cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', textDecoration: 'underline',
+                    }}
+                  >
+                    저장 소재에서 고르기
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1122,64 +1072,6 @@ export default function DmBuilderPage() {
             onPickMany={handleLibraryImagesSelected}
           />
         </div>
-
-        {/* ★ 2026-07-02(5) 빠른 시작 12 시나리오 — 모달 (시나리오 클릭 = 즉시 AI 생성 확인 → 편집 진입) */}
-        {quickStartOpen && (
-          <div
-            style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(2,6,23,0.72)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{ width: '100%', maxWidth: 980, maxHeight: '88vh', overflowY: 'auto', background: '#0f172a', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 16, boxShadow: '0 24px 64px rgba(0,0,0,0.5)', padding: 20 }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 18 }}>⚡</span>
-                  <span style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>빠른 시작</span>
-                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>시나리오 클릭 = 즉시 AI가 섹션 + 카피 생성</span>
-                </div>
-                <button onClick={() => setQuickStartOpen(false)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', fontSize: 18, cursor: 'pointer', padding: 6 }} aria-label="닫기">✕</button>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
-                {QUICK_STARTS.map((s) => (
-                  <button
-                    key={s.label}
-                    onClick={() => { setQuickStartOpen(false); if (!generating) setPendingGen({ scenario: s.label, desc: `${s.label}: ${s.hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
-                    disabled={generating}
-                    style={{
-                      padding: '14px 10px 12px',
-                      background: s.gradient,
-                      border: `1px solid ${s.border}`,
-                      borderRadius: 12,
-                      cursor: generating ? 'not-allowed' : 'pointer',
-                      textAlign: 'center',
-                      transition: 'all 0.25s ease',
-                      opacity: generating ? 0.5 : 1,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!generating) {
-                        e.currentTarget.style.transform = 'translateY(-2px)';
-                        e.currentTarget.style.boxShadow = `0 8px 20px ${s.hover}, 0 1px 3px rgba(0,0,0,0.3)`;
-                        e.currentTarget.style.borderColor = s.hover;
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = 'translateY(0)';
-                      e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)';
-                      e.currentTarget.style.borderColor = s.border;
-                    }}
-                  >
-                    <div style={{ marginBottom: 8 }}><QuickStartThumbnail scenarioKey={s.key} /></div>
-                    <div style={{ fontSize: 18, marginBottom: 2 }}>{s.icon}</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>{s.label}</div>
-                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>{s.hint}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* 내 DM 현황 — 지표는 항상 표시 (로딩 중 스켈레톤, 실패해도 0으로) */}
         <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.85)', margin: '4px 4px 10px' }}>내 DM 현황</div>
@@ -1261,9 +1153,9 @@ export default function DmBuilderPage() {
           }}>
             <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(168,85,247,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>📱</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>아직 만든 DM이 없어요</div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>위에서 한 줄만 입력하거나 빠른 시작 카드를 누르면<br />AI가 1분 만에 첫 DM을 만들어 드려요.</div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>블록을 고르면 필요한 것만 물어봐요.<br />사진과 문구만 넣으면 첫 DM이 완성됩니다.</div>
             <button
-              onClick={() => { if (!generating) setPendingGen({ scenario: QUICK_STARTS[0].label, desc: `${QUICK_STARTS[0].label}: ${QUICK_STARTS[0].hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
+              onClick={handleStartBlockBuild}
               disabled={generating}
               style={{
                 marginTop: 4, padding: '10px 20px', borderRadius: 10, border: 'none',
@@ -1271,7 +1163,7 @@ export default function DmBuilderPage() {
                 fontSize: 13, fontWeight: 700, cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
               }}
             >
-              AI로 첫 DM 만들기
+              블록으로 첫 DM 만들기
             </button>
           </div>
         ) : (() => {
@@ -1336,26 +1228,22 @@ export default function DmBuilderPage() {
                     cloning={cloningId === dm.id}
                   />
                 ))}
-                {/* 희소 상태 — 1~2개면 목록 끝에 다음 추천 DM 줄 (첫 페이지만) */}
-                {safePage === 1 && list.length > 0 && list.length < 3 && (() => {
-                  const used = new Set(list.map((d) => (d.title || '').replace(/ 사본$/, '')));
-                  const next = QUICK_STARTS.find((q) => !used.has(q.label)) || QUICK_STARTS[1];
-                  return (
-                    <button
-                      type="button"
-                      className="dm-list-ghost"
-                      onClick={() => { if (!generating) setPendingGen({ scenario: next.label, desc: `${next.label}: ${next.hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
-                      disabled={generating}
-                      style={{ borderRadius: '0 0 14px 14px', cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1 }}
-                    >
-                      <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(168,85,247,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>{next.icon}</div>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>다음 추천: {next.label}</div>
-                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5, marginTop: 2 }}>클릭하면 AI가 바로 만들어 드려요</div>
-                      </div>
-                    </button>
-                  );
-                })()}
+                {/* 희소 상태 — 1~2개면 목록 끝에 블록으로 만들기 줄 (첫 페이지만) */}
+                {safePage === 1 && list.length > 0 && list.length < 3 && (
+                  <button
+                    type="button"
+                    className="dm-list-ghost"
+                    onClick={handleStartBlockBuild}
+                    disabled={generating}
+                    style={{ borderRadius: '0 0 14px 14px', cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1 }}
+                  >
+                    <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(168,85,247,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🧱</div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>블록으로 하나 더 만들기</div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5, marginTop: 2 }}>블록을 고르면 필요한 것만 물어봐요</div>
+                    </div>
+                  </button>
+                )}
               </div>
 
               {/* 페이징 컨트롤 (totalPages > 1 영역만 표시) */}
@@ -1730,7 +1618,7 @@ function EditorModals() {
   );
 }
 
-// EmptyList 영역 영구 폐기 (D216+ 정합 — 자연어 입력 + 빠른 시작 + 자유롭게 DM 생성 영역 흐름 정합)
+// EmptyList 영역 영구 폐기 (목록 빈 상태는 위 안내 카드가 소유)
 
 function DmListRow({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAlias, onStop, onResume, cloning }: {
   dm: DmListItem;

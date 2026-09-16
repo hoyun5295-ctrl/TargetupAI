@@ -19,7 +19,12 @@ const EFFECTS: Array<{ k: 'slide' | 'flip' | 'fade'; n: string; d: string }> = [
   { k: 'fade', n: '페이드', d: '앞 장이 사라지며 다음 장' },
 ];
 
-export default function DmBlockBuilder({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
+export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
+  onDone: () => void;
+  onBack: () => void;
+  /** 빈 캔버스에서 직접 섹션을 추가하고 싶을 때(옛 "직접 제작" 경로) — 편집기로 바로 간다 */
+  onBlankCanvas?: () => void;
+}) {
   const pages = useDmBuilderStore((s) => s.pages);
   const currentPageIndex = useDmBuilderStore((s) => s.currentPageIndex);
   const addSection = useDmBuilderStore((s) => s.addSection);
@@ -108,6 +113,15 @@ export default function DmBlockBuilder({ onDone, onBack }: { onDone: () => void;
           <div className="text-[11px] text-white/45">블록을 누르면 필요한 것만 물어봐요. 저장하면 바로 쌓입니다</div>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {onBlankCanvas && (
+            <button
+              onClick={onBlankCanvas}
+              className="h-9 px-3 rounded-[10px] border border-white/12 bg-transparent text-[12.5px] font-bold text-white/60 hover:text-white hover:bg-white/10"
+              title="블록 대신 빈 캔버스에서 섹션을 직접 추가해요"
+            >
+              빈 캔버스로
+            </button>
+          )}
           <button
             onClick={() => void save({ silent: false })}
             disabled={isSaving}
