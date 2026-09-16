@@ -492,9 +492,13 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
         //   에이전트 발급명이 화면에만 있었고, `extra` 행은 화면에서 원문 'extra'로 노출됐다.
         const scopeLabel = resolveBillingScopeLabel(item);
         // 요금제 행의 '유형' 칸은 플랜 코드다 — `PLAN_` 접두는 내부 키라 고객에게 보일 값이 아니다.
+        // ★ 2026-09-16 수기 부가서비스는 **입력한 항목명**이 유형 칸이다(서수란 접수).
+        //   '부가서비스'라고만 찍히면 고객은 무엇을 청구받는지 알 수 없다 — 이름은 입력한 사람이 안다.
+        //   개행·제어문자는 지운다(§2-16 — 우리가 형식을 통제하지 못하는 값이 이 칸에 들어온다).
+        const extraLabel = toSingleLine(item.item_label).trim();
         const typeText = ch === 'plan'
           ? String(item.message_type || '').replace(/^PLAN_/, '')
-          : (typeLabel[item.message_type] || item.message_type);
+          : (extraLabel || typeLabel[item.message_type] || item.message_type);
 
         // ★ 2026-08-06 한 행의 칸을 **먼저 목록으로 만들고, 같은 목록으로 재고 같은 목록으로 그린다.**
         //   재는 옵션과 그리는 옵션이 다르면 행 높이가 실제 그림과 어긋난다(Codex 적대검증 high).

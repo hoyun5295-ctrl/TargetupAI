@@ -6,11 +6,11 @@ import {
   billingRowKey, resolveBillingUnitPricesDetailed, findUnsetPricedTypes, summarizeBlockList,
   nullifyUnknownUserIds, checkBillingAmountIdentity, chunkArray, BILLING_MSG_TYPE_SQL,
   splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems, aggregateBillingSendIds, partitionBillingSendIds, findBlockingPendingRows,
-  buildExtraBillingItems, extraRowUserId, extraRowsBlockingIssue,
+  buildExtraBillingItems, extraRowUserId, extraRowsBlockingIssue, extraRowQuantity,
   type BillingUsageRow, type AgentUnitPriceRow, type PricedBillingItem, type ExtraItemSourceRow,
 } from './send-usage-aggregation';
 import type { PayAgentStoreRow } from './pay-stats';
-import { sumFlooredInvoiceLines } from './billing-invoice-lines';
+import { sumFlooredInvoiceLines, buildInvoiceLines, invoiceRowFromPricedItem } from './billing-invoice-lines';
 import { normalizeAgentSendId } from './send-usage-aggregation';
 // ★ 2026-09-04 별칭 흡수 계약 — 변환표의 모든 코드가 단가 붙는 유형으로 가는지 축 정의로 대조한다
 import { BILLING_TYPES } from './billing-types';
@@ -503,6 +503,84 @@ describe('추가 항목 파생 — 매핑 원장이 진실 (2026-08-04 · 2026-0
   });
 });
 
+// ★ 2026-09-16 수기 부가서비스의 수량·항목명 (서수란 접수 · Harold 승인).
+//   그전에는 수량이 **행 수**였다 — 9건 입력 = 원장 9행 = 반영 현황·상세 모달·PDF 2페이지 9줄.
+//   1페이지 항목표만 buildInvoiceLines가 행을 세어 합쳤고, 입력한 항목명은 어디에도 나오지 않아
+//   화면에는 내부 키(EXTRA_MANUAL)가, 청구서에는 '부가서비스'가 찍혔다.
+//   경위·계약 = docs/FEATURE-BILLING.md §2-22.
+describe('수기 부가서비스 — 수량·항목명 (2026-09-16)', () => {
+  const manual = (o: Partial<ExtraItemSourceRow> = {}): ExtraItemSourceRow => ({
+    kind: 'manual', supply_amount: 50000, period_month: '2026-09-01', source_ref: null,
+    user_id: 'u-sh', label: '단축 URL 제작', quantity: 9, ...o,
+  });
+
+  it('한 행이 단가 × 수량을 싣는다 — 단가는 건당 그대로', () => {
+    const items = buildExtraBillingItems([manual()]);
+    expect(items).toHaveLength(1);
+    expect(items[0].unitPrice).toBe(50000);
+    expect(items[0].amount).toBe(450000);
+    expect(items[0].amountExact).toBe(450000);
+    expect(items[0].itemQty).toBe(9);
+    expect(items[0].itemLabel).toBe('단축 URL 제작');
+  });
+
+  it('항목명이 청구서 항목줄의 이름이 된다 — 내부 키도 "부가서비스"도 아니다', () => {
+    const lines = buildInvoiceLines(buildExtraBillingItems([manual()]).map(invoiceRowFromPricedItem));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].label).toBe('단축 URL 제작');
+    expect(lines[0].count).toBe(9);
+    expect(lines[0].unitPrice).toBe(50000);
+    expect(lines[0].amount).toBe(450000);
+    // 청구서가 인쇄하는 산식이 참이어야 한다.
+    expect(lines[0].count * lines[0].unitPrice).toBe(lines[0].amount);
+  });
+
+  it('이름이 다르면 단가가 같아도 다른 줄이다 — 한 줄로 합치면 이름 하나가 거짓말을 한다', () => {
+    const rows = [manual({ quantity: 9 }), manual({ label: '디자인 작업', quantity: 2 })];
+    const lines = buildInvoiceLines(buildExtraBillingItems(rows).map(invoiceRowFromPricedItem));
+    expect(lines).toHaveLength(2);
+    expect(lines.map((l) => `${l.label} ${l.count}`).sort()).toEqual(['단축 URL 제작 9', '디자인 작업 2']);
+    expect(sumFlooredInvoiceLines(buildExtraBillingItems(rows) as any)).toBe(550000);
+  });
+
+  it('⛔ 수량을 발송 4칸에 싣지 않는다 — PDF 2페이지 전송·성공 열과 세로합이 오염된다', () => {
+    const it0 = buildExtraBillingItems([manual()])[0];
+    expect([it0.total, it0.success, it0.fail, it0.pending]).toEqual([0, 0, 0, 0]);
+  });
+
+  it('옛 행(수량 NULL)·ALTER 전 서버는 1로 읽힌다 — 금액이 1원도 바뀌지 않는다', () => {
+    for (const q of [undefined, null, 0, -3, 1.5, Number.NaN, 'abc', Number.MAX_SAFE_INTEGER + 2]) {
+      expect(extraRowQuantity(manual({ quantity: q as any }))).toBe(1);
+    }
+    const legacy = buildExtraBillingItems([manual({ quantity: null })]);
+    expect(legacy[0].amount).toBe(50000);
+    expect(legacy[0].unitPrice).toBe(50000);
+  });
+
+  it('080 행은 수량 축이 없다 — 값이 들어와도 1이고 금액 파생이 한 길이다', () => {
+    const snap: ExtraItemSourceRow = {
+      kind: '080_call', supply_amount: 7096, period_month: '2026-09-01', source_ref: '0805647720',
+      quantity: 5, map_found: true, map_is_active: true, map_charge_call_fee: true,
+    };
+    expect(extraRowQuantity(snap)).toBe(1);
+    const items = buildExtraBillingItems([snap]);
+    expect(items[0].amount).toBe(7096);
+    expect(items[0].itemLabel).toBeNull();
+  });
+
+  it('항목명이 비면 종전 이름으로 떨어진다 — 빈 칸이 청구서에 나가지 않는다', () => {
+    const lines = buildInvoiceLines(buildExtraBillingItems([manual({ label: '   ' })]).map(invoiceRowFromPricedItem));
+    expect(lines[0].label).toBe('부가서비스');
+  });
+
+  it('귀속은 종전 그대로 — 수량이 생겨도 그 계정 장에 실린다', () => {
+    const items = buildExtraBillingItems([manual()]);
+    const sheets = splitBillingSheets(items, 'by_user');
+    expect(sheets.find((s) => s.userId === 'u-sh')!.amount).toBe(450000);
+    expect(sheets.find((s) => s.sheetScope === 'common')!.items).toHaveLength(0);
+  });
+});
+
 // ★ 2026-07-31 귀속 축 회귀 차단 — Codex 적대검증 high.
 //   `extra`(080·부가서비스)에 귀속 계정을 실어 보냈는데 분배 조건이 `channel === 'web'` 리터럴이라
 //   계정 귀속 항목이 **전부 공통 장으로** 갔다. 채널을 늘릴 때 같은 사고가 나지 않도록 계약을 고정한다.
@@ -557,6 +635,62 @@ describe('귀속 축 — 추가 항목(extra)의 장 분배 (2026-07-31)', () =>
   });
 });
 
+// ★ 2026-09-16 테스트·스팸의 장 귀속 (서수란 접수 · Harold 승인 — 0726 결정 개정).
+//   그전에는 계정이 행에 실려 있는데도 전부 공통 장으로 갔다(시세이도 계정별 정산 실측 — 공통 장
+//   상세에 `스팸필터 · 시세이도_시세이도(SH)`가 찍혀 있었다. 구분 칸은 계정을 아는데 장 분할만 몰랐다).
+//   경위·뒤집힌 판단 = docs/FEATURE-BILLING.md §2-21.
+describe('귀속 축 — 테스트·스팸의 장 분배 (2026-09-16)', () => {
+  const row = (o: Partial<PricedBillingItem>): PricedBillingItem => ({
+    channel: 'web', itemDate: '2026-09-01', typeKey: 'SMS', userId: null, agentSendId: null,
+    total: 0, success: 0, fail: 0, pending: 0, agentId: null,
+    unitPrice: 22.8, amount: 0, amountExact: 0, planDays: null, planMonthDays: null, ...o,
+  });
+  const test1 = (userId: string | null) => row({ channel: 'test' as any, typeKey: 'TEST_SMS', userId, total: 4, success: 4, amount: 91.2, amountExact: 91.2 });
+  const spam1 = (userId: string | null) => row({ channel: 'spam' as any, typeKey: 'SPAM_LMS', userId, total: 3, success: 3, amount: 68.4, amountExact: 68.4 });
+
+  it('테스트 발송은 누른 계정의 장에 실린다', () => {
+    const sheets = splitBillingSheets([test1('u1')], 'by_user');
+    expect(sheets.find((s) => s.userId === 'u1')!.items.some((i) => i.channel === 'test')).toBe(true);
+    expect(sheets.find((s) => s.sheetScope === 'common')!.items).toHaveLength(0);
+  });
+
+  it('스팸필터도 같은 축이다 — 두 채널이 함께 움직인다', () => {
+    const sheets = splitBillingSheets([spam1('u2')], 'by_user');
+    expect(sheets.find((s) => s.userId === 'u2')!.items.some((i) => i.channel === 'spam')).toBe(true);
+  });
+
+  it('계정 미상 테스트·스팸은 그대로 공통 장 — 추측으로 계정을 만들지 않는다', () => {
+    const sheets = splitBillingSheets([test1(null), spam1(null)], 'by_user');
+    const common = sheets.find((s) => s.sheetScope === 'common')!;
+    expect(common.items).toHaveLength(2);
+    expect(sheets.filter((s) => s.sheetScope === 'by_user')).toHaveLength(0);
+  });
+
+  it('장 헤더 수량이 그 계정 것만 담는다 — billings.test_sms_count·spam_filter_lms_count', () => {
+    const sheets = splitBillingSheets([test1('u1'), spam1('u1'), test1('u2')], 'by_user');
+    const u1 = sheets.find((s) => s.userId === 'u1')!;
+    const u2 = sheets.find((s) => s.userId === 'u2')!;
+    expect(u1.totals.TEST_SMS).toBe(4);
+    expect(u1.totals.SPAM_LMS).toBe(3);
+    expect(u2.totals.TEST_SMS).toBe(4);
+    expect(u2.totals.SPAM_LMS).toBe(0);
+  });
+
+  it('재분배일 뿐 총액은 변하지 않는다 — Σ(장) = 합산 1장', () => {
+    const items = [test1('u1'), spam1('u1'), test1(null), row({ userId: 'u1', success: 10, amount: 228, amountExact: 228 })];
+    const combined = splitBillingSheets(items, 'combined').reduce((s, sh) => s + sh.amount, 0);
+    const byUser = splitBillingSheets(items, 'by_user').reduce((s, sh) => s + sh.amount, 0);
+    expect(byUser).toBeCloseTo(combined, 6);
+  });
+
+  it('전체 발행(combined)은 종전과 같다 — 한 장에 모인다', () => {
+    const sheets = splitBillingSheets([test1('u1'), spam1('u2')], 'combined');
+    expect(sheets).toHaveLength(1);
+    expect(sheets[0].sheetScope).toBe('combined');
+    expect(sheets[0].items).toHaveLength(2);
+  });
+});
+
 describe('splitBillingSheets — 발행 단위 장 분할 (2026-07-26)', () => {
   const pi = (o: Partial<PricedBillingItem>): PricedBillingItem => ({
     channel: 'web', itemDate: '2026-07-01', typeKey: 'SMS', userId: 'u1', agentSendId: null,
@@ -575,12 +709,15 @@ describe('splitBillingSheets — 발행 단위 장 분할 (2026-07-26)', () => {
     const sheets = splitBillingSheets([
       pi({ userId: 'u1', success: 10, amount: 90 }),
       pi({ userId: 'u2', success: 5, amount: 45 }),
+      // ★ 2026-09-16 테스트 행도 계정이 있으면 그 계정 장이다(0726 결정 개정 — 서수란 접수).
       pi({ channel: 'test', userId: 'u1', typeKey: 'TEST_SMS', success: 2, amount: 18 }),
+      // 계정 축이 없는 행은 그대로 공통 장 — 공통 장이 사라지는 것이 아니다.
+      pi({ channel: 'agent', userId: null, typeKey: 'LMS', success: 3, amount: 60 }),
     ], 'by_user');
     expect(sheets.map((s) => s.sheetScope)).toEqual(['by_user', 'by_user', 'common']);
     expect(sheets[0].userId).toBe('u1');
-    expect(sheets[0].amount).toBe(90);
-    expect(sheets[2].amount).toBe(18); // 테스트는 계정이 있어도 공통 장
+    expect(sheets[0].amount).toBe(108); // 웹 90 + 테스트 18
+    expect(sheets[2].amount).toBe(60);
   });
 
   it('회사 단위 항목을 싣는 장은 하나뿐이다', () => {

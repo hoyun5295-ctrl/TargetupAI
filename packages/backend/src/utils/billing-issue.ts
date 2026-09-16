@@ -594,7 +594,9 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     //   겹침이라 중간정산(7/16~8/15 "8월 정산")이 7월분까지 쓸어 담았다. 역월 정산은 겹침과 월일치가
     //   같은 답이라 동작 무변화. 항목은 자기 청구월 라벨의 정산에만 실린다(차단·표시 5곳도 같은 축).
     const extraRes = await client.query(
-      `SELECT e.id, e.kind, e.supply_amount, e.period_month, e.source_ref,
+      // ★ 2026-09-16 `e.label`(수기 항목명) 추가 — 청구서·화면의 유형 칸이 이 값을 쓴다(서수란 접수).
+      //   수량은 EXTRA_ITEM_SOURCE_SELECT가 to_jsonb로 함께 내린다(ALTER 전 안전).
+      `SELECT e.id, e.kind, e.supply_amount, e.period_month, e.source_ref, e.label,
 ${EXTRA_ITEM_SOURCE_SELECT}
          FROM billing_extra_items e
 ${EXTRA_ITEM_SOURCE_JOIN}
@@ -737,7 +739,8 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     const batchId = sheets.length > 1 ? randomUUID() : null;
     // ★ 2026-07-26 14 → 16. 요금제 일수 전용 컬럼(plan_days·plan_month_days) 추가분.
     // ★ 2026-08-05 16 → 17. 요금제 무료 제공 공제분(free_count).
-    const COLS = 17;
+    // ★ 2026-09-16 17 → 19. 추가 항목의 청구 수량·항목명(item_qty·item_label).
+    const COLS = 19;
     const ITEM_CHUNK_ROWS = 1000;
     const issuedSheets: any[] = [];
 
@@ -834,6 +837,10 @@ ${EXTRA_ITEM_SOURCE_JOIN}
         it.planDays, it.planMonthDays,
         // ★ 2026-08-05 무료 제공 공제분 — 이 칸이 곧 소비 마커다(발행을 지우면 함께 사라진다).
         Number(it.freeCount) || 0,
+        // ★ 2026-09-16 추가 항목의 청구 수량·항목명(서수란 접수). 발송 행·요금제 행은 null이다 —
+        //   수량을 발송 4칸에 실으면 PDF 2페이지 '전송'·'성공' 열과 세로합이 오염된다(요금제 일수의 선례).
+        it.itemQty ?? null,
+        it.itemLabel ?? null,
       ]));
 
       // ★ 청크 INSERT. 검증은 count(*)가 아니라 **rowCount 합**으로 한다.
@@ -851,7 +858,8 @@ ${EXTRA_ITEM_SOURCE_JOIN}
             total_count, success_count, fail_count, pending_count,
             unit_price, amount,
             plan_days, plan_month_days,
-            free_count
+            free_count,
+            item_qty, item_label
           ) VALUES ${ph}`,
           batch.flat()
         );

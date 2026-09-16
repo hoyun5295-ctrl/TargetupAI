@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, invoiceLineLabel } from './billing-invoice-lines';
+import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, invoiceLineLabel, escapeInvoiceHtml } from './billing-invoice-lines';
 
 const item = (o: Record<string, any> = {}) => ({
   channel: 'web', message_type: 'SMS', unit_price: 9, success_count: 10, amount: 90, ...o,
@@ -77,6 +77,49 @@ describe('080 등 월별 추가 항목 (channel=extra — 2026-07-30 서수란 �
     expect(lines).toHaveLength(2);
     expect(lines.map((l) => l.label)).toEqual(['080 통화료', '080 통화료']);
     expect(lines.map((l) => l.count)).toEqual([1, 1]);
+  });
+
+  // ★ 2026-09-16 수량·항목명이 행으로 옮겨진 뒤의 계약 (서수란 접수).
+  //   아래 옛 계약(행 수 = 수량)은 `item_qty`가 없는 **이미 발행된 장**의 표시라 그대로 살아 있어야 한다.
+  it('★수량은 행이 싣는다 — 한 줄이 "9건 × ₩50,000 = ₩450,000"', () => {
+    const lines = buildInvoiceLines([
+      extra({ message_type: 'EXTRA_MANUAL', unit_price: 50000, amount: 450000, item_qty: 9, item_label: '단축 URL 제작' }),
+    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ label: '단축 URL 제작', count: 9, unitPrice: 50000, amount: 450000 });
+    expect(lines[0].count * lines[0].unitPrice).toBe(lines[0].amount);
+  });
+
+  it('★항목명이 다르면 단가가 같아도 줄이 나뉜다 — 이름 하나가 둘을 대표하지 않는다', () => {
+    const lines = buildInvoiceLines([
+      extra({ message_type: 'EXTRA_MANUAL', unit_price: 50000, amount: 450000, item_qty: 9, item_label: '단축 URL 제작' }),
+      extra({ message_type: 'EXTRA_MANUAL', unit_price: 50000, amount: 100000, item_qty: 2, item_label: '디자인 작업' }),
+    ]);
+    expect(lines).toHaveLength(2);
+    expect(lines.map((l) => l.label)).toEqual(['단축 URL 제작', '디자인 작업']);
+    expect(lines.reduce((s, l) => s + l.amount, 0)).toBe(550000);
+  });
+
+  it('★비정상 수량은 1로 떨어진다 — 못 읽은 값이 0원·거대 금액을 만들지 않는다', () => {
+    for (const q of [null, 0, -5, 2.5, 'x']) {
+      const lines = buildInvoiceLines([extra({ message_type: 'EXTRA_MANUAL', unit_price: 50000, amount: 50000, item_qty: q })]);
+      expect(lines[0].count).toBe(1);
+    }
+  });
+
+  it('★080 행에는 이름을 싣지 않는다 — 그 이름은 유형키가 소유한다', () => {
+    const lines = buildInvoiceLines([extra({ item_label: null, item_qty: 1 })]);
+    expect(lines[0].label).toBe('080 번호 이용료');
+  });
+
+  it('★항목명이 메일 HTML을 깨지 않는다 — 값은 그대로 두고 넣는 쪽에서 막는다', () => {
+    // 항목명이 사람 입력이 된 뒤부터 이 자리는 HTML 본문에 그대로 들어간다.
+    expect(escapeInvoiceHtml('A & B <제작>')).toBe('A &amp; B &lt;제작&gt;');
+    expect(escapeInvoiceHtml('"단축" URL')).toBe('&quot;단축&quot; URL');
+    expect(escapeInvoiceHtml(null)).toBe('');
+    // 항목줄 자체는 원문을 유지한다 — PDF·화면은 이스케이프가 필요 없고, 값을 바꾸면 청구 항목명이 달라진다.
+    const lines = buildInvoiceLines([extra({ message_type: 'EXTRA_MANUAL', unit_price: 1000, amount: 1000, item_qty: 1, item_label: 'A & B' })]);
+    expect(lines[0].label).toBe('A & B');
   });
 
   it('★부가서비스 수기·최소과금 기본요금 라벨 (2026-07-30 Harold 확정) — "부가서비스 3건 × 50,000" 참 산식', () => {

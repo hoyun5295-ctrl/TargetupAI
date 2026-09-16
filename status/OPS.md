@@ -67,11 +67,11 @@
 docker exec -it pay-ingest-db mariadb -uroot -p sales -e "
 SELECT SysId, COUNT(*) rowcnt, SUM(TotCnt) tot, SUM(OkCnt) ok, SUM(FailCnt) fail, MAX(InsTm) last_ins, TIMESTAMPDIFF(MINUTE, MAX(InsTm), NOW()) mins_ago FROM RSRM_SalesStts WHERE DestDt=DATE_FORMAT(NOW(),'%Y%m%d') GROUP BY SysId ORDER BY SysId;
 SELECT SysId, LEFT(CustId,1) prefix, COUNT(*) c FROM RSRM_SalesStts WHERE DestDt=DATE_FORMAT(NOW(),'%Y%m%d') GROUP BY SysId, LEFT(CustId,1);
-SELECT DestDt,SysId,CustId,StoreId,MsgType,COUNT(*) c FROM RSRM_SalesStts GROUP BY DestDt,SysId,CustId,StoreId,MsgType HAVING c>1 LIMIT 20;
+SELECT DestDt,CustId,StoreId,MsgType,COUNT(*) c FROM RSRM_SalesStts GROUP BY DestDt,CustId,StoreId,MsgType HAVING c>1 LIMIT 20;
 "
 ```
 - ① 서버별 유입 + `mins_ago` 작으면 1분 push 정상 / ② prefix 정합(B=54·C=57·D=58) / ③ replace 확정키 중복 0.
-- 확정 키 = `(DestDt, SysId, CustId, StoreId, MsgType)`. StoreId 공란 = 후불 업체 정상(CustId 매칭). 스키마 = 설계문서 §2-2.
+- 확정 키 = **`(DestDt, CustId, StoreId, MsgType)` 4개**(★2026-09-16 `SHOW INDEX` 실측 = PRIMARY · `Non_unique=0`). **`SysId`는 키가 아니다** — 0707 설계 §2-2는 SysId를 키에 넣는 개선을 적었으나 실제 ALTER는 컬럼만 추가했고 PK는 그대로다(같은 문서 ④). 그래서 같은 4키를 다른 SysId가 쓰면 덮어쓴다 — 지금은 CustId 접두가 갈려 있어(QTmsg B/C/D · 비토 게이트웨이 V) 충돌하지 않으며, **V 접두를 QTmsg 쪽에서 쓰지 않는 것이 그 전제**다(게이트웨이 `migrations/050` 설계 근거). StoreId 공란 = 후불 업체 정상(CustId 매칭).
 - ★ 완전성 검증 = 레거시 143 `sales` 원본과 같은 일자 집계 대조(설계 §7-4).
 
 **실측 통과 이력**: 2026-07-16 — 54(65,033)·57(16,219)·58(898,442) 실시간 유입 + prefix 정합 + 중복 0 확인.

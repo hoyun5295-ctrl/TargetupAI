@@ -416,8 +416,13 @@ export async function reconcileKtStatement(entries: KtStatementEntry[]): Promise
 // ============================================================
 
 /**
- * 수기 항목 추가 — 단가×수량을 **수량만큼의 행**으로 넣는다(행당 supply_amount=단가).
- * 청구서 항목줄(buildInvoiceLines)이 같은 단가를 합쳐 "부가서비스 N건 × 단가"로 참 산식을 인쇄한다.
+ * 수기 항목 추가 — **한 행에 단가와 수량을 함께** 넣는다(`supply_amount`=건당 단가 · `quantity`=수량).
+ *
+ * ★ 2026-09-16 그전에는 수량만큼 행을 만들었다(9건 = 9행). 1페이지 항목표만 `buildInvoiceLines`가
+ *   행을 세어 합쳤고, **반영 현황·정산 상세·PDF 2페이지는 전부 9줄**이었다. 삭제도 9번이었다.
+ *   수량은 사람이 적는 값이라 원장이 가져야 한다 — 행 수는 수량을 표현하는 자리가 아니다(서수란 접수).
+ *   기존 1행짜리 옛 행들은 `quantity` NULL로 읽히고 CT(`extraRowQuantity`)가 1로 해석해 금액이 바뀌지 않는다.
+ *
  * 발행과 같은 회사 잠금 + 그 달 발행 존재 시 409(굳은 청구서에 안 실리는 항목을 만들지 않는다 — 080 반영과 동일 계약).
  */
 export async function addManualExtraItems(params: {
@@ -429,7 +434,7 @@ export async function addManualExtraItems(params: {
   unitSupply: number;    // 건당 공급가
   qty: number;           // 1~100
   adminId?: string | null;
-}): Promise<{ inserted: number; supplyTotal: number }> {
+}): Promise<{ inserted: number; quantity: number; supplyTotal: number }> {
   const periodMonth = String(params.periodMonth || '');
   if (!/^\d{4}-\d{2}-01$/.test(periodMonth)) throw new Error('대상월 형식이 올바르지 않습니다 (YYYY-MM-01).');
   const label = String(params.label || '').trim().slice(0, 180);
@@ -475,17 +480,14 @@ export async function addManualExtraItems(params: {
     if (monthFullyCovered(periodMonth, cover.rows.map((r: any) => ({ start: r.s, end: r.e })))) {
       throw new Error('그 달 전체가 이미 발행된 정산 기간(또는 수동 정산완료)에 덮여 있어 지금 추가하면 어느 청구서에도 실리지 못합니다. 해당 기간 정산 삭제 또는 수동 정산완료 해제 후 추가해주세요.');
     }
-    let inserted = 0;
-    for (let i = 0; i < qty; i++) {
-      const r = await client.query(
-        `INSERT INTO billing_extra_items (company_id, user_id, period_month, kind, label, supply_amount, source_ref, created_by)
-         VALUES ($1, $6::uuid, $2::date, 'manual', $3, $4, NULL, $5)`,
-        [params.companyId, periodMonth, label, unit, params.adminId || null, params.userId || null],
-      );
-      inserted += r.rowCount || 0;
-    }
+    const r = await client.query(
+      `INSERT INTO billing_extra_items (company_id, user_id, period_month, kind, label, supply_amount, quantity, source_ref, created_by)
+       VALUES ($1, $6::uuid, $2::date, 'manual', $3, $4, $7, NULL, $5)`,
+      [params.companyId, periodMonth, label, unit, params.adminId || null, params.userId || null, qty],
+    );
     await client.query('COMMIT');
-    return { inserted, supplyTotal: unit * qty };
+    // `inserted` = 만들어진 **행 수**(이제 언제나 1). 청구 건수는 `qty`다 — 둘을 섞어 쓰지 않는다.
+    return { inserted: r.rowCount || 0, quantity: qty, supplyTotal: unit * qty };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* release가 파기 */ }
     throw err;

@@ -26,7 +26,7 @@ import { normalizeUnitPriceBasis, toSupplyPrice, pickBrandPriceRaw, BRAND_FRIEND
 import { allocateFreeToRows } from './free-messaging';
 import type { PlanSegment } from './plan-proration';
 import {
-  BILLING_TYPES, billableQuantity, BRAND_NONFRIEND_SMSQ_CODE,
+  BILLING_TYPES, billableQuantity, normalizeExtraQty, BRAND_NONFRIEND_SMSQ_CODE,
   type BillingTypeDef, type AgentPriceColumn, type AgentUnitPriceRow,
 } from './billing-types';
 import { DIRECT_PIPELINE_SEND_TYPES_SQL } from './send-type-axis';
@@ -1136,6 +1136,26 @@ export interface PricedBillingItem extends BillingUsageRow {
    * 이 칸이 곧 **소비 마커**다: 발행을 지우면 함께 사라져 그 달 무료가 자동으로 미반영으로 돌아온다.
    */
   freeCount: number;
+  /**
+   * ★ 2026-09-16 추가 항목(extra) 전용 — 청구 수량(`billing_items.item_qty`).
+   *
+   * 그전에는 수량을 **행 수로** 표현했다(수기 부가서비스 9건 = 원장 9행 = 상세 9줄). 1페이지 항목표만
+   * `buildInvoiceLines`가 행을 세어 합쳤고, 반영 현황·상세 모달·PDF 2페이지는 전부 9줄이었다(서수란 접수).
+   * 이제 원장이 수량을 갖고(`billing_extra_items.quantity`) 이 칸이 그것을 상세 행까지 옮긴다.
+   * ⛔ **발송 수량 4칸(`total`·`success`·`fail`·`pending`)에 싣지 않는다** — 그 칸에 실으면
+   * PDF 2페이지 '전송'·'성공' 열과 상세 모달 세로합이 발송 건수로 오염된다(요금제 일수가 그랬다 · 0726 Codex 3차 HIGH).
+   * 발송 행·요금제 행은 null이고, `buildInvoiceLines`가 null을 1로 읽어 **옛 발행분의 표시가 그대로 유지된다.**
+   */
+  itemQty?: number | null;
+  /**
+   * ★ 2026-09-16 수기 부가서비스 전용 — 사람이 입력한 항목명(`billing_items.item_label`).
+   *
+   * 유형키(`EXTRA_MANUAL`)는 "이것이 수기 항목이다"만 말할 뿐 무엇을 청구하는지는 못 말한다.
+   * 그래서 화면에는 내부 키가 그대로 노출됐고 청구서에는 '부가서비스'라고만 찍혔다 — 고객도 담당자도
+   * "단축 URL 제작"을 어디서도 볼 수 없었다. 이름의 진실은 입력한 사람에게 있으므로 행이 들고 간다.
+   * 080 행은 null이다 — 그 이름은 유형키가 소유한다(계약값을 행에 복사하지 않는다는 §2-11과 같은 규약).
+   */
+  itemLabel?: string | null;
 }
 
 /**
@@ -1187,10 +1207,18 @@ export function buildPlanBillingItems(segments: PlanSegment[]): PricedBillingIte
  */
 export interface ExtraItemSourceRow {
   kind: string;
-  /** 스냅샷 금액 — `080_call`은 명세서 통화료 공급가, `manual`은 수기 건당 공급가 */
+  /** 스냅샷 금액 — `080_call`은 명세서 통화료 공급가, `manual`은 수기 **건당** 공급가 */
   supply_amount: any;
   period_month: any;
   source_ref?: string | null;
+  /**
+   * ★ 2026-09-16 수기 항목의 청구 수량(`billing_extra_items.quantity`). 080 행은 언제나 1이다.
+   * **읽기는 `to_jsonb` 경유**(EXTRA_ITEM_SOURCE_SELECT)라 ALTER 전에도 이 행이 NULL로 안전하게 읽히고,
+   * 아래 `extraRowQuantity`가 NULL을 1로 해석해 **옛 행(1행=1건)의 금액이 1원도 바뀌지 않는다.**
+   */
+  quantity?: any;
+  /** 수기 항목의 항목명. 청구서·화면의 유형 칸이 이 값을 쓴다(080은 유형키가 이름을 소유해 안 쓴다) */
+  label?: string | null;
   /** 수기 항목의 귀속 계정. 호출측 SQL이 **그 회사 실재 계정일 때만** 값을 살려서 넘긴다 */
   user_id?: string | null;
   /** 매핑 원장이 그 회사에 실재하는가 — false면 계약값(이용료·부가서비스)의 근거가 없다 */
@@ -1254,6 +1282,9 @@ export function extraRowsBlockingIssue(rows: ExtraItemSourceRow[]): Array<{ sour
  * "비활성(청구 중단 = 0줄)"은 다른 상태이고, 조인에 섞으면 둘을 구분할 수 없다.
  */
 export const EXTRA_ITEM_SOURCE_SELECT = `
+              -- ★ 2026-09-16 수량은 to_jsonb로 읽는다: ALTER 실행 전에도 발행·화면이 깨지지 않는다
+              --   (부재 = NULL = extraRowQuantity가 1로 해석 = 옛 동작 그대로).
+              (to_jsonb(e) ->> 'quantity')::int AS quantity,
               CASE WHEN eu.id IS NULL THEN NULL ELSE e.user_id END AS user_id,
               (en.id IS NOT NULL) AS map_found,
               en.is_active AS map_is_active,
@@ -1295,11 +1326,30 @@ export function extraRowUserId(r: ExtraItemSourceRow): string | null {
 }
 
 /**
+ * (순수) 그 항목의 청구 수량 — **부재·비정상은 언제나 1이다.** (★ 2026-09-16)
+ *
+ * 수량이 원장 컬럼이 되기 전의 행은 "1행 = 1건"이었다. 그 행들이 NULL로 읽히므로 1로 해석해야
+ * **옛 발행분과 미소비 옛 행의 금액이 1원도 바뀌지 않는다.** ALTER 실행 전(컬럼 부재 → to_jsonb가 NULL)도
+ * 같은 길로 떨어진다 — 그래서 배포와 마이그레이션의 순서가 금액을 흔들지 못한다.
+ *
+ * 080 행은 수량 축이 없다(번호당 1행이 그 달의 근거). 값이 들어와도 1로 고정해 금액 파생을 한 길로 둔다.
+ * 값 정규화 규약은 CT 하나(`normalizeExtraQty`)가 소유한다 — 저장된 상세 행을 읽는 `buildInvoiceLines`와 같은 규약이라야
+ * 발행 금액과 인쇄 수량이 갈리지 않는다.
+ */
+export function extraRowQuantity(r: Pick<ExtraItemSourceRow, 'kind'> & { quantity?: any }): number {
+  if (String(r?.kind || '') !== 'manual') return 1;
+  return normalizeExtraQty(r?.quantity);
+}
+
+/**
  * (순수) 월별 추가 항목 → 청구 상세 행. (★ 2026-07-30 신설 · 2026-08-04 원장 파생으로 재설계)
  *
  * 요금제(buildPlanBillingItems)와 같은 부류다 — 발송이 아니라서 수량 4칸은 전부 0으로 둔다
  * (수량 칸에 실으면 PDF 2페이지 전송·실패 열이 오염된다 — 2026-07-26 Codex 3차 HIGH와 같은 함정).
- * 항목줄 수량 표시는 buildInvoiceLines가 extra 채널 전용으로 합친 행 수를 세어 담당한다.
+ * ★ 2026-09-16 **수량과 이름은 행이 들고 온다**(itemQty·itemLabel — 서수란 접수).
+ *   그전에는 수기 항목의 수량이 "행 수"여서 9건이 원장 9행이 됐고, buildInvoiceLines가 1페이지에서만
+ *   행을 세어 합쳤다. 반영 현황·상세 모달·PDF 2페이지는 전부 9줄이었고 이름은 어디에도 없었다.
+ *   지금은 1행이 `단가 × 수량`을 싣고 항목명을 함께 옮긴다. 옛 행은 수량 NULL = 1로 읽혀 금액 무변화.
  * 금액은 공급가 정수라 amount === amountExact(절사 멱등).
  *
  * ★ 2026-08-21 고정료의 근거를 명세서에서 발행으로 옮겼다(서수란 0821 접수 — "명세서를 안 올리면
@@ -1325,7 +1375,13 @@ export function buildExtraBillingItems(rows: ExtraItemSourceRow[]): PricedBillin
     const kind = String(r?.kind || '');
     const itemDate = toDayKey(r?.period_month);
     const userId = extraRowUserId(r);
-    const push = (typeKey: string, amount: number) => {
+    /**
+     * `unit` = **건당** 공급가. 금액은 `단가 × 수량`이다(★2026-09-16 — 그전에는 단가 = 금액이었고
+     * 수량은 행 수로만 존재했다). 080 행은 수량 축이 없어 언제나 1이라 종전과 같은 값이 나온다.
+     */
+    const push = (typeKey: string, unit: number, opts?: { qty?: number; label?: string | null }) => {
+      const qty = extraRowQuantity({ kind, quantity: opts?.qty });
+      const amount = unit * qty;
       if (!(amount > 0)) return;
       out.push({
         // ★ 2026-08-05 080·부가서비스는 월별 정액 항목이라 발송 수량 축이 없다 — 무료 공제 대상이 아니다.
@@ -1336,16 +1392,23 @@ export function buildExtraBillingItems(rows: ExtraItemSourceRow[]): PricedBillin
         userId,
         agentSendId: null,
         agentId: null,
+        // ⛔ 수량은 여기가 아니라 itemQty가 싣는다 — 이 4칸은 발송 건수 축이고 PDF 2페이지 열과 세로합이 그것을 더한다.
         total: 0, success: 0, fail: 0, pending: 0,
         planDays: null,
         planMonthDays: null,
-        unitPrice: amount,
+        unitPrice: unit,
         amount,
         amountExact: amount,
+        itemQty: qty,
+        itemLabel: opts?.label ?? null,
       });
     };
     if (kind === 'manual') {
-      push('EXTRA_MANUAL', won(r?.supply_amount));
+      // 수기 항목만 수량·이름을 행이 들고 온다. 이름을 안 실으면 청구서·화면이 내부 키(EXTRA_MANUAL)로 떨어진다.
+      push('EXTRA_MANUAL', won(r?.supply_amount), {
+        qty: extraRowQuantity(r),
+        label: (String(r?.label ?? '').trim() || null),
+      });
       continue;
     }
     // 비활성 = 그 번호의 청구 중단. 매핑 없음과 달리 사람이 명시한 상태라 차단이 아니라 0줄이다.
@@ -1583,8 +1646,8 @@ function sheetTotals(items: PricedBillingItem[]): Record<string, number> {
 /**
  * (순수) 청구 상세를 발행 단위대로 장으로 나눈다.
  *
- * **회사 단위 항목은 공통 장 하나에 모은다**(Harold 결정 2026-07-26 "고객사 관리자 = 본사").
- * 테스트·스팸필터·AI 크레딧·에이전트 발송분·계정 미상 발송분이 여기 들어간다.
+ * **계정 축이 없는 항목은 공통 장 하나에 모은다**(Harold 결정 2026-07-26 "고객사 관리자 = 본사").
+ * AI 크레딧·요금제·에이전트 발송분·계정 미상 발송분이 여기 들어간다.
  *
  * 대표 장에 몰거나 계정별로 안분하지 않는 이유:
  * - **대표를 정할 규칙이 없다.** 계정이 추가·삭제되면 대표가 바뀌어 같은 항목이 달마다 다른 사람 청구서에 붙는다.
@@ -1595,14 +1658,25 @@ function sheetTotals(items: PricedBillingItem[]): Record<string, number> {
  *
  * ★ 에이전트 발송분은 계정 축이 없어 공통 장으로 간다. 웹 발송은 본사가 보내는 것이라
  *   지점·계정에 섞지 않는다는 Harold 확정과 같은 원칙이다.
+ *
+ * ★ 2026-09-16 **테스트·스팸은 계정 장으로 옮겼다**(서수란 접수 · Harold 승인 — 0726 결정의 개정).
+ *   위 두 근거는 **안분이 필요한 항목**의 사정이다. 테스트·스팸은 안분하지 않는다 —
+ *   행마다 누가 눌렀는지가 원장에 남아 있어(아래 집합 주석) 계정이 사실로 정해진다.
+ *   뒤집힌 판단 기록 = docs/FEATURE-BILLING.md §2-21.
  */
 /**
  * ★ 2026-07-31 **계정 장에 실릴 수 있는 채널** — 계정 축 판정의 단일 출처.
  *   `web` = 그 계정이 보낸 발송분. `extra` = 그 계정 앞으로 지정한 080·부가서비스(귀속 축).
- *   여기 없는 채널(`agent`·`test`·`spam`)은 계정 축이 없어 공통 장이다.
+ *   ★ 2026-09-16 `test`·`spam` 합류 — 테스트는 MySQL `bill_id`, 스팸은 `spam_filter_tests.user_id`로
+ *   **계정이 행에 실려 있다**(이 파일의 집계 3)·4)). 구분 칸 CT(`billing-scope-label.ts`
+ *   `ACCOUNT_SCOPED_CHANNELS`)는 처음부터 그 계정명을 찍고 있었는데 장 분할만 `web`·`extra`를 보고 있어,
+ *   **계정을 알면서 공통 장에 싣는** 어긋남이 있었다(서수란 0916 접수 — 시세이도 계정별 정산 실측).
+ *   ⚠ 두 집합은 뜻이 다르다 — 여기는 "어느 장에 실리나", 저기는 "구분 칸에 계정명을 쓰나"다.
+ *   `extra`가 여기에만 있는 이유가 그것이다(추가 항목의 구분 칸은 계정명이 아니라 '추가 항목').
+ *   여기 없는 채널(`agent`·`plan`)은 계정 축이 없어 공통 장이다. 계정 미상(userId 없음)도 공통 장.
  *   ⚠ 채널을 늘릴 때 이 집합을 함께 보지 않으면 그 채널은 조용히 전부 공통 장으로 간다.
  */
-export const USER_SHEET_CHANNELS = new Set<string>(['web', 'extra']);
+export const USER_SHEET_CHANNELS = new Set<string>(['web', 'extra', 'test', 'spam']);
 
 export function splitBillingSheets(items: PricedBillingItem[], scope: BillingScope): BillingSheet[] {
   const all = items || [];
@@ -1618,7 +1692,7 @@ export function splitBillingSheets(items: PricedBillingItem[], scope: BillingSco
   const byUser = new Map<string, PricedBillingItem[]>();
   const common: PricedBillingItem[] = [];
   for (const it of all) {
-    // 계정 축이 있는 것만 계정 장으로. 에이전트·테스트·스팸과 계정 미상 웹 발송은 공통 장.
+    // 계정 축이 있는 것만 계정 장으로. 에이전트·요금제와 계정 미상 행은 공통 장.
     // ★ 2026-07-31 채널을 여기 리터럴로 적어 두면 채널이 늘 때마다 이 줄을 놓친다 —
     //   실제로 `extra`(080·부가서비스)에 귀속 계정을 실어 보냈는데 이 조건이 `web`만 보고 있어
     //   계정 귀속 항목이 전부 공통 장으로 갔다(Codex 적대검증 high). 집합을 단일 출처로 둔다.

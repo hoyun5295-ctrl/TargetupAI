@@ -15,7 +15,7 @@
  */
 
 import { shiftDayKey } from './plan-proration';
-import { BILLING_TYPES, billableQuantity } from './billing-types';
+import { BILLING_TYPES, billableQuantity, normalizeExtraQty } from './billing-types';
 import { floorWon } from './money';
 
 /** 청구서 항목 한 줄 */
@@ -118,9 +118,15 @@ export function buildInvoiceLines(items: any[]): InvoiceLine[] {
     //   일할 분모가 달마다 달라서 애초에 합칠 수 있는 줄이 아니다.
     //   발송 줄은 일자 축으로 합치는 게 맞으므로 이 조각이 빈 문자열이다.
     const planKeyPart = channel === 'plan' ? String(it?.item_date ?? '').slice(0, 10) : '';
-    const key = `${channel}\u0000${typeKey}\u0000${unitPrice}\u0000${planKeyPart}`;
+    // ★ 2026-09-16 추가 항목의 **이름도 그룹 축**이다(서수란 접수 — 수기 부가서비스 항목명).
+    //   같은 단가의 "단축 URL 제작"과 "디자인 작업"을 (채널·유형·단가)로만 묶으면 한 줄이 되고
+    //   이름은 먼저 온 것만 남는다 — 요금제 구간을 합쳤다가 수량 문구가 거짓이 된 것과 같은 함정이다.
+    //   이름이 없는 행(080·옛 발행분)은 빈 문자열이라 종전 그룹과 정확히 같다.
+    const itemLabel = channel === 'extra' ? String(it?.item_label ?? '').trim() : '';
+    const key = `${channel}\u0000${typeKey}\u0000${unitPrice}\u0000${planKeyPart}\u0000${itemLabel}`;
     if (!acc.has(key)) {
-      const seed: InvoiceLine = { channel, typeKey, label: invoiceLineLabel(channel, typeKey), unitPrice, count: 0, amount: 0 };
+      // 항목명이 있으면 그것이 이 줄의 이름이다 -- 유형키 표시명('부가서비스')은 무엇을 청구하는지 못 말한다.
+      const seed: InvoiceLine = { channel, typeKey, label: itemLabel || invoiceLineLabel(channel, typeKey), unitPrice, count: 0, amount: 0 };
       if (channel === 'plan') {
         // ★ 2026-07-26 일수를 **전용 컬럼**에서 읽는다(`billing_items.plan_days`·`plan_month_days`).
         //   그 전에는 발송 수량 컬럼(total_count·fail_count)에 실려서, 같은 컬럼이 채널에 따라 다른 뜻이 되고
@@ -138,9 +144,11 @@ export function buildInvoiceLines(items: any[]): InvoiceLine[] {
     const line = acc.get(key)!;
     if (freeCount > 0) line.freeCount = (line.freeCount || 0) + freeCount;
     // ★ 2026-07-30 extra(080 등 월별 항목)는 발송 수량 축이 없어 success_count가 0이다(2페이지 오염 차단 —
-    //   요금제와 같은 이유). 항목줄 수량은 **합쳐진 항목 수**로 센다 — 같은 단가 그룹만 합쳐지므로
-    //   "2건 × ₩9,000 = ₩18,000"이 참 산식이 된다. 0으로 두면 "0건 × ₩9,000 = ₩18,000" 거짓 산식이 인쇄된다.
-    line.count += channel === 'extra' ? 1 : count;
+    //   요금제와 같은 이유). 0으로 두면 "0건 × ₩9,000 = ₩18,000" 거짓 산식이 인쇄된다.
+    // ★ 2026-09-16 수량은 **행이 싣고 온다**(`item_qty`). 그전에는 행 수를 셌는데, 그러려면 원장이
+    //   수량만큼 행을 만들어야 해서 반영 현황·상세·PDF가 전부 N줄이었다(서수란 접수).
+    //   옛 행·080은 NULL이고 CT가 1로 읽으므로 **기존 발행분의 인쇄 수량이 그대로다.**
+    line.count += channel === 'extra' ? normalizeExtraQty(it?.item_qty) : count;
     line.amount += amount;
   }
 
@@ -188,6 +196,9 @@ export function invoiceRowFromPricedItem(it: {
   planMonthDays?: number | null;
   /** ★ 2026-08-05 무료 제공 공제분 — 발행 시점 계산과 저장 후 표시가 같은 수량을 보게 한다 */
   freeCount?: number;
+  /** ★ 2026-09-16 추가 항목의 청구 수량·항목명 — 이것이 빠지면 발행 시점 금액과 저장 후 인쇄가 갈린다 */
+  itemQty?: number | null;
+  itemLabel?: string | null;
 }): any {
   return {
     channel: it.channel,
@@ -199,7 +210,26 @@ export function invoiceRowFromPricedItem(it: {
     plan_days: it.planDays ?? null,
     plan_month_days: it.planMonthDays ?? null,
     free_count: Number(it.freeCount) || 0,
+    item_qty: it.itemQty ?? null,
+    item_label: it.itemLabel ?? null,
   };
+}
+
+/**
+ * (순수) 항목줄 텍스트를 **HTML 메일 본문에 넣을 수 있는 형태**로 만든다. (★ 2026-09-16)
+ *
+ * 그전에는 항목명이 전부 코드가 만든 고정 문자열(`SMS`·`080 번호 이용료`)이라 그냥 끼워 넣어도 됐다.
+ * 수기 부가서비스가 생기면서 **사람이 적은 값**(`item_label`)이 이 자리에 들어온다 —
+ * `A & B 제작`의 `&`나 `<`가 그대로 나가면 메일 본문이 깨지거나 태그로 먹힌다.
+ * 값을 바꾸지 않고(입력에서 지우면 청구 항목명이 조용히 달라진다) **넣는 쪽에서** 막는다.
+ */
+export function escapeInvoiceHtml(value: any): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /** (순수) 항목 묶음의 청구 합 = 절사된 항목줄들의 정수 합. 헤더·장 공급가액이 이 값에서 파생된다. */

@@ -55,6 +55,24 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-0916-5 계정별 정산인데 테스트·스팸 청구가 공통 장으로 간다 (🟡 0916 수정 · **DDL 0** · 배포 대기) — 2026-09-16 서수란 접수(`cmu3np2bw03y2jnluc6qgkm46`)
+
+- **실측(접수 캡쳐)**: 시세이도 9월 계정별 정산. 공통 장(회사 단위 항목 · ₩4,062) 상세에 `스팸필터 · 시세이도_시세이도(SH)` · `테스트 · 시세이도_꼴레드(CPB)` 14행. 각 계정 장에는 그 금액이 없다.
+- **원인(코드)**: 같은 질문에 답이 둘이었다. [billing-scope-label.ts:47](../packages/backend/src/utils/billing-scope-label.ts:47) `ACCOUNT_SCOPED_CHANNELS`는 `web`·`test`·`spam`(구분 칸에 계정명을 찍는다)인데, [send-usage-aggregation.ts:1605](../packages/backend/src/utils/send-usage-aggregation.ts:1605) `USER_SHEET_CHANNELS`는 `web`·`extra`뿐이라 장을 계정으로 안 나눴다. **계정을 아는 행이 공통 장에 앉아 있었다.** 계정 출처는 테스트 = MySQL `bill_id`, 스팸 = `spam_filter_tests.user_id`(같은 파일 집계 3)·4)).
+- **판단**: 2026-07-26 Harold 확정("회사 단위 항목은 공통 장")의 **개정**이다. 그 결정의 근거 둘("대표를 정할 규칙이 없다"·"안분 기준이 사실이 아니다")은 안분이 필요한 항목(AI 크레딧·에이전트)의 사정이고, 테스트·스팸은 누가 눌렀는지가 원장에 있어 안분이 없다. Harold 승인 후 진행.
+- **수정(0916)**: `USER_SHEET_CHANNELS`에 `test`·`spam` 합류. 계정 미상은 그대로 공통 장 · `agent`·`plan` 무변화 · 합산 발행 무변화. 두 집합에 서로를 가리키는 주석(엇갈림 재발 차단). 계약 = `send-usage-aggregation.test.ts` 6건 + 기존 1건 개정. 상설 = [FEATURE-BILLING §2-21](../docs/FEATURE-BILLING.md).
+- **확인된 위험 0**: 테스트·스팸 수량 조정 행 실측 0건(조정이 공통 장에 홀로 남아 음수 판정으로 발행이 막히는 경로 없음).
+- **실측 대기**: 시세이도 9월 장 삭제 → 재발행 → 계정 장에 테스트·스팸이 실리고 공통 장이 비는지. **기발행 장은 바뀌지 않는다**(발행 시점 계산).
+
+### 🟠 B-0916-4 부가서비스 수기 항목이 수량만큼 줄로 늘어서고, 유형 칸에 `EXTRA_MANUAL`이 보인다 (🟡 0916 수정 · **DDL 3 대기** · 배포 대기) — 2026-09-16 서수란 접수(`cmu3o3a880475jnlubza89ztu`)
+
+- **실측(접수 캡쳐)**: "단축 URL 제작 · 건당 5만 · 수량 9" 입력 → 반영 현황 9줄 · 정산 상세 일자별 내역에 `EXTRA_MANUAL` ₩50,000 9줄. 1페이지 항목표만 `부가서비스 9건 × ₩50,000`으로 합쳐져 있었다.
+- **원인(코드)**: ①수량이 **행 수**였다 — [billing-080.ts](../packages/backend/src/utils/billing-080.ts) `addManualExtraItems`가 `for (let i = 0; i < qty; i++)`로 행을 만들었다(원장에 수량 칸 없음). ②`billing_items`에 이름 칸이 없어 항목명이 발행에서 버려졌다 → 화면은 내부 키 그대로(`AdminDashboard.tsx` `billingTypeLabel`에 `EXTRA_*` 부재), PDF는 '부가서비스'.
+- **수정(0916)**: 수량·이름을 데이터로 옮겼다. `billing_extra_items.quantity` · `billing_items.item_qty`·`item_label` 신설(**ALTER 3 · 실행 대기**) · 1행 저장 · 금액 = 단가 × 수량 · `buildInvoiceLines` 그룹키에 항목명 · 표시 3곳(상세 모달·PDF 2페이지·반영 현황) 항목명 우선. 곁들여 **화면의 추가 항목 행 수량 4칸을 '-'로**(PDF는 처음부터 그랬다 — 한 줄이 되면 0이 "9건인데 0"으로 읽힌다). 상설·계약 = [FEATURE-BILLING §2-22](../docs/FEATURE-BILLING.md).
+- **호환**: 옛 행·ALTER 전 서버는 수량 NULL = 1(`normalizeExtraQty` CT) → **기존 금액·표시 무변화**. 읽기는 `to_jsonb` 경유라 ALTER 전에도 발행·화면이 안 깨지고, 쓰기는 `DB_MIGRATION_PENDING` 503으로 드러난다.
+- **실측 대기**: ALTER 3 실행 → 9월 시세이도 항목 취소 후 재입력(1행 9건) → 반영 현황 1줄 · 재발행 상세 1줄 · PDF 2페이지 유형 칸에 "단축 URL 제작" · 1페이지 `단축 URL 제작 9건 × ₩50,000 = ₩450,000`.
+- **추가 과제(축 밖 · 기록만)**: 정산 메일 본문(`billing.ts` `buildHtmlBody`)의 회사명·계정명 등 다른 값은 이 변경 이전부터 HTML 이스케이프가 없다. 이번에 사람 입력이 새로 들어가는 항목명만 `escapeInvoiceHtml`로 닫았다. 착수 판단 = Harold.
+
 ### 🟡 B-0916-3 블록 창(블록 조립·스튜디오·쪽)의 글씨가 안 보인다 — 흰 표면에 다크 전제 색 (🟡 0916 수정 · 배포 대기) — 2026-09-16 Harold 접수
 
 - **실측**: 블록 창 상단 "사진이 없으면 여기서 바로 만들 수 있어요" 줄과 배지가 화면에서 보이지 않는다(스크린샷).

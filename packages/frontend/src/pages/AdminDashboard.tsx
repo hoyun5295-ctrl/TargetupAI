@@ -2750,6 +2750,10 @@ const billingTypeLabel: Record<string, string> = {
   // ★ 2026-09-13 브랜드 두 줄 — 없으면 상세 행에 원문 키가 보인다(청구서 라벨 = billing-types.ts label)
   BRAND: '브랜드메시지', BRAND_NF: '브랜드메시지(비친구)',
   TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS', SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS',
+  // ★ 2026-09-16 추가 항목(서수란 접수) — 없으면 상세 행에 내부 키(EXTRA_MANUAL)가 그대로 보인다.
+  //   실제로 그렇게 보이고 있었다. 이름은 PDF·이메일(billing-invoice-lines CT)과 같은 값이라야 한다.
+  EXTRA_080_FEE: '080 번호 이용료', EXTRA_080_SVC: '080 부가서비스', EXTRA_080_CALL: '080 통화료',
+  EXTRA_MANUAL: '부가서비스', EXTRA_BASE_FEE: '기본요금',
 };
 // 상세 행 '구분' 라벨 — ★2026-07-31부터 **서버가 내리는 `scope_label`이 단일 진실**이다
 // (backend `utils/billing-scope-label.ts`). 이 맵은 구버전 응답용 폴백으로만 남는다.
@@ -12882,14 +12886,21 @@ const handleApproveRequest = async (id: string) => {
                                 // 채널 판정은 유형키 접두가 아니라 channel — 접두 판정은 새 유형이 생기면 조용히 어긋난다.
                                 const ch = String(item.channel || 'web');
                                 const isPlan = ch === 'plan';
+                                // ★ 2026-09-16 발송 수량 축이 없는 행 — 요금제·추가 항목(080·부가서비스).
+                                //   PDF 2페이지는 처음부터 이 둘을 '-'로 그렸는데 화면만 0을 찍고 있었다.
+                                //   수기 항목이 `단가 × 수량` 한 줄이 되면서 그 0이 "9건인데 0"으로 읽힌다 — 같은 규약으로 맞춘다.
+                                const noQtyAxis = isPlan || ch === 'extra';
                                 const planDays = Number(item.plan_days) || 0;
                                 // 요금제 행은 발송이 아니다 — 일자 칸에 적용 구간, 수량 4칸에 '-'.
                                 const dateText = isPlan && planDays > 1
                                   ? `${String(item.item_date).slice(5, 10)}~${billingShiftDay(item.item_date, planDays - 1)}`
                                   : String(item.item_date).slice(5, 10);
+                                // ★ 2026-09-16 수기 부가서비스는 **입력한 항목명**이 유형 칸이다(PDF와 같은 규약).
+                                //   그 전에는 여기에 내부 키(EXTRA_MANUAL)가 그대로 보였다(서수란 접수).
+                                const extraLabel = String(item.item_label ?? '').trim();
                                 const typeText = isPlan
                                   ? String(item.message_type).replace(/^PLAN_/, '')
-                                  : (billingTypeLabel[item.message_type] || item.message_type);
+                                  : (extraLabel || billingTypeLabel[item.message_type] || item.message_type);
                                 // ★ 2026-07-31 구분 칸은 **서버가 확정한 값**(scope_label)을 그대로 쓴다 —
                                 //   화면이 자기 판정을 또 두면 청구서(PDF)와 갈린다(실제로 갈려 있었다:
                                 //   발급명은 화면에만, `extra` 행은 화면에서 원문 'extra' 노출).
@@ -12904,7 +12915,7 @@ const handleApproveRequest = async (id: string) => {
                                     <td className="px-3 py-2 text-gray-700 font-mono text-xs whitespace-nowrap">{dateText}</td>
                                     <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{scopeText}</td>
                                     <td className="px-3 py-2">{typeText}</td>
-                                    {isPlan ? (
+                                    {noQtyAxis ? (
                                       <>
                                         <td className="px-3 py-2 text-right text-gray-400">-</td>
                                         <td className="px-3 py-2 text-right text-gray-400">-</td>

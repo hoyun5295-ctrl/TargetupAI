@@ -173,6 +173,26 @@ export function billableQuantity(row: { success?: any; freeCount?: any; success_
   return success - free;
 }
 
+/**
+ * ★ CT: **추가 항목(extra) 청구 수량**의 단일 정의 (2026-09-16 신설 · 서수란 접수)
+ *
+ * 발송이 아니라 사람이 적어 넣는 수량이다(수기 부가서비스 "단축 URL 제작 9건"). 그래서 `billableQuantity`와
+ * 축이 다르다 — 성공·무료가 없고, **못 읽은 값이 0이 되면 안 된다.**
+ *
+ * ⛔ **부재·비정상은 언제나 1이다.** 수량이 컬럼이 되기 전의 행은 "1행 = 1건"이었고 그 행들은 NULL로 읽힌다.
+ *   NULL을 0으로 읽으면 옛 행·ALTER 전 서버에서 **청구 수량이 통째로 0**이 되고, 반대로 큰 값이 들어오면
+ *   없던 금액이 만들어진다. 0·음수·소수·안전정수 초과를 전부 1로 떨어뜨려 금액이 조용히 흔들리지 않게 한다.
+ *   (같은 부류의 함정 = 0912 KT 통화료 `toInt(null)` → 0원 줄 확정)
+ *
+ * 쓰는 곳 둘 — 원장 행은 `extraRowQuantity`(kind까지 본다), 저장된 상세 행은 `buildInvoiceLines`.
+ * 두 층이 각자 정규화하되 **규약은 이 함수 하나**다.
+ */
+export function normalizeExtraQty(v: any): number {
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < 1) return 1;
+  return n;
+}
+
 /** `company_agent_ids` 단가 행 — 발송ID별 단가는 회사 단가와 별개 축이다 */
 export interface AgentUnitPriceRow {
   id: string;

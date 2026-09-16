@@ -690,4 +690,69 @@ describe('계산서 비고(PO) 경로 계약 (2026-08-21)', () => {
     expect(settingsSrc).toContain("require_taxbill_remark = CASE WHEN $8 THEN EXCLUDED.require_taxbill_remark ELSE company_billing_settings.require_taxbill_remark END");
     expect(settingsSrc).toContain("(to_jsonb(s) ->> 'require_taxbill_remark')::boolean AS require_taxbill_remark");
   });
+
+  // ★ 2026-09-16 수기 부가서비스의 수량·항목명 (서수란 접수 · docs/FEATURE-BILLING.md §2-22).
+  //   런타임 테스트로는 "원장이 행을 몇 개 만드는가"·"INSERT가 어떤 칸을 채우는가"가 안 잡힌다 — 소스로 밟는다.
+  describe('수기 부가서비스 — 수량·항목명 (2026-09-16)', () => {
+    const b080Src = read('./billing-080.ts');
+
+    it('수량만큼 행을 만들지 않는다 — 수량은 원장 컬럼이고 행 수가 아니다', () => {
+      expect(b080Src, '수기 항목 INSERT가 루프 안에 있다(수량 = 행 수로 되돌아갔다)')
+        .not.toMatch(/for\s*\(\s*let\s+i\s*=\s*0;\s*i\s*<\s*qty/);
+      expect(b080Src, '수기 INSERT가 quantity를 채우지 않는다').toMatch(/INSERT INTO billing_extra_items[\s\S]{0,260}quantity/);
+    });
+
+    it('원장 읽기는 to_jsonb 경유 — ALTER 실행 전에도 발행·화면이 깨지지 않는다', () => {
+      const aggSrc = read('./send-usage-aggregation.ts');
+      expect(aggSrc).toContain("(to_jsonb(e) ->> 'quantity')::int AS quantity");
+    });
+
+    it('발행 코어가 항목명을 읽어 상세 행에 싣는다 — 이름이 없으면 화면·청구서가 내부 키로 떨어진다', () => {
+      expect(issueSrc).toContain('e.source_ref, e.label');
+      expect(issueSrc, 'billing_items INSERT에 수량·이름 칸이 없다').toMatch(/free_count,\s*\n\s*item_qty, item_label/);
+      expect(issueSrc, '바인딩 컬럼 수(COLS)가 INSERT 컬럼 수와 갈렸다').toContain('const COLS = 19');
+    });
+
+    it('수량 정규화 규약은 CT 하나 — 두 층(원장·상세 행)이 같은 함수를 쓴다', () => {
+      const typesSrc = read('./billing-types.ts');
+      expect(typesSrc).toContain('export function normalizeExtraQty');
+      const linesSrc = read('./billing-invoice-lines.ts');
+      expect(linesSrc).toContain('normalizeExtraQty(it?.item_qty)');
+      const aggSrc = read('./send-usage-aggregation.ts');
+      expect(aggSrc).toContain('return normalizeExtraQty(r?.quantity)');
+    });
+
+    it('상세 행의 유형 칸은 PDF·화면이 같은 규약을 쓴다 — 항목명 우선, 없으면 유형 표시명', () => {
+      expect(pdfSrc).toContain('extraLabel || typeLabel[item.message_type]');
+      const adminUiSrc = readFileSync(
+        resolve(__dirname, '../../../frontend/src/pages/AdminDashboard.tsx'), 'utf8',
+      );
+      expect(adminUiSrc).toContain('extraLabel || billingTypeLabel[item.message_type]');
+      // 화면이 내부 키를 그대로 노출하던 결함의 재발 차단 — 라벨표에 EXTRA_* 키가 있어야 한다.
+      expect(adminUiSrc).toContain("EXTRA_MANUAL: '부가서비스'");
+    });
+
+    it('메일 항목표가 항목명을 이스케이프한다 — 사람이 적은 값이 HTML 본문에 그대로 들어가는 자리다', () => {
+      expect(billingSrc).toContain('${escapeInvoiceHtml(l.label)}');
+    });
+
+    it('수정 재발행은 **삭제 전에** 발행이 쓰는 컬럼을 확인한다 — 지운 정산이 안 돌아오는 창을 만들지 않는다', () => {
+      // 삭제는 커밋되고 재발행만 실패하면 원본이 영영 사라진다(조정 preflight·라벨 승계와 같은 부류).
+      const guard = billingSrc.indexOf("AND column_name IN ('item_qty', 'item_label')");
+      const del = billingSrc.indexOf("DELETE FROM billings WHERE id = ANY($1::uuid[])");
+      expect(guard, '재발행 컬럼 확인이 없다').toBeGreaterThan(-1);
+      expect(del, '삭제문을 찾지 못했다').toBeGreaterThan(-1);
+      expect(guard, '컬럼 확인이 삭제보다 뒤에 있다 — 원본을 지키지 못한다').toBeLessThan(del);
+      expect(billingSrc.slice(guard, del)).toContain("code: 'DB_MIGRATION_PENDING'");
+    });
+
+    it('추가 항목 행은 발송 수량 4칸을 표시하지 않는다 — PDF와 화면이 같은 판정(0이 "9건인데 0"으로 읽힌다)', () => {
+      expect(pdfSrc).toContain("if (ch === 'plan' || ch === 'extra')");
+      const adminUiSrc = readFileSync(
+        resolve(__dirname, '../../../frontend/src/pages/AdminDashboard.tsx'), 'utf8',
+      );
+      expect(adminUiSrc).toContain("const noQtyAxis = isPlan || ch === 'extra'");
+      expect(adminUiSrc).toContain('{noQtyAxis ? (');
+    });
+  });
 });

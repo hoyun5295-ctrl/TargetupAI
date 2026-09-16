@@ -35,7 +35,7 @@ import { retryUnsentConfirmations, ensureConfirmationToken, renderConfirmBlockHt
 // ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행·반영·취소·수동완료가 **같은 두 겹**을 잡아야 서로를 막는다.
 import { lockCompanyForBilling, lockCompaniesForBilling } from '../utils/billing-lock';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
-import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, sumFlooredInvoiceLines, invoiceLineLabel } from '../utils/billing-invoice-lines';
+import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, sumFlooredInvoiceLines, invoiceLineLabel, escapeInvoiceHtml } from '../utils/billing-invoice-lines';
 import { resolveBillingScopeLabel } from '../utils/billing-scope-label';
 import {
   loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate,
@@ -159,7 +159,7 @@ router.post('/generate', async (req: Request, res: Response) => {
     }
     const emsg = error?.message || '';
     if (emsg.includes('column') && emsg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요: billing_items.channel·store_id·plan_days·plan_month_days, billings.scope·batch_id, ai_credit_transactions.overage_credits·billed_billing_id 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: billing_items.channel·store_id·plan_days·plan_month_days·item_qty·item_label, billings.scope·batch_id, ai_credit_transactions.overage_credits·billed_billing_id 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('정산 생성 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -1748,7 +1748,15 @@ ${EXTRA_ITEM_SOURCE_JOIN}
         // 항목명은 청구서 항목줄과 **같은 함수**에서 온다 — 화면과 인쇄물의 이름이 갈라지지 않는다.
         //   ★ 2026-08-04 이미 발행에 실린 행은 파생값을 보여주지 않는다(Codex 적대검증 수용) — 청구서는
         //   `billing_items`에 굳어 있는데 원장을 고치면 화면 숫자만 바뀌어 "발행액이 바뀐 것처럼" 읽힌다.
-        billable_parts: billed ? [] : parts.map((p) => ({ type_key: p.typeKey, label: invoiceLineLabel('extra', p.typeKey), amount: p.amount })),
+        //   ★ 2026-09-16 수기 항목은 **자기 이름과 수량**을 함께 내린다 — 화면이 "단축 URL 제작 9건 × ₩50,000"을
+        //   한 줄로 보여준다(그전에는 원장이 9행이라 같은 줄이 아홉 번 늘어섰다 · 서수란 접수).
+        billable_parts: billed ? [] : parts.map((p) => ({
+          type_key: p.typeKey,
+          label: (p.itemLabel || '').trim() || invoiceLineLabel('extra', p.typeKey),
+          qty: p.itemQty ?? 1,
+          unit_price: p.unitPrice,
+          amount: p.amount,
+        })),
         billable_supply: billed ? null : parts.reduce((s, p) => s + p.amount, 0),
         // 매핑이 사라진 현행 행(통화료 스냅샷·고정료 근거) = 그 회사 발행이 막힌다(BILLING_080_MAPPING_MISSING).
         blocks_issue: (kind === '080_call' || kind === '080_base') && !row.map_found,
@@ -1850,8 +1858,9 @@ router.post('/extra-items', async (req: Request, res: Response) => {
     // ★ 2026-07-31 `user_id` ALTER 미실행 서버에서 사람이 고칠 수 없는 오류를 400으로 흘리지 않는다.
     //   ★ 2026-08-20(2) 커버리지 판정이 billing_manual_completions도 읽는다 — 안내 대상에 포함.
     const emsgX = error?.message || '';
+    //   ★ 2026-09-16 수량 컬럼(quantity) 미실행 서버도 같은 안내로 떨어진다 — 이 INSERT는 to_jsonb로 피할 수 없다.
     if (emsgX.includes('does not exist') && (emsgX.includes('column') || emsgX.includes('relation'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: billing_extra_items.user_id·billing_manual_completions 반영 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: billing_extra_items.user_id·quantity·billing_manual_completions 반영 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('부가서비스 항목 추가 오류:', emsgX || error);
     return res.status(400).json({ success: false, error: emsgX || '항목 추가 실패' });
@@ -2463,6 +2472,23 @@ const handleBillingDelete = async (req: Request, res: Response) => {
     }
 
     if (reissue) {
+      // ★ 2026-09-16 **세 번째 원인 — 발행이 쓰는 컬럼이 아직 없는 경우**(Codex 1R high 수용).
+      //   0916에 상세 행이 `item_qty`·`item_label`을 쓰기 시작했다. ALTER 전 서버에서 재발행을 누르면
+      //   삭제는 커밋되고 그 뒤 INSERT가 42703으로 죽어 **지운 정산이 영영 안 돌아온다**(수기 항목이
+      //   없는 정산도 같다 — INSERT 문이 그 칸을 항상 나열한다). 배포 순서로만 막지 않고 여기서 닫는다.
+      //   판정은 카탈로그 1회. 드라이버가 파싱하는 타입으로 캐스팅한다(LESSONS_DB — `name[]`·도메인 타입 함정).
+      const reissueCols = await client.query(
+        `SELECT column_name::text AS name FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'billing_items'
+            AND column_name IN ('item_qty', 'item_label')`,
+      );
+      if (reissueCols.rows.length < 2) {
+        await client.query('ROLLBACK');
+        return res.status(503).json({
+          error: 'DB 마이그레이션 필요: billing_items.item_qty·item_label 컬럼 ALTER 실행 요청. 기존 정산은 그대로 있습니다.',
+          code: 'DB_MIGRATION_PENDING',
+        });
+      }
       // ★ 2026-08-04 **삭제하기 전에** 조정이 적용 가능한지 본다(Codex 재검증 high 완화).
       //   삭제와 재발행은 트랜잭션이 둘이라, 재발행이 422로 막히면 정산만 사라진 채 남는다.
       //   재발행 실패의 실질 원인 둘(조정 대상 줄 없음·조정 후 음수)을 여기서 미리 걸러낸다.
@@ -3246,7 +3272,7 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
     }
     const LINE_BG: Record<string, string> = { web: '', agent: ' background: #EFF6FF;', test: ' background: #FFFBEB;', spam: ' background: #FEF3C7;' };
     const lineRowsHtml = emailLines.map((l) => `<tr style="border-bottom: 1px solid #F3F4F6;${LINE_BG[l.channel] || ''}">
-              <td style="padding: 8px 0; color: #6B7280;">${l.label}</td>
+              <td style="padding: 8px 0; color: #6B7280;">${escapeInvoiceHtml(l.label)}</td>
               <td style="padding: 8px 0; text-align: right;">${l.quantityText ? `${l.quantityText} × ₩${l.unitPrice.toLocaleString()}/월` : `${l.count.toLocaleString()}건 × ₩${l.unitPrice.toLocaleString()}`}</td>
               <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${l.amount.toLocaleString()}</td>
             </tr>`).join('');

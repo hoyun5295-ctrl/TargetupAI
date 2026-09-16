@@ -72,7 +72,9 @@ interface ExtraItem {
    *   080은 스냅샷 1행(통화료)에서 이용료·부가서비스·통화료를 매핑 원장으로 파생하므로,
    *   화면이 `supply_amount`를 그대로 보여주면 매핑을 고쳐도 옛 금액이 보인다(접수 원인).
    */
-  billable_parts: Array<{ type_key: string; label: string; amount: number }>;
+  billable_parts: Array<{ type_key: string; label: string; amount: number; qty?: number; unit_price?: number }>;
+  /** ★ 2026-09-16 수기 항목의 청구 수량 — 그전에는 수량만큼 행이 늘어서 이 목록이 같은 줄로 도배됐다 */
+  quantity?: number | null;
   /** 발행에 실린 행은 null — 청구서는 굳어 있으므로 원장에서 다시 계산한 값을 보여주지 않는다 */
   billable_supply: number | null;
   /** 매핑이 사라진 반영분 — 그 회사 발행이 막힌다 */
@@ -233,7 +235,8 @@ export default function Billing080Modal({ open, onClose, companies }: {
       });
       const d = await r.json();
       if (d.success) {
-        say(`추가했습니다. 공급가 ${won(d.supplyTotal)} (${mQty}건). ${mMonth}월 발행 때 "부가서비스" 항목으로 실립니다.`);
+        // ★ 2026-09-16 실릴 이름은 입력한 항목명이다 — 안내도 그 이름으로 한다(청구서·상세와 같은 값).
+        say(`추가했습니다. 공급가 ${won(d.supplyTotal)} (${mQty}건). ${mMonth}월 발행 때 "${mLabel.trim()}" 항목 한 줄로 실립니다.`);
         setMLabel(''); setMQty(1);
         if (statusMonth === mMonth) loadItems(mMonth);
       } else say(d.error || '추가 실패', 'error');
@@ -598,8 +601,10 @@ export default function Billing080Modal({ open, onClose, companies }: {
                     </button>
                   </div>
                 </div>
+                {/* ★ 2026-09-16 항목명이 그대로 인쇄된다 — 미리보기 문구도 같은 이름을 쓴다(서수란 접수).
+                    그전에는 '부가서비스'라고만 나갔고, 상세 내역은 수량만큼 줄이 늘어섰다. */}
                 <p className="text-[11px] text-gray-400 mt-2.5">
-                  거래내역서에는 <b>"부가서비스 {mQty}건 × {won(mUnit)} = {won(mUnit * mQty)}"</b>로 인쇄됩니다.
+                  거래내역서에는 <b>"{mLabel.trim() || '부가서비스'} {mQty}건 × {won(mUnit)} = {won(mUnit * mQty)}"</b> 한 줄로 인쇄됩니다(상세 내역도 같은 한 줄).
                   입력 내용은 반영 현황 탭에서 확인·삭제할 수 있습니다. 이미 발행된 달에는 추가할 수 없습니다.
                 </p>
               </div>
@@ -692,11 +697,16 @@ export default function Billing080Modal({ open, onClose, companies }: {
                                 )}
                               </div>
                               <div className="text-[11px] text-gray-400 mt-0.5">
+                                {/* ★ 2026-09-16 수량이 2 이상이면 산식을 그대로 보여준다 — 청구서 항목줄과 같은 문장이다. */}
                                 {it.billed_billing_id
                                   ? '발행됨: 금액은 발행된 청구서 기준'
                                   : it.billable_parts.length === 0
                                     ? '청구 항목 없음'
-                                    : it.billable_parts.map((p) => `${p.label} ${won(p.amount)}`).join(' · ')}
+                                    : it.billable_parts.map((p) => (
+                                        Number(p.qty) > 1
+                                          ? `${p.label} ${p.qty}건 × ${won(Number(p.unit_price))} = ${won(p.amount)}`
+                                          : `${p.label} ${won(p.amount)}`
+                                      )).join(' · ')}
                               </div>
                             </div>
                             {/* ★ 2026-07-31 귀속 — 계정 앞 항목만 표시한다(고객사 전체는 기본값이라 조용히 둔다). */}
