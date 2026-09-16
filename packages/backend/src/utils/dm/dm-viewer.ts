@@ -21,6 +21,8 @@ import type { DmBrandKit } from './dm-tokens';
 import { expandSlidePagesForSwipe, isSwipeImagePage } from './dm-slides-expand';
 // ★ 2026-09-15 카탈로그 보기(PC 책 펼침) — 게이트·og 메타·viewport·CSS/HTML/스크립트 조각. 조건 밖 DM 출력은 바이트 동일.
 import { isCatalogDm, isCatalogEnabled, catalogFirstImageUrl, CATALOG_VIEWPORT_META, renderCatalogOgMeta, renderCatalogCss, renderCatalogHtml, renderCatalogScript, renderCatalogMobileGridButton } from './dm-viewer-catalog';
+// ★ 2026-09-16 장 넘김 효과(settings.effect · 밀어내기 기본 = 미삽입 = 현행 바이트 동일)
+import { effectOf, effectBodyClass, renderEffectCss, renderEffectScript } from './dm-effect';
 
 export { inlineImage, youtubeEmbedUrl };
 
@@ -362,6 +364,8 @@ function renderPagesHtml(
   const totalPages = pages.length;
   // ★ 2026-09-15 카탈로그 보기 게이트 — **고른 DM만**(settings.catalog · Harold 정정 : 자동 아님) AND slides AND 펼친 뒤 전 장이 이미지 무대 · 2장 이상(isCatalogDm). 조건 밖 = 아래 삽입 전부 빈 문자열.
   const catalog = mode === 'slides' && isCatalogEnabled(dm) && isCatalogDm(pages as any);
+  // ★ 2026-09-16 장 넘김 효과 — 고른 DM만(flip·fade). 미지정·slide = null → 아래 삽입 전부 빈 문자열(현행 경로 그대로)
+  const fx = effectOf(dm, mode, totalPages);
 
   // ★ 2026-07-13 디자인 3.0 — brand_kit.art_direction 영속분 실주입(옛 Task 7 완결).
   //   미설정 DM = tone 기반 정규화 기본값... 이 아니라 중립 기본과 동일 출력을 위해 raw 없으면 null 정규화(기존 발행물 무변화).
@@ -476,10 +480,10 @@ ${renderDmVariantCss()}
 .cd-unit{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:var(--dm-sp-4) var(--dm-sp-3);min-width:76px}
 .cd-num{font-size:34px;font-weight:800;font-family:var(--dm-font-display);font-variant-numeric:tabular-nums;letter-spacing:1px;color:var(--dm-cd-num,#fff);line-height:1.1}
 .cd-lbl{font-size:11px;opacity:0.55;margin-top:6px;letter-spacing:2px}
-${modeCss}${catalog ? renderCatalogCss() : ''}
+${modeCss}${catalog ? renderCatalogCss() : ''}${renderEffectCss(fx)}
 </style>
 </head>
-<body data-layout-mode="${mode}"${artDirection.accentMotif !== 'none' ? ` data-dm-motif="${artDirection.accentMotif}"` : ''}${artDirection.sectionDivider !== 'none' ? ` data-dm-divider="${artDirection.sectionDivider}"` : ''}${catalog ? ' data-dm-catalog="1"' : ''}>
+<body data-layout-mode="${mode}"${artDirection.accentMotif !== 'none' ? ` data-dm-motif="${artDirection.accentMotif}"` : ''}${artDirection.sectionDivider !== 'none' ? ` data-dm-divider="${artDirection.sectionDivider}"` : ''}${catalog ? ' data-dm-catalog="1"' : ''}${fx ? ` class="${effectBodyClass(fx).trim()}" data-dm-effect="${fx}"` : ''}>
 <div class="dm-viewer">
 ${pagesHtml}
 </div>
@@ -606,7 +610,7 @@ ${mode === 'slides' ? `
   // 장 이동 한 곳 — 점 클릭·화살표·키보드가 같이 쓴다
   function goToPage(i) {
     if (!pageEls[i]) return;
-    if (MODE === 'slides') {
+${fx ? '    fxGo(i); return;\n' : ''}    if (MODE === 'slides') {
       var viewer = document.querySelector('.dm-viewer');
       if (viewer) viewer.scrollTo({ left: i * viewer.clientWidth, behavior: 'smooth' });
     } else {
@@ -676,7 +680,7 @@ ${catalog ? '      if (dmCatalogOn) return;\n' : ''}      if (e.key === 'ArrowRi
       else if (e.key === 'ArrowLeft') goToPage(currentIdx - 1);
     });
   }
-${catalog ? renderCatalogScript() : ''}
+${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
   // 섹션 클릭 → 클릭 카운트 + 요소(버튼/링크/옵션/탭) 라벨 카운트.
   // 외부 링크/CTA는 클릭 즉시 이탈 — 떠나기 전에 비콘으로 클릭 보존.
   document.addEventListener('click', function(e){

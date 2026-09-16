@@ -34,6 +34,16 @@ export function inlineImage(src: string): string {
 }
 
 /**
+ * ★ 2026-09-16 저장된 DM 이미지 src → 서버 로컬 파일 경로. 우리 저장본이 아니면 null.
+ * (inlineImage 가 쓰던 판정을 한 곳으로 빼 쪽 합성(dm-catalog-render)도 같은 규칙을 쓴다.)
+ */
+export function dmImageLocalPath(src: string): string | null {
+  const m = String(src || '').match(/\/(?:api\/dm\/images|api\/flyer\/p\/dm-images|api\/dm\/v\/images)\/([^/?#]+)\/([^/?#]+)(?:[?#].*)?$/);
+  if (!m) return null;
+  return path.join(DM_IMAGE_DIR, m[1], m[2]);
+}
+
+/**
  * 저장된 이미지 src를 공개 뷰어 경로(/api/dm/v/images/:companyId/:filename)로 정규화.
  * 뷰어와 동일 dmPublicRouter가 서빙 → 뷰어가 뜬 도메인에서 항상 도달. base64보다 HTML 경량.
  * 외부 URL/data URL은 그대로. (base64 인라인이 필요하면 inlineImage 사용 — fallback)

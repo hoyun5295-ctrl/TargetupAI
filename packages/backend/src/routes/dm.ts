@@ -22,6 +22,9 @@ import {
   extractFlatSectionsFromDm, extractPagesFromDm, extractDmCopyText,
   stopDm, resumeDm, isDmStopped, isDmStoppedByCode, DM_TRANSITION_BLOCK_MESSAGES,
 } from '../utils/dm/dm-builder';
+// ★ 2026-09-16 쪽 템플릿 조립(블록 조립 화면·AI 자동제작 공용) — 자리 정의는 dm-catalog-templates, 합성 실행은 dm-catalog-render
+import { renderCatalogTemplatePage } from '../utils/dm/dm-catalog-render';
+import { CATALOG_TEMPLATES, catalogTemplateOf, type CatalogTemplateKey } from '../utils/dm/dm-catalog-templates';
 // ★ 2026-08-25 DB 스키마 부재 → 503 안내(CLAUDE.md db_alter_safety_net)
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
 // ★ 2026-07-03 DM 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 1)
@@ -2546,6 +2549,55 @@ dmRouter.post('/:id/self-diagnose', async (req: any, res: any) => {
       return send503Migration(res, 'dm_pages ALTER 4 + dm_event_responses CREATE');
     }
     return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** 한 번에 만들 수 있는 쪽 수 상한 — 합성은 쪽마다 sharp + 글자 합성 1회다 */
+const CATALOG_RENDER_MAX_PAGES = 30;
+
+// ── ★ 2026-09-16 쪽 템플릿 (블록 조립 화면이 쓰는 공용 경로) ──
+// GET /api/dm/catalog/templates — 자리 정의(화면이 미리보기·필요 사진 수를 그린다). AI 0 · 크레딧 0
+dmRouter.get('/catalog/templates', (req: any, res: any) => {
+  if (!req.user?.companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  return res.json({
+    success: true,
+    data: CATALOG_TEMPLATES.map((t) => ({
+      key: t.key, name: t.name, photos: t.images.length,
+      texts: t.texts.map((b) => ({ key: b.key, maxLines: b.maxLines })),
+    })),
+  });
+});
+
+// POST /api/dm/catalog/render-pages — 쪽 정의 N개 → 쪽 이미지 N장(1200×1600). AI 호출 0 · 크레딧 0(사용자가 자리에 직접 넣는 편집 행위)
+//   사진은 우리 저장본만 읽는다(dm-catalog-render readLocalImage) · 숫자는 새기지 않는다(상품 정보 = 쪽 밖 칩)
+dmRouter.post('/catalog/render-pages', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const raw = Array.isArray(req.body?.pages) ? req.body.pages : [];
+    if (raw.length === 0) return res.status(400).json({ success: false, error: '만들 쪽이 없습니다.' });
+    if (raw.length > CATALOG_RENDER_MAX_PAGES) {
+      return res.status(400).json({ success: false, error: `쪽은 한 번에 ${CATALOG_RENDER_MAX_PAGES}장까지 만들 수 있어요.` });
+    }
+    const brandColor = typeof req.body?.brand_color === 'string' ? req.body.brand_color : null;
+    const pages: Array<{ template: CatalogTemplateKey; url: string | null }> = [];
+    for (const p of raw) {
+      const template = catalogTemplateOf(String(p?.template || 'one') as CatalogTemplateKey).key;
+      const url = await renderCatalogTemplatePage({
+        companyId,
+        template,
+        photos: Array.isArray(p?.photos) ? p.photos.map((x: any) => String(x || '')) : [],
+        texts: (p?.texts && typeof p.texts === 'object') ? p.texts : {},
+        brandColor,
+      });
+      pages.push({ template, url });
+    }
+    const made = pages.filter((p) => p.url).length;
+    if (made === 0) return res.status(422).json({ success: false, error: '쪽을 만들지 못했습니다. 사진을 다시 올려 주세요.' });
+    return res.json({ success: true, data: { pages, made, failed: pages.length - made } });
+  } catch (err: any) {
+    console.error('[DM catalog/render-pages] 오류:', err?.message);
+    return res.status(500).json({ success: false, error: '쪽을 만들지 못했습니다. 잠시 후 다시 시도해주세요.' });
   }
 });
 

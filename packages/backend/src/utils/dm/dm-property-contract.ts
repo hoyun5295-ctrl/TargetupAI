@@ -75,6 +75,11 @@ export const DM_PRODUCT_CAROUSEL_PER_PAGE = 2;
  *  (종전엔 escapeHtml만이라 \n이 공백으로 붕괴 → 편집창 3줄, 단말 1줄). card·classic 양 구도 SSR + 캔버스 StoreInfoSection 미러. */
 export const DM_STORE_INFO_NEWLINE_FIELDS = ['business_hours', 'address'] as const;
 
+/** ★ 2026-09-16 카탈로그 쪽 상품 칩 — 가격·링크는 쪽 이미지에 새기지 않고 이 마커로 이미지 밖에 나온다.
+ *  값 = gallery props.chips[{label, price?, url?}] · 렌더 = dm-section-renderer renderGalleryChips.
+ *  이미지에 숫자를 새기지 않는 이유 = 값이 바뀌면 재합성 없이는 고칠 수 없다(설계서 2026-09-16 §5-3). */
+export const DM_GALLERY_CHIP_MARKER = 'data-dm-chip';
+
 /** ★ 2026-07-21 고아 토글 전수 배선 — 편집기 토글이 발행물/뷰어에 실제 소비돼야 한다(종전 전부 미소비 = 토글해도 단말 무변화).
  *  각 값 = 발행물에 나와야 하는 마커(뷰어 dm-viewer.ts가 같은 마커로 배선). enable_zoom=갤러리 링크 없는 이미지 라이트박스,
  *  allow_multiple=투표 복수 선택+제출, show_progress=설문 진행률 실시간.

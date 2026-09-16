@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import { DmMiniCover, QuickStartThumbnail } from '../components/dm/DmThumbnails';
+import DmBlockBuilder from '../components/dm/build/DmBlockBuilder';
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
 import { useDmBuilderStore } from '../stores/dmBuilderStore';
@@ -116,7 +117,7 @@ export default function DmBuilderPage() {
   const navigate = useNavigate();
   const customerGate = useCustomerDataGate(localStorage.getItem('token'));
   const [showDataGate, setShowDataGate] = useState(false);
-  const [mode, setMode] = useState<'list' | 'edit'>('list');
+  const [mode, setMode] = useState<'list' | 'edit' | 'build'>('list');
   const [list, setList] = useState<DmListItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
   // ★ 2026-09-02 딥링크 진입(/dm-builder?id=<DM>&from=planner) — 마케팅 플래너 [DM 완성하기] 1클릭.
@@ -256,6 +257,14 @@ export default function DmBuilderPage() {
     setLegacyDmError(null);
     createNew({ layoutMode: 'scroll' });
     setMode('edit');
+  };
+
+  // ★ 2026-09-16 블록 조립 시작 — 빈 DM 을 만들고 조립 화면으로 (저장 축·캔버스는 편집기와 같다)
+  const handleStartBlockBuild = () => {
+    if (generating) return;
+    setLegacyDmError(null);
+    createNew({ layoutMode: 'scroll' });
+    setMode('build');
   };
 
   // ★ D216+ 자동 생성 흐름 — 자연어 OR 시나리오 → AI 자동 sections + 카피 → 편집 모드 진입
@@ -637,6 +646,15 @@ export default function DmBuilderPage() {
   };
 
   // ── 편집 모드 ──
+  if (mode === 'build') {
+    return (
+      <DmBlockBuilder
+        onBack={() => setMode('list')}
+        onDone={() => { void save({ silent: true }); setMode('edit'); }}
+      />
+    );
+  }
+
   if (mode === 'edit') {
     return (
       <div className="dm-builder" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -860,11 +878,11 @@ export default function DmBuilderPage() {
           <style>{`
             .dm-hub-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
             /* ★ 2026-09-16 Harold — 가로 4칸은 타일이 좁아 제목이 꺾였다 → 항상 2×2 · 빠른 시작 대신 이 2×2가 남는 높이를 나눠 갖는다 */
-            .dm-hub-bottom { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; flex: 1; }
+            .dm-hub-bottom { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; flex: 1; }
             /* ★ 2026-08-21 한글은 기본 줄바꿈이 글자 단위라 "추 가"·"슬라 이드"·"불러 오기"처럼 낱말이 잘렸다.
                keep-all = 띄어쓰기에서만 끊는다(줄 위치는 아래 타일이 <br/>로 직접 정한다). */
             .dm-hub-bottom button { word-break: keep-all; }
-            @media (max-width: 767px) { .dm-hub-grid { grid-template-columns: 1fr; } }
+            @media (max-width: 767px) { .dm-hub-grid { grid-template-columns: 1fr; } .dm-hub-bottom { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
           `}</style>
           <div className="dm-hub-grid">
             {/* 좌 — 프롬프트 입력 */}
@@ -958,8 +976,10 @@ export default function DmBuilderPage() {
 
             {/* 우 — 위: 빠른 시작 / 아래: 자유 시작 · 완성 슬라이드 */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* ★ 2026-09-16 Harold — 빠른 시작(시나리오만 넘겨 AI가 전부 지어내던 경로) 자리를 블록 조립이 대신한다.
+                  블록을 누르면 필요한 것만 묻는 창이 뜨고, 넣은 재료로 쌓인다(사진 0장으로 만들어지지 않는다). */}
               <button
-                onClick={() => { if (!generating) setQuickStartOpen(true); }}
+                onClick={handleStartBlockBuild}
                 disabled={generating}
                 style={{
                   minHeight: 104, padding: '14px 16px', textAlign: 'center',
@@ -969,11 +989,21 @@ export default function DmBuilderPage() {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 18 }}>⚡</span>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>빠른 시작</span>
+                  <span style={{ fontSize: 18 }}>🧱</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>블록으로 만들기</span>
                 </div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', lineHeight: 1.5 }}>12가지 시나리오: 카드 클릭 즉시 AI가 섹션 + 카피를 만들고 편집 모드로 들어갑니다</div>
-                <div style={{ fontSize: 13, marginTop: 8, letterSpacing: 2 }}>🛍️ 🏷️ 🎁 🗺️ 📝 ✉️ 🎡 🖼️ ⭐ ⏳ 📊 👑</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', lineHeight: 1.5 }}>헤드라인·상품·쿠폰·추첨 같은 블록을 고르면 필요한 것만 물어봐요. 저장하면 바로 쌓입니다</div>
+                <div style={{ fontSize: 13, marginTop: 8, letterSpacing: 2 }}>🖼️ ✍️ 🛍️ 🔗 ▶️ 🎟️ 🎁 📊 🗺️ 👉</div>
+              </button>
+              <button
+                onClick={() => { if (!generating) setQuickStartOpen(true); }}
+                disabled={generating}
+                style={{
+                  background: 'transparent', border: 0, color: 'rgba(255,255,255,0.5)',
+                  fontSize: 11.5, padding: '2px 0 4px', cursor: generating ? 'not-allowed' : 'pointer', textAlign: 'center',
+                }}
+              >
+                시나리오 12종으로 시작하기 (AI가 구성까지 제안)
               </button>
               <div className="dm-hub-bottom">
                 <button
@@ -993,9 +1023,12 @@ export default function DmBuilderPage() {
                   </div>
                   <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>빈 캔버스에서<br />직접 섹션 추가</div>
                 </button>
+                {/* ★ 2026-09-16 Harold — [완성 슬라이드]와 [카탈로그 DM]은 만드는 결과가 같았다(장마다 이미지 1장).
+                    차이는 settings.catalog(PC 책 펼침) 하나뿐이라 입구를 합치고, 책 펼침은 편집기 토글로 켠다. */}
                 <button
-                  onClick={() => { uploadModeRef.current = 'slides'; completedImagesInputRef.current?.click(); }}
+                  onClick={() => { uploadModeRef.current = 'catalog'; completedImagesInputRef.current?.click(); }}
                   disabled={generating || uploadingImages}
+                  title="완성된 이미지를 순서대로 올리면 휴대폰은 슬라이드, PC는 책처럼 두 쪽씩 펼쳐 보입니다. 편집기에서 끌 수 있어요"
                   style={{
                     minHeight: 84, padding: '14px 16px', textAlign: 'center',
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -1005,27 +1038,9 @@ export default function DmBuilderPage() {
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 26, lineHeight: 1 }}>🖼️</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 슬라이드'}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 이미지 올리기'}</span>
                   </div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>완성 이미지 업로드<br />→ 슬라이드 DM</div>
-                </button>
-                {/* ★ 2026-09-15 카탈로그 DM(Harold) — 쪽 이미지 N장(장수 제한 없음) → 휴대폰 슬라이드 · PC 책 펼침. 완성 슬라이드와 같은 업로드 입구 · settings.catalog 만 다르다 */}
-                <button
-                  onClick={() => { uploadModeRef.current = 'catalog'; completedImagesInputRef.current?.click(); }}
-                  disabled={generating || uploadingImages}
-                  title="쪽 이미지를 순서대로 올리면 휴대폰에서는 슬라이드로, PC에서는 책처럼 두 쪽씩 펼쳐 보이는 카탈로그 DM이 됩니다"
-                  style={{
-                    minHeight: 84, padding: '14px 16px', textAlign: 'center',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
-                    cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
-                  }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 26, lineHeight: 1 }}>📖</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '카탈로그 DM'}</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>쪽 이미지 업로드<br />→ PC 책 펼침</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>이미지 그대로 슬라이드<br />PC는 책 펼침</div>
                 </button>
                 {/* ★ 2026-07-19 P4: 라이브러리 불러오기 — 저장 소재 다중 선택 → 이미지 DM */}
                 <button

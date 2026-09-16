@@ -940,6 +940,30 @@ function renderProductList(p: any, products: any[]): string {
 }
 
 // ★ 2026-07-13 디자인 3.0 — gallery treatment (classic / mosaic 첫 장 대형 변칙 그리드)
+/**
+ * ★ 2026-09-16 카탈로그 쪽 상품 칩 — 가격·링크를 **이미지 밖 글자**로 낸다.
+ * 이미지에 숫자를 새기면 값이 바뀔 때 거짓말이 되고, 다시 합성해야 고쳐진다.
+ * 쪽 자격(dm-slides-expand isSwipeImagePage = 갤러리 1섹션·list_1xN·이미지 1장)은 props 추가로 바뀌지 않는다 → 책 펼침 유지.
+ * 계약 = dm-property-contract DM_GALLERY_CHIP_MARKER.
+ */
+function renderGalleryChips(p: any): string {
+  const chips = Array.isArray(p?.chips) ? p.chips : [];
+  if (chips.length === 0) return '';
+  const items = chips.slice(0, 4).map((c: any) => {
+    const label = escapeHtml(String(c?.label || '').trim());
+    if (!label) return '';
+    const price = c?.price ? `<em style="font-style:normal;font-weight:800;color:var(--dm-primary);margin-left:auto">${escapeHtml(String(c.price))}</em>` : '';
+    const inner = `<b style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</b>${price}`;
+    const href = c?.url ? safeUrl(String(c.url)) : '#';
+    const style = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 140px;padding:9px 14px;border-radius:999px;background:var(--dm-bg,#fff);border:1px solid var(--dm-neutral-200);box-shadow:0 2px 8px rgba(0,0,0,0.12);font-size:var(--dm-fs-small);color:var(--dm-neutral-900);text-decoration:none';
+    return href !== '#'
+      ? `<a data-dm-chip href="${href}" target="_blank" rel="noopener" style="${style}">${inner}</a>`
+      : `<span data-dm-chip style="${style}">${inner}</span>`;
+  }).join('');
+  if (!items) return '';
+  return `<div class="dm-gal-chips" style="display:flex;flex-wrap:wrap;gap:6px;padding:var(--dm-sp-3) var(--dm-sp-5) var(--dm-sp-4)">${items}</div>`;
+}
+
 function renderGallery(p: any, treatment?: string): string {
   const images = Array.isArray(p?.images) ? p.images : [];
   if (images.length === 0) {
@@ -985,6 +1009,7 @@ function renderGallery(p: any, treatment?: string): string {
   return `<div class="dm-section dm-gallery" style="padding:${sectionPad}">
     ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4);${titlePad}">${escapeHtml(p.title)}</div>` : ''}
     <div class="dm-gal-grid" style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${gap}px">${items}</div>
+    ${renderGalleryChips(p)}
   </div>`;
 }
 

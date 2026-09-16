@@ -115,6 +115,8 @@ export type DmBuilderState = {
    * 뷰어(dm-viewer-catalog)가 이 플래그로 PC 책 펼침을 판정한다(휴대폰은 슬라이드 그대로). 자동 판정 없음.
    */
   catalogView: boolean;
+  /** ★ 2026-09-16 장 넘김 효과(슬라이드 DM) — 'slide'(기본·현행) | 'flip' | 'fade'. 저장 = settings.effect */
+  pageEffect: DmPageEffect;
   approvalStatus: ApprovalStatus;
   /** ★ 2026-07-02(3) 실제 발행 여부(dm.status='published'/short_code 축) — 발행(100크레딧) 완료 = 버튼 [발송] 전환·크레딧 모달 미노출 */
   isPublished: boolean;
@@ -207,6 +209,7 @@ export type DmBuilderState = {
   setValidationOverride: (v: DmBuilderState['validationOverride']) => void;
 
   // ── Actions: AI 적용 ──
+  setPageEffect: (effect: DmPageEffect) => void;
   applyAiGenerated: (sections: Section[], brandKit?: DmBrandKit, prompt?: string, opts?: { pages?: Section[][]; layoutMode?: LayoutMode; catalogView?: boolean }) => void;
 
   // ── Actions: Persistence ──
@@ -244,9 +247,19 @@ function readCatalogFlag(raw: unknown): boolean {
   return !!obj && typeof obj === 'object' && (obj as Record<string, unknown>).catalog === true;
 }
 
+/** ★ 2026-09-16 settings.effect 읽기 — 서버 dm-effect effectOf 와 같은 판정(모르는 값 = 기본) */
+export type DmPageEffect = 'slide' | 'flip' | 'fade';
+function readPageEffect(raw: unknown): DmPageEffect {
+  if (!raw) return 'slide';
+  let obj: unknown = raw;
+  if (typeof raw === 'string') { try { obj = JSON.parse(raw); } catch { return 'slide'; } }
+  const v = obj && typeof obj === 'object' ? (obj as Record<string, unknown>).effect : null;
+  return v === 'flip' || v === 'fade' ? v : 'slide';
+}
+
 const INITIAL_STATE: Pick<
   DmBuilderState,
-  | 'dmId' | 'title' | 'storeName' | 'pages' | 'currentPageIndex' | 'sections' | 'brandKit' | 'layoutMode' | 'catalogView'
+  | 'dmId' | 'title' | 'storeName' | 'pages' | 'currentPageIndex' | 'sections' | 'brandKit' | 'layoutMode' | 'catalogView' | 'pageEffect'
   | 'approvalStatus' | 'isPublished' | 'isStopped' | 'templateId' | 'aiPrompt'
   | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt'
   | 'isSaving' | 'loadError' | 'aiGenerating' | 'validationResult'
@@ -262,6 +275,7 @@ const INITIAL_STATE: Pick<
   brandKit: { ...DEFAULT_BRAND_KIT },
   layoutMode: 'scroll',
   catalogView: false,
+  pageEffect: 'slide',
   approvalStatus: 'draft',
   isPublished: false,
   isStopped: false,
@@ -502,6 +516,10 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   setCatalogView: (on) => {
     if (on && get().layoutMode !== 'slides') get().setLayoutMode('slides');
     set((s) => (s.catalogView === on ? s : markDirty({ catalogView: on })));
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+  setPageEffect: (effect) => {
+    set((s) => (s.pageEffect === effect ? s : markDirty({ pageEffect: effect })));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
   setAiPrompt: (aiPrompt) => set(markDirty({ aiPrompt })),
@@ -875,6 +893,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         brandKit: { ...DEFAULT_BRAND_KIT, ...rawBrand },
         layoutMode: dm.layout_mode || 'scroll',
         catalogView: dm.layout_mode === 'slides' && readCatalogFlag(dm.settings),
+        pageEffect: dm.layout_mode === 'slides' ? readPageEffect(dm.settings) : 'slide',
         approvalStatus: dm.approval_status || 'draft',
         // ★ 발행 여부 = 발행 축(status/short_code)으로 판정 — approval_status(검수 축)와 별개
         isPublished: dm.status === 'published' || !!dm.short_code,
@@ -914,7 +933,11 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         brand_kit: s.brandKit,
         layout_mode: s.layoutMode,
         // ★ 2026-09-15 카탈로그 플래그 — settings jsonb 는 이 키 전에 어떤 소비처도 없어 화면이 통째로 소유한다(뷰어·목록 뱃지가 읽는다)
-        settings: { catalog: s.layoutMode === 'slides' && s.catalogView },
+        settings: {
+          catalog: s.layoutMode === 'slides' && s.catalogView,
+          // ★ 2026-09-16 장 넘김 효과 — 기본(slide)은 싣지 않는다(옛 DM 설정 바이트 무변경)
+          ...(s.layoutMode === 'slides' && s.pageEffect !== 'slide' ? { effect: s.pageEffect } : {}),
+        },
         template_id: s.templateId,
         ai_prompt: s.aiPrompt,
       };

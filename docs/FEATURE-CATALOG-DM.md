@@ -81,6 +81,17 @@
 | 0915 22:3x | 새 AI 영업 잡 처음부터 → 카탈로그 DM | 생성 확인 · Harold 「아직 좀 수정이 필요」(항목 = 다음 세션 접수) |
 | 미실측 | AI 자동제작 채널 10크레딧 원장 SQL · 쪽 1장 게이트 · 추적 +1 · og 미리보기 · 포스터 글자색([B-0915-4](../status/BUGS.md)) | [0915 인계 §6-3 5~8 · §7-3 3~5](2026-09-15-session-handoff.md) |
 
+## §7-2 ★ 2026-09-16 쪽 템플릿 · 넘김 효과 · 상품 칩 (블록 조립 축 · 설계서 `docs/2026-09-16-dm-block-assembly-design.md`)
+
+- **쪽 템플릿 4종**(표지 · 상품 한 점 · 두 점 비교 · 마무리) = `utils/dm/dm-catalog-templates.ts`(자리·줄 나눔·글자 항목 · 순수) + `dm-catalog-render.ts`(sharp 배치 + 파이썬 글자 합성 → 1200×1600 한 장).
+  합성 결과가 갤러리 1장짜리 장이라 책 자격(`isSwipeImagePage`)을 그대로 통과한다. 경로 = `POST /api/dm/catalog/render-pages`(AI 0 · 크레딧 0 · 한 번에 30쪽).
+- **넘김 효과 3종** = `settings.effect` (`slide` 기본 · `flip` · `fade`). 미지정·`slide`면 발행 HTML 에 흔적이 없다(현행 가로 스크롤 그대로). 조각 = `utils/dm/dm-effect.ts` · 배선 = `dm-viewer.ts` 4곳(CSS·body 표식·goToPage 분기·스크립트).
+- **상품 칩** = 갤러리 props `chips[{label, price?, url?}]` → 이미지 **밖** 알약(`data-dm-chip` · 최대 4개 · `safeUrl` 통과분만 링크). 가격을 이미지에 새기지 않는 이유 = 값이 바뀌면 재합성 없이는 못 고친다. 계약 = `dm-property-contract DM_GALLERY_CHIP_MARKER`.
+- **입구 통합** = 시작 화면의 [완성 슬라이드]와 [카탈로그 DM]은 만드는 결과가 같았다(장마다 이미지 1장 · `settings.catalog` 한 값만 차이). 하나로 합쳐 **완성 이미지 올리기**가 되고 책 펼침은 편집기 토글이 소유한다.
+- 검증 = `dm-catalog-templates.test.ts`(16) · `dm-effect.test.ts`(9) · `dm-effect-viewer.test.ts`(6) · `dm-catalog-render.test.ts`(9) · `dm-gallery-chips.test.ts`(5) · `dm-blocks-contract.test.ts`(7).
+
+---
+
 ## §8 이력 · 뒤집힌 판단
 
 - **2026-09-15(1) 검토** : Harold가 메이크뷰 e-book 뷰어와 우리 34장 슬라이드 DM(`hlj.kr/uFKZAtH`)을 비교 지시. 실측 = 메이크뷰는 jQuery 플릭(3D 넘김 아님) · PC 두 쪽 · 썸네일 · 맞춤 · 전체화면 · URL 파라미터 추적. 우리 부족분 = PC 두 쪽 · 썸네일 · 전체화면 · 핀치(`user-scalable=no`) · og 0. 제안 3축(①카탈로그 보기 ②장별 체류·순서 ③핫스팟) → 목업(다운로드 폴더 · 폐기 전제) → Harold 「맘에든다 진행해볼까」.
