@@ -24,7 +24,8 @@ import { sendEmail, isSmtpConfigured, getSmtpConfigPublic } from './company-smtp
 import { applyTracking, buildUnsubscribeUrl, UNSUB_URL_MARKER } from './email-tracking';
 import { logCampaignTraining, updateTrainingMetrics, getSourceRef } from './training-logger';
 import { buildEmailTrainingMessage } from './email-training-message';
-import { renderEmailSections, EMAIL_FOOTER_SLOT } from './email/email-section-renderer';
+// ★ 2026-09-16 `esc` = 렌더러가 소유한 이메일 HTML 이스케이프 CT. 법정 footer의 발신자 값도 같은 규칙을 쓴다.
+import { renderEmailSections, EMAIL_FOOTER_SLOT, esc as escapeEmailText } from './email/email-section-renderer';
 import { resolveEmailSectionsForCustomer, renderEmailText } from './email/email-personalization';
 import type { EmailDesign } from './email/email-tokens';
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
@@ -300,6 +301,63 @@ export async function deleteEmailCampaign(companyId: string, campaignId: string,
 // ════════════════════════════════════════════════════════════════════
 
 /**
+ * 광고성 이메일 법정 footer (정보통신망법 §50④ — 전송자 명칭 + 연락처 + 수신거부 방법).
+ *
+ * ★ 2026-09-16 (임은지 접수 `cmu3m2hey03nsjnludt2b1zv6`) 문구를 함수로 뽑은 이유:
+ *   편집기의 "수신거부 링크 표시" 토글이 이메일에서는 한 번도 반영되지 않았다는 접수였고,
+ *   그 처방이 **편집 미리보기에 실제로 붙을 문구를 보여주는 것**이라 발송 엔진 밖에서도 같은 문장이 필요해졌다.
+ *   문장을 두 곳에 적으면 한쪽만 고쳐져 "미리보기와 실제 메일이 다르다"가 된다 — 여기가 유일한 출처다.
+ *
+ * ⛔ `unsubHref`는 호출부가 정한다. 발송은 `UNSUB_URL_MARKER`(수신자별 개인 토큰 URL로 치환됨),
+ *   미리보기는 누를 데가 없는 자리 표시다. **미리보기 경로에 마커를 넘기지 마라** — 저장 HTML에 섞이면
+ *   `hasUnsubLink` 판정이 참이 되어 진짜 법정 footer가 통째로 생략된다(전송자 명칭·연락처까지 사라진다).
+ *
+ * ⛔ 발신자 이름·주소는 **여기서 이스케이프한다**(Codex 1R `high`). 둘 다 사람이 적는 값이고
+ *   SMTP 설정·캠페인 어디에도 HTML 제한이 없다. 옛 인라인 문자열도 이스케이프가 없었는데,
+ *   문구를 이 함수로 모은 김에 **발송·미리보기 두 경로를 한 자리에서 닫는다** — 호출부마다 이스케이프를
+ *   덧대면 새 호출부가 생길 때 또 빠진다. 편집 미리보기는 `srcDoc` 으로 그려지므로 그쪽이 더 위험했다.
+ */
+export function buildEmailAdFooter(fromName: string, fromEmail: string, unsubHref: string): string {
+  return `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${escapeEmailText(fromName)}(${escapeEmailText(fromEmail)})의 광고 정보입니다. 수신을 원하지 않으시면 <a href="${unsubHref}">수신거부</a>를 눌러주세요.</p>`;
+}
+
+/** 미리보기 수신거부 자리 표시 — 누를 곳이 없다는 뜻. ⛔ 마커(UNSUB_URL_MARKER)를 쓰지 않는다(위 주석). */
+const EMAIL_PREVIEW_UNSUB_HREF = '#';
+
+/**
+ * 편집 미리보기 HTML에 **실제로 붙을** 광고 footer를 채워 돌려준다(응답 전용 — 저장·발송 HTML 무관).
+ *
+ * 발신자는 **그 캠페인이 실제로 쓸 값**이어야 한다. 순서가 곧 발송 규칙이다:
+ *   ① 이미 저장된 캠페인이면 그 행의 `from_name`·`from_email`(발송이 쓰는 값 · `sendEmailCampaign`)
+ *   ② 신규 작성 중이면 `createEmailCampaign`과 같은 기본값 규칙(회사 SMTP 설정 → 없으면 한줄로AI)
+ * ⛔ ①을 빼면 안 된다(Codex 1R `medium`). 캠페인별 발신자 지정이 실재하고(목록 화면의 "발신자 이름" 칸),
+ *   SMTP 설정을 나중에 바꾼 회사도 있다. 그때 미리보기만 새 설정을 보여주면 **사용자가 확인한 전송자와
+ *   수신함에 찍히는 전송자가 갈린다** — 법정 문구에서 그 불일치는 그냥 틀린 표기다.
+ * 광고성이 아니면 슬롯만 지운다 — 그 경우 실제 발송에도 footer가 붙지 않기 때문이다.
+ */
+export async function withEmailPreviewAdFooter(
+  html: string,
+  companyId: string,
+  isAd: boolean,
+  campaign?: { fromName?: string | null; fromEmail?: string | null } | null,
+): Promise<string> {
+  if (!html.includes(EMAIL_FOOTER_SLOT)) return html;
+  if (!isAd) return html.split(EMAIL_FOOTER_SLOT).join('');
+  // ⛔ 캠페인이 있으면 **그 두 값을 묶어서 그대로** 쓴다. 이름만 폴백을 태우면 발송에는 없는
+  //   조합(캠페인 주소 + 회사 설정 이름)이 미리보기에만 생긴다 — 발송은 `sendEmailCampaign`이
+  //   campaign.fromName·fromEmail을 폴백 없이 쓰기 때문이다. 미리보기가 실물보다 친절해지면 그것도 거짓이다.
+  //   (생성 시 두 값은 회사 SMTP 설정으로 이미 채워지고, fromEmail 없이는 캠페인이 만들어지지 않는다.)
+  if (campaign) {
+    return html.split(EMAIL_FOOTER_SLOT)
+      .join(buildEmailAdFooter(campaign.fromName || '', campaign.fromEmail || '', EMAIL_PREVIEW_UNSUB_HREF));
+  }
+  // 신규 작성 중 = 저장되면 붙을 값(createEmailCampaign과 같은 기본값 규칙).
+  const smtpConfig = await getSmtpConfigPublic(companyId);
+  return html.split(EMAIL_FOOTER_SLOT)
+    .join(buildEmailAdFooter(smtpConfig?.fromName || '한줄로AI', smtpConfig?.fromEmail || '', EMAIL_PREVIEW_UNSUB_HREF));
+}
+
+/**
  * 캠페인 발송 — 회사 admin SMTP relay 활용. 옛 SendGrid 흐름 영구 폐기.
  * 흐름:
  *   1. 회사 SMTP 설정 완료 검증 (미완료 시 차단)
@@ -372,7 +430,7 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   const hasSections = campaignSections.length > 0;
   const brandKit = hasSections ? await getCompanyBrandKit(campaign.companyId) : null;
   // 정보통신망법 §50④ — 전송자 명칭 + 연락처(발신 이메일) + 수신거부 방법 명시
-  const adFooter = `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${campaign.fromName}(${campaign.fromEmail})의 광고 정보입니다. 수신을 원하지 않으시면 <a href="${UNSUB_URL_MARKER}">수신거부</a>를 눌러주세요.</p>`;
+  const adFooter = buildEmailAdFooter(campaign.fromName, campaign.fromEmail, UNSUB_URL_MARKER);
   // 수신거부 링크 실존 판정 — 마커 또는 개인 토큰 URL이 실제로 있어야 생략.
   // 본문에 '수신거부' 단어만 있는 경우(링크 없는 안내 문구)에 footer가 빠지면 수신거부 수단 0 = 법 위반.
   const hasUnsubLink = (html: string): boolean => html.includes(UNSUB_URL_MARKER) || html.includes('/api/email/u/');

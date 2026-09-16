@@ -2,7 +2,7 @@ import type { FooterProps } from '../../../../utils/dm-section-defaults';
 import { Field, TextInput, TextArea, Toggle } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
-export default function FooterEditor({ props, onUpdate }: EditorProps<FooterProps>) {
+export default function FooterEditor({ props, onUpdate, hidden }: EditorProps<FooterProps>) {
   return (
     <>
       <Field label="유의사항">
@@ -21,9 +21,15 @@ export default function FooterEditor({ props, onUpdate }: EditorProps<FooterProp
         <TextArea value={props.legal_text} onChange={(v) => onUpdate({ legal_text: v })} rows={3} placeholder="(주)브랜드 | 대표 홍길동 | 사업자 000-00-00000" />
       </Field>
 
-      <Field label="수신거부 링크 표시" hint="광고 문자 규정상 표시를 권장해요">
-        <Toggle value={props.show_unsubscribe_link !== false} onChange={(v) => onUpdate({ show_unsubscribe_link: v })} labelOn="표시" labelOff="숨김" />
-      </Field>
+      {/* ★ 2026-09-16 이메일에서는 이 토글을 감춘다 — 수신거부를 발송 엔진이 소유하기 때문이다.
+          광고성 메일이면 전송자 명칭·연락처·수신거부 링크가 법에 따라 항상 자동으로 붙고,
+          비광고성이면 붙지 않는다. 사람이 끌 수 있는 값이 아니라 고를 것을 두면 거짓이 된다
+          (대신 그 화면은 실제로 붙는 문구를 미리보기 하단에 보여준다 — 임은지 접수 cmu3m2hey03nsjnludt2b1zv6). */}
+      {!hidden?.('show_unsubscribe_link') && (
+        <Field label="수신거부 링크 표시" hint="광고 문자 규정상 표시를 권장해요">
+          <Toggle value={props.show_unsubscribe_link !== false} onChange={(v) => onUpdate({ show_unsubscribe_link: v })} labelOn="표시" labelOff="숨김" />
+        </Field>
+      )}
     </>
   );
 }

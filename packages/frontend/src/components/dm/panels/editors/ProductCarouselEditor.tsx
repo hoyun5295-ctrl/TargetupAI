@@ -7,7 +7,7 @@ import MallProductPickerModal, { type PickedMallProduct } from '../../MallProduc
 // ★ 2026-07-14 Harold 지시 — 상품 정보 붙여넣기(이름/가격→할인/URL 블록) = 결정적 파서·크레딧 0 (이메일·DM 공용)
 import { parsePastedProducts } from '../../../../utils/product-paste';
 
-export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<ProductCarouselProps>) {
+export default function ProductCarouselEditor({ props, onUpdate, hidden }: EditorProps<ProductCarouselProps>) {
   const products = props.products || [];
   const [pickerOpen, setPickerOpen] = useState(false);
   const [matchingIdx, setMatchingIdx] = useState<number | null>(null);
@@ -293,7 +293,11 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
         />
       </Field>
       {/* ★ 2026-07-21 (#4a 임은지) 상품 3개 이상이면 좌우 스와이프 슬라이드로 자동 표시(수동 넘김). 인디케이터=하단 위치 점. 자동 전환(auto_slide)은 미도입. */}
-      <Field label="인디케이터" hint="상품 3개 이상이면 좌우로 넘기는 슬라이드 · 켜면 하단에 위치 점 표시"><Toggle value={props.show_indicator ?? true} onChange={(v) => onUpdate({ show_indicator: v })} /></Field>
+      {/* ★ 2026-09-16 이메일에는 스와이프가 없다(상품을 정적 그리드·리스트로 전량 펼친다) — 넘길 것이 없어
+          점이 가리킬 대상도 없으므로 그 화면에서는 감춘다(눌러도 안 바뀌는 칸을 두지 않는다). */}
+      {!hidden?.('show_indicator') && (
+        <Field label="인디케이터" hint="상품 3개 이상이면 좌우로 넘기는 슬라이드 · 켜면 하단에 위치 점 표시"><Toggle value={props.show_indicator ?? true} onChange={(v) => onUpdate({ show_indicator: v })} /></Field>
+      )}
       <MallProductPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={applyPicked} />
     </>
   );

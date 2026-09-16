@@ -52,6 +52,8 @@ import {
   createResendChildCampaign,
   listEmailPersonalizationVars,
   excludeOptedOutEmails,
+  // ★ 2026-09-16 편집 미리보기에 실제 법정 footer 표시(임은지 접수 — 수신거부 토글)
+  withEmailPreviewAdFooter,
   type EmailRecipient,
   type EmailTargetSpec,
 } from '../utils/email-channel';
@@ -1127,7 +1129,22 @@ router.post('/render-preview', async (req: Request, res: Response) => {
       ? resolveEmailSectionsForCustomer(sections as Section[], sampleCustomer)
       : (sections as Section[]);
     const html = renderEmailSections(renderSections, { brandKit, design, publicBase: process.env.PUBLIC_BASE_URL });
-    return res.json({ success: true, html });
+    // ★ 2026-09-16 (임은지 접수 cmu3m2hey03nsjnludt2b1zv6) "수신거부 링크 표시를 켜고 꺼도 달라지는 게 없다" —
+    //   이메일 수신거부는 편집기가 아니라 발송 엔진이 소유한다: 광고성이면 정보통신망법 §50④ footer가
+    //   항상 자동으로 붙고 비광고성이면 안 붙는다(사람이 끌 수 있는 값이 아니라 토글은 감췄다).
+    //   그래서 미리보기가 **실제로 붙을 문구 그대로**를 보여 준다 — 그러면 "무엇이 어디에 붙는지"가 보이고,
+    //   법정 문구를 못 보는 채로 발송하는 일이 없어진다.
+    // ⛔ 여기서 채우는 것은 **응답 HTML뿐**이다(저장·발송 HTML 무관 — 슬롯은 그 경로에서 그대로 치환된다).
+    // ⛔ 수신거부 href 는 마커가 아니라 자리 표시(`#`)다. 마커를 넣으면 hasUnsubLink 판정이 참이 되어
+    //   실제 발송에서 법정 footer가 통째로 생략된다(전송자 명칭·연락처까지 사라진다).
+    // 저장된 캠페인이면 **그 캠페인이 실제로 쓸 발신자**로 문구를 만든다(회사·소유자 격리는 조회 함수가 한다).
+    //   신규 작성 중(id 없음)이면 생성 경로와 같은 기본값 규칙을 따른다.
+    const previewCampaignId = typeof req.body?.campaign_id === 'string' ? req.body.campaign_id : '';
+    const previewCampaign = previewCampaignId
+      ? await getEmailCampaign(auth.companyId, previewCampaignId, auth.ownerId)
+      : null;
+    const previewHtml = await withEmailPreviewAdFooter(html, auth.companyId, req.body?.is_ad !== false, previewCampaign);
+    return res.json({ success: true, html: previewHtml });
   } catch (err: any) {
     console.error('[Email /render-preview] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '미리보기 렌더 실패' });

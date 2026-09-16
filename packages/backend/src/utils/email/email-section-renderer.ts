@@ -23,7 +23,11 @@ import type {
 import type { DmBrandKit } from '../dm/dm-tokens';
 import { resolveEmailBrand, emailSelfHostFontImport, type EmailBrand, type EmailDesign } from './email-tokens';
 import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE, selectEmailTreatment } from './email-blocks';
-import { EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_TITLE_SIZE_KEY } from './email-property-contract';
+import {
+  EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_TITLE_SIZE_KEY,
+  // ★ 2026-09-16 접수 8건 — 기대치를 원장이 소유한다(렌더러가 리터럴로 굳히면 계약이 두 곳이 된다)
+  EMAIL_HEADER_BRAND_OFF_ALIGN, EMAIL_HERO_OVERLAY_BANDS, EMAIL_HERO_OVERLAY_TOP, EMAIL_SNS_CHIPS_PER_ROW,
+} from './email-property-contract';
 import { PRODUCT_GRID_ASPECT, PRODUCT_NAME_MAX_CHARS } from '../image-fit-spec';
 // ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 + 쿠폰 마감 한국어 표시 (normalize CT)
 import { normalizeWebUrl, formatKoreanDateTimeDisplay } from '../normalize';
@@ -203,9 +207,20 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment:
     //   조판 = 사진 한 장 + 그 아래 텍스트 밴드(분할 구도의 이미지 셀 배관을 세로로 재사용).
     //   오버레이 토글은 "밴드를 어둡게"로 이어받는다 — 색을 지정하지 않은 기존 캠페인의 흰 글씨가
     //   옛 스크림 위와 같은 대비로 그대로 읽힌다(밴드를 끄면 본문색으로 내려간다).
-    const banded = p.overlay_gradient !== false;
+    // ★ 2026-09-16 (남지현 접수 cmu3n4c4b03xfjnlumbg75qcz) 오버레이 프리셋을 무엇으로 바꿔도 변화가 없었다 —
+    //   이 함수가 `p.overlay`를 한 번도 읽지 않았다(DM은 heroOverlayCss로 소비 · dm-section-renderer 91행).
+    //   이메일은 위 계약대로 사진이 `<img>`라 **사진 위에 그라디언트를 겹칠 수 없다**. 그래서 프리셋의 뜻을
+    //   사진에 붙는 텍스트 밴드로 옮긴다 — 강도는 밴드 농도로, `상단 방향`은 밴드를 사진 위로.
+    //   값·매핑은 원장(EMAIL_HERO_OVERLAY_BANDS)이 소유한다.
+    // ⛔ 미지정(빈 값)은 손대지 않는다 = 옛 overlay_gradient 토글 그대로(기존 캠페인 출력 무변화).
+    const preset = typeof p.overlay === 'string' ? EMAIL_HERO_OVERLAY_BANDS[p.overlay] : undefined;
+    const banded = preset ? preset.onDark : p.overlay_gradient !== false;
     // 다크 밴드는 리터럴 고정(#171717 — DM 다크 패널 원칙). 다크 테마에서도 어두운 면을 유지한다.
-    const bandBg = banded ? '#171717' : b.cardBg;
+    //   브랜드 틴트만 런타임 주색을 쓴다(원장에 리터럴로 굳히면 회사마다 다른 색을 못 낸다).
+    const presetBg = preset ? (preset.bg || (p.overlay === 'brand' ? b.primary : b.cardBg)) : '';
+    const bandBg = presetBg || (banded ? '#171717' : b.cardBg);
+    // 밴드를 사진 위로 올리는 프리셋(상단 방향) — 조판 순서만 뒤집는다.
+    const bandOnTop = p.overlay === EMAIL_HERO_OVERLAY_TOP;
     // ★ 2026-07-02 줄바꿈(\n→<br>) + 색상 직접 지정(미지정 = 밴드 유무별 기본색) + ★ 2026-07-12 크기 직접 지정(fsPx)
     const headColor = esc(p.headline_color || (banded ? '#ffffff' : b.text));
     const subColor = esc(p.sub_copy_color || (banded ? 'rgba(255,255,255,0.92)' : b.textMuted));
@@ -216,10 +231,13 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment:
     const imgRow = `<tr><td style="padding:0"><img src="${esc(img)}" alt="${esc(p.headline || '')}" width="600" height="${minH}" style="width:100%;max-width:600px;height:${minH}px;${heroImgFit};display:block;border:0"></td></tr>`;
     // ⛔ 문구가 없으면 밴드 자체를 안 그린다 — 문구가 들어간 완성 포스터를 통짜로 올리는 사용법(편집기
     //   "이미지 맞춤" 안내가 권하는 그 방식)에서 사진 아래 빈 검정 띠만 남는 것을 막는다.
+    //   밴드 면은 `bgcolor` 속성도 함께 싣는다 — 아웃룩 Word 엔진은 인라인 background를 흘릴 수 있고,
+    //   그때 흰 면 위에 흰 글씨가 남는다(글자색은 밴드가 있다는 전제로 정해지기 때문이다).
     const textRow = (headEsc || p.sub_copy)
-      ? `<tr><td class="em-hero" style="background:${bandBg};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr>`
+      ? `<tr><td class="em-hero" bgcolor="${bandBg}" style="background:${bandBg};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr>`
       : '';
-    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${imgRow}${textRow}</table></td></tr>`;
+    const rows = bandOnTop ? `${textRow}${imgRow}` : `${imgRow}${textRow}`;
+    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows}</table></td></tr>`;
   }
 
   // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경. ★ 2026-07-02 줄바꿈+색상 지정 동일 적용 + 크기(fsPx)
@@ -230,26 +248,73 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment:
   return `<tr><td height="${minH}" valign="middle" class="em-hero" style="height:${minH}px;padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${motifHtml(b, ordinal)}${headlineD}${subD}</td></tr>`;
 }
 
+/** ★ 2026-09-16 D-Day 문구 — DM 헤더(dm-section-renderer 138행)와 **같은 규칙**. 지난 날짜는 `D+n`.
+ *  ⛔ 이메일에는 JS가 없어 **렌더 시점** 기준 정적 계산이다(수신함에서 숫자가 줄지 않는다).
+ *    카운트다운 블록(renderCountdownStatic)과 같은 한계이고, 계약 = EMAIL_HEADER_VARIANTS 주석. */
+function headerDdayText(eventDate: string | undefined): string {
+  if (!eventDate) return '';
+  const end = new Date(eventDate).getTime();
+  if (!Number.isFinite(end)) return '';
+  const days = Math.ceil((end - Date.now()) / 86400000);
+  return days > 0 ? 'D-' + days : days === 0 ? 'D-Day' : 'D+' + Math.abs(days);
+}
+
 function renderHeader(p: HeaderProps, b: EmailBrand, ctx: EmailRenderCtx): string {
-  // banner = 전폭 이미지
-  if (p.variant === 'banner' && p.banner_image_url) {
-    const img = emailImg(p.banner_image_url, ctx.publicBase);
-    return `<tr><td style="padding:0"><img src="${esc(img)}" alt="${esc(p.brand_name || ctx.storeName || '')}" width="600" style="width:100%;max-width:600px;display:block;border:0"></td></tr>`;
-  }
-  // logo(기본) = 로고 + 브랜드명
   const brand = esc(p.brand_name || ctx.storeName || '');
   const align = p.align || 'center';
-  const logo = p.logo_url ? emailImg(p.logo_url, ctx.publicBase) : '';
-  const logoH = p.logo_size === 'sm' ? '24' : p.logo_size === 'lg' ? '48' : '32';
-  const brandFs = p.brand_size === 'sm' ? b.type.small.size : p.brand_size === 'lg' ? b.type.h1.size : b.type.h3.size;
-  const logoTag = logo ? `<img src="${esc(logo)}" alt="${brand}" height="${logoH}" style="height:${logoH}px;display:inline-block;vertical-align:middle;border:0">` : '';
   // ★ 2026-08-31 (임은지 접수 cmtgt4pgm0543jnot7j7j02xu) 브랜드명 색이 테마 본문색으로 **고정**돼 있어
   //   편집기의 "브랜드명 색"이 이메일에서만 죽어 있었다(DM 렌더러는 같은 값을 읽는다 · dm-section-renderer 127행).
   //   편집 패널을 DM과 공유하는 구조라, 이메일 렌더러가 안 읽으면 칸은 보이는데 조용히 무시된다.
   // ⛔ 미지정이면 옛 값(b.text) 그대로 — 기존 캠페인 출력이 한 글자도 바뀌지 않는다(회귀 0).
   const brandColor = p.title_color ? esc(p.title_color) : b.text;
-  const brandTag = brand ? `<span style="font-family:${b.displayFont};font-size:${brandFs};font-weight:700;color:${brandColor};vertical-align:middle;margin-left:${logo ? b.sp[2] : '0'}">${brand}</span>` : '';
-  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};text-align:${align};border-bottom:1px solid ${b.border}">${logoTag}${brandTag}</td></tr>`;
+
+  // banner = 전폭 이미지
+  if (p.variant === 'banner' && p.banner_image_url) {
+    const img = emailImg(p.banner_image_url, ctx.publicBase);
+    return `<tr><td style="padding:0"><img src="${esc(img)}" alt="${brand}" width="600" style="width:100%;max-width:600px;display:block;border:0"></td></tr>`;
+  }
+
+  // ★ 2026-09-16 (남지현 접수 cmu3m03ze03najnlu1fjw857n) 형태를 D-Day·쿠폰으로 바꿔도 아무 변화가 없었다 —
+  //   이 함수가 `banner` 하나만 분기하고 나머지를 전부 로고형으로 떨어뜨려, 입력한 이벤트 제목·종료일·
+  //   할인 라벨·쿠폰 코드가 어디에도 안 실렸다(화면에는 브랜드명만 남았다 = 접수 원문 그대로).
+  //   DM 렌더러(dm-section-renderer 136~158행)는 네 형태를 모두 그리고 있었다 — 이메일만 빠져 있었다.
+  // ⛔ 그라데이션 면은 solid 폴백을 함께 싣는다(아웃룩은 background-image를 무시한다).
+  //   사진이 아니라 색 장식이므로 EMAIL_PHOTO_AS_IMG_TAG 금지 대상이 아니다(그 계약의 금지 대상은 url(...)뿐).
+  const brandLine = brand
+    ? `<div style="font-size:${b.type.tiny.size};color:#ffffff;opacity:0.72;margin-top:${b.sp[2]}">${brand}</div>`
+    : '';
+  if (p.variant === 'countdown') {
+    const dday = headerDdayText(p.event_date);
+    const ddayTag = dday ? `<div style="font-family:${b.displayFont};font-size:${b.type.hero.size};font-weight:900;letter-spacing:2px;color:#ffffff">${esc(dday)}</div>` : '';
+    const title = p.event_title ? `<div style="font-size:${b.type.small.size};color:#ffffff;opacity:0.92;margin-top:${b.sp[2]};font-weight:500">${esc(p.event_title)}</div>` : '';
+    return `<tr><td style="padding:${b.sp[6]} ${b.sp[6]};background:${b.primary};background-image:${b.heroGrad};text-align:center">${ddayTag}${title}${brandLine}</td></tr>`;
+  }
+  if (p.variant === 'coupon') {
+    const label = p.discount_label ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:#ffffff;margin-bottom:${b.sp[2]}">${esc(p.discount_label)}</div>` : '';
+    // 코드 알약 = 흰 워시 위 모노 대문자(쿠폰 블록 스터브와 같은 톤). 표 셀이라 아웃룩도 면이 나온다.
+    const code = p.coupon_code
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;${ROUND_CELL_TABLE}"><tr><td bgcolor="#ffffff" style="padding:${b.sp[2]} ${b.sp[6]};background:rgba(255,255,255,0.92);border-radius:${b.radius.md};font-family:${b.mono};font-size:${b.type.h2.size};font-weight:900;letter-spacing:3px;color:${b.primary}">${esc(p.coupon_code)}</td></tr></table>`
+      : '';
+    return `<tr><td style="padding:${b.sp[6]} ${b.sp[6]};background:${b.accent};background-image:linear-gradient(135deg,${b.accent} 0%,${b.primary} 100%);text-align:center">${label}${code}${brandLine}</td></tr>`;
+  }
+
+  // logo(기본) = 로고 + 브랜드명 + 대표 전화
+  // ★ 2026-09-16 (남지현 접수 cmu3mkzba03wmjnlufa4o1n68) "브랜드명 표시"를 미사용으로 눌러도 그대로였다 —
+  //   `show_brand_name`을 이 함수가 한 번도 읽지 않았다(DM은 읽는다 · dm-section-renderer 128행).
+  //   끈 뒤 모습은 편집기 안내문이 약속한 대로 **로고만 중앙**이다(EMAIL_HEADER_BRAND_OFF_ALIGN).
+  // ⛔ 미지정/true = 옛 출력 그대로(회귀 0).
+  const showBrand = p.show_brand_name !== false;
+  const logoAlign = showBrand ? align : EMAIL_HEADER_BRAND_OFF_ALIGN;
+  const logo = p.logo_url ? emailImg(p.logo_url, ctx.publicBase) : '';
+  const logoH = p.logo_size === 'sm' ? '24' : p.logo_size === 'lg' ? '48' : '32';
+  const brandFs = p.brand_size === 'sm' ? b.type.small.size : p.brand_size === 'lg' ? b.type.h1.size : b.type.h3.size;
+  const logoTag = logo ? `<img src="${esc(logo)}" alt="${brand}" height="${logoH}" style="height:${logoH}px;display:inline-block;vertical-align:middle;border:0">` : '';
+  const brandTag = (showBrand && brand) ? `<span style="font-family:${b.displayFont};font-size:${brandFs};font-weight:700;color:${brandColor};vertical-align:middle;margin-left:${logo ? b.sp[2] : '0'}">${brand}</span>` : '';
+  // ★ 2026-09-16 대표 전화 — 편집기 안내가 "탭하면 전화 연결"인데 이메일에는 한 줄도 안 나가고 있었다(DM은 tel 링크).
+  const phoneTag = p.phone
+    ? `<div style="margin-top:${b.sp[1]}"><a href="tel:${esc(String(p.phone).replace(/[^0-9+\-]/g, ''))}" style="font-size:${b.type.tiny.size};color:${b.textMuted};text-decoration:none">${esc(p.phone)}</a></div>`
+    : '';
+  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};text-align:${logoAlign};border-bottom:1px solid ${b.border}">${logoTag}${brandTag}${phoneTag}</td></tr>`;
 }
 
 function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string, ordinal: number): string {
@@ -580,9 +645,19 @@ function renderStoreInfo(p: StoreInfoProps, b: EmailBrand): string {
     const wurl = normalizeWebUrl(p.website);
     rows.push(`<div style="font-size:${b.type.small.size};margin:${b.sp[1]} 0"><a href="${esc(wurl)}" style="color:${b.primary};text-decoration:none">${esc(p.website)}</a></div>`);
   }
-  if (rows.length === 0) return '';
+  // ★ 2026-09-16 (임은지 접수 cmu3lnjg403mgjnlu1fnxdmuc) 이메일 주소·지도 링크가 미리보기에도 발행본에도
+  //   안 나갔다 — 이 함수가 `email`·`map_url`을 한 번도 읽지 않았다(DM SSR 622·642행, 편집 캔버스는 둘 다 그린다).
+  if (p.email) {
+    rows.push(`<div style="font-size:${b.type.small.size};margin:${b.sp[1]} 0"><a href="mailto:${esc(p.email)}" style="color:${b.primary};text-decoration:none">${esc(p.email)}</a></div>`);
+  }
+  // 지도 = DM과 같은 "매장 위치 보기" 버튼. 버튼 CT(renderButton)를 그대로 써 아웃룩 VML 폴백까지 따라온다.
+  const mapUrl = p.map_url ? normalizeWebUrl(p.map_url) : '';
+  const mapBtn = /^https?:\/\//i.test(mapUrl)
+    ? `<div style="margin-top:${b.sp[4]}">${renderButton({ label: '매장 위치 보기', url: mapUrl, style: 'outline' }, b)}</div>`
+    : '';
+  if (rows.length === 0 && !mapBtn) return '';
   // ★ 2026-07-07(5) 디자인 2.0 — 평면 전폭 블록 → 헤어라인 보더 카드
-  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[5]} ${b.sp[6]};background:${b.bg};border:1px solid ${b.border};border-radius:14px;text-align:center">${rows.join('')}</td></tr></table></td></tr>`;
+  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[5]} ${b.sp[6]};background:${b.bg};border:1px solid ${b.border};border-radius:14px;text-align:center">${rows.join('')}${mapBtn}</td></tr></table></td></tr>`;
 }
 
 function renderSns(p: SnsProps, b: EmailBrand): string {
@@ -591,9 +666,39 @@ function renderSns(p: SnsProps, b: EmailBrand): string {
     .filter((c) => c && c.url && /^https?:\/\//i.test(c.url));
   if (ch.length === 0) return '';
   const labels: Record<string, string> = { instagram: 'Instagram', youtube: 'YouTube', kakao: '카카오', naver: '네이버', facebook: 'Facebook', twitter: 'X' };
-  // ★ 2026-07-07(5) 디자인 2.0 — SNS 링크 = 워시 알약 칩
-  const links = ch.map((c) => `<a href="${esc(c.url)}" style="display:inline-block;margin:${b.sp[1]};padding:${b.sp[2]} ${b.sp[4]};background:${b.primarySoft};border-radius:999px;font-size:${b.type.small.size};color:${b.primary};text-decoration:none;font-weight:700">${esc(labels[c.type] || c.type)}</a>`).join('');
-  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};text-align:center">${links}</td></tr>`;
+  // ★ 2026-09-16 (임은지 접수 cmu3lxucs03mqjnluyeihh7p4) 두 축이 죽어 있었다.
+  //   ① 표시 방식(layout)을 이 함수가 한 번도 읽지 않아 무엇을 골라도 같은 줄이 나갔고,
+  //      핸들(handle)은 "버튼(라벨 포함)"에서만 쓰는 값인데 역시 아무도 안 읽어 입력칸만 남아 있었다
+  //      (DM은 둘 다 소비 · dm-section-renderer 650~670행).
+  //   ② 칩 배경이 `<a>` 인라인 `background` 하나뿐이라 아웃룩에서 면이 사라지고 글씨만 남았다
+  //      (접수 원문 = "하이웍스에서는 보이는데 아웃룩에서는 안 보인다"). 같은 파일의 CTA 버튼은
+  //      `<td>` 배경 + MSO VML 이중인데 SNS만 맨몸이었다 — 그래서 한 메일 안에서 갈렸다.
+  // ⛔ 칩 면은 표 셀로 내고 `bgcolor` 속성을 함께 싣는다(아웃룩 Word 엔진이 읽는 유일한 배경 계약).
+  //   ⛔ rgba는 그 속성에 못 쓴다 — 워시(primarySoft)는 인라인 style로만 두고, 속성에는 불투명 대체색을 준다.
+  const isIcons = (p.layout || 'icons') === 'icons';
+  const chipCell = (c: { type: string; url: string; handle?: string }): string => {
+    const label = esc(labels[c.type] || c.type);
+    // 핸들은 "버튼(라벨 포함)"에서만 붙인다 — 편집기가 그 방식에서만 입력칸을 여는 것과 같은 조건.
+    const handle = (!isIcons && c.handle) ? `<span style="color:${b.textMuted};font-weight:500;margin-left:${b.sp[2]}">@${esc(c.handle)}</span>` : '';
+    return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;${ROUND_CELL_TABLE}"><tr>`
+      + `<td bgcolor="${b.primarySoftOpaque}" style="background:${b.primarySoft};border:1px solid ${b.border};border-radius:999px;padding:${b.sp[2]} ${b.sp[4]}">`
+      + `<a href="${esc(c.url)}" style="font-size:${b.type.small.size};color:${b.primary};text-decoration:none;font-weight:700">${label}${handle}</a>`
+      + '</td></tr></table>';
+  };
+  // 아이콘(원형) = 한 줄에 나란히 · 버튼(라벨 포함) = 세로로 쌓고 핸들까지(DM 배치 미러).
+  // ⛔ 표의 한 행은 **줄바꿈되지 않는다.** DM은 flex-wrap이라 채널이 몇 개든 알아서 접히지만,
+  //   이메일에서 한 줄에 전부 늘어놓으면 채널 6종에서 본문 폭 600px를 넘어 가로 스크롤이 생기고
+  //   모바일에서는 3개만 돼도 넘친다. 그래서 줄당 개수를 고정해 끊는다(여기가 콘텐츠 쪽 폭 계약).
+  const perRow = EMAIL_SNS_CHIPS_PER_ROW;
+  const rowsOf = (items: typeof ch): typeof ch[] => {
+    const out: typeof ch[] = [];
+    for (let i = 0; i < items.length; i += perRow) out.push(items.slice(i, i + perRow));
+    return out;
+  };
+  const inner = isIcons
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto">${rowsOf(ch).map((row) => `<tr>${row.map((c) => `<td style="padding:${b.sp[1]} ${b.sp[1]}">${chipCell(c)}</td>`).join('')}</tr>`).join('')}</table>`
+    : `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto">${ch.map((c) => `<tr><td style="padding:${b.sp[1]} 0">${chipCell(c)}</td></tr>`).join('')}</table>`;
+  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};text-align:center">${inner}</td></tr>`;
 }
 
 function renderReviews(p: ReviewsProps, b: EmailBrand): string {

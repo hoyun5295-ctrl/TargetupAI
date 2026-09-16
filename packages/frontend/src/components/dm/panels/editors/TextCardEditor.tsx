@@ -3,7 +3,7 @@ import { DM_FONT_SIZE_OPTIONS } from '../../../../utils/dm-section-defaults';
 import { Field, TextInput, TextArea, Select, ImageUploader, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
-export default function TextCardEditor({ props, onUpdate }: EditorProps<TextCardProps>) {
+export default function TextCardEditor({ props, onUpdate, hidden }: EditorProps<TextCardProps>) {
   return (
     <>
       <Field label="태그 (선택)" hint="NEW / BEST 등 강조">
@@ -28,18 +28,22 @@ export default function TextCardEditor({ props, onUpdate }: EditorProps<TextCard
         />
       </Field>
 
-      {/* ★ 2026-07-13 디자인 3.0 — 헤드라인 강조 (형광 마커/밑줄) */}
-      <Field label="헤드라인 강조">
-        <Select
-          value={props.headline_emphasis || ''}
-          onChange={(v) => onUpdate({ headline_emphasis: (v || undefined) as TextCardProps['headline_emphasis'] })}
-          options={[
-            { value: '', label: '없음' },
-            { value: 'marker', label: '형광 마커' },
-            { value: 'underline', label: '밑줄 스트로크' },
-          ]}
-        />
-      </Field>
+      {/* ★ 2026-07-13 디자인 3.0 — 헤드라인 강조 (형광 마커/밑줄)
+          ★ 2026-09-16 이메일은 위쪽 "블록 스타일" 3버튼이 같은 값을 소유해 여기서는 감춘다
+          (히어로와 같은 중복 — 남지현 접수 cmu3n9xmo03xsjnlucds4r889). */}
+      {!hidden?.('headline_emphasis') && (
+        <Field label="헤드라인 강조">
+          <Select
+            value={props.headline_emphasis || ''}
+            onChange={(v) => onUpdate({ headline_emphasis: (v || undefined) as TextCardProps['headline_emphasis'] })}
+            options={[
+              { value: '', label: '없음' },
+              { value: 'marker', label: '형광 마커' },
+              { value: 'underline', label: '밑줄 스트로크' },
+            ]}
+          />
+        </Field>
+      )}
 
       <Field label="본문">
         <TextArea value={props.body} onChange={(v) => onUpdate({ body: v })} rows={5} placeholder="고객님을 위한 한 마디..." />

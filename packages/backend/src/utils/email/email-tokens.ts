@@ -200,6 +200,8 @@ export interface EmailBrand {
   // ── ★ 2026-07-07(5) 이메일 디자인 2.0 (인앱 2.0 톤 미러 — 추가 토큰, 기존 의미 불변) ──
   /** 강조색 연한 워시 (칩/쿠폰 면) — rgba */
   primarySoft: string;
+  /** 위 워시의 불투명 판 — `bgcolor` 속성용(아웃룩 Word 엔진은 rgba를 못 읽는다) */
+  primarySoftOpaque: string;
   /** 강조색 대시 보더 색 (쿠폰 절취) — rgba */
   primaryDashed: string;
   /** primary 버튼 그라데이션 (background-image 값 — 미지원 클라이언트는 solid primary 폴백) */
@@ -278,7 +280,9 @@ export function resolveEmailBrand(brandKit?: DmBrandKit | null, design?: EmailDe
     sp,
     type: scale,
     radius: { sm: '8px', md: '12px', lg: '16px', xl: '20px' },
-    primarySoft: withAlpha(primary, 0.08),
+    primarySoft: withAlpha(primary, EMAIL_PRIMARY_SOFT_ALPHA),
+    // 같은 워시의 불투명 판 — rgba를 못 받는 `bgcolor` 속성용(아웃룩에서 면이 사라지지 않게).
+    primarySoftOpaque: flattenAlpha(primary, EMAIL_PRIMARY_SOFT_ALPHA, neutrals.cardBg),
     primaryDashed: withAlpha(primary, 0.45),
     btnGrad: `linear-gradient(180deg,${shift(primary, 14)} 0%,${shift(primary, -28)} 100%)`,
     bandGrad: `linear-gradient(90deg,${primary} 0%,${shift(primary, 64)} 100%)`,
@@ -303,6 +307,28 @@ function shift(hex: string, delta: number): string {
   const b = clamp((n & 255) + delta);
   return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
 }
+
+/**
+ * ★ 2026-09-16 반투명 워시를 **불투명 hex**로 눌러 준다(같은 색을 그 배경 위에 깐 결과).
+ *
+ * 필요한 이유: 표 셀의 `bgcolor` 속성은 아웃룩 Word 엔진이 읽는 유일한 배경 계약인데 **rgba를 못 받는다.**
+ * 인라인 `background`에 워시를 두고 속성에 흰색을 주면, 아웃룩에서만 면이 사라져 접수가 다시 온다
+ * (임은지 접수 `cmu3lxucs03mqjnluyeihh7p4` = SNS 칩이 "하이웍스는 보이는데 아웃룩은 글씨만").
+ * ⛔ 눈대중 색을 쓰지 말고 같은 알파로 계산한다 — 워시 비율을 바꾸면 두 값이 함께 움직여야 한다.
+ */
+export function flattenAlpha(hex: string, alpha: number, bgHex: string): string {
+  const fg = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
+  const bg = /^#?([0-9a-fA-F]{6})$/.exec(bgHex.trim());
+  if (!fg || !bg) return bgHex;
+  const f = parseInt(fg[1], 16);
+  const g = parseInt(bg[1], 16);
+  const a = Math.max(0, Math.min(1, alpha));
+  const ch = (shiftBits: number) => Math.round((((f >> shiftBits) & 255) * a) + (((g >> shiftBits) & 255) * (1 - a)));
+  return '#' + ((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, '0');
+}
+
+/** 강조색 워시 비율 — `primarySoft`(인라인 rgba)와 그 불투명 대체색이 같은 값을 써야 면이 갈리지 않는다. */
+export const EMAIL_PRIMARY_SOFT_ALPHA = 0.08;
 
 /** hex + 알파 → rgba 문자열. #rrggbb 외는 원본 반환. */
 export function withAlpha(hex: string, alpha: number): string {

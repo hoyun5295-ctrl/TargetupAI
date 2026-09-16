@@ -40,43 +40,58 @@ export type EditorProps<P> = {
    * (선택 속성이라 안 쓰는 편집기는 무영향). 지금 소비처 = CtaEditor 배치.
    */
   treatment?: string;
+  /**
+   * ★ 2026-09-16 이 채널에서 감출 필드인가. 이 패널은 모바일 DM과 이메일이 **함께 쓰는데**
+   * 채널마다 쓰는 값이 다르다 — 한쪽 렌더러가 안 읽는 값은 그쪽 화면에서 "눌러도 안 바뀌는 칸"이 되고,
+   * 채널 전용 컨트롤과 같은 값을 노출하면 한 화면에 같은 것이 두 번 나온다(남지현 접수 2건).
+   * 미지정이면 아무것도 감추지 않는다 = 기존 호출부(DM) 화면 무변화.
+   */
+  hidden?: (field: string) => boolean;
 };
 
 export default function SectionPropsEditor({
-  section, onUpdate,
+  section, onUpdate, hiddenFields,
 }: {
   section: Section;
   onUpdate: (patch: Record<string, any>) => void;
+  /** ★ 2026-09-16 채널이 감추는 필드 목록. 원장 = 백엔드 `email-property-contract.EMAIL_HIDDEN_EDITOR_FIELDS`. */
+  hiddenFields?: readonly string[];
 }) {
+  // 전 에디터 공통 인자 — 감춤 판정을 한 곳에서 만든다(에디터마다 배열을 다시 훑지 않도록).
+  const common = {
+    props: section.props as any,
+    onUpdate,
+    hidden: (field: string) => !!hiddenFields && hiddenFields.includes(field),
+  };
   switch (section.type) {
-    case 'header':     return <HeaderEditor     props={section.props as any} onUpdate={onUpdate} />;
-    case 'hero':       return <HeroEditor       props={section.props as any} onUpdate={onUpdate} />;
-    case 'coupon':     return <CouponEditor     props={section.props as any} onUpdate={onUpdate} />;
-    case 'countdown':  return <CountdownEditor  props={section.props as any} onUpdate={onUpdate} />;
-    case 'text_card':  return <TextCardEditor   props={section.props as any} onUpdate={onUpdate} />;
-    case 'cta':        return <CtaEditor        props={section.props as any} onUpdate={onUpdate} treatment={section.treatment} />;
-    case 'video':      return <VideoEditor      props={section.props as any} onUpdate={onUpdate} />;
-    case 'store_info': return <StoreInfoEditor  props={section.props as any} onUpdate={onUpdate} />;
-    case 'sns':        return <SnsEditor        props={section.props as any} onUpdate={onUpdate} />;
-    case 'promo_code': return <PromoCodeEditor  props={section.props as any} onUpdate={onUpdate} />;
-    case 'footer':     return <FooterEditor     props={section.props as any} onUpdate={onUpdate} />;
+    case 'header':     return <HeaderEditor     {...common} />;
+    case 'hero':       return <HeroEditor       {...common} />;
+    case 'coupon':     return <CouponEditor     {...common} />;
+    case 'countdown':  return <CountdownEditor  {...common} />;
+    case 'text_card':  return <TextCardEditor   {...common} />;
+    case 'cta':        return <CtaEditor        {...common} treatment={section.treatment} />;
+    case 'video':      return <VideoEditor      {...common} />;
+    case 'store_info': return <StoreInfoEditor  {...common} />;
+    case 'sns':        return <SnsEditor        {...common} />;
+    case 'promo_code': return <PromoCodeEditor  {...common} />;
+    case 'footer':     return <FooterEditor     {...common} />;
     // D216+ 신규 16
-    case 'product_carousel':  return <ProductCarouselEditor  props={section.props as any} onUpdate={onUpdate} />;
-    case 'gallery':           return <GalleryEditor          props={section.props as any} onUpdate={onUpdate} />;
-    case 'slideshow':         return <SlideshowEditor        props={section.props as any} onUpdate={onUpdate} />;
-    case 'tab_cards':         return <TabCardsEditor         props={section.props as any} onUpdate={onUpdate} />;
-    case 'poll':              return <PollEditor             props={section.props as any} onUpdate={onUpdate} />;
-    case 'survey':            return <SurveyEditor           props={section.props as any} onUpdate={onUpdate} />;
-    case 'email_capture':     return <EmailCaptureEditor     props={section.props as any} onUpdate={onUpdate} />;
-    case 'click_rewards':     return <ClickRewardsEditor     props={section.props as any} onUpdate={onUpdate} />;
-    case 'lucky_draw':        return <LuckyDrawEditor        props={section.props as any} onUpdate={onUpdate} />;
-    case 'roulette':          return <RouletteEditor         props={section.props as any} onUpdate={onUpdate} />;
-    case 'instant_coupon':    return <InstantCouponEditor    props={section.props as any} onUpdate={onUpdate} />;
-    case 'limited_quantity':  return <LimitedQuantityEditor  props={section.props as any} onUpdate={onUpdate} />;
-    case 'youtube_embed':     return <YoutubeEmbedEditor     props={section.props as any} onUpdate={onUpdate} />;
-    case 'instagram_embed':   return <InstagramEmbedEditor   props={section.props as any} onUpdate={onUpdate} />;
-    case 'map_store_locator': return <MapStoreLocatorEditor  props={section.props as any} onUpdate={onUpdate} />;
-    case 'reviews':           return <ReviewsEditor          props={section.props as any} onUpdate={onUpdate} />;
+    case 'product_carousel':  return <ProductCarouselEditor  {...common} />;
+    case 'gallery':           return <GalleryEditor          {...common} />;
+    case 'slideshow':         return <SlideshowEditor        {...common} />;
+    case 'tab_cards':         return <TabCardsEditor         {...common} />;
+    case 'poll':              return <PollEditor             {...common} />;
+    case 'survey':            return <SurveyEditor           {...common} />;
+    case 'email_capture':     return <EmailCaptureEditor     {...common} />;
+    case 'click_rewards':     return <ClickRewardsEditor     {...common} />;
+    case 'lucky_draw':        return <LuckyDrawEditor        {...common} />;
+    case 'roulette':          return <RouletteEditor         {...common} />;
+    case 'instant_coupon':    return <InstantCouponEditor    {...common} />;
+    case 'limited_quantity':  return <LimitedQuantityEditor  {...common} />;
+    case 'youtube_embed':     return <YoutubeEmbedEditor     {...common} />;
+    case 'instagram_embed':   return <InstagramEmbedEditor   {...common} />;
+    case 'map_store_locator': return <MapStoreLocatorEditor  {...common} />;
+    case 'reviews':           return <ReviewsEditor          {...common} />;
     default:                  return null;
   }
 }

@@ -3,7 +3,7 @@ import { Field, TextInput, Select, Toggle, ImageUploader, MultiImageUploader } f
 import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
 
-export default function GalleryEditor({ props, onUpdate }: EditorProps<GalleryProps>) {
+export default function GalleryEditor({ props, onUpdate, hidden }: EditorProps<GalleryProps>) {
   const images = props.images || [];
   const setItem = (i: number, patch: Partial<GalleryImage>) =>
     onUpdate({ images: images.map((it, idx) => (idx === i ? { ...it, ...patch } : it)) });
@@ -43,7 +43,10 @@ export default function GalleryEditor({ props, onUpdate }: EditorProps<GalleryPr
         />
       </Field>
       <Field label="풀화면 (여백 없이 꽉 채우기)"><Toggle value={props.full_bleed ?? false} onChange={(v) => onUpdate({ full_bleed: v })} /></Field>
-      <Field label="확대 보기"><Toggle value={props.enable_zoom ?? true} onChange={(v) => onUpdate({ enable_zoom: v })} /></Field>
+      {/* ★ 2026-09-16 이메일 본문은 클릭 확대(라이트박스)를 못 연다(JS 0) — 그 화면에서는 감춘다. */}
+      {!hidden?.('enable_zoom') && (
+        <Field label="확대 보기"><Toggle value={props.enable_zoom ?? true} onChange={(v) => onUpdate({ enable_zoom: v })} /></Field>
+      )}
     </>
   );
 }

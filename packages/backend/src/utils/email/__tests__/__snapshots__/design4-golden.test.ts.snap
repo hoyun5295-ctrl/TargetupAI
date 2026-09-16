@@ -140,6 +140,7 @@ exports[`M0 골든 — 이메일 브랜드 해석(resolveEmailBrand) > 다크 �
   "primaryDashed": "rgba(184,145,80,0.45)",
   "primaryHover": "#a07938",
   "primarySoft": "rgba(184,145,80,0.08)",
+  "primarySoftOpaque": "#24211c",
   "radius": {
     "lg": "16px",
     "md": "12px",
@@ -230,6 +231,7 @@ exports[`M0 골든 — 이메일 브랜드 해석(resolveEmailBrand) > 미설정
   "primaryDashed": "rgba(79,70,229,0.45)",
   "primaryHover": "#4338ca",
   "primarySoft": "rgba(79,70,229,0.08)",
+  "primarySoftOpaque": "#f1f0fd",
   "radius": {
     "lg": "16px",
     "md": "12px",
@@ -320,6 +322,7 @@ exports[`M0 골든 — 이메일 브랜드 해석(resolveEmailBrand) > 에디토
   "primaryDashed": "rgba(17,24,39,0.45)",
   "primaryHover": "#00000f",
   "primarySoft": "rgba(17,24,39,0.08)",
+  "primarySoftOpaque": "#ecedee",
   "radius": {
     "lg": "16px",
     "md": "12px",

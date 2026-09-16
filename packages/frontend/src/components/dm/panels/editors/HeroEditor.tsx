@@ -3,7 +3,7 @@ import { DM_FONT_SIZE_OPTIONS } from '../../../../utils/dm-section-defaults';
 import { Field, TextArea, Select, Toggle, ImageUploader, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
-export default function HeroEditor({ props, onUpdate }: EditorProps<HeroProps>) {
+export default function HeroEditor({ props, onUpdate, hidden }: EditorProps<HeroProps>) {
   return (
     <>
       <Field label="배경 이미지">
@@ -100,17 +100,21 @@ export default function HeroEditor({ props, onUpdate }: EditorProps<HeroProps>) 
         />
       </Field>
 
-      <Field label="헤드라인 강조">
-        <Select
-          value={props.headline_emphasis || ''}
-          onChange={(v) => onUpdate({ headline_emphasis: (v || undefined) as HeroProps['headline_emphasis'] })}
-          options={[
-            { value: '', label: '없음' },
-            { value: 'marker', label: '형광 마커' },
-            { value: 'underline', label: '밑줄 스트로크' },
-          ]}
-        />
-      </Field>
+      {/* ★ 2026-09-16 이메일 편집기는 같은 값을 위쪽 "블록 스타일"에서 3버튼으로 내보내므로 여기서는 감춘다
+          (감추지 않으면 한 화면에 헤드라인 강조가 위·아래 두 번 — 남지현 접수 cmu3n0fdj03x1jnlua7bfr9h2). */}
+      {!hidden?.('headline_emphasis') && (
+        <Field label="헤드라인 강조">
+          <Select
+            value={props.headline_emphasis || ''}
+            onChange={(v) => onUpdate({ headline_emphasis: (v || undefined) as HeroProps['headline_emphasis'] })}
+            options={[
+              { value: '', label: '없음' },
+              { value: 'marker', label: '형광 마커' },
+              { value: 'underline', label: '밑줄 스트로크' },
+            ]}
+          />
+        </Field>
+      )}
     </>
   );
 }

@@ -19,6 +19,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
+// ★ 2026-09-16 공용 패널에서 이메일이 감출 필드(원장 = 백엔드 EMAIL_HIDDEN_EDITOR_FIELDS 사본)
+import { emailHiddenFieldsFor } from '../../constants/email-editor-hidden-fields';
 // ★ 2026-07-02 완성(50크레딧) 사전 고지 — 환불 없는 돈이라 확인 모달 의무
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 // ★ 2026-09-06 S6 재료(이미지·행사 내용)로 블록 — 아웃리치 브랜드 이메일 시안 경로
@@ -238,7 +240,10 @@ export default function EmailVisualEditor({
       try {
         const sample = previewSample !== 'none' ? sampleCustomers.find((c) => c.label === previewSample)?.customer : null;
         const res = await fetch('/api/email/render-preview', {
-          method: 'POST', headers: authHeaders(), body: JSON.stringify({ sections, design: design || undefined, sampleCustomer: sample || undefined }),
+          // ★ 2026-09-16 광고성 여부 동승 — 미리보기 하단에 실제로 붙을 법정 문구(전송자 명칭·연락처·수신거부)를
+          //   그대로 보여준다(임은지 접수: 수신거부 표시가 화면에 반영되지 않는다).
+          //   저장된 캠페인이면 id를 함께 보내 **그 캠페인의 발신자**로 문구를 만든다(신규 작성 중이면 회사 기본값).
+          method: 'POST', headers: authHeaders(), body: JSON.stringify({ sections, design: design || undefined, sampleCustomer: sample || undefined, is_ad: isAd, campaign_id: campaignId || undefined }),
         });
         const data = await res.json();
         if (data.success) setPreviewHtml(data.html || '');
@@ -246,8 +251,9 @@ export default function EmailVisualEditor({
       finally { setPreviewLoading(false); }
     }, 500);
     return () => { if (debounce.current) clearTimeout(debounce.current); };
+    // ★ 2026-09-16 isAd 의존 — 광고성 체크를 끄고 켜면 하단 법정 문구가 바로 따라 바뀌어야 한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections, previewSample, design]);
+  }, [sections, previewSample, design, isAd]);
 
   // 미리보기 샘플 고객 로드 (VIP/일반/신규) — 개인화 미리보기 토글용
   useEffect(() => {
@@ -808,7 +814,18 @@ export default function EmailVisualEditor({
                   </div>
                 )}
                 <div className="text-white" onFocus={trackFieldFocus}>
-                  <SectionPropsEditor section={selected} onUpdate={updateSelected} />
+                  <SectionPropsEditor section={selected} onUpdate={updateSelected} hiddenFields={emailHiddenFieldsFor(selected.type)} />
+                  {/* ★ 2026-09-16 수신거부는 켜고 끄는 값이 아니라 발송 규칙이다(임은지 접수). 토글을 감춘 자리에
+                      무엇이 붙는지 알려 준다 — 안 그러면 "칸이 사라졌다"로만 보인다. 미리보기 맨 끝이 실물이다. */}
+                  {selected.type === 'footer' && (
+                    <div className={`mt-3 rounded-xl border px-3 py-2.5 text-[11px] leading-relaxed ${
+                      isAd ? 'border-violet-400/30 bg-violet-500/10 text-violet-100/90' : 'border-white/10 bg-white/5 text-white/60'
+                    }`}>
+                      {isAd
+                        ? '광고성 메일이라 보내는 사람 정보와 수신거부 링크가 메일 맨 아래에 자동으로 붙습니다. 오른쪽 미리보기 맨 끝에서 실제 문구를 확인하세요.'
+                        : '광고성이 아니어서 수신거부 링크가 붙지 않습니다. 할인·행사 같은 광고 내용이 있으면 위쪽 "광고성"을 켜 주세요.'}
+                    </div>
+                  )}
                 </div>
 
                 {/* 개인화 — 변수 칩(편리한 삽입) + 조건부 표시(수신자별 맞춤) */}
