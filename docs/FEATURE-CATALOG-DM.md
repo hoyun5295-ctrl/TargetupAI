@@ -88,6 +88,7 @@
 - **넘김 효과 3종** = `settings.effect` (`slide` 기본 · `flip` · `fade`). 미지정·`slide`면 발행 HTML 에 흔적이 없다(현행 가로 스크롤 그대로). 조각 = `utils/dm/dm-effect.ts` · 배선 = `dm-viewer.ts` 4곳(CSS·body 표식·goToPage 분기·스크립트).
 - **상품 칩** = 갤러리 props `chips[{label, price?, url?}]` → 이미지 **밖** 알약(`data-dm-chip` · 최대 4개 · `safeUrl` 통과분만 링크). 가격을 이미지에 새기지 않는 이유 = 값이 바뀌면 재합성 없이는 못 고친다. 계약 = `dm-property-contract DM_GALLERY_CHIP_MARKER`.
 - **입구 통합** = 시작 화면의 [완성 슬라이드]와 [카탈로그 DM]은 만드는 결과가 같았다(장마다 이미지 1장 · `settings.catalog` 한 값만 차이). 하나로 합쳐 **완성 이미지 올리기**가 되고 책 펼침은 편집기 토글이 소유한다.
+- **입구 통합(★0916)** = 시작 화면 타일이 [직접 제작]·[완성 슬라이드]·[카탈로그 DM]·[라이브러리] 4개였는데, 만드는 결과로 보면 셋이 같은 이미지 DM 이었다(사진 출처·`settings.catalog` 만 달랐다). 지금은 **완성 이미지로 만들기** 하나(저장 소재는 그 카드 안 보조 줄) + 상단 카드띠 [블록으로 만들기]. 빈 캔버스 경로는 조립 화면 헤더 버튼이 소유한다.
 - 검증 = `dm-catalog-templates.test.ts`(16) · `dm-effect.test.ts`(9) · `dm-effect-viewer.test.ts`(6) · `dm-catalog-render.test.ts`(9) · `dm-gallery-chips.test.ts`(5) · `dm-blocks-contract.test.ts`(7).
 
 ---
