@@ -5,15 +5,21 @@
  * 우 = 직접 제작(OUI_CARD dashed) → 호출부의 직접 제작 진입(옛 "자유 시작"·"비주얼로 만들기"). enabled=false 면 아무것도 그리지 않는다(ENV 미노출).
  */
 import { useNavigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { Sparkles, PencilLine } from 'lucide-react';
 import { OUI_BADGE_NEW, OUI_CARD, OUI_CARD_ACCENT } from '../../utils/operator-ui';
 import type { BuildChannel } from '../../utils/ai-build';
 
-export default function AiBuildEntryStrip({ channel, enabled, onDirect, directDesc, disabled }: {
+export default function AiBuildEntryStrip({ channel, enabled, onDirect, directDesc, directLabel, directSub, directIcon, disabled }: {
   channel: BuildChannel;
   enabled: boolean;
   onDirect: () => void;
   directDesc: string;
+  /** ★ 2026-09-16 오른쪽 카드 이름·부제·아이콘 — 미지정이면 "직접 제작 / 빈 캔버스에서 시작"(이메일 화면 그대로).
+   *  모바일 DM 은 이 자리가 블록 조립 입구라 이름을 바꿔 부른다(같은 자리에 같은 일이 두 번 있지 않게). */
+  directLabel?: string;
+  directSub?: string;
+  directIcon?: ReactNode;
   disabled?: boolean;
 }) {
   const navigate = useNavigate();
@@ -37,11 +43,11 @@ export default function AiBuildEntryStrip({ channel, enabled, onDirect, directDe
         className={`${OUI_CARD} border-dashed text-left p-4 md:p-5 hover:bg-white/[0.08] hover:border-white/25 transition-colors disabled:opacity-50`}>
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
-            <PencilLine className="w-4 h-4 text-white/85" />
+            {directIcon || <PencilLine className="w-4 h-4 text-white/85" />}
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-bold text-white">직접 제작</div>
-            <div className="text-[11px] text-white/60 mt-0.5">빈 캔버스에서 시작</div>
+            <div className="text-sm font-bold text-white">{directLabel || '직접 제작'}</div>
+            <div className="text-[11px] text-white/60 mt-0.5">{directSub || '빈 캔버스에서 시작'}</div>
           </div>
         </div>
         <p className="text-[12px] text-white/60 mt-3 leading-relaxed">{directDesc}</p>

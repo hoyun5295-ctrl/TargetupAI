@@ -844,7 +844,17 @@ export default function DmBuilderPage() {
 
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 32px' }}>
         {/* ★ 2026-09-14 T6 카드띠 [AI 자동제작 | 직접 제작] — 신규 ENV 미개방 회사는 그리지 않는다(설계서 §3-1 · §4-1) */}
-        <AiBuildEntryStrip channel="dm" enabled={autoBuild === true} disabled={generating} onDirect={handleCreateNew} directDesc="빈 캔버스에서 섹션을 직접 추가해요. 템플릿·완성 슬라이드·라이브러리도 아래에서 고를 수 있어요." />
+        {/* ★ 2026-09-16 Harold — 오른쪽 카드 = 블록으로 만들기(옛 "직접 제작"과 같은 일이라 하나로). 빈 캔버스는 조립 화면 안 버튼이 소유한다 */}
+        <AiBuildEntryStrip
+          channel="dm"
+          enabled={autoBuild === true}
+          disabled={generating}
+          onDirect={handleStartBlockBuild}
+          directIcon={<span className="text-[15px]">🧱</span>}
+          directLabel="블록으로 만들기"
+          directSub="고르면 필요한 것만 물어봐요"
+          directDesc="헤드라인·상품·쿠폰·추첨 같은 블록을 고르면 그 블록에 필요한 것만 물어봐요. 저장하면 바로 쌓입니다."
+        />
         {/* 자연어 한 줄 입력 + 블록으로 만들기 + 완성 이미지 (★ 2026-09-16 블록 조립 전환) */}
         <div style={{
           background: 'linear-gradient(135deg, rgba(217,70,239,0.10), rgba(168,85,247,0.08), rgba(99,102,241,0.10))',
@@ -855,17 +865,17 @@ export default function DmBuilderPage() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <span style={{ fontSize: 18 }}>✨</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>자연어 한 줄로 DM 자동 생성</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>어떻게 만들까요</span>
           </div>
           {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-3" />}
-          {/* 좌: 한 줄 입력 · 우: 블록으로 만들기(위) + 완성 이미지(아래) */}
+          {/* 좌: 한 줄 입력 + 자동 생성 · 우: 만드는 방법 스택 */}
           <style>{`
-            .dm-hub-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
-            /* ★ 2026-09-16 아래 타일은 남는 높이를 나눠 갖는다(블록 카드는 내용 높이만) */
-            .dm-hub-bottom { display: grid; grid-template-columns: 1fr; gap: 10px; flex: 1; }
+            .dm-hub-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
+            /* ★ 2026-09-16(3) 오른쪽 = 만드는 방법 스택. 마지막 카드가 남는 높이를 먹어 빈칸이 남지 않는다 */
+            .dm-hub-side { display: flex; flex-direction: column; gap: 10px; }
             /* ★ 2026-08-21 한글은 기본 줄바꿈이 글자 단위라 "추 가"·"슬라 이드"·"불러 오기"처럼 낱말이 잘렸다.
                keep-all = 띄어쓰기에서만 끊는다(줄 위치는 아래 타일이 <br/>로 직접 정한다). */
-            .dm-hub-bottom button { word-break: keep-all; }
+            .dm-hub-side button { word-break: keep-all; }
             @media (max-width: 767px) { .dm-hub-grid { grid-template-columns: 1fr; } }
           `}</style>
           <div className="dm-hub-grid">
@@ -905,6 +915,43 @@ export default function DmBuilderPage() {
                 {autoBuild === true ? '더 정확하게 만들기(질문 몇 개)' : '질문 몇 개로 정확하게 만들기'}
                 <span className={autoBuild === true ? 'text-[11px] text-white/35' : 'text-[11px] text-fuchsia-200/70'}>생성 5 + 오토설계 50</span>
               </button>
+              <button
+                onClick={() => { if (naturalLanguage.trim() && !generating) { setPendingGen({ prompt: naturalLanguage.trim(), desc: `"${naturalLanguage.trim()}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` }); } }}
+                disabled={!naturalLanguage.trim() || generating}
+                style={{
+                  height: 46,
+                  background: naturalLanguage.trim() && !generating ? 'linear-gradient(135deg, #a855f7, #d946ef)' : 'rgba(255,255,255,0.05)',
+                  color: '#fff', border: 'none', borderRadius: 10,
+                  fontSize: 14, fontWeight: 700,
+                  cursor: naturalLanguage.trim() && !generating ? 'pointer' : 'not-allowed',
+                  opacity: naturalLanguage.trim() && !generating ? 1 : 0.4,
+                }}
+              >
+                {generating ? 'AI 생성 중...' : '✨ 자동 생성'}
+              </button>
+            </div>
+
+            {/* 우 — 만드는 방법(블록·사진 읽기·재료·완성 이미지). 왼쪽 입력 높이에 맞춰 채운다 */}
+            <div className="dm-hub-side">
+              {/* ★ 2026-09-16(2) 상단 카드띠가 이미 [블록으로 만들기]다 — 카드띠가 안 보이는 회사(기능 미개방)에서만 여기 둔다 */}
+              {autoBuild !== true && (
+                <button
+                  onClick={handleStartBlockBuild}
+                  disabled={generating}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', textAlign: 'left',
+                    background: 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(217,70,239,0.12))',
+                    border: '1px solid rgba(168,85,247,0.45)', borderRadius: 12,
+                    cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
+                  }}
+                >
+                  <span style={{ fontSize: 20, lineHeight: 1 }}>🧱</span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 13, fontWeight: 800, color: '#fff' }}>블록으로 만들기</span>
+                    <span style={{ display: 'block', fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 2 }}>고르면 필요한 것만 물어봐요</span>
+                  </span>
+                </button>
+              )}
               <ImageToCopyButton
                 label="이미지로 불러오기"
                 onExtracted={(t) => setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
@@ -942,73 +989,31 @@ export default function DmBuilderPage() {
                   setToast({ type: 'success', message: '재료로 초안을 만들었습니다. 이미지와 문구만 다듬어 주세요.' });
                 }}
               />
-              <button
-                onClick={() => { if (naturalLanguage.trim() && !generating) { setPendingGen({ prompt: naturalLanguage.trim(), desc: `"${naturalLanguage.trim()}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` }); } }}
-                disabled={!naturalLanguage.trim() || generating}
+              {/* ★ 2026-09-16(3) 완성 이미지 = 남는 높이를 채운다(빈칸 0). 라이브러리는 이 카드 안 보조 입구 */}
+              <div
+                onClick={() => { if (!generating && !uploadingImages) { uploadModeRef.current = 'catalog'; completedImagesInputRef.current?.click(); } }}
+                title="완성된 이미지를 순서대로 올리면 휴대폰은 슬라이드, PC는 책처럼 두 쪽씩 펼쳐 보입니다. 편집기에서 끌 수 있어요"
                 style={{
-                  height: 46,
-                  background: naturalLanguage.trim() && !generating ? 'linear-gradient(135deg, #a855f7, #d946ef)' : 'rgba(255,255,255,0.05)',
-                  color: '#fff', border: 'none', borderRadius: 10,
-                  fontSize: 14, fontWeight: 700,
-                  cursor: naturalLanguage.trim() && !generating ? 'pointer' : 'not-allowed',
-                  opacity: naturalLanguage.trim() && !generating ? 1 : 0.4,
+                  flex: 1, minHeight: 92, padding: '14px 16px',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, textAlign: 'center',
+                  background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
+                  cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
                 }}
               >
-                {generating ? 'AI 생성 중...' : '✨ 자동 생성'}
-              </button>
-            </div>
-
-            {/* 우 — 위: 블록으로 만들기 / 아래: 완성 이미지로 만들기 */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {/* ★ 2026-09-16 Harold — 빠른 시작(시나리오만 넘겨 AI가 전부 지어내던 경로) 자리를 블록 조립이 대신한다.
-                  블록을 누르면 필요한 것만 묻는 창이 뜨고, 넣은 재료로 쌓인다(사진 0장으로 만들어지지 않는다). */}
-              <button
-                onClick={handleStartBlockBuild}
-                disabled={generating}
-                style={{
-                  minHeight: 104, padding: '14px 16px', textAlign: 'center',
-                  background: 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(217,70,239,0.12))',
-                  border: '1px solid rgba(168,85,247,0.45)', borderRadius: 14,
-                  cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 18 }}>🧱</span>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>블록으로 만들기</span>
-                </div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', lineHeight: 1.5 }}>헤드라인·상품·쿠폰·추첨 같은 블록을 고르면 필요한 것만 물어봐요. 저장하면 바로 쌓입니다</div>
-                <div style={{ fontSize: 13, marginTop: 8, letterSpacing: 2 }}>🖼️ ✍️ 🛍️ 🔗 ▶️ 🎟️ 🎁 📊 🗺️ 👉</div>
-              </button>
-              <div className="dm-hub-bottom">
-                {/* ★ 2026-09-16(2) Harold — [라이브러리 불러오기]도 결과가 같은 이미지 DM 이었다(사진 출처만 다르다).
-                    타일을 합치고 라이브러리는 이 카드 안 보조 입구로 둔다. 블록 창의 사진 자리에도 라이브러리 입구가 이미 있다. */}
-                <div
-                  onClick={() => { if (!generating && !uploadingImages) { uploadModeRef.current = 'catalog'; completedImagesInputRef.current?.click(); } }}
-                  title="완성된 이미지를 순서대로 올리면 휴대폰은 슬라이드, PC는 책처럼 두 쪽씩 펼쳐 보입니다. 편집기에서 끌 수 있어요"
+                <span style={{ fontSize: 22, lineHeight: 1 }}>🖼️</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 이미지로 만들기'}</span>
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>이미지 그대로 슬라이드 · PC는 책 펼침</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); if (!generating && !uploadingImages) setLibPickerOpen(true); }}
+                  disabled={generating || uploadingImages}
                   style={{
-                    minHeight: 84, padding: '14px 16px', textAlign: 'center',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
-                    cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
+                    marginTop: 2, background: 'transparent', border: 0, color: 'rgba(255,255,255,0.5)',
+                    fontSize: 11, cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', textDecoration: 'underline',
                   }}
                 >
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 26, lineHeight: 1 }}>🖼️</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 이미지로 만들기'}</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>이미지 그대로 슬라이드<br />PC는 책 펼침</div>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); if (!generating && !uploadingImages) setLibPickerOpen(true); }}
-                    disabled={generating || uploadingImages}
-                    style={{
-                      marginTop: 4, background: 'transparent', border: 0, color: 'rgba(255,255,255,0.5)',
-                      fontSize: 11, cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', textDecoration: 'underline',
-                    }}
-                  >
-                    저장 소재에서 고르기
-                  </button>
-                </div>
+                  저장 소재에서 고르기
+                </button>
               </div>
             </div>
           </div>
