@@ -144,7 +144,7 @@ export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'catalog-dm-build': 10,        // ★ 2026-09-15 카탈로그 DM 생성(AI 자동제작 카탈로그 채널 · Harold 확정 10 · 자동제작 흐름의 확인 모달 1회에 라벨·단가 공급)
   'dm-builder': 100,             // DM 발행
   'dm-interaction-publish': 120, // 인터랙션 발행 (룰렛·추첨·설문)
-  'dm-custom-short-link': 100,   // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 발급 확정 차감
+  'dm-custom-short-link': 20,    // ★ 2026-09-16 100 → 20 (Harold 확정 · AI 0 · 되돌릴 수 없는 발급이라 확인 모달 유지)
   'email-campaign-complete': 50, // ★ 2026-07-02 Email 캠페인 완성 (AI/수동/템플릿 불문 1회 — 발송·이력 무료)
   'email-ai-publish': 50,        // (구) Email AI 캠페인 발송 확정 — 2026-07-02부터 미사용(완성 요금 대체)
   'inapp-publish': 100,          // 인앱 게시

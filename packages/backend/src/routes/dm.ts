@@ -45,10 +45,10 @@ import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
 import { lookupDmRecipientToken, issueDmRecipientTokensBulk, lookupDmShortLink } from '../utils/dm/dm-recipient-token';
-// ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(100크레딧·도메인 평판 보호)
+// ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(도메인 평판 보호 · 2026-09-16 20크레딧)
 import {
   createCustomShortLink, lookupCustomShortLink, recordCustomShortLinkClick,
-  listCustomShortLinks, setCustomShortLinkActive,
+  listCustomShortLinks, setCustomShortLinkActive, ShortLinkSlugTakenError,
   // ★ 2026-07-15 발행 DM 한글 주소 별칭
   upsertDmAliasLink, getDmAliasLink, isSlugAvailable,
 } from '../utils/dm/dm-custom-short-link';
@@ -198,7 +198,7 @@ dmPublicRouter.get('/s/:code', async (req: Request, res: Response) => {
   try {
     const found = await lookupDmShortLink(req.params.code);
     if (!found) {
-      // ★ 2026-07-10 3순위: 고객사 자체 URL 단축(dm_custom_short_links) — 박성용 신기능(Harold 100크레딧 확정).
+      // ★ 2026-07-10 3순위: 고객사 자체 URL 단축(dm_custom_short_links) — 박성용 신기능.
       //   기존 2축(수신자 토큰 → 발행 페이지) miss 후에만 조회 = 기존 링크 동작 무변경.
       //   클릭 집계는 fire-and-forget(실패해도 리다이렉트 무영향). 테이블 미생성/오류 = 홈 폴백(500 노출 0).
       try {
@@ -445,8 +445,9 @@ dmRouter.post('/', async (req: any, res: any) => {
 });
 
 // ============================================================
-// ★ 2026-07-10 고객사 자체 URL 단축 (hlj.kr) — 박성용 신기능, Harold 100크레딧 확정
+// ★ 2026-07-10 고객사 자체 URL 단축 (hlj.kr) — 박성용 신기능
 //   외부 MDM 등 고객사 URL → hlj.kr/<code> 발급 + 클릭 집계. AI 호출 0 — 가치 과금(인프라 서빙+추적).
+//   ★ 2026-09-16 한글 주소 지정 + 20크레딧(박성용 접수 · Harold 확정) — 주소를 비우면 종전 난수다.
 //   도메인 평판 보호 = dm-custom-short-link-core 검증(오픈 리다이렉터 차단) + 일일 상한 + 비활성 토글.
 //   ('/:id'보다 먼저 등록 — 경로 캡처 방지)
 // ============================================================
@@ -473,7 +474,7 @@ dmRouter.get('/short-links', async (req: any, res: any) => {
   }
 });
 
-// POST /api/dm/short-links — 단축 링크 생성 (100크레딧 — 발급 성공 후 멱등 차감)
+// POST /api/dm/short-links — 단축 링크 생성 (단가는 CREDIT_COST_MAP 원장 — 발급 성공 후 멱등 차감)
 dmRouter.post('/short-links', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
@@ -488,12 +489,23 @@ dmRouter.post('/short-links', async (req: any, res: any) => {
     if (!v.ok || !v.url) return res.status(400).json({ error: v.reason || '올바른 URL이 아닙니다.' });
     const title = normalizeCustomLinkTitle(req.body?.title);
 
+    // ★ 2026-09-16 한글 주소(사용자 지정 slug) — 박성용 접수. 비우면 종전 난수다.
+    //   검증은 **발행 DM 별칭과 같은 함수**(validateCustomSlug) — 두 입구가 다른 규칙을 갖게 두지 않는다.
+    //   실패도 크레딧 차감 전이라 과금 0.
+    const rawSlug = typeof req.body?.slug === 'string' ? req.body.slug.trim() : '';
+    let slug: string | null = null;
+    if (rawSlug) {
+      const s = validateCustomSlug(rawSlug);
+      if (!s.ok || !s.slug) return res.status(400).json({ error: s.reason || '주소로 쓸 수 없는 문구입니다.' });
+      slug = s.slug;
+    }
+
     // 크레딧 — 사전 확인 → 발급 성공 → 멱등 차감(키=링크 id). 발급 실패/상한 초과 시 미차감.
     //   일일 상한 판정은 CT의 INSERT 단문에 결합(선-카운트 TOCTOU 정정 — Codex 지적).
     //   deductCreditSafe 영구 실패는 전사 정책대로 [CREDIT][MISS] 로그+수동 재차감(효과물 회수 없음 — DM 발행과 동일).
     const cost = getCreditCost('dm-custom-short-link');
     await checkCredit(companyId, cost);
-    const link = await createCustomShortLink({ companyId, userId, targetUrl: v.url, title });
+    const link = await createCustomShortLink({ companyId, userId, targetUrl: v.url, title, slug });
     if (!link) {
       return res.status(429).json({ error: `단축 링크는 하루 ${CUSTOM_LINK_DAILY_LIMIT}건까지 생성할 수 있습니다.` });
     }
@@ -506,6 +518,10 @@ dmRouter.post('/short-links', async (req: any, res: any) => {
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    }
+    // ★ 2026-09-16 지정 주소 선점 — 차감 전에 던져지므로 과금 0. 화면이 그 칸만 다시 받게 코드를 함께 준다.
+    if (err instanceof ShortLinkSlugTakenError) {
+      return res.status(409).json({ error: err.message, code: 'SHORT_LINK_SLUG_TAKEN' });
     }
     const msg = err?.message || '';
     if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {

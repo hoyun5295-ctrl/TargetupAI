@@ -1,15 +1,21 @@
 /**
- * DmShortLinkModal — 고객사 자체 URL 단축(hlj.kr) 발급/관리 모달 (2026-07-10 박성용 신기능, Harold 100크레딧 확정)
+ * DmShortLinkModal — 고객사 자체 URL 단축(hlj.kr) 발급/관리 모달 (2026-07-10 박성용 신기능)
  *
  * 고객사가 직접 만든 MDM 등 외부 URL을 hlj.kr/<code>로 단축 + 클릭 집계.
- * 발급 = CreditConfirmModal(100크레딧) 확인 후 1회. 비활성 토글 = 즉시 홈 폴백(오발급 대응).
+ * 발급 = CreditConfirmModal 확인 후 1회. 비활성 토글 = 즉시 홈 폴백(오발급 대응).
+ * ★ 2026-09-16 한글 주소 지정 칸 신설 + 20크레딧(박성용 접수 · Harold 확정). 주소를 비우면 종전 난수다 —
+ *   추가 입력을 요구하지 않고, 원하는 사람만 채운다. 단가는 원장(CONFIRM_CREDIT_COSTS)에서 읽는다.
  * 다크 모달 + createPortal + 모바일 반응형 + Source caption. native dialog 0.
  */
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link2, X, Loader2, Copy, Power, MousePointerClick, AlertTriangle } from 'lucide-react';
 import CreditConfirmModal from '../credit/CreditConfirmModal';
+import { CONFIRM_CREDIT_COSTS } from '../../constants/credit';
 import { useToast } from '../ToastProvider';
+
+/** 발급 1건 단가 — 확인 모달과 같은 원장에서 읽는다(두 값이 갈리면 표시가 실차감과 어긋난다) */
+const SHORT_LINK_CREDIT = CONFIRM_CREDIT_COSTS['dm-custom-short-link'];
 
 interface ShortLink {
   id: string;
@@ -33,6 +39,8 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
   const toast = useToast();
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
+  /** ★ 2026-09-16 사용자 지정 한글 주소 — 비우면 서버가 난수를 붙인다(종전 동작) */
+  const [slug, setSlug] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -45,6 +53,7 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     setInputError(null);
+    setSlug('');
     void loadLinks();
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
@@ -77,16 +86,21 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
       const res = await fetch('/api/dm/short-links', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...auth() },
-        body: JSON.stringify({ url: url.trim(), title: title.trim() || undefined }),
+        body: JSON.stringify({ url: url.trim(), title: title.trim() || undefined, slug: slug.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
         if (data.code === 'INSUFFICIENT_CREDIT') throw new Error('크레딧이 부족합니다. 충전 후 다시 시도해주세요.');
+        // ★ 2026-09-16 주소 선점 — 크레딧은 빠지지 않았다. 그 사실을 함께 알려야 다시 시도한다.
+        if (data.code === 'SHORT_LINK_SLUG_TAKEN') {
+          throw new Error(`${data.error || '이미 사용 중인 주소입니다.'} (크레딧은 차감되지 않았습니다)`);
+        }
         throw new Error(data.error || '단축 링크 생성에 실패했습니다.');
       }
       setLinks((prev) => [data.link, ...prev]);
       setUrl('');
       setTitle('');
+      setSlug('');
       if (data.link?.shortUrl) {
         await copyText(data.link.shortUrl, '단축 URL이 생성되고 복사되었습니다.');
       } else {
@@ -161,6 +175,27 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
                   disabled={creating}
                   className="w-full px-3 py-2.5 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400"
                 />
+              </div>
+              {/* ★ 2026-09-16 한글 주소 지정(박성용 접수) — 비우면 종전대로 난수가 붙는다.
+                  발행 DM 별칭과 같은 규칙(2~20자·한글/영문/숫자/-/_)이라 서버 검증 함수도 같다. */}
+              <div>
+                <label className="text-xs text-white/60 font-medium mb-1.5 block">
+                  주소 직접 지정 <span className="text-white/30 font-normal">(선택 · 비우면 자동)</span>
+                </label>
+                <div className="flex items-stretch rounded-lg border border-white/10 bg-slate-950 focus-within:border-violet-400 overflow-hidden">
+                  <span className="px-3 py-2.5 text-sm text-white/35 border-r border-white/10 shrink-0 select-none">hlj.kr/</span>
+                  <input
+                    value={slug}
+                    onChange={(e) => { setSlug(e.target.value); setInputError(null); }}
+                    placeholder="예: 여름세일"
+                    maxLength={20}
+                    disabled={creating}
+                    className="flex-1 min-w-0 px-3 py-2.5 bg-transparent text-sm text-white placeholder-white/30 focus:outline-none"
+                  />
+                </div>
+                <div className="text-[11px] text-white/35 mt-1">
+                  한글·영문·숫자·하이픈·밑줄 2~20자. 한 번 만든 주소는 다른 곳에 다시 쓸 수 없습니다.
+                </div>
               </div>
               <div>
                 <label className="text-xs text-white/60 font-medium mb-1.5 block">이름 (선택, 목록 구분용)</label>
@@ -249,7 +284,8 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
 
           {/* 푸터 */}
           <div className="px-5 py-3 border-t border-white/10 shrink-0">
-            <div className="text-[10px] text-white/30 italic">Data source: dm_custom_short_links 실시간 · 발급 1건 = 100크레딧 · 비활성 시 접속은 서비스 홈으로 이동</div>
+            {/* ★ 2026-09-16 크레딧 수치는 원장(CONFIRM_CREDIT_COSTS)에서 읽는다 — 하드코딩은 값이 바뀌는 날 거짓말이 된다 */}
+            <div className="text-[10px] text-white/30 italic">Data source: dm_custom_short_links 실시간 · 발급 1건 = {SHORT_LINK_CREDIT}크레딧 · 비활성 시 접속은 서비스 홈으로 이동</div>
           </div>
         </div>
       </div>
@@ -257,7 +293,12 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
       <CreditConfirmModal
         open={confirmOpen}
         source="dm-custom-short-link"
-        description={`"${url.trim().slice(0, 80)}${url.trim().length > 80 ? '…' : ''}"을(를) hlj.kr 단축 주소로 발급합니다. 발급 후 클릭 수가 집계됩니다.`}
+        description={
+          slug.trim()
+            // ★ 2026-09-16 지정 주소는 되돌릴 수 없다 — 확인 창에 그 주소를 그대로 보여준다(오타 방지).
+            ? `"${url.trim().slice(0, 60)}${url.trim().length > 60 ? '…' : ''}"을(를) hlj.kr/${slug.trim()} 주소로 발급합니다. 한 번 만든 주소는 다시 쓸 수 없으니 문구를 확인해주세요.`
+            : `"${url.trim().slice(0, 80)}${url.trim().length > 80 ? '…' : ''}"을(를) hlj.kr 단축 주소로 발급합니다. 발급 후 클릭 수가 집계됩니다.`
+        }
         onConfirm={() => { void handleCreate(); }}
         onCancel={() => setConfirmOpen(false)}
       />

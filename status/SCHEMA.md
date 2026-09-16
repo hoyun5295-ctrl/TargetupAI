@@ -987,9 +987,9 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | id | uuid PK DEFAULT gen_random_uuid() |
 | company_id | uuid NOT NULL FK companies ON DELETE CASCADE |
 | created_by | uuid |
-| code | varchar(12) NOT NULL UNIQUE — base62 8자(generateDmShortCode). ★ 2026-07-15 varchar(20) ALTER **대기**(한글 별칭 slug 2~20자·NFC) |
+| code | **varchar(20) NOT NULL UNIQUE** — base62 8자(generateDmShortCode) 또는 한글 별칭 slug 2~20자(NFC). ★2026-09-16 실측 = ALTER **실행완료**(`character_maximum_length=20` · UNIQUE `dm_custom_short_links_code_key`). 그전 기재는 "varchar(12)·ALTER 대기"였다 — 문서가 낡았던 것이고 실물이 진실이다. **UNIQUE라 지정 slug 경합은 DB가 막는다**(23505 → 라우트가 409로 옮긴다) |
 | target_url | text NOT NULL |
-| dm_page_id | uuid REF dm_pages CASCADE — ★ 2026-07-15 ALTER **대기**. 발행 DM 한글 별칭 연결(NULL=기존 외부 URL 단축). 부분 UNIQUE(dm_page_id)=DM당 별칭 1개 |
+| dm_page_id | uuid REF dm_pages CASCADE — ★2026-09-16 실측 = **존재 확인**(2026-07-15 ALTER 실행완료). 발행 DM 한글 별칭 연결(NULL=기존 외부 URL 단축). 부분 UNIQUE `idx_dm_custom_links_alias_one_per_dm`(dm_page_id) WHERE NOT NULL = DM당 별칭 1개 |
 | title | varchar(100) |
 | is_active | boolean NOT NULL DEFAULT true — 비활성=접속 시 서비스 홈 폴백 |
 | click_count | integer NOT NULL DEFAULT 0 |

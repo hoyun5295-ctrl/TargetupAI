@@ -184,9 +184,14 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'ai-column-mapper': 1,
   'brand-voice-extract': 1,
   'parse-briefing': 1,
-  // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(Harold 100 확정). AI 호출 0 —
+  // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능. AI 호출 0 —
   //   가치 과금(우리 도메인 상시 서빙 + 클릭 추적). 발급 성공 후 멱등 차감(키=링크 id).
-  'dm-custom-short-link': 100,
+  // ★ 2026-09-16 100 → 20 (Harold 확정). AI가 안 들어가는데 이 표에서 혼자 50배였다 —
+  //   AI 0에 산출물 가치로 받는 선례는 카탈로그(10)다. 20으로 두는 이유는 **되돌릴 수 없는 발급**이라서다:
+  //   한 번 쓴 코드는 비활성해도 재사용이 막히므로(옛 링크가 새 대상으로 가면 안 된다) 오타 하나가
+  //   그 이름을 영구히 죽인다. 20 이상이면 확인 모달이 의무라(feedback_credit_confirm_modal_threshold)
+  //   값과 확인 창이 한 결정으로 맞물린다. ⚠ 정산 수기 청구(건당 5만원 · 서수란 소관)와는 별개 축이다.
+  'dm-custom-short-link': 20,
   // ★ 2026-07-19 P4 이미지 스튜디오 (AI 오퍼레이터 스튜디오 — 1크레딧=500원, 전부 20 미만 = CreditConfirmModal 비대상).
   //   생성 1회 = Pro 2K 후보 2장 = 2 (부분 성공 1장 = 호출측이 cost 1 override). 같은 구도 4K 격상 = +2. 배경·무드 AI 편집 = 1.
   //   누끼·서버 합성(/compose)·타이포 오버레이·MMS 변환은 무료(CREDIT_COST_MAP 미등록 = 0).
