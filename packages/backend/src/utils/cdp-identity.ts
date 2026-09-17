@@ -30,6 +30,8 @@ import { recomputeProfile } from './unified-customer-profile';
 import { decidePhoneUpdate } from './cdp-phone-sync';
 import { detectIdentityConflict } from './cdp-identity-conflict';
 import { recordIdentityReview } from './cdp-identity-review';
+// ★ 2026-09-18 자사몰 적재의 분류코드 기록 — 형제 적재 경로(upload·sync·단건)와 같은 줄을 CT 하나가 소유한다
+import { linkCustomerStore } from './customer-store-link';
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -54,6 +56,14 @@ export interface IdentifyInput {
    * - undefined: 기존 고객은 현재 값 유지, 신규 생성은 false (동의 확인 전 발송 차단이 안전)
    */
   smsOptIn?: boolean;
+  /**
+   * 분류코드 (2026-09-18 · 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-3)
+   * - 이 회원이 들어온 몰의 분류코드. 주면 고객을 customer_stores 에 그 코드로 기록한다
+   *   (사용자 범위 필터 utils/store-scope.ts 가 그 표를 거친다 = 상시 원칙 "사용자는 분류코드로 자기 것만").
+   * - 생략 = 지금과 1바이트도 다르지 않다(단일몰·무분류 회사). ⛔ 요청 본문 값을 여기에 넣지 마라 —
+   *   호출부가 연동 행(서버가 정한 값)에서 읽어 넘긴다.
+   */
+  storeCode?: string;
 }
 
 /**
@@ -122,6 +132,8 @@ export async function identifyCustomer(
          WHERE id = $1::uuid`,
         [linkRow.id, email, normalizedPhone]
       );
+      // ★ 2026-09-18: 조기 반환 경로도 분류 기록을 지난다(빠뜨리면 이미 연결된 회원만 영영 분류 밖에 남는다)
+      await recordStoreMembership(companyId, linkRow.customer_id, input.storeCode);
       return {
         customerId: linkRow.customer_id,
         linkId: linkRow.id,
@@ -267,6 +279,9 @@ export async function identifyCustomer(
     }
   }
 
+  // ★ 2026-09-18: 고객이 확정된 뒤 분류 기록(신규 · email 매칭 · phone 매칭 공통). 두 몰의 회원 = 고객 1행 + 소속 2행.
+  await recordStoreMembership(companyId, customerId!, input.storeCode);
+
   // ★ D214+ (2026-05-24) unified profile 재계산 (fire-and-forget — active_sources / primary_source / preferred_channel)
   void recomputeProfile(companyId, customerId!).catch((err) => {
     console.warn('[CDP Identity] recomputeProfile 실패 (identifyCustomer 흐름 유지):', err);
@@ -316,6 +331,19 @@ export async function ensureAnonymousLink(
 // ═══════════════════════════════════════════════════════════
 // 헬퍼 — customer 필드 sync (기존 customer에 자사몰 신규 정보 박음)
 // ═══════════════════════════════════════════════════════════
+
+/**
+ * 분류코드가 오면 고객을 그 분류에 기록한다. 없으면 아무 일도 하지 않는다(쿼리 0).
+ * ⛔ 실패는 식별을 막지 않는다 — 분류 기록 때문에 회원·주문 적재가 유실되면 안 된다(다음 이벤트에서 다시 기록된다).
+ */
+async function recordStoreMembership(companyId: string, customerId: string, storeCode?: string): Promise<void> {
+  if (!storeCode) return;
+  try {
+    await linkCustomerStore(companyId, customerId, storeCode);
+  } catch (err: any) {
+    console.warn('[CDP Identity] 분류 기록 실패 (식별 자체는 완료):', err?.message || err);
+  }
+}
 
 /** 같은 회사에서 normalizedPhone을 보유한 활성 고객 id 1건(없으면 null). A1/A4 phone 충돌 판정 공용. */
 async function findPhoneHolderId(companyId: string, normalizedPhone: string | null): Promise<string | null> {

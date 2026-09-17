@@ -127,6 +127,11 @@ export interface WooIntegration {
   consumerKey: string;
   consumerSecret: string;
   consentMetaKey: string | null;
+  /**
+   * 분류코드(2026-09-18 · 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-1) — 몰 1행 = 분류코드 1개.
+   * 이 몰에서 들어온 회원·주문을 customer_stores 에 이 코드로 기록한다. null = 회사 공용(분류 없음 · 기존 동작).
+   */
+  storeCode: string | null;
   /** 앱 인증으로 받은 키 권한(read · write · read_write) · 직접 입력이면 '' */
   keyPermissions: string;
   /** 1클릭 연결이 만든 웹훅 id(해제 시 제거) */
@@ -141,6 +146,8 @@ interface WooMeta {
   woo_key_permissions?: string;
   woo_webhook_ids?: number[];
   woo_consent_meta_key?: string;
+  /** 분류코드 — provider 공통 키(접두 없음). utils/integration-scope.ts resolveStoreCodeByOriginHost 가 같은 키를 읽는다 */
+  store_code?: string | null;
   woo_sync_error?: string;
   woo_sync_error_code?: string;
   woo_sync_error_at?: string;
@@ -162,6 +169,7 @@ function toIntegration(r: any): WooIntegration {
     consumerKey: meta.woo_consumer_key || '',
     consumerSecret: meta.woo_consumer_secret || '',
     consentMetaKey: meta.woo_consent_meta_key || null,
+    storeCode: typeof meta.store_code === 'string' && meta.store_code.trim() ? meta.store_code.trim() : null,
     keyPermissions: meta.woo_key_permissions || '',
     webhookIds: Array.isArray(meta.woo_webhook_ids) ? meta.woo_webhook_ids.map(Number).filter((n) => Number.isFinite(n)) : [],
     syncError: meta.woo_sync_error
@@ -181,6 +189,11 @@ export interface SaveWooCredentialsInput {
   consumerKey: string;
   consumerSecret: string;
   consentMetaKey: string;
+  /**
+   * 분류코드. ⛔ 라우트가 권한 CT(utils/integration-scope.ts pickStoreCodeForConnect)로 정한 값만 넣는다(요청 본문 값 금지).
+   * undefined = meta 에 키를 싣지 않는다(기존 몰의 분류코드를 덮지 않는다) · null = 회사 공용으로 명시.
+   */
+  storeCode?: string | null;
 }
 
 export interface SaveWooCredentialsResult {
@@ -205,6 +218,7 @@ export async function saveWooCredentials(companyId: string, input: SaveWooCreden
   if (ck) meta.woo_consumer_key = ck;
   if (cs) meta.woo_consumer_secret = cs;
   if (consent) meta.woo_consent_meta_key = consent;
+  if (input.storeCode !== undefined) meta.store_code = input.storeCode ? String(input.storeCode).trim() || null : null;
   const freshSecret = randomBytes(32).toString('hex');
 
   const r = await query(
@@ -360,6 +374,8 @@ export interface WooMallStatus {
   webhookUrl: string;
   hasRestKeys: boolean;
   consentMetaKey: string | null;
+  /** 분류코드(없으면 회사 공용) — 관리자 화면에서 어느 몰이 누구 것인지 */
+  storeCode: string | null;
   syncError: { message: string; code: string; at: string | null } | null;
 }
 
@@ -381,6 +397,7 @@ export async function getWooStatus(companyId: string): Promise<WooStatus> {
     webhookUrl: buildWooWebhookUrl(i.mallId),
     hasRestKeys: hasKeys(i),
     consentMetaKey: i.consentMetaKey,
+    storeCode: i.storeCode,
     syncError: i.syncError,
   }));
   return { connected: malls.some((m) => m.connected), malls };
@@ -502,12 +519,15 @@ export async function processWooResource(
   kind: WooTopicResource,
   raw: any,
   consentMetaKey: string | null | undefined,
+  /** 이 몰 행의 분류코드(WooIntegration.storeCode). 없으면 키를 싣지 않는다 = 지금과 같은 적재 */
+  storeCode?: string | null,
 ): Promise<WooProcessResult> {
+  const store = storeCode ? { storeCode } : {};
   if (kind === 'customer') {
     const m = mapWooCustomerToCdp(raw, { mallId, consentMetaKey });
     if (!m) return 'skipped';
     const consent = parseConsentValue(m.consentRaw);
-    await identifyCustomer(companyId, { ...m.identify, ...(consent !== undefined ? { smsOptIn: consent } : {}) });
+    await identifyCustomer(companyId, { ...m.identify, ...(consent !== undefined ? { smsOptIn: consent } : {}), ...store });
     return 'synced';
   }
   const m = mapWooOrderToCdp(raw, { mallId, consentMetaKey });
@@ -521,9 +541,10 @@ export async function processWooResource(
       name: m.order.name,
       email: m.order.email,
       smsOptIn: consent,
+      ...store,
     });
   }
-  await syncOrder(companyId, m.order);
+  await syncOrder(companyId, { ...m.order, ...store });
   return 'synced';
 }
 
@@ -550,7 +571,7 @@ async function walkPages(
     pages++;
     totalPages = res.totalPages;
     for (const raw of res.items) {
-      const r = await processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey);
+      const r = await processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey, integ.storeCode);
       if (r === 'synced') imported++;
     }
     if (res.items.length === 0) break;

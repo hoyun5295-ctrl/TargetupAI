@@ -355,6 +355,12 @@ export interface BrowserIngestBatch {
   schemaVersion: string;
   sentAt: string | null;
   events: Array<Record<string, any>>;
+  /**
+   * 분류코드(2026-09-18 · 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-4).
+   * SDK 공개키는 회사당 하나라 몰은 Origin 만 안다 — 라우트가 검증된 Origin 으로 찾은 값을 싣는다(요청 본문 값 금지).
+   * 없으면 지금과 같은 무분류 적재.
+   */
+  storeCode?: string | null;
 }
 
 export interface BrowserIngestResult {
@@ -434,6 +440,8 @@ export async function ingestBrowserEvents(
         email: identifyEvt.email ? String(identifyEvt.email) : undefined,
         phone: identifyEvt.phone ? String(identifyEvt.phone) : undefined,
         name: identifyEvt.name ? String(identifyEvt.name) : undefined,
+        // ★ 2026-09-18 Origin 으로 찾은 몰의 분류코드(있을 때만 키를 싣는다)
+        ...(batch.storeCode ? { storeCode: batch.storeCode } : {}),
       });
       customerId = r.customerId;
       identityLinkId = r.linkId;

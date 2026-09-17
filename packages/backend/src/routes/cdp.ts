@@ -25,6 +25,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
 import { requireCdpApiKey, requireCdpBrowserOrigin, requireCdpKeyOrBrowserOrigin, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
+// ★ 2026-09-18 브라우저 수집의 몰 분류코드 — 검증된 Origin 호스트로 연동 행에서 찾는다
+import { resolveStoreCodeByOriginHost } from '../utils/integration-scope';
 import { isValidBundleId } from '../utils/cdp-app-id';
 import { identifyCustomer, parseConsentValue } from '../utils/cdp-identity';
 import { trackEvent, getRecentEvents, ingestBrowserEvents } from '../utils/cdp-events';
@@ -161,12 +163,17 @@ router.post('/ingest', requireCdpBrowserOrigin, cdpWriteBurst, async (req: Reque
     // ★ 정규화 적재 (CT-21 ingestBrowserEvents) — SDK type → 표준 event_name +
     //   identify 식별 + 익명→회원 소급. PII masking 2차 안전망은 함수 내부 normalizeBrowserEvent에서 수행.
     //   옛 inline INSERT는 없는 event_type/payload 컬럼 참조로 항상 503이었음.
+    // ★ 2026-09-18 몰별 분류코드 — SDK 공개키는 회사당 하나라 몰은 Origin 만 안다. requireCdpBrowserOrigin 이 허용 목록과
+    //   대조한 그 Origin 으로 연동 행의 분류코드를 찾아 배치에 싣는다(설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-4).
+    //   못 찾으면 null = 지금과 같은 무분류 적재. 본문 값은 읽지 않는다.
+    const storeCode = await resolveStoreCodeByOriginHost(companyId, String(req.headers['origin'] || ''));
     const ingestResult = await ingestBrowserEvents(companyId, {
       anonymousId: anonymous_id || null,
       sessionId: session_id || null,
       schemaVersion: schema_version,
       sentAt: sent_at || null,
       events: events as Array<Record<string, any>>,
+      storeCode,
     });
 
     return res.json({

@@ -14,12 +14,19 @@ import { matchMallProductByName } from '../utils/mall-product-match';
 // ★ 2026-09-14 W5 우커머스 — Store API 공개 조회(키 불필요) · 몰별 탭 provider = woocommerce:{mall}
 import { listWooIntegrations, getWooIntegration, fetchWooStoreProducts, fetchWooStoreProductsRaw } from '../utils/woocommerce-client';
 import { normalizeWooMallId } from '../utils/woocommerce-core';
+// ★ 2026-09-18 몰별 사용자 범위 — 관리자는 회사 전체 몰 · 사용자는 자기 분류코드 몰만(설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-5)
+import { resolveIntegrationActor, canTouchIntegration, type IntegrationActor } from '../utils/integration-scope';
 
 const WOO_PREFIX = 'woocommerce:';
-/** provider 'woocommerce:{mall}' → 이 회사 소속 몰 행(없으면 undefined). 타사 몰 주소로 조회하는 길을 막는다. */
-async function wooMallOf(companyId: string, provider: string) {
+/**
+ * provider 'woocommerce:{mall}' → 이 회사 소속 + 이 주체가 다룰 수 있는 몰 행(없으면 undefined).
+ * 타사 몰 주소로 조회하는 길과, 남의 분류코드 몰을 provider 문자열로 찍어 읽는 길을 함께 막는다.
+ */
+async function wooMallOf(companyId: string, provider: string, actor: IntegrationActor) {
   const mallId = normalizeWooMallId(provider.slice(WOO_PREFIX.length));
-  return mallId ? getWooIntegration(companyId, mallId) : undefined;
+  const integ = mallId ? await getWooIntegration(companyId, mallId) : undefined;
+  if (!integ || !canTouchIntegration(actor, integ.storeCode)) return undefined;
+  return integ;
 }
 
 export const mallProductsRouter = Router();
@@ -36,7 +43,9 @@ mallProductsRouter.get('/providers', async (req: any, res: Response) => {
     const naver = await getNaverCommerceIntegration(companyId).catch(() => null);
     if (naver) providers.push({ provider: 'naver', label: '네이버 스마트스토어' });
     // 우커머스 — 몰별 탭(해제 몰 제외). Store API 가 공개라 연결 검증 전이라도 상품은 읽힌다.
-    const woo = await listWooIntegrations(companyId).catch(() => []);
+    //   ★ 2026-09-18 사용자는 자기 분류코드 몰만(관리자는 전체 · 분류 미배정 사용자는 0개).
+    const actor = await resolveIntegrationActor(req.user);
+    const woo = (await listWooIntegrations(companyId).catch(() => [])).filter((m) => canTouchIntegration(actor, m.storeCode));
     for (const m of woo) providers.push({ provider: `woocommerce:${m.mallId}`, label: `우커머스 · ${m.mallId}` });
     return res.json({ success: true, providers });
   } catch (err: any) {
@@ -70,7 +79,7 @@ mallProductsRouter.get('/preview', async (req: any, res: Response) => {
     }
 
     if (provider.startsWith('woocommerce:')) {
-      const integ = await wooMallOf(companyId, provider);
+      const integ = await wooMallOf(companyId, provider, await resolveIntegrationActor(req.user));
       if (!integ) return res.status(404).json({ success: false, error: '우커머스 연동이 없는 몰입니다.' });
       const raw = await fetchWooStoreProductsRaw(integ.siteUrl, { q, limit: 5 });
       return res.json({ success: true, provider, mallId: integ.mallId, raw });
@@ -115,7 +124,7 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
     }
 
     if (provider.startsWith('woocommerce:')) {
-      const integ = await wooMallOf(companyId, provider);
+      const integ = await wooMallOf(companyId, provider, await resolveIntegrationActor(req.user));
       if (!integ) return res.status(404).json({ success: false, error: '우커머스 연동이 없는 몰입니다.' });
       const products = await fetchWooStoreProducts(integ.siteUrl, { q, limit });
       return res.json({ success: true, provider, products });

@@ -1464,6 +1464,7 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | company_id | uuid FK |
 | login_id | varchar(50) |
 | password_hash | varchar(255) |
+| store_codes | 배열(★2026-09-18 등재 · 정확한 배열 타입은 information_schema 미확인 — 설계서 §7-4 SQL) | 사용자에게 배정된 분류코드 목록. 쓰기 = `manage-users.ts`·`admin.ts`(등록부 `companies.store_code_list`와 대조 없음 · 자유 문자열). 읽기 = `store-scope.ts`(범위 판정 · `ANY($2::text[])`) · `integration-scope.ts`(연동 권한). 0918 실측 = 배정 7명 전원이 `customer_stores` 0행 회사 소속 |
 | user_type | varchar(20) | ★ 2026-08-03 실측 분포 = `admin` 126 · `user` 101(매장 배정 7) · `system` 75. **JWT의 `company_admin`·`company_user`는 토큰 변환값이라 DB에 없다** — 권한 판정을 토큰 어휘로 하면 제한 사용자(`user`)가 전체 권한으로 승격된다(자동마케팅 발송 범위 사고 기원) |
 | mfa_phone | varchar(20) | ★2026-08-18 신설(전송자격인증 3.4) — **로그인 다중인증 주 번호. 계정당 하나**(복수 등록은 기준 위반 — "다수가 공동 사용 가능한 인증수단 부적합"). 슈퍼관리자가 계약 담당자 기준으로 등록(`PUT /api/admin/users/:id/mfa-phone`) · 변경 시 그 계정 신뢰 기기 전량 해제 + `mfa_phone_changed` 감사 로그. **NULL이면 MFA 대상 아님**(전환기 안전장치) |
 | role | varchar(20) |
@@ -2264,7 +2265,7 @@ kind별 payload 키:
 | refresh_token | text | refresh token |
 | token_expires_at | timestamptz | access_token 만료 시각 (카페24 = 2시간 TTL) |
 | scope | text | OAuth 부여 scope (mall.read_customer, mall.read_order 등) |
-| meta | jsonb DEFAULT '{}' | 자사몰별 추가 데이터 (mall_name, plan, currency 등) |
+| meta | jsonb DEFAULT '{}' | 자사몰별 추가 데이터 (mall_name, plan, currency 등). **★2026-09-18 provider 공통 키 `store_code`** = 이 몰의 분류코드(몰 1행 = 코드 1개 · 없으면 회사 공용). 적재가 고객을 `customer_stores`에 이 코드로 기록하고 사용자 범위(`store-scope.ts`)가 그것을 거른다. 읽는 곳 = `woocommerce-client.ts toIntegration` · `integration-scope.ts resolveStoreCodeByOriginHost`(SDK Origin). 설계서 = docs/2026-09-18-mall-integration-user-scope-design.md |
 | webhook_secret | varchar(100) | webhook 서명 검증용 secret (자사몰이 박음 또는 한줄로 발급) |
 | connected_at | timestamptz | OAuth 최초 연동 시각 |
 | last_synced_at | timestamptz | 마지막 webhook 수신 또는 polling 시각 |

@@ -152,9 +152,14 @@ describe('매장 발송 범위 — DB 원시 역할값으로 판정한다 (6R)',
     expect((await resolveOperatorStoreScope(COMPANY, USER)).blocked).toBe(true);
   });
 
-  it('배정 코드가 하나도 안 맞아도 전사로 넓히지 않는다 (읽기 화면의 no_filter 폴백과 다른 판단)', async () => {
+  it('배정 코드가 하나도 안 맞아도 전사로 넓히지 않는다 (★0918: 격리 CT 가 직접 좁힌다 = filtered · 대상 0명 · 보류가 아니다)', async () => {
+    // 종전엔 CT 가 no_filter 를 돌려줘 여기서 보류(blocked)로 막았다. 2026-09-18 CT 정정(store-scope.test.ts) 뒤에는
+    // 회사에 분류 체계가 있으면 내 코드로 좁혀(0건) 돌려주므로 발송도 "아직 내 고객이 없다" 그대로 좁게 간다. 전체는 여전히 안 열린다.
     mockScope({ role: 'user', storeCodes: ['OLD'], assignedMatches: false, companyHasStores: true });
-    expect((await resolveOperatorStoreScope(COMPANY, USER)).blocked).toBe(true);
+    const r = await resolveOperatorStoreScope(COMPANY, USER);
+    expect(r.blocked).toBe(false);
+    expect(r.storeFilter).toContain('store_code = ANY($2::text[])');
+    expect(r.baseParams).toEqual([COMPANY, ['OLD']]);
   });
 
   it('매장 체계 자체가 없는 회사는 나눌 범위가 없다 → 전체', async () => {

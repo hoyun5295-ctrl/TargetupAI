@@ -103,7 +103,8 @@ export const woocommerceAdapter: IProviderAdapter = {
       console.log(`[WooCommerce Adapter] 삭제 이벤트는 적재하지 않는다: ${event} id=${resource?.id}`);
       return;
     }
-    const r = await processWooResource(companyId, parsed.mallId, parsed.kind.resource, resource, integ.consentMetaKey);
+    // ★ 2026-09-18 몰 행의 분류코드를 함께 넘긴다(웹훅·백필·주기 수집이 같은 함수라 자리는 하나 · 설계서 §3-4)
+    const r = await processWooResource(companyId, parsed.mallId, parsed.kind.resource, resource, integ.consentMetaKey, integ.storeCode);
     if (r === 'skipped') console.log(`[WooCommerce Adapter] 적재 불가(식별 수단·주문시각 없음): ${event} id=${resource?.id}`);
   },
 

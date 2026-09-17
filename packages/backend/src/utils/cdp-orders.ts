@@ -43,6 +43,12 @@ export interface OrderInput {
   items?: Array<{ productId?: string; productName?: string; price?: number; quantity?: number; categoryName?: string }>;
   orderedAt: string;                        // ISO datetime
   currency?: string;                        // 기본 KRW
+  /**
+   * 분류코드 (2026-09-18 · 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-3)
+   * 이 주문이 들어온 몰의 분류코드. 식별 단계(identifyCustomer)로 그대로 넘겨 고객을 그 분류에 기록한다.
+   * 생략 = 식별 입력이 지금과 같다. ⛔ 호출부가 연동 행에서 읽은 값만 넣는다(요청 본문 값 금지).
+   */
+  storeCode?: string;
 }
 
 export interface OrderResult {
@@ -79,6 +85,8 @@ export async function syncOrder(
     email: input.email,
     phone: input.phone,
     name: input.name,
+    // ★ 2026-09-18: 분류코드가 있을 때만 키를 싣는다(생략 시 식별 입력 불변 = 계약 테스트 cdp-orders-store-code)
+    ...(input.storeCode ? { storeCode: input.storeCode } : {}),
   };
   const idResult = await identifyCustomer(companyId, identifyInput);
 

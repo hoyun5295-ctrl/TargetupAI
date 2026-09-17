@@ -48,14 +48,50 @@ describe('routes/woocommerce.ts — 웹훅 수신', () => {
   });
 });
 
-describe('routes/woocommerce.ts — 관리자 라우트', () => {
+describe('routes/woocommerce.ts — 인증 라우트(★0918 권한 CT 경유 · 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-5)', () => {
   const route = () => code('routes/woocommerce.ts');
-  it('자격 저장·연결·해제·secret 재발급은 회사 관리자 전용 · 요금제 게이트 · 회사 식별자는 세션에서만', () => {
+  it('자격 저장·연결·해제·secret 재발급은 권한 CT(resolveIntegrationActor) 하나로 판정 · 요금제 게이트 · 회사 식별자는 세션에서만', () => {
     const r = route();
-    expect(r).toContain('company_admin');
+    expect(r).toContain('resolveIntegrationActor(');
+    expect(r).not.toContain('function gateAdmin');
+    expect(r).not.toContain("userType !== 'company_admin'");
     expect(r).toContain('isCdpEnabledForPlan(');
     expect(r).not.toMatch(/req\.(body|query|params)\??\.\.?(companyId|company_id)/);
     for (const p of ["'/credentials'", "'/connect'", "'/status'", "'/disconnect'", "'/rotate-secret'"]) expect(r).toContain(p);
+  });
+  it('★0918 분류코드는 본문이 아니라 권한 CT 가 정한다 — 본문 store_code 는 pickStoreCodeForConnect 의 선택지로만 · 저장 함수에 직접 흐르지 않는다', () => {
+    const r = route();
+    expect(r).toMatch(/pickStoreCodeForConnect\(actor, req\.body\?\.store_code\)/);
+    expect(r).not.toMatch(/saveWooCredentials\([\s\S]{0,400}req\.body\?\.store_code/);
+    expect(r).not.toMatch(/storeCode:\s*req\.body/);
+  });
+  it('★0918 몰 소유 = canTouchIntegration — 연결·해제·secret 재발급 전 확인 · 남의 분류코드 몰은 409/403 코드로 · 연결된 몰의 분류코드 변경은 지원하지 않는다', () => {
+    const r = route();
+    const block = (from: string, to: string) => r.slice(r.indexOf(from), r.indexOf(to));
+    // 변경 라우트 셋(연결 · secret 재발급 · 해제)은 몰을 읽은 뒤 소유 게이트를 지난다
+    expect(block("'/connect'", "'/connect-url'")).toMatch(/getWooIntegration\([\s\S]{0,300}gateMall\(res, actor, integ\.storeCode\)/);
+    expect(block("'/rotate-secret'", "'/status'")).toMatch(/getWooIntegration\([\s\S]{0,200}gateMall\(res, actor, owned\.storeCode\)/);
+    expect(block("'/disconnect'", 'export default')).toMatch(/getWooIntegration\([\s\S]{0,200}gateMall\(res, actor, owned\.storeCode\)/);
+    // 저장 계열(자격 저장 · 1클릭 시작)은 기존 행의 소유·변경 규칙을 decideStoreCode 로 지난다
+    expect(block("'/credentials'", "'/connect'")).toContain('decideStoreCode(');
+    expect(block("'/connect-url'", "'/rotate-secret'")).toContain('decideStoreCode(');
+    expect(r).toContain("'MALL_OWNED_BY_OTHER_STORE'");
+    expect(r).toContain("'STORE_CODE_CHANGE_NOT_SUPPORTED'");
+    // 기존 행에는 storeCode 를 덮어쓰지 않는다(undefined 로 저장)
+    expect(r).toMatch(/storeCode: existing \? undefined : pick\.storeCode/);
+  });
+  it('★0918 잠금 사유 문장은 CT(integrationLockMessage)가 소유 — 라우트에 관리자 한정 문구를 손으로 적지 않는다', () => {
+    const r = route();
+    expect(r).toContain('integrationLockMessage(');
+    expect(r).not.toContain('우커머스 연동은 회사 관리자만 가능합니다.');
+  });
+  it('★0918 /status 는 주체 범위로 몰을 거르고(사용자 = 자기 분류코드 몰만) 화면이 계산하지 않도록 can_connect · lock_reason · connect_store_codes · store_code_options 를 내려 준다', () => {
+    const r = route();
+    const block = r.slice(r.indexOf("'/status'"), r.indexOf("'/disconnect'"));
+    expect(block).toContain('resolveIntegrationActor(');
+    expect(block).toContain('canTouchIntegration(');
+    for (const k of ['can_connect', 'lock_reason', 'lock_message', 'connect_store_codes', 'store_code_options']) expect(block).toContain(k);
+    expect(block).toContain('listCompanyStoreCodes(');
   });
   it('저장 응답에 웹훅 URL·secret(1회) · 연결은 검증 1콜 뒤 백필(회원 → 주문) 백그라운드 · REST 키 없는 몰은 오류가 아니라 안내', () => {
     const r = route();

@@ -374,9 +374,12 @@ describe('접근 권한 격리 (★2026-08-10 — 화면이 담당자에게 열�
     expect(page).toMatch(/isAdmin && \([\s\S]{0,200}setActiveModal\('customers'\)/);
   });
 
-  it('연결·해제·자격 저장은 provider 6종 전부 관리자 전용이다', () => {
+  it('연결·해제·자격 저장 게이트 — 5종은 관리자 전용 · ★0918 우커머스는 권한 CT(관리자 전체 · 분류코드 배정 사용자는 자기 몰)', () => {
+    // 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-5 · P5 에서 나머지 5종도 같은 CT 로 옮긴다
     for (const f of PROVIDER_ROUTES) {
-      expect(read(path.join(BACKEND_SRC, 'routes', f)), `${f}에 관리자 게이트가 없다`).toContain('company_admin');
+      const src = read(path.join(BACKEND_SRC, 'routes', f));
+      if (f === 'woocommerce.ts') expect(src, `${f}가 권한 CT 를 지나지 않는다`).toContain('resolveIntegrationActor(');
+      else expect(src, `${f}에 관리자 게이트가 없다`).toContain('company_admin');
     }
   });
 

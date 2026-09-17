@@ -12,7 +12,9 @@
  *
  * 보안:
  *   - webhook 은 인증 미들웨어 앞 — 몰 후보 행마다 webhook_secret 으로 서명 대조(같은 몰 주소를 두 회사가 적어도 secret 이 가른다)
- *   - 관리자 라우트는 authenticate + company_admin · 회사 식별자는 세션에서만(본문·쿼리의 companyId 를 읽지 않는다)
+ *   - 인증 라우트는 authenticate + 권한 CT(utils/integration-scope.ts) · 회사 식별자는 세션에서만(본문·쿼리의 companyId 를 읽지 않는다)
+ *     ★2026-09-18(설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-5): 관리자는 회사 전체 몰 ·
+ *     분류코드가 배정된 사용자는 자기 분류코드로 자기 몰만 연결·조회·해제. 분류코드는 본문이 아니라 세션 사용자에서 정한다.
  *   - 몰 식별자는 normalizeWooMallId 한 함수(경로 파라미터 · 발신 헤더 · 폼 입력 전부)
  *
  * ⛔ 우커머스 웹훅 헤더명·서명 인코딩·최초 ping 본문은 게이트 ② 실측 전까지 미검증 — 주제 헤더가 없는 요청은 200 으로 받아 활성화가 막히지 않게 한다.
@@ -45,6 +47,15 @@ import {
 // ★ ① 1클릭 연결 — 우커머스 내장 앱 인증(/wc-auth/v1/authorize) · state 서명 CT · 플러그인 zip
 import { signWooAuthState, verifyWooAuthState, buildWooAuthorizeUrl } from '../utils/woocommerce-auth-state';
 import { buildWooPluginZip, WOO_PLUGIN_ZIP_NAME } from '../utils/woocommerce-plugin-zip';
+// ★ 2026-09-18 권한·범위 CT — 관리자 전체 · 사용자는 분류코드로 자기 것만(상시 원칙)
+import {
+  resolveIntegrationActor,
+  canTouchIntegration,
+  pickStoreCodeForConnect,
+  listCompanyStoreCodes,
+  integrationLockMessage,
+  type IntegrationActor,
+} from '../utils/integration-scope';
 
 const router = Router();
 
@@ -267,19 +278,50 @@ function renderWooReturnHtml(status: 'ok' | 'error', message: string, mallId: st
 
 router.use(authenticate);
 
-/** 회사 admin 게이트 — 통과 시 companyId 반환, 아니면 응답 전송 후 null(고도몰 라우트와 같은 형태). */
-function gateAdmin(req: Request, res: Response): string | null {
-  const companyId = req.user?.companyId;
-  const userType = req.user?.userType;
-  if (!companyId) {
-    res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+/**
+ * 권한 게이트(★2026-09-18) — 연동을 다룰 수 있는 주체(관리자 전체 · 분류코드 배정 사용자 자기 것)면 { companyId, actor },
+ * 아니면 사유(CT 문장)로 403 을 보내고 null. 옛 회사 관리자 한정 게이트를 대체한다.
+ */
+async function gateActor(req: Request, res: Response): Promise<{ companyId: string; actor: IntegrationActor } | null> {
+  const actor = await resolveIntegrationActor(req.user);
+  if (actor.kind === 'blocked') {
+    res.status(403).json({ success: false, error: integrationLockMessage(actor.reason), code: actor.reason });
     return null;
   }
-  if (userType !== 'company_admin') {
-    res.status(403).json({ success: false, error: '우커머스 연동은 회사 관리자만 가능합니다.' });
+  return { companyId: actor.companyId, actor };
+}
+
+/** 이 주체가 그 몰을 다룰 수 있는가 — 아니면 403(사유 = 다른 담당자의 분류코드 몰) 을 보내고 false. */
+function gateMall(res: Response, actor: IntegrationActor, storeCode: string | null | undefined): boolean {
+  if (canTouchIntegration(actor, storeCode)) return true;
+  res.status(403).json({ success: false, error: integrationLockMessage('MALL_OWNED_BY_OTHER_STORE'), code: 'MALL_OWNED_BY_OTHER_STORE' });
+  return false;
+}
+
+/**
+ * 새로 저장하는 몰의 분류코드를 정한다(권한 CT) + 이미 있는 몰이면 소유·변경 규칙을 건다.
+ * 반환 = 저장에 넘길 storeCode(undefined = 기존 행 값 유지) · 거부면 응답을 보내고 null.
+ */
+async function decideStoreCode(req: Request, res: Response, actor: IntegrationActor, companyId: string, siteUrl: string): Promise<{ storeCode: string | null | undefined } | null> {
+  const pick = await pickStoreCodeForConnect(actor, req.body?.store_code);
+  if (!pick.ok) {
+    res.status(400).json({ success: false, error: integrationLockMessage(pick.code), code: pick.code });
     return null;
   }
-  return companyId;
+  const mallId = normalizeWooMallId(siteUrl);
+  const existing = mallId ? await getWooIntegration(companyId, mallId) : undefined;
+  if (existing) {
+    if (!canTouchIntegration(actor, existing.storeCode)) {
+      res.status(409).json({ success: false, error: integrationLockMessage('MALL_OWNED_BY_OTHER_STORE'), code: 'MALL_OWNED_BY_OTHER_STORE' });
+      return null;
+    }
+    // 몰 1행 = 분류코드 1개. 관리자가 다른 코드로 다시 저장하려 하면 거부(해제 뒤 재연결이 길이다).
+    if (actor.kind === 'admin' && pick.storeCode !== null && pick.storeCode !== existing.storeCode) {
+      res.status(409).json({ success: false, error: integrationLockMessage('STORE_CODE_CHANGE_NOT_SUPPORTED'), code: 'STORE_CODE_CHANGE_NOT_SUPPORTED' });
+      return null;
+    }
+  }
+  return { storeCode: existing ? undefined : pick.storeCode };
 }
 
 /** WooApiError → 상태코드. 몰 서버 쪽 문제(network·rate_limited·http)는 502, 입력·권한 문제는 400. */
@@ -301,16 +343,20 @@ const PLAN_LOCKED = { success: false, error: '우커머스 연동은 유료 요�
  */
 router.post('/credentials', async (req: Request, res: Response) => {
   try {
-    const companyId = gateAdmin(req, res);
-    if (!companyId) return;
+    const g = await gateActor(req, res);
+    if (!g) return;
+    const { companyId, actor } = g;
     if (!(await isCdpEnabledForPlan(companyId))) return res.status(403).json(PLAN_LOCKED);
     const siteUrl = String(req.body?.site_url || '').trim();
     if (!siteUrl) return res.status(400).json({ success: false, error: '쇼핑몰 주소(site_url)를 입력해주세요.' });
+    const decided = await decideStoreCode(req, res, actor, companyId, siteUrl);
+    if (!decided) return;
     const r = await saveWooCredentials(companyId, {
       siteUrl,
       consumerKey: String(req.body?.consumer_key || ''),
       consumerSecret: String(req.body?.consumer_secret || ''),
       consentMetaKey: String(req.body?.consent_meta_key || ''),
+      storeCode: decided.storeCode,
     });
     return res.json({
       success: true,
@@ -332,13 +378,15 @@ router.post('/credentials', async (req: Request, res: Response) => {
  */
 router.post('/connect', async (req: Request, res: Response) => {
   try {
-    const companyId = gateAdmin(req, res);
-    if (!companyId) return;
+    const g = await gateActor(req, res);
+    if (!g) return;
+    const { companyId, actor } = g;
     if (!(await isCdpEnabledForPlan(companyId))) return res.status(403).json(PLAN_LOCKED);
     const mallId = normalizeWooMallId(String(req.body?.mall_id || ''));
     if (!mallId) return res.status(400).json({ success: false, error: '몰 식별자(mall_id)가 올바르지 않습니다.' });
     const integ = await getWooIntegration(companyId, mallId);
     if (!integ) return res.status(400).json({ success: false, error: '먼저 몰 주소와 REST 키를 저장해주세요.' });
+    if (!gateMall(res, actor, integ.storeCode)) return;
 
     try {
       await verifyWooConnection(companyId, mallId);
@@ -375,12 +423,16 @@ router.post('/connect', async (req: Request, res: Response) => {
  */
 router.post('/connect-url', async (req: Request, res: Response) => {
   try {
-    const companyId = gateAdmin(req, res);
-    if (!companyId) return;
+    const g = await gateActor(req, res);
+    if (!g) return;
+    const { companyId, actor } = g;
     if (!(await isCdpEnabledForPlan(companyId))) return res.status(403).json(PLAN_LOCKED);
     const siteUrl = String(req.body?.site_url || '').trim();
     if (!siteUrl) return res.status(400).json({ success: false, error: '쇼핑몰 주소(site_url)를 입력해주세요.' });
-    const saved = await saveWooCredentials(companyId, { siteUrl, consumerKey: '', consumerSecret: '', consentMetaKey: String(req.body?.consent_meta_key || '') });
+    // ★ 분류코드는 여기(세션으로 몰 행을 만드는 시점)에서 정한다. 승인 콜백은 이미 있는 행에 키만 얹으므로 state 에 실을 필요가 없다.
+    const decided = await decideStoreCode(req, res, actor, companyId, siteUrl);
+    if (!decided) return;
+    const saved = await saveWooCredentials(companyId, { siteUrl, consumerKey: '', consumerSecret: '', consentMetaKey: String(req.body?.consent_meta_key || ''), storeCode: decided.storeCode });
     const integ = await getWooIntegration(companyId, saved.mallId);
     if (!integ) return res.status(500).json({ success: false, error: '몰 저장 뒤 조회에 실패했습니다.' });
 
@@ -413,10 +465,13 @@ router.post('/connect-url', async (req: Request, res: Response) => {
  */
 router.post('/rotate-secret', async (req: Request, res: Response) => {
   try {
-    const companyId = gateAdmin(req, res);
-    if (!companyId) return;
+    const g = await gateActor(req, res);
+    if (!g) return;
+    const { companyId, actor } = g;
     const mallId = normalizeWooMallId(String(req.body?.mall_id || ''));
     if (!mallId) return res.status(400).json({ success: false, error: '몰 식별자(mall_id)가 올바르지 않습니다.' });
+    const owned = await getWooIntegration(companyId, mallId);
+    if (owned && !gateMall(res, actor, owned.storeCode)) return;
     const r = await rotateWooWebhookSecret(companyId, mallId);
     return res.json({ success: true, mall_id: mallId, webhook_url: r.webhookUrl, webhook_secret: r.webhookSecret });
   } catch (err) {
@@ -433,8 +488,22 @@ router.get('/status', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    // ★ 2026-09-18 주체 범위 — 관리자 = 전체 · 사용자 = 자기 분류코드 몰만 · 잠긴 계정 = 빈 목록 + 사유.
+    //   화면은 can_connect·connect_store_codes·store_code_options 를 그리기만 한다(권한을 다시 계산하지 않는다).
+    const actor = await resolveIntegrationActor(req.user);
     const status = await getWooStatus(companyId);
-    return res.json({ success: true, ...status });
+    const malls = actor.kind === 'blocked' ? [] : status.malls.filter((m) => canTouchIntegration(actor, m.storeCode));
+    const storeCodeOptions = actor.kind === 'admin' ? await listCompanyStoreCodes(companyId) : [];
+    return res.json({
+      success: true,
+      connected: malls.some((m) => m.connected),
+      malls,
+      can_connect: actor.kind !== 'blocked',
+      lock_reason: actor.kind === 'blocked' ? actor.reason : null,
+      lock_message: actor.kind === 'blocked' ? integrationLockMessage(actor.reason) : null,
+      connect_store_codes: actor.kind === 'user' ? actor.storeCodes : [],
+      store_code_options: storeCodeOptions,
+    });
   } catch (err: any) {
     console.error('[WooCommerce /status] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '상태 조회 실패' });
@@ -447,10 +516,13 @@ router.get('/status', async (req: Request, res: Response) => {
  */
 router.delete('/disconnect', async (req: Request, res: Response) => {
   try {
-    const companyId = gateAdmin(req, res);
-    if (!companyId) return;
+    const g = await gateActor(req, res);
+    if (!g) return;
+    const { companyId, actor } = g;
     const mallId = normalizeWooMallId(String(req.query?.mall_id || ''));
     if (!mallId) return res.status(400).json({ success: false, error: '몰 식별자(mall_id)가 올바르지 않습니다.' });
+    const owned = await getWooIntegration(companyId, mallId);
+    if (owned && !gateMall(res, actor, owned.storeCode)) return;
     // 1클릭 연결이 만든 웹훅은 몰에서도 지운다(최선 노력 · 실패해도 해제는 진행)
     const removed = await removeWooWebhooks(companyId, mallId).catch(() => 0);
     if (removed > 0) console.log(`[WooCommerce /disconnect] 웹훅 ${removed}개 제거 mall=${mallId}`);

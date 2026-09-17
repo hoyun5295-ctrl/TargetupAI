@@ -713,12 +713,24 @@ export interface WooMallStatus {
   webhookUrl: string;
   hasRestKeys: boolean;
   consentMetaKey: string | null;
+  /** ★2026-09-18 분류 코드(없으면 회사 공용) */
+  storeCode?: string | null;
   syncError: { message: string; code: string; at: string | null } | null;
 }
 
+/**
+ * ★2026-09-18 서버가 주체 범위를 이미 적용해 내려 준다(설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-5 · §3-7).
+ * 관리자 = 회사 전체 몰 + 등록부(store_code_options) · 사용자 = 자기 분류 코드 몰만 + connect_store_codes · 잠긴 계정 = 빈 목록 + 사유.
+ * 화면은 이 값을 그리기만 한다 — 권한을 다시 계산하지 않는다.
+ */
 export interface WooStatus {
   connected: boolean;
   malls: WooMallStatus[];
+  can_connect?: boolean;
+  lock_reason?: string | null;
+  lock_message?: string | null;
+  connect_store_codes?: string[];
+  store_code_options?: string[];
 }
 
 /** 저장·재발급 응답에서 받은 1회 노출 값 */
@@ -730,7 +742,19 @@ export interface WooIssuedSecret {
 
 export interface CdpWooConnectFormProps {
   status: WooStatus | null;
+  /** 관리자 여부 — 다른 폼과 시그니처를 맞추기 위해 남긴다. ★2026-09-18 우커머스 잠금은 이 값이 아니라 서버 canConnect 로만 */
   isAdmin: boolean;
+  /** ★2026-09-18 서버 판정 — 이 계정이 몰을 연결·해제할 수 있는가(관리자 · 분류 코드 배정 사용자) */
+  canConnect: boolean;
+  /** 잠긴 이유(서버 문장) · 연결 가능하면 null */
+  lockMessage: string | null;
+  /** 관리자: 회사 등록부의 분류 코드 목록(선택 칸) · 비어 있으면 칸을 그리지 않는다 */
+  storeCodeOptions: string[];
+  /** 사용자: 내게 배정된 분류 코드(1개면 안내 한 줄 · 여러 개면 선택) */
+  connectStoreCodes: string[];
+  /** 이번에 붙일 몰의 분류 코드(선택값 · 빈 문자열 = 관리자의 회사 공용) */
+  storeCode: string;
+  onStoreCodeChange: (v: string) => void;
   connecting: boolean;
   siteUrl: string;
   onSiteUrlChange: (v: string) => void;
@@ -759,6 +783,36 @@ const fmtKo = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleS
 
 export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
   const malls = p.status?.malls ?? [];
+  // ★2026-09-18 분류 코드 칸의 세 모양 — 관리자(등록부에서 선택 · 비움 = 회사 공용) / 사용자 1코드(안내 한 줄) / 사용자 여러 코드(내 코드 중 선택)
+  const userCodes = p.connectStoreCodes || [];
+  const adminOptions = p.storeCodeOptions || [];
+  const storeCodeField = !p.canConnect ? null
+    : userCodes.length === 1 ? (
+      <div className="text-[11px] text-white/60 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+        이 몰의 회원·주문은 <strong className="text-white/90">{userCodes[0]}</strong> 분류 코드 고객으로 들어옵니다.
+      </div>
+    ) : userCodes.length > 1 ? (
+      <div>
+        <label className="block text-[11px] text-white/50 mb-1">분류 코드(내게 배정된 것 중 선택)</label>
+        <select value={p.storeCode} onChange={(e) => p.onStoreCodeChange(e.target.value)} className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50">
+          <option value="">선택해 주세요</option>
+          {userCodes.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+    ) : adminOptions.length > 0 ? (
+      <div>
+        <label className="block text-[11px] text-white/50 mb-1">분류 코드(선택 · 비우면 회사 공용)</label>
+        <select value={p.storeCode} onChange={(e) => p.onStoreCodeChange(e.target.value)} className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50">
+          <option value="">회사 공용(분류 없음)</option>
+          {adminOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+    ) : null;
+  const lockNote = !p.canConnect && p.lockMessage ? (
+    <div className="flex items-start gap-2 text-[11px] text-amber-100 bg-amber-500/10 border border-amber-400/30 rounded-lg px-3 py-2">
+      <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-300" /><span>{p.lockMessage}</span>
+    </div>
+  ) : null;
   const wooHead = buildSdkScriptTag(p.publicKey);
   const wooBody = buildWooBodyAttrsSnippet();
   const guideFor = (m: { mallId: string; siteUrl: string; webhookUrl: string; hasRestKeys: boolean; consentMetaKey: string | null }) =>
@@ -830,6 +884,9 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
                       ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연결됨</span>
                       : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-200 border border-amber-400/25 font-medium">첫 웹훅·연결 확인 대기</span>}
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/50 border border-white/10">{m.hasRestKeys ? '주기 수집 + 웹훅' : '웹훅 전용'}</span>
+                    {m.storeCode
+                      ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-200 border border-violet-400/25 font-medium">분류 코드 {m.storeCode}</span>
+                      : <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">회사 공용</span>}
                   </div>
                   <div className="text-[11px] text-white/45 mt-1">
                     연결 {fmtKo(m.connectedAt)} · 마지막 수집 {fmtKo(m.lastSyncedAt)}{m.consentMetaKey ? ` · 수신동의 키 ${m.consentMetaKey}` : ' · 수신동의 키 미설정'}
@@ -844,7 +901,7 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
               <div className="mt-3 flex flex-wrap gap-2">
                 <button type="button" onClick={() => p.onCopy(guideFor(m), '개발자 전달용 안내')} className="px-3 py-1.5 bg-violet-500/25 hover:bg-violet-500/40 text-violet-100 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />개발자 안내 복사</button>
                 <button type="button" onClick={() => p.onCopy(m.webhookUrl, '웹훅 URL')} className="px-3 py-1.5 bg-indigo-500/25 hover:bg-indigo-500/40 text-indigo-100 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />웹훅 URL</button>
-                {p.isAdmin && (
+                {p.canConnect && (
                   <>
                     <button type="button" onClick={() => p.onRotateSecret(m.mallId)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" />비밀키 재발급</button>
                     <button type="button" onClick={() => p.onDisconnect(m.mallId)} className="px-3 py-1.5 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Unlink className="w-3.5 h-3.5" />해제</button>
@@ -888,10 +945,12 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
           </div>
         </div>
 
-        <button onClick={p.onAuthorize} disabled={p.authorizing || p.connecting || !p.isAdmin || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-fuchsia-500/30 hover:bg-fuchsia-500/50 text-fuchsia-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+        {storeCodeField}
+        {lockNote}
+
+        <button onClick={p.onAuthorize} disabled={p.authorizing || p.connecting || !p.canConnect || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-fuchsia-500/30 hover:bg-fuchsia-500/50 text-fuchsia-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
           {p.authorizing ? <><Loader2 className="w-4 h-4 animate-spin" /> 승인 창을 여는 중...</> : <><ExternalLink className="w-4 h-4" /> 우커머스 관리자 승인으로 연결</>}
         </button>
-        {!p.isAdmin && NOT_ADMIN_NOTE}
         <div className="text-[10px] text-white/30 italic">승인 창에서 몰 관리자 로그인이 필요합니다. 키는 우커머스가 한줄로 서버로 직접 전달하며 화면에 표시되지 않습니다. 몰 주소는 수집 허용 도메인에 자동 등록됩니다.</div>
 
         <details className="group rounded-xl border border-white/10 bg-white/[0.03]">
@@ -927,7 +986,7 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
                 </div>
               </div>
             </div>
-            <button onClick={p.onConnect} disabled={p.connecting || p.authorizing || !p.isAdmin || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+            <button onClick={p.onConnect} disabled={p.connecting || p.authorizing || !p.canConnect || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
               {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 저장하고 연결 확인 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 연결 확인</>}
             </button>
             <div className="text-[10px] text-white/30 italic">REST 키는 한줄로 서버에 보관되며 화면에 다시 표시되지 않습니다. 키 없이 주소만 저장하면 웹훅 첫 수신이 연결 신호가 됩니다.</div>

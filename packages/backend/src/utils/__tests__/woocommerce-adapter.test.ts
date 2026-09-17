@@ -112,6 +112,17 @@ describe('processWebhookEvent — 재처리 워커와 같은 시그니처(compan
     const sel = q.mock.calls.find((c: any[]) => String(c[0]).includes('SELECT'));
     expect(sel![1]).toEqual([COMPANY, MALL]);
   });
+  it('★0918 몰 행에 분류코드가 있으면 웹훅 적재도 그 코드로 (identify·syncOrder 양쪽) · 없으면 키 없음', async () => {
+    q.mockImplementation(async () => ({ rows: [{ ...integrationRow, meta: { ...integrationRow.meta, store_code: 'ILBON' } }] }));
+    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.created', order);
+    expect((identifyCustomer as any).mock.calls[0][1]).toMatchObject({ storeCode: 'ILBON' });
+    expect((syncOrder as any).mock.calls[0][1]).toMatchObject({ orderId: 'ilbonimo.com:727', storeCode: 'ILBON' });
+    (identifyCustomer as any).mockClear();
+    (syncOrder as any).mockClear();
+    q.mockImplementation(async () => ({ rows: [integrationRow] }));
+    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.created', order);
+    expect('storeCode' in (syncOrder as any).mock.calls[0][1]).toBe(false);
+  });
   it('회원 갱신: identify 만', async () => {
     await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:customer.updated', { id: 25, email: 'h@example.invalid', first_name: '길동', last_name: '홍', billing: { phone: '010-0000-0001' }, meta_data: [] });
     expect(identifyCustomer).toHaveBeenCalledTimes(1);

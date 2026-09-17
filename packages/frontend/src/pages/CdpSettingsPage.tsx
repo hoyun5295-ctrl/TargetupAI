@@ -241,6 +241,8 @@ export default function CdpSettingsPage() {
   const [wooConsumerKey, setWooConsumerKey] = useState('');
   const [wooConsumerSecret, setWooConsumerSecret] = useState('');
   const [wooConsentMetaKey, setWooConsentMetaKey] = useState('');
+  // ★2026-09-18 이번에 붙일 몰의 분류 코드(선택값). 서버가 세션 사용자로 다시 판정하므로 본문 값은 "내 코드 중 어느 것"의 선택지일 뿐이다.
+  const [wooStoreCode, setWooStoreCode] = useState('');
   const [showWooSecret, setShowWooSecret] = useState(false);
   const [wooConnecting, setWooConnecting] = useState(false);
   const [wooAuthorizing, setWooAuthorizing] = useState(false);
@@ -863,7 +865,7 @@ export default function CdpSettingsPage() {
       const res = await fetch('/api/woocommerce/connect-url', {
         method: 'POST',
         headers: wooJsonHeaders(),
-        body: JSON.stringify({ site_url: siteUrl, consent_meta_key: wooConsentMetaKey.trim() }),
+        body: JSON.stringify({ site_url: siteUrl, consent_meta_key: wooConsentMetaKey.trim(), store_code: wooStoreCode.trim() }),
       });
       const data = await res.json();
       if (!data.success || !data.authorize_url) { toast.error(data.error || '연결 시작 실패'); return; }
@@ -881,7 +883,7 @@ export default function CdpSettingsPage() {
       const saveRes = await fetch('/api/woocommerce/credentials', {
         method: 'POST',
         headers: wooJsonHeaders(),
-        body: JSON.stringify({ site_url: siteUrl, consumer_key: wooConsumerKey.trim(), consumer_secret: wooConsumerSecret.trim(), consent_meta_key: wooConsentMetaKey.trim() }),
+        body: JSON.stringify({ site_url: siteUrl, consumer_key: wooConsumerKey.trim(), consumer_secret: wooConsumerSecret.trim(), consent_meta_key: wooConsentMetaKey.trim(), store_code: wooStoreCode.trim() }),
       });
       const saveData = await saveRes.json();
       if (!saveData.success) { toast.error(saveData.error || '몰 저장 실패'); return; }
@@ -891,7 +893,7 @@ export default function CdpSettingsPage() {
       const data = await res.json();
       if (data.success) {
         toast.success(data.message || (data.verified ? '우커머스 연동을 시작했습니다.' : '몰을 저장했습니다.'));
-        setWooSiteUrl(''); setWooConsumerKey(''); setWooConsumerSecret(''); setWooConsentMetaKey('');
+        setWooSiteUrl(''); setWooConsumerKey(''); setWooConsumerSecret(''); setWooConsentMetaKey(''); setWooStoreCode('');
       } else {
         // 저장은 됐고 연결 확인만 실패 — 몰은 대기 상태로 남고 웹훅 secret 은 위에 떠 있다
         toast.error(data.error || '우커머스 연결 확인 실패');
@@ -1471,6 +1473,13 @@ export default function CdpSettingsPage() {
           <CdpWooConnectForm
             status={wooStatus}
             isAdmin={isAdmin}
+            // ★2026-09-18 잠금·분류 코드는 서버 상태 값 그대로(화면이 권한을 계산하지 않는다). 상태를 아직 못 받았으면 잠금.
+            canConnect={wooStatus?.can_connect === true}
+            lockMessage={wooStatus ? (wooStatus.lock_message ?? null) : null}
+            storeCodeOptions={wooStatus?.store_code_options ?? []}
+            connectStoreCodes={wooStatus?.connect_store_codes ?? []}
+            storeCode={wooStoreCode}
+            onStoreCodeChange={setWooStoreCode}
             connecting={wooConnecting}
             siteUrl={wooSiteUrl}
             onSiteUrlChange={setWooSiteUrl}
