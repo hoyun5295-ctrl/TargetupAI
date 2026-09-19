@@ -12,6 +12,7 @@ import DmCanvas from '../DmCanvas';
 import BlockEditModal from './BlockEditModal';
 import CatalogPageModal, { CATALOG_BLOCKS, type CatalogTemplateKey } from './CatalogPageModal';
 import type { Section } from '../../../utils/dm-section-defaults';
+import { useMediaQuery } from '../../../hooks/useMediaQuery';
 
 const EFFECTS: Array<{ k: 'slide' | 'flip' | 'fade'; n: string; d: string }> = [
   { k: 'slide', n: '밀어내기', d: '손가락을 따라 밀림 (기본)' },
@@ -52,6 +53,11 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
   );
   const editingSection = sections.find((s) => s.id === editing) || null;
   const todo = sections.filter((s) => !isSectionReady(s)).length;
+  // ★ 2026-09-19 (임은지 접수 cmu51q01u05tujnluc32zp8ej) 블록 창이 가운데 떠 미리보기를 가렸다.
+  //   3단이 보이는 넓은 화면(lg = 1024px · 아래 grid 분기와 같은 기준)이면 창을 오른쪽 열에 붙인다 — 입력이 바로
+  //   캔버스에 반영되는 것을 보면서 고친다. 좁은 화면은 열이 세로로 쌓여 창이 미리보기 아래로 가므로 종전 모달.
+  const wide = useMediaQuery('(min-width: 1024px)');
+  const dockedEditing = wide && !!editingSection;
 
   /** 블록 얹기 = 섹션 추가 + 블록 기본값 덮기 + 창 열기 (클릭 1회) */
   const addBlock = (key: string) => {
@@ -139,7 +145,7 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
         </div>
       </header>
 
-      <div className="max-w-[1320px] mx-auto px-6 py-5 grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)_300px] gap-4 items-start">
+      <div className={`max-w-[1320px] mx-auto px-6 py-5 grid grid-cols-1 ${dockedEditing ? 'lg:grid-cols-[250px_minmax(0,1fr)_400px]' : 'lg:grid-cols-[250px_minmax(0,1fr)_300px]'} gap-4 items-start`}>
         {/* 왼쪽 — 블록 팔레트 */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
           <div className="text-[12px] text-white/70 mb-2 font-bold">블록 고르기</div>
@@ -195,7 +201,16 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
           <DmCanvas />
         </div>
 
-        {/* 오른쪽 — 쌓인 블록 · 상태 · 넘김 효과 */}
+        {/* 오른쪽 — 편집 중(넓은 화면) = 붙은 블록 창 · 아니면 쌓인 블록 · 상태 · 넘김 효과 */}
+        {dockedEditing ? (
+          <BlockEditModal
+            docked
+            section={editingSection}
+            open
+            onClose={() => setEditing(null)}
+            onUpdate={(patch) => { if (editingSection) updateSectionProps(editingSection.id, patch as any); }}
+          />
+        ) : (
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
           <div className="text-[12px] text-white/70 mb-2 font-bold">쌓인 블록 {sections.length}개</div>
           {sections.length === 0 ? (
@@ -251,6 +266,7 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
             </>
           )}
         </div>
+        )}
       </div>
 
       <CatalogPageModal
@@ -261,9 +277,10 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
         onMade={(url, chips) => { addCatalogPage(url, chips); setCatalogAt(null); }}
       />
 
+      {/* 좁은 화면 전용 — 넓은 화면은 위 오른쪽 열에 붙는다(두 형태가 동시에 뜨지 않는다) */}
       <BlockEditModal
         section={editingSection}
-        open={!!editingSection}
+        open={!!editingSection && !wide}
         onClose={() => setEditing(null)}
         onUpdate={(patch) => { if (editingSection) updateSectionProps(editingSection.id, patch as any); }}
       />

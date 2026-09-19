@@ -932,6 +932,12 @@ export function getMaxByteMessage(msg: string, recipients: any[], variableMap: R
   return result;
 }
 
+/**
+ * ★ 2026-09-19 (접수 cmu51p03g05t8jnlufxnmty1a · P0) 본문에 무료 수신거부 문구가 이미 있는가 — 띄어쓰기·콜론 허용.
+ * 백엔드 messageUtils.ts AD_REJECT_FOOTER_RE 미러(같은 식 · 계약 = backend ad-reject-footer-detect.test.ts).
+ */
+const AD_REJECT_FOOTER_RE = /무료\s*수신\s*거부|무료\s*거부/;
+
 /** @param msgType      'SMS' | 'LMS' | 'MMS'
  * @param isAd         광고 여부
  * @param optOutNumber 080 수신거부번호
@@ -954,7 +960,7 @@ export function buildAdMessageFront(
   //   - 빈 줄은 고객 입력 또는 AI 원본 개행 (ai.ts 자동제거 regex `\n?` 제거로 보존)에 의해서만 발생
   //   - AI 문안이 이미 "무료수신거부 080..."을 포함하면 hasRejectFooter=true → 원본 유지
   const hasAdPrefix = /^\s*[(（]\s*광고\s*[)）]/.test(message); // 반각·전각 (광고) 모두 인식 — 이중부착 방지
-  const hasRejectFooter = /무료수신거부|무료거부/.test(message);
+  const hasRejectFooter = AD_REJECT_FOOTER_RE.test(message);
 
   const finalPrefix = hasAdPrefix ? '' : adPrefix;
 

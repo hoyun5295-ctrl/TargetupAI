@@ -66,9 +66,17 @@ describe('renderEmailSections — 디자인 2.0 골격', () => {
   });
 
   it('brandKit primary가 밴드·버튼·쿠폰에 반영', () => {
+    const html = renderEmailSections(SAMPLE, { brandKit: { primary_color: '#0b7e58' } });
+    expect(html).toContain('#0b7e58');
+    expect(html).toContain('rgba(11,126,88,0.08)'); // primarySoft 워시
+  });
+
+  // ★ 2026-09-19 의도 변경 — 흰 글씨 대비 4.5 미만 킷 주색은 AI 자동제작과 같은 규칙으로 명도만 낮춰 싣는다
+  //   (재오픈 cmu3m03ze03najnlu1fjw857n · 계약 = email-kit-readability.test.ts). 옛 기대는 #10b981 원색 그대로였다.
+  it('흰 글씨 대비 미달 킷 주색은 보정값으로 반영(원색 아님)', () => {
     const html = renderEmailSections(SAMPLE, { brandKit: { primary_color: '#10b981' } });
-    expect(html).toContain('#10b981');
-    expect(html).toContain('rgba(16,185,129,0.08)'); // primarySoft 워시
+    expect(html).toContain('rgba(11,126,88,0.08)');
+    expect(html).not.toContain('rgba(16,185,129,0.08)');
   });
 
   it('visible=false 제외 + order 정렬 (기존 동작 회귀 가드)', () => {

@@ -56,13 +56,24 @@ function rgbToHex(r: number, g: number, b: number): string {
 /** ★ 0906(3) 브랜드 색을 못 뽑았을 때의 주색 — 기본 보라 토큰 대신 무채색(짙은 슬레이트). 어느 브랜드에 얹어도 "남의 색"이 되지 않는다. */
 export const OUTREACH_NEUTRAL_PRIMARY = '#1f2937';
 
+/**
+ * 밝은 무채색(흰·연회색)인가 — 이런 색은 브랜드 색이 아니다. 어둡게 만들면 회색이 되어 대비를 통과해 버린다.
+ * 검정·짙은 회색은 정당한 브랜드 색(패션)이라 거짓. 6자리 hex가 아니면 판정하지 않는다(거짓).
+ * ★ 2026-09-19 accessiblePrimaryOf 안의 같은 줄을 꺼냈다 — 이메일 렌더 엔진이 회사 킷 강조색에 같은 잣대를 쓴다
+ *   (재오픈 `cmu3m03ze03najnlu1fjw857n` · 흰 강조색 = 쿠폰 강조 헤더가 흰→흰 면에 흰 글씨).
+ */
+export function isLightNeutral(hex: string | null | undefined): boolean {
+  const rgb = hex ? hexToRgb(hex) : null;
+  if (!rgb) return false;
+  const mx = Math.max(...rgb), mn = Math.min(...rgb);
+  return mx > 0 && (mx - mn) / mx < 0.1 && mx / 255 > 0.5;
+}
+
 export function accessiblePrimaryOf(hex: string | null | undefined): string | null {
   const rgb = hex ? hexToRgb(hex) : null;
   if (!rgb) return null;
   let [r, g, b] = rgb;
-  // 밝은 무채색(흰·연회색)은 브랜드 색이 아니다 — 어둡게 만들면 회색이 되어 통과해 버린다. 검정·짙은 회색은 정당한 브랜드 색(패션)이라 허용.
-  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-  if (mx > 0 && (mx - mn) / mx < 0.1 && mx / 255 > 0.5) return null;
+  if (isLightNeutral(hex)) return null;
   for (let i = 0; i < 12; i++) {
     const cur = rgbToHex(r, g, b);
     if (getContrastRatio(cur, '#ffffff') >= PRIMARY_MIN_CONTRAST) return cur;

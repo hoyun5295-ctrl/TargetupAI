@@ -21,7 +21,7 @@ import type {
   CountdownProps, VideoProps, YoutubeEmbedProps, InstagramEmbedProps, MapStoreLocatorProps,
 } from '../dm/dm-section-registry';
 import type { DmBrandKit } from '../dm/dm-tokens';
-import { resolveEmailBrand, emailSelfHostFontImport, type EmailBrand, type EmailDesign } from './email-tokens';
+import { resolveEmailBrand, readableEmailKit, emailSelfHostFontImport, type EmailBrand, type EmailDesign } from './email-tokens';
 import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE, selectEmailTreatment } from './email-blocks';
 import {
   EMAIL_PRODUCT_IMG_HEIGHT, EMAIL_PRODUCT_LIST_THUMB, EMAIL_PRODUCT_TITLE_SIZE_KEY,
@@ -161,7 +161,7 @@ function wrapBand(rowsHtml: string, bgStyle: string): string {
 //   계약 = email-editor-parity.test.ts "셸 CSS가 히어로 높이를 덮지 않는다".
 const HERO_HEIGHT_PX: Record<string, number> = { sm: 200, md: 320, lg: 480, full: 600 };
 
-function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string, ordinal: number): string {
+function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string, ordinal: number, bOnDark: EmailBrand = b): string {
   const img = emailImg(p.image_url, ctx.publicBase);
   const align = p.align || 'center';
   const minH = HERO_HEIGHT_PX[(p.height as string) || 'md'] || 320;
@@ -224,7 +224,8 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment:
     // ★ 2026-07-02 줄바꿈(\n→<br>) + 색상 직접 지정(미지정 = 밴드 유무별 기본색) + ★ 2026-07-12 크기 직접 지정(fsPx)
     const headColor = esc(p.headline_color || (banded ? '#ffffff' : b.text));
     const subColor = esc(p.sub_copy_color || (banded ? 'rgba(255,255,255,0.92)' : b.textMuted));
-    const headline = `<div style="font-family:${b.displayFont};font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${headColor};margin:0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, b)}</div>`;
+    // 강조색 = 밴드가 어두우면(banded) 보정 전 킷(bOnDark) · 흰 면이면 보정 킷(b). 호출부 renderBlock 주석 참조.
+    const headline = `<div style="font-family:${b.displayFont};font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${headColor};margin:0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, banded ? bOnDark : b)}</div>`;
     const sub = p.sub_copy
       ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${subColor};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
       : '';
@@ -799,8 +800,11 @@ function renderBlock(s: Section, baseBrand: EmailBrand, ctx: EmailRenderCtx, ord
       designForDark,
     );
   } else if (accent) {
+    // ★ 2026-09-19 흰 면 재해석 = 보정된 킷 위에 사람이 고른 강조색을 그대로 덮는다(킷 강조색만 보정값을 쓴다).
+    //   ⛔ 위 dark 분기는 원래 킷 그대로다 — 보정은 흰 글씨·흰 바탕 계약이라 #171717 면에 쓰면 어두운 면 위
+    //     어두운 장식이 된다(적대 검토 0919 · 계약 = email-kit-readability.test.ts).
     b = resolveEmailBrand(
-      { ...(ctx.brandKit || {}), primary_color: accent } as NonNullable<EmailRenderCtx['brandKit']>,
+      { ...(readableEmailKit(ctx.brandKit, designSansPrimary) || {}), primary_color: accent } as NonNullable<EmailRenderCtx['brandKit']>,
       designSansPrimary,
     );
   }
@@ -816,8 +820,16 @@ function renderBlock(s: Section, baseBrand: EmailBrand, ctx: EmailRenderCtx, ord
   switch (s.type) {
     case 'header':
       html = renderHeader(s.props as HeaderProps, b, ctx); break;
-    case 'hero':
-      html = renderHero(s.props as HeroProps, b, ctx, treatment, ordinal); break;
+    case 'hero': {
+      // ★ 2026-09-19 히어로 사진 아래 문구 밴드는 블록이 스스로 만드는 어두운 면이다. 그 위 헤드라인 강조(마커·밑줄)는
+      //   보정 전 킷으로 그린다 — 킷 보정은 흰 면 계약이라 어두운 밴드 위에 쓰면 어두운 워시가 된다(적대 검토 0919).
+      //   사람이 고른 블록 강조색·테마 색은 두 값이 같으니 출력 무변화. 어둡게 배경면은 b가 이미 보정 전 킷이다.
+      const bOnDark = bgKind === 'dark' ? b : resolveEmailBrand(
+        accent ? ({ ...(ctx.brandKit || {}), primary_color: accent } as NonNullable<EmailRenderCtx['brandKit']>) : ctx.brandKit,
+        accent ? designSansPrimary : ctx.design,
+      );
+      html = renderHero(s.props as HeroProps, b, ctx, treatment, ordinal, bOnDark); break;
+    }
     case 'text_card':
       html = renderTextCard(s.props as TextCardProps, b, ctx, treatment, ordinal); break;
     case 'cta':
@@ -868,7 +880,11 @@ function renderBlock(s: Section, baseBrand: EmailBrand, ctx: EmailRenderCtx, ord
  *  ★ 2026-07-13 디자인 3.0 — 완전한 문서 출력(다크모드 meta·모바일 @media·웹폰트 @import) +
  *    섹션 디바이더 + 명시 프리헤더 우선 + EMAIL_FOOTER_SLOT(광고 footer 자리). */
 export function renderEmailSections(sections: Section[], ctx: EmailRenderCtx): string {
-  const b = resolveEmailBrand(ctx.brandKit, ctx.design);
+  // ★ 2026-09-19 (남지현 재오픈 cmu3m03ze03najnlu1fjw857n · cmu3n0fdj03x1jnlua7bfr9h2) 회사 킷 색 보정은 **렌더 엔진 안**.
+  //   0915에 AI 자동제작 래퍼에만 넣었더니 편집기 저장·미리보기·발송·기획 제작은 흰 킷을 그대로 실어
+  //   D-Day·쿠폰 헤더(흰 면 흰 글씨)와 헤드라인 마커·밑줄이 사라졌다. 규칙 = email-tokens readableEmailKit.
+  //   흰 면 브랜드를 정하는 두 자리(여기 · renderBlock 블록 강조색 분기)에만 쓰고, 어둡게 배경면 재해석은 원래 킷 그대로.
+  const b = resolveEmailBrand(readableEmailKit(ctx.brandKit, ctx.design), ctx.design);
   const ordered = (sections || [])
     .filter((s) => s.visible !== false)
     .sort((a, c) => (a.order || 0) - (c.order || 0));

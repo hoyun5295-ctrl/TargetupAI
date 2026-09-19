@@ -4696,9 +4696,13 @@ router.get('/charge-management', authenticate, requireSuperAdmin, async (req: Re
     const endDate = req.query.endDate as string;
 
     // 1. Pending deposit requests (항상 조회)
+    // ★ 2026-09-19 (서수란 접수 cmu6llzi206otjnluyg2vxl29) 보류 컬럼 3개를 싣는다. 관리 화면 "한줄로 충전" 탭은
+    //   이 목록으로 배지·사유·소명을 그리고 승인 때 resolveHold(= held_reason 유무)를 정한다. 빠져 있어서 보류 건 승인이
+    //   "입금자명 확인이 필요한 요청"으로 계속 거절됐다. /deposit-requests 목록과 같은 컬럼(계약 = deposit-hold-list-columns.test.ts).
     const pendingResult = await query(
       `SELECT dr.id, dr.company_id, dr.amount, dr.depositor_name, dr.status,
               COALESCE(dr.payment_method, 'deposit') as payment_method,
+              dr.held_reason, dr.held_at, dr.explanation_note,
               dr.created_at, c.company_name, c.balance
        FROM deposit_requests dr
        JOIN companies c ON dr.company_id = c.id
@@ -4766,7 +4770,12 @@ router.get('/charge-management', authenticate, requireSuperAdmin, async (req: Re
       page,
       totalPages: Math.ceil(total / limit),
     });
-  } catch (error) {
+  } catch (error: any) {
+    // ★ DB ALTER 안전망(held_reason·held_at·explanation_note = 0819 ALTER 컬럼) — 500이 아니라 503으로 정확히 알린다
+    const msg = String(error?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('충전 관리 조회 실패:', error);
     res.status(500).json({ error: '충전 관리 조회 실패' });
   }

@@ -398,6 +398,16 @@ export async function getOpt080Number(userId: string | null, companyId: string):
  * @param opt080Number 080 수신거부번호 (getOpt080Number로 조회한 값)
  * @returns (광고)+본문+무료거부 조합된 메시지. 광고 아니거나 080번호 없으면 원본 반환.
  */
+/**
+ * ★ 2026-09-19 (남지현 접수 cmu51p03g05t8jnlufxnmty1a · P0) 본문에 무료 수신거부 문구가 이미 있는가.
+ *   종전 `/무료수신거부|무료거부/`는 붙여 쓴 형태만 알아봐서, 대행 메일 접수 원문의 `무료 수신거부 : 080-…`
+ *   (띄어쓰기·콜론)에 한 줄을 더 붙였다 → 스팸 테스트·받는 사람별 미리보기·실발송에 두 번 들어갔다.
+ *   너비는 같은 파일 stripAdPartsDeep 과 같다(무료/수신/거부 사이 공백 허용). "무료" 없는 "수신거부"는 법정 문구가
+ *   아니라 인정하지 않는다(그때는 종전처럼 우리 080을 붙인다).
+ * ⛔ 프론트 미리보기 미러 `formatDate.ts` 의 같은 이름 상수와 **같은 식**이어야 한다(계약 = ad-reject-footer-detect.test.ts).
+ */
+export const AD_REJECT_FOOTER_RE = /무료\s*수신\s*거부|무료\s*거부/;
+
 export function buildAdMessage(
   message: string,
   msgType: string,
@@ -422,7 +432,7 @@ export function buildAdMessage(
   //   - AI 문안이 이미 "무료수신거부 080..."을 포함하면 hasRejectFooter=true → 원본 그대로
   //   - D102/D103 안전장치(중복 방지)는 그대로 유지
   const hasAdPrefix = /^\s*[(（]\s*광고\s*[)）]/.test(message); // 반각·전각 (광고) 모두 인식 — 이중부착 방지
-  const hasRejectFooter = /무료수신거부|무료거부/.test(message);
+  const hasRejectFooter = AD_REJECT_FOOTER_RE.test(message);
 
   const finalPrefix = hasAdPrefix ? '' : adPrefix;
 

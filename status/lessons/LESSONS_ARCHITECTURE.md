@@ -42,6 +42,8 @@
 | CT-64 | `continuous-operator-policy.ts` | D212+ 발송 정책 |
 | CT-65~70 | performance-cohort / benchmark / explainer / quick-action / attribution / data-availability | D213+ 성과리포트 |
 | CT-71~76 | unified-customer-profile / customer-cdp-fusion / cdp-diagnostics / cdp-active-customers / source-aware-channel-selector / cdp-fusion-explainer | D214+ 자사몰 + 데이터 융합 |
+| CT-77 | `customer-store-link.ts` | ★2026-09-18 고객↔분류코드 소속 기록(`customer_stores`) 단일 함수 — 자사몰 적재가 부른다 · 형제 경로(upload·sync·customers) 인라인 3곳 통합은 별건 · [D92](../DECISIONS.md) |
+| CT-78 | `integration-scope.ts` | ★2026-09-18 자사몰 연동 권한·범위 — 관리자 전체 / 분류코드 배정 사용자 자기 몰 / 잠금 사유 문장 / SDK Origin → 분류코드. 1단계 소비 = 우커머스 라우트 · 상품 피커 · `/api/cdp/ingest`. P5 = 나머지 5 provider |
 
 ### Frontend (`packages/frontend/src/utils/`)
 - `formatDate.ts` — 포맷팅 + 바이트 + 변수 치환 + `cellToString` (backend normalize.ts 미러) + DIRECT_VAR_MAP + displayValue

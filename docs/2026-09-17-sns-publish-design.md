@@ -383,15 +383,48 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 
 ---
 
-## 9. 범위 밖 · 별건 (기록만 · 착수 판단 = Harold)
+## 9. 범위 밖 · 별건 — 무엇을 · 왜 이 설계에 넣지 않았나 · 지금 위험 · 재개 조건 · 소유 (기록만 · 착수 판단 = Harold)
 
-- `company_integrations` provider 조건 없는 조회 2곳의 fail-open 성질(`|| 'manual'`)은 SNS와 무관하게 다음 provider에서 같은 사고를 낸다.
-- 허브 카드 만료 NEW 2장(이미지 스튜디오 07-19 · 플래너 08-12) · NEW 만료 장치 부재.
-- 발송 버튼 색 4벌(DM 발행 · 이메일 발송 · 알림톡 · 자동제작) 통일.
-- `OUI_TAB_ON/OFF` 미사용 토큰 정리.
-- 혜택 차단기 목록·주석 불일치(`할인`).
-- 시댄스 홍보 영상 프롬프트 연구 = 코드 밖 별도 작업.
+> 규율 = `scope_discipline_one_ticket_axis`. 이 설계의 축 = **"고객사가 자기 SNS 계정을 연결하고 미디어를 올려 캡션·태그를 받아 게시·예약한다"**. 아래는 §1 출발점 실측 중 드러났으나 그 축이 아니거나, 이 설계가 **피해 가는 방식으로 대응한** 것들이다. 피해 갔다고 사라진 것이 아니라 다음 기능이 같은 자리를 밟는다.
 
+### 9-1. `company_integrations`를 provider 조건 없이 읽는 2곳의 fail-open
+- **무엇**: `utils/inapp-display-eligibility.ts:70~83`(미지 provider → `|| 'manual'` 보수적 허용 = 인앱 생성·게시 게이트가 열린다) · `utils/performance-data-availability.ts:65~68`(`access_token IS NOT NULL` 카운트 → "쇼핑몰 연동됨" 거짓 신호).
+- **왜 이 설계가 아닌가**: 이 설계는 그 두 곳 **때문에** `company_integrations` 재사용을 버리고 `sns_accounts`를 따로 뒀다(§1-2 · §3-1). 즉 SNS는 지뢰를 밟지 않는다. 두 곳을 고치는 것은 인앱 표시·성과 리포트 축의 공용 CT 수정이라 이 설계의 승인 단위가 아니고, 고쳐도 SNS 동작은 달라지지 않는다.
+- **지금 위험**: SNS 0. 다음에 누가 `company_integrations`에 자사몰 아닌 provider 행을 넣는 순간 인앱 게이트가 그 회사에 열리고 성과 리포트가 "연동됨"으로 보인다. 몰별 사용자 연동(0918)도 같은 항목을 그 문서 §8-6에 기록했다(그쪽은 provider 행을 새로 안 넣어 영향 0).
+- **재개 조건·방향**: 자사몰 밖 provider를 그 표에 넣으려는 설계가 나오면 그 설계의 선행 과제로. 방향 = 두 조회에 `provider IN (자사몰 목록)` 명시 · 목록은 `cdp-provider-registry`가 소유 · `|| 'manual'`을 fail-closed로. 소유 = [FEATURE-CDP-INTEGRATION.md](FEATURE-CDP-INTEGRATION.md) · 인앱 = `LESSONS_BACKEND`.
+
+### 9-2. 허브 카드 만료 NEW 2장 · NEW 만료 장치 부재
+- **무엇**: `frontend/constants/ai-operator-modules.ts:47·54·56`의 `badge: 'NEW'` 3장 중 마케팅 플래너(08-12 출시)·이미지 스튜디오(07-19 출시)는 라벨 3단 규칙(갓 출시 = NEW 4~6주 뒤 제거)의 기한을 넘겼다. 자동제작(0914)은 기한 안. 만료를 알려 주는 장치(출시일 필드·테스트)가 없어 사람이 기억해야 뗀다.
+- **왜 이 설계가 아닌가**: SNS 타일에 NEW를 붙일지가 **결재 대기 항목**(§3-11 · Harold 결정)이고, 붙이는 경우에만 "같은 배포에 만료 2장 제거"를 이 설계의 범위로 넣는다고 적어 뒀다(넷을 동시에 켜지 않는다). 안 붙이면 2장 제거는 SNS와 무관한 허브 정리라 별도 배포 단위다. 어느 쪽이든 결재 전에는 손대지 않는다.
+- **지금 위험**: 사용자 노출 라벨 정확성(NEW가 아닌 것을 NEW로) · 과금·발송 무관.
+- **재개 조건·방향**: 결재 결과에 따라 (a) SNS 배포에 동반 (b) 별도 [HOTFIX] 1줄 2건. 만료 장치는 별도 과제 — 방향 = 카드에 `launchedAt` + 계약 테스트가 42일 초과 NEW를 실패시킴(프론트 테스트 0이라 백엔드 소스 스캔 계약으로). 소유 = [2026-08-21 오퍼레이터 표면 단계](2026-08-21-operator-surface-tier-design.md) · `LESSONS_FRONTEND` 뱃지 3단.
+
+### 9-3. 발송 버튼 색 4벌 통일
+- **무엇**: DM 발행 · 이메일 발송 · 알림톡 · 자동제작의 최종 실행 버튼 색·그라데이션이 화면마다 다르다(§1 실측 중 자매 화면 대조에서 확인). SNS 게시 버튼은 §4-2 4번대로 `OUI_BTN_SEND`(violet 단색 · `operator-ui:55`)를 쓴다 — "그라데이션 = 만드는 일 / 단색 = 밖으로 나가는 일" 규칙.
+- **왜 이 설계가 아닌가**: 화면 4개의 공용 시각 규칙을 바꾸는 일이라 "공용 컴포넌트는 접수 하나 때문에 고치지 않는다"에 해당한다. SNS는 기존 토큰 하나를 골라 쓰면 축이 닫힌다 — 5벌째를 만들지 않는 것까지가 이 설계의 책임이다.
+- **지금 위험**: 일관성만. 동작·과금 무관.
+- **재개 조건·방향**: 허브 화면 정비 세션에서 4곳이 `OUI_BTN_SEND`/`OUI_BTN_AI` 둘 중 하나로 수렴(밖으로 나가는 일 = 단색). 소유 = `LESSONS_FRONTEND` 디자인 최소 기준.
+
+### 9-4. `OUI_TAB_ON/OFF` 미사용 토큰
+- **무엇**: `frontend/utils/operator-ui.ts:71~72`에 정의돼 있으나 실사용 0(§8 회의록 3번 · 화면 골격을 스택으로 정한 근거 중 하나).
+- **왜 이 설계가 아닌가**: SNS 화면이 탭을 안 쓰기로 했으니 이 토큰을 검증하지도 지우지도 않는다. 지우는 것은 공용 유틸 정리이고, 남겨 두면 "검증 안 된 패턴"이 다음 화면에서 또 후보로 올라온다는 것이 유일한 비용이다.
+- **재개 조건·방향**: 탭이 실제로 필요한 화면이 생기면 그때 실사용과 함께 검증하거나, 허브 정비 세션에서 삭제. 삭제 전 `grep -rn OUI_TAB` 0 재확인.
+
+### 9-5. 혜택 차단기 키워드 목록과 주석의 불일치(`할인`)
+- **무엇**: `utils/copy-benefit-detector.ts:16~19`의 키워드 목록에 `할인`이 있는데 주석·[FEATURE-AI-AUTO-BUILD.md:103](FEATURE-AI-AUTO-BUILD.md) 설명과 어긋난다(어느 쪽이 의도인지 코드만으로 확정 불가).
+- **왜 이 설계가 아닌가**: SNS 캡션은 이 차단기를 **그대로 재사용**한다(§3-8 · AI 임의 혜택 0 원칙). 목록을 바꾸면 DM·이메일·자동제작 문안의 차단 결과가 함께 바뀌므로 그 세 채널의 소유 문서(FEATURE-AI-AUTO-BUILD)에서 결정할 일이다. SNS가 재사용하는 이상 SNS도 그 결정을 따른다.
+- **지금 위험**: `할인`이 목록에 있으면 원문에 없는 "할인" 문구가 차단되는 쪽(보수적)이라 AI 임의 혜택 노출 위험은 0. 반대 방향(주석이 맞고 목록이 과잉)이면 정당한 문안이 잘린다 — 발생 건수 미측정.
+- **재개 조건·방향**: 자동제작 문안 접수 중 "할인이 지워졌다"가 오면. 방향 = 의도를 Harold가 확정한 뒤 목록·주석·문서 셋을 같은 값으로.
+
+### 9-6. 시댄스 홍보 영상 프롬프트 연구 = 코드 밖
+- **무엇**: 한줄로 15~30초 홍보 영상을 시댄스(Harold 결제 계정)로 만드는 프롬프트 연구. SNS 1차의 첫 게시물 재료.
+- **왜 이 설계가 아닌가**: Harold 결정(0917) = 외부 영상 도구는 API 연동하지 않는다. 영상은 밖에서 만들어 올리고 한줄로는 캡션·태그·게시만. 따라서 코드·DB·화면에 닿지 않는 별도 세션 작업이다.
+- **재개 조건**: SNS 1차-A 배포 뒤 첫 게시물을 올릴 때 Harold와 별도 세션.
+
+### 9-7. 몰별 사용자 연동(0918) 축을 이 설계에 반영
+- **무엇**: 0918에 상시 원칙(관리자 = 회사 전체 · 분류코드 배정 사용자 = 자기 것만)이 자사몰 연동에 적용됐다. 이 설계의 `sns_accounts`·게시물 목록·게이트는 회사 단위라 몰별 담당자가 다른 몰의 SNS 계정으로 게시할 수 있다.
+- **왜 아직 반영하지 않았나**: 이 설계서가 Harold 검토 대기(결재 4건)라 승인 전에 본문을 고치면 검토 대상이 흔들린다. 코드 0이라 지금 위험 0.
+- **재개 조건·방향**: 승인 직후 개정 1회 — §2 불변 원칙 추가("분류코드 배정 사용자는 자기 SNS 계정만") · §3-1 `sns_accounts.store_code` · §3-11 게이트에 CT-78 `integration-scope.ts` 재사용(관리자 전체 / 사용자 자기 코드 행 / 연결 시 코드 결정 규칙 동일). 상세 = [2026-09-18 몰별 사용자 연동 설계서 §8-8](2026-09-18-mall-integration-user-scope-design.md).
 ## 10. 관련 문서
 
 [FEATURE-CDP-INTEGRATION.md](FEATURE-CDP-INTEGRATION.md) · [2026-09-14 우커머스 설계서](2026-09-14-woocommerce-integration-design.md) · [FEATURE-AI-AUTO-BUILD.md](FEATURE-AI-AUTO-BUILD.md) · [FEATURE-MARKETING-PLANNER.md](FEATURE-MARKETING-PLANNER.md) · [FEATURE-IMAGE-STUDIO.md](FEATURE-IMAGE-STUDIO.md) · [2026-09-01 AI 이미지 표시](2026-09-01-ai-image-notice-design.md) · [2026-08-21 오퍼레이터 표면 단계](2026-08-21-operator-surface-tier-design.md) · [DECISIONS D90](../status/DECISIONS.md) · [LESSONS_BACKEND](../status/lessons/LESSONS_BACKEND.md) · [BUGS B-0904-5 · 818행 대조 회귀](../status/BUGS.md) · 회의 원문 = 세션 scratchpad(`sns-brainstorm-brief.md` · `round1.md` · `converged.md`).

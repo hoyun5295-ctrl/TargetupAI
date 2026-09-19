@@ -17,6 +17,8 @@ import type { DmBrandKit } from '../dm/dm-tokens';
 // ★ 2026-07-14 디자인 4.0 M2 — 타입스케일·밀도·서체 카탈로그 소유가 design-core로 이동(값 무변 이관).
 import { CORE_TYPE_SCALE, CORE_DENSITY_SCALE } from '../design-core/art-direction';
 import { CORE_FONTS } from '../design-core/fonts';
+// ★ 2026-09-19 회사 킷 색 보정 — AI 자동제작(readableCustomerBrandKit)·AI 영업과 같은 판정 함수를 쓴다.
+import { accessiblePrimaryOf, isLightNeutral, OUTREACH_NEUTRAL_PRIMARY } from '../sales-outreach-look';
 
 // ────────────── 디자인(캠페인 단위) 타입 ──────────────
 
@@ -230,6 +232,39 @@ export interface EmailBrand {
  *  ★ 2026-07-13 — brand_kit/design 서체 문자열은 raw 삽입 표면 → 허용 문자 밖 제거(DM safeFontFamily 원칙). */
 function inlineFont(stack: string): string {
   return stack.replace(/"/g, "'").replace(/[^a-zA-Z0-9 ,'\-]/g, '');
+}
+
+/**
+ * ★ 2026-09-19 회사 브랜드 킷 색을 이메일에 싣기 전에 읽기 좋게 만든다(남지현 재오픈 2건).
+ *   헤더 D-Day·쿠폰 강조(`cmu3m03ze03najnlu1fjw857n`) = 흰 면 위 흰 글씨 ·
+ *   히어로 마커·밑줄(`cmu3n0fdj03x1jnlua7bfr9h2`) = 흰 바탕 위 흰 워시·흰 선.
+ *   실측(0919 운영 PG): 주식회사 인비토 킷 주색·강조색 = `#ffffff`, 손으로 만든 초안은 `design.palette`가 비어
+ *   그 흰색을 그대로 썼다. 같은 회사 AI 자동제작 초안만 `#1f2937`이었다 — 보정이 그 래퍼에만 있었다.
+ *
+ * - 주색 = AI 자동제작과 **같은 규칙**(accessiblePrimaryOf · 흰 글씨 대비 4.5 미만이면 명도만 낮춤 · 흰·연회색이면
+ *   무채색). 주색은 버튼·D-Day 면에서 흰 글씨를 얹는 색이라 흰 글씨 대비가 계약이다.
+ * - 강조색 = 흰·연회색만 "지정 없음"(→ 기본 강조색). 유채색은 연해도 그대로 — 우리 기본 강조색부터 대비 4.5
+ *   미만이라 주색 잣대를 쓰면 기본색까지 바뀐다.
+ * - 기준을 넘는 색은 입력 문자열 그대로 둔다(운영 나머지 회사 출력이 한 글자도 안 바뀐다).
+ *
+ * ⛔ 회사 킷에만 쓴다. 캠페인 테마 색(`design.palette`)과 블록별 "버튼·강조색"은 사람이 고른 값이라 보정하지 않는다.
+ *   그래서 resolveEmailBrand 안이 아니라 렌더 엔진이 흰 면 브랜드를 정하는 두 자리(renderEmailSections 기본 ·
+ *   renderBlock 블록 강조색 분기)에서 킷만 거친다 — resolveEmailBrand는 블록 강조색도 킷 자리로 받는다.
+ * ⛔ 흰 바탕 기준 보정이라 어두운 면에는 쓰지 않는다(어두운 면 위 장식을 어둡게 만든다). 렌더러의 어두운 면은 셋 —
+ *   ①셸 전체(킷·테마 배경이 어두움 = 여기서 판정해 그대로 돌려준다) ②"어둡게" 배경면(renderBlock dark 분기 = 원래 킷)
+ *   ③히어로 사진 아래 문구 밴드(renderBlock hero 분기 bOnDark). 새 어두운 면을 만들면 이 목록에 더한다.
+ * ⛔ 원장(companies.brand_kit)은 바꾸지 않는다. 새 객체를 돌려준다.
+ */
+export function readableEmailKit<T extends DmBrandKit>(kit: T | null | undefined, design?: EmailDesign | null): T | null | undefined {
+  if (!kit) return kit;
+  if (isDarkBackground(design?.palette?.background || kit.background_color)) return kit;
+  const out: T = { ...kit };
+  if (kit.primary_color) {
+    const fixed = accessiblePrimaryOf(kit.primary_color) || OUTREACH_NEUTRAL_PRIMARY;
+    if (fixed.toLowerCase() !== String(kit.primary_color).trim().toLowerCase()) out.primary_color = fixed;
+  }
+  if (kit.accent_color && isLightNeutral(kit.accent_color)) delete out.accent_color;
+  return out;
 }
 
 /** 브랜드킷(snake_case 필드) + 캠페인 design → 이메일 인라인 값. 미설정 필드는 DM 기본 토큰. */
