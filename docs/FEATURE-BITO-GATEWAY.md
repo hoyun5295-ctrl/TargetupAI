@@ -302,6 +302,7 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 | hanjul02 | 14 | SMSQ_SEND_14 | `bito-agent-hanjul02.service` | **1.0.20** | ✅ **전환 완료** — bootstrap 관리형 · credential `active`(gen 3) · smoke 확정 · 발송/결과반영 실측 완료 |
 | hanjul03 | 15 | SMSQ_SEND_15 | `bito-agent-hanjul03.service` | 1.0.22 | 전환 완료형(목표 상태) · bootstrap **1.0.27** |
 
+- ★2026-09-19 세 Agent `send_concurrency` 1 → **4**(`/opt/bito-agent*/agent-config.yaml` · 백업 `.bak-20260919`) · 게이트웨이 회선 메트로놈 enforce와 짝(메트로놈을 끄면 1로 되돌린다) · 상세 = bito-gateway `status/BUG_HISTORY.md` 2026-09-19.
 - 전환 사유 = 01·02가 구형이라 **원격 업그레이드 미지원**. 주소·연결·인증은 전부 정상이었다.
 - 전환은 기존 config·토큰·서비스 정체성을 보존한다 → **잊어버린 ID·비번 재입력 불필요**(이 세션의 출발 질문).
 - ⚠ **bootstrap 버전 격차** — hanjul02 `1.0.22` vs hanjul03 `1.0.27`. hanjul02를 1.0.22 child로 올리려 하면 rollout이 `CANARY_LANE_MISSING`으로 거부된다(실체는 적격 판정 실패가 그 이름으로 튀어나오는 것 — `agent-rollout-service.js:127-137`은 **`eligible===true`인 canary만** 세므로 진짜 사유가 가려진다). 유력 원인 = `minimum_bootstrap_version` 미달(`:97-98`). 임계값은 `agent_release` 컬럼이 아니라 **아티팩트 descriptor**에 있어 한 겹 더 들어가야 확인된다. `state_schema`는 01·02·03 모두 `1`로 동일 — 그 축은 아니다.

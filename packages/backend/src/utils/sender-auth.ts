@@ -23,6 +23,7 @@ import { query } from '../config/database';
 import { isEnforcedFrom, isPilotTarget } from './rollout-gate';
 import { ipPrefix, maskPhone, generateMfaCode, sendAuthCodeSms } from './mfa';
 import { recordAuditLog } from './audit-log';
+import { trySendAuthCodeAlimtalk } from './system-alimtalk';
 
 /** 시행일 게이트 — `SENDER_AUTH_ENFORCE_FROM`. 미설정이 기본값(미시행)이다. */
 export function isSenderAuthEnforced(now: Date = new Date()): boolean {
@@ -225,10 +226,14 @@ export async function issueSenderAuthChallenge(params: {
     ]
   );
 
-  await sendAuthCodeSms(
-    params.phone,
-    `[한줄로] 발신번호 인증번호 ${code}\n${SENDER_AUTH_CODE_TTL_MINUTES}분 안에 입력해주세요.`
-  );
+  // ★ 2026-09-19 Harold 지시 — 승인 알림톡(추가인증 인증번호) 우선 · 실패 시 게이트웨이가 같은 문구 SMS로 전환.
+  //   스위치(ENV)가 꺼졌거나 알림톡을 못 실으면 종전 문자 그대로(발신 인증이 막히지 않는다 · CT = system-alimtalk.ts).
+  if (!(await trySendAuthCodeAlimtalk('sender_auth', params.phone, code))) {
+    await sendAuthCodeSms(
+      params.phone,
+      `[한줄로] 발신번호 인증번호 ${code}\n${SENDER_AUTH_CODE_TTL_MINUTES}분 안에 입력해주세요.`
+    );
+  }
 
   await recordAuditLog({
     actorUserId: params.userId,

@@ -31,6 +31,7 @@ import { query, mysqlQuery } from '../config/database';
 import { getTestSmsTables } from './sms-queue';
 import { restrictAccount } from './account-action';
 import { isEnforcedFrom, isPilotTarget } from './rollout-gate';
+import { trySendAuthCodeAlimtalk } from './system-alimtalk';
 
 /** 코드 유효시간(분) */
 export const MFA_CODE_TTL_MINUTES = 5;
@@ -239,6 +240,9 @@ export async function issueMfaChallenge(userId: string, phone: string, req: Requ
  * ⛔ 식별 컬럼(app_etc1·app_etc2·bill_id)을 싣지 않는다 — 실으면 테스트발송으로 고객사에 청구된다.
  */
 async function sendMfaCode(phone: string, code: string): Promise<void> {
+  // ★ 2026-09-19 Harold 지시 — 승인 알림톡(다중인증 인증번호) 우선 · 실패 시 게이트웨이가 같은 문구 SMS로 전환.
+  //   스위치(ENV)가 꺼졌거나 알림톡을 못 실으면 아래 종전 문자 그대로(로그인이 막히지 않는다 · CT = system-alimtalk.ts).
+  if (await trySendAuthCodeAlimtalk('mfa_login', phone, code)) return;
   await sendAuthCodeSms(phone, `[한줄로] 인증번호 ${code}\n${MFA_CODE_TTL_MINUTES}분 안에 입력해주세요.`);
 }
 

@@ -930,3 +930,21 @@ JWT를 주고 화면에서 가리는 방식은 통제가 아니다(그 토큰으
 | 04·09 문서 정정 | 09 문서의 "4.1/4.2 해당 없음" 문장을 위 표로 교체. **정정 전 재제출 금지** |
 | 앱 로그 시각 표기 | `ecosystem.config.js:49`에 `time: true`가 있으나 실제 기록에 시각이 붙는지 미검증(827MB 파일의 앞부분에는 없었다 — 옛 구간일 가능성). 최근 줄 확인 후 판단 |
 | docker 로그 무한 성장 | 보관 요구와는 무관. `/var` 185G 여유라 급하지 않음. 별도 과제 |
+
+## 4-J. ★ 인증번호 알림톡 전환 — 코드완료·배포 대기 (2026-09-19 · Harold 지시)
+
+로그인 다중인증(3.4)·발신번호 추가인증(3.5) 인증번호를 **승인 알림톡**으로 보내고, 알림톡이 실패하면 게이트웨이가 **같은 문구를 SMS로** 자동 전환한다. 충전 안내 2종(입금안내·충전확인)은 Harold 결정으로 제외.
+
+| 종류 | 템플릿(0919 운영 실측 APPROVED · 발신프로필 "한줄로" 활성) | 호출부 |
+|---|---|---|
+| `mfa_login` | `B_NG_013_02_84157` 다중인증 인증번호 — "[한줄로] / 로그인 인증번호 / #{인증번호}를 5분안에 입력 해주세요." | `utils/mfa.ts` sendMfaCode |
+| `sender_auth` | `B_NG_013_02_84158` 추가인증 인증번호 — "[한줄로] / 발신 인증번호 / …" | `utils/sender-auth.ts` issueSenderAuthChallenge |
+
+- **CT** = `utils/system-alimtalk.ts` `trySendAuthCodeAlimtalk` — true(알림톡 적재) 또는 false(호출부가 종전 문자). 못 싣는 이유(스위치 꺼짐·템플릿 미승인·프로필 비활성·채울 수 없는 변수·라인그룹 없음·적재 실패)가 무엇이든 **종전 문자** → 인증이 막히지 않는다.
+- **본문 = 템플릿 원장**(`kakao_templates.content`)을 채운 값. 코드에 문구를 적지 않는다(승인 문구와 글자까지 같아야 한다). 두 템플릿 모두 유효 시간 "5분" = `MFA_CODE_TTL_MINUTES`·`SENDER_AUTH_CODE_TTL_MINUTES`(5).
+- **실패 전환** = `k_next_type 'S'`(기존 카톡 문구로 SMS · `alimtalk-fallback` CT) · 발신번호 = 플랫폼 대표번호(`SYSTEM_SMS_CALLBACK`) · 문구는 SMS 한 통(90바이트)에 들어간다(테스트 고정).
+- **청구·결과·학습 0**: `app_etc1` 미기재(테스트발송 청구 = `app_etc1='test'` 조건 · AI 학습 코퍼스 = appEtc1 필수). 회사 식별(`app_etc2`)은 **비토 라인일 때만**(발신프로필 키를 템플릿+회사로 찾는다) — 그 외 라인은 종전 인증 문자처럼 식별 컬럼 0.
+- **스위치(ENV · 둘 다 있어야 켜진다 · 기본 꺼짐 = 배포만으로 무변화)**: `SYSTEM_ALIMTALK_KINDS=mfa_login,sender_auth`(쉼표 · 종류별로 켠다) · `SYSTEM_ALIMTALK_LINE_GROUP=<sms_line_groups.group_name>`(Harold 지정 = 한줄로01~03 중 하나 · 코드에 라인을 적지 않는다).
+- **켜는 순서**: 배포 → 라인그룹 이름 확정 → `.env`에 두 줄 → `pm2 restart targetup-backend --update-env` → 로그인 인증 1건(카카오 수신) + 카카오 미사용 번호 1건(SMS 전환 도착·걸린 시간) 실측 → 발신 인증도 같은 순서. 되돌리기 = `SYSTEM_ALIMTALK_KINDS` 줄 삭제 + 재시작.
+- **계약**: `system-alimtalk.test.ts` 15건 · `auth-code-alimtalk-wiring.test.ts` 5건(알림톡 실으면 문자 0 · 못 실으면 종전 문자 · 코드 동일).
+- **미검증**: 알림톡 실패 → SMS 전환까지 걸리는 시간(인증 5분 창 안인지 = 실측) · 인증 템플릿 `security_flag = f`(보안 템플릿 아님 · 승인·발송에는 지장 없음 · 설정 효과 미확인).
