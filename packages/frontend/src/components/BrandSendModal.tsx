@@ -355,7 +355,7 @@ export default function BrandSendModal({
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addFromDraft(); } }}
               rows={5}
               placeholder={'번호를 줄바꿈·쉼표로 구분해 입력하세요\n01012345678\n010-8765-4321'}
-              className={`${FIELD_CLASS} resize-none leading-relaxed font-mono text-[12.5px]`}
+              className={`${FIELD_CLASS} resize-none leading-relaxed font-mono !text-[12.5px]`}
             />
             <button
               type="button"

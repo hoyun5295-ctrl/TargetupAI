@@ -810,8 +810,14 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                 )}
               </div>
               <div className="space-y-2">
-                {buttons.map((btn, idx) => (
-                  <div key={idx} className="flex gap-2 items-center rounded-xl bg-slate-50/70 ring-1 ring-slate-900/5 p-2">
+                {/* ⛔ 이 줄은 **격자**로 나눈다. 공용 입력칸 클래스(FIELD)에는 `w-full`·`px-3.5 py-2.5 text-sm` 이 들어 있어서,
+                    뒤에 `w-28`·`px-2.5` 를 덧붙여도 이기지 못한다(Tailwind 는 클래스 적힌 순서가 아니라 생성된 CSS 순서로 정한다 —
+                    `w-full` 이 `w-28` 보다 뒤). 0920 에 flex + `w-28` 로 두었다가 종류 선택칸이 줄 전체를 차지하고
+                    버튼명·URL 칸이 패널 밖으로 밀려났다(Harold 캡처 · 커머스). 덮어쓸 값은 `!` 로 적는다(BrandRichSections 의 카드 버튼 줄과 같은 방식). */}
+                {buttons.map((btn, idx) => {
+                  const needUrl = !!BUTTON_TYPES.find(t => t.code === btn.type)?.needUrl;
+                  return (
+                  <div key={idx} className="grid grid-cols-[112px_minmax(0,1fr)_minmax(0,1.3fr)_28px] gap-1.5 items-center rounded-xl bg-slate-50/70 ring-1 ring-slate-900/5 p-2">
                     <select value={btn.type}
                       onChange={(e) => {
                         const next = e.target.value;
@@ -821,7 +827,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                           ? { ...b, type: next, ...(spec?.fixedName ? { name: spec.fixedName } : {}) }
                           : b));
                       }}
-                      className={`${FIELD} w-28 shrink-0 px-2.5 py-1.5 text-xs`}>
+                      className={`${FIELD} !px-2.5 !py-1.5 !text-xs`}>
                       {/* 대상 범위를 바꿔 지금은 못 쓰는 유형이 남아 있어도 선택칸이 비지 않게 그대로 보여준다
                           — 무엇이 걸렸는지는 발송 버튼 아래 한 줄이 알려준다 */}
                       {(availableButtonTypes.some(bt => bt.code === btn.type)
@@ -831,18 +837,19 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                     </select>
                     <input type="text" value={btn.name} onChange={(e) => updateButton(idx, 'name', e.target.value)}
                       maxLength={selectedType.maxBtnName}
-                      className={`${FIELD} flex-1 px-2.5 py-1.5 text-xs`} placeholder="버튼명" />
-                    {BUTTON_TYPES.find(t => t.code === btn.type)?.needUrl && (
+                      className={`${FIELD} !px-2.5 !py-1.5 !text-xs ${needUrl ? '' : 'col-span-2'}`} placeholder="버튼명" />
+                    {needUrl && (
                       <input type="text" value={btn.url_mobile || ''} onChange={(e) => updateButton(idx, 'url_mobile', e.target.value)}
                         onBlur={(e) => updateButton(idx, 'url_mobile', normalizeLinkInput(e.target.value))}
-                        className={`${FIELD} flex-1 px-2.5 py-1.5 text-xs`} placeholder="URL" />
+                        className={`${FIELD} !px-2.5 !py-1.5 !text-xs`} placeholder="URL (https://…)" />
                     )}
-                    <button type="button" onClick={() => removeButton(idx)}
-                      className="shrink-0 p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-white transition">
+                    <button type="button" onClick={() => removeButton(idx)} aria-label="버튼 삭제"
+                      className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-white transition">
                       <X size={14} strokeWidth={2} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
                 {buttons.length === 0 && (
                   <p className="text-[11px] text-slate-400 px-1">버튼 없이 보낼 수 있습니다.</p>
                 )}
