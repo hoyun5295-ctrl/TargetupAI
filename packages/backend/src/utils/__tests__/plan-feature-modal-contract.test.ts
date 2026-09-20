@@ -123,7 +123,21 @@ describe('AI Operator 허브 — 서버 판정으로 막고 공통 안내 창을
     const start = HUB.indexOf('{SUB_MODULE_CARDS');
     expect(start, '허브 카드 렌더 자리를 못 찾으면 이 게이트가 죽은 것이다').toBeGreaterThan(-1);
     const tiles = HUB.slice(start, start + 4000);
-    expect(tiles).toMatch(/const featureId = planFeatureIdForPath\(card\.path\);\s*if \(planLocked && featureId\) \{ setPlanFeatureId\(featureId\); return; \}\s*navigate\(card\.path\);/);
+    // ★ 2026-09-20 조각 단정으로 바꿈 — 순차 개방 플래그 분기가 같은 자리에 하나 더 들어갔다(아래 테스트가 그것을 본다).
+    //   의도는 그대로다: 잠긴 카드는 **이동하지 않고** 그 기능의 안내를 연다.
+    expect(tiles).toMatch(/const featureId = planFeatureIdForPath\(card\.path\);/);
+    expect(tiles).toMatch(/if \(planLocked && featureId\) \{ setPlanFeatureId\(featureId\); return; \}/);
+    expect(tiles).toMatch(/navigate\(card\.path\);/);
+    // 안내를 여는 분기가 navigate 보다 **앞**에 있어야 한다(뒤에 있으면 이미 이동한 뒤다)
+    expect(tiles.indexOf('setPlanFeatureId(featureId); return;')).toBeLessThan(tiles.indexOf('navigate(card.path);'));
+  });
+
+  it('순차 개방 중인 기능은 카드를 숨기지 않고 같은 안내로 보낸다(★2026-09-20)', () => {
+    const start = HUB.indexOf('{SUB_MODULE_CARDS');
+    const tiles = HUB.slice(start, start + 4000);
+    expect(tiles).toMatch(/if \(!isCardOpen\(card, featureFlags\) && featureId\) \{ setPlanFeatureId\(featureId\); return; \}/);
+    // ⛔ 카드 목록에서 걸러내면 안 된다 — 없는 메뉴는 물어볼 수도 없다.
+    expect(tiles).not.toMatch(/\.filter\(\(card\) => isCardOpen\(/);
   });
 
   it('[생성]은 잠겨 있으면 제안 요청을 보내지 않는다', () => {

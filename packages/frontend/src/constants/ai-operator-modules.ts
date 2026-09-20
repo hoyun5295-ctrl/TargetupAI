@@ -31,15 +31,20 @@ export interface SubModuleCard {
   /** ★ P4: 신규 기능 NEW 뱃지(4~6주 유효 — 지나면 제거). */
   badge?: string;
   /**
-   * ★ 2026-09-20: 서버가 준 개방 플래그로 거르는 축(`GET /api/ai/operator/access` 의 `features`).
-   * 값이 있으면 그 플래그가 true 인 회사에만 카드가 보인다. **화면은 ENV 를 다시 계산하지 않는다.**
-   * 소비처 2곳(허브 그리드 · 워크스루 매트릭스)이 같은 함수로 거른다.
+   * ★ 2026-09-20: 서버가 준 개방 플래그 축(`GET /api/ai/operator/access` 의 `features`).
+   * **카드는 모든 회사에 보인다.** 이 값은 "눌렀을 때 들어가는가"만 가른다 —
+   * 아직 안 열린 회사는 이동 대신 그 기능의 안내 창을 받는다(요금제 잠김과 같은 길).
+   * ⛔ 숨기지 않는 이유 = 없는 메뉴는 물어볼 수도 없다. 순차 개방 중인 기능은 보이되 설명돼야 한다(Harold 확정).
    */
   flag?: 'sns';
 }
 
-/** 카드가 이 회사에 보이는가 — 필터 소비처 2곳이 같은 판정을 쓰도록 여기 한 곳이 소유한다. */
-export function isCardVisible(card: SubModuleCard, features: Record<string, boolean> | null | undefined): boolean {
+/**
+ * 이 카드가 이 회사에 **열려 있는가**(= 누르면 화면으로 들어가는가).
+ * 소비처가 같은 판정을 쓰도록 여기 한 곳이 소유한다. 플래그가 없는 카드는 언제나 열려 있다.
+ * 조회 실패·필드 부재 = 닫힘으로 본다(모르면 열지 않는다).
+ */
+export function isCardOpen(card: SubModuleCard, features: Record<string, boolean> | null | undefined): boolean {
   if (!card.flag) return true;
   return !!features?.[card.flag];
 }

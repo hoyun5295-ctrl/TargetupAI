@@ -301,8 +301,9 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 - 요금제 = `FeatureKey`에 `'sns_publish'` 추가 · `canUseFeature` case = FREE(미가입)만 차단 · 유료 전 개방(D90 · 새 플랜 컬럼 0). `routes/sns.ts` 전 라우트 · `PlanGate featureId="sns"` · `plan-feature-intros.ts` 항목 1건(**비용 칸 비움** · 안내 1줄 · 자사몰 항목 형태 · 계약 테스트 규칙 1·2·7).
 - ENV = `SNS_COMPANY_IDS`(`aiAutoBuildEnabled` 미러). 서버가 `overview.enabled`와 허브 접근 응답(`GET /api/ai/operator/access`에 `features.sns` 추가)에 실어 준다. **순서 = 요금제 먼저 → ENV.** ENV 미개방 유료 회사 = `준비 중` 화면 1장(403 빈 화면 0). 플래그 endpoint가 타일보다 먼저 배포.
 - 허브 타일 = **★0920 배포 완료.** 명칭 `SNS 채널`(Harold 확정 · 회의 수렴안 `SNS 게시`에서 변경 — "기능을 계속 붙여 나갈 그릇"이라는 이유) · **3행 3열**(2행에서 변경: 만들고[AI 자동제작] 다듬어서[이미지 스튜디오] 내보내는[SNS] 동선이 한 줄로 이어진다) · 아이콘 `Share2` · 그라데이션 `from-sky-400 to-violet-500`.
-  - 자리를 만든 방법 = **AI 메모리를 4행 3열로 옮기고 AI 자율 예측 타일을 내렸다.** ⛔ 두 기능을 **합치지 않았다** — `/predictive` 라우트·화면·데이터·안내 항목은 그대로고 진열장에서만 뺐다(2026-08-12 세그먼트와 같은 비파괴 방식 · 되돌리기 = 배열에 한 줄 복원).
-  - 카드 정의 `flag?: 'sns'` + 판정 함수 `isCardVisible(card, features)` → **필터 대상 2곳**(허브 그리드 · 워크스루)이 같은 함수를 쓴다. 플래그 값은 `GET /api/ai/operator/access` 의 `features.sns`이며 **화면은 ENV 를 다시 계산하지 않는다.** 조회 실패 = 빈 객체 = 카드 미노출(모르면 열지 않는다).
+  - 자리를 만든 방법 = **AI 메모리를 4행 3열로 옮기고 AI 자율 예측 타일을 내렸다.** ⛔ **버린 것이 아니라 합쳤다** — `AiMemoryPage` 헤더에 `자율 예측` 서브메뉴 버튼을 내어 거기서 `/predictive` 로 들어간다(2026-08-12 세그먼트와 같은 비파괴 방식). **타일만 내리고 입구를 안 내면 주소를 아는 사람만 쓰는 죽은 기능이 된다** — 계약 테스트가 그 입구의 실존을 본다.
+  - 카드 정의 `flag?: 'sns'` + 판정 함수 `isCardOpen(card, features)`. ⛔ **카드를 숨기지 않는다**(Harold 확정 — "없는 메뉴는 물어볼 수도 없다"). 플래그는 **"눌렀을 때 들어가는가"만** 가르고, 아직인 회사는 요금제 잠김과 **같은 길**로 그 기능의 안내 창을 받는다. 워크스루는 "이런 메뉴가 있습니다" 안내라 아예 거르지 않는다. 플래그 값은 `GET /api/ai/operator/access` 의 `features.sns`이며 **화면은 ENV 를 다시 계산하지 않는다.** 조회 실패 = 빈 객체 = 닫힘(모르면 열지 않는다).
+  - ⛔ **개방 축은 회사 단위다.** ENV 에 회사 id 를 넣으므로 그 회사의 **전 사용자**가 함께 열린다. 특정 계정만 여는 축은 없다.
   - **등재 대상 1곳** = `plan-feature-intros.ts`(`id: 'sns'` · path `/sns` · 비용 칸 비움) · App.tsx 입구 `<PlanGate featureId="sns">`(계약 테스트 7).
   - NEW 배지 = **안 붙인다**(Harold 확정). 1차-A 는 ENV 로 한 회사만 열려 NEW 가 닿을 고객이 0명이고, 4~6주 기한을 배포일부터 세면 2차 개방 전에 만료된다. 2차 고객 개방 때 붙인다. 같은 배포에서 **기한 넘긴 NEW 2장**(마케팅 플래너 08-12 · 이미지 스튜디오 07-19)을 제거했다.
 - 프론트 계약 테스트 = 프론트에 테스트 파일이 0이므로 **백엔드 소스 스캔 테스트**(`plan-feature-modal-contract.test.ts` 방식)에 항목을 더한다: 타일 필터 2곳 · 안내 항목 · `PlanGate` · 금지어 · 배지 사전 완전성 · `stage` 조건문 0건 · 상태 목록 · specs = CT 상수.

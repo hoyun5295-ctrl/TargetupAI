@@ -189,9 +189,18 @@ describe('허브 타일 계약 (§3-11)', () => {
     expect(MODULES).toMatch(/label: 'SNS 채널'[^}]*path: '\/sns', flag: 'sns'/);
   });
 
-  it('필터 대상 2곳이 같은 판정 함수를 쓴다(허브 그리드 · 워크스루)', () => {
-    expect(HUB).toMatch(/isCardVisible\(card, featureFlags\)/);
-    expect(WALK).toMatch(/isCardVisible\(card, featureFlags\)/);
+  it('카드를 숨기지 않는다 — 아직인 회사는 같은 안내 창으로 보낸다(Harold 확정)', () => {
+    expect(HUB).toMatch(/if \(!isCardOpen\(card, featureFlags\) && featureId\) \{ setPlanFeatureId\(featureId\); return; \}/);
+    expect(HUB).not.toMatch(/\.filter\(\(card\) => isCardOpen\(/);
+    // 워크스루는 "이런 메뉴가 있습니다" 안내라 거르지 않는다. 거르면 순차 개방 기능이 안내에서 사라진다.
+    expect(WALK).not.toMatch(/isCardOpen/);
+  });
+
+  it('AI 자율 예측은 버린 것이 아니라 AI 메모리 안에서 들어간다 — 입구 실존', () => {
+    const MEMORY = readFileSync(resolve(FRONT, 'pages/AiMemoryPage.tsx'), 'utf8');
+    expect(MEMORY, '타일만 내리고 입구를 안 내면 주소를 아는 사람만 쓰는 죽은 기능이 된다')
+      .toMatch(/navigate\('\/predictive'\)/);
+    expect(MODULES).not.toMatch(/label: 'AI 자율 예측'/);
   });
 
   it('안내 원장에 SNS 항목이 있고 경로가 카드와 같다', () => {

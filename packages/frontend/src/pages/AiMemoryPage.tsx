@@ -584,6 +584,17 @@ export default function AiMemoryPage() {
             <p className={OUI_SUBTITLE}>회사별 누적 학습. 시간이 지날수록 AI 추천 정확도가 향상됩니다</p>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {/* ★ 2026-09-20 (Harold 확정 — SNS 채널 신설): AI 자율 예측 = AI Operator 타일에서 제거 → 여기 서브메뉴로.
+                라우트 /predictive는 유지(비파괴). ⛔ **버린 것이 아니라 합친 것이다** — 타일만 내리고 입구를 안 내면
+                주소를 아는 사람만 쓰는 죽은 기능이 된다. 누적 학습(이 화면)과 예측은 같은 줄기라 여기가 제자리다. */}
+            <button
+              onClick={() => navigate('/predictive')}
+              className="text-xs text-violet-200 border border-violet-400/30 hover:bg-violet-500/20 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
+              aria-label="AI 자율 예측"
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">자율 예측</span>
+            </button>
             {/* ★ 2026-08-12 (Harold 확정 — 플래너 메뉴 개편): 세그먼트 = AI Operator 타일에서 제거 → 여기 서브메뉴로.
                 라우트 /segments는 유지(비파괴) — AI 사용량 이동(0709)과 같은 선례. */}
             <button

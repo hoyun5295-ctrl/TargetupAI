@@ -43,7 +43,7 @@ import SmsCharsetNotice from '../components/SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
-import { SUB_MODULE_CARDS, isCardVisible } from '../constants/ai-operator-modules';
+import { SUB_MODULE_CARDS, isCardOpen } from '../constants/ai-operator-modules';
 import PlanFeatureModal from '../components/PlanFeatureModal';
 import { findPlanFeatureIntro, planFeatureIdForPath, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
 import { fetchAiOperatorAccess, fetchAiOperatorFeatures } from '../utils/ai-operator-access';
@@ -1873,7 +1873,6 @@ export default function AiOperatorPage() {
                 <div className={`grid grid-cols-1 sm:grid-cols-2 ${planLocked ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3`}>
                   {SUB_MODULE_CARDS
                     .filter((card) => !card.adminOnly || (user as any)?.userType === 'company_admin')
-                    .filter((card) => isCardVisible(card, featureFlags))
                     .map((card) => {
                       const Icon = card.icon;
                       return (
@@ -1883,6 +1882,9 @@ export default function AiOperatorPage() {
                             // ★ 2026-09-15 못 쓰는 회사 = 이동 대신 그 기능의 안내(요금제 공통 안내 창)
                             const featureId = planFeatureIdForPath(card.path);
                             if (planLocked && featureId) { setPlanFeatureId(featureId); return; }
+                            // ★ 2026-09-20 순차 개방 중인 기능(카드 flag) = 카드는 보이되 아직인 회사는 같은 안내 창으로.
+                            //   숨기지 않는다 — 없는 메뉴는 물어볼 수도 없다(Harold 확정).
+                            if (!isCardOpen(card, featureFlags) && featureId) { setPlanFeatureId(featureId); return; }
                             navigate(card.path);
                           }}
                           // ★ D209+ (Harold 명시 2026-05-22): 호버 효과 강화 — shadow + glow + scale + 색감 강화.

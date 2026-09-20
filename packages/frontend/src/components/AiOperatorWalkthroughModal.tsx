@@ -9,8 +9,9 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, BarChart3, Edit2, LayoutGrid, MessageSquareText, Play, Sparkles, X } from 'lucide-react';
 // ★ D210+ (Harold 명시 2026-05-23): STEP 6 메뉴 매트릭스 = AiOperatorPage와 단일 source 공통 사용.
-import { SUB_MODULE_CARDS, isCardVisible } from '../constants/ai-operator-modules';
-import { fetchAiOperatorFeatures } from '../utils/ai-operator-access';
+// ★ 2026-09-20: 여기는 "이런 메뉴가 있습니다" 안내라 **개방 플래그로 거르지 않는다.**
+//   순차 개방 중인 기능도 보여주고, 실제 진입 가부는 허브 카드 클릭이 판정한다(같은 안내 창으로 떨어진다).
+import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
 import { PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
 
 interface WalkthroughStep {
@@ -83,13 +84,6 @@ interface AiOperatorWalkthroughModalProps {
 export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOperatorWalkthroughModalProps) {
   const [show, setShow] = useState(false);
   const [stepIdx, setStepIdx] = useState(0);
-  // ★ 2026-09-20 허브 그리드와 **같은 필터**를 쓴다 — 여기만 빠지면 못 쓰는 기능이 안내에만 남는다(설계서 §3-11 필터 대상 2곳).
-  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    let alive = true;
-    void fetchAiOperatorFeatures().then((f) => { if (alive) setFeatureFlags(f); });
-    return () => { alive = false; };
-  }, []);
 
   useEffect(() => {
     if (forceShow) {
@@ -166,7 +160,7 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
                 <p className="text-sm text-white/60 leading-relaxed mb-3 whitespace-pre-line">{step.description}</p>
                 {/* ★ 2026-07-18 P1 — 3열 고정(lg 4열 폐기): 카드 순서가 행 정체성(자동화/채널/제작/분석) 기준이라 4열이면 행이 섞인다 */}
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3 text-left">
-                  {SUB_MODULE_CARDS.filter((card) => isCardVisible(card, featureFlags)).map((card) => {
+                  {SUB_MODULE_CARDS.map((card) => {
                     const CardIcon = card.icon;
                     return (
                       <div
