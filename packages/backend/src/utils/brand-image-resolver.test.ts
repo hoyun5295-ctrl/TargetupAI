@@ -31,16 +31,25 @@ vi.mock('../config/database', () => ({ query: vi.fn() }));
 // (대역이 실물보다 관대하면 래핑 변종을 못 잡는 코드를 통과시킨다)
 vi.mock('./alimtalk-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./alimtalk-api')>();
-  return { ...actual, uploadBrandDefaultImage: vi.fn(), uploadBrandWideImage: vi.fn() };
+  return {
+    ...actual, uploadBrandDefaultImage: vi.fn(), uploadBrandWideImage: vi.fn(),
+    // ★2026-09-20 5종 개통으로 늘어난 창구 4개
+    uploadBrandWideListFirstImage: vi.fn(), uploadBrandWideListImages: vi.fn(),
+    uploadBrandCarouselFeedImages: vi.fn(), uploadBrandCarouselCommerceImages: vi.fn(),
+  };
 });
 
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
-import { resolveBrandSendImage, resolveBrandSendAttachmentJson, BrandImageResolveError } from './brand-image-resolver';
+import { resolveBrandSendImage, resolveBrandSendAttachmentJson, resolveBrandSendRichImages, BrandImageResolveError } from './brand-image-resolver';
 
 const queryMock = vi.mocked(query);
 const uploadDefault = vi.mocked(imc.uploadBrandDefaultImage);
 const uploadWide = vi.mocked(imc.uploadBrandWideImage);
+const uploadListFirst = vi.mocked(imc.uploadBrandWideListFirstImage);
+const uploadList = vi.mocked(imc.uploadBrandWideListImages);
+const uploadFeed = vi.mocked(imc.uploadBrandCarouselFeedImages);
+const uploadCommerce = vi.mocked(imc.uploadBrandCarouselCommerceImages);
 
 const COMPANY = '11111111-1111-1111-1111-111111111111';
 const OTHER = '22222222-2222-2222-2222-222222222222';
@@ -148,10 +157,18 @@ describe('손대지 않는 것', () => {
     expect(uploadDefault).not.toHaveBeenCalled();
   });
 
+  // ★2026-09-20 의도 변경 — 그전에는 COMMERCE를 「창구를 모르는 유형」의 예로 썼다. 5종 개통으로 커머스의
+  //   상품 이미지에 창구(default · 템플릿 등록 화면과 같은 창구)를 배정했으므로, 창구가 없는 유형으로 바꾼다.
   it('창구를 모르는 유형은 통과시킨다 — 창구를 추측하면 규격이 어긋난다', async () => {
-    const out = await resolveBrandSendImage({ companyId: COMPANY, bubbleType: 'COMMERCE', image: { img_url: OWN_REL } });
+    const out = await resolveBrandSendImage({ companyId: COMPANY, bubbleType: 'TEXT', image: { img_url: OWN_REL } });
     expect(out?.img_url).toBe(OWN_REL);
     expect(uploadDefault).not.toHaveBeenCalled();
+  });
+
+  it('커머스의 상품 이미지는 기본 창구로 올린다(★2026-09-20 5종 개통)', async () => {
+    const out = await resolveBrandSendImage({ companyId: COMPANY, bubbleType: 'COMMERCE', image: { img_url: OWN_REL } });
+    expect(out?.img_url).toBe(KAKAO);
+    expect(uploadDefault).toHaveBeenCalledTimes(1);
   });
 
   it('이미지가 없으면 아무 일도 하지 않는다', async () => {
@@ -386,5 +403,100 @@ describe('허용 목록은 업로드 유형까지 본다 (Codex 2R high1)', () =
     // WIDE로는 거절된다
     await expect(resolveBrandSendImage({ companyId: COMPANY, bubbleType: 'WIDE', image: { img_url: KAKAO } }))
       .rejects.toBeInstanceOf(BrandImageResolveError);
+  });
+});
+
+/**
+ * ★2026-09-20 자유형 5종의 나머지 이미지 자리 — 아이템 · 동영상 썸네일 · 캐러셀 카드·인트로.
+ * 자리마다 창구가 다르다(템플릿 등록 화면과 같은 배정). 다중 창구는 응답이 목록으로 온다.
+ */
+describe('5종의 이미지 자리 확정 (resolveBrandSendRichImages)', () => {
+  const K = (n: string) => `https://mud-kage.kakao.com/dn/abc/${n}.jpg`;
+  const single = (n: string) => ({ code: '0000', message: 'OK', data: { imageUrl: K(n), imageName: `${n}.jpg` } }) as any;
+  const multi = (n: string) => ({ code: '0000', message: 'OK', data: { list: [{ imageUrl: K(n), imageName: `${n}.jpg` }] } }) as any;
+
+  beforeEach(() => {
+    uploadListFirst.mockResolvedValue(single('first'));
+    uploadList.mockResolvedValue(multi('rest'));
+    uploadFeed.mockResolvedValue(multi('feed'));
+    uploadCommerce.mockResolvedValue(multi('commerce'));
+    uploadDefault.mockResolvedValue(single('default'));
+  });
+
+  it('와이드 리스트 — 1번은 first 창구, 나머지는 목록 창구로 한 장씩 올린다', async () => {
+    const out = await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'WIDE_ITEM_LIST',
+      itemList: [
+        { img_url: OWN_REL, url_mobile: 'https://a' },
+        { title: '둘', img_url: OWN_ABS, url_mobile: 'https://b' },
+        { title: '셋', img_url: OWN_REL, url_mobile: 'https://c' },
+      ],
+    });
+    expect(out.itemList?.map((it) => it.img_url)).toEqual([K('first'), K('rest'), K('rest')]);
+    expect(uploadListFirst).toHaveBeenCalledTimes(1);
+    expect(uploadList).toHaveBeenCalledTimes(2);
+    // 한 장씩 올린다 — 자리마다 제목·링크가 달라 묶어 올리면 순서 대응을 보장할 수 없다
+    expect(uploadList.mock.calls[0][0]).toHaveLength(1);
+    // 입력을 바꾸지 않는다 · 이미지 밖의 값은 그대로다
+    expect(out.itemList?.[1]).toMatchObject({ title: '둘', url_mobile: 'https://b' });
+  });
+
+  it('프리미엄 동영상 썸네일은 기본 창구 · 썸네일이 없으면 아무것도 올리지 않는다', async () => {
+    const out = await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'PREMIUM_VIDEO',
+      video: { video_url: 'https://tv.kakao.com/v/1', thumbnail_url: OWN_REL },
+    });
+    expect(out.video).toEqual({ video_url: 'https://tv.kakao.com/v/1', thumbnail_url: K('default') });
+    vi.clearAllMocks();
+    noCache();
+    const none = await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'PREMIUM_VIDEO', video: { video_url: 'https://tv.kakao.com/v/1' },
+    });
+    expect(none.video).toEqual({ video_url: 'https://tv.kakao.com/v/1' });
+    expect(uploadDefault).not.toHaveBeenCalled();
+  });
+
+  it('캐러셀 — 카드와 인트로 이미지를 그 유형의 창구로 올린다(피드 ≠ 커머스)', async () => {
+    const feed = await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_FEED',
+      carouselCards: [{ header: 'a', image: { img_url: OWN_REL, img_link: 'https://x' } }, { header: 'b', image: { img_url: OWN_REL } }],
+    });
+    expect(feed.carouselCards?.map((c) => c.image?.img_url)).toEqual([K('feed'), K('feed')]);
+    expect(feed.carouselCards?.[0].image).toMatchObject({ img_link: 'https://x' });
+    expect(uploadFeed).toHaveBeenCalledTimes(2);
+    expect(uploadCommerce).not.toHaveBeenCalled();
+
+    const comm = await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_COMMERCE',
+      carouselIntro: { header: 'h', content: 'c', image_url: OWN_REL },
+      carouselCards: [{ image: { img_url: OWN_REL } }],
+    });
+    expect(comm.carouselIntro?.image_url).toBe(K('commerce'));
+    expect(comm.carouselCards?.[0].image?.img_url).toBe(K('commerce'));
+    expect(uploadCommerce).toHaveBeenCalledTimes(2);
+  });
+
+  it('유형에 맞지 않는 자리는 손대지 않는다 — 텍스트 유형에 아이템이 딸려 와도 올리지 않는다', async () => {
+    const out = await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'TEXT', itemList: [{ img_url: OWN_REL, url_mobile: 'https://a' }],
+    });
+    expect(out.itemList?.[0].img_url).toBe(OWN_REL);
+    expect(uploadListFirst).not.toHaveBeenCalled();
+  });
+
+  it('우리가 올린 적 없는 외부 URL은 거절한다(허용 목록) — 새 자리도 같은 규칙이다', async () => {
+    await expect(resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_FEED',
+      carouselCards: [{ image: { img_url: 'https://evil.example.com/a.jpg' } }],
+    })).rejects.toBeInstanceOf(BrandImageResolveError);
+    expect(uploadFeed).not.toHaveBeenCalled();
+  });
+
+  it('카카오가 업로드를 거절하면 그 사유로 멈춘다 — 조용히 우리 URL을 남기지 않는다', async () => {
+    uploadList.mockResolvedValue({ code: '9999', message: '규격 불일치' } as any);
+    await expect(resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'WIDE_ITEM_LIST',
+      itemList: [{ img_url: OWN_REL, url_mobile: 'https://a' }, { title: '둘', img_url: OWN_REL, url_mobile: 'https://b' }],
+    })).rejects.toBeInstanceOf(BrandImageResolveError);
   });
 });

@@ -28,7 +28,7 @@ import fs from 'fs';
 import path from 'path';
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
-import { extractImageFromAnyShape } from './alimtalk-api';
+import { extractImageFromAnyShape, extractImageListFromAnyShape } from './alimtalk-api';
 
 /** 인앱 이미지 실물 저장 경로 — `utils/assets.ts`·`routes/cdp.ts`와 동일 정의(단일 env 소스) */
 const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
@@ -53,12 +53,38 @@ function trustedImageHosts(): Set<string> {
  * 유형 → IMC 업로드 창구. 카카오가 유형마다 다른 규격(비율·크기)을 요구해서 창구가 갈린다.
  * ⛔ 여기 없는 유형은 **치환하지 않고 그대로 통과**한다 — 창구를 추측해서 고르면 규격이 어긋난
  *    이미지를 올리게 된다. 늘릴 때는 매뉴얼에서 그 유형의 창구를 확인한 뒤 한 줄씩 추가한다.
- *    (현재 편집기가 낼 수 있는 이미지 유형 = IMAGE·WIDE 둘뿐이다)
+ *    (★2026-09-20 편집기가 5종을 더 낸다 — 아래 ROUTES·resolveBrandSendRichImages가 그 자리들을 맡는다)
  */
-const UPLOAD_BY_BUBBLE: Record<string, { uploadType: string; upload: (buf: Buffer, name: string) => Promise<any> }> = {
+type UploadRoute = { uploadType: string; upload: (buf: Buffer, name: string) => Promise<any> };
+
+/**
+ * IMC 업로드 창구 6개 — ★2026-09-20 자유형 5종 개통으로 4개를 더했다.
+ * 창구 배정의 근거 = 템플릿 등록 화면(`BrandTemplateForm` `IMG_EP`·`imageEndpointFor`)이 같은 자리에 쓰는 창구다
+ * (그 경로는 운영에서 등록이 통과하고 있다). 발송 쪽에서 카카오가 받는지는 **유형별 실측으로만** 확정된다.
+ * 다중 창구(wide-list·carousel-*)도 한 장씩 올린다 — 자리마다 제목·링크가 달라 한 장 단위가 규격에 맞다.
+ * `upload_type`은 varchar(30)이다(SCHEMA.md kakao_image_uploads) — 이름을 늘릴 때 길이를 본다.
+ */
+const ROUTES = {
   // 참조를 캡처하지 않고 호출 시점에 찾는다(모듈 로드 순서·대역 교체에 영향받지 않게).
-  IMAGE: { uploadType: 'brand_send_default', upload: (b, n) => imc.uploadBrandDefaultImage(b, n) },
-  WIDE: { uploadType: 'brand_send_wide', upload: (b, n) => imc.uploadBrandWideImage(b, n) },
+  default: { uploadType: 'brand_send_default', upload: (b, n) => imc.uploadBrandDefaultImage(b, n) },
+  wide: { uploadType: 'brand_send_wide', upload: (b, n) => imc.uploadBrandWideImage(b, n) },
+  wideListFirst: { uploadType: 'brand_send_wide_list_first', upload: (b, n) => imc.uploadBrandWideListFirstImage(b, n) },
+  wideList: { uploadType: 'brand_send_wide_list', upload: (b, n) => imc.uploadBrandWideListImages([{ buffer: b, name: n }]) },
+  carouselFeed: { uploadType: 'brand_send_carousel_feed', upload: (b, n) => imc.uploadBrandCarouselFeedImages([{ buffer: b, name: n }]) },
+  carouselCommerce: { uploadType: 'brand_send_carousel_commerce', upload: (b, n) => imc.uploadBrandCarouselCommerceImages([{ buffer: b, name: n }]) },
+} satisfies Record<string, UploadRoute>;
+
+/** 첨부 `image` 자리의 창구 — 유형으로 갈린다. 여기 없는 유형의 `image`는 손대지 않는다 */
+const UPLOAD_BY_BUBBLE: Record<string, UploadRoute> = {
+  IMAGE: ROUTES.default,
+  WIDE: ROUTES.wide,
+  COMMERCE: ROUTES.default,
+};
+
+/** 캐러셀 카드·인트로 이미지의 창구 */
+const CAROUSEL_ROUTE_BY_BUBBLE: Record<string, UploadRoute> = {
+  CAROUSEL_FEED: ROUTES.carouselFeed,
+  CAROUSEL_COMMERCE: ROUTES.carouselCommerce,
 };
 
 export class BrandImageResolveError extends Error {
@@ -174,11 +200,12 @@ async function rememberUpload(input: {
 async function resolveOne(input: {
   companyId: string;
   userId?: string | null;
-  bubbleType: string;
+  /** 이 자리의 업로드 창구. 없으면(창구를 모르는 자리) 손대지 않고 넘긴다 */
+  route: UploadRoute | undefined;
   imgUrl: string;
 }): Promise<string> {
   const ref = toOwnImageRef(input.imgUrl);
-  const route = UPLOAD_BY_BUBBLE[String(input.bubbleType || '').trim().toUpperCase()];
+  const route = input.route;
 
   if (!ref) {
     // 우리 서빙 URL이 아니다 — **그 유형으로** 우리가 올린 것일 때만 통과시킨다.
@@ -225,7 +252,9 @@ async function resolveOne(input: {
       `카카오가 이미지를 받지 않았습니다${res?.message ? ` (${String(res.message).slice(0, 80)})` : ''}. 다른 이미지를 사용해주세요`,
     );
   }
-  const { imageUrl, imageName } = extractImageFromAnyShape(res);
+  // 단일 창구는 객체, 다중 창구는 목록으로 온다 — 한 장씩 올리므로 목록이면 첫 항목이다
+  const single = extractImageFromAnyShape(res);
+  const { imageUrl, imageName } = single.imageUrl ? single : (extractImageListFromAnyShape(res)[0] || {});
   if (!imageUrl) {
     console.error('[brand-image-resolver] 업로드 응답에 imageUrl 없음:', JSON.stringify(res).slice(0, 400));
     throw new BrandImageResolveError('이미지 등록 결과를 확인하지 못했습니다. 잠시 후 다시 시도해주세요');
@@ -258,10 +287,75 @@ export async function resolveBrandSendImage(input: {
   const resolved = await resolveOne({
     companyId: input.companyId,
     userId: input.userId,
-    bubbleType: input.bubbleType,
+    route: UPLOAD_BY_BUBBLE[String(input.bubbleType || '').trim().toUpperCase()],
     imgUrl: String(img.img_url).trim(),
   });
   return resolved === img.img_url ? img : { ...img, img_url: resolved };
+}
+
+/**
+ * ★2026-09-20 자유형 5종의 **나머지 이미지 자리** 확정 — 아이템 목록 · 동영상 썸네일 · 캐러셀 카드·인트로.
+ * 첨부 `image` 자리는 위 `resolveBrandSendImage`가 그대로 맡는다(호출부가 둘을 함께 부른다).
+ * 입력을 바꾸지 않고 새 객체를 돌려준다. 값이 없는 자리는 그대로 통과한다.
+ *
+ * ⛔ 수신자 루프 **밖** · 차감 **앞**에서 한 번만 부른다(자리 수만큼 업로드가 나간다 — 캐러셀 6장이면 6번).
+ * ⛔ AI 생성 이미지 판정은 이 함수 **앞**에서 끝내야 한다(치환 뒤에는 우리 URL이 아니라 판정이 안 된다).
+ */
+export async function resolveBrandSendRichImages<
+  TItem extends { img_url: string },
+  TVideo extends { thumbnail_url?: string },
+  TCard extends { image?: { img_url: string } },
+  THead extends { image_url: string },
+>(input: {
+  companyId: string;
+  userId?: string | null;
+  bubbleType: string;
+  itemList?: TItem[];
+  video?: TVideo;
+  carouselCards?: TCard[];
+  carouselIntro?: THead;
+}): Promise<{ itemList?: TItem[]; video?: TVideo; carouselCards?: TCard[]; carouselIntro?: THead }> {
+  const base = { companyId: input.companyId, userId: input.userId };
+  const bubble = String(input.bubbleType || '').trim().toUpperCase();
+  const one = (route: UploadRoute | undefined, url: string) => resolveOne({ ...base, route, imgUrl: String(url).trim() });
+
+  let itemList = input.itemList;
+  if (bubble === 'WIDE_ITEM_LIST' && Array.isArray(itemList)) {
+    const next: TItem[] = [];
+    for (let i = 0; i < itemList.length; i++) {
+      const it = itemList[i];
+      const url = String(it?.img_url || '').trim();
+      // 1번 아이템만 큰 이미지 규격이라 창구가 다르다(wide-list/first)
+      next.push(url ? { ...it, img_url: await one(i === 0 ? ROUTES.wideListFirst : ROUTES.wideList, url) } : it);
+    }
+    itemList = next;
+  }
+
+  let video = input.video;
+  const thumb = String(video?.thumbnail_url || '').trim();
+  if (bubble === 'PREMIUM_VIDEO' && video && thumb) {
+    video = { ...video, thumbnail_url: await one(ROUTES.default, thumb) };
+  }
+
+  const carRoute = CAROUSEL_ROUTE_BY_BUBBLE[bubble];
+  let carouselCards = input.carouselCards;
+  let carouselIntro = input.carouselIntro;
+  if (carRoute) {
+    if (Array.isArray(carouselCards)) {
+      const next: TCard[] = [];
+      for (const c of carouselCards) {
+        const url = String(c?.image?.img_url || '').trim();
+        next.push(url && c.image ? { ...c, image: { ...c.image, img_url: await one(carRoute, url) } } : c);
+      }
+      carouselCards = next;
+    }
+    const introUrl = String(carouselIntro?.image_url || '').trim();
+    if (carouselIntro && introUrl) {
+      carouselIntro = { ...carouselIntro, image_url: await one(carRoute, introUrl) };
+    }
+  }
+
+  return { itemList, video, carouselCards, carouselIntro };
 }
 
 /**
@@ -296,7 +390,7 @@ export async function resolveBrandSendAttachmentJson(input: {
   const resolved = await resolveOne({
     companyId: input.companyId,
     userId: input.userId,
-    bubbleType: input.bubbleType,
+    route: UPLOAD_BY_BUBBLE[String(input.bubbleType || '').trim().toUpperCase()],
     imgUrl: imgUrl.trim(),
   });
   if (resolved === imgUrl) return raw;

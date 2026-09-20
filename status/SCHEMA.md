@@ -806,7 +806,7 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | id | uuid PK | |
 | company_id | uuid FK | |
 | user_id | uuid FK | |
-| upload_type | varchar(30) NOT NULL | alimtalk_template/alimtalk_highlight/brand_default/brand_wide/brand_wide_list_first/brand_wide_list/brand_carousel_feed/brand_carousel_commerce/marketing_agree |
+| upload_type | varchar(30) NOT NULL | alimtalk_template/alimtalk_highlight/brand_default/brand_wide/brand_wide_list_first/brand_wide_list/brand_carousel_feed/brand_carousel_commerce/marketing_agree · **발송 직전 업로드분**(`brand-image-resolver`) = brand_send_default/brand_send_wide(0902) + ★2026-09-20 brand_send_wide_list_first/brand_send_wide_list/brand_send_carousel_feed/brand_send_carousel_commerce(최장 28자) · **CHECK 제약 없음**(2026-09-20 `pg_constraint` 실측 0행) |
 | image_name | varchar(100) NOT NULL | IMC 반환 파일명 |
 | image_url | varchar(500) NOT NULL | IMC 반환 URL |
 | original_filename | varchar(200) | |
@@ -1665,6 +1665,11 @@ kind별 payload 키:
 > **★ DDL 접속(2026-08-22 재확인)** — `docker exec -it targetup-mysql mysql -uroot -p smsdb`. `smsuser`로는 `ERROR 1142 ALTER command denied`가 난다(조회는 smsuser로 된다). 이 표의 DDL을 psql에 넣으면 `syntax error at or near "ALGORITHM"` — **MySQL과 PG를 헷갈리지 않는다**.
 > **★ 2026-08-22 실측(Harold 실행, 고객 360 설계 §5-R)** — `SMSQ_SEND_%` 총 **103개**. 월별 log `SMSQ_SEND_N_YYYYMM`은 **우리 코드가 자동 생성**: `utils/sms-queue.ts ensureMonthlyLogTables()`가 프로세스 시작 시 당월·다음달을 `CREATE TABLE IF NOT EXISTS <log> LIKE <live>`로 만든다(대상 = env `SMS_TABLES`의 1~11. 13~15는 log 없음). **`LIKE`라 live에 건 인덱스는 다음 달 log부터 자동 상속**, 이미 있는 log에는 별도 DDL. 실데이터 2026-03~08, 최대 `SMSQ_SEND_8_202606` 846,873행(4~9번 라인 5~8월 각 30만~85만, 전체 약 1,400만). `dest_no`는 하이픈 없는 숫자만(0/839,349) · **`dest_no` 인덱스 없음**(`WHERE dest_no=?` EXPLAIN = type ALL + filesort, COUNT 1회 20초). 고객별 발송 조회는 `(dest_no, sendreq_time)` 인덱스 전제.
 > **★ 2026-08-22 `idx_dest_sendreq (dest_no, sendreq_time)` 103개 전 테이블 적용 완료**(Harold 실행 · root). 재측정 = `type=ref` · `rows=1` · `Backward index scan; Using index`(covering + filesort 제거). 최장 소요 37.7초(`SMSQ_SEND_9_202606`), `LOCK=NONE`이라 무중단. 다음 달 log는 `ensureMonthlyLogTables()`의 `LIKE`로 자동 상속. 되돌리기 = `DROP INDEX idx_dest_sendreq`. 경위 = 고객 360 설계서 §6-D-R.
+> **★ 2026-09-20 `k_etc_json` 폭 실측 + 비토 라인 확장(Harold 실행 · root)** — `information_schema` 실측 = `SMSQ_SEND_1~15` + 월별 log 전부 `varchar(1024)`(뷰 `SMSQ_SEND`만 `text`로 표시).
+> 브랜드메시지 캐러셀 2종은 최소 구성(카드 2장)부터 1,190자대, 최대 3,500자대라 1024에 실리지 않는다(와이드 리스트는 아이템 4개에서 초과 · 산식 = 조립기 키 형태 + URL 80/60자 가정).
+> **`SMSQ_SEND_13·14·15`(비토 게이트웨이 라인)만 `varchar(8192)`로 확장** — `SET SESSION lock_wait_timeout=2; ALTER TABLE … MODIFY COLUMN k_etc_json varchar(8192) DEFAULT NULL, ALGORITHM=INPLACE, LOCK=NONE`. 세 테이블 모두 `0 rows affected` · 0.01~0.02초 · 경고 0(메타데이터만 변경). 리허설로 유휴 `SMSQ_SEND_12`에도 같은 문장을 먼저 실행해 12도 8192다.
+> ⛔ **1~11(QTmsg 라인)과 월별 log는 1024 그대로다** — QTmsg Agent가 행을 log로 옮기므로 live만 넓히면 옮길 때 깨진다. 1024를 넘는 값은 **13~15 적재에서만** 허용해야 한다(조립기 한도는 적재 대상 테이블 기준으로 판정 · 구현 전).
+> 새 비토 라인을 `LIKE SMSQ_SEND_13`으로 만들면 8192가 상속된다. 행 최대 크기 ≈ 41,200바이트(한도 65,535).
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
@@ -1688,7 +1693,7 @@ kind별 payload 키:
 | k_next_type | varchar(1) | N=없음 |
 | k_next_contents | text | |
 | k_button_json | varchar(1024) | |
-| k_etc_json | varchar(1024) | |
+| k_etc_json | varchar(1024) · **12~15번은 varchar(8192)** | ★2026-09-20 아래 실측 기록 |
 | k_oriseq | varchar(20) | |
 | k_resyes | varchar(1) | |
 | app_etc1 | varchar(50) | campaign_run_id 저장 |

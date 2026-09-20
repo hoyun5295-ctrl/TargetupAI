@@ -134,10 +134,31 @@ describe('buildBrandQueuePayload — 자유형: msg_contents=순수 본문 / k_e
       ...FREE_BASE, targeting: 'M', unsubscribePhone: '0801234567', unsubscribeAuth: '1234',
     }).etcJson);
     expect(etc.TARGETING).toBe('M');
-    expect(etc.UNSUBSCRIBE_PHONE_NUMBER).toBe('0801234567');
+    // ★2026-09-20 의도 변경 — 그전에는 입력 그대로('0801234567') 실렸다. 하이픈 없이 가면 발송이
+    //   실패한다는 실측(Harold)에 따라 조립기가 하이픈 형식으로 고쳐 싣는다.
+    expect(etc.UNSUBSCRIBE_PHONE_NUMBER).toBe('080-123-4567');
     expect(etc.UNSUBSCRIBE_AUTH_NUMBER).toBe('1234');
     // I 타겟팅은 번호 없이 통과
     expect(() => buildBrandQueuePayload({ ...FREE_BASE, targeting: 'I' })).not.toThrow();
+  });
+
+  it('무료수신거부 번호 — 어떤 입력 형태든 080-XXX-XXXX · 080-XXXX-XXXX로 실리고, 080 번호가 아니면 적재 전에 막는다', () => {
+    const unsubOf = (v: string) => JSON.parse(buildBrandQueuePayload({
+      ...FREE_BASE, targeting: 'I', unsubscribePhone: v,
+    }).etcJson).UNSUBSCRIBE_PHONE_NUMBER;
+    expect(unsubOf('0807198700')).toBe('080-719-8700');       // 10자리 무하이픈
+    expect(unsubOf('080-719-8700')).toBe('080-719-8700');     // 이미 하이픈
+    expect(unsubOf(' 080 719 8700 ')).toBe('080-719-8700');   // 공백 섞임
+    expect(unsubOf('08012345678')).toBe('080-1234-5678');     // 11자리
+    expect(unsubOf('080-1234-5678')).toBe('080-1234-5678');
+    // 080이 아니거나 자릿수가 틀리면 거절 — 조용히 실으면 발송 단계에서 무로그로 죽는다
+    for (const bad of ['0212345678', '080123456', '080123456789', '15881234', '080-abc']) {
+      expect(() => buildBrandQueuePayload({ ...FREE_BASE, targeting: 'I', unsubscribePhone: bad }), bad)
+        .toThrow(/080으로 시작하는 10~11자리/);
+    }
+    // 빈 값은 「번호 없음」이다 — I 타겟팅이면 통과하고 키도 실리지 않는다
+    expect(unsubOf('')).toBeUndefined();
+    expect(unsubOf('   ')).toBeUndefined();
   });
 
   it('발신프로필 키가 비면 throw — 조립 시점 fail-closed', () => {

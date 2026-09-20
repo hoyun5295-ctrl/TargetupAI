@@ -1234,6 +1234,40 @@ export function extractImageFromAnyShape(r: any): { imageUrl?: string; imageName
   return {};
 }
 
+/** 다중 이미지 업로드 응답에서 목록 추출 — ★2026-09-20 `routes/alimtalk.ts`에서 옮겨 왔다(본문 무변경) */
+export function extractImageListFromAnyShape(r: any): { imageUrl: string; imageName: string }[] {
+  if (!r) return [];
+  const cands = [
+    r?.data?.list,
+    r?.data?.data?.list,
+    r?.data?.images,
+    r?.data?.data?.images,
+    Array.isArray(r?.data) ? r.data : null,
+  ];
+  // ★ D146 (2026-05-07): list element 변종 수용 — {imageUrl,imageName} / {image:"url"} / "url"(string)
+  const fromUrl = (url: string) => {
+    const tail = url.split('/').pop() || '';
+    return { imageUrl: url, imageName: (tail.split('?')[0] || 'image').slice(0, 200) };
+  };
+  for (const c of cands) {
+    if (Array.isArray(c) && c.length > 0) {
+      const out = c
+        .map((it: any): { imageUrl: string; imageName: string } | null => {
+          if (!it) return null;
+          if (typeof it === 'string' && it.startsWith('http')) return fromUrl(it);
+          if (typeof it === 'object') {
+            if (it.imageUrl && it.imageName) return { imageUrl: it.imageUrl, imageName: it.imageName };
+            if (typeof it.image === 'string' && it.image.startsWith('http')) return fromUrl(it.image);
+          }
+          return null;
+        })
+        .filter((it): it is { imageUrl: string; imageName: string } => !!it);
+      if (out.length > 0) return out;
+    }
+  }
+  return [];
+}
+
 async function uploadSingleImage(
   endpoint: string,
   fileBuffer: Buffer,

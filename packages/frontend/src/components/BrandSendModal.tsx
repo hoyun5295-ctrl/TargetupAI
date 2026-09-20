@@ -24,6 +24,7 @@ import { Megaphone, PencilLine, Upload, Sparkles, Lock, Loader2, Trash2, Users, 
 import BrandMessageEditor from './BrandMessageEditor';
 import SendWorkspaceShell, { WorkspaceNotice, FIELD_CLASS } from './shared/SendWorkspaceShell';
 import ConfirmDialogShell, { DialogHeadline, DialogRow, DialogCaution } from './shared/ConfirmDialogShell';
+import { BRAND_SPEC } from '../constants/brand-message-spec';
 
 type RecipientMode = 'manual' | 'file' | 'ai';
 
@@ -47,6 +48,11 @@ export interface BrandSendModalProps {
    *   **가져온 목록만** 보여준다(빼기만 가능). 알림톡 인계와 같은 "리스트 그대로 가져가기" 축.
    */
   entry?: 'direct' | 'target';
+  /**
+   * ★ 2026-09-20 설정에 등록된 080 수신거부 번호 — 부모(Dashboard)가 `/api/companies/settings`에서
+   *   이미 받아 둔 값을 그대로 넘긴다(문자 직접발송과 같은 값). 편집기가 이 값으로 080 칸을 채워 잠근다.
+   */
+  optOutNumber?: string;
 }
 
 /**
@@ -67,7 +73,7 @@ const normalizePhones = (raw: string): string[] =>
 
 export default function BrandSendModal({
   show, onClose, profiles, initialRecipients, isAiTargetLocked, onLockedFeature, onSend, sending,
-  entry = 'direct',
+  entry = 'direct', optOutNumber,
 }: BrandSendModalProps) {
   const isTarget = entry === 'target';
   const accent = isTarget ? 'indigo' : 'violet';
@@ -449,8 +455,9 @@ export default function BrandSendModal({
   );
 
   // 확인 다이얼로그에 적을 유형 — payload가 화면 선택값을 그대로 갖고 있다
+  //   유형은 규격 사본의 한글 이름으로 적는다 — 내부 코드(CAROUSEL_FEED 등)를 화면에 내지 않는다
   const pendingTypeLabel = pending
-    ? `브랜드메시지 ${pending.mode === 'template' ? '기본형' : String(pending.bubbleType || 'TEXT')}`
+    ? `브랜드메시지 ${pending.mode === 'template' ? '기본형' : (BRAND_SPEC[String(pending.bubbleType || 'TEXT')]?.label || '텍스트')}`
     : '';
 
   return (
@@ -469,7 +476,9 @@ export default function BrandSendModal({
         </WorkspaceNotice>
       ) : undefined}
       aside={aside}
-      maxW="max-w-7xl"
+      // ★2026-09-20 창 확대(1280 → 1600) · 수신자 열 380 → 320. 공용 셸은 건드리지 않고 호출부 값만 바꾼다.
+      asideWidth="320px"
+      maxW="max-w-[1600px]"
     >
       {/* 우측 — 메시지 (기존 에디터 재사용. 새로 만들면 두 벌이 되고 반드시 갈라진다)
           ★2026-09-01 패딩 래퍼 제거 — 에디터가 자기 패딩과 하단 고정 발송 바(sticky)를 소유한다.
@@ -479,6 +488,7 @@ export default function BrandSendModal({
         sending={!!sending}
         accent={accent}
         recipientCount={phones.length}
+        defaultUnsubPhone={optOutNumber}
         onSend={(payload: any) => {
           if (!canSend) return;
           // 바로 보내지 않는다 — 건수를 보여주고 확인을 받는다(문자·알림톡과 같은 계약)

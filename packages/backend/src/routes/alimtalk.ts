@@ -23,7 +23,7 @@ import {
 } from '../middlewares/auth';
 import { query } from '../config/database';
 import * as imc from '../utils/alimtalk-api';
-import { ImcApiError, extractImageFromAnyShape } from '../utils/alimtalk-api';
+import { ImcApiError, extractImageFromAnyShape, extractImageListFromAnyShape } from '../utils/alimtalk-api';
 import {
   processKakaoWebhook,
   verifyWebhookSignature,
@@ -2430,38 +2430,8 @@ function sendImcManagedResponse(
 //   경로가 같은 추출을 필요로 하는데, 라우트에 두면 utils→routes 역방향 의존이 된다).
 //   상단에서 named import 한다 — 여기에 const로 두면 위쪽 호출부(persistImage)가 TDZ에 걸린다.
 
-function extractImageListFromAnyShape(r: any): { imageUrl: string; imageName: string }[] {
-  if (!r) return [];
-  const cands = [
-    r?.data?.list,
-    r?.data?.data?.list,
-    r?.data?.images,
-    r?.data?.data?.images,
-    Array.isArray(r?.data) ? r.data : null,
-  ];
-  // ★ D146 (2026-05-07): list element 변종 수용 — {imageUrl,imageName} / {image:"url"} / "url"(string)
-  const fromUrl = (url: string) => {
-    const tail = url.split('/').pop() || '';
-    return { imageUrl: url, imageName: (tail.split('?')[0] || 'image').slice(0, 200) };
-  };
-  for (const c of cands) {
-    if (Array.isArray(c) && c.length > 0) {
-      const out = c
-        .map((it: any): { imageUrl: string; imageName: string } | null => {
-          if (!it) return null;
-          if (typeof it === 'string' && it.startsWith('http')) return fromUrl(it);
-          if (typeof it === 'object') {
-            if (it.imageUrl && it.imageName) return { imageUrl: it.imageUrl, imageName: it.imageName };
-            if (typeof it.image === 'string' && it.image.startsWith('http')) return fromUrl(it.image);
-          }
-          return null;
-        })
-        .filter((it): it is { imageUrl: string; imageName: string } => !!it);
-      if (out.length > 0) return out;
-    }
-  }
-  return [];
-}
+// ★2026-09-20 `extractImageListFromAnyShape`도 `utils/alimtalk-api.ts`로 이동했다(본문 무변경 ·
+//   브랜드 발송 이미지 확정기가 다중 업로드 응답을 같은 방식으로 읽어야 한다). 상단에서 named import 한다.
 
 function sendImageUploadResponse(
   res: Response,

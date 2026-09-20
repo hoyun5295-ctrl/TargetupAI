@@ -20,6 +20,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import pool from '../config/database';
 // ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행과 **같은 두 겹**을 잡아야 반영·취소가 발행을 막는다.
 import { lockCompanyForBilling } from './billing-lock';
+import { normalize080Number, format080Number } from './normalize';
 import { callAIWithFallback } from '../services/ai';
 import type { EventImageInput } from './event-image-extract';
 
@@ -75,17 +76,11 @@ export function monthFullyCovered(
   return cursor > monthEnd;
 }
 
-export function normalize080Number(v: any): string {
-  return String(v ?? '').replace(/\D/g, '');
-}
-
-/** 표시용 080-XXX-XXXX (10자리 기준, 그 외 길이는 원문 유지) */
-export function format080Number(digits: string): string {
-  const d = normalize080Number(digits);
-  if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
-  if (d.length === 11) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
-  return d;
-}
+// ★ 2026-09-20 080 정규화·표시 함수 2개를 `utils/normalize.ts`로 옮겼다(본문 무변경).
+//   브랜드메시지 조립기(CT-12)가 수신거부 번호 하이픈 형식에 같은 함수를 써야 하는데, 이 파일은
+//   정산 잠금·AI 서비스를 import하고 있어 발송 조립기가 끌어오기에 무겁다. 기존 소비처
+//   (routes/billing.ts · billing-080.test.ts)가 그대로 돌도록 여기서 다시 내보낸다.
+export { normalize080Number, format080Number };
 
 export async function list080Numbers(): Promise<Billing080Number[]> {
   const r = await pool.query(

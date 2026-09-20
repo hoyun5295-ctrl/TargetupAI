@@ -18,15 +18,30 @@
  *   톤 = 화이트 고급형 유지(2026-07-31 Harold 확정 · SendWorkspaceShell 계열).
  *
  * ★ 2026-07-31 재작성분에서 유지하는 것 — 죽은 분기 없음(지원 3종만 노출), 쿠폰 5형식 선택 입력.
+ *
+ * ★ 2026-09-20 발송 창 개편 1차 (Harold 승인 목업 v2.1)
+ *   ①유형 카드 나열 → 한 줄 버튼 + 작은 선택 창(`brand-send/BrandTypePickerModal`)
+ *   ②발신 프로필·타겟팅 = 기본 select → 선택 목록(`brand-send/BrandPickMenu`). 글자 잘림 접수의 뿌리가
+ *     기본 select였다(닫힌 상태의 글자는 줄바꿈이 안 된다)
+ *   ③수신거부 080 = 설정값 고정 또는 하이픈 자동 입력. 접이식에서 광고 줄로 올렸다
+ *   ④3종 규격 사본 표 삭제 → `constants/brand-message-spec.ts` 단일 사본
+ *   ⑤미리보기 = 실수신 화면 기준((광고) 이름 앞 · 수신거부 안내는 말풍선 아래)
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Image as ImageIcon, PanelTop, Plus, X, Ticket, MessageSquareReply, Ban, Loader2, Send,
-  FolderOpen, Upload, Sparkles, ChevronDown,
+  Image as ImageIcon, PanelTop, Plus, X, Ticket, MessageSquareReply, Loader2, Send,
+  FolderOpen, Upload, Sparkles, ChevronDown, Target, Lock,
 } from 'lucide-react';
 import BrandMessagePreview from './BrandMessagePreview';
 import AssetLibraryPickerModal, { type PickedAsset } from './assets/AssetLibraryPickerModal';
 import { FIELD_CLASS, FIELD_CLASS_INDIGO, PANEL_CLASS, SourceCaption } from './shared/SendWorkspaceShell';
+import BrandPickMenu from './brand-send/BrandPickMenu';
+import BrandTypePickerModal, { BrandTypeThumb, brandTypeChips } from './brand-send/BrandTypePickerModal';
+import { BRAND_SPEC, BRAND_TYPE_ORDER, type BrandSpec } from '../constants/brand-message-spec';
+import BrandRichSections from './brand-send/BrandRichSections';
+import { initialRich, richBlockReason, richPayload, type RichState } from './brand-send/brandRich';
+import type { PreviewRich } from './BrandMessagePreview';
+import { format080Input, isValid080Number } from '../utils/formatDate';
 
 /**
  * ★ AI 생성 이미지 안내 문구 — 값의 원천은 백엔드 CT-12(`BRAND_AI_IMAGE_NOTICE`)다.
@@ -58,11 +73,9 @@ export type EditorAccent = 'violet' | 'indigo';
 const ACCENT = {
   violet: {
     field: FIELD_CLASS,
-    thumbBar: 'bg-violet-200', thumbImg: 'bg-violet-300', thumbBg: 'bg-violet-50',
-    cardOn: 'bg-white ring-2 ring-violet-500 shadow-violet-500/10',
-    cardText: 'text-violet-700',
-    specOn: 'bg-violet-50 text-violet-600',
-    check: 'text-violet-600 focus:ring-violet-500/40',
+    typeBtn: 'ring-1 ring-violet-200 bg-gradient-to-b from-white to-violet-50 hover:ring-violet-300',
+    typeChange: 'text-violet-700 ring-1 ring-violet-200',
+    switchOn: 'bg-violet-600',
     link: 'text-violet-600 hover:bg-violet-50',
     actPrimary: 'ring-1 ring-violet-200 text-violet-700 bg-gradient-to-b from-white to-violet-50 hover:ring-violet-300',
     actIcon: 'text-violet-500',
@@ -71,11 +84,9 @@ const ACCENT = {
   },
   indigo: {
     field: FIELD_CLASS_INDIGO,
-    thumbBar: 'bg-indigo-200', thumbImg: 'bg-indigo-300', thumbBg: 'bg-indigo-50',
-    cardOn: 'bg-white ring-2 ring-indigo-600 shadow-indigo-500/10',
-    cardText: 'text-indigo-700',
-    specOn: 'bg-indigo-50 text-indigo-600',
-    check: 'text-indigo-600 focus:ring-indigo-500/40',
+    typeBtn: 'ring-1 ring-indigo-200 bg-gradient-to-b from-white to-indigo-50 hover:ring-indigo-300',
+    typeChange: 'text-indigo-700 ring-1 ring-indigo-200',
+    switchOn: 'bg-indigo-600',
     link: 'text-indigo-600 hover:bg-indigo-50',
     actPrimary: 'ring-1 ring-indigo-200 text-indigo-700 bg-gradient-to-b from-white to-indigo-50 hover:ring-indigo-300',
     actIcon: 'text-indigo-500',
@@ -93,11 +104,19 @@ const ACCENT = {
 // 여기 표는 **입력 단계에서 미리 막아주는 거울**이다 — 두 벌이라 갈릴 수 있으므로 값을 고칠 때는
 // 반드시 양쪽을 같이 고친다(근거 = IMC-Agent 매뉴얼 v2.3.1 §4.4.1 · §6.10.3.3 · §6.10.7.2).
 // maxBtnName = attachment_method.pdf §3.4 (TEXT·IMAGE 14자 / 그외 8자) — ★2026-09-01 거울에 추가.
-export const BUBBLE_TYPES = [
-  { code: 'TEXT', label: '텍스트', maxMsg: 1300, maxNewline: 99, maxBtn: 5, couponMaxBtn: 4, couponDescMax: 12, maxBtnName: 14, needImage: false, needHeader: false, desc: '텍스트 + 버튼', spec1: '본문 1,300자', spec2: '버튼 5개' },
-  { code: 'IMAGE', label: '이미지', maxMsg: 1300, maxNewline: 29, maxBtn: 5, couponMaxBtn: 4, couponDescMax: 12, maxBtnName: 14, needImage: true, needHeader: false, desc: '이미지 + 텍스트 + 버튼', spec1: '이미지 필수', spec2: '본문 1,300자' },
-  { code: 'WIDE', label: '와이드', maxMsg: 76, maxNewline: 5, maxBtn: 2, couponMaxBtn: 2, couponDescMax: 18, maxBtnName: 8, needImage: true, needHeader: false, desc: '가로 배너 + 짧은 텍스트', spec1: '가로 배너', spec2: '본문 76자' },
-] as const;
+// ★ 2026-09-20 손으로 적던 3종 사본 표를 없앴다 — 규격 값은 `constants/brand-message-spec.ts`
+//   (백엔드 CT-12에서 뽑은 사본 · 파리티 테스트가 어긋남을 잡는다) 한 곳에서만 읽는다.
+//   노출 유형 = 그 사본의 `opened`(발송이 열린 유형)뿐이다. 실패할 버튼 노출 금지 원칙은 그대로다.
+const toEditorType = (s: BrandSpec) => ({
+  code: s.code, label: s.label,
+  maxMsg: s.maxMessage, maxNewline: s.maxNewline,
+  maxBtn: s.maxButtons, minBtn: s.minButtons, couponMaxBtn: s.couponMaxButtons, couponDescMax: s.couponDescMax,
+  maxBtnName: s.maxButtonName, needImage: s.requireImage,
+  /** 캐러셀은 버튼·쿠폰을 카드가 갖는다 — 말풍선 단위 버튼·쿠폰 입력을 그리지 않는다 */
+  isCarousel: !!s.carousel,
+});
+/** 발송이 열린 유형(전 고객) — 시험 계정에게만 열리는 유형은 서버가 따로 알려준다(아래 trialTypes) */
+export const BUBBLE_TYPES = BRAND_TYPE_ORDER.filter((code) => BRAND_SPEC[code].opened).map((code) => toEditorType(BRAND_SPEC[code]));
 
 /**
  * 버튼 타입 — 필수 입력과 사용 조건은 매뉴얼 §6.10.3.2가 정한다.
@@ -140,21 +159,12 @@ interface BrandMessageEditorProps {
   accent?: EditorAccent;
   /** 발송 바 요약에 적을 수신자 수 — 부모(BrandSendModal)가 넘긴다. 없으면 표기 생략 */
   recipientCount?: number;
-}
-
-/** 유형 카드의 미니 구조도 — 이모지 대신 실제 말풍선 배치를 보여준다 */
-function TypeThumb({ code, active, accent }: { code: string; active: boolean; accent: EditorAccent }) {
-  const a = ACCENT[accent];
-  const bar = active ? a.thumbBar : 'bg-slate-200';
-  const img = active ? a.thumbImg : 'bg-slate-300';
-  return (
-    <div className={`w-full h-[38px] rounded-lg p-1.5 flex flex-col gap-1 justify-center ${active ? a.thumbBg : 'bg-slate-50'}`}>
-      {code === 'IMAGE' && <div className={`h-3 w-full rounded ${img}`} />}
-      {code === 'WIDE' && <div className={`h-4 w-full rounded ${img}`} />}
-      <div className={`h-1 w-full rounded-full ${bar}`} />
-      {code !== 'WIDE' && <div className={`h-1 w-2/3 rounded-full ${bar}`} />}
-    </div>
-  );
+  /**
+   * ★ 2026-09-20 설정에 등록된 080 수신거부 번호(`/api/companies/settings` reject_number · 사용자 값 우선).
+   *   유효한 080 번호면 **그 값을 그대로 쓰고 입력칸을 잠근다** — 다른 번호로 보내면 080 수신거부
+   *   자동 등록(콜백 매칭)과 어긋난다. 없거나 080 형식이 아니면 직접 입력(하이픈 자동)으로 받는다.
+   */
+  defaultUnsubPhone?: string;
 }
 
 /**
@@ -186,18 +196,37 @@ function Collapsible({ icon, title, stateText, stateSet, children, defaultOpen }
   );
 }
 
-export default function BrandMessageEditor({ profiles, onSend, sending, accent = 'violet', recipientCount }: BrandMessageEditorProps) {
+export default function BrandMessageEditor({ profiles, onSend, sending, accent = 'violet', recipientCount, defaultUnsubPhone }: BrandMessageEditorProps) {
   const a = ACCENT[accent];
   const FIELD = a.field;
   const [mode, setMode] = useState<'free' | 'template'>('free');
   const [bubbleType, setBubbleType] = useState('TEXT');
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
+  /**
+   * ★2026-09-20 시험 개방 — 실측 전인 5종은 **시험 계정에게만** 보인다(서버 CT-12 `BUBBLE_TYPE_TRIAL` ·
+   *   `GET /api/campaigns/brand-send/capabilities`). 조회가 실패하면 빈 배열 = 열린 유형만 그린다.
+   *   최종 판정은 발송 시 서버가 다시 한다 — 이 값은 화면에 무엇을 그릴지 정할 뿐이다.
+   */
+  const [trialTypes, setTrialTypes] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/campaigns/brand-send/capabilities', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && Array.isArray(d?.trialTypes)) setTrialTypes(d.trialTypes.map(String)); })
+      .catch(() => { /* 시험 유형 없음으로 둔다 */ });
+    return () => { alive = false; };
+  }, []);
+  const availableCodes = BRAND_TYPE_ORDER.filter((code) => BRAND_SPEC[code].opened || trialTypes.includes(code));
+  /** 5종이 더하는 입력(헤더·아이템·동영상·커머스·캐러셀) — 상태·검사·payload는 brandRich가 소유한다 */
+  const [rich, setRich] = useState<RichState>(() => initialRich('TEXT'));
   const [senderKey, setSenderKey] = useState('');
   const [targeting, setTargeting] = useState('I');
   const [isAd, setIsAd] = useState(true);
 
   // 메시지 내용
   const [message, setMessage] = useState('');
-  const [header] = useState('');   // 지원 3종은 헤더를 쓰지 않는다(스펙 확보 시 입력 배선)
 
   // 버튼
   const [buttons, setButtons] = useState<Button[]>([]);
@@ -259,14 +288,18 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
   const [resendMessage, setResendMessage] = useState('');
   const [resendTitle, setResendTitle] = useState('');
 
-  // 수신거부
+  // 수신거부 — 설정값이 유효하면 그것으로 고정, 아니면 직접 입력(하이픈 자동 · props 주석)
   const [unsubPhone, setUnsubPhone] = useState('');
   const [unsubAuth, setUnsubAuth] = useState('');
+  const lockedUnsub = isValid080Number(defaultUnsubPhone || '') ? format080Input(defaultUnsubPhone || '') : '';
+  const effUnsub = lockedUnsub || unsubPhone.trim();
+  // 080 줄은 광고이거나 마수동·비친구 대상일 때 보인다 — M·N은 광고 여부와 무관하게 번호가 필수다(매뉴얼 §2.2.2)
+  const showUnsub = isAd || targeting !== 'I';
 
   // 기본형(템플릿)
   const [templateCode, setTemplateCode] = useState('');
 
-  const selectedType = BUBBLE_TYPES.find(t => t.code === bubbleType) || BUBBLE_TYPES[0];
+  const selectedType = toEditorType(BRAND_SPEC[bubbleType] || BRAND_SPEC.TEXT);
   const selectedProfile = profiles.find(p => p.profile_key === senderKey);
 
   // 쿠폰을 함께 쓰면 버튼 상한이 줄어든다 (매뉴얼 §6.10.3.3)
@@ -298,6 +331,13 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
 
   /** 보내기 전에 걸리는 것 — 첫 한 줄만 알려주고 버튼을 잠근다 */
   const blockReason = (() => {
+    // 수신거부 080 — 백엔드 CT-12 거절 사유의 거울(080 시작 · 10~11자리 / M·N 대상은 필수)
+    if (showUnsub && !lockedUnsub && unsubPhone.trim() && !isValid080Number(unsubPhone)) {
+      return '수신거부 번호는 080으로 시작하는 10~11자리 번호여야 합니다';
+    }
+    if (targeting !== 'I' && !effUnsub) {
+      return '마수동·비친구 대상 발송은 수신거부 080 번호가 필요합니다';
+    }
     if (mode === 'template') {
       // 기본형은 자유형 본문을 payload에서 제외하므로(Codex 1R H3) 대체발송 문안 폴백이 없다 —
       // 백엔드가 같은 이유로 거절하기 전에 여기서 먼저 알려준다.
@@ -319,6 +359,15 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
         : `줄바꿈은 최대 ${selectedType.maxNewline}개입니다`;
     }
     if (selectedType.needImage && !imageUrl.trim()) return `${selectedType.label} 유형은 이미지가 필요합니다`;
+    // 본문이 없는 유형은 AI 생성 이미지 안내 문구를 붙일 자리가 없다 — 서버도 같은 이유로 거절한다
+    if (selectedType.needImage && selectedType.maxMsg === 0 && imageKind === 'generated') {
+      return `${selectedType.label} 유형에는 AI로 만든 이미지를 쓸 수 없습니다. 직접 올린 이미지를 사용해 주세요`;
+    }
+    const richReason = richBlockReason(bubbleType, rich, BUTTON_TYPES.filter((t) => t.needUrl).map((t) => t.code));
+    if (richReason) return richReason;
+    if (!selectedType.isCarousel && buttons.length < selectedType.minBtn) {
+      return `${selectedType.label} 유형은 버튼이 최소 ${selectedType.minBtn}개 필요합니다`;
+    }
     if (buttons.length > effectiveMaxBtn) {
       return hasCoupon
         ? `쿠폰을 함께 쓰면 버튼은 최대 ${effectiveMaxBtn}개입니다`
@@ -433,17 +482,19 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
       resendFrom: resendFrom || undefined,
       resendMessage: resendMessage || undefined,
       resendTitle: resendTitle || undefined,
-      unsubscribePhone: unsubPhone || undefined,
-      unsubscribeAuth: unsubAuth || undefined,
+      // 080 줄이 화면에 보일 때만 싣는다 — 안 보이는 값이 따라 나가지 않게(이미지와 같은 원칙)
+      unsubscribePhone: showUnsub ? (effUnsub || undefined) : undefined,
+      unsubscribeAuth: showUnsub ? (unsubAuth.trim() || undefined) : undefined,
     };
 
     if (mode === 'free') {
-      data.message = message || undefined;
-      data.header = header || undefined;
-      data.buttons = buttons.length > 0 ? buttons : undefined;
+      // 본문·말풍선 버튼은 그 유형이 쓸 때만 싣는다(유형을 바꾸며 남은 값이 따라 나가지 않게)
+      data.message = selectedType.maxMsg > 0 ? (message || undefined) : undefined;
+      data.buttons = !selectedType.isCarousel && buttons.length > 0 ? buttons : undefined;
+      Object.assign(data, richPayload(bubbleType, rich));
       // 쿠폰 클릭 URL은 매뉴얼 §6.10.7의 평면 키(url_mobile)다 — 옛 `link: {url_mobile}` 래핑은
       // 규격 밖 키라 클릭이 전달되지 않았다(2026-08-18 정정).
-      if (couponTitle) data.coupon = { title: couponTitle, description: couponDesc, url_mobile: couponUrl || undefined };
+      if (couponTitle && !selectedType.isCarousel) data.coupon = { title: couponTitle, description: couponDesc, url_mobile: couponUrl || undefined };
     } else {
       data.templateCode = templateCode;
     }
@@ -461,21 +512,40 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
     onSend(data);
   };
 
+  const richSpec = BRAND_SPEC[bubbleType];
+  const previewRich: PreviewRich | undefined = mode === 'free' && richSpec ? {
+    additional: richSpec.maxAdditional > 0 ? rich.additional : undefined,
+    items: richSpec.maxItems > 0 ? rich.items.map((it) => ({ imageUrl: it.image?.url, title: it.title })) : undefined,
+    video: richSpec.requireVideo ? { thumbUrl: rich.video.thumb?.url } : undefined,
+    commerce: richSpec.requireCommerce && !richSpec.carousel ? rich.commerce : undefined,
+    carousel: richSpec.carousel ? {
+      intro: richSpec.carousel.allowIntro && rich.introOn
+        ? { imageUrl: rich.intro.image?.url, header: rich.intro.header, content: rich.intro.content } : undefined,
+      cards: rich.cards.map((c) => ({
+        imageUrl: c.image?.url, header: c.header, message: c.message, additional: c.additional,
+        commerce: richSpec.requireCommerce ? c.commerce : undefined,
+        buttons: c.buttons.map((b) => b.name),
+      })),
+      tail: rich.tailOn,
+    } : undefined,
+  } : undefined;
+
   const previewData = {
     bubbleType,
-    message: message || undefined,
-    header: header || undefined,
+    message: selectedType.maxMsg > 0 ? (message || undefined) : undefined,
+    header: mode === 'free' && richSpec && richSpec.maxHeader > 0 && !richSpec.carousel ? (rich.header || undefined) : undefined,
     imageUrl: (imageUrl && selectedType.needImage) ? imageUrl : undefined,
-    buttons: buttons.length > 0 ? buttons : undefined,
-    couponTitle: couponTitle || undefined,
+    buttons: !selectedType.isCarousel && buttons.length > 0 ? buttons : undefined,
+    couponTitle: !selectedType.isCarousel ? (couponTitle || undefined) : undefined,
     isAd,
-    unsubPhone: unsubPhone || undefined,
     profileName: selectedProfile?.profile_name,
     aiNoticeText: noticeActive ? AI_IMAGE_NOTICE : undefined,
+    rich: previewRich,
   };
 
+  // 본문이 없는 유형(와이드 리스트·커머스·캐러셀)은 본문 없이 보낸다 — 나머지는 본문이 있어야 한다
   const canSend = !sending && !!senderKey && !blockReason
-    && (mode === 'template' ? !!templateCode : !!message.trim());
+    && (mode === 'template' ? !!templateCode : (selectedType.maxMsg === 0 || !!message.trim()));
 
   // 발송 바 요약 — 무엇이 어떻게 나가는지 누르기 전에 한 줄로 보인다
   const summaryParts: string[] = [];
@@ -502,62 +572,99 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
             ))}
           </div>
 
-          {/* 유형 선택 — 카드에 규격 힌트를 같이 보여준다(고르고 나서야 76자를 아는 구조 금지) */}
+          {/* ★2026-09-20 설정 바 — 유형·발신 프로필·타겟팅을 한 줄 높이의 선택 버튼 3개로.
+              유형 카드는 작성 화면에 펼치지 않는다(8종이면 화면의 큰 몫을 먹는다). 「변경」이 작은 창을 띄우고,
+              규격 힌트는 버튼 안에서 계속 보인다(고르고 나서야 76자를 아는 구조 금지 원칙 유지).
+              폭이 좁아지면 줄바꿈으로 흡수한다 — 가로 스크롤을 만들지 않는다(min-w-0 · LESSONS_FRONTEND 0828). */}
+          <div className="flex flex-wrap gap-2.5">
+            <div className="min-w-0 flex-[1.35_1_220px]">
+              <span className="block text-[12px] font-semibold text-slate-600 mb-1.5">메시지 유형</span>
+              <button type="button" onClick={() => setTypePickerOpen(true)} aria-haspopup="dialog"
+                className={`w-full h-10 flex items-center gap-2 pl-1.5 pr-2 rounded-xl text-left shadow-sm transition ${a.typeBtn}`}>
+                <BrandTypeThumb code={selectedType.code} active accent={accent} compact />
+                <span className="min-w-0 flex-1 flex items-baseline gap-1.5">
+                  <span className="shrink-0 text-[13px] font-semibold text-slate-800">{selectedType.label}</span>
+                  <span className="min-w-0 truncate text-[11px] text-slate-500">
+                    {brandTypeChips(BRAND_SPEC[selectedType.code]).join(' · ')}
+                  </span>
+                </span>
+                {availableCodes.length > 1 && (
+                  <span className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-white ${a.typeChange}`}>변경</span>
+                )}
+              </button>
+            </div>
+            <div className="min-w-0 flex-[1_1_170px]">
+              <BrandPickMenu
+                label="발신 프로필"
+                accent={accent}
+                value={senderKey}
+                onChange={setSenderKey}
+                options={profiles.map((p) => ({ value: p.profile_key, title: p.profile_name }))}
+                leading={(sel) => (
+                  <span className={`shrink-0 w-6 h-6 rounded-lg grid place-items-center text-[11px] font-bold ${
+                    sel ? 'bg-[#FEE500] text-[#3C1E1E]' : 'bg-slate-100 text-slate-400'
+                  }`}>
+                    {sel ? sel.title.slice(0, 1) : '?'}
+                  </span>
+                )}
+              />
+            </div>
+            <div className="min-w-0 flex-[1_1_150px]">
+              <BrandPickMenu
+                label="타겟팅"
+                accent={accent}
+                alignRight
+                value={targeting}
+                onChange={setTargeting}
+                options={TARGETING_OPTIONS.map((t) => ({
+                  value: t.code, title: t.label, tag: t.code,
+                  desc: t.code === 'I' ? t.desc : `${t.desc} · 수신거부 080 번호가 필요합니다`,
+                }))}
+                leading={() => <Target size={15} strokeWidth={1.9} className="shrink-0 text-slate-400 ml-0.5" />}
+              />
+            </div>
+          </div>
+
+          {/* 광고 여부 + 수신거부 080 — 한 줄. 080은 설정값이 있으면 그대로 쓰고(잠금), 없으면 하이픈 자동 입력 */}
           <div>
-            <label className="block text-[13px] font-semibold text-slate-700 mb-2">메시지 유형</label>
-            <div className="grid grid-cols-3 gap-2.5">
-              {BUBBLE_TYPES.map(t => {
-                const active = bubbleType === t.code;
-                return (
-                  <button key={t.code} type="button" onClick={() => { setBubbleType(t.code); setButtons([]); }}
-                    className={`p-2.5 rounded-2xl text-left transition shadow-sm ${
-                      active
-                        ? a.cardOn
-                        : 'bg-white ring-1 ring-slate-200/80 hover:ring-slate-300'
-                    }`}>
-                    <TypeThumb code={t.code} active={active} accent={accent} />
-                    <div className={`text-[13px] font-semibold mt-2 ${active ? a.cardText : 'text-slate-700'}`}>{t.label}</div>
-                    <div className="text-[10px] text-slate-400 leading-tight mt-0.5">{t.desc}</div>
-                    <div className="flex gap-1 flex-wrap mt-1.5">
-                      {[t.spec1, t.spec2].map(s => (
-                        <span key={s} className={`text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap ${active ? a.specOn : 'bg-slate-50 text-slate-400'}`}>
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 rounded-xl bg-slate-50/70 ring-1 ring-slate-900/5">
+              <button type="button" role="switch" aria-checked={isAd} onClick={() => setIsAd(!isAd)}
+                className="inline-flex items-center gap-2 text-[13px] font-medium text-slate-700 select-none">
+                <span className={`relative w-8 h-[18px] rounded-full transition-colors ${isAd ? a.switchOn : 'bg-slate-300'}`}>
+                  <span className={`absolute top-[2.5px] left-[2.5px] w-[13px] h-[13px] rounded-full bg-white shadow transition-transform ${isAd ? 'translate-x-[14px]' : ''}`} />
+                </span>
+                광고 메시지
+              </button>
+              {showUnsub && (
+                <>
+                  <span className="hidden sm:block w-px h-5 bg-slate-200" />
+                  <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                    <span className="text-[12px] font-semibold text-slate-600 whitespace-nowrap">수신거부 080</span>
+                    {lockedUnsub ? (
+                      <span className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white ring-1 ring-slate-200 text-[13px] font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                        <Lock size={12} strokeWidth={2} className="text-slate-400" />
+                        {lockedUnsub}
+                        <span className="text-[10.5px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">설정값</span>
+                      </span>
+                    ) : (
+                      <input type="text" inputMode="numeric" value={unsubPhone}
+                        onChange={(e) => setUnsubPhone(format080Input(e.target.value))}
+                        className={`${FIELD} !w-[148px] !py-0 h-8 !text-[13px] tabular-nums`} placeholder="080-000-0000" />
+                    )}
+                    <input type="text" value={unsubAuth} onChange={(e) => setUnsubAuth(e.target.value)}
+                      className={`${FIELD} !w-[120px] !py-0 h-8 !text-[13px] tabular-nums`} placeholder="인증번호 (선택)" />
+                  </div>
+                </>
+              )}
             </div>
+            {showUnsub && (
+              <p className="text-[11px] text-slate-500 mt-1.5 px-1">
+                {lockedUnsub
+                  ? '설정에 등록된 080 번호를 그대로 씁니다. 번호는 설정의 「080 수신거부번호」에서 바꿀 수 있습니다.'
+                  : '숫자만 입력하면 하이픈이 자동으로 들어갑니다. 예) 0807198700 → 080-719-8700'}
+              </p>
+            )}
           </div>
-
-          {/* 발신 프로필 · 타겟팅 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[13px] font-semibold text-slate-700 mb-1.5">발신 프로필</label>
-              <select value={senderKey} onChange={(e) => setSenderKey(e.target.value)} className={FIELD}>
-                <option value="">선택하세요</option>
-                {profiles.map(p => (
-                  <option key={p.id} value={p.profile_key}>{p.profile_name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[13px] font-semibold text-slate-700 mb-1.5">타겟팅</label>
-              <select value={targeting} onChange={(e) => setTargeting(e.target.value)} className={FIELD}>
-                {TARGETING_OPTIONS.map(t => (
-                  <option key={t.code} value={t.code}>{t.label}: {t.desc}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* 광고 여부 */}
-          <label className="inline-flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer select-none">
-            <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)}
-              className={`w-4 h-4 rounded border-slate-300 ${a.check}`} />
-            광고 메시지 <span className="text-slate-400 text-[12px]">(수신거부 표시가 필요합니다)</span>
-          </label>
 
           {/* 기본형: 템플릿 코드 */}
           {mode === 'template' && (
@@ -568,8 +675,21 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
             </div>
           )}
 
-          {/* 본문 — 카운터가 글자·줄바꿈·AI 문구 몫까지 미리 계산한다 */}
+          {/* 5종이 더하는 입력 — 헤더·동영상·아이템·커머스·캐러셀. 무엇이 보이는지는 규격이 정한다 */}
           {mode === 'free' && (
+            <BrandRichSections
+              code={bubbleType}
+              value={rich}
+              onChange={setRich}
+              fieldClass={FIELD}
+              panelClass={PANEL_CLASS}
+              accentText={a.sumAccent}
+              buttonTypes={availableButtonTypes.map((t) => ({ code: t.code, label: t.label, needUrl: t.needUrl, fixedName: t.fixedName }))}
+            />
+          )}
+
+          {/* 본문 — 카운터가 글자·줄바꿈·AI 문구 몫까지 미리 계산한다. 본문을 쓰지 않는 유형에서는 그리지 않는다 */}
+          {mode === 'free' && selectedType.maxMsg > 0 && (
             <div>
               <div className="flex items-baseline justify-between mb-1.5">
                 <label className="text-[13px] font-semibold text-slate-700">본문</label>
@@ -699,7 +819,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
           )}
 
           {/* 버튼 */}
-          {selectedType.maxBtn > 0 && mode === 'free' && (
+          {selectedType.maxBtn > 0 && !selectedType.isCarousel && mode === 'free' && (
             <div>
               <div className="flex justify-between items-center mb-2">
                 <label className="text-[13px] font-semibold text-slate-700">
@@ -756,7 +876,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
 
           {/* 선택 항목 — 접힌 상태에서도 현재 값이 보인다 */}
           <div className="space-y-2.5">
-            {mode === 'free' && (
+            {mode === 'free' && !selectedType.isCarousel && (
               <Collapsible icon={<Ticket size={14} strokeWidth={1.9} />} title="쿠폰"
                 stateText={hasCoupon ? (couponTitle || '입력 중') : '사용 안 함'} stateSet={hasCoupon}>
                 {/* 쿠폰 제목은 카카오가 정한 5형식만 통과한다 — 자유 입력으로 받으면 반드시 거절되므로
@@ -822,18 +942,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                 </>
               )}
             </Collapsible>
-
-            {isAd && (
-              <Collapsible icon={<Ban size={14} strokeWidth={1.9} />} title="수신거부 080" defaultOpen
-                stateText={unsubPhone.trim() ? unsubPhone.trim() : '미입력'} stateSet={!!unsubPhone.trim()}>
-                <div className="grid grid-cols-2 gap-2">
-                  <input type="text" value={unsubPhone} onChange={(e) => setUnsubPhone(e.target.value)}
-                    className={FIELD} placeholder="080 번호" />
-                  <input type="text" value={unsubAuth} onChange={(e) => setUnsubAuth(e.target.value)}
-                    className={FIELD} placeholder="인증번호" />
-                </div>
-              </Collapsible>
-            )}
           </div>
         </div>
 
@@ -875,14 +983,17 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
       </div>
 
       {/* ── 우측: 미리보기 ───────────────────────────────────────── */}
-      <div className="w-full lg:w-[320px] shrink-0 p-5 sm:p-6 lg:pl-0">
+      <div className="w-full lg:w-[clamp(292px,29vw,392px)] shrink-0 p-5 lg:border-l lg:border-slate-100 lg:bg-slate-50/50">
         <div className="lg:sticky lg:top-5">
-          <h3 className="text-[13px] font-semibold text-slate-700 mb-2.5 inline-flex items-center gap-1.5">
-            <PanelTop size={13} strokeWidth={1.9} className="text-slate-400" />
-            미리보기
-          </h3>
+          <div className="flex items-baseline justify-between gap-2 mb-2.5">
+            <h3 className="text-[12.5px] font-semibold text-slate-700 inline-flex items-center gap-1.5">
+              <PanelTop size={13} strokeWidth={1.9} className="text-slate-400" />
+              미리보기
+            </h3>
+            <span className="text-[11px] text-slate-500">받는 사람 화면 그대로</span>
+          </div>
           <BrandMessagePreview {...previewData} />
-          <SourceCaption>카카오 브랜드메시지 규격 (텍스트·이미지·와이드)</SourceCaption>
+          <SourceCaption>카카오톡 실수신 화면 기준 · 입력값 실시간 반영</SourceCaption>
           {noticeActive && (
             <div className="mt-3 px-3 py-2.5 rounded-xl bg-white ring-1 ring-slate-900/5 shadow-sm text-[11.5px] text-slate-500 leading-relaxed">
               <span className="font-semibold text-violet-700">AI 생성 이미지 안내</span><br />
@@ -891,6 +1002,17 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
           )}
         </div>
       </div>
+
+      {/* 유형 선택 창 — 발송이 열린 유형만 넘긴다 */}
+      <BrandTypePickerModal
+        show={typePickerOpen}
+        accent={accent}
+        codes={availableCodes}
+        trialCodes={trialTypes}
+        value={bubbleType}
+        onPick={(code) => { setBubbleType(code); setButtons([]); setRich(initialRich(code)); setTypePickerOpen(false); }}
+        onClose={() => setTypePickerOpen(false)}
+      />
 
       {/* 이미지 라이브러리 픽커 — 공용 컴포넌트 재사용 + AI 생성 배지 */}
       <AssetLibraryPickerModal

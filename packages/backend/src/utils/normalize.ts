@@ -305,6 +305,20 @@ export function normalizeOpt080Input(raw: any): string | null {
   return s === '' ? null : s;
 }
 
+// ★ 2026-09-20 `utils/billing-080.ts`에서 옮겨 왔다(본문 무변경 · 그쪽은 여기 것을 다시 내보낸다).
+//   소비처 = 080 청구(billing-080·routes/billing) + 브랜드메시지 조립기(수신거부 번호 하이픈 형식).
+export function normalize080Number(v: any): string {
+  return String(v ?? '').replace(/\D/g, '');
+}
+
+/** 표시용 080-XXX-XXXX (10자리 기준, 그 외 길이는 원문 유지) */
+export function format080Number(digits: string): string {
+  const d = normalize080Number(digits);
+  if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
+  if (d.length === 11) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
+  return d;
+}
+
 export function normalizeStorePhone(value: any): string | null {
   if (value == null || value === '') return null;
   let v = String(value).trim();

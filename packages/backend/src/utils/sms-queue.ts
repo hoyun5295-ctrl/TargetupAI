@@ -950,6 +950,47 @@ export interface BrandQueueRow {
   reservedDate?: string;
   /** app_etc2 — companyId 추적 */
   companyId?: string;
+  /**
+   * ★2026-09-20 본문 없는 유형(와이드 리스트·커머스·캐러셀 2종)의 행인가.
+   * 그 유형은 CT-12가 `msg_contents`를 **일부러 비운다**(0828 게이트웨이 MESSAGE 계약). 아래 빈 본문 방어가
+   * 그 계약과 부딪혀 적재 자체가 불가능했다. 유형 판정은 CT-12가 소유하므로 여기는 표식만 받는다
+   * (brand-message ↔ sms-queue 순환 import를 만들지 않는다). 미지정 = 종전대로 빈 본문 거절.
+   */
+  allowEmptyContents?: boolean;
+}
+
+/**
+ * ★2026-09-20 큐 테이블의 `k_etc_json` 실제 폭 — 값의 주인은 DB다(상수로 들고 있지 않는다).
+ *   2026-09-20 실측: QTmsg 라인(1~11)과 월별 log는 varchar(1024), 비토 게이트웨이 라인(13~15)만 8192로 넓혔다.
+ *   브랜드 캐러셀은 최소 구성부터 1,190자대라 1024에 실리지 않는다. 적재 대상 테이블의 실제 폭을 읽어
+ *   CT-12가 그 폭으로 판정한다. 새 비토 라인을 `LIKE SMSQ_SEND_13`으로 만들면 폭이 상속돼 코드 수정이 없다.
+ *   조회 실패·미지원 값은 **1024로 본다**(fail-closed — 넓다고 잘못 알면 적재가 Data too long으로 깨진다).
+ */
+export const K_ETC_JSON_BASE_MAX = 1024;
+const etcJsonCapCache = new Map<string, { cap: number; at: number }>();
+const ETC_JSON_CAP_TTL_MS = 10 * 60 * 1000;
+
+export async function getEtcJsonCapacity(table: string): Promise<number> {
+  const t = String(table || '').trim();
+  if (!isValidSmsTable(t)) return K_ETC_JSON_BASE_MAX;
+  const hit = etcJsonCapCache.get(t);
+  if (hit && Date.now() - hit.at < ETC_JSON_CAP_TTL_MS) return hit.cap;
+  let cap = K_ETC_JSON_BASE_MAX;
+  try {
+    const rows = await mysqlQuery(
+      `SELECT CHARACTER_MAXIMUM_LENGTH AS cap FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'k_etc_json'`,
+      [t],
+    ) as any[];
+    const n = Number(rows?.[0]?.cap);
+    // text 계열은 폭이 수만~수십억으로 온다 — 상한을 둬 조립기 한도가 터무니없이 커지지 않게 한다
+    if (Number.isFinite(n) && n >= K_ETC_JSON_BASE_MAX) cap = Math.min(n, 16000);
+  } catch (e: any) {
+    console.warn(`[sms-queue] k_etc_json 폭 조회 실패(${t}) — 1024로 판정:`, e?.message);
+    return K_ETC_JSON_BASE_MAX;   // 실패는 캐시하지 않는다
+  }
+  etcJsonCapCache.set(t, { cap, at: Date.now() });
+  return cap;
 }
 
 /**
@@ -974,7 +1015,7 @@ export async function insertBrandQueue(
     if (!String(r.etcJson || '').trim()) {
       throw new BrandQueueInsertError('브랜드메시지 발신 설정 정보가 비어 있습니다', 0);
     }
-    if (!String(r.msgContents || '').trim()) {
+    if (!r.allowEmptyContents && !String(r.msgContents || '').trim()) {
       throw new BrandQueueInsertError('브랜드메시지 본문이 비어 있습니다', 0);
     }
     if (!['N', 'A', 'B'].includes(r.nextType)) {

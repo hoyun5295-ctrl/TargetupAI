@@ -30,7 +30,7 @@ import {
 } from '../utils/sms-queue';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑은 CT-12에서만 — 라우트 인라인 금지
 import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback,
-         prepareBrandAttachmentForSend, appendAiImageNotice, BUBBLE_TYPES } from '../utils/brand-message';
+         prepareBrandAttachmentForSend, appendAiImageNotice, BUBBLE_TYPES, listBrandTrialTypes } from '../utils/brand-message';
 // ★ 2026-09-02 브랜드 이미지의 카카오 콘텐츠 서버 확정 — img_url에는 업로드본만 실을 수 있다(IMC 회신).
 //   조립기가 우리 서빙 URL을 거절하므로, 조립기를 부르는 경로는 그 앞에서 이 치환을 거쳐야 한다.
 // (판정 → 치환 순서는 prepareBrandAttachmentForSend가 소유한다 — brand-message에서 가져온다)
@@ -3456,6 +3456,24 @@ router.delete('/:id', async (req: Request, res: Response) => {
 });
 
 // ============================================================
+// GET /brand-send/capabilities — 이 사용자가 고를 수 있는 시험 유형 (★2026-09-20)
+//   발송이 열린 유형은 프론트 규격 사본(`opened`)이 이미 안다. 여기는 **시험 계정에게만** 열리는
+//   유형 목록을 돌려준다(CT-12 `BUBBLE_TYPE_TRIAL` · ENV `BRAND_TRIAL_LOGIN_IDS`). 시험 계정이 아니면 빈 배열.
+//   최종 판정은 발송 시 조립기가 다시 한다 — 이 응답은 화면에 무엇을 그릴지 정할 뿐이다.
+// ============================================================
+router.get('/brand-send/capabilities', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: '인증 필요' });
+    return res.json({ success: true, trialTypes: await listBrandTrialTypes(userId) });
+  } catch (error) {
+    console.error('[brand-send/capabilities] 에러:', error);
+    // 조회 실패 = 시험 유형 없음으로 본다(화면은 열린 유형만 그린다)
+    return res.json({ success: true, trialTypes: [] });
+  }
+});
+
+// ============================================================
 // POST /brand-send — 브랜드메시지 발송 (CT-12 컨트롤타워)
 // ============================================================
 router.post('/brand-send', async (req: Request, res: Response) => {
@@ -3541,7 +3559,9 @@ router.post('/brand-send', async (req: Request, res: Response) => {
         companyId,
         userId,
         `브랜드메시지 ${bubbleType || 'TEXT'}`,
-        message || `[${bubbleType}] 브랜드메시지`,
+        // ★2026-09-20 본문 없는 유형(와이드 리스트·커머스·캐러셀)이 열리면서 이 폴백이 실제로 쓰인다 —
+        //   발송 결과 화면에 내부 코드(CAROUSEL_FEED 등) 대신 유형의 한글 이름이 보이게 한다.
+        message || `[${BUBBLE_TYPES[String(bubbleType || 'TEXT').trim().toUpperCase()]?.label || '브랜드메시지'}] 브랜드메시지`,
         resolvedCallback || null,
         Array.isArray(phones) ? phones.length : 0,
         isAd ?? true,

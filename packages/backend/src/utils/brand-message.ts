@@ -24,11 +24,13 @@
  * 참조: 카카오-브랜드메시지-발송매뉴얼.pptx(강문희 2026-01) + attachment_method.pdf
  */
 
-import { insertBrandQueue, BrandQueueInsertError, getCompanySmsTables, type BrandQueueRow } from './sms-queue';
+import { insertBrandQueue, BrandQueueInsertError, getCompanySmsTables, getEtcJsonCapacity, K_ETC_JSON_BASE_MAX, type BrandQueueRow } from './sms-queue';
+import { isPilotTarget } from './rollout-gate';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 import { markRefundPending } from './refund-pending';
 import { buildUnsubscribeExistsFilter } from './unsubscribe-helper';
 import { normalizePhone } from './normalize-phone';
+import { normalize080Number, format080Number } from './normalize';
 // 발송 가능 시간 판정은 시각 CT가 소유한다(브랜드 창 08:00~20:50 — config/defaults BRAND_SEND_WINDOW).
 import { isWithinBrandSendWindow } from './send-time-util';
 import { BRAND_SEND_WINDOW } from '../config/defaults';
@@ -38,7 +40,7 @@ import { logCampaignTraining } from './training-logger';
 // ★ 2026-09-01 AI 생성 이미지 표시 — cdp_assets.kind 판정 (설계서 docs/2026-09-01-ai-image-notice-design.md)
 import { getAssetByUrl, isAssetsTableMissing, type AssetRow } from './assets';
 // ★ 2026-09-02 자유형 이미지의 카카오 콘텐츠 서버 확정(ATTACHMENT.image.img_url 규격)
-import { resolveBrandSendImage, resolveBrandSendAttachmentJson, isOwnServingImageUrl } from './brand-image-resolver';
+import { resolveBrandSendImage, resolveBrandSendRichImages, resolveBrandSendAttachmentJson, isOwnServingImageUrl } from './brand-image-resolver';
 
 // ============================================================
 // 상수 정의
@@ -272,12 +274,57 @@ export const BUBBLE_TYPE_OPENED: Record<string, { since: string; note: string }>
 
 export const SUPPORTED_BUBBLE_TYPES: readonly string[] = Object.keys(BUBBLE_TYPE_OPENED);
 
+/**
+ * ★2026-09-20 시험 개방 원장 — **실측을 하려면 보낼 길이 있어야 한다.**
+ *
+ * 위 `BUBBLE_TYPE_OPENED`는 「실측 REPORT 0000을 본 유형만」이라는 계약을 그대로 지킨다. 그런데 그 실측을
+ * 하려면 누군가는 그 유형을 실제로 보낼 수 있어야 한다. 그래서 **시험 계정에게만** 열리는 원장을 따로 둔다.
+ *   · 시험 계정 = ENV `BRAND_TRIAL_LOGIN_IDS`(쉼표 명단). **비어 있으면 아무도 아니다**(기본 꺼짐).
+ *   · 유형 하나가 실측을 통과하면 여기서 빼서 위 원장으로 옮긴다(개방일·근거 필수). 그때 전 고객에게 열린다.
+ * ⛔ 이 원장의 유형을 일반 계정에 여는 분기를 만들지 마라 — 형식이 어긋나면 차감만 남는 구조는 그대로다.
+ */
+export const BUBBLE_TYPE_TRIAL: Record<string, { since: string; note: string }> = {
+  WIDE_ITEM_LIST:    { since: '2026-09-20', note: '시험 계정 한정 · 실측 전' },
+  CAROUSEL_FEED:     { since: '2026-09-20', note: '시험 계정 한정 · 실측 전' },
+  PREMIUM_VIDEO:     { since: '2026-09-20', note: '시험 계정 한정 · 실측 전' },
+  COMMERCE:          { since: '2026-09-20', note: '시험 계정 한정 · 실측 전' },
+  CAROUSEL_COMMERCE: { since: '2026-09-20', note: '시험 계정 한정 · 실측 전' },
+};
+
+export function isTrialBubbleType(t: any): boolean {
+  return Object.prototype.hasOwnProperty.call(BUBBLE_TYPE_TRIAL, String(t || '').trim().toUpperCase());
+}
+
+/** 이 login_id가 브랜드 시험 계정인가 — 명단이 비면 **아무도 아니다**(rollout-gate의 「빈 명단 = 전면」과 반대라 먼저 막는다) */
+export function isBrandTrialLogin(loginId: string | null | undefined): boolean {
+  const raw = String(process.env.BRAND_TRIAL_LOGIN_IDS || '').trim();
+  if (!raw) return false;
+  return isPilotTarget(raw, loginId);
+}
+
+/** userId → 시험 계정 여부. 조회 실패는 「아니다」로 접는다(fail-closed) */
+export async function isBrandTrialUser(userId: string | null | undefined): Promise<boolean> {
+  if (!userId || !String(process.env.BRAND_TRIAL_LOGIN_IDS || '').trim()) return false;
+  try {
+    const r = await query('SELECT login_id FROM users WHERE id = $1', [userId]);
+    return isBrandTrialLogin(r.rows?.[0]?.login_id);
+  } catch (e: any) {
+    console.warn('[brand-message] 시험 계정 판정 실패 — 시험 유형을 열지 않는다:', e?.message);
+    return false;
+  }
+}
+
+/** 이 사용자가 지금 고를 수 있는 시험 유형 목록(화면용). 시험 계정이 아니면 빈 배열 */
+export async function listBrandTrialTypes(userId: string | null | undefined): Promise<string[]> {
+  return (await isBrandTrialUser(userId)) ? Object.keys(BUBBLE_TYPE_TRIAL) : [];
+}
+
 export function isSupportedBubbleType(t: any): boolean {
   return (SUPPORTED_BUBBLE_TYPES as readonly string[]).includes(String(t || '').trim().toUpperCase());
 }
 
 const UNSUPPORTED_BUBBLE_MSG = (t: string) =>
-  `브랜드메시지 '${t}' 유형은 아직 지원하지 않습니다 (TEXT·IMAGE·WIDE만 발송 가능)`;
+  `브랜드메시지 '${t}' 유형은 아직 지원하지 않습니다 (${SUPPORTED_BUBBLE_TYPES.join('·')}만 발송 가능)`;
 
 // ============================================================
 // SMSQ 적재 규약 조립 + 대체발송 매핑 (2026-08-15 경계 규약 정정)
@@ -310,6 +357,16 @@ export interface BrandQueuePayloadParams {
    */
   sendAt?: Date | string | null;
   /**
+   * ★2026-09-20 시험 계정의 발송인가 — true면 `BUBBLE_TYPE_TRIAL` 유형도 받는다.
+   * 판정은 호출부가 `isBrandTrialUser(userId)`로 한다(조립기는 사용자를 모른다). 미지정 = false.
+   */
+  trialAllowed?: boolean;
+  /**
+   * ★2026-09-20 적재 대상 테이블의 `k_etc_json` 실제 폭(`getEtcJsonCapacity`). 미지정 = 1024.
+   * 비토 라인(8192)으로 가는 발송만 넓은 값을 넘긴다 — QTmsg 라인은 월별 log가 1024라 넘기면 안 된다.
+   */
+  etcJsonMax?: number;
+  /**
    * 이 건이 **지금 나가는가**(예약이 아닌가). 마감 여유 적용 여부를 가른다.
    * 미지정이면 sendAt이 비었는지로 판단한다 — 다만 즉시발송도 시각을 고정해 넘기는 경로가 있어
    * (검증 시각 = 적재 시각을 맞추려고) 그 경로는 이 값을 명시해야 한다.
@@ -324,8 +381,13 @@ export interface BrandQueuePayload {
   etcJson: string;
 }
 
-/** k_etc_json 컬럼 실측 한도 — SMSQ_SEND_1x varchar(1024). 초과분은 적재가 깨지므로 적재 전에 막는다. */
-const K_ETC_JSON_MAX = 1024;
+/**
+ * k_etc_json 한도 — 기본 1024(QTmsg 라인·월별 log 실측). 초과분은 적재가 깨지므로 적재 전에 막는다.
+ * ★2026-09-20 값의 주인을 DB로 옮겼다: 비토 라인은 8192로 넓혔고(SCHEMA.md), 호출부가 적재 대상 테이블의
+ *   실제 폭을 `etcJsonMax`로 넘긴다. 상수 하나로 두면 테이블마다 다른 폭을 표현할 수 없다.
+ */
+// ⛔ 모듈 최상단에서 값을 꺼내지 않는다 — sms-queue를 통째로 흉내 내는 테스트가 이 파일을 import만 해도 깨진다.
+const etcJsonBaseMax = (): number => K_ETC_JSON_BASE_MAX;
 
 export class BrandMessageBuildError extends Error {
   constructor(message: string) {
@@ -356,7 +418,8 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
     throw new BrandMessageBuildError('브랜드메시지 발신프로필 키(senderKey)가 없습니다');
   }
   const bubble = String(p.bubbleType || '').trim().toUpperCase();
-  if (!isSupportedBubbleType(bubble)) {
+  // 발송이 열린 유형이거나, 시험 계정의 시험 유형이어야 한다(그 밖은 입구에서 막는다)
+  if (!isSupportedBubbleType(bubble) && !(p.trialAllowed === true && isTrialBubbleType(bubble))) {
     throw new BrandMessageBuildError(UNSUPPORTED_BUBBLE_MSG(bubble || '(없음)'));
   }
   // ★2026-08-28 캐러셀 입구 개방 — 상위 조립 규격을 확보했다(attachment_method.pdf §5.3).
@@ -376,7 +439,14 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
   }
 
   // 매뉴얼 §2.2.2 — M/N 타겟팅은 무료수신거부 번호 필수. 없으면 발송 단계에서 무로그 거절되므로 적재 전에 막는다.
-  const unsubPhone = String(p.unsubscribePhone || '').trim();
+  // ★ 2026-09-20 수신거부 번호는 **하이픈 형식으로만** 싣는다(Harold 실측 — 하이픈 없이 가면 발송이 실패한다).
+  //   화면마다 맞추면 입구가 늘 때마다 샌다. 호출부 전부가 지나는 이 조립기에서 080-XXX-XXXX ·
+  //   080-XXXX-XXXX 두 형태로 고쳐 싣고, 080 번호가 아니면(자릿수·접두) 적재 전에 막는다.
+  const unsubDigits = normalize080Number(p.unsubscribePhone);
+  if (unsubDigits && !/^080\d{7,8}$/.test(unsubDigits)) {
+    throw new BrandMessageBuildError('수신거부 번호는 080으로 시작하는 10~11자리 번호여야 합니다 (예: 080-123-4567)');
+  }
+  const unsubPhone = unsubDigits ? format080Number(unsubDigits) : '';
   const unsubAuth = String(p.unsubscribeAuth || '').trim();
   if ((targeting === 'M' || targeting === 'N') && !unsubPhone) {
     throw new BrandMessageBuildError('마수동(M/N) 대상 발송은 무료수신거부 번호가 필요합니다. 수신거부 번호를 입력하거나 대상 범위를 채널 친구로 바꿔주세요');
@@ -472,8 +542,10 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
   }
 
   const etcJson = JSON.stringify(etc);
-  if (etcJson.length > K_ETC_JSON_MAX) {
-    throw new BrandMessageBuildError(`브랜드메시지 부가 정보가 너무 깁니다 (${etcJson.length}자, 최대 ${K_ETC_JSON_MAX}자). 버튼·링크 길이를 줄여주세요`);
+  const baseMax = etcJsonBaseMax();
+  const etcMax = Number.isFinite(p.etcJsonMax) && (p.etcJsonMax as number) >= baseMax ? (p.etcJsonMax as number) : baseMax;
+  if (etcJson.length > etcMax) {
+    throw new BrandMessageBuildError(`브랜드메시지 부가 정보가 너무 깁니다 (${etcJson.length}자, 최대 ${etcMax}자). 카드·버튼 수나 링크 길이를 줄여주세요`);
   }
 
   return { msgContents, etcJson };
@@ -637,18 +709,6 @@ export interface BrandItemListItem {
   scheme_ios?: string;
 }
 
-export interface CarouselItem {
-  header?: string;
-  message?: string;
-  additional_content?: string;
-  attachment?: {
-    button?: BrandButton[];
-    image?: BrandImage;
-    coupon?: BrandCoupon;
-    commerce?: BrandCommerce;
-  };
-}
-
 export interface BrandMessageParams {
   // 필수
   bubbleType: BubbleTypeCode;
@@ -672,10 +732,11 @@ export interface BrandMessageParams {
   video?: BrandVideo;
   itemList?: BrandItemListItem[];
 
-  // 캐러셀
-  carouselHead?: { header?: string; description?: string; img_url?: string; img_link?: string };
-  carouselItems?: CarouselItem[];
-  carouselTail?: { link?: { url_mobile: string; url_pc?: string } };
+  // 캐러셀 — ★2026-09-20 조립기(`buildCarouselJson`) 입력 타입 그대로 받는다. 옛 타입은 규격 밖 키
+  //   (인트로 `description`·`img_url` · 더보기 `link` 래핑)를 적고 있었고 소비처가 없었다(발송이 막혀 있어 드러나지 않았다).
+  carouselHead?: BrandCarouselIntro;
+  carouselItems?: BrandCarouselCard[];
+  carouselTail?: BrandCarouselTail;
 
   // 대체 발송
   resendType?: string;
@@ -866,6 +927,9 @@ function assertBrandContentSpec(input: {
   for (const it of Array.isArray(attItem?.list) ? attItem.list : []) {
     assertNoOwnServingImage((it as any)?.img_url, label);
   }
+  // ★2026-09-20 동영상 썸네일도 같은 자리다 — 5종 개통으로 이미지가 실리는 자리가 늘었는데 게이트는
+  //   `image`·아이템 두 자리에만 있었다. 치환을 빠뜨린 자리가 생기면 0901과 똑같이 큐에는 들어가고 발송만 죽는다.
+  assertNoOwnServingImage(attVideo?.thumbnail_url, label);
   if (spec.requireVideo && !required(attVideo !== undefined, !!strFieldOrThrow(attVideo?.video_url, '동영상 주소'))) {
     throw new BrandMessageBuildError(`${label}: 동영상 주소가 필요합니다`);
   }
@@ -1029,6 +1093,7 @@ export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: 
     if (!strFieldOrThrow(head?.image_url, '인트로 이미지')) {
       throw new BrandMessageBuildError('캐러셀 인트로: 이미지가 필요합니다');
     }
+    assertNoOwnServingImage(head?.image_url, label);   // 우리 서빙 URL은 카카오가 받지 않는다(조립기 본체와 같은 게이트)
     // §5.3 "url_mobile이 필수 — url_mobile, url_pc, scheme_android, scheme_ios 중 하나라도 입력하는 경우"
     const introLinkKeys = ['url_pc', 'scheme_android', 'scheme_ios'];
     const hasOtherLink = introLinkKeys.some((k) => strFieldOrThrow(head?.[k], '인트로 링크'));
@@ -1091,6 +1156,7 @@ export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: 
 
     // 카드 안의 attachment는 다시 이미지·버튼·쿠폰·커머스를 품는다(§5.2 "캐러셀 아이템 이미지, 버튼 정보").
     const cAtt = plainObjectOrThrow(card?.attachment, `${at} 첨부`) ?? {};
+    assertNoOwnServingImage((cAtt as any)?.image?.img_url, label);
     const cCommerce = plainObjectOrThrow(cAtt.commerce, `${at} 상품 정보`);
     const cProdTitle = strFieldOrThrow(cCommerce?.title, `${at} 상품명`);
     if (cProdTitle && spec.maxCommerceTitle > 0 && charLen(cProdTitle) > spec.maxCommerceTitle) {
@@ -1624,19 +1690,52 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
     return { success: false, sentCount: 0, failCount: 0, error: '수신자가 없습니다' };
   }
 
-  // 2. 적재 규약(msg_contents+k_etc_json)·대체발송 확정 — 차감 전에 조립해 형식 결함을 선차단(fail-closed)
+  // 2. 발송 테이블 확정 — ★2026-09-20 조립보다 앞으로 올렸다. 조립기가 **적재 대상 테이블의 실제 폭**으로
+  //    k_etc_json 한도를 판정해야 하기 때문이다(비토 라인 8192 · 그 외 1024 — sms-queue getEtcJsonCapacity).
+  //    차감보다 앞인 것은 그대로다.
+  const tables = await getCompanySmsTables(params.companyId, params.userId);
+  if (tables.length === 0) {
+    return { success: false, sentCount: 0, failCount: 0, error: '발송 라인이 설정되지 않았습니다. 관리자에게 문의하세요.' };
+  }
+
+  // 3. 적재 규약(msg_contents+k_etc_json)·대체발송 확정 — 차감 전에 조립해 형식 결함을 선차단(fail-closed)
   let queuePayload: BrandQueuePayload;
   let fallback: ResolvedBrandFallback;
+  const bubbleKey = String(params.bubbleType || '').trim().toUpperCase();
+  const bubbleSpec: BrandBubbleSpec | undefined = BUBBLE_TYPES[bubbleKey];
   try {
+    // 시험 계정 여부 · 적재 테이블 폭 — 둘 다 조립기가 모르는 값이라 여기서 구해 넘긴다
+    const trialAllowed = await isBrandTrialUser(params.userId);
+    const etcJsonMax = await getEtcJsonCapacity(tables[0]);   // insertBrandQueue가 쓰는 테이블과 같은 자리
+
     // ★ 2026-09-01 AI 생성 이미지 안내 문구(§4-4) — 판정·부착은 조립·차감보다 앞.
     //   대체발송은 아래에서 **원본 본문**으로 확정한다 — 문자 대체본은 카카오 심사 대상이
     //   아니라 문구를 넣지 않는다(§4-7-①). 보강본은 카카오로 가는 큐 본문에만 쓴다.
     let message = params.message;
     if (await isBrandImageAiGenerated(params.companyId, params.image)) {
-      const spec = BUBBLE_TYPES[String(params.bubbleType || '').trim().toUpperCase()];
       // spec이 없는 유형은 바로 아래 조립기가 미지원으로 거절한다 — 판정을 두 벌 두지 않는다.
-      if (spec) message = appendAiImageNotice(String(params.message || ''), spec);
+      if (bubbleSpec) {
+        // ★2026-09-20 본문이 없는 유형은 안내 문구를 붙일 자리가 없다 — 표시 없이 나가지 않게 막는다(Harold 승인)
+        if (bubbleSpec.maxMessage === 0) {
+          throw new BrandMessageBuildError(`${bubbleSpec.label} 유형은 본문이 없어 AI 생성 이미지 안내 문구를 넣을 수 없습니다. 직접 올린 이미지를 사용해주세요`);
+        }
+        message = appendAiImageNotice(String(params.message || ''), bubbleSpec);
+      }
     }
+    // ★2026-09-20 그 밖의 이미지 자리(아이템·동영상 썸네일·캐러셀 카드·인트로)는 안내 문구를 자동으로 붙일
+    //   규칙이 아직 없다. AI 생성 이미지가 하나라도 있으면 막는다(fail-closed · 표시 없이 나가는 것을 막는 쪽).
+    const otherImageUrls: string[] = [
+      ...(params.itemList || []).map((it) => it?.img_url),
+      params.video?.thumbnail_url,
+      params.carouselHead?.image_url,
+      ...(params.carouselItems || []).map((c) => c?.image?.img_url),
+    ].map((u) => String(u || '').trim()).filter(Boolean);
+    for (const u of otherImageUrls) {
+      if (await isBrandImageAiGenerated(params.companyId, { img_url: u })) {
+        throw new BrandMessageBuildError('이 자리에는 AI로 만든 이미지를 쓸 수 없습니다(안내 문구를 넣을 수 없는 자리입니다). 직접 올린 이미지를 사용해주세요');
+      }
+    }
+
     // ★ 2026-09-02 이미지를 카카오 콘텐츠 서버 URL로 확정 — `img_url`에는 업로드본만 실을 수 있다
     //   (외부 URL 불가 · `imc.*`는 에이전트 전용이라 소켓 직연동인 우리는 못 쓴다 — IMC 회신).
     //   ⛔ 반드시 **위 AI 생성 판정 뒤**다. 판정 근거가 우리 서빙 URL이라 먼저 치환하면 판정이
@@ -1648,12 +1747,24 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
       bubbleType: params.bubbleType,
       image: params.image,
     });
+    const rich = await resolveBrandSendRichImages({
+      companyId: params.companyId,
+      userId: params.userId,
+      bubbleType: params.bubbleType,
+      itemList: params.itemList,
+      video: params.video,
+      carouselCards: params.carouselItems,
+      carouselIntro: params.carouselHead,
+    });
+    const hasCarousel = Array.isArray(rich.carouselCards) && rich.carouselCards.length > 0;
     queuePayload = buildBrandQueuePayload({
       typeDef: 'FREE',
       senderKey: params.senderKey,
       targeting: params.targeting,
       bubbleType: params.bubbleType,
       isAd: params.isAd === true,
+      trialAllowed,
+      etcJsonMax,
       header: params.header,
       additionalContent: params.additionalContent,
       message,
@@ -1665,11 +1776,15 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
         buttons: params.buttons,
         image: sendImage,
         coupon: params.coupon,
-        itemList: params.itemList,
+        itemList: rich.itemList,
         commerce: params.commerce,
-        video: params.video,
+        video: rich.video,
       }),
-      carouselJson: (params.carouselItems && params.carouselItems.length > 0) ? '[]' : null,
+      // ★2026-09-20 캐러셀 배선 — 그전에는 자리표시 `'[]'`를 넘겨, 조립 함수(buildCarouselJson)가
+      //   있는데도 이 경로에서는 아무도 부르지 않았다(캐러셀은 검사에서 반드시 거절되는 상태였다).
+      carouselJson: hasCarousel
+        ? buildCarouselJson({ intro: rich.carouselIntro, cards: rich.carouselCards!, tail: params.carouselTail })
+        : null,
     });
     fallback = resolveBrandFallback({
       resendType: params.resendType,
@@ -1681,17 +1796,13 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
     return { success: false, sentCount: 0, failCount: 0, error: buildErr?.message || '브랜드메시지 구성 오류' };
   }
 
-  // 3. 수신거부 필터
+  // 4. 수신거부 필터
   const filteredPhones = await filterUnsubscribed(params.userId, params.phones);
   if (filteredPhones.length === 0) {
     return { success: false, sentCount: 0, failCount: 0, error: '모든 수신자가 수신거부 상태입니다' };
   }
 
-  // 4. 발송 테이블·회신번호 확정 — 차감 전에 확정해 적재 불능 상태를 선차단
-  const tables = await getCompanySmsTables(params.companyId, params.userId);
-  if (tables.length === 0) {
-    return { success: false, sentCount: 0, failCount: 0, error: '발송 라인이 설정되지 않았습니다. 관리자에게 문의하세요.' };
-  }
+  // 회신번호 확정 — 차감 전에 확정해 적재 불능 상태를 선차단(발송 테이블은 위 2번에서 확정했다)
   const callback = await resolveBrandCallback(params.companyId, params.resendFrom);
   if (!callback && fallback.nextType !== 'N') {
     return { success: false, sentCount: 0, failCount: 0, error: '대체발송 회신번호가 없습니다. 기본 회신번호를 등록해주세요.' };
@@ -1716,6 +1827,8 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
     titleStr: fallback.titleStr,
     reservedDate: params.reservedDate,
     companyId: params.companyId,
+    // 본문 없는 유형은 조립기가 msg_contents를 일부러 비운다(0828 게이트웨이 MESSAGE 계약) — 큐 방어에 그 사실을 알린다
+    allowEmptyContents: !!bubbleSpec && bubbleSpec.maxMessage === 0,
   }));
 
   let sentCount = 0;

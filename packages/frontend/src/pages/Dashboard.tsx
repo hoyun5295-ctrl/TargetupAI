@@ -3697,6 +3697,7 @@ const campaignData = {
         profiles={alimtalkSenders}
         initialRecipients={brandInitialRecipients}
         entry={brandEntry}
+        optOutNumber={optOutNumber}
         isAiTargetLocked={isAiMessagingLocked}
         onLockedFeature={openPlanFeature}
         sending={brandSending}

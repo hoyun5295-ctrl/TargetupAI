@@ -814,6 +814,25 @@ export function formatPhoneNumber(phone: string): string {
 }
 
 /**
+ * ★ 2026-09-20 080 수신거부 번호 **입력 중** 하이픈 자동 부착.
+ * `formatPhoneNumber`는 자릿수가 다 찬 번호만 고친다(입력 도중에는 원문 반환). 입력칸은 치는 동안에도
+ * 하이픈이 따라붙어야 해서 단계별로 끊는다: 10자리까지 080-XXX-XXXX, 11번째 숫자가 들어오면 080-XXXX-XXXX.
+ * 숫자 외 문자는 버리고 11자리에서 자른다. 최종 판정은 백엔드 CT-12(080 시작 · 10~11자리)가 한다.
+ */
+export function format080Input(raw: string): string {
+  const d = String(raw ?? '').replace(/\D/g, '').slice(0, 11);
+  if (d.length <= 3) return d;
+  if (d.length <= 6) return `${d.slice(0, 3)}-${d.slice(3)}`;
+  if (d.length <= 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
+  return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
+}
+
+/** 080 수신거부 번호로 보낼 수 있는 형태인가 — 백엔드 CT-12 판정의 거울(080 시작 · 10~11자리) */
+export function isValid080Number(raw: string): boolean {
+  return /^080\d{7,8}$/.test(String(raw ?? '').replace(/\D/g, ''));
+}
+
+/**
  * ★ D99: 수신자의 개별회신번호 값 추출 — 컨트롤타워
  * individualCallbackColumn이 지정되면 해당 컬럼에서 회신번호 추출.
  * custom_fields JSONB 내부 키(custom_1~15)도 지원.
