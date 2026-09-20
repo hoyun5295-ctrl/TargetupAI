@@ -1234,7 +1234,14 @@ export function extractImageFromAnyShape(r: any): { imageUrl?: string; imageName
   return {};
 }
 
-/** 다중 이미지 업로드 응답에서 목록 추출 — ★2026-09-20 `routes/alimtalk.ts`에서 옮겨 왔다(본문 무변경) */
+/**
+ * 다중 이미지 업로드 응답에서 목록 추출 — ★2026-09-20 `routes/alimtalk.ts`에서 옮겨 왔다.
+ * ★2026-09-20(2) 다중 창구의 실제 응답 구조를 더했다 — 운영 로그 원문:
+ *   `{"code":"0000","data":{"overallStatus":"SUCCESS","success":[{"index":0,"formField":"image_1","imageUrl":"https://…"}],"failure":[]}}`
+ *   목록 키가 `success`이고 원소에 imageName이 없다. 그전에는 `list`·`images` 키와 imageUrl+imageName 쌍만 읽어서,
+ *   카카오 업로드가 성공했는데도 빈 목록이 나와 캐러셀 피드 발송 2건이 「이미지 등록 결과를 확인하지 못했습니다」로 죽었다.
+ *   ⛔ 새 후보는 기존 후보 **뒤**에 둔다(지금 읽히는 구조의 결과를 바꾸지 않는다).
+ */
 export function extractImageListFromAnyShape(r: any): { imageUrl: string; imageName: string }[] {
   if (!r) return [];
   const cands = [
@@ -1243,6 +1250,8 @@ export function extractImageListFromAnyShape(r: any): { imageUrl: string; imageN
     r?.data?.images,
     r?.data?.data?.images,
     Array.isArray(r?.data) ? r.data : null,
+    r?.data?.success,
+    r?.data?.data?.success,
   ];
   // ★ D146 (2026-05-07): list element 변종 수용 — {imageUrl,imageName} / {image:"url"} / "url"(string)
   const fromUrl = (url: string) => {
@@ -1257,6 +1266,7 @@ export function extractImageListFromAnyShape(r: any): { imageUrl: string; imageN
           if (typeof it === 'string' && it.startsWith('http')) return fromUrl(it);
           if (typeof it === 'object') {
             if (it.imageUrl && it.imageName) return { imageUrl: it.imageUrl, imageName: it.imageName };
+            if (typeof it.imageUrl === 'string' && it.imageUrl.startsWith('http')) return fromUrl(it.imageUrl);
             if (typeof it.image === 'string' && it.image.startsWith('http')) return fromUrl(it.image);
           }
           return null;

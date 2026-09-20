@@ -59,8 +59,8 @@ type UploadRoute = { uploadType: string; upload: (buf: Buffer, name: string) => 
 
 /**
  * IMC 업로드 창구 6개 — ★2026-09-20 자유형 5종 개통으로 4개를 더했다.
- * 창구 배정의 근거 = 템플릿 등록 화면(`BrandTemplateForm` `IMG_EP`·`imageEndpointFor`)이 같은 자리에 쓰는 창구다
- * (그 경로는 운영에서 등록이 통과하고 있다). 발송 쪽에서 카카오가 받는지는 **유형별 실측으로만** 확정된다.
+ * 창구 배정의 근거 = 템플릿 등록 화면(`BrandTemplateForm` `IMG_EP`·`imageEndpointFor`)이 같은 자리에 쓰는 창구다.
+ * 발송 쪽에서 카카오가 받는지는 **유형별 실측으로만** 확정된다(0920 실측 = 캐러셀 피드 창구 업로드 성공 · code 0000).
  * 다중 창구(wide-list·carousel-*)도 한 장씩 올린다 — 자리마다 제목·링크가 달라 한 장 단위가 규격에 맞다.
  * `upload_type`은 varchar(30)이다(SCHEMA.md kakao_image_uploads) — 이름을 늘릴 때 길이를 본다.
  */

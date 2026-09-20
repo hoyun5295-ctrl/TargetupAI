@@ -42,6 +42,7 @@ vi.mock('./alimtalk-api', async (importOriginal) => {
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
 import { resolveBrandSendImage, resolveBrandSendAttachmentJson, resolveBrandSendRichImages, BrandImageResolveError } from './brand-image-resolver';
+import { extractImageListFromAnyShape } from './alimtalk-api';
 
 const queryMock = vi.mocked(query);
 const uploadDefault = vi.mocked(imc.uploadBrandDefaultImage);
@@ -413,7 +414,13 @@ describe('허용 목록은 업로드 유형까지 본다 (Codex 2R high1)', () =
 describe('5종의 이미지 자리 확정 (resolveBrandSendRichImages)', () => {
   const K = (n: string) => `https://mud-kage.kakao.com/dn/abc/${n}.jpg`;
   const single = (n: string) => ({ code: '0000', message: 'OK', data: { imageUrl: K(n), imageName: `${n}.jpg` } }) as any;
-  const multi = (n: string) => ({ code: '0000', message: 'OK', data: { list: [{ imageUrl: K(n), imageName: `${n}.jpg` }] } }) as any;
+  // ★0920 다중 창구의 **실제 응답 구조**(운영 로그 09:16·17:57 원문) — 목록 키가 `success`이고 원소에 imageName이 없다.
+  //   처음에는 이 대역을 `data.list[{imageUrl,imageName}]`로 지어냈고, 그래서 추출 실패를 테스트가 못 잡았다
+  //   (대역이 실물과 다르면 결함을 덮는다). 구조를 바꿀 때는 운영 로그의 원문을 다시 떠서 맞춘다.
+  const multi = (n: string) => ({
+    code: '0000', message: 'SUCCESS',
+    data: { overallStatus: 'SUCCESS', code: '0000', message: null, success: [{ index: 0, formField: 'image_1', imageUrl: K(n) }], failure: [] },
+  }) as any;
 
   beforeEach(() => {
     uploadListFirst.mockResolvedValue(single('first'));
@@ -510,5 +517,38 @@ describe('5종의 이미지 자리 확정 (resolveBrandSendRichImages)', () => {
       companyId: COMPANY, bubbleType: 'WIDE_ITEM_LIST',
       itemList: [{ img_url: OWN_REL, url_mobile: 'https://a' }, { title: '둘', img_url: OWN_REL, url_mobile: 'https://b' }],
     })).rejects.toBeInstanceOf(BrandImageResolveError);
+  });
+});
+
+/**
+ * ★2026-09-20 다중 업로드 응답 추출 — 0920 캐러셀 피드 발송 2건이 「이미지 등록 결과를 확인하지 못했습니다」로 죽은 원인.
+ * 카카오 업로드는 성공(code 0000 · imageUrl 발급)했는데 추출 함수가 `data.success[]`와 imageName 없는 원소를 몰랐다.
+ * 이 함수는 템플릿 등록 화면의 다중 업로드 라우트 3곳도 함께 쓴다(routes/alimtalk.ts).
+ */
+describe('다중 업로드 응답 추출 (extractImageListFromAnyShape)', () => {
+  it('운영 로그 원문 구조 — data.success[] · imageName 없음', () => {
+    const raw = {
+      code: '0000', message: 'SUCCESS',
+      data: {
+        overallStatus: 'SUCCESS', code: '0000', message: null,
+        success: [{ index: 0, formField: 'image_1', imageUrl: 'https://mud-kage.kakao.com/dn/ezNyS/dJMcadXUGoK/iJ0RHXJmy3qe3vWGJ0A1wk/img_l.jpg' }],
+        failure: [],
+      },
+    };
+    expect(extractImageListFromAnyShape(raw)).toEqual([
+      { imageUrl: 'https://mud-kage.kakao.com/dn/ezNyS/dJMcadXUGoK/iJ0RHXJmy3qe3vWGJ0A1wk/img_l.jpg', imageName: 'img_l.jpg' },
+    ]);
+  });
+
+  it('종전에 읽던 구조는 그대로 읽는다 — list · images · 문자열 원소 · image 키', () => {
+    const U = 'https://mud-kage.kakao.com/dn/a/b/c/img_l.jpg';
+    expect(extractImageListFromAnyShape({ data: { list: [{ imageUrl: U, imageName: 'n.jpg' }] } })).toEqual([{ imageUrl: U, imageName: 'n.jpg' }]);
+    expect(extractImageListFromAnyShape({ data: { data: { images: [U] } } })).toEqual([{ imageUrl: U, imageName: 'img_l.jpg' }]);
+    expect(extractImageListFromAnyShape({ data: [{ image: U }] })).toEqual([{ imageUrl: U, imageName: 'img_l.jpg' }]);
+  });
+
+  it('성공 목록이 비면 빈 배열 — `success: true` 같은 불리언은 목록으로 보지 않는다', () => {
+    expect(extractImageListFromAnyShape({ code: '0000', data: { success: [], failure: [{ index: 0 }] } })).toEqual([]);
+    expect(extractImageListFromAnyShape({ code: '0000', data: { success: true } })).toEqual([]);
   });
 });
