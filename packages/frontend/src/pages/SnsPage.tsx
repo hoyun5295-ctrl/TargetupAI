@@ -1,57 +1,34 @@
-// SNS 게시 — 계정 연결 화면 (2026-09-20 S1)
+// SNS 채널 — 계정 연결 화면 (2026-09-20 S1 · C안 확정)
 // 설계 SoT = docs/2026-09-17-sns-publish-design.md §4-1 · §3-10 · §3-11
 //
-// S1 범위 = 채널 계정 연결·해제·상태. 작성·예약·이력 구역은 S2·S3에서 이 페이지에 붙는다.
-// 다크 slate-950 + violet 액센트 · native dialog 0(ConfirmModal·useToast) · 모델명 0 · 모바일 반응형.
+// 화면 규칙
+//   - 채널 카드 4칸 1줄. **연결된 채널은 브랜드 색이 살아나고 아직인 채널은 가라앉는다** — 상태를 색으로 먼저 읽는다.
+//   - 지면은 slate-950, 버튼·배지 액센트는 violet·emerald 그대로. 브랜드 색은 카드 배경에만 번진다(정합성).
+//   - 상태 배지를 누르면 채널 상세 창. native dialog 0(커스텀 모달 · ConfirmModal · useToast).
+//   - 채널 목록·규격은 **서버가 준 specs 만** 그린다. 화면이 채널을 추론하지 않는다(§3-3).
 //
 // ⛔ 연결 여부는 **서버 상태를 다시 읽은 결과로만** 말한다(§3-10).
-//    승인 창이 보내는 메시지는 "다시 읽어라" 신호일 뿐이며 성공 여부를 담고 있지 않다.
+//    승인 창이 보내는 메시지는 "다시 읽어라" 신호일 뿐 성공 여부를 담고 있지 않다.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
-import {
-  ArrowLeft, Share2, Link2, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Unlink, ExternalLink,
-} from 'lucide-react';
+import { ArrowLeft, Share2, Link2, Loader2, RefreshCw, AlertTriangle, ExternalLink, Plus } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
+import SnsChannelLogo from '../components/sns/SnsChannelLogo';
+import SnsChannelModal from '../components/sns/SnsChannelModal';
+import { snsBrandColor } from '../constants/sns-brand';
+import {
+  SNS_ACCOUNT_BADGE, liveSnsAccounts, snsAccountAbility,
+  type SnsAccount, type SnsSpec,
+} from '../utils/sns-view';
 import {
   OUI_BACK, OUI_CARD, OUI_EMPTY, OUI_EMPTY_DESC, OUI_EMPTY_ICON, OUI_EMPTY_TITLE, OUI_HEADER,
   OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_PAGE_CENTER, OUI_SRC, OUI_SUBTITLE, OUI_TITLE,
-  OUI_WRAP_NARROW, OUI_BTN_PRIMARY, OUI_BTN_GHOST,
+  OUI_WRAP_WIDE, OUI_BTN_PRIMARY, OUI_BTN_GHOST, OUI_BTN_OUTLINE,
 } from '../utils/operator-ui';
 import OperatorAura from '../components/operator/OperatorAura';
-
-interface SnsSpec {
-  platform: string;
-  label: string;
-  available: boolean;
-  capabilities: { maxCaptionChars: number; maxTags: number; publishCarousel: boolean };
-}
-
-interface SnsAccount {
-  id: string;
-  platform: string;
-  username: string | null;
-  displayName: string | null;
-  avatarUrl: string | null;
-  status: string;
-  statusReason: string | null;
-  connectedAt: string | null;
-  lastVerifiedAt: string | null;
-  tokenExpiresAt: string | null;
-}
-
-/** 계정 카드 배지 사전 — 문구·색을 여기서만 쓴다(§3-5). 사전에 없는 값은 그리지 않는다. */
-const ACCOUNT_BADGE: Record<string, { label: string; cls: string }> = {
-  active: { label: '연결됨', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' },
-  pending: { label: '확인 중', cls: 'bg-violet-500/15 text-violet-200 border-violet-400/30' },
-  ineligible: { label: '계정 확인 필요', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' },
-  token_expired: { label: '다시 연결 필요', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' },
-  reauth_required: { label: '다시 연결 필요', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' },
-  revoked: { label: '해제됨', cls: 'bg-white/10 text-white/60 border-white/15' },
-  error: { label: '확인 필요', cls: 'bg-rose-500/15 text-rose-300 border-rose-400/30' },
-};
 
 export default function SnsPage() {
   const navigate = useNavigate();
@@ -64,6 +41,7 @@ export default function SnsPage() {
   const [busyPlatform, setBusyPlatform] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [popupBlockedUrl, setPopupBlockedUrl] = useState<string | null>(null);
+  const [openChannel, setOpenChannel] = useState<string | null>(null);
 
   /** 이 화면이 연 승인 창의 state. 다른 창이 보낸 메시지를 무시하는 근거. */
   const pendingNonce = useRef<string | null>(null);
@@ -73,8 +51,7 @@ export default function SnsPage() {
   const auth = () => ({ Authorization: `Bearer ${token()}` });
 
   // ⛔ `useToast()`는 매 렌더 새 객체를 돌려준다(ToastProvider 에 useMemo 가 없다).
-  //    toast 를 `load` 의 의존성에 두면 load 가 매 렌더 새로 만들어지고, 그것을 보는 effect 가 끝없이 돈다.
-  //    최신 toast 는 ref 로 잡고 `load` 는 의존성 없이 고정한다.
+  //    toast 를 `load` 의 의존성에 두면 load 가 매 렌더 새로 만들어지고 그것을 보는 effect 가 끝없이 돈다.
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
@@ -82,11 +59,7 @@ export default function SnsPage() {
     try {
       const res = await fetch('/api/sns/overview', { headers: auth() });
       const data = await res.json();
-      if (res.status === 403 && data?.code === 'PLAN_FEATURE_LOCKED') {
-        setEnabled(false);
-        setAccounts([]);
-        return;
-      }
+      if (res.status === 403) { setEnabled(false); setAccounts([]); return; }
       if (!data?.success) throw new Error(data?.error || '불러오지 못했습니다.');
       setEnabled(!!data.enabled);
       setAccounts(Array.isArray(data.accounts) ? data.accounts : []);
@@ -100,7 +73,7 @@ export default function SnsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // 승인 창이 보내는 신호 — **성공 여부를 담고 있지 않다.** 받으면 서버를 다시 읽을 뿐이다(§3-10).
+  // 승인 창이 보내는 신호 — 성공 여부가 아니라 "다시 읽어라"다(§3-10).
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return;
@@ -144,9 +117,8 @@ export default function SnsPage() {
       pendingNonce.current = data.stateNonce;
       const win = window.open(data.authorizeUrl, 'hanjullo-sns-auth', 'width=600,height=760');
       if (!win) {
-        // 팝업 차단 — 링크를 직접 눌러 열 수 있게 남긴다.
         setBusyPlatform(null);
-        setPopupBlockedUrl(data.authorizeUrl);
+        setPopupBlockedUrl(data.authorizeUrl);   // 팝업 차단 — 직접 열 수 있게 남긴다
         return;
       }
       popupRef.current = win;
@@ -156,10 +128,7 @@ export default function SnsPage() {
     }
   };
 
-  /**
-   * 다시 연결 — 서버에 소유를 먼저 물어본다. 그 사이 계정이 사라졌으면 승인 창을 띄우기 전에 알 수 있다.
-   * 화면이 이미 platform 을 알고 있어도 이 왕복을 건너뛰지 않는다(소유 확인은 서버가 한다).
-   */
+  /** 다시 연결 — 서버에 소유를 먼저 물어본다. 그 사이 계정이 사라졌으면 창을 띄우기 전에 안다. */
   const reconnect = async (accountId: string) => {
     try {
       const res = await fetch(`/api/sns/accounts/${accountId}/reconnect`, { method: 'POST', headers: auth() });
@@ -169,6 +138,7 @@ export default function SnsPage() {
         void load();
         return;
       }
+      setOpenChannel(null);
       await startConnect(data.platform);
     } catch {
       toast.error('요청을 처리하지 못했습니다.');
@@ -187,6 +157,7 @@ export default function SnsPage() {
           const data = await res.json();
           if (!data?.success) throw new Error(data?.error || '');
           toast.success('연결을 해제했습니다.');
+          setOpenChannel(null);
           void load();
         } catch {
           toast.error('연결을 해제하지 못했습니다.');
@@ -203,20 +174,22 @@ export default function SnsPage() {
     );
   }
 
+  const openSpec = specs.find((s) => s.platform === openChannel);
+
   return (
     <div className={OUI_PAGE}>
       <OperatorAura />
 
       <header className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_NARROW} ${OUI_HEADER_ROW}`}>
+        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
           <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="뒤로">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-violet-500 to-fuchsia-500`}>
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-sky-400 to-violet-500`}>
             <Share2 className="w-5 h-5 text-white" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className={OUI_TITLE}>SNS 게시</h1>
+            <h1 className={OUI_TITLE}>SNS 채널</h1>
             <p className={OUI_SUBTITLE}>회사 SNS 계정을 연결하고 사진과 글을 올립니다.</p>
           </div>
           {enabled && (
@@ -228,9 +201,9 @@ export default function SnsPage() {
         </div>
       </header>
 
-      <main className={`${OUI_WRAP_NARROW} py-6 md:py-8 relative z-10`}>
+      <main className={`${OUI_WRAP_WIDE} py-6 md:py-8 relative z-10`}>
         {!enabled ? (
-          <section className={`${OUI_CARD} ${OUI_EMPTY}`}>
+          <section className={`${OUI_CARD} ${OUI_EMPTY} max-w-xl mx-auto`}>
             <div className={OUI_EMPTY_ICON}>
               <Share2 className="w-6 h-6 text-white/40" />
             </div>
@@ -240,141 +213,134 @@ export default function SnsPage() {
             </p>
           </section>
         ) : (
-          <div className="space-y-4">
-            <section>
-              <h2 className="text-sm font-semibold text-white/80 mb-1">채널 연결</h2>
-              <p className="text-xs text-white/50 mb-3">
-                연결한 채널에만 글이 올라갑니다. 한 채널에 계정을 여러 개 연결할 수도 있어요.
-              </p>
+          <>
+            <div className="flex items-end justify-between gap-3 mb-4 flex-wrap">
+              <div>
+                <h2 className="text-sm font-semibold text-white/80">채널 연결</h2>
+                <p className="text-xs text-white/50 mt-0.5">연결한 채널에만 글이 올라갑니다. 한 채널에 계정을 여러 개 연결할 수도 있어요.</p>
+              </div>
+            </div>
 
-              {popupBlockedUrl && (
-                <div className="mb-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs text-amber-100">새 창이 열리지 않았습니다. 브라우저가 팝업을 막은 것 같아요.</p>
-                    <a
-                      href={popupBlockedUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100"
-                    >
-                      승인 창 직접 열기
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
+            {popupBlockedUrl && (
+              <div className="mb-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-amber-100">새 창이 열리지 않았습니다. 브라우저가 팝업을 막은 것 같아요.</p>
+                  <a href={popupBlockedUrl} target="_blank" rel="noreferrer"
+                    className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100">
+                    승인 창 직접 열기
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
                 </div>
-              )}
+              </div>
+            )}
 
-              <div className="space-y-3">
-                {specs.map((spec) => {
-                  const rows = accounts.filter((a) => a.platform === spec.platform);
-                  const live = rows.filter((a) => a.status !== 'revoked');
-                  const busy = busyPlatform === spec.platform;
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {specs.map((spec) => {
+                const live = liveSnsAccounts(accounts, spec.platform);
+                const head = live[0];
+                const connected = live.some((a) => a.status === 'active');
+                const busy = busyPlatform === spec.platform;
+                const soon = !spec.available;
+                const color = snsBrandColor(spec.platform);
+                const badge = head ? SNS_ACCOUNT_BADGE[head.status] : null;
 
-                  return (
-                    <div key={spec.platform} className={`${OUI_CARD} p-4`}>
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-white">{spec.label}</span>
-                            {!spec.available && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60 border border-white/15">
-                                준비 중
-                              </span>
-                            )}
-                          </div>
-                          {live.length === 0 && (
-                            <p className="text-xs text-white/40 mt-0.5">아직 연결된 계정이 없어요.</p>
-                          )}
+                return (
+                  <div
+                    key={spec.platform}
+                    className={`relative overflow-hidden rounded-2xl p-4 transition-colors ${
+                      connected ? 'bg-white/5 border border-transparent' : `${OUI_CARD} border`
+                    } ${soon ? 'opacity-45' : ''}`}
+                  >
+                    {/* 연결된 채널만 브랜드 색이 번진다. 지면 규칙을 깨지 않도록 배경에만, 옅게. */}
+                    {connected && (
+                      <>
+                        <span aria-hidden className="absolute inset-0 pointer-events-none"
+                          style={{ background: `radial-gradient(120% 90% at 0% 0%, ${color} 0%, transparent 62%)`, opacity: 0.2 }} />
+                        <span aria-hidden className="absolute inset-0 pointer-events-none rounded-2xl"
+                          style={{ border: `1px solid ${color}`, opacity: 0.45 }} />
+                      </>
+                    )}
+
+                    <div className="relative">
+                      <div className="flex items-start justify-between gap-2 mb-3.5">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border ${
+                          connected ? 'bg-white/[0.12] border-white/20' : 'bg-white/[0.06] border-white/10'
+                        }`}>
+                          <SnsChannelLogo platform={spec.platform} size={22} muted={soon} />
                         </div>
-                        {spec.available && (
+                        {soon ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-white/40 border border-white/10 whitespace-nowrap">
+                            준비 중
+                          </span>
+                        ) : badge ? (
                           <button
-                            onClick={() => void startConnect(spec.platform)}
-                            disabled={busy}
-                            className={OUI_BTN_PRIMARY}
+                            onClick={() => setOpenChannel(spec.platform)}
+                            className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap transition-opacity hover:opacity-80 ${badge.cls}`}
                           >
-                            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
-                            {live.length > 0 ? '계정 추가' : '연결'}
+                            {badge.label}{live.length > 1 ? ` · ${live.length}` : ''}
                           </button>
+                        ) : (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.08] text-white/55 border border-white/15 whitespace-nowrap">
+                            연결 안 됨
+                          </span>
                         )}
                       </div>
 
-                      {rows.length > 0 && (
-                        <div className="mt-3 space-y-2">
-                          {rows.map((a) => {
-                            const badge = ACCOUNT_BADGE[a.status];
-                            const needsReconnect = a.status === 'reauth_required' || a.status === 'token_expired';
-                            return (
-                              <div
-                                key={a.id}
-                                className="flex items-center gap-3 rounded-xl bg-white/[0.03] border border-white/10 px-3 py-2.5"
-                              >
-                                <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center overflow-hidden flex-shrink-0">
-                                  {a.avatarUrl ? (
-                                    <img src={a.avatarUrl} alt="" className="w-full h-full object-cover" />
-                                  ) : (
-                                    <span className="text-[11px] text-white/50">
-                                      {(a.username || a.displayName || '?').slice(0, 2)}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm text-white truncate">
-                                      {a.username ? `@${a.username}` : (a.displayName || '이름 없음')}
-                                    </span>
-                                    {badge && (
-                                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.cls}`}>
-                                        {badge.label}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {a.statusReason && (
-                                    <p className="text-[11px] text-amber-200/80 mt-0.5 break-keep">{a.statusReason}</p>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-1 flex-shrink-0">
-                                  {needsReconnect && (
-                                    <button onClick={() => void reconnect(a.id)} className={OUI_BTN_GHOST}>
-                                      <RefreshCw className="w-3.5 h-3.5" />
-                                      <span className="hidden sm:inline">다시 연결</span>
-                                    </button>
-                                  )}
-                                  {a.status !== 'revoked' && (
-                                    <button
-                                      onClick={() => askDisconnect(a, spec.label)}
-                                      className="p-2 rounded-lg text-white/40 hover:bg-white/10 hover:text-white/80 transition-colors"
-                                      aria-label="연결 해제"
-                                    >
-                                      <Unlink className="w-4 h-4" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                      <p className="text-sm font-semibold text-white">{spec.label}</p>
+                      <p className="text-[11px] text-white/50 mt-1 mb-3.5 truncate">
+                        {soon
+                          ? '곧 열립니다'
+                          : head
+                            ? (head.username ? `@${head.username}` : (head.displayName || '이름 없음'))
+                            : snsAccountAbility(spec.capabilities)}
+                      </p>
+
+                      {!soon && (
+                        head ? (
+                          <button onClick={() => void startConnect(spec.platform)} disabled={busy}
+                            className={`${OUI_BTN_OUTLINE} w-full justify-center`}>
+                            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                            계정 추가
+                          </button>
+                        ) : (
+                          <button onClick={() => void startConnect(spec.platform)} disabled={busy}
+                            className={`${OUI_BTN_PRIMARY} w-full justify-center`}>
+                            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                            연결
+                          </button>
+                        )
                       )}
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
+            </div>
 
-              <p className={`${OUI_SRC} mt-3`}>Data source: 우리 기록과 채널에서 다시 확인한 결과</p>
-            </section>
+            <p className={`${OUI_SRC} mt-3`}>Data source: 우리 기록과 채널에서 다시 확인한 결과</p>
 
-            <section className={`${OUI_CARD} p-4`}>
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 text-white/30 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-white/50 leading-relaxed break-keep">
-                  계정을 연결하면 글과 사진을 올릴 준비가 끝납니다. 작성 화면은 곧 이 자리에 열립니다.
-                  인스타그램은 프로페셔널(비즈니스·크리에이터) 계정만 연결됩니다.
-                </p>
-              </div>
+            <section className={`${OUI_CARD} p-4 mt-5`}>
+              <p className="text-xs text-white/50 leading-relaxed break-keep">
+                계정을 연결하면 글과 사진을 올릴 준비가 끝납니다. 작성 화면은 곧 이 아래에 열립니다.
+                인스타그램은 프로페셔널(비즈니스·크리에이터) 계정만 연결됩니다.
+              </p>
             </section>
-          </div>
+          </>
         )}
       </main>
+
+      {openSpec && (
+        <SnsChannelModal
+          open
+          label={openSpec.label}
+          platform={openSpec.platform}
+          accounts={accounts.filter((a) => a.platform === openSpec.platform)}
+          abilityText={snsAccountAbility(openSpec.capabilities)}
+          onClose={() => setOpenChannel(null)}
+          onReconnect={(id) => void reconnect(id)}
+          onDisconnect={(a) => askDisconnect(a, openSpec.label)}
+        />
+      )}
 
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
     </div>

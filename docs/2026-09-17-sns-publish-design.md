@@ -85,6 +85,7 @@
 - **2차 고객 개방의 정체 = Advanced Access.** 같은 문서 원문 = "앱에서 역할이 부여되지 않은 사용자도 앱을 사용할 경우 **Advanced Access가 필요**" · "Advanced Access를 받으려면 **비즈니스 인증이 필요**". 고객이 OAuth 동의를 눌러도 이 레벨 없이는 게시가 안 된다(동의와 액세스 레벨은 별개 층). 대시보드의 `기술 제공업체 되기`가 그 입구다.
 - 미디어 공개 URL = 이번 검증은 **기존 인앱 공개 경로**(`/api/cdp/inapp/image/{companyId}/{filename}` · 인증 0 · `?fit=1x1`)를 **1회** 썼다. 외부망에서 `200 image/jpeg` 확인(원본 325,035B → `fit=1x1` 163,109B). ⛔ **운영은 이 경로를 쓰지 않는다** — 서명 경로 §3-7이 유일 출구다. 기존 경로의 영구 공개 성격은 §9-8에 별건으로 기록.
 - 3:4 생성 포스터는 `ASPECT_RATIOS`에 `1x1`뿐이라 좌우 여백이 생긴다. §3-7의 `4x5` 추가가 그 여백을 없앤다.
+- **OAuth 왕복 확정(2026-09-20 S1 게이트)** = `https://www.instagram.com/oauth/authorize`(scope `instagram_business_basic,instagram_business_content_publish`) → `POST https://api.instagram.com/oauth/access_token`(form · 단기) → `GET /access_token?grant_type=ig_exchange_token`(장기 60일). 자사 계정 1건이 이 경로로 `active` 까지 갔다. `/me` 가 `profile_picture_url` 을 함께 돌려주는 것도 화면 프로필 사진으로 확인됐다(문서 기준이던 필드가 실측으로 올라섰다). ⛔ **단기 토큰을 저장하면 1시간 뒤 전부 끊긴다** — 장기 교환까지가 한 묶음이다.
 - 삭제 = Instagram API에 피드 게시물 삭제 endpoint가 **없다**. §6-2의 "삭제 감지"는 사람이 앱에서 지운 것을 대조 워커가 알아채는 흐름이며, 그 재조회 오류 형식은 S3에서 확정한다.
 
 ---
@@ -299,7 +300,11 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 
 - 요금제 = `FeatureKey`에 `'sns_publish'` 추가 · `canUseFeature` case = FREE(미가입)만 차단 · 유료 전 개방(D90 · 새 플랜 컬럼 0). `routes/sns.ts` 전 라우트 · `PlanGate featureId="sns"` · `plan-feature-intros.ts` 항목 1건(**비용 칸 비움** · 안내 1줄 · 자사몰 항목 형태 · 계약 테스트 규칙 1·2·7).
 - ENV = `SNS_COMPANY_IDS`(`aiAutoBuildEnabled` 미러). 서버가 `overview.enabled`와 허브 접근 응답(`GET /api/ai/operator/access`에 `features.sns` 추가)에 실어 준다. **순서 = 요금제 먼저 → ENV.** ENV 미개방 유료 회사 = `준비 중` 화면 1장(403 빈 화면 0). 플래그 endpoint가 타일보다 먼저 배포.
-- 허브 타일 = 1차부터 1장 · 2행(발송 채널) · 카드 정의에 `flag?: 'sns'` 필드 → **필터 대상 2곳**(허브 그리드 `AiOperatorPage.tsx:1872` · 워크스루 `AiOperatorWalkthroughModal.tsx:161`) / **등재 대상 1곳**(`plan-feature-intros.ts` · 필터 금지). NEW 배지 = Harold 결정(붙이면 만료 NEW 2장 제거를 같은 배포에 · 아니면 NEW 없이 · 넷을 동시에 켜지 않는다).
+- 허브 타일 = **★0920 배포 완료.** 명칭 `SNS 채널`(Harold 확정 · 회의 수렴안 `SNS 게시`에서 변경 — "기능을 계속 붙여 나갈 그릇"이라는 이유) · **3행 3열**(2행에서 변경: 만들고[AI 자동제작] 다듬어서[이미지 스튜디오] 내보내는[SNS] 동선이 한 줄로 이어진다) · 아이콘 `Share2` · 그라데이션 `from-sky-400 to-violet-500`.
+  - 자리를 만든 방법 = **AI 메모리를 4행 3열로 옮기고 AI 자율 예측 타일을 내렸다.** ⛔ 두 기능을 **합치지 않았다** — `/predictive` 라우트·화면·데이터·안내 항목은 그대로고 진열장에서만 뺐다(2026-08-12 세그먼트와 같은 비파괴 방식 · 되돌리기 = 배열에 한 줄 복원).
+  - 카드 정의 `flag?: 'sns'` + 판정 함수 `isCardVisible(card, features)` → **필터 대상 2곳**(허브 그리드 · 워크스루)이 같은 함수를 쓴다. 플래그 값은 `GET /api/ai/operator/access` 의 `features.sns`이며 **화면은 ENV 를 다시 계산하지 않는다.** 조회 실패 = 빈 객체 = 카드 미노출(모르면 열지 않는다).
+  - **등재 대상 1곳** = `plan-feature-intros.ts`(`id: 'sns'` · path `/sns` · 비용 칸 비움) · App.tsx 입구 `<PlanGate featureId="sns">`(계약 테스트 7).
+  - NEW 배지 = **안 붙인다**(Harold 확정). 1차-A 는 ENV 로 한 회사만 열려 NEW 가 닿을 고객이 0명이고, 4~6주 기한을 배포일부터 세면 2차 개방 전에 만료된다. 2차 고객 개방 때 붙인다. 같은 배포에서 **기한 넘긴 NEW 2장**(마케팅 플래너 08-12 · 이미지 스튜디오 07-19)을 제거했다.
 - 프론트 계약 테스트 = 프론트에 테스트 파일이 0이므로 **백엔드 소스 스캔 테스트**(`plan-feature-modal-contract.test.ts` 방식)에 항목을 더한다: 타일 필터 2곳 · 안내 항목 · `PlanGate` · 금지어 · 배지 사전 완전성 · `stage` 조건문 0건 · 상태 목록 · specs = CT 상수.
 
 ---
@@ -374,7 +379,7 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 
 ## 7. 미검증 목록 (설계에 그대로 싣는다 · 착수 전 확인 순서 = 번호)
 
-① **인스타 게시 경로 = §1-4로 확정(0920 실측).** 남은 것 = 삭제 감지 시 재조회 오류 형식(S3) · Threads 전체(S1에서 인스타 어댑터를 세운 뒤) ② Meta가 컨테이너 처리 중 미디어를 다시 가져가는지(TTL은 상태 결박으로 회피) ③ X 조회 과금 여부·단가(2차 출처 · `deferred`로 건수 비례 회피 · 0920 재확인 = 2026-06-01 레거시 Basic 종량제 자동 이관 · Pro 2026-08-14 폐지 → **신규는 종량제뿐**) ④ **Harold 결재 완료(0920) = 캡션 텍스트 AI 표시 부착 0으로 진행**(AI 기본법 2026-01-22 시행 · 계도 최소 1년). 플랫폼 AI 라벨 필드가 국내 의무를 만족하는지는 여전히 미검증이며, 이미지 표시 CT(§3-9)는 불변 ⑤ MP4 헤더 파싱 사전 판정 범위(코덱·오디오 불가) ⑥ 운영 DB `sns_*` 존재 여부 ⑦ Meta Advanced Access 심사 기간 ⑧ Threads 인증 창 주소가 Instagram Login과 다른지(별도 유스케이스는 확인) ⑨ 서명 쿼리스트링이 Range 재요청에서 떨어지는지(경로 세그먼트로 회피) ⑩ 플랫폼이 서명 URL을 캐시하는지(우리 쪽 `no-store`만) ⑪ `stripUnauthorizedBenefits` 부정 문맥 한계가 공개 게시물에서 어느 정도 위험인지.
+① **인스타 게시 경로 = §1-4로 확정(0920 실측).** 0920 S1 게이트에서 **OAuth 왕복 3개도 확정**. 남은 것 = 삭제 감지 시 재조회 오류 형식(S3) · Threads 전체(ENV 미투입) ② Meta가 컨테이너 처리 중 미디어를 다시 가져가는지(TTL은 상태 결박으로 회피) ③ X 조회 과금 여부·단가(2차 출처 · `deferred`로 건수 비례 회피 · 0920 재확인 = 2026-06-01 레거시 Basic 종량제 자동 이관 · Pro 2026-08-14 폐지 → **신규는 종량제뿐**) ④ **Harold 결재 완료(0920) = 캡션 텍스트 AI 표시 부착 0으로 진행**(AI 기본법 2026-01-22 시행 · 계도 최소 1년). 플랫폼 AI 라벨 필드가 국내 의무를 만족하는지는 여전히 미검증이며, 이미지 표시 CT(§3-9)는 불변 ⑤ MP4 헤더 파싱 사전 판정 범위(코덱·오디오 불가) ⑥ 운영 DB `sns_*` 존재 여부 ⑦ Meta Advanced Access 심사 기간 ⑧ Threads 인증 창 주소가 Instagram Login과 다른지(별도 유스케이스는 확인) ⑨ 서명 쿼리스트링이 Range 재요청에서 떨어지는지(경로 세그먼트로 회피) ⑩ 플랫폼이 서명 URL을 캐시하는지(우리 쪽 `no-store`만) ⑪ `stripUnauthorizedBenefits` 부정 문맥 한계가 공개 게시물에서 어느 정도 위험인지.
 
 ---
 

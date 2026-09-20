@@ -10,6 +10,28 @@
  *   잠김·모름은 기억하지 않는다 — 요금제에 가입한 뒤 다시 들어오면 바로 열려야 한다.
  */
 let allowedForToken: string | null = null;
+/** 기능별 개방 플래그(`features`) 캐시 — 로그인 단위. 허브 카드 필터가 쓴다. */
+let featuresCache: { token: string; features: Record<string, boolean> } | null = null;
+
+/**
+ * ★ 2026-09-20: 기능별 개방 플래그. 지금은 `sns` 하나이며 서버 ENV 판정 결과가 그대로 실려 온다.
+ * ⛔ 화면은 이 값을 **묻기만** 한다. 회사 id 목록이나 ENV 를 프론트에서 다시 계산하지 않는다(설계서 §2-16).
+ * 조회 실패·필드 부재 = 빈 객체 → 플래그가 달린 카드는 **안 보인다**(모르면 열지 않는다).
+ */
+export async function fetchAiOperatorFeatures(): Promise<Record<string, boolean>> {
+  const token = localStorage.getItem('token');
+  if (!token) return {};
+  if (featuresCache?.token === token) return featuresCache.features;
+  try {
+    const res = await fetch('/api/ai/operator/access', { headers: { Authorization: `Bearer ${token}` } });
+    const d = await res.json();
+    const features = d?.success && d.features && typeof d.features === 'object' ? d.features : {};
+    featuresCache = { token, features };
+    return features;
+  } catch {
+    return {};
+  }
+}
 
 /** 이미 "사용 가능"으로 확인된 로그인인가(입구가 로딩 화면 없이 바로 그리기 위한 동기 확인) */
 export function isAiOperatorAccessKnownAllowed(): boolean {

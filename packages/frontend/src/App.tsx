@@ -701,7 +701,15 @@ function App() {
         {/* ★ 2026-09-03 공개 라우트 — 비로그인 방문자도 요금제를 본다(소개 페이지 CTA). 로그인 전용 구역은 PricingPage가 isAuthenticated로 가른다 */}
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/agency-send" element={<PrivateRoute><AgencySendPage /></PrivateRoute>} />
-        <Route path="/sns" element={<PrivateRoute><SnsPage /></PrivateRoute>} />
+        {/* ★ 2026-09-20 SNS 채널 — 허브 카드 경로라 PlanGate 가 그 기능 id로 걸려 있어야 한다(계약 테스트 7) */}
+        <Route
+          path="/sns"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <PlanGate featureId="sns"><SnsPage /></PlanGate>
+            </PrivateRoute>
+          }
+        />
         <Route path="/guide" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
         <Route path="/guide/:jobId" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
         <Route path="/privacy" element={<PrivacyPage />} />

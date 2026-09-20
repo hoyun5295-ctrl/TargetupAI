@@ -43,10 +43,10 @@ import SmsCharsetNotice from '../components/SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
-import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
+import { SUB_MODULE_CARDS, isCardVisible } from '../constants/ai-operator-modules';
 import PlanFeatureModal from '../components/PlanFeatureModal';
 import { findPlanFeatureIntro, planFeatureIdForPath, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
-import { fetchAiOperatorAccess } from '../utils/ai-operator-access';
+import { fetchAiOperatorAccess, fetchAiOperatorFeatures } from '../utils/ai-operator-access';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
@@ -306,9 +306,12 @@ export default function AiOperatorPage() {
   //   못 쓰는 회사가 카드나 [생성]을 누르면 이동·호출 대신 공통 안내 창을 연다. 판정 전·조회 실패는 잠그지 않는다(서버가 다시 막는다).
   const [planLocked, setPlanLocked] = useState(false);
   const [planFeatureId, setPlanFeatureId] = useState<string | null>(null);
+  // ★ 2026-09-20 기능별 개방 플래그 — 카드 필터 축(설계서 §3-11). 모르면 빈 객체 = 그 카드는 안 보인다.
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     let alive = true;
+    void fetchAiOperatorFeatures().then((f) => { if (alive) setFeatureFlags(f); });
     fetchAiOperatorAccess().then((allowed) => {
       if (!alive) return;
       const locked = allowed === false;
@@ -1870,6 +1873,7 @@ export default function AiOperatorPage() {
                 <div className={`grid grid-cols-1 sm:grid-cols-2 ${planLocked ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3`}>
                   {SUB_MODULE_CARDS
                     .filter((card) => !card.adminOnly || (user as any)?.userType === 'company_admin')
+                    .filter((card) => isCardVisible(card, featureFlags))
                     .map((card) => {
                       const Icon = card.icon;
                       return (

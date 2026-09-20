@@ -8,5 +8,7 @@
 
 import './instagram';
 import './threads';
+import './facebook-page';   // 1차-B · available:false 스켈레톤
+import './x';               // 1차-B · available:false 스켈레톤(metered)
 
 export * from './adapter';

@@ -15,6 +15,7 @@ import {
   LineChart,
   Mail,
   MessageSquare,
+  Share2,
   Smartphone,
   Wand2,
   Workflow,
@@ -29,6 +30,18 @@ export interface SubModuleCard {
   adminOnly?: boolean;
   /** ★ P4: 신규 기능 NEW 뱃지(4~6주 유효 — 지나면 제거). */
   badge?: string;
+  /**
+   * ★ 2026-09-20: 서버가 준 개방 플래그로 거르는 축(`GET /api/ai/operator/access` 의 `features`).
+   * 값이 있으면 그 플래그가 true 인 회사에만 카드가 보인다. **화면은 ENV 를 다시 계산하지 않는다.**
+   * 소비처 2곳(허브 그리드 · 워크스루 매트릭스)이 같은 함수로 거른다.
+   */
+  flag?: 'sns';
+}
+
+/** 카드가 이 회사에 보이는가 — 필터 소비처 2곳이 같은 판정을 쓰도록 여기 한 곳이 소유한다. */
+export function isCardVisible(card: SubModuleCard, features: Record<string, boolean> | null | undefined): boolean {
+  if (!card.flag) return true;
+  return !!features?.[card.flag];
 }
 
 // ★ D209+ (Harold 명시 2026-05-22): 모든 description 1줄 일관 매트릭스 — AI 자동 마케팅 ("매일 AI 캠페인 자동 제안" 12자) 기준.
@@ -44,7 +57,8 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   // 1행 — 자동화 3형제 (사건·상태·달력)
   { icon: Workflow,     gradient: 'from-fuchsia-400 to-purple-500', label: '여정 자동화',    description: 'AI 여정 7종 자동 설계',          path: '/ai-journeys' },
   { icon: Brain,        gradient: 'from-indigo-400 to-violet-500',  label: '자동 마케팅',    description: '매일 AI 캠페인 자동 제안',       path: '/continuous-operator' },
-  { icon: CalendarDays, gradient: 'from-violet-400 to-fuchsia-500', label: '마케팅 플래너',  description: '월간 행사 계획 → AI 대행',       path: '/marketing-planner', badge: 'NEW' },
+  // ★ 2026-09-20 NEW 만료 제거(출시 08-12 · 라벨 3단 정책의 4~6주 기한 경과). 이미지 스튜디오(07-19)도 같이 내렸다.
+  { icon: CalendarDays, gradient: 'from-violet-400 to-fuchsia-500', label: '마케팅 플래너',  description: '월간 행사 계획 → AI 대행',       path: '/marketing-planner' },
   // 2행 — 발송 채널
   { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',   label: '모바일 DM',      description: '카드형 미디어 메시지 빌더',      path: '/dm-builder' },
   { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',      label: 'Email 캠페인',   description: '이메일 자동 발송 + 트래킹',      path: '/email-campaigns' },
@@ -53,10 +67,17 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   // ★ 2026-09-14 T6 "AI 자동제작" 승격(설계서 §3-3) — 같은 경로 · 신규 ENV 미개방 회사는 옛 화면(원클릭 캠페인)이 그대로 열린다
   { icon: Wand2,        gradient: 'from-amber-400 to-fuchsia-500', label: 'AI 자동제작',    description: '재료만 넣으면 완성본까지',        path: '/quick-campaign', badge: 'NEW' },
   // ★ 2026-07-19 P4: 3행 중앙 슬롯 = 마케팅 캘린더 → 이미지 스튜디오 교체 (라우트 /marketing-calendar는 유지, 카드 진입만 제거 — 비파괴).
-  { icon: ImagePlus,    gradient: 'from-violet-400 to-fuchsia-500', label: '이미지 스튜디오', description: '상품→AI 배경 소재 완성',         path: '/image-studio', badge: 'NEW' },
-  { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',   label: 'AI 메모리',      description: '회사별 누적 학습 정확도↑',       path: '/ai-memory' },
+  { icon: ImagePlus,    gradient: 'from-violet-400 to-fuchsia-500', label: '이미지 스튜디오', description: '상품→AI 배경 소재 완성',         path: '/image-studio' },
+  // ★ 2026-09-20 SNS 채널 신설(설계서 docs/2026-09-17-sns-publish-design.md §3-11 · Harold 확정).
+  //   3행에 두는 이유 = 만들고(AI 자동제작) 다듬어서(이미지 스튜디오) 내보내는(SNS) 동선이 한 줄로 이어진다.
+  //   `flag: 'sns'` = 서버가 준 개방 플래그로 거르는 축. 화면은 ENV 를 다시 계산하지 않는다(§2-16).
+  { icon: Share2,       gradient: 'from-sky-400 to-violet-500',     label: 'SNS 채널',       description: '계정 연결 → 게시·예약',          path: '/sns', flag: 'sns' },
   // 4행 — 고객 이해·분석
   { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',   label: '자사몰 연동',    description: '카페24·네이버 자동 연동',        path: '/cdp-settings' },
   { icon: LineChart,    gradient: 'from-fuchsia-400 to-pink-500',   label: '성과리포트',     description: '30일 성과 + 다음 추천',          path: '/performance' },
-  { icon: Brain,        gradient: 'from-violet-400 to-fuchsia-500', label: 'AI 자율 예측',   description: '이탈·구매 AI 자동 예측',         path: '/predictive' },
+  // ★ 2026-09-20 AI 메모리 이동(3행 3열 → 4행 3열). 4행이 "고객 이해·분석"이라 누적 학습이 이 줄에 더 맞다.
+  { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',   label: 'AI 메모리',      description: '회사별 누적 학습 정확도↑',       path: '/ai-memory' },
 ];
+// ★ 2026-09-20 AI 자율 예측 타일 내림(Harold 확정) — **라우트 `/predictive` 와 화면·데이터는 그대로다.**
+//   2026-08-12 세그먼트와 같은 방식(타일만 제거 · 비파괴). 진열장에서 내렸을 뿐이라 주소로는 그대로 들어간다.
+//   되돌리기 = 이 주석 위 배열에 한 줄 복원. 합치지 않았으므로 페이지·안내 항목·요금제 축은 손대지 않았다.

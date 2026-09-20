@@ -14,7 +14,7 @@
  */
 import {
   BarChart3, Brain, CalendarDays, Eye, FileSpreadsheet, Filter, ImagePlus, LineChart, ListChecks, Mail,
-  MessageSquare, PenLine, Plug, Search, Send, ShieldCheck, Smartphone, Sparkles, Target, Upload, Users, Wand2, Workflow,
+  MessageSquare, PenLine, Plug, Search, Send, Share2, ShieldCheck, Smartphone, Sparkles, Target, Upload, Users, Wand2, Workflow,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -165,6 +165,17 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: PenLine, title: '직접 가르치기', text: '꼭 알아야 할 사실을 넣고 오래된 것은 정리합니다.' },
     ],
     costs: [{ label: '질문', source: 'ai-memory-search', credits: 1 }],
+  },
+  {
+    id: 'sns', path: '/sns', title: 'SNS 채널', icon: Share2, gradient: 'from-sky-400 to-violet-500',
+    summary: '회사 SNS 계정을 연결해 사진과 글을 올립니다.',
+    steps: [
+      { icon: Plug, title: '계정 연결', text: '채널 카드에서 연결을 누르면 그 채널 로그인 창이 열립니다.' },
+      { icon: ImagePlus, title: '사진 고르기', text: '올릴 사진을 고르면 채널 규격에 맞춰 준비됩니다.' },
+      { icon: Send, title: '올리기', text: '지금 올리거나 시각을 정해 두면 그때 올라갑니다.' },
+    ],
+    costs: [],
+    costNote: '계정 연결과 게시에는 크레딧이 들지 않습니다',
   },
   {
     id: 'connect-shop', path: '/cdp-settings', title: '자사몰 연동', icon: Workflow, gradient: 'from-emerald-400 to-teal-500',
