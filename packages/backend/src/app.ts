@@ -26,6 +26,7 @@ import { startAgentChargeReconciler } from './utils/agent-charge-reconciler';  /
 import salesOutreachRoutes from './routes/sales-outreach'; // ★ 2026-08-24 AI 영업 아웃리치 (슈퍼관리자 ceo 전용 · docs/2026-07-31-ai-sales-outreach-design.md §15)
 import outreachPublicRoutes from './routes/outreach-public'; // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증 · noindex · 만료)
 import { startAgencySendWorker } from './utils/agency-send-worker';
+import { startSnsTokenWorker } from './utils/sns-token-worker';   // ★ 2026-09-20 SNS 토큰 갱신(S1)
 import { startAgencySendMailWorker } from './utils/agency-send-mail-worker';
 import { startSalesOutreachSweeper } from './utils/sales-outreach-sweeper'; // ★ 2026-08-24 아웃리치 sweeper
 // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 API (Performance 카드 + 메일 양쪽 활용)
@@ -82,6 +83,7 @@ import imwebRoutes, { imwebCallbackRouter } from './routes/imweb';
 import godoRoutes from './routes/godo';
 // ★ 2026-09-14 우커머스(워드프레스) — REST 키 주기 수집 + 기본 웹훅 수신(몰별 행)
 import woocommerceRoutes from './routes/woocommerce';
+import snsRoutes, { snsPublicRouter } from './routes/sns';   // ★ 2026-09-20 SNS 게시(S1)
 import makeshopRoutes from './routes/makeshop';
 // ★ 2026-06-25 (gap 7): CDP Provider 등록 단일 출처 — routes import 부수효과 의존 제거
 import { registerAllProviders } from './utils/register-providers';
@@ -207,6 +209,11 @@ app.use('/api/dm/v', dmPublicRouter);
 //   (Codex 1R HIGH 수용: helmet 뒤에 두면 CSP script-src가 페이지 인라인 스크립트를 막아
 //    컨펌·이의신청 버튼이 동작하지 않는다.) 전역 json 파서보다도 앞이라 라우터가 자체 파서를 쓴다.
 app.use('/api/invoice-view', invoicePublicRoutes);
+
+// ★ 2026-09-20 SNS 승인 복귀·권한 회수 콜백 — 위 둘과 같은 이유로 helmet 전에 마운트.
+//   복귀 HTML 이 인라인 스크립트로 부모 창에 신호를 보내므로 CSP 뒤에 두면 창이 안 닫힌다.
+//   여기서 안 잡히는 경로는 next() 로 흘러 아래 인증 라우터가 받는다.
+app.use('/api/sns', snsPublicRouter);
 
 // 미들웨어
 app.use(helmet());
@@ -483,6 +490,7 @@ app.use('/api/popbill', popbillWebhookRouter);
 app.use('/api/godo', godoRoutes);
 // ★ 2026-09-14: 우커머스(워드프레스) — /webhook/:mallId 공개(rawBody 선처리 위 블록) + 관리자 라우트
 app.use('/api/woocommerce', woocommerceRoutes);
+app.use('/api/sns', snsRoutes);   // ★ 2026-09-20 SNS 게시 — 인증 → 요금제 → ENV 순(설계서 §2-16)
 // ★ 2026-07-06: 메이크샵 커머스 API 폴링 커넥터 (client_credentials 자격 입력 — OAuth/webhook 없음)
 app.use('/api/makeshop', makeshopRoutes);
 // ★ D178: 인바운드 AI 음성 응답 (통신사 webhook + 회사 admin 토글/이력)
@@ -590,6 +598,10 @@ app.listen(PORT, () => {
   // ★ 2026-08-22 대행발송 셀프 접수 워커 (5분 cron) — 1차 검사·당일 재검사·만료·대조·복구
   //   docs/2026-08-22-agency-send-design.md §4-4. 테이블이 없으면 조용히 넘어간다(마이그레이션 전 안전).
   startAgencySendWorker();
+
+  // ★ 2026-09-20 SNS 토큰 갱신 워커 (6시간 cron) — 설계서 §3-4.
+  //   ENV(SNS_COMPANY_IDS)가 비면 시작하지 않는다. 테이블이 없으면 조용히 넘어간다.
+  startSnsTokenWorker();
 
   // ★ 2026-08-26 대행발송 이메일 접수 워커 (1분 폴링 · POP3S) — 설계서 §18.
   //   AGENCY_MAIL_ENABLED + 계정 ENV가 없으면 부팅 로그 1회만 남기고 시작하지 않는다(회신 없는 접수 금지).

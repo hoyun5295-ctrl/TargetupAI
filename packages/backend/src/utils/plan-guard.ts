@@ -50,7 +50,8 @@ export type FeatureKey =
   | 'auto_campaign'     // 자동발송                                — PRO+
   | 'mobile_dm'         // 모바일 DM 빌더                          — PRO+
   | 'auto_spam_test'    // 스팸테스트 자동화                       — PRO+
-  | 'ai_cdp';           // ★ D172: 한줄로 CDP (자사몰 sync API)    — BUSINESS+
+  | 'ai_cdp'            // ★ D172: 한줄로 CDP (자사몰 sync API)    — BUSINESS+
+  | 'sns_publish';      // ★ 2026-09-20: SNS 게시(계정 연결·게시·예약) — FREE만 차단 · 개방 범위는 ENV SNS_COMPANY_IDS
 
 /**
  * 구독 상태.
@@ -439,6 +440,14 @@ export function canUseFeature(ctx: PlanContext, key: FeatureKey): FeatureCheckRe
       //   (자사몰/이메일/네이버 연동 경유). 여기는 plan-guard 일관성용 — FREE만 차단.
       return isUnsubscribed(ctx)
         ? { allowed: false, errorMsg: '한줄로 CDP는 유료 요금제 가입 후 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' }
+        : { allowed: true };
+
+    case 'sns_publish':
+      // ★ 2026-09-20 SNS 게시 — 종량제 기조 그대로 FREE(미가입)만 차단, 전 유료 개방(설계서 §3-11).
+      //   ⛔ 실제 노출은 이 판정 **뒤에** ENV(SNS_COMPANY_IDS)가 정한다. 순서를 뒤집으면
+      //      ENV 에 든 FREE 회사가 뚫린다(§2-16).
+      return isUnsubscribed(ctx)
+        ? { allowed: false, errorMsg: 'SNS 게시는 유료 요금제 가입 후 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' }
         : { allowed: true };
 
     default: {

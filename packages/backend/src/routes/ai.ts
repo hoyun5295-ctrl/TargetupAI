@@ -26,6 +26,7 @@ import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from '../utils/messageUtils';
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
+import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
 import { getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
@@ -1106,6 +1107,9 @@ router.get('/operator/access', async (req: Request, res: Response) => {
       allowed,
       planCode: planCtx.planCode,
       legacyGrandfathered: planCtx.legacyGrandfathered,
+      // ★ 2026-09-20 SNS 게시 개방 플래그(설계서 §3-11). **타일보다 먼저 배포한다** —
+      //   화면은 ENV 를 다시 계산하지 않고 이 값 하나만 본다(플래그가 없으면 타일이 아예 안 뜬다).
+      features: { sns: snsPublishEnabled(companyId) },
     });
   } catch (err: any) {
     console.error('[AI Operator /access] 오류:', err);

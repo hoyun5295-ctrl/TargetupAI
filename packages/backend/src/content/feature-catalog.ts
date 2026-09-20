@@ -60,7 +60,7 @@ export type PublicFeatureJob = Omit<FeatureJob, 'sourceFile' | 'status' | 'stubU
 
 /** 대분류. 안내 화면의 목차이자 봇의 추천 묶음 */
 export const JOB_GROUPS: { key: string; label: string; jobs: string[] }[] = [
-  { key: 'start', label: '시작 준비', jobs: ['sender-register', 'credits-and-plan', 'manage-accounts', 'ai-usage', 'ai-batches'] },
+  { key: 'start', label: '시작 준비', jobs: ['sender-register', 'credits-and-plan', 'manage-accounts', 'ai-usage', 'ai-batches', 'sns-connect'] },
   { key: 'customers', label: '고객 명단', jobs: ['upload-customers', 'ai-column-mapping', 'view-customer', 'manage-unsubscribes', 'connect-shop', 'segments'] },
   { key: 'send', label: '보내기', jobs: ['send-direct', 'send-target', 'schedule-send', 'send-alimtalk', 'check-spam', 'auto-spam-test', 'agency-send', 'ai-operator'] },
   { key: 'create', label: '만들기', jobs: ['write-copy-ai', 'mobile-dm', 'image-studio', 'email-campaign', 'inapp-message', 'push-campaign', 'quick-campaign'] },
@@ -1006,6 +1006,29 @@ const READY: FeatureJob[] = [
     related: ['send-direct', 'check-spam', 'schedule-send'],
     status: 'ready', stubUntil: null,
     sourceFile: 'frontend/src/pages/AgencySendPage.tsx · frontend/src/components/agency/ · backend/src/utils/agency-send-worker.ts',
+  },
+  {
+    id: 'sns-connect',
+    title: 'SNS 계정 연결',
+    goal: '회사 SNS 계정을 연결해 게시 준비를 마친다',
+    keywords: ['SNS', '인스타', '인스타그램', 'Threads', '스레드', '계정 연결', '소셜', '피드', '게시'],
+    steps: [
+      '주소창의 주소 끝을 /sns 로 바꿔 엽니다. 회사마다 순서대로 열리는 기능이라 아직이면 준비 중 안내가 나옵니다',
+      '연결할 채널 카드에서 "연결"을 누르면 새 창에서 그 채널 로그인과 권한 승인이 진행됩니다',
+      '승인이 끝나면 창이 저절로 닫히고 카드가 연결됨으로 바뀝니다. 계정 이름과 사진이 함께 표시됩니다',
+      '연결을 끊으려면 카드에서 "연결 해제"를 누릅니다. 지금까지 올린 기록은 그대로 남습니다',
+    ],
+    blockers: [
+      { symptom: '연결했는데 "계정 확인 필요"로 표시됩니다', fix: '인스타그램은 프로페셔널(비즈니스·크리에이터) 계정만 연결됩니다. 인스타그램 앱에서 계정 종류를 바꾼 뒤 다시 연결해 주세요' },
+      { symptom: '"다시 연결 필요"가 떴습니다', fix: '채널에서 권한이 해제되었거나 기간이 지난 상태입니다. 카드에서 다시 연결하면 됩니다' },
+      { symptom: '새 창이 열리지 않습니다', fix: '브라우저가 팝업을 막은 상태입니다. 주소창 오른쪽의 차단 표시를 눌러 허용한 뒤 다시 시도해 주세요' },
+    ],
+    entry: { path: '/sns', via: '상단 메뉴에서 "SNS 게시"' },
+    planKey: 'sns_publish',
+    creditSource: null,
+    related: ['connect-shop', 'image-studio', 'manage-accounts'],
+    status: 'ready', stubUntil: null,
+    sourceFile: 'frontend/src/pages/SnsPage.tsx · backend/src/routes/sns.ts · backend/src/utils/sns-accounts.ts',
   },
 ];
 

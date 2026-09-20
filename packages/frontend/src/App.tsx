@@ -37,6 +37,7 @@ const Unsubscribes = lazyPage(() => import('./pages/Unsubscribes'));
 const PricingPage = lazyPage(() => import('./pages/PricingPage'));
 const GuidePage = lazyPage(() => import('./pages/GuidePage')); // ★ 2026-08-22 기능 안내(/guide) — 도움말 봇과 같은 원장
 const AgencySendPage = lazyPage(() => import('./pages/AgencySendPage')); // ★ 2026-08-22 대행발송 셀프 접수
+const SnsPage = lazyPage(() => import('./pages/SnsPage')); // ★ 2026-09-20 SNS 게시(S1 계정 연결)
 const AgencyApprovePage = lazyPage(() => import('./pages/AgencyApprovePage')); // ★ 2026-08-25 담당자 링크 승인(인증 X)
 const ChargeApprovePage = lazyPage(() => import('./pages/ChargeApprovePage')); // ★ 2026-08-28(3) 충전 승인 링크(인증 X)
 const AutoSendPage = lazyPage(() => import('./pages/AutoSendPage'));
@@ -700,6 +701,7 @@ function App() {
         {/* ★ 2026-09-03 공개 라우트 — 비로그인 방문자도 요금제를 본다(소개 페이지 CTA). 로그인 전용 구역은 PricingPage가 isAuthenticated로 가른다 */}
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/agency-send" element={<PrivateRoute><AgencySendPage /></PrivateRoute>} />
+        <Route path="/sns" element={<PrivateRoute><SnsPage /></PrivateRoute>} />
         <Route path="/guide" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
         <Route path="/guide/:jobId" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
         <Route path="/privacy" element={<PrivacyPage />} />
