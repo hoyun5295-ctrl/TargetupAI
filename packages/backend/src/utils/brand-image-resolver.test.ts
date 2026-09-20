@@ -492,6 +492,18 @@ describe('5종의 이미지 자리 확정 (resolveBrandSendRichImages)', () => {
     expect(uploadFeed).not.toHaveBeenCalled();
   });
 
+  it('★0920 거절 사유는 읽을 수 있는 문장으로 — 어느 이미지인지 · 영문 예외명·파일명 없이', async () => {
+    uploadFeed.mockResolvedValue({
+      code: '4000', message: 'InvalidImageShapeException(가로:세로 비율은 2:1 이상 3:4 이하여야 합니다, ë틀ɑì틀´.jpg)',
+    } as any);
+    const run = resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_FEED',
+      carouselCards: [{ image: { img_url: OWN_REL } }],
+    });
+    await expect(run).rejects.toThrow('카드 1 이미지: 카카오가 이미지를 받지 않았습니다 (가로:세로 비율은 2:1 이상 3:4 이하여야 합니다)');
+    await expect(run).rejects.not.toThrow(/Exception|\.jpg/);
+  });
+
   it('카카오가 업로드를 거절하면 그 사유로 멈춘다 — 조용히 우리 URL을 남기지 않는다', async () => {
     uploadList.mockResolvedValue({ code: '9999', message: '규격 불일치' } as any);
     await expect(resolveBrandSendRichImages({

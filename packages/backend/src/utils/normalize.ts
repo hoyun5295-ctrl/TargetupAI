@@ -707,6 +707,16 @@ export function normalizeWebUrl(value: any): string {
   return s;
 }
 
+/**
+ * 웹 링크 형식 판정 — `http://` 또는 `https://`로 시작하는가. (★ 2026-09-20 브랜드메시지 링크 검사)
+ * 변수(`#{...}`)로 시작하는 값은 치환 뒤에 주소가 정해지므로 통과시킨다.
+ * ⛔ 위 `normalizeWebUrl`처럼 고쳐 주지 않는다 — 발송 문안의 링크는 고객이 넣은 값 그대로 나가야 하므로 판정만 한다.
+ */
+export function isHttpLinkOrVariable(value: any): boolean {
+  const s = String(value ?? '').trim();
+  return /^https?:\/\/\S+$/i.test(s) || s.startsWith('#{');
+}
+
 // ============================================================
 // 필드키 기반 정규화 디스패처
 // standard-field-map.ts의 normalizeFunction 값에 따라 호출

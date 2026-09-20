@@ -28,7 +28,7 @@ import fs from 'fs';
 import path from 'path';
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
-import { extractImageFromAnyShape, extractImageListFromAnyShape } from './alimtalk-api';
+import { extractImageFromAnyShape, extractImageListFromAnyShape, sanitizeImcMessageForUser } from './alimtalk-api';
 
 /** 인앱 이미지 실물 저장 경로 — `utils/assets.ts`·`routes/cdp.ts`와 동일 정의(단일 env 소스) */
 const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
@@ -203,6 +203,8 @@ async function resolveOne(input: {
   /** 이 자리의 업로드 창구. 없으면(창구를 모르는 자리) 손대지 않고 넘긴다 */
   route: UploadRoute | undefined;
   imgUrl: string;
+  /** 자리 이름 — 거절 사유 앞에 붙인다(이미지 자리가 여럿인 유형에서 어느 이미지인지 알 수 있게). 예: "카드 2 이미지" */
+  at?: string;
 }): Promise<string> {
   const ref = toOwnImageRef(input.imgUrl);
   const route = input.route;
@@ -248,8 +250,11 @@ async function resolveOne(input: {
     console.error(
       `[brand-image-resolver] 카카오 이미지 업로드 거절 code=${res?.code} message=${String(res?.message || '').slice(0, 200)}`,
     );
+    // ★2026-09-20 거절 원문을 그대로 붙이지 않는다 — 영문 예외명·깨진 파일명이 섞여 고객이 읽을 수 없었다.
+    //   템플릿 등록 화면과 같은 변환기로 사유(한글 문장)만 남긴다. 규격 사유는 대부분 여기에 들어 있다(비율·크기).
+    const reason = sanitizeImcMessageForUser(res?.message, res?.code, '이미지 규격을 확인해 주세요');
     throw new BrandImageResolveError(
-      `카카오가 이미지를 받지 않았습니다${res?.message ? ` (${String(res.message).slice(0, 80)})` : ''}. 다른 이미지를 사용해주세요`,
+      `${input.at ? `${input.at}: ` : ''}카카오가 이미지를 받지 않았습니다 (${reason}). 규격에 맞는 이미지로 다시 선택해주세요`,
     );
   }
   // 단일 창구는 객체, 다중 창구는 목록으로 온다 — 한 장씩 올리므로 목록이면 첫 항목이다
@@ -317,7 +322,7 @@ export async function resolveBrandSendRichImages<
 }): Promise<{ itemList?: TItem[]; video?: TVideo; carouselCards?: TCard[]; carouselIntro?: THead }> {
   const base = { companyId: input.companyId, userId: input.userId };
   const bubble = String(input.bubbleType || '').trim().toUpperCase();
-  const one = (route: UploadRoute | undefined, url: string) => resolveOne({ ...base, route, imgUrl: String(url).trim() });
+  const one = (route: UploadRoute | undefined, url: string, at: string) => resolveOne({ ...base, route, imgUrl: String(url).trim(), at });
 
   let itemList = input.itemList;
   if (bubble === 'WIDE_ITEM_LIST' && Array.isArray(itemList)) {
@@ -326,7 +331,7 @@ export async function resolveBrandSendRichImages<
       const it = itemList[i];
       const url = String(it?.img_url || '').trim();
       // 1번 아이템만 큰 이미지 규격이라 창구가 다르다(wide-list/first)
-      next.push(url ? { ...it, img_url: await one(i === 0 ? ROUTES.wideListFirst : ROUTES.wideList, url) } : it);
+      next.push(url ? { ...it, img_url: await one(i === 0 ? ROUTES.wideListFirst : ROUTES.wideList, url, `${i + 1}번째 아이템 이미지`) } : it);
     }
     itemList = next;
   }
@@ -334,7 +339,7 @@ export async function resolveBrandSendRichImages<
   let video = input.video;
   const thumb = String(video?.thumbnail_url || '').trim();
   if (bubble === 'PREMIUM_VIDEO' && video && thumb) {
-    video = { ...video, thumbnail_url: await one(ROUTES.default, thumb) };
+    video = { ...video, thumbnail_url: await one(ROUTES.default, thumb, '동영상 썸네일') };
   }
 
   const carRoute = CAROUSEL_ROUTE_BY_BUBBLE[bubble];
@@ -343,15 +348,16 @@ export async function resolveBrandSendRichImages<
   if (carRoute) {
     if (Array.isArray(carouselCards)) {
       const next: TCard[] = [];
-      for (const c of carouselCards) {
+      for (let i = 0; i < carouselCards.length; i++) {
+        const c = carouselCards[i];
         const url = String(c?.image?.img_url || '').trim();
-        next.push(url && c.image ? { ...c, image: { ...c.image, img_url: await one(carRoute, url) } } : c);
+        next.push(url && c.image ? { ...c, image: { ...c.image, img_url: await one(carRoute, url, `카드 ${i + 1} 이미지`) } } : c);
       }
       carouselCards = next;
     }
     const introUrl = String(carouselIntro?.image_url || '').trim();
     if (carouselIntro && introUrl) {
-      carouselIntro = { ...carouselIntro, image_url: await one(carRoute, introUrl) };
+      carouselIntro = { ...carouselIntro, image_url: await one(carRoute, introUrl, '인트로 이미지') };
     }
   }
 

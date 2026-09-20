@@ -9,9 +9,13 @@
  * payload 키는 백엔드 `BrandMessageParams` 계약 그대로다 — 고칠 때는 양쪽을 같이 고친다.
  */
 import { BRAND_SPEC } from '../../constants/brand-message-spec';
+import { ratioLabel, sameRatio } from './brandImageSpec';
 
-/** 이미지 한 자리 — 라이브러리·업로드에서 고른 우리 자산. 발송 직전 서버가 카카오에 올려 준다 */
-export interface SlotImage { url: string; assetId: string; kind: string; name: string }
+/**
+ * 이미지 한 자리 — 라이브러리·업로드에서 고른 우리 자산. 발송 직전 서버가 카카오에 올려 준다.
+ * `w`·`h` = 고를 때 잰 실제 크기(useBrandImageGuard). 캐러셀의 「카드끼리 같은 비율」 검사에 쓴다.
+ */
+export interface SlotImage { url: string; assetId: string; kind: string; name: string; w?: number; h?: number }
 export interface RichButton { name: string; type: string; url_mobile?: string }
 /** 가격은 입력 문자열 그대로 들고 있다가 보낼 때 숫자로 바꾼다(입력을 고쳐 쓰지 않는다) */
 export interface CommerceState { title: string; regular: string; discount: string; rate: string }
@@ -75,6 +79,28 @@ export function calcRate(regular: string, discount: string): string {
   return String(Math.round((1 - d / r) * 100));
 }
 
+/**
+ * 링크 형식 — `http://` 또는 `https://`로 시작해야 한다. 변수(`#{...}`)로 시작하는 값은 치환 뒤에 정해지므로 통과.
+ * ⛔ 자동으로 붙여 주지 않는다 — 고객이 넣은 주소를 우리가 바꾸지 않는다. 무엇을 고치면 되는지만 알려 준다.
+ */
+export const isWebLink = (raw: string): boolean => {
+  const v = String(raw || '').trim();
+  return /^https?:\/\/\S+$/i.test(v) || v.startsWith('#{');
+};
+export const linkReason = (raw: string, at: string): string =>
+  !String(raw || '').trim() || isWebLink(raw) ? '' : `${at} http:// 또는 https://로 시작해야 합니다 (예: https://www.example.com)`;
+
+/** 프리미엄 동영상은 카카오TV 주소만 받는다(0920 실측 — 유튜브 주소는 카카오가 동영상 오류로 거절) */
+export const isKakaoTvUrl = (raw: string): boolean => {
+  try {
+    const u = new URL(String(raw || '').trim());
+    return (u.protocol === 'https:' || u.protocol === 'http:') && u.hostname.toLowerCase() === 'tv.kakao.com';
+  } catch { return false; }
+};
+
+/** 가격 상한 — 카카오 규격 「정상가격·할인가격 (0 ~ 99,999,999)」 */
+const PRICE_MAX = 99_999_999;
+
 /** AI로 만든 이미지인가 — 5종의 이미지 자리는 안내 문구를 붙일 규칙이 없어 서버가 거절한다 */
 const isGenerated = (img: SlotImage | null | undefined): boolean => !!img && img.kind === 'generated';
 const AI_BLOCK_MSG = 'AI로 만든 이미지는 이 자리에 쓸 수 없습니다. 직접 올린 이미지를 사용해 주세요';
@@ -84,9 +110,11 @@ function commerceReason(c: CommerceState, at: string, titleMax: number): string 
   if (cpLen(c.title.trim()) > titleMax) return `${at} 상품명은 최대 ${titleMax}자입니다`;
   if (!c.regular.trim()) return `${at} 정상가를 입력해 주세요`;
   if (parsePrice(c.regular) === null) return `${at} 정상가는 숫자로 입력해 주세요`;
+  if ((parsePrice(c.regular) as number) > PRICE_MAX) return `${at} 정상가는 99,999,999원까지 입력할 수 있습니다`;
   if (c.discount.trim()) {
     const d = parsePrice(c.discount);
     if (d === null) return `${at} 할인가는 숫자로 입력해 주세요`;
+    if (d > PRICE_MAX) return `${at} 할인가는 99,999,999원까지 입력할 수 있습니다`;
     if (d > (parsePrice(c.regular) as number)) return `${at} 할인가가 정상가보다 큽니다`;
     const rate = Number(c.rate);
     if (!c.rate.trim() || !Number.isInteger(rate) || rate < 0 || rate > 100) return `${at} 할인율을 0~100 사이로 입력해 주세요`;
@@ -101,8 +129,18 @@ function buttonsReason(buttons: RichButton[], at: string, max: number, nameMax: 
     if (!b.name.trim()) return `${at} ${i + 1}번째 버튼의 버튼명을 입력해 주세요`;
     if (cpLen(b.name.trim()) > nameMax) return `${at} ${i + 1}번째 버튼명은 최대 ${nameMax}자입니다`;
     if (urlTypes.includes(b.type) && !(b.url_mobile || '').trim()) return `${at} ${i + 1}번째 버튼의 링크를 입력해 주세요`;
+    const lr = urlTypes.includes(b.type) ? linkReason(b.url_mobile || '', `${at} ${i + 1}번째 버튼의 링크는`) : '';
+    if (lr) return lr;
   }
   return '';
+}
+
+const ratioOf = (img: SlotImage | null | undefined): number | null => (img && img.w && img.h ? img.w / img.h : null);
+
+/** 캐러셀의 비율 기준 — 인트로를 쓰면 인트로, 아니면 첫 카드. 화면(자리별 규격 안내)과 검사가 같은 기준을 쓴다 */
+export function carouselRefRatio(st: RichState, useIntro: boolean): { ratio: number | null; name: string; isIntro: boolean } {
+  if (useIntro && st.intro.image) return { ratio: ratioOf(st.intro.image), name: '인트로', isIntro: true };
+  return { ratio: ratioOf(st.cards[0]?.image), name: '카드 1', isIntro: false };
 }
 
 /**
@@ -130,12 +168,17 @@ export function richBlockReason(code: string, st: RichState, urlButtonTypes: rea
       if (isGenerated(it.image)) return AI_BLOCK_MSG;
       if (i > 0 && !it.title.trim()) return `${i + 1}번째 아이템의 제목을 입력해 주세요`;
       if (!it.urlMobile.trim()) return `${i + 1}번째 아이템의 링크를 입력해 주세요`;
+      const lr = linkReason(it.urlMobile, `${i + 1}번째 아이템의 링크는`);
+      if (lr) return lr;
     }
   }
 
   // 동영상
   if (s.requireVideo) {
     if (!st.video.url.trim()) return '동영상 주소를 입력해 주세요';
+    if (!isKakaoTvUrl(st.video.url)) {
+      return '동영상은 카카오TV 주소만 쓸 수 있습니다 (예: https://tv.kakao.com/v/123456789). 유튜브 등 다른 주소는 카카오가 받지 않습니다';
+    }
     if (isGenerated(st.video.thumb)) return AI_BLOCK_MSG;
   }
 
@@ -168,12 +211,22 @@ export function richBlockReason(code: string, st: RichState, urlButtonTypes: rea
       if (nlCount(ic) > cs.introContentNewline) return `인트로 내용의 줄바꿈은 ${cs.introContentNewline}개까지입니다`;
       if (!st.intro.image) return '인트로 이미지를 넣어 주세요';
       if (isGenerated(st.intro.image)) return AI_BLOCK_MSG;
+      const ilr = linkReason(st.intro.urlMobile, '인트로 링크는');
+      if (ilr) return ilr;
     }
+    const ref = carouselRefRatio(st, useIntro);
     for (let i = 0; i < st.cards.length; i++) {
       const c = st.cards[i];
       const at = `카드 ${i + 1}:`;
       if (!c.image) return `${at} 이미지를 넣어 주세요`;
       if (isGenerated(c.image)) return AI_BLOCK_MSG;
+      // 카드끼리 비율이 같아야 한다 — 기준 이미지를 나중에 바꾸면 이미 담긴 카드가 어긋난다
+      const cr = ratioOf(c.image);
+      if (ref.ratio && cr && !(i === 0 && !ref.isIntro) && !sameRatio(cr, ref.ratio)) {
+        return `${at} 이미지 비율이 ${ref.name}과 다릅니다 (${ref.name} ${ratioLabel(ref.ratio)} · 이 카드 ${ratioLabel(cr)}). 이미지를 다시 선택하면 맞춰 드립니다`;
+      }
+      const clr = linkReason(c.imgLink, `${at} 이미지 링크는`);
+      if (clr) return clr;
       if (cs.itemHeader === 'required') {
         if (!c.header.trim()) return `${at} 제목을 입력해 주세요`;
         if (cpLen(c.header.trim()) > cs.itemHeaderMax) return `${at} 제목은 최대 ${cs.itemHeaderMax}자입니다`;
@@ -196,6 +249,10 @@ export function richBlockReason(code: string, st: RichState, urlButtonTypes: rea
       if (br) return br;
     }
     if (st.tailOn && !st.tailUrl.trim()) return '더보기 링크를 입력해 주세요';
+    if (st.tailOn) {
+      const tlr = linkReason(st.tailUrl, '더보기 링크는');
+      if (tlr) return tlr;
+    }
   }
   return '';
 }

@@ -30,7 +30,7 @@ import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 import { markRefundPending } from './refund-pending';
 import { buildUnsubscribeExistsFilter } from './unsubscribe-helper';
 import { normalizePhone } from './normalize-phone';
-import { normalize080Number, format080Number } from './normalize';
+import { normalize080Number, format080Number, isHttpLinkOrVariable } from './normalize';
 // 발송 가능 시간 판정은 시각 CT가 소유한다(브랜드 창 08:00~20:50 — config/defaults BRAND_SEND_WINDOW).
 import { isWithinBrandSendWindow } from './send-time-util';
 import { BRAND_SEND_WINDOW } from '../config/defaults';
@@ -814,6 +814,49 @@ function strFieldOrThrow(v: any, label: string): string {
 }
 
 /**
+ * ★2026-09-20 값 검사 3종 — 자유형 5종 개통으로 늘어난 입력의 **값**을 본다(그전에는 있고 없음만 봤다).
+ *   동영상 주소 = 카카오TV만(매뉴얼 「video_url = 카카오TV 동영상 URL」 · 0920 실측 = 유튜브 주소가 카카오 동영상 오류로 거절).
+ *   가격 범위   = attachment_method.pdf 커머스 표(정상가·할인가 0~99,999,999 · 할인율 0~100 · 정액할인 0~999,999).
+ *   링크 형식   = http(s) 시작. **오늘 열린 자리(아이템·캐러셀)에만 건다** — 말풍선 버튼·쿠폰·이미지 링크는
+ *                이미 운영 중인 유형과 예약분이 같은 조립기를 지나므로, 카카오가 실제로 거절하는지 실측한 뒤에 넓힌다.
+ *   변수(`#{...}`)가 든 값은 치환 뒤에 정해지므로 통과시킨다.
+ */
+function isKakaoTvUrl(v: string): boolean {
+  try {
+    const u = new URL(v);
+    return (u.protocol === 'https:' || u.protocol === 'http:') && u.hostname.toLowerCase() === 'tv.kakao.com';
+  } catch {
+    return false;
+  }
+}
+
+const COMMERCE_RANGES: [string, string, number][] = [
+  ['regular_price', '정상가', 99_999_999],
+  ['discount_price', '할인가', 99_999_999],
+  ['discount_rate', '할인율', 100],
+  ['discount_fixed', '할인금액', 999_999],
+];
+
+function assertCommerceRange(commerce: Record<string, any> | undefined, at: string): void {
+  if (!commerce) return;
+  for (const [key, name, max] of COMMERCE_RANGES) {
+    const v = commerce[key];
+    if (v === undefined || v === null || v === '') continue;
+    if (typeof v === 'string' && v.includes('#{')) continue;
+    const n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, ''));
+    if (!Number.isInteger(n) || n < 0 || n > max) {
+      throw new BrandMessageBuildError(`${at}${name}은(는) 0~${max.toLocaleString('en-US')} 사이의 숫자여야 합니다`);
+    }
+  }
+}
+
+function assertWebLink(v: string, at: string): void {
+  if (v && !isHttpLinkOrVariable(v)) {
+    throw new BrandMessageBuildError(`${at}: 링크는 http:// 또는 https://로 시작해야 합니다 (예: https://www.example.com)`);
+  }
+}
+
+/**
  * 우리 서빙 URL이 이미지 자리에 남아 있으면 거절한다 — 카카오는 콘텐츠 서버 업로드본만 받는다.
  * 판정은 `brand-image-resolver`가 소유한다(치환하는 쪽과 막는 쪽이 같은 판정을 써야 한다 —
  * 두 벌이면 한쪽이 통과시킨 것을 다른 쪽이 막는다).
@@ -933,6 +976,12 @@ function assertBrandContentSpec(input: {
   if (spec.requireVideo && !required(attVideo !== undefined, !!strFieldOrThrow(attVideo?.video_url, '동영상 주소'))) {
     throw new BrandMessageBuildError(`${label}: 동영상 주소가 필요합니다`);
   }
+  const videoUrl = strFieldOrThrow(attVideo?.video_url, '동영상 주소');
+  if (videoUrl && !videoUrl.startsWith('#{') && !isKakaoTvUrl(videoUrl)) {
+    throw new BrandMessageBuildError(
+      `${label}: 동영상은 카카오TV 주소만 쓸 수 있습니다 (예: https://tv.kakao.com/v/123456789)`,
+    );
+  }
   if (spec.requireCommerce) {
     const present = attCommerce !== undefined;
     if (!required(present, !!strFieldOrThrow(attCommerce?.title, '상품 제목'))) {
@@ -960,6 +1009,7 @@ function assertBrandContentSpec(input: {
       && attCommerce.discount_rate === undefined && attCommerce.discount_fixed === undefined) {
     throw new BrandMessageBuildError('할인가를 넣으면 할인율 또는 할인금액 중 하나를 함께 입력해야 합니다');
   }
+  assertCommerceRange(attCommerce, '');
 
   // ── 버튼 개수 (§6.10.3.3 — 쿠폰을 함께 쓰면 상한이 줄어든다) ──────────
   const buttonMax = coupon ? spec.couponMaxButtons : spec.maxButtons;
@@ -1043,6 +1093,7 @@ function assertBrandContentSpec(input: {
       plainObjectOrThrow(item, at);
       if (!strFieldOrThrow(item?.img_url, `${at} 이미지`)) throw new BrandMessageBuildError(`${at}: 이미지가 필요합니다`);
       if (!strFieldOrThrow(item?.url_mobile, `${at} 모바일 링크`)) throw new BrandMessageBuildError(`${at}: 모바일 링크가 필요합니다`);
+      assertWebLink(strFieldOrThrow(item?.url_mobile, `${at} 모바일 링크`), at);
       // 1번째만 제목이 선택이다.
       if (i > 0 && !strFieldOrThrow(item?.title, `${at} 제목`)) throw new BrandMessageBuildError(`${at}: 제목이 필요합니다`);
     });
@@ -1100,6 +1151,7 @@ export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: 
     if (hasOtherLink && !strFieldOrThrow(head?.url_mobile, '인트로 모바일 링크')) {
       throw new BrandMessageBuildError('캐러셀 인트로: 다른 링크를 넣으면 모바일 링크가 필요합니다');
     }
+    assertWebLink(strFieldOrThrow(head?.url_mobile, '인트로 모바일 링크'), '캐러셀 인트로');
   }
 
   // ── list (카드) ──
@@ -1157,7 +1209,9 @@ export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: 
     // 카드 안의 attachment는 다시 이미지·버튼·쿠폰·커머스를 품는다(§5.2 "캐러셀 아이템 이미지, 버튼 정보").
     const cAtt = plainObjectOrThrow(card?.attachment, `${at} 첨부`) ?? {};
     assertNoOwnServingImage((cAtt as any)?.image?.img_url, label);
+    assertWebLink(strFieldOrThrow((cAtt as any)?.image?.img_link, `${at} 이미지 링크`), `${at} 이미지`);
     const cCommerce = plainObjectOrThrow(cAtt.commerce, `${at} 상품 정보`);
+    assertCommerceRange(cCommerce, `${at}: `);
     const cProdTitle = strFieldOrThrow(cCommerce?.title, `${at} 상품명`);
     if (cProdTitle && spec.maxCommerceTitle > 0 && charLen(cProdTitle) > spec.maxCommerceTitle) {
       throw new BrandMessageBuildError(
@@ -1183,6 +1237,7 @@ export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: 
       }
       const bType = strFieldOrThrow(btn?.type, `${bat} 종류`).toUpperCase();
       if (!BUTTON_TYPES[bType]) throw new BrandMessageBuildError(`${bat}: 지원하지 않는 버튼 종류입니다 (${bType || '미지정'})`);
+      assertWebLink(strFieldOrThrow(btn?.url_mobile, `${bat} 모바일 링크`), bat);
     });
   });
 
@@ -1191,6 +1246,7 @@ export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: 
   if (tail !== undefined) {
     const tUrl = strFieldOrThrow(tail?.url_mobile, '더보기 모바일 링크');
     if (!tUrl) throw new BrandMessageBuildError('캐러셀 더보기: 모바일 링크가 필요합니다');
+    assertWebLink(tUrl, '캐러셀 더보기');
     // 더보기에는 변수를 쓸 수 없다(카카오 브랜드메시지 가이드 · 접수 문서 「캐러셀 더보기」 항).
     // 치환이 일어나지 않아 `#{...}`가 링크에 그대로 남는다.
     for (const k of ['url_mobile', 'url_pc', 'scheme_android', 'scheme_ios']) {

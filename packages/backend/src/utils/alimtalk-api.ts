@@ -1268,6 +1268,39 @@ export function extractImageListFromAnyShape(r: any): { imageUrl: string; imageN
   return [];
 }
 
+// ★2026-09-20 `routes/alimtalk.ts`에서 옮겨 왔다(본문 무변경) — 템플릿 등록 라우트와 브랜드 발송 이미지 등록(brand-image-resolver)이 함께 쓴다
+/**
+ * 카카오(IMC) 이미지 업로드 에러 메시지를 사용자 친화적으로 정제.
+ *
+ * 입력 예: `InvalidImageShapeException(가로:세로 비율은 2:1여야 합니다, ë틀ɑì틀´.jpg)`
+ * 출력 예: `이미지 가로:세로 비율은 2:1이어야 합니다`
+ *
+ * 처리:
+ *  - 영문 ExceptionName/ErrorName 제거
+ *  - 괄호 안 첫 번째 콤마까지를 메시지로 추출 (그 뒤는 파일명 등 부가 정보 → 제거)
+ *  - 'IMC'/'humuson' 등 라우터 명칭 제거
+ *  - 메시지 못 추출 시 "이미지 업로드에 실패했습니다" + 코드 fallback
+ */
+export function sanitizeImcMessageForUser(
+  rawMsg: string | undefined,
+  code: string | undefined,
+  fallback: string = '요청 처리에 실패했습니다',
+): string {
+  const msg = (rawMsg || '').trim();
+  if (!msg) return code ? `${fallback} (코드 ${code})` : fallback;
+  // 1) 영문 ExceptionName/ErrorName(...) 패턴 → 괄호 안 첫 콤마 이전만 추출
+  const m = msg.match(/^[A-Za-z][A-Za-z0-9_]*(?:Exception|Error|Failure)\s*\((.+)\)\s*$/);
+  let inner = m ? m[1] : msg;
+  // 괄호 안에 콤마가 있으면 첫 콤마까지만 (이후는 파일명/부가정보)
+  const commaIdx = inner.indexOf(',');
+  if (commaIdx > 0) inner = inner.slice(0, commaIdx);
+  // 2) 라우터 명칭 제거 (사용자 노출 금지 정책)
+  inner = inner.replace(/\bIMC\b/gi, '').replace(/humuson/gi, '').trim();
+  // 3) 잔여 정리
+  inner = inner.replace(/\s{2,}/g, ' ').trim();
+  return inner || (code ? `${fallback} (코드 ${code})` : fallback);
+}
+
 async function uploadSingleImage(
   endpoint: string,
   fileBuffer: Buffer,

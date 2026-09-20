@@ -33,13 +33,15 @@ import {
   FolderOpen, Upload, Sparkles, ChevronDown, Target, Lock,
 } from 'lucide-react';
 import BrandMessagePreview from './BrandMessagePreview';
-import AssetLibraryPickerModal, { type PickedAsset } from './assets/AssetLibraryPickerModal';
+import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
 import { FIELD_CLASS, FIELD_CLASS_INDIGO, PANEL_CLASS, SourceCaption } from './shared/SendWorkspaceShell';
 import BrandPickMenu from './brand-send/BrandPickMenu';
 import BrandTypePickerModal, { BrandTypeThumb, brandTypeChips } from './brand-send/BrandTypePickerModal';
 import { BRAND_SPEC, BRAND_TYPE_ORDER, type BrandSpec } from '../constants/brand-message-spec';
 import BrandRichSections from './brand-send/BrandRichSections';
-import { initialRich, richBlockReason, richPayload, type RichState } from './brand-send/brandRich';
+import { initialRich, linkReason, richBlockReason, richPayload, type RichState } from './brand-send/brandRich';
+import { brandImageHint } from './brand-send/brandImageSpec';
+import { useBrandImageGuard } from './brand-send/useBrandImageGuard';
 import type { PreviewRich } from './BrandMessagePreview';
 import { format080Input, isValid080Number } from '../utils/formatDate';
 
@@ -58,11 +60,6 @@ const noticeAtEnd = (s: string): boolean => NOTICE_TAIL_RE.test(s.trimEnd());
 /** 코드포인트 글자 수 — 백엔드 charLen과 같은 자(이모지 서로게이트 쌍 = 1자) */
 const cpLen = (s: string): number => [...s].length;
 const nlCount = (s: string): number => (s.match(/\n/g) || []).length;
-
-/** 라이브러리·업로드 응답의 상대 URL(공개 서빙)을 카카오가 내려받을 절대 URL로 */
-const toAbsoluteUrl = (u: string): string => {
-  try { return new URL(u, window.location.origin).toString(); } catch { return u; }
-};
 
 /**
  * ★ 2026-08-21 강조색을 호출자가 고른다. 직접발송 진입 = violet(기존 그대로), 직접 타겟 발송 진입 = indigo(콘솔 톤).
@@ -239,15 +236,23 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
   const [imageKind, setImageKind] = useState('');       // 'generated' | 'uploaded' | ... | ''(출처 모름)
   const [imageName, setImageName] = useState('');       // 표시용 파일명
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [imageError, setImageError] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   /**
-   * ★Codex 1R H4 수용 — 이미지 소스 세대. 업로드 중에 라이브러리 선택·URL 입력·제거가 일어나면
-   * 세대를 올려, 늦게 도착한 업로드 응답이 사용자의 마지막 선택을 덮지 못하게 한다
-   * (BrandSendModal의 reqSeqRef와 같은 패턴).
+   * ★2026-09-20 이미지 입구 = `useBrandImageGuard`(자리형 입력 BrandImageSlot과 같은 입구).
+   *   고르는 순간 실제 크기를 재서 규격 밖이면 경고 창을 띄운다(자동 맞춤 · 다른 이미지 선택).
+   *   업로드 호출과 「늦게 온 응답 버리기」(옛 imageSeqRef · Codex 1R H4)도 그 훅이 소유한다.
    */
-  const imageSeqRef = useRef(0);
+  const imageGuard = useBrandImageGuard({
+    kind: 'main',
+    label: '이미지',
+    onAccept: (img) => {
+      setImageUrl(img.url);
+      setImageAssetId(img.assetId);
+      setImageKind(img.kind);
+      setImageName(img.name);
+    },
+    onPickAnother: () => setPickerOpen(true),
+  });
 
   // 쿠폰 — 제목은 카카오가 정한 5형식만 되므로 자유 입력 대신 형식 선택 + 값으로 받는다.
   //   (근거 = IMC Developer Portal brand/send/free coupon.title "사용 가능한 쿠폰 제목")
@@ -363,6 +368,10 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
     if (selectedType.needImage && selectedType.maxMsg === 0 && imageKind === 'generated') {
       return `${selectedType.label} 유형에는 AI로 만든 이미지를 쓸 수 없습니다. 직접 올린 이미지를 사용해 주세요`;
     }
+    if (selectedType.needImage) {
+      const ilr = linkReason(imageLink, '이미지 클릭 주소는');
+      if (ilr) return ilr;
+    }
     const richReason = richBlockReason(bubbleType, rich, BUTTON_TYPES.filter((t) => t.needUrl).map((t) => t.code));
     if (richReason) return richReason;
     if (!selectedType.isCarousel && buttons.length < selectedType.minBtn) {
@@ -382,6 +391,8 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
         return `${i + 1}번째 버튼명은 최대 ${selectedType.maxBtnName}자입니다`;
       }
       if (spec?.needUrl && !(b.url_mobile || '').trim()) return `${i + 1}번째 버튼의 링크를 입력해주세요`;
+      const blr = spec?.needUrl ? linkReason(b.url_mobile || '', `${i + 1}번째 버튼의 링크는`) : '';
+      if (blr) return blr;
       if (spec?.targetingOnly && !spec.targetingOnly.includes(targeting)) {
         return `${spec.label} 버튼은 지금 선택한 대상 범위에서는 쓸 수 없습니다`;
       }
@@ -404,6 +415,8 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
       if (!desc) return '쿠폰 설명을 입력해주세요';
       if (cpLen(desc) > selectedType.couponDescMax) return `쿠폰 설명은 최대 ${selectedType.couponDescMax}자입니다`;
       if (!couponUrl.trim()) return '쿠폰을 누르면 이동할 주소를 입력해주세요';
+      const clr = linkReason(couponUrl, '쿠폰 주소는');
+      if (clr) return clr;
     }
     // LMS 대체발송 제목 — 백엔드 거절 문구와 같은 문장으로 미리 막는다(실패할 버튼 노출 금지)
     if (resendType === 'LM' && !resendTitle.trim()) return 'LMS 대체발송은 제목이 필요합니다';
@@ -420,51 +433,12 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
     setButtons(buttons.map((b, i) => i === idx ? { ...b, [field]: value } : b));
   };
 
-  // 이미지 입력 — 상태를 바꾸는 모든 통로가 세대를 올린다(진행 중 업로드 응답 무효화)
-  // ★2026-09-02 URL 직접 입력 제거: img_url에는 카카오 콘텐츠 서버 업로드본만 실을 수 있어
+  // 이미지 입력 — ★2026-09-02 URL 직접 입력 제거: img_url에는 카카오 콘텐츠 서버 업로드본만 실을 수 있어
   //   임의 주소는 애초에 발송이 안 된다. 라이브러리·업로드 둘 다 서버가 카카오로 올려 준다.
-  const applyPickedAsset = (asset: PickedAsset) => {
-    imageSeqRef.current++;
-    setUploading(false);
-    setImageUrl(toAbsoluteUrl(asset.url));
-    setImageAssetId(asset.id);
-    setImageKind(asset.kind);
-    setImageName(asset.filename || '라이브러리 이미지');
-    setImageError('');
-  };
-
-  const handleUploadFile = async (file: File | null) => {
-    if (!file) return;
-    const seq = ++imageSeqRef.current;
-    setUploading(true);
-    setImageError('');
-    try {
-      const fd = new FormData();
-      fd.append('image', file);
-      const res = await fetch('/api/assets/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
-        body: fd,
-      });
-      const data = await res.json();
-      if (seq !== imageSeqRef.current) return;   // 그 사이 다른 이미지를 골랐다 — 이 응답은 버린다
-      if (!res.ok || data?.success === false) throw new Error(String(data?.error || '업로드하지 못했습니다.'));
-      setImageUrl(toAbsoluteUrl(String(data.url || '')));
-      setImageAssetId(String(data.assetId || ''));
-      setImageKind('uploaded');
-      setImageName(String(data.filename || file.name));
-    } catch (e: any) {
-      if (seq === imageSeqRef.current) setImageError(e?.message || '업로드하지 못했습니다.');
-    } finally {
-      if (seq === imageSeqRef.current) setUploading(false);
-    }
-  };
-
+  //   고르기·올리기는 imageGuard가 맡는다(규격 검사 포함) — 여기는 제거만 갖는다.
   const clearImage = () => {
-    imageSeqRef.current++;
-    setUploading(false);
+    imageGuard.reset();
     setImageUrl(''); setImageLink(''); setImageAssetId(''); setImageKind(''); setImageName('');
-    setImageError('');
   };
 
   // 발송 — payload 키는 백엔드 CT-12 계약 그대로 유지한다(★2026-09-01 image.asset_id만 추가).
@@ -799,22 +773,22 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                       <FolderOpen size={17} strokeWidth={1.8} className={a.actIcon} />
                       라이브러리에서 선택
                     </button>
-                    <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}
+                    <button type="button" onClick={() => fileInputRef.current?.click()} disabled={imageGuard.busy}
                       className="flex flex-col items-center gap-1.5 px-2 py-4 rounded-xl bg-white ring-1 ring-slate-200/80 text-[12px] font-semibold text-slate-600 hover:ring-slate-300 hover:text-slate-800 transition shadow-sm disabled:opacity-50">
-                      {uploading
+                      {imageGuard.busy
                         ? <Loader2 size={17} strokeWidth={1.8} className="text-slate-400 animate-spin" />
                         : <Upload size={17} strokeWidth={1.8} className="text-slate-400" />}
-                      {uploading ? '올리는 중...' : '파일 업로드'}
+                      {imageGuard.busy ? '확인 중...' : '파일 업로드'}
                     </button>
                   </div>
-                  <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden"
-                    onChange={(e) => { handleUploadFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+                  <input ref={fileInputRef} type="file" accept="image/jpeg,image/png" className="hidden"
+                    onChange={(e) => { imageGuard.pickFile(e.target.files?.[0] || null); e.target.value = ''; }} />
                   <p className="text-[11px] text-slate-400 text-center mt-2.5">
-                    jpg·png · 업로드 2MB 이하 · 권장 800×400
+                    {brandImageHint('main')}
                   </p>
                 </div>
               )}
-              {imageError && <p className="text-[11px] text-rose-500 mt-2 px-1">{imageError}</p>}
+              {imageGuard.error && <p className="text-[11px] text-rose-500 mt-2 px-1">{imageGuard.error}</p>}
             </div>
           )}
 
@@ -1018,9 +992,10 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
       <AssetLibraryPickerModal
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onPick={applyPickedAsset}
+        onPick={imageGuard.pickAsset}
         showKindBadge
       />
+      {imageGuard.modal}
     </div>
   );
 }

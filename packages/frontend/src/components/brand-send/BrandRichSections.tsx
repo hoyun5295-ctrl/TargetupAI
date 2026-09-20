@@ -12,7 +12,7 @@ import { Plus, X } from 'lucide-react';
 import { BRAND_SPEC } from '../../constants/brand-message-spec';
 import BrandImageSlot from './BrandImageSlot';
 import {
-  calcRate, cpLen, emptyCard, emptyItem, nlCount,
+  calcRate, carouselRefRatio, cpLen, emptyCard, emptyItem, nlCount,
   type CardState, type CommerceState, type RichButton, type RichState,
 } from './brandRich';
 
@@ -153,6 +153,9 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
   const cardMin = cs ? (useIntro ? cs.listMinWithIntro : cs.listMin) : 0;
   const activeCard = typeof tab === 'number' ? value.cards[Math.min(tab, value.cards.length - 1)] : undefined;
   const activeIdx = typeof tab === 'number' ? Math.min(tab, value.cards.length - 1) : -1;
+  /** 카드끼리 비율이 같아야 한다 — 기준은 인트로(쓰면) 또는 첫 카드. 기준 자리 자신에게는 걸지 않는다 */
+  const ratioRef = carouselRefRatio(value, useIntro);
+  const cardMatchRatio = (i: number): number | null => (i === 0 && !ratioRef.isIntro ? null : ratioRef.ratio);
 
   const tabCls = (on: boolean) =>
     `shrink-0 px-3 py-1.5 rounded-lg text-[12px] font-medium whitespace-nowrap transition ${
@@ -178,7 +181,7 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
               className={fieldClass} placeholder="https://tv.kakao.com/v/..." />
           </Row>
           <div className="mt-2.5">
-            <BrandImageSlot label="썸네일 (선택)" hint="비우면 동영상의 기본 썸네일이 보입니다" blockGenerated
+            <BrandImageSlot label="썸네일 (선택)" kind="main" note="비우면 동영상의 기본 썸네일이 보입니다" blockGenerated
               value={value.video.thumb} onChange={(img) => set({ video: { ...value.video, thumb: img } })} />
           </div>
         </div>
@@ -206,7 +209,7 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
                       className="text-[11px] text-slate-400 hover:text-rose-500 transition">삭제</button>
                   )}
                 </div>
-                <BrandImageSlot label="아이템 이미지" hint="jpg·png · 2MB 이하" blockGenerated thumbWidth={i === 0 ? 96 : 48}
+                <BrandImageSlot label={`${i + 1}번 아이템 이미지`} kind={i === 0 ? 'wideItemFirst' : 'wideItem'} blockGenerated thumbWidth={i === 0 ? 96 : 48}
                   value={it.image} onChange={(img) => set({ items: value.items.map((x, j) => (j === i ? { ...x, image: img } : x)) })} />
                 <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-1.5">
                   <input type="text" value={it.title}
@@ -269,7 +272,7 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
               </label>
               {value.introOn && (
                 <>
-                  <BrandImageSlot label="인트로 이미지" hint="jpg·png · 2MB 이하" blockGenerated
+                  <BrandImageSlot label="인트로 이미지" kind="carousel" note="이 비율이 모든 카드의 기준이 됩니다" blockGenerated
                     value={value.intro.image} onChange={(img) => set({ intro: { ...value.intro, image: img } })} />
                   <Row label={<>인트로 제목 <span className="text-rose-500">*</span></>} right={<Count value={value.intro.header} max={cs.introHeaderMax} />}>
                     <input type="text" value={value.intro.header} onChange={(e) => set({ intro: { ...value.intro, header: e.target.value } })} className={fieldClass} />
@@ -294,7 +297,8 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
                     className="text-[11px] text-slate-400 hover:text-rose-500 transition">이 카드 삭제</button>
                 )}
               </div>
-              <BrandImageSlot label="카드 이미지" hint="jpg·png · 2MB 이하" blockGenerated
+              <BrandImageSlot key={activeIdx} label={`카드 ${activeIdx + 1} 이미지`} kind="carousel" matchRatio={cardMatchRatio(activeIdx)} blockGenerated
+                note={activeIdx === 0 && !ratioRef.isIntro ? '이 비율이 나머지 카드의 기준이 됩니다' : undefined}
                 value={activeCard.image} onChange={(img) => setCard(activeIdx, { image: img })} />
               <input type="text" value={activeCard.imgLink} onChange={(e) => setCard(activeIdx, { imgLink: e.target.value })}
                 className={fieldClass} placeholder="이미지를 누르면 이동할 주소 (선택)" />
