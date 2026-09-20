@@ -330,10 +330,13 @@ export default function BrandSendModal({
             return (
               <button key={t.key} type="button"
                 onClick={() => { if (t.locked) { onLockedFeature('ai-target'); return; } setMode(t.key); }}
-                className={`flex-1 px-2 py-2 rounded-lg text-[12px] font-medium inline-flex items-center justify-center gap-1.5 transition ${
+                // ★2026-09-20 수신자 열을 380 → 320으로 줄이면서 3등분(flex-1) 칸에 「AI 타겟추출」이 안 들어가
+                //   두 줄로 접혔다(Harold 실측). 칸을 글자 길이대로 나누고(flex-auto) 줄바꿈을 막는다 —
+                //   잠금 표식이 붙어도 320 안에 들어간다(글자 150 + 아이콘·여백 ≈ 250 < 272).
+                className={`flex-auto min-w-0 px-1.5 py-2 rounded-lg text-[12px] font-medium whitespace-nowrap inline-flex items-center justify-center gap-1 transition ${
                   active ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'
                 }`}>
-                <t.icon size={13} strokeWidth={1.9} className={active ? 'text-violet-500' : ''} />
+                <t.icon size={13} strokeWidth={1.9} className={`shrink-0 ${active ? 'text-violet-500' : ''}`} />
                 <span>{t.label}</span>
                 {t.locked && <Lock size={10} strokeWidth={2.2} className="text-slate-300" />}
               </button>

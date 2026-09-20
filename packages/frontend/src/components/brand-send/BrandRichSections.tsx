@@ -239,7 +239,7 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
           <div className="flex items-center justify-between gap-2 mb-2">
             <span className={LABEL}>카드 <span className="text-rose-500">*</span> <span className={SUB}>{cardMin}~{cardMax}장 · 옆으로 넘겨 봅니다</span></span>
           </div>
-          <div className="flex gap-1 p-1 rounded-xl bg-slate-100/80 overflow-x-auto mb-2.5">
+          <div className="flex gap-1 p-1 rounded-xl bg-slate-100/80 overflow-x-auto mb-2.5 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300">
             {cs.allowIntro && (
               <button type="button" onClick={() => setTab('intro')} className={tabCls(tab === 'intro')}>
                 인트로{value.introOn ? '' : ' (안 씀)'}

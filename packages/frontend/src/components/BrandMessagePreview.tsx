@@ -139,7 +139,8 @@ export default function BrandMessagePreview({
             {hasContent && car ? (
               /* 캐러셀 — 카드가 옆으로 이어진다(말풍선 하나가 아니라 카드 열) */
               <>
-                <div className="flex gap-2 overflow-x-auto pb-1 -mr-3 pr-3">
+                {/* 카드 열의 가로 스크롤 막대 — 브라우저 기본(화살표 달린 굵은 막대)은 말풍선 면에서 깨져 보인다. 얇은 막대로 */}
+                <div className="flex gap-2 overflow-x-auto pb-1.5 -mr-3 pr-3 [scrollbar-width:thin] [scrollbar-color:rgba(60,80,100,0.35)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[rgba(60,80,100,0.35)]">
                   {car.intro && (
                     <div className="w-[168px] shrink-0 rounded-xl overflow-hidden shadow-sm bg-[#3b4b5a] text-white">
                       <Img src={car.intro.imageUrl} className="w-full h-[104px]" />
