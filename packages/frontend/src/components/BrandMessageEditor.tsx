@@ -39,7 +39,7 @@ import BrandPickMenu from './brand-send/BrandPickMenu';
 import BrandTypePickerModal, { BrandTypeThumb, brandTypeChips } from './brand-send/BrandTypePickerModal';
 import { BRAND_SPEC, BRAND_TYPE_ORDER, type BrandSpec } from '../constants/brand-message-spec';
 import BrandRichSections from './brand-send/BrandRichSections';
-import { initialRich, linkReason, richBlockReason, richPayload, type RichState } from './brand-send/brandRich';
+import { initialRich, linkReason, normalizeLinkInput, richBlockReason, richPayload, type RichState } from './brand-send/brandRich';
 import { brandImageHint } from './brand-send/brandImageSpec';
 import { useBrandImageGuard } from './brand-send/useBrandImageGuard';
 import type { PreviewRich } from './BrandMessagePreview';
@@ -762,6 +762,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                   )}
 
                   <input type="text" value={imageLink} onChange={(e) => setImageLink(e.target.value)}
+                    onBlur={(e) => setImageLink(normalizeLinkInput(e.target.value))}
                     className={FIELD} placeholder="클릭 시 이동 URL (선택)" />
                 </div>
               ) : (
@@ -833,6 +834,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                       className={`${FIELD} flex-1 px-2.5 py-1.5 text-xs`} placeholder="버튼명" />
                     {BUTTON_TYPES.find(t => t.code === btn.type)?.needUrl && (
                       <input type="text" value={btn.url_mobile || ''} onChange={(e) => updateButton(idx, 'url_mobile', e.target.value)}
+                        onBlur={(e) => updateButton(idx, 'url_mobile', normalizeLinkInput(e.target.value))}
                         className={`${FIELD} flex-1 px-2.5 py-1.5 text-xs`} placeholder="URL" />
                     )}
                     <button type="button" onClick={() => removeButton(idx)}
@@ -884,6 +886,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                       maxLength={selectedType.couponDescMax} className={FIELD}
                       placeholder={`쿠폰 설명 (최대 ${selectedType.couponDescMax}자)`} />
                     <input type="text" value={couponUrl} onChange={(e) => setCouponUrl(e.target.value)}
+                      onBlur={(e) => setCouponUrl(normalizeLinkInput(e.target.value))}
                       className={FIELD} placeholder="쿠폰을 누르면 이동할 주소" />
                   </>
                 )}

@@ -107,6 +107,33 @@ describe('값 검사 — 링크 · 동영상 주소 · 가격', () => {
     expect(rich.linkReason('www.hanjul.ai', '더보기 링크는')).toContain('http:// 또는 https://');
   });
 
+  it('★0920 링크 칸 자동 https — 도메인 형태인데 스킴이 없는 값에만 붙인다(칸에 보이는 값을 바꾼다)', () => {
+    expect(rich.normalizeLinkInput('www.naver.com')).toBe('https://www.naver.com');
+    expect(rich.normalizeLinkInput('  naver.com/event?x=1  ')).toBe('https://naver.com/event?x=1');
+    expect(rich.normalizeLinkInput('www.hanjul.ai')).toBe('https://www.hanjul.ai');       // 0920 접수 화면의 실제 입력값
+    // 건드리지 않는 것 — 이미 스킴이 있는 값 · 변수 · 도메인 형태가 아닌 값 · 빈 값
+    expect(rich.normalizeLinkInput('http://a.co/x')).toBe('http://a.co/x');
+    expect(rich.normalizeLinkInput('HTTPS://A.CO')).toBe('HTTPS://A.CO');
+    expect(rich.normalizeLinkInput('#{상품링크}')).toBe('#{상품링크}');
+    expect(rich.normalizeLinkInput('네이버')).toBe('네이버');
+    expect(rich.normalizeLinkInput('ftp://a.co')).toBe('ftp://a.co');
+    expect(rich.normalizeLinkInput('')).toBe('');
+    // 붙인 결과는 검사를 통과하고, 도메인 형태가 아닌 값은 그대로 남아 검사에 걸린다
+    expect(rich.linkReason(rich.normalizeLinkInput('www.naver.com'), '링크는')).toBe('');
+    expect(rich.linkReason(rich.normalizeLinkInput('네이버'), '링크는')).toContain('http:// 또는 https://');
+    // 두 번 적용해도 같다(멱등)
+    expect(rich.normalizeLinkInput(rich.normalizeLinkInput('www.naver.com'))).toBe('https://www.naver.com');
+  });
+
+  it('★0920 자동 https 의 도메인 판정은 백엔드 normalizeWebUrl 과 같은 식이다(두 벌이 갈리면 화면과 서버가 다른 주소를 만든다)', async () => {
+    const fs = await import('fs');
+    const front = fs.readFileSync(path.join(FRONT, 'brandRich.ts'), 'utf8');
+    const back = fs.readFileSync(path.resolve(__dirname, '../normalize.ts'), 'utf8');
+    const DOMAIN_RE = String.raw`/^[a-z0-9-]+(\.[a-z0-9-]+)+([/?#].*)?$/i`;
+    expect(front).toContain(DOMAIN_RE);
+    expect(back).toContain(DOMAIN_RE);
+  });
+
   it('동영상은 카카오TV 주소만 — 0920 실측 실패값(유튜브 단축 주소)을 막는다', () => {
     expect(rich.isKakaoTvUrl('https://tv.kakao.com/v/422641013')).toBe(true);
     expect(rich.isKakaoTvUrl('https://tv.kakao.com/channel/1391/cliplink/455082924')).toBe(true);

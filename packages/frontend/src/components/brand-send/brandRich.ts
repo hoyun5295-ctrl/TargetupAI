@@ -87,6 +87,19 @@ export const isWebLink = (raw: string): boolean => {
   const v = String(raw || '').trim();
   return /^https?:\/\/\S+$/i.test(v) || v.startsWith('#{');
 };
+/**
+ * 링크 칸에서 포커스가 빠질 때의 정리 — `www.naver.com` 처럼 **도메인 형태인데 스킴이 없는 값**에만 `https://` 를 붙인다.
+ * 규칙은 백엔드 `normalizeWebUrl`(utils/normalize.ts · 0702 이메일 링크 건)의 도메인 판정과 같다.
+ * ⛔ 발송할 때 뒤에서 고치지 않는다. **칸에 보이는 값**을 바꾸므로 담당자가 나가는 주소를 그대로 본다.
+ * 이미 `http(s)://` 로 시작하는 값 · 변수(`#{...}`)로 시작하는 값 · 도메인 형태가 아닌 값은 건드리지 않는다
+ * (도메인 형태가 아닌 값은 아래 linkReason 이 사유와 함께 막는다).
+ */
+export const normalizeLinkInput = (raw: string): string => {
+  const v = String(raw || '').trim();
+  if (!v || /^https?:\/\//i.test(v) || v.startsWith('#{')) return v;
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+([/?#].*)?$/i.test(v) ? `https://${v}` : v;
+};
+
 export const linkReason = (raw: string, at: string): string =>
   !String(raw || '').trim() || isWebLink(raw) ? '' : `${at} http:// 또는 https://로 시작해야 합니다 (예: https://www.example.com)`;
 

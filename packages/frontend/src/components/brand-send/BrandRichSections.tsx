@@ -12,7 +12,7 @@ import { Plus, X } from 'lucide-react';
 import { BRAND_SPEC } from '../../constants/brand-message-spec';
 import BrandImageSlot from './BrandImageSlot';
 import {
-  calcRate, carouselRefRatio, cpLen, emptyCard, emptyItem, nlCount,
+  calcRate, carouselRefRatio, cpLen, emptyCard, emptyItem, nlCount, normalizeLinkInput,
   type CardState, type CommerceState, type RichButton, type RichState,
 } from './brandRich';
 
@@ -123,6 +123,7 @@ function ButtonRows({ buttons, onChange, max, nameMax, fieldClass, accentText, b
                 className={`${fieldClass} !px-2.5 !py-1.5 !text-xs`} placeholder="버튼명" />
               {spec?.needUrl
                 ? <input type="text" value={b.url_mobile || ''} onChange={(e) => set(i, { url_mobile: e.target.value })}
+                    onBlur={(e) => set(i, { url_mobile: normalizeLinkInput(e.target.value) })}
                     className={`${fieldClass} !px-2.5 !py-1.5 !text-xs`} placeholder="URL" />
                 : <span />}
               <button type="button" onClick={() => onChange(buttons.filter((_, j) => j !== i))} aria-label="버튼 삭제"
@@ -217,6 +218,7 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
                     className={`${fieldClass} !py-2 !text-[13px]`} placeholder={i === 0 ? '제목 (선택)' : '제목'} />
                   <input type="text" value={it.urlMobile}
                     onChange={(e) => set({ items: value.items.map((x, j) => (j === i ? { ...x, urlMobile: e.target.value } : x)) })}
+                    onBlur={(e) => set({ items: value.items.map((x, j) => (j === i ? { ...x, urlMobile: normalizeLinkInput(e.target.value) } : x)) })}
                     className={`${fieldClass} !py-2 !text-[13px]`} placeholder="누르면 이동할 주소" />
                 </div>
               </div>
@@ -281,6 +283,7 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
                     <textarea rows={2} value={value.intro.content} onChange={(e) => set({ intro: { ...value.intro, content: e.target.value } })} className={`${fieldClass} resize-none`} />
                   </Row>
                   <input type="text" value={value.intro.urlMobile} onChange={(e) => set({ intro: { ...value.intro, urlMobile: e.target.value } })}
+                    onBlur={(e) => set({ intro: { ...value.intro, urlMobile: normalizeLinkInput(e.target.value) } })}
                     className={fieldClass} placeholder="인트로를 누르면 이동할 주소 (선택)" />
                 </>
               )}
@@ -301,6 +304,7 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
                 note={activeIdx === 0 && !ratioRef.isIntro ? '이 비율이 나머지 카드의 기준이 됩니다' : undefined}
                 value={activeCard.image} onChange={(img) => setCard(activeIdx, { image: img })} />
               <input type="text" value={activeCard.imgLink} onChange={(e) => setCard(activeIdx, { imgLink: e.target.value })}
+                onBlur={(e) => setCard(activeIdx, { imgLink: normalizeLinkInput(e.target.value) })}
                 className={fieldClass} placeholder="이미지를 누르면 이동할 주소 (선택)" />
 
               {cs.itemHeader === 'required' && (
@@ -335,6 +339,7 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
               </label>
               {value.tailOn && (
                 <input type="text" value={value.tailUrl} onChange={(e) => set({ tailUrl: e.target.value })}
+                  onBlur={(e) => set({ tailUrl: normalizeLinkInput(e.target.value) })}
                   className={fieldClass} placeholder="더보기를 누르면 이동할 주소" />
               )}
             </div>
