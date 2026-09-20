@@ -61,6 +61,32 @@
 5. 처음부터 고객사가 자사몰 연동처럼 자기 계정을 연결하고 직접 게시하거나 AI를 쓰는 구조 · 한줄로는 첫 사용자 → §2-1.
 6. 명칭부터 1·2차 완벽 설계 → §4-5 · §5.
 
+### 1-4. S0 raw 실측 — 인스타그램 (2026-09-20 · Harold 실행 · **응답 원문 기준 · 추론 0**)
+
+어댑터 코드 이전 게이트(§6-1). 자사 `hanjul_official`(프로페셔널 전환 완료)로 **게시 1건을 끝까지 관통**했다(permalink `instagram.com/p/Ddgm8b1EyhT/`).
+
+| 확인 | 값 |
+|---|---|
+| 베이스 | `https://graph.instagram.com` — 버전 세그먼트 **생략 가능**(전 호출 성공) |
+| 앱 | Meta 앱 **1개**에 Instagram·Threads 이용 사례 **공존**(별도 앱 불요 · 선택 화면 회색 처리 0). Instagram 앱 ID `2597365514118636` · 유스케이스 한국어명 `Instagram에서 메시지 및 콘텐츠 관리` · 좌측 `Instagram 로그인이 포함된 API` |
+| ⛔ 계정 ID | **`/me`가 주는 값을 쓴다.** 앱 대시보드 표시값(`17841424233711532`)과 `/me.id`(`28332885656368830`)가 **다르다** — 게시 경로에서 먹히는 것은 후자. 화면값을 저장하면 런타임에 터진다 |
+| `/me` | `{id, username, account_type}` · `account_type` = `BUSINESS` → §3-10 프로페셔널 판정이 이 필드를 쓴다 |
+| 한도 | `GET /{id}/content_publishing_limit?fields=config,quota_usage` → `{"data":[{"config":{"quota_total":100,"quota_duration":86400},"quota_usage":0}]}` · **`data` 배열로 감싸여 온다**(`data[0]`) |
+| 컨테이너 | `POST /{id}/media` + `image_url`·`caption` → `{"id"}` |
+| 상태 | `GET /{container-id}?fields=status_code,status` → **두 필드 모두** `FINISHED`. 어댑터는 `status_code`를 축으로 본다 |
+| 게시 | `POST /{id}/media_publish` + `creation_id` → `{"id"}` |
+| 재조회 | `?fields=id,permalink,media_type,media_url,timestamp,caption` · `permalink` = `https://www.instagram.com/p/{shortcode}/` · `media_type` = `IMAGE` · `timestamp` = ISO 8601 `+0000` |
+| 캡션 | 한글 정상 왕복(응답은 JSON 유니코드 이스케이프 표기) |
+| ⛔ `media_url` | 응답 CDN 주소에 **만료 파라미터(`oe=`)가 붙는다 → DB 저장 금지.** 저장 대상은 `permalink`뿐이고, 썸네일은 우리가 올린 원본을 쓴다(§3-5) |
+| 캐러셀 | ①자식마다 `POST /{id}/media` + `image_url` + **`is_carousel_item=true`**(자식은 단독 게시 불가 · 피드 노출 0) ②부모 `POST /{id}/media` + **`media_type=CAROUSEL`** + **`children=id1,id2`**(쉼표 구분) + `caption` ③부모도 `status_code` 폴링 대상이며 자식이 모두 처리돼야 `FINISHED` ④게시는 단일과 동일(`media_publish` + `creation_id`) |
+| 토큰 | `GET /refresh_access_token?grant_type=ig_refresh_token` → `{access_token, token_type:"bearer", expires_in, permissions}` · `expires_in` **5,182,603초 ≈ 60일** · `permissions`에 `instagram_business_content_publish` 포함 확인 · **발급 직후 호출에도 거부 0**(§1-1의 "24시간 지나야 갱신 가능"과 다름) → 토큰 워커가 이 경로로 **남은 시간 조회를 겸한다** |
+
+- **테스터 역할이 선행 조건이다.** 역할 없이 `계정 추가`를 누르면 인스타가 `개발자 역할 권한 부족`으로 OAuth를 거부한다(Meta 액세스 레벨 문서 원문 = "Standard Access가 있는 권한은 **앱에서 역할이 부여된 앱 사용자만** 요청할 수 있습니다"). 초대는 **수락**까지 되어야 효력이 생긴다(역할 화면 `대기 중` 배지 해제로 확인).
+- **2차 고객 개방의 정체 = Advanced Access.** 같은 문서 원문 = "앱에서 역할이 부여되지 않은 사용자도 앱을 사용할 경우 **Advanced Access가 필요**" · "Advanced Access를 받으려면 **비즈니스 인증이 필요**". 고객이 OAuth 동의를 눌러도 이 레벨 없이는 게시가 안 된다(동의와 액세스 레벨은 별개 층). 대시보드의 `기술 제공업체 되기`가 그 입구다.
+- 미디어 공개 URL = 이번 검증은 **기존 인앱 공개 경로**(`/api/cdp/inapp/image/{companyId}/{filename}` · 인증 0 · `?fit=1x1`)를 **1회** 썼다. 외부망에서 `200 image/jpeg` 확인(원본 325,035B → `fit=1x1` 163,109B). ⛔ **운영은 이 경로를 쓰지 않는다** — 서명 경로 §3-7이 유일 출구다. 기존 경로의 영구 공개 성격은 §9-8에 별건으로 기록.
+- 3:4 생성 포스터는 `ASPECT_RATIOS`에 `1x1`뿐이라 좌우 여백이 생긴다. §3-7의 `4x5` 추가가 그 여백을 없앤다.
+- 삭제 = Instagram API에 피드 게시물 삭제 endpoint가 **없다**. §6-2의 "삭제 감지"는 사람이 앱에서 지운 것을 대조 워커가 알아채는 흐름이며, 그 재조회 오류 형식은 S3에서 확정한다.
+
 ---
 
 ## 2. 불변 원칙 (어길 수 없는 것)
@@ -250,7 +276,8 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 
 - 진입 = `callAIWithFallback`(`services/ai.ts:73` · `withCopyRules` 관문 · source `sns-caption-generate`) · 시스템 프롬프트는 `refineDirectMessage`(`:3350`) 계약 미러("없는 걸 지어내지 X · 항목에 없는 사실 추가 X").
 - 가격·링크 AI 미경유 = 원문의 URL·금액·혜택 문구를 `{{link1}}`·`{{price1}}` 토큰으로 치환해 모델에 넘기고 결과에서 복원. 토큰을 잃은 후보 폐기. 출구 = `stripUnauthorizedBenefits(text, 사용자 원문)`(부정 문맥 한계 = §7 ⑪).
-- 태그 = AI 출력은 **고정 세트의 부분집합**(프롬프트에 세트를 주고 "이 글에 맞는 것을 고르라") · 서버 강제 `tags ⊆ fixedSet ∪ userTyped` · 직접 입력 태그는 형식 검사 + `detectBenefits`(혜택 낱말) · 채널 상한(인스타 30 · 캡션 2200 · X 280 · Threads 500)은 규칙 CT가 자르고 화면은 카운터. 세트 비면 캡션만 다듬고 사유 1줄. 세트 씨앗 = `GET /api/sns/tag-set` 지연 생성(회사당 1회 · 생성 시각 기록 · 후보 상태 · 화면 `전부 넣기` 1버튼). 게시 화면에 새 태그 입구 0(세트 편집 절만).
+- **입력에 사진을 포함한다(★2026-09-20 Harold 승인).** 캡션·태그 요청에 선택된 `sns_media` 이미지를 함께 넘긴다 — 모델이 글만 보고 고르던 것이 **글과 사진을 같이 보고 고르는 것**으로 바뀐다(글자가 박힌 포스터는 캡션이 비어도 성격이 사진에서 읽힌다). **출력 계약은 불변** — 태그는 여전히 부분집합 서버 강제, 캡션은 여전히 `stripUnauthorizedBenefits` 출구를 통과한다. **입력만 늘리고 안전장치는 하나도 줄이지 않는다**(회의 §8-1 6번 "오탐 0" 결정 유지 · AI가 태그를 만드는 것은 여전히 금지). 이미지가 없거나 읽기 실패면 글만으로 진행(기능 차단 0 · 사유 노출 0). MP4는 넘기지 않는다(1차). 비전 입력 토큰 증가는 크레딧 자리 §3-6이 받는다(1차 값 0이라 현재 영향 0).
+- 태그 = AI 출력은 **고정 세트의 부분집합**(프롬프트에 세트를 주고 "이 글과 사진에 맞는 것을 고르라") · 서버 강제 `tags ⊆ fixedSet ∪ userTyped` · 직접 입력 태그는 형식 검사 + `detectBenefits`(혜택 낱말) · 채널 상한(인스타 30 · 캡션 2200 · X 280 · Threads 500)은 규칙 CT가 자르고 화면은 카운터. 세트 비면 캡션만 다듬고 사유 1줄. 세트 씨앗 = `GET /api/sns/tag-set` 지연 생성(회사당 1회 · 생성 시각 기록 · 후보 상태 · 화면 `전부 넣기` 1버튼). 게시 화면에 새 태그 입구 0(세트 편집 절만).
 - 확정본 = 규칙 CT 통과 문자열을 target 행 `caption`에 저장. 워커는 그 컬럼만. `claimed` 이후 수정 409.
 
 ### 3-9. AI 표시
@@ -347,7 +374,7 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 
 ## 7. 미검증 목록 (설계에 그대로 싣는다 · 착수 전 확인 순서 = 번호)
 
-① 플랫폼 응답 필드명·오류 코드·재조회 endpoint(저장소 호출 0 · S0 raw로 확정) ② Meta가 컨테이너 처리 중 미디어를 다시 가져가는지(TTL은 상태 결박으로 회피) ③ X 조회 과금 여부·단가(2차 출처 · `deferred`로 건수 비례 회피) ④ 플랫폼 AI 라벨 필드가 국내 표시 의무를 만족하는지 · 캡션 텍스트가 표시 대상인지(**Harold 결재**) ⑤ MP4 헤더 파싱 사전 판정 범위(코덱·오디오 불가) ⑥ 운영 DB `sns_*` 존재 여부 ⑦ Meta Advanced Access 심사 기간 ⑧ Threads 인증 창 주소가 Instagram Login과 다른지(별도 유스케이스는 확인) ⑨ 서명 쿼리스트링이 Range 재요청에서 떨어지는지(경로 세그먼트로 회피) ⑩ 플랫폼이 서명 URL을 캐시하는지(우리 쪽 `no-store`만) ⑪ `stripUnauthorizedBenefits` 부정 문맥 한계가 공개 게시물에서 어느 정도 위험인지.
+① **인스타 게시 경로 = §1-4로 확정(0920 실측).** 남은 것 = 삭제 감지 시 재조회 오류 형식(S3) · Threads 전체(S1에서 인스타 어댑터를 세운 뒤) ② Meta가 컨테이너 처리 중 미디어를 다시 가져가는지(TTL은 상태 결박으로 회피) ③ X 조회 과금 여부·단가(2차 출처 · `deferred`로 건수 비례 회피 · 0920 재확인 = 2026-06-01 레거시 Basic 종량제 자동 이관 · Pro 2026-08-14 폐지 → **신규는 종량제뿐**) ④ **Harold 결재 완료(0920) = 캡션 텍스트 AI 표시 부착 0으로 진행**(AI 기본법 2026-01-22 시행 · 계도 최소 1년). 플랫폼 AI 라벨 필드가 국내 의무를 만족하는지는 여전히 미검증이며, 이미지 표시 CT(§3-9)는 불변 ⑤ MP4 헤더 파싱 사전 판정 범위(코덱·오디오 불가) ⑥ 운영 DB `sns_*` 존재 여부 ⑦ Meta Advanced Access 심사 기간 ⑧ Threads 인증 창 주소가 Instagram Login과 다른지(별도 유스케이스는 확인) ⑨ 서명 쿼리스트링이 Range 재요청에서 떨어지는지(경로 세그먼트로 회피) ⑩ 플랫폼이 서명 URL을 캐시하는지(우리 쪽 `no-store`만) ⑪ `stripUnauthorizedBenefits` 부정 문맥 한계가 공개 게시물에서 어느 정도 위험인지.
 
 ---
 
@@ -425,6 +452,13 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 - **무엇**: 0918에 상시 원칙(관리자 = 회사 전체 · 분류코드 배정 사용자 = 자기 것만)이 자사몰 연동에 적용됐다. 이 설계의 `sns_accounts`·게시물 목록·게이트는 회사 단위라 몰별 담당자가 다른 몰의 SNS 계정으로 게시할 수 있다.
 - **왜 아직 반영하지 않았나**: 이 설계서가 Harold 검토 대기(결재 4건)라 승인 전에 본문을 고치면 검토 대상이 흔들린다. 코드 0이라 지금 위험 0.
 - **재개 조건·방향**: 승인 직후 개정 1회 — §2 불변 원칙 추가("분류코드 배정 사용자는 자기 SNS 계정만") · §3-1 `sns_accounts.store_code` · §3-11 게이트에 CT-78 `integration-scope.ts` 재사용(관리자 전체 / 사용자 자기 코드 행 / 연결 시 코드 결정 규칙 동일). 상세 = [2026-09-18 몰별 사용자 연동 설계서 §8-8](2026-09-18-mall-integration-user-scope-design.md).
+### 9-8. 인앱·DM 이미지 공개 경로의 영구 노출 성격 (★0920 Harold 지적으로 등재)
+
+- **무엇**: `/api/cdp/inapp/image/{companyId}/{filename}`(`routes/cdp.ts:563`)과 `/api/dm/v/images/{companyId}/{filename}`(`routes/dm.ts:152`)은 인증이 없고 `Cache-Control: public, max-age=86400`이다. 경로가 UUID 2개라 추측·목록 조회는 불가능하지만 **주소가 한 번 새면 그 1장이 영구 노출**된다(중간 캐시 포함). 자사몰 방문자와 카카오 서버가 직접 받아가야 해서 공개로 만든 **의도된 설계**다(주석 = "자사몰 방문자 img 직접 GET, 인증 X").
+- **왜 이 설계가 아닌가**: 문제는 **용도가 섞여 있다는 것**이다 — 상시 표시돼야 하는 인앱 이미지와, 아직 아무 데도 안 쓴 이미지 스튜디오 초안·실패작이 같은 영구 공개 경로에 있다. 후자는 공개될 이유가 없다. 다만 둘을 가르는 일은 인앱·DM·카카오 전 경로를 건드리는 것이라 "접수 하나 때문에 공용을 고치지 않는다"에 해당한다. SNS는 §3-7 서명 경로로 **자기 출구를 따로 낸다** — 그것까지가 이 설계의 책임이다.
+- **지금 위험**: 주소 유출 시 그 1장. 목록 조회가 안 되니 옆 파일로 번지지 않는다. 과금·발송 무관.
+- **재개 조건·방향**: 용도 2축 분리 — 상시 표시(영구 공개 유지 · 만료를 걸면 자사몰 화면이 깨진다) / 일회성 전달(한시 서명 URL). 후자는 §3-7 구조를 그대로 옮기면 된다. 착수 판단 = Harold님.
+
 ## 10. 관련 문서
 
 [FEATURE-CDP-INTEGRATION.md](FEATURE-CDP-INTEGRATION.md) · [2026-09-14 우커머스 설계서](2026-09-14-woocommerce-integration-design.md) · [FEATURE-AI-AUTO-BUILD.md](FEATURE-AI-AUTO-BUILD.md) · [FEATURE-MARKETING-PLANNER.md](FEATURE-MARKETING-PLANNER.md) · [FEATURE-IMAGE-STUDIO.md](FEATURE-IMAGE-STUDIO.md) · [2026-09-01 AI 이미지 표시](2026-09-01-ai-image-notice-design.md) · [2026-08-21 오퍼레이터 표면 단계](2026-08-21-operator-surface-tier-design.md) · [DECISIONS D90](../status/DECISIONS.md) · [LESSONS_BACKEND](../status/lessons/LESSONS_BACKEND.md) · [BUGS B-0904-5 · 818행 대조 회귀](../status/BUGS.md) · 회의 원문 = 세션 scratchpad(`sns-brainstorm-brief.md` · `round1.md` · `converged.md`).
