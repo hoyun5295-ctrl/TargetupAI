@@ -14,7 +14,7 @@
  */
 import 'dotenv/config';
 import { query } from '../src/config/database';
-import { runWooBackfill, WooApiError } from '../src/utils/woocommerce-client';
+import { runWooBackfill, WooApiError, wooTuning } from '../src/utils/woocommerce-client';
 
 const PROGRESS_EVERY_MS = 30000;
 
@@ -50,7 +50,7 @@ async function main(): Promise<number> {
     ...(all ? eligible.filter((t) => !named.includes(t.mall_id)) : []),
   ];
   if (targets.length === 0) { console.error(`대상 몰이 없습니다(active · REST 키 있는 몰만): ${args.join(' ')}`); return 1; }
-  console.log(`대상 ${targets.length}몰: ${targets.map((t) => t.mall_id).join(', ')}`);
+  console.log(`대상 ${targets.length}몰: ${targets.map((t) => t.mall_id).join(', ')} · 동시 요청 회원 ${wooTuning.customerPageConcurrency} · 주문 ${wooTuning.orderPageConcurrency}`);
 
   let failedMalls = 0;
   for (const t of targets) {
@@ -58,7 +58,7 @@ async function main(): Promise<number> {
     console.log(`\n── ${t.mall_id} 시작 · ${await progressLine(t)}`);
     const timer = setInterval(() => { progressLine(t).then((l) => console.log(`   … ${l}`)).catch(() => undefined); }, PROGRESS_EVERY_MS);
     try {
-      const st = await runWooBackfill(t.company_id, t.mall_id);
+      const st = await runWooBackfill(t.company_id, t.mall_id, { requested: true });
       console.log(`── ${t.mall_id} 끝 stage=${st.stage} 회원=${st.customers_imported} 주문=${st.orders_imported} 번호없음=${st.customers_no_phone + st.orders_no_phone} 실패=${st.failed}${st.truncated ? ' (상한 도달)' : ''} · ${Math.round((Date.now() - started) / 1000)}초`);
     } catch (e: any) {
       failedMalls++;

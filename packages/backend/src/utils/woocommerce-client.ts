@@ -43,11 +43,24 @@ export const PAGE_SIZE = 20;
  * 가져오기 상한은 "건수"로 둔다(페이지 크기를 바꿔도 뜻이 안 변한다). 업무 한도가 아니라 폭주 방지선이다 —
  * 쇼핑몰 회원은 5,000명을 그냥 넘는다(옛 상한 5,000명 · 40,000건은 0921 폐기). 닿으면 truncated 로 남기고 화면에 알린다.
  */
-export const MAX_BACKFILL_CUSTOMERS = 500_000;
-export const MAX_BACKFILL_ORDERS = 200_000;
+export const MAX_BACKFILL_CUSTOMERS = 5_000_000;   // 첫 실고객 몰의 회원이 약 50만(0921 Harold) — 방지선은 그 10배에 둔다
+export const MAX_BACKFILL_ORDERS = 2_000_000;
 export const MAX_SYNC_ORDERS = 5_000;        // 주기 수집 한 회차 상한 — modified_after 를 서버가 모를 때 90일치가 통째로 오는 것을 막는다
-/** 조정값(테스트가 지연을 0 으로 둔다). retryDelaysMs = 같은 페이지 재시도 전 대기 · 길이 + 1 = 총 시도 수 */
-export const wooTuning = { retryDelaysMs: [2000, 6000] as number[] };
+const envInt = (name: string, fallback: number, max: number): number => {
+  const n = Math.floor(Number(process.env[name]));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, max) : fallback;
+};
+/**
+ * 조정값(테스트가 바꾼다). retryDelaysMs = 같은 페이지 재시도 전 대기 · 길이 + 1 = 총 시도 수.
+ * *PageConcurrency = 가져오기에서 몰에 동시에 보내는 페이지 요청 수(★0921). 순차(1)로는 회원 분당 1,200명 → 회원 50만 몰이면 7시간.
+ * 몰 서버 부하가 같은 배수로 는다 — 회원 조회(가벼움 · 페이지당 약 0.7초)는 4 · 주문 조회(무거움 · 페이지당 2초·192KB)는 2.
+ * 몰이 버거워하면(재시도 로그가 늘면) ENV 로 낮춘다: WOO_BACKFILL_CUSTOMER_CONCURRENCY · WOO_BACKFILL_ORDER_CONCURRENCY(상한 8).
+ */
+export const wooTuning = {
+  retryDelaysMs: [2000, 6000] as number[],
+  customerPageConcurrency: envInt('WOO_BACKFILL_CUSTOMER_CONCURRENCY', 4, 8),
+  orderPageConcurrency: envInt('WOO_BACKFILL_ORDER_CONCURRENCY', 2, 8),
+};
 export const STORE_PAGE_MAX = 100;                  // Store API per_page 상한
 /** 우리가 받는 웹훅 주제 4종 — 1클릭 연결이 REST 로 자동 생성한다(화면 안내 문안과 같은 목록) */
 export const WOO_WEBHOOK_TOPICS = ['order.created', 'order.updated', 'customer.created', 'customer.updated'] as const;
@@ -182,6 +195,12 @@ export interface WooBackfillState {
   failed: number;
   /** 폭주 방지선(MAX_BACKFILL_*)에 닿아 멈췄는가 */
   truncated: boolean;
+  /**
+   * 그 몰의 연결(사용자 승인 · 수동 연결 · 운영자가 그 몰을 지정해 돌린 스크립트)이 시작시킨 가져오기인가.
+   * 주기 워커는 이 표시가 있는 미완료 건만 이어 간다 — 아무도 요청하지 않은 몰을 워커가 스스로 가져오지 않는다
+   * (★0921 Harold: 연동은 사용자 계정에서 자기 몰 하나씩 · 몰 1개 연동이 다른 몰로 번지면 안 된다).
+   */
+  requested: boolean;
   started_at: string;
   updated_at: string;
   done_at: string | null;
@@ -203,6 +222,7 @@ function readBackfill(v: any): WooBackfillState | null {
     orders_no_phone: n(v.orders_no_phone, 0),
     failed: n(v.failed, 0),
     truncated: v.truncated === true,
+    requested: v.requested === true,
     started_at: String(v.started_at || ''),
     updated_at: String(v.updated_at || ''),
     done_at: v.done_at ? String(v.done_at) : null,
@@ -723,8 +743,10 @@ interface WooRunGuard { streak: number; logged: number }
 async function processWooItems(integ: WooIntegration, kind: WooTopicResource, items: any[], guard: WooRunGuard): Promise<WooItemTally> {
   const t: WooItemTally = { synced: 0, noPhone: 0, failed: 0 };
   for (const raw of items) {
+    const put = () => processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey, integ.storeCode);
     try {
-      const r = await processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey, integ.storeCode);
+      // UNIQUE 위반(23505) = 동시에 도는 다른 페이지가 같은 휴대폰·이메일의 고객을 방금 만들었다 → 한 번 더 넣으면 그 고객에 합쳐진다
+      const r = await put().catch((e: any) => { if (e?.code === '23505') return put(); throw e; });
       if (r === 'synced') t.synced++;
       else if (r === 'no_phone') t.noPhone++;
       guard.streak = 0;
@@ -785,26 +807,62 @@ async function saveBackfill(companyId: string, mallId: string, st: WooBackfillSt
  * 한 단계를 끝까지. 페이지가 끝날 때마다 "다음 페이지"를 저장한다.
  * 몰 행은 페이지마다 다시 읽는다 — 도는 중에 해제(없음 → 중단)되거나 재승인으로 키가 바뀌어도 그 즉시 따른다.
  * 정렬은 뒤에 붙는 순서(회원 id 오름차순 · 주문 생성일 오름차순)라 도는 중에 새 건이 생겨도 앞 페이지가 밀리지 않는다.
+ *
+ * 동시 처리(★0921 운영 실측: 순차로는 회원 분당 1,200명 → 회원 50만 몰이면 7시간 · 병목 = 몰 응답 페이지당 0.7~2초):
+ *   첫 페이지는 혼자 받아 전체 쪽수를 확정하고, 나머지는 wooTuning.*PageConcurrency 개가 페이지를 나눠 받는다.
+ *   저장하는 "다음 페이지"는 끝난 페이지가 **이어진 데까지**(watermark) — 뒤 페이지가 먼저 끝나도 앞의 실패한 페이지를 건너뛰지 않는다.
+ *   저장은 한 줄로 세운다(늦게 도착한 옛 값이 새 값을 덮지 않게). 한 페이지가 끝내 실패하면 새 페이지를 더 집지 않고 첫 오류를 던진다.
  */
 async function runBackfillStage(companyId: string, mallId: string, st: WooBackfillState, stage: 'customers' | 'orders', guard: WooRunGuard): Promise<void> {
   const isCustomers = stage === 'customers';
   const maxPages = Math.ceil((isCustomers ? MAX_BACKFILL_CUSTOMERS : MAX_BACKFILL_ORDERS) / PAGE_SIZE);
-  for (;;) {
-    const page = isCustomers ? st.customers_page : st.orders_page;
-    if (page > maxPages) { st.truncated = true; return; }
+  const concurrency = Math.max(1, Math.floor(isCustomers ? wooTuning.customerPageConcurrency : wooTuning.orderPageConcurrency) || 1);
+  const startPage = isCustomers ? st.customers_page : st.orders_page;
+
+  let totalPages = Number.POSITIVE_INFINITY;   // 첫 응답에서 확정 · 도는 중 늘면 따라 늘린다
+  let emptyAt = Number.POSITIVE_INFINITY;      // 빈 페이지가 나온 가장 앞 자리(그 뒤는 없다)
+  const lastPage = () => Math.min(totalPages, emptyAt - 1);
+  let nextPage = startPage;
+  let watermark = startPage;                   // 이 앞 페이지는 전부 끝났다
+  const finished = new Set<number>();
+  let firstError: unknown = null;
+  let saving: Promise<void> = Promise.resolve();
+
+  const doPage = async (page: number): Promise<void> => {
     const integ = await requireIntegration(companyId, mallId);
     if (!hasKeys(integ)) throw new WooApiError('no_keys');
     const res = isCustomers
       // role=all: 회원 역할이 몰마다 다르다(실측 bronze_member) — 기본값(customer)으로 부르면 0명이 온다. 운영자 역할은 매핑(core)이 뺀다.
       ? await fetchWooPageWithRetry(integ, 'customers', { per_page: PAGE_SIZE, role: 'all', orderby: 'id', order: 'asc', page })
       : await fetchWooPageWithRetry(integ, 'orders', { per_page: PAGE_SIZE, after: st.orders_after, dates_are_gmt: 'true', orderby: 'date', order: 'asc', page });
+    if (res.items.length === 0) emptyAt = Math.min(emptyAt, page);
+    totalPages = Number.isFinite(totalPages) ? Math.max(totalPages, res.totalPages) : res.totalPages;
     const t = await processWooItems(integ, isCustomers ? 'customer' : 'order', res.items, guard);
     st.failed += t.failed;
-    if (isCustomers) { st.customers_imported += t.synced; st.customers_no_phone += t.noPhone; st.customers_page = page + 1; }
-    else { st.orders_imported += t.synced; st.orders_no_phone += t.noPhone; st.orders_page = page + 1; }
-    await saveBackfill(companyId, mallId, st);
-    if (res.items.length === 0 || page >= res.totalPages) return;
-  }
+    if (isCustomers) { st.customers_imported += t.synced; st.customers_no_phone += t.noPhone; }
+    else { st.orders_imported += t.synced; st.orders_no_phone += t.noPhone; }
+    finished.add(page);
+    while (finished.has(watermark)) { finished.delete(watermark); watermark++; }
+    if (isCustomers) st.customers_page = watermark; else st.orders_page = watermark;
+    saving = saving.then(() => saveBackfill(companyId, mallId, st));
+    await saving;
+  };
+
+  if (startPage > maxPages) { st.truncated = true; return; }
+  await doPage(nextPage++);
+
+  const worker = async (): Promise<void> => {
+    while (!firstError) {
+      const page = nextPage;
+      if (page > lastPage()) return;
+      if (page > maxPages) { st.truncated = true; return; }
+      nextPage++;
+      try { await doPage(page); } catch (e) { if (!firstError) firstError = e; return; }
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  await saving.catch(() => undefined);
+  if (firstError) throw firstError;
 }
 
 /**
@@ -814,7 +872,7 @@ async function runBackfillStage(companyId: string, mallId: string, st: WooBackfi
  * - 시작할 때 옛 실패 사유를 지우고, 실패하면 새로 남긴 뒤 던진다. 끝나면 active 보장(옛 backfillWooOrders 와 같은 계약).
  * 직접 부르지 말고 enqueueWooBackfill 로 줄 세운다(동시 실행 방지) — 이 함수는 테스트와 큐가 부른다.
  */
-export async function runWooBackfill(companyId: string, mallId: string, opts?: { restartIfDone?: boolean }): Promise<WooBackfillState> {
+export async function runWooBackfill(companyId: string, mallId: string, opts?: { restartIfDone?: boolean; requested?: boolean }): Promise<WooBackfillState> {
   const integ = await requireIntegration(companyId, mallId);
   if (!hasKeys(integ)) throw new WooApiError('no_keys');
   const prev = integ.backfill;
@@ -828,11 +886,12 @@ export async function runWooBackfill(companyId: string, mallId: string, opts?: {
     st = {
       stage: 'customers', customers_page: 1, orders_page: 1,
       orders_after: wooDateParam(new Date(now.getTime() - DEFAULT_BACKFILL_DAYS * 24 * 60 * 60 * 1000)),
-      customers_imported: 0, orders_imported: 0, customers_no_phone: 0, orders_no_phone: 0, failed: 0, truncated: false,
+      customers_imported: 0, orders_imported: 0, customers_no_phone: 0, orders_no_phone: 0, failed: 0, truncated: false, requested: false,
       started_at: now.toISOString(), updated_at: now.toISOString(), done_at: null,
     };
   }
 
+  if (opts?.requested) st.requested = true;
   await clearWooSetupError(companyId, mallId);
   await saveBackfill(companyId, mallId, st);
   const guard: WooRunGuard = { streak: 0, logged: 0 };
@@ -865,7 +924,7 @@ let backfillChain: Promise<void> = Promise.resolve();
  * 가져오기를 줄 세운다(즉시 반환). 승인 콜백·수동 연결·주기 워커가 전부 이 함수 하나로 시작한다.
  * 반환 false = 그 몰이 이미 줄에 있거나 도는 중. 실패는 runWooBackfill 이 meta 에 남기고 여기서는 로그만 — 다음 워커 회차가 이어 간다.
  */
-export function enqueueWooBackfill(companyId: string, mallId: string, opts?: { restartIfDone?: boolean }): boolean {
+export function enqueueWooBackfill(companyId: string, mallId: string, opts?: { restartIfDone?: boolean; requested?: boolean }): boolean {
   const key = `${companyId}:${mallId}`;
   if (backfillQueued.has(key)) return false;
   backfillQueued.add(key);

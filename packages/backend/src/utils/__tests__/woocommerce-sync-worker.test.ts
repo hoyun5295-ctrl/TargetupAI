@@ -54,12 +54,14 @@ describe('소스 계약 — 고도몰 워커와 같은 규약', () => {
     expect(src).not.toMatch(/fetchWooPage|syncOrder\(|identifyCustomer\(|axios/);
   });
   // ★0921 가져오기가 한 번 실패하면 다시 도는 경로가 없었다(워커는 최근 12시간 수정분만) → 안 끝난 몰은 워커가 줄 세운다
-  it('가져오기가 안 끝난 몰(상태 없음 포함)은 enqueueWooBackfill 로 줄 세우고 그 회차 주기 수집은 건너뛴다(같은 몰에 두 흐름이 동시에 붙지 않게)', () => {
+  it('그 몰의 연결이 시작시킨(requested) 미완료 가져오기만 줄 세워 이어 간다 · 워커가 스스로 시작하지 않는다(요청 없는 몰은 주기 수집만) · 이어 가는 회차엔 주기 수집을 건너뛴다', () => {
     const src = code('woocommerce-sync-worker.ts');
     const loop = src.slice(src.indexOf('for (const row of'));
     const enq = loop.indexOf('enqueueWooBackfill(');
     expect(enq).toBeGreaterThan(-1);
-    expect(loop).toMatch(/woo_backfill\?\.stage !== 'done'/);
+    // ★0921 Harold: 연동은 사용자 계정에서 자기 몰 하나씩 — 상태 없음·requested 아님 = 워커가 건드리지 않는다
+    expect(loop).toMatch(/if \(bf && bf\.requested === true && bf\.stage !== 'done'\)/);
+    expect(loop.slice(enq, enq + 80)).not.toMatch(/requested: true|restartIfDone/);
     expect(enq).toBeLessThan(loop.indexOf('syncWooOrdersSince('));
     expect(loop.slice(enq, loop.indexOf('syncWooOrdersSince('))).toContain('continue;');
     // 요금제 게이트·키 확인 뒤에만 줄 세운다

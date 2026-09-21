@@ -46,7 +46,7 @@ interface WooSyncTarget {
   mall_id: string;
   last_synced_at: Date | null;
   connected_at: Date | null;
-  meta: { woo_consumer_key?: string; woo_consumer_secret?: string; woo_backfill?: { stage?: string } } | null;
+  meta: { woo_consumer_key?: string; woo_consumer_secret?: string; woo_backfill?: { stage?: string; requested?: boolean } } | null;
 }
 
 /**
@@ -126,9 +126,12 @@ export async function runWooSyncPass(): Promise<WooSyncPassResult> {
       // 요금제 게이트 — 연결 라우트와 같은 기준
       if (!(await isCdpEnabledForPlan(row.company_id))) { result.skipped++; continue; }
 
-      // ★0921 기존 회원·주문 가져오기가 안 끝난 몰(실패·서버 재시작 · 상태 없는 기존 연결 몰 포함)은 줄 세워 이어 간다.
-      //   끝나기 전에는 주기 수집을 돌리지 않는다 — 같은 몰에 두 흐름이 동시에 붙으면 몰 서버 부하만 두 배다(겹치는 건은 어차피 가져오기가 읽는다).
-      if (row.meta?.woo_backfill?.stage !== 'done') {
+      // ★0921 그 몰의 연결이 시작시킨(requested) 가져오기가 안 끝났으면(실패·서버 재시작) 줄 세워 이어 간다.
+      //   워커가 스스로 시작하지 않는다 — 요청 없는 몰(상태 없음 · requested 아님)은 건드리지 않고 아래 주기 수집만 돈다
+      //   (연동은 사용자 계정에서 자기 몰 하나씩 · 몰 1개 연동이 다른 몰로 번지면 안 된다 — Harold 0921).
+      //   이어 가는 동안에는 그 몰의 주기 수집을 돌리지 않는다 — 같은 몰에 두 흐름이 동시에 붙으면 몰 서버 부하만 두 배다.
+      const bf = row.meta?.woo_backfill;
+      if (bf && bf.requested === true && bf.stage !== 'done') {
         enqueueWooBackfill(row.company_id, row.mall_id);
         result.skipped++;
         continue;

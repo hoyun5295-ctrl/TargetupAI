@@ -189,7 +189,7 @@ router.post('/auth-callback', async (req: Request, res: Response) => {
         await verifyWooConnection(st.companyId, st.mallId);
         await clearWooSetupError(st.companyId, st.mallId);
         const w = await ensureWooWebhooks(st.companyId, st.mallId);
-        const queued = enqueueWooBackfill(st.companyId, st.mallId, { restartIfDone: true });
+        const queued = enqueueWooBackfill(st.companyId, st.mallId, { restartIfDone: true, requested: true });
         console.log(`[WooCommerce auth-callback] 자동 설정 mall=${st.mallId} webhooks +${w.created}/=${w.existing} 가져오기=${queued ? '줄 세움' : '이미 도는 중'}`);
       } catch (e: any) {
         const code = e instanceof WooApiError ? e.code : 'unknown';
@@ -399,7 +399,7 @@ router.post('/connect', async (req: Request, res: Response) => {
 
     // 가져오기는 시간이 걸려 백그라운드로(회원 → 주문) — 줄 세우기 하나로. 실패는 meta 에 남고 주기 워커가 이어 간다.
     await clearWooSetupError(companyId, mallId).catch(() => undefined);
-    enqueueWooBackfill(companyId, mallId, { restartIfDone: true });
+    enqueueWooBackfill(companyId, mallId, { restartIfDone: true, requested: true });
 
     return res.json({ success: true, verified: true, message: '연동 확인 완료. 회원·주문을 가져오는 중입니다. 잠시 후 상태를 확인해주세요.' });
   } catch (err) {

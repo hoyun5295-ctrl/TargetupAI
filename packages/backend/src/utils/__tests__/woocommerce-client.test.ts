@@ -255,7 +255,60 @@ describe('가져오기(runWooBackfill) — 회원 → 주문 · 20건 단위 · 
   const savedStates = () => q.mock.calls.filter((c: any[]) => String(c[0]).includes("'woo_backfill'")).map((c: any[]) => JSON.parse(c[1][2]));
   const withRow = (meta: Record<string, any> = {}) =>
     q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row({ meta: { ...row().meta, ...meta } })] } : { rows: [] }));
-  beforeEach(() => { wooTuning.retryDelaysMs = [0, 0]; });
+  // 아래 순차 계약들은 동시 1 로 고정한다(호출 순서를 단정한다). 동시 처리 계약은 맨 아래에서 값을 올려 따로 본다.
+  beforeEach(() => { wooTuning.retryDelaysMs = [0, 0]; wooTuning.customerPageConcurrency = 1; wooTuning.orderPageConcurrency = 1; });
+
+  // ★0921 운영 실측: 순차로는 회원 분당 1,200명 — 회원 50만 몰이면 7시간. 병목은 몰 응답(페이지당 0.7~2초)이라 페이지를 동시에 받는다.
+  describe('페이지 동시 처리 — 첫 페이지는 혼자(전체 쪽수 확정) · 나머지는 동시 N · 이어 가기 자리는 "끝난 페이지가 이어진 데까지"', () => {
+    const pageOf = (url: string) => Number(new URL(url).searchParams.get('page'));
+    const isCust = (url: string) => new URL(url).pathname.endsWith('/customers');
+    const tick = () => new Promise<void>((r) => setTimeout(r, 5));
+
+    it('회원 5페이지 · 동시 3: 페이지마다 정확히 1번 · 동시에 3개를 넘지 않는다 · 끝나면 다음 페이지 = 6', async () => {
+      withRow();
+      wooTuning.customerPageConcurrency = 3;
+      let inFlight = 0; let peak = 0;
+      get.mockImplementation(async (url: string) => {
+        if (!isCust(url)) return page([]);
+        inFlight++; peak = Math.max(peak, inFlight);
+        await tick();
+        inFlight--;
+        const p = pageOf(url);
+        return page([cust(p * 100 + 1), cust(p * 100 + 2)], 5);
+      });
+      const st = await runWooBackfill(COMPANY, MALL);
+      const custPages = get.mock.calls.map((c: any[]) => c[0]).filter(isCust).map(pageOf).sort((a: number, b: number) => a - b);
+      expect(custPages).toEqual([1, 2, 3, 4, 5]);
+      expect(peak).toBeLessThanOrEqual(3);
+      expect(peak).toBeGreaterThanOrEqual(2);
+      expect(st).toMatchObject({ stage: 'done', customers_imported: 10, customers_page: 6 });
+    });
+    it('가운데 페이지가 끝내 실패하면: 멈추고 던진다 · 저장된 다음 페이지 = 실패한 그 페이지(뒤 페이지가 먼저 끝났어도 건너뛰지 않는다)', async () => {
+      withRow();
+      wooTuning.customerPageConcurrency = 3;
+      get.mockImplementation(async (url: string) => {
+        if (!isCust(url)) return page([]);
+        const p = pageOf(url);
+        if (p === 3) { await tick(); throw Object.assign(new Error('timeout of 20000ms exceeded'), { code: 'ECONNABORTED' }); }
+        return page([cust(p * 100 + 1)], 6);
+      });
+      await expect(runWooBackfill(COMPANY, MALL)).rejects.toMatchObject({ code: 'network' });
+      expect(savedStates().pop()).toMatchObject({ stage: 'customers', customers_page: 3 });
+    });
+    it('동시 처리로 같은 번호의 두 회원이 겹쳐 UNIQUE 위반(23505)이 나면 그 건을 한 번 다시 넣는다(두 번째는 기존 고객에 합쳐진다)', async () => {
+      withRow();
+      (identifyCustomer as any).mockImplementationOnce(async () => { throw Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' }); });
+      get.mockResolvedValueOnce(page([cust(1)]));
+      get.mockResolvedValueOnce(page([]));
+      const st = await runWooBackfill(COMPANY, MALL);
+      expect(st).toMatchObject({ stage: 'done', customers_imported: 1, failed: 0 });
+      expect(identifyCustomer).toHaveBeenCalledTimes(2);
+    });
+    it('상한은 회원 50만 몰을 자르지 않는다(실고객 회원 약 50만)', () => {
+      expect(MAX_BACKFILL_CUSTOMERS).toBeGreaterThanOrEqual(5_000_000);
+      expect(MAX_BACKFILL_ORDERS).toBeGreaterThanOrEqual(2_000_000);
+    });
+  });
 
   it('상수: 페이지 20 · 상한은 건수(회원 50만 · 주문 20만 · 주기 5천) — 옛 5,000명 상한 없음', () => {
     expect(PAGE_SIZE).toBe(20);
@@ -408,6 +461,16 @@ describe('가져오기(runWooBackfill) — 회원 → 주문 · 20건 단위 · 
     expect(new URL(get.mock.calls[0][0]).pathname).toBe('/wp-json/wc/v3/customers');
     expect(new URL(get.mock.calls[0][0]).searchParams.get('page')).toBe('1');
     expect(again).toMatchObject({ stage: 'done', customers_imported: 0, orders_imported: 0 });
+  });
+  // ★0921 Harold: 연동은 사용자 계정에서 자기 몰 하나씩 — 몰 1개 연동이 다른 몰로 번지면 안 된다
+  it('requested 표시: 그 몰의 연결(승인·수동 연결·지정 실행)이 시작시킨 것만 true 로 저장된다 · 이어 갈 때 유지된다(워커가 이어 갈 자격)', async () => {
+    withRow();
+    get.mockResolvedValue(page([]));
+    expect((await runWooBackfill(COMPANY, MALL)).requested).toBe(false);
+    expect((await runWooBackfill(COMPANY, MALL, { restartIfDone: true, requested: true })).requested).toBe(true);
+    withRow({ woo_backfill: { stage: 'orders', customers_page: 2, orders_page: 3, orders_after: '2026-06-23T00:00:00', requested: true, started_at: 'a', updated_at: 'b', done_at: null } });
+    expect((await runWooBackfill(COMPANY, MALL)).requested).toBe(true);
+    expect(savedStates().pop()).toMatchObject({ stage: 'done', requested: true });
   });
   it('enqueueWooBackfill: 같은 몰은 도는 동안 한 번만 줄 세운다(콜백·워커 동시 실행 방지)', async () => {
     withRow();
