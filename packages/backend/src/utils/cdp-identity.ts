@@ -91,6 +91,18 @@ export interface IdentifyResult {
 // ═══════════════════════════════════════════════════════════
 
 /**
+ * 신규 고객인데 쓸 수 있는 휴대폰 번호가 없다 — 그 한 건을 넣을 수 없다는 뜻이지 장애가 아니다(★0921).
+ * 문구는 종전 그대로(Error 하위 · 기존 호출부 동작 불변). 대량 적재 호출부가 이 타입으로 "건너뛸 건"과 "멈출 장애"를 가른다
+ * (문구 문자열 대조 금지). 경위 = 우커머스 회원 가져오기가 전화번호 없는 회원 1명에서 4몰 전부 중단(BUGS B-0921-3).
+ */
+export class CdpPhoneRequiredError extends Error {
+  constructor() {
+    super('신규 회원 생성 시 phone은 필수입니다 (UNIQUE 제약 정합).');
+    this.name = 'CdpPhoneRequiredError';
+  }
+}
+
+/**
  * 자사몰 회원을 한줄로 customers에 매핑/upsert.
  * - 매칭 우선순위: source+external_id → email → phone → 신규 생성
  * - phone은 normalizePhone() 경유 (D162 영구 fix 정합)
@@ -182,7 +194,7 @@ export async function identifyCustomer(
   let wasCreated = false;
   if (!customerId) {
     if (!normalizedPhone) {
-      throw new Error('신규 회원 생성 시 phone은 필수입니다 (UNIQUE 제약 정합).');
+      throw new CdpPhoneRequiredError();
     }
     // 2026-06-10 정정: sms_opt_in 무조건 true → 명시 동의값만 반영, 미전달 신규는 false.
     // (동의 없는 자사몰 회원이 광고 발송 대상이 되던 구조 차단 — 정보통신망법 사전 동의)

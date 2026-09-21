@@ -717,7 +717,7 @@ export interface WooMallStatus {
   storeCode?: string | null;
   syncError: { message: string; code: string; at: string | null } | null;
   /** ★2026-09-21 기존 회원·주문 가져오기 진행(수십 분~수 시간 · 백그라운드). 옛 서버 응답엔 없다 → optional */
-  backfill?: { stage: 'customers' | 'orders' | 'done'; customersImported: number; ordersImported: number; truncated: boolean; doneAt: string | null } | null;
+  backfill?: { stage: 'customers' | 'orders' | 'done'; customersImported: number; ordersImported: number; noPhone?: number; failed?: number; truncated: boolean; doneAt: string | null } | null;
 }
 
 /**
@@ -904,7 +904,10 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
                   )}
                   {m.backfill?.stage === 'done' && (
                     <div className="mt-1 text-[11px] text-white/45">
-                      기존 데이터 가져오기 완료 · 회원 {m.backfill.customersImported.toLocaleString()}명 · 주문 {m.backfill.ordersImported.toLocaleString()}건{m.backfill.truncated ? ' · 상한에 닿아 일부만 가져왔습니다' : ''}
+                      기존 데이터 가져오기 완료 · 회원 {m.backfill.customersImported.toLocaleString()}명 · 주문 {m.backfill.ordersImported.toLocaleString()}건
+                      {(m.backfill.noPhone ?? 0) > 0 ? ` · 휴대폰 번호가 없어 넣지 않은 ${(m.backfill.noPhone ?? 0).toLocaleString()}건` : ''}
+                      {(m.backfill.failed ?? 0) > 0 ? ` · 형식 문제로 건너뛴 ${(m.backfill.failed ?? 0).toLocaleString()}건` : ''}
+                      {m.backfill.truncated ? ' · 상한에 닿아 일부만 가져왔습니다' : ''}
                     </div>
                   )}
                   {m.syncError && (

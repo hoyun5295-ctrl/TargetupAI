@@ -12,7 +12,7 @@ vi.mock('../cdp-orders', async (orig) => ({ ...(await orig<any>()), syncOrder: v
 
 import axios from 'axios';
 import { query } from '../../config/database';
-import { identifyCustomer } from '../cdp-identity';
+import { identifyCustomer, CdpPhoneRequiredError } from '../cdp-identity';
 import { syncOrder } from '../cdp-orders';
 import {
   WOO_PROVIDER,
@@ -35,6 +35,7 @@ import {
   MAX_BACKFILL_CUSTOMERS,
   MAX_BACKFILL_ORDERS,
   MAX_SYNC_ORDERS,
+  WOO_MAX_CONSECUTIVE_FAILURES,
   syncWooOrdersSince,
   processWooResource,
   getWooStatus,
@@ -311,6 +312,51 @@ describe('가져오기(runWooBackfill) — 회원 → 주문 · 20건 단위 · 
     expect((identifyCustomer as any).mock.calls[0][1]).toMatchObject({ smsOptIn: true });
     expect((identifyCustomer as any).mock.calls[1][1]).toMatchObject({ smsOptIn: false });
   });
+  // ★0921 배포 직후 운영 실측: 4몰 전부 회원 단계에서 "신규 회원 생성 시 phone은 필수입니다"로 즉시 중단
+  //   (iroirotokyo 1페이지 0명 · ilbonimo 35페이지 679명에서). 한 건의 적재 불가가 가져오기 전체를 죽였다.
+  it('전화번호 없는 회원·주문은 건너뛰고 계속 간다(no_phone 집계) — 한 건이 전체를 죽이지 않는다', async () => {
+    withRow();
+    (identifyCustomer as any).mockImplementationOnce(async () => { throw new CdpPhoneRequiredError(); });
+    get.mockResolvedValueOnce(page([cust(1), cust(2), cust(3)]));
+    (syncOrder as any).mockImplementationOnce(async () => { throw new CdpPhoneRequiredError(); });
+    get.mockResolvedValueOnce(page([order(1, { meta_data: [] }), order(2, { meta_data: [] })]));
+    const st = await runWooBackfill(COMPANY, MALL);
+    expect(st).toMatchObject({ stage: 'done', customers_imported: 2, customers_no_phone: 1, orders_imported: 1, orders_no_phone: 1, failed: 0 });
+    expect(q.mock.calls.some((c: any[]) => String(c[0]).includes("'woo_sync_error', $3"))).toBe(false);
+  });
+  it('예상 못 한 한 건 실패(컬럼 길이 등)도 그 건만 failed 로 세고 계속 간다', async () => {
+    withRow();
+    (identifyCustomer as any).mockImplementationOnce(async () => { throw new Error('value too long for type character varying(100)'); });
+    get.mockResolvedValueOnce(page([cust(1), cust(2)]));
+    get.mockResolvedValueOnce(page([]));
+    const st = await runWooBackfill(COMPANY, MALL);
+    expect(st).toMatchObject({ stage: 'done', customers_imported: 1, failed: 1 });
+  });
+  it('연속 실패는 데이터 문제가 아니라 장애다 — WOO_MAX_CONSECUTIVE_FAILURES 에서 멈추고 그 페이지에 남는다(전부 실패한 채 done 이 되지 않는다)', async () => {
+    withRow();
+    (identifyCustomer as any).mockImplementation(async () => { throw new Error('connection terminated'); });
+    get.mockResolvedValue(page(Array.from({ length: 20 }, (_, i) => cust(i + 1)), 5));
+    await expect(runWooBackfill(COMPANY, MALL)).rejects.toThrow('connection terminated');
+    expect((identifyCustomer as any).mock.calls.length).toBe(WOO_MAX_CONSECUTIVE_FAILURES);
+    const last = savedStates().pop();
+    expect(last).toMatchObject({ stage: 'customers', customers_page: 1 });
+    (identifyCustomer as any).mockImplementation(async () => ({ customerId: 'c', linkId: 'l', wasCreated: true, wasMerged: false }));
+  });
+  it('웹훅·재처리 경로(processWooResource): 전화번호 없음은 no_phone 으로 돌려주고 던지지 않는다 · 그 밖의 오류는 그대로 던진다', async () => {
+    (identifyCustomer as any).mockImplementationOnce(async () => { throw new CdpPhoneRequiredError(); });
+    expect(await processWooResource(COMPANY, MALL, 'customer', cust(1), null)).toBe('no_phone');
+    (syncOrder as any).mockImplementationOnce(async () => { throw new CdpPhoneRequiredError(); });
+    expect(await processWooResource(COMPANY, MALL, 'order', order(1, { meta_data: [] }), null)).toBe('no_phone');
+    (identifyCustomer as any).mockImplementationOnce(async () => { throw new Error('db down'); });
+    await expect(processWooResource(COMPANY, MALL, 'customer', cust(1), null)).rejects.toThrow('db down');
+  });
+  it('주기 수집도 한 건 실패로 회차 전체가 죽지 않는다(죽으면 커서가 안 나가 같은 건에서 영원히 실패한다)', async () => {
+    withRow();
+    (syncOrder as any).mockImplementationOnce(async () => { throw new CdpPhoneRequiredError(); });
+    get.mockResolvedValueOnce(page([order(1, { meta_data: [] }), order(2, { meta_data: [] })]));
+    const r = await syncWooOrdersSince(COMPANY, MALL, new Date(Date.now() - 3600 * 1000));
+    expect(r.imported).toBe(1);
+  });
   it('시간 초과(ECONNABORTED)는 같은 페이지를 다시 시도한다 — 두 번 실패 뒤 성공하면 끝까지 간다', async () => {
     withRow();
     get.mockResolvedValueOnce(page([]));                                                         // 회원 0
@@ -417,7 +463,8 @@ describe('getWooStatus — 몰 목록 · connected = active+connected_at 인 몰
       row({ id: 'row-2', mall_id: 'lens007.net' }),
     ] }));
     const s = await getWooStatus(COMPANY);
-    expect(s.malls[0].backfill).toEqual({ stage: 'orders', customersImported: 160, ordersImported: 80, truncated: false, doneAt: null });
+    // 옛 상태(0921 첫 배포분 · no_phone·failed 키 없음)도 0 으로 읽힌다
+    expect(s.malls[0].backfill).toEqual({ stage: 'orders', customersImported: 160, ordersImported: 80, noPhone: 0, failed: 0, truncated: false, doneAt: null });
     expect(s.malls[1].backfill).toBeNull();
   });
   it('행이 없으면 connected false · malls []', async () => {

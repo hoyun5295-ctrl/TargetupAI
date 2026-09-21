@@ -23,7 +23,7 @@ import * as https from 'https';
 import { randomBytes } from 'crypto';
 import { query } from '../config/database';
 import { syncOrder } from './cdp-orders';
-import { identifyCustomer, parseConsentValue } from './cdp-identity';
+import { identifyCustomer, parseConsentValue, CdpPhoneRequiredError } from './cdp-identity';
 import { WOO_SOURCE, normalizeWooMallId, wooSiteOrigin, mapWooCustomerToCdp, mapWooOrderToCdp, type WooTopicResource } from './woocommerce-core';
 export { wooSiteOrigin };
 import { normalizeWooStoreProduct, type MallProduct } from './mall-product-normalize';
@@ -175,6 +175,11 @@ export interface WooBackfillState {
   /** 적재한 건수(이어 갈 때 겹쳐 읽는 한 페이지는 다시 세어진다 — 진행 표시용이지 정산값이 아니다) */
   customers_imported: number;
   orders_imported: number;
+  /** 신규 고객인데 쓸 수 있는 휴대폰 번호가 없어 넣지 못한 건(설계상 제외 · 장애 아님) */
+  customers_no_phone: number;
+  orders_no_phone: number;
+  /** 예상 못 한 사유로 그 건만 건너뛴 수(로그에 몰·종류·id·사유) */
+  failed: number;
   /** 폭주 방지선(MAX_BACKFILL_*)에 닿아 멈췄는가 */
   truncated: boolean;
   started_at: string;
@@ -194,6 +199,9 @@ function readBackfill(v: any): WooBackfillState | null {
     orders_after: String(v.orders_after || ''),
     customers_imported: n(v.customers_imported, 0),
     orders_imported: n(v.orders_imported, 0),
+    customers_no_phone: n(v.customers_no_phone, 0),
+    orders_no_phone: n(v.orders_no_phone, 0),
+    failed: n(v.failed, 0),
     truncated: v.truncated === true,
     started_at: String(v.started_at || ''),
     updated_at: String(v.updated_at || ''),
@@ -456,7 +464,7 @@ export interface WooMallStatus {
   storeCode: string | null;
   syncError: { message: string; code: string; at: string | null } | null;
   /** 기존 회원·주문 가져오기 진행(없으면 null) — 수십 분~수 시간 걸리는 일이라 화면이 "도는 중"임을 말해야 한다 */
-  backfill: { stage: WooBackfillState['stage']; customersImported: number; ordersImported: number; truncated: boolean; doneAt: string | null } | null;
+  backfill: { stage: WooBackfillState['stage']; customersImported: number; ordersImported: number; noPhone: number; failed: number; truncated: boolean; doneAt: string | null } | null;
 }
 
 export interface WooStatus {
@@ -480,7 +488,11 @@ export async function getWooStatus(companyId: string): Promise<WooStatus> {
     storeCode: i.storeCode,
     syncError: i.syncError,
     backfill: i.backfill
-      ? { stage: i.backfill.stage, customersImported: i.backfill.customers_imported, ordersImported: i.backfill.orders_imported, truncated: i.backfill.truncated, doneAt: i.backfill.done_at }
+      ? {
+        stage: i.backfill.stage, customersImported: i.backfill.customers_imported, ordersImported: i.backfill.orders_imported,
+        noPhone: i.backfill.customers_no_phone + i.backfill.orders_no_phone, failed: i.backfill.failed,
+        truncated: i.backfill.truncated, doneAt: i.backfill.done_at,
+      }
       : null,
   }));
   return { connected: malls.some((m) => m.connected), malls };
@@ -602,12 +614,15 @@ export async function verifyWooConnection(companyId: string, mallId: string): Pr
 // 적재 — 자원 1건 → 매핑 → identify / syncOrder
 // ════════════════════════════════════════════════════════════════════
 
-export type WooProcessResult = 'synced' | 'skipped';
+/** synced = 적재 · skipped = 매핑 불가(식별 수단·주문시각 없음 · 운영자 역할) · no_phone = 신규 고객인데 쓸 수 있는 휴대폰 번호가 없다(CDP 고객은 휴대폰이 열쇠) */
+export type WooProcessResult = 'synced' | 'skipped' | 'no_phone';
 
 /**
  * 우커머스 자원 1건 적재. 웹훅 수신·백필·주기 수집·재처리 워커가 전부 이 함수 하나를 부른다.
  * - 회원: identifyCustomer(수신동의 raw 가 해석되면 smsOptIn 동봉). 식별 수단 없으면 skipped.
  * - 주문: 수신동의가 해석될 때만 identify(smsOptIn) → syncOrder(식별·매출·이벤트는 syncOrder 가 소유). 적재 불가(삭제 페이로드)면 skipped.
+ * - 신규 고객인데 휴대폰 번호가 없으면(CdpPhoneRequiredError) 던지지 않고 no_phone — 그 건을 넣을 수 없을 뿐 장애가 아니다.
+ *   던지면 웹훅은 같은 건을 끝없이 재처리하고 가져오기는 그 한 건에서 전체가 멈춘다(★0921 4몰 실측). 그 밖의 오류는 그대로 던진다.
  */
 export async function processWooResource(
   companyId: string,
@@ -618,6 +633,22 @@ export async function processWooResource(
   /** 이 몰 행의 분류코드(WooIntegration.storeCode). 없으면 키를 싣지 않는다 = 지금과 같은 적재 */
   storeCode?: string | null,
 ): Promise<WooProcessResult> {
+  try {
+    return await applyWooResource(companyId, mallId, kind, raw, consentMetaKey, storeCode);
+  } catch (err) {
+    if (err instanceof CdpPhoneRequiredError) return 'no_phone';
+    throw err;
+  }
+}
+
+async function applyWooResource(
+  companyId: string,
+  mallId: string,
+  kind: WooTopicResource,
+  raw: any,
+  consentMetaKey: string | null | undefined,
+  storeCode?: string | null,
+): Promise<'synced' | 'skipped'> {
   const store = storeCode ? { storeCode } : {};
   if (kind === 'customer') {
     const m = mapWooCustomerToCdp(raw, { mallId, consentMetaKey });
@@ -674,6 +705,42 @@ async function fetchWooPageWithRetry(integ: WooIntegration, resource: 'orders' |
   }
 }
 
+/**
+ * 연속 실패 상한. 데이터 문제(길이 초과·형식 이상)는 드문드문 나고, 장애(DB 끊김 등)는 연속으로 난다 →
+ * 드문 실패는 그 건만 세고 넘어가되, 연속으로 이만큼 실패하면 장애로 보고 멈춘다(전부 실패한 채 "완료"가 되지 않게).
+ */
+export const WOO_MAX_CONSECUTIVE_FAILURES = 10;
+const MAX_FAILURE_LOGS_PER_RUN = 20;
+
+interface WooItemTally { synced: number; noPhone: number; failed: number }
+/** 한 회차(가져오기 1회 · 주기 수집 1회) 동안 페이지를 넘어 이어지는 연속 실패 수·로그 수 */
+interface WooRunGuard { streak: number; logged: number }
+
+/**
+ * 한 페이지의 건들을 적재한다 — 한 건의 실패가 회차 전체를 죽이지 않는다(★0921: 전화번호 없는 회원 1명에 4몰 가져오기 전부 중단).
+ * no_phone 은 processWooResource 가 값으로 돌려준다. 그 밖의 예외는 그 건만 failed 로 세고 로그(몰·종류·id·사유 — 개인정보 없음)를 남긴다.
+ */
+async function processWooItems(integ: WooIntegration, kind: WooTopicResource, items: any[], guard: WooRunGuard): Promise<WooItemTally> {
+  const t: WooItemTally = { synced: 0, noPhone: 0, failed: 0 };
+  for (const raw of items) {
+    try {
+      const r = await processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey, integ.storeCode);
+      if (r === 'synced') t.synced++;
+      else if (r === 'no_phone') t.noPhone++;
+      guard.streak = 0;
+    } catch (err: any) {
+      t.failed++;
+      guard.streak++;
+      if (guard.logged < MAX_FAILURE_LOGS_PER_RUN) {
+        guard.logged++;
+        console.error(`[WooCommerce] 적재 실패(그 건만 건너뜀) mall=${integ.mallId} ${kind} id=${raw?.id ?? '-'} — ${err?.message || err}`);
+      }
+      if (guard.streak >= WOO_MAX_CONSECUTIVE_FAILURES) throw err;
+    }
+  }
+  return t;
+}
+
 /** 주기 수집용 페이지 순회(상태 저장 없음 · 한 회차 안에서 끝난다). maxItems = 건수 상한. */
 async function walkPages(
   integ: WooIntegration,
@@ -687,15 +754,13 @@ async function walkPages(
   let pages = 0;
   let totalPages = 1;
   let truncated = false;
+  const guard: WooRunGuard = { streak: 0, logged: 0 };
   for (let page = 1; page <= totalPages; page++) {
     if (page > maxPages) { truncated = true; break; }
     const res = await fetchWooPageWithRetry(integ, resource, { ...baseParams, page });
     pages++;
     totalPages = res.totalPages;
-    for (const raw of res.items) {
-      const r = await processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey, integ.storeCode);
-      if (r === 'synced') imported++;
-    }
+    imported += (await processWooItems(integ, kind, res.items, guard)).synced;
     if (res.items.length === 0) break;
   }
   return { imported, pages, truncated };
@@ -721,7 +786,7 @@ async function saveBackfill(companyId: string, mallId: string, st: WooBackfillSt
  * 몰 행은 페이지마다 다시 읽는다 — 도는 중에 해제(없음 → 중단)되거나 재승인으로 키가 바뀌어도 그 즉시 따른다.
  * 정렬은 뒤에 붙는 순서(회원 id 오름차순 · 주문 생성일 오름차순)라 도는 중에 새 건이 생겨도 앞 페이지가 밀리지 않는다.
  */
-async function runBackfillStage(companyId: string, mallId: string, st: WooBackfillState, stage: 'customers' | 'orders'): Promise<void> {
+async function runBackfillStage(companyId: string, mallId: string, st: WooBackfillState, stage: 'customers' | 'orders', guard: WooRunGuard): Promise<void> {
   const isCustomers = stage === 'customers';
   const maxPages = Math.ceil((isCustomers ? MAX_BACKFILL_CUSTOMERS : MAX_BACKFILL_ORDERS) / PAGE_SIZE);
   for (;;) {
@@ -733,13 +798,10 @@ async function runBackfillStage(companyId: string, mallId: string, st: WooBackfi
       // role=all: 회원 역할이 몰마다 다르다(실측 bronze_member) — 기본값(customer)으로 부르면 0명이 온다. 운영자 역할은 매핑(core)이 뺀다.
       ? await fetchWooPageWithRetry(integ, 'customers', { per_page: PAGE_SIZE, role: 'all', orderby: 'id', order: 'asc', page })
       : await fetchWooPageWithRetry(integ, 'orders', { per_page: PAGE_SIZE, after: st.orders_after, dates_are_gmt: 'true', orderby: 'date', order: 'asc', page });
-    let imported = 0;
-    for (const raw of res.items) {
-      const r = await processWooResource(companyId, mallId, isCustomers ? 'customer' : 'order', raw, integ.consentMetaKey, integ.storeCode);
-      if (r === 'synced') imported++;
-    }
-    if (isCustomers) { st.customers_imported += imported; st.customers_page = page + 1; }
-    else { st.orders_imported += imported; st.orders_page = page + 1; }
+    const t = await processWooItems(integ, isCustomers ? 'customer' : 'order', res.items, guard);
+    st.failed += t.failed;
+    if (isCustomers) { st.customers_imported += t.synced; st.customers_no_phone += t.noPhone; st.customers_page = page + 1; }
+    else { st.orders_imported += t.synced; st.orders_no_phone += t.noPhone; st.orders_page = page + 1; }
     await saveBackfill(companyId, mallId, st);
     if (res.items.length === 0 || page >= res.totalPages) return;
   }
@@ -766,21 +828,22 @@ export async function runWooBackfill(companyId: string, mallId: string, opts?: {
     st = {
       stage: 'customers', customers_page: 1, orders_page: 1,
       orders_after: wooDateParam(new Date(now.getTime() - DEFAULT_BACKFILL_DAYS * 24 * 60 * 60 * 1000)),
-      customers_imported: 0, orders_imported: 0, truncated: false,
+      customers_imported: 0, orders_imported: 0, customers_no_phone: 0, orders_no_phone: 0, failed: 0, truncated: false,
       started_at: now.toISOString(), updated_at: now.toISOString(), done_at: null,
     };
   }
 
   await clearWooSetupError(companyId, mallId);
   await saveBackfill(companyId, mallId, st);
+  const guard: WooRunGuard = { streak: 0, logged: 0 };
   try {
     if (st.stage === 'customers') {
-      await runBackfillStage(companyId, mallId, st, 'customers');
+      await runBackfillStage(companyId, mallId, st, 'customers', guard);
       st.stage = 'orders';
       await saveBackfill(companyId, mallId, st);
     }
     if (st.stage === 'orders') {
-      await runBackfillStage(companyId, mallId, st, 'orders');
+      await runBackfillStage(companyId, mallId, st, 'orders', guard);
       st.stage = 'done';
       st.done_at = new Date().toISOString();
       await saveBackfill(companyId, mallId, st);
@@ -809,7 +872,7 @@ export function enqueueWooBackfill(companyId: string, mallId: string, opts?: { r
   backfillChain = backfillChain
     .then(() => runWooBackfill(companyId, mallId, opts))
     .then(
-      (st) => { console.log(`[WooCommerce backfill] 끝 mall=${mallId} stage=${st.stage} customers=${st.customers_imported} orders=${st.orders_imported}${st.truncated ? ' (truncated)' : ''}`); },
+      (st) => { console.log(`[WooCommerce backfill] 끝 mall=${mallId} stage=${st.stage} customers=${st.customers_imported} orders=${st.orders_imported} no_phone=${st.customers_no_phone + st.orders_no_phone} failed=${st.failed}${st.truncated ? ' (truncated)' : ''}`); },
       (e: any) => { console.error(`[WooCommerce backfill] 중단 mall=${mallId} code=${e instanceof WooApiError ? e.code : 'unknown'} — ${e?.message || e} (다음 워커 회차가 이어 간다)`); },
     )
     .finally(() => { backfillQueued.delete(key); });
