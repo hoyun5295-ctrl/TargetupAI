@@ -8,6 +8,7 @@
  * 실행(운영 서버):
  *   cd packages/backend && npx ts-node scripts/diagnose-woo-headers.ts iroirotokyo.net
  *   (비인증 기준선만: … www.iroirotokyo.net --anon  — DB·키를 쓰지 않는다)
+ *   (--consent 를 붙이면 최근 주문 20건·최근 가입 회원 20명의 동의 관련 메타키와 값 분포·회원 역할 분포를 집계한다 · 개인정보 출력 없음)
  *   (--timing 을 붙이면 백필과 같은 호출 6개(회원·주문 × per_page 1·20·100)의 소요 시간·본문 크기·전체 건수를 잰다 · GET 뿐)
  *
  * 하는 일: company_integrations 에서 그 몰 행을 SELECT 1회 → 저장된 REST 키로 같은 주소를 2번 GET
@@ -102,8 +103,71 @@ function backfillUrls(base: string): { name: string; url: string }[] {
   const after = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, '');
   const out: { name: string; url: string }[] = [];
   for (const n of [1, 20, 100]) out.push({ name: `customers per_page=${n}`, url: `${base}/wp-json/wc/v3/customers?per_page=${n}&orderby=registered_date&order=desc&page=1` });
+  // ★0921 실측: 위 호출(역할 기본값)의 전체건수가 0 이었다 → 역할을 가리지 않으면 몇 명인지 건수만 본다(본문 출력 없음)
+  out.push({ name: 'customers role=all per_page=1', url: `${base}/wp-json/wc/v3/customers?per_page=1&role=all&orderby=registered_date&order=desc&page=1` });
   for (const n of [1, 20, 100]) out.push({ name: `orders(90일) per_page=${n}`, url: `${base}/wp-json/wc/v3/orders?per_page=${n}&after=${encodeURIComponent(after)}&dates_are_gmt=true&orderby=date&order=asc&page=1` });
   return out;
+}
+
+// ── --consent: 수신동의 메타키가 REST 응답에 실제로 오는지 · 값이 무슨 모양인지 집계(★0921) ──
+//    출력 = 키 · 값(24자까지) · 건수 · 회원 역할 분포. 이름·전화·이메일·주문 내용은 출력하지 않는다.
+const CONSENT_KEY_RE = /agree|consent|mssms|marketing|optin|opt_in|수신|동의/i;
+
+function fetchJson(url: string, auth: string): Promise<{ ok: boolean; status?: number; data?: any; errorCode?: string }> {
+  return new Promise((resolve) => {
+    const req = https.request(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json', 'User-Agent': USER_AGENT, Authorization: auth },
+      timeout: TIMING_TIMEOUT_MS,
+      maxHeaderSize: WIDE_LIMIT,
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => {
+        try { resolve({ ok: true, status: res.statusCode, data: JSON.parse(Buffer.concat(chunks).toString('utf8')) }); }
+        catch { resolve({ ok: false, status: res.statusCode, errorCode: 'JSON 아님' }); }
+      });
+      res.on('error', (e: any) => resolve({ ok: false, errorCode: e?.code || e?.message }));
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', (e: any) => resolve({ ok: false, errorCode: e?.code || e?.message }));
+    req.end();
+  });
+}
+
+function tallyConsent(label: string, items: any[], extra?: (it: any, bump: (k: string) => void) => void): void {
+  const counts = new Map<string, number>();
+  const bump = (k: string) => counts.set(k, (counts.get(k) || 0) + 1);
+  let withAny = 0;
+  for (const it of items) {
+    let hit = false;
+    for (const m of Array.isArray(it?.meta_data) ? it.meta_data : []) {
+      const key = String(m?.key ?? '');
+      if (!CONSENT_KEY_RE.test(key)) continue;
+      hit = true;
+      const v = m?.value;
+      const shown = (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)).slice(0, 24);
+      bump(`${key} = "${shown}"`);
+    }
+    if (hit) withAny++;
+    if (extra) extra(it, bump);
+  }
+  console.log(`\n[수신동의 집계 · ${label} · 표본 ${items.length}건 · 동의 관련 키가 하나라도 있는 건 ${withAny}]`);
+  if (counts.size === 0) { console.log('(동의 관련 키 없음)'); return; }
+  console.log('건수\t키 = "값"');
+  [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40).forEach(([k, n]) => console.log(`${n}\t${k}`));
+}
+
+async function consentSeries(base: string, auth: string): Promise<void> {
+  const o = await fetchJson(`${base}/wp-json/wc/v3/orders?per_page=20&orderby=date&order=desc`, auth);
+  if (o.ok && Array.isArray(o.data)) {
+    tallyConsent('최근 주문', o.data, (it, bump) => bump(`(주문) 회원 주문 여부 = "${Number(it?.customer_id) > 0 ? '회원' : '비회원'}"`));
+  } else console.log(`\n[수신동의 집계 · 최근 주문] 실패 HTTP ${o.status ?? '-'} ${o.errorCode ?? ''}`);
+
+  const c = await fetchJson(`${base}/wp-json/wc/v3/customers?per_page=20&role=all&orderby=registered_date&order=desc`, auth);
+  if (c.ok && Array.isArray(c.data)) {
+    tallyConsent('최근 가입 회원(역할 무관)', c.data, (it, bump) => bump(`(회원) role = "${String(it?.role ?? '')}"`));
+  } else console.log(`\n[수신동의 집계 · 최근 가입 회원] 실패 HTTP ${c.status ?? '-'} ${c.errorCode ?? ''}`);
 }
 
 /** 헤더 1줄이 전선에서 차지하는 크기 = "이름: 값\r\n" */
@@ -197,6 +261,10 @@ async function main(): Promise<number> {
     console.log(`② 상한 ${WIDE_LIMIT}: HTTP ${b.status}`);
     report(b.rawHeaders || []);
     if (process.argv.includes('--timing')) await timingSeries('백필과 같은 호출', backfillUrls(restBase(row)), auth);
+    if (process.argv.includes('--consent')) {
+      console.log(`\n한줄로에 저장된 수신동의 키 = ${row.meta?.woo_consent_meta_key || '(미설정)'}`);
+      await consentSeries(restBase(row), auth);
+    }
   }
   return 0;
 }
