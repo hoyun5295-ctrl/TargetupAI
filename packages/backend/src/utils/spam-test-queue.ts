@@ -20,6 +20,7 @@ import { replaceVariables, enrichWithCustomFields, buildAdMessage, buildAdSubjec
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
 import { prepaidDeduct } from '../utils/prepaid';
+import { getSampleCustomerScope } from './store-scope';
 
 // ============================================================
 // 상수
@@ -140,9 +141,11 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
       const mappingCols = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
       const selectCols = [...new Set(['phone', 'custom_fields', ...mappingCols])].join(', ');
       // ★ 미리보기와 동일한 정렬 (name ASC) — recommend-target의 샘플 고객과 일치 보장
+      // ★ 2026-09-22 브랜드 격리: 테스트 주체가 분류코드 사용자면 자기 코드 고객에서만(CT-02 경유 · 빈 조각이면 종전 SQL 그대로)
+      const sampleScope = await getSampleCustomerScope(companyId, userId, { paramIndex: 2 });
       const firstResult = await query(
-        `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY name ASC NULLS LAST LIMIT 1`,
-        [companyId]
+        `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true${sampleScope.where} ORDER BY name ASC NULLS LAST LIMIT 1`,
+        [companyId, ...sampleScope.params]
       );
       firstCustomer = firstResult.rows[0] || {};
     }
@@ -331,9 +334,11 @@ async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
     } else {
       const mappingCols = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
       const selectCols = [...new Set(['phone', 'custom_fields', ...mappingCols])].join(', ');
+      // ★ 2026-09-22 브랜드 격리(과거 레코드 폴백 경로도 같은 범위)
+      const sampleScope = await getSampleCustomerScope(test.company_id, test.user_id, { paramIndex: 2 });
       const firstResult = await query(
-        `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY name ASC NULLS LAST LIMIT 1`,
-        [test.company_id]
+        `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true${sampleScope.where} ORDER BY name ASC NULLS LAST LIMIT 1`,
+        [test.company_id, ...sampleScope.params]
       );
       firstCustomer = firstResult.rows[0] || {};
     }

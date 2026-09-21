@@ -6,7 +6,7 @@ import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError } from '../utils/unsubscribe-helper';
+import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError, isUserIsolationEnabled, deleteIsolatedUnsubscribes } from '../utils/unsubscribe-helper';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { normalizePhone, formatPhoneDisplay } from '../utils/normalize';
 import { isFirstRowHeaderRow } from '../utils/excel-columns';
@@ -102,6 +102,8 @@ function sweepStaleUnsubFiles(uploadDir: string): void {
 // plan_id가 있는 업체만 customers 테이블 연동 (플랜 없으면 스킵)
 // ================================================================
 async function syncCustomerOptIn(companyId: string, phone: string, optIn: boolean): Promise<void> {
+  // ★2026-09-22: 격리 ON 회사는 고객 행 동의를 건드리지 않는다 — 회사 전체 값이라 한 계정(몰)의 거부·삭제가 다른 몰에 번진다(H2).
+  if (await isUserIsolationEnabled(companyId)) return;
   const planResult = await query(
     `SELECT plan_id FROM companies WHERE id = $1`,
     [companyId]
@@ -117,6 +119,7 @@ async function syncCustomerOptIn(companyId: string, phone: string, optIn: boolea
 
 // 벌크 버전 (업로드용)
 async function syncCustomerOptInBulk(companyId: string, phones: string[], optIn: boolean): Promise<void> {
+  if (await isUserIsolationEnabled(companyId)) return; // ★2026-09-22 위 syncCustomerOptIn 과 같은 이유
   const planResult = await query(
     `SELECT plan_id FROM companies WHERE id = $1`,
     [companyId]
@@ -551,6 +554,19 @@ router.delete('/:id', async (req: Request, res: Response) => {
     }
 
     const targetPhone = target.rows[0].phone;
+
+    // ★2026-09-22: 격리 ON 회사 = 본인 행만(CT). 아래 회사 전체 DELETE + 동의 복구는 격리 OFF 의 broadcast 등록과 짝이라,
+    //   격리 ON 에서 그대로 돌면 한 계정(몰)의 삭제가 다른 몰의 거부를 풀고 동의를 되살린다(과발송 방향).
+    if (await isUserIsolationEnabled(companyId)) {
+      const isoDeleted = (await deleteIsolatedUnsubscribes(companyId, userId, [targetPhone])).length;
+      const isoIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+      console.log(`[unsubscribe-audit][delete][isolated] ${new Date().toISOString()} ip=${isoIp} actor=${loginId || userId} company=${companyId} phone=${targetPhone} affected=${isoDeleted}`);
+      return res.json({
+        success: isoDeleted > 0,
+        message: isoDeleted > 0 ? '삭제되었습니다.' : '삭제된 항목이 없습니다.',
+        deletedCount: isoDeleted,
+      });
+    }
 
     // 회사 전체 active user의 해당 phone row 모두 삭제 + 삭제 row 수 반환 (D162-3)
     const delResult = await query(

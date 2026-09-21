@@ -79,3 +79,45 @@ export async function getStoreScope(companyId: string, userId: string): Promise<
   // 브랜드 체계 없는 회사 → 필터 없이 전체
   return { type: 'no_filter' };
 }
+
+// ============================================================
+// 개인화 샘플 고객 1명 조회의 범위 (★2026-09-22)
+// ============================================================
+
+/** 샘플 고객 조회(`FROM customers WHERE company_id = $1 …`)에 붙일 조각. 빈 조각 = 기존 SQL 과 1바이트도 같다. */
+export interface SampleCustomerScope { where: string; params: any[] }
+
+/**
+ * 테스트 발송·스팸 테스트가 개인화 미리보기에 쓰는 "샘플 고객 1명" 조회의 분류코드 격리.
+ * 결함(0922 실측): 이 조회들이 회사 전체를 읽어, 분류코드 사용자(몰별 계정)의 테스트 문자에 다른 몰 고객의 이름·커스텀 필드가 찍혔다.
+ *
+ * - 판정은 getStoreScope 하나(재구현 금지). company_user(DB user_type='user')만 탄다 — 관리자·슈퍼·사용자 없음 = 빈 조각.
+ * - userType(JWT)을 모르는 경로(큐 워커)는 users.user_type 으로 판정한다.
+ * - filtered = 범위 서브쿼리 한 모양 · blocked = ` AND FALSE`(고객을 주지 않는다 → 호출부의 기존 폴백 `rows[0] || {}` 가 빈 객체로 받는다 · 발송은 막지 않는다).
+ * @param opts.paramIndex 분류코드 배열이 들어갈 자리($N). 호출부는 `[companyId, ...scope.params]` 로 넘긴다.
+ */
+export async function getSampleCustomerScope(
+  companyId: string,
+  userId: string | null | undefined,
+  opts: { userType?: string; paramIndex: number },
+): Promise<SampleCustomerScope> {
+  const none: SampleCustomerScope = { where: '', params: [] };
+  if (!userId) return none;
+  let isStoreUser: boolean;
+  if (opts.userType !== undefined) {
+    isStoreUser = opts.userType === 'company_user';
+  } else {
+    const r = await query('SELECT user_type FROM users WHERE id = $1', [userId]);
+    isStoreUser = r.rows[0]?.user_type === 'user';
+  }
+  if (!isStoreUser) return none;
+  const scope = await getStoreScope(companyId, userId);
+  if (scope.type === 'filtered') {
+    return {
+      where: ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${opts.paramIndex}::text[]))`,
+      params: [scope.storeCodes],
+    };
+  }
+  if (scope.type === 'blocked') return { where: ' AND FALSE', params: [] };
+  return none;
+}

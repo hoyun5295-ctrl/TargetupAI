@@ -8,6 +8,7 @@ import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-m
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
 import { normalizeContent, computeMessageHash } from '../utils/spam-test-queue';
+import { getSampleCustomerScope } from '../utils/store-scope';
 
 const router = Router();
 
@@ -96,9 +97,11 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
       const spamMappingCols = Object.values(spamFieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
       const spamSelectCols = [...new Set(['phone', 'custom_fields', ...spamMappingCols])].join(', ');
+      // ★ 2026-09-22 브랜드 격리: 분류코드 사용자는 자기 코드 고객에서만 샘플을 고른다(CT-02 getStoreScope 경유 · 빈 조각이면 종전 SQL 그대로)
+      const sampleScope = await getSampleCustomerScope(companyId, userId, { userType: (req as any).user.userType, paramIndex: 2 });
       const firstCustomerResult = await query(
-        `SELECT ${spamSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
-        [companyId]
+        `SELECT ${spamSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true${sampleScope.where} ORDER BY created_at DESC LIMIT 1`,
+        [companyId, ...sampleScope.params]
       );
       firstCustomer = firstCustomerResult.rows[0] || {};
     }

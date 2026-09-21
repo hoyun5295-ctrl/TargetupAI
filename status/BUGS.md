@@ -65,6 +65,25 @@
 - **고객사 안내(0921)**: Query Monitor 비활성화 → 「우커머스 관리자 승인으로 연결」 재승인(확인 → 웹훅 4개 → 회원·주문 수집이 도는 경로는 승인 콜백 하나).
 - **미검증**: ①운영 서버에 설치된 axios 버전에서 transport 배선 동작(로컬 1.15.0 만 확인) ②100건 단위 수집 응답의 헤더 크기(오류 수가 건수에 비례하면 256KB 를 넘을 수 있다 → 그때는 `header_overflow` 문구로 안내된다) ③iroirotokyo.net 재승인 뒤 active 전환.
 
+### 🔴 B-0922-2 몰이 여러 개인 회사: 한 몰의 수신동의·수신거부가 다른 몰에 번진다 (🟡 0922 1차 구현 · **DDL 대기** · 미배포 · 단계 S0~S7) — 2026-09-22 Harold 「분류코드가 다르면 각각 보유해야 · 일본이모는 수신거부를 해도 이로이로도쿄는 안 했을 수 있다」
+
+- **실측(0922 · Harold DB 조회 + 코드)**: 이에스페이먼트 고객 327,632명 중 2몰 소속 3,723 · 3몰 6(1몰 완주 시점). 고객 1행의 `sms_opt_in` 을 **나중에 들어온 몰이 덮는다**(`cdp-identity.ts` 기존 고객 UPDATE · ON CONFLICT). 수신거부는 표가 계정(user_id) 단위인데 **격리 스위치를 보는 입구가 등록 하나뿐** — 삭제는 격리 ON 이어도 회사 전 계정 행을 지우고 동의를 `true` 로 되살리고(과발송 방향), 080 콜백·수동 등록은 끝에 그 번호의 동의를 회사 전체에서 내린다. 그 회사 `user_isolation_enabled = false`(broadcast 중).
+- **결정**: [D93](DECISIONS.md) · 설계서 [docs/2026-09-22-mall-consent-isolation-design.md](../docs/2026-09-22-mall-consent-isolation-design.md)(브레인스토밍 4역할 수렴 · 갈린 지점 2 · 단계 · 되돌리기). 몰별 고객 행 분리는 기각(설계서 §3).
+- **0922 구현(전부 읽는 곳 0 또는 ENV 꺼짐 = 기존 고객사 동작 불변)**: ①CT `utils/mall-consent.ts`(몰 동의 분류코드 = 자사몰 연동 행의 `meta.store_code` · ENV `MALL_CONSENT_ENFORCE_COMPANY_IDS` · `buildSendConsent` · `upsertStoreConsent` · 부팅 로그) ②`identifyCustomer` 동결 + 몰 동의를 소속 행에(`storeCode` 없는 호출은 불변) ③수신거부 입구 격리(삭제 라우트 · 슈퍼관리자 삭제 · 080 동의 내림 · 라우트 동의 동기화 사본 2벌 · 판정 CT `isUserIsolationEnabled`) ④`campaigns.ts` 발송·타겟 인원·수신자 미리보기가 같은 분류 범위·같은 동의 조각(타겟 인원은 그동안 회사 전체를 세고 있었다 = 화면 숫자 ≠ 실발송).
+- **계약**: `mall-consent.test.ts` 16 · `unsubscribe-isolation.test.ts` 8 · `cdp-identity-store-code.test.ts` +5 · 백엔드 vitest 344파일 5,271건 · tsc 0.
+- **Harold 실행 순서**: ①`customer_stores` 실측 2건(설계서 §8) → 결과 회신 → SCHEMA 등재 ②DDL(컬럼 3 · 추가만) ③업무시간 밖 백엔드 재기동 ④4몰 `run-woo-backfill.ts` 재실행(재기동 없음 · 몰 동의가 소속 행에 채워진다) → 몰별 동의 분포 조회 ⑤격리 스위치 ON ⑥ENV 에 회사 id + 재기동(`--update-env`) → 몰별 대상 수 전후 비교 + 실발송 1건.
+- **미검증**: `customer_stores` 실제 구조 · 4계정 080 번호가 서로 다른지 · 몰 동의 백필 뒤 「모름」 비율 · ENV ON 뒤 발송 대상 수.
+- **다음(S6-b · S7)**: `customers.ts` filter-count·extract · `ai.ts` 7곳 · `targets.ts` · 자동발송·여정의 동의 읽기 · 화면 3상태와 「몰 동의 미확인 N명 제외」 줄 · 관리자 광고 발송 몰 선택.
+
+### 🔴 B-0922-1 테스트 발송·스팸 테스트: 분류코드 사용자의 개인화 샘플에 다른 분류(몰) 고객의 이름·커스텀 필드가 찍힌다 (🟡 0922 수정 · **DDL 0** · 미배포) — 2026-09-22 브레인스토밍 회의(백엔드·회의론자)가 발견 · Harold 수정 지시
+
+- **실측(코드)**: `POST /api/campaigns/test-send` 가 `getStoreScope` 로 `storeFilter`·`storeParams` 를 만들고(blocked 403 까지는 동작) **한 번도 쓰지 않았다**(다음 참조는 다른 라우트의 동명 변수). 샘플 고객 조회가 `[companyId]` 하나로 회사 전체를 읽었다. 같은 모양 3곳 = `routes/spam-filter.ts` 수동 스팸 테스트 · `utils/spam-test-queue.ts` enqueue · 큐 처리의 과거 레코드 폴백. 대상 = 분류코드가 배정된 사용자(이에스페이먼트 espayment1~4). 프론트가 `sampleCustomer` 를 넘기는 경로는 해당 없음(폴백 조회만).
+- **수정**: ①test-send = 만들어 둔 `storeFilter`·`storeParams` 를 `$STORE_IDX` 치환으로 그 조회에 건다(`/:id/send` 와 같은 모양 · 조회에 별칭이 없어 서브쿼리도 별칭 없는 공통 모양으로) ②CT-02 `store-scope.ts` 에 `getSampleCustomerScope(companyId, userId, { userType?, paramIndex })` 신설 — 판정은 `getStoreScope` 하나 · userType 을 모르는 큐 경로는 `users.user_type` · filtered = 범위 서브쿼리 · **blocked = ` AND FALSE`**(고객을 주지 않는다) · 그 밖 = 빈 조각 ③스팸 3곳이 그 조각을 붙인다. 샘플 0명은 기존 폴백 `rows[0] || {}` 가 빈 객체로 받는다(발송은 막지 않는다).
+- **회귀 0 근거**: 관리자·슈퍼(= `getStoreScope` 미호출)와 `no_filter` 는 조각이 빈 문자열·파라미터 빈 배열이라 SQL 글자와 파라미터가 종전과 같다(계약 테스트가 빈 조각을 단정).
+- **계약**: `sample-customer-scope.test.ts` 8건(조각 5 + 소스 계약 3 · 결함 주입 1회 = test-send 에서 조각을 빼면 실패) · 백엔드 vitest 342파일 5,242건 · tsc 0.
+- **실측 시나리오(배포 뒤)**: espayment2(일본이모) 계정으로 개인화 변수(`%이름%`)가 든 문안을 테스트 발송 → 수신 문자에 찍힌 이름이 일본이모 분류 고객인지 고객 DB 에서 대조.
+- **같은 뿌리로 남은 것(회의 안건 · 미착수)**: `campaigns.ts:611` 캠페인 생성 시 타겟 인원이 회사 전체(발송 `:845` 는 범위 적용 = 화면 숫자 ≠ 실발송) · `routes/targets.ts` 범위 0건.
+
 ### 🟠 B-0921-4 우커머스 가져오기 속도: 순차로는 회원 50만 몰에 7시간 · 고객이 쌓일수록 더 느려진다(이메일 매칭이 회사 고객 전체를 훑는다) (🟢 0921 가져오기 완주 · 인덱스 운영 반영 · 코드 미배포 = 재기동 대기) — 2026-09-21 Harold 「이게 최선이야?」
 
 - **실측(운영 · `scripts/run-woo-backfill.ts` 로그)**: 순차 = 분당 1,200명. 동시 4(회원)로 바꾼 직후 분당 3,700명이었으나 들어간 회원 수에 비례해 하락(14만 = 2,100 · 22.8만 = 1,700 · 29만 = 1,400). `EXPLAIN` = `identifyCustomer` 2단계 이메일 매칭(`LOWER(email) = $2`)이 `idx_customers_uploaded_by`(company_id)로 그 회사 26만 행을 Bitmap Heap Scan(병렬 4워커 · cost 45,196) · `pg_stat_activity` 활성 7개 전부 이 쿼리.

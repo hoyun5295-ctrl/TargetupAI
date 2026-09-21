@@ -17,6 +17,7 @@ import { convertButtonsToQTmsg } from '../utils/alimtalk-button';
 import { buildAlimtalkEtcJson } from '../utils/alimtalk-emphasize';
 import { decideKakaoTemplateSendable, getImcTemplateStatusSafe } from '../utils/kakao-template-guard';
 import { getStoreScope } from '../utils/store-scope';
+import { buildSendConsent, resolveSendConsent } from '../utils/mall-consent';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 // ★ 메시징 컨트롤타워 import
 import {
@@ -273,13 +274,14 @@ router.post('/test-send', async (req: Request, res: Response) => {
     }
 
     // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
+    //   (이 라우트의 소비처 = 아래 샘플 고객 조회 1곳. 그 조회에 테이블 별칭이 없어 서브쿼리도 별칭 없이 쓴다 — 분류 없는 경로의 SQL 을 종전과 같게 두기 위함)
     let storeFilter = '';
     let storeParams: any[] = [];
 
     if (userType === 'company_user' && userId) {
       const scope = await getStoreScope(companyId, userId);
       if (scope.type === 'filtered') {
-        storeFilter = ' AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($STORE_IDX::text[]))';
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($STORE_IDX::text[]))';
         storeParams = [scope.storeCodes];
       } else if (scope.type === 'blocked') {
         return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
@@ -332,9 +334,12 @@ router.post('/test-send', async (req: Request, res: Response) => {
       // 폴백: DB에서 조회 (sampleCustomer 미전달 시)
       const testMappingCols = Object.values(testFieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
       const testSelectCols = [...new Set(['phone', 'custom_fields', ...testMappingCols])].join(', ');
+      // ★ 2026-09-22 브랜드 격리: 위에서 만든 storeFilter 를 실제로 건다(그동안 만들기만 하고 안 써서 다른 분류코드 고객의 이름·커스텀 필드가 찍혔다).
+      //   storeFilter 가 빈 문자열(관리자·분류 체계 없는 회사)이면 조건·파라미터가 종전과 같다. 0명이면 아래 `|| {}` 폴백 — 테스트 발송은 막지 않는다.
+      const testStoreFilterFinal = storeFilter.replace('$STORE_IDX', '$2');
       const testFirstCustomerResult = await query(
-        `SELECT ${testSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY name ASC NULLS LAST LIMIT 1`,
-        [companyId]
+        `SELECT ${testSelectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true${testStoreFilterFinal} ORDER BY name ASC NULLS LAST LIMIT 1`,
+        [companyId, ...storeParams]
       );
       testFirstCustomer = testFirstCustomerResult.rows[0] || {};
     }
@@ -606,11 +611,29 @@ router.post('/', async (req: Request, res: Response) => {
     let targetCount = 0;
     if (targetFilter) {
       const filterQuery = buildFilterQueryCompat(targetFilter, companyId);
-      const unsubIdx = 1 + filterQuery.params.length + 1;
+      // ★ 2026-09-22 세는 곳 = 보내는 곳: 발송(POST /:id/send)과 같은 분류 범위·같은 동의 조각으로 센다.
+      //   관리자·분류 체계 없는 회사는 조각이 비어 SQL·파라미터가 종전과 같다. blocked(미배정)는 발송이 403 이므로 0 으로 센다.
+      let countStoreFilter = '';
+      const countStoreParams: any[] = [];
+      if (req.user?.userType === 'company_user' && userId) {
+        const countScope = await getStoreScope(companyId, userId);
+        if (countScope.type === 'filtered') {
+          countStoreFilter = ` AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($${1 + filterQuery.params.length + 1}::text[]))`;
+          countStoreParams.push(countScope.storeCodes);
+        } else if (countScope.type === 'blocked') {
+          countStoreFilter = ' AND FALSE';
+        }
+      }
+      const countConsent = buildSendConsent({
+        enforce: countStoreParams.length > 0 && (await resolveSendConsent(companyId, countStoreParams[0])),
+        alias: 'c',
+        storeFilter: countStoreFilter,
+      });
+      const unsubIdx = 1 + filterQuery.params.length + countStoreParams.length + 1;
       const countResult = await query(
-        `SELECT COUNT(*) FROM customers c WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterQuery.where}
+        `SELECT COUNT(*) FROM customers c WHERE c.company_id = $1 AND c.is_active = true AND ${countConsent.customerConsent} ${filterQuery.where}${countConsent.storeFilter}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`,
-        [companyId, ...filterQuery.params, userId]
+        [companyId, ...filterQuery.params, ...countStoreParams, userId]
       );
       targetCount = parseInt(countResult.rows[0].count);
     }
@@ -836,13 +859,22 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     // store_code 필터 인덱스 계산
     const storeParamIdx = 1 + filterQuery.params.length + 1;
-    const storeFilterFinal = storeFilter.replace('$STORE_IDX', `$${storeParamIdx}`);
+    // ★ 2026-09-22 몰별 수신동의(CT mall-consent · 설계서 docs/2026-09-22-mall-consent-isolation-design.md §4-4):
+    //   ENV 로 켠 몰 동의 회사의 분류코드 사용자 발송만 "그 몰의 소속 행 동의"로 자격을 본다(고객 행 sms_opt_in 퇴역 · 모름 = 제외).
+    //   그 밖(관리자 · ENV 꺼짐 · 무분류 회사)은 조각이 옛 문자열과 같다.
+    const sendConsent = buildSendConsent({
+      enforce: storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0])),
+      alias: 'c',
+      storeFilter,
+    });
+    if (sendConsent.mode === 'mall') console.log(`[MallConsent] 캠페인 발송 자격 = 몰 동의 company=${companyId} campaign=${id} codes=${(storeParams[0] || []).join(',')}`);
+    const storeFilterFinal = sendConsent.storeFilter.replace('$STORE_IDX', `$${storeParamIdx}`);
 
     // ★ B17-01 수정: 수신거부 기준을 user_id로 통일 (080 자동연동과 일관성 유지 — 사용자별 수신거부 관리)
     const unsubParamIdx = 1 + filterQuery.params.length + storeParams.length + 1;
     const customersResult = await query(
       `SELECT ${selectColumns} FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true ${filterQuery.where}${storeFilterFinal}
+       WHERE c.company_id = $1 AND c.is_active = true AND ${sendConsent.customerConsent} ${filterQuery.where}${storeFilterFinal}
        AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubParamIdx} AND u.phone = c.phone)`,
       [companyId, ...filterQuery.params, ...storeParams, userId]
     );
@@ -2974,6 +3006,14 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
         }
       }
 
+      // ★ 2026-09-22 발송(POST /:id/send)과 같은 동의 조각 — 세는 곳·뽑는 곳·보내는 곳이 같은 자격을 본다
+      const previewConsent = buildSendConsent({
+        enforce: storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0])),
+        alias: 'c',
+        storeFilter,
+      });
+      storeFilter = previewConsent.storeFilter;
+
       // 검색 필터
       let searchFilter = '';
       let searchParams: any[] = [];
@@ -2996,7 +3036,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       const unsubIdx = 1 + filterQuery.params.length + storeParams.length + searchParams.length + excludeParams.length + 1;
       const countResult = await query(
         `SELECT COUNT(*) FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
+         WHERE c.company_id = $1 AND c.is_active = true AND ${previewConsent.customerConsent}
          ${filterQuery.where}${storeFilter}${searchFilter}${excludeFilter}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`,
         [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams, userId]
@@ -3008,7 +3048,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       const recipients = await query(
         `SELECT phone, name, phone as idx
          FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
+         WHERE c.company_id = $1 AND c.is_active = true AND ${previewConsent.customerConsent}
          ${filterQuery.where}${storeFilter}${searchFilter}${excludeFilter}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)
          ORDER BY name, phone

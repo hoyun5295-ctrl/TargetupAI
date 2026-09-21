@@ -32,6 +32,7 @@ import { detectIdentityConflict } from './cdp-identity-conflict';
 import { recordIdentityReview } from './cdp-identity-review';
 // ★ 2026-09-18 자사몰 적재의 분류코드 기록 — 형제 적재 경로(upload·sync·단건)와 같은 줄을 CT 하나가 소유한다
 import { linkCustomerStore } from './customer-store-link';
+import { upsertStoreConsent } from './mall-consent';
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -118,6 +119,12 @@ export async function identifyCustomer(
   const normalizedPhone = input.phone ? normalizePhone(input.phone) : null;
   const email = input.email?.toLowerCase().trim() || null;
 
+  // ★ 2026-09-22 몰별 수신동의(설계서 docs/2026-09-22-mall-consent-isolation-design.md §4-2 · H2):
+  //   분류코드가 실린 호출(= 몰 단위 연동)의 수신동의는 **그 몰의 소속 행**에만 쓴다(아래 recordStoreMembership).
+  //   고객 1행의 sms_opt_in 은 동결한다 — 안 그러면 나중에 들어온 몰의 동의가 앞선 몰의 미동의를 덮는다(0922 실측 3,729명).
+  //   storeCode 가 없는 호출(기존 호출처 전부)은 rowInput === input 이라 1바이트도 다르지 않다.
+  const rowInput: IdentifyInput = input.storeCode ? { ...input, smsOptIn: undefined } : input;
+
   // ★ 1단계: 기존 link 매칭 (source + external_id)
   const existingLink = await query(
     `SELECT id, customer_id FROM cdp_identity_links
@@ -134,7 +141,7 @@ export async function identifyCustomer(
     const linkRow = existingLink.rows[0];
     if (linkRow.customer_id) {
       // 기존 연결 완료 link → last_seen 갱신 + customer 컬럼 변경 사항만 update
-      await syncCustomerFields(companyId, linkRow.customer_id, input, normalizedPhone, email);
+      await syncCustomerFields(companyId, linkRow.customer_id, rowInput, normalizedPhone, email);
       await query(
         `UPDATE cdp_identity_links
          SET external_email = COALESCE($2, external_email),
@@ -145,7 +152,7 @@ export async function identifyCustomer(
         [linkRow.id, email, normalizedPhone]
       );
       // ★ 2026-09-18: 조기 반환 경로도 분류 기록을 지난다(빠뜨리면 이미 연결된 회원만 영영 분류 밖에 남는다)
-      await recordStoreMembership(companyId, linkRow.customer_id, input.storeCode);
+      await recordStoreMembership(companyId, linkRow.customer_id, input.storeCode, input.smsOptIn, input.source);
       return {
         customerId: linkRow.customer_id,
         linkId: linkRow.id,
@@ -232,7 +239,7 @@ export async function identifyCustomer(
         input.address || null,
         JSON.stringify(input.customFields || {}),
         `cdp_${input.source}`,
-        input.smsOptIn ?? null,
+        rowInput.smsOptIn ?? null,
       ]
     );
     customerId = newCustomer.rows[0].id;
@@ -240,7 +247,7 @@ export async function identifyCustomer(
     if (!wasCreated) wasMerged = true;
   } else {
     // 매칭된 기존 customer에 필드 sync
-    await syncCustomerFields(companyId, customerId, input, normalizedPhone, email);
+    await syncCustomerFields(companyId, customerId, rowInput, normalizedPhone, email);
   }
 
   // ★ link INSERT (모든 경로 공통)
@@ -292,7 +299,7 @@ export async function identifyCustomer(
   }
 
   // ★ 2026-09-18: 고객이 확정된 뒤 분류 기록(신규 · email 매칭 · phone 매칭 공통). 두 몰의 회원 = 고객 1행 + 소속 2행.
-  await recordStoreMembership(companyId, customerId!, input.storeCode);
+  await recordStoreMembership(companyId, customerId!, input.storeCode, input.smsOptIn, input.source);
 
   // ★ D214+ (2026-05-24) unified profile 재계산 (fire-and-forget — active_sources / primary_source / preferred_channel)
   void recomputeProfile(companyId, customerId!).catch((err) => {
@@ -348,12 +355,21 @@ export async function ensureAnonymousLink(
  * 분류코드가 오면 고객을 그 분류에 기록한다. 없으면 아무 일도 하지 않는다(쿼리 0).
  * ⛔ 실패는 식별을 막지 않는다 — 분류 기록 때문에 회원·주문 적재가 유실되면 안 된다(다음 이벤트에서 다시 기록된다).
  */
-async function recordStoreMembership(companyId: string, customerId: string, storeCode?: string): Promise<void> {
+async function recordStoreMembership(
+  companyId: string,
+  customerId: string,
+  storeCode?: string,
+  /** 그 몰이 준 수신동의(명시 값일 때만). undefined = 모름 = 소속 행 동의를 건드리지 않는다 */
+  smsOptIn?: boolean,
+  source?: string,
+): Promise<void> {
   if (!storeCode) return;
   try {
     await linkCustomerStore(companyId, customerId, storeCode);
+    // ★ 2026-09-22: 몰 동의는 소속 행이 단독으로 갖는다(CT mall-consent · 다른 몰의 행에는 닿지 않는다). 소속 행이 생긴 뒤에 쓴다.
+    if (smsOptIn !== undefined) await upsertStoreConsent(companyId, customerId, storeCode, smsOptIn, source || 'unknown');
   } catch (err: any) {
-    console.warn('[CDP Identity] 분류 기록 실패 (식별 자체는 완료):', err?.message || err);
+    console.warn('[CDP Identity] 분류·몰 동의 기록 실패 (식별 자체는 완료):', err?.message || err);
   }
 }
 

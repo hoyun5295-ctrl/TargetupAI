@@ -141,6 +141,51 @@ export async function registerBulkCompanyUserUnsubscribes(
   return result.rowCount || 0;
 }
 
+/**
+ * 회사의 사용자 격리 스위치(companies.user_isolation_enabled). 없음·NULL = false.
+ * ★2026-09-22: 이 값을 보는 입구가 등록 하나뿐이었다 → 삭제·080·동의 동기화도 같은 판정을 쓴다(설계서 docs/2026-09-22-mall-consent-isolation-design.md §4-3).
+ */
+export async function isUserIsolationEnabled(companyId: string): Promise<boolean> {
+  const r = await query(
+    `SELECT COALESCE(user_isolation_enabled, false) AS iso FROM companies WHERE id = $1::uuid`,
+    [companyId]
+  );
+  return r.rows[0]?.iso === true;
+}
+
+/**
+ * 격리 ON 회사의 수신거부 삭제 — **본인(user_id) 행만** 지운다. H2: 한 계정(몰)의 삭제가 다른 계정의 거부를 풀지 않는다.
+ * 관리자 사본(등록 때 함께 들어간 admin 행)은 그 번호에 다른 사용자 행이 하나도 안 남을 때만 함께 지운다.
+ * ⛔ customers.sms_opt_in 을 되살리지 않는다(회사 전체 값이라 다른 몰까지 켠다 — 0922 실측한 과발송 방향).
+ * @param phones 비우면(undefined) 그 사용자의 전체
+ * @returns 실제로 지운 번호(중복 제거)
+ */
+export async function deleteIsolatedUnsubscribes(companyId: string, userId: string, phones?: string[]): Promise<string[]> {
+  const own = phones && phones.length > 0
+    ? await query(
+        `DELETE FROM unsubscribes WHERE company_id = $1::uuid AND user_id = $2::uuid AND phone = ANY($3::varchar[]) RETURNING phone`,
+        [companyId, userId, phones]
+      )
+    : await query(
+        `DELETE FROM unsubscribes WHERE company_id = $1::uuid AND user_id = $2::uuid RETURNING phone`,
+        [companyId, userId]
+      );
+  const deleted = Array.from(new Set(own.rows.map((r: any) => r.phone as string)));
+  if (deleted.length === 0) return deleted;
+  await query(
+    `DELETE FROM unsubscribes a
+      USING users au
+      WHERE a.company_id = $1::uuid AND a.user_id = au.id AND au.user_type = 'admin'
+        AND a.phone = ANY($2::varchar[])
+        AND NOT EXISTS (
+          SELECT 1 FROM unsubscribes o JOIN users ou ON ou.id = o.user_id
+           WHERE o.company_id = $1::uuid AND o.phone = a.phone AND ou.user_type <> 'admin'
+        )`,
+    [companyId, deleted]
+  );
+  return deleted;
+}
+
 export class IsolationBlockedError extends Error {
   constructor() {
     super('ISOLATION_BLOCKED');
@@ -164,11 +209,7 @@ export async function registerUnsubscribe(
   //   - 격리 ON  + 그 외       → 차단 (방어)
   //   회사별 user_isolation_enabled = false(기본) → broadcast / true → 사용자별 격리.
   //   옛 D136 customers JOIN + store_code 격리 디자인 폐기 (Harold 새 설계로 대체).
-  const companyResult = await query(
-    `SELECT COALESCE(user_isolation_enabled, false) AS iso FROM companies WHERE id = $1::uuid`,
-    [companyId]
-  );
-  const isolationEnabled = companyResult.rows[0]?.iso === true;
+  const isolationEnabled = await isUserIsolationEnabled(companyId);
 
   if (isolationEnabled) {
     if (userType === 'company_admin') {
@@ -386,7 +427,10 @@ export async function process080Callback(phone: string, opt080Number: string): P
   }
 
   // 각 회사별 customers.sms_opt_in 동기화
+  //   ★2026-09-22: 격리 ON 회사는 돌리지 않는다 — 회사 전체 값이라 한 계정(몰)의 080 거부가 다른 몰의 동의까지 끈다(H2).
+  //   거부 자체는 위에서 계정 행으로 이미 들어갔고, 발송 제외는 unsubscribes(user_id) 안티조인이 한다.
   for (const companyId of companyIds) {
+    if (await isUserIsolationEnabled(companyId)) continue;
     await syncCustomerOptIn(companyId, [phone], false);
   }
 
@@ -463,6 +507,11 @@ export async function deleteUserUnsubscribes(userId: string, phones?: string[]):
   const userResult = await query('SELECT company_id FROM users WHERE id = $1', [userId]);
   if (userResult.rows.length === 0) return 0;
   const companyId = userResult.rows[0].company_id;
+
+  // ★2026-09-22: 격리 ON 회사는 그 사용자 행만 지우고 동의를 되살리지 않는다(아래 회사 전체 DELETE 는 격리 OFF 의 broadcast 등록과 짝이다).
+  if (await isUserIsolationEnabled(companyId)) {
+    return (await deleteIsolatedUnsubscribes(companyId, userId, phones)).length;
+  }
 
   // ★ D162-3 (2026-05-15) Harold 명시 의도 — 격리 OFF(기본) 회사 = 사용자/admin/슈퍼관리자
   //   누가 삭제하든 회사 전체 user_id의 해당 phone row 모두 DELETE (등록 broadcast 패턴 정합).

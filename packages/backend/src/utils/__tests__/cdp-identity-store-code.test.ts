@@ -12,15 +12,18 @@ vi.mock('../../config/database', () => ({ query: vi.fn() }));
 vi.mock('../unified-customer-profile', () => ({ recomputeProfile: vi.fn(async () => undefined) }));
 vi.mock('../cdp-identity-review', () => ({ recordIdentityReview: vi.fn(async () => undefined) }));
 vi.mock('../customer-store-link', () => ({ linkCustomerStore: vi.fn(async () => true) }));
+vi.mock('../mall-consent', () => ({ upsertStoreConsent: vi.fn(async () => true) }));
 
 import { query } from '../../config/database';
 import { linkCustomerStore } from '../customer-store-link';
+import { upsertStoreConsent } from '../mall-consent';
 import { identifyCustomer } from '../cdp-identity';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
 const PHONE = '01000000000'; // 형식만 유효한 도달 불가 번호
 const q = query as unknown as ReturnType<typeof vi.fn>;
 const link = linkCustomerStore as unknown as ReturnType<typeof vi.fn>;
+const consent = upsertStoreConsent as unknown as ReturnType<typeof vi.fn>;
 
 interface Scenario { linkedCustomerId?: string | null; hasLink?: boolean; phoneHolderId?: string | null }
 
@@ -48,6 +51,8 @@ beforeEach(() => {
   q.mockReset();
   link.mockReset();
   link.mockResolvedValue(true);
+  consent.mockReset();
+  consent.mockResolvedValue(true);
 });
 
 describe('identifyCustomer · 현재 동작 캡처(storeCode 생략)', () => {
@@ -98,6 +103,44 @@ describe('identifyCustomer · storeCode 전달', () => {
     db();
     link.mockRejectedValueOnce(new Error('boom'));
     const r = await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'iroirotokyo.net:9', phone: PHONE, storeCode: 'IROIRO' });
+    expect(r.customerId).toBe('cust-new');
+  });
+});
+
+// ★2026-09-22 설계서 docs/2026-09-22-mall-consent-isolation-design.md §4-2 — H2: 한 몰의 동의가 다른 몰의 동의를 덮지 않는다.
+//   실측: 고객 1행의 sms_opt_in 을 "나중에 들어온 몰"이 덮고 있었다(이에스페이먼트 2몰 이상 소속 3,729명).
+describe('identifyCustomer · 몰 수신동의는 소속 행에 · 고객 행 동의는 동결(storeCode 있을 때만)', () => {
+  const insertParams = () => q.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO customers'))![1] as any[];
+  const updateParams = () => q.mock.calls.find(([sql]: [string]) => /UPDATE customers SET\s+name/.test(String(sql)))![1] as any[];
+
+  it('storeCode 없음(기존 호출처 전부): 고객 행에 동의를 그대로 쓴다 · 소속 행 동의는 건드리지 않는다', async () => {
+    db();
+    await identifyCustomer(COMPANY, { source: 'cafe24', externalId: 'm:9', phone: PHONE, smsOptIn: true });
+    expect(insertParams()[10]).toBe(true);
+    expect(consent).not.toHaveBeenCalled();
+  });
+  it('storeCode 있음 · 신규: 고객 행 동의 자리는 null(INSERT 기본 false · 기존 값 불변) · 그 몰 소속 행에 동의를 쓴다(소속 기록 뒤에)', async () => {
+    db();
+    await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: true, storeCode: '일본이모' });
+    expect(insertParams()[10]).toBeNull();
+    expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-new', '일본이모', true, 'woocommerce');
+    expect(link.mock.invocationCallOrder[0]).toBeLessThan(consent.mock.invocationCallOrder[0]);
+  });
+  it('storeCode 있음 · 기존 연결(두 번째 몰의 미동의가 와도): 고객 행 동의를 덮지 않는다 · 그 몰 소속 행에만 false', async () => {
+    db({ hasLink: true, linkedCustomerId: 'cust-linked' });
+    await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: false, storeCode: '일본이모' });
+    expect(updateParams()[8]).toBeNull();
+    expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', false, 'woocommerce');
+  });
+  it('동의 값이 없으면(주문 등) 소속 행 동의를 건드리지 않는다 — 모름은 모름으로 둔다', async () => {
+    db();
+    await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, storeCode: '일본이모' });
+    expect(consent).not.toHaveBeenCalled();
+  });
+  it('몰 동의 기록이 실패해도 식별 결과는 그대로다', async () => {
+    db();
+    consent.mockRejectedValueOnce(new Error('boom'));
+    const r = await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: true, storeCode: '일본이모' });
     expect(r.customerId).toBe('cust-new');
   });
 });

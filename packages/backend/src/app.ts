@@ -153,6 +153,7 @@ import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-wo
 // ★ 2026-08-10: 고도몰 주기 수집 (30분) — 웹훅이 없는 몰이라 당겨오지 않으면 연결 후 신규 주문이 영영 안 들어온다
 import { startGodoSyncWorker } from './utils/godo-sync-worker';
 import { startWoocommerceSyncWorker } from './utils/woocommerce-sync-worker';
+import { logMallConsentGate } from './utils/mall-consent';
 // ★ 2026-06-13: 시스템 크리티컬 감지 워커 (발송 큐 지연 정체 + 싱크에이전트 중단 → 운영자 문자 통지)
 import { startSystemMonitorWorker } from './utils/system-monitor-worker';
 // ★ 2026-07-05: 발송 피로도 보호 — send_fatigue_daily 45일 초과 버킷 프루닝 (6시간 주기)
@@ -691,6 +692,7 @@ app.listen(PORT, () => {
 
   // ★ 2026-09-14: 우커머스 주기 수집 (30분 · modified_after) — 웹훅은 가속일 뿐, 이 워커가 유일한 보장 경로.
   startWoocommerceSyncWorker();
+  logMallConsentGate(); // ★0922 몰별 수신동의 읽기 강제(ENV) 상태 — 꺼져 있어도 남긴다
 
   // ★ 2026-06-13: 시스템 크리티컬 감지 (5분 주기) — 발송 큐 지연 정체 + 싱크에이전트 중단을
   //   운영자 문자(SYSTEM_ALERT_PHONES)로 직접 통지. 톤28 지연 실발송·인비토 동기화 중단 실측 후속.
