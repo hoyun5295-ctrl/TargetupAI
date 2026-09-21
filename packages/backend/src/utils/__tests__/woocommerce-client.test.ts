@@ -40,6 +40,7 @@ import {
   ensureWooWebhooks,
   removeWooWebhooks,
   recordWooSetupError,
+  wooWideHeaderTransport,
 } from '../woocommerce-client';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
@@ -187,6 +188,30 @@ describe('연결 검증 1콜 — 주문 1건 읽기 · 실패 코드 매핑 · �
     q.mockImplementation(async () => ({ rows: [row({ meta: { woo_site_url: 'https://www.ilbonimo.com/' } })] }));
     await expect(verifyWooConnection(COMPANY, MALL)).rejects.toMatchObject({ code: 'no_keys' });
     expect(get).not.toHaveBeenCalled();
+  });
+  // ★0921 운영 실측(iroirotokyo.net): 몰에 연결은 됐는데 인증 응답 헤더 21,494 bytes 가 Node 기본 상한 16,384 를 넘어
+  //   axios 가 code='HPE_HEADER_OVERFLOW' 로 던졌고, 화면엔 "몰 서버에 연결할 수 없습니다"로 나갔다(원인과 다른 안내).
+  it('HPE_HEADER_OVERFLOW → header_overflow(연결 실패 문구 아님) · active 갱신 0', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row({ status: 'pending' })] } : { rows: [] }));
+    get.mockRejectedValueOnce(Object.assign(new Error('Parse Error: Header overflow'), { code: 'HPE_HEADER_OVERFLOW' }));
+    const err: any = await verifyWooConnection(COMPANY, MALL).catch((e) => e);
+    expect(err).toBeInstanceOf(WooApiError);
+    expect(err.code).toBe('header_overflow');
+    expect(err.message).not.toContain('연결할 수 없습니다');
+    expect(err.message).toContain('헤더');
+    expect(q.mock.calls.filter((c: any[]) => String(c[0]).includes("status = 'active'"))).toHaveLength(0);
+  });
+  it('인증 호출(리다이렉트 0)은 넓은 헤더 상한 transport 를 싣는다 · 공개 Store API(리다이렉트 3)는 싣지 않는다', async () => {
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    get.mockResolvedValueOnce({ status: 200, headers: { 'x-wp-totalpages': '1' }, data: [order(1)] });
+    await verifyWooConnection(COMPANY, MALL);
+    expect(get.mock.calls[0][1].transport).toBe(wooWideHeaderTransport);
+    expect(typeof wooWideHeaderTransport.request).toBe('function');
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: [] });
+    await fetchWooStoreProductsRaw(MALL, {});
+    // transport 를 주면 axios 가 리다이렉트를 따라가지 않는다 — 공개 상품 조회는 지금처럼 따라가야 한다
+    expect(get.mock.calls[1][1].maxRedirects).toBe(3);
+    expect(get.mock.calls[1][1].transport).toBeUndefined();
   });
 });
 

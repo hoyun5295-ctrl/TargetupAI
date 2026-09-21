@@ -324,10 +324,10 @@ async function decideStoreCode(req: Request, res: Response, actor: IntegrationAc
   return { storeCode: existing ? undefined : pick.storeCode };
 }
 
-/** WooApiError → 상태코드. 몰 서버 쪽 문제(network·rate_limited·http)는 502, 입력·권한 문제는 400. */
+/** WooApiError → 상태코드. 몰 서버 쪽 문제(network·rate_limited·http·header_overflow)는 502, 입력·권한 문제는 400. */
 function sendWooError(res: Response, err: unknown): void {
   if (err instanceof WooApiError) {
-    const upstream = err.code === 'network' || err.code === 'rate_limited' || err.code === 'http';
+    const upstream = err.code === 'network' || err.code === 'rate_limited' || err.code === 'http' || err.code === 'header_overflow';
     res.status(upstream ? 502 : 400).json({ success: false, error: err.message, code: `WOO_${err.code}` });
     return;
   }

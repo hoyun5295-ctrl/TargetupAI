@@ -55,6 +55,16 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-0921-1 우커머스 연동: 몰에 연결됐는데 「몰 서버에 연결할 수 없습니다 (HPE_HEADER_OVERFLOW)」로 떨어진다 (🟡 0921 수정 · **DDL 0** · 미배포 · 실측 대기) — 2026-09-21 이에스페이먼츠 문의(iroirotokyo.net · Harold 경유)
+
+- **접수**: 1클릭 승인 뒤 몰 카드가 「첫 웹훅·연결 확인 대기」에 머물고 「수집 실패 · 몰 서버에 연결할 수 없습니다 (HPE_HEADER_OVERFLOW)」가 뜬다. 고객사가 자기 서버를 점검하려 했다.
+- **실측(0921 · 운영 서버 `scripts/diagnose-woo-headers.ts` · Harold 실행)**: 같은 호출(`orders?per_page=1` · 저장된 키)이 기본 상한에서는 `HPE_HEADER_OVERFLOW`, 상한 1MB 에서는 **HTTP 200**. 헤더 합계 **21,494 bytes**(Node 기본 16,384) 중 **20,196 bytes = `X-QM-php_errors-error-1~23`**(줄당 약 1KB). 키 없이 외부망에서 재면 1,041~1,311 bytes. `X-QM-*` = Query Monitor(워드프레스 디버깅 플러그인)가 **관리자 권한으로 인증된 REST 응답에만** 싣는 헤더(공식 문서 확인) → 앱 인증 키는 승인한 관리자 계정 자격이라 우리 호출에만 붙는다.
+- **원인 둘**: ①수신 상한이 Node 기본값 16KB 고정(axios 1.15.0 은 `maxHeaderSize` 를 Node 로 넘기지 않는다 · `config.transport` 로만 주입 가능) ②`wooRequest` catch 가 axios 예외 전부를 `network` 문구로 묶어 **연결된 건을 연결 실패로 안내**.
+- **수정(0921)**: ①`WOO_MAX_HEADER_BYTES = 256KB` + `wooWideHeaderTransport` — 리다이렉트 0 인 호출(= 인증 호출 전부)에만 싣는다(transport 를 주면 axios 가 리다이렉트를 안 따라가므로 공개 Store API 는 그대로) ②오류 코드 `header_overflow` 신설(문구 = 연결은 됐고 헤더가 크다 · 디버깅 플러그인 안내) · `sendWooError` 502 묶음에 추가. 화면은 `syncError.message` 만 그려 프론트 변경 0.
+- **계약**: `woocommerce-header-limit.test.ts` 3건(axios mock 없이 로컬 HTTP 서버로 실물 파서 통과 — 기준선 16KB 거부 재현 · transport 로 수신 · 256KB 초과는 여전히 거부) + `woocommerce-client.test.ts` +2(코드 매핑 · transport 배선). 백엔드 vitest 341파일 5,212건 · tsc 0.
+- **고객사 안내(0921)**: Query Monitor 비활성화 → 「우커머스 관리자 승인으로 연결」 재승인(확인 → 웹훅 4개 → 회원·주문 수집이 도는 경로는 승인 콜백 하나).
+- **미검증**: ①운영 서버에 설치된 axios 버전에서 transport 배선 동작(로컬 1.15.0 만 확인) ②100건 단위 수집 응답의 헤더 크기(오류 수가 건수에 비례하면 256KB 를 넘을 수 있다 → 그때는 `header_overflow` 문구로 안내된다) ③iroirotokyo.net 재승인 뒤 active 전환.
+
 ### 🟠 B-0920-1 브랜드메시지 자유형 5종: 부품은 다 있는데 발송 경로 네 자리가 죽어 있었다 (🟢 0920 **배포완료** `5573a2a1` · MySQL DDL 실행 완료(13·14·15 `k_etc_json` 8192) · **게이트웨이 Agent 1.0.31 3대 반영 완료(19:46)** · 실측 성공 2종(캐러셀 피드 · 커머스 `1800`) · 남은 3종 직원 실측) — 2026-09-20 Harold 접수 「발송 준비 중 5종을 실제 발송으로 전환해 테스트」
 
 - **접수**: 와이드 리스트·프리미엄 동영상·커머스·캐러셀 피드·캐러셀 커머스를 시험 계정(`psy5868`)으로 실제 발송해 실측한다. 0828에 「남은 것은 유형별 실측 5회뿐」이라 적어 두었다.

@@ -18,6 +18,8 @@
  */
 
 import axios from 'axios';
+import * as http from 'http';
+import * as https from 'https';
 import { randomBytes } from 'crypto';
 import { query } from '../config/database';
 import { syncOrder } from './cdp-orders';
@@ -41,10 +43,17 @@ export const STORE_PAGE_MAX = 100;                  // Store API per_page 상한
 export const WOO_WEBHOOK_TOPICS = ['order.created', 'order.updated', 'customer.created', 'customer.updated'] as const;
 const HTTP_TIMEOUT_MS = 20000;
 const USER_AGENT = 'Hanjullo-CDP/1.0';
+/**
+ * 인증 호출의 응답 헤더 수신 상한(★0921 · iroirotokyo.net 실측). Node 기본 16,384 bytes 로는 못 받는 몰이 있다:
+ * 관리자 키로 인증된 REST 응답에 Query Monitor(워드프레스 디버깅 플러그인)가 PHP 오류를 건당 약 1KB 헤더로 싣는다
+ * (실측 23줄 · 헤더 합계 21,494 bytes · 키 없이 재면 1KB대). 256KB = 크롬의 응답 헤더 상한과 같은 수준(문서 기준) —
+ * 몰 관리자 브라우저가 같은 헤더를 받는 한도라 그 위는 몰 쪽도 깨진다. 무한으로 열지 않는다(넘으면 header_overflow 로 말한다).
+ */
+export const WOO_MAX_HEADER_BYTES = 256 * 1024;
 
 export type WooApiErrorCode =
   | 'invalid_site' | 'no_integration' | 'no_keys'
-  | 'unauthorized' | 'forbidden' | 'not_found' | 'rate_limited' | 'redirect' | 'http' | 'bad_response' | 'network';
+  | 'unauthorized' | 'forbidden' | 'not_found' | 'rate_limited' | 'redirect' | 'http' | 'bad_response' | 'header_overflow' | 'network';
 
 const ERROR_MESSAGE: Record<WooApiErrorCode, string> = {
   invalid_site: '몰 주소를 인식할 수 없습니다. https://로 시작하는 쇼핑몰 주소를 입력해주세요.',
@@ -57,6 +66,7 @@ const ERROR_MESSAGE: Record<WooApiErrorCode, string> = {
   redirect: '몰 주소가 다른 주소로 이동합니다(리다이렉트). 실제 접속 주소(www 포함 여부·https)를 그대로 입력해주세요.',
   http: '몰 서버가 오류를 돌려주었습니다.',
   bad_response: '몰 서버 응답이 우커머스 REST 형식이 아닙니다. 주소가 우커머스 몰인지 확인해주세요.',
+  header_overflow: '몰 서버에는 연결됐지만 응답 헤더가 너무 커서 받을 수 없습니다. 몰에 디버깅용 플러그인(Query Monitor 등)이 켜져 있으면 끈 뒤 다시 연결해주세요.',
   network: '몰 서버에 연결할 수 없습니다. 주소와 서버 상태를 확인해주세요.',
 };
 
@@ -431,6 +441,16 @@ function wooRestBase(integ: Pick<WooIntegration, 'mallId' | 'siteUrl'>): string 
 const authHeaders = (integ: WooIntegration): Record<string, string> => ({ Authorization: wooBasicAuth(integ.consumerKey, integ.consumerSecret) });
 
 /**
+ * 응답 헤더 상한을 WOO_MAX_HEADER_BYTES 로 연 transport. axios 는 maxHeaderSize 를 Node 로 넘기지 않아(config 에 그 키가 없다)
+ * transport 자리에서 Node 요청 옵션에 직접 싣는다. ⛔ transport 를 주면 axios 가 리다이렉트를 따라가지 않는다 →
+ * 리다이렉트 0 인 호출(= 인증 호출 전부)에만 싣는다. 공개 Store API(리다이렉트 3 · 키 없음 → 디버깅 헤더도 없다)는 그대로 둔다.
+ */
+export const wooWideHeaderTransport = {
+  request: (options: any, callback: any): http.ClientRequest =>
+    (String(options?.protocol || 'https:').startsWith('https') ? https : http).request({ ...options, maxHeaderSize: WOO_MAX_HEADER_BYTES }, callback),
+};
+
+/**
  * HTTP 1회 — 네트워크 오류·HTTP 상태를 WooApiError 로 통일. Authorization 은 호출부가 headers 로 넣는다.
  * GET 은 axios.get · 그 밖(POST·PUT·DELETE)은 axios.request(JSON 본문).
  */
@@ -442,11 +462,14 @@ async function wooRequest(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string
       timeout: HTTP_TIMEOUT_MS,
       validateStatus: () => true,
       maxRedirects,
+      ...(maxRedirects === 0 ? { transport: wooWideHeaderTransport } : {}),
     };
     res = method === 'GET'
       ? await axios.get(url, common)
       : await axios.request({ ...common, method, url, data: body === undefined ? undefined : JSON.stringify(body), headers: { ...common.headers, 'Content-Type': 'application/json' } });
   } catch (err: any) {
+    // 연결은 됐고 응답 헤더가 상한을 넘은 것 — "연결할 수 없습니다"로 말하면 고객사가 자기 서버를 의심한다(0921 실측)
+    if (err?.code === 'HPE_HEADER_OVERFLOW') throw new WooApiError('header_overflow');
     throw new WooApiError('network', `${ERROR_MESSAGE.network} (${err?.code || err?.message || 'unknown'})`);
   }
   const status = Number(res.status);
