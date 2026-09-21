@@ -8,6 +8,7 @@
  * 실행(운영 서버):
  *   cd packages/backend && npx ts-node scripts/diagnose-woo-headers.ts iroirotokyo.net
  *   (비인증 기준선만: … www.iroirotokyo.net --anon  — DB·키를 쓰지 않는다)
+ *   (--timing 을 붙이면 백필과 같은 호출 6개(회원·주문 × per_page 1·20·100)의 소요 시간·본문 크기·전체 건수를 잰다 · GET 뿐)
  *
  * 하는 일: company_integrations 에서 그 몰 행을 SELECT 1회 → 저장된 REST 키로 같은 주소를 2번 GET
  *   ① 기본 상한 그대로(운영과 같은 조건 · 오류 재현 확인)  ② 상한 1MB(헤더 전부 받아 이름·길이 집계)
@@ -55,6 +56,54 @@ function probe(url: string, auth: string | null, maxHeaderSize?: number): Promis
     req.on('error', (e: any) => resolve({ ok: false, errorCode: e?.code || e?.message }));
     req.end();
   });
+}
+
+// ── --timing: 백필이 부르는 것과 같은 호출의 소요 시간 실측(★0921 · 회원 100명 1페이지가 20초 제한에 걸린 건) ──
+const TIMING_TIMEOUT_MS = 90000;
+
+interface Timed { ok: boolean; ms: number; status?: number; bodyBytes?: number; total?: string; totalPages?: string; errorCode?: string }
+
+function timed(url: string, auth: string | null): Promise<Timed> {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const req = https.request(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json', 'User-Agent': USER_AGENT, ...(auth ? { Authorization: auth } : {}) },
+      timeout: TIMING_TIMEOUT_MS,
+      maxHeaderSize: WIDE_LIMIT,
+    }, (res) => {
+      let bodyBytes = 0;
+      res.on('data', (c: Buffer) => { bodyBytes += c.length; }); // 크기만 센다(본문 출력 금지)
+      res.on('end', () => resolve({
+        ok: true, ms: Date.now() - t0, status: res.statusCode, bodyBytes,
+        total: String(res.headers['x-wp-total'] ?? '-'), totalPages: String(res.headers['x-wp-totalpages'] ?? '-'),
+      }));
+      res.on('error', (e: any) => resolve({ ok: false, ms: Date.now() - t0, errorCode: e?.code || e?.message }));
+    });
+    req.on('timeout', () => req.destroy(new Error(`timeout ${TIMING_TIMEOUT_MS}ms`)));
+    req.on('error', (e: any) => resolve({ ok: false, ms: Date.now() - t0, errorCode: e?.code || e?.message }));
+    req.end();
+  });
+}
+
+async function timingSeries(label: string, urls: { name: string; url: string }[], auth: string | null): Promise<void> {
+  console.log(`\n[소요 시간 · ${label} · 호출당 제한 ${TIMING_TIMEOUT_MS / 1000}초 · 운영 코드 제한 = 20초]`);
+  console.log('ms\tHTTP\t본문bytes\t전체건수\t전체쪽수\t호출');
+  for (const u of urls) {
+    const r = await timed(u.url, auth);
+    console.log(r.ok
+      ? `${r.ms}\t${r.status}\t${r.bodyBytes}\t${r.total}\t${r.totalPages}\t${u.name}`
+      : `${r.ms}\t오류 ${r.errorCode}\t-\t-\t-\t${u.name}`);
+  }
+}
+
+/** 백필과 같은 파라미터(woocommerce-client.ts backfillWooCustomers · backfillWooOrders) — per_page 만 1 · 20 · 100 으로 바꿔 잰다 */
+function backfillUrls(base: string): { name: string; url: string }[] {
+  const after = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, '');
+  const out: { name: string; url: string }[] = [];
+  for (const n of [1, 20, 100]) out.push({ name: `customers per_page=${n}`, url: `${base}/wp-json/wc/v3/customers?per_page=${n}&orderby=registered_date&order=desc&page=1` });
+  for (const n of [1, 20, 100]) out.push({ name: `orders(90일) per_page=${n}`, url: `${base}/wp-json/wc/v3/orders?per_page=${n}&after=${encodeURIComponent(after)}&dates_are_gmt=true&orderby=date&order=asc&page=1` });
+  return out;
 }
 
 /** 헤더 1줄이 전선에서 차지하는 크기 = "이름: 값\r\n" */
@@ -105,6 +154,10 @@ async function main(): Promise<number> {
     if (!r.ok) { console.log(`오류 ${r.errorCode}`); return 1; }
     console.log(`HTTP ${r.status}`);
     report(r.rawHeaders || []);
+    // 키가 없으니 공개 Store API 로 시간 재는 코드만 점검한다
+    if (process.argv.includes('--timing')) {
+      await timingSeries('공개 상품(키 없음)', [1, 20, 100].map((n) => ({ name: `store products per_page=${n}`, url: `https://${rawHost}/wp-json/wc/store/v1/products?per_page=${n}` })), null);
+    }
     return 0;
   }
   if (!process.env.DATABASE_URL) { console.error('DATABASE_URL 이 없습니다. packages/backend 에서 실행했는지 확인해주세요.'); return 2; }
@@ -143,6 +196,7 @@ async function main(): Promise<number> {
     if (!b.ok) { console.log(`② 상한 ${WIDE_LIMIT}: 오류 ${b.errorCode}`); continue; }
     console.log(`② 상한 ${WIDE_LIMIT}: HTTP ${b.status}`);
     report(b.rawHeaders || []);
+    if (process.argv.includes('--timing')) await timingSeries('백필과 같은 호출', backfillUrls(restBase(row)), auth);
   }
   return 0;
 }
