@@ -193,6 +193,21 @@ describe('wooTopicKind — 웹훅 주제 문자열 → 자원·이벤트', () =>
 });
 
 describe('mapWooCustomerToCdp — 회원 JSON → IdentifyInput(+ 수신동의 raw)', () => {
+  // ★0921 iroirotokyo.net 실측: 회원 역할 = bronze_member(멤버십 등급) · 수신동의 = mssms_agreement_label "YES"/"NO"
+  it('역할: 등급 역할(bronze_member)·customer·역할 없음은 회원 · 운영자 역할(대소문자 무관)은 null', () => {
+    for (const role of ['bronze_member', 'customer', 'subscriber', '', undefined]) {
+      expect(mapWooCustomerToCdp({ ...customer(), role }, { mallId: MALL })).not.toBeNull();
+    }
+    for (const role of ['administrator', 'shop_manager', 'editor', 'author', 'contributor', 'Administrator']) {
+      expect(mapWooCustomerToCdp({ ...customer(), role }, { mallId: MALL })).toBeNull();
+    }
+  });
+  it('수신동의 실측 값: mssms_agreement_label = "YES" / "NO" 가 raw 로 그대로 나온다', () => {
+    const yes = mapWooCustomerToCdp({ ...customer(), meta_data: [{ id: 1, key: 'mssms_agreement', value: 'on' }, { id: 2, key: 'mssms_agreement_label', value: 'YES' }] }, { mallId: MALL, consentMetaKey: 'mssms_agreement_label' });
+    const no = mapWooCustomerToCdp({ ...customer(), meta_data: [{ id: 1, key: 'mssms_agreement', value: '' }, { id: 2, key: 'mssms_agreement_label', value: 'NO' }] }, { mallId: MALL, consentMetaKey: 'mssms_agreement_label' });
+    expect(yes!.consentRaw).toBe('YES');
+    expect(no!.consentRaw).toBe('NO');
+  });
   it('기본 매핑: source · externalId = 몰:id · email · phone(billing) · name(한글 성+이름) · address(billing 1+2)', () => {
     const r = mapWooCustomerToCdp(customer(), { mallId: MALL, consentMetaKey: 'marketing_agree' });
     expect(r).not.toBeNull();

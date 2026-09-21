@@ -34,10 +34,20 @@ import { normalizeWooStoreProduct, type MallProduct } from './mall-product-norma
 
 export const WOO_PROVIDER = WOO_SOURCE;            // company_integrations.provider = cdp_events.source = 'woocommerce'
 export const DEFAULT_BACKFILL_DAYS = 90;
-export const PAGE_SIZE = 100;                       // 우커머스 REST per_page 상한
-export const MAX_CUSTOMER_PAGES = 50;               // 회원 백필 상한(5,000명) — 넘으면 truncated 로 알린다
-export const MAX_ORDER_PAGES = 400;          // 연결 시 백필 주문 상한(40,000건)
-export const MAX_SYNC_PAGES = 50;            // 주기 수집 한 회차 상한(5,000건) — modified_after 를 서버가 모를 때 90일치가 통째로 오는 것을 막는다
+/**
+ * 한 페이지 건수(★0921 iroirotokyo.net 실측 · 90일 주문 20,267건): per_page=100 은 13.8초·1.3MB(제한 20초에 여유 6초 →
+ * 203페이지 중 한 번만 밀려도 ECONNABORTED 로 전체 중단) · per_page=20 은 2.0초·192KB 이고 건당 시간도 짧다(0.10초 대 0.14초).
+ */
+export const PAGE_SIZE = 20;
+/**
+ * 가져오기 상한은 "건수"로 둔다(페이지 크기를 바꿔도 뜻이 안 변한다). 업무 한도가 아니라 폭주 방지선이다 —
+ * 쇼핑몰 회원은 5,000명을 그냥 넘는다(옛 상한 5,000명 · 40,000건은 0921 폐기). 닿으면 truncated 로 남기고 화면에 알린다.
+ */
+export const MAX_BACKFILL_CUSTOMERS = 500_000;
+export const MAX_BACKFILL_ORDERS = 200_000;
+export const MAX_SYNC_ORDERS = 5_000;        // 주기 수집 한 회차 상한 — modified_after 를 서버가 모를 때 90일치가 통째로 오는 것을 막는다
+/** 조정값(테스트가 지연을 0 으로 둔다). retryDelaysMs = 같은 페이지 재시도 전 대기 · 길이 + 1 = 총 시도 수 */
+export const wooTuning = { retryDelaysMs: [2000, 6000] as number[] };
 export const STORE_PAGE_MAX = 100;                  // Store API per_page 상한
 /** 우리가 받는 웹훅 주제 4종 — 1클릭 연결이 REST 로 자동 생성한다(화면 안내 문안과 같은 목록) */
 export const WOO_WEBHOOK_TOPICS = ['order.created', 'order.updated', 'customer.created', 'customer.updated'] as const;
@@ -147,6 +157,48 @@ export interface WooIntegration {
   /** 1클릭 연결이 만든 웹훅 id(해제 시 제거) */
   webhookIds: number[];
   syncError: { message: string; code: string; at: string | null } | null;
+  /** 기존 회원·주문 가져오기 진행 상태(meta.woo_backfill). null = 한 번도 시작 안 함 */
+  backfill: WooBackfillState | null;
+}
+
+/**
+ * 가져오기 진행 상태 — company_integrations.meta.woo_backfill (★0921 · SCHEMA.md 등재).
+ * 페이지가 끝날 때마다 저장한다 → 실패·서버 재시작 뒤 주기 워커가 그 자리에서 이어 간다.
+ * orders_after = 시작할 때 한 번 정한 90일 바닥(시간대 표기 없는 우커머스 날짜 파라미터) — 회차마다 새로 계산하면 창이 밀려 페이지가 어긋난다.
+ */
+export interface WooBackfillState {
+  stage: 'customers' | 'orders' | 'done';
+  /** 다음에 읽을 페이지(1부터) */
+  customers_page: number;
+  orders_page: number;
+  orders_after: string;
+  /** 적재한 건수(이어 갈 때 겹쳐 읽는 한 페이지는 다시 세어진다 — 진행 표시용이지 정산값이 아니다) */
+  customers_imported: number;
+  orders_imported: number;
+  /** 폭주 방지선(MAX_BACKFILL_*)에 닿아 멈췄는가 */
+  truncated: boolean;
+  started_at: string;
+  updated_at: string;
+  done_at: string | null;
+}
+
+function readBackfill(v: any): WooBackfillState | null {
+  if (!v || typeof v !== 'object') return null;
+  const stage = v.stage === 'customers' || v.stage === 'orders' || v.stage === 'done' ? v.stage : null;
+  if (!stage) return null;
+  const n = (x: any, d: number) => (Number.isFinite(Number(x)) && Number(x) >= 0 ? Math.floor(Number(x)) : d);
+  return {
+    stage,
+    customers_page: Math.max(1, n(v.customers_page, 1)),
+    orders_page: Math.max(1, n(v.orders_page, 1)),
+    orders_after: String(v.orders_after || ''),
+    customers_imported: n(v.customers_imported, 0),
+    orders_imported: n(v.orders_imported, 0),
+    truncated: v.truncated === true,
+    started_at: String(v.started_at || ''),
+    updated_at: String(v.updated_at || ''),
+    done_at: v.done_at ? String(v.done_at) : null,
+  };
 }
 
 interface WooMeta {
@@ -161,6 +213,7 @@ interface WooMeta {
   woo_sync_error?: string;
   woo_sync_error_code?: string;
   woo_sync_error_at?: string;
+  woo_backfill?: unknown;
 }
 
 const ROW_COLUMNS = 'id, company_id, mall_id, status, connected_at, last_synced_at, webhook_secret, meta';
@@ -185,6 +238,7 @@ function toIntegration(r: any): WooIntegration {
     syncError: meta.woo_sync_error
       ? { message: meta.woo_sync_error, code: meta.woo_sync_error_code || 'unknown', at: meta.woo_sync_error_at || null }
       : null,
+    backfill: readBackfill(meta.woo_backfill),
   };
 }
 
@@ -318,6 +372,20 @@ export async function recordWooSetupError(companyId: string, mallId: string, cod
   );
 }
 
+/**
+ * 저장된 실패 사유를 지운다 — 새 시도가 시작되면 옛 기록은 거짓이 된다(★0921: 연결이 성공한 뒤에도 옛 "수집 실패"가 화면에 남아
+ * 고객사가 "동일하다"고 회신). 그 뒤 실패하면 recordWooSetupError 가 새로 남긴다.
+ */
+export async function clearWooSetupError(companyId: string, mallId: string): Promise<void> {
+  await query(
+    `UPDATE company_integrations
+        SET meta = COALESCE(meta, '{}'::jsonb) - 'woo_sync_error' - 'woo_sync_error_code' - 'woo_sync_error_at',
+            updated_at = NOW()
+      WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2`,
+    [companyId, mallId],
+  );
+}
+
 /** 회사 + 몰 행(해제된 몰은 없음으로). 어댑터·워커·라우트가 전부 이 함수로 몰을 잡는다(타사 몰 오적재 차단). */
 export async function getWooIntegration(companyId: string, mallId: string): Promise<WooIntegration | undefined> {
   const r = await query(
@@ -387,6 +455,8 @@ export interface WooMallStatus {
   /** 분류코드(없으면 회사 공용) — 관리자 화면에서 어느 몰이 누구 것인지 */
   storeCode: string | null;
   syncError: { message: string; code: string; at: string | null } | null;
+  /** 기존 회원·주문 가져오기 진행(없으면 null) — 수십 분~수 시간 걸리는 일이라 화면이 "도는 중"임을 말해야 한다 */
+  backfill: { stage: WooBackfillState['stage']; customersImported: number; ordersImported: number; truncated: boolean; doneAt: string | null } | null;
 }
 
 export interface WooStatus {
@@ -409,6 +479,9 @@ export async function getWooStatus(companyId: string): Promise<WooStatus> {
     consentMetaKey: i.consentMetaKey,
     storeCode: i.storeCode,
     syncError: i.syncError,
+    backfill: i.backfill
+      ? { stage: i.backfill.stage, customersImported: i.backfill.customers_imported, ordersImported: i.backfill.orders_imported, truncated: i.backfill.truncated, doneAt: i.backfill.done_at }
+      : null,
   }));
   return { connected: malls.some((m) => m.connected), malls };
 }
@@ -577,20 +650,46 @@ export async function processWooResource(
 
 export interface WooSyncResult { imported: number; pages: number }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** 기다리면 풀릴 수 있는 실패만 다시 시도한다 — 시간 초과·연결 끊김(network) · 429 · 몰 서버 5xx. 키·권한·주소·헤더 초과는 기다려도 안 풀린다. */
+function isRetryableWooError(err: unknown): boolean {
+  if (!(err instanceof WooApiError)) return false;
+  return err.code === 'network' || err.code === 'rate_limited' || (err.code === 'http' && Number(err.httpStatus) >= 500);
+}
+
+/**
+ * 한 페이지 읽기 + 같은 페이지 재시도(wooTuning.retryDelaysMs). 수백~천 페이지를 도는 가져오기에서 한 번의 시간 초과가
+ * 전체를 죽이지 않게 한다(★0921: 203페이지 중 1회 ECONNABORTED 로 회원·주문 전량 미적재).
+ */
+async function fetchWooPageWithRetry(integ: WooIntegration, resource: 'orders' | 'customers', params: UrlParams): Promise<WooPage> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetchWooPage(integ, resource, params);
+    } catch (err) {
+      if (!isRetryableWooError(err) || attempt >= wooTuning.retryDelaysMs.length) throw err;
+      console.log(`[WooCommerce] ${resource} page=${params.page} 재시도 ${attempt + 1}/${wooTuning.retryDelaysMs.length} mall=${integ.mallId} code=${(err as WooApiError).code}`);
+      await sleep(wooTuning.retryDelaysMs[attempt]);
+    }
+  }
+}
+
+/** 주기 수집용 페이지 순회(상태 저장 없음 · 한 회차 안에서 끝난다). maxItems = 건수 상한. */
 async function walkPages(
   integ: WooIntegration,
   resource: 'orders' | 'customers',
   kind: WooTopicResource,
   baseParams: UrlParams,
-  maxPages: number,
+  maxItems: number,
 ): Promise<WooSyncResult & { truncated: boolean }> {
+  const maxPages = Math.ceil(maxItems / PAGE_SIZE);
   let imported = 0;
   let pages = 0;
   let totalPages = 1;
   let truncated = false;
   for (let page = 1; page <= totalPages; page++) {
     if (page > maxPages) { truncated = true; break; }
-    const res = await fetchWooPage(integ, resource, { ...baseParams, page });
+    const res = await fetchWooPageWithRetry(integ, resource, { ...baseParams, page });
     pages++;
     totalPages = res.totalPages;
     for (const raw of res.items) {
@@ -602,20 +701,124 @@ async function walkPages(
   return { imported, pages, truncated };
 }
 
-/** 주문 백필(연결 시 1회) — 생성일 기준 최근 days(기본 90). 성공 뒤 active 보장. dedup 은 syncOrder 멱등(order_id). */
-export async function backfillWooOrders(companyId: string, mallId: string, opts?: { days?: number }): Promise<WooSyncResult> {
-  const integ = await requireIntegration(companyId, mallId);
-  const days = opts?.days ?? DEFAULT_BACKFILL_DAYS;
-  const after = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const r = await walkPages(integ, 'orders', 'order', { per_page: PAGE_SIZE, after: wooDateParam(after), dates_are_gmt: 'true', orderby: 'date', order: 'asc' }, MAX_ORDER_PAGES);
-  await markWooConnected(companyId, mallId);
-  return { imported: r.imported, pages: r.pages };
+// ════════════════════════════════════════════════════════════════════
+// 기존 회원·주문 가져오기 — 단계(회원 → 주문) · 페이지마다 진행 저장 · 실패·재시작 뒤 이어 가기 · 한 번에 한 몰 (★0921)
+// ════════════════════════════════════════════════════════════════════
+
+async function saveBackfill(companyId: string, mallId: string, st: WooBackfillState): Promise<void> {
+  st.updated_at = new Date().toISOString();
+  await query(
+    `UPDATE company_integrations
+        SET meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('woo_backfill', $3::jsonb),
+            updated_at = NOW()
+      WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2 AND status <> 'revoked'`,
+    [companyId, mallId, JSON.stringify(st)],
+  );
 }
 
-/** 회원 백필(연결 시 1회) — 최근 가입 순 · 상한 MAX_CUSTOMER_PAGES(넘으면 truncated). 이후 회원 변경은 웹훅(customer.*)이 맡는다. */
-export async function backfillWooCustomers(companyId: string, mallId: string): Promise<WooSyncResult & { truncated: boolean }> {
+/**
+ * 한 단계를 끝까지. 페이지가 끝날 때마다 "다음 페이지"를 저장한다.
+ * 몰 행은 페이지마다 다시 읽는다 — 도는 중에 해제(없음 → 중단)되거나 재승인으로 키가 바뀌어도 그 즉시 따른다.
+ * 정렬은 뒤에 붙는 순서(회원 id 오름차순 · 주문 생성일 오름차순)라 도는 중에 새 건이 생겨도 앞 페이지가 밀리지 않는다.
+ */
+async function runBackfillStage(companyId: string, mallId: string, st: WooBackfillState, stage: 'customers' | 'orders'): Promise<void> {
+  const isCustomers = stage === 'customers';
+  const maxPages = Math.ceil((isCustomers ? MAX_BACKFILL_CUSTOMERS : MAX_BACKFILL_ORDERS) / PAGE_SIZE);
+  for (;;) {
+    const page = isCustomers ? st.customers_page : st.orders_page;
+    if (page > maxPages) { st.truncated = true; return; }
+    const integ = await requireIntegration(companyId, mallId);
+    if (!hasKeys(integ)) throw new WooApiError('no_keys');
+    const res = isCustomers
+      // role=all: 회원 역할이 몰마다 다르다(실측 bronze_member) — 기본값(customer)으로 부르면 0명이 온다. 운영자 역할은 매핑(core)이 뺀다.
+      ? await fetchWooPageWithRetry(integ, 'customers', { per_page: PAGE_SIZE, role: 'all', orderby: 'id', order: 'asc', page })
+      : await fetchWooPageWithRetry(integ, 'orders', { per_page: PAGE_SIZE, after: st.orders_after, dates_are_gmt: 'true', orderby: 'date', order: 'asc', page });
+    let imported = 0;
+    for (const raw of res.items) {
+      const r = await processWooResource(companyId, mallId, isCustomers ? 'customer' : 'order', raw, integ.consentMetaKey, integ.storeCode);
+      if (r === 'synced') imported++;
+    }
+    if (isCustomers) { st.customers_imported += imported; st.customers_page = page + 1; }
+    else { st.orders_imported += imported; st.orders_page = page + 1; }
+    await saveBackfill(companyId, mallId, st);
+    if (res.items.length === 0 || page >= res.totalPages) return;
+  }
+}
+
+/**
+ * 기존 회원·주문 가져오기 1회 실행(끝까지 또는 실패까지).
+ * - 상태 없음 → 새로 시작(주문 기준일 = 지금 - 90일 · 저장) · 진행 중 상태 → 저장된 페이지의 한 페이지 앞에서 이어 간다(겹친 건은 적재 멱등이 흡수).
+ * - 끝난 상태 → 그대로 반환. restartIfDone(재승인·수동 연결) 이면 처음부터 다시.
+ * - 시작할 때 옛 실패 사유를 지우고, 실패하면 새로 남긴 뒤 던진다. 끝나면 active 보장(옛 backfillWooOrders 와 같은 계약).
+ * 직접 부르지 말고 enqueueWooBackfill 로 줄 세운다(동시 실행 방지) — 이 함수는 테스트와 큐가 부른다.
+ */
+export async function runWooBackfill(companyId: string, mallId: string, opts?: { restartIfDone?: boolean }): Promise<WooBackfillState> {
   const integ = await requireIntegration(companyId, mallId);
-  return walkPages(integ, 'customers', 'customer', { per_page: PAGE_SIZE, orderby: 'registered_date', order: 'desc' }, MAX_CUSTOMER_PAGES);
+  if (!hasKeys(integ)) throw new WooApiError('no_keys');
+  const prev = integ.backfill;
+  if (prev && prev.stage === 'done' && !opts?.restartIfDone) return prev;
+
+  let st: WooBackfillState;
+  if (prev && prev.stage !== 'done' && prev.orders_after) {
+    st = { ...prev, customers_page: Math.max(1, prev.customers_page - (prev.stage === 'customers' ? 1 : 0)), orders_page: Math.max(1, prev.orders_page - (prev.stage === 'orders' ? 1 : 0)) };
+  } else {
+    const now = new Date();
+    st = {
+      stage: 'customers', customers_page: 1, orders_page: 1,
+      orders_after: wooDateParam(new Date(now.getTime() - DEFAULT_BACKFILL_DAYS * 24 * 60 * 60 * 1000)),
+      customers_imported: 0, orders_imported: 0, truncated: false,
+      started_at: now.toISOString(), updated_at: now.toISOString(), done_at: null,
+    };
+  }
+
+  await clearWooSetupError(companyId, mallId);
+  await saveBackfill(companyId, mallId, st);
+  try {
+    if (st.stage === 'customers') {
+      await runBackfillStage(companyId, mallId, st, 'customers');
+      st.stage = 'orders';
+      await saveBackfill(companyId, mallId, st);
+    }
+    if (st.stage === 'orders') {
+      await runBackfillStage(companyId, mallId, st, 'orders');
+      st.stage = 'done';
+      st.done_at = new Date().toISOString();
+      await saveBackfill(companyId, mallId, st);
+      await markWooConnected(companyId, mallId);
+    }
+  } catch (e: any) {
+    const code = e instanceof WooApiError ? e.code : 'unknown';
+    await recordWooSetupError(companyId, mallId, code, String(e?.message || 'unknown')).catch(() => undefined);
+    throw e;
+  }
+  return st;
+}
+
+// 한 번에 한 몰만 돈다(한 회사의 몰 여럿이 같은 서버에 있을 수 있다 · 우리 DB 적재도 한 줄로). 같은 몰은 도는 동안 다시 줄 세우지 않는다.
+const backfillQueued = new Set<string>();
+let backfillChain: Promise<void> = Promise.resolve();
+
+/**
+ * 가져오기를 줄 세운다(즉시 반환). 승인 콜백·수동 연결·주기 워커가 전부 이 함수 하나로 시작한다.
+ * 반환 false = 그 몰이 이미 줄에 있거나 도는 중. 실패는 runWooBackfill 이 meta 에 남기고 여기서는 로그만 — 다음 워커 회차가 이어 간다.
+ */
+export function enqueueWooBackfill(companyId: string, mallId: string, opts?: { restartIfDone?: boolean }): boolean {
+  const key = `${companyId}:${mallId}`;
+  if (backfillQueued.has(key)) return false;
+  backfillQueued.add(key);
+  backfillChain = backfillChain
+    .then(() => runWooBackfill(companyId, mallId, opts))
+    .then(
+      (st) => { console.log(`[WooCommerce backfill] 끝 mall=${mallId} stage=${st.stage} customers=${st.customers_imported} orders=${st.orders_imported}${st.truncated ? ' (truncated)' : ''}`); },
+      (e: any) => { console.error(`[WooCommerce backfill] 중단 mall=${mallId} code=${e instanceof WooApiError ? e.code : 'unknown'} — ${e?.message || e} (다음 워커 회차가 이어 간다)`); },
+    )
+    .finally(() => { backfillQueued.delete(key); });
+  return true;
+}
+
+/** 줄이 빌 때까지 기다린다(테스트·종료 처리용). */
+export function wooBackfillIdle(): Promise<void> {
+  return backfillChain;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -701,7 +904,7 @@ export async function syncWooOrdersSince(companyId: string, mallId: string, sinc
     'order',
     // dates_are_gmt: 날짜 파라미터를 GMT 로 해석하게 한다(서버가 모르면 무시 → 몰 시간대 · 워커의 12시간 겹침이 덮는다). orderby 는 문서에 있는 date 만 쓴다.
     { per_page: PAGE_SIZE, modified_after: wooDateParam(since), after: wooDateParam(floor), dates_are_gmt: 'true', orderby: 'date', order: 'asc' },
-    MAX_SYNC_PAGES,
+    MAX_SYNC_ORDERS,
   );
   return { imported: r.imported, pages: r.pages };
 }

@@ -28,8 +28,13 @@ import {
   getWooIntegration,
   listWooIntegrationsByMallId,
   verifyWooConnection,
-  backfillWooOrders,
-  backfillWooCustomers,
+  runWooBackfill,
+  enqueueWooBackfill,
+  wooBackfillIdle,
+  wooTuning,
+  MAX_BACKFILL_CUSTOMERS,
+  MAX_BACKFILL_ORDERS,
+  MAX_SYNC_ORDERS,
   syncWooOrdersSince,
   processWooResource,
   getWooStatus,
@@ -76,10 +81,10 @@ beforeEach(() => {
 });
 
 describe('순수 — URL · 인증 헤더 · 웹훅 URL', () => {
-  it("WOO_PROVIDER = 'woocommerce' · 백필 90일 · 페이지 100", () => {
+  it("WOO_PROVIDER = 'woocommerce' · 백필 90일 · 페이지 20(★0921 의도 변경 — 100 은 실측 13.8초로 제한 20초에 걸린다)", () => {
     expect(WOO_PROVIDER).toBe('woocommerce');
     expect(DEFAULT_BACKFILL_DAYS).toBe(90);
-    expect(PAGE_SIZE).toBe(100);
+    expect(PAGE_SIZE).toBe(20);
   });
   it('REST v3 URL = https://{mall}/wp-json/wc/v3/{자원}?params(undefined 생략 · 인코딩)', () => {
     expect(wooRestUrl(MALL, 'orders', { per_page: 100, page: 2, after: '2026-06-16T00:00:00Z', modified_after: undefined }))
@@ -241,36 +246,131 @@ describe('processWooResource — 매핑 → identify(수신동의 있을 때) �
   });
 });
 
-describe('백필 — X-WP-TotalPages 로 끝까지(첫 페이지에서 멈추지 않는다) · after 90일 · 성공 뒤 active', () => {
-  it('주문 백필: 2페이지 순회 · 주문 3건 syncOrder · 1페이지 URL 에 after·orderby·per_page 100', async () => {
-    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
-    get.mockResolvedValueOnce({ status: 200, headers: { 'x-wp-totalpages': '2' }, data: [order(1), order(2)] });
-    get.mockResolvedValueOnce({ status: 200, headers: { 'x-wp-totalpages': '2' }, data: [order(3)] });
-    const r = await backfillWooOrders(COMPANY, MALL, { days: 90 });
-    expect(r).toEqual({ imported: 3, pages: 2 });
-    expect(syncOrder).toHaveBeenCalledTimes(3);
-    const u1 = new URL(get.mock.calls[0][0]);
-    expect(u1.pathname).toBe('/wp-json/wc/v3/orders');
-    expect(u1.searchParams.get('per_page')).toBe('100');
-    expect(u1.searchParams.get('page')).toBe('1');
-    expect(u1.searchParams.get('orderby')).toBe('date');
-    expect(u1.searchParams.get('order')).toBe('asc');
-    expect(u1.searchParams.get('dates_are_gmt')).toBe('true');
-    const after = new Date(u1.searchParams.get('after')!);
-    expect(Math.round((Date.now() - after.getTime()) / 86400000)).toBe(90);
-    expect(new URL(get.mock.calls[1][0]).searchParams.get('page')).toBe('2');
-    expect(q.mock.calls.filter((c: any[]) => String(c[0]).includes("status = 'active'"))).toHaveLength(1);
+// ★0921 iroirotokyo.net 실측: 90일 주문 20,267건 · per_page=100 이 13.8초(제한 20초) → ECONNABORTED 한 번에 가져오기 전체가 중단되고
+//   다시 도는 경로가 없었다. 회원은 역할 기본값(customer) 때문에 0명(그 몰 회원 역할 = bronze_member). 옛 상한 = 회원 5,000명.
+describe('가져오기(runWooBackfill) — 회원 → 주문 · 20건 단위 · 페이지 재시도 · 이어서 가져오기 · 상한은 건수', () => {
+  const cust = (id: number, over: Record<string, any> = {}) => ({ id, role: 'bronze_member', email: `u${id}@example.invalid`, first_name: 'A', last_name: 'B', billing: { phone: '' }, meta_data: [], ...over });
+  const page = (data: any[], totalPages = 1) => ({ status: 200, headers: { 'x-wp-totalpages': String(totalPages) }, data });
+  const savedStates = () => q.mock.calls.filter((c: any[]) => String(c[0]).includes("'woo_backfill'")).map((c: any[]) => JSON.parse(c[1][2]));
+  const withRow = (meta: Record<string, any> = {}) =>
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row({ meta: { ...row().meta, ...meta } })] } : { rows: [] }));
+  beforeEach(() => { wooTuning.retryDelaysMs = [0, 0]; });
+
+  it('상수: 페이지 20 · 상한은 건수(회원 50만 · 주문 20만 · 주기 5천) — 옛 5,000명 상한 없음', () => {
+    expect(PAGE_SIZE).toBe(20);
+    expect(MAX_BACKFILL_CUSTOMERS).toBeGreaterThanOrEqual(500_000);
+    expect(MAX_BACKFILL_ORDERS).toBeGreaterThanOrEqual(200_000);
+    expect(MAX_SYNC_ORDERS).toBe(5_000);
   });
-  it('회원 백필: 페이지 순회 · identify 만 · 상한(MAX_CUSTOMER_PAGES) 넘으면 truncated', async () => {
-    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
-    const c = (id: number) => ({ id, email: `u${id}@example.invalid`, first_name: 'A', last_name: 'B', billing: { phone: '' }, meta_data: [] });
-    get.mockResolvedValue({ status: 200, headers: { 'x-wp-totalpages': '999' }, data: [c(1)] });
-    const r = await backfillWooCustomers(COMPANY, MALL);
-    expect(r.truncated).toBe(true);
-    expect(r.pages).toBe(50);
-    expect(r.imported).toBe(50);
-    expect(identifyCustomer).toHaveBeenCalledTimes(50);
-    expect(syncOrder).not.toHaveBeenCalled();
+  it('회원(role=all · id 오름차순) 2페이지 → 주문(after 90일 · date 오름차순) 2페이지 · 끝나면 done + active · 시작할 때 옛 오류를 지운다', async () => {
+    withRow();
+    get.mockResolvedValueOnce(page([cust(1), cust(2)], 2));
+    get.mockResolvedValueOnce(page([cust(3)], 2));
+    get.mockResolvedValueOnce(page([order(1), order(2)], 2));
+    get.mockResolvedValueOnce(page([order(3)], 2));
+    const st = await runWooBackfill(COMPANY, MALL);
+    expect(st).toMatchObject({ stage: 'done', customers_imported: 3, orders_imported: 3, truncated: false });
+    expect(st.done_at).toBeTruthy();
+    expect(identifyCustomer).toHaveBeenCalled();
+    expect(syncOrder).toHaveBeenCalledTimes(3);
+    const c1 = new URL(get.mock.calls[0][0]);
+    expect(c1.pathname).toBe('/wp-json/wc/v3/customers');
+    expect(c1.searchParams.get('role')).toBe('all');
+    expect(c1.searchParams.get('orderby')).toBe('id');
+    expect(c1.searchParams.get('order')).toBe('asc');
+    expect(c1.searchParams.get('per_page')).toBe('20');
+    expect(new URL(get.mock.calls[1][0]).searchParams.get('page')).toBe('2');
+    const o1 = new URL(get.mock.calls[2][0]);
+    expect(o1.pathname).toBe('/wp-json/wc/v3/orders');
+    expect(o1.searchParams.get('per_page')).toBe('20');
+    expect(o1.searchParams.get('orderby')).toBe('date');
+    expect(o1.searchParams.get('order')).toBe('asc');
+    expect(o1.searchParams.get('dates_are_gmt')).toBe('true');
+    expect(Math.round((Date.now() - new Date(o1.searchParams.get('after')!).getTime()) / 86400000)).toBe(90);
+    // 기준일은 시작할 때 한 번 정해 저장한다 — 창이 밀리면 페이지가 밀려 건너뛴다
+    expect(new URL(get.mock.calls[3][0]).searchParams.get('after')).toBe(o1.searchParams.get('after'));
+    expect(q.mock.calls.filter((c: any[]) => String(c[0]).includes("status = 'active'"))).toHaveLength(1);
+    expect(q.mock.calls.some((c: any[]) => String(c[0]).includes("- 'woo_sync_error'"))).toBe(true);
+    // 페이지마다 진행 상태를 저장한다(재시작·실패 뒤 이어 가기 위한 자리)
+    const states = savedStates();
+    expect(states.length).toBeGreaterThanOrEqual(4);
+    expect(states[states.length - 1].stage).toBe('done');
+  });
+  it('운영자 역할(administrator·shop_manager)은 회원으로 넣지 않는다', async () => {
+    withRow();
+    get.mockResolvedValueOnce(page([cust(1, { role: 'administrator' }), cust(2, { role: 'shop_manager' }), cust(3)]));
+    get.mockResolvedValueOnce(page([]));
+    const st = await runWooBackfill(COMPANY, MALL);
+    expect(st.customers_imported).toBe(1);
+    expect(identifyCustomer).toHaveBeenCalledTimes(1);
+  });
+  it('수신동의 실측 값(mssms_agreement_label = "YES"/"NO") → smsOptIn true/false 로 들어간다', async () => {
+    const meta = (v: string) => [{ id: 1, key: 'mssms_agreement_label', value: v }];
+    await processWooResource(COMPANY, MALL, 'customer', cust(1, { meta_data: meta('YES') }), 'mssms_agreement_label');
+    await processWooResource(COMPANY, MALL, 'customer', cust(2, { meta_data: meta('NO') }), 'mssms_agreement_label');
+    expect((identifyCustomer as any).mock.calls[0][1]).toMatchObject({ smsOptIn: true });
+    expect((identifyCustomer as any).mock.calls[1][1]).toMatchObject({ smsOptIn: false });
+  });
+  it('시간 초과(ECONNABORTED)는 같은 페이지를 다시 시도한다 — 두 번 실패 뒤 성공하면 끝까지 간다', async () => {
+    withRow();
+    get.mockResolvedValueOnce(page([]));                                                         // 회원 0
+    get.mockRejectedValueOnce(Object.assign(new Error('timeout of 20000ms exceeded'), { code: 'ECONNABORTED' }));
+    get.mockRejectedValueOnce(Object.assign(new Error('timeout of 20000ms exceeded'), { code: 'ECONNABORTED' }));
+    get.mockResolvedValueOnce(page([order(1)]));
+    const st = await runWooBackfill(COMPANY, MALL);
+    expect(st.stage).toBe('done');
+    expect(get).toHaveBeenCalledTimes(4);
+    expect(new URL(get.mock.calls[3][0]).searchParams.get('page')).toBe('1');
+  });
+  it('재시도를 다 써도 실패하면 오류를 남기고 던진다 · 진행 상태는 그 페이지에 남는다(다음 회차가 이어 간다)', async () => {
+    withRow();
+    get.mockResolvedValueOnce(page([]));
+    get.mockResolvedValueOnce(page([order(1)], 3));
+    get.mockRejectedValue(Object.assign(new Error('timeout of 20000ms exceeded'), { code: 'ECONNABORTED' }));
+    await expect(runWooBackfill(COMPANY, MALL)).rejects.toMatchObject({ code: 'network' });
+    expect(get).toHaveBeenCalledTimes(2 + 3);
+    const last = savedStates().pop();
+    expect(last).toMatchObject({ stage: 'orders', orders_page: 2, orders_imported: 1 });
+    const rec = q.mock.calls.find((c: any[]) => String(c[0]).includes("'woo_sync_error', $3"));
+    expect(rec?.[1][3]).toBe('network');
+  });
+  it('401 은 재시도하지 않는다(키 문제는 기다려도 안 풀린다)', async () => {
+    withRow();
+    get.mockResolvedValueOnce({ status: 401, headers: {}, data: {} });
+    await expect(runWooBackfill(COMPANY, MALL)).rejects.toMatchObject({ code: 'unauthorized' });
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+  it('이어서 가져오기: 저장된 단계·페이지의 한 페이지 앞에서 · 저장된 기준일 그대로 · 회원 단계는 다시 안 돈다', async () => {
+    withRow({ woo_backfill: { stage: 'orders', customers_page: 9, orders_page: 5, orders_after: '2026-06-23T00:00:00', customers_imported: 160, orders_imported: 80, truncated: false, started_at: '2026-09-21T07:00:00.000Z', updated_at: '2026-09-21T07:10:00.000Z', done_at: null } });
+    get.mockResolvedValueOnce(page([order(1)], 4));
+    const st = await runWooBackfill(COMPANY, MALL);
+    const u = new URL(get.mock.calls[0][0]);
+    expect(u.pathname).toBe('/wp-json/wc/v3/orders');
+    expect(u.searchParams.get('page')).toBe('4');
+    expect(u.searchParams.get('after')).toBe('2026-06-23T00:00:00');
+    expect(st).toMatchObject({ stage: 'done', customers_imported: 160, orders_imported: 81, started_at: '2026-09-21T07:00:00.000Z' });
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+  it('끝난 몰: 워커 경로(restartIfDone 없음)는 아무것도 안 부른다 · 재승인 경로(restartIfDone)는 처음부터 다시', async () => {
+    const done = { stage: 'done', customers_page: 3, orders_page: 9, orders_after: '2026-06-23T00:00:00', customers_imported: 40, orders_imported: 160, truncated: false, started_at: 'x', updated_at: 'x', done_at: '2026-09-21T08:00:00.000Z' };
+    withRow({ woo_backfill: done });
+    const same = await runWooBackfill(COMPANY, MALL);
+    expect(same.done_at).toBe('2026-09-21T08:00:00.000Z');
+    expect(get).not.toHaveBeenCalled();
+    get.mockResolvedValue(page([]));
+    const again = await runWooBackfill(COMPANY, MALL, { restartIfDone: true });
+    expect(new URL(get.mock.calls[0][0]).pathname).toBe('/wp-json/wc/v3/customers');
+    expect(new URL(get.mock.calls[0][0]).searchParams.get('page')).toBe('1');
+    expect(again).toMatchObject({ stage: 'done', customers_imported: 0, orders_imported: 0 });
+  });
+  it('enqueueWooBackfill: 같은 몰은 도는 동안 한 번만 줄 세운다(콜백·워커 동시 실행 방지)', async () => {
+    withRow();
+    get.mockResolvedValue(page([]));
+    expect(enqueueWooBackfill(COMPANY, MALL)).toBe(true);
+    expect(enqueueWooBackfill(COMPANY, MALL)).toBe(false);
+    await wooBackfillIdle();
+    expect(enqueueWooBackfill(COMPANY, MALL)).toBe(true);
+    await wooBackfillIdle();
   });
   it('주기 수집(syncWooOrdersSince): modified_after = since · after = 90일 바닥(미지 파라미터 무시돼도 범위가 묶인다)', async () => {
     q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
@@ -286,10 +386,14 @@ describe('백필 — X-WP-TotalPages 로 끝까지(첫 페이지에서 멈추지
     // 주기 수집은 연결 상태를 건드리지 않는다(active 갱신은 연결 검증·백필 몫)
     expect(q.mock.calls.filter((c: any[]) => String(c[0]).includes("status = 'active'"))).toHaveLength(0);
   });
-  it('백필 중 401 은 WooApiError 로 올라온다(부분 적재는 syncOrder 멱등이 감당)', async () => {
+  it('주기 수집도 20건 단위 · 시간 초과는 같은 페이지 재시도', async () => {
     q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
-    get.mockResolvedValueOnce({ status: 401, headers: {}, data: {} });
-    await expect(backfillWooOrders(COMPANY, MALL)).rejects.toMatchObject({ code: 'unauthorized' });
+    get.mockRejectedValueOnce(Object.assign(new Error('timeout of 20000ms exceeded'), { code: 'ECONNABORTED' }));
+    get.mockResolvedValueOnce({ status: 200, headers: { 'x-wp-totalpages': '1' }, data: [order(9)] });
+    const r = await syncWooOrdersSince(COMPANY, MALL, new Date(Date.now() - 3600 * 1000));
+    expect(r.imported).toBe(1);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(new URL(get.mock.calls[1][0]).searchParams.get('per_page')).toBe('20');
   });
 });
 
@@ -306,6 +410,15 @@ describe('getWooStatus — 몰 목록 · connected = active+connected_at 인 몰
     expect(s.malls[0].webhookUrl).toContain('/api/woocommerce/webhook/ilbonimo.com');
     expect(s.malls[1]).toMatchObject({ mallId: 'lens007.net', status: 'pending', connected: false, hasRestKeys: false, syncError: null });
     expect(JSON.stringify(s)).not.toMatch(/ck_x|cs_y|aaaaaaaa/);
+  });
+  it('가져오기 진행 상태(backfill)를 화면에 준다 — 없으면 null', async () => {
+    q.mockImplementation(async () => ({ rows: [
+      row({ meta: { ...row().meta, woo_backfill: { stage: 'orders', customers_page: 9, orders_page: 5, orders_after: '2026-06-23T00:00:00', customers_imported: 160, orders_imported: 80, truncated: false, started_at: 'a', updated_at: 'b', done_at: null } } }),
+      row({ id: 'row-2', mall_id: 'lens007.net' }),
+    ] }));
+    const s = await getWooStatus(COMPANY);
+    expect(s.malls[0].backfill).toEqual({ stage: 'orders', customersImported: 160, ordersImported: 80, truncated: false, doneAt: null });
+    expect(s.malls[1].backfill).toBeNull();
   });
   it('행이 없으면 connected false · malls []', async () => {
     expect(await getWooStatus(COMPANY)).toEqual({ connected: false, malls: [] });

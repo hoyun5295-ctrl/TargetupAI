@@ -94,6 +94,19 @@
 - **zip 은 직접 쓴다(`zip-store.ts` · 저장 방식)**: 라이브러리 추가 = 서버 npm install 단계 = 배포 함정(0826). 텍스트 몇 개라 압축 불필요.
 - **범위 밖(기록만)**: `routes/*.ts` 의 `gateAdmin` 인라인 헬퍼는 고도몰·메이크샵 라우트와 같은 형태로 복제(공용 CT 로 올리는 것은 별도 과제) · 자격 평문 저장은 전 provider 공통 과제.
 
+### 5-0-1. 운영 첫 몰 실측으로 바뀐 것(2026-09-21 · iroirotokyo.net · 경위 = `status/BUGS.md` B-0921-1·B-0921-2)
+
+실측 도구 = `packages/backend/scripts/diagnose-woo-headers.ts`(읽기 전용 · `--timing` · `--consent` · 키·개인정보 출력 0).
+
+- **인증 응답 헤더 상한 256KB**(`WOO_MAX_HEADER_BYTES` · `wooWideHeaderTransport`): 관리자 키로 인증된 응답에만 Query Monitor 가 `X-QM-php_errors-error-N` 을 싣는다(실측 23줄 · 21,494 bytes · Node 기본 16,384). 넘으면 `header_overflow` 문구.
+- **페이지 20건**(`PAGE_SIZE`): 90일 주문 20,267건 · per_page=100 은 13.8초·1.3MB(제한 20초) · per_page=20 은 2.0초·192KB · 건당 시간도 20건 쪽이 짧다.
+- **상한은 건수 · 폭주 방지선**(`MAX_BACKFILL_CUSTOMERS` 50만 · `MAX_BACKFILL_ORDERS` 20만 · `MAX_SYNC_ORDERS` 5천): 옛 회원 5,000명·주문 40,000건 상한 폐기(쇼핑몰 회원은 5,000명을 그냥 넘는다). 닿으면 `truncated` 를 상태에 남기고 화면에 말한다.
+- **가져오기 = 단계(회원 → 주문) · 페이지마다 진행 저장(`meta.woo_backfill`) · 같은 페이지 재시도 3회 · 이어 가기**: 시작점은 `enqueueWooBackfill` 하나(승인 콜백 · 수동 연결 · 주기 워커) · 한 번에 한 몰 · 같은 몰은 도는 동안 한 번만. 워커는 가져오기가 안 끝난 몰(상태 없는 기존 연결 몰 포함)을 줄 세우고 그 회차 주기 수집은 건너뛴다. 주문 기준일(`orders_after`)은 시작할 때 한 번 정해 저장(회차마다 새로 계산하면 창이 밀려 페이지가 어긋난다). 정렬 = 회원 id 오름차순 · 주문 생성일 오름차순(도는 중 새 건이 뒤에 붙는다).
+- **회원 조회 = `role=all` + 운영자 역할 제외**(`WOO_STAFF_ROLES` · core): 그 몰 회원 역할은 `bronze_member`(멤버십 등급) — 우커머스 기본값(`customer`)으로 부르면 0명. 등급 역할은 몰마다 달라 허용 목록을 만들 수 없다.
+- **수신동의(코드엠샵)**: 값이 든 키는 `mssms_agreement_label` = `YES`/`NO`(회원 20/20 · 회원 주문 13/13 에 플러그인 도움 없이 온다). `mssms_agreement` 는 `on`/빈 값이라 해석 불가. 이메일 동의(`email_agreement_label`)는 읽는 자리가 아직 없다(추가 과제).
+- **옛 실패 사유는 새 시도가 시작될 때 지운다**(`clearWooSetupError`): 연결이 성공한 뒤에도 옛 「수집 실패」가 남아 고객사가 "동일하다"고 회신했다.
+- **미검증**: `bronze_member` 회원의 가입·수정에 우커머스가 회원 웹훅을 보내는지 · 전체 회원 수 · 가져오기 전 구간 완주 시간.
+
 ### 5-1. W1 설계 결정(브리핑 기록)
 
 - 서명 검증 순수 함수는 W1에 넣지 않았다(웹훅 수신 = W2 몫 · 자체호스팅 어댑터처럼 어댑터 안에 둔다).

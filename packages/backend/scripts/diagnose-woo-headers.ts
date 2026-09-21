@@ -98,7 +98,7 @@ async function timingSeries(label: string, urls: { name: string; url: string }[]
   }
 }
 
-/** 백필과 같은 파라미터(woocommerce-client.ts backfillWooCustomers · backfillWooOrders) — per_page 만 1 · 20 · 100 으로 바꿔 잰다 */
+/** 가져오기(woocommerce-client.ts runBackfillStage)와 같은 자원 — per_page 만 1 · 20 · 100 으로 바꿔 잰다(0921 실측 당시 파라미터 그대로) */
 function backfillUrls(base: string): { name: string; url: string }[] {
   const after = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, '');
   const out: { name: string; url: string }[] = [];

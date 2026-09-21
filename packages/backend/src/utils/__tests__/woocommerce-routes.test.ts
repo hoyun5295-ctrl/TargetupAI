@@ -98,7 +98,10 @@ describe('routes/woocommerce.ts — 인증 라우트(★0918 권한 CT 경유 ·
     expect(r).toContain('saveWooCredentials(');
     expect(r).toContain('webhook_secret:');
     expect(r).toContain('verifyWooConnection(');
-    expect(r).toMatch(/backfillWooCustomers\([\s\S]{0,400}backfillWooOrders\(/);
+    // ★0921 가져오기는 라우트가 직접 돌리지 않는다 — 줄 세우기(enqueueWooBackfill) 하나로(재시도·이어 가기·동시 실행 방지는 CT 소유)
+    const connect = r.slice(r.indexOf("'/connect'"), r.indexOf("'/connect-url'"));
+    expect(connect.indexOf('enqueueWooBackfill(')).toBeGreaterThan(connect.indexOf('verifyWooConnection('));
+    expect(r).not.toMatch(/backfillWooCustomers\(|backfillWooOrders\(/);
     expect(r).toMatch(/no_keys/);
   });
 });
@@ -183,7 +186,7 @@ describe('① 1클릭 연결 라우트 — connect-url(관리자) · auth-callba
     expect(respond).toBeGreaterThan(block.indexOf('saveWooRestKeysFromAuth('));
     expect(block.indexOf('verifyWooConnection(')).toBeGreaterThan(respond);
     expect(block.indexOf('ensureWooWebhooks(')).toBeGreaterThan(block.indexOf('verifyWooConnection('));
-    expect(block.indexOf('backfillWooCustomers(')).toBeGreaterThan(block.indexOf('ensureWooWebhooks('));
+    expect(block.indexOf('enqueueWooBackfill(')).toBeGreaterThan(block.indexOf('ensureWooWebhooks('));
     expect(block).toContain('recordWooSetupError(');
     // 검증 실패 state 는 400 · 위조된 콜백이 키를 꽂지 못한다
     expect(block).toMatch(/status\(400\)/);

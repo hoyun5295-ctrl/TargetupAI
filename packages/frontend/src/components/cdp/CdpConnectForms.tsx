@@ -716,6 +716,8 @@ export interface WooMallStatus {
   /** ★2026-09-18 분류 코드(없으면 회사 공용) */
   storeCode?: string | null;
   syncError: { message: string; code: string; at: string | null } | null;
+  /** ★2026-09-21 기존 회원·주문 가져오기 진행(수십 분~수 시간 · 백그라운드). 옛 서버 응답엔 없다 → optional */
+  backfill?: { stage: 'customers' | 'orders' | 'done'; customersImported: number; ordersImported: number; truncated: boolean; doneAt: string | null } | null;
 }
 
 /**
@@ -891,6 +893,20 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
                   <div className="text-[11px] text-white/45 mt-1">
                     연결 {fmtKo(m.connectedAt)} · 마지막 수집 {fmtKo(m.lastSyncedAt)}{m.consentMetaKey ? ` · 수신동의 키 ${m.consentMetaKey}` : ' · 수신동의 키 미설정'}
                   </div>
+                  {m.backfill && m.backfill.stage !== 'done' && (
+                    <div className="mt-2 text-[11px] text-sky-200 bg-sky-500/10 border border-sky-400/25 rounded-lg px-3 py-2 flex items-start gap-1.5">
+                      <Loader2 className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${m.syncError ? '' : 'animate-spin'}`} />
+                      <span>
+                        기존 회원·주문을 가져오는 중입니다 · 회원 {m.backfill.customersImported.toLocaleString()}명 · 주문 {m.backfill.ordersImported.toLocaleString()}건
+                        {m.syncError ? ' · 잠시 멈췄고 30분 안에 멈춘 자리부터 자동으로 이어집니다.' : ' · 몰 규모에 따라 몇 시간 걸릴 수 있고 창을 닫아도 계속됩니다.'}
+                      </span>
+                    </div>
+                  )}
+                  {m.backfill?.stage === 'done' && (
+                    <div className="mt-1 text-[11px] text-white/45">
+                      기존 데이터 가져오기 완료 · 회원 {m.backfill.customersImported.toLocaleString()}명 · 주문 {m.backfill.ordersImported.toLocaleString()}건{m.backfill.truncated ? ' · 상한에 닿아 일부만 가져왔습니다' : ''}
+                    </div>
+                  )}
                   {m.syncError && (
                     <div className="mt-2 text-[11px] text-rose-200 bg-rose-500/10 border border-rose-400/30 rounded-lg px-3 py-2 inline-flex items-start gap-1.5">
                       <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> 수집 실패 · {m.syncError.message}

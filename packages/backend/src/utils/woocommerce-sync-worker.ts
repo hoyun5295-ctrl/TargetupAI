@@ -16,7 +16,7 @@
  */
 
 import { query } from '../config/database';
-import { syncWooOrdersSince, WooApiError, DEFAULT_BACKFILL_DAYS } from './woocommerce-client';
+import { syncWooOrdersSince, enqueueWooBackfill, WooApiError, DEFAULT_BACKFILL_DAYS } from './woocommerce-client';
 import { isCdpEnabledForPlan } from './cdp-auth';
 
 /** 주기 — 몰 서버(공유 호스팅일 수 있다)에 몰아치지 않는다. */
@@ -46,7 +46,7 @@ interface WooSyncTarget {
   mall_id: string;
   last_synced_at: Date | null;
   connected_at: Date | null;
-  meta: { woo_consumer_key?: string; woo_consumer_secret?: string } | null;
+  meta: { woo_consumer_key?: string; woo_consumer_secret?: string; woo_backfill?: { stage?: string } } | null;
 }
 
 /**
@@ -125,6 +125,14 @@ export async function runWooSyncPass(): Promise<WooSyncPassResult> {
       if (!row.meta?.woo_consumer_key || !row.meta?.woo_consumer_secret) { result.skipped++; continue; }
       // 요금제 게이트 — 연결 라우트와 같은 기준
       if (!(await isCdpEnabledForPlan(row.company_id))) { result.skipped++; continue; }
+
+      // ★0921 기존 회원·주문 가져오기가 안 끝난 몰(실패·서버 재시작 · 상태 없는 기존 연결 몰 포함)은 줄 세워 이어 간다.
+      //   끝나기 전에는 주기 수집을 돌리지 않는다 — 같은 몰에 두 흐름이 동시에 붙으면 몰 서버 부하만 두 배다(겹치는 건은 어차피 가져오기가 읽는다).
+      if (row.meta?.woo_backfill?.stage !== 'done') {
+        enqueueWooBackfill(row.company_id, row.mall_id);
+        result.skipped++;
+        continue;
+      }
 
       if (isGapBeyondWindow(row.last_synced_at, row.connected_at, now)) {
         console.warn(`[Woo Sync] 공백이 ${MAX_WINDOW_DAYS}일을 넘음 — 그보다 과거 주문은 이 연동으로 가져오지 않는다(company=${row.company_id} mall=${row.mall_id}).`);

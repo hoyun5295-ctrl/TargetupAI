@@ -15,7 +15,7 @@ import axios from 'axios';
 import { query } from '../../config/database';
 import { identifyCustomer } from '../cdp-identity';
 import { syncOrder } from '../cdp-orders';
-import { saveWooCredentials, getWooIntegration, getWooStatus, processWooResource, backfillWooCustomers } from '../woocommerce-client';
+import { saveWooCredentials, getWooIntegration, getWooStatus, processWooResource, runWooBackfill } from '../woocommerce-client';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
 const MALL = 'iroirotokyo.net';
@@ -104,13 +104,14 @@ describe('processWooResource — 분류코드를 적재로 넘긴다', () => {
 });
 
 describe('백필 — 몰 행의 분류코드가 그대로 따라간다', () => {
-  it('backfillWooCustomers: 행 meta.store_code → identify 입력', async () => {
+  it('runWooBackfill(회원 단계): 행 meta.store_code → identify 입력', async () => {
     q.mockImplementation(async (sql: string) => (String(sql).includes('FROM company_integrations') ? { rows: [row({ store_code: 'IROIRO' })] } : { rows: [] }));
     const page = { status: 200, data: [customer], headers: { 'x-wp-totalpages': '1' } };
     request.mockResolvedValue(page);
-    get.mockResolvedValue(page);
-    const r = await backfillWooCustomers(COMPANY, MALL);
-    expect(r.imported).toBe(1);
+    get.mockResolvedValueOnce(page);                                                              // 회원 1페이지
+    get.mockResolvedValue({ status: 200, data: [], headers: { 'x-wp-totalpages': '1' } });        // 주문 0건
+    const r = await runWooBackfill(COMPANY, MALL);
+    expect(r.customers_imported).toBe(1);
     expect(identify.mock.calls[0][1]).toMatchObject({ storeCode: 'IROIRO' });
   });
 });

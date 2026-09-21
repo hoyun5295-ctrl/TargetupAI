@@ -35,8 +35,8 @@ import {
   listWooIntegrationsByMallId,
   markWooConnected,
   verifyWooConnection,
-  backfillWooCustomers,
-  backfillWooOrders,
+  enqueueWooBackfill,
+  clearWooSetupError,
   getWooStatus,
   disconnectWoo,
   saveWooRestKeysFromAuth,
@@ -183,14 +183,14 @@ router.post('/auth-callback', async (req: Request, res: Response) => {
     console.log(`[WooCommerce auth-callback] 키 수신 company=${st.companyId} mall=${st.mallId} permissions=${String(body.key_permissions || '')}`);
     res.json({ success: true });
 
-    // 무거운 일은 응답 뒤 — 검증 1콜(active) → 웹훅 4개 → 회원 → 주문
+    // 무거운 일은 응답 뒤 — 검증 1콜(active) → 웹훅 4개 → 기존 회원·주문 가져오기(줄 세우기 · 재시도·이어 가기는 CT 소유)
     void (async () => {
       try {
         await verifyWooConnection(st.companyId, st.mallId);
+        await clearWooSetupError(st.companyId, st.mallId);
         const w = await ensureWooWebhooks(st.companyId, st.mallId);
-        const c = await backfillWooCustomers(st.companyId, st.mallId);
-        const o = await backfillWooOrders(st.companyId, st.mallId);
-        console.log(`[WooCommerce auth-callback] 자동 설정 완료 mall=${st.mallId} webhooks +${w.created}/=${w.existing} customers=${c.imported}${c.truncated ? '(truncated)' : ''} orders=${o.imported}`);
+        const queued = enqueueWooBackfill(st.companyId, st.mallId, { restartIfDone: true });
+        console.log(`[WooCommerce auth-callback] 자동 설정 mall=${st.mallId} webhooks +${w.created}/=${w.existing} 가져오기=${queued ? '줄 세움' : '이미 도는 중'}`);
       } catch (e: any) {
         const code = e instanceof WooApiError ? e.code : 'unknown';
         await recordWooSetupError(st.companyId, st.mallId, code, String(e?.message || 'unknown')).catch(() => undefined);
@@ -397,16 +397,9 @@ router.post('/connect', async (req: Request, res: Response) => {
       throw err;
     }
 
-    // 백필은 시간이 걸려 백그라운드로(회원 → 주문). 실패는 로그.
-    void (async () => {
-      try {
-        const c = await backfillWooCustomers(companyId, mallId);
-        const o = await backfillWooOrders(companyId, mallId);
-        console.log(`[WooCommerce backfill] company=${companyId} mall=${mallId} customers=${c.imported}(pages ${c.pages}${c.truncated ? ' · truncated' : ''}) orders=${o.imported}(pages ${o.pages})`);
-      } catch (e: any) {
-        console.error('[WooCommerce backfill]', mallId, e?.message || e);
-      }
-    })();
+    // 가져오기는 시간이 걸려 백그라운드로(회원 → 주문) — 줄 세우기 하나로. 실패는 meta 에 남고 주기 워커가 이어 간다.
+    await clearWooSetupError(companyId, mallId).catch(() => undefined);
+    enqueueWooBackfill(companyId, mallId, { restartIfDone: true });
 
     return res.json({ success: true, verified: true, message: '연동 확인 완료. 회원·주문을 가져오는 중입니다. 잠시 후 상태를 확인해주세요.' });
   } catch (err) {

@@ -178,7 +178,15 @@ function pickAddress(billing: any): string | undefined {
 }
 
 /**
+ * 몰 운영자 역할(워드프레스·우커머스 고정값) — 회원이 아니라 적재하지 않는다(★0921).
+ * 회원 역할은 몰마다 다르다(iroirotokyo.net 실측 = 멤버십 등급 역할 `bronze_member` · 우커머스 기본 `customer` 가 아님) →
+ * 회원 조회는 role=all 로 하고, 허용 목록을 만들 수 없으니 고정된 운영자 역할만 뺀다. 회원 백필·회원 웹훅이 같은 규칙을 탄다.
+ */
+export const WOO_STAFF_ROLES: ReadonlySet<string> = new Set(['administrator', 'shop_manager', 'editor', 'author', 'contributor']);
+
+/**
  * 회원 JSON 1건 → identifyCustomer 입력 + 수신동의 raw.
+ * - 운영자 역할(WOO_STAFF_ROLES)은 null
  * - externalId = `{mallId}:{id}`
  * - email: 회원 email → billing.email · phone: billing.phone → shipping.phone
  * - 반환 null: id·mallId 누락, 또는 email·phone 둘 다 없음(빈 고객 생성 차단 · 삭제 웹훅 {id} 포함)
@@ -188,6 +196,7 @@ export function mapWooCustomerToCdp(raw: any, opts: WooMapOptions): WooMappedCus
   const mallId = str(opts?.mallId);
   const id = str(raw.id);
   if (!mallId || !id) return null;
+  if (WOO_STAFF_ROLES.has(str(raw.role).toLowerCase())) return null;
 
   const billing = raw.billing ?? {};
   const email = str(raw.email) || str(billing.email) || undefined;
