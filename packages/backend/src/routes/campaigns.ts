@@ -17,7 +17,7 @@ import { convertButtonsToQTmsg } from '../utils/alimtalk-button';
 import { buildAlimtalkEtcJson } from '../utils/alimtalk-emphasize';
 import { decideKakaoTemplateSendable, getImcTemplateStatusSafe } from '../utils/kakao-template-guard';
 import { getStoreScope } from '../utils/store-scope';
-import { buildSendConsent, resolveSendConsent } from '../utils/mall-consent';
+import { buildSendConsent, resolveSendConsent, isMallConsentMigrationPending, MALL_CONSENT_MIGRATION_PENDING } from '../utils/mall-consent';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 // ★ 메시징 컨트롤타워 import
 import {
@@ -672,6 +672,7 @@ router.post('/', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('캠페인 생성 에러:', error);
+    if (isMallConsentMigrationPending(error)) return res.status(503).json(MALL_CONSENT_MIGRATION_PENDING);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
@@ -1331,6 +1332,9 @@ await query(
     console.error('캠페인 발송 에러:', error);
     // 실행 행이 이미 만들어진 뒤라면 종결한다 — 안 하면 그 캠페인이 영구히 잠긴다(2026-08-17).
     if (campaignRunId) await failCampaignRun(campaignRunId, '발송 처리 중 예기치 못한 오류');
+    // ★ 2026-09-22 db_alter_safety_net: 몰 동의 컬럼 미존재는 503(위에서 실행 행은 이미 종결했다 — 두 응답 모두 같은 종결 뒤에 있다)
+    const sendErrorStatus = isMallConsentMigrationPending(error) ? 503 : 500;
+    if (sendErrorStatus === 503) { res.status(sendErrorStatus).json(MALL_CONSENT_MIGRATION_PENDING); return; }
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
@@ -3086,6 +3090,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('수신자 조회 실패:', error);
+    if (isMallConsentMigrationPending(error)) return res.status(503).json(MALL_CONSENT_MIGRATION_PENDING);
     res.status(500).json({ success: false, error: '조회 실패' });
   }
 });

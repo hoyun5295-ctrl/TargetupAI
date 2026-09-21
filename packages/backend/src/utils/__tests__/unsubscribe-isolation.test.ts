@@ -45,14 +45,14 @@ describe('isUserIsolationEnabled', () => {
 });
 
 describe('deleteIsolatedUnsubscribes — 격리 회사의 삭제는 본인 행만', () => {
-  it('본인(user_id) 행만 지운다 · 관리자 사본은 그 번호에 다른 사용자 행이 하나도 안 남을 때만 · 고객 행 동의를 되살리지 않는다', async () => {
+  it('본인(user_id) 행만 지운다 · **관리자 행은 건드리지 않는다**(사본인지 관리자 자신의 독립된 거부인지 구별할 수 없다 — Codex R1) · 고객 행 동의를 되살리지 않는다', async () => {
     db({ iso: true });
     const phones = await deleteIsolatedUnsubscribes(COMPANY, USER, [PHONE]);
     expect(phones).toEqual([PHONE]);
     const all = sqls();
+    expect(all).toHaveLength(1);
     expect(all[0]).toMatch(/DELETE FROM unsubscribes WHERE company_id = \$1::uuid AND user_id = \$2::uuid AND phone = ANY\(\$3::varchar\[\]\)/);
-    expect(all[1]).toMatch(/user_type = 'admin'/);
-    expect(all[1]).toMatch(/NOT EXISTS/);
+    expect(all.some((s) => /user_type = 'admin'/.test(s))).toBe(false);
     expect(all.some((s) => /UPDATE customers SET sms_opt_in/.test(s))).toBe(false);
   });
 });

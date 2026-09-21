@@ -120,10 +120,14 @@ export async function identifyCustomer(
   const email = input.email?.toLowerCase().trim() || null;
 
   // ★ 2026-09-22 몰별 수신동의(설계서 docs/2026-09-22-mall-consent-isolation-design.md §4-2 · H2):
-  //   분류코드가 실린 호출(= 몰 단위 연동)의 수신동의는 **그 몰의 소속 행**에만 쓴다(아래 recordStoreMembership).
-  //   고객 1행의 sms_opt_in 은 동결한다 — 안 그러면 나중에 들어온 몰의 동의가 앞선 몰의 미동의를 덮는다(0922 실측 3,729명).
+  //   분류코드가 실린 호출(= 몰 단위 연동)의 수신동의는 **그 몰의 소속 행**이 진실이다(아래 recordStoreMembership).
+  //   고객 1행의 sms_opt_in 은 **올리지 않는다** — 안 그러면 나중에 들어온 몰의 동의가 앞선 몰의 미동의를 덮는다(0922 실측 3,729명).
+  //   ⛔ 단 **철회(false)는 고객 행에도 내린다**(Codex 0922 R1): 몰 동의 읽기(ENV)가 켜지기 전과 관리자·여정·자동발송은 아직 고객 행을 읽는다.
+  //      철회를 버리면 거부한 사람에게 나간다. 내리는 방향은 "덜 보낸다"뿐이고, 몰 사용자 발송은 ENV ON 뒤 소속 행만 본다(H2).
   //   storeCode 가 없는 호출(기존 호출처 전부)은 rowInput === input 이라 1바이트도 다르지 않다.
-  const rowInput: IdentifyInput = input.storeCode ? { ...input, smsOptIn: undefined } : input;
+  const rowInput: IdentifyInput = input.storeCode
+    ? { ...input, smsOptIn: input.smsOptIn === false ? false : undefined }
+    : input;
 
   // ★ 1단계: 기존 link 매칭 (source + external_id)
   const existingLink = await query(
@@ -366,11 +370,13 @@ async function recordStoreMembership(
   if (!storeCode) return;
   try {
     await linkCustomerStore(companyId, customerId, storeCode);
-    // ★ 2026-09-22: 몰 동의는 소속 행이 단독으로 갖는다(CT mall-consent · 다른 몰의 행에는 닿지 않는다). 소속 행이 생긴 뒤에 쓴다.
-    if (smsOptIn !== undefined) await upsertStoreConsent(companyId, customerId, storeCode, smsOptIn, source || 'unknown');
   } catch (err: any) {
-    console.warn('[CDP Identity] 분류·몰 동의 기록 실패 (식별 자체는 완료):', err?.message || err);
+    console.warn('[CDP Identity] 분류 기록 실패 (식별 자체는 완료):', err?.message || err);
   }
+  // ★ 2026-09-22: 몰 동의는 소속 행이 단독으로 갖는다(CT mall-consent · 다른 몰의 행에는 닿지 않는다). 소속 행이 생긴 뒤에 쓴다.
+  // ⛔ 이 쓰기의 실패는 삼키지 않는다(Codex 0922 R1) — 철회(false)가 조용히 사라지면 그 몰에서 거부한 사람에게 계속 나간다.
+  //    던지면 웹훅은 재처리 경로로, 가져오기는 그 건만 failed 로 남는다. 컬럼 미존재(42703)는 CT 가 안에서 처리한다.
+  if (smsOptIn !== undefined) await upsertStoreConsent(companyId, customerId, storeCode, smsOptIn, source || 'unknown');
 }
 
 /** 같은 회사에서 normalizedPhone을 보유한 활성 고객 id 1건(없으면 null). A1/A4 phone 충돌 판정 공용. */

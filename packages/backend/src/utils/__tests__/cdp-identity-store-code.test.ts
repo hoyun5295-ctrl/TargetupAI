@@ -126,10 +126,16 @@ describe('identifyCustomer · 몰 수신동의는 소속 행에 · 고객 행 �
     expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-new', '일본이모', true, 'woocommerce');
     expect(link.mock.invocationCallOrder[0]).toBeLessThan(consent.mock.invocationCallOrder[0]);
   });
-  it('storeCode 있음 · 기존 연결(두 번째 몰의 미동의가 와도): 고객 행 동의를 덮지 않는다 · 그 몰 소속 행에만 false', async () => {
+  it('storeCode 있음 · 기존 연결 · 두 번째 몰의 **동의**: 고객 행을 올리지 않는다(앞선 몰의 미동의를 덮지 않는다) · 그 몰 소속 행에만 true', async () => {
+    db({ hasLink: true, linkedCustomerId: 'cust-linked' });
+    await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: true, storeCode: '일본이모' });
+    expect(updateParams()[8]).toBeNull();
+    expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', true, 'woocommerce');
+  });
+  it('storeCode 있음 · **철회(false)는 고객 행에도 내린다** — 몰 동의 읽기가 켜지기 전·관리자·여정은 아직 고객 행을 읽는다(Codex R1 · 덜 보내는 방향)', async () => {
     db({ hasLink: true, linkedCustomerId: 'cust-linked' });
     await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: false, storeCode: '일본이모' });
-    expect(updateParams()[8]).toBeNull();
+    expect(updateParams()[8]).toBe(false);
     expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', false, 'woocommerce');
   });
   it('동의 값이 없으면(주문 등) 소속 행 동의를 건드리지 않는다 — 모름은 모름으로 둔다', async () => {
@@ -137,10 +143,16 @@ describe('identifyCustomer · 몰 수신동의는 소속 행에 · 고객 행 �
     await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, storeCode: '일본이모' });
     expect(consent).not.toHaveBeenCalled();
   });
-  it('몰 동의 기록이 실패해도 식별 결과는 그대로다', async () => {
+  it('몰 동의 쓰기 실패는 삼키지 않는다 — 철회가 조용히 사라지면 거부한 사람에게 계속 나간다(웹훅은 재처리 · 가져오기는 그 건만 failed)', async () => {
     db();
-    consent.mockRejectedValueOnce(new Error('boom'));
+    consent.mockRejectedValueOnce(new Error('connection terminated'));
+    await expect(identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: false, storeCode: '일본이모' })).rejects.toThrow('connection terminated');
+  });
+  it('분류 기록(소속 행) 실패는 종전대로 식별을 막지 않고, 그 뒤 몰 동의 쓰기도 시도한다', async () => {
+    db();
+    link.mockRejectedValueOnce(new Error('boom'));
     const r = await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: true, storeCode: '일본이모' });
     expect(r.customerId).toBe('cust-new');
+    expect(consent).toHaveBeenCalledTimes(1);
   });
 });

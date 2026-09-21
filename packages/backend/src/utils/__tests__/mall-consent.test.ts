@@ -34,11 +34,11 @@ const mallRows = (codes: (string | null)[]) => q.mockImplementation(async (sql: 
   (sql.includes('FROM company_integrations') ? { rows: codes.filter((c) => c).map((c) => ({ store_code: c })) } : { rows: [] }));
 
 describe('몰 동의 분류코드 · ENV 강제', () => {
-  it('해제 아닌 자사몰 연동 행의 meta.store_code 만 · 중복 제거 · 조회 조건에 revoked 제외와 빈 코드 제외가 있다', async () => {
+  it('자사몰 연동 행의 meta.store_code · 중복 제거 · 빈 코드 제외 · **해제된 연동도 포함**(해제해도 그 몰의 거부는 남는다 — Codex R1)', async () => {
     mallRows(['이로이로도쿄', '일본이모', '이로이로도쿄']);
     expect(await getMallConsentStoreCodes(COMPANY)).toEqual(['이로이로도쿄', '일본이모']);
     const sql = String(q.mock.calls[0][0]);
-    expect(sql).toMatch(/status <> 'revoked'/);
+    expect(sql).not.toMatch(/revoked/);
     expect(sql).toMatch(/meta->>'store_code'/);
   });
   it('ENV 빈 값 = 아무도 아님 · 목록 = 그 회사만 · * = 몰 동의 분류코드가 있는 회사만', async () => {
@@ -65,7 +65,14 @@ describe('buildSendConsent — 발송 자격 조각(순수)', () => {
     const r = buildSendConsent({ enforce: true, alias: 'c', storeFilter: LEGACY_STORE });
     expect(r.mode).toBe('mall');
     expect(r.customerConsent).toBe('TRUE');
-    expect(r.storeFilter).toBe(' AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($3::text[]) AND sms_opt_in = true)');
+    // 몰 동의 컬럼은 소속 표 별칭으로 한정 — 한정하지 않으면 컬럼 없는 환경에서 바깥 customers.sms_opt_in 으로 새어 통과한다(Codex R1)
+    expect(r.storeFilter).toBe(' AND c.id IN (SELECT customer_id FROM customer_stores mcs WHERE company_id = c.company_id AND store_code = ANY($3::text[]) AND mcs.sms_opt_in = true)');
+  });
+  it('모르는 모양의 서브쿼리에 강제가 걸리면 옛 판정으로 열지 않고 닫는다(FALSE)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const r = buildSendConsent({ enforce: true, alias: 'c', storeFilter: ' AND c.store_code = $3' });
+    expect(r).toMatchObject({ mode: 'mall', customerConsent: 'FALSE' });
+    err.mockRestore();
   });
   it('강제인데 범위 서브쿼리가 없으면(관리자·no_filter) 옛 문자열 그대로 — 몰을 모르는 발송에 몰 동의를 걸 수 없다', () => {
     expect(buildSendConsent({ enforce: true, alias: 'c', storeFilter: '' }).mode).toBe('legacy');
@@ -73,20 +80,24 @@ describe('buildSendConsent — 발송 자격 조각(순수)', () => {
   it('별칭 없는 서브쿼리 모양(직접 타겟)도 같은 규칙', () => {
     const s = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
     const r = buildSendConsent({ enforce: true, alias: 'c', storeFilter: s });
-    expect(r.storeFilter).toBe(' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]) AND sms_opt_in = true)');
+    expect(r.storeFilter).toBe(' AND id IN (SELECT customer_id FROM customer_stores mcs WHERE company_id = $1 AND store_code = ANY($2::text[]) AND mcs.sms_opt_in = true)');
   });
 });
 
 describe('resolveSendConsent — 회사·사용자 코드로 강제 여부를 정한다', () => {
-  it('ENV 켜짐 + 사용자 코드가 전부 몰 동의 분류코드 → 강제', async () => {
+  it('ENV 켜짐 + 사용자 코드가 몰 동의 분류코드 → 강제', async () => {
     process.env[ENV] = COMPANY;
     mallRows(['이로이로도쿄', '일본이모']);
     expect(await resolveSendConsent(COMPANY, ['일본이모'])).toBe(true);
   });
-  it('사용자 코드에 몰 동의가 아닌 코드가 섞이면 강제하지 않는다(옛 SQL) · 코드 없음(관리자)도 강제하지 않는다', async () => {
+  it('몰 동의가 아닌 코드가 섞여도 옛 판정으로 되돌리지 않는다(덜 보내는 방향 · 경고) · 몰 코드가 하나도 없으면 강제 아님 · 코드 없음(관리자)도 아님', async () => {
     process.env[ENV] = COMPANY;
     mallRows(['이로이로도쿄']);
-    expect(await resolveSendConsent(COMPANY, ['이로이로도쿄', 'CPB'])).toBe(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await resolveSendConsent(COMPANY, ['이로이로도쿄', 'CPB'])).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    expect(await resolveSendConsent(COMPANY, ['CPB'])).toBe(false);
     expect(await resolveSendConsent(COMPANY, [])).toBe(false);
     expect(await resolveSendConsent(COMPANY, undefined)).toBe(false);
   });
@@ -147,5 +158,30 @@ describe('소스 계약 — routes/campaigns.ts 발송·세기·미리보기가 
     const block = src.slice(src.indexOf('const previewConsent = buildSendConsent('), src.indexOf('// 발송 완료/진행중이면 MySQL'));
     expect((block.match(/\$\{previewConsent\.customerConsent\}/g) || []).length).toBe(2);
     expect(block).not.toMatch(/c\.sms_opt_in = true/);
+  });
+});
+
+// ── db_alter_safety_net(Codex 0922 R2): 몰 동의 컬럼 미존재 = 500 이 아니라 503 DB_MIGRATION_PENDING ──
+import { isMallConsentMigrationPending, MALL_CONSENT_MIGRATION_PENDING } from '../mall-consent';
+
+describe('몰 동의 컬럼 미존재 → 503 DB_MIGRATION_PENDING', () => {
+  it('판정: column + does not exist + sms_opt_in 이 함께 있을 때만', () => {
+    expect(isMallConsentMigrationPending(new Error('column mcs.sms_opt_in does not exist'))).toBe(true);
+    expect(isMallConsentMigrationPending(new Error('column "foo" does not exist'))).toBe(false);
+    expect(isMallConsentMigrationPending(new Error('connection terminated'))).toBe(false);
+    expect(MALL_CONSENT_MIGRATION_PENDING).toMatchObject({ code: 'DB_MIGRATION_PENDING' });
+    expect(MALL_CONSENT_MIGRATION_PENDING.error).toContain('customer_stores');
+  });
+  it('조각을 쓰는 세 endpoint(생성·발송·수신자 미리보기)의 catch 가 500 앞에서 503 으로 갈린다 · 옛 판정으로 되돌리는 재시도는 없다', () => {
+    const src = readFileSync(resolve(__dirname, '..', '..', 'routes', 'campaigns.ts'), 'utf-8');
+    expect((src.match(/isMallConsentMigrationPending\(error\)/g) || []).length).toBe(3);
+    expect((src.match(/json\(MALL_CONSENT_MIGRATION_PENDING\)/g) || []).length).toBe(3);
+    for (const marker of ["console.error('캠페인 생성 에러:', error);", "await failCampaignRun(campaignRunId, '발송 처리 중 예기치 못한 오류');", "console.error('수신자 조회 실패:', error);"]) {
+      const at = src.indexOf(marker);
+      const tail = src.slice(at, at + 400);
+      const pendingAt = tail.indexOf('MALL_CONSENT_MIGRATION_PENDING');
+      expect(pendingAt).toBeGreaterThan(-1);
+      expect(pendingAt).toBeLessThan(tail.indexOf('status(500)'));
+    }
   });
 });

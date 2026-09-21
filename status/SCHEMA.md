@@ -504,6 +504,25 @@
 | created_at | timestamp |
 - UNIQUE: (company_id, field_key)
 
+### customer_stores (고객의 분류코드 소속 — 다매장·다몰)
+> **2026-09-22 information_schema · pg_indexes 실측(Harold 실행)** — 그 전까지 이 표는 본 문서에 절이 없었다(코드의 ON CONFLICT 로만 알던 표).
+> 고객은 폰당 1행(`customers`)이고, 한 고객이 여러 분류코드(브랜드·몰)에 속하는 것은 이 표의 행 수로 나타난다. 범위 격리 CT `utils/store-scope.ts` 가 이 표를 읽는다.
+> 쓰기 입구 = `utils/customer-store-link.ts linkCustomerStore`(자사몰 적재) · `routes/upload.ts` · `routes/sync.ts` · `routes/customers.ts`(인라인 3곳 · 같은 줄).
+
+| 컬럼 | 타입 | NULL | 비고 |
+|------|------|------|------|
+| id | uuid PK | NO | |
+| company_id | uuid | NO | |
+| customer_id | uuid | NO | |
+| store_code | varchar | NO | 분류코드(브랜드·몰). 몰 연동 행의 `company_integrations.meta.store_code` 와 같은 값 |
+| created_at | timestamp | YES | |
+| **sms_opt_in** | boolean | YES | ★2026-09-22 DDL 실행(D93 · Harold · information_schema 8컬럼 확인) — 그 몰이 받은 수신동의. NULL = 모름(발송 제외). 쓰기 = `utils/mall-consent.ts upsertStoreConsent` 하나 · 읽기 = 같은 CT `buildSendConsent`(ENV 로 켠 회사만) |
+| **consent_source** | varchar(60) | YES | ★0922 DDL — 동의를 준 출처(예: woocommerce) |
+| **consent_at** | timestamptz | YES | ★0922 DDL — 그 값을 받은 시각 |
+- UNIQUE: `customer_stores_customer_id_store_code_key`(customer_id, store_code)
+- INDEX: `idx_cs_company_store`(company_id, store_code) · `idx_cs_customer`(customer_id)
+- 설계서 = docs/2026-09-22-mall-consent-isolation-design.md · 결정 = DECISIONS D93
+
 ### customers (고객)
 > **유니크 인덱스 (2026-08-14 pg_indexes 실덤프)**: `customers_company_id_phone_key`(company_id, phone) ·
 > `idx_customers_company_store_phone`(company_id, COALESCE(store_code,'__NONE__'), phone) ·

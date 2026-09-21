@@ -155,7 +155,8 @@ export async function isUserIsolationEnabled(companyId: string): Promise<boolean
 
 /**
  * 격리 ON 회사의 수신거부 삭제 — **본인(user_id) 행만** 지운다. H2: 한 계정(몰)의 삭제가 다른 계정의 거부를 풀지 않는다.
- * 관리자 사본(등록 때 함께 들어간 admin 행)은 그 번호에 다른 사용자 행이 하나도 안 남을 때만 함께 지운다.
+ * ⛔ 관리자 행은 지우지 않는다(Codex 0922 R1) — 관리자 행이 등록 사본인지 관리자 자신의 독립된 거부(자기 080 직접 매칭 등)인지
+ *    행만 봐서는 구별할 수 없다. 사본으로 보고 지우면 관리자 발송에서 그 번호의 제외가 풀린다. 남기는 쪽은 "덜 보낸다"뿐이다.
  * ⛔ customers.sms_opt_in 을 되살리지 않는다(회사 전체 값이라 다른 몰까지 켠다 — 0922 실측한 과발송 방향).
  * @param phones 비우면(undefined) 그 사용자의 전체
  * @returns 실제로 지운 번호(중복 제거)
@@ -170,20 +171,7 @@ export async function deleteIsolatedUnsubscribes(companyId: string, userId: stri
         `DELETE FROM unsubscribes WHERE company_id = $1::uuid AND user_id = $2::uuid RETURNING phone`,
         [companyId, userId]
       );
-  const deleted = Array.from(new Set(own.rows.map((r: any) => r.phone as string)));
-  if (deleted.length === 0) return deleted;
-  await query(
-    `DELETE FROM unsubscribes a
-      USING users au
-      WHERE a.company_id = $1::uuid AND a.user_id = au.id AND au.user_type = 'admin'
-        AND a.phone = ANY($2::varchar[])
-        AND NOT EXISTS (
-          SELECT 1 FROM unsubscribes o JOIN users ou ON ou.id = o.user_id
-           WHERE o.company_id = $1::uuid AND o.phone = a.phone AND ou.user_type <> 'admin'
-        )`,
-    [companyId, deleted]
-  );
-  return deleted;
+  return Array.from(new Set(own.rows.map((r: any) => r.phone as string)));
 }
 
 export class IsolationBlockedError extends Error {
