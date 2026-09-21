@@ -18,7 +18,8 @@
 
 import {
   registerSnsAdapter, readSnsJson, SnsAdapterError,
-  type ISnsAdapter, type SnsOAuthCreds, type SnsTokenResult, type SnsAccountProfile,
+  type ISnsPublishAdapter, type SnsOAuthCreds, type SnsTokenResult, type SnsAccountProfile,
+  type SnsPublishRequest, type SnsContainerResult, type SnsContainerStatus, type SnsFetchedPost,
 } from './adapter';
 
 const GRAPH = 'https://graph.instagram.com';
@@ -37,7 +38,7 @@ function expiresAtFrom(expiresIn: unknown): Date | null {
   return new Date(Date.now() + sec * 1000);
 }
 
-export const instagramAdapter: ISnsAdapter = {
+export const instagramAdapter: ISnsPublishAdapter = {
   platform: 'instagram',
   label: '인스타그램',
   available: true,
@@ -58,6 +59,11 @@ export const instagramAdapter: ISnsAdapter = {
     verify: 'immediate',
     ephemeral: false,
     mediaTransfer: 'pull_url',
+    // ★ §1-1 실측 = 비율 4:5 ~ 1.91:1 · 폭 320~1440 · 8MB · JPEG.
+    imageAspectMin: 0.8,      // 4:5
+    imageAspectMax: 1.91,     // 1.91:1
+    imageMaxWidth: 1440,
+    imageMaxBytes: 8 * 1024 * 1024,
   },
 
   buildAuthorizeUrl(creds: SnsOAuthCreds, state: string): string {
@@ -153,6 +159,121 @@ export const instagramAdapter: ISnsAdapter = {
       refreshToken: null,
       expiresAt: expiresAtFrom(body?.expires_in),
       scope: typeof body?.permissions === 'string' ? body.permissions : null,
+    };
+  },
+
+  // ───────────────────────── 게시 (§1-4 실측 경로 그대로) ─────────────────────────
+
+  /**
+   * 컨테이너 생성. 사진이 2장 이상이면 **캐러셀** 2단계다(§1-4 실측).
+   *   ①자식마다 `is_carousel_item=true` ②부모 `media_type=CAROUSEL` + `children=id1,id2`(쉼표)
+   */
+  async createPost(req: SnsPublishRequest): Promise<SnsContainerResult> {
+    if (req.mediaUrls.length === 0) {
+      throw new SnsAdapterError('instagram', 'media:empty', '올릴 사진이 없습니다.');
+    }
+    const base = `${GRAPH}/${req.externalAccountId}/media`;
+
+    // 단일
+    if (req.mediaUrls.length === 1) {
+      const form = new URLSearchParams({
+        image_url: req.mediaUrls[0],
+        caption: req.caption,
+        access_token: req.accessToken,
+      });
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+      });
+      const body = await readSnsJson('instagram', res, 'container');
+      const id = String(body?.id || '');
+      if (!id) throw new SnsAdapterError('instagram', 'container:empty', '컨테이너 응답에 id 가 없습니다.', null, body);
+      // 피드는 실측상 바로 FINISHED 였지만, 상태는 워커가 한 번 확인하고 넘어간다(즉시 게시로 건너뛰지 않는다).
+      return { containerId: id, ready: false };
+    }
+
+    // 캐러셀 — 자식 먼저
+    const children: string[] = [];
+    for (const url of req.mediaUrls) {
+      const form = new URLSearchParams({
+        image_url: url,
+        is_carousel_item: 'true',
+        access_token: req.accessToken,
+      });
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+      });
+      const body = await readSnsJson('instagram', res, 'carousel-item');
+      const id = String(body?.id || '');
+      if (!id) throw new SnsAdapterError('instagram', 'carousel-item:empty', '캐러셀 항목 응답에 id 가 없습니다.', null, body);
+      children.push(id);
+    }
+
+    const parentForm = new URLSearchParams({
+      media_type: 'CAROUSEL',
+      children: children.join(','),
+      caption: req.caption,
+      access_token: req.accessToken,
+    });
+    const parentRes = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: parentForm.toString(),
+    });
+    const parentBody = await readSnsJson('instagram', parentRes, 'carousel');
+    const parentId = String(parentBody?.id || '');
+    if (!parentId) throw new SnsAdapterError('instagram', 'carousel:empty', '캐러셀 응답에 id 가 없습니다.', null, parentBody);
+    return { containerId: parentId, ready: false };
+  },
+
+  /** `status_code` 를 축으로 본다(§1-4 = `status` 도 같은 값이 오지만 정식 축은 `status_code`). */
+  async pollContainer(req: SnsPublishRequest, containerId: string): Promise<SnsContainerStatus> {
+    const q = new URLSearchParams({ fields: 'status_code,status', access_token: req.accessToken });
+    const res = await fetch(`${GRAPH}/${containerId}?${q.toString()}`);
+    const body = await readSnsJson('instagram', res, 'container-status');
+    const raw = String(body?.status_code || '');
+    return {
+      raw,
+      ready: raw === 'FINISHED',
+      // ERROR·EXPIRED 는 되살릴 수 없다 — 워커가 폐기하고 다시 만든다(키는 불변).
+      failed: raw === 'ERROR' || raw === 'EXPIRED',
+    };
+  },
+
+  async publish(req: SnsPublishRequest, containerId: string): Promise<{ platformPostId: string }> {
+    const form = new URLSearchParams({ creation_id: containerId, access_token: req.accessToken });
+    const res = await fetch(`${GRAPH}/${req.externalAccountId}/media_publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const body = await readSnsJson('instagram', res, 'publish');
+    const id = String(body?.id || '');
+    if (!id) throw new SnsAdapterError('instagram', 'publish:empty', '게시 응답에 id 가 없습니다.', null, body);
+    return { platformPostId: id };
+  },
+
+  /**
+   * 재조회 — 성공을 확정하는 유일한 근거(§2-6).
+   * ⛔ `media_url` 은 만료 파라미터가 붙은 CDN 주소라 **돌려주지 않는다**(§1-4). 저장 대상은 `permalink` 뿐이다.
+   */
+  async fetchPost(req: SnsPublishRequest, platformPostId: string): Promise<SnsFetchedPost> {
+    const q = new URLSearchParams({ fields: 'id,permalink,media_type,timestamp', access_token: req.accessToken });
+    const res = await fetch(`${GRAPH}/${platformPostId}?${q.toString()}`);
+    if (res.status === 404 || res.status === 400) {
+      // 지워졌거나 접근할 수 없다 — 대조 워커가 "게시물 없음"으로 읽는다.
+      return { exists: false, permalink: null };
+    }
+    const body = await readSnsJson('instagram', res, 'fetch');
+    const id = String(body?.id || '');
+    if (!id) return { exists: false, permalink: null };
+    return {
+      exists: true,
+      permalink: body?.permalink ? String(body.permalink) : null,
+      raw: { media_type: body?.media_type, timestamp: body?.timestamp },
     };
   },
 };

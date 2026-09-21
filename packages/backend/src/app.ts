@@ -27,6 +27,8 @@ import salesOutreachRoutes from './routes/sales-outreach'; // ★ 2026-08-24 AI 
 import outreachPublicRoutes from './routes/outreach-public'; // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증 · noindex · 만료)
 import { startAgencySendWorker } from './utils/agency-send-worker';
 import { startSnsTokenWorker } from './utils/sns-token-worker';   // ★ 2026-09-20 SNS 토큰 갱신(S1)
+import { startSnsPublishWorker } from './utils/sns-publish-worker';       // ★ 2026-09-21 SNS 발행(S3)
+import { startSnsReconcileWorker } from './utils/sns-reconcile-worker';   // ★ 2026-09-21 SNS 대조(S3)
 import { startAgencySendMailWorker } from './utils/agency-send-mail-worker';
 import { startSalesOutreachSweeper } from './utils/sales-outreach-sweeper'; // ★ 2026-08-24 아웃리치 sweeper
 // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 API (Performance 카드 + 메일 양쪽 활용)
@@ -602,6 +604,14 @@ app.listen(PORT, () => {
   // ★ 2026-09-20 SNS 토큰 갱신 워커 (6시간 cron) — 설계서 §3-4.
   //   ENV(SNS_COMPANY_IDS)가 비면 시작하지 않는다. 테이블이 없으면 조용히 넘어간다.
   startSnsTokenWorker();
+
+  // ★ 2026-09-21 SNS 발행 워커 (30초 cron) — 설계서 §3-4.
+  //   ⛔ 첫 tick 은 대기 건수만 세고 **게시하지 않는다**(배포 직후 밀린 예약이 한꺼번에 나가는 것을 막는 소급 가드 · §2-15).
+  startSnsPublishWorker();
+
+  // ★ 2026-09-21 SNS 대조 워커 (30분 cron) — 좌초 회수 · 접수분 확인 · 삭제 감지.
+  //   진실이 두 곳(우리 원장 ↔ 플랫폼)이라 안전망 워커를 함께 둔다(6원칙 ③).
+  startSnsReconcileWorker();
 
   // ★ 2026-08-26 대행발송 이메일 접수 워커 (1분 폴링 · POP3S) — 설계서 §18.
   //   AGENCY_MAIL_ENABLED + 계정 ENV가 없으면 부팅 로그 1회만 남기고 시작하지 않는다(회신 없는 접수 금지).

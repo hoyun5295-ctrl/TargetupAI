@@ -18,6 +18,8 @@ import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
 import SnsChannelLogo from '../components/sns/SnsChannelLogo';
 import SnsChannelModal from '../components/sns/SnsChannelModal';
+import SnsComposer from '../components/sns/SnsComposer';
+import SnsHistory from '../components/sns/SnsHistory';
 import { snsBrandColor } from '../constants/sns-brand';
 import {
   SNS_ACCOUNT_BADGE, liveSnsAccounts, snsAccountAbility,
@@ -42,6 +44,8 @@ export default function SnsPage() {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [popupBlockedUrl, setPopupBlockedUrl] = useState<string | null>(null);
   const [openChannel, setOpenChannel] = useState<string | null>(null);
+  /** 게시 뒤 이력을 다시 읽게 하는 신호. 값이 바뀌는 것만 의미가 있다. */
+  const [historyKey, setHistoryKey] = useState(0);
 
   /** 이 화면이 연 승인 창의 state. 다른 창이 보낸 메시지를 무시하는 근거. */
   const pendingNonce = useRef<string | null>(null);
@@ -319,12 +323,23 @@ export default function SnsPage() {
 
             <p className={`${OUI_SRC} mt-3`}>Data source: 우리 기록과 채널에서 다시 확인한 결과</p>
 
-            <section className={`${OUI_CARD} p-4 mt-5`}>
-              <p className="text-xs text-white/50 leading-relaxed break-keep">
-                계정을 연결하면 글과 사진을 올릴 준비가 끝납니다. 작성 화면은 곧 이 아래에 열립니다.
-                인스타그램은 프로페셔널(비즈니스·크리에이터) 계정만 연결됩니다.
-              </p>
-            </section>
+            {/* 세로 스택 2·3구역 — 작성 · 이력(§4-1) */}
+            <div className="mt-8 space-y-8">
+              <SnsComposer
+                specs={specs}
+                accounts={accounts}
+                onPublished={() => setHistoryKey((k) => k + 1)}
+              />
+              <SnsHistory specs={specs} reloadKey={historyKey} />
+            </div>
+
+            {accounts.every((a) => a.status !== 'active') && (
+              <section className={`${OUI_CARD} p-4 mt-6`}>
+                <p className="text-xs text-white/50 leading-relaxed break-keep">
+                  채널을 하나 연결하면 바로 올릴 수 있어요. 인스타그램은 프로페셔널(비즈니스·크리에이터) 계정만 연결됩니다.
+                </p>
+              </section>
+            )}
           </>
         )}
       </main>

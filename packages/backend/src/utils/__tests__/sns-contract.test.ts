@@ -16,6 +16,11 @@ import {
 } from '../sns-constants';
 import { signSnsState, verifySnsState } from '../sns-auth-state';
 import { listSnsAdapters, getSnsAdapter } from '../sns';
+import { planSnsFit } from '../sns-media-fit';
+import { buildSnsCaption, normalizeSnsTags, tightestCaptionChannel } from '../sns-caption-rules';
+import { buildSnsIdempotencyKey } from '../sns-idempotency';
+import { signSnsMediaToken, verifySnsMediaToken, isSnsMediaUrlLive } from '../sns-signed-media';
+import { snsTargetBadge, canRetrySnsTarget, hasSnsInFlight } from '../../../../frontend/src/utils/sns-view';
 
 const FRONT = resolve(__dirname, '../../../../frontend/src');
 const SNS_PAGE = readFileSync(resolve(FRONT, 'pages/SnsPage.tsx'), 'utf8');
@@ -214,6 +219,210 @@ describe('허브 타일 계약 (§3-11)', () => {
   it('기한 넘긴 NEW 배지가 남아 있지 않다 — 라벨 3단 정책', () => {
     expect(MODULES).not.toMatch(/label: '마케팅 플래너'[^}]*badge: 'NEW'/);
     expect(MODULES).not.toMatch(/label: '이미지 스튜디오'[^}]*badge: 'NEW'/);
+  });
+});
+
+describe('⛔ 원본을 멋대로 자르지 않는다 (Harold 확정 2026-09-21)', () => {
+  const ig = { imageAspectMin: 0.8, imageAspectMax: 1.91, imageMaxWidth: 1440, imageMaxBytes: 8 * 1024 * 1024 };
+
+  it('허용 범위 안이면 **아무것도 하지 않는다** — 손대는 것이 기본이 아니다', () => {
+    for (const [w, h] of [[1080, 1080], [1080, 1350], [1200, 628], [1000, 1250]]) {
+      const plan = planSnsFit(w, h, ig);
+      expect(plan.needsAspectChange, `${w}x${h} 는 범위 안인데 비율을 바꿨다`).toBe(false);
+      expect(plan.notice).toBe('');   // 하지 않은 일을 설명하지 않는다
+    }
+  });
+
+  it('범위 밖이어도 **가장 가까운 경계**로 간다 — 정사각으로 보내지 않는다(여백 최소)', () => {
+    // 3:4 = 0.75 세로 포스터 → 1:1(1.0) 이 아니라 4:5(0.8)
+    const plan = planSnsFit(1200, 1600, ig);
+    expect(plan.needsAspectChange).toBe(true);
+    expect(plan.targetAspect).toBeCloseTo(0.8, 5);
+    expect(plan.targetAspect).not.toBeCloseTo(1.0, 5);
+
+    // 초광각 3:1 = 3.0 → 1.91
+    const wide = planSnsFit(3000, 1000, ig);
+    expect(wide.targetAspect).toBeCloseTo(1.91, 5);
+  });
+
+  it('기본 방식은 언제나 pad — crop 은 명시해야만 나온다', () => {
+    expect(planSnsFit(1200, 1600, ig).mode).toBe('pad');
+    expect(planSnsFit(1200, 1600, ig).notice).toContain('잘리지 않아요');
+    expect(planSnsFit(1200, 1600, ig, 'crop').mode).toBe('crop');
+  });
+
+  it('캔버스가 원본을 통째로 담는다 — 어느 변도 원본보다 작지 않다(= 잘림 0)', () => {
+    for (const [w, h] of [[1200, 1600], [3000, 1000], [400, 900]]) {
+      const plan = planSnsFit(w, h, ig);
+      if (!plan.needsAspectChange || plan.resized) continue;
+      expect(plan.canvasWidth).toBeGreaterThanOrEqual(w);
+      expect(plan.canvasHeight).toBeGreaterThanOrEqual(h);
+    }
+  });
+
+  it('워커가 게시본을 구울 때 crop 을 기본으로 쓰지 않는다(소스 스캔)', () => {
+    const WORKER = readFileSync(resolve(__dirname, '../sns-publish-worker.ts'), 'utf8');
+    expect(WORKER).toMatch(/mode: 'pad'/);
+    expect(WORKER).not.toMatch(/mode: 'crop'/);
+  });
+
+  it('화면이 "잘린다"고 말하지 않는다 — 잘리지 않으므로', () => {
+    const COMPOSER = readFileSync(resolve(FRONT, 'components/sns/SnsComposer.tsx'), 'utf8');
+    // 사용자에게 보이는 문구에 "잘" 이 들어가는 곳은 "잘리지 않아요" 뿐이어야 한다.
+    const scary = [...COMPOSER.matchAll(/'[^'\n]*잘[^'\n]*'/g)].map((m) => m[0]);
+    expect(scary.filter((s) => !s.includes('잘리지 않아요'))).toEqual([]);
+  });
+});
+
+describe('캡션 규칙 CT', () => {
+  const igSpec = { maxCaptionChars: 2200, maxTags: 30 };
+  const xSpec = { maxCaptionChars: 280, maxTags: 10 };
+
+  it('⛔ 상한을 넘어도 **자르지 않는다** — 넘었다는 사실만 돌려준다(고객 문안 불변)', () => {
+    const long = 'ㄱ'.repeat(400);
+    const r = buildSnsCaption({ body: long, tags: [], aiNotice: false }, xSpec);
+    expect(r.ok).toBe(false);
+    expect(r.overBy).toBeGreaterThan(0);
+    expect(r.text).toContain(long);           // 원문이 그대로 들어 있다
+    expect([...r.text].length).toBe(r.length);
+  });
+
+  it('태그는 상한까지만 싣고 나머지는 알린다(잘라내는 것이 아니라 안 싣는 것)', () => {
+    const tags = Array.from({ length: 15 }, (_, i) => `태그${i}`);
+    const r = buildSnsCaption({ body: '글', tags, aiNotice: false }, xSpec);
+    expect(r.droppedTags).toHaveLength(5);
+    expect(r.text).not.toContain('#태그10');
+  });
+
+  it('AI 표시는 끌 수 없고 글자수에 포함된다(§3-9)', () => {
+    const r = buildSnsCaption({ body: '글', tags: [], aiNotice: true }, igSpec);
+    expect(r.aiNoticeApplied).toBe(true);
+    expect(r.text).toContain('AI로 생성된 이미지입니다');
+    const without = buildSnsCaption({ body: '글', tags: [], aiNotice: false }, igSpec);
+    expect(r.length).toBeGreaterThan(without.length);
+  });
+
+  it('같은 글이 채널마다 다르게 판정된다 — 기준은 가장 빡빡한 채널', () => {
+    const body = 'ㄱ'.repeat(500);
+    expect(buildSnsCaption({ body, tags: [], aiNotice: false }, igSpec).ok).toBe(true);
+    expect(buildSnsCaption({ body, tags: [], aiNotice: false }, xSpec).ok).toBe(false);
+    const tightest = tightestCaptionChannel([
+      { platform: 'instagram', label: '인스타그램', spec: igSpec },
+      { platform: 'x', label: 'X', spec: xSpec },
+    ]);
+    expect(tightest?.platform).toBe('x');
+  });
+
+  it('태그 형식 위반은 싣지 않는다', () => {
+    expect(normalizeSnsTags(['좋아요', '#중복', '중복', 'bad tag!', ''])).toEqual(['좋아요', '중복']);
+  });
+});
+
+describe('멱등키 (§3-6)', () => {
+  const company = '11111111-2222-3333-4444-555555555555';
+  const target = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const material = { caption: '글 #태그', mediaIds: ['m1', 'm2'], format: 'carousel' };
+
+  it('94자 고정 — 설계서가 못 박은 값', () => {
+    expect(buildSnsIdempotencyKey(company, target, material)).toHaveLength(94);
+  });
+
+  it('같은 내용이면 항상 같은 키(랜덤 0) · 내용이 바뀌면 다른 키', () => {
+    const a = buildSnsIdempotencyKey(company, target, material);
+    expect(buildSnsIdempotencyKey(company, target, material)).toBe(a);
+    expect(buildSnsIdempotencyKey(company, target, { ...material, caption: '다른 글' })).not.toBe(a);
+    // 순서가 바뀌면 다른 게시물이다
+    expect(buildSnsIdempotencyKey(company, target, { ...material, mediaIds: ['m2', 'm1'] })).not.toBe(a);
+  });
+});
+
+describe('서명 미디어 URL (§3-7 · 불변 14)', () => {
+  const base = {
+    targetId: '11111111-2222-3333-4444-555555555555',
+    mediaId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    companyId: '99999999-8888-7777-6666-555555555555',
+    salt: 's',
+  };
+  const SEC = 'media-secret';
+
+  it('서명 왕복 · 변조 거부', () => {
+    const token = signSnsMediaToken(base, SEC);
+    expect(verifySnsMediaToken(token, SEC)).toEqual(base);
+    expect(verifySnsMediaToken(`${token}x`, SEC)).toBeNull();
+    expect(verifySnsMediaToken(token, 'other')).toBeNull();
+  });
+
+  it('게시가 확인되면 **즉시 죽는다** — 서명이 통과해도 상태가 막는다', () => {
+    const now = new Date();
+    const live = { status: 'submitted', container_created_at: now, created_at: now, verified_at: null };
+    expect(isSnsMediaUrlLive(live, now)).toBe(true);
+    expect(isSnsMediaUrlLive({ ...live, verified_at: now }, now)).toBe(false);
+    expect(isSnsMediaUrlLive({ ...live, status: 'failed' }, now)).toBe(false);
+    expect(isSnsMediaUrlLive({ ...live, status: 'cancelled' }, now)).toBe(false);
+    expect(isSnsMediaUrlLive({ ...live, status: 'scheduled' }, now)).toBe(false);
+  });
+
+  it('절대 상한 36시간을 넘으면 상태와 무관하게 죽는다', () => {
+    const now = new Date();
+    const old = new Date(now.getTime() - 37 * 60 * 60 * 1000);
+    expect(isSnsMediaUrlLive({ status: 'submitted', container_created_at: null, created_at: old, verified_at: null }, now)).toBe(false);
+  });
+});
+
+describe('이력 배지 판정 (§3-5)', () => {
+  const base = {
+    targetId: 't', platform: 'instagram', status: 'draft',
+    permalink: null, verifiedAt: null, deletedOnPlatformAt: null,
+    verifyGaveUpAt: null, platformPostId: null, lastError: null, lastErrorCode: null,
+  };
+
+  it('⛔ 올라갔을 가능성이 있으면 "다시 시도"를 열지 않는다(이중 게시 차단)', () => {
+    const submittedWithId = { ...base, status: 'submitted', platformPostId: 'p1' };
+    expect(snsTargetBadge(submittedWithId).label).toBe('올렸고 확인 중');
+    expect(canRetrySnsTarget(submittedWithId)).toBe(false);
+    // 게시 id 를 못 받은 실패만 재시도 대상이다
+    expect(canRetrySnsTarget({ ...base, status: 'failed' })).toBe(true);
+    expect(canRetrySnsTarget({ ...base, status: 'failed', platformPostId: 'p1' })).toBe(false);
+  });
+
+  it('증거 컬럼이 상태보다 앞선다 — 삭제 감지·확인 포기·재연결', () => {
+    expect(snsTargetBadge({ ...base, status: 'published', deletedOnPlatformAt: 'x' }).label).toBe('게시물 없음');
+    expect(snsTargetBadge({ ...base, status: 'submitted', platformPostId: 'p', verifyGaveUpAt: 'x' }).label).toBe('올렸고 확인 못함');
+    expect(snsTargetBadge({ ...base, status: 'failed', lastErrorCode: 'REAUTH_REQUIRED' }).label).toBe('계정 확인 필요');
+  });
+
+  it('진행 중이 없으면 폴링하지 않는다', () => {
+    expect(hasSnsInFlight([{ targets: [{ ...base, status: 'published', verifiedAt: 'x' }] }])).toBe(false);
+    expect(hasSnsInFlight([{ targets: [{ ...base, status: 'submitted' }] }])).toBe(true);
+  });
+});
+
+describe('워커 계약 (§3-4 · §2-8 · §2-15)', () => {
+  const WORKER = readFileSync(resolve(__dirname, '../sns-publish-worker.ts'), 'utf8');
+  const RECON = readFileSync(resolve(__dirname, '../sns-reconcile-worker.ts'), 'utf8');
+
+  it('이중 게시 3겹 — 선점·소유권·게시 직전 재확인', () => {
+    expect(WORKER).toMatch(/FOR UPDATE SKIP LOCKED/);
+    expect(WORKER).toMatch(/lock_token = \$2::uuid/);            // 소유권 확인하며 쓴다
+    expect(WORKER).toMatch(/stage = 'publish_called'/);           // 게시 직전 재확인 자리
+  });
+
+  it('소급 게시 0 — 첫 tick 은 세기만 하고, 지난 예약은 선점 전에 닫는다', () => {
+    expect(WORKER).toMatch(/armed/);
+    // 주석이 아니라 **실행되는 SQL** 의 순서를 본다 — stale 정리가 선점 UPDATE 보다 앞에 있어야 한다.
+    const claimSql = WORKER.indexOf(`SET status = 'claimed', lock_token`);
+    expect(claimSql, '선점 UPDATE 를 못 찾으면 이 게이트가 죽은 것이다').toBeGreaterThan(-1);
+    expect(WORKER.indexOf('SCHEDULE_EXPIRED')).toBeLessThan(claimSql);
+  });
+
+  it('대조 워커는 게시 호출까지 간 행을 scheduled 로 되돌리지 않는다(이중 게시 차단)', () => {
+    expect(RECON).toMatch(/stage = 'publish_called'[\s\S]*?status = 'submitted'|status = 'submitted'[\s\S]*?stage = 'publish_called'/);
+    expect(RECON).toMatch(/stage IS NULL OR stage <> 'publish_called'/);
+  });
+
+  it('종결·확정은 대조 조회에서 뺀다(BUGS 818행 되돌림 회귀 방지)', () => {
+    expect(RECON).toMatch(/verify_gave_up_at IS NULL/);
+    expect(RECON).toMatch(/deleted_on_platform_at IS NULL/);
   });
 });
 

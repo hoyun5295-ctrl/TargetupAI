@@ -3,21 +3,24 @@
  *
  * 설계 SoT = docs/2026-09-17-sns-publish-design.md §3-3 · 플랫폼 사실 §1-1.
  *
- * ⚠ **이 파일의 endpoint·필드명은 전부 미검증이다.** 인스타(§1-4)와 달리 raw 1건을 아직 못 받았다.
- *   설계서 §7 ① 의 남은 항목이며, 확정 순서는 인스타 어댑터가 S1 게이트를 통과한 뒤다.
- *   ⛔ 실측 전에는 이 어댑터로 고객사를 열지 않는다 — 1차-A 실측 대상은 인스타가 먼저다.
+ * ★ **OAuth 왕복 확정(2026-09-21 · 자사 Threads 연결 1건 성공 · 설계서 §1-5).**
+ *   아래 endpoint·scope·필드명이 **문서 기준 그대로 동작했다** — authorize 주소가 `threads.net`(인스타는
+ *   `instagram.com`)이고, 토큰 교환은 `graph.threads.net`, 장기 교환 `grant_type=th_exchange_token` 이다.
+ *   `/v1.0/me` 가 `username`·`threads_profile_picture_url` 을 돌려주는 것도 화면 카드로 확인했다.
+ *   ⛔ 값을 바꾸려면 새 실측이 있어야 한다. **게시 경로(createPost·publish)는 여전히 미검증이다 — S3 에서 raw 로 확정한다.**
  *
  * 확인된 것(§1-1 · 공식 문서 열람):
  *   - **별도 권한** `threads_basic` · `threads_content_publish`(인스타 권한과 겹치지 않는다)
  *   - 24시간 250건 · 텍스트 500자 · 이미지·영상·캐러셀 2~20장
  *   - 토큰 1시간 → 장기 60일(갱신 endpoint 있음)
- *   - 이용 사례는 **인스타와 같은 Meta 앱에 공존**한다(§1-4 실측). 다만 앱 ID·시크릿이 따로 발급된다는
- *     문서 기술이 있어 ENV 를 `THREADS_CLIENT_ID` 계열로 분리해 둔다.
+ *   - 이용 사례는 **인스타와 같은 Meta 앱에 공존**한다(§1-4 실측). **앱 ID·시크릿은 실제로 따로 발급된다**
+ *     (0921 실측 = Threads `1078487358416548` ≠ Instagram `2597365514118636`) → ENV 분리가 맞았다.
  */
 
 import {
   registerSnsAdapter, readSnsJson, SnsAdapterError,
-  type ISnsAdapter, type SnsOAuthCreds, type SnsTokenResult, type SnsAccountProfile,
+  type ISnsPublishAdapter, type SnsOAuthCreds, type SnsTokenResult, type SnsAccountProfile,
+  type SnsPublishRequest, type SnsContainerResult, type SnsContainerStatus, type SnsFetchedPost,
 } from './adapter';
 
 const GRAPH = 'https://graph.threads.net';
@@ -32,7 +35,7 @@ function expiresAtFrom(expiresIn: unknown): Date | null {
   return new Date(Date.now() + sec * 1000);
 }
 
-export const threadsAdapter: ISnsAdapter = {
+export const threadsAdapter: ISnsPublishAdapter = {
   platform: 'threads',
   label: 'Threads',
   available: true,
@@ -51,6 +54,12 @@ export const threadsAdapter: ISnsAdapter = {
     verify: 'immediate',
     ephemeral: false,
     mediaTransfer: 'pull_url',
+    // ⚠ Threads 는 이미지 비율 제약을 문서에 명시하지 않는다(미검증). **넓게 두어 원본을 손대지 않는 쪽으로 둔다** —
+    //   모르는 채널에 좁은 범위를 씌우면 멀쩡한 사진에 여백이 붙는다. 게시 실측에서 거부 사유가 나오면 그때 좁힌다.
+    imageAspectMin: 0.4,
+    imageAspectMax: 2.5,
+    imageMaxWidth: 1440,
+    imageMaxBytes: 8 * 1024 * 1024,
   },
 
   buildAuthorizeUrl(creds: SnsOAuthCreds, state: string): string {
@@ -138,6 +147,80 @@ export const threadsAdapter: ISnsAdapter = {
       expiresAt: expiresAtFrom(body?.expires_in),
       scope: null,
     };
+  },
+
+  // ───────────────────────── 게시 (⚠ 전부 미검증 · S3 raw 로 확정) ─────────────────────────
+  // 구조는 인스타와 같은 2단계(컨테이너 → 게시)이나 **경로 이름이 다르다**(`/threads`·`/threads_publish`).
+  // 캡션 파라미터도 `caption` 이 아니라 `text` 다. 실측에서 다르면 이 블록만 고친다.
+
+  async createPost(req: SnsPublishRequest): Promise<SnsContainerResult> {
+    const base = `${GRAPH}/${req.externalAccountId}/threads`;
+
+    const postForm = async (params: Record<string, string>, step: string): Promise<string> => {
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ ...params, access_token: req.accessToken }).toString(),
+      });
+      const body = await readSnsJson('threads', res, step);
+      const id = String(body?.id || '');
+      if (!id) throw new SnsAdapterError('threads', `${step}:empty`, '응답에 id 가 없습니다.', null, body);
+      return id;
+    };
+
+    if (req.mediaUrls.length === 0) {
+      // 텍스트만 — Threads 는 글만 올릴 수 있다(인스타와 다른 점).
+      return { containerId: await postForm({ media_type: 'TEXT', text: req.caption }, 'container'), ready: false };
+    }
+    if (req.mediaUrls.length === 1) {
+      return {
+        containerId: await postForm({ media_type: 'IMAGE', image_url: req.mediaUrls[0], text: req.caption }, 'container'),
+        ready: false,
+      };
+    }
+
+    const children: string[] = [];
+    for (const url of req.mediaUrls) {
+      children.push(await postForm({ media_type: 'IMAGE', image_url: url, is_carousel_item: 'true' }, 'carousel-item'));
+    }
+    return {
+      containerId: await postForm({ media_type: 'CAROUSEL', children: children.join(','), text: req.caption }, 'carousel'),
+      ready: false,
+    };
+  },
+
+  async pollContainer(req: SnsPublishRequest, containerId: string): Promise<SnsContainerStatus> {
+    const q = new URLSearchParams({ fields: 'status,error_message', access_token: req.accessToken });
+    const res = await fetch(`${GRAPH}/${containerId}?${q.toString()}`);
+    const body = await readSnsJson('threads', res, 'container-status');
+    const raw = String(body?.status || '');
+    return {
+      raw,
+      ready: raw === 'FINISHED',
+      failed: raw === 'ERROR' || raw === 'EXPIRED',
+    };
+  },
+
+  async publish(req: SnsPublishRequest, containerId: string): Promise<{ platformPostId: string }> {
+    const res = await fetch(`${GRAPH}/${req.externalAccountId}/threads_publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ creation_id: containerId, access_token: req.accessToken }).toString(),
+    });
+    const body = await readSnsJson('threads', res, 'publish');
+    const id = String(body?.id || '');
+    if (!id) throw new SnsAdapterError('threads', 'publish:empty', '게시 응답에 id 가 없습니다.', null, body);
+    return { platformPostId: id };
+  },
+
+  async fetchPost(req: SnsPublishRequest, platformPostId: string): Promise<SnsFetchedPost> {
+    const q = new URLSearchParams({ fields: 'id,permalink,timestamp', access_token: req.accessToken });
+    const res = await fetch(`${GRAPH}/${platformPostId}?${q.toString()}`);
+    if (res.status === 404 || res.status === 400) return { exists: false, permalink: null };
+    const body = await readSnsJson('threads', res, 'fetch');
+    const id = String(body?.id || '');
+    if (!id) return { exists: false, permalink: null };
+    return { exists: true, permalink: body?.permalink ? String(body.permalink) : null, raw: { timestamp: body?.timestamp } };
   },
 };
 

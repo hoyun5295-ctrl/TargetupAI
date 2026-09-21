@@ -89,8 +89,15 @@ async function edgeStats(buf: Buffer): Promise<{ rgb: [number, number, number]; 
   return { rgb: mean.map(Math.round) as [number, number, number], deviation: Math.sqrt(variance) };
 }
 
-/** 비율 캔버스로 굽는다. `crop`이면 꽉 채우고 넘치는 가장자리를 자른다(편집기의 "채우기" 선택 그대로). */
-async function fitToCanvas(buf: Buffer, canvasW: number, canvasH: number, mode: FitMode): Promise<Buffer> {
+/**
+ * 비율 캔버스로 굽는다. `crop`이면 꽉 채우고 넘치는 가장자리를 자른다(편집기의 "채우기" 선택 그대로).
+ *
+ * ★ 2026-09-21 export 로 열었다 — SNS 게시본 확정(`sns-media.ts`)이 같은 판정을 써야 한다.
+ *   여백을 단색으로 채울지 블러로 채울지는 **사진을 보고 서버가 고르는 것**이고(0908 비교 캡처로 확정),
+ *   그 판정을 SNS 에서 다시 짜면 같은 사진이 화면마다 다르게 구워진다.
+ *   ⛔ 이 함수는 순수 변환이다. 캐시·경로·서빙 규칙은 이 파일의 다른 함수가 갖는다.
+ */
+export async function fitToCanvas(buf: Buffer, canvasW: number, canvasH: number, mode: FitMode): Promise<Buffer> {
   if (mode === 'crop') {
     return sharp(buf).resize({ width: canvasW, height: canvasH, fit: 'cover', position: 'centre' }).toBuffer();
   }

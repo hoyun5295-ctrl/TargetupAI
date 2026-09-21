@@ -3,7 +3,7 @@
 > **이 문서가 소유하는 것** = "SNS 게시"(고객사가 자기 SNS 계정을 연결하고 사진·영상을 올려 AI가 캡션·태그를 채우면 채널을 골라 게시·예약하는 기능)의 설계안 · 불변 원칙 · 계약 · 예정 DDL · 1차/2차 단계 · 실측 게이트 · 미검증 목록 · 회의록. 구현 종결 뒤 기능 상설 문서 `FEATURE-SNS-PUBLISH.md`를 만들고 이 문서는 시점 근거로 남긴다.
 > **발동** = Harold "SNS 자동화 기능 · 재료 넣고 AI 제작 누르면 채널별 규격 맞춰 자동 업로드" → "대행사에 SNS 바이럴까지 맡기는 회사가 많다 · 크레딧으로 고가 요금제 유도" → "당장은 한줄로 자사 SNS 활동(피드부터) · 영상은 밖에서 만들어 올린다 · 외부 영상 도구 API 연동 0 · 태그 자동 부여 + AI 살짝" → **"처음부터 고객사가 자사몰 연동처럼 자기 계정을 연결하는 구조 · 브레인스토밍 전원합의체 · 명칭부터 1·2차 설계 · 회의 뒤 설계서까지"**.
 > **회의** = 2026-09-17 전원합의체(기획·백엔드·프론트엔드·디자이너·회의론자 · 읽기 전용) 1차 의견 → 교차 토론 1라운드 → 회의론자 최종 검증(9개 정정) → 주재자 수렴. 회의록 = §8.
-> **상태** = 설계안 · Harold 검토 대기. 코드 0 · DDL 0 실행.
+> **상태**(★2026-09-21) = **S0~S3 코드 완료.** S0·S1 은 배포·게이트 통과(인스타·Threads 연결 실동작 · 허브 타일 `SNS 채널` 노출 중). **S2·S3 은 코드 완료 · 실측 대기**(게시 1건을 우리 화면과 워커로 관통하는 것이 남은 게이트). DDL 추가 0 — S1 에서 만든 5테이블을 그대로 쓴다. 실측으로 확정된 상수는 §1-4(인스타)·§1-5(Threads)가 소유하며 **문서만 보고 고치지 않는다.**
 > 관련 상설 = [FEATURE-CDP-INTEGRATION.md](FEATURE-CDP-INTEGRATION.md)(자매 화면 · OAuth 배관) · [FEATURE-AI-AUTO-BUILD.md](FEATURE-AI-AUTO-BUILD.md)(2차 합류 · 돈 단위) · [FEATURE-MARKETING-PLANNER.md](FEATURE-MARKETING-PLANNER.md)(2차 합류) · [FEATURE-IMAGE-STUDIO.md](FEATURE-IMAGE-STUDIO.md)(비율 변환 원칙) · [2026-09-01 AI 이미지 표시](2026-09-01-ai-image-notice-design.md)(표시 CT 계약) · [2026-09-14 우커머스](2026-09-14-woocommerce-integration-design.md)(state·콜백 선례).
 
 ---
@@ -87,6 +87,23 @@
 - 3:4 생성 포스터는 `ASPECT_RATIOS`에 `1x1`뿐이라 좌우 여백이 생긴다. §3-7의 `4x5` 추가가 그 여백을 없앤다.
 - **OAuth 왕복 확정(2026-09-20 S1 게이트)** = `https://www.instagram.com/oauth/authorize`(scope `instagram_business_basic,instagram_business_content_publish`) → `POST https://api.instagram.com/oauth/access_token`(form · 단기) → `GET /access_token?grant_type=ig_exchange_token`(장기 60일). 자사 계정 1건이 이 경로로 `active` 까지 갔다. `/me` 가 `profile_picture_url` 을 함께 돌려주는 것도 화면 프로필 사진으로 확인됐다(문서 기준이던 필드가 실측으로 올라섰다). ⛔ **단기 토큰을 저장하면 1시간 뒤 전부 끊긴다** — 장기 교환까지가 한 묶음이다.
 - 삭제 = Instagram API에 피드 게시물 삭제 endpoint가 **없다**. §6-2의 "삭제 감지"는 사람이 앱에서 지운 것을 대조 워커가 알아채는 흐름이며, 그 재조회 오류 형식은 S3에서 확정한다.
+
+### 1-5. Threads 연결 실측 (2026-09-21 · Harold 실행 · 자사 계정 연결 1건 성공)
+
+**문서 기준으로 짠 상수가 전부 맞았다.** 어댑터 값을 바꾸려면 새 실측이 있어야 한다.
+
+| 확인 | 값 |
+|---|---|
+| ⛔ 앱 ID | **인스타와 다르다** — Threads `1078487358416548` ≠ Instagram `2597365514118636`. 같은 Meta 앱에 공존하지만 자격은 별개이므로 ENV 를 `THREADS_CLIENT_*` 로 분리한 것이 맞았다 |
+| authorize | `https://threads.net/oauth/authorize`(인스타는 `instagram.com`) · scope `threads_basic,threads_content_publish` |
+| 토큰 | `POST https://graph.threads.net/oauth/access_token`(단기) → `GET /access_token?grant_type=th_exchange_token`(장기) |
+| 계정 | `GET https://graph.threads.net/v1.0/me?fields=id,username,name,threads_profile_picture_url` — 프로필 사진까지 온다 |
+| 권한 | 게시에 필요한 것은 `threads_basic` + **`threads_content_publish` 둘뿐**. 나머지 9개는 붙이지 않았다(요청한 권한마다 2차 심사 대상이 된다) |
+| 테스터 | 인스타와 같다 — **Threads 테스터 역할 + 초대 수락**이 선행 조건. 앱 역할 화면에 두 줄(Instagram 테스터 · Threads 테스터)이 따로 선다 |
+| ⚠ 제약 | "토큰은 **공개 Threads 계정**에 대해서만 생성 가능"(설정 화면 문구) |
+
+- **콜백 URL 3칸이 전부 필수다.** 리디렉션만 넣으면 저장이 거부된다. 그리고 **리디렉션 칸은 입력만으로 등록되지 않는다** — 아래 뜨는 제안을 클릭해 칩으로 만들어야 "지정"된다(오류 문구 `Redirect URIs: OAuth 리디렉션 URI를 지정해주세요`). 0921 에 이 둘 때문에 저장이 세 번 막혔다.
+- ⛔ **게시 경로는 아직 미검증이다.** 확정된 것은 연결까지이며 `createPost`·`publish` 는 S3 에서 raw 로 확인한다.
 
 ---
 
@@ -360,10 +377,17 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 
 | 단계 | 범위 | 게이트 |
 |---|---|---|
-| **S0 준비**(코드 0) | Meta 개발자 앱(Instagram API with Instagram Login 유스케이스 + Threads 유스케이스) · 한줄로 인스타·Threads 계정 프로페셔널 전환 · 자사 계정 토큰 손으로 1개 → **curl로 게시·재조회·삭제 raw 1건**(채널별) · X 개발자 계정·결제(Harold) · 페이스북 페이지 · `information_schema` 5테이블 부재 확인 | raw 없이는 어댑터 코드 시작 0 |
-| **S1 원장·연결** | DDL 5(`lock_timeout 3s`) · `routes/sns.ts` + 공개 라우터 · `ISnsAdapter` + instagram·threads 어댑터(raw 기준) · OAuth 시작·콜백·복귀 HTML·deauthorize · 토큰 워커 · 계정 카드·연결 구역·한 줄 진행 표시 · 요금제 축 `sns_publish` + ENV + 허브 플래그 endpoint(**타일보다 먼저**) | 자사 계정 `active` 1건 화면 확인 |
-| **S2 미디어·캡션** | `sns_media` 업로드(이미지) · 미리보기 인증 라우트 · 서명 경로 · 게시본 확정 함수(JPEG 재판독) · `ASPECT_RATIOS` 3키 · 캡션 규칙 CT + `specs` · `POST /caption`(토큰 치환 · 세트 부분집합 · 출구 차단기) · 태그 세트 조회·지연 씨앗·편집 절 · 작성 구역 4단 · 확인 창 | 규칙 CT 계약 테스트(specs = 상수 · 상한) |
-| **S3 게시·워커** | `sns_posts`·`sns_post_targets` · 저장·예약·게시·취소·재시도(새 행) · 발행 워커(선점·lock_token·컨테이너 폴링·재조회) · 대조 워커(회수·포기 24h·삭제 감지) · 소급 가드 + 첫 tick 무게시 · 멱등키(1차 실제 기록) · 크레딧 키 2개 호출 자리(값 0) · 이력 목록·배지 사전·상세 모달 · 허브 타일 + 필터 2곳 + 안내 항목 | **실측 1건** = 자사 인스타 피드 1건 → 30초 워커 → `verified_at` → 화면 `게시됨` + permalink → 삭제 → 대조 워커가 `게시물 없음` |
+| **S0 준비**(코드 0) · **★완료 0920** | Meta 개발자 앱(Instagram API with Instagram Login 유스케이스 + Threads 유스케이스) · 한줄로 인스타·Threads 계정 프로페셔널 전환 · 자사 계정 토큰 손으로 1개 → **curl로 게시·재조회·삭제 raw 1건**(채널별) · X 개발자 계정·결제(Harold) · 페이스북 페이지 · `information_schema` 5테이블 부재 확인 | raw 없이는 어댑터 코드 시작 0 → **통과**(게시 1건 실물 · 결과 = §1-4). X·페이스북은 1차-B 로 미룸 |
+| **S1 원장·연결** · **★완료 0920~21 · 배포됨** | DDL 5(`lock_timeout 3s`) · `routes/sns.ts` + 공개 라우터 · `ISnsAdapter` + instagram·threads 어댑터(raw 기준) · OAuth 시작·콜백·복귀 HTML·deauthorize · 토큰 워커 · 계정 카드·연결 구역·한 줄 진행 표시 · 요금제 축 `sns_publish` + ENV + 허브 플래그 endpoint(**타일보다 먼저**) | 자사 계정 `active` 1건 화면 확인 → **통과**(인스타 0920 · Threads 0921 · 연결 해제 정상). 실제 산출물 = 백엔드 9파일 · 프론트 5파일 · 계약 테스트 26건. 스켈레톤 어댑터 2(`facebook_page`·`x` · `available:false`)를 더해 채널 카드 4칸을 서버 목록으로만 그린다 |
+| **S2 미디어·캡션** · **★코드 완료 0921** | `sns_media` 업로드(이미지) · 미리보기 인증 라우트 · 서명 경로 · 게시본 확정 함수(JPEG 재판독) · 캡션 규칙 CT + `specs` · `POST /caption`(토큰 치환 · 세트 부분집합 · 출구 차단기) · 태그 세트(`companies.brand_kit.sns_tag_set` · 신규 테이블 0) · 작성 구역 | 규칙 CT 계약 테스트 통과. ⛔ **비율 처리 방식이 설계보다 강해졌다**(아래 주) · AI 캡션의 **사진 입력은 §9-11 로 분리** |
+| **S3 게시·워커** · **★코드 완료 0921 · 실측 대기** | `sns_posts`·`sns_post_targets` · 저장·예약·게시·취소·재시도(새 행) · 발행 워커(선점·lock_token·컨테이너 폴링·재조회) · 대조 워커(회수·포기 24h·삭제 감지) · 소급 가드 + 첫 tick 무게시 · 멱등키(1차 실제 기록) · 이력 목록·배지 판정 | **실측 1건**(아직) = 자사 인스타 피드 1건 → 30초 워커 → `verified_at` → 화면 `게시됨` + permalink → 삭제 → 대조 워커가 `게시물 없음` |
+
+> **★0921 Harold 확정 — 비율 처리가 설계보다 강해졌다.** 설계 §4-2 는 "기본 = 잘림 표시 뒤 선택"이었으나
+> **"원본을 멋대로 자르지 않는다"** 지시로 다음이 규칙이 됐다(`sns-media-fit.ts` 가 값으로 소유 · 계약 테스트 6건이 잠근다).
+> ① **허용 비율 안이면 아무것도 하지 않는다**(경계에 0.5% 오차 — 1200x628 처럼 0.04% 넘는 사진에 여백을 붙이지 않는다)
+> ② 범위 밖이어도 자르지 않고 **가장 가까운 경계**로 pad 한다(3:4 포스터는 1:1 이 아니라 4:5 로 → 여백 최소)
+> ③ `crop` 은 사용자가 그 채널에 대해 명시적으로 고를 때만. **기본값이 될 수 없다**
+> ④ 화면 문구에 "잘린다"가 나오지 않는다(잘리지 않으므로 · 소스 스캔 테스트로 강제)
 | **1차-A 배포** | 위 S1~S3 · ENV = 한줄로 회사 1개 | Codex 리뷰(돈 경로 자리·DDL 포함 = 대상) · tsc 0 · vitest 전체 |
 | **1차-B** | MP4 업로드·Range 서빙·ISO-BMFF 파서(3파일) · instagram 릴스(asyncContainer) · facebook_page 어댑터(Facebook Login · 사진·영상) · x 어댑터(`metered` · `upload` · `verify:'deferred'` · 월 상한 fail-closed · 링크 고지) | 실측 = 릴스 1건 + X 1건(Harold 계정) |
 | **2차** | 고객 개방(Advanced Access 심사 + 사업자 인증 · 심사 요구 화면 요소는 1차 화면에 이미 있음) · ENV `*` · 크레딧 값(Harold) + 요금제 안내 비용 칩 · `POST /api/sns/build`(BuildMaterials v1 · `buildBillingHash` payload 확장 · **RED 테스트 먼저**: SNS 재료만 다른 두 요청의 해시가 다른가) + SNS 화면 `재료로 만들기` 입구(QuickCampaignPage 탭 0) · 플래너 6번째 채널(수신자 없는 채널 축 = 별도 설계 · `PLANNER_CHANNELS` 미리 넣기 0 = exhaustive switch가 안전장치) · 스토리(`ephemeral`) · 틱톡(감사 · `requiresExplicitConsent` · `is_aigc`) · 유튜브(검증) · 인사이트·댓글·DM 응대 · 영상 자동 제작(ffmpeg · 쪽 이미지 → 슬라이드 MP4) · 만료 NEW 정리 | 각각 별도 착수 승인 |
@@ -373,6 +397,9 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 ## 6. 실측 게이트 · 시나리오
 
 1. **어댑터 이전 raw 1건**(S0) = 자사 토큰 + curl: 컨테이너 생성 → 상태 조회 → 게시 → 게시물 조회 → 삭제. 응답 전문을 stdout으로 남기고 필드명·상태값을 어댑터 상수로 옮긴다(`console.log` · D217+ 규율).
+   - **★0920 결과 = 인스타 통과.** 전 경로 관통(게시 1건 실물 · 캐러셀 컨테이너까지). 옮긴 상수는 §1-4. ⛔ 삭제만 예외 — **Instagram API 에 피드 게시물 삭제 endpoint 가 없다**(§1-4). 그래서 삭제는 "우리가 지운다"가 아니라 "사람이 지운 것을 대조 워커가 알아챈다"로 남고, 그 재조회 오류 형식이 §7 ① 의 잔여 항목이 된다.
+   - **★0921 결과 = Threads 연결 경로 통과**(§1-5). 게시 경로는 S3 에서 같은 방식으로 raw 를 받는다.
+   - **★S1 게이트 = 통과.** 인스타 0920 · Threads 0921 · 연결 해제 정상(행 DELETE 0 확인). 미확인 1건 = 프로페셔널이 아닌 계정의 `ineligible` 경로(그런 계정이 있어야 해서 미검증으로 남긴다).
 2. **배포 전 1건**(S3) = 위 표. 추가 확인 = 같은 게시물 [다시 시도]가 새 target 행인가 · `claimed` 행 강제 종료 후 대조 워커 회수 · 예약 시각 25시간 전 행이 `failed(시각 경과)` + `[지금 올리기]` · ENV 꺼진 유료 회사가 `준비 중` 화면 · FREE 회사가 요금제 안내 창 · 서명 URL이 `verified_at` 뒤 404 · 화면 미리보기는 살아 있음.
 3. **테스트 데이터** = 도달 가능한 값 생성 0(실 게시는 자사 계정 1건 · 즉시 삭제).
 
@@ -380,7 +407,7 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 
 ## 7. 미검증 목록 (설계에 그대로 싣는다 · 착수 전 확인 순서 = 번호)
 
-① **인스타 게시 경로 = §1-4로 확정(0920 실측).** 0920 S1 게이트에서 **OAuth 왕복 3개도 확정**. 남은 것 = 삭제 감지 시 재조회 오류 형식(S3) · Threads 전체(ENV 미투입) ② Meta가 컨테이너 처리 중 미디어를 다시 가져가는지(TTL은 상태 결박으로 회피) ③ X 조회 과금 여부·단가(2차 출처 · `deferred`로 건수 비례 회피 · 0920 재확인 = 2026-06-01 레거시 Basic 종량제 자동 이관 · Pro 2026-08-14 폐지 → **신규는 종량제뿐**) ④ **Harold 결재 완료(0920) = 캡션 텍스트 AI 표시 부착 0으로 진행**(AI 기본법 2026-01-22 시행 · 계도 최소 1년). 플랫폼 AI 라벨 필드가 국내 의무를 만족하는지는 여전히 미검증이며, 이미지 표시 CT(§3-9)는 불변 ⑤ MP4 헤더 파싱 사전 판정 범위(코덱·오디오 불가) ⑥ 운영 DB `sns_*` 존재 여부 ⑦ Meta Advanced Access 심사 기간 ⑧ Threads 인증 창 주소가 Instagram Login과 다른지(별도 유스케이스는 확인) ⑨ 서명 쿼리스트링이 Range 재요청에서 떨어지는지(경로 세그먼트로 회피) ⑩ 플랫폼이 서명 URL을 캐시하는지(우리 쪽 `no-store`만) ⑪ `stripUnauthorizedBenefits` 부정 문맥 한계가 공개 게시물에서 어느 정도 위험인지.
+① **인스타 게시 경로 = §1-4로 확정(0920 실측).** 0920 S1 게이트에서 **인스타 OAuth 왕복 3개 확정**, 0921 에 **Threads 연결 경로 확정**(§1-5). 남은 것 = 삭제 감지 시 재조회 오류 형식 · **Threads 게시 경로**(둘 다 S3) ② Meta가 컨테이너 처리 중 미디어를 다시 가져가는지(TTL은 상태 결박으로 회피) ③ X 조회 과금 여부·단가(2차 출처 · `deferred`로 건수 비례 회피 · 0920 재확인 = 2026-06-01 레거시 Basic 종량제 자동 이관 · Pro 2026-08-14 폐지 → **신규는 종량제뿐**) ④ **Harold 결재 완료(0920) = 캡션 텍스트 AI 표시 부착 0으로 진행**(AI 기본법 2026-01-22 시행 · 계도 최소 1년). 플랫폼 AI 라벨 필드가 국내 의무를 만족하는지는 여전히 미검증이며, 이미지 표시 CT(§3-9)는 불변 ⑤ MP4 헤더 파싱 사전 판정 범위(코덱·오디오 불가) ⑥ 운영 DB `sns_*` 존재 여부 ⑦ Meta Advanced Access 심사 기간 ⑧ Threads 인증 창 주소가 Instagram Login과 다른지(별도 유스케이스는 확인) ⑨ 서명 쿼리스트링이 Range 재요청에서 떨어지는지(경로 세그먼트로 회피) ⑩ 플랫폼이 서명 URL을 캐시하는지(우리 쪽 `no-store`만) ⑪ `stripUnauthorizedBenefits` 부정 문맥 한계가 공개 게시물에서 어느 정도 위험인지.
 
 ---
 
@@ -464,6 +491,27 @@ createPost(target, media) · pollContainer · publish · fetchPost(verify) · de
 - **왜 이 설계가 아닌가**: 문제는 **용도가 섞여 있다는 것**이다 — 상시 표시돼야 하는 인앱 이미지와, 아직 아무 데도 안 쓴 이미지 스튜디오 초안·실패작이 같은 영구 공개 경로에 있다. 후자는 공개될 이유가 없다. 다만 둘을 가르는 일은 인앱·DM·카카오 전 경로를 건드리는 것이라 "접수 하나 때문에 공용을 고치지 않는다"에 해당한다. SNS는 §3-7 서명 경로로 **자기 출구를 따로 낸다** — 그것까지가 이 설계의 책임이다.
 - **지금 위험**: 주소 유출 시 그 1장. 목록 조회가 안 되니 옆 파일로 번지지 않는다. 과금·발송 무관.
 - **재개 조건·방향**: 용도 2축 분리 — 상시 표시(영구 공개 유지 · 만료를 걸면 자사몰 화면이 깨진다) / 일회성 전달(한시 서명 URL). 후자는 §3-7 구조를 그대로 옮기면 된다. 착수 판단 = Harold님.
+
+### 9-9. Threads 데이터 삭제 콜백이 임시 주소다 (★0921)
+
+- **무엇**: Meta 설정이 콜백 3칸(리디렉션·제거·삭제)을 **전부 필수**로 요구해서, 데이터 삭제 콜백에 제거 콜백과 **같은 주소**(`/api/sns/deauthorize/threads`)를 넣고 저장했다. 그 라우트는 권한 회수용이라 삭제 요청의 규격(확인 코드 응답)을 만족하지 않는다.
+- **왜 이 설계가 아닌가**: 데이터 삭제 요청 처리는 개인정보 요청 흐름이라 SNS 축이 아니라 계정·개인정보 축이다. 0921 목표는 Threads **연결** 확인이었고, 이 칸이 연결을 막고 있었다.
+- **지금 위험**: 자사 계정 1개만 연결된 미게시 앱이라 실제 삭제 요청이 올 경로가 없다. 2차 고객 개방 심사에서는 걸릴 수 있다.
+- **재개 조건·방향**: S2 또는 2차 개방 준비 때 `POST /api/sns/data-deletion/:platform` 를 만들고(서명 검증 → 그 외부 계정의 우리 데이터 삭제 → `{url, confirmation_code}` 응답) Meta 설정의 주소를 교체한다.
+
+### 9-10. Threads 는 게시물 삭제 API 가 있다 (★0921 · 어댑터 축 후보)
+
+- **무엇**: 권한 목록에 `threads_delete`("delete an app user's Threads posts")가 있다. **인스타에는 없는 능력**이다(§1-4 = 피드 게시물 삭제 endpoint 없음).
+- **왜 이 설계가 아닌가**: 지금 `ISnsAdapter` 에는 "삭제할 수 있는가" 축이 없다. 설계서는 인스타 기준으로 "사람이 지우면 대조 워커가 알아챈다"만 잡아 뒀다. 채널마다 갈리는 능력이므로 `capabilities` 에 축을 하나 더 두는 편이 맞지만, 1차 범위가 아니다.
+- **지금 위험**: 없음. 권한을 요청하지 않았으므로 동작도 없다.
+- **재개 조건·방향**: 화면에 "채널에서도 지우기"를 낼 때. `capabilities.canDelete` + 어댑터 `deletePost` 를 정식 축으로 올리고, 권한 `threads_delete` 를 scope 에 추가한다(권한 추가 = 2차 심사 대상 증가이므로 실제 기능과 함께 켠다).
+
+### 9-11. AI 캡션이 아직 **사진을 보지 않는다** (★0921 · Harold 승인분 중 미구현)
+
+- **무엇**: 0920 Harold 승인 = "AI 캡션·태그 입력에 사진을 함께 넘긴다"(§3-8 에 반영됨). S2 구현은 **글만** 넘긴다.
+- **왜 이 설계가 아닌가**: 이미지를 넘기려면 공용 CT `services/ai.ts` 의 `callAIWithFallback` 이 이미지 입력을 받도록 확장해야 한다. 그 함수는 전 AI 기능이 쓰는 관문이라 "접수 하나 때문에 공용 CT 를 고치지 않는다"(scope_discipline)에 걸린다. 출력 계약(부분집합 강제·출구 차단기)은 이미 들어가 있어, 입력만 늘리면 되는 상태로 멈춰 뒀다.
+- **지금 위험**: 없음. 글만 보고 고르는 것도 정상 동작이며 안전장치는 전부 살아 있다. 글자가 박힌 포스터에서 성격을 못 읽는 정도의 품질 차이다.
+- **재개 조건·방향**: `callAIWithFallback` 에 `images?: {mime, base64}[]` 를 더하고(옛 호출부 영향 0 · optional), `generateSnsCaption` 이 선택된 `sns_media` 를 읽어 넘긴다. **출력 계약은 손대지 않는다** — 태그는 여전히 세트의 부분집합이고 캡션은 여전히 출구 차단기를 지난다.
 
 ## 10. 관련 문서
 

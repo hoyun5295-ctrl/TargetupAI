@@ -36,6 +36,11 @@ export const facebookPageAdapter: ISnsAdapter = {
     verify: 'immediate',
     ephemeral: false,
     mediaTransfer: 'pull_url',
+    // ⚠ 미검증 — 페이스북은 비율 제약이 느슨하다고 알려져 있어 넓게 둔다(원본 무접촉 우선).
+    imageAspectMin: 0.4,
+    imageAspectMax: 2.5,
+    imageMaxWidth: 2048,
+    imageMaxBytes: 10 * 1024 * 1024,
   },
   buildAuthorizeUrl: notReady,
   exchangeToken: notReady,
