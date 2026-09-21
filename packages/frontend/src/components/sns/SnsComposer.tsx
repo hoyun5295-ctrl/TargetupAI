@@ -9,8 +9,9 @@
 // ⛔ 추가 입력을 요구하지 않는다. 사진을 올리고 글을 쓰면 그걸로 끝이고, 규격 맞춤은 서버가 알아서 한다.
 
 import { useMemo, useRef, useState } from 'react';
-import { ImagePlus, Loader2, Send, X, CheckCircle2, Info, Clock, Sparkles } from 'lucide-react';
+import { ImagePlus, Loader2, Send, X, CheckCircle2, Info, Clock, Sparkles, Library } from 'lucide-react';
 import SnsChannelLogo from './SnsChannelLogo';
+import SnsAssetPicker from './SnsAssetPicker';
 import { useToast } from '../ToastProvider';
 import { snsAccountAbility, type SnsAccount, type SnsSpec } from '../../utils/sns-view';
 import { OUI_CARD, OUI_BTN_PRIMARY, OUI_BTN_GHOST, OUI_BTN_OUTLINE, OUI_SRC } from '../../utils/operator-ui';
@@ -44,6 +45,7 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
   const [refining, setRefining] = useState(false);
   /** AI가 채웠다는 표시. 사용자가 한 글자라도 고치면 사라진다(§4-2). */
   const [refined, setRefined] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const token = () => localStorage.getItem('token');
   const auth = () => ({ Authorization: `Bearer ${token()}` });
@@ -90,6 +92,36 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  /**
+   * 소재 라이브러리에서 가져오기. 서버가 파일을 복사하고 `asset_id` 를 남긴다 —
+   * 그 표식이 있어야 우리가 만든 사진에 AI 표시가 자동으로 붙는다(§3-9).
+   */
+  const pickFromLibrary = async (assetIds: string[]) => {
+    setUploading(true);
+    try {
+      for (const assetId of assetIds) {
+        const res = await fetch('/api/sns/media/from-asset', {
+          method: 'POST',
+          headers: { ...auth(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assetId }),
+        });
+        const data = await res.json();
+        if (!data?.success) { toast.error(data?.error || '소재를 가져오지 못했습니다.'); continue; }
+        setMedia((prev) => [...prev, {
+          id: data.media.id,
+          width: data.media.width,
+          height: data.media.height,
+          previewUrl: `/api/sns/media/${data.media.id}`,
+          fits: Array.isArray(data.fits) ? data.fits : [],
+        }]);
+      }
+    } catch {
+      toast.error('소재를 가져오지 못했습니다.');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -188,12 +220,21 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
           onChange={(e) => void upload(e.target.files)} />
 
         {media.length === 0 ? (
-          <button onClick={() => fileRef.current?.click()} disabled={uploading}
-            className="w-full py-10 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 hover:bg-white/[0.03] transition-colors flex flex-col items-center gap-2">
-            {uploading ? <Loader2 className="w-6 h-6 animate-spin text-violet-400" /> : <ImagePlus className="w-6 h-6 text-white/40" />}
-            <span className="text-sm text-white/70">사진 올리기</span>
-            <span className="text-[11px] text-white/40">여러 장을 고르면 넘겨보는 게시물이 됩니다</span>
-          </button>
+          /* 반반 — 직접 올리기 / 소재에서 고르기. 이미 만들어 둔 소재를 다시 올리게 하지 않는다. */
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button onClick={() => fileRef.current?.click()} disabled={uploading}
+              className="py-10 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 hover:bg-white/[0.03] transition-colors flex flex-col items-center gap-2">
+              {uploading ? <Loader2 className="w-6 h-6 animate-spin text-violet-400" /> : <ImagePlus className="w-6 h-6 text-white/40" />}
+              <span className="text-sm text-white/70">직접 올리기</span>
+              <span className="text-[11px] text-white/40">내 컴퓨터에서 고르기</span>
+            </button>
+            <button onClick={() => setPickerOpen(true)} disabled={uploading}
+              className="py-10 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 hover:bg-white/[0.03] transition-colors flex flex-col items-center gap-2">
+              <Library className="w-6 h-6 text-white/40" />
+              <span className="text-sm text-white/70">소재에서 고르기</span>
+              <span className="text-[11px] text-white/40">이미지 스튜디오에서 만든 소재</span>
+            </button>
+          </div>
         ) : (
           <>
             <div className="flex gap-2 flex-wrap">
@@ -208,8 +249,14 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
                 </div>
               ))}
               <button onClick={() => fileRef.current?.click()} disabled={uploading}
-                className="w-24 h-24 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors">
+                className="w-24 h-24 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors"
+                title="직접 올리기">
                 {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImagePlus className="w-5 h-5" />}
+              </button>
+              <button onClick={() => setPickerOpen(true)} disabled={uploading}
+                className="w-24 h-24 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors"
+                title="소재에서 고르기">
+                <Library className="w-5 h-5" />
               </button>
             </div>
 
@@ -326,6 +373,8 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
           {scheduledAt ? '예약하기' : '올리기'}
         </button>
       </div>
+
+      <SnsAssetPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={pickFromLibrary} />
     </section>
   );
 }

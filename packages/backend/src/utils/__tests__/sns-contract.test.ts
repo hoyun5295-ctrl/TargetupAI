@@ -274,6 +274,30 @@ describe('⛔ 원본을 멋대로 자르지 않는다 (Harold 확정 2026-09-21)
   });
 });
 
+describe('소재 라이브러리 픽커 (§4-2 · §3-9)', () => {
+  const COMPOSER = readFileSync(resolve(FRONT, 'components/sns/SnsComposer.tsx'), 'utf8');
+  const ROUTE = readFileSync(resolve(__dirname, '../../routes/sns.ts'), 'utf8');
+
+  it('사진 넣는 입구가 둘이다 — 직접 올리기 · 소재에서 고르기', () => {
+    expect(COMPOSER).toMatch(/직접 올리기/);
+    expect(COMPOSER).toMatch(/소재에서 고르기/);
+    expect(COMPOSER).toMatch(/\/api\/sns\/media\/from-asset/);
+  });
+
+  it('★ 소재 경유 미디어만 asset_id 를 갖는다 — AI 표시 자동 부착의 유일한 근거(§3-9)', () => {
+    // 직접 업로드 INSERT 에는 asset_id 가 없고, 소재 경유 INSERT 에만 있다.
+    const direct = ROUTE.slice(ROUTE.indexOf("router.post('/media'"), ROUTE.indexOf("router.get('/assets'"));
+    const fromAsset = ROUTE.slice(ROUTE.indexOf("router.post('/media/from-asset'"));
+    expect(direct).not.toMatch(/INSERT INTO sns_media[\s\S]{0,300}asset_id/);
+    expect(fromAsset).toMatch(/INSERT INTO sns_media[\s\S]{0,300}asset_id/);
+  });
+
+  it('소재는 회사 조건으로만 꺼낸다 — 남의 회사 소재를 가져올 수 없다', () => {
+    expect(ROUTE).toMatch(/FROM cdp_assets\s*\n?\s*WHERE company_id = \$1::uuid/);
+    expect(ROUTE).toMatch(/FROM cdp_assets WHERE id = \$1::uuid AND company_id = \$2::uuid/);
+  });
+});
+
 describe('캡션 규칙 CT', () => {
   const igSpec = { maxCaptionChars: 2200, maxTags: 30 };
   const xSpec = { maxCaptionChars: 280, maxTags: 10 };

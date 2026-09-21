@@ -105,6 +105,42 @@ export async function storeSnsMedia(input: {
   };
 }
 
+/** 소재 라이브러리 원본이 있는 곳(`utils/assets.ts` 와 같은 값). */
+const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
+const INAPP_URL_PREFIX = '/api/cdp/inapp/image/';
+
+/**
+ * 소재 라이브러리 이미지를 SNS 미디어로 **복사**한다.
+ *
+ * ⛔ 경로만 참조하지 않고 복사하는 이유 둘.
+ *   ① 라이브러리에서 그 소재를 지워도 게시 이력의 사진이 사라지면 안 된다
+ *   ② 두 저장소의 수명·공개 규칙이 다르다(라이브러리는 영구 공개 · SNS 원본은 비공개)
+ * ★ 이 경로로 들어온 미디어만 `asset_id` 를 갖고, 그것이 **AI 표시 자동 부착의 유일한 근거**다(§3-9).
+ */
+export async function copyAssetToSnsMedia(input: {
+  companyId: string;
+  assetUrl: string;
+}): Promise<SnsStoredMedia> {
+  const url = String(input.assetUrl || '');
+  const prefix = `${INAPP_URL_PREFIX}${input.companyId}/`;
+  if (!url.startsWith(prefix)) {
+    // 다른 회사의 소재이거나 우리 서빙 경로가 아니다.
+    throw new SnsMediaError('BAD_ASSET', '이 소재는 쓸 수 없어요.');
+  }
+  const filename = url.slice(prefix.length);
+  if (!filename || filename.includes('/') || filename.includes('..') || filename.includes('\\')) {
+    throw new SnsMediaError('BAD_ASSET', '이 소재는 쓸 수 없어요.');
+  }
+
+  const srcAbs = path.join(INAPP_IMAGE_BASE, input.companyId, filename);
+  if (!fs.existsSync(srcAbs)) {
+    throw new SnsMediaError('SOURCE_MISSING', '소재 파일을 찾지 못했어요.');
+  }
+  const buf = fs.readFileSync(srcAbs);
+  // 저장 규칙은 직접 업로드와 **완전히 같다** — 형식·크기 검사도 그대로 지난다.
+  return storeSnsMedia({ companyId: input.companyId, buffer: buf, originalName: filename });
+}
+
 /** 저장된 원본의 절대 경로. 경로 조작은 여기서 막는다(`routes/dm.ts:156~157` 규약). */
 export function snsMediaAbsPath(relPath: string): string {
   const rel = String(relPath || '');

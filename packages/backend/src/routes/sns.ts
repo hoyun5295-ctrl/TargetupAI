@@ -32,7 +32,7 @@ import {
   listSnsAccounts, getSnsAccount, upsertPendingAccount, applyAccountProfile,
   setSnsAccountStatus, revokeSnsAccount, resolveSnsCredentials, toAccountCard, isMissingSnsTable,
 } from '../utils/sns-accounts';
-import { storeSnsMedia, snsMediaAbsPath, snsRenderAbsPath, SnsMediaError, SNS_IMAGE_MAX_BYTES } from '../utils/sns-media';
+import { storeSnsMedia, copyAssetToSnsMedia, snsMediaAbsPath, snsRenderAbsPath, SnsMediaError, SNS_IMAGE_MAX_BYTES } from '../utils/sns-media';
 import { verifySnsMediaToken, isSnsMediaUrlLive } from '../utils/sns-signed-media';
 import { planSnsFit } from '../utils/sns-media-fit';
 import { buildSnsCaption, normalizeSnsTags, tightestCaptionChannel } from '../utils/sns-caption-rules';
@@ -223,6 +223,72 @@ router.post('/media', snsUpload.single('file'), async (req: Request, res: Respon
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS media] 업로드 오류:', err);
     return res.status(500).json({ success: false, error: '사진을 올리지 못했습니다.' });
+  }
+});
+
+/**
+ * 소재 라이브러리 목록 — 이미지 스튜디오에서 만든 것과 올려 둔 것.
+ * ⛔ 회사 조건 직접. 다른 회사 소재는 애초에 안 나온다.
+ */
+router.get('/assets', async (req: Request, res: Response) => {
+  const companyId = (req as any).user?.companyId as string;
+  try {
+    const r = await query(
+      `SELECT id, url, filename, kind, width, height, created_at
+         FROM cdp_assets
+        WHERE company_id = $1::uuid
+        ORDER BY created_at DESC
+        LIMIT 60`,
+      [companyId],
+    );
+    return res.json({
+      success: true,
+      assets: r.rows.map((a) => ({
+        id: a.id,
+        url: a.url,
+        kind: a.kind,
+        // 우리가 만든 소재인가 — 화면이 "AI로 만든 사진" 표시를 미리 보여줄 수 있게(§3-9)
+        generated: a.kind === 'generated',
+      })),
+    });
+  } catch (err: any) {
+    console.error('[SNS assets] 조회 오류:', err);
+    return res.status(500).json({ success: false, error: '소재를 불러오지 못했습니다.' });
+  }
+});
+
+/**
+ * 소재 라이브러리에서 가져오기. 파일을 **복사**하고 `asset_id` 를 남긴다.
+ * ★ `asset_id` 가 있는 미디어만 AI 표시 자동 부착 대상이 된다(§3-9) — 이 경로가 그 근거를 만든다.
+ */
+router.post('/media/from-asset', async (req: Request, res: Response) => {
+  const companyId = (req as any).user?.companyId as string;
+  const userId = (req as any).user?.id ?? null;
+  const assetId = String(req.body?.assetId || '');
+  if (!assetId) return res.status(400).json({ success: false, error: '소재를 골라 주세요.' });
+
+  try {
+    const a = await query(`SELECT id, url FROM cdp_assets WHERE id = $1::uuid AND company_id = $2::uuid`, [assetId, companyId]);
+    if (!a.rows[0]) return res.status(404).json({ success: false, error: '소재를 찾을 수 없습니다.' });
+
+    const stored = await copyAssetToSnsMedia({ companyId, assetUrl: a.rows[0].url });
+    const r = await query(
+      `INSERT INTO sns_media (company_id, created_by, kind, path, format, bytes, width, height, asset_id)
+       VALUES ($1::uuid, $2::uuid, 'image', $3, $4, $5, $6, $7, $8::uuid)
+       RETURNING id, width, height`,
+      [companyId, userId, stored.relPath, stored.format, stored.bytes, stored.width, stored.height, assetId],
+    );
+    const row = r.rows[0];
+    return res.json({
+      success: true,
+      media: { id: row.id, width: row.width, height: row.height },
+      fits: fitsByChannel(stored.width, stored.height),
+    });
+  } catch (err: any) {
+    if (err instanceof SnsMediaError) return res.status(400).json({ success: false, code: err.code, error: err.message });
+    if (isMissingSnsTable(err)) return sendDbPending(res);
+    console.error('[SNS media] 소재 가져오기 오류:', err);
+    return res.status(500).json({ success: false, error: '소재를 가져오지 못했습니다.' });
   }
 });
 
