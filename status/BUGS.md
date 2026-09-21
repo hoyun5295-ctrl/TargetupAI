@@ -65,6 +65,15 @@
 - **고객사 안내(0921)**: Query Monitor 비활성화 → 「우커머스 관리자 승인으로 연결」 재승인(확인 → 웹훅 4개 → 회원·주문 수집이 도는 경로는 승인 콜백 하나).
 - **미검증**: ①운영 서버에 설치된 axios 버전에서 transport 배선 동작(로컬 1.15.0 만 확인) ②100건 단위 수집 응답의 헤더 크기(오류 수가 건수에 비례하면 256KB 를 넘을 수 있다 → 그때는 `header_overflow` 문구로 안내된다) ③iroirotokyo.net 재승인 뒤 active 전환.
 
+### 🟠 B-0921-4 우커머스 가져오기 속도: 순차로는 회원 50만 몰에 7시간 · 고객이 쌓일수록 더 느려진다(이메일 매칭이 회사 고객 전체를 훑는다) (🟢 0921 가져오기 완주 · 인덱스 운영 반영 · 코드 미배포 = 재기동 대기) — 2026-09-21 Harold 「이게 최선이야?」
+
+- **실측(운영 · `scripts/run-woo-backfill.ts` 로그)**: 순차 = 분당 1,200명. 동시 4(회원)로 바꾼 직후 분당 3,700명이었으나 들어간 회원 수에 비례해 하락(14만 = 2,100 · 22.8만 = 1,700 · 29만 = 1,400). `EXPLAIN` = `identifyCustomer` 2단계 이메일 매칭(`LOWER(email) = $2`)이 `idx_customers_uploaded_by`(company_id)로 그 회사 26만 행을 Bitmap Heap Scan(병렬 4워커 · cost 45,196) · `pg_stat_activity` 활성 7개 전부 이 쿼리.
+- **수정**: ①페이지 동시 처리(`wooTuning.customerPageConcurrency` 4 · `orderPageConcurrency` 2 · ENV 조정 상한 8 · 첫 페이지는 혼자 · 이어 가기 자리 = 연속 완료 지점 · 저장 직렬화 · 23505 1회 재시도) ②상한 회원 500만·주문 200만(첫 실고객이 회원 수십만) ③**`idx_customers_company_lower_email`(company_id, LOWER(email))** `CREATE INDEX CONCURRENTLY`(Harold 실행 · Codex 검토는 Harold 실행으로 면제 · [SCHEMA.md](SCHEMA.md) 등재) → 직후 30초 진행 폭 35 → 61페이지.
+- **결과**: iroirotokyo.net `stage=done` 회원 331,929 · 주문 20,220 · 번호 없음 4,217 · 실패 0 · 10,529초.
+- **같은 날 함께 고친 범위 결함**: 워커가 "안 끝난 몰 전부"를 스스로 시작하던 것(첫 배포분)을 제거 — `woo_backfill.requested`(그 몰의 연결·지정 실행이 시작시킨 것)만 이어 간다. 경위 = Harold 「연동은 사용자 계정에서 자기 몰 하나씩이라고 안내했는데 왜 4몰이 다 도느냐」.
+- **미검증**: ①이 몰이 `modified_after` 를 지키는지(재기동 뒤 첫 주기 수집의 `[Woo Sync] … 주문 N건`으로 판정 · 5,000 근처면 무시하는 것) ②나머지 3몰의 `store_code`.
+- **재기동 전 상태(0921 20:29 로그)**: 돌고 있는 앱은 첫 배포분이라 주기 수집이 전화번호 없는 주문 1건에서 `phone은 필수`로 매 회차 실패한다(B-0921-3 수정이 디스크에만 있다) → 재기동으로 해소.
+
 ### 🔴 B-0921-3 우커머스 가져오기: 전화번호 없는 회원 1명에서 4몰 전부 중단 (🟡 0921 수정 · **DDL 0** · 미배포 · 실측 = 재기동 없이 `scripts/run-woo-backfill.ts`) — 2026-09-21 B-0921-2 배포 직후 운영 실측(Harold DB 조회)
 
 - **실측**: 배포 4분 뒤 워커가 4몰(iroirotokyo.net·ilbonimo.com·lensgogo.info·lens007.net)을 줄 세웠으나 전부 회원 단계에서 `unknown · 신규 회원 생성 시 phone은 필수입니다`로 즉시 중단(iroirotokyo 1페이지 0명 · ilbonimo 35페이지 679명). B-0921-2 이전에는 회원 조회가 0명이라 **회원 적재 경로가 실데이터를 한 번도 지난 적이 없었다.**
