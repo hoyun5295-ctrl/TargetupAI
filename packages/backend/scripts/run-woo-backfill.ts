@@ -8,6 +8,7 @@
  * 실행(운영 서버):
  *   cd packages/backend && npx ts-node scripts/run-woo-backfill.ts iroirotokyo.net          (그 몰만)
  *   cd packages/backend && npx ts-node scripts/run-woo-backfill.ts iroirotokyo.net --all    (그 몰 먼저 · 나머지 몰도 이어서)
+ *   cd packages/backend && npx ts-node scripts/run-woo-backfill.ts iroirotokyo.net --restart (★0922 이미 끝난(done) 몰을 처음부터 다시 — 몰 동의를 소속 행에 채울 때 · 적재는 멱등)
  *
  * 하는 일: 대상 몰(해제 아님 · active · REST 키 있음)을 하나씩 runWooBackfill → 30초마다 진행 1줄 출력.
  * 출력: 몰 식별자·단계·페이지·건수뿐(키·개인정보 0). 몰 쪽에는 GET 만 보낸다. 우리 DB 에는 앱과 같은 적재(멱등)를 한다.
@@ -34,6 +35,7 @@ async function progressLine(t: Target): Promise<string> {
 async function main(): Promise<number> {
   const args = process.argv.slice(2).map((a) => String(a).trim().toLowerCase()).filter(Boolean);
   const all = args.includes('--all');
+  const restart = args.includes('--restart'); // 끝난 몰도 처음부터 다시(진행 중인 몰은 이 옵션과 무관하게 이어 간다)
   const named = args.filter((a) => !a.startsWith('--'));
   if (!all && named.length === 0) { console.error('사용법: npx ts-node scripts/run-woo-backfill.ts <몰 식별자 ...> [--all]   (적은 몰부터 · --all 이면 나머지도 이어서)'); return 2; }
 
@@ -50,7 +52,7 @@ async function main(): Promise<number> {
     ...(all ? eligible.filter((t) => !named.includes(t.mall_id)) : []),
   ];
   if (targets.length === 0) { console.error(`대상 몰이 없습니다(active · REST 키 있는 몰만): ${args.join(' ')}`); return 1; }
-  console.log(`대상 ${targets.length}몰: ${targets.map((t) => t.mall_id).join(', ')} · 동시 요청 회원 ${wooTuning.customerPageConcurrency} · 주문 ${wooTuning.orderPageConcurrency}`);
+  console.log(`대상 ${targets.length}몰: ${targets.map((t) => t.mall_id).join(', ')} · 동시 요청 회원 ${wooTuning.customerPageConcurrency} · 주문 ${wooTuning.orderPageConcurrency}${restart ? ' · 끝난 몰도 다시(--restart)' : ''}`);
 
   let failedMalls = 0;
   for (const t of targets) {
@@ -58,7 +60,7 @@ async function main(): Promise<number> {
     console.log(`\n── ${t.mall_id} 시작 · ${await progressLine(t)}`);
     const timer = setInterval(() => { progressLine(t).then((l) => console.log(`   … ${l}`)).catch(() => undefined); }, PROGRESS_EVERY_MS);
     try {
-      const st = await runWooBackfill(t.company_id, t.mall_id, { requested: true });
+      const st = await runWooBackfill(t.company_id, t.mall_id, { requested: true, restartIfDone: restart });
       console.log(`── ${t.mall_id} 끝 stage=${st.stage} 회원=${st.customers_imported} 주문=${st.orders_imported} 번호없음=${st.customers_no_phone + st.orders_no_phone} 실패=${st.failed}${st.truncated ? ' (상한 도달)' : ''} · ${Math.round((Date.now() - started) / 1000)}초`);
     } catch (e: any) {
       failedMalls++;
