@@ -850,6 +850,24 @@ function assertCommerceRange(commerce: Record<string, any> | undefined, at: stri
   }
 }
 
+/**
+ * 상품 정보 필수값(제목·정상가) — 말풍선(커머스)과 캐러셀 카드가 **같은 판정**을 쓴다.
+ *
+ * ★2026-09-22 신설. 그전에는 말풍선 쪽에만 있었고 카드에는 없었다. 두 벌로 두면 한쪽이
+ * 통과시킨 것을 다른 쪽이 막는다(0902 이미지 판정과 같은 부류) — 판정은 한 자리에 둔다.
+ * 0원도 유효한 정상가라 falsy가 아니라 **타입**으로 본다(§6.10.8).
+ *
+ * @param at 자리 이름 접두 — `'커머스: '`(말풍선) · `'2번째 카드: '`(캐러셀 카드)
+ */
+function assertCommerceRequired(commerce: Record<string, any> | undefined, at: string): void {
+  if (!strFieldOrThrow(commerce?.title, `${at}상품 제목`)) {
+    throw new BrandMessageBuildError(`${at}상품 정보가 필요합니다`);
+  }
+  const priceOk = typeof commerce?.regular_price === 'number'
+    || (typeof commerce?.regular_price === 'string' && commerce.regular_price.trim() !== '');
+  if (!priceOk) throw new BrandMessageBuildError(`${at}상품 정상가가 필요합니다`);
+}
+
 function assertWebLink(v: string, at: string): void {
   if (v && !isHttpLinkOrVariable(v)) {
     throw new BrandMessageBuildError(`${at}: 링크는 http:// 또는 https://로 시작해야 합니다 (예: https://www.example.com)`);
@@ -982,15 +1000,15 @@ function assertBrandContentSpec(input: {
       `${label}: 동영상은 카카오TV 주소만 쓸 수 있습니다 (예: https://tv.kakao.com/v/123456789)`,
     );
   }
-  if (spec.requireCommerce) {
-    const present = attCommerce !== undefined;
-    if (!required(present, !!strFieldOrThrow(attCommerce?.title, '상품 제목'))) {
-      throw new BrandMessageBuildError(`${label}: 상품 정보가 필요합니다`);
-    }
-    const priceOk = typeof attCommerce?.regular_price === 'number'
-      || (typeof attCommerce?.regular_price === 'string' && attCommerce.regular_price.trim() !== '');
-    if (!required(present, priceOk)) {
-      throw new BrandMessageBuildError(`${label}: 상품 정상가가 필요합니다`);
+  // ★2026-09-22 `!spec.carousel` — 캐러셀은 상품 정보를 **카드가 소유한다**(§5.3). 말풍선 최상위에는
+  //   실리지 않으므로 여기서 요구하면 화면 필수값을 다 채워도 100% 거절된다(0922 접수 = 캐러셀 커머스
+  //   "상품 정보가 필요 합니다"). 화면 4곳(brandRich 2 · BrandMessageEditor · BrandTemplateForm)은
+  //   전부 `!carousel` 조건으로 안 싣고 있었고 이 자리만 유형을 가리지 않았다.
+  //   ⛔ 캐러셀의 상품 필수는 면제가 아니라 **자리 이동**이다 — 카드별 판정은 assertCarouselSpec이 진다.
+  if (spec.requireCommerce && !spec.carousel) {
+    // 기본형이 면제받는 것은 **"안 보낸 경우"뿐이다**(템플릿이 담당) — 보냈으면 알맹이가 있어야 한다
+    if (isFreeForm || attCommerce !== undefined) {
+      assertCommerceRequired(attCommerce, `${label}: `);
     }
     // ★2026-08-28 상품명 길이 — §3.4 "상품제목 (최대 30자)". 그전에는 이 검사가 없었다.
     const cTitle = strFieldOrThrow(attCommerce?.title, '상품 제목');
@@ -1212,6 +1230,10 @@ export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: 
     assertWebLink(strFieldOrThrow((cAtt as any)?.image?.img_link, `${at} 이미지 링크`), `${at} 이미지`);
     const cCommerce = plainObjectOrThrow(cAtt.commerce, `${at} 상품 정보`);
     assertCommerceRange(cCommerce, `${at}: `);
+    // ★2026-09-22 상품 필수를 카드가 진다 — 말풍선 최상위에서 캐러셀을 뺀 짝(0922 접수).
+    //   그전에는 상품명이 **있을 때만** 길이를 봐서, 상품이 통째로 빈 카드가 그대로 큐까지 갔다.
+    //   규격 밖은 무로그 폐기라 차감만 남는다(파일 머리 ⛔).
+    if (spec.requireCommerce) assertCommerceRequired(cCommerce, `${at}: `);
     const cProdTitle = strFieldOrThrow(cCommerce?.title, `${at} 상품명`);
     if (cProdTitle && spec.maxCommerceTitle > 0 && charLen(cProdTitle) > spec.maxCommerceTitle) {
       throw new BrandMessageBuildError(

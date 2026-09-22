@@ -11,11 +11,12 @@
  * ⛔ 이 파일의 숫자를 손으로 고치지 마라 — 값의 출처는 `BUBBLE_TYPES[*].carousel`(CT)이다.
  *    기대값을 CT에서 읽어 쓰는 이유가 그것이다(문서와 코드가 갈리면 테스트가 먼저 깨져야 한다).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   assertCarouselSpec,
   buildCarouselJson,
   buildAttachmentJson,
+  buildBrandQueuePayload,
   BUBBLE_TYPES,
   BUBBLE_TYPE_OPENED,
   SUPPORTED_BUBBLE_TYPES,
@@ -269,5 +270,77 @@ describe('발송 개방 원장 (BUBBLE_TYPE_OPENED)', () => {
       expect(rec.since, `${code}: 개방일이 필요하다`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(rec.note.length, `${code}: 개방 근거가 필요하다`).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * 조립기 경로 왕복 (★2026-09-22 신설 · 0922 접수 "필수값을 다 넣었는데 [상품 정보가 필요 합니다]")
+ *
+ * 위 검사들은 `assertCarouselSpec`을 **직접** 부른다. 그런데 접수의 거절은 검사기가 아니라 그 앞
+ * 말풍선 검사(`assertBrandContentSpec`)에서 났다 — 유형을 가리지 않고 최상위 `attachment.commerce`를
+ * 요구해 캐러셀 커머스가 100% 막혔다. 상품 정보는 규격상 **카드가 소유한다**(§5.3).
+ * 부품별 테스트가 전부 초록인데 경로가 죽어 있던 0920과 같은 부류라, 화면이 보내는 형태 그대로
+ * 조립기를 지나는 길을 여기서 고정한다(시험 개방 `BUBBLE_TYPE_TRIAL`로 그 길이 열려 있다).
+ */
+describe('캐러셀 커머스 — 조립기 경로(buildBrandQueuePayload)', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-08-18T00:00:00Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const BASE = {
+    typeDef: 'FREE' as const, senderKey: 'sk-test', targeting: 'I', isAd: true,
+    sendAt: '2027-08-18 10:00:00', trialAllowed: true, etcJsonMax: 8192,
+  };
+  const KAKAO_IMG = 'https://mud-kage.kakao.com/dn/abc/btsXXXX/yyyyyyyy/img_l.jpg';
+  const SHOP = 'https://shop.example.co.kr/p/1001';
+
+  /** 화면(brandRich.richPayload)이 카드 하나로 보내는 형태 */
+  const card = (commerce?: Record<string, any>) => ({
+    image: { img_url: KAKAO_IMG },
+    buttons: [{ name: '구매', type: 'WL' as const, url_mobile: SHOP }],
+    ...(commerce ? { commerce } : {}),
+  });
+  /** ⛔ attachmentJson은 비운다 — 캐러셀은 말풍선 첨부를 싣지 않는다(화면과 같은 형태) */
+  const build = (cards: any[]) => () => buildBrandQueuePayload({
+    ...BASE, bubbleType: 'CAROUSEL_COMMERCE',
+    attachmentJson: buildAttachmentJson({}),
+    carouselJson: buildCarouselJson({ cards }),
+  });
+  const GOODS = { title: '부클 니트', regular_price: 89000 };
+
+  it('카드가 상품 정보를 갖추면 최상위 commerce 없이 통과한다', () => {
+    expect(build([card(GOODS), card(GOODS)])).not.toThrow();
+  });
+
+  it('인트로를 함께 써도 통과한다', () => {
+    expect(() => buildBrandQueuePayload({
+      ...BASE, bubbleType: 'CAROUSEL_COMMERCE',
+      attachmentJson: buildAttachmentJson({}),
+      carouselJson: buildCarouselJson({
+        intro: { header: '가을 기획전', content: '선착순 한정', image_url: KAKAO_IMG },
+        cards: [card(GOODS), card(GOODS)],
+      }),
+    })).not.toThrow();
+  });
+
+  it('상품 정보가 없는 카드는 그 카드 번호와 함께 거절한다', () => {
+    expect(build([card(GOODS), card()])).toThrow(/2번째 카드.*상품 정보가 필요/);
+  });
+
+  it('정상가가 없는 카드도 거절한다', () => {
+    expect(build([card({ title: '부클 니트' }), card(GOODS)])).toThrow(/1번째 카드.*상품 정상가가 필요/);
+  });
+
+  it('단일 커머스는 최상위 상품 정보를 그대로 요구한다 (캐러셀 예외가 번지지 않는다)', () => {
+    const single = (commerce?: Record<string, any>) => () => buildBrandQueuePayload({
+      ...BASE, bubbleType: 'COMMERCE',
+      attachmentJson: buildAttachmentJson({
+        image: { img_url: KAKAO_IMG },
+        buttons: [{ name: '구매', type: 'WL', url_mobile: SHOP }],
+        ...(commerce ? { commerce: commerce as any } : {}),
+      }),
+    });
+    expect(single()).toThrow(/상품 정보가 필요/);
+    expect(single({ title: '부클 니트' })).toThrow(/상품 정상가가 필요/);
+    expect(single(GOODS)).not.toThrow();
   });
 });

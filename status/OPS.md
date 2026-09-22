@@ -910,6 +910,7 @@ tail -20 /home/administrator/targetup-app/packages/backend/.env
 | 스케줄 | crontab — 매일 03:00 KST |
 | 스크립트 | `/home/administrator/backups/backup.sh` |
 | 환경변수 | `/home/administrator/backups/.env` (chmod 600) |
+| GPG 수신자(공개키 지문) | **`C37BE420302EB51FAD8CF6C0EBC163F87CFFBFF8`** `Hanjul Backup 2026-09` (★2026-09-22 교체 · 개인키·암호 = Harold PC 키링 + USB 사본 + 비밀번호 관리자). 옛 키 `EFF068D1…BFA1`(0716)은 **암호 분실**로 그 키로 잠근 0922 이전 암호문(정기 백업·`~/backups-archive/` Oracle 레거시 덤프)은 암호가 떠오르기 전까지 못 연다 · 옛 키·암호문은 지우지 않는다. 교체 검증 = PC 자체 복호 + 서버 암호화→PC 복호 실측(0922). 상세 = memory `reference_hanjul_backup_system` |
 
 ### 10-2. 백업 대상
 | DB | 방식 | 옵션 |

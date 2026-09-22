@@ -127,14 +127,31 @@ export const BUBBLE_TYPES = BRAND_TYPE_ORDER.filter((code) => BRAND_SPEC[code].o
  *   - `BF`(비즈니스폼) = `biz_form_key` 입력칸이 없어 항상 거절된다.
  *   두 유형은 노출해 두면 "발송 버튼은 눌리는데 서버가 막는" 막다른 길이 된다.
  */
+/**
+ * 말풍선 버튼 종류 — 백엔드 원장(CT-12 `BUTTON_TYPES`)의 거울.
+ *
+ * ★2026-09-22 앱링크(AL)·비즈니스폼(BF) 신설. 백엔드 원장과 규격에는 처음부터 있었는데 **이 화면에만
+ * 없어서** 고객이 쓸 방법이 없었다(0922 박성용 지적 — 휴머스온이 여는 버튼과 우리 목록 대조).
+ *   · `needUrl`     = 모바일 링크가 **필수**인가(웹링크만)
+ *   · `needScheme`  = 앱 실행 주소 칸을 그리는가. 규격상 모바일 링크·안드로이드·iOS 중 **2개 이상**이면 된다
+ *                     (백엔드 `anyOf: { count: 2 }`) — 그래서 앱링크의 모바일 링크는 필수가 아니라 선택이다.
+ *   · `needBizForm` = 비즈니스폼 키 칸을 그리는가. 값은 카카오에 폼을 올리고 발급받는 문자열이다.
+ *   · `allowedNames` = 버튼명을 규격이 정해 둔 유형. 자유 입력 대신 고르게 한다(틀리면 카카오가 거절한다).
+ *
+ * 규격 출처 = **Humuson IMC 연동규약서 v20251031 §3.4**(자유형 ATTACHMENT · 소켓 전문). 비즈니스폼 필드는
+ * 그 표에 `Biz_form_key`(text)로 적혀 있다 — REST 템플릿 등록 API의 `bizFormId`(정수)와 다른 경로다.
+ * ⛔ 둘을 섞지 마라. 발송은 소켓 전문을 타므로 이 화면의 기준은 언제나 연동규약서다.
+ */
 export const BUTTON_TYPES = [
-  { code: 'WL', label: '웹링크', needUrl: true, fixedName: undefined as string | undefined, targetingOnly: undefined as readonly string[] | undefined },
-  { code: 'BK', label: '봇키워드', needUrl: false, fixedName: undefined, targetingOnly: undefined },
-  { code: 'MD', label: '메시지전달', needUrl: false, fixedName: undefined, targetingOnly: undefined },
-  { code: 'BC', label: '상담톡전환', needUrl: false, fixedName: undefined, targetingOnly: undefined },
-  { code: 'BT', label: '봇전환', needUrl: false, fixedName: undefined, targetingOnly: undefined },
+  { code: 'WL', label: '웹링크', needUrl: true, needScheme: false, needBizForm: false, fixedName: undefined as string | undefined, allowedNames: undefined as readonly string[] | undefined, targetingOnly: undefined as readonly string[] | undefined },
+  { code: 'AL', label: '앱링크', needUrl: false, needScheme: true, needBizForm: false, fixedName: undefined, allowedNames: undefined, targetingOnly: undefined },
+  { code: 'BK', label: '봇키워드', needUrl: false, needScheme: false, needBizForm: false, fixedName: undefined, allowedNames: undefined, targetingOnly: undefined },
+  { code: 'MD', label: '메시지전달', needUrl: false, needScheme: false, needBizForm: false, fixedName: undefined, allowedNames: undefined, targetingOnly: undefined },
+  { code: 'BF', label: '비즈니스폼', needUrl: false, needScheme: false, needBizForm: true, fixedName: undefined, allowedNames: ['톡에서 예약하기', '톡에서 설문하기', '톡에서 응모하기'] as readonly string[], targetingOnly: undefined },
+  { code: 'BC', label: '상담톡전환', needUrl: false, needScheme: false, needBizForm: false, fixedName: undefined, allowedNames: undefined, targetingOnly: undefined },
+  { code: 'BT', label: '봇전환', needUrl: false, needScheme: false, needBizForm: false, fixedName: undefined, allowedNames: undefined, targetingOnly: undefined },
   // 채널추가는 마케팅 수신동의(M·N) 대상에서만 쓸 수 있다 — 채널 친구(I)에는 붙일 수 없다.
-  { code: 'AC', label: '채널추가', needUrl: false, fixedName: '채널 추가', targetingOnly: ['M', 'N'] as readonly string[] },
+  { code: 'AC', label: '채널추가', needUrl: false, needScheme: false, needBizForm: false, fixedName: '채널 추가', allowedNames: undefined, targetingOnly: ['M', 'N'] as readonly string[] },
 ];
 
 export const TARGETING_OPTIONS = [
@@ -146,7 +163,7 @@ export const TARGETING_OPTIONS = [
 // ============================================================
 // 인터페이스
 // ============================================================
-interface Button { name: string; type: string; url_mobile?: string; url_pc?: string; }
+interface Button { name: string; type: string; url_mobile?: string; url_pc?: string; scheme_android?: string; scheme_ios?: string; biz_form_key?: string; }
 
 interface BrandMessageEditorProps {
   profiles: { id: string; profile_key: string; profile_name: string }[];
@@ -314,6 +331,13 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
   const availableButtonTypes = BUTTON_TYPES.filter(
     bt => !bt.targetingOnly || bt.targetingOnly.includes(targeting)
   );
+  /**
+   * 캐러셀 카드 버튼에 쓸 수 있는 종류 — 말풍선 목록에서 앱링크·비즈니스폼을 뺀다.
+   * ⛔ 백엔드 카드 검사(`assertCarouselSpec`)는 버튼명·종류·링크 형식만 보고 **타입별 필수값**(앱 실행 주소
+   *    2개 이상 · 비즈니스폼 키)을 보지 않는다. 화면만 열면 검사를 안 받는 값이 큐로 간다(규격 밖은 무로그
+   *    폐기 = 차감만 남는다). 카드 버튼까지 열려면 백엔드 카드 검사를 말풍선과 같은 판정으로 맞추는 작업이 먼저다.
+   */
+  const cardButtonTypes = availableButtonTypes.filter((t) => !t.needScheme && !t.needBizForm);
 
   /**
    * ★ AI 안내 문구 활성 판정 — 백엔드 부착 조건의 거울.
@@ -391,7 +415,22 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
         return `${i + 1}번째 버튼명은 최대 ${selectedType.maxBtnName}자입니다`;
       }
       if (spec?.needUrl && !(b.url_mobile || '').trim()) return `${i + 1}번째 버튼의 링크를 입력해주세요`;
-      const blr = spec?.needUrl ? linkReason(b.url_mobile || '', `${i + 1}번째 버튼의 링크는`) : '';
+      // 앱링크는 규격상 모바일 링크·안드로이드·iOS 중 2개 이상이면 된다 — 백엔드 anyOf(count 2)의 거울이고
+      // 문구도 백엔드 거절 문구와 같은 항목 이름을 쓴다(같은 것을 두 이름으로 부르지 않는다).
+      // 버튼명이 규격으로 정해진 유형(비즈니스폼)은 목록 밖 이름을 카카오가 거절한다
+      if (spec?.allowedNames && !spec.allowedNames.includes(b.name.trim())) {
+        return `${i + 1}번째 버튼(${spec.label}): 버튼명은 ${spec.allowedNames.join(' / ')} 중에서만 쓸 수 있습니다`;
+      }
+      if (spec?.needBizForm && !(b.biz_form_key || '').trim()) {
+        return `${i + 1}번째 버튼(비즈니스폼): 비즈니스폼 키를 입력해주세요`;
+      }
+      if (spec?.needScheme) {
+        const filled = [b.url_mobile, b.scheme_android, b.scheme_ios].filter((v) => (v || '').trim()).length;
+        if (filled < 2) {
+          return `${i + 1}번째 버튼(앱링크): 모바일 링크 · 안드로이드 앱 실행 주소 · iOS 앱 실행 주소 중 2개 이상을 입력해주세요`;
+        }
+      }
+      const blr = (spec?.needUrl || spec?.needScheme) ? linkReason(b.url_mobile || '', `${i + 1}번째 버튼의 링크는`) : '';
       if (blr) return blr;
       if (spec?.targetingOnly && !spec.targetingOnly.includes(targeting)) {
         return `${spec.label} 버튼은 지금 선택한 대상 범위에서는 쓸 수 없습니다`;
@@ -658,7 +697,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
               fieldClass={FIELD}
               panelClass={PANEL_CLASS}
               accentText={a.sumAccent}
-              buttonTypes={availableButtonTypes.map((t) => ({ code: t.code, label: t.label, needUrl: t.needUrl, fixedName: t.fixedName }))}
+              buttonTypes={cardButtonTypes.map((t) => ({ code: t.code, label: t.label, needUrl: t.needUrl, fixedName: t.fixedName }))}
             />
           )}
 
@@ -815,16 +854,25 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                     `w-full` 이 `w-28` 보다 뒤). 0920 에 flex + `w-28` 로 두었다가 종류 선택칸이 줄 전체를 차지하고
                     버튼명·URL 칸이 패널 밖으로 밀려났다(Harold 캡처 · 커머스). 덮어쓸 값은 `!` 로 적는다(BrandRichSections 의 카드 버튼 줄과 같은 방식). */}
                 {buttons.map((btn, idx) => {
-                  const needUrl = !!BUTTON_TYPES.find(t => t.code === btn.type)?.needUrl;
+                  const btnSpec = BUTTON_TYPES.find(t => t.code === btn.type);
+                  const needUrl = !!btnSpec?.needUrl;
+                  const needScheme = !!btnSpec?.needScheme;
+                  const needBizForm = !!btnSpec?.needBizForm;
+                  // 앱링크는 링크가 선택이라 칸은 보여 주되 필수 표시를 하지 않는다
+                  const showUrl = needUrl || needScheme;
                   return (
-                  <div key={idx} className="grid grid-cols-[112px_minmax(0,1fr)_minmax(0,1.3fr)_28px] gap-1.5 items-center rounded-xl bg-slate-50/70 ring-1 ring-slate-900/5 p-2">
+                  <div key={idx} className="rounded-xl bg-slate-50/70 ring-1 ring-slate-900/5 p-2 space-y-1.5">
+                    <div className="grid grid-cols-[112px_minmax(0,1fr)_minmax(0,1.3fr)_28px] gap-1.5 items-center">
                     <select value={btn.type}
                       onChange={(e) => {
                         const next = e.target.value;
                         const spec = BUTTON_TYPES.find(t => t.code === next);
-                        // 버튼명이 정해진 유형(채널추가)은 고를 때 바로 채워 넣는다 — 다시 묻지 않는다.
+                        // 버튼명이 정해진 유형은 고를 때 바로 채워 넣는다 — 다시 묻지 않는다.
+                        //   채널추가 = 이름이 하나뿐(fixedName) · 비즈니스폼 = 정해진 3종 중 첫 값으로 시작
                         setButtons(buttons.map((b, i) => i === idx
-                          ? { ...b, type: next, ...(spec?.fixedName ? { name: spec.fixedName } : {}) }
+                          ? { ...b, type: next,
+                              ...(spec?.fixedName ? { name: spec.fixedName } : {}),
+                              ...(spec?.allowedNames && !spec.allowedNames.includes(b.name.trim()) ? { name: spec.allowedNames[0] } : {}) }
                           : b));
                       }}
                       className={`${FIELD} !px-2.5 !py-1.5 !text-xs`}>
@@ -835,18 +883,42 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                         : [...availableButtonTypes, BUTTON_TYPES.find(bt => bt.code === btn.type)!].filter(Boolean)
                       ).map(bt => <option key={bt.code} value={bt.code}>{bt.label}</option>)}
                     </select>
-                    <input type="text" value={btn.name} onChange={(e) => updateButton(idx, 'name', e.target.value)}
-                      maxLength={selectedType.maxBtnName}
-                      className={`${FIELD} !px-2.5 !py-1.5 !text-xs ${needUrl ? '' : 'col-span-2'}`} placeholder="버튼명" />
-                    {needUrl && (
+                    {btnSpec?.allowedNames ? (
+                      <select value={btn.name} onChange={(e) => updateButton(idx, 'name', e.target.value)}
+                        className={`${FIELD} !px-2.5 !py-1.5 !text-xs ${showUrl ? '' : 'col-span-2'}`}>
+                        {btnSpec.allowedNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    ) : (
+                      <input type="text" value={btn.name} onChange={(e) => updateButton(idx, 'name', e.target.value)}
+                        maxLength={selectedType.maxBtnName}
+                        className={`${FIELD} !px-2.5 !py-1.5 !text-xs ${showUrl ? '' : 'col-span-2'}`} placeholder="버튼명" />
+                    )}
+                    {showUrl && (
                       <input type="text" value={btn.url_mobile || ''} onChange={(e) => updateButton(idx, 'url_mobile', e.target.value)}
                         onBlur={(e) => updateButton(idx, 'url_mobile', normalizeLinkInput(e.target.value))}
-                        className={`${FIELD} !px-2.5 !py-1.5 !text-xs`} placeholder="URL (https://…)" />
+                        className={`${FIELD} !px-2.5 !py-1.5 !text-xs`}
+                        placeholder={needScheme ? 'URL (선택)' : 'URL (https://…)'} />
                     )}
                     <button type="button" onClick={() => removeButton(idx)} aria-label="버튼 삭제"
                       className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-white transition">
                       <X size={14} strokeWidth={2} />
                     </button>
+                    </div>
+                    {/* 앱링크 — 앱을 직접 여는 주소. 규격상 위 URL과 아래 둘을 통틀어 2개 이상 채우면 된다.
+                        스킴은 http(s)가 아니라 `myapp://` 형태라 링크 형식 검사를 걸지 않는다(백엔드도 같다). */}
+                    {needScheme && (
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <input type="text" value={btn.scheme_android || ''} onChange={(e) => updateButton(idx, 'scheme_android', e.target.value)}
+                          className={`${FIELD} !px-2.5 !py-1.5 !text-xs`} placeholder="안드로이드 앱 실행 주소 (예: myapp://home)" />
+                        <input type="text" value={btn.scheme_ios || ''} onChange={(e) => updateButton(idx, 'scheme_ios', e.target.value)}
+                          className={`${FIELD} !px-2.5 !py-1.5 !text-xs`} placeholder="iOS 앱 실행 주소 (예: myapp://home)" />
+                      </div>
+                    )}
+                    {/* 비즈니스폼 — 카카오에 폼(예약·설문·응모)을 올리면 발급되는 키. 버튼명은 규격이 정한 3종뿐이라 위에서 고른다. */}
+                    {needBizForm && (
+                      <input type="text" value={btn.biz_form_key || ''} onChange={(e) => updateButton(idx, 'biz_form_key', e.target.value)}
+                        className={`${FIELD} !px-2.5 !py-1.5 !text-xs`} placeholder="비즈니스폼 키 (카카오에 폼을 등록하면 발급됩니다)" />
+                    )}
                   </div>
                   );
                 })}

@@ -19,7 +19,7 @@
 | 디스크 | 분할(§2) 5·2·26% | 899G (3%) | 899G (1%) | 1.9T (35%) | 3.6T (17%) | 937G (55%) |
 | 부하(16~20T 기준) | 0.38 | 1.16 | 0.00 | 0.40 | 0.38 | **5.72** |
 | 가동일수 | 57일 | 14일 | 15일 | 252일 | **1204일** | **1696일** |
-| 환경 | host/vm | host/vm | host/vm | 물리 | **컨테이너** | host/vm |
+| 환경 | **실물 · HPE ProLiant DL20 Gen11**(0922 DMI) | host/vm | **실물 · ASUS Z490-F**(0922 DMI) | 물리 | **컨테이너** | host/vm |
 
 **자원은 여섯 대 모두 여유롭다.** 부하 최대가 `.54`의 36%, 디스크 최대가 `.54`의 55%다. 성능이 병목인 지점은 현재 없다.
 
@@ -30,6 +30,8 @@
 - **도커 4개**: `targetup-mysql`·`targetup-postgres`·`targetup-redis`·`pay-ingest-db`
 - **메모리 상위**: mysqld 4.5G · postgres 1.2G · java ×4(각 1G, QTmsg 에이전트) · node 762M
 - **포트**: 외부 22·80·443·23388 / 로컬 전용 3306·5432·6379·8555
+- **★0922 실물 확인**(DMI · Harold): **HPE ProLiant DL20 Gen11** · `systemd-detect-virt` none · Xeon **6325P** 4C/8T(6300P 계열 최저 SKU) · 62G(DIMM 구성은 iLO에서) · 저장 컨트롤러 = 온보드 SATA AHCI만(NVMe·Smart Array 0) · 그 위 소비자용 TAMMUZ SATA SSD 1장. 섀시는 ECC·iLO 있는 진짜 서버, 낮았던 것은 부품 선택.
+- **용량·증설(0922)**: 고객 128만 · PG 4.1G · 1명당 1.9KB 실측 · 계획선 1,000만 · 첫 증설 = PG 전용 DB 분리(D94). **추천 = `.62` 제자리 증설**(DDR5 ECC 128G + 데이터센터용 NVMe 2장 미러 · CPU 8코어 교체는 선택) · `.66`은 다음 단계 PG 대기 서버. 산식·비교·절차 = [FEATURE-INFRA-CAPACITY.md §3-3](../docs/FEATURE-INFRA-CAPACITY.md)
 - ✅ **DB 바인딩 원칙 준수 실측** — MySQL·PG·Redis 전부 `127.0.0.1`. 랜섬웨어 이후 원칙이 실제로 지켜지고 있다.
 - ⚠ **23388 = `pay-ingest-db`(MariaDB) 외부 개방** — 상세 §3.
 - ⚠ **재부팅 시 자동 복구 공백(2026-08-16 실측)** — 도커 4종(DB)은 restart 정책으로 자동 복구되지만, **pm2 3종(systemd 유닛 없음 — dump는 저장돼 있어 `pm2 resurrect` 한 줄로 복원)과 QTmsg 발송 에이전트 11프로세스(0731 21:30 수동 기동 — 자동 기동 장치 전무)는 재부팅 후 수동 기동 필요.** Tomcat은 현재 미가동. 재부팅은 Harold 접속 가능 시간대로만 + 직후 pm2 resurrect·에이전트 기동. 근본 개선(자동 기동 등록)은 별도 과제.
@@ -51,6 +53,7 @@
 ### .66 — 사내 (58.227.193.66)
 그룹웨어 등 사내 용도. **부하 0.00**으로 사실상 유휴 — 사양 대비 여력이 가장 크다.
 - node·next-server·postgres 구동, 포트 외부 80·443·8080·4000
+- **★0922 실측**(Harold): 보드 **ASUS ROG STRIX Z490-F GAMING**(소비자용 · DDR4 4슬롯 · 최대 128G · M.2 2개 · ECC 없음) · i7-10700 16스레드 · RAM 31G(가용 28G) · 디스크 **Samsung SSD 870 931.5G SATA 1장**(13G 사용 · NVMe 없음) · 부하 0.03 · 가동 53일 · NIC `enp3s0` 하나(`drop 40/min`) · 구동 = pm2 `bito-console` + Bito Agent 4개(`bito-agent` + test-97/98/99) + MySQL(127.0.0.1) + PostgreSQL 16(127.0.0.1) + nginx. **한줄로 DB 분리 서버로 재활용 검토 중** = [FEATURE-INFRA-CAPACITY.md §3-2](../docs/FEATURE-INFRA-CAPACITY.md)(RAM 128G + NVMe 2장 · 그 위 것들은 경량 서버로 · Agent 이전 시 `.65` 9090 허용 목록 갱신)
 - ★2026-08-30 추가 = **MySQL 8.0.46**(`smsdb` · `bind-address` `127.0.0.1` · 3306·33060 외부 노출 0) + **Bito Agent v1.0.14**(`bito-agent.service` · `/opt/bito-agent` · agentID `bito-agent-01` · 대상 `SMSQ_SEND_13`). 발송 콘솔용 사내 확인 환경이다. 그룹웨어(PostgreSQL·next-server)와 접점 없음. 절차·불변 = `bito-console/docs/OPS.md` §7-6
 - ⚠ 커널 `6.8.0-31`로 같은 24.04 계열 중 가장 오래됐다(`.65`는 136). 패치 주기에서 빠져 있다.
 
@@ -80,6 +83,7 @@ QtMsg 3.0(`test11/12`)·4.0(`insvc11/12`)·KAW(웹)·ngen(GemTek 문자) 구동.
 | 4 | **.65** | 유닛 드롭인에 **IMC 비밀번호 평문**(`systemctl show`로 일반 사용자도 읽힘), `/etc/default`에 PG 비밀번호 평문 | `/etc/default/bito-gateway`는 0815에 `chmod 600` 적용. 드롭인(`zz-humuson-invito11.conf`)은 미조치 — EnvironmentFile로 이관 필요(재시작 1회) |
 | 5 | **.66** | 커널 6.8.0-31(계열 내 최고령) | 사내용이라 급하지 않으나 패치 주기 이탈 신호 |
 | 6 | **.58** | 스왑 758Mi 사용 이력 | 과거 메모리 압박. 원인 미확인 |
+| 7 | **.62** | **디스크 1장(TAMMUZ SATA SSD 1.9T · 소비자용 · 미러 없음)에 PG·MySQL·Redis·PAY 수집 DB 전부**(0922 `lsblk` 실측) · 0922 IO 대기 11.5%(가져오기 중 · fsync 대기 쪽) | 디스크 하나가 죽으면 네 DB가 같이 멈추고 복구는 백업 체계에 의존. **PG는 DB 분리 서버(D94)로 빠질 예정** · 남는 MySQL(발송 큐)은 그때 다시 판단. 용량 산식·사양·절차 = [FEATURE-INFRA-CAPACITY.md](../docs/FEATURE-INFRA-CAPACITY.md) |
 
 **정리된 것(0815)** — `sales@139.150.81.213`(옛 게이트웨이 잔여 계정) 삭제 완료 / `sales@58.227.193.65` 신설(PAY 적재용) / `/etc/default/bito-gateway` 권한 600.
 

@@ -13,7 +13,7 @@
 set -euo pipefail
 
 ### ── 설정 ────────────────────────────────────────────────────────────────
-GPG_RECIPIENT="EFF068D19AE32B3D305C7CE145C04B07D3CFBFA1"   # Hanjul Backup 공개키 지문
+GPG_RECIPIENT="C37BE420302EB51FAD8CF6C0EBC163F87CFFBFF8"   # Hanjul Backup 2026-09 공개키 지문 (★0922 교체 · 옛 키 EFF068D1…BFA1 은 암호 분실 · 옛 암호문은 존치)
 BACKUP_DIR="/home/administrator/backups"
 
 PG_CONTAINER="targetup-postgres"; PG_USER="targetup"; PG_DB="targetup"
