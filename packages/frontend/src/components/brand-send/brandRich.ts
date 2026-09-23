@@ -60,6 +60,36 @@ export function initialRich(code: string): RichState {
   };
 }
 
+/** 손대지 않은 카드인가 — 어느 칸이든 입력이 있으면 사용자의 것이다 */
+export function isEmptyRichCard(c: CardState): boolean {
+  const cm = c.commerce;
+  return !c.image && !c.imgLink.trim() && !c.header.trim() && !c.message.trim() && !c.additional.trim()
+    && !cm.title.trim() && !cm.regular.trim() && !cm.discount.trim() && !cm.rate.trim()
+    && c.buttons.length === 0;
+}
+
+/**
+ * 카드 수를 최소 장수에 맞춘다 — 끝쪽의 빈 카드만 빼고, 모자라면 빈 카드를 채운다. 입력한 카드는 건드리지 않는다.
+ * 발송 창과 템플릿 등록 화면(BrandTemplateForm)이 함께 쓴다(카드 모양이 달라 판정·생성 함수를 받는다).
+ */
+export function fitCarouselCards<T>(cards: T[], min: number, isEmpty: (c: T) => boolean, make: () => T): T[] {
+  const out = [...cards];
+  while (out.length > min && isEmpty(out[out.length - 1])) out.pop();
+  while (out.length < min) out.push(make());
+  return out;
+}
+
+/**
+ * 인트로 켜기·끄기 — 카드 수를 그 상태의 최소 장수에 맞춘다.
+ * ★ 2026-09-23 처음 깔리는 카드는 인트로 미사용 최소(2장)라, 인트로를 켜도 빈 카드 2가 남아
+ *   「카드 2: 이미지를 넣어 주세요」로 발송이 막혔다(규격 = 인트로를 쓰면 1장부터 · 0923 박성용 접수).
+ */
+export function toggleCarouselIntro(code: string, st: RichState, on: boolean): RichState {
+  const cs = BRAND_SPEC[code]?.carousel;
+  if (!cs?.allowIntro) return { ...st, introOn: on };
+  return { ...st, introOn: on, cards: fitCarouselCards(st.cards, on ? cs.listMinWithIntro : cs.listMin, isEmptyRichCard, emptyCard) };
+}
+
 /** 코드포인트 글자 수 — 백엔드 charLen과 같은 자(이모지 서로게이트 쌍 = 1자) */
 export const cpLen = (s: string): number => [...String(s || '')].length;
 export const nlCount = (s: string): number => (String(s || '').match(/\n/g) || []).length;
@@ -242,6 +272,8 @@ export function richBlockReason(code: string, st: RichState, urlButtonTypes: rea
         const r = commerceReason(c.commerce, at, s.maxCommerceTitle);
         if (r) return r;
       }
+      // ★2026-09-23 카드 버튼 최소(커머스 1) — 버튼 없는 캐러셀 커머스가 카카오 1030 으로 실패했다(차감 뒤)
+      if (c.buttons.length < cs.itemButtonMin) return `${at} 버튼을 ${cs.itemButtonMin}개 이상 넣어 주세요`;
       const br = buttonsReason(c.buttons, at, cs.itemButtonMax, s.maxButtonName, urlButtonTypes);
       if (br) return br;
     }

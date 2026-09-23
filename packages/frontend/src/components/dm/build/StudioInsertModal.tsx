@@ -5,9 +5,10 @@
  *   GET /api/image-studio/templates → POST /api/image-studio/generate(2크레딧·서버 차감) → POST /api/image-studio/save(라이브러리 보관)
  * 저장된 그림의 공개 주소를 호출부(블록)에 돌려준다. 실패하면 블록은 사진 없는 상태로 남는다(조립이 막히지 않는다).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ModalBase, { ModalButton } from '../modals/ModalBase';
 import { useToast } from '../../ToastProvider';
+import { fetchAuthObjectUrl } from '../../../lib/auth-download';
 
 const token = () => localStorage.getItem('token');
 const authFetch = (url: string, opts: RequestInit = {}) =>
@@ -30,10 +31,20 @@ export default function StudioInsertModal({
   const [title, setTitle] = useState(defaultTitle || '');
   const [subtitle, setSubtitle] = useState(defaultSubtitle || '');
   const [busy, setBusy] = useState<'gen' | 'save' | null>(null);
-  const [made, setMade] = useState<{ tempId: string; url: string } | null>(null);
+  // ★ 2026-09-23 미리보기는 blob 주소로 띄운다. 만든 그림의 주소(`/api/image-studio/temp/:id`)는 로그인 토큰이
+  //   있어야 열리는데 `<img src>` 는 토큰을 못 붙여 결과 화면이 빈칸이었다(0922 남지현 접수 · 「이 그림 넣기」는 tempId 로 저장해 정상).
+  //   preview = null 은 미리보기를 못 받은 경우다 — 넣기는 그대로 된다.
+  const [made, setMade] = useState<{ tempId: string; preview: string | null } | null>(null);
+  const previewUrl = useRef<string | null>(null);
+  const dropPreview = useCallback(() => {
+    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+    previewUrl.current = null;
+  }, []);
+  useEffect(() => dropPreview, [dropPreview]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) { dropPreview(); return; }
+    dropPreview();
     setMade(null);
     setTitle(defaultTitle || '');
     setSubtitle(defaultSubtitle || '');
@@ -45,7 +56,7 @@ export default function StudioInsertModal({
         setPicked((p) => p || list[0]?.id || '');
       })
       .catch(() => setTemplates([]));
-  }, [open, defaultTitle, defaultSubtitle]);
+  }, [open, defaultTitle, defaultSubtitle, dropPreview]);
 
   const generate = useCallback(async () => {
     if (!picked || busy) return;
@@ -61,11 +72,15 @@ export default function StudioInsertModal({
         toast.error(d?.error || '그림을 만들지 못했어요. 잠시 후 다시 시도해주세요.');
         return;
       }
-      setMade({ tempId: d.images[0].tempId, url: d.images[0].url });
+      let preview: string | null = null;
+      try { preview = await fetchAuthObjectUrl(d.images[0].url); } catch { /* 미리보기만 못 띄운다 · 넣기는 tempId 로 된다 */ }
+      dropPreview();
+      previewUrl.current = preview;
+      setMade({ tempId: d.images[0].tempId, preview });
     } finally {
       setBusy(null);
     }
-  }, [picked, title, subtitle, busy, toast]);
+  }, [picked, title, subtitle, busy, toast, dropPreview]);
 
   const insert = useCallback(async () => {
     if (!made || busy) return;
@@ -101,8 +116,14 @@ export default function StudioInsertModal({
     >
       {made ? (
         <div className="space-y-3">
-          <img src={made.url} alt="" className="w-full max-h-[52vh] object-contain rounded-xl border border-slate-200 bg-slate-100" />
-          <button type="button" onClick={() => setMade(null)} className="text-[12px] text-slate-500 hover:text-slate-800">다시 만들기</button>
+          {made.preview
+            ? <img src={made.preview} alt="만든 그림 미리보기" className="w-full max-h-[52vh] object-contain rounded-xl border border-slate-200 bg-slate-100" />
+            : (
+              <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-10 text-center text-[12.5px] text-slate-500">
+                미리보기를 불러오지 못했어요. 「이 그림 넣기」를 누르면 만든 그림이 그대로 들어갑니다.
+              </div>
+            )}
+          <button type="button" onClick={() => { dropPreview(); setMade(null); }} className="text-[12px] text-slate-500 hover:text-slate-800">다시 만들기</button>
         </div>
       ) : (
         <div className="space-y-3">

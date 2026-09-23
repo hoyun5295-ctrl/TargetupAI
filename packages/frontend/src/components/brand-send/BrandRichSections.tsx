@@ -12,7 +12,7 @@ import { Plus, X } from 'lucide-react';
 import { BRAND_SPEC } from '../../constants/brand-message-spec';
 import BrandImageSlot from './BrandImageSlot';
 import {
-  calcRate, carouselRefRatio, cpLen, emptyCard, emptyItem, nlCount, normalizeLinkInput,
+  calcRate, carouselRefRatio, cpLen, emptyCard, emptyItem, nlCount, normalizeLinkInput, toggleCarouselIntro,
   type CardState, type CommerceState, type RichButton, type RichState,
 } from './brandRich';
 
@@ -90,15 +90,21 @@ function PriceFields({ value, onChange, fieldClass, titleMax }: {
   );
 }
 
-function ButtonRows({ buttons, onChange, max, nameMax, fieldClass, accentText, buttonTypes }: {
-  buttons: RichButton[]; onChange: (next: RichButton[]) => void; max: number; nameMax: number;
+function ButtonRows({ buttons, onChange, max, min = 0, nameMax, fieldClass, accentText, buttonTypes }: {
+  buttons: RichButton[]; onChange: (next: RichButton[]) => void; max: number;
+  /** ★2026-09-23 카드 버튼 최소(규격 원장 itemButtonMin · 커머스 1) */
+  min?: number;
+  nameMax: number;
   fieldClass: string; accentText: string; buttonTypes: RichButtonTypeOption[];
 }) {
   const set = (i: number, patch: Partial<RichButton>) => onChange(buttons.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   return (
     <div>
       <div className="flex items-center justify-between gap-2 mb-2">
-        <span className={LABEL}>버튼 <span className={SUB}>최대 {max}개 · 버튼명 {nameMax}자</span></span>
+        <span className={LABEL}>
+          버튼{min > 0 && <> <span className="text-rose-500">*</span></>}{' '}
+          <span className={SUB}>{min > 0 ? `${min}~${max}개` : `최대 ${max}개`} · 버튼명 {nameMax}자</span>
+        </span>
         {buttons.length < max && (
           <button type="button" onClick={() => onChange([...buttons, { name: '', type: 'WL', url_mobile: '' }])}
             className={`inline-flex items-center gap-1 text-[12px] font-medium px-2 py-1 rounded-lg hover:bg-slate-50 transition ${accentText}`}>
@@ -133,7 +139,11 @@ function ButtonRows({ buttons, onChange, max, nameMax, fieldClass, accentText, b
             </div>
           );
         })}
-        {buttons.length === 0 && <p className="text-[11px] text-slate-400 px-1">버튼 없이 보낼 수 있습니다.</p>}
+        {buttons.length === 0 && (
+          min > 0
+            ? <p className="text-[11px] text-amber-600 px-1">카드마다 버튼이 {min}개 이상 있어야 보낼 수 있습니다. 상품으로 가는 웹링크를 넣어 주세요.</p>
+            : <p className="text-[11px] text-slate-400 px-1">버튼 없이 보낼 수 있습니다.</p>
+        )}
       </div>
     </div>
   );
@@ -268,7 +278,8 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
           {tab === 'intro' && cs.allowIntro && (
             <div className={`${panelClass} space-y-2.5`}>
               <label className="inline-flex items-center gap-2 text-[13px] text-slate-700 cursor-pointer select-none">
-                <input type="checkbox" checked={value.introOn} onChange={(e) => set({ introOn: e.target.checked })}
+                {/* ★ 2026-09-23 켜고 끌 때 끝쪽 빈 카드를 그 상태의 최소 장수에 맞춘다(인트로 = 1장부터) */}
+                <input type="checkbox" checked={value.introOn} onChange={(e) => onChange(toggleCarouselIntro(code, value, e.target.checked))}
                   className="w-4 h-4 rounded border-slate-300" />
                 인트로 사용 <span className="text-[11.5px] text-slate-400">맨 앞에 소개 카드가 하나 붙습니다 (쓰면 카드는 {cs.listMinWithIntro}~{cs.listMaxWithIntro}장)</span>
               </label>
@@ -326,7 +337,7 @@ export default function BrandRichSections({ code, value, onChange, fieldClass, p
                 </Row>
               )}
               <ButtonRows buttons={activeCard.buttons} onChange={(b) => setCard(activeIdx, { buttons: b })}
-                max={cs.itemButtonMax} nameMax={s.maxButtonName} fieldClass={fieldClass} accentText={accentText} buttonTypes={buttonTypes} />
+                max={cs.itemButtonMax} min={cs.itemButtonMin} nameMax={s.maxButtonName} fieldClass={fieldClass} accentText={accentText} buttonTypes={buttonTypes} />
             </div>
           )}
 

@@ -34,11 +34,12 @@ const feedCard = (over: Record<string, any> = {}) => ({
   ...over,
 });
 
-/** 규격을 지키는 최소 카드 (커머스) */
+/** 규격을 지키는 최소 카드 (커머스) — ★0923 버튼 1개 이상(itemButtonMin) */
 const commCard = (over: Record<string, any> = {}) => ({
   attachment: {
     image: { img_url: 'https://img/1.jpg' },
     commerce: { title: '부클 니트', regular_price: 89000 },
+    button: [{ name: '구매', type: 'WL', url_mobile: 'https://shop.example.co.kr/p/1' }],
   },
   ...over,
 });
@@ -245,8 +246,10 @@ describe('캐러셀 조립 (buildCarouselJson)', () => {
     const json = buildCarouselJson({
       intro: { header: '가을 기획전', content: '선착순 한정', image_url: 'https://img/intro.jpg' },
       cards: [
+        // ★0923 커머스 카드 버튼 최소 1(itemButtonMin) — 버튼 없는 카드는 카카오 1030 이었다
         { commerce: { title: '니트', regular_price: 89000, discount_price: 62300, discount_rate: 30 },
-          image: { img_url: 'https://img/1.jpg' }, additional_content: '무료배송' },
+          image: { img_url: 'https://img/1.jpg' }, additional_content: '무료배송',
+          buttons: [{ name: '구매', type: 'WL', url_mobile: 'https://maisonblanc.kr/p/1' }] },
       ],
       tail: { url_mobile: 'https://maisonblanc.kr/autumn' },
     })!;
@@ -328,6 +331,31 @@ describe('캐러셀 커머스 — 조립기 경로(buildBrandQueuePayload)', () 
 
   it('정상가가 없는 카드도 거절한다', () => {
     expect(build([card({ title: '부클 니트' }), card(GOODS)])).toThrow(/1번째 카드.*상품 정상가가 필요/);
+  });
+
+  // ★2026-09-23 재오픈 접수 — 버튼 없는 캐러셀 커머스 2건이 카카오 1030(잘못된 파라미터)으로 실패했다
+  //   (SMSQ_SEND_15 seqno 326208·326209). 같은 프로필에서 대상 M 은 다른 유형이 성공해 원인에서 빠졌고,
+  //   남은 차이가 카드 버튼이었다. 단일 커머스는 규격상 버튼 최소 1개(minButtons)다.
+  it('버튼이 없는 카드는 그 카드 번호와 함께 거절한다', () => {
+    const noBtn = { image: { img_url: KAKAO_IMG }, commerce: GOODS };
+    expect(build([card(GOODS), noBtn])).toThrow(/2번째 카드.*버튼이 최소 1개/);
+  });
+
+  it('카드 버튼 최소는 원장 값이다 (커머스 1 · 피드 0)', () => {
+    expect(COMM.carousel!.itemButtonMin).toBe(1);
+    expect(FEED.carousel!.itemButtonMin).toBe(0);
+  });
+
+  it('기본형은 카드 버튼 최소를 요구하지 않는다 (말풍선 minButtons 와 같은 규칙)', () => {
+    const noBtn = { attachment: { image: { img_url: 'https://img/1.jpg' }, commerce: GOODS } };
+    const car = { list: [noBtn, noBtn] };
+    expect(() => assertCarouselSpec(COMM, car, COMM.label)).toThrow(/버튼이 최소 1개/);
+    expect(() => assertCarouselSpec(COMM, car, COMM.label, { isFreeForm: false })).not.toThrow();
+  });
+
+  it('피드 카드는 버튼 없이도 통과한다 (최소 0)', () => {
+    const noBtnFeed = { header: '신상', message: '가을 니트', attachment: { image: { img_url: 'https://img/1.jpg' } } };
+    expect(() => assertCarouselSpec(FEED, { list: [noBtnFeed, noBtnFeed] }, FEED.label)).not.toThrow();
   });
 
   it('단일 커머스는 최상위 상품 정보를 그대로 요구한다 (캐러셀 예외가 번지지 않는다)', () => {

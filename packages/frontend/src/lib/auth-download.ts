@@ -23,6 +23,20 @@ export function filenameFromDisposition(cd: string, fallbackName: string): strin
   return fallbackName;
 }
 
+/**
+ * 인증 서빙 그림을 화면에 띄울 blob 주소로 받는다(쓰고 나면 부르는 쪽이 URL.revokeObjectURL).
+ *
+ * ★ 2026-09-23 `<img src>` 는 Authorization 헤더를 못 붙인다. 로그인이 필요한 주소
+ *   (예: `/api/image-studio/temp/:id`)를 그대로 넣으면 401 로 깨진다 — DM 블록 스튜디오 결과 미리보기 빈칸 접수.
+ *   서버가 거절하면 깨진 주소 대신 실패를 던진다.
+ *   검증 = backend/src/utils/__tests__/auth-object-url.test.ts
+ */
+export async function fetchAuthObjectUrl(url: string): Promise<string> {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+  if (!res.ok) throw new Error(`이미지를 불러오지 못했습니다 (${res.status})`);
+  return URL.createObjectURL(await res.blob());
+}
+
 export async function downloadAuthFile(url: string, fallbackName: string, onError: (m: string) => void) {
   try {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });

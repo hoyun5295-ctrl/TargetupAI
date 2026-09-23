@@ -140,6 +140,13 @@ export interface BrandCarouselSpec {
   itemAdditionalNewline: number;
   /** 카드당 버튼 최대 개수 */
   itemButtonMax: number;
+  /**
+   * 카드당 버튼 최소 개수 — 자유형만(기본형은 템플릿이 버튼을 갖는다 · 말풍선 minButtons 와 같은 규칙).
+   * ★2026-09-23 커머스 = 1. 버튼 없는 캐러셀 커머스 2건이 카카오 1030(잘못된 파라미터)으로 실패했다
+   *   (SMSQ_SEND_15 seqno 326208·326209). 같은 프로필·대상 M 으로 다른 유형은 성공해 대상은 원인에서 빠졌고,
+   *   남은 차이가 카드 버튼이었다. 단일 커머스도 규격상 버튼 최소 1개다(minButtons). 피드는 근거가 없어 0.
+   */
+  itemButtonMin: number;
 }
 
 /** 캐러셀 공통값 — 두 유형이 같은 자리는 여기서 한 번만 적는다(§5.3 표) */
@@ -184,7 +191,8 @@ export const BUBBLE_TYPES: Record<string, BrandBubbleSpec> = {
       allowIntro: false,          // §5.3 head = "CAROUSEL_COMMERCE 인 경우 사용"
       itemHeader: 'required',     // §5.3 "Header 필드 필수 - CAROUSEL_FEED"
       itemMessage: 'required',    // §5.3 "Message 필드 필수 - CAROUSEL_FEED"
-      itemAdditional: 'forbidden' // §5.3 "additional_content 필드 사용불가: CAROUSEL_FEED"
+      itemAdditional: 'forbidden', // §5.3 "additional_content 필드 사용불가: CAROUSEL_FEED"
+      itemButtonMin: 0,
     },
   },
   // PREMIUM_VIDEO의 HEADER·MESSAGE는 §4.4.1에서 둘 다 "선택"이다(옛 표는 헤더를 필수로 잘못 적고 있었다).
@@ -200,7 +208,8 @@ export const BUBBLE_TYPES: Record<string, BrandBubbleSpec> = {
       allowIntro: true,
       itemHeader: 'forbidden',    // §5.3 "Header 필드 사용불가 - CAROUSEL_COMMERCE"
       itemMessage: 'forbidden',   // §5.3 "Message 필드 사용불가 - CAROUSEL_COMMERCE"
-      itemAdditional: 'allowed'
+      itemAdditional: 'allowed',
+      itemButtonMin: 1,           // ★0923 실측 = 버튼 없는 카드 → 카카오 1030 (위 인터페이스 주석)
     },
   },
 };
@@ -1139,7 +1148,7 @@ function assertBrandContentSpec(input: {
   // ── 캐러셀 (§5.3 — head 인트로 / list 카드 / tail 더보기) ─────────────
   //   ★2026-08-28 신설. 그전에는 캐러셀 값이 오면 조립 앞단에서 통째로 거부했다.
   if (spec.carousel) {
-    assertCarouselSpec(spec, input.carousel, label);
+    assertCarouselSpec(spec, input.carousel, label, { isFreeForm });
   }
 }
 
@@ -1151,8 +1160,13 @@ function assertBrandContentSpec(input: {
  *   `list`(카드)   = 인트로 쓰면 1~5장, 안 쓰면 2~6장 · 유형별로 header·message가 필수이거나 사용불가
  *   `tail`(더보기) = url_mobile 필수 · **변수 사용 불가**
  */
-export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: string): void {
+export function assertCarouselSpec(
+  spec: BrandBubbleSpec, carousel: any, label: string,
+  opts: { isFreeForm?: boolean } = {},
+): void {
   const cs = spec.carousel!;
+  // 모르면 자유형으로 본다(엄격한 쪽) — 조립기는 언제나 값을 넘긴다
+  const isFreeForm = opts.isFreeForm !== false;
   const car = plainObjectOrThrow(carousel, '캐러셀');
   if (!car) throw new BrandMessageBuildError(`${label}: 캐러셀 카드가 필요합니다`);
 
@@ -1267,6 +1281,10 @@ export function assertCarouselSpec(spec: BrandBubbleSpec, carousel: any, label: 
     const cButtons = asArray(cAtt.button);
     if (cButtons.length > cs.itemButtonMax) {
       throw new BrandMessageBuildError(`${at}: 버튼은 최대 ${cs.itemButtonMax}개입니다 (현재 ${cButtons.length}개)`);
+    }
+    // ★2026-09-23 카드 버튼 최소 — 자유형만(말풍선 minButtons 와 같은 규칙). 커머스 = 1(원장 주석 참조).
+    if (isFreeForm && cButtons.length < cs.itemButtonMin) {
+      throw new BrandMessageBuildError(`${at}: 버튼이 최소 ${cs.itemButtonMin}개 필요합니다`);
     }
     cButtons.forEach((btn: any, bi: number) => {
       const bat = `${at} ${bi + 1}번째 버튼`;

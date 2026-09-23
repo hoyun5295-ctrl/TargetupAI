@@ -27,6 +27,7 @@ import {
   BRAND_COUPON_TITLE_FORMS,
   type BrandSpec,
 } from '../../constants/brand-message-spec';
+import { fitCarouselCards } from '../brand-send/brandRich';
 import {
   CUI_BTN_OUTLINE,
   CUI_BTN_PRIMARY,
@@ -176,6 +177,11 @@ const emptyCard = (): CardState => ({
   title: '', regular_price: '', discount_price: '', discount_rate: '', discount_fixed: '',
   buttons: [],
 });
+/** 손대지 않은 카드인가 — 인트로를 켜고 끌 때 끝쪽 빈 카드만 맞춘다(fitCarouselCards) */
+const isEmptyTemplateCard = (c: CardState): boolean =>
+  !c.header.trim() && !c.message.trim() && !c.additional_content.trim() && !c.img_url && !c.img_link.trim()
+  && !c.title.trim() && c.regular_price === '' && c.discount_price === '' && c.discount_rate === '' && c.discount_fixed === ''
+  && c.buttons.length === 0;
 
 function initialFormState(template: BrandTemplate | null | undefined): FormState {
   const t = template || {};
@@ -423,6 +429,8 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
           p.push(`${at}: 할인가를 넣으면 할인율 또는 정액할인가가 필요합니다`);
         }
         if (c.buttons.length > carSpec.itemButtonMax) p.push(`${at} 버튼이 ${carSpec.itemButtonMax}개를 넘습니다`);
+        // ★2026-09-23 카드 버튼 최소(커머스 1) — 버튼 없는 캐러셀 커머스가 카카오 1030 으로 실패했다(원장 itemButtonMin)
+        if (c.buttons.length < carSpec.itemButtonMin) p.push(`${at} 버튼이 ${carSpec.itemButtonMin}개 이상 필요합니다`);
         c.buttons.forEach((b) => {
           if (b.name.length > spec.maxButtonName) p.push(`${at} 버튼명이 ${spec.maxButtonName}자를 넘습니다`);
         });
@@ -1002,7 +1010,14 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
           right={carSpec.allowIntro ? (
             <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-neutral-700 cursor-pointer">
               <input type="checkbox" className="w-[15px] h-[15px] accent-indigo-600" disabled={isView}
-                checked={form.introOn} onChange={(e) => set('introOn', e.target.checked)} />
+                checked={form.introOn} onChange={(e) => {
+                  // ★ 2026-09-23 켜고 끌 때 끝쪽 빈 카드를 그 상태의 최소 장수에 맞춘다(인트로 = 1장부터 · 발송 창과 같은 함수)
+                  const on = e.target.checked;
+                  setForm((p) => ({
+                    ...p, introOn: on,
+                    cards: fitCarouselCards(p.cards, on ? carSpec.listMinWithIntro : carSpec.listMin, isEmptyTemplateCard, emptyCard),
+                  }));
+                }} />
               사용
             </label>
           ) : undefined}>
@@ -1170,7 +1185,8 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
           </Field>
         )}
 
-        <Field label="카드 버튼" hint={`카드당 최대 ${carSpec.itemButtonMax}개 · 버튼명 ${spec.maxButtonName}자`}>
+        <Field label="카드 버튼" required={carSpec.itemButtonMin > 0}
+          hint={`카드당 ${carSpec.itemButtonMin > 0 ? `${carSpec.itemButtonMin}~${carSpec.itemButtonMax}개` : `최대 ${carSpec.itemButtonMax}개`} · 버튼명 ${spec.maxButtonName}자`}>
           <ButtonRows disabled={isView} buttons={card.buttons} max={carSpec.itemButtonMax}
             maxName={spec.maxButtonName} onChange={(b) => patchCard(i, { buttons: b })} />
         </Field>

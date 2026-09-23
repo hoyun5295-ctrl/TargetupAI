@@ -35,6 +35,8 @@ export interface BrandSpecCarousel {
   itemAdditionalMax: number;
   itemAdditionalNewline: number;
   itemButtonMax: number;
+  /** 카드당 버튼 최소(자유형) — ★0923 커머스 1 · 백엔드 원장 주석이 근거를 소유한다 */
+  itemButtonMin: number;
 }
 
 export interface BrandSpec {
@@ -198,7 +200,8 @@ export const BRAND_SPEC: Record<string, BrandSpec> = {
         "allowIntro": false,
         "itemHeader": "required",
         "itemMessage": "required",
-        "itemAdditional": "forbidden"
+        "itemAdditional": "forbidden",
+        "itemButtonMin": 0
       },
       "opened": false
     },
@@ -283,7 +286,8 @@ export const BRAND_SPEC: Record<string, BrandSpec> = {
         "allowIntro": true,
         "itemHeader": "forbidden",
         "itemMessage": "forbidden",
-        "itemAdditional": "allowed"
+        "itemAdditional": "allowed",
+        "itemButtonMin": 1
       },
       "opened": false
     }

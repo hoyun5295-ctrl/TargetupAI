@@ -923,7 +923,10 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                   );
                 })}
                 {buttons.length === 0 && (
-                  <p className="text-[11px] text-slate-400 px-1">버튼 없이 보낼 수 있습니다.</p>
+                  // ★2026-09-23 최소 버튼이 있는 유형(커머스 = 1)에는 「버튼 없이」가 틀린 안내였다 — 서버는 차감 전에 막는다
+                  selectedType.minBtn > 0
+                    ? <p className="text-[11px] text-amber-600 px-1">버튼이 {selectedType.minBtn}개 이상 있어야 보낼 수 있습니다.</p>
+                    : <p className="text-[11px] text-slate-400 px-1">버튼 없이 보낼 수 있습니다.</p>
                 )}
               </div>
             </div>

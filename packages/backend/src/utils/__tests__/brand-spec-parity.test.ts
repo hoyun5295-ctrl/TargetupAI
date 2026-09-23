@@ -60,7 +60,7 @@ const CAROUSEL_KEYS = [
   'allowIntro', 'introHeaderMax', 'introContentMax', 'introContentNewline',
   'listMinWithIntro', 'listMaxWithIntro', 'listMin', 'listMax',
   'itemHeader', 'itemHeaderMax', 'itemMessage', 'itemMessageMax', 'itemMessageNewline',
-  'itemAdditional', 'itemAdditionalMax', 'itemAdditionalNewline', 'itemButtonMax',
+  'itemAdditional', 'itemAdditionalMax', 'itemAdditionalNewline', 'itemButtonMax', 'itemButtonMin',
 ] as const;
 
 describe('브랜드메시지 규격은 백엔드와 프론트가 같다', () => {
