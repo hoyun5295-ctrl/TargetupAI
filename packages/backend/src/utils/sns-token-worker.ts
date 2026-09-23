@@ -14,8 +14,7 @@
 
 import { query } from '../config/database';
 import { getSnsAdapter } from './sns';
-import { SnsAdapterError } from './sns/adapter';
-import { resolveSnsCredentials, saveRefreshedToken, setSnsAccountStatus, isMissingSnsTable } from './sns-accounts';
+import { resolveSnsCredentials, saveRefreshedToken, setSnsAccountStatus, isMissingSnsTable, isSnsReauthError } from './sns-accounts';
 import { SNS_ERROR_CODES, isSnsPlatform } from './sns-constants';
 
 const TICK_MS = 6 * 60 * 60 * 1000;      // 6시간
@@ -23,16 +22,9 @@ const FIRST_DELAY_MS = 60 * 1000;        // 부팅 1분 뒤
 const RENEW_BEFORE_DAYS = 14;            // 만료 14일 전부터 갱신 시도
 const MIN_REFRESH_INTERVAL_H = 24;       // 인스타 제약(§1-1)
 
-/** 이 오류가 "사람이 다시 연결해야 하는 상태"인가 — 일시 장애와 가른다. */
-function isReauthError(err: unknown): boolean {
-  if (!(err instanceof SnsAdapterError)) return false;
-  if (err.httpStatus === 400 || err.httpStatus === 401 || err.httpStatus === 403) return true;
-  return /expired|invalid|revoked|permission/i.test(err.message || '');
-}
-
 async function tick(): Promise<void> {
   const rows = await query(
-    `SELECT id, company_id, platform, access_token, token_expires_at, token_refreshed_at
+    `SELECT id, company_id, platform, access_token, refresh_token, token_expires_at, token_refreshed_at
        FROM sns_accounts
       WHERE status = 'active'
         AND access_token IS NOT NULL
@@ -49,13 +41,17 @@ async function tick(): Promise<void> {
     const adapter = getSnsAdapter(row.platform);
     const creds = resolveSnsCredentials(row.platform);
     if (!adapter || !creds.ok) continue;
+    // ★ 1차-B — 이 워커가 갱신하는 것은 `scheduled` 채널(Meta 장기 토큰)뿐이다.
+    //   X(`at_use`)는 게시·확인 직전에 행 잠금 안에서만 갱신한다 — 여기서 같이 돌리면 1회용 refresh token 을
+    //   두 곳이 동시에 써서 계정이 끊긴다(불변 25). 페이스북 페이지(`none`)는 만료가 없다.
+    if (adapter.capabilities.tokenRefresh !== 'scheduled') continue;
 
     try {
-      const token = await adapter.refreshToken(creds.credentials, row.access_token);
+      const token = await adapter.refreshToken(creds.credentials, row.access_token, row.refresh_token ?? null);
       if (!token) continue;   // 갱신 수단이 없는 플랫폼 — 건너뛴다.
       await saveRefreshedToken(row.id, token);
     } catch (err: any) {
-      if (isReauthError(err)) {
+      if (isSnsReauthError(err)) {
         // 만료·회수 — 계정을 닫고, 그 계정으로 잡힌 예약을 조용히 실패시키지 않는다.
         await setSnsAccountStatus(
           row.company_id, row.id, 'reauth_required',

@@ -168,10 +168,10 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   },
   {
     id: 'sns', path: '/sns', title: 'SNS 채널', icon: Share2, gradient: 'from-sky-400 to-violet-500',
-    summary: '회사 SNS 계정을 연결해 사진과 글을 올립니다.',
+    summary: '회사 SNS 계정을 연결해 사진·영상과 글을 올립니다.',
     steps: [
       { icon: Plug, title: '계정 연결', text: '채널 카드에서 연결을 누르면 그 채널 로그인 창이 열립니다.' },
-      { icon: ImagePlus, title: '사진 고르기', text: '올릴 사진을 고르면 채널 규격에 맞춰 준비됩니다.' },
+      { icon: ImagePlus, title: '사진·영상 고르기', text: '사진은 채널 규격에 맞춰 준비되고, 영상은 그대로 올라갑니다.' },
       { icon: Send, title: '올리기', text: '지금 올리거나 시각을 정해 두면 그때 올라갑니다.' },
     ],
     costs: [],

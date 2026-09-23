@@ -6,12 +6,13 @@
 // 보안: localhost 전용 (외부 차단). IP 검증으로 인증 secret 불필요.
 // 호출자: 같은 서버의 monitor-dist.sh (curl http://127.0.0.1:3000/api/internal/dist-alert)
 //
-// 발송 라인: SMSQ_SEND_10 (사전테스트 라인 — Harold님 결정).
+// 발송 라인: 테스트 라인그룹의 적재 테이블(getTestSendTable · 첫 테이블 — 사전테스트 라인, Harold님 결정).
+//   ★2026-09-23 테스트 그룹이 여러 테이블이 된 뒤로 배열째 넘기면 라운드로빈으로 번갈아 갔다 → 한 테이블로 고정.
 // 수신: 010-5295-8517 (환경변수 ADMIN_ALERT_PHONE으로 변경 가능)
 // ============================================================
 
 import { Router, Request, Response } from 'express';
-import { getTestSmsTables, bulkInsertSmsQueue } from '../utils/sms-queue';
+import { getTestSendTable, bulkInsertSmsQueue } from '../utils/sms-queue';
 
 const router = Router();
 
@@ -42,9 +43,9 @@ router.post('/dist-alert', async (req: Request, res: Response) => {
     }
     const message = rawMessage.slice(0, 1500); // LMS 안전 한도
 
-    // 3. 발송 라인 (사전테스트 = SMSQ_SEND_10)
-    const tables = await getTestSmsTables();
-    if (!tables || tables.length === 0) {
+    // 3. 발송 라인 (사전테스트 라인그룹의 적재 테이블 하나)
+    const table = await getTestSendTable();
+    if (!table) {
       console.error('[internal-alert] 테스트 SMS 라인 없음');
       return res.status(500).json({ error: 'no test sms tables configured' });
     }
@@ -69,7 +70,7 @@ router.post('/dist-alert', async (req: Request, res: Response) => {
     ];
 
     // 6. 큐 INSERT (즉시발송)
-    const sent = await bulkInsertSmsQueue(tables, [row], true);
+    const sent = await bulkInsertSmsQueue([table], [row], true);
     if (sent > 0) {
       console.log(`[internal-alert] 시스템 알림 발송 완료 → ${ADMIN_PHONE} (${sent}건)`);
       return res.json({ success: true, sentCount: sent });

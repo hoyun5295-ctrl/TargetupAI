@@ -45,12 +45,12 @@ export const instagramAdapter: ISnsPublishAdapter = {
   scopes: SCOPES,
   capabilities: {
     publishImage: true,
-    // 릴스(MP4)는 1차-B. 지금 true 로 두면 화면이 영상 칸을 열고 게시에서 실패한다.
-    publishVideo: false,
+    // ★ 2026-09-23 1차-B 릴스. 영상 1개는 REELS 컨테이너로 간다(아래 createPost).
+    publishVideo: true,
     publishCarousel: true,
     publishStory: false,
-    // 피드·캐러셀은 컨테이너가 바로 FINISHED 로 온다(§1-4). 릴스가 들어오는 1차-B 에서 true 가 된다.
-    asyncContainer: false,
+    // 피드·캐러셀은 컨테이너가 바로 FINISHED 로 오지만(§1-4) 릴스는 처리 시간이 있다.
+    asyncContainer: true,
     maxCaptionChars: 2200,
     maxTags: 30,
     dailyLimit: 100,
@@ -64,6 +64,22 @@ export const instagramAdapter: ISnsPublishAdapter = {
     imageAspectMax: 1.91,     // 1.91:1
     imageMaxWidth: 1440,
     imageMaxBytes: 8 * 1024 * 1024,
+    // ★ 1차-B — 공식 문서 기준(2026-09-23 열람 · raw 전 · 설계 1b §2).
+    publishText: false,          // 인스타는 사진·영상 없는 글이 없다
+    maxMediaCount: 10,           // 캐러셀 10장(§1-1)
+    // 릴스 규격 원문 = MOV·MP4 · moov 앞 · HEVC·H264 · 가로 최대 1920 · 0.01:1~10:1 · 3초~15분 · 300MB
+    video: {
+      maxBytes: 300 * 1024 * 1024,
+      minSec: 3,
+      maxSec: 900,
+      aspectMin: 0.01,
+      aspectMax: 10,
+      maxWidth: 1920,
+      codecs: ['avc1', 'avc3', 'hvc1', 'hev1'],
+    },
+    pollIntervalSec: 60,         // 원문 "분당 1회 조회 권장"
+    tokenRefresh: 'scheduled',
+    captionCounting: 'chars',
   },
 
   buildAuthorizeUrl(creds: SnsOAuthCreds, state: string): string {
@@ -167,17 +183,42 @@ export const instagramAdapter: ISnsPublishAdapter = {
   /**
    * 컨테이너 생성. 사진이 2장 이상이면 **캐러셀** 2단계다(§1-4 실측).
    *   ①자식마다 `is_carousel_item=true` ②부모 `media_type=CAROUSEL` + `children=id1,id2`(쉼표)
+   * ★ 1차-B — 영상 1개 = 릴스(`media_type=REELS` + `video_url` · 문서 기준 · raw 전).
    */
   async createPost(req: SnsPublishRequest): Promise<SnsContainerResult> {
-    if (req.mediaUrls.length === 0) {
-      throw new SnsAdapterError('instagram', 'media:empty', '올릴 사진이 없습니다.');
+    if (req.media.length === 0) {
+      throw new SnsAdapterError('instagram', 'media:empty', '올릴 사진이나 영상이 없습니다.');
     }
     const base = `${GRAPH}/${req.externalAccountId}/media`;
+    const videos = req.media.filter((m) => m.kind === 'video');
+
+    // 릴스 — 영상 1개만(1차-B · 사진과 섞지 않는다)
+    if (videos.length > 0) {
+      if (req.media.length !== 1) {
+        throw new SnsAdapterError('instagram', 'media:mixed', '영상은 한 개만, 사진과 섞지 않고 올릴 수 있어요.');
+      }
+      const form = new URLSearchParams({
+        media_type: 'REELS',
+        video_url: videos[0].url,
+        caption: req.caption,
+        share_to_feed: 'true',
+        access_token: req.accessToken,
+      });
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+      });
+      const body = await readSnsJson('instagram', res, 'reels');
+      const id = String(body?.id || '');
+      if (!id) throw new SnsAdapterError('instagram', 'reels:empty', '릴스 컨테이너 응답에 id 가 없습니다.', null, body);
+      return { containerId: id, ready: false };
+    }
 
     // 단일
-    if (req.mediaUrls.length === 1) {
+    if (req.media.length === 1) {
       const form = new URLSearchParams({
-        image_url: req.mediaUrls[0],
+        image_url: req.media[0].url,
         caption: req.caption,
         access_token: req.accessToken,
       });
@@ -195,9 +236,9 @@ export const instagramAdapter: ISnsPublishAdapter = {
 
     // 캐러셀 — 자식 먼저
     const children: string[] = [];
-    for (const url of req.mediaUrls) {
+    for (const m of req.media) {
       const form = new URLSearchParams({
-        image_url: url,
+        image_url: m.url,
         is_carousel_item: 'true',
         access_token: req.accessToken,
       });
@@ -238,8 +279,10 @@ export const instagramAdapter: ISnsPublishAdapter = {
     return {
       raw,
       ready: raw === 'FINISHED',
-      // ERROR·EXPIRED 는 되살릴 수 없다 — 워커가 폐기하고 다시 만든다(키는 불변).
+      // ERROR·EXPIRED 는 되살릴 수 없다 — 워커가 폐기하고 다시 만든다(키는 불변 · 3회째면 실패로 닫는다).
       failed: raw === 'ERROR' || raw === 'EXPIRED',
+      // `status` 에 사람이 읽는 사유가 온다(예: 영상 형식 거부). 원문 그대로 남긴다.
+      detail: body?.status ? String(body.status) : null,
     };
   },
 

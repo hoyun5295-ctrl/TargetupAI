@@ -42,10 +42,10 @@ export const threadsAdapter: ISnsPublishAdapter = {
   scopes: SCOPES,
   capabilities: {
     publishImage: true,
-    publishVideo: false,       // 1차-A 는 이미지만
+    publishVideo: true,        // ★ 2026-09-23 1차-B(`media_type=VIDEO` · 문서 기준 · raw 전)
     publishCarousel: true,     // 2~20장(§1-1)
     publishStory: false,
-    asyncContainer: false,
+    asyncContainer: true,      // 원문 "게시 전 평균 30초 대기 권장" · 영상은 처리 시간이 있다
     maxCaptionChars: 500,      // §1-1
     maxTags: 30,               // ⚠ 미검증 — Threads 는 태그 수 상한을 명시하지 않는다. 캡션 500자가 사실상 상한이다.
     dailyLimit: 250,           // §1-1
@@ -60,6 +60,22 @@ export const threadsAdapter: ISnsPublishAdapter = {
     imageAspectMax: 2.5,
     imageMaxWidth: 1440,
     imageMaxBytes: 8 * 1024 * 1024,
+    // ★ 1차-B — 공식 문서 기준(2026-09-23 열람 · 설계 1b §2).
+    publishText: true,           // 글만 올릴 수 있다(인스타와 다른 점)
+    maxMediaCount: 20,
+    // 영상 규격 원문 = MOV·MP4 · moov 앞 · HEVC·H264 · 가로 최대 1920 · 0.01:1~10:1 · 최대 5분 · 1GB
+    video: {
+      maxBytes: 1024 * 1024 * 1024,
+      minSec: 0,
+      maxSec: 300,
+      aspectMin: 0.01,
+      aspectMax: 10,
+      maxWidth: 1920,
+      codecs: ['avc1', 'avc3', 'hvc1', 'hev1'],
+    },
+    pollIntervalSec: 30,
+    tokenRefresh: 'scheduled',
+    captionCounting: 'chars',
   },
 
   buildAuthorizeUrl(creds: SnsOAuthCreds, state: string): string {
@@ -168,20 +184,31 @@ export const threadsAdapter: ISnsPublishAdapter = {
       return id;
     };
 
-    if (req.mediaUrls.length === 0) {
+    if (req.media.length === 0) {
       // 텍스트만 — Threads 는 글만 올릴 수 있다(인스타와 다른 점).
       return { containerId: await postForm({ media_type: 'TEXT', text: req.caption }, 'container'), ready: false };
     }
-    if (req.mediaUrls.length === 1) {
+    const videos = req.media.filter((m) => m.kind === 'video');
+    if (videos.length > 0) {
+      // ★ 1차-B — 영상 1개(사진과 섞지 않는다). 원문 = `media_type=VIDEO` + `video_url`.
+      if (req.media.length !== 1) {
+        throw new SnsAdapterError('threads', 'media:mixed', '영상은 한 개만, 사진과 섞지 않고 올릴 수 있어요.');
+      }
       return {
-        containerId: await postForm({ media_type: 'IMAGE', image_url: req.mediaUrls[0], text: req.caption }, 'container'),
+        containerId: await postForm({ media_type: 'VIDEO', video_url: videos[0].url, text: req.caption }, 'container'),
+        ready: false,
+      };
+    }
+    if (req.media.length === 1) {
+      return {
+        containerId: await postForm({ media_type: 'IMAGE', image_url: req.media[0].url, text: req.caption }, 'container'),
         ready: false,
       };
     }
 
     const children: string[] = [];
-    for (const url of req.mediaUrls) {
-      children.push(await postForm({ media_type: 'IMAGE', image_url: url, is_carousel_item: 'true' }, 'carousel-item'));
+    for (const m of req.media) {
+      children.push(await postForm({ media_type: 'IMAGE', image_url: m.url, is_carousel_item: 'true' }, 'carousel-item'));
     }
     return {
       containerId: await postForm({ media_type: 'CAROUSEL', children: children.join(','), text: req.caption }, 'carousel'),
@@ -198,6 +225,8 @@ export const threadsAdapter: ISnsPublishAdapter = {
       raw,
       ready: raw === 'FINISHED',
       failed: raw === 'ERROR' || raw === 'EXPIRED',
+      // 원문 목록 = FAILED_DOWNLOADING_VIDEO · FAILED_PROCESSING_VIDEO · INVALID_DURATION … (troubleshooting 문서)
+      detail: body?.error_message ? String(body.error_message) : null,
     };
   },
 

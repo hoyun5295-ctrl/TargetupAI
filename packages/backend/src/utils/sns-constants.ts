@@ -63,6 +63,11 @@ export const SNS_ERROR_CODES = {
   SCHEDULE_EXPIRED: 'SCHEDULE_EXPIRED',
   RATE_LIMITED: 'RATE_LIMITED',
   PLATFORM_REJECTED: 'PLATFORM_REJECTED',
+  // ★ 2026-09-23 1차-B
+  CHANNEL_CLOSED: 'CHANNEL_CLOSED',          // 개방 판정이 닫힘(ENV·실비 상한 해제)
+  MONTHLY_CAP: 'MONTHLY_CAP',                // 실비 채널 이번 달 상한(불변 23)
+  CONTAINER_FAILED: 'CONTAINER_FAILED',      // 컨테이너 실패 상한 3회(D3)
+  PROCESSING_TIMEOUT: 'PROCESSING_TIMEOUT',  // 처리 30분 초과
 } as const;
 
 /**

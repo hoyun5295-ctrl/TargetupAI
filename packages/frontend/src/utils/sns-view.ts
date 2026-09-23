@@ -22,6 +22,16 @@ export interface SnsAccount {
   tokenExpiresAt: string | null;
 }
 
+export interface SnsVideoSpec {
+  maxBytes: number;
+  minSec: number;
+  maxSec: number;
+  aspectMin: number;
+  aspectMax: number;
+  maxWidth: number | null;
+  codecs: readonly string[] | null;
+}
+
 export interface SnsCapabilities {
   publishImage: boolean;
   publishVideo: boolean;
@@ -36,6 +46,13 @@ export interface SnsCapabilities {
   verify: 'immediate' | 'deferred' | 'none';
   ephemeral: boolean;
   mediaTransfer: 'pull_url' | 'upload';
+  // ★ 2026-09-23 1차-B (docs/2026-09-23-sns-1b-design.md §3-4)
+  publishText: boolean;
+  maxMediaCount: number;
+  video: SnsVideoSpec | null;
+  pollIntervalSec: number;
+  tokenRefresh: 'scheduled' | 'at_use' | 'none';
+  captionCounting: 'chars' | 'x_weighted';
 }
 
 export interface SnsSpec {
@@ -144,4 +161,118 @@ export function snsAccountAbility(cap: SnsCapabilities | undefined): string {
   if (cap.publishCarousel) parts.push('여러 장');
   if (parts.length === 0) parts.push('글');
   return parts.join(' · ');
+}
+
+// ───────────────────────── ★ 2026-09-23 1차-B — 서버 CT 미러 ─────────────────────────
+// ⛔ 원본 = backend/src/utils/sns-media-fit.ts(snsMediaBlockReason·planSnsVideoFit) ·
+//    backend/src/utils/sns-caption-rules.ts(countSnsCaption). **문구·값까지 같아야 한다** —
+//    칩 아래 사유와 저장 거절 사유가 다르면 사용자가 두 번 헷갈린다. 계약 테스트(sns-1b-rules)가 같은 표로 맞춘다.
+
+export interface SnsMediaSummary {
+  images: number;
+  videos: number;
+}
+
+/** 이 채널이 이 미디어 조합을 받지 못하는 사유 한 문장. 받으면 null. */
+export function snsMediaBlockReason(summary: SnsMediaSummary, cap: SnsCapabilities): string | null {
+  const images = Math.max(0, summary.images | 0);
+  const videos = Math.max(0, summary.videos | 0);
+  if (images + videos === 0) return cap.publishText ? null : '사진이나 영상이 있어야 올릴 수 있어요.';
+  if (videos > 1) return '영상은 한 개만 올릴 수 있어요.';
+  if (videos > 0 && images > 0) return '영상과 사진은 함께 올릴 수 없어요.';
+  if (videos > 0) return cap.publishVideo ? null : '영상은 올릴 수 없어요.';
+  if (!cap.publishImage) return '사진은 올릴 수 없어요.';
+  if (images > 1 && !cap.publishCarousel) return '사진은 한 장만 올릴 수 있어요.';
+  if (images > cap.maxMediaCount) return `사진은 ${cap.maxMediaCount}장까지 올릴 수 있어요.`;
+  return null;
+}
+
+export interface SnsVideoFacts {
+  bytes: number;
+  durationSec: number | null;
+  width: number | null;
+  height: number | null;
+  videoCodec: string | null;
+}
+
+function secText(sec: number): string {
+  return sec >= 60 && sec % 60 === 0 ? `${sec / 60}분` : `${sec}초`;
+}
+function bytesText(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 && mb % 1024 === 0 ? `${mb / 1024}GB` : `${Math.floor(mb)}MB`;
+}
+function ratioText(r: number): string {
+  return r >= 1 ? `${Math.round(r * 100) / 100}:1` : `1:${Math.round((1 / r) * 100) / 100}`;
+}
+function codecNames(codecs: readonly string[]): string {
+  const names: string[] = [];
+  if (codecs.some((c) => c === 'avc1' || c === 'avc3')) names.push('H.264');
+  if (codecs.some((c) => c === 'hvc1' || c === 'hev1')) names.push('HEVC');
+  return names.join(' 또는 ');
+}
+function aspectOf(width: number | null, height: number | null): number | null {
+  const w = Number(width);
+  const h = Number(height);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+  return w / h;
+}
+
+/** 이 영상을 이 채널이 받는가. **확인된 위반만 막는다** — 모르는 값(null)은 통과. */
+export function planSnsVideoFit(v: SnsVideoFacts, spec: SnsVideoSpec | null): { accepted: boolean; notice: string } {
+  if (!spec) return { accepted: false, notice: '영상은 올릴 수 없어요.' };
+  if (v.bytes > spec.maxBytes) return { accepted: false, notice: `영상이 너무 커요. ${bytesText(spec.maxBytes)} 이하로 올려 주세요.` };
+  if (v.durationSec !== null && v.durationSec < spec.minSec) {
+    return { accepted: false, notice: `영상이 너무 짧아요. ${secText(spec.minSec)} 이상이어야 해요.` };
+  }
+  if (v.durationSec !== null && v.durationSec > spec.maxSec) {
+    return { accepted: false, notice: `영상이 너무 길어요. ${secText(spec.maxSec)}까지 올릴 수 있어요.` };
+  }
+  if (spec.codecs && v.videoCodec !== null && !spec.codecs.includes(v.videoCodec)) {
+    return { accepted: false, notice: `받지 않는 영상 형식이에요. ${codecNames(spec.codecs)}로 내보낸 영상을 올려 주세요.` };
+  }
+  if (spec.maxWidth !== null && v.width !== null && v.width > spec.maxWidth) {
+    return { accepted: false, notice: `가로 ${spec.maxWidth}px 이하로 내보낸 영상만 올릴 수 있어요.` };
+  }
+  const aspect = aspectOf(v.width, v.height);
+  if (aspect !== null && (aspect < spec.aspectMin || aspect > spec.aspectMax)) {
+    return { accepted: false, notice: `화면 비율이 받는 범위(${ratioText(spec.aspectMin)}~${ratioText(spec.aspectMax)})를 벗어났어요.` };
+  }
+  return { accepted: true, notice: '' };
+}
+
+const X_SCHEME_URL_RE = /https?:\/\/[^\s]+/gi;
+const X_BARE_URL_RE = /\b(?:[a-z0-9-]+\.)+(?:com|net|org|ai|io|co|kr|me|app|dev|shop|store|info|biz|xyz|jp|us|tv|ly|gg)\b(?:\/[^\s]*)?/gi;
+const X_EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}]{2}|\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}|\u200D\p{Extended_Pictographic}\uFE0F?)*/gu;
+
+function xWeight(cp: number): number {
+  if (cp <= 4351) return 1;
+  if (cp >= 8192 && cp <= 8205) return 1;
+  if (cp >= 8208 && cp <= 8223) return 1;
+  if (cp >= 8242 && cp <= 8247) return 1;
+  return 2;
+}
+
+/** 채널 방식으로 센 글자 수. chars = 코드포인트 수 · x_weighted = X 가중(한글·이모지 2 · 링크 23). */
+export function countSnsCaption(text: string, mode: 'chars' | 'x_weighted'): number {
+  const raw = String(text ?? '');
+  if (mode !== 'x_weighted') return [...raw].length;
+  let total = 0;
+  let marks = 0;
+  const take = (w: number) => () => { total += w; marks += 1; return '\n'; };
+  const rest = raw.normalize('NFC')
+    .replace(X_SCHEME_URL_RE, take(23))
+    .replace(X_BARE_URL_RE, take(23))
+    .replace(X_EMOJI_RE, take(2));
+  for (const ch of rest) total += xWeight(ch.codePointAt(0) ?? 0);
+  return total - marks;
+}
+
+/** 영상 한 개 상한 — 서버 `sns-media.ts SNS_VIDEO_MAX_BYTES` 와 같은 값(계약 테스트). 넘으면 전송을 시작하지 않는다. */
+export const SNS_VIDEO_MAX_BYTES = 300 * 1024 * 1024;
+
+/** 영상 길이 표기(1:05 · 12:30). */
+export function formatSnsDuration(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }

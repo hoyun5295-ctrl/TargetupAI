@@ -21,6 +21,43 @@ const TAG_BODY_RE = /^[0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ_]+$/;
 export interface SnsCaptionSpec {
   maxCaptionChars: number;
   maxTags: number;
+  /** ★ 1차-B — 글자 세는 방식. 없으면 chars(1차-A 동작 그대로) */
+  captionCounting?: SnsCaptionCounting;
+}
+
+export type SnsCaptionCounting = 'chars' | 'x_weighted';
+
+// ───────────── ★ 2026-09-23 1차-B — X 가중 글자 수 ─────────────
+// 근거 = docs.x.com counting-characters(2026-09-23 열람): 280 가중 · CJK·이모지 2 · URL 23 · NFC.
+// 가중 1 구간 = twitter-text v3 설정값(0~4351 · 8192~8205 · 8208~8223 · 8242~8247). 그 밖은 2.
+// ⚠ 근사 둘: ①스킴 없는 주소는 흔한 도메인 끝말만 주소로 본다 ②키캡 이모지는 따로 묶지 않는다.
+//   둘 다 **더 크게 세는 쪽이 아니라 같은 값**을 내는 흔한 경우를 덮는다. 실측에서 다르면 이 블록만 고친다.
+// ⛔ 화면 미러 = frontend/src/utils/sns-view.ts countSnsCaption. 계약 테스트가 같은 표로 둘을 맞춘다.
+const X_SCHEME_URL_RE = /https?:\/\/[^\s]+/gi;
+const X_BARE_URL_RE = /\b(?:[a-z0-9-]+\.)+(?:com|net|org|ai|io|co|kr|me|app|dev|shop|store|info|biz|xyz|jp|us|tv|ly|gg)\b(?:\/[^\s]*)?/gi;
+const X_EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}]{2}|\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}|\u200D\p{Extended_Pictographic}\uFE0F?)*/gu;
+
+function xWeight(cp: number): number {
+  if (cp <= 4351) return 1;
+  if (cp >= 8192 && cp <= 8205) return 1;
+  if (cp >= 8208 && cp <= 8223) return 1;
+  if (cp >= 8242 && cp <= 8247) return 1;
+  return 2;
+}
+
+/** 채널 방식으로 센 글자 수. chars = 코드포인트 수(1차-A 그대로) · x_weighted = X 가중. */
+export function countSnsCaption(text: string, mode: SnsCaptionCounting): number {
+  const raw = String(text ?? '');
+  if (mode !== 'x_weighted') return [...raw].length;
+  let total = 0;
+  let marks = 0;
+  const take = (w: number) => () => { total += w; marks += 1; return '\n'; };
+  const rest = raw.normalize('NFC')
+    .replace(X_SCHEME_URL_RE, take(23))
+    .replace(X_BARE_URL_RE, take(23))
+    .replace(X_EMOJI_RE, take(2));
+  for (const ch of rest) total += xWeight(ch.codePointAt(0) ?? 0);
+  return total - marks;   // 자리표시 줄바꿈(가중 1)은 원문에 없던 글자다
 }
 
 export interface SnsCaptionInput {
@@ -91,7 +128,8 @@ export function buildSnsCaption(input: SnsCaptionInput, spec: SnsCaptionSpec): S
   if (input.aiNotice) parts.push(BRAND_AI_IMAGE_NOTICE);
 
   const text = parts.join('\n\n');
-  const length = [...text].length;   // 이모지·결합 문자를 1자로 세는 쪽이 플랫폼 카운트에 가깝다
+  // chars = 이모지·결합 문자를 1자로 세는 쪽이 Meta 계열 카운트에 가깝다 · X 는 가중(★ 1차-B)
+  const length = countSnsCaption(text, spec.captionCounting ?? 'chars');
   const limit = spec.maxCaptionChars;
   const overBy = Math.max(0, length - limit);
 

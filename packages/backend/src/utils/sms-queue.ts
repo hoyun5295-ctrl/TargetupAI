@@ -148,6 +148,16 @@ export async function getTestSmsTables(): Promise<string[]> {
 }
 
 /**
+ * 테스트 라인그룹의 적재 테이블 = 첫 테이블(insertTestSmsQueue · MFA 문자와 같은 자리).
+ * 배열 전체(getTestSmsTables)는 조회·정산이 옛 라인 이력까지 보려고 쓴다. 적재에 배열을 통째로 넘기면
+ * bulkInsertSmsQueue 전역 라운드로빈으로 라인이 번갈아 간다(2026-09-23 테스트 그룹 {16,10} · 16 = 시스템 발송 전용).
+ */
+export async function getTestSendTable(): Promise<string> {
+  const [table] = await getTestSmsTables();
+  return table;
+}
+
+/**
  * ★ D103: 테스트/스팸필터 전용 단건 SMS INSERT 컨트롤타워
  * spam-test-queue.ts, spam-filter.ts, campaigns.ts test-send에서
  * 인라인으로 반복되던 테스트 INSERT 로직을 한 곳으로 통합.

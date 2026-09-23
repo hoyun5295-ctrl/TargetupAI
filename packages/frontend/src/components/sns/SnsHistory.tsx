@@ -129,7 +129,7 @@ export default function SnsHistory({ specs, reloadKey }: Props) {
                         {p.scheduled_at ? `${when(p.scheduled_at)} 예정` : when(p.created_at)}
                       </span>
                     </div>
-                    <p className="text-sm text-white/80 mt-1.5 line-clamp-2 break-keep">{p.body || '(사진만)'}</p>
+                    <p className="text-sm text-white/80 mt-1.5 line-clamp-2 break-keep">{p.body || '(글 없음)'}</p>
                   </div>
                   {cancellable && (
                     <button onClick={() => void cancel(p.id)}

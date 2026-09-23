@@ -194,7 +194,7 @@ export default function SnsPage() {
           </div>
           <div className="min-w-0 flex-1">
             <h1 className={OUI_TITLE}>SNS 채널</h1>
-            <p className={OUI_SUBTITLE}>회사 SNS 계정을 연결하고 사진과 글을 올립니다.</p>
+            <p className={OUI_SUBTITLE}>회사 SNS 계정을 연결하고 사진·영상과 글을 올립니다.</p>
           </div>
           {enabled && (
             <button onClick={() => void load()} className={OUI_BTN_GHOST}>
@@ -213,7 +213,7 @@ export default function SnsPage() {
             </div>
             <p className={OUI_EMPTY_TITLE}>준비 중인 기능이에요</p>
             <p className={OUI_EMPTY_DESC}>
-              회사마다 순서대로 열고 있습니다. 열리면 이 화면에서 인스타그램과 Threads 계정을 연결할 수 있어요.
+              회사마다 순서대로 열고 있습니다. 열리면 이 화면에서 회사 SNS 계정을 연결할 수 있어요.
             </p>
           </section>
         ) : (
@@ -336,7 +336,7 @@ export default function SnsPage() {
             {accounts.every((a) => a.status !== 'active') && (
               <section className={`${OUI_CARD} p-4 mt-6`}>
                 <p className="text-xs text-white/50 leading-relaxed break-keep">
-                  채널을 하나 연결하면 바로 올릴 수 있어요. 인스타그램은 프로페셔널(비즈니스·크리에이터) 계정만 연결됩니다.
+                  채널을 하나 연결하면 바로 올릴 수 있어요. 인스타그램은 프로페셔널(비즈니스·크리에이터) 계정만, 페이스북은 관리하는 페이지가 연결됩니다.
                 </p>
               </section>
             )}

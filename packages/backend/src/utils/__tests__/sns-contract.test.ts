@@ -31,6 +31,7 @@ const WALK = readFileSync(resolve(FRONT, 'components/AiOperatorWalkthroughModal.
 const INTROS = readFileSync(resolve(FRONT, 'constants/plan-feature-intros.ts'), 'utf8');
 const APP = readFileSync(resolve(FRONT, 'App.tsx'), 'utf8');
 const PLAN_GUARD = readFileSync(resolve(__dirname, '../plan-guard.ts'), 'utf8');
+const ROUTE_SRC = readFileSync(resolve(__dirname, '../../routes/sns.ts'), 'utf8');
 const AI_ROUTE = readFileSync(resolve(__dirname, '../../routes/ai.ts'), 'utf8');
 const SECRET = 'test-secret-for-sns-state';
 
@@ -109,11 +110,12 @@ describe('어댑터 계약', () => {
     expect(platforms).toEqual([...SNS_PLATFORMS].sort());
   });
 
-  it('1차-A 는 열려 있고 1차-B 는 스켈레톤(available:false)이다', () => {
-    expect(getSnsAdapter('instagram')!.available).toBe(true);
-    expect(getSnsAdapter('threads')!.available).toBe(true);
-    expect(getSnsAdapter('facebook_page')!.available).toBe(false);
-    expect(getSnsAdapter('x')!.available).toBe(false);
+  it('★ 1차-B(0923) — 네 채널 모두 코드가 준비돼 있고, 실제 개방은 자격 ENV·실비 상한이 정한다(sns-availability)', () => {
+    for (const p of ['instagram', 'threads', 'facebook_page', 'x'] as const) {
+      expect(getSnsAdapter(p)!.available).toBe(true);
+    }
+    // 화면 specs 는 어댑터의 available 을 그대로 싣지 않고 개방 판정 함수를 거친다(코드 배포만으로 열리지 않게).
+    expect(ROUTE_SRC).toMatch(/available:\s*snsChannelAvailable\(a\)\.ok/);
   });
 
   it('capabilities 는 전 채널이 직접 선언한다', () => {
@@ -132,7 +134,8 @@ describe('어댑터 계약', () => {
     expect(ig.capabilities.maxCaptionChars).toBe(2200);
     expect(ig.capabilities.maxTags).toBe(30);
     expect(ig.capabilities.publishCarousel).toBe(true);
-    expect(ig.capabilities.publishVideo).toBe(false);
+    // ★ 1차-B(0923) — 릴스가 열렸다(문서 기준 · raw 전 · 설계 1b §2)
+    expect(ig.capabilities.publishVideo).toBe(true);
     expect(ig.scopes).toContain('instagram_business_content_publish');
   });
 
@@ -140,7 +143,8 @@ describe('어댑터 계약', () => {
     const x = getSnsAdapter('x')!;
     expect(x.capabilities.metered).toBe(true);
     expect(x.capabilities.mediaTransfer).toBe('upload');
-    expect(x.capabilities.verify).toBe('deferred');
+    // ★ 1차-B(0923) deferred → immediate — 공식 요금 = 글 읽기 건당 $0.005 · 타임라인 대조는 읽은 글 수만큼 과금(설계 1b §3-7)
+    expect(x.capabilities.verify).toBe('immediate');
     expect(listSnsAdapters().filter((a) => a.capabilities.metered).map((a) => a.platform)).toEqual(['x']);
   });
 
@@ -156,9 +160,17 @@ describe('어댑터 계약', () => {
     expect(url).not.toContain('sec');
   });
 
-  it('스켈레톤 채널은 연결을 시도하면 사유와 함께 막는다', () => {
+  it('★ 1차-B — X 는 PKCE 값 없이 연결 주소를 만들지 않는다 · 페이스북은 로그인 1회에 계정 N개를 선언한다', () => {
+    const x = getSnsAdapter('x')!;
+    expect(x.pkce).toBe(true);
+    expect(() => x.buildAuthorizeUrl({ clientId: 'a', clientSecret: 'b', redirectUri: 'c' }, 's')).toThrow();
+    const url = x.buildAuthorizeUrl({ clientId: 'a', clientSecret: 'sec', redirectUri: 'c' }, 's', { codeChallenge: 'CH' });
+    expect(url).toContain('code_challenge=CH');
+    expect(url).toContain('code_challenge_method=S256');
+    expect(url).not.toContain('sec');
     const fb = getSnsAdapter('facebook_page')!;
-    expect(() => fb.buildAuthorizeUrl({ clientId: 'a', clientSecret: 'b', redirectUri: 'c' }, 's')).toThrow();
+    expect(typeof fb.fetchAccounts).toBe('function');
+    expect(fb.deauthKey).toBe('owner');
   });
 });
 

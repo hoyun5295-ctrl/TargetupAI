@@ -12,10 +12,10 @@
  * ⛔ 토큰은 이 파일 밖으로 원문이 나가지 않는다. 화면 직렬화(`toAccountCard`)에 토큰 필드가 없다.
  */
 
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
 import { resolveProviderOAuthCredentials } from './provider-credentials';
 import type { SnsAccountStatus, SnsPlatform } from './sns-constants';
-import type { SnsAccountProfile, SnsOAuthCreds, SnsTokenResult } from './sns/adapter';
+import { SnsAdapterError, getSnsAdapter, type ISnsAdapter, type SnsAccountProfile, type SnsOAuthCreds, type SnsTokenResult } from './sns/adapter';
 
 /** 테이블 미생성(42P01) 판별 — 마이그레이션 전 배포에서 500 대신 안내를 내기 위한 축(`db_alter_safety_net`). */
 export function isMissingSnsTable(err: any): boolean {
@@ -65,6 +65,9 @@ export interface SnsAccountCard {
 }
 
 export function toAccountCard(row: SnsAccountRow): SnsAccountCard {
+  // ★ 1차-B — 게시 직전에 갱신하는 채널(X · 액세스 2시간)은 토큰 만료가 곧 연결 만료가 아니다.
+  //   그대로 내보내면 화면이 "1일 남음"이라고 말한다 — 만료 시각을 싣지 않는다.
+  const shortLived = getSnsAdapter(row.platform)?.capabilities.tokenRefresh === 'at_use';
   return {
     id: row.id,
     platform: row.platform,
@@ -75,7 +78,7 @@ export function toAccountCard(row: SnsAccountRow): SnsAccountCard {
     statusReason: row.status_reason,
     connectedAt: row.connected_at ? row.connected_at.toISOString() : null,
     lastVerifiedAt: row.last_verified_at ? row.last_verified_at.toISOString() : null,
-    tokenExpiresAt: row.token_expires_at ? row.token_expires_at.toISOString() : null,
+    tokenExpiresAt: !shortLived && row.token_expires_at ? row.token_expires_at.toISOString() : null,
   };
 }
 
@@ -83,12 +86,15 @@ export function toAccountCard(row: SnsAccountRow): SnsAccountCard {
  * 한줄로 자체 앱 자격(ENV). 회사 자체 앱 자격은 2차(Advanced Access 우회 경로)에서 붙는다 —
  * 그때 첫 인자에 회사 자격을 넘기면 이 함수가 그대로 우선 적용한다(§3-10).
  */
-export function resolveSnsCredentials(platform: SnsPlatform): { ok: true; credentials: SnsOAuthCreds } | { ok: false; reason: string } {
+export function resolveSnsCredentials(
+  platform: SnsPlatform,
+  env: Record<string, string | undefined> = process.env,
+): { ok: true; credentials: SnsOAuthCreds } | { ok: false; reason: string } {
   const prefix = platform === 'facebook_page' ? 'FACEBOOK_PAGE' : platform.toUpperCase();
   const resolved = resolveProviderOAuthCredentials(null, {
-    clientId: process.env[`${prefix}_CLIENT_ID`],
-    clientSecret: process.env[`${prefix}_CLIENT_SECRET`],
-    redirectUri: process.env[`${prefix}_REDIRECT_URI`],
+    clientId: env[`${prefix}_CLIENT_ID`],
+    clientSecret: env[`${prefix}_CLIENT_SECRET`],
+    redirectUri: env[`${prefix}_REDIRECT_URI`],
   });
   if (!resolved.ok) {
     return { ok: false, reason: '이 채널은 아직 연결 준비가 끝나지 않았어요. 잠시 뒤 다시 시도해 주세요.' };
@@ -248,4 +254,77 @@ export async function saveRefreshedToken(accountId: string, token: SnsTokenResul
       WHERE id = $1::uuid`,
     [accountId, token.accessToken, token.refreshToken ?? null, token.expiresAt ?? null, token.scope ?? null],
   );
+}
+
+// ───────────────────────── ★ 2026-09-23 1차-B — 재연결 판정 · 사용 직전 갱신 ─────────────────────────
+
+/** 이 오류가 "사람이 다시 연결해야 하는 상태"인가 — 일시 장애와 가른다(토큰 워커에서 옮겨 와 발행·대조 워커와 같이 쓴다). */
+export function isSnsReauthError(err: unknown): boolean {
+  if (!(err instanceof SnsAdapterError)) return false;
+  if (err.httpStatus === 400 || err.httpStatus === 401 || err.httpStatus === 403) return true;
+  return /expired|invalid|revoked|permission/i.test(err.message || '');
+}
+
+/** 만료 이만큼 전이면 게시 전에 갱신한다. */
+const AT_USE_MARGIN_MS = 10 * 60 * 1000;
+
+/**
+ * 게시·확인 직전에 쓸 액세스 토큰. `tokenRefresh='at_use'` 채널(X · 액세스 2시간)만 여기서 갱신한다.
+ *
+ * ⛔ 불변 25 — refresh token 은 1회용일 수 있다. 두 워커가 같은 계정을 동시에 갱신하면 늦은 쪽이 쓴 값이
+ *   무효가 되어 계정이 통째로 끊긴다. 그래서 **계정 행을 `FOR UPDATE` 로 잡은 트랜잭션 안에서만** 갱신하고,
+ *   잠금을 얻은 뒤 만료 시각을 다시 본다(먼저 들어온 쪽이 이미 갱신했으면 그 값을 쓴다).
+ */
+export async function ensureFreshSnsToken(
+  account: { id: string; company_id: string; platform: SnsPlatform; access_token: string | null; token_expires_at: Date | string | null },
+  adapter: ISnsAdapter,
+): Promise<string> {
+  const current = String(account.access_token || '');
+  if (adapter.capabilities.tokenRefresh !== 'at_use') return current;
+  const exp = account.token_expires_at ? new Date(account.token_expires_at).getTime() : 0;
+  if (current && exp > Date.now() + AT_USE_MARGIN_MS) return current;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(
+      `SELECT access_token, refresh_token, token_expires_at FROM sns_accounts
+        WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+      [account.id, account.company_id],
+    );
+    const row = r.rows[0];
+    if (!row?.access_token) {
+      await client.query('ROLLBACK');
+      throw new SnsAdapterError(adapter.platform, 'token:missing', '채널 연결이 끊어졌어요. 다시 연결해 주세요.', 401);
+    }
+    const lockedExp = row.token_expires_at ? new Date(row.token_expires_at).getTime() : 0;
+    if (lockedExp > Date.now() + AT_USE_MARGIN_MS) {
+      await client.query('COMMIT');
+      return String(row.access_token);
+    }
+    const creds = resolveSnsCredentials(adapter.platform);
+    if (!creds.ok) {
+      await client.query('ROLLBACK');
+      throw new SnsAdapterError(adapter.platform, 'creds:missing', creds.reason, null);
+    }
+    const t = await adapter.refreshToken(creds.credentials, String(row.access_token), row.refresh_token ?? null);
+    if (!t) {
+      await client.query('COMMIT');
+      return String(row.access_token);
+    }
+    await client.query(
+      `UPDATE sns_accounts
+          SET access_token = $2, refresh_token = COALESCE($3, refresh_token), token_expires_at = $4,
+              token_refreshed_at = NOW(), meta = COALESCE(meta, '{}'::jsonb) - 'refresh_error', updated_at = NOW()
+        WHERE id = $1::uuid`,
+      [account.id, t.accessToken, t.refreshToken ?? null, t.expiresAt ?? null],
+    );
+    await client.query('COMMIT');
+    return t.accessToken;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }

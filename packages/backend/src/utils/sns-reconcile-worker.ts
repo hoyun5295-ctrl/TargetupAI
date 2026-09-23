@@ -18,9 +18,9 @@
 
 import { query } from '../config/database';
 import { getSnsAdapter } from './sns';
-import { isSnsPublishAdapter, SnsAdapterError, type SnsPublishRequest } from './sns/adapter';
+import { isSnsPublishAdapter, SnsAdapterError, type ISnsAdapter, type SnsPublishRequest } from './sns/adapter';
 import { isSnsPlatform } from './sns-constants';
-import { isMissingSnsTable } from './sns-accounts';
+import { ensureFreshSnsToken, isMissingSnsTable } from './sns-accounts';
 
 const TICK_MS = 30 * 60 * 1000;
 const FIRST_DELAY_MS = 90 * 1000;
@@ -31,9 +31,9 @@ const VERIFY_GIVE_UP_HOURS = 24;
 /** 한 tick 에 재조회할 최대 건수(플랫폼 호출을 몰아치지 않는다). */
 const BATCH = 30;
 
-async function buildRequest(row: any): Promise<SnsPublishRequest | null> {
+async function buildRequest(row: any, adapter: ISnsAdapter): Promise<SnsPublishRequest | null> {
   const acc = await query(
-    `SELECT access_token, external_account_id, status FROM sns_accounts
+    `SELECT id, company_id, platform, access_token, token_expires_at, external_account_id, status FROM sns_accounts
       WHERE id = $1::uuid AND company_id = $2::uuid`,
     [row.account_id, row.company_id],
   );
@@ -41,10 +41,11 @@ async function buildRequest(row: any): Promise<SnsPublishRequest | null> {
   if (!account?.access_token) return null;
   return {
     externalAccountId: account.external_account_id,
-    accessToken: account.access_token,
+    // ★ 1차-B — X 는 액세스 토큰이 2시간이라 확인 직전에 갱신한다(행 잠금 안에서 · 불변 25).
+    accessToken: await ensureFreshSnsToken(account, adapter),
     caption: row.caption,
     format: row.format,
-    mediaUrls: [],   // 재조회에는 미디어가 필요 없다
+    media: [],   // 재조회에는 미디어가 필요 없다
   };
 }
 
@@ -91,10 +92,9 @@ async function verifySubmitted(): Promise<void> {
     if (!isSnsPublishAdapter(adapter)) continue;
     if (adapter.capabilities.verify === 'none') continue;   // 확인 수단이 없는 채널은 건드리지 않는다
 
-    const req = await buildRequest(row);
-    if (!req) continue;
-
     try {
+      const req = await buildRequest(row, adapter);
+      if (!req) continue;
       const fetched = await adapter.fetchPost(req, row.platform_post_id);
       if (fetched.exists) {
         await query(
@@ -152,10 +152,12 @@ async function detectDeleted(): Promise<void> {
     const adapter = getSnsAdapter(row.platform);
     if (!isSnsPublishAdapter(adapter)) continue;
     if (adapter.capabilities.ephemeral) continue;   // 스토리처럼 원래 사라지는 것은 대조 대상이 아니다
+    // ★ 1차-B — 실비 채널은 삭제 감지를 하지 않는다. 30분마다 같은 글을 다시 읽으면 읽을 때마다 과금된다(설계 1b §3-7).
+    if (adapter.capabilities.metered) continue;
 
-    const req = await buildRequest(row);
-    if (!req) continue;
     try {
+      const req = await buildRequest(row, adapter);
+      if (!req) continue;
       const fetched = await adapter.fetchPost(req, row.platform_post_id);
       if (!fetched.exists) {
         await query(

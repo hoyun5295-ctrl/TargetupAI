@@ -10,9 +10,9 @@
 
 - **무엇**: 회사가 자기 SNS 계정을 OAuth 로 연결하고(비밀번호 저장 0), 사진과 글을 **한 번** 쓰면 고른 채널마다 그 채널 규격으로 각각 올라간다. 성공은 **플랫폼 재조회로만** 확정한다.
 - **어디**: `/sns` · AI Operator 허브 3행 3열 카드 `SNS 채널`.
-- **채널(2026-09-21)**: 인스타그램·Threads = **연결·게시 코드 완료** / 페이스북 페이지·X = 스켈레톤(`available:false` · 1차-B).
+- **채널(2026-09-23 1차-B)**: 인스타그램·Threads·페이스북 페이지·X = **연결·게시 코드 완료 · 영상 포함**(인스타 = 릴스). 카드가 실제로 열리는지는 **자격 ENV(+ X 는 월 상한 ENV)** 가 정한다(`sns-availability.ts`). 설계·결정 = [2026-09-23 1차-B 설계서](2026-09-23-sns-1b-design.md).
 - **개방**: ENV `SNS_COMPANY_IDS` **회사 단위**. ENV 밖 회사도 **카드는 보이고**, 누르면 기능 안내 창이 열린다(숨기지 않는다).
-- **상태**: S0·S1 배포·게이트 통과(자사 계정 연결 실동작). **S2·S3 코드 완료 · 게시 실측 대기.**
+- **상태**: S0·S1 배포·게이트 통과(자사 계정 연결 실동작). **S2·S3 코드 완료 · 게시 실측 대기.** **1차-B 코드 완료(0923) · 미배포 · 전 경로 문서 기준(raw 전).**
 
 ---
 
@@ -48,8 +48,10 @@
 | 채널 | `utils/sns/{instagram,threads,facebook-page,x}.ts` | **채널 1개 = 파일 1개.** 상수·endpoint·scope 를 그 파일이 직접 선언한다(화면 추론 0) |
 | 계정 원장 | `utils/sns-accounts.ts` | 계정 CRUD · 자격 해석 · 화면 직렬화(**토큰 필드 없음**). ⛔ `company_integrations` 를 import 하지 않는다(정적 계약) |
 | OAuth | `utils/sns-auth-state.ts` | state 서명·TTL·미래 시각 방어. 1회용 보장은 `sns_oauth_states` 행이 한다(두 겹) |
-| 규격 판정 | `utils/sns-media-fit.ts` | **§5 규칙의 값 소유자.** 순수 함수(sharp 0) |
-| 미디어 | `utils/sns-media.ts` | 원본 저장 · 소재 복사 · 게시본 굽기(JPEG 재판독) · 경로 조작 차단 |
+| 규격 판정 | `utils/sns-media-fit.ts` | **§5 규칙의 값 소유자.** 순수 함수(sharp 0) · ★1차-B 채널별 미디어 수용(`snsMediaBlockReason`) · 영상 판정(`planSnsVideoFit`) |
+| 영상 판독 | `utils/sns-video-probe.ts` | ★1차-B ISO-BMFF 판독(길이·표시 크기·코덱·초당 프레임) · **moov 앞당김(무손실)** |
+| 개방 판정 | `utils/sns-availability.ts` | ★1차-B 코드·자격 ENV·실비 월 상한 셋 다. 카드·연결·저장·워커가 이 함수 하나를 부른다 |
+| 미디어 | `utils/sns-media.ts` | 원본 저장 · 소재 복사 · 게시본 굽기(JPEG 재판독 · ★target·미디어별 파일) · 경로 조작 차단 · ★영상 4MB 조각 세션(디스크만) · 서명 서빙 파일 해석 |
 | 캡션 | `utils/sns-caption-rules.ts` | 확정본 조립 · 상한 판정 · 태그 정규화. **전 경로가 이 함수를 지난다** |
 | AI | `utils/sns-caption-ai.ts` | 토큰 치환·복원 · 세트 부분집합 강제 · 출구 차단기 |
 | 서명 URL | `utils/sns-signed-media.ts` | HMAC + **상태 결박 판정**(`isSnsMediaUrlLive`) |
@@ -68,9 +70,11 @@
 | 채널 | 연결 | 게시 | 비고 |
 |---|---|---|---|
 | **인스타그램** | 실동작(0920) | 코드 완료 · 실측 대기 | 상수 전량 실측 확정(설계서 §1-4). ⛔ **계정 ID 는 `/me` 값**(대시보드 표시값과 다르다) · ⛔ **`media_url` 저장 금지**(CDN 만료) · **삭제 API 없음**(사람이 지운 것을 대조 워커가 감지) |
-| **Threads** | 실동작(0921) | 코드 완료 · **미검증** | 연결 경로만 확정(설계서 §1-5). **앱 ID·시크릿이 인스타와 별개** · 게시 경로(`/threads`·`/threads_publish`·`text` 파라미터)는 문서 기준 |
-| 페이스북 페이지 | 스켈레톤 | — | 1차-B. Facebook Login 기반이라 **계정 1 = 페이지 N** 구조 설계가 선행 |
-| X | 스켈레톤 | — | 1차-B. **호출마다 실비**(`metered`) · 미디어를 우리가 업로드 · 확인은 타임라인 대조(`deferred`) |
+| **Threads** | 실동작(0921) | 코드 완료 · **미검증** | 연결 경로만 확정(설계서 §1-5). **앱 ID·시크릿이 인스타와 별개** · 게시 경로(`/threads`·`/threads_publish`·`text` 파라미터)는 문서 기준 · ★영상 `VIDEO` 최대 5분 |
+| 페이스북 페이지 | 코드 완료(0923) · **미검증** | 코드 완료 · **미검증** | Facebook Login · **로그인 1회 = 페이지 N행**(페이지 토큰 만료 없음) · 글·사진·여러 장(`attached_media`)·영상(`file_url`) · 권한 회수는 사람 id → `meta.profile.owner_user_id` · 실제 게시는 `publish` 안에서만 |
+| X | 코드 완료(0923) · **미검증** | 코드 완료 · **미검증** | **PKCE** · 액세스 2시간 → **게시 직전 행 잠금 갱신** · 사진 4장·영상 조각 업로드 · **글 1건 $0.015 · 링크 $0.200 · 읽기 $0.005(공식)** → 확인은 게시 직후 1건(`immediate`로 변경) · 삭제 감지 제외 · **월 상한 ENV 없으면 닫힘** |
+
+**영상(1차-B)** = 한 게시물에 1개 · 사진과 섞지 않는다 · **다시 인코딩하지 않는다** · 인스타·Threads 규격의 "moov atom at the front" 때문에 moov 가 뒤에 있으면 **상자 순서만 바꾼다**(위치표 보정 · 영상 바이트 불변) · 판정은 확인된 위반만 막는다(모르는 값은 통과) · 업로드 300MB(인스타 상한) · 4MB 조각.
 
 스켈레톤도 **어댑터로 등록돼 있다** — 화면이 채널 목록을 지어내지 않고 서버가 준 것만 그리기 위해서다. 연결을 누르면 사유와 함께 막힌다.
 
@@ -101,7 +105,10 @@
 | `SNS_COMPANY_IDS` | 회사 id 목록 · `*` = 전 회사 | **비면 기능이 닫힌다**(워커도 안 뜬다). 되돌리기 = 비우고 재시작 |
 | `INSTAGRAM_CLIENT_ID/SECRET/REDIRECT_URI` | Meta 앱 Instagram 유스케이스 | 콜백 = `/api/sns/auth/callback/instagram` |
 | `THREADS_CLIENT_ID/SECRET/REDIRECT_URI` | **인스타와 별개 값** | 콜백 = `/api/sns/auth/callback/threads` |
-| `SNS_MEDIA_PATH` · `SNS_RENDER_PATH` | 원본·게시본 보관 | 생략 시 `./uploads/sns-media`·`./uploads/sns-render` |
+| `SNS_MEDIA_PATH` · `SNS_RENDER_PATH` | 원본·게시본 보관 | 생략 시 `./uploads/sns-media`·`./uploads/sns-render` · 영상 조각은 `SNS_MEDIA_PATH/_incoming/{회사}` (6시간 지나면 정리) |
+| `FACEBOOK_PAGE_CLIENT_ID/SECRET/REDIRECT_URI` | ★1차-B Meta 앱 **Facebook 로그인** 이용 사례 | 콜백 = `/api/sns/auth/callback/facebook_page` · 권한 회수 = `/api/sns/deauthorize/facebook_page` |
+| `X_CLIENT_ID/SECRET/REDIRECT_URI` | ★1차-B X 개발자 콘솔 OAuth 2.0 **Web App(기밀)** | 콜백 = `/api/sns/auth/callback/x` |
+| `SNS_X_MONTHLY_POST_CAP` | ★1차-B X 이번 달 게시 상한(전 회사 합산) | **비었거나 0 이면 X 카드가 `준비 중`**(fail-closed). 콘솔 지출 상한이 두 번째 겹 |
 
 **게이트 순서** = 인증 → `requirePlanFeature('sns_publish')`(FREE 만 차단) → ENV. ⛔ 뒤집으면 ENV 에 든 FREE 회사가 뚫린다.
 
@@ -119,7 +126,9 @@
 | 4 | Threads **게시 경로 미검증** | 연결만 확정. 실측에서 다르면 `sns/threads.ts` 게시 블록만 교정 |
 | 5 | Threads **데이터 삭제 콜백이 임시 주소** | 설계서 §9-9. 2차 심사에서 걸릴 수 있음 |
 | 6 | 프로페셔널 아닌 계정의 `ineligible` 경로 | 그런 계정이 있어야 확인 가능 |
-| 7 | 1차-B(릴스·페북·X) · 2차(고객 개방·심사) | 설계서 §5 |
+| 7 | ~~1차-B(릴스·페북·X)~~ **코드 완료 0923** · 2차(고객 개방·심사) | 1차-B 설계서 §8 실측 6건 · §9 미검증 9건 · §10 별건 5건 |
+| 8 | **1차-B 배포 전 DB 확인 1회** — `sns_media`·`sns_post_targets` CHECK 제약에 `'video'` 가 막히지 않는지 | 1차-B 설계서 §6 SQL(Harold) |
+| 9 | **1차-B Codex 적대 검토** — X 실비 경로 · 발행 워커 D1·D3 · 행 잠금 갱신 | 미실행(Harold) |
 
 ---
 
@@ -136,4 +145,5 @@
 | 0921 | Threads 연결 실동작 | 앱 ID 가 인스타와 **실제로 별개**임이 확인돼 ENV 분리가 맞았다 |
 | 0921 | **비율 처리가 설계보다 강해졌다** | 설계는 "잘림 표시 뒤 선택"이었으나 Harold 확정으로 §5 가 됐다. 경계 오차 0.5% 도 이때 들어갔다(1200x628 이 0.04% 초과로 여백이 붙던 것) |
 | 0921 | 소재 라이브러리 픽커 누락 → 보강 | 설계서 §4-2 에 있었는데 구현에서 빠졌다. **`asset_id` 가 AI 표시 자동 부착의 유일한 근거**라 그냥 빠지면 안 되는 자리였다 |
+| 0923 | **1차-B 코드 완료** — 영상(릴스·Threads·페북·X) · 페이스북 페이지 · X | [1차-B 설계서](2026-09-23-sns-1b-design.md). 뒤집힌 판단 = X 확인 `deferred → immediate`(공식 요금이 건당 $0.005 라 타임라인 대조가 더 비싸다) · 업로드는 nginx 를 바꾸지 않고 4MB 조각 · 발견 결함 3(D1 처리 5분 넘으면 영구 올리는 중 · D2 캐러셀이 마지막 사진 N장 · D3 컨테이너 무한 재생성 = B-0923-5) |
 | 0923 | 작성 구역 썸네일 깨짐 수정(B-0923-4) | 미리보기 주소가 인증 뒤인데 `<img src>` 로 불러 401. 주소는 인증 그대로 두고 화면이 헤더를 실어 blob 으로 받는다. **화면 미리보기용 인증 주소는 `<img src>` 에 그대로 넣지 않는다** |

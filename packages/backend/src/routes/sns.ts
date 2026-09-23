@@ -19,9 +19,9 @@
  *   복귀 HTML 이 인라인 스크립트를 쓰기 때문이다. CSP 뒤에 두면 창이 안 닫힌다.
  */
 
-import { Router, Request, Response, urlencoded } from 'express';
+import { Router, Request, Response, urlencoded, raw } from 'express';
 import { findLinkDefectInText } from '../utils/normalize';
-import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
@@ -33,9 +33,14 @@ import {
   listSnsAccounts, getSnsAccount, upsertPendingAccount, applyAccountProfile,
   setSnsAccountStatus, revokeSnsAccount, resolveSnsCredentials, toAccountCard, isMissingSnsTable,
 } from '../utils/sns-accounts';
-import { storeSnsMedia, copyAssetToSnsMedia, snsMediaAbsPath, snsRenderAbsPath, SnsMediaError, SNS_IMAGE_MAX_BYTES } from '../utils/sns-media';
+import {
+  storeSnsMedia, copyAssetToSnsMedia, snsMediaAbsPath, SnsMediaError, SNS_IMAGE_MAX_BYTES,
+  startSnsVideoUpload, appendSnsVideoChunk, completeSnsVideoUpload, resolveSnsServeFile, SNS_UPLOAD_CHUNK_BYTES,
+} from '../utils/sns-media';
 import { verifySnsMediaToken, isSnsMediaUrlLive } from '../utils/sns-signed-media';
-import { planSnsFit } from '../utils/sns-media-fit';
+import { planSnsFit, snsMediaBlockReason, planSnsVideoFit, type SnsVideoFacts } from '../utils/sns-media-fit';
+import { probeSnsVideoFile } from '../utils/sns-video-probe';
+import { snsChannelAvailable } from '../utils/sns-availability';
 import { buildSnsCaption, normalizeSnsTags, tightestCaptionChannel } from '../utils/sns-caption-rules';
 import { buildSnsIdempotencyKey } from '../utils/sns-idempotency';
 import { generateSnsCaption } from '../utils/sns-caption-ai';
@@ -71,12 +76,16 @@ function adapterErrorMessage(err: unknown): string {
 router.use(authenticate);
 router.use(requirePlanFeature('sns_publish'));
 
-/** 채널 규격 — 어댑터가 선언한 값 그대로. 화면은 이 값만 보고 추론하지 않는다(§3-3). */
+/**
+ * 채널 규격 — 어댑터가 선언한 값 그대로. 화면은 이 값만 보고 추론하지 않는다(§3-3).
+ * ★ 1차-B — `available` = 코드 · 자격 ENV · 실비 상한 셋 다(`snsChannelAvailable` · 불변 23).
+ *   코드만 배포되고 ENV 가 없으면 카드는 `준비 중` 그대로다.
+ */
 function specsPayload() {
   return listSnsAdapters().map((a) => ({
     platform: a.platform,
     label: a.label,
-    available: a.available,
+    available: snsChannelAvailable(a).ok,
     capabilities: a.capabilities,
   }));
 }
@@ -131,12 +140,25 @@ router.post('/auth/start/:platform', async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: '알 수 없는 채널입니다.' });
   }
   const adapter = getSnsAdapter(platform);
-  if (!adapter || !adapter.available) {
+  if (!adapter) {
     return res.status(400).json({ success: false, error: '아직 준비 중인 채널이에요.' });
+  }
+  const open = snsChannelAvailable(adapter);
+  if (!open.ok) {
+    return res.status(400).json({ success: false, code: 'SNS_CHANNEL_CLOSED', error: open.reason });
   }
   const creds = resolveSnsCredentials(platform);
   if (!creds.ok) {
     return res.status(503).json({ success: false, code: 'SNS_CREDENTIALS_MISSING', error: creds.reason });
+  }
+
+  // ★ 1차-B — PKCE 채널(X). verifier 는 1회용 state 행에만 두고(30분 · 소비 시 삭제) 주소에는 해시만 싣는다.
+  let codeChallenge: string | undefined;
+  const statePayload: Record<string, string> = {};
+  if (adapter.pkce) {
+    const verifier = randomBytes(32).toString('base64url');
+    statePayload.code_verifier = verifier;
+    codeChallenge = createHash('sha256').update(verifier).digest('base64url');
   }
 
   const nonce = randomUUID();
@@ -144,7 +166,7 @@ router.post('/auth/start/:platform', async (req: Request, res: Response) => {
     await query(
       `INSERT INTO sns_oauth_states (state_nonce, company_id, platform, created_by, payload, expires_at)
        VALUES ($1, $2::uuid, $3, $4::uuid, $5::jsonb, NOW() + ($6 || ' milliseconds')::interval)`,
-      [nonce, companyId, platform, userId, JSON.stringify({}), String(SNS_OAUTH_STATE_TTL_MS)],
+      [nonce, companyId, platform, userId, JSON.stringify(statePayload), String(SNS_OAUTH_STATE_TTL_MS)],
     );
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
@@ -155,7 +177,7 @@ router.post('/auth/start/:platform', async (req: Request, res: Response) => {
   const state = signSnsState({ companyId, platform, nonce, ts: Date.now() });
   return res.json({
     success: true,
-    authorizeUrl: adapter.buildAuthorizeUrl(creds.credentials, state),
+    authorizeUrl: adapter.buildAuthorizeUrl(creds.credentials, state, { codeChallenge }),
     stateNonce: nonce,
   });
 });
@@ -216,7 +238,7 @@ router.post('/media', snsUpload.single('file'), async (req: Request, res: Respon
     const row = r.rows[0];
     return res.json({
       success: true,
-      media: { id: row.id, width: row.width, height: row.height },
+      media: { id: row.id, width: row.width, height: row.height, kind: 'image' },
       fits: fitsByChannel(stored.width, stored.height),
     });
   } catch (err: any) {
@@ -282,7 +304,7 @@ router.post('/media/from-asset', async (req: Request, res: Response) => {
     const row = r.rows[0];
     return res.json({
       success: true,
-      media: { id: row.id, width: row.width, height: row.height },
+      media: { id: row.id, width: row.width, height: row.height, kind: 'image' },
       fits: fitsByChannel(stored.width, stored.height),
     });
   } catch (err: any) {
@@ -302,9 +324,93 @@ function fitsByChannel(width: number, height: number) {
       label: a.label,
       untouched: !plan.needsAspectChange && !plan.resized,
       notice: plan.notice,
+      accepted: true,
     };
   });
 }
+
+/** ★ 1차-B — 이 영상을 채널마다 받는가. 영상은 손대지 않으므로 받으면 언제나 "그대로"다(불변 21). */
+function videoFitsByChannel(v: SnsVideoFacts) {
+  return listSnsAdapters().filter((a) => a.available).map((a) => {
+    const fit = planSnsVideoFit(v, a.capabilities.video);
+    return { platform: a.platform, label: a.label, untouched: true, notice: fit.notice, accepted: fit.accepted };
+  });
+}
+
+// ───────────────────────────── 영상 조각 업로드 (★ 2026-09-23 1차-B · 설계 1b §3-2) ─────────────────────────────
+// nginx 본문 상한(가이드 전역 5M)을 바꾸지 않도록 4MB 조각으로 받는다. 세션은 디스크에만 있다(메모리 상태 0).
+
+function sendMediaError(res: Response, err: any, what: string) {
+  if (err instanceof SnsMediaError) return res.status(400).json({ success: false, code: err.code, error: err.message });
+  if (isMissingSnsTable(err)) return sendDbPending(res);
+  console.error(`[SNS video] ${what} 오류:`, err);
+  return res.status(500).json({ success: false, error: '영상을 올리지 못했습니다.' });
+}
+
+router.post('/media/uploads', async (req: Request, res: Response) => {
+  const companyId = (req as any).user?.companyId as string;
+  const userId = (req as any).user?.id ?? null;
+  try {
+    const r = await startSnsVideoUpload({
+      companyId,
+      userId,
+      originalName: String(req.body?.name || ''),
+      totalBytes: Number(req.body?.bytes),
+    });
+    return res.json({ success: true, uploadId: r.uploadId, chunkBytes: r.chunkBytes });
+  } catch (err: any) {
+    return sendMediaError(res, err, '업로드 시작');
+  }
+});
+
+router.put(
+  '/media/uploads/:id/chunks/:index',
+  raw({ type: 'application/octet-stream', limit: SNS_UPLOAD_CHUNK_BYTES + 1024 }),
+  async (req: Request, res: Response) => {
+    const companyId = (req as any).user?.companyId as string;
+    try {
+      const r = await appendSnsVideoChunk({
+        companyId,
+        uploadId: String(req.params.id),
+        index: Number(req.params.index),
+        chunk: req.body as Buffer,
+      });
+      return res.json({ success: true, received: r.received, totalBytes: r.totalBytes });
+    } catch (err: any) {
+      return sendMediaError(res, err, '조각');
+    }
+  },
+);
+
+router.post('/media/uploads/:id/complete', async (req: Request, res: Response) => {
+  const companyId = (req as any).user?.companyId as string;
+  const userId = (req as any).user?.id ?? null;
+  try {
+    const stored = await completeSnsVideoUpload({ companyId, uploadId: String(req.params.id) });
+    const r = await query(
+      `INSERT INTO sns_media (company_id, created_by, kind, path, format, bytes, width, height)
+       VALUES ($1::uuid, $2::uuid, 'video', $3, $4, $5, $6, $7)
+       RETURNING id, width, height`,
+      [companyId, userId, stored.relPath, stored.format, stored.bytes, stored.width, stored.height],
+    );
+    const row = r.rows[0];
+    const facts: SnsVideoFacts = {
+      bytes: stored.bytes,
+      durationSec: stored.probe.durationSec,
+      width: stored.probe.width,
+      height: stored.probe.height,
+      videoCodec: stored.probe.videoCodec,
+    };
+    return res.json({
+      success: true,
+      media: { id: row.id, width: row.width, height: row.height, kind: 'video', durationSec: stored.probe.durationSec },
+      fits: videoFitsByChannel(facts),
+      relocated: stored.relocated,
+    });
+  } catch (err: any) {
+    return sendMediaError(res, err, '업로드 마무리');
+  }
+});
 
 /** 화면 미리보기 — 인증 + 회사 조건. 영구히 살아 있다(플랫폼이 쓰는 주소와 다르다 · 불변 14). */
 router.get('/media/:id', async (req: Request, res: Response) => {
@@ -402,7 +508,7 @@ router.post('/posts', async (req: Request, res: Response) => {
   const accountIds: string[] = Array.isArray(req.body?.accountIds) ? req.body.accountIds.map(String) : [];
 
   if (!body.trim() && mediaIds.length === 0) {
-    return res.status(400).json({ success: false, error: '글이나 사진 중 하나는 있어야 해요.' });
+    return res.status(400).json({ success: false, error: '글이나 사진·영상 중 하나는 있어야 해요.' });
   }
   if (accountIds.length === 0) {
     return res.status(400).json({ success: false, error: '올릴 채널을 하나 이상 골라 주세요.' });
@@ -425,6 +531,47 @@ router.post('/posts', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, code: SNS_ERROR_CODES.ACCOUNT_STATE_CHANGED, error: '고른 채널을 쓸 수 없어요. 연결 상태를 확인해 주세요.' });
     }
 
+    // ★ 1차-B — 채널마다 이 미디어를 받는지 **저장 전에** 판정한다(워커에서 터지지 않게 · 설계 1b §3-4).
+    //   화면 칩 잠금과 같은 규칙·같은 문구다(sns-view.ts 미러 · 계약 테스트).
+    const uniqueMediaIds = Array.from(new Set(mediaIds));
+    const mediaRes = uniqueMediaIds.length
+      ? await query(`SELECT id, kind, path, bytes FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`, [companyId, uniqueMediaIds])
+      : { rows: [] as any[] };
+    if (mediaRes.rows.length !== uniqueMediaIds.length || uniqueMediaIds.length !== mediaIds.length) {
+      return res.status(400).json({ success: false, error: '올린 사진이나 영상을 찾지 못했어요. 다시 올려 주세요.' });
+    }
+    const summary = {
+      images: mediaRes.rows.filter((m: any) => m.kind !== 'video').length,
+      videos: mediaRes.rows.filter((m: any) => m.kind === 'video').length,
+    };
+    let videoFacts: SnsVideoFacts | null = null;
+    if (summary.videos === 1) {
+      const v = mediaRes.rows.find((m: any) => m.kind === 'video');
+      const probe = await probeSnsVideoFile(snsMediaAbsPath(v.path));
+      videoFacts = { bytes: Number(v.bytes) || 0, durationSec: probe.durationSec, width: probe.width, height: probe.height, videoCodec: probe.videoCodec };
+    }
+    const blocked: Array<{ platform: string; reason: string }> = [];
+    for (const acc of accRes.rows) {
+      const adapter = getSnsAdapter(acc.platform);
+      if (!adapter) { blocked.push({ platform: acc.platform, reason: '알 수 없는 채널입니다.' }); continue; }
+      const open = snsChannelAvailable(adapter);
+      if (!open.ok) { blocked.push({ platform: adapter.label, reason: '지금은 이 채널에 올릴 수 없어요.' }); continue; }
+      const reason = snsMediaBlockReason(summary, adapter.capabilities);
+      if (reason) { blocked.push({ platform: adapter.label, reason }); continue; }
+      if (videoFacts) {
+        const fit = planSnsVideoFit(videoFacts, adapter.capabilities.video);
+        if (!fit.accepted) blocked.push({ platform: adapter.label, reason: fit.notice });
+      }
+    }
+    if (blocked.length > 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'MEDIA_NOT_ACCEPTED',
+        error: blocked.map((b) => `${b.platform}: ${b.reason}`).join(' '),
+        blocked,
+      });
+    }
+
     // 우리가 만든 사진이 실렸는가 → AI 표시 부착 대상(§3-9)
     const aiRes = mediaIds.length
       ? await query(`SELECT COUNT(*)::int AS n FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND (asset_id IS NOT NULL OR ai_declared)`, [companyId, mediaIds])
@@ -439,7 +586,8 @@ router.post('/posts', async (req: Request, res: Response) => {
     );
     const postId = postRes.rows[0].id;
 
-    const format = mediaIds.length > 1 ? 'carousel' : mediaIds.length === 1 ? 'feed' : 'text';
+    // ★ 1차-B — 영상은 채널 중립 값 'video'. 인스타는 어댑터가 릴스로 보낸다.
+    const format = summary.videos > 0 ? 'video' : mediaIds.length > 1 ? 'carousel' : mediaIds.length === 1 ? 'feed' : 'text';
     const results: any[] = [];
 
     for (const acc of accRes.rows) {
@@ -632,9 +780,21 @@ snsPublicRouter.get('/m/:token', async (req: Request, res: Response) => {
     const mediaIds: string[] = row.media_ids ?? [];
     if (!mediaIds.includes(payload.mediaId)) return res.status(404).end();
 
+    // ★ 1차-B — 서명 속 미디어가 사진이면 그 target·미디어의 게시본(D2), 영상이면 보관본 그대로(불변 21).
+    const m = await query(
+      `SELECT id, kind, path, format FROM sns_media WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [payload.mediaId, payload.companyId],
+    );
+    if (!m.rows[0]) return res.status(404).end();
+    const file = resolveSnsServeFile({ companyId: payload.companyId, targetId: payload.targetId, media: m.rows[0] });
+
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    return res.sendFile(snsRenderAbsPath(`${payload.companyId}/${payload.targetId}.jpg`));
+    res.setHeader('Content-Type', file.contentType);
+    // Range 206 은 sendFile 이 처리한다(Meta 가 영상을 나눠 받아도 된다).
+    return res.sendFile(file.absPath, (err) => {
+      if (err && !res.headersSent) res.status(404).end();
+    });
   } catch (err: any) {
     if (isMissingSnsTable(err)) return res.status(404).end();
     console.error('[SNS media serve] 오류:', err);
@@ -664,18 +824,22 @@ snsPublicRouter.get('/auth/callback/:platform', async (req: Request, res: Respon
 
   // 1회용 소비 — 0행이면 이미 쓴 state 이거나 만료다.
   // 누가 시작했는지는 이 행만 안다(공개 라우터라 세션이 없다). 원장에 남기려면 여기서 꺼내야 한다.
+  // ★ 1차-B — PKCE verifier 도 이 행에서만 꺼낸다(소비와 함께 사라진다).
   let startedBy: string | null = null;
+  let codeVerifier: string | undefined;
   try {
     const used = await query(
       `DELETE FROM sns_oauth_states
         WHERE state_nonce = $1 AND company_id = $2::uuid AND expires_at > NOW()
-        RETURNING state_nonce, created_by`,
+        RETURNING state_nonce, created_by, payload`,
       [st.nonce, st.companyId],
     );
     if (used.rowCount === 0) {
       return res.status(400).send(renderSnsReturnHtml('error', '연결 요청이 만료되었어요. 한줄로 화면에서 다시 시작해 주세요.', platform, null, st.nonce));
     }
     startedBy = used.rows[0]?.created_by ?? null;
+    const verifier = used.rows[0]?.payload?.code_verifier;
+    codeVerifier = typeof verifier === 'string' && verifier ? verifier : undefined;
   } catch (err: any) {
     if (isMissingSnsTable(err)) {
       return res.status(503).send(renderSnsReturnHtml('error', 'DB 마이그레이션이 끝나면 연결할 수 있어요.', platform, null, st.nonce));
@@ -691,7 +855,33 @@ snsPublicRouter.get('/auth/callback/:platform', async (req: Request, res: Respon
   }
 
   try {
-    const token = await adapter.exchangeToken(creds.credentials, code);
+    const token = await adapter.exchangeToken(creds.credentials, code, { codeVerifier });
+
+    // ★ 1차-B — 로그인 1회에 계정이 여럿인 채널(페이스북 = 페이지 N개). 페이지마다 자기 토큰으로 한 행씩.
+    if (adapter.fetchAccounts) {
+      const list = await adapter.fetchAccounts(token.accessToken);
+      if (list.length === 0) {
+        return res.send(renderSnsReturnHtml('error', '연결할 페이지가 없어요. 페이지를 관리하는 계정으로 다시 시도해 주세요.', platform, null, st.nonce));
+      }
+      const saved: Array<{ id: string; profile: typeof list[number]['profile'] }> = [];
+      for (const item of list) {
+        const row = await upsertPendingAccount({
+          companyId: st.companyId,
+          platform,
+          externalAccountId: item.profile.externalAccountId,
+          token: item.token,
+          connectedBy: startedBy,
+        });
+        saved.push({ id: row.id, profile: item.profile });
+      }
+      void (async () => {
+        for (const s of saved) {
+          try { await applyAccountProfile(st.companyId, s.id, s.profile); } catch (e) { console.error('[SNS callback] 프로필 반영 오류:', e); }
+        }
+      })();
+      return res.send(renderSnsReturnHtml('ok', `${saved.length}개를 연결했어요. 이 창은 자동으로 닫힙니다.`, platform, saved[0].id, st.nonce));
+    }
+
     // 계정 식별자는 토큰으로 한 번 물어봐야 안다 — 여기까지는 동기 구간(행을 만들어야 창이 무엇을 가리킬지 정해진다).
     const profile = await adapter.fetchAccount(token.accessToken);
     const row = await upsertPendingAccount({
@@ -742,9 +932,14 @@ snsPublicRouter.post('/deauthorize/:platform', urlencoded({ extended: false, lim
   }
 
   try {
+    // ★ 1차-B — 페이스북은 로그인한 **사람의 id** 를 준다. 페이지 행은 연결 때 남긴 `meta.profile.owner_user_id` 로 찾는다.
+    const byOwner = getSnsAdapter(platform)?.deauthKey === 'owner';
     const rows = await query(
-      `SELECT id, company_id FROM sns_accounts
-        WHERE platform = $1 AND external_account_id = $2 AND status <> 'revoked'`,
+      byOwner
+        ? `SELECT id, company_id FROM sns_accounts
+            WHERE platform = $1 AND meta->'profile'->>'owner_user_id' = $2 AND status <> 'revoked'`
+        : `SELECT id, company_id FROM sns_accounts
+            WHERE platform = $1 AND external_account_id = $2 AND status <> 'revoked'`,
       [platform, externalId],
     );
     for (const row of rows.rows) {

@@ -22,6 +22,7 @@ import sharp from 'sharp';
 import type { Metadata } from 'sharp';
 import { fitToCanvas } from './image-serve';
 import { planSnsFit, type SnsFitMode, type SnsFitPlan, type SnsImageSpec } from './sns-media-fit';
+import { probeSnsVideoFile, relocateMoovToFront, SnsVideoRelocateError, type SnsVideoProbe } from './sns-video-probe';
 
 /** 원본 보관 위치. 인앱 이미지(`uploads/inapp`)와 섞지 않는다 — 수명·공개 규칙이 다르다. */
 const SNS_MEDIA_BASE = process.env.SNS_MEDIA_PATH || path.resolve('./uploads/sns-media');
@@ -175,6 +176,8 @@ export interface SnsRenderResult {
 export async function renderSnsPublishFile(input: {
   companyId: string;
   targetId: string;
+  /** ★ 2026-09-23 D2 — 게시본은 target·미디어마다 한 장이다(캐러셀이 마지막 사진 N장으로 나가던 것) */
+  mediaId: string;
   sourceRelPath: string;
   spec: SnsImageSpec;
   mode?: SnsFitMode;
@@ -207,7 +210,7 @@ export async function renderSnsPublishFile(input: {
 
   // ③④ 흰 바탕 + JPEG · 용량 상한까지 품질을 낮춘다.
   const dir = companyDir(SNS_RENDER_BASE, input.companyId);
-  const filename = `${input.targetId}.jpg`;
+  const filename = snsRenderFileName(input.targetId, input.mediaId);
   const absPath = path.join(dir, filename);
 
   let out: Buffer | null = null;
@@ -256,4 +259,211 @@ export function removeSnsRenderFile(relPath: string): void {
     const abs = snsRenderAbsPath(relPath);
     if (fs.existsSync(abs)) fs.unlinkSync(abs);
   } catch { /* best-effort */ }
+}
+
+// ───────────────────────── ★ 2026-09-23 1차-B — 미디어별 게시본 · 영상 ─────────────────────────
+// 설계 SoT = docs/2026-09-23-sns-1b-design.md §3-1·§3-2·§3-5 · 불변 21.
+
+/**
+ * 게시본 파일명. ⛔ D2 — 전에는 `{targetId}.jpg` 한 장이라 캐러셀 사진이 서로 덮어써 마지막 사진이 N번 나갔다.
+ * target 과 미디어 둘 다 UUID 만 받는다(경로 조작 차단).
+ */
+export function snsRenderFileName(targetId: string, mediaId: string): string {
+  if (!UUID_RE.test(targetId) || !UUID_RE.test(mediaId)) throw new SnsMediaError('BAD_PATH', '잘못된 요청입니다.');
+  return `${targetId}-${mediaId}.jpg`;
+}
+
+/** 영상 보관 형식 → 전송 형식 */
+export function snsVideoMime(format: string | null | undefined): string {
+  return String(format || '').toLowerCase() === 'mov' ? 'video/quicktime' : 'video/mp4';
+}
+
+/**
+ * 서명 주소가 내보낼 파일. 사진 = 그 target·미디어의 게시본(JPEG) · 영상 = 보관본 그대로(불변 21 · 변환 0).
+ * `res.sendFile` 이 Range 206 을 처리한다(Meta 가 영상을 나눠 받아도 된다).
+ */
+export function resolveSnsServeFile(input: {
+  companyId: string;
+  targetId: string;
+  media: { id: string; kind: string; path: string; format: string | null };
+}): { absPath: string; contentType: string } {
+  if (input.media.kind === 'video') {
+    return { absPath: snsMediaAbsPath(input.media.path), contentType: snsVideoMime(input.media.format) };
+  }
+  return {
+    absPath: snsRenderAbsPath(`${input.companyId}/${snsRenderFileName(input.targetId, input.media.id)}`),
+    contentType: 'image/jpeg',
+  };
+}
+
+/** 영상 한 개 상한 = 채널 중 가장 작은 인스타 릴스 300MB(원문). 이보다 큰 것은 받는 채널이 있어도 1차-B 는 받지 않는다. */
+export const SNS_VIDEO_MAX_BYTES = 300 * 1024 * 1024;
+/** 조각 크기. nginx 본문 상한(가이드 전역 5M)에 걸리지 않게 4MB(설계 1b §3-2) */
+export const SNS_UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+const ALLOWED_VIDEO_EXT = new Set(['.mp4', '.mov']);
+/** 끝나지 않은 조각을 치우는 기준 */
+const INCOMING_STALE_MS = 6 * 60 * 60 * 1000;
+
+interface UploadSession {
+  companyId: string;
+  userId: string | null;
+  ext: string;
+  totalBytes: number;
+  createdAt: number;
+}
+
+function incomingDir(companyId: string): string {
+  return companyDir(path.join(SNS_MEDIA_BASE, '_incoming'), companyId);
+}
+function sessionPaths(companyId: string, uploadId: string): { part: string; meta: string } {
+  if (!UUID_RE.test(uploadId)) throw new SnsMediaError('BAD_UPLOAD', '업로드 정보를 찾지 못했어요. 처음부터 다시 올려 주세요.');
+  const dir = incomingDir(companyId);
+  return { part: path.join(dir, `${uploadId}.part`), meta: path.join(dir, `${uploadId}.json`) };
+}
+async function readSession(companyId: string, uploadId: string): Promise<UploadSession> {
+  const { meta } = sessionPaths(companyId, uploadId);
+  try {
+    const s = JSON.parse(await fs.promises.readFile(meta, 'utf8')) as UploadSession;
+    // 회사가 다르면 없는 것과 같다(경로가 이미 회사별이지만 한 번 더 본다).
+    if (s.companyId !== companyId) throw new Error('company');
+    return s;
+  } catch {
+    throw new SnsMediaError('BAD_UPLOAD', '업로드 정보를 찾지 못했어요. 처음부터 다시 올려 주세요.');
+  }
+}
+
+/** 6시간 넘게 멈춘 조각을 치운다(그 회사 것만 · 실패해도 넘어간다). */
+async function sweepIncoming(companyId: string): Promise<void> {
+  try {
+    const dir = incomingDir(companyId);
+    const now = Date.now();
+    for (const name of await fs.promises.readdir(dir)) {
+      const abs = path.join(dir, name);
+      const st = await fs.promises.stat(abs).catch(() => null);
+      if (st && now - st.mtimeMs > INCOMING_STALE_MS) await fs.promises.unlink(abs).catch(() => undefined);
+    }
+  } catch { /* best-effort */ }
+}
+
+/**
+ * 영상 업로드 시작. **메모리 상태 0** — 세션은 디스크의 조각 파일과 옆 JSON 이 전부다
+ * (재시작·다중 프로세스에서도 이어진다).
+ */
+export async function startSnsVideoUpload(input: {
+  companyId: string;
+  userId: string | null;
+  originalName: string;
+  totalBytes: number;
+}): Promise<{ uploadId: string; chunkBytes: number }> {
+  const ext = path.extname(String(input.originalName || '')).toLowerCase();
+  if (!ALLOWED_VIDEO_EXT.has(ext)) {
+    throw new SnsMediaError('BAD_FORMAT', '올릴 수 없는 형식이에요. MP4·MOV 영상을 올려 주세요.');
+  }
+  const total = Number(input.totalBytes);
+  if (!Number.isInteger(total) || total <= 0) throw new SnsMediaError('BAD_SIZE', '영상 크기를 확인하지 못했어요.');
+  if (total > SNS_VIDEO_MAX_BYTES) {
+    throw new SnsMediaError('TOO_LARGE', `영상이 너무 커요. ${SNS_VIDEO_MAX_BYTES / 1024 / 1024}MB 이하로 올려 주세요.`);
+  }
+  await sweepIncoming(input.companyId);
+
+  const uploadId = randomUUID();
+  const { part, meta } = sessionPaths(input.companyId, uploadId);
+  const session: UploadSession = { companyId: input.companyId, userId: input.userId, ext, totalBytes: total, createdAt: Date.now() };
+  await fs.promises.writeFile(part, Buffer.alloc(0));
+  await fs.promises.writeFile(meta, JSON.stringify(session));
+  return { uploadId, chunkBytes: SNS_UPLOAD_CHUNK_BYTES };
+}
+
+/**
+ * 조각 하나. **순서대로만** 받는다 — `index × 조각 크기 = 지금까지 받은 크기` 여야 한다.
+ * 같은 조각을 다시 보내면(응답을 못 받고 재시도) 이미 받은 것으로 보고 그대로 돌려준다.
+ */
+export async function appendSnsVideoChunk(input: {
+  companyId: string;
+  uploadId: string;
+  index: number;
+  chunk: Buffer;
+}): Promise<{ received: number; totalBytes: number }> {
+  const session = await readSession(input.companyId, input.uploadId);
+  const { part } = sessionPaths(input.companyId, input.uploadId);
+  const index = Number(input.index);
+  if (!Number.isInteger(index) || index < 0) throw new SnsMediaError('BAD_CHUNK', '조각 번호가 잘못됐어요.');
+  if (!Buffer.isBuffer(input.chunk) || input.chunk.length === 0 || input.chunk.length > SNS_UPLOAD_CHUNK_BYTES) {
+    throw new SnsMediaError('BAD_CHUNK', '조각 크기가 잘못됐어요.');
+  }
+  const have = (await fs.promises.stat(part)).size;
+  const start = index * SNS_UPLOAD_CHUNK_BYTES;
+  if (start < have) return { received: have, totalBytes: session.totalBytes };   // 이미 받은 조각
+  if (start > have) throw new SnsMediaError('OUT_OF_ORDER', '조각 순서가 맞지 않아요. 처음부터 다시 올려 주세요.');
+  if (have + input.chunk.length > session.totalBytes) throw new SnsMediaError('BAD_CHUNK', '영상 크기보다 많이 받았어요.');
+  if (input.chunk.length !== SNS_UPLOAD_CHUNK_BYTES && have + input.chunk.length !== session.totalBytes) {
+    throw new SnsMediaError('BAD_CHUNK', '조각 크기가 잘못됐어요.');   // 마지막 조각만 작을 수 있다
+  }
+  await fs.promises.appendFile(part, input.chunk);
+  return { received: have + input.chunk.length, totalBytes: session.totalBytes };
+}
+
+export interface SnsStoredVideo extends SnsStoredMedia {
+  probe: SnsVideoProbe;
+  /** moov 를 앞당겼는가(설계 1b §3-1 ③ · 무손실) */
+  relocated: boolean;
+}
+
+/**
+ * 업로드 마무리 — 크기 확인 → 판독 → (필요하면) moov 앞당김 → 보관.
+ * ⛔ 영상·음성 바이트는 바꾸지 않는다(불변 21). 앞당김은 상자 순서와 위치표만 바꾼다.
+ */
+export async function completeSnsVideoUpload(input: { companyId: string; uploadId: string }): Promise<SnsStoredVideo> {
+  const session = await readSession(input.companyId, input.uploadId);
+  const { part, meta } = sessionPaths(input.companyId, input.uploadId);
+  const cleanup = async () => {
+    await fs.promises.unlink(part).catch(() => undefined);
+    await fs.promises.unlink(meta).catch(() => undefined);
+  };
+  const have = (await fs.promises.stat(part)).size;
+  if (have !== session.totalBytes) {
+    throw new SnsMediaError('INCOMPLETE', '영상이 끝까지 올라오지 않았어요. 다시 올려 주세요.');
+  }
+
+  const first = await probeSnsVideoFile(part);
+  if (!first.hasMoov) {
+    await cleanup();
+    throw new SnsMediaError('UNREADABLE', '영상 정보를 읽지 못했어요. 다른 파일로 올려 주세요.');
+  }
+  if (first.compressedMoov) {
+    await cleanup();
+    throw new SnsMediaError('UNREADABLE', '이 영상은 처리할 수 없는 형식이에요. 편집 앱에서 MP4 로 다시 내보내 주세요.');
+  }
+
+  const dir = companyDir(SNS_MEDIA_BASE, input.companyId);
+  const filename = `${randomUUID()}${session.ext}`;
+  const finalAbs = path.join(dir, filename);
+  let relocated = false;
+  try {
+    if (first.fastStart) {
+      await fs.promises.rename(part, finalAbs);
+    } else {
+      const r = await relocateMoovToFront(part, finalAbs);
+      relocated = r.moved;
+      if (!r.moved) await fs.promises.rename(part, finalAbs);
+    }
+  } catch (err) {
+    await fs.promises.unlink(finalAbs).catch(() => undefined);
+    await cleanup();
+    if (err instanceof SnsVideoRelocateError) throw new SnsMediaError(err.code, err.message);
+    throw err;
+  }
+  await cleanup();
+
+  const probe = relocated ? await probeSnsVideoFile(finalAbs) : first;
+  const bytes = (await fs.promises.stat(finalAbs)).size;
+  return {
+    relPath: `${input.companyId}/${filename}`,
+    format: session.ext.slice(1),
+    bytes,
+    width: probe.width ?? 0,
+    height: probe.height ?? 0,
+    probe,
+    relocated,
+  };
 }

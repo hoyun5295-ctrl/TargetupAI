@@ -22,7 +22,7 @@ import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils
 // ★ 메시징 컨트롤타워 import
 import {
   toKoreaTimeStr,
-  getCompanySmsTables, hasCompanyLineGroup, getTestSmsTables, getAuthSmsTable,
+  getCompanySmsTables, hasCompanyLineGroup, getTestSmsTables, getTestSendTable, getAuthSmsTable,
   invalidateLineGroupCache, getNextSmsTable,
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs, getCampaignQueueTables,
@@ -392,8 +392,8 @@ router.post('/test-send', async (req: Request, res: Response) => {
       testDeductedTypes.push(axis.type);
     }
 
-    // 담당자별로 테스트 전용 라인으로 INSERT
-    const testTables = await getTestSmsTables();
+    // 담당자별로 테스트 전용 라인으로 INSERT — 적재 테이블은 하나(getTestSendTable · 문자 축 insertTestSmsQueue 와 같은 자리)
+    const testSendTable = await getTestSendTable();
     const msgType = toQtmsgType(messageType || 'SMS');
     // ★ D124 N4: mmsImagePaths 객체 배열 허용 (frontend가 {path, originalName} 전송)
     //   - DB 저장: 객체 배열 그대로 JSONB로 저장 (originalName 표시 용도)
@@ -443,7 +443,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
               typeDef: 'FREE', senderKey: testKakaoSenderKey, targeting: TEST_BRAND_TARGETING,
               bubbleType: testKakaoBubbleType, isAd: isAd || false, message: testMsg,
             });
-            await insertBrandQueue(testTables, [{
+            await insertBrandQueue([testSendTable], [{
               phone: cleanPhone,
               callback: callbackNumber,
               msgContents: testBrandPayload.msgContents,
