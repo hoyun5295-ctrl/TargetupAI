@@ -8,9 +8,10 @@
  * ALIMTALK-DESIGN.md §3, §5-2 참조.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { CUI_INPUT } from '../../utils/console-ui';
 import { Trash2 } from 'lucide-react';
+import { linkReason } from '../../utils/link-check';
 
 export type ButtonLinkType =
   | 'WL' | 'AL' | 'DS' | 'BK' | 'MD' | 'BF' | 'BC' | 'AC' | 'PD';
@@ -194,6 +195,16 @@ function ButtonRow({
 
   const typeLocked = disabled || removeLocked;
 
+  /**
+   * ★2026-09-22 링크 결함 안내 — 포커스가 빠진 뒤에만 판정한다(타이핑 중간 상태를 빨갛게 만들면 방해가 된다).
+   * 판정은 공용 CT(`utils/link-check`)가 소유하고 브랜드메시지·DM·이메일과 같은 문구를 낸다.
+   * 오타 도메인(`.cpm`)은 카카오가 받지 않아 발송이 통째로 죽으므로 등록 단계에서 알려 준다.
+   */
+  const [urlDefect, setUrlDefect] = useState('');
+  const recheckUrls = () => setUrlDefect(
+    linkReason(btn.urlMobile, '모바일 URL은') || linkReason(btn.urlPc, 'PC URL은'),
+  );
+
   return (
     <div className="mb-2 bg-neutral-50 border border-neutral-200 p-3 rounded-lg space-y-2">
       <div className="flex gap-2 items-center">
@@ -235,18 +246,21 @@ function ButtonRow({
       </div>
 
       {hint && <p className="text-[12px] text-neutral-500 ml-8">{hint}</p>}
+      {urlDefect && <p className="text-[12px] text-rose-500 ml-8">{urlDefect}</p>}
 
       {btn.type === 'WL' && (
         <div className="grid grid-cols-2 gap-2">
           <input
             value={btn.urlMobile || ''}
             onChange={(e) => onPatch({ urlMobile: e.target.value })}
+            onBlur={recheckUrls}
             placeholder="모바일 URL"
             className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
           />
           <input
             value={btn.urlPc || ''}
             onChange={(e) => onPatch({ urlPc: e.target.value })}
+            onBlur={recheckUrls}
             placeholder="PC URL (선택)"
             className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
           />
@@ -259,12 +273,14 @@ function ButtonRow({
             <input
               value={btn.urlMobile || ''}
               onChange={(e) => onPatch({ urlMobile: e.target.value })}
+            onBlur={recheckUrls}
               placeholder="모바일 URL"
               className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
             />
             <input
               value={btn.urlPc || ''}
               onChange={(e) => onPatch({ urlPc: e.target.value })}
+            onBlur={recheckUrls}
               placeholder="PC URL (선택)"
               className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
             />

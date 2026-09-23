@@ -113,11 +113,40 @@ describe('링크 형식 — 오늘 열린 자리', () => {
     expect(isHttpLinkOrVariable('')).toBe(false);
   });
 
-  it('말풍선 버튼 링크는 조립기가 막지 않는다 — 운영 중 유형·예약분 보호(넓힐 때 이 테스트의 의도를 바꾼다)', () => {
-    expect(() => buildBrandQueuePayload({
+  /**
+   * ★2026-09-22 의도 변경 — 그전 이 자리는 「말풍선 버튼 링크는 조립기가 막지 않는다」였다.
+   * 근거는 "카카오가 실제로 거절하는지 실측한 뒤에 넓힌다"였고, 0922에 그 실측이 나왔다:
+   * 버튼·쿠폰 링크를 `invitocorp.cpm`(`.com` 오타)으로 친 발송 3건이 전부 `status_code 9999`로
+   * 죽었고, 같은 계정·같은 라인에서 `.com`으로 보낸 건은 `1800`(성공)이었다. 그래서 넓혔다.
+   */
+  const withButton = (url: string) => () => buildBrandQueuePayload({
+    ...BASE, bubbleType: 'TEXT', message: '본문',
+    attachmentJson: buildAttachmentJson({ buttons: [{ name: '바로가기', type: 'WL', url_mobile: url }] }),
+  });
+
+  it('말풍선 버튼 링크도 스킴을 요구한다', () => {
+    expect(withButton('www.hanjul.ai')).toThrow(/http:\/\/ 또는 https:\/\//);
+  });
+
+  it('말풍선 버튼 링크의 오타 도메인을 막고 고칠 곳을 알려 준다 (0922 접수 재현)', () => {
+    expect(withButton('https://invitocorp.cpm')).toThrow(/\.cpm/);
+    expect(withButton('https://invitocorp.cpm')).toThrow(/혹시 '\.com'인가요\?/);
+  });
+
+  it('정상 링크와 변수는 그대로 통과한다', () => {
+    expect(withButton('https://invitocorp.com')).not.toThrow();
+    expect(withButton('#{상품링크}')).not.toThrow();
+  });
+
+  it('쿠폰 링크도 같은 판정을 받는다', () => {
+    const withCoupon = (url: string) => () => buildBrandQueuePayload({
       ...BASE, bubbleType: 'TEXT', message: '본문',
-      attachmentJson: buildAttachmentJson({ buttons: [{ name: '바로가기', type: 'WL', url_mobile: 'www.hanjul.ai' }] }),
-    })).not.toThrow();
+      attachmentJson: buildAttachmentJson({
+        coupon: { title: '1,000원 할인 쿠폰', description: '전 상품', url_mobile: url } as any,
+      }),
+    });
+    expect(withCoupon('https://shop.example.cpm')).toThrow(/\.cpm/);
+    expect(withCoupon('https://shop.example.com')).not.toThrow();
   });
 });
 

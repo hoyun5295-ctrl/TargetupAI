@@ -127,7 +127,9 @@ describe('값 검사 — 링크 · 동영상 주소 · 가격', () => {
 
   it('★0920 자동 https 의 도메인 판정은 백엔드 normalizeWebUrl 과 같은 식이다(두 벌이 갈리면 화면과 서버가 다른 주소를 만든다)', async () => {
     const fs = await import('fs');
-    const front = fs.readFileSync(path.join(FRONT, 'brandRich.ts'), 'utf8');
+    // ★2026-09-22 링크 판정이 브랜드 전용(`brandRich.ts`)에서 공용 CT(`utils/link-check.ts`)로 올라갔다
+    //   — 전 채널이 같은 판정을 쓰게 하려는 이동이라, 이 계약이 보는 자리도 함께 옮긴다.
+    const front = fs.readFileSync(path.resolve(FRONT, '../../utils/link-check.ts'), 'utf8');
     const back = fs.readFileSync(path.resolve(__dirname, '../normalize.ts'), 'utf8');
     const DOMAIN_RE = String.raw`/^[a-z0-9-]+(\.[a-z0-9-]+)+([/?#].*)?$/i`;
     expect(front).toContain(DOMAIN_RE);

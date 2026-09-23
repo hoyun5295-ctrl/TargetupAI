@@ -45,6 +45,7 @@ import MmsImagePreview from './shared/MmsImagePreview';
 import AiRefineModal from './AiRefineModal';
 import SmsCharsetNotice from './SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
+import { findLinkDefectInText } from '../utils/link-check';
 import AlimtalkChannelPanel, {
   validateAlimtalkChannelState,
   type AlimtalkChannelState,
@@ -340,6 +341,13 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 발송하지 않는다(설계 D2 · 본문 아래 안내에서 바꾼다)
     if (hasUnsupportedSmsChars(directMessage, directMsgType === 'SMS' ? '' : directSubject)) {
       setToast({ show: true, type: 'error', message: SMS_CHARSET_BLOCK_MESSAGE });
+      return;
+    }
+    // ★2026-09-22 본문에 실존하지 않는 도메인이 있으면 보내지 않는다 — 받는 사람이 눌러도 안 열린다.
+    //   서버도 같은 판정으로 막지만(차감 앞) 여기서 먼저 알려 주면 왕복이 없다. 판정은 공용 CT가 소유한다.
+    const linkDefect = findLinkDefectInText(directMessage) || findLinkDefectInText(directSubject, '제목의 링크는');
+    if (linkDefect) {
+      setToast({ show: true, type: 'error', message: linkDefect });
       return;
     }
 

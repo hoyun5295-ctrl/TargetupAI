@@ -8,6 +8,7 @@
  */
 
 import { getFieldByKey } from './standard-field-map';
+import { KNOWN_TLDS } from './tld-list';
 
 // ============================================================
 // 성별 정규화
@@ -715,6 +716,147 @@ export function normalizeWebUrl(value: any): string {
 export function isHttpLinkOrVariable(value: any): boolean {
   const s = String(value ?? '').trim();
   return /^https?:\/\/\S+$/i.test(s) || s.startsWith('#{');
+}
+
+/**
+ * 주소 끝의 최상위 도메인이 실존하는가 — 모르는 TLD면 **그 값**을, 판정 대상이 아니면 빈 문자열을 돌려준다.
+ *
+ * ★2026-09-22 신설(0922 접수 = 버튼·쿠폰 링크를 `invitocorp.cpm`으로 쳐서 발송 3건이 통째로 죽었다).
+ * 존재하지 않는 TLD는 100% 오타다 — 네트워크 없이 그 자리에서 판정한다.
+ * ⛔ 판정하지 않는 것(전부 빈 문자열 = 통과): 빈 값 · 변수 · 스킴 없는 값(형식 검사가 소유) ·
+ *    파싱 불가 · IP 주소 · 점 없는 호스트(사내 호스트명). **막는 쪽이 아니라 모르는 쪽으로 접는다** —
+ *    오탐은 멀쩡한 발송을 세우므로, 확실히 틀린 것만 잡는다.
+ */
+export function unknownTldOf(value: any): string {
+  const s = String(value ?? '').trim();
+  if (!s || !/^https?:\/\//i.test(s)) return '';
+  let host = '';
+  try { host = new URL(s).hostname; } catch { return ''; }
+  host = host.toLowerCase().replace(/\.$/, '');
+  if (!host || /^\[|^[0-9.]+$/.test(host)) return '';   // IPv6 대괄호 · IPv4
+  const parts = host.split('.');
+  if (parts.length < 2) return '';
+  const tld = parts[parts.length - 1];
+  return KNOWN_TLDS.has(tld) ? '' : tld;
+}
+
+/**
+ * 한 번의 실수로 같아지는가 — 치환·삽입·삭제 1회, 그리고 **인접 두 글자 뒤바뀜**(전치) 1회.
+ * ⛔ 전치를 빼면 `cmo`(com의 흔한 오타)가 `com` 대신 `co`로 안내된다 — 손가락이 미끄러지는 대표 형태다.
+ */
+function withinOneEdit(a: string, b: string): boolean {
+  if (a.length === b.length) {
+    const diff: number[] = [];
+    for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) diff.push(k);
+    if (diff.length === 2 && diff[1] === diff[0] + 1
+        && a[diff[0]] === b[diff[1]] && a[diff[1]] === b[diff[0]]) return true;
+  }
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, diff = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++diff > 1) return false;
+    if (a.length === b.length) { i++; j++; }
+    else if (a.length > b.length) i++;
+    else j++;
+  }
+  return diff + (a.length - i) + (b.length - j) <= 1;
+}
+
+/**
+ * 오타로 보이는 TLD에 가장 가까운 실존 TLD 하나 — 없으면 빈 문자열.
+ * 흔히 쓰는 것부터 본다(`.cpm` 앞에 `.com`이 걸려야지 알파벳 순으로 엉뚱한 것이 걸리면 안내가 해롭다).
+ */
+export function suggestTld(unknown: string): string {
+  const u = String(unknown || '').toLowerCase();
+  if (!u) return '';
+  for (const t of ['com', 'net', 'org', 'kr', 'co', 'io', 'me', 'biz', 'info']) {
+    if (KNOWN_TLDS.has(t) && withinOneEdit(u, t)) return t;
+  }
+  for (const t of KNOWN_TLDS) {
+    if (withinOneEdit(u, t)) return t;
+  }
+  return '';
+}
+
+/**
+ * 발송에 실리는 웹 링크의 결함 사유 한 줄 — 통과면 빈 문자열.
+ *
+ * **링크를 받는 전 채널이 이 판정 하나를 쓴다**(브랜드메시지·알림톡·RCS·DM·이메일·인앱·푸시·SNS).
+ * 판정이 여러 벌이면 한쪽이 통과시킨 값을 다른 쪽이 막는다 — 그때 고객은 "화면은 됐는데 발송이 죽는"
+ * 상태를 본다. 화면 사본은 `frontend/src/utils/link-check.ts`이고 `tld-parity.test.ts`가 문구까지 고정한다.
+ *
+ * ⛔ 값을 고쳐 주지 않는다 — 무엇이 틀렸는지만 알려 주고 고객이 고친다.
+ * @param at 사유 앞에 붙는 자리 이름(예: `'버튼 링크는'`)
+ */
+export function webLinkReason(value: any, at = '링크는'): string {
+  const s = String(value ?? '').trim();
+  if (!s || s.startsWith('#{') || s.includes('{{')) return '';
+  if (!/^https?:\/\/\S+$/i.test(s)) {
+    return `${at} http:// 또는 https://로 시작해야 합니다 (예: https://www.example.com)`;
+  }
+  const bad = unknownTldOf(s);
+  if (!bad) return '';
+  // ⛔ 조사를 붙이지 않는다 — TLD마다 받침이 달라(`.com`=콤 / `.co`=코) 「을/를」이 갈린다.
+  const hint = suggestTld(bad);
+  return hint
+    ? `${at} 주소 끝이 '.${bad}'인데 그런 도메인은 없습니다. 혹시 '.${hint}'인가요?`
+    : `${at} 주소 끝이 '.${bad}'인데 그런 도메인은 없습니다. 주소를 다시 확인해 주세요`;
+}
+
+/**
+ * 객체·배열 트리를 훑어 **링크 결함 첫 하나**를 돌려준다 — 없으면 빈 문자열.
+ *
+ * ★2026-09-22 신설. 발송 payload의 링크 키 이름이 채널마다 제각각이라(`url` · `urlMobile` ·
+ * `link_url` · `cta_url` · `map_url` · `website` · `img_link` …) 키로 찾으면 반드시 빠뜨린다.
+ * 그래서 **값으로** 찾는다: `http(s)://`로 시작하는 문자열은 링크다. 키를 몰라도 걸린다.
+ *
+ * 쓰는 자리 = 화면을 지나지 않는 경로의 최종 방어(API 직호출 · AI 자동 생성 · 저장분 재발송).
+ * ⛔ 임시 저장을 막지 마라 — 작업 중인 값까지 거절하면 편집이 불가능해진다. **발송·발행·등록
+ *    시점**에만 부른다.
+ */
+export function findLinkDefectDeep(node: any, at = '주소는', depth = 0): string {
+  if (depth > 12 || node == null) return '';
+  if (typeof node === 'string') {
+    return /^https?:\/\//i.test(node.trim()) ? webLinkReason(node, at) : '';
+  }
+  if (Array.isArray(node)) {
+    for (const v of node) {
+      const r = findLinkDefectDeep(v, at, depth + 1);
+      if (r) return r;
+    }
+    return '';
+  }
+  if (typeof node === 'object') {
+    for (const v of Object.values(node)) {
+      const r = findLinkDefectDeep(v, at, depth + 1);
+      if (r) return r;
+    }
+  }
+  return '';
+}
+
+/**
+ * **본문 글 속의** 링크를 뽑아 첫 결함 하나를 돌려준다 — 없으면 빈 문자열.
+ *
+ * ★2026-09-22 신설. 문자(SMS·LMS·MMS)는 링크가 별도 칸이 아니라 본문에 섞여 들어간다.
+ * 위 `findLinkDefectDeep`은 값 하나가 통째로 주소일 때를 보므로 이 경우를 못 잡는다.
+ *
+ * ⛔ 뽑는 범위를 **ASCII URL 문자로 끊는다** — `https://a.com입니다`처럼 뒤에 한글이 붙는 문장이 흔한데,
+ *    공백까지 삼키면 `a.com입니다`가 주소가 되고 퓨니코드로 바뀌어 **멀쩡한 주소가 오타로 판정된다.**
+ *    한글 도메인은 이 정규식에 안 걸려 검사되지 않지만, 그쪽은 통과시키는 쪽이라 해롭지 않다.
+ */
+export function findLinkDefectInText(text: any, at = '본문의 링크는'): string {
+  const s = String(text ?? '');
+  if (!s.includes('http')) return '';
+  const found = s.match(/https?:\/\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+/gi) || [];
+  for (const raw of found) {
+    // 문장 끝 구두점은 주소가 아니다 — `…invitocorp.com, 문의는`에서 쉼표까지 삼키면 멀쩡한 주소가 오타가 된다
+    const u = raw.replace(/[.,;:!?)\]'"]+$/, '');
+    const r = webLinkReason(u, at);
+    if (r) return r;
+  }
+  return '';
 }
 
 // ============================================================

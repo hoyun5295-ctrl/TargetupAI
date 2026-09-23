@@ -28,6 +28,7 @@
 import { Router, Request, Response, json } from 'express';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
+import { webLinkReason } from '../utils/normalize';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 // ★ D225+ (2026-05-28): Email 캠페인 events 이력 조회 endpoint 신설 — email_events 직접 SELECT
 import { query } from '../config/database';
@@ -638,6 +639,20 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
         error: `${ph.where}에 직접 입력이 필요한 자리 "${ph.sample}"가 남아 있습니다. 편집에서 그 자리를 채운 뒤 발송해주세요.`,
         code: 'UNEDITED_PLACEHOLDER',
       });
+    }
+
+    // ★2026-09-22 링크 결함(실존하지 않는 도메인) = 발송 차단. 0922 브랜드메시지에서 `.com` → `.cpm`
+    //   오타 한 글자에 발송이 통째로 죽었다. 메일은 발송 자체는 되고 **받는 사람이 눌렀을 때** 안 열리므로
+    //   더 늦게 드러난다 — 나가기 전에 막는다. 판정은 CT(`webLinkReason`)가 소유한다.
+    const badHref = (() => {
+      for (const m of String(campaign.htmlBody || '').matchAll(/href=["']([^"']+)["']/gi)) {
+        const r = webLinkReason(m[1], '메일 본문의 링크는');
+        if (r) return r;
+      }
+      return '';
+    })();
+    if (badHref) {
+      return res.status(400).json({ success: false, error: badHref, code: 'LINK_DEFECT' });
     }
 
     const { recipients, target, mode, scheduled_at } = req.body;

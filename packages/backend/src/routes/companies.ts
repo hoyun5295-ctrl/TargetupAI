@@ -9,7 +9,7 @@ import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/a
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
-import { normalizeOpt080Input } from '../utils/normalize';
+import { normalizeOpt080Input, findLinkDefectInText, findLinkDefectDeep, webLinkReason } from '../utils/normalize';
 import { grantFreeTrial, isTrialApplyOpen } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
@@ -2892,6 +2892,13 @@ router.post('/rcs-templates', async (req: Request, res: Response) => {
     const { templateName, messageType, content, buttons, mediaUrl } = req.body;
     if (!templateName || !content || !messageType) {
       return res.status(400).json({ success: false, error: '템플릿명, 메시지유형, 본문은 필수입니다' });
+    }
+    // ★2026-09-22 링크 결함 = 등록 차단. 오타 주소는 심사에서 반려되거나, 통과해도 받는 사람이 못 연다.
+    const rcsLinkDefect = findLinkDefectInText(content, '본문의 링크는')
+      || findLinkDefectDeep(buttons, '버튼 주소는')
+      || webLinkReason(mediaUrl, '미디어 주소는');
+    if (rcsLinkDefect) {
+      return res.status(400).json({ success: false, error: rcsLinkDefect, code: 'LINK_DEFECT' });
     }
 
     const result = await query(

@@ -3,7 +3,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
-import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from '../utils/normalize';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants, findLinkDefectInText } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSends } from '../utils/customer-send-stats';
@@ -769,6 +769,13 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     //    이 지점에 도달할 수 없다. 도달 못 하는 분기를 남기면 다음 사람이 그 경로가 산다고 믿는다.)
     if ((campaign.message_type === 'LMS' || campaign.message_type === 'MMS') && !campaign.message_subject?.trim() && !campaign.subject?.trim()) {
       return res.status(400).json({ error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
+    }
+
+    // ★2026-09-22 본문 링크 결함 = 발송 차단(차감 앞). 저장분 재발송도 같은 판정을 받는다 —
+    //   저장할 때는 없던 검사라 이미 들어 있는 오타 주소가 이 경로로 나갈 수 있다.
+    for (const t of [campaign.message_content, campaign.message_subject, campaign.subject]) {
+      const r = findLinkDefectInText(t, '본문의 링크는');
+      if (r) return res.status(400).json({ error: r, code: 'LINK_DEFECT' });
     }
 
     // 기본 회신번호 조회 (callback_numbers 테이블에서)
@@ -1948,6 +1955,19 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     //   그 값들은 각자 다른 배관이 만들고 `campaign_runs`를 남기는데, 이 라우트로 들어온 행은 runs가 없다.
     //   그러면 run 축에도 안 잡히고 청구 선택기(direct·operator)에도 안 걸려 **실발송이 청구에서 사라진다**.
     //   조용히 떨어뜨리지 않고 로그를 남긴다 — 이 경로로 오는 값은 프론트 버그거나 조작이라 둘 다 봐야 한다.
+    // ★2026-09-22 본문 링크 결함(실존하지 않는 도메인) = 발송 차단. **차감 앞이다** — 뒤에서 막으면
+    //   돈은 나가고 메시지는 안 간다(0818 금칙어 게이트 교훈). 0922 브랜드메시지에서 `.com` → `.cpm`
+    //   오타 한 글자에 발송 3건이 통째로 죽었고, 문자는 죽지는 않지만 받는 사람이 링크를 못 연다.
+    //   개인화 치환본(customMessages)도 본다 — 치환 값에 주소가 들어오는 경로가 있다.
+    const textsToCheck: any[] = [message, subject];
+    if (Array.isArray(customMessages)) {
+      for (const c of customMessages.slice(0, 50)) textsToCheck.push(c?.message);
+    }
+    for (const t of textsToCheck) {
+      const r = findLinkDefectInText(t, '본문의 링크는');
+      if (r) return res.status(400).json({ success: false, error: r, code: 'LINK_DEFECT' });
+    }
+
     const resolvedSendType: string = isDirectPipelineSendType(sendType) ? sendType : 'direct';
     if (sendType !== undefined && sendType !== null && sendType !== '' && !isDirectPipelineSendType(sendType)) {
       console.warn(

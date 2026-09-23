@@ -6,6 +6,7 @@ import type { ChangeEvent, ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import axios from 'axios';
 import { dmImageUrl } from '../../../utils/dm-image-url';
+import { linkReason } from '../../../utils/link-check';
 import { DateTimeField } from '../../DateTimeField';
 // ★ 2026-07-19 P4: 에셋 라이브러리 불러오기 — DM 에디터 전 이미지 필드 + 이메일 비주얼 에디터 일괄 적용
 import AssetLibraryPickerModal from '../../assets/AssetLibraryPickerModal';
@@ -53,6 +54,13 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 
 // ────────────── 텍스트 ──────────────
 
+/**
+ * ★2026-09-22 `type="url"` 칸은 **주소 결함을 그 자리에서 알려 준다.**
+ * 이 컴포넌트를 DM 편집기의 링크 칸 전부가 쓰므로(CTA·쿠폰·갤러리·상품카드·탭카드·슬라이드·지도·임베드)
+ * 여기 한 곳에 걸면 그 전부가 함께 걸린다. 판정은 공용 CT(`utils/link-check`)가 소유한다.
+ * ⛔ 값을 고쳐 주지 않는다 — 무엇이 틀렸는지만 보여 주고 고객이 고친다. 입력을 막지도 않는다
+ *    (타이핑 중간 상태까지 빨갛게 만들면 방해가 된다 — 포커스가 빠진 뒤에만 판정한다).
+ */
 export function TextInput({
   value, onChange, placeholder, type = 'text', min, max,
 }: {
@@ -63,16 +71,24 @@ export function TextInput({
   min?: number;
   max?: number;
 }) {
+  const [touched, setTouched] = useState(false);
+  const reason = type === 'url' && touched ? linkReason(value ?? '', '주소는') : '';
   return (
-    <input
-      type={type}
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      min={min}
-      max={max}
-      style={inputStyle}
-    />
+    <>
+      <input
+        type={type}
+        value={value ?? ''}
+        onChange={(e) => { setTouched(false); onChange(e.target.value); }}
+        onBlur={() => setTouched(true)}
+        placeholder={placeholder}
+        min={min}
+        max={max}
+        style={reason ? { ...inputStyle, borderColor: '#f43f5e' } : inputStyle}
+      />
+      {reason && (
+        <p style={{ margin: '4px 2px 0', fontSize: 11, lineHeight: 1.5, color: '#e11d48' }}>{reason}</p>
+      )}
+    </>
   );
 }
 

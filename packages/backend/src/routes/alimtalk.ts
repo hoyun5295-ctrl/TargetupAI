@@ -22,6 +22,7 @@ import {
   requireCompanyAdmin,
 } from '../middlewares/auth';
 import { query } from '../config/database';
+import { findLinkDefectDeep } from '../utils/normalize';
 import * as imc from '../utils/alimtalk-api';
 import { ImcApiError, extractImageFromAnyShape, extractImageListFromAnyShape, sanitizeImcMessageForUser } from '../utils/alimtalk-api';
 import {
@@ -1232,6 +1233,14 @@ router.post(
         rawKey ||
         `T${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`.slice(0, 20);
 
+      // ★2026-09-22 링크 결함(실존하지 않는 도메인) = 등록 차단. 오타 주소는 카카오 심사에서 반려되거나
+      //   통과하더라도 받는 사람이 눌렀을 때 열리지 않는다. 등록 전에 막으면 심사 왕복이 사라진다.
+      //   키 이름이 제각각이라(`urlMobile`·`url_pc`·`link`) 값으로 찾는다 = findLinkDefectDeep.
+      const badLink = findLinkDefectDeep(body, '버튼 주소는');
+      if (badLink) {
+        return res.status(400).json({ success: false, error: badLink, code: 'LINK_DEFECT' });
+      }
+
       // ─────────────────────────────────────────
       // 1) IMC 등록
       //    D135+ (B3 복구): IMC는 성공했는데 DB INSERT 실패로 한줄로 DB에만 없는 상태
@@ -2097,6 +2106,13 @@ router.post(
       const templateKey: string =
         body.templateKey ||
         `BRT_${companyId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
+
+      // ★2026-09-22 링크 결함 = 등록 차단(알림톡 템플릿과 같은 판정). 브랜드 템플릿의 버튼·쿠폰·이미지
+      //   링크는 발송 때 그대로 나가고, 오타면 카카오가 받지 않아 큐에는 들어가고 발송만 죽는다.
+      const badBrandLink = findLinkDefectDeep(body, '링크는');
+      if (badBrandLink) {
+        return res.status(400).json({ success: false, error: badBrandLink, code: 'LINK_DEFECT' });
+      }
 
       const r = await imc.createBrandTemplate(prof.rows[0].profile_key, {
         ...body,

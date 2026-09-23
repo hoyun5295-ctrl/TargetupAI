@@ -18,6 +18,7 @@
  */
 
 import { Router, Request, Response, json } from 'express';
+import { findLinkDefectDeep, findLinkDefectInText, webLinkReason } from '../utils/normalize';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -1154,6 +1155,11 @@ router.post('/push/send', async (req: Request, res: Response) => {
 
     const { title, body, url, icon, badge } = req.body;
     if (!title || !body) return res.status(400).json({ success: false, error: 'title과 body는 필수입니다.' });
+    // ★2026-09-22 링크 결함 = 발송 차단. 푸시는 눌렀을 때 이동할 주소가 핵심이라 오타면 기능이 없는 것과 같다.
+    const pushLinkDefect = webLinkReason(url, '이동 주소는') || findLinkDefectInText(body, '내용의 링크는');
+    if (pushLinkDefect) {
+      return res.status(400).json({ success: false, error: pushLinkDefect, code: 'LINK_DEFECT' });
+    }
     const result = await sendPushCampaign(
       companyId,
       { title: String(title), body: String(body), url: url ? String(url) : undefined, icon: icon ? String(icon) : undefined, badge: badge ? String(badge) : undefined },
@@ -1233,6 +1239,13 @@ router.post('/inapp', async (req: Request, res: Response) => {
     const cdpEnabled = await isCdpEnabledForPlan(companyId);
     if (!cdpEnabled) {
       return res.status(403).json({ success: false, error: 'In-app 메시지는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+    }
+
+    // ★2026-09-22 링크 결함 = 게시 차단(차감 앞). 인앱 메시지의 버튼·이미지 링크가 오타면
+    //   게시는 되고 보는 사람이 눌렀을 때 안 열린다. 키 이름이 제각각이라 값으로 찾는다.
+    const inappLinkDefect = findLinkDefectDeep(req.body, '링크는');
+    if (inappLinkDefect) {
+      return res.status(400).json({ success: false, error: inappLinkDefect, code: 'LINK_DEFECT' });
     }
 
     // ★ 종량제: 인앱 게시(확정) = 15, status=active 저장 시 최초 1회(멱등 inapp-publish:messageId). paused/archived 저장은 미과금.

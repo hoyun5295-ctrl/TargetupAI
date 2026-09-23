@@ -65,7 +65,7 @@ import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
 import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-send-core';
 import { DirectSendError } from '../utils/direct-send-spec';
 import { getOpt080Number, stripAdPartsDeep, normalizeSmsSeparatorLines } from '../utils/messageUtils';
-import { isUuid } from '../utils/normalize';
+import { isUuid, findLinkDefectDeep } from '../utils/normalize';
 import { callAIWithFallback, getSeasonContext } from '../services/ai';
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
@@ -803,6 +803,21 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
         code: 'DM_STOPPED',
       });
     }
+    // ★2026-09-22 링크 결함(실존하지 않는 도메인) = 발행 차단. **차감 앞이다** — 뒤에서 막으면 크레딧만
+    //   나가고 발행은 안 된다. DM은 발행 자체는 되고 **보는 사람이 눌렀을 때** 안 열려 더 늦게 드러난다.
+    //   본문 구조가 `sections`·`pages` 두 갈래라 둘 다 본다(SCHEMA dm_pages 10·17 — 실측상 pages가 항상 있다).
+    //   키 이름이 섹션마다 달라서 값으로 찾는다(findLinkDefectDeep).
+    const dmBody = await query(
+      `SELECT sections, pages, header_data, footer_data FROM dm_pages WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+      [req.params.id, companyId],
+    );
+    if (dmBody.rows[0]) {
+      const dmLinkDefect = findLinkDefectDeep(dmBody.rows[0], '링크는');
+      if (dmLinkDefect) {
+        return res.status(400).json({ error: dmLinkDefect, code: 'LINK_DEFECT' });
+      }
+    }
+
     // ★ 종량제: 발행(단축URL 확정) 최초 1회만(멱등키 dm-publish:dmId). 인터랙션 캠페인=50(F 안1), 일반 DM=30. test-send 자동발행(publishDm 직접 호출)은 라우트 미경유=미과금. 재발행은 멱등 0.
     const isInteraction = await isInteractionCampaign(companyId, req.params.id);
     const costSource = isInteraction ? 'dm-interaction-publish' : 'dm-builder';

@@ -30,7 +30,7 @@ import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 import { markRefundPending } from './refund-pending';
 import { buildUnsubscribeExistsFilter } from './unsubscribe-helper';
 import { normalizePhone } from './normalize-phone';
-import { normalize080Number, format080Number, isHttpLinkOrVariable } from './normalize';
+import { normalize080Number, format080Number, isHttpLinkOrVariable, webLinkReason } from './normalize';
 // 발송 가능 시간 판정은 시각 CT가 소유한다(브랜드 창 08:00~20:50 — config/defaults BRAND_SEND_WINDOW).
 import { isWithinBrandSendWindow } from './send-time-util';
 import { BRAND_SEND_WINDOW } from '../config/defaults';
@@ -868,10 +868,16 @@ function assertCommerceRequired(commerce: Record<string, any> | undefined, at: s
   if (!priceOk) throw new BrandMessageBuildError(`${at}상품 정상가가 필요합니다`);
 }
 
+/**
+ * 발송에 실리는 링크 검사 — 형식(스킴)과 **실존하지 않는 최상위 도메인**을 함께 본다.
+ *
+ * ★2026-09-22 TLD 판정 추가. 그전에는 스킴만 봐서 `invitocorp.cpm`(`.com` 오타)이 그대로 통과했고,
+ * 큐에는 들어가고 발송만 `status_code 9999`로 죽었다(0922 실측 3건 · 화면에는 「기타 오류」만 남고
+ * 차감은 끝난 뒤). 판정은 CT(`normalize.webLinkReason`)가 소유하고 화면도 같은 문구를 쓴다.
+ */
 function assertWebLink(v: string, at: string): void {
-  if (v && !isHttpLinkOrVariable(v)) {
-    throw new BrandMessageBuildError(`${at}: 링크는 http:// 또는 https://로 시작해야 합니다 (예: https://www.example.com)`);
-  }
+  const reason = webLinkReason(v, `${at}: 링크는`);
+  if (reason) throw new BrandMessageBuildError(reason);
 }
 
 /**
@@ -985,6 +991,8 @@ function assertBrandContentSpec(input: {
   //   치환은 각 경로가 발송 직전 `resolveBrandSendImage`/`resolveBrandSendAttachmentJson`으로 한다.
   //   여기 걸린다는 것은 그 치환을 안 거친 경로가 있다는 뜻이다.
   assertNoOwnServingImage(attImage?.img_url, label);
+  // ★2026-09-22 이미지 클릭 주소도 링크다 — 캐러셀 카드 이미지 링크는 검사받는데 말풍선만 빠져 있었다
+  assertWebLink(strFieldOrThrow(attImage?.img_link, '이미지 링크'), '이미지');
   for (const it of Array.isArray(attItem?.list) ? attItem.list : []) {
     assertNoOwnServingImage((it as any)?.img_url, label);
   }
@@ -1058,6 +1066,12 @@ function assertBrandContentSpec(input: {
         throw new BrandMessageBuildError(`${at}(${btnSpec.label}): ${names} 중 ${btnSpec.anyOf.count}개 이상을 입력해야 합니다`);
       }
     }
+    // ★2026-09-22 말풍선 버튼 링크 검사 — 그전에는 캐러셀·아이템만 보고 **이 자리는 열려 있었다**
+    //   ("카카오가 실제로 거절하는지 실측한 뒤에 넓힌다" = brand-value-checks.test.ts 머리 4번).
+    //   0922에 그 실측이 나왔다: 버튼 링크를 `invitocorp.cpm`으로 친 3건이 전부 9999로 죽었고
+    //   같은 계정·같은 라인에서 `.com`으로 보낸 건은 성공했다. 근거가 생겼으므로 넓힌다.
+    assertWebLink(strFieldOrThrow(btn?.url_mobile, `${at} 모바일 링크`), at);
+    assertWebLink(strFieldOrThrow(btn?.url_pc, `${at} PC 링크`), `${at} PC`);
     // ★2026-08-28 버튼명 길이 — §3.4 "TEXT, IMAGE - 최대 14자 - 그외 최대 8자".
     //   그전에는 이 축이 없어 8자 유형에도 14자가 통과했다(화면 maxLength가 전 유형 14 고정이었다).
     const btnName = strFieldOrThrow(btn?.name, `${at} 버튼명`);
@@ -1092,6 +1106,9 @@ function assertBrandContentSpec(input: {
     const hasCouponLink = ['url_mobile', 'scheme_android', 'scheme_ios']
       .some((k) => strFieldOrThrow(coupon[k], '쿠폰 링크'));
     if (!hasCouponLink) throw new BrandMessageBuildError('쿠폰을 넣으려면 쿠폰 URL이 필요합니다');
+    // ★2026-09-22 쿠폰 링크도 버튼과 같은 판정을 받는다(0922 실측 = 오타 링크가 그대로 나가 9999)
+    assertWebLink(strFieldOrThrow(coupon.url_mobile, '쿠폰 모바일 링크'), '쿠폰');
+    assertWebLink(strFieldOrThrow(coupon.url_pc, '쿠폰 PC 링크'), '쿠폰 PC');
     const desc = strFieldOrThrow(coupon.description, '쿠폰 설명');
     if (!desc) throw new BrandMessageBuildError('쿠폰 설명이 필요합니다');
     if (charLen(desc) > spec.couponDescMax) {

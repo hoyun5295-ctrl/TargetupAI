@@ -20,6 +20,7 @@
  */
 
 import { Router, Request, Response, urlencoded } from 'express';
+import { findLinkDefectInText } from '../utils/normalize';
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
@@ -405,6 +406,12 @@ router.post('/posts', async (req: Request, res: Response) => {
   }
   if (accountIds.length === 0) {
     return res.status(400).json({ success: false, error: '올릴 채널을 하나 이상 골라 주세요.' });
+  }
+  // ★2026-09-22 글 속 링크에 실존하지 않는 도메인이 있으면 올리지 않는다 — 게시는 되고 보는 사람이
+  //   눌렀을 때 안 열린다. 판정은 CT(findLinkDefectInText)가 소유하고 전 채널이 같은 문구를 쓴다.
+  const snsLinkDefect = findLinkDefectInText(body, '글 속 링크는');
+  if (snsLinkDefect) {
+    return res.status(400).json({ success: false, error: snsLinkDefect, code: 'LINK_DEFECT' });
   }
 
   try {

@@ -10,6 +10,7 @@
  */
 import { BRAND_SPEC } from '../../constants/brand-message-spec';
 import { ratioLabel, sameRatio } from './brandImageSpec';
+import { isWebLink, normalizeLinkInput, linkReason } from '../../utils/link-check';
 
 /**
  * 이미지 한 자리 — 라이브러리·업로드에서 고른 우리 자산. 발송 직전 서버가 카카오에 올려 준다.
@@ -80,28 +81,11 @@ export function calcRate(regular: string, discount: string): string {
 }
 
 /**
- * 링크 형식 — `http://` 또는 `https://`로 시작해야 한다. 변수(`#{...}`)로 시작하는 값은 치환 뒤에 정해지므로 통과.
- * ⛔ 자동으로 붙여 주지 않는다 — 고객이 넣은 주소를 우리가 바꾸지 않는다. 무엇을 고치면 되는지만 알려 준다.
+ * 링크 검사는 **공용 CT가 소유한다**(★2026-09-22 — 전 채널이 같은 판정을 써야 한다).
+ * 그전에는 이 파일이 브랜드 전용으로 갖고 있어서 다른 채널은 아무 검사도 받지 못했다.
+ * 기존 소비처가 `brandRich`에서 가져다 쓰므로 import 경로를 그대로 두려고 여기서 다시 내보낸다.
  */
-export const isWebLink = (raw: string): boolean => {
-  const v = String(raw || '').trim();
-  return /^https?:\/\/\S+$/i.test(v) || v.startsWith('#{');
-};
-/**
- * 링크 칸에서 포커스가 빠질 때의 정리 — `www.naver.com` 처럼 **도메인 형태인데 스킴이 없는 값**에만 `https://` 를 붙인다.
- * 규칙은 백엔드 `normalizeWebUrl`(utils/normalize.ts · 0702 이메일 링크 건)의 도메인 판정과 같다.
- * ⛔ 발송할 때 뒤에서 고치지 않는다. **칸에 보이는 값**을 바꾸므로 담당자가 나가는 주소를 그대로 본다.
- * 이미 `http(s)://` 로 시작하는 값 · 변수(`#{...}`)로 시작하는 값 · 도메인 형태가 아닌 값은 건드리지 않는다
- * (도메인 형태가 아닌 값은 아래 linkReason 이 사유와 함께 막는다).
- */
-export const normalizeLinkInput = (raw: string): string => {
-  const v = String(raw || '').trim();
-  if (!v || /^https?:\/\//i.test(v) || v.startsWith('#{')) return v;
-  return /^[a-z0-9-]+(\.[a-z0-9-]+)+([/?#].*)?$/i.test(v) ? `https://${v}` : v;
-};
-
-export const linkReason = (raw: string, at: string): string =>
-  !String(raw || '').trim() || isWebLink(raw) ? '' : `${at} http:// 또는 https://로 시작해야 합니다 (예: https://www.example.com)`;
+export { isWebLink, normalizeLinkInput, linkReason };
 
 /** 프리미엄 동영상은 카카오TV 주소만 받는다(0920 실측 — 유튜브 주소는 카카오가 동영상 오류로 거절) */
 export const isKakaoTvUrl = (raw: string): boolean => {
