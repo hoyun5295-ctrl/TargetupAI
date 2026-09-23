@@ -161,9 +161,11 @@ const CAROUSEL_COMMON = {
 
 export const BUBBLE_TYPES: Record<string, BrandBubbleSpec> = {
   TEXT: { code: 'TEXT', label: '텍스트', maxMessage: 1300, maxNewline: 99, maxButtons: 5, minButtons: 0, couponMaxButtons: 4, couponDescMax: 12, maxHeader: 0, requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0, maxButtonName: 14, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0 },
-  // IMAGE 줄바꿈 29 = 자유형(§4.4.1) 기준. 기본형(§4.3.1)은 같은 자리를 99로 적어 매뉴얼끼리 갈리는데,
-  // 우리가 리치 첨부를 싣는 경로는 자유형뿐이라 좁은 쪽을 택한다(fail-closed).
-  IMAGE: { code: 'IMAGE', label: '이미지', maxMessage: 1300, maxNewline: 29, maxButtons: 5, minButtons: 0, couponMaxButtons: 4, couponDescMax: 12, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0, maxButtonName: 14, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0 },
+  // ★2026-09-22 IMAGE 줄바꿈 29 → 99. **공급사 회신으로 확정**(0922 박성용 접수 「99회까지 가능」 →
+  //   Harold 문의 → 회신 = 이미지형도 99). 그전 근거는 문서였고 둘이 갈렸다: 자유형 §4.4.1 = 29 ·
+  //   기본형 §4.3.1 = 99. 어느 쪽인지 몰라 좁은 쪽을 택했는데(fail-closed), 그 선택이 **규격이 허용하는
+  //   것을 우리가 막는** 상태였다. ⛔ 되돌리려면 근거가 문서가 아니라 회신이나 실측이어야 한다.
+  IMAGE: { code: 'IMAGE', label: '이미지', maxMessage: 1300, maxNewline: 99, maxButtons: 5, minButtons: 0, couponMaxButtons: 4, couponDescMax: 12, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0, maxButtonName: 14, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0 },
   WIDE: { code: 'WIDE', label: '와이드 이미지', maxMessage: 76, maxNewline: 5, maxButtons: 2, minButtons: 0, couponMaxButtons: 2, couponDescMax: 18, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0, maxButtonName: 8, maxAdditional: 0, maxAdditionalNewline: 0, maxCommerceTitle: 0 },
   // ★2026-08-28 아이템 상한 5 → 4 (Harold 확정). 규격 문서 둘이 갈린다:
   //   attachment_method.pdf §3.4 `item.list` = "아이템리스트(최소:3, 최대:4)"

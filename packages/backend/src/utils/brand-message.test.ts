@@ -227,12 +227,17 @@ describe('본문 길이·줄바꿈 (§4.4.1)', () => {
   // 개행을 글자 사이에 둔다.
   const lines = (newlineCount: number) => Array.from({ length: newlineCount + 1 }, () => 'a').join('\n');
 
-  it('줄바꿈 상한 — TEXT 99 · IMAGE 29 · WIDE 5', () => {
+  // ★2026-09-22 IMAGE 29 → 99 (공급사 회신으로 확정 · 0922 박성용 접수). 그전에는 문서 둘이 갈려
+  //   좁은 쪽을 택했고, 그 선택이 규격이 허용하는 것을 우리가 막는 상태였다.
+  it('줄바꿈 상한 — TEXT 99 · IMAGE 99 · WIDE 5', () => {
     expect(() => buildBrandQueuePayload({ ...FREE_BASE, message: lines(100) })).toThrow(/줄바꿈은 최대 99개/);
     expect(() => buildBrandQueuePayload({ ...FREE_BASE, message: lines(99) })).not.toThrow();
     expect(() => buildBrandQueuePayload({
-      ...FREE_BASE, bubbleType: 'IMAGE', attachmentJson: att(IMAGE_OK), message: lines(30),
-    })).toThrow(/줄바꿈은 최대 29개/);
+      ...FREE_BASE, bubbleType: 'IMAGE', attachmentJson: att(IMAGE_OK), message: lines(100),
+    })).toThrow(/줄바꿈은 최대 99개/);
+    expect(() => buildBrandQueuePayload({
+      ...FREE_BASE, bubbleType: 'IMAGE', attachmentJson: att(IMAGE_OK), message: lines(99),
+    })).not.toThrow();
     expect(() => buildBrandQueuePayload({
       ...FREE_BASE, bubbleType: 'WIDE', attachmentJson: att(IMAGE_OK), message: lines(6),
     })).toThrow(/줄바꿈은 최대 5개/);
@@ -564,7 +569,7 @@ describe('시각 판정은 "실제로 나갈 때"를 기준으로 한다', () =>
 // ============================================================
 
 describe('AI 안내 문구 부착 — appendAiImageNotice (부착·중복·초과)', () => {
-  const IMAGE = BUBBLE_TYPES.IMAGE;   // 1300자 / 줄바꿈 29
+  const IMAGE = BUBBLE_TYPES.IMAGE;   // 1300자 / 줄바꿈 99
   const WIDE = BUBBLE_TYPES.WIDE;     // 76자 / 줄바꿈 5
 
   it('본문 끝에 줄바꿈+문구가 붙는다 — 소모 = 코드포인트 16(줄바꿈 포함) + 줄바꿈 1', () => {

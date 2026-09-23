@@ -99,7 +99,7 @@ export const BRAND_SPEC: Record<string, BrandSpec> = {
       "code": "IMAGE",
       "label": "이미지",
       "maxMessage": 1300,
-      "maxNewline": 29,
+      "maxNewline": 99,
       "maxButtons": 5,
       "minButtons": 0,
       "couponMaxButtons": 4,
