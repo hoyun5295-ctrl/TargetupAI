@@ -26,7 +26,7 @@ import { outreachMailTo, outreachMailToList, isOutreachMailerReady, outreachTest
 import {
   getOutreachDirectInfo, setOutreachContact, reviewOutreachJob, holdOutreachJob, ackOutreachContactDomain, reopenOutreachContact,
   sendOutreachDirectForJob, sendOutreachDirectBulk, autoSendOutreachJob, getOutreachDirectStatus, resumeOutreachAutoSend,
-  setOutreachSendReviewFlag, extractOutreachStorePageText, getOutreachWorkbench,
+  setOutreachSendReviewFlag, extractOutreachStorePageText, getOutreachWorkbench, grabOutreachStorePage,
 } from '../utils/sales-outreach-direct-jobs';
 import { directStageEnv, outreachHashSecret, CONTACT_BASIS_PRESETS } from '../utils/sales-outreach-direct';
 import { getOutreachContext } from '../utils/sales-outreach-produce';
@@ -397,6 +397,28 @@ router.post('/jobs/:id/store-page', async (req: Request, res: Response) => {
       res.json({ ok: true, ...r });
     } catch (e: any) {
       respondError(res, e, '스토어 저장본 읽기');
+    }
+  });
+});
+
+// ★0924 네이버 스토어 화면 가져오기(북마크 버튼 → 수신 페이지 → 여기 · 서버 네트워크 0 · 같은 스토어 저장값 건에 문구만 저장)
+router.post('/store-grab', async (req: Request, res: Response) => {
+  if (!(await isSalesOutreachOperator(req.user?.userId))) {
+    return res.status(403).json({ error: '이 기능을 사용할 권한이 없습니다.', code: 'FORBIDDEN' });
+  }
+  storePageUpload.single('file')(req as any, res as any, async (err: any) => {
+    if (err) {
+      console.log('[sales-outreach] 스토어 화면 거절:', err?.message);
+      return res.status(400).json({ error: err?.code === 'LIMIT_FILE_SIZE' ? '화면 내용이 너무 커서 받지 못했습니다.' : '화면 내용을 받지 못했습니다.' });
+    }
+    try {
+      const file = (req as any).file as { buffer: Buffer } | undefined;
+      if (!file?.buffer) return res.status(400).json({ error: '화면 내용이 비어 있습니다.' });
+      const r = await grabOutreachStorePage({ pageUrl: String(req.body?.pageUrl || ''), html: file.buffer.toString('utf8'), jobId: req.body?.jobId ? String(req.body.jobId) : null }, req.user?.userId);
+      audit(req, 'store_grab', r.attached?.jobId ?? null, { store: r.store, chars: r.attached?.chars ?? null, choices: r.choices.length, reason: r.reason });
+      res.json({ ok: true, ...r });
+    } catch (e: any) {
+      respondError(res, e, '스토어 화면 가져오기');
     }
   });
 });

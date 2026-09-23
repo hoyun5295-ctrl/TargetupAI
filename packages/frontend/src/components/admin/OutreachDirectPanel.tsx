@@ -180,7 +180,7 @@ export default function OutreachDirectPanel({ jobId, companyName, stage, mailRes
       )}
 
       {direct.naverStoreUrl && (
-        <p className="text-[11px] text-gray-500 break-all">네이버 스토어: <a href={direct.naverStoreUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{direct.naverStoreUrl.replace(/^https:\/\//, '')}</a> · 저장만 됨(지금은 읽지 않습니다)</p>
+        <p className="text-[11px] text-gray-500 break-all">네이버 스토어: <a href={direct.naverStoreUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{direct.naverStoreUrl.replace(/^https:\/\//, '')}</a> · 서버는 읽지 않습니다(행사 문구는 확인 단계에서 북마크 버튼으로)</p>
       )}
 
       {/* 확인 상태 */}

@@ -29,6 +29,7 @@ const AdminDashboard = lazyPage(() => import('./pages/AdminDashboard'));
 const AiTrainingDataPage = lazyPage(() => import('./pages/AiTrainingDataPage'));
 const BestCopyPage = lazyPage(() => import('./pages/BestCopyPage'));
 const BestLayoutPage = lazyPage(() => import('./pages/BestLayoutPage'));
+const OutreachGrabPage = lazyPage(() => import('./pages/OutreachGrabPage')); // ★ 2026-09-24 AI 영업 네이버 스토어 화면 받기(북마크 버튼이 연 탭)
 const Dashboard = lazyPage(() => import('./pages/Dashboard'));
 const ManagePage = lazyPage(() => import('./pages/ManagePage'));
 const CalendarPage = lazyPage(() => import('./pages/CalendarPage'));
@@ -358,6 +359,15 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['super_admin']}>
               <BestLayoutPage />
+            </PrivateRoute>
+          }
+        />
+        {/* ★ 2026-09-24 AI 영업 네이버 스토어 화면 받기 — 라우트는 super_admin, 실제 권한은 서버(isSalesOutreachOperator) */}
+        <Route
+          path="/admin/outreach-grab"
+          element={
+            <PrivateRoute allowedTypes={['super_admin']}>
+              <OutreachGrabPage />
             </PrivateRoute>
           }
         />

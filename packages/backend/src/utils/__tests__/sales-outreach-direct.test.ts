@@ -16,6 +16,7 @@ import {
   classifyContactDomain, parseNaverStoreSlug, naverStoreUrlOf, directSubjectOf,
   computeDirectSendLock, evaluateDirectStage, directStageEnv, directDailyCap, pickAutoConfirmIndexes, autoSendBlockers, visionTwoItemsOk,
   pickPostReviewIndexes, kstDayStartIso, DIRECT_LOCK_MESSAGES, type DirectLockInput, type DirectStats,
+  storePageTextOf, STORE_PAGE_TEXT_MAX, STORE_GRAB_STAGES,
 } from '../sales-outreach-direct';
 
 const SECRET = 'a'.repeat(64);
@@ -93,6 +94,24 @@ describe('네이버 스토어 저장값(불변 50 · fetch 0)', () => {
     expect(naverStoreUrlOf('smartstore:my_shop')).toBe('https://smartstore.naver.com/my_shop');
     expect(naverStoreUrlOf('brand:../x')).toBeNull();
     expect(naverStoreUrlOf(null)).toBeNull();
+  });
+});
+
+describe('네이버 스토어 화면 가져오기(★0924 · 직원 브라우저 화면 · 서버 네트워크 0)', () => {
+  it('홈페이지와 같은 추출기 · 행사 블록이 앞 · 2000자 상한', () => {
+    const html = '<div class="promo_banner">티끌모아 톤캉스 최대 74% 할인</div><a href="/c">쿠폰 받기 10%</a><p>' + '본문 '.repeat(3000) + '</p>';
+    const t = storePageTextOf(html);
+    expect(t.startsWith('티끌모아 톤캉스 최대 74% 할인')).toBe(true);
+    expect(t).toContain('쿠폰 받기 10%');
+    expect(t.length).toBeLessThanOrEqual(STORE_PAGE_TEXT_MAX);
+    expect(STORE_PAGE_TEXT_MAX).toBe(2000);
+  });
+  it('빈 화면 = 빈 문자열(호출부가 짧으면 거절)', () => {
+    expect(storePageTextOf('')).toBe('');
+    expect(storePageTextOf('<div></div>')).toBe('');
+  });
+  it('받을 수 있는 단계 = 확정 전만', () => {
+    expect([...STORE_GRAB_STAGES]).toEqual(['queued', 'crawling', 'analyzing', 'awaiting_confirm']);
   });
 });
 
@@ -305,6 +324,40 @@ describe('불변식(소스 검사)', () => {
     const src = read('sales-outreach-produce.ts');
     expect(src).toContain('imageSlot.run(() => produceOutreachImageExclusive(input)');
     expect(src).not.toContain('imageInFlight');
+  });
+  // ★0924 스토어 화면 가져오기 — 서버는 네이버에 요청하지 않는다 · 저장은 추출 문구만 · 추출기는 한 곳
+  const bodyOf = (src: string, sig: string): string => {
+    const i = src.indexOf(sig);
+    expect(i, sig).toBeGreaterThan(-1);
+    const rest = src.slice(i + sig.length);
+    const next = rest.search(/\n(export |async function |function )/);
+    return next < 0 ? rest : rest.slice(0, next);
+  };
+  it('가져오기 함수는 네트워크 0 · 스토어 판정은 저장값 CT · 조건부 UPDATE 1문 · 주소·HTML 원문 저장 0', () => {
+    const src = read('sales-outreach-direct-jobs.ts');
+    const body = bodyOf(src, 'export async function grabOutreachStorePage(');
+    expect(body).not.toMatch(/fetch\(|fetchHtmlGuarded|renderPageGuarded|http\.request|axios/);
+    expect(body).toContain('parseNaverStoreSlug(input.pageUrl)');
+    expect(body).toContain('storePageTextOf(input.html)');
+    expect(body).toContain('JSON.stringify({ store_grab: { text, chars: text.length, at, by: operatorSuperAdminId || null } })');
+    expect(body).toMatch(/WHERE id = \$1 AND naver_store_slug = \$3[\s\S]*stage = ANY\(\$4::text\[\]\)/);
+    expect(body).not.toMatch(/store_grab:[^}]*(url|html|pageUrl)/i);
+  });
+  it('저장본 업로드와 화면 가져오기는 같은 추출 함수 하나', () => {
+    const src = read('sales-outreach-direct-jobs.ts');
+    expect(bodyOf(src, 'export async function extractOutreachStorePageText(')).toContain('storePageTextOf(');
+    expect(src).not.toContain('buildOutreachEventMaterial(');
+  });
+  it('스토어 문구를 가져온 건은 자동 확정하지 않는다(혜택 숫자는 사람이 채운다)', () => {
+    const src = read('sales-outreach-jobs.ts');
+    const body = bodyOf(src, 'async function autoConfirmOutreachJob(');
+    expect(body).toContain("stage_results->'store_grab' AS store_grab");
+    expect(body.indexOf('if (cur.rows[0].store_grab)')).toBeGreaterThan(-1);
+    expect(body.indexOf('if (cur.rows[0].store_grab)')).toBeLessThan(body.indexOf('confirmSelectionCore('));
+    // 확인과 확정 사이에 붙은 경우도 확정 UPDATE 조건이 막는다(효과가 만들어지는 자리)
+    const core = bodyOf(src, 'async function confirmSelectionCore(');
+    expect(core).toContain("AND ($7::text = 'human' OR (stage_results->'store_grab') IS NULL)");
+    expect(core).toMatch(/actor\.kind\],\s*\);/);
   });
 });
 

@@ -1224,8 +1224,13 @@ type ConfirmActor = { kind: 'human'; id: string | null } | { kind: 'auto' };
  *   돌려주는 것 = 제작 완료(ready·failed)까지 기다릴 수 있는 약속 · 확정하지 않았으면 null.
  */
 async function autoConfirmOutreachJob(jobId: string): Promise<Promise<void> | null> {
-  const cur = await query(`SELECT stage, event_quote FROM sales_outreach_jobs WHERE id = $1 AND purged_at IS NULL`, [jobId]);
+  const cur = await query(`SELECT stage, event_quote, stage_results->'store_grab' AS store_grab FROM sales_outreach_jobs WHERE id = $1 AND purged_at IS NULL`, [jobId]);
   if (!cur.rows[0] || cur.rows[0].stage !== 'awaiting_confirm') return null;
+  // ★0924 스토어 화면 문구를 가져온 건 = 사람이 고른다(스토어 문구는 혜택 숫자 면허가 없어 어차피 사람이 채워야 발송이 풀린다)
+  if (cur.rows[0].store_grab) {
+    console.log('[sales-outreach] 자동 확정 건너뜀(스토어 문구 있음 · 사람 확정):', jobId);
+    return null;
+  }
   const candidates: EventCandidate[] = Array.isArray(cur.rows[0].event_quote?.candidates) ? cur.rows[0].event_quote.candidates : [];
   const indexes = pickAutoConfirmIndexes(candidates);
   if (indexes.length === 0) return null;
@@ -1301,6 +1306,7 @@ async function confirmSelectionCore(
             stage_results = COALESCE(stage_results, '{}'::jsonb) || $6::jsonb,
             lock_token = $5, lock_at = NOW()
       WHERE id = $1 AND stage = 'awaiting_confirm'
+        AND ($7::text = 'human' OR (stage_results->'store_grab') IS NULL)
       RETURNING id`,
     [jobId,
      // ★ v3 selectedList(≤3 · 누른 순서) 를 함께 싣는다 · selected 는 대표 1건(하류 무변경) · ★ 2026-09-23 자동 확정 = 'auto:v1'
@@ -1308,7 +1314,9 @@ async function confirmSelectionCore(
      JSON.stringify({ ...profile, selectedImageUrl }),
      industry, lockToken,
      // 자동 확정 흔적은 되돌리기(RESETTABLE_KEYS)가 지우지 않는다 — "자동 확정 뒤 사람이 행사를 바꿨는가"(단계 3 조건)의 원천
-     JSON.stringify(actor.kind === 'auto' ? { auto_confirmed_at: confirmedAt } : {})],
+     JSON.stringify(actor.kind === 'auto' ? { auto_confirmed_at: confirmedAt } : {}),
+     // ★0924 자동 확정은 스토어 문구가 붙은 건을 잡지 않는다(확인과 확정 사이에 붙어도 이 조건이 막는다 · 사람 확정은 무관)
+     actor.kind],
   );
   if (updated.rows.length === 0) {
     throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.');

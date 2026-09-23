@@ -458,6 +458,7 @@ cd /home/administrator/targetup-app/packages/backend && grep -q '^OUTREACH_HASH_
 4. 수신거부 링크 GET → 확인 페이지만(기록 0 · `SELECT COUNT(*) FROM sales_outreach_suppressions;` 불변) · [수신거부] POST → 1행.
 5. 법 판단 서면(Harold) 뒤 `OUTREACH_DIRECT_STAGE=1` → 자사 도메인 담당자 1건 실발송 → `SELECT mode, outcome, review_flag FROM sales_outreach_sends ORDER BY created_at DESC LIMIT 3;` = `manual · sent`.
 6. 롤백 = `OUTREACH_DIRECT_STAGE=0`(직접 발송 즉시 잠김 · 코드 되돌리기 불필요). 새 테이블은 구코드가 읽지 않는다.
+7. ★0924 스토어 화면 가져오기(DDL 0 · ENV 0 · 백엔드·프론트 둘 다 빌드) — 네이버 스토어 주소를 적은 업체 1건 등록 → 확인 화면 [버튼 설치]의 [한줄로 가져오기]를 크롬 북마크바로 끌어다 놓기 → [스토어 열기] → 그 화면에서 북마크 → 새 탭 "○○에 행사 문구 N자를 붙였습니다" 후 닫힘 → 확인 화면에 "네이버 스토어에서 가져옴" 카드. 확인 SQL = `SELECT company_name, stage_results->'store_grab'->>'chars' FROM sales_outreach_jobs WHERE stage_results ? 'store_grab' ORDER BY created_at DESC LIMIT 3;`. 롤백 = 코드 되돌리기(저장된 키는 구코드가 읽지 않는다).
 
 ---
 

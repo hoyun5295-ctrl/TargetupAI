@@ -16,6 +16,9 @@ import {
   outreachFetch, WORKBENCH_LANES, DOMAIN_BADGE, EDIT_REASON_OPTIONS, splitEmail, fmtDateTime,
   type WorkbenchData, type WorkbenchCard, type WorkbenchLane,
 } from './sales-outreach-shared';
+// ★0924 네이버 스토어 화면 가져오기(카드 [스토어 열기] → 북마크 → 수신 탭 알림 → 새로고침)
+import OutreachStoreGrabInstall from './OutreachStoreGrabInstall';
+import { onStoreGrab } from './outreach-store-grab';
 
 interface Props {
   onClose: () => void;
@@ -38,6 +41,7 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob }: Props) {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [autoStop, setAutoStop] = useState<{ stopped?: boolean; reason?: string; at?: string } | null>(null);
+  const [grabInstallOpen, setGrabInstallOpen] = useState(false);
   const reqSeq = useRef(0);
 
   const load = useCallback(async (b?: string) => {
@@ -62,6 +66,8 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob }: Props) {
   }, []);
 
   useEffect(() => { load(); loadStatus(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // ★0924 스토어 화면이 어느 건에 붙으면 바로 새로고침(카드의 "가져옴" 표시)
+  useEffect(() => onStoreGrab(() => { load(); }), [load]);
 
   // 폴링 — 움직이는 줄(읽는 중 · 제작 중 · 확인 대기 자동 확정)이 있으면 5초 · 없으면 20초
   const moving = !!data && ((data.laneCounts.reading || 0) + (data.laneCounts.producing || 0) > 0);
@@ -183,9 +189,12 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob }: Props) {
             발송 단계 {data.stage.effective}{data.stage.env !== data.stage.effective ? ` (결재 ${data.stage.env})` : ''} · 오늘 {data.today}/{data.cap}
           </span>
         )}
+        <button onClick={() => setGrabInstallOpen(!grabInstallOpen)}
+          className={`px-3 py-2 rounded-lg border text-xs inline-flex items-center gap-1 ${grabInstallOpen ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}><Store className="w-3.5 h-3.5" /> 스토어 가져오기 버튼</button>
         <button onClick={() => { load(); loadStatus(); }} disabled={busy} className="p-2 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-40" title="새로고침"><RefreshCw className="w-4 h-4" /></button>
         <button onClick={onClose} className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50"><X className="w-5 h-5" /></button>
       </div>
+      {grabInstallOpen && <div className="mx-4 md:mx-6 mt-3"><OutreachStoreGrabInstall /></div>}
 
       {autoStop?.stopped && (
         <div className="mx-4 md:mx-6 mt-3 px-4 py-2.5 rounded-lg bg-rose-50 border border-rose-200 text-sm text-rose-800 flex items-center justify-between gap-3 flex-wrap">
@@ -263,7 +272,9 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob }: Props) {
                         <span className="text-sm font-semibold text-gray-900 truncate">{c.companyName}</span>
                         {c.chainIndex ? <span className="text-[10px] text-gray-400">#{c.chainIndex}</span> : null}
                         {c.autoConfirmed && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 inline-flex items-center gap-0.5"><Sparkles className="w-3 h-3" /> 자동 확정</span>}
-                        {c.naverStoreUrl && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 inline-flex items-center gap-0.5"><Store className="w-3 h-3" /> 스토어 저장</span>}
+                        {c.storeGrab
+                          ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-800 inline-flex items-center gap-0.5" title={fmtDateTime(c.storeGrab.at)}><Store className="w-3 h-3" /> 스토어 가져옴 {c.storeGrab.chars.toLocaleString()}자</span>
+                          : c.naverStoreUrl && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 inline-flex items-center gap-0.5"><Store className="w-3 h-3" /> 스토어</span>}
                       </div>
                       {c.contact.email ? (
                         <div className="text-gray-700 break-all">{splitEmail(c.contact.email).local}<b>{splitEmail(c.contact.email).domain}</b>
@@ -307,6 +318,11 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob }: Props) {
                         <button onClick={(e) => { e.stopPropagation(); flagSend(c, 'ok'); }} disabled={busy} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs disabled:opacity-40">문제없음</button>
                         <button onClick={(e) => { e.stopPropagation(); flagSend(c, 'wrong'); }} disabled={busy} className="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50 disabled:opacity-40">잘못 나감</button>
                       </>
+                    )}
+                    {/* ★0924 확정 전 건만 — 스토어를 열어 북마크 [한줄로 가져오기]를 누르면 이 건에 문구가 들어온다 */}
+                    {c.naverStoreUrl && (c.lane === 'reading' || c.lane === 'confirm') && (
+                      <a href={c.naverStoreUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                        className="px-2.5 py-1.5 rounded-lg border border-green-200 text-green-700 text-xs hover:bg-green-50 inline-flex items-center gap-1"><Store className="w-3.5 h-3.5" /> 스토어 열기</a>
                     )}
                     {c.dmUrl && <a href={c.dmUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-[11px] text-gray-500 hover:text-blue-600 inline-flex items-center gap-0.5"><ExternalLink className="w-3 h-3" /> DM</a>}
                     <button onClick={(e) => { e.stopPropagation(); onOpenJob(c.id, cards.map((x) => x.id)); }}

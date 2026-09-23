@@ -10,6 +10,7 @@
  */
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { isSameSite, normalizeHost } from './sales-outreach-render-guard';
+import { buildOutreachEventMaterial } from './sales-outreach-extract';
 import type { SendLock, SendLockReason } from './sales-outreach-jobs';
 
 // ===== 담당자 입력 정규화 =====
@@ -145,6 +146,20 @@ export function naverStoreUrlOf(value: string | null | undefined): string | null
   const m = /^(brand|smartstore):([a-z0-9_-]{2,40})$/.exec(String(value || ''));
   if (!m) return null;
   return m[1] === 'brand' ? `https://brand.naver.com/${m[2]}` : `https://smartstore.naver.com/${m[2]}`;
+}
+
+// ===== 스토어 화면 문구(★0924 · 직원 브라우저 화면 가져오기 · 저장본 업로드 공용 · 네트워크 0) =====
+
+/** 스토어 화면·저장본에서 뽑는 행사 문구 상한(직접 붙여넣기 칸과 같은 2000자) */
+export const STORE_PAGE_TEXT_MAX = 2000;
+
+/** 가져온 문구를 받을 수 있는 단계 = 확정 전(확정 뒤에는 쓰일 자리가 없다) */
+export const STORE_GRAB_STAGES = ['queued', 'crawling', 'analyzing', 'awaiting_confirm'] as const;
+
+/** 스토어 화면 HTML → 행사 문구. 홈페이지와 같은 추출기(새 추출 로직 0) · 빈 결과 = '' (호출부가 짧으면 거절) */
+export function storePageTextOf(html: string): string {
+  const m = buildOutreachEventMaterial(String(html || ''));
+  return String(m.text || '').replace(/\n{3,}/g, '\n\n').trim().slice(0, STORE_PAGE_TEXT_MAX);
 }
 
 // ===== 제목 접두 (불변 47 · 발송 시점 변형은 이것 하나) =====
