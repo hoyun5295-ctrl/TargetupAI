@@ -21,6 +21,7 @@ import { useAuthStore } from '../../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 import TablePagination from '../common/TablePagination';
 import EmptyState from '../console/EmptyState';
+import ExcelDownloadButton from '../console/ExcelDownloadButton';
 import RowActions, { type RowAction } from '../console/RowActions';
 import StatusPill from '../console/StatusPill';
 import {
@@ -867,6 +868,13 @@ export default function AlimtalkManagementSection({ onCount }: Props = {}) {
               </button>
             )}
           </div>
+          {/* ★ 2026-09-23 엑셀 다운로드 — 조회와 같은 범위(회사 전체)라 권한 분기 밖. 필터는 엑셀 머리행에서 */}
+          <ExcelDownloadButton
+            url="/api/alimtalk/templates/export"
+            fallbackName="알림톡템플릿.xlsx"
+            onError={(message) => setToast(message)}
+            disabled={templates.length === 0}
+          />
           {/* ★ 검수 알림 수신자 관리 + 템플릿 등록: 고객사관리자만 (백엔드 requireCompanyAdmin) */}
           {canManage && (
             <>

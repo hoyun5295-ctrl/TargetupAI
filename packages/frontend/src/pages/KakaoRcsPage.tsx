@@ -10,6 +10,7 @@ import AlimtalkManagementSection from '../components/alimtalk/AlimtalkManagement
 import BrandTemplateManagementSection from '../components/alimtalk/BrandTemplateManagementSection';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import EmptyState from '../components/console/EmptyState';
+import ExcelDownloadButton from '../components/console/ExcelDownloadButton';
 import RowActions from '../components/console/RowActions';
 import StatusPill from '../components/console/StatusPill';
 import {
@@ -345,6 +346,13 @@ export default function KakaoRcsPage() {
                     className={CUI_FIELD_INPUT}
                   />
                 </div>
+                {/* ★ 2026-09-23 엑셀 다운로드(전체 목록 · 엑셀 머리행 필터로 거른다) */}
+                <ExcelDownloadButton
+                  url="/api/companies/rcs-templates/export"
+                  fallbackName="RCS템플릿.xlsx"
+                  onError={message => setToast({ show: true, type: 'error', message })}
+                  disabled={rcsTemplates.length === 0}
+                />
                 <button
                   onClick={() => { setEditingRcs(null); setShowRcsForm(true); }}
                   className={CUI_BTN_PRIMARY}

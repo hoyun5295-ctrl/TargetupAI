@@ -35,6 +35,8 @@ import { resolveImcCode } from '../utils/alimtalk-result-map';
 // ★ D217+ (2026-05-26 Harold 명시 진단 영역 정정): 옛 Tmp_xxx 영역 = 진정 카카오 templateCode 영역 동기화
 import { syncTemplateCodes, syncSingleTemplateCode } from '../utils/kakao-template-sync';
 import { normalizeImcTemplateStatus } from '../utils/alimtalk-jobs';
+import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
+import { buildAlimtalkTemplateSheet, buildBrandTemplateSheet, templateExportFilename } from '../utils/template-export';
 import {
   syncCategoriesJob,
   syncPendingTemplatesJob,
@@ -1183,6 +1185,33 @@ router.get('/templates', async (req: Request, res: Response) => {
   }
 });
 
+// ★ 2026-09-23 알림톡 템플릿 엑셀 다운로드(숭실원격평생교육원 요청).
+//   범위 = 위 목록 GET 과 같다(회사 전체 · 같은 정렬). 화면의 상태·검색 필터는 적용하지 않는다 —
+//   엑셀 머리행 필터로 거른다(template-export.ts). `/templates/:templateCode` 보다 앞에 둬야 export 가 코드로 잡히지 않는다.
+router.get('/templates/export', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompany(req, res);
+    if (!companyId) return;
+    const r = await query(
+      `SELECT t.*, p.profile_key, p.profile_name,
+              u.name AS created_by_name, u.login_id AS created_by_login_id
+         FROM kakao_templates t
+         LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
+         LEFT JOIN users u ON u.id = t.created_by
+        WHERE t.company_id = $1
+        ORDER BY t.updated_at DESC NULLS LAST, t.created_at DESC`,
+      [companyId],
+    );
+    const now = new Date();
+    const buf = await buildXlsxBuffer(buildAlimtalkTemplateSheet(r.rows, now));
+    res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+    res.setHeader('Content-Disposition', xlsxContentDisposition(templateExportFilename('alimtalk', now)));
+    return res.send(buf);
+  } catch (err) {
+    return handleImcError(res, err);
+  }
+});
+
 // 템플릿 등록: 고객사관리자(admin)만 허용 (Harold님 지시 2026-04-21)
 //   기존 D130 §2-2 "모든 로그인 사용자 허용" 정책 폐기.
 //   사유: 발신프로필과 동일한 관리 단위로 통일 (/senders/token, /senders = requireCompanyAdmin).
@@ -2081,6 +2110,30 @@ router.get('/brand-templates', async (req: Request, res: Response) => {
       [companyId],
     );
     res.json({ success: true, templates: r.rows });
+  } catch (err) {
+    return handleImcError(res, err);
+  }
+});
+
+// ★ 2026-09-23 브랜드메시지 템플릿 엑셀 다운로드. 범위 = 위 목록 GET 과 같다(회사 · ACTIVE · 같은 정렬).
+//   `/brand-templates/:templateKey` 보다 앞에 둬야 export 가 템플릿키로 잡히지 않는다.
+router.get('/brand-templates/export', async (req: Request, res: Response) => {
+  try {
+    const companyId = requireCompany(req, res);
+    if (!companyId) return;
+    const r = await query(
+      `SELECT b.*, p.profile_key, p.profile_name
+         FROM brand_message_templates b
+         LEFT JOIN kakao_sender_profiles p ON p.id = b.profile_id
+        WHERE b.company_id = $1 AND b.status = 'ACTIVE'
+        ORDER BY b.updated_at DESC`,
+      [companyId],
+    );
+    const now = new Date();
+    const buf = await buildXlsxBuffer(buildBrandTemplateSheet(r.rows, now));
+    res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+    res.setHeader('Content-Disposition', xlsxContentDisposition(templateExportFilename('brand', now)));
+    return res.send(buf);
   } catch (err) {
     return handleImcError(res, err);
   }

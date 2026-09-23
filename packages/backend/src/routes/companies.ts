@@ -25,6 +25,9 @@ import {
   CompanyMergeBlockedError,
   CompanyMergeResidueError,
 } from '../utils/company-merge';
+// ★ 2026-09-23 RCS 템플릿 엑셀 다운로드 — 행 빌더 CT + 서식 CT
+import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
+import { buildRcsTemplateSheet, templateExportFilename } from '../utils/template-export';
 
 const router = Router();
 
@@ -2880,6 +2883,27 @@ router.get('/rcs-templates', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('RCS 템플릿 조회 실패:', error);
     res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// ★ 2026-09-23 RCS 템플릿 엑셀 다운로드. 범위 = 위 목록 GET 에서 상태 필터를 뺀 것(화면이 부르는 그대로 · 회사 전체).
+router.get('/rcs-templates/export', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    const result = await query(
+      'SELECT * FROM rcs_templates WHERE company_id = $1 ORDER BY created_at DESC',
+      [companyId],
+    );
+    const now = new Date();
+    const buf = await buildXlsxBuffer(buildRcsTemplateSheet(result.rows, now));
+    res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+    res.setHeader('Content-Disposition', xlsxContentDisposition(templateExportFilename('rcs', now)));
+    return res.send(buf);
+  } catch (error) {
+    console.error('RCS 템플릿 엑셀 다운로드 실패:', error);
+    res.status(500).json({ success: false, error: '다운로드 실패' });
   }
 });
 

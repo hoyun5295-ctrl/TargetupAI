@@ -25,6 +25,7 @@ import BrandTemplateForm from './BrandTemplateForm';
 import { useAuthStore } from '../../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 import EmptyState from '../console/EmptyState';
+import ExcelDownloadButton from '../console/ExcelDownloadButton';
 import RowActions, { type RowAction } from '../console/RowActions';
 import StatusPill from '../console/StatusPill';
 import {
@@ -292,6 +293,14 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
               className={CUI_FIELD_INPUT}
             />
           </div>
+
+          {/* ★ 2026-09-23 엑셀 다운로드 — 조회와 같은 범위(회사 전체)라 권한 분기 밖. 필터는 엑셀 머리행에서 */}
+          <ExcelDownloadButton
+            url="/api/alimtalk/brand-templates/export"
+            fallbackName="브랜드템플릿.xlsx"
+            onError={(message) => setToast({ show: true, type: 'error', message })}
+            disabled={templates.length === 0}
+          />
 
           {canManage && (
             <button type="button" onClick={() => setShowCreate(true)} className={CUI_BTN_PRIMARY}>
