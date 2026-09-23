@@ -53,6 +53,10 @@ const OUTREACH_FILES = [
   'utils/outreach-mailer.ts',
   'routes/sales-outreach.ts',
   'routes/outreach-public.ts',
+  // ★ 2026-09-23 담당자 직접 발송(판정 CT · 효과 CT · 대기열) — 같은 축, 같은 스캔
+  'utils/sales-outreach-direct.ts',
+  'utils/sales-outreach-direct-jobs.ts',
+  'utils/outreach-slot-queue.ts',
 ];
 
 /** `export async function NAME(` 부터 다음 최상위 `export`/`async function`/`function` 선언 직전까지 */
@@ -125,7 +129,8 @@ describe('sales-outreach invariants', () => {
     const jobs = readCode('utils/sales-outreach-jobs.ts');
     expect(jobs).toContain('isSalesOutreachOperator');
     // recordOutreachPreviewView = 공개 페이지 열람 계수(getPublicOutreachHtml 과 같은 무인증 축 · preview_code 가 게이트 · 쓰는 것은 stage_results.views_preview 뿐)
-    const ALLOW = new Set(['runOutreachJob', 'markFailed', 'getPublicOutreachHtml', 'recordOutreachPreviewView']);
+    // ★ 2026-09-23 assertOperator = 게이트 그 자체(직접 발송 파일이 같은 함수를 쓰려고 export)
+    const ALLOW = new Set(['runOutreachJob', 'markFailed', 'getPublicOutreachHtml', 'recordOutreachPreviewView', 'assertOperator']);
     const re = /export async function (\w+)\(/g;
     let m: RegExpExecArray | null;
     let checked = 0;
@@ -408,6 +413,67 @@ describe('sales-outreach invariants', () => {
     // 레시피 승격은 best-copy CT 의 insert 만(jobs 에 INSERT INTO best_copy_assets 0)
     expect(jobs).not.toContain('INSERT INTO best_copy_assets');
     expect(jobs).toContain('await insertOutreachRecipe({');
+  });
+
+  it('★ 2026-09-23 직접 발송 — 발송 코어 1곳 · 진입점 3곳(사람 단건 · 사람 묶음 · 묶음 승인 기록 자동) · 게이트 첫 await · 선점 트랜잭션 순서 · 수신처는 행 값', () => {
+    const dj = readCode('utils/sales-outreach-direct-jobs.ts');
+    // 발송 코어 = 정의 1 + 호출 3
+    expect(count(dj, 'async function sendDirectCore(')).toBe(1);
+    expect(count(dj, 'sendDirectCore(') - 1).toBe(3);
+    expect(dj).toContain("sendDirectCore(jobId, { kind: 'human', operatorId: String(operatorSuperAdminId) }, 'manual', String(expectedTo || ''))");
+    expect(dj).toContain("sendDirectCore(id, { kind: 'human', operatorId }, 'bulk', expected.get(id) || '')");
+    expect(dj).toContain("sendDirectCore(jobId, { kind: 'approval', approval }, 'auto', null)");
+    // SMTP 호출은 코어 안 1곳 · 수신처 = 선점한 행에서 읽은 값(l.email) · 요청 인자 0
+    expect(count(dj, 'sendOutreachDirectMail(')).toBe(1);
+    const core = fnBody(dj, 'async function sendDirectCore(');
+    expect(core).toContain('const to = l.email!;');
+    expect(core).toContain('sendOutreachDirectMail({\n        to, subject');
+    // 선점 트랜잭션 순서: 잡 CAS → advisory lock → 수신거부 원장 → 일일 상한 → 발송 원장 INSERT → COMMIT → SMTP
+    const order = ["SET mail_result = 'sending'", 'pg_advisory_xact_lock(', 'FROM sales_outreach_suppressions', 'FROM sales_outreach_sends WHERE created_at', 'INSERT INTO sales_outreach_sends', "client.query('COMMIT')", 'sendOutreachDirectMail('];
+    const idx = order.map((k) => core.indexOf(k));
+    for (let i = 0; i < idx.length; i++) expect(idx[i], order[i]).toBeGreaterThan(-1);
+    for (let i = 1; i < idx.length; i++) expect(idx[i], `${order[i - 1]} → ${order[i]}`).toBeGreaterThan(idx[i - 1]);
+    // 게이트 — 공개 수신거부 2곳 · 자동(묶음 승인 기록) 1곳을 뺀 효과 함수의 첫 await = assertOperator
+    const ALLOW = new Set(['autoSendOutreachJob', 'resolveOutreachUnsubscribe', 'recordOutreachUnsubscribe']);
+    const re = /export async function (\w+)\(/g;
+    let m: RegExpExecArray | null;
+    let checked = 0;
+    while ((m = re.exec(dj)) !== null) {
+      if (ALLOW.has(m[1])) continue;
+      const body = fnBody(dj, `export async function ${m[1]}(`);
+      const firstAwait = body.indexOf('await ');
+      expect(body.indexOf('await assertOperator('), `${m[1]}: 첫 await 가 assertOperator 가 아니다`).toBe(firstAwait);
+      checked++;
+    }
+    expect(checked).toBeGreaterThanOrEqual(12);
+    // 자동 발송은 승인 기록이 없으면 아무것도 하지 않는다
+    const auto = fnBody(dj, 'export async function autoSendOutreachJob(');
+    expect(auto.indexOf('validApproval(')).toBeGreaterThan(-1);
+    expect(auto.indexOf('if (!approval) return;')).toBeLessThan(auto.indexOf('sendDirectCore('));
+    // 라우트·스윕·체인은 SMTP·코어를 직접 모른다
+    for (const f of ['routes/sales-outreach.ts', 'utils/sales-outreach-sweeper.ts', 'utils/sales-outreach-jobs.ts']) {
+      const src = readCode(f);
+      expect(src, f).not.toContain('sendOutreachDirectMail');
+      expect(src, f).not.toContain('sendDirectCore');
+    }
+    expect(readCode('utils/sales-outreach-jobs.ts')).not.toContain('sales-outreach-direct-jobs');
+  });
+
+  it('★ 2026-09-23 수신거부 — GET 은 기록하지 않는다 · 검수 메일에는 List-Unsubscribe 0 · 공개 경로 리미터가 mount 보다 앞', () => {
+    const pub = readCode('routes/outreach-public.ts');
+    const getStart = pub.indexOf("unsubscribeRouter.get('/:token'");
+    const postStart = pub.indexOf("unsubscribeRouter.post('/:token'");
+    expect(getStart).toBeGreaterThan(-1);
+    expect(postStart).toBeGreaterThan(getStart);
+    expect(pub.slice(getStart, postStart)).not.toContain('recordOutreachUnsubscribe');
+    expect(pub.slice(postStart)).toContain('recordOutreachUnsubscribe(');
+    const mailer = readCode('utils/outreach-mailer.ts');
+    const testFn = fnBody(mailer, 'export async function sendOutreachTestMail(');
+    expect(testFn).not.toContain('List-Unsubscribe');
+    expect(fnBody(mailer, 'export async function sendOutreachDirectMail(')).toContain("'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'");
+    const app = read('app.ts');
+    expect(app.indexOf("app.use('/api/outreach/u', outreachPublicLimiter)")).toBeGreaterThan(-1);
+    expect(app.indexOf("app.use('/api/outreach/u', outreachUnsubscribeRoutes)")).toBeGreaterThan(app.indexOf("app.use('/api/outreach/u', outreachPublicLimiter)"));
   });
 
   it('제작 실패 4단계 3값 — markFailed가 stage_results[failStage]=unavailable을 찍는다', () => {

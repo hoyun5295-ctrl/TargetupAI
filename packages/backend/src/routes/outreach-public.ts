@@ -7,8 +7,10 @@
  * - 수명 = 발송 성공 시각 기준 상수(OUTREACH_PREVIEW_DAYS) · 만료·파기 건은 404와 동일한 안내(존재 추측 차단).
  * - 열람 로그(시각·IP) = 영업 신호.
  */
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import { getPublicOutreachHtml, recordOutreachPreviewView } from '../utils/sales-outreach-jobs';
+import { resolveOutreachUnsubscribe, recordOutreachUnsubscribe } from '../utils/sales-outreach-direct-jobs';
+import { renderUnsubscribePage } from '../utils/sales-outreach-direct';
 import { isOutreachMigrationPending } from '../utils/sales-outreach-jobs';
 import { outreachPublicPageCsp } from '../utils/sales-outreach-produce';
 
@@ -41,3 +43,46 @@ router.get('/:code', async (req: Request, res: Response) => {
 });
 
 export default router;
+
+/**
+ * ★ 2026-09-23 담당자 직접 발송 수신거부(공개 · 무인증 · noindex · 설계서 §5 · 불변 48)
+ * - GET = 확인 페이지만(기업 메일 보안 스캐너의 사전 열람이 해지를 만들지 않게) · POST = 기록.
+ * - List-Unsubscribe-Post 원클릭(본문 List-Unsubscribe=One-Click)은 바로 기록 · 범위 = 그 회사 전체.
+ * - 무효 토큰 = 같은 안내(존재 추측 차단) · 응답에 내부 식별자 0.
+ */
+export const unsubscribeRouter = Router();
+unsubscribeRouter.use(express.urlencoded({ extended: false, limit: '8kb' }));
+
+unsubscribeRouter.get('/:token', async (req: Request, res: Response) => {
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  try {
+    const t = await resolveOutreachUnsubscribe(req.params.token);
+    if (!t) return res.status(404).send(renderUnsubscribePage({ state: 'invalid' }));
+    return res.send(renderUnsubscribePage({ state: 'confirm', companyName: t.companyName, actionUrl: `/api/outreach/u/${req.params.token}` }));
+  } catch (err: any) {
+    console.error('[sales-outreach] 수신거부 페이지 오류:', err?.message);
+    return res.status(isOutreachMigrationPending(err) ? 503 : 500).send(renderUnsubscribePage({ state: 'invalid' }));
+  }
+});
+
+unsubscribeRouter.post('/:token', async (req: Request, res: Response) => {
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  res.setHeader('Cache-Control', 'private, no-store');
+  const oneClick = String(req.body?.['List-Unsubscribe'] || '') === 'One-Click';
+  try {
+    const ok = await recordOutreachUnsubscribe(req.params.token, {
+      companyWide: oneClick || String(req.body?.company || '') === '1',
+      notContact: !oneClick && String(req.body?.not_contact || '') === '1',
+    });
+    if (oneClick) return res.status(ok ? 200 : 404).json({ ok });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(ok ? 200 : 404).send(renderUnsubscribePage({ state: ok ? 'done' : 'invalid' }));
+  } catch (err: any) {
+    console.error('[sales-outreach] 수신거부 기록 오류:', err?.message);
+    if (oneClick) return res.status(500).json({ ok: false });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(500).send(renderUnsubscribePage({ state: 'invalid' }));
+  }
+});

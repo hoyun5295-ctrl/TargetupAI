@@ -507,7 +507,7 @@ export function discoverProductLinks(html: string, base: string, max = 10): stri
 }
 
 /** 앵커 텍스트 키워드 → 같은 호스트 링크(CTA 딥링크 · 순수). 로그인·장바구니류 제외. */
-export function findLinkByText(html: string, base: string, keywords: string[]): string | null {
+export function findLinkByText(html: string, base: string, keywords: string[], exclude: readonly string[] = []): string | null {
   let host = '';
   try { host = new URL(base).hostname; } catch { return null; }
   const re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -520,9 +520,30 @@ export function findLinkByText(html: string, base: string, keywords: string[]): 
     if (!u) continue;
     try { if (new URL(u).hostname !== host) continue; } catch { continue; }
     if (/\/(login|join|cart|mypage|member)/i.test(u)) continue;
+    if (exclude.includes(u)) continue; // ★ 2026-09-23 이미 고른 링크는 건너뛴다(기본값 = 옛 동작)
     return u;
   }
   return null;
+}
+
+/**
+ * ★ 2026-09-23 제휴·문의 **페이지 링크**(순수 · 같은 호스트 · 최대 3) — 담당자 주소를 사람이 찾아 옮겨 적는 출발점(불변 44).
+ *   ⛔ 페이지 주소만 돌려준다. 페이지 안의 이메일 주소를 읽지 않는다(정보통신망법 제50조의2 · 주소는 사람이 넣은 값만).
+ *   순서 = 제휴·입점 → 광고·비즈니스 → 일반 문의(고객센터일 수 있다).
+ */
+export function findContactPageLinks(html: string, base: string, max = 3): string[] {
+  const groups: string[][] = [
+    ['제휴', '입점', '파트너', 'partnership', 'partner'],
+    ['광고 문의', '비즈니스', 'business', 'b2b'],
+    ['문의', 'contact'],
+  ];
+  const out: string[] = [];
+  for (const g of groups) {
+    const u = findLinkByText(html, base, g, out);
+    if (u) out.push(u);
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 /** CTA 버튼 라벨에서 딥링크로 이을 키워드(라벨에 포함되면 그 키워드 링크를 찾는다) */

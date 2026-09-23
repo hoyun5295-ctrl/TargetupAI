@@ -12,7 +12,7 @@ vi.mock('../../services/ai', () => ({ callAIWithFallback: (...args: any[]) => ai
 
 import {
   TEMPLATE_POOLS, INDUSTRY_TEMPLATE_MAP, pickTemplate, sanitizeDmCopyBenefits, fillOutreachDmMedia, sectionsFromAiJson,
-  buildProposalEmailSections, buildOutreachPlainText, assembleProposalEmail, generateSubjectIntro, buildEmailIntroPrompt,
+  buildProposalEmailSections, buildOutreachPlainText, assembleProposalEmail, generateSubjectIntro, buildEmailIntroPrompt, buildOutreachSubject,
   buildOutreachMaterialBlock, buildDmSectionsPrompt, buildEmailSectionsPrompt, countBenefitPlaceholders, type ProposalEmailInput,
 } from '../sales-outreach-produce';
 import { getActiveStyleGuide } from '../sales-outreach-style';
@@ -275,7 +275,8 @@ describe('A-2 제안 메일 조립', () => {
   });
   it('emailCopy 함수형 문구는 업체명 직후에 조사를 붙이지 않는다', () => {
     const c = guide.emailCopy;
-    for (const f of [c.subjectDefault, c.preheader, c.introDefault, c.hero.headlineNoImage, c.sample.headline]) {
+    const fns: Array<(n: string) => string> = [c.subjectDefault, c.subjectGeneric, (n) => c.subjectEvent(n, '추석 기획전'), c.preheader, c.introDefault, c.opener.headline, c.sample.headline, (n) => c.more.lines(n).join(' ')];
+    for (const f of fns) {
       for (const name of ['한줄로', '인비토']) {
         const s = f(name);
         const after = s.slice(s.indexOf(name) + name.length, s.indexOf(name) + name.length + 1);
@@ -283,26 +284,67 @@ describe('A-2 제안 메일 조립', () => {
       }
     }
   });
-  it('히어로 분할 구도 + contain · 흰 글자색 고정 없음 · 브랜드 시안·CTA·푸터 순서', () => {
-    const s = buildProposalEmailSections(guide, base);
-    const hero = s[1] as any;
-    expect(hero.type).toBe('hero');
-    expect(hero.treatment).toBe('split');
-    expect(hero.props.image_fit).toBe('contain');
-    expect(hero.props.headline_color).toBeUndefined();
-    expect(hero.props.headline).toBe(guide.emailCopy.hero.headline);
+  it('★ 2026-09-23 첫 화면 = 발신 헤더 → 헤드라인·서두 → [DM 열어보기] → 브랜드 시안 머리 · 시안 footer 는 빼고 끝 footer 하나 · 두 번째 버튼 묶음', () => {
+    const withFooter = { ...base, brandSections: [...base.brandSections, sec('footer', { legal_text: '브랜드 법정 표기' }, 2)] };
+    const s = buildProposalEmailSections(guide, withFooter);
     const types = s.map((x) => x.type);
-    expect(types.slice(0, 4)).toEqual(['header', 'hero', 'text_card', 'text_card']);
-    expect(types).toContain('cta');
+    expect(types.slice(0, 5)).toEqual(['header', 'text_card', 'cta', 'text_card', 'header']);
+    const opener = s[1] as any;
+    expect(opener.props.headline).toBe(guide.emailCopy.opener.headline('브랜드'));
+    const firstCta = s[2] as any;
+    expect(firstCta.props.buttons).toEqual([{ label: guide.emailCopy.cta.secondary, url: base.dmUrl, style: 'primary' }]);
+    // 시안 footer(그 브랜드 법정 표기)는 빠지고 맨 끝 footer 하나만
+    expect(types.filter((t) => t === 'footer')).toHaveLength(1);
     expect(types[types.length - 1]).toBe('footer');
+    expect(JSON.stringify(s)).not.toContain('브랜드 법정 표기');
     expect(s.every((x, i) => (x as any).order === i)).toBe(true);
-    const cta = s.find((x) => x.type === 'cta') as any;
-    expect(cta.props.buttons.map((b: any) => b.url)).toEqual([base.previewUrl, base.dmUrl]);
+    const ctas = s.filter((x) => x.type === 'cta') as any[];
+    expect(ctas).toHaveLength(2);
+    expect(ctas[1].props.buttons.map((b: any) => b.url)).toEqual([base.previewUrl, base.dmUrl]);
     const footer = s[s.length - 1] as any;
     expect(footer.props.notes).toContain('2026-09-05');
     expect(footer.props.notes).toContain(base.unsubscribeNotice);
-    const noImg = buildProposalEmailSections(guide, { ...base, posterUrl: null })[1] as any;
-    expect(noImg.props.headline).toBe(guide.emailCopy.hero.headlineNoImage('브랜드'));
+    expect(footer.props.legal_text).toContain('1800-8125');
+    // 'AI' 는 헤드라인 1번 + footer 고지 1번(우리 문구 · 시안·문안 제외)
+    const ours = s.filter((x) => !String((x as any).id).includes('-header') || (x as any).props?.brand_name === guide.emailCopy.senderBrandName).map((x) => JSON.stringify((x as any).props));
+    const aiCount = (ours.join(' ').match(/AI/g) || []).length;
+    expect(aiCount).toBeLessThanOrEqual(2);
+    expect(JSON.stringify(s)).not.toMatch(/"tag":"\d\./);
+  });
+  it('★ 2026-09-23 담당자명이 있으면 서두 첫 줄 호칭 · 확정 행사 요약(날짜·수치 걷음) · 원문 인용 덤프 0', () => {
+    const s = buildProposalEmailSections(guide, {
+      ...base, contactName: '김지은', selectedEvent: { quote: '추석 기획전 최대 50% 할인', sourceUrl: 'x', startDate: null, endDate: null, benefitLicensed: false, origin: 'crawl' } as any,
+      confirmedEvents: [{ title: '추석 기획전 최대 50% 할인', periodRaw: '2026.09.01 ~ 2026.09.30' }],
+    }) as any[];
+    expect(s[1].props.body.split('\n')[0]).toBe(guide.emailCopy.greeting('김지은'));
+    const ev = s.find((x) => x.props?.tag === guide.emailCopy.events.tag);
+    expect(ev).toBeTruthy();
+    expect(ev.props.body).toContain('추석 기획전');
+    expect(ev.props.body).not.toContain('50%');
+    expect(ev.props.body).toContain('2026.09.01');
+    expect(JSON.stringify(s)).not.toContain('홈페이지에서 본 내용');
+    const none = buildProposalEmailSections(guide, base) as any[];
+    expect(none.some((x) => x.props?.tag === guide.emailCopy.events.tag)).toBe(false);
+    expect(none[1].props.body).not.toContain('님, 안녕하세요');
+  });
+  it('★ 2026-09-23 결정 제목 — 업체 + 행사명(숫자·% 걷음) · 6자 미만·35자 초과면 generic · 중간 절단 0', () => {
+    // 혜택 수치 조각("최대 50%")은 공용 규칙(headlineFromCard)이 통째로 걷는다 — 매달린 "최대" 0
+    expect(buildOutreachSubject(guide, '아이소이', '추석 기획전 최대 50% 할인')).toBe('아이소이 추석 기획전 할인 모바일 DM 시안');
+    expect(buildOutreachSubject(guide, '아이소이', '50% OFF')).toBe(guide.emailCopy.subjectGeneric('아이소이'));
+    expect(buildOutreachSubject(guide, '아이소이', null)).toBe(guide.emailCopy.subjectGeneric('아이소이'));
+    expect(buildOutreachSubject(guide, '아주아주긴브랜드이름이있는회사', '가을 신상품 런칭 기념 한정 특별전 안내')).toBe(guide.emailCopy.subjectGeneric('아주아주긴브랜드이름이있는회사'));
+    expect(buildOutreachSubject(guide, '브랜드', '9월 가입 한정 혜택').length).toBeLessThanOrEqual(35);
+  });
+  it('★ 2026-09-23 직접 발송 법정 footer — adFooter 가 있으면 조립 시점에 수신거부 링크까지 html 안 · 평문에도 · 없으면 슬롯 0', () => {
+    const url = 'https://hanjul.ai/api/outreach/u/11111111-2222-4333-8444-555555555555.0123456789abcdef0123456789abcdef';
+    const r = assembleProposalEmail({ ...base, adFooter: { fromName: guide.emailCopy.senderLegalName, fromEmail: 'hanjul@invitocorp.com', unsubscribeUrl: url } });
+    expect(r.html).toContain(`href="${url}"`);
+    expect(r.html).toContain('광고 정보');
+    expect(r.html).not.toContain('<!--EMAIL_FOOTER_SLOT-->');
+    expect(r.text).toContain(url);
+    const plain = assembleProposalEmail(base);
+    expect(plain.html).not.toContain('/api/outreach/u/');
+    expect(plain.html).not.toContain('<!--EMAIL_FOOTER_SLOT-->');
   });
   it('assembleProposalEmail — html·평문에 링크·수신거부 문구 · placeholder 합산(제목 포함)', () => {
     const r = assembleProposalEmail(base);

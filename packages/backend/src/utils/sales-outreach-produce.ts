@@ -35,6 +35,8 @@ import { STUDIO_TEMPLATES, type StudioTemplate, type TemplateCategory } from './
 import { extractJson, DM_EDITABLE_TEXT_KEYS } from './dm/dm-ai';
 import { createDm, publishDm, updateDm } from './dm/dm-builder';
 import { renderEmailSections, EMAIL_FOOTER_SLOT, esc as escHtml } from './email/email-section-renderer';
+// ★ 2026-09-23 광고성 이메일 법정 footer 단일 출처(전송자 명칭 · 연락처 · 수신거부 링크 · 이스케이프 소유) — 담당자 직접 발송 조립에 재사용
+import { buildEmailAdFooter } from './email-channel';
 import { getDefaultProps, createSection, type Section, type SectionType } from './dm/dm-section-registry';
 import { firstBenefitPhrase } from './event-brief';
 import { AI_AUTO_BUILD_FEATURES } from './ai-auto-build-materials';
@@ -64,8 +66,10 @@ import {
   type OutreachProduct, type StoredImage,
 } from './sales-outreach-media';
 // ★ 2026-09-06 S3 — 스튜디오 문구 게이트(hasBenefitPattern) · 합성 타이포 타입 · DM 캡처(렌더 워커)
-import { hasBenefitPattern, findTemplateSample, type ComposeTypography } from './image-studio';
+import { hasBenefitPattern, type ComposeTypography } from './image-studio';
 import { renderPageGuarded } from './sales-outreach-render';
+// ★ 2026-09-23 이미지 제작 대기열(불변 51)
+import { createSlotQueue } from './outreach-slot-queue';
 // ★ 2026-09-06 S5 조립 엔진(결정 구간 공용) — 엔진은 이 파일을 모른다(deps 주입 · 순환 0)
 import { assembleDmCampaign, type EngineDeps, type EngineGenInput, type EngineMaterials, type EngineChannel, type EngineEntry, type EngineEventCard, type EngineFeaturesResult } from './campaign-engine';
 // ★ 2026-09-09 기획전 슬라이스 조립 모드(재료 판정·자격·구성 CT · AI 0)
@@ -580,7 +584,9 @@ export function productFactKeys(p: Partial<OutreachProduct> | null | undefined):
 // ===== 대표 이미지 제작 (수급→인물 보조판정→누끼→포스터→JPEG 공개 URL) =====
 
 // rembg py 서비스가 단일 워커라 아웃리치는 동시 1건만(고객 스튜디오와 경합 최소화 — 회의 확정)
-let imageInFlight = false;
+// ★ 2026-09-23 불변 51 — 겹치면 예외로 떨어지던 것(포스터가 조용히 빠짐)을 대기열로 바꾼다. 대기 상한 초과만 옛 예외.
+export const OUTREACH_IMAGE_QUEUE_MAX_WAIT_MS = 120_000;
+const imageSlot = createSlotQueue();
 
 export interface OutreachImageResult {
   publicUrl: string;      // 절대 URL(이메일 임베드용)
@@ -641,19 +647,6 @@ export function posterStyleHint(brandColor: string | null, hasProduct: boolean |
     // ★ 2026-09-10 서버 합성용 무대 — 제품은 서버가 누끼를 픽셀 그대로 얹는다(모델이 라벨을 다시 그려 뭉개던 톤28 실측 차단). 배경은 아래 2/3 가운데에 빈 진열면만 둔다.
     ...(stage ? ['leave an empty, clean, evenly lit display surface (table, podium or floor) centered in the lower two thirds of the frame where a product will be placed later: nothing standing on that surface, no props there, soft even light on it'] : []),
   ].join(' · ');
-}
-
-/** ★ 0906(3) 제안 메일 "5분 투자" 대비 이미지 — 업종에 맞는 스튜디오 템플릿 중 실샘플 파일이 있는 첫 장(공개 라우트 · 없으면 null) */
-export function pickShowcaseExampleUrl(industry: string | null | undefined, finder: (id: string) => unknown = findTemplateSample): string | null {
-  const code = isIndustryCode(industry) ? industry : null;
-  const pool = code
-    ? STUDIO_TEMPLATES.filter((t) => (t.kind ?? 'product') === 'product' && INDUSTRY_TEMPLATE_MAP[code].product.includes(t.category))
-    : STUDIO_TEMPLATES.filter((t) => (t.kind ?? 'product') === 'product');
-  const ordered = [...pool, ...STUDIO_TEMPLATES.filter((t) => !pool.includes(t))];
-  for (const t of ordered) {
-    try { if (finder(t.id)) return `${PUBLIC_BASE}/api/image-studio/template-sample/${t.id}`; } catch { /* 다음 */ }
-  }
-  return null;
 }
 
 /** 쇼핑몰 옵션·SKU 낱말 — 포스터 subtitle 로 쓰지 않는다 */
@@ -900,7 +893,14 @@ async function generatePosterWithRetry<T>(run: () => Promise<T>, jobId: string, 
   }
 }
 
-export async function produceOutreachImage(input: {
+/** 대표 이미지 제작 진입점 — 아웃리치 이미지 제작은 대기열 한 자리를 지난다(불변 51). */
+export async function produceOutreachImage(input: OutreachImageInput): Promise<OutreachImageResult> {
+  const r = await imageSlot.run(() => produceOutreachImageExclusive(input), OUTREACH_IMAGE_QUEUE_MAX_WAIT_MS);
+  if (!r.ok) throw new Error('다른 이미지 제작이 진행 중입니다. 잠시 후 재시도해주세요.');
+  return r.value;
+}
+
+export interface OutreachImageInput {
   jobId: string;
   companyName: string;
   industry: string | null;
@@ -917,17 +917,23 @@ export async function produceOutreachImage(input: {
   wantBanner?: boolean;
   /** ★ 2026-09-09(6) 누끼 후보(순서 · 선택 이미지 뒤) — 상품 사본 상위 3. 선택 이미지가 배너·사진이면 호출부가 상품을 앞에 둔다 */
   cutoutCandidates?: readonly string[];
-}): Promise<OutreachImageResult> {
+  /**
+   * ★ 2026-09-23 자동 확정 건(사람이 이미지를 고르지 않았다) — 누끼 원천은 인물 판정이 **확실히 없음(none)** 인 것만(fail-closed).
+   *   사람이 고른 건은 옛 규칙(person 확정만 제외)을 그대로 쓴다. 설계서 §7.
+   */
+  strictPerson?: boolean;
+}
+
+async function produceOutreachImageExclusive(input: OutreachImageInput): Promise<OutreachImageResult> {
   const ctx = getOutreachContext();
   if (!ctx) throw new Error('OUTREACH_COMPANY_ID·OUTREACH_USER_ID가 설정되지 않았습니다.');
   if (!isStudioReady()) throw new Error('이미지 생성 서비스가 준비되지 않았습니다.');
-  if (imageInFlight) throw new Error('다른 이미지 제작이 진행 중입니다. 잠시 후 재시도해주세요.');
   // ★ C-7 임시 저장 용량 게이트 — 락 교체는 하지 않는다
   if (companyTempUsageBytes(ctx.companyId) > STUDIO_TEMP_CAP_BYTES) {
     throw new Error('이미지 임시 저장 용량이 가득 찼습니다. 잠시 후 다시 시도해주세요.');
   }
-  imageInFlight = true;
-  try {
+  // 동시 1건은 진입점(produceOutreachImage)의 대기열이 보장한다 — 자리 반납도 대기열이 한다
+  {
     let cutout: { base64: string; mime: string } | null = null;
     let cutoutPath: string | null = null;
     let cutoutSource: 'alpha_png' | 'rembg' | null = null;
@@ -947,6 +953,9 @@ export async function produceOutreachImage(input: {
         if (personJudge === 'person') {
           // Harold 보강 ① — 인물 확정만 기계가 제외한다(마네킹·일러스트 오탐은 none으로 통과)
           skippedReason = '인물이 포함된 것으로 판정되어 해당 이미지는 사용하지 않았습니다.';
+        } else if (input.strictPerson && personJudge !== 'none') {
+          // ★ 2026-09-23 자동 확정 건은 판정이 확실하지 않으면(undetermined·unavailable) 쓰지 않는다(fail-closed)
+          skippedReason = '인물 포함 여부가 확실하지 않아 해당 이미지는 사용하지 않았습니다(자동 확정 건).';
         } else if (img.ext === 'png' && pngHasAlpha(img.buffer)) {
           // ★ S3 몰이 준 누끼 PNG — rembg(단일 워커) 우회 · 해상도 게이트만
           const size = readImageSize(img.buffer);
@@ -1089,8 +1098,6 @@ export async function produceOutreachImage(input: {
       posterInk: made.ink,
       bannerInk,
     };
-  } finally {
-    imageInFlight = false;
   }
 }
 
@@ -2701,16 +2708,19 @@ export interface ProposalEmailInput {
   intro: string;
   /** 푸터 기준일(테스트 주입용 · 기본 = 지금) */
   now?: Date;
-  /** ★ 0906(3) 자동으로 만든 모바일 DM 첫 화면 캡처(375×900 공개 사본) · 없으면 캡처 블록 생략 */
-  dmCaptureUrl?: string | null;
-  /** ★ 0906(3) "5분 투자" 대비 이미지(이미지 스튜디오 실샘플 · 공개 라우트) · 없으면 대비 카드만 */
-  showcaseImageUrl?: string | null;
-  /** ★ v3 담당자 홈 첫 화면 캡처(375×900 공개 사본 · brand_profile.homeCaptureUrl) · 없으면 대조 왼쪽 카드 생략 */
-  homeCaptureUrl?: string | null;
   /** ★ v3 회신 유도 문장(검토 화면 편집분 · 없으면 emailCopy.reply) */
   replyLine?: string | null;
   /** ★ 2026-09-15 아웃리치 카탈로그 DM 주소(hlj.kr) · 없으면 버튼 2개 현행 그대로 */
   catalogUrl?: string | null;
+  /** ★ 2026-09-23 담당자명(사람이 넣은 값 · 있으면 서두 첫 줄 호칭) */
+  contactName?: string | null;
+  /** ★ 2026-09-23 시안에 담은 확정 행사(제목 · 기간 원문 · 누른 순서 · ≤3) — 원문 인용 덤프 대신 요약 카드 */
+  confirmedEvents?: Array<{ title: string; periodRaw?: string | null }> | null;
+  /**
+   * ★ 2026-09-23 담당자 직접 발송 법정 footer(불변 47) — 있으면 조립 시점에 EMAIL_FOOTER_SLOT 에 buildEmailAdFooter 를 넣는다
+   *   (전송자 명칭 · 발신 주소 · 수신거부 링크). 발송 html = 이 asset html 이다(발송 시점 변형은 제목 접두 1개뿐).
+   */
+  adFooter?: { fromName: string; fromEmail: string; unsubscribeUrl: string } | null;
 }
 
 function kstDateDash(d: Date): string {
@@ -2725,13 +2735,47 @@ export function replyLineOf(input: Pick<ProposalEmailInput, 'replyLine'>, c: Out
   return t || c.reply;
 }
 
-/** 순수 섹션 조립 — 한글 리터럴 0(문구 전부 guide.emailCopy). 렌더는 호출부. */
+/** 결정 제목 한도(외부 발송 때 코드가 붙이는 "(광고) " 5자를 빼고 40자 안) */
+export const OUTREACH_SUBJECT_EVENT_MAX = 35;
+
+/**
+ * ★ 2026-09-23 결정 제목(순수 · 설계서 §11) — `{업체} {확정 행사명} 모바일 DM 시안`.
+ *   행사명은 면허와 무관하게 날짜·혜택 수치를 걷고(headlineFromCard · 불리한 쪽) 남은 숫자도 뺀다(제목은 행사가 끝난 뒤에도 받은편지함에 남는다).
+ *   6자 미만이 되거나 35자를 넘으면 행사명을 통째로 빼고 generic(중간 절단 0).
+ */
+export function buildOutreachSubject(guide: OutreachStyleGuide, companyName: string, eventTitle: string | null | undefined): string {
+  const c = guide.emailCopy;
+  const cleaned = headlineFromCard(eventTitle ? { title: String(eventTitle) } : null, false).headline
+    .replace(/[0-9０-９]+/g, ' ').replace(/[<>()[\]［］（）【】]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (cleaned.length >= 6 && /[가-힣A-Za-z]{2,}/.test(cleaned)) {
+    const s = c.subjectEvent(companyName, cleaned);
+    if (s.length <= OUTREACH_SUBJECT_EVENT_MAX) return s;
+  }
+  return c.subjectGeneric(companyName);
+}
+
+/** 확정 행사 요약 줄(순수) — 제목(날짜·수치 걷음) + 기간 줄 · 없으면 빈 배열 */
+function confirmedEventLines(events: ProposalEmailInput['confirmedEvents']): string[] {
+  return (Array.isArray(events) ? events : []).slice(0, 3).map((e) => {
+    const title = headlineFromCard({ title: String(e?.title || '') }, false).headline;
+    if (!title) return '';
+    const period = e?.periodRaw ? periodLineOf(e.periodRaw) : '';
+    return period ? `${title} · ${period}` : title;
+  }).filter(Boolean);
+}
+
+/**
+ * 순수 섹션 조립 — 한글 리터럴 0(문구 전부 guide.emailCopy). 렌더는 호출부.
+ * ★ 2026-09-23 재구성(설계서 §11 · Harold 결재): 모바일 첫 화면 = 발신 헤더 → 헤드라인·서두 → [DM 열어보기] → 그 브랜드 시안 머리.
+ *   원문 인용 덤프 · 캡처 카드 · 3막 스토리 카드 · 기능 3칸은 없앴다(요약 카드 1장 · 확정 행사 요약 1장).
+ */
 export function buildProposalEmailSections(guide: OutreachStyleGuide, input: ProposalEmailInput): Section[] {
   const c = guide.emailCopy;
   // ★ 0906(3) 자리표시자 노출 0 — 면허가 안 난 혜택 문장은 메일·공개 페이지에서 빼고 조립한다(검토 화면의 문안 원본은 그대로 · 편집용)
   const copyForEmail = dropPlaceholderSentences(input.copyBody.replace(/\{\{DM_LINK\}\}/g, input.dmUrl));
   const copyOk = copyForEmail.length >= 20 && !copyForEmail.includes(BENEFIT_PLACEHOLDER);
   const introClean = dropPlaceholderSentences(input.intro) || c.introDefault(input.companyName);
+  const name = String(input.contactName || '').replace(/\s+/g, ' ').trim().slice(0, 40);
   let order = 0;
   const sec = (type: string, props: Record<string, unknown>, extra?: Record<string, unknown>): Section => ({
     id: `so-${order}-${type}`,
@@ -2744,46 +2788,16 @@ export function buildProposalEmailSections(guide: OutreachStyleGuide, input: Pro
 
   const head: Section[] = [
     sec('header', { variant: 'logo', align: 'left', brand_name: c.senderBrandName, brand_size: 'sm', show_brand_name: true }),
-    sec('hero', {
-      image_url: input.posterUrl || undefined,
-      headline: input.posterUrl ? c.hero.headline : c.hero.headlineNoImage(input.companyName),
-      sub_copy: c.hero.subCopy,
-      align: 'center', height: 'lg', image_fit: 'contain',
-    }, { treatment: 'split' }),
     sec('text_card', {
-      tag: c.lead.tag,
-      headline: input.selectedEvent ? c.lead.headlineWithEvent : c.lead.headlineNoEvent,
-      body: [
-        introClean,
-        input.selectedEvent ? `${c.lead.quoteLabel}: "${input.selectedEvent.quote}"` : '',
-      ].filter(Boolean).join('\n\n'),
+      headline: c.opener.headline(input.companyName),
+      body: [name ? c.greeting(name) : '', introClean].filter(Boolean).join('\n'),
       align: 'left', image_position: 'top',
-    }, { treatment: 'lead' }),
-    // ★ 0906(3) 스토리 1 — 홈페이지 주소 하나로 자동으로 이만큼(기술력) + 모바일 DM 캡처 · 대표 이미지
-    sec('text_card', {
-      tag: c.story.auto.tag,
-      headline: c.story.auto.headline,
-      body: c.story.auto.body(input.companyName),
-      align: 'left', image_position: 'top',
-    }, { background: 'soft' }),
-    // ★ v3 대조 카드(설계서 §8 · gallery 0) — 왼쪽 = 홈 첫 화면 캡처(있을 때만) · 오른쪽 = DM 첫 화면 캡처 · 포스터. 세로 캡처는 image_position left(220px 열) · 캡처 위 글자 0
-    ...(input.homeCaptureUrl ? [sec('text_card', {
-      tag: c.story.capture.title,
-      headline: c.story.capture.homeHeadline(input.companyName),
-      body: c.story.capture.homeBody,
-      align: 'left', image_url: input.homeCaptureUrl, image_position: 'left',
-    })] : []),
-    ...(input.dmCaptureUrl ? [sec('text_card', {
-      ...(input.homeCaptureUrl ? {} : { tag: c.story.capture.title }),
-      headline: c.story.capture.dmHeadline,
-      body: c.story.capture.dmBody(input.companyName),
-      align: 'left', image_url: input.dmCaptureUrl, image_position: 'left',
-    })] : []),
-    ...(input.dmCaptureUrl && input.posterUrl ? [sec('text_card', {
-      headline: c.story.capture.posterHeadline,
-      body: c.story.capture.posterBody,
-      align: 'left', image_url: input.posterUrl, image_position: 'left',
-    }, { background: 'soft' })] : []),
+    }),
+    // 첫 화면 안의 버튼 — 담당자가 가장 먼저 누를 실물(모바일 DM)
+    sec('cta', {
+      layout: 'stack',
+      buttons: [{ label: assertButtonLabel(c.cta.secondary), url: input.dmUrl, style: 'primary' }],
+    }, { treatment: 'bar' }),
   ];
 
   const showcase: Section[] = [];
@@ -2791,52 +2805,40 @@ export function buildProposalEmailSections(guide: OutreachStyleGuide, input: Pro
     showcase.push(sec('text_card', {
       tag: c.sample.tag,
       headline: c.sample.headline(input.companyName),
-      body: c.sample.body,
       align: 'left', image_position: 'top',
     }, { background: 'soft' }));
+    // 시안의 footer(그 브랜드 법정 표기)는 이 메일 안에서 빼고, 발신자 표기는 맨 끝 footer 하나만 둔다
     for (const s of input.brandSections) {
+      if ((s as any)?.type === 'footer') continue;
       showcase.push({ ...(s as any), id: `so-${order}-${s.type}`, order: order++ } as Section);
     }
   }
 
+  const eventLines = confirmedEventLines(input.confirmedEvents);
   const tail: Section[] = [
+    ...(eventLines.length ? [sec('text_card', {
+      tag: c.events.tag,
+      headline: c.events.headline,
+      body: eventLines.join('\n'),
+      align: 'left', image_position: 'top',
+    }, { background: 'soft' })] : []),
     ...(copyOk ? [sec('text_card', {
       tag: c.showcase.tag,
       headline: c.showcase.headline,
       body: copyForEmail,
       align: 'left', image_position: 'top',
     })] : []),
-    // ★ 0906(3) 스토리 2 — 자사몰 연동 · 이미지 몇 장이면 훨씬 위(대비 카드 + 이미지 스튜디오 실샘플)
     sec('text_card', {
-      tag: c.story.compare.tag,
-      headline: c.story.compare.headline,
-      body: c.story.compare.body(input.companyName),
+      tag: c.more.tag,
+      headline: c.more.headline,
+      body: c.more.lines(input.companyName).join('\n\n'),
       align: 'left', image_position: 'top',
     }, { background: 'soft' }),
-    // ★ v3 실샘플도 이미지 위 text_card(gallery 0)
-    ...(input.showcaseImageUrl ? [sec('text_card', {
-      headline: c.story.compare.imageTitle,
-      body: c.story.compare.imageCaption,
-      align: 'left', image_url: input.showcaseImageUrl, image_position: 'top',
-    })] : []),
-    // ★ 0906(3) 스토리 3 — 5분이면 브로마이드급(features 3칸)
-    sec('text_card', {
-      tag: c.features.tag,
-      headline: c.features.headline(input.companyName),
-      body: c.features.body,
-      align: 'left', image_position: 'top',
-    }),
-    ...c.features.items.map((f) => sec('text_card', {
-      tag: f.tag,
-      headline: f.headline(!!input.posterUrl),
-      body: f.body(input.companyName),
-      align: 'left', image_position: 'top',
-    }, { background: 'soft' })),
     sec('cta', {
       layout: 'stack',
       buttons: [
         { label: assertButtonLabel(c.cta.primary), url: input.previewUrl, style: 'primary' },
-        // ★ 2026-09-15 카탈로그 DM 이 만들어진 건에만 3번째 버튼(없으면 종전 2개 그대로)
+        // ★ 2026-09-15 카탈로그 DM 이 만들어진 건에만(없으면 버튼 2개)
         ...(input.catalogUrl ? [{ label: assertButtonLabel(c.cta.catalog), url: input.catalogUrl, style: 'outline' }] : []),
         { label: assertButtonLabel(c.cta.secondary), url: input.dmUrl, style: 'outline' },
       ],
@@ -2861,32 +2863,28 @@ export function buildProposalEmailSections(guide: OutreachStyleGuide, input: Pro
   return [...head, ...showcase, ...tail];
 }
 
-/** 평문 대체본(★ C-1 · 공용 extractEmailText는 cta·footer를 못 읽는다) */
+/** 평문 대체본(★ C-1 · 공용 extractEmailText는 cta·footer를 못 읽는다) — ★ 2026-09-23 html 과 같은 순서 */
 export function buildOutreachPlainText(guide: OutreachStyleGuide, input: ProposalEmailInput): string {
   const c = guide.emailCopy;
   const copyForEmail = dropPlaceholderSentences(input.copyBody.replace(/\{\{DM_LINK\}\}/g, input.dmUrl));
   const copyOk = copyForEmail.length >= 20 && !copyForEmail.includes(BENEFIT_PLACEHOLDER);
+  const name = String(input.contactName || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const eventLines = confirmedEventLines(input.confirmedEvents);
   return [
     input.subject,
     '',
+    c.opener.headline(input.companyName),
+    name ? c.greeting(name) : '',
     dropPlaceholderSentences(input.intro) || c.introDefault(input.companyName),
-    input.selectedEvent ? `${c.lead.quoteLabel}: "${input.selectedEvent.quote}"` : '',
+    `${c.cta.secondary}: ${input.dmUrl}`,
     '',
-    `${c.story.auto.tag} ${c.story.auto.headline}`,
-    c.story.auto.body(input.companyName),
-    input.homeCaptureUrl ? c.story.capture.homeHeadline(input.companyName) : '',
-    input.dmCaptureUrl ? `${c.story.capture.dmCaption}: ${input.dmUrl}` : '',
-    '',
+    ...(eventLines.length ? [`${c.events.tag}:`, ...eventLines, ''] : []),
     ...(copyOk ? [`${c.showcase.tag}:`, copyForEmail, ''] : []),
-    `${c.story.compare.tag} ${c.story.compare.headline}`,
-    c.story.compare.body(input.companyName),
+    `${c.more.tag}: ${c.more.headline}`,
+    ...c.more.lines(input.companyName),
     '',
     `${c.cta.primary}: ${input.previewUrl}`,
     ...(input.catalogUrl ? [`${c.cta.catalog}: ${input.catalogUrl}`] : []),
-    `${c.cta.secondary}: ${input.dmUrl}`,
-    '',
-    `${c.features.tag}: ${c.features.headline(input.companyName)}`,
-    ...c.features.items.map((f) => `- ${f.tag}: ${f.headline(!!input.posterUrl)} ${f.body(input.companyName)}`),
     '',
     c.service.body,
     replyLineOf(input, c),
@@ -2895,6 +2893,7 @@ export function buildOutreachPlainText(guide: OutreachStyleGuide, input: Proposa
     c.footer.basisLine(kstDateDash(input.now || new Date())),
     input.unsubscribeNotice,
     c.footer.legal,
+    input.adFooter ? c.plainUnsubscribe(`${input.adFooter.fromName}(${input.adFooter.fromEmail})`, input.adFooter.unsubscribeUrl) : '',
   ].filter((l) => l !== undefined && l !== null).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -2928,7 +2927,10 @@ export function assembleProposalEmail(input: ProposalEmailInput): { subject: str
       ...(primary ? { palette: { primary } } : {}),
     } as any,
     publicBase: PUBLIC_BASE,
-  }).replace(EMAIL_FOOTER_SLOT, '');
+  }).split(EMAIL_FOOTER_SLOT).join(input.adFooter
+    // ★ 2026-09-23 담당자 직접 발송 법정 footer(불변 47) — 공용 CT(email-channel buildEmailAdFooter · 이스케이프 소유) · 조립 시점에 asset 안으로
+    ? buildEmailAdFooter(input.adFooter.fromName, input.adFooter.fromEmail, input.adFooter.unsubscribeUrl)
+    : '');
   const text = buildOutreachPlainText(guide, input);
   return {
     subject: input.subject,

@@ -294,13 +294,14 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 
 ⛔ **owner 키트(`/var/lib/vito-owner-kits/…`)는 쓰지 않는다** — `install` 단계가 SSH `authorized_keys` forced-command 라인을 교체한다. 우리가 필요한 건 nonce와 `install.sh`뿐이다. (키트 규모 = host.sh 49KB + owner.ps1 62KB + README 16KB)
 
-## 6. 한줄로 측 현황 (Agent 3대)
+## 6. 한줄로 측 현황 (Agent 4대 · ★2026-09-23 hanjul-04 추가)
 
 | agentID | 라인 | 테이블 | systemd 유닛 | 버전 | 상태 (2026-08-14 23:30 기준) |
 |---|---|---|---|---|---|
 | hanjul01 | 13 | SMSQ_SEND_13 | **`bito-agent.service`**(hanjul01 안 붙음) | **1.0.20** | ✅ **전환 완료**(2026-08-15 00:03) — bootstrap 관리형 · credential `active`(gen 2) · 실측 수신 정상(Harold 확인) |
 | hanjul02 | 14 | SMSQ_SEND_14 | `bito-agent-hanjul02.service` | **1.0.20** | ✅ **전환 완료** — bootstrap 관리형 · credential `active`(gen 3) · smoke 확정 · 발송/결과반영 실측 완료 |
 | hanjul03 | 15 | SMSQ_SEND_15 | `bito-agent-hanjul03.service` | 1.0.22 | 전환 완료형(목표 상태) · bootstrap **1.0.27** |
+| hanjul-04 | 16 | SMSQ_SEND_16 | 이 표에 기록 없음(.62 `/opt/bito-agent-hanjul-04`) | 이 표에 기록 없음 | ★2026-09-23 신설 · 한줄로 시스템 발송 전용(인증 카카오·로그인 인증 문자·스팸테스트·담당자 테스트) · 설치 묶음 `first-install.sh`(원격 관리 등록 포함) · 기록 = bito-gateway `status/STATUS.md` 2026-09-23 |
 
 - ★2026-09-19 세 Agent `send_concurrency` 1 → **4**(`/opt/bito-agent*/agent-config.yaml` · 백업 `.bak-20260919`) · 게이트웨이 회선 메트로놈 enforce와 짝(메트로놈을 끄면 1로 되돌린다) · 상세 = bito-gateway `status/BUG_HISTORY.md` 2026-09-19.
 - 전환 사유 = 01·02가 구형이라 **원격 업그레이드 미지원**. 주소·연결·인증은 전부 정상이었다.

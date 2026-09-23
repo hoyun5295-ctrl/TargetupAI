@@ -163,7 +163,7 @@ describe('제안 메일 3번째 버튼 "카탈로그 보기"', () => {
     expect(guide.emailCopy.cta.catalog).toBe('카탈로그 보기');
     expect(guide.emailCopy.cta.catalog.length).toBeLessThanOrEqual(8);
     const s = buildProposalEmailSections(guide, { ...base, catalogUrl: 'https://hlj.kr/cat' });
-    const cta = s.find((x) => x.type === 'cta') as any;
+    const cta = [...s].reverse().find((x) => x.type === 'cta') as any; // ★ 2026-09-23 버튼 묶음 = 마지막 cta(첫 cta 는 첫 화면의 [DM 열어보기] 하나)
     expect(cta.props.buttons.map((b: any) => [b.label, b.url, b.style])).toEqual([
       [guide.emailCopy.cta.primary, base.previewUrl, 'primary'],
       [guide.emailCopy.cta.catalog, 'https://hlj.kr/cat', 'outline'],
@@ -175,7 +175,7 @@ describe('제안 메일 3번째 버튼 "카탈로그 보기"', () => {
   it('catalogUrl 이 없으면(null · 생략) 현행 2개 · 출력 동일', () => {
     const before = buildProposalEmailSections(guide, base);
     expect(buildProposalEmailSections(guide, { ...base, catalogUrl: null })).toEqual(before);
-    const cta = before.find((x) => x.type === 'cta') as any;
+    const cta = [...before].reverse().find((x) => x.type === 'cta') as any;
     expect(cta.props.buttons.map((b: any) => b.url)).toEqual([base.previewUrl, base.dmUrl]);
     expect(buildOutreachPlainText(guide, { ...base, catalogUrl: null })).toBe(buildOutreachPlainText(guide, base));
     expect(buildOutreachPlainText(guide, base)).not.toContain(guide.emailCopy.cta.catalog);

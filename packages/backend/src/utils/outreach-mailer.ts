@@ -66,12 +66,27 @@ export function outreachTestMailDomains(): string[] {
   return parseTestMailDomains(process.env.OUTREACH_TEST_MAIL_DOMAINS);
 }
 
-/** 수신 주소가 허용 도메인에 속하는가(순수) — 형식 유효 · 도메인 정확 일치(서브도메인 불허 · 대소문자 무시). */
-export function isAllowedTestRecipient(to: string, domains: string[]): boolean {
+/** 수신 주소가 허용 도메인 또는 ★ 2026-09-23 허용 주소 목록(정확 일치)에 속하는가(순수) — 형식 유효 · 도메인 정확 일치(서브도메인 불허 · 대소문자 무시). */
+export function isAllowedTestRecipient(to: string, domains: string[], addresses: string[] = []): boolean {
   const v = String(to || '').trim();
   if (!v || !EMAIL_RE.test(v)) return false;
+  if (addresses.some((a) => a.toLowerCase() === v.toLowerCase())) return true;
   const domain = v.slice(v.lastIndexOf('@') + 1).toLowerCase();
   return domains.map((d) => d.toLowerCase()).includes(domain);
+}
+
+/**
+ * ★ 2026-09-23 검수 허용 **주소** 목록(OUTREACH_TEST_MAIL_ADDRESSES · 쉼표) — Gmail·네이버 메일처럼 외부 메일함에서 스팸함 분류를 먼저 재 보는 용도(불변 24 개정).
+ * 비면 빈 목록(도메인 축만). 형식 불량 제거 · 중복 제거.
+ */
+export function outreachTestMailAddresses(): string[] {
+  return Array.from(new Set(String(process.env.OUTREACH_TEST_MAIL_ADDRESSES || '').split(/[,;\s]+/)
+    .map((v) => v.trim()).filter((v) => v && EMAIL_RE.test(v)).map((v) => v.toLowerCase())));
+}
+
+/** 영업 발신 계정 주소(법정 footer 의 전송자 연락처 · 표시용) — 미설정 = '' */
+export function outreachSenderAddress(): string {
+  return (process.env.OUTREACH_SMTP_USER || '').trim();
 }
 
 // ===== 수신자 판정 (★ B-11 순수) =====
@@ -102,7 +117,7 @@ export function decideMailOutcome(info: any, to: string[]): { outcome: OutreachM
 
 // ===== 발송 (공용 하위 함수는 export 하지 않는다 — 진입점 2개만) =====
 
-async function sendViaOutreachAccount(input: { to: string[]; subject: string; html: string; text?: string }): Promise<{ outcome: OutreachMailOutcome; detail: string; rejected: string[] }> {
+async function sendViaOutreachAccount(input: { to: string[]; subject: string; html: string; text?: string; headers?: Record<string, string> }): Promise<{ outcome: OutreachMailOutcome; detail: string; rejected: string[] }> {
   if (!isOutreachMailerReady()) {
     return { outcome: 'unknown', detail: '영업 발신 계정(OUTREACH_SMTP_USER/PASS)이 설정되지 않았습니다.', rejected: [] };
   }
@@ -124,6 +139,7 @@ async function sendViaOutreachAccount(input: { to: string[]; subject: string; ht
       subject: input.subject,
       html: input.html,
       ...(input.text ? { text: input.text } : {}),
+      ...(input.headers ? { headers: input.headers } : {}),
     });
     const info: any = await Promise.race([
       send,
@@ -166,8 +182,34 @@ export async function sendOutreachTestMail(input: {
   html: string;
   text?: string;
 }): Promise<{ outcome: OutreachMailOutcome; detail: string; rejected: string[] }> {
-  if (!isAllowedTestRecipient(input.to, outreachTestMailDomains())) {
-    return { outcome: 'rejected', detail: '허용된 도메인의 주소가 아닙니다.', rejected: [input.to] };
+  if (!isAllowedTestRecipient(input.to, outreachTestMailDomains(), outreachTestMailAddresses())) {
+    return { outcome: 'rejected', detail: '허용된 도메인·주소가 아닙니다.', rejected: [input.to] };
   }
+  // 검수 메일에는 List-Unsubscribe 헤더를 넣지 않는다(불변 48 · 우리 쪽 검토자가 누른 해지가 실제 담당자를 막지 않게)
   return sendViaOutreachAccount({ to: [input.to.trim()], subject: input.subject, html: input.html, text: input.text });
+}
+
+/**
+ * ★ 2026-09-23 담당자 직접 발송(수신자 1명 · 설계서 §5). 수신처는 호출부가 **선점한 잡 행에서 읽은 값**만 넘긴다(불변 24 개정 · 요청 인자 0).
+ * 결과 판정은 그 1명만(외부 1명 + 사내 사본을 한 통에 섞으면 외부 거부가 sent 로 접힌다 · decideMailOutcome 무변경).
+ * 헤더 = List-Unsubscribe(수신거부 주소) + List-Unsubscribe-Post(원클릭 · 불변 48).
+ */
+export async function sendOutreachDirectMail(input: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+  unsubscribeUrl: string;
+}): Promise<{ outcome: OutreachMailOutcome; detail: string; rejected: string[] }> {
+  const to = String(input.to || '').trim();
+  if (!to || !EMAIL_RE.test(to)) return { outcome: 'rejected', detail: '담당자 주소 형식이 올바르지 않습니다.', rejected: [to] };
+  return sendViaOutreachAccount({
+    to: [to], subject: input.subject, html: input.html, text: input.text,
+    headers: { 'List-Unsubscribe': `<${input.unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+  });
+}
+
+/** ★ 2026-09-23 직접 발송분의 자사 사본(ENV 수신함 · 따로 1통) — 실패해도 잡 결과에 영향 없음(호출부가 결과를 무시한다) */
+export async function sendOutreachCopyMail(input: { subject: string; html: string; text?: string }): Promise<{ outcome: OutreachMailOutcome; detail: string; rejected: string[] }> {
+  return sendViaOutreachAccount({ to: outreachMailToList(), subject: input.subject, html: input.html, text: input.text });
 }

@@ -4,7 +4,8 @@
  *
  * 두 층:
  *  ① 클라이언트(네트워크 = 127.0.0.1 워커만): renderPageGuarded — 워커가 안 떠 있으면(ECONNREFUSED) 즉시 실패를 돌려준다(대기 0).
- *     사용자는 기다리지 않고 정적 결과로 전진한다. 다른 렌더가 진행 중(409)이어도 같다. 실패 사유는 3값 별 키로 남긴다(불변 21).
+ *     사용자는 기다리지 않고 정적 결과로 전진한다. 실패 사유는 3값 별 키로 남긴다(불변 21).
+ *     ★ 2026-09-23 이 프로세스 안의 겹친 요청은 대기열에서 순서를 기다린다(불변 51 · 대기 상한 90초 초과만 busy · 다른 프로세스의 409 는 옛 계약 그대로).
  *  ② 순수 층: countMaterials(정적 HTML 재료 계측) · shouldEscalateToRender(승격 조건 4개 중 하나) · unionStrings/unionProducts/mergeCtaLinks(정적+렌더 합집합 ·
  *     렌더가 앞) · buildMaterialsV2(brand_profile.materials 조립 · DDL 0).
  *
@@ -17,6 +18,7 @@ import {
   type OutreachProduct, type ImageCandidateDetail, type ProofSignals, type OutreachEventCard,
 } from './sales-outreach-media';
 import type { RenderMeta } from './sales-outreach-render-guard';
+import { createSlotQueue } from './outreach-slot-queue';
 import type { RenderImage } from './sales-outreach-slices';
 
 export const OUTREACH_RENDER_URL = (process.env.OUTREACH_RENDER_URL || 'http://127.0.0.1:4317').replace(/\/+$/, '');
@@ -69,8 +71,25 @@ export type RenderOutcome =
   | { ok: true; result: RenderResult }
   | { ok: false; failure: { reason: RenderFailureReason; detail: string } };
 
+export interface RenderRequestOptions { deadlineMs?: number; screenshot?: boolean; requestTimeoutMs?: number; baseUrl?: string; viewportWidth?: number; screenshotViewport?: boolean; queueWaitMs?: number }
+
+/**
+ * ★ 2026-09-23 렌더 대기열(불변 51) — 워커는 동시 1건이라 겹친 요청이 409 로 떨어지고 호출부가 정적 결과로 조용히 넘어갔다
+ *   (일괄 체인 크롤 × 앞 건 제작 캡처 · 재료·채점 누락). 이 프로세스의 렌더 요청은 전부 이 대기열을 지나 **순서대로** 워커에 간다.
+ *   대기 상한을 넘으면 옛 계약 그대로 busy 실패(호출부 무변경).
+ */
+export const OUTREACH_RENDER_QUEUE_MAX_WAIT_MS = 90_000;
+const renderSlot = createSlotQueue();
+
 /** 워커에 렌더 1건을 요청한다. 워커 부재·점유·차단·시간 초과는 전부 {ok:false}로 돌아온다(throw 0). */
-export function renderPageGuarded(url: string, opts: { deadlineMs?: number; screenshot?: boolean; requestTimeoutMs?: number; baseUrl?: string; viewportWidth?: number; screenshotViewport?: boolean } = {}): Promise<RenderOutcome> {
+export async function renderPageGuarded(url: string, opts: RenderRequestOptions = {}): Promise<RenderOutcome> {
+  const waitMs = typeof opts.queueWaitMs === 'number' && opts.queueWaitMs >= 0 ? opts.queueWaitMs : OUTREACH_RENDER_QUEUE_MAX_WAIT_MS;
+  const r = await renderSlot.run(() => renderPageOnce(url, opts), waitMs);
+  if (!r.ok) return { ok: false, failure: { reason: 'busy', detail: `렌더 대기 ${Math.round(waitMs / 1000)}초 초과(다른 렌더가 길어짐)` } };
+  return r.value;
+}
+
+function renderPageOnce(url: string, opts: RenderRequestOptions): Promise<RenderOutcome> {
   return new Promise((resolve) => {
     let settled = false;
     const done = (v: RenderOutcome) => { if (!settled) { settled = true; resolve(v); } };

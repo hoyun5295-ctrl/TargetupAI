@@ -27,7 +27,7 @@ import { isSalesOutreachOperator } from './audit-log';
 import { isIndustryCode, industryLabel } from './industry-codes';
 import {
   getOutreachContext, produceOutreachImage, produceOutreachBrandEmail, collectOutreachMedia, fetchImageGuarded,
-  generateSubjectIntro, assembleProposalEmail, countBenefitPlaceholders, captureAndScoreDm, bannerAltMapOf, pickShowcaseExampleUrl,
+  generateSubjectIntro, assembleProposalEmail, countBenefitPlaceholders, captureAndScoreDm, bannerAltMapOf, buildOutreachSubject,
   storeViewportCapture, stripSelfLinkButtons,
   // ★ v3 조립/발행 분리 · 자동 재조립 · 배너 전사 폴백 · AI 계수기
   assembleOutreachDm, publishOutreachDm, updateOutreachDm, produceResultOf, autoRetryReasons, bannerCardsFromTranscripts, assertLicensedQuoteSources,
@@ -45,11 +45,16 @@ import {
 } from './sales-outreach-review';
 import {
   sendOutreachProposalMail, sendOutreachTestMail as mailerSendTest, isOutreachMailerReady, outreachMailTo,
-  outreachTestMailDomains, isAllowedTestRecipient,
+  outreachTestMailDomains, isAllowedTestRecipient, outreachTestMailAddresses, outreachSenderAddress,
 } from './outreach-mailer';
+// ★ 2026-09-23 담당자 직접 발송 판정 CT(순수) — 담당자 입력 정규화 · 수신거부 주소 · 스토어 저장값 · 자동 확정 후보
+import {
+  normalizeContactEmail, normalizeContactName, normalizeContactBasis, outreachHashSecret, directUnsubscribeUrlOf, parseNaverStoreSlug, pickAutoConfirmIndexes,
+  directSubjectOf, naverStoreUrlOf,
+} from './sales-outreach-direct';
 import {
   extractProducts, extractImageCandidates, discoverProductLinks, buildCtaLinkMap, extractLegal, resolveBrandColorGuarded, extractLogoCandidates,
-  extractEventListCards, extractRenderedProductCards,
+  extractEventListCards, extractRenderedProductCards, findContactPageLinks,
   OUTREACH_FETCH_OPTS, type OutreachProduct, type OutreachEventCard,
 } from './sales-outreach-media';
 import { stopDm } from './dm/dm-builder';
@@ -145,33 +150,48 @@ export type SendLockReason = 'SENDER_NOT_CONFIGURED' | 'UNSUB_NOTICE_MISSING' | 
 
 export interface SendLock { locked: boolean; reasons: SendLockReason[] }
 
+/** 잠금 사유 문장(서버 완성 · 자사 발송과 ★ 2026-09-23 직접 발송이 같은 표를 쓴다) */
+export const SEND_LOCK_MESSAGES: Record<SendLockReason, string> = {
+  SENDER_NOT_CONFIGURED: '영업 발신 계정(OUTREACH_SMTP_USER/PASS)이 설정되지 않아 발송이 잠겨 있습니다.',
+  UNSUB_NOTICE_MISSING: '수신거부 안내 문구(OUTREACH_UNSUB_NOTICE)가 확정되지 않아 발송이 잠겨 있습니다.',
+  NO_EMAIL: '조립된 메일이 없습니다. 메일 재조립 후 발송해주세요.',
+  PLACEHOLDER_REMAINS: '직접 채울 자리(혜택 안내)가 남아 있습니다. 문안을 수정하고 메일을 재조립한 뒤 발송할 수 있습니다.',
+  UNSUB_NOT_APPLIED: '수신거부 문구가 반영되기 전의 메일입니다. 메일 재조립 후 발송해주세요.',
+  MATERIAL_THIN: '홈페이지에서 읽은 재료가 얇아(상품·배너·행사 중 둘 이상 부족) 발송이 잠겨 있습니다. 산출물을 확인한 뒤 화면에서 해제할 수 있습니다.',
+};
+
 /** 발송 잠금 판정에 넘기는 재료 게이트 요약(stage_results.material + material_override) · null·undefined = 옛 잡(재료 축 없음) */
 export interface SendLockMaterial { verdict?: string | null; overridden?: boolean }
 
 /** 발송 잠금 6종(순수 · 불변 3 개정 · ★S2 6번째 = MATERIAL_THIN) — 발송 함수(효과)와 조회 응답(표시)이 같은 함수를 부른다. stage·in-flight·CAS는 효과 함수의 DB 축. */
 export function computeSendLock(
   env: { mailerReady: boolean; unsub: string },
-  emailAsset: { html?: string; subject?: string; placeholderCount?: number } | null,
+  /**
+   * ★ 2026-09-23 unsubApplied = 수신거부 문구 반영 여부를 호출부가 이미 잰 값(작업대 목록은 html 을 옮기지 않고 DB 가 position 으로 잰다).
+   *   없으면 옛대로 html 본문을 본다. 발송 함수는 언제나 html 을 넘긴다(판정 = 이 함수 하나).
+   */
+  emailAsset: { html?: string; subject?: string; placeholderCount?: number; unsubApplied?: boolean } | null,
   material?: SendLockMaterial | null,
 ): SendLock {
   const reasons: SendLockReason[] = [];
   if (!env.mailerReady) reasons.push('SENDER_NOT_CONFIGURED');
   if (material && material.verdict === 'thin' && !material.overridden) reasons.push('MATERIAL_THIN');
   if (!String(env.unsub || '').trim()) reasons.push('UNSUB_NOTICE_MISSING');
-  if (!emailAsset || !emailAsset.html || !emailAsset.subject) {
+  if (!emailAsset || !(emailAsset.html || typeof emailAsset.unsubApplied === 'boolean') || !emailAsset.subject) {
     reasons.push('NO_EMAIL');
     return { locked: true, reasons };
   }
   const placeholders = typeof emailAsset.placeholderCount === 'number'
     ? emailAsset.placeholderCount
-    : countBenefitPlaceholders(String(emailAsset.html) + '\n' + String(emailAsset.subject)); // 구 asset 폴백(필드 없음)
+    : countBenefitPlaceholders(String(emailAsset.html || '') + '\n' + String(emailAsset.subject)); // 구 asset 폴백(필드 없음)
   if (placeholders > 0) reasons.push('PLACEHOLDER_REMAINS');
   const unsub = String(env.unsub || '').trim();
-  if (unsub && !String(emailAsset.html).includes(unsub)) reasons.push('UNSUB_NOT_APPLIED');
+  const applied = typeof emailAsset.unsubApplied === 'boolean' ? emailAsset.unsubApplied : String(emailAsset.html || '').includes(unsub);
+  if (unsub && !applied) reasons.push('UNSUB_NOT_APPLIED');
   return { locked: reasons.length > 0, reasons };
 }
 
-function sendLockEnv(): { mailerReady: boolean; unsub: string } {
+export function sendLockEnv(): { mailerReady: boolean; unsub: string } {
   return { mailerReady: isOutreachMailerReady(), unsub: (process.env.OUTREACH_UNSUB_NOTICE || '').trim() };
 }
 
@@ -184,7 +204,8 @@ export function sendLockMaterialOf(sr: Record<string, any> | null | undefined): 
 
 // ===== 게이트 (효과를 만드는 모든 함수의 첫 줄) =====
 
-async function assertOperator(operatorSuperAdminId: string | null | undefined): Promise<void> {
+/** 게이트(fail-closed) — ★ 2026-09-23 직접 발송 파일(sales-outreach-direct-jobs.ts)도 이 함수 하나를 쓴다 */
+export async function assertOperator(operatorSuperAdminId: string | null | undefined): Promise<void> {
   if (!(await isSalesOutreachOperator(operatorSuperAdminId))) {
     throw new OutreachError('FORBIDDEN', '이 기능을 사용할 권한이 없습니다.');
   }
@@ -585,7 +606,7 @@ export function detailOf(err: any): string {
 }
 
 /** 검수 테스트 발송 이력 갱신(순수) — 최대 20건 · 최신이 뒤 */
-export function appendTestSend(list: unknown, entry: { to: string; outcome: string; at: string; by: string | null }, cap = 20): Array<Record<string, unknown>> {
+export function appendTestSend(list: unknown, entry: { to: string; outcome: string; at: string; by: string | null; assetId?: string | null }, cap = 20): Array<Record<string, unknown>> {
   const cur = Array.isArray(list) ? list.filter((x) => x && typeof x === 'object') as Array<Record<string, unknown>> : [];
   return [...cur, entry].slice(-cap);
 }
@@ -600,6 +621,22 @@ export interface EnqueueInput {
   extraNotes?: string | null;
   /** ★ B-6 중복이어도 새로 만든다 */
   force?: boolean;
+  /** ★ 2026-09-23 담당자(사람이 넣은 값만 · 불변 44) · 네이버 스토어 주소(저장만 · fetch 0 · 불변 50) */
+  contactEmail?: string | null;
+  contactName?: string | null;
+  contactBasis?: string | null;
+  naverStoreUrl?: string | null;
+}
+
+/** ★ 2026-09-23 등록 입력의 담당자·스토어 칸 정규화 — 비면 null · 형식 불량 = VALIDATION(단건 입력은 바로 고칠 수 있다) */
+export function normalizeEnqueueContact(input: Pick<EnqueueInput, 'contactEmail' | 'contactName' | 'contactBasis' | 'naverStoreUrl'>): { contactEmail: string | null; contactName: string | null; contactBasis: string | null; naverStore: string | null } {
+  const rawEmail = String(input.contactEmail ?? '').trim();
+  const contactEmail = rawEmail ? normalizeContactEmail(rawEmail) : null;
+  if (rawEmail && !contactEmail) throw new OutreachError('VALIDATION', '담당자 이메일 형식이 올바르지 않습니다.');
+  const rawStore = String(input.naverStoreUrl ?? '').trim();
+  const store = rawStore ? parseNaverStoreSlug(rawStore) : null;
+  if (rawStore && !store) throw new OutreachError('VALIDATION', '네이버 스토어 주소 형식이 아닙니다(brand.naver.com/… 또는 smartstore.naver.com/…).');
+  return { contactEmail, contactName: normalizeContactName(input.contactName), contactBasis: normalizeContactBasis(input.contactBasis), naverStore: store ? store.value : null };
 }
 
 function normalizeHomepageUrl(raw: string): string {
@@ -621,8 +658,9 @@ function normalizeExtraNotes(raw: unknown): string | null {
   return v;
 }
 
-/** 같은 키의 미파기 잡(최신 1건) — 중복 등록 판정(B-6). ★ S4 LIMIT 300 제거(301번째부터 중복을 못 보던 자리) · 호스트 ILIKE 사전 필터 뒤 키 대조 */
-async function findDuplicateJob(homepageUrl: string): Promise<{ id: string; stage: string } | null> {
+/** 같은 키의 미파기 잡(최신 1건) — 중복 등록 판정(B-6). ★ S4 LIMIT 300 제거(301번째부터 중복을 못 보던 자리) · 호스트 ILIKE 사전 필터 뒤 키 대조
+ *  ★ 2026-09-23 같은 네이버 스토어(저장값 일치)도 중복이다(홈페이지 주소가 달라도 같은 브랜드). */
+async function findDuplicateJob(homepageUrl: string, naverStore: string | null = null): Promise<{ id: string; stage: string } | null> {
   const key = normalizeHomepageKey(homepageUrl);
   const r = await query(
     `SELECT id, stage, homepage_url FROM sales_outreach_jobs
@@ -631,7 +669,13 @@ async function findDuplicateJob(homepageUrl: string): Promise<{ id: string; stag
     [`%${hostOfKey(key)}%`],
   );
   const hit = r.rows.find((row: any) => normalizeHomepageKey(String(row.homepage_url || '')) === key);
-  return hit ? { id: String(hit.id), stage: String(hit.stage) } : null;
+  if (hit) return { id: String(hit.id), stage: String(hit.stage) };
+  if (!naverStore) return null;
+  const s = await query(
+    `SELECT id, stage FROM sales_outreach_jobs WHERE purged_at IS NULL AND naver_store_slug = $1 ORDER BY created_at DESC LIMIT 1`,
+    [naverStore],
+  );
+  return s.rows[0] ? { id: String(s.rows[0].id), stage: String(s.rows[0].stage) } : null;
 }
 
 export async function enqueueOutreachJob(
@@ -652,19 +696,22 @@ export async function enqueueOutreachJob(
   const extraNotes = normalizeExtraNotes(input.extraNotes);
   const industry = input.industryCategory && isIndustryCode(input.industryCategory)
     ? input.industryCategory : null;
+  const contact = normalizeEnqueueContact(input);
 
   if (!input.force) {
-    const dup = await findDuplicateJob(homepageUrl);
+    const dup = await findDuplicateJob(homepageUrl, contact.naverStore);
     if (dup) {
       throw new OutreachError('CONFLICT', '이미 등록된 업체입니다.', { reason: 'DUPLICATE', existingJobId: dup.id, existingStage: dup.stage });
     }
   }
 
   const result = await query(
-    `INSERT INTO sales_outreach_jobs (company_name, industry_category, homepage_url, stage, created_by, brand_profile)
-     VALUES ($1, $2, $3, 'queued', $4, $5::jsonb)
+    `INSERT INTO sales_outreach_jobs (company_name, industry_category, homepage_url, stage, created_by, brand_profile,
+                                      contact_email, contact_name, contact_basis, naver_store_slug)
+     VALUES ($1, $2, $3, 'queued', $4, $5::jsonb, $6, $7, $8, $9)
      RETURNING id`,
-    [companyName, industry, homepageUrl, operatorSuperAdminId, JSON.stringify(extraNotes ? { extraNotes } : {})],
+    [companyName, industry, homepageUrl, operatorSuperAdminId, JSON.stringify(extraNotes ? { extraNotes } : {}),
+     contact.contactEmail, contact.contactName, contact.contactBasis, contact.naverStore],
   );
   const id = result.rows[0].id as string;
 
@@ -1040,6 +1087,8 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
     productLinks: unionStrings(unionStrings(rendered ? discoverProductLinks(rendered.html, finalUrl, 10) : [], page ? discoverProductLinks(page.html, staticUrl, 10) : [], 10), cardProductLinks, 10),
     // ★ 0905(5) 헤더 로고 후보(순수 · 실물 판정은 제작 단계 collectOutreachMedia)
     logoCandidates: unionStrings(rendered ? extractLogoCandidates(rendered.html, finalUrl) : [], page ? extractLogoCandidates(page.html, staticUrl) : [], 4),
+    // ★ 2026-09-23 제휴·문의 **페이지 링크**(담당자 주소를 사람이 찾아 옮겨 적는 출발점 · 이메일 추출 0 · 불변 44)
+    contactPages: unionStrings(rendered ? findContactPageLinks(rendered.html, finalUrl) : [], page ? findContactPageLinks(page.html, staticUrl) : [], 3),
     listProducts,
     ctaLinks: mergeCtaLinks(rendered ? buildCtaLinkMap(rendered.html, finalUrl) : {}, page ? buildCtaLinkMap(page.html, staticUrl) : {}),
     legal: homeText ? extractLegal(homeText) : null,
@@ -1162,7 +1211,40 @@ export async function confirmOutreachSelection(
   operatorSuperAdminId: string | null | undefined,
 ): Promise<{ warnings: string[] }> {
   await assertOperator(operatorSuperAdminId);
+  const r = await confirmSelectionCore(jobId, selection, { kind: 'human', id: operatorSuperAdminId || null });
+  return { warnings: r.warnings };
+}
 
+/** 확정 주체 — 사람(슈퍼관리자 id) · 자동(일괄 옵션 · 면허 후보만 · 설계서 §7) */
+type ConfirmActor = { kind: 'human'; id: string | null } | { kind: 'auto' };
+
+/**
+ * ★ 2026-09-23 자동 확정(설계서 §7) — 확정 대기에 닿은 건에서 면허 있는 카드·크롤 후보를 후보 순서대로 앞 3개 → 사람 확정과 **같은 함수**.
+ *   면허 후보 0 = 확정하지 않는다(사람 3단계로 남는다). 이미지는 고르지 않는다(imageUrl null · 포스터 누끼는 인물 판정 none 만 = strictPerson).
+ *   돌려주는 것 = 제작 완료(ready·failed)까지 기다릴 수 있는 약속 · 확정하지 않았으면 null.
+ */
+async function autoConfirmOutreachJob(jobId: string): Promise<Promise<void> | null> {
+  const cur = await query(`SELECT stage, event_quote FROM sales_outreach_jobs WHERE id = $1 AND purged_at IS NULL`, [jobId]);
+  if (!cur.rows[0] || cur.rows[0].stage !== 'awaiting_confirm') return null;
+  const candidates: EventCandidate[] = Array.isArray(cur.rows[0].event_quote?.candidates) ? cur.rows[0].event_quote.candidates : [];
+  const indexes = pickAutoConfirmIndexes(candidates);
+  if (indexes.length === 0) return null;
+  try {
+    const r = await confirmSelectionCore(jobId, { eventIndex: null, eventIndexes: indexes, imageUrl: null }, { kind: 'auto' });
+    console.log('[sales-outreach] 자동 확정:', jobId, `행사 ${indexes.length}건`);
+    return r.production;
+  } catch (err: any) {
+    // 사람이 먼저 확정했거나(CONFLICT) 후보가 바뀐 경우 — 자동은 물러난다(그 건은 사람 흐름 그대로)
+    console.log('[sales-outreach] 자동 확정 건너뜀:', jobId, err?.message);
+    return null;
+  }
+}
+
+async function confirmSelectionCore(
+  jobId: string,
+  selection: OutreachSelection,
+  actor: ConfirmActor,
+): Promise<{ warnings: string[]; production: Promise<void> }> {
   const cur = await query(
     `SELECT stage, event_quote, brand_profile FROM sales_outreach_jobs WHERE id = $1`,
     [jobId],
@@ -1209,30 +1291,34 @@ export async function confirmOutreachSelection(
     ? selection.industryCategory : null;
 
   const lockToken = randomUUID();
+  const confirmedAt = new Date().toISOString();
   const updated = await query(
     `UPDATE sales_outreach_jobs
         SET stage = 'producing_copy',
             event_quote = $2::jsonb,
             brand_profile = $3::jsonb,
             industry_category = COALESCE($4, industry_category),
+            stage_results = COALESCE(stage_results, '{}'::jsonb) || $6::jsonb,
             lock_token = $5, lock_at = NOW()
       WHERE id = $1 AND stage = 'awaiting_confirm'
       RETURNING id`,
     [jobId,
-     // ★ v3 selectedList(≤3 · 누른 순서) 를 함께 싣는다 · selected 는 대표 1건(하류 무변경)
-     JSON.stringify({ candidates: allCandidates, selectedList, selected, confirmedBy: operatorSuperAdminId, confirmedAt: new Date().toISOString() }),
+     // ★ v3 selectedList(≤3 · 누른 순서) 를 함께 싣는다 · selected 는 대표 1건(하류 무변경) · ★ 2026-09-23 자동 확정 = 'auto:v1'
+     JSON.stringify({ candidates: allCandidates, selectedList, selected, confirmedBy: actor.kind === 'auto' ? 'auto:v1' : actor.id, confirmedAt }),
      JSON.stringify({ ...profile, selectedImageUrl }),
-     industry, lockToken],
+     industry, lockToken,
+     // 자동 확정 흔적은 되돌리기(RESETTABLE_KEYS)가 지우지 않는다 — "자동 확정 뒤 사람이 행사를 바꿨는가"(단계 3 조건)의 원천
+     JSON.stringify(actor.kind === 'auto' ? { auto_confirmed_at: confirmedAt } : {})],
   );
   if (updated.rows.length === 0) {
     throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.');
   }
 
-  runProduction(jobId, lockToken).catch((err: any) => {
+  const production = runProduction(jobId, lockToken).catch((err: any) => {
     console.error('[sales-outreach] 제작 실행 실패:', jobId, err?.message);
-    markFailed(jobId, 'producing_copy', '제작을 시작하지 못했습니다. 다시 시도해주세요.', { lockToken, detail: detailOf(err) }).catch(() => {});
+    return markFailed(jobId, 'producing_copy', '제작을 시작하지 못했습니다. 다시 시도해주세요.', { lockToken, detail: detailOf(err) }).then(() => undefined, () => undefined);
   });
-  return { warnings };
+  return { warnings, production };
 }
 
 // ===== 제작 파이프라인 (producing_copy → image → dm → email → ready · 단계별 재개 가능) =====
@@ -1426,7 +1512,7 @@ async function runProduction(jobId: string, lockToken: string): Promise<void> {
 async function runProductionMetered(jobId: string, lockToken: string, meter: OutreachAiCost): Promise<void> {
   for (let guard = 0; guard < 8; guard++) {
     const cur = await query(
-      `SELECT stage, company_name, industry_category, event_quote, brand_profile, preview_code, stage_results, homepage_url
+      `SELECT stage, company_name, industry_category, event_quote, brand_profile, preview_code, stage_results, homepage_url, contact_email, contact_name
          FROM sales_outreach_jobs WHERE id = $1 AND lock_token = $2`,
       [jobId, lockToken],
     );
@@ -1618,6 +1704,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               products: media?.products?.length ? media.products : (Array.isArray(bp.listProducts) ? bp.listProducts : []),
               siteTitle: bp.siteTitle || null,
               wantBanner: !(media && Array.isArray(media.gallery) && media.gallery.length > 0),
+              // ★ 2026-09-23 자동 확정 건 = 사람이 이미지를 보지 않았다 → 누끼 원천은 인물 판정 none 만(fail-closed · 설계서 §7)
+              strictPerson: job.event_quote?.confirmedBy === 'auto:v1',
             });
           } catch (err: any) {
             studioError = detailOf(err);
@@ -1808,14 +1896,21 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
         // ★ 0905(3) 두 축으로 나눈다 — 제목·서두 = kind 'email'뿐 · 브랜드 시안 = 'email' + 재료 재선택('materials'). 섹션 숨김('sections_email')은 AI 0.
         const regenIntro = regenFrom === 'email' || !prevEmail;
         const regenBrand = regenFrom === 'email' || regenFrom === 'materials' || !prevEmail;
-        let subject: string; let intro: string;
+        let subject: string; let intro: string; let subjectCandidates: string[] = [];
         if (regenIntro) {
           const si = await generateSubjectIntro(guide, { companyName: job.company_name, industry: job.industry_category, selectedEvent: selected, promptMaterial: promptMaterial.slice(0, 2000) });
-          subject = si.subject; intro = si.intro;
+          // ★ 2026-09-23 제목 = 결정 규칙(업체 + 확정 행사명 · 설계서 §11) · AI 제목은 검토 화면 후보로만 남긴다
+          const topEvent = selectedList[0] || null;
+          subject = buildOutreachSubject(guide, job.company_name, topEvent ? (topEvent.origin === 'card' ? topEvent.title : topEvent.quote) : null);
+          subjectCandidates = si.generated && si.subject && si.subject !== subject ? [si.subject] : [];
+          intro = si.intro;
         } else {
           subject = String(prevEmail.subject || guide.emailCopy.subjectDefault(job.company_name));
           intro = String(prevEmail.intro || guide.emailCopy.introDefault(job.company_name));
+          subjectCandidates = Array.isArray(prevEmail.subjectCandidates) ? prevEmail.subjectCandidates.map((s: unknown) => String(s)).slice(0, 3) : [];
         }
+        // ★ 2026-09-23 담당자 직접 발송 법정 footer(불변 47) — 담당자 주소·비밀값이 있으면 조립 시점에 수신거부 링크까지 asset 안으로
+        const adFooter = directAdFooterOf(jobId, job.contact_email, guide);
         let brandSectionsBase: any[]; let brandSubject: string; let brandStripped: number; let exemplarCount: number; let exemplarTotal: number; let brandLook: any;
         let brandSliceMode = false; let brandSliceCount = 0;
         if (regenBrand) {
@@ -1859,15 +1954,18 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           brandColor,
           subject,
           intro,
-          // ★ 0906(3) 스토리라인 재료 — DM 첫 화면 캡처 · 이미지 스튜디오 실샘플(업종 매칭 · 공개 라우트)
-          dmCaptureUrl: dmAsset?.captureUrl ? String(dmAsset.captureUrl) : null,
-          showcaseImageUrl: pickShowcaseExampleUrl(job.industry_category),
-          // ★ v3 대조 왼쪽(홈 첫 화면 캡처 · 있을 때만) · 회신 문장(검토 화면 편집분)
-          homeCaptureUrl: bp.homeCaptureUrl ? String(bp.homeCaptureUrl) : null,
+          // ★ v3 회신 문장(검토 화면 편집분)
           replyLine: sr.reply_line?.text ? String(sr.reply_line.text) : null,
+          // ★ 2026-09-23 재구성 — 담당자 호칭 · 시안에 담은 확정 행사 요약 · 직접 발송 법정 footer
+          contactName: job.contact_name ? String(job.contact_name) : null,
+          confirmedEvents: selectedList.map((c) => ({ title: c.origin === 'card' ? String(c.title || c.quote) : String(c.quote), periodRaw: c.periodRaw || null })),
+          adFooter,
         });
         if (!(await insertAssetOwned(jobId, 'email_html', {
           subject: email.subject, intro: email.intro, html: email.html, text: email.text, placeholderCount: email.placeholderCount,
+          subjectCandidates,
+          // 이 판에 수신거부 링크가 들어갔는가(직접 발송 잠금 UNSUB_LINK_STALE 는 html 을 직접 본다 · 이 값은 표시용)
+          adFooter: adFooter ? { fromEmail: adFooter.fromEmail, unsubscribeUrl: adFooter.unsubscribeUrl } : null,
           brandSections, brandSectionsBase, brandSubject, brandStripped, exemplarCount, exemplarTotal, brandLook,
           brandSliceMode, brandSliceCount,
           hiddenApplied: brandApplied.applied, hiddenMissed: brandApplied.missed, hiddenSkipped: brandApplied.skipped === true,
@@ -2025,6 +2123,17 @@ export async function markFailed(
   return r.rows.length > 0;
 }
 
+/**
+ * ★ 2026-09-23 담당자 직접 발송 법정 footer 입력(불변 47) — 담당자 주소 · 비밀값 · 발신 계정이 다 있을 때만.
+ *   수신거부 주소는 잠금 판정(UNSUB_LINK_STALE)과 같은 함수(directUnsubscribeUrlOf)가 만든다 → 담당자가 바뀌면 옛 판은 잠긴다.
+ */
+function directAdFooterOf(jobId: string, contactEmail: unknown, guide: OutreachStyleGuide): { fromName: string; fromEmail: string; unsubscribeUrl: string } | null {
+  const from = outreachSenderAddress();
+  const url = directUnsubscribeUrlOf(PUBLIC_BASE, jobId, contactEmail, outreachHashSecret());
+  if (!from || !url) return null;
+  return { fromName: guide.emailCopy.senderLegalName, fromEmail: from, unsubscribeUrl: url };
+}
+
 // ===== 발송 (사람 클릭이 유일 경로 — 워커·스케줄러 호출 불가 구조) =====
 
 /** 발송 중복 클릭 방지(프로세스 내) — 최종 방어는 DB WHERE 조건 */
@@ -2056,16 +2165,8 @@ export async function sendOutreachMailForJob(
   // ★ B-1 잠금 6종 = 순수 함수 하나(조회 응답도 같은 함수) — reason → 코드 · ★S2 재료 게이트는 stage_results 에서 읽는다
   const lock = computeSendLock(sendLockEnv(), emailAsset, sendLockMaterialOf(cur.rows[0].stage_results));
   if (lock.locked) {
-    const messages: Record<SendLockReason, string> = {
-      SENDER_NOT_CONFIGURED: '영업 발신 계정(OUTREACH_SMTP_USER/PASS)이 설정되지 않아 발송이 잠겨 있습니다.',
-      UNSUB_NOTICE_MISSING: '수신거부 안내 문구(OUTREACH_UNSUB_NOTICE)가 확정되지 않아 발송이 잠겨 있습니다.',
-      NO_EMAIL: '조립된 메일이 없습니다. 메일 재조립 후 발송해주세요.',
-      PLACEHOLDER_REMAINS: '직접 채울 자리(혜택 안내)가 남아 있습니다. 문안을 수정하고 메일을 재조립한 뒤 발송할 수 있습니다.',
-      UNSUB_NOT_APPLIED: '수신거부 문구가 반영되기 전의 메일입니다. 메일 재조립 후 발송해주세요.',
-      MATERIAL_THIN: '홈페이지에서 읽은 재료가 얇아(상품·배너·행사 중 둘 이상 부족) 발송이 잠겨 있습니다. 산출물을 확인한 뒤 화면에서 해제할 수 있습니다.',
-    };
     const first = lock.reasons[0];
-    throw new OutreachError(first === 'NO_EMAIL' ? 'CONFLICT' : 'NOT_READY', messages[first], { reasons: lock.reasons });
+    throw new OutreachError(first === 'NO_EMAIL' ? 'CONFLICT' : 'NOT_READY', SEND_LOCK_MESSAGES[first], { reasons: lock.reasons });
   }
   if (mailInFlight.has(jobId)) {
     throw new OutreachError('CONFLICT', '발송이 진행 중입니다.');
@@ -2144,31 +2245,47 @@ export async function sendOutreachTestMail(
   await assertOperator(operatorSuperAdminId);
   const addr = String(to || '').trim();
   const domains = outreachTestMailDomains();
-  if (!isAllowedTestRecipient(addr, domains)) {
-    throw new OutreachError('VALIDATION', `검수 메일은 허용된 도메인(${domains.join(', ')})의 주소로만 보낼 수 있습니다.`);
+  // ★ 2026-09-23 허용 주소 목록(외부 메일함 스팸함 실측용 · 불변 24 개정)
+  if (!isAllowedTestRecipient(addr, domains, outreachTestMailAddresses())) {
+    throw new OutreachError('VALIDATION', `검수 메일은 허용된 도메인(${domains.join(', ')}) 또는 허용 주소 목록의 주소로만 보낼 수 있습니다.`);
   }
   const cur = await query(`SELECT stage, stage_results FROM sales_outreach_jobs WHERE id = $1`, [jobId]);
   if (cur.rows.length === 0) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
   if (cur.rows[0].stage !== 'ready' && cur.rows[0].stage !== 'sent') {
     throw new OutreachError('CONFLICT', '제작이 끝난 뒤에 검수 메일을 보낼 수 있습니다.');
   }
-  const emailAsset = await latestAsset(jobId, 'email_html');
+  // ★ 2026-09-23 판 id 도 함께 읽는다 — 검수 메일로 받아 본 판 = 확인한 판(불변 46 · reviewed_asset_id)
+  const latestRow = await query(
+    `SELECT id, payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'email_html' ORDER BY created_at DESC LIMIT 1`,
+    [jobId],
+  );
+  const emailAsset = latestRow.rows[0]?.payload || null;
+  const assetId: string | null = latestRow.rows[0]?.id ? String(latestRow.rows[0].id) : null;
   const lock = computeSendLock(sendLockEnv(), emailAsset);
   if (lock.reasons.includes('NO_EMAIL')) throw new OutreachError('CONFLICT', '조립된 메일이 없습니다. 메일 재조립 후 보내주세요.');
   if (lock.reasons.includes('SENDER_NOT_CONFIGURED')) throw new OutreachError('NOT_READY', '영업 발신 계정(OUTREACH_SMTP_USER/PASS)이 설정되지 않아 발송이 잠겨 있습니다.');
   const guide = getActiveStyleGuide();
+  // 담당자 직접 발송 판(법정 footer 가 든 판)이면 담당자가 받을 제목 그대로("(광고) " 접두)를 검수에서도 본다
+  const shownSubject = emailAsset.adFooter ? directSubjectOf(String(emailAsset.subject)) : String(emailAsset.subject);
   const result = await mailerSendTest({
     to: addr,
-    subject: `${guide.emailCopy.testSubjectPrefix}${String(emailAsset.subject)}`,
+    subject: `${guide.emailCopy.testSubjectPrefix}${shownSubject}`,
     html: String(emailAsset.html),
     ...(emailAsset.text ? { text: String(emailAsset.text) } : {}),
   });
   const at = new Date().toISOString();
-  const list = appendTestSend(cur.rows[0].stage_results?.test_sends, { to: addr, outcome: result.outcome, at, by: operatorSuperAdminId || null });
+  const list = appendTestSend(cur.rows[0].stage_results?.test_sends, { to: addr, outcome: result.outcome, at, by: operatorSuperAdminId || null, assetId });
   await query(
     `UPDATE sales_outreach_jobs SET stage_results = COALESCE(stage_results, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
     [jobId, JSON.stringify({ test_sends: list })],
   ).catch((err: any) => console.error('[sales-outreach] test_sends 기록 실패:', jobId, err?.message));
+  // 받아 본 판 = 확인한 판(도착한 것만) · 재조립으로 판이 바뀌면 이 기록은 판 id 비교로 저절로 무효
+  if (result.outcome === 'sent' && assetId) {
+    await query(
+      `UPDATE sales_outreach_jobs SET reviewed_asset_id = $2, stage_results = COALESCE(stage_results, '{}'::jsonb) || $3::jsonb WHERE id = $1`,
+      [jobId, assetId, JSON.stringify({ review: { by: operatorSuperAdminId || null, at, assetId, via: 'test_mail' } })],
+    ).catch((err: any) => console.error('[sales-outreach] 검수 확인 기록 실패:', jobId, err?.message));
+  }
   console.log('[sales-outreach] 검수 발송:', jobId, result.outcome, '→', addr);
   return { outcome: result.outcome, detail: result.detail, to: addr };
 }
@@ -2809,6 +2926,21 @@ export interface BulkEnqueueInput {
   companyName: string;
   homepageUrl: string;
   industryCategory: string | null;
+  /** ★ 2026-09-23 엑셀 새 열(파서가 정규화한 값 · 형식 불량은 이미 null) */
+  naverStore?: string | null;
+  contactEmail?: string | null;
+  contactName?: string | null;
+  contactBasis?: string | null;
+}
+
+/** ★ 2026-09-23 일괄 옵션(설계서 §6·§7) */
+export interface BulkEnqueueOptions {
+  /** 확정 대기에 닿은 건을 면허 후보로 자동 확정(기본 켬) */
+  autoConfirm?: boolean;
+  /** 단계 3 묶음 자동 발송 승인 기록(업로드 때 사람이 1클릭 · 라우트가 유효 단계 3 을 확인한 뒤에만 싣는다) */
+  autoSendApproval?: { by: string; at: string; rule: string } | null;
+  /** 한 건이 제작 완료(ready)에 닿았을 때 부를 함수(직접 발송 파일이 준다 · 이 파일은 그 파일을 import 하지 않는다) */
+  onReady?: (jobId: string) => Promise<void>;
 }
 
 /**
@@ -2820,7 +2952,8 @@ export interface BulkEnqueueInput {
 export async function enqueueOutreachJobsBulk(
   rows: BulkEnqueueInput[],
   operatorSuperAdminId: string | null | undefined,
-): Promise<{ acceptedIds: string[]; rejected: Array<{ companyName: string; reason: string }> }> {
+  options: BulkEnqueueOptions = {},
+): Promise<{ acceptedIds: string[]; rejected: Array<{ companyName: string; reason: string }>; batch: string }> {
   await assertOperator(operatorSuperAdminId);
   if (!getOutreachContext()) {
     throw new OutreachError('NOT_READY', '준비가 되지 않았습니다: OUTREACH_COMPANY_ID·OUTREACH_USER_ID 설정이 필요합니다.');
@@ -2842,15 +2975,21 @@ export async function enqueueOutreachJobsBulk(
       continue;
     }
     const industry = row.industryCategory && isIndustryCode(row.industryCategory) ? row.industryCategory : null;
+    // 엑셀 파서가 이미 정규화했다 — 여기서는 한 번 더 걸러 형식 불량을 칸째 비운다(행은 등록 · 발송만 잠김)
+    const contactEmail = normalizeContactEmail(row.contactEmail);
+    const naverStore = naverStoreUrlOf(row.naverStore) ? String(row.naverStore) : null;
     try {
-      if (await findDuplicateJob(homepageUrl)) {
+      if (await findDuplicateJob(homepageUrl, naverStore)) {
         rejected.push({ companyName, reason: '이미 등록된 업체입니다.' });
         continue;
       }
       const r = await query(
-        `INSERT INTO sales_outreach_jobs (company_name, industry_category, homepage_url, stage, created_by, stage_results)
-         VALUES ($1, $2, $3, 'queued', $4, $5::jsonb) RETURNING id`,
-        [companyName, industry, homepageUrl, operatorSuperAdminId, JSON.stringify({ chain: { batch, index: i + 1, total } })],
+        `INSERT INTO sales_outreach_jobs (company_name, industry_category, homepage_url, stage, created_by, stage_results,
+                                          contact_email, contact_name, contact_basis, naver_store_slug)
+         VALUES ($1, $2, $3, 'queued', $4, $5::jsonb, $6, $7, $8, $9) RETURNING id`,
+        [companyName, industry, homepageUrl, operatorSuperAdminId,
+         JSON.stringify({ chain: { batch, index: i + 1, total }, ...(options.autoSendApproval ? { auto_send: options.autoSendApproval } : {}) }),
+         contactEmail, normalizeContactName(row.contactName), normalizeContactBasis(row.contactBasis), naverStore],
       );
       acceptedIds.push(r.rows[0].id as string);
     } catch (err: any) {
@@ -2859,12 +2998,34 @@ export async function enqueueOutreachJobsBulk(
     }
   }
 
-  // 순차 체인 — 각 건은 awaiting_confirm(사람 게이트)·failed에서 멈추므로 이 체인은 발송·확정을 절대 넘지 않는다.
+  // 순차 체인 — 한 건 = 수집·분석 → (자동 확정) → 제작 완료까지 기다린 뒤 다음 건(★ 2026-09-23 불변 51 · 체인 크롤과 앞 건 제작이 겹치지 않는다).
+  //   자동 확정이 없거나 면허 후보가 0 이면 그 건은 awaiting_confirm(사람)에서 멈추고 체인은 다음 건으로 간다.
+  //   발송은 여기서 일어나지 않는다 — onReady 는 직접 발송 파일이 준 함수이고, 그 함수가 단계·승인 기록·건 조건을 스스로 판정한다(불변 1 개정).
   if (acceptedIds.length > 0) {
+    const autoConfirm = options.autoConfirm !== false;
     (async () => {
-      for (const id of acceptedIds) {
+      for (let i = 0; i < acceptedIds.length; i++) {
+        const id = acceptedIds[i];
+        // 직렬화로 길어진 대기 — 남은 queued 건의 lock_at 을 갱신해 대기 2시간 종결(sweeper)에 걸리지 않게
+        const waiting = acceptedIds.slice(i + 1);
+        if (waiting.length) {
+          await query(
+            `UPDATE sales_outreach_jobs SET lock_at = NOW() WHERE id = ANY($1::uuid[]) AND stage = 'queued' AND lock_token IS NULL`,
+            [waiting],
+          ).catch((err: any) => console.error('[sales-outreach] 대기 건 heartbeat 실패(계속):', err?.message));
+        }
         try {
           await runOutreachJob(id);
+          if (!autoConfirm) continue;
+          const production = await autoConfirmOutreachJob(id);
+          if (!production) continue;
+          await production;
+          if (options.onReady) {
+            const st = await query(`SELECT stage FROM sales_outreach_jobs WHERE id = $1`, [id]);
+            if (st.rows[0]?.stage === 'ready') {
+              await options.onReady(id).catch((err: any) => console.error('[sales-outreach] 제작 완료 후속 실패(계속):', id, err?.message));
+            }
+          }
         } catch (err: any) {
           console.error('[sales-outreach] 일괄 체인 실행 실패:', id, err?.message);
           await markFailed(id, 'crawling', '분석 시작에 실패했습니다. 재시도해주세요.', { detail: detailOf(err) }).catch(() => {});
@@ -2873,5 +3034,5 @@ export async function enqueueOutreachJobsBulk(
     })().catch((err: any) => console.error('[sales-outreach] 일괄 체인 예외:', err?.message));
   }
 
-  return { acceptedIds, rejected };
+  return { acceptedIds, rejected, batch };
 }

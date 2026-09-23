@@ -81,10 +81,10 @@
 > ⛔ 정의에 요금제 이름·크레딧 숫자·버튼 라벨을 문자열로 적지 않는다 / **버튼 기본 상태까지 실측하고 "누르세요"를 쓴다**(§10-5 가) / **`entry.path`에 쿼리를 붙이지 마라**(`jobsForPath`가 문자열 비교 · 붙일 것은 `entry.open` · §10-5 나) / 매칭 실패면 모델 호출 0 / 봇 노출 = 요금제 사용 회사만(서버 판정)
 > 잔여 = **배포 후 §10-5·§10-6·§10-7 실측**(모달 딥링크 · 구어 질문 · 후속 대화 · ceo 질문 이력 탭 · **못 답함 사유 라벨과 재시도**) → §10-1 육안 40개 → 백지 리허설. **`reason` ALTER 미실행이면 이력 탭이 마이그레이션 안내를 낸다**(§10-7 · 답변은 정상) · 질문 한도 축소는 Harold 0825 "두고 보면서 체크"로 보류 · 학습데이터 (나) Harold 답 대기
 
-### AI 영업 아웃리치 — ★0906 v3(이벤트 카드·갤러리 0·자동 재조립·학습 원장) + S1~S6 코드완료·배포 대기(DDL 0 · 렌더 워커 PM2 앱 1개 추가)
-> 호출어 **"영업 아웃리치"** → **[FEATURE-SALES-OUTREACH.md](../docs/FEATURE-SALES-OUTREACH.md)가 전부 소유**(불변 33 §2 · 파일별 §3 · ENV §4 · 이력 §5) · 근거 = [0906 설계서](../docs/2026-09-06-campaign-engine-design.md)(§3~§8 구현 기록) · 배포 = **[OPS §2-2-E ⑧](OPS.md)**
-> ⛔ 요지: 발송 잠금 6종 = `computeSendLock` 하나 / 실패 종결 `markFailed` · 되돌리기 `resetJobTo` 하나 / 크롤은 가드 경로만(렌더 워커도 같은 가드·프록시) / AI 뒤 결정 구간 = `campaign-engine.ts` 하나(아웃리치·고객 재료 입구 공용) / 삭제 = 만료 파기와 같은 `purgeOutreachJobArtifacts` / 열람 새 테이블 0 / 이미지 안 글자는 코드가 찍는다
-> 잔여 = **배포**(tp-push → reload · 워커 재시작 불필요) → [v3 설계서 §17-3](../docs/2026-09-06-outreach-v3-brand-page-recomposition-design.md) 실측 6건(아이소이 카드 격자 · 375폭 캡처 · 관측 1줄 · 검수 메일 · 원클릭 카드 · 레시피 승격) → Codex 리뷰(Harold가 /codex:review 직접) → 0905 잔여(Harold 결재 2 · 네이버 키)
+### AI 영업 아웃리치 — ★0923 담당자 직접 발송 · 엑셀 자동 영업 · 작업대 코드 완료(DDL 실행 완료 · 배포 대기)
+> 호출어 **"영업 아웃리치"** → **[FEATURE-SALES-OUTREACH.md](../docs/FEATURE-SALES-OUTREACH.md)가 전부 소유**(불변 51 §2 · 파일별 §3 · ENV §4 · 이력 §5) · 0923 근거 = [직접 발송 설계서](../docs/2026-09-23-outreach-direct-send-design.md) · 배포 = **[OPS §2-2-E ⑨](OPS.md)**
+> ⛔ 요지: 발송 코어 1곳(승인 기록 필수 · 진입점 3) · 수신처 = 행 값(요청 인자 0) · 한 트랜잭션(수신거부·상한·같은 회사 UNIQUE) · 확인한 판만 · 법정 footer 는 조립 시점 · 네이버 스토어 fetch 0(0923 재실측 429) · 담당자 주소 크롤 추출 0
+> 잔여 = 배포 → ENV(`OUTREACH_HASH_SECRET` 생성 · `OUTREACH_DIRECT_STAGE=0`) → OPS ⑨ 실측 → **법 판단 서면(Harold)** → 단계 1 → Codex 리뷰(DDL 축 · Harold /codex:review) · 카탈로그 DM 수정 항목(Harold 접수 대기)
 
 ### 참조 골격 학습층 — **0903 코드 완료·배포 대기**(브레인스토밍 5역할 수렴 · 신규 DDL 0)
 > 호출어 **"참조 골격"** → **[설계서](../docs/2026-09-03-reference-skeleton-learning-design.md)가 전부 소유**(불변 §2 · 계약 §5 · 배선 §6 · 승격 §7 · 화면 §8 · 테스트 §9 · 순서 §10 · 결재 §12 · 구현 §16).

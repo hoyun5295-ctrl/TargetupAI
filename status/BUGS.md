@@ -55,6 +55,22 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-0923-6 단문(SMS)에 제목이 실려 나간다 — 직접발송 화면에서 LMS→SMS 로 바꿔도 제목 값이 남아 title_str 에 적재 (🟡 0923 수정 · **DDL 0** · 미배포 · 실측 대기) · 2026-09-22 Harold 접수(비토 콘솔 SMS 에 제목 말풍선)
+
+- **실측(0922 게이트웨이 세션)**: `hanjul02` SMS 142,457건 중 **7,974건**(`btrim(title) <> ''`) · 발신번호 둘 · 캠페인 `252a0573` = `send_type='direct'`·`message_type='SMS'` 인데 제목 저장. 게이트웨이 화면 표시는 0922 에 따로 닫음.
+- **원인(코드)**: 화면 제목 칸은 LMS·MMS 에만 그리는데 유형 전환 때 값을 비우지 않는다. 서버 적재가 유형을 보지 않고 그 값을 싣는다. 판정 CT 가 없어 문안 수정(`campaigns.ts` 문안 수정 경로)·스팸필터만 인라인으로 막고 있었다. ⚠ 메모의 `campaigns.ts:2410`(`/direct-send`)은 직접타겟발송·AI Operator 경로이고, **직접발송 화면의 실제 경로는 `/direct-send/commit` → `direct-send-processor.ts`** 다.
+- **수정**: 판정 CT 신설 `utils/qtmsg-type.ts` `subjectForMsgType`(단문 = toQtmsgType 'S' 면 빈 값 · 모르는 유형은 그대로) → `direct-send-processor.ts`·`campaigns.ts /direct-send` 두 적재 경로 · 화면 `Dashboard.tsx` commit 전송 값(단문이면 제목 빼기 · 입력 값은 지우지 않는다 → LMS 로 돌아오면 남아 있다) · `DirectSendPanel.tsx` 링크 검사가 단문의 숨은 제목으로 막지 않게(글자 검사와 같은 축).
+- **계약**: `utils/qtmsg-type-subject.test.ts`(판정 + 청크 적재 SMS 행 title_str 빈 값 · LMS 그대로 · 광고 LMS `(광고)` 그대로 · 옛 코드에서 실패 확인). 백엔드 vitest 358파일 5,458건 · tsc 0(백·프).
+- **실측(배포 뒤)**: 직접발송에서 LMS 제목 입력 → SMS 로 바꿈 → 테스트 번호 1건 → 큐 행 `msg_type='S'`·`title_str=''` · 캠페인 `subject` 빈 값. 그 뒤 `hanjul02` SMS `btrim(title) <> ''` 가 더 늘지 않는지.
+- **남은 것(추가 과제 · 기록만)**: 같은 구멍이 다른 경로에도 있다(조사 = 테스트발송·자동발송·여정·대행 담당자 테스트 · 발송 CT `prepareSendMessage` 가 SMS 제목을 그대로 돌려준다) — 전 경로를 CT 한 자리에서 막는 것은 공용 CT 수정이라 별도 과제. 이미 저장된 SMS 제목(캠페인·큐 이력)은 코드로 지워지지 않는다.
+
+### 🟡 B-0923-7 테스트 라인그룹이 {16,10} 이 된 뒤 시스템 알림이 16·10 을 번갈아 간다 (🟡 0923 수정 · **DDL 0** · 미배포) · 2026-09-23 게이트웨이 세션 인계(hanjul-04 = `SMSQ_SEND_16` 시스템 발송 전용)
+
+- **원인(코드)**: `internal-alert.ts`(빌드·dist 사고 알림)가 테스트 라인 배열을 통째로 `bulkInsertSmsQueue` 에 넘겨 전역 라운드로빈으로 16·10 을 번갈아 갔다. 인계가 함께 지목한 `campaigns.ts` 브랜드 테스트는 `insertBrandQueue` 가 첫 테이블만 써서 번갈아 가지 않았다(암묵 계약에 기대는 상태).
+- **수정**: CT 신설 `sms-queue.ts` `getTestSendTable`(테스트 그룹 첫 테이블 = 적재 · insertTestSmsQueue·MFA 와 같은 자리 · 배열 전체는 조회·정산용) → `internal-alert.ts` 한 테이블 · 브랜드 테스트는 같은 테이블을 명시.
+- **계약**: `routes/internal-alert-test-line.test.ts`(첫 테이블 · 두 번 보내도 같은 테이블 · 옛 코드에서 실패 확인).
+- **남은 것(기록만)**: 16 이 테스트·bito 두 그룹에 있어 회사별 전 라인 합집합(`getCompanyAllLiveSmsTables`)에 들어간다 → 16 에 쌓이는 담당자 테스트가 고객 360 타임라인에 보일 수 있다(미검증) · `BULK_ONLY_TABLES` 제외 목록에 16 없음 · `manage-stats.ts` 테스트 상세가 첫 테이블만 본다.
+
 ### 🟠 B-0923-5 SNS 발행 워커 1차-A 결함 3건 — 1차-B(영상) 설계 중 코드 대조로 발견 (🟡 0923 수정 · **DDL 0** · 미배포 · 실측 대기) · 게시 실측 전이라 운영 피해 0
 
 - **D1 처리 5분 넘은 컨테이너가 영구히 「올리는 중」**: 5분 폴링 상한을 넘기면 `submitted` + 컨테이너 있음 + 게시 id 없음으로 두는데, 발행 워커는 `scheduled` 만 선점하고 대조 워커는 게시 id 있는 행만 본다 → 아무도 다시 잡지 않는다. 릴스는 반드시 밟는다. **수정** = tick 당 확인 1회 · `next_attempt_at` 으로 미룸 · 재개 선점(`submitted` + 게시 id 없음 + 컨테이너 있음 + 시각 도래) · 게시 직전 기록이 `next_attempt_at` 을 비워 게시까지 간 행은 재개 대상에서 빠진다(이중 게시 차단 · stage 는 읽지 않는다) · 처리 30분 초과 = 실패.

@@ -105,11 +105,21 @@ async function sweepExpired(): Promise<void> {
  *  발송 여부는 알 수 없으므로 'unknown'으로 정직하게 복구한다(발송을 대신 하지 않는다 · 판단은 사람). */
 async function sweepStuckSending(): Promise<void> {
   try {
+    // ★ 2026-09-23 직접 발송 원장(sales_outreach_sends)의 sending 도 **같은 한 문장**에서 unknown 으로(회의론자 6 · 잡만 풀고 원장이 sending 으로 남으면 같은 회사 재발송이 영구 잠긴다).
+    //   원장 쪽은 그 잡이 풀렸거나, 원장 행 자체가 임계보다 오래된 경우(잡 기록이 먼저 어긋난 경우)를 함께 본다.
     const r = await query(
-      `UPDATE sales_outreach_jobs SET mail_result = 'unknown'
-        WHERE stage = 'ready' AND mail_result = 'sending'
-          AND lock_at < NOW() - ($1 || ' minutes')::interval
-        RETURNING id`,
+      `WITH j AS (
+         UPDATE sales_outreach_jobs SET mail_result = 'unknown'
+          WHERE stage = 'ready' AND mail_result = 'sending'
+            AND lock_at < NOW() - ($1 || ' minutes')::interval
+          RETURNING id
+       ), s AS (
+         UPDATE sales_outreach_sends SET outcome = 'unknown', finished_at = NOW(), detail = '발송 도중 끊김(도착 여부 모름)'
+          WHERE outcome = 'sending'
+            AND (job_id IN (SELECT id FROM j) OR created_at < NOW() - ($1 || ' minutes')::interval)
+          RETURNING id
+       )
+       SELECT id FROM j`,
       [ZOMBIE_MINUTES],
     );
     for (const row of r.rows) {

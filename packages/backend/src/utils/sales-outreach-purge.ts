@@ -74,5 +74,7 @@ export async function purgeOutreachJobArtifacts(jobId: string, companyId: string
     for (const p of (Array.isArray(media.products) ? media.products : [])) if (unlinkPublicImage(String(p?.image_url || ''))) filesDeleted += 1;
     if (media.logo?.url && unlinkPublicImage(String(media.logo.url))) filesDeleted += 1;
   }
+  // ★ 2026-09-23 담당자 개인정보(주소·이름·근거)는 파기 때 비운다(불변 49) — 발송 원장·수신거부 원장은 해시만이라 남는다(재발송 차단·해지 링크 검증의 원천)
+  await query(`UPDATE sales_outreach_jobs SET contact_email = NULL, contact_name = NULL, contact_basis = NULL WHERE id = $1`, [jobId]);
   return { dmsStopped, filesDeleted };
 }

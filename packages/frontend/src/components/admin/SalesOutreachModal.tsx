@@ -14,13 +14,17 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, RefreshCw, Send, Check, ExternalLink, Pencil, Upload, Download, List, Search, EyeOff, Eye, Mail, ChevronDown, ChevronUp, Smartphone, Monitor, Trash2, CheckSquare, Square } from 'lucide-react';
+import { X, Loader2, RefreshCw, Send, Check, ExternalLink, Pencil, Upload, Download, List, Search, EyeOff, Eye, Mail, ChevronDown, ChevronUp, Smartphone, Monitor, Trash2, CheckSquare, Square, LayoutGrid, FileUp } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../ConfirmModal';
 import { useToast } from '../ToastProvider';
+// ★ 2026-09-23 담당자 직접 발송 · 작업대(설계서 docs/2026-09-23-outreach-direct-send-design.md §12) — 공용 조각은 한 파일
+import OutreachDirectPanel from './OutreachDirectPanel';
+import SalesOutreachWorkbench from './SalesOutreachWorkbench';
+import { outreachFetch as authFetch, EDIT_REASON_OPTIONS, fmtDateTime, type OutreachDirectInfo } from './sales-outreach-shared';
 
 interface IndustryOption { code: string; label: string }
 
-interface OutreachAsset { kind: string; payload: any; created_at: string; regen_count?: number }
+interface OutreachAsset { id?: string; kind: string; payload: any; created_at: string; regen_count?: number }
 
 interface OutreachJob {
   id: string;
@@ -65,6 +69,8 @@ interface OutreachJob {
   } | null;
   /** ★ S4 같은 주소(중복 키)로 등록된 다른 건 수(미파기) */
   dup_count?: number;
+  /** ★ 2026-09-23 담당자 직접 발송 정보(서버 계산 · 조회 실패 = null) */
+  direct?: OutreachDirectInfo | null;
 }
 
 const ACTIVE_STAGES = ['queued', 'crawling', 'analyzing', 'producing_copy', 'producing_image', 'producing_dm', 'producing_email'];
@@ -119,10 +125,6 @@ const QUALITY_LABEL: Record<string, (v?: number) => string> = {
   BRAND_COLOR_FALLBACK: () => '홈페이지에서 브랜드 색을 읽지 못해 무채색 주색으로 만들었습니다',
   BLOCK_MINIMA_SHORT: (v) => `블록 ${v ?? 0}곳의 글자·상품 수가 최소 요건에 못 미칩니다(경고만)`,
 };
-/** ★ v3 사람 수정 사유 5값(서버 화이트리스트와 같은 값 · 학습 원장) */
-const EDIT_REASON_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'no_text', label: '설명 글자가 없음' }, { value: 'duplicate', label: '중복' }, { value: 'blurry', label: '흐림·품질' }, { value: 'wrong', label: '내용 틀림' }, { value: 'tone', label: '톤이 다름' },
-];
 const SECTION_TYPE_LABEL: Record<string, string> = {
   header: '머리말', hero: '메인', text_card: '텍스트 카드', product_carousel: '상품 묶음', gallery: '갤러리', coupon: '쿠폰',
   countdown: '카운트다운', cta: '버튼', footer: '꼬리말', promo_code: '프로모션 코드', reviews: '후기', store_info: '매장 정보',
@@ -151,28 +153,12 @@ function hostOfUrl(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
 }
 
-async function authFetch(path: string, init?: RequestInit): Promise<Response> {
-  const token = localStorage.getItem('token');
-  return fetch(path, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(init?.headers || {}),
-    },
-  });
-}
-
 function latestAssetOf(job: OutreachJob | null, kind: string): any | null {
   if (!job?.assets) return null;
   const list = job.assets.filter((a) => a.kind === kind);
   return list.length ? list[list.length - 1].payload : null;
 }
 
-function fmtDateTime(s: string | null | undefined): string {
-  if (!s) return '';
-  return String(s).slice(0, 16).replace('T', ' ');
-}
 
 export default function SalesOutreachModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
@@ -193,6 +179,22 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [extraNotes, setExtraNotes] = useState('');
   const [notesOpen, setNotesOpen] = useState(false);
   const [dupState, setDupState] = useState<{ existingJobId: string; existingStage?: string } | null>(null);
+  // ★ 2026-09-23 담당자(사람이 넣은 값만) · 네이버 스토어 주소(저장만) · 수신 근거 선택지 · 직접 발송 결재 단계(ENV)
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [contactBasis, setContactBasis] = useState('');
+  const [naverStoreUrl, setNaverStoreUrl] = useState('');
+  const [basisPresets, setBasisPresets] = useState<string[]>([]);
+  const [testAddresses, setTestAddresses] = useState<string[]>([]);
+  const [directEnvStage, setDirectEnvStage] = useState(0);
+  // ★ 2026-09-23 일괄 옵션(행사 자동 확정 기본 켬 · 묶음 자동 발송 승인은 단계 3 에서만 보인다)
+  const [bulkAutoConfirm, setBulkAutoConfirm] = useState(true);
+  const [bulkAutoSend, setBulkAutoSend] = useState(false);
+  // ★ 2026-09-23 작업대 · 작업대에서 연 건의 이전·다음 · 이 모달 위에 뜬 창(ESC 가 모달을 닫지 않게)
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  const [navIds, setNavIds] = useState<string[]>([]);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [storeBusy, setStoreBusy] = useState(false);
 
   // 확인 단계 선택 — ★ v3 행사는 다중 선택(≤3 · 누른 순서 = DM 등장 순서) · 'manual' 은 직접 붙여넣기 · 'none' 은 선택 0
   const [eventChoice, setEventChoice] = useState<string>('none'); // 'none' | 'manual'
@@ -237,7 +239,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [cleanupMode, setCleanupMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkSummary, setBulkSummary] = useState<{ accepted: number; rejected: Array<{ label: string; reason: string }>; overflow?: number } | null>(null);
+  const [bulkSummary, setBulkSummary] = useState<{ accepted: number; rejected: Array<{ label: string; reason: string }>; overflow?: number; warnings?: Array<{ label: string; reason: string }> } | null>(null);
 
   // 요청 순번(늦은 응답 폐기) · 언마운트 abort · 목록 활성 판정 ref
   const reqSeq = useRef(0);
@@ -249,14 +251,15 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   // ESC 닫기(캡처 단계 · 부모로 전파 차단) — 확인 모달이 떠 있으면 그쪽이 우선
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !confirmState) {
+      // 작업대·발송 확인 창이 위에 떠 있으면 그 창이 ESC 를 가진다
+      if (e.key === 'Escape' && !confirmState && !workbenchOpen && !overlayOpen) {
         e.stopPropagation();
         onClose();
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, confirmState]);
+  }, [onClose, confirmState, workbenchOpen, overlayOpen]);
 
   useEffect(() => () => { abortRef.current?.abort(); }, []);
 
@@ -312,6 +315,9 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
         const d = await r.json().catch(() => ({}));
         if (r.ok && Array.isArray(d?.mailTo)) setMailTo(d.mailTo.map((x: unknown) => String(x)));
         if (r.ok && Array.isArray(d?.testDomains)) setTestDomains(d.testDomains.map((x: unknown) => String(x)));
+        if (r.ok && Array.isArray(d?.testAddresses)) setTestAddresses(d.testAddresses.map((x: unknown) => String(x)));
+        if (r.ok && Array.isArray(d?.contactBasisPresets)) setBasisPresets(d.contactBasisPresets.map((x: unknown) => String(x)));
+        if (r.ok && d?.direct) setDirectEnvStage(Number(d.direct.envStage) || 0);
       } catch { /* 문구 폴백 */ }
       try {
         const r = await authFetch('/api/sales-outreach/jobs/latest');
@@ -411,6 +417,9 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     try {
       const token = localStorage.getItem('token');
       const fd = new FormData();
+      // ★ 2026-09-23 일괄 옵션(multer 가 파일보다 먼저 받도록 앞에) — 행사 자동 확정 · 묶음 자동 발송 승인(단계 3 · 서버가 다시 판정)
+      fd.append('autoConfirm', bulkAutoConfirm ? '1' : '0');
+      fd.append('autoSend', bulkAutoSend && bulkAutoConfirm ? '1' : '0');
       fd.append('file', file);
       const r = await fetch('/api/sales-outreach/jobs/bulk', {
         method: 'POST',
@@ -425,9 +434,10 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
         }
         return;
       }
-      setBulkSummary({ accepted: d.accepted || 0, rejected: Array.isArray(d.rejected) ? d.rejected : [], overflow: Number(d.rejectedOverflow) || 0 });
+      setBulkSummary({ accepted: d.accepted || 0, rejected: Array.isArray(d.rejected) ? d.rejected : [], overflow: Number(d.rejectedOverflow) || 0, warnings: Array.isArray(d.warnings) ? d.warnings : [] });
       toast.success(`${d.accepted || 0}곳을 등록했습니다. 순서대로 자동 처리됩니다.`);
-      setListMode(true);
+      // ★ 2026-09-23 일괄 등록 뒤에는 작업대에서 묶음 단위로 본다
+      setWorkbenchOpen(true);
     } catch {
       setNotice('업로드 요청에 실패했습니다. 네트워크를 확인해주세요.');
     } finally {
@@ -481,7 +491,12 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     try {
       const r = await authFetch('/api/sales-outreach/jobs', {
         method: 'POST',
-        body: JSON.stringify({ companyName, industryCategory: industryCode || null, homepageUrl, extraNotes: extraNotes.trim() || null, force }),
+        body: JSON.stringify({
+          companyName, industryCategory: industryCode || null, homepageUrl, extraNotes: extraNotes.trim() || null, force,
+          // ★ 2026-09-23 담당자(사람이 넣은 값) · 네이버 스토어 주소(저장만)
+          contactEmail: contactEmail.trim() || null, contactName: contactName.trim() || null, contactBasis: contactBasis.trim() || null,
+          naverStoreUrl: naverStoreUrl.trim() || null,
+        }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -591,6 +606,44 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
       else setNotice(res.data?.detail || '검수 메일 발송 결과를 확인하지 못했습니다.');
       await loadJob(job.id);
     }
+  };
+
+  /** ★ 2026-09-23 네이버 스토어 기획전 저장본(사람이 브라우저에서 저장한 .html) → 서버가 파일만 읽어 행사 문구를 돌려준다 → 붙여넣기 칸을 채운다(네트워크 0 · 면허 없음) */
+  const uploadStorePage = async (file: File | null) => {
+    if (!job || !file) return;
+    setStoreBusy(true);
+    setNotice(null);
+    try {
+      const token = localStorage.getItem('token');
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch(`/api/sales-outreach/jobs/${job.id}/store-page`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setNotice(d?.error || '파일을 읽지 못했습니다.'); return; }
+      setEventChoice('manual'); setEventPicks([]);
+      setManualEventText(String(d.text || ''));
+      toast.success(`저장한 페이지에서 행사 문구 ${Number(d.chars) || 0}자를 가져왔습니다. 확인 후 제작을 시작하세요(혜택 숫자는 직접 입력 자리로 바뀝니다).`);
+    } catch {
+      setNotice('업로드 요청에 실패했습니다. 네트워크를 확인해주세요.');
+    } finally {
+      setStoreBusy(false);
+    }
+  };
+
+  /** ★ 2026-09-23 작업대에서 연 건 — 같은 줄의 순서를 이전·다음으로 */
+  const openFromWorkbench = (id: string, ids: string[]) => {
+    setWorkbenchOpen(false);
+    setListMode(false);
+    setNavIds(ids);
+    resetInputState();
+    loadJob(id);
+  };
+  const navIndex = job ? navIds.indexOf(job.id) : -1;
+  const goNav = (delta: -1 | 1) => {
+    const next = navIds[navIndex + delta];
+    if (!next) return;
+    resetInputState();
+    loadJob(next);
   };
 
   const saveCopy = async () => {
@@ -903,9 +956,21 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
         <div className="px-4 md:px-6 py-4 border-b border-gray-200/70 flex items-center justify-between shrink-0 gap-2">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-gray-900">AI 영업</h2>
-            <p className="text-xs text-gray-500 mt-0.5 truncate">업체 홈페이지를 읽고 맞춤 제안 세트를 만들어 검수 후 회사 수신함으로 보냅니다</p>
+            <p className="text-xs text-gray-500 mt-0.5 truncate">업체 홈페이지를 읽고 맞춤 제안 세트를 만들어, 확인한 뒤 담당자 또는 회사 수신함으로 보냅니다</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {/* ★ 2026-09-23 작업대에서 연 건 — 같은 줄 이전·다음 */}
+            {!listMode && job && navIndex >= 0 && navIds.length > 1 && (
+              <span className="flex items-center gap-1 text-xs text-gray-500">
+                <button onClick={() => goNav(-1)} disabled={navIndex <= 0} className="px-2 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-30">이전</button>
+                <span>{navIndex + 1}/{navIds.length}</span>
+                <button onClick={() => goNav(1)} disabled={navIndex >= navIds.length - 1} className="px-2 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-30">다음</button>
+              </span>
+            )}
+            <button onClick={() => setWorkbenchOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50">
+              <LayoutGrid className="w-4 h-4" /> 작업대
+            </button>
             <button onClick={() => { setListMode(!listMode); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border ${
                 listMode ? 'border-blue-200 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
@@ -950,6 +1015,13 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
               <ul className="mt-1 text-xs text-blue-600 space-y-0.5">
                 {bulkSummary.rejected.slice(0, 6).map((r, i) => <li key={i}>{r.label}: {r.reason}</li>)}
                 {bulkSummary.rejected.length + (bulkSummary.overflow || 0) > 6 && <li>외 {bulkSummary.rejected.length + (bulkSummary.overflow || 0) - 6}건</li>}
+              </ul>
+            )}
+            {/* ★ 2026-09-23 등록은 됐지만 칸 하나를 비운 줄(거절과 별도) */}
+            {Array.isArray(bulkSummary.warnings) && bulkSummary.warnings.length > 0 && (
+              <ul className="mt-1 text-xs text-amber-700 space-y-0.5">
+                {bulkSummary.warnings.slice(0, 6).map((w, i) => <li key={i}>{w.label}: {w.reason}</li>)}
+                {bulkSummary.warnings.length > 6 && <li>외 {bulkSummary.warnings.length - 6}건</li>}
               </ul>
             )}
           </div>
@@ -1147,6 +1219,27 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                   placeholder="예: www.brand.co.kr"
                   className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
+              {/* ★ 2026-09-23 네이버 스토어(저장만 · 우리 서버는 스토어를 읽지 못해 홈페이지로 만든다) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">네이버 스토어 주소 <span className="text-gray-400 font-normal">(선택 · 저장만 하고 지금은 읽지 않습니다)</span></label>
+                <input value={naverStoreUrl} onChange={(e) => setNaverStoreUrl(e.target.value)}
+                  placeholder="예: brand.naver.com/브랜드아이디"
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              {/* ★ 2026-09-23 담당자(사람이 확인한 주소만 · 근거와 함께) — 비워도 제작은 되고 발송만 잠긴다 */}
+              <div className="rounded-xl border border-gray-200/70 p-3 space-y-2">
+                <div className="text-sm font-medium text-gray-700">담당자 <span className="text-gray-400 font-normal text-xs">(선택 · 비워도 제작은 되고, 담당자에게 보낼 때 적으면 됩니다)</span></div>
+                <input value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="담당자 이메일"
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input value={contactName} onChange={(e) => setContactName(e.target.value.slice(0, 40))} placeholder="담당자명(메일 첫 줄 호칭)"
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <input value={contactBasis} onChange={(e) => setContactBasis(e.target.value.slice(0, 200))} list="so-basis-new" placeholder="주소를 알게 된 근거"
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <datalist id="so-basis-new">{basisPresets.map((b) => <option key={b} value={b} />)}</datalist>
+                </div>
+                <p className="text-[11px] text-gray-400">명함 · 기존 대화 · 제휴 문의 페이지처럼 직접 확인한 주소만 적어주세요. 홈페이지에서 주소를 자동으로 가져오지 않습니다.</p>
+              </div>
               <div>
                 <button onClick={() => setNotesOpen(!notesOpen)} className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900">
                   {notesOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />} 추가 정보 <span className="text-gray-400 text-xs">(선택 · 담당자 이름·요청 사항·행사 메모)</span>
@@ -1180,7 +1273,20 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
               {/* 대량 등록 — 엑셀 양식(옆에 작성 예시 포함)으로 한 번에 최대 20곳 */}
               <div className="mt-6 pt-5 border-t border-gray-200/70">
                 <div className="text-sm font-medium text-gray-700 mb-1">여러 업체 한번에 등록</div>
-                <p className="text-xs text-gray-500 mb-3">엑셀 양식을 받아 작성한 뒤 올리면 한 번에 최대 20곳을 순서대로 자동 처리합니다. 진행 상황은 [진행 목록]에서 봅니다.</p>
+                <p className="text-xs text-gray-500 mb-3">엑셀 양식(업체명 · 홈페이지 · 네이버 스토어 · 담당자 이메일 · 담당자명 · 수신 근거)을 받아 작성한 뒤 올리면 한 번에 최대 20곳을 순서대로 자동 처리합니다. 진행 상황은 [작업대]에서 봅니다.</p>
+                {/* ★ 2026-09-23 일괄 옵션 */}
+                <div className="mb-3 space-y-1.5 text-xs text-gray-700">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input type="checkbox" checked={bulkAutoConfirm} onChange={(e) => { setBulkAutoConfirm(e.target.checked); if (!e.target.checked) setBulkAutoSend(false); }} className="mt-0.5 accent-blue-600" />
+                    <span>행사 자동 확정 <span className="text-gray-400">(홈페이지에서 진행 중으로 확인된 행사만 · 없으면 그 건은 확인 대기에서 멈춥니다)</span></span>
+                  </label>
+                  {directEnvStage >= 3 && (
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input type="checkbox" checked={bulkAutoSend} disabled={!bulkAutoConfirm} onChange={(e) => setBulkAutoSend(e.target.checked)} className="mt-0.5 accent-blue-600" />
+                      <span>이 묶음 자동 발송 승인 <span className="text-gray-400">(발송 단계 3일 때만 · 조건을 다 채운 건만 담당자에게 자동 발송 · 10%는 사후 확인)</span></span>
+                    </label>
+                  )}
+                </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <button onClick={downloadTemplate}
                     className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50">
@@ -1334,6 +1440,13 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                         rows={4} placeholder="홈페이지의 행사 안내 문구를 그대로 붙여넣어 주세요"
                         className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                     )}
+                    {/* ★ 2026-09-23 네이버 스토어 기획전 저장본 — 브라우저에서 "웹페이지 전체"로 저장한 파일을 올리면 행사 문구로 칸을 채운다(서버는 스토어에 접속하지 않는다) */}
+                    <label className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs cursor-pointer ${storeBusy ? 'border-gray-200 text-gray-400' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                      {storeBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
+                      네이버 스토어 기획전 페이지를 저장한 파일(.html)로 채우기
+                      <input type="file" accept=".html,.htm" className="hidden" disabled={storeBusy}
+                        onChange={(e) => { uploadStorePage(e.target.files?.[0] || null); e.target.value = ''; }} />
+                    </label>
                   </div>
                   {meta && (
                     <p className="mt-3 text-[11px] text-gray-400">후보 {Number(meta.rawCandidates) || 0}건 중 {Number(meta.matched) || 0}건이 원문과 일치했습니다{Number(meta.markerDropped) ? ` · 종료 표현으로 제외 ${meta.markerDropped}건` : ''}{job.brand_profile?.subPageUrl ? ' · 행사 페이지 1곳을 함께 읽었습니다' : ''}</p>
@@ -1774,10 +1887,26 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                           )}
                         </div>
                       )}
+                      {/* ★ 2026-09-23 담당자 직접 발송(담당자 카드 · 이 판으로 확인 · 잠금 사유 · 보내기) */}
+                      <OutreachDirectPanel
+                        jobId={job.id}
+                        companyName={job.company_name}
+                        stage={stage}
+                        mailResult={job.mail_result}
+                        direct={job.direct || null}
+                        latestEmailAssetId={(() => { const rows = (job.assets || []).filter((a) => a.kind === 'email_html'); return rows.length ? String(rows[rows.length - 1].id || '') || null : null; })()}
+                        basisPresets={basisPresets}
+                        onRefresh={() => loadJob(job.id)}
+                        onNotice={(m) => setNotice(m)}
+                        onToast={(m) => toast.success(m)}
+                        onConfirm={(st) => setConfirmState(st)}
+                        onRebuildEmail={rebuildEmail}
+                        onOverlay={setOverlayOpen}
+                      />
                       {/* 검수 메일 — 우리 담당자에게 먼저(허용 도메인만) */}
                       <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4 space-y-2">
                         <h4 className="text-xs font-semibold text-gray-500 flex items-center gap-1"><Mail className="w-3.5 h-3.5" /> 검수 메일 보내기</h4>
-                        <p className="text-[11px] text-gray-400">발송본과 같은 메일을 담당자에게 먼저 보내 확인받습니다{testDomains.length ? ` (${testDomains.map((d) => '@' + d).join(', ')} 주소만)` : ''}. 발송 상태는 바뀌지 않습니다.</p>
+                        <p className="text-[11px] text-gray-400">발송본과 같은 메일을 우리 쪽 주소로 먼저 보내 확인합니다{testDomains.length || testAddresses.length ? ` (${[...testDomains.map((d) => '@' + d), ...testAddresses].join(', ')}만)` : ''}. 발송 상태는 바뀌지 않고, 도착하면 그 판을 확인한 것으로 기록합니다.</p>
                         <div className="flex items-center gap-2">
                           <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder={testDomains[0] ? `이름@${testDomains[0]}` : '담당자 이메일'}
                             onKeyDown={(e) => { if (e.key === 'Enter') sendTest(); }}
@@ -1838,7 +1967,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                             {job.forwarded_at && <p className="text-xs text-gray-400">업체 전달 표시됨 · 공개 샘플 기간이 연장되었습니다.</p>}
                           </>
                         )}
-                        <button onClick={() => { setJob(null); setLastSummary(job); setCompanyName(''); setHomepageUrl(''); setIndustryCode(''); setExtraNotes(''); resetInputState(); }}
+                        <button onClick={() => { setJob(null); setLastSummary(job); setCompanyName(''); setHomepageUrl(''); setIndustryCode(''); setExtraNotes(''); setContactEmail(''); setContactName(''); setContactBasis(''); setNaverStoreUrl(''); setNavIds([]); resetInputState(); }}
                           className="w-full px-4 py-2 rounded-lg border border-blue-200 text-sm text-blue-600 hover:bg-blue-50">
                           새 업체 시작
                         </button>
@@ -1857,6 +1986,8 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
         </div>
       </div>
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+      {/* ★ 2026-09-23 작업대(전체 화면 · 이 모달 위) */}
+      {workbenchOpen && <SalesOutreachWorkbench onClose={() => setWorkbenchOpen(false)} onOpenJob={openFromWorkbench} />}
     </div>,
     document.body,
   );

@@ -25,6 +25,7 @@ import chargeApproveRoutes from './routes/charge-approve';  // ★ 2026-08-28(3)
 import { startAgentChargeReconciler } from './utils/agent-charge-reconciler';  // ★ 2026-08-29 충전 주문 대사 워커
 import salesOutreachRoutes from './routes/sales-outreach'; // ★ 2026-08-24 AI 영업 아웃리치 (슈퍼관리자 ceo 전용 · docs/2026-07-31-ai-sales-outreach-design.md §15)
 import outreachPublicRoutes from './routes/outreach-public'; // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증 · noindex · 만료)
+import { unsubscribeRouter as outreachUnsubscribeRoutes } from './routes/outreach-public'; // ★ 2026-09-23 담당자 직접 발송 수신거부(무인증 · GET 확인 · POST 기록)
 import { startAgencySendWorker } from './utils/agency-send-worker';
 import { startSnsTokenWorker } from './utils/sns-token-worker';   // ★ 2026-09-20 SNS 토큰 갱신(S1)
 import { startSnsPublishWorker } from './utils/sns-publish-worker';       // ★ 2026-09-21 SNS 발행(S3)
@@ -326,6 +327,7 @@ const outreachPublicLimiter = rateLimit({
   message: '<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>안내</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;color:#333"><p>요청이 너무 잦습니다. 잠시 후 다시 열어주세요.</p></body></html>',
 });
 app.use('/api/outreach/v', outreachPublicLimiter);
+app.use('/api/outreach/u', outreachPublicLimiter); // ★ 2026-09-23 수신거부 경로도 같은 버킷(IP당 분 60)
 
 // ★ D130: IMC 웹훅은 HMAC 검증을 위해 raw body 필요
 //    express.json()이 먼저 파싱하면 rawBody 손실되므로 이 경로만 선처리
@@ -439,6 +441,7 @@ app.use('/api/agency-approve', agencyApproveRoutes); // ★ 2026-08-25 대행발
 app.use('/api/charge-approve', chargeApproveRoutes); // ★ 2026-08-28(3) 충전 승인 링크(무인증 · 토큰 = 문자 안 주소)
 app.use('/api/sales-outreach', salesOutreachRoutes); // ★ 2026-08-24 AI 영업 아웃리치(슈퍼관리자 ceo 전용)
 app.use('/api/outreach/v', outreachPublicRoutes); // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증)
+app.use('/api/outreach/u', outreachUnsubscribeRoutes); // ★ 2026-09-23 담당자 직접 발송 수신거부(무인증)
 app.use('/api/insight', insightRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);

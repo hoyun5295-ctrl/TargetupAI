@@ -624,7 +624,8 @@ export default function Dashboard() {
         stagingId,
         msgType: isAlimtalk ? 'LMS' : directMsgType,
         sendChannel: isAlimtalk ? 'alimtalk' : 'sms',
-        subject: directSubject,
+        // ★2026-09-22 단문 제목: 제목 칸은 LMS·MMS 에만 보이는데 SMS 로 바꿔도 값이 남는다 — 단문이면 싣지 않는다(서버 subjectForMsgType 와 같은 판정)
+        subject: (!isAlimtalk && directMsgType === 'SMS') ? '' : directSubject,
         // ★ 알림톡 빈 본문 fix (2026-06-01): 모달은 kakaoMessage를 채우지 않음 → 템플릿 본문(content)으로 발송(타겟 경로와 동일). 빈 본문→카카오 반려→불필요 대체 차단.
         message: isAlimtalk ? (kakaoSelectedTemplate?.content || '') : directMessage,
         callback: isAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),

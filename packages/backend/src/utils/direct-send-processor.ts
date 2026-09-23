@@ -14,6 +14,7 @@ import { prepareSendMessage, replaceVariables } from './messageUtils';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
 import { bulkInsertSmsQueue, insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType } from './sms-queue';
+import { subjectForMsgType } from './qtmsg-type';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑 — CT-12 단일 진입점
 import { buildBrandQueuePayload, resolveBrandFallback,
          appendAiImageNotice, BUBBLE_TYPES } from './brand-message';
@@ -145,7 +146,8 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         {
           msgType: p.msgType, isAd: p.finalIsAd, opt080Number: p.opt080,
           addressBookFields: toAddressBookFields(r),
-          subject: p.subject || '', skipNumberFormatting: true,
+          // ★2026-09-22 단문 제목: 단문이면 제목을 싣지 않는다(판정 = subjectForMsgType · 행 msg_type 과 같은 축)
+          subject: subjectForMsgType(p.msgType, p.subject), skipNumberFormatting: true,
         }
       );
       const recipientCallback = resolveCustomerCallback(r, p.useIndividualCallback, p.callback);

@@ -21,7 +21,14 @@ import {
   // ★ v3 회신 문장 · 레시피 승격
   editOutreachReplyLine, promoteOutreachRecipe,
 } from '../utils/sales-outreach-jobs';
-import { outreachMailTo, outreachMailToList, isOutreachMailerReady, outreachTestMailDomains } from '../utils/outreach-mailer';
+import { outreachMailTo, outreachMailToList, isOutreachMailerReady, outreachTestMailDomains, outreachTestMailAddresses } from '../utils/outreach-mailer';
+// ★ 2026-09-23 담당자 직접 발송(설계서 docs/2026-09-23-outreach-direct-send-design.md) — 효과 함수는 전부 그 파일 안에서 assertOperator 를 먼저 지난다
+import {
+  getOutreachDirectInfo, setOutreachContact, reviewOutreachJob, holdOutreachJob, ackOutreachContactDomain, reopenOutreachContact,
+  sendOutreachDirectForJob, sendOutreachDirectBulk, autoSendOutreachJob, getOutreachDirectStatus, resumeOutreachAutoSend,
+  setOutreachSendReviewFlag, extractOutreachStorePageText, getOutreachWorkbench,
+} from '../utils/sales-outreach-direct-jobs';
+import { directStageEnv, outreachHashSecret, CONTACT_BASIS_PRESETS } from '../utils/sales-outreach-direct';
 import { getOutreachContext } from '../utils/sales-outreach-produce';
 import { buildOutreachTemplateXlsx, parseOutreachBulkXlsx } from '../utils/sales-outreach-bulk';
 import { XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
@@ -45,7 +52,7 @@ function respondError(res: Response, err: any, context: string): void {
     console.error(`[sales-outreach] ${context} — DB 마이그레이션 필요:`, err?.message);
     res.status(503).json({
       code: 'DB_MIGRATION_PENDING',
-      error: 'DB 마이그레이션 필요: sales_outreach_jobs·sales_outreach_assets 테이블(및 fail_detail 컬럼) 생성을 요청해주세요.',
+      error: 'DB 마이그레이션 필요: sales_outreach_jobs·sales_outreach_assets·sales_outreach_sends·sales_outreach_suppressions·sales_outreach_controls 테이블(및 fail_detail·contact 칸) 생성을 요청해주세요.',
     });
     return;
   }
@@ -68,6 +75,10 @@ router.get('/access', async (req: Request, res: Response) => {
       ready: !!getOutreachContext(),
       send: { senderReady: isOutreachMailerReady(), unsubReady: !!(process.env.OUTREACH_UNSUB_NOTICE || '').trim() },
       testDomains: outreachTestMailDomains(),
+      // ★ 2026-09-23 검수 허용 주소 · 직접 발송 결재 단계(ENV) · 원장 비밀값 준비 · 수신 근거 선택지
+      testAddresses: outreachTestMailAddresses(),
+      direct: { envStage: directStageEnv(), hashReady: !!outreachHashSecret() },
+      contactBasisPresets: CONTACT_BASIS_PRESETS,
     } : {}),
   });
 });
@@ -91,6 +102,11 @@ router.post('/jobs', async (req: Request, res: Response) => {
       homepageUrl: req.body?.homepageUrl,
       extraNotes: req.body?.extraNotes ?? null,
       force: req.body?.force === true,
+      // ★ 2026-09-23 담당자(사람이 넣은 값) · 네이버 스토어 주소(저장만)
+      contactEmail: req.body?.contactEmail ?? null,
+      contactName: req.body?.contactName ?? null,
+      contactBasis: req.body?.contactBasis ?? null,
+      naverStoreUrl: req.body?.naverStoreUrl ?? null,
     }, req.user?.userId);
     console.log('[sales-outreach] 등록:', id, req.user?.userId);
     audit(req, 'enqueue', id, { companyName: String(req.body?.companyName || '').slice(0, 100), force: req.body?.force === true });
@@ -151,17 +167,35 @@ router.post('/jobs/bulk', async (req: Request, res: Response) => {
           rejectedOverflow: parsed.rejectedOverflow,
         });
       }
-      const result = await enqueueOutreachJobsBulk(parsed.rows, req.user?.userId);
-      console.log('[sales-outreach] 일괄 등록:', result.acceptedIds.length, '건 /', req.user?.userId);
-      audit(req, 'enqueue_bulk', null, { accepted: result.acceptedIds.length, rejected: parsed.rejected.length + result.rejected.length });
+      // ★ 2026-09-23 일괄 옵션 — 행사 자동 확정(기본 켬) · 단계 3 묶음 자동 발송 승인(유효 단계 3 일 때만 · 승인 기록 = 이 사람 · 이 시각 · 규칙 v1)
+      const autoConfirm = String((req as any).body?.autoConfirm ?? '1') !== '0';
+      const wantAutoSend = String((req as any).body?.autoSend ?? '0') === '1';
+      let autoSendApproval: { by: string; at: string; rule: string } | null = null;
+      if (wantAutoSend) {
+        const st = await getOutreachDirectStatus(req.user?.userId);
+        if (st.stage < 3) return res.status(409).json({ error: `묶음 자동 발송은 단계 3부터 열립니다(지금 단계 ${st.stage}).`, code: 'CONFLICT', blockers: st.blockers });
+        if (!autoConfirm) return res.status(400).json({ error: '자동 발송은 행사 자동 확정과 함께만 켤 수 있습니다.', code: 'VALIDATION' });
+        autoSendApproval = { by: String(req.user?.userId), at: new Date().toISOString(), rule: 'v1' };
+      }
+      const result = await enqueueOutreachJobsBulk(parsed.rows, req.user?.userId, {
+        autoConfirm,
+        autoSendApproval,
+        onReady: autoSendApproval ? (id: string) => autoSendOutreachJob(id) : undefined,
+      });
+      console.log('[sales-outreach] 일괄 등록:', result.acceptedIds.length, '건 /', req.user?.userId, autoConfirm ? '자동 확정' : '', autoSendApproval ? '자동 발송 승인' : '');
+      audit(req, 'enqueue_bulk', null, { accepted: result.acceptedIds.length, rejected: parsed.rejected.length + result.rejected.length, autoConfirm, autoSend: !!autoSendApproval, batch: result.batch });
       res.status(202).json({
         accepted: result.acceptedIds.length,
         acceptedIds: result.acceptedIds,
+        batch: result.batch,
         rejected: [
           ...parsed.rejected.map((r) => ({ label: `${r.line}행`, reason: r.reason })),
           ...result.rejected.map((r) => ({ label: r.companyName, reason: r.reason })),
         ],
         rejectedOverflow: parsed.rejectedOverflow,
+        // 등록은 됐지만 칸 하나를 비운 줄(거절과 별도 · §10)
+        warnings: parsed.warnings.map((w) => ({ label: `${w.line}행`, reason: w.reason })),
+        format: parsed.format,
       });
     } catch (e: any) {
       respondError(res, e, '일괄 등록');
@@ -195,13 +229,176 @@ router.get('/jobs/latest', async (req: Request, res: Response) => {
   }
 });
 
-// 상태 폴링(2초) — 단계·산출물·실패 사유·발송 잠금
+// ★ 2026-09-23 작업대(묶음 · 줄 · 3초 판정 카드 = 서버 계산) — 폴링
+router.get('/workbench', async (req: Request, res: Response) => {
+  try {
+    res.json(await getOutreachWorkbench({ batch: typeof req.query.batch === 'string' ? req.query.batch : null }, req.user?.userId));
+  } catch (err: any) {
+    respondError(res, err, '작업대 조회');
+  }
+});
+
+// ★ 2026-09-23 직접 발송 단계 · 통계 · 자동 정지
+router.get('/direct/status', async (req: Request, res: Response) => {
+  try {
+    res.json(await getOutreachDirectStatus(req.user?.userId));
+  } catch (err: any) {
+    respondError(res, err, '발송 단계 조회');
+  }
+});
+
+router.post('/direct/resume', async (req: Request, res: Response) => {
+  try {
+    await resumeOutreachAutoSend(req.user?.userId);
+    console.log('[sales-outreach] 자동 발송 다시 켬:', req.user?.userId);
+    audit(req, 'direct_resume', null);
+    res.json({ ok: true });
+  } catch (err: any) {
+    respondError(res, err, '자동 발송 다시 켜기');
+  }
+});
+
+// ★ 2026-09-23 묶음 직접 발송(단계 2 · 확인한 건만 · 백그라운드 순차)
+router.post('/jobs/send-direct-bulk', async (req: Request, res: Response) => {
+  try {
+    const r = await sendOutreachDirectBulk(req.body?.items, req.user?.userId);
+    console.log('[sales-outreach] 묶음 직접 발송 접수:', r.queued.length, '건 · 제외', r.skipped.length, req.user?.userId);
+    audit(req, 'send_direct_bulk', null, { queued: r.queued, skipped: r.skipped.length });
+    res.status(202).json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, '묶음 직접 발송');
+  }
+});
+
+// 상태 폴링(2초) — 단계·산출물·실패 사유·발송 잠금 · ★ 2026-09-23 담당자 직접 발송 정보(direct · 조회 실패는 null · 본 조회를 막지 않는다)
 router.get('/jobs/:id', async (req: Request, res: Response) => {
   try {
-    res.json(await getOutreachJob(req.params.id, req.user?.userId));
+    const job = await getOutreachJob(req.params.id, req.user?.userId);
+    const direct = await getOutreachDirectInfo(req.params.id, req.user?.userId).catch((e: any) => {
+      console.log('[sales-outreach] 직접 발송 정보 건너뜀:', req.params.id, e?.message);
+      return null;
+    });
+    res.json({ ...job, direct });
   } catch (err: any) {
     respondError(res, err, '조회');
   }
+});
+
+// ★ 2026-09-23 담당자 저장(ready 면 메일 재조립이 바로 돈다 · AI 0)
+router.post('/jobs/:id/contact', async (req: Request, res: Response) => {
+  try {
+    const r = await setOutreachContact(req.params.id, { email: req.body?.email, name: req.body?.name, basis: req.body?.basis }, req.user?.userId);
+    console.log('[sales-outreach] 담당자 저장:', req.params.id, r.rebuilding ? '재조립' : '', req.user?.userId);
+    audit(req, 'contact', req.params.id, { hasEmail: !!String(req.body?.email || '').trim(), rebuilding: r.rebuilding });
+    res.json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, '담당자 저장');
+  }
+});
+
+// ★ 2026-09-23 확인(O · 화면에 렌더한 판 id) · 보류(X · 사유 5값)
+router.post('/jobs/:id/review', async (req: Request, res: Response) => {
+  try {
+    await reviewOutreachJob(req.params.id, req.body?.assetId, req.user?.userId);
+    console.log('[sales-outreach] 확인:', req.params.id, req.user?.userId);
+    audit(req, 'review', req.params.id, { assetId: String(req.body?.assetId || '').slice(0, 40) });
+    res.json({ ok: true });
+  } catch (err: any) {
+    respondError(res, err, '확인');
+  }
+});
+
+router.post('/jobs/:id/hold', async (req: Request, res: Response) => {
+  try {
+    await holdOutreachJob(req.params.id, req.body?.reason, req.user?.userId);
+    console.log('[sales-outreach] 보류:', req.params.id, req.body?.reason, req.user?.userId);
+    audit(req, 'hold', req.params.id, { reason: String(req.body?.reason || '').slice(0, 20) });
+    res.json({ ok: true });
+  } catch (err: any) {
+    respondError(res, err, '보류');
+  }
+});
+
+// ★ 2026-09-23 담당자 도메인 불일치 해제(근거 확인 · 사람 2클릭 · 그 주소에만)
+router.post('/jobs/:id/domain-ack', async (req: Request, res: Response) => {
+  try {
+    await ackOutreachContactDomain(req.params.id, req.user?.userId);
+    console.log('[sales-outreach] 도메인 불일치 해제:', req.params.id, req.user?.userId);
+    audit(req, 'domain_ack', req.params.id);
+    res.json({ ok: true });
+  } catch (err: any) {
+    respondError(res, err, '도메인 불일치 해제');
+  }
+});
+
+// ★ 2026-09-23 담당자에게 직접 발송(단계 1 · 발송 확인 창의 1클릭 · 수신처 = 서버 저장값 · expectedTo 는 확인만)
+router.post('/jobs/:id/send-direct', async (req: Request, res: Response) => {
+  try {
+    const r = await sendOutreachDirectForJob(req.params.id, req.body?.expectedTo, req.user?.userId);
+    console.log('[sales-outreach] 직접 발송:', req.params.id, r.outcome, req.user?.userId);
+    audit(req, 'send_direct', req.params.id, { outcome: r.outcome });
+    res.json({ ok: true, outcome: r.outcome, detail: r.detail, to: r.to });
+  } catch (err: any) {
+    respondError(res, err, '직접 발송');
+  }
+});
+
+// ★ 2026-09-23 같은 회사 재접촉 열기(마지막 발송 90일 경과)
+router.post('/jobs/:id/reopen-contact', async (req: Request, res: Response) => {
+  try {
+    const r = await reopenOutreachContact(req.params.id, req.user?.userId);
+    console.log('[sales-outreach] 재접촉 열기:', req.params.id, r.reopened, req.user?.userId);
+    audit(req, 'reopen_contact', req.params.id, r);
+    res.json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, '재접촉 열기');
+  }
+});
+
+// ★ 2026-09-23 사후 확인(단계 3 표본) ok · wrong(= 자동 정지)
+router.post('/sends/:id/review-flag', async (req: Request, res: Response) => {
+  try {
+    await setOutreachSendReviewFlag(req.params.id, req.body?.flag, req.user?.userId);
+    console.log('[sales-outreach] 사후 확인:', req.params.id, req.body?.flag, req.user?.userId);
+    audit(req, 'send_review_flag', null, { sendId: req.params.id, flag: String(req.body?.flag || '') });
+    res.json({ ok: true });
+  } catch (err: any) {
+    respondError(res, err, '사후 확인');
+  }
+});
+
+// ★ 2026-09-23 네이버 스토어 저장본(사람이 저장한 기획전 페이지 · 2MB · 네트워크 0 · DB 쓰기 0 → 붙여넣기 칸을 채운다)
+const storePageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (/\.html?$/i.test(String(file.originalname || ''))) return cb(null, true);
+    const e: any = new Error('웹페이지 파일만 허용');
+    e.code = 'BAD_FILE_TYPE';
+    cb(e);
+  },
+});
+router.post('/jobs/:id/store-page', async (req: Request, res: Response) => {
+  if (!(await isSalesOutreachOperator(req.user?.userId))) {
+    return res.status(403).json({ error: '이 기능을 사용할 권한이 없습니다.', code: 'FORBIDDEN' });
+  }
+  storePageUpload.single('file')(req as any, res as any, async (err: any) => {
+    if (err) {
+      console.log('[sales-outreach] 스토어 저장본 거절:', err?.message);
+      const msg = err?.code === 'LIMIT_FILE_SIZE' ? '파일이 2MB를 넘습니다.' : err?.code === 'BAD_FILE_TYPE' ? '저장한 웹페이지 파일(.html)만 올릴 수 있습니다.' : '파일 업로드에 실패했습니다.';
+      return res.status(400).json({ error: msg });
+    }
+    try {
+      const file = (req as any).file as { buffer: Buffer } | undefined;
+      if (!file?.buffer) return res.status(400).json({ error: '파일을 선택해주세요.' });
+      const r = await extractOutreachStorePageText(req.params.id, file.buffer.toString('utf8'), req.user?.userId);
+      console.log('[sales-outreach] 스토어 저장본 읽기:', req.params.id, r.chars, req.user?.userId);
+      audit(req, 'store_page', req.params.id, { chars: r.chars });
+      res.json({ ok: true, ...r });
+    } catch (e: any) {
+      respondError(res, e, '스토어 저장본 읽기');
+    }
+  });
 });
 
 // 읽은 것 확인(사람 게이트) — 행사·이미지·업종 확정 → 제작 시작. ★ A-9 warnings 동봉

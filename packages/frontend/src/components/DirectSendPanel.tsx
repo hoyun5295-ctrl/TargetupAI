@@ -345,7 +345,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     }
     // ★2026-09-22 본문에 실존하지 않는 도메인이 있으면 보내지 않는다 — 받는 사람이 눌러도 안 열린다.
     //   서버도 같은 판정으로 막지만(차감 앞) 여기서 먼저 알려 주면 왕복이 없다. 판정은 공용 CT가 소유한다.
-    const linkDefect = findLinkDefectInText(directMessage) || findLinkDefectInText(directSubject, '제목의 링크는');
+    //   단문은 제목을 싣지 않으므로(위 글자 검사와 같은 축) 숨은 제목의 링크로 막지 않는다.
+    const linkDefect = findLinkDefectInText(directMessage) || findLinkDefectInText(directMsgType === 'SMS' ? '' : directSubject, '제목의 링크는');
     if (linkDefect) {
       setToast({ show: true, type: 'error', message: linkDefect });
       return;

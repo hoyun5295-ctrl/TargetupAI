@@ -13,7 +13,7 @@ vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(async () => '') 
 
 import { pickBrandColorFromPalette } from '../sales-outreach-render';
 import { OUTREACH_NEUTRAL_PRIMARY } from '../sales-outreach-look';
-import { insertProofCard, buildProposalEmailSections, buildOutreachPlainText, pickShowcaseExampleUrl, posterStyleHint, dropPlaceholderSentences } from '../sales-outreach-produce';
+import { insertProofCard, buildProposalEmailSections, buildOutreachPlainText, posterStyleHint, dropPlaceholderSentences } from '../sales-outreach-produce';
 import { getActiveStyleGuide } from '../sales-outreach-style';
 import { OUTREACH_GENERATION_RULES } from '../sales-outreach-exemplars';
 import { BENEFIT_PLACEHOLDER } from '../copy-benefit-detector';
@@ -95,15 +95,9 @@ describe('증거 카드 중복 제거 · 포스터 배경 힌트 · 톤 규칙',
     expect(OUTREACH_GENERATION_RULES).toContain('범용 문구를 쓰지 마라');
     expect(OUTREACH_GENERATION_RULES).toContain('그 수치로 text_card 를 만들지 마라');
   });
-  it('실샘플 선택 — 업종 매칭 템플릿 중 파일이 있는 첫 장 · 하나도 없으면 null · 공개 라우트 경로', () => {
-    const has = new Set<string>();
-    expect(pickShowcaseExampleUrl('beauty', (id) => has.has(id))).toBeNull();
-    const url = pickShowcaseExampleUrl('beauty', () => true);
-    expect(url).toMatch(/\/api\/image-studio\/template-sample\/[A-Za-z0-9_-]+$/);
-  });
 });
 
-describe('제안 메일 — 자리표시자 노출 0 · 스토리라인 순서', () => {
+describe('제안 메일 — 자리표시자 노출 0 · ★ 2026-09-23 재구성 순서', () => {
   const guide = getActiveStyleGuide();
   const P = BENEFIT_PLACEHOLDER;
   const base = {
@@ -111,15 +105,15 @@ describe('제안 메일 — 자리표시자 노출 0 · 스토리라인 순서',
     copyBody: `(광고) 아이소이에서 티퍼런스 기프트 컬렉션 최대 ${P} OFF 행사를 진행 중입니다. 기프트 컬렉션은 {{DM_LINK}} 에서 확인하세요.`,
     posterUrl: 'https://hanjul.ai/p.jpg', dmUrl: 'https://hlj.kr/x', previewUrl: 'https://hanjul.ai/api/outreach/v/abc', unsubscribeNotice: '수신거부 안내',
     brandSections: [] as Section[], subject: '제목', intro: `아이소이 공식몰에서 최대 ${P} OFF 행사를 보았습니다. 티퍼런스 컬렉션이 인상적이었습니다.`,
-    now: new Date('2026-09-06T03:00:00Z'), dmCaptureUrl: 'https://hanjul.ai/api/cdp/inapp/image/c/dm.jpg', showcaseImageUrl: 'https://hanjul.ai/api/image-studio/template-sample/t1',
+    now: new Date('2026-09-06T03:00:00Z'),
   };
-  it('자리표시자가 든 문장은 서두·문안에서 빠진다 · 인용(홈페이지 원문)은 남는다 · html·평문 어디에도 자리표시자 0', () => {
+  it('자리표시자가 든 문장은 서두·문안에서 빠진다 · 원문 인용 덤프 0 · html·평문 어디에도 자리표시자 0', () => {
     const s = buildProposalEmailSections(guide, base) as any[];
     const all = JSON.stringify(s);
     expect(all).not.toContain(P);
-    const lead = s[2];
-    expect(lead.props.body).toContain('티퍼런스 컬렉션이 인상적이었습니다.');
-    expect(lead.props.body).toContain('홈페이지에서 본 내용');
+    const opener = s[1];
+    expect(opener.props.body).toContain('티퍼런스 컬렉션이 인상적이었습니다.');
+    expect(opener.props.body).not.toContain('티퍼런스 기프트 컬렉션 최대 20% OFF');
     const copy = s.find((x) => x.props?.tag === guide.emailCopy.showcase.tag);
     expect(copy.props.body).toContain('기프트 컬렉션은 https://hlj.kr/x 에서 확인하세요.');
     expect(copy.props.body).not.toContain('OFF 행사');
@@ -129,52 +123,29 @@ describe('제안 메일 — 자리표시자 노출 0 · 스토리라인 순서',
   it('문안이 자리표시자만 남으면 문안 블록을 생략한다 · 서두가 비면 기본 서두', () => {
     const s = buildProposalEmailSections(guide, { ...base, copyBody: `최대 ${P} OFF`, intro: `${P}` }) as any[];
     expect(s.some((x) => x.props?.tag === guide.emailCopy.showcase.tag)).toBe(false);
-    expect(s[2].props.body).toContain(guide.emailCopy.introDefault('아이소이'));
+    expect(s[1].props.body).toContain(guide.emailCopy.introDefault('아이소이'));
   });
-  it('★ v3 순서 = header · hero · 서두 · [1 자동] · DM 캡처 text_card(image left) · 포스터 text_card · 문안 · [2 대비] · 실샘플 text_card · [3 5분] · 기능 3칸 · CTA · 서비스(회신 문장) · footer · gallery 0', () => {
+  it('순서 = header · 헤드라인 · [DM 열어보기] · (시안 표지 · 시안) · (행사 요약) · 문안 · 요약 카드 · 버튼 묶음 · 서비스(회신 문장) · footer · gallery 0 · 캡처 카드 0', () => {
     const s = buildProposalEmailSections(guide, base) as any[];
-    const tags = s.map((x) => x.props?.tag || x.props?.title || x.type);
-    expect(tags.slice(0, 5)).toEqual(['header', 'hero', guide.emailCopy.lead.tag, guide.emailCopy.story.auto.tag, guide.emailCopy.story.capture.title]);
-    // 캡처는 gallery 가 아니라 이미지 위 text_card(세로 캡처 = image_position left · 캡처 위 글자 0)
-    const cap = s[4];
-    expect(cap.type).toBe('text_card');
-    expect(cap.props.image_url).toBe(base.dmCaptureUrl);
-    expect(cap.props.image_position).toBe('left');
-    expect(cap.props.headline).toBe(guide.emailCopy.story.capture.dmHeadline);
-    const poster = s[5];
-    expect(poster.type).toBe('text_card');
-    expect(poster.props.image_url).toBe(base.posterUrl);
+    const tags = s.map((x) => x.props?.tag || x.type);
+    expect(tags.slice(0, 3)).toEqual(['header', 'text_card', 'cta']);
     expect(s.filter((x) => x.type === 'gallery').length).toBe(0);
-    const compareIdx = tags.indexOf(guide.emailCopy.story.compare.tag);
-    expect(s[compareIdx + 1].type).toBe('text_card');
-    expect(s[compareIdx + 1].props.headline).toBe(guide.emailCopy.story.compare.imageTitle);
-    expect(s[compareIdx + 1].props.image_url).toBe(base.showcaseImageUrl);
-    expect(tags[compareIdx + 2]).toBe(guide.emailCopy.features.tag);
-    expect(tags.slice(compareIdx + 3, compareIdx + 6)).toEqual(['이미지 스튜디오', '문안과 여정', '자동마케팅']);
-    expect(tags[compareIdx + 6]).toBe('cta');
-    // 서비스 카드 마지막 줄 = 회신 유도 문장(기본) · 편집분이 있으면 그것(60자)
-    const service = s[compareIdx + 7];
+    expect(s.some((x) => x.props?.image_position === 'left')).toBe(false);
+    const moreIdx = tags.indexOf(guide.emailCopy.more.tag);
+    expect(moreIdx).toBeGreaterThan(2);
+    expect(tags[moreIdx + 1]).toBe('cta');
+    const service = s[moreIdx + 2];
     expect(service.props.headline).toBe(guide.emailCopy.service.headline);
     expect(String(service.props.body).endsWith(guide.emailCopy.reply)).toBe(true);
     const edited = buildProposalEmailSections(guide, { ...base, replyLine: '  이미지 2장만  회신해 주세요  ' }) as any[];
-    expect(String(edited[compareIdx + 7].props.body).endsWith('이미지 2장만 회신해 주세요')).toBe(true);
+    expect(String(edited[moreIdx + 2].props.body).endsWith('이미지 2장만 회신해 주세요')).toBe(true);
     expect(buildOutreachPlainText(guide, base)).toContain(guide.emailCopy.reply);
     expect(tags[tags.length - 1]).toBe('footer');
     expect(s.every((x, i) => x.order === i)).toBe(true);
-    // 홈 캡처가 있으면 대조 왼쪽 카드가 DM 캡처 앞에 선다 · 없으면 생략
-    const withHome = buildProposalEmailSections(guide, { ...base, homeCaptureUrl: 'https://hanjul.ai/api/cdp/inapp/image/c/home.jpg' }) as any[];
-    expect(withHome[4].props.image_url).toBe('https://hanjul.ai/api/cdp/inapp/image/c/home.jpg');
-    expect(withHome[4].props.headline).toBe(guide.emailCopy.story.capture.homeHeadline('아이소이'));
-    expect(withHome[5].props.image_url).toBe(base.dmCaptureUrl);
-    // 캡처·실샘플이 없으면 그 카드만 빠지고 나머지는 그대로
-    const bare = buildProposalEmailSections(guide, { ...base, dmCaptureUrl: null, showcaseImageUrl: null }) as any[];
-    expect(bare.filter((x) => x.type === 'gallery').length).toBe(0);
-    expect(bare.some((x) => x.props?.image_url === base.dmCaptureUrl)).toBe(false);
-    expect(bare.some((x) => x.props?.tag === guide.emailCopy.story.compare.tag)).toBe(true);
   });
   it('문구 사실 검사 — 모델명 0 · 줄표 0 · 업체명 직후 조사 0', () => {
     const c = guide.emailCopy;
-    const texts = [c.hero.headline, c.hero.subCopy, c.story.auto.body('인비토'), c.story.compare.body('인비토'), c.features.headline('인비토'), ...c.features.items.map((i) => i.body('인비토'))];
+    const texts = [c.opener.headline('인비토'), c.introDefault('인비토'), c.sample.headline('인비토'), c.events.headline, c.more.headline, ...c.more.lines('인비토'), c.service.body, c.reply, ...c.footer.notes];
     for (const t of texts) {
       expect(t).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic|—/);
       const i = t.indexOf('인비토');
@@ -184,13 +155,15 @@ describe('제안 메일 — 자리표시자 노출 0 · 스토리라인 순서',
 });
 
 describe('소스 계약 — DM 캡처 저장·승계 · 메일 입력 배선', () => {
-  it('producing_dm 은 캡처 URL 을 asset 에 남기고 숨김 재실행은 승계 · producing_email 은 캡처·실샘플을 조립에 넘긴다', () => {
+  it('producing_dm 은 캡처 URL 을 asset 에 남기고 숨김 재실행은 승계 · ★ 2026-09-23 producing_email 은 결정 제목 · 담당자 호칭 · 확정 행사 · 법정 footer 를 조립에 넘긴다', () => {
     const jobs = code('utils/sales-outreach-jobs.ts');
-    // ★ v3 발행 참조(pub)의 뷰어 URL 을 캡처한다(조립/발행 분리)
+    // ★ v3 발행 참조(pub)의 뷰어 URL 을 캡처한다(조립/발행 분리) · 캡처는 검토 화면의 3초 판정 카드가 쓴다
     expect(jobs).toContain('captureAndScoreDm(pub.viewerUrl, { companyId: ctx.companyId })');
     expect(jobs).toContain("const captureUrl = carry ? (carry.captureUrl || null) : (captured?.captureUrl || null);");
-    expect(jobs).toContain('dmCaptureUrl: dmAsset?.captureUrl ? String(dmAsset.captureUrl) : null,');
-    expect(jobs).toContain('showcaseImageUrl: pickShowcaseExampleUrl(job.industry_category),');
+    expect(jobs).toContain('subject = buildOutreachSubject(guide, job.company_name,');
+    expect(jobs).toContain('contactName: job.contact_name ? String(job.contact_name) : null,');
+    expect(jobs).toContain('const adFooter = directAdFooterOf(jobId, job.contact_email, guide);');
+    expect(jobs).not.toContain('pickShowcaseExampleUrl');
     const produce = code('utils/sales-outreach-produce.ts');
     expect(produce).toContain("screenshot: true, screenshotViewport: true, viewportWidth: 375");
     expect(produce).toContain('const moved = moveTempToPermanent(companyId, tempId);');

@@ -29,6 +29,7 @@ import {
   insertBrandQueue, BrandQueueInsertError, type BrandQueueRow,
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
+import { subjectForMsgType } from '../utils/qtmsg-type';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑은 CT-12에서만 — 라우트 인라인 금지
 import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback,
          prepareBrandAttachmentForSend, appendAiImageNotice, BUBBLE_TYPES, listBrandTrialTypes } from '../utils/brand-message';
@@ -2399,7 +2400,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
             extra3: recipient.extra3,
             callback: recipient.callback,
           },
-          subject: subject || '',
+          // ★2026-09-22 단문 제목: 단문이면 제목을 싣지 않는다(화면이 유형을 바꿔도 값이 남아 온다 · 판정 = subjectForMsgType)
+          subject: subjectForMsgType(msgType, subject),
           skipNumberFormatting: true,
         });
 

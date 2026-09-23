@@ -447,6 +447,18 @@ curl -s http://127.0.0.1:4317/health
 5. 이후 코드 변경 = `pm2 reload outreach-render`(env 변경 시 `pm2 restart outreach-render --update-env`). 워커가 죽어 있어도 backend 는 정적 크롤로 전진한다(대기 0 · 사유 = `stage_results.rendering='unavailable'`).
 6. 롤백 = `pm2 stop outreach-render`(정적 크롤로 즉시 복귀) + 코드 되돌리기. 새 jsonb 키는 구코드가 읽지 않는다.
 
+**⑨ 2026-09-23 담당자 직접 발송 · 엑셀 자동 영업 · 제안 메일 재구성 배포** (설계 = [직접 발송 설계서](../docs/2026-09-23-outreach-direct-send-design.md) · **DDL = 2026-09-23 Harold 실행 완료**(jobs ALTER 5칸 + `sales_outreach_sends`·`sales_outreach_suppressions`·`sales_outreach_controls` · information_schema 8행 실측 · 원문 = 설계서 §4) · 워커 무변경)
+1. 코드 배포 = §2-2 표준 순서(백엔드 먼저 · 업무시간 밖). 새 jsonb 키·칸은 구코드가 읽지 않는다.
+2. ENV(`packages/backend/.env` · 명령에 값이 찍히지 않게) — 비밀값 1회 생성:
+```bash
+cd /home/administrator/targetup-app/packages/backend && grep -q '^OUTREACH_HASH_SECRET=' .env || echo "OUTREACH_HASH_SECRET=$(openssl rand -hex 32)" >> .env
+```
+   이어서 `OUTREACH_DIRECT_STAGE=0`(법 판단 서면 전 유지) · 선택 `OUTREACH_TEST_MAIL_ADDRESSES=개인메일주소` · `OUTREACH_DIRECT_DAILY_CAP=5` → `pm2 restart targetup-backend --update-env`. **`OUTREACH_HASH_SECRET` 은 한 번 정하면 바꾸지 않는다**(바꾸면 수신거부 원장이 옛 주소를 못 알아본다).
+3. 실측(단계 0 · 외부 발송 0) — 담당자 이메일 칸에 자사 주소(본인 invitocorp.com 주소)를 적어 단건 등록 → 검토 화면 담당자 패널에 잠금 `DIRECT_DISABLED` 1줄 · 검수 메일 도착 → 제목 `[검수] (광고) …` · 메일 첫 화면에 [DM 열어보기] · 맨 아래 법정 footer + 수신거부 링크 · 작업대 "검토 대기"에서 O → "발송 대기"로 이동.
+4. 수신거부 링크 GET → 확인 페이지만(기록 0 · `SELECT COUNT(*) FROM sales_outreach_suppressions;` 불변) · [수신거부] POST → 1행.
+5. 법 판단 서면(Harold) 뒤 `OUTREACH_DIRECT_STAGE=1` → 자사 도메인 담당자 1건 실발송 → `SELECT mode, outcome, review_flag FROM sales_outreach_sends ORDER BY created_at DESC LIMIT 3;` = `manual · sent`.
+6. 롤백 = `OUTREACH_DIRECT_STAGE=0`(직접 발송 즉시 잠김 · 코드 되돌리기 불필요). 새 테이블은 구코드가 읽지 않는다.
+
 ---
 
 ### 2-2-F. 국외 접속 판정 대역(geo_allow_cidrs) 갱신 (★2026-08-30 신설 · 반기 권장)
@@ -594,11 +606,12 @@ C:\Users\ceo\projects\targetup\  (로컬)
 | 대량발송(1) | bulk | SMSQ_SEND_1,2,3 | 고객사 A 전용 |
 | 대량발송(2) | bulk | SMSQ_SEND_4,5,6 | 고객사 B 전용 |
 | 대량발송(3) | bulk | SMSQ_SEND_7,8,9 | 고객사 C 전용 |
-| 테스트발송 | test | SMSQ_SEND_10 | 테스트 전용 (격리) |
-| 슈퍼관리자인증 | auth | SMSQ_SEND_11 | 2FA 인증번호 전용 |
+| 테스트발송 | test | SMSQ_SEND_16,10 | 테스트 전용 (격리) · ★2026-09-23 첫 테이블 16(hanjul-04) = 적재(`getTestSendTable` · 로그인 인증 문자·스팸테스트·담당자 테스트·시스템 알림) · 10 = 이력·정산 연속용 |
+| 슈퍼관리자인증 | auth | SMSQ_SEND_16 | 2FA 인증번호 전용 · ★2026-09-23 11 → 16(안내 문자) |
 | 비토게이트웨이 1(13) | bito | SMSQ_SEND_13 | (★2026-07-17 개명 — 옛 이름 '비토테스트(13)') 자체 게이트웨이(Bito) 연동 — Bito Agent **v1.0.8**(2026-07-05 교체; 1.0.5→1.0.7→1.0.8) 라이브 = `/opt/bito-agent` systemd `bito-agent.service`(enabled), agentID `hanjul01`, journal `/opt/bito-agent/data/`. **v1.0.8=MMS 이미지 첨부** — agent-config `mms:`(allowed_base_dirs=`/home/administrator/mms-images`·max_file_bytes 1MB·on_error:fail) 추가, Agent가 file_name1~5 로컬파일을 읽어 gRPC 바이트 전송, **Gateway v135(media_data inline base64)와 짝** — 둘 다 반영돼야 MMS 이미지 전달(E2E 실측 대기). 발송/집계/드롭다운 `bulk+bito` 포함. Gateway **58.227.193.65:9090**(★2026-08-14 실측 — 하나로호스팅 이전, 옛 클라우드 139.150.81.213 폐기. use_tls:false, 12자 구형 토큰 신 GW 수용 확인), MySQL=smsuser, agent_id/token=비토 발급. 교체 절차=바이너리 `sudo install`+(v1.0.8은 config `mms:` append 동반)+systemd restart. (`~/bito-install`=6/16 옛 스테이징 사본, 미실행) |
 | 비토게이트웨이 2(14) | bito | SMSQ_SEND_14 | ★2026-07-17 신설(자비스 요청) — Agent `hanjul02`, Agent v1.0.12 바이너리·설정·systemd·Gateway 계정/인증/라우팅 전부 **비토(자비스) 측 설치 완료**. 한줄로 측 = 테이블 생성(`CREATE TABLE LIKE SMSQ_SEND_13`) + 라인그룹 연결만. |
 | 비토게이트웨이 3(15) | bito | SMSQ_SEND_15 | ★2026-07-17 신설(자비스 요청) — Agent `hanjul03`. 그 외 위와 동일. |
+| 비토게이트웨이_4 | bito | SMSQ_SEND_16 | ★2026-09-23 신설 — 한줄로 시스템 발송 전용 Agent `hanjul-04`(.62 `/opt/bito-agent-hanjul-04` · `LIKE SMSQ_SEND_13`). 인증 카카오(`SYSTEM_ALIMTALK_LINE_GROUP` · bito 유형이라 발신프로필 키가 붙는다). 고객사·사용자에게 배정하지 않는다. 기록 = bito-gateway `status/STATUS.md` 2026-09-23. |
 - **★ 2026-07-17 라인 14·15 신설 요지:** MySQL 테이블은 13과 완전 동일(컬럼 29 · 인덱스 3 = PK `seqno`+`idx_app_etc1_status`+`idx_app_etc1_sendreq` · InnoDB · utf8mb4_0900_ai_ci). **권한 별도 GRANT 불요** — `smsuser@%`가 `smsdb.*` 스키마 단위 보유라 신규 테이블 자동 상속. 단 smsuser는 CREATE 권한이 없어 **DDL은 root로**. 비토 라인은 `.env` `SMS_TABLES`(1~11)에 넣지 않는다 — 라우팅은 `sms_line_groups`가 전담하고, env에 넣는 순간 라인 미할당 고객사의 일반 발송이 비토로 샌다(`BULK_ONLY_TABLES` 격리는 2차 방어선).
 - **★2026-08-14 게이트웨이 이전·Agent 전환 트랙:** 비토 게이트웨이 = 하나로호스팅 `58.227.193.65:9090`(01·02·03 라이브 연결 실측 확정). Agent 3대 실측 = 01 `/opt/bito-agent`(`bito-agent.service`, v1.0.8) · 02 `/opt/bito-agent-hanjul02`(`bito-agent-hanjul02.service`, v1.0.12, 토큰 64자) · 03 `/var/lib/bito-agent-bootstrap/hanjul03`(bootstrap 관리형 = 원격 업그레이드형, 0812 설치). 01·02는 구형이라 원격 업그레이드 미지원 → **v1.0.21(bootstrap v1.0.27 동봉) 보호 전환 진행 중** — 02 doctor FAIL 0·config/유닛 `.bak-20260814` 백업 완료, 발급물(installer config·release_id·nonce) 대기. 전환은 기존 config·토큰·서비스 정체성 보존. 상세 = memory `project_2026_0814_bito_agent_v1021_conversion`.
 - **라인그룹 관리 화면 (★2026-07-17 신설):** 슈퍼관리자 `시스템 → 발송 라인 설정`. **쓰기(생성/수정/삭제)는 `LINE_GROUP_ADMIN_USERS`(기본 `ceo,admin`)만** — Harold 명시. 조회는 슈퍼관리자 공용(고객사/사용자 편집 모달의 발송 라인 드롭다운이 같은 API를 쓰므로 막으면 그 화면이 깨진다). 판정 CT = `utils/audit-log.ts` `isLineGroupAdmin`. 저장 시 `findMissingSmsTables`가 MySQL 실존까지 검증(패턴만 맞는 오타 테이블이 라인에 들어가면 그 라인의 적재·집계·정산 UNION이 전부 SQL 에러).

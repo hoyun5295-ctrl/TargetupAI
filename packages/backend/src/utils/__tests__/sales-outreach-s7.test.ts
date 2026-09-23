@@ -119,42 +119,39 @@ describe('증거 카드 문장 · DM 계약', () => {
   });
 });
 
-describe('제안 메일 기능 소개 3칸(여정 · 자동마케팅 · 이미지 스튜디오)', () => {
+describe('제안 메일 요약 카드(★ 2026-09-23 옛 2·3막 + 기능 3칸 → 카드 1장 · 설계서 §11)', () => {
   const guide = getActiveStyleGuide();
   const base = {
     companyName: '아이소이', industry: 'beauty', selectedEvent: null, copyBody: '문안 {{DM_LINK}}', posterUrl: 'https://hanjul.ai/p.jpg',
     dmUrl: 'https://hlj.kr/x', previewUrl: 'https://hanjul.ai/api/outreach/v/abc', unsubscribeNotice: '수신거부 안내', brandSections: [] as Section[],
     subject: '제목', intro: '서두', now: new Date('2026-09-06T03:00:00Z'),
   };
-  it('CTA 앞에 소개 카드 1 + 기능 카드 3 · 포스터가 있으면 이미지 스튜디오 headline 이 이 메일의 이미지를 가리킨다 · 평문에도 실린다', () => {
-    const s = buildProposalEmailSections(guide, base);
-    const types = s.map((x) => x.type);
-    const ctaIdx = types.indexOf('cta');
-    const features = s.slice(ctaIdx - 4, ctaIdx) as any[];
-    expect(features.map((x) => x.type)).toEqual(['text_card', 'text_card', 'text_card', 'text_card']);
-    expect(features[0].props.tag).toBe(guide.emailCopy.features.tag);
-    expect(features.slice(1).map((x) => x.props.tag)).toEqual(['이미지 스튜디오', '문안과 여정', '자동마케팅']);
-    expect(features[1].props.headline).toBe('이 메일 맨 위 이미지도 그렇게 만들었습니다');
-    expect(features[1].props.body).toContain('아이소이 상품 사진');
-    for (const f of features) { expect(String(f.props.body)).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic|—/); }
-    const noPoster = buildProposalEmailSections(guide, { ...base, posterUrl: null }) as any[];
-    const studio = noPoster.find((x) => x.props?.tag === '이미지 스튜디오');
-    expect(studio.props.headline).toBe('상품 사진 한 장으로 포스터가 나옵니다');
+  it('두 번째 버튼 묶음 바로 앞 = 요약 카드 1장(자사몰 연동 · 이미지 스튜디오 · 문안과 여정 · 자동마케팅) · 평문에도 실린다', () => {
+    const s = buildProposalEmailSections(guide, base) as any[];
+    const ctaIdxs = s.map((x, i) => (x.type === 'cta' ? i : -1)).filter((i) => i >= 0);
+    expect(ctaIdxs).toHaveLength(2);
+    const more = s[ctaIdxs[1] - 1];
+    expect(more.type).toBe('text_card');
+    expect(more.props.tag).toBe(guide.emailCopy.more.tag);
+    expect(more.props.body).toContain('이미지 스튜디오:');
+    expect(more.props.body).toContain('문안과 여정:');
+    expect(more.props.body).toContain('자동마케팅:');
+    expect(more.props.body).toContain('아이소이 상품');
+    expect(String(more.props.body)).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic|—/);
     const text = buildOutreachPlainText(guide, base);
-    expect(text).toContain('- 문안과 여정:');
-    expect(text).toContain('- 자동마케팅:');
-    expect(text).toContain('- 이미지 스튜디오:');
-    expect(types[types.length - 1]).toBe('footer');
+    expect(text).toContain(guide.emailCopy.more.headline);
+    expect(text).toContain('자동마케팅:');
+    expect(s[s.length - 1].type).toBe('footer');
+    // 옛 3막 카드·기능 3칸 0
+    expect(s.filter((x) => x.type === 'text_card' && /^\d\./.test(String(x.props?.tag || '')))).toHaveLength(0);
   });
-  it('기능 문구는 업체명 직후에 조사를 붙이지 않는다', () => {
-    for (const item of guide.emailCopy.features.items) {
-      for (const name of ['한줄로', '인비토']) {
-        const body = item.body(name);
-        const after = body.slice(body.indexOf(name) + name.length, body.indexOf(name) + name.length + 1);
-        expect(['을', '를', '이', '가', '은', '는', '과', '와'], body).not.toContain(after);
+  it('요약 문구는 업체명 직후에 조사를 붙이지 않는다', () => {
+    for (const name of ['한줄로', '인비토']) {
+      for (const line of guide.emailCopy.more.lines(name)) {
+        if (!line.includes(name)) continue;
+        const after = line.slice(line.indexOf(name) + name.length, line.indexOf(name) + name.length + 1);
+        expect(['을', '를', '이', '가', '은', '는', '과', '와'], line).not.toContain(after);
       }
     }
-    const h = guide.emailCopy.features.headline('인비토');
-    expect(h.startsWith('인비토 ')).toBe(true);
   });
 });

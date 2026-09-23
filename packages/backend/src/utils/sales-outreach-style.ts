@@ -6,9 +6,13 @@
  * - ★2026-09-03 실물 참조(섹션 골격)는 참조 골격 CT가 맡는다(best-copy-assets getStructureSkeleton · sales-outreach-produce pickOutreachStructure).
  * - ★2026-09-05 v1: 샘플 예시(few-shot) 층이 붙었다(sales-outreach-exemplars.ts · 직원 실물 DM 10건·이메일 9건 마스킹본).
  *   이 파일은 문안 규칙 층 + 제안 메일 문구(emailCopy)를 소유한다. `sampleTrained=true`의 뜻 = 예시 층이 생성 프롬프트에 실린다.
+ * - ★2026-09-23 제안 메일 재구성(docs/2026-09-23-outreach-direct-send-design.md §11 · Harold 결재) — 모바일 첫 화면 = 헤드라인 + [DM 열어보기] + 그 브랜드 시안 머리.
+ *   3막 스토리(홈페이지 하나로 · 자사몰 연동 · 5분 투자)는 카드 1장 요약으로 줄였다(0906(3) 스토리 지시의 압축 · 같은 결재).
+ *   'AI' 는 헤드라인 1번 + footer 고지 1번만 · 번호 태그(1. 2. 3.) 0 · 괄호 "(예시 · 시안)" 은 footer 고지로.
  * - 테이블 승격 조건(하나라도 생기면 sales_outreach_style_guides 신설로 이관):
  *   ①샘플 세트 2개 이상 ②Harold가 화면에서 가이드 편집을 요구 ③버전 롤백 필요.
  */
+import { INVITO_INFO } from '../config/defaults';
 
 export interface OutreachStyleGuide {
   version: string;
@@ -33,51 +37,37 @@ export interface OutreachStyleGuide {
    */
   emailCopy: {
     senderBrandName: string;
+    /** 제목·서두 생성이 실패했을 때의 기본 제목(옛 키) */
     subjectDefault: (companyName: string) => string;
+    /** ★ 2026-09-23 결정 제목 — 확정 행사명이 있을 때 · 없거나 길면 generic */
+    subjectEvent: (companyName: string, eventTitle: string) => string;
+    subjectGeneric: (companyName: string) => string;
     preheader: (companyName: string) => string;
     introDefault: (companyName: string) => string;
-    hero: { headline: string; headlineNoImage: (companyName: string) => string; subCopy: string };
-    /**
-     * ★ 0906(3) Harold 스토리라인 — 1) 홈페이지만 읽고 자동으로 이만큼(기술력) 2) 자사몰 연동·이미지 몇 장이면 훨씬 위 3) 5분이면 브로마이드급(features).
-     * 사실만 · 로드맵 0 · 모델명 0. 캡처 갤러리 문구는 이미지 렌더러가 title 과 caption 을 그린다.
-     */
-    story: {
-      auto: { tag: string; headline: string; body: (companyName: string) => string };
-      /**
-       * ★ v3 대조 2장(설계서 §8) — 왼쪽 = 담당자 홈 첫 화면 캡처(있을 때만) · 오른쪽 = 자동으로 만든 모바일 DM 첫 화면 캡처 · 포스터 카드. 전부 이미지 위 text_card(gallery 0).
-       * 캡처 위에는 글자를 얹지 않는다(카드의 headline·body 가 설명).
-       */
-      capture: {
-        title: string;
-        homeHeadline: (companyName: string) => string; homeBody: string;
-        dmHeadline: string; dmBody: (companyName: string) => string;
-        posterHeadline: string; posterBody: string;
-        /** 옛 키(갤러리 캡션) — 평문 대체본이 계속 쓴다 */
-        dmCaption: string; posterCaption: string;
-      };
-      compare: { tag: string; headline: string; body: (companyName: string) => string; imageTitle: string; imageCaption: string };
-    };
-    /** ★ v3 회신 유도 1문장(마지막 카드 body 마지막 줄 · 검토 화면에서 60자까지 편집 = stage_results.reply_line) */
-    reply: string;
-    lead: { tag: string; headlineWithEvent: string; headlineNoEvent: string; quoteLabel: string };
-    sample: { tag: string; headline: (companyName: string) => string; body: string };
+    /** ★ 2026-09-23 담당자명이 있을 때만 서두 첫 줄(사람이 넣은 이름 · 제목에는 넣지 않는다) */
+    greeting: (contactName: string) => string;
+    /** ★ 2026-09-23 첫 화면 헤드라인(이 메일에서 'AI' 는 여기와 footer 고지 두 번뿐) */
+    opener: { headline: (companyName: string) => string };
+    sample: { tag: string; headline: (companyName: string) => string };
+    /** ★ 2026-09-23 시안에 담은 확정 행사 요약(제목 · 기간 줄 · 원문 인용 덤프 없음) */
+    events: { tag: string; headline: string };
     showcase: { tag: string; headline: string };
+    /** ★ 2026-09-23 옛 2·3막(자사몰 연동 · 5분 투자 3가지)을 카드 1장으로 */
+    more: { tag: string; headline: string; lines: (companyName: string) => string[] };
+    /** ★ v3 회신 유도 1문장(서비스 카드 body 마지막 줄 · 검토 화면에서 60자까지 편집 = stage_results.reply_line) */
+    reply: string;
     /** ★ 2026-09-15 catalog = 아웃리치 카탈로그 DM 버튼(카탈로그가 만들어진 건에만 실린다) */
     cta: { primary: string; secondary: string; catalog: string };
     service: { headline: string; body: string };
-    /**
-     * ★ 2026-09-06(2) Harold 지시 — 제안 메일 본문에 한줄로 기능 3가지(여정 · 자동마케팅 · 이미지 스튜디오)를 실물 근거와 함께 섞어 넣는다.
-     * 사실만(기능 상설 SoT 문서의 정의 · 로드맵 0 · 모델명 0). 이미지 스튜디오 headline 은 포스터가 있으면 "이 메일의 이미지가 그 결과물"이라고 가리킨다(호기심 축).
-     */
-    features: {
-      tag: string;
-      headline: (companyName: string) => string;
-      body: string;
-      items: Array<{ tag: string; headline: (hasPoster: boolean) => string; body: (companyName: string) => string }>;
-    };
     footer: { notes: string[]; basisLine: (kstDate: string) => string; legal: string };
+    /** ★ 2026-09-23 담당자 직접 발송 법정 footer 의 전송자 명칭(buildEmailAdFooter 에 넘긴다) */
+    senderLegalName: string;
+    /** ★ 2026-09-23 평문 대체본의 수신거부 줄(직접 발송 건) */
+    plainUnsubscribe: (sender: string, url: string) => string;
     /** 검수 테스트 발송 제목 접두 */
     testSubjectPrefix: string;
+    /** ★ 2026-09-23 직접 발송 때 자사 수신함으로 따로 보내는 사본 제목 접두 */
+    copySubjectPrefix: string;
   };
 }
 
@@ -112,87 +102,44 @@ const STYLE_GUIDE_V1: OutreachStyleGuide = {
   emailCopy: {
     senderBrandName: '한줄로',
     subjectDefault: (c) => `${c} 맞춤 마케팅 시안이 도착했습니다`,
-    preheader: (c) => `${c} 맞춤 시안 · 한줄로AI 제작 예시`,
-    introDefault: (c) => `${c} 홈페이지를 살펴보고, 한줄로AI로 귀사 브랜드에 맞춘 마케팅 예시를 만들어 보았습니다. 아래에서 실물 그대로 확인하실 수 있습니다.`,
-    hero: {
-      headline: '귀사 홈페이지만 읽고 AI가 자동으로 만든 시안입니다',
-      headlineNoImage: (c) => `${c} 홈페이지만 읽고 AI가 자동으로 만든 시안입니다`,
-      subCopy: '이미지 · 문안 · 모바일 페이지 전부 사람 손 없이 만들어졌습니다(예시 · 시안)',
-    },
-    story: {
-      auto: {
-        tag: '1. 홈페이지 주소 하나로',
-        headline: '사람 손 없이 여기까지 만들었습니다',
-        body: (c) => `${c} 홈페이지를 AI가 읽고 대표 이미지 · 모바일 DM · 브랜드 이메일 · 문자 문안을 자동으로 만들었습니다. 아래 화면 캡처와 시안이 그 결과입니다.`,
-      },
-      capture: {
-        title: '자동으로 만든 모바일 DM(화면 캡처)와 대표 이미지',
-        homeHeadline: (c) => `${c} 홈페이지 첫 화면(읽은 원본)`,
-        homeBody: 'AI가 읽은 출발점입니다. 이 화면의 배너 · 행사 · 상품 정보만으로 아래 시안을 만들었습니다.',
-        dmHeadline: '자동으로 만든 모바일 DM 첫 화면',
-        dmBody: (c) => `${c} 홈페이지의 행사와 상품을 그대로 옮긴 모바일 DM 시안입니다. 아래 버튼으로 실제 페이지가 열립니다.`,
-        posterHeadline: '대표 이미지 · 이미지 스튜디오 자동 제작',
-        posterBody: '홈페이지 상품 사진 한 장으로 배경을 걷어내고 연출 템플릿에 얹어 만든 이미지입니다.',
-        dmCaption: '모바일 DM 시안 · 누르면 실제 페이지가 열립니다',
-        posterCaption: '대표 이미지 · 이미지 스튜디오 자동 제작',
-      },
-      compare: {
-        tag: '2. 자사몰 연동과 이미지 몇 장이면',
-        headline: '지금 보신 것은 시작점입니다',
-        body: (c) => `홈페이지만 읽어 만든 결과가 이 정도입니다. ${c} 자사몰을 연동하고 행사 이미지 몇 장만 올리면 상품 · 가격 · 행사를 그대로 읽어 훨씬 뛰어난 품질의 DM과 이메일이 자동으로 나옵니다.`,
-        imageTitle: '이미지 스튜디오 실제 산출물 예시',
-        imageCaption: '한줄로 이미지 스튜디오가 만든 실제 결과물입니다(예시)',
-      },
+    subjectEvent: (c, e) => `${c} ${e} 모바일 DM 시안`,
+    subjectGeneric: (c) => `${c} 맞춤 모바일 DM 시안`,
+    preheader: (c) => `${c} 홈페이지 재료로 만든 모바일 DM · 이메일 시안`,
+    introDefault: (c) => `${c} 홈페이지를 살펴보고 귀사 브랜드에 맞춘 마케팅 시안을 만들어 보았습니다. 아래 버튼을 누르면 실제 모바일 DM이 열립니다.`,
+    greeting: (n) => `${n}님, 안녕하세요.`,
+    opener: { headline: (c) => `${c} 홈페이지만 읽고 AI가 만든 모바일 DM 시안입니다` },
+    sample: { tag: '브랜드 이메일 시안', headline: (c) => `${c} 이름으로 나가는 이메일은 이런 모습입니다` },
+    events: { tag: '이번 시안에 담은 소식', headline: '홈페이지에서 확인한 진행 중 소식으로 만들었습니다' },
+    showcase: { tag: '문자 문안 예시', headline: '이런 문안으로 보낼 수 있습니다' },
+    more: {
+      tag: '여기서 더 좋아집니다',
+      headline: '지금 보신 것은 홈페이지만 읽은 결과입니다',
+      lines: (c) => [
+        `자사몰을 연동하고 행사 이미지 몇 장만 올리면 ${c} 상품 · 가격 · 행사를 그대로 읽어 훨씬 좋은 DM과 이메일이 나옵니다.`,
+        '이미지 스튜디오: 상품 사진 한 장으로 배경을 걷어내고 포스터와 배너를 만듭니다. 문구는 담당자님이 쓴 그대로만 들어갑니다.',
+        '문안과 여정: 귀사 문자를 학습해 귀사 목소리로 쓰고, 첫 구매 · 재구매 · 오랜 미방문 같은 고객의 순간을 여정으로 잇습니다.',
+        '자동마케팅: 이달 생일 고객처럼 회차마다 달라지는 대상을 골라 캠페인을 제안하고, 확인하시면 발송까지 이어집니다.',
+      ],
     },
     reply: '이 메일에 행사 이미지 2장과 자사몰 주소만 회신해 주시면 시안 3벌을 더 만들어 보내드립니다.',
-    lead: {
-      tag: '귀사 홈페이지에서 확인했습니다',
-      headlineWithEvent: '지금 진행 중인 소식에 맞춰 만들었습니다',
-      headlineNoEvent: '귀사 브랜드에 맞춰 만들었습니다',
-      quoteLabel: '홈페이지에서 본 내용',
-    },
-    sample: {
-      tag: '브랜드 이메일 시안',
-      headline: (c) => `${c} 이름으로 나가는 이메일은 이런 모습입니다`,
-      body: '아래는 귀사 홈페이지의 상품·이미지·문구만으로 한줄로AI가 구성한 이메일 시안입니다. 실제 발송 전에는 담당자님이 자유롭게 고칠 수 있습니다.',
-    },
-    showcase: { tag: 'AI 문안 예시', headline: '이런 문안으로 보낼 수 있습니다' },
     cta: { primary: '산출물 보기', secondary: 'DM 열어보기', catalog: '카탈로그 보기' },
     service: {
       headline: '한줄로는 이렇게 도와드립니다',
-      body: '한줄로는 문자·이메일·모바일 DM·인앱 메시지를 AI가 만들어 보내는 마케팅 자동화 서비스입니다. 이 안내의 이미지·문안·모바일 페이지 전부 한줄로AI가 귀사 홈페이지만 보고 만들었습니다.',
-    },
-    features: {
-      tag: '3. 5분만 투자하면 브로마이드급',
-      headline: (c) => `${c} 담당자님이 5분으로 바꿀 수 있는 세 가지`,
-      body: '지금 보신 자동 시안 위에 세 가지만 더하면 결과물이 달라집니다.',
-      items: [
-        {
-          tag: '이미지 스튜디오',
-          headline: (hasPoster) => (hasPoster ? '이 메일 맨 위 이미지도 그렇게 만들었습니다' : '상품 사진 한 장으로 포스터가 나옵니다'),
-          body: (c) => `${c} 상품 사진을 올리면 배경을 자동으로 걷어내고(누끼) 300여 종 연출 템플릿 중 골라 포스터와 배너를 바로 산출물로 씁니다. 문구는 담당자님이 쓴 그대로만 들어가 지어낸 혜택이 실릴 일이 없습니다.`,
-        },
-        {
-          tag: '문안과 여정',
-          headline: () => '귀사 문자를 학습해 귀사 목소리로 씁니다',
-          body: (c) => `${c} 대표 문안을 학습한 AI가 그 어투로 문자 · 모바일 DM · 이메일 문안을 쓰고, 첫 구매 · 재구매 · 오랜 미방문 같은 고객의 순간을 출발점으로 여정을 설계합니다. 조건과 대기 시간은 말로 설명하면 됩니다.`,
-        },
-        {
-          tag: '자동마케팅',
-          headline: () => '매달 생일자 같은 반복 마케팅은 자동으로',
-          body: (c) => `이달 생일 고객, 등급이 오른 고객, 발길이 끊긴 고객처럼 회차마다 달라지는 대상을 AI가 골라 ${c} 소식에 맞춘 캠페인을 제안하고, 담당자님이 확인하면 발송까지 이어집니다.`,
-        },
-      ],
+      body: '한줄로는 문자 · 이메일 · 모바일 DM · 인앱 메시지를 만들고 보내는 마케팅 자동화 서비스입니다. 이 메일의 시안은 전부 귀사 홈페이지만 보고 만들었습니다.',
     },
     footer: {
       notes: [
-        '본 안내의 모든 산출물은 한줄로AI로 제작된 예시(시안)입니다.',
+        '본 안내의 모든 산출물은 한줄로가 AI로 자동 제작한 예시(시안)입니다.',
         '귀사에 맞춤형 제안을 드리기 위하여 귀사 홈페이지의 이미지를 활용한 예시를 보여드렸습니다. 상업적 이용이 아닌 귀사 제안용으로만 사용되었음을 확약드립니다.',
       ],
       basisLine: (kstDate) => `본 안내는 ${kstDate} 기준 홈페이지 내용을 참고했습니다.`,
-      legal: '(주)인비토 · 한줄로(hanjul.ai)',
+      // ★ 2026-09-23 발신자 명칭 · 주소 · 연락처(INVITO_INFO 단일 원천 · 정보통신망법 제50조 표기 축)
+      legal: `(주)인비토 · 한줄로(hanjul.ai) · ${INVITO_INFO.address} · ${INVITO_INFO.phone}`,
     },
+    senderLegalName: '주식회사 인비토(한줄로)',
+    plainUnsubscribe: (sender, url) => `본 메일은 ${sender}의 광고 정보입니다. 수신을 원하지 않으시면: ${url}`,
     testSubjectPrefix: '[검수] ',
+    copySubjectPrefix: '[사본] ',
   },
 };
 
