@@ -8,11 +8,12 @@
 //    기본이 pad 라 잘리지 않기 때문이다.
 // ⛔ 추가 입력을 요구하지 않는다. 사진을 올리고 글을 쓰면 그걸로 끝이고, 규격 맞춤은 서버가 알아서 한다.
 
-import { useMemo, useRef, useState } from 'react';
-import { ImagePlus, Loader2, Send, X, CheckCircle2, Info, Clock, Sparkles, Library } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ImagePlus, ImageOff, Loader2, Send, X, CheckCircle2, Info, Clock, Sparkles, Library } from 'lucide-react';
 import SnsChannelLogo from './SnsChannelLogo';
 import SnsAssetPicker from './SnsAssetPicker';
 import { useToast } from '../ToastProvider';
+import { fetchAuthObjectUrl } from '../../lib/auth-download';
 import { snsAccountAbility, type SnsAccount, type SnsSpec } from '../../utils/sns-view';
 import { OUI_CARD, OUI_BTN_PRIMARY, OUI_BTN_GHOST, OUI_BTN_OUTLINE, OUI_SRC } from '../../utils/operator-ui';
 
@@ -20,7 +21,8 @@ interface UploadedMedia {
   id: string;
   width: number;
   height: number;
-  previewUrl: string;
+  /** 화면 미리보기 blob 주소. 못 받았으면 null(사진은 서버에 있어 올리기는 된다). */
+  previewUrl: string | null;
   fits: { platform: string; label: string; untouched: boolean; notice: string }[];
 }
 
@@ -40,7 +42,8 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
   const [tags, setTags] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [scheduledAt, setScheduledAt] = useState('');
-  const [uploading, setUploading] = useState(false);
+  /** 어느 입구가 사진을 받는 중인가. 로더는 누른 버튼에만 돈다. */
+  const [uploading, setUploading] = useState<null | 'file' | 'asset'>(null);
   const [busy, setBusy] = useState(false);
   const [refining, setRefining] = useState(false);
   /** AI가 채웠다는 표시. 사용자가 한 글자라도 고치면 사라진다(§4-2). */
@@ -49,6 +52,45 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
 
   const token = () => localStorage.getItem('token');
   const auth = () => ({ Authorization: `Bearer ${token()}` });
+
+  /**
+   * 미리보기 blob 주소 반납. 목록에서 빠진 사진(빼기 · 게시 뒤 비우기)과 화면을 떠날 때 남은 것을 여기 한 곳에서 돌려준다.
+   * 안 돌려주면 탭을 닫을 때까지 사진이 메모리에 남는다.
+   */
+  const liveUrls = useRef<string[]>([]);
+  const alive = useRef(true);
+  useEffect(() => {
+    const now = media.map((m) => m.previewUrl).filter((u): u is string => !!u);
+    for (const u of liveUrls.current) if (!now.includes(u)) URL.revokeObjectURL(u);
+    liveUrls.current = now;
+  }, [media]);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      for (const u of liveUrls.current) URL.revokeObjectURL(u);
+      liveUrls.current = [];
+    };
+  }, []);
+
+  /**
+   * 서버에 저장된 사진을 목록에 붙인다. 두 입구(직접 올리기 · 소재에서 고르기)가 같이 쓴다.
+   * ★ 2026-09-23 B-0923-4: 미리보기 주소 `/api/sns/media/:id` 는 로그인이 필요해 `<img src>` 에 그대로 넣으면 401 로 깨졌다
+   *   (`<img>` 는 Authorization 헤더를 못 붙인다). 공용 CT 로 헤더를 실어 받아 blob 주소로 띄운다.
+   *   못 받으면 null: 사진은 이미 서버에 있어 올리기는 그대로 되고, 칸에는 깨진 그림 대신 빈 사진 표시가 선다.
+   */
+  const appendMedia = async (data: { media: { id: string; width: number; height: number }; fits?: unknown }) => {
+    let previewUrl: string | null = null;
+    try { previewUrl = await fetchAuthObjectUrl(`/api/sns/media/${data.media.id}`); } catch { /* 미리보기만 못 띄운다 */ }
+    if (!alive.current) { if (previewUrl) URL.revokeObjectURL(previewUrl); return; }
+    setMedia((prev) => [...prev, {
+      id: data.media.id,
+      width: data.media.width,
+      height: data.media.height,
+      previewUrl,
+      fits: Array.isArray(data.fits) ? data.fits : [],
+    }]);
+  };
 
   /** 연결돼서 실제로 고를 수 있는 계정만. 해제·확인 필요는 여기 안 나온다. */
   const usable = useMemo(
@@ -71,7 +113,7 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
 
   const upload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    setUploading(true);
+    setUploading('file');
     try {
       for (const file of Array.from(files).slice(0, 10)) {
         const form = new FormData();
@@ -79,18 +121,12 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
         const res = await fetch('/api/sns/media', { method: 'POST', headers: auth(), body: form });
         const data = await res.json();
         if (!data?.success) { toast.error(data?.error || '사진을 올리지 못했습니다.'); continue; }
-        setMedia((prev) => [...prev, {
-          id: data.media.id,
-          width: data.media.width,
-          height: data.media.height,
-          previewUrl: `/api/sns/media/${data.media.id}`,
-          fits: Array.isArray(data.fits) ? data.fits : [],
-        }]);
+        await appendMedia(data);
       }
     } catch {
       toast.error('사진을 올리지 못했습니다.');
     } finally {
-      setUploading(false);
+      setUploading(null);
       if (fileRef.current) fileRef.current.value = '';
     }
   };
@@ -100,7 +136,7 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
    * 그 표식이 있어야 우리가 만든 사진에 AI 표시가 자동으로 붙는다(§3-9).
    */
   const pickFromLibrary = async (assetIds: string[]) => {
-    setUploading(true);
+    setUploading('asset');
     try {
       for (const assetId of assetIds) {
         const res = await fetch('/api/sns/media/from-asset', {
@@ -110,18 +146,12 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
         });
         const data = await res.json();
         if (!data?.success) { toast.error(data?.error || '소재를 가져오지 못했습니다.'); continue; }
-        setMedia((prev) => [...prev, {
-          id: data.media.id,
-          width: data.media.width,
-          height: data.media.height,
-          previewUrl: `/api/sns/media/${data.media.id}`,
-          fits: Array.isArray(data.fits) ? data.fits : [],
-        }]);
+        await appendMedia(data);
       }
     } catch {
       toast.error('소재를 가져오지 못했습니다.');
     } finally {
-      setUploading(false);
+      setUploading(null);
     }
   };
 
@@ -222,15 +252,15 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
         {media.length === 0 ? (
           /* 반반 — 직접 올리기 / 소재에서 고르기. 이미 만들어 둔 소재를 다시 올리게 하지 않는다. */
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <button onClick={() => fileRef.current?.click()} disabled={uploading}
+            <button onClick={() => fileRef.current?.click()} disabled={uploading !== null}
               className="py-10 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 hover:bg-white/[0.03] transition-colors flex flex-col items-center gap-2">
-              {uploading ? <Loader2 className="w-6 h-6 animate-spin text-violet-400" /> : <ImagePlus className="w-6 h-6 text-white/40" />}
+              {uploading === 'file' ? <Loader2 className="w-6 h-6 animate-spin text-violet-400" /> : <ImagePlus className="w-6 h-6 text-white/40" />}
               <span className="text-sm text-white/70">직접 올리기</span>
               <span className="text-[11px] text-white/40">내 컴퓨터에서 고르기</span>
             </button>
-            <button onClick={() => setPickerOpen(true)} disabled={uploading}
+            <button onClick={() => setPickerOpen(true)} disabled={uploading !== null}
               className="py-10 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 hover:bg-white/[0.03] transition-colors flex flex-col items-center gap-2">
-              <Library className="w-6 h-6 text-white/40" />
+              {uploading === 'asset' ? <Loader2 className="w-6 h-6 animate-spin text-violet-400" /> : <Library className="w-6 h-6 text-white/40" />}
               <span className="text-sm text-white/70">소재에서 고르기</span>
               <span className="text-[11px] text-white/40">이미지 스튜디오에서 만든 소재</span>
             </button>
@@ -240,7 +270,11 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
             <div className="flex gap-2 flex-wrap">
               {media.map((m, i) => (
                 <div key={m.id} className="relative w-24 h-24 rounded-xl overflow-hidden border border-white/10 bg-white/5">
-                  <img src={m.previewUrl} alt="" className="w-full h-full object-cover" />
+                  {m.previewUrl ? <img src={m.previewUrl} alt="" className="w-full h-full object-cover" /> : (
+                    <div className="w-full h-full flex items-center justify-center" title="미리보기를 불러오지 못했습니다. 올리기는 그대로 됩니다.">
+                      <ImageOff className="w-5 h-5 text-white/30" />
+                    </div>
+                  )}
                   <span className="absolute left-1 top-1 text-[10px] px-1 rounded bg-slate-950/70 text-white/70">{i + 1}</span>
                   <button onClick={() => setMedia((prev) => prev.filter((x) => x.id !== m.id))}
                     className="absolute right-1 top-1 p-0.5 rounded bg-slate-950/70 text-white/70 hover:text-white" aria-label="빼기">
@@ -248,15 +282,15 @@ export default function SnsComposer({ specs, accounts, onPublished }: Props) {
                   </button>
                 </div>
               ))}
-              <button onClick={() => fileRef.current?.click()} disabled={uploading}
+              <button onClick={() => fileRef.current?.click()} disabled={uploading !== null}
                 className="w-24 h-24 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors"
                 title="직접 올리기">
-                {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImagePlus className="w-5 h-5" />}
+                {uploading === 'file' ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImagePlus className="w-5 h-5" />}
               </button>
-              <button onClick={() => setPickerOpen(true)} disabled={uploading}
+              <button onClick={() => setPickerOpen(true)} disabled={uploading !== null}
                 className="w-24 h-24 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors"
                 title="소재에서 고르기">
-                <Library className="w-5 h-5" />
+                {uploading === 'asset' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Library className="w-5 h-5" />}
               </button>
             </div>
 

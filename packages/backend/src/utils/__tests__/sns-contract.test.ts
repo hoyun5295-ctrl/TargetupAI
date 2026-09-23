@@ -298,6 +298,53 @@ describe('소재 라이브러리 픽커 (§4-2 · §3-9)', () => {
   });
 });
 
+describe('작성 구역 미리보기 · 인증 주소는 헤더를 실어 받는다 (B-0923-4)', () => {
+  // 0923 접수: 소재에서 고른 사진이 작성 구역에서 깨진 그림으로 보였다.
+  // `/api/sns/media/:id` 는 authenticate 뒤라 `<img src>` 로 부르면 401 이다(`<img>` 는 Authorization 헤더를 못 붙인다).
+  // 직접 올리기도 같은 주소를 써서 똑같이 깨졌다. 처방 = 공용 CT `fetchAuthObjectUrl`(B-0923-1 과 같은 뿌리).
+  const COMPOSER = readFileSync(resolve(FRONT, 'components/sns/SnsComposer.tsx'), 'utf8');
+  const ROUTE = readFileSync(resolve(__dirname, '../../routes/sns.ts'), 'utf8');
+
+  it('미리보기 주소는 인증 뒤에 둔다 · 공개로 풀어서 고치지 않는다(불변 14)', () => {
+    const authAt = ROUTE.indexOf('router.use(authenticate)');
+    const mediaAt = ROUTE.indexOf("router.get('/media/:id'");
+    expect(authAt).toBeGreaterThan(-1);
+    expect(mediaAt).toBeGreaterThan(authAt);
+    expect(ROUTE).not.toMatch(/snsPublicRouter\.get\('\/media\//);
+  });
+
+  it('미리보기 주소를 그대로 쓰지 않고 공용 CT 로 받는다', () => {
+    expect(COMPOSER).toMatch(/import \{[^}]*fetchAuthObjectUrl[^}]*\} from '\.\.\/\.\.\/lib\/auth-download'/);
+    const uses = [...COMPOSER.matchAll(/`\/api\/sns\/media\/\$\{/g)];
+    expect(uses.length).toBeGreaterThan(0);
+    for (const u of uses) {
+      expect(COMPOSER.slice(Math.max(0, u.index! - 40), u.index)).toMatch(/fetchAuthObjectUrl\($/);
+    }
+  });
+
+  it('두 입구가 같은 함수로 사진을 붙인다 · 한쪽만 고쳐지지 않게', () => {
+    const upload = COMPOSER.slice(COMPOSER.indexOf('const upload = async'), COMPOSER.indexOf('const pickFromLibrary'));
+    const pick = COMPOSER.slice(COMPOSER.indexOf('const pickFromLibrary'), COMPOSER.indexOf('const refine'));
+    expect(upload).toMatch(/await appendMedia\(data\)/);
+    expect(pick).toMatch(/await appendMedia\(data\)/);
+    expect(upload).not.toMatch(/setMedia\(/);
+    expect(pick).not.toMatch(/setMedia\(/);
+  });
+
+  it('못 받은 미리보기는 깨진 그림 대신 빈 사진 표시로 그린다', () => {
+    expect(COMPOSER).toMatch(/m\.previewUrl\s*\?\s*<img src=\{m\.previewUrl\}/);
+  });
+
+  it('다 쓴 blob 주소를 돌려준다 · 빼기·게시 뒤 비우기·화면 이탈', () => {
+    expect(COMPOSER).toMatch(/URL\.revokeObjectURL/);
+  });
+
+  it('로더는 누른 입구에서만 돈다', () => {
+    expect(COMPOSER).toMatch(/uploading === 'file'/);
+    expect(COMPOSER).toMatch(/uploading === 'asset'/);
+  });
+});
+
 describe('캡션 규칙 CT', () => {
   const igSpec = { maxCaptionChars: 2200, maxTags: 30 };
   const xSpec = { maxCaptionChars: 280, maxTags: 10 };
