@@ -76,7 +76,7 @@ describe('불변 23 — 실비 채널 월 상한 · 개방 판정', () => {
   });
 
   it('워커도 개방 판정 함수를 다시 부른다(ENV 가 그 사이 비면 보내지 않는다)', () => {
-    expect(w).toMatch(/snsChannelAvailable\(adapter\)/);
+    expect(w).toMatch(/snsChannelAvailable\(adapter, row\.company_id\)/);
   });
 
   it('실비 채널은 삭제 감지(반복 과금)에서 빠진다', () => {
@@ -92,8 +92,14 @@ describe('라우트 — 조각 업로드 · 저장 판정 · 연결 확장', () 
   });
 
   it('저장은 게시물 행을 만들기 전에 채널별 수용·영상 판정을 끝낸다', () => {
-    const post = r.slice(r.indexOf(`router.post('/posts'`));
+    // ★ 2026-09-24 저장은 CT(sns-compose.ts composeSnsPost)로 옮겼다 — 라우트는 CT 만 부른다.
+    const route = r.slice(r.indexOf(`router.post('/posts'`), r.indexOf(`router.post('/posts/:id/publish'`));
+    expect(route).toMatch(/composeSnsPost\(/);
+    expect(route).not.toMatch(/INSERT INTO sns_posts/);
+    const COMPOSE = code(readFileSync(resolve(__dirname, '../sns-compose.ts'), 'utf8'));
+    const post = COMPOSE.slice(COMPOSE.indexOf('export async function composeSnsPost'));
     const insert = post.indexOf('INSERT INTO sns_posts');
+    expect(insert).toBeGreaterThan(-1);
     expect(post.indexOf('snsMediaBlockReason(')).toBeGreaterThan(-1);
     expect(post.indexOf('snsMediaBlockReason(')).toBeLessThan(insert);
     expect(post.indexOf('planSnsVideoFit(')).toBeLessThan(insert);

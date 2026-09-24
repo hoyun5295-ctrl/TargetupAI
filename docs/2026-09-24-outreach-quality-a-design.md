@@ -2,7 +2,8 @@
 
 > 접수: Harold 「홈페이지만 읽어서 해도 퀄리티를 끌어올려야 하는데 영 마음에 들지가 않네」 → 「A부터 설계 확정하고 구현까지」.
 > 근거 실물: 톤28 잡 `ea70ffc6` (산출물 `/api/outreach/v/3cbb05142a` · DM `dm-DmvTXF7` · 카탈로그 `dm-Skt1knt`) 원문·이미지 5장 직접 확인 + Harold SQL(선택 행사 원문 · hero_fallback false · block_gate 7/0).
-> 상설 = [FEATURE-SALES-OUTREACH.md](FEATURE-SALES-OUTREACH.md). B(네이버 스토어 전용 판독기)는 별도 설계.
+> 상설 = [FEATURE-SALES-OUTREACH.md](FEATURE-SALES-OUTREACH.md). B(네이버 스토어 전용 판독기)는 [별도 설계](2026-09-24-outreach-naver-store-reader-design.md).
+> **상태: ★2026-09-24 배포완료 · 실측(§5) 대기** · 백엔드 vitest 360/5,517 · tsc 0.
 
 ## 1. 축 대조표 (결함 → 원인 확인 자리 → 처방)
 

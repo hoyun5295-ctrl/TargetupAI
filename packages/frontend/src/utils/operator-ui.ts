@@ -53,7 +53,10 @@ export const OUI_BADGE_NEW = 'text-[10px] font-bold px-1.5 py-0.5 rounded bg-vio
 
 /** 헤더 우측 액션(최대 2): primary 1 + ghost 1 */
 export const OUI_BTN_PRIMARY = 'h-9 px-3 rounded-lg text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white inline-flex items-center gap-1.5 transition-colors disabled:opacity-50';
-export const OUI_BTN_OUTLINE = 'h-9 px-3 rounded-lg text-xs font-medium text-violet-200 border border-violet-400/30 hover:bg-violet-500/15 inline-flex items-center gap-1.5 transition-colors';
+// ★ 2026-09-24 disabled 표시 추가(눌리지 않는 버튼이 눌리는 것처럼 보이던 문제 · PRIMARY 와 같은 값)
+export const OUI_BTN_OUTLINE = 'h-9 px-3 rounded-lg text-xs font-medium text-violet-200 border border-violet-400/30 hover:bg-violet-500/15 inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+/** ★ 2026-09-24 AI 동작 버튼(AI로 캡션 쓰기 등) — 일반 버튼과 구별되는 한 단 밝은 그라데이션 */
+export const OUI_BTN_AI = 'h-9 px-3 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 shadow-sm shadow-violet-900/40 inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 export const OUI_BTN_GHOST = 'h-9 px-3 rounded-lg text-xs font-medium text-white/70 hover:bg-white/10 hover:text-white inline-flex items-center gap-1.5 transition-colors';
 
 /** 카드 한 벌 + 강조 카드(화면당 1개) */

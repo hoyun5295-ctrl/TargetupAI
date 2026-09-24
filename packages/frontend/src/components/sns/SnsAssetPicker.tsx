@@ -64,7 +64,6 @@ export default function SnsAssetPicker({ open, onClose, onPick }: Props) {
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="w-full max-w-3xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
         <div className="flex items-center gap-3 px-5 py-4 border-b border-white/10">

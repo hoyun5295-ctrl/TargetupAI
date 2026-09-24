@@ -115,7 +115,8 @@ describe('어댑터 계약', () => {
       expect(getSnsAdapter(p)!.available).toBe(true);
     }
     // 화면 specs 는 어댑터의 available 을 그대로 싣지 않고 개방 판정 함수를 거친다(코드 배포만으로 열리지 않게).
-    expect(ROUTE_SRC).toMatch(/available:\s*snsChannelAvailable\(a\)\.ok/);
+    // ★ 0924 — 회사 id 를 함께 넘긴다(채널 회사 명단 · 심사 전 채널).
+    expect(ROUTE_SRC).toMatch(/available:\s*snsChannelAvailable\(a, companyId\)\.ok/);
   });
 
   it('capabilities 는 전 채널이 직접 선언한다', () => {
@@ -132,7 +133,8 @@ describe('어댑터 계약', () => {
     const ig = getSnsAdapter('instagram')!;
     expect(ig.capabilities.dailyLimit).toBe(100);
     expect(ig.capabilities.maxCaptionChars).toBe(2200);
-    expect(ig.capabilities.maxTags).toBe(30);
+    // ★ 2026-09-24 30 → 5 — Meta @creators 공지(2025-12-18) '게시물당 해시태그 최대 5개'
+    expect(ig.capabilities.maxTags).toBe(5);
     expect(ig.capabilities.publishCarousel).toBe(true);
     // ★ 1차-B(0923) — 릴스가 열렸다(문서 기준 · raw 전 · 설계 1b §2)
     expect(ig.capabilities.publishVideo).toBe(true);
@@ -336,7 +338,8 @@ describe('작성 구역 미리보기 · 인증 주소는 헤더를 실어 받는
 
   it('두 입구가 같은 함수로 사진을 붙인다 · 한쪽만 고쳐지지 않게', () => {
     const upload = COMPOSER.slice(COMPOSER.indexOf('const upload = async'), COMPOSER.indexOf('const pickFromLibrary'));
-    const pick = COMPOSER.slice(COMPOSER.indexOf('const pickFromLibrary'), COMPOSER.indexOf('const refine'));
+    // ★ 2026-09-24 pickFromLibrary 다음 함수 = lookupMedia(불러와서 쓰기 · 같은 appendMedia 를 쓴다)
+    const pick = COMPOSER.slice(COMPOSER.indexOf('const pickFromLibrary'), COMPOSER.indexOf('const lookupMedia'));
     expect(upload).toMatch(/await appendMedia\(data\)/);
     expect(pick).toMatch(/await appendMedia\(data\)/);
     expect(upload).not.toMatch(/setMedia\(/);

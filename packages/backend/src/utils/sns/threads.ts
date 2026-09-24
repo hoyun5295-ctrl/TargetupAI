@@ -47,7 +47,10 @@ export const threadsAdapter: ISnsPublishAdapter = {
     publishStory: false,
     asyncContainer: true,      // 원문 "게시 전 평균 30초 대기 권장" · 영상은 처리 시간이 있다
     maxCaptionChars: 500,      // §1-1
-    maxTags: 30,               // ⚠ 미검증 — Threads 는 태그 수 상한을 명시하지 않는다. 캡션 500자가 사실상 상한이다.
+    // ★ 2026-09-24 1 — 공식 문서 "Only one topic tag is allowed per post · 첫 유효 태그가 그 게시물의 태그".
+    //   본문에 태그가 여럿이어도 거부가 아니라 표시 방식이라 경고하지 않는다(tagFirstOnly).
+    maxTags: 1,
+    tagFirstOnly: true,
     dailyLimit: 250,           // §1-1
     requiresExplicitConsent: false,
     metered: false,

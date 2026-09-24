@@ -14,6 +14,7 @@
 
 import type { ISnsAdapter } from './sns/adapter';
 import { resolveSnsCredentials } from './sns-accounts';
+import { companyListAllows, SNS_CHANNEL_COMPANY_ENV } from './sns-constants';
 
 /** 실비 채널의 이번 달 게시 상한. 비었거나 숫자가 아니거나 0 이하면 0(= 닫힘). */
 export function snsMeteredMonthlyCap(env: Record<string, string | undefined> = process.env): number {
@@ -21,14 +22,25 @@ export function snsMeteredMonthlyCap(env: Record<string, string | undefined> = p
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
+/**
+ * ★ 2026-09-24 넷째 조건 — **심사 전 채널(페이스북 페이지·X)은 채널 회사 명단에 든 회사에만** 연다.
+ *   자사 실측용으로 자격 ENV 를 넣는 순간 SNS 가 열린 모든 회사에 카드가 열리던 구멍을 막는다.
+ *   `companyId` 는 필수 인자다(호출부 4곳을 tsc 로 강제 · 빠뜨리면 카드와 저장 판정이 갈린다).
+ */
 export function snsChannelAvailable(
   adapter: ISnsAdapter,
+  companyId: string | null,
   env: Record<string, string | undefined> = process.env,
 ): { ok: true } | { ok: false; reason: string } {
   if (!adapter.available) return { ok: false, reason: '아직 준비 중인 채널이에요.' };
   const creds = resolveSnsCredentials(adapter.platform, env);
   if (!creds.ok) return { ok: false, reason: creds.reason };
   if (adapter.capabilities.metered && snsMeteredMonthlyCap(env) === 0) {
+    return { ok: false, reason: '아직 준비 중인 채널이에요.' };
+  }
+  const gateKey = SNS_CHANNEL_COMPANY_ENV[adapter.platform];
+  // ⛔ `?? ''` — 명단 ENV 가 없으면 빈 문자열로 판정한다(닫힘). 다른 명단으로 넘어가지 않는다.
+  if (gateKey && !companyListAllows(companyId, env[gateKey] ?? '')) {
     return { ok: false, reason: '아직 준비 중인 채널이에요.' };
   }
   return { ok: true };

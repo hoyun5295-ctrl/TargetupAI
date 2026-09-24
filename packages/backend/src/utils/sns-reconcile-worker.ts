@@ -19,7 +19,7 @@
 import { query } from '../config/database';
 import { getSnsAdapter } from './sns';
 import { isSnsPublishAdapter, SnsAdapterError, type ISnsAdapter, type SnsPublishRequest } from './sns/adapter';
-import { isSnsPlatform } from './sns-constants';
+import { isSnsPlatform, SNS_ERROR_CODES } from './sns-constants';
 import { ensureFreshSnsToken, isMissingSnsTable } from './sns-accounts';
 
 const TICK_MS = 30 * 60 * 1000;
@@ -52,15 +52,28 @@ async function buildRequest(row: any, adapter: ISnsAdapter): Promise<SnsPublishR
 /** ① 좌초 회수 */
 async function recoverStalled(): Promise<void> {
   // 게시 호출까지 간 행 — 되돌리면 이중 게시다. 증거 조회로 결말을 짓게 `submitted` 로 올린다.
+  //   ★ 2026-09-24 S2 — 게시 id 가 있어야 확인 조회가 된다. 없으면 `submitted` 로 올려도 어느 경로도 줍지 않아
+  //   영구히 '올리는 중'이었다(0924 최종 검증 R3-04). 그 행은 발행 워커와 같은 모양(결과 모름 · 다시 시도 잠금)으로 닫는다.
   const called = await query(
     `UPDATE sns_post_targets
         SET status = 'submitted', lock_token = NULL, updated_at = NOW()
-      WHERE status = 'claimed' AND stage = 'publish_called'
+      WHERE status = 'claimed' AND stage = 'publish_called' AND platform_post_id IS NOT NULL
         AND claimed_at < NOW() - ($1 || ' minutes')::interval
       RETURNING id`,
     [String(STALL_MINUTES)],
   );
   if (called.rowCount) console.warn(`[SNS reconcile] 게시 호출 후 좌초 ${called.rowCount}건 → 확인 대기로 올림`);
+  const unknown = await query(
+    `UPDATE sns_post_targets
+        SET status = 'failed', lock_token = NULL, next_attempt_at = NULL,
+            last_error_code = $2, last_error = '올라갔는지 확인하지 못했어요. 채널에서 먼저 확인해 주세요.', updated_at = NOW()
+      WHERE status = 'claimed' AND stage = 'publish_called' AND platform_post_id IS NULL
+        AND claimed_at < NOW() - ($1 || ' minutes')::interval
+      RETURNING id, post_id`,
+    [String(STALL_MINUTES), SNS_ERROR_CODES.PUBLISH_OUTCOME_UNKNOWN],
+  );
+  if (unknown.rowCount) console.warn(`[SNS reconcile] 게시 호출 후 결과 모름 ${unknown.rowCount}건 → 다시 시도 잠금 · 채널에서 확인`);
+  for (const r of unknown.rows) await refreshPostStatus(r.post_id);
 
   const back = await query(
     `UPDATE sns_post_targets

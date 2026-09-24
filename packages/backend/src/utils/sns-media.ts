@@ -151,6 +151,18 @@ export function snsMediaAbsPath(relPath: string): string {
   return path.join(SNS_MEDIA_BASE, rel);
 }
 
+/**
+ * ★ 2026-09-24 E2 목록 썸네일(사진만 · 96px 칸의 2배). 원본은 건드리지 않고 매번 메모리에서 줄인다.
+ * 서빙 캐시(.opt)를 쓰지 않는 규칙은 게시본 이야기라 여기와 무관하지만, 파일을 새로 만들지 않는 쪽이 정리할 것이 없다.
+ */
+export async function snsMediaThumbnail(relPath: string, width = 192): Promise<Buffer> {
+  return sharp(snsMediaAbsPath(relPath))
+    .rotate()
+    .resize({ width, height: width, fit: 'cover', withoutEnlargement: true })
+    .jpeg({ quality: 78 })
+    .toBuffer();
+}
+
 export interface SnsRenderResult {
   /** 게시본 절대 경로 */
   absPath: string;

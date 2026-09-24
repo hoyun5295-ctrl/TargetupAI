@@ -68,6 +68,10 @@ export const SNS_ERROR_CODES = {
   MONTHLY_CAP: 'MONTHLY_CAP',                // 실비 채널 이번 달 상한(불변 23)
   CONTAINER_FAILED: 'CONTAINER_FAILED',      // 컨테이너 실패 상한 3회(D3)
   PROCESSING_TIMEOUT: 'PROCESSING_TIMEOUT',  // 처리 30분 초과
+  // ★ 2026-09-24 (docs/2026-09-24-sns-channel-design.md §2) — 상태값은 늘리지 않고 코드 값만 더한다(불변 7)
+  PUBLISH_OUTCOME_UNKNOWN: 'PUBLISH_OUTCOME_UNKNOWN', // 게시 호출 뒤 결과를 모름 → 다시 시도 잠금 · 채널에서 확인(S2)
+  ACCOUNT_REVOKED: 'ACCOUNT_REVOKED',                 // 사용자가 연결을 해제해 예약을 함께 취소(S4)
+  REPLACED: 'REPLACED',                               // 글 고치기로 새 예약에 자리를 넘김(E6)
 } as const;
 
 /**
@@ -100,10 +104,29 @@ export function snsPublishEnabled(
   companyId: string | null | undefined,
   env: string | undefined = process.env.SNS_COMPANY_IDS,
 ): boolean {
-  const list = String(env || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return companyListAllows(companyId, String(env || ''));
+}
+
+/**
+ * 회사 명단 판정 — **기본값 없는 순수 파서**(★2026-09-24).
+ * 비면 false · `*` = 전 회사. 채널별 게이트는 반드시 이 함수를 부른다 —
+ * `snsPublishEnabled` 는 두 번째 인자가 비면(undefined) SNS 전체 명단으로 넘어가므로,
+ * 채널 명단 ENV 가 없을 때 전 회사에 열리는 구멍이 된다(0924 최종 검증 R-01).
+ */
+export function companyListAllows(companyId: string | null | undefined, raw: string): boolean {
+  const list = String(raw).split(',').map((s) => s.trim()).filter(Boolean);
   if (list.length === 0 || !companyId) return false;
   return list.includes('*') || list.includes(String(companyId));
 }
+
+/**
+ * ★ 2026-09-24 채널별 회사 명단 ENV — **심사 전 채널만** 둔다. 비면 그 채널은 닫힌다(fail-closed).
+ * 자격 ENV 를 넣어도 여기 든 회사에만 열린다. 인스타·Threads 는 없음(SNS_COMPANY_IDS 로만 연다 · 지금 동작 그대로).
+ */
+export const SNS_CHANNEL_COMPANY_ENV: Partial<Record<SnsPlatform, string>> = {
+  facebook_page: 'SNS_FACEBOOK_PAGE_COMPANY_IDS',
+  x: 'SNS_X_COMPANY_IDS',
+};
 
 /** OAuth state TTL — 사용자가 플랫폼에 로그인하고 승인까지 걸리는 시간(우커머스 30분 선례). */
 export const SNS_OAUTH_STATE_TTL_MS = 30 * 60 * 1000;

@@ -74,7 +74,7 @@ export const facebookPageAdapter: ISnsPublishAdapter = {
     publishStory: false,
     asyncContainer: false,
     maxCaptionChars: 5000,       // ⚠ 미검증(1차 스켈레톤 값 유지)
-    maxTags: 30,
+    maxTags: 30,                 // ⚠ 공식 근거 없음 — 페이스북 도움말은 태그 개수 상한을 적지 않는다(0924 열람)
     dailyLimit: 50,              // ⚠ 미검증 — 우리 원장 상한으로만 쓴다
     requiresExplicitConsent: false,
     metered: false,

@@ -4,6 +4,7 @@
 > 근거 원본: Harold 가 저장한 톤28 브랜드스토어 화면(`톤28.html` 1.8MB) 안 `window.__PRELOADED_STATE__`(220KB JS 객체).
 > 선행: [품질 A](2026-09-24-outreach-quality-a-design.md) · 스토어 입구(북마크·수신 탭·store-grab) = [직접 발송 설계서 §9-1](2026-09-23-outreach-direct-send-design.md).
 > 상설 = [FEATURE-SALES-OUTREACH.md](FEATURE-SALES-OUTREACH.md) 불변 50.
+> **상태: ★2026-09-24 배포완료 · 실측(§5) 대기 · 북마크 버튼 다시 설치 필요** · 백엔드 vitest 361/5,526 · tsc 0 백·프 · build:safe · 버튼 Node 검사(원본 전체 → 허용 칸 6 · 회원 칸 0 · 압축 30KB).
 
 ## 1. 원본에서 확인한 사실 (톤28 1건)
 

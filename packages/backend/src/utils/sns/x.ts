@@ -141,7 +141,7 @@ export const xAdapter: ISnsPublishAdapter = {
     publishStory: false,
     asyncContainer: true,        // 영상은 처리 상태를 본다
     maxCaptionChars: 280,        // 가중 280(원문)
-    maxTags: 10,
+    maxTags: 10,                 // ⚠ 공식 근거 없음(0924 · help.x.com 열람 실패) · 태그도 가중 글자 수에 포함된다
     dailyLimit: 50,
     requiresExplicitConsent: false,
     metered: true,

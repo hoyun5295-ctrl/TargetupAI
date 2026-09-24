@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
+import { clearSnsDrafts } from '../utils/sns-draft';
 
 const api = axios.create({
   baseURL: '/api',
@@ -27,6 +28,7 @@ api.interceptors.response.use(
 
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      clearSnsDrafts();   // ★ 2026-09-24 SNS 쓰던 글(sns-draft.ts)
 
       // 강제 로그아웃 (다른 곳에서 로그인)
       if (data?.forceLogout) {

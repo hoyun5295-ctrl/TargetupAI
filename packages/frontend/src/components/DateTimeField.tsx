@@ -55,6 +55,8 @@ interface DateTimeFieldProps {
   /** 제어형 오픈 (선택) — 부모가 별도 트리거로 모달을 열 때 */
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
+  /** ★ 2026-09-24 트리거 빈칸 문구·창 제목(기본 '발송 시점 선택' · SNS 는 '올릴 시각 선택') */
+  title?: string;
 }
 
 const LIGHT_BORDER = { borderColor: '#d7d9e0' } as const;
@@ -77,7 +79,7 @@ const TRIGGER = {
 } as const;
 
 export function DateTimeField({
-  value, onChange, tone = 'dark', clearable = false, disabled = false, open, onOpenChange,
+  value, onChange, tone = 'dark', clearable = false, disabled = false, open, onOpenChange, title = '발송 시점 선택',
 }: DateTimeFieldProps) {
   const controlled = open !== undefined;
   const [internalOpen, setInternalOpen] = useState(false);
@@ -165,7 +167,7 @@ export function DateTimeField({
         style={tone === 'light' ? LIGHT_BORDER : undefined}
       >
         <Calendar className={`w-3.5 h-3.5 shrink-0 ${trg.icon}`} />
-        <span className={label ? trg.text : trg.placeholder}>{label || '발송 시점 선택'}</span>
+        <span className={label ? trg.text : trg.placeholder}>{label || title}</span>
       </button>
       {clearable && value && (
         <button
@@ -190,7 +192,7 @@ export function DateTimeField({
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
                   <Calendar className="w-4 h-4 text-white" />
                 </div>
-                <h3 className="text-white font-bold text-sm">발송 시점 선택</h3>
+                <h3 className="text-white font-bold text-sm">{title}</h3>
               </div>
               <button type="button" onClick={() => setOpen(false)} className="text-white/50 hover:text-white p-1.5 hover:bg-white/5 rounded" aria-label="닫기">
                 <X className="w-5 h-5" />

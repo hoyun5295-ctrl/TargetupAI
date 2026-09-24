@@ -9,6 +9,8 @@
  * 백엔드 계약 테스트가 이 파일을 읽어 계정 상태 7개를 다 덮는지 단정한다.
  */
 
+import { hasBenefitPlaceholder, hasUrlPlaceholder } from './message-placeholders';
+
 export interface SnsAccount {
   id: string;
   platform: string;
@@ -20,6 +22,13 @@ export interface SnsAccount {
   connectedAt: string | null;
   lastVerifiedAt: string | null;
   tokenExpiresAt: string | null;
+  // ★ 2026-09-24 C4 — 서버 카드 파생값(sns-accounts.ts toAccountCard)
+  /** 연결 연장이 실패하고 있고 만료가 7일 안 */
+  renewFailing?: boolean;
+  /** 이 계정으로 기다리는 예약 수 */
+  waitingScheduled?: number;
+  /** 연결 확인이 10분 넘게 끝나지 않음 */
+  stuck?: boolean;
 }
 
 export interface SnsVideoSpec {
@@ -53,6 +62,8 @@ export interface SnsCapabilities {
   pollIntervalSec: number;
   tokenRefresh: 'scheduled' | 'at_use' | 'none';
   captionCounting: 'chars' | 'x_weighted';
+  /** ★ 2026-09-24 첫 태그만 태그로 인정하는 채널(Threads) */
+  tagFirstOnly?: boolean;
 }
 
 export interface SnsSpec {
@@ -98,6 +109,18 @@ export interface SnsTargetView {
   platformPostId: string | null;
   lastError: string | null;
   lastErrorCode: string | null;
+  // ★ 2026-09-24 E1~E3 — 서버 목록 CT(sns-posts.ts)가 싣는 값. 옛 응답에는 없을 수 있다.
+  accountId?: string;
+  accountUsername?: string | null;
+  accountDisplayName?: string | null;
+  accountStatus?: string | null;
+  scheduledAt?: string | null;
+  /** 이 채널에 실제로 올라간(올라갈) 확정본 */
+  caption?: string;
+  /** 다시 시도로 대체된 옛 줄 — 버튼 0 · 흐리게 */
+  superseded?: boolean;
+  action?: SnsFailureAction;
+  checkUrl?: string | null;
 }
 
 /**
@@ -139,9 +162,34 @@ export function canRetrySnsTarget(t: SnsTargetView): boolean {
   return t.status === 'failed' && !t.platformPostId;
 }
 
-/** 진행 중인 것이 있으면 화면이 폴링한다(끝난 목록을 계속 두드리지 않는다). */
-export function hasSnsInFlight(posts: { targets: SnsTargetView[] }[]): boolean {
-  return posts.some((p) => p.targets.some((t) => ['scheduled', 'claimed', 'submitted'].includes(t.status) && !t.verifiedAt));
+/** 폴링을 켜 두는 예약 창 — 이 시간 안에 올라갈 예약이 있으면 미리 두드린다(E8). */
+export const SNS_POLL_LEAD_MS = 10 * 60 * 1000;
+
+/**
+ * 진행 중인 것이 있으면 화면이 폴링한다(끝난 목록을 계속 두드리지 않는다).
+ * ★ 2026-09-24 E8 — 진행 중 = 올리는 중(claimed) · 확인 대기(submitted) · **10분 안에 올라갈 예약**.
+ *   먼 예약은 폴링하지 않는다(다음 예약 10분 전에 타이머가 깨운다 · SnsHistory).
+ */
+export function hasSnsInFlight(posts: { targets: SnsTargetView[] }[], now: number = Date.now()): boolean {
+  return posts.some((p) => p.targets.some((t) => {
+    if (t.superseded) return false;
+    if ((t.status === 'claimed' || t.status === 'submitted') && !t.verifiedAt) return true;
+    if (t.status !== 'scheduled') return false;
+    const at = t.scheduledAt ? new Date(t.scheduledAt).getTime() : NaN;
+    // 시각을 모르는 예약(옛 응답)은 진행 중으로 본다 — 안 두드려서 놓치는 쪽보다 낫다.
+    return !Number.isFinite(at) || at - now <= SNS_POLL_LEAD_MS;
+  }));
+}
+
+/** 다음 예약 시각(폴링 타이머). 없으면 null. */
+export function nextSnsScheduledAt(posts: { targets: SnsTargetView[] }[]): number | null {
+  let min: number | null = null;
+  for (const p of posts) for (const t of p.targets) {
+    if (t.superseded || t.status !== 'scheduled' || !t.scheduledAt) continue;
+    const at = new Date(t.scheduledAt).getTime();
+    if (Number.isFinite(at) && (min === null || at < min)) min = at;
+  }
+  return min;
 }
 
 /** 해제된 계정은 카드에서 접는다(이력 때문에 행은 남아 있지만 "연결된 채널"은 아니다). */
@@ -276,3 +324,309 @@ export function formatSnsDuration(sec: number): string {
   const s = Math.max(0, Math.round(sec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
+
+// ───────────────────────── ★ 2026-09-24 올릴 글 · 연결 관리 — 서버 CT 미러 ─────────────────────────
+// 설계 SoT = docs/2026-09-24-sns-channel-design.md §4 B-2·B-3 · §5 C5 · §6.
+// ⛔ 원본 = backend/src/utils/sns-caption-rules.ts(checkSnsTag·extractBodyHashtags·buildSnsCaption) ·
+//    sns-caption-ai.ts(splitTrailingTagLines·snsCaptionMode). **같은 입력에 같은 답**이어야 한다.
+//    화면이 보여 준 글과 올라가는 글이 다르면 서버가 409 CAPTION_CHANGED 로 멈춘다. 계약 테스트가 같은 표로 맞춘다.
+
+export type SnsFailureAction = 'reconnect' | 'retry_at' | 'publish_now' | 'check' | 'rewrite' | 'none';
+
+export interface SnsPostView {
+  id: string;
+  body: string;
+  tags: string[];
+  status: string;
+  scheduled_at: string | null;
+  created_at: string;
+  media_ids: string[];
+  nextAt?: string | null;
+  targets: SnsTargetView[];
+}
+
+export type SnsAttentionKind = 'reconnect' | 'stuck' | 'ineligible' | 'renew_failing' | 'failed' | 'unknown';
+
+export interface SnsAttentionItem {
+  kind: SnsAttentionKind;
+  platform: string;
+  accountId: string;
+  accountUsername: string | null;
+  accountDisplayName: string | null;
+  reason: string | null;
+  waitingScheduled?: number;
+  expiresAt?: string | null;
+  postId?: string;
+  targetId?: string;
+  at?: string | null;
+  checkUrl?: string | null;
+}
+
+export interface SnsAttention {
+  items: SnsAttentionItem[];
+  total: number;
+}
+
+export interface SnsComposeDefaults {
+  accountIds: string[];
+  dropped: Array<{ accountId: string; reason: 'disconnected' | 'metered' | 'closed' }>;
+  source: 'last_post' | 'only_account' | 'none';
+}
+
+/** 우리가 만든 이미지가 실린 글 끝에 붙는 표시(서버 brand-message.ts BRAND_AI_IMAGE_NOTICE 와 같은 값 · 계약 테스트). */
+export const SNS_AI_IMAGE_NOTICE = '*AI로 생성된 이미지입니다';
+
+const TAG_BODY_RE = /^[0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ_]+$/;
+const JAMO_ONLY_RE = /^[ㄱ-ㅎㅏ-ㅣ]+$/;
+const DIGITS_ONLY_RE = /^[0-9]+$/;
+export const SNS_TAG_MAX_CHARS = 50;
+
+export type SnsTagCheck = { ok: true; tag: string } | { ok: false; raw: string; reason: string };
+
+/** 태그 한 개 판정. 앞 `#` 와 공백을 지운다. 거절이면 사유 한 문장. 빈 값이면 null. */
+export function checkSnsTag(raw: unknown): SnsTagCheck | null {
+  const src = String(raw ?? '');
+  const s = src.trim().replace(/^#+/, '').replace(/\s+/g, '').normalize('NFC');
+  if (!s) return null;
+  if (!TAG_BODY_RE.test(s)) return { ok: false, raw: src.trim(), reason: '태그에는 한글·영문·숫자·밑줄만 쓸 수 있어요.' };
+  if (DIGITS_ONLY_RE.test(s)) return { ok: false, raw: src.trim(), reason: '숫자만으로는 태그가 되지 않아요.' };
+  if (JAMO_ONLY_RE.test(s)) return { ok: false, raw: src.trim(), reason: '자음·모음만으로는 태그를 만들 수 없어요.' };
+  if ([...s].length > SNS_TAG_MAX_CHARS) return { ok: false, raw: src.trim(), reason: `태그는 ${SNS_TAG_MAX_CHARS}자까지 쓸 수 있어요.` };
+  return { ok: true, tag: s };
+}
+
+export function normalizeSnsTag(raw: unknown): string | null {
+  const r = checkSnsTag(raw);
+  return r && r.ok ? r.tag : null;
+}
+
+/** 중복·형식 위반을 걸러 낸 태그 목록(순서 유지 · 대소문자 무시 중복 제거). */
+export function normalizeSnsTags(raw: readonly unknown[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const tag = normalizeSnsTag(item);
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+  }
+  return out;
+}
+
+interface SnsTextSpan { start: number; end: number; text: string }
+
+function findSnsLinkSpans(text: string): SnsTextSpan[] {
+  const src = String(text ?? '');
+  const spans: SnsTextSpan[] = [];
+  for (const re of [X_SCHEME_URL_RE, X_BARE_URL_RE]) {
+    for (const m of src.matchAll(re)) {
+      if (m.index == null) continue;
+      const start = m.index;
+      const end = start + m[0].length;
+      if (spans.some((sp) => start < sp.end && end > sp.start)) continue;
+      spans.push({ start, end, text: m[0] });
+    }
+  }
+  return spans.sort((a, b) => a.start - b.start);
+}
+
+const BODY_TAG_RE = /(^|[^0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ_&/])#([0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ_]+)/g;
+
+function findBodyHashtagSpans(text: string): Array<SnsTextSpan & { tag: string }> {
+  const src = String(text ?? '');
+  const links = findSnsLinkSpans(src);
+  const out: Array<SnsTextSpan & { tag: string }> = [];
+  for (const m of src.matchAll(BODY_TAG_RE)) {
+    if (m.index == null) continue;
+    const start = m.index + m[1].length;
+    const end = start + 1 + m[2].length;
+    if (links.some((l) => start < l.end && end > l.start)) continue;
+    const r = checkSnsTag(m[2]);
+    if (!r || !r.ok) continue;
+    out.push({ start, end, text: src.slice(start, end), tag: r.tag });
+  }
+  return out;
+}
+
+/** 본문에 사용자가 직접 쓴 해시태그(고유 · 대소문자 무시 · 처음 표기). */
+export function extractBodyHashtags(body: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const span of findBodyHashtagSpans(String(body ?? '').normalize('NFC'))) {
+    const key = span.tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(span.tag);
+  }
+  return out;
+}
+
+/** 사용자가 채워야 할 자리 표기가 남았는가(message-placeholders 규약 그대로). */
+export function hasSnsPlaceholder(text: string): boolean {
+  return hasBenefitPlaceholder(text) || hasUrlPlaceholder(text);
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const NOTICE_TAIL_RE = new RegExp(`(?:^|\\n)${escapeRe(SNS_AI_IMAGE_NOTICE)}$`);
+
+export interface SnsCaptionSpecView {
+  maxCaptionChars: number;
+  maxTags: number;
+  captionCounting?: 'chars' | 'x_weighted';
+  tagFirstOnly?: boolean;
+}
+
+export interface SnsCaptionView {
+  text: string;
+  length: number;
+  limit: number;
+  overBy: number;
+  ok: boolean;
+  droppedTags: string[];
+  aiNoticeApplied: boolean;
+  keptTags: string[];
+  bodyTags: string[];
+  alreadyInBody: string[];
+  bodyTagsOver: boolean;
+  placeholderLeft: boolean;
+}
+
+/** 채널 하나의 확정본(서버 buildSnsCaption 미러). 본문은 한 글자도 바꾸지 않는다. */
+export function buildSnsCaption(input: { body: string; tags: string[]; aiNotice: boolean }, spec: SnsCaptionSpecView): SnsCaptionView {
+  const body = String(input.body ?? '');
+  const chips = normalizeSnsTags(input.tags ?? []);
+  const bodyTags = extractBodyHashtags(body);
+  const bodyKeys = new Set(bodyTags.map((t) => t.toLowerCase()));
+  const alreadyInBody = chips.filter((t) => bodyKeys.has(t.toLowerCase()));
+  const remaining = chips.filter((t) => !bodyKeys.has(t.toLowerCase()));
+  const budget = Math.max(0, spec.maxTags - bodyTags.length);
+  const keptTags = remaining.slice(0, budget);
+  const droppedTags = remaining.slice(keptTags.length);
+  const bodyTagsOver = !spec.tagFirstOnly && bodyTags.length > spec.maxTags;
+
+  const noticeInBody = NOTICE_TAIL_RE.test(body.trimEnd());
+  const parts: string[] = [];
+  if (body.trim()) parts.push(body);
+  if (keptTags.length) parts.push(keptTags.map((t) => `#${t}`).join(' '));
+  if (input.aiNotice && !noticeInBody) parts.push(SNS_AI_IMAGE_NOTICE);
+
+  const text = parts.join('\n\n');
+  const length = countSnsCaption(text, spec.captionCounting ?? 'chars');
+  const limit = spec.maxCaptionChars;
+  const overBy = Math.max(0, length - limit);
+  const placeholderLeft = hasSnsPlaceholder(body);
+  return {
+    text, length, limit, overBy,
+    ok: overBy === 0 && !placeholderLeft,
+    droppedTags,
+    aiNoticeApplied: !!input.aiNotice || noticeInBody,
+    keptTags, bodyTags, alreadyInBody, bodyTagsOver, placeholderLeft,
+  };
+}
+
+/** 글 끝의 태그만 있는 줄을 떼어 낸다(서버 sns-caption-ai.ts 미러). */
+export function splitTrailingTagLines(body: string): { head: string; tail: string } {
+  const src = String(body ?? '');
+  const lines = src.split('\n');
+  let cut = lines.length;
+  while (cut > 0) {
+    const line = lines[cut - 1];
+    if (!line.trim()) { cut -= 1; continue; }
+    const rest = line.replace(/(^|\s)#[0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ_]+/g, ' ').trim();
+    if (rest === '' && /#/.test(line)) { cut -= 1; continue; }
+    break;
+  }
+  const tailLines = lines.slice(cut);
+  if (!tailLines.some((l) => /#/.test(l))) return { head: src, tail: '' };
+  const head = lines.slice(0, cut).join('\n');
+  return { head, tail: src.slice(head.length) };
+}
+
+export type SnsCaptionMode = 'refine' | 'photo_draft' | 'locked';
+
+/** AI 캡션 모드(서버 snsCaptionMode 미러). 버튼 문구·잠금 사유가 이것으로 정해진다. */
+export function snsCaptionMode(input: { body: string; imageCount: number; videoCount: number }): { mode: SnsCaptionMode; reason: string | null } {
+  const { head } = splitTrailingTagLines(input.body);
+  if (head.trim()) return { mode: 'refine', reason: null };
+  if (input.imageCount > 0) return { mode: 'photo_draft', reason: null };
+  if (input.videoCount > 0) return { mode: 'locked', reason: '영상만 있으면 AI가 첫 글을 쓸 수 없어요. 한 줄만 써 주시면 다듬어 드릴게요.' };
+  return { mode: 'locked', reason: '글을 한 줄 쓰거나 사진을 올리면 AI가 도와드려요.' };
+}
+
+// ── 계정 이름 · 채널 요약(A-0-3 · C5) ──
+
+function dayText(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
+
+function baseAccountName(a: { username: string | null; displayName: string | null }): string {
+  const u = String(a.username || '').replace(/^@/, '').trim();
+  if (u) return `@${u}`;
+  const d = String(a.displayName || '').trim();
+  return d || '이름 없음';
+}
+
+/**
+ * 계정 이름: @username → 표시 이름 → '이름 없음'.
+ * 같은 채널에 같은 이름의 계정이 둘 이상이면 연결한 날을 붙여 가른다(칩·카드·기록이 같은 이름을 쓴다).
+ */
+export function snsAccountName(
+  a: { id: string; platform: string; username: string | null; displayName: string | null; connectedAt?: string | null },
+  all: ReadonlyArray<{ id: string; platform: string; username: string | null; displayName: string | null; status?: string }> = [],
+): string {
+  const name = baseAccountName(a);
+  const twins = all.filter((x) => x.id !== a.id && x.platform === a.platform && x.status !== 'revoked' && baseAccountName(x) === name);
+  if (twins.length === 0) return name;
+  const day = dayText(a.connectedAt);
+  return day ? `${name} · ${day} 연결` : name;
+}
+
+/** 목록 줄(SnsTargetView)의 계정 이름. */
+export function snsTargetAccountName(t: SnsTargetView, accounts: SnsAccount[]): string {
+  const acc = accounts.find((a) => a.id === t.accountId);
+  if (acc) return snsAccountName(acc, accounts);
+  return baseAccountName({ username: t.accountUsername ?? null, displayName: t.accountDisplayName ?? null });
+}
+
+/** 다시 연결이 필요한 계정인가(끊김 · 연결 확인 멈춤). */
+export function snsNeedsReconnect(a: SnsAccount): boolean {
+  return a.status === 'token_expired' || a.status === 'reauth_required' || a.status === 'error' || (a.status === 'pending' && !!a.stuck);
+}
+
+const WORST_ORDER: Record<string, number> = {
+  reauth_required: 0, token_expired: 0, error: 0, ineligible: 1, pending: 2, active: 3,
+};
+
+/**
+ * 채널 카드 배지 = **가장 나쁜 계정**(C5). 둘째 계정이 끊겨도 카드가 '연결됨'이던 결함(K7).
+ * 연장 실패 중인 active 는 다른 active 보다 앞에 둔다.
+ */
+export function snsChannelSummary(accounts: SnsAccount[]): {
+  worst: SnsAccount | null;
+  badge: { label: string; cls: string } | null;
+  count: number;
+  connected: boolean;
+} {
+  const live = accounts.filter((a) => a.status !== 'revoked');
+  if (live.length === 0) return { worst: null, badge: null, count: 0, connected: false };
+  const rank = (a: SnsAccount) => (a.status === 'pending' && a.stuck ? 0.5 : a.status === 'active' && a.renewFailing ? 2.5 : WORST_ORDER[a.status] ?? 1.5);
+  const worst = [...live].sort((x, y) => rank(x) - rank(y))[0];
+  let badge = SNS_ACCOUNT_BADGE[worst.status] ?? null;
+  if (worst.status === 'pending' && worst.stuck) badge = SNS_ACCOUNT_BADGE.reauth_required;
+  if (worst.status === 'active' && worst.renewFailing) badge = { label: '연장 확인 필요', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' };
+  return { worst, badge, count: live.length, connected: live.some((a) => a.status === 'active') };
+}
+
+/** 실패 줄 버튼 이름(서버 snsFailureAction 이 정한 값). */
+export const SNS_ACTION_LABEL: Record<SnsFailureAction, string> = {
+  reconnect: '다시 연결',
+  retry_at: '다시 예약',
+  publish_now: '지금 다시 올리기',
+  check: '채널에서 확인',
+  rewrite: '불러와서 쓰기',
+  none: '',
+};

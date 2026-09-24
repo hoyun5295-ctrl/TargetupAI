@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { clearSnsDrafts } from '../utils/sns-draft';
 
 interface User {
   id: string;
@@ -56,6 +57,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    // ★ 2026-09-24 SNS 쓰던 글도 지운다(같은 PC 다음 사용자에게 남지 않게 · sns-draft.ts).
+    clearSnsDrafts();
     set({ user: null, token: null, isAuthenticated: false });
   },
 

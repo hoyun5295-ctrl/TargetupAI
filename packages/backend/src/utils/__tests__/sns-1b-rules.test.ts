@@ -166,15 +166,50 @@ describe('개방 판정 — 코드 · 자격 · 실비 상한 셋 다(불변 23)
     X_CLIENT_ID: 'a', X_CLIENT_SECRET: 'b', X_REDIRECT_URI: 'https://h/api/sns/auth/callback/x',
   } as Record<string, string | undefined>;
 
+  // ★ 0924 — 심사 전 채널(X·페북)은 채널 회사 명단까지 본다. 이 표의 X 판정은 명단에 든 회사('c1') 기준.
+  const gated = { ...env, SNS_X_COMPANY_IDS: 'c1' } as Record<string, string | undefined>;
+
   it('자격 ENV 가 없으면 준비 중', () => {
-    expect(snsChannelAvailable(getSnsAdapter('instagram')!, env).ok).toBe(true);
-    expect(snsChannelAvailable(getSnsAdapter('threads')!, env).ok).toBe(false);
+    expect(snsChannelAvailable(getSnsAdapter('instagram')!, 'c1', env).ok).toBe(true);
+    expect(snsChannelAvailable(getSnsAdapter('threads')!, 'c1', env).ok).toBe(false);
   });
 
   it('⛔ X 는 자격이 있어도 월 상한이 비었거나 0 이면 열리지 않는다', () => {
-    expect(snsChannelAvailable(getSnsAdapter('x')!, env).ok).toBe(false);
-    expect(snsChannelAvailable(getSnsAdapter('x')!, { ...env, SNS_X_MONTHLY_POST_CAP: '0' }).ok).toBe(false);
-    expect(snsChannelAvailable(getSnsAdapter('x')!, { ...env, SNS_X_MONTHLY_POST_CAP: 'abc' }).ok).toBe(false);
-    expect(snsChannelAvailable(getSnsAdapter('x')!, { ...env, SNS_X_MONTHLY_POST_CAP: '30' }).ok).toBe(true);
+    expect(snsChannelAvailable(getSnsAdapter('x')!, 'c1', gated).ok).toBe(false);
+    expect(snsChannelAvailable(getSnsAdapter('x')!, 'c1', { ...gated, SNS_X_MONTHLY_POST_CAP: '0' }).ok).toBe(false);
+    expect(snsChannelAvailable(getSnsAdapter('x')!, 'c1', { ...gated, SNS_X_MONTHLY_POST_CAP: 'abc' }).ok).toBe(false);
+    expect(snsChannelAvailable(getSnsAdapter('x')!, 'c1', { ...gated, SNS_X_MONTHLY_POST_CAP: '30' }).ok).toBe(true);
+  });
+});
+
+describe('★ 0924 채널 회사 명단 — 심사 전 채널은 명단에 든 회사에만 연다(fail-closed)', () => {
+  const full = {
+    FACEBOOK_PAGE_CLIENT_ID: 'a', FACEBOOK_PAGE_CLIENT_SECRET: 'b', FACEBOOK_PAGE_REDIRECT_URI: 'https://h/api/sns/auth/callback/facebook_page',
+    X_CLIENT_ID: 'a', X_CLIENT_SECRET: 'b', X_REDIRECT_URI: 'https://h/api/sns/auth/callback/x', SNS_X_MONTHLY_POST_CAP: '5',
+    INSTAGRAM_CLIENT_ID: 'a', INSTAGRAM_CLIENT_SECRET: 'b', INSTAGRAM_REDIRECT_URI: 'https://h/api/sns/auth/callback/instagram',
+  } as Record<string, string | undefined>;
+
+  it('⛔ 명단 ENV 가 없으면 닫힌다 — SNS 전체 명단(SNS_COMPANY_IDS=*)으로 넘어가지 않는다(R-01)', () => {
+    const prev = process.env.SNS_COMPANY_IDS;
+    process.env.SNS_COMPANY_IDS = '*';
+    try {
+      expect(snsChannelAvailable(getSnsAdapter('facebook_page')!, 'c1', full).ok).toBe(false);
+      expect(snsChannelAvailable(getSnsAdapter('x')!, 'c1', full).ok).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.SNS_COMPANY_IDS; else process.env.SNS_COMPANY_IDS = prev;
+    }
+  });
+
+  it('명단에 든 회사만 열리고 `*` 는 전 회사다', () => {
+    const env2 = { ...full, SNS_FACEBOOK_PAGE_COMPANY_IDS: 'c1', SNS_X_COMPANY_IDS: '*' };
+    expect(snsChannelAvailable(getSnsAdapter('facebook_page')!, 'c1', env2).ok).toBe(true);
+    expect(snsChannelAvailable(getSnsAdapter('facebook_page')!, 'c2', env2).ok).toBe(false);
+    expect(snsChannelAvailable(getSnsAdapter('x')!, 'c2', env2).ok).toBe(true);
+    expect(snsChannelAvailable(getSnsAdapter('x')!, null, env2).ok).toBe(false);
+  });
+
+  it('인스타·Threads 는 채널 명단과 무관하다(지금 동작 그대로)', () => {
+    expect(snsChannelAvailable(getSnsAdapter('instagram')!, 'c9', full).ok).toBe(true);
+    expect(snsChannelAvailable(getSnsAdapter('instagram')!, 'c9', { ...full, SNS_X_COMPANY_IDS: 'c1' }).ok).toBe(true);
   });
 });

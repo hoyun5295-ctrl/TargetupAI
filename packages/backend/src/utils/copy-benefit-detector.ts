@@ -81,14 +81,15 @@ const AMOUNT_RE = /(?<![\d.,제])\d+(?:[.,]\d+)*\s*(?:만\s*(?:\d+\s*천)?\s*원
 /** N+N 증정 표기. */
 const NPLUSN_RE = /(?<!\d)\d\s*\+\s*\d(?!\d)/g;
 
-interface BenefitSpan { start: number; end: number; text: string; }
+export interface BenefitSpan { start: number; end: number; text: string; }
 
 /**
  * 문안에서 구체 혜택이 있는 **자리**를 찾는다. 토큰 문자열이 아니라 자리(span)인 이유 —
  * 교체는 원문 그대로의 자리를 바꿔야 한다. 토큰을 재조립해 정규식으로 되찾으면
  * 붙여쓰기·띄어쓰기 차이로 못 찾고 그대로 나간다('무료 체험'으로 '무료체험을'을 못 잡는다).
  */
-function findBenefitSpans(text: string): BenefitSpan[] {
+// ★ 2026-09-24 export 만 추가(동작 불변) — SNS AI 캡션 가림·맞춤법 보호 구간이 같은 자리 판정을 쓴다.
+export function findBenefitSpans(text: string): BenefitSpan[] {
   const spans: BenefitSpan[] = [];
   const add = (start: number, raw: string) => {
     const noTail = raw.replace(/\s+$/, '');

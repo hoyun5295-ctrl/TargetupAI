@@ -55,6 +55,44 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-0924-1 공용 `cutAtWord` 가 한도에 딱 맞게 끝나는 낱말을 버린다 — 행사 버튼 이름이 짧게 잘려 "행사 자세히 보기"로 떨어진다 (🔵 Open · 착수 판단 = Harold) · 2026-09-24 AI 영업 품질 A 구현 중 발견
+
+- **실측(코드·테스트)**: `sales-outreach-produce.ts cutAtWord(s, n)` 은 `t.slice(0, n)` 뒤 마지막 공백에서 자른다 → n 번째 글자가 공백(= 낱말이 딱 n 에서 끝남)이어도 그 낱말을 버린다. "추석 맞이 톤28 윷놀이 행운의"를 13자로 자르면 "추석 맞이 톤28 윷놀이"(13자)가 아니라 "추석 맞이 톤28". 그래서 `eventCtaLabel` 이름형 라벨이 제목의 60% 미만이 되어 `sliceCtaLabel` 이 대체 문구로 떨어진다.
+- **이번 처리(호출부)**: 품질 A 에서 행사 카드 대체 문구만 "상품 자세히 보기" → "행사 자세히 보기"로 바꿨다([품질 A 설계서 §4](../docs/2026-09-24-outreach-quality-a-design.md)). 공용 함수는 고객 입구(`campaign-customer-fill.ts:131` · `headlineFromCard`)도 쓰므로 손대지 않았다.
+- **고칠 때**: `t[n]` 이 공백이면 `cut` 을 그대로 쓰는 한 줄 · 소비처 = `headlineFromCard`(포스터·제목·고객 입구 카드) · `eventCtaLabel` · `productCtaLabel` · `campaign-customer-fill` 라벨 · 스팟 카드 제목 → 결과가 길어지는 쪽(≤ n)이라 글자 넘침은 없지만 고객 입구 계약 테스트 기대값 재확인 필요.
+
+### 🟠 B-0924-2 SNS 올릴 글·채널 관리 결함 12건(K1~K12) — 태그 칸 태그가 글에 안 보임 · 다시 시도 두 번 = 두 번 게시 · 게시 뒤 확인 오류를 실패로 적음 · 해제가 예약을 남김 · 예약 시각 시간대 없음 · 작성자 NULL · 카드 '연결됨' 오표시 외 (🟡 0924 수정 · **DDL 0** · 미배포 · 실측 대기) · 2026-09-24 Harold 접수("태그에 아무리 넣어도 캡션에 자동으로 안 들어가더라")
+
+- **실측(Harold SQL 0924)**: 운영 게시 4건 모두 `sns_posts.tags = {}` · 해시태그는 본문에 붙여 넣은 것. 태그 칸은 저장 때 서버가 붙이지만 **화면 어디에도 조립본이 없었다**.
+- **결함 표·처방 = [0924 설계서 §1·§2](../docs/2026-09-24-sns-channel-design.md)**(K1~K12 · S0~S7). 요지: 사용자 id `user?.id`→`userId` 6곳 · 다시 시도 CT(`sns-retry.ts` 한 트랜잭션 · 나중 행 재계수) · 게시 호출 뒤 결과 모름 = `failed`+`PUBLISH_OUTCOME_UNKNOWN`(다시 시도 잠금) · 해제 = 같은 트랜잭션에서 예약 취소 · 예약 시각 CT(`sns-schedule.ts` · 지난 시각 400) · 묶음 상태는 계정별 최신 행으로 읽을 때 파생 · X 게시 재검증을 가중 글자로 · 캡션 CT 확장(본문 태그 · 두 번 붙지 않음 · 채울 자리 게시 불가) · 인스타 태그 5 · Threads 1.
+- **계약**: `utils/__tests__/sns-0924.test.ts`(33건 · 화면 미러 = 서버 표 대조 포함) + 기존 SNS 계약 갱신. 백엔드 vitest 362파일 5,562건 · tsc 0(백·프).
+- **실측(배포 뒤)**: 설계서 §10 SQL 4건 → 사진 1장 + 자주 쓰는 태그 → 인스타·Threads 두 곳 → 채널별 글과 실제 게시물 대조(Threads 는 첫 태그만).
+
+### 🔵 B-0924-3 DM 브랜드킷 저장이 읽기 실패 때 `brand_kit` 전체를 기본값으로 덮는다 — SNS 자주 쓰는 태그(`brand_kit.sns_tag_set`)가 함께 사라질 수 있다 (🔵 Open · 착수 판단 = Harold) · 2026-09-24 SNS 설계 회의 발견
+
+- **코드**: `utils/dm/dm-brand-kit.ts` `updateCompanyBrandKit` = `getCompanyBrandKit`(읽기 실패 catch → `DEFAULT_BRAND_KIT`) + patch 를 **통째로** `UPDATE companies SET brand_kit = $1`. 읽기가 실패하면 저장된 다른 키(`sns_tag_set` 포함)가 기본값으로 덮인다. 잠금 없는 읽기-수정-쓰기라 같은 순간의 SNS 태그 저장(`PATCH /api/sns/tag-set` · `jsonb_set` + `FOR UPDATE`)도 덮을 수 있다.
+- **이번 처리**: SNS 쪽은 이 키만 `jsonb_set` 으로 바꾼다(`sns-tag-set.ts`). DM 저장 경로는 손대지 않았다(공용 경로 · 축 밖).
+- **고칠 때**: 저장을 `brand_kit || $patch::jsonb`(키 단위 병합)로 · 읽기 실패 시 저장 중단 · 소비처 = DM 브랜드킷 PUT · 원스텝 인터뷰 · 브랜드 학습.
+
+### 🔵 B-0924-4 SNS 게시물 상태를 쓰는 곳이 서로 다른 규칙으로 쓴다 (🔵 Open · 화면 영향 0 · 기록만) · 2026-09-24 SNS 설계 회의 발견
+
+- **코드**: `sns_posts.status` 를 쓰는 곳 = `sns-publish-worker.ts refreshPostStatus`(SQL CASE · 대체된 옛 행까지 센다) · `routes/sns.ts` /publish·/cancel · `sns-compose.ts` 글 고치기 · 그 밖 워커 경로. `derivePostStatus`(상수 CT)와 SQL CASE 가 다른 판정이다.
+- **이번 처리**: 읽는 곳은 GET /posts 한 곳이고, 그 자리에서 **계정별 최신 행으로 파생**한다(`sns-posts.ts`) — 화면은 저장값을 읽지 않는다. 쓰는 쪽 정리는 축 밖.
+
+### 🔵 B-0924-5 `routes/admin.ts` 가 `(req as any).user?.id` 를 3곳에서 읽는다 — JWT 는 `userId` 라 늘 undefined 일 수 있다 (🔵 Open · 착수 판단 = Harold) · 2026-09-24 SNS S0 전수 grep 에서 발견
+
+- **코드**: `routes/admin.ts` 5883·5918·5952행 `const adminId = (req as any).user?.id;`. `middlewares/auth.ts` JwtPayload 는 `userId`. 단 슈퍼관리자 토큰은 발급 경로가 달라 **형태를 따로 확인해야 한다**(미검증).
+- **확인 방법**: 슈퍼관리자 로그인 토큰 발급 코드(`routes/admin*` 로그인)에서 payload 키 확인 → `id` 가 없으면 세 곳이 NULL 을 기록 중.
+
+### 🔵 B-0924-6 X 월 상한이 '올라갔는지 모름' 행을 세지 않는다 (🔵 Open · X 개방 전 · 기록만) · 2026-09-24 SNS 설계 회의 발견
+
+- **코드**: `sns-publish-worker.ts meteredMonthCount` = `platform_post_id IS NOT NULL` 만 센다. 게시 호출 뒤 결과를 모르는 행(`PUBLISH_OUTCOME_UNKNOWN`)은 실제로 과금됐을 수 있는데 빠진다 → 상한을 조금 넘을 수 있다.
+- **고칠 때**: `OR last_error_code = 'PUBLISH_OUTCOME_UNKNOWN'` 을 더한다. X 고객 개방(2차) 전 처리.
+
+### 🔵 B-0924-7 `sns-constants.ts` 'stage 는 어떤 분기도 읽지 않는다' 주석과 대조 워커가 다르다 (🔵 Open · 문서 정합 · 기록만) · 2026-09-24 SNS 설계 회의 발견
+
+- **코드**: `SNS_TARGET_STAGES` 주석 = 기록 전용. 그러나 `sns-reconcile-worker.ts` 는 `stage = 'publish_called'` 로 좌초 행을 골라 결과 모름 처리한다(0924 S2 로 더 분명해짐). 주석 또는 불변 §2-4 문구를 "좌초 회수만 읽는다"로 고친다.
+
 ### 🟠 B-0923-6 단문(SMS)에 제목이 실려 나간다 — 직접발송 화면에서 LMS→SMS 로 바꿔도 제목 값이 남아 title_str 에 적재 (🟡 0923 수정 · **DDL 0** · 미배포 · 실측 대기) · 2026-09-22 Harold 접수(비토 콘솔 SMS 에 제목 말풍선)
 
 - **실측(0922 게이트웨이 세션)**: `hanjul02` SMS 142,457건 중 **7,974건**(`btrim(title) <> ''`) · 발신번호 둘 · 캠페인 `252a0573` = `send_type='direct'`·`message_type='SMS'` 인데 제목 저장. 게이트웨이 화면 표시는 0922 에 따로 닫음.

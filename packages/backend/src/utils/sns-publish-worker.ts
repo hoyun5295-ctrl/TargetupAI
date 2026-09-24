@@ -207,7 +207,7 @@ async function handleTarget(row: any): Promise<void> {
     return;
   }
   // 개방 판정(불변 23) — ENV 가 그 사이 비었으면(실비 상한 해제 포함) 보내지 않는다.
-  const open = snsChannelAvailable(adapter);
+  const open = snsChannelAvailable(adapter, row.company_id);
   if (!open.ok) {
     await failTarget(targetId, lockToken, SNS_ERROR_CODES.CHANNEL_CLOSED, '지금은 이 채널에 올릴 수 없어요.');
     return;
@@ -267,6 +267,9 @@ async function handleTarget(row: any): Promise<void> {
     return;
   }
 
+  // ★ 2026-09-24 S2 — 게시 호출이 어디까지 갔는지. catch 가 "올라갔을 수 있는가"를 이 두 값으로 가른다.
+  let publishCalled = false;
+  let postIdSaved = false;
   try {
     // ③ 컨테이너 — 이미 만들어 둔 것이 있으면 재사용한다(재시도 전 증거 우선 · §2-8 · D1 재개).
     let containerId: string | null = row.container_id || null;
@@ -317,8 +320,10 @@ async function handleTarget(row: any): Promise<void> {
     // ⑤ 게시 — 호출 **직전에** 소유권을 다시 확인한다. 여기가 이중 게시를 막는 마지막 겹이다.
     //    `next_attempt_at` 을 비워 이 행이 재개 선점에 다시 잡히지 않게 한다(게시가 나갔을 수 있는 행 · D1).
     if (!await ownedUpdate(targetId, lockToken, `stage = 'publish_called', next_attempt_at = NULL`, [])) return;
+    publishCalled = true;
     const published = await adapter.publish(req, containerId);
     if (!await ownedUpdate(targetId, lockToken, `platform_post_id = $3`, [published.platformPostId])) return;
+    postIdSaved = true;
 
     // ⑥ 재조회 — **여기를 지나야 성공이다**(§2-6). 실패해도 `submitted` 로 두고 대조 워커에 넘긴다.
     if (adapter.capabilities.verify === 'immediate') {
@@ -338,7 +343,18 @@ async function handleTarget(row: any): Promise<void> {
   } catch (err) {
     console.error(`[SNS publish] ${row.platform} target ${targetId} 실패:`,
       err instanceof SnsAdapterError ? { code: err.code, raw: err.raw } : err);
-    if (isSnsReauthError(err) && err instanceof SnsAdapterError && err.httpStatus === 401) {
+    // ★ 2026-09-24 S2 — 게시가 나갔을 수 있는 오류는 '실패'로 적지 않는다(K3). 적으면 다시 시도가 열려 두 번 올라간다.
+    //   ① 게시 id 를 적은 뒤 = 올라갔다. 확인만 못 했다 → submitted 로 두고 대조 워커가 확인한다.
+    //   ② 게시를 부른 뒤 결과를 못 받음(네트워크·5xx) = 모른다 → 결과 모름 코드 · 다시 시도 잠금 · 채널에서 확인.
+    //   ③ 4xx 는 채널이 확정 거절한 것이라 지금처럼 실패다. ⛔ 이 판정이 아래 401 분기보다 앞에 있어야 한다.
+    const definitiveReject = err instanceof SnsAdapterError
+      && typeof err.httpStatus === 'number' && err.httpStatus >= 400 && err.httpStatus < 500;
+    if (postIdSaved) {
+      await ownedUpdate(targetId, lockToken, `status = 'submitted', lock_token = NULL`, []);
+    } else if (publishCalled && !definitiveReject) {
+      await failTarget(targetId, lockToken, SNS_ERROR_CODES.PUBLISH_OUTCOME_UNKNOWN,
+        '올라갔는지 확인하지 못했어요. 채널에서 먼저 확인해 주세요.');
+    } else if (isSnsReauthError(err) && err instanceof SnsAdapterError && err.httpStatus === 401) {
       await setSnsAccountStatus(row.company_id, account.id, 'reauth_required', '채널 연결이 만료되었어요. 다시 연결해 주세요.');
       await failTarget(targetId, lockToken, SNS_ERROR_CODES.REAUTH_REQUIRED, '채널 연결이 만료되어 게시하지 못했습니다. 다시 연결해 주세요.');
     } else {

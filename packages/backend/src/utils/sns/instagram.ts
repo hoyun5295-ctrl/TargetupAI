@@ -52,7 +52,9 @@ export const instagramAdapter: ISnsPublishAdapter = {
     // 피드·캐러셀은 컨테이너가 바로 FINISHED 로 오지만(§1-4) 릴스는 처리 시간이 있다.
     asyncContainer: true,
     maxCaptionChars: 2200,
-    maxTags: 30,
+    // ★ 2026-09-24 5 — Meta @creators 2025-12-18 공식 발표(게시물·릴스당 해시태그 5개). API 문서는 아직 30이라
+    //   6개 이상을 API 로 보냈을 때의 동작(거부·무시)은 미검증. 적게 싣는 쪽이 안전 방향이다(자사 실측 1건으로 확정).
+    maxTags: 5,
     dailyLimit: 100,
     requiresExplicitConsent: false,
     metered: false,

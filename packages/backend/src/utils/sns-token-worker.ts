@@ -4,7 +4,7 @@
  *
  * 6시간 주기 · 만료 14일 전 갱신 · 실패는 **status 를 바꾸지 않고** `meta.refresh_error` 만 남긴다
  * (한 번 실패했다고 계정을 끊으면, 플랫폼 일시 장애에 고객 연결이 통째로 풀린다).
- * 만료·권한 회수로 판정되면 `token_expired`/`reauth_required` + 그 계정 예약 행을 사유와 함께 닫는다.
+ * 만료·권한 회수로 판정되면 `reauth_required`. 그 계정 예약은 닫지 않고 연결을 기다린다(★2026-09-24 Harold Q1 가).
  *
  * 공통 관례(app.ts) = 부팅 1분 뒤 첫 실행 · 시작 로그 1줄 · 테이블 없으면 조용히 · **ENV 비면 미시작**.
  *
@@ -15,7 +15,7 @@
 import { query } from '../config/database';
 import { getSnsAdapter } from './sns';
 import { resolveSnsCredentials, saveRefreshedToken, setSnsAccountStatus, isMissingSnsTable, isSnsReauthError } from './sns-accounts';
-import { SNS_ERROR_CODES, isSnsPlatform } from './sns-constants';
+import { isSnsPlatform } from './sns-constants';
 
 const TICK_MS = 6 * 60 * 60 * 1000;      // 6시간
 const FIRST_DELAY_MS = 60 * 1000;        // 부팅 1분 뒤
@@ -52,21 +52,17 @@ async function tick(): Promise<void> {
       await saveRefreshedToken(row.id, token);
     } catch (err: any) {
       if (isSnsReauthError(err)) {
-        // 만료·회수 — 계정을 닫고, 그 계정으로 잡힌 예약을 조용히 실패시키지 않는다.
+        // 만료·회수 — 계정만 닫는다.
+        // ★ 2026-09-24 Harold 결정 Q1 가(기다림) — 그 계정의 예약은 **미리 닫지 않는다.**
+        //   시각 전에 다시 연결하면 같은 행이 되살아나 원래 시각에 나가고, 끝내 연결이 안 되면 발행 워커가
+        //   게시 직전 계정 재확인에서 그 시각에 사유와 함께 닫는다(sns-publish-worker handleTarget).
+        //   끊긴 동안은 화면 '확인할 것' 띠가 "예약 N건이 연결을 기다려요"로 알린다(조용히 실패 0).
+        //   전에는 이 판정 한 번(HTTP 400 도 재연결로 본다)에 예약 전부가 되돌릴 수 없게 닫혔다.
         await setSnsAccountStatus(
           row.company_id, row.id, 'reauth_required',
           '채널 연결이 만료되었어요. 다시 연결해 주세요.',
         );
-        await query(
-          `UPDATE sns_post_targets
-              SET status = 'failed',
-                  last_error_code = $3,
-                  last_error = '채널 연결이 만료되어 예약이 중단되었습니다.',
-                  updated_at = NOW()
-            WHERE company_id = $1::uuid AND account_id = $2::uuid AND status = 'scheduled'`,
-          [row.company_id, row.id, SNS_ERROR_CODES.REAUTH_REQUIRED],
-        );
-        console.warn(`[SNS token] ${row.platform} 계정 ${row.id} 재연결 필요 — ${err?.message || ''}`);
+        console.warn(`[SNS token] ${row.platform} 계정 ${row.id} 재연결 필요(예약은 연결을 기다림) — ${err?.message || ''}`);
       } else {
         // 일시 장애로 본다 — 상태는 그대로 두고 사유만 남긴다.
         await query(

@@ -5,7 +5,7 @@
 import { X, Unlink, RefreshCw, AlertTriangle } from 'lucide-react';
 import SnsChannelLogo from './SnsChannelLogo';
 import type { SnsAccount } from '../../utils/sns-view';
-import { SNS_ACCOUNT_BADGE, snsAccountAbility } from '../../utils/sns-view';
+import { SNS_ACCOUNT_BADGE, snsAccountAbility, snsAccountName, snsNeedsReconnect } from '../../utils/sns-view';
 
 interface Props {
   open: boolean;
@@ -40,10 +40,8 @@ export default function SnsChannelModal({
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
+    // ★ 2026-09-24 바깥을 눌러 닫지 않는다(설계 0924 · 닫기는 X 버튼)
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm">
       <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex items-center gap-3 px-5 py-4 border-b border-white/10">
           <div className="w-10 h-10 rounded-xl bg-white/[0.08] border border-white/15 flex items-center justify-center flex-shrink-0">
@@ -66,7 +64,7 @@ export default function SnsChannelModal({
           {accounts.map((a) => {
             const badge = SNS_ACCOUNT_BADGE[a.status];
             const left = daysLeft(a.tokenExpiresAt);
-            const needsReconnect = a.status === 'reauth_required' || a.status === 'token_expired';
+            const needsReconnect = snsNeedsReconnect(a);
             return (
               <div key={a.id} className="rounded-xl bg-white/[0.04] border border-white/10 p-3.5">
                 <div className="flex items-center gap-2.5">
@@ -76,7 +74,7 @@ export default function SnsChannelModal({
                       : <span className="text-[11px] text-white/50">{(a.username || a.displayName || '?').slice(0, 2)}</span>}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-white truncate">{a.username ? `@${a.username}` : (a.displayName || '이름 없음')}</p>
+                    <p className="text-sm text-white truncate">{snsAccountName(a, accounts)}</p>
                     {a.displayName && a.username && <p className="text-[11px] text-white/45 truncate">{a.displayName}</p>}
                   </div>
                   {badge && <span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${badge.cls}`}>{badge.label}</span>}
@@ -101,13 +99,22 @@ export default function SnsChannelModal({
                   {left !== null && (
                     <div className="flex justify-between gap-3 text-[11.5px]">
                       <dt className="text-white/45">연결 유지</dt>
-                      <dd className="text-white/80">{left}일 남음 · 자동 연장</dd>
+                      {/* ★ 2026-09-24 C4 — 연장이 실패하고 있으면 '자동 연장'이라고 말하지 않는다 · Threads 에는 쓰지 않는다 */}
+                      <dd className={a.renewFailing ? 'text-amber-200' : 'text-white/80'}>
+                        {left}일 남음{a.renewFailing ? ' · 연장이 안 되고 있어요. 다시 연결해 주세요.' : platform !== 'threads' ? ' · 자동 연장' : ''}
+                      </dd>
+                    </div>
+                  )}
+                  {(a.waitingScheduled ?? 0) > 0 && (
+                    <div className="flex justify-between gap-3 text-[11.5px]">
+                      <dt className="text-white/45">기다리는 예약</dt>
+                      <dd className="text-white/80">{a.waitingScheduled}건</dd>
                     </div>
                   )}
                 </dl>
 
                 <div className="mt-3 flex items-center gap-2 justify-end">
-                  {needsReconnect && (
+                  {(needsReconnect || a.renewFailing || a.status === 'ineligible') && (
                     <button
                       onClick={() => onReconnect(a.id)}
                       className="h-8 px-2.5 rounded-lg text-[11.5px] font-medium text-violet-200 border border-violet-400/30 hover:bg-violet-500/15 inline-flex items-center gap-1.5 transition-colors"

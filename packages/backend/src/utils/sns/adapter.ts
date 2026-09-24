@@ -92,6 +92,8 @@ export interface SnsCapabilities {
   tokenRefresh: 'scheduled' | 'at_use' | 'none';
   /** 글자 수 세는 방식. X 는 한글·이모지 2 · 링크 23(가중 280) */
   captionCounting: 'chars' | 'x_weighted';
+  /** ★ 2026-09-24 첫 태그만 태그로 인정하는 채널(Threads). 본문 태그가 여럿이어도 경고하지 않는다 */
+  tagFirstOnly?: boolean;
 }
 
 export interface SnsOAuthCreds {
