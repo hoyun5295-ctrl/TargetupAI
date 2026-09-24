@@ -607,10 +607,17 @@ router.post('/caption', async (req: Request, res: Response) => {
       if (!adapter) return res.status(400).json({ success: false, code: 'FIT_PLATFORM_REQUIRED', error: '어느 채널 길이에 맞출지 알 수 없어요.' });
       fit = { label: adapter.label, spec: adapter.capabilities, aiNotice: await snsMediaNeedsAiNotice(companyId, mediaIds) };
     }
-    const media = await loadSnsCaptionImages(companyId, mediaIds, !splitTrailingTagLines(body).head.trim());
+    const photoDraft = !splitTrailingTagLines(body).head.trim();
+    const media = await loadSnsCaptionImages(companyId, mediaIds, photoDraft);
     const tagSet = (await readSnsTagSet(companyId)).tags;
+    // ★ 0925 사진 초안의 면허에 회사 이름이 든다(브랜드명 우선)
+    let brandName = '';
+    if (photoDraft && media.images.length) {
+      const c = await query(`SELECT company_name, brand_name FROM companies WHERE id = $1::uuid`, [companyId]);
+      brandName = String(c.rows[0]?.brand_name || c.rows[0]?.company_name || '').trim();
+    }
 
-    const out = await generateSnsCaption({ companyId, userId, action, body, previous, tags, tagSet, media, fit });
+    const out = await generateSnsCaption({ companyId, userId, action, body, previous, tags, tagSet, media, fit, brandName });
     if (out.mode === 'locked') {
       return res.status(400).json({ success: false, code: 'CAPTION_AI_LOCKED', mode: out.mode, error: out.note });
     }
@@ -621,6 +628,7 @@ router.post('/caption', async (req: Request, res: Response) => {
       caption: out.caption,
       tags: out.tags,
       note: out.note,
+      imageText: out.imageText,
     });
   } catch (err: any) {
     if (err?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, code: 'AI_RATE_LIMIT', error: err.message });
@@ -794,26 +802,48 @@ router.post('/targets/:id/retry', async (req: Request, res: Response) => {
 });
 
 /**
- * 이력 목록 — `{ upcoming, posts, attention }`.
+ * 이력 목록 — `{ upcoming, posts, page, pageSize, total, attention }`.
  * ★ 2026-09-24 CT(`listSnsPostsView`)가 예약·기록을 가르고, 묶음 상태를 계정별 최신 행으로 파생하며(S6),
  *   채널 줄마다 계정 이름·확정본·대체 여부·할 수 있는 일을 싣는다(E1~E3). 확인할 것 띠도 함께 실어
  *   폴링 한 번으로 새 실패·끊김이 띠에 뜨게 한다(0924 최종 검증 R3-10).
+ * ★ 2026-09-25 기록은 `?page=N` 10개씩(카드 5 × 2). 띠 [보기]는 목록에 덧붙이지 않고 `GET /posts/:id` 로 그 글을 연다.
  */
 router.get('/posts', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
+  const page = Number.parseInt(String(req.query.page ?? '1'), 10);
   try {
-    const view = await listSnsPostsView(companyId);
+    const view = await listSnsPostsView(companyId, Date.now(), Number.isFinite(page) ? page : 1);
     const accounts = await listSnsAccounts(companyId);
     const attention = await listSnsAttention(companyId, accounts);
-    // 띠가 가리키는 글이 목록 밖이면 기록 끝에 덧붙인다([보기]가 갈 곳이 있게).
-    const shown = new Set([...view.upcoming, ...view.posts].map((p) => p.id));
-    const missing = attention.items.map((i) => i.postId).filter((id): id is string => !!id && !shown.has(id));
-    const extra = missing.length ? await loadSnsPostsByIds(companyId, Array.from(new Set(missing))) : [];
-    return res.json({ success: true, upcoming: view.upcoming, posts: [...view.posts, ...extra], attention });
+    return res.json({
+      success: true,
+      upcoming: view.upcoming,
+      posts: view.posts,
+      page: view.page,
+      pageSize: view.pageSize,
+      total: view.total,
+      attention,
+    });
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS posts] 목록 오류:', err);
     return res.status(500).json({ success: false, error: '이력을 불러오지 못했습니다.' });
+  }
+});
+
+/** ★ 2026-09-25 글 하나(상세 창) — 띠 [보기]처럼 지금 페이지 밖의 글을 열 때. 회사 조건 직접. */
+router.get('/posts/:id', async (req: Request, res: Response) => {
+  const companyId = (req as any).user?.companyId as string;
+  const postId = String(req.params.id);
+  if (!isUuid(postId)) return res.status(400).json({ success: false, error: '잘못된 요청입니다.' });
+  try {
+    const [post] = await loadSnsPostsByIds(companyId, [postId]);
+    if (!post) return res.status(404).json({ success: false, error: '글을 찾을 수 없어요.' });
+    return res.json({ success: true, post });
+  } catch (err: any) {
+    if (isMissingSnsTable(err)) return sendDbPending(res);
+    console.error('[SNS posts] 글 조회 오류:', err);
+    return res.status(500).json({ success: false, error: '글을 불러오지 못했습니다.' });
   }
 });
 

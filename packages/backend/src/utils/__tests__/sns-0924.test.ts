@@ -30,7 +30,7 @@ import { BRAND_AI_IMAGE_NOTICE } from '../brand-message';
 import {
   buildSnsCaption as viewBuild, checkSnsTag as viewCheck, extractBodyHashtags as viewExtract,
   splitTrailingTagLines as viewSplit, snsCaptionMode as viewMode, SNS_AI_IMAGE_NOTICE as VIEW_NOTICE,
-  hasSnsInFlight, snsChannelSummary, snsAccountName, type SnsAccount,
+  hasSnsInFlight, snsChannelSummary, snsAccountName, snsPostCardState, snsTargetDisplayState, type SnsAccount,
 } from '../../../../frontend/src/utils/sns-view';
 import { snsComposePostId as viewPostId, SNS_COMPOSE_NAMESPACE as VIEW_NS } from '../../../../frontend/src/utils/sns-draft';
 
@@ -198,8 +198,8 @@ describe('AI 캡션 가드(B-6)', () => {
     expect(buildSnsCaption({ body: r.caption, tags: [], aiNotice: false }, ig).placeholderLeft).toBe(true);
   });
 
-  it('사진 초안(Q2 가) — 숫자·행사·혜택 문장은 빠지고, 짧으면 결과 없이 한 줄 안내', async () => {
-    const photo = { images: [{ media_type: 'image/jpeg', data: 'x' }], imageCount: 1, videoCount: 0 };
+  it('사진 초안(Q2 가) — 사진 속 글이 없으면 숫자·행사·혜택 문장은 빠지고, 짧으면 결과 없이 한 줄 안내', async () => {
+    const photo = { images: [{ media_type: 'image/jpeg', data: 'x' }], imageIds: ['p-none'], imageCount: 1, videoCount: 0 };
     ai.mockResolvedValue(JSON.stringify({ caption: '햇살 가득한 창가 자리예요. 오늘만 20% 할인! 따뜻한 라떼 한 잔 어떠세요?', tags: [] }));
     const r = await generateSnsCaption({ ...base, body: '', media: photo });
     expect(r.mode).toBe('photo_draft');
@@ -211,6 +211,56 @@ describe('AI 캡션 가드(B-6)', () => {
     expect(short.changed).toBe(false);
     expect(short.caption).toBe('');
     expect(short.note).toBe('한 줄만 써 주시면 다듬어 드릴게요.');
+  });
+
+  // ★ 0925 A안 — 사진 속 글을 먼저 읽고(전사) 그 글을 면허로 쓴다
+  const transcribeOr = (lines: string[], caption: string) => async (p: { system: string }) => (
+    p.system.includes('전사') ? JSON.stringify({ lines }) : JSON.stringify({ caption, tags: [] })
+  );
+
+  it('A안 — 먼저 사진 속 글을 무작위성 0 으로 옮기고, 그 글에 있는 사실(OPEN → 오픈)은 남기고 없는 사실은 뺀다', async () => {
+    const photo = { images: [{ media_type: 'image/jpeg', data: 'x' }], imageIds: ['p-open'], imageCount: 1, videoCount: 0 };
+    ai.mockImplementation(transcribeOr(
+      ['NOW OPEN', '한줄로 AI OPERATION', 'AI 마케팅의 새로운 시작입니다'],
+      '한줄로 AI OPERATION이 오픈했어요!\nAI 마케팅의 새로운 시작을 함께해요. 오늘만 30% 할인해요.',
+    ));
+    const r = await generateSnsCaption({ ...base, body: '', media: photo, brandName: '한줄로' });
+    const [read, write] = ai.mock.calls.map((c) => c[0]);
+    expect(read.system).toContain('전사');
+    expect(read.temperature).toBe(0);
+    expect(read.images).toHaveLength(1);
+    expect(write.userMessage).toContain('회사 이름: 한줄로');
+    expect(write.userMessage).toContain('NOW OPEN');
+    expect(write.system).toContain('해요체');
+    expect(r.imageText).toEqual(['NOW OPEN', '한줄로 AI OPERATION', 'AI 마케팅의 새로운 시작입니다']);
+    expect(r.caption).toBe('한줄로 AI OPERATION이 오픈했어요!\nAI 마케팅의 새로운 시작을 함께해요.');
+  });
+
+  it('A안 — 사진 속 글의 숫자는 쓸 수 있고, 없는 숫자·조건·혜택 문장은 뺀다', async () => {
+    const photo = { images: [{ media_type: 'image/jpeg', data: 'x' }], imageIds: ['p-date'], imageCount: 1, videoCount: 0 };
+    ai.mockImplementation(transcribeOr(['9월 30일 GRAND OPEN'], '9월 30일에 문을 열어요! 선착순 100명께 사은품을 드려요.'));
+    const r = await generateSnsCaption({ ...base, body: '', media: photo });
+    expect(r.caption).toBe('9월 30일에 문을 열어요!');
+  });
+
+  it('A안 — 같은 사진은 다시 쓰기 때 다시 읽지 않는다(읽은 글 캐시)', async () => {
+    const photo = { images: [{ media_type: 'image/jpeg', data: 'x' }], imageIds: ['p-cache'], imageCount: 1, videoCount: 0 };
+    ai.mockImplementation(transcribeOr(['봄 신메뉴'], '봄 신메뉴가 나왔어요. 한번 드셔 보세요.'));
+    await generateSnsCaption({ ...base, body: '', media: photo });
+    await generateSnsCaption({ ...base, action: 'again', body: '', previous: '봄 신메뉴가 나왔어요.', media: photo });
+    const reads = ai.mock.calls.filter((c) => String(c[0].system).includes('전사'));
+    expect(reads).toHaveLength(1);
+  });
+
+  it('A안 — 사진을 읽다 실패해도 멈추지 않고 보이는 것만으로 이어 간다', async () => {
+    const photo = { images: [{ media_type: 'image/jpeg', data: 'x' }], imageIds: ['p-fail'], imageCount: 1, videoCount: 0 };
+    ai.mockImplementation(async (p: { system: string }) => {
+      if (p.system.includes('전사')) throw new Error('timeout');
+      return JSON.stringify({ caption: '창가에 햇살이 가득해요. 오늘도 좋은 하루 보내세요.', tags: [] });
+    });
+    const r = await generateSnsCaption({ ...base, body: '', media: photo });
+    expect(r.changed).toBe(true);
+    expect(r.imageText).toEqual([]);
   });
 
   it('영상만 · 아무것도 없음 = 잠금(AI 를 부르지 않는다)', async () => {
@@ -283,6 +333,45 @@ describe('예약 시각 · 실패 할 일 · 폴링', () => {
     expect(hasSnsInFlight([{ targets: [{ ...t, status: 'scheduled', scheduledAt: new Date(now + 300_000).toISOString() }] }], now)).toBe(true);
     expect(hasSnsInFlight([{ targets: [{ ...t, status: 'claimed' }] }], now)).toBe(true);
     expect(hasSnsInFlight([{ targets: [{ ...t, status: 'claimed', superseded: true }] }], now)).toBe(false);
+  });
+});
+
+describe('올린 기록 카드 · 상세 창 상태(0925)', () => {
+  let n = 0;
+  const t = (over: Record<string, unknown>) => ({
+    targetId: `t${++n}`, platform: 'instagram', status: 'published', permalink: null, verifiedAt: 'x',
+    deletedOnPlatformAt: null, verifyGaveUpAt: null, platformPostId: 'p', lastError: null, lastErrorCode: null, ...over,
+  });
+
+  it('문제가 있을 때만 카드 표시 — 다 올라간 글은 조용하다', () => {
+    expect(snsPostCardState([t({}), t({ platform: 'threads' })])).toBeNull();
+    expect(snsPostCardState([t({}), t({ status: 'failed', platformPostId: null })])).toEqual({ label: '일부 실패', tone: 'amber' });
+    expect(snsPostCardState([t({ status: 'failed', platformPostId: null })])).toEqual({ label: '실패', tone: 'rose' });
+    expect(snsPostCardState([t({}), t({ status: 'failed', action: 'check' })])).toEqual({ label: '확인 필요', tone: 'amber' });
+    // 다시 올려 대체된 옛 실패 줄은 세지 않는다
+    expect(snsPostCardState([t({ status: 'failed', superseded: true }), t({})])).toBeNull();
+  });
+
+  it('채널 줄 상태 — 삭제 감지와 결과 모름이 상태보다 앞선다', () => {
+    expect(snsTargetDisplayState(t({ deletedOnPlatformAt: 'x' }))).toBe('gone');
+    expect(snsTargetDisplayState(t({ status: 'failed', action: 'check' }))).toBe('check');
+    expect(snsTargetDisplayState(t({ status: 'claimed' }))).toBe('run');
+  });
+
+  it('서버가 기록을 10개씩 나누고(목록·개수 같은 조건), 글 하나 조회 입구가 있다', () => {
+    const POSTS = readFileSync(resolve(__dirname, '../sns-posts.ts'), 'utf8');
+    expect(POSTS).toMatch(/SNS_HISTORY_PAGE_SIZE = 10/);
+    expect(POSTS).toMatch(/COUNT\(\*\)::int AS n FROM sns_posts p WHERE \$\{historyWhere\}/);
+    expect(POSTS).toMatch(/WHERE \$\{historyWhere\}\s+ORDER BY p\.created_at DESC, p\.id DESC\s+LIMIT \$\{SNS_HISTORY_PAGE_SIZE\} OFFSET \$3/);
+    expect(ROUTE).toMatch(/router\.get\('\/posts\/:id'/);
+  });
+
+  it('상세 창은 바깥을 눌러 닫지 않고, 인증 사진을 공용 CT 로 받는다', () => {
+    const MODAL = readFileSync(resolve(FRONT, 'components/sns/SnsPostModal.tsx'), 'utf8');
+    expect(MODAL).not.toMatch(/e\.target === e\.currentTarget/);
+    expect(MODAL).toMatch(/fetchAuthObjectUrl\(url\)/);
+    expect(MODAL).not.toMatch(/\balert\(|\bconfirm\(|\bprompt\(/);
+    expect(MODAL).not.toMatch(/opus|sonnet|haiku|gpt-|claude|anthropic/i);
   });
 });
 

@@ -16,6 +16,10 @@
  *   ④ 출구에서 `stripUnauthorizedBenefits(결과, 원문)`
  *   ⑤ 글 끝 태그 줄은 떼어 두었다가 그대로 다시 붙인다(모델이 만지지 않는다)
  * ⛔ 버렸으면 **버렸다고 말한다**(0924 K9 · 전에는 원문을 성공처럼 돌려줬다).
+ * ★ 2026-09-25 사진 초안 = **두 단계**(Harold 0925 A안 · 포스터 문구가 한 글자도 안 들어가던 결함)
+ *   ① 사진 속 글자를 그대로 옮겨 적는다(창작 금지 · 무작위성 0) → ② 그 글을 메시지로 삼아 SNS 글을 쓴다.
+ *   쓸 수 있는 사실의 범위(면허) = ①의 글 + 회사 이름. **글을 쓰기 전에 정해 둔다** — 쓰는 단계가 면허를 넓힐 수 없다.
+ *   ①의 글은 화면에 '사진에서 읽은 글'로 보여 준다(잘못 읽었으면 사람이 바로 본다).
  * ⛔ again 의 면허는 `body`(= AI 쓰기 직전 사용자 글)다. `previous` 는 "피할 안"으로만 넘기고 면허가 아니다.
  */
 
@@ -48,6 +52,28 @@ const PHOTO_DRAFT_FACT_WORDS = [
   '신상', '입고', '출시', '예약', '주문', '배송', '가격', '영업', '휴무', '위치', '전화', '문의',
   '당첨', '추첨', '프로모션', '혜택', '무료', '증정', '할인', '쿠폰', '적립',
 ];
+
+/**
+ * ★ 2026-09-25 알림 낱말의 영문 표기 — 포스터가 'NOW OPEN' 이면 글의 '오픈'은 사진 속 글에 있는 사실이다.
+ * ⛔ 알림 낱말만 둔다. 조건·기한·혜택 낱말(할인·한정·오늘만 등)은 사진 속 글에 **그 낱말 그대로** 있어야 한다.
+ */
+const PHOTO_FACT_WORD_EQUIV: Record<string, RegExp> = {
+  '오픈': /\bopen(ing)?\b/i,
+  '개업': /\bopen(ing)?\b/i,
+  '출시': /\b(launch|release|new)\b/i,
+  '신상': /\bnew\b/i,
+  '입고': /\b(new|arrival)\b/i,
+  '행사': /\b(event|sale)\b/i,
+  '이벤트': /\bevent\b/i,
+  '세일': /\bsale\b/i,
+};
+
+/** 사진 속 글을 옮길 때 줄 수 · 줄 길이 상한 */
+const IMAGE_TEXT_MAX_LINES = 12;
+const IMAGE_TEXT_MAX_CHARS = 120;
+/** 같은 사진을 다시 쓰기 할 때 다시 읽지 않는다(프로세스 1개 전제 · 30분) */
+const IMAGE_TEXT_TTL_MS = 30 * 60 * 1000;
+const imageTextCache = new Map<string, { lines: string[]; at: number }>();
 
 // ───────────────────────────── 모드 ─────────────────────────────
 
@@ -168,8 +194,20 @@ function dropInventedHashtags(result: string, original: string): string {
   return out.replace(/[ \t]+\n/g, '\n');
 }
 
-/** 사진 초안에서 사진만으로 알 수 없는 문장을 뺀다. */
-function keepPhotoSafeSentences(text: string): string {
+/**
+ * 사진 초안에서 **면허 밖 사실**이 든 문장을 뺀다.
+ * ★ 2026-09-25 면허 = 사진 속 글 + 회사 이름. 그 안에 있는 숫자·링크·혜택·사실 낱말은 쓸 수 있다
+ *   (전에는 전부 뺐다 → 포스터 문구가 든 문장이 통째로 빠졌다).
+ */
+function keepPhotoSafeSentences(text: string, license = ''): string {
+  const lic = String(license ?? '');
+  const licLower = lic.toLowerCase();
+  const licDigits = lic.replace(/\s+/g, '');
+  const licHosts = new Set(findSnsLinkSpans(lic).map((s) => snsLinkHost(s.text)));
+  const spanKey = (t: string) => t.replace(/\s+/g, ' ').trim();
+  const licBenefits = new Set(findBenefitSpans(lic).map((s) => spanKey(s.text)));
+  const wordLicensed = (w: string) => licLower.includes(w.toLowerCase()) || !!PHOTO_FACT_WORD_EQUIV[w]?.test(lic);
+
   const lines = String(text ?? '').split('\n');
   const kept: string[] = [];
   for (const line of lines) {
@@ -177,10 +215,10 @@ function keepPhotoSafeSentences(text: string): string {
     const safe = sentences.filter((s) => {
       const t = s.trim();
       if (!t) return false;
-      if (/\d/.test(t)) return false;
-      if (findSnsLinkSpans(t).length) return false;
-      if (findBenefitSpans(t).length) return false;
-      if (PHOTO_DRAFT_FACT_WORDS.some((w) => t.includes(w))) return false;
+      if ((t.match(/\d+/g) ?? []).some((d) => !licDigits.includes(d))) return false;
+      if (findSnsLinkSpans(t).some((l) => !licHosts.has(snsLinkHost(l.text)))) return false;
+      if (findBenefitSpans(t).some((b) => !licBenefits.has(spanKey(b.text)))) return false;
+      if (PHOTO_DRAFT_FACT_WORDS.some((w) => t.includes(w) && !wordLicensed(w))) return false;
       return true;
     });
     if (safe.length) kept.push(safe.join(' '));
@@ -200,11 +238,13 @@ function sameText(a: string, b: string): boolean {
  */
 export async function loadSnsCaptionImages(companyId: string, mediaIds: readonly string[], withImages = true): Promise<{
   images: Array<{ media_type: string; data: string }>;
+  /** images 와 같은 순서의 미디어 id(사진 속 글 캐시 키) */
+  imageIds: string[];
   imageCount: number;
   videoCount: number;
 }> {
   const ids = [...new Set(mediaIds.map(String))].slice(0, 20);
-  if (!ids.length) return { images: [], imageCount: 0, videoCount: 0 };
+  if (!ids.length) return { images: [], imageIds: [], imageCount: 0, videoCount: 0 };
   const r = await query(
     `SELECT id, kind, path FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
     [companyId, ids],
@@ -214,6 +254,7 @@ export async function loadSnsCaptionImages(companyId: string, mediaIds: readonly
   const photos = ordered.filter((m) => m.kind === 'image');
   const videoCount = ordered.filter((m) => m.kind === 'video').length;
   const images: Array<{ media_type: string; data: string }> = [];
+  const imageIds: string[] = [];
   // 글이 있으면(다듬기) 사진을 읽지 않는다 — 모드 판정에 필요한 건 수뿐이다
   for (const m of withImages ? photos.slice(0, SNS_CAPTION_PHOTO_LIMIT) : []) {
     try {
@@ -223,11 +264,69 @@ export async function loadSnsCaptionImages(companyId: string, mediaIds: readonly
         .jpeg({ quality: 80 })
         .toBuffer();
       images.push({ media_type: 'image/jpeg', data: buf.toString('base64') });
+      imageIds.push(String(m.id));
     } catch (err) {
       console.error('[SNS caption] 사진 읽기 실패:', m.id, err);
     }
   }
-  return { images, imageCount: photos.length, videoCount };
+  return { images, imageIds, imageCount: photos.length, videoCount };
+}
+
+const TRANSCRIBE_SYSTEM = [
+  '너는 사진 속 글자를 옮겨 적는 전사 담당이다.',
+  '사진에 인쇄된 글자를 줄 단위로 보이는 그대로 옮긴다. 요약·의역·번역·창작 금지 · 사진에 없는 말 금지.',
+  '영문·숫자·기호도 그대로 옮긴다. 너무 작거나 흐려 읽을 수 없는 글자는 뺀다.',
+  '사진이 여러 장이면 장 순서대로 이어서 적는다.',
+  `출력은 JSON 하나만: {"lines":["첫 줄","둘째 줄"]} · 최대 ${IMAGE_TEXT_MAX_LINES}줄 · 글자가 없으면 {"lines":[]}`,
+].join('\n');
+
+/**
+ * ★ 2026-09-25 사진 속 글자 옮겨 적기(A안 1단계). 무작위성 0 · 창작 금지.
+ * 선례 = AI 영업 배너 전사(`sales-outreach-produce.ts transcribeBannerLines`).
+ * 읽지 못하면 [] — 사진 초안은 사진 속 글 없이(보이는 것만) 이어 간다. 한도 초과는 그대로 던진다(라우트가 429).
+ */
+export async function transcribeSnsImageText(input: {
+  companyId: string;
+  userId?: string | null;
+  images: Array<{ media_type: string; data: string }>;
+  imageIds: readonly string[];
+}): Promise<string[]> {
+  if (!input.images.length) return [];
+  const key = `${input.companyId}:${input.imageIds.join(',')}`;
+  const hit = imageTextCache.get(key);
+  if (hit && Date.now() - hit.at < IMAGE_TEXT_TTL_MS) return hit.lines;
+
+  let raw: string;
+  try {
+    raw = await callAIWithFallback({
+      system: TRANSCRIBE_SYSTEM,
+      userMessage: '사진 속 글자를 옮겨라.',
+      maxTokens: 500,
+      temperature: 0,
+      companyId: input.companyId,
+      userId: input.userId ?? undefined,
+      source: 'sns-caption-generate',
+      images: input.images,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AiRateLimitExceeded') throw err;
+    console.error('[SNS caption] 사진 속 글 읽기 실패(보이는 것만으로 이어 감):', err?.message || err);
+    return [];
+  }
+  let lines: string[] = [];
+  try {
+    const parsed = extractJsonFromAiText<{ lines?: unknown }>(String(raw));
+    lines = (Array.isArray(parsed.lines) ? parsed.lines : [])
+      .map((x) => String(x ?? '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, IMAGE_TEXT_MAX_LINES)
+      .map((l) => [...l].slice(0, IMAGE_TEXT_MAX_CHARS).join(''));
+  } catch {
+    lines = [];
+  }
+  if (imageTextCache.size > 200) imageTextCache.clear();
+  imageTextCache.set(key, { lines, at: Date.now() });
+  return lines;
 }
 
 // ───────────────────────────── 프롬프트 ─────────────────────────────
@@ -246,13 +345,18 @@ const REFINE_SYSTEM = [
   OUTPUT_RULE,
 ].join('\n');
 
+// ★ 2026-09-25 A안 — 사진 속 글이 메시지다. 묘사가 아니라 게시글을 쓴다(소설식 묘사체가 나오던 결함).
 const PHOTO_SYSTEM = [
-  '너는 한국 소상공인의 SNS 게시글 첫 초안을 쓰는 편집자다.',
-  '사진에 보이는 것만 보고 2~3문장의 짧은 글을 쓴다.',
+  '너는 한국 소상공인·브랜드의 SNS 게시글 첫 초안을 쓰는 마케터다.',
+  '사진과 아래 "사진 속 글"을 보고 이 사진과 함께 올릴 글을 쓴다.',
   '규칙:',
-  '- 가격·할인·기간·행사·수치·날짜·장소·연락처·영업 정보는 쓰지 않는다. 사진만으로는 알 수 없다.',
-  '- 보이지 않는 사실을 지어내지 않는다. 보이는 것·색·질감·분위기·계절감 위주로 쓴다.',
-  '- 해시태그(#)와 링크를 쓰지 않는다. 태그는 목록에서 고르기만 한다. 이모지는 0~2개.',
+  '- 사진 속 글이 있으면 그것이 이 게시물의 메시지다. 첫 줄은 사진 속 제목이나 핵심 문구를 살려 쓴다.',
+  '- 이름·날짜·시각·가격·혜택·기간·행사·장소·연락처·링크 같은 사실은 사진 속 글과 회사 이름에 있는 것만 쓴다. 없는 사실은 지어내지 않는다.',
+  '- 사진 속 장면은 한 문장 이하로만 거든다. 장면을 늘어놓거나 소설처럼 묘사하지 않는다.',
+  '- 말투는 SNS에 올리는 친근한 존댓말(해요체). 2~4줄이고 줄마다 한 가지 이야기만 한다. 이모지는 0~2개.',
+  '- 효과를 장담하는 말(확산·바이럴·도달·팔로워 증가)을 쓰지 않는다.',
+  '- 해시태그(#)를 쓰지 않는다. 태그는 목록에서 고르기만 한다.',
+  '- 사진 속 글이 없으면 사진에 보이는 것을 해요체로 두세 문장만 쓴다.',
   OUTPUT_RULE,
 ].join('\n');
 
@@ -271,7 +375,9 @@ export interface SnsAiCaptionInput {
   /** 회사 자주 쓰는 태그 */
   tagSet: string[];
   /** 사진 초안용(라우트가 loadSnsCaptionImages 로 준비) */
-  media: { images: Array<{ media_type: string; data: string }>; imageCount: number; videoCount: number };
+  media: { images: Array<{ media_type: string; data: string }>; imageIds?: string[]; imageCount: number; videoCount: number };
+  /** ★ 0925 회사 이름(브랜드명 우선) — 사진 초안의 면허에 든다 */
+  brandName?: string;
   /** fit 전용 — 맞출 채널 */
   fit?: { label: string; spec: SnsCaptionSpec; aiNotice: boolean };
 }
@@ -288,10 +394,12 @@ export interface SnsAiCaptionResult {
   note: string | null;
   /** 세트 밖이라 버린 태그(진단용 · 화면에 쓰지 않는다) */
   rejectedTags: string[];
+  /** ★ 0925 사진 초안에서 읽은 사진 속 글(화면 '사진에서 읽은 글' · 그 밖 모드는 빈 배열) */
+  imageText: string[];
 }
 
 function unchanged(mode: SnsCaptionMode, body: string, note: string): SnsAiCaptionResult {
-  return { mode, caption: mode === 'photo_draft' ? '' : body, changed: false, tags: [], note, rejectedTags: [] };
+  return { mode, caption: mode === 'photo_draft' ? '' : body, changed: false, tags: [], note, rejectedTags: [], imageText: [] };
 }
 
 export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsAiCaptionResult> {
@@ -326,7 +434,19 @@ export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsA
     fitTarget = counting === 'x_weighted' ? Math.floor(room / 2) : room;
   }
 
+  // ★ 0925 A안 1단계 — 사진 속 글을 먼저 읽는다(면허를 쓰기 전에 정한다)
+  const imageText = mode === 'photo_draft'
+    ? await transcribeSnsImageText({ companyId: input.companyId, userId: input.userId, images: input.media.images, imageIds: input.media.imageIds ?? [] })
+    : [];
+  const brand = String(input.brandName ?? '').trim();
+
   const lines: string[] = [];
+  if (mode === 'photo_draft') {
+    if (brand) lines.push(`회사 이름: ${brand}`);
+    lines.push(imageText.length
+      ? `사진 속 글(보이는 그대로 옮긴 것 · 사실은 여기 있는 것만 쓴다):\n${imageText.join('\n')}`
+      : '사진 속 글: 없음');
+  }
   if (mode === 'refine') {
     lines.push('다듬을 글:', masked.text);
     if (input.action === 'fit') lines.push('', `이 글을 한글 기준 ${fitTarget}자 이내로 줄여라. 토큰과 핵심(무엇·언제·어디)은 남기고 군더더기를 뺀다.`);
@@ -363,11 +483,13 @@ export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsA
 
   let text = String(parsed.caption ?? '').trim();
   if (mode === 'photo_draft') {
-    text = dropInventedHashtags(text, '');
-    text = keepPhotoSafeSentences(text);
-    if ([...text].length < PHOTO_DRAFT_MIN_CHARS) return { ...unchanged(mode, original, PHOTO_DRAFT_TOO_SHORT), tags };
+    // 면허 = 사진 속 글 + 회사 이름 — 그 밖의 사실·태그가 든 문장은 뺀다
+    const license = [...imageText, brand].filter(Boolean).join('\n');
+    text = dropInventedHashtags(text, license);
+    text = keepPhotoSafeSentences(text, license);
+    if ([...text].length < PHOTO_DRAFT_MIN_CHARS) return { ...unchanged(mode, original, PHOTO_DRAFT_TOO_SHORT), tags, imageText };
     const caption = tail.trim() ? `${text}\n\n${tail.replace(/^\s+/, '')}` : text;
-    return { mode, caption, changed: true, tags, note: null, rejectedTags };
+    return { mode, caption, changed: true, tags, note: null, rejectedTags, imageText };
   }
 
   // ① 토큰 복원 — 잃었으면 버리고 버렸다고 말한다.
@@ -393,5 +515,5 @@ export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsA
     const after = buildSnsCaption({ body: caption, tags: input.tags, aiNotice: input.fit.aiNotice }, input.fit.spec);
     if (after.overBy > 0) note = `아직 ${input.fit.label} 길이보다 ${after.overBy}자 길어요. 한 번 더 줄이거나 직접 고쳐 주세요.`;
   }
-  return { mode, caption, changed, tags, note, rejectedTags };
+  return { mode, caption, changed, tags, note, rejectedTags, imageText: [] };
 }

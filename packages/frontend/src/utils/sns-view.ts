@@ -341,8 +341,51 @@ export interface SnsPostView {
   scheduled_at: string | null;
   created_at: string;
   media_ids: string[];
+  /** ★ 0925 미디어 종류(카드 표지) — 옛 응답에는 없을 수 있다 */
+  media?: Array<{ id: string; kind: string }>;
   nextAt?: string | null;
   targets: SnsTargetView[];
+}
+
+// ───────────────────────── ★ 2026-09-25 올린 기록 카드 · 상세 창 상태 ─────────────────────────
+// 카드 점 색 · 카드 표시 · 상세 창 탭 배지가 **같은 판정**을 쓴다(한 글이 카드와 창에서 다른 상태로 보이지 않게).
+
+export type SnsTargetDisplay = 'ok' | 'gone' | 'fail' | 'check' | 'run' | 'cancelled' | 'draft';
+
+/** 채널 줄 하나의 표시 상태. 서버가 정한 할 일(action)을 증거로 먼저 본다. */
+export function snsTargetDisplayState(t: SnsTargetView): SnsTargetDisplay {
+  if (t.deletedOnPlatformAt) return 'gone';
+  if (t.action === 'check') return 'check';
+  if (t.status === 'published') return 'ok';
+  if (t.status === 'failed') return 'fail';
+  if (t.status === 'claimed' || t.status === 'submitted' || t.status === 'scheduled') return 'run';
+  if (t.status === 'cancelled') return 'cancelled';
+  return 'draft';
+}
+
+export const SNS_TARGET_DISPLAY: Record<SnsTargetDisplay, { label: string; dot: string; badge: string }> = {
+  ok: { label: '게시됨', dot: 'bg-emerald-400', badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' },
+  gone: { label: '게시물 없음', dot: 'bg-white/35', badge: 'bg-white/10 text-white/60 border-white/15' },
+  fail: { label: '실패', dot: 'bg-rose-400', badge: 'bg-rose-500/15 text-rose-300 border-rose-400/30' },
+  check: { label: '확인 필요', dot: 'bg-amber-400', badge: 'bg-amber-500/15 text-amber-200 border-amber-400/30' },
+  run: { label: '올리는 중', dot: 'bg-violet-400', badge: 'bg-violet-500/15 text-violet-200 border-violet-400/30' },
+  cancelled: { label: '취소됨', dot: 'bg-white/35', badge: 'bg-white/10 text-white/60 border-white/15' },
+  draft: { label: '초안', dot: 'bg-white/35', badge: 'bg-white/10 text-white/60 border-white/15' },
+};
+
+/**
+ * 카드 표시 — **문제가 있을 때만** 붙인다(다 올라간 글은 조용하게 · Harold 0925 목업).
+ * 실패가 전부면 '실패' · 일부면 '일부 실패' · 결과 모름 '확인 필요' · 진행 중 '올리는 중' · 전부 취소 '취소됨'.
+ */
+export function snsPostCardState(targets: SnsTargetView[]): { label: string; tone: 'rose' | 'amber' | 'violet' | 'gray' } | null {
+  const latest = targets.filter((t) => !t.superseded);
+  const states = latest.map(snsTargetDisplayState);
+  if (!states.length) return null;
+  if (states.includes('fail')) return states.every((s) => s === 'fail') ? { label: '실패', tone: 'rose' } : { label: '일부 실패', tone: 'amber' };
+  if (states.includes('check')) return { label: '확인 필요', tone: 'amber' };
+  if (states.includes('run')) return { label: '올리는 중', tone: 'violet' };
+  if (states.every((s) => s === 'cancelled')) return { label: '취소됨', tone: 'gray' };
+  return null;
 }
 
 export type SnsAttentionKind = 'reconnect' | 'stuck' | 'ineligible' | 'renew_failing' | 'failed' | 'unknown';

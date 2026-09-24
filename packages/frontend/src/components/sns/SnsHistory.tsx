@@ -1,21 +1,25 @@
 // SnsHistory — 예약과 올린 기록 (2026-09-21 S3 · ★ 2026-09-24 E1~E8)
 // 설계 SoT = docs/2026-09-24-sns-channel-design.md §6(E1~E8) · 이전 = 0917 §4-3 · §3-5
 //
-// 두 블록 = '예약 N'(날짜 머리 · 다음 시각 순) → '올린 기록'(최근 50). 같은 글이 두 블록에 동시에 나오지 않는다(서버 CT).
+// 두 블록 = '예약 N'(날짜 머리 · 다음 시각 순) → '올린 기록'. 같은 글이 두 블록에 동시에 나오지 않는다(서버 CT).
+// ★ 2026-09-25 올린 기록 = 카드 5 × 2 · 페이지 번호(서버 10개씩) · 카드를 누르면 상세 창(SnsPostModal) — Harold 0925 목업 승인.
+//   카드에는 문제가 있을 때만 표시를 붙이고, 할 일 버튼은 상세 창 채널 탭 안에만 둔다(난잡하지 않게).
 // 채널 줄의 버튼은 서버가 정한 할 일(action) 하나로 정해진다 — 화면이 상태를 보고 추론하지 않는다.
 // ⛔ 올라갔을 수 있는 줄에는 다시 올리기를 **열지 않는다** — 채널에서 확인 · 불러와서 쓰기만.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ExternalLink, RefreshCw, Loader2, XCircle, ChevronDown, ChevronUp, Link2, Pencil, CopyPlus, ImageIcon, CalendarClock, Clock,
+  RefreshCw, Loader2, XCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pencil, ImageIcon, CalendarClock, Clock, Play,
 } from 'lucide-react';
 import SnsChannelLogo from './SnsChannelLogo';
+import SnsPostModal from './SnsPostModal';
 import ConfirmModal, { ConfirmState } from '../ConfirmModal';
 import { DateTimeField } from '../DateTimeField';
 import { useToast } from '../ToastProvider';
 import { fetchAuthObjectUrl } from '../../lib/auth-download';
 import {
-  SNS_POST_BADGE, SNS_ACTION_LABEL, snsTargetBadge, hasSnsInFlight, nextSnsScheduledAt, snsTargetAccountName, SNS_POLL_LEAD_MS,
+  hasSnsInFlight, nextSnsScheduledAt, snsTargetAccountName, SNS_POLL_LEAD_MS,
+  snsPostCardState, snsTargetDisplayState, SNS_TARGET_DISPLAY,
   type SnsTargetView, type SnsSpec, type SnsAccount, type SnsPostView, type SnsAttention,
 } from '../../utils/sns-view';
 import { OUI_CARD, OUI_EMPTY, OUI_EMPTY_DESC, OUI_EMPTY_ICON, OUI_EMPTY_TITLE, OUI_SRC, OUI_BTN_GHOST } from '../../utils/operator-ui';
@@ -80,6 +84,22 @@ function SnsThumb({ mediaId, count }: { mediaId: string | undefined; count: numb
   );
 }
 
+/** 카드 표지 — 사진 썸네일(정사각 채움). 못 받으면 아이콘. */
+function SnsCover({ mediaId }: { mediaId: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let made: string | null = null;
+    fetchAuthObjectUrl(`/api/sns/media/${mediaId}?thumb=1`)
+      .then((u) => { if (alive) { made = u; setUrl(u); } else URL.revokeObjectURL(u); })
+      .catch(() => { /* 못 받음 — 아이콘 */ });
+    return () => { alive = false; if (made) URL.revokeObjectURL(made); };
+  }, [mediaId]);
+  return url
+    ? <img src={url} alt="" className="w-full h-full object-cover" />
+    : <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-5 h-5 text-white/20" /></div>;
+}
+
 export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, onAttention, onCompose, onReconnect }: Props) {
   const toast = useToast();
   const toastRef = useRef(toast);
@@ -94,14 +114,30 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  // ★ 0925 올린 기록 페이지 · 상세 창
+  const [page, setPage] = useState(1);
+  const pageRef = useRef(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [modalPost, setModalPost] = useState<SnsPostView | null>(null);
 
   const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
-  const load = async () => {
+  const load = async (nextPage: number = pageRef.current) => {
     try {
-      const res = await fetch('/api/sns/posts', { headers: auth() });
+      const res = await fetch(`/api/sns/posts?page=${nextPage}`, { headers: auth() });
       const data = await res.json();
       if (data?.success) {
+        const size = Number(data.pageSize) || 10;
+        const count = Number(data.total) || 0;
+        const lastPage = Math.max(1, Math.ceil(count / size));
+        // 글이 줄어 지금 페이지가 비었으면 마지막 페이지로 간다
+        if (nextPage > lastPage && Array.isArray(data.posts) && data.posts.length === 0) { void load(lastPage); return; }
+        pageRef.current = Number(data.page) || nextPage;
+        setPage(pageRef.current);
+        setPageSize(size);
+        setTotal(count);
         setUpcoming(Array.isArray(data.upcoming) ? data.upcoming : []);
         setPosts(Array.isArray(data.posts) ? data.posts : []);
         if (data.attention) attentionRef.current(data.attention);
@@ -110,6 +146,23 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
       /* 목록 조회 실패는 조용히 — 다음 폴링이 되살린다 */
     } finally {
       setLoading(false);
+      setPageLoading(false);
+    }
+  };
+
+  const goPage = (n: number) => {
+    setPageLoading(true);
+    void load(n);
+  };
+
+  /** 글 하나를 서버에서 다시 읽는다(상세 창 새로 고침 · 지금 페이지 밖 글 열기). */
+  const fetchPost = async (id: string): Promise<SnsPostView | null> => {
+    try {
+      const res = await fetch(`/api/sns/posts/${id}`, { headers: auth() });
+      const data = await res.json().catch(() => null);
+      return res.ok && data?.success ? (data.post as SnsPostView) : null;
+    } catch {
+      return null;
     }
   };
 
@@ -140,17 +193,31 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
   }, [all]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 띠 [보기] — 그 글로 옮겨 잠깐 강조(한 번만 · 폴링으로 목록이 바뀌어도 다시 끌고 가지 않는다)
+  // ★ 0925 — 예약 글이면 그 줄로 옮겨 강조, 기록 글이면 상세 창을 연다(지금 페이지 밖이면 서버에서 그 글만 읽는다).
   const handledFocus = useRef<string | null>(null);
   useEffect(() => {
     if (!focusPostId) { handledFocus.current = null; return; }
     if (loading || handledFocus.current === focusPostId) return;
-    const el = document.getElementById(`sns-post-${focusPostId}`);
-    if (!el) return;
     handledFocus.current = focusPostId;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setOpen((prev) => ({ ...prev, [focusPostId]: true }));
-    setFlash(focusPostId);
-  }, [focusPostId, loading, all]);
+    const el = upcoming.some((p) => p.id === focusPostId) ? document.getElementById(`sns-post-${focusPostId}`) : null;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setOpen((prev) => ({ ...prev, [focusPostId]: true }));
+      setFlash(focusPostId);
+      return;
+    }
+    const inPage = posts.find((p) => p.id === focusPostId);
+    if (inPage) { setModalPost(inPage); return; }
+    void fetchPost(focusPostId).then((p) => {
+      if (p) setModalPost(p);
+      else toastRef.current.error('그 글을 찾지 못했어요. 목록을 새로 고쳐 주세요.');
+    });
+  }, [focusPostId, loading, all]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 목록이 새로 오면 열려 있는 상세 창도 새 값으로(폴링으로 상태가 바뀐 것을 창에서도 보게)
+  useEffect(() => {
+    setModalPost((cur) => (cur ? all.find((p) => p.id === cur.id) ?? cur : cur));
+  }, [all]);
 
   useEffect(() => {
     if (!flash) return;
@@ -174,6 +241,7 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
       const at = data.scheduledAt ? new Date(data.scheduledAt).getTime() : 0;
       toastRef.current.success(at > Date.now() + 60_000 ? `${when(data.scheduledAt)}에 다시 올려요.` : '다시 올리고 있어요.');
       void load();
+      if (modalPost) void fetchPost(modalPost.id).then((p) => { if (p) setModalPost(p); });
     } catch {
       toastRef.current.error('다시 올리지 못했습니다.');
     } finally {
@@ -221,55 +289,6 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
     }
   };
 
-  /** 채널 줄 — 계정 이름 · 배지 · 사유 · 할 일 버튼(서버가 정한 action) */
-  const targetLine = (p: SnsPostView, t: SnsTargetView) => {
-    const b = snsTargetBadge(t);
-    const action = t.action ?? 'none';
-    const dim = !!t.superseded;
-    return (
-      <div key={t.targetId} className={`flex items-center gap-2 flex-wrap text-[11.5px] ${dim ? 'opacity-45' : ''}`}>
-        <SnsChannelLogo platform={t.platform} size={14} />
-        <span className="text-white/70">{labelOf(t.platform)}</span>
-        <span className="text-white/40">{snsTargetAccountName(t, accounts)}</span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.label}</span>
-        {dim && <span className="text-white/35">다시 올려 바뀐 줄</span>}
-        {!dim && b.hint && <span className="text-white/35">{b.hint}</span>}
-        {!dim && t.lastError && t.status === 'failed' && <span className="text-rose-200/70 break-keep">{t.lastError}</span>}
-        {!dim && action === 'check' && <span className="text-amber-200/80">이미 올라갔을 수 있어요</span>}
-        <div className="flex-1" />
-        {t.permalink && (
-          <a href={t.permalink} target="_blank" rel="noreferrer"
-            className="text-violet-300 hover:text-violet-200 inline-flex items-center gap-1">
-            게시물 보기 <ExternalLink className="w-3 h-3" />
-          </a>
-        )}
-        {!dim && action === 'reconnect' && t.accountId && (
-          <button onClick={() => onReconnect(t.accountId!)} className="text-amber-200 hover:text-amber-100 inline-flex items-center gap-1">
-            <Link2 className="w-3 h-3" /> {SNS_ACTION_LABEL.reconnect}
-          </button>
-        )}
-        {!dim && (action === 'retry_at' || action === 'publish_now') && (
-          <button onClick={() => void retry(t)} disabled={busyId === t.targetId}
-            className="text-violet-300 hover:text-violet-200 inline-flex items-center gap-1 disabled:opacity-50"
-            title={action === 'retry_at' && t.scheduledAt ? `원래 시각 ${when(t.scheduledAt)}` : undefined}>
-            {busyId === t.targetId ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            {SNS_ACTION_LABEL[action]}{action === 'retry_at' && t.scheduledAt ? ` · ${when(t.scheduledAt)}` : ''}
-          </button>
-        )}
-        {!dim && action === 'check' && !t.permalink && t.checkUrl && (
-          <a href={t.checkUrl} target="_blank" rel="noreferrer" className="text-violet-300 hover:text-violet-200 inline-flex items-center gap-1">
-            {SNS_ACTION_LABEL.check} <ExternalLink className="w-3 h-3" />
-          </a>
-        )}
-        {!dim && (action === 'check' || action === 'rewrite') && (
-          <button onClick={() => onCompose({ kind: 'reuse', post: p })} className="text-violet-300 hover:text-violet-200 inline-flex items-center gap-1">
-            <CopyPlus className="w-3 h-3" /> {SNS_ACTION_LABEL.rewrite}
-          </button>
-        )}
-      </div>
-    );
-  };
-
   const captionsBlock = (p: SnsPostView) => {
     const rows = p.targets.filter((t) => !t.superseded && t.caption);
     if (!rows.length) return null;
@@ -285,6 +304,73 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
           </div>
         ))}
       </div>
+    );
+  };
+
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  /** 페이지 번호는 지금 페이지 둘레 5개까지 */
+  const pageNumbers = useMemo(() => {
+    const start = Math.max(1, Math.min(page - 2, pageCount - 4));
+    const end = Math.min(pageCount, start + 4);
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  }, [page, pageCount]);
+
+  /** 카드 — 표지(사진·영상·글) · 첫 줄 · 채널 로고와 상태 점 · 날짜. 문제가 있을 때만 표시. */
+  const postCard = (p: SnsPostView) => {
+    const latest = p.targets.filter((t) => !t.superseded);
+    const state = snsPostCardState(p.targets);
+    const media = p.media ?? p.media_ids.map((id) => ({ id, kind: 'image' }));
+    const first = media[0];
+    const toneCls = {
+      rose: 'bg-rose-500/25 text-rose-100 border-rose-400/45',
+      amber: 'bg-amber-500/25 text-amber-100 border-amber-400/40',
+      violet: 'bg-violet-500/25 text-violet-100 border-violet-400/40',
+      gray: 'bg-slate-950/60 text-white/70 border-white/15',
+    } as const;
+    const ring = state?.tone === 'rose' ? 'border-rose-400/40' : state?.tone === 'amber' ? 'border-amber-400/35' : 'border-white/10';
+    const d = new Date(p.scheduled_at ?? p.created_at);
+    const day = Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+    return (
+      <button key={p.id} onClick={() => setModalPost(p)} aria-label={`${when(p.scheduled_at ?? p.created_at)} 올린 글 열기`}
+        className={`text-left rounded-2xl border ${ring} bg-white/5 hover:bg-white/[0.07] hover:border-violet-400/40 overflow-hidden flex flex-col transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70`}>
+        <div className="relative aspect-square bg-[#0b1224] overflow-hidden">
+          {first && first.kind === 'video' ? (
+            <div className="w-full h-full flex items-center justify-center bg-[radial-gradient(120%_90%_at_30%_20%,#1f2a4a_0%,#0b1224_70%)]">
+              <span className="w-10 h-10 rounded-full bg-slate-950/65 flex items-center justify-center"><Play className="w-4 h-4 text-white" /></span>
+            </div>
+          ) : first ? (
+            <SnsCover mediaId={first.id} />
+          ) : (
+            <div className="w-full h-full p-3.5 bg-gradient-to-br from-[#111a33] to-[#0b1224] relative">
+              <p className="text-xs leading-relaxed text-white/70 whitespace-pre-wrap break-keep line-clamp-[7]">{p.body || '(글 없음)'}</p>
+              <span className="absolute inset-x-0 bottom-0 h-9 bg-gradient-to-b from-transparent to-[#0b1224]" />
+            </div>
+          )}
+          {media.length > 1 && (
+            <span className="absolute right-2 top-2 text-[11px] px-1.5 rounded-md bg-slate-950/75 text-white/80">{media.length}장</span>
+          )}
+          {state && (
+            <span className={`absolute left-2 top-2 text-[11px] px-1.5 py-0.5 rounded-md border backdrop-blur-sm ${toneCls[state.tone]}`}>{state.label}</span>
+          )}
+        </div>
+        <div className="p-3 flex flex-col gap-2 flex-1">
+          <p className="text-xs leading-normal text-white/80 line-clamp-2 break-keep min-h-[2.25rem]">{(p.body || '').split('\n')[0] || '(글 없음)'}</p>
+          <div className="mt-auto flex items-center justify-between gap-1.5">
+            <span className="flex items-center gap-1.5">
+              {latest.map((t) => {
+                const look = SNS_TARGET_DISPLAY[snsTargetDisplayState(t)];
+                return (
+                  <span key={t.targetId} className="relative inline-flex" title={`${snsTargetAccountName(t, accounts)} · ${look.label}`}>
+                    <SnsChannelLogo platform={t.platform} size={17} />
+                    <i className={`absolute -right-0.5 -bottom-0.5 w-[7px] h-[7px] rounded-full ring-2 ring-[#0e1528] ${look.dot}`} />
+                  </span>
+                );
+              })}
+            </span>
+            <span className="text-[11px] text-white/45 tabular-nums whitespace-nowrap">{day}</span>
+          </div>
+        </div>
+      </button>
     );
   };
 
@@ -373,9 +459,34 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
         </div>
       )}
 
-      {/* 올린 기록 */}
+      {/* 올린 기록 — 카드 5 × 2 · 페이지 번호 · 누르면 상세 창 */}
       <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-white/80">올린 기록</h2>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="text-sm font-semibold text-white/80 inline-flex items-center gap-2">
+            올린 기록 {total > 0 && <span className="text-xs font-medium text-white/35 tabular-nums">{total}개</span>}
+            {pageLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-400" />}
+          </h2>
+          {pageCount > 1 && (
+            <nav className="flex items-center gap-1" aria-label="올린 기록 페이지">
+              <button onClick={() => goPage(page - 1)} disabled={page <= 1 || pageLoading} aria-label="이전 페이지"
+                className="h-8 min-w-[2rem] px-2 rounded-lg text-white/55 hover:bg-white/10 hover:text-white disabled:opacity-40 disabled:hover:bg-transparent inline-flex items-center justify-center">
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              {pageNumbers.map((n) => (
+                <button key={n} onClick={() => goPage(n)} disabled={pageLoading} aria-current={n === page ? 'page' : undefined}
+                  className={`h-8 min-w-[2rem] px-2 rounded-lg text-xs tabular-nums border transition-colors ${
+                    n === page ? 'bg-violet-500/20 border-violet-400/35 text-violet-100 font-semibold' : 'border-transparent text-white/55 hover:bg-white/10 hover:text-white'
+                  }`}>
+                  {n}
+                </button>
+              ))}
+              <button onClick={() => goPage(page + 1)} disabled={page >= pageCount || pageLoading} aria-label="다음 페이지"
+                className="h-8 min-w-[2rem] px-2 rounded-lg text-white/55 hover:bg-white/10 hover:text-white disabled:opacity-40 disabled:hover:bg-transparent inline-flex items-center justify-center">
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </nav>
+          )}
+        </div>
         {posts.length === 0 ? (
           <div className={`${OUI_CARD} ${OUI_EMPTY}`}>
             <div className={OUI_EMPTY_ICON}><RefreshCw className="w-5 h-5 text-white/40" /></div>
@@ -383,53 +494,26 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
             <p className={OUI_EMPTY_DESC}>위에서 사진과 글을 올리면 여기에 쌓입니다.</p>
           </div>
         ) : (
-          <div className="space-y-2.5">
-            {posts.map((p) => {
-              const badge = SNS_POST_BADGE[p.status];
-              const expanded = !!open[p.id];
-              const shown = expanded ? p.targets : p.targets.filter((t) => !t.superseded);
-              const hasSuperseded = p.targets.some((t) => t.superseded);
-              return (
-                <div key={p.id} id={`sns-post-${p.id}`}
-                  className={`${OUI_CARD} p-3.5 sm:p-4 transition-shadow ${flash === p.id ? 'ring-2 ring-violet-400/60' : ''}`}>
-                  <div className="flex items-start gap-3">
-                    {p.media_ids.length > 0 && <SnsThumb mediaId={p.media_ids[0]} count={p.media_ids.length} />}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {badge && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.cls}`}>{badge.label}</span>}
-                        <span className="text-[11px] text-white/40">
-                          {p.scheduled_at ? `${when(p.scheduled_at)} 예약` : when(p.created_at)}
-                        </span>
-                      </div>
-                      <p className="text-sm text-white/80 mt-1.5 line-clamp-2 break-keep">{p.body || '(글 없음)'}</p>
-                    </div>
-                    <button onClick={() => onCompose({ kind: 'reuse', post: p })}
-                      className="p-1.5 rounded-lg text-white/40 hover:bg-white/10 hover:text-white/80 transition-colors flex-shrink-0"
-                      title="불러와서 쓰기" aria-label="불러와서 쓰기">
-                      <CopyPlus className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="mt-3 space-y-1.5">
-                    {shown.map((t) => targetLine(p, t))}
-                  </div>
-                  <div className="mt-2 flex justify-end">
-                    <button onClick={() => setOpen((prev) => ({ ...prev, [p.id]: !expanded }))}
-                      className="text-[11px] text-white/45 hover:text-white/75 inline-flex items-center gap-1">
-                      {expanded ? '접기' : hasSuperseded ? '올라간 글 · 지난 시도' : '올라간 글'}
-                      {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                    </button>
-                  </div>
-                  {expanded && captionsBlock(p)}
-                </div>
-              );
-            })}
+          <div className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3 transition-opacity ${pageLoading ? 'opacity-60' : ''}`}>
+            {posts.map((p) => postCard(p))}
           </div>
         )}
       </div>
 
       <p className={OUI_SRC}>Data source: 우리 기록과 채널에서 다시 확인한 결과</p>
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+      {modalPost && (
+        <SnsPostModal
+          post={modalPost}
+          specs={specs}
+          accounts={accounts}
+          busyTargetId={busyId}
+          onClose={() => setModalPost(null)}
+          onReconnect={onReconnect}
+          onRetry={(t) => void retry(t)}
+          onReuse={(p) => { setModalPost(null); onCompose({ kind: 'reuse', post: p }); }}
+        />
+      )}
     </section>
   );
 }

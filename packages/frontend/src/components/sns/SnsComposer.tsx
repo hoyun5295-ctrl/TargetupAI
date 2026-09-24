@@ -95,6 +95,8 @@ interface AiState {
   showingBase: boolean;
   /** 표시 모드(바뀐 곳 강조). 누르면 편집으로 넘어간다 */
   display: boolean;
+  /** ★ 0925 사진 초안에서 AI 가 읽은 사진 속 글(잘못 읽었으면 사람이 바로 보게) */
+  imageText: string[];
 }
 
 interface Replacing {
@@ -564,7 +566,8 @@ export default function SnsComposer({
       if (data.changed) {
         const base = action === 'again' && ai ? ai.base : current;
         const result = String(data.caption ?? '');
-        setAi({ base, result, showingBase: false, display: true });
+        const imageText = Array.isArray(data.imageText) ? data.imageText.map(String).filter(Boolean) : [];
+        setAi({ base, result, showingBase: false, display: true, imageText: action === 'again' && ai ? (imageText.length ? imageText : ai.imageText) : imageText });
         setBodyByApp(result);
         setSpell(null);
       }
@@ -1289,6 +1292,12 @@ export default function SnsComposer({
                   </button>
                 )}
               </div>
+            )}
+            {/* ★ 0925 A안 — AI 가 사진에서 읽은 글. 이 글에 있는 사실만 초안에 쓸 수 있다(잘못 읽었으면 여기서 보인다). */}
+            {aiActive && ai && !ai.showingBase && ai.imageText.length > 0 && (
+              <p className="mb-2 text-[11px] text-white/45 break-keep">
+                <span className="text-white/60">사진에서 읽은 글</span> · {ai.imageText.join(' · ')}
+              </p>
             )}
 
             {/* 글 상자 = 글 + 꼬리(올릴 때 글 끝에 붙는 것 · 읽기 전용) */}

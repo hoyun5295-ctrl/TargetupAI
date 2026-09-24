@@ -20,8 +20,10 @@ import { snsChannelUrl } from './sns-accounts';
 
 /** 예약 묶음 상한 — 예약이 기록 50건에 묻히지 않게 따로 싣는다. */
 export const SNS_UPCOMING_LIMIT = 200;
-/** 기록 묶음 수 */
-export const SNS_HISTORY_LIMIT = 50;
+/** 기록 한 페이지 글 수 — ★ 2026-09-25 카드 5 × 2(Harold 0925 목업 승인) · 전에는 최근 50개에서 끊겨 오래된 글을 못 봤다 */
+export const SNS_HISTORY_PAGE_SIZE = 10;
+/** 페이지 번호 상한(주소 조작으로 큰 OFFSET 을 만들지 않게) */
+export const SNS_HISTORY_MAX_PAGE = 1000;
 
 export interface SnsTargetViewRow {
   targetId: string;
@@ -59,6 +61,8 @@ export interface SnsPostViewRow {
   scheduled_at: string | null;
   created_at: string;
   media_ids: string[];
+  /** ★ 0925 미디어 종류(카드 표지 · 사진이면 썸네일 · 영상이면 재생 표시) — media_ids 순서 */
+  media: Array<{ id: string; kind: string }>;
   /** 다음에 올라갈 시각(최신 행 중 예약된 것의 가장 이른 시각) — 예약 목록 정렬·표시 */
   nextAt: string | null;
   targets: SnsTargetViewRow[];
@@ -86,6 +90,11 @@ async function loadPosts(companyId: string, ids: string[], now: number): Promise
       ORDER BY t.platform, t.created_at, t.id`,
     [companyId, ids],
   );
+  const allMediaIds = Array.from(new Set(posts.rows.flatMap((p) => (Array.isArray(p.media_ids) ? p.media_ids.map(String) : []))));
+  const kinds = allMediaIds.length
+    ? await query(`SELECT id, kind FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`, [companyId, allMediaIds])
+    : { rows: [] as any[] };
+  const kindOf = new Map(kinds.rows.map((m: any) => [String(m.id), String(m.kind)]));
   const byPost = new Map<string, any[]>();
   for (const t of targets.rows) {
     const list = byPost.get(t.post_id) ?? [];
@@ -111,6 +120,7 @@ async function loadPosts(companyId: string, ids: string[], now: number): Promise
       scheduled_at: iso(p.scheduled_at),
       created_at: iso(p.created_at) as string,
       media_ids: Array.isArray(p.media_ids) ? p.media_ids : [],
+      media: (Array.isArray(p.media_ids) ? p.media_ids.map(String) : []).map((id: string) => ({ id, kind: kindOf.get(id) ?? 'image' })),
       nextAt,
       targets: rows.map((t) => {
         const superseded = !!t.superseded;
@@ -150,14 +160,17 @@ async function loadPosts(companyId: string, ids: string[], now: number): Promise
 }
 
 /**
- * 기록 화면 목록 — `{ upcoming, posts }`.
- *   upcoming = 최신 행 중 예약(scheduled)이 있고 사용자가 시각을 고른 글 · 다음 시각 오름차순 · 50건 제한 밖
- *   posts    = 그 밖의 글(여집합) · 최근 50 · 채널 줄이 전부 초안인 글과 글 고치기로 통째 대체된 글은 뺀다
+ * 기록 화면 목록 — `{ upcoming, posts, page, pageSize, total }`.
+ *   upcoming = 최신 행 중 예약(scheduled)이 있고 사용자가 시각을 고른 글 · 다음 시각 오름차순 · 페이지 밖(예약은 늘 전부)
+ *   posts    = 그 밖의 글(여집합) · ★0925 한 페이지 10개 · 채널 줄이 전부 초안인 글과 글 고치기로 통째 대체된 글은 뺀다
  * ⛔ 같은 글이 두 배열에 동시에 나오지 않는다(계약 테스트).
  */
-export async function listSnsPostsView(companyId: string, now: number = Date.now()): Promise<{
+export async function listSnsPostsView(companyId: string, now: number = Date.now(), page = 1): Promise<{
   upcoming: SnsPostViewRow[];
   posts: SnsPostViewRow[];
+  page: number;
+  pageSize: number;
+  total: number;
 }> {
   const up = await query(
     `SELECT p.id,
@@ -175,23 +188,31 @@ export async function listSnsPostsView(companyId: string, now: number = Date.now
   );
   const upcomingIds: string[] = up.rows.map((r) => r.id);
 
-  const hist = await query(
-    `SELECT p.id FROM sns_posts p
-      WHERE p.company_id = $1::uuid
+  // 기록 조건 하나를 목록·개수가 같이 쓴다(둘이 갈리면 마지막 페이지가 비거나 넘친다)
+  const historyWhere = `p.company_id = $1::uuid
         AND NOT (p.id = ANY($2::uuid[]))
         AND EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.company_id = p.company_id AND t.status <> 'draft')
         AND EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.company_id = p.company_id
                      -- ⛔ COALESCE — 코드가 NULL 인 취소 행에서 비교가 NULL 이 되면 사용자가 취소한 글이 목록에서 사라진다
-                     AND NOT (t.status = 'cancelled' AND COALESCE(t.last_error_code, '') = 'REPLACED'))
-      ORDER BY p.created_at DESC
-      LIMIT ${SNS_HISTORY_LIMIT}`,
-    [companyId, upcomingIds],
+                     AND NOT (t.status = 'cancelled' AND COALESCE(t.last_error_code, '') = 'REPLACED'))`;
+  const safePage = Math.min(SNS_HISTORY_MAX_PAGE, Math.max(1, Math.floor(Number(page) || 1)));
+  const count = await query(`SELECT COUNT(*)::int AS n FROM sns_posts p WHERE ${historyWhere}`, [companyId, upcomingIds]);
+  const total = Number(count.rows[0]?.n || 0);
+  const hist = await query(
+    `SELECT p.id FROM sns_posts p
+      WHERE ${historyWhere}
+      ORDER BY p.created_at DESC, p.id DESC
+      LIMIT ${SNS_HISTORY_PAGE_SIZE} OFFSET $3`,
+    [companyId, upcomingIds, (safePage - 1) * SNS_HISTORY_PAGE_SIZE],
   );
   const historyIds: string[] = hist.rows.map((r) => r.id);
 
   return {
     upcoming: await loadPosts(companyId, upcomingIds, now),
     posts: await loadPosts(companyId, historyIds, now),
+    page: safePage,
+    pageSize: SNS_HISTORY_PAGE_SIZE,
+    total,
   };
 }
 
