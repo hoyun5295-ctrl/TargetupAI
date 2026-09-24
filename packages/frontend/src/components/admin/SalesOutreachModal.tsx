@@ -74,6 +74,8 @@ interface OutreachJob {
   dup_count?: number;
   /** ★ 2026-09-23 담당자 직접 발송 정보(서버 계산 · 조회 실패 = null) */
   direct?: OutreachDirectInfo | null;
+  /** ★ 2026-09-24 B 확인 화면 후보(홈페이지 후보 + 네이버 스토어 기획 · 서버 계산) */
+  candidatesView?: any[];
 }
 
 const ACTIVE_STAGES = ['queued', 'crawling', 'analyzing', 'producing_copy', 'producing_image', 'producing_dm', 'producing_email'];
@@ -200,10 +202,11 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [storeBusy, setStoreBusy] = useState(false);
 
   // 확인 단계 선택 — ★ v3 행사는 다중 선택(≤3 · 누른 순서 = DM 등장 순서) · 'manual' 은 직접 붙여넣기 · 'none' 은 선택 0
-  const [eventChoice, setEventChoice] = useState<string>('none'); // 'none' | 'manual' | 'store'(★0924 스토어 화면에서 가져온 문구 · 서버에는 직접 붙여넣기와 같은 경로)
+  const [eventChoice, setEventChoice] = useState<string>('none'); // 'none' | 'manual'
   const [eventPicks, setEventPicks] = useState<number[]>([]);
   const [manualEventText, setManualEventText] = useState('');
-  const textChoice = eventChoice === 'manual' || eventChoice === 'store';
+  // ★ 2026-09-24 B — 스토어 정보는 글자 칸이 아니라 행사 후보(candidatesView)로 들어온다 · 글자 선택 = 직접 붙여넣기 하나
+  const textChoice = eventChoice === 'manual';
   // ★0924 [한줄로 가져오기] 설치 안내 — 이 브라우저에 설치 열쇠가 없으면 펼친 채로 시작
   const [grabInstallOpen, setGrabInstallOpen] = useState(() => !readGrabKey());
   const [imageChoice, setImageChoice] = useState<string>('');     // '' = 이미지 없이
@@ -345,26 +348,17 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     return () => clearInterval(t);
   }, [job?.id, job?.stage, loadJob]);
 
-  // ★0924 스토어 화면 가져오기 알림(북마크가 연 수신 탭 → 이 창) — 지금 연 건이면 다시 읽고, 확인 단계면 그 문구를 고른 상태로
+  // ★0924 스토어 가져오기 알림(북마크가 연 수신 탭 → 이 창) — 지금 연 건이면 다시 읽는다(스토어 기획은 행사 후보 목록 뒤에 붙는다 · B)
   const jobIdRef = useRef<string | null>(null);
   jobIdRef.current = job?.id || null;
-  const grabPickRef = useRef(false);
   useEffect(() => onStoreGrab((id) => {
     if (id !== jobIdRef.current) return;
-    grabPickRef.current = true;
     loadJob(id);
-    toast.success('네이버 스토어 화면의 행사 문구가 들어왔습니다.');
+    toast.success('네이버 스토어 기획·상품이 행사 후보에 들어왔습니다.');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [loadJob]);
+  // 화면이 본 스토어 정보 시각 — 확정 요청에 함께 보낸다(그 사이 새로 들어왔으면 서버가 새로고침을 요청한다)
   const storeGrabAt: string | null = job?.stage_results?.store_grab?.at ? String(job.stage_results.store_grab.at) : null;
-  useEffect(() => {
-    if (!grabPickRef.current || !storeGrabAt || job?.stage !== 'awaiting_confirm') return;
-    grabPickRef.current = false;
-    // 사람이 쓰던 붙여넣기 원문은 덮지 않는다
-    if (eventChoice === 'manual' && manualEventText.trim()) return;
-    setEventChoice('store'); setEventPicks([]); setManualEventText(String(job?.stage_results?.store_grab?.text || ''));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeGrabAt, job?.stage]);
 
   // 목록 — 첫 페이지 로드(필터 반영) / 더 보기(커서) / 폴링은 첫 페이지만 id upsert
   const loadJobsList = useCallback(async (opts?: { append?: boolean; silent?: boolean; q?: string }) => {
@@ -551,6 +545,8 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     if (textChoice) body.manualEventText = manualEventText;
     else if (eventPicks.length) { body.eventIndexes = eventPicks; body.eventIndex = eventPicks[0]; }
     else body.eventIndex = null;
+    // ★ 2026-09-24 B — 후보 번호는 화면이 본 스토어 정보 기준(그 사이 새로 들어왔으면 서버가 새로고침을 요청한다)
+    body.storeGrabAt = storeGrabAt;
     const res = await callAction(`/api/sales-outreach/jobs/${job.id}/confirm`, body);
     if (res.ok) {
       const warnings: string[] = Array.isArray(res.data?.warnings) ? res.data.warnings : [];
@@ -568,12 +564,6 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const toggleEventPick = (i: number) => {
     setEventChoice('none');
     setEventPicks((cur) => (cur.includes(i) ? cur.filter((x) => x !== i) : cur.length >= 3 ? cur : [...cur, i]));
-  };
-  /** ★0924 스토어 화면에서 가져온 문구를 행사로 고른다(칸에 넣어 사람이 보고 고칠 수 있게) */
-  const pickStoreGrab = () => {
-    const t = String(job?.stage_results?.store_grab?.text || '');
-    if (!t) return;
-    setEventChoice('store'); setEventPicks([]); setManualEventText(t);
   };
   /** ★ v3 회신 문장 저장(0~60자 · 비우면 기본 문장 · 메일 재조립 AI 0) */
   const saveReply = async () => {
@@ -653,6 +643,12 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
       const r = await fetch(`/api/sales-outreach/jobs/${job.id}/store-page`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setNotice(d?.error || '파일을 읽지 못했습니다.'); return; }
+      // ★ 2026-09-24 B — 스토어 저장본이면 서버가 판독 결과를 저장했다(행사 후보에 스토어 기획) · 아니면 종전(붙여넣기 칸)
+      if (d?.mode === 'store') {
+        toast.success(`저장한 스토어 화면에서 기획 ${Number(d.campaigns) || 0}개 · 상품 ${Number(d.products) || 0}개를 행사 후보에 넣었습니다.`);
+        await loadJob(job.id);
+        return;
+      }
       setEventChoice('manual'); setEventPicks([]);
       setManualEventText(String(d.text || ''));
       toast.success(`저장한 페이지에서 행사 문구 ${Number(d.chars) || 0}자를 가져왔습니다. 확인 후 제작을 시작하세요(혜택 숫자는 직접 입력 자리로 바뀝니다).`);
@@ -858,7 +854,10 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const producing = stage.startsWith('producing_');
   const sr: Record<string, any> = job?.stage_results || {};
 
-  const candidates: any[] = Array.isArray(job?.event_quote?.candidates) ? job!.event_quote!.candidates! : [];
+  // ★ 2026-09-24 B — 후보 목록 = 서버가 만든 candidatesView(홈페이지 후보 + 네이버 스토어 기획 · 확정과 같은 함수) · 옛 응답이면 종전
+  const candidates: any[] = Array.isArray(job?.candidatesView) ? job!.candidatesView! : Array.isArray(job?.event_quote?.candidates) ? job!.event_quote!.candidates! : [];
+  // 네이버 스토어 판독 결과(판 2 · 요약 줄 · 대표 상품) · 판 1(글자)은 표시하지 않는다
+  const storeMaterial: any = sr.store_grab?.v === 2 && sr.store_grab?.material ? sr.store_grab.material : null;
   const imageCandidates: string[] = Array.isArray(job?.brand_profile?.imageCandidates) ? job!.brand_profile!.imageCandidates! : [];
   const crawlUnavailable = sr.crawling === 'unavailable';
   const analyzeUnavailable = sr.analyzing === 'unavailable';
@@ -1436,12 +1435,16 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                               <span className="text-gray-800 min-w-0">{isCard ? String(c.title || c.quote) : `"${c.quote}"`}</span>
                               {on && <span className="ml-auto shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-semibold">{order + 1}</span>}
                             </div>
+                            {/* ★ 2026-09-24 B 네이버 스토어 기획 — 본문 한 줄(대표 상품 · 가져온 시각의 스토어 가격) */}
+                            {c.source === 'naver_store' && c.parts?.benefit && <p className="mt-1 text-[11px] text-gray-600">{String(c.parts.benefit)}</p>}
                             <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                               {isCard && c.periodRaw && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{String(c.periodRaw)}</span>}
                               {/* ★ 2026-09-09 v4 홈에 걸린 프로모션·기획 페이지(슬라이스 그대로 이어 붙이는 카드 · 종료일 없음 = 홈 게시가 진행 중의 근거) */}
                               {isCard && c.source === 'promo_page' && <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">홈에 걸린 기획 페이지 · 디자인 그대로</span>}
                               {!isCard && c.endDate && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">종료 {c.endDate}</span>}
-                              {isCard && <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">이벤트 목록 카드</span>}
+                              {isCard && (c.source === 'naver_store'
+                                ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 inline-flex items-center gap-0.5"><Store className="w-3 h-3" /> 네이버 스토어</span>
+                                : <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">이벤트 목록 카드</span>)}
                               {!isCard && c.sourceUrl && c.sourceUrl !== job.homepage_url && c.sourceUrl !== 'manual' && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">행사 페이지에서</span>}
                               {c.benefitLicensed
                                 ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">혜택 문구 인용 가능</span>
@@ -1468,41 +1471,47 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                         onChange={() => { setEventChoice('manual'); setEventPicks([]); }} />
                       행사 내용 직접 붙여넣기
                     </label>
-                    {/* ★0924 네이버 스토어 화면에서 가져온 문구 = 후보 한 장(고르면 아래 칸에 들어가 사람이 보고 고친다 · 서버에는 직접 붙여넣기와 같은 경로) */}
-                    {typeof sr.store_grab?.text === 'string' && sr.store_grab.text && (
-                      <label className={`block p-3 rounded-lg border cursor-pointer text-sm ${eventChoice === 'store' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                        <span className="flex items-start gap-2">
-                          <input type="radio" name="so-event" className="mt-1" checked={eventChoice === 'store'} onChange={pickStoreGrab} />
-                          <span className="min-w-0">
-                            <span className="font-medium text-gray-900">네이버 스토어에서 가져옴</span>
-                            <span className="ml-1.5 text-[11px] text-gray-500">{(Number(sr.store_grab.chars) || 0).toLocaleString()}자 · {fmtDateTime(sr.store_grab.at)}</span>
-                            <span className="block mt-1 text-[11px] text-gray-600 break-all">{String(sr.store_grab.text).slice(0, 120)}{String(sr.store_grab.text).length > 120 ? '…' : ''}</span>
-                            <span className="inline-block mt-1.5 text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">혜택 숫자는 직접 입력 자리로</span>
-                          </span>
-                        </span>
-                      </label>
-                    )}
                     {textChoice && (
                       <textarea value={manualEventText} onChange={(e) => setManualEventText(e.target.value)}
                         rows={4} placeholder="홈페이지의 행사 안내 문구를 그대로 붙여넣어 주세요"
                         className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                     )}
-                    {/* ★0924 스토어 열기 → 그 화면에서 북마크 [한줄로 가져오기] → 이 건에 문구가 들어온다(서버는 네이버에 접속하지 않는다) */}
+                    {/* ★0924 스토어 열기 → 그 화면에서 북마크 [한줄로 가져오기] → 이 건의 행사 후보에 스토어 기획이 들어온다(서버는 네이버에 접속하지 않는다) */}
                     {job.direct?.naverStoreUrl && (
                       <div className="rounded-lg border border-gray-200 p-3 space-y-2">
                         <div className="flex items-center gap-2 flex-wrap text-xs">
                           <a href={job.direct.naverStoreUrl} target="_blank" rel="noreferrer"
                             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-green-200 text-green-700 hover:bg-green-50"><Store className="w-3.5 h-3.5" /> 스토어 열기</a>
-                          <span className="text-gray-500">열린 화면에서 북마크 [한줄로 가져오기]를 누르면 여기로 들어옵니다.</span>
+                          <span className="text-gray-500">열린 스토어 첫 화면에서 북마크 [한줄로 가져오기]를 누르면 기획·상품이 위 후보에 들어옵니다.</span>
                           <button onClick={() => setGrabInstallOpen(!grabInstallOpen)} className="ml-auto text-[11px] text-blue-600 hover:underline">{grabInstallOpen ? '설치 안내 접기' : '버튼 설치'}</button>
                         </div>
+                        {/* ★ 2026-09-24 B 판독 결과 요약(서버 값만) — 기획 · 상품 · 관심고객 · 가져온 시각 + 대표 상품 3줄 */}
+                        {storeMaterial && (
+                          <div className="rounded-md bg-green-50/60 border border-green-100 px-3 py-2 text-[11px] text-gray-700 space-y-1">
+                            <div className="font-medium text-green-800">
+                              네이버 스토어 · 기획 {Array.isArray(storeMaterial.campaigns) ? storeMaterial.campaigns.length : 0}
+                              {' · '}상품 {Array.isArray(storeMaterial.products) ? storeMaterial.products.length : 0}
+                              {typeof storeMaterial.interestCount === 'number' ? ` · 관심고객 ${storeMaterial.interestCount.toLocaleString()}` : ''}
+                              {' · '}{fmtDateTime(sr.store_grab.at)} 기준
+                            </div>
+                            {(Array.isArray(storeMaterial.products) ? storeMaterial.products : []).slice(0, 3).map((p: any) => (
+                              <div key={String(p.id)} className="truncate">
+                                {String(p.name)}
+                                {p.price ? ` · ${Number(p.price).toLocaleString()}원` : ''}
+                                {p.salePrice ? ` → ${Number(p.salePrice).toLocaleString()}원` : ''}
+                                {p.discountRatio ? ` (${p.discountRatio}%)` : ''}
+                                {typeof p.reviewCount === 'number' ? ` · 리뷰 ${p.reviewCount.toLocaleString()}` : ''}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         {grabInstallOpen && <OutreachStoreGrabInstall />}
                       </div>
                     )}
-                    {/* ★ 2026-09-23 네이버 스토어 기획전 저장본 — 브라우저에서 "웹페이지 전체"로 저장한 파일을 올리면 행사 문구로 칸을 채운다(서버는 스토어에 접속하지 않는다) · 0924부터 북마크 가져오기의 예비 */}
+                    {/* ★ 2026-09-23 네이버 스토어 기획전 저장본 — 브라우저에서 "웹페이지 전체"로 저장한 파일(서버는 스토어에 접속하지 않는다) · 0924 B = 스토어 첫 화면 저장본이면 북마크와 같은 판독 */}
                     <label className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs cursor-pointer ${storeBusy ? 'border-gray-200 text-gray-400' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                       {storeBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
-                      네이버 스토어 기획전 페이지를 저장한 파일(.html)로 채우기
+                      네이버 스토어 화면을 저장한 파일(.html)로 채우기
                       <input type="file" accept=".html,.htm" className="hidden" disabled={storeBusy}
                         onChange={(e) => { uploadStorePage(e.target.files?.[0] || null); e.target.value = ''; }} />
                     </label>

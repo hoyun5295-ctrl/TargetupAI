@@ -159,14 +159,18 @@ export function promoCardTitleOf(images: readonly RenderImage[], pageUrl: string
   return '기획 페이지';
 }
 
-/** ★ v4-2 슬라이스 모드 버튼 문구 — 제목이 사이트명·공식몰 류면 "상품 자세히 보기", 아니면 호출부가 만든 제목형 라벨 */
-export function sliceCtaLabel(title: string | null | undefined, companyName: string, fallbackLabel: string): string {
+/**
+ * ★ v4-2 슬라이스 모드 버튼 문구 — 제목이 사이트명·공식몰 류면 "상품 자세히 보기", 아니면 호출부가 만든 제목형 라벨
+ * ★ 2026-09-24 품질 A — kind 'event'(홈페이지 인용문 행사 카드) 의 대체 문구는 "행사 자세히 보기"(톤28 실측: 행사 버튼이 "상품 자세히 보기"로 나갔다) · 기본 = 종전
+ */
+export function sliceCtaLabel(title: string | null | undefined, companyName: string, fallbackLabel: string, kind: 'product' | 'event' = 'product'): string {
+  const generic = kind === 'event' ? '행사 자세히 보기' : '상품 자세히 보기';
   const t = String(title || '').trim();
   const comp = squashText(companyName);
-  if (!t || SITE_LIKE_TITLE_RE.test(t) || (!!comp && squashText(t) === comp) || t === '기획 페이지') return '상품 자세히 보기';
+  if (!t || SITE_LIKE_TITLE_RE.test(t) || (!!comp && squashText(t) === comp) || t === '기획 페이지') return generic;
   // 제목형 라벨이 낱말 경계 절단으로 제목의 60% 미만만 남았으면("Farm to Product" → "Farm to 보기" = 47%) 상품형으로 · "추석선물세트 특별 기획전" → "추석선물세트 특별 보기"(69%)는 그대로
   const kept = String(fallbackLabel || '').replace(/\s*보기$/, '').trim();
-  if (kept.length < t.length * 0.6) return '상품 자세히 보기';
+  if (kept.length < t.length * 0.6) return generic;
   return fallbackLabel;
 }
 
@@ -257,7 +261,11 @@ export function selectEventSlices(slices: readonly StoredImage[], kinds: Readonl
 /** 히어로 1장 — 스튜디오 포스터(행사 문구를 얹어 생성) 우선 · 없으면 홈 캠페인 배너 사본 · 없으면 카드 배너 */
 export interface StandardHero { url: string; kind: 'poster' | 'banner' | 'card'; linkUrl: string }
 /** 행사 1건 — 제목·기간 줄(호출부가 만든다 · 수치 검증은 호출부) · 배너 사본 · 링크 · 그 행사의 슬라이스(선별 뒤 · ≤3) */
-export interface StandardEvent { title: string; periodLine: string; imageUrl: string | null; linkUrl: string; ctaLabel: string; slices?: readonly StoredImage[] }
+export interface StandardEvent {
+  title: string; periodLine: string; imageUrl: string | null; linkUrl: string; ctaLabel: string; slices?: readonly StoredImage[];
+  /** ★ 2026-09-24 품질 A — 본문 한 줄(인용문 혜택 조각 · 면허 있을 때만 호출부가 싣는다) */
+  text?: string;
+}
 export interface ComposeStandardInput {
   companyName: string;
   logoUrl: string | null;
@@ -307,7 +315,7 @@ export function composeOutreachStandard(input: ComposeStandardInput): Section[] 
   events.forEach((e, i) => {
     const n = i + 1;
     out.push(mk('text_card', `so-std-event${n}`, order++, {
-      tag: '이벤트', headline: String(e.title).trim().slice(0, 40), body: e.periodLine || '', align: 'left',
+      tag: '이벤트', headline: String(e.title).trim().slice(0, 40), body: [e.text, e.periodLine].filter(Boolean).join('\n'), align: 'left',
       ...(e.imageUrl ? { image_url: e.imageUrl, image_position: 'top' } : {}),
     }));
     const slices = (e.slices || []).filter((s) => s && s.url && s.url !== e.imageUrl).slice(0, OUTREACH_STD_EVENT_SLICES_MAX);

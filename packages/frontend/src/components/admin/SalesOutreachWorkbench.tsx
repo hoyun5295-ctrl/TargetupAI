@@ -273,7 +273,7 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob }: Props) {
                         {c.chainIndex ? <span className="text-[10px] text-gray-400">#{c.chainIndex}</span> : null}
                         {c.autoConfirmed && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 inline-flex items-center gap-0.5"><Sparkles className="w-3 h-3" /> 자동 확정</span>}
                         {c.storeGrab
-                          ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-800 inline-flex items-center gap-0.5" title={fmtDateTime(c.storeGrab.at)}><Store className="w-3 h-3" /> 스토어 가져옴 {c.storeGrab.chars.toLocaleString()}자</span>
+                          ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-800 inline-flex items-center gap-0.5" title={fmtDateTime(c.storeGrab.at)}><Store className="w-3 h-3" /> 스토어 기획 {c.storeGrab.campaigns}</span>
                           : c.naverStoreUrl && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 inline-flex items-center gap-0.5"><Store className="w-3 h-3" /> 스토어</span>}
                       </div>
                       {c.contact.email ? (

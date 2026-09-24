@@ -46,8 +46,8 @@ export interface WorkbenchCard {
   contact: { email: string | null; name: string | null; basis: string | null };
   domainVerdict: ContactDomainVerdict;
   naverStoreUrl: string | null;
-  /** ★0924 스토어 화면에서 가져온 문구(글자 수·시각) */
-  storeGrab: { chars: number; at: string } | null;
+  /** ★0924 B 스토어에서 가져온 기획 수·시각 */
+  storeGrab: { campaigns: number; at: string } | null;
   subject: string | null;
   directSubject: string | null;
   emailAssetId: string | null;

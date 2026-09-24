@@ -52,6 +52,8 @@ import {
   normalizeContactEmail, normalizeContactName, normalizeContactBasis, outreachHashSecret, directUnsubscribeUrlOf, parseNaverStoreSlug, pickAutoConfirmIndexes,
   directSubjectOf, naverStoreUrlOf,
 } from './sales-outreach-direct';
+// ★ 2026-09-24 B 네이버 스토어 판독기 — 확인 화면·확정이 같은 후보 목록 함수를 부른다
+import { eventCandidatesView } from './sales-outreach-naver-store';
 import {
   extractProducts, extractImageCandidates, discoverProductLinks, buildCtaLinkMap, extractLegal, resolveBrandColorGuarded, extractLogoCandidates,
   extractEventListCards, extractRenderedProductCards, findContactPageLinks,
@@ -110,7 +112,28 @@ export interface EventCandidate {
   bannerUrl?: string | null;
   detailUrl?: string | null;
   /** ★ v4 카드 출처(홈에 걸린 프로모션 페이지 = 슬라이스 그대로 · 화면 라벨) · 옛 항목에는 없다 */
-  source?: 'event_list' | 'promo_page';
+  source?: 'event_list' | 'promo_page' | 'naver_store';
+  /** ★ 2026-09-24 품질 A — 인용문 후보(crawl)의 세 조각(분석 AI 가 원문 그대로 낸 것 중 quotePartsOf 대조 통과분) · 옛 항목에는 없다(= 종전 동작) */
+  parts?: { title: string; benefit: string | null; period: string | null };
+}
+
+/** ★ 2026-09-24 품질 A — 조각 길이 상한(제목은 DM 행사 카드 한 줄 · 혜택·기간은 본문 한 줄) */
+export const QUOTE_PART_LIMITS = { title: 30, benefit: 60, period: 40 } as const;
+
+/**
+ * ★ 2026-09-24 품질 A(설계서 docs/2026-09-24-outreach-quality-a-design.md A2) — AI 가 낸 세 조각을 인용문과 대조(순수).
+ * 각 조각은 인용문의 부분 문자열이어야 하고(지어낸 글자 차단) 인용문 전체와 같으면 안 된다. 틀린 혜택·기간은 그 조각만 버리고, 제목이 틀리면 전체를 버린다.
+ */
+export function quotePartsOf(raw: unknown, quote: string): EventCandidate['parts'] | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const q = norm(String(quote || ''));
+  const pick = (v: unknown, max: number): string | null => {
+    const t = norm(String(v ?? ''));
+    return t && t.length <= max && t !== q && q.includes(t) ? t : null;
+  };
+  const title = pick((raw as any).title, QUOTE_PART_LIMITS.title);
+  if (!title || !/[가-힣A-Za-z]{2,}/.test(title)) return null;
+  return { title, benefit: pick((raw as any).benefit, QUOTE_PART_LIMITS.benefit), period: pick((raw as any).period, QUOTE_PART_LIMITS.period) };
 }
 
 export interface OutreachSelection {
@@ -120,6 +143,8 @@ export interface OutreachSelection {
   eventIndexes?: number[] | null;
   /** 봇 차단 등 크롤 실패 시 직접 붙여넣는 행사 원문(있으면 eventIndex 무시) */
   manualEventText?: string;
+  /** ★ 2026-09-24 B — 화면이 본 store_grab.at(스토어 후보 번호가 그 사이 바뀌었으면 CONFLICT) · 보내지 않으면 대조하지 않는다(자동 확정) */
+  storeGrabAt?: string | null;
   /** 선택 이미지 URL. null = 이미지 없이 진행 */
   imageUrl: string | null;
   /** 크롤 판정과 다르면 바꿔 넣는 업종 코드 */
@@ -517,7 +542,9 @@ export function filterQuoteCandidates(
     const near = inQuote.end ? { start: null, end: null } : findPeriodNear(src, quote);
     const startDate = normalizeAiDate((c as any)?.start_date) || inQuote.start || near.start;
     const endDate = normalizeAiDate((c as any)?.end_date) || inQuote.end || near.end;
-    candidates.push({ quote, sourceUrl, startDate, endDate, benefitLicensed: isFutureDate(endDate, now), origin: 'crawl' });
+    // ★ 2026-09-24 품질 A — 제목·혜택·기간 조각(인용문 부분 문자열만)
+    const parts = quotePartsOf(c, quote);
+    candidates.push({ quote, sourceUrl, startDate, endDate, benefitLicensed: isFutureDate(endDate, now), origin: 'crawl', ...(parts ? { parts } : {}) });
   }
   return { candidates, meta };
 }
@@ -580,11 +607,14 @@ export function eventCardsOf(selectedList: readonly EventCandidate[], media: Out
     .filter((c) => c && (c.origin === 'card' ? String(c.title || '').trim() : String(c.quote || '').trim()))
     .map((c) => {
       if (c.origin !== 'card') {
+        // ★ 2026-09-24 품질 A — 조각이 있으면 제목·기간 = 조각 · 본문(text) = 혜택 조각(면허 있을 때만 · 표준 조립은 숫자 차단기가 없는 preset 경로) · 없으면 종전
+        const p = c.parts || null;
         return {
-          title: String(c.quote).replace(/\s+/g, ' ').trim().slice(0, 60),
-          periodRaw: null, endDate: c.endDate || null, bannerUrl: null, bannerSize: null,
+          title: String(p?.title || c.quote).replace(/\s+/g, ' ').trim().slice(0, 60),
+          periodRaw: p?.period || null, endDate: c.endDate || null, bannerUrl: null, bannerSize: null,
           detailUrl: c.sourceUrl ? String(c.sourceUrl) : null,
           licensed: !!c.benefitLicensed,
+          ...(p?.benefit && c.benefitLicensed ? { text: p.benefit } : {}),
         };
       }
       const copy = c.bannerUrl ? gallery.find((g) => g && g.srcUrl === c.bannerUrl) : undefined;
@@ -596,6 +626,8 @@ export function eventCardsOf(selectedList: readonly EventCandidate[], media: Out
         bannerSize: copy && copy.width > 0 && copy.height > 0 ? { width: copy.width, height: copy.height } : null,
         detailUrl: c.detailUrl || null,
         licensed: !!c.benefitLicensed,
+        // ★ 2026-09-24 B — 네이버 스토어 기획 카드의 본문(대표 상품 한 줄 · 면허 있을 때만) · 다른 카드 후보는 parts 가 없다(= 종전)
+        ...(c.parts?.benefit && c.benefitLicensed ? { text: c.parts.benefit } : {}),
       };
     });
 }
@@ -1158,8 +1190,10 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
           // ★ 2026-09-10 브랜드 대표 소식(톤28 실측: 홈 첫 화면의 출시 카운트다운이 후보에 없었다) — 혜택이 없어도 날짜가 명시된 출시·오픈·티저는 후보다
           '- 신제품 출시·오픈·선공개·티저처럼 날짜가 명시된 브랜드 소식은 혜택 문구가 없어도 후보로 넣는다(시작 전이면 start_date 에 그 날짜 · 홈 첫 화면의 큰 소식을 우선).',
           '- 날짜는 본문에 명시된 것만 YYYY-MM-DD로 적고, 없으면 null.',
+          // ★ 2026-09-24 품질 A — 인용문을 세 조각으로(전부 quote 안의 글자 그대로 · 서버가 부분 문자열인지 대조한다)
+          '- title = quote 안에서 행사 이름에 해당하는 앞부분(30자 이내 · 원문 그대로). benefit = quote 안의 혜택 설명 부분(60자 이내 · 원문 그대로 · 없으면 null). period = quote 안의 날짜·기간 표기만(예: "~10/4까지" · 원문 그대로 · 없으면 null).',
           '- 최대 3개. 없으면 빈 배열.',
-          '- 출력은 JSON 배열 하나만: [{"quote":"...","start_date":null,"end_date":null}]',
+          '- 출력은 JSON 배열 하나만: [{"quote":"...","title":"...","benefit":"...","period":"...","start_date":null,"end_date":null}]',
         ].join('\n'),
         userMessage: eventTextFull,
         maxTokens: 1200,
@@ -1251,16 +1285,22 @@ async function confirmSelectionCore(
   actor: ConfirmActor,
 ): Promise<{ warnings: string[]; production: Promise<void> }> {
   const cur = await query(
-    `SELECT stage, event_quote, brand_profile FROM sales_outreach_jobs WHERE id = $1`,
+    `SELECT stage, event_quote, brand_profile, stage_results->'store_grab' AS store_grab FROM sales_outreach_jobs WHERE id = $1`,
     [jobId],
   );
   if (cur.rows.length === 0) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
   if (cur.rows[0].stage !== 'awaiting_confirm') {
     throw new OutreachError('CONFLICT', '지금은 확정할 수 있는 상태가 아닙니다. 화면을 새로고침해주세요.');
   }
+  // ★ 2026-09-24 B — 화면이 본 스토어 정보와 지금이 다르면(그 사이 새로 가져옴) 후보 번호가 어긋난다 → 새로고침 요청
+  const storeGrab = cur.rows[0].store_grab || null;
+  if (selection.storeGrabAt !== undefined && (selection.storeGrabAt || null) !== (storeGrab?.at ? String(storeGrab.at) : null)) {
+    throw new OutreachError('CONFLICT', '네이버 스토어 정보가 새로 들어왔습니다. 화면을 새로고침한 뒤 다시 골라주세요.');
+  }
 
   const eventQuote = cur.rows[0].event_quote || { candidates: [] };
-  const allCandidates: EventCandidate[] = Array.isArray(eventQuote.candidates) ? eventQuote.candidates : [];
+  // ★ 2026-09-24 B — 후보 = 홈페이지 후보 + 지금 스토어 기획(확인 화면 candidatesView 와 같은 함수 · 확정 결과 candidates 에 함께 저장)
+  const allCandidates: EventCandidate[] = eventCandidatesView(Array.isArray(eventQuote.candidates) ? eventQuote.candidates : [], storeGrab);
   const warnings: string[] = [];
 
   // ★ v3 다중 선택(설계서 §6-1) — manual > eventIndexes > eventIndex · 범위 밖은 그것만 버리고 warning · 앞 3개 · selected = selectedList[0](카피·포스터 하류 무변경)
@@ -1709,6 +1749,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               brandColor,
               // ★ 2026-09-06 S3 문구 3칸 재료 · 실측 배너 0장이면 16:9 배너 1장
               eventQuote: selected?.quote || null,
+              // ★ 2026-09-24 품질 A — 포스터 제목 출처 = 확정 행사 전부(누른 순서 · 조각 제목이 원문보다 먼저)
+              eventQuotes: selectedList.flatMap((c) => [c.parts?.title, c.origin === 'card' ? c.title : c.quote]).filter((t): t is string => !!t),
               products: media?.products?.length ? media.products : (Array.isArray(bp.listProducts) ? bp.listProducts : []),
               siteTitle: bp.siteTitle || null,
               wantBanner: !(media && Array.isArray(media.gallery) && media.gallery.length > 0),
@@ -1832,6 +1874,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           const plan = planOutreachCatalog({
             posterUrl: dmInput.posterUrl, media: applyOutreachMediaSelection(dmInput.media, dmInput.mediaSelection || null),
             eventCards: dmCards, eventSlices: dmInput.eventSlices, ctaLinks: dmInput.ctaLinks, homepageUrl,
+            companyName: job.company_name, // ★ 2026-09-24 품질 A — 캡션 숫자 게이트에서 업체명을 가린다
           });
           catalog = await buildOutreachCatalog({ companyId: ctx.companyId, userId: ctx.userId, companyName: job.company_name, brandColor, brandKit: assembled.brandKit, plan });
         } catch (err: any) {
@@ -1909,7 +1952,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           const si = await generateSubjectIntro(guide, { companyName: job.company_name, industry: job.industry_category, selectedEvent: selected, promptMaterial: promptMaterial.slice(0, 2000) });
           // ★ 2026-09-23 제목 = 결정 규칙(업체 + 확정 행사명 · 설계서 §11) · AI 제목은 검토 화면 후보로만 남긴다
           const topEvent = selectedList[0] || null;
-          subject = buildOutreachSubject(guide, job.company_name, topEvent ? (topEvent.origin === 'card' ? topEvent.title : topEvent.quote) : null);
+          subject = buildOutreachSubject(guide, job.company_name, topEvent ? (topEvent.origin === 'card' ? topEvent.title : (topEvent.parts?.title || topEvent.quote)) : null);
           subjectCandidates = si.generated && si.subject && si.subject !== subject ? [si.subject] : [];
           intro = si.intro;
         } else {
@@ -1966,7 +2009,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           replyLine: sr.reply_line?.text ? String(sr.reply_line.text) : null,
           // ★ 2026-09-23 재구성 — 담당자 호칭 · 시안에 담은 확정 행사 요약 · 직접 발송 법정 footer
           contactName: job.contact_name ? String(job.contact_name) : null,
-          confirmedEvents: selectedList.map((c) => ({ title: c.origin === 'card' ? String(c.title || c.quote) : String(c.quote), periodRaw: c.periodRaw || null })),
+          confirmedEvents: selectedList.map((c) => ({ title: c.origin === 'card' ? String(c.title || c.quote) : String(c.parts?.title || c.quote), periodRaw: c.periodRaw || c.parts?.period || null })),
           adFooter,
         });
         if (!(await insertAssetOwned(jobId, 'email_html', {
@@ -2858,7 +2901,11 @@ export async function getOutreachJob(jobId: string, operatorSuperAdminId: string
     }
   }
   const views = viewSummaryOf(rest, dmRow);
-  return { ...rest, assets: assets.rows, sendLock: computeSendLock(sendLockEnv(), emailAsset, sendLockMaterialOf(rest.stage_results)), quality, views };
+  return {
+    ...rest, assets: assets.rows, sendLock: computeSendLock(sendLockEnv(), emailAsset, sendLockMaterialOf(rest.stage_results)), quality, views,
+    // ★ 2026-09-24 B — 확인 화면 후보 목록(홈페이지 후보 + 스토어 기획 · 확정과 같은 함수)
+    candidatesView: eventCandidatesView(Array.isArray(rest.event_quote?.candidates) ? rest.event_quote.candidates : [], rest.stage_results?.store_grab || null),
+  };
 }
 
 export async function getLatestOutreachJob(operatorSuperAdminId: string | null | undefined): Promise<any | null> {

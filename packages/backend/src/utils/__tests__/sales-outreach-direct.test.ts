@@ -333,19 +333,22 @@ describe('불변식(소스 검사)', () => {
     const next = rest.search(/\n(export |async function |function )/);
     return next < 0 ? rest : rest.slice(0, next);
   };
-  it('가져오기 함수는 네트워크 0 · 스토어 판정은 저장값 CT · 조건부 UPDATE 1문 · 주소·HTML 원문 저장 0', () => {
+  it('가져오기 함수는 네트워크 0 · 스토어 판정은 저장값 CT · 조건부 UPDATE 1문 · 판독 결과만 저장(★0924 B 판 2 · 상태·주소 원문 0)', () => {
     const src = read('sales-outreach-direct-jobs.ts');
     const body = bodyOf(src, 'export async function grabOutreachStorePage(');
     expect(body).not.toMatch(/fetch\(|fetchHtmlGuarded|renderPageGuarded|http\.request|axios/);
     expect(body).toContain('parseNaverStoreSlug(input.pageUrl)');
-    expect(body).toContain('storePageTextOf(input.html)');
-    expect(body).toContain('JSON.stringify({ store_grab: { text, chars: text.length, at, by: operatorSuperAdminId || null } })');
+    expect(body).toContain('parseNaverStoreState(pickNaverStoreState(input.state)');
+    expect(body).toContain('JSON.stringify({ store_grab: { v: 2, store: store.value, material, at, by: operatorSuperAdminId || null } })');
     expect(body).toMatch(/WHERE id = \$1 AND naver_store_slug = \$3[\s\S]*stage = ANY\(\$4::text\[\]\)/);
-    expect(body).not.toMatch(/store_grab:[^}]*(url|html|pageUrl)/i);
+    expect(body).not.toMatch(/store_grab:[^}]*(pageUrl|input\.state|html)/i);
   });
-  it('저장본 업로드와 화면 가져오기는 같은 추출 함수 하나', () => {
+  it('저장본 업로드 = 스토어 상태가 있으면 같은 판독기·같은 저장 · 없으면 종전 글자 추출 함수 하나', () => {
     const src = read('sales-outreach-direct-jobs.ts');
-    expect(bodyOf(src, 'export async function extractOutreachStorePageText(')).toContain('storePageTextOf(');
+    const up = bodyOf(src, 'export async function extractOutreachStorePageText(');
+    expect(up).toContain('naverStoreStateFromHtml(html)');
+    expect(up).toContain('parseNaverStoreState(state,');
+    expect(up).toContain('storePageTextOf(');
     expect(src).not.toContain('buildOutreachEventMaterial(');
   });
   it('스토어 문구를 가져온 건은 자동 확정하지 않는다(혜택 숫자는 사람이 채운다)', () => {

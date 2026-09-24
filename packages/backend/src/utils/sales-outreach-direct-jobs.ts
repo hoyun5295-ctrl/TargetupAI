@@ -24,6 +24,8 @@ import {
   isPostReviewPick, kstDayStartIso, type DirectLockReason, type DirectStats, type DirectSendLock, type ContactDomainVerdict,
   parseNaverStoreSlug, storePageTextOf, STORE_GRAB_STAGES,
 } from './sales-outreach-direct';
+// ★ 2026-09-24 B 네이버 스토어 전용 판독기(허용 칸 · 순수)
+import { parseNaverStoreState, pickNaverStoreState, naverStoreStateFromHtml } from './sales-outreach-naver-store';
 import { sendOutreachDirectMail, sendOutreachCopyMail, isOutreachMailerReady } from './outreach-mailer';
 import { PUBLIC_BASE } from './sales-outreach-produce';
 import { getActiveStyleGuide } from './sales-outreach-style';
@@ -654,22 +656,43 @@ export async function recordOutreachUnsubscribe(token: string, input: { companyW
 
 // ===== 네이버 스토어 저장본(사람 업로드 · 네트워크 0 · 불변 50) =====
 
-/** 사람이 브라우저에서 저장한 기획전 페이지 → 행사 텍스트(붙여넣기와 같은 성격 · DB 쓰기 0) */
-export async function extractOutreachStorePageText(jobId: string, html: string, operatorSuperAdminId: string | null | undefined): Promise<{ text: string; chars: number }> {
+export type StorePageUploadResult =
+  | { mode: 'store'; campaigns: number; products: number }
+  | { mode: 'text'; text: string; chars: number };
+
+/**
+ * 사람이 브라우저에서 저장한 스토어·기획전 페이지(.html).
+ * ★ 2026-09-24 B — 파일 안에 스토어 상태(__PRELOADED_STATE__)가 있고 잡에 스토어 주소가 저장돼 있으면 북마크와 같은 판독기·같은 저장(store_grab 판 2)
+ *   → 확인 화면 후보에 스토어 기획이 붙는다. 상태가 없거나 스토어 주소가 없으면 종전(행사 글자 → 붙여넣기 칸 · DB 쓰기 0).
+ */
+export async function extractOutreachStorePageText(jobId: string, html: string, operatorSuperAdminId: string | null | undefined): Promise<StorePageUploadResult> {
   await assertOperator(operatorSuperAdminId);
-  const cur = await query(`SELECT stage FROM sales_outreach_jobs WHERE id = $1 AND purged_at IS NULL`, [jobId]);
+  const cur = await query(`SELECT stage, naver_store_slug FROM sales_outreach_jobs WHERE id = $1 AND purged_at IS NULL`, [jobId]);
   if (!cur.rows[0]) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
   if (cur.rows[0].stage !== 'awaiting_confirm') throw new OutreachError('CONFLICT', '확인 대기 단계에서만 올릴 수 있습니다.');
+  const slug = /^(brand|smartstore):([a-z0-9_-]{2,40})$/.exec(String(cur.rows[0].naver_store_slug || ''));
+  const state = slug ? naverStoreStateFromHtml(html) : null;
+  const material = state && slug ? parseNaverStoreState(state, { kind: slug[1] as 'brand' | 'smartstore', slug: slug[2] }) : null;
+  if (material && slug) {
+    const at = new Date().toISOString();
+    const upd = await query(
+      `UPDATE sales_outreach_jobs SET stage_results = COALESCE(stage_results, '{}'::jsonb) || $2::jsonb
+        WHERE id = $1 AND stage = 'awaiting_confirm' AND purged_at IS NULL RETURNING id`,
+      [jobId, JSON.stringify({ store_grab: { v: 2, store: slug[0], material, at, by: operatorSuperAdminId || null } })],
+    );
+    if (!upd.rows[0]) throw new OutreachError('CONFLICT', '그 사이 제작이 시작되어 붙이지 못했습니다. 화면을 새로고침해주세요.');
+    return { mode: 'store', campaigns: material.campaigns.length, products: material.products.length };
+  }
   const text = storePageTextOf(html);
   if (text.length < 10) throw new OutreachError('VALIDATION', '파일에서 읽을 수 있는 행사 문구를 찾지 못했습니다. 기획전 페이지를 "웹페이지 전체"로 저장했는지 확인해주세요.');
-  return { text, chars: text.length };
+  return { mode: 'text', text, chars: text.length };
 }
 
 export interface StoreGrabResult {
   /** 판정한 스토어 저장값(brand:slug · smartstore:slug) */
   store: string;
-  /** 붙인 건(하나로 정해졌을 때만) */
-  attached: { jobId: string; companyName: string; chars: number } | null;
+  /** 붙인 건(하나로 정해졌을 때만) · 기획 수 · 상품 수 */
+  attached: { jobId: string; companyName: string; campaigns: number; products: number } | null;
   /** 같은 스토어로 받을 수 있는 건이 여럿 = 사람이 고른다(붙이지 않음) */
   choices: Array<{ jobId: string; companyName: string; stage: string; createdAt: string }>;
   /** 붙이지 못한 이유 · no_job = 이 스토어로 등록된 건 없음 · past_confirm = 전부 확정 뒤 */
@@ -678,11 +701,13 @@ export interface StoreGrabResult {
 
 /**
  * ★0924 네이버 스토어 화면 가져오기(설계서 §9-1) — 직원 브라우저에 이미 떠 있는 화면을 북마크 버튼이 보내 온 것.
+ * ★ 2026-09-24 B(판 2 · docs/2026-09-24-outreach-naver-store-reader-design.md) — 버튼이 보낸 것 = 스토어 상태의 허용 칸(글자 긁기 폐기).
+ *   서버는 한 번 더 허용 칸으로 거르고(pickNaverStoreState) 판독기가 기획·상품·관심고객수만 뽑는다.
  * 서버는 네이버에 요청하지 않는다(불변 50). 스토어 판정 = 저장값 CT · 붙일 건 = 같은 스토어 저장값 + 확정 전 단계.
- * 저장 = stage_results.store_grab {text, chars, at, by} 뿐(페이지 주소·HTML 원문 0). 확정 화면에서 사람이 고를 때만 쓰인다.
+ * 저장 = stage_results.store_grab {v:2, store, material, at, by} 뿐(상태 원문·페이지 주소 0). 확인 화면 후보는 eventCandidatesView 가 만든다.
  */
 export async function grabOutreachStorePage(
-  input: { pageUrl: string; html: string; jobId?: string | null },
+  input: { pageUrl: string; state: unknown; jobId?: string | null },
   operatorSuperAdminId: string | null | undefined,
 ): Promise<StoreGrabResult> {
   await assertOperator(operatorSuperAdminId);
@@ -701,19 +726,19 @@ export async function grabOutreachStorePage(
   if (want && !choices.some((c) => c.jobId === want)) throw new OutreachError('CONFLICT', '고른 건이 지금은 받을 수 없는 상태입니다. 스토어 화면에서 다시 눌러 주세요.');
   const targetId = want || (choices.length === 1 ? choices[0].jobId : '');
   if (!targetId) return { store: store.value, attached: null, choices, reason: null };
-  const text = storePageTextOf(input.html);
-  if (text.length < 10) throw new OutreachError('VALIDATION', '이 화면에서 읽을 수 있는 행사 문구를 찾지 못했습니다. 기획전이나 이벤트 화면을 연 뒤 다시 눌러 주세요.');
+  const material = parseNaverStoreState(pickNaverStoreState(input.state), { kind: store.kind, slug: store.slug });
+  if (!material) throw new OutreachError('VALIDATION', '이 화면에서 스토어 정보를 찾지 못했습니다. 스토어 첫 화면을 연 뒤 다시 눌러 주세요.');
   const at = new Date().toISOString();
   const upd = await query(
     `UPDATE sales_outreach_jobs SET stage_results = COALESCE(stage_results, '{}'::jsonb) || $2::jsonb
       WHERE id = $1 AND naver_store_slug = $3 AND purged_at IS NULL AND (stage_results->>'deleted_at') IS NULL
         AND stage = ANY($4::text[])
       RETURNING company_name`,
-    [targetId, JSON.stringify({ store_grab: { text, chars: text.length, at, by: operatorSuperAdminId || null } }), store.value, [...STORE_GRAB_STAGES]],
+    [targetId, JSON.stringify({ store_grab: { v: 2, store: store.value, material, at, by: operatorSuperAdminId || null } }), store.value, [...STORE_GRAB_STAGES]],
   );
   if (!upd.rows[0]) throw new OutreachError('CONFLICT', '그 사이 제작이 시작되어 붙이지 못했습니다. 화면을 새로고침해주세요.');
-  console.log('[sales-outreach-direct] 스토어 화면 가져오기:', targetId, store.value, text.length);
-  return { store: store.value, attached: { jobId: targetId, companyName: String(upd.rows[0].company_name), chars: text.length }, choices: [], reason: null };
+  console.log('[sales-outreach-direct] 스토어 가져오기:', targetId, store.value, `기획 ${material.campaigns.length}`, `상품 ${material.products.length}`);
+  return { store: store.value, attached: { jobId: targetId, companyName: String(upd.rows[0].company_name), campaigns: material.campaigns.length, products: material.products.length }, choices: [], reason: null };
 }
 
 // ===== 작업대(§12 · 서버 계산 카드) =====
@@ -753,7 +778,7 @@ export async function getOutreachWorkbench(filter: { batch?: string | null }, op
             j.stage_results->'domain_ack' AS domain_ack, j.stage_results->'material' AS material, j.stage_results->'material_override' AS material_override,
             j.stage_results->'direct_last' AS direct_last, j.stage_results->'auto_send' AS auto_send, j.stage_results->>'auto_confirmed_at' AS auto_confirmed_at,
             j.event_quote->>'confirmedBy' AS confirmed_by, j.event_quote->'selectedList' AS selected_list,
-            j.stage_results->'store_grab'->>'chars' AS store_grab_chars, j.stage_results->'store_grab'->>'at' AS store_grab_at,
+            j.stage_results->'store_grab'->'material'->'campaigns' AS store_grab_campaigns, j.stage_results->'store_grab'->>'at' AS store_grab_at,
             j.contact_email, j.contact_name, j.contact_basis, j.naver_store_slug, j.reviewed_asset_id,
             e.id AS email_id, e.payload->>'subject' AS subject, (e.payload->>'placeholderCount')::int AS placeholder_count,
             e.payload->'adFooter'->>'unsubscribeUrl' AS unsub_url,
@@ -818,8 +843,8 @@ export async function getOutreachWorkbench(filter: { batch?: string | null }, op
       contact: { email, name: row.contact_name || null, basis: row.contact_basis || null },
       domainVerdict: verdict,
       naverStoreUrl: naverStoreUrlOf(row.naver_store_slug),
-      // ★0924 스토어 화면에서 가져온 문구(글자 수·시각만 · 문구 본문은 상세에서)
-      storeGrab: row.store_grab_at ? { chars: Number(row.store_grab_chars) || 0, at: String(row.store_grab_at) } : null,
+      // ★0924 B 스토어에서 가져온 기획 수·시각(판 1 글자 저장분 = 기획 0)
+      storeGrab: row.store_grab_at ? { campaigns: Array.isArray(row.store_grab_campaigns) ? row.store_grab_campaigns.length : 0, at: String(row.store_grab_at) } : null,
       subject: row.subject || null,
       directSubject: row.subject ? directSubjectOf(String(row.subject)) : null,
       emailAssetId: row.email_id || null,

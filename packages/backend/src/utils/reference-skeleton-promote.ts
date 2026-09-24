@@ -80,7 +80,7 @@ async function loadDmRows(companyId: string, limit: number, ids?: string[]): Pro
             (d.ai_prompt IS NOT NULL) AS ai_edited,
             COALESCE(u.name, u.login_id) AS created_by,
             EXISTS(SELECT 1 FROM planner_touchpoints t WHERE t.exec_meta->>'dm_id' = d.id::text) AS from_planner,
-            EXISTS(SELECT 1 FROM sales_outreach_assets a WHERE a.kind = 'dm' AND a.payload->>'dmId' = d.id::text) AS from_outreach
+            EXISTS(SELECT 1 FROM sales_outreach_assets a WHERE a.kind = 'dm' AND (a.payload->>'dmId' = d.id::text OR a.payload->>'catalogDmId' = d.id::text)) AS from_outreach
        FROM dm_pages d
        LEFT JOIN users u ON u.id = d.created_by
       WHERE d.company_id = $1 AND d.status = 'published'${idFilter}

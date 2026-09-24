@@ -1,0 +1,862 @@
+{
+ "bsProductCollection": {
+  "bestProducts": [
+   {
+    "id": 13760607741,
+    "name": "[톤캉스] 해남404 시카 병풀 새벽 크림 2.0 50g",
+    "dispName": "[톤캉스] 해남404 시카 병풀 새벽 크림 2.0 50g",
+    "salePrice": 38000,
+    "benefitsView": {
+     "discountedSalePrice": 12900,
+     "discountedRatio": 66
+    },
+    "reviewAmount": {
+     "totalReviewCount": 135,
+     "averageReviewScore": 4.95
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_230/1789463796534mzWuK_JPEG/31905989046276671_605664392.jpg"
+   },
+   {
+    "id": 13760613391,
+    "name": "[톤캉스] 해남404 시카 병풀 새벽 크림 50g",
+    "dispName": "[톤캉스] 해남404 시카 병풀 새벽 크림 50g",
+    "salePrice": 42000,
+    "benefitsView": {
+     "discountedSalePrice": 12900,
+     "discountedRatio": 69
+    },
+    "reviewAmount": {
+     "totalReviewCount": 109,
+     "averageReviewScore": 4.94
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_98/1789463745234E2EjA_JPEG/123596586463187816_913887113.jpg"
+   },
+   {
+    "id": 13760584892,
+    "name": "[톤캉스] 펩타시카 탄력 광채 세럼 30ml",
+    "dispName": "[톤캉스] 펩타시카 탄력 광채 세럼 30ml",
+    "salePrice": 37000,
+    "benefitsView": {
+     "discountedSalePrice": 12900,
+     "discountedRatio": 65
+    },
+    "reviewAmount": {
+     "totalReviewCount": 100,
+     "averageReviewScore": 4.96
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_100/1789464194793YAP64_JPEG/100357875106074478_1776016976.jpg"
+   },
+   {
+    "id": 13760616375,
+    "name": "[톤캉스] 해남 404 펩타시카 탄력 광채 인텐시브 크림 50g",
+    "dispName": "[톤캉스] 해남 404 펩타시카 탄력 광채 인텐시브 크림 50g",
+    "salePrice": 45000,
+    "benefitsView": {
+     "discountedSalePrice": 15900,
+     "discountedRatio": 64
+    },
+    "reviewAmount": {
+     "totalReviewCount": 95,
+     "averageReviewScore": 4.92
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_4/1789463677197NCqyf_JPEG/123596617959151038_1032884498.jpg"
+   },
+   {
+    "id": 13760633169,
+    "name": "[톤캉스] 화잘먹 펩타시카 선세럼 50ml SPF 50+",
+    "dispName": "[톤캉스] 화잘먹 펩타시카 선세럼 50ml SPF 50+",
+    "salePrice": 35000,
+    "benefitsView": {
+     "discountedSalePrice": 8900,
+     "discountedRatio": 74
+    },
+    "reviewAmount": {
+     "totalReviewCount": 70,
+     "averageReviewScore": 4.93
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_46/1789463432501Eidy2_JPEG/100357112806435765_1871641260.jpg"
+   },
+   {
+    "id": 13760588661,
+    "name": "[톤캉스] 펩타 시카 저자극 탄력 광채 세럼 패드 60매입",
+    "dispName": "[톤캉스] 펩타 시카 저자극 탄력 광채 세럼 패드 60매입",
+    "salePrice": 37000,
+    "benefitsView": {
+     "discountedSalePrice": 12900,
+     "discountedRatio": 65
+    },
+    "reviewAmount": {
+     "totalReviewCount": 40,
+     "averageReviewScore": 4.95
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_204/1789464158973wEYK2_JPEG/125561346923221490_1862101574.jpg"
+   },
+   {
+    "id": 13760631432,
+    "name": "[톤캉스] 톤업 파데프리 선비비 미백 50ml SPF50+ 50g",
+    "dispName": "[톤캉스] 톤업 파데프리 선비비 미백 50ml SPF50+ 50g",
+    "salePrice": 35000,
+    "benefitsView": {
+     "discountedSalePrice": 8900,
+     "discountedRatio": 74
+    },
+    "reviewAmount": {
+     "totalReviewCount": 82,
+     "averageReviewScore": 4.89
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_106/1789463446538vu8U0_JPEG/125560634499915307_291700777.jpg"
+   },
+   {
+    "id": 13760618870,
+    "name": "[톤캉스] 펩타시카 리프팅 글로우 겔 마스크 4매입",
+    "dispName": "[톤캉스] 펩타시카 리프팅 글로우 겔 마스크 4매입",
+    "salePrice": 42000,
+    "benefitsView": {
+     "discountedSalePrice": 15900,
+     "discountedRatio": 62
+    },
+    "reviewAmount": {
+     "totalReviewCount": 48,
+     "averageReviewScore": 4.73
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_137/1789463663484n5wXe_JPEG/20237611632961744_1521631182.jpg"
+   },
+   {
+    "id": 13760603582,
+    "name": "[톤캉스] 펩타시카 탄력 광채 펩타이드 토너 250ml",
+    "dispName": "[톤캉스] 펩타시카 탄력 광채 펩타이드 토너 250ml",
+    "salePrice": 31000,
+    "benefitsView": {
+     "discountedSalePrice": 12900,
+     "discountedRatio": 58
+    },
+    "reviewAmount": {
+     "totalReviewCount": 60,
+     "averageReviewScore": 4.87
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_281/1789463957963LQulA_JPEG/65232260075451270_1997228890.jpg"
+   },
+   {
+    "id": 13760624328,
+    "name": "[톤캉스] 레틴알 0.1% 펩타시카 탄력 모공 세럼 30ml",
+    "dispName": "[톤캉스] 레틴알 0.1% 펩타시카 탄력 모공 세럼 30ml",
+    "salePrice": 37000,
+    "benefitsView": {
+     "discountedSalePrice": 12900,
+     "discountedRatio": 65
+    },
+    "reviewAmount": {
+     "totalReviewCount": 57,
+     "averageReviewScore": 4.93
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_20/1789463546783lCAoS_JPEG/20237494938454458_1540096915.jpg"
+   },
+   {
+    "id": 13760548532,
+    "name": "[톤캉스] 검은콩 샴푸바 탈모완화기능성 100g",
+    "dispName": "[톤캉스] 검은콩 샴푸바 탈모완화기능성 100g",
+    "salePrice": 11000,
+    "benefitsView": {
+     "discountedSalePrice": 6900,
+     "discountedRatio": 37
+    },
+    "reviewAmount": {
+     "totalReviewCount": 53,
+     "averageReviewScore": 4.89
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_76/17894642222304Xsuv_JPEG/19869875023394546_1110949024.jpg"
+   },
+   {
+    "id": 13760613797,
+    "name": "[톤캉스] 회상 바디 로션 300g",
+    "dispName": "[톤캉스] 회상 바디 로션 300g",
+    "salePrice": 30000,
+    "benefitsView": {
+     "discountedSalePrice": 11000,
+     "discountedRatio": 63
+    },
+    "reviewAmount": {
+     "totalReviewCount": 40,
+     "averageReviewScore": 4.98
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_213/1789463729159tDa23_JPEG/123596664307489135_1100796485.jpg"
+   },
+   {
+    "id": 13760628795,
+    "name": "[톤캉스] 히알 시카 수분 시카 앰플 세럼 30ml",
+    "dispName": "[톤캉스] 히알 시카 수분 시카 앰플 세럼 30ml",
+    "salePrice": 37000,
+    "benefitsView": {
+     "discountedSalePrice": 12900,
+     "discountedRatio": 65
+    },
+    "reviewAmount": {
+     "totalReviewCount": 43,
+     "averageReviewScore": 4.98
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_78/1789463464779Ee6vq_JPEG/123596302933980012_1815551638.jpg"
+   },
+   {
+    "id": 13760588250,
+    "name": "[톤캉스] 안티댄드러프 샴푸바 비듬 가려움 탈모기능성 100g 멘톨",
+    "dispName": "[톤캉스] 안티댄드러프 샴푸바 비듬 가려움 탈모기능성 100g 멘톨",
+    "salePrice": 13000,
+    "benefitsView": {
+     "discountedSalePrice": 6900,
+     "discountedRatio": 46
+    },
+    "reviewAmount": {
+     "totalReviewCount": 30,
+     "averageReviewScore": 4.83
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_180/1789464177742PC5eL_JPEG/100357858040220115_1282549344.jpg"
+   },
+   {
+    "id": 13760600157,
+    "name": "[톤캉스] 무화과 콜라겐 캡슐 30,000ppm 세럼 30ml",
+    "dispName": "[톤캉스] 무화과 콜라겐 캡슐 30,000ppm 세럼 30ml",
+    "salePrice": 37000,
+    "benefitsView": {
+     "discountedSalePrice": 12900,
+     "discountedRatio": 65
+    },
+    "reviewAmount": {
+     "totalReviewCount": 36,
+     "averageReviewScore": 4.94
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260915_30/1789464023779kNVwt_JPEG/38018908621638823_1409852141.jpg"
+   }
+  ],
+  "newProducts": [
+   {
+    "id": 13771440392,
+    "name": "[노워시 트리트먼트] 톤28 탄력 윤기 푸석한 모발 80g",
+    "dispName": "[노워시 트리트먼트] 톤28 탄력 윤기 푸석한 모발 80g",
+    "salePrice": 15000,
+    "benefitsView": {
+     "discountedSalePrice": 13500,
+     "discountedRatio": 10
+    },
+    "reviewAmount": {
+     "totalReviewCount": 0,
+     "averageReviewScore": 0
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260611_77/1781150041894wpTwK_JPEG/20584435638920078_1078275799.jpg"
+   },
+   {
+    "id": 13766850632,
+    "name": "[신제품] 톤28 블루 펩타이드 스킨부스터 100g 탄력 볼륨 피부결 개선",
+    "dispName": "[신제품] 톤28 블루 펩타이드 스킨부스터 100g 탄력 볼륨 피부결 개선",
+    "salePrice": 32000,
+    "benefitsView": {
+     "discountedSalePrice": 27200,
+     "discountedRatio": 15
+    },
+    "reviewAmount": {
+     "totalReviewCount": 10,
+     "averageReviewScore": 5
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260918_292/1789697186620PWH83_JPEG/17111040741323069_800803178.jpg"
+   },
+   {
+    "id": 13766208367,
+    "name": "[신제품] 톤28 블루 펩타이드 고체 세럼 55g 탄력 리프팅",
+    "dispName": "[신제품] 톤28 블루 펩타이드 고체 세럼 55g 탄력 리프팅",
+    "salePrice": 37000,
+    "benefitsView": {
+     "discountedSalePrice": 31450,
+     "discountedRatio": 15
+    },
+    "reviewAmount": {
+     "totalReviewCount": 19,
+     "averageReviewScore": 5
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260917_100/1789646877241yEWer_JPEG/6341373027503753_749116656.jpg"
+   },
+   {
+    "id": 13766128294,
+    "name": "[신제품] 톤28 블루 펩타이드 크림 50g 탄력 개선",
+    "dispName": "[신제품] 톤28 블루 펩타이드 크림 50g 탄력 개선",
+    "salePrice": 39000,
+    "benefitsView": {
+     "discountedSalePrice": 33150,
+     "discountedRatio": 15
+    },
+    "reviewAmount": {
+     "totalReviewCount": 9,
+     "averageReviewScore": 5
+    },
+    "representativeImageUrl": "https://shop-phinf.pstatic.net/20260917_292/1789641583010zSwte_JPEG/17055437120834055_1661425802.jpg"
+   }
+  ]
+ },
+ "widgetContents": {
+  "advancedPromotionWidget": {
+   "lookbookConfig": {
+    "data": {
+     "simpleProducts": []
+    }
+   }
+  },
+  "bestProductWidget": {
+   "data": {}
+  },
+  "bestReviewWidget": {
+   "data": {
+    "reviewProducts": [],
+    "reviewCatalogs": []
+   }
+  },
+  "categoryProductWidget": {
+   "data": {}
+  },
+  "couponPointProductWidget": {
+   "couponPointProductWidget": {
+    "data": {
+     "simpleProducts": []
+    }
+   },
+   "couponPointProductWidget1": {
+    "data": {
+     "simpleProducts": []
+    }
+   },
+   "couponPointProductWidget2": {
+    "data": {
+     "simpleProducts": []
+    }
+   },
+   "couponPointProductWidget3": {
+    "data": {
+     "simpleProducts": []
+    }
+   },
+   "couponPointProductWidget4": {
+    "data": {
+     "simpleProducts": []
+    }
+   }
+  },
+  "customProductWidget": {
+   "customProductWidget4": {
+    "data": {
+     "simpleProducts": [
+      {
+       "id": 13663228103,
+       "name": "[챌린지팩]톤28 시원한 쿨링 멘톨 바디바 3.5% + 프리즈 5% + 데스 7% 3개 100g 천연 바디워시 클렌저",
+       "dispName": "[챌린지팩]톤28 시원한 쿨링 멘톨 바디바 3.5% + 프리즈 5% + 데스 7% 3개 100g 천연 바디워시 클렌저",
+       "salePrice": 36000,
+       "benefitsView": {
+        "discountedSalePrice": 30600,
+        "discountedRatio": 15
+       },
+       "reviewAmount": {
+        "totalReviewCount": 55,
+        "averageReviewScore": 4.93
+       },
+       "representativeImageUrl": "https://shop-phinf.pstatic.net/20260714_187/1784014559600hBzrD_JPEG/118147470718754884_1777490680.jpg"
+      },
+      {
+       "id": 13503024043,
+       "name": "[NEW] 톤28 직모 모발 시카 PDRN 약산성 샴푸바 뿌리 볼륨 리프팅 120g",
+       "dispName": "[NEW] 톤28 직모 모발 시카 PDRN 약산성 샴푸바 뿌리 볼륨 리프팅 120g",
+       "salePrice": 15000,
+       "benefitsView": {
+        "discountedSalePrice": 13200,
+        "discountedRatio": 12
+       },
+       "reviewAmount": {
+        "totalReviewCount": 54,
+        "averageReviewScore": 4.96
+       },
+       "representativeImageUrl": "https://shop-phinf.pstatic.net/20260619_59/1781853380425fIIgQ_JPEG/36543236388623847_2010275005.jpg"
+      },
+      {
+       "id": 13237375603,
+       "name": "톤28 브라이트닝 앰플 토닝 스틱 9g",
+       "dispName": "톤28 브라이트닝 앰플 토닝 스틱 9g",
+       "salePrice": 32000,
+       "benefitsView": {
+        "discountedSalePrice": 30400,
+        "discountedRatio": 5
+       },
+       "reviewAmount": {
+        "totalReviewCount": 13,
+        "averageReviewScore": 4.77
+       },
+       "representativeImageUrl": "https://shop-phinf.pstatic.net/20260311_29/1773221161873SkK6r_JPEG/97482386285828230_129827385.jpg"
+      },
+      {
+       "id": 13099588151,
+       "name": "[2026 신제품]톤28 톤업 파데프리 선비비 미백 50ml SPF50+ 50g, 1개",
+       "dispName": "[2026 신제품]톤28 톤업 파데프리 선비비 미백 50ml SPF50+ 50g, 1개",
+       "salePrice": 35000,
+       "benefitsView": {
+        "discountedSalePrice": 28000,
+        "discountedRatio": 20
+       },
+       "reviewAmount": {
+        "totalReviewCount": 121,
+        "averageReviewScore": 4.8
+       },
+       "representativeImageUrl": "https://shop-phinf.pstatic.net/20260212_113/1770882631734xOYdq_JPEG/17624035864524320_1772815818.jpg"
+      },
+      {
+       "id": 13099596082,
+       "name": "[2026 신제품] 톤28 화잘먹 선세럼 탄력 수분 자외선 차단 리프세이프 진정 50ml SPF 50+",
+       "dispName": "[2026 신제품] 톤28 화잘먹 선세럼 탄력 수분 자외선 차단 리프세이프 진정 50ml SPF 50+",
+       "salePrice": 35000,
+       "benefitsView": {
+        "discountedSalePrice": 25200,
+        "discountedRatio": 28
+       },
+       "reviewAmount": {
+        "totalReviewCount": 76,
+        "averageReviewScore": 4.78
+       },
+       "representativeImageUrl": "https://shop-phinf.pstatic.net/20260212_209/1770883997862dH9V5_JPEG/43704052003527553_298490603.jpg"
+      },
+      {
+       "id": 11830217903,
+       "name": "[여름 BEST] 톤28 무기자차 시카 선크림 저자극 백탁 없는 톤업 선크림 리프세이프 50ml SPF50+",
+       "dispName": "[여름 BEST] 톤28 무기자차 시카 선크림 저자극 백탁 없는 톤업 선크림 리프세이프 50ml SPF50+",
+       "salePrice": 32000,
+       "benefitsView": {
+        "discountedSalePrice": 25600,
+        "discountedRatio": 20
+       },
+       "reviewAmount": {
+        "totalReviewCount": 266,
+        "averageReviewScore": 4.82
+       },
+       "representativeImageUrl": "https://shop-phinf.pstatic.net/20250512_124/17470219392484qnid_PNG/83385586637317494_569398536.png"
+      }
+     ]
+    }
+   }
+  },
+  "newProductWidget": {
+   "data": {
+    "simpleProducts": [],
+    "simpleCatalogs": []
+   }
+  },
+  "promotionManageWidget": {
+   "data": {
+    "simpleProducts": [
+     {
+      "id": 12809586465,
+      "name": "톤28 리프팅 글로우 겔 마스크 4매입 풀페이스 피부 광채 고농축 에센스",
+      "dispName": "톤28 리프팅 글로우 겔 마스크 4매입 풀페이스 피부 광채 고농축 에센스",
+      "salePrice": 42000,
+      "benefitsView": {
+       "discountedSalePrice": 29400,
+       "discountedRatio": 30
+      },
+      "reviewAmount": {
+       "totalReviewCount": 114,
+       "averageReviewScore": 4.69
+      },
+      "representativeImageUrl": "https://shop-phinf.pstatic.net/20251211_66/1765448659958W4H8b_JPEG/99581583848436652_608985124.jpg"
+     },
+     {
+      "id": 12741965801,
+      "name": "톤28 해남404 시카크림 병풀 새벽 2.0 광채 탄력 크림 50g",
+      "dispName": "톤28 해남404 시카크림 병풀 새벽 2.0 광채 탄력 크림 50g",
+      "salePrice": 38000,
+      "benefitsView": {
+       "discountedSalePrice": 28500,
+       "discountedRatio": 25
+      },
+      "reviewAmount": {
+       "totalReviewCount": 376,
+       "averageReviewScore": 4.82
+      },
+      "representativeImageUrl": "https://shop-phinf.pstatic.net/20251216_180/1765872651421ePdP1_JPEG/19715142924789473_807091242.jpg"
+     }
+    ]
+   }
+  },
+  "relationProductWidget": {
+   "data": {
+    "manual": [],
+    "auto": []
+   }
+  },
+  "shoppingStoryWidget": {
+   "data": {
+    "shoppingStories": []
+   }
+  },
+  "wholeProductWidget": {
+   "data": {
+    "simpleProducts": [],
+    "simpleCatalogs": []
+   }
+  }
+ },
+ "categoryMenu": {
+  "firstCategories": [
+   {
+    "id": "980c00b0ec4b46debf0eb0acb7abdcf2",
+    "name": "톤캉스🌿"
+   },
+   {
+    "id": "c4349e384e984058a0fa189b31ef4db5",
+    "name": "추석선물🎁"
+   },
+   {
+    "id": "03c662d4b5d44a1f85154f00a24f8a89",
+    "name": "슈퍼 적립🎈"
+   },
+   {
+    "id": "5dfb38353cb14a4387f3d0bcad7fbe1c",
+    "name": "NEW💗"
+   },
+   {
+    "id": "c30512c549484823a6c6166d23906019",
+    "name": "스킨"
+   },
+   {
+    "id": "9055466ce3b046e39caca7aa9bc0a615",
+    "name": "헤어"
+   },
+   {
+    "id": "e317a32fd33d4780a0b5357123335e41",
+    "name": "바디"
+   },
+   {
+    "id": "b582d85afcff4168b8a4de3dc83dc7cc",
+    "name": "제품 라인별"
+   },
+   {
+    "id": "454e619bc9f24a4bbd6e5ab328bfe50c",
+    "name": "전체상품"
+   },
+   {
+    "id": "95135eeffa0e4b75860fb374f059248a",
+    "name": "정기구독"
+   },
+   {
+    "id": "43940e5d1c104f9da9a1d5a021d6ee27",
+    "name": "홈"
+   }
+  ]
+ },
+ "keepStore": {
+  "count": 118182
+ },
+ "channel": {
+  "channelName": "톤28",
+  "url": "toun28"
+ },
+ "homeSetting": {
+  "widgets": {
+   "gnbWidget": {
+    "visible": true,
+    "order": 0,
+    "type": "GNB"
+   },
+   "promotionManageWidget": {
+    "visible": true,
+    "order": 1,
+    "type": "PROMOTION_MANAGE",
+    "generalPromotion": {
+     "items": [
+      {
+       "visible": true,
+       "title": "",
+       "description": "",
+       "linkUrl": "https://brand.naver.com/toun28/shoppingstory/detail?id=5003001901&NaPm=ct%3D1k2i4o05q%7Cci%3Dshopn%7Ctr%3Dmktlnk%7Chk%3Dd54f17879be60d7df42773168e43317537aa6368%7Ctrx%3Dundefined"
+      },
+      {
+       "visible": true,
+       "title": "",
+       "description": "",
+       "linkUrl": "https://brand.naver.com/toun28/shoppingstory/detail?id=5003001901&NaPm=ct%3D1k2i4o05q%7Cci%3Dshopn%7Ctr%3Dmktlnk%7Chk%3Dd54f17879be60d7df42773168e43317537aa6368%7Ctrx%3Dundefined"
+      },
+      {
+       "visible": true,
+       "title": "",
+       "description": "",
+       "linkUrl": "https://brand.naver.com/toun28/shoppingstory/detail?id=5003054385"
+      },
+      {
+       "visible": false,
+       "title": "",
+       "description": "",
+       "linkUrl": "https://brand.naver.com/toun28/category/c4349e384e984058a0fa189b31ef4db5?cp=1"
+      },
+      {
+       "visible": false,
+       "title": "",
+       "description": "",
+       "linkUrl": "https://brand.naver.com/toun28/category/03c662d4b5d44a1f85154f00a24f8a89?cp=1"
+      },
+      {
+       "visible": false,
+       "title": "",
+       "description": "",
+       "linkUrl": "https://brand.naver.com/toun28/shoppingstory/detail?id=5002869774"
+      },
+      {
+       "visible": false,
+       "title": "",
+       "description": "",
+       "linkUrl": "https://brand.naver.com/toun28/category/5dfb38353cb14a4387f3d0bcad7fbe1c?cp=1"
+      },
+      {
+       "visible": false,
+       "title": "",
+       "description": "",
+       "linkUrl": null
+      },
+      {
+       "visible": false,
+       "title": "",
+       "description": "",
+       "linkUrl": "https://brand.naver.com/toun28/category/52330f3e3dcf4c24916e8ed067041682?cp=1"
+      },
+      {
+       "visible": false,
+       "title": "",
+       "description": "",
+       "linkUrl": null
+      }
+     ]
+    }
+   },
+   "marketingLayerWidget": {
+    "visible": false,
+    "order": 2,
+    "type": "MARKETING_LAYER"
+   },
+   "benefitBannerWidget": {
+    "visible": true,
+    "order": 3,
+    "type": "BENEFIT_BANNER"
+   },
+   "timeSaleProductWidget": {
+    "visible": false,
+    "order": 4,
+    "type": "TIME_SALE_PRODUCT",
+    "titleSettings": {
+     "title": "TIME SALE",
+     "subTitle": "찝찝한 여름 피부, 산뜻하게 리셋"
+    },
+    "productNos": [
+     12848984900,
+     13678161716,
+     13678149002,
+     12809586465,
+     12862182354,
+     12333982012,
+     12978801179,
+     13678164906
+    ]
+   },
+   "bestProductWidget": {
+    "visible": false,
+    "order": 5,
+    "type": "BEST_PRODUCT",
+    "titleSettings": {
+     "title": "BEST SELLER",
+     "subTitle": ""
+    }
+   },
+   "customProductWidget4": {
+    "visible": true,
+    "order": 6,
+    "type": "CUSTOM_PRODUCT",
+    "titleSettings": {
+     "title": "NEW",
+     "subTitle": ""
+    },
+    "productNos": [
+     13663228103,
+     13503024043,
+     13237375603,
+     13099588151,
+     13099596082,
+     11830217903
+    ]
+   },
+   "exhibitionBannerWidget": {
+    "visible": false,
+    "order": 7,
+    "type": "EXHIBIT_BANNER"
+   },
+   "videoWidget1": {
+    "visible": true,
+    "order": 8,
+    "type": "VIDEO",
+    "titleSettings": {
+     "title": "해남404 펩타시카",
+     "subTitle": "병풀명가 톤28 대표 바를거리"
+    }
+   },
+   "customProductWidget3": {
+    "visible": false,
+    "order": 9,
+    "type": "CUSTOM_PRODUCT",
+    "titleSettings": {
+     "title": "",
+     "subTitle": ""
+    },
+    "productNos": [
+     13628689779,
+     13630748171,
+     13630787104,
+     13630764302,
+     12741965801,
+     9134465479,
+     12848984900
+    ]
+   },
+   "bestReviewWidget": {
+    "visible": true,
+    "order": 10,
+    "type": "BEST_REVIEW",
+    "titleSettings": {
+     "title": "BEST REVIEW",
+     "subTitle": ""
+    },
+    "productNos": [
+     9138243928,
+     12848984900,
+     12741965801,
+     4946636903,
+     12815076697,
+     10407557912,
+     4946548961,
+     9138208721,
+     9134465479,
+     9183252385,
+     5149897442,
+     5311586747,
+     6767925084,
+     10008251847,
+     4506228504,
+     6442620546,
+     5311579792,
+     5269129266,
+     5849983205
+    ]
+   },
+   "shoppingStoryWidget": {
+    "visible": true,
+    "order": 11,
+    "type": "SHOPPING_STORY",
+    "titleSettings": {
+     "title": "STORY",
+     "subTitle": ""
+    }
+   },
+   "categoryQuickLinkWidget1": {
+    "visible": true,
+    "order": 12,
+    "type": "CATEGORY_QUICKLINK",
+    "titleSettings": {
+     "title": "CATEGORY",
+     "subTitle": ""
+    }
+   },
+   "customBannerWidget3": {
+    "visible": false,
+    "order": 13,
+    "type": "CUSTOM_BANNER"
+   },
+   "customBannerWidget": {
+    "visible": false,
+    "order": 14,
+    "type": "CUSTOM_BANNER"
+   },
+   "categoryQuickLinkWidget": {
+    "visible": false,
+    "order": 15,
+    "type": "CATEGORY_QUICKLINK",
+    "titleSettings": {
+     "title": "CATEGORY",
+     "subTitle": ""
+    }
+   },
+   "brandDescriptionWidget": {
+    "visible": true,
+    "order": 16,
+    "type": "BRAND_DESCRIPTION"
+   },
+   "customProductWidget": {
+    "visible": false,
+    "order": 17,
+    "type": "CUSTOM_PRODUCT",
+    "titleSettings": {
+     "title": "BODY CARE",
+     "subTitle": ""
+    },
+    "productNos": [
+     4920797201,
+     6371578928,
+     4920808727,
+     6891134588,
+     5524105357
+    ]
+   },
+   "newProductWidget": {
+    "visible": false,
+    "order": 18,
+    "type": "NEW_PRODUCT",
+    "titleSettings": {
+     "title": "신상품",
+     "subTitle": ""
+    }
+   },
+   "categoryProductWidget": {
+    "visible": false,
+    "order": 19,
+    "type": "CATEGORY_PRODUCT"
+   },
+   "wholeProductWidget": {
+    "visible": true,
+    "order": 20,
+    "type": "WHOLE_PRODUCT",
+    "titleSettings": {
+     "title": "",
+     "subTitle": ""
+    }
+   },
+   "videoWidget": {
+    "visible": false,
+    "order": 21,
+    "type": "VIDEO",
+    "titleSettings": {
+     "title": "De Tulip Mist",
+     "subTitle": ""
+    }
+   },
+   "relationProductWidget": {
+    "visible": false,
+    "order": 22,
+    "type": "RELATION_PRODUCT",
+    "titleSettings": {
+     "title": "연관상품",
+     "subTitle": ""
+    }
+   },
+   "couponPointProductWidget": {
+    "visible": true,
+    "order": 23,
+    "type": "COUPON_POINT_PRODUCT",
+    "titleSettings": {
+     "title": "쿠폰 혜택 상품",
+     "subTitle": ""
+    },
+    "productNos": []
+   },
+   "footerWidget": {
+    "visible": true,
+    "order": 24,
+    "type": "FOOTER"
+   }
+  }
+ }
+}

@@ -641,7 +641,9 @@ export const OUTREACH_BANNER_CUTOUT_LAYOUT: { x: number; y: number; scale: numbe
 export function posterStyleHint(brandColor: string | null, hasProduct: boolean | null = null, stage = false): string {
   return [
     brandColor ? `brand accent color ${brandColor}, backdrop tinted softly toward this color` : 'neutral soft backdrop in warm off-white',
-    'clean studio lighting, minimal props, no text, keep the top 30% calm and uncluttered for typography',
+    'clean studio lighting, no props, no text, keep the top 30% calm and uncluttered for typography',
+    // ★ 2026-09-24 품질 A(A5) — 톤28 실측: 읽어 온 상품에 없는 색조 팔레트·메이크업 붓이 배경 소품으로 실렸다 → 화장품·미용 도구·다른 상품 전반 금지 · 중립 재료만
+    'do not draw any cosmetics or makeup (palettes, brushes, compacts, lipsticks, powders), beauty tools, mirrors with bulbs, or any other merchandise: only neutral materials such as stone, fabric, paper, plants, water and light',
     ...(hasProduct === true ? ['the attached product is the ONLY product in the scene: do not add, invent or draw any other bottles, jars, tubes, boxes, packaging, containers or labels'] : []),
     ...(hasProduct === false ? ['no products at all: no bottles, jars, tubes, boxes, packaging, containers or labels of any kind, scenery, materials and light only'] : []),
     // ★ 2026-09-10 서버 합성용 무대 — 제품은 서버가 누끼를 픽셀 그대로 얹는다(모델이 라벨을 다시 그려 뭉개던 톤28 실측 차단). 배경은 아래 2/3 가운데에 빈 진열면만 둔다.
@@ -670,29 +672,61 @@ export function posterTextOk(v: string | null | undefined): v is string {
 }
 
 /**
+ * ★ 2026-09-24 품질 A(A1·A6) — 같은 게이트를 업체명을 가린 뒤 본다(순수). 업체명의 숫자("톤28")는 혜택 수치가 아니다.
+ *   혜택어·다른 숫자는 여전히 거절 · 업체명만 남으면 거절(제목이 아니다).
+ */
+export function posterTextOkFor(v: string | null | undefined, companyName: string | null | undefined): v is string {
+  if (!v || v.trim().length < 2 || hasBenefitPattern(v) || POSTER_EXTRA_REJECT_RE.test(v)) return false;
+  const name = String(companyName || '').trim();
+  const masked = name ? v.split(name).join(' ') : v;
+  return !/\d/.test(masked) && masked.replace(/\s+/g, '').length >= 2;
+}
+
+/**
+ * ★ 2026-09-24 품질 A(A1·A6) — 상품명 → 이미지 글자(포스터 부제 · 카탈로그 캡션)(순수).
+ *   괄호·대괄호 안 제거 + 숫자로 시작하는 낱말(용량·수량·판번호 "50g"·"2.0"·"1+1") 제거 → posterTextOkFor. 못 쓰면 null.
+ */
+export function productNameForImage(name: string | null | undefined, companyName: string | null | undefined): string | null {
+  const t = String(name || '').replace(/\(.*?\)/g, ' ').replace(/\[.*?\]/g, ' ')
+    .split(/\s+/).filter((w) => w && !/^\d/.test(w)).join(' ').trim();
+  return posterTextOkFor(t, companyName) ? t : null;
+}
+
+/**
  * 포스터 3칸 = label(행사 성격/업종 라벨) · title(면허 행사명의 부분 문자열 · 첫 구분자 앞 · 숫자 앞까지 · 40자) · subtitle(상품군 이름 또는 사이트 제목).
  * 세 칸 모두 원문 대조본만 · 근거를 못 찾은 칸은 null(채우려고 지어내지 않는다) · title 이 비면 업체명(사실).
  */
 export function buildOutreachPosterTexts(input: {
   companyName: string; industry: string | null; eventQuote: string | null; products: ReadonlyArray<Pick<OutreachProduct, 'name'>>; siteTitle: string | null;
+  /** ★ 2026-09-24 품질 A(A1) — 제목 출처 여러 개(확정 행사 전부 · 누른 순서 · 조각 제목 → 원문) · 없으면 eventQuote 하나 */
+  eventQuotes?: ReadonlyArray<string | null | undefined>;
 }): OutreachPosterTexts {
   const dropped: string[] = [];
-  const quote = String(input.eventQuote || '').replace(/\s+/g, ' ').trim();
+  const sources = (input.eventQuotes && input.eventQuotes.length ? input.eventQuotes : [input.eventQuote])
+    .map((q) => String(q || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
   let title: string | null = null;
-  if (quote) {
+  let titleSource: string | null = null;
+  for (const quote of sources) {
     const seg = quote.split(/[~·|,/\n]|\s-\s|\s–\s/)[0].replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim();
     // ★ 2026-09-06(2) 숫자 앞에서 잘랐으면 매달린 수식어("혜택 최대")와 조사를 걷는다(아이소이 실측 "풍성한 한가위 보름달 혜택 최대")
-    const cutRaw = seg.replace(/\s*\d[\s\S]*$/, '').trim();
+    // ★ 2026-09-24 업체명의 숫자("톤28")는 절단 기준이 아니다 — 가린 채로 자를 자리를 찾는다
+    const name = String(input.companyName || '').trim();
+    const maskedSeg = name ? seg.split(name).join('\u0000'.repeat(name.length)) : seg;
+    const cutAt = maskedSeg.search(/\s*\d/);
+    const cutRaw = (cutAt >= 0 ? seg.slice(0, cutAt) : seg).trim();
     const cut = cutRaw !== seg ? trimDanglingTail(cutRaw) : cutRaw;
-    const cand = posterTextOk(cut) ? cut : (posterTextOk(seg) ? seg : null);
-    if (cand && cand.length <= 40 && quote.includes(cand)) title = cand; else dropped.push('title');
+    const cand = posterTextOkFor(cut, name) ? cut : (posterTextOkFor(seg, name) ? seg : null);
+    if (cand && cand.length <= 40 && quote.includes(cand)) { title = cand; titleSource = quote; break; }
   }
+  if (sources.length && !title) dropped.push('title');
   if (!title) title = input.companyName;
+  const quote = titleSource || sources[0] || '';
   let label = posterCategoryLabel(quote || null, input.industry);
   if (label && !posterTextOk(label)) { dropped.push('label'); label = null; }
   // ★ 2026-09-06(2) subtitle 후보에서 쇼핑몰 옵션 낱말(옵션·선택·택1·단품·더블)을 거르고 짧은 이름을 앞세운다(실측 "올세라 탄력 옵션 선택")
-  const prodNames = (input.products || []).map((p) => String(p.name || '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/\s+/g, ' ').trim())
-    .filter((n) => posterTextOk(n) && n.length <= 30 && !POSTER_SUBTITLE_NOISE_RE.test(n));
+  // ★ 2026-09-24 품질 A — 용량·판번호 낱말을 떼고 업체명은 숫자 게이트 밖(productNameForImage · 카탈로그 캡션과 같은 규칙)
+  const prodNames = (input.products || []).map((p) => productNameForImage(p.name, input.companyName))
+    .filter((n): n is string => !!n && n.length <= 30 && !POSTER_SUBTITLE_NOISE_RE.test(n));
   const prod = prodNames.slice().sort((a, b) => a.length - b.length).find((n) => n.length <= 14) || prodNames[0] || null;
   const site = input.siteTitle ? String(input.siteTitle).replace(/\s+/g, ' ').trim() : '';
   let subtitle: string | null = prod || (posterTextOk(site) && site !== input.companyName && site.length <= 40 ? site : null);
@@ -911,6 +945,8 @@ export interface OutreachImageInput {
   brandColor?: string | null;
   /** ★ 2026-09-06 S3 문구 3칸 재료 — 선택 행사 인용(면허 무관 · 숫자·혜택어는 칸에서 거부) · 상품명 · 사이트 제목 */
   eventQuote?: string | null;
+  /** ★ 2026-09-24 품질 A — 포스터 제목 출처(확정 행사 전부 · 누른 순서 · 조각 제목 → 원문) · 없으면 eventQuote 하나 */
+  eventQuotes?: readonly string[];
   products?: ReadonlyArray<Pick<OutreachProduct, 'name'>>;
   siteTitle?: string | null;
   /** ★ S3 실측 배너가 0장일 때만 16:9 배너 1장을 더 만든다(회의 수렴안 · 원가 = 그때만) */
@@ -992,7 +1028,7 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
 
     // ★ S3 문구 3칸(원문 대조본만 · 숫자·혜택어 0) — 프롬프트에는 문구를 넘기지 않고(배경만 생성 · 상단 문구 구역 확보) 서버 합성이 코드로 찍는다(오철자 0 · 잠금이 못 보는 면에 글자를 코드가 보증)
     const posterTexts = buildOutreachPosterTexts({
-      companyName: input.companyName, industry: input.industry, eventQuote: input.eventQuote || null, products: input.products || [], siteTitle: input.siteTitle || null,
+      companyName: input.companyName, industry: input.industry, eventQuote: input.eventQuote || null, eventQuotes: input.eventQuotes, products: input.products || [], siteTitle: input.siteTitle || null,
     });
     const fontPath = outreachPosterFontPath();
     const template = pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}`, !!cutout);
@@ -1523,14 +1559,15 @@ export function cutAtWord(s: string, n: number): string {
   return (sp >= Math.floor(n / 2) ? cut.slice(0, sp) : cut).replace(/[\s~·\-–:,]+$/g, '').trim();
 }
 
-export function headlineFromCard(card: { title: string } | null | undefined, licensed: boolean, minLen = 6): { headline: string; demoted: boolean } {
+export function headlineFromCard(card: { title: string } | null | undefined, licensed: boolean, minLen = 6, maxLen = 18): { headline: string; demoted: boolean } {
   // 날짜 조각은 면허와 무관하게 제목이 아니다(기간은 sub_copy·body 가 따로 든다)
+  // ★ 2026-09-24 품질 A — maxLen 인자(기본 18 = 포스터·제목·고객 입구 종전 · DM 행사 카드만 30)
   const raw = String(card?.title || '').replace(CARD_DATE_TOKEN_RE, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
   if (!raw || !/[가-힣A-Za-z]{2,}/.test(raw)) return { headline: '', demoted: true };
-  if (licensed) return { headline: cutAtWord(raw, 18), demoted: false };
+  if (licensed) return { headline: cutAtWord(raw, maxLen), demoted: false };
   // ★ 2026-09-09(6) 수치를 걷어낸 뒤 비어 버린 괄호("<3+1>" → "< >")는 찌꺼기다 → 통째로 뺀다(톤28 실측 "오늘핫딜 < > 지성두피")
   const base = raw.replace(CARD_BENEFIT_TOKEN_RE, ' ').replace(/[<(\[［（【]\s*[>)\]］）】]/g, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
-  const head = cutAtWord(base, 18);
+  const head = cutAtWord(base, maxLen);
   if (head.length < minLen || !/[가-힣A-Za-z]{2,}/.test(head)) return { headline: '', demoted: true };
   return { headline: head, demoted: false };
 }
@@ -2245,6 +2282,9 @@ export function matchHeroBannerInTitle(title: string, banners: ReadonlyArray<{ u
   return null;
 }
 
+/** ★ 2026-09-24 품질 A(A2) — DM·메일 행사 카드 제목 한도(낱말 경계) */
+export const OUTREACH_STD_EVENT_TITLE_MAX = 30;
+
 export function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>, media: OutreachMedia | null): { hero: StandardHero | null; products: SliceProduct[]; events: StandardEvent[]; ctaLabel: string; ctaUrl: string } | null {
   const cards = (input.eventCards || []).filter((c) => c && String(c.title || '').trim());
   const products = sliceProductsOf(media?.products || []).slice(0, OUTREACH_STD_PRODUCTS_MAX);
@@ -2263,7 +2303,8 @@ export function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput,
         : null;
   const sliceKey = normalizeUrlKey(input.eventSlices?.detailUrl || '');
   const events: StandardEvent[] = cards.map((c) => {
-    const h = headlineFromCard(c, c.licensed);
+    // ★ 2026-09-24 품질 A(A2) — 행사 카드 제목 = 괄호 설명("(3만원 이상 구매)")을 뺀 뒤 30자 낱말 경계(포스터·제목 계열 18 은 그대로)
+    const h = headlineFromCard({ title: String(c.title || '').replace(/\s*[(（][^)）]*[)）]/g, ' ') }, c.licensed, 6, OUTREACH_STD_EVENT_TITLE_MAX);
     const isSliceCard = !!sliceKey && !!c.detailUrl && normalizeUrlKey(c.detailUrl) === sliceKey;
     // ★ v5 행사 블록 슬라이스 = 판정 선별(문서 제외 · 배너·상품 → 분위기 ≤2 · 홈 배너 제외 · 문서만이면 0장)
     const slices = isSliceCard ? selectEventSlices(media?.slices || [], media?.imageKinds || null, OUTREACH_STD_EVENT_SLICES_MAX) : [];
@@ -2282,13 +2323,19 @@ export function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput,
       const hb = matchHeroBannerInTitle(c.title, input.heroBanners || null, media?.gallery || []);
       if (hb) { imageUrl = hb.url; if (hb.href && (!c.detailUrl || normalizeUrlKey(c.detailUrl) === normalizeUrlKey(homeUrl))) linkUrl = hb.href; }
     }
+    // ★ 2026-09-24 품질 A(A2) — 본문 한 줄 = 카드 text(인용문 혜택 조각 · eventCardsOf 가 면허 있을 때만 싣는다) · 여기서도 면허를 다시 본다(preset 경로 = 숫자 차단기 0)
+    const text = c.licensed && c.text ? String(c.text).replace(/\s+/g, ' ').trim().slice(0, 80) : '';
     return {
       title, periodLine: periodLineOf(c.periodRaw), imageUrl, linkUrl,
-      ctaLabel: sliceCtaLabel(c.title, input.companyName, eventCtaLabel(c)), slices,
+      // ★ 2026-09-24 품질 A — 슬라이스 없는 행사 카드의 대체 버튼 = 행사형(슬라이스 카드 = 기획·상품 페이지라 종전 상품형)
+      ctaLabel: sliceCtaLabel(c.title, input.companyName, eventCtaLabel(c), isSliceCard ? 'product' : 'event'), slices,
+      ...(text ? { text } : {}),
     };
   });
   const ctaUrl = cards.length ? String(cards[cards.length - 1].detailUrl || galleryLink) : galleryLink;
-  const ctaLabel = cards.length ? sliceCtaLabel(cards[cards.length - 1].title, input.companyName, eventCtaLabel(cards[cards.length - 1])) : `${input.companyName} 바로가기`.slice(0, 16);
+  const lastCard = cards.length ? cards[cards.length - 1] : null;
+  const lastIsSlice = !!lastCard && !!sliceKey && !!lastCard.detailUrl && normalizeUrlKey(lastCard.detailUrl) === sliceKey;
+  const ctaLabel = lastCard ? sliceCtaLabel(lastCard.title, input.companyName, eventCtaLabel(lastCard), lastIsSlice ? 'product' : 'event') : `${input.companyName} 바로가기`.slice(0, 16);
   return { hero, products, events, ctaLabel, ctaUrl };
 }
 
@@ -2475,7 +2522,9 @@ export interface PublishedDmRef { dmId: string; dmUrl: string; viewerUrl: string
 export async function publishOutreachDm(a: AssembledDm, input: Pick<ProduceDmInput, 'companyId' | 'userId' | 'companyName' | 'material'>): Promise<PublishedDmRef> {
   assertOutreachPublisher(input);
   const dm = await createDm(input.companyId, input.userId, {
-    title: `[영업] ${input.companyName}`.slice(0, 200),
+    // ★ 2026-09-24 품질 A(A3) — 받는 사람 브라우저 탭·링크 미리보기에 보이는 제목 = 업체명만(내부 표식 "[영업]" 노출 0).
+    //   학습 후보 제외는 원장 연결(sales_outreach_assets payload dmId·catalogDmId)로 판정한다(sales-outreach-examples · reference-skeleton-promote).
+    title: String(input.companyName).slice(0, 200),
     sections: a.sections,
     pages: a.pages,
     layout_mode: OUTREACH_DM_LAYOUT_MODE,
@@ -2814,7 +2863,9 @@ export function buildProposalEmailSections(guide: OutreachStyleGuide, input: Pro
     }
   }
 
-  const eventLines = confirmedEventLines(input.confirmedEvents);
+  // ★ 2026-09-24 품질 A(A4) — 시안(표준 조립)에 행사 카드가 이미 있으면 요약 카드는 같은 제목의 반복이라 뺀다
+  const draftHasEvents = input.brandSections.some((s) => String((s as any)?.id || '').startsWith('so-std-event'));
+  const eventLines = draftHasEvents ? [] : confirmedEventLines(input.confirmedEvents);
   const tail: Section[] = [
     ...(eventLines.length ? [sec('text_card', {
       tag: c.events.tag,

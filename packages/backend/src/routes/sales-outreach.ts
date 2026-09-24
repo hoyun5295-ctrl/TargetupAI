@@ -392,8 +392,9 @@ router.post('/jobs/:id/store-page', async (req: Request, res: Response) => {
       const file = (req as any).file as { buffer: Buffer } | undefined;
       if (!file?.buffer) return res.status(400).json({ error: '파일을 선택해주세요.' });
       const r = await extractOutreachStorePageText(req.params.id, file.buffer.toString('utf8'), req.user?.userId);
-      console.log('[sales-outreach] 스토어 저장본 읽기:', req.params.id, r.chars, req.user?.userId);
-      audit(req, 'store_page', req.params.id, { chars: r.chars });
+      // ★ 2026-09-24 B — mode 'store' = 스토어 판독 결과 저장(후보에 기획) · 'text' = 종전(붙여넣기 칸)
+      console.log('[sales-outreach] 스토어 저장본 읽기:', req.params.id, r.mode, r.mode === 'text' ? r.chars : `기획 ${r.campaigns}`, req.user?.userId);
+      audit(req, 'store_page', req.params.id, r.mode === 'text' ? { mode: r.mode, chars: r.chars } : { mode: r.mode, campaigns: r.campaigns, products: r.products });
       res.json({ ok: true, ...r });
     } catch (e: any) {
       respondError(res, e, '스토어 저장본 읽기');
@@ -401,21 +402,34 @@ router.post('/jobs/:id/store-page', async (req: Request, res: Response) => {
   });
 });
 
-// ★0924 네이버 스토어 화면 가져오기(북마크 버튼 → 수신 페이지 → 여기 · 서버 네트워크 0 · 같은 스토어 저장값 건에 문구만 저장)
+// ★0924 네이버 스토어 화면 가져오기(북마크 버튼 → 수신 페이지 → 여기 · 서버 네트워크 0)
+// ★ 2026-09-24 B(판 2) — 받는 것 = 스토어 상태의 허용 칸(JSON 파일 · 2MB) · 저장 = 판독 결과만
+const storeStateUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (/\.json$/i.test(String(file.originalname || ''))) return cb(null, true);
+    const e: any = new Error('스토어 정보 파일만 허용');
+    e.code = 'BAD_FILE_TYPE';
+    cb(e);
+  },
+});
 router.post('/store-grab', async (req: Request, res: Response) => {
   if (!(await isSalesOutreachOperator(req.user?.userId))) {
     return res.status(403).json({ error: '이 기능을 사용할 권한이 없습니다.', code: 'FORBIDDEN' });
   }
-  storePageUpload.single('file')(req as any, res as any, async (err: any) => {
+  storeStateUpload.single('file')(req as any, res as any, async (err: any) => {
     if (err) {
       console.log('[sales-outreach] 스토어 화면 거절:', err?.message);
-      return res.status(400).json({ error: err?.code === 'LIMIT_FILE_SIZE' ? '화면 내용이 너무 커서 받지 못했습니다.' : '화면 내용을 받지 못했습니다.' });
+      return res.status(400).json({ error: err?.code === 'LIMIT_FILE_SIZE' ? '화면 내용이 너무 커서 받지 못했습니다.' : '화면 내용을 받지 못했습니다. AI 영업 화면에서 [한줄로 가져오기] 버튼을 다시 설치해 주세요.' });
     }
     try {
       const file = (req as any).file as { buffer: Buffer } | undefined;
       if (!file?.buffer) return res.status(400).json({ error: '화면 내용이 비어 있습니다.' });
-      const r = await grabOutreachStorePage({ pageUrl: String(req.body?.pageUrl || ''), html: file.buffer.toString('utf8'), jobId: req.body?.jobId ? String(req.body.jobId) : null }, req.user?.userId);
-      audit(req, 'store_grab', r.attached?.jobId ?? null, { store: r.store, chars: r.attached?.chars ?? null, choices: r.choices.length, reason: r.reason });
+      let state: unknown = null;
+      try { state = JSON.parse(file.buffer.toString('utf8')); } catch { return res.status(400).json({ error: '화면 내용을 읽지 못했습니다. 스토어 화면에서 다시 눌러 주세요.' }); }
+      const r = await grabOutreachStorePage({ pageUrl: String(req.body?.pageUrl || ''), state, jobId: req.body?.jobId ? String(req.body.jobId) : null }, req.user?.userId);
+      audit(req, 'store_grab', r.attached?.jobId ?? null, { store: r.store, campaigns: r.attached?.campaigns ?? null, products: r.attached?.products ?? null, choices: r.choices.length, reason: r.reason });
       res.json({ ok: true, ...r });
     } catch (e: any) {
       respondError(res, e, '스토어 화면 가져오기');
@@ -431,6 +445,8 @@ router.post('/jobs/:id/confirm', async (req: Request, res: Response) => {
       // ★ v3 다중 선택(배열 · 서버가 정수·범위·중복을 걸러 앞 3개)
       eventIndexes: Array.isArray(req.body?.eventIndexes) ? req.body.eventIndexes : null,
       manualEventText: req.body?.manualEventText,
+      // ★ 2026-09-24 B — 화면이 본 스토어 정보 시각(키가 없으면 대조하지 않는다 · 옛 화면 호환)
+      ...(req.body && 'storeGrabAt' in req.body ? { storeGrabAt: req.body.storeGrabAt ? String(req.body.storeGrabAt) : null } : {}),
       imageUrl: req.body?.imageUrl ?? null,
       industryCategory: req.body?.industryCategory,
     }, req.user?.userId);

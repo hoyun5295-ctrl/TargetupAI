@@ -86,8 +86,14 @@ export function suggestEmailForDm(dmTitle: string, emails: ReadonlyArray<{ id: s
   return best && best.score >= 2 ? best.id : null;
 }
 
-function rejectReasonOf(title: string, sectionCount: number): string | null {
-  if (PIPELINE_TITLE_PREFIXES.some((p) => String(title || '').startsWith(p))) return '플래너·AI 영업이 만든 산출물';
+/**
+ * ★ 2026-09-24 품질 A(A3) — AI 영업 DM·카탈로그는 제목에서 "[영업]" 표식을 뺐다(받는 사람 탭·링크 미리보기 노출 0).
+ *   그래서 판정 원천을 원장 연결로 둔다(reference-skeleton-promote 와 같은 식) · 옛 행은 제목 접두로도 걸린다.
+ */
+const FROM_OUTREACH_SQL = `EXISTS(SELECT 1 FROM sales_outreach_assets a WHERE a.kind = 'dm' AND (a.payload->>'dmId' = d.id::text OR a.payload->>'catalogDmId' = d.id::text)) AS from_outreach`;
+
+function rejectReasonOf(title: string, sectionCount: number, fromOutreach = false): string | null {
+  if (fromOutreach || PIPELINE_TITLE_PREFIXES.some((p) => String(title || '').startsWith(p))) return '플래너·AI 영업이 만든 산출물';
   if (sectionCount < MIN_SECTIONS) return `미완성(섹션 ${MIN_SECTIONS}개 미만)`;
   return null;
 }
@@ -124,7 +130,7 @@ export interface EmailCandidate {
   aliases: string[];
 }
 
-interface DmRow { code: string; id: string; title: string; store_name: string | null; created_by: string | null; created_at: string; pages: unknown; sections: unknown }
+interface DmRow { code: string; id: string; title: string; store_name: string | null; created_by: string | null; created_at: string; pages: unknown; sections: unknown; from_outreach?: boolean }
 interface EmailRow { id: string; name: string; subject: string | null; created_by: string | null; created_at: string; sections: unknown }
 
 function parseJsonMaybe(v: unknown): unknown {
@@ -141,7 +147,7 @@ async function loadDmRowsByCodes(companyId: string, codes: string[]): Promise<Dm
   if (codes.length === 0) return [];
   const direct = await query(
     `SELECT d.short_code AS code, d.id, d.title, d.store_name, d.created_at, d.pages, d.sections,
-            COALESCE(u.name, u.login_id) AS created_by
+            COALESCE(u.name, u.login_id) AS created_by, ${FROM_OUTREACH_SQL}
        FROM dm_pages d LEFT JOIN users u ON u.id = d.created_by
       WHERE d.company_id = $1 AND d.short_code = ANY($2)`,
     [companyId, codes],
@@ -152,7 +158,7 @@ async function loadDmRowsByCodes(companyId: string, codes: string[]): Promise<Dm
   if (rest.length) {
     const r = await query(
       `SELECT t.short_code AS code, d.id, d.title, d.store_name, d.created_at, d.pages, d.sections,
-              COALESCE(u.name, u.login_id) AS created_by
+              COALESCE(u.name, u.login_id) AS created_by, ${FROM_OUTREACH_SQL}
          FROM dm_recipient_tokens t JOIN dm_pages d ON d.id = t.dm_id LEFT JOIN users u ON u.id = d.created_by
         WHERE d.company_id = $1 AND t.short_code = ANY($2)`,
       [companyId, rest],
@@ -242,7 +248,7 @@ export async function resolveOutreachExampleCodes(input: { companyId: string; co
       code, otherCodes: others, id: dmId, title: String(row.title || ''), storeName: row.store_name ? String(row.store_name) : null,
       createdBy: row.created_by ? String(row.created_by) : null, createdAt: String(row.created_at),
       sectionCount: b.sections.length, alreadyPromoted: promotedDm.has(String(row.id)),
-      rejectReason: rejectReasonOf(String(row.title || ''), b.sections.length),
+      rejectReason: rejectReasonOf(String(row.title || ''), b.sections.length, row.from_outreach === true),
       preview: b.body, aliases: b.aliases,
       suggestedEmailId: suggestEmailForDm(String(row.title || ''), emails.filter((e) => !e.rejectReason)),
     };
@@ -286,7 +292,7 @@ export async function promoteOutreachExamples(input: {
   const emailIds = items.filter((i) => i.kind === 'email').map((i) => i.id);
   const [dmRows, emailRows] = await Promise.all([
     dmIds.length ? query(
-      `SELECT d.short_code AS code, d.id, d.title, d.store_name, d.created_at, d.pages, d.sections, COALESCE(u.name, u.login_id) AS created_by
+      `SELECT d.short_code AS code, d.id, d.title, d.store_name, d.created_at, d.pages, d.sections, COALESCE(u.name, u.login_id) AS created_by, ${FROM_OUTREACH_SQL}
          FROM dm_pages d LEFT JOIN users u ON u.id = d.created_by WHERE d.company_id = $1 AND d.id = ANY($2::uuid[])`,
       [input.companyId, dmIds],
     ).then((r) => r.rows as DmRow[]) : Promise.resolve([] as DmRow[]),
@@ -305,7 +311,7 @@ export async function promoteOutreachExamples(input: {
     const built = it.kind === 'dm'
       ? buildDmExample(row as DmRow, companyName, it.aliasesExtra || undefined)
       : buildEmailExample(row as EmailRow, companyName, it.aliasesExtra || undefined);
-    const reject = rejectReasonOf(title, built.sections.length);
+    const reject = rejectReasonOf(title, built.sections.length, it.kind === 'dm' && (row as DmRow).from_outreach === true);
     if (reject) { skipped.push({ kind: it.kind, id: it.id, reason: reject }); continue; }
     const hygiene = checkExemplarHygiene(built.body, built.aliases);
     if (!hygiene.ok) { skipped.push({ kind: it.kind, id: it.id, reason: `마스킹 검사 실패: ${hygiene.violations.join(' · ')}` }); continue; }

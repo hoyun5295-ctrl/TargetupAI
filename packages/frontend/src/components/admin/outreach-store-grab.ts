@@ -3,19 +3,21 @@
  * 북마크 버튼(책갈피 스크립트) → 이 앱의 수신 페이지(OUTREACH_GRAB_PATH) → 서버 POST /api/sales-outreach/store-grab.
  *
  * 규율:
- * - 버튼은 직원 브라우저에 이미 떠 있는 화면만 읽는다(네이버에 추가 요청 0). 행사 문구 추출은 서버 CT 하나 — 여기는 걷어내기·압축·전달만.
+ * - 버튼은 직원 브라우저에 이미 떠 있는 화면만 읽는다(네이버에 추가 요청 0). 판독은 서버 CT 하나(sales-outreach-naver-store) — 여기는 뽑기·압축·전달만.
+ * - ★ 2026-09-24 B(판 2) — 화면 글자가 아니라 스토어 상태(window.__PRELOADED_STATE__)의 **허용 칸만** 보낸다(서버 NAVER_STORE_STATE_KEYS 와 같은 목록).
+ *   보는 사람의 회원·주소 칸은 버튼 안에서 버린다. 상태가 없는 화면이면 안내만 한다.
  * - 전달 = 새 탭 주소의 # 뒤(서버 로그에 안 남는다 · 네이버 쪽 보안 설정과 무관). 수신 페이지가 읽자마자 주소에서 지운다.
- * - 설치 열쇠(이 브라우저 localStorage) = 버튼에 심는다. 수신 페이지는 열쇠가 맞을 때만 받는다(남이 만든 링크로 문구를 못 붙인다).
+ * - 설치 열쇠(이 브라우저 localStorage) = 버튼에 심는다. 수신 페이지는 열쇠가 맞을 때만 받는다(남이 만든 링크로 붙이지 못한다).
  * - 번들이 난독화되므로 버튼 스크립트는 함수 직렬화가 아니라 문자열로 조립한다(난독화 보조 함수가 네이버 화면에는 없다).
  */
 
 export const OUTREACH_GRAB_PATH = '/admin/outreach-grab';
-/** 버튼 판(바뀌면 수신 페이지가 옛 버튼을 거절하고 다시 설치를 안내한다) */
-export const OUTREACH_GRAB_VERSION = 1;
+/** 버튼 판(바뀌면 수신 페이지가 옛 버튼을 거절하고 다시 설치를 안내한다) · ★ 2026-09-24 B = 2(스토어 상태 허용 칸) */
+export const OUTREACH_GRAB_VERSION = 2;
 const KEY_STORAGE = 'outreachGrabKey';
 const CHANNEL = 'hanjul-outreach';
-/** 버튼이 보내는 화면 HTML 상한(글자) — 서버 업로드 상한 2MB 안쪽(한글 3바이트 기준) */
-const GRAB_HTML_MAX = 600_000;
+/** 압축본(base64) 상한 — 크롬 주소 한도 2MB 안쪽 */
+const GRAB_PAYLOAD_MAX = 1_800_000;
 
 export function readGrabKey(): string | null {
   try { return localStorage.getItem(KEY_STORAGE); } catch { return null; }
@@ -33,25 +35,28 @@ export function ensureGrabKey(): string {
 }
 
 // 버튼 본문(네이버 화면에서 실행) — O 앱 주소 · P 수신 경로 · V 판 · K 열쇠 · M 상한은 앞에서 주입한다.
-// 머리글·바닥글은 걷어낸다(로그인한 직원 이름이 머리글에 있다) · 속성은 class·id·href 만(추출기가 쓰는 것).
+// ★ 2026-09-24 B 판 2 — 스토어 상태의 허용 칸만 담는다(서버 pickNaverStoreState 와 같은 목록 · 회원·주소 칸은 여기서 버린다).
 const GRAB_SCRIPT_BODY = [
   "const s=t=>{const d=document.createElement('div');d.style.cssText='position:fixed;top:12px;right:12px;z-index:2147483647;background:#0f172a;color:#fff;padding:12px 16px;border-radius:10px;font:14px/1.6 sans-serif;max-width:360px';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),6000)};",
   'try{',
   "if(!location.hostname.endsWith('naver.com')){s('한줄로: 네이버 스토어 화면에서 눌러 주세요');return}",
-  'const c=document.body.cloneNode(true);',
-  "c.querySelectorAll('script,style,svg,noscript,iframe,template,link,meta,img,video,picture,source,canvas,header,footer,input,textarea,select').forEach(e=>e.remove());",
-  "c.querySelectorAll('*').forEach(e=>{for(const a of [...e.attributes]){if(a.name!=='class'&&a.name!=='id'&&a.name!=='href')e.removeAttribute(a.name)}});",
-  "const h=c.innerHTML.replace(/\\s+/g,' ').slice(0,M);",
-  "const z=new Uint8Array(await new Response(new Blob([JSON.stringify({u:location.href,h:h})]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());",
+  'const S=window.__PRELOADED_STATE__;',
+  "if(!S||typeof S!=='object'){s('한줄로: 이 화면에서 스토어 정보를 찾지 못했습니다. 스토어 첫 화면에서 눌러 주세요');return}",
+  "const o=x=>x&&typeof x==='object'?x:{};",
+  "const C=o(S.categoryMenu),H=o(S.homeSetting),N=o(S.channel);",
+  'const A={bsProductCollection:o(S.bsProductCollection),widgetContents:o(S.widgetContents),categoryMenu:{firstCategories:Array.isArray(C.firstCategories)?C.firstCategories:[]},keepStore:{count:o(S.keepStore).count},channel:{channelName:N.channelName,url:N.url},homeSetting:{widgets:o(H.widgets)}};',
+  "const z=new Uint8Array(await new Response(new Blob([JSON.stringify({u:location.href,s:A})]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());",
   "let b='';for(let i=0;i<z.length;i+=8192)b+=String.fromCharCode.apply(null,z.subarray(i,i+8192));",
-  "const w=window.open(O+P+'#v='+V+'&k='+K+'&g='+btoa(b).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,''),'_blank');",
+  "const g=btoa(b).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');",
+  "if(g.length>M){s('한줄로: 스토어 정보가 너무 커서 보내지 못했습니다');return}",
+  "const w=window.open(O+P+'#v='+V+'&k='+K+'&g='+g,'_blank');",
   "s(w?'한줄로로 보냈습니다':'한줄로: 새 창이 막혔습니다. 이 사이트의 팝업을 허용해 주세요')",
   "}catch(e){s('한줄로 가져오기 오류 · '+(e&&e.message||e))}",
 ].join('');
 
 /** 북마크바에 끌어다 놓을 주소(javascript:) — 앱 주소·열쇠를 심는다 */
 export function buildGrabBookmarklet(origin: string, key: string): string {
-  const head = `const O=${JSON.stringify(origin)},P=${JSON.stringify(OUTREACH_GRAB_PATH)},V=${OUTREACH_GRAB_VERSION},K=${JSON.stringify(key)},M=${GRAB_HTML_MAX};`;
+  const head = `const O=${JSON.stringify(origin)},P=${JSON.stringify(OUTREACH_GRAB_PATH)},V=${OUTREACH_GRAB_VERSION},K=${JSON.stringify(key)},M=${GRAB_PAYLOAD_MAX};`;
   return 'javascript:' + encodeURIComponent(`(async()=>{${head}${GRAB_SCRIPT_BODY}})();`);
 }
 
@@ -63,16 +68,16 @@ export function parseGrabHash(hash: string): { v: number; k: string; g: string }
   return { v: Number(p.get('v')) || 0, k: String(p.get('k') || ''), g };
 }
 
-/** 압축본 → { u: 스토어 화면 주소, h: 걷어낸 HTML } · 실패 = null */
-export async function inflateGrab(g: string): Promise<{ u: string; h: string } | null> {
+/** 압축본 → { u: 스토어 화면 주소, s: 스토어 상태 허용 칸 } · 실패 = null */
+export async function inflateGrab(g: string): Promise<{ u: string; s: Record<string, unknown> } | null> {
   try {
     const b64 = g.replace(/-/g, '+').replace(/_/g, '/');
     const bin = atob(b64 + '==='.slice((b64.length + 3) % 4));
     const bytes = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
     const text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
     const o = JSON.parse(text);
-    if (!o || typeof o.u !== 'string' || typeof o.h !== 'string') return null;
-    return { u: o.u, h: o.h };
+    if (!o || typeof o.u !== 'string' || !o.s || typeof o.s !== 'object') return null;
+    return { u: o.u, s: o.s };
   } catch {
     return null;
   }

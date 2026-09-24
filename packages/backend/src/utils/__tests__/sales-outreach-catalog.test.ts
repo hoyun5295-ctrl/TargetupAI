@@ -61,7 +61,8 @@ describe('catalogCaptionOf · catalogTintOf (순수)', () => {
   it('상품명은 포스터 문구 게이트와 같다(2자 이상 · 숫자 0 · 혜택어 0 · 30자 이내) · 괄호·대괄호 안은 뗀다', () => {
     expect(catalogCaptionOf('얼티뮨 파워라이징 컨센트레이트')).toBe('얼티뮨 파워라이징 컨센트레이트');
     expect(catalogCaptionOf('[기획] 얼티뮨 세럼 (50ml)')).toBe('얼티뮨 세럼');
-    expect(catalogCaptionOf('세럼 50ml')).toBeNull();
+    // ★ 2026-09-24 품질 A(A6) — 용량 낱말은 떼고 캡션을 낸다(종전 = 캡션 0 · 톤28 실측 상품명 거의 전부 탈락)
+    expect(catalogCaptionOf('세럼 50ml')).toBe('세럼');
     expect(catalogCaptionOf('1+1 특가 세럼')).toBeNull();
     expect(catalogCaptionOf('a')).toBeNull();
     expect(catalogCaptionOf('')).toBeNull();

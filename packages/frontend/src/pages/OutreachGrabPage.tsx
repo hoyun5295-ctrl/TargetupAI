@@ -17,11 +17,11 @@ const STAGE_LABEL: Record<string, string> = { queued: '대기 중', crawling: '�
 export default function OutreachGrabPage() {
   const [phase, setPhase] = useState<Phase>('working');
   const [message, setMessage] = useState('');
-  const [attached, setAttached] = useState<{ companyName: string; chars: number } | null>(null);
+  const [attached, setAttached] = useState<{ companyName: string; campaigns: number; products: number } | null>(null);
   const [choices, setChoices] = useState<Choice[]>([]);
   const [busy, setBusy] = useState(false);
   const [closeFailed, setCloseFailed] = useState(false);
-  const payloadRef = useRef<{ u: string; h: string } | null>(null);
+  const payloadRef = useRef<{ u: string; s: Record<string, unknown> } | null>(null);
   // StrictMode 이중 실행에도 한 번만(첫 렌더의 # 을 붙잡는다)
   const hashRef = useRef(window.location.hash);
   const startedRef = useRef(false);
@@ -34,14 +34,15 @@ export default function OutreachGrabPage() {
       const fd = new FormData();
       fd.append('pageUrl', p.u);
       if (jobId) fd.append('jobId', jobId);
-      fd.append('file', new Blob([p.h], { type: 'text/html' }), 'page.html');
+      // ★ 2026-09-24 B 판 2 — 스토어 상태 허용 칸(JSON)
+      fd.append('file', new Blob([JSON.stringify(p.s)], { type: 'application/json' }), 'state.json');
       const token = localStorage.getItem('token');
       const r = await fetch('/api/sales-outreach/store-grab', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setPhase('error'); setMessage(d?.error || '가져오기에 실패했습니다. 잠시 후 스토어 화면에서 다시 눌러 주세요.'); return; }
       if (d?.attached) {
         payloadRef.current = null;
-        setAttached({ companyName: String(d.attached.companyName), chars: Number(d.attached.chars) || 0 });
+        setAttached({ companyName: String(d.attached.companyName), campaigns: Number(d.attached.campaigns) || 0, products: Number(d.attached.products) || 0 });
         setPhase('attached');
         notifyStoreGrab(String(d.attached.jobId));
         // 버튼이 연 창이라 스스로 닫을 수 있다 · 닫히지 않으면 안내만
@@ -91,12 +92,12 @@ export default function OutreachGrabPage() {
         </div>
         <div className="px-5 py-5 text-sm text-gray-700">
           {phase === 'working' && (
-            <div className="flex items-center gap-2 text-gray-600"><Loader2 className="w-4 h-4 animate-spin text-blue-600" /> 행사 문구를 읽어 같은 스토어로 등록된 업체에 붙이는 중입니다</div>
+            <div className="flex items-center gap-2 text-gray-600"><Loader2 className="w-4 h-4 animate-spin text-blue-600" /> 스토어 기획·상품을 읽어 같은 스토어로 등록된 업체에 넣는 중입니다</div>
           )}
           {phase === 'attached' && attached && (
             <div className="space-y-2">
-              <div className="flex items-start gap-2 text-emerald-700"><CheckCircle2 className="w-5 h-5 shrink-0" /><span><b>{attached.companyName}</b>에 행사 문구 {attached.chars.toLocaleString()}자를 붙였습니다.</span></div>
-              <p className="text-xs text-gray-500">AI 영업 확인 화면의 행사 목록에 "네이버 스토어에서 가져옴"으로 보입니다. 혜택 숫자는 제작 뒤 직접 채우는 자리로 바뀝니다.</p>
+              <div className="flex items-start gap-2 text-emerald-700"><CheckCircle2 className="w-5 h-5 shrink-0" /><span><b>{attached.companyName}</b>에 네이버 스토어 기획 {attached.campaigns}개 · 상품 {attached.products}개를 넣었습니다.</span></div>
+              <p className="text-xs text-gray-500">AI 영업 확인 화면의 행사 후보에 "네이버 스토어" 표시로 보입니다. 가격은 지금 스토어에 보이는 값입니다.</p>
               <p className="text-xs text-gray-400">{closeFailed ? '이 창은 닫으셔도 됩니다.' : '이 창은 곧 닫힙니다.'}</p>
             </div>
           )}
@@ -123,7 +124,7 @@ export default function OutreachGrabPage() {
           )}
         </div>
         <div className="px-5 py-2.5 border-t border-gray-100">
-          <span className="text-[10px] text-gray-400 italic">Data source: 직원 브라우저에 떠 있던 스토어 화면 · 한줄로 서버는 네이버에 접속하지 않습니다</span>
+          <span className="text-[10px] text-gray-400 italic">Data source: 직원 브라우저에 떠 있던 스토어 화면의 기획·상품 정보 · 한줄로 서버는 네이버에 접속하지 않습니다</span>
         </div>
       </div>
     </div>
