@@ -8,7 +8,7 @@
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔.
  */
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Check, Eye, Loader2, Send, X } from 'lucide-react';
+import { AlertTriangle, Check, Eye, Loader2, Send, SpellCheck, X } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import AgencyPreviewModal from './AgencyPreviewModal';
 import AgencyEventLog from './AgencyEventLog';
@@ -22,7 +22,7 @@ import {
   CUI_PILL_BASE, CUI_PILL_TONE, CUI_SEC_TITLE, CUI_TEXTAREA,
 } from '../../utils/console-ui';
 import {
-  agencyCallbackLabel, approveAgencyRequest, cancelAgencyRequest, fetchAgencyPreview, fetchAgencyRequest, formatWhen,
+  agencyCallbackLabel, applyAgencySpellToDraft, approveAgencyRequest, cancelAgencyRequest, fetchAgencyPreview, fetchAgencyRequest, formatWhen,
   isApprovable, isCancelable, isEditableStatus, rescheduleAgencyRequest, SOURCE_LABEL, STATUS_LABEL,
   STATUS_TONE, toLocalInput, updateAgencyContent, type AgencyPreviewSample, type AgencySendEvent,
   type AgencySendRequest,
@@ -50,6 +50,9 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   const [preview, setPreview] = useState<{ samples: AgencyPreviewSample[]; shown: number; total: number } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
+  // ★2026-09-25 맞춤법 확인 — 화면에서만 접는 [그대로 두기] · 고치기 칸에 넣은 줄(저장해야 반영)
+  const [spellKept, setSpellKept] = useState<Set<string>>(new Set());
+  const [spellPut, setSpellPut] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!requestId) { setReq(null); setEvents([]); return; }
@@ -64,6 +67,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
         setDraft(request.currentContent);
         setNewWhen(toLocalInput(new Date(request.requestedAt)));
         setEditing(false);
+        setSpellKept(new Set());
+        setSpellPut(new Set());
       })
       .catch((e) => { if (alive) toast.error(e?.message || '접수를 불러오지 못했습니다.'); })
       .finally(() => { if (alive) setLoading(false); });
@@ -83,7 +88,29 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   };
 
   // 문안·시각이 바뀌면 미리보기도 낡는다. 비워 두면 다음 펼침에서 새로 읽는다.
-  const apply = (r: AgencySendRequest) => { setReq(r); setDraft(r.currentContent); setPreview(null); setPreviewOpen(false); onChanged(r); };
+  const apply = (r: AgencySendRequest) => { setReq(r); setDraft(r.currentContent); setPreview(null); setPreviewOpen(false); setSpellKept(new Set()); setSpellPut(new Set()); onChanged(r); };
+
+  /**
+   * ★2026-09-25 맞춤법 [고치기] — 고치기 칸을 열고 그 자리를 바꿔 넣는다(여러 개 누적).
+   * ⛔ 저장하지 않는다. 저장해야 기존 문안 수정 경로로 재검사·테스트 문자·재승인이 다시 돈다(0910 보낼 수 없는 글자와 같은 방식).
+   */
+  const putSpellFixes = (ids: string[]) => {
+    if (!req?.spellIssues) return;
+    let next = editing ? draft : req.currentContent;
+    const put = new Set(spellPut);
+    let skipped = 0;
+    for (const issue of req.spellIssues) {
+      if (!ids.includes(issue.id) || issue.blocked || put.has(issue.id)) continue;
+      const fixed = applyAgencySpellToDraft(next, issue);
+      if (fixed == null) { skipped += 1; continue; }
+      next = fixed;
+      put.add(issue.id);
+    }
+    setDraft(next);
+    setEditing(true);
+    setSpellPut(put);
+    if (skipped > 0) toast.info('이미 바뀐 자리는 건너뛰었습니다.');
+  };
 
   /**
    * 서버가 거절했을 때 현재 상태를 다시 읽는다.
@@ -245,6 +272,51 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                   <SmsCharsetNotice className="mt-2" texts={[req.currentContent]} onApply={(fix) => { setDraft(fix(req.currentContent)); setEditing(true); }} />
                 )}
               </div>
+
+              {/* ★2026-09-25 맞춤법 확인(검사 결과 · 자동으로 고치지 않는다 · 고치고 저장하면 검사를 다시 한다) */}
+              {changeable && Array.isArray(req.spellIssues) && req.spellIssues.some((i) => !spellKept.has(i.id)) && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3.5">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <h4 className={`${CUI_SEC_TITLE} flex items-center gap-1.5`}>
+                      <SpellCheck className="w-4 h-4 text-emerald-600" strokeWidth={2} />
+                      맞춤법 확인 {req.spellIssues.filter((i) => !spellKept.has(i.id) && !spellPut.has(i.id)).length}곳
+                    </h4>
+                    {req.spellIssues.some((i) => !i.blocked && !spellKept.has(i.id) && !spellPut.has(i.id)) && (
+                      <button
+                        type="button"
+                        onClick={() => putSpellFixes(req.spellIssues!.filter((i) => !spellKept.has(i.id)).map((i) => i.id))}
+                        className={CUI_BTN_OUTLINE}
+                      >
+                        모두 고치기
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    {req.spellIssues.filter((i) => !spellKept.has(i.id)).map((i) => (
+                      <div key={i.id} className={`flex items-center gap-2 rounded-md bg-white border border-emerald-100 px-3 py-2 ${spellPut.has(i.id) ? 'opacity-60' : ''}`}>
+                        <div className="min-w-0 flex-1 text-[13px]">
+                          <span className="text-rose-600 line-through">{i.before}</span>
+                          <span className="mx-1.5 text-neutral-400">→</span>
+                          <b className="text-emerald-700">{i.after}</b>
+                          <span className="ml-2 text-[11.5px] text-neutral-500">
+                            {i.reason || (i.kind === 'spacing' ? '띄어쓰기' : '맞춤법')}
+                            {i.blocked === 'sms_bytes' ? ' · 고치면 단문 길이를 넘어요' : ''}
+                          </span>
+                        </div>
+                        {spellPut.has(i.id) ? (
+                          <span className="text-[11.5px] text-emerald-700 whitespace-nowrap">고치기 칸에 넣음</span>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => setSpellKept((prev) => new Set(prev).add(i.id))} className={CUI_BTN_GHOST}>그대로 두기</button>
+                            <button type="button" onClick={() => putSpellFixes([i.id])} disabled={!!i.blocked} className={CUI_BTN_OUTLINE}>고치기</button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <p className={`${CUI_HINT} mt-2`}>고친 내용은 저장해야 반영되고, 저장하면 검사를 처음부터 다시 합니다. 그대로 승인해도 됩니다.</p>
+                </div>
+              )}
 
               {refined && !editing && (
                 <div>

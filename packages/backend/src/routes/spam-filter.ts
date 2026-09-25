@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { Request, Response, Router } from 'express';
-import { mysqlQuery, query } from '../config/database';
+import pool, { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 import { replaceVariables, prepareFieldMappings, getOpt080Number, buildAdSubject } from '../utils/messageUtils';
@@ -9,6 +9,10 @@ import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
 import { normalizeContent, computeMessageHash } from '../utils/spam-test-queue';
 import { getSampleCustomerScope } from '../utils/store-scope';
+// ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
+import {
+  SPAM_TRIAL_LIMIT, SPAM_TRIAL_LOCK_SQL, SPAM_TRIAL_SOURCE, countSpamTrialsInTx, judgeSpamVerdict, readSpamTrialStatus, withExpectedSpamDevices,
+} from '../utils/spam-trial';
 
 const router = Router();
 
@@ -43,11 +47,18 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
        WHERE c.id = $1`,
       [companyId]
     );
-    if (!planCheck.rows[0]?.spam_filter_enabled) {
-      return res.status(403).json({
-        error: '스팸필터 테스트는 스타터 이상 요금제에서 이용 가능합니다.',
-        code: 'PLAN_FEATURE_LOCKED'
-      });
+    // ★2026-09-25 요금제에 스팸 검사가 없는 회사 = 무료 체험(회사당 평생 3회 · 차감 0 · 청구 집계 제외).
+    //   여기서는 빠른 거절만 한다. 한 칸을 실제로 쓰는 판정은 테스트 행을 넣는 트랜잭션 안(잠금 뒤 재확인)이다.
+    const trialMode = !planCheck.rows[0]?.spam_filter_enabled;
+    if (trialMode) {
+      const trial = await readSpamTrialStatus(companyId);
+      if (trial.remaining <= 0) {
+        return res.status(403).json({
+          error: `무료 스팸 검사 ${SPAM_TRIAL_LIMIT}번을 모두 쓰셨어요. 요금제에 가입하면 계속 쓸 수 있어요.`,
+          code: 'SPAM_TRIAL_EXHAUSTED',
+          trial,
+        });
+      }
     }
 
     // 1) stale 테스트 자동 정리 (타임아웃 초과 active → completed/timeout 처리)
@@ -153,19 +164,52 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     const spamCheckNumber = await getOpt080Number(userId || null, companyId) || null;
 
     // 7) 테스트 건 생성 (message_hash 포함) — 차감 전에 생성하여 testId를 referenceId로 사용
-    const testResult = await query(
-      `INSERT INTO spam_filter_tests
-       (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
-       RETURNING id, created_at`,
-      [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, spamCheckNumber]
-    );
-    const testId = testResult.rows[0].id;
+    let testId: string;
+    if (trialMode) {
+      // ★2026-09-25 체험: 회사 잠금 → 센다 → 남았을 때만 넣는다(한 트랜잭션). 동시 요청이 3을 넘기지 못한다.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(SPAM_TRIAL_LOCK_SQL, [companyId]);
+        const used = await countSpamTrialsInTx(client, companyId);
+        if (used >= SPAM_TRIAL_LIMIT) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({
+            error: `무료 스팸 검사 ${SPAM_TRIAL_LIMIT}번을 모두 쓰셨어요. 요금제에 가입하면 계속 쓸 수 있어요.`,
+            code: 'SPAM_TRIAL_EXHAUSTED',
+          });
+        }
+        const ins = await client.query(
+          `INSERT INTO spam_filter_tests
+           (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status, source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
+           RETURNING id, created_at`,
+          [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, spamCheckNumber, SPAM_TRIAL_SOURCE]
+        );
+        await client.query('COMMIT');
+        testId = ins.rows[0].id;
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw txErr;
+      } finally {
+        client.release();
+      }
+    } else {
+      const testResult = await query(
+        `INSERT INTO spam_filter_tests
+         (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+         RETURNING id, created_at`,
+        [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, spamCheckNumber]
+      );
+      testId = testResult.rows[0].id;
+    }
 
     // ★ 선불 잔액 차감 (테스트폰 × 메시지타입 = 실제 발송 건수)
     // ★ 크레딧 모델 v2 (2026-06-30): "프로 이상 스팸필터 테스트 무료" 전면 폐지 — 전 플랜 항상 과금(현금/후불).
+    // ★ 2026-09-25 체험 검사는 차감하지 않는다(무료 체험 = 잔액·무료 문자 어느 쪽도 쓰지 않는다).
     let spamDeductAmount = 0;
-    {
+    if (!trialMode) {
       const spamDeduct = await prepaidDeduct(companyId, spamSendCount, spamDeductType, testId, userId, 'spam');
       if (!spamDeduct.ok) {
         // 차감 실패 시 테스트 레코드 cancelled 처리
@@ -183,6 +227,10 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     // ★ D32: 실제 타겟 최상단 고객 데이터로 치환 (하드코딩 완전 제거)
     // replaceVariables가 타입포맷+잔여변수 strip 모두 처리
 
+    // ★2026-09-25 체험 검사가 한 통도 못 나가고 실패하면 그 체험은 쓰지 않은 것으로 되돌린다(행 삭제 = 세는 대상에서 빠진다).
+    //   한 통이라도 나갔으면 되돌리지 않는다(테스트폰에 이미 문자가 갔다).
+    let sentCount = 0;
+    try {
     for (const device of devices.rows) {
       for (const msgType of messageTypes) {
         // 결과 행 생성
@@ -209,7 +257,16 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           testId,
           titleStr
         );
+        sentCount += 1;
       }
+    }
+    } catch (sendErr) {
+      if (trialMode && sentCount === 0) {
+        await query(`DELETE FROM spam_filter_test_results WHERE test_id = $1`, [testId]).catch(() => undefined);
+        await query(`DELETE FROM spam_filter_tests WHERE id = $1 AND source = $2`, [testId, SPAM_TRIAL_SOURCE]).catch(() => undefined);
+        console.error(`[SpamFilter] 체험 검사 발송 실패 — 체험을 되돌림 testId=${testId}`);
+      }
+      throw sendErr;
     }
 
     // 7) 15초 폴링 — QTmsg 성공 확인 후 10초 대기, 그래도 앱 미수신이면 BLOCKED
@@ -364,7 +421,8 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       totalCount: spamSendCount,
       message: `${devices.rows.length}대 테스트폰에 ${messageTypes.join('/')} 발송 완료 (${spamSendCount}건)`,
       timeoutSeconds: TEST_TIMEOUT_MS / 1000,
-      deducted: spamDeductAmount
+      deducted: spamDeductAmount,
+      trial: trialMode,
     });
 
   } catch (err) {
@@ -574,6 +632,67 @@ router.get('/active-test', authenticate, async (req: Request, res: Response) => 
 });
 
 // ============================================================
+// [POST] /api/spam-filter/recent-check — 이 문안을 최근 24시간 안에 검사했는가 (★2026-09-25)
+//   직접발송 [전송하기] 직전 경고 창이 쓴다. 화면 기억이 아니라 **검사 원장**으로 판정한다(새로고침·다른 화면 검사도 인정).
+//   같은 회사 · 같은 발신번호 · 같은 문안(공백 무시 = 해시와 같은 정규화) · 같은 종류(단문/장문).
+//   ⛔ 조회만 한다. 검사를 만들거나 바꾸지 않는다.
+// ============================================================
+router.post('/recent-check', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user.companyId;
+    const { callbackNumber, messageType, messageContentSms, messageContentLms } = req.body || {};
+    const isLms = messageType === 'LMS' || messageType === 'MMS';
+    const norm = normalizeContent(String((isLms ? messageContentLms : messageContentSms) || ''));
+    const cb = String(callbackNumber || '').replace(/\D/g, '');
+    if (!cb || !norm) return res.json({ checked: false });
+
+    // ⛔ 검사 행에는 단문·장문 문안이 둘 다 저장되지만 실제로 보낸 것은 한 종류다(결과 행의 message_type).
+    //   그 종류로 실제 보낸 결과가 있는 검사만 인정한다 — 단문으로 검사하고 장문으로 바꿨는데 "검사함"으로 나오면 안 된다.
+    const sentType = isLms ? 'LMS' : 'SMS';
+    const found = await query(
+      `SELECT t.id, t.status, t.created_at, t.source
+         FROM spam_filter_tests t
+        WHERE t.company_id = $1
+          AND REPLACE(t.callback_number, '-', '') = $2
+          AND t.created_at > NOW() - INTERVAL '24 hours'
+          AND regexp_replace(COALESCE(${isLms ? 't.message_content_lms' : 't.message_content_sms'}, ''), '[[:space:]]+', '', 'g') = $3
+          AND EXISTS (SELECT 1 FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.message_type = $4)
+        ORDER BY t.created_at DESC
+        LIMIT 1`,
+      [companyId, cb, norm, sentType],
+    );
+    if (found.rows.length === 0) return res.json({ checked: false });
+    const test = found.rows[0];
+    const results = await query(
+      `SELECT carrier, phone, received, result FROM spam_filter_test_results WHERE test_id = $1 AND message_type = $2 ORDER BY carrier`,
+      [test.id, sentType],
+    );
+    // ★Codex 4R·5R: 발송이 중간에 끊긴 검사는 결과 행이 일부만 있다 — 지금 쓰는 테스트폰 중 행이 없는 것을 "결과 없음"으로 채워 판정한다
+    const devices = await query(`SELECT carrier, phone FROM spam_filter_devices WHERE is_active = true`);
+    const rows = withExpectedSpamDevices(results.rows, devices.rows);
+    // 진행 중인데 시간을 넘긴 건은 끝난 것으로 본다(판정만 · 행은 기존 정리 경로가 닫는다)
+    const expired = test.status === 'active' && Date.now() - new Date(test.created_at).getTime() > TEST_TIMEOUT_MS;
+    const verdict = judgeSpamVerdict(expired ? 'completed' : String(test.status), rows);
+    return res.json({
+      checked: true,
+      testId: test.id,
+      verdict,
+      checkedAt: test.created_at,
+      trial: test.source === SPAM_TRIAL_SOURCE,
+      blockedCarriers: [...new Set(rows.filter((r) => r.result === 'blocked').map((r) => r.carrier))],
+      // 받지 못한 곳(시간 초과·전달 실패·보내지 못한 테스트폰) — 화면 "결과 없는 통신사" 안내
+      missingCarriers: [...new Set(rows
+        .filter((r) => !r.received && r.result !== 'pass' && r.result !== 'blocked')
+        .map((r) => r.carrier))],
+    });
+  } catch (err) {
+    console.error('[SpamFilter] 최근 검사 조회 오류:', err);
+    // 조회 실패는 "안 했다"로 보지 않는다 — 화면이 경고를 띄울지 판단하지 못한 채로 두지 않게 모름으로 돌려준다
+    return res.json({ checked: false, unknown: true });
+  }
+});
+
+// ============================================================
 // [GET] /api/spam-filter/tests — 내 테스트 이력 조회
 // ============================================================
 router.get('/tests', authenticate, async (req: Request, res: Response) => {
@@ -602,10 +721,12 @@ router.get('/tests', authenticate, async (req: Request, res: Response) => {
 
     const tests = await query(
       `SELECT t.id, t.callback_number, t.status, t.created_at, t.completed_at,
-              t.message_content_sms, t.message_content_lms,
+              t.message_content_sms, t.message_content_lms, t.source,
               u.name as user_name,
               (SELECT COUNT(*) FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.received = true) as received_count,
-              (SELECT COUNT(*) FROM spam_filter_test_results r WHERE r.test_id = t.id) as total_count
+              (SELECT COUNT(*) FROM spam_filter_test_results r WHERE r.test_id = t.id) as total_count,
+              (SELECT COALESCE(json_agg(json_build_object('carrier', r.carrier, 'received', r.received, 'result', r.result) ORDER BY r.carrier), '[]'::json)
+                 FROM spam_filter_test_results r WHERE r.test_id = t.id) as results
        FROM spam_filter_tests t
        JOIN users u ON u.id = t.user_id
        ${whereClause}

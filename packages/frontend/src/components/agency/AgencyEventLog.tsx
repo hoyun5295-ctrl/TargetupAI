@@ -15,6 +15,8 @@ import { CUI_SEC_TITLE } from '../../utils/console-ui';
 /** 검사 이력을 담당자 언어로 */
 const EVENT_LABEL: Record<string, string> = {
   received: '접수했습니다',
+  // ★2026-09-25 맞춤법 검사(테스트 문자 뒤 · 승인 안내 앞). 확인할 곳 수는 상세 화면 목록이 보여 준다
+  spell_checked: '맞춤법을 확인했습니다',
   spam_blocked: '스팸 검사에 걸렸습니다',
   refined: '문안을 다듬었습니다',
   // ★2026-08-31 다듬을 곳이 없어 문안이 그대로인 회차. `refined`와 나눈 이유는 이 경우 담당자에게

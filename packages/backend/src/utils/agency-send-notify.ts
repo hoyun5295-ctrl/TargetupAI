@@ -25,6 +25,11 @@ export interface AgencyNotifyContext {
   /** ★2026-08-26(4) 전송 요청 건수(Harold "문자에 XX건 넣자"). 승인·재승인 안내에 실린다 */
   count?: number;
   /**
+   * ★2026-09-25 맞춤법 검사에서 확인할 곳 수(docs/2026-09-25-agency-spell-check-design.md §3-5).
+   * 0·없음이면 줄을 싣지 않는다. 저장이 된 때만 워커가 넘긴다(화면에 없는 숫자를 문자에 보내지 않는다).
+   */
+  spellCount?: number;
+  /**
    * ★2026-08-26(6) 요청 시각이 촉박해 자동으로 뒤로 미룬 건인가(원본 시각 표기 · 예: "8월 30일 10:00").
    * 값이 있으면 승인 문자가 **다른 문안**으로 나간다 — 담당자가 못 본 시각으로 승인하면 안 되기 때문이다.
    */
@@ -57,6 +62,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
       `건: ${shortLabel(ctx.label)}`,
       ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
       `요청하신 ${ctx.originalWhenText}은 준비 시간이 촉박해 ${ctx.whenText}로 잡았습니다.`,
+    ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
       ctx.approveUrl
         ? '이 시각이 괜찮으시면 아래 주소에서 승인해 주세요.'
         : '이 시각이 괜찮으시면 로그인하여 승인해 주세요.',
@@ -69,6 +75,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
     `건: ${shortLabel(ctx.label)}`,
     ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
+    ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
     ctx.approveUrl
       ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 바로 승인해 주세요.'
       : '방금 보내 드린 문자를 확인하시고, 로그인하여 승인해 주세요.',

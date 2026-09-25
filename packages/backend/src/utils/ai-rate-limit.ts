@@ -7,6 +7,7 @@
  *
  * 영구 원칙 정합:
  *  - plans.ai_calls_per_month NULL = 무제한 (ENTERPRISE)
+ *  - ★2026-09-25 Harold B안: 면제 source(`AI_CALL_LIMIT_EXEMPT_SOURCES`)는 한도 검사도 건너뛰고 한도와 비교되는 숫자에서도 빠진다
  *  - 한도 초과 시 throw AiRateLimitExceeded (호출 측 catch + 사용자 안내)
  *  - ai_call_log 매 호출 INSERT (회사별 월 통계 진실의 원천)
  *  - DB 조회 비용 매트릭스 = in-memory cache (60초 TTL)
@@ -18,6 +19,34 @@
  */
 
 import { query } from '../config/database';
+
+/** 직접발송 맞춤법 검사 source(원장 `spell_check_uses.source`와 같은 값 · 이름 소유 = 여기) */
+export const DIRECT_SPELL_AI_SOURCE = 'direct-send-spell';
+/** 대행발송 맞춤법 검사 source(이름 소유 = 여기) */
+export const AGENCY_SPELL_AI_SOURCE = 'agency-send-spell';
+
+/**
+ * 월 AI 호출 한도에서 빠지는 source(한 벌 · ★2026-09-25 Harold B안).
+ * 이 목록의 호출은 ① 한도 검사를 건너뛰고(`callAIWithFallback`) ② **한도와 비교되는 모든 숫자**에서 빠진다
+ * (월 사용량 `getMonthlyUsage` · 일별 호출 수 `getDailyUsage` · 사용량 화면 전월 호출). 기록(`ai_call_log`)은 그대로 남아
+ * 출처별 분포(`getModelBreakdown`)와 일별 비용에는 보인다.
+ * 넣는 기준 = 자기 사용 한도가 따로 있는 서비스. 맞춤법 = 무료 월 5회(`spell-check-quota`) · 사용자당 1분 6회 · 같은 글 5분 캐시.
+ * 이유(Harold 승인): 맞춤법 무제한이 크레딧 매출을 내는 다른 AI 기능의 한도를 깎지 않게 한다.
+ */
+export const AI_CALL_LIMIT_EXEMPT_SOURCES: readonly string[] = [DIRECT_SPELL_AI_SOURCE, AGENCY_SPELL_AI_SOURCE];
+
+/** 한도 면제 호출인가 */
+export function isAiCallLimitExempt(source: string | null | undefined): boolean {
+  return !!source && AI_CALL_LIMIT_EXEMPT_SOURCES.includes(source);
+}
+
+/**
+ * 한도에 세는 호출(SQL 조각 · 한 벌). 목록 값은 코드 상수라 글자로 싣는다.
+ * source 가 NULL 인 옛 행도 센다(COALESCE) — 조건을 붙였다고 옛 행이 셈에서 빠지면 안 된다.
+ */
+export function aiLimitCountedSql(col = 'source'): string {
+  return `COALESCE(${col}, '') NOT IN (${AI_CALL_LIMIT_EXEMPT_SOURCES.map((s) => `'${s.replace(/'/g, "''")}'`).join(', ')})`;
+}
 
 export class AiRateLimitExceeded extends Error {
   constructor(message: string, public used: number, public limit: number) {
@@ -36,7 +65,7 @@ const usageCache = new Map<string, UsageCache>();
 const USAGE_CACHE_TTL_MS = 60 * 1000;  // 60초 (월 카운트라 분 단위 정합)
 
 /**
- * 회사별 월 한도 + 사용량 조회 (KST 월 기준)
+ * 회사별 월 한도 + 사용량 조회 (KST 월 기준). used = 한도에 세는 호출만(`aiLimitCountedSql`).
  */
 export async function getMonthlyUsage(companyId: string): Promise<{ used: number; limit: number | null }> {
   if (!companyId) return { used: 0, limit: null };
@@ -65,7 +94,8 @@ export async function getMonthlyUsage(companyId: string): Promise<{ used: number
       `SELECT COUNT(*)::int AS cnt
        FROM ai_call_log
        WHERE company_id = $1::uuid
-         AND called_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'`,
+         AND called_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
+         AND ${aiLimitCountedSql()}`,
       [companyId]
     );
     const used = usageRes.rows[0]?.cnt || 0;
@@ -134,6 +164,7 @@ export async function recordAiCall(opts: {
 
 /**
  * 30일 사용량 일별 매트릭스 (대시보드용)
+ * count = 한도에 세는 호출(일평균·한도 도달 예측·30일 예측이 한도와 비교한다) · cost = 전체 원가(면제 호출 포함).
  */
 export async function getDailyUsage(companyId: string, days = 30): Promise<Array<{ date: string; count: number; cost: number }>> {
   if (!companyId) return [];
@@ -141,7 +172,7 @@ export async function getDailyUsage(companyId: string, days = 30): Promise<Array
     const res = await query(
       `SELECT
          to_char(date_trunc('day', called_at AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD') AS date,
-         COUNT(*)::int AS count,
+         (COUNT(*) FILTER (WHERE ${aiLimitCountedSql()}))::int AS count,
          COALESCE(SUM(cost_won), 0)::int AS cost
        FROM ai_call_log
        WHERE company_id = $1::uuid

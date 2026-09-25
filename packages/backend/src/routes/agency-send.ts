@@ -27,6 +27,9 @@ import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples } from '../utils/agency-send
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 import { ATTEMPT_LOCK_PREFIX, attemptBlocksChange, attemptIdleSql } from '../utils/agency-send-worker';
+// ★2026-09-25 맞춤법 검사(설계 docs/2026-09-25-agency-spell-check-design.md · 자동 교정 0 · 결과는 문안 버전에 묶인다)
+import { checkAgencySpelling, hasAgencySpellColumn, readAgencySpell } from '../utils/agency-send-spell';
+import { takeSpellMinuteSlot } from '../utils/spell-check-quota';
 // ★2026-08-26 §18 승격 — 접수 코어·원스텝 분석은 CT(utils/agency-send-intake.ts)가 소유한다.
 //   입구 = 화면 접수 · 원스텝 · 이메일 접수 워커. 이 파일에 코어를 다시 정의하지 마라(두 벌 금지).
 import {
@@ -159,6 +162,8 @@ function toPublic(row: any) {
     originalContent: row.original_content,
     currentContent: row.current_content,
     contentVersion: row.content_version,
+    // ★2026-09-25 지금 문안의 맞춤법 확인 목록(버전이 다르거나 검사가 실패했으면 null · 컬럼 전이면 null)
+    spellIssues: readAgencySpell(row),
     // 행 수정 번호. 화면이 이 값을 되돌려주고 서버가 조건으로 쓴다(낙관적 잠금).
     revision: row.revision,
     mmsImagePaths: row.mms_image_paths || [],
@@ -513,6 +518,24 @@ router.post('/mms-image', requireAgencySendMw, mmsImageUpload, async (req: Reque
 });
 
 // ════════════════════════════════════════════════════════════
+// POST /api/agency-send/spell-check — 접수 화면 사전 맞춤법 검사 (★2026-09-25 · 설계 §3-8)
+//   저장 0 · 크레딧 0 · 같은 판정(워커 A와 한 벌). 접수 전에 고치면 재검사·재테스트 왕복이 0이다.
+// ════════════════════════════════════════════════════════════
+router.post('/spell-check', async (req: Request, res: Response) => {
+  const auth = await requireAgencySend(req, res);
+  if (!auth) return;
+  const content = String(req.body?.content ?? '');
+  if (!content.trim()) return res.status(400).json({ success: false, error: '검사할 문안을 먼저 적어 주세요.' });
+  if (content.length > MAX_CONTENT) return res.status(400).json({ success: false, error: `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.` });
+  if (!takeSpellMinuteSlot(`${auth.companyId}:${auth.userId}`)) {
+    return res.status(429).json({ success: false, code: 'SPELL_RATE_LIMITED', error: '잠시 뒤 다시 눌러 주세요.' });
+  }
+  const messageType = ['SMS', 'LMS', 'MMS'].includes(String(req.body?.messageType)) ? String(req.body.messageType) : 'LMS';
+  const r = await checkAgencySpelling({ companyId: auth.companyId, userId: auth.userId, content, messageType });
+  return res.json({ success: true, issues: r.issues, failed: r.failed });
+});
+
+// ════════════════════════════════════════════════════════════
 // GET /api/agency-send/:id — 상세(검사 이력 포함)
 // ════════════════════════════════════════════════════════════
 router.get('/:id', async (req: Request, res: Response) => {
@@ -691,10 +714,13 @@ router.post('/:id/content', async (req: Request, res: Response) => {
     //   같은 프로세스에서 그 시도가 돌고 있는지 본다. 캠페인이 있는데 캐시만 비어 있는 틈에 시도 키를 비우면
     //   대조가 옛 캠페인을 못 찾아 새 시도와 두 벌로 나간다. ⛔ 이 판정과 아래 UPDATE 사이에 다른 대기를 두지 않는다.
     //   다른 연결이 쥔 시도 키 잠금은 UPDATE 조건(`attemptIdleSql`)이 본다(쥐고 있으면 0행 → 상태 변경 안내).
+    // ★2026-09-25 문안이 바뀌면 옛 맞춤법 결과를 지운다(버전으로도 막히지만 저장값을 남기지 않는다 · 컬럼이 있을 때만).
+    //   ⛔ 컬럼 탐지는 차단 판정 **앞**에서 한다 — 판정과 UPDATE 사이에 다른 대기를 끼우지 않는다(위 ⛔ 대행 ⓔ).
+    const clearSpell = (await hasAgencySpellColumn()) ? 'spell_check = NULL, ' : '';
     if (rejectAlreadyDispatched(await attemptBlocksChange(auth.companyId, req.params.id, r.rows[0].dispatch_key), res)) return;
     const updated = await query(
       `UPDATE agency_send_requests
-          SET original_content = $1, current_content = $1, content_version = content_version + 1,
+          SET ${clearSpell}original_content = $1, current_content = $1, content_version = content_version + 1,
               status = 'received', test_round = 0, last_test_result = NULL, last_test_at = NULL,
               approved_at = NULL, approved_by = NULL, approval_version = NULL, final_test_at = NULL,
               dispatch_key = NULL, campaign_id = NULL,

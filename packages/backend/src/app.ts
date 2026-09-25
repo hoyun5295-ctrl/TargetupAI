@@ -63,6 +63,7 @@ import smsTemplatesRoutes from './routes/sms-templates';
 import internalAlertRoutes from './routes/internal-alert'; // ★ D145 (2026-05-07): 시스템 알림 SMS (localhost 전용)
 import mmsImagesRoutes from './routes/mms-images';
 import spamFilterRoutes from './routes/spam-filter';
+import sendChecksRoutes from './routes/send-checks'; // ★ 2026-09-25 직접발송 보내기 전 점검(맞춤법 월 5회 · 스팸 체험 현황)
 import analysisRoutes from './routes/analysis';
 import autoCampaignsRoutes from './routes/auto-campaigns';
 import savedSegmentsRoutes from './routes/saved-segments';
@@ -400,6 +401,7 @@ app.use((_req, res, next) => {
 app.use('/api/upload', uploadRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/spam-filter', spamFilterRoutes);
+app.use('/api/send-checks', sendChecksRoutes);
 // D183 (2026-05-20): 단축 URL redirect — 공개 endpoint (/c/:hash) — SMS/카톡 수신자 클릭 트래킹
 app.use('/', shortUrlRoutes);
 // ★ D218+ (2026-05-26): 여정 즉시 정지 페이지 — 공개 endpoint (/journey-pause/:token) — 담당자 LMS 안 단축 URL

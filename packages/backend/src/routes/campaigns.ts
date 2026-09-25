@@ -63,6 +63,8 @@ import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from '../utils/brand-lin
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
 // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 판정·응답 모두 CT가 소유한다
 import { checkSenderAuthGate, senderAuthRejection } from '../utils/sender-auth';
+// ★2026-09-25 무료 체험 스팸 검사 표시(비용 0)
+import { SPAM_TRIAL_SOURCE } from '../utils/spam-trial';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -1511,7 +1513,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       SELECT
         r.id, r.phone, r.carrier, r.message_type, r.result, r.received,
         t.created_at as sent_at, t.user_id, t.callback_number,
-        t.message_content_sms, t.message_content_lms,
+        t.message_content_sms, t.message_content_lms, t.source,
         u.name as sender_name
       FROM spam_filter_test_results r
       JOIN spam_filter_tests t ON r.test_id = t.id
@@ -1524,7 +1526,9 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     const spamFilterList = spamListResult.rows.map((r: any) => {
       const msgType = r.message_type || 'SMS';
       const isCompleted = r.result !== null;
-      if (isCompleted) {
+      // ★2026-09-25 무료 체험 검사는 비용 0(청구하지 않는다 · spam-trial CT)
+      const isTrial = r.source === SPAM_TRIAL_SOURCE;
+      if (isCompleted && !isTrial) {
         sfCostCalc += msgType === 'SMS' ? costSms : costLms;
       }
       return {
@@ -1538,6 +1542,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
         carrier: r.carrier,
         testType: 'spam_filter',
         senderName: r.sender_name || '-',
+        trial: isTrial,
       };
     });
 

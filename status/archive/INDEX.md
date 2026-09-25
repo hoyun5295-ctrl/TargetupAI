@@ -9,6 +9,7 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-09-22 | 🟢 세션 포인트 카드 원문(0925 회전) — 브랜드메시지 직원 접수 3건 + 버튼 종류 정합 + 링크 검사 전 채널 | 캐러셀 커머스 상품 정보가 필요 합니다 이미지형 줄바꿈 99 버튼 종류 정합 링크 검사 FormControls.TextInput 비즈니스폼 bizFormId k_etc_json scheme 9999 seqno 115661 B-0922-3 B-0922-4 B-0922-5 B-0922-6 bdc857ee 5a462669 11638828 | [TASKS_2026-09.md](TASKS_2026-09.md) |
 | 2026-09-16 | 🟢 세션 포인트 카드 원문(0918 회전) — 모바일 DM 블록 조립 · 정산 접수 2건(계정별 장 테스트·스팸 합류 · 수기 부가서비스 수량 컬럼) · 단축 URL 한글 주소 · 이메일 캠페인 8건(편집기 속성 6종 발송 HTML 미반영) | 블록 조립 쪽 템플릿 넘김 효과 settings.effect 목록 리스트형 시작 화면 입구 B-0916-1 B-0916-2 B-0916-3 계정별 장 테스트 스팸 quantity item_qty item_label 572e133a 단축 URL 한글 주소 20크레딧 5b6ef1cd B-0916-4 B-0916-5 B-0916-6 이메일 헤더 형태 히어로 오버레이 매장 지도 SNS 표시 방식 아웃룩 td bgcolor primarySoftOpaque 푸터 수신거부 hiddenFields B-0916-7 B-0916-8 d8e8c7d9 | [TASKS_2026-09.md](TASKS_2026-09.md) |
 | 2026-09-04 · 2026-08-05 | 🟢 비토 링크가드 배포완료 카드 + 자동마케팅 재설계 배포완료 카드 — STATUS §2 카드 원문(0912 30KB 회전) | 링크가드 linkguard.hanjulgw.com 게이트웨이 9be2ade 토글 KISA 회신 docx 큐당 작업 세션 인스턴스 락 held ready hash_key_id 자동마케팅 재설계 08605ab9 §12-1 §12-5 §12-6 DDL 상품 데이터 FEATURE-AUTOMARKETING | [TASKS_2026-09.md](TASKS_2026-09.md) |
 | 2026-09-04 | 🟢 직원 접수 3건(이메일 히어로 사진 유실·텍스트 카드 자동 번호·쿠폰 할인 타입) — 세션 포인트 카드 원문(0904(2) 회전) | 이메일 히어로 CSS 배경 img 태그 텍스트 밴드 수신함 누락 EMAIL_PHOTO_AS_IMG_TAG 포인트 장식 section.motif EMAIL_SECTION_MOTIF_OFF 쿠폰 할인 타입 고아 속성 DM_REMOVED_DEAD_CONTROLS B-0904-1 B-0904-2 B-0904-3 VML MSO 조건부 주석 | [TASKS_2026-09.md](TASKS_2026-09.md) |

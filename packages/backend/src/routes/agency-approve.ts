@@ -28,6 +28,7 @@ import { checkApproval } from '../utils/agency-send-state';
 import { notifyManager } from '../utils/agency-send-worker';
 import { buildLinkApprovedNotify, formatWhen } from '../utils/agency-send-notify';
 import { recordAuditLog } from '../utils/audit-log';
+import { readAgencySpell } from '../utils/agency-send-spell';
 
 const router = Router();
 
@@ -64,6 +65,8 @@ function toApprovalView(row: any) {
     imageCount: Array.isArray(row.mms_image_paths) ? row.mms_image_paths.length : 0,
     revision: Number(row.revision),
     approvedAt: row.approved_at,
+    // ★2026-09-25 맞춤법 확인 목록(읽기 전용 · 문안에서 나온 것뿐이라 노출 규칙 안 · 고치기는 로그인 화면 소유)
+    spellIssues: readAgencySpell(row),
   };
 }
 

@@ -34,6 +34,8 @@ interface ApprovalView {
   imageCount: number;
   revision: number;
   approvedAt: string | null;
+  /** ★2026-09-25 맞춤법 확인 목록(읽기 전용 · 문안 버전에 묶여 서버가 준다) */
+  spellIssues?: { id: string; before: string; after: string; kind: 'typo' | 'spacing'; reason: string }[] | null;
 }
 
 type ViewState =
@@ -191,6 +193,25 @@ export default function AgencyApprovePage() {
               {r.isAd ? ' 광고 표시와 무료 수신거부 번호는 자동으로 붙습니다.' : ''}
             </p>
           </div>
+          {/* ★2026-09-25 맞춤법 확인 — 이 화면은 승인만 한다(고치기는 로그인 화면 소유) */}
+          {Array.isArray(r.spellIssues) && r.spellIssues.length > 0 && (
+            <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
+              <p className="text-[13px] font-bold text-emerald-900">맞춤법을 확인할 곳 {r.spellIssues.length}곳</p>
+              <ul className="mt-1.5 space-y-1">
+                {r.spellIssues.map((i) => (
+                  <li key={i.id} className="text-[12.5px] text-neutral-700">
+                    <span className="text-rose-600 line-through">{i.before}</span>
+                    <span className="mx-1.5 text-neutral-400">→</span>
+                    <b className="text-emerald-700">{i.after}</b>
+                    <span className="ml-1.5 text-[11.5px] text-neutral-500">{i.reason || (i.kind === 'spacing' ? '띄어쓰기' : '맞춤법')}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[11.5px] text-neutral-500 leading-relaxed">
+                고치려면 한줄로 화면의 대행발송 메뉴에서 문안을 고쳐 주세요. 이대로 승인해도 됩니다.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

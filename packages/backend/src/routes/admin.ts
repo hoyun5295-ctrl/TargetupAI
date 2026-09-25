@@ -78,6 +78,8 @@ import { classifyHelpDbError, helpQuestionKind, helpReasonLabel, HELP_REQUEST_PH
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
 import { sendTypeLabel } from '../utils/send-type-axis';
+// ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
+import { spamBillableTestSql } from '../utils/spam-trial';
 
 const router = Router();
 
@@ -3007,7 +3009,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
             SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
           FROM spam_filter_test_results r
           JOIN spam_filter_tests t ON r.test_id = t.id
-          WHERE t.company_id = $1 ${sfDateWhere}
+          WHERE t.company_id = $1 AND ${spamBillableTestSql('t')} ${sfDateWhere}
         `, sfParams);
         const sf = sfAgg.rows[0];
         testSummary.total += Number(sf.total) || 0;

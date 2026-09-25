@@ -19,7 +19,7 @@ import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { callAIWithFallback } from '../services/ai';
-import { getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
+import { aiLimitCountedSql, getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
 import { getCacheStats } from '../utils/ai-cache';
 
 const router = Router();
@@ -79,13 +79,14 @@ router.get('/overview', async (req: Request, res: Response) => {
       predictedDaysToLimit = Math.floor(remaining / dailyAvg);
     }
 
-    // 전월 대비 격차
+    // 전월 대비 격차 — 이번 달(getMonthlyUsage)과 같은 기준(한도에 세는 호출 · ★2026-09-25 면제 source 제외)
     const prevMonthRes = await query(
       `SELECT COUNT(*)::int AS cnt
        FROM ai_call_log
        WHERE company_id = $1::uuid
          AND called_at >= (date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') - INTERVAL '1 month') AT TIME ZONE 'Asia/Seoul'
-         AND called_at <  date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'`,
+         AND called_at <  date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
+         AND ${aiLimitCountedSql()}`,
       [companyId],
     );
     const prevMonthCalls = Number(prevMonthRes.rows[0]?.cnt) || 0;

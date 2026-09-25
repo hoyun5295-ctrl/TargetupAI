@@ -48,6 +48,8 @@ import { sendSystemAlert } from './system-alert';
 // ★2026-09-13(3) 단계 격리의 마이그레이션 전 판정(판정 한 벌) · tick 단계 겹침 가드(B-0825-7)
 import { isMissingSchemaError } from './db-errors';
 import { createStageGuard } from './stage-guard';
+// ★2026-09-25 맞춤법 검사(테스트 문자 뒤·승인 안내 앞 · 흐름을 막지 않는다 · docs/2026-09-25-agency-spell-check-design.md §3-4)
+import { readAgencySpellCount, runAgencySpellAfterTest } from './agency-send-spell';
 
 const LOG = '[agency-send][worker]';
 const TICK_MS = 5 * 60 * 1000;
@@ -456,7 +458,8 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       const { passed, finalContent, rounds, detail } = await runSpamRound(row, 0);
       // ⛔ 검사 결과부터 소유권을 확인하며 쓴다. 여기서 잃었으면 알림도 보내지 않는다 —
       //   담당자가 이미 문안을 고쳤는데 옛 문안으로 "승인해 주세요"를 보내면 그 문자가 거짓이 된다.
-      if (await saveTestResult(row, finalContent, rounds, detail, token) === null) continue;
+      const savedVersion = await saveTestResult(row, finalContent, rounds, detail, token);
+      if (savedVersion === null) continue;
       const label = shortLabel(row.file_name || row.original_content);
       const whenText = formatWhen(new Date(row.requested_at));
 
@@ -501,6 +504,12 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
         text: sample.text, subject: sample.subject || '[대행발송] 테스트',
         messageType: row.message_type, mmsImages: images,
       });
+      // ★2026-09-25 맞춤법 검사 — 테스트 문자(실물 그대로) 뒤·승인 안내 앞. 최종 문안(다듬기 뒤)을 본다.
+      //   ⛔ 자동 교정 0 · 흐름을 막지 않는다(실패·20초 초과·컬럼 없음 = 0곳으로 그대로 진행 · 설계 불변 1·4).
+      await runAgencySpellAfterTest({
+        requestId: row.id, companyId: row.company_id, userId: row.created_by,
+        content: finalContent, messageType: row.message_type, version: savedVersion, logEvent,
+      });
       // ★2026-08-26(6) 승인 링크를 보내기 전에 **지금 승인이 통하는지** 먼저 본다.
       //   검사가 오래 걸려 남은 시간이 적재 여유에 못 미치면 링크를 보내지 않는다 —
       //   누를 수는 있는데 서버가 거절하는 상태(0823 §12-2의 그 함정)를 만들지 않기 위해서다.
@@ -520,6 +529,8 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       // ★2026-08-26(4) 주소는 단축으로 싣고(실패 시 원본 폴백), 요청 건수를 함께 안내한다(Harold)
       // ★2026-08-26(6) 시각이 자동 조정된 건은 문안이 갈린다(원본 시각을 함께 알린다)
       const linkRow = (await freshLinkFields(row.id)) || row;
+      // ★2026-09-25 맞춤법 건수는 **안내 직전 최신 저장값**에서 센다 — 그 사이 문안이 바뀌면 0(옛 건수를 새 버전 안내에 싣지 않는다)
+      const spellCount = await readAgencySpellCount(row.id);
       const count = Number(row.recipient_count || 0);
       const originalWhenText = row.requested_at_original
         ? formatWhen(new Date(row.requested_at_original))
@@ -527,9 +538,9 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
-        text: buildPassedNotify({ label, whenText, count, originalWhenText }),
+        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl }),
+          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount }),
           row.company_id, row.id, linkRow),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);

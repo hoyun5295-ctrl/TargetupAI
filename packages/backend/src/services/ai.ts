@@ -107,8 +107,12 @@ export async function callAIWithFallback(params: {
   // ★ D209+ Phase D: Rate limit 검증 + cache 조회 (companyId 박힘 영역만)
   let cacheKey: string | null = null;
   if (params.companyId) {
-    const { checkAiRateLimit } = await import('../utils/ai-rate-limit');
-    await checkAiRateLimit(params.companyId);  // 초과 시 throw AiRateLimitExceeded
+    // ★ 2026-09-25 한도 면제 source(맞춤법)는 월 AI 호출 한도를 보지 않는다 — 판정 = CT-55 목록 한 벌(셈에서도 같은 목록으로 뺀다).
+    //   캐시·기록·크레딧 판정은 그대로다. 한도 0인 미가입 회사도 맞춤법 무료 월 5회를 쓸 수 있어야 한다.
+    const { checkAiRateLimit, isAiCallLimitExempt } = await import('../utils/ai-rate-limit');
+    if (!isAiCallLimitExempt(params.source)) {
+      await checkAiRateLimit(params.companyId);  // 초과 시 throw AiRateLimitExceeded
+    }
 
     const { generateCacheKey, getCachedResponse } = await import('../utils/ai-cache');
     cacheKey = generateCacheKey(params.companyId, system, params.userMessage);

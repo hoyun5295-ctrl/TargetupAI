@@ -14,7 +14,7 @@
  *   - textInsert.ts: insertAtCursorPos
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   MessageSquare, Smartphone, Bell,
   SendHorizontal, Send,
@@ -24,7 +24,7 @@ import {
   Eye, ShieldCheck, Lock,
   CalendarClock, ChevronDown, Image as ImageIcon,
   Trash2, XCircle, RotateCcw, ChevronRight,
-  Plus, Sparkles, Megaphone,
+  Plus, Sparkles, Megaphone, Timer,
 } from 'lucide-react';
 import {
   calculateSmsBytes,
@@ -54,6 +54,18 @@ import AlimtalkChannelPanel, {
 } from './alimtalk/AlimtalkChannelPanel';
 import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 import '../styles/direct-send.css';
+// ★ 2026-09-25 보내기 전 점검(스팸 검사 · 맞춤법 검사) · 발송 바 · 발송 전 경고 · 요금제 안내
+import DirectCheckTiles, { type SpamTileState, type SpellTileState } from './direct-send/DirectCheckTiles';
+import DirectSpellModal from './direct-send/DirectSpellModal';
+import SendSpamWarnModal, { type SendWarnVariant } from './direct-send/SendSpamWarnModal';
+import SplitSendPopover from './direct-send/SplitSendPopover';
+import TrialUpsellModal from './direct-send/TrialUpsellModal';
+import {
+  applySpellIssue, carrierLabel, dismissSendWarn, fetchRecentSpamCheck, fetchSendCheckStatus, isSendWarnDismissed,
+  markSpellRowFixed, markSpellRowsByteBlocked, runDirectSpellCheck,
+  type RecentSpamCheck, type SendCheckStatus, type SpellIssue, type SpellQuota, type SpellRow,
+} from '../utils/send-checks';
+import { useAuthStore } from '../stores/authStore';
 
 // ============================================================
 // Props 인터페이스
@@ -107,6 +119,8 @@ export interface DirectSendPanelProps {
   isSpamFilterLocked: boolean;
   setSpamFilterData: (d: any) => void;
   setShowSpamFilter: (b: boolean) => void;
+  /** ★ 2026-09-25 스팸 검사 창이 열려 있는가 — 닫히면 점검 칸이 검사 원장을 다시 본다 */
+  spamModalOpen?: boolean;
 
   // ★ D152+ AI 다듬기 요금제 잠금 (BASIC 이상 + TRIAL만 활성, FREE/STARTER 잠금)
   isAiMessagingLocked?: boolean;
@@ -196,7 +210,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     splitEnabled, setSplitEnabled, splitCount, setSplitCount,
     optOutNumber,
     mmsUploadedImages, setMmsUploadedImages, setShowMmsUploadModal,
-    isSpamFilterLocked, setSpamFilterData, setShowSpamFilter,
+    isSpamFilterLocked, setSpamFilterData, setShowSpamFilter, spamModalOpen = false,
     isAiMessagingLocked, onLockedFeature,
     kakaoTemplates, kakaoSelectedTemplate, setKakaoSelectedTemplate,
     kakaoTemplateVars, setKakaoTemplateVars,
@@ -216,7 +230,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     onSendConfirm, setToast,
     lmsKeepAccepted, smsOverrideAccepted,
     setPendingBytes, setShowLmsConfirm, setShowSmsConvert,
-    getMaxByteMessage, formatPhoneNumber, formatRejectNumber,
+    getFullMessage, getMaxByteMessage, formatPhoneNumber, formatRejectNumber,
     onClose,
     onAlimtalkOpen,
     onBrandOpen,
@@ -300,6 +314,260 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const [directPage, setDirectPage] = useState(0);
 
   // ============================================================
+  // ★ 2026-09-25 보내기 전 점검 (설계 docs/2026-09-25-direct-send-precheck-design.md)
+  //   스팸 검사 = 검사 원장(최근 24시간 · 같은 발신번호 · 같은 문안)으로 판정한다(화면 기억이 아니다).
+  //   맞춤법 = 미가입 월 5회 · 요금제 무제한(서버가 센다). 글이 바뀌는 것은 [고치기]를 누를 때뿐이다.
+  // ============================================================
+  const authUserId = useAuthStore((st) => st.user?.id || '');
+  const [checkStatus, setCheckStatus] = useState<SendCheckStatus | null>(null);
+  const refreshCheckStatus = useCallback(async () => {
+    const st = await fetchSendCheckStatus();
+    if (st) setCheckStatus(st);
+    return st;
+  }, []);
+  useEffect(() => { void refreshCheckStatus(); }, [refreshCheckStatus]);
+
+  /** 스팸 검사에 싣는 글 — 검사 창과 최근 검사 조회가 같은 계산을 쓴다(두 벌이면 "검사했는데 안 했다"가 된다) */
+  const buildSpamTestContent = () => {
+    const msg = directMessage || '';
+    const firstR = directRecipients[0];
+    const replaceVars = (text: string) => {
+      if (!text || !firstR) return text;
+      return replaceDirectVars(text, firstR, selectedCallback);
+    };
+    const smsRaw = buildAdMessageFront(msg, 'SMS', adTextEnabled, optOutNumber);
+    const lmsRaw = buildAdMessageFront(msg, 'LMS', adTextEnabled, optOutNumber);
+    const smsMsg = replaceVars(smsRaw);
+    const lmsMsg = replaceVars(lmsRaw);
+    return { smsMsg, lmsMsg, firstR };
+  };
+
+  const [spamCheck, setSpamCheck] = useState<RecentSpamCheck | null>(null);
+  const [spamEverChecked, setSpamEverChecked] = useState(false);
+  const spamSeqRef = useRef(0);
+  const refreshSpamCheck = async (): Promise<RecentSpamCheck | null> => {
+    const seq = ++spamSeqRef.current;
+    // 수신자별 회신번호는 지금 스팸 검사가 쓸 발신번호가 없다 — 판정하지 않는다
+    if (useIndividualCallback || !selectedCallback || !directMessage.trim()) {
+      setSpamCheck(null);
+      return null;
+    }
+    const { smsMsg, lmsMsg } = buildSpamTestContent();
+    const r = await fetchRecentSpamCheck({
+      callbackNumber: selectedCallback, messageType: directMsgType, messageContentSms: smsMsg, messageContentLms: lmsMsg,
+    });
+    if (seq !== spamSeqRef.current) return r; // 그 사이 더 새 조회가 시작됐다
+    setSpamCheck(r);
+    if (r.checked) setSpamEverChecked(true);
+    return r;
+  };
+  const refreshSpamCheckRef = useRef(refreshSpamCheck);
+  refreshSpamCheckRef.current = refreshSpamCheck;
+  // 글·발신번호·종류가 바뀌면 0.7초 뒤 원장을 다시 본다
+  useEffect(() => {
+    const t = setTimeout(() => { void refreshSpamCheckRef.current(); }, 700);
+    return () => clearTimeout(t);
+  }, [directMessage, selectedCallback, directMsgType, adTextEnabled, optOutNumber, useIndividualCallback, directRecipients]);
+  // 검사 창이 닫히면(끝났든 창만 닫았든) 원장과 체험 횟수를 다시 본다
+  const prevSpamModalOpenRef = useRef(spamModalOpen);
+  useEffect(() => {
+    if (prevSpamModalOpenRef.current && !spamModalOpen) {
+      void refreshSpamCheckRef.current();
+      void refreshCheckStatus();
+    }
+    prevSpamModalOpenRef.current = spamModalOpen;
+  }, [spamModalOpen, refreshCheckStatus]);
+  // 검사가 진행 중이면(창을 닫고 계속 쓰는 동안) 5초마다 결과를 따라간다
+  useEffect(() => {
+    if (spamCheck?.verdict !== 'running' || spamModalOpen) return;
+    const t = setInterval(() => { void refreshSpamCheckRef.current(); }, 5000);
+    return () => clearInterval(t);
+  }, [spamCheck?.verdict, spamModalOpen]);
+
+  const spamTrialEligible = !!checkStatus?.spamTrial?.eligible;
+  const spamTrialRemaining = spamTrialEligible ? Math.max(0, Number(checkStatus?.spamTrial?.remaining ?? 0)) : null;
+  const carriersOf = (r: RecentSpamCheck | null) =>
+    ((r?.verdict === 'warn' ? r?.missingCarriers : r?.blockedCarriers) || []).map(carrierLabel).join(' · ') || '통신사';
+  const spamCarriersText = carriersOf(spamCheck);
+  const spamTileState: SpamTileState = (() => {
+    if (spamCheck?.checked && spamCheck.verdict) return spamCheck.verdict;
+    if (isSpamFilterLocked && checkStatus && !(spamTrialEligible && (spamTrialRemaining ?? 0) > 0)) return 'locked';
+    return spamEverChecked ? 'stale' : 'todo';
+  })();
+
+  // ── 맞춤법 ──
+  const [spellRows, setSpellRows] = useState<SpellRow[]>([]);
+  const [spellText, setSpellText] = useState<string | null>(null);
+  const [spellRunning, setSpellRunning] = useState(false);
+  const [spellModalOpen, setSpellModalOpen] = useState(false);
+  const [upsell, setUpsell] = useState<'spam' | 'spell' | null>(null);
+  const directMessageRef = useRef(directMessage);
+  directMessageRef.current = directMessage;
+  const spellStale = spellText !== null && spellText !== directMessage;
+  const spellOpenCount = spellStale ? 0 : spellRows.filter((r) => r.status === 'open').length;
+  const spellUnlimited = !!checkStatus?.spell?.unlimited;
+  const spellFreeRemaining = checkStatus && !spellUnlimited ? Math.max(0, Number(checkStatus.spell?.remaining ?? 0)) : null;
+  const spellTileState: SpellTileState = spellRunning ? 'running'
+    : spellText === null ? (spellFreeRemaining === 0 ? 'locked' : 'todo')
+    : spellStale ? (spellFreeRemaining === 0 ? 'locked' : 'stale')
+    : spellOpenCount > 0 ? 'issues' : 'clean';
+  // 단문 바이트 잠금 — 화면 바이트 표시와 같은 계산(명단 최장 값 · (광고) · 수신거부 줄 포함). 창이 열려 있을 때만 센다(명단이 크면 무겁다).
+  const spellRowsView = useMemo(() => {
+    if (!spellModalOpen || spellStale) return spellRows;
+    const measure = directMsgType === 'SMS'
+      ? (t: string) => calculateSmsBytes(getFullMessage(getMaxByteMessage(t, directRecipients, DIRECT_VAR_TO_FIELD)))
+      : null;
+    return markSpellRowsByteBlocked(directMessage, spellRows, measure);
+  }, [spellModalOpen, spellStale, spellRows, directMsgType, directMessage, directRecipients, adTextEnabled, optOutNumber]);
+
+  const runSpell = async () => {
+    const text = directMessage;
+    if (!text.trim()) { setToast({ show: true, type: 'error', message: '맞춤법을 볼 글을 먼저 적어 주세요.' }); return; }
+    if (spellFreeRemaining === 0) { setUpsell('spell'); return; }
+    setSpellRunning(true);
+    const r = await runDirectSpellCheck(text);
+    setSpellRunning(false);
+    if (!r.ok) {
+      if (r.code === 'SPELL_FREE_EXHAUSTED') { void refreshCheckStatus(); setUpsell('spell'); return; }
+      setToast({ show: true, type: 'error', message: r.error });
+      return;
+    }
+    if (r.spell) setCheckStatus((prev) => (prev ? { ...prev, spell: r.spell as SpellQuota } : prev));
+    if (r.failed) {
+      setToast({ show: true, type: 'error', message: '맞춤법 검사를 하지 못했어요. 잠시 뒤 다시 눌러 주세요. 이번 검사는 횟수에서 빠져요.' });
+      return;
+    }
+    setSpellText(text);
+    setSpellRows(r.issues.map((issue) => ({ issue, status: 'open' as const })));
+    if (r.issues.length === 0) setToast({ show: true, type: 'success', message: '고칠 곳이 없어요.' });
+    else if (directMessageRef.current === text) setSpellModalOpen(true);
+  };
+  const onSpellTile = () => {
+    if (spellTileState === 'running') return;
+    if (spellTileState === 'locked') { setUpsell('spell'); return; }
+    if (spellTileState === 'issues') { setSpellModalOpen(true); return; }
+    if (spellTileState === 'clean') { setToast({ show: true, type: 'success', message: '고칠 곳이 없어요. 글을 고치면 다시 검사할 수 있어요.' }); return; }
+    void runSpell();
+  };
+  const closeSpellIfDone = (rows: SpellRow[]) => {
+    if (!rows.some((r) => r.status === 'open')) setTimeout(() => setSpellModalOpen(false), 300);
+  };
+  const fixSpellIssue = (issue: SpellIssue) => {
+    const cur = directMessageRef.current;
+    if (spellText !== cur) {
+      setSpellModalOpen(false);
+      setToast({ show: true, type: 'warning', message: '글이 바뀌었어요. 맞춤법을 다시 검사해 주세요.' });
+      return;
+    }
+    if (spellRowsView.find((r) => r.issue.id === issue.id)?.issue.blocked) return;
+    const next = applySpellIssue(cur, issue);
+    if (next === cur) {
+      const rows = spellRows.map((r) => (r.issue.id === issue.id ? { ...r, status: 'kept' as const } : r));
+      setSpellRows(rows); closeSpellIfDone(rows);
+      return;
+    }
+    const rows = markSpellRowFixed(spellRows, issue);
+    setDirectMessage(next);
+    setSpellText(next);
+    setSpellRows(rows);
+    closeSpellIfDone(rows);
+  };
+  const keepSpellIssue = (issue: SpellIssue) => {
+    const rows = spellRows.map((r) => (r.issue.id === issue.id ? { ...r, status: 'kept' as const } : r));
+    setSpellRows(rows);
+    closeSpellIfDone(rows);
+  };
+  const fixAllSpell = () => {
+    const cur = directMessageRef.current;
+    if (spellText !== cur) { setSpellModalOpen(false); return; }
+    const targets = spellRowsView.filter((r) => r.status === 'open' && !r.issue.blocked).map((r) => r.issue.id);
+    let text = cur;
+    let rows = spellRows;
+    for (const id of targets) {
+      const row = rows.find((r) => r.issue.id === id);
+      if (!row || row.status !== 'open') continue;
+      const next = applySpellIssue(text, row.issue);
+      if (next === text) continue;
+      rows = markSpellRowFixed(rows, row.issue);
+      text = next;
+    }
+    setDirectMessage(text);
+    setSpellText(text);
+    setSpellRows(rows);
+    setToast({ show: true, type: 'success', message: '고칠 곳을 고쳤어요.' });
+    closeSpellIfDone(rows);
+  };
+  const openAiRefineFromSpell = () => {
+    if (isAiMessagingLocked) { onLockedFeature('ai-refine'); return; }
+    if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '다듬을 메시지를 입력해주세요' }); return; }
+    setSpellModalOpen(false);
+    setShowAiRefineModal(true);
+  };
+  const spellQuotaText = spellUnlimited
+    ? '맞춤법 검사는 크레딧이 들지 않아요'
+    : `이번 달 무료 ${spellFreeRemaining ?? 0}/${checkStatus?.spell?.limit ?? 5}회 남음 · 요금제는 무제한`;
+
+  // ── 본문 칸: 글을 따라 늘고(약 1,000byte 높이까지) 넘으면 칸 안 스크롤 ──
+  const editorScrollRef = useRef<HTMLDivElement>(null);
+  const [editorOverflow, setEditorOverflow] = useState(false);
+  const syncEditorOverflow = useCallback(() => {
+    const box = editorScrollRef.current;
+    setEditorOverflow(!!box && box.scrollHeight - box.clientHeight > 2);
+  }, []);
+  const syncEditorHeight = useCallback(() => {
+    const ta = directTextareaRef.current;
+    const box = editorScrollRef.current;
+    if (ta) {
+      const keep = box ? box.scrollTop : 0;
+      ta.style.height = '0px';
+      ta.style.height = `${ta.scrollHeight}px`;
+      if (box) box.scrollTop = keep;
+    }
+    syncEditorOverflow();
+  }, [syncEditorOverflow]);
+  useLayoutEffect(() => { syncEditorHeight(); }, [directMessage, directMsgType, adTextEnabled, mmsUploadedImages.length, directSendChannel, syncEditorHeight]);
+  useEffect(() => {
+    window.addEventListener('resize', syncEditorHeight);
+    return () => window.removeEventListener('resize', syncEditorHeight);
+  }, [syncEditorHeight]);
+  /** 글 아래 빈 곳을 눌러도 글 끝에서 이어 쓴다 */
+  const focusEditorFromBlank = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return;
+    e.preventDefault();
+    const ta = directTextareaRef.current;
+    if (!ta) return;
+    ta.focus();
+    const n = ta.value.length;
+    ta.setSelectionRange(n, n);
+    directCursorPosRef.current = n;
+  };
+  const openDirectPreview = () => {
+    if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' }); return; }
+    setShowDirectPreview(true);
+  };
+
+  // ── 분할 풍선 · 발송 전 경고 ──
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [sendWarn, setSendWarn] = useState<{ variant: SendWarnVariant; carriersText: string } | null>(null);
+  const [sendBusy, setSendBusy] = useState(false);
+  /** [전송하기] 직전 — 스팸 검사를 안 했거나(24시간 안 · 같은 문안) 막혔거나 끝나지 않았으면, 맞춤법 고칠 곳이 남았으면 묻는다 */
+  const decideSendWarn = async (): Promise<{ variant: SendWarnVariant; carriersText: string } | null> => {
+    let variant: SendWarnVariant | null = null;
+    let carriersText = '';
+    if (!useIndividualCallback && selectedCallback) {
+      const pre = await refreshSpamCheck();
+      if (pre?.checked && pre.verdict && pre.verdict !== 'pass') {
+        variant = pre.verdict;
+        carriersText = carriersOf(pre);
+      } else if (!pre?.checked && !isSendWarnDismissed(authUserId)) {
+        variant = 'none';
+      }
+    }
+    if (!variant && spellOpenCount > 0) variant = 'spell';
+    return variant ? { variant, carriersText } : null;
+  };
+
+  // ============================================================
   // 헬퍼
   // ============================================================
   const calculateBytes = calculateSmsBytes;
@@ -368,6 +636,19 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       }
     }
 
+    // ★ 2026-09-25 보내기 전 경고 — 스팸 검사 안 함·막힘·미완료 · 맞춤법 고칠 곳 남음이면 먼저 묻는다(막지는 않는다)
+    setSendBusy(true);
+    try {
+      const warn = await decideSendWarn();
+      if (warn) { setSendWarn(warn); return; }
+    } finally {
+      setSendBusy(false);
+    }
+    await stageAndConfirm();
+  };
+
+  /** 수신자 적재 → 서버 집계 → 전송 확인 창(★ 2026-09-25 경고 창의 [그냥 보내기]도 여기로 온다) */
+  const stageAndConfirm = async () => {
     const token = localStorage.getItem('token') || '';
     // ★ 2026-06-04 재배치: 모달 전에 staging 적재 → 서버 count(중복/수신거부)로 모달 카운트.
     //   옛 phones 통째 POST(/unsubscribes/check) + 프론트 중복 계산 폐기 — 대량(50만+)에서도 안 죽고
@@ -421,6 +702,18 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     });
   };
 
+  const onWarnCheckSpam = () => { setSendWarn(null); void handleSpamFilter(); };
+  const onWarnSendAnyway = (dismiss24h: boolean) => {
+    if (dismiss24h && sendWarn?.variant === 'none') dismissSendWarn(authUserId);
+    setSendWarn(null);
+    void stageAndConfirm();
+  };
+  const onWarnOpenSpell = () => {
+    setSendWarn(null);
+    if (spellRows.length > 0 && !spellStale) setSpellModalOpen(true);
+    else void runSpell();
+  };
+
   // 알림톡 전송
   const handleAlimtalkSend = async () => {
     if (directRecipients.length === 0) { setToast({ show: true, type: 'error', message: '수신자를 추가해주세요' }); return; }
@@ -452,25 +745,29 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   };
 
   // 스팸필터
-  const handleSpamFilter = () => {
-    if (isSpamFilterLocked) { onLockedFeature('check-spam'); return; }
+  const handleSpamFilter = async () => {
+    // ★ 2026-09-25 요금제에 스팸 검사가 없는 회사 = 무료 체험 3회(서버가 센다) · 다 쓰면 요금제 안내 창
+    if (isSpamFilterLocked) {
+      const st = checkStatus || await refreshCheckStatus();
+      if (st?.spamTrial?.eligible) {
+        if ((st.spamTrial.remaining ?? 0) <= 0) { setUpsell('spam'); return; }
+      } else {
+        onLockedFeature('check-spam');
+        return;
+      }
+    }
     if (!directRecipients || directRecipients.length === 0) {
       setToast({ show: true, type: 'error', message: '발송리스트를 먼저 업로드해주세요.' });
       return;
     }
-    const msg = directMessage || '';
     const cb = selectedCallback || '';
-    const firstR = directRecipients[0];
-    const replaceVars = (text: string) => {
-      if (!text || !firstR) return text;
-      return replaceDirectVars(text, firstR, selectedCallback);
-    };
-    const smsRaw = buildAdMessageFront(msg, 'SMS', adTextEnabled, optOutNumber);
-    const lmsRaw = buildAdMessageFront(msg, 'LMS', adTextEnabled, optOutNumber);
-    const smsMsg = replaceVars(smsRaw);
-    const lmsMsg = replaceVars(lmsRaw);
+    const { smsMsg, lmsMsg, firstR } = buildSpamTestContent();
     setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: directMsgType, subject: directSubject || '', isAd: adTextEnabled, firstRecipient: firstR || undefined });
     setShowSpamFilter(true);
+  };
+  const onSpamTile = () => {
+    if (spamTileState === 'running') return;
+    void handleSpamFilter();
   };
 
   // 파일 업로드
@@ -682,14 +979,21 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   </div>
                 )}
 
-                {/* 본문 에디터 */}
+                {/* 본문 에디터 — ★ 2026-09-25 (광고) · 본문 · 수신거부 줄이 한 흐름(Harold "자동부착은 메세지창 안에 고정").
+                    본문 칸은 약 1,000byte 높이까지 글을 따라 늘고(창도 함께), 넘으면 칸 안에서 스크롤 + 미리보기 안내. */}
                 <div className="ds-editor-wrap ds-t">
-                  <div className="ds-editor-body">
+                  <div
+                    ref={editorScrollRef}
+                    className="ds-editor-body ds-editor-flow"
+                    onMouseDown={focusEditorFromBlank}
+                    onScroll={syncEditorOverflow}
+                  >
                     {adTextEnabled && (
                       <span className="ds-ad-prefix absolute left-0 top-0 z-10">(광고)</span>
                     )}
                     <textarea
                       ref={directTextareaRef}
+                      rows={1}
                       data-char-target="direct"
                       value={directMessage}
                       onChange={(e) => { setDirectMessage(e.target.value); directCursorPosRef.current = e.target.selectionStart; }}
@@ -698,16 +1002,18 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       spellCheck={false}
                       style={adTextEnabled ? { textIndent: 52 } : undefined}
                     />
+                    {adTextEnabled && (
+                      <div className="ds-optout-line" title="광고 문자에 자동으로 붙는 문구라 고칠 수 없어요">
+                        <Lock size={12} strokeWidth={2} />
+                        <span className="ds-num">{getAdSuffix()}</span>
+                        <small>자동으로 붙어요</small>
+                      </div>
+                    )}
                   </div>
-
-                  {/* 하단 고정 문구 (자동 부착) */}
-                  {adTextEnabled && (
-                    <div className="ds-editor-foot">
-                      <span className="ds-lock-tag">
-                        <Lock size={12} strokeWidth={1.75} />
-                        자동 부착
-                      </span>
-                      <span className="ds-opt-out-num">{getAdSuffix()}</span>
+                  {editorOverflow && (
+                    <div className="ds-editor-more">
+                      글이 길어 아래가 가려져 있어요
+                      <button type="button" onClick={openDirectPreview}>미리보기로 한 번에 보기</button>
                     </div>
                   )}
 
@@ -728,11 +1034,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       )}
                     </div>
                   )}
-                </div>
 
-                {/* 에디터 툴바 (유틸 + 바이트) */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
+                  {/* 편집 칸 안 도구 줄 — 줄바꿈 금지(버튼은 줄지 않는다) */}
+                  <div className="ds-editor-tools">
+                    <div className="ds-editor-tools__l">
                     <button type="button" className="ds-util ds-t" onClick={() => setShowSpecialChars('direct')}>
                       <Asterisk size={13} strokeWidth={1.75} />
                       <span>특수문자</span>
@@ -748,158 +1053,15 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       <Save size={13} strokeWidth={1.75} />
                       <span>문자저장</span>
                     </button>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className={`ds-bytebar ${byteState === 'warn' ? 'ds-bytebar--warn' : byteState === 'danger' ? 'ds-bytebar--danger' : ''}`}>
-                      <div style={{ width: `${byteRatio * 100}%` }} />
-                    </div>
-                    <span className={`ds-byte-text ${byteState === 'danger' ? 'ds-byte-text--danger' : ''}`}>
-                      <span className="ds-byte-cur">{messageBytes}</span>
-                      <span className="ds-byte-slash">/</span>
-                      <span className="ds-byte-max">{maxBytes}</span>
-                      <span className="ds-byte-unit">byte</span>
-                    </span>
-                  </div>
-                </div>
-
-                {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다 */}
-                <SmsCharsetNotice
-                  texts={[directMessage, directMsgType === 'SMS' ? '' : directSubject]}
-                  onApply={(fix) => {
-                    setDirectMessage((prev) => fix(prev));
-                    if (directMsgType !== 'SMS' && fix(directSubject) !== directSubject) setDirectSubject(fix(directSubject));
-                  }}
-                />
-
-                {/* 발신번호 — 커스텀 드롭다운 (검색 + 스크롤) */}
-                {(() => {
-                  const phoneHeaders = directFileHeaders.length > 0
-                    ? detectPhoneHeaders(directFileHeaders, directFileData).filter(h => h !== directColumnMapping.phone)
-                    : [];
-                  const selectedLabel = useIndividualCallback && individualCallbackColumn
-                    ? `${individualCallbackColumn} (수신자별)`
-                    : selectedCallback
-                      ? (() => {
-                          const cb = callbackNumbers.find(c => c.phone === selectedCallback);
-                          return cb
-                            ? `${formatPhoneNumber(cb.phone)}${cb.label ? ` (${cb.label})` : ''}`
-                            : formatPhoneNumber(selectedCallback);
-                        })()
-                      : '';
-                  const selectedIsDefault = !!(selectedCallback && callbackNumbers.find(c => c.phone === selectedCallback)?.is_default);
-                  const q = callbackSearch.trim().toLowerCase();
-                  const filteredPhoneHeaders = q
-                    ? phoneHeaders.filter(h => h.toLowerCase().includes(q))
-                    : phoneHeaders;
-                  const filteredCallbacks = q
-                    ? callbackNumbers.filter(cb =>
-                        cb.phone.replace(/-/g, '').includes(q.replace(/-/g, '')) ||
-                        (cb.label || '').toLowerCase().includes(q)
-                      )
-                    : callbackNumbers;
-                  return (
-                    <>
-                      <div className="ds-callback-row">
-                        <span className="ds-callback-label">발신번호</span>
-                        <div className="ds-callback-wrap" ref={callbackMenuRef}>
-                          <button
-                            type="button"
-                            className={`ds-sel ds-sel--btn ds-num ${callbackMenuOpen ? 'ds-sel--open' : ''} ${!selectedLabel ? 'ds-sel--placeholder' : ''}`}
-                            onClick={() => setCallbackMenuOpen(o => !o)}
-                          >
-                            <span className="ds-sel-label">
-                              {selectedLabel || '회신번호 선택'}
-                              {selectedIsDefault && <span className="ds-sel-star">⭐</span>}
-                            </span>
-                          </button>
-                          {callbackMenuOpen && (
-                            <div className="ds-callback-menu" role="menu">
-                              {callbackNumbers.length + phoneHeaders.length > 5 && (
-                                <div className="ds-callback-menu__search">
-                                  <Search size={13} strokeWidth={1.75} />
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    placeholder="번호·라벨 검색"
-                                    value={callbackSearch}
-                                    onChange={(e) => setCallbackSearch(e.target.value)}
-                                  />
-                                </div>
-                              )}
-                              <div className="ds-callback-menu__scroll">
-                                {filteredPhoneHeaders.length > 0 && (
-                                  <>
-                                    <div className="ds-callback-menu__group">수신자별 회신번호 컬럼</div>
-                                    {filteredPhoneHeaders.map(h => {
-                                      // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
-                                      const sample = cellToString(directFileData[0]?.[h]);
-                                      const isActive = useIndividualCallback && individualCallbackColumn === h;
-                                      return (
-                                        <button
-                                          key={h}
-                                          type="button"
-                                          role="menuitem"
-                                          className={`ds-callback-item ${isActive ? 'ds-callback-item--on' : ''}`}
-                                          onClick={() => {
-                                            setUseIndividualCallback(true);
-                                            setSelectedCallback('');
-                                            setIndividualCallbackColumn(h);
-                                            setCallbackMenuOpen(false);
-                                          }}
-                                        >
-                                          <span className="ds-callback-item__label">{h} <span className="ds-callback-item__hint">(수신자별)</span></span>
-                                          {sample !== '' && <span className="ds-callback-item__sample">예: {sample.slice(0, 15)}</span>}
-                                        </button>
-                                      );
-                                    })}
-                                  </>
-                                )}
-                                <div className="ds-callback-menu__group">등록된 회신번호{callbackSearch && ` · ${filteredCallbacks.length}건`}</div>
-                                {callbackNumbers.length === 0 ? (
-                                  <div className="ds-callback-menu__empty">등록된 회신번호가 없습니다</div>
-                                ) : filteredCallbacks.length === 0 ? (
-                                  <div className="ds-callback-menu__empty">검색 결과가 없습니다</div>
-                                ) : (
-                                  filteredCallbacks.map((cb) => {
-                                    const isActive = !useIndividualCallback && selectedCallback === cb.phone;
-                                    return (
-                                      <button
-                                        key={cb.id}
-                                        type="button"
-                                        role="menuitem"
-                                        className={`ds-callback-item ${isActive ? 'ds-callback-item--on' : ''}`}
-                                        onClick={() => {
-                                          setUseIndividualCallback(false);
-                                          setSelectedCallback(cb.phone);
-                                          setIndividualCallbackColumn('');
-                                          setCallbackMenuOpen(false);
-                                        }}
-                                      >
-                                        <span className="ds-callback-item__label">
-                                          {formatPhoneNumber(cb.phone)}
-                                          {cb.label && <span className="ds-callback-item__hint"> ({cb.label})</span>}
-                                        </span>
-                                        {cb.is_default && <span className="ds-callback-item__star">⭐</span>}
-                                      </button>
-                                    );
-                                  })
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* 변수 삽입 드롭다운 (발신번호 옆 병치) */}
                         <div className="ds-var-wrap" ref={varMenuRef}>
                           <button
                             type="button"
-                            className={`ds-var-trigger ds-t ${varMenuOpen ? 'ds-var-trigger--on' : ''}`}
+                            className={`ds-util ds-util--line ds-t ${varMenuOpen ? 'ds-var-trigger--on' : ''}`}
                             onClick={() => setVarMenuOpen(o => !o)}
                           >
-                            <Plus size={14} strokeWidth={2} />
-                            <span>변수 삽입</span>
-                            <ChevronDown size={13} strokeWidth={2} className={`ds-var-chev ${varMenuOpen ? 'ds-var-chev--open' : ''}`} />
+                            <Plus size={13} strokeWidth={2} />
+                            <span>변수</span>
+                            <ChevronDown size={12} strokeWidth={2} className={`ds-var-chev ${varMenuOpen ? 'ds-var-chev--open' : ''}`} />
                           </button>
                           {varMenuOpen && (
                             <div className="ds-var-menu" role="menu">
@@ -928,138 +1090,35 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                             </div>
                           )}
                         </div>
-                      </div>
-                      {useIndividualCallback && individualCallbackColumn && (
-                        <div className="ds-ind-callback-hint flex-shrink-0">
-                          각 수신자의 <strong>{individualCallbackColumn}</strong> 값으로 발송됩니다
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-
-                {/* 보조 액션 3등분 (미리보기 / 스팸필터테스트 / AI 다듬기 — D152+ PDF 0511 funnel fix) */}
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    className="ds-btn-sec ds-t border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:border-sky-300 transition-all"
-                    onClick={() => {
-                      if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' }); return; }
-                      setShowDirectPreview(true);
-                    }}
-                  >
-                    <Eye size={14} strokeWidth={1.75} />
-                    <span>미리보기</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`ds-btn-sec ds-t border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-all ${isSpamFilterLocked ? 'opacity-60' : ''}`}
-                    onClick={handleSpamFilter}
-                  >
-                    {isSpamFilterLocked ? <Lock size={14} strokeWidth={1.75} /> : <ShieldCheck size={14} strokeWidth={1.75} />}
-                    <span>스팸필터테스트</span>
-                  </button>
-                  <button
-                    type="button"
-                    data-ai-refine-btn
-                    className="ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 hover:from-violet-100 hover:to-fuchsia-100 hover:border-violet-300 text-violet-700 font-semibold transition-all"
-                    onClick={() => {
-                      // ★ 2026-07-04 미가입 잠금 시 — 요금제 안내 창 통일(★ 2026-09-15 공통 안내 창 PlanFeatureModal)
-                      if (isAiMessagingLocked) {
-                        onLockedFeature('ai-refine');
-                        return;
-                      }
-                      if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '다듬을 메시지를 입력해주세요' }); return; }
-                      setShowAiRefineModal(true);
-                    }}
-                  >
-                    <Sparkles size={14} strokeWidth={2} className="text-fuchsia-500" />
-                    <span>AI 다듬기</span>
-                  </button>
+                    </div>
+                    <div className="ds-editor-tools__r">
+                      <span className={`ds-bytes ${messageBytes > maxBytes ? 'ds-bytes--over' : messageBytes >= maxBytes * 0.8 ? 'ds-bytes--warn' : ''}`}>
+                        <b>{messageBytes.toLocaleString()}</b> / {maxBytes.toLocaleString()} <small>byte</small>
+                      </span>
+                      <button type="button" className="ds-util ds-util--preview ds-t" onClick={openDirectPreview}>
+                        <Eye size={13} strokeWidth={1.9} />
+                        <span>미리보기</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                {/* 옵션 카드 3종 */}
-                <div className="grid grid-cols-3 gap-2">
-                  {/* 예약전송 */}
-                  <label className={`ds-optcard ds-t ${reserveEnabled ? 'ds-optcard--on-blue' : ''}`}>
-                    <div className="ds-optcard-top">
-                      <input
-                        type="checkbox"
-                        className="ds-chk ds-chk--blue"
-                        checked={reserveEnabled}
-                        onChange={(e) => { setReserveEnabled(e.target.checked); if (e.target.checked) setShowReservePicker(true); }}
-                      />
-                      <span className="ds-optcard-title">예약전송</span>
-                    </div>
-                    <div
-                      className="ds-optcard-sub"
-                      style={reserveEnabled ? { color: '#1D4ED8', fontWeight: 500 } : undefined}
-                      onClick={(e) => { e.preventDefault(); if (reserveEnabled) setShowReservePicker(true); }}
-                    >
-                      <CalendarClock size={12} strokeWidth={1.75} />
-                      <span>
-                        {reserveDateTime
-                          ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                          : '예약시간 선택'}
-                      </span>
-                    </div>
-                  </label>
+                {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다 */}
+                <SmsCharsetNotice
+                  texts={[directMessage, directMsgType === 'SMS' ? '' : directSubject]}
+                  onApply={(fix) => {
+                    setDirectMessage((prev) => fix(prev));
+                    if (directMsgType !== 'SMS' && fix(directSubject) !== directSubject) setDirectSubject(fix(directSubject));
+                  }}
+                />
 
-                  {/* 분할전송 */}
-                  <label className={`ds-optcard ds-t ${splitEnabled ? 'ds-optcard--on-purple' : ''}`}>
-                    <div className="ds-optcard-top">
-                      <input
-                        type="checkbox"
-                        className="ds-chk ds-chk--purple"
-                        checked={splitEnabled}
-                        onChange={(e) => setSplitEnabled(e.target.checked)}
-                      />
-                      <span className="ds-optcard-title">분할전송</span>
-                    </div>
-                    <div className="ds-optcard-sub" style={{ gap: 6 }}>
-                      {/* ★ D142 (2026-04-28): 분할전송 정책 — 기본 1000건/분, 1~9999 범위 검증.
-                          PDF 0428 #4 — 천단위 입력 시 앞 3자리만 보이던 버그 수정 (CSS width 64px). */}
-                      <input
-                        type="number"
-                        className="ds-num-in"
-                        min={1}
-                        max={9999}
-                        value={splitCount}
-                        onChange={(e) => {
-                          const n = Number(e.target.value) || 1000;
-                          // 1~9999 범위 강제 (4자리 초과 입력 차단)
-                          setSplitCount(Math.max(1, Math.min(9999, n)));
-                        }}
-                        disabled={!splitEnabled}
-                      />
-                      <span>건/분</span>
-                    </div>
-                  </label>
-
-                  {/* 광고표기 */}
-                  <label className={`ds-optcard ds-t ${adTextEnabled ? 'ds-optcard--on-amber' : ''}`}>
-                    <div className="ds-optcard-top">
-                      <input
-                        type="checkbox"
-                        className="ds-chk ds-chk--amber"
-                        checked={adTextEnabled}
-                        onChange={(e) => handleAdToggle(e.target.checked)}
-                      />
-                      <span className="ds-optcard-title">광고표기</span>
-                    </div>
-                    <div className="ds-optcard-sub">
-                      <span style={adTextEnabled ? { color: 'var(--ds-amber-700)', fontWeight: 500 } : undefined}>
-                        {adTextEnabled ? '(광고) + 080 수신거부' : '080 수신거부'}
-                      </span>
-                    </div>
-                  </label>
-                </div>
-
-                {/* 전송하기 — 좌측 섹션 하단 */}
-                <button type="button" className="ds-btn-primary ds-t" onClick={handleSendClick}>
-                  <Send size={17} strokeWidth={2} />
-                  <span>{directRecipients.length > 0 ? `${directRecipients.length.toLocaleString()}명에게 전송하기` : '전송하기'}</span>
-                </button>
+                {/* ★ 2026-09-25 보내기 전 점검 — 스팸 검사 · 맞춤법 검사(설계 docs/2026-09-25-direct-send-precheck-design.md §2) */}
+                <DirectCheckTiles
+                  spam={{ state: spamTileState, trialRemaining: spamTrialRemaining, carriersText: spamCarriersText }}
+                  spell={{ state: spellTileState, openCount: spellOpenCount, freeRemaining: spellFreeRemaining, freeLimit: checkStatus?.spell.limit ?? null }}
+                  onSpam={onSpamTile}
+                  onSpell={onSpellTile}
+                />
               </>
             )}
 
@@ -1114,7 +1173,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           <div className="ds-modal__vdiv" />
 
           {/* ====== 우측: 수신자 관리 ====== */}
-          <section className="flex flex-col gap-4 min-w-0">
+          <section className="ds-recipients flex flex-col gap-4 min-w-0">
 
             {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 알림톡 채널일 때만 변수 매칭 박스 노출.
                 Harold님 명시 "우측에 고객데이터 올렸을때 매칭되는 화면" + ALIMTALK-DESIGN.md §6-3-D 정합.
@@ -1399,6 +1458,224 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           </section>
         </div>
 
+        {/* ============ ★ 2026-09-25 발송 바 — 왼쪽 열에 맞춘 옵션 3칸(예약·분할·광고) + 발신번호 · 전송 ============
+            발신번호 고르기는 옛 본문 아래 줄에서 옮겨 왔다(원본 그대로 · 위로 열린다). 두 곳에 두지 않는다. */}
+        {directSendChannel === 'sms' && (() => {
+                  const phoneHeaders = directFileHeaders.length > 0
+                    ? detectPhoneHeaders(directFileHeaders, directFileData).filter(h => h !== directColumnMapping.phone)
+                    : [];
+                  const selectedLabel = useIndividualCallback && individualCallbackColumn
+                    ? `${individualCallbackColumn} (수신자별)`
+                    : selectedCallback
+                      ? (() => {
+                          const cb = callbackNumbers.find(c => c.phone === selectedCallback);
+                          return cb
+                            ? `${formatPhoneNumber(cb.phone)}${cb.label ? ` (${cb.label})` : ''}`
+                            : formatPhoneNumber(selectedCallback);
+                        })()
+                      : '';
+                  const selectedIsDefault = !!(selectedCallback && callbackNumbers.find(c => c.phone === selectedCallback)?.is_default);
+                  const q = callbackSearch.trim().toLowerCase();
+                  const filteredPhoneHeaders = q
+                    ? phoneHeaders.filter(h => h.toLowerCase().includes(q))
+                    : phoneHeaders;
+                  const filteredCallbacks = q
+                    ? callbackNumbers.filter(cb =>
+                        cb.phone.replace(/-/g, '').includes(q.replace(/-/g, '')) ||
+                        (cb.label || '').toLowerCase().includes(q)
+                      )
+                    : callbackNumbers;
+          return (
+            <footer className="ds-modal__foot">
+              <div className="ds-foot-opts">
+                {/* 예약 */}
+                <div className="ds-opt-anchor">
+                  <button
+                    type="button"
+                    className={`ds-tile ds-tile--opt ${reserveEnabled ? 'ds-tile--opt-blue' : ''}`}
+                    onClick={() => { if (!reserveEnabled) setReserveEnabled(true); setShowReservePicker(true); }}
+                  >
+                    <span className="ds-tile__ic"><CalendarClock size={17} strokeWidth={2} /></span>
+                    <span className="ds-tile__tx">
+                      <span className="ds-tile__t1">예약</span>
+                      <span className="ds-tile__t2">
+                        {reserveEnabled
+                          ? (reserveDateTime
+                            ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            : '시각을 골라 주세요')
+                          : '지금 보내기'}
+                      </span>
+                    </span>
+                    {!reserveEnabled && <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />}
+                  </button>
+                  {reserveEnabled && (
+                    <button type="button" className="ds-tile__clear" onClick={() => setReserveEnabled(false)} aria-label="예약 풀기" title="예약 풀기">
+                      <X size={12} strokeWidth={2.4} />
+                    </button>
+                  )}
+                </div>
+                {/* 분할 — 누르면 몇 건씩 나눌지 묻는다 */}
+                <div className="ds-opt-anchor">
+                  <button
+                    type="button"
+                    data-split-anchor
+                    className={`ds-tile ds-tile--opt ${splitEnabled ? 'ds-tile--opt-violet' : ''}`}
+                    onClick={() => setSplitOpen((o) => !o)}
+                    aria-haspopup="dialog"
+                    aria-expanded={splitOpen}
+                  >
+                    <span className="ds-tile__ic"><Timer size={17} strokeWidth={2} /></span>
+                    <span className="ds-tile__tx">
+                      <span className="ds-tile__t1">분할</span>
+                      <span className="ds-tile__t2">{splitEnabled ? `1분에 ${splitCount.toLocaleString()}건` : '안 함'}</span>
+                    </span>
+                    <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />
+                  </button>
+                  <SplitSendPopover
+                    open={splitOpen}
+                    enabled={splitEnabled}
+                    value={splitCount}
+                    recipientCount={directRecipients.length}
+                    startAt={reserveEnabled && reserveDateTime ? reserveDateTime : null}
+                    onApply={(n) => { setSplitCount(n); setSplitEnabled(true); }}
+                    onOff={() => setSplitEnabled(false)}
+                    onClose={() => setSplitOpen(false)}
+                  />
+                </div>
+                {/* 광고 표기 */}
+                <div className="ds-opt-anchor">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={adTextEnabled}
+                    className={`ds-tile ds-tile--opt ${adTextEnabled ? 'ds-tile--opt-amber' : ''}`}
+                    onClick={() => handleAdToggle(!adTextEnabled)}
+                  >
+                    <span className="ds-tile__ic"><Megaphone size={17} strokeWidth={2} /></span>
+                    <span className="ds-tile__tx">
+                      <span className="ds-tile__t1">광고 표기</span>
+                      <span className="ds-tile__t2">{adTextEnabled ? '(광고) · 080 붙음' : '안 붙음'}</span>
+                    </span>
+                    <span className="ds-switch" aria-hidden />
+                  </button>
+                </div>
+              </div>
+              <div className="ds-modal__vdiv" />
+              <div className="ds-foot-send">
+                <div className="ds-sender" ref={callbackMenuRef}>
+                  <button
+                    type="button"
+                    className={`ds-sender__btn ${!selectedLabel ? 'ds-sender__btn--empty' : ''}`}
+                    onClick={() => setCallbackMenuOpen(o => !o)}
+                    aria-haspopup="menu"
+                    aria-expanded={callbackMenuOpen}
+                    title={selectedLabel || '회신번호 선택'}
+                  >
+                    <span className="min-w-0">
+                      <span className="ds-sender__lab">발신번호</span>
+                          <span className="ds-sender__val">
+                            {useIndividualCallback && individualCallbackColumn ? (
+                              <>
+                                <span className="ds-sender__eq">= {individualCallbackColumn}</span>
+                                <span className="ds-sender__tag ds-sender__tag--col">수신자별</span>
+                              </>
+                            ) : selectedCallback ? (
+                              <>
+                                <span className="ds-num">{formatPhoneNumber(selectedCallback)}</span>
+                                {selectedIsDefault && <span className="ds-sender__tag ds-sender__tag--rep">대표</span>}
+                              </>
+                            ) : (
+                              <span className="text-stone-400">회신번호 선택</span>
+                            )}
+                          </span>
+                    </span>
+                    <ChevronDown size={15} strokeWidth={2} className="ds-sender__chev" />
+                  </button>
+                          {callbackMenuOpen && (
+                            <div className="ds-callback-menu" role="menu">
+                              {callbackNumbers.length + phoneHeaders.length > 5 && (
+                                <div className="ds-callback-menu__search">
+                                  <Search size={13} strokeWidth={1.75} />
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    placeholder="번호·라벨 검색"
+                                    value={callbackSearch}
+                                    onChange={(e) => setCallbackSearch(e.target.value)}
+                                  />
+                                </div>
+                              )}
+                              <div className="ds-callback-menu__scroll">
+                                {filteredPhoneHeaders.length > 0 && (
+                                  <>
+                                    <div className="ds-callback-menu__group">수신자별 회신번호 컬럼</div>
+                                    {filteredPhoneHeaders.map(h => {
+                                      // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
+                                      const sample = cellToString(directFileData[0]?.[h]);
+                                      const isActive = useIndividualCallback && individualCallbackColumn === h;
+                                      return (
+                                        <button
+                                          key={h}
+                                          type="button"
+                                          role="menuitem"
+                                          className={`ds-callback-item ${isActive ? 'ds-callback-item--on' : ''}`}
+                                          onClick={() => {
+                                            setUseIndividualCallback(true);
+                                            setSelectedCallback('');
+                                            setIndividualCallbackColumn(h);
+                                            setCallbackMenuOpen(false);
+                                          }}
+                                        >
+                                          <span className="ds-callback-item__label">{h} <span className="ds-callback-item__hint">(수신자별)</span></span>
+                                          {sample !== '' && <span className="ds-callback-item__sample">예: {sample.slice(0, 15)}</span>}
+                                        </button>
+                                      );
+                                    })}
+                                  </>
+                                )}
+                                <div className="ds-callback-menu__group">등록된 회신번호{callbackSearch && ` · ${filteredCallbacks.length}건`}</div>
+                                {callbackNumbers.length === 0 ? (
+                                  <div className="ds-callback-menu__empty">등록된 회신번호가 없습니다</div>
+                                ) : filteredCallbacks.length === 0 ? (
+                                  <div className="ds-callback-menu__empty">검색 결과가 없습니다</div>
+                                ) : (
+                                  filteredCallbacks.map((cb) => {
+                                    const isActive = !useIndividualCallback && selectedCallback === cb.phone;
+                                    return (
+                                      <button
+                                        key={cb.id}
+                                        type="button"
+                                        role="menuitem"
+                                        className={`ds-callback-item ${isActive ? 'ds-callback-item--on' : ''}`}
+                                        onClick={() => {
+                                          setUseIndividualCallback(false);
+                                          setSelectedCallback(cb.phone);
+                                          setIndividualCallbackColumn('');
+                                          setCallbackMenuOpen(false);
+                                        }}
+                                      >
+                                        <span className="ds-callback-item__label">
+                                          {formatPhoneNumber(cb.phone)}
+                                          {cb.label && <span className="ds-callback-item__hint"> ({cb.label})</span>}
+                                        </span>
+                                        {cb.is_default && <span className="ds-callback-item__star">⭐</span>}
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          )}
+                </div>
+                <button type="button" className="ds-send-btn" onClick={handleSendClick} disabled={sendBusy}>
+                  <Send size={17} strokeWidth={2} />
+                  <span>{directRecipients.length > 0 ? `${directRecipients.length.toLocaleString()}명에게 전송하기` : '전송하기'}</span>
+                </button>
+              </div>
+            </footer>
+          );
+        })()}
+
         {/* ============ 파일 매핑 모달 ============ */}
         {directShowMapping && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
@@ -1600,6 +1877,30 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
             </div>
           );
         })()}
+
+        {/* ★ 2026-09-25 맞춤법 결과 · 발송 전 경고 · 요금제 안내 */}
+        <DirectSpellModal
+          open={spellModalOpen && !spellStale}
+          rows={spellRowsView}
+          quotaText={spellQuotaText}
+          onFix={fixSpellIssue}
+          onKeep={keepSpellIssue}
+          onFixAll={fixAllSpell}
+          onAiRefine={openAiRefineFromSpell}
+          onClose={() => setSpellModalOpen(false)}
+        />
+        <SendSpamWarnModal
+          open={!!sendWarn}
+          variant={sendWarn?.variant || 'none'}
+          carriersText={sendWarn?.carriersText || ''}
+          spellOpenCount={spellOpenCount}
+          trialRemaining={spamTrialRemaining}
+          onCheckSpam={onWarnCheckSpam}
+          onOpenSpell={onWarnOpenSpell}
+          onSendAnyway={onWarnSendAnyway}
+          onClose={() => setSendWarn(null)}
+        />
+        <TrialUpsellModal kind={upsell} status={checkStatus} onClose={() => setUpsell(null)} />
 
         {/* ★ D152+ (PDF 0511 funnel fix): AI 인라인 다듬기 모달.
             BASIC(35만원/월)+ TRIAL 게이팅은 백엔드 requirePlanFeature('ai_messaging') 미들웨어에서 처리.

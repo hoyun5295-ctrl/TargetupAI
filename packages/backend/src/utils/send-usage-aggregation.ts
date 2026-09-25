@@ -31,6 +31,8 @@ import {
 } from './billing-types';
 import { DIRECT_PIPELINE_SEND_TYPES_SQL } from './send-type-axis';
 import { nonSentPhaseSql, sentPhaseSql } from './billing-send-phase';
+// ★2026-09-25 무료 체험 스팸 검사는 정산에서 뺀다(조건 한 벌 = spam-trial CT)
+import { spamBillableTestSql } from './spam-trial';
 
 // 축 정의는 `billing-types.ts`(순수)로 옮겼다. 소비처가 이 모듈에서 가져다 쓰던 이름은 그대로 둔다.
 export { BILLING_TYPES };
@@ -795,6 +797,7 @@ export async function buildCompanyUsageByDay(opts: {
       FROM spam_filter_test_results r
       JOIN spam_filter_tests t ON r.test_id = t.id
       WHERE t.company_id = $1
+        AND ${spamBillableTestSql('t')}
         AND t.created_at >= ($2 || ' 00:00:00+09')::timestamptz
         AND t.created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
       GROUP BY r.message_type, DATE(t.created_at AT TIME ZONE 'Asia/Seoul')
@@ -1877,6 +1880,7 @@ export async function buildBillingUsageRows(opts: {
         FROM spam_filter_test_results r
         JOIN spam_filter_tests t ON r.test_id = t.id
        WHERE t.company_id = $1
+         AND ${spamBillableTestSql('t')}
          AND t.created_at >= ($2 || ' 00:00:00+09')::timestamptz
          AND t.created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
        GROUP BY t.user_id, r.message_type, DATE(t.created_at AT TIME ZONE 'Asia/Seoul')

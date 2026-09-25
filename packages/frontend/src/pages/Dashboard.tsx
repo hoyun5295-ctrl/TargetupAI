@@ -3648,6 +3648,7 @@ const campaignData = {
           onLockedFeature={openPlanFeature}
           isAiMessagingLocked={isAiMessagingLocked}
           setSpamFilterData={setSpamFilterData} setShowSpamFilter={setShowSpamFilter}
+          spamModalOpen={showSpamFilter}
           kakaoTemplates={kakaoTemplates}
           kakaoSelectedTemplate={kakaoSelectedTemplate} setKakaoSelectedTemplate={setKakaoSelectedTemplate}
           kakaoTemplateVars={kakaoTemplateVars} setKakaoTemplateVars={setKakaoTemplateVars}

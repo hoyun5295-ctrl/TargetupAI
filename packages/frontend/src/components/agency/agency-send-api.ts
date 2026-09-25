@@ -31,6 +31,11 @@ export interface AgencySendRequest {
   currentContent: string;
   contentVersion: number;
   /**
+   * ★2026-09-25 지금 문안의 맞춤법 확인 목록(서버가 문안 버전에 묶어 준다 · 없거나 옛 버전이면 null).
+   * ⛔ 자동으로 고치지 않는다. [고치기]는 고치기 칸에 넣을 뿐이고, **저장**해야 기존 수정 경로로 재검사가 시작된다.
+   */
+  spellIssues?: AgencySpellIssue[] | null;
+  /**
    * 행 수정 번호. **승인·문안 수정·시각 변경은 이 값을 그대로 되돌려준다**(낙관적 잠금).
    * 화면이 보고 있던 것과 서버의 것이 다르면 서버가 거절한다 — 담당자가 못 본 문안이나 시각으로
    * 승인이 통과하는 것을 막는 자리다.
@@ -105,6 +110,39 @@ async function unwrap(res: Response): Promise<any> {
     throw err;
   }
   return data;
+}
+
+/** ★2026-09-25 맞춤법 확인 한 줄(서버 `SpellIssue`와 같은 모양 · 위치는 그 버전 문안 기준) */
+export interface AgencySpellIssue {
+  id: string;
+  start: number;
+  end: number;
+  before: string;
+  after: string;
+  kind: 'typo' | 'spacing';
+  reason: string;
+  /** 단문 90바이트를 넘게 되는 교정 = 'sms_bytes' ([고치기] 잠김) */
+  blocked?: 'sms_bytes';
+}
+
+/**
+ * 고치기 칸에 한 줄을 넣는다(순수). 원래 자리가 그대로면 그 자리를, 아니면 같은 말이 **한 번만** 있을 때 그 자리를 바꾼다.
+ * 찾지 못하면 null(그 자리를 이미 바꿨다 · 건너뛴다).
+ */
+export function applyAgencySpellToDraft(draft: string, issue: Pick<AgencySpellIssue, 'start' | 'end' | 'before' | 'after'>): string | null {
+  if (draft.slice(issue.start, issue.end) === issue.before) {
+    return draft.slice(0, issue.start) + issue.after + draft.slice(issue.end);
+  }
+  const first = draft.indexOf(issue.before);
+  if (first === -1 || draft.indexOf(issue.before, first + 1) !== -1) return null;
+  return draft.slice(0, first) + issue.after + draft.slice(first + issue.before.length);
+}
+
+/** ★2026-09-25 접수 화면 사전 맞춤법 검사(저장 0 · 크레딧 0 · 워커와 같은 판정) */
+export async function checkAgencyContentSpelling(content: string, messageType: string): Promise<{ issues: AgencySpellIssue[]; failed: boolean }> {
+  const res = await fetch('/api/agency-send/spell-check', { method: 'POST', headers: json(), body: JSON.stringify({ content, messageType }) });
+  const data = await unwrap(res);
+  return { issues: Array.isArray(data.issues) ? data.issues : [], failed: !!data.failed };
 }
 
 export async function fetchAgencyRequests(): Promise<AgencySendRequest[]> {

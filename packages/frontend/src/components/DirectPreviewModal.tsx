@@ -73,7 +73,9 @@ export default function DirectPreviewModal({
           {/* 좌측: 폰 프레임 */}
           <div className="flex flex-col items-center shrink-0 mx-auto md:mx-0">
             <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-200">
-              <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[280px]" style={{ height: '420px' }}>
+              {/* ★ 2026-09-25 폰 높이 = 글 길이(Harold "나머지는 미리보기를 눌러서 한 번에 제대로 보이게") — 420 고정이던 것을
+                  최소 420 · 최대 화면 높이로. 넘으면 폰 안에서만 스크롤한다. */}
+              <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[280px]" style={{ minHeight: '420px', maxHeight: 'calc(95vh - 190px)' }}>
                 {/* 상단 - 회신번호 (첫 수신자의 실제 적용 번호) */}
                 <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
                   <span className="text-[11px] text-gray-400 font-medium">{directMsgType === 'MMS' ? 'MMS' : directMsgType === 'LMS' ? 'LMS' : '문자메시지'}</span>

@@ -96,6 +96,7 @@
 | 75-E | sales_outreach_controls **(★2026-09-23 운영 CREATE 완료)** | 직접 발송 통제값 kv. `key text PK, value jsonb NOT NULL, updated_by uuid, updated_at timestamptz NOT NULL DEFAULT NOW()`. 키 = `auto_send_stop`{stopped,reason,at \| resumedAt}(자동 발송 정지 · 다시 켜기는 사람) |
 | 75-B | sales_outreach_assets **(2026-08-28 운영 CREATE 완료)** | 아웃리치 산출물(append 전용 · 최신 = created_at DESC). 6컬럼 = `id uuid PK, job_id uuid NOT NULL FK sales_outreach_jobs CASCADE, kind text NOT NULL CHECK(copy·email_html·dm·studio_image), payload jsonb NOT NULL, regen_count int NOT NULL DEFAULT 0(★0905 = 그 시점 재생성 순번), created_at timestamptz`. INDEX(job_id, kind, created_at DESC). INSERT는 `insertAssetOwned`(소유권 결속)만 · payload 키 = [상세 절](#sales_outreach_assets-아웃리치-산출물) |
 | 76 | sender_auth_challenges **(2026-09-12 운영 CREATE 완료 — 13컬럼 `information_schema` 실측)** | 발신 인증(추가 인증 · 전송자격인증 3.5) 인증번호 원장. `id uuid PK DEFAULT gen_random_uuid(), user_id uuid NOT NULL FK users CASCADE, company_id uuid(FK 없음), callback_number varchar(20) NOT NULL(**숫자만 남긴 비교 키** — 표기가 달라도 같은 번호로 본다), code_hash varchar(255) NOT NULL(bcrypt · **평문 저장 금지**), phone varchar(20)(담당자 수신 번호), attempts int NOT NULL DEFAULT 0, consumed_at timestamp(**썼거나 폐기됨**), verified_at timestamp(**인증 성공** — 24시간 세션 판정의 유일한 축), expires_at timestamp NOT NULL, ip_address varchar(50), user_agent text, created_at timestamp NOT NULL DEFAULT NOW()`. INDEX `(user_id, callback_number, verified_at DESC) WHERE verified_at IS NOT NULL` · `(user_id, callback_number, created_at DESC) WHERE consumed_at IS NULL`. ⛔ **`consumed_at`으로 세션을 판정하지 마라** — 미사용 코드를 폐기한 행이 인증 성공으로 읽혀 인증 없이 24시간이 열린다(두 축을 나눈 이유). 코드 42P01 폴백 = 발신 인증만 쉬고 **발송은 그대로 나간다**. 소유 = `utils/sender-auth.ts` · 계약 = [전송자격인증 §4-K](../docs/2026-08-18-transmission-qualification-cert.md) |
+| 77 | spell_check_uses **(★2026-09-25 신설 · CREATE 실행 완료 0925 Harold)** | 직접발송 맞춤법 검사 사용 원장(미가입 회사 월 5회 한도의 근거 · 한 번 = 한 행). `id bigserial PK, company_id uuid NOT NULL FK companies CASCADE, user_id uuid NULL(FK 없음), source varchar(40) NOT NULL('direct-send-spell'), period_month char(7) NOT NULL(KST 'YYYY-MM' · SQL이 계산), status varchar(10) NOT NULL DEFAULT 'reserved' CHECK IN (reserved·done·failed), issue_count int NOT NULL DEFAULT 0, created_at timestamptz NOT NULL DEFAULT now()`. INDEX (company_id, source, period_month). 검사 **전에** reserved 로 넣고(회사 advisory 잠금 안에서 세고 넣음) 끝나면 done/failed · 세는 행 = done + 70분 안의 reserved(예약 수명 · 수명 지난 예약은 done 이 되지 않고 failed · ★Codex 4R·5R) · failed 는 한도에서 빠진다. 코드 42P01 폴백 = 요금제 회사는 기록 없이 검사 · 미가입은 503 `DB_MIGRATION_PENDING`. 소유 = `utils/spell-check-quota.ts` · 설계 = [직접발송 점검](../docs/2026-09-25-direct-send-precheck-design.md) §4 |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 | - | ai_training_logs (클릭·전환 컬럼) | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). **★2026-08-11 information_schema 실측 = 둘 다 실존**(0704 "ADD 대기" 표기는 낡은 기록 — `operator_proposals.conversion_attributed_at`·`operator_proposal_variants.sent/click/conversion_count`도 같은 실측으로 실존 확인). ⚠값 유입은 DM·이메일 클릭뿐 — SMS/LMS 클릭(short-url→변이 테이블)은 이 원장에 미배선(자기 개선 루프 설계의 Phase 0) |
 | - | best_copy_seed_usage **★2026-09-03 `information_schema` 실측 존재(5컬럼)** | 시드 사용 기록(성과 환류). 실측 = `id bigint, seed_id uuid, tenant_ref varchar, channel varchar, used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at)은 미실측. 코드 42P01 폴백 유지 |
@@ -1158,7 +1159,7 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | **advanced_access_enabled** | **boolean NOT NULL DEFAULT false** | **★2026-07-28 ALTER 실측. 상위 등급 전용 기능(베타 진입 `isBetaAccessAllowed`·자율 발송 자격 `continuous-operator`) 판정. 그 전에는 두 곳이 `plan_code IN ('ENTERPRISE','BUSINESS')`를 직접 비교해서, 요금제가 늘 때마다 코드를 고쳐야 했다. 현재 true = ENTERPRISE·BUSINESS·STAFF. 조회 조각은 컬럼 부재 시 옛 규칙으로 폴백한다(`to_jsonb(p) ->> ...`) — ALTER 전후 동작이 같다** |
 | dm_builder_enabled | boolean DEFAULT false | ★2026-08-05 실측 등재. 옛 DM 빌더 플래그(현행 판정은 `mobile_dm_enabled`) |
 | ai_mapping_monthly_quota | integer DEFAULT 10 | ★2026-08-05 실측 등재 |
-| ai_calls_per_month | integer | ★2026-08-05 실측 등재. 종량제 전환 전 호출수 한도(현행 크레딧 축은 `ai_credits_per_month`) |
+| ai_calls_per_month | integer | ★2026-08-05 실측 등재. 종량제 전환 전 호출수 한도(현행 크레딧 축은 `ai_credits_per_month`). ★0925 운영값: FREE 0 · TRIAL·STARTER·BASIC 1,000 · PRO 5,000 · BUSINESS 20,000 · STAFF·ENTERPRISE NULL(무제한). 셈에서 빠지는 source = CT-55 `AI_CALL_LIMIT_EXEMPT_SOURCES`(맞춤법 2종) |
 | created_at | timestamp | |
 
 - **★2026-08-05 전 컬럼 실측 = 27개**(`information_schema` 순수 덤프). 위 표가 27개 전량이다. **무료 메시징 컬럼(`free_sms_qty` 등)은 존재하지 않는다** — [요금제 무료 메시징 설계서](../docs/2026-08-05-plan-free-messaging-design.md) §3-1의 ALTER 4건이 미실행 상태라는 근거.
@@ -2058,7 +2059,7 @@ kind별 payload 키:
 | message_content_lms | text (nullable) | LMS 테스트 메시지 본문 |
 | message_hash | varchar(64) (nullable) | 메시지 해시 (앱 매칭용) |
 | spam_check_number | varchar(20) (nullable) | 스팸 체크 번호 |
-| source | varchar(20) DEFAULT 'manual' | 발원지: manual / auto_campaign |
+| source | varchar(20) DEFAULT 'manual' | 발원지: manual / auto_campaign(코드는 auto_ai) / **trial**(★2026-09-25 미가입 무료 체험 · 회사당 3회 · 차감 0 · 청구·비용 집계 제외 = `spam-trial.ts spamBillableTestSql`) · ⚠ CHECK 제약 유무 미확인(배포 전 `pg_constraint` 확인) |
 | variant_id | varchar(2) (nullable) | A/B 테스트 변형 ID (A/B) |
 | batch_id | uuid (nullable) | 배치 그룹화 ID (자동 테스트용) |
 | subject | text (nullable) | LMS 제목 (2026-06-13 information_schema 실측 확인) |
@@ -3270,6 +3271,7 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 - ⛔ `created_by`·`approved_by`·`campaign_id`에 **FK 없음**(0728 `23503` 원칙 + 캠페인 정리 워커가 옛 행을 지운다).
 - ⛔ **큐 적재는 당일 재검사 통과 뒤 1회뿐**이라 `queued` 이전 상태에는 MySQL 큐가 없다. 취소도 그 전에는 상태 변경만이다(0611 에이치피오 사고 경로를 구조로 제거).
 - `approval_version`은 승인 당시 `content_version`. 문안이 바뀌면(다듬기) 값이 어긋나 재승인으로 간다.
+- **`spell_check jsonb NULL`**(★2026-09-25 ADD 실행 완료 0925 Harold) = 맞춤법 검사 저장값 `{version, checkedAt, issues, failed}`. 워커 A 가 테스트 문자 뒤 `content_version` 조건으로 쓰고, 문안 수정 라우트가 NULL 로 지운다. 화면·승인 링크·안내 문자는 `version = content_version` 이고 실패가 아닐 때만 쓴다(`readAgencySpell`). 컬럼 부재 = `hasAgencyColumn` 으로 저장·표시를 건너뛴다. 설계 = [대행 맞춤법](../docs/2026-09-25-agency-spell-check-design.md) §3-3
 - **`source varchar(16) NOT NULL DEFAULT 'screen'`**(★2026-08-26 ALTER 실행완료 · CHECK `('screen','one_step','email')`) = 접수 출처. 라벨은 프론트 `SOURCE_LABEL` 단일표 소유(파일명 유무 추정 폐지). 이메일 축 설계 = 대행발송 설계서 §18.
 
 ### agency_send_email_senders · agency_send_email_intake · agency_send_mail_state (대행발송 이메일 접수 · §18) — ★2026-08-26 CREATE 실행완료(information_schema 3테이블+source 실측)

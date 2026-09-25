@@ -19,7 +19,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight, FileSpreadsheet,
-  Image as ImageIcon, Loader2, Send, Sparkles, Upload, X,
+  Image as ImageIcon, Loader2, Send, Sparkles, SpellCheck, Upload, X,
 } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import { useMmsUpload } from '../../hooks/useMmsUpload';
@@ -33,8 +33,9 @@ import {
   CUI_MODAL_FOOT, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_SELECT, CUI_TEXTAREA,
 } from '../../utils/console-ui';
 import {
-  AGENCY_MMS_UPLOAD, aiGuessPhoneColumn, createAgencyRequest, extractAgencyVars, MAX_AGENCY_VARS, toLocalInput,
-  type AgencySendRequest,
+  AGENCY_MMS_UPLOAD, aiGuessPhoneColumn, applyAgencySpellToDraft, checkAgencyContentSpelling, createAgencyRequest,
+  extractAgencyVars, MAX_AGENCY_VARS, toLocalInput,
+  type AgencySendRequest, type AgencySpellIssue,
 } from './agency-send-api';
 
 interface SenderNumber { phone_number?: string; phone?: string }
@@ -146,6 +147,9 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   const [varMapping, setVarMapping] = useState<Record<string, string>>({});
   const [mmsOpen, setMmsOpen] = useState(false);
   const [previewIdx, setPreviewIdx] = useState(0);
+  // ★2026-09-25 접수 전 맞춤법 검사(설계 §3-8) — 저장 0 · 크레딧 0. text = 결과가 가리키는 문안(바뀌면 목록을 접는다)
+  const [spell, setSpell] = useState<{ text: string; issues: AgencySpellIssue[]; done: Set<string> } | null>(null);
+  const [spellBusy, setSpellBusy] = useState(false);
   // ★2026-09-10 큰 사진·PNG도 서버가 규격에 맞춰 받는다. 바꿨으면 안내를 띄운다(조용히 바꾸지 않는다)
   const mms = useMmsUpload((m) => toast.error(m), { ...AGENCY_MMS_UPLOAD, onNotice: (m) => toast.info(m) });
 
@@ -308,6 +312,34 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   };
 
   /** 항목 칩 — 커서 자리에 %열%을 넣는다. 표기를 외울 필요가 없다 */
+  const runComposerSpell = async () => {
+    if (!content.trim() || spellBusy) return;
+    setSpellBusy(true);
+    try {
+      const r = await checkAgencyContentSpelling(content, messageType);
+      if (r.failed) { toast.error('맞춤법 검사를 하지 못했습니다. 잠시 뒤 다시 눌러 주세요.'); return; }
+      setSpell({ text: content, issues: r.issues, done: new Set() });
+      if (r.issues.length === 0) toast.success('고칠 곳이 없습니다.');
+    } catch (e: any) {
+      toast.error(e?.message || '맞춤법 검사를 하지 못했습니다.');
+    } finally { setSpellBusy(false); }
+  };
+  /** 접수 전 문안은 사용자의 초안이라 [고치기]가 바로 문안에 들어간다(자리 대조 후 · 못 찾으면 건너뛴다) */
+  const fixComposerSpell = (issues: AgencySpellIssue[]) => {
+    if (!spell) return;
+    let next = content;
+    const done = new Set(spell.done);
+    for (const i of issues) {
+      if (i.blocked || done.has(i.id)) continue;
+      const fixed = applyAgencySpellToDraft(next, i);
+      if (fixed == null) continue;
+      next = fixed;
+      done.add(i.id);
+    }
+    setContent(next);
+    setSpell({ ...spell, text: next, done });
+  };
+
   const insertVar = (name: string) => {
     const token = `%${name}%`;
     const el = contentRef.current;
@@ -646,6 +678,41 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
                       texts={[content, subject]}
                       onApply={(fix) => { setContent((prev) => fix(prev)); setSubject((prev) => fix(prev)); }}
                     />
+                    {/* ★2026-09-25 접수 전 맞춤법 검사 — 접수 뒤 검사(테스트 문자 뒤)와 같은 판정. 접수 전에 고치면 재검사 왕복이 없다 */}
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <button type="button" onClick={runComposerSpell} disabled={spellBusy || !content.trim()} className={CUI_BTN_OUTLINE}>
+                        {spellBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SpellCheck className="w-3.5 h-3.5" strokeWidth={2} />}
+                        맞춤법 검사
+                      </button>
+                      <span className="text-[11.5px] text-neutral-500">접수 뒤에도 테스트 문자를 보낸 다음 한 번 더 봅니다.</span>
+                    </div>
+                    {spell && spell.text === content && spell.issues.some((i) => !spell.done.has(i.id)) && (
+                      <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <p className="text-[12.5px] font-bold text-emerald-900">맞춤법 확인 {spell.issues.filter((i) => !spell.done.has(i.id)).length}곳</p>
+                          {spell.issues.some((i) => !i.blocked && !spell.done.has(i.id)) && (
+                            <button type="button" onClick={() => fixComposerSpell(spell.issues)} className={CUI_BTN_GHOST}>모두 고치기</button>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          {spell.issues.filter((i) => !spell.done.has(i.id)).map((i) => (
+                            <div key={i.id} className="flex items-center gap-2 rounded-md bg-white border border-emerald-100 px-2.5 py-1.5">
+                              <div className="min-w-0 flex-1 text-[12.5px]">
+                                <span className="text-rose-600 line-through">{i.before}</span>
+                                <span className="mx-1.5 text-neutral-400">→</span>
+                                <b className="text-emerald-700">{i.after}</b>
+                                <span className="ml-1.5 text-[11px] text-neutral-500">{i.reason || (i.kind === 'spacing' ? '띄어쓰기' : '맞춤법')}{i.blocked === 'sms_bytes' ? ' · 고치면 단문 길이를 넘어요' : ''}</span>
+                              </div>
+                              <button type="button" onClick={() => setSpell({ ...spell, done: new Set(spell.done).add(i.id) })} className={CUI_BTN_GHOST}>그대로 두기</button>
+                              <button type="button" onClick={() => fixComposerSpell([i])} disabled={!!i.blocked} className={CUI_BTN_OUTLINE}>고치기</button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {spell && spell.text !== content && spell.issues.some((i) => !spell.done.has(i.id)) && (
+                      <p className="mt-1.5 text-[11.5px] text-neutral-500">문안이 바뀌었습니다. 맞춤법을 다시 보려면 검사를 한 번 더 눌러 주세요.</p>
+                    )}
                   </div>
 
                   {usedVars.length > 0 && headers.length > 0 && usedVars.some((v) => !varMapping[v] && !headers.find((h) => h.replace(/\s+/g, '') === v.replace(/\s+/g, ''))) && (
