@@ -64,23 +64,22 @@
   align-items: center;
   justify-content: center;
   z-index: 50;
-  padding: 20px;
+  padding: 0; /* ★ 2026-09-25 창 = 전체 화면(Harold) — 둘레 여백 없음 */
 }
 
 .ds-modal {
   background: #FFFFFF;
-  border-radius: 18px;
   box-shadow:
     0 1px 2px rgb(0 0 0 / .04),
     0 16px 48px rgb(0 0 0 / .14),
     0 2px 6px rgb(0 0 0 / .04);
   overflow: hidden;
-  width: min(1560px, calc(100vw - 24px));
-  /* ★ 2026-09-25 창 높이 = 글 길이(Harold "메시지가 늘어나면 가변적으로") — 최소 600 · 최대 화면 높이.
-     본문 칸은 약 1,000byte 높이까지 늘고(--ds-editor-cap) 넘으면 칸 안에서 스크롤 + 미리보기 안내. */
-  height: auto;
-  min-height: min(600px, calc(100vh - 24px));
-  max-height: calc(100vh - 24px);
+  /* ★ 2026-09-25 창 = 전체 화면(Harold "모달 자체를 전체화면으로") — 기본 크기가 작다는 지적으로 글 길이 따라 늘던 방식을 거둔다.
+     왼쪽 열 폭(560)은 그대로 · 늘어난 폭은 오른쪽 수신자 쪽이 가진다. 본문 칸은 창 높이를 채우고 넘치면 칸 안 스크롤 + 미리보기 안내.
+     모바일(767 이하)은 아래 블록이 자유 높이 + 배경 스크롤로 덮는다. */
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
   display: flex;
   flex-direction: column;
 }
@@ -102,7 +101,7 @@
   min-height: 0;
   overflow: hidden;
 }
-/* ★ 2026-09-25 오른쪽(수신자)은 창 높이를 정하지 않는다 — 왼쪽 글 길이가 정하고 오른쪽은 그 높이를 채운다 */
+/* ★ 2026-09-25 오른쪽(수신자)은 창 높이를 밀지 않는다 — 창 높이는 화면이 정하고 오른쪽은 그 높이를 채운다 */
 .ds-modal__body > section.ds-recipients { contain: size; }
 
 .ds-modal__body > section {
@@ -1597,11 +1596,12 @@
 /* ============================================================
    ★ 2026-09-25 보내기 전 점검 개편 (Harold 지시 · 목업 3 B안 승인)
    설계 SoT = docs/2026-09-25-direct-send-precheck-design.md
-   - 본문 칸: (광고) · 본문 · 수신거부 줄이 한 흐름 · 약 1,000byte까지 늘고 넘으면 칸 안 스크롤
+   - 본문 칸: (광고) · 본문 · 수신거부 줄이 한 흐름 · 창(전체 화면) 높이를 채우고 넘으면 칸 안 스크롤
    - 점검 칸 2개(스팸 · 맞춤법)와 아래 발송 바 옵션 3개 = 같은 높이 58 · 같은 폭(왼쪽 열 512)
    - 발송 바: 왼쪽 열에 맞춘 옵션 3칸 + 오른쪽 발신번호 · 전송
    ============================================================ */
-.ds-scope { --ds-editor-cap: 500px; }
+/* 본문 칸 상한 — 데스크톱은 없음(전체 화면 창을 채운다) · 모바일은 자유 높이 창이라 아래 블록이 420으로 묶는다 */
+.ds-scope { --ds-editor-cap: none; }
 
 /* 본문 흐름(스크롤 칸) */
 .ds-editor-wrap > .ds-editor-body.ds-editor-flow {

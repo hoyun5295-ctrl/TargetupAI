@@ -507,7 +507,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     ? '맞춤법 검사는 크레딧이 들지 않아요'
     : `이번 달 무료 ${spellFreeRemaining ?? 0}/${checkStatus?.spell?.limit ?? 5}회 남음 · 요금제는 무제한`;
 
-  // ── 본문 칸: 글을 따라 늘고(약 1,000byte 높이까지) 넘으면 칸 안 스크롤 ──
+  // ── 본문 칸: 창(전체 화면) 높이를 채우고 넘치면 칸 안 스크롤 + 미리보기 안내 ──
   const editorScrollRef = useRef<HTMLDivElement>(null);
   const [editorOverflow, setEditorOverflow] = useState(false);
   const syncEditorOverflow = useCallback(() => {
@@ -980,7 +980,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                 )}
 
                 {/* 본문 에디터 — ★ 2026-09-25 (광고) · 본문 · 수신거부 줄이 한 흐름(Harold "자동부착은 메세지창 안에 고정").
-                    본문 칸은 약 1,000byte 높이까지 글을 따라 늘고(창도 함께), 넘으면 칸 안에서 스크롤 + 미리보기 안내. */}
+                    본문 칸은 창(전체 화면) 높이를 채우고, 넘치면 칸 안에서 스크롤 + 미리보기 안내. */}
                 <div className="ds-editor-wrap ds-t">
                   <div
                     ref={editorScrollRef}

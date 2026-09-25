@@ -432,6 +432,15 @@ describe('8. 화면 계약', () => {
     expect(isSendWarnDismissed('u1', t0 + 24 * 60 * 60 * 1000 + 1)).toBe(false);
     delete (globalThis as any).localStorage;
   });
+  it('창 = 전체 화면(★Harold 0925) · 본문 칸 상한은 모바일만', () => {
+    const css = readFront('styles/direct-send.css');
+    const modal = css.slice(css.indexOf('.ds-modal {'), css.indexOf('.ds-modal__header {'));
+    expect(modal).toContain('width: 100vw;');
+    expect(modal).toContain('height: 100vh;');
+    expect(modal).not.toMatch(/max-height|min-height/);
+    expect(css).toContain('.ds-scope { --ds-editor-cap: none; }');
+    expect(css).toContain('.ds-scope { --ds-editor-cap: 420px; }');
+  });
   it('모델명 0 · native dialog 0(새 화면 파일)', () => {
     const files = [
       'components/direct-send/DirectCheckTiles.tsx', 'components/direct-send/DirectSpellModal.tsx',
