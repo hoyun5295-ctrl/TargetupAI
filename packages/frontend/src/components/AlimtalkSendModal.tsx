@@ -38,7 +38,9 @@ import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPane
 import AddressBookModal from './AddressBookModal';
 import ScheduleTimeModal from './ScheduleTimeModal';
 import { normalizePhoneKr } from '../utils/formatDate';
-import { validateAlimtalkVariables } from '../utils/alimtalkVars';
+import { validateAlimtalkVariables, extractAlimtalkVariables } from '../utils/alimtalkVars';
+import RecipientDirectInputModal, { type PastePreview, type RowAddResult } from './direct-send/RecipientDirectInputModal';
+import { checkAlimtalkPaste, planAppend } from '../utils/recipient-paste';
 
 // 주소록/엑셀 표준 필드 → 사용자 표시 라벨. 미리보기 컬럼 + 변수 매칭 드롭다운 공용.
 const FIELD_LABEL_MAP: Record<string, string> = { name: '이름', extra1: '기타1', extra2: '기타2', extra3: '기타3' };
@@ -139,7 +141,8 @@ export default function AlimtalkSendModal({
 }: AlimtalkSendModalProps) {
   // 수신자 영역 — 알림톡 전용 state (직접발송 directRecipients와 격리)
   const [inputMode, setInputMode] = useState<'direct' | 'file' | 'address'>('direct');
-  const [directInput, setDirectInput] = useState('');
+  // ★ 2026-09-25 직접입력 = 공용 창(입력칸은 수신자 열에서 걷었다 · Harold 목업 v2)
+  const [directInputOpen, setDirectInputOpen] = useState(false);
   const [recipients, setRecipients] = useState<any[]>([]);
   const [fileLoading, setFileLoading] = useState(false);
   const [dedupEnabled, setDedupEnabled] = useState(true);
@@ -174,7 +177,7 @@ export default function AlimtalkSendModal({
       setFileAllData([]);
       setPhoneColumn('');
       setShowMapping(false);
-      setDirectInput('');
+      setDirectInputOpen(false);
       setInputMode('direct');
       // 예약·분할도 창을 열 때마다 끈 상태로 시작한다(지난 창의 예약이 다음 발송에 남지 않게)
       setReserveEnabled(false);
@@ -205,41 +208,45 @@ export default function AlimtalkSendModal({
   const [fileAllData, setFileAllData] = useState<any[]>([]);
   const [phoneColumn, setPhoneColumn] = useState('');
 
-  // ★ 2026-06-05: 변수 매칭 옵션 — 사용자가 올린 데이터(recipients[0] keys)만 사용.
+  // ★ 2026-09-25 명단 전체 칸(phone 외 · 처음 나온 순서). 예전엔 첫 줄 칸만 봤다 — 번호만 붙여넣은 줄 뒤에
+  //   [변수와 함께 한 건씩]으로 넣은 값(이름·주문번호 칸)이 칸 목록·자동 연결·목록 표시에서 빠져, 보내기 전 검사에 막혔다.
+  //   파일·주소록처럼 모든 줄의 칸이 같으면 결과는 첫 줄과 같다.
+  const recipientFieldKeys = useMemo(() => {
+    const seen = new Set<string>();
+    for (const r of recipients) {
+      for (const k of Object.keys(r || {})) if (k !== 'phone') seen.add(k);
+    }
+    return Array.from(seen);
+  }, [recipients]);
+
+  // ★ 2026-06-05: 변수 매칭 옵션 — 사용자가 올린 데이터(명단 칸)만 사용.
   //   직접발송 알림톡에 고객 DB 표준 필드를 노출하지 않음(수신자 0건에 DB 필드 노출·고정 발송 문제 차단, 직원 신고).
   const dynamicFieldOptions = useMemo(() => {
-    const sample = recipients[0];
-    if (sample) {
-      const keys = Object.keys(sample).filter((k) => k !== 'phone');
-      if (keys.length > 0) {
-        return keys.map((k) => ({ key: k, label: FIELD_LABEL_MAP[k] || k }));
-      }
+    if (recipientFieldKeys.length > 0) {
+      return recipientFieldKeys.map((k) => ({ key: k, label: FIELD_LABEL_MAP[k] || k }));
     }
     // 업로드 데이터가 없으면 옵션 없음(직접 입력만).
     return customerFieldOptions;
-  }, [recipients, customerFieldOptions]);
+  }, [recipientFieldKeys, customerFieldOptions]);
 
   // ★ 2026-06-05: 수신자 미리보기 컬럼 — 변수 매칭 여부와 무관하게 recipients의 실제 필드(phone 외)를 항상 표시.
   //   기존 방식(매핑된 변수 컬럼만 표시)은 주소록/엑셀을 불러와도 수신번호만 노출시켜 직원 신고 발생.
-  const previewColumns = useMemo(() => {
-    const sample = recipients[0];
-    if (!sample) return [] as string[];
-    return Object.keys(sample).filter((k) => k !== 'phone');
-  }, [recipients]);
+  const previewColumns = recipientFieldKeys;
 
   // ★ 2026-06-05: 주소록/엑셀 불러오면 변수↔필드 자동 매핑 (변수명 = 필드명/라벨/별칭 일치 시).
   //   사용자가 비워 둔 변수만 채움 — 직접 입력·선택한 매핑은 보존.
   useEffect(() => {
     if (recipients.length === 0 || !kakaoSelectedTemplate?.content) return;
-    const fields = Object.keys(recipients[0]).filter((k) => k !== 'phone');
+    const fields = recipientFieldKeys;
     if (fields.length === 0) return;
     const vars = Array.from(new Set(kakaoSelectedTemplate.content.match(/#\{[^}]+\}/g) || [])) as string[];
     const autoMap: Record<string, string> = {};
     vars.forEach((v) => {
       const inner = v.replace(/^#\{|\}$/g, '').trim();
-      const matched = fields.find(
-        (f) => f === inner || FIELD_LABEL_MAP[f] === inner || (FIELD_NAME_ALIASES[f] || []).includes(inner),
-      );
+      // ★ 2026-09-25 정확히 같은 이름을 먼저 찾는다(Codex 1R). 한 번에 찾으면 칸 순서에 따라 별칭이 이겨
+      //   #{name}·#{이름} 이 둘 다 name 칸(라벨 "이름")으로 이어져 한 사람의 두 값 중 하나가 다른 값으로 나갔다.
+      const matched = fields.find((f) => f === inner)
+        || fields.find((f) => FIELD_LABEL_MAP[f] === inner || (FIELD_NAME_ALIASES[f] || []).includes(inner));
       if (matched) autoMap[v] = `@@${matched}@@`;
     });
     if (Object.keys(autoMap).length === 0) return;
@@ -250,7 +257,7 @@ export default function AlimtalkSendModal({
       }
       return next;
     });
-  }, [recipients, kakaoSelectedTemplate]);
+  }, [recipients, recipientFieldKeys, kakaoSelectedTemplate]);
 
   // AlimtalkChannelPanel 통합 state
   const channelState: AlimtalkChannelState = useMemo(
@@ -285,32 +292,70 @@ export default function AlimtalkSendModal({
     if (setAlimtalkNextSubject) setAlimtalkNextSubject(v.nextSubject || '');
   };
 
-  // 직접입력 파싱 — 한 줄에 하나씩, 콤마/탭/공백 무시
-  const parseDirectInput = () => {
-    const lines = directInput
-      .split(/[\n\r,;]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const parsed = lines
-      .map((raw) => {
-        const phone = normalizePhoneKr(raw);
-        return phone ? { phone } : null;
-      })
-      .filter(Boolean) as any[];
-    if (parsed.length === 0) {
-      setToast({ show: true, type: 'error', message: '유효한 수신번호를 입력해주세요.' });
-      return;
-    }
-    // 중복 제거
-    const dedup = dedupEnabled
-      ? Array.from(new Map(parsed.map((r) => [r.phone, r])).values())
-      : parsed;
-    setRecipients(dedup);
+  // ★ 2026-09-25 직접입력(공용 창) — 붙여넣기는 지금 명단에 **더한다**(예전 = 명단 통째 교체 · 버튼 이름 "추가"와 달랐다 · Harold 승인).
+  //   [중복제거] 켜짐 = 이번 입력 안의 중복과 지금 명단에 이미 있는 번호를 뺀다 · 꺼짐 = 전부 더한다.
+  //   검수(창에 보이는 수)와 더하기가 같은 함수(checkAlimtalkPaste · planAppend)라 보인 수 = 더해진 수.
+  //   섞인 명단(파일 줄 + 번호만 줄)은 보내기 직전 validateAlimtalkVariables 가 빈 변수 수신자를 막는다.
+  const planPaste = (text: string) => {
+    const check = checkAlimtalkPaste(text);
+    return { check, plan: planAppend(check.phones, recipients.map((r) => r?.phone), dedupEnabled) };
+  };
+  const previewDirectPaste = (text: string): PastePreview => {
+    const { check, plan } = planPaste(text);
+    return {
+      add: plan.add.length,
+      notes: plan.dup > 0
+        ? [dedupEnabled
+          ? { text: `중복 ${plan.dup.toLocaleString()} 제외`, tone: 'neutral' as const }
+          : { text: `같은 번호 ${plan.dup.toLocaleString()} · 중복제거가 꺼져 있어 여러 번 나가요`, tone: 'warn' as const }]
+        : [],
+      invalid: check.invalid,
+    };
+  };
+  const submitDirectPaste = (text: string) => {
+    const { plan } = planPaste(text);
+    if (plan.add.length === 0) return;
+    setRecipients([...recipients, ...plan.add.map((phone) => ({ phone }))]);
     setToast({
       show: true,
       type: 'success',
-      message: `${dedup.length}건 ${dedupEnabled && dedup.length !== parsed.length ? `(중복 ${parsed.length - dedup.length}건 제거)` : ''} 추가됨`,
+      message: `${plan.add.length.toLocaleString()}건 추가${dedupEnabled && plan.dup > 0 ? ` · 중복 ${plan.dup.toLocaleString()}건 제외` : ''}`,
     });
+  };
+  // 한 건씩 — 칸 = 템플릿 변수. 값은 변수 이름 칸(#{이름} → '이름')에 담는다 → 위 자동 연결이 @@이름@@ 으로 잇고,
+  //   보낼 때는 파일 줄과 같은 적재 슬롯 매핑을 탄다. 칸을 비우면 보내기 전 검사에 막히므로 여기서 먼저 채우게 한다.
+  //   ★ Codex 1R — 칸은 **지금 연결 기준**이다. 변수가 @@칸@@ 에 이어져 있으면 그 칸에 담고(파일 줄과 같은 모양),
+  //   비어 있으면 변수 이름 칸에 담아 자동 연결이 잇게 한다. 모두에게 같은 값으로 정한 변수는 칸이 없다(넣어도 안 쓰인다).
+  //   같은 칸을 쓰는 변수는 칸 하나로 모은다. 예전엔 늘 변수 이름 칸에 담아 파일 줄(name 칸)과 섞이면 어느 한쪽이 빈 값으로 막혔다.
+  const directRowFields = useMemo(() => {
+    const out: Array<{ key: string; label: string; tag: string }> = [];
+    for (const v of extractAlimtalkVariables(kakaoSelectedTemplate?.content)) {
+      const inner = v.replace(/^#\{|\}$/g, '').trim();
+      const mapped = String(kakaoTemplateVars?.[v] ?? '');
+      let key: string;
+      if (mapped.startsWith('@@') && mapped.endsWith('@@')) key = mapped.slice(2, -2);
+      else if (mapped.trim() === '') key = inner;
+      else continue;
+      if (!key || key === 'phone') continue;
+      const same = out.find((f) => f.key === key);
+      if (same) { same.tag = `${same.tag} ${v}`; continue; }
+      out.push({ key, label: inner, tag: v });
+    }
+    return out;
+  }, [kakaoSelectedTemplate?.content, kakaoTemplateVars]);
+  const templateVarCount = extractAlimtalkVariables(kakaoSelectedTemplate?.content).length;
+  const addDirectRow = (values: Record<string, string>): RowAddResult => {
+    const phone = normalizePhoneKr(values.phone);
+    if (!phone || phone.length < 10) return { ok: false, error: '수신번호를 확인해 주세요(10자리 이상 숫자)' };
+    const empty = directRowFields.find((f) => !String(values[f.key] ?? '').trim());
+    if (empty) return { ok: false, error: `${empty.label} 칸을 채워 주세요(${empty.tag})` };
+    if (dedupEnabled && planAppend([phone], recipients.map((r) => r?.phone), true).add.length === 0) {
+      return { ok: false, error: '이미 명단에 있는 번호예요(중복제거 켜짐)' };
+    }
+    const entry: Record<string, string> = { phone };
+    directRowFields.forEach((f) => { entry[f.key] = String(values[f.key]).trim(); });
+    setRecipients((prev) => [...prev, entry]);
+    return { ok: true, phone };
   };
 
   // ★ D162-4 (2026-05-15) 3차: 파일 업로드 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
@@ -401,7 +446,6 @@ export default function AlimtalkSendModal({
   useEffect(() => {
     if (resetSignal && resetSignal > 0) {
       setRecipients([]);
-      setDirectInput('');
       // 발송이 접수되면 예약·분할도 끈다(같은 창에서 이어 보내는 다음 건이 지난 예약 시각을 물려받지 않게)
       setReserveEnabled(false);
       setReserveDateTime('');
@@ -782,7 +826,7 @@ export default function AlimtalkSendModal({
                 <button
                   type="button"
                   className={`ds-rtab ${inputMode === 'direct' ? 'ds-rtab--on' : ''}`}
-                  onClick={() => setInputMode('direct')}
+                  onClick={() => { setInputMode('direct'); setDirectInputOpen(true); }}
                 >
                   <PencilLine size={17} strokeWidth={1.75} />
                   <span>직접입력</span>
@@ -827,18 +871,6 @@ export default function AlimtalkSendModal({
                 </label>
               </div>
             </div>
-
-            {inputMode === 'direct' && (
-              <div className="ks-direct">
-                <textarea
-                  value={directInput}
-                  onChange={(e) => setDirectInput(e.target.value)}
-                  placeholder={'수신번호를 한 줄에 하나씩 넣어 주세요(콤마·세미콜론도 돼요)\n01012345678'}
-                  aria-label="수신번호 직접 입력"
-                />
-                <button type="button" onClick={parseDirectInput}>수신자로 추가</button>
-              </div>
-            )}
 
             <div className="flex items-center justify-between">
               <div className="ds-count-wrap">
@@ -1142,6 +1174,26 @@ export default function AlimtalkSendModal({
         }
       `}</style>
       {/* ★ D162-4 (2026-05-15) 2차: 주소록 모달 — Harold님 명시 정합. recipients/setRecipients position에 위임 → 그룹 선택 시 자동 적용. */}
+      <RecipientDirectInputModal
+        open={directInputOpen}
+        onClose={() => setDirectInputOpen(false)}
+        tone="amber"
+        unit="건"
+        currentCount={recipients.length}
+        pasteHint="메모장·엑셀에서 복사해 붙여넣기 · 줄바꿈·쉼표·세미콜론"
+        pastePlaceholder={'01012345678\n01087654321\n01011112222'}
+        previewPaste={previewDirectPaste}
+        onSubmitPaste={submitDirectPaste}
+        rows={{
+          fields: directRowFields,
+          disabledReason: !kakaoSelectedTemplate
+            ? '템플릿을 고르면 변수와 함께 한 건씩 넣을 수 있어요'
+            : directRowFields.length > 0 ? null
+              : templateVarCount === 0 ? '이 템플릿은 변수가 없어서 번호만 넣으면 돼요'
+                : '변수가 모두 같은 값으로 정해져 있어서 번호만 넣으면 돼요',
+          onAdd: addDirectRow,
+        }}
+      />
       <AddressBookModal
         show={showAddressBook}
         onClose={() => setShowAddressBook(false)}

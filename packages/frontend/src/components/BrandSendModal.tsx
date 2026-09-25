@@ -26,6 +26,8 @@ import BrandMessageEditor from './BrandMessageEditor';
 import { WorkspaceNotice } from './shared/SendWorkspaceShell';
 import KakaoSendHeader from './kakao-send/KakaoSendHeader';
 import '../styles/direct-send.css';
+import RecipientDirectInputModal, { type PastePreview } from './direct-send/RecipientDirectInputModal';
+import { checkBrandPaste, normalizeBrandPhones } from '../utils/recipient-paste';
 import ConfirmDialogShell, { DialogHeadline, DialogRow, DialogCaution } from './shared/ConfirmDialogShell';
 import { BRAND_SPEC } from '../constants/brand-message-spec';
 
@@ -70,11 +72,8 @@ export interface BrandSendModalProps {
  */
 const RECIPIENT_EDIT_LIMIT = 1000;
 
-const normalizePhones = (raw: string): string[] =>
-  raw
-    .split(/[\s,;\n\r\t]+/)
-    .map((v) => v.replace(/[^0-9]/g, ''))
-    .filter((v) => v.length >= 9 && v.length <= 11);
+// 번호 읽기 규칙(공백·쉼표·세미콜론 · 숫자만 9~11자리)은 utils/recipient-paste.ts normalizeBrandPhones 로 옮겼다
+//   — 직접입력 창의 검수와 더하기가 같은 함수를 써야 "보인 수 = 더해진 수"(★ 2026-09-25).
 
 export default function BrandSendModal({
   show, onClose, profiles, initialRecipients, isAiTargetLocked, onLockedFeature, onSend, sending,
@@ -91,7 +90,8 @@ export default function BrandSendModal({
   const [seededCount, setSeededCount] = useState(0);
   const [listQuery, setListQuery] = useState('');
   /** 입력 중인 번호 — [수신자로 추가]를 눌러야 확정 목록(phones)에 들어간다(알림톡과 같은 축) */
-  const [draft, setDraft] = useState('');
+  // ★ 2026-09-25 직접입력 = 공용 창(입력칸은 수신자 열에서 걷었다 · Harold 목업 v2)
+  const [directInputOpen, setDirectInputOpen] = useState(false);
   const [addNotice, setAddNotice] = useState('');
   const [phones, setPhones] = useState<string[]>([]);
   /**
@@ -137,7 +137,7 @@ export default function BrandSendModal({
     setPhones(seeded);
     setSeededCount(seeded.length);
     setListQuery('');
-    setDraft(''); setAddNotice('');
+    setDirectInputOpen(false); setAddNotice('');
     setMode('manual');
     setPending(null); setPendingPhones([]);
     setAiPrompt(''); setAiError(''); setAiResult(null);
@@ -165,17 +165,28 @@ export default function BrandSendModal({
    * 여러 곳에서 모은 번호를 이어 붙일 수 있어야 해서 병합이 기본이고, 이미 담긴 번호는 조용히 버리지 않고
    * 몇 건이 중복이었는지 알린다 — 넣었는데 수가 안 늘면 사용자는 버튼이 고장난 줄로 읽는다.
    */
-  const addFromDraft = () => {
-    const parsed = normalizePhones(draft);
-    if (parsed.length === 0) {
-      setAddNotice(draft.trim() ? '유효한 번호를 찾지 못했습니다 (9~11자리 숫자).' : '번호를 입력해 주세요.');
+  //   ★ 2026-09-25 직접입력 창이 입력하는 동안 같은 식으로 검수를 보여 준다(planDraft 한 벌).
+  const planDraft = (text: string) => {
+    const check = checkBrandPaste(text);
+    const existing = new Set(phones);
+    const added = Array.from(new Set(check.phones)).filter((p) => !existing.has(p));
+    return { check, added, dupes: check.phones.length - added.length };
+  };
+  const previewDraft = (text: string): PastePreview => {
+    const { check, added, dupes } = planDraft(text);
+    return {
+      add: added.length,
+      notes: dupes > 0 ? [{ text: `중복 ${dupes.toLocaleString()} 제외`, tone: 'neutral' }] : [],
+      invalid: check.invalid,
+    };
+  };
+  const addFromDraft = (text: string) => {
+    const { check, added, dupes } = planDraft(text);
+    if (check.phones.length === 0) {
+      setAddNotice(text.trim() ? '유효한 번호를 찾지 못했습니다 (9~11자리 숫자).' : '번호를 입력해 주세요.');
       return;
     }
-    const existing = new Set(phones);
-    const added = Array.from(new Set(parsed)).filter((p) => !existing.has(p));
-    const dupes = parsed.length - added.length;
     setRecipients([...phones, ...added]);
-    setDraft('');
     setAddNotice(
       added.length === 0
         ? `이미 담긴 번호입니다 (중복 ${dupes.toLocaleString()}건).`
@@ -195,7 +206,7 @@ export default function BrandSendModal({
       setAddNotice('파일을 읽는 동안 명단이 바뀌어 이번 파일은 넣지 않았어요. 다시 올려 주세요.');
       return;
     }
-    const parsed = normalizePhones(text);
+    const parsed = normalizeBrandPhones(text);
     const existing = new Set(phones);
     const added = Array.from(new Set(parsed)).filter((p) => !existing.has(p));
     setRecipients([...phones, ...added]);
@@ -324,7 +335,7 @@ export default function BrandSendModal({
           ) : (
             <button key={t.key} type="button"
               className={`ds-rtab ${mode === t.key ? 'ds-rtab--on' : ''}`}
-              onClick={() => { if (t.locked) { onLockedFeature('ai-target'); return; } setMode(t.key); }}>
+              onClick={() => { if (t.locked) { onLockedFeature('ai-target'); return; } setMode(t.key); if (t.key === 'manual') setDirectInputOpen(true); }}>
               <t.icon size={17} strokeWidth={1.75} />
               <span>{t.label}</span>
               {t.locked && <Lock size={12} strokeWidth={2.2} className="text-slate-300" />}
@@ -333,26 +344,13 @@ export default function BrandSendModal({
         </div>
       )}
 
-      {!isTarget && mode === 'manual' && (
-        <>
-          {/* 입력 → [수신자로 추가] → 목록. 실시간 파싱이 아니라 명시적으로 담는다(알림톡과 같은 축) */}
-          <div className="ks-direct">
-            <textarea
-              value={draft}
-              onChange={(e) => { setDraft(e.target.value); if (addNotice) setAddNotice(''); }}
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addFromDraft(); } }}
-              placeholder={'번호를 줄바꿈·쉼표로 구분해 넣어 주세요\n01012345678'}
-              aria-label="수신번호 직접 입력"
-            />
-            <button type="button" onClick={addFromDraft} disabled={!draft.trim()}>수신자로 추가</button>
-          </div>
-          {addNotice && <p className="text-[11.5px] text-violet-600 px-0.5 m-0">{addNotice}</p>}
-          {aiResult?.explanation && phones.length > 0 && (
-            <p className="text-[11px] text-slate-500 bg-slate-50/80 ring-1 ring-slate-900/5 rounded-lg px-2.5 py-1.5 leading-relaxed m-0">
-              {aiResult.explanation}
-            </p>
-          )}
-        </>
+      {/* ★ 2026-09-25 직접입력은 창으로(수신자 열에 입력칸 없음). 더한 결과 안내는 방식과 무관하게 보인다 —
+          예전엔 직접입력 방식일 때만 보여 파일 읽기 중단 안내가 파일 방식에서 가려졌다. */}
+      {!isTarget && addNotice && <p className="text-[11.5px] text-violet-600 px-0.5 m-0">{addNotice}</p>}
+      {!isTarget && mode === 'manual' && aiResult?.explanation && phones.length > 0 && (
+        <p className="text-[11px] text-slate-500 bg-slate-50/80 ring-1 ring-slate-900/5 rounded-lg px-2.5 py-1.5 leading-relaxed m-0">
+          {aiResult.explanation}
+        </p>
       )}
 
       {!isTarget && mode === 'file' && (
@@ -552,6 +550,18 @@ export default function BrandSendModal({
           recipientsPanel={recipientsPanel}
         />
       </div>
+
+      <RecipientDirectInputModal
+        open={directInputOpen && !isTarget}
+        onClose={() => setDirectInputOpen(false)}
+        tone="violet"
+        unit="명"
+        currentCount={phones.length}
+        pasteHint="메모장·엑셀에서 복사해 붙여넣기 · 줄바꿈·쉼표로 구분"
+        pastePlaceholder={'01012345678\n01087654321\n01011112222'}
+        previewPaste={previewDraft}
+        onSubmitPaste={addFromDraft}
+      />
 
       <ConfirmDialogShell
         show={!!pending}

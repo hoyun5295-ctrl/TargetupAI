@@ -203,8 +203,11 @@ export function useAlimtalkChannel({
     vars.forEach((v) => {
       // 자동 매핑: #{name} → @@name@@ (고객 필드 자동 치환 placeholder)
       const inner = v.replace(/^#\{|\}$/g, '').trim();
-      const fieldKey = customerFieldOptions.find(
-        (f) => f.key === inner || f.label === inner,
+      // ★ 2026-09-25 정확히 같은 칸 이름을 먼저, 없을 때만 라벨(Codex 2R 범위 밖 · 알림톡 창 자동 연결과 같은 뿌리).
+      //   한 번에 찾으면 앞쪽의 라벨 일치(name · 라벨 "이름")가 정확한 칸(이름)을 이겨 #{name}·#{이름} 이 같은 값으로 나갔다.
+      const fieldKey = (
+        customerFieldOptions.find((f) => f.key === inner)
+        || customerFieldOptions.find((f) => f.label === inner)
       )?.key;
       next[v] = fieldKey ? `@@${fieldKey}@@` : value.variableMap[v] || '';
     });

@@ -54,6 +54,8 @@ import AlimtalkChannelPanel, {
 } from './alimtalk/AlimtalkChannelPanel';
 import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 import '../styles/direct-send.css';
+import RecipientDirectInputModal, { type PastePreview, type RowAddResult } from './direct-send/RecipientDirectInputModal';
+import { checkDirectSendPaste, planAppend } from '../utils/recipient-paste';
 // ★ 2026-09-25 보내기 전 점검(스팸 검사 · 맞춤법 검사) · 발송 바 · 발송 전 경고 · 요금제 안내
 import DirectCheckTiles, { type SpamTileState, type SpellTileState } from './direct-send/DirectCheckTiles';
 import DirectSpellModal from './direct-send/DirectSpellModal';
@@ -316,7 +318,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const [showDirectInput, setShowDirectInput] = useState(false);
   const [dedupEnabled, setDedupEnabled] = useState(true);
   const [unsubFilterEnabled, setUnsubFilterEnabled] = useState(true);
-  const [directInputText, setDirectInputText] = useState('');
   const [directSearchQuery, setDirectSearchQuery] = useState('');
   const [selectedRecipients, setSelectedRecipients] = useState<Set<number>>(new Set());
   // ★ 2026-09-25 명단이 바뀌면(파일·주소록·직접입력·발송 뒤 비움) 선택을 비운다 — 선택은 순번이라 새 명단에서는 다른 번호를 가리킨다.
@@ -1807,93 +1808,66 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
         )}
 
         {/* ============ 직접입력 모달 ============ */}
-        {showDirectInput && (() => {
+        {/* ★ 2026-09-25 직접입력 창 = 알림톡·브랜드와 같은 공용 창(Harold 목업 v2). 두 방식 토글 · 입력하는 동안 검수.
+            더하기 규칙은 원래 그대로다: 여러 줄 = 유효한 번호를 전부 더함(중복은 보낼 때 [중복제거]가 뺀다) · 한 건씩 = 한 줄씩 더함.
+            처음 열리는 방식도 원래대로 — 문구에 변수가 있으면 한 건씩, 없으면 붙여넣기(언제든 바꿀 수 있다). */}
+        {(() => {
           const usedVars = directSendChannel === 'sms'
             ? DIRECT_VAR_MAP.filter(v => directMessage.includes(v.variable)).map(v => v.fieldKey)
             : [];
+          const rowFieldKeys = usedVars.length > 0 ? usedVars : ['name'];
+          const varOf = (f: string) => DIRECT_VAR_MAP.find(v => v.fieldKey === f)?.variable;
+          const previewPaste = (text: string): PastePreview => {
+            const check = checkDirectSendPaste(text);
+            const plan = planAppend(check.phones, directRecipients.map((r: any) => r?.phone), false);
+            return {
+              add: plan.add.length,
+              notes: plan.dup > 0
+                ? [dedupEnabled
+                  ? { text: `중복 ${plan.dup.toLocaleString()} · 보낼 때 빠져요`, tone: 'neutral' as const }
+                  : { text: `같은 번호 ${plan.dup.toLocaleString()} · 중복제거가 꺼져 있어 여러 번 나가요`, tone: 'warn' as const }]
+                : [],
+              invalid: check.invalid,
+            };
+          };
+          const onSubmitPaste = (text: string) => {
+            const newRecipients = checkDirectSendPaste(text).phones
+              .map(phone => ({ phone, name: '', extra1: '', extra2: '', extra3: '', callback: '' }));
+            setDirectRecipients(prev => [...prev, ...newRecipients]);
+            setDirectInputMode('direct');
+          };
+          const onAddRow = (values: Record<string, string>): RowAddResult => {
+            const phone = normalizePhoneKr(values.phone);
+            if (!phone || phone.length < 10) return { ok: false, error: '수신번호를 확인해 주세요(10자리 이상 숫자)' };
+            const entry: any = { phone, name: '', extra1: '', extra2: '', extra3: '', callback: '' };
+            rowFieldKeys.forEach(f => {
+              const val = values[f] || '';
+              entry[f] = f === 'callback' ? normalizePhoneKr(val) : val;
+            });
+            setDirectRecipients(prev => [...prev, entry]);
+            setDirectInputMode('direct');
+            return { ok: true, phone };
+          };
           return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[550px] max-h-[90vh] overflow-hidden">
-                <div className="px-5 py-3 border-b bg-emerald-50 flex justify-between items-center">
-                  <div>
-                    <h3 className="font-semibold text-[14px] text-emerald-900 flex items-center gap-2">
-                      <PencilLine size={14} strokeWidth={1.75} />
-                      직접입력
-                    </h3>
-                    <p className="text-[11.5px] text-emerald-700/80 mt-0.5">
-                      {usedVars.length > 0
-                        ? `메시지에 사용된 변수: ${usedVars.map(f => DIRECT_FIELD_LABELS[f] || f).join(', ')}`
-                        : '수신번호를 입력해주세요 (한 줄에 하나씩 또는 한 건씩 추가)'}
-                    </p>
-                  </div>
-                  <button onClick={() => setShowDirectInput(false)} className="text-stone-500 hover:text-stone-700">
-                    <X size={16} strokeWidth={1.75} />
-                  </button>
-                </div>
-                <div className="p-5">
-                  {usedVars.length === 0 ? (
-                    <>
-                      <div className="mb-2 text-xs text-stone-500">전화번호를 한 줄에 하나씩 입력</div>
-                      <textarea value={directInputText} onChange={(e) => setDirectInputText(e.target.value)}
-                        placeholder={'01012345678\n01087654321\n01011112222'}
-                        className="w-full h-[200px] border rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex gap-2 items-end mb-3">
-                        <div className="flex-1">
-                          <label className="block text-xs font-medium text-stone-600 mb-1">수신번호 *</label>
-                          <input id="directInputPhone" type="text" placeholder="01012345678"
-                            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-                        </div>
-                        {usedVars.map(f => (
-                          <div key={f} className="flex-1">
-                            <label className="block text-xs font-medium text-stone-600 mb-1">{DIRECT_FIELD_LABELS[f]}</label>
-                            <input id={`directInput_${f}`} type="text" placeholder={DIRECT_FIELD_LABELS[f]}
-                              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-                          </div>
-                        ))}
-                        <button onClick={() => {
-                          const phoneEl = document.getElementById('directInputPhone') as HTMLInputElement;
-                          const phone = normalizePhoneKr(phoneEl?.value);
-                          if (!phone || phone.length < 10) { setToast({ show: true, type: 'error', message: '유효한 수신번호를 입력해주세요' }); return; }
-                          const entry: any = { phone, name: '', extra1: '', extra2: '', extra3: '', callback: '' };
-                          usedVars.forEach(f => {
-                            const el = document.getElementById(`directInput_${f}`) as HTMLInputElement;
-                            const val = el?.value || '';
-                            entry[f] = f === 'callback' ? normalizePhoneKr(val) : val;
-                          });
-                          setDirectRecipients(prev => [...prev, entry]);
-                          phoneEl.value = '';
-                          usedVars.forEach(f => { const el = document.getElementById(`directInput_${f}`) as HTMLInputElement; if (el) el.value = ''; });
-                          phoneEl.focus();
-                          setDirectInputMode('direct');
-                        }} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium shrink-0">추가</button>
-                      </div>
-                      {directRecipients.length > 0 && (
-                        <div className="text-xs text-emerald-600 font-medium">✅ {directRecipients.length}건 추가됨</div>
-                      )}
-                    </>
-                  )}
-                </div>
-                <div className="px-5 py-3 border-t bg-stone-50 flex justify-end gap-2">
-                  <button onClick={() => setShowDirectInput(false)} className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-stone-100">닫기</button>
-                  {usedVars.length === 0 && (
-                    <button onClick={() => {
-                      const lines = directInputText.split('\n').map(l => l.trim()).filter(l => l);
-                      const newRecipients = lines
-                        .map(line => ({ phone: normalizePhoneKr(line), name: '', extra1: '', extra2: '', extra3: '', callback: '' }))
-                        .filter(r => r.phone && r.phone.length >= 10);
-                      setDirectRecipients(prev => [...prev, ...newRecipients]);
-                      setDirectInputText('');
-                      setShowDirectInput(false);
-                      setDirectInputMode('direct');
-                    }} className="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-medium">등록</button>
-                  )}
-                </div>
-              </div>
-            </div>
+            <RecipientDirectInputModal
+              open={showDirectInput}
+              onClose={() => setShowDirectInput(false)}
+              tone="emerald"
+              unit="건"
+              currentCount={directRecipients.length}
+              pasteHint="메모장·엑셀에서 복사해 붙여넣기 · 한 줄에 하나씩"
+              pastePlaceholder={'01012345678\n01087654321\n01011112222'}
+              previewPaste={previewPaste}
+              onSubmitPaste={onSubmitPaste}
+              pasteWarning={usedVars.length > 0
+                ? `문구에 ${usedVars.map(f => varOf(f) || f).join(' ')} 가 있어요. 번호만 넣은 줄은 그 값이 비어요 · 값까지 넣으려면 [변수와 함께 한 건씩]`
+                : null}
+              rows={directSendChannel === 'sms' ? {
+                fields: rowFieldKeys.map(f => ({ key: f, label: DIRECT_FIELD_LABELS[f] || f, tag: varOf(f) })),
+                initial: usedVars.length > 0,
+                onAdd: onAddRow,
+              } : undefined}
+            />
           );
         })()}
 

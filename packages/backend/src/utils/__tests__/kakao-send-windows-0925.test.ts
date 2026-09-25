@@ -418,7 +418,7 @@ describe('8. 수신자 열 모양 — 0925 밤 Harold 스크린샷 퇴행 고정
     expect(tab).toContain('min-width: 0;');
     expect(tab).toContain('flex: 1 1 auto;');
     expect(css).toContain('.ks-recipients > .ds-rtab-group { flex: 0 0 auto; }');
-    expect(css).toContain('.ks-recipients { container-type: inline-size; }');
+    expect(css).toContain('.ks-recipients { container-type: inline-size; row-gap: 16px; }');
     expect(css).toContain('@container (max-width: 420px) {');
   });
 
