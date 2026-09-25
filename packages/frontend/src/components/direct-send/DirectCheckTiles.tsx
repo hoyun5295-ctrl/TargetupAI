@@ -30,10 +30,10 @@ export default function DirectCheckTiles({ spam, spell, onSpam, onSpell }: Props
   let spamGo = '검사';
   if (spam.state === 'running') {
     spamCls = 'ds-tile--run'; spamIcon = <Loader2 size={18} strokeWidth={2} className="animate-spin" />;
-    spamTitle = '스팸 검사 중'; spamSub = '3사 테스트폰으로 보내는 중'; spamGo = '';
+    spamTitle = '스팸 검사 중'; spamSub = '통신사 3사 결과 확인 중'; spamGo = '';
   } else if (spam.state === 'pass') {
     spamCls = 'ds-tile--pass'; spamIcon = <Check size={18} strokeWidth={2.6} />;
-    spamTitle = '스팸 검사 통과'; spamSub = '3사 모두 받았어요'; spamGo = '다시';
+    spamTitle = '스팸 검사 통과'; spamSub = '3사 모두 통과했어요'; spamGo = '다시';
   } else if (spam.state === 'blocked') {
     spamCls = 'ds-tile--issue'; spamIcon = <Ban size={18} strokeWidth={2.2} />;
     spamTitle = `${spam.carriersText}에서 막힘`; spamSub = '글을 고친 뒤 다시 검사해 주세요'; spamGo = '보기';

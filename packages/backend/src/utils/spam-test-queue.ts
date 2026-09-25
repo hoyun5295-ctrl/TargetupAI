@@ -160,7 +160,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
       `SELECT id, carrier, phone FROM spam_filter_devices WHERE is_active = true ORDER BY carrier`
     );
     if (devices.rows.length === 0) {
-      return { ok: false, error: '등록된 테스트폰이 없습니다. 관리자에게 문의하세요.' };
+      return { ok: false, error: '지금은 스팸 검사를 할 수 없습니다. 관리자에게 문의하세요.' };
     }
 
     const messageTypes: string[] = [];

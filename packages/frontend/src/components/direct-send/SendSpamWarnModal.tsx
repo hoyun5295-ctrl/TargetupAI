@@ -6,9 +6,10 @@
  * 맞춤법 고칠 곳이 남아 있으면 한 줄을 함께 싣는다.
  * "24시간 다시 보지 않기"는 **검사를 안 한 경우의 안내에만** 있다. 막힘·미완료는 매번 보인다(알고 있는 실패라서).
  * ⛔ 막지 않는다 — [그냥 보내기]는 언제나 누를 수 있다.
+ * ★0925 Harold A안: 안내는 문단이 아니라 그림 세 칸(스팸 차단에 걸림 → 고객 스팸함으로 → 비용은 청구) + 한 줄씩.
  */
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Ban, Loader2, ShieldCheck, X } from 'lucide-react';
+import { AlertTriangle, Ban, ChevronRight, CircleCheck, Filter, Loader2, MailX, Receipt, ShieldCheck, X } from 'lucide-react';
 
 export type SendWarnVariant = 'none' | 'blocked' | 'running' | 'warn' | 'spell';
 
@@ -69,8 +70,8 @@ export default function SendSpamWarnModal({
               {variant === 'spell' && '맞춤법 고칠 곳이 남아 있어요'}
             </b>
             <small>
-              {variant === 'none' && '보내기 전에 한 번만 확인해 보세요.'}
-              {variant === 'blocked' && '이대로 보내면 그 통신사 고객은 문자를 보지 못할 수 있어요.'}
+              {variant === 'none' && '정상 문자도 고객 스팸함으로 갈 수 있어요'}
+              {variant === 'blocked' && '글을 고친 뒤 다시 검사해 보세요'}
               {variant === 'running' && '결과가 나온 뒤 보내면 막히는지 확인할 수 있어요. 1분 안에 끝나요.'}
               {variant === 'warn' && `${carriersText}의 결과가 오지 않았어요. 다시 검사해 보세요.`}
               {variant === 'spell' && '고친 뒤 보내면 받는 사람이 보는 글이 깔끔해져요.'}
@@ -81,22 +82,36 @@ export default function SendSpamWarnModal({
 
         <div className="ds-dlg__body">
           {(variant === 'none' || variant === 'blocked') && (
-            <div className="ds-warn-card">
-              <p>정상적인 문자도 통신사의 스팸 차단 서비스에 걸리면 고객 휴대폰의 <b>스팸 메시지함</b>으로 들어가요.</p>
-              <div className="ds-warn-chips">
-                <span>SKT T스팸필터링</span><span>KT 스팸차단</span><span>LG U+ 스팸차단</span>
+            <div className="ds-warn-flow" role="list" aria-label="스팸 차단에 걸리면 생기는 일">
+              <div role="listitem" className={`ds-warn-step ${variant === 'blocked' ? 'ds-warn-step--blocked' : 'ds-warn-step--hit'}`}>
+                <Filter size={19} strokeWidth={2} aria-hidden />
+                <b>{variant === 'blocked' ? `${carriersText}에서 막힘` : '스팸 차단에 걸림'}</b>
+                <small>{variant === 'blocked' ? '이번 검사 결과' : '통신사 3사'}</small>
               </div>
-              <p>
-                스팸 메시지함으로 들어간 문자는 고객이 보지 못하지만, 통신사에는 전달된 것으로 처리되어 <b>발송 비용은 그대로 청구</b>돼요.
-                마케팅 효과 없이 비용만 나가는 셈이에요.
-              </p>
-              {variant === 'none' && (
-                <p className="ds-warn-good">
-                  <ShieldCheck size={14} strokeWidth={2.2} />
-                  한줄로 스팸 검사로 통신사 3사 테스트폰에 먼저 보내 보면 이런 일을 막을 수 있어요.
-                </p>
-              )}
+              <ChevronRight className="ds-warn-arrow" size={14} strokeWidth={2.2} aria-hidden />
+              <div role="listitem" className="ds-warn-step">
+                <MailX size={19} strokeWidth={2} aria-hidden />
+                <b>고객 스팸함으로</b>
+                <small>고객은 못 봐요</small>
+              </div>
+              <ChevronRight className="ds-warn-arrow" size={14} strokeWidth={2.2} aria-hidden />
+              <div role="listitem" className="ds-warn-step ds-warn-step--cost">
+                <Receipt size={19} strokeWidth={2} aria-hidden />
+                <b>비용은 청구</b>
+                <small>효과 없이 지출</small>
+              </div>
             </div>
+          )}
+          {variant === 'none' && (
+            <>
+              <div className="ds-warn-chips">
+                <em>걸리는 곳</em><span>SKT T스팸필터링</span><span>KT 스팸차단</span><span>LG U+ 스팸차단</span>
+              </div>
+              <p className="ds-warn-good">
+                <CircleCheck size={15} strokeWidth={2.2} aria-hidden />
+                스팸 검사 1분이면 미리 막을 수 있어요
+              </p>
+            </>
           )}
           {variant === 'warn' && (
             <div className="ds-warn-card ds-warn-card--amber">

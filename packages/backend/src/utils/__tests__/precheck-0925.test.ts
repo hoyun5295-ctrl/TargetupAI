@@ -418,8 +418,18 @@ describe('8. 화면 계약', () => {
     expect(warn).toContain('SKT T스팸필터링');
     expect(warn).toContain('KT 스팸차단');
     expect(warn).toContain('LG U+ 스팸차단');
-    expect(warn).toContain('발송 비용은 그대로 청구');
     expect(warn).toMatch(/variant === 'none' && \(\s*<label className="ds-warn-dismiss">/);
+  });
+  it('★Harold 0925 A안 — 안내는 그림 세 칸(걸림 → 스팸함 → 비용 청구) · 긴 문단 없음 · 단어 단위 줄바꿈', () => {
+    const flow = warn.slice(warn.indexOf('<div className="ds-warn-flow"'), warn.indexOf("{variant === 'none' && (\n            <>"));
+    expect(flow).toContain("'스팸 차단에 걸림'");
+    expect(flow).toContain('<b>고객 스팸함으로</b>');
+    expect(flow).toContain('<b>비용은 청구</b>');
+    expect((flow.match(/className="ds-warn-arrow"/g) || []).length).toBe(2);
+    expect(warn).not.toContain('<div className="ds-warn-card">');
+    const css = readFront('styles/direct-send.css');
+    expect(css).toMatch(/\.ds-warn-step b \{[^}]*word-break: keep-all;/);
+    expect(css).toMatch(/\.ds-warn-step small \{[^}]*word-break: keep-all;/);
   });
   it('다시 보지 않기 — 사용자별 24시간', () => {
     const store = new Map<string, string>();
@@ -440,6 +450,23 @@ describe('8. 화면 계약', () => {
     expect(modal).not.toMatch(/max-height|min-height/);
     expect(css).toContain('.ds-scope { --ds-editor-cap: none; }');
     expect(css).toContain('.ds-scope { --ds-editor-cap: 420px; }');
+  });
+  it('★Harold 0925 — 스팸 검사 사용자 문구에 "테스트폰" 0(검사 방식을 드러내지 않는다 · 주석 제외)', () => {
+    const codeLines = (src: string) => src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l));
+    const files: Array<[string, string]> = [
+      ['front', 'components/SpamFilterTestModal.tsx'],
+      ['front', 'components/direct-send/DirectCheckTiles.tsx'],
+      ['front', 'components/direct-send/SendSpamWarnModal.tsx'],
+      ['front', 'components/direct-send/TrialUpsellModal.tsx'],
+      ['back', 'content/feature-catalog.ts'],
+      ['back', 'routes/spam-filter.ts'],
+      ['back', 'utils/spam-test-queue.ts'],
+    ];
+    for (const [side, f] of files) {
+      const hits = codeLines(side === 'front' ? readFront(f) : read(f)).filter((l) => l.includes('테스트폰'));
+      expect(hits, f).toEqual([]);
+    }
+    expect(readFront('components/SpamFilterTestModal.tsx')).toContain('{carrierLabel(c)} 스팸 검사</b>');
   });
   it('모델명 0 · native dialog 0(새 화면 파일)', () => {
     const files = [

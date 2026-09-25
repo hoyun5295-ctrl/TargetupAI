@@ -1847,10 +1847,21 @@
 .ds-warn-card p { margin: 0; font-size: 13px; line-height: 1.65; color: var(--ds-stone-700); word-break: keep-all; }
 .ds-warn-card p b { color: var(--ds-stone-900); }
 .ds-warn-card--amber { border-color: var(--ds-amber-200); background: var(--ds-amber-50); }
-.ds-warn-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.ds-warn-chips span { font-size: 11.5px; font-weight: 700; color: var(--ds-rose-600); background: #FFF1F2; border: 1px solid #FECDD3; border-radius: 999px; padding: 3px 9px; }
-.ds-warn-card p.ds-warn-good { display: flex; gap: 6px; align-items: flex-start; color: var(--ds-emerald-800); font-weight: 600; }
-.ds-warn-good svg { flex: none; margin-top: 4px; color: var(--ds-emerald-600); }
+/* ★0925 Harold A안 — 경고 안내 = 그림 세 칸 흐름(걸림 → 스팸함 → 비용) · 문단 없이 한 줄씩 · 단어 단위 줄바꿈 */
+.ds-warn-flow { display: grid; grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr) 14px minmax(0, 1fr); align-items: stretch; gap: 4px; }
+.ds-warn-step { min-width: 0; border: 1px solid var(--ds-stone-200); background: var(--ds-stone-50); border-radius: 12px; padding: 11px 6px 10px; display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; }
+.ds-warn-step svg { color: var(--ds-stone-600); margin-bottom: 2px; }
+.ds-warn-step b { font-size: 12.5px; font-weight: 700; line-height: 1.35; color: var(--ds-stone-900); word-break: keep-all; }
+.ds-warn-step small { font-size: 11px; line-height: 1.4; color: var(--ds-stone-500); word-break: keep-all; }
+.ds-warn-step--hit svg { color: var(--ds-amber-700); }
+.ds-warn-step--blocked, .ds-warn-step--cost { border-color: #FECDD3; background: #FFF1F2; }
+.ds-warn-step--blocked svg, .ds-warn-step--cost svg { color: var(--ds-rose-600); }
+.ds-warn-arrow { align-self: center; justify-self: center; color: var(--ds-stone-300); }
+.ds-warn-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.ds-warn-chips em { font-style: normal; font-size: 11px; color: var(--ds-stone-400); margin-right: 2px; }
+.ds-warn-chips span { font-size: 11px; font-weight: 600; color: var(--ds-stone-600); background: var(--ds-stone-100); border-radius: 999px; padding: 3px 9px; }
+p.ds-warn-good { margin: 0; display: flex; gap: 7px; align-items: center; padding: 9px 11px; border-radius: 10px; background: var(--ds-emerald-50); color: var(--ds-emerald-800); font-size: 12.5px; font-weight: 600; line-height: 1.45; word-break: keep-all; }
+.ds-warn-good svg { flex: none; color: var(--ds-emerald-600); }
 .ds-warn-spell { display: flex; align-items: center; gap: 8px; border: 1px solid #FECDD3; background: #FFF1F2; border-radius: 10px; padding: 9px 12px; font-size: 12.5px; color: #BE123C; font-weight: 500; }
 .ds-warn-spell button { margin-left: auto; border: 0; background: transparent; color: var(--ds-rose-600); font-weight: 700; font-size: 12.5px; cursor: pointer; font-family: inherit; }
 .ds-warn-dismiss { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ds-stone-600); cursor: pointer; user-select: none; margin-top: 2px; }

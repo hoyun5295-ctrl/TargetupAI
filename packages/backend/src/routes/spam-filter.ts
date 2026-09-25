@@ -147,7 +147,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
        WHERE is_active = true ORDER BY carrier`
     );
     if (devices.rows.length === 0) {
-      return res.status(400).json({ error: '등록된 테스트폰이 없습니다. 관리자에게 문의하세요.' });
+      return res.status(400).json({ error: '지금은 스팸 검사를 할 수 없습니다. 관리자에게 문의하세요.' });
     }
 
     // 5) 발송 건수 계산 + 메시지 타입 결정
@@ -419,7 +419,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       success: true,
       testId,
       totalCount: spamSendCount,
-      message: `${devices.rows.length}대 테스트폰에 ${messageTypes.join('/')} 발송 완료 (${spamSendCount}건)`,
+      message: `스팸 검사 시작 (${messageTypes.join('/')} ${spamSendCount}건)`,
       timeoutSeconds: TEST_TIMEOUT_MS / 1000,
       deducted: spamDeductAmount,
       trial: trialMode,

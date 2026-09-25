@@ -1,7 +1,8 @@
 /**
  * SpamFilterTestModal — 스팸 검사 창
  * ★ 2026-09-25 화면 개편(Harold "스팸필터테스트 검사 창도 너무 올드해" · 목업 승인)
- *   - 상태 카드(60초 원형 타이머 · 통과/막힘/결과 없음과 다음 할 일) · 통신사별 한 줄(도착 시간) · 지난 검사(통신사 색 점)
+ *   - 상태 카드(60초 원형 타이머 · 통과/막힘/결과 없음과 다음 할 일) · 통신사별 한 줄(통과 확인 시간) · 지난 검사(통신사 색 점)
+ *   - ★0925 Harold: 사용자 문구에 "테스트폰"·기기 대수 표현을 쓰지 않는다(검사 방식을 드러내지 않는다) · 통신사별 줄 = "SKT 스팸 검사"
  *   - 무료 체험(미가입 3회 · 차감 0) / 유료(테스트 문자 발송 요금 청구) 한 줄 · 진행 중 중복·잔액 부족을 같은 카드 안에서 안내
  *   - 판정 규칙·API·폴링·타이머·이력 조회는 원본 그대로(화면만 바꿨다). 창을 여는 곳 4곳(대시보드·자동발송·모바일 DM·여정)의
  *     넘기는 값은 그대로이고, `onEdit`만 선택으로 더했다(없으면 [글 고치러 가기] = 닫기).
@@ -291,19 +292,19 @@ export default function SpamFilterTestModal({
 
   const laneOf = (carrier: string) => {
     const r = results.find((x) => x.carrier === carrier);
-    if (status === 'ready' || !r) return { cls: 'wait', chip: '대기', sub: '검사를 시작하면 이 번호로 보내요' };
+    if (status === 'ready' || !r) return { cls: 'wait', chip: '대기', sub: '검사를 시작하면 결과가 여기에 나와요' };
     if (r.received) {
       const at = r.received_at ? new Date(r.received_at).getTime() : null;
       const base = serverTestCreatedRef.current;
       const sec = at && base ? Math.max(0, (at - base) / 1000) : null;
-      return { cls: 'ok', chip: '받았어요', sub: sec != null ? `보낸 뒤 ${sec.toFixed(1)}초 만에 도착` : '테스트폰에 도착했어요' };
+      return { cls: 'ok', chip: '통과', sub: sec != null ? `${sec.toFixed(1)}초 만에 통과 확인` : '막히지 않았어요' };
     }
     if (status === 'completed') {
-      if (r.result === 'blocked') return { cls: 'block', chip: '막혔어요', sub: '통신사는 전달했는데 휴대폰에 오지 않았어요' };
+      if (r.result === 'blocked') return { cls: 'block', chip: '막혔어요', sub: '통신사 스팸 차단에 걸렸어요' };
       if (r.result === 'failed') return { cls: 'block', chip: '전달 실패', sub: '통신사가 문자를 받지 않았어요' };
       return { cls: 'warn', chip: '결과 없음', sub: '60초 안에 통신사 결과가 오지 않았어요' };
     }
-    return { cls: 'run', chip: '확인 중', sub: '테스트폰이 받는지 보고 있어요' };
+    return { cls: 'run', chip: '확인 중', sub: '통신사 결과를 확인하고 있어요' };
   };
 
   // 로딩 중 표시
@@ -331,7 +332,7 @@ export default function SpamFilterTestModal({
           </span>
           <div className="min-w-0">
             <h3 id="sft-title" className="text-base font-extrabold text-stone-900">스팸 검사</h3>
-            <p className="text-xs text-stone-500 mt-0.5 break-keep">통신사 3사 테스트폰으로 실제로 보내 막히는지 확인해요</p>
+            <p className="text-xs text-stone-500 mt-0.5 break-keep">통신사 3사에서 이 글이 스팸으로 막히는지 확인해요</p>
           </div>
           <div className="ml-auto inline-flex bg-stone-100 rounded-[10px] p-[3px] gap-0.5 ring-1 ring-inset ring-stone-200 shrink-0">
             {(['test', 'history'] as const).map((t) => (
@@ -406,9 +407,9 @@ export default function SpamFilterTestModal({
                     <span className="text-[15px] font-extrabold tabular-nums">{countdown}</span>
                   </span>
                   <div className="min-w-0">
-                    <h4 className="text-[16px] font-extrabold leading-snug break-keep">테스트폰이 받는지 보고 있어요</h4>
+                    <h4 className="text-[16px] font-extrabold leading-snug break-keep">통신사 3사 결과를 확인하고 있어요</h4>
                     <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">
-                      <b className="tabular-nums">{totalCount || results.length || 3}</b>대 중 <b className="tabular-nums">{receivedCount}</b>대가 받았어요. 창을 닫아도 검사는 계속되고, 다시 열면 이어서 보여요.
+                      <b className="tabular-nums">{totalCount || results.length || 3}</b>곳 중 <b className="tabular-nums">{receivedCount}</b>곳이 통과했어요. 창을 닫아도 검사는 계속되고, 다시 열면 이어서 보여요.
                     </p>
                   </div>
                 </div>
@@ -416,7 +417,7 @@ export default function SpamFilterTestModal({
                 <div className="rounded-2xl p-4 flex items-center gap-3.5 border border-emerald-200 bg-emerald-50">
                   <span className="w-14 h-14 rounded-2xl grid place-items-center bg-emerald-600 text-white shrink-0"><Check className="w-7 h-7" strokeWidth={2.6} /></span>
                   <div className="min-w-0">
-                    <h4 className="text-[16px] font-extrabold leading-snug text-emerald-800 break-keep">3사 테스트폰이 모두 받았어요</h4>
+                    <h4 className="text-[16px] font-extrabold leading-snug text-emerald-800 break-keep">3사 스팸 검사를 모두 통과했어요</h4>
                     <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">이 글은 이번 검사에서 막히지 않았어요.</p>
                   </div>
                 </div>
@@ -441,7 +442,7 @@ export default function SpamFilterTestModal({
                   <span className="w-14 h-14 rounded-2xl grid place-items-center bg-amber-500 text-white shrink-0"><ShieldCheck className="w-7 h-7" strokeWidth={2.1} /></span>
                   <div className="min-w-0">
                     <h4 className="text-[16px] font-extrabold leading-snug break-keep">보내기 전에 막히는지 확인해 볼까요?</h4>
-                    <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">지금 글 그대로 SKT · KT · LG U+ 테스트폰에 한 통씩 보내요. 1분 안에 끝나요.</p>
+                    <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">지금 글 그대로 SKT · KT · LG U+ 3사에서 확인해요. 1분 안에 끝나요.</p>
                   </div>
                 </div>
               )}
@@ -460,7 +461,7 @@ export default function SpamFilterTestModal({
                       <div key={c} className={`flex items-center gap-3 px-3.5 py-3 ${i > 0 ? 'border-t border-stone-100' : ''}`}>
                         <span className="w-[52px] h-8 rounded-[9px] bg-stone-100 grid place-items-center text-xs font-extrabold text-stone-700 shrink-0">{carrierLabel(c)}</span>
                         <div className="flex-1 min-w-0">
-                          <b className="text-[13px] font-bold">{carrierLabel(c)} 테스트폰</b>
+                          <b className="text-[13px] font-bold">{carrierLabel(c)} 스팸 검사</b>
                           <small className="block text-[11.5px] text-stone-500 mt-0.5 break-keep">{l.sub}</small>
                           {l.cls === 'run' && (
                             <div className="h-1 rounded bg-stone-200 overflow-hidden mt-1.5"><i className="block h-full w-[30%] rounded bg-amber-400 animate-pulse" /></div>
@@ -477,7 +478,7 @@ export default function SpamFilterTestModal({
 
               {/* 보내는 양 · 요금 */}
               <div className="flex flex-wrap gap-1.5">
-                <span className="text-[11.5px] text-stone-600 bg-stone-100 rounded-[7px] px-2 py-1">{messageType === 'SMS' ? '단문(SMS)' : '장문(LMS)'} <b className="text-stone-900">1통씩</b> · 통신사 3사 테스트폰</span>
+                <span className="text-[11.5px] text-stone-600 bg-stone-100 rounded-[7px] px-2 py-1">{messageType === 'SMS' ? '단문(SMS)' : '장문(LMS)'} <b className="text-stone-900">1통씩</b> · 통신사 3사</span>
                 {checkStatus && (isTrial ? (
                   <span className="text-[11.5px] text-violet-700 bg-violet-50 ring-1 ring-inset ring-violet-200 rounded-[7px] px-2 py-1">
                     무료 체험 <b className="tabular-nums">{Math.max(0, trial?.remaining ?? 0)}</b>회 남음 · 차감 없음
@@ -558,7 +559,7 @@ export default function SpamFilterTestModal({
                             </div>
                             <div className="flex flex-col gap-1.5">
                               {historyDetail.results.map((r: any, idx: number) => {
-                                const chip = r.received ? ['받았어요', 'bg-emerald-50 text-emerald-700 ring-emerald-200']
+                                const chip = r.received ? ['통과', 'bg-emerald-50 text-emerald-700 ring-emerald-200']
                                   : r.result === 'blocked' ? ['막혔어요', 'bg-rose-50 text-rose-700 ring-rose-200']
                                     : r.result === 'failed' ? ['전달 실패', 'bg-rose-50 text-rose-700 ring-rose-200']
                                       : r.result === 'timeout' ? ['결과 없음', 'bg-amber-50 text-amber-800 ring-amber-200']
