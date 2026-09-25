@@ -64,6 +64,7 @@ import DirectSendPanel from '../components/DirectSendPanel';
 import AlimtalkSendModal from '../components/AlimtalkSendModal';
 // ★ 2026-07-29 브랜드메시지 발송 풀 화면 — 알림톡과 같은 진입 패턴, 성격은 다르다(템플릿 검수 불필요)
 import BrandSendModal from '../components/BrandSendModal';
+import { carryPhonesToDirectRecipients } from '../utils/send-checks';
 import AgencySendIntroModal from '../components/agency/AgencySendIntroModal';
 // ★ 2026-08-16 AI 마케팅 진단(퍼널 A — 설계서 §5-2·§5-3): FREE 진단 → TRIAL 7일 자동 지급
 import DiagnosisModal from '../components/marketing-diagnosis/DiagnosisModal';
@@ -3696,6 +3697,24 @@ const campaignData = {
       <BrandSendModal
         show={showBrandSend}
         onClose={() => { setShowBrandSend(false); setBrandInitialRecipients([]); }}
+        // ★ 2026-09-25 브랜드 창 머리의 채널 전환 — 이 창을 닫고(닫기와 같은 정리) 그 창을 연다.
+        //   알림톡으로 갈 때는 지금 명단의 번호를 넘긴다(직접발송 → 알림톡과 같은 축). 문자 발송은 창이 열려 있으면 그대로 드러난다.
+        onSwitchChannel={(to, phones) => {
+          setShowBrandSend(false);
+          setBrandInitialRecipients([]);
+          if (to === 'alimtalk') {
+            setAlimtalkInitialRecipients(phones.map((phone) => ({ phone })));
+            setShowAlimtalkSend(true);
+          } else {
+            // ★Codex 8R — 문자 발송으로도 지금 명단을 넘긴다(번호 집합이 같으면 그대로 · 바뀐 것만 반영 · 빈 명단은 덮지 않음)
+            const carried = carryPhonesToDirectRecipients(phones, directRecipients);
+            if (carried) {
+              setDirectRecipients(carried);
+              setToast({ show: true, type: 'success', message: `지금 명단 ${carried.length.toLocaleString()}명을 문자 발송으로 가져왔어요` });
+            }
+            if (!showDirectSend) setShowDirectSend(true);
+          }
+        }}
         profiles={alimtalkSenders}
         initialRecipients={brandInitialRecipients}
         entry={brandEntry}
@@ -3784,6 +3803,26 @@ const campaignData = {
           //   Harold 기대 = 알림톡 직접발송 팝업 잔존 유지 (사용자 직접 close 의무 영역).
         }}
         setToast={setToast}
+        // ★ 2026-09-25 알림톡 창 머리의 채널 전환 — 이 창을 닫고(닫기와 같은 정리) 그 창을 연다.
+        //   브랜드메시지로 갈 때는 지금 명단의 번호를 넘긴다(직접발송 → 브랜드와 같은 축). 문자 발송은 창이 열려 있으면 그대로 드러난다.
+        onSwitchChannel={(to, phones, rows) => {
+          setShowAlimtalkSend(false);
+          setAlimtalkInitialRecipients([]);
+          setDirectSendChannel('sms');
+          if (to === 'brand') {
+            setBrandInitialRecipients(phones);
+            setBrandEntry('direct');
+            setShowBrandSend(true);
+          } else {
+            // ★Codex 8R·9R — 문자 발송으로도 지금 명단을 넘긴다. 알림톡은 줄 자체로(같은 줄이면 그 줄 · 중복 번호 줄도 정확) · 빈 명단은 덮지 않음
+            const carried = carryPhonesToDirectRecipients(rows ?? phones, directRecipients);
+            if (carried) {
+              setDirectRecipients(carried);
+              setToast({ show: true, type: 'success', message: `지금 명단 ${carried.length.toLocaleString()}명을 문자 발송으로 가져왔어요` });
+            }
+            if (!showDirectSend) setShowDirectSend(true);
+          }
+        }}
       />
 
       {/* ★ 2026-08-21 작성기 부속 모달 3종(특수문자·보관함·문자 저장) — 인라인(이모지 제목·제각각 색·회색 border)에서

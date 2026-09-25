@@ -17,7 +17,8 @@
  */
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Info } from 'lucide-react';
+import { X, Info, LayoutTemplate } from 'lucide-react';
+import BrandMessagePreview from '../BrandMessagePreview';
 import { BRAND_SPEC, type BrandSpec } from '../../constants/brand-message-spec';
 
 export type BrandTypeAccent = 'violet' | 'indigo';
@@ -106,8 +107,42 @@ interface BrandTypePickerModalProps {
   accent?: BrandTypeAccent;
 }
 
+/**
+ * ★2026-09-25 유형마다 보여 줄 예시 화면(받는 사람 화면 그대로 · Harold 목업 v2 승인).
+ *   규격 숫자는 여기 적지 않는다 — 칩은 여전히 brandTypeChips(규격 사본)가 만든다. 여기는 그림용 예시 글뿐이다.
+ */
+const TYPE_EXAMPLE: Record<string, Record<string, any>> = {
+  TEXT: { message: '새로 나온 소식을 전해 드려요.\n자세한 내용은 아래 버튼에서 확인해 주세요.', buttons: [{ name: '자세히 보기', type: 'WL' }] },
+  IMAGE: { message: '이번 주 새로 나온 소식이에요.', buttons: [{ name: '자세히 보기', type: 'WL' }] },
+  WIDE: { message: '지금 확인해 보세요', buttons: [{ name: '보러 가기', type: 'WL' }] },
+  WIDE_ITEM_LIST: {
+    header: '이번 주 추천',
+    rich: { items: [{ title: '첫 번째 소식' }, { title: '두 번째 소식' }, { title: '세 번째 소식' }] },
+    buttons: [{ name: '더 보기', type: 'WL' }],
+  },
+  CAROUSEL_FEED: {
+    rich: { carousel: { cards: [
+      { header: '첫 번째 카드', message: '카드마다 이미지와 글', additional: '', buttons: ['자세히 보기'] },
+      { header: '두 번째 카드', message: '옆으로 넘겨 봐요', additional: '', buttons: ['자세히 보기'] },
+    ], tail: false } },
+  },
+  PREMIUM_VIDEO: { header: '새 영상', message: '짧은 영상으로 소개해요', rich: { video: {} }, buttons: [{ name: '보러 가기', type: 'WL' }] },
+  COMMERCE: {
+    rich: { additional: '상품 설명 한 줄', commerce: { title: '상품 이름', regular: '20000', discount: '16000', rate: '20' } },
+    buttons: [{ name: '구매하기', type: 'WL' }],
+  },
+  CAROUSEL_COMMERCE: {
+    rich: { carousel: { cards: [
+      { header: '', message: '', additional: '', commerce: { title: '상품 A', regular: '20000', discount: '16000', rate: '20' }, buttons: ['구매하기'] },
+      { header: '', message: '', additional: '', commerce: { title: '상품 B', regular: '30000', discount: '24000', rate: '20' }, buttons: ['구매하기'] },
+    ], tail: false } },
+  },
+};
+
+const ACCENT_HEX: Record<BrandTypeAccent, string> = { violet: '#7C3AED', indigo: '#4F46E5' };
+
 export default function BrandTypePickerModal({ show, codes, trialCodes, value, onPick, onClose, accent = 'violet' }: BrandTypePickerModalProps) {
-  const t = TONE[accent];
+  const hex = ACCENT_HEX[accent];
 
   useEffect(() => {
     if (!show) return;
@@ -123,63 +158,51 @@ export default function BrandTypePickerModal({ show, codes, trialCodes, value, o
   if (!show) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[2100] bg-slate-900/40 flex items-center justify-center p-4">
+    <div className="ds-scope ks-picker-back">
       <div
         role="dialog"
         aria-modal="true"
         aria-label="메시지 유형 선택"
-        className="w-full max-w-[680px] max-h-[88vh] flex flex-col bg-white rounded-2xl overflow-hidden ring-1 ring-slate-900/5 shadow-[0_40px_90px_-20px_rgba(15,23,42,0.55)]"
+        className="ks-picker"
+        style={{ ['--ks-accent' as any]: hex }}
       >
-        <div className="shrink-0 flex items-center justify-between gap-3 px-5 pt-4 pb-1">
-          <h2 className="text-[15px] font-semibold text-slate-900 tracking-tight">메시지 유형 선택</h2>
-          <button type="button" onClick={onClose} aria-label="닫기"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
-            <X size={15} strokeWidth={1.9} />
-          </button>
-        </div>
-        <p className="shrink-0 px-5 pb-3 text-[12px] text-slate-500">고르면 바로 적용되고 이 창은 닫힙니다.</p>
-
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-1">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-            {codes.map((code) => {
-              const s = BRAND_SPEC[code];
-              if (!s) return null;
-              const on = code === value;
-              return (
-                <button key={code} type="button" onClick={() => onPick(code)} aria-pressed={on}
-                  className={`relative flex flex-col text-left p-2.5 rounded-xl shadow-sm transition ${
-                    on ? t.cardOn : 'bg-white ring-1 ring-slate-200 hover:ring-slate-300 hover:-translate-y-0.5'
-                  }`}>
-                  {trialCodes?.includes(code) && (
-                    <span className="absolute top-1.5 right-1.5 text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 ring-1 ring-amber-200/70">
-                      시험 발송
-                    </span>
-                  )}
-                  <BrandTypeThumb code={code} active={on} accent={accent} />
-                  <span className={`text-[13px] font-semibold mt-2 ${on ? t.label : 'text-slate-800'}`}>{s.label}</span>
-                  <span className="text-[11px] text-slate-500 leading-snug mt-0.5 min-h-[30px]">{brandTypeDesc(code)}</span>
-                  <span className="flex gap-1 flex-wrap mt-1.5">
-                    {brandTypeChips(s).map((c) => (
-                      <span key={c} className={`text-[10px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap ${on ? t.chipOn : 'bg-slate-100 text-slate-600'}`}>
-                        {c}
-                      </span>
-                    ))}
-                  </span>
-                </button>
-              );
-            })}
+        <div className="ks-picker__head">
+          <span className="ks-picker__ic" style={{ background: hex }}><LayoutTemplate size={18} strokeWidth={2} /></span>
+          <div className="min-w-0">
+            <b>메시지 유형 고르기</b>
+            <small>받는 사람에게 보이는 모습 그대로예요 · 고르면 바로 적용되고 이 창은 닫혀요</small>
           </div>
+          <button type="button" className="ks-pop__x ml-auto" onClick={onClose} aria-label="닫기"><X size={18} strokeWidth={2} /></button>
         </div>
 
-        <div className="shrink-0 flex items-center gap-2.5 px-5 pt-3 pb-4">
+        <div className="ks-picker__grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(236px, 1fr))' }}>
+          {codes.map((code) => {
+            const s = BRAND_SPEC[code];
+            if (!s) return null;
+            const on = code === value;
+            return (
+              <button key={code} type="button" onClick={() => onPick(code)} aria-pressed={on} className={`ks-card ${on ? 'on' : ''}`}>
+                <div className="ks-card__view" style={{ height: 250 }} aria-hidden>
+                  <BrandMessagePreview bubbleType={code} isAd {...(TYPE_EXAMPLE[code] || {})} />
+                </div>
+                <div className="ks-card__meta">
+                  <b>{s.label}</b>
+                  <small>{brandTypeDesc(code)}</small>
+                  <div className="ks-tags">
+                    {brandTypeChips(s).map((c) => <span key={c}>{c}</span>)}
+                    {trialCodes?.includes(code) && <span className="wait">시험 발송</span>}
+                    {on && <span className="ok">지금 쓰는 중</span>}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="ks-picker__foot">
           <Info size={14} strokeWidth={1.9} className="shrink-0 text-slate-400" />
-          <p className="min-w-0 flex-1 text-[11.5px] text-slate-500 leading-relaxed">
-            유형을 바꾸면 버튼과 유형별 입력(아이템·상품·카드)이 초기화됩니다. 본문·수신자·발신 프로필·080 번호는 그대로 남습니다.
-          </p>
-          <button type="button" onClick={onClose}
-            className="shrink-0 px-3.5 py-2 rounded-xl text-[12.5px] font-semibold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 transition">
-            닫기
-          </button>
+          <p className="ks-note">유형을 바꾸면 버튼과 유형별 입력(아이템·상품·카드)이 초기화돼요. 본문·수신자·발신 프로필·080 번호는 그대로 남아요.</p>
+          <button type="button" className="ks-picker__cancel" onClick={onClose}>닫기</button>
         </div>
       </div>
     </div>,

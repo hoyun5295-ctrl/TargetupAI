@@ -302,6 +302,15 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const [directColumnMapping, setDirectColumnMapping] = useState<{ [key: string]: string }>({});
   const [directFileLoading, setDirectFileLoading] = useState(false);
   const [directMappingLoading, setDirectMappingLoading] = useState(false);
+  // ★ 2026-09-25 파일 매핑 세대 — 처리 중 매핑 창을 닫거나(= 취소) 패널이 사라지면(창 닫힘) 늦게 끝난 결과를 발송 명단에 쓰지 않는다
+  //   (주소록 불러오기와 같은 규칙). ⛔ 닫기를 잠그지 않는다 — 처리가 예외로 멈추면 영구히 갇힌다(Codex 12R). 닫기 = 취소다.
+  const mappingSeqRef = useRef(0);
+  useEffect(() => () => { mappingSeqRef.current++; }, []);
+  const closeMapping = () => {
+    mappingSeqRef.current++;
+    setDirectMappingLoading(false);
+    setDirectShowMapping(false);
+  };
   const [directLoadingProgress, setDirectLoadingProgress] = useState(0);
   const [directShowMapping, setDirectShowMapping] = useState(false);
   const [showDirectInput, setShowDirectInput] = useState(false);
@@ -310,6 +319,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const [directInputText, setDirectInputText] = useState('');
   const [directSearchQuery, setDirectSearchQuery] = useState('');
   const [selectedRecipients, setSelectedRecipients] = useState<Set<number>>(new Set());
+  // ★ 2026-09-25 명단이 바뀌면(파일·주소록·직접입력·발송 뒤 비움) 선택을 비운다 — 선택은 순번이라 새 명단에서는 다른 번호를 가리킨다.
+  //   알림톡·브랜드 창과 같은 규칙(Codex 3R 같은 뿌리 · Harold "같은 문제면 같이").
+  useEffect(() => { setSelectedRecipients(new Set()); }, [directRecipients]);
   // ★ D137 (0423 D3): 페이지네이션
   const [directPage, setDirectPage] = useState(0);
 
@@ -806,6 +818,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       setToast({ show: true, type: 'error', message: '수신번호는 필수입니다.' });
       return;
     }
+    const seq = ++mappingSeqRef.current;
     setDirectMappingLoading(true);
     setDirectLoadingProgress(0);
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -848,6 +861,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
 
+    if (seq !== mappingSeqRef.current) return;   // 처리 중 매핑 창을 닫았거나(취소) 패널이 사라졌다 — 명단에 쓰지 않는다
     setDirectRecipients(mapped);
     setDirectMappingLoading(false);
     setDirectShowMapping(false);
@@ -1269,7 +1283,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   className="ds-search-in"
                   placeholder="수신번호 검색"
                   value={directSearchQuery}
-                  onChange={(e) => { setDirectSearchQuery(e.target.value); setDirectPage(0); }}
+                  onChange={(e) => { setDirectSearchQuery(e.target.value); setDirectPage(0); setSelectedRecipients(new Set()); }}
                 />
               </div>
             </div>
@@ -1300,10 +1314,14 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                         <input
                           type="checkbox"
                           className="ds-chk ds-chk--lg"
-                          checked={directRecipients.length > 0 && selectedRecipients.size === directRecipients.length}
+                          // ★ 2026-09-25 선택 범위 = 지금 보이는 목록(검색 결과) — 알림톡·브랜드 창과 같은 규칙(Codex 3R · Harold "같은 문제면 같이").
+                          //   예전에는 검색 중에 누르면 숨은 번호까지 골라 선택삭제가 안 보이는 수신자를 지웠다.
+                          checked={filtered.length > 0 && filtered.every((r) => selectedRecipients.has(r.originalIdx))}
+                          disabled={filtered.length === 0}
                           onChange={(e) => {
-                            if (e.target.checked) setSelectedRecipients(new Set(directRecipients.map((_, i) => i)));
-                            else setSelectedRecipients(new Set());
+                            const visible = filtered.map((r) => r.originalIdx);
+                            if (e.target.checked) setSelectedRecipients(new Set([...selectedRecipients, ...visible]));
+                            else setSelectedRecipients(new Set([...selectedRecipients].filter((i) => !visible.includes(i))));
                           }}
                         />
                       </label>
@@ -1688,7 +1706,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   </h3>
                   <p className="text-[11.5px] text-emerald-700/80 mt-0.5">수신번호 필수, 나머지는 사용할 항목만 선택</p>
                 </div>
-                <button onClick={() => setDirectShowMapping(false)} className="text-stone-500 hover:text-stone-700">
+                {/* ★ 2026-09-25 닫기 = 취소 — 처리 중에 닫으면 늦게 끝난 결과가 사람이 고친 명단을 덮지 않는다 */}
+                <button onClick={closeMapping} className="text-stone-500 hover:text-stone-700">
                   <X size={16} strokeWidth={1.75} />
                 </button>
               </div>
@@ -1777,7 +1796,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               <div className="px-5 py-3 border-t bg-stone-50 flex justify-between items-center">
                 <span className="text-xs text-stone-600">총 <strong>{directFileData.length.toLocaleString()}</strong>건</span>
                 <div className="flex gap-2">
-                  <button onClick={() => setDirectShowMapping(false)} className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-stone-100">취소</button>
+                  <button onClick={closeMapping} className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-stone-100">취소</button>
                   <button onClick={handleMappingApply} disabled={!directColumnMapping.phone || directMappingLoading}
                     className="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold disabled:opacity-50"
                   >{directMappingLoading ? `처리중... ${directLoadingProgress}%` : '등록하기'}</button>

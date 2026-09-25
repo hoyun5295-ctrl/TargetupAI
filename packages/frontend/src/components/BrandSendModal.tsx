@@ -20,9 +20,12 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Megaphone, PencilLine, Upload, Sparkles, Lock, Loader2, Trash2, Users, UserPlus, X, Search } from 'lucide-react';
 import BrandMessageEditor from './BrandMessageEditor';
-import SendWorkspaceShell, { WorkspaceNotice, FIELD_CLASS } from './shared/SendWorkspaceShell';
+import { WorkspaceNotice } from './shared/SendWorkspaceShell';
+import KakaoSendHeader from './kakao-send/KakaoSendHeader';
+import '../styles/direct-send.css';
 import ConfirmDialogShell, { DialogHeadline, DialogRow, DialogCaution } from './shared/ConfirmDialogShell';
 import { BRAND_SPEC } from '../constants/brand-message-spec';
 
@@ -53,6 +56,8 @@ export interface BrandSendModalProps {
    *   이미 받아 둔 값을 그대로 넘긴다(문자 직접발송과 같은 값). 편집기가 이 값으로 080 칸을 채워 잠근다.
    */
   optOutNumber?: string;
+  /** ★ 2026-09-25 머리의 채널 전환(문자 발송 · 알림톡 발송) — 주면 버튼이 보인다. phones = 지금 명단(넘겨 쓰도록) */
+  onSwitchChannel?: (to: 'sms' | 'alimtalk', phones: string[]) => void;
 }
 
 /**
@@ -73,7 +78,7 @@ const normalizePhones = (raw: string): string[] =>
 
 export default function BrandSendModal({
   show, onClose, profiles, initialRecipients, isAiTargetLocked, onLockedFeature, onSend, sending,
-  entry = 'direct', optOutNumber,
+  entry = 'direct', optOutNumber, onSwitchChannel,
 }: BrandSendModalProps) {
   const isTarget = entry === 'target';
   const accent = isTarget ? 'indigo' : 'violet';
@@ -95,6 +100,12 @@ export default function BrandSendModal({
    *   광고성 메시지가 몇 명에게 나가는지 못 보고 누르는 구조였다. payload를 잡아 두고 확인 후 넘긴다.
    */
   const [pending, setPending] = useState<any | null>(null);
+  /**
+   * ★ 2026-09-25 확인 창을 연 순간의 명단(Codex 10R·11R). 확인 창의 건수와 실제 발송은 **이 명단만** 쓴다.
+   *   확인 창이 떠 있는 동안 늦게 끝난 담기나 키보드로 닿는 뒤쪽 버튼이 화면 명단을 바꿔도, 나가는 것은 확인한 명단이다
+   *   (문자·알림톡 = 명단을 먼저 적재하고 확인 창은 그 적재분만 확정하는 것과 같은 계약).
+   */
+  const [pendingPhones, setPendingPhones] = useState<string[]>([]);
 
   // AI 타겟추출
   const [aiPrompt, setAiPrompt] = useState('');
@@ -102,8 +113,13 @@ export default function BrandSendModal({
   const [aiError, setAiError] = useState('');
   const [aiResult, setAiResult] = useState<{ matchCount: number; explanation: string; filter: any } | null>(null);
   const [aiApplying, setAiApplying] = useState(false);
-  /** 요청 세대 — 늦게 도착한 응답이 그 사이 바뀐 리스트를 덮어쓰는 것을 막는다(일괄발급 bulkReqSeqRef와 같은 방식) */
+  /** 명단 세대 — 늦게 도착한 담기·파일 읽기 응답이 그 사이 바뀐 리스트를 덮어쓰는 것을 막는다(일괄발급 bulkReqSeqRef와 같은 방식) */
   const reqSeqRef = useRef(0);
+  /**
+   * ★ 2026-09-25 추출 세대 — 타겟 추출은 명단을 바꾸지 않으므로(조건·대상 수만) 명단 세대와 따로 센다.
+   *   한 세대를 같이 쓰면 명단을 고칠 때 진행 중인 추출이 버려지고 [추출 중]이 멈춘 채 남았다(finally 가 세대가 달라 안 내림).
+   */
+  const aiSeqRef = useRef(0);
 
   /**
    * ★ 2026-07-29 열릴 때 **전 상태를 되돌린다**(적대검증 high 수용).
@@ -114,6 +130,7 @@ export default function BrandSendModal({
   useEffect(() => {
     if (!show) return;
     reqSeqRef.current++;
+    aiSeqRef.current++;
     const seeded = Array.from(new Set(
       (initialRecipients || []).map((p) => String(p).replace(/[^0-9]/g, '')).filter(Boolean),
     ));
@@ -122,7 +139,7 @@ export default function BrandSendModal({
     setListQuery('');
     setDraft(''); setAddNotice('');
     setMode('manual');
-    setPending(null);
+    setPending(null); setPendingPhones([]);
     setAiPrompt(''); setAiError(''); setAiResult(null);
     setAiLoading(false); setAiApplying(false);
   }, [show]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -138,7 +155,7 @@ export default function BrandSendModal({
    * 그건 오발송이다. 그래서 변경 경로를 하나로 좁힌다.
    */
   const setRecipients = (list: string[]) => {
-    reqSeqRef.current++;          // 진행 중인 추출 응답을 무효화한다
+    reqSeqRef.current++;          // 진행 중인 담기·파일 읽기 응답을 무효화한다(타겟 추출은 명단을 안 바꿔 따로 센다 · aiSeqRef)
     setAiApplying(false);
     setPhones(list);
   };
@@ -170,7 +187,14 @@ export default function BrandSendModal({
 
   const handleFile = async (file: File | null) => {
     if (!file) return;
+    // ★ 2026-09-25 읽는 동안 명단이 바뀌면(삭제·추가·AI 담기·창 닫힘) 이 읽기 결과는 버린다 — AI 추출과 같은 세대 규칙.
+    //   읽기 전 명단(phones)에 합치면 그 사이 지운 번호가 되살아나 발송된다(Codex 4R 범위 밖 지적 · Harold "같은 문제면 같이").
+    const seq = reqSeqRef.current;
     const text = await file.text();
+    if (seq !== reqSeqRef.current) {
+      setAddNotice('파일을 읽는 동안 명단이 바뀌어 이번 파일은 넣지 않았어요. 다시 올려 주세요.');
+      return;
+    }
     const parsed = normalizePhones(text);
     const existing = new Set(phones);
     const added = Array.from(new Set(parsed)).filter((p) => !existing.has(p));
@@ -182,7 +206,10 @@ export default function BrandSendModal({
   const runAiTarget = async () => {
     if (isAiTargetLocked) { onLockedFeature('ai-target'); return; }
     if (!aiPrompt.trim()) { setAiError('찾을 대상을 한 줄로 입력해 주세요.'); return; }
-    const seq = ++reqSeqRef.current;
+    const seq = ++aiSeqRef.current;
+    // 새 추출은 앞 조건으로 진행 중이던 담기를 무효로 한다(명단 세대) — 버린 담기의 진행 표시도 여기서 내린다
+    reqSeqRef.current++;
+    setAiApplying(false);
     setAiLoading(true); setAiError(''); setAiResult(null);
     try {
       const res = await fetch('/api/customers/generate-from-text', {
@@ -191,7 +218,7 @@ export default function BrandSendModal({
         body: JSON.stringify({ naturalLanguage: aiPrompt.trim() }),
       });
       const data = await res.json();
-      if (seq !== reqSeqRef.current) return;   // 그 사이 닫혔거나 리스트를 손댔다 — 이 응답은 버린다
+      if (seq !== aiSeqRef.current) return;   // 그 사이 창이 닫혔거나 새 추출을 시작했다 — 이 응답은 버린다
       if (!res.ok) throw new Error(data?.error || '타겟 추출에 실패했습니다.');
       // 1단계는 **조건과 대상 수만** 확정한다. 수신자는 아래 [리스트에 담기]가 전량을 받아온다 —
       // samples는 5건짜리 미리보기라 그걸 수신자로 쓰면 3,000명 대상이 5명에게만 나간다.
@@ -201,9 +228,9 @@ export default function BrandSendModal({
         filter: data?.filter ?? null,
       });
     } catch (e: any) {
-      if (seq === reqSeqRef.current) setAiError(e?.message || '타겟 추출에 실패했습니다.');
+      if (seq === aiSeqRef.current) setAiError(e?.message || '타겟 추출에 실패했습니다.');
     } finally {
-      if (seq === reqSeqRef.current) setAiLoading(false);
+      if (seq === aiSeqRef.current) setAiLoading(false);
     }
   };
 
@@ -244,17 +271,36 @@ export default function BrandSendModal({
     { key: 'file' as RecipientMode, label: '파일등록', icon: Upload, locked: false },
     { key: 'ai' as RecipientMode, label: 'AI 타겟추출', icon: Sparkles, locked: isAiTargetLocked },
   ]), [isAiTargetLocked]);
+  // ★ 2026-09-25 카카오 발송 창 틀(Harold 목업 v2) — 수신자 열을 직접발송과 같은 모양으로(탭 · 합계 · 검색 · 10줄 목록 · 선택삭제).
+  //   수신자를 바꾸는 길은 위 setRecipients 하나 그대로다(늦게 온 AI 응답 무효화 포함). 여기는 보여 주는 방식만 다르다.
+  const [listPage, setListPage] = useState(0);
+  const [listSelected, setListSelected] = useState<Set<number>>(new Set());
+  const [dragActive, setDragActive] = useState(false);
+  const dropInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => { setListSelected(new Set()); setListPage(0); }, [phones]);
+  // ESC 닫기 — 옛 공용 틀(SendWorkspaceShell)이 하던 일 그대로. 안쪽 풍선·고르기 창은 캡처 단계에서 먼저 잡는다.
+  useEffect(() => {
+    if (!show) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [show, onClose]);
 
-  // ── 좌측 패널(수신자) · target 진입 = 가져온 목록만 ──────────────────────
-  //   직접 타겟 발송에서 조건으로 뽑은 대상이 곧 수신자다. 여기서 번호를 더 넣는 길을 열면
-  //   "조건 = 대상"이 깨져 발송 결과와 추출 조건이 어긋난다 → 빼기만 둔다.
   const removedCount = Math.max(0, seededCount - phones.length);
-  const visiblePhones = listQuery.trim()
-    ? phones.filter((p) => p.includes(listQuery.replace(/[^0-9]/g, '')))
-    : phones;
-  const targetAside = (
-    <>
-      <div className="shrink-0 px-4 pt-4">
+  const LIST_PAGE_SIZE = 10;
+  const listDigits = listQuery.replace(/[^0-9]/g, '');
+  const listFiltered = phones.map((p, idx) => ({ p, idx })).filter((r) => !listDigits || r.p.includes(listDigits));
+  const listTotalPages = Math.max(1, Math.ceil(listFiltered.length / LIST_PAGE_SIZE));
+  const listCurrentPage = Math.min(listPage, listTotalPages - 1);
+  const listPageItems = listFiltered.slice(listCurrentPage * LIST_PAGE_SIZE, (listCurrentPage + 1) * LIST_PAGE_SIZE);
+  // ★Codex 3R — 선택 범위 = 지금 보이는 목록(검색 결과). 머리 체크박스가 숨은 줄까지 고르면 선택 제외가 안 보이는 번호를 지운다
+  const listVisibleIdx = listFiltered.map((r) => r.idx);
+  const listAllVisibleChecked = listVisibleIdx.length > 0 && listVisibleIdx.every((i) => listSelected.has(i));
+
+  const recipientsPanel = (
+    <section className="ds-recipients ks-recipients">
+      {isTarget ? (
+        // target 진입 = 가져온 목록만. 번호를 더 넣는 길을 열면 "조건 = 대상"이 깨진다 → 빼기만 둔다.
         <div className="rounded-2xl bg-white ring-1 ring-slate-900/5 shadow-sm px-4 py-3 flex items-center gap-3">
           <div className={`h-9 w-9 rounded-xl ${A.badge} text-white grid place-items-center shrink-0`}>
             <Users size={16} strokeWidth={1.9} />
@@ -266,166 +312,64 @@ export default function BrandSendModal({
             </p>
           </div>
         </div>
-      </div>
-
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
-        <div className={`h-9 flex items-center gap-2 px-3 rounded-lg bg-white ring-1 ring-slate-200 focus-within:ring-2 ${A.focus} transition`}>
-          <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-          <input
-            type="text"
-            value={listQuery}
-            onChange={(e) => setListQuery(e.target.value)}
-            placeholder="수신번호 검색"
-            className="w-full min-w-0 bg-transparent border-0 p-0 text-[12.5px] text-slate-800 placeholder:text-slate-400 outline-none focus:ring-0"
-          />
+      ) : (
+        <div className="ds-rtab-group">
+          {modeTabs.map((t) => (t.key === 'file' ? (
+            <label key={t.key} className={`ds-rtab ds-rtab--label ${mode === 'file' ? 'ds-rtab--on' : ''}`}>
+              <t.icon size={17} strokeWidth={1.75} />
+              <span>{t.label}</span>
+              <input type="file" accept=".csv,.txt,text/plain" className="hidden"
+                onChange={(e) => { handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+            </label>
+          ) : (
+            <button key={t.key} type="button"
+              className={`ds-rtab ${mode === t.key ? 'ds-rtab--on' : ''}`}
+              onClick={() => { if (t.locked) { onLockedFeature('ai-target'); return; } setMode(t.key); }}>
+              <t.icon size={17} strokeWidth={1.75} />
+              <span>{t.label}</span>
+              {t.locked && <Lock size={12} strokeWidth={2.2} className="text-slate-300" />}
+            </button>
+          )))}
         </div>
+      )}
 
-        {phones.length === 0 ? (
-          <p className="text-[12px] text-slate-500 text-center py-10">수신자가 모두 제외됐습니다. 창을 닫고 타겟을 다시 가져오세요.</p>
-        ) : (
-          <div className="rounded-2xl bg-white ring-1 ring-slate-900/5 shadow-sm overflow-hidden">
-            <div className="px-3.5 py-2 bg-slate-50/70 border-b border-slate-100 text-[11px] text-slate-400">
-              {listQuery.trim()
-                ? `검색 ${visiblePhones.length.toLocaleString()}건`
-                : phones.length > RECIPIENT_EDIT_LIMIT
-                  ? `앞 ${RECIPIENT_EDIT_LIMIT.toLocaleString()}건 표시 · 전체 ${phones.length.toLocaleString()}명 발송`
-                  : `수신번호 ${phones.length.toLocaleString()}건`}
-            </div>
-            <div className="max-h-[52vh] overflow-y-auto divide-y divide-slate-50">
-              {visiblePhones.slice(0, RECIPIENT_EDIT_LIMIT).map((p) => (
-                <div key={p} className="flex items-center justify-between gap-2 px-3.5 py-1.5 group">
-                  <span className="font-mono text-[12px] text-slate-600">{p}</span>
-                  <button type="button" onClick={() => setRecipients(phones.filter((x) => x !== p))}
-                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-slate-300 hover:text-rose-500 transition shrink-0"
-                    aria-label={`${p} 제외`} title="이 번호 제외">
-                    <X size={13} strokeWidth={2.2} />
-                  </button>
-                </div>
-              ))}
-              {listQuery.trim() && visiblePhones.length === 0 && (
-                <p className="text-[12px] text-slate-400 text-center py-6">일치하는 번호가 없습니다</p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="shrink-0 border-t border-slate-100 bg-white/70 px-4 py-3">
-        <p className="text-xs text-slate-500 inline-flex items-center gap-1.5">
-          <Users size={13} strokeWidth={1.9} className="text-slate-300" />
-          수신자 <span className={`font-bold ${A.count} tabular-nums`}>{phones.length.toLocaleString()}</span>명
-        </p>
-      </div>
-    </>
-  );
-
-  // ── 좌측 패널(수신자) · direct 진입 = 3방식 입력 ────────────────────────
-  const aside = isTarget ? targetAside : (
-    <>
-      {/* 세그먼트 탭 — 밑줄 대신 알약형. 회색 선을 줄이면 화면이 정돈돼 보인다 */}
-      <div className="shrink-0 px-4 pt-4">
-        <div className="flex gap-1 p-1 rounded-xl bg-slate-100/80">
-          {modeTabs.map((t) => {
-            const active = mode === t.key;
-            return (
-              <button key={t.key} type="button"
-                onClick={() => { if (t.locked) { onLockedFeature('ai-target'); return; } setMode(t.key); }}
-                // ★2026-09-20 수신자 열을 380 → 320으로 줄이면서 3등분(flex-1) 칸에 「AI 타겟추출」이 안 들어가
-                //   두 줄로 접혔다(Harold 실측). 칸을 글자 길이대로 나누고(flex-auto) 줄바꿈을 막는다 —
-                //   잠금 표식이 붙어도 320 안에 들어간다(글자 150 + 아이콘·여백 ≈ 250 < 272).
-                className={`flex-auto min-w-0 px-1.5 py-2 rounded-lg text-[12px] font-medium whitespace-nowrap inline-flex items-center justify-center gap-1 transition ${
-                  active ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'
-                }`}>
-                <t.icon size={13} strokeWidth={1.9} className={`shrink-0 ${active ? 'text-violet-500' : ''}`} />
-                <span>{t.label}</span>
-                {t.locked && <Lock size={10} strokeWidth={2.2} className="text-slate-300" />}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
-        {mode === 'manual' && (
-          <>
-            {/* 입력 → [수신자로 추가] → 목록. 실시간 파싱이 아니라 명시적으로 담는다(알림톡과 같은 축) */}
+      {!isTarget && mode === 'manual' && (
+        <>
+          {/* 입력 → [수신자로 추가] → 목록. 실시간 파싱이 아니라 명시적으로 담는다(알림톡과 같은 축) */}
+          <div className="ks-direct">
             <textarea
               value={draft}
               onChange={(e) => { setDraft(e.target.value); if (addNotice) setAddNotice(''); }}
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addFromDraft(); } }}
-              rows={5}
-              placeholder={'번호를 줄바꿈·쉼표로 구분해 입력하세요\n01012345678\n010-8765-4321'}
-              className={`${FIELD_CLASS} resize-none leading-relaxed font-mono !text-[12.5px]`}
+              placeholder={'번호를 줄바꿈·쉼표로 구분해 넣어 주세요\n01012345678'}
+              aria-label="수신번호 직접 입력"
             />
-            <button
-              type="button"
-              onClick={addFromDraft}
-              disabled={!draft.trim()}
-              className="w-full py-2.5 rounded-xl text-[13px] font-semibold text-violet-700 bg-violet-50 ring-1 ring-violet-100 hover:bg-violet-100 disabled:opacity-40 disabled:hover:bg-violet-50 inline-flex items-center justify-center gap-1.5 transition"
-            >
-              <UserPlus size={14} strokeWidth={2} /> 수신자로 추가
+            <button type="button" onClick={addFromDraft} disabled={!draft.trim()}>수신자로 추가</button>
+          </div>
+          {addNotice && <p className="text-[11.5px] text-violet-600 px-0.5 m-0">{addNotice}</p>}
+          {aiResult?.explanation && phones.length > 0 && (
+            <p className="text-[11px] text-slate-500 bg-slate-50/80 ring-1 ring-slate-900/5 rounded-lg px-2.5 py-1.5 leading-relaxed m-0">
+              {aiResult.explanation}
+            </p>
+          )}
+        </>
+      )}
+
+      {!isTarget && mode === 'file' && (
+        <p className="ks-note">CSV · TXT 파일에서 번호만 골라 목록에 더해요. 위 [파일등록]을 누르거나 아래 칸에 끌어다 놓으세요.</p>
+      )}
+
+      {!isTarget && mode === 'ai' && (
+        <div className="rounded-2xl ring-1 ring-violet-200/70 bg-violet-50/30 p-3 space-y-2">
+          <p className="text-[11.5px] text-slate-500 m-0">찾을 대상을 한 줄로 쓰세요. 연동된 고객DB에서 조건을 만들어 대상을 뽑습니다.</p>
+          <div className="ks-direct">
+            <textarea value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} placeholder="예) 최근 3개월 구매 없는 VIP 고객" aria-label="찾을 대상" />
+            <button type="button" onClick={runAiTarget} disabled={aiLoading} style={{ background: '#7C3AED' }}>
+              {aiLoading ? <><Loader2 size={13} className="animate-spin inline-block mr-1 -mt-0.5" />추출 중</> : '타겟 추출'}
             </button>
-            {addNotice && <p className="text-[11px] text-violet-600">{addNotice}</p>}
-            {aiResult?.explanation && phones.length > 0 && (
-              <p className="text-[11px] text-slate-500 bg-slate-50/80 ring-1 ring-slate-900/5 rounded-lg px-2.5 py-1.5 leading-relaxed">
-                {aiResult.explanation}
-              </p>
-            )}
-
-            {phones.length > 0 && (
-              <div className="rounded-2xl bg-white ring-1 ring-slate-900/5 shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between gap-2 px-3.5 py-2 bg-slate-50/70 border-b border-slate-100">
-                  <span className="text-[11px] text-slate-400">
-                    수신번호 {phones.length > RECIPIENT_EDIT_LIMIT
-                      ? `(앞 ${RECIPIENT_EDIT_LIMIT.toLocaleString()}건 표시 · 전체 ${phones.length.toLocaleString()}명 발송)`
-                      : `${phones.length.toLocaleString()}건`}
-                  </span>
-                  <button type="button" onClick={() => { setRecipients([]); setAddNotice(''); }}
-                    className="text-[11px] text-slate-400 hover:text-rose-500 transition shrink-0">
-                    전체삭제
-                  </button>
-                </div>
-                <div className="max-h-[240px] overflow-y-auto divide-y divide-slate-50">
-                  {phones.slice(0, RECIPIENT_EDIT_LIMIT).map((p, i) => (
-                    <div key={`${p}-${i}`} className="flex items-center justify-between gap-2 px-3.5 py-1.5 group">
-                      <span className="font-mono text-[12px] text-slate-600">{p}</span>
-                      <button type="button" onClick={() => removeAt(i)}
-                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-slate-300 hover:text-rose-500 transition shrink-0"
-                        aria-label={`${p} 삭제`}>
-                        <X size={13} strokeWidth={2.2} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-
-        {mode === 'file' && (
-          <label className="flex flex-col items-center justify-center gap-2 px-4 py-12 rounded-2xl bg-white ring-1 ring-dashed ring-violet-200 cursor-pointer text-sm text-violet-600 hover:ring-violet-300 hover:bg-violet-50/40 transition shadow-sm">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/25">
-              <Upload size={18} strokeWidth={1.9} className="text-white" />
-            </div>
-            <span className="font-medium text-slate-700">파일을 선택하세요</span>
-            <span className="text-[11px] text-slate-400">CSV · TXT: 번호만 골라 읽습니다</span>
-            <input type="file" accept=".csv,.txt,text/plain" className="hidden"
-              onChange={(e) => { handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
-          </label>
-        )}
-
-        {mode === 'ai' && (
-          <>
-            <p className="text-[11px] text-slate-400">찾을 대상을 한 줄로 쓰세요. 연동된 고객DB에서 조건을 만들어 대상을 뽑습니다.</p>
-            <textarea value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} rows={3}
-              placeholder="예) 최근 3개월 구매 없는 VIP 고객"
-              className={`${FIELD_CLASS} resize-none`} />
-            <button type="button" onClick={runAiTarget} disabled={aiLoading}
-              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 shadow-lg shadow-violet-500/25 disabled:opacity-40 disabled:shadow-none inline-flex items-center justify-center gap-1.5 transition">
-              {aiLoading ? <><Loader2 size={14} className="animate-spin" /> 추출 중...</> : <><Sparkles size={14} /> 타겟 추출</>}
-            </button>
-            {aiError && <p className="text-xs text-rose-600">{aiError}</p>}
-            {aiResult && (
+          </div>
+          {aiError && <p className="text-xs text-rose-600 m-0">{aiError}</p>}
+          {aiResult && (
               <div className="px-3.5 py-3 rounded-2xl bg-white ring-1 ring-violet-200/70 shadow-sm text-xs space-y-2">
                 <p className="font-semibold text-slate-800">대상 {aiResult.matchCount.toLocaleString()}명</p>
                 {/* 어떤 조건으로 뽑았는지 보여준다 — 근거 없이 담으면 사람이 검증할 수 없다 */}
@@ -437,24 +381,123 @@ export default function BrandSendModal({
                     : <>리스트에 담기 ({aiResult.matchCount.toLocaleString()}명)</>}
                 </button>
               </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <div className="ds-count-wrap">
+          <span className="ds-count-label">총</span>
+          <span className="ds-count-num">{phones.length.toLocaleString()}</span>
+          <span className="ds-count-label">명</span>
+        </div>
+        <div className="ds-search-wrap">
+          <Search size={15} strokeWidth={1.75} />
+          <input type="text" className="ds-search-in" placeholder="수신번호 검색" value={listQuery}
+            onChange={(e) => { setListQuery(e.target.value); setListPage(0); setListSelected(new Set()); }} />
+        </div>
+      </div>
+
+      <div className="ds-list-frame">
+        <div className="ds-list-head">
+          <label className="flex items-center cursor-pointer">
+            <input type="checkbox" className="ds-chk ds-chk--lg ds-chk--purple"
+              checked={listAllVisibleChecked}
+              disabled={listVisibleIdx.length === 0}
+              onChange={(e) => setListSelected(e.target.checked
+                ? new Set([...listSelected, ...listVisibleIdx])
+                : new Set([...listSelected].filter((i) => !listVisibleIdx.includes(i))))}
+              aria-label="전체 선택" />
+          </label>
+          <span>수신번호</span>
+          <span />
+        </div>
+        {phones.length === 0 ? (
+          <div className="ds-list-empty">
+            {isTarget ? (
+              <p className="m-auto text-[12.5px] text-slate-500 text-center">수신자가 모두 제외됐습니다. 창을 닫고 타겟을 다시 가져오세요.</p>
+            ) : (
+              <>
+                <div
+                  className={`ds-dropzone ds-t w-full ${dragActive ? 'ds-dropzone--active' : ''}`}
+                  onClick={() => dropInputRef.current?.click()}
+                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                  onDrop={(e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    setDragActive(false);
+                    handleFile(e.dataTransfer?.files?.[0] || null);
+                  }}
+                >
+                  <div>
+                    <div className="text-[14px] font-semibold text-stone-800">번호를 넣거나 파일을 올려 주세요</div>
+                    <div className="text-[12.5px] text-stone-500 mt-1">CSV · TXT에서 번호만 골라 읽어요{isAiTargetLocked ? '' : ' · AI 타겟추출로 바로 뽑을 수도 있어요'}</div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="ds-btn-sec px-4 pointer-events-none border border-violet-200 bg-violet-50 text-violet-700">
+                      <Upload size={14} strokeWidth={1.75} />
+                      <span>파일 선택</span>
+                    </span>
+                    <span className="text-[12px] text-stone-400">또는 여기로 드래그</span>
+                  </div>
+                </div>
+                <input ref={dropInputRef} type="file" accept=".csv,.txt,text/plain" className="hidden"
+                  onChange={(e) => { handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+              </>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="ds-list-body">
+              {listPageItems.length === 0 ? (
+                <div className="py-12 text-center text-stone-400 text-[13px]">"{listQuery}" 검색 결과가 없어요</div>
+              ) : (
+                listPageItems.map(({ p, idx }) => (
+                  <div key={`${p}-${idx}`} className="ds-list-row">
+                    <label className="flex items-center cursor-pointer">
+                      <input type="checkbox" className="ds-chk ds-chk--purple" checked={listSelected.has(idx)}
+                        onChange={(e) => {
+                          const next = new Set(listSelected);
+                          if (e.target.checked) next.add(idx); else next.delete(idx);
+                          setListSelected(next);
+                        }}
+                        aria-label={`${p} 선택`} />
+                    </label>
+                    <span className="ds-num text-stone-800 font-medium">{p}</span>
+                    <span />
+                  </div>
+                ))
+              )}
+            </div>
+            {listTotalPages > 1 && (
+              <div className="ds-page">
+                <button type="button" onClick={() => setListPage((n) => Math.max(0, n - 1))} disabled={listCurrentPage === 0}>이전</button>
+                <span className="ds-page-num">{listCurrentPage + 1} / {listTotalPages}</span>
+                <button type="button" onClick={() => setListPage((n) => Math.min(listTotalPages - 1, n + 1))} disabled={listCurrentPage >= listTotalPages - 1}>다음</button>
+              </div>
             )}
           </>
         )}
       </div>
 
-      <div className="shrink-0 border-t border-slate-100 bg-white/70 px-4 py-3 flex items-center justify-between">
-        <p className="text-xs text-slate-500 inline-flex items-center gap-1.5">
-          <Users size={13} strokeWidth={1.9} className="text-slate-300" />
-          수신자 <span className="font-bold text-violet-600 tabular-nums">{phones.length.toLocaleString()}</span>명
-        </p>
-        {phones.length > 0 && (
-          <button type="button" onClick={() => { setRecipients([]); setAddNotice(''); }}
-            className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-500 transition">
-            <Trash2 size={12} strokeWidth={1.9} /> 비우기
+      <div className="ds-bottom-actions">
+        <div className="flex items-center gap-1">
+          <button type="button" className="ds-ter ds-ter--danger ds-t" disabled={listSelected.size === 0}
+            onClick={() => { setRecipients(phones.filter((_, i) => !listSelected.has(i))); }}>
+            <Trash2 size={13} strokeWidth={1.75} />
+            <span>{isTarget ? '선택 제외' : '선택삭제'}</span>
           </button>
-        )}
+          {!isTarget && (
+            <button type="button" className="ds-ter ds-ter--danger ds-t" disabled={phones.length === 0}
+              onClick={() => { setRecipients([]); setAddNotice(''); }}>
+              <X size={13} strokeWidth={1.75} />
+              <span>전체삭제</span>
+            </button>
+          )}
+        </div>
       </div>
-    </>
+    </section>
   );
 
   // 확인 다이얼로그에 적을 유형 — payload가 화면 선택값을 그대로 갖고 있다
@@ -463,30 +506,34 @@ export default function BrandSendModal({
     ? `브랜드메시지 ${pending.mode === 'template' ? '기본형' : (BRAND_SPEC[String(pending.bubbleType || 'TEXT')]?.label || '텍스트')}`
     : '';
 
-  return (
-    <SendWorkspaceShell
-      show={show}
-      onClose={onClose}
-      title="브랜드메시지 발송"
-      subtitle={isTarget
-        ? `추출된 ${phones.length.toLocaleString()}명에게 브랜드메시지를 발송합니다`
-        : '발신프로필이 연동돼 있으면 전화번호로 바로 보냅니다. 템플릿 검수는 필요 없습니다.'}
-      icon={<Megaphone size={19} strokeWidth={1.9} className="text-white" />}
-      accent={accent}
-      notice={!hasProfile ? (
-        <WorkspaceNotice>
-          카카오 채널 연동(발신프로필 등록)이 필요합니다. 발신프로필이 등록되면 요금제와 무관하게 바로 사용할 수 있습니다.
-        </WorkspaceNotice>
-      ) : undefined}
-      aside={aside}
-      // ★2026-09-20 창 확대(1280 → 1600) · 수신자 열 380 → 320. 공용 셸은 건드리지 않고 호출부 값만 바꾼다.
-      asideWidth="320px"
-      maxW="max-w-[1600px]"
+  if (!show) return null;
+
+  return createPortal(
+    // 겹침 2000 = 옛 공용 틀과 같은 층(요금제 안내 · 확인 창 2100이 이 위에 뜬다)
+    <div
+      className="ds-scope ds-backdrop"
+      style={{ zIndex: 2000 }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
-      {/* 우측 — 메시지 (기존 에디터 재사용. 새로 만들면 두 벌이 되고 반드시 갈라진다)
-          ★2026-09-01 패딩 래퍼 제거 — 에디터가 자기 패딩과 하단 고정 발송 바(sticky)를 소유한다.
-          여기서 패딩을 두르면 발송 바가 스크롤 바닥에서 떠 보인다. */}
-      <BrandMessageEditor
+      <div className="ds-modal" role="dialog" aria-modal="true" aria-label="브랜드메시지 발송">
+        <KakaoSendHeader
+          channel="brand"
+          title="브랜드메시지 발송"
+          subtitle={isTarget
+            ? `추출된 ${phones.length.toLocaleString()}명에게 브랜드메시지를 발송합니다`
+            : '검수 없이 바로 보내요 · 발신프로필이 연동돼 있으면 전화번호로 도착해요'}
+          onSwitch={onSwitchChannel ? (to) => onSwitchChannel(to === 'alimtalk' ? 'alimtalk' : 'sms', phones) : undefined}
+          onClose={onClose}
+        />
+        {!hasProfile && (
+          <div className="shrink-0 px-6 pt-3">
+            <WorkspaceNotice>
+              카카오 채널 연동(발신프로필 등록)이 필요합니다. 발신프로필이 등록되면 요금제와 무관하게 바로 사용할 수 있습니다.
+            </WorkspaceNotice>
+          </div>
+        )}
+        <BrandMessageEditor
         profiles={profiles}
         sending={!!sending}
         accent={accent}
@@ -494,10 +541,17 @@ export default function BrandSendModal({
         defaultUnsubPhone={optOutNumber}
         onSend={(payload: any) => {
           if (!canSend) return;
+          // ★ 2026-09-25 확인을 기다리는 동안은 새 보내기를 받지 않는다(Codex 12R) — 확인 창은 포커스를 옮기지 않아
+          //   Enter 가 뒤쪽 보내기 버튼으로 다시 들어가면 떠 둔 명단이 그 사이 바뀐 명단으로 교체됐다(건수가 같으면 알 수 없음).
+          if (pending) return;
           // 바로 보내지 않는다 — 건수를 보여주고 확인을 받는다(문자·알림톡과 같은 계약)
+          // ★ 2026-09-25 확인 창을 연 순간의 명단을 떠 둔다 — 건수 표시와 발송은 이 명단만 쓴다(Codex 10R·11R)
+          setPendingPhones(phones.slice());
           setPending(payload);
         }}
-      />
+          recipientsPanel={recipientsPanel}
+        />
+      </div>
 
       <ConfirmDialogShell
         show={!!pending}
@@ -506,19 +560,20 @@ export default function BrandSendModal({
         title="지금 바로 발송합니다"
         subtitle="광고성 메시지입니다. 누르는 즉시 나가며 회수할 수 없습니다."
         cancelLabel="취소"
-        onCancel={() => setPending(null)}
+        onCancel={() => { setPending(null); setPendingPhones([]); }}
         confirmLabel="즉시 발송"
         onConfirm={async () => {
           const payload = pending;
+          const sendPhones = pendingPhones;
           if (!payload) return;
-          setPending(null);
-          await onSend({ ...payload, phones });
+          setPending(null); setPendingPhones([]);
+          await onSend({ ...payload, phones: sendPhones });
         }}
         busy={!!sending}
         busyLabel="접수 중..."
-        confirmDisabled={phones.length === 0}
+        confirmDisabled={pendingPhones.length === 0}
       >
-        <DialogHeadline label="발송 대상" value={phones.length} unit="명" tone={accent} />
+        <DialogHeadline label="발송 대상" value={pendingPhones.length} unit="명" tone={accent} />
         <div className="mt-3">
           <DialogRow label="메시지 유형" value={pendingTypeLabel} />
           <DialogRow
@@ -534,6 +589,7 @@ export default function BrandSendModal({
           발송이 시작되면 중간에 멈추거나 되돌릴 수 없습니다. 문구와 수신자를 다시 한번 확인해 주세요.
         </DialogCaution>
       </ConfirmDialogShell>
-    </SendWorkspaceShell>
+    </div>,
+    document.body,
   );
 }

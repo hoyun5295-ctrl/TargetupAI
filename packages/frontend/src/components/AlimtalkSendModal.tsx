@@ -13,14 +13,27 @@
  * 발송 흐름은 기존 DirectSendPanel의 handleAlimtalkSend와 동일 — onSendConfirm callback으로 위임.
  */
 
-import { useState, useMemo, useEffect } from 'react';
-import { Bell, X, Contact, CalendarClock, Layers } from 'lucide-react';
-import AlimtalkChannelPanel, {
+import { useState, useMemo, useEffect, useRef } from 'react';
+import {
+  Bell, CalendarClock, ChevronDown, ChevronRight, CircleX, Contact, FolderOpen, MessageSquareReply,
+  PencilLine, Search, Send, Timer, Trash2, Upload, X,
+} from 'lucide-react';
+import {
+  AlimtalkFallbackEditor,
+  NEXT_TYPE_OPTIONS,
+  buildAlimtalkPreviewProps,
+  extractVariables,
+  useAlimtalkChannel,
   validateAlimtalkChannelState,
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
 } from './alimtalk/AlimtalkChannelPanel';
+import AlimtalkPreview from './alimtalk/AlimtalkPreview';
+import AlimtalkTemplatePickerModal from './alimtalk/AlimtalkTemplatePickerModal';
+import KakaoSendHeader from './kakao-send/KakaoSendHeader';
+import SplitSendPopover from './direct-send/SplitSendPopover';
+import '../styles/direct-send.css';
 import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 import AddressBookModal from './AddressBookModal';
 import ScheduleTimeModal from './ScheduleTimeModal';
@@ -92,6 +105,12 @@ export interface AlimtalkSendModalProps {
 
   /** ★ #2 (2026-06-01): 발송 성공 시 증가하는 신호 — 수신자 리스트만 초기화(모달은 열린 채 유지). */
   resetSignal?: number;
+
+  /**
+   * ★ 2026-09-25 머리의 채널 전환(문자 발송 · 브랜드메시지) — 주면 버튼이 보인다.
+   *   phones = 지금 명단의 번호 · rows = 지금 명단의 줄 그대로(문자 쪽은 줄의 정체로 되돌린다 · Codex 9R).
+   */
+  onSwitchChannel?: (to: 'sms' | 'brand', phones: string[], rows: any[]) => void;
 }
 
 export default function AlimtalkSendModal({
@@ -116,6 +135,7 @@ export default function AlimtalkSendModal({
   setToast,
   initialRecipients,
   resetSignal,
+  onSwitchChannel,
 }: AlimtalkSendModalProps) {
   // 수신자 영역 — 알림톡 전용 state (직접발송 directRecipients와 격리)
   const [inputMode, setInputMode] = useState<'direct' | 'file' | 'address'>('direct');
@@ -575,199 +595,201 @@ export default function AlimtalkSendModal({
     onClose();
   };
 
+  // ★ 2026-09-25 알림톡 발송 창 개편(Harold 목업 v2 승인) — 화면용 상태만 여기 둔다. 발송 값·검증은 위 handleSend 그대로다.
+  //   채널 로직(발신프로필·템플릿·대체발송)은 공용 패널과 같은 한 벌(useAlimtalkChannel)을 쓴다 — 기존 패널과 같은 props.
+  //   ⛔ 창이 닫혀 있으면 발신프로필을 빈 목록으로 준다 — 옛 패널은 닫힌 창에서 그려지지 않아 '하나뿐이면 자동 선택'이
+  //     돌지 않았다. 훅은 창 맨 위에 있어 닫혀도 돈다. 그대로 두면 닫힌 창이 대시보드 공유 상태(발신프로필)를 바꾼다.
+  const ch = useAlimtalkChannel({
+    senders: show ? alimtalkSenders : [],
+    templates: alimtalkTemplates,
+    customerFieldOptions: dynamicFieldOptions,
+    value: channelState,
+    onChange: handleChannelChange,
+    sampleRecipient: recipients[0] || null,
+  });
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [fallbackOpen, setFallbackOpen] = useState(false);
+  const fallbackAnchorRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [listQuery, setListQuery] = useState('');
+  const [listPage, setListPage] = useState(0);
+  const [listSelected, setListSelected] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    if (!show) return;
+    setPickerOpen(false);
+    setSplitOpen(false);
+    setFallbackOpen(false);
+    setListQuery('');
+  }, [show]);
+  // 명단이 바뀌면(추가·삭제·발송 뒤 비움) 선택을 풀고 첫 장으로
+  useEffect(() => {
+    setListSelected(new Set());
+    setListPage(0);
+  }, [recipients]);
+  // 실패 시 문자 풍선 — 칸 바깥을 누르면 닫는다
+  useEffect(() => {
+    if (!fallbackOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (fallbackAnchorRef.current && !fallbackAnchorRef.current.contains(e.target as Node)) setFallbackOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [fallbackOpen]);
+  const selectedVarCount = ch.selectedTemplate ? extractVariables(ch.selectedTemplate.content).length : 0;
+  const currentSender = ch.approvedSenders.find((s) => s.id === alimtalkProfileId) || null;
+  const fallbackLabel = NEXT_TYPE_OPTIONS.find((o) => o.value === alimtalkFallback)?.label || '대체 문자';
+  // 표시용 — 보내기 직전 판정은 handleSend의 validateAlimtalkChannelState가 한다(같은 조건 · 같은 순서: 대체문안 → 제목)
+  const fallbackIssue = !ch.selectedTemplate
+    ? null
+    : ch.requiresNextContents && !String(alimtalkNextContents || '').trim()
+      ? '대체문안을 넣어 주세요'
+      : ch.requiresNextSubject && !String(alimtalkNextSubject || '').trim()
+        ? 'LMS 제목을 넣어 주세요'
+        : null;
+  const LIST_PAGE_SIZE = 10;
+  const listFiltered = recipients
+    .map((r, idx) => ({ ...r, originalIdx: idx }))
+    .filter((r) => !listQuery || String(r.phone || '').includes(listQuery));
+  const listTotalPages = Math.max(1, Math.ceil(listFiltered.length / LIST_PAGE_SIZE));
+  const listCurrentPage = Math.min(listPage, listTotalPages - 1);
+  const listPageItems = listFiltered.slice(listCurrentPage * LIST_PAGE_SIZE, (listCurrentPage + 1) * LIST_PAGE_SIZE);
+  // ★Codex 3R — 선택 범위 = 지금 보이는 목록(검색 결과). 머리 체크박스가 숨은 줄까지 고르면 선택삭제가 안 보이는 번호를 지운다
+  const listVisibleIdx = listFiltered.map((r) => r.originalIdx);
+  const listAllVisibleChecked = listVisibleIdx.length > 0 && listVisibleIdx.every((i) => listSelected.has(i));
+
   if (!show) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] h-[92vh] flex flex-col overflow-hidden"
-        style={{ animation: 'zoomIn 0.2s ease-out' }}
-      >
-        {/* 헤더 */}
-        <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-white flex justify-between items-center shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-              <Bell size={20} className="text-blue-600" strokeWidth={1.75} />
-            </span>
+    <div
+      className="ds-scope ds-backdrop"
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
+    >
+      <div className="ds-modal">
+        <KakaoSendHeader
+          channel="alimtalk"
+          title="알림톡 발송"
+          subtitle="승인된 템플릿으로 보내요 · 원하는 시각에 예약도 돼요"
+          onSwitch={onSwitchChannel ? (to) => onSwitchChannel(to === 'brand' ? 'brand' : 'sms', recipients.map((r) => r.phone), recipients) : undefined}
+          onClose={handleClose}
+        />
+
+        {/* ★ 2026-09-25 3열 — 작성(발신프로필 · 템플릿 · 변수) / 받는 화면 / 수신자. 틀 = direct-send.css "카카오 발송 창" 절 */}
+        <div className="ds-modal__body ks-body">
+          {/* ====== 작성 ====== */}
+          <section className="ks-compose">
             <div>
-              <h2 className="text-lg font-bold text-gray-900">알림톡 발송</h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                승인된 템플릿으로 바로 보내거나 원하는 시각에 예약해 보냅니다. 카카오톡 알림톡 전용 화면입니다.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition"
-          >
-            <X size={20} strokeWidth={1.75} />
-          </button>
-        </div>
-
-        {/* 본문 — 2-col grid */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden">
-          {/* 좌측: 알림톡 채널 */}
-          <div className="p-5 overflow-y-auto border-r border-gray-100">
-            <AlimtalkChannelPanel
-              senders={alimtalkSenders}
-              templates={alimtalkTemplates}
-              customerFieldOptions={dynamicFieldOptions}
-              value={channelState}
-              onChange={handleChannelChange}
-              sampleRecipient={recipients[0] || null}
-            />
-
-            {/* ★ 2026-09-14 박성용 접수: 문자 직접발송과 같은 예약전송·분할전송(부달 설정 아래).
-                AlimtalkChannelPanel은 여정·자동발송 등 6곳 공용이라 손대지 않고 이 창에 둔다. */}
-            <div className="mt-4 border-t border-gray-100 pt-4">
-              <div className="text-xs font-medium text-gray-600 mb-1.5">발송 시점</div>
-              <p className="text-[11px] text-gray-400 mb-2">
-                예약하면 정한 시각에, 분할하면 분당 정한 건수씩 나눠 보냅니다.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {/* 예약전송 */}
-                <div
-                  className={`rounded-xl border px-3 py-2.5 transition-all ${
-                    reserveEnabled
-                      ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-300/50 shadow-sm'
-                      : 'bg-white border-gray-200 hover:border-blue-300'
-                  }`}
+              <p className="ks-label">발신프로필</p>
+              {ch.approvedSenders.length === 0 ? (
+                <p className="ks-warn">승인된 발신프로필이 없어요. 슈퍼관리자 승인이 끝나면 쓸 수 있어요.</p>
+              ) : ch.approvedSenders.length === 1 ? (
+                <div className="ks-static">
+                  <span className="ks-avatar">{ch.approvedSenders[0].profile_name.slice(0, 1)}</span>
+                  <span className="truncate">{ch.approvedSenders[0].profile_name}</span>
+                  {ch.approvedSenders[0].yellow_id && <small>{ch.approvedSenders[0].yellow_id}</small>}
+                </div>
+              ) : (
+                <select
+                  className="ks-select"
+                  value={alimtalkProfileId}
+                  onChange={(e) => ch.setProfileId(e.target.value)}
+                  aria-label="발신프로필"
                 >
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="w-3.5 h-3.5 accent-blue-600"
-                      checked={reserveEnabled}
-                      onChange={(e) => {
-                        setReserveEnabled(e.target.checked);
-                        if (e.target.checked) setShowReservePicker(true);
-                      }}
-                    />
-                    <CalendarClock size={13} strokeWidth={1.9} className={reserveEnabled ? 'text-blue-600' : 'text-gray-400'} />
-                    <span className={`text-xs font-bold ${reserveEnabled ? 'text-blue-900' : 'text-gray-700'}`}>예약전송</span>
-                  </label>
-                  <button
-                    type="button"
-                    disabled={!reserveEnabled}
-                    onClick={() => setShowReservePicker(true)}
-                    className={`mt-1.5 text-left text-[11px] leading-tight ${
-                      reserveEnabled ? 'text-blue-700 font-medium hover:underline' : 'text-gray-400 cursor-not-allowed'
-                    }`}
-                  >
-                    {reserveEnabled && reserveDateTime
-                      ? new Date(reserveDateTime).toLocaleString('ko-KR', {
-                          timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                        })
-                      : '예약 시각 선택'}
-                  </button>
-                </div>
-
-                {/* 분할전송 */}
-                <div
-                  className={`rounded-xl border px-3 py-2.5 transition-all ${
-                    splitEnabled
-                      ? 'bg-violet-50 border-violet-400 ring-2 ring-violet-300/50 shadow-sm'
-                      : 'bg-white border-gray-200 hover:border-violet-300'
-                  }`}
-                >
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="w-3.5 h-3.5 accent-violet-600"
-                      checked={splitEnabled}
-                      onChange={(e) => setSplitEnabled(e.target.checked)}
-                    />
-                    <Layers size={13} strokeWidth={1.9} className={splitEnabled ? 'text-violet-600' : 'text-gray-400'} />
-                    <span className={`text-xs font-bold ${splitEnabled ? 'text-violet-900' : 'text-gray-700'}`}>분할전송</span>
-                  </label>
-                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-500">
-                    {/* 직접발송 분할과 같은 범위(1~9999건/분 · 기본 1000) */}
-                    <input
-                      type="number"
-                      min={1}
-                      max={9999}
-                      value={splitCount}
-                      disabled={!splitEnabled}
-                      onChange={(e) => {
-                        const n = Number(e.target.value) || 1000;
-                        setSplitCount(Math.max(1, Math.min(9999, n)));
-                      }}
-                      className="w-20 rounded-md border border-gray-300 px-2 py-0.5 text-xs text-gray-800 disabled:bg-gray-100 disabled:text-gray-400"
-                    />
-                    <span>건/분</span>
-                  </div>
-                </div>
-              </div>
+                  <option value="">발신프로필을 고르세요</option>
+                  {ch.approvedSenders.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.profile_name}
+                      {s.yellow_id ? ` (${s.yellow_id})` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
-          </div>
 
-          {/* 우측: 수신자 + 변수 매칭 */}
-          <div className="p-5 overflow-y-auto bg-gray-50/40 space-y-4">
-            {/* 변수 매칭 */}
-            <AlimtalkVariableMappingPanel
-              selectedTemplate={kakaoSelectedTemplate}
-              variableMap={kakaoTemplateVars}
-              onVariableMapChange={(next) => setKakaoTemplateVars(next)}
-              customerFieldOptions={dynamicFieldOptions}
-              sampleRecipient={recipients[0] || null}
-              recipientCount={recipients.length}
-            />
+            <div>
+              <p className="ks-label">템플릿<small>누르면 템플릿을 받는 화면 예시로 보여 줘요</small></p>
+              <button
+                type="button"
+                className={`ks-pick ${!ch.selectedTemplate ? 'ks-pick--empty' : ''}`}
+                disabled={!alimtalkProfileId}
+                onClick={() => setPickerOpen(true)}
+              >
+                <span className="ks-pick__thumb ks-pick__thumb--kakao"><Bell size={18} strokeWidth={2} /></span>
+                <span className="ks-pick__tx">
+                  <b>{ch.selectedTemplate ? ch.selectedTemplate.template_name : '템플릿을 골라 주세요'}</b>
+                  <small>
+                    {ch.selectedTemplate
+                      ? `승인 · 변수 ${selectedVarCount}개 · 버튼 ${Array.isArray(ch.selectedTemplate.buttons) ? ch.selectedTemplate.buttons.length : 0}개`
+                      : alimtalkProfileId
+                        ? `승인된 템플릿 ${ch.visibleTemplates.length}개`
+                        : '먼저 발신프로필을 골라 주세요'}
+                  </small>
+                </span>
+                <span className="ks-pick__go ks-pick__go--amber">
+                  {ch.selectedTemplate ? '바꾸기' : '고르기'}
+                  <ChevronRight size={14} strokeWidth={2.2} />
+                </span>
+              </button>
+            </div>
 
-            {/* 수신자 영역 */}
-            <div className="bg-white rounded-2xl border-2 border-gray-200 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">👥</span>
-                  <span className="text-sm font-semibold text-gray-800">수신자</span>
-                  <span className="ml-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[11px] font-medium">
-                    총 {recipients.length.toLocaleString()}건
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-[11px]">
-                  <label className="inline-flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="w-3.5 h-3.5"
-                      checked={dedupEnabled}
-                      onChange={(e) => setDedupEnabled(e.target.checked)}
-                    />
-                    <span className="text-gray-600">중복제거</span>
-                  </label>
-                  <label className="inline-flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="w-3.5 h-3.5"
-                      checked={unsubFilterEnabled}
-                      onChange={(e) => setUnsubFilterEnabled(e.target.checked)}
-                    />
-                    <span className="text-gray-600">수신거부제거</span>
-                  </label>
-                </div>
+            {ch.selectedTemplate && (
+              <div>
+                <p className="ks-label">변수 채우기<small>수신자 명단 칸과 연결해요</small></p>
+                {selectedVarCount > 0 ? (
+                  <AlimtalkVariableMappingPanel
+                    layout="rows"
+                    selectedTemplate={kakaoSelectedTemplate}
+                    variableMap={kakaoTemplateVars}
+                    onVariableMapChange={(next) => setKakaoTemplateVars(next)}
+                    customerFieldOptions={dynamicFieldOptions}
+                    sampleRecipient={recipients[0] || null}
+                    recipientCount={recipients.length}
+                  />
+                ) : (
+                  <p className="ks-note">이 템플릿은 채울 변수가 없어요.</p>
+                )}
               </div>
+            )}
+          </section>
 
-              {/* ★ D162-4 (2026-05-15) 2차: 입력 방식 탭 — 직접입력 / 파일등록 / 주소록 3개로 확장.
-                  Harold님 명시 "주소록에서 가져와서 보내는것도 추가" 정합. AddressBookModal 재사용으로 동작 일관성. */}
-              <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {/* ====== 받는 화면 ====== */}
+          <section className="ks-preview">
+            <div className="ks-preview__head">
+              <b>받는 화면</b>
+              {ch.selectedTemplate && (
+                <span className="ks-seg" role="group" aria-label="미리보기 방식">
+                  <button type="button" className={ch.previewMode === 'template' ? 'on' : ''} onClick={() => ch.setPreviewMode('template')}>원본</button>
+                  <button type="button" className={ch.previewMode === 'filled' ? 'on' : ''} onClick={() => ch.setPreviewMode('filled')}>치환</button>
+                </span>
+              )}
+            </div>
+            {ch.selectedTemplate ? (
+              <AlimtalkPreview
+                {...buildAlimtalkPreviewProps(ch.selectedTemplate, ch.previewMode === 'filled' ? ch.renderPreview : undefined)}
+              />
+            ) : (
+              <div className="ks-preview__empty">템플릿을 고르면 받는 사람 화면이 여기에 그대로 보여요</div>
+            )}
+            <p className="ks-preview__cap">Data source: 카카오톡 실수신 화면 기준 · 치환은 첫 번째 받는 사람 값</p>
+          </section>
+
+          {/* ====== 수신자 ====== */}
+          <section className="ds-recipients ks-recipients">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="ds-rtab-group">
                 <button
                   type="button"
+                  className={`ds-rtab ${inputMode === 'direct' ? 'ds-rtab--on' : ''}`}
                   onClick={() => setInputMode('direct')}
-                  className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${
-                    inputMode === 'direct'
-                      ? 'bg-white shadow text-blue-600'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
                 >
-                  직접입력
+                  <PencilLine size={17} strokeWidth={1.75} />
+                  <span>직접입력</span>
                 </button>
-                <label
-                  className={`flex-1 py-1.5 text-xs font-medium rounded-md text-center cursor-pointer transition ${
-                    inputMode === 'file'
-                      ? 'bg-white shadow text-blue-600'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  {fileLoading ? '파일 분석중...' : '파일등록'}
+                <label className={`ds-rtab ds-rtab--label ${inputMode === 'file' ? 'ds-rtab--on' : ''} ${fileLoading ? 'ds-rtab--loading' : ''}`}>
+                  <FolderOpen size={17} strokeWidth={1.75} />
+                  <span>{fileLoading ? '파일 분석중...' : '파일등록'}</span>
                   <input
                     type="file"
                     accept=".xlsx,.xls,.csv"
@@ -784,151 +806,341 @@ export default function AlimtalkSendModal({
                 </label>
                 <button
                   type="button"
+                  className={`ds-rtab ${inputMode === 'address' ? 'ds-rtab--on' : ''}`}
                   onClick={() => {
                     setInputMode('address');
                     setShowAddressBook(true);
                   }}
-                  className={`flex-1 py-1.5 text-xs font-medium rounded-md transition inline-flex items-center justify-center gap-1 ${
-                    inputMode === 'address'
-                      ? 'bg-white shadow text-blue-600'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
                 >
-                  <Contact size={13} strokeWidth={1.75} />
+                  <Contact size={17} strokeWidth={1.75} />
                   <span>주소록</span>
                 </button>
               </div>
+              <div className="ds-filter-row">
+                <label>
+                  <input type="checkbox" className="ds-chk ds-chk--amber" checked={dedupEnabled} onChange={(e) => setDedupEnabled(e.target.checked)} />
+                  <span>중복제거</span>
+                </label>
+                <label>
+                  <input type="checkbox" className="ds-chk ds-chk--amber" checked={unsubFilterEnabled} onChange={(e) => setUnsubFilterEnabled(e.target.checked)} />
+                  <span>수신거부제거</span>
+                </label>
+              </div>
+            </div>
 
-              {/* 직접입력 영역 */}
-              {inputMode === 'direct' && (
-                <div className="space-y-2">
-                  <textarea
-                    value={directInput}
-                    onChange={(e) => setDirectInput(e.target.value)}
-                    rows={8}
-                    placeholder={
-                      '수신번호를 한 줄에 하나씩 입력 (또는 콤마/세미콜론 구분)\n예시:\n01012345678\n010-2345-6789'
-                    }
-                    className="w-full border border-gray-200 rounded-lg p-2 text-xs font-mono resize-y focus:ring-2 focus:ring-blue-200 outline-none"
+            {inputMode === 'direct' && (
+              <div className="ks-direct">
+                <textarea
+                  value={directInput}
+                  onChange={(e) => setDirectInput(e.target.value)}
+                  placeholder={'수신번호를 한 줄에 하나씩 넣어 주세요(콤마·세미콜론도 돼요)\n01012345678'}
+                  aria-label="수신번호 직접 입력"
+                />
+                <button type="button" onClick={parseDirectInput}>수신자로 추가</button>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between">
+              <div className="ds-count-wrap">
+                <span className="ds-count-label">총</span>
+                <span className="ds-count-num">{recipients.length.toLocaleString()}</span>
+                <span className="ds-count-label">건</span>
+              </div>
+              <div className="ds-search-wrap">
+                <Search size={15} strokeWidth={1.75} />
+                <input
+                  type="text"
+                  className="ds-search-in"
+                  placeholder="수신번호 검색"
+                  value={listQuery}
+                  onChange={(e) => { setListQuery(e.target.value); setListPage(0); setListSelected(new Set()); }}
+                />
+              </div>
+            </div>
+
+            <div className="ds-list-frame">
+              <div className="ds-list-head">
+                <label className="flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="ds-chk ds-chk--lg ds-chk--amber"
+                    checked={listAllVisibleChecked}
+                    disabled={listVisibleIdx.length === 0}
+                    onChange={(e) => setListSelected(e.target.checked
+                      ? new Set([...listSelected, ...listVisibleIdx])
+                      : new Set([...listSelected].filter((i) => !listVisibleIdx.includes(i))))}
+                    aria-label="전체 선택"
                   />
-                  <button
-                    type="button"
-                    onClick={parseDirectInput}
-                    className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-medium transition"
-                  >
-                    수신자로 추가
-                  </button>
-                </div>
-              )}
+                </label>
+                <span>수신번호</span>
+                {previewColumns.length > 0 ? (
+                  <div className="ds-head-extra">
+                    {previewColumns.map((col) => (
+                      <span key={col} className="flex-1 min-w-0 truncate">{FIELD_LABEL_MAP[col] || col}</span>
+                    ))}
+                  </div>
+                ) : <span />}
+              </div>
 
-              {/* ★ D162-4 (2026-05-15) 4차: 수신자 목록 — 매핑된 변수 컬럼도 함께 표시. Harold님 명시 정합. */}
-              {recipients.length > 0 && (
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                  <div className="bg-gray-50 px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
-                    <span className="text-[11px] text-gray-500">
-                      수신번호 (최근 {Math.min(recipients.length, 50)}건 표시)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setRecipients([])}
-                      className="text-[11px] text-red-500 hover:text-red-600"
-                    >
-                      전체삭제
-                    </button>
+              {recipients.length === 0 ? (
+                <div className="ds-list-empty">
+                  <div
+                    className={`ds-dropzone ds-t w-full ${dragActive ? 'ds-dropzone--active' : ''}`}
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                    onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                    onDrop={(e) => {
+                      e.preventDefault(); e.stopPropagation();
+                      setDragActive(false);
+                      const f = e.dataTransfer?.files?.[0];
+                      if (f) { setInputMode('file'); handleFileUpload(f); }
+                    }}
+                  >
+                    <div>
+                      <div className="text-[14px] font-semibold text-stone-800">파일을 올리거나 직접 입력해 주세요</div>
+                      <div className="text-[12.5px] text-stone-500 mt-1">CSV · XLSX · XLS · 명단 칸은 변수와 바로 연결돼요</div>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="ds-btn-sec px-4 pointer-events-none border border-amber-200 bg-amber-50 text-amber-700">
+                        <Upload size={14} strokeWidth={1.75} />
+                        <span>파일 선택</span>
+                      </span>
+                      <span className="text-[12px] text-stone-400">또는 여기로 드래그</span>
+                    </div>
                   </div>
-                  <div className="max-h-48 overflow-y-auto overflow-x-auto">
-                    <table className="w-full text-xs">
-                      {previewColumns.length > 0 && (
-                        <thead className="bg-gray-50/70 sticky top-0">
-                          <tr>
-                            <th className="px-3 py-1 text-left text-[10px] font-medium text-gray-500 whitespace-nowrap">
-                              수신번호
-                            </th>
-                            {previewColumns.map((col) => (
-                              <th
-                                key={col}
-                                className="px-3 py-1 text-left text-[10px] font-medium text-gray-500 whitespace-nowrap"
-                              >
-                                {FIELD_LABEL_MAP[col] || col}
-                              </th>
-                            ))}
-                            <th className="px-3 py-1 text-right"></th>
-                          </tr>
-                        </thead>
-                      )}
-                      <tbody>
-                        {recipients.slice(0, 50).map((r, idx) => (
-                          <tr
-                            key={`${r.phone}-${idx}`}
-                            className="border-b border-gray-100 last:border-0"
-                          >
-                            <td className="px-3 py-1 font-mono text-gray-700 whitespace-nowrap">{r.phone}</td>
-                            {previewColumns.map((col) => (
-                              <td
-                                key={col}
-                                className="px-3 py-1 text-gray-700 truncate max-w-[140px] whitespace-nowrap"
-                              >
-                                {r[col] != null && String(r[col]).trim() !== '' ? String(r[col]) : '-'}
-                              </td>
-                            ))}
-                            <td className="px-3 py-1 text-right whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setRecipients((prev) => prev.filter((_, i) => i !== idx))
-                                }
-                                className="text-[11px] text-gray-400 hover:text-red-500"
-                              >
-                                삭제
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) { setInputMode('file'); handleFileUpload(f); }
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="ds-list-body">
+                    {listPageItems.length === 0 ? (
+                      <div className="py-12 text-center text-stone-400 text-[13px]">
+                        {listQuery ? `"${listQuery}" 검색 결과가 없어요` : '데이터가 없어요'}
+                      </div>
+                    ) : (
+                      listPageItems.map((r) => (
+                        <div key={`${r.phone}-${r.originalIdx}`} className="ds-list-row">
+                          <label className="flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="ds-chk ds-chk--amber"
+                              checked={listSelected.has(r.originalIdx)}
+                              onChange={(e) => {
+                                const next = new Set(listSelected);
+                                if (e.target.checked) next.add(r.originalIdx);
+                                else next.delete(r.originalIdx);
+                                setListSelected(next);
+                              }}
+                              aria-label={`${r.phone} 선택`}
+                            />
+                          </label>
+                          <span className="ds-num text-stone-800 font-medium">{r.phone}</span>
+                          <span className="ds-cell-extra">
+                            {previewColumns.map((col) => {
+                              const v = r[col] != null && String(r[col]).trim() !== '' ? String(r[col]) : '-';
+                              return (
+                                <span key={col}>
+                                  <span className="val" title={v}>{v}</span>
+                                </span>
+                              );
+                            })}
+                          </span>
+                        </div>
+                      ))
+                    )}
                   </div>
+                  {listTotalPages > 1 && (
+                    <div className="ds-page">
+                      <button type="button" onClick={() => setListPage((p) => Math.max(0, p - 1))} disabled={listCurrentPage === 0}>이전</button>
+                      <span className="ds-page-num">{listCurrentPage + 1} / {listTotalPages}</span>
+                      <button type="button" onClick={() => setListPage((p) => Math.min(listTotalPages - 1, p + 1))} disabled={listCurrentPage >= listTotalPages - 1}>다음</button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="ds-bottom-actions">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="ds-ter ds-ter--danger ds-t"
+                  onClick={() => {
+                    if (listSelected.size === 0) { setToast({ show: true, type: 'error', message: '선택된 항목이 없습니다' }); return; }
+                    setRecipients((prev) => prev.filter((_, idx) => !listSelected.has(idx)));
+                    setListSelected(new Set());
+                  }}
+                >
+                  <Trash2 size={13} strokeWidth={1.75} />
+                  <span>선택삭제</span>
+                </button>
+                <button
+                  type="button"
+                  className="ds-ter ds-ter--danger ds-t"
+                  onClick={() => { setRecipients([]); setListSelected(new Set()); }}
+                >
+                  <CircleX size={13} strokeWidth={1.75} />
+                  <span>전체삭제</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {/* ====== 발송 바 — 예약 · 분할 · 실패 시 문자 / 발신프로필 · 보내기 ====== */}
+        <footer className="ds-modal__foot ks-foot">
+          <div className="ds-foot-opts">
+            <div className="ds-opt-anchor">
+              <button
+                type="button"
+                className={`ds-tile ds-tile--opt ${reserveEnabled ? 'ds-tile--opt-blue' : ''}`}
+                onClick={() => { if (!reserveEnabled) setReserveEnabled(true); setShowReservePicker(true); }}
+              >
+                <span className="ds-tile__ic"><CalendarClock size={17} strokeWidth={2} /></span>
+                <span className="ds-tile__tx">
+                  <span className="ds-tile__t1">예약</span>
+                  <span className="ds-tile__t2">
+                    {reserveEnabled
+                      ? (reserveDateTime
+                        ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                        : '시각을 골라 주세요')
+                      : '지금 보내기'}
+                  </span>
+                </span>
+                {!reserveEnabled && <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />}
+              </button>
+              {reserveEnabled && (
+                <button type="button" className="ds-tile__clear" onClick={() => { setReserveEnabled(false); setReserveDateTime(''); }} aria-label="예약 풀기" title="예약 풀기">
+                  <X size={12} strokeWidth={2.4} />
+                </button>
+              )}
+            </div>
+            <div className="ds-opt-anchor">
+              <button
+                type="button"
+                data-split-anchor
+                className={`ds-tile ds-tile--opt ${splitEnabled ? 'ds-tile--opt-violet' : ''}`}
+                onClick={() => setSplitOpen((o) => !o)}
+                aria-haspopup="dialog"
+                aria-expanded={splitOpen}
+              >
+                <span className="ds-tile__ic"><Timer size={17} strokeWidth={2} /></span>
+                <span className="ds-tile__tx">
+                  <span className="ds-tile__t1">분할</span>
+                  <span className="ds-tile__t2">{splitEnabled ? `1분에 ${splitCount.toLocaleString()}건` : '안 함'}</span>
+                </span>
+                <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />
+              </button>
+              <SplitSendPopover
+                open={splitOpen}
+                enabled={splitEnabled}
+                value={splitCount}
+                recipientCount={recipients.length}
+                startAt={reserveEnabled && reserveDateTime ? reserveDateTime : null}
+                onApply={(n) => { setSplitCount(n); setSplitEnabled(true); }}
+                onOff={() => setSplitEnabled(false)}
+                onClose={() => setSplitOpen(false)}
+              />
+            </div>
+            <div className="ds-opt-anchor" ref={fallbackAnchorRef}>
+              <button
+                type="button"
+                className={`ds-tile ds-tile--opt ${fallbackIssue ? 'ds-tile--opt-amber' : ''}`}
+                onClick={() => setFallbackOpen((o) => !o)}
+                aria-haspopup="dialog"
+                aria-expanded={fallbackOpen}
+              >
+                <span className="ds-tile__ic"><MessageSquareReply size={17} strokeWidth={2} /></span>
+                <span className="ds-tile__tx">
+                  <span className="ds-tile__t1">실패 시 문자</span>
+                  <span className="ds-tile__t2">{fallbackIssue || fallbackLabel}</span>
+                </span>
+                <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />
+              </button>
+              {fallbackOpen && (
+                <div className="ks-pop" role="dialog" aria-label="알림톡이 실패하면">
+                  <div className="ks-pop__head">
+                    <b>알림톡이 실패하면</b>
+                    <button type="button" className="ks-pop__x" onClick={() => setFallbackOpen(false)} aria-label="닫기"><X size={15} strokeWidth={2} /></button>
+                  </div>
+                  {ch.selectedTemplate ? (
+                    <AlimtalkFallbackEditor
+                      value={channelState}
+                      selectedTemplate={ch.selectedTemplate}
+                      setNextType={ch.setNextType}
+                      setNextSubject={ch.setNextSubject}
+                      setNextContents={ch.setNextContents}
+                      requiresNextSubject={ch.requiresNextSubject}
+                      requiresNextContents={ch.requiresNextContents}
+                      renderPreview={ch.renderPreview}
+                    />
+                  ) : (
+                    <p className="ks-note">템플릿을 먼저 고르면 실패했을 때 보낼 문자를 정할 수 있어요.</p>
+                  )}
                 </div>
               )}
             </div>
           </div>
-        </div>
-
-        {/* 푸터 — 발송 버튼 */}
-        <div className="px-6 py-4 border-t border-gray-200 bg-white shrink-0">
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={
-              sending ||
-              recipients.length === 0 ||
-              !kakaoSelectedTemplate ||
-              !['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate?.status)
-            }
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-base transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            <Bell size={18} strokeWidth={2} />
-            <span>
-              {sending
-                ? '발송 준비중...'
-                : recipients.length === 0
-                  ? '수신자를 추가해주세요'
-                  : !kakaoSelectedTemplate
-                    ? '템플릿을 선택해주세요'
-                    : reserveEnabled
-                      ? `${recipients.length.toLocaleString()}명에게 알림톡 예약 발송하기`
-                      : `${recipients.length.toLocaleString()}명에게 알림톡 발송하기`}
-            </span>
-          </button>
-        </div>
-
-        <style>{`
-          @keyframes zoomIn {
-            from { opacity: 0; transform: scale(0.96); }
-            to { opacity: 1; transform: scale(1); }
-          }
-        `}</style>
+          <div className="ds-modal__vdiv" />
+          <div className="ds-foot-send">
+            <div className={`ks-sender ${!currentSender ? 'ks-sender--empty' : ''}`}>
+              <span className="ks-sender__lab">발신프로필</span>
+              <span className="ks-sender__val">{currentSender ? currentSender.profile_name : '고르기 전'}</span>
+            </div>
+            <button
+              type="button"
+              className="ds-send-btn ks-send--amber"
+              onClick={handleSend}
+              disabled={
+                sending ||
+                recipients.length === 0 ||
+                !kakaoSelectedTemplate ||
+                !['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate?.status)
+              }
+            >
+              <Send size={17} strokeWidth={2} />
+              <span>
+                {sending
+                  ? '발송 준비중...'
+                  : recipients.length === 0
+                    ? '수신자를 추가해주세요'
+                    : !kakaoSelectedTemplate
+                      ? '템플릿을 선택해주세요'
+                      : reserveEnabled
+                        ? `${recipients.length.toLocaleString()}명에게 알림톡 예약 발송하기`
+                        : `${recipients.length.toLocaleString()}명에게 알림톡 발송하기`}
+              </span>
+            </button>
+          </div>
+        </footer>
       </div>
 
+      <AlimtalkTemplatePickerModal
+        open={pickerOpen}
+        templates={alimtalkTemplates}
+        profileId={alimtalkProfileId}
+        selectedId={kakaoSelectedTemplate?.id || ''}
+        onPick={(t) => ch.handleSelectTemplate(t)}
+        onClose={() => setPickerOpen(false)}
+      />
+
+      <style>{`
+        @keyframes zoomIn {
+          from { opacity: 0; transform: scale(0.96); }
+          to { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
       {/* ★ D162-4 (2026-05-15) 2차: 주소록 모달 — Harold님 명시 정합. recipients/setRecipients position에 위임 → 그룹 선택 시 자동 적용. */}
       <AddressBookModal
         show={showAddressBook}

@@ -65,7 +65,7 @@ export interface AlimtalkChannelState {
   nextSubject?: string;
 }
 
-interface Props {
+export interface Props {
   /** 승인된 발신프로필 목록 (호출부에서 필터 또는 전체 전달) */
   senders: AlimtalkSenderProfile[];
   /** 전체 템플릿 목록 (Panel 내부에서 profile + status 필터링) */
@@ -96,7 +96,7 @@ export function createEmptyAlimtalkState(): AlimtalkChannelState {
   return { ...EMPTY_STATE, variableMap: {} };
 }
 
-const NEXT_TYPE_OPTIONS: { value: AlimtalkNextType; label: string; desc: string }[] = [
+export const NEXT_TYPE_OPTIONS: { value: AlimtalkNextType; label: string; desc: string }[] = [
   // ★ 2026-06-01 (영업팀장 박성용 신고): SMS 대체 계열(S·A:SMS+문구) 제거 — 알림톡 문구가 길어 SMS 대체 부적합.
   // ★ 2026-06-02 (직원 신고): LMS+문구(B) 재추가 — LMS로 대체하되 별도 문구가 필요한 경우. SMS 계열(S·A)은 계속 제외.
   // ★ 2026-07-27: 라벨을 "무엇이 나가는가"로 정정. 옛 'LMS 대체'/'LMS+문구'는 두 선택의 차이가
@@ -124,24 +124,32 @@ export function validateAlimtalkChannelState(v: AlimtalkChannelState): string | 
   return null;
 }
 
-const APPROVED_TEMPLATE_STATUSES = new Set(['APPROVED', 'APR', 'A', 'approved']);
-const APPROVED_SENDER_STATUSES = new Set(['APPROVED']);
+export const APPROVED_TEMPLATE_STATUSES = new Set(['APPROVED', 'APR', 'A', 'approved']);
+export const APPROVED_SENDER_STATUSES = new Set(['APPROVED']);
 
 /** 템플릿 내용에서 #{...} 변수 추출 */
-function extractVariables(content: string): string[] {
+export function extractVariables(content: string): string[] {
   const matches = content?.match(/#\{[^}]+\}/g) || [];
   return Array.from(new Set(matches));
 }
 
-export default function AlimtalkChannelPanel({
+/** ★2026-09-25 승인 템플릿인가 — 발송 창 템플릿 고르기 창과 공용 패널이 같은 판정을 쓴다 */
+export function isApprovedAlimtalkTemplate(t: { status?: string | null } | null | undefined): boolean {
+  return APPROVED_TEMPLATE_STATUSES.has(String(t?.status || '').toUpperCase());
+}
+
+/**
+ * ★2026-09-25 알림톡 채널 선택·대체발송 로직 한 벌 — 공용 패널(기본 모양)과 알림톡 발송 창(작업면 모양)이 같이 쓴다.
+ *   화면을 새로 짜도 판정·자동 매핑·대체문안 규칙은 여기 하나다(두 벌이 되면 갈라진다).
+ */
+export function useAlimtalkChannel({
   senders,
   templates,
   customerFieldOptions = [],
   value,
   onChange,
-  onRequestTemplates,
   sampleRecipient,
-}: Props) {
+}: Pick<Props, 'senders' | 'templates' | 'customerFieldOptions' | 'value' | 'onChange' | 'sampleRecipient'>) {
   const [previewMode, setPreviewMode] = useState<'template' | 'filled'>('filled');
 
   // 승인된 발신프로필만
@@ -279,6 +287,160 @@ export default function AlimtalkChannelPanel({
     }
     return out;
   };
+
+  return {
+    previewMode, setPreviewMode, approvedSenders, visibleTemplates, selectedTemplate, handleSelectTemplate,
+    setProfileId, setNextType, setNextContents, setNextSubject, requiresNextContents, requiresNextSubject, renderPreview,
+  };
+}
+
+/** ★2026-09-25 카카오 말풍선 미리보기 값 — 템플릿 한 건을 AlimtalkPreview 속성으로. fill 이 있으면 변수를 치환한다 */
+export function buildAlimtalkPreviewProps(
+  t: AlimtalkTemplate,
+  fill?: (text: string | null | undefined) => string,
+): React.ComponentProps<typeof AlimtalkPreview> {
+  return {
+    messageType: (t.message_type || 'BA') as any,
+    emphasizeType: (t.emphasize_type || 'NONE') as any,
+    templateTitle: t.emphasize_title ? (fill ? fill(t.emphasize_title) : t.emphasize_title) : undefined,
+    templateSubtitle: t.emphasize_subtitle || undefined,
+    imageUrl: (t as any).image_url || undefined,
+    content: fill ? fill(t.content) : t.content,
+    extraContent: (t as any).extra_content || undefined,
+    adContent: (t as any).ad_content || undefined,
+    header: (t as any).template_header || undefined,
+    highlight: (t as any).item_highlight || undefined,
+    itemList: (t as any).item_list || undefined,
+    summary: (t as any).item_summary || undefined,
+    buttons: (t.buttons || []) as any,
+    profileName: t.profile_name || undefined,
+  };
+}
+
+/** ★2026-09-25 부달(대체) 발송 편집 — 공용 패널과 알림톡 발송 창 발송 바가 같이 쓴다(원본 마크업 그대로) */
+export function AlimtalkFallbackEditor({
+  value,
+  selectedTemplate,
+  setNextType,
+  setNextSubject,
+  setNextContents,
+  requiresNextSubject,
+  requiresNextContents,
+  renderPreview,
+}: {
+  value: AlimtalkChannelState;
+  selectedTemplate: AlimtalkTemplate | null;
+  setNextType: (t: AlimtalkNextType) => void;
+  setNextSubject: (v: string) => void;
+  setNextContents: (v: string) => void;
+  requiresNextSubject: boolean;
+  requiresNextContents: boolean;
+  renderPreview: (text: string | null | undefined) => string;
+}) {
+  return (
+    <>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">
+              부달(대체) 발송
+            </label>
+            <p className="text-[11px] text-gray-400 mb-2">
+              알림톡 전송 실패 시 자동 대체 발송 정책
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {NEXT_TYPE_OPTIONS.map((opt) => {
+                const active = value.nextType === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setNextType(opt.value)}
+                    className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
+                      active
+                        ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300/50 shadow-sm'
+                        : 'bg-white border-gray-200 hover:border-amber-300 hover:bg-amber-50/40'
+                    }`}
+                  >
+                    <div className={`text-xs font-bold ${active ? 'text-amber-900' : 'text-gray-700'}`}>{opt.label}</div>
+                    <div className={`text-[10.5px] mt-0.5 leading-tight ${active ? 'text-amber-700' : 'text-gray-400'}`}>{opt.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {/* ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L/B 시 LMS 제목 input 신규. */}
+            {requiresNextSubject && (
+              <div className="mt-2">
+                <label className="block text-[11px] text-gray-500 mb-1">
+                  대체 LMS 제목 <span className="text-red-500">*</span>
+                  <span className="ml-1 text-gray-400">(40자, LMS/MMS는 제목 필수)</span>
+                </label>
+                <input
+                  type="text"
+                  value={value.nextSubject || ''}
+                  onChange={(e) => setNextSubject(e.target.value)}
+                  placeholder="LMS 대체 발송 시 표시될 제목"
+                  maxLength={40}
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs"
+                />
+                <div className="text-right text-[10px] text-gray-400 mt-0.5">
+                  {(value.nextSubject || '').length} / 40자
+                </div>
+              </div>
+            )}
+            {/* ★ 2026-07-27: '원문 그대로'는 무엇이 나가는지 화면에서 확정해 보여준다(추측 여지 제거). */}
+            {(value.nextType === 'L' || value.nextType === 'S') && (
+              <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="text-[11px] font-medium text-gray-600 mb-1">전환 시 나갈 문구: 위 알림톡 본문 그대로</div>
+                <div className="text-[11px] text-gray-500 whitespace-pre-wrap max-h-24 overflow-y-auto leading-relaxed">
+                  {renderPreview(selectedTemplate?.content) || '템플릿을 선택하면 표시됩니다.'}
+                </div>
+              </div>
+            )}
+            {/* ★ D188 (2026-05-21) 영업팀장 신고 #7-(1): 부달 textarea 영역 확대 rows={3}→{6} + resize-y. */}
+            {requiresNextContents && (
+              <div className="mt-2">
+                <label className="block text-[11px] text-gray-500 mb-1">
+                  대체문안 {value.nextType === 'A' ? '(SMS)' : '(LMS)'}{' '}
+                  <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={value.nextContents}
+                  onChange={(e) => setNextContents(e.target.value)}
+                  rows={6}
+                  placeholder="알림톡 실패 시 이 문안으로 대체 발송됩니다. (알림톡 본문 변수 #{...}가 자동 적용됩니다)"
+                  className={`w-full border rounded px-2 py-1.5 text-xs resize-y ${
+                    value.nextContents.trim() ? 'border-gray-300' : 'border-red-300 bg-red-50/40'
+                  }`}
+                  maxLength={value.nextType === 'A' ? 90 : 2000}
+                />
+                <div className="flex items-center justify-between mt-0.5">
+                  <div className="text-[10px] text-red-500">
+                    {value.nextContents.trim()
+                      ? ''
+                      : '대체문안이 비어 있으면 저장할 수 없습니다. 원문을 쓰려면 "원문 그대로"를 선택하세요.'}
+                  </div>
+                  <div className="text-[10px] text-gray-400">
+                    {value.nextContents.length} /{' '}
+                    {value.nextType === 'A' ? '90' : '2000'}자
+                  </div>
+                </div>
+              </div>
+            )}
+    </>
+  );
+}
+
+export default function AlimtalkChannelPanel({
+  senders,
+  templates,
+  customerFieldOptions = [],
+  value,
+  onChange,
+  onRequestTemplates,
+  sampleRecipient,
+}: Props) {
+  const {
+    previewMode, setPreviewMode, approvedSenders, visibleTemplates, selectedTemplate, handleSelectTemplate,
+    setProfileId, setNextType, setNextContents, setNextSubject, requiresNextContents, requiresNextSubject, renderPreview,
+  } = useAlimtalkChannel({ senders, templates, customerFieldOptions, value, onChange, sampleRecipient });
 
   return (
     <div className="border-2 border-blue-200 rounded-2xl overflow-hidden bg-white shadow-sm text-gray-900 [&_input]:text-gray-900 [&_input]:bg-white [&_textarea]:text-gray-900 [&_textarea]:bg-white [&_select]:text-gray-900">
@@ -423,30 +585,7 @@ export default function AlimtalkChannelPanel({
               </div>
             </div>
             <AlimtalkPreview
-              messageType={(selectedTemplate.message_type || 'BA') as any}
-              emphasizeType={(selectedTemplate.emphasize_type || 'NONE') as any}
-              templateTitle={
-                selectedTemplate.emphasize_title
-                  ? previewMode === 'filled'
-                    ? renderPreview(selectedTemplate.emphasize_title)
-                    : selectedTemplate.emphasize_title
-                  : undefined
-              }
-              templateSubtitle={selectedTemplate.emphasize_subtitle || undefined}
-              imageUrl={(selectedTemplate as any).image_url || undefined}
-              content={
-                previewMode === 'filled'
-                  ? renderPreview(selectedTemplate.content)
-                  : selectedTemplate.content
-              }
-              extraContent={(selectedTemplate as any).extra_content || undefined}
-              adContent={(selectedTemplate as any).ad_content || undefined}
-              header={(selectedTemplate as any).template_header || undefined}
-              highlight={(selectedTemplate as any).item_highlight || undefined}
-              itemList={(selectedTemplate as any).item_list || undefined}
-              summary={(selectedTemplate as any).item_summary || undefined}
-              buttons={(selectedTemplate.buttons || []) as any}
-              profileName={selectedTemplate.profile_name || undefined}
+              {...buildAlimtalkPreviewProps(selectedTemplate, previewMode === 'filled' ? renderPreview : undefined)}
             />
           </div>
         )}
@@ -454,91 +593,16 @@ export default function AlimtalkChannelPanel({
         {/* 5) 부달 발송 */}
         {selectedTemplate && (
           <div className="border-t pt-3">
-            <label className="block text-xs font-medium text-gray-600 mb-1.5">
-              부달(대체) 발송
-            </label>
-            <p className="text-[11px] text-gray-400 mb-2">
-              알림톡 전송 실패 시 자동 대체 발송 정책
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {NEXT_TYPE_OPTIONS.map((opt) => {
-                const active = value.nextType === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setNextType(opt.value)}
-                    className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
-                      active
-                        ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300/50 shadow-sm'
-                        : 'bg-white border-gray-200 hover:border-amber-300 hover:bg-amber-50/40'
-                    }`}
-                  >
-                    <div className={`text-xs font-bold ${active ? 'text-amber-900' : 'text-gray-700'}`}>{opt.label}</div>
-                    <div className={`text-[10.5px] mt-0.5 leading-tight ${active ? 'text-amber-700' : 'text-gray-400'}`}>{opt.desc}</div>
-                  </button>
-                );
-              })}
-            </div>
-            {/* ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L/B 시 LMS 제목 input 신규. */}
-            {requiresNextSubject && (
-              <div className="mt-2">
-                <label className="block text-[11px] text-gray-500 mb-1">
-                  대체 LMS 제목 <span className="text-red-500">*</span>
-                  <span className="ml-1 text-gray-400">(40자, LMS/MMS는 제목 필수)</span>
-                </label>
-                <input
-                  type="text"
-                  value={value.nextSubject || ''}
-                  onChange={(e) => setNextSubject(e.target.value)}
-                  placeholder="LMS 대체 발송 시 표시될 제목"
-                  maxLength={40}
-                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs"
-                />
-                <div className="text-right text-[10px] text-gray-400 mt-0.5">
-                  {(value.nextSubject || '').length} / 40자
-                </div>
-              </div>
-            )}
-            {/* ★ 2026-07-27: '원문 그대로'는 무엇이 나가는지 화면에서 확정해 보여준다(추측 여지 제거). */}
-            {(value.nextType === 'L' || value.nextType === 'S') && (
-              <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                <div className="text-[11px] font-medium text-gray-600 mb-1">전환 시 나갈 문구: 위 알림톡 본문 그대로</div>
-                <div className="text-[11px] text-gray-500 whitespace-pre-wrap max-h-24 overflow-y-auto leading-relaxed">
-                  {renderPreview(selectedTemplate?.content) || '템플릿을 선택하면 표시됩니다.'}
-                </div>
-              </div>
-            )}
-            {/* ★ D188 (2026-05-21) 영업팀장 신고 #7-(1): 부달 textarea 영역 확대 rows={3}→{6} + resize-y. */}
-            {requiresNextContents && (
-              <div className="mt-2">
-                <label className="block text-[11px] text-gray-500 mb-1">
-                  대체문안 {value.nextType === 'A' ? '(SMS)' : '(LMS)'}{' '}
-                  <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={value.nextContents}
-                  onChange={(e) => setNextContents(e.target.value)}
-                  rows={6}
-                  placeholder="알림톡 실패 시 이 문안으로 대체 발송됩니다. (알림톡 본문 변수 #{...}가 자동 적용됩니다)"
-                  className={`w-full border rounded px-2 py-1.5 text-xs resize-y ${
-                    value.nextContents.trim() ? 'border-gray-300' : 'border-red-300 bg-red-50/40'
-                  }`}
-                  maxLength={value.nextType === 'A' ? 90 : 2000}
-                />
-                <div className="flex items-center justify-between mt-0.5">
-                  <div className="text-[10px] text-red-500">
-                    {value.nextContents.trim()
-                      ? ''
-                      : '대체문안이 비어 있으면 저장할 수 없습니다. 원문을 쓰려면 "원문 그대로"를 선택하세요.'}
-                  </div>
-                  <div className="text-[10px] text-gray-400">
-                    {value.nextContents.length} /{' '}
-                    {value.nextType === 'A' ? '90' : '2000'}자
-                  </div>
-                </div>
-              </div>
-            )}
+            <AlimtalkFallbackEditor
+              value={value}
+              selectedTemplate={selectedTemplate}
+              setNextType={setNextType}
+              setNextSubject={setNextSubject}
+              setNextContents={setNextContents}
+              requiresNextSubject={requiresNextSubject}
+              requiresNextContents={requiresNextContents}
+              renderPreview={renderPreview}
+            />
           </div>
         )}
       </div>

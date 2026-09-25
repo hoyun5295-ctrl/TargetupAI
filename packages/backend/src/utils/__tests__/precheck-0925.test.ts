@@ -468,6 +468,13 @@ describe('8. 화면 계약', () => {
     }
     expect(readFront('components/SpamFilterTestModal.tsx')).toContain('{carrierLabel(c)} 스팸 검사</b>');
   });
+  it('★Harold 0925 — 빈 수신자 목록의 업로드 칸이 목록 칸 안에 들어간다(잘림 없음)', () => {
+    const css = readFront('styles/direct-send.css');
+    const empty = css.slice(css.indexOf('.ds-list-empty {'), css.indexOf('.ds-list-empty > .ds-dropzone'));
+    expect(empty).toContain('min-height: 0;');
+    expect(empty).toContain('align-items: stretch;');
+    expect(css).toContain('.ds-list-empty > .ds-dropzone { flex: 1; min-height: 0;');
+  });
   it('모델명 0 · native dialog 0(새 화면 파일)', () => {
     const files = [
       'components/direct-send/DirectCheckTiles.tsx', 'components/direct-send/DirectSpellModal.tsx',

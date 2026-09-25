@@ -1240,12 +1240,20 @@
 }
 .ds-list-row:hover { background: var(--ds-stone-50); }
 
+/* ★ 2026-09-25 빈 상태 = 목록 칸 높이 안에 들어간다(Harold "파일 업로드 칸이 잘려 보인다").
+   예전: 칸 높이를 몰라 내용 높이(위아래 여백 64)를 고집 → 전체 화면 창에서 목록 칸보다 커지면 아래 점선이 잘렸다.
+   지금: 빈 상태가 칸 높이까지 줄고(min-height 0) 업로드 상자가 그 높이를 꽉 채운다 → 점선 네 변이 늘 보인다. */
 .ds-list-empty {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  padding: 24px;
+  padding: 16px;
   flex: 1;
+  min-height: 0;
+}
+.ds-list-empty > .ds-dropzone { flex: 1; min-height: 0; padding: 20px 24px; gap: 12px; }
+@media (max-height: 760px) {
+  .ds-list-empty > .ds-dropzone svg { width: 56px; height: 56px; }
 }
 
 /* 테이블 내부 셀 — 동일 grid로 행별 균일 정렬 */
@@ -1925,4 +1933,151 @@ p.ds-warn-good { margin: 0; display: flex; gap: 7px; align-items: center; paddin
   .ds-tile__go { display: none; }
   .ds-split-pop { width: min(320px, calc(100vw - 28px)); }
   .ds-sender .ds-callback-menu { width: auto; left: 0; }
+}
+
+/* ============================================================
+   ★ 2026-09-25 카카오 발송 창(알림톡 · 브랜드메시지) — 직접발송과 같은 틀 (Harold 목업 v2 승인)
+   - 3열: 작성 520 · 받는 화면 380(카카오 말풍선 최대 폭 352 + 여백) · 수신자 = 남는 폭
+   - 가장 큰 유형(캐러셀) 기준으로 잡아 유형·템플릿이 바뀌어도 창 크기는 그대로다.
+     넓은 카드는 받는 화면 안에서 옆으로, 긴 목록은 위아래로 넘긴다(실제 카카오톡과 같은 방식).
+   - 발송 바: 옵션 3칸 = 작성+받는 화면 폭(901) · 오른쪽 = 발신프로필 + 보내기
+   - 클래스는 ks-* 로 새로 만든다(직접발송 화면의 ds-* 규칙은 건드리지 않는다).
+   ============================================================ */
+.ds-modal__body.ks-body { grid-template-columns: 520px 380px minmax(0, 1fr); }
+.ks-body > section { min-width: 0; }
+.ks-body > section + section { border-left: 1px solid var(--ds-stone-150); }
+.ks-body > section.ks-compose { overflow-y: auto; gap: 16px; }
+.ks-body > section.ks-preview { background: var(--ds-stone-50); padding: 18px 16px; overflow-y: auto; }
+.ds-modal__foot.ks-foot { grid-template-columns: 901px 1px minmax(0, 1fr); }
+
+.ds-head-icon.ks-head-icon--amber { background: var(--ds-amber-500); border-color: var(--ds-amber-500); color: #FFFFFF; }
+.ds-head-icon.ks-head-icon--violet { background: #7C3AED; border-color: #7C3AED; color: #FFFFFF; }
+
+.ds-send-btn.ks-send--amber { background: var(--ds-amber-500); box-shadow: 0 1px 2px rgb(146 64 14 / .12), 0 4px 14px rgb(245 158 11 / .28); }
+.ds-send-btn.ks-send--amber:hover:not(:disabled) { background: var(--ds-amber-600); }
+.ds-send-btn.ks-send--violet { background: #7C3AED; box-shadow: 0 1px 2px rgb(76 29 149 / .12), 0 4px 14px rgb(124 58 237 / .26); }
+.ds-send-btn.ks-send--violet:hover:not(:disabled) { background: #6D28D9; }
+.ds-send-btn.ks-send--amber:disabled,
+.ds-send-btn.ks-send--violet:disabled { background: var(--ds-stone-300); box-shadow: none; }
+
+.ks-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12.5px; font-weight: 700; color: var(--ds-stone-700); margin: 0 0 7px; }
+.ks-label small { font-size: 11.5px; font-weight: 500; color: var(--ds-stone-400); word-break: keep-all; text-align: right; }
+.ks-select { width: 100%; height: 42px; border: 1px solid var(--ds-stone-200); border-radius: 10px; background: #FFFFFF; padding: 0 12px; font-size: 13.5px; color: var(--ds-stone-900); font-family: inherit; }
+.ks-select:focus { outline: none; border-color: var(--ds-amber-500); box-shadow: 0 0 0 3px rgb(245 158 11 / .12); }
+.ks-static { min-height: 42px; border: 1px solid var(--ds-stone-200); border-radius: 10px; background: var(--ds-stone-50); display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 13.5px; font-weight: 600; color: var(--ds-stone-900); }
+.ks-static small { color: var(--ds-stone-500); font-weight: 500; font-size: 12px; }
+.ks-avatar { width: 24px; height: 24px; border-radius: 8px; background: #FEE500; color: #3C1E1E; display: grid; place-items: center; font-size: 11px; font-weight: 800; flex: none; }
+
+.ks-pick { width: 100%; min-height: 64px; border: 1px solid var(--ds-stone-200); border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; gap: 12px; padding: 10px 12px; text-align: left; cursor: pointer; font-family: inherit; color: var(--ds-stone-900); transition: border-color .15s ease, box-shadow .15s ease; }
+.ks-pick:hover:not(:disabled) { border-color: var(--ds-stone-300); box-shadow: 0 1px 3px rgb(0 0 0 / .06); }
+.ks-pick:disabled { cursor: not-allowed; opacity: .6; }
+.ks-pick--empty { border-style: dashed; background: var(--ds-stone-50); }
+.ks-pick__thumb { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--ds-stone-100); color: var(--ds-stone-500); }
+.ks-pick__thumb--kakao { background: #FEE500; color: #3C1E1E; }
+.ks-pick__tx { min-width: 0; flex: 1; }
+.ks-pick__tx b { display: block; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ks-pick__tx small { display: block; font-size: 12px; color: var(--ds-stone-500); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ks-pick__go { flex: none; height: 32px; padding: 0 11px; border-radius: 9px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.ks-pick__go--amber { background: var(--ds-amber-50); color: var(--ds-amber-700); }
+.ks-pick__go--violet { background: #F5F3FF; color: #6D28D9; }
+
+.ks-note { font-size: 12px; color: var(--ds-stone-500); line-height: 1.55; word-break: keep-all; margin: 0; }
+.ks-warn { font-size: 12.5px; line-height: 1.5; color: var(--ds-amber-800); background: var(--ds-amber-50); border: 1px solid var(--ds-amber-200); border-radius: 10px; padding: 9px 12px; word-break: keep-all; margin: 0; }
+
+.ks-preview__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.ks-preview__head b { font-size: 12.5px; font-weight: 700; color: var(--ds-stone-700); }
+.ks-preview__cap { margin: 10px 0 0; font-size: 10.5px; font-style: italic; color: var(--ds-stone-400); text-align: center; }
+.ks-preview__empty { border: 1.5px dashed var(--ds-stone-300); border-radius: 16px; padding: 36px 16px; text-align: center; color: var(--ds-stone-400); font-size: 12.5px; line-height: 1.6; word-break: keep-all; }
+.ks-seg { display: inline-flex; background: var(--ds-stone-150); border-radius: 8px; padding: 2px; }
+.ks-seg button { height: 24px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; font-size: 11.5px; color: var(--ds-stone-500); cursor: pointer; font-family: inherit; }
+.ks-seg button.on { background: #FFFFFF; color: var(--ds-stone-900); font-weight: 700; box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+
+.ks-direct { display: flex; gap: 8px; align-items: stretch; }
+.ks-direct textarea { flex: 1; min-width: 0; height: 64px; border: 1px solid var(--ds-stone-200); border-radius: 10px; padding: 8px 11px; font-size: 12.5px; line-height: 1.5; font-family: inherit; resize: vertical; color: var(--ds-stone-900); }
+.ks-direct textarea:focus { outline: none; border-color: var(--ds-stone-400); }
+.ks-direct button { flex: none; width: 96px; border: 0; border-radius: 10px; background: var(--ds-stone-900); color: #FFFFFF; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.ks-direct button:hover { background: #000000; }
+
+/* 발송 바 풍선(실패 시 문자) — 칸 위로 뜬다 */
+.ks-pop { position: absolute; bottom: calc(100% + 8px); right: 0; width: 460px; max-height: min(560px, calc(100vh - 170px)); overflow-y: auto; z-index: 60; background: #FFFFFF; border: 1px solid var(--ds-stone-200); border-radius: 14px; box-shadow: 0 20px 44px -12px rgb(0 0 0 / .3); padding: 14px 16px 16px; }
+.ks-pop--left { right: auto; left: 0; }
+.ks-pop__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.ks-pop__head b { font-size: 13.5px; font-weight: 700; }
+.ks-pop__x { border: 0; background: transparent; color: var(--ds-stone-400); width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; cursor: pointer; }
+.ks-pop__x:hover { background: var(--ds-stone-100); color: var(--ds-stone-700); }
+
+/* 보내기 전에 걸리는 것(브랜드메시지) — 발송 바 바로 위 한 줄 */
+.ks-blockbar { flex: none; padding: 8px 24px; background: #FFF1F2; border-top: 1px solid #FECDD3; color: #BE123C; font-size: 12.5px; line-height: 1.5; word-break: keep-all; }
+.ds-send-btn.ks-send--indigo { background: #4F46E5; box-shadow: 0 1px 2px rgb(49 46 129 / .12), 0 4px 14px rgb(79 70 229 / .26); }
+.ds-send-btn.ks-send--indigo:hover:not(:disabled) { background: #4338CA; }
+.ds-send-btn.ks-send--indigo:disabled { background: var(--ds-stone-300); box-shadow: none; }
+.ds-tile--opt-violet .ds-switch { background: #7C3AED; }
+.ds-tile--opt-violet .ds-switch::after { left: 14px; }
+
+/* 발송 바 발신프로필(읽기 전용) */
+.ks-sender { height: 58px; min-width: 180px; max-width: 280px; border: 1px solid var(--ds-stone-200); border-radius: 12px; background: #FFFFFF; padding: 0 14px; display: flex; flex-direction: column; justify-content: center; }
+.ks-sender--empty { border-color: var(--ds-amber-200); background: var(--ds-amber-50); }
+.ks-sender__lab { font-size: 11.5px; font-weight: 600; color: var(--ds-stone-500); }
+.ks-sender__val { font-size: 15.5px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+/* 고르기 창(템플릿 · 유형) — 문서 몸통으로 띄운다(z = 확인 창 등급 2100) */
+.ks-picker-back { position: fixed; inset: 0; z-index: 2100; background: rgb(28 25 23 / .55); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.ks-picker { width: min(1080px, 100%); max-height: calc(100vh - 40px); background: #FFFFFF; border-radius: 18px; box-shadow: 0 24px 60px -12px rgb(0 0 0 / .45); display: flex; flex-direction: column; overflow: hidden; font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; letter-spacing: -0.01em; color: var(--ds-stone-900); }
+.ks-picker__head { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--ds-stone-150); flex: none; }
+.ks-picker__ic { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: #FFFFFF; flex: none; }
+.ks-picker__head b { display: block; font-size: 16px; font-weight: 800; }
+.ks-picker__head small { display: block; font-size: 12px; color: var(--ds-stone-500); margin-top: 2px; }
+.ks-picker__tools { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--ds-stone-100); flex-wrap: wrap; flex: none; }
+.ks-chipf { height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--ds-stone-200); background: #FFFFFF; font-size: 12.5px; color: var(--ds-stone-600); cursor: pointer; font-family: inherit; white-space: nowrap; }
+.ks-chipf.on { background: var(--ds-stone-900); color: #FFFFFF; border-color: var(--ds-stone-900); font-weight: 700; }
+.ks-picker__search { margin-left: auto; width: 260px; max-width: 100%; height: 34px; border: 1px solid var(--ds-stone-200); border-radius: 10px; display: flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--ds-stone-400); }
+.ks-picker__search input { border: 0; outline: none; flex: 1; min-width: 0; font-size: 13px; font-family: inherit; color: var(--ds-stone-900); background: transparent; }
+.ks-picker__grid { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; background: var(--ds-stone-50); display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; align-content: start; }
+.ks-card { background: #FFFFFF; border: 1px solid var(--ds-stone-200); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; text-align: left; padding: 0; cursor: pointer; font-family: inherit; color: inherit; transition: border-color .15s ease, box-shadow .15s ease; }
+.ks-card:hover:not(:disabled) { border-color: var(--ds-stone-300); box-shadow: 0 4px 14px -6px rgb(0 0 0 / .18); }
+.ks-card:disabled { cursor: not-allowed; opacity: .5; }
+.ks-card.on { box-shadow: 0 0 0 2px var(--ks-accent, var(--ds-amber-500)); border-color: transparent; }
+.ks-card__view { height: 280px; overflow: hidden; position: relative; background: #F1F5F9; padding: 10px; }
+.ks-card__view::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 36px; background: linear-gradient(to bottom, rgb(241 245 249 / 0), #F1F5F9); pointer-events: none; }
+.ks-card__meta { padding: 10px 12px 12px; border-top: 1px solid var(--ds-stone-100); }
+.ks-card__meta b { display: block; font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ks-card__meta small { display: block; font-size: 11.5px; color: var(--ds-stone-500); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ks-tags { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+.ks-tags span { font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--ds-stone-100); color: var(--ds-stone-600); }
+.ks-tags span.ok { background: var(--ds-emerald-50); color: var(--ds-emerald-700); }
+.ks-tags span.wait { background: var(--ds-amber-50); color: var(--ds-amber-700); }
+.ks-picker__empty { grid-column: 1 / -1; text-align: center; padding: 48px 16px; color: var(--ds-stone-400); font-size: 13px; line-height: 1.6; word-break: keep-all; }
+.ks-picker__foot { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--ds-stone-150); flex: none; }
+.ks-picker__foot .ks-note { flex: 1; min-width: 0; }
+.ks-picker__cancel { height: 40px; padding: 0 14px; border: 0; background: transparent; color: var(--ds-stone-600); border-radius: 10px; font-size: 13.5px; cursor: pointer; font-family: inherit; }
+.ks-picker__cancel:hover { background: var(--ds-stone-100); }
+.ks-picker__ok { height: 40px; padding: 0 18px; border: 0; border-radius: 10px; color: #FFFFFF; font-size: 13.5px; font-weight: 800; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.ks-picker__ok:disabled { background: var(--ds-stone-300) !important; cursor: not-allowed; }
+
+@media (max-width: 1279px) {
+  .ds-modal__body.ks-body { grid-template-columns: 460px 340px minmax(0, 1fr); }
+  .ds-modal__foot.ks-foot { grid-template-columns: 801px 1px minmax(0, 1fr); }
+}
+@media (min-width: 768px) and (max-width: 1099px) {
+  /* 좁은 창: 받는 화면을 작성 열 아래로 · 수신자는 오른쪽 한 열 */
+  .ds-modal__body.ks-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .ks-body > section.ks-compose { grid-column: 1; grid-row: 1; }
+  .ks-body > section.ks-preview { grid-column: 1; grid-row: 2; border-left: 0; border-top: 1px solid var(--ds-stone-150); }
+  .ks-body > section.ks-recipients { grid-column: 2; grid-row: 1 / span 2; }
+  .ds-modal__foot.ks-foot { grid-template-columns: 1fr; }
+  .ds-modal__foot.ks-foot > .ds-modal__vdiv { display: none; }
+  .ks-foot .ds-foot-send { padding-top: 0; }
+}
+@media (max-width: 767px) {
+  .ds-modal__body.ks-body { grid-template-columns: 1fr; }
+  .ks-body > section + section { border-left: 0; border-top: 1px solid var(--ds-stone-150); }
+  .ks-body > section.ks-recipients { contain: none; }
+  .ds-modal__foot.ks-foot { grid-template-columns: 1fr; }
+  .ds-modal__foot.ks-foot > .ds-modal__vdiv { display: none; }
+  .ks-pop { width: min(460px, calc(100vw - 28px)); }
+  .ks-sender { flex: 1 1 100%; max-width: none; }
+  .ks-picker-back { padding: 0; }
+  .ks-picker { max-height: 100vh; height: 100vh; border-radius: 0; }
+  .ks-picker__grid { grid-template-columns: 1fr; }
+  .ks-picker__search { width: 100%; margin-left: 0; }
 }

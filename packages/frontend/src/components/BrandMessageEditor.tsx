@@ -27,16 +27,18 @@
  *   ④3종 규격 사본 표 삭제 → `constants/brand-message-spec.ts` 단일 사본
  *   ⑤미리보기 = 실수신 화면 기준((광고) 이름 앞 · 수신거부 안내는 말풍선 아래)
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Image as ImageIcon, PanelTop, Plus, X, Ticket, MessageSquareReply, Loader2, Send,
-  FolderOpen, Upload, Sparkles, ChevronDown, Target, Lock,
+  FolderOpen, Upload, Sparkles, ChevronDown, ChevronRight, Target, Lock, Megaphone, Library,
 } from 'lucide-react';
 import BrandMessagePreview from './BrandMessagePreview';
 import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
 import { FIELD_CLASS, FIELD_CLASS_INDIGO, PANEL_CLASS, SourceCaption } from './shared/SendWorkspaceShell';
 import BrandPickMenu from './brand-send/BrandPickMenu';
 import BrandTypePickerModal, { BrandTypeThumb, brandTypeChips } from './brand-send/BrandTypePickerModal';
+import BrandTemplatePickerModal from './brand-send/BrandTemplatePickerModal';
+import { brandTemplatePreviewProps, type BrandTemplateRow } from './brand-send/brandTemplatePreview';
 import { BRAND_SPEC, BRAND_TYPE_ORDER, type BrandSpec } from '../constants/brand-message-spec';
 import BrandRichSections from './brand-send/BrandRichSections';
 import { initialRich, linkReason, normalizeLinkInput, richBlockReason, richPayload, type RichState } from './brand-send/brandRich';
@@ -179,6 +181,11 @@ interface BrandMessageEditorProps {
    *   자동 등록(콜백 매칭)과 어긋난다. 없거나 080 형식이 아니면 직접 입력(하이픈 자동)으로 받는다.
    */
   defaultUnsubPhone?: string;
+  /**
+   * ★ 2026-09-25 카카오 발송 창 틀(Harold 목업 v2) — 수신자 열. 작성 · 받는 화면 · 수신자 3열을 이 편집기가 그리고,
+   *   수신자 열 내용(입력 방식 · 목록)은 호출부(BrandSendModal)가 소유한다.
+   */
+  recipientsPanel?: ReactNode;
 }
 
 /**
@@ -210,7 +217,7 @@ function Collapsible({ icon, title, stateText, stateSet, children, defaultOpen }
   );
 }
 
-export default function BrandMessageEditor({ profiles, onSend, sending, accent = 'violet', recipientCount, defaultUnsubPhone }: BrandMessageEditorProps) {
+export default function BrandMessageEditor({ profiles, onSend, sending, accent = 'violet', recipientCount, defaultUnsubPhone, recipientsPanel }: BrandMessageEditorProps) {
   const a = ACCENT[accent];
   const FIELD = a.field;
   const [mode, setMode] = useState<'free' | 'template'>('free');
@@ -567,46 +574,73 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
   summaryParts.push(isAd ? '(광고) 표기' : '광고 표기 없음');
   if (resendType === 'SM') summaryParts.push('실패 시 SMS 대체');
   if (resendType === 'LM') summaryParts.push('실패 시 LMS 대체');
+  // ★ 2026-09-25 발송 창 틀 — 화면용 상태만. 보내기 값·판정은 위 그대로다(handleSend · blockReason · canSend).
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  /** 고른 등록 템플릿 — 받는 화면 미리보기용. 코드를 손으로 바꾸면 미리보기는 비운다(다른 템플릿일 수 있다) */
+  const [pickedTemplate, setPickedTemplate] = useState<BrandTemplateRow | null>(null);
+  const pickedForPreview = pickedTemplate && pickedTemplate.template_key === templateCode ? pickedTemplate : null;
+  /**
+   * ★Codex 1R — 고른 등록 템플릿은 코드 · 발신프로필 · 메시지 유형이 **한 묶음**이다.
+   *   고를 때 셋을 함께 맞추고(아래 onPick), 발신프로필이나 유형이 템플릿과 달라지면 묶음을 푼다(코드를 비운다).
+   *   그대로 두면 B 프로필로 A 프로필 템플릿 코드가 나가거나, 서버가 거절하는 유형이 실린다.
+   *   손으로 적은 코드(고르지 않은 코드)는 예전처럼 건드리지 않는다.
+   */
+  useEffect(() => {
+    if (!pickedTemplate || templateCode !== pickedTemplate.template_key) return;
+    if ((pickedTemplate.profile_key && pickedTemplate.profile_key !== senderKey) || pickedTemplate.chat_bubble_type !== bubbleType) {
+      setTemplateCode('');
+      setPickedTemplate(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [senderKey, bubbleType]);
+  /**
+   * 발송 버튼 방어 — 위 효과가 풀기 전 한 순간이라도 어긋난 묶음은 보내지 않는다.
+   * ★Codex 6R: 이미지도 묶음이다 — 고른 템플릿이 이미지를 가진다. 직접 넣은 이미지가 남아 있으면 받는 화면(등록본)과
+   *   실제로 실리는 값(handleSend 의 data.image)이 갈린다(기본형 서버 경로는 자체 이미지를 거절한다).
+   */
+  const templateMismatch = mode === 'template' && !!pickedForPreview
+    && ((!!pickedForPreview.profile_key && pickedForPreview.profile_key !== senderKey)
+      || pickedForPreview.chat_bubble_type !== bubbleType
+      || !!imageUrl);
+  const [footPop, setFootPop] = useState<'' | 'target' | 'resend'>('');
+  const targetAnchorRef = useRef<HTMLDivElement | null>(null);
+  const resendAnchorRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!footPop) return;
+    const onDown = (e: MouseEvent) => {
+      const anchor = footPop === 'target' ? targetAnchorRef.current : resendAnchorRef.current;
+      if (anchor && !anchor.contains(e.target as Node)) setFootPop('');
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.isComposing) { e.stopPropagation(); setFootPop(''); } };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey, true);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey, true); };
+  }, [footPop]);
+  const accentHex = accent === 'indigo' ? '#4F46E5' : '#7C3AED';
+  const targetingLabel = TARGETING_OPTIONS.find((t) => t.code === targeting)?.label || targeting;
+  const resendLabel = resendType === 'SM' ? 'SMS로 대체' : resendType === 'LM' ? 'LMS로 대체' : '대체발송 없음';
+  const noRecipients = typeof recipientCount === 'number' && recipientCount === 0;
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-full">
-      {/* ── 좌측: 작성 ───────────────────────────────────────────── */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex-1 p-5 sm:p-6 space-y-5">
-          {/* 발송 방식 */}
-          <div className="flex gap-1 p-1 rounded-xl bg-slate-100/80 w-fit">
-            {([['free', '자유형 발송'], ['template', '기본형 (템플릿)']] as const).map(([k, label]) => (
-              <button key={k} type="button" onClick={() => setMode(k)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                  mode === k ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'
-                }`}>
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* ★2026-09-20 설정 바 — 유형·발신 프로필·타겟팅을 한 줄 높이의 선택 버튼 3개로.
-              유형 카드는 작성 화면에 펼치지 않는다(8종이면 화면의 큰 몫을 먹는다). 「변경」이 작은 창을 띄우고,
-              규격 힌트는 버튼 안에서 계속 보인다(고르고 나서야 76자를 아는 구조 금지 원칙 유지).
-              폭이 좁아지면 줄바꿈으로 흡수한다 — 가로 스크롤을 만들지 않는다(min-w-0 · LESSONS_FRONTEND 0828). */}
-          <div className="flex flex-wrap gap-2.5">
-            <div className="min-w-0 flex-[1.35_1_220px]">
-              <span className="block text-[12px] font-semibold text-slate-600 mb-1.5">메시지 유형</span>
-              <button type="button" onClick={() => setTypePickerOpen(true)} aria-haspopup="dialog"
-                className={`w-full h-10 flex items-center gap-2 pl-1.5 pr-2 rounded-xl text-left shadow-sm transition ${a.typeBtn}`}>
-                <BrandTypeThumb code={selectedType.code} active accent={accent} compact />
-                <span className="min-w-0 flex-1 flex items-baseline gap-1.5">
-                  <span className="shrink-0 text-[13px] font-semibold text-slate-800">{selectedType.label}</span>
-                  <span className="min-w-0 truncate text-[11px] text-slate-500">
-                    {brandTypeChips(BRAND_SPEC[selectedType.code]).join(' · ')}
-                  </span>
-                </span>
-                {availableCodes.length > 1 && (
-                  <span className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-white ${a.typeChange}`}>변경</span>
-                )}
-              </button>
+    <>
+      <div className="ds-modal__body ks-body">
+        {/* ====== 작성 ====== */}
+        <section className="ks-compose">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
+            <div>
+              <p className="ks-label">보내는 방식</p>
+              <div className="flex gap-1 p-1 rounded-xl bg-slate-100/80">
+                {([['free', '자유형 발송'], ['template', '등록 템플릿']] as const).map(([k, label]) => (
+                  <button key={k} type="button" onClick={() => setMode(k)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-[13px] font-medium transition ${
+                      mode === k ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'
+                    }`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="min-w-0 flex-[1_1_170px]">
+            <div className="min-w-0">
               <BrandPickMenu
                 label="발신 프로필"
                 accent={accent}
@@ -622,37 +656,62 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                 )}
               />
             </div>
-            <div className="min-w-0 flex-[1_1_150px]">
-              <BrandPickMenu
-                label="타겟팅"
-                accent={accent}
-                alignRight
-                value={targeting}
-                onChange={setTargeting}
-                options={TARGETING_OPTIONS.map((t) => ({
-                  value: t.code, title: t.label, tag: t.code,
-                  desc: t.code === 'I' ? t.desc : `${t.desc} · 수신거부 080 번호가 필요합니다`,
-                }))}
-                leading={() => <Target size={15} strokeWidth={1.9} className="shrink-0 text-slate-400 ml-0.5" />}
-              />
-            </div>
           </div>
 
-          {/* 광고 여부 + 수신거부 080 — 한 줄. 080은 설정값이 있으면 그대로 쓰고(잠금), 없으면 하이픈 자동 입력 */}
+          {/* 메시지 유형 — 누르면 8가지 유형을 받는 화면 예시로 보여 주는 창.
+              등록 템플릿을 고른 동안은 템플릿이 유형을 정한다(묶음 · Codex 1R) → 이 버튼을 숨긴다 */}
+          {!(mode === 'template' && pickedForPreview) && (
           <div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 rounded-xl bg-slate-50/70 ring-1 ring-slate-900/5">
-              <button type="button" role="switch" aria-checked={isAd} onClick={() => setIsAd(!isAd)}
-                className="inline-flex items-center gap-2 text-[13px] font-medium text-slate-700 select-none">
-                <span className={`relative w-8 h-[18px] rounded-full transition-colors ${isAd ? a.switchOn : 'bg-slate-300'}`}>
-                  <span className={`absolute top-[2.5px] left-[2.5px] w-[13px] h-[13px] rounded-full bg-white shadow transition-transform ${isAd ? 'translate-x-[14px]' : ''}`} />
+            <p className="ks-label">메시지 유형<small>누르면 유형을 받는 화면 예시로 보여 줘요</small></p>
+            <button type="button" className="ks-pick" onClick={() => setTypePickerOpen(true)} aria-haspopup="dialog">
+              <BrandTypeThumb code={selectedType.code} active accent={accent} compact />
+              <span className="ks-pick__tx">
+                <b>{selectedType.label}</b>
+                <small>{brandTypeChips(BRAND_SPEC[selectedType.code]).join(' · ')}</small>
+              </span>
+              {availableCodes.length > 1 && (
+                <span className="ks-pick__go ks-pick__go--violet">유형 바꾸기<ChevronRight size={14} strokeWidth={2.2} /></span>
+              )}
+            </button>
+          </div>
+          )}
+
+          {/* 등록 템플릿 — 관리 메뉴에서 등록한 템플릿을 받는 화면 그대로 보고 고른다. 코드를 직접 적는 칸도 남긴다 */}
+          {mode === 'template' && (
+            <div>
+              <p className="ks-label">등록 템플릿<small>고르면 템플릿 코드와 발신 프로필이 함께 들어가요</small></p>
+              <button type="button" className={`ks-pick ${!pickedForPreview ? 'ks-pick--empty' : ''}`} onClick={() => setTemplatePickerOpen(true)} aria-haspopup="dialog">
+                <span className="ks-pick__thumb"><Library size={18} strokeWidth={2} /></span>
+                <span className="ks-pick__tx">
+                  <b>{pickedForPreview ? (pickedForPreview.manage_name || pickedForPreview.template_key) : '등록 템플릿을 골라 주세요'}</b>
+                  <small>
+                    {pickedForPreview
+                      ? `${BRAND_SPEC[pickedForPreview.chat_bubble_type]?.label || pickedForPreview.chat_bubble_type} · ${pickedForPreview.profile_name || ''}`
+                      : '관리 메뉴에서 등록한 템플릿을 받는 화면으로 보여 줘요'}
+                  </small>
                 </span>
-                광고 메시지
+                <span className="ks-pick__go ks-pick__go--violet">{pickedForPreview ? '바꾸기' : '고르기'}<ChevronRight size={14} strokeWidth={2.2} /></span>
               </button>
-              {showUnsub && (
-                <>
-                  <span className="hidden sm:block w-px h-5 bg-slate-200" />
-                  <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                    <span className="text-[12px] font-semibold text-slate-600 whitespace-nowrap">수신거부 080</span>
+              {pickedForPreview && !!imageUrl && (
+                // 자유형에서 넣은 이미지가 남은 채 돌아온 경우 — 이미지는 템플릿 것만 쓴다(Codex 6R · 보내기는 막혀 있다)
+                <div className="ks-warn mt-2 flex items-center gap-2">
+                  <span className="min-w-0 flex-1">직접 넣은 이미지가 남아 있어 보낼 수 없어요. 등록 템플릿은 템플릿 이미지를 그대로 써요.</span>
+                  <button type="button" onClick={clearImage} className="shrink-0 h-8 px-3 rounded-lg bg-white ring-1 ring-amber-300 text-[12px] font-bold text-amber-800 hover:bg-amber-100">
+                    이미지 비우기
+                  </button>
+                </div>
+              )}
+              <label className="block mt-2.5 text-[12px] font-semibold text-slate-500 mb-1">템플릿 코드 <span className="font-normal text-slate-400">고르면 자동으로 들어가요 · 직접 적어도 돼요</span></label>
+                      <input type="text" value={templateCode} onChange={(e) => setTemplateCode(e.target.value)}
+                        className={FIELD} placeholder="사전 등록한 템플릿 코드" />
+            </div>
+          )}
+
+          {/* 수신거부 080 — 광고이거나 마수동·비친구 대상일 때. 광고 표기 스위치는 발송 바로 옮겼다 */}
+          {showUnsub && (
+            <div>
+              <p className="ks-label">수신거부 080</p>
+              <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1.5">
                     {lockedUnsub ? (
                       <span className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white ring-1 ring-slate-200 text-[13px] font-semibold text-slate-800 tabular-nums whitespace-nowrap">
                         <Lock size={12} strokeWidth={2} className="text-slate-400" />
@@ -666,10 +725,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                     )}
                     <input type="text" value={unsubAuth} onChange={(e) => setUnsubAuth(e.target.value)}
                       className={`${FIELD} !w-[120px] !py-0 h-8 !text-[13px] tabular-nums`} placeholder="인증번호 (선택)" />
-                  </div>
-                </>
-              )}
-            </div>
+              </div>
             {showUnsub && (
               <p className="text-[11px] text-slate-500 mt-1.5 px-1">
                 {lockedUnsub
@@ -677,14 +733,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                   : '숫자만 입력하면 하이픈이 자동으로 들어갑니다. 예) 0807198700 → 080-719-8700'}
               </p>
             )}
-          </div>
-
-          {/* 기본형: 템플릿 코드 */}
-          {mode === 'template' && (
-            <div>
-              <label className="block text-[13px] font-semibold text-slate-700 mb-1.5">템플릿 코드</label>
-              <input type="text" value={templateCode} onChange={(e) => setTemplateCode(e.target.value)}
-                className={FIELD} placeholder="사전 등록한 템플릿 코드" />
             </div>
           )}
 
@@ -739,7 +787,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
           )}
 
           {/* 이미지 — ★2026-09-01 라이브러리 선택(전략 A) · 업로드 · URL 3방식 */}
-          {selectedType.needImage && (
+          {selectedType.needImage && !(mode === 'template' && pickedForPreview) && (
             <div className={PANEL_CLASS}>
               <div className="flex items-center gap-2 mb-2.5">
                 <ImageIcon size={14} strokeWidth={1.9} className="text-slate-400" />
@@ -877,7 +925,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                       }}
                       className={`${FIELD} !px-2.5 !py-1.5 !text-xs`}>
                       {/* 대상 범위를 바꿔 지금은 못 쓰는 유형이 남아 있어도 선택칸이 비지 않게 그대로 보여준다
-                          — 무엇이 걸렸는지는 발송 버튼 아래 한 줄이 알려준다 */}
+                          — 무엇이 걸렸는지는 발송 바 위 한 줄(ks-blockbar)이 알려준다 */}
                       {(availableButtonTypes.some(bt => bt.code === btn.type)
                         ? availableButtonTypes
                         : [...availableButtonTypes, BUTTON_TYPES.find(bt => bt.code === btn.type)!].filter(Boolean)
@@ -932,8 +980,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
             </div>
           )}
 
-          {/* 선택 항목 — 접힌 상태에서도 현재 값이 보인다 */}
-          <div className="space-y-2.5">
             {mode === 'free' && !selectedType.isCarousel && (
               <Collapsible icon={<Ticket size={14} strokeWidth={1.9} />} title="쿠폰"
                 stateText={hasCoupon ? (couponTitle || '입력 중') : '사용 안 함'} stateSet={hasCoupon}>
@@ -974,10 +1020,86 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                 )}
               </Collapsible>
             )}
+        </section>
 
-            <Collapsible icon={<MessageSquareReply size={14} strokeWidth={1.9} />} title="대체 발송"
-              stateText={resendType === 'SM' ? 'SMS로 대체' : resendType === 'LM' ? 'LMS로 대체' : '사용 안 함'}
-              stateSet={resendType !== 'NO'}>
+        {/* ====== 받는 화면 ====== */}
+        <section className="ks-preview">
+          <div className="ks-preview__head">
+            <b className="inline-flex items-center gap-1.5"><PanelTop size={13} strokeWidth={1.9} className="text-slate-400" />받는 화면</b>
+            <span className="text-[11px] text-slate-500">입력하는 대로 바로 바뀌어요</span>
+          </div>
+          {mode === 'template' ? (
+            pickedForPreview
+              ? <BrandMessagePreview {...brandTemplatePreviewProps(pickedForPreview, isAd)} />
+              : <div className="ks-preview__empty">등록 템플릿을 고르면 받는 사람 화면이 여기에 그대로 보여요</div>
+          ) : (
+            <BrandMessagePreview {...previewData} />
+          )}
+          <SourceCaption>카카오톡 실수신 화면 기준 · 입력값 실시간 반영</SourceCaption>
+          {noticeActive && (
+            <div className="mt-3 px-3 py-2.5 rounded-xl bg-white ring-1 ring-slate-900/5 shadow-sm text-[11.5px] text-slate-500 leading-relaxed">
+              <span className="font-semibold text-violet-700">AI 생성 이미지 안내</span><br />
+              심사 기준에 맞춰 본문 끝에 안내 문구가 자동으로 들어가며, 미리보기와 실제 발송이 같습니다.
+            </div>
+          )}
+        </section>
+
+        {recipientsPanel}
+      </div>
+
+      {/* 보내기 전에 걸리는 것 — 첫 한 줄(예전 발송 바의 안내와 같은 값) */}
+      {!!senderKey && !!blockReason && (
+        <div className="ks-blockbar" role="alert">{blockReason}</div>
+      )}
+
+      {/* ====== 발송 바 — 타겟팅 · 실패 시 문자 · 광고 표기 / 발신 프로필 · 보내기 ====== */}
+      <footer className="ds-modal__foot ks-foot">
+        <div className="ds-foot-opts">
+          <div className="ds-opt-anchor" ref={targetAnchorRef}>
+            <button type="button" className="ds-tile ds-tile--opt" onClick={() => setFootPop((p) => (p === 'target' ? '' : 'target'))} aria-haspopup="dialog" aria-expanded={footPop === 'target'}>
+              <span className="ds-tile__ic"><Target size={17} strokeWidth={2} /></span>
+              <span className="ds-tile__tx">
+                <span className="ds-tile__t1">타겟팅</span>
+                <span className="ds-tile__t2">{targetingLabel}</span>
+              </span>
+              <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />
+            </button>
+            {footPop === 'target' && (
+              <div className="ks-pop ks-pop--left" role="dialog" aria-label="받는 대상 범위">
+                <div className="ks-pop__head">
+                  <b>받는 대상 범위</b>
+                  <button type="button" className="ks-pop__x" onClick={() => setFootPop('')} aria-label="닫기"><X size={15} strokeWidth={2} /></button>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {TARGETING_OPTIONS.map((t) => (
+                    <button key={t.code} type="button" onClick={() => { setTargeting(t.code); setFootPop(''); }}
+                      className={`text-left px-3 py-2.5 rounded-xl border transition ${
+                        targeting === t.code ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-200/60' : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}>
+                      <span className="block text-[13px] font-bold text-slate-800">{t.label}</span>
+                      <span className="block text-[11.5px] text-slate-500 mt-0.5">{t.code === 'I' ? t.desc : `${t.desc} · 수신거부 080 번호가 필요합니다`}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="ds-opt-anchor" ref={resendAnchorRef}>
+            <button type="button" className={`ds-tile ds-tile--opt ${resendType !== 'NO' ? 'ds-tile--opt-blue' : ''}`} onClick={() => setFootPop((p) => (p === 'resend' ? '' : 'resend'))} aria-haspopup="dialog" aria-expanded={footPop === 'resend'}>
+              <span className="ds-tile__ic"><MessageSquareReply size={17} strokeWidth={2} /></span>
+              <span className="ds-tile__tx">
+                <span className="ds-tile__t1">실패 시 문자</span>
+                <span className="ds-tile__t2">{resendLabel}</span>
+              </span>
+              <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />
+            </button>
+            {footPop === 'resend' && (
+              <div className="ks-pop" role="dialog" aria-label="브랜드메시지가 실패하면">
+                <div className="ks-pop__head">
+                  <b>브랜드메시지가 실패하면</b>
+                  <button type="button" className="ks-pop__x" onClick={() => setFootPop('')} aria-label="닫기"><X size={15} strokeWidth={2} /></button>
+                </div>
+                <div className="space-y-2">
               <select value={resendType} onChange={(e) => setResendType(e.target.value)} className={FIELD}>
                 <option value="NO">대체발송 없음</option>
                 <option value="SM">SMS로 대체</option>
@@ -1000,67 +1122,36 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                   )}
                 </>
               )}
-            </Collapsible>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-
-        {/* ── 하단 고정 발송 바 — 무엇이 나가는지 요약과 함께 ── */}
-        <div className="sticky bottom-0 z-10 border-t border-slate-100 bg-white/95 backdrop-blur-sm px-5 sm:px-6 py-3.5">
-          {!!senderKey && !!blockReason && (
-            <p className="text-[11.5px] text-rose-600 bg-rose-50 ring-1 ring-rose-200/60 rounded-xl px-3 py-2 mb-2.5 leading-relaxed">
-              {blockReason}
-            </p>
-          )}
-          <div className="flex items-center gap-3">
-            <div className="min-w-0 flex-1 text-[12px] text-slate-500 leading-relaxed">
-              {summaryParts.map((s, i) => (
-                <span key={s}>
-                  {i > 0 && <span className="text-slate-300 mx-1.5">·</span>}
-                  {i === 0 && typeof recipientCount === 'number'
-                    ? <b className="text-slate-800 font-bold">{s}</b>
-                    : s}
-                </span>
-              ))}
-              {noticeActive && (
-                <>
-                  <span className="text-slate-300 mx-1.5">·</span>
-                  <span className={`font-semibold ${a.sumAccent}`}>AI 이미지 안내 포함</span>
-                </>
-              )}
-            </div>
-            <button type="button" onClick={handleSend} disabled={!canSend}
-              className={`shrink-0 px-6 py-3 rounded-2xl text-sm font-bold text-white ${a.send} shadow-lg disabled:opacity-40 disabled:shadow-none inline-flex items-center justify-center gap-2 transition`}>
-              {sending
-                ? <><Loader2 size={16} className="animate-spin" /> 발송 중...</>
-                : <><Send size={15} strokeWidth={2} /> 브랜드메시지 발송</>}
+          <div className="ds-opt-anchor">
+            <button type="button" role="switch" aria-checked={isAd} className={`ds-tile ds-tile--opt ${isAd ? 'ds-tile--opt-violet' : ''}`} onClick={() => setIsAd(!isAd)}>
+              <span className="ds-tile__ic"><Megaphone size={17} strokeWidth={2} /></span>
+              <span className="ds-tile__tx">
+                <span className="ds-tile__t1">광고 표기</span>
+                <span className="ds-tile__t2">{isAd ? '(광고) · 080 붙음' : '안 붙음'}</span>
+              </span>
+              <span className="ds-switch" aria-hidden />
             </button>
           </div>
-          {!senderKey && (
-            <p className="text-[11px] text-slate-400 mt-1.5">발신 프로필을 선택하면 발송할 수 있습니다.</p>
-          )}
         </div>
-      </div>
-
-      {/* ── 우측: 미리보기 ───────────────────────────────────────── */}
-      <div className="w-full lg:w-[clamp(292px,29vw,392px)] shrink-0 p-5 lg:border-l lg:border-slate-100 lg:bg-slate-50/50">
-        <div className="lg:sticky lg:top-5">
-          <div className="flex items-baseline justify-between gap-2 mb-2.5">
-            <h3 className="text-[12.5px] font-semibold text-slate-700 inline-flex items-center gap-1.5">
-              <PanelTop size={13} strokeWidth={1.9} className="text-slate-400" />
-              미리보기
-            </h3>
-            <span className="text-[11px] text-slate-500">받는 사람 화면 그대로</span>
+        <div className="ds-modal__vdiv" />
+        <div className="ds-foot-send">
+          <div className={`ks-sender ${!selectedProfile ? 'ks-sender--empty' : ''}`}>
+            <span className="ks-sender__lab">발신 프로필</span>
+            <span className="ks-sender__val">{selectedProfile ? selectedProfile.profile_name : '고르기 전'}</span>
           </div>
-          <BrandMessagePreview {...previewData} />
-          <SourceCaption>카카오톡 실수신 화면 기준 · 입력값 실시간 반영</SourceCaption>
-          {noticeActive && (
-            <div className="mt-3 px-3 py-2.5 rounded-xl bg-white ring-1 ring-slate-900/5 shadow-sm text-[11.5px] text-slate-500 leading-relaxed">
-              <span className="font-semibold text-violet-700">AI 생성 이미지 안내</span><br />
-              심사 기준에 맞춰 본문 끝에 안내 문구가 자동으로 들어가며, 미리보기와 실제 발송이 같습니다.
-            </div>
-          )}
+          <button type="button" className={`ds-send-btn ${accent === 'indigo' ? 'ks-send--indigo' : 'ks-send--violet'}`} onClick={handleSend} disabled={!canSend || noRecipients || templateMismatch}>
+            {sending
+              ? <><Loader2 size={16} className="animate-spin" /> 발송 중...</>
+              : noRecipients
+                ? <><Send size={16} strokeWidth={2} /> 수신자를 넣어 주세요</>
+                : <><Send size={16} strokeWidth={2} /> {typeof recipientCount === 'number' ? `${recipientCount.toLocaleString()}명에게 브랜드메시지 보내기` : '브랜드메시지 보내기'}</>}
+          </button>
         </div>
-      </div>
+      </footer>
 
       {/* 유형 선택 창 — 발송이 열린 유형만 넘긴다 */}
       <BrandTypePickerModal
@@ -1081,6 +1172,26 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
         showKindBadge
       />
       {imageGuard.modal}
-    </div>
+
+      {/* 등록 템플릿 고르기 창 — 고르면 코드 · 발신 프로필을 넣고 받는 화면을 보여 준다 */}
+      <BrandTemplatePickerModal
+        open={templatePickerOpen}
+        profileKeys={profiles.map((p) => p.profile_key)}
+        selectedKey={templateCode}
+        isAd={isAd}
+        accentHex={accentHex}
+        onPick={(t) => {
+          // 묶음을 한 번에 맞춘다 — 유형이 바뀌면 유형 고르기 창과 같은 규칙으로 버튼 · 유형별 입력을 비운다
+          const code = BRAND_SPEC[t.chat_bubble_type] ? t.chat_bubble_type : bubbleType;
+          if (code !== bubbleType) { setBubbleType(code); setButtons([]); setRich(initialRich(code)); }
+          // 이미지는 템플릿 것만 — 직접 넣은 이미지를 비우고 진행 중인 이미지 작업도 무효화한다(Codex 6R)
+          clearImage();
+          setTemplateCode(t.template_key);
+          if (t.profile_key) setSenderKey(t.profile_key);
+          setPickedTemplate(t);
+        }}
+        onClose={() => setTemplatePickerOpen(false)}
+      />
+    </>
   );
 }

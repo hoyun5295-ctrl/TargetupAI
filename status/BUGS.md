@@ -109,6 +109,12 @@
 - **0925에 체험만 닫았다**: 체험 검사는 한 통도 못 나가면 행을 지워 체험을 되돌린다. 유료 경로는 축 밖이라 손대지 않았다.
 - **모르는 것**: 실제로 적재 예외가 난 적이 있는지(운영 로그 `[SpamFilter] 테스트 요청 오류` 로 확인 가능 · 미검증).
 
+### 🔵 B-0925-6 브랜드메시지 등록 템플릿 수정 폼이 없는 칸 이름으로 읽는다 (🔵 Open · 표시 · 착수 판단 = Harold) · 2026-09-25 발송 창 개편 중 발견
+
+- **코드**: `frontend/src/components/alimtalk/BrandTemplateForm.tsx initialFormState` 가 `t.attachment_json`·`t.carousel_json` 을 읽는다. 실제 칸은 `attachment`·`carousel`(등록 INSERT `backend/src/routes/alimtalk.ts` · SCHEMA `brand_message_templates`) · 목록 조회는 `b.*` 라 응답 키도 `attachment`·`carousel`.
+- **영향(미검증)**: 등록한 템플릿을 수정하려고 열면 이미지·아이템·동영상·커머스·캐러셀 입력이 비어 보일 수 있다. 발송 경로는 아니다(발송 창의 새 받는 화면 변환은 실제 칸 이름을 먼저 읽는다).
+- **확인 방법**: 관리 메뉴에서 이미지 있는 브랜드 템플릿을 [수정]으로 열어 이미지 칸이 채워지는지 본다.
+
 ### 🔵 B-0925-5 테스트 결과 화면의 스팸 비용이 최근 100줄만 합한다 (🔵 Open · 표시 · 착수 판단 = Harold) · 2026-09-25 스팸 무료 체험 영향표 작성 중 발견
 
 - **코드**: `routes/campaigns.ts` 테스트 결과 조회 — `spamFilterStats.cost` 를 `LIMIT 100` 목록(`spamListResult`)을 돌며 더한다(`sfCostCalc`). 같은 기간 합계(`spamAgg`)는 따로 세면서 비용만 목록에서 낸다. 기간 안 스팸 테스트가 100줄을 넘으면 비용이 작게 보인다. 청구(정산 집계)와는 별개 경로라 청구액은 영향 없다.

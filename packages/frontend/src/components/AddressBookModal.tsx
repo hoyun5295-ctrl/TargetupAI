@@ -41,6 +41,16 @@ export default function AddressBookModal({
   //   업로드 중 영역 = 모달 close 영역 차단 (중간 X 사고 영구 안전망)
   const [isUploading, setIsUploading] = useState(false);
   const [uploadingMsg, setUploadingMsg] = useState('주소록을 처리 중입니다...');
+  /**
+   * ★ 2026-09-25 명단 불러오기(그룹 [불러오기] · 선택 그룹 일괄) — 불러오는 동안 가림막 + [불러오기 취소].
+   *   예전에는 응답을 기다리는 동안 창을 닫으면, 닫은 뒤 늦게 온 응답이 그 사이 사람이 고친 발송 명단을 통째로 덮었다
+   *   (브랜드·알림톡 창의 늦은 응답 규칙과 같은 뿌리 · Harold "주소록 경합도 같이").
+   *   세대: 취소하거나 창이 닫히거나(숨김·언마운트) 새 불러오기가 시작되면 앞 응답은 명단에 쓰지 않는다.
+   *   ⛔ 닫기를 잠그지 않는다 — 응답이 끝나지 않으면 영구히 갇힌다(Codex 12R). 닫기 = 취소다.
+   */
+  const [listLoading, setListLoading] = useState(false);
+  const loadSeqRef = React.useRef(0);
+  React.useEffect(() => () => { loadSeqRef.current++; }, []);
 
   // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 기존 그룹에 번호 추가 모드
   //   null = 신규 그룹 신설 모드 / string = 기존 그룹명 (append endpoint 호출 분기)
@@ -100,6 +110,10 @@ export default function AddressBookModal({
     if (isUploading) return;
     onClose();
   };
+  const cancelListLoad = () => {
+    loadSeqRef.current++;
+    setListLoading(false);
+  };
 
   const toggleGroupSelection = (groupName: string) => {
     setSelectedGroupNames(prev => {
@@ -111,33 +125,40 @@ export default function AddressBookModal({
 
   const handleLoadMultipleGroups = async () => {
     if (selectedGroupNames.size === 0) return;
-    const token = localStorage.getItem('token');
-    const allContacts: { phone: string; name: string; extra1: string; extra2: string; extra3: string }[] = [];
-    const seenPhones = new Set<string>();
-    for (const groupName of selectedGroupNames) {
-      try {
-        const res = await fetch(`/api/address-books/${encodeURIComponent(groupName)}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const data = await res.json();
-        if (data.success && Array.isArray(data.contacts)) {
-          for (const c of data.contacts) {
-            const phone = String(c.phone || '').trim();
-            if (!phone || seenPhones.has(phone)) continue;
-            seenPhones.add(phone);
-            allContacts.push({
-              // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
-              phone, name: cellToString(c.name), extra1: cellToString(c.extra1), extra2: cellToString(c.extra2), extra3: cellToString(c.extra3)
-            });
+    const seq = ++loadSeqRef.current;
+    setListLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const allContacts: { phone: string; name: string; extra1: string; extra2: string; extra3: string }[] = [];
+      const seenPhones = new Set<string>();
+      for (const groupName of selectedGroupNames) {
+        try {
+          const res = await fetch(`/api/address-books/${encodeURIComponent(groupName)}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          const data = await res.json();
+          if (data.success && Array.isArray(data.contacts)) {
+            for (const c of data.contacts) {
+              const phone = String(c.phone || '').trim();
+              if (!phone || seenPhones.has(phone)) continue;
+              seenPhones.add(phone);
+              allContacts.push({
+                // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
+                phone, name: cellToString(c.name), extra1: cellToString(c.extra1), extra2: cellToString(c.extra2), extra3: cellToString(c.extra3)
+              });
+            }
           }
-        }
-      } catch (e) { /* 한 그룹 실패해도 다음 진행 */ }
+        } catch (e) { /* 한 그룹 실패해도 다음 진행 */ }
+      }
+      if (seq !== loadSeqRef.current) return;   // 그 사이 창이 닫혔다 — 명단에 쓰지 않는다
+      setDirectRecipients(allContacts);
+      setSelectedGroupNames(new Set());
+      onClose();
+      setToast({ show: true, type: 'success', message: `${selectedGroupNames.size}개 그룹 ${allContacts.length}명 불러오기 완료 (중복 제거)` });
+      setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+    } finally {
+      if (seq === loadSeqRef.current) setListLoading(false);
     }
-    setDirectRecipients(allContacts);
-    setSelectedGroupNames(new Set());
-    onClose();
-    setToast({ show: true, type: 'success', message: `${selectedGroupNames.size}개 그룹 ${allContacts.length}명 불러오기 완료 (중복 제거)` });
-    setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
   };
 
   // 모달 열릴 때 그룹 로드
@@ -153,6 +174,9 @@ export default function AddressBookModal({
         .catch(() => setLoaded(true));
     }
     if (!show) {
+      // 닫히면 진행 중인 명단 불러오기 응답은 버린다(늦게 와서 사람이 고친 명단을 덮지 않게) · 가림막도 내린다
+      loadSeqRef.current++;
+      setListLoading(false);
       setLoaded(false);
       setAddressSaveMode(false);
       setNewGroupName('');
@@ -176,12 +200,20 @@ export default function AddressBookModal({
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <div className="bg-white rounded-xl shadow-2xl w-[750px] max-h-[85vh] overflow-hidden relative">
         {/* ★ D185: 업로드 영역 로딩 오버레이 (모달 본체 absolute 영역) */}
-        {isUploading && (
+        {(isUploading || listLoading) && (
           <div className="absolute inset-0 bg-white/95 backdrop-blur-sm flex items-center justify-center z-[70] rounded-xl">
             <div className="text-center px-8">
               <div className="inline-block w-14 h-14 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mb-5"></div>
-              <div className="text-base font-semibold text-gray-800 mb-2">{uploadingMsg}</div>
-              <div className="text-xs text-gray-500">창을 닫지 마세요. 처리가 완료되면 자동으로 안내됩니다.</div>
+              <div className="text-base font-semibold text-gray-800 mb-2">{listLoading ? '주소록을 불러오는 중입니다...' : uploadingMsg}</div>
+              {listLoading ? (
+                <button
+                  type="button"
+                  onClick={cancelListLoad}
+                  className="mt-1 px-4 py-2 rounded-lg bg-white ring-1 ring-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >불러오기 취소</button>
+              ) : (
+                <div className="text-xs text-gray-500">창을 닫지 마세요. 처리가 완료되면 자동으로 안내됩니다.</div>
+              )}
             </div>
           </div>
         )}
@@ -615,25 +647,37 @@ export default function AddressBookModal({
                         >{addressViewGroup === group.group_name ? '닫기' : '조회'}</button>
                         <button
                           onClick={async () => {
-                            const token = localStorage.getItem('token');
-                            const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}`, {
-                              headers: { Authorization: `Bearer ${token}` }
-                            });
-                            const data = await res.json();
-                            if (data.success) {
-                              setDirectRecipients(data.contacts.map((c: any) => ({
-                                // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
-                                phone: c.phone,
-                                name: cellToString(c.name),
-                                extra1: cellToString(c.extra1),
-                                extra2: cellToString(c.extra2),
-                                extra3: cellToString(c.extra3)
-                              })));
-                              onClose();
-                              setAddressViewGroup(null);
-                              setAddressViewContacts([]);
-                              setToast({show: true, type: 'success', message: `${data.contacts.length}명 불러오기 완료`});
-                              setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
+                            const seq = ++loadSeqRef.current;
+                            setListLoading(true);
+                            try {
+                              const token = localStorage.getItem('token');
+                              const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}`, {
+                                headers: { Authorization: `Bearer ${token}` }
+                              });
+                              const data = await res.json();
+                              if (seq !== loadSeqRef.current) return;   // 그 사이 창이 닫혔다 — 명단에 쓰지 않는다
+                              if (data.success) {
+                                setDirectRecipients(data.contacts.map((c: any) => ({
+                                  // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
+                                  phone: c.phone,
+                                  name: cellToString(c.name),
+                                  extra1: cellToString(c.extra1),
+                                  extra2: cellToString(c.extra2),
+                                  extra3: cellToString(c.extra3)
+                                })));
+                                onClose();
+                                setAddressViewGroup(null);
+                                setAddressViewContacts([]);
+                                setToast({show: true, type: 'success', message: `${data.contacts.length}명 불러오기 완료`});
+                                setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
+                              } else {
+                                showError(data.error || '주소록을 불러오지 못했습니다.');
+                              }
+                            } catch {
+                              // 가림막이 떴다 사라지기만 하면 왜 안 됐는지 모른다 — 실패를 알린다
+                              if (seq === loadSeqRef.current) showError('주소록을 불러오지 못했습니다.');
+                            } finally {
+                              if (seq === loadSeqRef.current) setListLoading(false);
                             }
                           }}
                           className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 text-sm"

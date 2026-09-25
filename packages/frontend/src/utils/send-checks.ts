@@ -178,3 +178,46 @@ export async function fetchRecentSpamCheck(body: {
     return { checked: false, unknown: true };
   }
 }
+
+/**
+ * ★ 2026-09-25 카카오 창(알림톡·브랜드메시지) → 문자 발송 전환 때 명단 넘기기(Codex 8R · 직접발송 → 카카오와 대칭).
+ * 결과 = 카카오 명단 그대로(수·순서). 문자 명단 줄의 이름·기타 칸은 아래 규칙으로만 이어 쓴다.
+ * incoming = 알림톡은 줄 자체 · 브랜드는 번호 목록.
+ *   ① 줄 정체가 있으면(알림톡이 문자 명단의 줄 객체를 그대로 받아 지우기만 한 경우) 같은 줄은 그 줄 그대로 ·
+ *      나머지는 번호만. 같은 번호 여러 줄(주문A/주문B)도 어느 줄을 지웠는지 정확하다(Codex 9R).
+ *   ② 줄 정체가 없으면 번호 목록으로 본다. 중복 없는 목록의 번호 집합이 문자 명단과 같으면 **그대로 둔다**(null) —
+ *      중복 없는 목록은 같은 번호 여러 줄을 담지 못하므로 집합이 같다 = 고친 것이 없다(들렀다 오기만 해도 줄이 줄어드는 일 차단).
+ *      다르면 남은 문자 명단 줄과 번호로 **순서대로 하나씩** 짝짓고(첫 줄 반복 금지), 짝이 없으면 번호만.
+ * ⛔ 새 줄은 언제나 번호만 — 카카오 쪽 줄의 다른 칸(파일 머리글 등)을 문자 명단으로 들이지 않는다.
+ * ⛔ 넘어온 명단이 비었거나 결과가 지금 명단과 똑같으면 null — 문자 명단을 덮지 않는다(지우는 방향 금지 · 쓸데없는 안내 금지).
+ */
+export function carryPhonesToDirectRecipients<T extends { phone?: unknown }>(
+  incoming: ReadonlyArray<string | T>,
+  current: readonly T[],
+): Array<T | { phone: string }> | null {
+  const phoneOf = (x: string | T): string => String(typeof x === 'string' ? x : x?.phone ?? '').trim();
+  const items = incoming.filter((x) => phoneOf(x) !== '');
+  if (items.length === 0) return null;
+  const digits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
+  const currentSet = new Set<T>(current);
+  const isSame = (x: string | T): x is T => typeof x !== 'string' && currentSet.has(x);
+  let out: Array<T | { phone: string }>;
+  if (items.some(isSame)) {
+    out = items.map((x) => (isSame(x) ? x : { phone: phoneOf(x) }));
+  } else {
+    const keys = items.map((x) => digits(phoneOf(x)));
+    const a = new Set(keys);
+    const b = new Set(current.map((r) => digits(r?.phone)).filter(Boolean));
+    if (a.size === keys.length && a.size === b.size && [...a].every((k) => b.has(k))) return null;
+    const queue = new Map<string, T[]>();
+    for (const r of current) {
+      const k = digits(r?.phone);
+      if (!k) continue;
+      const q = queue.get(k);
+      if (q) q.push(r); else queue.set(k, [r]);
+    }
+    out = items.map((x, idx) => queue.get(keys[idx])?.shift() || { phone: phoneOf(x) });
+  }
+  if (out.length === current.length && out.every((r, idx) => r === current[idx])) return null;
+  return out;
+}

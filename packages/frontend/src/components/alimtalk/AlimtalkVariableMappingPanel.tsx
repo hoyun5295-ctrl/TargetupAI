@@ -36,6 +36,8 @@ export interface AlimtalkVariableMappingPanelProps {
   sampleRecipient?: Record<string, any> | null;
   /** 수신자 총 건수 (안내문용) */
   recipientCount?: number;
+  /** ★ 2026-09-25 배치 — 'grid'(기본 · 다른 화면 4곳) / 'rows'(알림톡 발송 창 작업면 · 변수 하나 = 한 줄) */
+  layout?: 'grid' | 'rows';
 }
 
 /** 템플릿 내용에서 #{...} 변수 추출 — AlimtalkChannelPanel과 동일 규칙 */
@@ -52,6 +54,7 @@ export default function AlimtalkVariableMappingPanel({
   customerFieldOptions = [],
   sampleRecipient = null,
   recipientCount = 0,
+  layout = 'grid',
 }: AlimtalkVariableMappingPanelProps) {
   const variables = useMemo(
     () => extractVariables(selectedTemplate?.content),
@@ -96,6 +99,60 @@ export default function AlimtalkVariableMappingPanel({
     void previewText;
     void recipientCount;
     return null;
+  }
+
+  // ★ 2026-09-25 알림톡 발송 창(작업면) 배치 — 변수 하나 = 한 줄(변수 → 명단 칸 또는 직접 입력).
+  //   판정·값 쓰기(setVariable)는 위와 같은 한 벌이고 모양만 다르다. 기본(grid)은 다른 화면 4곳이 쓰므로 그대로 둔다.
+  if (layout === 'rows') {
+    return (
+      <div className="flex flex-col divide-y divide-stone-100 border border-stone-200 rounded-xl bg-white px-3">
+        {variables.map((varKey) => {
+          const current = variableMap[varKey] || '';
+          const isFieldRef = current.startsWith('@@') && current.endsWith('@@');
+          const fieldKey = isFieldRef ? current.slice(2, -2) : '';
+          return (
+            <div key={varKey} className="flex items-center gap-2 py-2 min-w-0">
+              <span className="shrink-0 max-w-[132px] truncate text-[12px] font-bold text-amber-700 bg-amber-50 rounded-md px-2 py-1" title={varKey}>
+                {varKey}
+              </span>
+              <span className="shrink-0 text-stone-300" aria-hidden>→</span>
+              {customerFieldOptions.length > 0 && (
+                <select
+                  value={isFieldRef ? fieldKey : '__manual__'}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '__manual__') {
+                      setVariable(varKey, '');
+                    } else {
+                      setVariable(varKey, `@@${v}@@`);
+                    }
+                  }}
+                  className={`${isFieldRef ? 'flex-1' : 'w-[120px] shrink-0'} min-w-0 h-9 border border-stone-200 rounded-lg px-2 text-[12.5px] bg-white text-stone-900`}
+                  aria-label={`${varKey} 값 고르기`}
+                >
+                  <option value="__manual__">직접 입력</option>
+                  {customerFieldOptions.map((f) => (
+                    <option key={f.key} value={f.key}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {!isFieldRef && (
+                <input
+                  type="text"
+                  value={current}
+                  onChange={(e) => setVariable(varKey, e.target.value)}
+                  placeholder="값 입력"
+                  className="flex-1 min-w-0 h-9 border border-stone-200 rounded-lg px-2.5 text-[12.5px] bg-white text-stone-900"
+                  aria-label={`${varKey} 값`}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   // ★ D162-4 (2026-05-15) 4차: Harold님 명시 정합 — 한 줄에 4개씩 배치(반응형). 변수명 위 + 매핑 셀렉터 아래 카드 단위.
