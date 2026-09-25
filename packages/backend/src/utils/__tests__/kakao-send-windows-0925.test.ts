@@ -403,3 +403,33 @@ describe('7. 늦게 끝난 불러오기는 사람이 고친 명단을 덮지 않
     expect(close).toContain('setDirectMappingLoading(false);');
   });
 });
+
+describe('8. 수신자 열 모양 — 0925 밤 Harold 스크린샷 퇴행 고정(탭 글자 세로 꺾임 · 브랜드 탭 칸 세로로 늘어남 · 업로드 버튼 아이콘 56px)', () => {
+  const css = read('styles/direct-send.css');
+
+  it('낮은 화면에서 줄이는 것은 업로드 칸의 큰 그림(직계 svg)뿐 — 버튼 안 아이콘은 건드리지 않는다', () => {
+    expect(css).toContain('.ds-list-empty > .ds-dropzone > svg { width: 56px; height: 56px; }');
+    expect(css).not.toMatch(/\.ds-dropzone svg\s*\{/);
+  });
+
+  it('카카오 창 탭 — 글자를 꺾지 않고(nowrap) · 기준 폭은 글자 폭(auto) · 브랜드 세로 열에서 늘지 않는다', () => {
+    const tab = between(css, '.ks-recipients .ds-rtab {', '}');
+    expect(tab).toContain('white-space: nowrap;');
+    expect(tab).toContain('min-width: 0;');
+    expect(tab).toContain('flex: 1 1 auto;');
+    expect(css).toContain('.ks-recipients > .ds-rtab-group { flex: 0 0 auto; }');
+    expect(css).toContain('.ks-recipients { container-type: inline-size; }');
+    expect(css).toContain('@container (max-width: 420px) {');
+  });
+
+  it('좁은 열 — 합계는 한 줄로 줄지 않고 검색칸이 남는 폭을 쓴다 · [파일 선택]·드래그 안내는 꺾이지 않고 줄을 넘긴다', () => {
+    expect(css).toContain('.ks-recipients .ds-count-wrap { flex: none; white-space: nowrap;');
+    expect(css).toContain('.ks-recipients .ds-search-wrap { width: auto; flex: 1 1 auto; max-width: 260px; min-width: 0; }');
+    for (const f of ['components/AlimtalkSendModal.tsx', 'components/BrandSendModal.tsx']) {
+      const src = read(f);
+      expect(src).toContain('<div className="flex items-center justify-center flex-wrap gap-x-2 gap-y-1 mt-1">');
+      expect(src).toMatch(/ds-btn-sec px-4 pointer-events-none whitespace-nowrap/);
+      expect(src).toContain('text-stone-400 whitespace-nowrap">또는 여기로 드래그');
+    }
+  });
+});

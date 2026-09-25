@@ -434,12 +434,12 @@ export default function BrandSendModal({
                     <div className="text-[14px] font-semibold text-stone-800">번호를 넣거나 파일을 올려 주세요</div>
                     <div className="text-[12.5px] text-stone-500 mt-1">CSV · TXT에서 번호만 골라 읽어요{isAiTargetLocked ? '' : ' · AI 타겟추출로 바로 뽑을 수도 있어요'}</div>
                   </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="ds-btn-sec px-4 pointer-events-none border border-violet-200 bg-violet-50 text-violet-700">
+                  <div className="flex items-center justify-center flex-wrap gap-x-2 gap-y-1 mt-1">
+                    <span className="ds-btn-sec px-4 pointer-events-none whitespace-nowrap border border-violet-200 bg-violet-50 text-violet-700">
                       <Upload size={14} strokeWidth={1.75} />
                       <span>파일 선택</span>
                     </span>
-                    <span className="text-[12px] text-stone-400">또는 여기로 드래그</span>
+                    <span className="text-[12px] text-stone-400 whitespace-nowrap">또는 여기로 드래그</span>
                   </div>
                 </div>
                 <input ref={dropInputRef} type="file" accept=".csv,.txt,text/plain" className="hidden"
