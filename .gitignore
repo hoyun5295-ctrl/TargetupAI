@@ -47,3 +47,8 @@ packages/backend/uploads/
 
 # 폐기 전제 프로토타입·실물 덤프(직원 실물 원문 · 커밋 금지)
 scratch/
+
+# ★2026-09-27 .claude/skills/* 는 .agents/skills/* 를 가리키는 Windows 정션 8개다(원본 = .agents/skills · 그대로 추적).
+#   정션 안 파일이 원본과 중복으로 커밋돼 있었고, 66번 소스 동기화 도구가 링크 경유 파일을 막아 묶음이 멈췄다(Unsafe source).
+#   추적에서 빼고(git rm -r --cached .claude/skills) 여기서 무시한다. 노트북 정션은 그대로라 Claude Code 스킬 사용은 영향 없다.
+.claude/skills/
