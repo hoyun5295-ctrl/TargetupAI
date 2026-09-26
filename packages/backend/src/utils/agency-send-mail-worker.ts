@@ -35,9 +35,11 @@ import {
   type AgencyCallbackKinds,
 } from './agency-send-intake';
 import {
-  parseAgencyRequestForm, parseAgencyRecipientList, pickPhoneColumnStrict, resolveCallbackPlan,
-  looksLikeRequestForm, hasRecipientSheet,
+  pickPhoneColumnStrict, resolveCallbackPlan,
+  looksLikeRequestForm, hasRecipientSheet, unreadableAgencyForm,
 } from './agency-send-form';
+// ★ 2026-09-26 한줄로 V2 S1-H03 — 엑셀 파싱은 별도 프로세스(CT)
+import { parseAgencyFilesIsolated } from './agency-send-parse-isolated';
 import { extractAgencyVars } from './agency-send-vars';
 import { EMAIL_MIN_LEAD_MINUTES, EMAIL_DUP_BLOCKING_SQL, emailDupTimeSql } from './agency-send-state';
 import { agencyMailUser, isAgencyMailerReady, sendAgencyReplyMail } from './agency-mailer';
@@ -798,7 +800,10 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     };
 
     // 8) 요청서 파싱 — 이메일 전용 사전 게이트(§18-3 · 확인 화면이 없는 경로의 추가 반려 규칙)
-    const form = parseAgencyRequestForm(u.formBuf);
+    // ★ 2026-09-26 한줄로 V2 S1-H03 — 요청서·명단을 한 번에 **별도 프로세스에서** 읽는다(워커가 API와 같은 프로세스라
+    //   큰 명단을 여기서 읽으면 그동안 전부 멈췄다). 명단을 못 읽었으면 list = null(종전 catch와 같은 판정).
+    const parsedFiles = await parseAgencyFilesIsolated(u.formBuf, u.listBuf);
+    const form = parsedFiles.form ?? unreadableAgencyForm();
 
     // 8b) ★0827 §18-13 + ★0905 §21-2 발송 ID 확정.
     //   ⛔ **단위마다 자기 칸으로만 정한다. 메일 단위 상속 금지** — 첫 요청서의 계정을 나머지가 물려받게
@@ -875,8 +880,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       }
     }
 
-    let list: ReturnType<typeof parseAgencyRecipientList> | null = null;
-    try { list = parseAgencyRecipientList(u.listBuf); } catch { list = null; }
+    const list = parsedFiles.list;
     if (list) {
       if (list.headerless && extractAgencyVars(form.content).length > 0) {
         fail('명단 첫 줄에 열 이름이 없어서 문안의 %항목%을 연결할 수 없습니다. 첫 줄에 열 이름을 넣거나 문안에서 항목을 빼 주세요.', 'headerless_with_vars');
@@ -1001,12 +1005,14 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
 
   // 11) 접수 — 사전 조회는 트랜잭션 밖(§18-2), 코어가 검증·적재·리드타임을 집행한다.
   //   ⛔ 단위마다 계정·광고 여부가 다를 수 있어 사전 조회도 단위별이다.
-  const pres: Array<{ registeredSet: Awaited<ReturnType<typeof getRegisteredCallbackSet>>; window: Awaited<ReturnType<typeof loadSendWindow>>; minLeadMinutes: number }> = [];
+  const pres: Array<{ registeredSet: Awaited<ReturnType<typeof getRegisteredCallbackSet>>; window: Awaited<ReturnType<typeof loadSendWindow>>; minLeadMinutes: number; maxSmsBytes: number | null }> = [];
   for (const p of plans) {
     pres.push({
       registeredSet: await getRegisteredCallbackSet(p.acct.companyId, p.acct.userId),
       window: await loadSendWindow(p.acct.companyId, p.analysis.isAd),
       minLeadMinutes: EMAIL_MIN_LEAD_MINUTES,
+      // ★ 2026-09-26 R1-08 — 분석이 잰 SMS 최장 바이트(코어가 트랜잭션 안에서 다시 조회하지 않게)
+      maxSmsBytes: p.analysis.maxSmsBytes,
     });
   }
   const txClient = await pool.connect();
@@ -1181,7 +1187,16 @@ export async function runAgencyMailTick(): Promise<void> {
   running = true;
   const mailbox = agencyMailUser();
   // ⛔ advisory lock은 전용 client로 획득부터 해제까지(§18-8 12 · pool.query면 재진입이 뚫린다)
-  const lockClient = await pool.connect();
+  // ★ 2026-09-26 한줄로 V2 R1-07 — 연결을 못 얻으면 실행 표시를 풀고 다음 주기에 다시 시도한다.
+  //   옛: 연결 획득이 try 밖이라 한 번 실패하면 finally를 타지 않아 running이 true로 남고 재시작 전까지 접수가 멈췄다.
+  let lockClient: import('pg').PoolClient;
+  try {
+    lockClient = await pool.connect();
+  } catch (connErr: any) {
+    running = false;
+    log(`DB 연결을 얻지 못해 이번 주기를 건너뜀(다음 주기 재시도): ${connErr?.message || connErr}`);
+    return;
+  }
   let held = false;
   try {
     const lock = await lockClient.query(`SELECT pg_try_advisory_lock(hashtext('agency-send-mail-worker')) AS ok`);

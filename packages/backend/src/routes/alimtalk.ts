@@ -23,6 +23,8 @@ import {
 } from '../middlewares/auth';
 import { query } from '../config/database';
 import { findLinkDefectDeep } from '../utils/normalize';
+// ★ 2026-09-26 한줄로 V2 S1-H05 — 템플릿 수정 뒤 IMC 실제 값으로 발송 항목 맞춤(순수 CT)
+import { buildTemplateMirrorFromImc } from '../utils/alimtalk-template-mirror';
 import * as imc from '../utils/alimtalk-api';
 import { ImcApiError, extractImageFromAnyShape, extractImageListFromAnyShape, sanitizeImcMessageForUser } from '../utils/alimtalk-api';
 import {
@@ -1714,6 +1716,32 @@ router.put(
           body.customTemplateCode || null,
         ],
       );
+      // ★ 2026-09-26 한줄로 V2 S1-H05 — 위 COALESCE는 사용자가 지운 항목(강조 제목·대표 링크·부가정보 등)을 PG에 남겨 발송에 실었다.
+      //   IMC가 빠진 키를 지우는지 남기는지 확인할 수 없어 추측하지 않는다 → 수정 직후 IMC에서 다시 읽은 값으로 발송 항목을 맞춘다.
+      //   보낸 값이 응답에 모두 있을 때만 믿는다(CT buildTemplateMirrorFromImc) · 아니면 반영하지 않는다(종전 동작 · 로그).
+      try {
+        const reread = await imc.getAlimtalkTemplate(ctx.senderKey, ctx.imcTemplateKey);
+        const mirror = buildTemplateMirrorFromImc(body, reread?.code === '0000' ? reread.data : null);
+        if (mirror.ok) {
+          const c = mirror.columns;
+          await query(
+            `UPDATE kakao_templates SET
+               emphasize_type = $2, emphasize_title = $3,
+               emphasize_subtitle = $4, emphasize_sub_title = $4,
+               image_name = $5, extra_content = $6, template_header = $7,
+               item_highlight = $8::jsonb, item_list = $9::jsonb, item_summary = $10::jsonb,
+               represent_link = $11::jsonb, preview_message = $12, buttons = $13::jsonb,
+               last_synced_at = now()
+             WHERE id = $1`,
+            [ctx.id, c.emphasize_type, c.emphasize_title, c.emphasize_subtitle, c.image_name, c.extra_content, c.template_header,
+              c.item_highlight, c.item_list, c.item_summary, c.represent_link, c.preview_message, c.buttons],
+          );
+        } else {
+          console.warn(`[alimtalk][updateTemplate] IMC 재조회 값을 믿을 수 없어 발송 항목을 맞추지 않음(종전 동작) templateCode=${req.params.templateCode} 사유=${mirror.reason}`);
+        }
+      } catch (mirrorErr: any) {
+        console.warn(`[alimtalk][updateTemplate] IMC 재조회 실패(종전 동작) templateCode=${req.params.templateCode}:`, mirrorErr?.message || mirrorErr);
+      }
       console.log(`[alimtalk][updateTemplate 성공] templateCode=${req.params.templateCode} (PG 본문+IMC 갱신)`);
       res.json({ success: true, imc: r });
     } catch (err) {

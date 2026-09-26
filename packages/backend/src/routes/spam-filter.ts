@@ -5,22 +5,38 @@ import { TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 import { replaceVariables, prepareFieldMappings, getOpt080Number, buildAdSubject } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
-import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
+import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
+import { sendSystemAlert } from '../utils/system-alert';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
-import { normalizeContent, computeMessageHash } from '../utils/spam-test-queue';
+import { normalizeContent, computeMessageHash, cleanupStaleActiveTests } from '../utils/spam-test-queue';
 import { getSampleCustomerScope } from '../utils/store-scope';
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
 import {
   SPAM_TRIAL_LIMIT, SPAM_TRIAL_LOCK_SQL, SPAM_TRIAL_SOURCE, countSpamTrialsInTx, judgeSpamVerdict, readSpamTrialStatus, withExpectedSpamDevices,
 } from '../utils/spam-trial';
 
+import { spamAppTokenVerdict } from '../utils/spam-app-auth';
+
 const router = Router();
 
 // 테스트 타임아웃 (3분) — config/defaults.ts 중앙관리
 const TEST_TIMEOUT_MS = TIMEOUTS.spamFilterTest;
 
-// 앱 인증 토큰 (환경변수)
-const SPAM_APP_TOKEN = process.env.SPAM_APP_TOKEN || 'spam-hanjul-secret-2026';
+// 앱 인증 토큰 — ★ 2026-09-26 한줄로 V2 S1-H09 판정 CT(spam-app-auth)로. 옛: 설정이 비면 소스의 기본 토큰이 열쇠였다.
+let spamAppTokenUnconfiguredWarned = false;
+/** 앱 요청 인증 — 통과면 null, 아니면 이미 보낸 응답(호출부는 return) */
+function rejectSpamAppRequest(req: Request, res: Response): Response | null {
+  const verdict = spamAppTokenVerdict(req.headers['x-spam-token']);
+  if (verdict === 'ok') return null;
+  if (verdict === 'unconfigured') {
+    if (!spamAppTokenUnconfiguredWarned) {
+      spamAppTokenUnconfiguredWarned = true;
+      console.error('[SpamFilter] SPAM_APP_TOKEN 미설정 — 검사 단말 앱 요청을 받지 않는다(스팸 검사 결과가 들어오지 않음)');
+    }
+    return res.status(503).json({ error: '서버 인증 설정이 필요합니다.', code: 'SPAM_APP_TOKEN_UNCONFIGURED' });
+  }
+  return res.status(401).json({ error: '인증 실패' });
+}
 
 // ★ D79: 인라인 normalizeContent/computeMessageHash 제거 → CT-09 spam-test-queue.ts에서 import
 
@@ -62,24 +78,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     }
 
     // 1) stale 테스트 자동 정리 (타임아웃 초과 active → completed/timeout 처리)
-    const staleTests = await query(
-      `SELECT id FROM spam_filter_tests
-       WHERE status = 'active' AND created_at < NOW() - INTERVAL '${Math.ceil(TEST_TIMEOUT_MS / 1000)} seconds'`
-    );
-    if (staleTests.rows.length > 0) {
-      const staleIds = staleTests.rows.map((r: any) => r.id);
-      await query(
-        `UPDATE spam_filter_test_results SET result = $2
-         WHERE test_id = ANY($1::uuid[]) AND received = false AND result IS NULL`,
-        [staleIds, SPAM_RESULT.TIMEOUT]
-      );
-      await query(
-        `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
-         WHERE id = ANY($1::uuid[])`,
-        [staleIds]
-      );
-      console.log(`[SpamFilter] stale 테스트 ${staleIds.length}건 자동 정리`);
-    }
+    // ★ 2026-09-26 한줄로 V2 F46 — 큐 워커와 같은 CT(실행 시작 시각 기준). 옛 등록 시각 기준 전역 정리는 오래 기다렸다
+    //   막 시작한 큐 검사를 timeout으로 닫았다.
+    await cleanupStaleActiveTests(TEST_TIMEOUT_MS);
 
     // 2) 사용자별 active/pending 테스트 1건 제한
     const activeCheck = await query(
@@ -230,15 +231,18 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     // ★2026-09-25 체험 검사가 한 통도 못 나가고 실패하면 그 체험은 쓰지 않은 것으로 되돌린다(행 삭제 = 세는 대상에서 빠진다).
     //   한 통이라도 나갔으면 되돌리지 않는다(테스트폰에 이미 문자가 갔다).
     let sentCount = 0;
+    // ★ 2026-09-26 F30: 이번 회차에 만든 결과 행 — 적재가 실패하면 지운다(남으면 stale 정리로 timeout이 되어 후불에 1건 청구).
+    let pendingResultId: string | null = null;
     try {
     for (const device of devices.rows) {
       for (const msgType of messageTypes) {
         // 결과 행 생성
-        await query(
+        const inserted = await query(
           `INSERT INTO spam_filter_test_results (test_id, carrier, message_type, phone)
-           VALUES ($1, $2, $3, $4)`,
+           VALUES ($1, $2, $3, $4) RETURNING id`,
           [testId, device.carrier, msgType, device.phone]
         );
+        pendingResultId = inserted.rows[0]?.id ?? null;
 
         // ★ #3+D92: 개인화 변수를 샘플 데이터로 치환하여 발송 (원본은 DB에 보관)
         // %회신번호%도 callbackNumber로 치환
@@ -258,6 +262,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           titleStr
         );
         sentCount += 1;
+        pendingResultId = null;
       }
     }
     } catch (sendErr) {
@@ -265,6 +270,23 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         await query(`DELETE FROM spam_filter_test_results WHERE test_id = $1`, [testId]).catch(() => undefined);
         await query(`DELETE FROM spam_filter_tests WHERE id = $1 AND source = $2`, [testId, SPAM_TRIAL_SOURCE]).catch(() => undefined);
         console.error(`[SpamFilter] 체험 검사 발송 실패 — 체험을 되돌림 testId=${testId}`);
+      }
+      // ★ 2026-09-26 한줄로 V2 F30(B-0925-4) — 유료 검사는 **나간 건수만 남기고** 선불을 되돌린다(차감 − 나간 건 = keepCount).
+      //   어디서 실패했든 같은 목표라 다시 불러도 멱등이다. 후불은 prepaidRefund가 곧바로 돌아온다(결과 행 기준 청구).
+      if (!trialMode) {
+        if (pendingResultId) {
+          await query(`DELETE FROM spam_filter_test_results WHERE id = $1`, [pendingResultId]).catch(() => undefined);
+        }
+        const refundRes = await prepaidRefund(companyId, 0, spamDeductType, testId, '스팸 검사 발송 실패 환불', 'spam', { refundKey: REFUND_KEYS.NOT_LOADED, keepCount: sentCount })
+          .catch(() => ({ refunded: 0, ok: false }));
+        if (!refundRes.ok) {
+          console.error(`[SpamFilter] 발송 실패 환불 미완 testId=${testId} company=${companyId} — 수동 확인 필요`);
+          void sendSystemAlert({ dedupKey: `spam-refund-miss:${testId}`, message: `스팸 검사 발송 실패 환불 미완 — company=${companyId} test=${testId} 수동 확인 필요` }).catch(() => undefined);
+        }
+        // 한 통도 못 나갔으면 검사를 끝낸다 — active로 남으면 폴링 없이 큐의 다음 검사를 막는다.
+        if (sentCount === 0) {
+          await query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1 AND status = 'active'`, [testId]).catch(() => undefined);
+        }
       }
       throw sendErr;
     }
@@ -436,13 +458,11 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
 // ============================================================
 router.post('/report', async (req: Request, res: Response) => {
   try {
-    const authToken = req.headers['x-spam-token'] as string;
     const { deviceId, senderNumber, messageContent, messageType } = req.body;
 
-    // 1) 앱 토큰 인증
-    if (authToken !== SPAM_APP_TOKEN) {
-      return res.status(401).json({ error: '인증 실패' });
-    }
+    // 1) 앱 토큰 인증 — spamAppTokenVerdict(req.headers['x-spam-token'])
+    const rejected = rejectSpamAppRequest(req, res);
+    if (rejected) return rejected;
     if (!deviceId || !senderNumber) {
       return res.status(400).json({ error: '필수 항목 누락' });
     }
@@ -817,10 +837,9 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
 // ============================================================
 router.post('/devices', async (req: Request, res: Response) => {
   try {
-    const authToken = req.headers['x-spam-token'] as string;
-    if (authToken !== SPAM_APP_TOKEN) {
-      return res.status(401).json({ error: '인증 실패' });
-    }
+    // 앱 토큰 인증 — spamAppTokenVerdict(req.headers['x-spam-token'])
+    const rejected = rejectSpamAppRequest(req, res);
+    if (rejected) return rejected;
 
     const { deviceId, carrier, phone, deviceName } = req.body;
     if (!deviceId || !carrier || !phone) {

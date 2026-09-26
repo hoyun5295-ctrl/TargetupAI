@@ -226,11 +226,13 @@ async function getJourneyStepStats(journeyId: string): Promise<JourneyStepStat[]
          FROM cdp_events ce
          WHERE ce.event_name = 'message_click'
            AND (ce.properties->>'step_id')::uuid = s.id
+           -- ★ 2026-09-26 한줄로 V2 R1-43 — 그 여정 회사의 이벤트만(옛: 전 회사 message_click을 훑었다)
+           AND ce.company_id = (SELECT company_id FROM journeys WHERE id = $1::uuid)
        ) AS click_count,
        (
          SELECT COUNT(DISTINCT ce.customer_id)
          FROM cdp_events ce
-         WHERE ce.event_name = 'order'
+         WHERE ce.event_name = 'purchase'   -- ★ 2026-09-26 R1-43 주문은 표준 이름 purchase로 저장된다(cdp-orders · 옛 'order'는 저장되지 않아 전환이 항상 0)
            AND ce.customer_id IN (
              SELECT e2.customer_id FROM journey_executions e2 WHERE e2.journey_id = $1::uuid
            )
@@ -303,7 +305,7 @@ async function getJourneySegmentStats(journeyId: string): Promise<JourneySegment
        (
          SELECT COUNT(*)
          FROM cdp_events ce
-         WHERE ce.event_name = 'order'
+         WHERE ce.event_name = 'purchase'   -- ★ 2026-09-26 R1-43 주문은 표준 이름 purchase로 저장된다(cdp-orders · 옛 'order'는 저장되지 않아 전환이 항상 0)
            AND ce.customer_id = c.id
            AND ce.occurred_at > e.entered_at
        ) AS conversion_count

@@ -34,7 +34,9 @@ describe('1. queueOnly는 캠페인 상태를 바꾸지 않는다', () => {
 
   it('queueOnly는 상태 변경 UPDATE 앞에서 빠져나간다', () => {
     const idxReturn = LIFECYCLE.indexOf('if (queueOnly) {');
-    const idxUpdate = LIFECYCLE.indexOf("status = 'cancelled',");
+    // ★ 2026-09-26 F35: 상태 변경(취소 확정)은 결말 판정 CT(cancel-settle.ts settleCancelOutcome)가 한다 — 그 호출이 상태 변경 지점이다.
+    const idxUpdate = LIFECYCLE.indexOf('await settleCancelOutcome({');
+    expect(read('../cancel-settle.ts')).toContain("UPDATE campaigns SET status = 'cancelled',");
     expect(idxReturn, 'queueOnly 조기 return이 없다').toBeGreaterThan(0);
     expect(idxUpdate, "status='cancelled' UPDATE를 찾지 못했다").toBeGreaterThan(0);
     expect(idxReturn, 'queueOnly return이 상태 변경보다 뒤에 있으면 청구가 사라진다').toBeLessThan(idxUpdate);
@@ -75,7 +77,9 @@ describe('2. 대행발송 두 입구가 모두 queueOnly로 부른다', () => {
 
 describe('3. 이미 나간 건을 취소됨으로 확정하지 않는다', () => {
   it('alreadySent 판정은 대기와 픽업이 모두 0일 때다', () => {
-    expect(LIFECYCLE).toMatch(/alreadySent:\s*totalCancelCount === 0 && alreadyPickedUp === 0/);
+    // ★ 2026-09-26 F10·F31·F32: 적재 중(preparing·queued·processing)에 적재 중단 표식을 남긴 취소는 "이미 발송"이 아니다
+    //   (큐가 비어 있는 것은 아직 적재 전이라서다 — 워커가 표식을 보고 멈추고 정산한다). agency-load-cancel-0926 테스트가 표식 계약을 소유.
+    expect(LIFECYCLE).toMatch(/alreadySent:\s*!loadStopped && !stoppedEarlier && totalCancelCount === 0 && alreadyPickedUp === 0/);
   });
 
   it('사용자 경로는 되돌리고 사실을 알린다', () => {

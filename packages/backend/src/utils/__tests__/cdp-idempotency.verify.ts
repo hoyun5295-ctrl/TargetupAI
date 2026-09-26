@@ -9,13 +9,17 @@ import { buildWebhookIdempotencyKey } from '../cdp-idempotency';
 let passed = 0;
 function ok(name: string, fn: () => void) { fn(); passed++; console.log(`  ok - ${name}`); }
 
-console.log('[1] 전송 고유값(event_id/event_no) 1순위');
+console.log('[1] 전송 고유값(event_id) 1순위 · event_no는 종류 번호라 제외(★0925 C-12)');
 {
   const k1 = buildWebhookIdempotencyKey('order.updated', { order_id: 'O100' }, { event_id: 'E1', resource: { order_id: 'O100' } });
   const k2 = buildWebhookIdempotencyKey('order.updated', { order_id: 'O100' }, { event_id: 'E2', resource: { order_id: 'O100' } });
   ok('event_id 다르면 키 다름 (상태 전환 통과)', () => assert.notStrictEqual(k1, k2));
   ok('event_id 같으면 키 같음 (재시도 차단)', () => assert.strictEqual(k1, buildWebhookIdempotencyKey('order.updated', { order_id: 'O100' }, { event_id: 'E1', resource: { order_id: 'O100' } })));
-  ok('cafe24 event_no도 인정', () => assert.ok(buildWebhookIdempotencyKey('order.created', { order_id: 'O1' }, { event_no: 777 }).includes('evt:777')));
+  ok('cafe24 event_no는 전송 고유값이 아니다(같은 종류 다른 주문 = 다른 키)', () => {
+    const a = buildWebhookIdempotencyKey('order.created', { order_id: 'O1' }, { event_no: 90023, resource: { order_id: 'O1' } });
+    const b = buildWebhookIdempotencyKey('order.created', { order_id: 'O2' }, { event_no: 90023, resource: { order_id: 'O2' } });
+    assert.ok(!a.includes('evt:')); assert.notEqual(a, b);
+  });
 }
 
 console.log('[2] 고유값 없으면 엔티티ID + 본문 해시');

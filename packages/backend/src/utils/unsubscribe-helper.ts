@@ -181,6 +181,9 @@ export class IsolationBlockedError extends Error {
   }
 }
 
+/** ★ 2026-09-26 한줄로 V2 R1-17 — 파일 등록이 번호별 등록을 동시에 몇 건까지 돌리는가(번호끼리 독립 · PG 풀을 몰아 쓰지 않게) */
+export const UNSUB_UPLOAD_CONCURRENCY = 5;
+
 export async function registerUnsubscribe(
   companyId: string,
   userId: string,

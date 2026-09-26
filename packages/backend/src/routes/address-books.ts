@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { cellToString } from '../utils/normalize';
+import { insertAddressBookContacts, type AddressBookRow } from '../utils/address-book-insert';
 // ★ 2026-09-14 박성용 접수(주소록 번호 앞 0 생략): 업로드 파서가 CSV·엑셀의 앞 0을 숫자로 떨어뜨린다.
 //   저장·추가·조회·다운로드 네 곳이 같은 복원 규칙(휴대폰 10자리만 0 붙임)을 쓴다. 옛 저장분은 DB를 고치지 않고 읽을 때 붙인다.
 import { normalizeAgencyPhone as normalizeBookPhone } from '../utils/normalize-phone';
@@ -112,19 +113,16 @@ router.post('/', async (req: Request, res: Response) => {
     const limitErr = await checkAddressBookLimit(companyId, contacts.length);
     if (limitErr) return res.status(403).json({ error: limitErr, code: 'ADDRESS_BOOK_LIMIT' });
 
-    let insertCount = 0;
+    // ★ 2026-09-26 한줄로 V2 R1-01 — 행을 먼저 모으고 적재 CT 한 문장으로(전부 저장 또는 전부 안 함 · 옛: 연락처마다 INSERT = 일부 저장)
+    const rows: AddressBookRow[] = [];
     for (const contact of contacts) {
       const phone = normalizeBookPhone(contact.phone);
       if (phone.length >= 10) {
         // ★ D150-3 (2026-05-09) PDF #5: cellToString 컨트롤타워(normalize.ts) 사용 — 인라인 safeStr 폐기
-        await query(
-          `INSERT INTO address_books (company_id, user_id, group_name, phone, name, extra1, extra2, extra3)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [companyId, userId, groupName, phone, cellToString(contact.name), cellToString(contact.extra1), cellToString(contact.extra2), cellToString(contact.extra3)]
-        );
-        insertCount++;
+        rows.push({ phone, name: cellToString(contact.name), extra1: cellToString(contact.extra1), extra2: cellToString(contact.extra2), extra3: cellToString(contact.extra3) });
       }
     }
+    const insertCount = await insertAddressBookContacts({ companyId, userId, groupName, rows });
 
     return res.json({ success: true, message: `${insertCount}건 저장 완료`, insertCount });
   } catch (error) {
@@ -250,9 +248,9 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
       existingRes.rows.map((r: any) => normalizeBookPhone(r.phone)),
     );
 
-    let appendedCount = 0;
     let duplicateCount = 0;
     let invalidCount = 0;
+    const rows: AddressBookRow[] = [];
 
     for (const contact of contacts) {
       const phone = normalizeBookPhone(contact.phone);
@@ -265,22 +263,16 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
         continue;
       }
       existingPhones.add(phone); // 본 batch 안 중복 차단
-      await query(
-        `INSERT INTO address_books (company_id, user_id, group_name, phone, name, extra1, extra2, extra3)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          companyId,
-          userId,
-          groupName,
-          phone,
-          cellToString(contact.name),
-          cellToString(contact.extra1),
-          cellToString(contact.extra2),
-          cellToString(contact.extra3),
-        ],
-      );
-      appendedCount++;
+      rows.push({
+        phone,
+        name: cellToString(contact.name),
+        extra1: cellToString(contact.extra1),
+        extra2: cellToString(contact.extra2),
+        extra3: cellToString(contact.extra3),
+      });
     }
+    // ★ 2026-09-26 한줄로 V2 R1-01 — 적재 CT 한 문장(전부 추가 또는 전부 안 함)
+    const appendedCount = await insertAddressBookContacts({ companyId, userId, groupName, rows });
 
     return res.json({
       success: true,

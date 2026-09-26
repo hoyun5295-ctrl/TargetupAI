@@ -733,7 +733,7 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
                 <div className="flex-1">
                   <h3 className="text-lg font-bold text-gray-900">고객 DB 전체 삭제</h3>
                   <p className="text-sm text-gray-600 mt-1">
-                    등록된 모든 고객 데이터, 구매내역, 수신거부, 필드 정의가 <strong className="text-red-600">영구 삭제</strong>됩니다. 복구 불가능합니다.
+                    등록된 모든 고객 데이터, 구매내역, 필드 정의가 <strong className="text-red-600">영구 삭제</strong>됩니다. 복구 불가능합니다. 수신거부 목록은 그대로 남습니다.
                   </p>
                 </div>
               </div>

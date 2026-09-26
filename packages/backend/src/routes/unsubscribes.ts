@@ -6,7 +6,9 @@ import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError, isUserIsolationEnabled, deleteIsolatedUnsubscribes } from '../utils/unsubscribe-helper';
+import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError, isUserIsolationEnabled, deleteIsolatedUnsubscribes, UNSUB_UPLOAD_CONCURRENCY } from '../utils/unsubscribe-helper';
+// ★ 2026-09-26 한줄로 V2 R1-17 — 파일 등록 동시 상한(입력 순서 보존 CT)
+import { mapWithConcurrency } from '../utils/concurrency';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { normalizePhone, formatPhoneDisplay } from '../utils/normalize';
 import { isFirstRowHeaderRow } from '../utils/excel-columns';
@@ -476,17 +478,22 @@ router.post('/upload', async (req: Request, res: Response) => {
 
     let skipCount = 0;
     const insertedPhones: string[] = [];
-    for (const cleanPhone of phones) {
-      // CT-03 (D162-3): 격리 OFF=회사 전체 broadcast / 격리 ON=사용자 본인+admin sync
-      let cnt: number;
-      try {
-        cnt = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'upload');
-      } catch (e) {
-        if (e instanceof IsolationBlockedError) {
-          return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
-        }
-        throw e;
+    // CT-03 (D162-3): 격리 OFF=회사 전체 broadcast / 격리 ON=사용자 본인+admin sync
+    // ★ 2026-09-26 한줄로 V2 R1-17 — 번호끼리 독립이라 같은 CT를 동시 상한으로(옛: 번호마다 순서대로 기다렸다).
+    //   등록 판정은 그대로 · 결과는 입력 순서대로 모은다.
+    let results: Array<{ cleanPhone: string; cnt: number }>;
+    try {
+      results = await mapWithConcurrency(phones, UNSUB_UPLOAD_CONCURRENCY, async (cleanPhone) => ({
+        cleanPhone,
+        cnt: await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'upload'),
+      }));
+    } catch (e) {
+      if (e instanceof IsolationBlockedError) {
+        return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
       }
+      throw e;
+    }
+    for (const { cleanPhone, cnt } of results) {
       if (cnt > 0) insertedPhones.push(cleanPhone);
       else skipCount++; // 회사 전체에 이미 등록됨 = 중복
     }

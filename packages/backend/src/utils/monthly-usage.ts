@@ -105,7 +105,9 @@ export async function computeMonthlyUsage(
     const isProOrAbove = ['PRO', 'BUSINESS', 'ENTERPRISE'].includes(planCode);
 
     if (!isProOrAbove) {
-      // ★ D100: balance_transactions 기반 테스트 비용 (테스트발송 차감 참조ID = 더미 UUID)
+      // ★ D100: balance_transactions 기반 테스트 비용
+      // ★ 2026-09-26 한줄로 V2 F15·F17: 테스트 발송 참조가 요청마다 고유해졌다 — 유형(reference_type='test', 0707부터 기록)으로 찾는다.
+      //   옛 행 호환으로 고정 zero-uuid도 함께 본다(이번 달 조회라 사실상 test 유형만 걸린다).
       const testCostFilter = userType === 'company_user' && userId ? ' AND created_by = $2' : '';
       const testCostParams: any[] = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
       const testCostResult = await query(
@@ -113,7 +115,7 @@ export async function computeMonthlyUsage(
          FROM balance_transactions
          WHERE company_id = $1
            AND type = 'deduct'
-           AND reference_id = '00000000-0000-0000-0000-000000000000'
+           AND (reference_type = 'test' OR reference_id = '00000000-0000-0000-0000-000000000000')
            AND created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${testCostFilter}`,
         testCostParams,
       );

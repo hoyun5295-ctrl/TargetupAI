@@ -26,32 +26,45 @@ export function isWithinBrandSendWindow(at: Date, marginMinutes = 0): boolean {
     && minuteOfDay < BRAND_SEND_WINDOW.endMinuteOfDay - margin;
 }
 
+/**
+ * 분할발송 회차 시각 = 기준 시각에서 **발송 가능 시간(KST sendStartHour~sendEndHour) 안에서만** batchIndex분을 흘린다.
+ * 창 끝에 닿으면 다음 날 시작 시각부터 이어서 센다(여러 날에 걸쳐도 단조 증가 · 겹침 없음).
+ *
+ * ★ 2026-09-26 한줄로 전수점검 부분 ① F43·F44: 옛 식은 `기준 + batchIndex분`의 KST 시가 종료 시각 이상일 때만
+ *   다음 날로 넘겼다. 자정을 넘긴 회차 중 01~07시에 떨어진 것은 그대로 큐에 들어가 **광고 문자가 새벽에 나갔다**
+ *   (00시대는 toLocaleString이 자정을 "24"로 주는 우연 덕에 넘어갔다). 서버 로컬 시간대(setHours)에도 기대고 있었다.
+ *   - 창 안에서 끝나는 회차와 21시 전 기준에서 넘어가는 회차는 옛 결과와 같다(20:00+60 → 익일 08:00, +90 → 08:30).
+ *   - 기준 시각이 창 밖이면 첫 회차가 다음 창 시작으로 간다(옛: 22시 기준 → 익일 09시 · 새벽 기준 → 그대로).
+ *   초 단위는 보존한다(20:59:30 + 1 → 익일 08:00:30).
+ */
 export function calcSplitSendTime(
   baseTime: Date,
   batchIndex: number,
   sendStartHour: number = SEND_HOURS.start,
   sendEndHour: number = SEND_HOURS.end
 ): Date {
-  const result = new Date(baseTime.getTime());
-  result.setMinutes(result.getMinutes() + batchIndex);
+  const MIN = 60 * 1000;
+  const DAY = 24 * 60 * MIN;
+  const KST = 9 * 60 * MIN;
+  const startMs = sendStartHour * 60 * MIN;
+  const endMs = sendEndHour * 60 * MIN;
+  // KST 하루 안의 경과(ms)
+  const msOfDay = (t: number) => (((t + KST) % DAY) + DAY) % DAY;
 
-  // 한국시간 기준 시각 확인 (KST = UTC+9)
-  const kstHour = parseInt(
-    result.toLocaleString('en-US', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false })
-  );
+  let cur = baseTime.getTime();
+  let remaining = Math.max(0, Number(batchIndex) || 0) * MIN;
+  // 창 길이가 0 이하이면(설정 오류) 옛 동작처럼 단순 가산만 한다 — 무한 루프 방지.
+  if (!(endMs > startMs)) return new Date(cur + remaining);
 
-  if (kstHour >= sendEndHour) {
-    // 종료 시각 초과 → 다음날 시작 시각으로 이월
-    const kstMinutes = parseInt(
-      result.toLocaleString('en-US', { timeZone: 'Asia/Seoul', minute: '2-digit' })
-    );
-    const overflowMinutes = (kstHour - sendEndHour) * 60 + kstMinutes;
-    result.setDate(result.getDate() + 1);
-    result.setHours(result.getHours() - kstHour + sendStartHour);
-    result.setMinutes(overflowMinutes);
+  for (;;) {
+    const d = msOfDay(cur);
+    if (d < startMs) cur += startMs - d;            // 새벽 → 당일 시작
+    else if (d >= endMs) cur += DAY - d + startMs;  // 종료 이후 → 익일 시작
+    const avail = endMs - msOfDay(cur);             // 오늘 창에 남은 시간
+    if (remaining < avail) return new Date(cur + remaining);
+    remaining -= avail;
+    cur += avail;                                   // 창 끝(종료 시각) → 다음 반복에서 익일 시작으로
   }
-
-  return result;
 }
 
 /**

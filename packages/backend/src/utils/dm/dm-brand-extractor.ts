@@ -192,27 +192,13 @@ export async function extractBrandFromUrl(targetUrl: string): Promise<BrandExtra
     return {};
   }
 
-  // fetch with timeout
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  let html: string;
-  try {
-    const res = await fetch(normalizedUrl, {
-      headers: {
-        'User-Agent': USER_AGENT,
-        Accept: 'text/html,application/xhtml+xml',
-      },
-      signal: controller.signal,
-      redirect: 'follow',
-    });
-    if (!res.ok) return {};
-    html = await res.text();
-  } catch {
-    return {};
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  // ★ 2026-09-26 한줄로 V2 R1-28 — 보호된 요청으로만 가져온다(같은 파일의 fetchHtmlGuarded · 사설·내부 주소 차단 ·
+  //   리다이렉트 홉마다 DNS 해석·공인 검증·연결 고정 · 크기 상한 200KB · 5초). 옛 일반 fetch는 사용자가 넣은 주소가
+  //   내부 주소로 리다이렉트해도 따라갔다(SSRF). 상대 주소는 최종 도착 페이지 기준으로 푼다.
+  const page = await fetchHtmlGuarded(normalizedUrl);
+  if (!page) return {};
+  const html = page.html;
+  baseUrl = page.baseUrl;
 
   // 너무 큰 페이지는 앞부분만 (메타는 <head>에 있음)
   const headPart = html.slice(0, 200_000);

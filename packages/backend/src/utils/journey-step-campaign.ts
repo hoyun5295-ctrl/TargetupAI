@@ -33,6 +33,28 @@ function kstDateString(): string {
 }
 
 /**
+ * ★ 2026-09-26 한줄로 V2 F05·F06·F11 — 새 원장 표식.
+ * 이 코드부터 여정 차감은 (journey, **단계 캠페인 id**)로 남는다(옛: 여정 id). 정산 스위퍼는 이 표식이 있는
+ * 단계 캠페인만 새 원장으로 정산한다 — 배포 당일처럼 오전은 옛 참조·오후는 새 참조로 섞인 캠페인을 정산하면
+ * 원장과 결과의 경계가 어긋난다(Codex 1R). 표식 없는 옛 캠페인은 종전 그대로(정산 없음).
+ */
+export const JOURNEY_LEDGER_CONFIG = { journeyLedger: 'campaign' } as const;
+
+/**
+ * (순수) 단계 캠페인의 하루가 끝났는가 — 발송 기준 시각의 KST 날짜가 지금의 KST 날짜보다 앞이면 참.
+ * 단계 캠페인은 (여정, 단계, KST 날짜)당 1건이라 그날이 지나면 새 적재·차감이 붙지 않는다.
+ * 여정은 적재 → 결과 → 차감 순서라 진행 중인 날에 초과 환불 회수를 걸면 다음 발송의 결과가 차감보다 먼저 잡혀
+ * 정상 환불을 빼간다(Codex 1R high). 회수·불변식은 하루가 닫힌 집합에만 건다.
+ */
+export function isStepCampaignDayClosed(sendBase: Date | string | null | undefined, now: Date = new Date()): boolean {
+  if (!sendBase) return false;
+  const t = new Date(sendBase).getTime();
+  if (!Number.isFinite(t)) return false;
+  const kstDay = (ms: number) => new Date(ms + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return kstDay(t) < kstDay(now.getTime());
+}
+
+/**
  * `campaigns.message_type` CHECK 제약이 허용하는 값 — 2026-07-27 `pg_constraint` 실측.
  * 이 목록 밖 값을 넣으면 INSERT가 통째로 깨진다(값이 조용히 무시되는 게 아니다).
  */
@@ -79,10 +101,10 @@ export async function getOrCreateStepCampaign(spec: StepCampaignSpec): Promise<s
     //   2건뿐이라(2026-07-31 pg_constraint 실측) 새 값이 INSERT를 깨지 않는다.
     `INSERT INTO campaigns (
        company_id, campaign_name, message_type, message_content, subject, message_subject, message_template,
-       is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at, kakao_template_id, mms_image_paths, send_type
+       is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at, kakao_template_id, mms_image_paths, send_type, send_config
      ) VALUES (
        $1::uuid, $2, $3, $4, $5, $5, $4,
-       $6, 0, 0, $7::uuid, $9, $8, 'sending', NOW(), NOW(), $10::uuid, $11, 'journey'
+       $6, 0, 0, $7::uuid, $9, $8, 'sending', NOW(), NOW(), $10::uuid, $11, 'journey', $12::jsonb
      ) RETURNING id`,
     [
       spec.companyId,
@@ -97,6 +119,8 @@ export async function getOrCreateStepCampaign(spec: StepCampaignSpec): Promise<s
       spec.sendChannel,
       spec.kakaoTemplateId,
       spec.mmsImagePaths,
+      // ★ 2026-09-26 새 원장 표식(위 JOURNEY_LEDGER_CONFIG) — 이후 sentTables 기록은 jsonb_set이라 표식이 보존된다.
+      JSON.stringify(JOURNEY_LEDGER_CONFIG),
     ],
   );
   const newId = camp.rows[0].id as string;

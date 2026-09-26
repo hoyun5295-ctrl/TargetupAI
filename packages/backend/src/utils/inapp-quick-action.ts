@@ -22,6 +22,8 @@
 import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 import { createVariant } from './inapp-variant-optimizer';
+// ★ 2026-09-26 한줄로 V2 R1-45 — AI가 지어낸 혜택 차단 CT(원본에 있던 혜택만 통과)
+import { stripUnauthorizedBenefits } from './copy-benefit-detector';
 import { buildHourlyDistribution } from './inapp-funnel-stats';
 
 // ════════════════════════════════════════════════════════════════════
@@ -133,7 +135,17 @@ export async function quickActionAIRefine(
 
   // variant 자동 신설 (CT-80 createVariant 호출) — 가중치 동등 100/100/100
   const createdIds: string[] = [];
+  const parentText = `${parent.title || ''}
+${parent.body || ''}`;
   for (const v of variants) {
+    // ★ 2026-09-26 한줄로 V2 R1-45 — 변형은 검토 없이 바로 방문자에게 노출된다. 원본에 없던 혜택이 생긴 안은 만들지 않는다
+    //   (혜택 보존은 프롬프트 지시뿐 · 지시는 경계가 아니다).
+    const variantText = `${v.title}
+${v.body}`;
+    if (stripUnauthorizedBenefits(variantText, parentText) !== variantText) {
+      console.warn(`[CT-84 quickActionAIRefine] 원본에 없던 혜택이 생겨 안을 건너뜀 (tone=${v.tone})`);
+      continue;
+    }
     try {
       const id = await createVariant(companyId, createdBy, {
         parentMessageId: messageId,
@@ -146,6 +158,8 @@ export async function quickActionAIRefine(
         text_color: parent.text_color,
         animation: 'fade',
         variant_weight: 100,
+        // ★ 2026-09-26 한줄로 V2 R1-45 — 검토 없이 노출하지 않는다(사용자가 변형 검토 창에서 켠다)
+        status: 'paused',
       });
       createdIds.push(id);
     } catch (e: any) {
@@ -156,7 +170,7 @@ export async function quickActionAIRefine(
   return {
     actionType: 'ai_refine',
     applied: createdIds.length > 0,
-    appliedDetails: `A/B variant ${createdIds.length}건 자동 신설. 감성/실용/캐주얼 톤 자동 생성. 발송 시점 Sticky bucketing + Thompson Sampling으로 winner 자동 선택`,
+    appliedDetails: `A/B 변형 ${createdIds.length}건을 일시정지로 만들었습니다. 변형 검토 창에서 문안을 확인하고 켜면 노출되고, 켠 변형끼리 성과로 승자를 고릅니다`,
     beforeAfter: {
       before: { variantCount: 0 },
       after: { variantCount: createdIds.length, tones: variants.map((v) => v.tone) },

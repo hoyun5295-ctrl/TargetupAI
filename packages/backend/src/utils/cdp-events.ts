@@ -31,6 +31,7 @@ import { query, pool } from '../config/database';
 import { ensureAnonymousLink, identifyCustomer } from './cdp-identity';
 // ★ 2026-06-25 (gap 5): 자사몰 전송 시각 미래 클램프(커서·통계 왜곡 차단)
 import { clampOccurredAt } from './cdp-occurred-at';
+import { isUuid } from './normalize';
 import { maskPII } from './pii-masking';
 import { isOverMonthlyCdpLimit, recordCdpApiCall } from './cdp-auth';
 // ★ D214+ (2026-05-24) Unified Customer Profile 정합
@@ -67,6 +68,9 @@ export interface TrackEventInput {
   // 회원 식별 (둘 중 하나 필수, 둘 다 전달되면 externalId 우선)
   externalId?: string;                     // 자사몰 회원 ID (회원 이벤트)
   anonymousId?: string;                    // 비회원 추적 ID (브라우저 cookie 등)
+  // ★ 2026-09-26 한줄로 V2 R1-15 — 우리가 발급한 링크가 이미 아는 수신 고객(단축 URL 원장).
+  //   회원 연결이 고객을 못 채운 경우에만 쓴다(그 회사 고객일 때만 · 외부 입력 경로에서는 넘기지 않는다).
+  knownCustomerId?: string;
   // 이벤트 데이터
   properties?: Record<string, any>;        // 최대 10KB
   occurredAt?: string;                     // ISO datetime (미설정 시 NOW)
@@ -178,16 +182,20 @@ export async function trackEvent(
 
   // 이벤트 INSERT — occurred_at은 미래 클램프(파싱 실패/미전달 → now, 과거는 그대로)
   const occurredAt = clampOccurredAt(input.occurredAt, new Date());
+  // ★ 2026-09-26 한줄로 V2 R1-15 — 회원 연결이 못 채우면 발급 원장이 아는 수신 고객으로(그 회사 고객 한정 · INSERT 안 하위 조회).
+  //   지워진·다른 회사 고객이면 NULL → FK 위반으로 이벤트를 잃지 않는다. 회원 연결이 찾은 고객은 그대로(기존 동작 불변).
+  const knownCustomerId = input.knownCustomerId && isUuid(String(input.knownCustomerId)) ? String(input.knownCustomerId) : null;
 
   const result = await query(
     `INSERT INTO cdp_events (
       id, company_id, identity_link_id, customer_id,
       event_name, properties, source, occurred_at, created_at
     ) VALUES (
-      gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid,
+      gen_random_uuid(), $1::uuid, $2::uuid,
+      COALESCE($3::uuid, (SELECT c.id FROM customers c WHERE c.id = $8::uuid AND c.company_id = $1::uuid)),
       $4, $5::jsonb, $6, $7, NOW()
     )
-    RETURNING id`,
+    RETURNING id, customer_id`,
     [
       companyId,
       identityLinkId,
@@ -196,8 +204,10 @@ export async function trackEvent(
       JSON.stringify(input.properties || {}),
       input.source,
       occurredAt,
+      knownCustomerId,
     ]
   );
+  customerId = result.rows[0]?.customer_id || null;
 
   // ★ D214+ (2026-05-24) customer-level union 통합 (CT-72 + CT-71)
   //   cart_add / wishlist_add / page_view 영역 → customers 컬럼 union (fuseEventToCustomer)

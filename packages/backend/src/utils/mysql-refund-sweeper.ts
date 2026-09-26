@@ -24,15 +24,16 @@
 
 import pool, { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
-import { parseDeductDescription, parseFreeCount } from './deduct-reference';
+import { parseDeductDescription, parseFreeCount, resolveAlimtalkLedgerUnits } from './deduct-reference';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, type CampaignAggCounts } from './sms-queue';
+import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, smsAlimtalkResultAgg, smsCampaignSubRowCounts, type CampaignAggCounts } from './sms-queue';
 // ★ 2026-07-30 브랜드 SMSQ 합류 — 환불 원장 축(BRAND vs message_type) 판정 CT
-import { resolveRefundAxes } from './billing-types';
+import { resolveCampaignLedger } from './billing-types';
+import { isStepCampaignDayClosed } from './journey-step-campaign';
 import { prepaidRefund, prepaidReverseOverRefund, REFUND_KEYS } from './prepaid';
 // ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
 // ★ 2026-06-29: refundInvariantGap — 차감 = 성공 + 순환불 머니 불변식 감시
-import { calcRefundParts, refundInvariantGap } from './refund-calc';
+import { calcRefundParts, refundInvariantGap, resolveAlimtalkMix, calcAlimtalkUnitDiff } from './refund-calc';
 // ★ 2026-06-29: 머니 불변식 위반 시 운영자 LMS 경보 (쿨다운·미설정 시 무발송)
 import { sendSystemAlert } from './system-alert';
 // ★ D182 (2026-05-19): 캠페인 종료 시 회사별 학습 메모리 자동 누적
@@ -47,6 +48,22 @@ const INTERVAL_MS = 30 * 1000;     // 30초 — Harold님 명시 (D153 5/13): �
 const BOOT_DELAY_MS = 90 * 1000;   // campaign-sync-worker(60초)와 시작 시점 차이 둠
 // ★ 2026-06-29: 머니 불변식(차감 = 성공 + 순환불) 위반 경보 임계 — 반올림 노이즈(±1) 차단용 2건 이상
 const INVARIANT_ALERT_THRESHOLD = 2;
+// ★ 2026-09-26 한줄로 V2 F05 — 여정은 발송 1건마다 차감 → 적재가 하루 종일 이어진다. 방금 차감하고 아직 적재가 안 보이는 건을
+//   미적재로 환불하지 않도록, 여정의 미적재는 이 시간이 지난 차감만 센다(적재는 차감 뒤 ms~초 안에 끝난다 · 적재 실패분은 이 뒤에 돌아간다).
+const JOURNEY_LOAD_SETTLE_MS = 5 * 60 * 1000;
+// ★ 2026-09-26 한줄로 V2 F13·F42 — 캠페인 학습 누적은 급하지 않다: 10분 간격 · 한 번 평가한 캠페인은 다시 고르지 않는다.
+//   옛 코드는 클릭 0 캠페인(학습 행을 안 만든다)을 24시간 동안 30초마다 다시 골라 그 회사의 클릭 이벤트 전체를 COUNT했다.
+//   평가 기록은 프로세스 메모리(DB 쓰기 없음) — 재기동 뒤엔 한 번 더 평가될 뿐이다. 후보 창(24시간)보다 조금 길게 들고 있다가 버린다.
+const LEARNING_INTERVAL_MS = 10 * 60 * 1000;
+const LEARNING_MEMO_TTL_MS = 25 * 60 * 60 * 1000;
+let _lastLearningAt = 0;
+const _learningEvaluated = new Map<string, number>();
+
+/** 여정 알림톡 단계 캠페인인가 — 원장 CT(resolveCampaignLedger)가 journey · KAKAO 축으로 보는 캠페인(대체 행이 붙는다). */
+function isJourneyAlimtalk(c: { send_type: string | null; send_channel: string | null; message_type: string }): boolean {
+  const l = resolveCampaignLedger(c.send_type, c.send_channel, c.message_type);
+  return l.referenceType === 'journey' && l.axes[0]?.type === 'KAKAO';
+}
 
 let _timer: NodeJS.Timeout | null = null;
 let _boot: NodeJS.Timeout | null = null;
@@ -62,6 +79,8 @@ interface CampaignRow {
   created_by: string | null;
   message_type: string;
   send_channel: string | null;   // ★ 2026-07-30 환불 축 판정(BRAND vs message_type)
+  send_type: string | null;      // ★ 2026-09-26 여정 단계 캠페인은 journey 원장(resolveCampaignLedger)
+  journey_ledger: boolean | null; // ★ 2026-09-26 새 원장 표식(send_config.journeyLedger) — 없는 여정 캠페인은 정산하지 않는다
   success_count: number | null;
   fail_count: number | null;
   sent_count: number | null;
@@ -116,7 +135,8 @@ async function runOnce(): Promise<void> {
   try {
     // === 1. 후보 캠페인 SELECT (PG fail_count 무관) ===
     const candidates = await query(`
-      SELECT c.id, c.company_id, c.created_by, c.message_type, c.send_channel,
+      SELECT c.id, c.company_id, c.created_by, c.message_type, c.send_channel, c.send_type,
+             (c.send_config ? 'journeyLedger') AS journey_ledger,
              c.success_count, c.fail_count, c.sent_count, c.send_phase,
              COALESCE(c.scheduled_at, c.sent_at, c.created_at) AS send_base
       FROM campaigns c
@@ -169,9 +189,14 @@ async function runOnce(): Promise<void> {
     const smsAggMap = new Map<string, CampaignAggCounts>();
     const brandAggMap = new Map<string, CampaignAggCounts>();
     const nonBrandAggMap = new Map<string, CampaignAggCounts>();
+    // ★ 2026-09-26 선불 알림톡 결과별 정산(4-2-A)이 같은 테이블을 다시 쓴다 — 두 번 풀지 않는다.
+    const tablesByKey = new Map<string, string[]>();
+    // ★ 2026-09-26 (Codex 3R) 여정 알림톡 단계 캠페인의 대체 행 수(smsCampaignCountsSafe와 같은 가시성 규칙)
+    const subRowMap = new Map<string, number>();
     for (const [key, camps] of byUserKey) {
       const [cid, uid] = key.split('::');
       const tables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
+      tablesByKey.set(key, tables);
       const ids = camps.map(c => c.id);
       const partial = await smsCampaignCountsSafe(tables, ids);
       for (const [g, v] of partial) smsAggMap.set(g, v);
@@ -179,6 +204,11 @@ async function runOnce(): Promise<void> {
       if (bothIds.length > 0) {
         for (const [g, v] of await smsCampaignCountsSafe(tables, bothIds, 'app_etc1', 'brand')) brandAggMap.set(g, v);
         for (const [g, v] of await smsCampaignCountsSafe(tables, bothIds, 'app_etc1', 'nonBrand')) nonBrandAggMap.set(g, v);
+      }
+      // ★ 2026-09-26 (Codex 3R) 여정 알림톡 단계 캠페인만 — 대체 행 수(행 실패 − 대체 행 = 수신자 기준 실패). 다른 캠페인엔 조회 0.
+      const journeyAlimIds = camps.filter(c => isJourneyAlimtalk(c)).map(c => c.id);
+      if (journeyAlimIds.length > 0) {
+        for (const [g, v] of await smsCampaignSubRowCounts(tables, journeyAlimIds)) subRowMap.set(g, v);
       }
     }
 
@@ -210,7 +240,9 @@ async function runOnce(): Promise<void> {
           const pgSent = Number(camp.sent_count || 0);
           // ★ 2026-06-29: 실제 적재수 = 큐에 들어간 전체(성공+실패+대기). sent_count가 이보다 작게
           //   기록된 것(폴라초이스 15271 vs 15400)을 GREATEST로 진실에 맞춤 — 올림만, 이동 찰나에도 안 내려감.
-          const loaded = mysqlSuccess + mysqlFail + mysqlPending;
+          // ★ 2026-09-26 (Codex 3R) 여정 단계 캠페인의 발송 수는 실행기가 발송마다 +1 한다(bumpStepCampaignCount) —
+          //   여기서 행 수로 올리면 알림톡 대체 행이 적재 수를 부풀려 미적재(차감 − 적재)를 줄인다(적재 실패분 미환불).
+          const loaded = camp.send_type === 'journey' ? pgSent : mysqlSuccess + mysqlFail + mysqlPending;
           if (pgSuccess !== mysqlSuccess || pgFail !== mysqlFail || pgSent < loaded) {
             await query(
               `UPDATE campaigns
@@ -234,7 +266,13 @@ async function runOnce(): Promise<void> {
         //   브랜드 전용 캠페인은 BRAND 원장 하나, 'both'는 문자/브랜드 두 원장이 각자 수렴한다.
         //   축을 섞으면 한쪽 차감이 다른 쪽 실패를 삼켜 미환불·초과환불이 동시에 생긴다.
         if (camp.send_phase == null || camp.send_phase === 'sent') {
-          for (const axis of resolveRefundAxes(camp.send_channel, camp.message_type)) {
+          // ★ 2026-09-26 한줄로 V2 F05·F06·F11 — 원장 위치는 CT가 정한다. 여정 단계 캠페인은 (journey, 단계 캠페인 id) ·
+          //   알림톡 단계는 KAKAO 축. 옛 코드는 campaign 원장만 읽어 여정 실패분이 영구 과금됐다(차감 0으로 보였다).
+          const ledger = resolveCampaignLedger(camp.send_type, camp.send_channel, camp.message_type);
+          // ★ Codex 1R — 새 원장 표식이 없는 여정 캠페인(배포 전에 만든 날 · 차감이 옛 참조 = 여정 id)은 종전 그대로 건너뛴다.
+          //   섞인 날을 새 원장으로 정산하면 원장과 결과의 경계가 어긋나고, 빈 원장으로 보면 거짓 경보가 난다.
+          const journeySkip = ledger.referenceType === 'journey' && camp.journey_ledger !== true;
+          for (const axis of journeySkip ? [] : ledger.axes) {
             const axisCounts = axis.scope === 'all'
               ? { success: mysqlSuccess, fail: mysqlFail, pending: mysqlPending }
               : (axis.scope === 'brand' ? brandAggMap : nonBrandAggMap).get(camp.id)
@@ -253,32 +291,42 @@ async function runOnce(): Promise<void> {
             //   NULL(옛 세대) 행은 기본 축에만 합산한다 — BRAND 원장은 2026-07-29 이후 세대라 NULL이 없다.
             const dedRes = axis.type === 'BRAND'
               ? await query(
-                  `SELECT amount, description FROM balance_transactions
-                   WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
+                  `SELECT amount, description, created_at FROM balance_transactions
+                   WHERE company_id = $1 AND type = 'deduct' AND reference_type = $4 AND reference_id = $2
                      AND message_type = $3`,
-                  [camp.company_id, camp.id, axis.type]
+                  [camp.company_id, camp.id, axis.type, ledger.referenceType]
                 )
               : await query(
-                  `SELECT amount, description FROM balance_transactions
-                   WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
+                  `SELECT amount, description, created_at FROM balance_transactions
+                   WHERE company_id = $1 AND type = 'deduct' AND reference_type = $4 AND reference_id = $2
                      AND (message_type = $3 OR message_type IS NULL)`,
-                  [camp.company_id, camp.id, axis.type]
+                  [camp.company_id, camp.id, axis.type, ledger.referenceType]
                 );
             let dedTotal = 0;
             let parsedCount = 0;
             // ★ 2026-08-05 요금제 무료 제공으로 덮인 건수 — 정산 축은 `부담 = 차감 + 무료`(설계 §5-1-B).
             let freeCount = 0;
+            // ★ 2026-09-26 F05 — 여정 미적재 판정용: JOURNEY_LOAD_SETTLE_MS가 지난 차감만(여정이 아니면 전부).
+            let settledParsedCount = 0;
+            let settledFreeCount = 0;
+            const settleNowMs = Date.now();
             let allParsed = dedRes.rows.length > 0;
             for (const d of dedRes.rows as any[]) {
               const amount = Number(d.amount) || 0;
               dedTotal += amount;
-              freeCount += parseFreeCount(d.description);
+              const free = parseFreeCount(d.description);
+              freeCount += free;
+              const settled = ledger.referenceType !== 'journey'
+                || (d.created_at != null && settleNowMs - new Date(d.created_at).getTime() >= JOURNEY_LOAD_SETTLE_MS);
+              if (settled) settledFreeCount += free;
               // 금액 0 행 = 전량 무료라 차감이 없었던 행. 단가 역산에 기여할 것이 없고, 파싱 대상에 두면
               // `allParsed`가 거짓이 되어 같은 캠페인의 유료 행 정산까지 통째로 보류된다(prepaid.ts와 같은 규칙).
               if (amount === 0) continue;
               const parsed = parseDeductDescription(d.description);
-              if (parsed) parsedCount += parsed.count;
-              else allParsed = false;
+              if (parsed) {
+                parsedCount += parsed.count;
+                if (settled) settledParsedCount += parsed.count;
+              } else allParsed = false;
             }
             dedTotal = Math.round(dedTotal * 100) / 100;
             const ledgerUnit = allParsed && parsedCount > 0 ? Math.round((dedTotal / parsedCount) * 100) / 100 : null;
@@ -301,30 +349,95 @@ async function runOnce(): Promise<void> {
               // ★ 2026-08-05 부담 건수 = 차감 + 무료. 무료로 덮인 건도 큐에 올라갔어야 할 발송이라
               //   미적재·정당 한도·불변식은 전부 이 축으로 잰다. 무료 0이면 부담 = 차감이라 종전과 같다.
               const coveredCount = deductedCount + freeCount;
-              // ★ 2026-06-29: 미적재 = 부담 − max(적재기록, 성공+실패+대기). sent_count 과소 기록 초과환불 fix.
-              const processed = Math.max(axisSentCount, axisSuccess + axisFail + axisPending);
-              const notLoaded = processed > 0 ? Math.max(0, coveredCount - processed) : 0;
-              // ★ 2026-07-27 (B-0727-2): 한 덩어리로 환불하던 것을 원인별 항아리로 나눈다.
-              //   미적재분(notloaded)은 워커가 종결 때 넣는 것과 **같은 키**라 둘이 서로를 삼키지 않고 수렴한다.
-              //   실패분(fail)은 결과가 도착할수록 커지므로 그 키 안에서 계속 top-up된다.
-              //   합계는 옛 calcRefundDue와 동일하다(상한 포함).
-              const parts = calcRefundParts({
-                deductedCount, freeCount, sentCount: axisSentCount,
-                mysqlSuccess: axisSuccess, mysqlFail: axisFail, mysqlPending: axisPending,
-              });
-              for (const [key, dueCount, label] of [
-                [REFUND_KEYS.FAIL, parts.fail, '실패'],
-                [REFUND_KEYS.NOT_LOADED, parts.notLoaded, '미적재'],
-              ] as const) {
-                if (dueCount <= 0) continue;
+
+              // === 4-2-A. ★ 2026-09-26 한줄로 V2 F01·F04 — 선불 알림톡 결과별 단가 차액 ===
+              //   알림톡은 대체 문자까지 덮는 문자 단가로 차감한다. 결과가 알림톡 성공·SMS 대체로 나오면 그 단가와의 차액을
+              //   돌려준다(후불 청구와 같은 결과). 차감 행에 결과별 단가가 실린 캠페인만 — 옛 차감·문자 발송은 건너뛴다(조회 0).
+              //   실패·미적재 환불(아래)은 종전 행 기준 그대로다: sent_count가 대체 행까지 센 적재수로 올라가 있어
+              //   실패만 수신자 기준으로 바꾸면 미적재가 줄어 미환불이 난다. 행 기준 합은 정당 환불 건수와 같고 넘친 몫은 4-3 회수가 맞춘다.
+              //   차액을 먼저 돌려준다 — 실패 환불이 한도를 먼저 채우면 차액 항아리가 비어 기록이 흐려진다(금액은 4-3이 맞춘다).
+              let unitDiffAmt = 0;
+              const alimUnits = axis.scope === 'all' ? resolveAlimtalkLedgerUnits(dedRes.rows as any[]) : null;
+              if (alimUnits) {
+                const tables = tablesByKey.get(`${camp.company_id}::${camp.created_by || ''}`) || [];
+                const agg = (await smsAlimtalkResultAgg(tables, [camp.id])).get(camp.id);
+                const { mix, ambiguous } = resolveAlimtalkMix(agg, axisSuccess);
+                if (ambiguous) {
+                  // 한 캠페인에 대체 모양 두 가지(K행 7830/7831 · 대체 행)가 같이 있으면 한 수신자를 두 번 셀 수 있다.
+                  // 추측으로 돈을 움직이지 않는다 — 차액 없이 차감 단가로 정산하고(종전 동작) 사람이 보게 한다.
+                  log(`[결과별정산보류] campaign=${camp.id} ${axis.type} — K행 대체 코드와 대체 행이 함께 있다`);
+                  await sendSystemAlert({
+                    dedupKey: `alimtalk-settle-ambiguous:${camp.id}`,
+                    message: `선불 알림톡 결과별 정산 보류 — K행 대체 성공 코드와 대체 행이 한 캠페인에 함께 있어 차액 환불을 멈췄습니다(차감 단가로 정산). campaign=${camp.id}`,
+                  }).catch(() => { /* 경보 실패가 sweep을 막지는 않는다 */ });
+                } else {
+                  unitDiffAmt = calcAlimtalkUnitDiff({ deductUnit: unit, units: alimUnits, mix, freeCount });
+                }
+              }
+              if (unitDiffAmt > 0) {
                 const r = await prepaidRefund(
-                  camp.company_id, dueCount, axis.type, camp.id, `발송 ${label} 환불 (sweep)`,
-                  'campaign', { refundKey: key },
+                  camp.company_id, 0, axis.type, camp.id, '알림톡 결과별 단가 차액 환불',
+                  ledger.referenceType, { refundKey: REFUND_KEYS.KAKAO_DIFF, targetAmount: unitDiffAmt },
                 );
                 if (r.refunded > 0) {
                   refundCount++;
                   totalRefundAmount += r.refunded;
-                  log(`✓ campaign=${camp.id} ${axis.type} ${label} ${dueCount}건 (실패 ${axisFail} + 미적재 ${notLoaded} / 차감 ${deductedCount}${freeCount > 0 ? ` + 무료 ${freeCount}` : ''} 처리 ${processed}) 차액 ${r.refunded}원`);
+                  log(`✓ campaign=${camp.id} ${axis.type} 알림톡 결과별 단가 차액 목표 ${unitDiffAmt}원 → ${r.refunded}원`);
+                }
+              }
+
+              // ★ 2026-09-26 F05 — 실패·미적재 환불 목표는 여정이면 **자리 잡은 차감**(5분 지난)으로 잰다. 회수 한도·불변식은 전체 차감 그대로
+              //   (방금 차감분은 회수 한도를 늘리는 쪽이라 안전하다). 여정이 아니면 두 값이 같다.
+              const partsDeducted = ledger.referenceType === 'journey' ? settledParsedCount : deductedCount;
+              const partsFree = ledger.referenceType === 'journey' ? settledFreeCount : freeCount;
+              // ★ 2026-06-29: 미적재 = 부담 − max(적재기록, 성공+실패+대기). sent_count 과소 기록 초과환불 fix.
+              const processed = Math.max(axisSentCount, axisSuccess + axisFail + axisPending);
+              const notLoaded = processed > 0 ? Math.max(0, partsDeducted + partsFree - processed) : 0;
+              // ★ 2026-07-27 (B-0727-2): 한 덩어리로 환불하던 것을 원인별 항아리로 나눈다.
+              //   미적재분(notloaded)은 워커가 종결 때 넣는 것과 **같은 키**라 둘이 서로를 삼키지 않고 수렴한다.
+              //   실패분(fail)은 결과가 도착할수록 커지므로 그 키 안에서 계속 top-up된다.
+              //   합계는 옛 calcRefundDue와 동일하다(상한 포함).
+              if (ledger.referenceType === 'journey') {
+                // ★ 2026-09-26 (Codex 3R high) 여정은 원인별 항아리 대신 **단일 목표를 순환불(환불 − 회수)과 비교**한다.
+                //   하루 종일 쌓이는 캠페인이라 "실패 환불 → 회수(대체 성공) → 새 정당 환불(적재 실패 등)"이 생기는데,
+                //   항아리 지급 누계와 비교하면 회수된 몫이 새 환불을 막는다(prepaidRefund netTargetCount).
+                //   목표 = min(자리 잡은 차감, 수신자 기준 실패 + 미적재) — 알림톡은 행 실패 − 대체 행(K 실패 + 대체 성공 = 실패 아님).
+                //   미적재 = 자리 잡은 부담 − 적재(발송 수는 실행기가 성공마다 +1 · 차감 → 적재라 발송 수 0이면 정말 전부 미적재).
+                //   회수 한도(아래 4-3 = 전체 차감 − 성공 − 대기)는 이 목표보다 작아질 수 없다(적재 ≥ 성공 + 실패 + 대기) → 요동 없음.
+                const failR = Math.max(0, axisFail - (subRowMap.get(camp.id) || 0));
+                const processedR = Math.max(axisSentCount, axisSuccess + failR + axisPending);
+                const notLoadedR = Math.max(0, partsDeducted + partsFree - processedR);
+                const target = Math.min(partsDeducted, failR + notLoadedR);
+                if (target > 0) {
+                  const r = await prepaidRefund(
+                    camp.company_id, 0, axis.type, camp.id, '여정 발송 실패 환불 (sweep)',
+                    'journey', { refundKey: REFUND_KEYS.FAIL, netTargetCount: target },
+                  );
+                  if (r.refunded > 0) {
+                    refundCount++;
+                    totalRefundAmount += r.refunded;
+                    log(`✓ campaign=${camp.id} ${axis.type} 여정 목표 ${target}건(실패 ${failR} + 미적재 ${notLoadedR} / 자리 잡은 차감 ${partsDeducted}) 차액 ${r.refunded}원`);
+                  }
+                }
+              } else {
+                const parts = calcRefundParts({
+                  deductedCount: partsDeducted, freeCount: partsFree, sentCount: axisSentCount,
+                  mysqlSuccess: axisSuccess, mysqlFail: axisFail, mysqlPending: axisPending,
+                });
+                for (const [key, dueCount, label] of [
+                  [REFUND_KEYS.FAIL, parts.fail, '실패'],
+                  [REFUND_KEYS.NOT_LOADED, parts.notLoaded, '미적재'],
+                ] as const) {
+                  if (dueCount <= 0) continue;
+                  const r = await prepaidRefund(
+                    camp.company_id, dueCount, axis.type, camp.id, `발송 ${label} 환불 (sweep)`,
+                    ledger.referenceType, { refundKey: key },
+                  );
+                  if (r.refunded > 0) {
+                    refundCount++;
+                    totalRefundAmount += r.refunded;
+                    log(`✓ campaign=${camp.id} ${axis.type} ${label} ${dueCount}건 (실패 ${axisFail} + 미적재 ${notLoaded} / 차감 ${deductedCount}${freeCount > 0 ? ` + 무료 ${freeCount}` : ''} 처리 ${processed}) 차액 ${r.refunded}원`);
+                  }
                 }
               }
 
@@ -334,11 +447,14 @@ async function runOnce(): Promise<void> {
               //   settle 가드 — 정산 끝난 캠페인에서만: 대기 0(발송 중 아님) + 집계 유효(0/0 agg 실패 제외) + 30분 경과.
               //   (정당 한도 = MySQL 실측 성공으로만 계산 → 성공은 이력 append-only라 과대 불가 = 과다 회수 0)
               const ageMs = camp.send_base ? (Date.now() - new Date(camp.send_base).getTime()) : 0;
+              // ★ 2026-09-26 (Codex 2R high) 여정도 회수는 언제든 돈다 — 차감 → 적재 순서(journey-executor)라 차감 없는 성공이 보일 수 없어
+              //   회수 한도(전체 차감 − 성공 − 대기)가 정상 환불보다 작아지지 않는다. 날짜 마감으로 막던 1R 처방은 닫힘을 증명하지 못해 걷었다.
               if (axisPending === 0 && (axisSuccess + axisFail) > 0 && ageMs > 30 * 60 * 1000) {
                 // ★ 2026-08-05 정당 한도는 **부담 − 성공 − 대기**다. 차감만으로 재면 무료 제공이 낀 캠페인에서
                 //   성공이 차감보다 커져 한도가 0이 되고, **정상 실패 환불을 초과로 오인해 회수한다**(설계 §5-1-B).
                 const maxLegitRefund = Math.max(0, coveredCount - axisSuccess - axisPending);
-                const rev = await prepaidReverseOverRefund(camp.company_id, maxLegitRefund, axis.type, camp.id);
+                // ★ 2026-09-26 알림톡 결과별 차액은 정당 환불이다 — 한도에 더하지 않으면 30분 뒤 차액을 다시 빼간다.
+                const rev = await prepaidReverseOverRefund(camp.company_id, maxLegitRefund, axis.type, camp.id, unitDiffAmt, ledger.referenceType);
                 if (rev.reversed > 0) {
                   reverseOverCount++;
                   totalReverseOverAmount += rev.reversed;
@@ -349,16 +465,20 @@ async function runOnce(): Promise<void> {
                 //   "발송사는 한 건도 안 잃는다"를 코드로 보장. gap>0=미환불(고객 손해)·gap<0=초과환불 잔존.
                 //   reverse가 소유한 캠페인(타임아웃 등 skipped)은 제외. 반올림 노이즈는 임계값으로 차단.
                 //   순환불은 reverse가 같은 집계로 돌려준 값 재사용(추가 쿼리 0).
-                if (!rev.skipped) {
+                // ★ 2026-09-26 여정 단계 캠페인의 불변식 경보는 그날이 끝난 뒤에만 — 진행 중엔 방금 차감(적재 전)·5분 안 미적재가
+                //   gap으로 잡혀 거짓 경보가 난다. 돈은 움직이지 않는 감시라 날짜 기준으로 충분하다.
+                const invariantDue = ledger.referenceType !== 'journey' || isStepCampaignDayClosed(camp.send_base, new Date());
+                if (!rev.skipped && invariantDue) {
                   const netRefundedCnt = Math.round(rev.netRefundedAmt / unit);
-                  const gapCnt = refundInvariantGap({ deductedCount, freeCount, successCount: axisSuccess, netRefundedCount: netRefundedCnt });
+                  // ★ 2026-09-26 차액은 정당 환불 — 순환불에서 빼고 본다(못 돌려줬으면 gap > 0 미환불로 드러난다).
+                  const gapCnt = refundInvariantGap({ deductedCount, freeCount, successCount: axisSuccess, netRefundedCount: netRefundedCnt, unitDiffCount: unitDiffAmt / unit });
                   if (Math.abs(gapCnt) >= INVARIANT_ALERT_THRESHOLD) {
                     invariantAlertCount++;
                     const dir = gapCnt > 0 ? '미환불 의심(고객 손해)' : '초과환불 잔존';
-                    log(`[불변식위반] campaign=${camp.id} ${axis.type} 부담 ${coveredCount} ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir})`);
+                    log(`[불변식위반] campaign=${camp.id} ${axis.type} 부담 ${coveredCount} ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt}${unitDiffAmt > 0 ? ` (결과별 차액 ${unitDiffAmt}원)` : ''} (차이 ${Math.round(gapCnt * 10) / 10}건, ${dir})`);
                     await sendSystemAlert({
                       dedupKey: `refund-invariant:${camp.id}:${axis.type}`,
-                      message: `환불 불변식 위반 — ${axis.type} 캠페인: 부담 ${coveredCount}건(차감 ${deductedCount}${freeCount > 0 ? ` + 무료 ${freeCount}` : ''}) ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir}). campaign=${camp.id}`,
+                      message: `환불 불변식 위반 — ${axis.type} 캠페인: 부담 ${coveredCount}건(차감 ${deductedCount}${freeCount > 0 ? ` + 무료 ${freeCount}` : ''}) ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt}${unitDiffAmt > 0 ? ` (알림톡 결과별 차액 ${unitDiffAmt}원 포함)` : ''} (차이 ${Math.round(gapCnt * 10) / 10}건, ${dir}). campaign=${camp.id}`,
                     });
                   }
                 }
@@ -558,6 +678,10 @@ interface LearningCandidateRow {
 }
 
 async function accumulateCampaignLearning(): Promise<{ learned: number }> {
+  const nowMs = Date.now();
+  if (nowMs - _lastLearningAt < LEARNING_INTERVAL_MS) return { learned: 0 };
+  _lastLearningAt = nowMs;
+  for (const [id, at] of _learningEvaluated) if (nowMs - at > LEARNING_MEMO_TTL_MS) _learningEvaluated.delete(id);
   // 1. 최근 24h 내 종료된 캠페인 후보 (학습 누락분만)
   //   - status='completed' + sent_at 존재 + sent_count >= 10 (표본 부족 차단)
   //   - ai_company_memory에 해당 campaign_id metadata row 미존재
@@ -598,9 +722,11 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
             OR m.metadata->>'last_campaign_id' = c.id::text
           )
       )
+      -- ★ 2026-09-26 F13·F42 이미 평가한 캠페인(학습 행을 안 만든 클릭 0 캠페인 포함)은 다시 고르지 않는다
+      AND NOT (c.id = ANY($1::uuid[]))
     ORDER BY c.sent_at DESC
     LIMIT 100
-  `);
+  `, [Array.from(_learningEvaluated.keys())]);
 
   let learned = 0;
 
@@ -623,6 +749,7 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
         hasConversionData: false, // cdp_events 0건 — 전환 데이터 없음(가짜 전환율 차단)
         isAd: !!row.is_ad,
       });
+      _learningEvaluated.set(row.campaign_id, nowMs);
       learned++;
     } catch (innerErr: any) {
       log(`✗ memory-learning campaign=${row.campaign_id} 처리 에러:`, innerErr?.message || innerErr);
@@ -631,6 +758,9 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
 
   return { learned };
 }
+
+/** 테스트 진입점 — 한 사이클만 돈다(★2026-09-26 선불 알림톡 결과별 정산 배선 테스트). 운영은 startMysqlRefundSweeper만 쓴다. */
+export const runMysqlRefundSweepOnce = runOnce;
 
 export function startMysqlRefundSweeper(): void {
   if (_timer || _boot) return;

@@ -34,7 +34,7 @@ import { insertProposalVariants, recommendVariantForProposal, recordVariantRewar
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder, detectMissedOperatorRound } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
@@ -524,10 +524,10 @@ export async function updateOperator(
       schedule_day_of_week = COALESCE($16, schedule_day_of_week),
       schedule_day_of_month = COALESCE($17, schedule_day_of_month),
       channel = COALESCE($18, channel),
-      benefit_content = COALESCE($19, benefit_content),
+      benefit_content = CASE WHEN $19::text = '__keep__' THEN benefit_content ELSE NULLIF($19::text, '') END,
       sequence_enabled = COALESCE($20, sequence_enabled),
       sequence_delay_days = COALESCE($21, sequence_delay_days),
-      sequence_reminder_content = COALESCE($22, sequence_reminder_content),
+      sequence_reminder_content = CASE WHEN $22::text = '__keep__' THEN sequence_reminder_content ELSE NULLIF($22::text, '') END,
       send_time_mode = COALESCE($23, send_time_mode),
       copy_style = CASE WHEN $24::text = '__keep__' THEN copy_style ELSE NULLIF($24::text, '') END,
       schedule_month = COALESCE($25, schedule_month),
@@ -556,13 +556,17 @@ export async function updateOperator(
       nextDow,
       nextDom,
       patch.channel ?? null,
-      (typeof patch.benefitContent === 'string' && patch.benefitContent.trim()) ? patch.benefitContent.trim() : null,
+      // ★ 2026-09-26 한줄로 V2 R1-25 — 안 보냄(undefined)만 유지 · 빈 값은 해제(옛: ''→null→COALESCE로 옛 혜택이 남아 계속 발송).
+      //   비면 발송 쪽이 안전하게 멈춘다([혜택…] 자리 잔존 = 발송 출구 가드). copy_style과 같은 유지 표식.
+      patch.benefitContent === undefined ? '__keep__' : (typeof patch.benefitContent === 'string' ? patch.benefitContent.trim() : ''),
       // ★ 2026-08-04 되살림 — 코호트 확보(발송결과)로 보류 해제. 켜기·끄기 모두 받는다.
       patch.sequenceEnabled ?? null,
       typeof patch.sequenceDelayDays === 'number' && patch.sequenceDelayDays > 0 ? Math.min(30, Math.floor(patch.sequenceDelayDays)) : null,
       // 2R(#13): 수정 경로도 저장 시 EUC-KR 안전화(등록과 같은 문).
-      (typeof patch.sequenceReminderContent === 'string' && patch.sequenceReminderContent.trim())
-        ? stripIncompatibleEmojis(patch.sequenceReminderContent).trim().slice(0, 2000) || null : null,
+      // ★ 2026-09-26 R1-25 — 리마인더 문안도 같은 규칙(비면 리마인드를 예약하지 않고 관리자에게 알린다).
+      patch.sequenceReminderContent === undefined ? '__keep__'
+        : ((typeof patch.sequenceReminderContent === 'string' && patch.sequenceReminderContent.trim())
+          ? stripIncompatibleEmojis(patch.sequenceReminderContent).trim().slice(0, 2000) : ''),
       patch.sendTimeMode !== undefined ? normalizeSendTimeMode(patch.sendTimeMode) : null,
       // copy_style: undefined = 유지('__keep__'), 그 외 = 정규화 값 or ''(해제 → SQL NULLIF로 null)
       patch.copyStyle === undefined ? '__keep__' : (normalizeCopyStyle(patch.copyStyle) ?? ''),
@@ -671,6 +675,9 @@ interface CompanyContextRow {
   advanced_access_enabled: boolean;
 }
 
+/** ★ 2026-09-26 R1-24 — 회차 건너뜀 알림을 보낸 (운영자, 희망 시각). 같은 회차 반복 알림 방지(프로세스 안) */
+const missedRoundNoticed = new Set<string>();
+
 export async function generateProposalForOperator(operatorId: string): Promise<OperatorProposal | null> {
   // 1. Operator 조회 — ★ D212+ 5번 (2026-05-23 Harold 명시): budget_spent 영역 sub-query 통합
   const operRes = await query(
@@ -694,6 +701,29 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   );
   if (operRes.rows.length === 0) return null;
   const operator = mapRowToOperator(operRes.rows[0]);
+
+  // ★ 2026-09-26 한줄로 V2 R1-24 — 이번 회차의 발송 희망 시각이 이미 지났으면(서버 재시작·지연) 아래 계산이 다음 회차로 넘어간다.
+  //   늦게 보내지는 않는다(종전 동작 유지). 옛: 그 사실이 어디에도 남지 않아 담당자는 "왜 이번엔 안 갔지"를 알 수 없었다 → 알린다.
+  const missedAt = detectMissedOperatorRound({
+    nextRunAt: operator.nextRunAt,
+    leadMinutes: operator.autoSendLeadMinutes,
+    sendTimeMode: operator.sendTimeMode,
+  });
+  const missedKey = missedAt ? `${operator.id}:${missedAt.toISOString()}` : '';
+  if (missedAt && !missedRoundNoticed.has(missedKey)) {
+    // 같은 회차는 한 번만(생성이 예외로 끝나면 워커가 1분마다 다시 집는다 · 프로세스 안 기억 · 재시작 뒤 한 번 더는 허용)
+    if (missedRoundNoticed.size > 5000) missedRoundNoticed.clear();
+    missedRoundNoticed.add(missedKey);
+    const missedLabel = missedAt.toLocaleString('ko-KR', {
+      timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    console.warn(`[ContinuousOperator] ${operator.name} ${missedLabel} 회차 건너뜀(준비가 희망 시각 뒤에 시작됨)`);
+    void notifyOperatorAdmins(
+      operator,
+      '[AI 오퍼레이션 회차 건너뜀]',
+      `'${operator.name}' ${missedLabel} 회차는 준비가 늦어져 보내지 않았습니다. 예정보다 늦은 시각에 보내지 않도록 이번 회차는 건너뛰고 다음 회차를 정상 준비합니다.`,
+    ).catch((e: any) => console.error('[ContinuousOperator] 회차 건너뜀 알림 실패:', e?.message || e));
+  }
 
   // ★ D212+ 5번 (2026-05-23 Harold 명시): 예산 초과 차단 — 회사 admin 신뢰
   if (operator.budgetMonthly !== null && operator.budgetSpentMonth >= operator.budgetMonthly) {

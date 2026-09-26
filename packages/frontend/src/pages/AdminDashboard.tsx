@@ -2750,6 +2750,8 @@ const billingTypeLabel: Record<string, string> = {
   // ★ 2026-09-13 브랜드 두 줄 — 없으면 상세 행에 원문 키가 보인다(청구서 라벨 = billing-types.ts label)
   BRAND: '브랜드메시지', BRAND_NF: '브랜드메시지(비친구)',
   TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS', SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS',
+  // ★ 2026-09-26 담당자 브랜드메시지 테스트(청구서 라벨 = billing-types.ts · PDF와 같은 이름)
+  TEST_BRAND: '테스트브랜드메시지',
   // ★ 2026-09-16 추가 항목(서수란 접수) — 없으면 상세 행에 내부 키(EXTRA_MANUAL)가 그대로 보인다.
   //   실제로 그렇게 보이고 있었다. 이름은 PDF·이메일(billing-invoice-lines CT)과 같은 값이라야 한다.
   EXTRA_080_FEE: '080 번호 이용료', EXTRA_080_SVC: '080 부가서비스', EXTRA_080_CALL: '080 통화료',
@@ -4301,8 +4303,8 @@ const handleApproveRequest = async (id: string) => {
         body: JSON.stringify({ reason: cancelReason })
       });
 
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || '취소 실패');
       }
 
@@ -4310,7 +4312,8 @@ const handleApproveRequest = async (id: string) => {
       setCancelTarget(null);
       setCancelReason('');
       loadScheduledCampaigns();
-      showAlert('성공', '예약이 취소되었습니다.', 'success');
+      // ★ 2026-09-26 한줄로 V2 F35 — 서버 문구를 그대로 보여 준다(적재 중이던 캠페인은 워커가 결말을 정한다는 안내)
+      showAlert('성공', data.message || '예약이 취소되었습니다.', 'success');
     } catch (error: any) {
       showAlert('오류', error.message || '취소 실패', 'error');
     }

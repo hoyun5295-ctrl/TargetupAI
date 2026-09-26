@@ -228,7 +228,8 @@ describe('5. 스팸 무료 체험 · 청구 제외', () => {
   it('상수 · 조건 조각', () => {
     expect(SPAM_TRIAL_LIMIT).toBe(3);
     expect(SPAM_TRIAL_SOURCE).toBe('trial');
-    expect(spamBillableTestSql('t')).toBe("COALESCE(t.source, 'manual') <> 'trial'");
+    // ★ 2026-09-26 F49: 무료 자동 검사(auto_ai_free)도 함께 뺀다
+    expect(spamBillableTestSql('t')).toBe("COALESCE(t.source, 'manual') NOT IN ('trial', 'auto_ai_free')");
   });
   const route = read('routes/spam-filter.ts');
   it('체험은 차감하지 않는다 · 잠금 안에서 세고 넣는다 · 한 통도 못 나가면 되돌린다', () => {
@@ -250,7 +251,8 @@ describe('5. 스팸 무료 체험 · 청구 제외', () => {
     expect(read('routes/admin.ts')).toContain("WHERE t.company_id = $1 AND ${spamBillableTestSql('t')} ${sfDateWhere}");
     const camp = read('routes/campaigns.ts');
     expect(camp).toContain('const isTrial = r.source === SPAM_TRIAL_SOURCE;');
-    expect(camp).toContain('if (isCompleted && !isTrial) {');
+    // ★ 2026-09-26 F49: 비용은 청구 제외 판정 CT(체험 + 무료 자동 검사)를 따른다
+    expect(camp).toContain('if (isCompleted && isSpamTestBillable(r.source)) {');
   });
   it('Codex 1R — 최근 검사 조회는 실제로 보낸 종류의 결과가 있는 검사만 인정한다', () => {
     const rc = route.slice(route.indexOf("router.post('/recent-check'"), route.indexOf("router.get('/tests'"));

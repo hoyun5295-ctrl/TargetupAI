@@ -472,7 +472,7 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
 
       const typeLabel: Record<string, string> = {
         SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오',
-        TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS',
+        TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS', TEST_BRAND: '테스트브랜드메시지',   // ★ 2026-09-26 S1-H06
         SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS',
         // ★ 2026-07-30 080·부가서비스·최소과금 청구. 내부 키(EXTRA_*)는 고객에게 보일 값이 아니다.
         EXTRA_080_FEE: '080 이용료', EXTRA_080_SVC: '080 부가서비스', EXTRA_080_CALL: '080 통화료',

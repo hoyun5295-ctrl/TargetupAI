@@ -21,6 +21,8 @@
  */
 
 import { query } from '../config/database';
+// ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
+import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { buildNaverCommerceSignature } from './naver-commerce-signature-core';
 import {
@@ -106,7 +108,7 @@ export async function issueNaverCommerceToken(creds: NaverCommerceCredentials): 
   });
   if (!res.ok) {
     const errBody = await safeJsonText(res);
-    throw new Error(`네이버 커머스 토큰 발급 실패 (${res.status}): ${errBody}`);
+    throw tokenHttpError(`네이버 커머스 토큰 발급 실패 (${res.status}): ${errBody}`, res.status);
   }
   const json = (await res.json()) as NaverCommerceTokenResponse;
   if (!json?.access_token) {
@@ -251,7 +253,7 @@ export async function ensureFreshNaverCommerceToken(
       ?? (await getNaverCommerceCredentials(integration.companyId, integration.storeId))
       ?? envNaverCreds();
     if (!c) {
-      throw new Error('네이버 커머스 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
+      throw reconnectRequiredError('네이버 커머스 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
     }
     const reissued = await issueNaverCommerceToken(c);
     await saveNaverCommerceIntegration(integration.companyId, integration.storeId, reissued, c);
@@ -262,10 +264,13 @@ export async function ensureFreshNaverCommerceToken(
       tokenExpiresAt: new Date(Date.now() + (reissued.expires_in || 10800) * 1000),
     };
   } catch (err) {
-    await query(
-      `UPDATE company_integrations SET status = 'token_expired', updated_at = NOW() WHERE id = $1::uuid`,
-      [integration.id]
-    );
+    // ★ 2026-09-26 R1-31 — 제공자가 거절했을 때만 만료로 표시한다(일시 장애 한 번에 연동이 끊겨 웹훅이 유실됐다)
+    if (isDefinitiveTokenRejection(err)) {
+      await query(
+        `UPDATE company_integrations SET status = 'token_expired', updated_at = NOW() WHERE id = $1::uuid`,
+        [integration.id]
+      );
+    }
     throw err;
   }
 }

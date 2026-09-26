@@ -11,7 +11,7 @@
  */
 import { Response } from 'express';
 import { mysqlQuery } from '../config/database';
-import { getCompanySmsTablesWithLogs } from './sms-queue';
+import { getCampaignSmsTablesFor } from './sms-queue';
 import { SUCCESS_CODES, PENDING_CODES, getQueueRowStatus, getSendTypeLabel, getCarrierLabel, getDisplayContents } from './sms-result-map';
 import { BRAND_CAMPAIGN_CHANNELS } from './billing-types';
 
@@ -46,6 +46,8 @@ export interface CampaignSmsCsvParams {
   sendChannel: string;      // 'sms' | 'kakao' | 'both' | 'alimtalk'
   campaignCreatedAt: any;   // 등록일시 (전 행 동일)
   exportStatus?: string;    // '' | 'success' | 'fail' | 'substitute' (화면 필터 그대로)
+  /** ★ 2026-09-26 F26 — 캠페인 행(작성자·적재 기록·시각). 그 캠페인의 테이블만 읽는다(옛: 지금 기준 당월·전월 회사 라인). */
+  campaign: { created_by?: string | null; send_config?: any; sent_at?: any; scheduled_at?: any; created_at?: any };
 }
 
 /**
@@ -69,7 +71,7 @@ export async function streamCampaignSmsCsv(res: Response, params: CampaignSmsCsv
   // ★ 2026-07-30: 브랜드(kakao·kakao_brand)도 SMSQ(msg_type='F') 합류 — 옛 IMC 서브쿼리 폐기.
   if (sendChannel === 'sms' || sendChannel === 'both' || sendChannel === 'alimtalk'
       || (BRAND_CAMPAIGN_CHANNELS as readonly string[]).includes(sendChannel)) {
-    const exportTables = await getCompanySmsTablesWithLogs(companyId, userId || undefined);
+    const exportTables = await getCampaignSmsTablesFor(companyId, params.campaign);
     for (const t of exportTables) {
       subqueries.push(`(SELECT ${SMS_EXPORT_FIELDS} FROM ${t} WHERE app_etc1 = ?${smsStatusWhere})`);
       baseParams.push(id);

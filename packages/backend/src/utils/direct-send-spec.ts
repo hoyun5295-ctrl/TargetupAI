@@ -120,3 +120,13 @@ export function buildDirectSendCampaignParams(
     isDirectPipelineSendType(spec.sendType) ? spec.sendType : 'direct',
   ];
 }
+
+/**
+ * ★ 2026-09-26 한줄로 V2 F09 — 적재가 (일부라도) 끝난 뒤 예외가 난 발송의 안내. AI 발송·동기 직접발송 catch 공용.
+ * 옛 안내 "차감된 금액은 자동 환불됩니다"는 적재된 몫이 실제로 나가는데도 전액 환불처럼 읽혔다. 환불은 올라가지 못한 몫뿐이다.
+ */
+export function loadedSendFailureMessage(scheduled: boolean): string {
+  return scheduled
+    ? '발송 처리 중 오류가 발생했습니다. 이미 발송 대기에 올라간 문자는 예약 시각에 발송되며, 예약 목록에서 취소할 수 있습니다. 올라가지 못한 몫은 자동으로 환불됩니다.'
+    : '발송 처리 중 오류가 발생했습니다. 이미 발송 대기에 올라간 문자는 발송됩니다. 올라가지 못한 몫은 자동으로 환불됩니다.';
+}

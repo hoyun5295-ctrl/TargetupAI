@@ -65,6 +65,24 @@ export async function createPendingPayment(input: CreatePendingPaymentInput): Pr
   return { paymentId: result.rows[0].id };
 }
 
+// ── 1-2단계: 리턴 콜백의 승인 전 상태 조회 ──────────
+/**
+ * ★ 2026-09-26 한줄로 V2 F03·F25 — 리턴 콜백이 **승인을 부르기 전에** 결제의 현재 상태를 본다.
+ * 콜백이 두 번 오면(브라우저 재전송 · 재전송 · 이중 제출) 두 번째가 같은 인증 토큰으로 승인을 다시 부르고, 실패하면 망취소를 불렀다.
+ * 망취소는 그 토큰의 거래(= 이미 승인·충전된 첫 거래)를 취소한다 → 충전은 남고 카드 대금만 취소.
+ * 결제 확정은 멱등이지만 그 앞의 승인 재호출·망취소는 상태를 몰랐다. 행이 없으면 null(종전 흐름 — 확정이 거절하고 망취소한다).
+ * ⛔ 상태만 읽는다(Codex 5차 1R high) — 리턴 콜백은 인증 앞 공개 경로라, 주문번호만 아는 호출자에게 잔액·금액이 새면 안 된다.
+ */
+export async function readInicisPaymentState(orderId: string): Promise<{ status: string } | null> {
+  const r = await pool.query(
+    `SELECT status FROM payments WHERE pg_order_id = $1 AND pg_provider = 'inicis'`,
+    [orderId],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return { status: String(row.status) };
+}
+
 // ── 2단계: 결제 성공 확정 (pending → completed) ──────────
 
 export interface FinalizePaymentSuccessInput {

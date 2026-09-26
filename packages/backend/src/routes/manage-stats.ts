@@ -4,6 +4,7 @@ import pool, { mysqlQuery } from '../config/database';
 import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
+import { getSendTypeLabel } from '../utils/sms-result-map';
 // ★ 2026-07-25 `querySendStats`(campaigns 축) 미사용 — 화면·엑셀 모두 청구 축(send-usage-aggregation)으로 통일.
 //   슈퍼관리자 통계(admin.ts)는 계정·캠페인 단위 운영 뷰라 그 축을 계속 쓴다.
 import { buildDateRangeFilter, querySendStatsDetail } from '../utils/stats-aggregation';
@@ -267,7 +268,8 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       );
       testDetail = (testRows as any[]).map(r => ({
         phone: r.phone,
-        msgType: r.msg_type === 'S' ? 'SMS' : 'LMS',
+        // ★ 2026-09-26 S1-H06 브랜드 테스트가 들어온다 — 유형 라벨은 표시 CT
+        msgType: getSendTypeLabel(r.msg_type),
         status: [6, 1000, 1800].includes(r.status_code) ? 'success' : r.status_code === 100 ? 'pending' : 'fail',
         sentAt: r.sent_at,
         testType: 'manager',

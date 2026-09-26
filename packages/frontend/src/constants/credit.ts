@@ -113,7 +113,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'variant-generator': '문안 변형', 'performance-explainer': '성과 분석',
   'performance-quick-action': '성과 분석', 'next-action-advisor': '액션 추천',
   'multi-goal-decisioning': '목표 분석', 'cdp-fusion-explainer': 'CDP 분석',
-  'voice-inbound': '음성 분석', 'dm-event-recommender': '이벤트 추천',
+  'voice-inbound': '음성 분석', /* ★ 2026-09-26 음성 AI 제거 — 과거 사용 내역 표시 전용(단가 없음) */ 'dm-event-recommender': '이벤트 추천',
   'refine-direct': '문안 다듬기', 'journey-ai-refine': '다듬기', 'journey-step-diagnosis': '진단',
   'dm-quick-action-refine': '다듬기', 'dm-self-diagnosis': '진단',
   'inapp-explainer': '인앱 설명', 'alimtalk-matcher': '알림톡 매칭',
@@ -137,6 +137,7 @@ export const AI_GENERATE_COSTS: Record<string, number> = {
   'email-ai-generate': 3,
   'event-image-extract': 3,
   'catalog-dm-build': 10,
+  'inapp-explainer': 1,   // ★ 2026-09-26 한줄로 V2 R1-42 인앱 AI 영향 요인 분석 버튼 라벨(백엔드 CREDIT_COST_MAP 미러)
 };
 
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {

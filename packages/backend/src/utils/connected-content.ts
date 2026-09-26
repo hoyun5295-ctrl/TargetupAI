@@ -31,6 +31,10 @@ export interface WeatherInfo {
   region: string;          // '서울' / '부산' / ...
   summary: string;          // '맑음' / '흐림' / '비' / '눈'
   temperature: number | null;  // 섭씨
+  // ★ 2026-09-26 한줄로 V2 R1-35 — AI 지시문(journey-ai-generator)과 이미 저장된 여정 문안이 쓰는 이름.
+  //   temp = temperature와 같은 값 · condition = 날씨 API 영문 상태('Rain' · 'Clear' · 'Snow' ...) — 분기 조건용.
+  temp: number | null;
+  condition: string;
   rainProbability: number | null;  // 0~100 (%)
   fetchedAt: Date;
 }
@@ -61,7 +65,8 @@ export interface ProductNewInfo {
 
 export interface ExternalContext {
   // ★ D209+ (Harold 명시 2026-05-22): weather.store 신규 — 매장 region 매핑 (매장 단독 행사 영역 정합)
-  weather?: { today?: WeatherInfo; store?: WeatherInfo };
+  // ★ 2026-09-26 한줄로 V2 R1-35 — summary·temp·condition = 고객 지역(today) 값의 짧은 이름(AI 지시문·저장된 문안이 쓰는 이름)
+  weather?: { today?: WeatherInfo; store?: WeatherInfo; summary?: string; temp?: number | null; condition?: string };
   inventory?: Record<string, InventoryInfo>;
   price?: Record<string, PriceInfo>;
   product?: { new?: ProductNewInfo[]; last_viewed?: ProductNewInfo };
@@ -91,25 +96,72 @@ const REGION_NORMALIZE: Record<string, string> = {
   '제주': '제주', '제주도': '제주', '제주특별자치도': '제주',
 };
 
-function normalizeRegion(region: string | null | undefined): string {
-  if (!region) return '서울';
+// ★ 2026-09-26 한줄로 V2 R1-35 — 못 알아본 지역 = null(옛: '서울'로 간주 = 다른 지역 날씨를 지어냈다)
+function normalizeRegion(region: string | null | undefined): string | null {
+  if (!region) return null;
   const trimmed = region.trim();
   if (REGION_NORMALIZE[trimmed]) return REGION_NORMALIZE[trimmed];
   // 부분 매칭 (예: "서울시 강남구" → "서울")
   for (const key of Object.keys(REGION_NORMALIZE)) {
     if (trimmed.includes(key)) return REGION_NORMALIZE[key];
   }
-  return '서울';  // default fallback
+  return null;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 1. fetchWeather — 기상청 또는 OpenWeatherMap fallback
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const weatherCache = new Map<string, { data: WeatherInfo; expiresAt: number }>();
+/** ★ 2026-09-26 한줄로 V2 R1-35 후속 — 실시간 날씨 연결(키)이 있는가. 없으면 날씨 값은 늘 null(빈칸)이다. */
+export function isWeatherConfigured(): boolean {
+  return !!process.env.OPENWEATHER_API_KEY;
+}
 
-export async function fetchWeather(region: string): Promise<WeatherInfo> {
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-35 후속 — 여정 AI 생성 지시문의 날씨 블록(날씨 CT 소유).
+ * 연결이 있으면 종전 글 그대로(여정 AI 생성기에서 원문 이동) · 없으면 날씨 단어·변수 모두 쓰지 않게 한다
+ * (옛: 연결이 없어도 날씨 변수를 "의무"로 쓰게 해 빈칸 문장이 나갔다).
+ */
+export function buildWeatherPromptBlock(): string {
+  if (isWeatherConfigured()) {
+    return `[★ ★ ★ 날씨 Liquid 변수: D209+ 신규 (Connected Content 통합) ★ ★ ★]
+✗ 날씨 단순 단어 직접 작성 절대 금지 ("맑음" / "비" / "눈" / "흐림" / "쌀쌀해요" / "더워요" / "화창" / "쌀쌀"). 발송 시점 실시간 날씨와 불일치 사고 위험 (예: "오늘 날씨 화창해요" 작성한 메시지가 폭우 영역에 발송 = 신뢰 파괴)
+✓ 발송 시점 실시간 자동 분기는 Liquid 변수 의무:
+   - {{ weather.summary }}: 고객 region 기준 현재 날씨 한 줄 ("맑음 18°C" 등)
+   - {{ weather.store.summary }}: 매장 region 기준 (매장 단독 행사 영역 의무, 예: "강남점 봄 행사")
+   - {{ weather.temp }} / {{ weather.condition }}: 온도 / 상태 (분기 조건용)
+✓ 분기 예시: 폭우 / 폭염 / 눈 영역 안내:
+   {% if weather.condition == 'Rain' %}
+   비 오는 오늘, 매장 방문이 어려우신 분들을 위해
+   {% elsif weather.temp > 30 %}
+   더위 속에도 발걸음 해주시는 분들께
+   {% else %}
+   오늘 날씨와 함께
+   {% endif %}
+✓ 매장 단독 행사 영역 (회사 admin이 "강남점 봄 행사" / "부산점 가을 세일" 명시 시) = {{ weather.store.summary }} 의무`;
+  }
+  return `[★ 날씨 표현]
+✗ 날씨 단어("맑음" / "비" / "눈" / "흐림" / "쌀쌀해요" / "더워요" / "화창" 등)와 날씨 변수({{ weather.* }}) 모두 쓰지 않는다.
+  이 서버에는 실시간 날씨 연결이 없어 날씨 변수는 빈칸으로 나가고, 직접 쓴 날씨 단어는 발송 시점 실제 날씨와 어긋날 수 있다.`;
+}
+
+/** 다듬기 지시의 날씨 한 줄 — 연결이 있으면 종전 줄 그대로 · 없으면 날씨 단어·변수 모두 쓰지 않는다 */
+export function buildWeatherRefineRule(): string {
+  if (isWeatherConfigured()) {
+    return `✗ 날씨 단순 단어 직접 작성 X: {{ weather.summary }} / {{ weather.store.summary }} Liquid 변수 의무 (D209+ Connected Content 정합)`;
+  }
+  return '✗ 날씨 단어와 날씨 변수({{ weather.* }})는 쓰지 않는다(실시간 날씨 연결 없음 · 원본에 있으면 날씨 없이 다듬는다)';
+}
+
+const weatherCache = new Map<string, { data: WeatherInfo | null; expiresAt: number }>();
+
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-35 — **모르는 날씨는 null.** 옛: 키 없음·호출 실패·상태 없음이면 '맑음'을 돌려줬다
+ *   (비 오는 날 "맑은 오늘" 문자). 이제 null → 템플릿 날씨 자리는 비고 분기는 else로 간다. 실패도 캐시한다(장애 중 반복 호출 방지).
+ */
+export async function fetchWeather(region: string): Promise<WeatherInfo | null> {
   const normalized = normalizeRegion(region);
+  if (!normalized) return null;
   const cacheKey = `weather:${normalized}`;
   const cached = weatherCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
@@ -121,11 +173,9 @@ export async function fetchWeather(region: string): Promise<WeatherInfo> {
     //   ENV: KMA_API_KEY (기상청) / OPENWEATHER_API_KEY (OpenWeatherMap)
     //   둘 다 미박힘 시 fallback (default 정합)
     const apiKey = process.env.OPENWEATHER_API_KEY;
-    if (!apiKey) {
-      // ENV 미박힘 — fallback 정합 매트릭스 (default '맑음')
-      const fallback = defaultWeather(normalized);
-      weatherCache.set(cacheKey, { data: fallback, expiresAt: Date.now() + WEATHER_CACHE_TTL_MS });
-      return fallback;
+    if (!isWeatherConfigured() || !apiKey) {
+      // ENV 미설정 — 날씨를 모른다(null · 지어내지 않는다)
+      return null;
     }
 
     const cityCoords: Record<string, { lat: number; lon: number }> = {
@@ -159,8 +209,13 @@ export async function fetchWeather(region: string): Promise<WeatherInfo> {
     if (!res.ok) throw new Error(`Weather API HTTP ${res.status}`);
     const json: any = await res.json();
 
-    const main = json.weather?.[0]?.main || 'Clear';
-    const summary = WEATHER_SUMMARY_KR[main] || '맑음';
+    const main = String(json.weather?.[0]?.main || '');
+    // 표에 없는 상태는 받은 한글 설명(lang=kr) · 그것도 없으면 모르는 날씨(null)
+    const summary = WEATHER_SUMMARY_KR[main] || String(json.weather?.[0]?.description || '').trim();
+    if (!main || !summary) {
+      weatherCache.set(cacheKey, { data: null, expiresAt: Date.now() + WEATHER_CACHE_TTL_MS });
+      return null;
+    }
     const temperature = typeof json.main?.temp === 'number' ? Math.round(json.main.temp) : null;
     const rainProb = typeof json.rain?.['1h'] === 'number' ? Math.min(Math.round(json.rain['1h'] * 10), 100) : null;
 
@@ -168,16 +223,17 @@ export async function fetchWeather(region: string): Promise<WeatherInfo> {
       region: normalized,
       summary,
       temperature,
+      temp: temperature,
+      condition: main,
       rainProbability: rainProb,
       fetchedAt: new Date(),
     };
     weatherCache.set(cacheKey, { data, expiresAt: Date.now() + WEATHER_CACHE_TTL_MS });
     return data;
   } catch (err: any) {
-    console.warn('[ConnectedContent] fetchWeather 오류, fallback:', err?.message);
-    const fallback = defaultWeather(normalized);
-    weatherCache.set(cacheKey, { data: fallback, expiresAt: Date.now() + WEATHER_CACHE_TTL_MS });
-    return fallback;
+    console.warn('[ConnectedContent] fetchWeather 오류 — 날씨 없음(null):', err?.message);
+    weatherCache.set(cacheKey, { data: null, expiresAt: Date.now() + WEATHER_CACHE_TTL_MS });
+    return null;
   }
 }
 
@@ -192,10 +248,6 @@ const WEATHER_SUMMARY_KR: Record<string, string> = {
   'Fog': '안개',
   'Haze': '연무',
 };
-
-function defaultWeather(region: string): WeatherInfo {
-  return { region, summary: '맑음', temperature: null, rainProbability: null, fetchedAt: new Date() };
-}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 1-A. fetchStoreWeather — 매장 region 매핑 (callback_numbers JOIN) (D209+ Harold 명시 매장 단독 행사 영역 정합)
@@ -381,7 +433,16 @@ export async function enrichLiquidContextWithExternal(
   if (needs.needsWeather && customerRegion) {
     try {
       const weather = await fetchWeather(customerRegion);
-      context.weather = { ...(context.weather || {}), today: weather };
+      // ★ 2026-09-26 한줄로 V2 R1-35 — 모르는 날씨는 싣지 않는다 · 짧은 이름(summary·temp·condition)도 고객 지역 값으로
+      if (weather) {
+        context.weather = {
+          ...(context.weather || {}),
+          today: weather,
+          summary: weather.summary,
+          temp: weather.temp,
+          condition: weather.condition,
+        };
+      }
     } catch (err: any) {
       console.warn('[ConnectedContent] weather fetch skip:', err?.message);
     }

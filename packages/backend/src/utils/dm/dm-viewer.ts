@@ -9,7 +9,7 @@
  * 폰트: Pretendard CDN + 시스템 폰트 fallback 체인.
  */
 import { inlineImage, publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
-import { renderSections, COUNTDOWN_SCRIPT, escapeHtml, DM_TAB_PILL } from './dm-section-renderer';
+import { renderSections, COUNTDOWN_SCRIPT, escapeHtml, safeUrl, safeColor, DM_TAB_PILL } from './dm-section-renderer';
 import { renderDmTokensCss, renderDmBaseCss, renderDmDesign3Css, renderDmVariantCss } from './dm-tokens';
 // ★ 2026-07-16 자가 호스팅 웹폰트 — 발행 서체를 우리 서버 @font-face로 로드(구글 CDN 미로드 궁서 폴백 정정)
 import { selfHostPreloadUrls } from '../design-core/fonts';
@@ -28,8 +28,11 @@ export { inlineImage, youtubeEmbedUrl };
 
 // ────────────────── 헤더 템플릿 4종 ──────────────────
 
-function renderHeader(template: string, data: any, storeName: string): string {
+// ★ 2026-09-26 한줄로 V2 R1-41 — 머리말·꼬리말·옛 슬라이드는 저장 값을 그대로 HTML에 넣었다(저장형 스크립트).
+//   새 섹션 렌더러와 같은 CT로 감싼다: 글자 = escapeHtml · 링크 = safeUrl(http·https·tel·mailto만) · 색 = safeColor · 이미지 주소 = escapeHtml.
+function renderHeader(template: string, data: any, rawStoreName: string): string {
   const d = data || {};
+  const storeName = escapeHtml(rawStoreName || '');
   switch (template) {
     case 'banner':
       return ''; // 풀 배너는 첫 페이지 이미지가 대체하므로 헤더 없음
@@ -39,57 +42,58 @@ function renderHeader(template: string, data: any, storeName: string): string {
       const ddayText = dday > 0 ? `D-${dday}` : dday === 0 ? 'D-Day' : `D+${Math.abs(dday)}`;
       return `<div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:24px 20px;text-align:center">
         <div style="font-size:36px;font-weight:900;letter-spacing:2px">${ddayText}</div>
-        ${d.eventTitle ? `<div style="font-size:14px;opacity:0.9;margin-top:8px;font-weight:500">${d.eventTitle}</div>` : ''}
+        ${d.eventTitle ? `<div style="font-size:14px;opacity:0.9;margin-top:8px;font-weight:500">${escapeHtml(d.eventTitle)}</div>` : ''}
         <div style="font-size:12px;opacity:0.6;margin-top:4px">${storeName || ''}</div>
       </div>`;
     case 'coupon':
       return `<div style="background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%);color:#fff;padding:24px 20px;text-align:center">
-        ${d.discount ? `<div style="font-size:16px;font-weight:700;margin-bottom:6px">${d.discount}</div>` : ''}
-        ${d.couponCode ? `<div style="background:rgba(255,255,255,0.25);display:inline-block;padding:8px 24px;border-radius:8px;font-size:20px;font-weight:900;letter-spacing:3px;font-family:monospace">${d.couponCode}</div>` : ''}
+        ${d.discount ? `<div style="font-size:16px;font-weight:700;margin-bottom:6px">${escapeHtml(d.discount)}</div>` : ''}
+        ${d.couponCode ? `<div style="background:rgba(255,255,255,0.25);display:inline-block;padding:8px 24px;border-radius:8px;font-size:20px;font-weight:900;letter-spacing:3px;font-family:monospace">${escapeHtml(d.couponCode)}</div>` : ''}
         <div style="font-size:11px;opacity:0.7;margin-top:8px">${storeName || ''}</div>
       </div>`;
     default: // 'logo'
       return `<div style="background:#fff;padding:16px 20px;border-bottom:2px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between">
         <div style="display:flex;align-items:center;gap:10px">
-          ${d.logoUrl ? `<img src="${d.logoUrl}" style="height:32px;border-radius:6px" alt="">` : ''}
+          ${d.logoUrl ? `<img src="${escapeHtml(d.logoUrl)}" style="height:32px;border-radius:6px" alt="">` : ''}
           <div style="font-size:16px;font-weight:700;color:#222">${storeName || ''}</div>
         </div>
-        ${d.phone ? `<a href="tel:${d.phone}" style="font-size:13px;color:#666;text-decoration:none">${d.phone}</a>` : ''}
+        ${d.phone ? `<a href="${safeUrl(`tel:${d.phone}`)}" style="font-size:13px;color:#666;text-decoration:none">${escapeHtml(d.phone)}</a>` : ''}
       </div>`;
   }
 }
 
 // ────────────────── 푸터 템플릿 4종 ──────────────────
 
-function renderFooter(template: string, data: any, storeName: string): string {
+function renderFooter(template: string, data: any, rawStoreName: string): string {
   const d = data || {};
+  const storeName = escapeHtml(rawStoreName || '');
   switch (template) {
     case 'cta':
-      const ctaColor = d.ctaColor || '#4f46e5';
+      const ctaColor = safeColor(d.ctaColor, '#4f46e5');
       return `<div style="padding:20px;text-align:center;border-top:1px solid #eee">
-        ${d.ctaUrl ? `<a href="${d.ctaUrl}" style="display:inline-block;background:${ctaColor};color:#fff;padding:14px 48px;border-radius:12px;font-size:16px;font-weight:700;text-decoration:none;letter-spacing:0.5px" target="_blank">${d.ctaText || '자세히 보기'}</a>` :
-        `<div style="background:${ctaColor};color:#fff;padding:14px 48px;border-radius:12px;font-size:16px;font-weight:700;display:inline-block">${d.ctaText || '자세히 보기'}</div>`}
+        ${d.ctaUrl ? `<a href="${safeUrl(d.ctaUrl)}" style="display:inline-block;background:${ctaColor};color:#fff;padding:14px 48px;border-radius:12px;font-size:16px;font-weight:700;text-decoration:none;letter-spacing:0.5px" target="_blank">${escapeHtml(d.ctaText || '자세히 보기')}</a>` :
+        `<div style="background:${ctaColor};color:#fff;padding:14px 48px;border-radius:12px;font-size:16px;font-weight:700;display:inline-block">${escapeHtml(d.ctaText || '자세히 보기')}</div>`}
       </div>`;
     case 'social':
       return `<div style="background:#f8f8f8;padding:20px;text-align:center;border-top:1px solid #eee">
         <div style="font-size:12px;color:#999;margin-bottom:10px">${storeName || ''}</div>
         <div style="display:flex;justify-content:center;gap:20px">
-          ${d.instagram ? `<a href="${d.instagram}" style="font-size:13px;color:#e1306c;font-weight:500" target="_blank">Instagram</a>` : ''}
-          ${d.youtube ? `<a href="${d.youtube}" style="font-size:13px;color:#ff0000;font-weight:500" target="_blank">YouTube</a>` : ''}
-          ${d.kakao ? `<a href="${d.kakao}" style="font-size:13px;color:#371d1e;font-weight:500" target="_blank">카카오</a>` : ''}
+          ${d.instagram ? `<a href="${safeUrl(d.instagram)}" style="font-size:13px;color:#e1306c;font-weight:500" target="_blank">Instagram</a>` : ''}
+          ${d.youtube ? `<a href="${safeUrl(d.youtube)}" style="font-size:13px;color:#ff0000;font-weight:500" target="_blank">YouTube</a>` : ''}
+          ${d.kakao ? `<a href="${safeUrl(d.kakao)}" style="font-size:13px;color:#371d1e;font-weight:500" target="_blank">카카오</a>` : ''}
         </div>
       </div>`;
     case 'promo':
       return `<div style="background:linear-gradient(135deg,#ffecd2 0%,#fcb69f 100%);padding:24px 20px;text-align:center;border-top:1px solid #eee">
-        ${d.promoDesc ? `<div style="font-size:14px;font-weight:600;color:#333;margin-bottom:8px">${d.promoDesc}</div>` : ''}
-        ${d.promoCode ? `<div style="background:#fff;display:inline-block;padding:8px 24px;border-radius:8px;font-size:18px;font-weight:900;letter-spacing:2px;font-family:monospace;color:#e74c3c;border:2px dashed #e74c3c">${d.promoCode}</div>` : ''}
-        ${d.promoUrl ? `<div style="margin-top:12px"><a href="${d.promoUrl}" style="font-size:13px;color:#e74c3c;font-weight:600;text-decoration:underline" target="_blank">지금 사용하기 →</a></div>` : ''}
+        ${d.promoDesc ? `<div style="font-size:14px;font-weight:600;color:#333;margin-bottom:8px">${escapeHtml(d.promoDesc)}</div>` : ''}
+        ${d.promoCode ? `<div style="background:#fff;display:inline-block;padding:8px 24px;border-radius:8px;font-size:18px;font-weight:900;letter-spacing:2px;font-family:monospace;color:#e74c3c;border:2px dashed #e74c3c">${escapeHtml(d.promoCode)}</div>` : ''}
+        ${d.promoUrl ? `<div style="margin-top:12px"><a href="${safeUrl(d.promoUrl)}" style="font-size:13px;color:#e74c3c;font-weight:600;text-decoration:underline" target="_blank">지금 사용하기 →</a></div>` : ''}
       </div>`;
     default: // 'cs'
       return `<div style="background:#f8f8f8;padding:20px;text-align:center;border-top:1px solid #eee">
-        ${d.website ? `<a href="${d.website}" style="font-size:12px;color:#2563eb;text-decoration:none" target="_blank">${d.website.replace(/^https?:\/\//, '')}</a>` : ''}
-        ${d.phone ? `<div style="font-size:12px;color:#888;margin-top:4px">고객센터 ${d.phone}</div>` : ''}
-        ${d.email ? `<div style="font-size:12px;color:#888;margin-top:2px">${d.email}</div>` : ''}
+        ${d.website ? `<a href="${safeUrl(d.website)}" style="font-size:12px;color:#2563eb;text-decoration:none" target="_blank">${escapeHtml(String(d.website).replace(/^https?:\/\//, ''))}</a>` : ''}
+        ${d.phone ? `<div style="font-size:12px;color:#888;margin-top:4px">고객센터 ${escapeHtml(d.phone)}</div>` : ''}
+        ${d.email ? `<div style="font-size:12px;color:#888;margin-top:2px">${escapeHtml(d.email)}</div>` : ''}
         <div style="font-size:11px;color:#bbb;margin-top:8px">&copy; ${storeName || ''}</div>
       </div>`;
   }
@@ -101,21 +105,23 @@ function renderLegacySlidesHtml(dm: any, trackApiBase: string): string {
   const pages: any[] = Array.isArray(dm.pages) ? dm.pages : (typeof dm.pages === 'string' ? JSON.parse(dm.pages) : []);
   const headerData = typeof dm.header_data === 'string' ? JSON.parse(dm.header_data) : (dm.header_data || {});
   const footerData = typeof dm.footer_data === 'string' ? JSON.parse(dm.footer_data) : (dm.footer_data || {});
-  const storeName = dm.store_name || '';
+  const storeName = dm.store_name || '';   // 머리말·꼬리말·<title>에서 escapeHtml로 감싼다
   const title = dm.title || '모바일 DM';
   const totalPages = pages.length;
 
   const slidesHtml = pages.sort((a: any, b: any) => (a.order || 0) - (b.order || 0)).map((p: any, i: number) => {
-    const imgSrc = p.imageUrl ? publicImageUrl(p.imageUrl) : '';
-    const embedUrl = p.videoUrl ? youtubeEmbedUrl(p.videoUrl) : null;
+    const imgSrc = p.imageUrl ? escapeHtml(publicImageUrl(p.imageUrl)) : '';
+    // iframe·video 주소는 링크와 같은 규칙(javascript: 등 차단) — embed 형태 그대로 들어온 값도 거른다
+    const embedRaw = p.videoUrl ? youtubeEmbedUrl(p.videoUrl) : null;
+    const embedUrl = embedRaw ? safeUrl(embedRaw) : null;
     const layout = p.layout || 'full-image';
 
     // text-card 레이아웃
     if (layout === 'text-card') {
       return `<div class="dm-slide" data-page="${i + 1}">
-        <div style="min-height:400px;background:${p.bgColor || '#1a1a2e'};color:${p.textColor || '#fff'};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center">
-          ${p.heading ? `<div style="font-size:24px;font-weight:800;line-height:1.4">${p.heading}</div>` : ''}
-          ${p.caption ? `<div style="font-size:14px;opacity:0.8;margin-top:12px;line-height:1.6">${p.caption}</div>` : ''}
+        <div style="min-height:400px;background:${safeColor(p.bgColor, '#1a1a2e')};color:${safeColor(p.textColor, '#fff')};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center">
+          ${p.heading ? `<div style="font-size:24px;font-weight:800;line-height:1.4">${escapeHtml(p.heading)}</div>` : ''}
+          ${p.caption ? `<div style="font-size:14px;opacity:0.8;margin-top:12px;line-height:1.6">${escapeHtml(p.caption)}</div>` : ''}
         </div>
       </div>`;
     }
@@ -124,11 +130,11 @@ function renderLegacySlidesHtml(dm: any, trackApiBase: string): string {
     if (layout === 'cta-card') {
       return `<div class="dm-slide" data-page="${i + 1}">
         ${imgSrc ? `<img src="${imgSrc}" alt="" style="width:100%;display:block;object-fit:cover">` : ''}
-        ${p.caption ? `<div style="padding:12px 16px;font-size:14px;color:#333;line-height:1.6">${p.caption}</div>` : ''}
+        ${p.caption ? `<div style="padding:12px 16px;font-size:14px;color:#333;line-height:1.6">${escapeHtml(p.caption)}</div>` : ''}
         ${p.ctaUrl ? `<div style="padding:8px 16px 16px;text-align:center">
-          <a href="${p.ctaUrl}" target="_blank" style="display:inline-block;background:#4f46e5;color:#fff;padding:14px 48px;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none">${p.ctaText || '자세히 보기'}</a>
+          <a href="${safeUrl(p.ctaUrl)}" target="_blank" style="display:inline-block;background:#4f46e5;color:#fff;padding:14px 48px;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none">${escapeHtml(p.ctaText || '자세히 보기')}</a>
         </div>` : (p.ctaText ? `<div style="padding:8px 16px 16px;text-align:center">
-          <div style="display:inline-block;background:#4f46e5;color:#fff;padding:14px 48px;border-radius:12px;font-size:15px;font-weight:700">${p.ctaText}</div>
+          <div style="display:inline-block;background:#4f46e5;color:#fff;padding:14px 48px;border-radius:12px;font-size:15px;font-weight:700">${escapeHtml(p.ctaText)}</div>
         </div>` : '')}
       </div>`;
     }
@@ -139,8 +145,8 @@ function renderLegacySlidesHtml(dm: any, trackApiBase: string): string {
       ${embedUrl ? `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;margin:${imgSrc ? '12px 0 0' : '0'}">
         <iframe src="${embedUrl}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allowfullscreen></iframe>
       </div>` : ''}
-      ${(p.videoUrl && !embedUrl) ? `<video src="${p.videoUrl}" controls playsinline style="width:100%;display:block;margin-top:${imgSrc ? '12px' : '0'}"></video>` : ''}
-      ${p.caption ? `<div style="padding:12px 16px;font-size:14px;color:#333;line-height:1.6">${p.caption}</div>` : ''}
+      ${(p.videoUrl && !embedUrl) ? `<video src="${safeUrl(p.videoUrl)}" controls playsinline style="width:100%;display:block;margin-top:${imgSrc ? '12px' : '0'}"></video>` : ''}
+      ${p.caption ? `<div style="padding:12px 16px;font-size:14px;color:#333;line-height:1.6">${escapeHtml(p.caption)}</div>` : ''}
     </div>`;
   }).join('');
 
@@ -153,7 +159,7 @@ function renderLegacySlidesHtml(dm: any, trackApiBase: string): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<title>${storeName} - ${title}</title>
+<title>${escapeHtml(`${storeName} - ${title}`)}</title>
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
@@ -204,7 +210,7 @@ body{font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFo
   var total = ${totalPages};
   var current = 0;
   var startX = 0, diffX = 0, dragging = false;
-  var CODE = 'dm-${dm.short_code || ''}';
+  var CODE = 'dm-${escapeHtml(dm.short_code || '')}';
   var TRACK_URL = '${trackApiBase}';
   var QS = new URLSearchParams(location.search);
   var PHONE = QS.get('p') || '';
@@ -759,6 +765,8 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
       submitInteraction(info.id, info.type, {}).then(function (res) {
         spinning = false; clearInterval(iv);
         var spin = res && res.result ? res.result : null;
+        // ★ 2026-09-26 R1-27 — 경품 칸뿐인 룰렛에 발송 링크로 확인되지 않은 참여자 = 돌리지 않고 안내만(경품 칸에 멈춘 뒤 꽝으로 보이는 혼란 없음)
+        if (spin && spin.recipients_only) { showMsg(box, '문자로 받은 링크로 참여하신 분만 경품에 응모할 수 있어요.', false); return; }
         var idx = 0;
         if (spin && spin.segment_id) { for (var i = 0; i < segs.length; i++) { if (String(segs[i].id) === String(spin.segment_id)) { idx = i; break; } } }
         var per = segs.length > 0 ? 360 / segs.length : 360;

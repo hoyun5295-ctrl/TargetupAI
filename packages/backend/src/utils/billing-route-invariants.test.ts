@@ -186,18 +186,21 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     expect(claimIdx, '적재가 발송 뒤로 가면 재구성 이전 구조로 되돌아간 것이다').toBeLessThan(sendIdx);
   });
 
-  it('적재는 한 트랜잭션에서 장을 잠그고 이미 나갔거나 추적행이 있으면 건너뛴다', () => {
+  it('적재는 한 트랜잭션에서 장을 잠그고, 이미 나간 장은 건너뛰고, 살아 있는 추적행은 새로 만들지 않고 그 행으로 다시 보낸다', () => {
     const start = confirmSrc.indexOf('1단계: 적재');
     const body = confirmSrc.slice(start, confirmSrc.indexOf('2단계: 전송', start));
     expect(body, '장을 잠그지 않으면 동시 적재가 겹친다').toContain('FOR UPDATE');
     expect(body, '이미 발송된 장을 다시 적재하면 안 된다').toContain('emailed_at');
-    expect(body, '살아 있는 추적행이 있으면 대상이 아니다').toMatch(/NOT NULL\) AS has_confirmation|has_confirmation/);
+    // ★ 2026-09-26 R1-46: 살아 있는 추적행 = 메일만 실패한 장 → 재시도 대상(그 행을 다시 쓴다 · 행을 둘 만들지 않는다)
+    expect(body, '살아 있는 추적행을 판정해야 한다').toMatch(/NOT NULL\) AS has_confirmation|has_confirmation/);
+    expect(body, '추적행을 두 개 만들면 컨펌 판정이 갈라진다 — 기존 행을 다시 쓴다').toContain('RETURNING token');
   });
 
   it('발송 소유권은 조건부 UPDATE 하나로 잡는다 — 0행이면 남이 가져간 것이다', () => {
-    expect(confirmSrc).toMatch(/UPDATE billings SET emailed_at = NOW\(\)[\s\S]{0,120}emailed_at IS NULL RETURNING id/);
-    expect(confirmSrc, '표시는 SMTP 앞에 남겨야 발송 중 삭제가 막힌다')
-      .toSatisfy(() => confirmSrc.indexOf('emailed_at IS NULL RETURNING id') < confirmSrc.indexOf('transporter.sendMail'));
+    // ★ 2026-09-26 R1-46(Codex 6차 2R): 소유권은 메일보다 먼저 **커밋**한다(보낸 뒤 어떤 실패도 소유권을 다시 열지 않게)
+    expect(confirmSrc).toMatch(/UPDATE billings SET emailed_at = NOW\(\)[\s\S]{0,120}emailed_at IS NULL RETURNING emailed_at::text AS claimed_at/);
+    expect(confirmSrc, '표시는 SMTP 앞에 남겨야 한다')
+      .toSatisfy(() => confirmSrc.indexOf('emailed_at IS NULL RETURNING emailed_at::text AS claimed_at') < confirmSrc.indexOf('transporter.sendMail'));
   });
 
   it('PDF는 보내기 직전에 만든다 — 미리 렌더하면 막힌 회차마다 렌더본이 쌓인다', () => {

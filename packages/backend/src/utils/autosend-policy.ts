@@ -104,6 +104,29 @@ export function isSendableHourKst(now: Date, startHour: number, endHour: number)
 }
 
 /**
+ * 야간 광고 발송 제한(정보통신망법 · D-2) 판정 — 광고면 발송 시각(즉시 = 지금, 예약 = 예약 시각 KST)이 창 밖일 때
+ * 사용자 안내 문장을 돌려주고, 괜찮으면 null. 정보성(adEnabled !== true)은 늘 null.
+ * ★ 2026-09-26 한줄로 전수점검 부분 ① F20: 이 판정이 직접발송 코어(createDirectSendCampaign) 안에만 있어
+ *   코어를 거치지 않는 동기 /direct-send 경로(대시보드·AI 운영자·알림톡 창 등)는 야간 광고를 막지 못했다.
+ *   두 경로가 같은 문장·같은 판정을 쓰도록 여기로 올렸다.
+ */
+export function nightAdRestrictionMessage(
+  adEnabled: unknown,
+  scheduled: unknown,
+  scheduledAt: string | Date | null | undefined,
+  startHour: number,
+  endHour: number,
+  now: Date = new Date(),
+): string | null {
+  if (adEnabled !== true) return null;
+  const effectiveAt = scheduled && scheduledAt ? new Date(scheduledAt) : now;
+  if (Number.isNaN(effectiveAt.getTime())) return null;
+  if (isSendableHourKst(effectiveAt, startHour, endHour)) return null;
+  const s = String(startHour).padStart(2, '0');
+  return `야간(${endHour}시~다음날 ${s}시)에는 광고 발송이 제한됩니다. 발송 시각을 ${s}:00~${endHour - 1}:59 사이로 조정해주세요.`;
+}
+
+/**
  * 발송 희망 시각(HH:mm) 저장 가드 — 발송 가능 창 밖이면 저장 거부(조용한 시프트 대신 명시 안내).
  * 형식 이상(파싱 불가)은 기존 파서의 09시 기본값에 위임(ok) — computeNextOccurrence와 동일 관용.
  */
@@ -254,6 +277,25 @@ export function computeNextGenerationRun(
     nextRunAt = new Date(sendAt.getTime() - lead * 60 * 1000);
   }
   return { nextRunAt, sendAt };
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-24 — 생성 워커가 **이번 회차의 발송 희망 시각이 지난 뒤에** 돌았는가(순수).
+ * 저장된 생성 시각(next_run_at) = 희망 시각 − 준비시간이므로, 그 시각 + 준비시간 ≤ 지금이면 이번 회차는 제시간에 못 보낸다.
+ * 이때 생성은 다음 회차로 넘어간다(늦게 보내지 않는다 = 예상 밖 시각 발송·과금 방지 · 종전 동작). 그 사실을 남기려고 희망 시각을 돌려준다.
+ * 첫 실행(next_run_at 없음)·AI 최적 시각(희망 시각이 고정이 아님)은 null.
+ */
+export function detectMissedOperatorRound(input: {
+  nextRunAt: Date | null;
+  leadMinutes: number | null | undefined;
+  sendTimeMode: SendTimeMode;
+  now?: Date;
+}): Date | null {
+  if (!input.nextRunAt || input.sendTimeMode === 'ai_optimal') return null;
+  const lead = resolveAutoSendLeadMinutes(input.leadMinutes);
+  const intended = new Date(input.nextRunAt.getTime() + lead * 60 * 1000);
+  const now = input.now ?? new Date();
+  return now.getTime() >= intended.getTime() ? intended : null;
 }
 
 /**

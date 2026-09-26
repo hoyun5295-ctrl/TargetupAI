@@ -23,6 +23,7 @@ import { syncCampaignResults } from './campaign-lifecycle';
 import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, getPlatformNoticeCallback } from './sms-queue';
 import { shouldFinalizeCampaign, shouldSkipReconcileWrite } from './sms-table-split';
 import { recordedLiveTables } from './stats-table-scope';
+import { resolveCampaignTableGroups } from './stats-aggregation';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 const BOOT_DELAY_MS = 60 * 1000;   // 서버 startup 안정화 후 첫 실행
@@ -391,7 +392,7 @@ const FINALIZE_FALLBACK_MS = 72 * 60 * 60 * 1000;
 
 async function reconcileFinalizedCampaigns(): Promise<void> {
   const targets = await query(`
-    SELECT id, company_id, status, result_final, success_count, fail_count, sent_count,
+    SELECT id, company_id, created_by, status, result_final, success_count, fail_count, sent_count,
            jsonb_build_object('sentTables', send_config->'sentTables') AS send_config,
            COALESCE(scheduled_at, sent_at) AS send_base
       FROM campaigns
@@ -427,7 +428,12 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
   let skipped = 0;
   for (const camp of targets.rows) {
     try {
-      const tables = await getCompanySmsTablesWithLogs(camp.company_id);
+      // ★ 2026-09-26 한줄로 V2 F36 — 캠페인이 **실제로 적재된 테이블**을 읽는다(통계 화면과 같은 해석 CT:
+      //   기록된 sentTables + 그 라인의 전 LOG, 기록이 없으면 (회사, 작성자) 라인). 옛 코드는 회사의 현재 라인만 읽어,
+      //   발송 뒤 라인이 빠지거나 사용자 전용 라인으로 보낸 캠페인을 일부만 세고 sent_count를 낮춰 덮었다 →
+      //   선불 스위퍼가 그 차이를 미적재로 보고 실제로 나간 문자 값을 환불했다(0건만 막는 B-0914-1 가드로는 못 막는다).
+      const groups = await resolveCampaignTableGroups([{ id: camp.id, company_id: camp.company_id, created_by: camp.created_by, send_config: camp.send_config }]);
+      const tables = [...groups.values()][0]?.tables || [];
       // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
       // ★ 2026-07-30: 브랜드 행(msg_type='F')도 같은 SMSQ 집계에 자동 포함 — 옛 카카오 IMC 합산 폐기.
       const counts = (await smsCampaignCountsSafe(tables, [camp.id])).get(camp.id);

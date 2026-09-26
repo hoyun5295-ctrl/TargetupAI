@@ -2428,7 +2428,10 @@ router.post('/campaigns/:id/cancel', authenticate, requireSuperAdmin, async (req
     }
 
     res.json({
-      message: '예약이 취소되었습니다.',
+      // ★ 2026-09-26 한줄로 V2 F35 — 적재 중이던 캠페인은 워커가 적재를 멈춘 뒤 결말을 정한다(이미 나간 발송이 있으면 발송 완료로 정산)
+      message: result.deferred
+        ? '적재를 멈추고 대기 중인 발송을 지웠습니다. 이미 나간 발송이 있으면 발송 완료로 정산되고, 나머지 금액은 자동으로 환불됩니다.'
+        : '예약이 취소되었습니다.',
       campaign: { id, campaign_name: check.rows[0].campaign_name },
       cancelledCount: result.cancelledCount,
       refundedAmount: result.refundedAmount,
@@ -3189,7 +3192,8 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       const testRows2 = testRows2All.slice(0, 50);
       testDetail = (testRows2 as any[]).map(r => ({
         phone: r.phone,
-        msgType: r.msg_type === 'S' ? 'SMS' : 'LMS',
+        // ★ 2026-09-26 S1-H06 브랜드 테스트가 들어온다 — 유형 라벨은 표시 CT
+        msgType: getSendTypeLabel(r.msg_type),
         status: isSuccess(r.status_code) ? 'success' : isPending(r.status_code) ? 'pending' : 'fail',
         sentAt: r.sent_at,
         testType: 'manager',
@@ -3517,7 +3521,7 @@ router.get('/campaigns/:id/sms-detail/export', authenticate, requireSuperAdmin, 
   try {
     const { id } = req.params;
     const camp = await query(
-      `SELECT company_id, created_by, send_channel, created_at FROM campaigns WHERE id = $1`,
+      `SELECT company_id, created_by, send_channel, created_at, send_config, sent_at, scheduled_at FROM campaigns WHERE id = $1`,
       [id],
     );
     if (camp.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
@@ -3532,6 +3536,7 @@ router.get('/campaigns/:id/sms-detail/export', authenticate, requireSuperAdmin, 
       sendChannel: c.send_channel || 'sms',
       campaignCreatedAt: c.created_at,
       exportStatus: (req.query.status as string) || '',   // 화면 필터(전체/성공/실패) 그대로
+      campaign: c,                    // ★ 2026-09-26 F26 그 캠페인의 테이블(발송월 기준)
     });
   } catch (error) {
     console.error('[admin sms-detail export] 실패:', error);

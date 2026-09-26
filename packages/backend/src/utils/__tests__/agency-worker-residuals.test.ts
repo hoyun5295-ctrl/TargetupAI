@@ -170,7 +170,8 @@ describe('복구 확인과 상태 변경 사이 틈(복구 표시)', () => {
 describe('대조·취소 마무리·취소 CT', { timeout: 30_000 }, () => {
   it('중화 회차는 막은 것이 있거나 실패한 때만 기록하고, 캐시는 비어 있을 때만 채운다(30일 창 고착 방지)', () => {
     const rec = between(src, 'async function runReconcile(', '// ────────────── F. 취소 마무리');
-    expect(rec).toMatch(/if \(!ok \|\| !alreadySent \|\| !row\.campaign_id\) \{\s*await logEvent\(row\.id, ok \? 'reconciled_neutralize' : 'reconciled_neutralize_failed'/);
+    // ★ 2026-09-26 F10·F31·F32: 앞선 취소가 이미 적재를 멈춘 캠페인(stoppedEarlier)도 막을 것이 없던 반복 회차다
+    expect(rec).toMatch(/if \(!ok \|\| !\(alreadySent \|\| stoppedEarlier\) \|\| !row\.campaign_id\) \{\s*await logEvent\(row\.id, ok \? 'reconciled_neutralize' : 'reconciled_neutralize_failed'/);
     const one = between(rec, 'if (mustNotSend && found.kind === \'live\')', '// ② ');
     expect(one).toMatch(/WHERE id = \$1::uuid AND campaign_id IS NULL/);
     expect(one).not.toMatch(/COALESCE\(campaign_id/);

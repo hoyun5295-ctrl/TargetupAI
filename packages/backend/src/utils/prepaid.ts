@@ -4,7 +4,7 @@
 // 하드코딩 금지. DB 기반 단가 조회.
 
 import pool, { query } from '../config/database';
-import { buildDeductDescription } from './deduct-reference';
+import { buildDeductDescription, type AlimtalkSettleUnits } from './deduct-reference';
 // ★ 2026-07-26 단가의 부가세 기준(`companies.unit_price_basis`)을 해석하는 유일한 경로.
 //   선불 잔액은 고객이 입금한 현금이라 **부가세 포함가**로 깎아야 한다.
 //   전환 전 회사는 저장값이 곧 포함가라 이 배선으로 차감액이 바뀌지 않는다.
@@ -91,6 +91,22 @@ async function warnUnresolvedLedger(companyId: string, referenceId: string, mess
 }
 
 /**
+ * ★ 2026-09-26 한줄로 V2 F01·F04 — 알림톡 결과별 정산 단가(차감 잠금 행에서 읽는다).
+ * 셋 중 하나라도 미설정·미지 유형이면 `null` — 차감 행에 싣지 않고, 정산은 결과별 차액 없이 종전(차감 단가)대로 간다.
+ * 미설정 단가를 0원으로 보면 그 결과의 차액이 차감 단가 전부가 되어 **공짜 발송**이 된다. 발송 자체는 막지 않는다(종전 동작).
+ */
+function resolveAlimtalkSettleUnits(companyRow: any, companyId: string): AlimtalkSettleUnits | null {
+  const kakao = resolveChargeUnitPriceDetailed(companyRow, 'KAKAO');
+  const sms = resolveChargeUnitPriceDetailed(companyRow, 'SMS');
+  const lms = resolveChargeUnitPriceDetailed(companyRow, 'LMS');
+  if ([kakao, sms, lms].some((r) => r.unset || r.unknownType)) {
+    console.warn(`[선불차감] company=${companyId} 알림톡 결과별 단가 미설정(알림톡·SMS·LMS 중) — 결과별 정산 없이 차감 단가로 정산한다`);
+    return null;
+  }
+  return { KAKAO: kakao.price, SMS: sms.price, LMS: lms.price };
+}
+
+/**
  * 선불 차감
  * @param createdBy - ★ D98: 차감 실행 사용자 ID (user_id 기반 사용금액 격리용)
  * @param referenceType - ★ 2026-07-07: 차감 유형(campaign/test/spam/journey/brand). 기본 'campaign'(하위호환).
@@ -109,6 +125,10 @@ export async function prepaidDeduct(
   //   환불 단가는 차감 설명의 "건당 X원"을 되읽으므로 여기서 고른 단가를 그대로 따라간다.
   //   안 넘기면 비친구로 해석된다(싸게 깎이지 않는 쪽).
   brand?: BrandPricingInput | null,
+  // ★ 2026-09-26 한줄로 V2 F01·F04 — 알림톡 발송이면 차감 행에 **이 순간의 결과별 정산 단가**(알림톡·SMS·LMS)를 싣는다.
+  //   차감은 대체 문자까지 덮는 문자 단가로 하고, 정산(mysql-refund-sweeper)이 결과별 차액을 이 단가로 돌려준다.
+  //   세 단가를 차감과 **같은 잠금 행**에서 읽어야 단가를 바꾼 뒤에도 차감과 짝이 맞는다.
+  opts?: { alimtalk?: boolean },
 ): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean; freeUsed?: number }> {
   // 후불은 트랜잭션을 열지 않는다 — 발송마다 부르는 경로라 103사(후불)의 비용을 늘리지 않는다.
   const pre = await query('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
@@ -164,6 +184,7 @@ export async function prepaidDeduct(
       console.warn(`[선불차감] company=${companyId} 알 수 없는 발송 유형 '${messageType}' — 단가 축이 없어 0원 처리한다`);
     }
     const unitPrice = resolved.price;
+    const alimtalkUnits = opts?.alimtalk ? resolveAlimtalkSettleUnits(c, companyId) : null;
 
     // ★ 2026-08-05 요금제 무료 메시징 — 과금 **전에** 덮는다(설계 §5-1).
     //   단가 미설정 차단(위)을 지난 뒤에 둔다: 무료 초과분은 결국 과금해야 하므로
@@ -228,7 +249,7 @@ export async function prepaidDeduct(
     await client.query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by, message_type)
        VALUES ($1, 'deduct', $2, $3, $4, $5, $6, 'system', $7, $8)`,
-      [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, chargeCount, unitPrice, freeUsed), referenceType, referenceId, createdBy || null, messageType]
+      [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, chargeCount, unitPrice, freeUsed, alimtalkUnits), referenceType, referenceId, createdBy || null, messageType]
     );
     await client.query('COMMIT');
 
@@ -258,6 +279,8 @@ export const REFUND_KEYS = {
   FAIL: 'fail',
   CANCEL: 'cancel',
   TEST: 'test',
+  // ★ 2026-09-26 알림톡 결과별 단가 차액(성공분이 차감 단가보다 싼 결과로 나간 몫). 금액 목표(targetAmount)로만 쓴다.
+  KAKAO_DIFF: 'kakao_diff',
 } as const;
 
 
@@ -282,9 +305,26 @@ export async function prepaidRefund(
   //     취소처럼 "이 원인의 환불은 캠페인당 한 번뿐이라 그 항아리가 반드시 비어 있음"이 보장되는 경우에만 쓴다.
   //     레거시 폴백으로 떨어지면 목표를 전역 누적과 비교하게 되어, 재시도가 이중 환불되거나(additional)
   //     기존 환불에 삼켜져 미환불로 굳는다(cumulative). 항아리를 강제하면 둘 다 사라진다.
-  opts: { mode?: 'cumulative' | 'additional'; refundKey?: string; forceKeyedPot?: boolean } = {}
+  //   ★ 2026-09-25 (한줄로 전수점검 C-05·C-10·C-11 · Codex 1R) keepCount = **캠페인 전체 기준 목표**.
+  //     "이 캠페인·유형에서 남아서 나갈(과금이 유지될) 건수"를 주면 목표 = 차감 − 그 건수(refund-calc와 같은 무료 규칙)이고,
+  //     원인별 항아리가 아니라 **모든 원인의 누적 환불액**과 비교해 차이만 돌려준다. 이때 count 인자는 쓰지 않는다.
+  //     취소·개별 삭제처럼 한 사건이 여러 원인 항아리(NOT_LOADED·CANCEL)에 걸쳐 나뉘어 지급되는 자리에서
+  //     중단·재시도·순서가 뒤바뀌어도 합이 "차감 − 남는 건"으로 수렴한다(항아리별 목표로는 서로를 못 봐 이중 지급·누락이 났다).
+  //   ★ 2026-09-26 (한줄로 V2 F01·F04) targetAmount = 원인 항아리 하나의 **금액 목표(원)**. 알림톡 결과별 단가 차액처럼
+  //     건수 × 단가로 표현되지 않는 환불에 쓴다. 그 키의 기존 환불액과만 비교하고(옛 단일 항아리로 떨어지지 않는다),
+  //     차감 총액 − 전체 환불 한도는 그대로 지킨다. count 인자는 쓰지 않는다. 키 없이 넘기면 거절한다.
+  //   ★ 2026-09-26 (한줄로 V2 F05·F06·F11 · Codex 3R high) netTargetCount = 캠페인 전체 환불 목표 건수를 **순환불**(환불 − 회수)과 비교한다.
+  //     여정처럼 하루 종일 쌓이는 캠페인은 "실패 환불 → 회수(대체 성공) → 새 정당 환불"이 생기는데, 지급 누계와 비교하면 회수된 몫이
+  //     새 환불을 막는다. 목표 = min(차감, 건수 × 차감 단가) · 지급 = 목표 − 순환불(차액 제외) · 상한 = 차감 − 순환불(전체). 키 필수.
+  opts: { mode?: 'cumulative' | 'additional'; refundKey?: string; forceKeyedPot?: boolean; keepCount?: number; targetAmount?: number; netTargetCount?: number } = {}
 ): Promise<{ refunded: number; ok: boolean }> {
-  if (count <= 0) return { refunded: 0, ok: true };
+  const keepMode = typeof opts.keepCount === 'number' && Number.isFinite(opts.keepCount);
+  const amountMode = !keepMode && typeof opts.targetAmount === 'number' && Number.isFinite(opts.targetAmount);
+  const netMode = !keepMode && !amountMode && typeof opts.netTargetCount === 'number' && Number.isFinite(opts.netTargetCount);
+  if (amountMode || netMode) {
+    if (!opts.refundKey) return { refunded: 0, ok: false };
+    if (Number(amountMode ? opts.targetAmount : opts.netTargetCount) <= 0) return { refunded: 0, ok: true };
+  } else if (!keepMode && count <= 0) return { refunded: 0, ok: true };
   // 후불은 트랜잭션을 열지 않는다(차감과 같은 이유).
   const pre = await query('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
   if (pre.rows.length === 0) return { refunded: 0, ok: false };
@@ -343,7 +383,8 @@ export async function prepaidRefund(
     const existing = await client.query(
       `SELECT COALESCE(SUM(amount), 0) AS total,
               COALESCE(SUM(amount) FILTER (WHERE refund_key IS NULL), 0) AS unkeyed,
-              COALESCE(SUM(amount) FILTER (WHERE refund_key = $5), 0) AS for_key
+              COALESCE(SUM(amount) FILTER (WHERE refund_key = $5), 0) AS for_key,
+              COALESCE(SUM(amount) FILTER (WHERE refund_key IS DISTINCT FROM '${REFUND_KEYS.KAKAO_DIFF}'), 0) AS counted
          FROM balance_transactions
         WHERE company_id = $1 AND type = 'refund' AND reference_type = $4 AND reference_id = $2
           AND (message_type = $3 OR message_type IS NULL)`,
@@ -352,10 +393,32 @@ export async function prepaidRefund(
     const alreadyRefunded = Number(existing.rows[0].total);
     const unkeyedRefunded = Number(existing.rows[0].unkeyed);
     const refundedForKey = Number(existing.rows[0].for_key);
+    // ★ 2026-09-26 (Codex 1R high) 건수 × 단가 목표와 비교할 누적 = 알림톡 결과별 차액(금액 항아리)을 **뺀** 환불액.
+    //   차액은 성공한 건의 값을 깎아 준 몫이라 실패·미적재·취소 건수와 겹치지 않는다. 한 합계로 비교하면
+    //   옛 단일 항아리(키 없는 환불이 있는 캠페인)·캠페인 전체 기준(keepCount)에서 차액이 실패 환불을 삼킨다.
+    //   차감 총액 상한(아래 totalDeducted − alreadyRefunded)은 차액까지 전부 포함한 그대로다.
+    const countedRefunded = Number(existing.rows[0].counted);
     const totalDeducted = ledger.totalDeducted;
     // 키 계산 적용 조건 = 키를 넘겼고, 이 캠페인에 키 없는 옛 환불이 없을 것.
-    const useKeyedPot = !!opts.refundKey && (opts.forceKeyedPot === true || unkeyedRefunded <= 0);
-    const potAlready = useKeyedPot ? refundedForKey : alreadyRefunded;
+    const useKeyedPot = !keepMode && !netMode && !!opts.refundKey && (amountMode || opts.forceKeyedPot === true || unkeyedRefunded <= 0);
+    // ★ 2026-09-26 순환불 비교 모드 — 회수('환불 reverse' admin_deduct)를 뺀 값으로 비교·상한을 잡는다(잠근 뒤에 읽는다).
+    let netCounted = 0;
+    let netAll = 0;
+    if (netMode) {
+      const net = await client.query(
+        `SELECT COALESCE(SUM(amount) FILTER (WHERE type = 'refund' AND refund_key IS DISTINCT FROM '${REFUND_KEYS.KAKAO_DIFF}'), 0) AS refunded_counted,
+                COALESCE(SUM(amount) FILTER (WHERE type = 'refund'), 0) AS refunded_all,
+                COALESCE(SUM(-amount) FILTER (WHERE type = 'admin_deduct' AND description LIKE '%환불 reverse%'), 0) AS reversed
+           FROM balance_transactions
+          WHERE company_id = $1 AND reference_type = $4 AND reference_id = $2
+            AND (message_type = $3 OR message_type IS NULL)`,
+        [companyId, campaignId, messageType, referenceType]
+      );
+      const reversed = Number(net.rows[0].reversed);
+      netCounted = Math.round((Number(net.rows[0].refunded_counted) - reversed) * 100) / 100;
+      netAll = Math.round((Number(net.rows[0].refunded_all) - reversed) * 100) / 100;
+    }
+    const potAlready = netMode ? netCounted : useKeyedPot ? refundedForKey : countedRefunded;
 
     // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측 누적값 + 함수측 차이 계산
     //   count = "이 캠페인의 총 실패 건수"(누적). 함수가 alreadyRefunded와 비교해 차이만 환불한다.
@@ -364,8 +427,19 @@ export async function prepaidRefund(
     //   같은 트랜잭션·행 잠금 안이라 두 호출이 같은 기존값을 보고 각자 더하는 경합이 생기지 않는다.
     //   키 항아리를 쓰면 목표는 그 원인 하나의 총액이라 'additional'과 'cumulative'가 같아진다
     //   (같은 키로 다시 불려도 그 키의 기존액과 비교하므로 반복 호출이 안전하다).
-    const requestedRefund = Math.round(unitPrice * count * 100) / 100;
-    const targetTotalRefund = (!useKeyedPot && opts.mode === 'additional')
+    // keepCount 모드: 환불 건수 = min(차감, 차감 + 무료 − 남는 건) (refund-calc calcRefundParts와 같은 규칙 — 무료분은 돈이 나간 적이 없어
+    //   돌려줄 것이 없고, 상한은 차감 건수). 비교 대상은 potAlready = 모든 원인의 누적 환불(useKeyedPot=false).
+    const keepRefundCount = keepMode
+      ? Math.min(ledger.deductedCount, Math.max(0, ledger.deductedCount + ledger.freeCount - Math.max(0, Math.floor(Number(opts.keepCount)))))
+      : 0;
+    const requestedRefund = keepMode
+      ? Math.min(ledger.totalDeducted, Math.round(unitPrice * keepRefundCount * 100) / 100)
+      : amountMode
+        ? Math.min(ledger.totalDeducted, Math.round(Number(opts.targetAmount) * 100) / 100)
+        : netMode
+          ? Math.min(ledger.totalDeducted, Math.round(unitPrice * Math.max(0, Math.floor(Number(opts.netTargetCount))) * 100) / 100)
+          : Math.round(unitPrice * count * 100) / 100;
+    const targetTotalRefund = (!keepMode && !useKeyedPot && opts.mode === 'additional')
       ? Math.round((potAlready + requestedRefund) * 100) / 100
       : requestedRefund;
     const additionalRefund = Math.round((targetTotalRefund - potAlready) * 100) / 100;
@@ -374,7 +448,8 @@ export async function prepaidRefund(
       return { refunded: 0, ok: true };   // 이미 충분히 환불됨 (idempotency)
     }
 
-    const refundAmount = Math.round(Math.min(additionalRefund, totalDeducted - alreadyRefunded) * 100) / 100;
+    // 상한 = 차감 − 이미 나간 환불. 순환불 모드는 회수를 반영한다(회수된 몫은 다시 돌려줄 수 있어야 한다).
+    const refundAmount = Math.round(Math.min(additionalRefund, totalDeducted - (netMode ? netAll : alreadyRefunded)) * 100) / 100;
     if (refundAmount <= 0) {
       await client.query('ROLLBACK');
       return { refunded: 0, ok: true };   // 차감 한도 도달 — 더 돌려줄 것이 없다(정상)
@@ -394,9 +469,15 @@ export async function prepaidRefund(
     //   목표 건수를 적으면 감사 문구가 실제보다 크게 남는다.
     const newRefundCount = Math.round(refundAmount / unitPrice);
     const cumulativeCount = Math.round((potAlready + refundAmount) / unitPrice);
-    const desc = potAlready > 0
-      ? `${reason} (${messageType} 추가 ${newRefundCount}건 × ${unitPrice}원, 누적 ${cumulativeCount}건)`
-      : `${reason} (${messageType} ${cumulativeCount}건 × ${unitPrice}원)`;
+    // ★ 2026-09-26 금액 목표 환불은 건수 × 단가로 나눠지지 않는다 — 금액을 그대로 남긴다.
+    const cumulativeAmount = Math.round((potAlready + refundAmount) * 100) / 100;
+    const desc = amountMode
+      ? (potAlready > 0
+        ? `${reason} (${messageType} 추가 ${refundAmount}원, 누적 ${cumulativeAmount}원)`
+        : `${reason} (${messageType} ${refundAmount}원)`)
+      : potAlready > 0
+        ? `${reason} (${messageType} 추가 ${newRefundCount}건 × ${unitPrice}원, 누적 ${cumulativeCount}건)`
+        : `${reason} (${messageType} ${cumulativeCount}건 × ${unitPrice}원)`;
     await client.query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, message_type, refund_key)
        VALUES ($1, 'refund', $2, $3, $4, $7, $5, 'system', $6, $8)`,
@@ -434,7 +515,13 @@ export async function prepaidRefund(
  *   - 트랜잭션(BEGIN/COMMIT/ROLLBACK) 잔액 차감 + INSERT 원자성
  */
 export async function prepaidReverseOverRefund(
-  companyId: string, maxLegitRefundCount: number, messageType: string, campaignId: string
+  companyId: string, maxLegitRefundCount: number, messageType: string, campaignId: string,
+  // ★ 2026-09-26 (한줄로 V2 F01·F04) 건수 × 단가로 표현되지 않는 정당 환불액(원) — 알림톡 결과별 단가 차액.
+  //   정당 한도 = maxLegitRefundCount × 차감 단가 + 이 금액. 안 넘기면 0 = 종전과 같다.
+  //   빠뜨리면 정당하게 돌려준 차액을 "초과 환불"로 보고 30분 뒤 다시 빼간다.
+  extraLegitAmount: number = 0,
+  // ★ 2026-09-26 (한줄로 V2 F05·F06·F11) 차감·환불과 같은 참조 유형 — 여정 단계 캠페인은 'journey'. 기본 'campaign' = 종전과 같다.
+  referenceType: string = 'campaign',
 ): Promise<{ reversed: number; netRefundedAmt: number; skipped: boolean }> {
   // 후불은 트랜잭션을 열지 않는다.
   const pre = await query('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
@@ -460,7 +547,7 @@ export async function prepaidReverseOverRefund(
     // ★ 회수도 **차감 당시 단가**로 한다. 정당 한도(`maxLegitRefundCount × 단가`)를 현재 단가로 재면,
     //   단가를 올린 뒤엔 한도가 부풀어 초과 환불을 못 잡고(회사 손해), 내린 뒤엔 정상 환불을
     //   초과로 오인해 회수한다(고객 손해). 되읽지 못하면 회수하지 않고 멈춘다(Codex #6).
-    const ledger = await loadDeductLedger(client, companyId, 'campaign', campaignId, messageType);
+    const ledger = await loadDeductLedger(client, companyId, referenceType, campaignId, messageType);
     if (ledger.unresolved) {
       await client.query('ROLLBACK');
       await warnUnresolvedLedger(companyId, campaignId, messageType, 'prepaidReverseOverRefund');
@@ -479,9 +566,9 @@ export async function prepaidReverseOverRefund(
          COALESCE(SUM(-amount) FILTER (WHERE type = 'admin_deduct' AND description LIKE '%환불 reverse%'), 0) AS reversed,
          COALESCE(SUM(CASE WHEN type = 'refund' AND description LIKE '%타임아웃 실패 환불%' THEN 1 ELSE 0 END), 0) AS timeout_refunds
        FROM balance_transactions
-       WHERE company_id = $1 AND reference_type = 'campaign' AND reference_id = $2
+       WHERE company_id = $1 AND reference_type = $4 AND reference_id = $2
          AND (message_type = $3 OR message_type IS NULL)`,
-      [companyId, campaignId, messageType]
+      [companyId, campaignId, messageType, referenceType]
     );
     const refunded = Number(agg.rows[0].refunded);
   const alreadyReversed = Number(agg.rows[0].reversed); // 양수
@@ -493,7 +580,8 @@ export async function prepaidReverseOverRefund(
       return { reversed: 0, netRefundedAmt: netRefunded, skipped: true };
     }
 
-    const maxLegit = Math.round(unitPrice * Math.max(0, Math.floor(maxLegitRefundCount)) * 100) / 100;
+    const extraLegit = Math.max(0, Number(extraLegitAmount) || 0);
+    const maxLegit = Math.round((unitPrice * Math.max(0, Math.floor(maxLegitRefundCount)) + extraLegit) * 100) / 100;
     const excess = Math.round((netRefunded - maxLegit) * 100) / 100;
     if (excess <= 0) {
       await client.query('ROLLBACK');
@@ -508,8 +596,8 @@ export async function prepaidReverseOverRefund(
     const newBalance = Number(bal.rows[0].balance);
     await client.query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, message_type)
-       VALUES ($1, 'admin_deduct', $2, $3, $4, 'campaign', $5, 'system', $6)`,
-      [companyId, -excess, newBalance, `초과 환불 reverse (정당 한도 ${Math.max(0, Math.floor(maxLegitRefundCount))}건 초과분 자동 회수, ${messageType})`, campaignId, messageType]
+       VALUES ($1, 'admin_deduct', $2, $3, $4, $7, $5, 'system', $6)`,
+      [companyId, -excess, newBalance, `초과 환불 reverse (정당 한도 ${Math.max(0, Math.floor(maxLegitRefundCount))}건 초과분 자동 회수, ${messageType})`, campaignId, messageType, referenceType]
     );
     await client.query('COMMIT');
     console.log(`[초과환불reverse] company=${companyId} ${messageType} campaign=${campaignId} ${excess}원 회수 → 잔액 ${newBalance}원`);

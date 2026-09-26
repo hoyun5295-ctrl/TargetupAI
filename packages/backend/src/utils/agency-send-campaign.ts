@@ -90,10 +90,12 @@ export function campaignMayHaveSent(found: { id: string | null; phase: string | 
  */
 export async function neutralizeCampaign(
   requestId: string, companyId: string, campaignId: string, why: string,
-): Promise<{ ok: boolean; error: string; alreadySent?: boolean }> {
+): Promise<{ ok: boolean; error: string; alreadySent?: boolean; stoppedEarlier?: boolean }> {
   let ok = false;
   let error = '';
   let alreadySent = false;
+  // ★2026-09-26 F10·F31·F32 — 앞선 취소가 이미 적재를 멈춘 캠페인(취소 CT가 알려 준다). 대조의 반복 기록을 건너뛰는 데 쓴다.
+  let stoppedEarlier = false;
   try {
     // ★2026-09-13(3) 이미 취소된 캠페인은 막을 것이 없다(큐는 그 취소가 지웠다). 캠페인 취소 CT는 이 경우를 실패로 돌려줘
     //   (중복 환불 방지) 취소 마무리가 영원히 재시도하며 경보를 보냈다 → 성공으로 보고, "이미 발송"으로도 보지 않는다.
@@ -110,6 +112,7 @@ export async function neutralizeCampaign(
     ok = undone.success;
     error = undone.error || '';
     alreadySent = !!undone.alreadySent;
+    stoppedEarlier = !!undone.stoppedEarlier;
   } catch (err: any) {
     error = String(err?.message || err);
   }
@@ -127,5 +130,5 @@ export async function neutralizeCampaign(
       console.error('[agency-send] 경보 전송 실패(중화 결과는 그대로 돌려준다):', alertErr?.message || alertErr);
     }
   }
-  return { ok, error, alreadySent };
+  return { ok, error, alreadySent, stoppedEarlier };
 }

@@ -94,7 +94,7 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
       return res.json({ success: true, ignored: true });
     }
 
-    // idempotency_key — CT-85 단일 진입점 (event_no 전송 고유값 우선 + 본문 해시)
+    // idempotency_key — CT-85 단일 진입점 (엔티티 + 본문 해시 · event_no는 종류 번호라 키로 쓰지 않음 ★0925 C-12)
     const resource = req.body?.resource || {};
     const idempotencyKey = cafe24Adapter.buildIdempotencyKey(event, resource, req.body || {});
 
@@ -116,7 +116,9 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
       await query(
         `UPDATE cdp_webhook_deliveries
          SET status = 'duplicate', processed_at = NOW()
-         WHERE company_id = $1::uuid AND source = 'cafe24' AND idempotency_key = $2`,
+         WHERE company_id = $1::uuid AND source = 'cafe24' AND idempotency_key = $2
+           -- ★ 2026-09-26 한줄로 V2 R1-02 — 처리 완료 행만 중복 표시(실패 행을 덮으면 재처리 워커 대상에서 빠져 이벤트가 유실됐다)
+           AND status = 'processed'`,
         [integration.companyId, idempotencyKey]
       );
       return res.json({ success: true, duplicate: true });

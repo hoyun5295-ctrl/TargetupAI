@@ -78,6 +78,29 @@ export function isRecipientRejected(mailInfo: any, email: string): boolean {
   return rejected.some((x) => x.toLowerCase().includes(target));
 }
 
+/**
+ * (순수) ★ 2026-09-26 한줄로 V2 R1-46(Codex 6차 3R) — 메일이 **확실히 접수되지 않았는가**(발송 표시를 풀어 다시 보내도 되는가).
+ *
+ * 참 = 서버의 명시적 거절(4xx·5xx 응답) · 본문 전송 전 단계 실패(인사·TLS·인증·발신자·수신자 명령 · DNS·인증·봉투 오류) ·
+ *      우리가 판정한 대표 수신자 거부(`recipientRejected` 표시 · isRecipientRejected 규칙).
+ * 거짓 = 그 밖 전부(본문을 보낸 뒤 타임아웃·소켓 단절·알 수 없는 오류) — 서버가 받았는데 응답만 잃었을 수 있다(불확정).
+ *   불확정에서 표시를 풀면 같은 메일이 다시 나간다. 표시를 두고 수동 확인으로 넘긴다.
+ * 판정 근거 = nodemailer SMTP 오류의 `responseCode`·`command`·`code`.
+ */
+// ⛔ 'CONN'은 넣지 않는다(Codex 6차 4R) — nodemailer는 본문 전송 **뒤**의 소켓 타임아웃·단절도 command='CONN'으로 보고한다.
+const PRE_DATA_COMMANDS = new Set(['EHLO', 'HELO', 'LHLO', 'STARTTLS', 'MAIL FROM', 'RCPT TO']);
+export function isSmtpNotAccepted(err: any): boolean {
+  if (!err || typeof err !== 'object') return false;
+  if (err.recipientRejected === true) return true;
+  const rc = Number(err.responseCode);
+  if (Number.isFinite(rc) && rc >= 400 && rc < 600) return true;
+  const code = String(err.code || '');
+  if (code === 'EAUTH' || code === 'EDNS' || code === 'EENVELOPE') return true;
+  const cmd = String(err.command || '').toUpperCase();
+  if (PRE_DATA_COMMANDS.has(cmd) || cmd.startsWith('AUTH')) return true;
+  return false;
+}
+
 const trimOrNull = (v: any): string | null => {
   const s = String(v ?? '').trim();
   return s === '' ? null : s;

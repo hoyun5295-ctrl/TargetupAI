@@ -8,7 +8,7 @@
  *    오전 금지 창이 그만큼 열린다(0818 Codex 5R 실측 — 내가 만든 결함).
  */
 import { describe, it, expect, vi, afterAll } from 'vitest';
-import { isWithinBrandSendWindow } from './send-time-util';
+import { isWithinBrandSendWindow, calcSplitSendTime } from './send-time-util';
 
 /** KST 벽시계 h:m → UTC Date */
 const kst = (h: number, m: number) => new Date(Date.UTC(2027, 7, 18, h - 9, m, 0));
@@ -101,5 +101,48 @@ describe('마진 설정 정규화 — 소수·음수·Infinity가 창을 넓히�
     // 0.5 → 1분. 20:49는 end(20:50) − 1 = 20:49 미만이 아니라 거절된다.
     expect(isWithinBrandSendWindow(kst(20, 49), 1)).toBe(false);
     expect(isWithinBrandSendWindow(kst(20, 48), 1)).toBe(true);
+  });
+});
+
+/**
+ * ★ 2026-09-26 한줄로 전수점검 부분 ① F43·F44 — 분할발송 회차가 자정을 넘겨 01~07시에 떨어지면 광고 문자가 새벽에 나갔다.
+ *   발송 가능 시간(08~21시 KST) 안에서만 시간을 흘려 창 끝이면 다음 날 08시부터 잇는다.
+ */
+describe('calcSplitSendTime — 발송 가능 시간 안에서만 흐른다', () => {
+  const at = (s: string) => new Date(s + '+09:00');
+  const kstStr = (d: Date) => new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 19).replace('T', ' ');
+
+  it('창 안·21시 전 기준의 이월은 옛 결과와 같다(수정 전 캡처값)', () => {
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T10:00:00'), 30))).toBe('2026-09-25 10:30:00');
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T20:00:00'), 60))).toBe('2026-09-26 08:00:00');
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T20:00:00'), 90))).toBe('2026-09-26 08:30:00');
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T20:00:00'), 239))).toBe('2026-09-26 10:59:00');
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T20:59:30'), 1))).toBe('2026-09-26 08:00:30');
+  });
+
+  it('자정을 넘겨 새벽에 떨어지던 회차가 이어서 이월된다(옛 식은 +300 → 01:00)', () => {
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T20:00:00'), 300))).toBe('2026-09-26 12:00:00');
+    // 어떤 회차도 21시~08시에 떨어지지 않는다
+    for (let i = 0; i < 3000; i += 7) {
+      const h = Number(kstStr(calcSplitSendTime(at('2026-09-25T17:00:00'), i)).slice(11, 13));
+      expect(h >= 8 && h < 21).toBe(true);
+    }
+  });
+
+  it('여러 날에 걸쳐도 단조 증가(겹침 없음)', () => {
+    let prev = 0;
+    for (let i = 0; i < 2000; i++) {
+      const t = calcSplitSendTime(at('2026-09-25T20:30:00'), i).getTime();
+      expect(t).toBeGreaterThan(prev);
+      prev = t;
+    }
+    // 20:30 기준: 오늘 30분 + 다음 날 780분 → 810번째 회차는 이틀 뒤 08:00
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T20:30:00'), 810))).toBe('2026-09-27 08:00:00');
+  });
+
+  it('기준 시각이 창 밖이면 첫 회차가 다음 창 시작(08:00)으로 간다', () => {
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T22:00:00'), 0))).toBe('2026-09-26 08:00:00');
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T06:00:00'), 0))).toBe('2026-09-25 08:00:00');
+    expect(kstStr(calcSplitSendTime(at('2026-09-25T21:00:00'), 0))).toBe('2026-09-26 08:00:00');
   });
 });

@@ -196,6 +196,26 @@ export interface InicisApprovalResult {
   raw: Record<string, any>;
 }
 
+/**
+ * 콜백으로 받은 호출 주소(authUrl·netCancelUrl)가 이니시스 주소인가.
+ * ★ 2026-09-25 한줄로 전수점검 C-14: `/inicis/return`은 로그인 없는 공개 경로라 콜백 본문을 누구나 만들 수 있다.
+ *   주소를 검사하지 않으면 자기 서버를 authUrl로 넣고 resultCode '0000'만 돌려줘 결제 없이 잔액을 올릴 수 있었다.
+ *   이니시스 매뉴얼 = 승인 API가 이니시스 제공 주소인지 확인 · 도메인은 *.inicis.com.
+ *   ⛔ 센터 코드(idc_name)별 주소 경로 전체는 매뉴얼에 없어 경로·센터로는 막지 않는다(정상 결제가 깨질 수 있다).
+ */
+export function isTrustedInicisUrl(url: unknown): boolean {
+  if (typeof url !== 'string' || url.length === 0) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  if (parsed.username || parsed.password) return false;
+  return parsed.hostname.toLowerCase().endsWith('.inicis.com');
+}
+
 // authUrl POST 호출 = 결제 승인 영역
 export async function approveInicisPayment(callback: InicisCallbackBody): Promise<InicisApprovalResult> {
   const config = getInicisConfig();
@@ -218,6 +238,22 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
       resultMsg: `mid 불일치 (callback=${callback.mid}, config=${config.mid})`,
       raw: callback as any,
     };
+  }
+
+  // 승인 호출 주소 검사(C-14) — 이니시스 주소가 아니면 호출하지 않는다
+  if (!isTrustedInicisUrl(callback.authUrl)) {
+    console.error(`[inicis-client] 이니시스가 아닌 authUrl 거절: order=${callback.orderNumber} authUrl=${String(callback.authUrl).slice(0, 200)}`);
+    return {
+      success: false,
+      resultCode: 'UNTRUSTED_AUTH_URL',
+      resultMsg: '승인 주소가 이니시스 주소가 아닙니다',
+      raw: callback as any,
+    };
+  }
+  // 센터 코드와 호스트가 어긋나면 기록만 한다(매뉴얼에 경로 전체가 없어 막지 않는다)
+  const authHost = new URL(callback.authUrl).hostname.toLowerCase();
+  if (callback.idc_name && !authHost.startsWith(`${String(callback.idc_name).toLowerCase()}stdpay.`)) {
+    console.warn(`[inicis-client] authUrl 호스트와 idc_name 불일치(통과): order=${callback.orderNumber} idc=${callback.idc_name} host=${authHost}`);
   }
 
   const timestamp = String(Date.now());
@@ -275,6 +311,11 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
 
 // 결제 취소 영역 (사용자가 결제창을 닫거나 인증 실패 시 netCancelUrl 호출)
 export async function netCancelInicisPayment(netCancelUrl: string, callback: InicisCallbackBody): Promise<boolean> {
+  // 망취소 주소 검사(C-14) — 이니시스 주소가 아니면 호출하지 않는다(authToken·서명을 밖으로 보내지 않는다)
+  if (!isTrustedInicisUrl(netCancelUrl)) {
+    console.error(`[inicis-client] 이니시스가 아닌 netCancelUrl 거절: order=${callback.orderNumber} url=${String(netCancelUrl).slice(0, 200)}`);
+    return false;
+  }
   const config = getInicisConfig();
   const timestamp = String(Date.now());
   const signature = sha256(`authToken=${callback.authToken}&timestamp=${timestamp}`);

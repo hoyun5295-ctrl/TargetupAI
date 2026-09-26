@@ -1303,3 +1303,58 @@ export function getAlimtalkTemplateStatus(
   if (!s) return { label: '확인 중', badgeClass: NEUTRAL };
   return { label: s, badgeClass: NEUTRAL };
 }
+
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-08(Codex 8차 3R) — 대행 명단 번호 정규화 = 백엔드 `normalizeAgencyPhone` 미러
+ * (숫자만 남기고, 숫자 10자리 `1[016789]`로 시작하면 엑셀이 떨어뜨린 앞자리 0을 복원).
+ * 화면 중복 제거가 접수 코어와 같아야 화면에 보이는 건수 = 접수되는 건수이고, 길이 안내가 코어 판정과 같다.
+ */
+export function normalizeAgencyPhoneFront(raw: any): string {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  return /^1[016789]\d{8}$/.test(digits) ? `0${digits}` : digits;
+}
+
+/** 대행 문안 변수 — 백엔드 agency-send-vars `VAR_RE`와 같은 식(다르면 후보 선정이 서버와 갈린다) */
+const AGENCY_VAR_RE = /%([가-힣A-Za-z_][^%\s]{0,19})%/g;
+
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-08(Codex 8차 1R high 정정) — SMS 판정 후보 수신자.
+ * 서버 `measureAgencyMaxSmsBytes`와 같은 점수(변수 값 바이트 × 문안 등장 횟수 · 동점은 명단 순서)로 상위 N명을 **수신자 조합 그대로** 고른다.
+ * 옛 화면 추정은 서로 다른 수신자의 변수 최댓값을 합쳐 실제로 없는 문장을 만들었다(SMS 안인 명단을 LMS로 몰았다).
+ * 화면은 이 후보만 서버(`/api/agency-send/sms-bytes`)에 보내 실제 조립 CT로 잰 값을 받는다.
+ */
+export function pickAgencySmsCandidates(
+  content: string,
+  varsList: Array<Record<string, any> | null | undefined>,
+  limit: number = 20,
+): Array<Record<string, any>> {
+  const text = String(content || '');
+  const occ: Record<string, number> = {};
+  for (const m of text.matchAll(AGENCY_VAR_RE)) occ[m[1]] = (occ[m[1]] || 0) + 1;
+  const names = Object.keys(occ);
+  const list = (varsList || []).map((v) => v || {});
+  if (names.length === 0 || list.length === 0) return list.length > 0 ? [list[0]] : [];
+  const scored = list.map((vars, idx) => ({
+    idx,
+    score: names.reduce((acc, n) => acc + occ[n] * calculateSmsBytes(vars[n] === null || vars[n] === undefined ? '' : String(vars[n])), 0),
+  }));
+  scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
+  return scored.slice(0, Math.max(1, limit)).map((x) => list[x.idx]);
+}
+
+/**
+ * 서버 응답 전(또는 실패 시) 화면 표시용 값 — 후보 **각자의 조합**으로 조립한 문장의 최댓값(080은 10자리 가정).
+ * 최종 판정은 서버다(접수 코어가 SMS 90바이트 초과를 반려한다).
+ */
+export function estimateAgencySmsBytesFromCandidates(
+  content: string,
+  isAd: boolean,
+  candidates: Array<Record<string, any>>,
+): number {
+  const render = (vars: Record<string, any>) => String(content || '').replace(AGENCY_VAR_RE, (_m, name: string) => {
+    const v = vars[name];
+    return v === null || v === undefined ? '' : String(v);
+  });
+  const pool = candidates.length > 0 ? candidates : [{}];
+  return pool.reduce((max, vars) => Math.max(max, calculateSmsBytes(buildAdMessageFront(render(vars), 'SMS', isAd, '0800000000'))), 0);
+}

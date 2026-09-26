@@ -11,7 +11,7 @@ import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
-import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildAudienceCountSql, resolveConditionColumns } from '../utils/operator-recipients';
+import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
 // ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
 import { getFatigueCap } from '../utils/fatigue-guard';
 // ★ 2026-08-03 타겟팅 재설계 A-1: 자동마케팅 대상 수·명단은 발송과 같은 게이트를 쓰는 단일 문 경유.
@@ -1464,10 +1464,20 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
     );
     const defaultCallback = cbResult.rows[0]?.phone || null;
 
+    // ★ 2026-09-25 한줄로 전수점검 C-07: recipients는 buildSendableRecipientsSql의 상한(SENDABLE_RECIPIENTS_LIMIT)까지만 담긴다.
+    //   total을 recipients.length로 주면 화면이 잘린 사실을 알 수 없어 일부만 조용히 발송됐다.
+    //   같은 WHERE(buildAudienceWhere · 같은 게이트)로 실제 대상 수를 세어 준다 — 화면이 초과면 발송하지 않는다.
+    let total = recipients.length;
+    if (recipients.length >= SENDABLE_RECIPIENTS_LIMIT) {
+      const { sql: cntSql, params: cntParams } = buildAudienceCountSql(filterWhere, filterParams, baseParams, storeFilter);
+      const cnt = await query(cntSql, cntParams);
+      total = Math.max(recipients.length, Number(cnt.rows[0]?.count) || 0);
+    }
+
     return res.json({
       success: true,
       recipients,
-      total: recipients.length,
+      total,
       defaultCallback,
     });
   } catch (err: any) {
@@ -3093,8 +3103,10 @@ router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) 
     }));
 
     // 회사 정보 + 고객 통계
+    // ★ 2026-09-26 한줄로 V2 R1-20 — id를 함께 읽는다. 빠지면 analyzeGoalConflicts가 AI 관문에 회사 id를 못 넘겨
+    //   회사별 월 AI 호출 한도·캐시·통계가 전부 꺼졌다(고급 모델 호출이 한도 밖).
     const companyRes = await query(
-      `SELECT company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
+      `SELECT id, company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
       [companyId]
     );
     const statsRes = await query(

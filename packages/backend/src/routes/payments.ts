@@ -21,7 +21,10 @@ import {
   createPendingPayment,
   finalizePaymentSuccess,
   finalizePaymentFailure,
+  readInicisPaymentState,
 } from '../utils/payment-processor';
+// ★ 2026-09-26 한줄로 V2 F03·F25 — 같은 주문의 리턴 콜백 직렬화(프로세스 안 키별 잠금 CT)
+import { withKeyedLock } from '../utils/keyed-lock';
 
 const router = Router();
 
@@ -131,6 +134,9 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
     return;
   }
 
+  // ★ 2026-09-26 한줄로 V2 F03·F25 — 같은 주문의 리턴 콜백은 주문번호 단위 잠금 안에서 한 번에 하나씩 처리한다
+  //   (동시 이중 제출이 둘 다 승인을 부르고 뒤의 실패가 앞 거래를 망취소하지 않게). 잠금은 DB 연결을 쥐지 않는다(keyed-lock CT).
+  await withKeyedLock('inicis-return', orderId, async () => {
   try {
     // resultCode 0000 X = 결제창 단계 실패
     if (body.resultCode !== '0000') {
@@ -163,6 +169,24 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
       merchantData: body.merchantData,
       idc_name: body.idc_name,
     };
+
+    // ★ 2026-09-26 F03·F25 — 승인 전에 결제 상태를 본다. 이미 completed면 승인·망취소 없이 성공 화면(재전송) ·
+    //   pending이 아니면(실패·취소로 끝남) 승인·망취소 없이 실패 화면. 행이 없거나 pending이면 종전 흐름.
+    //   ⛔ 이 경로는 인증 앞 공개 경로다 — 재전송 응답에는 완료 여부만 싣는다(잔액·금액·결제 id를 싣지 않는다 · Codex 5차 1R high).
+    //   완료 화면의 금액·잔액은 첫 콜백이 이미 보여 줬고, 충전 화면은 인증된 조회로 잔액을 다시 읽는다.
+    const state = await readInicisPaymentState(orderId);
+    if (state && state.status === 'completed') {
+      console.log(`[payments] /inicis/return 재전송 — 이미 완료된 결제(승인·망취소 생략): orderId=${orderId}`);
+      res.status(200).send(renderResultHtml('success', { alreadyProcessed: true }, baseUrl));
+      return;
+    }
+    if (state && state.status !== 'pending') {
+      console.log(`[payments] /inicis/return 재전송 — 이미 종료된 결제(status=${state.status} · 승인·망취소 생략): orderId=${orderId}`);
+      res.status(200).send(renderResultHtml('failed', {
+        resultMsg: '이미 종료된 결제입니다. 결제를 다시 진행해 주세요.',
+      }, baseUrl));
+      return;
+    }
 
     const approval = await approveInicisPayment(callback);
 
@@ -216,6 +240,7 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
     console.error('[payments] /inicis/return 처리 실패:', err.message || err);
     res.status(200).send(renderResultHtml('failed', { resultMsg: '결제 처리 중 오류' }, baseUrl));
   }
+  });
 });
 
 // POST /api/payments/inicis/close — 결제창 닫기 callback (P_CLOSE_URL)

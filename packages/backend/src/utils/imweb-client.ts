@@ -30,6 +30,8 @@
  */
 
 import { query } from '../config/database';
+// ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
+import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
 import { timingSafeEqual } from 'crypto';
 import {
   IProviderAdapter,
@@ -135,7 +137,7 @@ export async function exchangeImwebCode(code: string): Promise<{ accessToken: st
   });
   if (!res.ok) {
     const errBody = await safeJsonText(res);
-    throw new Error(`아임웹 토큰 교환 실패 (${res.status}): ${errBody}`);
+    throw tokenHttpError(`아임웹 토큰 교환 실패 (${res.status}): ${errBody}`, res.status);
   }
   return normalizeTokenResponse((await res.json()) as ImwebTokenResponse);
 }
@@ -154,7 +156,7 @@ export async function refreshImwebToken(refreshToken: string): Promise<{ accessT
   });
   if (!res.ok) {
     const errBody = await safeJsonText(res);
-    throw new Error(`아임웹 토큰 갱신 실패 (${res.status}): ${errBody}`);
+    throw tokenHttpError(`아임웹 토큰 갱신 실패 (${res.status}): ${errBody}`, res.status);
   }
   return normalizeTokenResponse((await res.json()) as ImwebTokenResponse);
 }
@@ -241,7 +243,10 @@ export async function ensureFreshImwebToken(integration: ImwebIntegration): Prom
     await saveImwebIntegration(integration.companyId, integration.siteCode, refreshed);
     return { ...integration, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken, tokenExpiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000) };
   } catch (err) {
-    await query(`UPDATE company_integrations SET status = 'token_expired', updated_at = NOW() WHERE id = $1::uuid`, [integration.id]);
+    // ★ 2026-09-26 R1-31 — 제공자가 거절했을 때만 만료로 표시한다(일시 장애 한 번에 연동이 끊겨 웹훅이 유실됐다)
+    if (isDefinitiveTokenRejection(err)) {
+      await query(`UPDATE company_integrations SET status = 'token_expired', updated_at = NOW() WHERE id = $1::uuid`, [integration.id]);
+    }
     throw err;
   }
 }

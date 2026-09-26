@@ -4,8 +4,8 @@ import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import {
   getCompanySmsTablesWithLogs,
+  getCampaignSmsTablesFor,
   smsCountAll as smsUnionCount,
-  smsSelectAll,
   smsGroupByAll as smsUnionGroupBy,
 } from '../utils/sms-queue';
 // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F') — 채널 분기 판정은 CT 목록 하나만 쓴다
@@ -69,21 +69,7 @@ const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_co
 
 // ===== UNION ALL 기반 MySQL 헬퍼 — CT-04(sms-queue.ts)로 승격됨 =====
 // smsUnionCount → smsCountAll, smsUnionGroupBy → smsGroupByAll, kakao 헬퍼 → CT-04
-// smsUnionSelect는 ORDER BY/LIMIT 후미구문 호환을 위해 smsSelectAll 래퍼로 유지.
-
-/** smsSelectAll 래퍼: orderBy/limit/offset을 suffix로 조립 */
-async function smsUnionSelect(
-  tables: string[], fields: string, whereClause: string, params: any[],
-  orderBy?: string, limit?: number, offset?: number
-): Promise<any[]> {
-  // whereClause는 "WHERE ..." 형식으로 전달받음 — "WHERE " 접두사 제거하여 CT-04 규약으로 변환
-  const where = whereClause.replace(/^\s*WHERE\s+/i, '');
-  let suffix = '';
-  if (orderBy) suffix += `ORDER BY ${orderBy} `;
-  if (limit !== undefined) suffix += `LIMIT ${Number(limit)} `;
-  if (offset !== undefined) suffix += `OFFSET ${Number(offset)}`;
-  return await smsSelectAll(tables, fields, where, params, suffix.trim() || undefined);
-}
+// ★ 2026-09-26 한줄로 V2 — smsUnionSelect 래퍼(호출 0곳)는 지웠다. 페이지 조회는 아래 메시지 목록처럼 테이블별 선잘라내기를 쓴다.
 
 router.use(authenticate);
 
@@ -556,9 +542,6 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    // ★ userId 전달: 사용자별 라인그룹 테이블 포함 조회
-    const companyTables = await getCompanySmsTablesWithLogs(companyId, userId);
-
     const userType = req.user?.userType;
     // ★ B2: opt_out_080_number 포함을 위해 LEFT JOIN
     let detailQuery = `SELECT c.*, ${CAMPAIGN_OPT080_SELECT_EXPR}
@@ -578,6 +561,9 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
     }
 
     const campaign = campaignResult.rows[0];
+    // ★ 2026-09-26 한줄로 V2 F26 — 그 캠페인의 테이블(기록된 적재 테이블 또는 회사 전 라인 + 발송월 ±1 이력).
+    //   옛: "지금 기준 당월·전월" 회사 라인 → 전전월 이전 캠페인은 실패 사유·통신사 분포가 0건이었다.
+    const companyTables = await getCampaignSmsTablesFor(companyId, campaign);
 
     const runsResult = await query(
       `SELECT * FROM campaign_runs WHERE campaign_id = $1 ORDER BY created_at DESC`,
@@ -714,20 +700,24 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    // ★ userId 전달: 사용자별 라인그룹 테이블 포함 조회
-    const msgTables = await getCompanySmsTablesWithLogs(companyId, userId);
-
     // 캠페인 채널+상태 확인
     // ★ D227+-3 (2026-05-28 사이트 다운 긴급 복구): campaigns 테이블 = alimtalk_template_code 컬럼 X (kakao_template_id uuid FK만 존재).
     //   옛 D227+ 영역 = 없는 컬럼 SELECT → SQL 에러 → 발송결과 endpoint 500 전체 다운 사고 정정.
     //   알림톡 templateCode = kakao_template_id JOIN 으로 안전 조회.
     const campResult = await query(
-      `SELECT c.send_channel, c.status, kt.template_code AS alimtalk_template_code
+      `SELECT c.send_channel, c.status, c.created_by, c.send_config, c.sent_at, c.scheduled_at, c.created_at, kt.template_code AS alimtalk_template_code
        FROM campaigns c
        LEFT JOIN kakao_templates kt ON c.kakao_template_id = kt.id
        WHERE c.id = $1 AND c.company_id = $2`,
       [id, companyId],
     );
+    // ★ 2026-09-26 한줄로 V2 F27 — 그 회사 캠페인이 아니면 큐를 읽지 않는다(상세·엑셀과 같은 404).
+    //   조회 합집합에는 전 bulk·bito 라인이 들어 있어, 막지 않으면 다른 회사 캠페인의 수신번호·본문이 읽혔다.
+    if (campResult.rows.length === 0) {
+      return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+    }
+    // ★ 2026-09-26 F26 — 그 캠페인의 테이블(옛: 지금 기준 당월·전월 회사 라인 → 전전월 이전 캠페인 0건)
+    const msgTables = await getCampaignSmsTablesFor(companyId, campResult.rows[0]);
     const sendChannel = campResult.rows[0]?.send_channel || 'sms';
     const campStatus = campResult.rows[0]?.status || '';
     const campAlimtalkTemplateCode = campResult.rows[0]?.alimtalk_template_code || '';
@@ -951,7 +941,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ error: '권한이 필요합니다.' });
 
     const campaignResult = await query(
-      `SELECT campaign_name, send_channel, created_at FROM campaigns WHERE id = $1 AND company_id = $2`,
+      `SELECT campaign_name, send_channel, created_at, created_by, send_config, sent_at, scheduled_at FROM campaigns WHERE id = $1 AND company_id = $2`,
       [id, companyId]
     );
     if (campaignResult.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
@@ -977,7 +967,8 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     // ★ 2026-07-30: 브랜드(kakao·kakao_brand)도 SMSQ(msg_type='F') 합류 — 옛 IMC 서브쿼리 폐기.
     if (sendChannel === 'sms' || sendChannel === 'both' || sendChannel === 'alimtalk'
         || (BRAND_CAMPAIGN_CHANNELS as readonly string[]).includes(sendChannel)) {
-      const exportTables = await getCompanySmsTablesWithLogs(companyId, userId);
+      // ★ 2026-09-26 F26 — 그 캠페인의 테이블
+      const exportTables = await getCampaignSmsTablesFor(companyId, campaignResult.rows[0]);
       const smsFields = SMS_EXPORT_FIELDS;
       for (const t of exportTables) {
         subqueries.push(`(SELECT ${smsFields} FROM ${t} WHERE app_etc1 = ?${smsStatusWhere})`);

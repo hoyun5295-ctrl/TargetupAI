@@ -281,6 +281,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   const totalBrand = totals.BRAND;
   const totalBrandNf = totals.BRAND_NF;   // ★ 2026-09-13 비친구 브랜드 — 빠지면 같은 이유로 발행이 막힌다
   const totalTestSms = totals.TEST_SMS, totalTestLms = totals.TEST_LMS;
+  const totalTestBrand = totals.TEST_BRAND;   // ★ 2026-09-26 S1-H06 — 빠지면 상세합≠공급가액으로 발행이 막힌다(BRAND 선례)
   const totalSpamSms = totals.SPAM_SMS, totalSpamLms = totals.SPAM_LMS;
 
   // 스팸필터 단가 = 일반 단가와 동일 (D16 결정)
@@ -665,7 +666,7 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     const subtotalExact =
       (totalSms * prices.SMS) + (totalLms * prices.LMS) +
       (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) + (totalBrand * prices.BRAND) + (totalBrandNf * prices.BRAND_NF) +
-      (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) +
+      (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) + (totalTestBrand * prices.TEST_BRAND) +
       (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
       agentAmountExact +
       planAmount +
@@ -988,14 +989,25 @@ export async function issueMinimumChargeBilling(input: {
     });
   }
 
+  // ★ 2026-09-26 한줄로 V2 F14 — 해지·수동 정산 회사를 함께 읽는다(아래 거절 · 일반 일괄발급 filterBillableCompanies와 같은 기준).
   const coRes = await pool.query(
-    `SELECT c.company_name, c.billing_type, c.created_at, s.min_charge_supply
+    `SELECT c.company_name, c.billing_type, c.created_at, s.min_charge_supply,
+            c.status AS company_status, COALESCE(s.manual_billing, false) AS manual_billing
        FROM companies c LEFT JOIN company_billing_settings s ON s.company_id = c.id
       WHERE c.id = $1`,
     [company_id],
   );
   if (coRes.rows.length === 0) throw new BillingIssueError(404, { error: '고객사를 찾을 수 없습니다' });
   const co = coRes.rows[0];
+  // ★ 2026-09-26 F14 — 최소과금 일괄 발행이 등록 회사 전부를 여기로 넘기는데 해지·수동 정산을 거르지 않아,
+  //   해지한 회사에 매달 정액 청구서가 나가고 수동 정산 회사는 사람이 따로 청구해 이중 청구가 될 수 있었다.
+  //   해지 직전 달 미청구분은 일반 정산 생성(단건 발행)으로 처리한다(일괄발급과 같은 운영 규칙).
+  if (String(co.company_status) === 'terminated') {
+    throw new BillingIssueError(422, { error: `${co.company_name}은(는) 해지된 회사입니다. 남은 청구가 있으면 정산 생성으로 발행해주세요.`, code: 'MIN_CHARGE_TERMINATED' });
+  }
+  if (co.manual_billing === true) {
+    throw new BillingIssueError(422, { error: `${co.company_name}은(는) 수동 정산 회사입니다. 정액 발행에서 제외합니다.`, code: 'MIN_CHARGE_MANUAL_BILLING' });
+  }
   const minCharge = Number(co.min_charge_supply);
   if (!Number.isSafeInteger(minCharge) || minCharge <= 0) {
     throw new BillingIssueError(422, { error: `${co.company_name}은(는) 최소과금 회사로 등록돼 있지 않습니다.`, code: 'MIN_CHARGE_NOT_SET' });

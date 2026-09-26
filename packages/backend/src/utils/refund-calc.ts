@@ -84,6 +84,12 @@ export function refundInvariantGap(p: {
   netRefundedCount: number;
   /** ★ 2026-08-05 요금제 무료 제공으로 덮인 건수. 기본 0 = 종전 식과 완전히 같다. */
   freeCount?: number;
+  /**
+   * ★ 2026-09-26 알림톡 결과별 단가 차액을 차감 단가로 나눈 값(소수 그대로). 기본 0 = 종전 식.
+   * 차액은 성공한 건의 값을 깎아 준 **정당 환불**이라 순환불에서 빼고 본다 — 빼지 않으면 차액만큼 초과 환불로 보인다.
+   * 반대로 차액을 못 돌려줬으면 순환불이 모자라 gap > 0(미환불)으로 드러난다.
+   */
+  unitDiffCount?: number;
 }): number {
   const deducted = Math.max(0, Math.floor(p.deductedCount));
   const free = Math.max(0, Math.floor(Number(p.freeCount) || 0));
@@ -95,5 +101,67 @@ export function refundInvariantGap(p: {
   //   무료를 성공 건에 우선 배정하므로 소멸분은 `max(0, 무료 − 성공)`이다.
   //   무료 0이면 이 항도 0이라 옛 캠페인의 판정은 한 건도 달라지지 않는다.
   const freeLost = Math.max(0, free - success);
-  return (deducted + free) - (success + netRefunded + freeLost);
+  const unitDiff = Math.max(0, Number(p.unitDiffCount) || 0);
+  return (deducted + free) - (success + netRefunded - unitDiff + freeLost);
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 F01·F04 — 선불 알림톡 결과별 정산 (순수).
+ *
+ * 알림톡 캠페인의 결과 행은 두 가지 모양으로 대체 발송을 남긴다.
+ *   ① 대체 행: 카카오 실패한 K행 뒤에 문자 행(S/L)이 `k_oriseq`(원본 K행 번호)를 달고 따로 적재된다 — 운영 실측(c617: K 1800×4 · 7300×2 + 대체 L 1000×2).
+ *   ② K행 코드: K행 자체에 `7830`(SMS 대체 성공)·`7831`(LMS 대체 성공)이 찍힌다(결과 코드 규격).
+ * 한 캠페인에 두 모양이 함께 있으면 한 수신자를 두 번 셀 수 있어 **판정을 보류**한다(ambiguous) — 호출부는
+ * 결과별 정산 없이 종전 방식(차감 단가)으로 정산하고 경보를 낸다. 추측으로 돈을 움직이지 않는다.
+ * 기타(other) = 위 분류에 들지 않는 성공 — 차액 0(차감 단가 그대로).
+ */
+export interface AlimtalkResultAgg {
+  /** K행 알림톡 성공(1800) */ kakao: number;
+  /** K행 7830 */ inRowSms: number;
+  /** K행 7831 */ inRowLms: number;
+  /** 대체 S행 성공 */ subSms: number;
+  /** 대체 L행 성공 */ subLms: number;
+  /** 대체 행 전체(상태 무관) — 모양 판정용 */ sub: number;
+}
+export interface AlimtalkSuccessMix { kakao: number; sms: number; lms: number; other: number }
+
+export function resolveAlimtalkMix(agg: AlimtalkResultAgg | undefined, totalSuccess: number): { mix: AlimtalkSuccessMix; ambiguous: boolean } {
+  const n = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
+  const kakao = n(agg?.kakao);
+  const inRow = n(agg?.inRowSms) + n(agg?.inRowLms);
+  const sms = n(agg?.inRowSms) + n(agg?.subSms);
+  const lms = n(agg?.inRowLms) + n(agg?.subLms);
+  const other = Math.max(0, n(totalSuccess) - kakao - sms - lms);
+  return { mix: { kakao, sms, lms, other }, ambiguous: inRow > 0 && n(agg?.sub) > 0 };
+}
+
+/**
+ * 결과별 단가 차액(원) = Σ 과금된 성공 × max(0, 차감 단가 − 결과 단가).
+ * - 차감 단가보다 비싼 결과는 0 — 선불은 차감보다 더 받지 않는다(SMS로 차감한 자동발송의 LMS 대체).
+ * - 무료 제공분은 돈이 나가지 않아 차액이 없다. 무료는 **차액이 작은 성공부터** 덮는다(LMS 대체 → SMS 대체 → 알림톡):
+ *   무료 제공은 차감 유형(문자)의 몫이라 같은 문자 결과에 먼저 쓰인 것으로 본다. 성공 우선 배정은 refundInvariantGap과 같다.
+ * 성공은 이력(append-only)에서만 세므로 이 값은 결과가 도착할수록 커지기만 한다(환불 항아리의 누적 목표로 쓸 수 있다).
+ */
+export function calcAlimtalkUnitDiff(p: {
+  deductUnit: number;
+  units: { KAKAO: number; SMS: number; LMS: number };
+  mix: AlimtalkSuccessMix;
+  freeCount?: number;
+}): number {
+  const U = Number(p.deductUnit) || 0;
+  const n = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
+  const classes = [
+    { count: n(p.mix.other), diff: 0 },
+    { count: n(p.mix.lms), diff: Math.max(0, U - p.units.LMS) },
+    { count: n(p.mix.sms), diff: Math.max(0, U - p.units.SMS) },
+    { count: n(p.mix.kakao), diff: Math.max(0, U - p.units.KAKAO) },
+  ].sort((a, b) => a.diff - b.diff);
+  let free = n(p.freeCount);
+  let total = 0;
+  for (const c of classes) {
+    const covered = Math.min(free, c.count);
+    free -= covered;
+    total += (c.count - covered) * c.diff;
+  }
+  return Math.round(total * 100) / 100;
 }

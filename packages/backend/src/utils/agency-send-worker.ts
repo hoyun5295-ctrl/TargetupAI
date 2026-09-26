@@ -1321,12 +1321,13 @@ async function runReconcile(): Promise<void> {
 
       // ① 나가면 안 되는데 살아 있다 = 되돌린다. 실패해도 다음 tick이 다시 한다.
       if (mustNotSend && found.kind === 'live') {
-        const { ok, error, alreadySent } = await neutralizeCampaign(
+        const { ok, error, alreadySent, stoppedEarlier } = await neutralizeCampaign(
           row.id, row.company_id, found.id, `대행발송 ${row.status} 건의 예약 회수`,
         );
         // ★2026-09-13(3) 막은 예약도 매 tick 다시 본다(queueOnly 중화는 캠페인 상태를 바꾸지 않아, 늦게 적재된 조각까지 여기서 막는다).
         //   ⛔ 막을 것이 없던 반복 회차는 기록하지 않는다(종전에는 5분마다 같은 줄이 쌓였다). 처음 본 회차·실제로 막은 회차·실패는 남긴다.
-        if (!ok || !alreadySent || !row.campaign_id) {
+        // ★2026-09-26 앞선 취소가 이미 적재를 멈춘 캠페인(stoppedEarlier)도 "막을 것이 없던 반복 회차"다.
+        if (!ok || !(alreadySent || stoppedEarlier) || !row.campaign_id) {
           await logEvent(row.id, ok ? 'reconciled_neutralize' : 'reconciled_neutralize_failed', { campaignId: found.id, ok, error, alreadySent });
         }
         // 캐시는 중화 결과와 무관하게 **비어 있을 때만** 채운다(캠페인이 있다는 사실이 수정·재예약 차단 근거다).

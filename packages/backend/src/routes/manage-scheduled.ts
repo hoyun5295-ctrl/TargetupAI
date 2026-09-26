@@ -120,7 +120,10 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     }
 
     res.json({
-      message: '예약이 취소되었습니다.',
+      // ★ 2026-09-26 한줄로 V2 F35 — 적재 중이던 캠페인은 워커가 적재를 멈춘 뒤 결말을 정한다(이미 나간 발송이 있으면 발송 완료로 정산)
+      message: result.deferred
+        ? '적재를 멈추고 대기 중인 발송을 지웠습니다. 이미 나간 발송이 있으면 발송 완료로 정산되고, 나머지 금액은 자동으로 환불됩니다.'
+        : '예약이 취소되었습니다.',
       campaign: { id }
     });
   } catch (error) {

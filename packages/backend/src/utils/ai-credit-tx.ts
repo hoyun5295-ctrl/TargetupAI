@@ -92,7 +92,12 @@ export async function applyResetIfNeeded(client: any, companyId: string, row: an
   // ★ v2 음수 상계 — 지난달 운영 과금(여정·자동마케팅 실행)으로 base가 음수면 이번달 grant에서 그만큼 차감(덮어쓰기 X).
   //   양수 잔액은 이월 안 함(기존 동작 유지 = 미사용분 소멸). carriedBase = grant + min(0, 지난 base).
   const prevBase = Number(row.base) || 0;
-  const carriedBase = planCredits + Math.min(0, prevBase);
+  // ★ 2026-09-25 한줄로 전수점검 C-08: 음수 상계는 **선불만** 한다.
+  //   선불이 아닌 회사는 부족분이 overage_credits로 기록돼 월 정산(billing-issue.ts 초과사용 합산)에서 현금으로 청구된다.
+  //   그 음수를 다음 달 기본분에서 또 빼면 같은 초과분을 두 번 받는다. 정산 발행이 막힌 회사(billing_type='prepaid')만
+  //   청구 경로가 없으므로 상계가 유일한 회수 수단이다(billing-issue.ts의 선불 발행 차단과 같은 기준).
+  const carriesNegative = String(row.billing_type) === 'prepaid';
+  const carriedBase = planCredits + (carriesNegative ? Math.min(0, prevBase) : 0);
   await client.query(
     `UPDATE companies
         SET ai_credits_base_remaining = $2,
@@ -324,6 +329,26 @@ export async function refundCreditWithClient(client: any, opts: RefundOpts, now:
   let toBase = 0;
   let toPurchased = 0;
   /**
+   * ★ 2026-09-25 한줄로 전수점검 C-08 (Codex 1R high) — **선불이 아닌 회사의 초과분(overage)은 크레딧이 아니라 청구 부채다.**
+   *   월 리셋이 비선불의 음수 base를 더는 다음 달로 상계하지 않으므로(applyResetIfNeeded), 초과분을 옛 규칙대로
+   *   purchased에 넣으면 부채(overage_credits)는 지워지고 크레딧만 생긴다(쓰지 않은 구매분 발생).
+   *   청구 전(billed_billing_id NULL) 초과분은 위에서 overage_credits를 줄여 부채를 지웠다. 크레딧 쪽은
+   *   - 같은 주기(원 차감이 현재 리셋 뒤)면 그만큼 음수였던 base를 되메운다(차감 전 상태 그대로).
+   *   - 리셋이 지났으면 그 음수 base는 리셋이 이미 없앴다 → 어디에도 더하지 않는다(부채 취소만).
+   *   선불·이미 청구된 행은 종전 규칙 그대로다(overagePart = 0).
+   */
+  const isPrepaid = String(row0.billing_type) === 'prepaid';
+  const origOverage = origRow ? (Number(origRow.overage_credits) || 0) : 0;
+  const overagePart = (!isPrepaid && origRow && !origRow.billed_billing_id && origOverage > 0)
+    ? Math.min(amount, origOverage)
+    : 0;
+  if (overagePart > 0) {
+    const resetAt = row0.reset_at ? new Date(row0.reset_at) : null;
+    const sameCycle = !resetAt || Number.isNaN(resetAt.getTime()) || new Date(origRow.created_at) >= resetAt;
+    if (sameCycle) toBase += overagePart;
+  }
+  const restAmount = amount - overagePart;
+  /**
    * ★ 2026-08-13 Codex 2R — **원 차감의 실제 구성분을 복원한다.**
    * 원장에 from_base/from_purchased 컬럼은 없지만, 차감 행의 `balance_*_after`와
    * **그 직전 거래 행의 after**가 있으면 차이로 정확히 계산된다(before − after).
@@ -349,17 +374,21 @@ export async function refundCreditWithClient(client: any, opts: RefundOpts, now:
       if (fromBase + fromPurchased === expected && expected > 0) split = { fromBase, fromPurchased };
     }
   }
+  // 아래는 초과분을 뺀 나머지(restAmount)의 복원 — 선불·청구된 행은 restAmount = amount라 종전과 같다.
   if (split) {
     // 전액 환불이라 구성분을 그대로 되돌린다(반올림 없음).
-    toBase = Math.min(amount, split.fromBase);
-    toPurchased = amount - toBase;
+    const b = Math.min(restAmount, split.fromBase);
+    toBase += b;
+    toPurchased += restAmount - b;
   } else if (bucket === 'purchased') {
-    toPurchased = amount;
+    toPurchased += restAmount;
   } else if (bucket === 'base') {
-    toBase = amount;
+    toBase += restAmount;
   } else {
-    toBase = base < 0 ? Math.min(amount, -base) : 0;
-    toPurchased = amount - toBase;
+    const curBase = base + toBase;
+    const fill = curBase < 0 ? Math.min(restAmount, -curBase) : 0;
+    toBase += fill;
+    toPurchased += restAmount - fill;
   }
   const baseAfter = base + toBase;
   const purchasedAfter = purchased + toPurchased;

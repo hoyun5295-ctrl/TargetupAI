@@ -208,7 +208,17 @@ export async function syncPendingTemplatesJob(): Promise<void> {
     log('pendingTemplateSync', 'env 미설정 — skip');
     return;
   }
+  await pollInProgressTemplates();
+  await retryTerminalTemplateAlarms();
+}
 
+/**
+ * 검수 중 템플릿만 IMC 단건 조회로 따라간다(5분).
+ * ★ 2026-09-26 전수점검 P-04: 종결(승인·반려)·미알림 템플릿을 여기서 빼냈다. 알림 받을 번호가 없는 회사의 종결 템플릿이
+ *   5분마다 IMC GET + 무조건 UPDATE + 에러 로그를 영구 반복했다(0926 운영 실측 156건 · 70일 UPDATE 119만 회).
+ *   종결 템플릿의 알림 재시도는 retryTerminalTemplateAlarms가 IMC 호출 없이 한다.
+ */
+async function pollInProgressTemplates(): Promise<void> {
   let rows: Array<{
     id: string;
     company_id: string;
@@ -240,11 +250,10 @@ export async function syncPendingTemplatesJob(): Promise<void> {
               t.alarm_notified_status
          FROM kakao_templates t
          JOIN kakao_sender_profiles p ON p.id = t.profile_id
-        WHERE (
-          t.status IN ('REQUESTED','REVIEWING','REG','REQ','REV','KREQ')
-          OR (t.status IN ('APPROVED','REJECTED','KREJ') AND t.alarm_notified_status IS NULL)
-        )
+        WHERE t.status IN ('REQUESTED','REVIEWING','REG','REQ','REV','KREQ')
           AND (t.last_synced_at IS NULL OR t.last_synced_at < now() - INTERVAL '5 minutes')
+        -- ★ 2026-09-26 한줄로 V2 S1-H10 — 마지막 조회가 오래된 순으로 돈다(순서 없이 100건이면 같은 행만 계속 집혀 뒤가 굶었다).
+        ORDER BY t.last_synced_at ASC NULLS FIRST
         LIMIT 100`,
     );
     rows = res.rows;
@@ -265,6 +274,10 @@ export async function syncPendingTemplatesJob(): Promise<void> {
    */
   const skippedByCode = new Map<string, number>();
   let skipDetailLogged = false;
+  // ★ 2026-09-26 한줄로 V2 S1-H10 — IMC가 결과를 주지 않은 행(오류 코드 · 빈 응답 · 상태 없음)도 조회 시각을 찍어 5분 뒤로 돌린다.
+  //   옛: 시각을 안 찍고 넘겨 매 주기 다시 집혔고, 그런 행(발신프로필 삭제 4011 등)이 100건을 넘으면 다른 회사의 검수 중 템플릿이
+  //   영영 조회되지 않았다. 이 칸은 폴링 커서다(화면 표시 없음 · 0926 확인). 한 문장으로 모아 찍는다.
+  const unansweredIds: string[] = [];
   for (const row of rows) {
     try {
       // ★ 2026-06-10 정정: IMC GET 경로 파라미터 = templateKey.
@@ -281,6 +294,7 @@ export async function syncPendingTemplatesJob(): Promise<void> {
           skipDetailLogged = true;
           log('pendingTemplateSync', `IMC 단건 조회 건너뜀 — ${row.template_code} code=${code} (발신프로필 키 변경·삭제 가능성)`);
         }
+        unansweredIds.push(row.id);
         continue;
       }
 
@@ -293,7 +307,7 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       const rawLatestStatus =
         (res.data as any).inspectionStatus ??
         (res.data as any).status;
-      if (!rawLatestStatus) continue;
+      if (!rawLatestStatus) { unansweredIds.push(row.id); continue; }
       // ★ D143 (2026-04-30): IMC 약어(REQ/REV/APR/REJ) → 풀네임 정규화.
       // ★ D152-4 (2026-05-12): IMC 6단계 raw(REG/HREJ/KREQ/KREJ) 그대로 통과 (DB CHECK 12개 허용).
       const latestStatus = normalizeImcTemplateStatus(rawLatestStatus);
@@ -394,6 +408,13 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       // 개별 템플릿 실패해도 계속
     }
   }
+  if (unansweredIds.length > 0) {
+    try {
+      await query(`UPDATE kakao_templates SET last_synced_at = now() WHERE id = ANY($1::uuid[])`, [unansweredIds]);
+    } catch (err) {
+      logErr('pendingTemplateSync-rotate', err);
+    }
+  }
   const skippedTotal = Array.from(skippedByCode.values()).reduce((a, b) => a + b, 0);
   log(
     'pendingTemplateSync',
@@ -402,6 +423,79 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       ? ` · 건너뜀 ${skippedTotal}건 [${Array.from(skippedByCode.entries()).map(([c, n]) => `${c}:${n}`).join(' ')}]`
       : ''),
   );
+}
+
+/**
+ * 종결(승인·반려)됐지만 검수 알림을 아직 못 보낸 템플릿의 알림 재시도 — IMC를 부르지 않는다.
+ * ★ 2026-09-26 전수점검 P-04: 결과는 이미 DB에 있다(status · reject_reason = 검수 중 폴링이 종결을 받을 때 저장).
+ *   알림을 못 보냈으면(받을 번호 0) last_synced_at만 찍어 6시간 뒤에 다시 본다 — D188 "번호를 늦게 등록한 회사도
+ *   결국 알림을 받는다"는 그대로이고, 5분마다의 IMC 호출·UPDATE·에러 로그가 사라진다.
+ *   last_synced_at은 화면에 표시되지 않는다(0926 확인 · AlimtalkManagementSection은 타입 선언만).
+ */
+async function retryTerminalTemplateAlarms(): Promise<void> {
+  let rows: Array<{
+    id: string;
+    company_id: string;
+    profile_key: string;
+    profile_name: string | null;
+    template_code: string;
+    template_name: string;
+    status: string;
+    reject_reason: string | null;
+  }> = [];
+  try {
+    const res = await query(
+      `SELECT t.id,
+              t.company_id,
+              p.profile_key,
+              p.profile_name,
+              t.template_code,
+              t.template_name,
+              t.status,
+              t.reject_reason
+         FROM kakao_templates t
+         JOIN kakao_sender_profiles p ON p.id = t.profile_id
+        WHERE t.status IN ('APPROVED','REJECTED','KREJ')
+          AND t.alarm_notified_status IS NULL
+          AND (t.last_synced_at IS NULL OR t.last_synced_at < now() - INTERVAL '6 hours')
+        LIMIT 100`,
+    );
+    rows = res.rows;
+  } catch (err) {
+    logErr('terminalAlarmRetry-fetch', err);
+    return;
+  }
+  if (rows.length === 0) return;
+
+  let notified = 0;
+  let deferred = 0;
+  for (const row of rows) {
+    const terminal = toTerminalStatus(row.status);
+    if (!terminal) continue;
+    try {
+      const count = await notifyTemplateInspectionResult({
+        companyId: row.company_id,
+        profileKey: row.profile_key,
+        templateName: row.template_name,
+        profileName: row.profile_name,
+        status: terminal,
+        rejectReason: row.reject_reason,
+      });
+      if (count > 0) {
+        await query(
+          `UPDATE kakao_templates SET alarm_notified_status = $1 WHERE id = $2`,
+          [terminal, row.id],
+        );
+        notified += count;
+      } else {
+        await query(`UPDATE kakao_templates SET last_synced_at = now() WHERE id = $1`, [row.id]);
+        deferred++;
+      }
+    } catch (err) {
+      logErr(`terminalAlarmRetry-${row.template_code}`, err);
+    }
+  }
+  log('terminalAlarmRetry', `종결 템플릿 알림 재시도 ${rows.length}건 — 발송 ${notified}명 · 받을 번호 없어 6시간 뒤 재시도 ${deferred}건`);
 }
 
 /**

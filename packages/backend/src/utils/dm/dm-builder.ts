@@ -73,6 +73,27 @@ export function extractFlatSectionsFromDm(dm: any): any[] {
   return [];
 }
 
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-26 — extractFlatSectionsFromDm의 **짝**: 섹션 단위 수정을 저장 구조 그대로 되써 넣을 값을 만든다.
+ * - pages가 D128 새 구조면 pages 안의 섹션을 바꾼 pages 전체(column='pages')
+ * - 아니면 sections 칸(column='sections') · 둘 다 없으면 null
+ * 판정은 extractFlatSectionsFromDm과 같다(읽은 곳에 쓴다 — 옛 칸에만 쓰면 화면·발송에 반영되지 않는다).
+ */
+export function mapDmSections(dm: any, fn: (sec: any) => any): { column: 'pages' | 'sections'; value: any[] } | null {
+  let rawPages = dm?.pages;
+  if (typeof rawPages === 'string') { try { rawPages = JSON.parse(rawPages); } catch { rawPages = null; } }
+  if (Array.isArray(rawPages) && rawPages.length > 0 && rawPages[0] && Array.isArray(rawPages[0].sections)) {
+    return {
+      column: 'pages',
+      value: rawPages.map((p: any) => (p && Array.isArray(p.sections) ? { ...p, sections: p.sections.map(fn) } : p)),
+    };
+  }
+  let rawSections = dm?.sections;
+  if (typeof rawSections === 'string') { try { rawSections = JSON.parse(rawSections); } catch { rawSections = null; } }
+  if (Array.isArray(rawSections)) return { column: 'sections', value: rawSections.map(fn) };
+  return null;
+}
+
 // ★ 2026-07-03 DM 카드 창작 문안 추출 (문안 학습 코퍼스 ai_training_logs 적재용).
 //   섹션 props에서 카피성 텍스트 필드만 재귀 수집 → 대표 문안 1건. URL·색·id·enum은 제외.
 //   실패/빈 값이어도 throw 하지 않음(빈 문자열) — fire-and-forget 학습 적재 안전.
@@ -810,8 +831,11 @@ export interface DmViewTrackInput {
  * ★ 2026-07-02(5) 수신자별 발송·열람 원시 행 — CT 단일 진입.
  * 소비처: dm.ts recipients-tracking(목록) / recipient-detail(1명) / ai-memory-accumulator-worker(DM 학습).
  * customerId 전달 시 그 수신자 1명만 반환.
+ * ★ 2026-09-26 한줄로 V2 R1-18 — 고정 `LIMIT 1000` 제거(1천 명 넘게 보낸 DM의 깔때기·재발송 대상·AI 학습이 임의 1천 명 기준이었다).
+ *   기본 = 전체 수신자. 목록 크기를 줄여야 하는 호출부만 opts.limit.
  */
-export async function getDmRecipientEngagementRows(dmId: string, companyId: string, customerId?: string) {
+export async function getDmRecipientEngagementRows(dmId: string, companyId: string, customerId?: string, opts?: { limit?: number }) {
+  const limit = Number.isFinite(Number(opts?.limit)) && Number(opts?.limit) > 0 ? Math.floor(Number(opts?.limit)) : null;
   const r = await query(
     `SELECT DISTINCT ON (t.customer_id)
             t.customer_id, c.name, c.phone, t.created_at AS sent_at,
@@ -833,8 +857,8 @@ export async function getDmRecipientEngagementRows(dmId: string, companyId: stri
       WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
         AND ($3::uuid IS NULL OR t.customer_id = $3::uuid)
       ORDER BY t.customer_id, t.created_at DESC
-      LIMIT 1000`,
-    [dmId, companyId, customerId || null],
+      LIMIT $4::int`,
+    [dmId, companyId, customerId || null, limit],
   );
   return r.rows;
 }

@@ -654,12 +654,14 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
       const companyId = cmp.rows[0]?.company_id;
       if (companyId) {
         // customers 자동 처리 — email 매칭 + email_opt_in false
+        // ★ 2026-09-26 한줄로 V2 R1-40 — 대소문자만 다른 같은 주소 행까지(옛: 정확히 같은 행만 → 다른 표기 행은 계속 받았다).
+        //   읽기(직접 명단 excludeOptedOutEmails)와 같은 판정 = lower 비교.
         await query(
           `UPDATE customers SET
              email_opt_in = false,
              updated_at = NOW()
            WHERE company_id = $1::uuid
-             AND email = $2
+             AND lower(email) = lower($2)
              AND email_opt_in = true`,
           [companyId, email]
         );

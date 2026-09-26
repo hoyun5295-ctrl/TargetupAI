@@ -563,11 +563,8 @@ export default function CdpSettingsPage() {
     finally { setExplainLoading(false); }
   };
 
-  // 데이터 분석 모달이 열릴 때 AI 진단 자동 로드 (회사 관리자)
-  useEffect(() => {
-    if (activeModal === 'analytics' && isAdmin) loadExplanation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeModal]);
+  // ★ 2026-09-26 한줄로 V2 R1-42 — 데이터 분석 창을 열 때 AI 진단(유료 5크레딧)을 자동으로 부르지 않는다.
+  //   옛: 차트만 보려 해도 창을 열 때마다 차감됐다. 진단은 창 안 "AI 자율 진단 시작" 버튼(onStartExplain)으로만.
 
   // 모달 ESC 닫기
   useEffect(() => {

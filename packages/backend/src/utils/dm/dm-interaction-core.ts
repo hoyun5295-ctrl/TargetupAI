@@ -56,6 +56,24 @@ export function pickRouletteSegment(
   return { segmentId: seg.id, label: seg.label, won, prizeId: won ? prize.prizeId : null };
 }
 
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-27 — 참여자 자격까지 본 룰렛 선택(Harold 결정 「재고 경품 = 발송 링크 수신자만」).
+ * stockEligible = 발송 토큰(서버 권위)으로 확인된 수신자. 참이면 종전 선택 그대로.
+ * 거짓이면 **경품이 걸린 칸을 후보에서 빼고** 고른다(재고 차감 없음 · 경품 칸에 멈추고 꽝으로 나오는 혼란 없음).
+ * 경품 칸뿐이면 recipientsOnly(화면이 "문자로 받은 분만 참여할 수 있어요"를 보인다).
+ */
+export function pickRouletteForParticipant(
+  segments: RouletteSegmentLite[],
+  prizeBySegment: Record<string, SegmentPrize>,
+  stockEligible: boolean,
+  rng: () => number,
+): RoulettePick & { recipientsOnly?: boolean } {
+  if (stockEligible) return pickRouletteSegment(segments, prizeBySegment, rng);
+  const open = (segments || []).filter((s) => !prizeBySegment[s.id]);
+  if (open.length === 0) return { segmentId: '', label: '', won: false, prizeId: null, recipientsOnly: true };
+  return pickRouletteSegment(open, {}, rng);
+}
+
 // --- 마감 후 자동 랜덤 추첨 ---
 export type DrawEntry = { responseId: string; key: string }; // key = customer_id 또는 anonymous_id
 export type RankPrize = { prizeId: string; rank: number; count: number };

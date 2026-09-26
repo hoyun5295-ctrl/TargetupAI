@@ -26,7 +26,7 @@ import { useMmsUpload } from '../../hooks/useMmsUpload';
 import MmsUploadModal from '../MmsUploadModal';
 import SmsCharsetNotice from '../SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
-import { buildAdSubjectFront, startsWithAdMark } from '../../utils/formatDate';
+import { buildAdSubjectFront, startsWithAdMark, pickAgencySmsCandidates, estimateAgencySmsBytesFromCandidates, normalizeAgencyPhoneFront } from '../../utils/formatDate';
 import {
   CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_DANGER_BOX, CUI_DANGER_ICON, CUI_DANGER_TEXT,
   CUI_HINT, CUI_INPUT, CUI_LABEL, CUI_MODAL, CUI_MODAL_BODY, CUI_MODAL_CLOSE, CUI_MODAL_DESC,
@@ -161,10 +161,6 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   const [callbackNumber, setCallbackNumber] = useState('');
   const [senders, setSenders] = useState<string[]>([]);
 
-  const messageType: 'SMS' | 'LMS' | 'MMS' = mms.mmsUploadedImages.length > 0
-    ? 'MMS'
-    : (content.length > 45 || subject.trim() ? 'LMS' : 'SMS');
-
   /** 파일·붙여넣기·재접수 명단을 하나로 정리하고, 왜 몇 건이 빠졌는지도 같이 센다 */
   const recipientInfo = useMemo(() => {
     const seen = new Set<string>();
@@ -173,7 +169,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
     let invalid = 0;
     if (prefillRecipients) {
       for (const r of prefillRecipients) {
-        const phone = ONLY_DIGITS(r.phone);
+        const phone = normalizeAgencyPhoneFront(r.phone);   // ★ 2026-09-26 R1-08 — 코어와 같은 정규화(앞자리 0 복원 뒤 중복 제거)
         if (phone.length < 10) { invalid++; continue; }
         if (seen.has(phone)) { dup++; continue; }
         seen.add(phone);
@@ -185,7 +181,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
       // 폰 미리보기가 원본 행 값을 읽을 수 있게, 수신자 목록과 나란한 원본 행 배열을 같이 둔다(참조라 비용 0)
       const srcRows: Record<string, any>[] = [];
       for (const r of rows) {
-        const phone = ONLY_DIGITS(r[phoneColumn]);
+        const phone = normalizeAgencyPhoneFront(r[phoneColumn]);
         if (phone.length < 10) { invalid++; continue; }
         if (seen.has(phone)) { dup++; continue; }
         seen.add(phone);
@@ -200,7 +196,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
     }
     const tokens = pasted.split(/[\s,;]+/).filter((t) => t.trim());
     for (const raw of tokens) {
-      const phone = ONLY_DIGITS(raw);
+      const phone = normalizeAgencyPhoneFront(raw);
       if (phone.length < 10) { invalid++; continue; }
       if (seen.has(phone)) { dup++; continue; }
       seen.add(phone);
@@ -210,6 +206,45 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   }, [rows, phoneColumn, pasted, varMapping, prefillRecipients]);
 
   const recipients = recipientInfo.list;
+  // ★ 2026-09-26 한줄로 V2 R1-08 — 글자 45가 아니라 **실제로 나갈 문장의 바이트**(광고 표기·무료거부 줄·변수 값 포함)로 가른다.
+  //   (Codex 8차 1R·2R·3R high 구조 정정) **화면은 유형도 제목 필수도 정하지 않는다.** 접수는 'AUTO'로 보내고 접수 코어가
+  //   실제로 넣을 수신자(중복 제거 뒤)로 잰 바이트로 SMS/LMS를 정하며, 장문인데 제목이 없으면 코어가 반려(SUBJECT_REQUIRED_LONG)한다.
+  //   아래 값은 막지 않는 **안내**다(서버에 후보만 보내 같은 조립 CT로 잰 값 · 응답 전·실패 때 화면 값).
+  const smsCandidates = useMemo(() => pickAgencySmsCandidates(content.trim(), recipients.map((r) => r.vars)), [content, recipients]);
+  const localSmsBytes = useMemo(() => estimateAgencySmsBytesFromCandidates(content.trim(), isAd, smsCandidates), [content, isAd, smsCandidates]);
+  const [smsBytes, setSmsBytes] = useState<number | null>(null);
+  const [smsJudge, setSmsJudge] = useState<'idle' | 'pending' | 'done' | 'failed'>('idle');
+  const needsSmsJudge = mms.mmsUploadedImages.length === 0 && !subject.trim() && !!content.trim();
+  useEffect(() => {
+    setSmsBytes(null);
+    if (!needsSmsJudge) { setSmsJudge('idle'); return; }
+    setSmsJudge('pending');
+    let alive = true;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/agency-send/sms-bytes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+          body: JSON.stringify({ content: content.trim(), isAd, candidates: smsCandidates.map((vars) => ({ vars })) }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!alive) return;
+        if (res.ok && data?.success && Number.isFinite(Number(data.maxBytes))) { setSmsBytes(Number(data.maxBytes)); setSmsJudge('done'); }
+        else setSmsJudge('failed');
+      } catch { if (alive) setSmsJudge('failed'); }
+    }, 400);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [needsSmsJudge, content, isAd, smsCandidates]);
+  /** 표시용 유형 — 서버 판정이 있으면 그 값, 없으면 화면 값(표시만 · 접수 유형은 코어가 정한다) */
+  const messageType: 'SMS' | 'LMS' | 'MMS' = mms.mmsUploadedImages.length > 0
+    ? 'MMS'
+    : (subject.trim() || (smsBytes ?? localSmsBytes) > 90 ? 'LMS' : 'SMS');
+  /** 제목 필수 = 이미지 문자뿐. 장문 여부는 접수 코어가 실제 접수 행으로 정한다(화면 판단으로 제목을 강제하지 않는다) */
+  const subjectRequired = mms.mmsUploadedImages.length > 0;
+  /** 막지 않는 안내 — 서버가 잰 값이 단문 한도를 넘으면 "제목을 넣어 두면 바로 접수된다"고 알린다 */
+  const longHint = !subject.trim() && smsJudge === 'done' && (smsBytes ?? 0) > 90;
+  /** 확인 화면 유형 표기 — 서버 판정이 없으면 "자동"(접수 때 코어가 정한다 · 추정값을 사실처럼 보이지 않는다) */
+  const typeLabel: string = needsSmsJudge && smsJudge !== 'done' ? '자동' : messageType;
   /** 재접수 명단에 실린 고객별 회신번호 종류 수. 있으면 "보내는 번호"는 대표 번호일 뿐이라 화면에 알린다 */
   const prefillCallbackKinds = useMemo(
     () => new Set((prefillRecipients || []).map((r) => r.callback).filter(Boolean)).size,
@@ -371,7 +406,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
 
   const goStep3 = () => {
     if (!content.trim()) { toast.error('문안을 입력해 주세요.'); return; }
-    if ((messageType === 'LMS' || messageType === 'MMS') && !subject.trim()) {
+    if (subjectRequired && !subject.trim()) {
       toast.error('제목을 입력해 주세요. 긴 문자와 이미지 문자에는 제목이 필요합니다.');
       return;
     }
@@ -415,7 +450,8 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
     setSaving(true);
     try {
       const created = await createAgencyRequest({
-        messageType,
+        // ★ 2026-09-26 R1-08 — 유형은 접수 코어가 정한다(이미지만 화면이 확정)
+        messageType: mms.mmsUploadedImages.length > 0 ? 'MMS' : 'AUTO',
         subject: subject.trim() || undefined,
         content: content.trim(),
         isAd,
@@ -435,6 +471,8 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
       close();
     } catch (e: any) {
       toast.error(e?.message || '접수하지 못했습니다.');
+      // ★ 2026-09-26 R1-08 — 코어가 실제 접수 행으로 잰 결과 장문인데 제목이 없다 → 제목을 넣을 수 있게 문안 단계로
+      if (e?.code === 'SUBJECT_REQUIRED_LONG') setStep(2);
     } finally {
       setSaving(false);
     }
@@ -472,7 +510,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   const stepDesc = step === 1
     ? (recipients.length > 0 ? `보낼 번호 ${recipients.length.toLocaleString()}건이 준비됐습니다` : '명단을 올리면 나머지는 이어서 채워집니다')
     : step === 2 ? `${recipients.length.toLocaleString()}건 · 받는 화면을 보면서 문안을 다듬으세요`
-    : `${recipients.length.toLocaleString()}건 · ${messageType}${isAd ? ' · 광고' : ''}`;
+    : `${recipients.length.toLocaleString()}건 · ${typeLabel}${isAd ? ' · 광고' : ''}`;
 
   const candidates = timeCandidates();
 
@@ -622,9 +660,14 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
               {step === 2 && (
                 <>
                   <div>
-                    <label className={CUI_LABEL}>제목 {(messageType === 'LMS' || messageType === 'MMS') && <span className="text-rose-500">*</span>}</label>
+                    <label className={CUI_LABEL}>제목 {subjectRequired && <span className="text-rose-500">*</span>}</label>
                     <input value={subject} onChange={(e) => setSubject(e.target.value)} className={CUI_INPUT} placeholder="가을 신상 행사 안내" />
                     <p className={CUI_HINT}>제목은 모든 수신자에게 같은 문장으로 나갑니다.</p>
+                    {longHint && (
+                      <p className={`${CUI_HINT} text-amber-600`}>
+                        문안이 단문 한도(90바이트)를 넘어 장문으로 보냅니다(가장 긴 문장 {Number(smsBytes || 0).toLocaleString()}바이트). 제목을 넣어 주세요.
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -883,7 +926,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
                   <div className="w-full flex items-center justify-between">
                     <p className="text-[12.5px] font-bold text-neutral-700">받는 사람 화면</p>
                     <span className="flex gap-1.5">
-                      <span className="inline-flex items-center h-[21px] px-2 rounded-md bg-indigo-100 text-indigo-700 text-[11.5px] font-bold">{messageType}</span>
+                      <span className="inline-flex items-center h-[21px] px-2 rounded-md bg-indigo-100 text-indigo-700 text-[11.5px] font-bold">{typeLabel}</span>
                       <span className="inline-flex items-center h-[21px] px-2 rounded-md bg-neutral-100 text-neutral-600 text-[11.5px] font-bold tabular-nums">{content.length}자</span>
                     </span>
                   </div>

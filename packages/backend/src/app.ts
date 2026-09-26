@@ -91,8 +91,6 @@ import snsRoutes, { snsPublicRouter } from './routes/sns';   // ★ 2026-09-20 S
 import makeshopRoutes from './routes/makeshop';
 // ★ 2026-06-25 (gap 7): CDP Provider 등록 단일 출처 — routes import 부수효과 의존 제거
 import { registerAllProviders } from './utils/register-providers';
-// ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS + Opus 4.7)
-import voiceRoutes from './routes/voice';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid Web API v3)
 import emailRoutes from './routes/email';
 import shortUrlRoutes from './routes/short-url';  // D183: 단축 URL redirect (/c/:hash) — 공개 endpoint
@@ -165,6 +163,8 @@ import { startPlannerExecutor } from './utils/planner-executor';
 import { startPlannerReconcileWorker } from './utils/planner-reconcile';
 // ★ 2026-07-19: P4 이미지 스튜디오 temp 산출물 7일 스윕 (1일 주기)
 import { startStudioTempSweeper } from './utils/studio-temp-sweeper';
+// ★ 2026-09-26 전수점검 S1-H08: 발송 스테이징 미연결 적재분 정리 (1시간 주기 · KST 01~03시만 · 03시 백업 전 · 24시간 지난 것)
+import { startStagingSweeper } from './utils/staging-sweeper';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -501,8 +501,6 @@ app.use('/api/woocommerce', woocommerceRoutes);
 app.use('/api/sns', snsRoutes);   // ★ 2026-09-20 SNS 게시 — 인증 → 요금제 → ENV 순(설계서 §2-16)
 // ★ 2026-07-06: 메이크샵 커머스 API 폴링 커넥터 (client_credentials 자격 입력 — OAuth/webhook 없음)
 app.use('/api/makeshop', makeshopRoutes);
-// ★ D178: 인바운드 AI 음성 응답 (통신사 webhook + 회사 admin 토글/이력)
-app.use('/api/voice', voiceRoutes);
 // ★ D180: Email 채널 (SendGrid Event Webhook + 회사 admin 캠페인 CRUD/발송)
 app.use('/api/email', emailRoutes);
 // ★ D130: 알림톡/브랜드메시지 IMC 연동 (발신프로필/템플릿/검수/웹훅/이미지/알림수신자)
@@ -714,6 +712,9 @@ app.listen(PORT, () => {
 
   // ★ 2026-07-19: P4 이미지 스튜디오 temp 산출물 7일 스윕 (1일 주기)
   startStudioTempSweeper();
+
+  // ★ 2026-09-26 전수점검 S1-H08: 확인 창 취소·재클릭으로 남은 발송 스테이징 정리 (캠페인이 가리키는 적재분은 제외)
+  startStagingSweeper();
 
   // ★ 2026-08-13 마케팅 플래너 Phase 3·4 (docs/FEATURE-MARKETING-PLANNER.md)
   //   실행(10분) = 오늘 예정 터치포인트를 당일 문안 생성 → 스팸 게이트 → 발송/게시.

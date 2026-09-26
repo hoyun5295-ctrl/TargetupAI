@@ -19,6 +19,8 @@
  */
 
 import { query } from '../config/database';
+// ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
+import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
 import {
   IProviderAdapter,
   ProviderCapabilities,
@@ -76,7 +78,7 @@ export async function issueMakeshopToken(creds: MakeshopCredentials, shopUid: st
   });
   if (!res.ok) {
     const errBody = await safeJsonText(res);
-    throw new Error(`메이크샵 토큰 발급 실패 (${res.status}): ${errBody}`);
+    throw tokenHttpError(`메이크샵 토큰 발급 실패 (${res.status}): ${errBody}`, res.status);
   }
   const json = (await res.json()) as { success?: boolean; data?: { access_token?: string; token_type?: string; expires_in?: number }; error?: string; error_description?: string };
   const token = json?.data?.access_token;
@@ -178,12 +180,15 @@ export async function ensureFreshMakeshopToken(integration: MakeshopIntegration,
   }
   try {
     const c = creds ?? (await getMakeshopCredentials(integration.companyId, integration.shopUid)) ?? envMakeshopCreds();
-    if (!c) throw new Error('메이크샵 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
+    if (!c) throw reconnectRequiredError('메이크샵 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
     const reissued = await issueMakeshopToken(c, integration.shopUid);
     await saveMakeshopIntegration(integration.companyId, integration.shopUid, reissued, c);
     return { ...integration, accessToken: reissued.access_token, tokenExpiresAt: new Date(Date.now() + (reissued.expires_in || 300) * 1000) };
   } catch (err) {
-    await query(`UPDATE company_integrations SET status = 'token_expired', updated_at = NOW() WHERE id = $1::uuid`, [integration.id]);
+    // ★ 2026-09-26 R1-31 — 제공자가 거절했을 때만 만료로 표시한다(일시 장애 한 번에 연동이 끊겨 웹훅이 유실됐다)
+    if (isDefinitiveTokenRejection(err)) {
+      await query(`UPDATE company_integrations SET status = 'token_expired', updated_at = NOW() WHERE id = $1::uuid`, [integration.id]);
+    }
     throw err;
   }
 }

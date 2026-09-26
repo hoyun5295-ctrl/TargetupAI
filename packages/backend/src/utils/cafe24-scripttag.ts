@@ -60,16 +60,23 @@ export async function ensureCafe24ScriptTag(companyId: string, mallId: string): 
   const src = buildSdkSrc(publicKey);
   const byoCreds = await getCafe24ByoCredentials(companyId, mallId);
 
-  // 멱등 — 이미 우리 SDK가 등록돼 있으면 script_no만 meta에 갱신하고 종료
+  // 멱등 — 이미 **지금 주소(키·SDK 판)** 태그가 있으면 script_no만 meta에 갱신하고 남은 옛 태그를 정리한 뒤 종료
+  // ★ 2026-09-26 한줄로 V2 R1-30 — 옛: 우리 태그가 있기만 하면 끝이라 키 재발급 뒤에도 옛 키(?k=)를 계속 써서 수집이 401.
+  //   이제 주소까지 같아야 "등록됨"이다. 다르면 아래에서 새 태그를 **먼저** 올리고 옛 태그를 지운다
+  //   (먼저 지우면 올리기 실패 시 수집이 끊긴다 · 옛 키 태그는 이미 폐기된 키라 겹쳐 있어도 이중 수집이 없다).
+  let staleTags: any[] = [];
   try {
     const list = await cafe24ApiCall<any>(integration, '/scripttags', { method: 'GET' }, byoCreds);
     const tags = Array.isArray(list?.scripttags) ? list.scripttags : [];
-    const mine = tags.find(
-      (s: any) => typeof s?.src === 'string' && s.src.includes('/sdk/') && s.src.includes('hanjul'),
+    const mineAll = tags.filter(
+      (s: any) => typeof s?.src === 'string' && s.src.includes('/sdk/') && s.src.includes('hanjul') && s?.script_no,
     );
-    if (mine?.script_no) {
-      console.log('[Cafe24 ScriptTag] 이미 등록됨 script_no=', mine.script_no, 'mall=', mallId);
-      await mergeIntegrationMeta(companyId, mallId, { scripttag_no: mine.script_no, scripttag_src: mine.src });
+    const current = mineAll.find((s: any) => s.src === src);
+    staleTags = mineAll.filter((s: any) => s !== current);
+    if (current) {
+      console.log('[Cafe24 ScriptTag] 이미 등록됨 script_no=', current.script_no, 'mall=', mallId);
+      await mergeIntegrationMeta(companyId, mallId, { scripttag_no: current.script_no, scripttag_src: current.src });
+      await deleteStaleScriptTags(integration, byoCreds, staleTags, mallId);
       return;
     }
   } catch (e: any) {
@@ -89,6 +96,36 @@ export async function ensureCafe24ScriptTag(companyId: string, mallId: string): 
   const scriptNo = res?.scripttag?.script_no ?? res?.scripttags?.[0]?.script_no ?? null;
   await mergeIntegrationMeta(companyId, mallId, { scripttag_no: scriptNo, scripttag_src: src });
   console.log('[Cafe24 ScriptTag] 등록 완료 script_no=', scriptNo, 'mall=', mallId);
+  // 새 태그가 올라간 뒤에만 옛 주소 태그를 지운다
+  await deleteStaleScriptTags(integration, byoCreds, staleTags, mallId);
+}
+
+/** 옛 주소(폐기된 키·옛 SDK 판) 우리 태그 정리 — 하나 실패해도 나머지는 계속(로그만). */
+async function deleteStaleScriptTags(integration: any, byoCreds: any, staleTags: any[], mallId: string): Promise<void> {
+  for (const t of staleTags) {
+    try {
+      await cafe24ApiCall<any>(integration, `/scripttags/${t.script_no}`, { method: 'DELETE' }, byoCreds);
+      console.log('[Cafe24 ScriptTag] 옛 주소 태그 제거 script_no=', t.script_no, 'mall=', mallId);
+    } catch (e: any) {
+      console.log('[Cafe24 ScriptTag] 옛 주소 태그 제거 실패(무시 · 폐기된 키라 수집 영향 없음) script_no=', t.script_no, e?.message || e);
+    }
+  }
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-30 — 회사 공개 키가 바뀐 뒤(CDP 키 재발급) 그 회사 카페24 몰 전부의 태그를 지금 키로 맞춘다.
+ * fire-and-forget — 몰 하나 실패해도 나머지는 계속, 호출부(재발급 응답)에는 영향 없음.
+ */
+export async function resyncCafe24ScriptTagsForCompany(companyId: string): Promise<void> {
+  const r = await query(
+    `SELECT mall_id FROM company_integrations WHERE company_id = $1::uuid AND provider = 'cafe24' AND mall_id IS NOT NULL`,
+    [companyId],
+  );
+  for (const row of r.rows) {
+    await ensureCafe24ScriptTag(companyId, String(row.mall_id)).catch((e: any) =>
+      console.log('[Cafe24 ScriptTag] 키 재발급 뒤 태그 맞춤 실패(무시) mall=', row.mall_id, e?.message || e),
+    );
+  }
 }
 
 /**

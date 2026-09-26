@@ -8,11 +8,18 @@ import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/t
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSends } from '../utils/customer-send-stats';
 import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts } from '../utils/messageUtils';
-import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT, getSendTypeLabel, getDisplayContents } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
+import { fieldKeyToColumn, getFieldByKey } from '../utils/standard-field-map';
+import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
+import { nightAdRestrictionMessage } from '../utils/autosend-policy';
+import { resolveStagingCommitState, withStagingLock } from '../utils/staging-sweeper';
+import { isLoadingSendPhase } from '../utils/load-cancel';
+// ★ 2026-09-26 한줄로 V2 S1-H07·F09(Codex 4차 2R) — 캠페인 발송 시작 ↔ 초안 삭제 직렬화(프로세스 안 잠금 CT)
+import { withCampaignStartLock } from '../utils/keyed-lock';
 import { convertButtonsToQTmsg } from '../utils/alimtalk-button';
 import { buildAlimtalkEtcJson } from '../utils/alimtalk-emphasize';
 import { decideKakaoTemplateSendable, getImcTemplateStatusSafe } from '../utils/kakao-template-guard';
@@ -24,7 +31,7 @@ import {
   toKoreaTimeStr,
   getCompanySmsTables, hasCompanyLineGroup, getTestSmsTables, getTestSendTable, getAuthSmsTable,
   invalidateLineGroupCache, getNextSmsTable,
-  smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
+  smsCountAll, smsAggAll, smsSelectAll, smsSelectPagedAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs, getCampaignQueueTables,
   insertBrandQueue, BrandQueueInsertError, type BrandQueueRow,
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
@@ -39,7 +46,7 @@ import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback,
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 // ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
 //   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
-import { isBrandOnlyChannel, resolveRefundAxes, resolveSendChannel, resolveChargeMessageType } from '../utils/billing-types';
+import { isBrandOnlyChannel, resolveRefundAxes, resolveSendChannel, resolveChargeMessageType, BRAND_CAMPAIGN_CHANNELS } from '../utils/billing-types';
 import { markRefundPending, markRefundPendingAxes } from '../utils/refund-pending';
 // ★ 2026-07-30 (2R): 테스트 경로 환불 미완 경보 — 캠페인 레코드가 없어 durable 의무 대신 사람 호출
 import { sendSystemAlert } from '../utils/system-alert';
@@ -50,7 +57,7 @@ import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns, failCam
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { findUnfilledAlimtalkVars, fillAlimtalkVarMap } from '../utils/alimtalk-vars';
 import { resolveAlimtalkFallback, validateAlimtalkFallback } from '../utils/alimtalk-fallback';
-import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
+import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback, callbackAssignmentUserId } from '../utils/callback-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 회사 opt-in "최근 N일 광고 M건" 게이트(차감 전 제외) + 광고 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../utils/fatigue-guard';
 import { deduplicateByPhone } from '../utils/deduplicate';
@@ -58,13 +65,13 @@ import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt } from '../utils/campaign-validation';
 import { calcSplitSendTime } from '../utils/send-time-util';
 import { countStagingFiltered, createDirectSendCampaign } from '../utils/direct-send-core';
-import { DirectSendError } from '../utils/direct-send-spec';
+import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
 import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from '../utils/brand-link-core';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
 // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 판정·응답 모두 CT가 소유한다
 import { checkSenderAuthGate, senderAuthRejection } from '../utils/sender-auth';
 // ★2026-09-25 무료 체험 스팸 검사 표시(비용 0)
-import { SPAM_TRIAL_SOURCE } from '../utils/spam-trial';
+import { SPAM_TRIAL_SOURCE, isSpamTestBillable } from '../utils/spam-trial';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -368,7 +375,9 @@ router.post('/test-send', async (req: Request, res: Response) => {
     //   kakao=BRAND 단일 / both=문자(messageType)+BRAND 이중 / sms=messageType.
     //   옛 코드는 both 브랜드분이 무료였고, kakao 단독은 문자 단가로 깎였다.
     const testMsgType = (messageType || 'SMS') as string;
-    const TEST_REF = '00000000-0000-0000-0000-000000000000';
+    // ★ 2026-09-26 한줄로 V2 F15·F17 — 요청마다 새 참조. 고정 zero-uuid를 공유하면 환불이 회사의 과거 테스트 환불 누적과
+    //   비교돼 두 번째 실패부터 0원이 됐다(ok:true라 경보도 없었다). 차감·환불이 이 요청 안에서만 짝을 이룬다.
+    const TEST_REF = randomUUID();
     // 테스트 브랜드 발송은 담당자에게 채널 친구 대상으로 나간다 — 적재 조립과 차감 단가가 같은 값을 쓴다.
     const TEST_BRAND_TARGETING = 'I';
     const testAxes = resolveRefundAxes(testChannel, testMsgType);
@@ -378,7 +387,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
       if (!testDeduct.ok) {
         for (const doneType of testDeductedTypes) {
           // ★ 2026-07-30 (2R): 보상은 ok까지 확인한다. 이 경로는 의무를 붙일 캠페인 레코드가 없으므로
-          //   (전 건 zero-uuid 공유 — B-0727-2 ⑥ 기존 계약) 실패는 경보+로그로 사람이 수동 정산한다.
+          //   실패는 경보+로그로 사람이 수동 정산한다(참조는 요청마다 고유 — ★0926 F15·F17).
           try {
             const rev = await prepaidRefund(companyId, managerContacts.length, doneType, TEST_REF, `${axis.type} 차감 실패로 ${doneType} 차감분 회수`, 'test', { refundKey: REFUND_KEYS.TEST });
             if (!rev.ok) {
@@ -453,7 +462,9 @@ router.post('/test-send', async (req: Request, res: Response) => {
               etcJson: testBrandPayload.etcJson,
               nextType: 'N',  // 테스트는 대체발송 안함
               companyId,
-            }], testBillId);
+            }], 'test', testBillId);
+            // ★ 2026-09-26 한줄로 V2 S1-H06 — 옛: app_etc1 = userId(bill_id 없음)라 테스트 청구·테스트 결과 화면에서 빠졌다.
+            //   문자 테스트와 같은 자리('test' + bill_id = 계정). 청구 유형 = 테스트 브랜드(브랜드 단가 · billing-types testBillingTypeKey).
             testBrandSent++;
           } catch (brandErr) {
             contactOk = false;
@@ -474,8 +485,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
     // ★ P0-3: 테스트 발송 실패건 환불 — ★ 2026-07-30: 차감과 같은 축으로, 축별 실제 미적재분만 돌려준다.
     //   (옛 코드는 both에서 한 채널만 실패해도 유일한 차감 전체를 환불해 성공 발송이 무료가 됐다.)
-    // ⚠ 이 경로는 전 건이 고정 zero-uuid를 reference로 공유한다(기존 결함, B-0727-2 ⑥). 키를 달아 다른 원인과
-    //   섞이지는 않게 하되, 요청별 고유 reference로 바꾸는 것은 별도 과제로 남는다.
+    // ★ 2026-09-26 F15·F17: 참조가 요청마다 고유라 이 요청의 차감과만 비교된다(옛 고정 zero-uuid 공유 결함 B-0727-2 ⑥ 해소).
     for (const axis of testAxes) {
       const axisSent = axis.scope === 'brand' ? testBrandSent
         : axis.scope === 'nonBrand' ? testSmsSent
@@ -917,7 +927,7 @@ let callbackMissingCount = 0;
 let callbackUnregisteredCount = 0;
 if (useIndividualCallback) {
   // D91: admin/company_admin은 배정 필터 미적용 (전체 번호 사용 가능)
-  const cbUserId = (userType === 'super_admin' || userType === 'company_admin') ? undefined : userId;
+  const cbUserId = callbackAssignmentUserId(userType, userId);
   const cbResult = await filterByIndividualCallback(filteredCustomers, companyId, cbUserId, individualCallbackColumn);
   filteredCustomers = cbResult.filtered;
   callbackMissingCount = cbResult.callbackMissingCount;
@@ -953,44 +963,56 @@ if (campaign.is_ad) {
   }
 }
 
-    // ★ D100: 동일 캠페인 중복 발송 방지 — 이미 sending/scheduled run이 있으면 차단
-    const existingRun = await query(
-      `SELECT id FROM campaign_runs WHERE campaign_id = $1 AND status IN ('sending', 'scheduled') LIMIT 1`,
-      [id]
-    );
-    if (existingRun.rows.length > 0) {
-      return res.status(400).json({ error: '이미 발송이 진행 중이거나 예약되어 있습니다.' });
-    }
-
-    // campaign_runs에 발송 이력 생성 (CT-08 확인 모달 통과 후에만 INSERT)
-    const runNumberResult = await query(
-      `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run
-       FROM campaign_runs WHERE campaign_id = $1`,
-      [id]
-    );
-    const runNumber = runNumberResult.rows[0].next_run;
-
     // 예약 발송인지 확인
     console.log('scheduled_at:', campaign.scheduled_at);
     const isScheduled = campaign.scheduled_at && new Date(campaign.scheduled_at) > new Date();
     console.log('isScheduled:', isScheduled);
 
-    const runResult = await query(
-      `INSERT INTO campaign_runs (
-        campaign_id, run_number, target_filter, target_count,
-        status, scheduled_at
-      ) VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING *`,
-      [
-        id,
-        runNumber,
-        JSON.stringify(targetFilter),
-        filteredCustomers.length,
-        isScheduled ? 'scheduled' : 'sending',
-        campaign.scheduled_at
-      ]
-    );
-    const campaignRun = runResult.rows[0];
+    // ★ D100: 동일 캠페인 중복 발송 방지 — 이미 sending/scheduled run이 있으면 차단
+    // ★ 2026-09-26 한줄로 V2 S1-H07·F09(Codex 4차 2R high) — 존재 재확인 → 중복 확인 → 실행 행 생성을 **캠페인 발송 시작 잠금** 안에서 한다.
+    //   옛: 조회 뒤 삽입이라 동시 요청 둘이 함께 통과했고(S1-H07), 초안 삭제 가드와 섞이면 삭제된 캠페인으로 차감·적재가 이어져
+    //   예약분은 나가는데 정산 기준 행이 없었다. 실행 행이 생긴 뒤에 잠금을 푼다 — 그 뒤의 중복 요청·초안 삭제는 그 행을 본다.
+    const startGate = await withCampaignStartLock(id, async () => {
+      const alive = await query(`SELECT 1 FROM campaigns WHERE id = $1 AND company_id = $2`, [id, companyId]);
+      if (alive.rows.length === 0) return { run: null, blocked: 'gone' as const };
+      const existingRun = await query(
+        `SELECT id FROM campaign_runs WHERE campaign_id = $1 AND status IN ('sending', 'scheduled') LIMIT 1`,
+        [id]
+      );
+      if (existingRun.rows.length > 0) return { run: null, blocked: 'duplicate' as const };
+
+      // campaign_runs에 발송 이력 생성 (CT-08 확인 모달 통과 후에만 INSERT)
+      const runNumberResult = await query(
+        `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run
+         FROM campaign_runs WHERE campaign_id = $1`,
+        [id]
+      );
+      const runNumber = runNumberResult.rows[0].next_run;
+
+      const runResult = await query(
+        `INSERT INTO campaign_runs (
+          campaign_id, run_number, target_filter, target_count,
+          status, scheduled_at
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *`,
+        [
+          id,
+          runNumber,
+          JSON.stringify(targetFilter),
+          filteredCustomers.length,
+          isScheduled ? 'scheduled' : 'sending',
+          campaign.scheduled_at
+        ]
+      );
+      return { run: runResult.rows[0], blocked: null };
+    });
+    if (startGate.blocked === 'gone') {
+      return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+    }
+    if (startGate.blocked === 'duplicate') {
+      return res.status(400).json({ error: '이미 발송이 진행 중이거나 예약되어 있습니다.' });
+    }
+    const campaignRun = startGate.run;
     campaignRunId = campaignRun.id;  // 최상위 catch가 종결할 수 있게 밖으로 올린다(위 선언 주석 참조)
 
 // 차감 유형은 아래 catch(축별 환불)도 봐야 하므로 여기서 확정한다.
@@ -1289,7 +1311,7 @@ await query(
       callbackMissingCount,
       callbackUnregisteredCount,
       runId: campaignRun.id,
-      runNumber: runNumber,
+      runNumber: campaignRun.run_number,   // 잠금 안에서 만든 실행 행의 회차(RETURNING *)
     });
 
     } catch (sendError) {
@@ -1328,6 +1350,19 @@ await query(
       }
       // 축을 한 번에 기록한다 — 나눠 쓰면 그 사이에 워커가 첫 축만 보고 슬롯을 지운다.
       await markRefundPendingAxes(id, aiPending);
+      // ★ 2026-09-26 한줄로 V2 F09 — 한 건이라도 적재됐으면 그 몫은 (예약이면 예약 시각에) 나간다.
+      //   failed로 덮으면 예약 캠페인이 취소 게이트(scheduled·draft)에서 빠져 **취소할 수 없는 채로** 나가고, 실행 행 실패는
+      //   AI 결과 동기화(sending·scheduled·completed)에서도 빠진다. 정상 경로와 같은 종결 상태로 두고 안내는 사실대로.
+      //   상태 기록은 최선만 — 여기까지 온 이유가 DB 오류일 수 있다(실패해도 draft로 남아 취소 게이트 안이다).
+      const loadedAny = aiSmsInserted + aiBrandInsertedTotal > 0;
+      if (loadedAny) {
+        const finalStatus = isScheduled ? 'scheduled' : 'completed';
+        await query(`UPDATE campaigns SET status = $1, sent_count = GREATEST(COALESCE(sent_count, 0), $2), updated_at = NOW() WHERE id = $3`, [finalStatus, aiSentCount, id])
+          .catch((e: any) => console.error('[AI발송] 적재 뒤 캠페인 상태 기록 실패:', e?.message || e));
+        await query(`UPDATE campaign_runs SET status = $1, sent_count = GREATEST(COALESCE(sent_count, 0), $2) WHERE id = $3`, [finalStatus, aiSentCount, campaignRun.id])
+          .catch((e: any) => console.error('[AI발송] 적재 뒤 실행 행 상태 기록 실패:', e?.message || e));
+        return res.status(500).json({ error: loadedSendFailureMessage(!!isScheduled) });
+      }
       try {
         await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [id]);
       } catch (statusErr) {
@@ -1449,14 +1484,15 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     };
 
     // 비용 계산 (회사 실제 단가 기준)
-    const costResult = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms, unit_price_basis FROM companies WHERE id = $1', [companyId]);
+    const costResult = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_brand, unit_price_basis FROM companies WHERE id = $1', [companyId]);
     const costRow = getCompanyCosts(costResult.rows[0] || {});
     const costSms = costRow.sms;
     const costLms = costRow.lms;
     const costMms = costRow.mms;
     allResults.forEach((r: any) => {
       if (isSuccess(r.status_code)) {
-        stats.cost += r.msg_type === 'S' ? costSms : r.msg_type === 'M' ? costMms : costLms;
+        // ★ 2026-09-26 S1-H06 브랜드 테스트 = 브랜드(친구) 단가(청구 유형 테스트 브랜드와 같은 값)
+        stats.cost += r.msg_type === 'F' ? costRow.brand : r.msg_type === 'S' ? costSms : r.msg_type === 'M' ? costMms : costLms;
       }
     });
 
@@ -1464,8 +1500,9 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     const list = allResults.map((r: any) => ({
       id: r.seqno,
       phone: r.dest_no,
-      content: r.msg_contents,
-      type: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'M' ? 'MMS' : 'LMS',
+      // ★ 2026-09-26 S1-H06 브랜드 테스트가 이 목록에 들어온다 — 유형·본문은 표시 CT(브랜드 본문은 JSON이라 문구만 꺼낸다)
+      content: getDisplayContents(r.msg_type, r.msg_contents),
+      type: getSendTypeLabel(r.msg_type),
       sentAt: r.sendreq_time,
       status: isSuccess(r.status_code) ? 'success' : PENDING_CODES.includes(r.status_code) ? 'pending' : 'fail',
 
@@ -1528,7 +1565,8 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       const isCompleted = r.result !== null;
       // ★2026-09-25 무료 체험 검사는 비용 0(청구하지 않는다 · spam-trial CT)
       const isTrial = r.source === SPAM_TRIAL_SOURCE;
-      if (isCompleted && !isTrial) {
+      // ★ 2026-09-26 F49 — 비용은 청구 제외 판정 CT를 따른다(체험 + 무료 자동 검사 = 0원 · 정산 집계와 같은 집합)
+      if (isCompleted && isSpamTestBillable(r.source)) {
         sfCostCalc += msgType === 'SMS' ? costSms : costLms;
       }
       return {
@@ -1643,6 +1681,9 @@ router.post('/direct-send/stage', async (req: Request, res: Response) => {
       return res.status(413).json({ success: false, error: '청크는 최대 5만건입니다', code: 'CHUNK_TOO_LARGE' });
     }
     const stagingId = incoming || randomUUID();
+    // ★ 2026-09-26 한줄로 V2 F38 — 받은 stagingId에 덧붙일 수 있는 것은 **아직 커밋 전인 우리 회사 준비분**뿐이다.
+    //   커밋된 준비분에 덧붙이면 워커가 그 행까지 읽어 차감·정제 없이 발송됐다(화면은 이 경로를 안 쓰지만 API로 가능).
+    //   다른 회사 준비분은 존재를 드러내지 않는다(404).
     // ★ UNNEST 배열 방식 — 파라미터 8개 고정 (행 수 무관). 다중 행 VALUES는 행×8 파라미터라
     //   5만 청크 = 40만 파라미터로 PostgreSQL 한도(65,535)를 초과 → UNNEST 필수.
     const phones: string[] = [];
@@ -1659,13 +1700,37 @@ router.post('/direct-send/stage', async (req: Request, res: Response) => {
       extra3s.push(r.extra3 ?? null);
       callbacks.push(r.callback ?? null);
     });
-    await query(
+    const insertRows = () => query(
       `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1, extra2, extra3, callback)
        SELECT $1::uuid, $2::uuid, u.phone, u.name, u.extra1, u.extra2, u.extra3, u.callback
        FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[])
          AS u(phone, name, extra1, extra2, extra3, callback)`,
       [stagingId, companyId, phones, names, extra1s, extra2s, extra3s, callbacks]
     );
+    // ★ 2026-09-26 한줄로 V2 F38 — 받은 stagingId에 덧붙일 수 있는 것은 **아직 커밋 전인 우리 회사 준비분**뿐이다.
+    //   커밋된 준비분에 덧붙이면 워커가 그 행까지 읽어 차감·정제 없이 발송됐다(화면은 이 경로를 안 쓰지만 API로 가능).
+    //   다른 회사 준비분은 존재를 드러내지 않는다(404). ★ Codex 1R high: 검사와 INSERT 사이에 commit이 끼지 않게 준비분 잠금 안에서 한다
+    //   (commit도 같은 잠금 안에서 만료 확인 → 집계 → 캠페인 생성). 첫 청크(incoming 없음)는 아직 아무도 모르는 새 id라 잠글 필요가 없다.
+    if (incoming) {
+      const blocked = await withStagingLock(stagingId, async () => {
+        const committed = await query(`SELECT 1 FROM campaigns WHERE staging_id = $1::uuid LIMIT 1`, [stagingId]);
+        if (committed.rows.length > 0) {
+          return { status: 409, body: { success: false, code: 'STAGING_COMMITTED', error: '이미 발송을 누른 준비분에는 수신자를 더할 수 없습니다. 새로 준비해 주세요.' } };
+        }
+        const foreign = await query(
+          `SELECT 1 FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id <> $2::uuid LIMIT 1`,
+          [stagingId, companyId],
+        );
+        if (foreign.rows.length > 0) {
+          return { status: 404, body: { success: false, code: 'STAGING_NOT_FOUND', error: '발송 준비분을 찾을 수 없습니다. 새로 준비해 주세요.' } };
+        }
+        await insertRows();
+        return null;
+      });
+      if (blocked) return res.status(blocked.status).json(blocked.body);
+    } else {
+      await insertRows();
+    }
     return res.json({ success: true, stagingId, staged: recipients.length });
   } catch (err: any) {
     const msg = err?.message || '';
@@ -1818,35 +1883,45 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     // ★ 2026-06-04 정정: 정제(DELETE)를 commit에서 빼고 worker가 발송 직전에 수행 → commit 즉시 응답(504 원천 차단).
     //   여기선 count endpoint와 같은 헬퍼로 발송 예정 건수만 COUNT(차감·캠페인 target_count). staging은 안 건드린다.
     //   worker가 같은 기준으로 실제 제거하므로 모달 숫자 = 차감 = 실제 발송이 일치한다.
-    const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled);
-    if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
-
-    // 캠페인 생성 + 차감 + worker 트리거 — createDirectSendCampaign 공유(자율 발송과 동일 경로, MMS 이미지 컬럼 저장 포함).
-    try {
-      const { campaignId, accepted } = await createDirectSendCampaign({
-        stagingId, campaignName: `직접발송 ${new Date().toLocaleString('ko-KR')}`,
-        msgType: commitMsgResolved.messageType, message, subject, callback, sendChannel: commitChannel.channel, adEnabled, total,
-        scheduled, scheduledAt, splitEnabled, splitCount, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
-        dedupEnabled, unsubFilterEnabled,
-        kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
-        alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson: alimtalkButtonJsonResolved, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
-        alimtalkEtcJson, alimtalkTemplateUuid,
-      }, { companyId, userId }, { finalSource: 'manual' });
-
-      return res.status(202).json({
-        success: true, campaignId, accepted,
-        message: `${accepted}건 발송이 접수됐습니다. 진행 상황은 발송결과에서 확인하세요.`,
-      });
-    } catch (e: any) {
-      if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
-        return res.status(402).json({ success: false, error: e.message, ...(e.extra || {}) });
+    // ★ 2026-09-26 전수점검 S1-H08: 23시간 넘은(또는 정리된) 적재분은 받지 않는다 — 건수 확정·차감보다 먼저.
+    //   정리 워커(staging-sweeper)는 24시간 넘은 적재분만 통째로 지우므로, 정리가 손대는 적재분은 여기서 반드시 걸린다
+    //   (일부만 지워진 적재분이 발송되면 나머지가 조용히 빠진다). 만료 기준은 staging-sweeper 하나가 소유한다.
+    // ★ 2026-09-26 한줄로 V2 F38 (Codex 1R high) — 같은 준비분의 stage(검사 → INSERT)와 섞이지 않게 준비분 잠금 안에서
+    //   만료 확인 → 집계 → 캠페인 생성을 한다. 캠페인이 생기면 stage는 409로 막힌다(집계 뒤 덧붙인 행이 발송되지 않는다).
+    return await withStagingLock(stagingId, async () => {
+      if ((await resolveStagingCommitState(stagingId, companyId)) === 'expired') {
+        return res.status(400).json({ success: false, code: 'STAGING_EXPIRED', error: '발송 준비가 만료됐습니다. 발송을 다시 눌러 주세요.' });
       }
-      // ★ 2026-07-02 그 외 DirectSendError(링크 placeholder 가드 등) = 정의된 상태코드 + 사용자 친화 메시지
-      if (e instanceof DirectSendError) {
-        return res.status(e.httpStatus || 400).json({ success: false, error: e.message, code: e.code, ...(e.extra || {}) });
+      const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled);
+      if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
+
+      // 캠페인 생성 + 차감 + worker 트리거 — createDirectSendCampaign 공유(자율 발송과 동일 경로, MMS 이미지 컬럼 저장 포함).
+      try {
+        const { campaignId, accepted } = await createDirectSendCampaign({
+          stagingId, campaignName: `직접발송 ${new Date().toLocaleString('ko-KR')}`,
+          msgType: commitMsgResolved.messageType, message, subject, callback, sendChannel: commitChannel.channel, adEnabled, total,
+          scheduled, scheduledAt, splitEnabled, splitCount, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
+          dedupEnabled, unsubFilterEnabled,
+          kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
+          alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson: alimtalkButtonJsonResolved, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
+          alimtalkEtcJson, alimtalkTemplateUuid,
+        }, { companyId, userId }, { finalSource: 'manual' });
+
+        return res.status(202).json({
+          success: true, campaignId, accepted,
+          message: `${accepted}건 발송이 접수됐습니다. 진행 상황은 발송결과에서 확인하세요.`,
+        });
+      } catch (e: any) {
+        if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
+          return res.status(402).json({ success: false, error: e.message, ...(e.extra || {}) });
+        }
+        // ★ 2026-07-02 그 외 DirectSendError(링크 placeholder 가드 등) = 정의된 상태코드 + 사용자 친화 메시지
+        if (e instanceof DirectSendError) {
+          return res.status(e.httpStatus || 400).json({ success: false, error: e.message, code: e.code, ...(e.extra || {}) });
+        }
+        throw e;
       }
-      throw e;
-    }
+    });
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
@@ -2049,6 +2124,13 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ 2026-09-26 한줄로 전수점검 부분 ① F20: 야간 광고 발송 제한(정보통신망법 · D-2) — 이 동기 경로는 직접발송 코어를
+    //   거치지 않아 차단이 없었다. 판정·문장은 코어와 같은 CT(nightAdRestrictionMessage). 차감·적재 전에 막는다.
+    const directNightAdMsg = nightAdRestrictionMessage(finalIsAd, scheduled, scheduledAt, SEND_HOURS.start, SEND_HOURS.end);
+    if (directNightAdMsg) {
+      return res.status(400).json({ success: false, error: directNightAdMsg, code: 'NIGHT_AD_RESTRICTED' });
+    }
+
     // ★ D102: 중복제거 — 사용자 선택에 따라 적용 (기본 true)
     let finalRecipients = recipients;
     let duplicateCount = 0;
@@ -2160,7 +2242,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     let callbackUnregisteredCount = 0;
     if (useIndividualCallback) {
       // D91: admin/company_admin은 배정 필터 미적용 (전체 번호 사용 가능)
-      const cbUserId = (userType === 'super_admin' || userType === 'company_admin') ? undefined : userId;
+      const cbUserId = callbackAssignmentUserId(userType, userId);
       // ★ D99: direct-send에서는 프론트가 이미 선택된 컬럼값을 callback에 매핑해서 전달하므로
       // callbackColumn을 CT-08에 전달하지 않음 (recipients에 원본 컬럼 필드가 없으므로 전달하면 덮어씌워짐)
       console.log(`[direct-send] 개별회신번호 필터 시작 — recipients: ${validRecipients.length}, confirmCallbackExclusion: ${confirmCallbackExclusion}`);
@@ -2199,14 +2281,22 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         for (const [key, condition] of Object.entries(targetFilter)) {
           if (typeof condition === 'object' && condition !== null) {
             const cond = condition as any;
+            if (!['between', 'gte', 'lte'].includes(cond.operator)) continue;
+            // ★ 2026-09-25 한줄로 전수점검 C-03: 키를 SQL에 그대로 넣으면 로그인 사용자 누구나 API로 SQL을 바꿀 수 있었다.
+            //   컬럼명은 표준 필드 맵(유일 기준)의 숫자 컬럼에서만 가져오고, 모르는 키는 조용히 건너뛰지 않고 거절한다
+            //   (건너뛰면 걸러야 할 수신자까지 발송된다).
+            const col = fieldKeyToColumn(key);
+            if (!col || getFieldByKey(key)?.dataType !== 'number') {
+              return res.status(400).json({ success: false, error: `알 수 없는 금액 필터 항목입니다: ${String(key).slice(0, 40)}` });
+            }
             if (cond.operator === 'between' && Array.isArray(cond.value)) {
-              filterWhere += ` AND c.${key} BETWEEN $${pIdx++} AND $${pIdx++}`;
+              filterWhere += ` AND c.${col} BETWEEN $${pIdx++} AND $${pIdx++}`;
               filterParams.push(cond.value[0], cond.value[1]);
             } else if (cond.operator === 'gte') {
-              filterWhere += ` AND c.${key} >= $${pIdx++}`;
+              filterWhere += ` AND c.${col} >= $${pIdx++}`;
               filterParams.push(cond.value);
             } else if (cond.operator === 'lte') {
-              filterWhere += ` AND c.${key} <= $${pIdx++}`;
+              filterWhere += ` AND c.${col} <= $${pIdx++}`;
               filterParams.push(cond.value);
             }
           }
@@ -2538,7 +2628,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ 선불 잔액 체크 + 차감
     // 유형은 위 게이트가 확정한 값을 쓴다 — 원본을 다시 읽으면 게이트를 우회한 값이 과금 축이 된다.
     // ★ 2026-09-13 브랜드 단가는 대상(친구·비친구)으로 갈린다 — 적재 조립(위 directBrandPayload)과 같은 값.
-    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId, 'campaign', { targeting: kakaoTargeting || 'I', form: 'FREE' });
+    // ★ 2026-09-26 한줄로 V2 F01·F04 알림톡이면 차감 행에 결과별 정산 단가를 싣는다(정산 스위퍼가 결과별 차액을 돌려준다).
+    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId, 'campaign', { targeting: kakaoTargeting || 'I', form: 'FREE' }, { alimtalk: directChannel === 'alimtalk' });
     if (directDeduct.ok) directDeductedAxes.add(directDeductType);
     if (!directDeduct.ok) {
       // 캠페인 레코드 롤백
@@ -2890,6 +2981,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     } catch (sendError) {
       // ★ C1: 전체 실패 (루프 진입 전 오류 등) — 전액 환불
       console.error('[직접발송] 큐 처리 전체 실패 — 차감 환불 처리:', sendError);
+      // ★ 2026-09-26 한줄로 V2 F09(같은 모양) — 한 건이라도 적재됐으면 그 몫은 나간다. failed로 덮으면 예약분이 취소 게이트에서 빠진다.
+      const loadedAny = directSmsSentCount + directKakaoSentCount + directAlimtalkSentCount > 0;
       try {
         // ★ 2026-07-27 (B-0727-2): 이 catch는 큐 적재뿐 아니라 그 뒤 후처리(상태 UPDATE·학습 적재)까지 감싼다.
         //   전량을 미적재로 환불하면, 적재는 다 됐는데 후처리만 실패한 경우 실제로 나갈 발송분까지 돌려준다.
@@ -2927,11 +3020,21 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         }
         // 축을 **한 번에** 기록한다 — 나눠 쓰면 그 사이에 워커가 첫 축만 담긴 스냅샷을 읽고 슬롯을 지운다.
         await markRefundPendingAxes(campaignId, pendingAxes.map((p) => ({ count: p.count, messageType: p.type })));
-        await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [campaignId]);
+        if (loadedAny) {
+          if (!scheduled) {
+            // 즉시 발송 = 정상 경로와 같은 종결(completed). 예약은 상태가 원래 scheduled라 그대로 둔다(취소 게이트 안).
+            await query(
+              `UPDATE campaigns SET status = 'completed', sent_count = GREATEST(COALESCE(sent_count, 0), $2), sent_at = COALESCE(sent_at, NOW()), updated_at = NOW() WHERE id = $1`,
+              [campaignId, Math.max(directSmsSentCount, directKakaoSentCount, directAlimtalkSentCount)]
+            );
+          }
+        } else {
+          await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [campaignId]);
+        }
       } catch (refundErr) {
         console.error('[직접발송] 환불 처리 중 추가 오류:', refundErr);
       }
-      return res.status(500).json({ success: false, error: '발송 처리 중 오류가 발생했습니다. 차감된 금액은 자동 환불됩니다.' });
+      return res.status(500).json({ success: false, error: loadedAny ? loadedSendFailureMessage(!!scheduled) : '발송 처리 중 오류가 발생했습니다. 차감된 금액은 자동 환불됩니다.' });
     }
 
   } catch (error) {
@@ -2994,11 +3097,13 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       const searchCondition = search ? ` AND dest_no LIKE ?` : '';
       const searchParams = search ? [campaignId, `%${normalizePhone(String(search))}%`] : [campaignId];
 
-      const mysqlRecipients = await smsSelectAll(recipientTables,
+      // ★ 2026-09-26 한줄로 V2 F21 — 페이지 전용 CT(테이블별 상위 limit+offset만 먼저 자르고 병합 · 결과 동일).
+      //   옛 smsSelectAll은 페이지마다 일치 행 전체(본문 포함)를 임시 테이블에 모은 뒤 잘랐다(0613 예약 상세 10초 병목과 같은 모양).
+      const mysqlRecipients = await smsSelectPagedAll(recipientTables,
         'seqno as idx, dest_no as phone, call_back as callback, msg_contents as message',
         `app_etc1 = ? AND status_code = 100${searchCondition}`,
         searchParams,
-        `ORDER BY seqno LIMIT ${limit} OFFSET ${offset}`
+        'seqno ASC', limit, offset
       );
 
       // MySQL에 데이터 있으면 그걸 반환
@@ -3099,11 +3204,12 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     const searchCondition2 = search ? ` AND dest_no LIKE ?` : '';
     const searchParams2 = search ? [campaignId, `%${normalizePhone(String(search))}%`] : [campaignId];
 
-    const recipients = await smsSelectAll(recipientTables,
+    // ★ 2026-09-26 한줄로 V2 F21 — 위 예약 분기와 같은 페이지 전용 CT(전체 실체화 뒤 자르지 않는다).
+    const recipients = await smsSelectPagedAll(recipientTables,
       'seqno as idx, dest_no as phone, call_back as callback, msg_contents as message, sendreq_time, status_code',
       `app_etc1 = ? AND status_code = 100${searchCondition2}`,
       searchParams2,
-      `ORDER BY seqno LIMIT ${limit} OFFSET ${offset}`
+      'seqno ASC', limit, offset
     );
 
     const totalCount = await smsCountAll(recipientTables, `app_etc1 = ? AND status_code = 100${searchCondition2}`, searchParams2);
@@ -3147,25 +3253,94 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
     }
 
+    // ★ 2026-09-26 한줄로 전수점검 부분 ① F22·F23(0925 C-05 회귀): 직접발송은 접수 때부터 status='scheduled'인데
+    //   워커가 staging을 큐로 옮기는 중(preparing·queued·processing)이면 큐에는 일부만 있다. 이때 지우면 아래 환불의
+    //   "남아서 나갈 행"이 큐에 있는 행만 세어 아직 적재 안 된 행까지 환불된다(나갈 문자값 환불 · 워커 종결도 되돌리지 않음).
+    //   적재 중 삭제는 워커가 staging을 계속 읽어 그 번호가 그대로 나가는 문제도 있다(A-02) → 적재가 끝날 때까지 막는다.
+    const loadingPhase = String(campaign.rows[0].send_phase || '');
+    if (['preparing', 'queued', 'processing'].includes(loadingPhase)) {
+      return res.status(409).json({ success: false, error: '발송 준비(적재) 중에는 수신자를 삭제할 수 없습니다. 적재가 끝난 뒤 다시 시도해주세요.', code: 'LOADING_IN_PROGRESS' });
+    }
+
     // MySQL 라인 테이블(발송 당시 기록 1순위 + 전 라인 합집합)에서 데이터 있는지 확인 — 2026-06-11 라인 불일치 fix
     const delTables = await getCampaignQueueTables(companyId, campaign.rows[0].created_by || undefined, campaign.rows[0].send_config);
     const mysqlCount = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
     if (mysqlCount > 0) {
-      // 회사 테이블에서 삭제
-      await smsExecAll(delTables,
-        `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND dest_no = ? AND status_code = 100`,
-        [campaignId, phone]
-      );
+      // ★ 2026-09-25 한줄로 전수점검 C-05 (Codex 1R·2R): 이 행들은 적재 때 이미 선차감됐는데 지우기만 하고 환불하지 않았다.
+      //   순서 = ①캠페인 단위 잠금 ②삭제 **뒤** 상태 기준으로 캠페인 전체 목표 환불(keepCount = 남아서 나갈 대기 행)
+      //   ③환불이 끝난 뒤에만 큐에서 지운다. 환불이 안 되면 지우지 않는다 — 지운 뒤 환불이 실패하면 그 뒤 전체 취소 시
+      //   삭제분을 아무도 돌려주지 않았다(취소는 남은 대기 행만 · 취소 캠페인은 정리 워커 대상 밖).
+      //   원인 키 NOT_LOADED: 발송 뒤 정리 워커가 같은 몫(sent_count 감소분 · both는 MySQL 실측)을 미적재로 계산해도 그 항아리가 이미 차 있고,
+      //   뒤이은 취소(CANCEL)는 남은 대기 행만 돌려주므로 합이 차감과 맞는다. 15분 전 차단이라 에이전트 픽업과 겹치지 않는다(위 검사).
+      //   잠금 = 같은 캠페인의 동시 삭제가 "남는 행"을 겹쳐 세지 않게 한다 — 프로세스 안 잠금 CT(inflight-lock · pm2 fork 1개 전제).
+      //   ⛔ DB 연결을 쥔 잠금(advisory xact)을 쓰지 않는다(Codex 3R high): 잠금 연결을 쥔 채 prepaidRefund가 같은 풀에서
+      //   연결을 하나 더 빌리므로, 여러 캠페인 삭제가 몰리면 풀 전체가 서로를 기다리며 정체된다. 기다리지 않는다(409).
+      const deleteLockKey = `recipient-delete:${campaignId}`;
+      if (!tryAcquireInflight(deleteLockKey)) {
+        return res.status(409).json({ success: false, error: '다른 수신자 삭제를 처리하고 있습니다. 잠시 후 다시 시도해주세요.' });
+      }
+      try {
 
-      const remainingCount = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
+        const waitingNow = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
+        const phoneRows = await smsCountAll(delTables, 'app_etc1 = ? AND dest_no = ? AND status_code = 100', [campaignId, phone]);
+        if (phoneRows === 0) {
+          return res.json({ success: true, message: '삭제되었습니다', remainingCount: waitingNow });
+        }
+        if (waitingNow - phoneRows <= 0) {
+          // 전량 삭제는 예약 취소가 맞는 경로다(취소 상태·예약 목록 정리·CANCEL 환불). 수신자 0명인 예약을 남기지 않는다.
+          return res.status(400).json({ success: false, error: '마지막 수신자는 삭제할 수 없습니다. 예약 취소를 이용해주세요.' });
+        }
+        // sent_count는 'both' 채널에서 문자 행만 센다(워커 종결 sent = 문자 적재수 · 브랜드 F 행은 brandSent 축) —
+        // 번호 하나에 문자+F 두 행이 지워지므로 sent_count에서는 문자 몫만 뺀다(브랜드 축 환불은 sweeper가 MySQL 실측으로 한다).
+        const sentCountRows = String(campaign.rows[0].send_channel || '').trim() === 'both'
+          ? await smsCountAll(delTables, `app_etc1 = ? AND dest_no = ? AND status_code = 100 AND (msg_type IS NULL OR msg_type <> 'F')`, [campaignId, phone])
+          : phoneRows;
 
-      await query(
-        `UPDATE campaigns SET target_count = $1, updated_at = NOW() WHERE id = $2`,
-        [remainingCount, campaignId]
-      );
+        // ② 삭제 뒤 상태 기준 환불 — 축마다 남는 행 = 지금 대기 − 이 번호의 대기
+        for (const axis of resolveRefundAxes(campaign.rows[0].send_channel, campaign.rows[0].message_type)) {
+          const scopeWhere = axis.scope === 'brand' ? ` AND msg_type = 'F'` : axis.scope === 'nonBrand' ? ` AND (msg_type IS NULL OR msg_type <> 'F')` : '';
+          const axisWaiting = await smsCountAll(delTables, `app_etc1 = ? AND status_code = 100${scopeWhere}`, [campaignId]);
+          const axisPhone = await smsCountAll(delTables, `app_etc1 = ? AND dest_no = ? AND status_code = 100${scopeWhere}`, [campaignId, phone]);
+          const kept = Math.max(0, axisWaiting - axisPhone);
+          const r = await prepaidRefund(
+            companyId, 0, axis.type, campaignId, `예약 수신자 삭제 환불(남은 ${kept}건 제외)`, 'campaign',
+            { refundKey: REFUND_KEYS.NOT_LOADED, keepCount: kept },
+          );
+          if (!r.ok) {
+            console.error(`[예약 수신자 삭제] 환불 실패 — 삭제하지 않음 campaign=${campaignId} ${axis.type}`);
+            return res.status(503).json({ success: false, error: '환불 처리를 완료하지 못해 삭제하지 않았습니다. 잠시 후 다시 시도해주세요.' });
+          }
+        }
 
-      return res.json({ success: true, message: '삭제되었습니다', remainingCount });
+        // ③ 환불이 끝난 뒤에만 지운다. 여기서 실패하면 돌려준 몫의 행이 남아 발송된다(고객 쪽 이득 · 경보로 드러낸다).
+        try {
+          await smsExecAll(delTables,
+            `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND dest_no = ? AND status_code = 100`,
+            [campaignId, phone]
+          );
+        } catch (delErr: any) {
+          console.error(`[예약 수신자 삭제] 환불 뒤 큐 삭제 실패 campaign=${campaignId}:`, delErr?.message || delErr);
+          void sendSystemAlert({
+            dedupKey: `recipient-delete-after-refund:${campaignId}`,
+            message: `예약 수신자 삭제 — 환불은 됐는데 큐 삭제 실패 campaign=${campaignId} phone 끝4=${String(phone).slice(-4)} (그 번호가 발송될 수 있음 · 수동 확인)`,
+          }).catch(() => { /* 경보 실패가 응답을 막지 않는다 */ });
+          return res.status(500).json({ success: false, error: '삭제 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' });
+        }
+
+        const remainingCount = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
+        await query(
+          `UPDATE campaigns
+              SET target_count = $1,
+                  sent_count = CASE WHEN sent_count IS NULL THEN NULL ELSE GREATEST(sent_count - $3::int, 0) END,
+                  updated_at = NOW()
+            WHERE id = $2`,
+          [remainingCount, campaignId, sentCountRows]
+        );
+        return res.json({ success: true, message: '삭제되었습니다', remainingCount });
+      } finally {
+        releaseInflight(deleteLockKey);
+      }
     }
 
     // MySQL에 없으면 excluded_phones에 추가
@@ -3200,6 +3375,12 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
     }
 
+    // ★ 2026-09-26 한줄로 V2 F24 — 대량 직접발송은 워커가 선점할 때 읽은 send_config로 적재한다.
+    //   적재 중(preparing·processing)에 고치면 적재된 행과 나머지 청크가 옛·새 값으로 갈라진다 → 적재가 끝난 뒤 다시.
+    if (isLoadingSendPhase(campaign.rows[0].send_phase) && campaign.rows[0].send_phase !== 'queued') {
+      return res.status(409).json({ success: false, code: 'LOADING_IN_PROGRESS', error: '발송 준비(적재) 중이라 지금은 수정할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' });
+    }
+
     // ★ D111 P4: 새 예약 시각 검증 — 컨트롤타워 validateScheduledAt (이전 인라인 15분 체크 교체)
     const rsCheck = validateScheduledAt(scheduledAt, { allowNull: false, minMinutesFromNow: 15 });
     if (!rsCheck.valid) {
@@ -3213,6 +3394,23 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
     const diffMinutes = (currentScheduledAt.getTime() - now.getTime()) / (1000 * 60);
     if (diffMinutes < 15) {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 시간을 변경할 수 없습니다', tooLate: true });
+    }
+
+    // ★ 2026-09-26 F24 — 적재 전(queued) 직접발송은 워커가 읽을 send_config.scheduledAt까지 함께 바꾼다(PG 컬럼만 바꾸면 옛 시각으로 적재).
+    //   send_phase='queued' 조건 = 워커 선점과 원자적 — 그 사이 선점됐으면 0행 → 적재 중과 같이 409.
+    if (campaign.rows[0].send_phase === 'queued') {
+      const queuedUpd = await query(
+        `UPDATE campaigns
+            SET scheduled_at = $1,
+                send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{scheduledAt}', to_jsonb($2::text)),
+                updated_at = NOW()
+          WHERE id = $3 AND send_phase = 'queued'`,
+        [newScheduledAt, newScheduledAt.toISOString(), campaignId]
+      );
+      if (queuedUpd.rowCount === 0) {
+        return res.status(409).json({ success: false, code: 'LOADING_IN_PROGRESS', error: '발송 준비(적재)가 시작돼 지금은 수정할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' });
+      }
+      return res.json({ success: true, message: '예약 시간이 변경되었습니다' });
     }
 
     // 1. 라인 테이블(발송 당시 기록 1순위 + 전 라인 합집합)에서 MIN(sendreq_time) 찾기 — 2026-06-11 라인 불일치 fix
@@ -3263,6 +3461,12 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
     }
 
+    // ★ 2026-09-26 한줄로 V2 F24 — 대량 직접발송은 워커가 선점할 때 읽은 send_config로 적재한다.
+    //   적재 중(preparing·processing)에 고치면 적재된 행과 나머지 청크가 옛·새 값으로 갈라진다 → 적재가 끝난 뒤 다시.
+    if (isLoadingSendPhase(campaign.rows[0].send_phase) && campaign.rows[0].send_phase !== 'queued') {
+      return res.status(409).json({ success: false, code: 'LOADING_IN_PROGRESS', error: '발송 준비(적재) 중이라 지금은 수정할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' });
+    }
+
     // LMS/MMS는 제목 필수
     const campMsgType = campaign.rows[0].message_type;
     if ((campMsgType === 'LMS' || campMsgType === 'MMS') && (!subject || !subject.trim())) {
@@ -3275,6 +3479,32 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     const diffMinutes = (currentScheduledAt.getTime() - now.getTime()) / (1000 * 60);
     if (diffMinutes < 15) {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
+    }
+
+    // ★ 2026-09-26 F24 — 적재 전(queued) 직접발송은 워커가 읽을 send_config의 message·subject까지 함께 바꾼다.
+    //   **처음 읽은 상태가 queued면 큐를 보지 않고** 여기서 끝낸다(Codex 4차 1R: 그 사이 워커가 첫 청크를 적재하면 큐에 행이 보여
+    //   아래 큐 편집 경로로 새어 적재된 청크만 새 문안이 됐다). send_phase='queued' 조건 = 워커 선점과 원자적 — 선점됐으면 0행 → 409.
+    //   큐 행이 없으니 알림톡·브랜드는 채널로 거절한다(아래 큐 기반 거절과 같은 규칙).
+    if (campaign.rows[0].send_phase === 'queued') {
+      const queuedChannel = String(campaign.rows[0].send_channel || '');
+      if (queuedChannel === 'alimtalk') {
+        return res.status(400).json({ success: false, error: '알림톡 예약 캠페인은 문안 수정을 지원하지 않습니다. 알림톡은 승인된 템플릿 그대로 발송됩니다. 예약을 취소한 뒤 다시 발송해주세요.' });
+      }
+      if ((BRAND_CAMPAIGN_CHANNELS as readonly string[]).includes(queuedChannel)) {
+        return res.status(400).json({ success: false, error: '브랜드메시지가 포함된 예약 캠페인은 문안 수정을 지원하지 않습니다. 예약을 취소한 뒤 다시 발송해주세요.' });
+      }
+      const queuedUpd = await query(
+        `UPDATE campaigns
+            SET message_template = $1, message_subject = $2, message_content = $3,
+                send_config = COALESCE(send_config, '{}'::jsonb) || jsonb_build_object('message', $3::text, 'subject', $2::text),
+                updated_at = NOW()
+          WHERE id = $4 AND send_phase = 'queued'`,
+        [sanitizedEditMessage, subject || null, sanitizedEditMessage, campaignId]
+      );
+      if (queuedUpd.rowCount === 0) {
+        return res.status(409).json({ success: false, code: 'LOADING_IN_PROGRESS', error: '발송 준비(적재)가 시작돼 지금은 수정할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' });
+      }
+      return res.json({ success: true, message: '문안이 수정되었습니다 (발송 시 적용)' });
     }
 
     // 1. MySQL 라인 테이블(발송 당시 기록 1순위 + 전 라인 합집합)에서 수신자 목록 조회 — 2026-06-11 라인 불일치 fix
@@ -3366,8 +3596,13 @@ router.put('/:id/message', async (req: Request, res: Response) => {
         const batch = tableRecipients.slice(i, i + batchSize);
 
         // CASE WHEN 으로 배치 업데이트
+        // ★ 2026-09-25 한줄로 전수점검 C-04: 본문·제목을 작은따옴표 이중화만 하고 문자열로 붙이면
+        //   MySQL은 백슬래시를 이스케이프로 읽어(`\'`가 따옴표를 닫는다) 본문이 SQL을 바꾸거나 변형된다(`\10,000` → `10,000`).
+        //   값은 전부 `?` 자리표시자로 넘긴다(mysqlQuery = mysql2 conn.query 값 이스케이프 · 다른 큐 쿼리와 같은 방식).
         const cases: string[] = [];
+        const caseParams: any[] = [];
         const titleCases: string[] = [];
+        const titleParams: any[] = [];
         const seqnos: number[] = [];
 
         for (const recipient of batch) {
@@ -3380,36 +3615,38 @@ router.put('/:id/message', async (req: Request, res: Response) => {
             subject: subject || '',
           });
 
-          // SQL escape
-          const escapedMessage = finalMessage.replace(/'/g, "''");
-          cases.push(`WHEN seqno = ${recipient.seqno} THEN '${escapedMessage}'`);
+          cases.push('WHEN seqno = ? THEN ?');
+          caseParams.push(recipient.seqno, finalMessage);
 
           // ★ KISA 2026-05: 제목도 (광고) 포함하여 UPDATE
           if (finalSubject && (msgType === 'LMS' || msgType === 'MMS')) {
-            const escapedSubject = finalSubject.replace(/'/g, "''");
-            titleCases.push(`WHEN seqno = ${recipient.seqno} THEN '${escapedSubject}'`);
+            titleCases.push('WHEN seqno = ? THEN ?');
+            titleParams.push(recipient.seqno, finalSubject);
           }
 
           seqnos.push(recipient.seqno);
         }
 
-        // Bulk UPDATE 실행 (테이블별)
+        // Bulk UPDATE 실행 (테이블별) — 자리표시자 순서 = msg_contents CASE → title_str CASE → WHERE seqno IN
         let updateQuery = `
           UPDATE ${table}
           SET msg_contents = CASE ${cases.join(' ')} END
         `;
+        const updateParams: any[] = [...caseParams];
 
         if (titleCases.length > 0) {
           updateQuery += `, title_str = CASE ${titleCases.join(' ')} END`;
+          updateParams.push(...titleParams);
         }
 
         // ★ 2026-08-15 브랜드 행(msg_type='F') 제외 — 이 경로는 문자(SMS/LMS) 문안 수정이라
         //   (광고)·080 부착과 제목 갱신이 문자 규약 기준이다. F 행에 닿으면 본문·제어 규약이 오염된다
         //   (규약 정정 전에는 JSON 전문을 평문으로 덮어 무로그 폐기까지 갔다). 브랜드 예약 문안 수정은 미지원.
         // ★ 2026-09-14 알림톡 행(msg_type='K')도 같은 이유로 제외(위 거부의 경합 대비 이중 방어).
-        updateQuery += ` WHERE seqno IN (${seqnos.join(',')}) AND status_code = 100 AND msg_type NOT IN ('F', 'K')`;
+        updateQuery += ` WHERE seqno IN (${seqnos.map(() => '?').join(',')}) AND status_code = 100 AND msg_type NOT IN ('F', 'K')`;
+        updateParams.push(...seqnos);
 
-        await mysqlQuery(updateQuery, []);
+        await mysqlQuery(updateQuery, updateParams);
 
         processedCount += batch.length;
 
@@ -3469,7 +3706,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     // 캠페인 조회 — 소유권 확인
     const campResult = await query(
-      `SELECT id, status, campaign_name, created_by, scheduled_at FROM campaigns WHERE id = $1 AND company_id = $2`,
+      `SELECT id, status, campaign_name, created_by, scheduled_at, send_config FROM campaigns WHERE id = $1 AND company_id = $2`,
       [campaignId, companyId]
     );
 
@@ -3512,14 +3749,36 @@ router.delete('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ D120: 미확정 draft 캠페인은 cancelled 보존 대신 완전 삭제
-    // 회신번호 확인 취소 등 예약 확정 전 포기한 건 — DB에 남겨둘 이유 없음
-    await query(`DELETE FROM campaign_runs WHERE campaign_id = $1`, [campaignId]);
-    await query(`DELETE FROM campaigns WHERE id = $1 AND company_id = $2`, [campaignId, companyId]);
+    // ★ 2026-09-26 (Codex 4차 2R high) — 가드부터 물리 삭제까지 **캠페인 발송 시작 잠금** 안에서 한다(발송 시작과 한 줄).
+    //   가드(실행 행·큐 0) 뒤에 동시 발송이 실행 행을 만들고 차감·적재하면, 그 캠페인을 지워 예약분이 정산 기준 없이 나갔다.
+    //   발송 시작은 실행 행을 잠금 안에서 만들고, 잠금을 기다린 발송은 캠페인이 지워졌으면 멈춘다.
+    return await withCampaignStartLock(campaignId, async () => {
+      // 잠금을 기다리는 사이 상태가 바뀌었을 수 있다 — 초안인지 다시 본다.
+      const fresh = await query(`SELECT status FROM campaigns WHERE id = $1 AND company_id = $2`, [campaignId, companyId]);
+      if (fresh.rows[0]?.status !== 'draft') {
+        return res.status(409).json({ success: false, code: 'DRAFT_HAS_SEND', error: '발송이 이미 접수된 캠페인입니다. 예약 목록에서 예약 취소를 이용해 주세요.' });
+      }
+      // ★ 2026-09-26 한줄로 V2 F09(Codex 4차 1R high) — 발송이 시작된 초안은 지우지 않는다.
+      //   적재 뒤 예외에서 상태 기록까지 실패하면 캠페인이 draft로 남는다. 여기서 지우면 큐의 예약분은 그대로 나가는데
+      //   결과 동기화·정산의 기준 행이 사라진다. 실행 행이 있거나 발송 큐에 행이 하나라도 있으면 예약 취소(큐 삭제·정산)로 보낸다.
+      const draftRun = await query(`SELECT 1 FROM campaign_runs WHERE campaign_id = $1 LIMIT 1`, [campaignId]);
+      const draftQueueTables = await getCampaignQueueTables(companyId, campaign.created_by || undefined, campaign.send_config);
+      if (draftRun.rows.length > 0 || (await smsCountAll(draftQueueTables, 'app_etc1 = ?', [campaignId])) > 0) {
+        return res.status(409).json({
+          success: false, code: 'DRAFT_HAS_SEND',
+          error: '발송이 이미 접수된 캠페인입니다. 예약 목록에서 예약 취소를 이용해 주세요.',
+        });
+      }
 
-    console.log(`[캠페인삭제-draft] campaign_id=${campaignId}, name="${campaign.campaign_name}", by user=${userId}`);
+      // ★ D120: 미확정 draft 캠페인은 cancelled 보존 대신 완전 삭제
+      // 회신번호 확인 취소 등 예약 확정 전 포기한 건 — DB에 남겨둘 이유 없음
+      await query(`DELETE FROM campaign_runs WHERE campaign_id = $1`, [campaignId]);
+      await query(`DELETE FROM campaigns WHERE id = $1 AND company_id = $2 AND status = 'draft'`, [campaignId, companyId]);
 
-    return res.json({ success: true, message: '취소되었습니다.' });
+      console.log(`[캠페인삭제-draft] campaign_id=${campaignId}, name="${campaign.campaign_name}", by user=${userId}`);
+
+      return res.json({ success: true, message: '취소되었습니다.' });
+    });
 
   } catch (error) {
     console.error('[캠페인취소-draft] 오류:', error);

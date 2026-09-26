@@ -120,7 +120,9 @@ router.post(['/webhook/:mallId', '/webhook'], json({ limit: '1mb', verify: (req:
       await query(
         `UPDATE cdp_webhook_deliveries
          SET status = 'duplicate', processed_at = NOW()
-         WHERE company_id = $1::uuid AND source = 'woocommerce' AND idempotency_key = $2`,
+         WHERE company_id = $1::uuid AND source = 'woocommerce' AND idempotency_key = $2
+           -- ★ 2026-09-26 한줄로 V2 R1-02 — 처리 완료 행만 중복 표시(실패 행을 덮으면 재처리 워커 대상에서 빠져 이벤트가 유실됐다)
+           AND status = 'processed'`,
         [integ.companyId, idempotencyKey],
       );
       return res.json({ success: true, duplicate: true });

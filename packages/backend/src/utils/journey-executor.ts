@@ -151,6 +151,16 @@ type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_cu
 let workerRunning = false;
 
 // ★ D188 Phase 2-B-1 (2026-05-21): summary에 waited / condition_passed / condition_failed 카운트 추가.
+/**
+ * ★ 2026-09-26 한줄로 V2 F39 — 한 주기에 밀린 실행을 비운다.
+ * 옛: 5분마다 전 회사 합쳐 100건만(하루 최대 2.9만 건) · 한 회사의 대량 진입이 다른 회사 여정을 몇 시간씩 밀었다.
+ * 예산은 주기(5분)보다 짧다 → 다음 주기와 겹치지 않는다(workerRunning 가드와 이중 안전).
+ */
+const JOURNEY_TICK_BUDGET_MS = 4 * 60 * 1000;
+/** 한 묶음 크기(종전과 같다) · 묶음 안 회사당 상한(큰 회사가 묶음을 독차지하지 않게 — 다음 묶음에서 이어 받는다) */
+const JOURNEY_BATCH_SIZE = 100;
+const JOURNEY_PER_COMPANY_PER_BATCH = 25;
+
 export async function runJourneyExecutor(): Promise<{ processed: number; sent: number; skipped: number; waited: number; conditionPassed: number; conditionFailed: number; paused: number; failed: number; goalExited: number }> {
   if (workerRunning) {
     return { processed: 0, sent: 0, skipped: 0, waited: 0, conditionPassed: 0, conditionFailed: 0, paused: 0, failed: 0, goalExited: 0 };
@@ -160,29 +170,44 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
   const summary = { processed: 0, sent: 0, skipped: 0, waited: 0, conditionPassed: 0, conditionFailed: 0, paused: 0, failed: 0, goalExited: 0 };
 
   try {
+    // ★ 2026-09-26 한줄로 V2 F39 — 예산 안에서 묶음을 반복한다. 이번 주기에 이미 집은 실행은 다시 집지 않는다
+    //   (실패해 next_run_at이 그대로인 행이 같은 주기에 되풀이되지 않게 · 재시도는 종전처럼 다음 주기).
+    const tickStartedAt = Date.now();
+    const pickedThisTick: string[] = [];
+    let batches = 0;
+    while (Date.now() - tickStartedAt < JOURNEY_TICK_BUDGET_MS) {
     const dueRes = await query(
-      `SELECT
-         e.id AS execution_id,
-         e.journey_id, e.customer_id,
-         e.current_step_order, e.status, e.next_run_at, e.entered_at, e.total_cost,
-         e.entry_event_properties,
-         j.company_id, j.status AS journey_status,
-         j.budget_monthly, j.threshold_cost_per_step, j.threshold_recipients_per_step,
-         j.stats_total_completed, j.stats_total_cost, j.created_by,
-         j.callback_number AS journey_callback_number,
-         j.callback_mode, j.start_kind,
-         COALESCE(j.goal_exit_enabled, false) AS goal_exit_enabled
-       FROM journey_executions e
-       JOIN journeys j ON e.journey_id = j.id
-       WHERE e.status = 'active'
-         AND j.status = 'active'
-         AND e.next_run_at IS NOT NULL
-         AND e.next_run_at <= NOW()
-       ORDER BY e.next_run_at ASC
-       LIMIT 100`
+      `SELECT due.* FROM (
+         SELECT
+           e.id AS execution_id,
+           e.journey_id, e.customer_id,
+           e.current_step_order, e.status, e.next_run_at, e.entered_at, e.total_cost,
+           e.entry_event_properties,
+           j.company_id, j.status AS journey_status,
+           j.budget_monthly, j.threshold_cost_per_step, j.threshold_recipients_per_step,
+           j.stats_total_completed, j.stats_total_cost, j.created_by,
+           j.callback_number AS journey_callback_number,
+           j.callback_mode, j.start_kind,
+           COALESCE(j.goal_exit_enabled, false) AS goal_exit_enabled,
+           ROW_NUMBER() OVER (PARTITION BY j.company_id ORDER BY e.next_run_at ASC) AS company_rank
+         FROM journey_executions e
+         JOIN journeys j ON e.journey_id = j.id
+         WHERE e.status = 'active'
+           AND j.status = 'active'
+           AND e.next_run_at IS NOT NULL
+           AND e.next_run_at <= NOW()
+           AND NOT (e.id = ANY($1::uuid[]))
+       ) due
+       WHERE due.company_rank <= $2
+       ORDER BY due.next_run_at ASC
+       LIMIT $3`,
+      [pickedThisTick, JOURNEY_PER_COMPANY_PER_BATCH, JOURNEY_BATCH_SIZE]
     );
+    if (dueRes.rows.length === 0) break;
+    batches++;
 
     for (const row of dueRes.rows as ExecutionRow[]) {
+      pickedThisTick.push(row.execution_id);
       summary.processed++;
       try {
         const outcome = await processExecution(row);
@@ -223,8 +248,10 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
       }
     }
 
-    if (dueRes.rows.length > 0) {
-      console.log(`[JourneyExecutor] 처리 완료 — sent=${summary.sent} waited=${summary.waited} cond_pass=${summary.conditionPassed} cond_fail=${summary.conditionFailed} goal_exited=${summary.goalExited} skipped=${summary.skipped} paused=${summary.paused} failed=${summary.failed}`);
+    }
+
+    if (summary.processed > 0) {
+      console.log(`[JourneyExecutor] 처리 완료(묶음 ${batches}) — sent=${summary.sent} waited=${summary.waited} cond_pass=${summary.conditionPassed} cond_fail=${summary.conditionFailed} goal_exited=${summary.goalExited} skipped=${summary.skipped} paused=${summary.paused} failed=${summary.failed}`);
     }
   } finally {
     workerRunning = false;
@@ -800,8 +827,9 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'paused_external';
   }
 
-  // 8. 잔액 사전 확인 (read-only 게이트) — 실제 차감은 큐 INSERT 성공 직후(아래).
-  //    ★ 2026-06-06 J1: 옛 코드는 차감을 큐보다 먼저 해 큐 실패·재시도 시 과금만 되고 환불이 없었다(중복 차감) → 발송 성공 시점 차감으로 교정.
+  // 8. 잔액 사전 확인 (read-only 게이트) — 실제 차감은 단계 캠페인을 잡은 직후·큐 적재 전(아래).
+  //    ★ 2026-06-06 J1은 차감을 큐 성공 뒤로 옮겼다(그땐 큐 실패·재시도분 환불 경로가 없었다).
+  //    ★ 2026-09-26 한줄로 V2: 여정 환불 경로(스위퍼 실패·미적재)가 생겨 차감을 다시 적재 앞으로 둔다 — 이유는 차감 자리 주석.
   const prepaidMsgType = msgType === 'KAKAO' ? 'KAKAO' : (msgType as 'SMS' | 'LMS' | 'MMS');
   const balRes = await query(
     `SELECT billing_type, balance FROM companies WHERE id = $1::uuid`,
@@ -867,6 +895,34 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     kakaoTemplateId: isKakao && kakaoTemplateRow ? kakaoTemplateRow.id : null,  // 알림톡 결과 조회용 FK (results.ts JOIN)
     mmsImagePaths: (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths.length > 0) ? JSON.stringify(step.mms_image_paths) : null,
   });
+
+  // ★ 2026-09-26 한줄로 V2 F05·F06·F11 — 선불 차감은 **적재보다 앞**이고 참조는 **단계 캠페인 id**다(옛: 적재 뒤 · 여정 id).
+  //   ① 참조: 정산 스위퍼가 이 캠페인의 MySQL 결과로 실패·미적재분을 환불하려면 차감이 같은 id로 묶여 있어야 한다
+  //      (여정 id로는 실패분이 영구 과금됐다). 유형 'journey'는 그대로라 차감이력의 [여정 발송] 표시는 바뀌지 않는다.
+  //   ② 순서(Codex 2R high): 적재 → 결과 → 차감이면 결과가 차감보다 먼저 보이는 틈에 초과 환불 회수가 정상 환불을 빼가고
+  //      되살리지 못한다(MySQL·PG에 시간 상한이 없어 날짜로는 닫힘을 증명할 수 없다). 다른 모든 발송 경로처럼 차감 → 적재.
+  //      06-06 J1이 적재 뒤로 옮긴 이유(적재 실패·재시도분 환불 경로 없음)는 스위퍼 미적재 환불이 생겨 사라졌다 —
+  //      적재에 실패한 차감은 5분 뒤 미적재로 돌아간다(재시도는 새로 차감한다).
+  //   ③ 차감 실패(사전 확인 뒤 동시 소진)면 보내지 않고 정지한다 — 옛 "보내고 1건 회사 부담"은 다른 경로와 달랐다.
+  const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, campaignId, exec.created_by || undefined, 'journey');
+  if (!deduct.ok) {
+    console.warn(`[JourneyExecutor] execution=${exec.execution_id} 차감 실패(잔액 동시 소진) — 발송하지 않고 여정 정지`);
+    await pauseJourney(exec.journey_id, deduct.error || '잔액 부족');
+    await logFailedStep(exec.execution_id, step.id, 'insufficient_balance');
+    try {
+      await autoPauseExecution({
+        companyId: exec.company_id,
+        journeyId: exec.journey_id,
+        stepId: step.id,
+        executionId: exec.execution_id,
+        pauseReason: 'balance_insufficient',
+        pauseTriggerSource: 'auto_balance_check',
+      });
+    } catch (apErr: any) {
+      console.warn(`[JourneyExecutor] autoPauseExecution(balance_insufficient) 사고 (skip):`, apErr?.message);
+    }
+    return 'paused_balance';
+  }
 
   // AI 학습 데이터 적재 — 여정 발송(공유 step campaign, source_ref 멱등으로 (여정,step,일)당 1건, 발송 영향 0).
   void logCampaignTraining({
@@ -959,7 +1015,13 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
         (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[1]) ? extractBasename(step.mms_image_paths[1]) : '',
         (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[2]) ? extractBasename(step.mms_image_paths[2]) : '',
       ];
-      await bulkInsertSmsQueue(tables, [row], true, { companyId: exec.company_id, source: 'journey' });
+      // ★ 2026-09-26 한줄로 V2 F40·F41 — 적재 함수는 배치 INSERT 오류를 삼키고 적재 건수를 돌려준다(0 = 못 넣음).
+      //   반환값을 버리면 MySQL이 잠깐 끊긴 동안 'sent' 기록·선불 차감·다음 단계 진행이 일어난다(수신자는 못 받음).
+      //   알림톡 분기처럼 throw해서 아래 catch의 5분 뒤 재시도·자동 정지 분기를 태운다.
+      const loaded = await bulkInsertSmsQueue(tables, [row], true, { companyId: exec.company_id, source: 'journey' });
+      if (loaded < 1) {
+        throw new Error('SMS 큐 적재 0건(배치 INSERT 실패)');
+      }
     }
 
     // ★ 2026-07-05 발송 피로도 카운터 — 광고성만(알림톡 정보성 제외), 큐 커밋 후 fire-and-forget
@@ -1012,8 +1074,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'failed';
   }
 
-  // ★ 2026-06-06 J1: 큐 INSERT 성공 = 발송 확정 → ① 멱등 마커(step_log 'sent') 먼저 기록(재시도 중복발송 차단)
-  //   ② 실제 잔액 차감(발송 성공 시점). 사전확인 후 동시 소진(드묾)으로 차감 실패면 이미 발송됨 → 정지만(1건 부담), 발송은 진행.
+  // ★ 2026-06-06 J1: 큐 INSERT 성공 = 발송 확정 → 멱등 마커(step_log 'sent') 기록(재시도 중복발송 차단).
+  //   ★ 2026-09-26 차감은 위(적재 앞)로 옮겼다 — 이유는 그 자리 주석.
   await query(
     `INSERT INTO journey_step_logs (
       id, execution_id, step_id, campaign_id, sent_at, status, cost
@@ -1022,12 +1084,6 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     )`,
     [exec.execution_id, step.id, campaignId, sendCost]
   );
-  const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, exec.journey_id, exec.created_by || undefined, 'journey');
-  if (!deduct.ok) {
-    console.warn(`[JourneyExecutor] execution=${exec.execution_id} 발송 후 차감 실패(잔액 동시 소진) — 1건 부담 + 여정 정지`);
-    await pauseJourney(exec.journey_id, deduct.error || '잔액 부족(발송 후)');
-  }
-
   // ★ v2 운영 과금 (크레딧 모델 v2 2026-06-30) — 발송비(prepaidDeduct, 위)와 별개인 AI 운영 크레딧.
   //   멱등키 = 여정:KST날짜 → 같은 여정 그날 첫 발송 1건만 10 차감(동일 여정 하루 1회 상한 · 고객수만큼 안 불어남).
   //   journey-operation = 운영 source(P4) → 잔액 0이어도 −1개월 grant 상한까지 음수 허용. deductCreditSafe는 throw 0 = 발송 절대 안 막음.

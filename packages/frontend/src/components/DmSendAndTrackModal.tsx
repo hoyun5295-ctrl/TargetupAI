@@ -64,9 +64,16 @@ interface TrackSummary {
   multiDevice?: number;
 }
 
+/** ★ 2026-09-26 한줄로 V2 R1-18 — 후속 발송 세그먼트 키(서버 dm-tracking DM_RESEND_SEGMENTS와 같은 값) */
+type ResendSegment = 'unviewed' | 'viewed_no_action' | 'clicked' | 'responded';
+
 interface TrackData {
   summary: TrackSummary;
   recipients: TrackRecipient[];
+  /** ★ 2026-09-26 R1-18 — 전체 수신자 수(목록은 상한까지만 온다) · 잘림 여부 · 세그먼트별 전체 수 */
+  recipientsTotal?: number;
+  listTruncated?: boolean;
+  segments?: Partial<Record<ResendSegment, number>>;
   hourDistribution?: Array<{ hour: number; cnt: number }>;
   sectionExits?: Array<{ id: string; label: string; count: number }>;
 }
@@ -216,8 +223,9 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   const [trackAxis, setTrackAxis] = useState<'personal' | 'public'>('personal');
   // ★ 2026-07-06 미열람자 재발송 모드 — 추적 탭에서 고객만 추려 발송 탭으로(타겟 추출 대신 고객 id 지정)
   //   ★ 2026-07-12 D-3 일반화 — 미열람 외 열람·무반응/클릭/응모 세그먼트 후속 발송(라벨 동반)
-  const [resendIds, setResendIds] = useState<string[] | null>(null);
-  const [resendLabel, setResendLabel] = useState('미열람');
+  // ★ 2026-09-26 한줄로 V2 R1-18 — id 목록 대신 **세그먼트 키**를 들고 간다. 서버가 발송 시점에 전체 수신자에서 다시 뽑는다
+  //   (옛: 화면 목록 1천 명 안에서만 골라 1천 명 밖 수신자가 재발송에서 빠졌다). count는 표시용(추적 응답의 전체 수).
+  const [resend, setResend] = useState<{ segment: ResendSegment; label: string; count: number } | null>(null);
   // ★ 2026-07-12 D-1: 발행비 미확정 DM(테스트 발행 등) 발송 시 — 발행 확인 모달 → confirmPublishFee 재요청(서버 인라인 확정)
   const [publishFeeSource, setPublishFeeSource] = useState<string | null>(null);
   const [publishFeeConfirmed, setPublishFeeConfirmed] = useState(false);
@@ -238,7 +246,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     try {
       const res = await fetch(`/api/dm/${dmId}/recipients-tracking`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
       const data = await res.json();
-      if (res.ok && data.success) setTracking({ summary: data.summary, recipients: data.recipients, hourDistribution: data.hourDistribution || [], sectionExits: data.sectionExits || [] });
+      if (res.ok && data.success) setTracking({ summary: data.summary, recipients: data.recipients, recipientsTotal: data.recipientsTotal, listTruncated: !!data.listTruncated, segments: data.segments, hourDistribution: data.hourDistribution || [], sectionExits: data.sectionExits || [] });
       else toast.error(data?.error || '추적 조회에 실패했습니다.');
     } catch (e: any) {
       toast.error(e?.message || '추적 조회 중 오류가 발생했습니다.');
@@ -395,7 +403,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   };
 
   const handleSend = async (confirmExclusion = false, feeConfirmed = false) => {
-    const isResend = !!resendIds && resendIds.length > 0;
+    const isResend = !!resend;
     if (!isResend && (!target || target.channelEligibleCount === 0)) { toast.warning('먼저 타겟을 추출해주세요.'); return; }
     if (!messageText.trim()) { toast.warning('문자 본문을 작성해주세요.'); return; }
     // ★ 2026-09-12 제목은 DM 제목이 기본값이라 보통 차 있다. 지운 채 보내면 수신함에 제목이 빈다.
@@ -422,8 +430,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({
           // ★ 2026-07-06 재발송 모드 = 미열람 고객 id 지정(서버가 자격·수신거부 재적용) / 일반 = 타겟 filter
-          ...(isResend
-            ? { resendCustomerIds: resendIds }
+          ...(resend
+            ? { resendSegment: resend.segment }
             : { filter: target!.filter, allCustomers: !!target!.isAll }),
           messageText: messageText.trim(),
           // ★ 2026-09-12 문자 제목(DM 제목과 별개). 서버는 공백이면 DM 제목으로 폴백한다.
@@ -493,15 +501,15 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
               {/* 왼쪽 — 타겟 + 편집 */}
               <div className="space-y-4">
                 <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  {resendIds && resendIds.length > 0 ? (
+                  {resend ? (
                     /* ★ 2026-07-06/07-12 세그먼트 재발송 모드 — 타겟 추출 대신 추적 세그먼트 고객 지정. */
                     <div className="flex items-center justify-between gap-2">
                       <div>
-                        <p className="text-[10px] text-cyan-300/80 font-semibold">{resendLabel} 고객 재발송·후속 발송</p>
-                        <p className="text-2xl font-bold text-cyan-300">{resendIds.length.toLocaleString()}<span className="text-sm font-normal text-white/50 ml-1">명</span></p>
+                        <p className="text-[10px] text-cyan-300/80 font-semibold">{resend.label} 고객 재발송·후속 발송</p>
+                        <p className="text-2xl font-bold text-cyan-300">{resend.count.toLocaleString()}<span className="text-sm font-normal text-white/50 ml-1">명</span></p>
                         <p className="text-[10px] text-white/40 mt-0.5">그 사이 수신거부한 고객은 발송 시 자동 제외됩니다. 문구를 바꿔 보내는 것을 권장합니다.</p>
                       </div>
-                      <button onClick={() => setResendIds(null)} className="text-[11px] text-white/50 hover:text-white">재발송 해제</button>
+                      <button onClick={() => setResend(null)} className="text-[11px] text-white/50 hover:text-white">재발송 해제</button>
                     </div>
                   ) : target ? (
                     <div className="flex items-center justify-between gap-2">
@@ -712,35 +720,48 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                     {/* ★ 2026-07-12 D-3 재타겟 1클릭 — 미열람/열람·무반응/클릭/응모 세그먼트 후속 발송.
                         서버(send-to-target resendCustomerIds)가 자격·수신거부를 재적용하므로 프론트는 id 지정만. */}
                     {(() => {
+                      // ★ 2026-09-26 R1-18 — 수는 서버가 전체 수신자로 센 값(목록 1천 명 상한과 무관) · 누르면 세그먼트 키만 들고 간다
+                      const segCount = (key: ResendSegment, fallback: number) => Number(tracking.segments?.[key] ?? fallback);
                       const segs = [
-                        { label: '미열람', ids: tracking.recipients.filter((r) => !r.viewed).map((r) => r.customerId), hint: '문구를 바꿔 다시 보내면 열람률이 오릅니다' },
-                        { label: '열람·무반응', ids: tracking.recipients.filter((r) => r.viewed && r.clicks === 0 && !r.responded).map((r) => r.customerId), hint: '열람했지만 클릭·응모가 없던 고객: 다른 문구·구성으로 후속' },
-                        { label: '클릭', ids: tracking.recipients.filter((r) => r.clicks > 0).map((r) => r.customerId), hint: '관심을 보인 고객: 구매 유도 후속' },
-                        { label: '응모·액션', ids: tracking.recipients.filter((r) => r.responded).map((r) => r.customerId), hint: '참여한 고객: 결과 안내·후속 혜택' },
-                      ].filter((s) => s.ids.length > 0);
+                        { key: 'unviewed' as const, label: '미열람', count: segCount('unviewed', tracking.recipients.filter((r) => !r.viewed).length), hint: '문구를 바꿔 다시 보내면 열람률이 오릅니다' },
+                        { key: 'viewed_no_action' as const, label: '열람·무반응', count: segCount('viewed_no_action', tracking.recipients.filter((r) => r.viewed && r.clicks === 0 && !r.responded).length), hint: '열람했지만 클릭·응모가 없던 고객: 다른 문구·구성으로 후속' },
+                        { key: 'clicked' as const, label: '클릭', count: segCount('clicked', tracking.recipients.filter((r) => r.clicks > 0).length), hint: '관심을 보인 고객: 구매 유도 후속' },
+                        { key: 'responded' as const, label: '응모·액션', count: segCount('responded', tracking.recipients.filter((r) => r.responded).length), hint: '참여한 고객: 결과 안내·후속 혜택' },
+                      ].filter((s) => s.count > 0);
                       return segs.map((s) => (
                         <button
                           key={s.label}
                           title={s.hint}
                           onClick={() => {
-                            setResendIds(s.ids);
-                            setResendLabel(s.label);
+                            setResend({ segment: s.key, label: s.label, count: s.count });
                             setView('compose');
-                            toast.info(`${s.label} ${s.ids.length.toLocaleString()}명이 발송 대상으로 지정되었습니다. 문구를 바꿔 발송해보세요.`);
+                            toast.info(`${s.label} ${s.count.toLocaleString()}명이 발송 대상으로 지정되었습니다. 문구를 바꿔 발송해보세요.`);
                           }}
                           className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-cyan-100 bg-cyan-500/20 hover:bg-cyan-500/35 border border-cyan-400/30"
                         >
-                          <Send className="w-3.5 h-3.5" /> {s.label} ({s.ids.length.toLocaleString()})
+                          <Send className="w-3.5 h-3.5" /> {s.label} ({s.count.toLocaleString()})
                         </button>
                       ));
                     })()}
-                    {/* ★ 2026-07-06 추적 CSV 다운로드 — 로드된 전체 수신자(서버 LIMIT 1000) 내보내기 */}
+                    {/* ★ 2026-07-06 추적 CSV 다운로드 · ★ 2026-09-26 R1-18 화면 목록이 잘렸으면 전체(full=1)를 받아 내보낸다 */}
                     <button
-                      onClick={() => {
+                      onClick={async () => {
+                        let csvRows = tracking.recipients;
+                        if (tracking.listTruncated) {
+                          try {
+                            const fullRes = await fetch(`/api/dm/${dmId}/recipients-tracking?full=1`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+                            const fullData = await fullRes.json();
+                            if (!fullRes.ok || !fullData.success) { toast.error(fullData?.error || '전체 명단을 불러오지 못했습니다.'); return; }
+                            csvRows = fullData.recipients;
+                          } catch (e: any) {
+                            toast.error(e?.message || '전체 명단을 불러오지 못했습니다.');
+                            return;
+                          }
+                        }
                         downloadCsv(
                           safeCsvFilename(dmTitle || 'DM', 'DM_발송추적'),
                           ['이름', '전화번호', '발송 시각', '상태', '진행률(%)', '체류(초)', '클릭 수', '응모·액션', '재열람 횟수', '열람 기기 수', '구매 건수(7일)', '구매 금액(7일)', '마지막 활동'],
-                          tracking.recipients.map((r) => [
+                          csvRows.map((r) => [
                             r.name || '', r.phone || '', r.sentAt ? new Date(r.sentAt).toLocaleString('ko-KR') : '',
                             r.viewed ? (r.completed ? '완독' : '열람') : '미열람',
                             r.viewed ? (r.progressPct || 0) : '',
@@ -750,7 +771,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                             r.lastActiveAt ? new Date(r.lastActiveAt).toLocaleString('ko-KR') : '',
                           ]),
                         );
-                        toast.success(`${tracking.recipients.length.toLocaleString()}건 CSV 다운로드 완료`);
+                        toast.success(`${csvRows.length.toLocaleString()}건 CSV 다운로드 완료`);
                       }}
                       className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10"
                     >
@@ -782,6 +803,11 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                   <p className="text-[10.5px] text-white/45">
                     재열람 {Number(tracking.summary.reViewed || 0).toLocaleString()}명
                     {(tracking.summary.multiDevice ?? 0) > 0 && <> · 여러 기기에서 열람 {Number(tracking.summary.multiDevice || 0).toLocaleString()}명 <span className="text-cyan-300/70">(지인 공유 가능성)</span></>}
+                  </p>
+                )}
+                {tracking.listTruncated && (
+                  <p className="text-[10.5px] text-white/45">
+                    전체 {Number(tracking.recipientsTotal || 0).toLocaleString()}명 중 {tracking.recipients.length.toLocaleString()}명만 목록에 보여 드려요 · 위 수치와 후속 발송은 전체 기준이고, CSV는 전체를 받습니다
                   </p>
                 )}
                 <div className="rounded-xl border border-white/10 bg-white/5 divide-y divide-white/5 max-h-[52vh] overflow-y-auto">
@@ -960,10 +986,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
             </div>
             <div className="ml-auto flex items-center gap-2">
               <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs text-white/70 hover:bg-white/5">닫기</button>
-              <button onClick={() => handleSend()} disabled={(resendIds && resendIds.length > 0 ? false : (!target || target.channelEligibleCount === 0)) || !messageText.trim() || sending} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
+              <button onClick={() => handleSend()} disabled={(resend ? false : (!target || target.channelEligibleCount === 0)) || !messageText.trim() || sending} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
                 {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {sending ? '처리 중...'
-                  : resendIds && resendIds.length > 0 ? `${resendLabel} ${resendIds.length.toLocaleString()}명 발송`
+                  : resend ? `${resend.label} ${resend.count.toLocaleString()}명 발송`
                   : scheduleMode === 'immediate' ? (target ? `${target.channelEligibleCount.toLocaleString()}명 발송` : '발송') : '예약 발송'}
               </button>
             </div>

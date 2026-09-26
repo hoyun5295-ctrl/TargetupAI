@@ -135,7 +135,10 @@ describe('게이트가 차감·실행 행보다 앞에 있다', () => {
   });
 
   it('run INSERT 뒤의 거절 응답은 **각각** 실행 행을 종결한다', () => {
-    const runInsert = CAMPAIGN_SEND.indexOf('INSERT INTO campaign_runs');
+    // ★ 2026-09-26 S1-H07·F09: 실행 행은 발송 시작 잠금 안에서 만든다 — 잠금이 막은 거절(캠페인 없음·중복)은 행을 만들기 전이다.
+    //   실행 행이 확정되는 줄부터 센다.
+    const runInsert = CAMPAIGN_SEND.indexOf('const campaignRun = startGate.run;');
+    expect(runInsert, '실행 행 확정 줄을 못 찾았다 — 마커가 낡았다').toBeGreaterThan(CAMPAIGN_SEND.indexOf('INSERT INTO campaign_runs'));
     const after = CAMPAIGN_SEND.slice(runInsert);
     const rejects = [...after.matchAll(/return res\.status\([45]\d\d\)/g)].map((m) => m.index ?? 0);
     expect(rejects.length, '거절 경로를 하나도 못 찾았다 — 정규식이 낡았다').toBeGreaterThan(0);
@@ -145,8 +148,10 @@ describe('게이트가 차감·실행 행보다 앞에 있다', () => {
     let prev = 0;
     for (const at of rejects) {
       const between = after.slice(prev, at);
+      // ★ 2026-09-26 한줄로 V2 F09 — 적재가 끝난 뒤 예외면 실행 행을 실패가 아니라 **성공 경로와 같은 상태**(예약 = scheduled ·
+      //   즉시 = completed)로 닫는다(적재된 예약분이 취소 게이트·결과 동기화에 남게). 이것도 'sending' 잔존을 막는 종결이다.
       expect(
-        between.includes('failCampaignRun('),
+        between.includes('failCampaignRun(') || between.includes('UPDATE campaign_runs SET status = $1'),
         `run INSERT 뒤 거절(offset ${at})이 실행 행을 종결하지 않는다 — ` +
           '그 행이 남으면 중복 발송 방지 검사가 이후 발송을 영구히 막는다(충전해도 못 보낸다).',
       ).toBe(true);

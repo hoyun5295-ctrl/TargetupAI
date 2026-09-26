@@ -19,8 +19,11 @@ import { extractVarCatalog } from '../services/ai';
 import { replaceVariables, enrichWithCustomFields, buildAdMessage, buildAdSubject, prepareFieldMappings } from '../utils/messageUtils';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
-import { prepaidDeduct } from '../utils/prepaid';
+import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
+import { sendSystemAlert } from './system-alert';
 import { getSampleCustomerScope } from './store-scope';
+// ★ 2026-09-26 한줄로 V2 F49 — 무료 자동 검사 표시값·자동 판정(청구 제외 판정 CT와 한 벌)
+import { SPAM_AUTO_FREE_SOURCE, isAutoSpamSource } from './spam-trial';
 
 // ============================================================
 // 상수
@@ -43,7 +46,7 @@ export interface SpamTestEnqueueParams {
   messageType: 'SMS' | 'LMS' | 'MMS';
   subject?: string;
   firstRecipient?: Record<string, any>;
-  source: 'manual' | 'auto_ai';
+  source: 'manual' | 'auto_ai';   // 적재 표시값은 enqueueSpamTest가 정한다(차감 건너뛴 자동 = SPAM_AUTO_FREE_SOURCE)
   variantId?: string;
   batchId?: string;
   skipPrepaid?: boolean;
@@ -182,6 +185,8 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     const spamCheckNumber = opt080Result.rows[0]?.user_080 || opt080Result.rows[0]?.company_080 || null;
 
     // 3) 테스트 레코드 생성 (status = 'queued')
+    // ★ 2026-09-26 한줄로 V2 F49 — 차감을 건너뛴 자동 검사는 청구 제외 표시값으로 남긴다(후불 정산·비용 표시가 이 값으로 뺀다).
+    const storedSource = source === 'auto_ai' && skipPrepaid ? SPAM_AUTO_FREE_SOURCE : source;
     const testResult = await query(
       `INSERT INTO spam_filter_tests
        (company_id, user_id, callback_number, message_content_sms, message_content_lms,
@@ -191,7 +196,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
       [companyId, userId, callbackNumber,
        messageContentSms || null, messageContentLms || null,
        messageHash || null, spamCheckNumber,
-       source, variantId || null, batchId || null, subject || null,
+       storedSource, variantId || null, batchId || null, subject || null,
        firstCustomer && Object.keys(firstCustomer).length > 0 ? JSON.stringify(firstCustomer) : null]
     );
     const testId = testResult.rows[0].id;
@@ -243,37 +248,60 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
 // ============================================================
 let queueWorkerRunning = false;
 
+/**
+ * ★ 2026-09-26 한줄로 V2 F45·F46·F47 — 큐 검사의 **실행 시작 시각**(프로세스 메모리 · 큐가 active로 바꿀 때 기록).
+ * 등록 시각(created_at)으로 재면 큐에서 오래 기다린 검사가 시작하자마자 시간 초과·거짓 BLOCKED로 닫혔다(F46②·F47).
+ * 기록이 없는 active(수동 검사 = 등록 즉시 active라 두 시각이 같다 · 재기동 전 행 = 폴러가 이미 사라졌다)는 등록 시각으로 잰다.
+ */
+const _activatedAt = new Map<string, number>();
+
+/**
+ * ★ 2026-09-26 F45·F46 — 멈춘 active 검사를 닫는다(결과 NULL → timeout · 검사 completed). 큐 워커·수동 검사 라우트 공용 CT.
+ * 옛 큐 워커는 "active가 있으면 반환"을 먼저 해 이 정리에 영영 닿지 못했다 → 재기동으로 폴러가 사라진 행 하나가 큐 전체를 멈췄다.
+ * active는 보통 0~1건이라 행을 읽어 실행 시작 시각(없으면 등록 시각)으로 판정한다. 실행 시작 기록은 지금 active인 것만 남긴다.
+ */
+export async function cleanupStaleActiveTests(thresholdMs: number): Promise<number> {
+  const active = await query(`SELECT id, created_at FROM spam_filter_tests WHERE status = 'active'`);
+  const now = Date.now();
+  const activeIds = new Set<string>();
+  const staleIds: string[] = [];
+  for (const r of active.rows as any[]) {
+    const id = String(r.id);
+    activeIds.add(id);
+    const startedAt = _activatedAt.get(id) ?? new Date(r.created_at).getTime();
+    if (now - startedAt > thresholdMs) staleIds.push(id);
+  }
+  for (const id of Array.from(_activatedAt.keys())) if (!activeIds.has(id)) _activatedAt.delete(id);
+  if (staleIds.length === 0) return 0;
+  await query(
+    `UPDATE spam_filter_test_results SET result = $2
+     WHERE test_id = ANY($1::uuid[]) AND received = false AND result IS NULL`,
+    [staleIds, SPAM_RESULT.TIMEOUT]
+  );
+  await query(
+    `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
+     WHERE id = ANY($1::uuid[]) AND status = 'active'`,
+    [staleIds]
+  );
+  for (const id of staleIds) _activatedAt.delete(id);
+  console.log(`[SpamTestQueue] 멈춘 검사 ${staleIds.length}건 자동 정리`);
+  return staleIds.length;
+}
+
 export async function processSpamTestQueue(): Promise<void> {
   if (queueWorkerRunning) return; // 중복 실행 방지
   queueWorkerRunning = true;
 
   try {
+    // ★ 2026-09-26 F45·F46 — 멈춘 active 정리를 **먼저** 한다(옛: active가 있으면 반환 → 이 정리에 닿지 못함).
+    await cleanupStaleActiveTests(TIMEOUTS.spamFilterSafety);
+
     // 현재 active인 테스트가 있는지 확인
     const activeTest = await query(
       `SELECT id FROM spam_filter_tests WHERE status = 'active' LIMIT 1`
     );
     if (activeTest.rows.length > 0) {
       return; // 실행 중인 테스트 있음 → 대기
-    }
-
-    // stale 정리: 타임아웃 초과한 active 건 → completed
-    const staleTests = await query(
-      `SELECT id FROM spam_filter_tests
-       WHERE status = 'active' AND created_at < NOW() - INTERVAL '${Math.ceil(TIMEOUTS.spamFilterSafety / 1000)} seconds'`
-    );
-    if (staleTests.rows.length > 0) {
-      const staleIds = staleTests.rows.map((r: any) => r.id);
-      await query(
-        `UPDATE spam_filter_test_results SET result = $2
-         WHERE test_id = ANY($1::uuid[]) AND received = false AND result IS NULL`,
-        [staleIds, SPAM_RESULT.TIMEOUT]
-      );
-      await query(
-        `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
-         WHERE id = ANY($1::uuid[])`,
-        [staleIds]
-      );
-      console.log(`[SpamTestQueue] stale 테스트 ${staleIds.length}건 자동 정리`);
     }
 
     // 다음 queued 건 조회 (FIFO)
@@ -294,11 +322,12 @@ export async function processSpamTestQueue(): Promise<void> {
       `UPDATE spam_filter_tests SET status = 'active' WHERE id = $1`,
       [test.id]
     );
+    _activatedAt.set(test.id, Date.now());   // ★ 2026-09-26 F46·F47 실행 시작 시각
 
     console.log(`[SpamTestQueue] 테스트 실행 시작 — testId=${test.id}, source=${test.source}`);
 
     // 테스트 실행
-    await executeSpamTest(test.id, test.source === 'auto_ai');
+    await executeSpamTest(test.id, isAutoSpamSource(test.source), test.company_id);
   } catch (err) {
     console.error('[SpamTestQueue] 큐 워커 오류:', err);
   } finally {
@@ -309,7 +338,13 @@ export async function processSpamTestQueue(): Promise<void> {
 // ============================================================
 // [3] 테스트 실행: QTmsg INSERT + 폴링
 // ============================================================
-async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
+async function executeSpamTest(testId: string, isAuto: boolean, companyId: string): Promise<void> {
+  // ★ 2026-09-26 한줄로 V2 F30 — 적재에 성공한 건수. 예외면 나간 만큼만 남기고 선불을 되돌린다(catch).
+  //   환불 대상 회사는 호출부가 이미 읽은 값으로 시작한다(Codex 1R high: 첫 조회가 실패해도 환불을 건너뛰지 않게).
+  let sentCount = 0;
+  let refundCompanyId: string | null = companyId;
+  // ★ 2026-09-26 F47 — 시간 초과는 실행 시작 시각으로 잰다(큐에서 기다린 시간을 빼고).
+  const activatedAt = _activatedAt.get(testId) ?? Date.now();
   try {
     // 테스트 정보 조회
     const testInfo = await query(
@@ -357,6 +392,7 @@ async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
       const content = replaceVariables(rawContent || '', firstCustomer, fieldMappings, testAddressBookFields);
       const titleStr = (row.message_type === 'LMS' || row.message_type === 'MMS') ? (test.subject || '') : '';
       await insertTestSmsQueue(row.phone, test.callback_number, content, row.message_type, testId, titleStr);
+      sentCount += 1;
     }
 
     // grace period 결정
@@ -466,7 +502,7 @@ async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
         }
 
         // 타임아웃 체크
-        const elapsed = Date.now() - new Date(activeCheck.rows[0].created_at).getTime();
+        const elapsed = Date.now() - activatedAt;
         if (elapsed > TIMEOUTS.spamFilterTest) {
           clearInterval(pollInterval);
           for (const row of remaining.rows) {
@@ -493,11 +529,27 @@ async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
 
   } catch (err) {
     console.error('[SpamTestQueue] 테스트 실행 오류:', err);
+    // ★ 2026-09-26 한줄로 V2 F30 — 등록 때 차감한 선불을 **나간 건수만 남기고** 되돌린다(keepCount = 적재 성공 건수).
+    //   종전엔 completed만 적어 한 통도 안 나가도 차감이 남았다. 차감이 없던 검사(skipPrepaid·후불)는 prepaidRefund가 0원으로 돌아온다.
+    //   유형은 결과 행의 유형 = 등록 때의 차감 유형(단일 유형)이다.
+    //   환불을 상태 기록보다 **먼저** 한다(Codex 3차 2R) — 상태 UPDATE가 실패해도 환불·경보를 건너뛰지 않게.
+    if (refundCompanyId) {
+      try {
+        const types = await query(`SELECT DISTINCT message_type FROM spam_filter_test_results WHERE test_id = $1`, [testId]);
+        for (const r of types.rows) {
+          const refundRes = await prepaidRefund(refundCompanyId, 0, String(r.message_type), testId, '스팸 검사 발송 실패 환불', 'spam', { refundKey: REFUND_KEYS.NOT_LOADED, keepCount: sentCount });
+          if (!refundRes.ok) throw new Error(`환불 미완(${r.message_type})`);
+        }
+      } catch (refundErr: any) {
+        console.error(`[SpamTestQueue] 발송 실패 환불 미완 testId=${testId}:`, refundErr?.message || refundErr);
+        void sendSystemAlert({ dedupKey: `spam-refund-miss:${testId}`, message: `스팸 검사(큐) 발송 실패 환불 미완 — test=${testId} 수동 확인 필요` }).catch(() => undefined);
+      }
+    }
     // 실패 시 completed 처리
     await query(
       `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1`,
       [testId]
-    );
+    ).catch((e: any) => console.error(`[SpamTestQueue] 실패 종료 기록 실패 testId=${testId}:`, e?.message || e));
   }
 }
 
@@ -531,10 +583,16 @@ export async function getSpamTestBatchResults(batchId: string): Promise<SpamTest
     let overallResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'pending' = 'pending';
     if (test.status === 'completed' || test.status === 'active') {
       const allResults = carrierResults.map(r => r.result).filter(Boolean);
-      if (allResults.length === 0) {
-        overallResult = 'pending';
-      } else if (allResults.some(r => r === SPAM_RESULT.BLOCKED)) {
+      // ★ 2026-09-26 한줄로 V2 F48 — 판정 대기(NULL) 통신사를 버리지 않는다. 차단 판정은 유예(수십 초) 뒤라 통과 리포트(수 초)보다
+      //   늘 늦어, 대기를 버리면 한 곳만 통과해도 전체 pass였다(한 통신사만 막는 문안 = 스팸 검사가 잡아야 할 경우).
+      //   대기가 남으면: 진행 중 = pending · 완료 = timeout(통과 아님). 차단이 이미 있으면 그대로 blocked.
+      const hasUnjudged = carrierResults.some(r => !r.result);
+      if (allResults.some(r => r === SPAM_RESULT.BLOCKED)) {
         overallResult = 'blocked';
+      } else if (hasUnjudged) {
+        overallResult = test.status === 'active' ? 'pending' : 'timeout';
+      } else if (allResults.length === 0) {
+        overallResult = 'pending';
       } else if (allResults.some(r => r === SPAM_RESULT.FAILED)) {
         overallResult = 'failed';
       } else if (allResults.some(r => r === SPAM_RESULT.TIMEOUT)) {

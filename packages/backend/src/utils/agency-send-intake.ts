@@ -17,12 +17,17 @@ import { validateMmsPayload } from './mms-validator';
 import { alignMmsImageNames } from './mms-image-util';
 import {
   parseAgencyRequestForm, parseAgencyRecipientList, pickPhoneColumn, resolveCallbackPlan, matchHeader,
-  hasRecipientSheet, MAX_LIST_ROWS,
+  hasRecipientSheet, MAX_LIST_ROWS, unreadableAgencyForm,
   type AgencyFormError, type CallbackPlan,
 } from './agency-send-form';
+// ★ 2026-09-26 한줄로 V2 S1-H03 — 엑셀 파싱은 별도 프로세스(CT)
+import { parseAgencyFilesIsolated } from './agency-send-parse-isolated';
 import { normalizePhone, normalizeAgencyPhone } from './normalize-phone';
 import { validateRequestedAt } from './agency-send-state';
 import { buildSlotPlan, extractAgencyVars, resolveVarColumns, toStoredVars } from './agency-send-vars';
+// ★ 2026-09-26 한줄로 V2 R1-08 — SMS/LMS는 실제로 나가는 문장의 바이트로(조립 CT 한 벌)
+import { measureAgencyMaxSmsBytes } from './agency-send-preview';
+import { SMS_MAX_BYTES } from './message-byte';
 import { suggestVarColumnsWithAi } from './ai-column-mapper';
 import { SEND_HOURS } from '../config/defaults';
 
@@ -245,7 +250,11 @@ export async function createRequestCore(
    * 여기로 넘긴다. 검증 규칙 자체는 그대로 코어가 집행한다.
    * `minLeadMinutes`(★0826 §18) = 입구별 최소 리드타임. 비우면 화면 기본(180). 이메일 워커는 240을 넘긴다.
    */
-  pre?: { registeredSet?: Set<string>; window?: { startHour: number | null; endHour: number | null }; minLeadMinutes?: number },
+  pre?: {
+    registeredSet?: Set<string>; window?: { startHour: number | null; endHour: number | null }; minLeadMinutes?: number;
+    /** ★ 2026-09-26 R1-08 — 트랜잭션 밖에서 미리 잰 SMS 최장 바이트(원스텝·메일). 없으면 코어가 잰다(자체 트랜잭션 전이라 풀 대기 안전) */
+    maxSmsBytes?: number | null;
+  },
 ): Promise<CreateCoreResult> {
   const {
     messageType = 'SMS', subject, content, isAd = false, callbackNumber,
@@ -274,9 +283,16 @@ export async function createRequestCore(
   const plan = buildSlotPlan(body);
   if (!plan.ok) return { ok: false, status: 400, error: plan.error || '문안 항목이 너무 많습니다.', code: 'TOO_MANY_VARS' };
 
-  const type = String(messageType).toUpperCase();
-  if (!['SMS', 'LMS', 'MMS'].includes(type)) {
+  // ★ 2026-09-26 한줄로 V2 R1-08(Codex 8차 2R 구조 정정) — 'AUTO' = 화면이 유형을 확정하지 않고 코어에 맡긴다.
+  //   이미지 = MMS · 제목 = LMS(SMS에는 제목이 실리지 않는다 · 사용자 선택) · 그 밖은 아래에서 **실제로 넣을 수신자로** 잰 바이트로 정한다.
+  //   화면 추정값이 유형을 굳히면(응답 전·실패) SMS 안인 문안이 LMS로 접수·과금됐다(1R·2R high 같은 뿌리).
+  let type = String(messageType).toUpperCase();
+  if (!['SMS', 'LMS', 'MMS', 'AUTO'].includes(type)) {
     return { ok: false, status: 400, error: '보낼 수 있는 형식이 아닙니다.' };
+  }
+  if (type === 'AUTO') {
+    if (Array.isArray(mmsImagePaths) && mmsImagePaths.length > 0) type = 'MMS';
+    else if (String(subject || '').trim()) type = 'LMS';
   }
   if ((type === 'LMS' || type === 'MMS') && !String(subject || '').trim()) {
     return { ok: false, status: 400, error: '제목을 입력해 주세요.' };
@@ -290,7 +306,7 @@ export async function createRequestCore(
   }
   // MMS는 이미지가 본체다. 0장이면 통신사가 파일 오류로 버린다(2026-04-21 9007 선례)
   const images = Array.isArray(mmsImagePaths) ? mmsImagePaths : [];
-  const mmsCheck = validateMmsPayload(type, images);
+  const mmsCheck = validateMmsPayload(type === 'AUTO' ? 'SMS' : type, images);
   if (!mmsCheck.ok) return { ok: false, status: 400, error: mmsCheck.error || '이미지 구성을 확인해 주세요.', code: mmsCheck.code };
 
   // ── 발신번호(회사에 등록된 것만)
@@ -359,6 +375,32 @@ export async function createRequestCore(
     const unregisteredRows = rowCallbacks.filter((cb) => !regSet.has(cb));
     if (unregisteredRows.length > 0) {
       return { ok: false, status: 400, error: unregisteredCallbackError(unregisteredRows) };
+    }
+  }
+
+  // ★ 2026-09-26 한줄로 V2 R1-08 — SMS는 **가장 긴 수신자 문장**(광고 표기·무료거부 줄·변수 값 포함)이 90바이트 안이어야 한다.
+  //   옛: 화면 접수는 길이를 보지 않았고 원스텝·메일은 글자 45로 갈랐다 → 규격을 넘는 SMS가 접수돼 SMS 단가로 차감되고 LMS로 나갔다.
+  //   모든 입구(화면·원스텝·메일)가 지나는 여기서 막는다. 사전값(트랜잭션 밖에서 잰 값)이 있으면 그것을 쓴다.
+  //   ⛔ DB가 필요 없는 검사(번호·회신번호 등록)보다 **뒤**에 둔다 — 그 반려는 DB에 닿기 전에 나가야 한다(기존 계약).
+  if (type === 'SMS' || type === 'AUTO') {
+    const smsBytes = typeof pre?.maxSmsBytes === 'number'
+      ? pre.maxSmsBytes
+      : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: body, isAd: !!isAd, recipients: rows });
+    if (type === 'AUTO') {
+      // 여기 온 AUTO = 이미지·제목 없음. 한도 안이면 SMS, 넘으면 장문이라 제목이 있어야 한다(없으면 반려 = 사용자가 제목을 넣는다).
+      if (smsBytes <= SMS_MAX_BYTES) {
+        type = 'SMS';
+      } else {
+        return {
+          ok: false, status: 400, code: 'SUBJECT_REQUIRED_LONG',
+          error: `문안이 단문 한도(${SMS_MAX_BYTES}바이트)를 넘어(가장 긴 문장 ${smsBytes}바이트) 장문으로 보냅니다. 제목을 입력해 주세요.`,
+        };
+      }
+    } else if (smsBytes > SMS_MAX_BYTES) {
+      return {
+        ok: false, status: 400, code: 'SMS_TOO_LONG',
+        error: `단문(SMS)은 ${SMS_MAX_BYTES}바이트까지 보낼 수 있습니다. 광고 표기와 무료거부 문구를 넣으면 가장 긴 문장이 ${smsBytes}바이트라 장문(LMS)으로 접수해 주세요.`,
+      };
     }
   }
 
@@ -533,6 +575,8 @@ export interface OneStepAnalysis {
    */
   sampleRows: Array<Array<string | number | null>>;
   messageType: 'SMS' | 'LMS' | 'MMS';
+  /** ★ 2026-09-26 R1-08 — SMS로 보냈을 때 가장 긴 수신자 문장의 바이트(이미지·제목이 있으면 null = 판정 불필요). 접수 코어 사전값 */
+  maxSmsBytes: number | null;
   fileName: string | null;
   errors: AgencyFormError[];
 }
@@ -584,7 +628,7 @@ export async function analyzeOneStep(
     callback: { mode: 'none' }, headers: [], phoneColumn: null, varsMatched: [],
     counts: { total: 0, valid: 0, dup: 0, invalid: 0, callbackMissing: 0 },
     groups: [], allRecipients: [], primaryCallback: '',
-    sample: [], sampleRows: [], messageType: 'SMS', fileName: listName, errors,
+    sample: [], sampleRows: [], messageType: 'SMS', maxSmsBytes: null, fileName: listName, errors,
   };
   if (!formBuf) { errors.push({ field: '요청서', error: '요청서 파일을 올려 주세요.' }); return empty; }
   // ★2026-08-26(2) 통일 양식 = 한 파일(시트1 내용 + 시트2 고객리스트). 명단 파일이 따로 없으면
@@ -596,13 +640,20 @@ export async function analyzeOneStep(
     return empty;
   }
 
-  const form = pre?.form ?? parseAgencyRequestForm(formBuf);
+  // ★ 2026-09-26 한줄로 V2 S1-H03 — 넘겨받지 않은 파일은 **별도 프로세스에서** 읽는다(CT parseAgencyFilesIsolated).
+  //   이 프로세스에서 읽으면 큰 명단(0913 실측 20만 행 4초) 동안 발송 잠금·sweeper·다른 요청이 전부 멈췄다.
+  const needForm = !pre?.form;
+  const needList = !pre?.list;
+  const parsed = needForm || needList
+    ? await parseAgencyFilesIsolated(needForm ? formBuf : null, needList ? effectiveListBuf : null)
+    : null;
+  const form = pre?.form ?? parsed?.form ?? unreadableAgencyForm();
   errors.push(...form.errors);
 
   let headers: string[] = [];
   let rows: Record<string, any>[] = [];
-  try {
-    const list = pre?.list ?? parseAgencyRecipientList(effectiveListBuf);
+  const list = pre?.list ?? parsed?.list ?? null;
+  if (list) {
     headers = list.headers;
     rows = list.rows;
     // ⛔ 같은 이름의 열·상한 초과는 조용히 못 넘어간다(★Codex 적대 1R — 열이 밀리거나 잘리면 다른 사람에게 간다)
@@ -613,7 +664,7 @@ export async function analyzeOneStep(
       errors.push({ field: '명단', error: `명단이 너무 큽니다. 한 번에 ${MAX_LIST_ROWS.toLocaleString()}명까지 읽을 수 있으니 나눠 주세요.` });
     }
     if (list.columnsOverflow) errors.push({ field: '명단', error: '명단의 열이 100개를 넘습니다. 발송에 쓸 열만 남겨 주세요.' });
-  } catch {
+  } else {
     errors.push({ field: '명단', error: '명단 파일을 읽지 못했습니다. 엑셀 또는 CSV인지 확인해 주세요.' });
   }
   if (headers.length > 0 && rows.length === 0) errors.push({ field: '명단', error: '명단에 데이터 행이 없습니다.' });
@@ -794,8 +845,13 @@ export async function analyzeOneStep(
   }
 
   const images = Array.isArray(overrides.mmsImagePaths) ? overrides.mmsImagePaths : [];
+  // ★ 2026-09-26 한줄로 V2 R1-08 — 글자 45가 아니라 **실제 문장의 바이트**(광고 표기·무료거부 줄·가장 긴 변수 값 포함)로 가른다.
+  //   이미지 = MMS · 제목이 있으면 LMS(종전 그대로) · 그 밖은 SMS로 조립해 90바이트를 넘으면 LMS.
+  const maxSmsBytes = images.length > 0 || form.subject.trim()
+    ? null
+    : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: form.content.trim(), isAd: form.isAd, recipients: allRecipients });
   const messageType: 'SMS' | 'LMS' | 'MMS' = images.length > 0
-    ? 'MMS' : (form.content.length > 45 || form.subject.trim() ? 'LMS' : 'SMS');
+    ? 'MMS' : (form.subject.trim() || (maxSmsBytes !== null && maxSmsBytes > SMS_MAX_BYTES) ? 'LMS' : 'SMS');
 
   return {
     subject: form.subject, content: form.content, isAd: form.isAd, requestedAtIso,
@@ -808,6 +864,6 @@ export async function analyzeOneStep(
     primaryCallback: callback.mode === 'fixed' ? callback.number : firstCallback,
     sample,
     sampleRows: rows.slice(0, 50).map((r) => headers.map((h) => r[h] ?? null)),
-    messageType, fileName: listName, errors,
+    messageType, maxSmsBytes, fileName: listName, errors,
   };
 }

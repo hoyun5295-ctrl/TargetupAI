@@ -6,7 +6,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [], rowCount: 0 })) }));
 vi.mock('../cdp-identity', () => ({ identifyCustomer: vi.fn(async () => ({ customerId: 'c1', linkId: 'l1', wasCreated: false, wasMerged: false })) }));
-vi.mock('../cdp-events', () => ({ trackEvent: vi.fn(async () => ({})) }));
+// ★ 2026-09-26 R1-34 — 주문 CT가 이벤트 속성 검증(validateProperties)을 함께 쓴다: 실제 함수 + trackEvent만 목
+vi.mock('../cdp-events', async (importOriginal) => ({ ...(await importOriginal<any>()), trackEvent: vi.fn(async () => ({})) }));
 
 import { identifyCustomer } from '../cdp-identity';
 import { syncOrder } from '../cdp-orders';

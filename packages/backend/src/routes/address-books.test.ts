@@ -68,7 +68,8 @@ function mockDb(storedPhones: string[] = []) {
 const insertedPhones = () =>
   q.mock.calls
     .filter(([sql]: any[]) => /INSERT INTO address_books/i.test(String(sql)))
-    .map(([, params]: any[]) => params[3]);
+    // ★ 2026-09-26 R1-01 — 적재 CT가 한 문장(unnest 배열)으로 싣는다: $4 = 번호 배열
+    .flatMap(([, params]: any[]) => (Array.isArray(params[3]) ? params[3] : [params[3]]));
 
 async function post(path: string, body: any) {
   const res = await fetch(`${base}${path}`, {

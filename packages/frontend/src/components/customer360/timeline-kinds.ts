@@ -10,12 +10,12 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Send, Eye, MessageSquareReply, ShoppingCart, MousePointerClick, Smartphone,
-  ShieldCheck, BellOff, GitBranch, PhoneCall, Mail, UserPlus,
+  ShieldCheck, BellOff, GitBranch, Mail, UserPlus,
 } from 'lucide-react';
 
 export type TimelineKind =
   | 'send' | 'dm_view' | 'dm_response' | 'purchase' | 'behavior' | 'inapp'
-  | 'consent' | 'unsubscribe' | 'journey' | 'inbound' | 'email' | 'profile';
+  | 'consent' | 'unsubscribe' | 'journey' | 'email' | 'profile';
 
 export interface KindStyle {
   /** 필터 칩에 쓰는 이름 */
@@ -35,14 +35,13 @@ export const KIND_STYLE: Record<TimelineKind, KindStyle> = {
   consent:     { label: '동의',     icon: ShieldCheck,        tile: 'bg-teal-50 text-teal-700' },
   unsubscribe: { label: '수신거부', icon: BellOff,            tile: 'bg-rose-50 text-rose-600' },
   journey:     { label: '자동화',   icon: GitBranch,          tile: 'bg-amber-50 text-amber-700' },
-  inbound:     { label: '문의',     icon: PhoneCall,          tile: 'bg-orange-50 text-orange-600' },
   email:       { label: '이메일',   icon: Mail,               tile: 'bg-blue-50 text-blue-600' },
   profile:     { label: '등록',     icon: UserPlus,           tile: 'bg-neutral-100 text-neutral-500' },
 };
 
 /** 필터 칩 순서 — 자주 보는 것부터. `profile`은 사건이 하나뿐이라 칩을 두지 않는다 */
 export const FILTER_KINDS: TimelineKind[] = [
-  'send', 'dm_view', 'purchase', 'behavior', 'journey', 'consent', 'unsubscribe', 'inbound',
+  'send', 'dm_view', 'purchase', 'behavior', 'journey', 'consent', 'unsubscribe',
 ];
 
 /** 칩 하나가 켜질 때 서버로 보내는 종류들(묶어서 보는 것이 자연스러운 것은 함께 켠다) */

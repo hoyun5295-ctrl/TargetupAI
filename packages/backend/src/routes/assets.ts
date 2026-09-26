@@ -108,7 +108,7 @@ assetsRouter.delete('/:id', async (req: any, res: Response) => {
   try {
     const result = await deleteAsset(companyId, String(req.params.id));
     if (result.inUse) {
-      return res.status(409).json({ success: false, error: '발행된 인앱 메시지가 사용 중인 소재라 삭제할 수 없습니다. 해당 메시지를 먼저 수정/보관해주세요.', code: 'ASSET_IN_USE' });
+      return res.status(409).json({ success: false, /* ★ 2026-09-26 한줄로 V2 R1-22 — 참조 판정이 네 저장처로 넓어져 문구도 함께 */ error: 'DM·이메일·인앱 메시지·예약된 카카오 발송 중 사용하는 곳이 있어 삭제할 수 없습니다. 사용하는 곳에서 이미지를 바꾼 뒤 다시 삭제해 주세요.', code: 'ASSET_IN_USE' });
     }
     if (!result.deleted) return res.status(404).json({ success: false, error: '이미 삭제됐거나 없는 소재입니다.' });
     return res.json({ success: true });

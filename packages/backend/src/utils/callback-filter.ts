@@ -138,6 +138,17 @@ export async function filterByIndividualCallback(
 }
 
 /**
+ * ★ 2026-09-26 한줄로 V2 F19(Codex 4차 1R) — 개별 회신번호 **배정 제한을 걸 사용자**. 관리자는 제한 없이 회사의 전체 등록 번호를 쓴다(D91).
+ * 역할 어휘 두 벌을 같은 규칙으로 받는다: JWT `super_admin`·`company_admin` = DB `users.user_type` `admin`
+ * (로그인 변환 = login-issue.ts: DB admin → company_admin, 그 밖 user·system → company_user).
+ * 동기 직접발송(라우트)과 대량 직접발송(워커)이 이 함수 하나로 판정한다 — 갈라지면 관리자 발송이 워커에서만 전량 제외됐다.
+ */
+export function callbackAssignmentUserId(role: string | null | undefined, userId: string | null | undefined): string | undefined {
+  if (role === 'super_admin' || role === 'company_admin' || role === 'admin') return undefined;
+  return userId || undefined;
+}
+
+/**
  * 회사의 등록 발신번호 집합 (sender_numbers 활성 ∪ callback_numbers, assignment_scope 반영).
  * 정규화(하이픈 제거) 전화번호 Set. filterByIndividualCallback(리스트)·isCallbackRegistered(단건)이 공유.
  */

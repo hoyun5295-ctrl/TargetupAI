@@ -27,6 +27,8 @@ import { renderCatalogTemplatePage } from '../utils/dm/dm-catalog-render';
 import { CATALOG_TEMPLATES, catalogTemplateOf, type CatalogTemplateKey } from '../utils/dm/dm-catalog-templates';
 // ★ 2026-08-25 DB 스키마 부재 → 503 안내(CLAUDE.md db_alter_safety_net)
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
+// ★ 2026-09-26 한줄로 V2 R1-18 — 추적 세그먼트 판정 한 벌(화면 버튼 수 = 재발송 대상) · 목록 상한
+import { classifyDmRecipientSegments, DM_RESEND_SEGMENTS, DM_TRACK_LIST_CAP, type DmResendSegment } from '../utils/dm/dm-tracking';
 // ★ 2026-07-03 DM 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 1)
 import { logCampaignTraining } from '../utils/training-logger';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
@@ -1212,7 +1214,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     const userId = req.user?.userId || companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
-    const { filter, messageText, subject: subjectReq, isAd, scheduledAt, allCustomers, callback: callbackReq, useIndividualCallback, confirmCallbackExclusion, resendCustomerIds } = req.body as {
+    const { filter, messageText, subject: subjectReq, isAd, scheduledAt, allCustomers, callback: callbackReq, useIndividualCallback, confirmCallbackExclusion, resendCustomerIds, resendSegment } = req.body as {
       filter?: Record<string, { operator: string; value: any }>;
       messageText?: string;
       /**
@@ -1232,13 +1234,24 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       confirmCallbackExclusion?: boolean;
       /** ★ 2026-07-06 미열람자 재발송 — 지정 고객 id만 발송(자격·수신거부·차감 게이트는 동일 경로 전부 적용) */
       resendCustomerIds?: string[];
+      /**
+       * ★ 2026-09-26 한줄로 V2 R1-18 — 후속 발송 세그먼트 키(미열람·열람무반응·클릭·응모). 화면이 1천 명 목록의 id를 싣던 방식을 대신한다 —
+       *   서버가 **발송 시점에** 이 DM 수신자 전체에서 같은 판정 CT로 다시 뽑는다(1천 명 밖 수신자 누락 · 그 사이 바뀐 반응 반영).
+       *   id 지정(resendCustomerIds)은 옛 화면 번들 호환으로 남긴다.
+       */
+      resendSegment?: string;
     };
     // ★ 2026-07-06 재발송 모드 — 서버가 회사 격리 + DM 채널 자격을 재적용하므로 filter 불요
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const resendIds = Array.isArray(resendCustomerIds)
-      ? resendCustomerIds.map((x) => String(x)).filter((x) => UUID_RE.test(x)).slice(0, 10000)
-      : [];
-    const isResend = resendIds.length > 0;
+    const segmentKey: DmResendSegment | null = typeof resendSegment === 'string' && (DM_RESEND_SEGMENTS as readonly string[]).includes(resendSegment)
+      ? (resendSegment as DmResendSegment) : null;
+    const resendIds = segmentKey
+      ? classifyDmRecipientSegments(await getDmRecipientEngagementRows(req.params.id, companyId))[segmentKey]
+      : Array.isArray(resendCustomerIds)
+        ? resendCustomerIds.map((x) => String(x)).filter((x) => UUID_RE.test(x)).slice(0, 10000)
+        : [];
+    // 세그먼트 재발송인데 대상이 0이면 아래 대상 조회가 0명(ZERO_MATCH)으로 반려한다 — 전체 발송으로 새지 않게 재발송 모드는 유지
+    const isResend = resendIds.length > 0 || !!segmentKey;
     // ★ 2026-07-02(3) 전체 고객 발송 지원 — 타겟 추출 "전체 고객"(isAll) 확정분은 빈 filter 허용(= 조건 없음 = 전체 + DM 자격)
     if (!isResend && !allCustomers && (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0)) {
       return res.status(400).json({ error: '발송 대상 조건이 필요합니다. 전체 발송은 타겟 추출에서 "전체 고객"으로 확정해주세요.' });
@@ -1581,6 +1594,16 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
     });
 
     // 깔때기 요약: 발송 → 열람 → 50% 도달 → 완독 → 클릭 → 응모(액션) → 구매 전환
+    // ★ 2026-09-26 한줄로 V2 R1-18 — 요약·세그먼트 수는 **전체 수신자**(옛: CT 1천 명 상한 안에서만). 화면 목록만 아래에서 자른다.
+    const segmentIds = classifyDmRecipientSegments(rows);
+    const segments = {
+      unviewed: segmentIds.unviewed.length,
+      viewed_no_action: segmentIds.viewed_no_action.length,
+      clicked: segmentIds.clicked.length,
+      responded: segmentIds.responded.length,
+    };
+    const wantFull = String(req.query.full || '') === '1';
+    const listTruncated = !wantFull && recipients.length > DM_TRACK_LIST_CAP;
     const summary = {
       sent: recipients.length,
       viewed: recipients.filter((x) => x.viewed).length,
@@ -1645,7 +1668,13 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
       console.warn('[DM 발송 추적] 섹션 이탈 집계 실패:', e?.message);
     }
 
-    return res.json({ success: true, summary, recipients, hourDistribution, sectionExits });
+    return res.json({
+      success: true, summary,
+      // 목록은 상한까지(full=1 = CSV 등 전체) · 전체 수와 잘림 여부를 함께 준다
+      recipients: listTruncated ? recipients.slice(0, DM_TRACK_LIST_CAP) : recipients,
+      recipientsTotal: recipients.length, listTruncated, segments,
+      hourDistribution, sectionExits,
+    });
   } catch (err: any) {
     const msg = err?.message || '';
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
@@ -2572,6 +2601,11 @@ dmRouter.post('/:id/self-diagnose', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     const campaignId = req.params.id;
+    // ★ 2026-09-25 한줄로 전수점검 C-06: id만 받아 다른 회사·다른 사용자의 DM을 읽고 고치던 자리 — 다른 DM 라우트와 같은 소유 가드.
+    if (!isUuid(campaignId)) return res.status(400).json({ error: '올바르지 않은 DM ID입니다.' });
+    if (!(await canAccessDm(campaignId, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 접근할 수 있습니다.' });
+    }
     const result = await selfDiagnoseDm(companyId, campaignId);
     return res.json({ success: true, data: result });
   } catch (err: any) {
@@ -2638,6 +2672,11 @@ dmRouter.post('/:id/quick-action', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     const campaignId = req.params.id;
+    // ★ 2026-09-25 한줄로 전수점검 C-06: id만 받아 다른 회사·다른 사용자의 DM을 읽고 고치던 자리 — 다른 DM 라우트와 같은 소유 가드.
+    if (!isUuid(campaignId)) return res.status(400).json({ error: '올바르지 않은 DM ID입니다.' });
+    if (!(await canAccessDm(campaignId, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 접근할 수 있습니다.' });
+    }
     const action = req.body?.action as QuickActionType;
     if (!['ai_refine', 'design_align', 'variable_consistency'].includes(action)) {
       return res.status(400).json({ success: false, error: '알 수 없는 액션' });
@@ -2680,6 +2719,11 @@ dmRouter.get('/:id/section-suggest', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     const campaignId = req.params.id;
+    // ★ 2026-09-25 한줄로 전수점검 C-06: id만 받아 다른 회사·다른 사용자의 DM을 읽고 고치던 자리 — 다른 DM 라우트와 같은 소유 가드.
+    if (!isUuid(campaignId)) return res.status(400).json({ error: '올바르지 않은 DM ID입니다.' });
+    if (!(await canAccessDm(campaignId, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 접근할 수 있습니다.' });
+    }
     const result = await suggestNextSection(companyId, campaignId);
     return res.json({ success: true, data: result });
   } catch (err: any) {

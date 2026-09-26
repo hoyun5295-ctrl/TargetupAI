@@ -24,7 +24,7 @@ import {
 } from './billing-settings';
 // ★ 2026-07-31 수신자는 billing_recipients가 소유한다(CT). 그전엔 billing_contacts의 컬럼 한 쌍이라
 //   유형별로도 인원수로도 늘어나지 못했고, 개별 메일 경로는 companies.contact_email을 따로 보고 있었다.
-import { listBillingRecipients, pickRecipients, isRecipientRejected } from './billing-recipients';
+import { listBillingRecipients, pickRecipients, isRecipientRejected, isSmtpNotAccepted } from './billing-recipients';
 // ★ 2026-07-28 거래내역서 PDF를 메일에 첨부한다. 첨부가 없어서 웹페이지에서 항목표를 다시 그려야 했고,
 //   그 페이지가 "확인"과 "컨펌"을 한 화면에 섞어 버튼 뜻이 흐려졌다(Harold 2026-07-28).
 //   장(billings 행)마다 PDF가 따로다 — 전체 발급은 한 장, 계정별 발급은 계정 장 각각 + 공통 장.
@@ -152,7 +152,7 @@ export async function markConfirmationDelivered(
 export interface ConfirmSendSummary {
   sent: number;            // 메일 발송 + 추적 행 생성
   skippedNoEmail: number;  // 담당자 이메일 미등록 — 자동화 제외
-  mailFailed: number;      // SMTP 실패 — 행 미생성(수동 재발송 대상)
+  mailFailed: number;      // SMTP 실패 — 추적행은 남는다([메일 재시도]가 그 행으로 다시 보낸다 · R1-46)
   manualWait: number;      // 직접선택 정책 — 자동 발급 제외로 생성된 행 수
   // ★ 2026-07-28 두 축을 나눈다 — 하나로 세면 일시적 디스크 장애에도 운영자가 멀쩡한 묶음을 지우고 재발행한다.
   mismatchBlocked: number; // 항목합 ≠ 공급가액. 금액이 틀린 문서라 **재발송으로 안 풀린다** — 삭제 후 재발행
@@ -287,8 +287,27 @@ export async function createAndSendConfirmations(opts: {
         summary.mailFailed += 1;
         continue;
       }
-      if (row.rows[0].emailed_at || row.rows[0].has_confirmation === true) {
-        console.log(`[일괄발급][이미적재] billing=${sheet.id} — 추적행이 이미 있거나 발송된 장이다. 다시 만들지 않는다.`);
+      if (row.rows[0].emailed_at) {
+        console.log(`[일괄발급][이미발송] billing=${sheet.id} — 발송 표시가 있는 장이다. 다시 보내지 않는다.`);
+        continue;
+      }
+      if (row.rows[0].has_confirmation === true) {
+        // ★ 2026-09-26 한줄로 V2 R1-46 — 발송 표시 없이 살아 있는 추적행 = 앞선 시도에서 **메일만** 실패한 장이다(렌더·SMTP·정합 차단).
+        //   옛 코드는 여기서 건너뛰어 [메일 재시도]가 이 장을 영원히 못 보냈다("남은 행이 곧 재시도 목록"이 코드와 달랐다).
+        //   그 행을 다시 쓴다 — 토큰 유지 · 수신자·참조는 지금 설정으로 갱신(틀린 주소를 고친 뒤 재시도하면 새 주소로 간다).
+        //   한 번도 전달 확정이 안 된 행(manual_wait)만 — 진행된 행은 건드리지 않는다. 동시 재시도는 2단계 소유권 UPDATE가 한 건만 통과시킨다.
+        const reuse = await claimClient.query(
+          `UPDATE invoice_confirmations
+              SET recipient_email = $2, cc_emails = $3::text[], recipient_user_id = $4::uuid
+            WHERE billing_id = $1::uuid AND superseded_at IS NULL AND taxbill_status = 'manual_wait'
+            RETURNING token`,
+          [sheet.id, email, resolved.cc.length > 0 ? resolved.cc : null, sheet.scope === 'by_user' ? sheet.user_id : null],
+        );
+        if (reuse.rows.length !== 1) {
+          console.log(`[일괄발급][이미적재] billing=${sheet.id} — 추적행이 이미 진행됐다(전달 확정·처리 뒤). 다시 보내지 않는다.`);
+          continue;
+        }
+        claimed.push({ sheet, name: resolved.primary?.name ?? null, email, cc: resolved.cc, token: reuse.rows[0].token });
         continue;
       }
       const token = randomBytes(24).toString('hex'); // 48자 — 컬럼 varchar(64)
@@ -367,34 +386,36 @@ ${renderConfirmBlockHtml(viewUrl)}
       continue; // 마찬가지로 추적행이 남아 재시도 대상이 된다
     }
 
-    // 발송 표시를 SMTP **앞에** 남기고 그 트랜잭션 안에서 보낸다(이 레포의 정석 — 발송 중 삭제 차단).
-    //   실패하면 ROLLBACK으로 표시가 지워져 추적행과 함께 그대로 재시도 대상이 된다.
-    const client = await pool.connect();
-    let mailWasSent = false;
+    // ★ 2026-09-26 한줄로 V2 R1-46(Codex 6차 1R·2R high) — 발송 소유권(발송 표시)을 **메일보다 먼저 커밋**한다.
+    //   옛: 표시를 트랜잭션 안에 두고 SMTP 뒤에 커밋해, 보낸 뒤 확정 실패·커밋 실패·타임아웃 뒤 커밋 실패 중 무엇이든 소유권을
+    //   다시 열었다(그 순간 같은 장을 적재한 다른 재시도가 같은 메일을 또 보냈다). 이제 소유권은 발송 전에 영속되고,
+    //   **확실한 미발송**(SMTP 오류 · 대표 수신자 거부)일 때만 우리가 찍은 표시를 푼다. 불확정(타임아웃)은 표시를 둔다(수동 확인).
+    //   발송 동안 DB 연결·행 잠금을 쥐지 않는다. 삭제 경로는 원래도 발송 직후엔 지울 수 있어 결과가 같다.
+    let claimedAt: string;
     try {
-      await client.query('BEGIN');
-      // 잠금 대기·발송 총시간에 명시 상한을 건다(nodemailer 타임아웃 3종은 총 소요시간 상한이 아니다).
-      await client.query(`SET LOCAL lock_timeout = '10s'`);
       // 발송 소유권을 조건부 UPDATE 하나로 잡는다 — 0행이면 다른 요청이 이미 가져갔다는 뜻이다.
-      const claimRes = await client.query(
+      //   되돌릴 때 **우리가 찍은 값**만 지우도록 시각을 문자열(마이크로초 보존)로 받는다.
+      const claimRes = await pool.query(
         `UPDATE billings SET emailed_at = NOW(), emailed_to = $2
-          WHERE id = $1::uuid AND emailed_at IS NULL RETURNING id`,
+          WHERE id = $1::uuid AND emailed_at IS NULL RETURNING emailed_at::text AS claimed_at`,
         [sheet.id, email],
       );
       if (claimRes.rowCount === 0) {
-        await client.query('ROLLBACK');
         try { unlinkSync(attachment.path); } catch { /* 안 나간 렌더본은 남기지 않는다 */ }
         console.log(`[일괄발급][중복차단] billing=${sheet.id} — 다른 요청이 먼저 가져갔다(또는 장이 사라졌다).`);
         continue;
       }
-      await client.query(
-        `UPDATE billings SET emailed_at = COALESCE(emailed_at, NOW()), emailed_to = COALESCE(emailed_to, $2)
-          WHERE id = $1::uuid`,
-        [sheet.id, email],
-      );
+      claimedAt = String(claimRes.rows[0].claimed_at);
+    } catch (claimErr: any) {
+      try { unlinkSync(attachment.path); } catch { /* 안 나간 렌더본은 남기지 않는다 */ }
+      console.error(`[일괄발급][소유권실패] billing=${sheet.id} — 발송 표시를 남기지 못해 보내지 않았다(재시도 대상):`, claimErr?.message || claimErr);
+      summary.mailFailed += 1;
+      continue;
+    }
 
-      // 총 60초 상한 — 넘으면 발송 여부 불확정. sendMail은 취소되지 않으므로 "안 갔다"로 단정할 수 없다.
-      let mailTimedOut = false;
+    // 총 60초 상한 — 넘으면 발송 여부 불확정. sendMail은 취소되지 않으므로 "안 갔다"로 단정할 수 없다.
+    let mailTimedOut = false;
+    try {
       const mailInfo: any = await Promise.race([
         transporter.sendMail({
           // 고객문의 메일과 같은 계정(SMTP_USER)이다 — 표시명·회신 주소만 명시한다.
@@ -409,49 +430,47 @@ ${renderConfirmBlockHtml(viewUrl)}
           attachments: [attachment],
         }),
         new Promise((_, reject) => setTimeout(() => { mailTimedOut = true; reject(new Error('MAIL_TOTAL_TIMEOUT')); }, MAIL_TOTAL_TIMEOUT_MS)),
-      ]).catch(async (raceErr) => {
-        if (mailTimedOut) {
-          // 발송 불확정 — 표시를 **커밋해 남긴다**(전달됐을 수 있으므로 중복 발송을 막는 쪽을 택한다).
-          //   추적행은 이미 1단계에서 만들어졌고, 마감은 아래에서 못 채우므로 적재 시점 값이 남는다.
-          await client.query('COMMIT');
-          console.error(`[일괄발급][발송불확정] billing=${sheet.id} to=${email} — ${MAIL_TOTAL_TIMEOUT_MS / 1000}초 초과. 발송 여부 불명, 표식만 남김. 수동 확인 필요.`);
-        }
-        throw raceErr;
-      });
+      ]);
       // ★ 2026-07-31 부분 거부를 성공으로 세지 않는다(판정은 CT — 발송 지점 셋이 같은 규칙을 쓴다).
-      //   여기서 던지면 아래 catch가 ROLLBACK 하고(발송 표시 원복) 추적행은 남아 재시도 대상이 된다.
       if (isRecipientRejected(mailInfo, email)) {
-        throw new Error(`대표 수신자가 메일 서버에서 거부되었습니다 (${email})`);
+        throw Object.assign(new Error(`대표 수신자가 메일 서버에서 거부되었습니다 (${email})`), { recipientRejected: true });
       }
-      mailWasSent = true;
-
-      // 실제로 나간 시각으로 추적행을 확정한다. 마감은 **발송일 기준** 3일 뒤 09:00 KST(익월 10일 캡).
-      //   적재는 오늘 값으로 넣어두는데, 재시도가 다음 날 성공하면 그날 기준으로 다시 잡혀야 한다.
-      // ★ 2026-08-04 여기서 **처음으로** 자동 발행 대상이 된다(정책이 manual이면 그대로 멈춰 있다).
-      await markConfirmationDelivered(client, {
-        billingId: sheet.id, companyId, billingEnd, email,
-      });
-      await client.query('COMMIT');
     } catch (err: any) {
-      try { await client.query('ROLLBACK'); } catch { /* 타임아웃 경로는 이미 COMMIT됨 — 무해한 no-op */ }
-      if (mailWasSent) {
-        // 메일은 나갔는데 확정 UPDATE가 롤백됐다 — 표시만 되살려 발송 사실을 보존한다(중복 발송 차단 유지).
-        console.error(`[일괄발급][확정실패] billing=${sheet.id} to=${email} — 메일은 발송됨. 수동 확인 필요:`, err?.message || err);
+      // ★ Codex 6차 3R — 표시 해제는 **확실한 미접수**일 때만(판정 CT). 60초 타이머뿐 아니라 SMTP 자체 타임아웃·소켓 단절도
+      //   본문 전달 뒤 응답만 잃었을 수 있어 불확정이다 — 풀면 같은 메일이 다시 나간다.
+      if (!mailTimedOut && isSmtpNotAccepted(err)) {
+        // 확실한 미발송 — 우리가 찍은 표시만 푼다(그 사이 다른 경로가 찍은 표시는 건드리지 않는다). 추적행은 남아 재시도 대상이다.
+        console.error(`[일괄발급][메일실패] billing=${sheet.id} to=${email}:`, err?.message || err);
         try {
           await pool.query(
-            `UPDATE billings SET emailed_at = COALESCE(emailed_at, NOW()), emailed_to = COALESCE(emailed_to, $2) WHERE id = $1::uuid`,
-            [sheet.id, email],
+            `UPDATE billings SET emailed_at = NULL, emailed_to = NULL
+              WHERE id = $1::uuid AND emailed_at = $2::timestamptz`,
+            [sheet.id, claimedAt],
           );
-        } catch { /* 장 자체가 사라진 경우 — 위 로그로 충분 */ }
-      } else if (String(err?.message) !== 'MAIL_TOTAL_TIMEOUT') {
-        console.error(`[일괄발급][메일실패] billing=${sheet.id} to=${email}:`, err?.message || err);
+        } catch (releaseErr: any) {
+          console.error(`[일괄발급][표시해제실패] billing=${sheet.id} — 미발송인데 발송 표시가 남았다(재시도 대상에서 빠짐 · 수동 확인):`, releaseErr?.message || releaseErr);
+        }
         // 안 나간 첨부는 남기지 않는다. 추적행은 살아 있으니 재시도하면 새로 렌더된다.
         try { unlinkSync(attachment.path); } catch { /* 이미 없으면 그만 */ }
+      } else {
+        // 발송 불확정 — 표시를 **그대로 둔다**(전달됐을 수 있으므로 중복 발송을 막는 쪽을 택한다).
+        //   추적행은 1단계에서 만들어졌고 전달 확정은 못 했으므로 적재 시점 값(manual_wait)이 남는다.
+        console.error(`[일괄발급][발송불확정] billing=${sheet.id} to=${email} — ${mailTimedOut ? `${MAIL_TOTAL_TIMEOUT_MS / 1000}초 초과` : `SMTP 응답 불명(${err?.code || err?.message || err})`}. 발송 여부 불명, 표식만 남김. 수동 확인 필요.`);
       }
       summary.mailFailed += 1;
       continue;
-    } finally {
-      client.release();
+    }
+
+    // 실제로 나간 시각으로 추적행을 확정한다. 마감은 **발송일 기준** 3일 뒤 09:00 KST(익월 10일 캡).
+    //   적재는 오늘 값으로 넣어두는데, 재시도가 다음 날 성공하면 그날 기준으로 다시 잡혀야 한다.
+    // ★ 2026-08-04 여기서 **처음으로** 자동 발행 대상이 된다(정책이 manual이면 그대로 멈춰 있다).
+    //   실패하면 추적행이 manual_wait로 남는다(자동 발행 타이머가 돌지 않을 뿐 · 발송 표시는 이미 남았다) — 수동 확인.
+    try {
+      await markConfirmationDelivered(pool, {
+        billingId: sheet.id, companyId, billingEnd, email,
+      });
+    } catch (confirmErr: any) {
+      console.error(`[일괄발급][확정실패] billing=${sheet.id} to=${email} — 메일은 발송됨 · 발송 표시 커밋됨 · 전달 확정만 실패(자동 발행 멈춤). 수동 확인 필요:`, confirmErr?.message || confirmErr);
     }
 
     summary.sent += 1;

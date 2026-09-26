@@ -82,6 +82,8 @@ router.get('/c/:hash', async (req: Request, res: Response) => {
       eventName: 'message_click',
       externalId: detectedExternalId || undefined,
       anonymousId: detectedExternalId ? undefined : uaHash,
+      // ★ 2026-09-26 한줄로 V2 R1-15 — 발급 원장이 아는 수신 고객(회원 연결이 없을 때 이 고객으로 기록 · 여정 클릭 분기·목표가 찾는 축)
+      knownCustomerId: resolved.customerId || undefined,
       properties: {
         campaign_id: resolved.campaignId,
         journey_id: resolved.journeyId,

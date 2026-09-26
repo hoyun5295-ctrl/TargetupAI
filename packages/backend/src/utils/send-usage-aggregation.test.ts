@@ -155,9 +155,10 @@ describe('BILLING_MSG_TYPE_SQL — 브랜드 F 행을 친구·비친구로 가�
 describe('buildBillingTotals — 청구 수량 합산 (2026-07-25)', () => {
   const day = (t: number, s: number, f = 0, p = 0) => ({ total: t, success: s, fail: f, pending: p });
 
-  it('빈 입력 — 10개 유형키가 전부 0으로 존재한다', () => {
+  // ★ 2026-09-26 S1-H06 테스트 브랜드(TEST_BRAND) 합류 — 11개
+  it('빈 입력 — 11개 유형키가 전부 0으로 존재한다', () => {
     const t = buildBillingTotals({});
-    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, BRAND: 0, BRAND_NF: 0, TEST_SMS: 0, TEST_LMS: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
+    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, BRAND: 0, BRAND_NF: 0, TEST_SMS: 0, TEST_LMS: 0, TEST_BRAND: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
     expect(buildBillingTotals(undefined as any).SMS).toBe(0);
   });
 
@@ -931,7 +932,9 @@ describe('resolveBillingUnitPricesDetailed — 미설정 유형키 색출 (2026-
       cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8, cost_per_brand: null,
     });
     // ★ 2026-09-13 비친구 칸도 비어 있고 친구 단가로 떨어질 곳도 없으니 BRAND_NF도 함께 미설정이다.
-    expect(unsetKeys).toEqual(['BRAND', 'BRAND_NF']);
+    // ★ 2026-09-26 S1-H06 테스트 브랜드도 브랜드(친구) 단가를 따르므로 함께 미설정이다.
+    expect(unsetKeys).toEqual(['BRAND', 'BRAND_NF', 'TEST_BRAND']);
+    expect(prices.TEST_BRAND).toBe(0);
     expect(prices.BRAND).toBe(0);   // 알림톡 8원이 새어 들어오면 안 된다
     expect(prices.BRAND_NF).toBe(0);
   });
@@ -953,7 +956,7 @@ describe('resolveBillingUnitPricesDetailed — 미설정 유형키 색출 (2026-
 
   it('자기도 비고 상속원도 비면 테스트·스팸까지 잡힌다', () => {
     const { unsetKeys } = resolveBillingUnitPricesDetailed({ cost_per_mms: 90, cost_per_kakao: 8 });
-    expect(unsetKeys).toEqual(['SMS', 'LMS', 'BRAND', 'BRAND_NF', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS']);
+    expect(unsetKeys).toEqual(['SMS', 'LMS', 'BRAND', 'BRAND_NF', 'TEST_SMS', 'TEST_LMS', 'TEST_BRAND', 'SPAM_SMS', 'SPAM_LMS']);
   });
 
   // ★ 2026-09-13 브랜드 비친구 — 비친구 칸은 비면 친구 단가(cost_per_brand)를 따른다(테스트 단가 상속과 같은 방식).

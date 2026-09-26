@@ -36,6 +36,8 @@ import { isImplementedTriggerEvent, triggerTemplateCode } from './journey-trigge
 import { successionObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
 import { stripUnauthorizedBenefits } from './copy-benefit-detector';
+// ★ 2026-09-26 한줄로 V2 R1-35 후속 — 날씨 지시는 날씨 CT가 소유(연결이 없으면 날씨 변수를 쓰지 않게)
+import { buildWeatherPromptBlock, buildWeatherRefineRule } from './connected-content';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -365,21 +367,7 @@ ${memoryContext}
 
 ${dataProfilePrompt}
 
-[★ ★ ★ 날씨 Liquid 변수: D209+ 신규 (Connected Content 통합) ★ ★ ★]
-✗ 날씨 단순 단어 직접 작성 절대 금지 ("맑음" / "비" / "눈" / "흐림" / "쌀쌀해요" / "더워요" / "화창" / "쌀쌀"). 발송 시점 실시간 날씨와 불일치 사고 위험 (예: "오늘 날씨 화창해요" 작성한 메시지가 폭우 영역에 발송 = 신뢰 파괴)
-✓ 발송 시점 실시간 자동 분기는 Liquid 변수 의무:
-   - {{ weather.summary }}: 고객 region 기준 현재 날씨 한 줄 ("맑음 18°C" 등)
-   - {{ weather.store.summary }}: 매장 region 기준 (매장 단독 행사 영역 의무, 예: "강남점 봄 행사")
-   - {{ weather.temp }} / {{ weather.condition }}: 온도 / 상태 (분기 조건용)
-✓ 분기 예시: 폭우 / 폭염 / 눈 영역 안내:
-   {% if weather.condition == 'Rain' %}
-   비 오는 오늘, 매장 방문이 어려우신 분들을 위해
-   {% elsif weather.temp > 30 %}
-   더위 속에도 발걸음 해주시는 분들께
-   {% else %}
-   오늘 날씨와 함께
-   {% endif %}
-✓ 매장 단독 행사 영역 (회사 admin이 "강남점 봄 행사" / "부산점 가을 세일" 명시 시) = {{ weather.store.summary }} 의무
+${buildWeatherPromptBlock()}
 
 [★ ★ ★ AI 자율 예측 점수 활용 가이드: D197 신규 (Predictive Suite 통합) ★ ★ ★]
 발송 시점에 customer 객체에 자동 첨부되는 3 예측 점수 (0~1 매트릭스):
@@ -777,7 +765,7 @@ ${buildJourneyContextBlock(jc, hasBody)}
 ✓ 안내문 / 인사 / 감성 텍스트는 회사 톤에 맞춰 풍성하게 정련 (계절 단어 없이)
 ✗ 구체 혜택 (% / 원 / 무료 / 쿠폰) 임의 생성 금지: placeholder 유지
 ✗ (광고) / 무료수신거부 080 직접 작성 X
-✗ 날씨 단순 단어 직접 작성 X: {{ weather.summary }} / {{ weather.store.summary }} Liquid 변수 의무 (D209+ Connected Content 정합)
+${buildWeatherRefineRule()}
 ✓ 최대 ${maxBytes}바이트 안
 ✓ ★ D191 강화: Liquid 문법({{ }}, {% if %}, {% endif %}, {% elsif %}, {% else %}, | filter)이 원본에 있으면 정확히 보존. Liquid 분기 안 텍스트만 톤 정련. Liquid 미사용 영역은 기존대로 평문 처리.
 ✓ ★ D209+ 강화 (옛 ai.ts 정합 통합):
@@ -1008,5 +996,12 @@ export async function regenerateStepAvoidingSpam(input: StepSpamRegenInput): Pro
   const cleaned = String(text || '').trim();
   if (!cleaned) return null;
   const san = sanitizeForSms(cleaned.slice(0, maxBytes * 2));
-  return san.sanitized || null;
+  const out = san.sanitized || null;
+  // ★ 2026-09-26 한줄로 V2 R1-44 — 이 재작성은 사람 검토 없이 실발송 스냅샷을 바꾼다. 원본에 없던 혜택을 AI가 만들었으면
+  //   재작성을 버린다(대행 다듬기와 같은 혜택 차단 CT · 프롬프트 지시는 경계가 아니다). 버리면 자동 교체 없이 담당자 안내로 간다.
+  if (out && stripUnauthorizedBenefits(out, input.currentMessage) !== out) {
+    console.log(`[journey-ai-refine] 원본에 없던 혜택이 생겨 재작성을 버림 company=${input.companyId}`);
+    return null;
+  }
+  return out;
 }

@@ -6,7 +6,7 @@
  *   → 발송내역엔 없고 차감이력엔 떠서 불일치·추적 불가(서수란 신고). reference_type를 유형별로 분리한다.
  */
 import { describe, test, expect } from 'vitest';
-import { deductReferenceLabel, buildDeductDescription, parseDeductDescription } from './deduct-reference';
+import { deductReferenceLabel, buildDeductDescription, parseDeductDescription, parseFreeCount, parseAlimtalkUnits, resolveAlimtalkLedgerUnits } from './deduct-reference';
 
 describe('deductReferenceLabel', () => {
   test('유형별 한국어 라벨', () => {
@@ -86,5 +86,70 @@ describe('parseDeductDescription — 차감 설명 되읽기 (2026-07-26)', () =
     const desc = buildDeductDescription('campaign', 'LMS', 1000, 25.08);
     const parsed = parseDeductDescription(desc)!;
     expect(parsed.count * parsed.unitPrice).toBeCloseTo(25080, 6);
+  });
+});
+
+/**
+ * ★ 2026-09-26 한줄로 V2 F01·F04 — 선불 알림톡 결과별 정산 단가.
+ * 알림톡은 대체 문자까지 보낼 수 있어 차감은 문자 단가(보통 LMS)로 한다. 그런데 결과는 셋으로 갈린다
+ * (알림톡 성공 · SMS 대체 · LMS 대체). 후불 청구는 결과별 단가로 매기는데 선불만 차감 단가로 굳었다.
+ * 정산이 쓰는 결과별 단가는 **차감한 그 순간의 단가**여야 하므로 차감 행에 함께 싣는다(단가 변경 뒤에도 짝이 맞게).
+ */
+describe('알림톡 결과별 정산 단가 — 차감 설명에 싣고 되읽기 (2026-09-26)', () => {
+  const units = { KAKAO: 5.5, SMS: 11, LMS: 27.5 };
+
+  test('차감 설명 뒤에 붙인다 — 앞 문구는 한 글자도 바뀌지 않는다', () => {
+    expect(buildDeductDescription('campaign', 'LMS', 10, 27.5, 0, units))
+      .toBe('LMS 10건 발송 차감 (건당 27.5원) · 결과별 정산: 알림톡 5.5원 · SMS 대체 11원 · LMS 대체 27.5원');
+  });
+
+  test('부분 무료에도 붙고, 전량 무료(과금 없음)에는 붙이지 않는다 — 돌려줄 차액이 없다', () => {
+    expect(buildDeductDescription('campaign', 'LMS', 6, 27.5, 4, units))
+      .toBe('LMS 10건 중 무료 4건 · 과금 6건 발송 차감 (건당 27.5원) · 결과별 정산: 알림톡 5.5원 · SMS 대체 11원 · LMS 대체 27.5원');
+    expect(buildDeductDescription('campaign', 'LMS', 0, 27.5, 10, units)).toBe('LMS 무료 제공 10건 발송 (과금 없음)');
+  });
+
+  test('붙여도 차감 건수·단가·무료 되읽기는 그대로다', () => {
+    const desc = buildDeductDescription('campaign', 'LMS', 6, 27.5, 4, units);
+    expect(parseDeductDescription(desc)).toEqual({ count: 6, unitPrice: 27.5 });
+    expect(parseFreeCount(desc)).toBe(4);
+  });
+
+  test('왕복 — 0원 계약도 그대로 읽는다', () => {
+    expect(parseAlimtalkUnits(buildDeductDescription('campaign', 'LMS', 10, 27.5, 0, units))).toEqual(units);
+    const zero = { KAKAO: 0, SMS: 8.8, LMS: 22 };
+    expect(parseAlimtalkUnits(buildDeductDescription('campaign', 'SMS', 3, 8.8, 0, zero))).toEqual(zero);
+  });
+
+  test('단가를 싣지 않은 옛 문구·다른 문구는 null', () => {
+    expect(parseAlimtalkUnits(buildDeductDescription('campaign', 'LMS', 10, 27.5))).toBeNull();
+    expect(parseAlimtalkUnits('발송 실패 환불 (LMS 2건 × 27.5원)')).toBeNull();
+    expect(parseAlimtalkUnits(null)).toBeNull();
+  });
+});
+
+describe('resolveAlimtalkLedgerUnits — 차감 원장 행들에서 결과별 정산 단가 하나를 고른다 (2026-09-26)', () => {
+  const units = { KAKAO: 5.5, SMS: 11, LMS: 27.5 };
+  const paid = (count: number, u: any = units) => ({ amount: count * 27.5, description: buildDeductDescription('campaign', 'LMS', count, 27.5, 0, u) });
+
+  test('과금 행이 모두 같은 단가를 실었으면 그 단가', () => {
+    expect(resolveAlimtalkLedgerUnits([paid(10), paid(5)])).toEqual(units);
+  });
+
+  test('금액 0 행(전량 무료)은 보지 않는다', () => {
+    expect(resolveAlimtalkLedgerUnits([paid(10), { amount: 0, description: buildDeductDescription('campaign', 'LMS', 0, 27.5, 3) }])).toEqual(units);
+  });
+
+  test('과금 행 하나라도 단가가 없으면 null — 옛 방식으로 정산한다', () => {
+    expect(resolveAlimtalkLedgerUnits([paid(10), { amount: 137.5, description: buildDeductDescription('campaign', 'LMS', 5, 27.5) }])).toBeNull();
+  });
+
+  test('과금 행끼리 단가가 다르면 null — 어느 쪽인지 추측하지 않는다', () => {
+    expect(resolveAlimtalkLedgerUnits([paid(10), paid(5, { KAKAO: 6.6, SMS: 11, LMS: 27.5 })])).toBeNull();
+  });
+
+  test('과금 행이 없으면 null', () => {
+    expect(resolveAlimtalkLedgerUnits([])).toBeNull();
+    expect(resolveAlimtalkLedgerUnits([{ amount: 0, description: buildDeductDescription('campaign', 'LMS', 0, 27.5, 3) }])).toBeNull();
   });
 });

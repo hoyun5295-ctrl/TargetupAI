@@ -1,6 +1,9 @@
 // EUC-KR byte 길이 — 순수 코어(DB-free). 통신 규격: ASCII 1byte, 한글 등 비-ASCII 2byte.
 // SMS 발송은 EUC-KR 기준이라 길이 판정도 byte 기준. journey-ai-generator/variant-generator 인라인 중복의 통합 토대.
 
+/** SMS(단문) 통신 규격 상한(EUC-KR 바이트). ★ 2026-09-26 한줄로 V2 R1-08 — 대행 접수 판정이 이 값을 쓴다. */
+export const SMS_MAX_BYTES = 90;
+
 /** 문자열의 EUC-KR 근사 byte 길이. ASCII(<128) 1byte, 그 외(한글/특수) 2byte. */
 export function eucKrByteLength(text: string): number {
   let bytes = 0;

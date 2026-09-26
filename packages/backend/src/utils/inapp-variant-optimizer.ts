@@ -68,6 +68,11 @@ export interface CreateVariantInput {
   text_color?: string;
   animation?: string;
   variant_weight?: number;
+  /**
+   * ★ 2026-09-26 한줄로 V2 R1-45 — 만들 때 상태. 생략 = 'active'(수동 생성 = 사용자가 직접 쓴 변형 · 종전).
+   * AI 다듬기는 'paused'로 만든다 — 사람이 검토하고 켜야 노출된다(노출 선택은 켜진 변형만 본다).
+   */
+  status?: 'active' | 'paused';
   // ★ P1-4 (2026-07-12) — 명시 전달 시 그 값 우선, 미전달 시 부모 상속 (블록 부모의 variant가 레거시 단색 렌더로 오염되던 문제)
   content_blocks?: any[] | null;
   theme?: string | null;
@@ -162,7 +167,7 @@ export async function createVariant(
        $10::jsonb, $11::jsonb, $12::jsonb,
        $13, $14, $15,
        $16, $17, $18::integer[], $19::jsonb,
-       $20, $21, 'active',
+       $20, $21, $33,
        $22::uuid, $23,
        $24::jsonb, $25, $26, $27, $28, $29, $30::jsonb, $31::jsonb, $32,
        NOW(), NOW()
@@ -200,10 +205,33 @@ export async function createVariant(
       // ★ 2026-07-31 이미지 클릭 링크 상속 — 미상속 시 variant만 이미지 클릭이 죽는다(0721 poster_slides 유실과 같은 부류).
       // ★ (Codex 2R) 블록이 진실인 variant는 flat 전용 링크를 저장하지 않는다(create/update 계약 미러).
       variantBlocks.length > 0 ? null : (parent.image_link_url ?? null),
+      // ★ 2026-09-26 R1-45 — 상태($33)
+      input.status === 'paused' ? 'paused' : 'active',
     ]
   );
 
   return String(r.rows[0].id);
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-45 — 변형 켜기·끄기(검토 뒤 노출). **변형 행만**(부모·회사가 맞아야) · 과금 없음(변형 생성도 무료).
+ * 부모 메시지 상태는 건드리지 않는다(부모 게시·과금은 인앱 수정 경로 소유). 바뀐 행이 없으면 false.
+ */
+export async function setVariantStatus(
+  companyId: string,
+  parentMessageId: string,
+  variantId: string,
+  status: 'active' | 'paused',
+): Promise<boolean> {
+  const r = await query(
+    `UPDATE cdp_inapp_messages
+        SET status = $4, updated_at = NOW()
+      WHERE id = $1::uuid AND company_id = $2::uuid
+        AND parent_message_id = $3::uuid
+      RETURNING id`,
+    [variantId, companyId, parentMessageId, status],
+  );
+  return r.rows.length > 0;
 }
 
 /**

@@ -43,6 +43,7 @@ import { redis } from '../config/defaults';
 import { FIELD_MAP, getColumnFields, getFieldByKey, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue } from './standard-field-map';
 import { detectPhoneFields } from './callback-filter';
 import { swrPrimeCache } from './swr-cache';
+import { customFieldRef } from './safe-field-name';
 
 // ─── 타입 정의 ───
 
@@ -102,11 +103,11 @@ async function detectCustomFieldTypeFromSamples(
     //   내부 서브쿼리 LIMIT 200으로 스캔 조기 종료 → 그 표본에서 DISTINCT 20 (판정 정확도 동일).
     const sampleResult = await query(
       `SELECT DISTINCT val FROM (
-         SELECT custom_fields->>'${fieldKey}' as val
+         SELECT ${customFieldRef(fieldKey)} as val
            FROM customers
           WHERE ${scopeWhere}
-            AND custom_fields->>'${fieldKey}' IS NOT NULL
-            AND custom_fields->>'${fieldKey}' != ''
+            AND ${customFieldRef(fieldKey)} IS NOT NULL
+            AND ${customFieldRef(fieldKey)} != ''
           LIMIT 200
        ) sample_rows
        LIMIT 20`,
@@ -489,7 +490,7 @@ export async function buildEnabledFieldsPayload(
     optionThunks.push(async () => {
       try {
         const optResult = await query(
-          `SELECT DISTINCT custom_fields->>'${f.field_key}' as val FROM customers WHERE ${scopeWhere} AND custom_fields->>'${f.field_key}' IS NOT NULL AND custom_fields->>'${f.field_key}' != '' ORDER BY val LIMIT 100`,
+          `SELECT DISTINCT ${customFieldRef(f.field_key)} as val FROM customers WHERE ${scopeWhere} AND ${customFieldRef(f.field_key)} IS NOT NULL AND ${customFieldRef(f.field_key)} != '' ORDER BY val LIMIT 100`,
           scopeParams
         );
         if (optResult.rows.length > 0 && optResult.rows.length <= 100) {

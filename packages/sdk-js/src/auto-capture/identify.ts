@@ -9,9 +9,12 @@ export interface IdentifyResult {
   email?: string;
   phone?: string;
   name?: string;
+  /** ★ 2026-09-26 회원 토큰(몰 서버가 비밀키로 받은 값) — 있어야 인앱 개인화 값을 받는다 */
+  memberToken?: string;
 }
 
 const ATTR_USER_ID = 'data-hjl-user-id';
+const ATTR_MEMBER_TOKEN = 'data-hjl-member-token';
 const ATTR_EMAIL = 'data-hjl-email';
 const ATTR_PHONE = 'data-hjl-phone';
 const ATTR_NAME = 'data-hjl-name';
@@ -31,6 +34,8 @@ export function detectIdentify(): IdentifyResult | null {
   if (email) result.email = email;
   if (phone) result.phone = phone;
   if (name) result.name = name;
+  const memberToken = document.body.getAttribute(ATTR_MEMBER_TOKEN);
+  if (memberToken) result.memberToken = memberToken;
   return result;
 }
 

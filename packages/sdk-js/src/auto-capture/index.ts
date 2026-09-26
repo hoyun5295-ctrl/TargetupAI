@@ -115,7 +115,7 @@ function createHjlGlobal(): HjlGlobal {
         });
       }
       // identify 확정 직후 인앱 기동 — 비로그인이면 anonymousId만으로 조회 (세그먼트 조건 메시지는 서버가 제외)
-      inapp.init({ ...inappBaseInput(), externalId: id ? id.externalId : undefined }).catch(() => {});
+      inapp.init({ ...inappBaseInput(), externalId: id ? id.externalId : undefined, memberToken: id?.memberToken }).catch(() => {});
 
       watchIdentifyChanges((result) => {
         if (result) {
@@ -128,7 +128,7 @@ function createHjlGlobal(): HjlGlobal {
             trust_level: 'declared',
           });
           // 늦은 로그인(SPA) — 새 externalId로 인앱 재조회 (과다 호출은 5분 캐시가 흡수)
-          inapp.init({ ...inappBaseInput(), externalId: result.externalId }).catch(() => {});
+          inapp.init({ ...inappBaseInput(), externalId: result.externalId, memberToken: result.memberToken }).catch(() => {});
         }
       });
 

@@ -347,6 +347,9 @@ async function reconcileOneBill(billId: string, server: GatewayServer): Promise<
   report.desiredCount = desiredRes.rows.length;
 
   const remoteTmplcds = new Set<string>();
+  // ★ 2026-09-26 한줄로 V2 P-10 — 실존 확인 시각만 찍을 행(일치 · 대기)은 모아 아래에서 한 문장으로 찍는다
+  //   (행마다 UPDATE = 대조 1회 약 5,600번 왕복 · 70일 86만 회). 값의 의미(마지막 실존 확인)는 그대로다.
+  const seenIds: string[] = [];
 
   for (const remote of remoteRows) {
     const tmplcd = String(remote?.tmplcd ?? '').trim();
@@ -382,10 +385,7 @@ async function reconcileOneBill(billId: string, server: GatewayServer): Promise<
 
     if (mismatches.length === 0) {
       report.matched += 1;
-      await query(
-        `UPDATE gateway_template_mappings SET last_seen_at = now() WHERE id = $1`,
-        [desired.id],
-      );
+      seenIds.push(desired.id);
       continue;
     }
 
@@ -425,7 +425,10 @@ async function reconcileOneBill(billId: string, server: GatewayServer): Promise<
 
     // auto/manual인데 pending/failed 상태 = push 대기·판단 대기 중 — 실존 확인만 기록
     report.matched += 1;
-    await query(`UPDATE gateway_template_mappings SET last_seen_at = now() WHERE id = $1`, [desired.id]);
+    seenIds.push(desired.id);
+  }
+  if (seenIds.length > 0) {
+    await query(`UPDATE gateway_template_mappings SET last_seen_at = now() WHERE id = ANY($1::uuid[])`, [seenIds]);
   }
 
   // desired에 있는데 게이트웨이에 없는 행

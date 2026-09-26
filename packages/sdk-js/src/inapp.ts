@@ -194,6 +194,11 @@ export interface InAppDesignSdk {
 
 export interface InAppInitInput {
   externalId?: string;
+  /**
+   * ★ 2026-09-26 회원 토큰 — 몰 서버가 비밀키로 POST /api/cdp/member-token 을 불러 받은 값.
+   * 있어야 서버가 개인화 값(이름·등급·포인트 등)을 준다. 없으면 기본 문구(예: "고객")로 표시된다.
+   */
+  memberToken?: string;
   anonymousId?: string;
   /** 옛 trigger 단일 — backward compat */
   trigger?: string;
@@ -360,6 +365,7 @@ export class HanjulloInAppModule {
 
     const params = new URLSearchParams({ trigger });
     if (input.externalId) params.set('external_id', input.externalId);
+    if (input.memberToken) params.set('member_token', input.memberToken);
     if (input.anonymousId) params.set('anonymous_id', input.anonymousId);
     if (seenIds) params.set('seen', seenIds);
     // ★ 2026-06-17 2단계 — 앱(웹뷰)이면 채널=app 요청 (미전송 시 서버 기본 web)

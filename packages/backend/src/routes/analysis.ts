@@ -473,15 +473,14 @@ router.get('/preview', async (req: Request, res: Response) => {
       `, [userId]);
 
       // 9) 이탈 위험 고객 (마지막 구매 90일+)
+      // ★ 2026-09-26 한줄로 V2 R1-14 — 옛: GROUP BY cu.id라 이탈 고객 1명당 1행을 가져와 rows.length로 셌다.
+      //   같은 뜻의 카운트 한 행: MAX(구매일) < 90일 전 또는 구매 없음 ⇔ 90일 안 구매가 하나도 없음.
       const churnResult = await query(`
-        SELECT COUNT(DISTINCT cu.id) as churn_risk_count
+        SELECT COUNT(*)::int AS churn_risk_count
         FROM customers cu
-        LEFT JOIN purchases pu ON cu.id = pu.customer_id
         WHERE cu.company_id = $1
           AND cu.is_active = true
-        GROUP BY cu.id
-        HAVING MAX(pu.purchase_date) < NOW() - INTERVAL '90 days'
-           OR MAX(pu.purchase_date) IS NULL
+          AND NOT EXISTS (SELECT 1 FROM purchases pu WHERE pu.customer_id = cu.id AND pu.purchase_date >= NOW() - INTERVAL '90 days')
       `, [companyId]);
 
       // 10) 세그먼트 수 (등급 수 기반)
@@ -502,7 +501,7 @@ router.get('/preview', async (req: Request, res: Response) => {
       `, [companyId]);
 
       const bestDayRow = bestDayResult.rows[0];
-      const churnCount = churnResult.rows.length;
+      const churnCount = Number(churnResult.rows[0]?.churn_risk_count) || 0;
 
       teaser.bestTimeSlot = bestRow
         ? `${dowNames[parseInt(bestRow.dow)]} ${String(parseInt(bestRow.hour)).padStart(2, '0')}:00`

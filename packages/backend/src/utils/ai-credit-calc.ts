@@ -159,7 +159,6 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'next-action-advisor': 5,
   'multi-goal-decisioning': 5,
   'cdp-fusion-explainer': 5,
-  'voice-inbound': 5,
   'dm-event-recommender': 5,
   // Email 발송 후 성과 진단 5 — 실측 오픈/클릭 기반 topInsight + 개선 제안. 이벤트 0건 시 호출 차단(차감 0).
   'email-performance-insight': 5,

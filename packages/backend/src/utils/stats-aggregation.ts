@@ -227,6 +227,8 @@ export interface SendStatsResult {
 /**
  * ★ 2026-07-17 성능 — 캠페인 배열을 "조회해야 할 MySQL 테이블셋"별로 그룹핑
  *   (counts·channelSplit·sendTimes 3집계 공용 — 0717 stats mysqlUnion 823ms 실측 처방).
+ *   ★ 2026-09-26 한줄로 V2 F36 — 재대조 워커(campaign-sync-worker)도 이 해석을 쓴다(화면과 같은 테이블을 읽어야
+ *   라인이 빠진 뒤의 부분 실측으로 sent_count를 낮춰 덮지 않는다).
  *
  * 축소는 "라인 축"으로만 한다 — 기록된 LIVE 테이블(send_config.sentTables, 0611+ 적재 워커 실기록)
  * + 그 라인의 전 존재 LOG(이새 실측: 전 라인 합집합 27개 → 라인당 LIVE 1+LOG 수 개).
@@ -236,7 +238,7 @@ export interface SendStatsResult {
  * 기록이 없거나 실존 교차 검증에 실패한 캠페인은 현행 그대로 (company,user) 라인 합집합
  * (getCompanySmsTablesWithLogs) fallback — 정확성 동일. 산식 소비처는 무접촉.
  */
-async function resolveCampaignTableGroups(
+export async function resolveCampaignTableGroups(
   campaigns: CampaignTableMeta[]
 ): Promise<Map<string, { tables: string[]; ids: string[] }>> {
   const byTableSet = new Map<string, { tables: string[]; ids: string[] }>();

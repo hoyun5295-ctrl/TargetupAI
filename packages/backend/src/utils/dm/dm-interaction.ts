@@ -10,7 +10,8 @@ import { query, pool } from '../../config/database';
 import { getDmByCode, extractFlatSectionsFromDm } from './dm-builder';
 import { lookupDmRecipientToken } from './dm-recipient-token';
 import {
-  pickRouletteSegment,
+  pickRouletteForParticipant,
+  type RoulettePick,
   drawWinners,
   type DrawEntry,
   type RankPrize,
@@ -75,11 +76,14 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
 
   // 식별 — 토큰(발송 링크, 서버 권위) > phone > anonymous_id
   let customerId: string | null = null;
+  // ★ 2026-09-26 한줄로 V2 R1-27 — 발송 토큰으로 확인된 참여자인가(재고 경품 자격 · 전화번호 입력은 확인 수단이 아니다)
+  let tokenVerified = false;
   if (input.token) {
     try {
       const lookup = await lookupDmRecipientToken(input.token);
       if (lookup && lookup.dmId === campaignId && lookup.companyId === companyId) {
         customerId = lookup.customerId;
+        tokenVerified = true;
       }
     } catch {
       // 토큰 테이블 미마이그레이션 등 = phone 폴백
@@ -139,7 +143,7 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
   const responseId: string = ins.rows[0].id;
 
   if (input.sectionType === 'roulette') {
-    const result = await runRouletteDraw(companyId, campaignId, input.sectionId, responseId, props, customerId, input.phone, input.data);
+    const result = await runRouletteDraw(companyId, campaignId, input.sectionId, responseId, props, customerId, input.phone, input.data, tokenVerified);
     return { ok: true, result };
   }
   return { ok: true };
@@ -149,6 +153,8 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
 async function runRouletteDraw(
   companyId: string, campaignId: string, sectionId: string, responseId: string,
   props: any, customerId: string | null, phone: string | null, data: any,
+  /** ★ 2026-09-26 R1-27 — 발송 토큰으로 확인된 수신자만 재고 경품 대상 */
+  stockEligible: boolean,
 ): Promise<any> {
   const segments = Array.isArray(props.segments)
     ? props.segments.map((s: any) => ({ id: String(s.id), label: String(s.label || ''), probability: Number(s.probability) || 0 }))
@@ -166,7 +172,13 @@ async function runRouletteDraw(
     }
   }
 
-  let pick = pickRouletteSegment(segments, prizeBySegment, Math.random);
+  const firstPick = pickRouletteForParticipant(segments, prizeBySegment, stockEligible, Math.random);
+  if (firstPick.recipientsOnly) {
+    const spin = { segment_id: '', label: '', won: false, recipients_only: true };
+    await query(`UPDATE dm_event_responses SET response_data = response_data || $2::jsonb WHERE id = $1`, [responseId, JSON.stringify({ spin_result: spin })]);
+    return spin;
+  }
+  let pick: RoulettePick = firstPick;
 
   if (pick.won && pick.prizeId) {
     const dec = await query(

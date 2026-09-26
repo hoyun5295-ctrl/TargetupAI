@@ -20,6 +20,10 @@ import { getCampaignClickTotal } from './short-url';
 // ★ 2026-08-04: sweep 대상 캠페인 상태 CT — mysql-refund-sweeper와 같은 집합을 본다
 import { SWEEPABLE_CAMPAIGN_STATUS_SQL } from './campaign-sweep-scope';
 import { DIRECT_PIPELINE_SEND_TYPES_SQL } from './send-type-axis';
+import { isLoadingSendPhase, isLoadStopped, LOAD_CANCEL_FLAG } from './load-cancel';
+// ★ 2026-09-26 한줄로 V2 F35(Codex 4차 1R A) — 취소 결말·정산 공용 CT(재시도 워커와 같은 판정)
+import { countCampaignStartedRows, settleCancelOutcome, campaignRefDates, CANCEL_SETTLE_MODE } from './cancel-settle';
+import { withCancelObligationLock } from './keyed-lock';
 
 // ===== 예약 캠페인 자동 정리 (D145 P0) =====
 
@@ -156,6 +160,17 @@ export interface CancelCampaignResult {
    * "취소했다"와 "이미 나가서 취소할 것이 없었다"를 갈라 사용자에게 사실대로 말해야 한다.
    */
   alreadySent?: boolean;
+  /**
+   * ★2026-09-26 한줄로 V2 F10·F31·F32 — 이 캠페인은 **앞선 취소가 이미 적재를 멈췄다**(적재 중단 표식).
+   * 큐가 비어 있는 이유가 "나가서"가 아니라 "우리가 멈춰서"다 → `alreadySent`가 아니다.
+   * 대조 워커는 같은 캠페인을 매 주기 다시 중화하므로 이 값으로 반복 기록을 건너뛴다.
+   */
+  stoppedEarlier?: boolean;
+  /**
+   * ★2026-09-26 한줄로 V2 F35(Codex 4차 2R) — 적재 중이라 **결말은 적재를 멈춘 워커가 정한다**(취소 접수 · 적재 중단 표식 · 대기 삭제까지 끝남).
+   * 아직 들어오는 청크가 있을 수 있어 이 시점의 사실로 "취소 확정"을 하면 늦게 적재·픽업된 발송이 청구에서 빠진다.
+   */
+  deferred?: boolean;
   cancelledCount: number;
   refundedAmount: number;
 }
@@ -220,6 +235,9 @@ export async function cancelCampaign(
     return { success: false, error: '취소 가능한 상태가 아닙니다', cancelledCount: 0, refundedAmount: 0 };
   }
 
+  // ★ 2026-09-26 한줄로 V2 F35 — 예약 시각이 지났는가(아래 발송 시작 판정에 쓴다).
+  const scheduledPassed = !!camp.scheduled_at && new Date(camp.scheduled_at).getTime() <= Date.now();
+
   // 2. 15분 이내 체크 (skipTimeCheck가 false이고, 미래 예약인 경우만)
   if (!skipTimeCheck) {
     const scheduledAt = new Date(camp.scheduled_at);
@@ -231,11 +249,40 @@ export async function cancelCampaign(
     }
   }
 
+  // ★ 2026-09-26 한줄로 V2 F10·F31·F32 — queueOnly는 상태를 안 바꾸므로 적재 워커가 취소를 모른다.
+  //   적재가 끝나지 않은 캠페인(preparing·queued·processing)이면 **큐를 보기 전에** 적재 중단 표식을 남긴다 →
+  //   워커가 다음 확인 지점에서 적재를 멈추고 캠페인 전체 기준(차감 − 남은 행)으로 정산한다(늦은 조각 환불 부족 · 적재 전 취소 거절이 사라진다).
+  //   표식이 남으면 아래 "이미 발송"(대기·픽업 0) 판정에 걸리지 않는다 — 막을 것은 워커가 막는다.
+  // ★ 2026-09-26 한줄로 V2 F35 — 예약 시각이 지났는데 아직 적재 중이면 적재되는 대로 나가고 있다 → 사용자 취소를 받지 않는다.
+  //   아래 적재 중단 표식보다 **먼저** 거절한다(거절한 취소가 표식을 남기면 워커가 적재를 멈춰 버린다).
+  if (!skipTimeCheck && !queueOnly && scheduledPassed && isLoadingSendPhase(camp.send_phase)) {
+    return { success: false, error: '예약 시각이 지나 발송이 시작됐습니다. 이미 시작된 발송은 취소할 수 없습니다.', tooLate: true, cancelledCount: 0, refundedAmount: 0 };
+  }
+
+  let loadStopped = false;
+  // 앞선 취소가 이미 표식을 남겼다(그 뒤 워커가 멈추고 정산했을 수 있다) — 큐가 비어도 "이미 발송"이 아니다.
+  const stoppedEarlier = queueOnly && !isLoadingSendPhase(camp.send_phase) && isLoadStopped(null, camp.send_config?.[LOAD_CANCEL_FLAG]);
+  // ★ 2026-09-26 F35(Codex 4차 3R) — 상태를 바꾸는 취소의 표식은 여기가 아니라 아래 정산 의무와 **같은 UPDATE**로 남긴다
+  //   (워커가 표식을 보면 반드시 의무 표시도 본다 — 따로 쓰면 의무 기록이 실패한 사이 워커가 옛 정산으로 가른다).
+  if (queueOnly && isLoadingSendPhase(camp.send_phase)) {
+    // ⛔ updated_at을 건드리지 않고 처음 한 번만 쓴다(Codex 1R high) — 대조 워커가 이 취소를 5분마다 반복하는데,
+    //   그때마다 updated_at이 갱신되면 끊긴 적재 복구(processing + 10분 무활동)가 영영 돌지 않아 선차감이 남는다.
+    await query(
+      `UPDATE campaigns
+          SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{${LOAD_CANCEL_FLAG}}', 'true'::jsonb)
+        WHERE id = $1 AND COALESCE((send_config->>'${LOAD_CANCEL_FLAG}')::boolean, false) = false`,
+      [campaignId],
+    );
+    loadStopped = true;
+  }
+
   // 3. MySQL 대기 중인 메시지 건수 확인
   // ★ 2026-06-11: 적재는 사용자 라인(direct-send-worker가 userId 전달)인데 취소는 회사 라인만 보던
   //   불일치로 DELETE 0건 → 예약 시각 실발송 사고(에이치피오 87,014건).
   //   발송 당시 기록(send_config.sentTables) 1순위 + 회사+사용자 전 라인 합집합에서 삭제.
   const cancelTables = await getCampaignQueueTables(companyId, camp.created_by || undefined, camp.send_config);
+  // 이력 테이블을 셀 기준월(생성·예약) — 발송 시작 판정·취소 정산이 쓴다(CT).
+  const refDates = campaignRefDates(camp);
   // ★ 2026-07-30 브랜드 SMSQ 합류 — 같은 큐 안에서 행 단위로 환불 축을 가른다.
   //   브랜드 행(msg_type='F')은 BRAND 단가로 차감됐으므로 환불도 BRAND 축이어야 회계가 맞는다.
   //   문자 축(비F)은 기존대로 camp.message_type. DELETE 자체는 아래에서 전 행 공통.
@@ -248,35 +295,72 @@ export async function cancelCampaign(
   // - status_code != 100 (Agent 픽업됨): status_code를 9999(취소)로 변경
   const alreadyPickedUp = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code != 100', [campaignId]);
 
+  // ★ 2026-09-26 한줄로 V2 F35 — 예약 시각이 지나 발송이 시작된 캠페인은 사용자 취소를 받지 않는다(큐를 건드리기 전).
+  //   15분 게이트는 "0 < 남은 분 < 15"만 막아, 시각이 지난 뒤(정리 워커가 상태를 바꾸기 전)엔 취소가 통과했다. 그 취소는 상태를
+  //   'cancelled'로 바꿔 이미 나간 발송이 청구(status='completed')에서 빠지고, 픽업돼 멈춘 행·확정된 실패가 스위퍼(취소 제외)에서 빠졌다.
+  //   시작 판정 = 라이브의 픽업 행 · 대기를 떠난 행(이력 포함 — Codex 4차 1R:
+  //   분할 발송의 앞 회차는 이미 이력으로 넘어가 라이브만 보면 0이었다) · 적재 중은 위에서 먼저 거절했다.
+  //   세고 지우는 사이의 픽업은 아래 결말 판정(CT)이 받는다.
+  //   대행(queueOnly)은 상태를 안 바꿔 청구·환불이 맞으므로 제외 · 슈퍼관리자(skipTimeCheck)는 비상 정지 수단 — 나간 행이 있으면
+  //   아래 결말 판정이 취소 대신 발송 캠페인으로 넘겨 청구·정산을 지킨다.
+  if (!skipTimeCheck && !queueOnly && scheduledPassed) {
+    const started = alreadyPickedUp > 0
+      || (await countCampaignStartedRows(companyId, camp.created_by || '', campaignId, cancelTables, refDates)) > 0;
+    if (started) {
+      return { success: false, error: '예약 시각이 지나 발송이 시작됐습니다. 이미 시작된 발송은 취소할 수 없습니다.', tooLate: true, cancelledCount: 0, refundedAmount: 0 };
+    }
+  }
+
   // ★ 2026-07-27 (B-0727-2): 환불 의무를 **삭제 전에 prepared로** 남긴다.
   //   삭제한 뒤에 기록하면, 기록이 실패한 순간 대기 건수가 0이 되어 얼마를 돌려줘야 했는지가 사라진다
   //   (사용자가 재시도해도 0건으로 잡혀 그대로 cancelled가 되고 삭제분이 영구 미환불).
   //   반대로 prepared를 그냥 활성 의무로 두면 아직 안 지워진 큐를 두고 워커가 먼저 환불할 수 있으므로,
   //   삭제·검증이 끝난 뒤에만 ready로 올린다. 워커는 ready만 집는다.
-  if (totalCancelCount > 0) {
+  // ★ 2026-09-26 F35(Codex 4차 1R A) — 상태를 바꾸는 취소는 건수 대신 "삭제 뒤 사실로 다시 정산하라"는 의무를 남긴다.
+  //   삭제 전에 센 대기 수는 세고 지우는 사이 Agent가 집어 간 행까지 포함해 과환불이 됐다. 결말·금액은 삭제 뒤 CT가 정하고,
+  //   끊기면 재시도 워커가 같은 CT로 다시 정한다. 대기 0이어도 남긴다 — 아무것도 안 나간 차감(유령 예약)도 돌려줘야 한다.
+  //   대행(queueOnly)은 상태를 안 바꾸고 정산 스위퍼가 청구 캠페인으로 계속 맞추므로 종전 건수 의무 그대로.
+  const writeObligation = !queueOnly || totalCancelCount > 0;
+  const markLoadStop = !queueOnly && isLoadingSendPhase(camp.send_phase);
+  if (writeObligation) {
     try {
       // ★ 기존 의무가 있으면 **절대 덮어쓰지 않는다.** 앞선 시도에서 DELETE가 부분 실패했다면
       //   지금 세는 대기 건수는 "남은 것"이지 "돌려줘야 할 것"이 아니다. 원본 의무 건수로 덮으면
       //   먼저 지워진 몫이 환불 목표에서 사라진다(100건 중 60건 삭제 후 실패 → 재시도가 40으로 덮음).
       //   큐 삭제용 "현재 잔여"와 환불 목표인 "최초 의무"를 분리한다.
-      await query(
-        `UPDATE campaigns
-            SET send_config = jsonb_set(
+      // ★ 2026-09-26 F35(Codex 4차 3R) — 상태를 바꾸는 취소가 적재 중이면 적재 중단 표식을 이 UPDATE에 함께 싣는다.
+      //   결말이 "발송 캠페인으로 넘김"(나간 행 있음 · 슈퍼관리자 비상 정지)이면 상태가 cancelled가 아니라 워커가 적재를 멈추지 않았다.
+      //   표식과 정산 모드 의무가 한 행 한 번에 생기므로, 워커 취소 분기는 표식을 보면 반드시 의무 표시(결말 CT)를 본다.
+      // ★ 2026-09-26 F35(Codex 4차 4R) — "기존 의무 보존"은 **건수로 환불하는 대행**만의 규칙이다. 상태를 바꾸는 취소는
+      //   기존 의무(배포 전 부분 삭제 실패로 남은 건수형 포함)가 있어도 정산 모드로 덮는다 — 정산 모드는 금액을 사실(차감 − 남는 행)에서
+      //   다시 계산하므로 최초 건수가 필요 없고, 건수형으로 남기면 워커가 옛 정산으로 가르고 스위퍼가 같은 삭제분을 또 준다.
+      const setObligation = queueOnly
+        ? `jsonb_set(
                   COALESCE(send_config, '{}'::jsonb), '{refundPendingCancel}',
                   CASE WHEN send_config ? 'refundPendingCancel'
                        THEN send_config->'refundPendingCancel'
-                       ELSE $2::jsonb END),
+                       ELSE $2::jsonb END)`
+        : `jsonb_set(COALESCE(send_config, '{}'::jsonb), '{refundPendingCancel}', $2::jsonb)`;
+      // ★ Codex 4차 5R — 재시도 워커의 캠페인별 처리(옛 의무 읽기 → 환불 → 해제·연기)와 한 줄로 선다(취소 의무 잠금 CT).
+      await withCancelObligationLock(campaignId, () => query(
+        `UPDATE campaigns
+            SET send_config = ${markLoadStop ? `jsonb_set(${setObligation}, '{${LOAD_CANCEL_FLAG}}', 'true'::jsonb)` : setObligation},
                 updated_at = NOW()
           WHERE id = $1`,
-        [campaignId, JSON.stringify({
-          state: 'prepared',
-          sms: { count: cancelCount, messageType: camp.message_type },
-          // ★ 2026-07-30: 브랜드 행(msg_type='F')은 BRAND 축으로 — 차감(BRAND)과 같은 원장.
-          //   (옛 kakao 슬롯은 IMC 미실재로 항상 0이었다. 워커는 brand·kakao 둘 다 읽는다 — 하위호환.)
-          brand: { count: brandCancelCount, messageType: 'BRAND' },
-          at: new Date().toISOString(),
-        })],
-      );
+        [campaignId, JSON.stringify(
+          queueOnly
+            ? {
+              state: 'prepared',
+              sms: { count: cancelCount, messageType: camp.message_type },
+              // ★ 2026-07-30: 브랜드 행(msg_type='F')은 BRAND 축으로 — 차감(BRAND)과 같은 원장.
+              //   (옛 kakao 슬롯은 IMC 미실재로 항상 0이었다. 워커는 brand·kakao 둘 다 읽는다 — 하위호환.)
+              brand: { count: brandCancelCount, messageType: 'BRAND' },
+              at: new Date().toISOString(),
+            }
+            : { state: 'prepared', mode: CANCEL_SETTLE_MODE, at: new Date().toISOString() },
+        )],
+      ));
+      if (markLoadStop) loadStopped = true;
     } catch (obligationErr: any) {
       // 큐를 아직 건드리지 않았으므로 여기서 멈추면 아무것도 바뀌지 않는다(재시도 가능).
       console.error(`[취소] campaign ${campaignId} 환불 의무 기록 실패 — 취소 중단:`, obligationErr?.message || obligationErr);
@@ -323,7 +407,7 @@ export async function cancelCampaign(
 
   // 삭제·검증이 끝났으므로 의무를 ready로 올린다 — 이제 워커가 집어도 안전하다.
   //   이 UPDATE가 실패해도 의무는 prepared로 남아 있고, 워커가 실제 대기 0을 확인해 승격시킨다.
-  if (totalCancelCount > 0) {
+  if (writeObligation) {
     await query(
       `UPDATE campaigns
           SET send_config = jsonb_set(send_config, '{refundPendingCancel,state}', '"ready"'::jsonb),
@@ -333,85 +417,90 @@ export async function cancelCampaign(
     ).catch((e) => console.error(`[취소] campaign ${campaignId} 환불 의무 ready 전환 실패(워커가 승격):`, e?.message || e));
   }
 
-  // 6. 선불 환불
-  // ★ 2026-07-27 (B-0727-1): 'additional' 모드 — 취소분은 **추가 환불**이지 누적 목표가 아니다.
-  //   옛 코드는 취소 대기건수를 누적 목표로 넘겼다. 워커가 앞서 미적재분을 환불해 둔 캠페인에서는
-  //   (예: 1만 중 4천 적재 후 중단 → 미적재 6천 환불) 취소 4천을 누적 목표로 넘기면 6천 > 4천이라
-  //   추가 환불이 0원이 되고, 실제 미발송 1만 건 중 6천만 환불된 채 굳는다.
-  //   취소는 status='cancelled'로 끝나 sweeper(sending/completed) 보정 대상도 아니라 영구 누락이었다.
-  let totalRefunded = 0;
-  let smsOk = true;
-  let brandOk = true;
-  if (totalCancelCount > 0) {
-    if (cancelCount > 0) {
-      const smsRefund = await prepaidRefund(
-        companyId, cancelCount, camp.message_type, campaignId, '예약 취소 환불', 'campaign',
-        // 취소 환불은 캠페인당 한 번뿐이라 그 항아리가 비어 있음이 보장된다 → 항아리 기준 누적 = 멱등.
-        // (레거시 폴백으로 떨어지면 재시도가 이중 환불되거나 기존 환불에 삼켜진다 — B-0727-2)
-        { refundKey: REFUND_KEYS.CANCEL, forceKeyedPot: true },
-      );
-      totalRefunded += smsRefund.refunded;
-      smsOk = smsRefund.ok;
-      if (!smsOk) console.error(`[취소] campaign ${campaignId} 문자 취소 환불 실패 — 워커 재시도 대기(${cancelCount}건)`);
-    }
-    if (brandCancelCount > 0) {
-      // ★ 2026-07-30: 브랜드 행(msg_type='F')은 차감과 같은 BRAND 축으로 환불한다.
-      const brandRefund = await prepaidRefund(
-        companyId, brandCancelCount, 'BRAND', campaignId, '브랜드메시지 예약 취소 환불', 'campaign',
-        { refundKey: REFUND_KEYS.CANCEL, forceKeyedPot: true },
-      );
-      totalRefunded += brandRefund.refunded;
-      brandOk = brandRefund.ok;
-      if (!brandOk) console.error(`[취소] campaign ${campaignId} 브랜드 취소 환불 실패 — 워커 재시도 대기(${brandCancelCount}건)`);
-    }
-    // ★ 2026-07-27 (B-0727-2): 의무 해제는 **여기서 하지 않는다.**
-    //   앞선 시도가 부분 삭제로 끝났다면 의무에 남은 건수(원본)와 이번 회차의 cancelCount(잔여)가 다르다.
-    //   이번 환불이 성공했다고 의무를 지우면 먼저 지워진 몫이 목표에서 사라진다.
-    //   워커가 의무에 적힌 원본 건수로 다시 부르고(CANCEL 항아리 누적 = 멱등) 충족됐을 때 해제한다.
-    //   건수가 같은 일반적인 경우엔 워커 첫 사이클에서 추가 0원 + 해제로 바로 끝난다.
-    if (!smsOk || !brandOk) {
-      console.warn(`[취소] campaign ${campaignId} 취소 환불 미완료 — 워커 재시도가 이어받는다`);
-    }
-  }
-
   // ★ 2026-08-28 `queueOnly` — 큐 중화·검증·환불까지 마쳤으면 여기서 끝낸다.
   //   상태를 바꾸지 않는 이유는 옵션 주석이 소유한다(청구 축 `status='completed'`).
   //   `alreadySent` = 대기도 픽업도 0이었다 = **막을 것이 없었다**(이미 전량 나갔다).
   //   실패가 아니라 결과다 — 호출부가 "취소했다"와 "이미 나갔다"를 갈라 말할 수 있게 한다.
+  //   ★ 2026-09-26 F35 — 건수 환불(아래 6.)은 이제 대행 분기에서만 돈다. 상태를 바꾸는 취소는 7.의 결말 판정 CT가 정산한다.
   if (queueOnly) {
+    // 6. 선불 환불
+    // ★ 2026-07-27 (B-0727-1): 'additional' 모드 — 취소분은 **추가 환불**이지 누적 목표가 아니다.
+    //   옛 코드는 취소 대기건수를 누적 목표로 넘겼다. 워커가 앞서 미적재분을 환불해 둔 캠페인에서는
+    //   (예: 1만 중 4천 적재 후 중단 → 미적재 6천 환불) 취소 4천을 누적 목표로 넘기면 6천 > 4천이라
+    //   추가 환불이 0원이 되고, 실제 미발송 1만 건 중 6천만 환불된 채 굳는다.
+    //   취소는 status='cancelled'로 끝나 sweeper(sending/completed) 보정 대상도 아니라 영구 누락이었다.
+    let totalRefunded = 0;
+    let smsOk = true;
+    let brandOk = true;
+    if (totalCancelCount > 0) {
+      if (cancelCount > 0) {
+        const smsRefund = await prepaidRefund(
+          companyId, cancelCount, camp.message_type, campaignId, '예약 취소 환불', 'campaign',
+          // 취소 환불은 캠페인당 한 번뿐이라 그 항아리가 비어 있음이 보장된다 → 항아리 기준 누적 = 멱등.
+          // (레거시 폴백으로 떨어지면 재시도가 이중 환불되거나 기존 환불에 삼켜진다 — B-0727-2)
+          { refundKey: REFUND_KEYS.CANCEL, forceKeyedPot: true },
+        );
+        totalRefunded += smsRefund.refunded;
+        smsOk = smsRefund.ok;
+        if (!smsOk) console.error(`[취소] campaign ${campaignId} 문자 취소 환불 실패 — 워커 재시도 대기(${cancelCount}건)`);
+      }
+      if (brandCancelCount > 0) {
+        // ★ 2026-07-30: 브랜드 행(msg_type='F')은 차감과 같은 BRAND 축으로 환불한다.
+        const brandRefund = await prepaidRefund(
+          companyId, brandCancelCount, 'BRAND', campaignId, '브랜드메시지 예약 취소 환불', 'campaign',
+          { refundKey: REFUND_KEYS.CANCEL, forceKeyedPot: true },
+        );
+        totalRefunded += brandRefund.refunded;
+        brandOk = brandRefund.ok;
+        if (!brandOk) console.error(`[취소] campaign ${campaignId} 브랜드 취소 환불 실패 — 워커 재시도 대기(${brandCancelCount}건)`);
+      }
+      // ★ 2026-07-27 (B-0727-2): 의무 해제는 **여기서 하지 않는다.**
+      //   앞선 시도가 부분 삭제로 끝났다면 의무에 남은 건수(원본)와 이번 회차의 cancelCount(잔여)가 다르다.
+      //   이번 환불이 성공했다고 의무를 지우면 먼저 지워진 몫이 목표에서 사라진다.
+      //   워커가 의무에 적힌 원본 건수로 다시 부르고(CANCEL 항아리 누적 = 멱등) 충족됐을 때 해제한다.
+      //   건수가 같은 일반적인 경우엔 워커 첫 사이클에서 추가 0원 + 해제로 바로 끝난다.
+      if (!smsOk || !brandOk) {
+        console.warn(`[취소] campaign ${campaignId} 취소 환불 미완료 — 워커 재시도가 이어받는다`);
+      }
+    }
+
     return {
       success: true,
-      alreadySent: totalCancelCount === 0 && alreadyPickedUp === 0,
+      alreadySent: !loadStopped && !stoppedEarlier && totalCancelCount === 0 && alreadyPickedUp === 0,
+      stoppedEarlier,
       cancelledCount: totalCancelCount,
       refundedAmount: totalRefunded,
     };
   }
 
-  // 7. PostgreSQL 캠페인 상태 변경
-  // ★ 2026-06-11: fail_count=target/success=0 덮어쓰기 제거 — 취소는 status로 표현하고 counts는 실측 보존.
-  //   미발송 취소는 0/0이 진실이고, 취소 전 발송분이 있으면(0611 에이치피오) 그 실측이 청구·정정 근거다.
-  //   화면 취소 표시는 status 기반(line-through·라벨) 확인 — counts 의존 없음.
-  await query(
-    `UPDATE campaigns SET
-      status = 'cancelled',
-      cancelled_by = $1,
-      cancelled_by_type = $2,
-      cancel_reason = $3,
-      cancelled_at = NOW(),
-      updated_at = NOW()
-     WHERE id = $4`,
-    [cancelledBy || null, cancelledByType || null, reason || null, campaignId]
-  );
+  // 7-0. ★ 2026-09-26 (Codex 4차 2R high) — 적재 중이고 예약 시각이 지났거나(적재되는 대로 나간다) 슈퍼관리자 취소(시각 게이트 없음)면
+  //   결말은 **적재를 멈춘 워커**가 정한다(워커 취소 분기가 같은 결말 CT를 부른다 · 재시도 워커는 적재 중엔 기다린다).
+  //   지금 정하면 진행 중인 청크가 뒤에 적재·픽업돼 취소로 확정된 캠페인에서 나간다(청구 누락 · 과환불).
+  //   사용자 취소(15분 게이트 · 시각 전)는 새 청크가 발송 가능해지기 전에 워커가 지우므로 여기서 바로 정한다(종전 응답 그대로).
+  if (loadStopped && (scheduledPassed || skipTimeCheck)) {
+    console.log(`[취소] campaign ${campaignId} 적재 중 — 적재 중단 표식·대기 삭제 완료 · 결말은 워커가 정한다`);
+    return { success: true, deferred: true, cancelledCount: totalCancelCount, refundedAmount: 0 };
+  }
 
-  // 8. campaign_runs도 cancelled로 변경 (sync-results에서 재처리 방지)
-  await query(
-    `UPDATE campaign_runs SET
-      status = 'cancelled'
-     WHERE campaign_id = $1 AND status IN ('scheduled', 'sending')`,
-    [campaignId]
-  );
+  // 7. ★ 2026-09-26 한줄로 V2 F35(Codex 4차 1R A) — 결말은 **대기 삭제·잔존 0 검증 뒤의 사실**로 공용 CT가 가른다.
+  //   옛 코드는 삭제 전에 센 대기 수로 환불하고 무조건 'cancelled'로 바꿔, 세고 지우는 사이 Agent가 집어 간 행(나간 발송)까지
+  //   환불하고 청구·정산에서 뺐다. 지금은 새로 집힐 대기가 없다 —
+  //   대기를 떠난 행이 있으면 취소로 표시하지 않고 발송 캠페인으로 넘긴다(청구 유지 · 막은 몫은 정산 스위퍼가 미적재로 환불).
+  //   아무것도 나가지 않았으면 CT가 상태를 취소로 확정(실행 행 포함)하고 캠페인 전체 기준(차감 − 남는 행)으로 환불한다.
+  //   ★ 2026-06-11 원칙 유지: counts는 덮어쓰지 않는다(취소는 status로 표현 · 실측 보존).
+  const settled = await settleCancelOutcome({
+    camp, liveTables: cancelTables, refDates,
+    cancel: { cancelledBy, cancelledByType, reason },
+  });
+  if (settled.outcome === 'sent') {
+    return { success: false, error: '발송이 이미 시작돼 전체 취소는 되지 않았습니다. 아직 나가지 않은 몫은 막았고, 그 금액은 자동으로 환불됩니다.', tooLate: true, cancelledCount: 0, refundedAmount: 0 };
+  }
+  if (!settled.ok) {
+    // 의무 해제는 여기서 하지 않는다 — 워커가 같은 CT로 다시 정산하고 끝나면 해제한다.
+    console.warn(`[취소] campaign ${campaignId} 취소 정산 미완료 — 워커 재시도가 이어받는다`);
+  }
 
-  return { success: true, cancelledCount: totalCancelCount, refundedAmount: totalRefunded };
+  return { success: true, cancelledCount: totalCancelCount, refundedAmount: settled.refunded };
 }
 
 

@@ -18,7 +18,7 @@
  */
 
 import { Router, Request, Response, json } from 'express';
-import { findLinkDefectDeep, findLinkDefectInText, webLinkReason } from '../utils/normalize';
+import { findLinkDefectDeep, findLinkDefectInText, webLinkReason, isUuid } from '../utils/normalize';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -89,7 +89,7 @@ import { getInAppDisplayEligibility } from '../utils/inapp-display-eligibility';
 import { countSegment, describeSegment } from '../utils/inapp-segment-matcher';
 import { buildPreviewCustomers, buildEditorPreviewCustomers, renderInAppMessage, listAvailableVariables, extractUsedInAppVariables, getInAppCustomerForBrowser, renderTextForCustomer, renderBlocksForCustomer } from '../utils/inapp-personalization';
 import { getCompanyBrandKitRaw } from '../utils/dm/dm-brand-kit';
-import { createVariant, listVariantsWithStats, declareWinnerIfReady } from '../utils/inapp-variant-optimizer';
+import { createVariant, listVariantsWithStats, declareWinnerIfReady, setVariantStatus } from '../utils/inapp-variant-optimizer';
 import { explainInAppMessage } from '../utils/inapp-explainer';
 import {
   buildInAppFunnel,
@@ -106,7 +106,14 @@ import {
   quickActionSegmentRefine,
 } from '../utils/inapp-quick-action';
 import { query } from '../config/database';
-import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, deductCreditOutcome, isChargedByKey, InsufficientCreditError } from '../utils/ai-credit';
+import { sendSystemAlert } from '../utils/system-alert';
+// ★ 2026-09-26 한줄로 V2 R1-03(Codex 7차 2R) — 같은 인앱 메시지의 게시 PUT 직렬화(공용 잠금 CT)
+import { withKeyedLock, uuidLockKey } from '../utils/keyed-lock';
+// ★ 2026-09-26 한줄로 V2 R1-30 — 키 재발급 뒤 카페24 스크립트태그 재맞춤
+import { resyncCafe24ScriptTagsForCompany } from '../utils/cafe24-scripttag';
+// ★ 2026-09-26 한줄로 V2 R1-49 — 인앱 개인화는 확인된 회원만(회원 토큰 발급·검증 CT)
+import { issueCdpMemberToken, verifyCdpMemberToken } from '../utils/cdp-member-token';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { getServePath, parseFitOption } from '../utils/image-serve';
 
@@ -213,6 +220,25 @@ router.post('/ingest', requireCdpBrowserOrigin, cdpWriteBurst, async (req: Reque
       error: '서버 오류. 잠시 후 재시도',
       code: 'INTERNAL_ERROR',
     });
+  }
+});
+
+// POST /api/cdp/member-token — 회원 토큰 발급(★2026-09-26 한줄로 V2 R1-49 · 서버 간 호출 = 비밀키 인증)
+//   몰 서버가 로그인한 회원의 external_id로 받아 페이지에 싣는다(SDK memberToken · body data-hjl-member-token).
+//   이 토큰이 있어야 인앱 개인화 값(이름·등급·포인트 등)을 받는다. 유효기간 기본 1시간(최대 24시간).
+//   ⛔ router.use(authenticate)(관리자 로그인) **앞**에 둔다 — 몰 서버는 로그인 없이 비밀키로만 부른다.
+router.post('/member-token', requireCdpApiKey, async (req: Request, res: Response) => {
+  const cdpAuth = req.cdpAuth!;
+  const externalId = String(req.body?.external_id || '').trim();
+  if (!externalId || externalId.length > 255) {
+    return res.status(400).json({ success: false, error: 'external_id는 필수입니다(255자 이하).' });
+  }
+  try {
+    const { token, expiresAt } = issueCdpMemberToken(cdpAuth.companyId, externalId, Number(req.body?.ttl_seconds) || undefined);
+    return res.json({ success: true, member_token: token, expires_at: new Date(expiresAt * 1000).toISOString() });
+  } catch (err: any) {
+    console.error('[CDP /member-token] 발급 실패:', err?.message || err);
+    return res.status(503).json({ success: false, error: '회원 토큰을 발급하지 못했습니다. 잠시 후 다시 시도해 주세요.', code: 'MEMBER_TOKEN_UNAVAILABLE' });
   }
 });
 
@@ -448,7 +474,9 @@ router.post(
         await query(
           `UPDATE cdp_webhook_deliveries
            SET status = 'duplicate', processed_at = NOW()
-           WHERE company_id = $1::uuid AND source = 'custom' AND idempotency_key = $2`,
+           WHERE company_id = $1::uuid AND source = 'custom' AND idempotency_key = $2
+           -- ★ 2026-09-26 한줄로 V2 R1-02 — 처리 완료 행만 중복 표시(실패 행을 덮으면 재처리 워커 대상에서 빠져 이벤트가 유실됐다)
+           AND status = 'processed'`,
           [companyId, idempotencyKey]
         );
         return res.json({ success: true, duplicate: true });
@@ -634,8 +662,15 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
     }
 
     // T3 (2026-06-11) — 자동 기동 개인화: 메시지들이 실제 쓰는 변수만 customer로 동봉 (식별 회원 한정)
+    // ★ 2026-09-26 한줄로 V2 R1-49 — 개인화 값은 **확인된 회원**만: 서버 간 호출(비밀키 헤더 = 미들웨어가 이미 검증) 또는
+    //   우리 서버가 서명한 회원 토큰(member_token)이 이 회사·이 회원과 맞을 때. 그 밖은 비개인화(아래 사전 치환 = "고객").
+    //   옛: 공개키만 있으면 임의 external_id로 이름·등급·포인트·구매액을 받아 볼 수 있었다. 노출 대상 판정은 그대로다.
+    const viaSecret = !!(req.headers['x-hanjullo-secret'] || req.headers['X-Hanjullo-Secret' as any]);
+    const personalizationAllowed = !!externalId && (viaSecret || verifyCdpMemberToken(
+      req.query.member_token ? String(req.query.member_token) : '', cdpAuth.companyId, String(externalId),
+    ));
     let customer: Record<string, any> | null = null;
-    if (externalId && messages.length > 0) {
+    if (personalizationAllowed && messages.length > 0) {
       const usedVars = extractUsedInAppVariables(messages);
       if (usedVars.length > 0) {
         customer = await getInAppCustomerForBrowser(cdpAuth.companyId, externalId, usedVars).catch(() => null);
@@ -1292,32 +1327,88 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
     if (!(await isInAppMessageOwned(companyId, req.params.id, ownerId))) {
       return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     }
-    // ★ 2026-07-06 표시 가능성 게이트 — 웹 메시지를 active로 저장(게시/재개)할 때만.
-    //   paused/archived 저장은 통과(중단은 언제나 허용). 판정 오류는 격리(수정 자체를 막지 않음).
-    if (req.body?.status === 'active') {
-      const chRes = await query(
-        `SELECT channel FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid`,
-        [req.params.id, companyId],
-      ).catch(() => null);
-      const msgChannel = chRes?.rows?.[0]?.channel === 'app' ? 'app' : 'web';
-      if (msgChannel === 'web') {
-        const elig = await getInAppDisplayEligibility(companyId).catch(() => null);
-        if (elig && !elig.canCreateWeb) {
-          return res.status(400).json({ success: false, error: elig.blockReasonWeb, code: 'INAPP_DISPLAY_UNAVAILABLE' });
+    // ★ 2026-09-26 한줄로 V2 R1-03(Codex 7차 1R·2R 구조 정정) — 게시 과금은 **보상 순서**로, **메시지 단위 한 줄**로 한다.
+    //   옛: 먼저 active로 바꾸고 뒤에서 차감을 시도해 실패해도 게시가 유지됐다(무료 게시).
+    //   1R "전환 앞 과금"은 과금 뒤 메시지가 사라지면 복구가 없었고(게시 없는 과금), URL id 원문 키는 UUID 표기만 바꾸면 재과금됐다.
+    //   인앱 수정 CT는 자체 연결이라 한 트랜잭션으로 못 묶는다 → ①정규 id·이전 상태를 읽고 미과금이면 잔액 확인 ②게시
+    //   ③게시로 넘어간 경우에만 정규 id 키로 과금 ④과금 실패면 게시를 이전 상태로 되돌리고 거절. "과금됐는데 게시 안 됨"은 생길 수 없다.
+    //   2R: 같은 메시지의 PUT은 공용 잠금 CT로 한 줄로 선다(A 게시 → B 조회 → A 되돌림 → B 재게시 = 무과금 게시가 없게).
+    //   상태를 생략한 내용 수정은 게시가 아니다 — 과금·되돌림 없음. 게시 요청인데 이전 상태를 못 읽으면 503(모르는 상태로 진행하지 않는다).
+    const wantsActive = req.body?.status === 'active';
+    return await withKeyedLock('inapp-publish', uuidLockKey(String(req.params.id)), async () => {
+      let prevStatus: string | null = null;
+      if (wantsActive) {
+        let row: any;
+        try {
+          const chRes = await query(
+            `SELECT id, channel, status FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid`,
+            [req.params.id, companyId],
+          );
+          row = chRes.rows[0];
+        } catch (stateErr: any) {
+          console.error('[CDP /inapp PUT] 이전 상태 조회 실패:', stateErr?.message || stateErr);
+          return res.status(503).json({ success: false, error: '메시지 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.', code: 'INAPP_STATE_UNKNOWN' });
+        }
+        if (!row) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+        const canonicalId = String(row.id);
+        prevStatus = String(row.status);
+        // ★ 2026-07-06 표시 가능성 게이트 — 웹 메시지를 active로 저장(게시/재개)할 때만.
+        //   paused/archived 저장은 통과(중단은 언제나 허용). 판정 오류는 격리(수정 자체를 막지 않음).
+        const msgChannel = row.channel === 'app' ? 'app' : 'web';
+        if (msgChannel === 'web') {
+          const elig = await getInAppDisplayEligibility(companyId).catch(() => null);
+          if (elig && !elig.canCreateWeb) {
+            return res.status(400).json({ success: false, error: elig.blockReasonWeb, code: 'INAPP_DISPLAY_UNAVAILABLE' });
+          }
+        }
+        // 게시로 넘어가는데 아직 과금 전이면 잔액을 먼저 본다(흔한 잔액 부족을 게시 전에 막는다 · 부족 = InsufficientCreditError → 402).
+        if (prevStatus !== 'active') {
+          if (!(await isChargedByKey(companyId, `inapp-publish:${canonicalId}`))) {
+            await checkCredit(companyId, getCreditCost('inapp-publish'));
+          }
         }
       }
-    }
-    const message = await updateInAppMessage(companyId, req.params.id, req.body, ownerId);
-    if (!message) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
-    // ★ 종량제: paused→active 게시 시 15(멱등 inapp-publish:messageId — POST에서 이미 과금됐으면 0).
-    if (message.status === 'active') {
-      await deductCreditSafe({
-        companyId, cost: getCreditCost('inapp-publish'), source: 'inapp-publish', createdBy: req.user?.userId,
-        idempotencyKey: `inapp-publish:${message.id}`,
-      });
-    }
-    return res.json({ success: true, message });
+      const message = await updateInAppMessage(companyId, req.params.id, req.body, ownerId);
+      if (!message) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+      // ★ 종량제: 게시로 넘어간 경우에만 과금(멱등 inapp-publish:{정규 id} — POST·앞선 게시에서 이미 과금됐으면 duplicate = 0).
+      //   이미 active인 메시지의 내용 수정·상태 생략 수정은 게시가 아니라 과금을 시도하지 않는다.
+      const publishing = wantsActive && prevStatus !== null && prevStatus !== 'active' && message.status === 'active';
+      if (publishing) {
+        const publishOutcome = await deductCreditOutcome({
+          companyId, cost: getCreditCost('inapp-publish'), source: 'inapp-publish', createdBy: req.user?.userId,
+          idempotencyKey: `inapp-publish:${message.id}`,
+        });
+        if (publishOutcome === 'failed') {
+          // 과금이 안 됐으면 게시를 되돌린다(이전 상태로 · 그 사이 다른 전이가 있었으면 건드리지 않는다).
+          try {
+            await query(
+              `UPDATE cdp_inapp_messages SET status = $3, updated_at = NOW()
+                WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'`,
+              [message.id, companyId, prevStatus],
+            );
+          } catch (revertErr: any) {
+            console.error(`[CDP /inapp PUT] 과금 실패 뒤 게시 되돌림 실패 — 무과금 게시 상태(수동 확인) message=${message.id}:`, revertErr?.message || revertErr);
+            void sendSystemAlert({
+              dedupKey: `inapp-publish-revert:${message.id}`,
+              message: `인앱 게시 과금 실패 뒤 게시를 되돌리지 못했습니다(무과금 게시 · 수동 확인). message=${message.id}`,
+            }).catch(() => undefined);
+          }
+          try {
+            await checkCredit(companyId, getCreditCost('inapp-publish'));
+          } catch (creditErr: any) {
+            if (creditErr instanceof InsufficientCreditError) {
+              return res.status(402).json({ success: false, error: creditErr.message, code: 'INSUFFICIENT_CREDIT' });
+            }
+          }
+          return res.status(503).json({ success: false, error: '크레딧 차감을 확인하지 못해 게시하지 않았습니다. 잠시 후 다시 시도해 주세요.', code: 'CREDIT_DEDUCT_UNCONFIRMED' });
+        }
+      }
+      return res.json({ success: true, message });
+    });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    }
     const msg = err?.message || '';
     if (msg.startsWith('BENEFIT_PLACEHOLDER_UNEDITED')) {
       return res.status(400).json({ success: false, error: msg.replace(/^BENEFIT_PLACEHOLDER_UNEDITED:\s*/, ''), code: 'BENEFIT_PLACEHOLDER_UNEDITED' });
@@ -1712,6 +1803,16 @@ router.post('/inapp/variant', async (req: Request, res: Response) => {
       if (!parent_message_id) return res.status(400).json({ success: false, error: 'parent_message_id 필수' });
       const stats = await listVariantsWithStats(auth.companyId, String(parent_message_id));
       return res.json({ success: true, variants: stats });
+    } else if (action === 'set_status') {
+      // ★ 2026-09-26 한줄로 V2 R1-45 — 변형 켜기·끄기(검토 뒤 노출 · 변형 행만 · 과금 없음)
+      const variantId = String(req.body?.variant_id || '');
+      const nextStatus = req.body?.status === 'active' ? 'active' : req.body?.status === 'paused' ? 'paused' : null;
+      if (!parent_message_id || !isUuid(variantId) || !nextStatus) {
+        return res.status(400).json({ success: false, error: 'parent_message_id + variant_id + status(active|paused) 필수' });
+      }
+      const changed = await setVariantStatus(auth.companyId, String(parent_message_id), variantId, nextStatus);
+      if (!changed) return res.status(404).json({ success: false, error: '변형을 찾을 수 없습니다.' });
+      return res.json({ success: true, status: nextStatus });
     } else if (action === 'declare_winner') {
       if (!parent_message_id) return res.status(400).json({ success: false, error: 'parent_message_id 필수' });
       const result = await declareWinnerIfReady(auth.companyId, String(parent_message_id));
@@ -1978,6 +2079,10 @@ router.post('/issue-key', async (req: Request, res: Response) => {
     }
 
     const pair = await issueCdpKeyPair(companyId);
+    // ★ 2026-09-26 한줄로 V2 R1-30 — 카페24 몰에 자동 등록한 스크립트태그는 옛 키(?k=)를 싣고 있다 → 지금 키로 다시 맞춘다(격리 · 응답 무영향)
+    void resyncCafe24ScriptTagsForCompany(companyId).catch((e: any) =>
+      console.log('[CDP /issue-key] 카페24 스크립트태그 재맞춤 실패(무시):', e?.message || e),
+    );
     return res.json({
       success: true,
       cdp_api_key: pair.cdpApiKey,

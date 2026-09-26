@@ -23,7 +23,8 @@ import {
   type AgencySendStatus,
 } from '../utils/agency-send-state';
 import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
-import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples } from '../utils/agency-send-preview';
+import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples, measureAgencyMaxSmsBytes, AGENCY_SMS_BYTES_MAX_CANDIDATES } from '../utils/agency-send-preview';
+import { SMS_MAX_BYTES } from '../utils/message-byte';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 import { ATTEMPT_LOCK_PREFIX, attemptBlocksChange, attemptIdleSql } from '../utils/agency-send-worker';
@@ -396,6 +397,8 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
     const pre = {
       registeredSet: await getRegisteredCallbackSet(auth.companyId, auth.userId),
       window: await loadSendWindow(auth.companyId, analysis.isAd),
+      // ★ 2026-09-26 R1-08 — 분석이 잰 SMS 최장 바이트(코어가 트랜잭션 안에서 다시 조회하지 않게)
+      maxSmsBytes: analysis.maxSmsBytes,
     };
     const client = await pool.connect();
     try {
@@ -533,6 +536,26 @@ router.post('/spell-check', async (req: Request, res: Response) => {
   const messageType = ['SMS', 'LMS', 'MMS'].includes(String(req.body?.messageType)) ? String(req.body.messageType) : 'LMS';
   const r = await checkAgencySpelling({ companyId: auth.companyId, userId: auth.userId, content, messageType });
   return res.json({ success: true, issues: r.issues, failed: r.failed });
+});
+
+// ════════════════════════════════════════════════════════════
+// POST /api/agency-send/sms-bytes — 접수 화면 SMS/LMS 판정 (★2026-09-26 한줄로 V2 R1-08 · Codex 8차 1R high)
+//   화면이 자체 추정으로 LMS를 강제하지 않게, 실제 발송·미리보기·접수 코어와 **같은 조립 CT**로 잰 값을 돌려준다.
+//   화면은 명단 전체가 아니라 가중 점수 상위 후보(실제 수신자 조합 그대로 · 최대 20명)만 보낸다. 저장 0 · 크레딧 0.
+// ════════════════════════════════════════════════════════════
+router.post('/sms-bytes', async (req: Request, res: Response) => {
+  const auth = await requireAgencySend(req, res);
+  if (!auth) return;
+  // 측정 입력 = 접수 입력(접수 코어는 문안 앞뒤 공백을 지우고 잰다 · Codex 8차 2R)
+  const content = String(req.body?.content ?? '').trim();
+  if (content.length > MAX_CONTENT) return res.status(400).json({ success: false, error: `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.` });
+  const candidates = (Array.isArray(req.body?.candidates) ? req.body.candidates : [])
+    .slice(0, AGENCY_SMS_BYTES_MAX_CANDIDATES)
+    .map((c: any) => ({ vars: c && typeof c.vars === 'object' && !Array.isArray(c.vars) ? c.vars : {} }));
+  const maxBytes = await measureAgencyMaxSmsBytes({
+    companyId: auth.companyId, userId: auth.userId, content, isAd: !!req.body?.isAd, recipients: candidates,
+  });
+  return res.json({ success: true, maxBytes, limit: SMS_MAX_BYTES });
 });
 
 // ════════════════════════════════════════════════════════════

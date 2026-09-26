@@ -109,6 +109,12 @@
 - **0925에 체험만 닫았다**: 체험 검사는 한 통도 못 나가면 행을 지워 체험을 되돌린다. 유료 경로는 축 밖이라 손대지 않았다.
 - **모르는 것**: 실제로 적재 예외가 난 적이 있는지(운영 로그 `[SpamFilter] 테스트 요청 오류` 로 확인 가능 · 미검증).
 
+### 🔵 B-0925-7 알림톡 파일 명단 적용이 7자리 같은 짧은 번호도 수신자로 받는다 (🔵 Open · 미검증 · 착수 판단 = Harold) · 2026-09-25 직접입력 창 폭별 실측 중 발견
+
+- **코드**: `frontend/src/components/AlimtalkSendModal.tsx` applyMapping 이 `normalizePhoneKr(row[phoneColumn])` 결과가 비어 있지만 않으면 번호로 받는다 — "010-12-34" → `0101234`(7자리)도 수신자가 된다. 같은 창의 직접입력은 0925 에 10자리 이상으로 좁혔다(`utils/recipient-paste.ts` checkAlimtalkPaste).
+- **영향(미검증)**: 서버 적재(`/api/campaigns/direct-send/stage`)나 발송 단계에서 걸러지는지 확인 안 함. 걸러지지 않으면 확인 창 건수에 잘못된 번호가 섞인다.
+- **확인 방법**: 번호 칸에 `010-12-34` 가 든 엑셀을 알림톡 창 파일등록으로 올려 명단 건수·확인 창 건수·발송 결과를 본다.
+
 ### 🔵 B-0925-6 브랜드메시지 등록 템플릿 수정 폼이 없는 칸 이름으로 읽는다 (🔵 Open · 표시 · 착수 판단 = Harold) · 2026-09-25 발송 창 개편 중 발견
 
 - **코드**: `frontend/src/components/alimtalk/BrandTemplateForm.tsx initialFormState` 가 `t.attachment_json`·`t.carousel_json` 을 읽는다. 실제 칸은 `attachment`·`carousel`(등록 INSERT `backend/src/routes/alimtalk.ts` · SCHEMA `brand_message_templates`) · 목록 조회는 `b.*` 라 응답 키도 `attachment`·`carousel`.

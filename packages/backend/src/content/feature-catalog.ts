@@ -66,7 +66,7 @@ export const JOB_GROUPS: { key: string; label: string; jobs: string[] }[] = [
   { key: 'create', label: '만들기', jobs: ['write-copy-ai', 'mobile-dm', 'image-studio', 'email-campaign', 'inapp-message', 'push-campaign', 'quick-campaign'] },
   { key: 'automate', label: '자동으로 돌리기', jobs: ['auto-marketing', 'journeys', 'marketing-planner', 'marketing-calendar', 'auto-send-legacy'] },
   { key: 'results', label: '결과 보기', jobs: ['check-results', 'performance', 'predictive', 'ai-explain', 'send-calendar'] },
-  { key: 'agency', label: '맡기기·진단', jobs: ['marketing-diagnosis', 'campaign-agency', 'ai-memory', 'voice-inbound'] },
+  { key: 'agency', label: '맡기기·진단', jobs: ['marketing-diagnosis', 'campaign-agency', 'ai-memory'] },
 ];
 
 /**
@@ -872,28 +872,6 @@ const READY: FeatureJob[] = [
     related: ['auto-marketing', 'segments', 'ai-usage'],
     status: 'ready', stubUntil: null,
     sourceFile: 'frontend/src/pages/AiMemoryPage.tsx',
-  },
-  {
-    id: 'voice-inbound',
-    title: '전화 문의 기록 보기',
-    goal: '고객이 건 전화를 AI가 받고 기록한 내용을 본다',
-    keywords: ['전화', '음성', '인바운드', '통화 기록', '전화 문의', 'ARS', '음성 응답', '통화 내용'],
-    steps: [
-      '메뉴에 버튼이 없습니다. 주소창의 주소 끝을 /voice-inbound 로 바꿔 엽니다. 실험실 기능입니다',
-      '"활성으로 전환"을 누르면 고객이 자사몰에서 "전화 문의"를 눌러 건 전화에 AI가 응답합니다. 걸려 오는 전화만 받고 먼저 걸지는 않습니다',
-      'AI는 연결된 고객 데이터에 있는 사실만 말합니다. 추측하지 않습니다',
-      '"최근 통화 이력"에서 고객이 한 말과 AI 응답을 통화마다 확인합니다. 회원이 식별되면 표시가 붙습니다',
-    ],
-    blockers: [
-      { symptom: '환경 설정이 미설정이라는 빨간 안내가 뜹니다', fix: '음성 인식·합성 설정이 서버에 없는 상태입니다. 운영자에게 설정 등록을 요청하세요' },
-      { symptom: '통화 이력이 비어 있습니다', fix: '활성으로 바꾼 뒤 자사몰 사용자가 전화를 걸어야 쌓입니다' },
-    ],
-    entry: { path: '/voice-inbound', via: '주소로 직접 이동(메뉴 없음 · 실험실)' },
-    planKey: null,
-    creditSource: null,
-    related: ['view-customer', 'connect-shop'],
-    status: 'ready', stubUntil: null,
-    sourceFile: 'frontend/src/pages/VoiceInboundPage.tsx',
   },
   {
     id: 'push-campaign',

@@ -114,6 +114,20 @@ export const UNSUB_URL_MARKER = '{{__hanjul_unsub_url__}}';
  * ★ 2026-07-13 디자인 3.0 — 불릿프루프 버튼의 MSO VML(<v:roundrect href>)도 동일 래핑
  *   (아웃룩 데스크탑은 VML href로 클릭 — <a>만 래핑하면 그 클라이언트 클릭이 통째 미집계, Codex 지적).
  */
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-39 — HTML 속성에 적힌 href를 브라우저가 읽는 값으로 푼다(&amp; · &#38; · &#x26; · &quot; · &#39; · &lt; · &gt;).
+ * 렌더러는 링크를 속성 이스케이프로 넣는다(올바른 HTML). 푼 값이 원본 주소다 — 풀지 않고 서명하면 클릭 뒤 이동 주소에 `&amp;`가 글자로 남아
+ * 파라미터 2개 이상인 링크(쿠폰·UTM)가 깨졌다. 추적 주소 자체(토큰)는 속성에 넣어도 안전한 글자만 쓴다.
+ */
+function decodeHrefAttribute(href: string): string {
+  return href
+    .replace(/&#x26;|&#38;|&amp;/gi, '&')
+    .replace(/&quot;|&#34;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+}
+
 export function wrapLinksForTracking(html: string, campaignId: string, email: string): string {
   if (!html) return html;
   return html.replace(
@@ -121,7 +135,7 @@ export function wrapLinksForTracking(html: string, campaignId: string, email: st
     (whole, before: string, href: string, after: string) => {
       // ★ 2026-07-02 스킴 없는 도메인형(www.x.y)은 https:// 부착 후 래핑 — 저장된 구 캠페인 HTML도 발송 시점 치유.
       //   mailto:/tel:/#/상대경로/개인화 변수는 normalizeWebUrl이 그대로 보존하므로 아래 https 검사에서 제외됨.
-      const trimmed = normalizeWebUrl(href);
+      const trimmed = normalizeWebUrl(decodeHrefAttribute(href));
       if (!/^https?:\/\//i.test(trimmed)) return whole;          // mailto:/tel:/#/상대경로 제외
       if (trimmed.includes('{{')) return whole;                   // 개인화 변수 URL 제외
       if (/\/api\/email\/(t|u)\//.test(trimmed)) return whole;    // 이미 트래킹/수신거부 URL

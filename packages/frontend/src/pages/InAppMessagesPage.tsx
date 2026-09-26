@@ -27,6 +27,7 @@ import { InAppMessagePreview, AppInAppPreview } from '../components/InAppMessage
 import { toPng } from 'html-to-image';
 import { useAuthStore } from '../stores/authStore';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
+import { AI_GENERATE_COSTS } from '../constants/credit';
 import { useToast } from '../components/ToastProvider';
 import TargetExtractModal from '../components/TargetExtractModal';
 import {
@@ -425,6 +426,11 @@ export default function InAppMessagesPage() {
   // ★ 2026-07-06 식별 고객 열람 목록 + 익명 합산 (절충안)
   const [drillViewers, setDrillViewers] = useState<InAppViewersData | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
+  // ★ 2026-09-26 한줄로 V2 R1-42 — AI 영향 요인 분석은 버튼으로(열 때마다 자동 호출 = 1크레딧씩 빠지던 결함)
+  const [drillExplainLoading, setDrillExplainLoading] = useState(false);
+  // ★ 2026-09-26 한줄로 V2 R1-45 — A/B 변형 검토 창(AI 다듬기 변형은 일시정지로 만들어지고 여기서 켠다)
+  const [variantReview, setVariantReview] = useState<{ parentId: string; title: string } | null>(null);
+  const drillIdRef = useRef<string | null>(null);
 
   const token = () => localStorage.getItem('token');
   const authHeaders = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' });
@@ -660,6 +666,8 @@ export default function InAppMessagesPage() {
           if (data.success && data.result.applied) {
             showToast(data.result.appliedDetails || '적용 완료', { type: 'success' });
             await loadAll();
+            // ★ 2026-09-26 R1-45 — 다듬기 변형은 일시정지로 만들어진다 → 바로 검토 창을 연다
+            if (actionType === 'ai_refine') setVariantReview({ parentId: targetMsg.id, title: targetMsg.title });
           } else if (data.success) {
             showToast(data.result.appliedDetails || '적용 조건 미충족', { type: 'warning' });
           } else {
@@ -804,20 +812,21 @@ export default function InAppMessagesPage() {
   // ────────────────────────────────────────────────────────────────
 
   const openDrillDown = async (m: MessageRow) => {
+    drillIdRef.current = m.id;
     setDrillMessageId(m.id);
     setDrillStats(null);
     setDrillExplain(null);
+    setDrillExplainLoading(false);
     setDrillViewers(null);
     setDrillLoading(true);
     try {
-      const [funnelRes, explainRes, viewersRes] = await Promise.all([
+      // ★ 2026-09-26 한줄로 V2 R1-42 — 통계·열람 목록만 불러온다. AI 분석(유료)은 사용자가 버튼을 누를 때만.
+      const [funnelRes, viewersRes] = await Promise.all([
         fetch(`/api/cdp/inapp/funnel-stats/${m.id}`, { headers: authHeaders() }),
-        fetch('/api/cdp/inapp/explain', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ message_id: m.id }) }),
         // ★ 2026-07-06 식별 고객 열람 목록 + 익명 합산 (절충안)
         fetch(`/api/cdp/inapp/viewers/${m.id}`, { headers: authHeaders() }),
       ]);
       const funnelData = await funnelRes.json();
-      const explainData = await explainRes.json();
       const viewersData = await viewersRes.json();
       if (funnelData.success) {
         setDrillStats({
@@ -827,12 +836,29 @@ export default function InAppMessagesPage() {
           device: funnelData.device,
         });
       }
-      if (explainData.success) setDrillExplain(explainData.result);
       if (viewersData.success) setDrillViewers({ viewers: viewersData.viewers || [], identifiedTotal: viewersData.identifiedTotal || 0, anonymous: viewersData.anonymous || { visitors: 0, impressions: 0, clicks: 0 } });
     } catch (e: any) {
       showToast(e?.message || '드릴다운 로드 실패', { type: 'error' });
     } finally {
       setDrillLoading(false);
+    }
+  };
+
+  // ★ 2026-09-26 한줄로 V2 R1-42 — AI 영향 요인 분석 1클릭(누를 때만 차감 · 다른 메시지로 옮겨 가면 늦은 응답은 버린다)
+  const requestDrillExplain = async () => {
+    const id = drillIdRef.current;
+    if (!id || drillExplainLoading) return;
+    setDrillExplainLoading(true);
+    try {
+      const res = await fetch('/api/cdp/inapp/explain', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ message_id: id }) });
+      const data = await res.json().catch(() => ({}));
+      if (drillIdRef.current !== id) return;
+      if (res.ok && data?.success) setDrillExplain(data.result);
+      else showToast(data?.error || 'AI 분석을 불러오지 못했습니다.', { type: 'error' });
+    } catch (e: any) {
+      if (drillIdRef.current === id) showToast(e?.message || 'AI 분석을 불러오지 못했습니다.', { type: 'error' });
+    } finally {
+      if (drillIdRef.current === id) setDrillExplainLoading(false);
     }
   };
 
@@ -1509,6 +1535,9 @@ export default function InAppMessagesPage() {
                         <button onClick={() => openDrillDown(m)} className="text-[11px] text-cyan-300 hover:bg-cyan-500/10 px-2.5 py-1 rounded flex items-center gap-1">
                           <BarChart3 className="w-3 h-3" /> 통계
                         </button>
+                        <button onClick={() => setVariantReview({ parentId: m.id, title: m.title })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2.5 py-1 rounded flex items-center gap-1">
+                          <Layers className="w-3 h-3" /> A/B 변형
+                        </button>
                         <button onClick={() => setEditing(m)} className="text-[11px] text-indigo-300 hover:bg-indigo-500/10 px-2.5 py-1 rounded flex items-center gap-1">
                           <Edit2 className="w-3 h-3" /> 수정
                         </button>
@@ -1545,15 +1574,28 @@ export default function InAppMessagesPage() {
         onCancel={() => setConfirmPublish(false)}
       />
 
+      {/* ★ 2026-09-26 R1-45 — A/B 변형 검토 */}
+      {variantReview && (
+        <VariantReviewModal
+          parentId={variantReview.parentId}
+          messageTitle={variantReview.title}
+          authHeaders={authHeaders}
+          onToast={(msg, type) => showToast(msg, { type })}
+          onClose={() => setVariantReview(null)}
+        />
+      )}
+
       {/* ▼ 영역 12: 드릴다운 통계 모달 */}
       {drillMessageId && (
         <DrillDownModal
           loading={drillLoading}
           stats={drillStats}
           explain={drillExplain}
+          explainLoading={drillExplainLoading}
+          onRequestExplain={requestDrillExplain}
           viewers={drillViewers}
           messageTitle={messages.find((m) => m.id === drillMessageId)?.title || '인앱'}
-          onClose={() => { setDrillMessageId(null); setDrillStats(null); setDrillExplain(null); setDrillViewers(null); }}
+          onClose={() => { drillIdRef.current = null; setDrillMessageId(null); setDrillStats(null); setDrillExplain(null); setDrillExplainLoading(false); setDrillViewers(null); }}
         />
       )}
 
@@ -3290,6 +3332,117 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ★ 2026-09-26 한줄로 V2 R1-45 — A/B 변형 검토 창
+//   AI 다듬기 변형은 일시정지로 만들어진다. 여기서 문안을 보고 켜야 방문자에게 노출되고,
+//   켠 변형끼리 성과로 승자를 고른다(노출 선택은 켜진 변형만 본다). 켜기·끄기는 과금 없음.
+// ════════════════════════════════════════════════════════════════════
+
+interface VariantRow {
+  messageId: string;
+  parentMessageId: string | null;
+  title: string;
+  body: string;
+  status: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+}
+
+function VariantReviewModal({ parentId, messageTitle, authHeaders, onToast, onClose }: {
+  parentId: string;
+  messageTitle: string;
+  authHeaders: () => Record<string, string>;
+  onToast: (msg: string, type: 'success' | 'error' | 'info' | 'warning') => void;
+  onClose: () => void;
+}) {
+  const [rows, setRows] = useState<VariantRow[] | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const res = await fetch('/api/cdp/inapp/variant', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ action: 'list', parent_message_id: parentId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) setRows((data.variants || []).filter((v: VariantRow) => v.parentMessageId));
+      else { setRows([]); onToast(data?.error || '변형을 불러오지 못했습니다.', 'error'); }
+    } catch (e: any) {
+      setRows([]);
+      onToast(e?.message || '변형을 불러오지 못했습니다.', 'error');
+    }
+  };
+
+  useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [parentId]);
+
+  const toggle = async (v: VariantRow) => {
+    if (busyId) return;
+    const next = v.status === 'active' ? 'paused' : 'active';
+    setBusyId(v.messageId);
+    try {
+      const res = await fetch('/api/cdp/inapp/variant', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ action: 'set_status', parent_message_id: parentId, variant_id: v.messageId, status: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        onToast(next === 'active' ? '변형을 켰습니다. 이제 방문자에게 번갈아 보입니다.' : '변형을 껐습니다.', 'success');
+        await load();
+      } else {
+        onToast(data?.error || '변경하지 못했습니다.', 'error');
+      }
+    } catch (e: any) {
+      onToast(e?.message || '변경하지 못했습니다.', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
+      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-5 py-4 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-white flex items-center gap-2"><Layers className="w-4 h-4 text-violet-300" /> A/B 변형</h3>
+            <p className="text-[11px] text-white/50 truncate">{messageTitle}</p>
+          </div>
+          <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          <p className="text-xs text-white/60">AI가 만든 변형은 꺼진 상태로 만들어집니다. 문안을 확인하고 켜면 방문자에게 원본과 번갈아 보이고, 성과가 좋은 쪽을 자동으로 고릅니다.</p>
+          {rows === null ? (
+            <div className="py-10 flex justify-center text-white/50"><Loader2 className="w-6 h-6 animate-spin" /></div>
+          ) : rows.length === 0 ? (
+            <p className="text-xs text-white/40 text-center py-8">아직 변형이 없습니다. AI 개선의 '본문 다듬기'로 만들 수 있어요.</p>
+          ) : rows.map((v) => (
+            <div key={v.messageId} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${v.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-white/60'}`}>
+                    {v.status === 'active' ? '노출 중' : '꺼짐'}
+                  </span>
+                  <span className="text-[10px] text-white/40">표시 {Number(v.impressions || 0).toLocaleString()} · 클릭 {Number(v.clicks || 0).toLocaleString()} · CTR {((Number(v.ctr) || 0) * 100).toFixed(2)}%</span>
+                </div>
+                <p className="text-sm font-semibold text-white break-words">{v.title}</p>
+                <p className="text-xs text-white/70 whitespace-pre-wrap break-words mt-1">{v.body}</p>
+              </div>
+              <button
+                onClick={() => toggle(v)}
+                disabled={busyId === v.messageId}
+                className={`shrink-0 px-3.5 py-2 rounded-lg text-xs font-semibold disabled:opacity-50 ${v.status === 'active' ? 'bg-white/10 hover:bg-white/15 text-white/80' : 'bg-violet-600 hover:bg-violet-500 text-white'}`}
+              >
+                {busyId === v.messageId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : v.status === 'active' ? '끄기' : '노출 켜기'}
+              </button>
+            </div>
+          ))}
+          <p className="text-[10px] text-white/30 italic">Data source: cdp_inapp_messages 변형 · cdp_inapp_impressions 표시·클릭</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 드릴다운 모달 (통계 + AI 영향 요인)
 // ════════════════════════════════════════════════════════════════════
 
@@ -3297,12 +3450,14 @@ interface DrillDownProps {
   loading: boolean;
   stats: FunnelStats | null;
   explain: ExplainResult | null;
+  explainLoading: boolean;
+  onRequestExplain: () => void;
   viewers: InAppViewersData | null;
   messageTitle: string;
   onClose: () => void;
 }
 
-function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClose }: DrillDownProps) {
+function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExplain, viewers, messageTitle, onClose }: DrillDownProps) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-slate-900/60 border border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -3440,6 +3595,27 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
                 <div className="text-[10px] text-white/30 italic mt-2">Data source: 추정 분포 (첫 단계, 정확한 user_agent 매핑은 추후 강화)</div>
               </div>
             </>
+          )}
+
+          {/* ★ 2026-09-26 한줄로 V2 R1-42 — AI 영향 요인 분석은 누를 때만(유료 · 창을 열 때마다 빠지지 않게) */}
+          {!loading && !explain && (
+            <div className="bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 border border-violet-400/30 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <h4 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
+                  <Lightbulb className="w-4 h-4 text-amber-300" />
+                  AI 영향 요인 분석
+                </h4>
+                <p className="text-xs text-white/60">이 메시지 성과에 영향을 준 요인 5가지와 개선 추천 3가지를 뽑아 드려요.</p>
+              </div>
+              <button
+                onClick={onRequestExplain}
+                disabled={explainLoading}
+                className="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-60"
+              >
+                {explainLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {explainLoading ? '분석 중' : `AI로 분석하기 (${AI_GENERATE_COSTS['inapp-explainer']}크레딧)`}
+              </button>
+            </div>
           )}
 
           {/* AI 영향 요인 */}

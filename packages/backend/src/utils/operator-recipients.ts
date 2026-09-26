@@ -80,6 +80,9 @@ export function buildAudienceWhere(
        ${journeyGuard}`;
 }
 
+/** buildSendableRecipientsSql 한 번에 담는 최대 수. 넘는지 여부는 호출측이 buildAudienceCountSql로 확인한다(★0925 C-07). */
+export const SENDABLE_RECIPIENTS_LIMIT = 10000;
+
 /**
  * ★ 2026-08-03 A-1 — 대상 수 COUNT. 명단·발송 추출과 같은 WHERE를 쓴다.
  *   자동마케팅의 제안 수·화면 수·사전 통지 수가 전부 이 함수를 지난다(operator-audience.ts 단일 문 경유).
@@ -114,7 +117,7 @@ export function buildSendableRecipientsSql(
     `SELECT c.id, c.phone, c.name, c.gender, c.region, c.birth_date, c.age, c.grade, c.custom_fields
      FROM customers c
      WHERE ${where}
-     LIMIT 10000`;
+     LIMIT ${SENDABLE_RECIPIENTS_LIMIT}`;
   return { sql, params };
 }
 

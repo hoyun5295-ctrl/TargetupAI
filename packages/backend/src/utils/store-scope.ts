@@ -7,7 +7,19 @@
  * - 브랜드 체계 있는 회사 + store_codes 미할당 사용자: 차단 (관리자에게만)
  * 소비처 = 8파일 28곳(고객 조회 · 직접 타겟 발송 · 자동 캠페인 · 수신거부 · 운영 대상). 계약 테스트 = __tests__/store-scope.test.ts(0918 신설).
  */
+import { escapeLiteral } from 'pg';
 import { query } from '../config/database';
+
+/**
+ * 고객 매장 격리 SQL 조각 — 파라미터 번호를 쓸 수 없는 자리(한 조각을 여러 쿼리에 이어 붙이는 대시보드 카드 등)용.
+ * ★ 2026-09-25 한줄로 전수점검 C-02: 매장 코드(users.store_codes)는 고객사 관리자가 자유 문자열로 넣는다(manage-users 검증 없음).
+ *   따옴표로만 감싸 붙이면 SQL을 바꿀 수 있고 따옴표 하나에도 500이 난다 → 값은 반드시 pg escapeLiteral로 감싼다.
+ *   파라미터 바인딩(`ANY($n::text[])`)을 쓸 수 있는 자리는 그쪽이 우선이다.
+ */
+export function buildCustomerStoreFilterLiteral(companyId: string, storeCodes: string[]): string {
+  const codes = storeCodes.map((s) => escapeLiteral(String(s))).join(',');
+  return ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = ${escapeLiteral(String(companyId))} AND store_code = ANY(ARRAY[${codes}]::text[]))`;
+}
 
 export type StoreScopeResult =
   | { type: 'no_filter' }           // 브랜드 체계 없음 → company_id 전체

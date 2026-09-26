@@ -43,12 +43,64 @@ export function deductReferenceLabel(refType: string | null | undefined): string
  */
 export function buildDeductDescription(
   refType: string, messageType: string, count: number, unitPrice: number, freeCount: number = 0,
+  // ★ 2026-09-26 선불 알림톡 결과별 정산 단가(아래 buildAlimtalkUnitsNote). 없으면 문구는 종전 그대로다.
+  alimtalkUnits?: AlimtalkSettleUnits | null,
 ): string {
   const prefix = refType && refType !== 'campaign' ? `[${deductReferenceLabel(refType)}] ` : '';
   const free = Math.max(0, Math.floor(Number(freeCount) || 0));
-  if (free <= 0) return `${prefix}${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`;
-  if (count <= 0) return `${prefix}${messageType} 무료 제공 ${free}건 발송 (과금 없음)`;
-  return `${prefix}${messageType} ${count + free}건 중 무료 ${free}건 · 과금 ${count}건 발송 차감 (건당 ${unitPrice}원)`;
+  // 전량 무료 행은 돈이 나가지 않아 돌려줄 차액도 없다 — 단가를 싣지 않는다.
+  if (free > 0 && count <= 0) return `${prefix}${messageType} 무료 제공 ${free}건 발송 (과금 없음)`;
+  const note = alimtalkUnits ? buildAlimtalkUnitsNote(alimtalkUnits) : '';
+  if (free <= 0) return `${prefix}${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)${note}`;
+  return `${prefix}${messageType} ${count + free}건 중 무료 ${free}건 · 과금 ${count}건 발송 차감 (건당 ${unitPrice}원)${note}`;
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 F01·F04 — 선불 알림톡의 **결과별 정산 단가**.
+ *
+ * 알림톡은 카카오가 실패하면 문자로 대신 보낼 수 있어서 차감은 그 문자 단가(보통 LMS)로 한다.
+ * 결과는 셋으로 갈린다: 알림톡 성공 · SMS 대체 · LMS 대체. 후불 청구는 결과별 단가로 매기는데
+ * 선불은 차감 단가가 그대로 굳어 알림톡 성공분까지 문자 값을 냈다. 정산(mysql-refund-sweeper)이
+ * 결과가 나온 만큼 차액을 돌려주려면 **차감한 그 순간의 결과별 단가**가 있어야 한다 — 지금 단가로 재면
+ * 단가를 바꾼 뒤에 차감과 짝이 안 맞는다(2026-07-26 원칙). 그래서 차감 행에 함께 싣는다.
+ *
+ * 형식: `· 결과별 정산: 알림톡 5.5원 · SMS 대체 11원 · LMS 대체 27.5원` — 차감 설명의 닫는 괄호 **뒤**에 붙여
+ * `parseDeductDescription`(괄호로 끝나는 조각)·`parseFreeCount`가 종전과 똑같이 읽힌다.
+ * 고객 차감이력에도 이 문구가 보인다: 차감은 최대 단가로 하고 결과별로 정산한다는 뜻이다.
+ */
+export interface AlimtalkSettleUnits { KAKAO: number; SMS: number; LMS: number }
+
+export function buildAlimtalkUnitsNote(u: AlimtalkSettleUnits): string {
+  return ` · 결과별 정산: 알림톡 ${u.KAKAO}원 · SMS 대체 ${u.SMS}원 · LMS 대체 ${u.LMS}원`;
+}
+
+/** (순수) 차감 설명에서 결과별 정산 단가를 되읽는다. 싣지 않은 행은 `null`. 0원 계약도 그대로 읽는다. */
+export function parseAlimtalkUnits(description: string | null | undefined): AlimtalkSettleUnits | null {
+  const m = String(description || '').match(/결과별 정산:\s*알림톡\s*([\d.]+)원\s*·\s*SMS 대체\s*([\d.]+)원\s*·\s*LMS 대체\s*([\d.]+)원/);
+  if (!m) return null;
+  const [KAKAO, SMS, LMS] = [m[1], m[2], m[3]].map(Number);
+  if (![KAKAO, SMS, LMS].every((v) => Number.isFinite(v) && v >= 0)) return null;
+  return { KAKAO, SMS, LMS };
+}
+
+/**
+ * (순수) 한 캠페인·원장 축의 차감 행들에서 결과별 정산 단가 **하나**를 고른다.
+ * 과금 행(금액 > 0)이 전부 같은 단가를 실었을 때만 돌려준다 — 하나라도 없거나 서로 다르면 `null`이고,
+ * 호출부는 결과별 정산 없이 종전 방식(차감 단가)으로 정산한다. 어느 단가인지 추측하지 않는다.
+ * 금액 0 행(전량 무료)은 돈이 나가지 않아 보지 않는다.
+ */
+export function resolveAlimtalkLedgerUnits(rows: Array<{ amount: number | string; description: string | null }>): AlimtalkSettleUnits | null {
+  let found: AlimtalkSettleUnits | null = null;
+  let paidRows = 0;
+  for (const r of rows) {
+    if (!(Number(r.amount) > 0)) continue;
+    paidRows++;
+    const u = parseAlimtalkUnits(r.description);
+    if (!u) return null;
+    if (found && (found.KAKAO !== u.KAKAO || found.SMS !== u.SMS || found.LMS !== u.LMS)) return null;
+    found = u;
+  }
+  return paidRows > 0 ? found : null;
 }
 
 /**

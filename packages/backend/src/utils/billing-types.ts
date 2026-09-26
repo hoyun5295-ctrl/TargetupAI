@@ -156,6 +156,22 @@ export function resolveRefundAxes(sendChannel: any, messageType: any): RefundAxi
 }
 
 /**
+ * ★ 2026-09-26 한줄로 V2 F05·F06·F11 — 정산 스위퍼가 캠페인의 **차감 원장을 어디서** 찾는가.
+ * 여정 단계 캠페인은 차감이 reference_type='journey' · reference_id=단계 캠페인 id로 남는다(journey-executor).
+ * 원장 축은 발송 채널로 정한다 — 알림톡 단계는 campaigns.message_type이 CHECK 제약 때문에 'LMS'로 저장되지만
+ * 차감은 'KAKAO'다(journey-step-campaign toCampaignMessageType). 그 외 캠페인은 종전 그대로(campaign · resolveRefundAxes).
+ */
+export function resolveCampaignLedger(
+  sendType: any, sendChannel: any, messageType: any,
+): { referenceType: 'campaign' | 'journey'; axes: RefundAxis[] } {
+  if (String(sendType || '').trim() === 'journey') {
+    const type = String(sendChannel || '').trim() === 'alimtalk' ? 'KAKAO' : String(messageType || 'SMS');
+    return { referenceType: 'journey', axes: [{ type, scope: 'all' }] };
+  }
+  return { referenceType: 'campaign', axes: resolveRefundAxes(sendChannel, messageType) };
+}
+
+/**
  * ★ CT: **청구 수량**의 단일 정의 (2026-08-05 신설)
  *
  * `성공 건수 − 요금제 무료 제공 공제분`. 이 한 줄이 네 곳에 흩어져 있었고 **네 번 다 갈렸다** —
@@ -270,7 +286,20 @@ export const BILLING_TYPES: readonly BillingTypeDef[] = [
   { key: 'BRAND_NF', label: '브랜드메시지(비친구)', companyPriceColumn: 'cost_per_brand_nonfriend', agentPriceColumn: null, smsqCode: BRAND_NONFRIEND_SMSQ_CODE, agentCode: null },
   { key: 'TEST_SMS', label: '테스트 SMS',     companyPriceColumn: 'cost_per_test_sms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
   { key: 'TEST_LMS', label: '테스트 LMS',     companyPriceColumn: 'cost_per_test_lms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  // ★ 2026-09-26 한줄로 V2 S1-H06 담당자 브랜드메시지 테스트(Harold 결정 「브랜드 단가로 청구」). 전용 단가 칸을 두지 않고
+  //   브랜드(친구) 단가를 따른다 — 스팸테스트가 일반 단가를 따르는 것과 같은 형태(단가 화면에 칸이 늘지 않는다).
+  { key: 'TEST_BRAND', label: '테스트 브랜드메시지', companyPriceColumn: null,           agentPriceColumn: null,             smsqCode: null, agentCode: null },
   // 스팸테스트는 전용 단가가 없고 일반 SMS/LMS 단가를 그대로 쓴다(D16) — 그래서 컬럼이 없다.
   { key: 'SPAM_SMS', label: '스팸테스트 SMS', companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
   { key: 'SPAM_LMS', label: '스팸테스트 LMS', companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
 ];
+
+/**
+ * 테스트 라인 행(`app_etc1 = 'test'`)의 청구 유형키. 일자축·상세축 두 집계가 이 한 벌을 쓴다.
+ * ★ 2026-09-26 한줄로 V2 S1-H06 — 브랜드(F · 비친구 집계 코드 FN 포함)는 테스트 브랜드. 그 밖은 종전 그대로(S = 테스트 SMS · 나머지 = 테스트 LMS).
+ */
+export function testBillingTypeKey(msgType: string): 'TEST_SMS' | 'TEST_LMS' | 'TEST_BRAND' {
+  if (msgType === 'S') return 'TEST_SMS';
+  if (msgType === 'F' || msgType === BRAND_NONFRIEND_SMSQ_CODE) return 'TEST_BRAND';
+  return 'TEST_LMS';
+}

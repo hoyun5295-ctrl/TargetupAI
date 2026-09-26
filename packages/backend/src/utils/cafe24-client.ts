@@ -24,6 +24,8 @@
  */
 
 import { query } from '../config/database';
+// ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
+import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
 import { createHmac, timingSafeEqual } from 'crypto';
 import {
   IProviderAdapter,
@@ -182,7 +184,7 @@ export async function refreshCafe24Token(
 
   if (!res.ok) {
     const errBody = await safeJsonText(res);
-    throw new Error(`카페24 토큰 갱신 실패 (${res.status}): ${errBody}`);
+    throw tokenHttpError(`카페24 토큰 갱신 실패 (${res.status}): ${errBody}`, res.status);
   }
 
   return (await res.json()) as Cafe24TokenResponse;
@@ -358,12 +360,15 @@ export async function ensureFreshCafe24Token(integration: Cafe24Integration, cre
       tokenExpiresAt: new Date(refreshed.expires_at),
     };
   } catch (err) {
-    await query(
-      `UPDATE company_integrations
-       SET status = 'token_expired', updated_at = NOW()
-       WHERE id = $1::uuid`,
-      [integration.id]
-    );
+    // ★ 2026-09-26 R1-31 — 제공자가 거절했을 때만 만료로 표시한다(일시 장애 한 번에 연동이 끊겨 웹훅이 유실됐다)
+    if (isDefinitiveTokenRejection(err)) {
+      await query(
+        `UPDATE company_integrations
+         SET status = 'token_expired', updated_at = NOW()
+         WHERE id = $1::uuid`,
+        [integration.id]
+      );
+    }
     throw err;
   }
 }
@@ -757,7 +762,7 @@ export const cafe24Adapter: IProviderAdapter = {
   },
 
   buildIdempotencyKey(event: string, resource: Record<string, any>, body: Record<string, any>): string {
-    // CT-85 — event_no(전송 고유값) 우선 + 본문 해시. 이전 엔티티ID 단독 키는 두 번째 갱신부터 영구 duplicate가 되는 결함.
+    // CT-85 — 엔티티(order_id·member_id) + 본문 해시. event_no는 이벤트 종류 번호라 전송 고유값으로 쓰지 않는다(★0925 C-12).
     return buildWebhookIdempotencyKey(event, resource, body);
   },
 };

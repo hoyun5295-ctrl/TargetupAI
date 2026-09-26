@@ -1472,7 +1472,7 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 |------|------|
 | id | uuid PK |
 | user_id | uuid FK |
-| session_token | varchar(500) |
+| session_token | varchar(500) **NOT NULL + UNIQUE**(`user_sessions_session_token_key` · 0926 실측) · ★2026-09-26 전수점검 S2-05: JWT 원문 저장 중단 → **세션 id 저장**(읽는 코드 0 · 인증은 세션 id 대조 · ⛔ 모든 행에 같은 값을 넣으면 UNIQUE 위반으로 로그인이 막힌다). 인덱스 `idx_user_sessions_token`은 조회 0회 → **0926 삭제 완료**(`docs/2026-09-25-hanjul-source-audit.md` S4-03 · 되돌리기 = `CREATE INDEX CONCURRENTLY idx_user_sessions_token ON public.user_sessions USING btree (session_token)`) |
 | ip_address | varchar(50) |
 | user_agent | text |
 | device_type | varchar(20) |
@@ -1481,6 +1481,21 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | last_activity_at | timestamp |
 | expires_at | timestamp |
 | app_source | varchar | ★2026-08-18 실측 덤프로 등재(그동안 누락). 세션 격리 축 — `hanjul`·`flyer`·`super`. 활성 세션 판정은 `is_active=true AND expires_at > NOW()` 둘 다 필요(만료 행이 남는다 = 접속 인계 문서 §2-3) |
+
+### campaign_send_staging (발송 수신자 임시 적재) ★2026-09-26 등재 (information_schema·pg_indexes 실측, Harold 실행)
+| 컬럼 | 타입 |
+|------|------|
+| id | bigint PK (`campaign_send_staging_id_seq`) |
+| staging_id | uuid · 캠페인이 `campaigns.staging_id`로 가리킨다 |
+| company_id | uuid |
+| phone | varchar |
+| name | text |
+| extra1 · extra2 · extra3 | text |
+| callback | varchar · 고객별 회신번호(대행 명단 열 방식) |
+| created_at | timestamptz DEFAULT now() |
+- 인덱스: pkey(id) · `idx_css_staging (staging_id, id)` · `idx_css_company_created (company_id, created_at)` · `idx_css_staging_phone (staging_id, phone)`.
+- 적재 4곳(직접발송·알림톡 창 `/direct-send/stage` · DM 타겟 · 대행 · AI 운영자/플래너) · 삭제 = 워커 완료·각 경로 실패 처리 + **★0926 정리 워커 `utils/staging-sweeper.ts`**(KST 01~03시 · 모든 행이 24시간 지났고 캠페인이 가리키지 않는 적재분을 통째로). commit은 가장 오래된 행이 23시간을 넘으면 만료로 거절(`resolveStagingCommitState`).
+- ⛔ 0926 실측: 정리 워커 이전 240만 행(863MB) 전량이 연결 캠페인 없는 잔존분이었다(발송 버튼마다 확인 창 전 적재 → 취소·재클릭분). 전수점검 S1-H08.
 
 ### users (사용자)
 | 컬럼 | 타입 |
@@ -2105,6 +2120,7 @@ kind별 payload 키:
 | target_filter | jsonb NOT NULL | customer-filter.ts 호환 필터 |
 | store_code | varchar(50) | 브랜드 격리 (NULL = 전체) |
 | message_type | varchar(10) DEFAULT 'SMS' | SMS / LMS / MMS |
+| channel | (타입 미실측) | ★2026-09-26 등재(한줄로 V2 F01·F04 확인 중 발견 — 이 표에 없던 실존 컬럼 · routes/auto-campaigns.ts:688 저장 · auto-campaign-worker.ts:919 분기). 값 `'sms'` · `'alimtalk'`. ⛔ 자동발송이 만드는 campaigns 행에는 send_channel을 적지 않는다 → 알림톡 자동발송은 이 컬럼으로만 식별된다 |
 | message_content | text NOT NULL | 변수 포함 (%고객명% 등) |
 | message_subject | varchar(200) | LMS/MMS 제목 |
 | callback_number | varchar(20) NOT NULL | 발신번호 |

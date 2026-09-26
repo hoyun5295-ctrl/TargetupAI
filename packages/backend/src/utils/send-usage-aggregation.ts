@@ -26,7 +26,7 @@ import { normalizeUnitPriceBasis, toSupplyPrice, pickBrandPriceRaw, BRAND_FRIEND
 import { allocateFreeToRows } from './free-messaging';
 import type { PlanSegment } from './plan-proration';
 import {
-  BILLING_TYPES, billableQuantity, normalizeExtraQty, BRAND_NONFRIEND_SMSQ_CODE,
+  BILLING_TYPES, billableQuantity, normalizeExtraQty, BRAND_NONFRIEND_SMSQ_CODE, testBillingTypeKey,
   type BillingTypeDef, type AgentPriceColumn, type AgentUnitPriceRow,
 } from './billing-types';
 import { DIRECT_PIPELINE_SEND_TYPES_SQL } from './send-type-axis';
@@ -138,6 +138,8 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
     BRAND_NF: brandNfRaw ?? 0,
     TEST_SMS: testSmsRaw ?? sms,
     TEST_LMS: testLmsRaw ?? lms,
+    // ★ 2026-09-26 S1-H06 테스트 브랜드 = 브랜드(친구) 단가(담당자 테스트는 친구 대상으로 나간다 · 차감 단가와 같은 값)
+    TEST_BRAND: brandRaw ?? 0,
     SPAM_SMS: sms,
     SPAM_LMS: lms,
   };
@@ -152,6 +154,7 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
   if (brandNfRaw === null) unsetKeys.push('BRAND_NF');   // 비친구·친구 칸이 모두 빌 때만
   if (testSmsRaw === null && smsRaw === null) unsetKeys.push('TEST_SMS');
   if (testLmsRaw === null && lmsRaw === null) unsetKeys.push('TEST_LMS');
+  if (brandRaw === null) unsetKeys.push('TEST_BRAND');
   if (smsRaw === null) unsetKeys.push('SPAM_SMS');
   if (lmsRaw === null) unsetKeys.push('SPAM_LMS');
 
@@ -536,6 +539,8 @@ export function partitionBillingSendIds(input: {
   runs: { run_id: any; campaign_id: any }[];
   directs: { run_id: any }[];
   legacyDirects: { campaign_id: any }[];
+  /** ★ 2026-09-26 한줄로 V2 F07 — 여정 단계 캠페인(send_type='journey'). 기간 축으로만 간다. */
+  journeys?: { campaign_id: any }[];
 }): BillingSendIdSets {
   const eventIds = new Set<string>();
   for (const r of input.runs || []) eventIds.add(String(r.run_id));
@@ -549,6 +554,8 @@ export function partitionBillingSendIds(input: {
   for (const r of input.runs || []) addPeriod(r.campaign_id);
   // ★ 레거시 direct(send_phase NULL)는 **여기로만** 온다 — eventIds로 보내면 기간 보호가 사라진다.
   for (const r of input.legacyDirects || []) addPeriod(r.campaign_id);
+  // ★ 2026-09-26 한줄로 V2 F07 — 여정 단계 캠페인도 **여기로만**(큐 app_etc1 = 단계 캠페인 id · 기간 조건 동반).
+  for (const r of input.journeys || []) addPeriod(r.campaign_id);
 
   return { eventIds: Array.from(eventIds), periodCampaignIds: Array.from(periodCampaignIds) };
 }
@@ -564,6 +571,7 @@ export async function selectBillingSendIds(opts: {
   let userWhereRun = '';
   let userWhereDirect = '';
   let userWhereLegacy = '';
+  let userWhereJourney = '';
   if (userId) {
     params.push(userId);
     // ★ 2026-07-25 정정 — 캠페인 생성 경로가 채우는 컬럼은 `created_by`다(user_id는 대부분 비어 있다).
@@ -571,6 +579,7 @@ export async function selectBillingSendIds(opts: {
     userWhereDirect = ` AND c2.created_by = $${params.length}`;
     // ★ 2026-07-31 레거시 축도 같은 계정 필터를 받는다 — 빠뜨리면 계정별 발행에서 이 축만 회사 전체가 실린다.
     userWhereLegacy = ` AND c3.created_by = $${params.length}`;
+    userWhereJourney = ` AND c4.created_by = $${params.length}`;
   }
 
   const runsResult = await pool.query(
@@ -621,11 +630,27 @@ export async function selectBillingSendIds(opts: {
     params,
   );
 
+  // ★ 2026-09-26 한줄로 V2 F07 — 여정 단계 캠페인. 옛: 위 세 축 어디에도 안 걸려(campaign_runs 없음 · 직접 배관 아님)
+  //   후불 회사 여정 발송이 청구서에 0원이었다. 큐 행 식별값 = 단계 캠페인 id(문자·알림톡 공통)라 기간 축으로 정확히 잡힌다.
+  //   단계 캠페인은 (여정, 단계, KST 날짜)당 1건 — 후보는 생성일 앞뒤 하루를 넓혀 뽑는다(자정 직전 생성·다음 날 적재가
+  //   그 달 청구에서 빠지지 않게). 수량은 큐의 sendreq_time 기간 조건이 정하므로 이웃 달 이중 계상은 없다.
+  //   선불 회사는 발행 대상이 아니다(billing.ts billable = billing_type !== 'prepaid') — 이미 차감된 여정이 다시 청구되지 않는다.
+  const journeyResult = await pool.query(
+    `SELECT c4.id AS campaign_id
+       FROM campaigns c4
+      WHERE c4.company_id = $1
+        AND c4.send_type = 'journey'
+        AND c4.created_at >= (${kstStart('$2')}) - INTERVAL '1 day'
+        AND c4.created_at < (${kstEnd('$3')}) + INTERVAL '1 day'${userWhereJourney}`,
+    params,
+  );
+
   // 집합 배분은 순수 함수가 소유한다(테스트 고정 지점 — 이 판정이 틀리면 금액이 틀린다).
   return partitionBillingSendIds({
     runs: runsResult.rows as any[],
     directs: directResult.rows as any[],
     legacyDirects: legacyDirectResult.rows as any[],
+    journeys: journeyResult.rows as any[],
   });
 }
 
@@ -779,7 +804,8 @@ export async function buildCompanyUsageByDay(opts: {
       [companyId, startDate, endDate]
     );
     testRows.forEach((row: any) => {
-      const t = row.msg_type === 'S' ? 'TEST_SMS' : 'TEST_LMS';
+      // ★ 2026-09-26 S1-H06 유형 판정 한 벌(브랜드 = 테스트 브랜드 · 상세축과 같은 CT)
+      const t = testBillingTypeKey(row.msg_type);
       bump(dayData, toDayKey(row.send_date), t, {
         total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count,
       });
@@ -1854,7 +1880,8 @@ export async function buildBillingUsageRows(opts: {
     );
     for (const row of testRows) {
       const day = toDayKey(row.send_date);
-      const typeKey = row.msg_type === 'S' ? 'TEST_SMS' : 'TEST_LMS';
+      // ★ 2026-09-26 S1-H06 유형 판정 한 벌(일자축과 같은 CT)
+      const typeKey = testBillingTypeKey(row.msg_type);
       const uid = String(row.bill_id || '').trim() || null;
       bumpRow(acc, {
         channel: 'test', itemDate: day, typeKey, userId: uid, agentSendId: null,

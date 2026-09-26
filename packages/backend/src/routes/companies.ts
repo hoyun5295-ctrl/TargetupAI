@@ -7,7 +7,7 @@ import { createCompanyCore } from '../utils/company-create';
 import { omitCompanySecrets } from '../utils/secret-hash';
 import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/auth';
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
-import { getStoreScope } from '../utils/store-scope';
+import { getStoreScope, buildCustomerStoreFilterLiteral } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
 import { normalizeOpt080Input, findLinkDefectInText, findLinkDefectDeep, webLinkReason } from '../utils/normalize';
 import { grantFreeTrial, isTrialApplyOpen } from '../utils/basic-trial';
@@ -953,7 +953,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
       });
     }
     if (scope.type === 'filtered') {
-      customerStoreFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = '${companyId}' AND store_code = ANY(ARRAY[${scope.storeCodes.map(s => `'${s}'`).join(',')}]::text[]))`;
+      customerStoreFilter = buildCustomerStoreFilterLiteral(companyId, scope.storeCodes);
     }
   }
 
@@ -1404,7 +1404,7 @@ router.get('/dashboard-cards/:cardId/detail', async (req: Request, res: Response
         return res.json({ cardId, label: def.label, type: def.type, blocked: true });
       }
       if (scope.type === 'filtered') {
-        customerStoreFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = '${companyId}' AND store_code = ANY(ARRAY[${scope.storeCodes.map(s => `'${s}'`).join(',')}]::text[]))`;
+        customerStoreFilter = buildCustomerStoreFilterLiteral(companyId, scope.storeCodes);
       }
     }
 

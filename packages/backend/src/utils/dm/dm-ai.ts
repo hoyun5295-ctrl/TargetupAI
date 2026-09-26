@@ -33,6 +33,7 @@ import { getCompanyBrandKit } from './dm-brand-kit';
 import { decideLayoutMode, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
 import { normalizeVisualConcept, applyVisualDirection, type VisualConcept } from './dm-visual-direction';
 import { normalizeSectionChain } from './dm-section-layout';
+import { mapWithConcurrency } from '../concurrency';
 // ★ 2026-09-03 참조 골격 학습층(설계서 §6-1) — serving off·골격 없음이면 아래 두 import는 결과에 아무 영향이 없다.
 import { getStructureSkeleton } from '../best-copy-assets';
 import { AVAIL_UNKNOWN, pickVariant, resolveStructure, seedDateKey, type Avail, type StructureSource } from './dm-structure-resolve';
@@ -306,7 +307,22 @@ export interface EventCopyContext {
   brief?: EventBrief | null;
 }
 
-export async function generateCopy(spec: CampaignSpec, section: Section, companyId?: string, eventContext?: EventCopyContext): Promise<CopyDraft> {
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-29 — DM 문안두뇌(회사 성과 문안 RAG + 브랜드 키트) 덧붙임 문자열. 실패하면 ''(기본 프롬프트로 진행).
+ * 원스텝 생성은 루프 앞에서 한 번 만들어 섹션마다 넘긴다(옛: 섹션 수만큼 같은 조회를 반복).
+ */
+export async function resolveDmCopyBrainSuffix(companyId?: string): Promise<string> {
+  if (!companyId) return '';
+  try {
+    const brain = await composeCopyBrain({ companyId, channels: ['DM'], isAd: true });
+    return brain.promptSuffix || '';
+  } catch (err) {
+    console.warn('[copy-brain] DM generateCopy 주입 실패 — 기본 프롬프트로 진행:', (err as Error)?.message);
+    return '';
+  }
+}
+
+export async function generateCopy(spec: CampaignSpec, section: Section, companyId?: string, eventContext?: EventCopyContext, copyBrainSuffix?: string): Promise<CopyDraft> {
   const specSummary = JSON.stringify({
     brand: spec.brand.name,
     objective: spec.objective,
@@ -436,14 +452,9 @@ ${schema}`;
   let genSystem = rawEvent
     ? COPY_GEN_SYSTEM + '\n- 예외: [행사 원문]에 사용자가 직접 적은 혜택·수치·상품명·기간은 원문 그대로 인용해 반영한다 (원문에 없는 수치는 여전히 금지)'
     : COPY_GEN_SYSTEM;
-  if (companyId) {
-    try {
-      const brain = await composeCopyBrain({ companyId, channels: ['DM'], isAd: true });
-      if (brain.promptSuffix) genSystem = genSystem + brain.promptSuffix;
-    } catch (err) {
-      console.warn('[copy-brain] DM generateCopy 주입 실패 — 기본 프롬프트로 진행:', (err as Error)?.message);
-    }
-  }
+  // ★ 2026-09-26 한줄로 V2 R1-29 — 호출부가 미리 만든 값을 넘기면 다시 읽지 않는다(원스텝 = 한 번). 안 넘기면 지금처럼 읽는다.
+  const brainSuffix = copyBrainSuffix !== undefined ? copyBrainSuffix : await resolveDmCopyBrainSuffix(companyId);
+  if (brainSuffix) genSystem = genSystem + brainSuffix;
 
   const text = await callAIWithFallback({
     system: genSystem,
@@ -801,6 +812,9 @@ export async function extractEventProducts(sourceText: string, companyId?: strin
  *   4. 섹션별 generateCopy → 섹션 props 자동 매핑
  *   5. 완성된 Section[] + brandKit 반환
  */
+/** ★ 2026-09-26 한줄로 V2 R1-29 — 원스텝 DM 섹션 카피 AI 동시 호출 상한 */
+const DM_ONESHOT_COPY_CONCURRENCY = 3;
+
 export async function oneShotGenerate(opts: {
   prompt: string;
   scenario?: string;
@@ -919,27 +933,30 @@ export async function oneShotGenerate(opts: {
   }
 
   // 3. 섹션 영역 생성 + 카피 자동 매핑
+  // ★ 2026-09-26 한줄로 V2 R1-29 — 문안두뇌는 한 번만 읽어 섹션마다 넘긴다(같은 회사·채널·입력 = 같은 결과)
+  const copyBrainSuffix = await resolveDmCopyBrainSuffix(opts.companyId);
   const sections: Section[] = [];
   for (let i = 0; i < sectionTypes.length; i++) {
     const type = sectionTypes[i];
     if (!SECTION_META[type]) continue;
-
-    const section = createSection(type, randomUUID(), i);
-
-    // 4. 섹션별 카피 자동 생성 (AI 영역 = 옛 영역 정합) + 신규 16 영역 = default props 정합
-    // ★ 2026-07-16 M1 — 행사 원문·브리프 직투입 (eventContext) — 원문 기재 사실이 카피에 그대로 반영
-    if (SECTION_META[type].aiAware) {
-      try {
-        const copy = await generateCopy(spec, section, opts.companyId, eventContext);
-        section.props = mergeCopyIntoProps(section.props as any, type, copy) as any;
-      } catch (err) {
-        console.warn(`[oneShotGenerate] generateCopy 실패 type=${type}:`, (err as any)?.message);
-      }
-    }
-
-    applyInteractionDefaults(section);
-    sections.push(section);
+    sections.push(createSection(type, randomUUID(), i));
   }
+
+  // 4. 섹션별 카피 자동 생성 (AI 영역 = 옛 영역 정합) + 신규 16 영역 = default props 정합
+  // ★ 2026-07-16 M1 — 행사 원문·브리프 직투입 (eventContext) — 원문 기재 사실이 카피에 그대로 반영
+  // ★ 2026-09-26 한줄로 V2 R1-29 — 섹션마다 순서대로 기다리던 AI 호출을 동시 3개까지(입력 순서 보존 CT · 섹션끼리 독립).
+  //   실패 격리는 종전 그대로(그 섹션만 기본 문안) · 상한은 공급사 동시 호출을 한 요청이 몰아 쓰지 않게.
+  await mapWithConcurrency(sections, DM_ONESHOT_COPY_CONCURRENCY, async (section) => {
+    const type = section.type as SectionType;
+    if (!SECTION_META[type]?.aiAware) return;
+    try {
+      const copy = await generateCopy(spec, section, opts.companyId, eventContext, copyBrainSuffix);
+      section.props = mergeCopyIntoProps(section.props as any, type, copy) as any;
+    } catch (err) {
+      console.warn(`[oneShotGenerate] generateCopy 실패 type=${type}:`, (err as any)?.message);
+    }
+  });
+  for (const section of sections) applyInteractionDefaults(section);
 
   // ★ 2026-07-08 행사 원문 상품 구조 반영 — 첫 product_carousel.products에 원문 실존 검증 통과분 주입.
   //   추출 실패/검증 탈락 = placeholder 유지(기존 흐름 무영향). 이미지는 직접 업로드(image_url '').

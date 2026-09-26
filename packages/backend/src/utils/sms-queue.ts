@@ -10,6 +10,7 @@ import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { classifyResultTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
+import type { AlimtalkResultAgg } from './refund-calc';
 import { splitLinesByMsgType } from './sms-line-split';
 import { toQtmsgType } from './qtmsg-type';
 // ★ 2026-07-07 비토 게이트웨이 라인 전용 SENDER_KEY 주입 (Agent v1.0.10 kakao_sender_key 필수 대응)
@@ -547,6 +548,71 @@ export async function smsCampaignCountsSafe(
 }
 
 /**
+ * ★ 2026-09-26 한줄로 V2 F01·F04 — 알림톡 캠페인의 **성공을 결과별로** 센다(선불 결과별 정산 전용).
+ * 알림톡 성공(K 1800) · K행 대체 성공 코드(7830 SMS · 7831 LMS) · 대체 행(S/L + k_oriseq) 성공 · 대체 행 전체.
+ * 결과는 이력에서만 센다 — smsCampaignCountsSafe와 같은 테이블 분류라 이동 중인 행이 두 번 잡히지 않는다.
+ * 대체 행 판정식은 통계 엑셀(aggregateSmsChannelSplitByCampaign)과 같다.
+ * 소비처: mysql-refund-sweeper(결과별 단가를 실은 선불 알림톡 캠페인만 — 다른 캠페인엔 이 조회가 돌지 않는다).
+ */
+export async function smsAlimtalkResultAgg(
+  tables: string[],
+  ids: (string | number)[],
+): Promise<Map<string, AlimtalkResultAgg>> {
+  const out = new Map<string, AlimtalkResultAgg>();
+  if (tables.length === 0 || ids.length === 0) return out;
+  const { resultTables } = classifyResultTables(tables);
+  if (resultTables.length === 0) return out;
+  const SUC = SUCCESS_CODES.join(',');
+  const SUB = 'k_oriseq IS NOT NULL AND k_oriseq > 0';
+  const agg = await smsBatchAggByGroup(resultTables, 'app_etc1', `
+        SUM(CASE WHEN msg_type = 'K' AND status_code = 1800 THEN 1 ELSE 0 END) AS kakao,
+        SUM(CASE WHEN msg_type = 'K' AND status_code = 7830 THEN 1 ELSE 0 END) AS inRowSms,
+        SUM(CASE WHEN msg_type = 'K' AND status_code = 7831 THEN 1 ELSE 0 END) AS inRowLms,
+        SUM(CASE WHEN msg_type = 'S' AND ${SUB} AND status_code IN (${SUC}) THEN 1 ELSE 0 END) AS subSms,
+        SUM(CASE WHEN msg_type = 'L' AND ${SUB} AND status_code IN (${SUC}) THEN 1 ELSE 0 END) AS subLms,
+        SUM(CASE WHEN ${SUB} THEN 1 ELSE 0 END) AS sub`, ids);
+  for (const [id, v] of agg) {
+    out.set(id, {
+      kakao: Number(v.kakao || 0), inRowSms: Number(v.inRowSms || 0), inRowLms: Number(v.inRowLms || 0),
+      subSms: Number(v.subSms || 0), subLms: Number(v.subLms || 0), sub: Number(v.sub || 0),
+    });
+  }
+  return out;
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 F05·F06·F11(Codex 3R) — 캠페인의 **대체 행**(k_oriseq > 0) 수를 smsCampaignCountsSafe와 같은 가시성 규칙으로 센다.
+ * 여정 알림톡은 카카오 실패 K행 하나에 대체 행(S/L)이 붙어, 행 기준 실패에서 이 수를 빼야 수신자 기준 실패가 된다
+ * (K 실패 + 대체 성공 = 실패 아님 · K 실패 + 대체 실패 = 실패 1). 뺄셈이 맞으려면 대체 행도 행 집계와 똑같이 세야 한다:
+ * 이력(결과 테이블) 전체 + 이력 짝 있는 라이브의 대기(100/104)·만료 실패(비성공·비대기 + mobsend_time NULL).
+ * 소비처: mysql-refund-sweeper(여정 알림톡 단계 캠페인만 — 다른 캠페인엔 이 조회가 돌지 않는다).
+ */
+export async function smsCampaignSubRowCounts(
+  tables: string[],
+  ids: (string | number)[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (tables.length === 0 || ids.length === 0) return out;
+  const { resultTables, pendingLiveTables } = classifyResultTables(tables);
+  const SUC = SUCCESS_CODES.join(',');
+  const PEN = PENDING_CODES.join(',');
+  const SUB = 'k_oriseq IS NOT NULL AND k_oriseq > 0';
+  const logAgg = resultTables.length > 0
+    ? await smsBatchAggByGroup(resultTables, 'app_etc1', `SUM(CASE WHEN ${SUB} THEN 1 ELSE 0 END) AS sub`, ids)
+    : new Map<string, Record<string, number>>();
+  const liveAgg = pendingLiveTables.length > 0
+    ? await smsBatchAggByGroup(pendingLiveTables, 'app_etc1',
+        `SUM(CASE WHEN ${SUB} AND (status_code IN (${PEN}) OR (status_code NOT IN (${SUC},${PEN}) AND mobsend_time IS NULL)) THEN 1 ELSE 0 END) AS lsub`, ids)
+    : new Map<string, Record<string, number>>();
+  for (const rawId of ids) {
+    const id = String(rawId);
+    const n = Number(logAgg.get(id)?.sub || 0) + Number(liveAgg.get(id)?.lsub || 0);
+    if (n > 0) out.set(id, n);
+  }
+  return out;
+}
+
+/**
  * ★ GROUP BY 집계 — UNION ALL + 단일 GROUP BY
  * results.ts의 smsUnionGroupBy를 CT-04로 승격. 오류사유/통신사별 집계 등에 사용.
  */
@@ -712,6 +778,19 @@ export async function getCampaignSmsTables(
     }
   }
   return result;
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 F26 — 캠페인 행 하나로 **그 캠페인의** 조회 테이블을 고른다(getCampaignSmsTables · 관리자 상세와 같은 기준일).
+ * 발송결과 상세·발송내역·엑셀이 "지금 기준 당월·전월" 회사 라인만 읽어 전전월 이전 캠페인이 0건이던 것을 막는다.
+ * 기준일 = 발송 시각 → 예약 시각 → 생성 시각(관리자 상세 admin.ts와 같은 순서).
+ */
+export async function getCampaignSmsTablesFor(
+  companyId: string,
+  c: { created_by?: string | null; send_config?: any; sent_at?: any; scheduled_at?: any; created_at?: any },
+): Promise<string[]> {
+  const refDate = new Date(c.sent_at || c.scheduled_at || c.created_at || Date.now());
+  return getCampaignSmsTables(companyId, refDate, c.created_by || undefined, c.send_config);
 }
 
 /** 두 라인그룹 테이블 배열을 순서 보존 합집합(중복 제거). 집계 조회가 발송 라인을 놓치지 않게. */
@@ -1013,6 +1092,11 @@ export async function insertBrandQueue(
   tables: string[],
   rows: BrandQueueRow[],
   appEtc1?: string,
+  /**
+   * ★ 2026-09-26 한줄로 V2 S1-H06 — 담당자 테스트 발송의 계정(bill_id). 문자 테스트(insertTestSmsQueue)와 같은 칸이다.
+   *   테스트 청구·결과 화면이 `app_etc1 = 'test'` + bill_id로 계정을 가른다. 넘기지 않으면 종전 구문 그대로(bill_id 칸 없음).
+   */
+  billId?: string,
 ): Promise<number> {
   if (rows.length === 0) return 0;
   if (tables.length === 0) throw new BrandQueueInsertError('브랜드메시지 발송 테이블이 없습니다', 0);
@@ -1049,7 +1133,7 @@ export async function insertBrandQueue(
     for (const r of batch) {
       // 예약이면 지정 시각, 아니면 NOW() — bulkInsertSmsQueue 즉시발송과 동일 기준.
       const reservedExpr = r.reservedDate ? '?' : 'NOW()';
-      values.push(`(?, ?, ?, 'F', ?, ?, ?, ?, NULL, ${reservedExpr}, NOW(), '1', ?, ?, ?)`);
+      values.push(`(?, ?, ?, 'F', ?, ?, ?, ?, NULL, ${reservedExpr}, NOW(), '1', ?, ?, ?${billId !== undefined ? ', ?' : ''})`);
       params.push(
         r.phone,                                      // dest_no
         r.callback || '',                             // call_back (대체발송 발신번호)
@@ -1065,6 +1149,7 @@ export async function insertBrandQueue(
         appEtc1 || null,                              // app_etc1 (캠페인/추적 식별자)
         r.companyId || null,                          // app_etc2 (companyId 추적)
       );
+      if (billId !== undefined) params.push(billId || ''); // bill_id (테스트 계정 · 문자 테스트와 같은 값 규칙)
     }
 
     // 배치는 각각 독립 커밋 — 실패해도 커밋된 건수를 실어서 던진다(B-0727-1 계약 미러).
@@ -1073,7 +1158,7 @@ export async function insertBrandQueue(
         `INSERT INTO ${table} (
           dest_no, call_back, msg_contents, msg_type, title_str,
           k_template_code, k_next_type, k_next_contents, k_button_json,
-          sendreq_time, msg_instm, rsv1, k_etc_json, app_etc1, app_etc2
+          sendreq_time, msg_instm, rsv1, k_etc_json, app_etc1, app_etc2${billId !== undefined ? ', bill_id' : ''}
         ) VALUES ${values.join(',')}`,
         params
       );

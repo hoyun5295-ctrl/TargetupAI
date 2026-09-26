@@ -99,7 +99,11 @@ export interface CreateSessionParams {
  * sessionId는 호출부에서 미리 만들어 전달 (JWT 토큰에 sessionId가 포함되어야 하므로 토큰 생성 전 확보).
  */
 export async function createUserSession(params: CreateSessionParams): Promise<void> {
-  const { sessionId, userId, token, appSource, req, expiresInMinutes } = params;
+  const { sessionId, userId, appSource, req, expiresInMinutes } = params;
+  // ★ 2026-09-26 전수점검 S2-05: 토큰 원문을 저장하지 않는다. 이 컬럼을 읽는 코드가 0곳이고(인증은 세션 id로 대조),
+  //   DB가 새면 유효한 로그인 토큰이 그대로 나간다.
+  //   ⛔ 컬럼은 NOT NULL + UNIQUE(`user_sessions_session_token_key` · 0926 운영 실측)다 — 빈 문자열처럼 같은 값을 넣으면
+  //   두 번째 로그인부터 23505로 로그인이 전부 막힌다. 세션마다 유일하고 그 자체로는 인증에 못 쓰는 세션 id를 넣는다.
   await query(
     `INSERT INTO user_sessions
        (id, user_id, session_token, is_active, ip_address, user_agent, device_type, app_source,
@@ -108,7 +112,7 @@ export async function createUserSession(params: CreateSessionParams): Promise<vo
     [
       sessionId,
       userId,
-      token,
+      sessionId,
       req.ip || '',
       req.headers['user-agent'] || '',
       appSource,

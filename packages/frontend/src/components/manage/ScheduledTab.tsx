@@ -128,8 +128,9 @@ export default function ScheduledTab() {
       return;
     }
     try {
-      await manageScheduledApi.cancel(cancelTarget.id, cancelReason.trim());
-      setToast({ msg: '예약이 취소되었습니다.', type: 'success' });
+      // ★ 2026-09-26 한줄로 V2 F35 — 서버 문구를 그대로 보여 준다(적재 중이던 캠페인은 워커가 결말을 정한다는 안내)
+      const r = await manageScheduledApi.cancel(cancelTarget.id, cancelReason.trim());
+      setToast({ msg: r?.data?.message || '예약이 취소되었습니다.', type: 'success' });
       setShowCancel(false);
       loadCampaigns();
     } catch (err: any) {

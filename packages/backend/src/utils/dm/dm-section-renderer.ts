@@ -65,6 +65,16 @@ export function safeUrl(url: unknown): string {
   return '#';
 }
 
+/** ★ 2026-09-26 한줄로 V2 R1-41 — CSS 색 값이 색 형식(#hex · rgb()/rgba()/hsl()/hsla() 숫자만 · 이름 · transparent)일 때만 통과.
+ *  그 밖은 fallback — style 속성·태그 탈출(`;}</style>` · `url(javascript:…)`)을 막는다. */
+export function safeColor(value: unknown, fallback: string): string {
+  const v = String(value ?? '').trim();
+  if (/^#[0-9a-fA-F]{3,8}$/.test(v)) return v;
+  if (/^(rgb|rgba|hsl|hsla)\(\s*[\d.%\s,/-]+\)$/i.test(v)) return v;
+  if (/^[a-zA-Z]{3,20}$/.test(v)) return v;
+  return fallback;
+}
+
 /** ★ 2026-07-02(2) 폰트 크기 직접 선택 — 유효(10~80px)하면 뒤에 붙는 font-size 선언, 아니면 빈 문자열(기존 토큰 크기 유지). */
 export function fsDecl(size: unknown): string {
   const n = Math.round(Number(size));

@@ -17,13 +17,31 @@ import { normalizePhone } from './normalize';
 export const SPAM_TRIAL_LIMIT = 3;
 /** `spam_filter_tests.source` 값 */
 export const SPAM_TRIAL_SOURCE = 'trial';
+/**
+ * ★ 2026-09-26 한줄로 V2 F49 — 선불 차감을 건너뛴 자동 검사(AI 자동발송 · "프로 이상 무료")의 표시값.
+ * 옛: 유료인 여정 사전 검사와 같은 'auto_ai'라 후불 정산이 둘을 가르지 못하고 무료 검사를 청구했다.
+ * 적재할 때 차감 건너뜀 플래그 하나로 정한다(spam-test-queue enqueueSpamTest) — 선불·후불이 갈라질 수 없다. 칸 = varchar(20).
+ */
+export const SPAM_AUTO_FREE_SOURCE = 'auto_ai_free';
+/** 청구·비용 집계에서 빼는 표시값 — 아래 SQL 조각과 함수가 이 목록 하나를 쓴다. */
+const SPAM_BILL_EXEMPT_SOURCES = [SPAM_TRIAL_SOURCE, SPAM_AUTO_FREE_SOURCE] as const;
 
 /**
  * 청구·비용 집계에 넣어도 되는 검사인가 — SQL 조각(WHERE에 AND로 붙인다).
  * 쓰는 곳 = 정산 집계 2곳(`send-usage-aggregation.ts`) · 사용량 비용 표시 2곳(`manage-stats.ts`·`admin.ts`).
  */
 export function spamBillableTestSql(alias = 't'): string {
-  return `COALESCE(${alias}.source, 'manual') <> '${SPAM_TRIAL_SOURCE}'`;
+  return `COALESCE(${alias}.source, 'manual') NOT IN (${SPAM_BILL_EXEMPT_SOURCES.map((s) => `'${s}'`).join(', ')})`;
+}
+
+/** 같은 판정의 함수판 — 행을 이미 읽은 화면(테스트 결과 목록 비용)이 쓴다. 표시값 없는 옛 행 = manual = 청구. */
+export function isSpamTestBillable(source: string | null | undefined): boolean {
+  return !(SPAM_BILL_EXEMPT_SOURCES as readonly string[]).includes(source || 'manual');
+}
+
+/** 자동 검사(큐 워커의 자동 판정)인가 — 유료('auto_ai')·무료 둘 다. */
+export function isAutoSpamSource(source: string | null | undefined): boolean {
+  return source === 'auto_ai' || source === SPAM_AUTO_FREE_SOURCE;
 }
 
 /** 스팸 검사 표 advisory 잠금 키(체험 예약 전용) */

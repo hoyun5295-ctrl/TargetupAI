@@ -29,7 +29,7 @@ import { normalizePhone } from './normalize';
 
 export const TIMELINE_KINDS = [
   'send', 'dm_view', 'dm_response', 'purchase', 'behavior', 'inapp',
-  'consent', 'unsubscribe', 'journey', 'inbound', 'email', 'profile',
+  'consent', 'unsubscribe', 'journey', 'email', 'profile',
 ] as const;
 export type TimelineKind = typeof TIMELINE_KINDS[number];
 
@@ -755,52 +755,27 @@ async function fetchJourneys(companyId: string, scope: CustomerScope, f: SourceF
   return out.slice(0, limit + 1);
 }
 
-async function fetchInbound(companyId: string, scope: CustomerScope, f: SourceFilter, limit: number) {
-  const r = await query(
-    `SELECT id, caller_phone, transcript, ai_response, duration_ms, status, created_at
-       FROM voice_inbound_calls
-      WHERE company_id = $1::uuid
-        AND (customer_id = ANY($2::uuid[]) OR ($3::text IS NOT NULL AND caller_phone = $3::text))
-        AND ($4::timestamptz IS NULL OR created_at <= $4::timestamptz)
-        AND ($6::timestamptz IS NULL OR created_at >= $6::timestamptz)
-        AND ($7::text IS NULL OR transcript ILIKE $7 OR ai_response ILIKE $7)
-      ORDER BY created_at DESC
-      LIMIT $5`,
-    [companyId, scope.ids, scope.phone, f.before, limit + 1, f.after, f.like],
-  );
-  return r.rows.map((row: any): TimelineEvent => {
-    const sec = Math.round(num(row.duration_ms) / 1000);
-    const dur = sec >= 60 ? `${Math.floor(sec / 60)}분 ${sec % 60}초` : `${sec}초`;
-    return {
-      id: String(row.id),
-      kind: 'inbound',
-      at: toIso(row.created_at) || new Date(0).toISOString(),
-      title: `전화 문의${row.transcript ? ` · ${clip(row.transcript, 28)}` : ''}`,
-      subtitle: sec > 0 ? dur : undefined,
-      status: null,
-      detail: { transcript: row.transcript || null, response: row.ai_response || null, durationSeconds: sec, callStatus: row.status || null },
-    };
-  });
-}
-
 const EMAIL_EVENT_LABEL: Record<string, string> = {
   open: '이메일 열람', click: '이메일 링크 클릭', bounce: '이메일 반송',
   delivered: '이메일 도착', complaint: '이메일 스팸 신고', unsubscribe: '이메일 수신거부',
 };
 
-async function fetchEmails(scope: CustomerScope, f: SourceFilter, limit: number) {
+// ★ 2026-09-25 한줄로 전수점검 C-09: email_events에는 company_id가 없다(고객 키 = 이메일 주소).
+//   이메일 주소만으로 찾으면 같은 주소가 다른 고객사 메일을 받은 기록(캠페인 이름·클릭 URL·반송 사유)까지 보였다.
+//   캠페인을 INNER JOIN하고 그 캠페인의 회사로 가둔다 — 다른 원천과 같이 companyId를 받는다.
+async function fetchEmails(companyId: string, scope: CustomerScope, f: SourceFilter, limit: number) {
   if (scope.emails.length === 0) return [];
   const r = await query(
     `SELECT e.id, e.event_type, e.url, e.reason, e.occurred_at, c.name
        FROM email_events e
-       LEFT JOIN email_campaigns c ON c.id = e.campaign_id
+       JOIN email_campaigns c ON c.id = e.campaign_id AND c.company_id = $6::uuid
       WHERE lower(e.email) = ANY($1::text[])
         AND ($2::timestamptz IS NULL OR e.occurred_at <= $2::timestamptz)
         AND ($4::timestamptz IS NULL OR e.occurred_at >= $4::timestamptz)
         AND ($5::text IS NULL OR c.name ILIKE $5 OR e.url ILIKE $5)
       ORDER BY e.occurred_at DESC
       LIMIT $3`,
-    [scope.emails, f.before, limit + 1, f.after, f.like],
+    [scope.emails, f.before, limit + 1, f.after, f.like, companyId],
   );
   return r.rows.map((row: any): TimelineEvent => {
     const type = String(row.event_type || '');
@@ -983,8 +958,7 @@ export async function buildCustomerTimeline(opts: TimelineOptions): Promise<Time
     on('consent') ? runSource('consent', sources, limit, () => fetchConsents(opts.companyId, scope, filter, limit)) : [],
     on('unsubscribe') ? runSource('unsubscribe', sources, limit, () => fetchUnsubscribes(opts.companyId, scope, filter, limit)) : [],
     on('journey') ? runSource('journey', sources, limit, () => fetchJourneys(opts.companyId, scope, filter, limit)) : [],
-    on('inbound') ? runSource('inbound', sources, limit, () => fetchInbound(opts.companyId, scope, filter, limit)) : [],
-    on('email') ? runSource('email', sources, limit, () => fetchEmails(scope, filter, limit)) : [],
+    on('email') ? runSource('email', sources, limit, () => fetchEmails(opts.companyId, scope, filter, limit)) : [],
     on('profile') ? runSource('profile', sources, limit, async () => buildProfileEvents(scope, filter, limit)) : [],
   ]);
 

@@ -17,6 +17,8 @@
  */
 
 import { query } from '../../config/database';
+// ★ 2026-09-26 한줄로 V2 R1-26 — 섹션 읽기·되쓰기 CT(pages 우선)
+import { extractFlatSectionsFromDm, mapDmSections } from './dm-builder';
 import { callAIWithFallback } from '../../services/ai';
 import { extractJson } from './dm-ai';
 import type { SectionType } from './dm-section-registry';
@@ -117,8 +119,9 @@ const REFINE_SYSTEM = `당신은 모바일 DM 카피라이터입니다. 원본 �
 { "refined": "..." }`;
 
 async function refineAllCopy(companyId: string, campaignId: string): Promise<QuickActionResult> {
-  const result = await query(`SELECT sections FROM dm_pages WHERE id = $1`, [campaignId]);
-  const sections: any[] = parseJson(result.rows[0]?.sections) || [];
+  // ★ 2026-09-26 한줄로 V2 R1-26 — pages 우선(요즘 DM) · 옛 sections 칸 폴백(CT)
+  const result = await query(`SELECT pages, sections FROM dm_pages WHERE id = $1`, [campaignId]);
+  const sections: any[] = extractFlatSectionsFromDm(result.rows[0]);
 
   const changes: QuickActionChange[] = [];
 
@@ -166,8 +169,8 @@ async function refineAllCopy(companyId: string, campaignId: string): Promise<Qui
 // ────────────── design_align 액션 ──────────────
 
 async function alignDesign(campaignId: string): Promise<QuickActionResult> {
-  const result = await query(`SELECT sections, brand_kit FROM dm_pages WHERE id = $1`, [campaignId]);
-  const sections: any[] = parseJson(result.rows[0]?.sections) || [];
+  const result = await query(`SELECT pages, sections, brand_kit FROM dm_pages WHERE id = $1`, [campaignId]);
+  const sections: any[] = extractFlatSectionsFromDm(result.rows[0]);   // ★ 2026-09-26 R1-26 pages 우선
   const brandKit: any = parseJson(result.rows[0]?.brand_kit) || {};
 
   const changes: QuickActionChange[] = [];
@@ -234,8 +237,8 @@ const FALLBACK_MAP: Record<string, string> = {
 };
 
 async function ensureVariableConsistency(campaignId: string): Promise<QuickActionResult> {
-  const result = await query(`SELECT sections FROM dm_pages WHERE id = $1`, [campaignId]);
-  const sections: any[] = parseJson(result.rows[0]?.sections) || [];
+  const result = await query(`SELECT pages, sections FROM dm_pages WHERE id = $1`, [campaignId]);
+  const sections: any[] = extractFlatSectionsFromDm(result.rows[0]);   // ★ 2026-09-26 R1-26 pages 우선
 
   const changes: QuickActionChange[] = [];
 
@@ -303,18 +306,17 @@ export async function applyQuickAction(
 
   if (result.changes.length === 0) return result;
 
-  // DB 반영
-  const dbResult = await query(`SELECT sections FROM dm_pages WHERE id = $1`, [campaignId]);
-  const sections: any[] = parseJson(dbResult.rows[0]?.sections) || [];
-
-  const updated = sections.map((sec: any) => {
+  // DB 반영 — ★ 2026-09-26 한줄로 V2 R1-26 읽은 곳에 쓴다(pages 구조면 pages 안 섹션 · 옛 DM이면 sections 칸 · CT mapDmSections).
+  const dbResult = await query(`SELECT pages, sections FROM dm_pages WHERE id = $1 AND company_id = $2`, [campaignId, companyId]);
+  const mapped = mapDmSections(dbResult.rows[0], (sec: any) => {
     const change = result.changes.find((c) => c.section_id === sec?.id);
     return change ? { ...sec, props: change.after } : sec;
   });
+  if (!mapped) return result;
 
   await query(
-    `UPDATE dm_pages SET sections = $1, updated_at = NOW() WHERE id = $2`,
-    [JSON.stringify(updated), campaignId],
+    `UPDATE dm_pages SET ${mapped.column} = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3`,
+    [JSON.stringify(mapped.value), campaignId, companyId],
   );
 
   return result;

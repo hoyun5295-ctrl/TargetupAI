@@ -45,8 +45,8 @@ const DETAIL_LABEL: Record<string, string> = {
   pageReached: '도달 페이지', totalPages: '전체 페이지', durationSeconds: '머문 시간',
   maxScrollPct: '스크롤', openCount: '열람 횟수', sectionType: '구역',
   channel: '채널', consentType: '동의 유형', journeyName: '여정', executionStatus: '진행 상태',
-  stepOrder: '단계', logStatus: '결과', reason: '사유', transcript: '통화 내용',
-  response: '응답', callStatus: '통화 상태', url: '링크', buttonId: '버튼',
+  stepOrder: '단계', logStatus: '결과', reason: '사유',
+  response: '응답', url: '링크', buttonId: '버튼',
 };
 
 const CLAMP_CHARS = 600;

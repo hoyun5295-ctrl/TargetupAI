@@ -1411,9 +1411,12 @@ router.post('/delete-all', blockIfSyncActive, async (req: Request, res: Response
     const purchaseResult = await query('DELETE FROM purchases WHERE company_id = $1', [deleteCompanyId]);
     await query('DELETE FROM consents WHERE customer_id IN (SELECT id FROM customers WHERE company_id = $1)', [deleteCompanyId]);
 
-    // ★ D114 P1: 수신거부 + 필드 정의 + customer_schema + customer_stores 정리
+    // ★ D114 P1: 필드 정의 + customer_schema + customer_stores 정리
     // 고객 전체삭제 시 customer_field_definitions가 잔존하면 다음 업로드에서 매핑 충돌 오감지
-    await query('DELETE FROM unsubscribes WHERE company_id = $1', [deleteCompanyId]);
+    // ★ 2026-09-25 한줄로 전수점검 C-01: 수신거부(unsubscribes)는 지우지 않는다.
+    //   080 ARS 거부('080_ars')도 이 표에 있고 발송 대상 제외가 이 표로 이뤄진다. 여기서 지우면
+    //   전체삭제 → 재업로드 한 번에 거부 번호가 다시 광고 대상이 된다(정보통신망법 수신거부).
+    //   수신거부를 지우려면 수신거부 관리 화면(unsubscribe-helper 삭제 경로)을 쓴다. 업로드 충돌 원인(필드 정의)과는 무관하다.
     await query('DELETE FROM customer_field_definitions WHERE company_id = $1', [deleteCompanyId]);
     await query('DELETE FROM customer_stores WHERE company_id = $1', [deleteCompanyId]);
     await query(`UPDATE companies SET customer_schema = '{}'::jsonb WHERE id = $1`, [deleteCompanyId]);

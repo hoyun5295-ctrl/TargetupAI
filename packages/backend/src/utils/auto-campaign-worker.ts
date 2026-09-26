@@ -853,7 +853,9 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     const runId = runResult.rows[0].id;
 
     // ★ 선불 차감 (prepaid.ts 재활용)
-    const deduct = await prepaidDeduct(ac.company_id, customers.length, ac.message_type, campaignId, ac.user_id);
+    // ★ 2026-09-26 한줄로 V2 F01·F04 자동발송 알림톡은 캠페인 행에 send_channel이 없다 — 자동발송 설정(channel)으로 표시해
+    //   차감 행에 결과별 정산 단가를 싣는다(정산 스위퍼는 차감 행만 보고 판정한다).
+    const deduct = await prepaidDeduct(ac.company_id, customers.length, ac.message_type, campaignId, ac.user_id, 'campaign', null, { alimtalk: ac.channel === 'alimtalk' });
     if (!deduct.ok) {
       console.warn(`${logPrefix} 잔액 부족 — ${deduct.error}`);
       await query(

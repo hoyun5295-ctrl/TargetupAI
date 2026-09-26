@@ -167,14 +167,15 @@ describe('고객 360 타임라인 — 원천 격리·상한', () => {
 describe('고객 360 타임라인 — 카탈로그', () => {
   const SRC = readFileSync(resolve(__dirname, '../customer-timeline.ts'), 'utf8');
 
-  it('카탈로그 kind 12종이 전부 사건 생성 코드를 갖는다', () => {
+  it('카탈로그 kind 11종이 전부 사건 생성 코드를 갖는다', () => {
     // 원천을 늘리면서 kind만 추가하고 생성기를 안 붙이면 화면에서 그 종류가 영원히 비어 있다.
     const missing = TIMELINE_KINDS.filter((k) => {
       const re = new RegExp(`kind:\\s*'${k}'`);
       return !re.test(SRC);
     });
     expect(missing).toEqual([]);
-    expect(TIMELINE_KINDS.length).toBe(12);
+    // ★ 2026-09-26 음성 AI 제거로 'inbound'(전화 문의) 종류를 뺐다(12 → 11)
+    expect(TIMELINE_KINDS.length).toBe(11);
   });
 
   it('발송 원천은 PG messages를 읽지 않는다(⛔1 — 죽은 테이블)', () => {

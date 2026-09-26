@@ -205,7 +205,8 @@ export async function aiGuessPhoneColumn(
 }
 
 export interface CreateAgencyRequestInput {
-  messageType: 'SMS' | 'LMS' | 'MMS';
+  /** ★ 2026-09-26 R1-08 — 'AUTO' = 접수 코어가 실제 수신자 문장 바이트로 SMS/LMS를 정한다(화면은 유형을 확정하지 않는다) */
+  messageType: 'SMS' | 'LMS' | 'MMS' | 'AUTO';
   subject?: string;
   content: string;
   isAd: boolean;

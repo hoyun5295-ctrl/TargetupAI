@@ -119,6 +119,38 @@ export function sumSectionClicks(raw: any): number {
 }
 
 /**
+ * ★ 2026-09-26 한줄로 V2 R1-18 — DM 추적 화면 목록 상한(응답·렌더 크기 = 종전과 같은 1천 명).
+ * 요약·세그먼트 수·재발송 대상은 이 상한과 무관하게 **전체 수신자**로 계산한다.
+ */
+export const DM_TRACK_LIST_CAP = 1000;
+
+/** 후속 발송 세그먼트 키 — 화면 버튼과 서버 재발송이 같은 키를 쓴다. */
+export const DM_RESEND_SEGMENTS = ['unviewed', 'viewed_no_action', 'clicked', 'responded'] as const;
+export type DmResendSegment = (typeof DM_RESEND_SEGMENTS)[number];
+
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-18 — 추적 원시 행 → 후속 발송 세그먼트별 고객 id(판정 한 벌).
+ * 옛: 화면이 1천 명 목록에서 직접 걸러 id를 실어 보냈다(1천 명 밖 수신자는 재발송 대상에서 빠짐).
+ * 이제 화면 버튼 수(추적 응답)와 실제 발송 대상(발송 시점 재계산)이 이 함수 하나에서 나온다.
+ * 정의 = 추적 화면과 같다: 열람 = viewed_at 있음 · 클릭 = 섹션 클릭 합 > 0 · 응모 = 응답 이력 있음.
+ */
+export function classifyDmRecipientSegments(rows: any[]): Record<DmResendSegment, string[]> {
+  const out: Record<DmResendSegment, string[]> = { unviewed: [], viewed_no_action: [], clicked: [], responded: [] };
+  for (const r of rows || []) {
+    const id = String(r?.customer_id || '');
+    if (!id) continue;
+    const viewed = !!r.viewed_at;
+    const clicks = sumSectionClicks(r.section_interactions);
+    const responded = !!r.responded;
+    if (!viewed) out.unviewed.push(id);
+    if (viewed && clicks === 0 && !responded) out.viewed_no_action.push(id);
+    if (clicks > 0) out.clicked.push(id);
+    if (responded) out.responded.push(id);
+  }
+  return out;
+}
+
+/**
  * 열람 진행률(0~100) — 스크롤형은 max_scroll_pct 우선, 없으면(구 데이터) 페이지 도달 비율.
  */
 export function computeDmProgressPct(pageReached: any, totalPages: any, maxScrollPct: any): number {

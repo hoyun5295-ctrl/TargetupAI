@@ -741,6 +741,12 @@ export default function AiOperatorPage() {
       if (recipients.length === 0) {
         throw new Error('발송 대상 고객이 없습니다. 타겟 조건을 조정해주세요.');
       }
+      // ★ 2026-09-25 한줄로 전수점검 C-07: 조회는 1만 명까지만 싣는다. 실제 대상이 더 많으면 일부만 조용히 나가던 것을
+      //   막는다(누가 빠질지도 정해지지 않았다). 서버가 실제 대상 수(total)를 함께 준다.
+      const audienceTotal = Number(previewData.total) || recipients.length;
+      if (audienceTotal > recipients.length) {
+        throw new Error(`발송 대상이 ${audienceTotal.toLocaleString()}명이라 보내지 않았습니다. AI 운영자 승인 발송은 한 번에 ${recipients.length.toLocaleString()}명까지 보낼 수 있습니다. 조건을 좁혀 다시 제안받아 주세요.`);
+      }
       if (!previewData.defaultCallback) {
         throw new Error('기본 회신번호가 등록되지 않았습니다. 발신번호 관리에서 등록 후 다시 시도해주세요.');
       }

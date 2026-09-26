@@ -884,15 +884,10 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/api/gateway-templ
 | `VAPID_PRIVATE_KEY` | 박지 X | |
 | `VAPID_SUBJECT` | 박지 X | `mailto:admin@hanjul.ai` |
 
-### 9-5. 인바운드 음성 AI (D178)
+### 9-5. 인바운드 음성 AI (D178) — 2026-09-26 제거
 
-| 변수 | 박힘 영역 | 비고 |
-|------|---------|------|
-| `NAVER_CLOVA_STT_INVOKE_URL` | 박지 X | NCloud Clova Speech 박은 영역 |
-| `NAVER_CLOVA_STT_SECRET` | 박지 X | |
-| `NAVER_CLOVA_TTS_CLIENT_ID` | 박지 X | NCloud Clova Voice 박은 영역 |
-| `NAVER_CLOVA_TTS_CLIENT_SECRET` | 박지 X | |
-| `VOICE_WEBHOOK_SECRET` | 박지 X | 통신사 박은 HMAC-SHA256 박음. 박지 X 시 서명 검증 skip |
+기능 제거(Harold 결정 · 켠 회사 0 · 통화 이력 0). 코드가 `NAVER_CLOVA_*`·`VOICE_WEBHOOK_SECRET`을 더 이상 읽지 않는다. 설정할 필요 없음.
+빈 테이블 `voice_inbound_calls`·컬럼 `companies.voice_inbound_enabled`는 남아 있다(삭제는 별도 과제). 경위 = `docs/2026-09-25-hanjul-source-audit.md` §2-10.
 
 ### 9-6. Email 채널 (D180)
 

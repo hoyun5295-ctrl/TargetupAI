@@ -226,16 +226,34 @@ export async function deleteAsset(
   if (rowResult.rows.length === 0) return { deleted: false, inUse: false };
   const url: string = String(rowResult.rows[0].url || '');
 
-  // 인앱 메시지 참조 검사 (image_url 정확 일치 + buttons/content_blocks 본문 포함) — archived 제외
+  // 참조 검사 — 소재 주소를 **그대로 저장하는 곳 전부**를 한 번에 본다.
+  //   인앱 메시지(image_url 정확 일치 + buttons/content_blocks 본문 포함 · archived 제외)
+  //   ★ 2026-09-26 한줄로 V2 R1-22 — 옛 검사는 인앱만 봐서 DM·이메일 이미지가 깨지고 예약 브랜드 발송이 발송 직전 실패했다.
+  //   DM(pages·sections) · 이메일 본문(절대 주소로 실린다)·편집기 섹션(html_body가 아직 없는 초안 포함) · 카카오 브랜드 발송 첨부(끝나지 않은 발송만 · 발송 직전 이 파일을 올린다).
+  //   주소 형태가 저장처마다 달라(상대/절대) 파일명으로 찾는다(uuid 파일명 = 전역 유일).
+  //   MMS·SNS·이벤트 캠페인은 소재를 사본으로 옮겨 쓰므로 대상이 아니다. 조회가 실패하면 throw = 지우지 않는다.
+  //   campaigns.status는 NULL 허용(M-39 실측) → NULL은 끝나지 않은 발송으로 본다(NOT IN에서 빠지면 사용 중인 파일을 지운다).
   if (url) {
+    const fileKey = (url.split(/[?#]/)[0].split('/').pop() || url).replace(/[\\%_]/g, '\\$&');
     const refResult = await query(
-      `SELECT 1 FROM cdp_inapp_messages
-        WHERE company_id = $1::uuid AND status != 'archived'
-          AND (image_url = $2 OR buttons::text LIKE '%' || $2 || '%' OR content_blocks::text LIKE '%' || $2 || '%')
-        LIMIT 1`,
-      [companyId, url],
+      `SELECT EXISTS (
+         SELECT 1 FROM cdp_inapp_messages
+          WHERE company_id = $1::uuid AND status != 'archived'
+            AND (image_url = $2 OR buttons::text LIKE '%' || $2 || '%' OR content_blocks::text LIKE '%' || $2 || '%')
+       ) OR EXISTS (
+         SELECT 1 FROM dm_pages d
+          WHERE d.company_id = $1::uuid AND (d.pages::text LIKE $3 OR d.sections::text LIKE $3)
+       ) OR EXISTS (
+         SELECT 1 FROM email_campaigns e
+          WHERE e.company_id = $1::uuid AND (e.html_body LIKE $3 OR e.sections::text LIKE $3)
+       ) OR EXISTS (
+         SELECT 1 FROM campaigns k
+          WHERE k.company_id = $1::uuid AND COALESCE(k.status, '') NOT IN ('completed', 'cancelled', 'failed')
+            AND (k.kakao_attachment_json::text LIKE $3 OR k.kakao_carousel_json::text LIKE $3)
+       ) AS in_use`,
+      [companyId, url, `%${fileKey}%`],
     );
-    if (refResult.rows.length > 0) return { deleted: false, inUse: true };
+    if (refResult.rows[0]?.in_use) return { deleted: false, inUse: true };
   }
 
   await query(`DELETE FROM cdp_assets WHERE id = $1::uuid AND company_id = $2::uuid`, [assetId, companyId]);

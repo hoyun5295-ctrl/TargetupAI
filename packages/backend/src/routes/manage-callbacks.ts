@@ -162,22 +162,28 @@ router.put('/:id', async (req: Request, res: Response) => {
   const { phone, label } = req.body;
 
   try {
+    const current = await pool.query('SELECT company_id, phone FROM callback_numbers WHERE id = $1', [id]);
+    if (current.rows.length === 0) return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
     // 고객사관리자: 자사 발신번호만 수정 가능
-    if (callerType === 'company_admin') {
-      const check = await pool.query('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
-      if (check.rows.length === 0) return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
-      if (check.rows[0].company_id !== callerCompanyId) {
-        return res.status(403).json({ error: '자사 발신번호만 수정할 수 있습니다.' });
-      }
+    if (callerType === 'company_admin' && current.rows[0].company_id !== callerCompanyId) {
+      return res.status(403).json({ error: '자사 발신번호만 수정할 수 있습니다.' });
+    }
+    // ★ 2026-09-26 한줄로 V2 S1-H02 — 이 API는 **번호를 바꾸지 않는다**(라벨만). 등록(POST)의 자체등록 허용·형식·중복·회선 상한을
+    //   건너뛰고 등록되지 않은 번호로 바꿔 보낼 수 있었다(발신번호 사전등록 우회). 화면은 이 API로 번호를 바꾸지 않는다.
+    if (phone != null && String(phone).trim() !== ''
+        && normalizePhone(String(phone)) !== normalizePhone(String(current.rows[0].phone))) {
+      return res.status(400).json({
+        error: '발신번호는 수정할 수 없습니다. 기존 번호를 삭제하고 새 번호로 등록해 주세요.',
+        code: 'CALLBACK_PHONE_IMMUTABLE',
+      });
     }
 
     const result = await pool.query(`
       UPDATE callback_numbers 
-      SET phone = COALESCE($1, phone),
-          label = COALESCE($2, label)
-      WHERE id = $3
+      SET label = COALESCE($1, label)
+      WHERE id = $2
       RETURNING id, phone, label, is_default
-    `, [phone, label, id]);
+    `, [label, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });

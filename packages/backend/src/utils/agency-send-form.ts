@@ -205,6 +205,17 @@ function parseIsAd(text: string): boolean {
   return !['아니오', '아니요', '아님', 'no', 'n', 'x', '없음', '비광고'].includes(t) || t === '';
 }
 
+/**
+ * 요청서를 읽지 못했을 때의 값(한 벌). 파서 catch와 별도 프로세스 파싱 실패(★2026-09-26 S1-H03)가 같은 반려를 낸다.
+ */
+export function unreadableAgencyForm(): ParsedAgencyForm {
+  return {
+    subject: '', content: '', requestedAtText: '', requestedAt: null, callbackRaw: '',
+    isAd: true, managerPhones: [], phoneColumnName: '', imageFileName: '', billingTarget: '',
+    errors: [{ field: '요청서', error: '요청서 파일을 읽지 못했습니다. 양식 그대로인지 확인해 주세요.' }],
+  };
+}
+
 /** 요청서 시트를 라벨 기준으로 읽는다 */
 export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
   const errors: AgencyFormError[] = [];
@@ -224,11 +235,7 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
     sheetDatesToText(sheet);
     rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
   } catch {
-    return {
-      subject: '', content: '', requestedAtText: '', requestedAt: null, callbackRaw: '',
-      isAd: true, managerPhones: [], phoneColumnName: '', imageFileName: '', billingTarget: '',
-      errors: [{ field: '요청서', error: '요청서 파일을 읽지 못했습니다. 양식 그대로인지 확인해 주세요.' }],
-    };
+    return unreadableAgencyForm();
   }
 
   // ⛔ 중복은 **의미(필드) 단위**로 반려한다(★Codex 적대 1R·2R) — "광고 여부"와 "광고"처럼 별칭이

@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../config/database', () => ({ query: vi.fn() }));
 
 import { query } from '../../config/database';
-import { getStoreScope } from '../store-scope';
+import { getStoreScope, buildCustomerStoreFilterLiteral } from '../store-scope';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
 const USER = '22222222-2222-4222-8222-222222222222';
@@ -71,5 +71,32 @@ describe('getStoreScope · ★0918 변경', () => {
     // 이에스페이먼트: 이로이로도쿄 몰이 먼저 붙어 customer_stores 가 생긴 뒤, 아직 자기 몰을 안 붙인 일본이모 담당자
     db({ storeCodes: ['ILBON'], myMatch: false, companyHasRows: true });
     expect(await getStoreScope(COMPANY, USER)).toEqual({ type: 'filtered', storeCodes: ['ILBON'] });
+  });
+});
+
+/**
+ * ★ 2026-09-25 한줄로 전수점검 C-02 — 매장 코드는 고객사 관리자가 넣는 자유 문자열이다.
+ *   조각에 이어 붙일 때 값이 SQL 문법을 벗어나면 안 된다(따옴표로만 감싸던 옛 조립은 OR TRUE 주입·따옴표 500).
+ */
+describe('buildCustomerStoreFilterLiteral', () => {
+  it('평범한 코드는 종전과 같은 조각을 만든다', () => {
+    expect(buildCustomerStoreFilterLiteral(COMPANY, ['A01', 'B02'])).toBe(
+      ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = '${COMPANY}' AND store_code = ANY(ARRAY['A01','B02']::text[]))`,
+    );
+  });
+
+  it('작은따옴표가 든 코드는 두 번 써서 값 안에 가둔다', () => {
+    const inj = "x']::text[])) OR TRUE OR id IN (SELECT customer_id FROM customer_stores WHERE store_code = ANY(ARRAY['x";
+    const sql = buildCustomerStoreFilterLiteral(COMPANY, [inj]);
+    expect(sql).toContain(`ANY(ARRAY['x'']::text[])) OR TRUE OR id IN (SELECT customer_id FROM customer_stores WHERE store_code = ANY(ARRAY[''x']::text[]))`);
+    // 따옴표 개수가 짝수여야 값이 닫힌다(홀수면 문법이 새어 나간 것)
+    const inner = sql.slice(sql.indexOf('ARRAY[') + 6, sql.lastIndexOf(']::text[]'));
+    expect((inner.match(/'/g) || []).length % 2).toBe(0);
+  });
+
+  it('백슬래시가 든 코드는 E 문자열로 감싼다', () => {
+    const backslash = String.fromCharCode(92);
+    const sql = buildCustomerStoreFilterLiteral(COMPANY, [`a${backslash}b`]);
+    expect(sql).toContain(`ANY(ARRAY[ E'a${backslash}${backslash}b']::text[])`);
   });
 });

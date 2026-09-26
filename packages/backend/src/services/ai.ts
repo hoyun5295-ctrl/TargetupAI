@@ -29,6 +29,7 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 import { isInCreditBundle } from '../utils/ai-credit-context';
 // ★ 2026-08-04 계약 필수화 — 등록 1회 축 매핑(suggestSegmentForObjective)이 계약 정의·범위를 읽는다.
 import { getSegmentContract, normalizeSegmentParams } from '../utils/automarketing-segment';
+import { customFieldRef } from '../utils/safe-field-name';
 
 // ★ 2026-07-22 기동 시 1회 진단 경고(운영 PM2용). vitest는 dotenv.config()를 안 거쳐(app.ts 부트스트랩 미실행)
 //   process.env가 비어 실제 키가 있어도 매 테스트 파일마다 오탐 경고가 찍힌다 → 테스트 컨텍스트에선 skip.
@@ -1571,7 +1572,7 @@ export async function detectActiveFields(companyId: string): Promise<ActiveField
     for (const [key, label] of Object.entries(customFieldLabels)) {
       try {
         const cfRes = await query(
-          `SELECT DISTINCT custom_fields->>'${key}' as val FROM customers WHERE company_id = $1 AND custom_fields->>'${key}' IS NOT NULL AND custom_fields->>'${key}' != '' ORDER BY val LIMIT 200`,
+          `SELECT DISTINCT ${customFieldRef(key)} as val FROM customers WHERE company_id = $1 AND ${customFieldRef(key)} IS NOT NULL AND ${customFieldRef(key)} != '' ORDER BY val LIMIT 200`,
           [companyId]
         );
         const vals = cfRes.rows.map((r: any) => r.val).filter(Boolean);

@@ -64,8 +64,6 @@ const MarketingPlannerPage = lazyPage(() => import('./pages/MarketingPlannerPage
 // ★ 2026-08-13 마케팅 플래너 Phase 2 — 월간 브리핑·결재(문자 결재 링크의 착지 화면)
 const PlannerBriefPage = lazyPage(() => import('./pages/PlannerBriefPage'));
 const ImageStudioPage = lazyPage(() => import('./pages/ImageStudioPage')); // ★ 2026-07-19 P4 AI 이미지 스튜디오
-// ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS)
-const VoiceInboundPage = lazyPage(() => import('./pages/VoiceInboundPage'));
 // ★ D180 (2026-05-19): Email 채널 (SendGrid)
 const EmailCampaignsPage = lazyPage(() => import('./pages/EmailCampaignsPage'));
 // ★ D181 (2026-05-19): Phase 1 영구 개선 — Memory + Batch + Citations
@@ -539,16 +537,6 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <PlanGate featureId="image-studio"><ImageStudioPage /></PlanGate>
-            </PrivateRoute>
-          }
-        />
-
-        {/* ★ D178 (2026-05-19): 인바운드 AI 음성 응답 — BUSINESS+ 베타 (회사 admin) */}
-        <Route
-          path="/voice-inbound"
-          element={
-            <PrivateRoute allowedTypes={['company_admin']}>
-              <VoiceInboundPage />
             </PrivateRoute>
           }
         />
