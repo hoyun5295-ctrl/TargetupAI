@@ -99,6 +99,15 @@ export function isHelpQuestionViewer(superAdminId?: string | null): Promise<bool
 }
 
 /**
+ * ★ 2026-09-26 스팸 검사·맞춤법 사용 현황 열람 권한 — PRECHECK_USAGE_VIEWER_IDS(기본 'ceo').
+ * Harold 명시: 발송 전 점검(0925 배포) 사용 현황은 ceo 계정만 본다 · 다른 계정은 메뉴 자체가 보이지 않는다.
+ * 다른 축과 별도 env(한 계정을 열어줄 때 다른 축까지 함께 열리면 안 된다).
+ */
+export function isPrecheckUsageViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'PRECHECK_USAGE_VIEWER_IDS', 'ceo', 'precheck-usage', 'precheckUsage');
+}
+
+/**
  * AI 학습 데이터 열람 권한 — AI_TRAINING_VIEWER_IDS(기본 'ceo')에 포함된 super_admins.login_id만 허용.
  * 인비토AI 학습 데이터는 전사 비식별 집계라 소유자(ceo) 전용. 감사 로그와 분리된 별도 env.
  */

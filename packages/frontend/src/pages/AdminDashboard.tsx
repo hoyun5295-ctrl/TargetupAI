@@ -16,6 +16,7 @@ import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
 import DiagnosisAdminPanel from '../components/admin/DiagnosisAdminPanel'; // ★ 2026-08-16 신규마케팅진단(ceo 전용)
 import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
+import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
 import SalesOutreachModal from '../components/admin/SalesOutreachModal'; // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달)
 import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal'; // ★ 2026-08-26 대행발송 허용 발신 이메일(§18)
 import AgencyMailIntakePanel from '../components/admin/AgencyMailIntakePanel'; // ★ 2026-08-26 대행발송 메일 접수 관제(§18)
@@ -89,7 +90,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -104,6 +105,7 @@ export default function AdminDashboard() {
   const [adminActiveEdit, setAdminActiveEdit] = useState<{ id: string; login_id: string; isActive: boolean; reason: string } | null>(null);
   const [adminRoleBusy, setAdminRoleBusy] = useState(false);
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
+  const [precheckUsageAllowed, setPrecheckUsageAllowed] = useState(false); // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
   const [outreachAllowed, setOutreachAllowed] = useState(false);
   const [outreachOpen, setOutreachOpen] = useState(false);
@@ -1068,6 +1070,13 @@ useEffect(() => {
       const d = await r.json();
       setHelpQAccessAllowed(d.allowed === true);
     } catch { setHelpQAccessAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황 — 허용 계정(기본 ceo)에만 메뉴 노출
+      const r = await fetch('/api/admin/precheck-usage/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setPrecheckUsageAllowed(d.allowed === true);
+    } catch { setPrecheckUsageAllowed(false); }
     try {
       const token = localStorage.getItem('token');
       // ★ 2026-08-16: 신규마케팅진단 접근(mount 1회) — 허용이면 신규 리드 뱃지도 함께
@@ -4622,7 +4631,7 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '발송 관리', color: 'emerald',
-                tabs: ['callbacks', 'stats', 'scheduled', 'allCampaigns', 'templates', 'agencyMail', 'agencyLedger'] as const,
+                tabs: ['callbacks', 'stats', 'scheduled', 'allCampaigns', 'templates', 'agencyMail', 'agencyLedger', 'precheckUsage'] as const,
                 items: [
                   // ★ 2026-08-08 상단 메뉴는 **두 축의 합** — "발신번호 관리에 볼 일 N건"이 여기선 맞는 말이다.
                   //   화면에 보이는 두 탭 뱃지의 합으로 만든다(서버 total을 따로 받으면 뱃지끼리 어긋날 수 있다).
@@ -4638,6 +4647,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'agencyMail', label: '대행발송 접수' },
                   // ★ 2026-09-14 (Harold) 발신프로필 승인 대기 = 이 탭(발신 프로필 화면)에 뱃지 — 60초 주기 + 승인·반려 직후.
                   { key: 'templates', label: '템플릿 관리', badge: senderProfilePendingCount },
+                  // ★ 2026-09-26 (Harold) 스팸 검사·맞춤법 사용 현황 = 허용 계정(기본 ceo)에만 노출 · 다른 계정은 메뉴 자체가 없다
+                  ...(precheckUsageAllowed ? [{ key: 'precheckUsage', label: '점검 사용 현황' }] : []),
                 ],
               },
               {
@@ -5870,6 +5881,9 @@ const handleApproveRequest = async (id: string) => {
         {/* ★ 2026-08-19 국외 접근 통제 (전송자격인증 2.2) */}
         {activeTab === 'helpQuestions' && helpQAccessAllowed && (
           <HelpQuestionsTab companies={companies.map((c) => ({ id: c.id, company_name: c.company_name }))} />
+        )}
+        {activeTab === 'precheckUsage' && precheckUsageAllowed && (
+          <PrecheckUsageTab companies={companies.map((c) => ({ id: c.id, company_name: c.company_name }))} />
         )}
 
         {activeTab === 'geoAccess' && (

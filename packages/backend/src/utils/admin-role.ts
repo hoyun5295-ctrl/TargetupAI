@@ -135,6 +135,13 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
     levels: { super: 'R', lead: 'NONE', support: 'NONE' },
   },
   {
+    // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황 — ENV 허용 목록(기본 ceo)과 AND
+    key: 'precheckUsage',
+    area: '점검 사용 현황',
+    screens: '스팸 검사·맞춤법 사용 현황',
+    levels: { super: 'R', lead: 'NONE', support: 'NONE' },
+  },
+  {
     key: 'adminAccounts',
     area: '관리자 계정 관리',
     screens: '직원 계정·권한',
