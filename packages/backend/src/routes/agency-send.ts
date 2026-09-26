@@ -125,7 +125,16 @@ async function requireAgencySend(req: Request, res: Response): Promise<{ company
     res.status(401).json({ success: false, error: '인증이 필요합니다.' });
     return null;
   }
-  const ctx = await loadPlanContext(companyId);
+  // ★ 2026-09-26 한줄로 V2 R285 — Express 4는 async 핸들러의 거절을 받지 않는다. 라우트들이 이 함수를 try 밖에서 불러,
+  //   요금제 조회가 던지면 응답 없이 요청이 매달렸다. 여기서 JSON 500으로 끝낸다(라우트·미들웨어 전부 이 함수를 지난다).
+  let ctx: Awaited<ReturnType<typeof loadPlanContext>>;
+  try {
+    ctx = await loadPlanContext(companyId);
+  } catch (err: any) {
+    console.error('[agency-send] 자격 확인 조회 실패:', err?.message || err);
+    res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+    return null;
+  }
   if (!canUseAgencySend(ctx)) {
     res.status(403).json({ success: false, code: 'AGENCY_SEND_NOT_ALLOWED', error: '대행발송이 열려 있지 않은 계정입니다.' });
     return null;

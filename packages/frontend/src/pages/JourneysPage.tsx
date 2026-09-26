@@ -54,6 +54,8 @@ import { fillBenefitPlaceholders, fillUrlPlaceholders, isSendableUrl } from '../
 // ★ 2026-08-08 — 다듬기 결과는 비포/애프터로 본다. 하이라이트는 직접발송 모달과 같은 CT.
 import { highlightAdditions } from '../utils/text-diff';
 import { calculateSmsBytes } from '../utils/formatDate';
+// ★ 2026-09-26 한줄로 V2 m068 — 보낼 수 없는 글자 판정(게이트웨이 CP949 표)
+import { findUnsupportedSmsChars } from '../utils/smsSafeChars';
 import { buildAdMessageFront, buildAdSubjectFront } from '../utils/formatDate';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
@@ -509,31 +511,11 @@ function collectStepIssues(steps: AIGeneratedStep[]): Array<{ stepOrder: number;
   return out;
 }
 
-// D187-fix5: 이모지 + 비표준 특수문자 검출 (SMS/LMS 통신사 미지원 매트릭스)
-function isInRange(code: number, ranges: Array<[number, number]>): boolean {
-  for (const [s, e] of ranges) if (code >= s && code <= e) return true;
-  return false;
-}
-const EMOJI_RANGES_FE: Array<[number, number]> = [
-  [0x1F000, 0x1FFFF], [0x2600, 0x27BF], [0x2300, 0x23FF], [0x2B00, 0x2BFF], [0xFE00, 0xFE0F],
-];
-const UNSAFE_SPECIAL_FE = new Set<string>([
-  '—', '–', '‐', '−',
-  '・', '•', '⦁', '‣', '◦', '▪', '▫',
-  '▶', '▷', '◀', '◁', '►', '◄', '➤', '➔', '➜', '➡',
-  '※', '★', '☆', '✓', '✔', '✗', '✘', '◆', '◇', '■', '□', '●', '○',
-  '«', '»', '〈', '〉', '《', '》', '「', '」', '『', '』', '“', '”', '‘', '’',
-  '＆', '％', '＋', '＝', '？', '！', '：', '；', '，', '．', '＠', '＃', '＊',
-]);
-function detectUnsafe(text: string): { emoji: string[]; special: string[] } {
-  const emoji: string[] = [];
-  const special: string[] = [];
-  for (const c of Array.from(text || '')) {
-    const code = c.codePointAt(0) || 0;
-    if (isInRange(code, EMOJI_RANGES_FE)) emoji.push(c);
-    else if (UNSAFE_SPECIAL_FE.has(c)) special.push(c);
-  }
-  return { emoji: Array.from(new Set(emoji)), special: Array.from(new Set(special)) };
+// ★ 2026-09-26 한줄로 V2 m068(B-0910-5) — 문자로 보낼 수 없는 글자만(게이트웨이 CP949 표 · smsSafeChars CT).
+//   옛 검사는 ★♥☎▶※“” 같은 보낼 수 있는 기호까지 "통신사 미지원"으로 알렸고, 발송 직전 정리가 실제로 그 글자를 바꿨다.
+//   발송 경로는 이제 보낼 수 있는 글자를 바꾸지 않는다(backend message-sanitizer `sanitizeUnsendableForSms`).
+function detectUnsafe(text: string): string[] {
+  return findUnsupportedSmsChars(text || '').map((u) => u.char);
 }
 
 export default function JourneysPage() {
@@ -3444,14 +3426,10 @@ export default function JourneysPage() {
                           {placeholderWarn && <span className="text-amber-300">[...] 영역 - 직접 수정 필요</span>}
                           {(() => {
                             const unsafe = detectUnsafe(s.messageTemplate + ' ' + s.subject);
-                            if (unsafe.emoji.length === 0 && unsafe.special.length === 0) return null;
+                            if (unsafe.length === 0) return null;
                             return (
                               <span className="text-rose-400">
-                                통신사 미지원 단어 - 저장 시 자동 정규화 (
-                                {unsafe.emoji.length > 0 && `이모지: ${unsafe.emoji.slice(0, 5).join(' ')}`}
-                                {unsafe.emoji.length > 0 && unsafe.special.length > 0 && ' / '}
-                                {unsafe.special.length > 0 && `특수문자: ${unsafe.special.slice(0, 5).join(' ')}`}
-                                )
+                                문자로 보낼 수 없는 글자: 발송 때 빠지거나 비슷한 글자로 바뀝니다 ({unsafe.slice(0, 5).join(' ')})
                               </span>
                             );
                           })()}

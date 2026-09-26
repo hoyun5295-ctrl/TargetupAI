@@ -910,8 +910,11 @@ ${memoryContext}
   let parsed: any = {};
   try { parsed = JSON.parse(extractJSON(text)); } catch { parsed = {}; }
   // ★ AI가 본문/제목에 박은 (광고)·무료수신거부 제거 → 순수 본문만(발송 시 buildAdMessage가 (광고)+080 자동 합성, 빌더 표시도 일관).
-  const subj = stripAdParts(sanitizeForSms(String(parsed.subject || '').slice(0, 80)).sanitized).slice(0, 40);
-  const msg = stripAdParts(sanitizeForSms(String(parsed.message || '').slice(0, 4000)).sanitized);
+  // ★ 2026-09-26 한줄로 V2 R259 — 다른 여정 생성 경로(636·836행)와 같은 혜택 차단 CT. 근거 = 회사가 준 목표문.
+  //   혜택을 만들지 말라는 건 프롬프트 지시뿐이었다(지시는 경계가 아니다 · AI 임의 혜택 금지).
+  const benefitBasis = String(input.objective || '');
+  const subj = stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(String(parsed.subject || '').slice(0, 80)).sanitized), benefitBasis).slice(0, 40);
+  const msg = stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(String(parsed.message || '').slice(0, 4000)).sanitized), benefitBasis);
   return { subject: subj, message: msg };
 }
 

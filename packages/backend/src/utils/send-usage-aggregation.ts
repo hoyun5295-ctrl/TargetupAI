@@ -15,7 +15,7 @@
  */
 
 import pool, { mysqlBillingQuery, MYSQL_BILLING_POOL_LIMIT } from '../config/database';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from './sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, spamBilledResultSql, spamFailedResultSql } from './sms-result-map';
 import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables } from './sms-queue';
 import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats';
 import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
@@ -819,7 +819,9 @@ export async function buildCompanyUsageByDay(opts: {
         r.message_type,
         DATE(t.created_at AT TIME ZONE 'Asia/Seoul') as send_date,
         COUNT(*) as total_count,
-        SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as success_count
+        -- ★ 2026-09-26 한줄로 V2 m042 — 통신사 발송 실패(failed)는 청구하지 않는다(시간 초과는 청구) · 판정 CT = sms-result-map
+        SUM(CASE WHEN ${spamBilledResultSql('r')} THEN 1 ELSE 0 END) as success_count,
+        SUM(CASE WHEN ${spamFailedResultSql('r')} THEN 1 ELSE 0 END) as fail_count
       FROM spam_filter_test_results r
       JOIN spam_filter_tests t ON r.test_id = t.id
       WHERE t.company_id = $1
@@ -830,7 +832,7 @@ export async function buildCompanyUsageByDay(opts: {
     `, [companyId, startDate, endDate]);
     spamResult.rows.forEach((row: any) => {
       const t = row.message_type === 'LMS' ? 'SPAM_LMS' : 'SPAM_SMS';
-      bump(dayData, toDayKey(row.send_date), t, { total: row.total_count, success: row.success_count });
+      bump(dayData, toDayKey(row.send_date), t, { total: row.total_count, success: row.success_count, fail: row.fail_count });
     });
   }
 
@@ -1896,7 +1898,9 @@ export async function buildBillingUsageRows(opts: {
       SELECT t.user_id, r.message_type,
              DATE(t.created_at AT TIME ZONE 'Asia/Seoul') as send_date,
              COUNT(*) as total_count,
-             SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as success_count,
+             -- ★ 2026-09-26 한줄로 V2 m042 — 통신사 발송 실패(failed)는 청구하지 않는다(시간 초과는 청구) · 일자축과 같은 판정 CT
+             SUM(CASE WHEN ${spamBilledResultSql('r')} THEN 1 ELSE 0 END) as success_count,
+             SUM(CASE WHEN ${spamFailedResultSql('r')} THEN 1 ELSE 0 END) as fail_count,
              -- ★ 2026-07-31 (Codex 3R high) 대기 수량 — 그 전에는 조회조차 하지 않아 스팸 축의 pending이
              --   항상 0으로 내려갔다. 스팸 워커는 결과를 나중에 비동기로 채우므로, 그 사이에 발행하면
              --   미확정 건이 0원으로 굳고 같은 기간을 다시 청구할 수 없다(발행 차단 게이트가 못 잡던 구멍).
@@ -1919,7 +1923,7 @@ export async function buildBillingUsageRows(opts: {
       bumpRow(acc, {
         channel: 'spam', itemDate: day, typeKey, userId: uid, agentSendId: null,
         total: 0, success: 0, fail: 0, pending: 0,
-      }, { total: row.total_count, success: row.success_count, pending: row.pending_count });
+      }, { total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count });
     }
   }
 

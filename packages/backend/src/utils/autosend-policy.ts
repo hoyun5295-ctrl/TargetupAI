@@ -39,14 +39,17 @@ export function decideSendOutcome(input: { recipientCount: number; balanceOk: bo
  *  - campaignId 있음 = 발송 커밋 완료(마커) → 최종 상태만 'sent'로 마감. 노후 시각 무관 안전.
  *  - campaignId 없음 + claim 후 staleMinutes 경과 = 커밋 전 중단(예외/프로세스 종료) → 'admin_review'로 내려 사람 판단(절대 자동 재발송 X).
  *  - 그 외(최근 / claim 시각 모름) = keep(진행 중일 수 있어 손대지 않음).
+ *  - ★ 2026-09-26 한줄로 V2 m104 — 표식은 없는데 적재 묶음 id(meta.sendStagingId)로 찾은 캠페인이 있다 = 캠페인 생성은 커밋됐고
+ *    표식 직전에 멈췄다 → 표식을 채우고 보냄으로 마감(link_and_mark_sent). 검토로 내리면 재승인 때 같은 대상에게 두 번 나간다.
  */
-export type StuckSendingAction = 'mark_sent' | 'demote_admin_review' | 'keep';
+export type StuckSendingAction = 'mark_sent' | 'link_and_mark_sent' | 'demote_admin_review' | 'keep';
 export function decideStuckSendingRecovery(
-  row: { campaignId: string | null; reviewedAt: Date | null },
+  row: { campaignId: string | null; reviewedAt: Date | null; linkedCampaignId?: string | null },
   now: Date,
   staleMinutes: number = 30,
 ): StuckSendingAction {
   if (row.campaignId) return 'mark_sent';
+  if (row.linkedCampaignId) return 'link_and_mark_sent';
   if (row.reviewedAt && now.getTime() - row.reviewedAt.getTime() >= staleMinutes * 60 * 1000) {
     return 'demote_admin_review';
   }

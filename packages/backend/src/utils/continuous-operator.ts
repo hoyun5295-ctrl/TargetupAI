@@ -53,6 +53,8 @@ import { buildSendableStagingInsertSql } from './operator-recipients';
 import { resolveOperatorAudienceGates, compileOperatorAudience, resolveOperatorStoreScope, assertSegmentUsable } from './operator-audience';
 import { AudienceGates } from './operator-recipients';
 import { normalizeSegmentKey, normalizeSegmentParams, segmentNeedsCycleBaseline } from './automarketing-segment';
+// ★ 2026-09-26 한줄로 V2 m104 — 회복 패스의 적재 묶음 id 검증
+import { isUuid } from './normalize';
 // ★ 2026-08-04 변화 축 — 회차 스냅샷(자동마케팅 고유 어휘의 유일한 근거).
 //   기준선 보충(DO NOTHING)과 발송분 갱신(DO UPDATE) 두 문뿐 — 전체 교체는 폐기(Codex R3).
 import { hasCycleBaseline, ensureCycleBaselineRows, advanceCycleSnapshotForPhones } from './operator-cycle-snapshot';
@@ -1694,16 +1696,49 @@ async function settlePendingCharges(): Promise<void> {
 /** 'sending'에 정지된 제안 복구(decideStuckSendingRecovery 순수 정책). campaign 'sending' 자동정리 패턴 미러. */
 async function reconcileStuckSending(staleMinutes: number = 30): Promise<void> {
   const stuck = await query(
-    `SELECT id, company_id, operator_id, campaign_id, reviewed_at
+    `SELECT id, company_id, operator_id, campaign_id, reviewed_at,
+            proposal_json->'meta'->>'sendStagingId' AS send_staging_id,
+            proposal_json->'target'->>'segmentKey' AS segment_key,
+            proposal_json->'meta'->>'is_reminder' AS is_reminder
      FROM operator_proposals WHERE status = 'sending' LIMIT 100`,
   );
   for (const row of stuck.rows) {
+    // ★ 2026-09-26 한줄로 V2 m104 — 표식이 없으면 이 시도의 적재 묶음으로 만들어진 캠페인을 찾는다(캠페인이 생성과 함께 staging_id를 갖는다).
+    let linkedCampaignId: string | null = null;
+    if (!row.campaign_id && row.send_staging_id && isUuid(String(row.send_staging_id))) {
+      // ★ Codex 1R ③ — 조회 실패는 "캠페인 없음"이 아니다(불확정). 없음으로 읽으면 이미 보낸 제안을 검토로 내려 재승인 때 두 번 나간다.
+      //   실패하면 이 제안은 sending 그대로 두고 다음 회복 패스가 다시 본다.
+      let found: any;
+      try {
+        found = await query(
+          // 활성화된 캠페인만 잇는다 — preparing(차감·활성화 전 중단)·failed는 나간 적이 없다(대행 선례 agency-send-campaign.ts:71).
+          //   그런 캠페인은 종전대로 검토로 내리고, 멈춘 차감은 정산 스위퍼(적재 0 고착)가 돌려준다.
+          `SELECT id FROM campaigns WHERE staging_id = $1::uuid AND company_id = $2::uuid
+              AND send_phase IN ('queued', 'processing', 'sent') LIMIT 1`,
+          [row.send_staging_id, row.company_id],
+        );
+      } catch (lookupErr: any) {
+        console.warn(`[ContinuousOperator AutoSend] ${row.id} 발송 시도 캠페인 조회 실패 — 판정 보류(다음 패스):`, lookupErr?.message || lookupErr);
+        continue;
+      }
+      linkedCampaignId = found.rows[0]?.id || null;
+    }
     const action = decideStuckSendingRecovery(
-      { campaignId: row.campaign_id || null, reviewedAt: row.reviewed_at ? new Date(row.reviewed_at) : null },
+      { campaignId: row.campaign_id || null, reviewedAt: row.reviewed_at ? new Date(row.reviewed_at) : null, linkedCampaignId },
       new Date(),
       staleMinutes,
     );
-    if (action === 'mark_sent') {
+    if (action === 'link_and_mark_sent') {
+      // 캠페인은 만들어졌다 — 발송 경로와 같은 표식(정산 대기 포함)을 채운 뒤 보냄으로 마감한다. 재발송 X.
+      const needsSnapshotSettle = segmentNeedsCycleBaseline(row.segment_key || null) && row.is_reminder !== 'true';
+      await query(buildProposalSendMarkerSql(needsSnapshotSettle, true), [row.id, linkedCampaignId]).catch(() => undefined);
+      await query(
+        `UPDATE operator_proposals SET status = 'sent', auto_sent_at = COALESCE(auto_sent_at, NOW())
+         WHERE id = $1::uuid AND status = 'sending' AND campaign_id IS NOT NULL`,
+        [row.id],
+      ).catch(() => undefined);
+      console.warn(`[ContinuousOperator AutoSend] ${row.id} 표식 전 중단 → 적재 묶음으로 캠페인 ${linkedCampaignId} 연결 · 보냄 마감(재발송 없음)`);
+    } else if (action === 'mark_sent') {
       // 발송 커밋됨(마커 있음) → 최종 상태만 마감 + 크래시로 누락됐을 수 있는 크레딧 멱등 보강.
       const upd = await query(
         `UPDATE operator_proposals SET status = 'sent', auto_sent_at = COALESCE(auto_sent_at, NOW())
@@ -2207,6 +2242,18 @@ async function dispatchProposalSend(
   //   리마인드 예약 호출 시점(마커·크레딧·통지 뒤, 수 초 후)에 캡처하면 그 사이 클릭이 "미반응"으로 남는다.
   let primarySentAt: Date | null = null;
   try {
+    // ★ 2026-09-26 한줄로 V2 m104 — 캠페인을 만들기 **전에** 이 시도의 적재 묶음 id를 제안에 적는다.
+    //   캠페인 행은 생성과 함께 staging_id를 갖는다(원자). 생성 커밋 뒤 아래 campaign_id 표식 전에 멈춰도
+    //   회복 패스(reconcileStuckSending)가 이 id로 캠페인을 찾아 표식을 채운다 — 검토로 내려 재승인 때 두 번 나가지 않는다.
+    //   이 기록이 실패하면 캠페인을 만들지 않는다(아래 catch = 검토로 · staging 정리).
+    const linkMark = await query(
+      `UPDATE operator_proposals
+          SET proposal_json = jsonb_set(${PROPOSAL_META_BASE_SQL}, '{meta,sendStagingId}', to_jsonb($2::text))
+        WHERE id = $1::uuid AND status = 'sending'`,
+      [proposalId, stagingId],
+    );
+    // 0행 = 그 사이 이 제안이 sending이 아니게 됐다(회복 패스가 검토로 내렸다 등) — 이 시도는 보내지 않는다.
+    if ((linkMark.rowCount || 0) !== 1) throw new Error('발송 시도 표식 실패(제안 상태 변경)');
     const res = await createDirectSendCampaign(
       {
         stagingId,
@@ -2248,14 +2295,7 @@ async function dispatchProposalSend(
   // ⛔ 2026-08-04 2R(F2): 이 UPDATE 실패를 조용히 넘기면 변화 축은 settle 근거가 없어져 다음 회차에
   //   같은 사람들에게 다시 나간다. 발송은 이미 커밋됐으니 되돌릴 수 없다 — 1회 재시도하고, 그래도
   //   실패면 담당자에게 중복 가능성을 알린다(두 시스템 사이라 완전 원자화는 불가, 최소한 조용하지 않게).
-  const metaBase = `jsonb_set(COALESCE(proposal_json, '{}'::jsonb), '{meta}', COALESCE(proposal_json->'meta', '{}'::jsonb))`;
-  const withCharge = `jsonb_set(${metaBase}, '{meta,chargePending}', 'true'::jsonb)`;
-  const markerSql = needsSnapshotSettle
-    ? `UPDATE operator_proposals SET campaign_id = $2::uuid,
-         proposal_json = jsonb_set(${withCharge}, '{meta,cycleSnapshotPending}', 'true'::jsonb)
-       WHERE id = $1::uuid`
-    : `UPDATE operator_proposals SET campaign_id = $2::uuid, proposal_json = ${withCharge}
-       WHERE id = $1::uuid`;
+  const markerSql = buildProposalSendMarkerSql(needsSnapshotSettle);
   let markerOk = false;
   for (let attempt = 0; attempt < 2 && !markerOk; attempt++) {
     try {
@@ -2392,6 +2432,21 @@ async function hasSegmentColumns(): Promise<boolean> {
  *   전화번호·이름이 담긴 행이라 남겨 두면 안 되고, 이 테이블을 청소하는 워커도 따로 없다.
  *   삭제 실패는 삼키지 않고 남긴다(정리 대상이 남았다는 사실이 로그에 보여야 사람이 치울 수 있다).
  */
+/** proposal_json.meta가 없으면 세운다(jsonb_set은 중간 키를 만들지 않는다) — 표식 문장의 공통 바탕 */
+const PROPOSAL_META_BASE_SQL = `jsonb_set(COALESCE(proposal_json, '{}'::jsonb), '{meta}', COALESCE(proposal_json->'meta', '{}'::jsonb))`;
+
+/**
+ * 발송 커밋 표식 문장 — campaign_id + 정산 대기(chargePending) + (변화 축이면) 회차 스냅샷 대기.
+ * ★ 2026-09-26 한줄로 V2 m104 — 발송 경로와 회복 경로(reconcileStuckSending)가 같은 문장을 쓴다(한쪽만 바뀌면 회복이 정산을 빠뜨린다).
+ * `onlyIfUnmarked` = 회복 경로: 아직 표식이 없는 행만(발송 경로가 늦게라도 적었으면 덮지 않는다).
+ */
+function buildProposalSendMarkerSql(needsSnapshotSettle: boolean, onlyIfUnmarked: boolean = false): string {
+  const withCharge = `jsonb_set(${PROPOSAL_META_BASE_SQL}, '{meta,chargePending}', 'true'::jsonb)`;
+  const json = needsSnapshotSettle ? `jsonb_set(${withCharge}, '{meta,cycleSnapshotPending}', 'true'::jsonb)` : withCharge;
+  return `UPDATE operator_proposals SET campaign_id = $2::uuid, proposal_json = ${json}
+       WHERE id = $1::uuid${onlyIfUnmarked ? ' AND campaign_id IS NULL' : ''}`;
+}
+
 async function cleanupOrphanStaging(stagingId: string): Promise<void> {
   if (!stagingId) return;
   try {

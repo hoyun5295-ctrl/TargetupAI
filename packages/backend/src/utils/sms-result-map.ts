@@ -342,6 +342,17 @@ export const SPAM_RESULT = {
 
 export type SpamResultType = typeof SPAM_RESULT[keyof typeof SPAM_RESULT];
 
+/**
+ * ★ 2026-09-26 한줄로 V2 m042(Harold 결정 「발송 실패만 환불·청구 제외 · 시간 초과는 청구」) — 스팸 검사 결과 행의 청구 판정.
+ * 청구 = 결과가 나왔고 통신사 발송 실패가 아닌 행(통과·차단·시간 초과). 후불 청구 두 축과 선불 실패 환불이 이 두 조건만 쓴다.
+ */
+export function spamBilledResultSql(alias: string): string {
+  return `(${alias}.result IS NOT NULL AND ${alias}.result <> '${SPAM_RESULT.FAILED}')`;
+}
+export function spamFailedResultSql(alias: string): string {
+  return `${alias}.result = '${SPAM_RESULT.FAILED}'`;
+}
+
 /** 스팸필터 result → 표시명 */
 export const SPAM_RESULT_LABEL: Record<string, string> = {
   [SPAM_RESULT.PASS]: '정상',

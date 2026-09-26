@@ -8,7 +8,9 @@ import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-m
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from '../utils/system-alert';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
-import { normalizeContent, computeMessageHash, cleanupStaleActiveTests } from '../utils/spam-test-queue';
+import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpamQtmsgRows, refundSpamSendFailures } from '../utils/spam-test-queue';
+// ★ 2026-09-26 한줄로 V2 m040 — 검사 발신번호 = 등록 번호만(발송 경로와 같은 CT)
+import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { getSampleCustomerScope } from '../utils/store-scope';
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
 import {
@@ -21,6 +23,9 @@ const router = Router();
 
 // 테스트 타임아웃 (3분) — config/defaults.ts 중앙관리
 const TEST_TIMEOUT_MS = TIMEOUTS.spamFilterTest;
+
+// ★ 2026-09-26 한줄로 V2 m038 — 사용자별 검사 등록 직렬화(트랜잭션 잠금 · 커밋/롤백에 풀린다)
+const SPAM_TEST_USER_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('spam-test-user:' || $1::text))`;
 
 // 앱 인증 토큰 — ★ 2026-09-26 한줄로 V2 S1-H09 판정 CT(spam-app-auth)로. 옛: 설정이 비면 소스의 기본 토큰이 열쇠였다.
 let spamAppTokenUnconfiguredWarned = false;
@@ -54,6 +59,12 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     }
     if (!messageContentSms && !messageContentLms) {
       return res.status(400).json({ error: '테스트할 메시지를 입력해주세요.' });
+    }
+    // ★ 2026-09-26 한줄로 V2 m040 — 등록되지 않은 발신번호는 통신사가 막아(발신번호 사전등록제) 유료 검사가 헛돈다.
+    //   발송 경로와 같은 CT로 거른다(사용자 배정 범위 포함).
+    const registeredCallbacks = await getRegisteredCallbackSet(companyId, userId);
+    if (!registeredCallbacks.has(String(callbackNumber).replace(/-/g, '').trim())) {
+      return res.status(400).json({ error: '등록된 발신번호로만 스팸 검사를 할 수 있습니다. 발신번호 관리에서 확인해 주세요.', code: 'UNREGISTERED_CALLBACK' });
     }
 
     // ★ D53: 요금제 게이팅 — spam_filter_enabled 체크 (스타터+ 이용 가능)
@@ -172,6 +183,16 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       try {
         await client.query('BEGIN');
         await client.query(SPAM_TRIAL_LOCK_SQL, [companyId]);
+        // ★ 2026-09-26 한줄로 V2 m038 — 사용자 잠금 뒤 진행 중 검사를 다시 본다(위 확인은 잠금 없는 빠른 거절일 뿐)
+        await client.query(SPAM_TEST_USER_LOCK_SQL, [userId]);
+        const dupInTx = await client.query(
+          `SELECT id FROM spam_filter_tests WHERE user_id = $1 AND status IN ('pending', 'active') LIMIT 1`,
+          [userId]
+        );
+        if (dupInTx.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: '이미 진행 중인 테스트가 있습니다.', testId: dupInTx.rows[0].id });
+        }
         const used = await countSpamTrialsInTx(client, companyId);
         if (used >= SPAM_TRIAL_LIMIT) {
           await client.query('ROLLBACK');
@@ -196,14 +217,35 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         client.release();
       }
     } else {
-      const testResult = await query(
-        `INSERT INTO spam_filter_tests
-         (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
-         RETURNING id, created_at`,
-        [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, spamCheckNumber]
-      );
-      testId = testResult.rows[0].id;
+      // ★ 2026-09-26 한줄로 V2 m038 — 연타·동시 요청이면 위 빠른 확인을 둘 다 통과해 검사 2건·차감 2번이 됐다.
+      //   사용자 잠금 안에서 다시 확인하고 넣는다(체험 경로와 같은 모양).
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(SPAM_TEST_USER_LOCK_SQL, [userId]);
+        const dupInTx = await client.query(
+          `SELECT id FROM spam_filter_tests WHERE user_id = $1 AND status IN ('pending', 'active') LIMIT 1`,
+          [userId]
+        );
+        if (dupInTx.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: '이미 진행 중인 테스트가 있습니다.', testId: dupInTx.rows[0].id });
+        }
+        const testResult = await client.query(
+          `INSERT INTO spam_filter_tests
+           (company_id, user_id, callback_number, message_content_sms, message_content_lms, message_hash, spam_check_number, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+           RETURNING id, created_at`,
+          [companyId, userId, callbackNumber, messageContentSms || null, messageContentLms || null, messageHash || null, spamCheckNumber]
+        );
+        await client.query('COMMIT');
+        testId = testResult.rows[0].id;
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw txErr;
+      } finally {
+        client.release();
+      }
     }
 
     // ★ 선불 잔액 차감 (테스트폰 × 메시지타입 = 실제 발송 건수)
@@ -325,68 +367,57 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
           return;
         }
 
-        // QTmsg 결과 조회 (현재 큐 + 월별 로그 테이블)
-        const testTable = (await getTestSmsTables())[0];
-        const now2 = new Date();
-        const yyyymm = `${now2.getFullYear()}${String(now2.getMonth() + 1).padStart(2, '0')}`;
-        const logTable = `${testTable}_${yyyymm}`;
-
-        let mqRows: any[] = [];
-        const mqCurrent = await mysqlQuery(
-          `SELECT dest_no, msg_type, status_code FROM ${testTable} WHERE app_etc1 = ?`,
-          [testId]
-        ) as any[];
-        if (mqCurrent && mqCurrent.length > 0) mqRows = mqCurrent;
-
-        try {
-          const mqLog = await mysqlQuery(
-            `SELECT dest_no, msg_type, status_code FROM ${logTable} WHERE app_etc1 = ?`,
-            [testId]
-          ) as any[];
-          if (mqLog && mqLog.length > 0) mqRows = [...mqRows, ...mqLog];
-        } catch (e) { /* 로그 테이블 미존재 시 무시 */ }
+        // QTmsg 결과 조회 — ★ 2026-09-26 한줄로 V2 m003 CT(라이브 + 이번 달·지난달 로그 · 큐 워커와 같은 함수)
+        const mqRows = await fetchSpamQtmsgRows(testId);
 
         let updatedCount = 0;
-        for (const row of unreceived.rows) {
-          const mType = toQtmsgType(row.message_type);
-          const mqMatch = mqRows.find(
-            (m: any) => m.dest_no === row.phone && m.msg_type === mType
-          );
-
-          if (!mqMatch) continue; // 아직 QTmsg 결과 없음
-
-          const sc = Number(mqMatch.status_code);
-          let result: string | null = null;
-
-          if (SUCCESS_CODES.includes(sc)) {
-            // 이통사 전달 성공 + 앱 미수신 → 10초 grace period 후 BLOCKED
-            const rowKey = row.id;
-            if (!qtmsgSuccessTime.has(rowKey)) {
-              // 첫 확인 — 시점 기록, 다음 폴링까지 대기
-              qtmsgSuccessTime.set(rowKey, Date.now());
-              console.log(`[SpamFilter] QTmsg 성공 확인 — row=${rowKey}, phone=${row.phone}, carrier=${row.message_type}, 10초 대기 시작`);
-              result = null;
-            } else if (Date.now() - qtmsgSuccessTime.get(rowKey)! >= BLOCKED_GRACE_MS) {
-              // 10초 경과 — 앱 미수신 확정 → BLOCKED
-              result = SPAM_RESULT.BLOCKED;
-              console.log(`[SpamFilter] BLOCKED 판정 — row=${rowKey}, phone=${row.phone} (QTmsg 성공 후 ${Math.round((Date.now() - qtmsgSuccessTime.get(rowKey)!) / 1000)}초 경과, 앱 미수신)`);
-            } else {
-              // 아직 10초 미경과 — 계속 대기
-              result = null;
-            }
-          } else if (PENDING_CODES.includes(sc)) {
-            result = null; // 아직 대기 중
-          } else {
-            result = SPAM_RESULT.FAILED; // 이통사 실패
-          }
-
-          if (result) {
-            await query(
-              `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
-              [result, row.id]
+        let wroteFailed = false;
+        try {
+          for (const row of unreceived.rows) {
+            const mType = toQtmsgType(row.message_type);
+            const mqMatch = mqRows.find(
+              (m: any) => m.dest_no === row.phone && m.msg_type === mType
             );
-            updatedCount++;
+
+            if (!mqMatch) continue; // 아직 QTmsg 결과 없음
+
+            const sc = Number(mqMatch.status_code);
+            let result: string | null = null;
+
+            if (SUCCESS_CODES.includes(sc)) {
+              // 이통사 전달 성공 + 앱 미수신 → 10초 grace period 후 BLOCKED
+              const rowKey = row.id;
+              if (!qtmsgSuccessTime.has(rowKey)) {
+                // 첫 확인 — 시점 기록, 다음 폴링까지 대기
+                qtmsgSuccessTime.set(rowKey, Date.now());
+                console.log(`[SpamFilter] QTmsg 성공 확인 — row=${rowKey}, phone=${row.phone}, carrier=${row.message_type}, 10초 대기 시작`);
+                result = null;
+              } else if (Date.now() - qtmsgSuccessTime.get(rowKey)! >= BLOCKED_GRACE_MS) {
+                // 10초 경과 — 앱 미수신 확정 → BLOCKED
+                result = SPAM_RESULT.BLOCKED;
+                console.log(`[SpamFilter] BLOCKED 판정 — row=${rowKey}, phone=${row.phone} (QTmsg 성공 후 ${Math.round((Date.now() - qtmsgSuccessTime.get(rowKey)!) / 1000)}초 경과, 앱 미수신)`);
+              } else {
+                // 아직 10초 미경과 — 계속 대기
+                result = null;
+              }
+            } else if (PENDING_CODES.includes(sc)) {
+              result = null; // 아직 대기 중
+            } else {
+              result = SPAM_RESULT.FAILED; // 이통사 실패
+            }
+
+            if (result) {
+              await query(
+                `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
+                [result, row.id]
+              );
+              updatedCount++;
+              if (result === SPAM_RESULT.FAILED) wroteFailed = true;
+            }
           }
+        } finally {
+          // ★ 2026-09-26 한줄로 V2 m042 — 이번 회차에 발송 실패를 썼으면 그만큼 선불 환불(누적 목표 · 재호출 안전) · 뒤 행 기록이 던져도 부른다(Codex 1R)
+          if (wroteFailed) await refundSpamSendFailures(testId);
         }
 
         // 전부 처리됐으면 완료
@@ -546,9 +577,10 @@ router.post('/report', async (req: Request, res: Response) => {
     const updateResult = await query(
       `UPDATE spam_filter_test_results
        SET received = true, received_at = NOW(), result = $4
-       WHERE test_id = $1 AND carrier = $2 AND message_type = $3 AND received = false
+       WHERE test_id = $1 AND carrier = $2 AND message_type = $3 AND phone = $5 AND received = false
        RETURNING id`,
-      [testId, device.carrier, detectedType, SPAM_RESULT.PASS]
+      // ★ 2026-09-26 한줄로 V2 m041 — 단말 번호까지 맞춘다(같은 통신사 단말이 2대면 한 대의 수신이 두 행을 통과로 만들었다)
+      [testId, device.carrier, detectedType, SPAM_RESULT.PASS, device.phone]
     );
 
     // 6) 모든 결과 수신 완료 체크 → 즉시 completed 전환

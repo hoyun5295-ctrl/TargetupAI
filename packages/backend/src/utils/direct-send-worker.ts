@@ -8,7 +8,7 @@
 import { query } from '../config/database';
 import { prepareFieldMappings, getOpt080Number } from './messageUtils';
 import { prepaidRefund, REFUND_KEYS } from './prepaid';
-import { buildRefundPending } from './refund-pending';
+import { buildRefundPending, recheckZeroLoadObligation, dropRefundPendingAxes } from './refund-pending';
 import { getCampaignQueueTables, smsCountAll } from './sms-queue';
 import { getCompanySmsTables, smsExecAll, toKoreaTimeStr } from './sms-queue';
 import { calcSplitSendTime } from './send-time-util';
@@ -175,7 +175,7 @@ async function retryPendingRefunds(): Promise<void> {
     // 여기서 되살리지 않으면 영구 미환불이다. 키가 'cancel'이라 반복 호출해도 그 항아리 안에서 멱등이다.
     await retryPendingCancelRefunds();
     const pending = await query(
-      `SELECT id, company_id, send_config->'refundPending' AS rp
+      `SELECT id, company_id, created_by, send_config, sent_at, scheduled_at, created_at, send_config->'refundPending' AS rp
          FROM campaigns
         WHERE send_config ? 'refundPending'
           AND COALESCE((send_config->'refundPending'->>'nextAttemptAt')::timestamptz, TIMESTAMPTZ '-infinity') <= NOW()
@@ -221,6 +221,35 @@ async function retryPendingRefunds(): Promise<void> {
           : []),
       ].filter((p) => p.count > 0 && p.messageType);
       if (parts.length === 0) { await clear(); continue; }
+      // ★ 2026-09-26 한줄로 V2 CRASH(Codex 2R ② · 3R ① · 4R ③) — 적재 0 고착으로 넘겨받은 의무는 갚기 직전에 **축별로** 원행을 다시 센다
+      //   (refund-pending CT · 그 캠페인의 발송월 이력까지). 늦게 들어온 축은 의무에서 빼서 **저장한다**(CAS) — 빼기만 하고 미루면
+      //   원래 기록이 그대로 남아 몇 달 뒤 이력 범위가 바뀌었을 때 그 축이 원행 0으로 되살아나 이미 나간 발송을 환불한다(4R ③).
+      //   저장 뒤에는 이번 사이클을 넘긴다 — 다음 사이클이 남은 축만 다시 재확인하고 갚는다. 안 들어온 축은 그대로 갚는다
+      //   (전체 원행으로 의무를 통째로 지우면 both의 한 축만 늦게 들어왔을 때 다른 축 환불까지 사라진다 · 3R ①).
+      if (rp.verifyZeroLoad === true) {
+        const check = await recheckZeroLoadObligation(row.company_id, row, parts.map((p) => p.messageType));
+        if (check.verdict === 'defer') { await defer(check.error); continue; }
+        if (check.loaded.length > 0) {
+          console.error(`[direct-send-worker][적재0의무축무효] campaign=${row.id} 넘긴 뒤 원행이 들어온 축 ${check.loaded.join('/')} — 그 축은 환불하지 않는다(일반 정산이 다시 잰다)`);
+          void sendSystemAlert({
+            dedupKey: `zero-load-late-rows:${row.id}`,
+            message: `적재 0으로 넘긴 캠페인에 늦은 적재(${check.loaded.join('/')}) — 그 축의 환불 의무를 빼고 일반 정산으로 돌렸습니다. campaign=${row.id}`,
+          }).catch(() => undefined);
+          const rest = dropRefundPendingAxes(rp, check.loaded);
+          if (!rest) {
+            await clear();
+            continue;
+          }
+          await query(
+            `UPDATE campaigns
+                SET send_config = jsonb_set(send_config, '{refundPending}', $2::jsonb),
+                    updated_at = NOW()
+              WHERE id = $1 AND send_config->'refundPending' = $3::jsonb`,
+            [row.id, JSON.stringify(rest), snapshot],
+          ).catch((e: any) => console.error(`[direct-send-worker] 적재 0 의무 축 제외 저장 실패 campaign=${row.id}:`, e?.message || e));
+          continue;
+        }
+      }
       try {
         let allOk = true;
         for (const part of parts) {

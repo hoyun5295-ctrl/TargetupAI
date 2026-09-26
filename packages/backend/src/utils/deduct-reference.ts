@@ -151,3 +151,13 @@ export function parseFreeCount(description: string | null | undefined): number {
   const free = Number(m[1].replace(/,/g, ''));
   return Number.isFinite(free) && free > 0 ? free : 0;
 }
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m067 — 정산 원장(차감·환불·회수)을 축(message_type)으로 읽는 조건 하나.
+ * 빈 유형(NULL) 행은 브랜드 원장이 생기기 전(2026-07-29 이전) 세대라 기본 축에만 더한다 — 브랜드 축은 그 유형 행만.
+ * 옛 코드는 환불 한도(prepaid)가 브랜드 축에도 NULL을 더하고 스위퍼는 뺐다(같은 칸을 두 경로가 다르게 읽음).
+ * @param param SQL 자리표시(예 '$3') — 값은 호출부가 넘긴다
+ */
+export function ledgerMessageTypeSql(messageType: string, param: string): string {
+  return messageType === 'BRAND' ? `message_type = ${param}` : `(message_type = ${param} OR message_type IS NULL)`;
+}

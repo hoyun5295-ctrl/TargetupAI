@@ -98,7 +98,8 @@ describe('netCancelInicisPayment 주소 검사', () => {
   });
 
   it('이니시스 netCancelUrl이면 호출한다', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, text: async () => '{}' });
+    // ★ 2026-09-27 PAY Codex 1R — 망취소 성공 = 본문 resultCode '0000'(이니시스 매뉴얼 · HTTP 200만으로는 성공이 아니다)
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, text: async () => JSON.stringify({ resultCode: '0000', resultMsg: '정상' }) });
     vi.stubGlobal('fetch', fetchMock);
     const ok = await netCancelInicisPayment('https://fcstdpay.inicis.com/api/netCancel', callbackWith({}));
     expect(fetchMock).toHaveBeenCalledTimes(1);

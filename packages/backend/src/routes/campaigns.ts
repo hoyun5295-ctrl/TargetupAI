@@ -371,6 +371,13 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '등록된 담당자 번호가 없습니다. 설정에서 번호를 추가해주세요.' });
     }
 
+    // ★ 2026-09-26 한줄로 V2 A-06 — 실패할 수 있는 조회(적재 테이블 · 080 번호)는 **차감 전에** 한다.
+    //   옛 코드는 차감 뒤에 조회해, 둘 중 하나가 던지면 바깥 catch로 빠져 환불 루프를 건너뛰었다(차감만 남는다).
+    // 담당자별로 테스트 전용 라인으로 INSERT — 적재 테이블은 하나(getTestSendTable · 문자 축 insertTestSmsQueue 와 같은 자리)
+    const testSendTable = await getTestSendTable();
+    // ★ D103: 테스트발송도 백엔드에서 (광고)+080 추가 (전 경로 동일 원칙)
+    const testOpt080 = isAd ? await getOpt080Number(userId || null, companyId) : '';
+
     // ★ 선불 잔액 체크 — ★ 2026-07-30 적대검증 수용: 차감 축을 채널로 가른다.
     //   kakao=BRAND 단일 / both=문자(messageType)+BRAND 이중 / sms=messageType.
     //   옛 코드는 both 브랜드분이 무료였고, kakao 단독은 문자 단가로 깎였다.
@@ -404,8 +411,6 @@ router.post('/test-send', async (req: Request, res: Response) => {
       testDeductedTypes.push(axis.type);
     }
 
-    // 담당자별로 테스트 전용 라인으로 INSERT — 적재 테이블은 하나(getTestSendTable · 문자 축 insertTestSmsQueue 와 같은 자리)
-    const testSendTable = await getTestSendTable();
     const msgType = toQtmsgType(messageType || 'SMS');
     // ★ D124 N4: mmsImagePaths 객체 배열 허용 (frontend가 {path, originalName} 전송)
     //   - DB 저장: 객체 배열 그대로 JSONB로 저장 (originalName 표시 용도)
@@ -419,9 +424,6 @@ router.post('/test-send', async (req: Request, res: Response) => {
     let testSmsSent = 0;    // 문자 축 적재수 (sms/both)
     let testBrandSent = 0;  // 브랜드 축 적재수 (kakao/both)
     const failedContacts: { phone: string; error: string }[] = [];
-
-    // ★ D103: 테스트발송도 백엔드에서 (광고)+080 추가 (전 경로 동일 원칙)
-    const testOpt080 = isAd ? await getOpt080Number(userId || null, companyId) : '';
 
     for (const contact of managerContacts) {
       const cleanPhone = normalizePhone(contact.phone);

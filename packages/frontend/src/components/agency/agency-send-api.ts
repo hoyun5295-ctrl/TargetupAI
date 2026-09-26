@@ -9,6 +9,8 @@
  * ★2026-09-10 대행발송 이미지 업로드 = 서버가 규격(JPG · 300KB)에 맞춰 받는다(임은지 접수 cmttqx2gy0c8sjnotlvs441r1).
  * 화면 접수·원스텝 두 화면이 이 한 벌로 공용 업로드 훅(useMmsUpload)에 넘긴다. 메일 접수와 같은 서버 함수를 지난다.
  */
+import { findVarTokens } from '../../utils/formatDate';
+
 export const AGENCY_MMS_UPLOAD = { uploadUrl: '/api/agency-send/mms-image', autoFit: true } as const;
 
 export type AgencySendStatus =
@@ -369,10 +371,11 @@ export const MAX_AGENCY_VARS = 4;
 export function extractAgencyVars(content: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const m of String(content || '').matchAll(/%([가-힣A-Za-z_][^%\s]{0,19})%/g)) {
-    if (seen.has(m[1])) continue;
-    seen.add(m[1]);
-    out.push(m[1]);
+  // ★ 2026-09-26 한줄로 V2 R269 — 조각 판정 CT(숫자 바로 뒤 %는 퍼센트 기호 · 서버와 같은 판정)
+  for (const t of findVarTokens(String(content || ''))) {
+    if (seen.has(t.name)) continue;
+    seen.add(t.name);
+    out.push(t.name);
   }
   return out;
 }

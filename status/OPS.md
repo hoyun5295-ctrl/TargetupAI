@@ -144,6 +144,16 @@ pm2 reload targetup-backend
 pm2 status
 ```
 
+**7. 66번 동기화 — 매 작업의 마지막 단계(★2026-09-27 Harold · 문서만 바뀐 커밋도 포함)**
+66번(`invito@58.227.193.66`) `/srv/cureops/workspaces/targetup` 에도 같은 소스를 둔다. 운영 배포(1~6)를 바꾸지 않고 **확인된 뒤에** 더한다. 절차·근거·첫 실행 전 확인 = [CureOPS 답변서](../../CureOPS/docs/DEPLOYMENT_답변서_62_65.md) §0.
+
+▶ 실행 위치: 노트북 PowerShell (66 비밀번호 2번 직접 입력 · SCP 1 + 원격 반입 1)
+```powershell
+& C:\Users\ceo\projects\CureOPS\scripts\Sync-Source66.ps1 -Project targetup
+```
+- 성공 = `66 source import verified` + import ID. 묶음의 `gitCommit` 이 62 `git rev-parse HEAD` 와 같아야 하고 `dirty: false` 여야 한다.
+- 운영 성공 · 66 실패면 "운영 배포 성공 / 66 동기화 실패"로 적고 66 을 최신이라 하지 않는다. 충돌·잠금이 나오면 다시 덮지 말고 원인부터 본다(CureOPS 규칙).
+
 ### 2-2-B. 서버 배포 — flyer-frontend만 빌드 (전단AI 전용, D129+)
 
 > **전단AI 프론트엔드만 수정/배포할 때 사용.** 한줄로(frontend/company-frontend)와 완전 분리.
@@ -227,6 +237,8 @@ cd /home/invito/bito-gateway && git pull --ff-only && sudo bash scripts/gw/deplo
 
 성공 마커 `GW_DEPLOY_OK` / 자동 복원 마커 `GW_DEPLOY_ROLLBACK`. 백업 = `/opt/bito-gateway/deploy-backups/<타임스탬프>/`.
 health = gateway unit active + `:9090` LISTEN · api `{"ok":true,"db":"connected"}`.
+
+> ⚠ **★2026-09-27 정정 — 위 서버 블록은 옛 기록이다.** 런북(원문) 기준 = 서버 git 미사용(§1 · 소스는 노트북과 65 bare `/home/invito/repos/bito-gateway.git`) · 배포 명령 = §3-1~3-3(`deploy.sh` 를 root 스냅샷으로 설치해 실행) · health 포트 = **`:9443`**(0906 9090 → 9443 · §4). 작업 마지막 **66번 동기화** = 런북 §3-4.
 
 ---
 

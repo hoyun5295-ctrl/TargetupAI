@@ -24,13 +24,15 @@ describe('여정 문자 적재 실패 처리', () => {
     expect(after).toMatch(/if \(loaded < 1\) \{?\s*throw new Error\(/);
   });
 
-  it('그 throw는 발송 try 안이다 — catch(재시도·정지)보다 앞이고, sent 기록보다 앞이다', () => {
+  it('그 throw는 발송 try 안이다 — catch(재시도·정지)보다 앞이고, 실패하면 sent 기록이 남지 않는다', () => {
     const throwAt = src.indexOf('if (loaded < 1)');
     const catchAt = src.indexOf('} catch (sendErr: any) {');
-    const sentAt = src.indexOf("gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sent', $4");
     expect(throwAt).toBeGreaterThan(0);
     expect(throwAt).toBeLessThan(catchAt);
-    expect(catchAt).toBeLessThan(sentAt);
+    // ★ 2026-09-26 V2 m105 — sent 기록(발송 표식)은 적재 **앞**의 'sending'이 되었다(적재 커밋과 기록 사이 중단 = 재발송 차단).
+    //   "실패하면 sent가 없다"는 이제 'sending'이 발송 수·예산에 안 들어가는 것 + 큐 원행 판정 CT로 지킨다
+    //   (Codex 2R ③ — 적재 오류에 표식을 지우면 응답만 유실된 적재를 다시 보낸다 · 순서 계약 = journey-send-claim-before-load 테스트).
+    expect(src.slice(catchAt, catchAt + 1500)).not.toMatch(/DELETE FROM journey_step_logs/);
     // ★ 2026-09-26 F05 Codex 2R: 차감은 적재보다 앞이다(적재 실패분은 스위퍼 미적재 환불) — journey-refund-ledger 테스트가 소유
   });
 });

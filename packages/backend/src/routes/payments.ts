@@ -8,6 +8,8 @@
 
 import { Router, Request, Response, urlencoded } from 'express';
 import { pool } from '../config/database';
+import { parseWonAmount } from '../utils/normalize';
+import { sendSystemAlert } from '../utils/system-alert';
 import { authenticate } from '../middlewares/auth';
 import {
   prepareInicisPayment,
@@ -15,6 +17,8 @@ import {
   netCancelInicisPayment,
   generateOrderId,
   getInicisCallbackUrls,
+  verifyInicisCallback,
+  readInicisCallbackToken,
   type InicisCallbackBody,
 } from '../utils/inicis-client';
 import {
@@ -22,6 +26,8 @@ import {
   finalizePaymentSuccess,
   finalizePaymentFailure,
   readInicisPaymentState,
+  type FinalizePaymentFailureInput,
+  type FinalizePaymentFailureResult,
 } from '../utils/payment-processor';
 // ★ 2026-09-26 한줄로 V2 F03·F25 — 같은 주문의 리턴 콜백 직렬화(프로세스 안 키별 잠금 CT)
 import { withKeyedLock } from '../utils/keyed-lock';
@@ -112,6 +118,22 @@ function setResultPageCsp(res: Response) {
   );
 }
 
+/**
+ * ★ 2026-09-27 한줄로 V2 R338·A-03 — 인증 없는 결제 콜백의 실패·취소 기록은 **서명값이 맞을 때만** 한다.
+ * 결제창 실패·닫기 콜백과 승인·확정 실패 뒤 기록은 공개 경로라, 주문번호만 알면(또는 자기 결제의 인증 토큰에 남의 주문번호를 붙이면)
+ * 남의 대기 주문을 실패·취소로 바꿀 수 있었다. 서명값 = 주문을 만들 때 signKey로 만든 주문번호 HMAC(inicis-client signInicisCallback)
+ * — 닫기 URL의 cb 쿼리, 리턴 콜백의 merchantData(cb=)로 돌아온다. 없거나 틀리면 상태를 건드리지 않고 null(화면만 보여 준다).
+ */
+async function failTrustedCallback(
+  orderId: string, token: string, input: Omit<FinalizePaymentFailureInput, 'orderId'>,
+): Promise<FinalizePaymentFailureResult | null> {
+  if (!verifyInicisCallback(orderId, token)) {
+    console.warn(`[payments] 결제 콜백 서명값 불일치 — 상태 변경 안 함: orderId=${orderId} result=${input.resultCode}`);
+    return null;
+  }
+  return await finalizePaymentFailure({ orderId, ...input });
+}
+
 // ────────────────────────────────────────────────────────────
 // 1) 이니시스 callback 라우트 (인증 X — 이니시스 측 form POST)
 // ────────────────────────────────────────────────────────────
@@ -133,6 +155,7 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
     res.status(400).send(renderResultHtml('failed', { resultMsg: 'orderNumber 누락' }, baseUrl));
     return;
   }
+  const callbackToken = readInicisCallbackToken(body);   // ★ 2026-09-27 R338·A-03 merchantData(cb=)
 
   // ★ 2026-09-26 한줄로 V2 F03·F25 — 같은 주문의 리턴 콜백은 주문번호 단위 잠금 안에서 한 번에 하나씩 처리한다
   //   (동시 이중 제출이 둘 다 승인을 부르고 뒤의 실패가 앞 거래를 망취소하지 않게). 잠금은 DB 연결을 쥐지 않는다(keyed-lock CT).
@@ -140,15 +163,14 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
   try {
     // resultCode 0000 X = 결제창 단계 실패
     if (body.resultCode !== '0000') {
-      const fail = await finalizePaymentFailure({
-        orderId,
+      const fail = await failTrustedCallback(orderId, callbackToken, {
         resultCode: String(body.resultCode || 'UNKNOWN'),
         resultMsg: String(body.resultMsg || '결제창 처리 실패'),
         rawResponse: body,
         status: 'failed',
       });
       res.status(200).send(renderResultHtml('failed', {
-        paymentId: fail.paymentId,
+        paymentId: fail?.paymentId ?? null,
         resultCode: body.resultCode,
         resultMsg: body.resultMsg,
       }, baseUrl));
@@ -190,23 +212,47 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
 
     const approval = await approveInicisPayment(callback);
 
-    if (!approval.success) {
-      // 승인 실패 → netCancel 호출 (이니시스 거래 망취소)
-      if (callback.netCancelUrl) {
-        await netCancelInicisPayment(callback.netCancelUrl, callback);
+    // ★ 2026-09-27 한줄로 V2 PAY(Codex 1R · 이니시스 매뉴얼 "승인결과 전문 처리 중 예외발생 시 망취소") — 망취소는
+    //   **이 주문의 거래가 승인됐는데 우리 처리가 실패**한 한 곳(아래 확정 실패)에서만 한다.
+    //   승인 실패 응답은 승인된 거래가 없어 망취소 대상이 아니다. 승인 결과를 못 받은 경우(NETWORK_ERROR)는 자동 망취소하지 않는다 —
+    //   이 공개 경로에서는 인증 주소·망취소 주소·토큰을 요청자가 정할 수 있어, 자기의 완료 거래 토큰을 다른 주문번호로 보내
+    //   이미 충전된 결제를 취소시키는 데 쓰일 수 있다(잔액은 남고 카드 대금만 취소).
+    if (!approval.success && approval.resultCode === 'NETWORK_ERROR') {
+      // 승인됐을 수도 있다 — 주문은 대기로 두고, 서명값이 맞는 실제 대기 주문일 때만 사람이 확인하도록 알린다(무인증 경보 남발 방지).
+      console.error(`[payments] /inicis/return 승인 결과 미수신 — 자동 망취소 안 함: orderId=${orderId}`, approval.resultMsg);
+      if (state && state.status === 'pending' && verifyInicisCallback(orderId, callbackToken)) {
+        void sendSystemAlert({
+          dedupKey: `inicis-approve-unknown:${orderId}`,
+          message: `카드결제 승인 결과를 받지 못했습니다 — 주문 ${orderId}. 이니시스 관리자에서 승인 여부를 확인해 주세요(승인됐다면 카드 대금만 있고 충전은 안 된 상태).`,
+        }).catch(() => undefined);
       }
-      const fail = await finalizePaymentFailure({
-        orderId,
+      res.status(200).send(renderResultHtml('failed', {
+        resultMsg: '결제 결과를 확인하지 못했습니다. 잠시 후 충전 내역을 확인해 주세요.',
+      }, baseUrl));
+      return;
+    }
+
+    if (!approval.success) {
+      // 승인 실패 응답 — 승인된 거래가 없다(망취소 대상 아님 · 매뉴얼)
+      const fail = await failTrustedCallback(orderId, callbackToken, {
         resultCode: approval.resultCode,
         resultMsg: approval.resultMsg,
         rawResponse: approval.raw,
         status: 'failed',
       });
       res.status(200).send(renderResultHtml('failed', {
-        paymentId: fail.paymentId,
+        paymentId: fail?.paymentId ?? null,
         resultCode: approval.resultCode,
         resultMsg: approval.resultMsg,
       }, baseUrl));
+      return;
+    }
+
+    // ★ 2026-09-27 PAY(Codex 1R) — 승인된 거래의 주문번호(MOID)가 이 주문이 아니면 다른 주문의 토큰이다.
+    //   확정·망취소·상태 변경을 모두 하지 않는다(망취소하면 그 다른 주문의 이미 충전된 결제가 취소된다).
+    if (String(approval.moid ?? '').trim() !== orderId) {
+      console.error(`[payments] /inicis/return 승인 주문번호 불일치 — 확정·망취소 안 함: orderId=${orderId} moid=${String(approval.moid ?? '') || '(없음)'}`);
+      res.status(200).send(renderResultHtml('failed', { resultMsg: '결제 정보가 주문과 맞지 않습니다.' }, baseUrl));
       return;
     }
 
@@ -220,20 +266,19 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
         alreadyProcessed: result.alreadyProcessed,
       }, baseUrl));
     } catch (finalErr: any) {
-      // finalize 실패 시 netCancel 호출 (이니시스 측 망취소)
+      // 이 주문의 승인 거래인데 우리 처리가 실패 = 망취소(매뉴얼) · 실패는 망취소 CT가 경보
       console.error('[payments] /inicis/return finalize 실패 → netCancel 호출:', finalErr.message || finalErr);
-      if (callback.netCancelUrl) {
-        await netCancelInicisPayment(callback.netCancelUrl, callback);
-      }
-      await finalizePaymentFailure({
-        orderId,
+      const cancelled = callback.netCancelUrl ? await netCancelInicisPayment(callback.netCancelUrl, callback) : false;
+      await failTrustedCallback(orderId, callbackToken, {
         resultCode: 'FINALIZE_ERROR',
         resultMsg: `결제 확정 실패: ${finalErr.message || finalErr}`,
         rawResponse: { approval: approval.raw, error: String(finalErr) },
         status: 'failed',
       });
       res.status(200).send(renderResultHtml('failed', {
-        resultMsg: '결제 확정 실패 (망취소 처리됨)',
+        resultMsg: cancelled
+          ? '결제를 확정하지 못해 결제를 취소했습니다. 다시 시도해 주세요.'
+          : '결제를 확정하지 못했습니다. 결제 취소 여부를 확인 중이니 잠시 후 충전 내역을 확인해 주세요.',
       }, baseUrl));
     }
   } catch (err: any) {
@@ -252,8 +297,8 @@ router.post('/inicis/close', inicisFormParser, async (req: Request, res: Respons
   console.log('[payments] /inicis/close callback:', { orderId, body, requestHost: req.get('host') });
 
   if (orderId) {
-    await finalizePaymentFailure({
-      orderId,
+    // ★ 2026-09-27 R338·A-03 닫기 URL의 cb 쿼리(주문을 만들 때 실음) — 본문 merchantData도 본다
+    await failTrustedCallback(orderId, readInicisCallbackToken(req.query as Record<string, any>) || readInicisCallbackToken(body), {
       resultCode: 'USER_CANCELLED',
       resultMsg: '사용자가 결제창을 닫았습니다',
       rawResponse: body,
@@ -274,8 +319,7 @@ router.get('/inicis/close', async (req: Request, res: Response) => {
 
   if (orderId) {
     try {
-      await finalizePaymentFailure({
-        orderId,
+      await failTrustedCallback(orderId, readInicisCallbackToken(req.query as Record<string, any>), {
         resultCode: 'USER_CANCELLED_GET',
         resultMsg: '사용자가 결제창을 닫았습니다 (GET fallback)',
         rawResponse: req.query as Record<string, any>,
@@ -317,12 +361,10 @@ router.post('/inicis/prepare', async (req: Request, res: Response) => {
 
     const { amount, productName, buyerName, buyerEmail, buyerTel } = req.body || {};
 
-    const amountNum = Number(amount);
-    if (!amountNum || amountNum < 1000) {
-      return res.status(400).json({ error: '1,000원 이상 입력해주세요.' });
-    }
-    if (amountNum > 100_000_000) {
-      return res.status(400).json({ error: '1억원 이하 입력해주세요.' });
+    // ★ 2026-09-27 한줄로 V2 m011 — 정수 원 · 1,000원 ~ 1억 원(금액 CT · 소수 주문이 만들어지던 것을 막는다)
+    const amountNum = parseWonAmount(amount, { min: 1000, max: 100_000_000 });
+    if (amountNum === null) {
+      return res.status(400).json({ error: '1,000원 이상 1억원 이하의 원 단위 금액을 입력해주세요.' });
     }
     if (!buyerName || typeof buyerName !== 'string' || !buyerName.trim()) {
       return res.status(400).json({ error: '구매자명을 입력해주세요.' });

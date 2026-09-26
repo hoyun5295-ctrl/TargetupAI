@@ -17,6 +17,9 @@
  *   - D102/D103 (광고)+080 컨트롤타워 정합
  */
 
+// ★ 2026-09-26 한줄로 V2 m068 — 보낼 수 있는 글자 판정(게이트웨이 CP949 표) · 발송 경로 정리가 쓴다
+import { isSmsEncodableChar } from './sms-charset';
+
 // ════════════════════════════════════════════════════════════════════
 // 이모지 유니코드 범위 (한국 통신사 SMS/LMS 미지원 매트릭스)
 // ════════════════════════════════════════════════════════════════════
@@ -193,6 +196,71 @@ export function sanitizeForSms(text: string): SanitizeResult {
 
   // 연속 공백/줄바꿈 정규화 (최대 3 연속까지)
   result = result.replace(/ {3,}/g, '  ').replace(/\n{4,}/g, '\n\n\n');
+
+  return {
+    sanitized: result,
+    warnings,
+    hadChanges: result !== text,
+    removedEmojis,
+    replacedChars,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-09-26 한줄로 V2 m068(B-0910-5) — 발송 직전 정리: 보낼 수 없는 글자만
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 발송 경로 전용 정리. **문자로 보낼 수 있는 글자(ASCII · 한글 · CP949 표)는 한 글자도 바꾸지 않는다.**
+ * 보낼 수 없는 글자에만 `sanitizeForSms`와 같은 규칙(이모지·보이지 않는 글자 제거 · 표의 글자 바꿈)을 쓴다.
+ * 공백·줄바꿈 정리는 하지 않는다(고객이 쓴 모양 그대로).
+ *
+ * 왜: 여정 실행기가 사람이 쓴 문안에 `sanitizeForSms`를 돌려 `★ ♥ ☎`을 지우고 `▶→>` `※→*` `“”→"`로 바꿨다.
+ *   이 글자들은 게이트웨이 CP949 인코더가 그대로 보낸다(고객 문안은 우리가 바꾸지 않는다 · B-0910-4와 같은 부류).
+ * AI 생성 경로(생성 직후 정리)는 이번 축 밖이라 `sanitizeForSms` 그대로 쓴다.
+ */
+export function sanitizeUnsendableForSms(text: string): SanitizeResult {
+  if (!text) {
+    return { sanitized: '', warnings: [], hadChanges: false, removedEmojis: [], replacedChars: [] };
+  }
+
+  const removedEmojis: string[] = [];
+  const replacedChars: string[] = [];
+  let result = '';
+
+  for (const char of Array.from(text)) {
+    if (isSmsEncodableChar(char)) {
+      result += char;
+      continue;
+    }
+    const code = char.codePointAt(0) || 0;
+    if (isInRange(code, EMOJI_RANGES)) {
+      removedEmojis.push(char);
+      continue;
+    }
+    if (COMBINING_CHARS.has(code)) {
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(SPECIAL_CHAR_MAP, char)) {
+      const replacement = SPECIAL_CHAR_MAP[char];
+      result += replacement;
+      if (replacement !== char) {
+        replacedChars.push(`${char}${replacement || '∅'}`);
+      }
+      continue;
+    }
+    result += char;
+  }
+
+  const warnings: string[] = [];
+  if (removedEmojis.length > 0) {
+    const unique = Array.from(new Set(removedEmojis));
+    warnings.push(`보낼 수 없는 이모지 ${unique.length}종 제거: ${unique.slice(0, 10).join(' ')}`);
+  }
+  if (replacedChars.length > 0) {
+    const unique = Array.from(new Set(replacedChars));
+    warnings.push(`보낼 수 없는 특수문자 ${unique.length}종 바꿈: ${unique.slice(0, 10).join(', ')}`);
+  }
 
   return {
     sanitized: result,

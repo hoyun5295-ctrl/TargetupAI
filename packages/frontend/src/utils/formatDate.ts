@@ -8,10 +8,57 @@ import { isAlimtalkChannel, isBrandOnlyChannel } from './campaign-axis';
  *   시작 문자 한글/영문/언더스코어 강제 — 사용자 본문 보존:
  *   - %이름% / %name% / %기타1% — 매칭 (정상 변수)
  *   - %~30% / %50% — 매칭 안 됨 (사용자 본문 "50%~30% 할인" 보존)
+ *   ★ 2026-09-26 한줄로 V2 R269 — 조각 판정은 `findVarTokens` 하나다(숫자 바로 뒤 %는 퍼센트 기호).
  */
 export function cleanLeftoverVars(text: string): string {
   if (!text) return '';
-  return text.replace(/%[가-힣A-Za-z_][^%\s]{0,19}%/g, '');
+  return replaceVarTokens(text, () => '');
+}
+
+export interface VarToken {
+  /** 여는 % 위치 */
+  start: number;
+  /** 닫는 % 다음 위치 */
+  end: number;
+  /** % 사이 이름 */
+  name: string;
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 R269 — 문안 안 `%변수%` 조각 판정. 백엔드 `utils/var-tokens.ts findVarTokens` 미러
+ *   (같은 값인지는 backend `__tests__/percent-text-not-variable-0926.test.ts`가 확인한다).
+ *   - 이름 = 한글·영문·_ 로 시작, % 와 공백이 없는 20자 이내.
+ *   - 숫자 바로 뒤의 % 는 퍼센트 기호다. 그 자리에서 시작하는 조각은 변수가 아니다(`30%할인+10%적립`).
+ *   - 건너뛸 때는 닫는 % 부터 다시 찾는다(`10%할인%이름%`).
+ */
+export function findVarTokens(text: string): VarToken[] {
+  const out: VarToken[] = [];
+  if (!text) return out;
+  const re = /%([가-힣A-Za-z_][^%\s]{0,19})%/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (start > 0 && /[0-9]/.test(text[start - 1])) {
+      re.lastIndex = end - 1;
+      continue;
+    }
+    out.push({ start, end, name: m[1] });
+  }
+  return out;
+}
+
+/** 조각마다 바꿀 값을 받아 문장을 다시 잇는다(값이 undefined면 그 조각은 원문 그대로) — 백엔드 `replaceVarTokens` 미러 */
+export function replaceVarTokens(text: string, fn: (name: string) => string | undefined): string {
+  if (!text) return '';
+  let out = '';
+  let pos = 0;
+  for (const t of findVarTokens(text)) {
+    const v = fn(t.name);
+    out += text.slice(pos, t.start) + (v === undefined ? text.slice(t.start, t.end) : v);
+    pos = t.end;
+  }
+  return out + text.slice(pos);
 }
 
 /**
@@ -1314,8 +1361,7 @@ export function normalizeAgencyPhoneFront(raw: any): string {
   return /^1[016789]\d{8}$/.test(digits) ? `0${digits}` : digits;
 }
 
-/** 대행 문안 변수 — 백엔드 agency-send-vars `VAR_RE`와 같은 식(다르면 후보 선정이 서버와 갈린다) */
-const AGENCY_VAR_RE = /%([가-힣A-Za-z_][^%\s]{0,19})%/g;
+/* 대행 문안 변수 — 백엔드 agency-send-vars와 같은 조각 판정(`findVarTokens` · 다르면 후보 선정이 서버와 갈린다) */
 
 /**
  * ★ 2026-09-26 한줄로 V2 R1-08(Codex 8차 1R high 정정) — SMS 판정 후보 수신자.
@@ -1330,7 +1376,7 @@ export function pickAgencySmsCandidates(
 ): Array<Record<string, any>> {
   const text = String(content || '');
   const occ: Record<string, number> = {};
-  for (const m of text.matchAll(AGENCY_VAR_RE)) occ[m[1]] = (occ[m[1]] || 0) + 1;
+  for (const t of findVarTokens(text)) occ[t.name] = (occ[t.name] || 0) + 1;
   const names = Object.keys(occ);
   const list = (varsList || []).map((v) => v || {});
   if (names.length === 0 || list.length === 0) return list.length > 0 ? [list[0]] : [];
@@ -1351,7 +1397,7 @@ export function estimateAgencySmsBytesFromCandidates(
   isAd: boolean,
   candidates: Array<Record<string, any>>,
 ): number {
-  const render = (vars: Record<string, any>) => String(content || '').replace(AGENCY_VAR_RE, (_m, name: string) => {
+  const render = (vars: Record<string, any>) => replaceVarTokens(String(content || ''), (name) => {
     const v = vars[name];
     return v === null || v === undefined ? '' : String(v);
   });

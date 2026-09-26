@@ -32,6 +32,7 @@ import {
   bulkInsertSmsQueue,
   insertAlimtalkQueue,
 } from './sms-queue';
+import { sendSystemAlert } from './system-alert';
 import { convertButtonsToQTmsg } from './alimtalk-button';
 import { buildAlimtalkEtcJson, type RepresentLink } from './alimtalk-emphasize';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
@@ -57,11 +58,12 @@ import { getCreditCost, kstDateTag } from './ai-credit-calc';
 import { logCampaignTraining } from './training-logger';
 import { normalizePhone } from './normalize-phone';
 import { getCompanyCosts } from '../config/defaults';
-import { sanitizeForSms } from './message-sanitizer';
+import { sanitizeUnsendableForSms } from './message-sanitizer';
 import { shortenUrlsInText } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
 import { calculateNextRunAt, clampPersonalSendHour } from './send-time-util';
-import { getOrCreateStepCampaign, bumpStepCampaignCount } from './journey-step-campaign';
+import { getOrCreateStepCampaign } from './journey-step-campaign';
+import { confirmJourneyClaimSent, resolveJourneyClaim } from './journey-send-claim';
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
 // ★ §11-5(§5-1) — 종료 신호는 트리거 계약(단일 출처)에서 파생한다.
@@ -485,10 +487,47 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
   // ★ Fix #6 (2026-06-05): 묶음 멱등 가드 — 이 execution+step이 이미 'sent' 로그면(크래시 후 재처리)
   //   deduct(잔액)~advance 사이 중복 차감·발송 없이 그대로 다음 step으로. 신규 컬럼 0(기존 journey_step_logs).
+  // ★ 2026-09-26 한줄로 V2 m105(Codex 5R ①) — 증명 못 해 닫은 표식(failed · load_unprovable)도 "이미 처리됨"이다.
+  //   닫은 뒤 전진이 실패하거나 중단돼 이 단계에 다시 와도 다시 보내지 않고 전진만 한다(★ 0926 Harold 결정 = 다시 안 보냄).
   const alreadySent = await query(
-    `SELECT 1 FROM journey_step_logs WHERE execution_id = $1::uuid AND step_id = $2::uuid AND status = 'sent' LIMIT 1`,
+    `SELECT 1 FROM journey_step_logs WHERE execution_id = $1::uuid AND step_id = $2::uuid AND (status = 'sent' OR (status = 'failed' AND error_reason = 'load_unprovable')) LIMIT 1`,
     [exec.execution_id, step.id]
   );
+  // ★ 2026-09-26 한줄로 V2 m105(Codex 1R ④ ~ 4R) — 'sent'가 없고 '적재 중' 표식만 있으면 그 시도가 큐에 들어갔는지 CT가 **증명될 때만** 판정한다
+  //   (journey-send-claim). 들어갔으면 확정(+발송 수)하고 다시 보내지 않는다 · 안 들어갔으면 표식을 지우고 이번에 보낸다 ·
+  //   증명 안 되면 보내지 않고 10분 뒤 다시 본다 · 1시간 넘게 증명 안 되면 다시 보내지 않고 닫는다(★ 0926 Harold 결정).
+  if (alreadySent.rows.length === 0) {
+    const pendingClaim = await query(
+      `SELECT l.id FROM journey_step_logs l
+        WHERE l.execution_id = $1::uuid AND l.step_id = $2::uuid AND l.status = 'sending'
+        ORDER BY l.sent_at DESC LIMIT 1`,
+      [exec.execution_id, step.id]
+    );
+    const claimRow = pendingClaim.rows[0];
+    if (claimRow) {
+      const resolved = await resolveJourneyClaim(exec, claimRow.id);
+      if (resolved.result === 'sent') {
+        console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 적재 중 표식 → 큐 원행 확인 → 발송 확정 · 다시 보내지 않음`);
+        // 정상 발송의 마무리(운영 크레딧)를 여기서 받는다 — 확정 실패로 넘어온 발송은 정상 경로의 크레딧 차감에 닿지 않았다(3R ⑤)
+        await chargeJourneyOperationCredit(exec, resolved.sentAt);
+        await advanceOrComplete(exec, step, resolved.cost);
+        return 'skipped_already_sent';
+      }
+      if (resolved.result === 'held') {
+        await query(`UPDATE journey_executions SET next_run_at = NOW() + INTERVAL '10 minutes' WHERE id = $1::uuid`, [exec.execution_id]);
+        console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 적재 중 표식 → 적재 여부 증명 안 됨 → 보내지 않고 10분 뒤 다시 판정`);
+        return 'waited';
+      }
+      if (resolved.result === 'closed') {
+        alertUnprovableClaim(exec, step, claimRow.id);
+        await advanceOrComplete(exec, step, 0);
+        return 'failed';
+      }
+      if (resolved.result === 'cleared') {
+        console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 적재 중 표식 → 큐 원행 없음 → 표식 정리 후 발송`);
+      }
+    }
+  }
   if (alreadySent.rows.length > 0) {
     console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 이미 발송됨(재처리 감지) → 중복 차감/발송 없이 advance`);
     await advanceOrComplete(exec, step, 0);
@@ -716,9 +755,11 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     subject = step.alimtalk_next_subject || '';
   } else {
     // ★ 기존 흐름 — SMS/LMS/MMS는 prepareSendMessage 정합.
-    // ★ D187-fix5: 발송 직전 최후 안전망 — sanitize 자동 적용 (이모지/비표준 특수문자 제거)
-    const sanTemplate = sanitizeForSms(step.message_template || '');
-    const sanSubject = sanitizeForSms(step.subject || '');
+    // ★ D187-fix5: 발송 직전 최후 안전망 — 보낼 수 없는 글자만 정리
+    // ★ 2026-09-26 한줄로 V2 m068(B-0910-5) — 옛 정리(CT-46 전체 규칙)는 사람이 쓴 문안의 ★♥☎을 지우고 ▶※“”를 바꿨다.
+    //   이 글자들은 그대로 보낼 수 있다. 보낼 수 있는 글자는 한 글자도 바꾸지 않는 발송 경로 전용 함수를 쓴다.
+    const sanTemplate = sanitizeUnsendableForSms(step.message_template || '');
+    const sanSubject = sanitizeUnsendableForSms(step.subject || '');
     if (sanTemplate.hadChanges) {
       console.log(`[JourneyExecutor] step ${step.step_order} 본문 sanitize:`, sanTemplate.warnings.join(' / '));
     }
@@ -935,6 +976,9 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     sendAt: new Date(),
   });
 
+  // ★ 2026-09-26 한줄로 V2 m105 — 발송 표식(step_log 'sending') id. 적재 **앞**에 남기고 적재 뒤 'sent'로 확정한다.
+  //   적재 오류에도 지우지 않는다(Codex 2R ③) — 판정은 큐 원행을 세는 CT(journey-send-claim)가 한다.
+  let claimLogId: string | null = null;
   // ★ D188 Phase 2-B-2 (2026-05-21): 10. queue INSERT — channel별 분기 (SMS/LMS/MMS = bulkInsertSmsQueue / KAKAO = insertAlimtalkQueue).
   try {
     const tables = await getCompanySmsTables(exec.company_id, exec.created_by || undefined);
@@ -961,6 +1005,22 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     } catch (cfgErr: any) {
       console.error(`[JourneyExecutor] sentTables 기록 실패 campaign=${campaignId}:`, cfgErr?.message || cfgErr);
     }
+
+    // ★ 2026-06-06 J1: 큐 INSERT 성공 = 발송 확정 → 멱등 마커(step_log 'sent') 기록(재시도 중복발송 차단).
+    // ★ 2026-09-26 한줄로 V2 m105 — 적재 **앞**에 '적재 중(sending)' 표식을 남기고, 적재가 끝나면 'sent'로 바꾼다.
+    //   옛 순서(적재 커밋 → 'sent' 기록)는 둘 사이에 멈추면 가드가 비어 재실행이 같은 고객에게 다시 보내고 다시 차감했다.
+    //   표식이 'sending'으로 남으면(중단·적재 오류) 가드가 큐 원행을 실제로 세어 판정한다
+    //   (있으면 'sent'로 확정 · 없으면 표식을 지우고 보낸다 = processExecution 가드 · Codex 1R ④ · 2R ③).
+    //   'sending'은 발송 수·월 예산(status='sent'만 센다)에 들어가지 않는다.
+    const claim = await query(
+      `INSERT INTO journey_step_logs (
+        id, execution_id, step_id, campaign_id, sent_at, status, cost
+      ) VALUES (
+        gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sending', $4
+      ) RETURNING id`,
+      [exec.execution_id, step.id, campaignId, sendCost]
+    );
+    claimLogId = claim.rows[0]?.id || null;
 
     if (isKakao && kakaoTemplateRow) {
       // 알림톡 영역 — insertAlimtalkQueue 사용. buttons → buttonJson 변환.
@@ -1029,6 +1089,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       void recordFatigueSends(exec.company_id, [String(customer.phone || '')]);
     }
   } catch (sendErr: any) {
+    // ★ 2026-09-26 한줄로 V2 m105(Codex 2R ③) — 적재 오류여도 '적재 중' 표식은 지우지 않는다. 응답만 유실되고 행은 들어갔을 수 있어,
+    //   지우면 5분 뒤 재시도가 같은 고객에게 다시 보내고 다시 차감한다. 재시도면 그 실행의 가드가, 재시도 소진이면 아래에서 판정한다.
     // ★ D218+ (2026-05-26) 통신사 일시 fail 분기 — error_count < 1 = 5분 후 자동 재시도 1회 / 그 이상 = autoPauseExecution + pauseJourney.
     console.error('[JourneyExecutor] queue 발송 실패:', sendErr?.message || sendErr);
     const errMsg = String(sendErr?.message || '');
@@ -1056,6 +1118,29 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
         console.log(`[JourneyExecutor] execution=${exec.execution_id} 5분 후 자동 재시도 예약 (error_count=${errorCount + 1})`);
         return 'failed';
       }
+      // ★ 2026-09-26 한줄로 V2 m105(Codex 2R ③ · 4R) — 재시도 소진이면 이 실행은 정지·전진해 가드가 다시 보지 않는다 → 여기서 판정한다.
+      //   들어갔으면(응답만 유실) 발송으로 마친다 · 안 들어갔으면 표식을 지운다 · 증명 안 되면 기다리지 않고 닫는다(다시 보내지 않는다 ·
+      //   그 1건 차감은 정산이 미적재로 돌려준다) + 경보. 표식 조회(PG)마저 실패하면 표식이 남는다 — 경보로 사람이 본다.
+      if (claimLogId) {
+        try {
+          const resolved = await resolveJourneyClaim(exec, claimLogId, { closeNow: true });
+          if (resolved.result === 'sent') {
+            console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 적재 오류였으나 큐 원행 확인 → 발송으로 처리`);
+            await chargeJourneyOperationCredit(exec, resolved.sentAt);
+            await advanceOrComplete(exec, step, resolved.cost);
+            return 'sent';
+          }
+          if (resolved.result === 'closed') {
+            alertUnprovableClaim(exec, step, claimLogId);
+          }
+        } catch (resolveErr: any) {
+          console.error(`[JourneyExecutor][표식미판정] execution=${exec.execution_id} step=${step.step_order}:`, resolveErr?.message || resolveErr);
+          void sendSystemAlert({
+            dedupKey: `journey-claim-unresolved:${claimLogId}`,
+            message: `여정 발송 적재 여부 미판정 — execution=${exec.execution_id} 표식=${claimLogId} 수동 확인 필요(큐 원행이 있으면 발송 수가 빠진 상태)`,
+          }).catch(() => undefined);
+        }
+      }
       // 재시도 1회 후에도 fail → autoPauseExecution(carrier_temp_fail) + pauseJourney + advance.
       await autoPauseExecution({
         companyId: exec.company_id,
@@ -1074,26 +1159,15 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'failed';
   }
 
-  // ★ 2026-06-06 J1: 큐 INSERT 성공 = 발송 확정 → 멱등 마커(step_log 'sent') 기록(재시도 중복발송 차단).
-  //   ★ 2026-09-26 차감은 위(적재 앞)로 옮겼다 — 이유는 그 자리 주석.
-  await query(
-    `INSERT INTO journey_step_logs (
-      id, execution_id, step_id, campaign_id, sent_at, status, cost
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sent', $4
-    )`,
-    [exec.execution_id, step.id, campaignId, sendCost]
-  );
-  // ★ v2 운영 과금 (크레딧 모델 v2 2026-06-30) — 발송비(prepaidDeduct, 위)와 별개인 AI 운영 크레딧.
-  //   멱등키 = 여정:KST날짜 → 같은 여정 그날 첫 발송 1건만 10 차감(동일 여정 하루 1회 상한 · 고객수만큼 안 불어남).
-  //   journey-operation = 운영 source(P4) → 잔액 0이어도 −1개월 grant 상한까지 음수 허용. deductCreditSafe는 throw 0 = 발송 절대 안 막음.
-  await deductCreditSafe({
-    companyId: exec.company_id,
-    cost: getCreditCost('journey-operation'),
-    source: 'journey-operation',
-    idempotencyKey: `journey-operation:${exec.journey_id}:${kstDateTag(new Date())}`,
-    createdBy: exec.created_by || null,
-  });
+  // ★ 2026-09-26 한줄로 V2 m105 — 적재가 끝났다 → 표식 'sent' 확정 + 단계 캠페인 발송 수 +1을 한 문장으로(CT · 차감은 적재 앞).
+  //   ★ Codex 2R ⑤ 확정 실패를 삼키지 않는다 — 던지면 실행은 이 단계에 남고, 다음 틱의 가드가 큐 원행으로 확정한다(다시 보내지 않는다).
+  //   삼키고 진행하면 'sent'도 발송 수도 빠져 월 예산에서 빠지고 정산이 보낸 1건을 미적재로 환불했다.
+  if (claimLogId) {
+    const confirmed = await confirmJourneyClaimSent(claimLogId);
+    if (!confirmed) console.error(`[JourneyExecutor][CRITICAL] 발송 표식 확정 0행 execution=${exec.execution_id} 표식=${claimLogId} — 표식이 sending이 아니다`);
+  }
+  // ★ v2 운영 과금 (크레딧 모델 v2 2026-06-30) — 발송비(prepaidDeduct, 위)와 별개인 AI 운영 크레딧(본문 = chargeJourneyOperationCredit).
+  await chargeJourneyOperationCredit(exec, new Date());
 
   // ★ D218+ (2026-05-26) 시점 3: 발송 직후 status 재확인 — MySQL 큐 INSERT 도중 paused 동시 발화 사고 기록 안전망.
   //   본 시점 = MySQL 큐 INSERT 종결 후 = SMS 발송 영구 진행 영역. 정지 효과 X = log + execution_status_at_pause 추적.
@@ -1121,8 +1195,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // (step_log 'sent' + 차감은 위 J1 블록에서 큐 성공 직후 처리 — 멱등 마커 우선)
 
   // ★ Phase 5: 공유 campaign 카운트 +1 (이 step+날짜 campaign의 발송 누적 — 발송결과 목록 "N명" 표시).
-  await bumpStepCampaignCount(campaignId).catch((e: any) =>
-    console.warn('[JourneyExecutor] bumpStepCampaignCount 실패:', e?.message));
+  //   ★ 2026-09-26 V2 m105 — 표식 확정과 한 문장으로 옮겼다(confirmJourneyClaimSent · 위).
 
   // ★ D188 Phase 2-B-3 (2026-05-21): variants reward 누적 — sent=1 (click/conversion은 추후 트래킹 endpoint 영역).
   if (activeVariantId) {
@@ -1162,6 +1235,34 @@ function computeNextSendWindow(now: Date = new Date()): Date {
 // ════════════════════════════════════════════════════════════════════
 // execution advance / complete / pause / log
 // ════════════════════════════════════════════════════════════════════
+
+/**
+ * ★ 2026-09-26 한줄로 V2 m105(Codex 4R) — 적재 여부가 증명되지 않아 다시 보내지 않고 닫은 표식의 경보(★ 0926 Harold 결정).
+ * 고객이 그 1건을 못 받았을 수 있다 — 사람이 큐를 보고 판단할 수 있게 실행·단계·표식을 남긴다. 경보 실패가 실행을 막지 않는다.
+ */
+function alertUnprovableClaim(exec: ExecutionRow, step: StepRow, claimId: string): void {
+  console.error(`[JourneyExecutor][적재미증명종료] execution=${exec.execution_id} step=${step.step_order} 표식=${claimId} — 다시 보내지 않고 닫음`);
+  void sendSystemAlert({
+    dedupKey: `journey-claim-unprovable:${claimId}`,
+    message: `여정 발송 1건의 적재 여부를 증명하지 못해 다시 보내지 않고 닫았습니다. execution=${exec.execution_id} ${step.step_order + 1}단계 표식=${claimId} (그 1건 요금은 정산이 환불)`,
+  }).catch(() => undefined);
+}
+
+/**
+ * 여정 AI 운영 크레딧 — 발송비(prepaidDeduct)와 별개. 멱등키 = 여정:KST날짜 → 같은 여정 그날 첫 발송 1건만 차감(하루 1회 상한 · 고객수만큼 안 불어남).
+ * journey-operation = 운영 source(P4) → 잔액 0이어도 −1개월 grant 상한까지 음수 허용. deductCreditSafe는 throw 0 = 발송 절대 안 막음.
+ * ★ 2026-09-26 한줄로 V2 m105(Codex 3R ⑤) — 정상 발송 · 가드 복구 · 재시도 소진 복구 세 경로가 이 함수 하나로 받는다.
+ *   날짜는 **원 발송일**(복구는 표식 시각) — 복구가 다음 날 돌아도 그 발송이 속한 날의 키로 한 번만 받는다.
+ */
+async function chargeJourneyOperationCredit(exec: ExecutionRow, sentAt: Date): Promise<void> {
+  await deductCreditSafe({
+    companyId: exec.company_id,
+    cost: getCreditCost('journey-operation'),
+    source: 'journey-operation',
+    idempotencyKey: `journey-operation:${exec.journey_id}:${kstDateTag(sentAt)}`,
+    createdBy: exec.created_by || null,
+  });
+}
 
 async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, addedCost: number): Promise<void> {
   // ★ 2026-06-30 여정 일반화 — date_anchor/one_shot은 단발 execution: 이 step 발송 후 상대 advance 없이 완료.

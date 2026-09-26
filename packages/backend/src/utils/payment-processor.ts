@@ -150,13 +150,16 @@ export async function finalizePaymentSuccess(input: FinalizePaymentSuccessInput)
       throw new Error(`[payment-processor] pending 영역 X (status=${pending.status}): orderId=${orderId}`);
     }
 
-    // 2) 금액 위변조 검증
+    // 2) 금액·주문번호 대조 — ★ 2026-09-27 한줄로 V2 m006: 없거나 0이거나 다르면 확정하지 않는다(fail-closed · 호출부가 망취소).
+    //   옛 코드는 금액이 없거나 0이면 대조를 건너뛰었고 주문번호는 보지 않았다. 칸 이름(TotPrice·MOID)은 실결제 3건의 pg_response로 확인.
     const dbAmount = Number(pending.amount);
-    if (approval.totPrice) {
-      const totPriceNum = Number(String(approval.totPrice).replace(/[^0-9.]/g, ''));
-      if (totPriceNum > 0 && Math.abs(totPriceNum - dbAmount) > 0.5) {
-        throw new Error(`[payment-processor] 결제 금액 위변조: db=${dbAmount}, inicis=${totPriceNum}`);
-      }
+    const totPriceText = String(approval.totPrice ?? '').trim();
+    const totPriceNum = /^[0-9]+(\.[0-9]+)?$/.test(totPriceText) ? Number(totPriceText) : NaN;
+    if (!(totPriceNum > 0) || Math.abs(totPriceNum - dbAmount) > 0.5) {
+      throw new Error(`[payment-processor] 결제 금액 불일치: db=${dbAmount}, inicis=${totPriceText || '(없음)'}`);
+    }
+    if (String(approval.moid ?? '').trim() !== orderId) {
+      throw new Error(`[payment-processor] 결제 주문번호 불일치: order=${orderId}, inicis=${String(approval.moid ?? '') || '(없음)'}`);
     }
 
     // 3) payments UPDATE (pending → completed)

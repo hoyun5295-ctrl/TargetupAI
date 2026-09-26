@@ -74,7 +74,8 @@ describe('여정 실행기 — 차감이 적재보다 앞', () => {
   const tryAt = src.indexOf("// ★ D188 Phase 2-B-2 (2026-05-21): 10. queue INSERT");
   const loadAt = src.indexOf("await bulkInsertSmsQueue(tables, [row], true, { companyId: exec.company_id, source: 'journey' });");
   const alimAt = src.indexOf('await insertAlimtalkQueue(');
-  const sentLogAt = src.indexOf("gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sent', $4");
+  // ★ 2026-09-26 V2 m105 — 발송 기록은 적재 앞의 '적재 중' 표식(INSERT 'sending')이 되었다 → 적재 뒤 'sent' 확정(journey-send-claim-before-load 테스트 소유)
+  const sentLogAt = src.indexOf("gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sending', $4");
 
   it('차감 호출은 하나이고 큐 적재(문자·알림톡)와 sent 기록보다 앞이다', () => {
     expect((src.match(/await prepaidDeduct\(/g) || []).length).toBe(1);

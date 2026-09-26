@@ -70,6 +70,51 @@ export function calcRefundParts(p: {
 }
 
 /**
+ * ★ 2026-09-26 한줄로 V2 CRASH(F08·m053·m123) — 적재 0 고착 판정 (순수).
+ *
+ * 동기 발송 경로(AI 캠페인 · 직접발송 동기 · 브랜드 동기 · 예약 동기)는 [차감 커밋 → 큐 적재]다.
+ * 그 사이에 프로세스가 재시작되거나 예외가 나면 큐는 0건인데, "처리 0 = 미적재 0" 규칙 때문에 그 차감은 영영 환불되지 않았다.
+ * 이 모양이면 스위퍼가 차감 30분 뒤(전 축) 전 라인·이력 원행 수를 한 번 더 세고, 0건일 때만 **한 트랜잭션에서**
+ * 캠페인·실행 행을 실패로 종결하면서 축별 차감 건수를 영속 환불 의무(send_config.refundPending)로 남긴다
+ * (refund-pending CT `settleZeroLoadAsObligation`). 갚는 것은 기존 재시도 워커가 전 축 성공까지 한다(만료 없음 · Codex 1R ①②).
+ *
+ * - 워커 경로(send_phase 있음)는 워커가 적재 시점에 미적재를 소유한다 — 여기서 보지 않는다.
+ *   단 'preparing'(캠페인 행을 만들고 차감한 뒤 queued로 활성화하기 전에 멈춘 모양)은 워커가 절대 집지 않아
+ *   영영 적재·환불이 없다 → 여기서 본다. 스위퍼는 환불 **전에** preparing → failed로 중화한다(워커가 집을 틈을 닫는다).
+ * - 여정 단계 캠페인은 자기 규칙(자리 잡은 차감)이 따로 있다 — 여기서 보지 않는다.
+ * - completed는 끝까지 간 흐름이라 보지 않는다(sending·draft·failed만).
+ */
+export const ZERO_LOAD_SETTLE_MS = 30 * 60 * 1000;
+const ZERO_LOAD_STATUSES = new Set(['sending', 'draft', 'failed']);
+
+export function isZeroLoadShape(p: {
+  status: string | null | undefined;
+  sendPhase: string | null | undefined;
+  sentCount: number | null | undefined;
+  mysqlTotal: number;
+  sendType: string | null | undefined;
+  /** 이미 의무로 넘긴 캠페인(send_config.zeroLoadSettled) — 다시 세지 않는다 */
+  zeroLoadSettled?: boolean | null;
+}): boolean {
+  if (p.zeroLoadSettled === true) return false;
+  if (!ZERO_LOAD_STATUSES.has(String(p.status || ''))) return false;
+  if (p.sendPhase != null && p.sendPhase !== 'preparing') return false;
+  if (String(p.sendType || '') === 'journey') return false;
+  if (Math.max(0, Math.floor(Number(p.sentCount) || 0)) > 0) return false;
+  return Math.max(0, Math.floor(Number(p.mysqlTotal) || 0)) === 0;
+}
+
+/** 차감 행 전부가 창(30분)을 지났는가 — 하나라도 최근이거나 시각이 없으면 아직 적재 중일 수 있다 */
+export function isDeductSettledForZeroLoad(rows: Array<{ created_at?: Date | string | null }>, nowMs: number): boolean {
+  if (!rows || rows.length === 0) return false;
+  return rows.every((r) => {
+    if (r.created_at == null) return false;
+    const t = new Date(r.created_at).getTime();
+    return Number.isFinite(t) && nowMs - t >= ZERO_LOAD_SETTLE_MS;
+  });
+}
+
+/**
  * 환불 머니 불변식 — 정산 끝난 캠페인의 근본 식: 차감 == 성공 + 순환불(환불 − 회수).
  * ★ 2026-06-29: 차감한 모든 건은 성공으로 전달됐거나 환불됐어야 한다(발송사 근간).
  *   반환 gap = 차감 − (성공 + 순환불).

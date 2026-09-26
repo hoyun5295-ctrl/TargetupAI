@@ -9,6 +9,7 @@ import { hashSecret, omitCompanySecrets } from '../utils/secret-hash';
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
+import { parseWonAmount } from '../utils/normalize';
 import type { PoolClient } from 'pg';
 import { authenticate, requireSuperAdmin, requireUuidId, requireBestLayoutViewer } from '../middlewares/auth';
 import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, canDelete, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
@@ -3694,72 +3695,90 @@ router.patch('/companies/:id/billing-type', authenticate, requireSuperAdmin, asy
 // 수동 잔액 조정 (충전 또는 차감)
 router.post('/companies/:id/balance-adjust', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { type, amount, reason } = req.body;
+  const { type, reason } = req.body;
   const adminId = (req as any).user?.userId;
 
   if (!type || !['charge', 'deduct'].includes(type)) {
     return res.status(400).json({ error: '올바른 유형을 선택해주세요. (charge 또는 deduct)' });
   }
-  if (!amount || amount <= 0) {
-    return res.status(400).json({ error: '금액은 0보다 커야 합니다.' });
+  // ★ 2026-09-27 한줄로 V2 m012 — 금액은 숫자로 검사한다(금액 CT · 단가가 소수라 조정도 소수 둘째 자리까지).
+  //   옛 코드는 문자열 금액을 그대로 써 balance_before가 문자열 연결이 됐다.
+  const amount = parseWonAmount(req.body?.amount, { min: 0.01, max: 100_000_000, decimals: 2 });
+  if (amount === null) {
+    return res.status(400).json({ error: '금액은 0보다 크고 1억원 이하(소수 둘째 자리까지)여야 합니다.' });
   }
-  if (!reason || reason.trim() === '') {
+  if (!reason || typeof reason !== 'string' || reason.trim() === '') {
     return res.status(400).json({ error: '사유를 입력해주세요.' });
   }
 
+  // ★ 2026-09-27 한줄로 V2 m012 — 잔액 변경과 원장 기록을 한 트랜잭션으로. 옛 코드는 두 문장이 따로 커밋돼
+  //   원장 INSERT가 실패하면 원장 없는 잔액 변동이 남았다.
+  let client: PoolClient | null = null;
   try {
+    client = await pool.connect();   // 연결 획득 실패도 아래 catch가 500으로 답한다(PAY Codex 1R)
     const txType = type === 'charge' ? 'admin_charge' : 'admin_deduct';
+    await client.query('BEGIN');
 
     if (type === 'deduct') {
       // 차감: 잔액 부족 체크 (atomic)
-      const result = await query(
+      const result = await client.query(
         'UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 AND balance >= $1 RETURNING balance, company_name',
         [amount, id]
       );
       if (result.rows.length === 0) {
-        const co = await query('SELECT balance, company_name FROM companies WHERE id = $1', [id]);
+        await client.query('ROLLBACK');
+        // 잡은 연결로 조회한다 — pool.query는 두 번째 연결을 기다린다(연결을 쥔 채 · PAY Codex 1R)
+        const co = await client.query('SELECT balance, company_name FROM companies WHERE id = $1', [id]);
         if (co.rows.length === 0) return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
         return res.status(400).json({ error: `잔액이 부족합니다. 현재 잔액: ${Number(co.rows[0].balance).toLocaleString()}원` });
       }
+      const after = Number(result.rows[0].balance);
 
-      await query(
+      await client.query(
         `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id, payment_method)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin')`,
-        [id, txType, amount, Number(result.rows[0].balance) + amount, result.rows[0].balance, reason.trim(), adminId]
+        [id, txType, amount, Math.round((after + amount) * 100) / 100, after, reason.trim(), adminId]
       );
+      await client.query('COMMIT');
 
-      console.log(`[관리자차감] ${result.rows[0].company_name}: -${amount}원 → 잔액 ${result.rows[0].balance}원 (사유: ${reason})`);
+      console.log(`[관리자차감] ${result.rows[0].company_name}: -${amount}원 → 잔액 ${after}원 (사유: ${reason})`);
       res.json({
         message: `${amount.toLocaleString()}원이 차감되었습니다.`,
-        balance: Number(result.rows[0].balance),
+        balance: after,
         transactionType: txType
       });
     } else {
       // 충전
-      const result = await query(
+      const result = await client.query(
         'UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance, company_name',
         [amount, id]
       );
       if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
         return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
       }
+      const after = Number(result.rows[0].balance);
 
-      await query(
+      await client.query(
         `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id, payment_method)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin')`,
-        [id, txType, amount, Number(result.rows[0].balance) - amount, result.rows[0].balance, reason.trim(), adminId]
+        [id, txType, amount, Math.round((after - amount) * 100) / 100, after, reason.trim(), adminId]
       );
+      await client.query('COMMIT');
 
-      console.log(`[관리자충전] ${result.rows[0].company_name}: +${amount}원 → 잔액 ${result.rows[0].balance}원 (사유: ${reason})`);
+      console.log(`[관리자충전] ${result.rows[0].company_name}: +${amount}원 → 잔액 ${after}원 (사유: ${reason})`);
       res.json({
         message: `${amount.toLocaleString()}원이 충전되었습니다.`,
-        balance: Number(result.rows[0].balance),
+        balance: after,
         transactionType: txType
       });
     }
   } catch (error) {
+    if (client) { try { await client.query('ROLLBACK'); } catch { /* 이미 끝난 트랜잭션 */ } }
     console.error('잔액 조정 실패:', error);
     res.status(500).json({ error: '잔액 조정 실패' });
+  } finally {
+    client?.release();
   }
 });
 

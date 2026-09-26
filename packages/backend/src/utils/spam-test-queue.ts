@@ -13,12 +13,12 @@
  */
 
 import { createHash } from 'crypto';
-import { mysqlQuery, query } from '../config/database';
+import pool, { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { extractVarCatalog } from '../services/ai';
 import { replaceVariables, enrichWithCustomFields, buildAdMessage, buildAdSubject, prepareFieldMappings } from '../utils/messageUtils';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
-import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, spamFailedResultSql } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from './system-alert';
 import { getSampleCustomerScope } from './store-scope';
@@ -184,48 +184,68 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     );
     const spamCheckNumber = opt080Result.rows[0]?.user_080 || opt080Result.rows[0]?.company_080 || null;
 
-    // 3) 테스트 레코드 생성 (status = 'queued')
+    // 3) 테스트 레코드 + 결과 행 + 차감 — ★ 2026-09-26 한줄로 V2 m001·m002(SQ).
+    //   옛 순서: 검사 행을 'queued'로 **먼저 커밋** → 차감 → 결과 행. 3초 워커가 그 사이 행을 집어 차감 전에 보낼 수 있었고
+    //   (잔액 부족이면 무료 발송 · 결과 행이 없으면 앱 보고 유실), 차감 뒤 결과 행이 던지면 환불 없이 queued가 남아 나중에 일부 행으로 나갔다.
+    //   새 순서: 한 트랜잭션에 검사 행·결과 행 → 차감(**같은 트랜잭션** · Codex 2R ①) → 커밋. 워커는 커밋 전 행을 못 본다.
+    //   셋이 한 커밋이라 어디서 멈춰도 "차감만 남은 검사"·"차감 없는 검사"가 생기지 않는다. 커밋 실패에 환불하지 않는다 —
+    //   커밋이 안 됐으면 차감도 함께 사라졌고, 응답만 유실됐으면 검사는 나가므로 환불하면 공짜 발송이 된다.
+    //   회사 행을 맨 먼저 잠근다: 검사 행 INSERT의 회사 FK가 KEY SHARE를 잡은 뒤 차감이 FOR UPDATE로 올리면
+    //   같은 회사의 동시 등록 둘이 서로의 KEY SHARE를 기다린다(교착). 먼저 잠그면 뒤 등록은 앞 등록의 커밋을 기다린다.
     // ★ 2026-09-26 한줄로 V2 F49 — 차감을 건너뛴 자동 검사는 청구 제외 표시값으로 남긴다(후불 정산·비용 표시가 이 값으로 뺀다).
     const storedSource = source === 'auto_ai' && skipPrepaid ? SPAM_AUTO_FREE_SOURCE : source;
-    const testResult = await query(
-      `INSERT INTO spam_filter_tests
-       (company_id, user_id, callback_number, message_content_sms, message_content_lms,
-        message_hash, spam_check_number, status, source, variant_id, batch_id, subject, first_recipient)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12)
-       RETURNING id, created_at`,
-      [companyId, userId, callbackNumber,
-       messageContentSms || null, messageContentLms || null,
-       messageHash || null, spamCheckNumber,
-       storedSource, variantId || null, batchId || null, subject || null,
-       firstCustomer && Object.keys(firstCustomer).length > 0 ? JSON.stringify(firstCustomer) : null]
-    );
-    const testId = testResult.rows[0].id;
+    const client = await pool.connect();
+    let testId = '';
+    try {
+      await client.query('BEGIN');
+      if (!skipPrepaid) await client.query('SELECT id FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+      const testResult = await client.query(
+        `INSERT INTO spam_filter_tests
+         (company_id, user_id, callback_number, message_content_sms, message_content_lms,
+          message_hash, spam_check_number, status, source, variant_id, batch_id, subject, first_recipient)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12)
+         RETURNING id, created_at`,
+        [companyId, userId, callbackNumber,
+         messageContentSms || null, messageContentLms || null,
+         messageHash || null, spamCheckNumber,
+         storedSource, variantId || null, batchId || null, subject || null,
+         firstCustomer && Object.keys(firstCustomer).length > 0 ? JSON.stringify(firstCustomer) : null]
+      );
+      testId = testResult.rows[0].id;
 
-    // 4) 선불 차감 (skipPrepaid가 아닐 때만)
-    if (!skipPrepaid) {
-      const deduct = await prepaidDeduct(companyId, sendCount, deductType, testId, userId, 'spam');
-      if (!deduct.ok) {
-        await query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1`, [testId]);
-        return {
-          ok: false,
-          error: deduct.error,
-          errorCode: 'INSUFFICIENT_BALANCE',
-          insufficientBalance: true,
-          balance: deduct.balance,
-          requiredAmount: deduct.amount,
-        };
+      // 결과 행 — 커밋 전이라 워커가 이 검사를 집을 때는 늘 전부 있다
+      for (const device of devices.rows) {
+        for (const msgType of messageTypes) {
+          await client.query(
+            `INSERT INTO spam_filter_test_results (test_id, carrier, message_type, phone)
+             VALUES ($1, $2, $3, $4)`,
+            [testId, device.carrier, msgType, device.phone]
+          );
+        }
       }
-    }
 
-    // 5) test_results 행 미리 생성
-    for (const device of devices.rows) {
-      for (const msgType of messageTypes) {
-        await query(
-          `INSERT INTO spam_filter_test_results (test_id, carrier, message_type, phone)
-           VALUES ($1, $2, $3, $4)`,
-          [testId, device.carrier, msgType, device.phone]
-        );
+      // 4) 선불 차감 (skipPrepaid가 아닐 때만) — 실패하면 검사 행째 롤백(남기지 않는다 · 워커가 볼 행이 없다)
+      if (!skipPrepaid) {
+        const deduct = await prepaidDeduct(companyId, sendCount, deductType, testId, userId, 'spam', null, { client });
+        if (!deduct.ok) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            error: deduct.error,
+            errorCode: 'INSUFFICIENT_BALANCE',
+            insufficientBalance: true,
+            balance: deduct.balance,
+            requiredAmount: deduct.amount,
+          };
+        }
       }
+
+      await client.query('COMMIT');
+    } catch (txErr: any) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw txErr;
+    } finally {
+      client.release();
     }
 
     console.log(`[SpamTestQueue] 큐 등록 — testId=${testId}, source=${source}, variant=${variantId || '-'}, batch=${batchId || '-'}`);
@@ -241,6 +261,65 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     console.log('[SpamTestQueue] 큐 등록 오류(상세):', err?.message || err);
     return { ok: false, error: `스팸 테스트 큐 등록 오류: ${err?.message || '알 수 없는 오류'}` };
   }
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 m042(Harold 결정 「발송 실패만 환불·청구 제외 · 시간 초과는 청구」) — 스팸 검사 발송 실패분 선불 환불.
+ * 통신사가 실패로 확정한 결과 행(failed) 수를 유형별로 세어 FAIL 항아리의 **누적 목표**로 환불한다(prepaidRefund 기본 모드 ·
+ * 같은 검사에 여러 번 불러도 차이만 나간다). 차감이 없던 검사(체험·자동 무료·후불)는 prepaidRefund가 0원으로 돌아온다.
+ * 부르는 자리 = 발송 실패를 기록하는 두 폴링(수동 라우트·큐 워커)에서 실패를 쓴 직후. 검사를 끝내는 자리는 9곳이라 거기 붙이면 빠진다.
+ * 환불이 끝나지 않으면 경보만 남기고 던지지 않는다 — 폴링을 막지 않는다(사람이 경보로 본다).
+ */
+export async function refundSpamSendFailures(testId: string): Promise<void> {
+  try {
+    const r = await query(
+      `SELECT t.company_id, r.message_type, COUNT(*) FILTER (WHERE ${spamFailedResultSql('r')})::int AS failed
+         FROM spam_filter_test_results r
+         JOIN spam_filter_tests t ON t.id = r.test_id
+        WHERE r.test_id = $1
+        GROUP BY t.company_id, r.message_type`,
+      [testId],
+    );
+    for (const row of r.rows) {
+      const failed = Number(row.failed || 0);
+      if (failed <= 0) continue;
+      const res = await prepaidRefund(String(row.company_id), failed, String(row.message_type), testId, '스팸 검사 발송 실패 환불', 'spam', { refundKey: REFUND_KEYS.FAIL });
+      if (!res.ok) throw new Error(`환불 미완(${row.message_type} ${failed}건)`);
+    }
+  } catch (e: any) {
+    console.error(`[SpamTest] 발송 실패 환불 미완 testId=${testId}:`, e?.message || e);
+    void sendSystemAlert({
+      dedupKey: `spam-fail-refund-miss:${testId}`,
+      message: `스팸 검사 발송 실패 환불 미완 — test=${testId} 수동 확인 필요`,
+    }).catch(() => undefined);
+  }
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 m003 — 스팸 검사 문자의 QTmsg 행(라이브 + 이번 달 · 지난달 로그).
+ * 옛 코드는 서버 현재 월 로그 하나만 봐 월말에 보낸 검사의 성공이 다음 달로 넘어가면 놓쳐 차단 대신 timeout이 됐다.
+ * 큐 워커와 수동 검사 라우트가 같은 조회를 복붙하고 있어 여기 하나로 모은다. 로그 테이블이 없으면 그 달은 건너뛴다.
+ */
+export async function fetchSpamQtmsgRows(testId: string, now: Date = new Date()): Promise<any[]> {
+  const testTable = (await getTestSmsTables())[0];
+  const rows: any[] = [];
+  const live = await mysqlQuery(
+    `SELECT dest_no, msg_type, status_code FROM ${testTable} WHERE app_etc1 = ?`,
+    [testId]
+  ) as any[];
+  if (live && live.length > 0) rows.push(...live);
+  const ym = (d: Date) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const months = [ym(now), ym(new Date(now.getFullYear(), now.getMonth() - 1, 1))];
+  for (const m of months) {
+    try {
+      const log = await mysqlQuery(
+        `SELECT dest_no, msg_type, status_code FROM ${testTable}_${m} WHERE app_etc1 = ?`,
+        [testId]
+      ) as any[];
+      if (log && log.length > 0) rows.push(...log);
+    } catch (e) { /* 로그 테이블 미존재 시 무시 */ }
+  }
+  return rows;
 }
 
 // ============================================================
@@ -429,60 +508,49 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
           return;
         }
 
-        // QTmsg 결과 조회
-        const testTable = (await getTestSmsTables())[0];
-        const now2 = new Date();
-        const yyyymm = `${now2.getFullYear()}${String(now2.getMonth() + 1).padStart(2, '0')}`;
-        const logTable = `${testTable}_${yyyymm}`;
+        // QTmsg 결과 조회 — ★ 2026-09-26 한줄로 V2 m003 CT(라이브 + 이번 달·지난달 로그)
+        const mqRows = await fetchSpamQtmsgRows(testId);
 
-        let mqRows: any[] = [];
-        const mqCurrent = await mysqlQuery(
-          `SELECT dest_no, msg_type, status_code FROM ${testTable} WHERE app_etc1 = ?`,
-          [testId]
-        ) as any[];
-        if (mqCurrent && mqCurrent.length > 0) mqRows = mqCurrent;
-
+        let wroteFailed = false;
         try {
-          const mqLog = await mysqlQuery(
-            `SELECT dest_no, msg_type, status_code FROM ${logTable} WHERE app_etc1 = ?`,
-            [testId]
-          ) as any[];
-          if (mqLog && mqLog.length > 0) mqRows = [...mqRows, ...mqLog];
-        } catch (e) { /* 로그 테이블 미존재 시 무시 */ }
-
-        for (const row of unreceived.rows) {
-          const mType = toQtmsgType(row.message_type);
-          const mqMatch = mqRows.find(
-            (m: any) => m.dest_no === row.phone && m.msg_type === mType
-          );
-          if (!mqMatch) continue;
-
-          const sc = Number(mqMatch.status_code);
-          let result: string | null = null;
-
-          if (SUCCESS_CODES.includes(sc)) {
-            const rowKey = row.id;
-            if (!qtmsgSuccessTime.has(rowKey)) {
-              qtmsgSuccessTime.set(rowKey, Date.now());
-              result = null;
-            } else if (Date.now() - qtmsgSuccessTime.get(rowKey)! >= graceMs) {
-              result = SPAM_RESULT.BLOCKED;
-              console.log(`[SpamTestQueue] BLOCKED — testId=${testId}, phone=${row.phone}, grace=${graceMs}ms`);
-            } else {
-              result = null;
-            }
-          } else if (PENDING_CODES.includes(sc)) {
-            result = null;
-          } else {
-            result = SPAM_RESULT.FAILED;
-          }
-
-          if (result) {
-            await query(
-              `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
-              [result, row.id]
+          for (const row of unreceived.rows) {
+            const mType = toQtmsgType(row.message_type);
+            const mqMatch = mqRows.find(
+              (m: any) => m.dest_no === row.phone && m.msg_type === mType
             );
+            if (!mqMatch) continue;
+
+            const sc = Number(mqMatch.status_code);
+            let result: string | null = null;
+
+            if (SUCCESS_CODES.includes(sc)) {
+              const rowKey = row.id;
+              if (!qtmsgSuccessTime.has(rowKey)) {
+                qtmsgSuccessTime.set(rowKey, Date.now());
+                result = null;
+              } else if (Date.now() - qtmsgSuccessTime.get(rowKey)! >= graceMs) {
+                result = SPAM_RESULT.BLOCKED;
+                console.log(`[SpamTestQueue] BLOCKED — testId=${testId}, phone=${row.phone}, grace=${graceMs}ms`);
+              } else {
+                result = null;
+              }
+            } else if (PENDING_CODES.includes(sc)) {
+              result = null;
+            } else {
+              result = SPAM_RESULT.FAILED;
+            }
+
+            if (result) {
+              await query(
+                `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
+                [result, row.id]
+              );
+              if (result === SPAM_RESULT.FAILED) wroteFailed = true;
+            }
           }
+        } finally {
+          // ★ 2026-09-26 한줄로 V2 m042 — 이번 회차에 발송 실패를 썼으면 그만큼 선불 환불(누적 목표 · 재호출 안전) · 뒤 행 기록이 던져도 부른다(Codex 1R)
+          if (wroteFailed) await refundSpamSendFailures(testId);
         }
 
         // 전부 처리 확인

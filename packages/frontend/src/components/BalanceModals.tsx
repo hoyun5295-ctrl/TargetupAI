@@ -621,6 +621,8 @@ function submitInicisForm(form: any) {
     buyeremail: form.buyerEmail || '',
     returnUrl: form.returnUrl,
     closeUrl: form.closeUrl,
+    // ★ 2026-09-27 한줄로 V2 R338·A-03 — 결제 콜백 서명값(이니시스가 리턴 콜백에 그대로 돌려준다 · 서버가 만든 값)
+    merchantData: form.merchantData || '',
     gopaymethod: form.gopaymethod,
     acceptmethod: form.acceptmethod,
     languageView: 'ko',

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
+import { parseWonAmount } from '../utils/normalize';
 import { authenticate } from '../middlewares/auth';
 import { queryPayAgentBalances, getAgentCustNameMap } from '../utils/pay-stats';
 import { resolveChargeUnitPrice } from '../utils/unit-price';
@@ -191,10 +192,12 @@ router.post('/deposit-request', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
 
-    const { amount, depositorName } = req.body;
+    const { depositorName } = req.body;
+    // ★ 2026-09-27 한줄로 V2 m010 — 정수 원 · 1,000원 ~ 1억 원(카드결제와 같은 범위 · 금액 CT). 옛 코드는 하한만 봤다.
+    const amount = parseWonAmount(req.body?.amount, { min: 1000, max: 100_000_000 });
 
-    if (!amount || amount < 1000) {
-      return res.status(400).json({ error: '1,000원 이상 입력해주세요.' });
+    if (amount === null) {
+      return res.status(400).json({ error: '1,000원 이상 1억원 이하의 원 단위 금액을 입력해주세요.' });
     }
     if (!depositorName || depositorName.trim() === '') {
       return res.status(400).json({ error: '입금자명을 입력해주세요.' });

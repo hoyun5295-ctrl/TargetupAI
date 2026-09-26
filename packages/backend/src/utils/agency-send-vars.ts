@@ -16,6 +16,8 @@
  * ⛔ 슬롯은 네 칸뿐이다. 접수에서 그 이상을 막는다(발송 직전에 조용히 잘리면 안 된다).
  */
 
+import { findVarTokens, replaceVarTokens } from './var-tokens';
+
 /** 주소록 슬롯 순서. 직접발송이 쓰는 이름 그대로다(`messageUtils.replaceVariables` 0단계) */
 export const SLOT_VARS = ['이름', '기타1', '기타2', '기타3'] as const;
 export type SlotVar = (typeof SLOT_VARS)[number];
@@ -24,17 +26,17 @@ export type SlotVar = (typeof SLOT_VARS)[number];
 export const MAX_AGENCY_VARS = SLOT_VARS.length;
 
 /**
- * 문안에서 변수를 뽑는다. 패턴은 `messageUtils.cleanLeftoverVars`와 **같아야 한다** —
+ * 문안에서 변수를 뽑는다. 판정은 `messageUtils.cleanLeftoverVars`와 **같아야 한다** —
  * 다르면 "여기서는 변수가 아닌데 발송 직전에 지워지는" 문자열이 생긴다.
+ * ★ 2026-09-26 한줄로 V2 R269 — 그래서 두 곳 모두 조각 판정 CT(`var-tokens.ts findVarTokens`)를 부른다
+ *   (숫자 바로 뒤 %는 퍼센트 기호: `30%할인+10%적립`이 변수 칸을 먹지 않는다).
  * 등장 순서를 지키고 중복은 한 번만 센다.
  */
-const VAR_RE = /%([가-힣A-Za-z_][^%\s]{0,19})%/g;
-
 export function extractAgencyVars(content: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const m of String(content || '').matchAll(VAR_RE)) {
-    const name = m[1];
+  for (const t of findVarTokens(String(content || ''))) {
+    const name = t.name;
     if (seen.has(name)) continue;
     seen.add(name);
     out.push(name);
@@ -72,9 +74,9 @@ export function buildSlotPlan(content: string): SlotPlan {
   const slots: Record<string, SlotVar> = {};
   order.forEach((name, i) => { slots[name] = SLOT_VARS[i]; });
 
-  const slotContent = String(content || '').replace(
-    VAR_RE,
-    (whole, name: string) => (slots[name] ? `%${slots[name]}%` : whole),
+  const slotContent = replaceVarTokens(
+    String(content || ''),
+    (name) => (slots[name] ? `%${slots[name]}%` : undefined),
   );
 
   return { ok: true, slots, slotContent, order };

@@ -17,6 +17,9 @@ import { cellToString } from './normalize';
 import { query } from '../config/database';
 import { renderLiquid, detectLiquidSyntax, flattenCustomerForLiquid, stripLiquidLeftovers } from './liquid-templating';
 import { applyVarFallback } from './var-fallback';
+// ★ 2026-09-26 한줄로 V2 R269 — %변수% 조각 판정(숫자 바로 뒤 %는 퍼센트 기호) · 순수 CT
+import { replaceVarTokens } from './var-tokens';
+export { findVarTokens } from './var-tokens';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 0-A) 날짜 포맷팅 헬퍼 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱
@@ -149,13 +152,14 @@ export async function enrichWithCustomFields(
  *   - %~30% / %50% — 특수문자/숫자 시작 → 매칭 안 됨 (사용자 본문 "50%~30% 할인")
  *
  * 의도: 오타/매핑 안 된 변수만 제거. 본문 % 문자는 보존.
+ * ★ 2026-09-26 한줄로 V2 R269 — 조각 판정은 `findVarTokens` 하나다(숫자 바로 뒤 %는 퍼센트 기호).
  *
  * @param text 원본 메시지 (이미 fieldMappings 순회 완료 상태)
  * @returns 잔여 %변수% 제거된 메시지
  */
 export function cleanLeftoverVars(text: string): string {
   if (!text) return '';
-  return text.replace(/%[가-힣A-Za-z_][^%\s]{0,19}%/g, '');
+  return replaceVarTokens(text, () => '');
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

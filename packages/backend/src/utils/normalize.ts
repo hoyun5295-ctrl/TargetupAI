@@ -935,3 +935,20 @@ export function firstPositiveAmount(...vals: unknown[]): number {
   return 0;
 }
 
+/**
+ * ★ 2026-09-27 한줄로 V2 m010·m011·m012 — 돈 금액 입력 검사 CT(원).
+ * 숫자 또는 숫자만 있는 문자열만 받는다(쉼표·지수 표기·불린 거절). 기본은 정수 원, decimals를 주면 그 자릿수까지 허용한다.
+ * 범위를 벗어나거나 형식이 틀리면 null — 호출부가 400을 돌려준다. 옛 코드는 하한만 봐 소수·문자열 금액이 원장에 들어갈 수 있었다.
+ */
+export function parseWonAmount(value: unknown, opts: { min: number; max: number; decimals?: number }): number | null {
+  const places = opts.decimals ?? 0;
+  // 자릿수는 십진 표기로 본다 — 곱셈으로 판정하면 131072.02 × 100 = 13107201.999…처럼 정상 금액을 거절한다(PAY Codex 1R).
+  //   숫자는 JS의 최단 십진 표기(String)로, 문자열은 그대로 검사한다. 지수 표기(1e-7 등)는 형식에서 걸러진다.
+  const text = typeof value === 'number' ? (Number.isFinite(value) ? String(value) : '')
+    : typeof value === 'string' ? value.trim() : '';
+  const pattern = places > 0 ? new RegExp(`^[0-9]+(\\.[0-9]{1,${places}})?$`) : /^[0-9]+$/;
+  if (!pattern.test(text)) return null;
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < opts.min || n > opts.max) return null;
+  return n;
+}

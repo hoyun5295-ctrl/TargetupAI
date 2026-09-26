@@ -491,6 +491,23 @@ export async function smsBatchAggByGroup(
   return result;
 }
 
+/** 알림톡 실패 대체 행(자식 행) 판정 — smsCampaignSubRowCounts · smsAlimtalkResultAgg · 원 행 범위('primary')가 같은 조건을 쓴다 */
+export const SMS_SUB_ROW_SQL = 'k_oriseq IS NOT NULL AND k_oriseq > 0';
+
+/**
+ * 행 범위 조건 — 'brand' = msg_type 'F'만 · 'nonBrand' = 그 외 · 'primary' = 대체 행을 뺀 원 행 · 'all' = 조건 없음('').
+ * ★ 2026-09-26 한줄로 V2(Codex 3R ①) — smsCampaignCountsSafe 안의 조건을 그대로 꺼냈다(동작 불변). 적재 0 의무의 축별 재확인이 같은 조건을 쓴다.
+ * ★ 2026-09-26 한줄로 V2(Codex 5R ③) — 'primary' 추가: 여정 적재 판정의 하한을 **원 행만 한 번에** 센다
+ *   (전체 − 대체 행을 두 번 조회해 빼면 그 사이 행이 옮겨질 때 하한이 부푼다). 기존 세 값의 동작은 그대로다.
+ */
+export type SmsRowScope = 'all' | 'brand' | 'nonBrand' | 'primary';
+export function smsMsgTypeScopeSql(msgTypeScope: SmsRowScope): string {
+  return msgTypeScope === 'brand' ? `msg_type = 'F'`
+    : msgTypeScope === 'nonBrand' ? `(msg_type IS NULL OR msg_type <> 'F')`
+    : msgTypeScope === 'primary' ? `NOT (${SMS_SUB_ROW_SQL})`
+    : '';
+}
+
 /**
  * ★ 2026-06-11 정합성 100% 캠페인 결과 집계 — 카운트 산식의 유일한 진입점.
  * 결과(성공/실패)는 월별 이력에서만, 대기는 라이브 큐의 대기 코드(100/104)에서만 센다.
@@ -506,7 +523,7 @@ export async function smsCampaignCountsSafe(
   groupField: string = 'app_etc1',
   // ★ 2026-07-30 브랜드 합류 후 환불 축 분리용 — 'brand'=msg_type 'F'만 / 'nonBrand'=그 외 / 'all'=전체(기본, 기존 동작 불변).
   //   차감이 두 축(BRAND + message_type)으로 갈리는 'both' 캠페인의 환불 계산에서만 분리 집계를 쓴다.
-  msgTypeScope: 'all' | 'brand' | 'nonBrand' = 'all',
+  msgTypeScope: SmsRowScope = 'all',
 ): Promise<Map<string, CampaignAggCounts>> {
   const out = new Map<string, CampaignAggCounts>();
   if (tables.length === 0 || ids.length === 0) return out;
@@ -515,9 +532,7 @@ export async function smsCampaignCountsSafe(
   const { resultTables, pendingLiveTables } = classifyResultTables(tables);
   const SUC = SUCCESS_CODES.join(',');
   const PEN = PENDING_CODES.join(',');
-  const scopeWhere = msgTypeScope === 'brand' ? `msg_type = 'F'`
-    : msgTypeScope === 'nonBrand' ? `(msg_type IS NULL OR msg_type <> 'F')`
-    : '';
+  const scopeWhere = smsMsgTypeScopeSql(msgTypeScope);
 
   const logAgg = resultTables.length > 0
     ? await smsBatchAggByGroup(resultTables, groupField, `
@@ -563,7 +578,7 @@ export async function smsAlimtalkResultAgg(
   const { resultTables } = classifyResultTables(tables);
   if (resultTables.length === 0) return out;
   const SUC = SUCCESS_CODES.join(',');
-  const SUB = 'k_oriseq IS NOT NULL AND k_oriseq > 0';
+  const SUB = SMS_SUB_ROW_SQL;
   const agg = await smsBatchAggByGroup(resultTables, 'app_etc1', `
         SUM(CASE WHEN msg_type = 'K' AND status_code = 1800 THEN 1 ELSE 0 END) AS kakao,
         SUM(CASE WHEN msg_type = 'K' AND status_code = 7830 THEN 1 ELSE 0 END) AS inRowSms,
@@ -596,7 +611,7 @@ export async function smsCampaignSubRowCounts(
   const { resultTables, pendingLiveTables } = classifyResultTables(tables);
   const SUC = SUCCESS_CODES.join(',');
   const PEN = PENDING_CODES.join(',');
-  const SUB = 'k_oriseq IS NOT NULL AND k_oriseq > 0';
+  const SUB = SMS_SUB_ROW_SQL;
   const logAgg = resultTables.length > 0
     ? await smsBatchAggByGroup(resultTables, 'app_etc1', `SUM(CASE WHEN ${SUB} THEN 1 ELSE 0 END) AS sub`, ids)
     : new Map<string, Record<string, number>>();
@@ -791,6 +806,22 @@ export async function getCampaignSmsTablesFor(
 ): Promise<string[]> {
   const refDate = new Date(c.sent_at || c.scheduled_at || c.created_at || Date.now());
   return getCampaignSmsTables(companyId, refDate, c.created_by || undefined, c.send_config);
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2(Codex 4R) — 캠페인 행이 있을 수 있는 테이블을 **넓게**: 발송 기록 테이블(sentTables) ∪ 회사 전 라인,
+ * 각각 캠페인 날짜 기준월 전후 이력까지. "이 캠페인 행이 없다"를 증명하는 판정(여정 적재 중 표식 · 적재 0 의무 재확인)에 쓴다 —
+ * 범위가 좁으면(그날 라인 재배정 · 기록 누락) 있는 행을 못 봐 "없다"를 증명해 버린다. 넓히는 것은 app_etc1 = 캠페인 조건이라 과대 집계가 아니다.
+ */
+export async function getCampaignSmsTablesWide(
+  companyId: string,
+  c: { created_by?: string | null; send_config?: any; sent_at?: any; scheduled_at?: any; created_at?: any },
+): Promise<string[]> {
+  const [recorded, allLines] = await Promise.all([
+    getCampaignSmsTablesFor(companyId, c),
+    getCampaignSmsTablesFor(companyId, { ...c, send_config: null }),
+  ]);
+  return Array.from(new Set([...recorded, ...allLines]));
 }
 
 /** 두 라인그룹 테이블 배열을 순서 보존 합집합(중복 제거). 집계 조회가 발송 라인을 놓치지 않게. */

@@ -26,7 +26,7 @@ import { useMmsUpload } from '../../hooks/useMmsUpload';
 import MmsUploadModal from '../MmsUploadModal';
 import SmsCharsetNotice from '../SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
-import { buildAdSubjectFront, startsWithAdMark, pickAgencySmsCandidates, estimateAgencySmsBytesFromCandidates, normalizeAgencyPhoneFront } from '../../utils/formatDate';
+import { buildAdSubjectFront, startsWithAdMark, pickAgencySmsCandidates, estimateAgencySmsBytesFromCandidates, normalizeAgencyPhoneFront, findVarTokens } from '../../utils/formatDate';
 import {
   CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_DANGER_BOX, CUI_DANGER_ICON, CUI_DANGER_TEXT,
   CUI_HINT, CUI_INPUT, CUI_LABEL, CUI_MODAL, CUI_MODAL_BODY, CUI_MODAL_CLOSE, CUI_MODAL_DESC,
@@ -494,14 +494,17 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
       return v === undefined || v === null || String(v).trim() === '' ? null : String(v);
     };
     const parts: Array<{ kind: 'text' | 'var' | 'miss'; text: string }> = [];
-    for (const seg of content.split(/(%[가-힣A-Za-z_][^%\s]{0,19}%)/g)) {
-      if (!seg) continue;
-      const m = seg.match(/^%([가-힣A-Za-z_][^%\s]{0,19})%$/);
-      if (!m) { parts.push({ kind: 'text', text: seg }); continue; }
-      const v = resolve(m[1]);
+    // ★ 2026-09-26 한줄로 V2 R269 — 조각 판정 CT(숫자 바로 뒤 %는 퍼센트 기호 · 발송과 같은 판정)
+    let pos = 0;
+    for (const t of findVarTokens(content)) {
+      if (t.start > pos) parts.push({ kind: 'text', text: content.slice(pos, t.start) });
+      const seg = content.slice(t.start, t.end);
+      const v = resolve(t.name);
       if (v === null) parts.push({ kind: 'miss', text: seg });
       else parts.push({ kind: 'var', text: v });
+      pos = t.end;
     }
+    if (pos < content.length) parts.push({ kind: 'text', text: content.slice(pos) });
     return parts;
   }, [content, recipients, previewIdx, varMapping, headers, recipientInfo]);
 

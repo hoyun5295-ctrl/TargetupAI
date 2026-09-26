@@ -24,7 +24,7 @@
 
 import pool, { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
-import { parseDeductDescription, parseFreeCount, resolveAlimtalkLedgerUnits } from './deduct-reference';
+import { parseDeductDescription, parseFreeCount, resolveAlimtalkLedgerUnits, ledgerMessageTypeSql } from './deduct-reference';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, smsAlimtalkResultAgg, smsCampaignSubRowCounts, type CampaignAggCounts } from './sms-queue';
 // ★ 2026-07-30 브랜드 SMSQ 합류 — 환불 원장 축(BRAND vs message_type) 판정 CT
@@ -33,7 +33,9 @@ import { isStepCampaignDayClosed } from './journey-step-campaign';
 import { prepaidRefund, prepaidReverseOverRefund, REFUND_KEYS } from './prepaid';
 // ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
 // ★ 2026-06-29: refundInvariantGap — 차감 = 성공 + 순환불 머니 불변식 감시
-import { calcRefundParts, refundInvariantGap, resolveAlimtalkMix, calcAlimtalkUnitDiff } from './refund-calc';
+import { calcRefundParts, refundInvariantGap, resolveAlimtalkMix, calcAlimtalkUnitDiff, isZeroLoadShape, isDeductSettledForZeroLoad } from './refund-calc';
+// ★ 2026-09-26 한줄로 V2 CRASH — 적재 0 고착 정산은 영속 환불 의무로 넘긴다(재시도 워커가 갚는다)
+import { settleZeroLoadAsObligation, countZeroLoadRawRows } from './refund-pending';
 // ★ 2026-06-29: 머니 불변식 위반 시 운영자 LMS 경보 (쿨다운·미설정 시 무발송)
 import { sendSystemAlert } from './system-alert';
 // ★ D182 (2026-05-19): 캠페인 종료 시 회사별 학습 메모리 자동 누적
@@ -86,6 +88,8 @@ interface CampaignRow {
   sent_count: number | null;
   send_phase: string | null;
   send_base: Date | string | null;
+  status: string | null;          // ★ 2026-09-26 한줄로 V2 CRASH — 적재 0 고착 판정(sending·draft·failed)
+  zero_load_settled: boolean | null; // ★ 2026-09-26 CRASH — 이미 의무로 넘긴 캠페인(send_config.zeroLoadSettled)
 }
 
 // ★ 2026-06-13 차등 주기 마커 — 캠페인별 마지막 실집계 시각(메모리).
@@ -113,6 +117,61 @@ async function getUnitPrice(companyId: string, messageType: string, cache: Map<s
 }
 
 /**
+ * 캠페인·축의 차감 원장 행 — 일반 정산과 적재 0 고착 정산이 같은 문장으로 읽는다.
+ * NULL(옛 세대) 행은 기본 축에만 합산한다 — BRAND 원장은 2026-07-29 이후 세대라 NULL이 없다.
+ */
+async function readAxisDeductRows(companyId: string, campaignId: string, axisType: string, referenceType: string) {
+  // ★ 2026-09-27 m067 — 축 조건은 환불 한도(prepaid)와 같은 CT(deduct-reference ledgerMessageTypeSql)
+  return query(
+    `SELECT amount, description, created_at FROM balance_transactions
+     WHERE company_id = $1 AND type = 'deduct' AND reference_type = $4 AND reference_id = $2
+       AND ${ledgerMessageTypeSql(axisType, '$3')}`,
+    [companyId, campaignId, axisType, referenceType]
+  );
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 CRASH(F08·m053·m123 · Codex 1R ①②) — 적재 0 고착 모양의 캠페인을 의무로 넘긴다.
+ * 조건을 **전 축**으로 본다: 모든 축의 차감 행이 30분 지났고, 금액 있는 차감 설명을 전부 되읽을 수 있고,
+ * 전 라인·이력 원행(상태 무관)이 0건일 때만. 하나라도 아니면 이번 사이클은 손대지 않는다(다음 사이클이 다시 본다).
+ * 넘기는 것 = 축별 차감 건수(무료 몫은 돈이 나간 적이 없어 넣지 않는다) · 원인 키 NOT_LOADED.
+ */
+async function settleZeroLoadIfStuck(camp: CampaignRow, tables: string[]): Promise<void> {
+  const ledger = resolveCampaignLedger(camp.send_type, camp.send_channel, camp.message_type);
+  const nowMs = Date.now();
+  const axes: Array<{ count: number; messageType: string; refundKey: string }> = [];
+  let anyDeduct = false;
+  for (const axis of ledger.axes) {
+    const ded = await readAxisDeductRows(camp.company_id, camp.id, axis.type, ledger.referenceType);
+    if (ded.rows.length === 0) continue;
+    anyDeduct = true;
+    if (!isDeductSettledForZeroLoad(ded.rows as any[], nowMs)) return;   // 아직 적재 중일 수 있다
+    let count = 0;
+    for (const d of ded.rows as any[]) {
+      if ((Number(d.amount) || 0) === 0) continue;   // 전량 무료 행 — 돌려줄 돈이 없다
+      const parsed = parseDeductDescription(d.description);
+      if (!parsed) {
+        log(`[적재0고착·보류] campaign=${camp.id} ${axis.type} — 차감 원장 설명을 되읽지 못해 의무 기록을 건너뛴다`);
+        await sendSystemAlert({
+          dedupKey: `zero-load-ledger-unresolved:${camp.id}:${axis.type}`,
+          message: `적재 0 고착 정산 보류 — 차감 원장 설명을 되읽지 못했습니다. campaign=${camp.id} ${axis.type}`,
+        }).catch(() => { /* 경보 실패가 sweep을 막지는 않는다 */ });
+        return;
+      }
+      count += parsed.count;
+    }
+    if (count > 0) axes.push({ count, messageType: axis.type, refundKey: REFUND_KEYS.NOT_LOADED });
+  }
+  if (!anyDeduct) return;   // 차감이 없는 캠페인 = 돌려줄 것도 종결할 이유도 없다
+  if (tables.length === 0) return;
+  // 원행 전체(상태 무관)를 센다 — 재시도 워커의 갚기 직전 재확인과 같은 CT(refund-pending)
+  const raw = await countZeroLoadRawRows(tables, camp.id);
+  if (raw > 0) return;
+  const settled = await settleZeroLoadAsObligation(camp.id, axes);
+  if (settled) log(`[적재0고착] campaign=${camp.id} 차감 뒤 적재 0건(전 라인 원행 0) → 실패 종결 · 환불 의무 ${axes.map((a) => `${a.messageType} ${a.count}건`).join(' + ') || '없음'}`);
+}
+
+/**
  * 1회 sweep 사이클:
  *  1) prepaid 회사 + 14일 내 발송 캠페인 후보 SELECT (PG fail 무관)
  *  2) 회사/유저 그룹별 MySQL 배치 집계 (UNION ALL GROUP BY 효율)
@@ -137,14 +196,18 @@ async function runOnce(): Promise<void> {
     const candidates = await query(`
       SELECT c.id, c.company_id, c.created_by, c.message_type, c.send_channel, c.send_type,
              (c.send_config ? 'journeyLedger') AS journey_ledger,
-             c.success_count, c.fail_count, c.sent_count, c.send_phase,
+             c.success_count, c.fail_count, c.sent_count, c.send_phase, c.status,
+             (c.send_config ? 'zeroLoadSettled') AS zero_load_settled,
              COALESCE(c.scheduled_at, c.sent_at, c.created_at) AS send_base
       FROM campaigns c
       JOIN companies co ON co.id = c.company_id
       WHERE co.billing_type = 'prepaid'
         -- ★ 2026-08-04 대상 상태는 CT(campaign-sweep-scope)가 소유한다 — lifecycle 동기화와
         --   같은 집합을 봐야 한쪽에만 보이는 캠페인이 생기지 않는다. 'failed' 합류 근거도 그 파일에.
-        AND c.status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL})
+        -- ★ 2026-09-26 한줄로 V2 CRASH(F08) — AI 캠페인은 적재가 끝날 때까지 draft다. 차감 뒤 멈추면 draft + 실행 행 sending으로 남아
+        --   후보에 없었다. 그 모양만 더한다(정산은 아래 적재 0 고착이 확인된 때만 · 진행 중 부분 적재는 건드리지 않는다).
+        AND (c.status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL})
+             OR (c.status = 'draft' AND c.id IN (SELECT r.campaign_id FROM campaign_runs r WHERE r.status = 'sending')))
         AND c.message_type IS NOT NULL
         AND COALESCE(c.scheduled_at, c.sent_at, c.created_at) >= NOW() - INTERVAL '14 days'
       ORDER BY c.created_at DESC
@@ -229,6 +292,21 @@ async function runOnce(): Promise<void> {
         const mysqlFail = Number(smsAgg?.fail || 0);
         const mysqlPending = Number(smsAgg?.pending || 0);
 
+        // ★ 2026-09-26 한줄로 V2 CRASH(F08·m053·m123 · Codex 1R ①②) — 적재 0 고착. 동기 경로가 차감 뒤 첫 적재 전에 멈춘 모양이면
+        //   의무로 넘기고 이 캠페인은 여기서 끝낸다(settleZeroLoadIfStuck). 이 모양은 일반 정산이 할 일이 없다:
+        //   처리 0 → 실패·미적재 0 · 회수·불변식은 성공+실패 > 0일 때만. 판정 = refund-calc CT.
+        const zeroShape = isZeroLoadShape({
+          status: camp.status, sendPhase: camp.send_phase, sentCount: camp.sent_count,
+          mysqlTotal: Math.max(Number(smsAgg?.total || 0), mysqlSuccess + mysqlFail + mysqlPending), sendType: camp.send_type,
+          zeroLoadSettled: camp.zero_load_settled === true,
+        });
+        if (zeroShape) {
+          await settleZeroLoadIfStuck(camp, tablesByKey.get(`${camp.company_id}::${camp.created_by || ''}`) || []);
+          continue;
+        }
+        // draft = AI 발송이 아직 적재 중인 모양이다. 고착이 아니면 아무 정산도 하지 않는다(부분 적재를 미적재로 환불하지 않는다).
+        if (camp.status === 'draft') continue;
+
         // === 4-1. PG count 동시 갱신 (화면 보조) — 결과가 하나라도 있을 때만 ===
         // target_count는 절대 건드리지 않음 (protect_completed_target_count trigger 호환)
         // ★ 2026-06-11: sent_count 덮어쓰기 제거 — sent_count는 적재 실측(worker 기록)이 진실.
@@ -289,19 +367,7 @@ async function runOnce(): Promise<void> {
             //   단가를 바꾸면 건수가 부풀어 없는 실패가 환불된다(2026-07-26 패밀리투 83건 622.5원 실측).
             //   정산의 근거는 그 차감이 남긴 값이다.
             //   NULL(옛 세대) 행은 기본 축에만 합산한다 — BRAND 원장은 2026-07-29 이후 세대라 NULL이 없다.
-            const dedRes = axis.type === 'BRAND'
-              ? await query(
-                  `SELECT amount, description, created_at FROM balance_transactions
-                   WHERE company_id = $1 AND type = 'deduct' AND reference_type = $4 AND reference_id = $2
-                     AND message_type = $3`,
-                  [camp.company_id, camp.id, axis.type, ledger.referenceType]
-                )
-              : await query(
-                  `SELECT amount, description, created_at FROM balance_transactions
-                   WHERE company_id = $1 AND type = 'deduct' AND reference_type = $4 AND reference_id = $2
-                     AND (message_type = $3 OR message_type IS NULL)`,
-                  [camp.company_id, camp.id, axis.type, ledger.referenceType]
-                );
+            const dedRes = await readAxisDeductRows(camp.company_id, camp.id, axis.type, ledger.referenceType);
             let dedTotal = 0;
             let parsedCount = 0;
             // ★ 2026-08-05 요금제 무료 제공으로 덮인 건수 — 정산 축은 `부담 = 차감 + 무료`(설계 §5-1-B).
@@ -330,6 +396,7 @@ async function runOnce(): Promise<void> {
             }
             dedTotal = Math.round(dedTotal * 100) / 100;
             const ledgerUnit = allParsed && parsedCount > 0 ? Math.round((dedTotal / parsedCount) * 100) / 100 : null;
+
 
             // 차감은 있는데 되읽지 못했다 = 추측으로 돈을 움직이면 안 되는 상태. 이번 사이클은 건너뛴다.
             // 환불은 idempotent하고 30초마다 다시 도므로, 원인을 고치면 밀린 환불이 자동으로 나간다.

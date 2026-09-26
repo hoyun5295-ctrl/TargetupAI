@@ -47,7 +47,14 @@ async function requireAiOperatorTrialActive(req: Request, res: Response, next: (
   if (req.user?.userType === 'super_admin') {
     return next();
   }
-  const ctx = await loadPlanContext(companyId);
+  // ★ 2026-09-26 한줄로 V2 R285(같은 뿌리) — Express 4는 async 핸들러의 거절을 받지 않는다. 이 조회가 던지면 응답 없이 매달렸다 → JSON 500.
+  let ctx: Awaited<ReturnType<typeof loadPlanContext>>;
+  try {
+    ctx = await loadPlanContext(companyId);
+  } catch (err: any) {
+    console.error('[onboarding] 자격 확인 조회 실패:', err?.message || err);
+    return res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+  }
   if (!ctx?.isAiOperatorTrialActive) {
     return res.status(403).json({
       success: false,

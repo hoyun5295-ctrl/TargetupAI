@@ -12,6 +12,8 @@
 
 import crypto from 'crypto';
 import type { Request } from 'express';
+import { TIMEOUTS } from '../config/defaults';
+import { sendSystemAlert } from './system-alert';
 
 // 이니시스 표준 테스트 영역 (이니시스 공식 매뉴얼 표준 영역)
 const INICIS_TEST_MID = 'INIpayTest';
@@ -57,6 +59,33 @@ function sha256(text: string): string {
   return crypto.createHash('sha256').update(text, 'utf-8').digest('hex');
 }
 
+/**
+ * ★ 2026-09-27 한줄로 V2 R338·A-03 — 결제 콜백 서명값(주문번호별).
+ * 결제창 실패·닫기 콜백과 승인 실패 뒤 실패 기록은 인증 없는 공개 경로라, 주문번호만 알면 남의 대기 주문을 실패·취소로 바꿀 수 있었다.
+ * 주문을 만들 때 서버 비밀(signKey)로 주문번호의 HMAC을 만들어 닫기 URL(cb 쿼리)·merchantData(cb=)에 싣고,
+ * 콜백이 돌려준 값이 맞을 때만 상태를 바꾼다(payments.ts failTrustedCallback). 성공 확정은 승인 + 주문번호·금액 대조가 증명한다.
+ */
+export function signInicisCallback(orderId: string): string {
+  return crypto.createHmac('sha256', getInicisConfig().signKey).update(`inicis-callback:${orderId}`, 'utf-8').digest('hex').slice(0, 32);
+}
+
+export function verifyInicisCallback(orderId: string, token: unknown): boolean {
+  if (typeof token !== 'string' || token.length !== 32 || !orderId) return false;
+  const expected = Buffer.from(signInicisCallback(orderId), 'utf-8');
+  const given = Buffer.from(token, 'utf-8');
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+}
+
+/** 콜백 본문·쿼리에서 서명값을 읽는다 — merchantData 'cb=값' 또는 cb 칸. 없으면 '' */
+export function readInicisCallbackToken(src: Record<string, any> | null | undefined): string {
+  if (!src) return '';
+  const direct = typeof src.cb === 'string' ? src.cb : '';
+  if (direct) return direct.trim();
+  const md = typeof src.merchantData === 'string' ? src.merchantData : '';
+  const m = md.match(/(?:^|&)cb=([0-9a-f]{32})(?:&|$)/);
+  return m ? m[1] : '';
+}
+
 // orderId 영역 생성 (한줄로 영역 prefix + timestamp + random hex)
 export function generateOrderId(): string {
   const ts = Date.now();
@@ -93,6 +122,8 @@ export interface PrepareInicisOutput {
   mKey: string;
   returnUrl: string;
   closeUrl: string;
+  /** ★ 2026-09-27 R338·A-03 콜백 서명값 — 이니시스가 리턴 콜백에 그대로 돌려준다 */
+  merchantData: string;
   stdpayUrl: string;
   currency: 'WON';
   gopaymethod: 'Card';
@@ -114,6 +145,10 @@ export function prepareInicisPayment(input: PrepareInicisInput): PrepareInicisOu
   // mKey 영역 (signKey의 SHA256)
   const mKey = sha256(config.signKey);
 
+  // ★ 2026-09-27 R338·A-03 콜백 서명값 — 닫기 URL 쿼리와 merchantData에 싣는다(서명 대상 필드가 아니라 결제 서명은 그대로)
+  const cb = signInicisCallback(orderId);
+  const closeUrl = `${input.closeUrl}${input.closeUrl.includes('?') ? '&' : '?'}cb=${cb}`;
+
   return {
     mid: config.mid,
     orderId,
@@ -127,7 +162,8 @@ export function prepareInicisPayment(input: PrepareInicisInput): PrepareInicisOu
     verification,
     mKey,
     returnUrl: input.returnUrl,
-    closeUrl: input.closeUrl,
+    closeUrl,
+    merchantData: `cb=${cb}`,
     stdpayUrl: config.stdpayUrl,
     currency: 'WON',
     gopaymethod: 'Card',
@@ -193,6 +229,8 @@ export interface InicisApprovalResult {
   cardName?: string;
   cardQuota?: string;
   totPrice?: string;
+  /** ★ 2026-09-27 m006 승인 응답의 주문번호(MOID) — 확정 때 우리 주문번호와 대조한다(실결제 pg_response 실측으로 칸 이름 확인) */
+  moid?: string;
   raw: Record<string, any>;
 }
 
@@ -276,6 +314,8 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
       body: params.toString(),
+      // ★ 2026-09-27 m008 시간 제한 — 넘으면 아래 catch = 승인 실패 → 호출부가 망취소
+      signal: AbortSignal.timeout(TIMEOUTS.inicisApi),
     });
     const text = await response.text();
     try {
@@ -305,6 +345,7 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
     cardName: json.CARD_Name || json.cardName || json.cardCorpName,
     cardQuota: json.CARD_Quota || json.cardQuota,
     totPrice: json.TotPrice || json.totPrice,
+    moid: json.MOID || json.moid,
     raw: json,
   };
 }
@@ -314,6 +355,7 @@ export async function netCancelInicisPayment(netCancelUrl: string, callback: Ini
   // 망취소 주소 검사(C-14) — 이니시스 주소가 아니면 호출하지 않는다(authToken·서명을 밖으로 보내지 않는다)
   if (!isTrustedInicisUrl(netCancelUrl)) {
     console.error(`[inicis-client] 이니시스가 아닌 netCancelUrl 거절: order=${callback.orderNumber} url=${String(netCancelUrl).slice(0, 200)}`);
+    alertNetCancelFail(callback, '이니시스가 아닌 망취소 주소');
     return false;
   }
   const config = getInicisConfig();
@@ -335,12 +377,30 @@ export async function netCancelInicisPayment(netCancelUrl: string, callback: Ini
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
       body: params.toString(),
+      signal: AbortSignal.timeout(TIMEOUTS.inicisApi),   // ★ 2026-09-27 m008
     });
     const text = await response.text();
     console.log('[inicis-client] netCancel response:', text);
-    return response.ok;
+    // ★ 2026-09-27 PAY Codex 1R — 성공 = 본문 resultCode '0000'(이니시스 매뉴얼 · 요청 format=JSON). HTTP 200만으로는 성공이 아니다.
+    let code = '';
+    try { code = String(JSON.parse(text)?.resultCode ?? ''); } catch { /* JSON 아님 = 실패 */ }
+    const ok = response.ok && code === '0000';
+    if (!ok) alertNetCancelFail(callback, `응답 ${response.status} · resultCode ${code || '(없음)'}`);
+    return ok;
   } catch (err: any) {
     console.error('[inicis-client] netCancel 호출 실패:', err.message || err);
+    alertNetCancelFail(callback, String(err?.message || err));
     return false;
   }
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m007 — 망취소 실패 경보. 승인·확정 실패 뒤 망취소까지 실패하면 카드는 결제됐는데 잔액은 그대로이고
+ * 결제 행은 failed라 아무도 모른다. 호출부가 반환값을 버려도 알 수 있게 망취소 CT 안에서 알린다. 경보 실패가 흐름을 막지 않는다.
+ */
+function alertNetCancelFail(callback: InicisCallbackBody, reason: string): void {
+  void sendSystemAlert({
+    dedupKey: `inicis-netcancel-fail:${callback.orderNumber}`,
+    message: `카드결제 망취소 실패 — 주문 ${callback.orderNumber} (${reason.slice(0, 120)}). 이니시스 관리자에서 거래 취소 여부를 확인해 주세요(카드 결제만 되고 충전은 안 된 상태일 수 있음).`,
+  }).catch(() => undefined);
 }

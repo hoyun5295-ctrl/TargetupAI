@@ -300,7 +300,15 @@ async function ensureEmailAdmin(req: Request, res: Response): Promise<{ companyI
     res.status(403).json({ success: false, error: '회사 관리자 권한이 필요합니다.' });
     return null;
   }
-  const cdpEnabled = await isCdpEnabledForPlan(companyId);
+  // ★ 2026-09-26 한줄로 V2 R285(같은 뿌리) — Express 4는 async 핸들러의 거절을 받지 않는다. 이 조회가 던지면 응답 없이 매달렸다 → JSON 500.
+  let cdpEnabled = false;
+  try {
+    cdpEnabled = await isCdpEnabledForPlan(companyId);
+  } catch (err: any) {
+    console.error('[email] 자격 확인 조회 실패:', err?.message || err);
+    res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+    return null;
+  }
   if (!cdpEnabled) {
     res.status(403).json({ success: false, error: 'Email 캠페인은 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
     return null;
@@ -317,7 +325,15 @@ async function ensureEmailAccess(req: Request, res: Response): Promise<{ company
     res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     return null;
   }
-  const cdpEnabled = await isCdpEnabledForPlan(companyId);
+  // ★ 2026-09-26 한줄로 V2 R285(같은 뿌리) — Express 4는 async 핸들러의 거절을 받지 않는다. 이 조회가 던지면 응답 없이 매달렸다 → JSON 500.
+  let cdpEnabled = false;
+  try {
+    cdpEnabled = await isCdpEnabledForPlan(companyId);
+  } catch (err: any) {
+    console.error('[email] 자격 확인 조회 실패:', err?.message || err);
+    res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+    return null;
+  }
   if (!cdpEnabled) {
     res.status(403).json({ success: false, error: 'Email 캠페인은 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
     return null;

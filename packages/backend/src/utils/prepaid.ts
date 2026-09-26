@@ -3,6 +3,7 @@
 // 포인트 차감/환불은 이 모듈을 통해서만 수행한다.
 // 하드코딩 금지. DB 기반 단가 조회.
 
+import type { PoolClient } from 'pg';
 import pool, { query } from '../config/database';
 import { buildDeductDescription, type AlimtalkSettleUnits } from './deduct-reference';
 // ★ 2026-07-26 단가의 부가세 기준(`companies.unit_price_basis`)을 해석하는 유일한 경로.
@@ -10,7 +11,7 @@ import { buildDeductDescription, type AlimtalkSettleUnits } from './deduct-refer
 //   전환 전 회사는 저장값이 곧 포함가라 이 배선으로 차감액이 바뀌지 않는다.
 import { resolveChargeUnitPrice, resolveChargeUnitPriceDetailed, type BrandPricingInput } from './unit-price';
 import { sendSystemAlert } from './system-alert';
-import { parseDeductDescription, parseFreeCount } from './deduct-reference';
+import { parseDeductDescription, parseFreeCount, ledgerMessageTypeSql } from './deduct-reference';
 // ★ 2026-08-05 요금제 무료 메시징 — 소진 길목은 이 파일 하나다(설계 §5-1).
 //   호출부 11곳에 흩뿌리면 "발송 5경로 부분 패치"가 그대로 재발한다.
 import { isFreeMessagingEligible, consumeFreeQuota, recordFreeAttempt } from './free-messaging';
@@ -46,7 +47,7 @@ async function loadDeductLedger(
   const rows = await db.query(
     `SELECT amount, description FROM balance_transactions
       WHERE company_id = $1 AND type = 'deduct' AND reference_type = $4 AND reference_id = $2
-        AND (message_type = $3 OR message_type IS NULL)`,
+        AND ${ledgerMessageTypeSql(messageType, '$3')}`,
     [companyId, referenceId, messageType, referenceType]
   );
   let totalDeducted = 0;
@@ -128,10 +129,18 @@ export async function prepaidDeduct(
   // ★ 2026-09-26 한줄로 V2 F01·F04 — 알림톡 발송이면 차감 행에 **이 순간의 결과별 정산 단가**(알림톡·SMS·LMS)를 싣는다.
   //   차감은 대체 문자까지 덮는 문자 단가로 하고, 정산(mysql-refund-sweeper)이 결과별 차액을 이 단가로 돌려준다.
   //   세 단가를 차감과 **같은 잠금 행**에서 읽어야 단가를 바꾼 뒤에도 차감과 짝이 맞는다.
-  opts?: { alimtalk?: boolean },
+  // ★ 2026-09-26 한줄로 V2 SQ(Codex 2R ①) — client를 넘기면 **호출자 트랜잭션 안에서** 차감한다.
+  //   차감과 호출자의 행(스팸 검사 행 등)이 한 번에 커밋되어, 둘 사이에 멈춰도 차감만 남지 않는다.
+  //   세이브포인트로 감싸 실패는 차감분만 되돌리고, 호출자 트랜잭션의 커밋·롤백·연결 반납은 호출자가 한다.
+  opts?: { alimtalk?: boolean; client?: PoolClient },
 ): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean; freeUsed?: number }> {
+  const callerClient = opts?.client;
+  const tx = callerClient
+    ? { begin: 'SAVEPOINT prepaid_deduct', commit: 'RELEASE SAVEPOINT prepaid_deduct', rollback: 'ROLLBACK TO SAVEPOINT prepaid_deduct' }
+    : { begin: 'BEGIN', commit: 'COMMIT', rollback: 'ROLLBACK' };
+  const run = (sql: string, params?: any[]) => (callerClient ? callerClient.query(sql, params) : query(sql, params));
   // 후불은 트랜잭션을 열지 않는다 — 발송마다 부르는 경로라 103사(후불)의 비용을 늘리지 않는다.
-  const pre = await query('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
+  const pre = await run('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
   if (pre.rows.length === 0) return { ok: false, error: '회사 정보를 찾을 수 없습니다' };
   // ★ 2026-08-05 후불은 여기서 무료를 소진하지 **않는다**(Codex 1R로 구조 정정).
   //   `used_qty`는 **발송 시도** 기준이라 실패해도 남는데, 후불 청구는 **성공** 기준이다.
@@ -141,7 +150,7 @@ export async function prepaidDeduct(
   if (pre.rows[0].billing_type !== 'prepaid') {
     // 청구 축은 그대로 두고 **표시용 시도 카운터만** 올린다 — 안 올리면 후불 고객 화면이 영원히 0이다.
     if (isFreeMessagingEligible(messageType, referenceType)) {
-      await recordFreeAttempt({ query: (sql: string, params?: any[]) => query(sql, params) }, companyId, messageType, count);
+      await recordFreeAttempt({ query: run }, companyId, messageType, count);
     }
     return { ok: true, amount: 0 };
   }
@@ -150,21 +159,21 @@ export async function prepaidDeduct(
   //   전에는 `query`(=pool.query) 두 문장이라 각각 즉시 커밋됐다 — INSERT가 실패하면
   //   **잔액만 깎이고 차감 이력이 없는** 상태가 남고, 그러면 환불·sweep이 근거를 잃는다.
   //   회사 행을 `FOR UPDATE`로 잠가 같은 회사의 차감·환불이 서로를 덮지 않게 직렬화한다.
-  const client = await pool.connect();
+  const client = callerClient || await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query(tx.begin);
     const co = await client.query(
       `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend
          FROM companies WHERE id = $1 FOR UPDATE`,
       [companyId]
     );
     if (co.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query(tx.rollback);
       return { ok: false, error: '회사 정보를 찾을 수 없습니다' };
     }
     const c = co.rows[0];
     if (c.billing_type !== 'prepaid') {
-      await client.query('ROLLBACK');
+      await client.query(tx.rollback);
       return { ok: true, amount: 0 };
     }
 
@@ -172,7 +181,7 @@ export async function prepaidDeduct(
     //   단가가 비어 있는 선불 회사가 공짜로 발송했다. 명시적 0원 계약은 그대로 통과시킨다.
     const resolved = resolveChargeUnitPriceDetailed(c, messageType, brand);
     if (resolved.unset) {
-      await client.query('ROLLBACK');
+      await client.query(tx.rollback);
       console.error(`[선불차감차단] company=${companyId} ${messageType} 단가 미설정 — 차감 없이 발송되는 것을 막았다`);
       return {
         ok: false,
@@ -202,7 +211,7 @@ export async function prepaidDeduct(
     const totalAmount = Math.round(unitPrice * chargeCount * 100) / 100; // 부동소수점 보정
     if (totalAmount === 0) {
       if (freeUsed <= 0) {
-        await client.query('ROLLBACK');
+        await client.query(tx.rollback);
         return { ok: true, amount: 0 };
       }
       // ★ 전량 무료 — 잔액은 그대로지만 **원장 행은 반드시 남긴다.**
@@ -218,7 +227,7 @@ export async function prepaidDeduct(
           referenceType, referenceId, createdBy || null, messageType,
         ],
       );
-      await client.query('COMMIT');
+      await client.query(tx.commit);
       console.log(`[선불차감] company=${companyId} ${messageType}×${count} 전량 무료 제공 소진 — 과금 0원`);
       return { ok: true, amount: 0, balance: Number(c.balance), freeUsed };
     }
@@ -229,7 +238,7 @@ export async function prepaidDeduct(
       [totalAmount, companyId]
     );
     if (result.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query(tx.rollback);
       return {
         ok: false,
         error: `잔액이 부족합니다. 필요: ${totalAmount.toLocaleString()}원 / 현재: ${Number(c.balance).toLocaleString()}원`,
@@ -251,17 +260,17 @@ export async function prepaidDeduct(
        VALUES ($1, 'deduct', $2, $3, $4, $5, $6, 'system', $7, $8)`,
       [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, chargeCount, unitPrice, freeUsed, alimtalkUnits), referenceType, referenceId, createdBy || null, messageType]
     );
-    await client.query('COMMIT');
+    await client.query(tx.commit);
 
     const freeNote = freeUsed > 0 ? ` (무료 ${freeUsed}건 제외)` : '';
     console.log(`[선불차감] company=${companyId} ${messageType}×${chargeCount}${freeNote} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);
     return { ok: true, amount: totalAmount, balance: Number(result.rows[0].balance), freeUsed };
   } catch (e: any) {
-    try { await client.query('ROLLBACK'); } catch { /* 이미 종료된 트랜잭션 */ }
+    try { await client.query(tx.rollback); } catch { /* 이미 종료된 트랜잭션 */ }
     console.error('[선불차감] 롤백:', e?.message || e);
     return { ok: false, error: '차감 처리 중 오류가 발생했습니다' };
   } finally {
-    client.release();
+    if (!callerClient) client.release();
   }
 }
 
@@ -387,7 +396,7 @@ export async function prepaidRefund(
               COALESCE(SUM(amount) FILTER (WHERE refund_key IS DISTINCT FROM '${REFUND_KEYS.KAKAO_DIFF}'), 0) AS counted
          FROM balance_transactions
         WHERE company_id = $1 AND type = 'refund' AND reference_type = $4 AND reference_id = $2
-          AND (message_type = $3 OR message_type IS NULL)`,
+          AND ${ledgerMessageTypeSql(messageType, '$3')}`,
       [companyId, campaignId, messageType, referenceType, opts.refundKey ?? null]
     );
     const alreadyRefunded = Number(existing.rows[0].total);
@@ -411,7 +420,7 @@ export async function prepaidRefund(
                 COALESCE(SUM(-amount) FILTER (WHERE type = 'admin_deduct' AND description LIKE '%환불 reverse%'), 0) AS reversed
            FROM balance_transactions
           WHERE company_id = $1 AND reference_type = $4 AND reference_id = $2
-            AND (message_type = $3 OR message_type IS NULL)`,
+            AND ${ledgerMessageTypeSql(messageType, '$3')}`,
         [companyId, campaignId, messageType, referenceType]
       );
       const reversed = Number(net.rows[0].reversed);
@@ -567,7 +576,7 @@ export async function prepaidReverseOverRefund(
          COALESCE(SUM(CASE WHEN type = 'refund' AND description LIKE '%타임아웃 실패 환불%' THEN 1 ELSE 0 END), 0) AS timeout_refunds
        FROM balance_transactions
        WHERE company_id = $1 AND reference_type = $4 AND reference_id = $2
-         AND (message_type = $3 OR message_type IS NULL)`,
+         AND ${ledgerMessageTypeSql(messageType, '$3')}`,
       [companyId, campaignId, messageType, referenceType]
     );
     const refunded = Number(agg.rows[0].refunded);
