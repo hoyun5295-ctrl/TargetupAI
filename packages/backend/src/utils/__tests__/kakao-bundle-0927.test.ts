@@ -18,8 +18,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { brandTemplateColumnsFromBody } from '../brand-template-columns';
 
-const src = (...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf8');
+const src =(...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf8');
 
 describe('m048 알림톡 적재 폭', () => {
   it('비토 라인은 테이블 실제 폭 · 1024 하드코딩 제거', () => {
@@ -97,10 +98,8 @@ describe('R088 IMC 성공일 때만 PG 반영', () => {
 });
 
 describe('R089 브랜드 템플릿 수정 → PG 칸', () => {
-  it('보낸 칸만 · 등록과 같은 변환', async () => {
-    vi.resetModules();
-    vi.doMock('../../config/database', () => ({ query: vi.fn(), mysqlQuery: vi.fn() }));
-    const { brandTemplateColumnsFromBody } = await import('../brand-message');
+  // ★ 0927 pre-push 시간 초과 정정 — 순수 CT를 바로 불러온다(옛: 모듈 캐시를 비우고 발송 모듈 전체를 다시 불러와 전체 실행 부하에서 5초 초과)
+  it('보낸 칸만 · 등록과 같은 변환', () => {
     const cols = brandTemplateColumnsFromBody({
       content: '새 본문', buttons: [{ name: 'b' }], variables: ['x'], attachment: null, adult: undefined,
     });
@@ -112,7 +111,6 @@ describe('R089 브랜드 템플릿 수정 → PG 칸', () => {
     expect(by.attachment.value).toBeNull();
     expect(brandTemplateColumnsFromBody({})).toEqual([]);
     expect(brandTemplateColumnsFromBody({ adult: '' })[0]).toEqual({ column: 'adult_yn', value: 'N', cast: '' });
-    vi.doUnmock('../../config/database');
   });
   it('수정 라우트가 IMC 성공 뒤 그 칸을 싣는다', () => {
     const s = src('..', 'routes', 'alimtalk.ts');

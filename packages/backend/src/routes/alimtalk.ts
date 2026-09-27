@@ -16,7 +16,7 @@
 
 import { Request, Response, NextFunction, Router, raw } from 'express';
 // ★ 2026-09-27 한줄로 V2 R089 — 브랜드 템플릿 칸 매핑 CT
-import { brandTemplateColumnsFromBody } from '../utils/brand-message';
+import { brandTemplateColumnsFromBody } from '../utils/brand-template-columns';
 import multer from 'multer';
 import {
   authenticate,
