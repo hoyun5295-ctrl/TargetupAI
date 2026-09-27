@@ -120,24 +120,34 @@ export async function runPushPass(): Promise<PushPassResult> {
   };
 
   let rows: any[];
+  // ★ 2026-09-27 한줄로 V2 R237 — 54 게이트가 꺼져 있으면 54 행을 뽑지 않는다(옛: 뽑고 건너뛰기만 해 updated_at이 그대로라
+  //   오래된 54 pending이 배치 한도 이상이면 매 패스 같은 행만 뽑혀 58 행이 영영 푸시되지 않았다).
+  const allow54 = isGateway54Enabled();
   try {
     const r = await query(
       `SELECT id, bill_id, server, tmplcd, tran_tmplcd, senderkey, billnm, usemod, attempts
          FROM gateway_template_mappings
         WHERE sync_status = 'pending'
           AND (next_retry_at IS NULL OR next_retry_at <= now())
+          AND ($2::boolean OR server <> '54')
         ORDER BY updated_at ASC
         LIMIT $1`,
-      [PUSH_BATCH_LIMIT],
+      [PUSH_BATCH_LIMIT, allow54],
     );
     rows = r.rows;
+    if (!allow54) {
+      // 보류 건수 표시(종전 held54 의미 유지) — 뽑지 않은 54 pending 수
+      const h = await query(
+        `SELECT COUNT(*)::int AS n FROM gateway_template_mappings WHERE sync_status = 'pending' AND server = '54'`,
+      );
+      result.held54 = Number(h.rows[0]?.n) || 0;
+    }
   } catch (err: any) {
     if (isMissingRelationError(err)) return { ...result, skipped: true };
     throw err;
   }
 
   result.picked = rows.length;
-  const allow54 = isGateway54Enabled();
 
   for (const row of rows) {
     const server = String(row.server) as GatewayServer;

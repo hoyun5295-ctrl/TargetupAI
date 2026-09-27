@@ -93,8 +93,8 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
 
   // 2. 30일 성공 캠페인 history
   const campaignsRes = await query(
-    `SELECT name, message_content, sent_at,
-            (SELECT COUNT(*) FROM campaign_runs WHERE campaign_id = c.id AND status_code IN ('1000', '2000')) AS success_count
+    // ★ 2026-09-27 한줄로 V2 R082 — 실존 칸(campaign_name · 캠페인 성공 수). 옛: campaigns.name · campaign_runs.status_code(없는 칸)라 늘 500.
+    `SELECT campaign_name AS name, message_content, sent_at, COALESCE(success_count, 0) AS success_count
      FROM campaigns c
      WHERE company_id = $1::uuid AND status = 'completed'
        AND sent_at > NOW() - INTERVAL '30 days'
@@ -130,8 +130,8 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
   const statsRes = await query(
     `SELECT COUNT(*) AS total,
             COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in,
-            AVG((custom_fields->>'purchase_count')::numeric) AS avg_purchase,
-            AVG((custom_fields->>'total_spent')::numeric) AS avg_spent
+            AVG(purchase_count) AS avg_purchase,
+            AVG(total_purchase_amount) AS avg_spent
      FROM customers WHERE company_id = $1::uuid AND is_active = true`,
     [companyId]
   );

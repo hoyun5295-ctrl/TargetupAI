@@ -89,6 +89,7 @@ export const COMMON_SERVICE_LINE = '스타터부터 AI 전 기능 · 전 채널 
 export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   orchestrate: '풀분석', orchestrateWithAI: '풀분석',
   'ai-operator-propose': '문안·분석', 'ai-operator-decorate': '꾸미기',
+  'ai-operator-explain': '근거 분석',   // ★ 2026-09-27 한줄로 V2 R082 — AI 근거 질의(고급 모델 분석 5)
   'journey-ai-generate': '여정 생성', 'journey-builder-custom': '여정 생성',
   'journey-activate': '여정 활성화', 'journey-operation': '여정 운영',
   'continuous-operator': '자동 마케팅', 'continuous-operator-send': '자동 마케팅 발송',

@@ -66,7 +66,7 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
       `SELECT id, company_id, created_by, target_spec, subject, html_body, text_body
        FROM email_campaigns
        WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()
-       ORDER BY scheduled_at ASC LIMIT 5`,
+       ORDER BY COALESCE(updated_at > scheduled_at AND updated_at > NOW() - INTERVAL '2 minutes', false) ASC, scheduled_at ASC LIMIT 5`,
     );
     dueRows = res.rows;
   } catch (err: any) {
@@ -102,7 +102,23 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
       continue;
     }
 
-    const recipients = await resolveRecipients(companyId, spec, row.created_by || null);
+    // ★ 2026-09-27 한줄로 V2 R231 — 선점 뒤 수신자 해석이 예외면 예약으로 되돌려 다음 주기에 다시 시도한다.
+    //   되돌린 행은 2분 동안만 위 정렬에서 뒤로 간다 — 가장 오래된 5칸을 차지해 정상 예약을 막지 않고(Codex 1R),
+    //   2분 뒤엔 오래된 순으로 다시 앞에 서서 새 예약에 밀려 무기한 대기하지 않는다(Codex 2R). 1시간이 지나면 아래가 failed로 끝낸다.
+    //   옛: 예외가 사이클 전체를 끊고 이 행은 sending에 30분 멈췄다가 failed(재시도 없음). 예약 시각 1시간이 지나면 failed.
+    let recipients: EmailRecipient[] = [];
+    try {
+      recipients = await resolveRecipients(companyId, spec, row.created_by || null);
+    } catch (e: any) {
+      console.error(`[email-send-sweeper] 수신자 해석 실패 — 다음 주기 재시도 (campaign ${campaignId}):`, e?.message);
+      await query(
+        `UPDATE email_campaigns
+            SET status = CASE WHEN scheduled_at < NOW() - INTERVAL '1 hour' THEN 'failed' ELSE 'scheduled' END, updated_at = NOW()
+          WHERE id = $1::uuid AND status = 'sending'`,
+        [campaignId],
+      ).catch(() => { /* 정체 복구(②)가 후위 안전망 */ });
+      continue;
+    }
     if (recipients.length === 0) {
       // Zero-Count — 발송 대상 0건이면 발송하지 않고 failed (자동 완화 금지 원칙)
       await query(

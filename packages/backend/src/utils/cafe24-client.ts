@@ -36,6 +36,7 @@ import {
 } from './provider-registry';
 import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
+import { orderExternalId } from './cdp-order-identity';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { buildCafe24AuthorizeUrl as buildCafe24Url } from './provider-oauth-url';
@@ -271,18 +272,18 @@ export async function getCafe24Integration(companyId: string, mallId?: string): 
 
 /**
  * mall_id로 회사 식별 (Webhook receiver용).
+ * ★ 2026-09-27 한줄로 V2 R098 — 같은 몰이 여러 회사에 연동돼 있으면 **전부** 돌려준다(웹훅은 회사마다 전달 · cdp-webhook-delivery).
+ *   옛: LIMIT 1(정렬 없음)이라 임의 한 회사로만 갔다.
  */
-export async function getCafe24IntegrationByMallId(mallId: string): Promise<Cafe24Integration | null> {
+export async function getCafe24IntegrationsByMallId(mallId: string): Promise<Cafe24Integration[]> {
   const result = await query(
     `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
      FROM company_integrations
      WHERE provider = 'cafe24' AND mall_id = $1 AND status = 'active'
-     LIMIT 1`,
+     ORDER BY connected_at DESC NULLS LAST`,
     [mallId]
   );
-  if (result.rows.length === 0) return null;
-  const r = result.rows[0];
-  return {
+  return result.rows.map((r: any) => ({
     id: r.id,
     companyId: r.company_id,
     mallId: r.mall_id,
@@ -292,7 +293,7 @@ export async function getCafe24IntegrationByMallId(mallId: string): Promise<Cafe
     scope: r.scope || '',
     webhookSecret: r.webhook_secret,
     status: r.status,
-  };
+  }));
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -673,7 +674,8 @@ export const cafe24Adapter: IProviderAdapter = {
         await syncOrder(companyId, {
           source: 'cafe24',
           orderId: String(resource.order_id || ''),
-          externalId: String(resource.member_id || resource.customer_id || ''),
+          // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
+          externalId: orderExternalId(resource.member_id || resource.customer_id, resource.buyer_cellphone || resource.buyer_phone, resource.order_id),
           email: resource.buyer_email,
           phone: resource.buyer_cellphone || resource.buyer_phone,
           name: resource.buyer_name,
@@ -698,7 +700,8 @@ export const cafe24Adapter: IProviderAdapter = {
         await syncOrder(companyId, {
           source: 'cafe24',
           orderId: String(resource.order_id || ''),
-          externalId: String(resource.member_id || resource.customer_id || ''),
+          // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
+          externalId: orderExternalId(resource.member_id || resource.customer_id, resource.buyer_cellphone || resource.buyer_phone, resource.order_id),
           email: resource.buyer_email,
           phone: resource.buyer_cellphone || resource.buyer_phone,
           name: resource.buyer_name,

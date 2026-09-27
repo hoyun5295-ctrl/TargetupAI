@@ -31,7 +31,7 @@ const THRESHOLD_OPTIONS: Array<{ value: 50 | 80 | 95; label: string; tone: strin
 const CHANNEL_OPTIONS: Array<{ value: 'email' | 'sms' | 'inapp'; label: string; icon: typeof Mail; description: string }> = [
   { value: 'email', label: '이메일',  icon: Mail,        description: '회사 admin 이메일로 발송' },
   { value: 'sms',   label: 'SMS',     icon: MessageSquare, description: '회사 admin 휴대폰으로 발송' },
-  { value: 'inapp', label: '앱 알림', icon: Smartphone,  description: '앱 내 알림 센터에 표시' },
+  { value: 'inapp', label: '앱 알림', icon: Smartphone,  description: 'AI 사용량 화면에 표시' },
 ];
 
 export default function ThresholdAlertModal({ open, onClose, initial, onSave }: Props) {

@@ -97,6 +97,8 @@ export async function callAIWithFallback(params: {
   userId?: string;  // 차감 이력 created_by
   // ★ 2026-07-08 vision — 행사 이미지 판독 등 이미지 입력(base64). 미지정 시 기존 텍스트 전용 동작 불변. images 있으면 cache 우회.
   images?: Array<{ media_type: string; data: string }>;
+  // ★ 2026-09-27 한줄로 V2 R246 — 이 호출의 응답을 5분 캐시에 넣지도 꺼내지도 않는다(호출부가 응답을 검증한 뒤에만 쓰는 경우 · 기본 = 종전)
+  noCache?: boolean;
 }): Promise<string> {
   const system = withCopyRules(params.system);  // ★ 2026-08-21 공통 문장 부호 규칙(캐시키·Claude·GPT 폴백 전부 같은 system)
   // ★ D227+ 종량제: 작업당 크레딧 (creditCost 우선, 없으면 source 맵).
@@ -104,7 +106,7 @@ export async function callAIWithFallback(params: {
   const creditCost = isInCreditBundle() ? 0 : (params.creditCost ?? getCreditCost(params.source));
   // ★ 2026-07-08 vision 요청 여부 — 이미지 포함 시 cache 우회(이미지 데이터가 cacheKey에 안 담겨 서로 다른 이미지가 충돌). 차감·통계는 그대로 유지.
   const hasImages = !!(params.images && params.images.length);
-  const skipCache = hasImages;
+  const skipCache = hasImages || params.noCache === true;
   // ★ D209+ Phase D: Rate limit 검증 + cache 조회 (companyId 박힘 영역만)
   let cacheKey: string | null = null;
   if (params.companyId) {

@@ -27,6 +27,20 @@ export function renderEmailText(text: string, customer: Record<string, any>): st
   return renderLiquid(text, { customer: flattenCustomerForLiquid(customer) }).rendered;
 }
 
+/**
+ * ★ 2026-09-27 한줄로 V2 R404(Codex 차수3 2R) — 고객 변수({{ customer.X }}·조건문)만 렌더하고 keepKeys 토큰
+ *   ({{이름}}·substitutions 키·수신거부 마커)은 원문 그대로 남긴다. 호출부가 그 뒤에 값을 넣는다.
+ *   순서가 핵심이다 — 값을 먼저 넣고 렌더하면 넣은 값({% if false %} 같은 이름)이 템플릿으로 다시 해석돼
+ *   뒤의 수신거부 안내까지 지운다. 렌더 뒤에 넣은 값은 다시 파싱하지 않는다.
+ *   customer 값의 이스케이프(HTML 문맥)는 호출부 몫이다.
+ */
+export function renderEmailTextKeepingTokens(text: string, customer: Record<string, any>, keepKeys: string[]): string {
+  if (!text) return text;
+  const keep = new Set(keepKeys.map((k) => String(k).trim()));
+  const guarded = text.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (m, key) => (keep.has(String(key).trim()) ? `\u0001${String(key).trim()}\u0002` : m));
+  return renderEmailText(guarded, customer).replace(/\u0001([^\u0001\u0002]*)\u0002/g, (_m, key) => `{{${key}}}`);
+}
+
 /** 구조화 조건 평가 — 고객 필드 vs 값. 필드 없으면 빈 문자로 안전 비교. */
 export function evalDisplayCondition(
   cond: NonNullable<Section['display_condition']>,

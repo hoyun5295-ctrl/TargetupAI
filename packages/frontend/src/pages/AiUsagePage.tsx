@@ -9,7 +9,7 @@ import OperatorAura from '../components/operator/OperatorAura';
  *   1. sticky 헤더 (TrendingUp emerald→cyan + BETA + 뒤로가기)
  *   2. AI 자율 진단 카드 (overview.top_insight 한 줄)
  *   3. 자연어 입력 + 빠른 시작 5 카드
- *   4. 5 metric 요약 + 전월 대비 격차
+ *   4. 5 metric 요약 + 지난달 같은 기간 대비 격차
  *   5. AI 비용 예측 라인 차트 (CostForecastChart)
  *   6. 1-click 액션 3 카드 (예측 / Batch 가이드 / 한도 알림)
  *   7. 자세히 분석 토글 (4 차트)
@@ -514,7 +514,7 @@ export default function AiUsagePage() {
             </div>
           </div>
           <div className="text-[10px] text-white/30 italic mt-3">
-            Data source: ai_call_log + plans.ai_calls_per_month + cache 통계 (5분 TTL) + 전월 대비 격차
+            Data source: ai_call_log + plans.ai_calls_per_month + cache 통계 (5분 TTL) + 지난달 같은 기간 대비 격차
           </div>
         </div>
 
@@ -606,7 +606,7 @@ export default function AiUsagePage() {
           </div>
         )}
 
-        {/* ───────── 4. 5 metric 요약 + 전월 대비 ───────── */}
+        {/* ───────── 4. 5 metric 요약 + 지난달 같은 기간 대비(R074) ───────── */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           <MetricCard
             icon={Calendar}
@@ -616,7 +616,7 @@ export default function AiUsagePage() {
             gradient="from-cyan-400 to-sky-500"
             footer={overview && overview.prev_month_delta_percent !== null
               ? <DeltaChip delta={overview.prev_month_delta_percent} />
-              : <span className="text-[10px] text-white/40">전월 대비 데이터 없음</span>}
+              : <span className="text-[10px] text-white/40">지난달 같은 기간 데이터 없음</span>}
           />
           <MetricCard
             icon={Gauge}
@@ -737,6 +737,15 @@ export default function AiUsagePage() {
             {overview?.threshold_config?.enabled && !migrationPending && (
               <div className="text-[10px] text-emerald-300 mt-1.5">
                 활성: {overview.threshold_config.threshold_percent}% / {(overview.threshold_config.channels || []).length}개 채널
+              </div>
+            )}
+            {/* ★ 2026-09-27 R075 — '앱 알림' 채널 = 이 화면 표시: 이번 달 사용률이 설정한 기준 이상이면 알린다 */}
+            {overview?.threshold_config?.enabled && !migrationPending
+              && (overview.threshold_config.channels || []).includes('inapp')
+              && overview.monthly_limit !== null
+              && overview.monthly_percent >= Number(overview.threshold_config.threshold_percent || 0) && (
+              <div className="text-[10px] text-amber-300 mt-1">
+                이번 달 사용량이 알림 기준 {overview.threshold_config.threshold_percent}%에 도달했습니다
               </div>
             )}
           </button>
@@ -917,12 +926,12 @@ function MetricCard({ icon: Icon, label, value, unit, gradient, footer }: Metric
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 전월 대비 격차 chip
+// 지난달 같은 기간 대비 격차 chip
 // ════════════════════════════════════════════════════════════════════
 
 function DeltaChip({ delta }: { delta: number }) {
   if (delta === 0) {
-    return <span className="text-[10px] text-white/40">전월 대비 변동 없음</span>;
+    return <span className="text-[10px] text-white/40">지난달 같은 기간 대비 변동 없음</span>;
   }
   const isUp = delta > 0;
   const Icon = isUp ? TrendingUp : TrendingDown;
@@ -930,7 +939,7 @@ function DeltaChip({ delta }: { delta: number }) {
   return (
     <span className={`text-[10px] ${tone} flex items-center gap-0.5`}>
       <Icon className="w-2.5 h-2.5" />
-      전월 대비 {isUp ? '+' : ''}{delta}%
+      지난달 같은 기간 대비 {isUp ? '+' : ''}{delta}%
     </span>
   );
 }

@@ -644,7 +644,9 @@ export async function createInAppMessage(
       companyId, createdBy, composed?.title || input.title, composed?.body || input.body,
       resolveActionUrlPatch(input).value, input.actionLabel || '자세히 보기',
       position, input.backgroundColor || '#4f46e5', input.textColor || '#ffffff',
-      input.triggerEvent || 'page_load', frequency,
+      // ★ 2026-09-27 한줄로 V2 R247 — 트리거가 따로 안 오면 trigger_conditions.event(화면 저장 경로와 같은 규칙).
+      //   옛: page_load로 고정돼 AI가 고른 트리거와 무관하게 모든 페이지 로드에 노출됐다(플래너 제작 경로).
+      input.triggerEvent || (typeof (input.trigger_conditions as any)?.event === 'string' ? (input.trigger_conditions as any).event : '') || 'page_load', frequency,
       input.startAt || null, input.endAt || null,
       input.status || 'active', channel,
       template, composed ? composed.imageUrl : (input.image_url || null),
@@ -1235,11 +1237,18 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
   // Step 2 — customer ID 매핑 (외부 ID → customer_id)
   let customerId: string | null = null;
   if (input.externalId) {
-    const linkR = await query(
-      `SELECT customer_id FROM cdp_identity_links
-       WHERE company_id = $1::uuid AND external_id = $2 LIMIT 1`,
-      [input.companyId, input.externalId]
-    );
+    // ★ 2026-09-27 한줄로 V2 R255 — 출처(source)를 함께 본다(아래 opt_out 조회와 같은 축). 옛: 몰 두 곳에서 같은 회원번호면 다른 고객으로 매칭됐다.
+    const linkR = input.source
+      ? await query(
+          `SELECT customer_id FROM cdp_identity_links
+           WHERE company_id = $1::uuid AND external_id = $2 AND source = $3 LIMIT 1`,
+          [input.companyId, input.externalId, input.source]
+        )
+      : await query(
+          `SELECT customer_id FROM cdp_identity_links
+           WHERE company_id = $1::uuid AND external_id = $2 LIMIT 1`,
+          [input.companyId, input.externalId]
+        );
     if (linkR.rows.length > 0 && linkR.rows[0].customer_id) {
       customerId = String(linkR.rows[0].customer_id);
     }

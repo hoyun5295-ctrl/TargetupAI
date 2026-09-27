@@ -29,11 +29,11 @@ import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed
 import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
-import { getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
+import { getMonthlyUsage, getDailyUsage, getModelBreakdown, checkAiRateLimit, AiRateLimitExceeded, recordAiCall } from '../utils/ai-rate-limit';
 import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ 크레딧 종량제 — 여정 저장(활성화) 등 endpoint 직접 차감용 (callAIWithFallback 경유 외)
-import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey, settleCreditAfterSuccess } from '../utils/ai-credit';
 // ★ 2026-09-27 한줄로 V2 R079 — 묶음 과금 안의 AI 호출은 따로 차감하지 않는다
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import { randomUUID } from 'crypto';
@@ -141,7 +141,7 @@ import { suggestJourneyTrigger } from '../utils/journey-trigger-suggest';
 import { editJourneyPackage } from '../utils/journey-ai-editor';
 // ★ 2026-06-29: AI 꾸미기 — 추천 메시지에 선택 컬럼(%변수%) 자연스럽게 녹임
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
-import { buildJourneyPreviewSamples, countJourneyTargetCustomers, selectAnchorAudienceIds } from '../utils/journey-target-extractor';
+import { buildJourneyPreviewSamples, countJourneyTargetCustomers, selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from '../utils/journey-target-extractor';
 import { describeJourneyTrigger } from '../utils/journey-step-format';
 import { normalizeStartKind } from '../utils/journey-start-kind';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
@@ -288,8 +288,8 @@ router.post('/generate-message', async (req: Request, res: Response) => {
 
     const statsResult = await query(
       `SELECT 
-        AVG((custom_fields->>'purchase_count')::numeric) as avg_purchase_count,
-        AVG((custom_fields->>'total_spent')::numeric) as avg_total_spent
+        AVG(purchase_count) as avg_purchase_count,
+        AVG(total_purchase_amount) as avg_total_spent
        FROM customers WHERE company_id = $1 AND is_active = true`,
       [companyId]
     );
@@ -313,14 +313,16 @@ router.post('/generate-message', async (req: Request, res: Response) => {
     // ★ D120: 고객사 최근 실제 발송 성공 문안 자동 조회 — AI few-shot 학습용
     // spam_filter_tests가 아닌 campaigns(실제 발송 성공)에서 가져와야 검증된 문안만 포함
     // ★ D144: PG success_count 캐시 의존 제거 — status='completed'+sent_at 30일 조건만으로 충분
+    // ★ 2026-09-27 한줄로 V2 R291 — 최근 발송 순(같은 문안은 한 번 · 옛: 가나다순이라 '최근' 문안이 아니었다)
     const recentMsgResult = await query(`
-      SELECT DISTINCT message_content as content
+      SELECT message_content as content
       FROM campaigns
       WHERE company_id = $1 AND status = 'completed'
         AND message_content IS NOT NULL
         AND LENGTH(message_content) > 30
         AND sent_at > NOW() - INTERVAL '30 days'
-      ORDER BY content
+      GROUP BY message_content
+      ORDER BY MAX(sent_at) DESC
       LIMIT 10
     `, [companyId]);
     const recentMessages: string[] = recentMsgResult.rows.map((r: any) => r.content);
@@ -420,8 +422,8 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
         COUNT(*) FILTER (WHERE gender = ANY($${baseParams.length + 1}::text[])) as male_count,
         COUNT(*) FILTER (WHERE gender = ANY($${baseParams.length + 2}::text[])) as female_count,
-        AVG((custom_fields->>'purchase_count')::numeric) as avg_purchase_count,
-        AVG((custom_fields->>'total_spent')::numeric) as avg_total_spent
+        AVG(purchase_count) as avg_purchase_count,
+        AVG(total_purchase_amount) as avg_total_spent
        FROM customers
        WHERE company_id = $1 AND is_active = true${storeFilter}`,
       [...baseParams, getGenderVariants('M'), getGenderVariants('F')]
@@ -1056,13 +1058,15 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
     // D120 패턴 미러 — 회사별 최근 발송 문안 10개 (campaigns.message_content, 30일, status='completed', LENGTH > 30)
     //   AI few-shot 학습용 — 각 회사 톤/스타일 자동 반영해서 다듬기 품질 향상.
     const recentMsgResult = await query(
-      `SELECT DISTINCT message_content AS content
+      // ★ 2026-09-27 한줄로 V2 R291 — 최근 발송 순(같은 문안은 한 번)
+      `SELECT message_content AS content
          FROM campaigns
         WHERE company_id = $1 AND status = 'completed'
           AND message_content IS NOT NULL
           AND LENGTH(message_content) > 30
           AND sent_at > NOW() - INTERVAL '30 days'
-        ORDER BY content
+        GROUP BY message_content
+        ORDER BY MAX(sent_at) DESC
         LIMIT 10`,
       [companyId],
     );
@@ -1349,8 +1353,8 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
          COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
          COUNT(*) FILTER (WHERE gender = 'M') as male_count,
          COUNT(*) FILTER (WHERE gender = 'F') as female_count,
-         AVG((custom_fields->>'purchase_count')::numeric) as avg_purchase_count,
-         AVG((custom_fields->>'total_spent')::numeric) as avg_total_spent
+         AVG(purchase_count) as avg_purchase_count,
+         AVG(total_purchase_amount) as avg_total_spent
        FROM customers WHERE company_id = $1 AND is_active = true`,
       [companyId]
     );
@@ -3119,8 +3123,8 @@ router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) 
     const statsRes = await query(
       `SELECT COUNT(*) AS total,
               COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in_count,
-              AVG((custom_fields->>'purchase_count')::numeric) AS avg_purchase_count,
-              AVG((custom_fields->>'total_spent')::numeric) AS avg_total_spent
+              AVG(purchase_count) AS avg_purchase_count,
+              AVG(total_purchase_amount) AS avg_total_spent
        FROM customers WHERE company_id = $1::uuid AND is_active = true`,
       [companyId]
     );
@@ -3310,6 +3314,11 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
 추측/창작 X. document에 없는 내용은 "정보가 없습니다"로 응답.
 한국어 존댓말 (~입니다 / ~합니다).`;
 
+    // ★ 2026-09-27 한줄로 V2 R082 — 이 호출은 AI 관문(services/ai)을 거치지 않아 월 호출 한도·크레딧이 없었다.
+    //   한도·잔액을 먼저 보고 호출 · 성공 뒤 1회 차감(단가표 5 = R1-20 선례).
+    await checkAiRateLimit(companyId);
+    const explainCost = getCreditCost('ai-operator-explain');
+    await checkCredit(companyId, explainCost);
     const answer = await callAIWithCitations({
       model: 'opus',
       system: systemPrompt,
@@ -3317,6 +3326,10 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
       documents,
       maxTokens: 1500,
     });
+    // ★ 2026-09-27 한줄로 V2 R082(Codex 차수3 1R) — 월 호출 기록(한도는 ai_call_log로 센다 · 옛: 기록이 없어 한도를 소진하지 않았다)
+    await recordAiCall({ companyId, source: 'ai-operator-explain', modelType: 'opus', success: true });
+    // 차감 확정 — 동시 요청에 잔액이 먼저 쓰였으면 결과를 내주지 않는다(402 · Codex 차수3 D 1R)
+    await settleCreditAfterSuccess({ companyId, cost: explainCost, source: 'ai-operator-explain', idempotencyKey: `ai-explain:${randomUUID()}` });
 
     return res.json({
       success: true,
@@ -3325,6 +3338,8 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
       document_titles: documents.map((d) => d.title),
     });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDIT', error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.' });
+    if (err instanceof AiRateLimitExceeded) return res.status(429).json({ success: false, code: 'AI_RATE_LIMIT', error: err.message });
     console.error('[AI Operator explain] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '분석 실패' });
   }
@@ -3642,11 +3657,12 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
     }
 
     // ★ 매장번호 발송(store 모드) 미등록 회신번호 pre-flight — 미등록이 있으면 확인 모달 요청(활성화 보류).
+    // ★ 2026-09-27 한줄로 V2 R296 — 대상 전체(미리보기 수와 같은 상한 JOURNEY_COUNT_CAP)를 본다. 옛: 앞 1,000명만 봐 실패 예정 인원을 적게 말했다.
     //   실제 발송 시 실행기가 미등록 store_phone을 자동 실패 처리하므로, 활성화 전 사용자에게 실패 예정 인원 고지.
     const confirmCbExcl = !!(req.body && (req.body as any).confirmCallbackExclusion);
     if (stRow.rows[0].callback_mode === 'store' && stRow.rows[0].trigger_event && !confirmCbExcl) {
       try {
-        const cbIds = await selectJourneyTargetCustomerIds(companyId, stRow.rows[0].trigger_event, stRow.rows[0].trigger_filters || {}, 1000, undefined, undefined, await getJourneyOwnerScopeSql(companyId, req.params.id));
+        const cbIds = await selectJourneyTargetCustomerIds(companyId, stRow.rows[0].trigger_event, stRow.rows[0].trigger_filters || {}, JOURNEY_COUNT_CAP, undefined, undefined, await getJourneyOwnerScopeSql(companyId, req.params.id));
         if (cbIds.length > 0) {
           const cbCust = await query(
             `SELECT store_phone, callback, custom_fields FROM customers WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
@@ -4166,13 +4182,22 @@ router.patch('/operator/journeys/:id/auto-reentry', async (req: Request, res: Re
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     const enabled = !!req.body?.enabled;
+    // ★ 2026-09-27 한줄로 V2 R298 — 켜기는 옵션 변경 규칙과 같게: 운영 중이면 막고(먼저 일시정지) 사전검사 통과를 무효로 한다.
+    //   끄기는 발송을 줄이는 방향이라 언제든 허용(목표 자동 종료 토글과 같은 예외). 옛: 상태·사전검사 없이 운영 중 여정의 재진입 구성을 바꿨다.
     const r = await query(
-      `UPDATE journeys SET auto_reentry_enabled = $3, updated_at = NOW()
+      `UPDATE journeys SET auto_reentry_enabled = $3,
+              last_pretest_passed_at = CASE WHEN $3 THEN NULL ELSE last_pretest_passed_at END,
+              updated_at = NOW()
        WHERE id = $1::uuid AND company_id = $2::uuid
+         AND (NOT $3 OR status <> 'active')
        RETURNING id, auto_reentry_enabled, allow_reentry, reentry_cooldown_days`,
       [req.params.id, companyId, enabled]
     );
     if (r.rows.length === 0) {
+      const exists = await query(`SELECT 1 FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
+      if (exists.rows.length > 0) {
+        return res.status(400).json({ success: false, error: '운영 중인 여정은 자동 재진입을 켤 수 없습니다. 먼저 일시정지해 주세요.' });
+      }
       return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
     }
     return res.json({
@@ -5080,6 +5105,8 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
 
     // 영역별 매칭 customer 카운트 + AI Operator orchestrate 영역 prefill 안내
     let targetCount = 0;
+    // ★ 2026-09-27 한줄로 V2 R084 — 목표 문장에 인원수를 넣지 않는다. 예측은 대상 선정에 쓰지 않는다(만든 자동마케팅의 실제 대상은
+    //   그 설정이 정한다) — "N명에게"라고 약속하면 실제 대상과 어긋난다. 예측 규모는 targetCount로만 따로 돌려준다(참고 표시).
     let objective = '';
     let targetFilters: Record<string, any> = {};
     let suggestedChannel = 'sms';
@@ -5092,7 +5119,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `이탈 위험 70% 이상 고객 ${targetCount.toLocaleString()}명에게 회복 캠페인. 자주 반응한 채널과 감성적인 메시지로 다시 찾게 만듭니다.`;
+      objective = `이탈 위험 70% 이상 고객에게 회복 캠페인. 자주 반응한 채널과 감성적인 메시지로 다시 찾게 만듭니다.`;
       targetFilters = { predictive_churn_risk_min: 0.7 };
       suggestedChannel = 'lms';
       suggestedTone = '감성적';
@@ -5103,7 +5130,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `구매 가능성 60% 이상 고객 ${targetCount.toLocaleString()}명에게 추천 상품 캠페인. 다음 구매 예측 시점 직전에 발송하면 효과적입니다.`;
+      objective = `구매 가능성 60% 이상 고객에게 추천 상품 캠페인. 다음 구매 예측 시점 직전에 발송하면 효과적입니다.`;
       targetFilters = { predictive_purchase_likelihood_min: 0.6 };
       suggestedChannel = 'sms';
       suggestedTone = '실용적';
@@ -5120,7 +5147,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId, avgLtv * 2]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `예측 LTV 상위 고객 ${targetCount.toLocaleString()}명에게 VIP 전용 혜택과 감사 인사 캠페인. 평균의 두 배가 넘는 핵심 고객층입니다.`;
+      objective = `예측 LTV 상위 고객에게 VIP 전용 혜택과 감사 인사 캠페인. 평균의 두 배가 넘는 핵심 고객층입니다.`;
       targetFilters = { predictive_ltv_365d_min: avgLtv * 2 };
       suggestedChannel = 'kakao';
       suggestedTone = '감성적';
@@ -5132,7 +5159,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `아직 첫 구매를 하지 않은 고객 ${targetCount.toLocaleString()}명에게 환영·첫 거래 유도 캠페인. 부담 없는 첫 메시지로 거래를 트는 데 집중합니다.`;
+      objective = `아직 첫 구매를 하지 않은 고객에게 환영·첫 거래 유도 캠페인. 부담 없는 첫 메시지로 거래를 트는 데 집중합니다.`;
       targetFilters = { purchase_count_max: 0 };
       suggestedChannel = 'sms';
       suggestedTone = '친근한';
@@ -5143,7 +5170,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `메시지에 잘 반응하는 고객 ${targetCount.toLocaleString()}명에게 신상품·이벤트 우선 알림. 클릭 가능성이 높아 반응을 빠르게 끌어낼 수 있습니다.`;
+      objective = `메시지에 잘 반응하는 고객에게 신상품·이벤트 우선 알림. 클릭 가능성이 높아 반응을 빠르게 끌어낼 수 있습니다.`;
       targetFilters = { predictive_click_score_min: 0.5 };
       suggestedChannel = 'sms';
       suggestedTone = '활기찬';
@@ -5154,7 +5181,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `2주 안에 다시 살 것으로 예측되는 고객 ${targetCount.toLocaleString()}명에게 적시 추천 캠페인. 구매 직전 타이밍에 추천 상품을 보냅니다.`;
+      objective = `2주 안에 다시 살 것으로 예측되는 고객에게 적시 추천 캠페인. 구매 직전 타이밍에 추천 상품을 보냅니다.`;
       targetFilters = { predictive_next_purchase_days_max: 14 };
       suggestedChannel = 'sms';
       suggestedTone = '실용적';

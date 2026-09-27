@@ -104,6 +104,11 @@ export function replaceBlockTexts(parentBlocks: any, title: string, body: string
   return copy;
 }
 
+/** ★ 2026-09-27 한줄로 V2 R257 — 변형에서 다시 변형을 만들려는 요청(라우트 400) */
+export class VariantOfVariantError extends Error {
+  constructor() { super('변형 메시지에서는 다시 변형을 만들 수 없어요. 원본 메시지에서 실행해 주세요.'); this.name = 'VariantOfVariantError'; }
+}
+
 // ════════════════════════════════════════════════════════════════════
 // Variant CRUD
 // ════════════════════════════════════════════════════════════════════
@@ -120,7 +125,7 @@ export async function createVariant(
   if (!companyId || !input.parentMessageId) throw new Error('companyId + parentMessageId 필수');
 
   const parentR = await query(
-    `SELECT id, title, body, template, segment_conditions, trigger_conditions, personalization_vars,
+    `SELECT id, parent_message_id, title, body, template, segment_conditions, trigger_conditions, personalization_vars,
             display_frequency, auto_dismiss_seconds, max_displays_per_user,
             send_start_hour, send_end_hour, allowed_weekdays, locale_variants, is_ad, status,
             content_blocks, theme, accent_color, card_style, badge_text, channel, design, poster_slides, image_link_url
@@ -130,6 +135,8 @@ export async function createVariant(
   );
   if (parentR.rows.length === 0) throw new Error('부모 메시지를 찾을 수 없습니다.');
   const parent = parentR.rows[0];
+  // ★ 2026-09-27 한줄로 V2 R257 — 변형의 변형은 만들지 않는다(서빙 후보 = 부모 직속 변형뿐이라 손자는 절대 노출되지 않는다)
+  if (parent.parent_message_id) throw new VariantOfVariantError();
 
   // ★ P1-4 — 블록·테마·형태·뱃지·채널 상속. content_blocks는 부모 블록 사본에 variant 문안(title/body)만 교체
   //   (미상속 시 블록 부모의 variant가 레거시 단색 렌더로 표시돼 A/B가 "디자인 세대 차이" 테스트로 오염).
@@ -270,7 +277,7 @@ export async function listVariantsWithStats(
       parentMessageId: row.parent_message_id ? String(row.parent_message_id) : null,
       title: row.title,
       body: row.body,
-      variantWeight: Number(row.variant_weight || 100),
+      variantWeight: Number(row.variant_weight ?? 100),   // ★ 2026-09-27 R258 — 0을 100으로 읽지 않는다(NULL만 100)
       status: row.status,
       impressions,
       clicks,
@@ -429,12 +436,21 @@ export async function declareWinnerIfReady(
   }
 
   // Winner 적용 — 옛 variant paused
-  const losersIds = others.map((s) => s.messageId);
+  // ★ 2026-09-27 한줄로 V2 R258 — 부모 행은 정지하지 않는다. 부모는 서빙 입구라(후보 조건 = 부모 status 'active') 부모를 멈추면
+  //   승자 변형까지 전부 노출이 멈췄다. 부모가 졌으면 가중치만 0으로 내려 자기 문안이 뽑히지 않게 한다.
+  const losersIds = others.filter((s) => s.messageId !== parentMessageId).map((s) => s.messageId);
   if (losersIds.length > 0) {
     await query(
       `UPDATE cdp_inapp_messages SET status = 'paused', updated_at = NOW()
        WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
       [companyId, losersIds]
+    );
+  }
+  if (others.some((s) => s.messageId === parentMessageId)) {
+    await query(
+      `UPDATE cdp_inapp_messages SET variant_weight = 0, updated_at = NOW()
+       WHERE company_id = $1::uuid AND id = $2::uuid`,
+      [companyId, parentMessageId]
     );
   }
 

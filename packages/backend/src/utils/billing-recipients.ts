@@ -75,7 +75,11 @@ export function isRecipientRejected(mailInfo: any, email: string): boolean {
   const rejected: string[] = Array.isArray(mailInfo?.rejected)
     ? mailInfo.rejected.map((x: any) => String(x))
     : [];
-  return rejected.some((x) => x.toLowerCase().includes(target));
+  // ★ 2026-09-27 한줄로 V2 R371 — 주소를 뽑아 완전 일치로 본다(옛: 부분 문자열이라 참조 ba@x.com 거부가 대표 a@x.com 거부로 오판됐다)
+  return rejected.some((x) => {
+    const m = x.match(/<([^>]+)>/);
+    return (m ? m[1] : x).trim().toLowerCase() === target;
+  });
 }
 
 /**

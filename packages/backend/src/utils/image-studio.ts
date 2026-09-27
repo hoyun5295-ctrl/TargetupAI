@@ -73,7 +73,8 @@ export type StudioErrorCode =
   | 'GEN_FAILED'
   | 'PY_SERVICE_DOWN'
   | 'INGEST_FAILED'
-  | 'BUSY';
+  | 'BUSY'
+  | 'TEMP_FULL';
 
 const STUDIO_ERROR_MESSAGES: Record<StudioErrorCode, string> = {
   STUDIO_NOT_READY: '이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.',
@@ -83,6 +84,7 @@ const STUDIO_ERROR_MESSAGES: Record<StudioErrorCode, string> = {
   PY_SERVICE_DOWN: '이미지 준비 기능을 점검 중입니다. 잠시 후 다시 시도해주세요.',
   INGEST_FAILED: '상품 이미지를 가져오지 못했어요. 다른 이미지를 사용해주세요.',
   BUSY: '다른 이미지 생성이 진행 중입니다. 완료 후 다시 시도해주세요.',
+  TEMP_FULL: '임시 보관 용량이 가득 찼습니다. 저장하거나 정리 후 다시 시도해주세요.',
 };
 
 export class StudioError extends Error {
@@ -482,6 +484,11 @@ function ensureTempDir(companyId: string): string {
 }
 
 /** 회사 temp 총 사용량(bytes) — 200MB 상한 검사용. */
+/** ★ 2026-09-27 한줄로 V2 R125 — 임시 보관 상한 초과인가(모든 임시 쓰기 라우트가 같은 판정 · 옛: /generate만 봤다) */
+export function isStudioTempFull(companyId: string): boolean {
+  return companyTempUsageBytes(companyId) >= STUDIO_TEMP_CAP_BYTES;
+}
+
 export function companyTempUsageBytes(companyId: string): number {
   const dir = companyTempDir(companyId);
   if (!fs.existsSync(dir)) return 0;

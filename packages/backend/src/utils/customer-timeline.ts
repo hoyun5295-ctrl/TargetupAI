@@ -966,7 +966,10 @@ export async function buildCustomerTimeline(opts: TimelineOptions): Promise<Time
   const merged = batches.flat().filter((e) => isAfterCursor(e, cursor));
   merged.sort(compareEvents);
   const page = merged.slice(0, limit);
-  const nextBefore = merged.length > limit && page.length > 0 ? encodeCursor(page[page.length - 1]) : null;
+  // ★ 2026-09-27 한줄로 V2 R204 — 어느 원천이든 잘렸으면 다음 쪽이 있다(옛: 합친 결과가 정확히 limit이면 커서가 없어
+  //   화면은 "아래 더 보기로 이어집니다"라고 안내하면서 버튼이 없었다).
+  const anySourceTruncated = Object.values(sources).some((s) => !!s?.truncated);
+  const nextBefore = (merged.length > limit || anySourceTruncated) && page.length > 0 ? encodeCursor(page[page.length - 1]) : null;
 
   // 요약은 기간·검색·종류와 무관하게 최근 12개월 고정이다(v2 §2-5). 화면은 첫 로드(조건 없음)에서만 받고
   // 이후 재조회는 `summary=0`으로 건너뛴다 — 그래야 칩 클릭마다 MySQL COUNT가 돌지 않고 lastActivityAt도 안 흔들린다.

@@ -121,23 +121,34 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    // 대표번호로 설정 시 기존 대표번호 해제
-    if (isDefault) {
-      await pool.query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [targetCompanyId]);
-    }
-
     // ★ 2026-08-18 전송자격인증 2.1 — 회선 수 상한(신규 등록에만 적용, 기존 보유분 불변)
+    // ★ 2026-09-27 한줄로 V2 R130 — 상한 검사를 대표번호 해제보다 먼저(R067과 같은 뿌리). 옛: 해제 뒤 거절되면 대표번호가 0이 됐다.
     const lineVerdict = await checkSenderLineLimit(targetCompanyId, phone);
     if (lineVerdict.status === 'exceeded') {
       return res.status(403).json({ error: lineVerdict.message, code: 'LINE_LIMIT_EXCEEDED', ...lineVerdict });
     }
 
+    // 대표번호 해제와 등록은 한 트랜잭션(등록이 중복 등으로 실패하면 해제도 되돌린다)
     // ★ D142+ B5: INSERT는 사용자 입력 phone 그대로 저장 (UI 표시 형식 유지)
-    const result = await pool.query(`
-      INSERT INTO callback_numbers (company_id, phone, label, is_default, store_code, store_name)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, phone, label, is_default, store_code, store_name
-    `, [targetCompanyId, phone, label || null, isDefault || false, storeCode || null, storeName || null]);
+    const client = await pool.connect();
+    let result: any;
+    try {
+      await client.query('BEGIN');
+      if (isDefault) {
+        await client.query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [targetCompanyId]);
+      }
+      result = await client.query(`
+        INSERT INTO callback_numbers (company_id, phone, label, is_default, store_code, store_name)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, phone, label, is_default, store_code, store_name
+      `, [targetCompanyId, phone, label || null, isDefault || false, storeCode || null, storeName || null]);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     res.json({
       message: '발신번호가 등록되었습니다.',

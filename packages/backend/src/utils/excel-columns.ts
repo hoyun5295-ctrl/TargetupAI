@@ -71,3 +71,45 @@ export function isFirstRowHeaderRow(firstRow: any[]): boolean {
     return str !== '' && isNaN(Number(str.replace(/-/g, '')));
   });
 }
+
+// ================================================================
+// ★ 2026-09-27 한줄로 V2 R144 — 헤더 중복 처리(옛 routes/upload.ts 인라인에서 그대로 옮김) + 헤더·행 나누기 CT
+// ================================================================
+/**
+ * 동일 헤더 자동 디덱싱 — 두 번째 이후 동일 헤더에 " (2)", " (3)" 접미사. 빈 헤더는 "컬럼N".
+ * 클라이언트 mapping(unique header key)과 백엔드 처리가 같은 키를 쓰게 한다.
+ */
+export function dedupeHeaders(rawHeaders: any[]): string[] {
+  // ★ Set 기반 단일 패스 — 결과가 항상 unique 보장 (엣지 케이스 포함)
+  //   예) 입력 ["전화번호", "전화번호", "전화번호 (2)"] → 출력 ["전화번호", "전화번호 (2)", "전화번호 (3)"]
+  //   카운터 기반 단순 디덱싱은 위 입력에서 ["전화번호", "전화번호 (2)", "전화번호 (2)"] 충돌 가능.
+  const seen = new Set<string>();
+  const result: string[] = [];
+  rawHeaders.forEach((raw, idx) => {
+    let h = String(raw ?? '').trim();
+    if (!h) h = `컬럼${idx + 1}`;
+    let candidate = h;
+    let n = 2;
+    while (seen.has(candidate)) {
+      candidate = `${h} (${n})`;
+      n++;
+    }
+    seen.add(candidate);
+    result.push(candidate);
+  });
+  return result;
+}
+
+/**
+ * 시트 행 배열 → 헤더·데이터 행. 업로드 3경로(/parse · /validate-mapping · 백그라운드 저장)가 이것만 쓴다.
+ * - 헤더 있는 파일: 헤더 빈 잡열 제외(dropEmptyHeaderColumns) · 중복 헤더 접미사 · 데이터 = 둘째 행부터
+ * - 헤더 없는 파일: 이름 = 컬럼1·컬럼2… · 데이터 = 첫 행부터(첫 고객을 버리지 않는다)
+ */
+export function splitHeaderRows(raw: any[][]): { headers: string[]; rows: any[][]; hasHeader: boolean } {
+  const hasHeader = isFirstRowHeaderRow(raw[0]);
+  if (hasHeader) {
+    const data = dropEmptyHeaderColumns(raw);
+    return { headers: dedupeHeaders(data[0] as any[]), rows: data.slice(1), hasHeader };
+  }
+  return { headers: (raw[0] || []).map((_: any, idx: number) => `컬럼${idx + 1}`), rows: raw, hasHeader };
+}

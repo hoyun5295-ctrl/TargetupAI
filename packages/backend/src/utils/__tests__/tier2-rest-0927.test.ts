@@ -162,7 +162,8 @@ describe('TX · TZ · YEAR', () => {
   it('R274 싱크 오늘 = KST 0시 CT', () => {
     const s = src('..', 'routes', 'admin-sync.ts');
     expect(s).not.toContain('started_at >= CURRENT_DATE');
-    expect((s.match(/started_at >= \$\{KST_TODAY_START_SQL\}/g) || []).length).toBe(2);
+    // 차수 3 R063 — 시각 폴백(COALESCE(started_at, completed_at))으로 바뀌어도 오늘 경계는 KST CT 두 곳
+    expect((s.match(/COALESCE\(started_at, completed_at\) >= \$\{KST_TODAY_START_SQL\}/g) || []).length).toBe(2);
     expect(src('stats-aggregation.ts')).toContain("export const KST_TODAY_START_SQL = `(date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')`;");
   });
   it('R411 도움말 일 한도 = KST 자정 초기화(행동)', async () => {

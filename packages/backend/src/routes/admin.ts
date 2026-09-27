@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample, SPAM_BLOCK_NOTICE } from '../utils/spam-block';
 import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache, GEO_BLOCK_NOTICE, validateCidrToken, isInvalidCidrError } from '../utils/geo-access';
-import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy } from '../utils/sender-line-limit';
+import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy, lineKindOf, parseLineLimitInput } from '../utils/sender-line-limit';
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
 // ★2026-09-12 싱크에이전트 시크릿 해시(원문 미저장 · 발급 시 1회 노출)
@@ -85,7 +85,7 @@ import { classifyHelpDbError, helpQuestionKind, helpReasonLabel, HELP_REQUEST_PH
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
 import { sendTypeLabel } from '../utils/send-type-axis';
 // ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
-import { spamBillableTestSql } from '../utils/spam-trial';
+import { spamBillableTestSql, isSpamTestBillable } from '../utils/spam-trial';
 
 const router = Router();
 
@@ -253,6 +253,8 @@ router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, r
       restriction = await restrictAccount({
         userId: id,
         status: result.rows[0].status,
+        // ★ 2026-09-27 한줄로 V2 R353 — 상태는 위에서 이미 바꿨다 → 감사 기록의 before는 바꾸기 전 값
+        previousStatus: before.status,
         reason: 'admin_action',
         actorUserId: req.user?.userId,
         note: req.body?.restrictNote,
@@ -1446,14 +1448,14 @@ router.put('/companies/:id/sender-line-policy', authenticate, requireSuperAdmin,
       return res.status(400).json({ error: '가입자 유형 값이 올바르지 않습니다.' });
     }
 
-    const toLimit = (v: any): number | null => {
-      if (v === null || v === undefined || String(v).trim() === '') return null;
-      const n = Number(v);
-      if (!Number.isFinite(n) || n <= 0) return null;
-      return Math.floor(n);
-    };
-    const mobileLimit = toLimit(req.body?.mobileLineLimit);
-    const landlineLimit = toLimit(req.body?.landlineLineLimit);
+    // ★ 2026-09-27 한줄로 V2 R279 — 비우면 제한 없음 · 0·음수·숫자 아님은 거절(CT). 옛: 오류 없이 null(= 제한 없음)로 저장했다.
+    const mobileParsed = parseLineLimitInput(req.body?.mobileLineLimit);
+    const landlineParsed = parseLineLimitInput(req.body?.landlineLineLimit);
+    if (!mobileParsed.ok || !landlineParsed.ok) {
+      return res.status(400).json({ error: '회선 수 상한은 1 이상의 숫자로 입력하거나 비워 두어야 합니다(비우면 제한 없음).' });
+    }
+    const mobileLimit = mobileParsed.value;
+    const landlineLimit = landlineParsed.value;
 
     const beforeRes = await query(
       'SELECT company_name, subscriber_type, mobile_line_limit, landline_line_limit FROM companies WHERE id = $1',
@@ -2497,24 +2499,35 @@ router.post('/callback-numbers', authenticate, requireSuperAdmin, async (req: Re
       });
     }
 
-    // 대표번호로 설정 시 기존 대표번호 해제
-    if (isDefault) {
-      await query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [companyId]);
-    }
-
     // ★ 2026-08-18 전송자격인증 2.1 — 회선 수 상한(신규 등록에만 적용, 기존 보유분 불변)
+    // ★ 2026-09-27 한줄로 V2 R067 — 상한 검사를 대표번호 해제보다 먼저. 옛: 해제 뒤 거절되면 회사에 대표번호가 0이 됐다.
     const lineVerdict = await checkSenderLineLimit(companyId, phone);
     if (lineVerdict.status === 'exceeded') {
       return res.status(403).json({ error: lineVerdict.message, code: 'LINE_LIMIT_EXCEEDED', ...lineVerdict });
     }
 
+    // 대표번호 해제와 등록은 한 트랜잭션(등록이 중복 등으로 실패하면 해제도 되돌린다)
     // ★ D142+ B5: INSERT는 사용자 입력 phone 그대로 저장 (UI 표시 형식 유지 — '02-3145-2186')
     //   중복 차단은 위 사전 체크(정규화 비교) + DB functional UNIQUE index가 책임
-    const result = await query(`
-      INSERT INTO callback_numbers (company_id, phone, label, is_default)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, phone, label, is_default
-    `, [companyId, phone, label || null, isDefault || false]);
+    const client = await pool.connect();
+    let result: any;
+    try {
+      await client.query('BEGIN');
+      if (isDefault) {
+        await client.query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [companyId]);
+      }
+      result = await client.query(`
+        INSERT INTO callback_numbers (company_id, phone, label, is_default)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, phone, label, is_default
+      `, [companyId, phone, label || null, isDefault || false]);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     res.json({
       message: '발신번호가 등록되었습니다.',
@@ -2539,6 +2552,42 @@ router.put('/callback-numbers/:id', authenticate, requireSuperAdmin, async (req:
   const { phone, label } = req.body;
   
   try {
+    // ★ 2026-09-27 한줄로 V2 R280 — 번호가 바뀌면 등록(POST)과 같은 검사. 옛: 형식·중복·회선 상한 없이 그대로 저장했다.
+    //   빈 번호는 거절(Codex 차수3 1R — COALESCE가 공백을 그대로 저장해 번호가 지워졌다). 생략(null·undefined)만 기존 번호 유지.
+    if (phone !== undefined && phone !== null && String(phone).trim() === '') {
+      return res.status(400).json({ error: '유효하지 않은 발신번호 형식입니다.' });
+    }
+    if (phone != null) {
+      const curRes = await query('SELECT company_id, phone FROM callback_numbers WHERE id = $1', [id]);
+      if (curRes.rows.length === 0) {
+        return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+      }
+      const cur = curRes.rows[0];
+      const nextNormalized = normalizePhone(phone);
+      if (nextNormalized !== normalizePhone(String(cur.phone))) {
+        if (nextNormalized.length < 8 || nextNormalized.length > 11) {
+          return res.status(400).json({ error: '유효하지 않은 발신번호 형식입니다.' });
+        }
+        const dup = await query(
+          `SELECT id FROM callback_numbers WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2 AND id <> $3`,
+          [cur.company_id, nextNormalized, id]
+        );
+        if (dup.rows.length > 0) {
+          return res.status(409).json({
+            error: '이미 등록된 발신번호입니다. 같은 고객사에 동일한 번호를 중복 등록할 수 없습니다.',
+            code: 'DUPLICATE_CALLBACK_NUMBER',
+          });
+        }
+        // 같은 종류(무선↔무선·유선↔유선)로 바꾸면 보유 회선 수가 그대로다 — 종류가 바뀔 때만 상한을 본다.
+        if (lineKindOf(phone) !== lineKindOf(cur.phone)) {
+          const lineVerdict = await checkSenderLineLimit(cur.company_id, phone);
+          if (lineVerdict.status === 'exceeded') {
+            return res.status(403).json({ error: lineVerdict.message, code: 'LINE_LIMIT_EXCEEDED', ...lineVerdict });
+          }
+        }
+      }
+    }
+
     const result = await query(`
       UPDATE callback_numbers 
       SET phone = COALESCE($1, phone),
@@ -2552,7 +2601,13 @@ router.put('/callback-numbers/:id', authenticate, requireSuperAdmin, async (req:
     }
     
     res.json({ message: '수정되었습니다.', callbackNumber: result.rows[0] });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === '23505') {
+      return res.status(409).json({
+        error: '이미 등록된 발신번호입니다. 같은 고객사에 동일한 번호를 중복 등록할 수 없습니다.',
+        code: 'DUPLICATE_CALLBACK_NUMBER',
+      });
+    }
     console.error('발신번호 수정 실패:', error);
     res.status(500).json({ error: '발신번호 수정 실패' });
   }
@@ -2733,69 +2788,65 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
   const { id } = req.params;
   const { adminNote } = req.body;
   const adminId = (req as any).user?.userId;
-  
+
+  // ★ 2026-09-27 한줄로 V2 R068(Codex 차수3 E 1R) — 승인 전체(신청 행 잠금 · 체험 지급 또는 플랜 변경·이력 · 신청 상태)를 **한 트랜잭션**으로.
+  //   옛: pending 확인 뒤 잠금 없이 처리하고 마지막 UPDATE는 id만이라, 같은 신청을 둘이 동시에 승인하면 둘 다 통과했다.
+  //   신청 행을 FOR UPDATE로 잠그면 동시 승인·반려는 줄을 서고, 뒤 요청은 이미 처리된 상태를 본다. 어디서 실패해도 ROLLBACK 하나로 전부 되돌아간다.
+  // 연결 획득도 오류 처리 안에서(Codex 차수3 E 2R — 밖이면 풀 고갈 때 응답 없이 멈춘다)
+  let client: PoolClient | null = null;
+  let request: any = null;
   try {
-    // 신청 정보 조회
-    const requestResult = await query(
-      'SELECT company_id, requested_plan_id, status, message FROM plan_requests WHERE id = $1',
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const requestResult = await client.query(
+      'SELECT company_id, requested_plan_id, status, message FROM plan_requests WHERE id = $1 FOR UPDATE',
       [id]
     );
-    
     if (requestResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: '신청을 찾을 수 없습니다.' });
     }
-    
-    const request = requestResult.rows[0];
-    
+    request = requestResult.rows[0];
     if (request.status !== 'pending') {
+      await client.query('ROLLBACK');
       return res.status(400).json({ error: '이미 처리된 신청입니다.' });
     }
-    
+
     // ★ 2026-06-08: 무료체험 신청([무료체험] 센티넬)이면 1개월 체험 부여, 그 외는 일반 플랜 변경.
     //   ★ 2026-07-28 배정 플랜 BASIC → TRIAL(월 0원). 기능 권한은 TRIAL 플래그가 BASIC과 동일하게 맞춰져 있다.
     const isTrialReq = typeof request.message === 'string' && request.message.startsWith('[무료체험]');
     if (isTrialReq) {
-      await grantFreeTrial(request.company_id);
+      // 같은 트랜잭션(client 주입 — 체험 지급 CT는 호출부 트랜잭션을 그대로 탄다)
+      await grantFreeTrial(request.company_id, 30, { client });
     } else {
       // ★ CT-17: 요금제 승인 시 TRIAL plan이면 'trial' 유지, 그 외는 'paid'(정식 구독).
       //   (과거: 무조건 'active'로 덮어써서 ① 체험 상태 파괴 ② companies.status='active'와 네이밍 충돌)
-      const approvedPlanRes = await query(`SELECT plan_code FROM plans WHERE id = $1`, [request.requested_plan_id]);
+      const approvedPlanRes = await client.query(`SELECT plan_code FROM plans WHERE id = $1`, [request.requested_plan_id]);
       const approvedIsTrial = approvedPlanRes.rows[0]?.plan_code === 'TRIAL';
       const approvedStatus = approvedIsTrial ? 'trial' : 'paid';
       // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C).
       //   승급/강등 판정은 recordPlanChange 안에서 INSERT에 쓰는 바로 그 직전 값으로 한다(지적 F) —
       //   호출부가 미리 계산하면 그 사이 다른 변경이 끼어들 때 방향이 뒤집힌다.
-      const planClient = await pool.connect();
-      try {
-        await planClient.query('BEGIN');
-        const planUpd = await planClient.query(
-          `UPDATE companies SET plan_id = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3
-           RETURNING id`,
-          [request.requested_plan_id, approvedStatus, request.company_id]
-        );
-        if (planUpd.rows.length > 0) {
-          await recordPlanChange({
-            client: planClient,
-            companyId: request.company_id,
-            toPlanId: request.requested_plan_id,
-            changeType: 'auto',
-            changedBy: (req as any).user?.userId || null,
-            reason: '요금제 신청 승인(슈퍼관리자)',
-          });
-        }
-        await planClient.query('COMMIT');
-      } catch (err) {
-        try { await planClient.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
-        await alertPlanChangeFailure(request.company_id, err);
-        return res.status(500).json({ error: '요금제 승인에 실패했습니다. 다시 시도해주세요.' });
-      } finally {
-        planClient.release();
+      const planUpd = await client.query(
+        `UPDATE companies SET plan_id = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3
+         RETURNING id`,
+        [request.requested_plan_id, approvedStatus, request.company_id]
+      );
+      if (planUpd.rows.length > 0) {
+        await recordPlanChange({
+          client,
+          companyId: request.company_id,
+          toPlanId: request.requested_plan_id,
+          changeType: 'auto',
+          changedBy: (req as any).user?.userId || null,
+          reason: '요금제 신청 승인(슈퍼관리자)',
+        });
       }
     }
-    
+
     // 신청 상태 변경
-    const result = await query(`
-      UPDATE plan_requests 
+    const result = await client.query(`
+      UPDATE plan_requests
       SET status = 'approved',
           admin_note = $1,
           processed_by = $2,
@@ -2803,14 +2854,19 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
       WHERE id = $3
       RETURNING *
     `, [adminNote || null, adminId, id]);
-    
-    res.json({ 
+
+    await client.query('COMMIT');
+    res.json({
       message: '승인되었습니다. 회사 플랜이 변경되었습니다.',
       request: result.rows[0]
     });
   } catch (error) {
+    if (client) { try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ } }
+    if (request?.company_id) await alertPlanChangeFailure(request.company_id, error).catch(() => {});
     console.error('플랜 신청 승인 실패:', error);
-    res.status(500).json({ error: '플랜 신청 승인 실패' });
+    res.status(500).json({ error: '요금제 승인에 실패했습니다. 다시 시도해주세요.' });
+  } finally {
+    client?.release();
   }
 });
 
@@ -2841,10 +2897,14 @@ router.put('/plan-requests/:id/reject', authenticate, requireSuperAdmin, async (
           admin_note = $1,
           processed_by = $2,
           processed_at = NOW()
-      WHERE id = $3
+      WHERE id = $3 AND status = 'pending'
       RETURNING *
     `, [adminNote.trim(), adminId, id]);
-    
+    // ★ 2026-09-27 한줄로 V2 R068 — 조건부 반려(승인이 같은 행을 잠그고 처리 중이면 끝난 뒤 pending이 아님을 본다)
+    if (result.rows.length === 0) {
+      return res.status(409).json({ error: '이미 처리 중이거나 처리된 신청입니다.' });
+    }
+
     res.json({ 
       message: '거절되었습니다.',
       request: result.rows[0]
@@ -3213,7 +3273,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         sfDateCond = `AND TO_CHAR(t.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') = $2`;
       }
       const sfDetail = await query(`
-        SELECT r.phone, r.carrier, r.message_type, r.result,
+        SELECT r.phone, r.carrier, r.message_type, r.result, t.source,
                t.created_at as sent_at
         FROM spam_filter_test_results r
         JOIN spam_filter_tests t ON r.test_id = t.id
@@ -3230,6 +3290,8 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
           carrier: r.carrier,
           sentAt: r.sent_at,
           testType: 'spam_filter',
+          // ★ 2026-09-27 한줄로 V2 m037 — 과금 여부(무료 체험·무료 자동 검사 = false · 정산 집계와 같은 판정 CT)
+          billable: isSpamTestBillable(r.source),
         });
       });
     } catch (err) {
@@ -5963,8 +6025,8 @@ router.put('/kakao-templates/:id/approve', authenticate, requireSuperAdmin, asyn
 
     // ★ D143 (2026-04-30): kakao_templates_status_check CHECK 대문자 풀네임 8개로 교체됨.
     //   기존 소문자('approved'/'pending'/'rejected')는 위반 → 대문자 + 'REQUESTED'(옛 'pending') 매핑.
-    //   본 라우트는 frontend 미사용(dead) — 슈퍼관리자가 IMC 통한 새 워크플로우(/api/alimtalk/templates)에서 처리.
-    //   안전 차원에서 새 CHECK 호환되게 상수만 갱신 (라우트 폐기는 별건).
+    //   ★ 2026-09-27 한줄로 V2 R284 정정 — 이 라우트군(승인·반려·수동 등록)은 AdminDashboard가 쓴다(옛 주석 "frontend 미사용"은 틀렸다).
+    //   reviewed_by는 user?.id(없는 키)라 늘 NULL — FK 대상 확인 뒤 정정(장부 M-46).
     const result = await query(
       `UPDATE kakao_templates SET
         status = 'APPROVED',
@@ -6044,7 +6106,8 @@ router.post('/kakao-templates/manual', authenticate, requireSuperAdmin, async (r
         message_type, emphasize_type, emphasize_title, content, image_url,
         extra_content, ad_content, security_flag, buttons, quick_replies,
         status, approved_at, reviewed_at, reviewed_by, requested_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'approved',NOW(),NOW(),$16,NOW())
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'APPROVED',NOW(),NOW(),$16,NOW())
+      -- ★ 2026-09-27 한줄로 V2 R071 — 대문자(D143 CHECK). 옛 소문자 'approved'는 CHECK 위반으로 등록이 늘 실패했다.
       RETURNING *`,
       [
         companyId, profileId || null, templateCode || null, templateName, category || null,

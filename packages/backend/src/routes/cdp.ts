@@ -38,6 +38,7 @@ import { buildCdpDiagnostics, buildCdpFunnel, buildCdpTimeline24h } from '../uti
 import { buildCdpActiveCustomers } from '../utils/cdp-active-customers';
 import { groupCustomersByChannel, getCompanyChannelCapabilities } from '../utils/source-aware-channel-selector';
 import { explainCdpDiagnostics } from '../utils/cdp-fusion-explainer';
+import { AiRateLimitExceeded } from '../utils/ai-rate-limit';
 import { recomputeProfileBatch } from '../utils/unified-customer-profile';
 // ★ D189 #4 (2026-05-22): Journey Step A/B/Bandit 트래킹 — SDK 호출용 endpoint
 import { recordJourneyStepVariantReward } from '../utils/bandit-optimizer';
@@ -59,7 +60,7 @@ import {
   getVapidPublicKey,
   saveSubscription,
   revokeSubscription,
-  sendPushCampaign,
+  sendPushCampaign, PushDuplicateError,
   countActiveSubscriptions,
   listPushCampaigns,
 } from '../utils/web-push';
@@ -89,7 +90,7 @@ import { getInAppDisplayEligibility } from '../utils/inapp-display-eligibility';
 import { countSegment, describeSegment } from '../utils/inapp-segment-matcher';
 import { buildPreviewCustomers, buildEditorPreviewCustomers, renderInAppMessage, listAvailableVariables, extractUsedInAppVariables, getInAppCustomerForBrowser, renderTextForCustomer, renderBlocksForCustomer } from '../utils/inapp-personalization';
 import { getCompanyBrandKitRaw } from '../utils/dm/dm-brand-kit';
-import { createVariant, listVariantsWithStats, declareWinnerIfReady, setVariantStatus } from '../utils/inapp-variant-optimizer';
+import { createVariant, listVariantsWithStats, declareWinnerIfReady, setVariantStatus , VariantOfVariantError } from '../utils/inapp-variant-optimizer';
 import { explainInAppMessage } from '../utils/inapp-explainer';
 import {
   buildInAppFunnel,
@@ -121,6 +122,10 @@ const router = Router();
 
 // ★ 2026-06-25 (gap 6): CDP write 버스트 한도 — 회사당 50req/10초(보수적). bulk-import는 제외(월 한도+1000건 캡).
 const cdpWriteBurst = cdpBurstLimit(50, 10_000);
+// ★ 2026-09-27 한줄로 V2 R179 — 브라우저 적재는 방문자(익명 id · 없으면 IP) 단위(쇼핑객 합산으로 막히지 않게)
+const cdpIngestBurst = cdpBurstLimit(50, 10_000, (req, companyId) => `${companyId}:v:${String((req.body || {}).anonymous_id || req.ip || '')}`);
+// ★ 2026-09-27 한줄로 V2 R317 — 공개 변이 보상 기록은 방문자·변이당 30분 2회(클릭 1 + 전환 1). 옛: 제한이 없어 반복 호출만으로 밴딧 보상이 늘었다.
+const cdpVariantTrackOnce = cdpBurstLimit(2, 30 * 60_000, (req, companyId) => `${companyId}:jv:${req.params.variantId}:${String((req.body || {}).anonymous_id || req.ip || '')}`);
 
 // ════════════════════════════════════════════════════════════════════
 // 외부 API (X-Hanjullo-Key + X-Hanjullo-Secret 인증)
@@ -131,7 +136,7 @@ const cdpWriteBurst = cdpBurstLimit(50, 10_000);
 // §12 #5 — schema_version 'v1' 의무 + 7 분류 PII masking 자동 (이중 안전망)
 // ════════════════════════════════════════════════════════════════════
 
-router.post('/ingest', requireCdpBrowserOrigin, cdpWriteBurst, async (req: Request, res: Response) => {
+router.post('/ingest', requireCdpBrowserOrigin, cdpIngestBurst, async (req: Request, res: Response) => {
   try {
     const { schema_version, anonymous_id, session_id, sent_at, events } = req.body || {};
 
@@ -368,7 +373,7 @@ router.post('/order', requireCdpApiKey, cdpWriteBurst, async (req: Request, res:
 //   - 기존 회사 admin 인증 endpoint(/api/ai/operator/journeys/variants/:variantId/track)와 별도
 // ════════════════════════════════════════════════════════════════════
 
-router.post('/journey-variants/:variantId/track', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {
+router.post('/journey-variants/:variantId/track', requireCdpKeyOrBrowserOrigin, cdpVariantTrackOnce, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
     const { variantId } = req.params;
@@ -873,6 +878,7 @@ router.get('/usage', async (req: Request, res: Response) => {
             SELECT SUM(call_count) FROM cdp_api_call_log
             WHERE company_id = c.id
               AND occurred_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
+              AND COALESCE(status_code, 200) < 400   -- ★ R319 한도 판정(cdp-auth)과 같은 기준
           ), 0) AS used,
           c.cdp_api_key IS NOT NULL AS has_key,
           c.cdp_api_key AS public_key,
@@ -1202,6 +1208,8 @@ router.post('/push/send', async (req: Request, res: Response) => {
     );
     return res.json({ success: true, ...result });
   } catch (err: any) {
+    // ★ 2026-09-27 한줄로 V2 R103 — 중복 발송 거절
+    if (err instanceof PushDuplicateError) return res.status(409).json({ success: false, error: err.message, code: 'PUSH_DUPLICATE' });
     console.error('[CDP /push/send] 오류:', err);
     const status = err?.message?.includes('0건') ? 400 : 500;
     return res.status(status).json({ success: false, error: err?.message || 'Push 발송 실패' });
@@ -1553,6 +1561,8 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
     });
     return res.json({ success: true, package: pkg });
   } catch (err: any) {
+    // ★ 2026-09-27 한줄로 V2 R246 — 크레딧 부족은 402(충전 안내 · 사전 확인과 성공 뒤 차감 확정 둘 다 여기로 온다)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     console.error('[CDP /inapp/ai-generate] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
     return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
@@ -1606,6 +1616,8 @@ router.post('/inapp/quick-action', async (req: Request, res: Response) => {
     }
     return res.json({ success: true, result });
   } catch (err: any) {
+    // ★ 2026-09-27 한줄로 V2 R257 — 변형의 변형 = 입력 오류
+    if (err instanceof VariantOfVariantError) return res.status(400).json({ success: false, error: err.message, code: 'VARIANT_OF_VARIANT' });
     console.error('[CDP /inapp/quick-action] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
     return res.status(500).json({ success: false, error: err?.message || 'Quick action 실패' });
@@ -2232,6 +2244,9 @@ router.post('/explain', async (req: Request, res: Response) => {
     const explanation = await explainCdpDiagnostics(companyId, diagnostics, companyInfo);
     return res.json({ success: true, explanation });
   } catch (err: any) {
+    // ★ 2026-09-27 한줄로 V2 R183 — 크레딧 부족·월 한도는 그대로 알린다(옛: 진단 함수가 삼켜 '건강도 50점'을 실제 결과처럼 보였다)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    if (err instanceof AiRateLimitExceeded) return res.status(429).json({ success: false, error: err.message, code: 'AI_RATE_LIMIT' });
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });

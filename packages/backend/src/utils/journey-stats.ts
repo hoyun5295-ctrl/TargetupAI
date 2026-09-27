@@ -733,19 +733,19 @@ export async function getJourneyLiveSnapshot(journeyId: string, companyId: strin
   const overview = overviewRes.rows[0] || {};
 
   // step별 실시간 위치
-  // current_step_order 매트릭스 = journey_executions.current_step_order
-  // 옛 매트릭스 = current_step_order 영역이 1-based (1, 2, 3...) 정합
+  // ★ 2026-09-27 한줄로 V2 R264 — current_step_order = **마지막으로 끝낸** 스텝(실행기가 +1로 다음 스텝을 찾는다 · journey-executor).
+  //   고객이 기다리는 자리 = current_step_order + 1. 옛: 끝낸 스텝을 현재로 세어 1단계 대기 고객(0)은 안 보이고 나머지는 한 칸 앞에 표시.
   const stepsRes = await query(
     `SELECT
        js.id AS step_id,
        js.step_order,
        js.step_type,
        js.channel,
-       COALESCE(SUM(CASE WHEN je.status = 'active' AND je.current_step_order = js.step_order THEN 1 ELSE 0 END), 0)::int AS active_count,
+       COALESCE(SUM(CASE WHEN je.status = 'active' AND je.current_step_order + 1 = js.step_order THEN 1 ELSE 0 END), 0)::int AS active_count,
        AVG(EXTRACT(EPOCH FROM (NOW() - je.entered_at)) / 60)
-         FILTER (WHERE je.status = 'active' AND je.current_step_order = js.step_order) AS avg_dwell_minutes,
+         FILTER (WHERE je.status = 'active' AND je.current_step_order + 1 = js.step_order) AS avg_dwell_minutes,
        MIN(je.next_run_at)
-         FILTER (WHERE je.status = 'active' AND je.current_step_order = js.step_order) AS next_run_at
+         FILTER (WHERE je.status = 'active' AND je.current_step_order + 1 = js.step_order) AS next_run_at
      FROM journey_steps js
      LEFT JOIN journey_executions je ON je.journey_id = js.journey_id
      WHERE js.journey_id = $1::uuid

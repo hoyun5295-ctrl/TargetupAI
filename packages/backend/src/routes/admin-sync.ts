@@ -11,10 +11,10 @@
 import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
 // ★ 2026-09-27 한줄로 V2 R274 — KST 오늘 0시 SQL CT
 import { KST_TODAY_START_SQL } from '../utils/stats-aggregation';
-import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, buildReleaseDownloadUrl, isPackageKeyVerified, PlatformId } from '../utils/agent-build-tiers';
+import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, buildReleaseDownloadUrl, isPackageKeyVerified, PlatformId, agentReleasesDir, agentReleaseExeFileName } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리: 진단 명령 버전 게이트 (v1.6.1+ ACK 전용)
 import { isAgentVersionGte, ACK_MIN_AGENT_VERSION } from '../utils/agent-protocol';
 // ★ 2026-09-02 매핑 계약 — 대상별 허용 필드·필수 필드 검증 CT
@@ -156,6 +156,8 @@ router.get('/agents', authenticate, requireSuperAdmin, async (req: Request, res:
     }
 
     // 각 Agent별 오늘 동기화 건수, 최근 24시간 에러 건수 집계
+    // ★ 2026-09-27 한줄로 V2 R063 — 배치 기록(sync.ts)은 started_at 없이 적재돼 집계에서 빠졌다 → 시각은 started_at 없으면 completed_at.
+    //   동기화 1회 = 마지막 배치 1행(에이전트 결과 보고가 그 행에 병합된다) 또는 결과 보고 단독 행(batch_index NULL).
     const agentIds = agents.map((a: any) => a.id);
     let todaySyncMap: Record<string, number> = {};
     let errorCountMap: Record<string, number> = {};
@@ -164,7 +166,8 @@ router.get('/agents', authenticate, requireSuperAdmin, async (req: Request, res:
     const { rows: todayRows } = await query(`
       SELECT agent_id, COUNT(*)::int as cnt
       FROM sync_logs
-      WHERE started_at >= ${KST_TODAY_START_SQL}
+      WHERE COALESCE(started_at, completed_at) >= ${KST_TODAY_START_SQL}
+        AND (batch_index IS NULL OR batch_index >= total_batches)
         AND agent_id = ANY($1)
       GROUP BY agent_id
     `, [agentIds]);
@@ -174,7 +177,7 @@ router.get('/agents', authenticate, requireSuperAdmin, async (req: Request, res:
     const { rows: errorRows } = await query(`
       SELECT agent_id, COUNT(*)::int as cnt
       FROM sync_logs
-      WHERE started_at >= NOW() - INTERVAL '24 hours'
+      WHERE COALESCE(started_at, completed_at) >= NOW() - INTERVAL '24 hours'
         AND fail_count > 0
         AND agent_id = ANY($1)
       GROUP BY agent_id
@@ -203,6 +206,8 @@ router.get('/agents', authenticate, requireSuperAdmin, async (req: Request, res:
         //   (1시간 전인데 지연으로 뜨는 이유가 그 에이전트의 주기 때문임을 담당자가 알 수 있게).
         heartbeat_interval_min: intervals.heartbeatMin,
         sync_interval_customers_min: intervals.customersMin,
+        // ★ 2026-09-27 한줄로 V2 R271 — [설정] 창이 이 값으로 열린다(옛: 60/30 고정값으로 열려 저장하면 실제 주기를 덮었다).
+        sync_interval_purchases_min: intervals.purchasesMin,
         created_at: a.created_at
       };
     });
@@ -250,7 +255,12 @@ router.get('/agents/:agentId', authenticate, requireSuperAdmin, async (req: Requ
       SELECT
         id, sync_type, mode, batch_index, total_batches,
         total_count, success_count, fail_count,
-        duration_ms, error_message, failures,
+        duration_ms, error_message,
+        -- ★ 2026-09-27 한줄로 V2 R064 — 실패 상세는 화면이 보이는 앞 5건 + 총수만(옛: 20건의 failures jsonb 전체를 내려보냈다)
+        CASE WHEN jsonb_typeof(failures) = 'array'
+             THEN (SELECT jsonb_agg(f.elem) FROM (SELECT elem FROM jsonb_array_elements(failures) elem LIMIT 5) f)
+        END AS failures,
+        CASE WHEN jsonb_typeof(failures) = 'array' THEN jsonb_array_length(failures) ELSE 0 END AS failures_total,
         started_at, completed_at
       FROM sync_logs
       WHERE agent_id = $1
@@ -261,11 +271,11 @@ router.get('/agents/:agentId', authenticate, requireSuperAdmin, async (req: Requ
     // 오늘 통계
     const { rows: statsRows } = await query(`
       SELECT
-        COUNT(*)::int as total_syncs_today,
+        COUNT(*) FILTER (WHERE batch_index IS NULL OR batch_index >= total_batches)::int as total_syncs_today,
         COALESCE(SUM(CASE WHEN fail_count > 0 THEN 1 ELSE 0 END), 0)::int as total_errors_today,
         COALESCE(AVG(duration_ms), 0)::int as avg_sync_duration_ms
       FROM sync_logs
-      WHERE agent_id = $1 AND started_at >= ${KST_TODAY_START_SQL}
+      WHERE agent_id = $1 AND COALESCE(started_at, completed_at) >= ${KST_TODAY_START_SQL}
     `, [agentId]);
 
     const stats = statsRows[0];
@@ -339,41 +349,37 @@ router.put('/agents/:agentId/config', authenticate, requireSuperAdmin, async (re
       });
     }
 
-    // Agent 존재 확인
-    const { rows } = await query(
-      'SELECT id, config FROM sync_agents WHERE id = $1',
-      [agentId]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Agent를 찾을 수 없습니다.' });
+    // ★ 2026-09-27 한줄로 V2 R275 — 매핑은 이 입구로 받지 않는다(매핑 전용 경로가 검증을 소유 · 화면도 보내지 않는다).
+    //   옛: 검증 없이 config에 넣어 에이전트 설정 응답으로 그대로 내려갔다.
+    if (column_mapping !== undefined) {
+      return res.status(400).json({ success: false, error: '컬럼 매핑은 매핑 설정 화면에서 저장해 주세요.' });
     }
 
-    const currentConfig = rows[0].config || {};
-
-    // 설정 병합 (기존 config에 새 값 덮어쓰기)
-    const newConfig = {
-      ...currentConfig,
-      ...(sync_interval_customers !== undefined && { sync_interval_customers }),
-      ...(sync_interval_purchases !== undefined && { sync_interval_purchases }),
-      ...(column_mapping !== undefined && { column_mapping })
-    };
+    // ★ 2026-09-27 한줄로 V2 R276 — 주기 두 키만 DB 안에서 병합한다. 옛: 읽은 config 전체를 다시 써서 그 사이
+    //   heartbeat의 명령 큐 갱신·관리자 명령 추가를 되돌렸다.
+    const patch: Record<string, any> = {};
+    if (sync_interval_customers !== undefined) patch.sync_interval_customers = sync_interval_customers;
+    if (sync_interval_purchases !== undefined) patch.sync_interval_purchases = sync_interval_purchases;
 
     // config jsonb + sync_interval 컬럼 둘 다 업데이트
     // ?? null 사용 (0도 유효한 값으로 취급)
-    await query(`
+    const upd = await query(`
       UPDATE sync_agents SET
-        config = $1,
+        config = COALESCE(config, '{}'::jsonb) || $1::jsonb,
         sync_interval_customers = COALESCE($2, sync_interval_customers),
         sync_interval_purchases = COALESCE($3, sync_interval_purchases),
         updated_at = NOW()
       WHERE id = $4
+      RETURNING id
     `, [
-      JSON.stringify(newConfig),
+      JSON.stringify(patch),
       sync_interval_customers ?? null,
       sync_interval_purchases ?? null,
       agentId
     ]);
+    if (upd.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Agent를 찾을 수 없습니다.' });
+    }
 
     res.json({
       success: true,
@@ -548,22 +554,40 @@ router.post('/releases', authenticate, requireSuperAdmin, async (req: Request, r
     if (tier && !VALID_TIERS.includes(tier)) {
       return res.status(400).json({ success: false, error: `tier는 ${VALID_TIERS.join(' | ')} 중 하나이거나 비워야 합니다.` });
     }
-    // ★ 2026-07-01: 같은 티어의 기존 활성만 해제 (다른 티어 릴리스는 유지 — 티어별 독립).
-    //   GET /version이 티어 매칭으로 조회하므로, 티어마다 활성 릴리스가 따로 존재해야 한다.
-    if (tier) {
-      await query(`UPDATE sync_releases SET is_active = false WHERE is_active = true AND tier = $1`, [tier]);
-    } else {
-      await query(`UPDATE sync_releases SET is_active = false WHERE is_active = true AND tier IS NULL`);
+    // ★ 2026-09-27 한줄로 V2 R277 — exe가 서버에 있어야 등록한다(없으면 활성 릴리즈가 받을 수 없는 파일을 가리킨다).
+    const exeName = agentReleaseExeFileName(version, tier || null);
+    if (!fs.existsSync(path.join(agentReleasesDir(), exeName))) {
+      return res.status(400).json({ success: false, error: `릴리즈 exe를 먼저 서버에 올려 주세요: ${exeName}` });
     }
-    // download_url = 서버 서빙 라우트(에이전트 baseURL 기준 상대경로). released_at/created_at은 default now().
-    //   ★ 2026-07-03: 티어별 릴리즈는 티어를 인코딩(/download/<version>-<tier>) → 티어마다 다른 exe 무선 서빙.
-    //   서버 파일 = agent-releases/sync-agent-<version>-<tier>.exe (전역이면 sync-agent-<version>.exe).
-    const { rows } = await query(
-      `INSERT INTO sync_releases (version, download_url, checksum, release_notes, force_update, is_active, tier)
-       VALUES ($1, $2, $3, $4, $5, true, $6)
-       RETURNING id, version, tier, download_url, force_update, is_active, released_at`,
-      [version, buildReleaseDownloadUrl(version, tier || null), checksum || null, release_notes || null, force_update ?? true, tier || null]
-    );
+    // 기존 활성 해제와 새 릴리즈 등록은 한 트랜잭션 — 등록이 실패하면 해제도 되돌린다(옛: 그 티어에 활성 릴리즈가 없어졌다).
+    const client = await pool.connect();
+    let rows: any[] = [];
+    try {
+      await client.query('BEGIN');
+      // ★ 2026-07-01: 같은 티어의 기존 활성만 해제 (다른 티어 릴리스는 유지 — 티어별 독립).
+      //   GET /version이 티어 매칭으로 조회하므로, 티어마다 활성 릴리스가 따로 존재해야 한다.
+      if (tier) {
+        await client.query(`UPDATE sync_releases SET is_active = false WHERE is_active = true AND tier = $1`, [tier]);
+      } else {
+        await client.query(`UPDATE sync_releases SET is_active = false WHERE is_active = true AND tier IS NULL`);
+      }
+      // download_url = 서버 서빙 라우트(에이전트 baseURL 기준 상대경로). released_at/created_at은 default now().
+      //   ★ 2026-07-03: 티어별 릴리즈는 티어를 인코딩(/download/<version>-<tier>) → 티어마다 다른 exe 무선 서빙.
+      //   서버 파일 = agent-releases/sync-agent-<version>-<tier>.exe (전역이면 sync-agent-<version>.exe).
+      const ins = await client.query(
+        `INSERT INTO sync_releases (version, download_url, checksum, release_notes, force_update, is_active, tier)
+         VALUES ($1, $2, $3, $4, $5, true, $6)
+         RETURNING id, version, tier, download_url, force_update, is_active, released_at`,
+        [version, buildReleaseDownloadUrl(version, tier || null), checksum || null, release_notes || null, force_update ?? true, tier || null]
+      );
+      rows = ins.rows;
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
     res.json({ success: true, release: rows[0] });
   } catch (error) {
     console.error('Sync 릴리즈 등록 실패:', error);
@@ -585,7 +609,8 @@ router.delete('/agents/:agentId', authenticate, requireSuperAdmin, async (req: R
 
     // Agent 존재 + heartbeat 최신성 확인
     const agentResult = await query(
-      `SELECT id, agent_name, company_id, status, last_heartbeat_at,
+      `SELECT id, agent_name, company_id, status, last_heartbeat_at, last_sync_at,
+              config, sync_interval_customers, sync_interval_purchases,
               EXTRACT(EPOCH FROM (NOW() - last_heartbeat_at)) / 60 AS minutes_since_heartbeat
        FROM sync_agents WHERE id = $1`,
       [agentId]
@@ -598,8 +623,11 @@ router.delete('/agents/:agentId', authenticate, requireSuperAdmin, async (req: R
     const agent = agentResult.rows[0];
     const minutesSinceHeartbeat = Number(agent.minutes_since_heartbeat ?? 99999);
 
-    // 활성 Agent(30분 이내 heartbeat) 삭제 방지 — force=true일 때만 허용
-    if (!force && minutesSinceHeartbeat < 30) {
+    // 활성 Agent 삭제 방지 — force=true일 때만 허용
+    // ★ 2026-09-27 한줄로 V2 R065 — 목록 화면과 같은 온라인 판정(에이전트별 실제 주기)으로 offline일 때만 삭제.
+    //   옛: 30분 고정인데 하트비트 기본 주기는 60분 → 정상 에이전트가 경고 없이 삭제될 수 있었다.
+    const liveStatus = getOnlineStatus(agent.last_heartbeat_at, agent.last_sync_at, resolveAgentIntervals(agent.config, agent));
+    if (!force && liveStatus !== 'offline') {
       return res.status(409).json({
         success: false,
         error: `Agent가 활성 상태입니다 (마지막 heartbeat ${Math.round(minutesSinceHeartbeat)}분 전). 먼저 일시정지/중지한 뒤 삭제하거나 ?force=true 로 강제 삭제하세요.`,
@@ -628,71 +656,7 @@ router.delete('/agents/:agentId', authenticate, requireSuperAdmin, async (req: R
 });
 
 
-// ----------------------------------------------------------------------------
-// GET /api/admin/sync/agents/:agentId/logs — 동기화 로그 (페이지네이션)
-// ----------------------------------------------------------------------------
-router.get('/agents/:agentId/logs', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
-  try {
-    const { agentId } = req.params;
-    const page = Math.max(1, parseInt(req.query.page as string) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
-    const syncType = req.query.sync_type as string;
-    const offset = (page - 1) * limit;
-
-    // Agent 존재 확인
-    const agentCheck = await query(
-      'SELECT id FROM sync_agents WHERE id = $1',
-      [agentId]
-    );
-    if (agentCheck.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Agent를 찾을 수 없습니다.' });
-    }
-
-    // 필터 조건 빌드
-    let whereClause = 'WHERE agent_id = $1';
-    const params: any[] = [agentId];
-    let paramIndex = 2;
-
-    if (syncType && ['customers', 'purchases'].includes(syncType)) {
-      whereClause += ` AND sync_type = $${paramIndex}`;
-      params.push(syncType);
-      paramIndex++;
-    }
-
-    // 총 건수
-    const { rows: countRows } = await query(
-      `SELECT COUNT(*)::int as total FROM sync_logs ${whereClause}`,
-      params
-    );
-
-    // 로그 조회
-    const { rows: logs } = await query(
-      `SELECT
-        id, sync_type, mode, batch_index, total_batches,
-        total_count, success_count, fail_count,
-        duration_ms, error_message,
-        started_at, completed_at, created_at
-      FROM sync_logs
-      ${whereClause}
-      ORDER BY started_at DESC
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-      [...params, limit, offset]
-    );
-
-    res.json({
-      success: true,
-      logs,
-      pagination: {
-        page,
-        limit,
-        total: countRows[0].total
-      }
-    });
-  } catch (error) {
-    console.error('Sync Agent 로그 조회 실패:', error);
-    res.status(500).json({ success: false, error: 'Sync Agent 로그 조회 실패' });
-  }
-});
+// ★ 2026-09-27 한줄로 V2 R278 — GET /agents/:agentId/logs 제거(화면 호출 0 · 소비처 없는 경로).
 
 
 export default router;

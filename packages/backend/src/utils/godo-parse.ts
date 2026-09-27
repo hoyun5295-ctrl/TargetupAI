@@ -10,6 +10,7 @@
 
 import { XMLParser } from 'fast-xml-parser';
 import type { OrderInput } from './cdp-orders';
+import { orderExternalId } from './cdp-order-identity';
 
 export const GODO_SOURCE = 'godo';
 
@@ -135,7 +136,7 @@ export function mapGodoOrderToCdp(order: any): GodoMappedOrder | null {
   const name = String(info?.orderName ?? '').trim() || undefined;
   const email = String(info?.orderEmail ?? '').trim() || undefined;
 
-  const externalId = memId || (phone ? `guest:${phone}` : `order:${orderId}`);
+  const externalId = orderExternalId(memId, phone, orderId);   // ★ 2026-09-27 R245 — 같은 규칙을 CT로 올렸다
 
   const goodsArr: any[] = Array.isArray(order?.orderGoodsData)
     ? order.orderGoodsData

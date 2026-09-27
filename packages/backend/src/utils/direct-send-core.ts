@@ -68,6 +68,32 @@ export async function countStagingFiltered(
 }
 
 /**
+ * ★ 2026-09-27 한줄로 V2 R119 — 스테이징 정제(중복·수신거부 · countStagingFiltered)와 **같은 기준**으로 수신자 목록을 먼저 거른다.
+ *   수신자별 산출물(DM 열람 토큰 등)을 정제 전에 만들면 실제로 안 나간 사람도 '발송'으로 잡힌다.
+ *   중복 = 번호당 첫 행만(목록 순서 유지) · 수신거부 = 광고면 항상(effectiveUnsubFilter) · 번호 없는 행은 뺀다.
+ */
+export async function preFilterRecipientsLikeStaging<T extends { phone?: any }>(
+  recipients: T[], userId: string, adEnabled: boolean, unsubFilterEnabled: unknown = true,
+): Promise<T[]> {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const r of recipients) {
+    const p = String(r.phone || '').replace(/\D/g, '');
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    deduped.push(r);
+  }
+  if (!effectiveUnsubFilter(adEnabled, unsubFilterEnabled) || deduped.length === 0) return deduped;
+  const phones = deduped.map((r) => String(r.phone || '').replace(/\D/g, ''));
+  const u = await query(
+    `SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2::text[])`,
+    [userId, phones],
+  );
+  const blocked = new Set(u.rows.map((x: any) => String(x.phone)));
+  return deduped.filter((r) => !blocked.has(String(r.phone || '').replace(/\D/g, '')));
+}
+
+/**
  * campaign 1건 생성(send_phase='queued') + 잔액 차감 + worker 트리거.
  * 검증·정제 건수(total)는 호출부가 선행. 잔액 부족이면 campaign 롤백 후 DirectSendError(402) throw.
  */

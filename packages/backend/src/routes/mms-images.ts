@@ -160,7 +160,8 @@ router.delete('/:companyId/:filename', authenticate, async (req: any, res: any) 
     return res.status(400).json({ error: '잘못된 파일명' });
   }
 
-  if (req.user.companyId !== companyId && req.user.role !== 'super_admin') {
+  // ★ 2026-09-27 한줄로 V2 R337 — JWT의 구분 칸은 userType(옛: 없는 role을 봐 슈퍼관리자도 다른 회사 이미지를 못 지웠다)
+  if (req.user.companyId !== companyId && req.user.userType !== 'super_admin') {
     return res.status(403).json({ error: '접근 권한 없음' });
   }
 

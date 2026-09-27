@@ -426,6 +426,8 @@ export async function isOverMonthlyCdpLimit(companyId: string): Promise<boolean>
           SELECT SUM(call_count) FROM cdp_api_call_log
           WHERE company_id = c.id
             AND occurred_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
+            -- ★ 2026-09-27 한줄로 V2 R319 — 성공 호출만 한도에 센다(옛: 400·500까지 고객사 한도를 먹었다 · 사용량 화면과 같은 기준)
+            AND COALESCE(status_code, 200) < 400
         ), 0) AS used
      FROM companies c
      LEFT JOIN plans p ON c.plan_id = p.id

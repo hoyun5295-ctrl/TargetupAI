@@ -372,6 +372,21 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 /**
  * SMTP 설정 완료 여부 — 발송 가능 검증용 (email-channel 호출 직전 활용).
  */
+/**
+ * ★ 2026-09-27 한줄로 V2 R228 — 수신 서버의 **영구** 거부인가(받는 사람 단계 · 5xx). 반송 기록 대상 판정.
+ *   받는 사람 단계(EENVELOPE · RCPT TO)만 본다 — 인증 실패(535) 같은 우리 쪽 5xx로 수신자를 반송 처리하면 안 된다.
+ *   일시 오류(4xx)·연결 실패는 아니다(다음 발송에서 다시 시도할 수 있어야 한다).
+ */
+export function isPermanentSmtpRejection(err: any): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const recipientStage = err.code === 'EENVELOPE' || String(err.command || '').toUpperCase() === 'RCPT TO';
+  if (!recipientStage) return false;
+  const is5xx = (v: any) => { const c = Number(v); return Number.isFinite(c) && c >= 500 && c < 600; };
+  if (is5xx(err.responseCode)) return true;
+  const rejectedErrors = Array.isArray(err.rejectedErrors) ? err.rejectedErrors : [];
+  return rejectedErrors.some((e: any) => is5xx(e?.responseCode));
+}
+
 export async function isSmtpConfigured(companyId: string): Promise<boolean> {
   const config = await getSmtpConfigPublic(companyId);
   return Boolean(config?.isConfigured);

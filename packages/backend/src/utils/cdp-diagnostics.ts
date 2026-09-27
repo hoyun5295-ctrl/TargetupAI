@@ -88,7 +88,8 @@ export async function buildCdpDiagnostics(companyId: string): Promise<CdpDiagnos
         COUNT(*) FILTER (WHERE occurred_at > NOW() - INTERVAL '7 days')::int AS d7,
         COUNT(*) FILTER (WHERE occurred_at > NOW() - INTERVAL '30 days')::int AS d30
        FROM cdp_events
-      WHERE company_id = $1::uuid`,
+      WHERE company_id = $1::uuid
+        AND occurred_at > NOW() - INTERVAL '30 days'   -- ★ 2026-09-27 R180 기간 하한(옛: 회사 전 기간 스캔 · 세는 값은 같다)`,
     [companyId]
   );
   const events24h = Number(eventCountResult.rows[0]?.h24) || 0;

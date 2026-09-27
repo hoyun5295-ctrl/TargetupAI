@@ -320,9 +320,10 @@ export async function upsertCustomFieldDefinitions(
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, false, NOW())
          ON CONFLICT (company_id, field_key) DO UPDATE SET
            field_label = EXCLUDED.field_label,
-           field_type = EXCLUDED.field_type,
+           field_type = CASE WHEN $6::boolean THEN EXCLUDED.field_type ELSE customer_field_definitions.field_type END,
            display_order = EXCLUDED.display_order`,
-        [companyId, def.fieldKey, def.label, dbFieldType, displayOrder]
+        // ★ 2026-09-27 한줄로 V2 R145 — 타입을 알아낸 경우에만 덮는다($6). 옛: 모르면 VARCHAR로 덮여 싱크가 넣은 DATE·INT가 매 업로드 초기화됐다.
+        [companyId, def.fieldKey, def.label, dbFieldType, displayOrder, !!(def.fieldType && String(def.fieldType).trim())]
       );
       upsertedCount++;
     } catch (err) {

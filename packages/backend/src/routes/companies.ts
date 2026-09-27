@@ -2960,6 +2960,13 @@ router.put('/rcs-templates/:id', async (req: Request, res: Response) => {
     }
 
     const { templateName, messageType, content, buttons, mediaUrl } = req.body;
+    // ★ 2026-09-27 한줄로 V2 R108 — 수정도 등록과 같은 링크 결함 검사(보낸 값만). 옛: 수정(PUT)은 검사를 건너뛰어 오타 주소가 재심사로 들어갔다.
+    const rcsEditLinkDefect = (content ? findLinkDefectInText(content, '본문의 링크는') : '')
+      || (buttons ? findLinkDefectDeep(buttons, '버튼 주소는') : '')
+      || (mediaUrl ? webLinkReason(mediaUrl, '미디어 주소는') : '');
+    if (rcsEditLinkDefect) {
+      return res.status(400).json({ success: false, error: rcsEditLinkDefect, code: 'LINK_DEFECT' });
+    }
 
     const result = await query(
       `UPDATE rcs_templates SET

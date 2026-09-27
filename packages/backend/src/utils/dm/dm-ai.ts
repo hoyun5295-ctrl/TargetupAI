@@ -29,7 +29,7 @@ import {
 } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
 // ★ 2026-07-21 브랜드 학습 통합 — one-shot 생성 시 회사 brand_kit.contact를 footer·store_info에 시드(페이지 분할 전)
-import { getCompanyBrandKit } from './dm-brand-kit';
+import { getCompanyBrandKit, getCompanyBrandKitRaw } from './dm-brand-kit';
 import { decideLayoutMode, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
 import { normalizeVisualConcept, applyVisualDirection, type VisualConcept } from './dm-visual-direction';
 import { normalizeSectionChain } from './dm-section-layout';
@@ -997,7 +997,9 @@ export async function oneShotGenerate(opts: {
   }
 
   // ★ AI 비주얼 디렉터 — 캠페인별 색·무드·강조 + 섹션 구도(treatment)를 설계해 섹션에 입힘(사진 없어도 완성형).
-  const concept = await designVisualConcept(spec, undefined, opts.companyId);
+  // ★ 2026-09-27 한줄로 V2 R210 — 회사가 저장한 브랜드 킷(설정한 경우만)을 넘긴다. 옛: undefined라 대표 색이 프롬프트에 안 들어가 생성 색이 브랜드와 무관했다.
+  const brandKitRaw = opts.companyId ? await getCompanyBrandKitRaw(opts.companyId).catch(() => null) : null;
+  const concept = await designVisualConcept(spec, (brandKitRaw || undefined) as DmBrandKit | undefined, opts.companyId);
   // 디렉터의 섹션 타입별 treatment 추천 → 섹션 id 맵(없으면 applyVisualDirection이 typeScale 기반 기본 적용).
   const treatmentById: Record<string, string> = {};
   if (concept.treatments) {

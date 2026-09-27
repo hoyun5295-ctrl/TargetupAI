@@ -735,8 +735,9 @@ describe('계산서 비고(PO) 경로 계약 (2026-08-21)', () => {
       expect(adminUiSrc).toContain("EXTRA_MANUAL: '부가서비스'");
     });
 
-    it('메일 항목표가 항목명을 이스케이프한다 — 사람이 적은 값이 HTML 본문에 그대로 들어가는 자리다', () => {
-      expect(billingSrc).toContain('${escapeInvoiceHtml(l.label)}');
+    it('메일 본문에 사람이 적은 항목명이 이스케이프 없이 들어가지 않는다 — ★ 차수 3 R097: 본문은 한줄로 양식 CT(항목 내역은 첨부 PDF)', () => {
+      expect(billingSrc).not.toMatch(/\$\{l\.label\}/);
+      expect(billingSrc).toContain('renderBillingMailHtml({');
     });
 
     it('수정 재발행은 **삭제 전에** 발행이 쓰는 컬럼을 확인한다 — 지운 정산이 안 돌아오는 창을 만들지 않는다', () => {

@@ -48,7 +48,8 @@ assetsRouter.get('/', async (req: any, res: Response) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q : undefined;
     const [assets, usage] = await Promise.all([listAssets(companyId, q, resolveOwnerScope(req)), getStorageUsage(companyId)]);
-    return res.json({ success: true, assets, usage });
+    // ★ 2026-09-27 한줄로 V2 R241 — prompt는 응답에서 뺀다(옛 저장분에 내부 템플릿 프롬프트가 남아 있다 · 화면 소비처 0)
+    return res.json({ success: true, assets: assets.map(({ prompt: _p, ...rest }: any) => rest), usage });
   } catch (err: any) {
     if (isAssetsTableMissing(err)) return respondMigrationPending(res);
     console.error('[assets list] 오류:', err?.message);

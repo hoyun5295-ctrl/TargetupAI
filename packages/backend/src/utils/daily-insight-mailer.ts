@@ -31,6 +31,8 @@
 
 import { query } from '../config/database';
 import { sendEmail, isSmtpConfigured } from './company-smtp-client';
+import { buildCompanyUsageByDay } from './send-usage-aggregation';
+import { kstDateString } from './planner-execution';
 
 function log(tag: string, ...args: any[]) {
   console.log(`[daily-insight-mailer][${tag}]`, ...args);
@@ -82,13 +84,28 @@ export async function collectCompanyInsight(companyId: string): Promise<CompanyI
       [companyId],
     );
 
+    // ★ 2026-09-27 한줄로 V2 R129 — 어제(KST) 발송 실적 = 발송통계 화면과 같은 청구 축(buildCompanyUsageByDay).
+    //   옛: 0 고정("향후 통합")이라 화면·메일이 0을 실적처럼 보였다.
+    const yesterday = kstDateString(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    const dayData = await buildCompanyUsageByDay({ companyId, startDate: yesterday, endDate: yesterday });
+    let yesterdaySent = 0;
+    let yesterdaySuccess = 0;
+    let yesterdayFail = 0;
+    for (const byType of Object.values(dayData)) {
+      for (const cnt of Object.values(byType)) {
+        yesterdaySent += cnt.total;
+        yesterdaySuccess += cnt.success;
+        yesterdayFail += cnt.fail;
+      }
+    }
+
     return {
       companyId,
       companyName: String(c.company_name || ''),
       recipientEmail: String(c.contact_email),
-      yesterdaySent: 0,        // 향후 sms_send_results 통계 통합 영역 (현 시점 = 0 default)
-      yesterdaySuccess: 0,
-      yesterdayFail: 0,
+      yesterdaySent,
+      yesterdaySuccess,
+      yesterdayFail,
       totalCustomers: Number(custCount.rows[0]?.cnt || 0),
       trialDaysRemaining: daysRemaining,
     };

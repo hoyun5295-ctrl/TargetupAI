@@ -42,6 +42,7 @@ import {
 } from './provider-registry';
 import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
+import { orderExternalId } from './cdp-order-identity';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { firstPositiveAmount } from './normalize';
@@ -226,14 +227,16 @@ export async function getImwebIntegration(companyId: string, siteCode?: string):
   return result.rows.length ? rowToIntegration(result.rows[0]) : null;
 }
 
-export async function getImwebIntegrationBySiteCode(siteCode: string): Promise<ImwebIntegration | null> {
+/** ★ 2026-09-27 한줄로 V2 R244 — 같은 사이트가 여러 회사에 연동돼 있으면 전부(웹훅은 회사마다 전달 · R098과 같은 뿌리). */
+export async function getImwebIntegrationsBySiteCode(siteCode: string): Promise<ImwebIntegration[]> {
   const result = await query(
     `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, status
      FROM company_integrations
-     WHERE provider = 'imweb' AND mall_id = $1 AND status = 'active' LIMIT 1`,
+     WHERE provider = 'imweb' AND mall_id = $1 AND status = 'active'
+     ORDER BY connected_at DESC NULLS LAST`,
     [siteCode]
   );
-  return result.rows.length ? rowToIntegration(result.rows[0]) : null;
+  return result.rows.map(rowToIntegration);
 }
 
 export async function ensureFreshImwebToken(integration: ImwebIntegration): Promise<ImwebIntegration> {
@@ -440,7 +443,8 @@ export const imwebAdapter: IProviderAdapter = {
         await syncOrder(companyId, {
           source: 'imweb',
           orderId: String(resource.orderNo || resource.order_no || ''),
-          externalId: String(resource.memberUid || resource.member_uid || ''),
+          // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
+          externalId: orderExternalId(resource.memberUid || resource.member_uid, resource.call || resource.mobile || resource.phone, resource.orderNo || resource.order_no),
           email: resource.email,
           phone: resource.call || resource.mobile || resource.phone,
           name: resource.name || resource.ordererName,

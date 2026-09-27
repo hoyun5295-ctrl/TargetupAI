@@ -17,6 +17,7 @@
  */
 
 import { query } from '../config/database';
+import { KST_TODAY_DATE_SQL } from './stats-aggregation';
 import { buildJourneySafetyFilter, buildReentryAntiJoin } from './journey-safety-filter';
 import { resolvePointsExpiringConfig, clampInt } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
@@ -124,8 +125,8 @@ export async function selectJourneyTargetCustomerIds(
          WHERE c.company_id = $1::uuid
            AND ${buildJourneySafetyFilter('c')}${scopeSql}
            AND c.recent_purchase_date IS NOT NULL
-           AND c.recent_purchase_date < (CURRENT_DATE - ($2 || ' days')::interval)
-           AND c.recent_purchase_date > (CURRENT_DATE - ($3 || ' days')::interval)
+           AND c.recent_purchase_date < (${KST_TODAY_DATE_SQL} - ($2 || ' days')::interval)
+           AND c.recent_purchase_date > (${KST_TODAY_DATE_SQL} - ($3 || ' days')::interval)
            ${antiJoin}
            ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
@@ -325,8 +326,12 @@ export async function selectJourneyTargetCustomerIds(
     }
 
     // 5. 생일 (D-N): NOW + N days의 MM-DD가 customers.birth_month_day 또는 birth_date와 일치
+    // ★ 2026-09-27 한줄로 V2 R425 — 기준일 = KST 오늘(옛: UTC 날짜) · 2/29생은 평년엔 2/28에 진입(옛: 평년엔 영영 못 들어왔다).
     case 'customer.birthday_approaching': {
       const days = Number(filters.days_before || 7);
+      const birthdayTarget = `(${KST_TODAY_DATE_SQL} + ($2 || ' days')::interval)`;
+      const birthdayTargetMd = `TO_CHAR(${birthdayTarget}, 'MM-DD')`;
+      const birthdayLeapMd = `CASE WHEN TO_CHAR(${birthdayTarget}, 'MM-DD') = '02-28' AND TO_CHAR(${birthdayTarget} + INTERVAL '1 day', 'MM-DD') = '03-01' THEN '02-29' END`;
       const params: any[] = [companyId, String(days)];
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
@@ -336,9 +341,9 @@ export async function selectJourneyTargetCustomerIds(
          WHERE c.company_id = $1::uuid
            AND ${buildJourneySafetyFilter('c')}${scopeSql}
            AND (
-             (c.birth_month_day IS NOT NULL AND c.birth_month_day = TO_CHAR((CURRENT_DATE + ($2 || ' days')::interval), 'MM-DD'))
+             (c.birth_month_day IS NOT NULL AND c.birth_month_day IN (${birthdayTargetMd}, ${birthdayLeapMd}))
              OR
-             (c.birth_date IS NOT NULL AND TO_CHAR(c.birth_date, 'MM-DD') = TO_CHAR((CURRENT_DATE + ($2 || ' days')::interval), 'MM-DD'))
+             (c.birth_date IS NOT NULL AND TO_CHAR(c.birth_date, 'MM-DD') IN (${birthdayTargetMd}, ${birthdayLeapMd}))
            )
            ${antiJoin}
            ${cond ? ` AND ${cond}` : ''}
@@ -357,10 +362,10 @@ export async function selectJourneyTargetCustomerIds(
         if (!cfg.expiryMonthDay) return [];  // 소멸일 미설정 = 발송 0 (안전)
         params.push(String(cfg.daysBefore));   // $3
         params.push(cfg.expiryMonthDay);       // $4
-        edgeClause = `TO_CHAR((CURRENT_DATE + ($3 || ' days')::interval), 'MM-DD') = $4`;
+        edgeClause = `TO_CHAR((${KST_TODAY_DATE_SQL} + ($3 || ' days')::interval), 'MM-DD') = $4`;
       } else {
         params.push(String(cfg.inactiveDays));  // $3
-        edgeClause = `(c.recent_purchase_date IS NULL OR c.recent_purchase_date < (CURRENT_DATE - ($3 || ' days')::interval))`;
+        edgeClause = `(c.recent_purchase_date IS NULL OR c.recent_purchase_date < (${KST_TODAY_DATE_SQL} - ($3 || ' days')::interval))`;
       }
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
       // 이관 유예 — inactivity 모드는 최근구매일 기반이라 이관 배치가 통째로 걸린다.

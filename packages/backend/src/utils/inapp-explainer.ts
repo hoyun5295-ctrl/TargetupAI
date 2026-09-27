@@ -87,6 +87,7 @@ async function loadMessageContext(
             COUNT(*) FILTER (WHERE i.event_type = 'dismiss')::int AS dismisses
      FROM cdp_inapp_messages m
      LEFT JOIN cdp_inapp_impressions i ON i.message_id = m.id AND i.company_id = m.company_id
+       AND i.occurred_at >= NOW() - INTERVAL '30 days'
      WHERE m.company_id = $1::uuid AND m.id = $2::uuid
      GROUP BY m.id, m.title, m.body, m.template, m.image_url, m.buttons,
               m.background_color, m.trigger_event, m.trigger_conditions, m.segment_conditions,
@@ -103,6 +104,7 @@ async function loadMessageContext(
             COUNT(*) FILTER (WHERE event_type = 'click')::int AS clicks
      FROM cdp_inapp_impressions
      WHERE company_id = $1::uuid AND message_id = $2::uuid
+       AND occurred_at >= NOW() - INTERVAL '30 days'   -- ★ R415 회사 평균과 같은 최근 30일
      GROUP BY hour
      ORDER BY hour ASC`,
     [companyId, messageId]
@@ -142,6 +144,8 @@ async function loadMessageContext(
   };
 }
 
+// ★ 2026-09-27 한줄로 V2 R415 — 메시지 CTR·시간대도 최근 30일(아래 회사 평균과 같은 기간). 옛: 메시지는 전 기간이라 기간이 다른 값을 비교해 진단했다.
+// ★ 2026-09-27 한줄로 V2 R249 — 진단 프롬프트 가이드에서 출처 없는 효과 수치와 글자 수 기준(다른 인앱 길이 규칙과 충돌)을 뺐다.
 async function loadCompanyAverageCTR(companyId: string): Promise<{ avgCTR: number; sampleSize: number }> {
   const r = await query(
     `SELECT COUNT(*) FILTER (WHERE event_type = 'impression')::int AS impressions,
@@ -205,7 +209,7 @@ export async function explainInAppMessage(
 - 시간대 제한: ${ctx.sendStartHour !== null && ctx.sendEndHour !== null ? `${ctx.sendStartHour}~${ctx.sendEndHour}시` : '제한 없음'}
 - 세그먼트 조건: ${ctx.hasSegmentConditions ? '있음' : '없음 (전체 회원)'}
 
-[통계 (누적)]
+[통계 (최근 30일)]
 - impression: ${ctx.impressions.toLocaleString()}건
 - click: ${ctx.clicks.toLocaleString()}건
 - dismiss: ${ctx.dismisses.toLocaleString()}건
@@ -221,11 +225,13 @@ export async function explainInAppMessage(
 
 [★ 5 영향 요인 분석 가이드 ★]
 
-1. 이미지 (image_url): 시선 끌기. 이미지 있음 = CTR +30~50% 일반
-2. CTA 색상 (background_color): 대비 명확 + 브랜드 정합 = CTR +10~20%
-3. 트리거 시점 (trigger_event + 시간대): page_load 단순 = CTR 낮음 / cart_view·time_on_page = CTR 높음 일반
-4. 본문 길이 (bodyLength): 50자 미만 너무 짧음 / 500자 초과 너무 김 / 200~400자 권장
-5. 세그먼트 정확도 (hasSegmentConditions): 전체 회원 = CTR 낮음 / 세그먼트 정확 = CTR +50~100%
+1. 이미지 (image_url): 시선을 끄는가
+2. CTA 색상 (background_color): 대비가 분명하고 브랜드와 맞는가
+3. 트리거 시점 (trigger_event + 시간대): 구매 의도가 있는 순간(장바구니 보기 등)에 뜨는가, 단순 페이지 진입인가
+4. 본문 길이 (bodyLength): 팝업에서 한눈에 읽히는가
+5. 세그먼트 정확도 (hasSegmentConditions): 전체 회원 대상인가, 조건으로 좁혔는가
+
+⛔ 요인별 효과 크기(예: "CTR +30%")를 지어내지 않는다. 위 [통계]·[회사 평균]에 있는 숫자만 근거로 쓴다.
 
 각 요인:
 - impact: 0~1 (영향력 절대값, 0.8 = 매우 높음 / 0.5 = 보통 / 0.2 = 낮음)
@@ -249,7 +255,7 @@ priority: high / medium / low
 {
   "topInsight": "본 메시지 CTR이 회사 평균 대비 N% (높음/낮음): 핵심 진단 한 줄",
   "factors": [
-    { "factor": "이미지", "impact": 0.7, "direction": "negative", "description": "이미지 없음. 시선 끌기 약함. 추가 시 CTR +30% 예상", "dataSource": "회사 누적 평균 vs 본 메시지" },
+    { "factor": "이미지", "impact": 0.7, "direction": "negative", "description": "이미지 없음. 시선을 끌 요소가 약함", "dataSource": "회사 누적 평균 vs 본 메시지" },
     ...총 5건
   ],
   "recommendations": [

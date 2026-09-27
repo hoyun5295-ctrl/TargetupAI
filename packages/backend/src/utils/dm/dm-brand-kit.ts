@@ -36,7 +36,8 @@ async function ensureColumn(): Promise<boolean> {
     );
     columnExists = res.rows.length > 0;
   } catch {
-    columnExists = false;
+    // ★ 2026-09-27 한줄로 V2 R212 — 확인 실패는 캐시하지 않는다(다음 호출이 다시 확인). 옛: false를 영구 캐시해 재시작 전까지 브랜드킷 저장이 조용히 무시됐다.
+    return false;
   }
   return columnExists;
 }

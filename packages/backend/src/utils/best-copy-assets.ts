@@ -124,33 +124,49 @@ export async function getIndustryFormula(industryCode: string): Promise<StoredFo
 
 /** 업종 공식 교체 저장(업종당 1행). 테이블 없으면 false. */
 export async function saveIndustryFormula(industryCode: string, content: string, meta: IndustryFormulaMeta): Promise<boolean> {
+  // ★ 2026-09-27 한줄로 V2 R367 — 교체는 한 트랜잭션(옛: DELETE 뒤 INSERT가 실패하면 그 업종 공식이 사라졌다)
+  const client = await pool.connect();
   try {
-    await pool.query(`DELETE FROM best_copy_assets WHERE kind = 'formula' AND industry_code = $1`, [industryCode]);
-    await pool.query(
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM best_copy_assets WHERE kind = 'formula' AND industry_code = $1`, [industryCode]);
+    await client.query(
       `INSERT INTO best_copy_assets (id, kind, industry_code, content, meta) VALUES ($1, 'formula', $2, $3, $4)`,
       [crypto.randomUUID(), industryCode, content, JSON.stringify(meta)],
     );
+    await client.query('COMMIT');
     return true;
   } catch (e: any) {
+    await client.query('ROLLBACK').catch(() => {});
     if (!isMissingTable(e)) console.warn('[best-copy] 공식 저장 실패:', e?.message);
     return false;
+  } finally {
+    client.release();
   }
 }
 
 /** 업종 재창작 예시 교체 저장. 테이블 없으면 false. */
 export async function replaceStyleExamples(industryCode: string, examples: { text: string; tags: string[] }[]): Promise<boolean> {
+  // ★ 2026-09-27 한줄로 V2 R367 — 새 예시가 0건이면(AI 응답이 깨졌거나 전부 유사도로 폐기) 기존 예시를 지우지 않는다.
+  //   교체는 한 트랜잭션(옛: DELETE 뒤 INSERT 실패 = 예시 전부 소실).
+  if (examples.length === 0) return false;
+  const client = await pool.connect();
   try {
-    await pool.query(`DELETE FROM best_copy_assets WHERE kind = 'style_example' AND industry_code = $1`, [industryCode]);
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM best_copy_assets WHERE kind = 'style_example' AND industry_code = $1`, [industryCode]);
     for (const ex of examples) {
-      await pool.query(
+      await client.query(
         `INSERT INTO best_copy_assets (id, kind, industry_code, content, meta) VALUES ($1, 'style_example', $2, $3, $4)`,
         [crypto.randomUUID(), industryCode, ex.text, JSON.stringify({ tags: ex.tags })],
       );
     }
+    await client.query('COMMIT');
     return true;
   } catch (e: any) {
+    await client.query('ROLLBACK').catch(() => {});
     if (!isMissingTable(e)) console.warn('[best-copy] 예시 저장 실패:', e?.message);
     return false;
+  } finally {
+    client.release();
   }
 }
 

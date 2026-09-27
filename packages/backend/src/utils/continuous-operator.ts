@@ -25,6 +25,8 @@
  *   7. 사용자: POST /api/ai/operator/proposals/:id/reject → 거부 → status='rejected'
  */
 
+// ★ 2026-09-27 한줄로 V2 R197 — 운영자 일·월 예산 창 = KST(옛 CURRENT_DATE·date_trunc는 UTC 세션 기준)
+import { KST_TODAY_START_SQL, KST_MONTH_START_SQL } from './stats-aggregation';
 import { query, pool } from '../config/database';
 import { orchestrate } from '../services/ai-orchestrator';
 import { getCompanyCosts, SEND_HOURS } from '../config/defaults';
@@ -40,7 +42,7 @@ import { getOpt080Number } from './messageUtils';
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
-import { InsufficientCreditError, checkCredit, deductCreditSafe } from './ai-credit';
+import { InsufficientCreditError, checkCredit, deductCreditSafe, hasCreditForStrict } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
 // ★ 2026-08-04 변화 축 settle — 캠페인 종결 후 실수신 번호를 발송 큐에서 되읽는다(보호 영역은 읽기만).
@@ -364,13 +366,13 @@ export async function listOperators(companyId: string, scopeUserId?: string | nu
        COALESCE((
          SELECT SUM(cost_estimate) FROM operator_proposals
          WHERE operator_id = o.id
-           AND created_at >= date_trunc('month', NOW())
+           AND created_at >= ${KST_MONTH_START_SQL}
            AND status IN ('approved', 'auto_executed', 'sent')
        ), 0) AS budget_spent_month,
        COALESCE((
          SELECT SUM(cost_estimate) FROM operator_proposals
          WHERE operator_id = o.id
-           AND created_at >= CURRENT_DATE
+           AND created_at >= ${KST_TODAY_START_SQL}
            AND status IN ('approved', 'auto_executed', 'sent')
        ), 0) AS budget_spent_today
      FROM continuous_operators o
@@ -689,22 +691,32 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
        COALESCE((
          SELECT SUM(cost_estimate) FROM operator_proposals
          WHERE operator_id = o.id
-           AND created_at >= date_trunc('month', NOW())
+           AND created_at >= ${KST_MONTH_START_SQL}
            AND status IN ('approved', 'auto_executed', 'sent')
        ), 0) AS budget_spent_month,
        COALESCE((
          SELECT SUM(cost_estimate) FROM operator_proposals
          WHERE operator_id = o.id
-           AND created_at >= CURRENT_DATE
+           AND created_at >= ${KST_TODAY_START_SQL}
            AND status IN ('approved', 'auto_executed', 'sent')
        ), 0) AS budget_spent_today
      FROM continuous_operators o
      JOIN companies c ON o.company_id = c.id
-     WHERE o.id = $1::uuid AND o.status = 'active'`,
+     WHERE o.id = $1::uuid AND o.status IN ('active', 'paused_no_credit')`,
     [operatorId]
   );
+  // ★ 2026-09-27 한줄로 V2 R192 — 크레딧 부족 정지(paused_no_credit)도 읽는다. 워커는 이 상태를 매 주기 고르는데
+  //   옛 로더가 active만 읽어 null로 끝났다 → 아래 자동 재개(크레딧 충분 = active 복귀)에 영영 못 닿고 next_run_at도 안 밀려 매분 재선택됐다.
   if (operRes.rows.length === 0) return null;
   const operator = mapRowToOperator(operRes.rows[0]);
+  //   ⛔ 재개 조건 = 발송 크레딧이 있을 때만. 제안 생성은 무과금(cost 0 · 잔액 확인 없음)이라 이 확인이 없으면
+  //   충전 없이도 살아나 부족한 잔액으로 발송이 돈다. 부족하면 정지 그대로 다음 회차로 넘긴다(재통지 없음).
+  //   (Codex 차수3 1R) 확인은 실제 발송 차감과 같은 허용 한도 · 조회 실패는 던진다(워커가 다음 분에 재시도 · 정지 유지).
+  if (operator.status === 'paused_no_credit'
+      && !(await hasCreditForStrict(operator.companyId, getCreditCost('continuous-operator-send'), 'continuous-operator-send'))) {
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
 
   // ★ 2026-09-26 한줄로 V2 R1-24 — 이번 회차의 발송 희망 시각이 이미 지났으면(서버 재시작·지연) 아래 계산이 다음 회차로 넘어간다.
   //   늦게 보내지는 않는다(종전 동작 유지). 옛: 그 사실이 어디에도 남지 않아 담당자는 "왜 이번엔 안 갔지"를 알 수 없었다 → 알린다.
@@ -826,8 +838,8 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     `SELECT
        COUNT(*) AS total,
        COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in_count,
-       AVG((custom_fields->>'purchase_count')::numeric) AS avg_purchase_count,
-       AVG((custom_fields->>'total_spent')::numeric) AS avg_total_spent
+       AVG(purchase_count) AS avg_purchase_count,
+       AVG(total_purchase_amount) AS avg_total_spent
      FROM customers
      WHERE company_id = $1::uuid AND is_active = true`,
     [operator.companyId]
@@ -1039,9 +1051,12 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   // ★ 2026-06-30: operator당 미처리 추천 1건 원칙 — 방금 만든 것 외 직전 미처리(pending/admin_review)는
   //   만료시켜 "오늘의 추천" 중복 누적을 차단(테스트계정2 = 한 operator에 제안 다수 쌓임 정정).
   //   'scheduled'(자율발송·리마인드)는 발송 확정분이라 건드리지 않음. operator_proposals엔 updated_at 컬럼 없음 → status만 set.
+  //   ★ 2026-09-27 한줄로 V2 R194 — 리마인드(meta.is_reminder)는 회차 추천이 아니라 별개 발송이다. 스팸 검증 대기(admin_review)
+  //   리마인드가 다음 회차 생성에 알림 없이 만료되던 것을 막는다(위 이중 예약 가드와 같은 제외 조건).
   await query(
     `UPDATE operator_proposals SET status = 'expired'
-      WHERE operator_id = $1::uuid AND status IN ('pending', 'admin_review') AND id <> $2::uuid`,
+      WHERE operator_id = $1::uuid AND status IN ('pending', 'admin_review') AND id <> $2::uuid
+        AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'`,
     [operator.id, proposalRes.rows[0].id],
   );
 
@@ -1431,6 +1446,10 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
   let failed = 0;
 
   try {
+    // ★ 2026-09-27 한줄로 V2 m107 — 발송 패스를 먼저 돈다. 옛: 운영자 최대 100건의 제안 생성(AI·스팸 실검사)을 순차로 끝낸 뒤에야
+    //   돌아 예약 발송 시각이 밀렸다. 제안마다 상태 선점을 거치므로 순서를 바꿔도 이중 발송은 없다.
+    await runAutoSendPass().catch((e: any) => console.error('[ContinuousOperator AutoSend] 패스 예외:', e?.message || e));
+
     const dueRes = await query(
       `SELECT id FROM continuous_operators
        WHERE status IN ('active', 'paused_no_credit')
@@ -1453,8 +1472,7 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
       console.log(`[ContinuousOperator Worker] 처리 완료 — ${processed} 성공 / ${failed} 실패`);
     }
 
-    // 발송 패스 — scheduled_send_at(준비+lead) 도달한 자율 발송 제안서를 직접발송 파이프라인으로 처리.
-    await runAutoSendPass().catch((e: any) => console.error('[ContinuousOperator AutoSend] 패스 예외:', e?.message || e));
+    // (발송 패스는 위 제안 생성 앞에서 돈다 — m107)
   } finally {
     workerRunning = false;
   }
@@ -1663,6 +1681,10 @@ async function settlePendingCharges(): Promise<void> {
          LEFT JOIN continuous_operators o ON o.id = p.operator_id
         WHERE p.campaign_id IS NOT NULL
           AND COALESCE(p.proposal_json->'meta'->>'chargePending', 'false') = 'true'
+          -- ★ 2026-09-27 한줄로 V2 R196 — 마지막 시도 10분 뒤에 다시 본다(옛: 매 패스 같은 행의 proposal_json을 다시 썼다 · 크레딧 부족 회사).
+          --   UTC ISO 문자열 비교(아래 정렬과 같은 형식) — 미시도(NULL)는 바로 본다.
+          AND (p.proposal_json->'meta'->>'chargeAttemptAt' IS NULL
+               OR p.proposal_json->'meta'->>'chargeAttemptAt' < to_char((NOW() AT TIME ZONE 'UTC') - INTERVAL '10 minutes', 'YYYY-MM-DD"T"HH24:MI:SS'))
         -- ⛔ 정렬 없이 LIMIT만 걸면 영구 실패 20건이 앞자리를 계속 차지해 뒤에 쌓인 미정산 발송이
         --   한 번도 시도되지 않는다(Codex 2R high · 기아). 미시도 우선 → 오래 안 해본 순.
         --   UTC ISO 고정 문자열이라 사전순 = 시간순이고, 캐스팅이 없어 형식 오류로 패스가 죽지 않는다.
@@ -1825,10 +1847,10 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
     const budRes = await query(
       `SELECT o.budget_monthly, o.budget_daily, o.name, o.admin_phone_numbers, o.backup_admin_phone,
          COALESCE((SELECT SUM(cost_estimate) FROM operator_proposals
-            WHERE operator_id = o.id AND created_at >= date_trunc('month', NOW())
+            WHERE operator_id = o.id AND created_at >= ${KST_MONTH_START_SQL}
               AND status IN ('approved','auto_executed','sent')), 0) AS spent_month,
          COALESCE((SELECT SUM(cost_estimate) FROM operator_proposals
-            WHERE operator_id = o.id AND created_at >= CURRENT_DATE
+            WHERE operator_id = o.id AND created_at >= ${KST_TODAY_START_SQL}
               AND status IN ('approved','auto_executed','sent')), 0) AS spent_today
        FROM continuous_operators o WHERE o.id = $1::uuid`,
       [p.operator_id],
@@ -2148,10 +2170,10 @@ async function dispatchProposalSend(
                   c.cost_per_sms, c.cost_per_lms, c.cost_per_mms, c.cost_per_kakao, c.unit_price_basis,
                   o.budget_monthly, o.budget_daily,
                   COALESCE((SELECT SUM(cost_estimate) FROM operator_proposals
-                     WHERE operator_id = o.id AND created_at >= date_trunc('month', NOW())
+                     WHERE operator_id = o.id AND created_at >= ${KST_MONTH_START_SQL}
                        AND status IN ('approved','auto_executed','sent','sending') AND id <> $2::uuid), 0) AS spent_month,
                   COALESCE((SELECT SUM(cost_estimate) FROM operator_proposals
-                     WHERE operator_id = o.id AND created_at >= CURRENT_DATE
+                     WHERE operator_id = o.id AND created_at >= ${KST_TODAY_START_SQL}
                        AND status IN ('approved','auto_executed','sent','sending') AND id <> $2::uuid), 0) AS spent_today
              FROM continuous_operators o JOIN companies c ON c.id = o.company_id
             WHERE o.id = $1::uuid`,
@@ -2214,6 +2236,26 @@ async function dispatchProposalSend(
         await cleanupOrphanStaging(stagingId);
         await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' ${overReason}. 담당자 검토가 필요합니다.`);
         return { action: 'skipped', reason: overReason };
+      }
+    } else if (!autoPath && recipientTotal > 0) {
+      // ★ 2026-09-27 한줄로 V2 R198 — 수동 승인 발송도 재추출한 실제 수량 · 지금 회사 단가로 기록한다(검사는 자율 경로만 · 기록은 둘 다).
+      //   옛: 기록이 자율 분기 안에만 있어 수동 승인분은 제안 시점 추정치가 남아 운영자 일·월 예산 합계가 실제와 어긋났다.
+      //   기록 실패는 발송을 막지 않는다(사람이 이미 승인한 발송 · 예산 합계 표시만 추정치로 남는다).
+      try {
+        const cr = await query(
+          `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1::uuid`,
+          [companyId],
+        );
+        const costs = getCompanyCosts((cr.rows[0] || {}) as any);
+        const unit = msgType === 'MMS' ? Number(costs.mms) : msgType === 'LMS' ? Number(costs.lms) : Number(costs.sms);
+        if (Number.isFinite(unit)) {
+          await query(
+            `UPDATE operator_proposals SET recipient_count = $2, cost_estimate = $3 WHERE id = $1::uuid`,
+            [proposalId, recipientTotal, Math.round(unit * recipientTotal)],
+          );
+        }
+      } catch (recErr: any) {
+        console.error(`[ContinuousOperator] 수동 승인 실측 기록 실패 proposal=${proposalId}:`, recErr?.message || recErr);
       }
     }
 
@@ -2359,8 +2401,8 @@ async function dispatchProposalSend(
   try {
     const spentRes = await query(
       `SELECT
-         COALESCE(SUM(cost_estimate) FILTER (WHERE created_at >= date_trunc('month', NOW())), 0) AS spent_month,
-         COALESCE(SUM(cost_estimate) FILTER (WHERE created_at >= CURRENT_DATE), 0) AS spent_today
+         COALESCE(SUM(cost_estimate) FILTER (WHERE created_at >= ${KST_MONTH_START_SQL}), 0) AS spent_month,
+         COALESCE(SUM(cost_estimate) FILTER (WHERE created_at >= ${KST_TODAY_START_SQL}), 0) AS spent_today
        FROM operator_proposals
        WHERE operator_id = $1::uuid AND status IN ('approved', 'auto_executed', 'sent') AND id <> $2::uuid`,
       [p.operator_id, proposalId],

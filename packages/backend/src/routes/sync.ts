@@ -2,6 +2,7 @@
 // Sync Agent API — FIELD_MAP 기반 동적 전환 (D39+ 반영)
 // 하드코딩 금지. standard-field-map.ts가 유일한 기준.
 
+import { agentReleasesDir } from '../utils/agent-build-tiers';
 import { Request, Response, Router } from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -9,7 +10,7 @@ import { query } from '../config/database';
 import { guardMachineOrigin } from '../utils/geo-access';
 import { ensureSystemSyncUser } from '../utils/system-sync-user';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
-import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts } from '../utils/normalize';
+import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts, normalizeAmount } from '../utils/normalize';
 import {
   FIELD_MAP,
   CATEGORY_LABELS,
@@ -42,7 +43,8 @@ const router = Router();
 
 // ★ 2026-07-01: 자동 업데이트 exe 릴리즈 디렉토리.
 //   서버에 exe 업로드(박스 아님) → 에이전트가 GET /api/sync/download/:version 로 수신.
-const AGENT_RELEASES_DIR = process.env.AGENT_RELEASES_DIR || path.join(__dirname, '..', '..', 'agent-releases');
+// ★ 2026-09-27 R277 — 폴더는 CT 하나(릴리즈 등록의 exe 확인과 같은 값)
+const AGENT_RELEASES_DIR = agentReleasesDir();
 try { fs.mkdirSync(AGENT_RELEASES_DIR, { recursive: true }); } catch { /* 권한 등 — 다운로드 시점 재판정 */ }
 
 // ============================================
@@ -1084,7 +1086,8 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
         phone, purchase_date: p.purchase_date || null,
         store_code: p.store_code || null, store_name: p.store_name || null,
         product_code: p.product_code || null, product_name: p.product_name || null,
-        quantity: p.quantity || null, unit_price: p.unit_price || null, total_amount: p.total_amount || null,
+        // ★ 2026-09-27 한줄로 V2 R346 — 0은 0으로(옛 || null이 0을 NULL로 바꿨다) · 빈 값·숫자 아님만 NULL(금액 정규화 CT)
+        quantity: normalizeAmount(p.quantity), unit_price: normalizeAmount(p.unit_price), total_amount: normalizeAmount(p.total_amount),
         source_row_key: keyResult.value,
       });
     }

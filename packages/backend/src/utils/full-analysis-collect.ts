@@ -102,15 +102,25 @@ export interface ForecastResult {
 /** 예측·기회 — 일별 발송량 시계열 추세 + RFM 이탈위험/휴면 규모(놓친 기회). */
 export async function buildForecast(companyId: string, period: string, rfmSegments: RfmSegment[]): Promise<ForecastResult> {
   const days = periodDays(period);
+  // ★ 2026-09-27 한줄로 V2 R233 — 기간의 KST 날짜 전부를 만들고 발송 없는 날은 0(옛: 발송 있는 날만이라 빈 날이 빠진 채
+  //   순번을 x로 회귀하고 "다음 동일 기간"도 발송일 수만큼만 투영했다).
   const res = await query(
-    `SELECT (COALESCE(scheduled_at, sent_at) AT TIME ZONE 'Asia/Seoul')::date AS d,
-            COALESCE(SUM(success_count + fail_count), 0) AS sent
-     FROM campaigns
-     WHERE company_id = $1::uuid
-       AND sent_at IS NOT NULL
-       AND COALESCE(scheduled_at, sent_at) > NOW() - ($2 || ' days')::interval
-     GROUP BY d ORDER BY d`,
-    [companyId, String(days)],
+    `WITH days AS (
+       SELECT generate_series((NOW() AT TIME ZONE 'Asia/Seoul')::date - ($3::int - 1),
+                              (NOW() AT TIME ZONE 'Asia/Seoul')::date, INTERVAL '1 day')::date AS d
+     ), sent AS (
+       SELECT (COALESCE(scheduled_at, sent_at) AT TIME ZONE 'Asia/Seoul')::date AS d,
+              COALESCE(SUM(success_count + fail_count), 0) AS sent
+       FROM campaigns
+       WHERE company_id = $1::uuid
+         AND sent_at IS NOT NULL
+         AND COALESCE(scheduled_at, sent_at) > NOW() - ($2 || ' days')::interval
+       GROUP BY 1
+     )
+     SELECT days.d, COALESCE(s.sent, 0) AS sent
+       FROM days LEFT JOIN sent s ON s.d = days.d
+      ORDER BY days.d`,
+    [companyId, String(days), days],
   );
   const dailySeries = res.rows.map((r: any) => Number(r.sent) || 0);
   const trend = computeSendTrendForecast(dailySeries);

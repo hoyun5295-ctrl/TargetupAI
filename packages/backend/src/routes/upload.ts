@@ -13,7 +13,7 @@ import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError }
 // ★ 2026-06-25: 고객 업로드 완료 시 회사 데이터 프로필 캐시 무효화(게이트 "고객 없음" 오표시 차단)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
-import { dropEmptyColumns, dropEmptyHeaderColumns, isFirstRowHeaderRow } from '../utils/excel-columns';
+import { dropEmptyColumns, dropEmptyHeaderColumns, isFirstRowHeaderRow, splitHeaderRows } from '../utils/excel-columns';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 // ★ 2026-09-11 전송자격인증 4.2 — 고객 파일 업로드(등록·수정) 이력(누가·언제·몇 건 · 원문 없음)
 import { logPrivacyEdit } from '../utils/privacy-audit';
@@ -59,26 +59,7 @@ const storage = multer.diskStorage({
 //   적용 3곳: POST /parse / POST /validate-mapping / processUploadInBackground.
 //   세 곳이 동일 결과를 내야 클라이언트 mapping(unique header key)과 백엔드 처리가 일치한다.
 // ================================================================
-function dedupeHeaders(rawHeaders: any[]): string[] {
-  // ★ Set 기반 단일 패스 — 결과가 항상 unique 보장 (엣지 케이스 포함)
-  //   예) 입력 ["전화번호", "전화번호", "전화번호 (2)"] → 출력 ["전화번호", "전화번호 (2)", "전화번호 (3)"]
-  //   카운터 기반 단순 디덱싱은 위 입력에서 ["전화번호", "전화번호 (2)", "전화번호 (2)"] 충돌 가능.
-  const seen = new Set<string>();
-  const result: string[] = [];
-  rawHeaders.forEach((raw, idx) => {
-    let h = String(raw ?? '').trim();
-    if (!h) h = `컬럼${idx + 1}`;
-    let candidate = h;
-    let n = 2;
-    while (seen.has(candidate)) {
-      candidate = `${h} (${n})`;
-      n++;
-    }
-    seen.add(candidate);
-    result.push(candidate);
-  });
-  return result;
-}
+// ★ 2026-09-27 한줄로 V2 R144 — dedupeHeaders는 엑셀 열 CT(excel-columns.ts)로 옮겼다(헤더·행 나누기 CT splitHeaderRows가 쓴다).
 
 const upload = multer({
   storage,
@@ -132,23 +113,9 @@ router.post('/parse', authenticate, upload.single('file'), async (req: Request, 
       return res.status(400).json({ error: '파일이 비어있습니다.' });
     }
 
-    // 첫 행이 헤더인지 판별 (CT — 3경로 동일 판정)
-    const isFirstRowHeader = isFirstRowHeaderRow(data[0]);
-    // ★ 2026-06-23: 헤더 있는 파일은 헤더 빈 잡열(컬럼5·7 — E열 SMS수신여부 등) 매핑에서 제외
-    if (isFirstRowHeader) data = dropEmptyHeaderColumns(data);
-    const firstRow = data[0];
-
-    // ★ D141 B1: 동일 헤더 자동 디덱싱 (dedupeHeaders 헬퍼)
-    let headers: string[];
-    let dataRows: any[][];
-
-    if (isFirstRowHeader) {
-      headers = dedupeHeaders(firstRow);
-      dataRows = data.slice(1);
-    } else {
-      headers = firstRow.map((_: any, idx: number) => `컬럼${idx + 1}`);
-      dataRows = data;
-    }
+    // ★ 2026-09-27 한줄로 V2 R144 — 헤더·행 나누기 CT 하나(파싱·매핑 검증·백그라운드 저장 3경로가 같은 결과).
+    //   헤더 있는 파일 = 빈 잡열 제외 + 중복 헤더 접미사 · 없는 파일 = 컬럼N 이름 + 첫 행부터 데이터.
+    const { headers, rows: dataRows } = splitHeaderRows(data);
 
     // 미리보기 (최대 5행)
     // ★ D100: Date 객체를 YYYY-MM-DD로 변환 — normalizeDate 컨트롤타워 사용 (인라인 금지)
@@ -397,13 +364,10 @@ router.post('/validate-mapping', authenticate, async (req: Request, res: Respons
     if (data.length === 0) {
       return res.status(400).json({ error: '파일이 비어있습니다.' });
     }
-    // ★ 2026-06-23: /parse와 동일 — 헤더 있는 파일은 헤더 빈 잡열 제외(매핑 키 일치)
-    if (isFirstRowHeaderRow(data[0] as any[])) data = dropEmptyHeaderColumns(data);
-    // ★ D141 B1: dedupeHeaders 헬퍼 — /parse와 동일 결과 보장
-    //   클라이언트가 보낸 mapping의 unique header 키와 백엔드 sampleData의 키가 일치해야
-    //   매핑 검증 결과(타입 감지 등)가 정확.
-    const headers = dedupeHeaders(data[0] as any[]);
-    const rows = data.slice(1, Math.min(21, data.length));
+    // ★ 2026-09-27 한줄로 V2 R144 — /parse와 같은 CT(옛: 늘 첫 행을 헤더로 봐 무헤더 파일의 매핑 키 컬럼N과 어긋났다)
+    const split = splitHeaderRows(data);
+    const headers = split.headers;
+    const rows = split.rows.slice(0, 20);
 
     const sampleData: Record<string, any[]> = {};
     headers.forEach((h, idx) => {
@@ -481,6 +445,7 @@ router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: 
       duplicateCount: 0,
       errorCount: 0,
       startedAt,
+      heartbeatAt: new Date().toISOString(),
       message: '처리 시작...'
     }), 'EX', CACHE_TTL.uploadProgress);
 
@@ -531,13 +496,8 @@ async function processUploadInBackground(
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     let data = dropEmptyColumns(XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][]);
-    // ★ 2026-06-23: /parse·/validate-mapping과 동일 — 헤더 있는 파일은 헤더 빈 잡열 제외(매핑 키 일치·데이터 손실 0)
-    if (isFirstRowHeaderRow(data[0] as any[])) data = dropEmptyHeaderColumns(data);
-
-    // ★ D141 B1: dedupeHeaders 헬퍼 — 클라이언트 mapping의 unique header 키와 정확히 일치해야 매핑 적용
-    //   누락 시: 동일 헤더 컬럼이 있는 엑셀 업로드 → 백그라운드 처리에서 raw header 사용 → mapping[rawHeader] 미스 → 매핑 미적용 → 데이터 손실 사고
-    const headers = dedupeHeaders(data[0] as any[]);
-    const rows = data.slice(1);
+    // ★ 2026-09-27 한줄로 V2 R144 — /parse와 같은 CT. 옛: 늘 data.slice(1)이라 무헤더 파일은 첫 고객이 빠지고 매핑 키(컬럼N)가 어긋났다.
+    const { headers, rows } = splitHeaderRows(data);
     const totalRows = rows.length;
 
     // 업로드 사용자의 store_codes 조회
@@ -830,6 +790,7 @@ async function processUploadInBackground(
         duplicateCount,
         errorCount,
         startedAt,
+        heartbeatAt: new Date().toISOString(),
         message: '처리 중...'
       }), 'EX', CACHE_TTL.uploadProgress);
     }
@@ -865,8 +826,10 @@ async function processUploadInBackground(
             const label = customLabels?.[fieldKey] || header;
             // ★ D101: 업로드 데이터 샘플링으로 field_type 자동 감지
             let fieldType: string | undefined;
+            // ★ 2026-09-27 한줄로 V2 R145 — 행은 배열이다(열 위치로 읽는다). 옛: r[header]라 표본이 늘 비어 타입 미정 → VARCHAR로 덮였다.
+            const colIdx = headers.indexOf(header);
             const sampleVals = rows.slice(0, Math.min(20, rows.length))
-              .map((r: any) => r[header])
+              .map((r: any) => (colIdx >= 0 ? r[colIdx] : undefined))
               .filter((v: any) => v != null && v !== '');
             if (sampleVals.length > 0) {
               // ★ D101: 날짜 감지를 숫자보다 먼저 — YYMMDD 6자리, YYYYMMDD 8자리 포함
@@ -998,13 +961,29 @@ async function processUploadInBackground(
 // ================================================================
 // GET /progress/:fileId — 진행률 조회 (강화)
 // ================================================================
+/** ★ R143 — 진행 기록이 이만큼 멈추면 중단으로 본다(배치마다 갱신 · 큰 파일 읽기도 이 안에 끝난다) */
+const UPLOAD_STALL_MS = 15 * 60 * 1000;
 router.get('/progress/:fileId', authenticate, async (req: Request, res: Response) => {
   try {
     const { fileId } = req.params;
     const data = await redis.get(`upload:${fileId}:progress`);
     
     if (data) {
-      return res.json(JSON.parse(data));
+      const parsed = JSON.parse(data);
+      // ★ 2026-09-27 한줄로 V2 R143 — 처리 중인데 진행 기록이 오래 멈췄으면(서버 재시작 등) 중단으로 확정한다.
+      //   옛: 재시작 복구가 없어 'processing'이 TTL까지 남아 화면이 계속 폴링했다.
+      const lastBeat = Date.parse(parsed.heartbeatAt || parsed.startedAt || '');
+      if (parsed.status === 'processing' && Number.isFinite(lastBeat) && Date.now() - lastBeat > UPLOAD_STALL_MS) {
+        const stalled = {
+          ...parsed,
+          status: 'failed',
+          error: '처리가 중단되었습니다',
+          message: `처리가 중단되었습니다(서버 재시작 등). ${(Number(parsed.insertCount || 0) + Number(parsed.duplicateCount || 0)).toLocaleString()}건까지 처리됐습니다. 같은 파일을 다시 올리면 중복 건은 자동으로 건너뜁니다.`,
+        };
+        await redis.set(`upload:${fileId}:progress`, JSON.stringify(stalled), 'EX', CACHE_TTL.uploadProgress);
+        return res.json(stalled);
+      }
+      return res.json(parsed);
     }
     return res.json({ status: 'unknown', total: 0, processed: 0, percent: 0 });
   } catch (error) {

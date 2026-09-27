@@ -22,12 +22,13 @@ import { randomBytes } from 'crypto';
 import { serveSdkFile } from '../utils/sdk-serve';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
+import { deliverWebhookToCompanies, extractWebhookResource } from '../utils/cdp-webhook-delivery';
 import {
   buildCafe24AuthorizeUrl,
   exchangeCafe24Code,
   saveCafe24Integration,
   getCafe24Integration,
-  getCafe24IntegrationByMallId,
+  getCafe24IntegrationsByMallId,
   verifyCafe24WebhookSignature,
   verifyCafe24WebhookApiKey,
   cafe24Adapter,
@@ -72,22 +73,22 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
     const apiKeyOk = verifyCafe24WebhookApiKey(apiKeyHeader);
 
     // 회사 식별 (mall_id → company_integrations)
-    const integration = await getCafe24IntegrationByMallId(mallId);
+    // ★ 2026-09-27 한줄로 V2 R098 — 같은 몰이 여러 회사에 연동돼 있으면 전부에게 전달한다(옛: LIMIT 1 임의 한 회사).
+    const integrations = await getCafe24IntegrationsByMallId(mallId);
+    let targets = integrations;
 
     if (!apiKeyOk) {
-      // 구형 HMAC 경로 — integration의 webhook_secret 필요
+      // 구형 HMAC 경로 — 그 회사의 webhook_secret으로 서명이 맞는 연동에만 전달한다
       const signature = (req.headers['x-cafe24-hmac-sha256'] || req.headers['X-Cafe24-Hmac-Sha256']) as string | undefined;
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      const hmacOk = integration
-        ? verifyCafe24WebhookSignature(rawBody, signature || '', integration.webhookSecret)
-        : false;
-      if (!hmacOk) {
+      targets = integrations.filter((i) => verifyCafe24WebhookSignature(rawBody, signature || '', i.webhookSecret));
+      if (targets.length === 0) {
         console.warn('[Cafe24 Webhook] 인증 실패 (X-API-Key/서명 모두 불일치), mall_id=', mallId);
         return res.status(401).json({ success: false, error: '웹훅 인증에 실패했습니다.' });
       }
     }
 
-    if (!integration) {
+    if (targets.length === 0) {
       // 인증은 통과(카페24 발신 확인)했으나 미연동 몰 — 개발자센터 TEST(샘플 몰ID)·연동 해제 몰 이벤트가 여기 해당.
       // 404로 거부하면 카페24 실패 집계에 쌓여 "실패 100건+성공률 10% 미만 = 수신 자동 차단" 정책에 걸린다 → 200 무시.
       console.log('[Cafe24 Webhook] 미연동 mall_id — 인증된 요청이라 200 무시:', mallId, 'event:', event);
@@ -95,58 +96,25 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
     }
 
     // idempotency_key — CT-85 단일 진입점 (엔티티 + 본문 해시 · event_no는 종류 번호라 키로 쓰지 않음 ★0925 C-12)
-    const resource = req.body?.resource || {};
+    const resource = extractWebhookResource('cafe24', req.body || {});
     const idempotencyKey = cafe24Adapter.buildIdempotencyKey(event, resource, req.body || {});
 
-    // 중복 차단 + 처리 row INSERT
-    const insertRes = await query(
-      `INSERT INTO cdp_webhook_deliveries (
-        id, company_id, source, webhook_event, idempotency_key, payload, status, retry_count, created_at
-      ) VALUES (
-        gen_random_uuid(), $1::uuid, 'cafe24', $2, $3, $4::jsonb, 'received', 0, NOW()
-      )
-      ON CONFLICT (company_id, source, idempotency_key) DO NOTHING
-      RETURNING id`,
-      [integration.companyId, event, idempotencyKey, JSON.stringify(req.body || {})]
-    );
-
-    if (insertRes.rows.length === 0) {
-      // 중복 webhook — duplicate 마커 갱신
-      // 2026-06-10 정정: updated_at은 cdp_webhook_deliveries에 없는 컬럼(실측) — 포함 시 중복 응답이 전부 500
-      await query(
-        `UPDATE cdp_webhook_deliveries
-         SET status = 'duplicate', processed_at = NOW()
-         WHERE company_id = $1::uuid AND source = 'cafe24' AND idempotency_key = $2
-           -- ★ 2026-09-26 한줄로 V2 R1-02 — 처리 완료 행만 중복 표시(실패 행을 덮으면 재처리 워커 대상에서 빠져 이벤트가 유실됐다)
-           AND status = 'processed'`,
-        [integration.companyId, idempotencyKey]
-      );
-      return res.json({ success: true, duplicate: true });
-    }
-
-    const deliveryId = insertRes.rows[0].id;
-
-    // ★ 이벤트별 처리 (cdp-* CT 자동 호출)
-    try {
-      await processCafe24Event(integration.companyId, event, resource);
-      await query(
-        `UPDATE cdp_webhook_deliveries
-         SET status = 'processed', processed_at = NOW()
-         WHERE id = $1::uuid`,
-        [deliveryId]
-      );
-      return res.json({ success: true });
-    } catch (processErr: any) {
-      console.error('[Cafe24 Webhook] 이벤트 처리 실패:', processErr);
-      await query(
-        `UPDATE cdp_webhook_deliveries
-         SET status = 'failed', error_message = $2, processed_at = NOW()
-         WHERE id = $1::uuid`,
-        [deliveryId, String(processErr?.message || 'unknown').slice(0, 1000)]
-      );
-      // 카페24는 200 반환해야 retry 안 일어남 — 한줄로 측 retry는 별도 cron 검토 (Phase 2)
+    // ★ 회사마다 전달 행 기록 + 이벤트별 처리 (cdp-* CT 자동 호출) — 적재·중복·실패 기록은 CT 하나
+    const outcome = await deliverWebhookToCompanies({
+      source: 'cafe24',
+      companyIds: targets.map((i) => i.companyId),
+      event,
+      idempotencyKey,
+      payload: req.body || {},
+      process: (companyId) => processCafe24Event(companyId, event, resource),
+      logTag: 'Cafe24',
+    });
+    if (outcome.failed > 0) {
+      // 카페24는 200 반환해야 retry 안 일어남 — 한줄로 측 재처리 워커가 실패 행을 다시 돈다
       return res.json({ success: false, error: '이벤트 처리 실패, 한줄로 측에서 재처리 예약됩니다.' });
     }
+    if (outcome.processed === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
+    return res.json({ success: true });
   } catch (err: any) {
     console.error('[Cafe24 Webhook] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });

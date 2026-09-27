@@ -177,9 +177,10 @@ export async function backfillGodoOrders(
     windowEnd = new Date(start);
   }
 
+  // ★ 2026-09-27 한줄로 V2 R124 — 백필 도중 연동을 해제(revoked)했으면 되살리지 않는다(옛: 조건 없이 active로 덮어 수집이 재개됐다).
   await query(
     `UPDATE company_integrations SET status = 'active', connected_at = COALESCE(connected_at, NOW()), updated_at = NOW()
-     WHERE company_id = $1::uuid AND provider = 'godo' AND mall_id = $2`,
+     WHERE company_id = $1::uuid AND provider = 'godo' AND mall_id = $2 AND status <> 'revoked'`,
     [companyId, GODO_INTEGRATION_MALL_ID],
   );
 

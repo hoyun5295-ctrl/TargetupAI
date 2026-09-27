@@ -211,13 +211,11 @@ export async function trackEvent(
 
   // ★ D214+ (2026-05-24) customer-level union 통합 (CT-72 + CT-71)
   //   cart_add / wishlist_add / page_view 영역 → customers 컬럼 union (fuseEventToCustomer)
-  //   unified profile 재계산 (recomputeProfile — fire-and-forget)
+  //   ★ 2026-09-27 한줄로 V2 R181 — unified profile 재계산은 5분 증분 워커(cdp-profile-recompute-worker)가 한다.
+  //   옛: 이벤트마다 즉시 재계산 + 워커가 같은 고객을 또 재계산(이중 작업).
   if (customerId) {
     await fuseEventToCustomer(companyId, customerId, input.eventName, occurredAt).catch((err) => {
       console.warn('[CDP Events] fuseEventToCustomer 실패 (이벤트 INSERT 성공):', err);
-    });
-    void recomputeProfile(companyId, customerId).catch((err) => {
-      console.warn('[CDP Events] recomputeProfile 실패:', err);
     });
   }
 
@@ -485,6 +483,7 @@ export async function ingestBrowserEvents(
   // ── 2. 정규화 + 트랜잭션 INSERT ──
   const client = await pool.connect();
   let accepted = 0;
+  const fusedEventNames: string[] = [];
   try {
     await client.query('BEGIN');
     for (const e of batch.events) {
@@ -522,6 +521,7 @@ export async function ingestBrowserEvents(
         ]
       );
       accepted++;
+      fusedEventNames.push(norm.eventName);
     }
     await client.query('COMMIT');
   } catch (err) {
@@ -547,6 +547,17 @@ export async function ingestBrowserEvents(
       [customerId, companyId, anonymousId]
     );
     backfilled = upd.rowCount || 0;
+  }
+
+  // ── 3-1. 고객 행 신호 반영 — ★ 2026-09-27 한줄로 V2 R182: 서버 trackEvent와 같은 CT(fuseEventToCustomer).
+  //   옛: 브라우저 SDK 적재는 cdp_events에만 넣어 장바구니·위시·페이지 조회가 고객 행에 안 쌓였다(여정 기회·추천 신호 누락).
+  //   프로필 재계산은 5분 증분 워커가 한다(R181 — 이벤트마다 즉시 재계산하지 않는다).
+  if (customerId && fusedEventNames.length > 0) {
+    for (const name of fusedEventNames) {
+      await fuseEventToCustomer(companyId, customerId, name, occurred).catch((err) => {
+        console.warn('[CDP ingestBrowser] fuseEventToCustomer 실패 (이벤트 INSERT 성공):', err);
+      });
+    }
   }
 
   // ── 4. 호출 한도 집계 (fire-and-forget) — accepted 건수만큼 누적 ──

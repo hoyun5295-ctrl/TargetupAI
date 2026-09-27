@@ -63,6 +63,27 @@ export interface SheetForConfirm {
  * 없어서, 업체가 "수량이 다르다"고 말할 창구 자체가 그 메일에 없었다(제주한라병원 LMS 3건 차이).
  * 본문 전체를 합치지 않고 이 블록만 공용으로 둔다 — 문구가 한 곳이면 갈라지지 않는다.
  */
+/**
+ * ★ 2026-09-27 한줄로 V2 R097 — 고객 대외 청구 메일 본문(한줄로 양식) 하나. 일괄발급 · 개별 정산서 · 개별 거래내역서가 같은 함수를 쓴다.
+ *   옛: 개별 발송 두 곳이 "INVITO 정산" 발신자·[INVITO] 제목·이모지·그라데이션 옛 모양이라 일괄발급 메일과 문서명·모양이 달랐다.
+ *   viewUrl이 있으면 컨펌 버튼, 없으면 첨부 안내 문장(거래내역서 개별 발송은 컨펌 절차가 없다).
+ */
+export function renderBillingMailHtml(p: { companyName: string; periodLabel: string; name: string | null; amount: number; viewUrl: string | null }): string {
+  return `
+      <div style="max-width:560px;margin:0 auto;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1f2937;">
+        <div style="padding:28px 24px;border:1px solid #e5e7eb;border-radius:12px;">
+          <p style="font-size:18px;font-weight:700;margin:0 0 4px;">거래내역서를 보내드립니다</p>
+          <p style="font-size:13px;color:#6b7280;margin:0 0 20px;">${esc(p.companyName)} · ${esc(p.periodLabel)}</p>
+          <p style="font-size:14px;line-height:1.7;margin:0 0 16px;">
+            안녕하세요, ${esc(p.name || '담당자')}님.<br/>
+            ${esc(p.periodLabel)} 이용분 거래내역서를 <b>첨부</b>해 드렸습니다. ${p.viewUrl ? '내용을 확인하신 뒤 아래 버튼을 눌러 주세요.' : '상세 내역은 첨부한 PDF에서 확인하실 수 있습니다.'}
+          </p>
+          <p style="font-size:15px;margin:0 0 20px;">청구 금액(부가세 포함): <b>${p.amount.toLocaleString()}원</b></p>
+${p.viewUrl ? renderConfirmBlockHtml(p.viewUrl) : ''}
+        </div>
+      </div>`;
+}
+
 export function renderConfirmBlockHtml(viewUrl: string): string {
   return `
       <div style="text-align:center;margin:20px 0 0;">
@@ -348,19 +369,7 @@ export async function createAndSendConfirmations(opts: {
 
     // ★ 2026-07-28 버튼은 하나다. 내역은 첨부 PDF가 담당하고, 이 링크는 컨펌 화면으로만 보낸다.
     //   ("확인 · 컨펌"으로 붙여두면 누르는 순간 컨펌된 것처럼 읽힌다 — Harold 2026-07-28)
-    const html = `
-      <div style="max-width:560px;margin:0 auto;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1f2937;">
-        <div style="padding:28px 24px;border:1px solid #e5e7eb;border-radius:12px;">
-          <p style="font-size:18px;font-weight:700;margin:0 0 4px;">거래내역서를 보내드립니다</p>
-          <p style="font-size:13px;color:#6b7280;margin:0 0 20px;">${esc(companyName)} · ${esc(periodLabel)}</p>
-          <p style="font-size:14px;line-height:1.7;margin:0 0 16px;">
-            안녕하세요, ${esc(name || '담당자')}님.<br/>
-            ${esc(periodLabel)} 이용분 거래내역서를 <b>첨부</b>해 드렸습니다. 내용을 확인하신 뒤 아래 버튼을 눌러 주세요.
-          </p>
-          <p style="font-size:15px;margin:0 0 20px;">청구 금액(부가세 포함): <b>${amount.toLocaleString()}원</b></p>
-${renderConfirmBlockHtml(viewUrl)}
-        </div>
-      </div>`;
+    const html = renderBillingMailHtml({ companyName, periodLabel, name, amount, viewUrl });
 
     // 이 장의 PDF는 **보내기 직전에** 만든다. 미리 만들어 두면 발송이 막힌 회차마다 렌더본이 그대로 쌓인다.
     //   정합 검사는 다운로드 라우트와 같은 것을 쓴다 — 항목합이 공급가액과 어긋나는 문서는 회수가 안 된다.

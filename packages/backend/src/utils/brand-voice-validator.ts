@@ -32,7 +32,10 @@ export interface ValidationResult {
 }
 
 // 한글 + 영문 + 숫자 외 이모지/특수문자 추출 정규식 (NFC 정규화 후)
-const EMOJI_PATTERN = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{2700}-\u{27BF}\u{FE0F}\u{200D}★♥▶◆◇■□●○☆♡▷◀▶♣♠♦♪♬✓✔✕✖]/gu;
+// ★ 2026-09-27 한줄로 V2 R172 — 변형 선택자(FE0F)·결합자(200D)는 독립 문자가 아니라 뺐다(옛: ❤️ 같은 허용 이모지도 위반 판정돼 매번 AI 재생성).
+const EMOJI_PATTERN = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{2700}-\u{27BF}★♥▶◆◇■□●○☆♡▷◀▶♣♠♦♪♬✓✔✕✖]/gu;
+/** 허용 목록 항목을 판정 단위(수식 문자 제거 뒤 코드포인트)로 편다 — '❤️'(2764+FE0F)도 '❤'로 맞는다 */
+const EMOJI_MODIFIERS = /[\u{FE0F}\u{200D}]/gu;
 
 // 종결어미 카운트 — 한글 음절이 조합형이라 어미는 음절 단위로 판정.
 // 해요체 = "...요" 종결 (단, 하세요/해보세요 등 '세요'는 합쇼체 문안에도 흔해 제외)
@@ -96,7 +99,11 @@ export function validateBrandVoiceCompliance(
   const usedEmojis = isKakao ? [] : (generated.match(EMOJI_PATTERN) || []);
   if (usedEmojis.length > 0) {
     const uniqueUsed = Array.from(new Set(usedEmojis));
-    const invalid = uniqueUsed.filter((e) => !guideline.emoji_whitelist.includes(e));
+    const allowed = new Set<string>();
+    for (const w of guideline.emoji_whitelist) {
+      for (const cp of Array.from(String(w || '').replace(EMOJI_MODIFIERS, ''))) allowed.add(cp);
+    }
+    const invalid = uniqueUsed.filter((e) => !allowed.has(e));
     if (invalid.length > 0) {
       const allowedStr = guideline.emoji_whitelist.length > 0
         ? guideline.emoji_whitelist.join(' / ')

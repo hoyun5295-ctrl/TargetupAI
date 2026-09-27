@@ -34,6 +34,8 @@ import {
   insertAlimtalkQueue,
 } from './sms-queue';
 import { sendSystemAlert } from './system-alert';
+import { toQtmsgType, subjectForMsgType } from './qtmsg-type';
+import { normalizeMmsImagePaths } from './mms-image-util';
 import { convertButtonsToQTmsg } from './alimtalk-button';
 import { buildAlimtalkEtcJson, type RepresentLink } from './alimtalk-emphasize';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
@@ -1059,17 +1061,18 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
         cleanPhone,
         callbackNumber,
         message,
-        msgType,
-        subject || '',
+        // ★ 2026-09-27 한줄로 V2 m093 — 적재 CT의 유형 칸은 QTmsg 코드(S·L·M)다. 옛: 'SMS'·'LMS'·'MMS' 원문을 넣어
+        //   MMS가 MMS 라인으로 가지 않았고(r[3] === 'M' 판정) DB 엄격 모드면 적재가 실패했다. 단문 제목은 비운다(다른 경로와 같은 CT).
+        toQtmsgType(msgType),
+        subjectForMsgType(msgType, subject),
         new Date(),
         // ★ Phase 5: row[6]=app_etc1=공유 campaignId(결과 상세 검색 일치), row[7]=app_etc2=companyId.
         //   기존엔 app_etc1=company_id, app_etc2=journey:... 로 뒤바뀌어 여정 SMS 수신자 상세가 안 잡혔음 — 직접발송과 동일 순서로 정정.
         campaignId,
         exec.company_id,
-        // MMS 영역 — mms_image_paths[0..2] 사용 (basename 추출, sms-queue file_name1~3 정합)
-        (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[0]) ? extractBasename(step.mms_image_paths[0]) : '',
-        (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[1]) ? extractBasename(step.mms_image_paths[1]) : '',
-        (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[2]) ? extractBasename(step.mms_image_paths[2]) : '',
+        // ★ 2026-09-27 한줄로 V2 m093(Codex 차수3 1R) — MMS 첨부는 절대경로 그대로(직접발송과 같은 CT · QTmsg는 이 경로를 그대로 읽는다).
+        //   옛: 파일 이름만 잘라 넣어(extractBasename) 유형을 M으로 고쳐도 첨부를 찾지 못했다.
+        ...(msgType === 'MMS' ? [0, 1, 2].map((i) => normalizeMmsImagePaths(step.mms_image_paths)[i] || '') : ['', '', '']),
       ];
       // ★ 2026-09-26 한줄로 V2 F40·F41 — 적재 함수는 배치 INSERT 오류를 삼키고 적재 건수를 돌려준다(0 = 못 넣음).
       //   반환값을 버리면 MySQL이 잠깐 끊긴 동안 'sent' 기록·선불 차감·다음 단계 진행이 일어난다(수신자는 못 받음).
@@ -1721,13 +1724,4 @@ async function evaluateJourneyStepClickedCondition(
 // 알림톡 본문 #{변수} 치환은 alimtalk-vars.fillAlimtalkVarMap으로 통일 (2026-06-22).
 // 여정 경로는 buildDefaultFallbacks(표준 대체값)를 동반해 호출한다. (기존 replaceAlimtalkVars 정의 제거)
 
-/**
- * MMS 이미지 서버 경로 → 파일명만 추출 (sms-queue file_name1~3 정합).
- * 예: "/home/admin/mms/abc123.jpg" → "abc123.jpg"
- */
-function extractBasename(filePath: string | null | undefined): string {
-  if (!filePath) return '';
-  const s = String(filePath);
-  const idx = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
-  return idx >= 0 ? s.slice(idx + 1) : s;
-}
+// (★ 2026-09-27 m093 — 옛 extractBasename 제거: MMS 첨부는 절대경로 그대로 넘긴다)

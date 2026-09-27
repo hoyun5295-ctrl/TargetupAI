@@ -28,6 +28,8 @@ import { callAIWithFallback } from '../services/ai';
 import { buildCustomerFilter } from './customer-filter';
 import { getFieldByKey, StandardFieldMapping } from './standard-field-map';
 import { query } from '../config/database';
+// ★ 2026-09-27 한줄로 V2 R161 — 프롬프트 날짜 = KST(옛: 오늘 날짜가 없고 예시만 UTC toISOString)
+import { kstDateString } from './planner-execution';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -105,6 +107,8 @@ function buildSystemPrompt(customFieldKeys: string[]): string {
   return `당신은 한줄로 마케팅 SaaS의 고객 세그먼트 AI 변환기입니다.
 사용자가 자연어로 입력한 조건을 정확한 structured filter JSON으로 변환합니다.
 
+[기준 날짜] 오늘(한국 시간) = ${kstDateString()}. "30일 안"·"지난달"·"이번 주" 같은 상대 날짜는 이 날짜 기준으로 계산합니다.
+
 [지원 표준 필드]
 ${fieldsBlock}
 ${customFieldsBlock}
@@ -146,7 +150,7 @@ ${customFieldsBlock}
   "filter": {
     "gender": { "operator": "eq", "value": "F" },
     "age": { "operator": "between", "value": [30, 39] },
-    "recent_purchase_date": { "operator": "lte", "value": "${new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)}" }
+    "recent_purchase_date": { "operator": "lte", "value": "${kstDateString(new Date(Date.now() - 30 * 86400000))}" }
   },
   "explanation": "여성 + 30~39세 + 최근 구매일이 30일 이전인 고객을 추출합니다.",
   "warnings": []

@@ -19,6 +19,8 @@ import { setCreditEvent } from './request-context';
 import {
   loadCreditRow,
   applyResetIfNeeded,
+  creditOverageAllowance,
+  carriedBaseOnReset,
   _deductWithClient,
   adjustCreditWithClient,
   refundCreditWithClient,
@@ -79,6 +81,23 @@ export async function isCreditEnabledStrict(companyId: string): Promise<boolean>
   const row = await loadCreditRow(pool, companyId, false);
   if (!row) return false;                                   // 행 부재 = 크레딧제 미적용(오류가 아니다)
   return row.plan_credits != null || (Number(row.purchased) || 0) > 0;
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R192(Codex 차수3 1R) — 과금 판정 전용 잔액 확인. checkCredit과 두 가지가 다르다.
+ *  ① 조회 실패를 삼키지 않는다(던진다) — 모르는 잔액을 "크레딧제 미적용"으로 접어 통과시키지 않는다.
+ *  ② 실제 차감(_deductWithClient)과 같은 source별 허용 한도·월 리셋 기본분으로 판단한다(같은 순수 함수).
+ * 차감이 건너뛰는 경우(행 없음·크레딧제 미적용)는 걷을 돈이 없으니 true.
+ */
+export async function hasCreditForStrict(companyId: string, cost: number, source: string): Promise<boolean> {
+  if (!companyId || !cost || cost <= 0) return true;
+  const row = await loadCreditRow(pool, companyId, false);
+  if (!row) return true;
+  if (row.plan_credits == null && (Number(row.purchased) || 0) === 0) return true;
+  const resetAt = row.reset_at ? new Date(row.reset_at) : null;
+  const base = needsMonthlyReset(resetAt, new Date()) ? carriedBaseOnReset(row) : (Number(row.base) || 0);
+  const purchased = Number(row.purchased) || 0;
+  return (base + purchased) - cost >= -creditOverageAllowance(row, source);
 }
 
 /** 호출 전 사전 차단 — 보유 크레딧이 작업 비용보다 적으면 throw InsufficientCreditError. */
@@ -182,6 +201,8 @@ export async function deductCreditOutcome(
     createdBy?: string | null;
     /** 멱등키 직접 지정(회사+행위 고정 키). 재시도·재개·동시요청 중복 차감 차단. 미지정 시 aiCallLogId/fallback 기준. */
     idempotencyKey?: string;
+    /** ★ 2026-09-27 한줄로 V2(Codex 차수3 D 2R) — 잔액 부족을 'failed'로 접지 않고 그 예외를 그대로 던진다(성공 뒤 차감 확정 전용 · 기본 = 종전). */
+    throwOnInsufficient?: boolean;
   },
   _deps?: { deductFn?: typeof deductCredit; sleep?: (ms: number) => Promise<void> }
 ): Promise<DeductOutcome> {
@@ -220,6 +241,7 @@ export async function deductCreditOutcome(
       // 잔액 부족 = 정상 차단(사전 checkCredit 통과 후 동시 소진). 재시도 무의미.
       if (err instanceof InsufficientCreditError) {
         console.log(`[CREDIT][SKIP] insufficient company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'}`);
+        if (opts.throwOnInsufficient) throw err;
         return 'failed';
       }
       if (attempt < MAX_ATTEMPTS) {
@@ -232,6 +254,24 @@ export async function deductCreditOutcome(
     }
   }
   return 'failed';
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2(Codex 차수3 D 1R·2R) — **성공 뒤 차감의 확정**. AI 결과를 돌려주기 직전에 부른다.
+ *   사전 확인(checkCredit) 뒤 동시 요청이 잔액을 먼저 써서 이 차감이 잔액 부족으로 거절되면 InsufficientCreditError를 던진다
+ *   — 결과를 무과금으로 내주지 않는다(호출부 402). 잔액 부족이 아닌 실패(DB 오류·영구 실패)는 기존 원칙대로 결과를 막지 않는다
+ *   ([CREDIT][MISS] 로그 · 같은 멱등키로 수동 재차감).
+ */
+export async function settleCreditAfterSuccess(opts: {
+  companyId: string;
+  cost: number;
+  source: string;
+  idempotencyKey: string;
+  createdBy?: string | null;
+}): Promise<void> {
+  // 잔액 부족은 차감 시점의 판정을 그대로 던진다(Codex 차수3 D 2R — 뒤에 다시 조회하면 그 사이 충전·리셋으로 통과될 수 있었다).
+  //   'failed'가 돌아오면 잔액 부족이 아닌 실패(DB 오류·영구 실패) — 기존 원칙대로 결과는 막지 않는다([CREDIT][MISS]).
+  await deductCreditOutcome({ ...opts, throwOnInsufficient: true });
 }
 
 /**

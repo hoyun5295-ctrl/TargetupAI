@@ -13,6 +13,7 @@
  */
 
 import { query } from '../config/database';
+import { extractWebhookResource } from './cdp-webhook-delivery';
 import { getProvider } from './provider-registry';
 
 const RETRY_INTERVAL_MS = 5 * 60 * 1000;   // 5분
@@ -52,7 +53,8 @@ export async function runCdpWebhookRetryPass(): Promise<{ retried: number; succe
 
     retried++;
     const payload = row.payload || {};
-    const resource = payload.resource || payload;
+    // ★ 2026-09-27 한줄로 V2 R188 — 원래 수신 라우트와 같은 규칙(아임웹 = data 먼저). 옛: resource || payload라 아임웹은 재처리해도 같은 모양으로 또 실패했다.
+    const resource = extractWebhookResource(row.source, payload);
     try {
       await adapter.processWebhookEvent(row.company_id, row.webhook_event, resource);
       await query(
@@ -82,6 +84,16 @@ async function runHousekeeping(): Promise<void> {
   await query(
     `DELETE FROM cdp_webhook_deliveries
      WHERE webhook_event = 'oauth_state' AND created_at < NOW() - INTERVAL '1 hour'`
+  );
+  // ★ 2026-09-27 한줄로 V2 R187 — 처리 끝난(processed·duplicate) 기록은 180일 뒤 지운다(한 번에 1000건).
+  //   옛: 지우지 않아 5분마다 훑는 이 표가 계속 커졌다. 실패 기록(재처리 대상·감사)은 남긴다.
+  await query(
+    `DELETE FROM cdp_webhook_deliveries
+     WHERE id IN (
+       SELECT id FROM cdp_webhook_deliveries
+       WHERE status IN ('processed', 'duplicate') AND created_at < NOW() - INTERVAL '180 days'
+       LIMIT 1000
+     )`
   );
   // 30일 경과 payload NULL (한 번에 500건씩 — 큰 일괄 UPDATE 차단)
   await query(

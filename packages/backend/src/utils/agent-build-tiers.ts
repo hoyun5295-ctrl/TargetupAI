@@ -1,3 +1,4 @@
+import path from 'path';
 // ============================================================================
 // CT — 싱크에이전트 빌드 티어 룰표 (단일 진실원, AI 판단 0)
 // OS(플랫폼+버전) × DB(제품+버전) → 내보낼 패키지 + state + 연결 프로파일.
@@ -231,6 +232,16 @@ export const VERIFIED_COMBOS = new Set<string>([
  *   서버 파일명 = sync-agent-<version>-<tier>.exe, 라우트 변경 불필요.
  *   tier 없으면(전역) 종전대로 sync-agent-<version>.exe.
  */
+/** ★ 2026-09-27 한줄로 V2 R277 — 에이전트 릴리즈 exe 보관 폴더(다운로드 라우트와 릴리즈 등록이 같은 값을 본다) */
+export function agentReleasesDir(): string {
+  return process.env.AGENT_RELEASES_DIR || path.join(__dirname, '..', '..', 'agent-releases');
+}
+
+/** 릴리즈 exe 파일명 — 다운로드 주소(buildReleaseDownloadUrl)의 `<version>[-<tier>]`와 같은 규칙 */
+export function agentReleaseExeFileName(version: string, tier: string | null | undefined): string {
+  return `sync-agent-${version}${tier ? `-${tier}` : ''}.exe`;
+}
+
 export function buildReleaseDownloadUrl(version: string, tier: string | null | undefined): string {
   return tier
     ? `/api/sync/download/${version}-${tier}`
@@ -275,8 +286,10 @@ export function resolveBuildTierFromOsInfo(osInfo: string | null | undefined): s
     const major = parseInt(m[1], 10);
     const minor = parseInt(m[2], 10);
     if (major >= 10) return 'win-modern';               // 10/11 · Server 2016+
-    if (major === 6 && minor >= 2) return 'win-mid';    // 8/8.1 · Server 2012 R2
-    if (major === 6 && minor <= 1) return 'win-legacy'; // 7 · Server 2008 R2 (isae)
+    // ★ 2026-09-27 한줄로 V2 R154 — 설치 티어표(OS_TIERS)와 같게: 6.3(8.1 · Server 2012 R2)만 win-mid(node16),
+    //   6.2(8 · Server 2012 R2 아님)은 win-legacy(node12). 옛: 6.2를 win-mid로 보내 그 서버에 node16 빌드가 내려갈 수 있었다.
+    if (major === 6 && minor >= 3) return 'win-mid';    // 8.1 · Server 2012 R2
+    if (major === 6 && minor <= 2) return 'win-legacy'; // 7 · 8 · Server 2008 R2 · Server 2012(R2 아님)
     return null;                                         // 6.0 이하 = 미지원
   }
   // Linux: "linux 5.4.0-..." (kernel). glibc 세분 불가 → kernel major로 보수 판별.

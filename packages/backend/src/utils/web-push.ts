@@ -20,6 +20,7 @@
  *   - 0건 매칭 시 발송 차단 (Harold Zero-Count 영구 원칙 정합)
  */
 
+import { withKeyedLock } from './keyed-lock';
 import { query } from '../config/database';
 
 // ════════════════════════════════════════════════════════════════════
@@ -152,10 +153,43 @@ export async function revokeSubscription(companyId: string, endpoint: string): P
 // 발송
 // ════════════════════════════════════════════════════════════════════
 
+/** ★ 2026-09-27 한줄로 V2 R103 — 중복 발송 거절(라우트가 409로 돌려준다) */
+export class PushDuplicateError extends Error {
+  constructor(message: string) { super(message); this.name = 'PushDuplicateError'; }
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R103 — 웹 푸시는 HTTP 요청 안에서 구독자 전원에 보낸다. 시간이 걸려 화면이 끊긴 뒤 다시 누르면
+ *   옛 코드는 같은 푸시를 한 번 더 보냈다(멱등 장치 없음). 회사 단위 잠금 안에서 ① 발송 중인 캠페인(30분 안) ②같은 내용을
+ *   방금(10분 안) 보낸 캠페인이 있으면 거절한다(단일 프로세스 기동 · keyed-lock CT). 결과 모양은 그대로다.
+ */
 export async function sendPushCampaign(
   companyId: string,
   payload: PushNotificationPayload,
   createdBy: string | null = null
+): Promise<{ campaignId: string; result: PushSendResult }> {
+  return withKeyedLock('web-push', companyId, async () => {
+    const inflight = await query(
+      `SELECT 1 FROM cdp_push_campaigns
+        WHERE company_id = $1::uuid AND status = 'sending' AND created_at > NOW() - INTERVAL '30 minutes' LIMIT 1`,
+      [companyId]
+    );
+    if (inflight.rows.length > 0) throw new PushDuplicateError('이미 발송 중인 웹 푸시가 있어요. 끝난 뒤 다시 확인해 주세요.');
+    const same = await query(
+      `SELECT 1 FROM cdp_push_campaigns
+        WHERE company_id = $1::uuid AND title = $2 AND body = $3 AND COALESCE(url, '') = COALESCE($4, '')
+          AND status <> 'failed' AND created_at > NOW() - INTERVAL '10 minutes' LIMIT 1`,
+      [companyId, payload.title, payload.body, payload.url || null]
+    );
+    if (same.rows.length > 0) throw new PushDuplicateError('같은 내용의 웹 푸시를 방금 보냈어요. 발송 결과를 먼저 확인해 주세요.');
+    return sendPushCampaignUnlocked(companyId, payload, createdBy);
+  });
+}
+
+async function sendPushCampaignUnlocked(
+  companyId: string,
+  payload: PushNotificationPayload,
+  createdBy: string | null
 ): Promise<{ campaignId: string; result: PushSendResult }> {
   const wp = getWebPush();
   if (!wp || !webPushInitialized) {

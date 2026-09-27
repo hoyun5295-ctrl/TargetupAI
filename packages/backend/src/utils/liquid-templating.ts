@@ -451,6 +451,7 @@ function evaluate(
   context: LiquidContext,
   errors: LiquidError[],
   depth = 0,
+  sharedScope?: Record<string, any>,
 ): string {
   if (depth > MAX_RECURSION_DEPTH) {
     errors.push({ type: 'limit', message: '재귀 깊이 한도 초과' });
@@ -458,7 +459,9 @@ function evaluate(
   }
 
   let result = '';
-  const scope: Record<string, any> = { ...context };
+  // ★ 2026-09-27 한줄로 V2 R428 — 한 렌더 안의 범위는 하나(Liquid 규칙: if·for·case 안 assign이 블록 밖에도 남는다).
+  //   최상위에서만 복사하고 안쪽 블록은 같은 범위를 쓴다. 옛: 호출마다 사본을 만들어 블록 안 assign이 사라졌다.
+  const scope: Record<string, any> = sharedScope ?? { ...context };
 
   for (const node of ast) {
     if (node.type === 'text') {
@@ -476,13 +479,13 @@ function evaluate(
       let matched = false;
       for (const branch of node.branches) {
         if (evalCondition(branch.condition, scope, errors)) {
-          result += evaluate(branch.children, scope, errors, depth + 1);
+          result += evaluate(branch.children, scope, errors, depth + 1, scope);
           matched = true;
           break;
         }
       }
       if (!matched && node.elseChildren) {
-        result += evaluate(node.elseChildren, scope, errors, depth + 1);
+        result += evaluate(node.elseChildren, scope, errors, depth + 1, scope);
       }
       continue;
     }
@@ -492,10 +495,14 @@ function evaluate(
       if (!Array.isArray(iterable)) continue;
 
       const limit = Math.min(iterable.length, FOR_LOOP_CAP);
+      // 반복 변수만 반복 동안 걸고 끝나면 되돌린다(바깥 같은 이름 변수 보존)
+      const hadLoopVar = Object.prototype.hasOwnProperty.call(scope, node.varName);
+      const prevLoopVar = scope[node.varName];
       for (let idx = 0; idx < limit; idx++) {
-        const loopScope = { ...scope, [node.varName]: iterable[idx] };
-        result += evaluate(node.children, loopScope, errors, depth + 1);
+        scope[node.varName] = iterable[idx];
+        result += evaluate(node.children, scope, errors, depth + 1, scope);
       }
+      if (hadLoopVar) scope[node.varName] = prevLoopVar; else delete scope[node.varName];
       if (iterable.length > FOR_LOOP_CAP) {
         errors.push({
           type: 'limit',
@@ -516,13 +523,13 @@ function evaluate(
       for (const when of node.whens) {
         const whenValue = evalExpression(when.value, scope, errors);
         if (looseEqual(targetValue, whenValue)) {
-          result += evaluate(when.children, scope, errors, depth + 1);
+          result += evaluate(when.children, scope, errors, depth + 1, scope);
           matched = true;
           break;
         }
       }
       if (!matched && node.elseChildren) {
-        result += evaluate(node.elseChildren, scope, errors, depth + 1);
+        result += evaluate(node.elseChildren, scope, errors, depth + 1, scope);
       }
       continue;
     }

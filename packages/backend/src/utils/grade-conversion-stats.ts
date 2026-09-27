@@ -67,12 +67,18 @@ export async function fetchGradeConversionStats(
          AND c.sent_at IS NOT NULL
          AND c.sent_at > NOW() - ($3 || ' days')::interval
          AND gx.grade = ANY($2::text[])
-     )
+     ),
+     -- ★ 2026-09-27 한줄로 V2 R239 — 발송 합과 전환을 따로 센다(옛: 이벤트 JOIN 뒤 SUM(sent_count)라 구매 이벤트 수만큼 분모가 부풀었다).
+     sent_by_grade AS (
+       SELECT grade, COALESCE(SUM(sent_count), 0)::bigint AS sent
+       FROM grade_campaigns
+       GROUP BY grade
+     ),
+     conv_by_grade AS (
      SELECT gc.grade,
-            COALESCE(SUM(gc.sent_count), 0)::bigint AS sent,
             COUNT(DISTINCT e.customer_id)::bigint   AS converted
      FROM grade_campaigns gc
-     LEFT JOIN cdp_events e
+     JOIN cdp_events e
             ON e.company_id = $1::uuid
            AND e.event_name IN ('purchase','order')
            AND e.customer_id IS NOT NULL
@@ -84,7 +90,11 @@ export async function fetchGradeConversionStats(
                 AND cu.company_id = $1::uuid
                 AND cu.grade = gc.grade
            )
-     GROUP BY gc.grade`,
+     GROUP BY gc.grade
+     )
+     SELECT s.grade, s.sent, COALESCE(cv.converted, 0)::bigint AS converted
+     FROM sent_by_grade s
+     LEFT JOIN conv_by_grade cv ON cv.grade = s.grade`,
     [companyId, grades, lookbackDays, windowDays * 24],
   );
 

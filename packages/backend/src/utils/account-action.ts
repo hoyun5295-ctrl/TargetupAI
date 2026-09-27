@@ -49,8 +49,10 @@ export async function restrictAccount(params: {
   /** 이력에 남길 자유 메모(사용자에게는 안 보인다) */
   note?: string;
   req?: Request;
+  /** ★ 2026-09-27 한줄로 V2 R353 — 호출부가 상태를 먼저 바꿨으면 바꾸기 전 값(감사 기록 before). 없으면 조회 값 */
+  previousStatus?: string;
 }): Promise<RestrictionOutcome> {
-  const { userId, status, reason, actorUserId, note, req } = params;
+  const { userId, status, reason, actorUserId, note, req, previousStatus } = params;
 
   const target = await query(
     'SELECT id, login_id, name, phone, mfa_phone, status FROM users WHERE id = $1',
@@ -86,7 +88,7 @@ export async function restrictAccount(params: {
       userId,
       JSON.stringify({
         targetLoginId: user.login_id,
-        before: user.status,
+        before: previousStatus ?? user.status,
         after: status,
         reason,
         note: note ? String(note).slice(0, 200) : undefined,

@@ -89,6 +89,8 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'orchestrateWithAI': 300,
   // AI Operator 한줄 입력 (타겟추출+문안 일회성 제안) = 문안·분석 5. 풀분석과 분리.
   'ai-operator-propose': 5,
+  // ★ 2026-09-27 한줄로 V2 R082 — AI 근거 질의(고급 모델 분석 · 0926 R1-20 Harold 결정 「단가표대로 5」와 같은 급)
+  'ai-operator-explain': 5,
   // 꾸미기 3 — AI Operator 추천 메시지에 회사 데이터 컬럼(%변수%)을 녹여 재작성. 다듬기(1)보다 위(데이터 적용). operator-message-decorator 인라인 creditCost 제거 후 이 map이 진실.
   'ai-operator-decorate': 3,
   // 여정 생성(돌려보기) 3 — 자연어→여정 패키지 생성. 호출(돌려보기)마다 3. 저장은 'journey-activate' 150 별도.

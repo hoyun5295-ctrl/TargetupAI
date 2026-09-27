@@ -279,6 +279,8 @@ export async function recommendVariantForProposal(
     const allVariants = await listAccumulatedVariantsByOperator(options.operatorId, 50);
     const byIndex = new Map<number, ProposalVariant>();
     for (const v of allVariants) {
+      // ★ 2026-09-27 한줄로 V2 R365 — 현재 제안 변이는 누적에서 뺀다(아래에서 따로 더한다 · 옛: 이번 제안 성과가 두 번 들어갔다)
+      if (v.proposalId === proposalId) continue;
       const existing = byIndex.get(v.variantIndex);
       if (!existing) {
         byIndex.set(v.variantIndex, { ...v });

@@ -178,12 +178,35 @@ export function kstDate(column: string): string {
 }
 
 /**
+ * ★ 2026-09-27 한줄로 V2 R091 — `timestamp without time zone` 칸(UTC 벽시계로 저장 · 예: campaign_runs.sent_at)을
+ * KST 벽시계로 바꾸는 표현식. timestamptz 칸은 kstDate·kstGroupBy처럼 `AT TIME ZONE 'Asia/Seoul'` 한 번이면 된다
+ * (이 CT를 쓰면 9시간이 거꾸로 밀린다). 요일·시각·날짜를 뽑기 전에 감싼다.
+ */
+export function kstFromNaiveUtc(column: string): string {
+  return `((${column} AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Seoul')`;
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2(Codex 차수3 D 1R) — KST 날짜의 0시를 UTC 벽시계(`timestamp without time zone`)로.
+ * UTC 벽시계 칸(campaign_runs.sent_at)을 KST 날짜 기간으로 자를 때 쓴다 — 칸 쪽을 변환하지 않아 인덱스를 탄다.
+ * 끝 경계는 다음 날 0시: `kstDayStartNaiveUtc('($3)::date + 1')`.
+ */
+export function kstDayStartNaiveUtc(dateExpr: string): string {
+  return `(((${dateExpr})::date::timestamp AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'UTC')`;
+}
+
+/**
  * ★ 2026-09-27 한줄로 V2 R274 — KST 오늘 0시(timestamptz). DB 세션 TimeZone = UTC라 CURRENT_DATE는 UTC 자정(= KST 09시)이다.
  * 컬럼 쪽은 변환하지 않아 인덱스를 그대로 탄다(timestamptz 컬럼과 비교).
  */
 export const KST_TODAY_START_SQL = `(date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')`;
 
+/** ★ 2026-09-27 한줄로 V2 R197 — KST 이번 달 1일 0시(timestamptz). date_trunc('month', NOW())는 UTC 세션이라 KST 1일 00~09시가 전달로 셈해졌다. */
+export const KST_MONTH_START_SQL = `(date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')`;
+
 /** ★ 2026-09-27 한줄로 V2 R111 — KST 현재 연도(정수). 연도를 코드에 박지 않는다(옛 2026 하드코딩은 해가 바뀌면 나이가 틀어진다). */
+/** ★ 2026-09-27 한줄로 V2 R425 — KST 오늘 날짜(date). DB 세션 TimeZone = UTC라 CURRENT_DATE는 KST 09시까지 어제다. */
+export const KST_TODAY_DATE_SQL = `((NOW() AT TIME ZONE 'Asia/Seoul')::date)`;
 export const KST_CURRENT_YEAR_SQL = `EXTRACT(YEAR FROM (NOW() AT TIME ZONE 'Asia/Seoul'))::int`;
 
 /**

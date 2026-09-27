@@ -34,6 +34,7 @@ import {
 } from './provider-registry';
 import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
+import { orderExternalId } from './cdp-order-identity';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { firstPositiveAmount } from './normalize';
@@ -217,16 +218,16 @@ export async function getNaverCommerceIntegration(
   };
 }
 
-export async function getNaverCommerceIntegrationByStoreId(storeId: string): Promise<NaverCommerceIntegration | null> {
+/** ★ 2026-09-27 한줄로 V2 R098 같은 뿌리 — 같은 스토어가 여러 회사에 연동돼 있으면 전부(웹훅은 서명이 맞는 회사마다 전달). */
+export async function getNaverCommerceIntegrationsByStoreId(storeId: string): Promise<NaverCommerceIntegration[]> {
   const result = await query(
     `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
      FROM company_integrations
-     WHERE provider = 'naver_smart_store' AND mall_id = $1 AND status = 'active' LIMIT 1`,
+     WHERE provider = 'naver_smart_store' AND mall_id = $1 AND status = 'active'
+     ORDER BY connected_at DESC NULLS LAST`,
     [storeId]
   );
-  if (result.rows.length === 0) return null;
-  const r = result.rows[0];
-  return {
+  return result.rows.map((r: any) => ({
     id: r.id,
     companyId: r.company_id,
     storeId: r.mall_id,
@@ -236,7 +237,7 @@ export async function getNaverCommerceIntegrationByStoreId(storeId: string): Pro
     scope: r.scope || '',
     webhookSecret: r.webhook_secret,
     status: r.status,
-  };
+  }));
 }
 
 export async function ensureFreshNaverCommerceToken(
@@ -559,7 +560,8 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
         await syncOrder(companyId, {
           source: 'naver_smart_store',
           orderId: String(resource.order_id || resource.product_order_id || ''),
-          externalId: String(resource.member_id || resource.customer_id || ''),
+          // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
+          externalId: orderExternalId(resource.member_id || resource.customer_id, resource.buyer_cellphone || resource.phone, resource.order_id || resource.product_order_id),
           email: resource.buyer_email || resource.email,
           phone: resource.buyer_cellphone || resource.phone,
           name: resource.buyer_name || resource.name,

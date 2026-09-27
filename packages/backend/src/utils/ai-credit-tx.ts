@@ -82,6 +82,31 @@ export async function loadCreditRow(client: any, companyId: string, forUpdate: b
   return res.rows[0] || null;
 }
 
+/**
+ * ★ 2026-09-27 한줄로 V2 R192(Codex 차수3 1R) — 차감이 허용하는 음수 한도(순수). 실제 차감(_deductWithClient)과
+ *   과금 전 엄격 확인(hasCreditForStrict)이 이 하나를 쓴다 — 두 곳이 다르게 계산하면 "확인은 통과·차감은 실패"가 된다.
+ * v2 운영 과금(여정·자동마케팅 실행) = 활성 자산이라 마이너스 허용(−1개월 grant 상한). 다음달 grant에서 상계(applyResetIfNeeded).
+ * 그 외(분석·생성·발행) = 후불(postpaid)이면 overage_limit까지, 선불은 0에서 차단(기존 동작).
+ */
+export function creditOverageAllowance(row: any, source: string): number {
+  const planCredits = Number(row.plan_credits) || 0;
+  return isOperationSource(source)
+    ? planCredits
+    : (String(row.billing_type) === 'postpaid' ? Math.max(0, Number(row.overage_limit) || 0) : 0);
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R192(Codex 차수3 1R) — 월 리셋 뒤 기본분(순수). applyResetIfNeeded와 엄격 확인이 같은 값을 쓴다.
+ * v2 음수 상계 — 지난달 운영 과금으로 base가 음수면 이번달 grant에서 그만큼 차감(덮어쓰기 X). 양수 잔액은 이월 안 함.
+ * ★ 2026-09-25 한줄로 전수점검 C-08: 음수 상계는 **선불만** 한다(후불은 overage_credits로 월 정산에서 현금 청구 — 두 번 받지 않는다).
+ */
+export function carriedBaseOnReset(row: any): number {
+  const planCredits = Number(row.plan_credits) || 0;
+  const prevBase = Number(row.base) || 0;
+  const carriesNegative = String(row.billing_type) === 'prepaid';
+  return planCredits + (carriesNegative ? Math.min(0, prevBase) : 0);
+}
+
 /** 트랜잭션 내부 월 리셋. base = 요금제 기본 크레딧 + reset 이력(월 1회 idempotent). */
 export async function applyResetIfNeeded(client: any, companyId: string, row: any, now: Date): Promise<any> {
   const resetAt = row.reset_at ? new Date(row.reset_at) : null;
@@ -89,15 +114,8 @@ export async function applyResetIfNeeded(client: any, companyId: string, row: an
 
   const planCredits = Number(row.plan_credits) || 0;
   const purchased = Number(row.purchased) || 0;
-  // ★ v2 음수 상계 — 지난달 운영 과금(여정·자동마케팅 실행)으로 base가 음수면 이번달 grant에서 그만큼 차감(덮어쓰기 X).
-  //   양수 잔액은 이월 안 함(기존 동작 유지 = 미사용분 소멸). carriedBase = grant + min(0, 지난 base).
-  const prevBase = Number(row.base) || 0;
-  // ★ 2026-09-25 한줄로 전수점검 C-08: 음수 상계는 **선불만** 한다.
-  //   선불이 아닌 회사는 부족분이 overage_credits로 기록돼 월 정산(billing-issue.ts 초과사용 합산)에서 현금으로 청구된다.
-  //   그 음수를 다음 달 기본분에서 또 빼면 같은 초과분을 두 번 받는다. 정산 발행이 막힌 회사(billing_type='prepaid')만
-  //   청구 경로가 없으므로 상계가 유일한 회수 수단이다(billing-issue.ts의 선불 발행 차단과 같은 기준).
-  const carriesNegative = String(row.billing_type) === 'prepaid';
-  const carriedBase = planCredits + (carriesNegative ? Math.min(0, prevBase) : 0);
+  // carriedBase = grant + (선불만) min(0, 지난 base) — 계산은 carriedBaseOnReset이 소유(엄격 확인과 같은 값).
+  const carriedBase = carriedBaseOnReset(row);
   await client.query(
     `UPDATE companies
         SET ai_credits_base_remaining = $2,
@@ -158,10 +176,7 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
   const purchased = Number(row.purchased) || 0;
   // ★ v2 운영 과금(여정·자동마케팅 실행) = 활성 자산이라 마이너스 허용(−1개월 grant 상한). 다음달 grant에서 상계(applyResetIfNeeded).
   //   그 외(분석·생성·발행) = 후불(postpaid)이면 overage_limit까지, 선불은 0에서 차단(기존 동작).
-  const planCredits = Number(row.plan_credits) || 0;
-  const overageAllowed = isOperationSource(opts.source)
-    ? planCredits
-    : (String(row.billing_type) === 'postpaid' ? Math.max(0, Number(row.overage_limit) || 0) : 0);
+  const overageAllowed = creditOverageAllowance(row, opts.source);
   const { fromBase, fromPurchased, shortfall } = splitDeduction(base, purchased, opts.cost);
   if ((base + purchased) - opts.cost < -overageAllowed) {
     await client.query('ROLLBACK');

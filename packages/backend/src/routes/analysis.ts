@@ -10,6 +10,8 @@ import { maskPhone } from '../utils/mfa';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, getCompanyCosts, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 import { withCopyRules } from '../services/ai';
+import { kstFromNaiveUtc, kstDayStartNaiveUtc } from '../utils/stats-aggregation';
+import { buildRecipientRunConversions } from '../utils/recipient-conversion';
 
 const router = Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
@@ -197,7 +199,7 @@ function buildBusinessPrompt2(collectedData: any): string {
 - 수신거부 추이: ${JSON.stringify(collectedData.unsubscribeTrend)}
 - RFM 세그먼트: ${JSON.stringify(collectedData.rfmSegments || [])}
 - 이탈 위험 고객 TOP 20: ${JSON.stringify(collectedData.churnRiskCustomers || [])}
-- 구매 전환 분석: ${JSON.stringify(collectedData.conversionAnalysis || [])}
+- 구매 전환 분석(${collectedData.conversionAnalysisBasis || '실수신자 기준'}): ${JSON.stringify(collectedData.conversionAnalysis || [])}
 
 === 응답 JSON 형식 ===
 { "insights": [ { "id": "...", "category": "...", "title": "...", "summary": "...", "details": "...", "level": "advanced", "keyMetrics": [...], "recommendations": [...] } ] }
@@ -418,8 +420,8 @@ router.get('/preview', async (req: Request, res: Response) => {
       // 5) 최적 발송 시간대 (성공률 기준)
       const bestTimeResult = await query(`
         SELECT 
-          EXTRACT(DOW FROM cr.sent_at) as dow,
-          EXTRACT(HOUR FROM cr.sent_at) as hour,
+          EXTRACT(DOW FROM ${kstFromNaiveUtc('cr.sent_at')}) as dow,
+          EXTRACT(HOUR FROM ${kstFromNaiveUtc('cr.sent_at')}) as hour,
           ROUND(SUM(cr.success_count)::numeric / NULLIF(SUM(cr.sent_count), 0) * 100, 1) as success_rate,
           SUM(cr.sent_count) as total_sent
         FROM campaign_runs cr
@@ -427,7 +429,7 @@ router.get('/preview', async (req: Request, res: Response) => {
         WHERE c.company_id = $1
           AND cr.sent_at >= NOW() - INTERVAL '90 days'
           AND cr.sent_count > 0
-        GROUP BY EXTRACT(DOW FROM cr.sent_at), EXTRACT(HOUR FROM cr.sent_at)
+        GROUP BY EXTRACT(DOW FROM ${kstFromNaiveUtc('cr.sent_at')}), EXTRACT(HOUR FROM ${kstFromNaiveUtc('cr.sent_at')})
         HAVING SUM(cr.sent_count) >= 10
         ORDER BY success_rate DESC
         LIMIT 1
@@ -439,14 +441,14 @@ router.get('/preview', async (req: Request, res: Response) => {
       // 6) 최고 성과 요일
       const bestDayResult = await query(`
         SELECT 
-          EXTRACT(DOW FROM cr.sent_at) as dow,
+          EXTRACT(DOW FROM ${kstFromNaiveUtc('cr.sent_at')}) as dow,
           ROUND(SUM(cr.success_count)::numeric / NULLIF(SUM(cr.sent_count), 0) * 100, 1) as success_rate
         FROM campaign_runs cr
         JOIN campaigns c ON cr.campaign_id = c.id
         WHERE c.company_id = $1
           AND cr.sent_at >= NOW() - INTERVAL '90 days'
           AND cr.sent_count > 0
-        GROUP BY EXTRACT(DOW FROM cr.sent_at)
+        GROUP BY EXTRACT(DOW FROM ${kstFromNaiveUtc('cr.sent_at')})
         HAVING SUM(cr.sent_count) >= 10
         ORDER BY success_rate DESC
         LIMIT 1
@@ -580,8 +582,9 @@ router.post('/run', async (req: Request, res: Response) => {
 
     // ── 캐시 체크 (forceRefresh가 아닌 경우) ──
     if (!forceRefresh) {
+      // ★ 2026-09-27 한줄로 V2 R090 — collected_data를 함께 읽는다(옛: 안 읽어 캐시 적중 때 화면 차트가 전부 사라졌다).
       const cached = await query(`
-        SELECT id, insights, created_at
+        SELECT id, insights, collected_data, created_at
         FROM analysis_results
         WHERE company_id = $1
           AND analysis_level = $2
@@ -622,8 +625,8 @@ router.post('/run', async (req: Request, res: Response) => {
       FROM campaign_runs cr
       JOIN campaigns c ON cr.campaign_id = c.id
       WHERE c.company_id = $1
-        AND cr.sent_at >= $2::date
-        AND cr.sent_at < $3::date + INTERVAL '1 day'
+        AND cr.sent_at >= ${kstDayStartNaiveUtc('$2')}
+        AND cr.sent_at < ${kstDayStartNaiveUtc('($3)::date + 1')}
     `, [companyId, dateFrom, dateTo]);
 
     collectedData.campaignSummary = campaignSummary.rows[0];
@@ -639,8 +642,8 @@ router.post('/run', async (req: Request, res: Response) => {
       FROM campaign_runs cr
       JOIN campaigns c ON cr.campaign_id = c.id
       WHERE c.company_id = $1
-        AND cr.sent_at >= $2::date
-        AND cr.sent_at < $3::date + INTERVAL '1 day'
+        AND cr.sent_at >= ${kstDayStartNaiveUtc('$2')}
+        AND cr.sent_at < ${kstDayStartNaiveUtc('($3)::date + 1')}
       GROUP BY cr.message_type
       ORDER BY sent DESC
     `, [companyId, dateFrom, dateTo]);
@@ -650,17 +653,17 @@ router.post('/run', async (req: Request, res: Response) => {
     // 3) 요일별 성과
     const dayOfWeekStats = await query(`
       SELECT 
-        EXTRACT(DOW FROM cr.sent_at) as dow,
+        EXTRACT(DOW FROM ${kstFromNaiveUtc('cr.sent_at')}) as dow,
         SUM(cr.sent_count) as sent,
         SUM(cr.success_count) as success,
         ROUND(SUM(cr.success_count)::numeric / NULLIF(SUM(cr.sent_count), 0) * 100, 1) as success_rate
       FROM campaign_runs cr
       JOIN campaigns c ON cr.campaign_id = c.id
       WHERE c.company_id = $1
-        AND cr.sent_at >= $2::date
-        AND cr.sent_at < $3::date + INTERVAL '1 day'
+        AND cr.sent_at >= ${kstDayStartNaiveUtc('$2')}
+        AND cr.sent_at < ${kstDayStartNaiveUtc('($3)::date + 1')}
         AND cr.sent_count > 0
-      GROUP BY EXTRACT(DOW FROM cr.sent_at)
+      GROUP BY EXTRACT(DOW FROM ${kstFromNaiveUtc('cr.sent_at')})
       ORDER BY dow
     `, [companyId, dateFrom, dateTo]);
 
@@ -669,17 +672,17 @@ router.post('/run', async (req: Request, res: Response) => {
     // 4) 시간대별 성과
     const hourStats = await query(`
       SELECT 
-        EXTRACT(HOUR FROM cr.sent_at) as hour,
+        EXTRACT(HOUR FROM ${kstFromNaiveUtc('cr.sent_at')}) as hour,
         SUM(cr.sent_count) as sent,
         SUM(cr.success_count) as success,
         ROUND(SUM(cr.success_count)::numeric / NULLIF(SUM(cr.sent_count), 0) * 100, 1) as success_rate
       FROM campaign_runs cr
       JOIN campaigns c ON cr.campaign_id = c.id
       WHERE c.company_id = $1
-        AND cr.sent_at >= $2::date
-        AND cr.sent_at < $3::date + INTERVAL '1 day'
+        AND cr.sent_at >= ${kstDayStartNaiveUtc('$2')}
+        AND cr.sent_at < ${kstDayStartNaiveUtc('($3)::date + 1')}
         AND cr.sent_count > 0
-      GROUP BY EXTRACT(HOUR FROM cr.sent_at)
+      GROUP BY EXTRACT(HOUR FROM ${kstFromNaiveUtc('cr.sent_at')})
       ORDER BY hour
     `, [companyId, dateFrom, dateTo]);
 
@@ -688,16 +691,16 @@ router.post('/run', async (req: Request, res: Response) => {
     // 4-1) D108: 요일x시간 히트맵 데이터 (차트용)
     const heatmapData = await query(`
       SELECT
-        EXTRACT(DOW FROM cr.sent_at)::int as day,
-        EXTRACT(HOUR FROM cr.sent_at)::int as hour,
+        EXTRACT(DOW FROM ${kstFromNaiveUtc('cr.sent_at')})::int as day,
+        EXTRACT(HOUR FROM ${kstFromNaiveUtc('cr.sent_at')})::int as hour,
         ROUND(SUM(cr.success_count)::numeric / NULLIF(SUM(cr.sent_count), 0) * 100, 1) as rate
       FROM campaign_runs cr
       JOIN campaigns c ON cr.campaign_id = c.id
       WHERE c.company_id = $1
-        AND cr.sent_at >= $2::date
-        AND cr.sent_at < $3::date + INTERVAL '1 day'
+        AND cr.sent_at >= ${kstDayStartNaiveUtc('$2')}
+        AND cr.sent_at < ${kstDayStartNaiveUtc('($3)::date + 1')}
         AND cr.sent_count > 0
-      GROUP BY EXTRACT(DOW FROM cr.sent_at), EXTRACT(HOUR FROM cr.sent_at)
+      GROUP BY EXTRACT(DOW FROM ${kstFromNaiveUtc('cr.sent_at')}), EXTRACT(HOUR FROM ${kstFromNaiveUtc('cr.sent_at')})
     `, [companyId, dateFrom, dateTo]);
     collectedData.heatmapData = heatmapData.rows;
 
@@ -750,8 +753,8 @@ router.post('/run', async (req: Request, res: Response) => {
       FROM campaign_runs cr
       JOIN campaigns c ON cr.campaign_id = c.id
       WHERE c.company_id = $1
-        AND cr.sent_at >= $2::date
-        AND cr.sent_at < $3::date + INTERVAL '1 day'
+        AND cr.sent_at >= ${kstDayStartNaiveUtc('$2')}
+        AND cr.sent_at < ${kstDayStartNaiveUtc('($3)::date + 1')}
         AND cr.sent_count >= 10
       GROUP BY c.id, c.campaign_name, c.message_type
       ORDER BY success_rate DESC
@@ -779,8 +782,8 @@ router.post('/run', async (req: Request, res: Response) => {
         FROM campaign_runs cr
         JOIN campaigns c ON cr.campaign_id = c.id
         WHERE c.company_id = $1
-          AND cr.sent_at >= $2::date
-          AND cr.sent_at < $3::date + INTERVAL '1 day'
+          AND cr.sent_at >= ${kstDayStartNaiveUtc('$2')}
+          AND cr.sent_at < ${kstDayStartNaiveUtc('($3)::date + 1')}
         ORDER BY cr.sent_at DESC
         LIMIT 20
       `, [companyId, dateFrom, dateTo]);
@@ -829,29 +832,11 @@ router.post('/run', async (req: Request, res: Response) => {
 
       collectedData.rfmSegments = rfmData.rows;
 
-      // 11) 구매 전환 분석
-      const conversionData = await query(`
-        SELECT 
-          c.campaign_name,
-          cr.sent_at,
-          cr.sent_count,
-          COUNT(DISTINCT pu.customer_id) as converted_customers,
-          COALESCE(SUM(pu.total_amount), 0) as conversion_revenue
-        FROM campaign_runs cr
-        JOIN campaigns c ON cr.campaign_id = c.id
-        LEFT JOIN purchases pu ON pu.company_id = c.company_id
-          AND pu.purchase_date >= cr.sent_at
-          AND pu.purchase_date < cr.sent_at + INTERVAL '7 days'
-        WHERE c.company_id = $1
-          AND cr.sent_at >= $2::date
-          AND cr.sent_at < $3::date + INTERVAL '1 day'
-          AND cr.sent_count >= 10
-        GROUP BY c.id, c.campaign_name, cr.sent_at, cr.sent_count
-        ORDER BY conversion_revenue DESC
-        LIMIT 10
-      `, [companyId, dateFrom, dateTo]);
-
-      collectedData.conversionAnalysis = conversionData.rows;
+      // 11) 구매 전환 분석 — ★ 2026-09-27 한줄로 V2 R093: 실수신자(발송 성공 번호)의 구매만 캠페인 성과로 센다(CT).
+      //   옛: 발송 뒤 7일 창의 회사 전체 구매를 그 캠페인 성과로 잡았다(수신자 무관 · 추정 ROI까지 부풀었다).
+      const conv = await buildRecipientRunConversions(companyId, dateFrom, dateTo);
+      collectedData.conversionAnalysis = conv.rows;
+      collectedData.conversionAnalysisBasis = conv.basis;
     }
 
     // ── Claude API 호출 ──

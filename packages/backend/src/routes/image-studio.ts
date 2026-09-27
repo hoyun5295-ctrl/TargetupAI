@@ -37,6 +37,7 @@ import {
   companyTempUsageBytes, isValidTempId, newTempId,
   tryAcquireGenerateLock, releaseGenerateLock,
   findTemplateSample, writeTemplateSample,
+  isStudioTempFull,
   STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS,
   type ComposeTypography,
 } from '../utils/image-studio';
@@ -196,10 +197,8 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   if (!tryAcquireGenerateLock(companyId)) return respondStudioError(res, new StudioError('BUSY', 409));
 
   try {
-    // temp 상한 검사(200MB)
-    if (companyTempUsageBytes(companyId) >= STUDIO_TEMP_CAP_BYTES) {
-      return res.status(409).json({ success: false, error: '임시 보관 용량이 가득 찼습니다. 저장하거나 정리 후 다시 시도해주세요.', code: 'TEMP_FULL' });
-    }
+    // temp 상한 검사(200MB) — ★ 2026-09-27 R125 CT(모든 임시 쓰기 라우트가 같은 판정)
+    if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));
 
     const benefitInHint = hasBenefitPattern(userHint);
     // ★ 2026-08-09 문구 위치(행사 포스터 위/중앙/아래) — 화이트리스트 밖 값은 무시(템플릿 기본 배치)
@@ -253,6 +252,7 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
   const userId = req.user?.userId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
+  if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
 
   const { tempId, instruction, targetSize } = req.body || {};
   if (!isValidTempId(tempId)) return res.status(400).json({ success: false, error: '대상 이미지를 찾을 수 없습니다.' });
@@ -309,6 +309,7 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
 imageStudioRouter.post('/ingest-product', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
   const rawUrl = String(req.body?.url || '').trim();
 
   try {
@@ -336,6 +337,7 @@ imageStudioRouter.post('/upload-product', (req: any, res: Response) => {
     if (err) return res.status(400).json({ success: false, error: err.message || '업로드 실패' });
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
     const file = req.file as Express.Multer.File | undefined;
     if (!file) return res.status(400).json({ success: false, error: '이미지를 선택해주세요.' });
     const ctype = file.mimetype.toLowerCase();
@@ -349,6 +351,7 @@ imageStudioRouter.post('/upload-product', (req: any, res: Response) => {
 imageStudioRouter.post('/remove-bg', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
   const { sourceTempId } = req.body || {};
   const src = findTempFile(companyId, sourceTempId);
   if (!src) return res.status(404).json({ success: false, error: '원본 이미지를 찾을 수 없습니다.' });
@@ -367,6 +370,7 @@ imageStudioRouter.post('/remove-bg', async (req: any, res: Response) => {
 imageStudioRouter.post('/compose', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
 
   const { bgTempId, cutoutTempId, layout, typography, presetKey } = req.body || {};
   const bg = findTempFile(companyId, bgTempId);
@@ -439,6 +443,8 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
   try {
     const effectiveSpec = channelSpec || meta.channelSpec || null;
     let effTempId: string = tempId;
+    // ★ 2026-09-27 한줄로 V2 R127 — 원본 임시 파일은 용량 한도를 통과한 뒤에 소비한다(옛: 먼저 지우고 한도 초과면 화면이 든 원본 id로 다시 저장할 수 없었다)
+    let consumeOriginal: (() => void) | null = null;
 
     // ★ MMS 트랙 = 서버가 저장 직전 1080px + JPEG ≤300KB 압축 보장(§4-4 — 사용자가 오버사이즈를 만들 수 없음)
     if (effectiveSpec === 'mms') {
@@ -452,10 +458,13 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
         presetKey: meta.presetKey || null, channelSpec: 'mms', width: r.width, height: r.height,
         aspectRatio: meta.aspectRatio || null,
       });
-      // 원본 temp 1회성 소비(중복 저장 차단)
-      const dir = path.dirname(found.absPath);
-      try { fs.unlinkSync(found.absPath); } catch { /* noop */ }
-      try { fs.unlinkSync(path.join(dir, `${tempId}.json`)); } catch { /* noop */ }
+      // 원본 temp 1회성 소비(중복 저장 차단) — 실행은 용량 한도 통과 뒤(R127)
+      const origPath = found.absPath;
+      const origDir = path.dirname(origPath);
+      consumeOriginal = () => {
+        try { fs.unlinkSync(origPath); } catch { /* noop */ }
+        try { fs.unlinkSync(path.join(origDir, `${tempId}.json`)); } catch { /* noop */ }
+      };
       effTempId = alloc.tempId;
       meta = readTempMeta(companyId, effTempId);
       found = findTempFile(companyId, effTempId);
@@ -466,8 +475,15 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
     const usage = await getStorageUsage(companyId);
     const projected = usage.usedBytes + (fs.existsSync(found.absPath) ? fs.statSync(found.absPath).size : 0);
     if (projected > usage.limitBytes) {
+      // 한도 초과 = 원본은 남긴다(정리 뒤 같은 id로 다시 저장). MMS 변환본만 치운다.
+      if (consumeOriginal) {
+        const convPath = found.absPath;
+        try { fs.unlinkSync(convPath); } catch { /* noop */ }
+        try { fs.unlinkSync(path.join(path.dirname(convPath), `${effTempId}.json`)); } catch { /* noop */ }
+      }
       return res.status(409).json({ success: false, error: '저장 용량 한도를 초과했습니다. 라이브러리에서 정리 후 다시 저장해주세요.', code: 'STORAGE_FULL' });
     }
+    consumeOriginal?.();
 
     const moved = moveTempToPermanent(companyId, effTempId);
     if (!moved) return res.status(409).json({ success: false, error: '이미 저장됐거나 만료된 이미지입니다.', code: 'ALREADY_SAVED' });
@@ -478,7 +494,8 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
     const assetId = await registerAsset({
       companyId, createdBy: userId, kind: 'generated', origin: 'studio',
       url: moved.url, filename: displayName, bytes: moved.bytes, format,
-      prompt: meta.prompt || null,
+      // ★ 2026-09-27 한줄로 V2 R241 — 최종 프롬프트는 숨긴 템플릿 골격을 담고 있어 소재 기록에 싣지 않는다(목록 API로 나갔다)
+      prompt: null,
       channelSpec: effectiveSpec,
       width: meta.width ?? null, height: meta.height ?? null,
     });

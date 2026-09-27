@@ -145,6 +145,7 @@ import { startCancelledQueueSweeper } from './utils/cancelled-queue-sweeper';
 // ★ 2026-06-17: 만료 발송요청 안전망 — rsv1=3(서버전송요청완료) 2일+ 결과없음 미발송 발송 차단 (시세이도 늦은 발송 사고 차단)
 import { startExpiredPendingSweeper } from './utils/expired-pending-sweeper';
 import { startEmailSendSweeper } from './utils/email-send-sweeper';
+import { startAiUsageThresholdAlertWorker } from './utils/ai-usage-threshold-alert';
 // ★ 2026-06-14: DM 마감 추첨 워커 (1분 주기) — lucky_draw draw_at 도래 시 등급별 랜덤 추첨
 import { startDmDrawWorker } from './utils/dm/dm-draw-worker';
 // ★ 2026-06-10: CDP webhook 실패 재처리 + unified profile 자동 재계산
@@ -706,6 +707,9 @@ app.listen(PORT, () => {
 
   // ★ 2026-06-13: 예약 Email 발송 + 정체 캠페인 복구 (1분 주기) — scheduled 도래 발송 + sending 30분+ 정체 failed
   startEmailSendSweeper();
+
+  // ★ 2026-09-27 한줄로 V2 R075: AI 사용량 한도 알림 (10분 주기) — 설정만 저장되고 발송이 없던 것을 붙였다
+  startAiUsageThresholdAlertWorker();
 
   // ★ 2026-06-14: DM 마감 추첨 (1분 주기) — lucky_draw draw_at 도래 시 응모자 풀 등급별 랜덤 추첨
   startDmDrawWorker();

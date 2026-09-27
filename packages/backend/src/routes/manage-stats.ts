@@ -24,7 +24,7 @@ import { queryPayAgentStats, queryPayAgentStoreBreakdown, validateStatsDateRange
 import { buildManageStatsXlsx, type StatsExportWebRow } from '../utils/manage-stats-export';
 import { XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 // ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
-import { spamBillableTestSql } from '../utils/spam-trial';
+import { spamBillableTestSql, isSpamTestBillable } from '../utils/spam-trial';
 
 const router = Router();
 
@@ -289,7 +289,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
         sfDateCond = `AND TO_CHAR(t.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') = $2`;
       }
       const sfDetail = await pool.query(`
-        SELECT r.phone, r.carrier, r.message_type, r.result, t.created_at as sent_at
+        SELECT r.phone, r.carrier, r.message_type, r.result, t.source, t.created_at as sent_at
         FROM spam_filter_test_results r
         JOIN spam_filter_tests t ON r.test_id = t.id
         WHERE t.company_id = $1 ${sfDateCond}
@@ -301,6 +301,8 @@ router.get('/send/detail', async (req: Request, res: Response) => {
           phone: r.phone, msgType: r.message_type || 'SMS',
           status: r.result ? 'success' : 'pending', result: r.result || 'pending',
           carrier: r.carrier, sentAt: r.sent_at, testType: 'spam_filter',
+          // ★ 2026-09-27 한줄로 V2 m037 — 과금 여부(무료 체험·무료 자동 검사 = false · 정산 집계와 같은 판정 CT)
+          billable: isSpamTestBillable(r.source),
         });
       });
     } catch (mysqlErr) {

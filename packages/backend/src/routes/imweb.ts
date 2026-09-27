@@ -18,12 +18,13 @@ import { Router, Request, Response } from 'express';
 import { randomBytes } from 'crypto';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
+import { deliverWebhookToCompanies, extractWebhookResource } from '../utils/cdp-webhook-delivery';
 import {
   buildImwebAuthorizeUrl,
   exchangeImwebCode,
   saveImwebIntegration,
   getImwebIntegration,
-  getImwebIntegrationBySiteCode,
+  getImwebIntegrationsBySiteCode,
   completeImwebIntegration,
   cancelImwebIntegration,
   verifyImwebWebhook,
@@ -46,8 +47,9 @@ router.post('/webhook', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'imweb event 또는 siteCode가 누락되었습니다.' });
     }
 
-    const integration = await getImwebIntegrationBySiteCode(String(siteCode));
-    if (!integration) {
+    // ★ 2026-09-27 한줄로 V2 R244 — 같은 사이트가 여러 회사에 연동돼 있으면 전부에게 전달한다(옛: LIMIT 1 임의 한 회사).
+    const integrations = await getImwebIntegrationsBySiteCode(String(siteCode));
+    if (integrations.length === 0) {
       console.warn('[Imweb Webhook] 미연동 siteCode, 무시:', siteCode);
       return res.status(404).json({ success: false, error: '연동된 siteCode가 없습니다.' });
     }
@@ -58,50 +60,21 @@ router.post('/webhook', async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: '웹훅 인증에 실패했습니다.' });
     }
 
-    const resource = req.body?.data || req.body?.resource || req.body || {};
+    const resource = extractWebhookResource('imweb', req.body || {});
     const idempotencyKey = imwebAdapter.buildIdempotencyKey(event, resource, req.body || {});
 
-    const insertRes = await query(
-      `INSERT INTO cdp_webhook_deliveries (
-        id, company_id, source, webhook_event, idempotency_key, payload, status, retry_count, created_at
-      ) VALUES (
-        gen_random_uuid(), $1::uuid, 'imweb', $2, $3, $4::jsonb, 'received', 0, NOW()
-      )
-      ON CONFLICT (company_id, source, idempotency_key) DO NOTHING
-      RETURNING id`,
-      [integration.companyId, event, idempotencyKey, JSON.stringify(req.body || {})]
-    );
-
-    if (insertRes.rows.length === 0) {
-      await query(
-        `UPDATE cdp_webhook_deliveries
-         SET status = 'duplicate', processed_at = NOW()
-         WHERE company_id = $1::uuid AND source = 'imweb' AND idempotency_key = $2
-           -- ★ 2026-09-26 한줄로 V2 R1-02 — 처리 완료 행만 중복 표시(실패 행을 덮으면 재처리 워커 대상에서 빠져 이벤트가 유실됐다)
-           AND status = 'processed'`,
-        [integration.companyId, idempotencyKey]
-      );
-      return res.json({ success: true, duplicate: true });
-    }
-
-    const deliveryId = insertRes.rows[0].id;
-    try {
-      await imwebAdapter.processWebhookEvent(integration.companyId, event, resource);
-      await query(
-        `UPDATE cdp_webhook_deliveries SET status = 'processed', processed_at = NOW() WHERE id = $1::uuid`,
-        [deliveryId]
-      );
-      return res.json({ success: true });
-    } catch (processErr: any) {
-      console.error('[Imweb Webhook] 이벤트 처리 실패:', processErr);
-      await query(
-        `UPDATE cdp_webhook_deliveries
-         SET status = 'failed', error_message = $2, processed_at = NOW()
-         WHERE id = $1::uuid`,
-        [deliveryId, String(processErr?.message || 'unknown').slice(0, 1000)]
-      );
-      return res.json({ success: false, error: '이벤트 처리 실패' });
-    }
+    const outcome = await deliverWebhookToCompanies({
+      source: 'imweb',
+      companyIds: integrations.map((i) => i.companyId),
+      event,
+      idempotencyKey,
+      payload: req.body || {},
+      process: (companyId) => imwebAdapter.processWebhookEvent(companyId, event, resource),
+      logTag: 'Imweb',
+    });
+    if (outcome.failed > 0) return res.json({ success: false, error: '이벤트 처리 실패' });
+    if (outcome.processed === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
+    return res.json({ success: true });
   } catch (err: any) {
     console.error('[Imweb Webhook] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });

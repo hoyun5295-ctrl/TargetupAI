@@ -64,7 +64,7 @@ import { extractJsonFromAiText } from '../utils/ai-json';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse } from '../utils/callback-filter';
 import { buildCustomerFilter } from '../utils/customer-filter';
 import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
-import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-send-core';
+import { createDirectSendCampaign, preFilterRecipientsLikeStaging, countStagingFiltered } from '../utils/direct-send-core';
 import { DirectSendError } from '../utils/direct-send-spec';
 import { getOpt080Number, stripAdPartsDeep, normalizeSmsSeparatorLines } from '../utils/messageUtils';
 import { isUuid, findLinkDefectDeep } from '../utils/normalize';
@@ -1387,6 +1387,11 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, async (req: any, res: any)
       recipients = cbResult.filtered;
     }
 
+    // ★ 2026-09-27 한줄로 V2 R119 — 수신자별 열람 토큰은 스테이징 정제(중복·수신거부)와 같은 기준으로 거른 **뒤** 발급한다.
+    //   옛: 정제 전에 전원 발급해 실제로 안 나간 사람도 추적에서 '발송'으로 잡혔다.
+    recipients = await preFilterRecipientsLikeStaging(recipients, userId, isAd === true);
+    if (recipients.length === 0) return res.status(400).json({ error: '수신 가능한 대상이 0명입니다(수신거부 제외 후).', code: 'ZERO_MATCH' });
+
     // ★ 2026-09-27 한줄로 V2 R327 — 발행비 차감·발행을 싼 검사(080·발신번호·대상 0명·개별 회신) **뒤**로 옮겼다.
     //   옛: 차감·발행을 먼저 해 검사에 걸리면 발송은 안 되는데 발행과 과금은 됐다. 발행 확인(402)·잔액 확인은 위에서 이미 했다.
     if (publishFeeGate) {
@@ -2545,12 +2550,8 @@ dmPublicRouter.get('/ab/:code', async (req: Request, res: Response) => {
       return res.status(404).send(renderDmErrorHtml(stopped ? '종료된 페이지입니다.' : 'DM을 찾을 수 없어요.'));
     }
 
-    // 첫 진입 추적 (variant 정보 함께)
-    const phone = (req.query.p as string) || null;
-    const ip = req.ip || req.socket?.remoteAddress || null;
-    const ua = req.headers['user-agent'] || null;
-    const totalPages = extractPagesFromDm(dm).length || 1;
-    trackAbTestView(test.id, variant, pageId, dm.company_id, phone, 1, totalPages, 0, ip, ua).catch(() => {});
+    // ★ 2026-09-27 한줄로 V2 R120 — 열람 기록은 뷰어 진입 비콘(init) 1곳(일반 DM과 같은 원칙 · 아래 비콘 주소를 A/B 기록으로 바꾼다).
+    //   옛: 여기서 첫 조회 1행을 남기고 비콘은 일반 DM 주소로 가서 A/B 기록엔 체류·완독이 쌓이지 않았다.
 
     // 쿠키 발급 (30일)
     if (!existing) {
@@ -2567,6 +2568,9 @@ dmPublicRouter.get('/ab/:code', async (req: Request, res: Response) => {
     } catch {
       html = renderDmViewerHtml(dm, '/api/dm/v');
     }
+    // 열람 진행 비콘(진입·체류·이탈)만 A/B 기록 주소로 — 설문·이벤트 응답은 원래 DM 주소 그대로(뷰어의 추적 식 하나만 바꾼다)
+    const abCode = String(req.params.code).replace(/[^0-9A-Za-z_-]/g, '');
+    html = html.split("TRACK_URL + '/' + CODE + '/track'").join(`'/api/dm/v/ab/${abCode}/track'`);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err: any) {
@@ -2588,18 +2592,21 @@ dmPublicRouter.post('/ab/:code/track', async (req: Request, res: Response) => {
     const pageId = variantToPageId(test, variant);
     if (!pageId) return res.status(404).json({ error: 'variant page not found' });
 
-    const { phone, page_reached, total_pages, duration } = req.body || {};
+    const b = req.body || {};
     const ip = req.ip || req.socket?.remoteAddress || null;
     const ua = req.headers['user-agent'] || null;
 
-    await trackAbTestView(
-      test.id, variant, pageId, test.company_id,
-      phone || null,
-      page_reached || 1,
-      total_pages || 0,
-      duration || 0,
-      ip, ua,
-    );
+    await trackAbTestView({
+      abTestId: test.id, variant, dmPageId: pageId, companyId: test.company_id,
+      phone: typeof b.phone === 'string' && b.phone ? b.phone : null,
+      anonymousId: typeof b.anon === 'string' && b.anon ? b.anon : null,
+      pageReached: b.page_reached,
+      totalPages: b.total_pages,
+      durationDelta: b.duration,
+      sectionDelta: b.section_interactions,
+      isInit: b.init === 1 || b.init === true,
+      ip, userAgent: ua,
+    });
     return res.json({ ok: true, variant });
   } catch (err: any) {
     console.error('[AB추적] 오류:', err.message);

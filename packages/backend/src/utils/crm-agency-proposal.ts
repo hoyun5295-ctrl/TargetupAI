@@ -49,8 +49,8 @@ async function collectContext(companyId: string): Promise<AgencyContext> {
     `SELECT
        COUNT(*) AS total,
        COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in_count,
-       AVG((custom_fields->>'purchase_count')::numeric) AS avg_purchase_count,
-       AVG((custom_fields->>'total_spent')::numeric) AS avg_total_spent
+       AVG(purchase_count) AS avg_purchase_count,
+       AVG(total_purchase_amount) AS avg_total_spent
      FROM customers
      WHERE company_id = $1::uuid AND is_active = true`,
     [companyId],

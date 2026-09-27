@@ -23,6 +23,10 @@
  */
 
 import { callAIWithFallback } from '../services/ai';
+import { randomUUID } from 'crypto';
+import { checkCredit, settleCreditAfterSuccess } from './ai-credit';
+import { isInCreditBundle, runInCreditBundle } from './ai-credit-context';
+import { getCreditCost } from './ai-credit-calc';
 import { buildMemoryPromptContext } from './company-memory';
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 import { query } from '../config/database';
@@ -686,15 +690,21 @@ ${brandAccent
   const systemWithVoice = await buildSystemPromptWithBrandVoice(input.companyId, system);
 
   // AI Operator 영역 호출 (model: 'opus')
-  const aiResult = await callAIWithFallback({
+  // ★ 2026-09-27 한줄로 V2 R246 — 성공 뒤 차감. 옛: AI 호출 안에서 3크레딧이 먼저 빠져 응답 JSON이 깨져도 돌려받지 못했고,
+  //   깨진 응답이 5분 캐시에 남아 다시 눌러도 같은 실패였다. 잔액만 먼저 확인 → 묶음 실행(안쪽 차감 0 · 캐시 안 함) →
+  //   파싱·조립이 끝난 뒤 1회 차감(R260과 같은 방식). 바깥이 이미 묶음 차감을 소유하면(플래너 등) 여기서는 빼지 않는다.
+  const inappCost = isInCreditBundle() ? 0 : getCreditCost('inapp-ai-generator');
+  if (inappCost > 0) await checkCredit(input.companyId, inappCost);
+  const aiResult = await runInCreditBundle(() => callAIWithFallback({
     system: systemWithVoice,
     userMessage,
     model: 'opus',
     maxTokens: 4096,
     temperature: 0.7,
     companyId: input.companyId,
-    source: 'inapp-ai-generator', // ★ D227+ 종량제: 인앱 생성 3크레딧
-  });
+    source: 'inapp-ai-generator', // ★ D227+ 종량제: 인앱 생성 3크레딧(차감은 아래 성공 뒤 1회)
+    noCache: true,
+  }));
 
   const jsonText = extractJSON(aiResult || '');
   let parsed: any;
@@ -782,6 +792,12 @@ ${brandAccent
   message.content_blocks = filterBlocksForTemplate(message.template, message.content_blocks);
 
   // 6 sub-agent 진행 — Frontend 시각 효과용 응답 (5~10초 시뮬레이션)
+  // ★ 2026-09-27 R246 — 파싱·조립이 끝났다 = 크레딧을 받을 결과가 있다(1회 · 작업마다 고유 키)
+  if (inappCost > 0) {
+    // 차감 확정 — 동시 요청에 잔액이 먼저 쓰였으면 결과를 내주지 않는다(402 · Codex 차수3 D 1R)
+    await settleCreditAfterSuccess({ companyId: input.companyId, cost: inappCost, source: 'inapp-ai-generator', idempotencyKey: `inapp-ai:${randomUUID()}` });
+  }
+
   const progressSteps: SubAgentStep[] = [
     { name: 'trigger_detection',  status: 'completed', hint: '자연어 목표에서 트리거 자동 추출' },
     { name: 'audience_match',     status: 'completed', hint: 'D214+ Unified Customer Profile 세그먼트 자동 매핑' },

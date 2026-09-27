@@ -283,7 +283,11 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
         isLastStep ? '여정 완료: 다음 step 없음' : '다음 step 자동 진행 예정',
       ].join('\n');
 
+      // ★ 2026-09-27 한줄로 V2 m087 — 안내 표시를 적재보다 먼저(적재 뒤 표시가 실패하면 다음 주기에 같은 안내가 또 나갔다).
+      //   적재가 실패하면 표시를 되돌려 다음 주기에 다시 시도한다.
+      await markNotified(rows);
       const authTable = await getAuthSmsTable();
+      try {
       await bulkInsertSmsQueue(
         [authTable],
         [[
@@ -301,8 +305,14 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
         ]],
         true,
       );
+      } catch (queueErr) {
+        await query(
+          `UPDATE journey_executions SET result_notified_at = NULL WHERE id = ANY($1::uuid[])`,
+          [rows.map((r) => r.execution_id)],
+        ).catch(() => { /* 되돌림 실패 = 이번 안내 1회 누락(중복보다 안전) */ });
+        throw queueErr;
+      }
 
-      await markNotified(rows);
       log(`✓ 여정 결과 LMS 발송 journey=${head.journey_name} step=${stepOrder} 대상 ${targetCount}명 (성공 ${successCount}/실패 ${failedCount}/대기 ${pendingCount})`);
     } catch (oneErr: any) {
       log(`✗ 여정 결과 알림 묶음 사고 ${key}:`, oneErr?.message || oneErr);

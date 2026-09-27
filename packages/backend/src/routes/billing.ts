@@ -31,7 +31,7 @@ import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from '../utils/pdf
 import { renderBillingStatementPdf, renderInvoicePdf, loadBillingStatementData, loadInvoicePdfData } from '../utils/billing-pdf';
 // ★ 2026-08-04 컨펌 토큰·안내 문구는 일괄발급과 **같은 CT**를 쓴다 — 개별 발송 메일에만 컨펌 버튼이
 //   없어서 업체가 이의를 낼 창구가 없었다(서수란 0803·0804 접수).
-import { retryUnsentConfirmations, ensureConfirmationToken, renderConfirmBlockHtml, markConfirmationDelivered } from '../utils/invoice-confirm';
+import { retryUnsentConfirmations, ensureConfirmationToken, renderConfirmBlockHtml, markConfirmationDelivered, renderBillingMailHtml } from '../utils/invoice-confirm';
 // ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행·반영·취소·수동완료가 **같은 두 겹**을 잡아야 서로를 막는다.
 import { lockCompanyForBilling, lockCompaniesForBilling } from '../utils/billing-lock';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
@@ -3380,49 +3380,16 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
         check: emailCheck,
       });
     }
-    const LINE_BG: Record<string, string> = { web: '', agent: ' background: #EFF6FF;', test: ' background: #FFFBEB;', spam: ' background: #FEF3C7;' };
-    const lineRowsHtml = emailLines.map((l) => `<tr style="border-bottom: 1px solid #F3F4F6;${LINE_BG[l.channel] || ''}">
-              <td style="padding: 8px 0; color: #6B7280;">${escapeInvoiceHtml(l.label)}</td>
-              <td style="padding: 8px 0; text-align: right;">${l.quantityText ? `${l.quantityText} × ₩${l.unitPrice.toLocaleString()}/월` : `${l.count.toLocaleString()}건 × ₩${l.unitPrice.toLocaleString()}`}</td>
-              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${l.amount.toLocaleString()}</td>
-            </tr>`).join('');
-
     // 3) 메일 발송
     // ★ 2026-08-04 컨펌 링크는 트랜잭션 안에서 확보한 토큰으로 만든다 — 본문을 함수로 둔다.
-    const buildHtmlBody = (viewUrl: string | null) => `
-      <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: linear-gradient(135deg, #4338ca, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
-          <h2 style="color: white; margin: 0; font-size: 20px;">📊 정산서 안내</h2>
-          <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px;">${bil.company_name} | ${bil.billing_year}년 ${bil.billing_month}월</p>
-        </div>
-        <div style="background: #ffffff; padding: 24px; border: 1px solid #E5E7EB; border-top: none;">
-          <p style="font-size: 14px; color: #374151; margin: 0 0 16px;">
-            안녕하세요, ${bil.contact_name || bil.company_name} 담당자님.<br/>
-            <strong>${bStart} ~ ${bEnd}</strong> 기간 정산서를 안내드립니다.
-          </p>
-          <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 16px;">
-            ${lineRowsHtml}
-            ${n(bil.ai_credit_supply) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #F5F3FF;">
-              <td style="padding: 8px 0; color: #6B7280;">AI 크레딧</td>
-              <td style="padding: 8px 0; text-align: right;">${n(bil.ai_credit_count).toLocaleString()} 크레딧</td>
-              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${n(bil.ai_credit_supply).toLocaleString()}</td>
-            </tr>` : ''}
-          </table>
-          <div style="background: #EEF2FF; padding: 16px; border-radius: 8px; text-align: right;">
-            <span style="font-size: 13px; color: #6B7280;">공급가액 ₩${n(bil.subtotal).toLocaleString()} + VAT ₩${n(bil.vat).toLocaleString()}</span><br/>
-            <span style="font-size: 20px; font-weight: 700; color: #4338CA;">합계 ₩${n(bil.total_amount).toLocaleString()}</span>
-          </div>
-          ${viewUrl ? renderConfirmBlockHtml(viewUrl) : ''}
-          <p style="font-size: 13px; color: #9CA3AF; margin-top: 16px;">
-            상세 내역은 첨부된 PDF를 확인해주세요.<br/>
-            문의사항이 있으시면 ${INVITO_INFO.phone}로 연락 부탁드립니다.
-          </p>
-        </div>
-        <div style="padding: 16px; text-align: center; font-size: 11px; color: #9CA3AF; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px; background: #F9FAFB;">
-          본 메일은 INVITO 한줄로 시스템에서 자동 발송되었습니다.
-        </div>
-      </div>
-    `;
+    // ★ 2026-09-27 한줄로 V2 R097 — 본문 = 일괄발급과 같은 한줄로 양식(CT). 항목 내역은 첨부 PDF가 담당한다(위 정합 검사는 그대로 발송 전에 건다).
+    const buildHtmlBody = (viewUrl: string | null) => renderBillingMailHtml({
+      companyName: String(bil.company_name || ''),
+      periodLabel: `${bStart} ~ ${bEnd}`,
+      name: bil.contact_name || null,
+      amount: n(bil.total_amount),
+      viewUrl,
+    });
 
     // ★ 2026-07-26 발송 표시와 SMTP를 **한 트랜잭션 안에서, 행 잠금을 든 채로** 한다(Codex 5차 #1·#2 수용).
     //   4차 수정은 표시를 SMTP 앞으로 옮기고 곧바로 COMMIT했다. 그러면 잠금이 발송 전에 풀려서,
@@ -3518,11 +3485,13 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
       let mailTimer: NodeJS.Timeout | undefined;
       await Promise.race([
         transporter.sendMail({
-          from: `"INVITO 정산" <${process.env.SMTP_USER}>`,
+          // ★ 2026-09-27 R097 — 발신자·제목 = 일괄발급과 같은 한줄로 양식(같은 문서 · 거래내역서)
+          from: `"한줄로" <${process.env.SMTP_USER || INVITO_INFO.email}>`,
+          replyTo: INVITO_INFO.email,
           to: sendTo,
           ...(ccList.length > 0 ? { cc: ccList } : {}),
           bcc: process.env.SMTP_BCC || '',
-          subject: subjectOverride || `[INVITO] ${bil.company_name} ${bil.billing_year}년 ${bil.billing_month}월 정산서`,
+          subject: subjectOverride || `[한줄로] ${bil.company_name} 거래내역서 (${bStart.slice(0, 7)}) · 확인 요청`,
           html: htmlBody,
           attachments: [{ filename: pdfFilename, path: pdfPath }],
         }).then((info: any) => {
@@ -3647,62 +3616,23 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
 
     const n = (v: any) => Number(v) || 0;
 
-    // 3) 메일 발송
-    const htmlBody = `
-      <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: linear-gradient(135deg, #4338ca, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
-          <h2 style="color: white; margin: 0; font-size: 20px;">📋 거래내역서 안내</h2>
-          <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px;">${inv.company_name}${inv.store_name ? ` / ${inv.store_name}` : ''} | ${bStart} ~ ${bEnd}</p>
-        </div>
-        <div style="background: #ffffff; padding: 24px; border: 1px solid #E5E7EB; border-top: none;">
-          <p style="font-size: 14px; color: #374151; margin: 0 0 16px;">
-            안녕하세요, ${inv.contact_name || inv.company_name} 담당자님.<br/>
-            <strong>${bStart} ~ ${bEnd}</strong> 기간 거래내역서를 안내드립니다.
-          </p>
-          <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 16px;">
-            ${n(inv.sms_success_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6;">
-              <td style="padding: 8px 0; color: #6B7280;">SMS</td>
-              <td style="padding: 8px 0; text-align: right;">${n(inv.sms_success_count).toLocaleString()}건</td>
-              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.sms_success_count) * n(inv.sms_unit_price)).toLocaleString()}</td>
-            </tr>` : ''}
-            ${n(inv.lms_success_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6;">
-              <td style="padding: 8px 0; color: #6B7280;">LMS</td>
-              <td style="padding: 8px 0; text-align: right;">${n(inv.lms_success_count).toLocaleString()}건</td>
-              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.lms_success_count) * n(inv.lms_unit_price)).toLocaleString()}</td>
-            </tr>` : ''}
-            ${n(inv.mms_success_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6;">
-              <td style="padding: 8px 0; color: #6B7280;">MMS</td>
-              <td style="padding: 8px 0; text-align: right;">${n(inv.mms_success_count).toLocaleString()}건</td>
-              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.mms_success_count) * n(inv.mms_unit_price)).toLocaleString()}</td>
-            </tr>` : ''}
-            ${n(inv.spam_filter_count) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #FEF3C7;">
-              <td style="padding: 8px 0; color: #6B7280;">스팸필터</td>
-              <td style="padding: 8px 0; text-align: right;">${n(inv.spam_filter_count).toLocaleString()}건</td>
-              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(inv.spam_filter_count) * n(inv.spam_filter_unit_price)).toLocaleString()}</td>
-            </tr>` : ''}
-          </table>
-          <div style="background: #EEF2FF; padding: 16px; border-radius: 8px; text-align: right;">
-            <span style="font-size: 13px; color: #6B7280;">공급가액 ₩${n(inv.subtotal).toLocaleString()} + VAT ₩${n(inv.vat).toLocaleString()}</span><br/>
-            <span style="font-size: 20px; font-weight: 700; color: #4338CA;">합계 ₩${n(inv.total_amount).toLocaleString()}</span>
-          </div>
-          <p style="font-size: 13px; color: #9CA3AF; margin-top: 16px;">
-            상세 내역은 첨부된 PDF를 확인해주세요.<br/>
-            문의사항이 있으시면 ${INVITO_INFO.phone}로 연락 부탁드립니다.
-          </p>
-        </div>
-        <div style="padding: 16px; text-align: center; font-size: 11px; color: #9CA3AF; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px; background: #F9FAFB;">
-          본 메일은 INVITO 한줄로 시스템에서 자동 발송되었습니다.
-        </div>
-      </div>
-    `;
+    // 3) 메일 발송 — ★ 2026-09-27 한줄로 V2 R097: 일괄발급과 같은 한줄로 양식(CT · 이 발송은 컨펌 절차가 없어 첨부 안내 문장)
+    const htmlBody = renderBillingMailHtml({
+      companyName: `${inv.company_name}${inv.store_name ? ` / ${inv.store_name}` : ''}`,
+      periodLabel: `${bStart} ~ ${bEnd}`,
+      name: inv.contact_name || null,
+      amount: n(inv.total_amount),
+      viewUrl: null,
+    });
 
     const transporter = getTransporter();
     const invMailInfo: any = await transporter.sendMail({
-      from: `"INVITO 정산" <${process.env.SMTP_USER}>`,
+      from: `"한줄로" <${process.env.SMTP_USER || INVITO_INFO.email}>`,
+      replyTo: INVITO_INFO.email,
       to: invSendTo,
       ...(invTo.cc.length > 0 ? { cc: invTo.cc } : {}),
       bcc: process.env.SMTP_BCC || '',
-      subject: `[INVITO] ${inv.company_name}${inv.store_name ? ` (${inv.store_name})` : ''} 거래내역서 (${bStart} ~ ${bEnd})`,
+      subject: `[한줄로] ${inv.company_name}${inv.store_name ? ` (${inv.store_name})` : ''} 거래내역서 (${bStart} ~ ${bEnd})`,
       html: htmlBody,
       attachments: [{ filename: pdfFilename, path: pdfPath }],
     });

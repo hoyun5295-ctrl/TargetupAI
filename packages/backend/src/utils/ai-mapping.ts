@@ -134,17 +134,34 @@ async function checkQuotaAndReset(companyId: string): Promise<{ limit: number; u
   return { limit, usedBefore: used };
 }
 
-/** 호출 성공 후 카운트 증가 */
-async function incrementQuota(companyId: string): Promise<void> {
+/**
+ * ★ 2026-09-27 한줄로 V2 R358 — 호출 **전에** 한 칸을 원자적으로 선점한다(한도 미만일 때만 +1).
+ *   옛: 확인과 증가 사이에 잠금이 없어 동시 호출이 둘 다 한도 확인을 통과했다. 실패하면 releaseQuota로 반납한다.
+ */
+async function reserveQuota(companyId: string, limit: number): Promise<boolean> {
   const now = currentYearMonth();
-  await query(
+  const r = await query(
     `UPDATE companies
        SET ai_mapping_calls_month = COALESCE(ai_mapping_calls_month, 0) + 1,
            ai_mapping_last_month = $1,
            updated_at = NOW()
-     WHERE id = $2`,
-    [now, companyId]
+     WHERE id = $2
+       AND COALESCE(ai_mapping_calls_month, 0) < $3
+     RETURNING ai_mapping_calls_month`,
+    [now, companyId, limit]
   );
+  return r.rows.length > 0;
+}
+
+/** 선점한 칸 반납 — AI 호출 실패·응답 해석 실패(★ R155)는 쿼터를 먹지 않는다 */
+async function releaseQuota(companyId: string): Promise<void> {
+  await query(
+    `UPDATE companies
+       SET ai_mapping_calls_month = GREATEST(COALESCE(ai_mapping_calls_month, 0) - 1, 0),
+           updated_at = NOW()
+     WHERE id = $1`,
+    [companyId]
+  ).catch((e: any) => console.warn('[AI Mapping] 쿼터 반납 실패:', e?.message));
 }
 
 // ============================================================
@@ -410,8 +427,11 @@ export async function callAiMapping(
     throw new AiMappingUnavailable('컬럼 수가 너무 많습니다 (최대 500개).');
   }
 
-  // 쿼터 체크 (예외 발생 가능)
+  // 쿼터 체크 (예외 발생 가능) + 한 칸 선점(★ R358 — 동시 호출이 한도를 넘지 못하게 호출 전에 원자적으로)
   const { limit, usedBefore } = await checkQuotaAndReset(companyId);
+  if (!(await reserveQuota(companyId, limit))) {
+    throw new AiMappingQuotaExceeded(limit, limit);
+  }
 
   // 1차: MODEL_PRIMARY (Sonnet 5 — defaults.ts 단일 진실)
   let raw: RawCallResult;
@@ -430,6 +450,7 @@ export async function callAiMapping(
       );
     } catch (fallbackErr: any) {
       console.error(`[AI Mapping] 폴백도 실패 (${fallbackErr.status || fallbackErr.message})`);
+      await releaseQuota(companyId);
       throw new AiMappingUnavailable(
         `1차+폴백 모두 실패. Agent 로컬 autoSuggestMapping을 사용하세요.`
       );
@@ -439,12 +460,13 @@ export async function callAiMapping(
   // 응답 파싱
   const rawMapping = parseMappingJson(raw.text);
   if (Object.keys(rawMapping).length === 0) {
-    console.warn('[AI Mapping] 응답 JSON 파싱 실패 — 전체 null 매핑 반환');
+    // ★ 2026-09-27 한줄로 V2 R155 — 해석 실패를 '전부 비어 있음' 성공으로 돌려주지 않는다(쿼터 반납 · 에이전트 로컬 제안으로 넘긴다).
+    console.warn('[AI Mapping] 응답 JSON 파싱 실패 — 쿼터 반납 후 실패 응답');
+    await releaseQuota(companyId);
+    throw new AiMappingUnavailable('AI 응답을 해석하지 못했습니다. Agent 로컬 autoSuggestMapping을 사용하세요.');
   }
   const mapping = sanitizeMapping(rawMapping, input.columns, input.target);
-
-  // 쿼터 증가 (성공 시에만)
-  await incrementQuota(companyId);
+  // (쿼터는 호출 전에 선점했다 — 성공이면 그대로 둔다)
 
   console.log(
     `[AI Mapping] 완료 (company=${companyId}, model=${raw.modelUsed}, used=${usedBefore + 1}/${limit})`

@@ -411,15 +411,25 @@ export const INAPP_BROWSER_VAR_WHITELIST: string[] = [
   'total_purchase_amount', 'purchase_count',
 ];
 
-/** 옛 %변수% 토큰 → customer 객체 키 매핑 (%전화%는 브라우저 동봉 차단으로 의도적 제외) */
-const LEGACY_TOKEN_TO_VAR: Record<string, string> = {
-  '%고객명%': 'name',
-  '%이름%': 'name',
-  '%등급%': 'grade',
-  '%포인트%': 'points',
-  '%지역%': 'region',
-  '%최근구매매장%': 'recent_purchase_store',
-};
+/** 옛 %변수% 토큰 → customer 객체 키 매핑 (%전화%는 브라우저 동봉 차단으로 의도적 제외)
+ *  ★ 2026-09-27 한줄로 V2 R256 — 표준 표기(FIELD_MAP displayName·aliases · %고객등급%·%보유포인트% 등)도 같은 원천에서 더한다.
+ *  옛: %등급%·%포인트%만 알아 표준 표기를 쓴 메시지는 브라우저에 등급·포인트가 동봉되지 않아 치환되지 않은 채 노출됐다. */
+const LEGACY_TOKEN_TO_VAR: Record<string, string> = (() => {
+  const map: Record<string, string> = {
+    '%고객명%': 'name',
+    '%이름%': 'name',
+    '%등급%': 'grade',
+    '%포인트%': 'points',
+    '%지역%': 'region',
+    '%최근구매매장%': 'recent_purchase_store',
+  };
+  for (const f of getColumnFields()) {
+    if (!INAPP_BROWSER_VAR_WHITELIST.includes(f.fieldKey)) continue;
+    map[`%${f.displayName}%`] = f.fieldKey;
+    for (const a of f.aliases || []) map[`%${a}%`] = f.fieldKey;
+  }
+  return map;
+})();
 
 interface UsedVarsMessageLike {
   title?: string | null;

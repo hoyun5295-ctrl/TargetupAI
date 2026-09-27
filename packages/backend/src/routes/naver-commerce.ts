@@ -20,10 +20,11 @@
 import { Router, Request, Response, json } from 'express';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
+import { deliverWebhookToCompanies, extractWebhookResource } from '../utils/cdp-webhook-delivery';
 import {
   connectNaverCommerce,
   getNaverCommerceIntegration,
-  getNaverCommerceIntegrationByStoreId,
+  getNaverCommerceIntegrationsByStoreId,
   verifyNaverCommerceWebhookSignature,
   naverSmartStoreAdapter,
   fetchRecentNaverOrdersPreview,
@@ -51,65 +52,35 @@ router.post(
         return res.status(400).json({ success: false, error: 'X-Naver-Event 또는 store_id가 누락되었습니다.' });
       }
 
-      const integration = await getNaverCommerceIntegrationByStoreId(String(storeId));
-      if (!integration) {
+      // ★ 2026-09-27 한줄로 V2 R098 같은 뿌리 — 같은 스토어가 여러 회사에 연동돼 있으면 서명이 맞는 회사 전부에게 전달한다.
+      const integrations = await getNaverCommerceIntegrationsByStoreId(String(storeId));
+      if (integrations.length === 0) {
         console.warn('[NaverCommerce Webhook] 미연동 store_id, 무시:', storeId);
         return res.status(404).json({ success: false, error: '연동된 store_id가 없습니다.' });
       }
 
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      const isValid = verifyNaverCommerceWebhookSignature(rawBody, signature || '', integration.webhookSecret);
-      if (!isValid) {
+      const targets = integrations.filter((i) => verifyNaverCommerceWebhookSignature(rawBody, signature || '', i.webhookSecret));
+      if (targets.length === 0) {
         console.warn('[NaverCommerce Webhook] 서명 검증 실패, store=', storeId);
         return res.status(401).json({ success: false, error: '서명 검증에 실패했습니다.' });
       }
 
-      const resource = req.body?.resource || req.body || {};
+      const resource = extractWebhookResource('naver_smart_store', req.body || {});
       const idempotencyKey = naverSmartStoreAdapter.buildIdempotencyKey(event, resource, req.body || {});
 
-      const insertRes = await query(
-        `INSERT INTO cdp_webhook_deliveries (
-          id, company_id, source, webhook_event, idempotency_key, payload, status, retry_count, created_at
-        ) VALUES (
-          gen_random_uuid(), $1::uuid, 'naver_smart_store', $2, $3, $4::jsonb, 'received', 0, NOW()
-        )
-        ON CONFLICT (company_id, source, idempotency_key) DO NOTHING
-        RETURNING id`,
-        [integration.companyId, event, idempotencyKey, JSON.stringify(req.body || {})]
-      );
-
-      if (insertRes.rows.length === 0) {
-        // 2026-06-10 정정: updated_at은 cdp_webhook_deliveries에 없는 컬럼(실측) — 포함 시 중복 응답이 전부 500
-        await query(
-          `UPDATE cdp_webhook_deliveries
-           SET status = 'duplicate', processed_at = NOW()
-           WHERE company_id = $1::uuid AND source = 'naver_smart_store' AND idempotency_key = $2
-           -- ★ 2026-09-26 한줄로 V2 R1-02 — 처리 완료 행만 중복 표시(실패 행을 덮으면 재처리 워커 대상에서 빠져 이벤트가 유실됐다)
-           AND status = 'processed'`,
-          [integration.companyId, idempotencyKey]
-        );
-        return res.json({ success: true, duplicate: true });
-      }
-
-      const deliveryId = insertRes.rows[0].id;
-
-      try {
-        await naverSmartStoreAdapter.processWebhookEvent(integration.companyId, event, resource);
-        await query(
-          `UPDATE cdp_webhook_deliveries SET status = 'processed', processed_at = NOW() WHERE id = $1::uuid`,
-          [deliveryId]
-        );
-        return res.json({ success: true });
-      } catch (processErr: any) {
-        console.error('[NaverCommerce Webhook] 이벤트 처리 실패:', processErr);
-        await query(
-          `UPDATE cdp_webhook_deliveries
-           SET status = 'failed', error_message = $2, processed_at = NOW()
-           WHERE id = $1::uuid`,
-          [deliveryId, String(processErr?.message || 'unknown').slice(0, 1000)]
-        );
-        return res.json({ success: false, error: '이벤트 처리 실패' });
-      }
+      const outcome = await deliverWebhookToCompanies({
+        source: 'naver_smart_store',
+        companyIds: targets.map((i) => i.companyId),
+        event,
+        idempotencyKey,
+        payload: req.body || {},
+        process: (companyId) => naverSmartStoreAdapter.processWebhookEvent(companyId, event, resource),
+        logTag: 'NaverCommerce',
+      });
+      if (outcome.failed > 0) return res.json({ success: false, error: '이벤트 처리 실패' });
+      if (outcome.processed === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
+      return res.json({ success: true });
     } catch (err: any) {
       console.error('[NaverCommerce Webhook] 오류:', err);
       return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });

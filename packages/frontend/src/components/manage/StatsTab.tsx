@@ -605,7 +605,7 @@ export default function StatsTab() {
                               <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
                                 t.testType === 'spam_filter' ? 'bg-violet-100 text-violet-700' : 'bg-orange-100 text-orange-700'
                               }`}>
-                                {t.testType === 'spam_filter' ? '스팸필터' : '담당자'}
+                                {t.testType === 'spam_filter' ? `스팸필터${t.billable === false ? ' · 무료' : ''}` : '담당자'}
                               </span>
                             </td>
                             <td className="px-4 py-2.5 font-mono text-xs text-slate-600">{t.phone}</td>

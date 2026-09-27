@@ -19,14 +19,14 @@
  *   - 발신 도메인 = 회사 admin 본인 도메인 (한줄로 도메인 사용 X — SaaS 핵심)
  */
 
-import { query } from '../config/database';
-import { sendEmail, isSmtpConfigured, getSmtpConfigPublic } from './company-smtp-client';
+import { query, pool } from '../config/database';
+import { isPermanentSmtpRejection, sendEmail, isSmtpConfigured, getSmtpConfigPublic } from './company-smtp-client';
 import { applyTracking, buildUnsubscribeUrl, UNSUB_URL_MARKER } from './email-tracking';
 import { logCampaignTraining, updateTrainingMetrics, getSourceRef } from './training-logger';
 import { buildEmailTrainingMessage } from './email-training-message';
 // ★ 2026-09-16 `esc` = 렌더러가 소유한 이메일 HTML 이스케이프 CT. 법정 footer의 발신자 값도 같은 규칙을 쓴다.
 import { renderEmailSections, EMAIL_FOOTER_SLOT, esc as escapeEmailText } from './email/email-section-renderer';
-import { resolveEmailSectionsForCustomer, renderEmailText } from './email/email-personalization';
+import { resolveEmailSectionsForCustomer, renderEmailTextKeepingTokens } from './email/email-personalization';
 import type { EmailDesign } from './email/email-tokens';
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
 import { buildCustomerFilter } from './customer-filter';
@@ -491,20 +491,28 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
           // 섹션 캠페인 = 수신자별 개인화 렌더(변수+조건부). 섹션 없으면 기존 html_body 경로(무회귀).
           let personalizedHtml: string;
           let personalizedSubject: string;
+          // ★ 2026-09-27 한줄로 V2 R404(Codex 차수3 2R) — 고객 변수 렌더는 값 삽입({{이름}}·substitutions)보다 먼저.
+          //   남길 토큰 = {{이름}}·substitutions 키·수신거부 마커(아래에서 값·URL을 넣는다 · 넣은 값은 다시 파싱하지 않는다).
+          const keepKeys = ['이름', UNSUB_URL_MARKER.slice(2, -2), ...Object.keys(recipient.substitutions || {})];
           if (hasSections) {
             const cust = recipient.customer || { name: recipient.name || '고객' };
             const resolved = resolveEmailSectionsForCustomer(campaignSections, cust);
             let body = renderEmailSections(resolved, { brandKit, design: campaign.design, publicBase: process.env.PUBLIC_BASE_URL });
             body = injectFooter(body, campaign.isAd && !hasUnsubLink(body) ? adFooter : '');
             personalizedHtml = body;
-            personalizedSubject = renderEmailText(finalSubject, cust);
+            personalizedSubject = renderEmailTextKeepingTokens(finalSubject, cust, keepKeys);
+          } else if (recipient.customer) {
+            // 섹션 없는 직접 HTML — HTML에는 이스케이프한 고객 사본(값이 <!-- 이면 뒤의 수신거부 안내가 주석으로 숨는다) · 제목은 원문.
+            personalizedHtml = renderEmailTextKeepingTokens(finalHtml, escapeCustomerForHtml(recipient.customer), keepKeys);
+            personalizedSubject = renderEmailTextKeepingTokens(finalSubject, recipient.customer, keepKeys);
           } else {
             personalizedHtml = finalHtml;
             personalizedSubject = finalSubject;
           }
           // ★ 2026-09-27 R227 — 텍스트 본문도 수신자별로 만든다(옛 코드는 원문 그대로 붙여 {{변수}}가 보이고 광고 표기가 빠졌다).
+          const textCust = hasSections ? (recipient.customer || { name: recipient.name || '고객' }) : recipient.customer;
           let personalizedText: string | undefined = campaign.textBody
-            ? (hasSections ? renderEmailText(campaign.textBody, recipient.customer || { name: recipient.name || '고객' }) : campaign.textBody)
+            ? (textCust ? renderEmailTextKeepingTokens(campaign.textBody, textCust, keepKeys) : campaign.textBody)
             : undefined;
           // 개인화 변수 치환 (substitutions {{변수}} 패턴 — 수동 HTML backward compat)
           if (recipient.substitutions) {
@@ -517,7 +525,9 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
           }
           // {{이름}} 기본 개인화 — 이름 없는 수신자도 토큰 원문이 남지 않게 '고객' fallback
           const nameForToken = recipient.name || '고객';
-          personalizedHtml = personalizedHtml.replace(/\{\{\s*이름\s*\}\}/g, nameForToken);
+          // ★ 2026-09-27 한줄로 V2 R404(Codex 차수3 1R) — HTML에 들어가는 고객 값은 이스케이프(값이 <!-- 이면 뒤의 수신거부 안내가 주석으로 숨는다).
+          //   제목·텍스트 본문은 HTML이 아니라 원문 그대로.
+          personalizedHtml = personalizedHtml.replace(/\{\{\s*이름\s*\}\}/g, escapeEmailText(nameForToken));
           personalizedSubject = personalizedSubject.replace(/\{\{\s*이름\s*\}\}/g, nameForToken);
           if (personalizedText) personalizedText = personalizedText.replace(/\{\{\s*이름\s*\}\}/g, nameForToken);
 
@@ -574,6 +584,17 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
         } catch (sendErr: any) {
           totalRejected += 1;
           console.warn(`[Email] 개별 발송 실패 (${recipient.email}): ${sendErr?.message}`);
+          // ★ 2026-09-27 한줄로 V2 R228 — 수신 서버가 주소를 영구 거부(받는 사람 단계 5xx)하면 반송으로 기록한다
+          //   (반송률·무효 주소 발송 중단의 근거 · 반송 자동 처리는 recordEmailEvent가 소유). 일시 오류·인증 오류는 기록하지 않는다.
+          if (isPermanentSmtpRejection(sendErr)) {
+            await recordEmailEvent({
+              campaignId: campaign.id,
+              email: recipient.email,
+              eventType: 'bounce',
+              reason: String(sendErr?.response || sendErr?.message || 'SMTP 거부').slice(0, 300),
+              occurredAt: new Date(),
+            }).catch((bErr: any) => console.warn(`[Email] 반송 기록 실패 (${recipient.email}): ${bErr?.message}`));
+          }
         }
       }
       // batch 완료마다 sent_count + updated_at 갱신 — 진행 폴링 + sweeper 정체 감지(살아있음 신호)
@@ -648,14 +669,6 @@ export interface EmailEventInput {
 
 export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
   const { campaignId, email, eventType, url, reason, occurredAt } = input;
-  await query(
-    `INSERT INTO email_events (
-      id, campaign_id, email, event_type, url, reason, occurred_at, auto_processed, created_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, false, NOW()
-    )`,
-    [campaignId, email, eventType, url || null, reason || null, occurredAt]
-  );
 
   // 캠페인 통계 갱신 — 고유 수신자 1회만 카운트 (같은 사람 반복 오픈/클릭에 카운터 부풀림 차단 → 오픈율 100% 초과 방지).
   //   delivered = 카운터 없음. open/click/unsubscribe/bounce = 해당 email 첫 이벤트일 때만 +1.
@@ -669,19 +682,41 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
     delivered: null,
   }[eventType];
 
-  if (column) {
-    // INSERT 직후 이 (campaign, email, event_type) 누적 건수 = 1 이면 첫 발생 → 카운터 증가.
-    const dupCheckTypes = eventType === 'spam_report' ? ['spam_report'] : eventType === 'dropped' ? ['dropped'] : [eventType];
-    const cntRes = await query(
-      `SELECT COUNT(*)::int AS n FROM email_events WHERE campaign_id = $1::uuid AND email = $2 AND event_type = ANY($3)`,
-      [campaignId, email, dupCheckTypes]
+  // ★ 2026-09-27 한줄로 V2 R121 — 첫 발생 판정과 적재·카운터를 (캠페인·주소·유형) 잠금 안에서 한 번에 한다.
+  //   옛: 적재 뒤 캠페인 전체를 COUNT(캠페인 선두 인덱스라 전체 스캔)하고 잠금 없이 +1이라, 동시 오픈이면 고유 오픈이 빠지거나 두 번 셌다.
+  //   이제: 있는지 1행만 확인(LIMIT 1) · 같은 키의 동시 요청은 잠금에서 줄을 선다.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`email-evt:${campaignId}:${String(email).toLowerCase()}:${eventType}`]);
+    let firstOccurrence = false;
+    if (column) {
+      const seen = await client.query(
+        `SELECT 1 FROM email_events WHERE campaign_id = $1::uuid AND email = $2 AND event_type = $3 LIMIT 1`,
+        [campaignId, email, eventType]
+      );
+      firstOccurrence = seen.rows.length === 0;
+    }
+    await client.query(
+      `INSERT INTO email_events (
+        id, campaign_id, email, event_type, url, reason, occurred_at, auto_processed, created_at
+      ) VALUES (
+        gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, false, NOW()
+      )`,
+      [campaignId, email, eventType, url || null, reason || null, occurredAt]
     );
-    if ((cntRes.rows[0]?.n || 0) <= 1) {
-      await query(
+    if (column && firstOccurrence) {
+      await client.query(
         `UPDATE email_campaigns SET ${column} = ${column} + 1, updated_at = NOW() WHERE id = $1::uuid`,
         [campaignId]
       );
     }
+    await client.query('COMMIT');
+  } catch (txErr) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw txErr;
+  } finally {
+    client.release();
   }
 
   // ★ D210+ Phase 3 B-5 (Harold 명시 2026-05-23): bounce / spam / unsubscribe 자동 처리
@@ -764,6 +799,23 @@ export async function listEmailPersonalizationVars(companyId: string): Promise<E
   return profile.safeFields
     .filter((f) => allowed.has(f.field))
     .map((f) => ({ field: f.field, token: `{{ ${f.liquidVar} }}`, label: f.label }));
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R404(Codex 차수3 1R) — 직접 HTML 개인화용 고객 사본: 문자열 값을 HTML 이스케이프한다
+ *   (custom_fields 한 단계 안까지 — flattenCustomerForLiquid가 펴는 범위). 섹션 경로는 렌더러가 esc로 같은 일을 한다.
+ */
+function escapeCustomerForHtml(customer: Record<string, any>): Record<string, any> {
+  const escValue = (v: any) => (typeof v === 'string' ? escapeEmailText(v) : v);
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(customer || {})) {
+    if (k === 'custom_fields' && v && typeof v === 'object' && !Array.isArray(v)) {
+      out[k] = Object.fromEntries(Object.entries(v).map(([ck, cv]) => [ck, escValue(cv)]));
+    } else {
+      out[k] = escValue(v);
+    }
+  }
+  return out;
 }
 
 /** customers row → EmailRecipient(+개인화 customer). 등급/필터 해석 공용 매핑. */

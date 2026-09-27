@@ -21,6 +21,10 @@ import { authenticate } from '../middlewares/auth';
 import { callAIWithFallback } from '../services/ai';
 import { aiLimitCountedSql, getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
 import { getCacheStats } from '../utils/ai-cache';
+import { kstDateString } from '../utils/planner-execution';
+
+/** ★ 2026-09-27 한줄로 V2 R074 — 사용량 일평균·예측의 창(일). 일평균 = 이 창의 합 ÷ 이 일수(호출 없는 날도 0으로 센다). */
+const USAGE_WINDOW_DAYS = 30;
 
 const router = Router();
 router.use(authenticate);
@@ -51,8 +55,8 @@ router.get('/overview', async (req: Request, res: Response) => {
 
     const [monthly, daily, breakdown] = await Promise.all([
       getMonthlyUsage(companyId),
-      getDailyUsage(companyId, 30),
-      getModelBreakdown(companyId, 30),
+      getDailyUsage(companyId, USAGE_WINDOW_DAYS),
+      getModelBreakdown(companyId, USAGE_WINDOW_DAYS),
     ]);
     const cache = getCacheStats(companyId);   // ★ 2026-09-27 R073 — 그 회사 몫만
 
@@ -72,7 +76,8 @@ router.get('/overview', async (req: Request, res: Response) => {
     })).sort((a, b) => b.count - a.count);
 
     // 일평균 + 한도 도달 예상일 (선형 추정)
-    const dailyAvg = daily.length > 0 ? daily.reduce((s, d) => s + d.count, 0) / daily.length : 0;
+    // ★ 2026-09-27 한줄로 V2 R074 — 최근 30일 합 ÷ 30(옛: 호출 있는 날 수로 나눠 부풀었다 · 한도 도달 예상일이 당겨졌다)
+    const dailyAvg = daily.reduce((s, d) => s + d.count, 0) / USAGE_WINDOW_DAYS;
     let predictedDaysToLimit: number | null = null;
     if (monthly.limit !== null && monthly.limit > 0 && dailyAvg > 0) {
       const remaining = Math.max(0, monthly.limit - monthly.used);
@@ -80,12 +85,17 @@ router.get('/overview', async (req: Request, res: Response) => {
     }
 
     // 전월 대비 격차 — 이번 달(getMonthlyUsage)과 같은 기준(한도에 세는 호출 · ★2026-09-25 면제 source 제외)
+    // ★ 2026-09-27 한줄로 V2 R074 — 지난달 **같은 기간**(1일 ~ 이번 달 경과 시간만큼)과 비교한다.
+    //   옛: 이번 달 누계를 지난달 전체와 비교해 월초엔 늘 크게 줄어든 것처럼 보였다. 지난달이 짧으면 지난달 끝에서 멈춘다.
     const prevMonthRes = await query(
       `SELECT COUNT(*)::int AS cnt
        FROM ai_call_log
        WHERE company_id = $1::uuid
          AND called_at >= (date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') - INTERVAL '1 month') AT TIME ZONE 'Asia/Seoul'
-         AND called_at <  date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
+         AND called_at <  LEAST(
+               ((date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') - INTERVAL '1 month') AT TIME ZONE 'Asia/Seoul')
+                 + (NOW() - (date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')),
+               date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')
          AND ${aiLimitCountedSql()}`,
       [companyId],
     );
@@ -187,7 +197,7 @@ router.get('/forecast', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
 
-    const daily = await getDailyUsage(companyId, 30);
+    const daily = await getDailyUsage(companyId, USAGE_WINDOW_DAYS);
     if (daily.length === 0) {
       return res.json({
         success: true,
@@ -198,8 +208,14 @@ router.get('/forecast', async (req: Request, res: Response) => {
       });
     }
 
-    // 오름차순 정렬 (옛 데이터는 DESC) — 선형 회귀 정합
-    const sorted = [...daily].reverse();
+    // 오름차순 · 호출 없는 날 0 — KST 오늘까지 창 일수 전부(★ 2026-09-27 R074 같은 뿌리 · 옛: 호출 있는 날만 이어 붙여
+    //   빈 날이 빠진 채 순번을 x로 회귀하고 평균도 호출 있는 날 수로 나눴다)
+    const byDate = new Map(daily.map((d) => [d.date, d]));
+    const sorted = Array.from({ length: USAGE_WINDOW_DAYS }, (_v, k) => {
+      const date = kstDateString(new Date(Date.now() - (USAGE_WINDOW_DAYS - 1 - k) * 86_400_000));
+      const hit = byDate.get(date);
+      return { date, count: hit ? Number(hit.count) || 0 : 0, cost: hit ? Number(hit.cost) || 0 : 0 };
+    });
     const n = sorted.length;
     const counts = sorted.map((d) => d.count);
     const costs = sorted.map((d) => d.cost);
@@ -232,16 +248,13 @@ router.get('/forecast', async (req: Request, res: Response) => {
       });
     }
 
-    // 향후 30일 예측 (오름차순 추가)
-    const todayKst = new Date();
-    todayKst.setHours(0, 0, 0, 0);
+    // 향후 30일 예측 (오름차순 추가) — 날짜는 위 시계열과 같은 KST 축
     for (let d = 1; d <= 30; d++) {
       const xIdx = n - 1 + d;
       const predictedCalls = Math.max(0, Math.round(slope * xIdx + intercept));
       const costRatio = avgCallsHistory > 0 ? avgCost / avgCallsHistory : 0;
       const predictedCost = Math.round(predictedCalls * costRatio);
-      const futureDate = new Date(todayKst.getTime() + d * 86_400_000);
-      const dateStr = `${futureDate.getFullYear()}-${String(futureDate.getMonth() + 1).padStart(2, '0')}-${String(futureDate.getDate()).padStart(2, '0')}`;
+      const dateStr = kstDateString(new Date(Date.now() + d * 86_400_000));
       forecast.push({
         date: dateStr,
         predicted_calls: predictedCalls,

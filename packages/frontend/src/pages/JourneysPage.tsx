@@ -879,8 +879,10 @@ export default function JourneysPage() {
         headers: { Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
-      if (data.success && Array.isArray(data.steps)) {
-        setStatsMap((prev) => ({ ...prev, [journeyId]: data.steps }));
+      // ★ 2026-09-27 한줄로 V2 R273 — 응답은 { success, stats }(stats.steps). 옛: 최상위 steps를 읽어 늘 거짓 → 스텝 통계가 안 나오고 펼칠 때마다 재조회.
+      const steps = data?.stats?.steps;
+      if (data.success && Array.isArray(steps)) {
+        setStatsMap((prev) => ({ ...prev, [journeyId]: steps }));
       }
     } catch {}
   };

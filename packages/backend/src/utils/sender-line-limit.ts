@@ -136,6 +136,16 @@ export function isLineLimitSchemaMissing(err: any): boolean {
  * ⚠ 보유 수는 유선/무선을 나눠 센다. 번호 판별은 DB가 아니라 여기서 한다 —
  *   판별 규칙이 SQL과 코드 두 곳에 흩어지면 조용히 갈린다.
  */
+/**
+ * ★ 2026-09-27 한줄로 V2 R279 — 관리자 입력 회선 수 상한 해석(순수). 비움 = 제한 없음(null) · 1 이상 = 그 값(정수) · 그 밖 = 거절.
+ */
+export function parseLineLimitInput(v: any): { ok: true; value: number | null } | { ok: false } {
+  if (v === null || v === undefined || String(v).trim() === '') return { ok: true, value: null };
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1) return { ok: false };
+  return { ok: true, value: Math.floor(n) };
+}
+
 export async function checkSenderLineLimit(companyId: string, phone: string): Promise<LineLimitVerdict> {
   const companyRes = await query(
     'SELECT subscriber_type, mobile_line_limit, landline_line_limit FROM companies WHERE id = $1',

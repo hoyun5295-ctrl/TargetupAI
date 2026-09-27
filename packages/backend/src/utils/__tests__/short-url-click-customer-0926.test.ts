@@ -50,7 +50,8 @@ describe('trackEvent knownCustomerId', () => {
     expect(call[1][2]).toBeNull();
     expect(call[1][7]).toBe(CUST);
     expect(r.customerId).toBe(CUST);
-    expect(recomputeMock).toHaveBeenCalledWith(CO, CUST);
+    // ★ 2026-09-27 차수 3 R181 — 프로필 재계산은 5분 증분 워커가 한다(이벤트마다 즉시 재계산하지 않는다)
+    expect(recomputeMock).not.toHaveBeenCalled();
   });
 
   it('고객이 그 회사에 없으면(하위 조회 NULL) 고객 없이 기록한다', async () => {

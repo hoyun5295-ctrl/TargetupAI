@@ -20,6 +20,7 @@
 
 import crypto from 'crypto';
 import { query } from '../../config/database';
+import { clampPageReached, clampTotalPages, clampDurationDelta, sanitizeSectionInteractions, mergeSectionInteractions } from './dm-tracking';
 
 // ────────────── 타입 ──────────────
 
@@ -442,36 +443,70 @@ export async function aggregateResults(
  * A/B 테스트용 뷰 기록.
  * (기존 trackDmView는 dm_id 단위이므로 ab_test_id 컬럼도 함께 채움)
  */
-export async function trackAbTestView(
-  abTestId: string,
-  variant: AbVariantKey,
-  dmPageId: string,
-  companyId: string,
-  phone: string | null,
-  pageReached: number,
-  totalPages: number,
-  duration: number,
-  ip: string | null,
-  userAgent: string | null,
-): Promise<void> {
+export async function trackAbTestView(input: {
+  abTestId: string;
+  variant: AbVariantKey;
+  dmPageId: string;
+  companyId: string;
+  phone: string | null;
+  anonymousId: string | null;
+  pageReached: any;
+  totalPages: any;
+  durationDelta: any;
+  sectionDelta: any;
+  isInit: boolean;
+  ip: string | null;
+  userAgent: string | null;
+}): Promise<void> {
+  // ★ 2026-09-27 한줄로 V2 R120 — 방문 1회 = 1행에 비콘(진입·체류·이탈) 증가분을 합친다(일반 DM trackDmView와 같은 규칙).
+  //   옛: 뷰어 비콘이 일반 DM 추적 주소로 가서 A/B 기록엔 첫 조회(1쪽·0초)만 남아 승자 판정이 사실상 방문 수였다.
+  const pageReached = clampPageReached(input.pageReached);
+  const totalPages = clampTotalPages(input.totalPages);
+  const durationDelta = clampDurationDelta(input.durationDelta);
+  const sectionDelta = sanitizeSectionInteractions(input.sectionDelta);
+  const hasSectionDelta = Object.keys(sectionDelta).length > 0;
+  const anonymousId = input.anonymousId ? String(input.anonymousId).slice(0, 100) : null;
+  const phone = input.phone ? String(input.phone).slice(0, 20) : null;
+
+  if (anonymousId) {
+    const ex = await query(
+      `SELECT id, section_interactions FROM dm_views
+        WHERE ab_test_id = $1 AND dm_id = $2 AND anonymous_id = $3
+        ORDER BY viewed_at DESC LIMIT 1`,
+      [input.abTestId, input.dmPageId, anonymousId],
+    );
+    const existing = ex.rows[0];
+    if (existing) {
+      const merged = hasSectionDelta ? mergeSectionInteractions(existing.section_interactions, sectionDelta) : null;
+      await query(
+        `UPDATE dm_views SET
+           page_reached = GREATEST(page_reached, $1),
+           total_pages = GREATEST(total_pages, $2),
+           duration_seconds = duration_seconds + $3,
+           section_interactions = COALESCE($4::jsonb, section_interactions),
+           phone = COALESCE(phone, $5),
+           last_active_at = NOW()
+         WHERE id = $6`,
+        [pageReached, totalPages, durationDelta, merged ? JSON.stringify(merged) : null, phone, existing.id],
+      );
+      return;
+    }
+  } else if (!input.isInit) {
+    // 방문 식별자가 없는 하트비트는 어느 방문인지 몰라 새 행을 만들지 않는다(방문 수 부풀림 차단)
+    return;
+  }
+
   await query(
     `INSERT INTO dm_views (
-       dm_id, company_id, phone, page_reached, total_pages,
-       duration_seconds, ip, user_agent,
+       dm_id, company_id, phone, anonymous_id, page_reached, total_pages,
+       duration_seconds, section_interactions, ip, user_agent,
        ab_test_id, ab_variant
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
     [
-      dmPageId,
-      companyId,
-      phone,
-      pageReached,
-      totalPages,
-      duration,
-      ip,
-      userAgent,
-      abTestId,
-      variant,
+      input.dmPageId, input.companyId, phone, anonymousId, pageReached, totalPages,
+      durationDelta, hasSectionDelta ? JSON.stringify(sectionDelta) : null, input.ip, input.userAgent,
+      input.abTestId, input.variant,
     ],
   );
 }

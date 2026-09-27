@@ -317,10 +317,17 @@ export async function importPresetWinners(companyId: string, dmId: string, secti
       );
       responseId = rr.rows[0]?.id || null;
     }
+    // ★ 2026-09-27 한줄로 V2 R217 — 응답과 연결되지 않은 당첨자(response_id NULL)는 유니크 인덱스가 막지 못해
+    //   같은 엑셀을 다시 올리면 또 들어갔다 → 같은 DM·섹션·번호의 사전 당첨자가 있으면 건너뛴다.
     const r = await query(
       `INSERT INTO dm_winners
          (company_id, campaign_id, section_id, response_id, customer_id, rank, win_method, winner_name, winner_phone, winner_email, is_member)
-       VALUES ($1, $2, $3, $4, $5, $6, 'preset', $7, $8, $9, $10)
+       SELECT $1, $2, $3, $4, $5, $6, 'preset', $7, $8, $9, $10
+        WHERE NOT EXISTS (
+          SELECT 1 FROM dm_winners
+           WHERE company_id = $1 AND campaign_id = $2
+             AND section_id IS NOT DISTINCT FROM $3 AND win_method = 'preset' AND winner_phone IS NOT DISTINCT FROM $8
+        )
        ON CONFLICT (response_id) WHERE response_id IS NOT NULL DO NOTHING
        RETURNING id`,
       [companyId, dmId, sectionId || null, responseId, cust, w.rank, w.name, w.phone, w.email, !!cust],
@@ -435,8 +442,11 @@ export async function loadDrawableLuckyDraws(): Promise<DrawableCampaign[]> {
 }
 
 /** 원자적 claim — 0행이면 이미 다른 사이클이 추첨함(중복 추첨 차단). */
-export async function claimDrawRun(campaignId: string, sectionId: string, seed: string): Promise<boolean> {
-  const r = await query(
+/** ★ 2026-09-27 R219 — 추첨 한 건을 한 트랜잭션에서 돌리려고 쿼리 실행기를 받는다(기본 = 풀) */
+type DrawQuery = (sql: string, params?: any[]) => Promise<any>;
+
+export async function claimDrawRun(campaignId: string, sectionId: string, seed: string, q: DrawQuery = query): Promise<boolean> {
+  const r = await q(
     `INSERT INTO dm_draw_runs (campaign_id, section_id, seed) VALUES ($1, $2, $3)
      ON CONFLICT (campaign_id) DO NOTHING RETURNING campaign_id`,
     [campaignId, sectionId, seed],
@@ -444,14 +454,14 @@ export async function claimDrawRun(campaignId: string, sectionId: string, seed: 
   return r.rows.length > 0;
 }
 
-export async function loadDrawEntriesAndPrizes(companyId: string, campaignId: string, sectionId: string): Promise<{ entries: DrawEntry[]; prizes: RankPrize[] }> {
-  const er = await query(
+export async function loadDrawEntriesAndPrizes(companyId: string, campaignId: string, sectionId: string, q: DrawQuery = query): Promise<{ entries: DrawEntry[]; prizes: RankPrize[] }> {
+  const er = await q(
     `SELECT id, COALESCE(customer_id::text, anonymous_id) AS key FROM dm_event_responses
      WHERE company_id = $1 AND campaign_id = $2 AND section_id = $3 AND section_type = 'lucky_draw'`,
     [companyId, campaignId, sectionId],
   );
   const entries: DrawEntry[] = er.rows.filter((x: any) => x.key).map((x: any) => ({ responseId: x.id, key: x.key }));
-  const pr = await query(
+  const pr = await q(
     `SELECT id, rank, total_count FROM dm_prizes
      WHERE company_id = $1 AND campaign_id = $2 AND section_id = $3 AND win_method = 'random'`,
     [companyId, campaignId, sectionId],
@@ -460,13 +470,13 @@ export async function loadDrawEntriesAndPrizes(companyId: string, campaignId: st
   return { entries, prizes };
 }
 
-export async function persistDrawWinners(companyId: string, campaignId: string, sectionId: string, winners: DrawnWinner[], entryCount: number): Promise<number> {
+export async function persistDrawWinners(companyId: string, campaignId: string, sectionId: string, winners: DrawnWinner[], entryCount: number, q: DrawQuery = query): Promise<number> {
   let inserted = 0;
   for (const w of winners) {
-    const rr = await query(`SELECT customer_id, response_data FROM dm_event_responses WHERE id = $1`, [w.responseId]);
+    const rr = await q(`SELECT customer_id, response_data FROM dm_event_responses WHERE id = $1`, [w.responseId]);
     const row: any = rr.rows[0] || {};
     const rd: any = row.response_data || {};
-    const r = await query(
+    const r = await q(
       `INSERT INTO dm_winners
          (company_id, campaign_id, section_id, prize_id, response_id, customer_id, rank, win_method, winner_name, winner_phone, winner_email, is_member)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'random', $8, $9, $10, $11)
@@ -476,17 +486,31 @@ export async function persistDrawWinners(companyId: string, campaignId: string, 
     );
     if (r.rows.length > 0) inserted++;
   }
-  await query(`UPDATE dm_draw_runs SET entry_count = $2, winner_count = $3 WHERE campaign_id = $1`, [campaignId, entryCount, inserted]);
+  await q(`UPDATE dm_draw_runs SET entry_count = $2, winner_count = $3 WHERE campaign_id = $1`, [campaignId, entryCount, inserted]);
   return inserted;
 }
 
 /** 마감 추첨 1건 처리(워커 호출). seed = campaignId:drawAt(결정적·감사). */
 export async function runLuckyDrawForCampaign(c: DrawableCampaign): Promise<{ drawn: boolean; winners: number; entries: number }> {
   const seed = `${c.campaignId}:${c.drawAt}`;
-  const claimed = await claimDrawRun(c.campaignId, c.sectionId, seed);
-  if (!claimed) return { drawn: false, winners: 0, entries: 0 };
-  const { entries, prizes } = await loadDrawEntriesAndPrizes(c.companyId, c.campaignId, c.sectionId);
-  const winners = drawWinners(entries, prizes, seed);
-  const inserted = await persistDrawWinners(c.companyId, c.campaignId, c.sectionId, winners, entries.length);
-  return { drawn: true, winners: inserted, entries: entries.length };
+  // ★ 2026-09-27 한줄로 V2 R219 — 실행 권리 선점 · 참가자·경품 조회 · 당첨자 적재를 한 트랜잭션으로.
+  //   옛: 권리를 먼저 커밋하고 적재를 트랜잭션 밖에서 해, 중간에 실패하면 권리만 남아 다시 돌지 않았다(추첨 누락).
+  //   이제 실패 = 권리도 되돌아가 다음 주기에 다시 돈다. 동시 실행은 권리 행 유니크(ON CONFLICT)가 막는다.
+  const client = await pool.connect();
+  const q: DrawQuery = (sql, params) => client.query(sql, params);
+  try {
+    await client.query('BEGIN');
+    const claimed = await claimDrawRun(c.campaignId, c.sectionId, seed, q);
+    if (!claimed) { await client.query('ROLLBACK'); return { drawn: false, winners: 0, entries: 0 }; }
+    const { entries, prizes } = await loadDrawEntriesAndPrizes(c.companyId, c.campaignId, c.sectionId, q);
+    const winners = drawWinners(entries, prizes, seed);
+    const inserted = await persistDrawWinners(c.companyId, c.campaignId, c.sectionId, winners, entries.length, q);
+    await client.query('COMMIT');
+    return { drawn: true, winners: inserted, entries: entries.length };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }

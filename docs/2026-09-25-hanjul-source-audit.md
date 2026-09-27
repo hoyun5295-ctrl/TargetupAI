@@ -588,6 +588,37 @@ m004(성립 · 처방이 정책) 7305(카카오 성공 불확실) 대기·실패
 | 6R | **approve**(지적 없음) | CRASH·SQ 묶음 Codex 종결(critical·high 0) · backend tsc 0 · vitest 461파일 6,279건 |
 
 뿌리 = MySQL 큐 행에 시도 식별자가 없다(29컬럼에 빈 칸 없음 · bill_id = 사용자·발신자 · sender_code = 중계 에이전트). 추정으로 메우면 매번 새 구멍이 난다 — 증명 안 되면 보류·종료로 닫는다.
+
+**차수 3 실행 기록 (0927 · Harold 「추천대로 진행해 차수 3 수정까지 마무리 · 배포명령어 제시」 · 미커밋·미배포)**
+
+| 묶음 | 처리 | 검증 |
+|---|---|---|
+| ① 발송·돈 | m093 여정 문자 유형 = QTmsg 코드 · 단문 제목 비움 · MMS 첨부 절대경로(직접발송과 같은 CT) · R103 웹 푸시 회사 잠금 + 발송 중·같은 내용 10분 거절(409) · R247 플래너 인앱 트리거 = AI 조건 · R258 A/B 승자 = 부모 가중치 0(정지 대신) · R257 변형의 변형 거절(AI 호출 전) · R246 인앱 AI 성공 뒤 차감 · R082 근거 질의 칸 정정 + 월 한도·기록·크레딧 5 · R197 운영자 예산 창 KST · R198 수동 승인 실측 기록 · m107 자율 발송 패스 먼저 | tier3-a 12 · Codex 1R(medium 2: MMS 첨부 · 한도 기록) → **2R approve** |
+| ② 데이터 | R144 헤더·행 나누기 CT 3경로 · R145 타입 감지 열 위치 · 못 알아내면 기존 타입 유지 · R367 업종 예시·공식 한 트랜잭션 · R127 원본 소비는 용량 통과 뒤 · R241 내부 프롬프트 비저장·목록 제외 · R245 비회원 주문 외부 id CT(4몰) · R179 브라우저 적재 = 방문자 단위 제한 · R346 싱크 금액 0 보존 · R219 마감 추첨 한 트랜잭션 · R217 사전 당첨자 중복 건너뜀 | tier3-b 13 |
+| ③ 기능 고장 | R071 수동 등록 'APPROVED'(+ 옛 「frontend 미사용」 주석 정정) · R192 크레딧 정지 운영자 로더 포함 + 재개 = 발송 크레딧 엄격 확인(`hasCreditForStrict` · 차감과 같은 허용 한도 `creditOverageAllowance`·`carriedBaseOnReset` 추출) · R194 리마인드는 회차 만료 제외 · R090 캐시 collected_data · R273 stats.steps · R404 직접 HTML 고객 변수(값 삽입 전 렌더 `renderEmailTextKeepingTokens` · HTML 사본 이스케이프 · {{이름}}도 HTML 이스케이프) · R231 수신자 해석 예외 = 예약 복귀(2분 뒤 순서 · 1시간 뒤 failed) · R067·R130 상한 검사 먼저 + 해제·등록 한 트랜잭션 · R280 번호 변경 검사(빈 번호 거절) · R271 설정 창 = 실제 주기 · R065 삭제 방지 = 온라인 판정 | tier3-c 15 · Codex 1R(high 3: 재개 한도 불일치 · 조회 실패 통과 · HTML 삽입 / medium 2) → 2R(high 0 · medium 2: 이름 값 템플릿 재해석 · 재시도 무기한 대기 → 정정) |
+| ④ 수치·표시 | R091 분석 시각 KST(`kstFromNaiveUtc` · campaign_runs.sent_at = UTC 벽시계) + 기간 경계 KST(`kstDayStartNaiveUtc` 7곳) · R093·R165 실수신자 구매 귀속 CT `recipient-conversion`(발송 큐 성공 번호 · 확인 못 한 캠페인은 0으로 넣지 않음 · ROI = 주문 단위 · 환불 주문 제외) · R233 빈 날 0 · R239 분모 분리 · R250·R251 고객당 1회 · 클릭 다음 KST 날짜부터 · R074 일평균 ÷30 · 지난달 같은 기간 대비(+예측 시계열 빈 날 0) · R365 누적에서 현재 제안 제외 · R317 공개 변이 보상 방문자당 30분 2회 · R264 위치 = 다음 스텝 · R296 사전 확인 상한 = 미리보기와 같게 · R417 식별 총수 · R204 원천 잘림 커서 · R063 싱크 집계 시각 폴백·동기화 1회 = 마지막 배치 · R129 어제 실적 = 청구 축 · R078·R193 평균 구매 = 표준 칸(같은 패턴 7곳) · R183 자사몰 진단 실패는 실패로 + 성공 뒤 차감 | tier3-d 21 · Codex 1R(high 1: 차감 실패에도 결과 반환 → **성공 뒤 차감 확정 CT `settleCreditAfterSuccess`**(차감 시점 잔액 부족이면 402 · R183·R246·R082 공통) / medium 3) → 2R(high 0 · medium 2 → 정정: 잔액 부족은 차감 시점 판정 `throwOnInsufficient` · 같은 주문 행 하나라도 환불이면 주문 제외) |
+| ⑤ 남은 결함 | CDP: R098·R244 같은 몰 여러 회사 = 회사마다 전달(CT `cdp-webhook-delivery` · 카페24 구형 서명·네이버 서명은 맞는 회사만) · R188 재처리 = 원래 경로와 같은 본문 규칙 · R124 백필이 해제 연동을 안 살림 · R182 브라우저 이벤트 고객 행 반영 · R186 감쇠 매일(60일 창) · R382 증분 이어서(시작점 기억) · R255 외부 ID 출처 · R319 한도 = 성공 호출만(두 읽기) / JRN: m087 표시 먼저·실패 되돌림 · R298 자동 재진입 켜기 = 운영 중 금지·사전검사 무효 · R424 목표 = goal_kind · 완주율 = 통계와 같은 값 · R425 생일 KST·2/29 · R428 Liquid 블록 assign / INAPP: R256 표준 표기 · R415 CTR 30일 / DM: R119 토큰 = 정제 뒤(`preFilterRecipientsLikeStaging`) · R120 A/B 비콘 = A/B 기록·방문 1행 · R210 브랜드 색 · R212 확인 실패 비캐시 · R399 선택 해제 원색 / AI: R072 라벨 -9 확인 · R075 한도 알림 워커(10분 · 달 1회 선점 · 문자·메일 · 앱 = 사용량 화면 표시) · R084 목표 문장 인원수 제거 · R155·R358 매핑 쿼터 선점·반납 · R161 오늘 KST · R172 이모지 수식 문자 / MAIL: R121 첫 오픈 판정 잠금 안 · R228 받는 사람 단계 5xx = 반송 · R371 주소 완전 일치 · R097 개별 정산서·거래내역서 메일 = 일괄발급 한줄로 양식 CT `renderBillingMailHtml` / R143 멈춘 업로드 = 중단(15분) · R108 RCS 수정 링크 검사 · R237 54 게이트 행 제외 / ADMIN: m037 스팸 상세 과금 여부 · R068 요금제 승인 = 한 트랜잭션(행 잠금) · R154 6.2 = win-legacy · R275·R276 원격 설정 두 키 병합·매핑 거절 · R277 exe 확인·한 트랜잭션 · R278 죽은 로그 라우트 제거 · R279 상한 입력 거절 · R337 userType · R353 감사 before | tier3-e 40 · Codex 1R(돈·청구 문서·주문 줄 · high 1: 승인 최종 저장 실패 시 선점 영구 잠김 → 한 트랜잭션으로 구조 정정 · 선점 칸 방식 제거) → 2R(high 0 · medium 1: 연결 획득이 오류 처리 밖 → 정정) · 청구 메일 이전·웹훅 인증·전달 회귀 없음 |
+| ⑥ 개선 | R180 진단 COUNT 30일 하한 · R181 이벤트마다 즉시 재계산 제거(5분 워커) · R187 처리 끝난 웹훅 기록 180일 뒤 정리 · R200 페이지 조회 행 갱신 10분 간격 · R125 임시 보관 상한 모든 임시 쓰기 라우트 · R249 진단 프롬프트 근거 없는 수치 제거 · R288 관련도 단어 단위 · R291 few-shot 최근 순 · R164 EXISTS · R196 정산 재시도 10분 간격 · R064 실패 상세 5건+총수 | tier3-f 11 · R196(돈 정산 재시도)은 E 2R에 합류 검토 = 지적 없음 |
+
+백엔드 tsc 0 · 프론트 tsc 0 · vitest 486파일 6,631건. DDL 0 · 새로 읽는 칸 = 기존 배포 코드가 이미 읽는 칸(purchases.customer_phone · journeys.goal_kind · cdp_identity_links.source · cdp_api_call_log.status_code · sync_logs batch 칸 · spam_filter_tests.source · companies.ai_usage_threshold_config) · 프론트 변경(여정 목록 · 관리자 싱크·발신번호 상세 · AI 사용량 · 한도 알림 창 · 고객사 통계) = 프론트 build:safe 필요.
+
+기존 테스트 의도 유지 갱신: tier2 R274(시각 폴백 형태) · webhook-duplicate(3몰 = CT로 이동) · billing-route-invariants(메일 항목표 → 양식 CT) · short-url-click(R181 즉시 재계산 제거).
+
+**차수 3 Harold 확인 필요**
+
+| # | 항목 | 지금 상태 |
+|---|---|---|
+| 1 | R082 근거 질의 단가 | 5크레딧(R1-20 선례) |
+| 2 | R284 승인·반려 라우트 | 화면(AdminDashboard)이 쓰는 라우트라 지우지 않음(브리핑의 「죽은 라우트」 판정 정정). reviewed_by = 없는 키라 늘 NULL → FK 대상 확인 뒤 정정(M-46) |
+| 3 | R107 RCS 브랜드 칸 | 코드가 한 번도 쓴 적 없는 칸(brand_id·brand_name)이라 칸 존재 확인 뒤 착수(M-47) |
+| 4 | R075 앱 알림 채널 | 알림 센터가 없어 「AI 사용량 화면 표시」로 문구를 바꿈 |
+| 5 | R097 개별 발송 메일 | 제목·본문 = 일괄발급과 같은 「[한줄로] … 거래내역서」 · 항목표 대신 첨부 PDF(발송 전 정합 검사는 유지) |
+| 6 | R187 웹훅 기록 보관 | 처리 끝난 기록 180일 뒤 삭제(실패 기록은 남김) |
+| 7 | R093 분석 귀속 창 | 구매일이 날짜만 있어 발송일 당일 발송 전 구매는 가릴 수 없어 포함 · 인앱(R251)은 반대로 다음 날부터(과대보다 과소) |
+| 8 | 성공 뒤 차감 확정 | 잔액 부족(동시 소진)만 402로 막고, DB 실패는 기존 원칙대로 결과를 막지 않는다([CREDIT][MISS]). 같은 원칙의 기존 라우트 6곳(ai.ts 1088·1765·2372·2462·3700·5217)은 그대로 |
+| 9 | R141 · R238 · R177 · R195 · R168 | 개선 5건 보류 — R141은 R1-06·11과 같은 뿌리(엑셀 처리 구조 설계 과제) · R238(고도몰 재수집)·R177(반응 매트릭스)·R195(운영자 매분 조회)는 측정 뒤 처방 · R168(채굴 재판정)은 판정 표식 칸 필요(DDL) |
+
+범위 밖 기록(착수 안 함): R1-06·11 엑셀 동기 처리(설계 과제) · 같은 회사 전체 구매 귀속 규칙을 쓰는 다른 소비처 3곳(operator-conversion-attribution 밴딧 보상 · operator-daily-recap · CT-69 반응 매트릭스 = 「회사 전체」 표기 설계) · 성능 인덱스 후보 `email_events (campaign_id, email, event_type)`(R121 첫 오픈 확인 LIMIT 1이 캠페인 선두 인덱스로 훑는다 · 배포와 무관한 선택 DDL).
 범위 밖 기록(착수 안 함): refund-pending `zeroLoadSettled` 영구 표식 = 같은 캠페인 재발송이 다시 적재 0으로 멈추면 구제 차단(3R) · journey-executor HEAD에도 sent 확정 직후 중단 시 운영 크레딧 없이 전진하는 경로(4R) · 정지·목표 달성으로 실행 후보에서 빠지면 남은 sending 표식이 가드에 다시 오지 않음(5R · journey-executor 299). · 스팸 앱 수신 보고의 단일 active 후보 매칭 = 이전 검사의 지연 보고가 새 검사 failed를 pass로 덮을 수 있음(m042 1R · spam-filter.ts 528) · 통계 화면 3곳(admin·manage-stats·campaigns)의 스팸 검사 비용 표시가 발송 실패 행도 셈(m042 청구 규칙과 표시 불일치).
 
 ## 3. 측정 대기 (읽기 전용 · 하나씩)
@@ -612,6 +643,8 @@ m004(성립 · 처방이 정책) 7305(카카오 성공 불확실) 대기·실패
 | M-43 | (R1-29) 원스텝 소요 시간 | **불필요(0926 저녁)** — 동시 3으로 바로 개선 |
 | **M-44** | **(m051 착수 판정 · 차수 1 KAKAO)** 운영 백엔드 프로세스에 IMC_WEBHOOK_HMAC_SECRET · IMC_WEBHOOK_ALLOWED_IPS가 설정돼 있는가 — **값은 출력하지 않고 개수(0/1)만**. 둘 다 1이면 「미설정이면 거절」로 바꿔도 웹훅이 멈추지 않는다 · 0이면 값 설정이 먼저(바로 바꾸면 IMC 웹훅 수신이 전부 거절된다) | pm2 env(targetup-backend) |
 | **M-45** | **(R134 착수 판정 · 차수 2)** PAY 일괄 생성 계정 중 must_change_password=true(최초 로그인 전) 개수 · 회사 수 — 값은 개수만. 0이면 코드 변경만으로 닫힘 · 1 이상이면 그 계정 잠금·재발급 방식 결정 필요 | users(must_change_password) × company_agent_ids |
+| **M-46** | **(R284 착수 판정 · 차수 3)** kakao_templates.reviewed_by의 FK 대상 테이블(users인가 super_admins인가) — 슈퍼관리자 승인·반려·수동 등록이 넣을 값(req.user.userId)이 그 표에 있어야 한다 | `information_schema.table_constraints` × `key_column_usage` × `constraint_column_usage`(kakao_templates.reviewed_by) |
+| **M-47** | **(R107 착수 판정 · 차수 3)** rcs_templates에 brand_id · brand_name 칸이 실제로 있는가(SCHEMA.md엔 있으나 코드가 한 번도 쓴 적 없음) | `information_schema.columns` (rcs_templates · brand_id·brand_name) |
 | M-01 | 고객 전체삭제 실행 이력 수와 시점 | audit_logs action='customer_delete_all' |
 | M-02 | MySQL 서버 sql_mode에 NO_BACKSLASH_ESCAPES가 있는가 | MySQL `@@GLOBAL.sql_mode` |
 | M-03 | AI 운영자 승인 발송 중 수신자 1만 명에 닿은 건 | campaigns(AI 운영자 경로) target_count |

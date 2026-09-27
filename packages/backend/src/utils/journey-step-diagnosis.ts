@@ -128,9 +128,8 @@ export async function diagnoseJourneySteps(
   }
 
   // 전체 건강 점수 (완료율 + 위험 step 수)
-  const completionRate = stats.overview.totalEntered > 0
-    ? stats.overview.completed / stats.overview.totalEntered
-    : 0;
+  // ★ 2026-09-27 한줄로 V2 R424 — 통계 화면과 같은 완주율(발송군 = 홀드아웃 제외 · journey-stats가 소유). 옛: 홀드아웃까지 분모에 넣어 화면과 달랐다.
+  const completionRate = stats.overview.completionRate;
   const criticalCount = stepDiagnoses.filter((s) => s.severity === 'critical').length;
   const warningCount = stepDiagnoses.filter((s) => s.severity === 'warning').length;
   const overallScore = Math.max(
@@ -259,13 +258,17 @@ function buildStepRecommendation(
 // 3. recommendNextJourneyStep — 다음 단계 자동 추천 (AI orchestrate)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+/** ★ 2026-09-27 한줄로 V2 R424 — 여정 목표 종류(journeys.goal_kind · journey-options-validator GOAL_KINDS) → 프롬프트 표기.
+ *  옛: 없는 칸(objective)을 읽어 목표가 늘 '재구매 유도'였다. */
+const JOURNEY_GOAL_LABEL: Record<string, string> = { purchase: '구매 전환', click: '클릭 전환', visit: '방문 전환' };
+
 export async function recommendNextJourneyStep(
   journeyId: string,
   companyId: string,
 ): Promise<NextStepRecommendation> {
   // journey 정보 조회
   const journeyRes = await query(
-    `SELECT j.id, j.name, j.template_code, j.trigger_event,
+    `SELECT j.id, j.name, j.template_code, j.trigger_event, j.goal_kind,
             (SELECT json_agg(s ORDER BY s.step_order)
              FROM (
                SELECT id, step_order, step_type, channel, delay_hours, message_template, subject
@@ -321,7 +324,7 @@ JSON 형식으로만 응답하세요.`;
 - 이름: ${journey.name}
 - 템플릿: ${journey.template_code}
 - 트리거: ${journey.trigger_event}
-- 목표: ${journey.objective || '재구매 유도'}
+- 목표: ${JOURNEY_GOAL_LABEL[String(journey.goal_kind || '')] || '지정 안 됨(이름·트리거로 판단)'}
 
 ## 현재 단계 흐름 (${existingSteps.length}개)
 ${stepsDescription || '(단계 영역 없음)'}

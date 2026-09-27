@@ -13240,7 +13240,11 @@ const handleApproveRequest = async (id: string) => {
                           <button
                             onClick={() => {
                               setSyncSelectedAgent(agent);
-                              setSyncConfigForm({ sync_interval_customers: 60, sync_interval_purchases: 30 });
+                              // ★ 2026-09-27 한줄로 V2 R271 — 행의 실제 주기로 연다(옛: 60/30 고정값이라 저장하면 실제 주기를 덮었다)
+                              setSyncConfigForm({
+                                sync_interval_customers: Number(agent.sync_interval_customers_min) || 60,
+                                sync_interval_purchases: Number(agent.sync_interval_purchases_min) || 30,
+                              });
                               setShowSyncConfigModal(true);
                             }}
                             className="text-gray-600 hover:text-gray-800 text-xs font-medium px-2 py-1 rounded hover:bg-gray-100"
@@ -13798,7 +13802,7 @@ const handleApproveRequest = async (id: string) => {
                                 실패 상세: {log.failures.slice(0, 5).map((f: any, i: number) => (
                                   <span key={i} className="mr-3 font-mono">{f.phone || '(번호 없음)'}: {f.reason || '원인 미기록'}</span>
                                 ))}
-                                {log.failures.length > 5 && <span className="text-red-400">외 {log.failures.length - 5}건</span>}
+                                {(log.failures_total ?? log.failures.length) > 5 && <span className="text-red-400">외 {(log.failures_total ?? log.failures.length) - 5}건</span>}
                               </td>
                             </tr>
                           )}

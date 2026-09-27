@@ -207,13 +207,18 @@ ${memoryContext}
     });
 
     const lowerQ = q.toLowerCase();
+    // ★ 2026-09-27 한줄로 V2 R288 — 관련도 = 질문 단어(2자 이상) 단위 일치. 옛: 질문 앞 20자 전체가 그대로 들어 있어야 가점이라
+    //   사실상 중요도 상위 5건이 나왔다.
+    const queryTerms = Array.from(new Set(lowerQ.split(/[\s,.?!·~"'()]+/).filter((t) => t.length >= 2))).slice(0, 12);
     const related = allMemories
       // 조회가 이미 학습 5종 화이트리스트(옛 제외 방식은 brand_link를 빠뜨렸음) — 방어적 이중 필터만 유지
       .filter((m) => (LEARNING_MEMORY_TYPES as string[]).includes(m.memoryType))
       .map((m) => {
-        const keyMatch = m.memoryKey.toLowerCase().includes(lowerQ.slice(0, 20)) ? 5 : 0;
-        const valueMatch = m.memoryValue.toLowerCase().includes(lowerQ.slice(0, 20)) ? 3 : 0;
-        return { memory: m, score: keyMatch + valueMatch + m.importance / 2 };
+        const key = m.memoryKey.toLowerCase();
+        const value = m.memoryValue.toLowerCase();
+        const keyHits = queryTerms.filter((t) => key.includes(t)).length;
+        const valueHits = queryTerms.filter((t) => value.includes(t)).length;
+        return { memory: m, score: keyHits * 5 + valueHits * 3 + m.importance / 2 };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, 5)
@@ -996,14 +1001,16 @@ router.post('/brand-links', async (req: Request, res: Response) => {
     // (UNIQUE(company_id, memory_type, memory_key) upsert가 다른 링크를 덮어쓰는 사고 차단)
     let label = baseLabel;
     let sameLabelSameUrl = false;
-    for (let suffix = 2; suffix <= 9; suffix++) {
+    // ★ 2026-09-27 한줄로 V2 R072 — 마지막 후보(-9)까지 확인하고, 다 차 있으면 거절한다(옛: -2~-8만 보고 -9를 확인 없이 써 기존 -9 링크를 덮었다).
+    let labelResolved = false;
+    for (let suffix = 2; suffix <= 10; suffix++) {
       const ex = await query(
         `SELECT memory_value FROM ai_company_memory
          WHERE company_id = $1::uuid AND memory_type = 'brand_link' AND memory_key = $2
          LIMIT 1`,
         [companyId, label],
       );
-      if (ex.rows.length === 0) break;
+      if (ex.rows.length === 0) { labelResolved = true; break; }
       let exUrl = '';
       try {
         const v = typeof ex.rows[0].memory_value === 'string' ? JSON.parse(ex.rows[0].memory_value) : ex.rows[0].memory_value;
@@ -1013,9 +1020,14 @@ router.post('/brand-links', async (req: Request, res: Response) => {
       }
       if (exUrl === url) {
         sameLabelSameUrl = true;
+        labelResolved = true;
         break;
       }
+      if (suffix === 10) break;
       label = `${baseLabel.slice(0, 37)}-${suffix}`;
+    }
+    if (!labelResolved) {
+      return res.status(400).json({ success: false, error: '같은 이름의 브랜드 링크가 너무 많습니다. 라벨을 다르게 입력해 주세요.' });
     }
 
     // 상한 확인 — 기존 행 갱신(같은 라벨·같은 URL)은 허용

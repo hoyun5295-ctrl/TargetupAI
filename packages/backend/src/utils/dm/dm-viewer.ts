@@ -813,10 +813,12 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     if (box.hasAttribute('data-dm-poll-multi')) {
       var selected = {};
       Array.prototype.forEach.call(opts, function (opt) {
+        // ★ 2026-09-27 한줄로 V2 R399 — 선택 전 인라인 색을 보관했다가 해제 때 되돌린다(옛: ''로 지워 원래 카드 배경·테두리까지 사라졌다)
+        var origBg = opt.style.background, origBorder = opt.style.borderColor;
         opt.addEventListener('click', function () {
           if (box.getAttribute('data-voted') === '1') return;
           var id = opt.getAttribute('data-option-id');
-          if (selected[id]) { delete selected[id]; opt.style.background = ''; opt.style.borderColor = ''; }
+          if (selected[id]) { delete selected[id]; opt.style.background = origBg; opt.style.borderColor = origBorder; }
           else { selected[id] = true; opt.style.background = '#ede9fe'; opt.style.borderColor = '#7c3aed'; }
         });
       });

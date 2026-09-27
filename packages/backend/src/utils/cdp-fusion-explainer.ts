@@ -14,6 +14,11 @@
  */
 
 import { callAIWithFallback } from '../services/ai';
+import { randomUUID } from 'crypto';
+import { checkCredit, settleCreditAfterSuccess, InsufficientCreditError } from './ai-credit';
+import { isInCreditBundle, runInCreditBundle } from './ai-credit-context';
+import { getCreditCost } from './ai-credit-calc';
+import { AiRateLimitExceeded } from './ai-rate-limit';
 import type { CdpDiagnosticsResult } from './cdp-diagnostics';
 
 export interface CdpExplainFactor {
@@ -108,8 +113,12 @@ ${conflictSummary}
   "recommendations": ["...", "..."]
 }`;
 
+  // ★ 2026-09-27 한줄로 V2 R183 — 잔액 확인 → 묶음 실행(캐시 안 함) → 파싱·조립 성공 뒤 1회 차감(R246과 같은 모양).
+  //   옛: 모든 오류를 삼켜 '건강도 50점'을 실제 결과처럼 돌려줬고, 파싱 실패에도 호출 시점에 차감됐다.
+  const explainCost = isInCreditBundle() ? 0 : getCreditCost('cdp-fusion-explainer');
+  if (explainCost > 0) await checkCredit(companyId, explainCost);
   try {
-    const text = await callAIWithFallback({
+    const text = await runInCreditBundle(() => callAIWithFallback({
       system,
       userMessage,
       maxTokens: 2048,
@@ -118,7 +127,8 @@ ${conflictSummary}
       model: 'opus',
       companyId,
       source: 'cdp-fusion-explainer',
-    });
+      noCache: true,
+    }));
 
     let jsonStr = text;
     if (text.includes('```json')) {
@@ -132,7 +142,7 @@ ${conflictSummary}
     }
 
     const parsed = JSON.parse(jsonStr);
-    return {
+    const result: CdpExplanation = {
       overallHealthScore: typeof parsed.overallHealthScore === 'number'
         ? Math.max(0, Math.min(100, parsed.overallHealthScore))
         : 50,
@@ -154,14 +164,14 @@ ${conflictSummary}
         : [],
       explainedAt: new Date().toISOString(),
     };
+    if (explainCost > 0) {
+      // 차감 확정 — 동시 요청에 잔액이 먼저 쓰였으면 결과를 내주지 않는다(402 · Codex 차수3 D 1R)
+      await settleCreditAfterSuccess({ companyId, cost: explainCost, source: 'cdp-fusion-explainer', idempotencyKey: `cdp-explain:${randomUUID()}` });
+    }
+    return result;
   } catch (err) {
+    if (err instanceof InsufficientCreditError || err instanceof AiRateLimitExceeded) throw err;
     console.error('[CdpFusionExplainer] AI 호출 실패:', err);
-    return {
-      overallHealthScore: 50,
-      topInsight: '자사몰 진단 영역 일시 오류. 잠시 후 다시 시도해주세요.',
-      factors: [],
-      recommendations: [],
-      explainedAt: new Date().toISOString(),
-    };
+    throw new Error('AI 진단 결과를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
   }
 }

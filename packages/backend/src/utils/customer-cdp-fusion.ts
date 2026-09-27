@@ -59,11 +59,14 @@ export async function fuseEventToCustomer(
       break;
 
     case 'page_view':
+      // ★ 2026-09-27 한줄로 V2 R200 — 10분 안의 조회는 행을 다시 쓰지 않는다(최근 조회 판정은 일 단위라 값이 바뀌지 않는다).
+      //   옛: 페이지 조회마다 고객 행 UPDATE → 고객 테이블 죽은 행이 쌓였다.
       await query(
         `UPDATE customers SET
             last_page_view_at = GREATEST(COALESCE(last_page_view_at, $2::timestamptz), $2::timestamptz),
             updated_at = NOW()
-          WHERE id = $1::uuid AND company_id = $3::uuid`,
+          WHERE id = $1::uuid AND company_id = $3::uuid
+            AND (last_page_view_at IS NULL OR last_page_view_at < $2::timestamptz - INTERVAL '10 minutes')`,
         [customerId, occurredAt, companyId]
       );
       break;

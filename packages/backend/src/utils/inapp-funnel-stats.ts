@@ -122,17 +122,24 @@ export async function buildInAppFunnel(
   // 24h attribution — click한 customer가 24h 안 purchase 했는지
   // 옵션 1: cdp_inapp_impressions.attributed_purchase_id (D215+ ALTER 컬럼 직접 매핑)
   // 옵션 2: customers.recent_purchase_date fallback
+  // ★ 2026-09-27 한줄로 V2 R250 · R251 — 고객당 1회(옛: 클릭 행마다 금액을 더해 같은 구매가 클릭 수만큼 곱해졌다) ·
+  //   구매일(KST 날짜 · 시각 없음)은 클릭한 KST 날짜 **다음 날**부터 인정(옛: 날짜를 UTC 자정으로 바꿔 비교해 클릭 전 구매까지 귀속됐다).
+  //   같은 날 클릭 뒤 구매는 날짜만으로 앞뒤를 가릴 수 없어 넣지 않는다(과대보다 과소 · 식별 고객 목록과 같은 기준).
   const attrR = await query(
-    `SELECT COUNT(DISTINCT i.customer_id)::int AS attributed_customers,
-            COALESCE(SUM(c.recent_purchase_amount), 0)::numeric AS attributed_revenue
-     FROM cdp_inapp_impressions i
-     JOIN customers c ON c.id = i.customer_id AND c.company_id = i.company_id
-     WHERE i.company_id = $1::uuid AND i.message_id = $2::uuid
-       AND i.event_type = 'click'
-       AND i.customer_id IS NOT NULL
-       AND c.recent_purchase_date IS NOT NULL
-       AND c.recent_purchase_date::timestamptz >= i.occurred_at
-       AND c.recent_purchase_date::timestamptz <= i.occurred_at + INTERVAL '24 hours'`,
+    `SELECT COUNT(*)::int AS attributed_customers,
+            COALESCE(SUM(x.amount), 0)::numeric AS attributed_revenue
+     FROM (
+       SELECT c.id, MAX(c.recent_purchase_amount) AS amount
+       FROM cdp_inapp_impressions i
+       JOIN customers c ON c.id = i.customer_id AND c.company_id = i.company_id
+       WHERE i.company_id = $1::uuid AND i.message_id = $2::uuid
+         AND i.event_type = 'click'
+         AND i.customer_id IS NOT NULL
+         AND c.recent_purchase_date IS NOT NULL
+         AND c.recent_purchase_date > (i.occurred_at AT TIME ZONE 'Asia/Seoul')::date
+         AND c.recent_purchase_date <= ((i.occurred_at + INTERVAL '24 hours') AT TIME ZONE 'Asia/Seoul')::date
+       GROUP BY c.id
+     ) x`,
     [companyId, messageId]
   );
   const attributedCustomers = Number(attrR.rows[0]?.attributed_customers || 0);
@@ -381,8 +388,9 @@ export async function buildInAppOverview(companyId: string, channel?: 'web' | 'a
        AND i.event_type = 'click'
        AND i.customer_id IS NOT NULL
        AND c.recent_purchase_date IS NOT NULL
-       AND c.recent_purchase_date::timestamptz >= i.occurred_at
-       AND c.recent_purchase_date::timestamptz <= i.occurred_at + INTERVAL '24 hours'
+       -- ★ 2026-09-27 R251 — 클릭 다음 KST 날짜부터(위 퍼널과 같은 기준)
+       AND c.recent_purchase_date > (i.occurred_at AT TIME ZONE 'Asia/Seoul')::date
+       AND c.recent_purchase_date <= ((i.occurred_at + INTERVAL '24 hours') AT TIME ZONE 'Asia/Seoul')::date
        AND ($2::varchar IS NULL OR i.message_id IN (SELECT id FROM cdp_inapp_messages WHERE company_id = $1::uuid AND channel = $2))`,
     [companyId, channel || null]
   );
@@ -455,7 +463,8 @@ export async function buildIdentifiedViewers(companyId: string, messageId: strin
     `SELECT i.customer_id, c.name, c.phone,
             COUNT(*) FILTER (WHERE i.event_type = 'impression')::int AS impressions,
             COUNT(*) FILTER (WHERE i.event_type = 'click')::int AS clicks,
-            MAX(i.occurred_at) AS last_seen
+            MAX(i.occurred_at) AS last_seen,
+            COUNT(*) OVER ()::int AS identified_total
        FROM cdp_inapp_impressions i
        JOIN customers c ON c.id = i.customer_id AND c.company_id = i.company_id
       WHERE i.company_id = $1::uuid AND i.message_id = $2::uuid AND i.customer_id IS NOT NULL
@@ -512,7 +521,8 @@ export async function buildIdentifiedViewers(companyId: string, messageId: strin
         purchaseAmount: p?.amount || 0,
       };
     }),
-    identifiedTotal: vRes.rows.length,
+    // ★ 2026-09-27 한줄로 V2 R417 — 전체 식별 고객 수(옛: LIMIT 500으로 자른 행 수라 500명 이상이면 500으로 보였다)
+    identifiedTotal: Number(vRes.rows[0]?.identified_total) || 0,
     anonymous: {
       visitors: Number(a.visitors) || 0,
       impressions: Number(a.impressions) || 0,
