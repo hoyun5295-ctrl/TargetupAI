@@ -174,10 +174,11 @@ describe('남은 옛 문구', () => {
     expect(WALK).not.toMatch(/PRO 요금제|특별 혜택|운영팀에 문의/);
   });
 
-  it('도움말 카탈로그가 AI 자동제작을 옛 원클릭 캠페인 화면으로 설명하지 않는다', () => {
+  // ★ 2026-09-27 만들기 개편 — 입구 이름이 "만들기"로 바뀌었다(설계서 docs/2026-09-27-make-redesign-design.md §4 입구 이름 소비처)
+  it('도움말 카탈로그가 만들기를 옛 원클릭 캠페인 화면으로 설명하지 않는다', () => {
     const job = findJob('quick-campaign');
-    expect(job?.title).toBe('AI 자동제작');
-    expect(job?.entry.via).toContain('"AI 자동제작"');
+    expect(job?.title).toBe('재료로 완성본 만들기');
+    expect(job?.entry.via).toContain('"만들기"');
     expect([...(job?.steps || []), job?.goal || ''].join('\n')).not.toMatch(/원클릭 캠페인|인앱/);
   });
 });

@@ -58,6 +58,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // ★ 2026-09-05 베스트 구성 · 실물 예시(AI 영업 학습)
   'best_layout.example_promote': '실물 예시 올리기(AI 영업 학습)',
   'best_layout.example_delete': '실물 예시 삭제(AI 영업 학습)',
+  // ★ 2026-09-27 만들기 개편 · 주소 하나로 읽은 재료를 자동제작에 사용
+  make_read_url_use: '주소 읽기 재료 사용',
   // 접근 통제(전송자격인증)
   machine_origin_detected: '기계 접속 감지',
   machine_origin_blocked: '기계 접속 차단',

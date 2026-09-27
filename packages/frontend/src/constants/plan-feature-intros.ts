@@ -129,12 +129,13 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
     ],
   },
   {
-    id: 'quick-campaign', path: '/quick-campaign', title: 'AI 자동제작', icon: Wand2, gradient: 'from-amber-400 to-fuchsia-500',
-    summary: '행사 내용과 사진만 넣으면 모바일 DM이나 이메일 완성본이 편집기에 열립니다.',
+    // ★ 2026-09-27 만들기 개편 — 입구 이름 "만들기" · 결과 화면(고칠 곳만 채우고 보내기)
+    id: 'quick-campaign', path: '/quick-campaign', title: '만들기', icon: Wand2, gradient: 'from-amber-400 to-fuchsia-500',
+    summary: '사진·글·홈페이지 주소 중 가진 것만 넣으면 모바일 DM이나 이메일 완성본이 결과 화면에 열립니다.',
     steps: [
-      { icon: ImagePlus, title: '재료 넣기', text: '행사 내용, 사진, 연동몰 상품을 넣습니다.' },
-      { icon: Wand2, title: '버튼 하나', text: '구성과 문구를 만들어 초안으로 저장합니다.' },
-      { icon: Send, title: '편집기에서 마무리', text: '바로 고치고 발행합니다.' },
+      { icon: ImagePlus, title: '재료 넣기', text: '사진·글·홈페이지 주소·몰 상품 중 가진 것을 넣습니다.' },
+      { icon: Wand2, title: '버튼 하나', text: '구성과 문구를 만들어 받는 사람이 볼 모습 그대로 보여 줍니다.' },
+      { icon: Send, title: '고칠 곳만 채우고 보내기', text: '누른 곳만 고치고 바로 보냅니다.' },
     ],
     costs: [
       { label: '모바일 DM', source: 'dm-ai-generate', credits: 5 },

@@ -56,6 +56,15 @@ import { peekBuildResult, clearBuildResult, useAiAutoBuildEnabled, type BuildRes
 import AbTestModal from '../components/dm/modals/AbTestModal';
 import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
+// ★ 2026-09-27 만들기 개편 — 첫 화면(만들기 카드 · 다른 방법 접힘 · 카드칩 · 상세 창) · 수정 화면(DmEditScreen) · 보내기 창
+import '../styles/make.css';
+import { ArrowLeft, Link as LinkIcon, Layers, BookOpen, Smartphone } from 'lucide-react';
+import DmEditScreen from '../components/make/DmEditScreen';
+import MakeSendModal from '../components/make/MakeSendModal';
+import DmDetailModal from '../components/make/DmDetailModal';
+import { MakeHeroCard, OtherMethods, ListHead, DmChip, Meter, fmtDate } from '../components/make/HomeParts';
+import { dmChipStatus, type ChipStatus } from '../utils/make-flow';
+import { MK_HEADER, MK_HEADER_ROW, MK_BACK, MK_TILE, MK_TITLE, MK_SUB } from '../utils/make-ui';
 
 const api = axios.create({ baseURL: '/api' });
 attachCreditInterceptor(api);
@@ -111,6 +120,10 @@ export default function DmBuilderPage() {
   const [entry] = useState(() => ({
     id: String(searchParams.get('id') || '').trim() || null,
     fromPlanner: searchParams.get('from') === 'planner',
+    // ★ 2026-09-27 만들기 개편 — ?other=1(다른 방법 펼침) · onestep(질문 몇 개) · blocks(블록 조립) / ?send=1(편집 진입 뒤 자세한 발송 창) / ?pair=(같은 재료 이메일)
+    other: String(searchParams.get('other') || '').trim() || null,
+    send: searchParams.get('send') === '1',
+    pair: String(searchParams.get('pair') || '').trim() || null,
   }));
   const [listFetched, setListFetched] = useState(false);
   const [listFailed, setListFailed] = useState(false);
@@ -143,6 +156,17 @@ export default function DmBuilderPage() {
     return () => clearTimeout(t);
   }, [mode, isDirty, isSavingGlobal, isPublishedGlobal]);
   const [confirmBackOpen, setConfirmBackOpen] = useState(false);
+  // ★ 2026-09-27 만들기 개편 — 첫 화면 상태 · 보내기 창 · 발행(플래너)·자세한 발송 창 신호(TopBarWithBack 이 흐름을 그대로 가진다)
+  const [otherOpen, setOtherOpen] = useState(entry.other === '1');
+  const [listFilter, setListFilter] = useState<'all' | ChipStatus>('all');
+  const [listQuery, setListQuery] = useState('');
+  const [listSort, setListSort] = useState('updated');
+  const [listLimit, setListLimit] = useState(24);
+  const [detail, setDetail] = useState<DmListItem | null>(null);
+  const [makeSendOpen, setMakeSendOpen] = useState(false);
+  const [publishSignal, setPublishSignal] = useState(0);
+  const [advSendSignal, setAdvSendSignal] = useState(0);
+  const [pairEmailId] = useState<string | null>(entry.pair);
   // ★ D216+ ConfirmModal generic (native confirm 영구 폐기)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
@@ -491,6 +515,23 @@ export default function DmBuilderPage() {
     setMode('edit');
   };
 
+  // ★ 2026-09-27 만들기 개편 — 만들기 화면 [다른 방법으로 만들기] 착지(한 번만)
+  const otherHandled = useRef(false);
+  useEffect(() => {
+    if (otherHandled.current || !entry.other || entry.id) return;
+    otherHandled.current = true;
+    if (entry.other === 'onestep') setOneStepOpen(true);
+    else if (entry.other === 'blocks') handleStartBlockBuild();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // 결과 화면 [자세히 설정] → 편집 진입 뒤 기존 발송 창
+  const sendHandled = useRef(false);
+  useEffect(() => {
+    if (!entry.send || sendHandled.current || mode !== 'edit' || !dmId) return;
+    sendHandled.current = true;
+    setAdvSendSignal((v) => v + 1);
+  }, [entry.send, mode, dmId]);
+
   // ★ 2026-09-02 딥링크(?id=) — 목록이 한 번 로드된 뒤 그 항목을 연다. 목록에 없으면 열 권한이 없거나 지워진 것이다.
   useEffect(() => {
     if (!entry.id || deepLinkHandled.current || !listFetched || listLoading) return;
@@ -597,20 +638,26 @@ export default function DmBuilderPage() {
 
   // ★ 2026-07-02(3) 발송 이력 카드 → 발송 추적 모달(track 직행) — 수신자별 열람·깊이·클릭·응모
   const [trackTarget, setTrackTarget] = useState<{ id: string; title?: string } | null>(null);
+  // ★ 2026-09-27 만들기 개편 — 상세 창 [다시 보내기] = 보내기 창 · [자세히 설정] = 기존 발송 창(작성 탭)
+  const [listSend, setListSend] = useState<{ id: string; title: string; brand: string | null } | null>(null);
+  const [composeTarget, setComposeTarget] = useState<{ id: string; title?: string } | null>(null);
 
   // ★ 2026-07-15 발행 DM 한글 주소 별칭 모달 (hlj.kr/반짝세일_07 — Harold 확정, 무료·DM당 1개)
   const [aliasTarget, setAliasTarget] = useState<{ id: string; title?: string } | null>(null);
 
   // 발행 주소 복사 — 이미 발행된 DM은 발행 멱등(추가 과금 0)이라 그대로 short_url 재사용. 편집 재발행 불필요.
-  const handleCopyUrl = async (id: string) => {
+  // ★ 2026-09-27 만들기 개편 — 상세 창이 주소를 화면에 띄우도록 주소를 돌려준다(경로·과금 무변경)
+  const handleCopyUrl = async (id: string): Promise<string | null> => {
     try {
       const res = await api.post(`/dm/${id}/publish`);
       const url = res?.data?.short_url || '';
-      if (!url) { setToast({ type: 'error', message: '발행 주소를 찾지 못했어요. 편집에서 발행 후 다시 시도해주세요.' }); return; }
-      await navigator.clipboard.writeText(url);
+      if (!url) { setToast({ type: 'error', message: '발행 주소를 찾지 못했어요. 편집에서 발행 후 다시 시도해주세요.' }); return null; }
+      try { await navigator.clipboard.writeText(url); } catch { /* 화면에 주소가 뜬다 */ }
       setToast({ type: 'success', message: '발행 주소를 복사했어요. (이미 발행, 추가 과금 없음)' });
+      return url;
     } catch (err: any) {
       setToast({ type: 'error', message: err?.response?.data?.error || '주소 복사 실패' });
+      return null;
     }
   };
 
@@ -640,24 +687,54 @@ export default function DmBuilderPage() {
   }
 
   if (mode === 'edit') {
+    // ★ 2026-09-27 만들기 개편 — 수정 화면 = DmEditScreen(같은 스토어·같은 모달). 발행·발송 흐름은 TopBarWithBack 이 그대로 가진다(바만 숨김).
+    //   [보내기] = 보내기 창(DM 카드 · 이메일 짝) · 플래너에서 온 DM = 옛 발행 흐름(발행 뒤 문자 실림 확인) 그대로.
+    const st = useDmBuilderStore.getState();
+    const heroSub = String(((st.pages.flatMap((pg) => pg.sections).find((x) => x.type === 'hero')?.props) as any)?.sub_copy || '');
     return (
-      <div className="dm-builder" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-        <TopBarWithBack onBack={handleBackRequest} onPublishDone={handleBackToList} fromPlanner={entry.fromPlanner} />
-        {/* ★ 2026-07-16 M4 — 전역 퀵바(서체 일괄·브랜드 킷·테마) */}
-        <DmQuickBar />
-        {buildBar && (
-          <BuildResultBar
-            handoff={buildBar}
-            collapsed={isDirtyForBar}
-            onDismiss={() => { clearBuildResult(); setBuildBar(null); }}
-            onRegenerate={() => { clearBuildResult(); setBuildBar(null); navigate('/quick-campaign?channel=dm&regen=1'); }}
-          />
-        )}
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <DmLeftPanel />
-          <DmCanvas />
-          <DmRightPanel />
-        </div>
+      <div className="dm-builder" style={{ minHeight: '100vh' }}>
+        <DmEditScreen
+          onBack={handleBackRequest}
+          onSend={() => {
+            if (entry.fromPlanner) { setPublishSignal((v) => v + 1); return; }
+            const g = useDmBuilderStore.getState();
+            if (g.isPublished && g.isDirty) {
+              setConfirm({
+                mode: 'warning', title: '고친 내용을 저장하고 보낼까요?',
+                description: '이미 보낸 DM이에요. 저장하면 먼저 보낸 링크로 들어오는 사람도 고친 화면을 봐요.',
+                confirmLabel: '저장하고 보내기', cancelLabel: '계속 고치기',
+                onConfirm: async () => { await useDmBuilderStore.getState().save(); if (!useDmBuilderStore.getState().isDirty) setMakeSendOpen(true); },
+              });
+              return;
+            }
+            setMakeSendOpen(true);
+          }}
+          pair={pairEmailId ? { onSwitch: () => navigate(`/email-campaigns?edit=${encodeURIComponent(pairEmailId)}&pair=${encodeURIComponent(st.dmId || '')}`) } : null}
+          banner={buildBar ? (
+            <BuildResultBar
+              handoff={buildBar}
+              collapsed={isDirtyForBar}
+              onDismiss={() => { clearBuildResult(); setBuildBar(null); }}
+              onRegenerate={() => { clearBuildResult(); setBuildBar(null); navigate('/quick-campaign?channel=dm&regen=1'); }}
+            />
+          ) : undefined}
+        />
+        <TopBarWithBack hidden publishSignal={publishSignal} sendSignal={advSendSignal} onBack={handleBackRequest} onPublishDone={handleBackToList} fromPlanner={entry.fromPlanner} />
+        <MakeSendModal
+          open={makeSendOpen}
+          onClose={() => setMakeSendOpen(false)}
+          channel="dm"
+          dm={dmId ? { id: dmId, title: st.title, brand: st.storeName || null, heroSub } : null}
+          email={null}
+          beforeSend={async () => {
+            const g = () => useDmBuilderStore.getState();
+            for (let i = 0; i < 40 && g().isSaving; i++) await new Promise((r) => setTimeout(r, 150)); // eslint-disable-line no-await-in-loop
+            if (!g().isPublished && (g().isDirty || !g().dmId)) await g().save({ silent: true });
+            return !!g().dmId && (g().isPublished || !g().isDirty);
+          }}
+          onSent={() => { void refreshList(); }}
+          onOpenAdvancedDm={() => { setMakeSendOpen(false); setAdvSendSignal((v) => v + 1); }}
+        />
         <EditorModals />
         <ConfirmDiscardModal
           open={confirmBackOpen}
@@ -803,30 +880,19 @@ export default function DmBuilderPage() {
   };
   const metricsLoading = !overviewTried;
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#020617,#0f172a,#020617)', fontFamily: 'var(--dm-font-primary)', color: '#fff' }}>
-      <header style={{ background: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
-        <button onClick={() => goBackOr(navigate, '/ai-operator')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8, color: '#fff' }} title="AI Operator로">←</button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#fff', margin: 0 }}>모바일 DM 빌더</h1>
-            <span style={{ fontSize: 11, padding: '3px 8px', background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', borderRadius: 12, fontWeight: 700 }}>PRO</span>
+    <div className="relative min-h-screen bg-slate-950 text-white" style={{ fontFamily: 'var(--dm-font-primary)' }}>
+      {/* ★ 2026-09-27 만들기 개편 — 첫 화면 머리(목업 마 ①) · 단축 URL 은 그대로 */}
+      <header className={MK_HEADER}>
+        <div className={`${MK_HEADER_ROW} max-w-[1280px] mx-auto`}>
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={MK_BACK} aria-label="돌아가기"><ArrowLeft className="w-5 h-5" /></button>
+          <div className={`${MK_TILE} bg-gradient-to-br from-violet-500 to-fuchsia-500`}><Smartphone className="w-5 h-5 text-white" /></div>
+          <div className="min-w-0 flex-1">
+            <h1 className={MK_TITLE}>모바일 DM</h1>
+            <p className={MK_SUB}>휴대폰으로 보는 행사 페이지를 만들어 문자로 보내요</p>
           </div>
-          <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', margin: '2px 0 0 0' }}>카드형 모바일 DM 빌더: 미디어 메세지 디자인 + 카드 단위 편집</p>
+          {/* ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능 */}
+          <button onClick={() => setShortLinkOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold text-white/85 hover:bg-white/10"><LinkIcon className="w-4 h-4" />단축 URL</button>
         </div>
-        {/* ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(Harold 위치 확정: 새 DM 만들기 왼쪽) */}
-        <button
-          onClick={() => setShortLinkOpen(true)}
-          style={{ height: 36, padding: '0 16px', background: 'rgba(255,255,255,0.06)', color: '#e9d5ff', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-        >
-          🔗 단축 URL
-          <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(52,211,153,0.18)', color: '#6ee7b7', borderRadius: 10, fontWeight: 700 }}>NEW</span>
-        </button>
-        <button
-          onClick={handleCreateNew}
-          style={{ height: 36, padding: '0 16px', background: 'rgba(139,92,246,0.3)', color: '#ddd6fe', border: '1px solid rgba(139,92,246,0.5)', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
-        >
-          + 새 DM 만들기
-        </button>
       </header>
 
       <DmShortLinkModal open={shortLinkOpen} onClose={() => setShortLinkOpen(false)} />
@@ -842,19 +908,22 @@ export default function DmBuilderPage() {
         </div>
       )}
 
-      <main style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 32px' }}>
-        {/* ★ 2026-09-14 T6 카드띠 [AI 자동제작 | 직접 제작] — 신규 ENV 미개방 회사는 그리지 않는다(설계서 §3-1 · §4-1) */}
-        {/* ★ 2026-09-16 Harold — 오른쪽 카드 = 블록으로 만들기(옛 "직접 제작"과 같은 일이라 하나로). 빈 캔버스는 조립 화면 안 버튼이 소유한다 */}
-        <AiBuildEntryStrip
-          channel="dm"
-          enabled={autoBuild === true}
+      <main className="max-w-[1280px] mx-auto px-4 md:px-12 py-6 space-y-3">
+        {/* ★ 2026-09-27 만들기 개편 — 입구 하나(만들기) + 작은 링크 2 · 쓰던 입구는 지우지 않고 "다른 방법"으로 접는다(결재 ④ · 핸들러 무변경) */}
+        <MakeHeroCard
+          title="재료만 넣으면 DM이 완성돼요"
+          desc="사진·글·홈페이지 주소, 가진 것 무엇이든 넣으세요. 몰을 연동했다면 상품도 바로 불러와요."
+          links={[
+            { icon: <Layers className="w-3.5 h-3.5" />, label: '블록으로 직접 만들기', onClick: handleStartBlockBuild },
+            { icon: <BookOpen className="w-3.5 h-3.5" />, label: '카탈로그 DM 만들기', onClick: () => navigate('/quick-campaign?channel=catalog') },
+          ]}
+          onMake={() => navigate('/quick-campaign?channel=dm')}
           disabled={generating}
-          onDirect={handleStartBlockBuild}
-          directIcon={<span className="text-[15px]">🧱</span>}
-          directLabel="블록으로 만들기"
-          directSub="고르면 필요한 것만 물어봐요"
-          directDesc="헤드라인·상품·쿠폰 같은 블록을 골라 쌓으면 DM이 됩니다."
         />
+        <OtherMethods open={otherOpen} onToggle={() => setOtherOpen((v) => !v)} summary="한 줄로 자동 생성 · 질문 몇 개로 · 이미지로 불러오기 · 저장 소재에서">
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <button type="button" onClick={handleCreateNew} className="text-[12px] text-white/50 hover:text-white underline underline-offset-4">빈 화면에서 시작</button>
+        </div>
         {/* 자연어 한 줄 입력 + 블록으로 만들기 + 완성 이미지 (★ 2026-09-16 블록 조립 전환) */}
         <div style={{
           background: 'linear-gradient(135deg, rgba(217,70,239,0.10), rgba(168,85,247,0.08), rgba(99,102,241,0.10))',
@@ -1078,244 +1147,72 @@ export default function DmBuilderPage() {
           />
         </div>
 
-        {/* 내 DM 현황 — 지표는 항상 표시 (로딩 중 스켈레톤, 실패해도 0으로) */}
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.85)', margin: '4px 4px 10px' }}>내 DM 현황</div>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-          gap: 10,
-          marginBottom: 20,
-        }}>
-          {[
-            { label: '전체 DM', value: metricsLoading ? '—' : ov.total_dm.toLocaleString(), accent: '#a855f7' },
-            { label: '발행', value: metricsLoading ? '—' : ov.published_dm.toLocaleString(), accent: '#10b981' },
-            { label: '30일 열람', value: metricsLoading ? '—' : ov.total_views_30d.toLocaleString(), accent: '#06b6d4' },
-            { label: '고유 시청자', value: metricsLoading ? '—' : ov.unique_viewers_30d.toLocaleString(), accent: '#f59e0b' },
-            { label: '평균 클릭률', value: metricsLoading ? '—' : `${ov.avg_ctr_30d}%`, accent: '#ec4899' },
-          ].map((m) => (
-            <div key={m.label} style={{
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 12,
-              padding: 14,
-            }}>
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>{m.label}</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: metricsLoading ? 'rgba(255,255,255,0.25)' : m.accent }}>{m.value}</div>
-            </div>
-          ))}
-        </div>
+        </OtherMethods>
 
-        {/* ★ 2026-09-16 Harold — 목록 화면 "AI 진단"(고정 문장 분기) 카드와 1-click 액션 3카드(토스트 안내만)를 메뉴에서 숨김.
-            실제 기능(편집 화면 AI 추천 액션 → POST /dm/:id/quick-action)은 그대로 둔다. */}
-
-        {/* 자세히 보기 토글 — 항상 표시 */}
-        <div style={{ marginBottom: 20 }}>
-          <button
-            onClick={() => setDetailExpanded(!detailExpanded)}
-            style={{
-              background: 'transparent',
-              border: '1px solid rgba(255,255,255,0.1)',
-              color: 'rgba(255,255,255,0.7)',
-              padding: '8px 14px',
-              borderRadius: 8,
-              fontSize: 12,
-              cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}
-          >
-            {detailExpanded ? '▲' : '▼'} 자세히 보기
-          </button>
-          {detailExpanded && (
-            <div style={{
-              marginTop: 12,
-              padding: 14,
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 10,
-            }}>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 8 }}>
-                30일 이벤트 응답: <strong style={{ color: '#fff' }}>{ov.total_responses_30d.toLocaleString()}건</strong>
-              </div>
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>
-                클릭률 = 이벤트 응답 ÷ 열람 × 100. 응답은 설문·응모·이메일 수집·추첨 등 고객 인터랙션을 합산해요.
-              </div>
-              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' }}>
-                집계: 최근 30일 열람 + 이벤트 응답
-              </div>
-            </div>
-          )}
-        </div>
-
-        {listLoading ? (
-          <div style={{ textAlign: 'center', padding: 60, color: 'rgba(255,255,255,0.5)' }}>불러오는 중...</div>
-        ) : list.length === 0 ? (
-          <div style={{
-            textAlign: 'center', padding: '48px 20px',
-            background: 'rgba(255,255,255,0.02)',
-            border: '1px dashed rgba(255,255,255,0.12)',
-            borderRadius: 14,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
-          }}>
-            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(168,85,247,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>📱</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>아직 만든 DM이 없어요</div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>블록을 고르면 필요한 것만 물어봐요.<br />사진과 문구만 넣으면 첫 DM이 완성됩니다.</div>
-            <button
-              onClick={handleStartBlockBuild}
-              disabled={generating}
-              style={{
-                marginTop: 4, padding: '10px 20px', borderRadius: 10, border: 'none',
-                background: 'linear-gradient(135deg, #a855f7, #d946ef)', color: '#fff',
-                fontSize: 13, fontWeight: 700, cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
-              }}
-            >
-              블록으로 첫 DM 만들기
-            </button>
-          </div>
-        ) : (() => {
-          // ★ D216+ 페이징 매트릭스 (Harold 명시 — 가로 3개 × 2열 = 6개)
-          const totalPages = Math.max(1, Math.ceil(list.length / DM_PAGE_SIZE));
-          const safePage = Math.min(currentPage, totalPages);
-          const start = (safePage - 1) * DM_PAGE_SIZE;
-          const paginatedList = list.slice(start, start + DM_PAGE_SIZE);
-          const startIdx = list.length === 0 ? 0 : start + 1;
-          const endIdx = Math.min(start + DM_PAGE_SIZE, list.length);
-
+        {/* ★ 2026-09-27 만들기 개편 — 내 DM = 요약 한 줄 + 상태 거름 칩 + 찾기·정렬 + 휴대폰 모양 카드칩(목업 마 ①) · 누르면 상세 창 · 초안 = 이어서 만들기 */}
+        {(() => {
+          const rows = list.map((d) => ({ d, st: dmChipStatus(d) }));
+          const cnt: Record<string, number> = { all: rows.length, draft: 0, sent: 0, stopped: 0 };
+          rows.forEach(({ st }) => { cnt[st] = (cnt[st] || 0) + 1; });
+          const q = listQuery.trim().toLowerCase();
+          let shown = rows.filter(({ d, st }) => (listFilter === 'all' || st === listFilter) && (!q || (d.title || '').toLowerCase().includes(q)));
+          if (listSort === 'title') shown = shown.slice().sort((a, b) => (a.d.title || '').localeCompare(b.d.title || '', 'ko'));
+          else if (listSort === 'views') shown = shown.slice().sort((a, b) => (b.d.view_count || 0) - (a.d.view_count || 0));
           return (
-            <>
-              {/* 목록 상단 영역 — 총 개수 + 현재 페이지 표시 */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
-                <span>총 <strong style={{ color: '#fff' }}>{list.length}</strong>개 DM</span>
-                <span>{startIdx}–{endIdx} 표시 중</span>
-              </div>
-
-              {/* ★ 2026-09-16 Harold A안 — 폰목업 카드 3열 → 리스트형 줄(대표 이미지 · 상태 · 열람 · 섹션 · 수정 · 자주 쓰는 버튼 + ⋯ 메뉴) */}
-              <style>{`
-                .dm-list { border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; background: rgba(255,255,255,0.03); margin-bottom: 20px; }
-                .dm-list-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 84px 64px 56px 92px 250px; align-items: center; gap: 14px; padding: 10px 16px; border-top: 1px solid rgba(255,255,255,0.06); }
-                .dm-list-row:first-child { border-top: 0; }
-                .dm-list-row.is-body { cursor: pointer; transition: background 0.15s; }
-                .dm-list-row.is-body:hover { background: rgba(168,85,247,0.07); }
-                .dm-list-head { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: 600; }
-                .dm-list-act { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
-                .dm-menu-item:hover:not(:disabled) { background: rgba(255,255,255,0.08) !important; }
-                .dm-col-narrow, .dm-menu-narrow { display: none; }
-                .dm-list-ghost { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 0; border-top: 1px dashed rgba(255,255,255,0.14); background: transparent; color: #fff; text-align: left; transition: background 0.15s; }
-                .dm-list-ghost:hover:not(:disabled) { background: rgba(168,85,247,0.07); }
-                @media (max-width: 767px) {
-                  .dm-list-row { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; padding: 10px 12px; }
-                  .dm-list-head, .dm-col-wide, .dm-act-wide { display: none; }
-                  .dm-col-narrow { display: inline-block; }
-                  .dm-menu-narrow { display: block; }
-                }
-              `}</style>
-              <div className="dm-list">
-                <div className="dm-list-row dm-list-head">
-                  <span />
-                  <span>DM</span>
-                  <span className="dm-col-wide">상태</span>
-                  <span className="dm-col-wide">열람</span>
-                  <span className="dm-col-wide">섹션</span>
-                  <span className="dm-col-wide">수정</span>
-                  <span />
+            <section className="pt-5">
+              <ListHead
+                title="내 DM"
+                summary={metricsLoading ? '불러오는 중' : `보낸 DM ${ov.published_dm.toLocaleString()} · 30일 열람 ${ov.total_views_30d.toLocaleString()} · 30일 응답 ${ov.total_responses_30d.toLocaleString()} · 평균 클릭률 ${ov.avg_ctr_30d}%`}
+                filters={[
+                  { key: 'all' as const, label: '전체', count: cnt.all },
+                  { key: 'draft' as const, label: '초안', count: cnt.draft || 0 },
+                  { key: 'sent' as const, label: '보냄', count: cnt.sent || 0 },
+                  { key: 'stopped' as const, label: '중지', count: cnt.stopped || 0 },
+                ]}
+                filter={listFilter === 'scheduled' || listFilter === 'failed' ? 'all' : listFilter}
+                onFilter={(f) => { setListFilter(f); setListLimit(24); }}
+                query={listQuery}
+                onQuery={setListQuery}
+                sort={listSort}
+                onSort={setListSort}
+                sortOptions={[{ value: 'updated', label: '최근 수정 순' }, { value: 'views', label: '열람 많은 순' }, { value: 'title', label: '이름 순' }]}
+              />
+              {listLoading ? (
+                <div className="py-16 text-center text-white/50 text-[13px]">불러오는 중</div>
+              ) : list.length === 0 ? (
+                <div className="mt-4 rounded-2xl border border-dashed border-white/15 py-12 px-5 text-center">
+                  <div className="text-[15px] font-bold text-white">아직 만든 DM이 없어요</div>
+                  <div className="text-[13px] text-white/55 mt-1.5">사진과 글만 넣으면 첫 DM이 완성돼요.</div>
+                  <div className="flex items-center justify-center gap-3 mt-4">
+                    <button type="button" onClick={() => navigate('/quick-campaign?channel=dm')} className="h-10 px-5 rounded-xl text-[13.5px] font-bold text-indigo-950 bg-gradient-to-r from-amber-400 to-fuchsia-400">만들기</button>
+                    <button type="button" onClick={handleStartBlockBuild} disabled={generating} className="h-10 px-4 rounded-xl text-[13px] font-semibold text-white/80 border border-white/15 hover:bg-white/10">블록으로 첫 DM 만들기</button>
+                  </div>
                 </div>
-                {paginatedList.map((dm) => (
-                  <DmListRow
-                    key={dm.id}
-                    dm={dm}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    onClone={handleClone}
-                    onCopyUrl={handleCopyUrl}
-                    onTrack={(id, title) => setTrackTarget({ id, title })}
-                    onKoreanAlias={(id, title) => setAliasTarget({ id, title })}
-                    onStop={handleStop}
-                    onResume={handleResume}
-                    cloning={cloningId === dm.id}
-                  />
-                ))}
-                {/* 희소 상태 — 1~2개면 목록 끝에 블록으로 만들기 줄 (첫 페이지만) */}
-                {safePage === 1 && list.length > 0 && list.length < 3 && (
-                  <button
-                    type="button"
-                    className="dm-list-ghost"
-                    onClick={handleStartBlockBuild}
-                    disabled={generating}
-                    style={{ borderRadius: '0 0 14px 14px', cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1 }}
-                  >
-                    <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(168,85,247,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🧱</div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>블록으로 하나 더 만들기</div>
-                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5, marginTop: 2 }}>블록을 고르면 필요한 것만 물어봐요</div>
-                    </div>
-                  </button>
-                )}
-              </div>
-
-              {/* 페이징 컨트롤 (totalPages > 1 영역만 표시) */}
-              {totalPages > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={safePage === 1}
-                    style={{
-                      width: 36, height: 36,
-                      background: safePage === 1 ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      color: safePage === 1 ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.8)',
-                      borderRadius: 8,
-                      cursor: safePage === 1 ? 'not-allowed' : 'pointer',
-                      fontSize: 14, fontWeight: 700,
-                      transition: 'all 0.2s',
-                    }}
-                    title="이전 페이지"
-                  >
-                    ‹
-                  </button>
-
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => {
-                    const isActive = p === safePage;
-                    return (
-                      <button
-                        key={p}
-                        onClick={() => setCurrentPage(p)}
-                        style={{
-                          minWidth: 36, height: 36, padding: '0 10px',
-                          background: isActive ? 'linear-gradient(135deg, #8b5cf6, #a855f7)' : 'rgba(255,255,255,0.04)',
-                          border: `1px solid ${isActive ? 'rgba(168, 85, 247, 0.6)' : 'rgba(255,255,255,0.1)'}`,
-                          color: isActive ? '#fff' : 'rgba(255,255,255,0.7)',
-                          borderRadius: 8,
-                          cursor: 'pointer',
-                          fontSize: 13,
-                          fontWeight: isActive ? 800 : 600,
-                          transition: 'all 0.2s',
-                          boxShadow: isActive ? '0 2px 8px rgba(168, 85, 247, 0.4)' : 'none',
-                        }}
-                      >
-                        {p}
-                      </button>
-                    );
-                  })}
-
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={safePage === totalPages}
-                    style={{
-                      width: 36, height: 36,
-                      background: safePage === totalPages ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      color: safePage === totalPages ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.8)',
-                      borderRadius: 8,
-                      cursor: safePage === totalPages ? 'not-allowed' : 'pointer',
-                      fontSize: 14, fontWeight: 700,
-                      transition: 'all 0.2s',
-                    }}
-                    title="다음 페이지"
-                  >
-                    ›
-                  </button>
+              ) : shown.length === 0 ? (
+                <div className="py-14 text-center text-[13px] text-white/45">조건에 맞는 DM이 없어요.</div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4 mt-4">
+                  {shown.slice(0, listLimit).map(({ d, st }) => (
+                    <DmChip
+                      key={d.id}
+                      cover={d.section_summary?.cover || null}
+                      fallback={<DmMiniCover cover={null} types={d.section_summary?.types} accent={d.section_summary?.accent} pageCount={d.page_count} />}
+                      status={st}
+                      catalog={!!d.catalog}
+                      title={d.title || '(제목 없음)'}
+                      meta={st === 'draft' ? `${fmtDate(d.updated_at)} 수정` : `${fmtDate(d.updated_at)} · 블록 ${d.section_summary?.count ?? 0}개`}
+                      metric={st !== 'draft' ? <Meter label={`열람 ${(d.view_count || 0).toLocaleString()}`} pct={null} /> : undefined}
+                      onOpen={() => { if (st === 'draft') void handleEdit(d.id, d.layout_mode); else setDetail(d); }}
+                      onContinue={() => { void handleEdit(d.id, d.layout_mode); }}
+                    />
+                  ))}
                 </div>
               )}
-            </>
+              {shown.length > listLimit && (
+                <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-white/75 border border-white/15 hover:bg-white/10">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
+              )}
+              <p className="text-[10px] text-white/30 italic mt-4">Data source: DM 목록 · 열람 = 공용·개인화 링크 누적 열람 수 · 요약 = 최근 30일</p>
+            </section>
           );
         })()}
       </main>
@@ -1365,6 +1262,35 @@ export default function DmBuilderPage() {
         onCancel={() => setPendingGen(null)}
       />
 
+      {/* ★ 2026-09-27 만들기 개편 — 보낸 DM 상세 창(성과·보낸 기록·받은 사람별·응답) */}
+      {detail && (
+        <DmDetailModal
+          dm={detail}
+          onClose={() => setDetail(null)}
+          onEdit={() => { const d = detail; setDetail(null); void handleEdit(d.id, d.layout_mode); }}
+          onClone={() => { void handleClone(detail.id); }}
+          cloning={cloningId === detail.id}
+          onStop={() => { const id = detail.id; setDetail(null); void handleStop(id); }}
+          onResume={() => { const id = detail.id; setDetail(null); void handleResume(id); }}
+          onDelete={() => { const id = detail.id; setDetail(null); void handleDelete(id); }}
+          onResend={() => { const d = detail; setDetail(null); setListSend({ id: d.id, title: d.title, brand: d.store_name || null }); }}
+          onResendUnviewed={() => { const d = detail; setDetail(null); setTrackTarget({ id: d.id, title: d.title }); }}
+          onGetUrl={() => handleCopyUrl(detail.id)}
+          onAlias={() => setAliasTarget({ id: detail.id, title: detail.title })}
+        />
+      )}
+      <MakeSendModal
+        open={!!listSend}
+        onClose={() => setListSend(null)}
+        channel="dm"
+        dm={listSend ? { id: listSend.id, title: listSend.title, brand: listSend.brand } : null}
+        email={null}
+        onSent={() => { void refreshList(); }}
+        onOpenAdvancedDm={() => { const t = listSend; setListSend(null); if (t) setComposeTarget({ id: t.id, title: t.title }); }}
+      />
+      {composeTarget && (
+        <DmSendAndTrackModal dmId={composeTarget.id} dmTitle={composeTarget.title} show initialView="compose" onClose={() => setComposeTarget(null)} />
+      )}
       {/* ★ 2026-07-02(3) 카드 [발송 추적] — 추적 탭 직행 */}
       {trackTarget && (
         <DmSendAndTrackModal dmId={trackTarget.id} dmTitle={trackTarget.title} show initialView="track" onClose={() => setTrackTarget(null)} />
@@ -1378,7 +1304,11 @@ export default function DmBuilderPage() {
   );
 }
 
-function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false }: { onBack: () => void; onPublishDone: () => void; fromPlanner?: boolean }) {
+function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false, hidden = false, publishSignal = 0, sendSignal = 0 }: {
+  onBack: () => void; onPublishDone: () => void; fromPlanner?: boolean;
+  /** ★ 2026-09-27 만들기 개편 — 새 수정 화면이 머리를 가진다. 발행·발송 흐름(모달·검수·플래너 확인)만 여기 남는다 */
+  hidden?: boolean; publishSignal?: number; sendSignal?: number;
+}) {
   const navigate = useNavigate();
   const saveStore = useDmBuilderStore((s) => s.save);
   const dmId = useDmBuilderStore((s) => s.dmId);
@@ -1469,13 +1399,8 @@ function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false }: { onBack
     onPublishDone();
   };
 
-  return (
-    <>
-      <DmTopBar
-        onBack={onBack}
-        onTestSendClick={handleTestSend}
-        // 발행 완료 = 크레딧 모달 없이 바로 타겟 발송 모달 / 미발행 = ★ M4 자동 검수 내장 → 통과 시 크레딧 확인 → 발행
-        onPublishClick={async () => {
+  // 발행 완료 = 크레딧 모달 없이 바로 타겟 발송 모달 / 미발행 = ★ M4 자동 검수 내장 → 통과 시 크레딧 확인 → 발행
+  const startPublish = async () => {
           if (isPublished) { setSendModalOpen(true); return; }
           // ★ Codex 1R — 저장 배리어: 진행 중 자동저장 완료를 기다린 뒤(save는 isSaving이면 즉시 반환)
           //   dirty/미생성분을 직접 저장 — 최신 상태로 검수·발행 보장. dmId 확보 실패 = 발행 중단(정직 안내).
@@ -1497,8 +1422,20 @@ function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false }: { onBack
             return;
           }
           setConfirmPublish(true);
-        }}
-      />
+  };
+  // ★ 2026-09-27 새 수정 화면의 [보내기](플래너 DM) · 보내기 창 [자세히 설정] 신호
+  useEffect(() => { if (publishSignal > 0) void startPublish(); }, [publishSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (sendSignal > 0) setSendModalOpen(true); }, [sendSignal]);
+
+  return (
+    <>
+      {!hidden && (
+        <DmTopBar
+          onBack={onBack}
+          onTestSendClick={handleTestSend}
+          onPublishClick={() => { void startPublish(); }}
+        />
+      )}
       <CreditConfirmModal
         open={confirmPublish}
         source={hasInteraction ? 'dm-interaction-publish' : 'dm-builder'}

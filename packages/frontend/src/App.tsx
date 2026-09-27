@@ -82,6 +82,8 @@ const PredictiveDashboardPage = lazyPage(() => import('./pages/PredictiveDashboa
 // ★ D209+ (2026-05-22) Phase D 비용 안전 — AI 호출 월 한도 + cache 통계 대시보드
 const AiUsagePage = lazyPage(() => import('./pages/AiUsagePage'));
 const QuickCampaignPage = lazyPage(() => import('./pages/QuickCampaignPage'));
+// ★ 2026-09-27 만들기 개편 — 결과 화면(받는 사람이 볼 실물 + 누른 곳만 고치기 + 보내기)
+const QuickCampaignResultPage = lazyPage(() => import('./pages/QuickCampaignResultPage'));
 const CampaignAgencyPage = lazyPage(() => import('./pages/CampaignAgencyPage')); // ★ 2026-07-09 CRM 캠페인 대행 접수
 const AdminCampaignAgencyPage = lazyPage(() => import('./pages/AdminCampaignAgencyPage')); // ★ 2026-07-09 캠페인 대행 설계
 
@@ -652,6 +654,15 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <PlanGate featureId="quick-campaign"><QuickCampaignPage /></PlanGate>
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/quick-campaign/result"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <PlanGate featureId="quick-campaign"><QuickCampaignResultPage /></PlanGate>
             </PrivateRoute>
           }
         />

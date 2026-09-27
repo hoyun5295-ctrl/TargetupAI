@@ -124,7 +124,9 @@ describe('DM 정상 흐름 — 판정 → checkCredit → 조립 → 초안 → 
     expect(calls).toEqual(['checkCredit:5', 'assembleDm', 'createDm', `deduct:${keyOf(r)}:dm-ai-generate:5`]);
     expect(drafts.dm).toHaveLength(1);
     expect(drafts.dm[0]).toMatchObject({ approval_status: 'draft', layout_mode: 'scroll' });
-    expect(String(drafts.dm[0].title)).toContain('브랜드');
+    // ★ 2026-09-27 만들기 개편 S1 — 제목 = 첫 행사 카드 제목(옛 `[AI 자동제작] {회사}`는 받는 사람 브라우저 탭에 노출)
+    expect(drafts.dm[0].title).toBe('가을 세일');
+    expect(String(drafts.dm[0].title)).not.toContain('AI 자동제작');
     // 엔진 입력 = 고객 입구 · 카드 1 · 갤러리 = 카드 이미지 · 면허 인용 = 카드 문구 · features 그대로
     const { m, opts } = captured.dm[0];
     expect(opts).toMatchObject({ entry: 'customer', channel: 'DM', features: null, presetSections: null });
@@ -141,6 +143,37 @@ describe('DM 정상 흐름 — 판정 → checkCredit → 조립 → 초안 → 
     const { deps, captured } = makeDeps();
     await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ features: ['coupon', 'bogus', 'gallery'] }) }, deps);
     expect(captured.dm[0].opts.features).toEqual(['coupon', 'gallery']);
+  });
+});
+
+// ★ 2026-09-27 과금 지문 = 요청 원문(서버가 재료를 거르기 전) — 같은 요청 재시도 = 같은 멱등키 = duplicate(재차감 0) · 다른 요청 = 새 키.
+// ★ 주소 읽기 카드의 면허 = 화면 체크(모든 카드와 같은 규칙 · Codex 3R~12R 결론으로 서버 추측 판정 제거).
+describe('과금 지문 · 주소 읽기 카드 면허 = 화면 체크', () => {
+  it('주소 읽기 카드(readId) 같은 요청 재시도 → 원장 1행 · 두 번째 duplicate', async () => {
+    const { deps, ledger } = makeDeps();
+    const readCard = { id: 'r1', title: '가을 세일', text: T40, licensed: false, images: [HERO], link: 'https://shop.example/event', readId: 'a'.repeat(32), readHash: 'b'.repeat(16) };
+    const a = await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ eventCards: [readCard] }) }, deps);
+    const b = await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ eventCards: [readCard] }) }, deps);
+    expect(a.idempotencyKey).toBe(b.idempotencyKey);
+    expect(a.deductOutcome).toBe('deducted');
+    expect(b.deductOutcome).toBe('duplicate');
+    expect(ledger).toHaveLength(1);
+  });
+  it('요청 내용이 다르면(면허 체크 변경) 다른 키 = 새 차감(지문의 목적 유지)', async () => {
+    const { deps, ledger } = makeDeps();
+    const card = { id: 'r1', title: '가을 세일', text: T40, licensed: false, images: [HERO], link: 'https://shop.example/event', readId: 'a'.repeat(32), readHash: 'b'.repeat(16) };
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ eventCards: [card] }) }, deps);
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ eventCards: [{ ...card, licensed: true }] }) }, deps);
+    expect(ledger).toHaveLength(2);
+  });
+  it('주소 읽기 카드: 체크 안 함 = 면허 0(수치 빠짐) · 체크 = 면허(서버가 덮어쓰지 않는다)', async () => {
+    const card = { id: 'r1', title: '가을 세일', text: T40, licensed: false, images: [HERO], link: 'https://shop.example/event', readId: 'a'.repeat(32), readHash: 'b'.repeat(16) };
+    const off = makeDeps();
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ eventCards: [card] }) }, off.deps);
+    expect(off.captured.dm[0].m.licensedQuote).toBe('');
+    const on = makeDeps();
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ eventCards: [{ ...card, licensed: true }] }) }, on.deps);
+    expect(on.captured.dm[0].m.licensedQuote).toContain(T40);
   });
 });
 
@@ -270,7 +303,7 @@ describe('계약 4·9 — 이메일: 채널 독립 키·소스 · is_ad 행 저�
     expect(r.idempotencyKey).toBe(keyOf(r));
     expect(r.idempotencyKey.startsWith(`quick:${COMPANY}:email:${TOKEN}:`)).toBe(true);
     expect(ledger).toEqual([keyOf(r)]);
-    expect(calls).toEqual(['smtp', 'checkCredit:3', 'produceEmail', 'createEmail', `deduct:${keyOf(r)}:email-ai-generate:3`]);
+    expect(calls).toEqual(['checkCredit:3', 'produceEmail', 'createEmail', `deduct:${keyOf(r)}:email-ai-generate:3`]);
     expect(drafts.email[0]).toMatchObject({ companyId: COMPANY, createdBy: USER, isAd: true, aiGenerated: true, subject: '이메일 제목', htmlBody: '<p>x</p>', textBody: 'x' });
     expect(Array.isArray(drafts.email[0].sections)).toBe(true);
     expect(captured.email[0]).toMatchObject({ entry: 'customer', features: null, licensedQuote: expect.stringContaining(T40) });
@@ -279,14 +312,18 @@ describe('계약 4·9 — 이메일: 채널 독립 키·소스 · is_ad 행 저�
     expect(r.preheader).toBe('프리헤더');
     expect(drafts.dm).toEqual([]);
   });
-  it('SMTP 미설정 = 400 SMTP_REQUIRED · checkCredit·생성·행·차감 0 · DM 채널은 SMTP 를 보지 않는다', async () => {
+  // ★ 2026-09-27 만들기 개편 S1(Harold 결재 ③ · 불변 11 개정) — 발신 설정 판정은 완성·발송 자리로 옮겼다. 생성은 SMTP 를 보지 않는다.
+  it('SMTP 미설정이어도 이메일 초안은 만든다 · 생성 경로는 SMTP 를 부르지 않는다(판정 = 완성·발송)', async () => {
     const { deps, calls, drafts, ledger } = makeDeps({ smtpConfigured: async () => { calls.push('smtp'); return false; } });
-    await expectBuildError(generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ channel: 'email', expectedTotal: 3 }) }, deps), 400, 'SMTP_REQUIRED');
-    expect(calls).toEqual(['smtp']);
-    expect(drafts.email).toEqual([]);
-    expect(ledger).toEqual([]);
-    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, deps);
-    expect(calls.filter((c) => c === 'smtp')).toHaveLength(1);
+    const r = await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ channel: 'email', expectedTotal: 3 }) }, deps);
+    expect(calls).not.toContain('smtp');
+    expect(drafts.email).toHaveLength(1);
+    expect(ledger).toEqual([keyOf(r)]);
+  });
+  it('초안 제목 — 첫 카드 제목이 비면 `{회사} 소식`(이메일 캠페인 이름도 같은 규칙)', async () => {
+    const { deps, drafts } = makeDeps();
+    await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ eventCards: [{ id: 'c1', title: '', text: T40, licensed: true, images: [HERO] }] }) }, deps);
+    expect(drafts.dm[0].title).toBe('브랜드 소식');
   });
 });
 
@@ -506,7 +543,7 @@ describe('★ T4 — 라우트 채널 고정 · 원장 조회 실패 503 · 견�
     const emR = await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ channel: 'email', expectedTotal: 3, attemptToken: TOKEN2 }) }, deps);
     const emRes = buildGenerateResponse(emR);
     expect(emRes).toMatchObject({ channel: 'email', draft_id: 'em-1', campaign_id: 'em-1', subjects: ['이메일 제목'], preheader: '프리헤더' });
-    expect(String(emRes.name)).toContain('브랜드');
+    expect(emRes.name).toBe('가을 세일'); // ★ 0927 S1 — 첫 카드 제목(DM 과 같은 규칙)
   });
 });
 

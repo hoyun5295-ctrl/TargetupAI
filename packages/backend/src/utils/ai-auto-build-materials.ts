@@ -40,6 +40,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const IMAGE_FILENAME_RE = /^[A-Za-z0-9._-]+$/;
 const CARD_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const PRODUCT_CODE_RE = /^[A-Za-z0-9_-]{1,60}$/;
+// ★ 2026-09-27 만들기 개편 S13 — 주소 읽기 캐시 id(16바이트 hex) · 카드 지문 16
+const READ_ID_RE = /^[a-f0-9]{32}$/;
+const READ_HASH_RE = /^[a-f0-9]{16}$/;
 const TITLE_MAX = 40;
 const BRAND_MAX = 60;
 const PRODUCT_NAME_MAX = 120;
@@ -84,8 +87,12 @@ export interface BuildEventCard {
   licensed: boolean;
   images: BuildImage[];
   link: string | null;
+  /** ★ 2026-09-27 S13 — 주소 읽기에서 온 카드(캐시 id + 카드 지문). 면허는 서버가 캐시와 대조해 정한다(화면 주장 대체) */
+  readId?: string | null;
+  readHash?: string | null;
 }
-export type BuildProductSource = 'mall' | 'manual';
+/** ★ 2026-09-27 S13 'site' = 주소 읽기가 가져온 홈페이지 상품(사진 = 회사 서빙 경로 사본 · 가격 없음 · 링크) — 결재 ② */
+export type BuildProductSource = 'mall' | 'manual' | 'site';
 export type BuildMallProvider = 'cafe24' | 'naver' | `woocommerce:${string}`;
 
 /** 몰 provider 인정 — 고정 2종 + 우커머스 몰별. 그 밖(godo · 빈 호스트 · IP)은 manual 로 접는다. */
@@ -105,7 +112,7 @@ export interface BuildProduct {
   salePrice: number | null;
   discountRate: number | null;
   url: string | null;
-  /** 몰 이미지만(불변 5) · manual 은 항상 null */
+  /** 몰 이미지 · ★0927 site = 회사 서빙 경로 사본만(결재 ②) · manual 은 항상 null */
   imageUrl: string | null;
 }
 /** ★ 2026-09-15 'catalog' = 카탈로그 DM(쪽 이미지 N장 → 장당 1쪽 슬라이드 DM + settings.catalog · AI 0 · 판독 0 · 차감 0). DM 라우트(requirePlanFeature mobile_dm)로 들어온다. */
@@ -184,6 +191,17 @@ function normalizeImages(raw: unknown, companyId: string, max: number): BuildIma
   return out;
 }
 
+/**
+ * ★ 2026-09-27 만들기 개편 S1 — 초안 제목 = 첫 행사 카드 제목 · 없으면 `{회사} 소식`.
+ * 옛 `[AI 자동제작] {회사}`는 DM 뷰어 `<title>`(받는 사람 브라우저 탭)로 그대로 나갔다(내부 표식 노출).
+ * 이메일 캠페인 이름(목록 표시)도 같은 규칙을 쓴다 — 두 채널 목록이 같은 이름으로 보인다.
+ */
+export function buildDraftTitle(cards: Array<{ title?: string | null }>, companyName: string, max: number): string {
+  const first = cards.map((c) => collapseWs(c?.title || '')).find((t) => !!t);
+  const base = first || `${collapseWs(companyName) || '우리 회사'} 소식`;
+  return base.slice(0, max);
+}
+
 function normalizeEventCards(raw: unknown, companyId: string): BuildEventCard[] {
   const list = Array.isArray(raw) ? raw : [];
   const out: BuildEventCard[] = [];
@@ -202,13 +220,16 @@ function normalizeEventCards(raw: unknown, companyId: string): BuildEventCard[] 
       licensed: r.licensed === true && !!(text || title),
       images,
       link: httpUrlOrNull(r.link),
+      ...(READ_ID_RE.test(String(r.readId ?? '')) && READ_HASH_RE.test(String(r.readHash ?? ''))
+        ? { readId: String(r.readId), readHash: String(r.readHash) }
+        : {}),
     });
     if (out.length >= AI_AUTO_BUILD_CARDS_MAX) break;
   }
   return out;
 }
 
-function normalizeProducts(raw: unknown): BuildProduct[] {
+function normalizeProducts(raw: unknown, companyId: string): BuildProduct[] {
   const list = Array.isArray(raw) ? raw : [];
   const out: BuildProduct[] = [];
   for (const p of list) {
@@ -216,6 +237,15 @@ function normalizeProducts(raw: unknown): BuildProduct[] {
     const r = p as Record<string, unknown>;
     const name = collapseWs(r.name).slice(0, PRODUCT_NAME_MAX);
     if (!name) continue;
+    // ★ 2026-09-27 S13 홈페이지 상품 — 사진이 이 회사 서빙 경로 사본일 때만 · 가격은 받지 않는다(가격 = 몰 재조회만 · 불변 2·3)
+    if (String(r.source ?? '') === 'site') {
+      const img = String(r.imageUrl ?? '').trim();
+      const url = httpUrlOrNull(r.url);
+      if (!isCompanyImageUrl(img, companyId) || !url) continue;
+      out.push({ source: 'site', provider: null, code: null, name, price: null, salePrice: null, discountRate: null, url, imageUrl: img });
+      if (out.length >= AI_AUTO_BUILD_PRODUCTS_MAX) break;
+      continue;
+    }
     const providerRaw = String(r.provider ?? '').trim().toLowerCase();
     const codeRaw = String(r.code ?? '').trim();
     const isMall = isBuildMallProvider(providerRaw) && PRODUCT_CODE_RE.test(codeRaw);
@@ -272,7 +302,7 @@ export function normalizeBuildMaterials(raw: unknown, companyId: string): BuildN
       channel: channelRaw,
       isAd: typeof r.isAd === 'boolean' ? r.isAd : null,
       eventCards,
-      products: isCatalog ? [] : normalizeProducts(r.products),
+      products: isCatalog ? [] : normalizeProducts(r.products, companyId),
       features: isCatalog ? null : normalizeFeatures(r.features),
       brandName: collapseWs(r.brandName).slice(0, BRAND_MAX) || null,
       origin: userText ? 'user' : 'empty',
@@ -326,7 +356,7 @@ export function judgeImageRoles(images: readonly BuildImage[]): BuildImageRoleJu
  */
 export function buildMaterialsHash(m: BuildMaterials, roles: readonly BuildImageRoleJudgement[]): string {
   const products = m.products
-    .map((p) => (p.source === 'mall' ? `mall:${p.provider}:${p.code}` : `manual:${p.name}:${p.price ?? ''}:${p.salePrice ?? ''}:${p.discountRate ?? ''}`))
+    .map((p) => (p.source === 'mall' ? `mall:${p.provider}:${p.code}` : p.source === 'site' ? `site:${p.name}:${p.imageUrl ?? ''}` : `manual:${p.name}:${p.price ?? ''}:${p.salePrice ?? ''}:${p.discountRate ?? ''}`))
     .sort();
   // 카탈로그 채널 = 쪽 수·제목(URL 은 계약 3 대로 넣지 않는다 · 견적은 0 이라 결박은 형식 유지)
   const payload = { text: m.userText, products, roles: roles.map((r) => r.role), catalogPages: m.catalogImages.length, catalogTitle: m.catalogTitle };
@@ -446,7 +476,8 @@ export interface BuildProductCard {
   image_url: string;
   link_url?: string;
   discount_rate?: number;
-  source: 'mall';
+  /** ★0927 S13 site = 홈페이지 상품(가격 없음 · code 빈 값 · verified false) */
+  source: 'mall' | 'site';
   code: string;
   verified: boolean;
 }
@@ -510,6 +541,14 @@ export function resolveBuildProducts(products: readonly BuildProduct[], lookups:
         code: no,
         verified: !!ok,
       });
+      continue;
+    }
+    // ★ 2026-09-27 S13 홈페이지 상품 = 사진 카드(가격 없음 · 링크) · 이름 기준 중복 제거
+    if (p.source === 'site' && p.imageUrl) {
+      const siteKey = p.name.toLowerCase().replace(/\s+/g, '');
+      if (seenName.has(siteKey)) continue;
+      seenName.add(siteKey);
+      cards.push({ name: p.name, price: null, discount_price: null, image_url: p.imageUrl, ...(p.url ? { link_url: p.url } : {}), source: 'site', code: '', verified: false });
       continue;
     }
     // 수동 · 상품번호 없는 몰 상품 = 글줄(카드 X · 이름 기준 중복 제거)

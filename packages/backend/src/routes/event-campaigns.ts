@@ -27,6 +27,9 @@ import { saveMaterialImages, extractMaterialsText, quoteQuickCampaign, quickPlan
 // ★ 2026-09-14 T4 AI 자동제작 v1 견적(POST · 재료 본문) — 신규 ENV 게이트 · 화면 배지·버튼 잠금·금액의 단일 출처
 import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, AI_AUTO_BUILD_CARDS_MAX, AI_AUTO_BUILD_CARD_IMAGES, AI_AUTO_BUILD_PRODUCTS_MAX, AI_AUTO_BUILD_MIN_TEXT_CHARS } from '../utils/ai-auto-build-materials';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
+// ★ 2026-09-27 만들기 개편 S12 — 주소 하나 → 재료 프리필(AI 0 · 가드 크롤 · 렌더 대기 0 · 10분 캐시)
+import { readBrandPage, PageReadError } from '../utils/brand-page-reader';
+import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
 
 export const eventCampaignRouter = Router();
 eventCampaignRouter.use(authenticate);
@@ -93,6 +96,26 @@ eventCampaignRouter.get('/materials/quote', async (req: any, res: Response) => {
   } catch (err: any) {
     console.error('[event-campaigns materials/quote] 오류:', err?.message);
     return res.status(500).json({ success: false, error: '견적을 계산하지 못했습니다.' });
+  }
+});
+
+// ★ 2026-09-27 만들기 개편 S12 — POST /materials/read-url { url } → 재료 프리필(행사 카드 ≤3 · 사진 사본 ≤6 · 로고·색 · 홈페이지 상품 ≤4)
+//   차감 0 · AI 0 · 면허는 여기서 주지 않는다(생성 요청의 readId+readHash 를 서버가 대조) · 회사당 동시 1건(크롤은 무겁다).
+eventCampaignRouter.post('/materials/read-url', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  if (!aiAutoBuildEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' });
+  const lockKey = `make-read-url:${companyId}`;
+  if (!tryAcquireInflight(lockKey)) return res.status(409).json({ success: false, error: '지금 다른 주소를 읽는 중이에요. 잠시 뒤 다시 눌러 주세요.', code: 'IN_FLIGHT' });
+  try {
+    const r = await readBrandPage(companyId, req.body?.url);
+    return res.json({ success: true, ...r });
+  } catch (err: any) {
+    if (err instanceof PageReadError) return res.status(err.status).json({ success: false, error: err.message, code: err.code });
+    console.error('[event-campaigns materials/read-url] 오류:', err?.message);
+    return res.status(500).json({ success: false, error: '페이지를 읽지 못했어요. 사진·글을 직접 넣어 주세요.' });
+  } finally {
+    releaseInflight(lockKey);
   }
 });
 

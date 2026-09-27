@@ -34,6 +34,16 @@ import { createSection, type Section } from '../utils/dm-section-defaults';
 import { STUDIO_EMAIL_DRAFT_KEY } from '../lib/studio-draft';
 import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 import type { EmailCampaign, CampaignStatus } from '../components/email/email-campaign-types';
+// ★ 2026-09-27 만들기 개편 — 발송 대상 창은 결과 화면·보내기 창도 쓰므로 공용 파일로 옮겼다(원본 그대로)
+import RecipientsModal from '../components/email/EmailRecipientsModal';
+// ★ 2026-09-27 만들기 개편 — 첫 화면(만들기 카드 · 다른 방법 접힘 · 카드칩 · 상세 창) · 수정 화면(EmailEditScreen · DM 과 같은 칸) · 보내기 창
+import { Layers } from 'lucide-react';
+import EmailEditScreen from '../components/make/EmailEditScreen';
+import EmailDetailModal from '../components/make/EmailDetailModal';
+import MakeSendModal from '../components/make/MakeSendModal';
+import { MakeHeroCard, OtherMethods, ListHead, EmailChip, Meter, fmtDate } from '../components/make/HomeParts';
+import { emailChipStatus, emailCoverOf, type ChipStatus } from '../utils/make-flow';
+import '../styles/make.css';
 
 // ★ 2026-07-02(3) 빠른 시작 7카드 제거 — 시작 방식은 [템플릿에서 시작]/[비주얼로 만들기] 2개 + 프롬프트 AI 생성으로 통일 (Harold 확정)
 
@@ -186,7 +196,7 @@ export default function EmailCampaignsPage() {
   // AI 캠페인 발송 확정 30크레딧 확인
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
   // 비주얼 빌더 에디터 (sections 기반)
-  const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string; completed?: boolean; design?: EmailDesign | null } | null>(null);
+  const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string; completed?: boolean; design?: EmailDesign | null; fromName?: string; hasPlaceholder?: boolean } | null>(null);
   // ★ 2026-07-02 캠페인 목록 페이징 — 2열 × 2줄 = 페이지당 4카드 (Harold 확정)
   const CAMPAIGN_PAGE_SIZE = 4;
   const [campaignPage, setCampaignPage] = useState(1);
@@ -194,6 +204,18 @@ export default function EmailCampaignsPage() {
   const [showGallery, setShowGallery] = useState(false);
   // 성과 분석 대시보드 모달
   const [showAnalytics, setShowAnalytics] = useState(false);
+  // ★ 2026-09-27 만들기 개편 — 첫 화면 상태 · 진입 값(?other=1 다른 방법 펼침 · blank 빈 화면 · ?smtp=1 회사 메일 연결 창 · ?pair= 같은 재료 DM)
+  const [entryOther] = useState(() => String(searchParams.get('other') || '').trim() || null);
+  const [entrySmtp] = useState(() => searchParams.get('smtp') === '1');
+  const [pairDmId] = useState(() => String(searchParams.get('pair') || '').trim() || null);
+  const [otherOpen, setOtherOpen] = useState(entryOther === '1');
+  const [listFilter, setListFilter] = useState<'all' | ChipStatus>('all');
+  const [listQuery, setListQuery] = useState('');
+  const [listSort, setListSort] = useState('recent');
+  const [listLimit, setListLimit] = useState(24);
+  const [detail, setDetail] = useState<EmailCampaign | null>(null);
+  const [cloningId, setCloningId] = useState<string | null>(null);
+  const [pageSend, setPageSend] = useState<EmailCampaign | null>(null);
 
   const token = () => localStorage.getItem('token');
   const authHeaders = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' });
@@ -500,7 +522,7 @@ export default function EmailCampaignsPage() {
   // 편집기 열기 — 비주얼 섹션 있으면 비주얼 에디터, 아니면 HTML 폼 (수정 버튼·placeholder 안내 공용)
   const openEditor = (c: EmailCampaign) => {
     if (c.sections && c.sections.length) {
-      setVisualEditor({ sections: c.sections as Section[], name: c.name, subject: c.subject, isAd: c.isAd, aiGenerated: c.aiGenerated, campaignId: c.id, completed: c.completed, design: c.design ?? null });
+      setVisualEditor({ sections: c.sections as Section[], name: c.name, subject: c.subject, isAd: c.isAd, aiGenerated: c.aiGenerated, campaignId: c.id, completed: c.completed, design: c.design ?? null, fromName: c.fromName, hasPlaceholder: c.hasPlaceholder });
     } else {
       setEditing(c);
     }
@@ -523,6 +545,30 @@ export default function EmailCampaignsPage() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editEntryId, loading]);
+
+  // ★ 2026-09-27 만들기 개편 S11 — 복제(초안 · 차감 0)
+  const handleClone = async (c: EmailCampaign) => {
+    if (cloningId) return;
+    setCloningId(c.id);
+    try {
+      const res = await fetch(`/api/email/campaigns/${c.id}/clone`, { method: 'POST', headers: authHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (data?.success) { showToast('복제했어요. "복사본"으로 추가됐어요.', 'success'); await loadAll(); }
+      else showToast(data?.error || '복제하지 못했어요.', 'error');
+    } catch (e: any) {
+      showToast(e?.message || '복제하지 못했어요.', 'error');
+    } finally {
+      setCloningId(null);
+    }
+  };
+  const entryHandled = useRef(false);
+  useEffect(() => {
+    if (entryHandled.current || loading) return;
+    entryHandled.current = true;
+    if (entrySmtp) setSmtpFormOpen(true);
+    if (entryOther === 'blank') setVisualEditor({ sections: [], isAd: true, aiGenerated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   const openRecipientsModal = (c: EmailCampaign) => {
     // ★ 2026-07-02(3) 미완성 = 발송 진입 차단 (버튼 미노출 + 함수 가드 + 백엔드 CAMPAIGN_NOT_COMPLETED 3중)
@@ -790,31 +836,36 @@ export default function EmailCampaignsPage() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className={OUI_TITLE}>Email 캠페인</h1>
+              <h1 className={OUI_TITLE}>이메일 마케팅</h1>
             </div>
-            <p className={OUI_SUBTITLE}>회사 SMTP 직접 등록 → 본인 도메인 발신 + 광고 자동 합성 + 오픈/클릭 트래킹</p>
+            <p className={OUI_SUBTITLE}>회사 메일로 보내고 열람·클릭까지 확인해요</p>
           </div>
           <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
-            {smtpConfigured && smtpConfig?.isConfigured && (
+            {/* ★ 2026-09-27 만들기 개편 — 머리 칩 = 발신 연결 상태(누르면 회사 메일 설정 · 연결 점검은 옆 버튼) */}
+            {smtpConfigured && smtpConfig?.isConfigured ? (
               <>
                 <button
                   onClick={() => setSmtpFormOpen(true)}
-                  className="text-xs flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 hover:bg-emerald-500/25 transition-colors"
-                  title="SMTP 설정: 수정 / 영구 제거"
+                  className="text-xs flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 hover:bg-emerald-500/25 transition-colors"
+                  title="회사 메일(발신) 설정: 수정 / 해제"
                 >
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
-                  <span className="font-medium">발송 가능</span>
-                  <span className="hidden lg:inline text-emerald-200/50 font-mono">{smtpConfig.host}</span>
+                  <Check className="w-3.5 h-3.5 text-emerald-300" />
+                  <span className="font-medium">발신 {smtpConfig.fromEmail}</span>
                 </button>
                 <button
                   onClick={() => setTestModalOpen(true)}
-                  className="text-xs text-cyan-200 hover:bg-cyan-500/15 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors border border-cyan-400/20"
+                  className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
+                  title="회사 메일 연결이 정상인지 내 메일로 보내 확인해요"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">테스트 발송</span>
+                  <span className="hidden sm:inline">연결 점검</span>
                 </button>
               </>
-            )}
+            ) : !loading ? (
+              <button onClick={() => setSmtpFormOpen(true)} className="text-xs flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/15 border border-amber-400/30 text-amber-100 hover:bg-amber-500/25 transition-colors">
+                <Settings className="w-3.5 h-3.5" />회사 메일 연결하기
+              </button>
+            ) : null}
             {campaigns.length > 0 && (
               <button
                 onClick={() => setShowAnalytics(true)}
@@ -842,39 +893,27 @@ export default function EmailCampaignsPage() {
           </div>
         )}
 
-        {/* SMTP 설정 미완료 안내 */}
+        {/* ★ 2026-09-27 만들기 개편 — 회사 메일 미연결 = 만들기·미리보기는 지금 되고 보낼 때 연결(결재 ③) */}
         {!smtpConfigured && !loading && (
-          <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-4 md:p-5">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-300 mt-0.5 shrink-0" />
-              <div className="flex-1">
-                <h3 className="text-sm font-bold text-amber-100 mb-1">SMTP 설정 미완료: Email 캠페인 발송 불가</h3>
-                <p className="text-xs text-amber-200/80 mb-3">
-                  회사 admin 본인 메일 서버 (Google Workspace / Naver Works / Office 365 / 자체 메일 서버) SMTP 정보 등록 후 발송 가능합니다.
-                  발신 도메인 = 회사 본인 도메인 = 한줄로 부담 0 + SPF/DKIM/DMARC 회사 본인 책임.
-                </p>
-                <button
-                  onClick={() => setSmtpFormOpen(true)}
-                  className="text-xs bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 px-3 py-2 rounded-lg font-medium flex items-center gap-1.5"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                  SMTP 설정 시작
-                </button>
-              </div>
-            </div>
+          <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
+            <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0" />
+            <span className="text-[12.5px] text-amber-100 flex-1 min-w-[200px]">보내려면 회사 메일 연결이 필요해요. 만들기와 미리보기는 지금 돼요.</span>
+            <button onClick={() => setSmtpFormOpen(true)} className="text-xs bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 px-3 py-2 rounded-lg font-medium flex items-center gap-1.5"><Settings className="w-3.5 h-3.5" />회사 메일 연결하기</button>
           </div>
         )}
 
-        {/* SMTP 상태·테스트 발송은 헤더의 칩·작은 모달로 이동 — 가로 큰 배너/카드 제거 */}
-
-        {/* ★ 2026-09-14 T6 카드띠 [AI 자동제작 | 직접 제작] — 신규 ENV 미개방 회사는 그리지 않는다(설계서 §3-1 · §4-1) */}
-        {smtpConfigured && (
-          <AiBuildEntryStrip channel="email" enabled={autoBuild === true} disabled={genStep !== null}
-            onDirect={() => setVisualEditor({ sections: [], isAd: true, aiGenerated: false })}
-            directDesc="빈 블록에서 시작해 제목·본문·이미지를 직접 채워요. 템플릿·라이브러리는 아래에서 고를 수 있어요." />
-        )}
-        {/* ★ 2026-07-02(3): AI 원샷 생성 — 자연어 프롬프트 1개만 (빠른 시작 카드 제거, 결과는 비주얼 편집기로) */}
-        {smtpConfigured && (
+        {/* ★ 2026-09-27 만들기 개편 — 입구 하나(만들기) + 작은 링크 2 · 쓰던 입구는 "다른 방법"으로 접는다(결재 ④ · 핸들러 무변경) */}
+        <MakeHeroCard
+          title="재료만 넣으면 이메일이 완성돼요"
+          desc="모바일 DM에 쓴 재료를 그대로 불러올 수도 있어요. 광고 표기와 수신거부는 보낼 때 자동으로 붙어요."
+          links={[
+            { icon: <Layers className="w-3.5 h-3.5" />, label: '블록으로 직접 만들기', onClick: () => setVisualEditor({ sections: [], isAd: true, aiGenerated: false }) },
+            { icon: <LayoutTemplate className="w-3.5 h-3.5" />, label: '템플릿에서 고르기', onClick: () => setShowGallery(true) },
+          ]}
+          onMake={() => navigate('/quick-campaign?channel=email')}
+          disabled={genStep !== null}
+        />
+        <OtherMethods open={otherOpen} onToggle={() => setOtherOpen((v) => !v)} summary="한 줄로 자동 생성 · 저장 소재에서 · 빈 화면에서">
           <div className="bg-gradient-to-br from-fuchsia-600/20 via-purple-600/15 to-indigo-600/20 border border-fuchsia-400/30 rounded-2xl p-5">
             {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
             <div className="flex items-center gap-2 mb-3">
@@ -969,203 +1008,108 @@ export default function EmailCampaignsPage() {
               Data source: 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력
             </div>
           </div>
-        )}
+        </OtherMethods>
 
-        {/* 통계 요약 (캠페인 있는 경우) */}
-        {campaigns.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            {[
-              { label: '총 캠페인', value: stats.total.toLocaleString(), icon: Mail },
-              { label: '활성', value: stats.active.toLocaleString(), icon: ShieldCheck },
-              { label: '총 발송', value: stats.sent.toLocaleString(), icon: Send },
-              { label: '오픈율', value: `${stats.openRate.toFixed(1)}%`, icon: Eye },
-              { label: '클릭률', value: `${stats.clickRate.toFixed(1)}%`, icon: Eye },
-              { label: '반송률', value: `${stats.bounceRate.toFixed(1)}%`, icon: AlertCircle },
-            ].map((metric, idx) => (
-              <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-3">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <metric.icon className="w-3 h-3 text-white/40" />
-                  <span className="text-[10px] text-white/50">{metric.label}</span>
-                </div>
-                <div className="text-lg font-bold text-white">{metric.value}</div>
-              </div>
-            ))}
-          </div>
-        )}
-        {campaigns.length > 0 && (
-          <div className="text-[10px] text-white/30 italic">Data source: email_campaigns + email_events 누적 통계</div>
-        )}
-
-        {/* 캠페인 목록 */}
-        {loading ? (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-12 flex justify-center text-white/50">
-            <Loader2 className="w-5 h-5 animate-spin" />
-          </div>
-        ) : campaigns.length === 0 ? (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
-            아직 등록된 캠페인이 없습니다.
-            {smtpConfigured ? ' "신규 캠페인" 버튼을 눌러 시작해주세요.' : ' SMTP 설정 후 진입 가능합니다.'}
-          </div>
-        ) : (() => {
-          // ★ 2026-07-02 Harold 지시 — 2열 그리드 + 페이징뷰(페이지당 10건). 삭제로 페이지 수가 줄면 안전 범위로 보정.
-          const totalCampaignPages = Math.max(1, Math.ceil(campaigns.length / CAMPAIGN_PAGE_SIZE));
-          const safeCampaignPage = Math.min(campaignPage, totalCampaignPages);
-          const pagedCampaigns = campaigns.slice((safeCampaignPage - 1) * CAMPAIGN_PAGE_SIZE, safeCampaignPage * CAMPAIGN_PAGE_SIZE);
+        {/* ★ 2026-09-27 만들기 개편 — 내 이메일 = 요약 한 줄 + 상태 거름 칩 + 찾기·정렬 + 받은편지함 모양 카드칩(목업 마 ③) · 누르면 상세 창 · 초안 = 이어서 고치기 */}
+        {(() => {
+          const rate = (c: EmailCampaign) => (c.sentCount > 0 ? c.openCount / c.sentCount : -1);
+          const rows = campaigns.map((c) => ({ c, st: emailChipStatus(c) }));
+          const cnt: Record<string, number> = { all: rows.length };
+          rows.forEach(({ st }) => { cnt[st] = (cnt[st] || 0) + 1; });
+          const q = listQuery.trim().toLowerCase();
+          let shown = rows.filter(({ c, st }) => (listFilter === 'all' || st === listFilter) && (!q || `${c.name} ${c.subject}`.toLowerCase().includes(q)));
+          if (listSort === 'open') shown = shown.slice().sort((a, b) => rate(b.c) - rate(a.c));
+          else if (listSort === 'title') shown = shown.slice().sort((a, b) => (a.c.name || '').localeCompare(b.c.name || '', 'ko'));
+          const sentCampaigns = campaigns.filter((c) => c.sentCount > 0).length;
           return (
-          <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
-            {pagedCampaigns.map((c) => (
-              <div key={c.id} className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 transition-colors">
-                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <span className="text-base font-bold text-white">{c.name}</span>
-                  <StatusBadge status={c.status} />
-                  {(c.resendGeneration ?? 0) > 0 && <span className="text-[10px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded-full font-medium">재발송</span>}
-                  {c.isAd && <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full font-medium">광고성</span>}
-                  {c.status === 'draft' && !c.completed && <span className="text-[10px] bg-white/10 text-white/50 px-1.5 py-0.5 rounded-full font-medium" title="완성 저장(50크레딧) 후 발송이 열립니다">완성 전</span>}
-                  {c.status === 'draft' && c.hasPlaceholder && <span className="text-[10px] bg-orange-500/25 text-orange-200 px-1.5 py-0.5 rounded-full font-medium">직접 입력 필요</span>}
+            <section className="pt-3">
+              <ListHead
+                title="내 이메일"
+                summary={campaigns.length ? `보낸 메일 ${sentCampaigns.toLocaleString()} · 평균 오픈율 ${stats.openRate.toFixed(1)}% · 평균 클릭률 ${stats.clickRate.toFixed(1)}% · 반송률 ${stats.bounceRate.toFixed(1)}%` : undefined}
+                filters={[
+                  { key: 'all' as const, label: '전체', count: cnt.all || 0 },
+                  { key: 'draft' as const, label: '초안', count: cnt.draft || 0 },
+                  { key: 'scheduled' as const, label: '예약', count: cnt.scheduled || 0 },
+                  { key: 'sent' as const, label: '보냄', count: cnt.sent || 0 },
+                  { key: 'failed' as const, label: '보내지 못함', count: cnt.failed || 0 },
+                ]}
+                filter={listFilter === 'stopped' ? 'all' : listFilter}
+                onFilter={(f) => { setListFilter(f); setListLimit(24); }}
+                query={listQuery}
+                onQuery={setListQuery}
+                sort={listSort}
+                onSort={setListSort}
+                sortOptions={[{ value: 'recent', label: '최근 순' }, { value: 'open', label: '오픈율 높은 순' }, { value: 'title', label: '이름 순' }]}
+              />
+              {loading ? (
+                <div className="bg-white/5 border border-white/10 rounded-xl p-12 mt-4 flex justify-center text-white/50"><Loader2 className="w-5 h-5 animate-spin" /></div>
+              ) : campaigns.length === 0 ? (
+                <div className="mt-4 rounded-2xl border border-dashed border-white/15 py-12 px-5 text-center">
+                  <div className="text-[15px] font-bold text-white">아직 만든 이메일이 없어요</div>
+                  <div className="text-[13px] text-white/55 mt-1.5">사진과 글만 넣으면 첫 이메일이 완성돼요.</div>
+                  <button type="button" onClick={() => navigate('/quick-campaign?channel=email')} className="mt-4 h-10 px-5 rounded-xl text-[13.5px] font-bold text-indigo-950 bg-gradient-to-r from-amber-400 to-fuchsia-400">만들기</button>
                 </div>
-                <div className="text-xs text-white/70 mb-2">제목: {c.subject}</div>
-                <div className="flex flex-wrap gap-2 text-[11px] text-white/50">
-                  <span>발송 <strong className="text-indigo-300">{c.sentCount.toLocaleString()}</strong></span>
-                  <span>·</span>
-                  <span>오픈 <strong className="text-emerald-300">{c.openCount.toLocaleString()}</strong> ({c.sentCount > 0 ? ((c.openCount / c.sentCount) * 100).toFixed(1) : 0}%)</span>
-                  <span>·</span>
-                  <span>클릭 <strong className="text-cyan-300">{c.clickCount.toLocaleString()}</strong> ({c.sentCount > 0 ? ((c.clickCount / c.sentCount) * 100).toFixed(1) : 0}%)</span>
-                  <span>·</span>
-                  <span>반송 <strong className="text-rose-300">{c.bounceCount.toLocaleString()}</strong></span>
-                  <span>·</span>
-                  <span>수신거부 <strong className="text-white/50">{c.unsubscribeCount.toLocaleString()}</strong></span>
-                  {c.sentAt && <><span>·</span><span>발송 일자 {new Date(c.sentAt).toLocaleString('ko-KR')}</span></>}
-                  {c.status === 'scheduled' && c.scheduledAt && <><span>·</span><span className="text-amber-300">예약 {new Date(c.scheduledAt).toLocaleString('ko-KR')}</span></>}
+              ) : shown.length === 0 ? (
+                <div className="py-14 text-center text-[13px] text-white/45">조건에 맞는 이메일이 없어요.</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-4">
+                  {shown.slice(0, listLimit).map(({ c, st }) => (
+                    <EmailChip
+                      key={c.id}
+                      from={c.fromName}
+                      subject={c.subject}
+                      cover={emailCoverOf(c.sections as any)}
+                      status={st}
+                      title={c.name}
+                      meta={st === 'draft' ? `${fmtDate(c.createdAt)} 만듦${c.completed ? ' · 완성' : ''}`
+                        : st === 'scheduled' ? `${c.scheduledAt ? new Date(c.scheduledAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''} 예약`
+                          : st === 'failed' ? <span className="text-rose-300">보내지 못했어요 · 다시 보내기</span>
+                            : c.status === 'sending' ? `보내는 중 · ${c.sentCount.toLocaleString()}명`
+                              : `${fmtDate(c.sentAt)} · ${c.sentCount.toLocaleString()}명`}
+                      metric={st === 'sent' && c.sentCount > 0 ? <Meter label={`오픈 ${((c.openCount / c.sentCount) * 100).toFixed(1)}% · 클릭 ${((c.clickCount / c.sentCount) * 100).toFixed(1)}%`} pct={(c.openCount / c.sentCount) * 100} /> : undefined}
+                      onOpen={() => { if (st === 'draft') openEditor(c); else setDetail(c); }}
+                    />
+                  ))}
                 </div>
-                <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap items-center gap-1.5">
-                  {/* ★ 2026-07-02(3) Harold 지시 — 발송 버튼은 완성 저장(50크레딧) 후에만 생성. 임시저장(미완성) = 발송 버튼 자체 미노출 */}
-                  {(c.status === 'draft' || c.status === 'failed') && c.completed && (
-                    <button
-                      onClick={() => openRecipientsModal(c)}
-                      disabled={sendingId === c.id || !smtpConfigured}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold bg-blue-500/30 hover:bg-blue-500/50 disabled:opacity-40 text-blue-100 border border-blue-400/30 px-2.5 py-1.5 rounded-lg"
-                    >
-                      <Send className="w-3 h-3" />
-                      {sendingId === c.id ? '발송 중...' : '발송'}
-                    </button>
-                  )}
-                  {(c.status === 'draft' || c.status === 'failed') && !c.completed && (
-                    <button
-                      onClick={() => openEditor(c)}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold bg-violet-500/20 hover:bg-violet-500/35 text-violet-200 border border-violet-400/30 px-2.5 py-1.5 rounded-lg"
-                      title="편집기에서 완성 저장(50크레딧)하면 발송 버튼이 열립니다"
-                    >
-                      <Lock className="w-3 h-3" /> 완성 저장 후 발송
-                    </button>
-                  )}
-                  {/* ★ 2026-07-12 예약 취소 — 취소 수단 부재 봉합 (취소 = 초안 복귀, 완성 크레딧 유지) */}
-                  {c.status === 'scheduled' && (
-                    <button
-                      onClick={() => handleCancelSchedule(c)}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-400/30 px-2.5 py-1.5 rounded-lg"
-                      title="예약을 취소하고 초안으로 되돌립니다 (완성 상태 유지, 다시 발송·예약 가능)"
-                    >
-                      <X className="w-3 h-3" /> 예약 취소
-                    </button>
-                  )}
-                  {c.sentCount > 0 && (
-                    <button
-                      onClick={() => setEventsModal({ id: c.id, name: c.name })}
-                      className="inline-flex items-center gap-1 text-[11px] text-emerald-300 border border-emerald-400/20 hover:bg-emerald-500/10 px-2.5 py-1.5 rounded-lg"
-                    >
-                      <Eye className="w-3 h-3" /> 이력
-                    </button>
-                  )}
-                  {c.status === 'completed' && c.sentCount > 0 && (
-                    <>
-                      <button
-                        onClick={() => setInsightModal({ campaign: c })}
-                        className="inline-flex items-center gap-1 text-[11px] text-fuchsia-300 border border-fuchsia-400/20 hover:bg-fuchsia-500/10 px-2.5 py-1.5 rounded-lg"
-                      >
-                        <Sparkles className="w-3 h-3" /> AI 진단
-                      </button>
-                      <button
-                        onClick={() => setNonOpenerModal({ campaign: c })}
-                        className="inline-flex items-center gap-1 text-[11px] text-cyan-300 border border-cyan-400/20 hover:bg-cyan-500/10 px-2.5 py-1.5 rounded-lg"
-                      >
-                        <RefreshCw className="w-3 h-3" /> 미수신자 재발송
-                      </button>
-                    </>
-                  )}
-                  <button
-                    onClick={() => openEditor(c)}
-                    className="inline-flex items-center gap-1 text-[11px] text-indigo-300 border border-indigo-400/20 hover:bg-indigo-500/10 px-2.5 py-1.5 rounded-lg"
-                  >
-                    <Edit2 className="w-3 h-3" /> 수정
-                  </button>
-                  {smtpConfigured && c.completed && (
-                    <button
-                      onClick={() => openCampaignTest(c)}
-                      className="inline-flex items-center gap-1 text-[11px] text-teal-300 border border-teal-400/20 hover:bg-teal-500/10 px-2.5 py-1.5 rounded-lg"
-                      title="이 이메일을 직접 입력한 주소(최대 3개)로 테스트 발송합니다 (광고 표기 없음)"
-                    >
-                      <Send className="w-3 h-3" /> 테스트발송
-                    </button>
-                  )}
-                  {c.completed && (
-                    <button
-                      onClick={() => handleExportHtml(c)}
-                      disabled={htmlExporting === c.id}
-                      className="inline-flex items-center gap-1 text-[11px] text-sky-300 border border-sky-400/20 hover:bg-sky-500/10 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
-                      title="완성된 이메일을 HTML 파일로 저장합니다"
-                    >
-                      {htmlExporting === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />} HTML 저장
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleDeleteCampaign(c)}
-                    className="inline-flex items-center gap-1 text-[11px] text-rose-300 border border-rose-400/20 hover:bg-rose-500/10 px-2.5 py-1.5 rounded-lg"
-                  >
-                    <Trash2 className="w-3 h-3" /> 삭제
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* 페이저 — 이전 / 숫자 / 다음 (1페이지뿐이면 숨김) */}
-          {totalCampaignPages > 1 && (
-            <div className="flex items-center justify-center gap-1.5 mt-4 flex-wrap">
-              <button
-                onClick={() => setCampaignPage(Math.max(1, safeCampaignPage - 1))}
-                disabled={safeCampaignPage <= 1}
-                className="px-3 py-1.5 text-[11px] rounded-lg border border-white/15 text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                이전
-              </button>
-              {Array.from({ length: totalCampaignPages }, (_, i) => i + 1).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setCampaignPage(p)}
-                  className={`w-8 h-8 text-[11px] rounded-lg border transition-colors ${
-                    p === safeCampaignPage
-                      ? 'bg-violet-600 border-violet-500 text-white font-bold'
-                      : 'border-white/15 text-white/60 hover:bg-white/10'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-              <button
-                onClick={() => setCampaignPage(Math.min(totalCampaignPages, safeCampaignPage + 1))}
-                disabled={safeCampaignPage >= totalCampaignPages}
-                className="px-3 py-1.5 text-[11px] rounded-lg border border-white/15 text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                다음
-              </button>
-              <span className="ml-2 text-[10px] text-white/35">{campaigns.length}건 중 {safeCampaignPage}/{totalCampaignPages}페이지</span>
-            </div>
-          )}
-          </>
+              )}
+              {shown.length > listLimit && (
+                <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-white/75 border border-white/15 hover:bg-white/10">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
+              )}
+              <div className="text-[10px] text-white/30 italic mt-4">Data source: email_campaigns + email_events 누적 집계</div>
+            </section>
           );
         })()}
       </div>
+
+      {/* ★ 2026-09-27 만들기 개편 — 보낸 이메일 상세 창(성과·발송 이력·받은 사람별·AI 진단) */}
+      {detail && (
+        <EmailDetailModal
+          campaign={detail}
+          cover={emailCoverOf(detail.sections as any)}
+          authHeaders={authHeaders}
+          onClose={() => setDetail(null)}
+          onEdit={() => { const c = detail; setDetail(null); openEditor(c); }}
+          onTest={() => { const c = detail; setDetail(null); openCampaignTest(c); }}
+          onExportHtml={() => { void handleExportHtml(detail); }}
+          exporting={htmlExporting === detail.id}
+          onClone={() => { void handleClone(detail); }}
+          cloning={cloningId === detail.id}
+          onDelete={() => { const c = detail; setDetail(null); handleDeleteCampaign(c); }}
+          onInsight={() => { const c = detail; setDetail(null); setInsightModal({ campaign: c }); }}
+          onNonOpener={() => { const c = detail; setDetail(null); setNonOpenerModal({ campaign: c }); }}
+          onSend={() => { const c = detail; setDetail(null); setPageSend(c); }}
+          onCancelSchedule={() => { const c = detail; setDetail(null); handleCancelSchedule(c); }}
+          onOpenEvents={() => { const c = detail; setDetail(null); setEventsModal({ id: c.id, name: c.name }); }}
+        />
+      )}
+      <MakeSendModal
+        open={!!pageSend}
+        onClose={() => setPageSend(null)}
+        channel="email"
+        dm={null}
+        email={pageSend ? { id: pageSend.id, name: pageSend.name, subject: pageSend.subject, isAd: pageSend.isAd, completed: !!pageSend.completed, hasPlaceholder: pageSend.hasPlaceholder } : null}
+        onSent={() => { const id = pageSend?.id; void loadAll(); if (id) pollCampaign(id); }}
+      />
 
       {/* ★ D225+ 발송 이력 모달 */}
       {eventsModal && (
@@ -1374,8 +1318,9 @@ export default function EmailCampaignsPage() {
       )}
 
       {/* 비주얼 빌더 에디터 */}
+      {/* ★ 2026-09-27 만들기 개편 — 수정 화면 = EmailEditScreen(DM 수정 화면과 같은 칸 · 같은 고치는 방법 · 옛 편집기 기능 전부) */}
       {visualEditor && (
-        <EmailVisualEditor
+        <EmailEditScreen
           initialSections={visualEditor.sections}
           initialName={visualEditor.name}
           initialSubject={visualEditor.subject}
@@ -1384,6 +1329,9 @@ export default function EmailCampaignsPage() {
           aiGenerated={visualEditor.aiGenerated}
           campaignId={visualEditor.campaignId}
           completed={visualEditor.completed}
+          fromName={visualEditor.fromName || smtpConfig?.fromName || ''}
+          hasPlaceholder={visualEditor.hasPlaceholder}
+          pairDmId={pairDmId}
           authHeaders={authHeaders}
           onClose={() => setVisualEditor(null)}
           onSaved={() => { loadAll(); }}
@@ -1811,278 +1759,6 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
         </div>
       </div>
     </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════
-// 수신자 입력 모달 (발송 직전)
-// ════════════════════════════════════════════════════════════════════
-
-interface RecipientsModalProps {
-  campaign: EmailCampaign;
-  authHeaders: () => Record<string, string>;
-  onProceed: (payload: any, total: number) => void;
-  onClose: () => void;
-  onToast: (msg: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
-}
-
-interface PrecheckResult {
-  codeChecks: Array<{ key: string; label: string; status: 'pass' | 'warn' | 'fail'; detail: string }>;
-  spamRisk: { riskLevel: 'low' | 'medium' | 'high'; reasons: string[]; suggestions: string[] };
-}
-
-function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }: RecipientsModalProps) {
-  const [tab, setTab] = useState<'customers' | 'direct' | 'ai'>('customers');
-  const [mode, setMode] = useState<'immediate' | 'scheduled'>('immediate');
-  const [scheduledAt, setScheduledAt] = useState('');
-  // AI 정밀 타겟 — 타겟 추출로 확정한 filter를 발송 대상으로 held
-  const [extractOpen, setExtractOpen] = useState(false);
-  const [extracted, setExtracted] = useState<ExtractedTarget | null>(null);
-
-  // 고객DB 탭
-  const [grades, setGrades] = useState<Array<{ grade: string; count: number }>>([]);
-  const [selectedGrades, setSelectedGrades] = useState<string[]>([]);
-  const [preview, setPreview] = useState<{ total: number; gradeBreakdown: Array<{ grade: string; count: number }> } | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-
-  // 직접 입력 탭
-  const [recipientsText, setRecipientsText] = useState('');
-  const directCount = recipientsText.split(/[,\n;]+/).filter((e) => e.trim().includes('@')).length;
-
-  // 발송 전 AI 진단
-  const [precheck, setPrecheck] = useState<PrecheckResult | null>(null);
-  const [prechecking, setPrechecking] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch('/api/email/recipients/grades', { headers: authHeaders() });
-        const data = await res.json();
-        if (data.success) setGrades(data.grades || []);
-      } catch { /* 등급 조회 실패 = 전체 발송만 */ }
-    })();
-  }, []);
-
-  // 고객DB 미리보기 (등급 선택 변경 시)
-  useEffect(() => {
-    if (tab !== 'customers') return;
-    let alive = true;
-    setPreviewLoading(true);
-    (async () => {
-      try {
-        const res = await fetch('/api/email/recipients/preview', {
-          method: 'POST', headers: authHeaders(),
-          body: JSON.stringify({ grades: selectedGrades.length > 0 ? selectedGrades : undefined }),
-        });
-        const data = await res.json();
-        if (alive && data.success) setPreview({ total: data.total, gradeBreakdown: data.gradeBreakdown || [] });
-      } catch { /* 미리보기 실패 — 발송 시 재검증 */ }
-      finally { if (alive) setPreviewLoading(false); }
-    })();
-    return () => { alive = false; };
-  }, [tab, selectedGrades]);
-
-  const total = tab === 'customers' ? (preview?.total || 0) : tab === 'ai' ? (extracted?.channelEligibleCount || 0) : directCount;
-
-  const handlePrecheck = async () => {
-    setPrechecking(true);
-    try {
-      const res = await fetch('/api/email/ai/precheck', {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify({ campaign_id: campaign.id }),
-      });
-      const data = await res.json();
-      if (data?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
-      if (data.success) { setPrecheck({ codeChecks: data.codeChecks, spamRisk: data.spamRisk }); onToast('발송 전 진단 완료 (1 크레딧)', 'success'); }
-      else onToast(data.error || '진단 실패', 'error');
-    } catch (e: any) {
-      onToast(e?.message || '진단 중 오류', 'error');
-    } finally {
-      setPrechecking(false);
-    }
-  };
-
-  const toggleGrade = (g: string) => {
-    setSelectedGrades((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]));
-  };
-
-  const handleProceed = () => {
-    if (total === 0) { onToast('발송 대상이 0건입니다.', 'warning'); return; }
-    if (mode === 'scheduled') {
-      if (!scheduledAt) { onToast('예약 시각을 선택해주세요.', 'warning'); return; }
-      if (new Date(scheduledAt).getTime() < Date.now() + 60 * 1000) { onToast('예약 시각은 현재보다 1분 이상 이후여야 합니다.', 'warning'); return; }
-    }
-    const payload: any = { mode };
-    if (mode === 'scheduled') payload.scheduled_at = new Date(scheduledAt).toISOString();
-    if (tab === 'customers') {
-      payload.target = { type: 'customers', grades: selectedGrades.length > 0 ? selectedGrades : undefined };
-    } else if (tab === 'ai') {
-      if (!extracted) { onToast('먼저 타겟을 추출해주세요.', 'warning'); return; }
-      payload.target = { type: 'filter', filter: extracted.filter };
-    } else {
-      payload.recipients = recipientsText.split(/[,\n;]+/).map((e) => ({ email: e.trim() })).filter((r) => r.email.includes('@'));
-    }
-    onProceed(payload, total);
-  };
-
-  const riskColor = { low: 'text-emerald-300', medium: 'text-amber-300', high: 'text-rose-300' };
-  const riskLabel = { low: '낮음', medium: '주의', high: '높음' };
-  const statusIcon = (s: string) => s === 'pass' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : s === 'warn' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> : <AlertCircle className="w-3.5 h-3.5 text-rose-400" />;
-
-  return (
-    <>
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between z-10">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <Send className="w-5 h-5 text-blue-300" /> 발송 대상 선택
-          </h3>
-          <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="p-6 space-y-4">
-          <div className="text-xs text-white/60">
-            캠페인: <strong className="text-white">{campaign.name}</strong>
-            {campaign.isAd && <span className="ml-2 text-amber-300">(광고성, "(광고)" + 수신거부 자동 부착)</span>}
-          </div>
-
-          {/* 탭 */}
-          <div className="flex gap-1 bg-violet-950/40 rounded-lg p-1">
-            <button onClick={() => setTab('customers')} className={`flex-1 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${tab === 'customers' ? 'bg-blue-500/40 text-white' : 'text-white/50 hover:text-white'}`}>
-              <Users className="w-3.5 h-3.5" /> 고객DB에서 선택
-            </button>
-            <button onClick={() => setTab('direct')} className={`flex-1 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${tab === 'direct' ? 'bg-blue-500/40 text-white' : 'text-white/50 hover:text-white'}`}>
-              <PenLine className="w-3.5 h-3.5" /> 직접 입력
-            </button>
-            <button onClick={() => setTab('ai')} className={`flex-1 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${tab === 'ai' ? 'bg-blue-500/40 text-white' : 'text-white/50 hover:text-white'}`}>
-              <Sparkles className="w-3.5 h-3.5" /> AI 정밀 타겟
-            </button>
-          </div>
-
-          {tab === 'customers' ? (
-            <div className="space-y-3">
-              <div className="text-[11px] text-white/50">등급을 고르면 해당 등급만, 비우면 전체 고객에게 발송합니다. 이메일 없음·수신거부·무효 고객은 자동 제외됩니다.</div>
-              {grades.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {grades.map((g) => (
-                    <button
-                      key={g.grade}
-                      onClick={() => toggleGrade(g.grade)}
-                      className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${selectedGrades.includes(g.grade) ? 'bg-blue-500/30 border-blue-400/50 text-white' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10'}`}
-                    >
-                      {g.grade} <span className="text-white/40">({g.count.toLocaleString()})</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="bg-cyan-500/10 border border-cyan-400/25 rounded-lg p-3 flex items-center justify-between">
-                <span className="text-xs text-white/70">발송 대상 (수신 가능)</span>
-                <span className="text-lg font-bold text-cyan-300">
-                  {previewLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : `${total.toLocaleString()}명`}
-                </span>
-              </div>
-            </div>
-          ) : tab === 'ai' ? (
-            <div className="space-y-3">
-              <div className="text-[11px] text-white/50">자연어로 조건을 입력하면 이메일 보낼 대상을 정확히 추출합니다. 조건에 맞고 이메일 수신 가능한 고객만 발송됩니다.</div>
-              {extracted ? (
-                <div className="bg-emerald-500/10 border border-emerald-400/25 rounded-lg p-3 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-white/70">추출된 타겟 (이메일 발송 가능)</span>
-                    <span className="text-lg font-bold text-emerald-300">{extracted.channelEligibleCount.toLocaleString()}명</span>
-                  </div>
-                  {extracted.explanation && <p className="text-[11px] text-white/50">{extracted.explanation}</p>}
-                  <button onClick={() => setExtractOpen(true)} className="text-[11px] text-fuchsia-300 hover:text-fuchsia-200">조건 다시 추출</button>
-                </div>
-              ) : (
-                <button onClick={() => setExtractOpen(true)} className="w-full py-3 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 flex items-center justify-center gap-2">
-                  <Sparkles className="w-4 h-4" /> AI 타겟 추출
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <textarea
-                value={recipientsText}
-                onChange={(e) => setRecipientsText(e.target.value)}
-                placeholder="수신 이메일 (콤마/세미콜론/줄바꿈 구분)&#10;예: user1@example.com, user2@example.com"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-28 focus:outline-none focus:border-blue-400/50"
-              />
-              <div className="text-xs text-cyan-300">유효 이메일: <strong>{directCount.toLocaleString()}건</strong></div>
-            </div>
-          )}
-
-          {/* 즉시 / 예약 */}
-          <div className="flex gap-2">
-            <button onClick={() => setMode('immediate')} className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors ${mode === 'immediate' ? 'bg-blue-500/30 border-blue-400/50 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}>즉시 발송</button>
-            <button onClick={() => setMode('scheduled')} className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors flex items-center justify-center gap-1.5 ${mode === 'scheduled' ? 'bg-blue-500/30 border-blue-400/50 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}><Clock className="w-3.5 h-3.5" /> 예약 발송</button>
-          </div>
-          {mode === 'scheduled' && (
-            <DateTimeField
-              value={localInputToIso(scheduledAt)}
-              onChange={(iso) => setScheduledAt(isoToLocalInput(iso))}
-              tone="dark"
-            />
-          )}
-
-          {/* 발송 전 AI 진단 */}
-          <div className="border-t border-white/10 pt-3">
-            <button
-              onClick={handlePrecheck}
-              disabled={prechecking}
-              className="text-xs text-fuchsia-300 hover:text-fuchsia-200 flex items-center gap-1.5 disabled:opacity-50"
-            >
-              {prechecking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              발송 전 AI 진단 (스팸 위험 · 광고 표기 · 모바일 잘림 · 1 크레딧)
-            </button>
-            {precheck && (
-              <div className="mt-3 space-y-2 bg-violet-950/40 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-white/60">스팸 위험</span>
-                  <span className={`font-bold ${riskColor[precheck.spamRisk.riskLevel]}`}>{riskLabel[precheck.spamRisk.riskLevel]}</span>
-                </div>
-                {precheck.spamRisk.reasons.length > 0 && (
-                  <ul className="text-[11px] text-white/60 list-disc list-inside space-y-0.5">
-                    {precheck.spamRisk.reasons.map((r, i) => <li key={i}>{r}</li>)}
-                  </ul>
-                )}
-                {precheck.spamRisk.suggestions.length > 0 && (
-                  <div className="text-[11px] text-emerald-300/80">
-                    제안: {precheck.spamRisk.suggestions.join(' · ')}
-                  </div>
-                )}
-                <div className="border-t border-white/10 pt-2 space-y-1">
-                  {precheck.codeChecks.map((c) => (
-                    <div key={c.key} className="flex items-start gap-1.5 text-[11px]">
-                      {statusIcon(c.status)}
-                      <span className="text-white/70">{c.detail}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="sticky bottom-0 bg-violet-900/40 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
-          <button
-            onClick={handleProceed}
-            disabled={total === 0}
-            className="px-5 py-2 bg-gradient-to-r from-blue-500 to-sky-500 hover:from-blue-600 hover:to-sky-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg flex items-center gap-2"
-          >
-            <Send className="w-4 h-4" />
-            {mode === 'scheduled' ? '예약' : '발송'} ({total.toLocaleString()}명)
-          </button>
-        </div>
-      </div>
-    </div>
-    <TargetExtractModal
-      show={extractOpen}
-      channel="email"
-      onClose={() => setExtractOpen(false)}
-      onApply={(t) => { setExtracted(t); setExtractOpen(false); }}
-    />
-    </>
   );
 }
 

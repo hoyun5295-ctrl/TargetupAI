@@ -1,0 +1,55 @@
+/*
+ * make.css — 만들기 개편 공용(★ 2026-09-27)
+ * .mk-dark-editor = 기존 블록 편집기(SectionPropsEditor · 27 편집기 · FormControls)가 쓰는 --dm-* 변수를
+ *   이 영역 안에서만 어두운 값으로 바꾼다. 편집기 코드는 무수정(같은 부품을 새 수정 화면 오른쪽 패널에서 쓴다).
+ */
+.mk-dark-editor {
+  --dm-neutral-0: #0b1222;
+  --dm-neutral-50: #0f172a;
+  --dm-neutral-100: #131c31;
+  --dm-neutral-200: rgba(255, 255, 255, 0.14);
+  --dm-neutral-300: rgba(255, 255, 255, 0.22);
+  --dm-neutral-400: rgba(255, 255, 255, 0.4);
+  --dm-neutral-500: rgba(255, 255, 255, 0.55);
+  --dm-neutral-600: rgba(255, 255, 255, 0.68);
+  --dm-neutral-700: rgba(255, 255, 255, 0.82);
+  --dm-neutral-800: rgba(255, 255, 255, 0.92);
+  --dm-neutral-900: #ffffff;
+  --dm-neutral-1000: #ffffff;
+  --dm-bg: #0b1222;
+  --dm-primary: #8b5cf6;
+  --dm-primary-hover: #7c3aed;
+  --dm-primary-light: rgba(139, 92, 246, 0.18);
+  color: #fff;
+  color-scheme: dark;
+}
+.mk-dark-editor input,
+.mk-dark-editor textarea,
+.mk-dark-editor select {
+  color-scheme: dark;
+}
+.mk-dark-editor input::placeholder,
+.mk-dark-editor textarea::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* 휴대폰 틀 · 스크롤바 */
+.mk-phone {
+  border-radius: 44px;
+  background: #0a0a0f;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 30px 60px -20px rgba(0, 0, 0, 0.7);
+  padding: 10px;
+}
+.mk-phone-screen {
+  border-radius: 34px;
+  overflow: hidden;
+  background: #fff;
+  position: relative;
+}
+.mk-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.mk-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 8px; }
+.mk-scroll::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes mk-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.mk-sheet-in { animation: mk-sheet-in 0.18s ease-out; }
+@media (prefers-reduced-motion: reduce) { .mk-sheet-in { animation: none; } }

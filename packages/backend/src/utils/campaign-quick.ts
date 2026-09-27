@@ -40,10 +40,13 @@ import { getWooIntegration, fetchWooStoreProductsRaw } from './woocommerce-clien
 import { normalizeWooMallId } from './woocommerce-core';
 import { parseLicensedEndDate } from './sales-outreach-jobs';
 import { runInCreditBundle } from './ai-credit-context';
+// ★ 2026-09-27 만들기 개편 S13 — 주소 읽기 카드의 면허는 서버 캐시 대조 · 사용 기록은 감사 로그(결재 ①②)
+import { readHostOf } from './brand-page-reader';
+import { recordAuditLog } from './audit-log';
 import type { Section } from './dm/dm-section-registry';
 import {
   aiAutoBuildEnabled, normalizeBuildMaterials, judgeImageRoles, checkMinimumMaterials, checkCatalogMinimum, buildMaterialsHash, buildBillingHash, buildIdempotencyKey, buildReadIdempotencyKey, imagesHashOf, mallProductNoOf, resolveBuildProducts,
-  companyImagePrefixes, isCompanyImageUrl, AiAutoBuildError,
+  companyImagePrefixes, isCompanyImageUrl, AiAutoBuildError, buildDraftTitle,
   type BuildChannel, type BuildEventCard, type BuildMallProvider, type BuildMallLookup, type BuildImageRoleJudgement,
   type BuildMaterials, type BuildImage, type BuildGateResult,
 } from './ai-auto-build-materials';
@@ -466,6 +469,8 @@ export interface BuildDeps {
   createEmail(input: CreateCampaignInput): Promise<{ id: string }>;
   deleteEmail(companyId: string, campaignId: string): Promise<boolean>;
   renderEmail(sections: Section[], brandKit: Record<string, unknown>, design?: ReturnType<typeof normalizeEmailDesign>): { html: string; text: string };
+  /** ★ 2026-09-27 S13 주소 읽기 재료 사용 감사 기록(요청이 서버에 도달한 뒤 · 실패해도 생성 무영향) */
+  auditRead?(companyId: string, userId: string, readIds: string[]): Promise<void>;
 }
 
 /** 서빙 URL → 디스크 경로(파일명 문자 제한은 isCompanyImageUrl 이 이미 걸렀다) */
@@ -542,6 +547,10 @@ export function defaultBuildDeps(): BuildDeps {
     basicInfo: (companyId) => getBrandBasicInfo(companyId),
     assembleDm: (m, opts) => assembleDmCampaign(m, opts, customerEngineDeps()),
     produceEmail: (input, impl) => produceOutreachBrandEmail(input, impl),
+    auditRead: async (companyId, userId, readIds) => {
+      const hosts = Array.from(new Set(readIds.map((id) => readHostOf(companyId, id)).filter((h): h is string => !!h)));
+      await recordAuditLog({ actorUserId: userId || null, action: 'make_read_url_use', targetType: 'company', targetId: companyId, details: { hosts, readIds } });
+    },
     createDm: (companyId, userId, data) => createDm(companyId, userId, data as any),
     deleteDm: (id, companyId) => deleteDm(id, companyId),
     createEmail: (input) => createEmailCampaign(input),
@@ -634,6 +643,8 @@ interface BuildPrepared {
   gate: BuildGateResult;
   imagesDropped: number;
   files: Map<string, BuildReadImage>;
+  /** ★ 2026-09-27 Codex 1R(high) — 과금 지문 = 요청 원문(서버가 재료를 거르기 전 · 아래 prepareBuildMaterials) */
+  billingHash: string;
 }
 
 /**
@@ -645,6 +656,12 @@ function prepareBuildMaterials(rawMaterials: unknown, companyId: string, deps: B
   const norm = normalizeBuildMaterials(rawMaterials, companyId);
   if (!norm.ok) throw new AiAutoBuildError(400, 'MATERIALS_INVALID', norm.error, { field: norm.field });
   const m = norm.materials;
+  // ★ 2026-09-27 Codex 1R(high) — 과금 지문 = 요청 원문(서버가 재료를 거르기 전). 같은 요청 재시도 = 같은 키(duplicate · 재차감 0) ·
+  //   요청 내용(면허 체크 포함)이 다르면 다른 키.
+  const billingHash = buildBillingHash(m);
+  // ★ 2026-09-27 만들기 개편(Codex 3R~12R 결론) — 주소 읽기 카드의 면허도 **화면의 "이 문구 그대로 쓰기" 체크**다(모든 카드와 같은 규칙 ·
+  //   불변 1 = 사람이 보고 준 글만 면허). 서버가 페이지 글로 행사 진행 여부를 추측해 면허를 덮어쓰던 S13 판정은 걷어 냈다
+  //   (날짜·마크업 추측은 닫히지 않는 문제였고, 사람 체크를 대신할 수 없다).
   // 라우트가 고정한 채널(DM 라우트 = dm · 이메일 라우트 = email)과 재료의 채널이 다르면 거부 — 다른 채널의 행·차감을 만들지 않는다.
   // ★ 카탈로그 DM 은 DM 라우트 가족(dm_pages 행 · mobile_dm 요금제 게이트)이라 DM 라우트로 들어온다.
   if (channel && m.channel !== channel && !(channel === 'dm' && m.channel === 'catalog')) throw new AiAutoBuildError(400, 'MATERIALS_INVALID', '요청한 채널과 재료의 채널이 다릅니다.', { field: 'channel' });
@@ -658,7 +675,7 @@ function prepareBuildMaterials(rawMaterials: unknown, companyId: string, deps: B
       catalogFiles.set(im.url, f);
       return [{ url: im.url, width: im.width ?? f.width, height: im.height ?? f.height }];
     });
-    return { m, cards: [], images: catalogImages, roles: [], gate: checkCatalogMinimum(catalogImages), imagesDropped: catalogDropped, files: catalogFiles };
+    return { m, cards: [], images: catalogImages, roles: [], gate: checkCatalogMinimum(catalogImages), imagesDropped: catalogDropped, files: catalogFiles, billingHash };
   }
   let imagesDropped = 0;
   const files = new Map<string, BuildReadImage>();
@@ -673,7 +690,7 @@ function prepareBuildMaterials(rawMaterials: unknown, companyId: string, deps: B
   }));
   const images = cards.flatMap((c) => c.images);
   const roles = judgeImageRoles(images);
-  return { m, cards, images, roles, gate: checkMinimumMaterials(m, roles), imagesDropped, files };
+  return { m, cards, images, roles, gate: checkMinimumMaterials(m, roles), imagesDropped, files, billingHash };
 }
 
 /** 원장 조회 실패 = 503(§6-5 · "모르는 것을 미차감으로 접지 않는다") · 잔액 부족(InsufficientCreditError)은 그대로 */
@@ -755,8 +772,8 @@ export function buildGenerateResponse(r: BuildGenerateResult): Record<string, un
  *  장 구조 = DM 편집기 "완성 이미지 업로드(슬라이드)"와 같은 모양(장당 갤러리 1장 · list_1xN · full_bleed) → 뷰어 isSwipeImagePage 무대 판정 통과.
  *  개방·정규화·이미지 실물·최소 쪽수 게이트는 공통 앞단(prepareBuildMaterials)이 이미 지났다.
  */
-async function buildCatalogDm(input: { m: BuildMaterials; images: BuildImage[]; imagesDropped: number; companyId: string; userId: string; deps: BuildDeps }): Promise<BuildGenerateResult> {
-  const { m, images, imagesDropped, companyId, userId, deps } = input;
+async function buildCatalogDm(input: { m: BuildMaterials; images: BuildImage[]; imagesDropped: number; companyId: string; userId: string; deps: BuildDeps; billingHash: string }): Promise<BuildGenerateResult> {
+  const { m, images, imagesDropped, companyId, userId, deps, billingHash } = input;
   const creditEnabled = await creditEnabledOrThrow(deps, companyId);
   const quote = quoteBuildMaterials({ channel: 'catalog', textChars: 0, imageCount: images.length, creditEnabled });
   if (quote.total !== m.expectedTotal) throw new AiAutoBuildError(409, 'QUOTE_CHANGED', '견적이 바뀌었어요. 금액을 다시 확인하고 눌러 주세요.', { quote });
@@ -779,7 +796,6 @@ async function buildCatalogDm(input: { m: BuildMaterials; images: BuildImage[]; 
   });
   const draftId = String(dm.id);
   const materialsHash = buildMaterialsHash(m, []);
-  const billingHash = buildBillingHash(m);
   const idempotencyKey = buildIdempotencyKey(companyId, 'catalog', m.attemptToken, billingHash);
   const genKey = 'catalog-dm-build';
   const genCost = getCreditCost(genKey);
@@ -832,17 +848,22 @@ export async function generateFromBuildMaterials(
 ): Promise<BuildGenerateResult> {
   const companyId = String(input.companyId);
   const userId = input.userId ? String(input.userId) : '';
-  const { m, cards, images, roles, gate, imagesDropped, files } = prepareBuildMaterials(input.materials, companyId, deps, input.channel);
+  const { m, cards, images, roles, gate, imagesDropped, files, billingHash } = prepareBuildMaterials(input.materials, companyId, deps, input.channel);
   if (!gate.ok) {
     throw new AiAutoBuildError(400, 'MATERIAL_THIN',
       m.channel === 'catalog' ? '카탈로그 쪽 이미지를 2장 이상 올려 주세요.' : '재료가 부족해요. 행사 내용 40자 이상 또는 첫 화면이 될 사진 1장을 넣어 주세요.',
       { missing: gate.missing });
   }
   // ★ 2026-09-15 카탈로그 DM 채널 — 엔진·몰·SMTP·판독·차감 전부 지나지 않는다(아래 공통 흐름과 분리 · 견적 결박만 유지)
-  if (m.channel === 'catalog') return buildCatalogDm({ m, images, imagesDropped, companyId, userId, deps });
-  if (m.channel === 'email' && !(await deps.smtpConfigured(companyId))) {
-    throw new AiAutoBuildError(400, 'SMTP_REQUIRED', '이메일 발신 설정이 먼저 필요해요. 설정 메뉴에서 발신 메일을 등록해 주세요.');
-  }
+  if (m.channel === 'catalog') return buildCatalogDm({ m, images, imagesDropped, companyId, userId, deps, billingHash });
+  // ★ 2026-09-27 만들기 개편 S1(Harold 결재 ③ · 불변 11 개정) — 이메일 초안은 발신 설정 없이도 만든다(미리보기까지).
+  //   발신 설정 판정은 돈·발송이 일어나는 자리로 옮겼다: 완성(`/campaigns/:id/complete` 차감 앞) · 발송(`/send` 선점 앞).
+  //   견적(`quoteBuildMaterials`)은 계속 smtpConfigured 를 돌려줘 화면이 "보내려면 회사 메일 연결 필요"를 알린다.
+
+  // ★ 2026-09-27 만들기 개편 S13 — 주소 읽기 재료를 쓴 요청은 **서버에 도달한 뒤** 감사 기록(도메인·사용자·시각 · 결재 ②).
+  //   확인 창에서 취소한 사람은 여기까지 오지 않는다(기록 0). 기록 실패는 생성에 영향 0(recordAuditLog 가 흡수).
+  const readIds = Array.from(new Set(m.eventCards.map((c) => c.readId).filter((x): x is string => !!x)));
+  if (readIds.length && deps.auditRead) await deps.auditRead(companyId, userId, readIds).catch(() => undefined);
 
   // 몰 재조회(상품번호) — 장애는 "가격 확인 못함"으로 접는다(생성 계속 · 502 금지)
   const byProvider = new Map<BuildMallProvider, string[]>();
@@ -928,7 +949,6 @@ export async function generateFromBuildMaterials(
     ctaLinks: fromCards.ctaLinks, legal: null, licensedQuote, proof: null, eventCards,
   };
   const materialsHash = buildMaterialsHash(m, roles);
-  const billingHash = buildBillingHash(m);
   const idempotencyKey = buildIdempotencyKey(companyId, m.channel, m.attemptToken, billingHash);
   const genKey = m.channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate';
   const genCost = getCreditCost(genKey);
@@ -949,7 +969,7 @@ export async function generateFromBuildMaterials(
       entry: 'customer', channel: 'DM', skeletonTypes: null, sectionOverride: null, presetSections: null, layoutMode: OUTREACH_DM_LAYOUT_MODE, features: m.features,
     });
     sections = r.sections; pages = r.pages; look = r.look; benefitStripped = r.benefitStripped; heroFallback = r.heroFallback; features = r.features;
-    name = `[AI 자동제작] ${companyName}`.slice(0, 200);
+    name = buildDraftTitle(m.eventCards, companyName, 200);
     const dm = await deps.createDm(companyId, userId, {
       title: name, sections, pages, layout_mode: OUTREACH_DM_LAYOUT_MODE, brand_kit: { ...brandKit, art_direction: artDirection }, ai_prompt: material.slice(0, 2000), approval_status: 'draft',
     });
@@ -968,7 +988,7 @@ export async function generateFromBuildMaterials(
     }, { fill: (s, ch) => fillCustomerStandard(s, engineMaterials, ch) });
     // ★ 2026-09-15 CTA 풀폭 띠는 마지막 1개만(공용 룩 무변경) · 프리헤더는 면허 밖 수치를 거른 값만
     sections = keepLastCtaBar(r.sections); pages = []; look = lookStatsOf(sections); benefitStripped = r.benefitStripped; features = r.features; subject = r.subject; preheader = licensedPreheaderOf(r.preheader, licensedQuote) || null;
-    name = `AI 자동제작 · ${companyName}`.slice(0, 60);
+    name = buildDraftTitle(m.eventCards, companyName, 60);
     // 미리보기·발송은 캠페인 design 으로 다시 렌더한다 · 생성 렌더와 저장이 같은 design 을 쓴다(주색 보정 · 업종 아트디렉션 · 프리헤더)
     const design = normalizeEmailDesign({ palette: { primary: brandKit.primary_color }, art_direction: artDirection, ...(preheader ? { preheader } : {}) });
     const rendered = deps.renderEmail(sections, brandKit, design);

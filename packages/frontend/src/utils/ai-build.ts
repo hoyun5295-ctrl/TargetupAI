@@ -29,12 +29,16 @@ export interface BuildCardValue {
   link: string;
   licensed: boolean;
   images: BuildImageValue[];
+  /** ★ 2026-09-27 만들기 개편 S13 — 주소 읽기 카드(캐시 id 32 hex + 카드 지문 16 hex). 면허는 서버가 캐시와 대조해 정한다 */
+  readId?: string | null;
+  readHash?: string | null;
 }
 
 export interface BuildProductValue {
   /** 화면 키(몰 = provider:code · 수동 = manual:이름) */
   key: string;
-  source: 'mall' | 'manual';
+  /** ★ 2026-09-27 S13 'site' = 주소 읽기가 가져온 홈페이지 상품(사진 = 회사 서빙 경로 사본 · 가격 없음) */
+  source: 'mall' | 'manual' | 'site';
   provider: string | null;
   code: string | null;
   name: string;
@@ -114,6 +118,7 @@ export function buildMaterialsPayload(state: Pick<BuildDraftState, 'channel' | '
       link: c.link.trim() || null,
       licensed: c.licensed && (c.text.trim().length > 0 || c.title.trim().length > 0),
       images: c.images.map((im) => ({ url: im.url, width: im.width, height: im.height })),
+      ...(c.readId && c.readHash ? { readId: c.readId, readHash: c.readHash } : {}),
     })),
     products: catalog ? [] : state.products.map((p) => ({
       source: p.source, provider: p.provider, code: p.code, name: p.name,
@@ -173,7 +178,7 @@ export function loadBuildDraft(): BuildDraftState | null {
     return {
       channel: d.channel === 'email' ? 'email' : d.channel === 'catalog' ? 'catalog' : 'dm',
       isAd: d.isAd !== false,
-      cards: d.cards.map((c) => ({ id: String(c.id || newCardId()), title: String(c.title || ''), text: String(c.text || ''), link: String(c.link || ''), licensed: c.licensed === true, images: Array.isArray(c.images) ? c.images.filter((im) => im && typeof im.url === 'string').map((im) => ({ url: im.url, width: im.width ?? null, height: im.height ?? null })) : [] })),
+      cards: d.cards.map((c) => ({ id: String(c.id || newCardId()), title: String(c.title || ''), text: String(c.text || ''), link: String(c.link || ''), licensed: c.licensed === true, images: Array.isArray(c.images) ? c.images.filter((im) => im && typeof im.url === 'string').map((im) => ({ url: im.url, width: im.width ?? null, height: im.height ?? null })) : [], ...(typeof c.readId === 'string' && typeof c.readHash === 'string' ? { readId: c.readId, readHash: c.readHash } : {}) })),
       products: Array.isArray(d.products) ? d.products.filter((p) => p && typeof p.name === 'string') : [],
       features: Array.isArray(d.features) ? d.features.map(String) : null,
       catalogImages: Array.isArray(d.catalogImages) ? d.catalogImages.filter((im) => im && typeof im.url === 'string').map((im) => ({ url: im.url, width: im.width ?? null, height: im.height ?? null })) : [],

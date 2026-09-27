@@ -30,10 +30,12 @@ import { Router, Request, Response, json } from 'express';
 import { withKeyedLock } from '../utils/keyed-lock';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
-import { webLinkReason } from '../utils/normalize';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 // ★ D225+ (2026-05-28): Email 캠페인 events 이력 조회 endpoint 신설 — email_events 직접 SELECT
 import { query } from '../config/database';
+// ★ 2026-09-27 만들기 개편 S2·S3 — 완성 판정·완성/발송 잠금은 CT 가 소유(라우트 인라인 0)
+import { isEmailCampaignCompleted, emailCompletionContextOf } from '../utils/email/email-completion';
+import { emailContentBlocker, emailSmtpBlocker } from '../utils/email/email-send-gate';
 import {
   createEmailCampaign,
   listEmailCampaigns,
@@ -435,17 +437,8 @@ router.post('/smtp-test', async (req: Request, res: Response) => {
 // 캠페인 CRUD
 // ─────────────────────────────────────────────────────────────────────
 
-// ★ 2026-07-02 캠페인 완성 여부 — 크레딧 거래 멱등키 존재로 판정 (DB ALTER 0).
-//   신 키 email-campaign-complete:ID + 구 키 email-ai-publish:ID(과거 발송 확정 시 50 납부분) 모두 인정 = 이중과금 0.
-async function isEmailCampaignCompleted(companyId: string, campaignId: string): Promise<boolean> {
-  const r = await query(
-    `SELECT 1 FROM ai_credit_transactions
-     WHERE company_id = $1::uuid AND idempotency_key = ANY($2)
-     LIMIT 1`,
-    [companyId, [`email-campaign-complete:${campaignId}`, `email-ai-publish:${campaignId}`]],
-  );
-  return r.rows.length > 0;
-}
+// ★ 2026-07-02 캠페인 완성 여부 = 완성 크레딧 멱등 원장 행(신·구 키) · ★ 2026-09-27 만들기 개편 S2 — 판정은 CT
+//   `utils/email/email-completion.ts`가 소유한다(크레딧제 미적용 회사 = 완성 · 조회 실패 = throw).
 
 // ★ 2026-07-02 개인화 변수 목록 — 하드코딩 금지(Harold 지시). CT-58 실측 프로필에서 데이터 있는(70%+) 필드만.
 router.get('/personalization-vars', async (req: Request, res: Response) => {
@@ -468,17 +461,10 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const campaigns = await listEmailCampaigns(companyId, limit, resolveOwnerScope(req));
     // ★ 2026-07-02 완성 여부 플래그 — 프론트 발송/PC 미리보기 잠금 판단용 (신·구 멱등키 인정)
     try {
-      const keysRes = await query(
-        `SELECT idempotency_key FROM ai_credit_transactions
-         WHERE company_id = $1::uuid
-           AND (idempotency_key LIKE 'email-campaign-complete:%' OR idempotency_key LIKE 'email-ai-publish:%')`,
-        [companyId],
-      );
-      const paidIds = new Set<string>(
-        keysRes.rows.map((r: any) => String(r.idempotency_key || '').split(':')[1]).filter(Boolean),
-      );
+      // ★ 2026-09-27 S2 — 발송 게이트와 같은 판정(크레딧제 미적용 회사 = 전부 완성)
+      const { notApplicable, paidIds } = await emailCompletionContextOf(companyId);
       for (const c of campaigns as any[]) {
-        c.completed = paidIds.has(String(c.id));
+        c.completed = notApplicable || paidIds.has(String(c.id));
       }
     } catch (flagErr: any) {
       console.log('[Email campaigns GET] completed 플래그 계산 오류 — 플래그 없이 반환:', flagErr?.message);
@@ -517,6 +503,13 @@ router.post('/campaigns/:id/complete', async (req: Request, res: Response) => {
 
     if (await isEmailCampaignCompleted(auth.companyId, campaign.id)) {
       return res.json({ success: true, completed: true, alreadyCompleted: true });
+    }
+
+    // ★ 2026-09-27 만들기 개편 S4 — 50 을 내기 **전에** 막는다(옛: 완성은 통과하고 발송에서야 막혀 돈만 나갔다).
+    //   발신 설정 판정은 생성에서 이 자리로 옮겨 왔다(Harold 결재 ③ · 불변 11 개정).
+    const completeBlock = (await emailSmtpBlocker(auth.companyId)) || emailContentBlocker(campaign);
+    if (completeBlock) {
+      return res.status(completeBlock.status).json({ success: false, error: completeBlock.error, code: completeBlock.code });
     }
 
     const cost = getCreditCost('email-campaign-complete'); // 50
@@ -579,6 +572,37 @@ router.post('/campaigns', async (req: Request, res: Response) => {
     console.error('[Email /campaigns POST] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     return res.status(500).json({ success: false, error: err?.message || '캠페인 신설 실패' });
+  }
+});
+
+// ★ 2026-09-27 만들기 개편 S11 — POST /campaigns/:id/clone — 이메일 복제(초안 · 차감 0).
+//   원본은 소유 범위(담당자 = 본인 것)에서 읽고, 새 행은 기존 생성 CT(createEmailCampaign)로 만든다(신규 SQL 0).
+//   완성 원장은 캠페인 id 기준이라 복제본은 "완성 전"으로 시작한다(돈 축 무변경) · 발송 이력·예약·재발송 표식은 옮기지 않는다.
+router.post('/campaigns/:id/clone', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAccess(req, res);
+  if (!auth) return;
+  try {
+    const src = await getEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
+    if (!src) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
+    const campaign = await createEmailCampaign({
+      companyId: auth.companyId,
+      createdBy: auth.userId,
+      name: `${src.name} 복사본`.slice(0, 200),
+      subject: src.subject,
+      htmlBody: src.htmlBody,
+      textBody: src.textBody || undefined,
+      fromName: src.fromName || undefined,
+      fromEmail: src.fromEmail || undefined,
+      isAd: src.isAd,
+      aiGenerated: src.aiGenerated,
+      sections: Array.isArray(src.sections) ? src.sections : null,
+      design: src.design || null,
+    });
+    return res.json({ success: true, campaign });
+  } catch (err: any) {
+    console.error('[Email /campaigns/:id/clone] 오류:', err);
+    if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    return res.status(500).json({ success: false, error: err?.message || '복제 실패' });
   }
 });
 
@@ -649,28 +673,17 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
       return res.status(409).json({ success: false, error: '이미 발송이 진행 중입니다.' });
     }
 
-    // placeholder 잔존(미입력 자리) = 발송 차단 (AI 임의 혜택 영구 룰). 위치·샘플을 함께 안내해 즉시 수정 가능하게.
-    const ph = findUneditedPlaceholder(campaign.subject, campaign.htmlBody, campaign.textBody);
-    if (ph) {
-      return res.status(400).json({
-        success: false,
-        error: `${ph.where}에 직접 입력이 필요한 자리 "${ph.sample}"가 남아 있습니다. 편집에서 그 자리를 채운 뒤 발송해주세요.`,
-        code: 'UNEDITED_PLACEHOLDER',
-      });
+    // placeholder 잔존(미입력 자리) · ★2026-09-22 링크 결함 = 발송 차단 — ★ 2026-09-27 만들기 개편 S3 판정은 CT(`email-send-gate`)가 소유
+    //   (완성 `/complete` 도 같은 CT 를 차감 앞에서 부른다). 문구·코드는 옛 인라인과 같다.
+    const contentBlock = emailContentBlocker(campaign);
+    if (contentBlock) {
+      return res.status(contentBlock.status).json({ success: false, error: contentBlock.error, code: contentBlock.code });
     }
-
-    // ★2026-09-22 링크 결함(실존하지 않는 도메인) = 발송 차단. 0922 브랜드메시지에서 `.com` → `.cpm`
-    //   오타 한 글자에 발송이 통째로 죽었다. 메일은 발송 자체는 되고 **받는 사람이 눌렀을 때** 안 열리므로
-    //   더 늦게 드러난다 — 나가기 전에 막는다. 판정은 CT(`webLinkReason`)가 소유한다.
-    const badHref = (() => {
-      for (const m of String(campaign.htmlBody || '').matchAll(/href=["']([^"']+)["']/gi)) {
-        const r = webLinkReason(m[1], '메일 본문의 링크는');
-        if (r) return r;
-      }
-      return '';
-    })();
-    if (badHref) {
-      return res.status(400).json({ success: false, error: badHref, code: 'LINK_DEFECT' });
+    // ★ 2026-09-27 만들기 개편 S5 — 발신 설정(SMTP) 확인은 **선점 앞**(옛: 'sending' 선점 뒤 백그라운드에서 failed 로 떨어져
+    //   화면은 "발송 시작"을 보고 결과는 실패였다). 예약도 같은 자리에서 막는다(sweeper 가 나중에 실패하지 않게).
+    const smtpBlock = await emailSmtpBlocker(auth.companyId);
+    if (smtpBlock) {
+      return res.status(smtpBlock.status).json({ success: false, error: smtpBlock.error, code: smtpBlock.code });
     }
 
     const { recipients, target, mode, scheduled_at } = req.body;

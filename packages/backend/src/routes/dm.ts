@@ -41,7 +41,9 @@ import {
   oneShotGenerate,
   type CampaignSpec, type ToneKey,
 } from '../utils/dm/dm-ai';
-import { checkCredit, deductCreditSafe, InsufficientCreditError, getCreditState } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, InsufficientCreditError, isCreditEnabledStrict } from '../utils/ai-credit';
+// ★ 2026-09-27 만들기 개편 S6 — 첫 발행 잠금·발행비 판정은 CT 가 소유(두 발행 문이 같은 판정)
+import { dmPublishBlocker, dmPublishFeeSourceOf, isDmPublishFeeCharged, resolveSendPublishFeeGate, quoteDmPublishFee } from '../utils/dm/dm-publish-gate';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
@@ -119,7 +121,7 @@ import { getPersonalizationVariables } from '../utils/dm/dm-personalization-engi
 import {
   submitEventResponse, getResponses, getWinners, getResponseStats,
   buildResponseExportRows, importPresetWinners, replacePrizesForSection,
-  syncPrizesFromSections, isInteractionCampaign,
+  syncPrizesFromSections,
 } from '../utils/dm/dm-interaction';
 import { parseWinnerRows, buildEventInsight } from '../utils/dm/dm-interaction-core';
 import * as XLSX from 'xlsx';
@@ -785,6 +787,49 @@ dmRouter.post('/:id/clone', async (req: any, res: any) => {
   }
 });
 
+// ★ 2026-09-27 만들기 개편 S9 — GET /api/dm/:id/publish-quote?via=send|publish — 발행비 선견적(표시용).
+//   누르는 순간의 판정은 각 라우트가 다시 한다(값이 다르면 화면이 다시 확인받는다 · 설계서 불변 5). 차감 0.
+dmRouter.get('/:id/publish-quote', requireDmAccess, async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const via = req.query?.via === 'publish' ? 'publish' : 'send';
+    const q = await quoteDmPublishFee(companyId, req.params.id, via);
+    return res.json({ success: true, via, ...q });
+  } catch (err: any) {
+    console.error('[DM 발행 선견적] 오류:', err?.message);
+    return res.status(500).json({ error: '발행비를 계산하지 못했어요.' });
+  }
+});
+
+// ★ 2026-09-27 만들기 개편 S10 — POST /api/dm/:id/render-preview — 무저장 미리보기(수정 화면 가운데 휴대폰·PC).
+//   소유를 확인한 행 위에 요청 본문(sections·pages·layout_mode·settings·brand_kit·title)을 **메모리에서만** 덮어
+//   기존 렌더 함수(`renderDmViewerHtmlWithCustomer` = 공개 뷰어와 같은 함수)에 넘긴다. 렌더러·DB 무변경(설계서 불변 1).
+//   발행된 DM 을 고치는 중에도 라이브 주소를 덮지 않고 미리 본다(자동 저장은 발행분을 덮지 않는다).
+dmRouter.post('/:id/render-preview', requireDmAccess, async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const dm = await getDmDetail(req.params.id, companyId);
+    if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    const b = req.body || {};
+    const merged: any = { ...dm };
+    if (Array.isArray(b.sections)) merged.sections = b.sections;
+    if (Array.isArray(b.pages)) merged.pages = b.pages;
+    if (b.layout_mode === 'scroll' || b.layout_mode === 'slides') merged.layout_mode = b.layout_mode;
+    if (b.settings && typeof b.settings === 'object' && !Array.isArray(b.settings)) merged.settings = b.settings;
+    if (b.brand_kit && typeof b.brand_kit === 'object' && !Array.isArray(b.brand_kit)) merged.brand_kit = b.brand_kit;
+    if (typeof b.title === 'string') merged.title = b.title.slice(0, 200);
+    const sampleKey: SampleCustomerKey = (b.sample_key || 'vip') as SampleCustomerKey;
+    const sample = await selectSampleCustomerByKey(companyId, sampleKey);
+    const html = await renderDmViewerHtmlWithCustomer(merged, '/api/dm/v', sample.data, companyId);
+    return res.json({ success: true, html });
+  } catch (err: any) {
+    console.error('[DM 무저장 미리보기] 오류:', err?.message);
+    return res.status(500).json({ error: '미리보기를 그리지 못했어요.' });
+  }
+});
+
 // POST /api/dm/:id/publish — 발행
 // ★ 2026-09-27 한줄로 V2 R117 — 아래 `requireDmAccess` = 소유 가드(담당자는 본인 DM만 · 관리자 = 회사 전체). 옛: 이 20개 라우트는 회사 조건만.
 dmRouter.post('/:id/publish', requireDmAccess, async (req: any, res: any) => {
@@ -804,27 +849,43 @@ dmRouter.post('/:id/publish', requireDmAccess, async (req: any, res: any) => {
     //   나가고 발행은 안 된다. DM은 발행 자체는 되고 **보는 사람이 눌렀을 때** 안 열려 더 늦게 드러난다.
     //   본문 구조가 `sections`·`pages` 두 갈래라 둘 다 본다(SCHEMA dm_pages 10·17 — 실측상 pages가 항상 있다).
     //   키 이름이 섹션마다 달라서 값으로 찾는다(findLinkDefectDeep).
-    const dmBody = await query(
-      `SELECT sections, pages, header_data, footer_data FROM dm_pages WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
-      [req.params.id, companyId],
-    );
-    if (dmBody.rows[0]) {
-      const dmLinkDefect = findLinkDefectDeep(dmBody.rows[0], '링크는');
-      if (dmLinkDefect) {
-        return res.status(400).json({ error: dmLinkDefect, code: 'LINK_DEFECT' });
+    // ★ 2026-09-27 만들기 개편 S7 — **첫 발행**(short_code 없음)은 CT 잠금 전체(링크 결함 · 채울 자리 · 무시 불가 검수 치명).
+    //   재발행(목록 [발행 주소 복사])은 옛 링크 검사만 그대로 — 발행 뒤 사정(지난 카운트다운 등)으로 주소 복사가 막히지 않게.
+    //   화면은 이미 검수 치명에서 멈췄다 — 서버가 같은 판정으로 뒷받침한다(목록·API 직행 우회 차단).
+    const dmBodyRow = await getDmDetail(req.params.id, companyId);
+    if (dmBodyRow) {
+      if (!dmBodyRow.short_code) {
+        const block = await dmPublishBlocker(dmBodyRow);
+        if (block) return res.status(block.status).json({ error: block.error, code: block.code, items: block.items || [] });
+      } else {
+        const dmLinkDefect = findLinkDefectDeep(
+          { sections: dmBodyRow.sections, pages: dmBodyRow.pages, header_data: dmBodyRow.header_data, footer_data: dmBodyRow.footer_data },
+          '링크는',
+        );
+        if (dmLinkDefect) {
+          return res.status(400).json({ error: dmLinkDefect, code: 'LINK_DEFECT' });
+        }
       }
     }
 
-    // ★ 종량제: 발행(단축URL 확정) 최초 1회만(멱등키 dm-publish:dmId). 인터랙션 캠페인=50(F 안1), 일반 DM=30. test-send 자동발행(publishDm 직접 호출)은 라우트 미경유=미과금. 재발행은 멱등 0.
-    const isInteraction = await isInteractionCampaign(companyId, req.params.id);
-    const costSource = isInteraction ? 'dm-interaction-publish' : 'dm-builder';
-    const pubCost = getCreditCost(costSource);
-    const charged = await query(
-      `SELECT 1 FROM ai_credit_transactions WHERE company_id = $1::uuid AND idempotency_key = $2 LIMIT 1`,
-      [companyId, `dm-publish:${req.params.id}`]
-    );
-    const firstPublish = charged.rows.length === 0;
-    if (firstPublish) await checkCredit(companyId, pubCost);
+    // ★ 종량제: 발행(단축URL 확정) 최초 1회만(멱등키 dm-publish:dmId). 인터랙션 캠페인 · 일반 DM 단가 = 단가표. test-send 자동발행은 라우트 미경유=미과금. 재발행은 멱등 0.
+    //   ★ 2026-09-27 S6 — 판정은 CT(send-to-target·선견적과 같은 함수) · 동작 무변경.
+    const { source: costSource, cost: pubCost } = await dmPublishFeeSourceOf(companyId, req.params.id);
+    const firstPublish = !(await isDmPublishFeeCharged(companyId, req.params.id));
+    // ★ 2026-09-27 Codex 3R·4R — 화면이 확인한 발행비(expected_fee · 보내기 창 [링크만 받기])가 오면 **청구 여부를 여기서 한 번 정하고**
+    //   차감까지 그대로 쓴다. 지금 발행비가 더 크면 차감 전에 402 · 크레딧제 미적용으로 통과한 요청은 뒤에 켜져도 걷지 않는다
+    //   (대조와 차감 사이 구매·요금제 반영으로 승인 없는 100/120 이 나가던 길). 걷는 금액 = pubCost ≤ expected_fee.
+    //   조회 실패 = throw(아래 catch · 차감 0). 값을 싣지 않는 옛 호출부(편집기 발행 · 목록 주소 복사)는 동작 그대로(chargeNow = firstPublish).
+    const expectedFee = req.body?.expected_fee;
+    let chargeNow = firstPublish;
+    if (typeof expectedFee === 'number' && firstPublish) {
+      const creditOn = await isCreditEnabledStrict(companyId);
+      if (creditOn && pubCost > expectedFee) {
+        return res.status(402).json({ error: '발행 비용을 다시 확인해 주세요.', code: 'PUBLISH_FEE_REQUIRED', costSource, cost: pubCost });
+      }
+      chargeNow = creditOn;
+    }
+    if (chargeNow) await checkCredit(companyId, pubCost);
     const result = await publishDm(req.params.id, companyId);
     if (!result) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
 
@@ -862,7 +923,7 @@ dmRouter.post('/:id/publish', requireDmAccess, async (req: any, res: any) => {
     // ★ B 연계: lucky_draw/roulette 경품 설정 → dm_prizes 동기화 (실패해도 발행은 유지)
     try { await syncPrizesFromSections(companyId, req.params.id); }
     catch (e: any) { console.error('[DM발행] 경품 동기화 오류:', e?.message); }
-    if (firstPublish) {
+    if (chargeNow) {
       await deductCreditSafe({
         companyId, cost: pubCost, source: costSource, createdBy: req.user?.userId,
         idempotencyKey: `dm-publish:${req.params.id}`,
@@ -1276,32 +1337,22 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, async (req: any, res: any)
       });
     }
 
+    // ★ 2026-09-27 만들기 개편 S8 — 미발행 DM 은 이 경로 안에서 첫 발행된다(아래 publishDm) → `/publish` 와 같은 잠금을
+    //   **발행비 판정·차감보다 앞**에서 건다. 이미 발행된 DM 의 재발송은 옛 동작 그대로.
+    if (!dm.short_code) {
+      const block = await dmPublishBlocker(dm);
+      if (block) return res.status(block.status).json({ error: block.error, code: block.code, items: block.items || [] });
+    }
+
     // ★ 2026-07-12 D-1 발행비 정합 — 발행비(멱등키 dm-publish:dmId) 미납 + 실고객 발송 이력 없음이면
     //   402 PUBLISH_FEE_REQUIRED → 프론트 발행 확인 모달 → confirmPublishFee=true 재요청 시 이 자리에서
     //   발행비 확정(멱등키 = /publish와 동일) 후 발송 진행. 테스트 발행(무과금)·API 직행 우회 차단.
     //   (/publish 왕복 재시도는 차감 swallow 시 402 루프 가능 — Codex 지적으로 인라인 확정 설계.)
     //   예외: ①과거 실발송 이력(dm_recipient_tokens) = 구 정책 통과분 소급 금지 ②크레딧제 미적용 회사.
     //   판정 조회 실패 = 기존 동작(발송 우선 — 발송 무결 최우선). 차감 영구 실패 = [CREDIT][MISS] 수동 재차감(전사 정책).
-    let publishFeeGate: { source: string; cost: number } | null = null;
-    try {
-      const chargedR = await query(
-        `SELECT 1 FROM ai_credit_transactions WHERE company_id = $1::uuid AND idempotency_key = $2 LIMIT 1`,
-        [companyId, `dm-publish:${req.params.id}`],
-      );
-      if (chargedR.rows.length === 0) {
-        const [legacyR, creditState] = await Promise.all([
-          query(`SELECT 1 FROM dm_recipient_tokens WHERE dm_id = $1::uuid AND company_id = $2::uuid LIMIT 1`, [req.params.id, companyId]),
-          getCreditState(companyId),
-        ]);
-        if (legacyR.rows.length === 0 && creditState.creditEnabled) {
-          const isInteractionFee = await isInteractionCampaign(companyId, req.params.id);
-          const feeSource = isInteractionFee ? 'dm-interaction-publish' : 'dm-builder';
-          publishFeeGate = { source: feeSource, cost: getCreditCost(feeSource) };
-        }
-      }
-    } catch (feeErr: any) {
-      console.warn('[DM 타겟 발송] 발행비 판정 실패 — 기존 동작으로 진행:', feeErr?.message);
-    }
+    //   ★ 2026-09-27 만들기 개편 S6 — 판정은 CT `resolveSendPublishFeeGate`(옛 인라인과 같은 식 · 조회 실패 = null = 발송 우선).
+    //   선견적(`GET /:id/publish-quote`)도 같은 함수를 부른다 — 화면이 먼저 보여 준 금액과 누른 뒤의 판정이 한 식이다.
+    const publishFeeGate: { source: string; cost: number } | null = await resolveSendPublishFeeGate(companyId, req.params.id);
     if (publishFeeGate) {
       if (req.body?.confirmPublishFee !== true) {
         return res.status(402).json({
