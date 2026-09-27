@@ -15,7 +15,8 @@ const h = src.slice(src.indexOf("router.get('/:id/recipients'"), src.indexOf('ro
 describe('예약 수신자 목록 페이지 조회', () => {
   it('페이지 전용 CT로 조회한다(정렬 = seqno 오름차순 · limit·offset)', () => {
     expect(h).toContain('const mysqlRecipients = await smsSelectPagedAll(recipientTables,');
-    expect(h).toMatch(/searchParams,\s*'seqno ASC', limit, offset\s*\)/);
+    // ★ 2026-09-27 m140 — 동률은 테이블로 가른다(seqno는 테이블마다 독립 · 여러 라인 캠페인의 페이지 경계 중복·누락)
+    expect(h).toMatch(/'seqno ASC, _sms_table ASC', limit, offset\s*\)/);
   });
 
   it('전체 실체화 뒤 자르는 옛 조회가 남아 있지 않다', () => {

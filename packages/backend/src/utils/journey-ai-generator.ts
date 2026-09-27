@@ -16,6 +16,7 @@
  */
 
 import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
+import { randomUUID } from 'crypto';
 import { buildMemoryPromptContext } from './company-memory';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입.
 import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
@@ -36,6 +37,10 @@ import { isImplementedTriggerEvent, triggerTemplateCode } from './journey-trigge
 import { successionObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
 import { stripUnauthorizedBenefits } from './copy-benefit-detector';
+// ★ 2026-09-27 한줄로 V2 R260 — 여정 자동 생성은 사전 확인 → 묶음 생성 → 1회 차감
+import { checkCredit, deductCreditSafe } from './ai-credit';
+import { getCreditCost } from './ai-credit-calc';
+import { runInCreditBundle } from './ai-credit-context';
 // ★ 2026-09-26 한줄로 V2 R1-35 후속 — 날씨 지시는 날씨 CT가 소유(연결이 없으면 날씨 변수를 쓰지 않게)
 import { buildWeatherPromptBlock, buildWeatherRefineRule } from './connected-content';
 
@@ -947,11 +952,26 @@ export async function generateAnchorJourneyPlan(input: {
   objective: string;
 }): Promise<{ steps: { offsetDays: number; subject: string; message: string }[] }> {
   const offsets = parseAnchorOffsets(input.objective);
-  const steps: { offsetDays: number; subject: string; message: string }[] = [];
-  for (const off of offsets) {
-    const m = await generateAnchorStepMessage({ companyId: input.companyId, objective: input.objective, offsetDays: off });
-    steps.push({ offsetDays: off, subject: m.subject, message: m.message });
-  }
+  // ★ 2026-09-27 한줄로 V2 R260 — 옛: 오프셋마다 AI를 순차 호출하며 1크레딧씩 뺐다 → 중간 실패·부족이면 앞 차감은 남고 결과는 없었다(402·500).
+  //   필요 크레딧을 먼저 확인하고(부족하면 InsufficientCreditError → 402), 묶음 실행(안쪽 차감 없음)으로 동시 3개까지 만든 뒤
+  //   **전부 성공했을 때만** 한 번에 뺀다. 문안 1건 = 1크레딧은 그대로다.
+  const cost = getCreditCost('journey-ai-refine') * offsets.length;
+  await checkCredit(input.companyId, cost);
+  const steps = await runInCreditBundle(async () => {
+    const out: { offsetDays: number; subject: string; message: string }[] = new Array(offsets.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < offsets.length) {
+        const i = next++;
+        const m = await generateAnchorStepMessage({ companyId: input.companyId, objective: input.objective, offsetDays: offsets[i] });
+        out[i] = { offsetDays: offsets[i], subject: m.subject, message: m.message };
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, offsets.length) }, () => worker()));
+    return out;
+  });
+  // 작업마다 고유 멱등키(Codex 2R medium) — 생략하면 대체 키가 밀리초 단위라 같은 순간의 두 요청이 한 번만 차감될 수 있다.
+  await deductCreditSafe({ companyId: input.companyId, cost, source: 'journey-ai-refine', idempotencyKey: `journey-anchor-plan:${randomUUID()}` });
   return { steps };
 }
 

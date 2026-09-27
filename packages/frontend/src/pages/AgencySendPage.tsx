@@ -95,6 +95,9 @@ export default function AgencySendPage() {
   const [composerPrefill, setComposerPrefill] = useState<AgencyComposerPrefill | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [requests, setRequests] = useState<AgencySendRequest[]>([]);
+  // ★ 2026-09-27 한줄로 V2 R286 — 전체 건수(서버) · 100건씩 이어 불러온다
+  const [total, setTotal] = useState(0);
+  const [moreLoading, setMoreLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [listLoading, setListLoading] = useState(false);
   const [redoLoadingId, setRedoLoadingId] = useState<string | null>(null);
@@ -102,13 +105,32 @@ export default function AgencySendPage() {
   const loadList = useCallback(async () => {
     setListLoading(true);
     try {
-      setRequests(await fetchAgencyRequests());
+      const first = await fetchAgencyRequests();
+      setRequests(first.requests);
+      setTotal(first.total);
     } catch (e: any) {
       if (e?.code !== 'AGENCY_SEND_NOT_ALLOWED') toast.error(e?.message || '목록을 불러오지 못했습니다.');
     } finally {
       setListLoading(false);
     }
   }, [toast]);
+
+  /** ★ 2026-09-27 R286 — 이전 접수 100건 더(이미 불러온 건수만큼 건너뛴다 · 사이에 새 접수가 끼면 같은 건이 겹칠 수 있어 id로 거른다) */
+  const loadMore = useCallback(async () => {
+    setMoreLoading(true);
+    try {
+      const next = await fetchAgencyRequests(requests.length);
+      setRequests((prev) => {
+        const seen = new Set(prev.map((r) => r.id));
+        return [...prev, ...next.requests.filter((r) => !seen.has(r.id))];
+      });
+      setTotal(next.total);
+    } catch (e: any) {
+      toast.error(e?.message || '이전 접수를 불러오지 못했습니다.');
+    } finally {
+      setMoreLoading(false);
+    }
+  }, [requests.length, toast]);
 
   useEffect(() => {
     let alive = true;
@@ -298,7 +320,7 @@ export default function AgencySendPage() {
               <div className={CUI_PANEL}>
                 <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-200 bg-neutral-50/60">
                   <p className="text-[13px] font-bold text-neutral-900">접수 내역</p>
-                  <p className="text-[12.5px] text-neutral-500 tabular-nums">{requests.length}건</p>
+                  <p className="text-[12.5px] text-neutral-500 tabular-nums">{total > requests.length ? `${requests.length} / ${total}건` : `${requests.length}건`}</p>
                 </div>
                 <div className="divide-y divide-neutral-100">
                   {pagedRequests.map((r) => {
@@ -370,6 +392,15 @@ export default function AgencySendPage() {
                   unit="건"
                   accent="indigo"
                 />
+                {total > requests.length && (
+                  <div className="flex justify-center px-5 py-3 border-t border-neutral-100">
+                    <button type="button" onClick={() => { void loadMore(); }} disabled={moreLoading}
+                      className={`${CUI_BTN_OUTLINE} h-8 px-3 text-[13px] disabled:opacity-50`}>
+                      {moreLoading ? <Loader2 className="w-[14px] h-[14px] animate-spin" /> : null}
+                      이전 접수 더 불러오기 ({(total - requests.length).toLocaleString()}건 남음)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             <p className="mt-3 text-[10px] text-neutral-400 italic">Data source: 대행발송 접수 원장</p>

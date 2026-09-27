@@ -24,7 +24,7 @@
  * 참조: 카카오-브랜드메시지-발송매뉴얼.pptx(강문희 2026-01) + attachment_method.pdf
  */
 
-import { insertBrandQueue, BrandQueueInsertError, getCompanySmsTables, getEtcJsonCapacity, K_ETC_JSON_BASE_MAX, type BrandQueueRow } from './sms-queue';
+import { insertBrandQueue, BrandQueueInsertError, getCompanySmsTables, getEtcJsonCapacity, K_ETC_JSON_BASE_MAX, recordCampaignSentTables, getCampaignSmsTablesWide, smsCountAll, type BrandQueueRow } from './sms-queue';
 import { isPilotTarget } from './rollout-gate';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 import { markRefundPending } from './refund-pending';
@@ -1624,13 +1624,9 @@ export async function resolveBrandCallback(companyId: string, resendFrom?: strin
  */
 function recordSentTables(campaignId: string | undefined, table: string): void {
   if (!campaignId) return;
-  query(
-    `UPDATE campaigns
-        SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{sentTables}', $2::jsonb),
-            updated_at = NOW()
-      WHERE id = $1`,
-    [campaignId, JSON.stringify([table])]
-  ).catch((e: any) => console.warn(`[brand-message] sentTables 기록 실패(무영향):`, e?.message || e));
+  // ★ 2026-09-27 한줄로 V2 m136 — 합친다(적재 기록 CT 하나 · 덮어쓰기 금지)
+  recordCampaignSentTables(campaignId, [table])
+    .catch((e: any) => console.warn(`[brand-message] sentTables 기록 실패(무영향):`, e?.message || e));
 }
 
 // ============================================================
@@ -2003,11 +1999,19 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
     };
   }
 
+  // 발송 테이블 확정 — ★ 2026-09-27 한줄로 V2 m049: 조립 폭(적재 테이블의 실제 폭)을 알아야 해 조립 앞으로 옮겼다(자유형과 같은 순서 · 차감 전).
+  const tables = await getCompanySmsTables(params.companyId, params.userId);
+  if (tables.length === 0) {
+    return { success: false, sentCount: 0, failCount: 0, error: '발송 라인이 설정되지 않았습니다. 관리자에게 문의하세요.' };
+  }
+
   // 적재 규약(msg_contents+k_etc_json)·대체발송 확정 — 차감 전 선차단
   const hasVars = !!(params.messageVariableJson || params.couponVariableJson);
   let queuePayload: BrandQueuePayload;
   let fallback: ResolvedBrandFallback;
   try {
+    // ★ 2026-09-27 한줄로 V2 m049 — 기본형도 적재 테이블 폭으로 판정(옛: 넘기지 않아 비토 라인 8192에서도 1024)
+    const etcJsonMax = await getEtcJsonCapacity(tables[0]);
     queuePayload = buildBrandQueuePayload({
       typeDef: hasVars ? 'BASIC_VAR' : 'BASIC_TCD',
       senderKey: params.senderKey,
@@ -2031,6 +2035,7 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
       carouselJson: (params.carouselItems && params.carouselItems.length > 0) ? '[]' : null,
       messageVariableJson: params.messageVariableJson,
       couponVariableJson: params.couponVariableJson,
+      etcJsonMax,
     });
     fallback = resolveBrandFallback({
       resendType: params.resendType,
@@ -2048,11 +2053,7 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
     return { success: false, sentCount: 0, failCount: 0, error: '모든 수신자가 수신거부 상태입니다' };
   }
 
-  // 발송 테이블·회신번호 확정
-  const tables = await getCompanySmsTables(params.companyId, params.userId);
-  if (tables.length === 0) {
-    return { success: false, sentCount: 0, failCount: 0, error: '발송 라인이 설정되지 않았습니다. 관리자에게 문의하세요.' };
-  }
+  // 회신번호 확정(발송 테이블은 위 조립 앞에서 확정)
   const callback = await resolveBrandCallback(params.companyId, params.resendFrom);
   if (!callback && fallback.nextType !== 'N') {
     return { success: false, sentCount: 0, failCount: 0, error: '대체발송 회신번호가 없습니다. 기본 회신번호를 등록해주세요.' };
@@ -2111,4 +2112,47 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
     return { success: false, sentCount: 0, failCount, error: '브랜드메시지 큐 적재에 실패했습니다. 잠시 후 다시 시도해주세요.', campaignId: params.campaignId };
   }
   return { success: true, sentCount, failCount, campaignId: params.campaignId };
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R316 — 브랜드 발송 CT가 던졌을 때 캠페인 상태 수습. 옛: 라우트가 캠페인을 'sending'으로 만든 뒤
+ * 발송 CT가 던지면 영영 'sending'이었다. 큐에 들어간 행이 있으면 completed(나간 몫은 나간다 · 정산은 스위퍼) ·
+ * 없으면 failed(적재 0 고착 = 스위퍼의 의무 정산 모양). 조회가 실패하면 'sending' 그대로 둔다(추측으로 상태를 바꾸지 않는다).
+ */
+export async function settleBrandSendCrash(campaignId: string, companyId: string, userId?: string | null): Promise<void> {
+  try {
+    const tables = await getCampaignSmsTablesWide(companyId, { created_by: userId ?? null, send_config: null, created_at: new Date() });
+    const loaded = await smsCountAll(tables, 'app_etc1 = ?', [campaignId]);
+    await query(
+      `UPDATE campaigns SET status = $2, updated_at = NOW() WHERE id = $1 AND status = 'sending'`,
+      [campaignId, loaded > 0 ? 'completed' : 'failed'],
+    );
+  } catch (e: any) {
+    console.error(`[brand-message] 발송 예외 뒤 상태 수습 실패 campaign=${campaignId}(sending 유지 · 스위퍼 후보):`, e?.message || e);
+  }
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R089 — 브랜드메시지 템플릿 요청 본문 → brand_message_templates 칸(등록 INSERT와 같은 매핑).
+ * 요청에 **있는 칸만** 돌려준다(없는 칸은 건드리지 않는다 · null은 비움). 수정 뒤 PG를 IMC가 받아들인 내용과 맞추는 데 쓴다.
+ */
+export function brandTemplateColumnsFromBody(body: any): Array<{ column: string; value: any; cast: string }> {
+  const b = body || {};
+  const out: Array<{ column: string; value: any; cast: string }> = [];
+  const put = (key: string, column: string, conv: (v: any) => any, cast = '') => {
+    if (b[key] !== undefined) out.push({ column, value: conv(b[key]), cast });
+  };
+  put('customTemplateCode', 'custom_template_code', (v) => v || null);
+  put('manageName', 'manage_name', (v) => v);
+  put('chatBubbleType', 'chat_bubble_type', (v) => v);
+  put('adult', 'adult_yn', (v) => v || 'N');
+  put('header', 'header', (v) => v || null);
+  put('content', 'content', (v) => v || null);
+  put('additionalContent', 'additional_content', (v) => v || null);
+  put('attachment', 'attachment', (v) => (v ? JSON.stringify(v) : null), '::jsonb');
+  put('carousel', 'carousel', (v) => (v ? JSON.stringify(v) : null), '::jsonb');
+  put('buttons', 'buttons', (v) => JSON.stringify(v || []), '::jsonb');
+  put('coupon', 'coupon', (v) => (v ? JSON.stringify(v) : null), '::jsonb');
+  put('variables', 'variables', (v) => (Array.isArray(v) ? v : []), '::text[]');
+  return out;
 }

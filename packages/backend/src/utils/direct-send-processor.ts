@@ -13,7 +13,7 @@ import { normalizePhone } from './normalize-phone';
 import { prepareSendMessage, replaceVariables } from './messageUtils';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
-import { bulkInsertSmsQueue, insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType } from './sms-queue';
+import { bulkInsertSmsQueue, insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, getEtcJsonCapacity } from './sms-queue';
 import { subjectForMsgType } from './qtmsg-type';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑 — CT-12 단일 진입점
 import { buildBrandQueuePayload, resolveBrandFallback,
@@ -174,6 +174,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       //   ⛔ 넘어온 값이 없으면(옛 호출부) 그대로 조립기로 보내고, 우리 서빙 URL이면 조립기가 거절한다.
       const resolvedAttachmentJson = p.kakaoAttachmentJson || null;
       const brandSpec = BUBBLE_TYPES[String(p.kakaoBubbleType || 'TEXT').toUpperCase()];
+      // ★ 2026-09-27 한줄로 V2 m049 — 조립 폭 = 적재 테이블(insertBrandQueue가 쓰는 첫 테이블)의 실제 폭(/brand-send와 같은 규칙).
+      //   옛: 넘기지 않아 비토 라인(8192)에서도 1024로 판정 → 캐러셀(최소 1,190자대)·큰 첨부가 조립에서 던져 청크 전체 미적재.
+      const etcJsonMax = await getEtcJsonCapacity(p.companyTables[0]);
       const brandRows: BrandQueueRow[] = recipients.map((r) => {
         const cleanPhone = normalizePhone(r.phone);
         const dbCustomer = custMap.get(cleanPhone) || null;
@@ -205,6 +208,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
           immediate: !p.scheduled,
           attachmentJson: resolvedAttachmentJson || undefined,
           carouselJson: p.kakaoCarouselJson || undefined,
+          etcJsonMax,
         });
         return {
           phone: cleanPhone,

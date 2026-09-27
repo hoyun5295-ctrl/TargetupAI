@@ -40,3 +40,10 @@ export const SWEEPABLE_CAMPAIGN_STATUS_SQL = SWEEPABLE_CAMPAIGN_STATUSES
 export function isSweepableCampaignStatus(status: string | null | undefined): boolean {
   return !!status && (SWEEPABLE_CAMPAIGN_STATUSES as readonly string[]).includes(status);
 }
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m070(MULTIRUN) — 발송 뒤 상태. AI 발송 문(POST /campaigns/:id/send)은 이 상태의 캠페인을 다시 보내지 않는다.
+ * 환불 항아리(미적재·실패·취소)가 캠페인 단위 누적이라 같은 캠페인 id의 두 번째 실행은 환불이 앞 실행 누적에 삼켜진다(m070·m058).
+ * 허용 목록(draft) 대신 이 목록으로 막는다 — 생성 INSERT가 상태 칸을 DB 기본값에 맡겨, 기본값이 무엇이든 새 캠페인 발송은 깨지지 않게.
+ */
+export const CAMPAIGN_POST_SEND_STATUSES: readonly string[] = ['scheduled', 'sending', 'completed', 'cancelled', 'failed'];

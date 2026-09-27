@@ -16,7 +16,7 @@
 
 import pool, { mysqlBillingQuery, MYSQL_BILLING_POOL_LIMIT } from '../config/database';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, spamBilledResultSql, spamFailedResultSql } from './sms-result-map';
-import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables } from './sms-queue';
+import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables, getInactiveLineGroupTables } from './sms-queue';
 import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats';
 import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
 import { floorWon } from './money';
@@ -140,6 +140,8 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
     TEST_LMS: testLmsRaw ?? lms,
     // ★ 2026-09-26 S1-H06 테스트 브랜드 = 브랜드(친구) 단가(담당자 테스트는 친구 대상으로 나간다 · 차감 단가와 같은 값)
     TEST_BRAND: brandRaw ?? 0,
+    // ★ 2026-09-27 한줄로 V2 m060(Harold 결정) 테스트 MMS = 회사 MMS 단가(선불 테스트 차감과 같은 단가 · 테스트 브랜드와 같은 방식)
+    TEST_MMS: mmsRaw ?? 0,
     SPAM_SMS: sms,
     SPAM_LMS: lms,
   };
@@ -155,6 +157,7 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
   if (testSmsRaw === null && smsRaw === null) unsetKeys.push('TEST_SMS');
   if (testLmsRaw === null && lmsRaw === null) unsetKeys.push('TEST_LMS');
   if (brandRaw === null) unsetKeys.push('TEST_BRAND');
+  if (mmsRaw === null) unsetKeys.push('TEST_MMS');
   if (smsRaw === null) unsetKeys.push('SPAM_SMS');
   if (lmsRaw === null) unsetKeys.push('SPAM_LMS');
 
@@ -170,9 +173,11 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
 //   회사 격리는 whereClause(app_etc1 IN (그 회사 run/campaign id) · app_etc2=company_id)가 보장 — 타사 혼입 0.
 // ★ 2026-07-17: bulk → bulk + bito 합집합 (Harold 승인). getAllBulkSmsTables는 group_type='bulk'만 봐서
 //   비토 게이트웨이 라인(13·14·15) 발송분이 정산에서 통째로 빠져 있었다.
+// ★ 2026-09-27 한줄로 V2 m063 — 꺼진(비활성) 라인 그룹의 실존 테이블도 합친다. 그룹을 끄면 그 라인의 과거 발송분(LIVE·LOG)이
+//   정산에서 통째로 빠졌다. 발송 경로는 활성 그룹만 그대로다(여기는 청구 집계 전용).
 export const getBillingCompanyTables = async (_companyId: string) => {
-  const [bulk, bito] = await Promise.all([getAllBulkSmsTables(), getBitoSmsTables()]);
-  return mergeLineTables(bulk, bito);
+  const [bulk, bito, inactive] = await Promise.all([getAllBulkSmsTables(), getBitoSmsTables(), getInactiveLineGroupTables()]);
+  return mergeLineTables(mergeLineTables(bulk, bito), inactive);
 };
 export const getBillingTestTables = () => getTestSmsTables();
 
@@ -625,7 +630,10 @@ export async function selectBillingSendIds(opts: {
         AND c3.send_type IN (${DIRECT_PIPELINE_SEND_TYPES_SQL})
         AND ${nonSentPhaseSql('c3')}
         AND c3.status = 'completed'
-        AND COALESCE(c3.scheduled_at, c3.sent_at) >= ${kstStart('$2')}
+        -- ★ 2026-09-27 한줄로 V2 m062 — 후보는 기간 시작 92일 전부터(분할 발송은 회차당 1분이라 큰 목록은 몇 주에 걸친다).
+        --   이 축은 수량을 큐의 sendreq_time 기간으로 자르므로(periodCampaignIds) 넓혀도 이중 계상이 없다.
+        --   옛 창(예약·발송 시각 달)은 월을 넘긴 분할 발송의 다음 달 행을 어느 달에도 잡지 못했다.
+        AND COALESCE(c3.scheduled_at, c3.sent_at) >= (${kstStart('$2')}) - INTERVAL '92 days'
         AND COALESCE(c3.scheduled_at, c3.sent_at) < ${kstEnd('$3')}${userWhereLegacy}`,
     params,
   );

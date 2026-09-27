@@ -26,9 +26,9 @@ import pool, { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
 import { parseDeductDescription, parseFreeCount, resolveAlimtalkLedgerUnits, ledgerMessageTypeSql } from './deduct-reference';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, smsAlimtalkResultAgg, smsCampaignSubRowCounts, type CampaignAggCounts } from './sms-queue';
+import { getCompanySmsTablesWithLogs, getCompanySmsTablesWithLogsRange, mergeLineTables, smsCampaignCountsSafe, smsAlimtalkResultAgg, smsCampaignSubRowCounts, type CampaignAggCounts } from './sms-queue';
 // ★ 2026-07-30 브랜드 SMSQ 합류 — 환불 원장 축(BRAND vs message_type) 판정 CT
-import { resolveCampaignLedger } from './billing-types';
+import { resolveCampaignLedger, KAKAO_RESULT_CHANNEL_SQL_IN } from './billing-types';
 import { isStepCampaignDayClosed } from './journey-step-campaign';
 import { prepaidRefund, prepaidReverseOverRefund, REFUND_KEYS } from './prepaid';
 // ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
@@ -209,7 +209,11 @@ async function runOnce(): Promise<void> {
         AND (c.status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL})
              OR (c.status = 'draft' AND c.id IN (SELECT r.campaign_id FROM campaign_runs r WHERE r.status = 'sending')))
         AND c.message_type IS NOT NULL
-        AND COALESCE(c.scheduled_at, c.sent_at, c.created_at) >= NOW() - INTERVAL '14 days'
+        -- ★ 2026-09-27 한줄로 V2 m004(Harold 결정) — 카카오 결과 캠페인은 7305(성공불확실 · 30일 대기)가 뒤늦게 성공으로 바뀌면
+        --   이미 환불한 몫을 회수해야 한다 → 후보 창 30일. 그 밖은 14일 그대로(부하 불변).
+        AND COALESCE(c.scheduled_at, c.sent_at, c.created_at) >= NOW() - (CASE
+              WHEN c.send_channel IN (${KAKAO_RESULT_CHANNEL_SQL_IN}) OR c.message_type IN ('KAKAO', 'BRAND') THEN INTERVAL '30 days'
+              ELSE INTERVAL '14 days' END)
       ORDER BY c.created_at DESC
     `);
 
@@ -258,7 +262,19 @@ async function runOnce(): Promise<void> {
     const subRowMap = new Map<string, number>();
     for (const [key, camps] of byUserKey) {
       const [cid, uid] = key.split('::');
-      const tables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
+      // ★ 2026-09-27 한줄로 V2 m004(Codex RES 1R) — 카카오 결과 캠페인은 후보 창이 30일이라 두 달 경계를 넘을 수 있다
+      //   (1월 말 발송 → 3월 1일). 당월·전월 이력만 보면 발송 월 LOG의 7305→성공 전환을 못 봐 회수가 빠진다.
+      //   이 묶음에 전전월 이전 발송이 있을 때만 3개월 이력을 합친다(평소 부하 그대로).
+      const nowForMonths = new Date();
+      const needsOlderLogs = camps.some((c) => {
+        if (!c.send_base) return false;
+        const b = new Date(c.send_base);
+        if (Number.isNaN(b.getTime())) return false;
+        return (nowForMonths.getFullYear() - b.getFullYear()) * 12 + (nowForMonths.getMonth() - b.getMonth()) >= 2;
+      });
+      const tables = needsOlderLogs
+        ? mergeLineTables(await getCompanySmsTablesWithLogs(cid, uid || undefined), await getCompanySmsTablesWithLogsRange(cid, 3))
+        : await getCompanySmsTablesWithLogs(cid, uid || undefined);
       tablesByKey.set(key, tables);
       const ids = camps.map(c => c.id);
       const partial = await smsCampaignCountsSafe(tables, ids);

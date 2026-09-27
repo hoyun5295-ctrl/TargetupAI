@@ -15,6 +15,8 @@
  */
 
 import { Request, Response, NextFunction, Router, raw } from 'express';
+// ★ 2026-09-27 한줄로 V2 R089 — 브랜드 템플릿 칸 매핑 CT
+import { brandTemplateColumnsFromBody } from '../utils/brand-message';
 import multer from 'multer';
 import {
   authenticate,
@@ -22,6 +24,7 @@ import {
   requireCompanyAdmin,
 } from '../middlewares/auth';
 import { query } from '../config/database';
+import { senderProfileScope } from '../utils/kakao-brand-gate';
 import { findLinkDefectDeep } from '../utils/normalize';
 // ★ 2026-09-26 한줄로 V2 S1-H05 — 템플릿 수정 뒤 IMC 실제 값으로 발송 항목 맞춤(순수 CT)
 import { buildTemplateMirrorFromImc } from '../utils/alimtalk-template-mirror';
@@ -529,9 +532,11 @@ router.post(
 
       // 동일 회사+채널 중복 가드 (idx_ksp_yellow_id unique 선방어 — 신규 등록 경로와 동일 정책)
       if (d.uuid) {
+        // ★ 2026-09-27 한줄로 V2 R301 — 신규 등록(0912)과 같은 정책: **활성 프로필만** 중복으로 본다(채널 유니크 인덱스도 활성 한정).
+        //   옛: 사용 중지된 옛 프로필이 있으면 가져오기만 409로 막혔다.
         const dupChannel = await query(
           `SELECT id FROM kakao_sender_profiles
-            WHERE company_id = $1 AND yellow_id = $2
+            WHERE company_id = $1 AND yellow_id = $2 AND COALESCE(is_active, true) = true
             LIMIT 1`,
           [companyId, d.uuid],
         );
@@ -851,9 +856,13 @@ router.post(
 
 router.get('/senders/:id', async (req: Request, res: Response) => {
   try {
+    // ★ 2026-09-27 한줄로 V2 S2-01 — 회사 범위(슈퍼관리자 전체 · 그 밖은 자기 회사). 옛 코드는 id만으로 읽어
+    //   다른 회사가 발신키·080 인증번호를 볼 수 있었다. 범위 밖 = 없는 것과 같게 404.
+    const scope = senderProfileScope(req.user as any, 2);
+    if (!scope) return res.status(401).json({ success: false, error: '인증 필요' });
     const r = await query(
-      `SELECT * FROM kakao_sender_profiles WHERE id = $1`,
-      [req.params.id],
+      `SELECT * FROM kakao_sender_profiles WHERE id = $1${scope.sql}`,
+      [req.params.id, ...scope.params],
     );
     if (r.rows.length === 0) {
       return res.status(404).json({ success: false, error: '발신프로필 없음' });
@@ -975,14 +984,17 @@ router.put(
         unsubscribePhoneNumber,
         unsubscribeAuthNumber,
       });
-      await query(
-        `UPDATE kakao_sender_profiles
-            SET unsubscribe_phone = $1,
-                unsubscribe_auth  = $2,
-                updated_at        = now()
-          WHERE id = $3`,
-        [unsubscribePhoneNumber, unsubscribeAuthNumber, req.params.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_sender_profiles
+              SET unsubscribe_phone = $1,
+                  unsubscribe_auth  = $2,
+                  updated_at        = now()
+            WHERE id = $3`,
+          [unsubscribePhoneNumber, unsubscribeAuthNumber, req.params.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -1012,12 +1024,15 @@ router.put(
         row.rows[0].profile_key,
         customSenderKey,
       );
-      await query(
-        `UPDATE kakao_sender_profiles
-            SET custom_sender_key = $1, updated_at = now()
-          WHERE id = $2`,
-        [customSenderKey, req.params.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_sender_profiles
+              SET custom_sender_key = $1, updated_at = now()
+            WHERE id = $2`,
+          [customSenderKey, req.params.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -1038,10 +1053,13 @@ router.put(
         return res.status(404).json({ success: false, error: '발신프로필 없음' });
       }
       const r = await imc.releaseSenderDormant(row.rows[0].profile_key);
-      await query(
-        `UPDATE kakao_sender_profiles SET status='NORMAL', updated_at=now() WHERE id=$1`,
-        [req.params.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_sender_profiles SET status='NORMAL', updated_at=now() WHERE id=$1`,
+          [req.params.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -1080,9 +1098,12 @@ router.get(
   '/senders/:id/brand-targeting-check',
   async (req: Request, res: Response) => {
     try {
+      // ★ 2026-09-27 한줄로 V2 S2-01 — 회사 범위(단건 조회와 같은 CT)
+      const scope = senderProfileScope(req.user as any, 2);
+      if (!scope) return res.status(401).json({ success: false, error: '인증 필요' });
       const row = await query(
-        `SELECT profile_key FROM kakao_sender_profiles WHERE id = $1`,
-        [req.params.id],
+        `SELECT profile_key FROM kakao_sender_profiles WHERE id = $1${scope.sql}`,
+        [req.params.id, ...scope.params],
       );
       if (row.rows.length === 0 || !row.rows[0].profile_key) {
         return res.status(404).json({ success: false, error: '발신프로필 없음' });
@@ -1274,15 +1295,14 @@ router.post(
 
       // ─────────────────────────────────────────
       // 1) IMC 등록
-      //    D135+ (B3 복구): IMC는 성공했는데 DB INSERT 실패로 한줄로 DB에만 없는 상태
-      //    → 재등록 시 IMC가 4014 반환 → listAlimtalkTemplates로 templateCode 복구 후 DB INSERT
+      //    (옛 D135+ B3 복구 분기는 2026-09-27 R302로 제거 — 아래 주석)
       // ─────────────────────────────────────────
       // ★ D146 (2026-05-07) PDF 0506 #2 진단 보강: createTemplate 라우트 진입 + IMC 호출 시점 명시 로그.
       //   "IMC에는 등록되나 한줄로 PG에 안 들어감" 재신고 시 PM2 grep으로 어느 단계에서 끊겼는지 즉시 파악.
       console.log(
         `[alimtalk][createTemplate 진입] companyId=${companyId} templateKey=${templateKey} manageName=${body.manageName}`,
       );
-      let r = await imc.createAlimtalkTemplate(senderKey, {
+      const r = await imc.createAlimtalkTemplate(senderKey, {
         ...body,
         templateKey,
       });
@@ -1292,35 +1312,15 @@ router.post(
       //   IMC는 등록 성공(templateKey 발급)인데 한줄로 PG에 안 들어가 "관리화면 등록 안됨" 신고 반복.
       //   3단계 fallback: IMC응답 templateCode → IMC응답 templateKey → 로컬 templateKey(한줄로가 IMC에 보낸 키).
       //   PG `template_code` = templateKey 박힘 → 다른 라우트(GET/PUT/DELETE/inspect 등) `template_code` WHERE 식별 정상 작동 (IMC가 templateKey로 식별).
-      let templateCode: string | null =
+      const templateCode: string | null =
         r.data?.templateCode || (r.data as any)?.templateKey || templateKey || null;
 
-      // B3 복구 경로: 4014 템플릿키 중복 → IMC에서 기존 템플릿 조회
-      if (r.code === '4014' && !templateCode) {
-        try {
-          const lst = await imc.listAlimtalkTemplates({ page: 0, count: 100 });
-          // ★ D217+ fix v3 (2026-05-26 Harold 명시 진단 영역 확정):
-          //   IMC 안 응답 필드명 = `templateList` 영구 정합 (Harold raw 정독 = total 4,849건 + templateList 영역).
-          //   옛 영역 = `list` / `data.list` 영역 영구 X = 빈 배열 영역 = B3 fallback 영구 영역 영영 사고 잠재.
-          //   본 영역 정정 = 옛 영역 + `templateList` 영역 영구 추가 (옛 호환 영구 영구 유지).
-          const items: any[] =
-            (lst.data as any)?.templateList ||
-            (lst.data as any)?.list ||
-            (lst.data as any)?.data?.list ||
-            (lst.data as any)?.data?.templateList ||
-            [];
-          const found = items.find((t: any) => t.templateKey === templateKey);
-          if (found?.templateCode) {
-            templateCode = found.templateCode;
-            r = { code: '0000', message: 'OK (B3 복구: 기존 IMC 템플릿 연결)', data: found };
-            console.log(
-              `[alimtalk][B3 복구] templateKey=${templateKey} → templateCode=${templateCode}`,
-            );
-          }
-        } catch (lookupErr: any) {
-          console.error('[alimtalk][B3 복구 실패]', lookupErr?.message || lookupErr);
-        }
-      }
+      // ★ 2026-09-27 한줄로 V2 R302 — 옛 「B3 복구」(4014 키 중복 → 목록에서 기존 템플릿 찾아 연결) 분기를 지웠다.
+      //   조건(4014 && !templateCode)이 위 3단계 폴백 때문에 절대 참이 아니라 한 번도 돌지 않은 죽은 분기였다(동작 변화 0 ·
+      //   4014는 종전처럼 아래 오류 응답). 살리지 않는 이유(Codex KAKAO 1R high ×2): PG에 이미 있는 키면 INSERT가 실패해
+      //   아래 롤백이 **기존 원격 템플릿을 지우고**, 원격 승인 내용과 다른 요청 본문을 그 코드로 저장한다.
+      //   「IMC 등록 · DB 누락」은 D139 롤백(PG 실패 시 IMC 삭제)이 막고, 키는 화면이 보내지 않아 서버가 무작위로 만든다
+      //   (4014 = 키를 직접 지정한 API 호출뿐).
 
       if (r.code !== '0000' || !templateCode) {
         return res.status(400).json({
@@ -1820,10 +1820,13 @@ router.delete(
       const ctx = await requireTemplateAccess(req, res);
       if (!ctx) return;
       const r = await imc.deleteAlimtalkTemplate(ctx.senderKey, ctx.imcTemplateKey);
-      await query(
-        `UPDATE kakao_templates SET status='DELETED', updated_at=now() WHERE id=$1`,
-        [ctx.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_templates SET status='DELETED', updated_at=now() WHERE id=$1`,
+          [ctx.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -1939,12 +1942,15 @@ router.post(
           finalComment || undefined,
         );
       }
-      await query(
-        `UPDATE kakao_templates
-            SET status='REQUESTED', requested_at=now(), updated_at=now()
-          WHERE id=$1`,
-        [ctx.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_templates
+              SET status='REQUESTED', requested_at=now(), updated_at=now()
+            WHERE id=$1`,
+          [ctx.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -1995,12 +2001,15 @@ router.post(
         filename,
         mimetype,
       );
-      await query(
-        `UPDATE kakao_templates
-            SET status='REQUESTED', requested_at=now(), updated_at=now()
-          WHERE id=$1`,
-        [ctx.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_templates
+              SET status='REQUESTED', requested_at=now(), updated_at=now()
+            WHERE id=$1`,
+          [ctx.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -2015,10 +2024,13 @@ router.put(
       const ctx = await requireTemplateAccess(req, res);
       if (!ctx) return;
       const r = await imc.cancelInspection(ctx.senderKey, ctx.imcTemplateKey);
-      await query(
-        `UPDATE kakao_templates SET status='DRAFT', updated_at=now() WHERE id=$1`,
-        [ctx.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_templates SET status='DRAFT', updated_at=now() WHERE id=$1`,
+          [ctx.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -2033,10 +2045,13 @@ router.put(
       const ctx = await requireTemplateAccess(req, res);
       if (!ctx) return;
       const r = await imc.releaseTemplateDormant(ctx.senderKey, ctx.imcTemplateKey);
-      await query(
-        `UPDATE kakao_templates SET status='APPROVED', updated_at=now() WHERE id=$1`,
-        [ctx.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_templates SET status='APPROVED', updated_at=now() WHERE id=$1`,
+          [ctx.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -2062,10 +2077,13 @@ router.patch(
         ctx.imcTemplateKey,
         customTemplateCode,
       );
-      await query(
-        `UPDATE kakao_templates SET custom_template_code=$1, updated_at=now() WHERE id=$2`,
-        [customTemplateCode, ctx.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_templates SET custom_template_code=$1, updated_at=now() WHERE id=$2`,
+          [customTemplateCode, ctx.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -2110,10 +2128,13 @@ router.patch(
         ctx.imcTemplateKey,
         serviceMode,
       );
-      await query(
-        `UPDATE kakao_templates SET service_mode=$1, updated_at=now() WHERE id=$2`,
-        [serviceMode, ctx.id],
-      );
+      // ★ 2026-09-27 한줄로 V2 R088 — IMC가 받아들였을 때만 PG에 반영한다(옛: 결과와 무관하게 바꿔 화면과 IMC가 갈렸다)
+      if (r.code === '0000') {
+        await query(
+          `UPDATE kakao_templates SET service_mode=$1, updated_at=now() WHERE id=$2`,
+          [serviceMode, ctx.id],
+        );
+      }
       res.json({ success: r.code === '0000', imc: r });
     } catch (err) {
       return handleImcError(res, err);
@@ -2344,9 +2365,14 @@ router.put(
         ...(req.body || {}),
       });
       if (imcRes.code === '0000') {
+        // ★ 2026-09-27 한줄로 V2 R089 — IMC가 받아들인 수정 내용을 PG에도 싣는다(보낸 칸만 · 등록과 같은 칸 매핑 CT).
+        //   옛: updated_at만 바꿔 목록·미리보기·재수정 폼이 옛 내용을 보였다.
+        const setCols = brandTemplateColumnsFromBody(req.body || {});
+        const params: any[] = [r.rows[0].id];
+        const sets = setCols.map((c) => { params.push(c.value); return `${c.column} = $${params.length}${c.cast}`; });
         await query(
-          `UPDATE brand_message_templates SET updated_at=now() WHERE id=$1`,
-          [r.rows[0].id],
+          `UPDATE brand_message_templates SET ${[...sets, 'updated_at = now()'].join(', ')} WHERE id = $1`,
+          params,
         );
       }
       // ★ D140 #C (0425): IMC raw 메시지 사용자 노출 방지

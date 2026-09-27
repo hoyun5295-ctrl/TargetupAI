@@ -228,24 +228,38 @@ router.get('/', async (req: Request, res: Response) => {
   if (!auth) return;
   try {
     // 관리자 = 회사 전체(접수 계정 이름 동봉) · 일반 사용자 = 본인 접수만(★2026-08-26(2) 격리)
-    const r = auth.seesAll
-      ? await query(
-          `SELECT a.*, u.name AS created_by_name, u.login_id AS created_by_login
-             FROM agency_send_requests a
-             LEFT JOIN users u ON u.id = a.created_by
-            WHERE a.company_id = $1::uuid
-            ORDER BY a.created_at DESC LIMIT 100`,
-          [auth.companyId],
-        )
-      : await query(
-          `SELECT * FROM agency_send_requests
-            WHERE company_id = $1::uuid AND created_by = $2::uuid
-            ORDER BY created_at DESC LIMIT 100`,
-          [auth.companyId, auth.userId],
-        );
+    // ★ 2026-09-27 한줄로 V2 R286 — 100건 고정 대신 건너뛰기(offset)·한 번에 최대 100건 + 전체 건수(total). 화면이 이전 접수를 더 불러온다.
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit)) || 100));
+    const offset = Math.max(0, Math.floor(Number(req.query.offset)) || 0);
+    const [r, cnt] = auth.seesAll
+      ? await Promise.all([
+          query(
+            `SELECT a.*, u.name AS created_by_name, u.login_id AS created_by_login
+               FROM agency_send_requests a
+               LEFT JOIN users u ON u.id = a.created_by
+              WHERE a.company_id = $1::uuid
+              ORDER BY a.created_at DESC, a.id DESC LIMIT $2 OFFSET $3`,
+            [auth.companyId, limit, offset],
+          ),
+          query(`SELECT COUNT(*)::int AS n FROM agency_send_requests WHERE company_id = $1::uuid`, [auth.companyId]),
+        ])
+      : await Promise.all([
+          query(
+            `SELECT * FROM agency_send_requests
+              WHERE company_id = $1::uuid AND created_by = $2::uuid
+              ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4`,
+            [auth.companyId, auth.userId, limit, offset],
+          ),
+          query(`SELECT COUNT(*)::int AS n FROM agency_send_requests WHERE company_id = $1::uuid AND created_by = $2::uuid`, [auth.companyId, auth.userId]),
+        ]);
+    const total = Number(cnt.rows[0]?.n) || 0;
     // ★2026-09-13(3) 목록도 실제로 나가는 회신번호 종류를 보인다(대행 등재분 ② · 스냅숏 우선이라 큰 명단을 매번 세지 않는다)
     const kinds = await loadAgencyCallbackKinds(r.rows);
-    return res.json({ success: true, requests: r.rows.map((row: any) => toPublic(withCallbackKinds(row, kinds.get(row.id)))) });
+    return res.json({
+      success: true,
+      total,
+      requests: r.rows.map((row: any) => toPublic(withCallbackKinds(row, kinds.get(row.id)))),
+    });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 목록 조회 실패:', err);

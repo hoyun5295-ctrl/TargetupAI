@@ -6,11 +6,14 @@
  * Node 블로킹 0(청크마다 이벤트루프 양보), idempotent(processed_count OFFSET).
  */
 import { query } from '../config/database';
+import { SEND_HOURS, NIGHT_AD_LOAD_LEAD_MS } from '../config/defaults';
+import { isNightStopDue } from './autosend-policy';
+import { effectiveUnsubFilter } from './direct-send-core';
 import { prepareFieldMappings, getOpt080Number } from './messageUtils';
 import { prepaidRefund, REFUND_KEYS } from './prepaid';
 import { buildRefundPending, recheckZeroLoadObligation, dropRefundPendingAxes } from './refund-pending';
 import { getCampaignQueueTables, smsCountAll } from './sms-queue';
-import { getCompanySmsTables, smsExecAll, toKoreaTimeStr } from './sms-queue';
+import { getCompanySmsTables, smsExecAll, toKoreaTimeStr, recordCampaignSentTables } from './sms-queue';
 import { calcSplitSendTime } from './send-time-util';
 import { processSendChunk, type ChunkRecipient } from './direct-send-processor';
 // ★2026-09-02 브랜드 이미지 preflight(AI 판정 → 카카오 URL 치환) — 캠페인당 한 번
@@ -446,10 +449,8 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
     ? recordedTables
     : await getCompanySmsTables(companyId, userId);
   if (!(mode === 'recover' && recordedTables.length > 0)) {
-    await query(
-      `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{sentTables}', $1::jsonb), updated_at = NOW() WHERE id = $2`,
-      [JSON.stringify(companyTables), campaignId]
-    );
+    // ★ 2026-09-27 한줄로 V2 m136 — 합친다(CT). 재개된 적재가 그 사이 바뀐 라인으로 덮으면 앞 적재의 테이블이 기록에서 빠졌다.
+    await recordCampaignSentTables(campaignId, companyTables);
   }
   // ★ 2026-09-26 F02·F37: 적재에만 쓰는 준비는 적재할 때만 한다 — recover(끊긴 적재 정리)가 여기서 막히면
   //   정산을 영영 못 해 선차감이 미환불로 남는다. 적재 루프는 skipLoad면 첫 줄에서 빠지므로 이 값을 쓰지 않는다.
@@ -489,12 +490,14 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   let chunkSkipped = 0;
   // ★ 2026-09-26 F19 — 개별 회신번호가 없거나 등록·배정되지 않아 뺀 건수(chunkSkipped에도 들어간다 · 미적재 환불)
   let callbackExcluded = 0;
+  // ★ 2026-09-27 한줄로 V2 m126 — 광고 적재 중 발송 창이 닫혀 멈춘 남은 건수(종결 블록이 미적재로 환불)
+  let nightStopped = 0;
 
   // ★ 2026-06-04 정정: commit에서 옮긴 정제 — 발송 직전 1회. count/commit과 같은 기준이라 모달=차감=발송 일치.
   //   첫 처리(processed===0)에만 수행(재시작 시 중복 정제 방지). dedup/unsub은 send_config 기준.
   //   적재하지 않는 경우(skipLoad)는 정제할 이유가 없다 — 제외 사유 기록이 0으로 남는다.
   if (processed === 0 && !skipLoad) {
-    if (cfg.unsubFilterEnabled !== false) {
+    if (effectiveUnsubFilter(cfg.adEnabled === true, cfg.unsubFilterEnabled)) {   // ★ 2026-09-27 S5-05 광고면 항상(배포 전 예약 광고 포함)
       const r1 = await query(
         `DELETE FROM campaign_send_staging s USING unsubscribes u WHERE s.staging_id = $1 AND u.user_id = $2 AND u.phone = s.phone`,
         [stagingId, userId]
@@ -535,6 +538,17 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
     const cancelCheck = await query(`SELECT status, ${LOAD_CANCELLED_SELECT} FROM campaigns WHERE id = $1`, [campaignId]);
     if (isLoadStopped(cancelCheck.rows[0]?.status, cancelCheck.rows[0]?.load_cancelled)) {
       console.log(`[direct-send-worker] 캠페인 ${campaignId} 적재 중 취소 감지 — 적재 중단 후 종결(환불) 처리`);
+      break;
+    }
+    // ★ 2026-09-27 한줄로 V2 m126(★ Harold 결정 「멈추고 남은 분량 환불」) — 광고(분할 아님)는 묶음마다 실제 나갈 시각을 발송 창과 대조한다.
+    //   접수 때 게이트는 시작 시각만 봐, 20:5x에 확정한 대량 즉시 광고의 뒤 묶음이 21시를 넘겨 적재·발송됐다(정보통신망법 야간 광고).
+    //   창 밖이면 적재를 멈춘다 — 남은 분량은 종결 블록의 미적재 환불(total − sent)로 돌아간다. 분할 발송은 분할 시각 CT가 창 끝을 넘는
+    //   묶음을 다음 날 시작으로 넘겨 이미 안전하다.
+    //   여유 시간(Codex NIGHT 1R): 판정 뒤 조회·적재가 창 끝을 넘기지 않게 「지금 + 여유」로 잰다.
+    if (isNightStopDue(cfg, new Date(), SEND_HOURS.start, SEND_HOURS.end, NIGHT_AD_LOAD_LEAD_MS)) {
+      nightStopped = total - processed;
+      failureReason = `야간 광고 제한(${SEND_HOURS.end}시)으로 적재를 멈췄습니다 · 남은 ${nightStopped}건 환불`;
+      console.warn(`[direct-send-worker] 캠페인 ${campaignId} 광고 적재 중 발송 창 종료 — 적재 중단 · 남은 ${nightStopped}건 미적재 환불`);
       break;
     }
     // ★2026-09-13(3) OFFSET 대신 직전 청크의 마지막 id 뒤를 읽는다(대행 등재분 ⑥). OFFSET은 앞 행을 청크마다 다시 세어
@@ -612,6 +626,15 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
     brandSent += result.brandSentCount || 0;
     chunkSkipped += Math.max(0, chunkRes.rows.length - result.sentCount);
     processed += chunkRes.rows.length;
+    // ★ 2026-09-27 m126(Codex NIGHT 1R) — 여유 시간을 두고 시작했는데도 이 묶음이 창 끝을 넘겨 끝났다 = 창 밖에 적재됐을 수 있다.
+    //   조용히 두지 않는다(마지막 묶음이면 루프 판정이 다시 돌지 않으므로 여기서 남긴다). 다음 묶음은 루프 판정이 멈춘다.
+    if (result.sentCount > 0 && isNightStopDue(cfg, new Date(), SEND_HOURS.start, SEND_HOURS.end)) {
+      console.error(`[direct-send-worker] 캠페인 ${campaignId} 광고 묶음 적재가 발송 창 끝(${SEND_HOURS.end}시)을 넘겨 끝남 — 적재 ${result.sentCount}건 확인 필요`);
+      void sendSystemAlert({
+        dedupKey: `night-ad-overrun:${campaignId}`,
+        message: `광고 대량 발송 캠페인 ${campaignId}의 한 묶음(${result.sentCount}건) 적재가 ${SEND_HOURS.end}시를 넘겨 끝났습니다. 야간 광고로 나갔는지 발송 결과를 확인해 주세요.`,
+      }).catch(() => undefined);
+    }
 
     await query(`UPDATE campaigns SET processed_count = $1, updated_at = NOW() WHERE id = $2`, [processed, campaignId]);
     await new Promise((res) => setImmediate(res)); // 이벤트루프 양보 — 다른 요청 블로킹 방지
@@ -687,7 +710,7 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   // ★ 2026-06-11 (근원 C): 제외 사유 기록 — 첫 기록만 보존(재시작 시 정제 카운트 0이라 덮지 않음).
   const finalStatus = cfg.scheduled ? 'scheduled' : (sent === 0 ? 'failed' : 'completed');
   const exclusions = JSON.stringify({
-    unsub: unsubRemoved, dup: dupRemoved, skipped: chunkSkipped, callbackExcluded,
+    unsub: unsubRemoved, dup: dupRemoved, skipped: chunkSkipped, callbackExcluded, nightStopped,
     deducted: total, loaded: sent, recordedAt: new Date().toISOString(),
   });
   // ★ 2026-07-27 (B-0727-1): 적재가 중단됐어도 종결은 정상 경로와 같은 형태로 남긴다 —

@@ -26,6 +26,8 @@ const client = {
     const s = String(sql).trim();
     txLog.push(s.split(/\s+/).slice(0, 3).join(' '));
     if (s.includes('FROM payments') && s.includes('FOR UPDATE')) return { rows: state.pending ? [state.pending] : [] };
+    // ★ 0927 BT m009 — 확정 전 회사 행 잠금 · 선불 재확인(bt-billing-type-0927.test.ts가 후불 거절을 본다)
+    if (s.includes('FROM companies') && s.includes('FOR UPDATE')) return { rows: [{ billing_type: 'prepaid' }] };
     if (s.startsWith('UPDATE payments')) return { rows: [{ id: 'p1' }] };
     if (s.startsWith('UPDATE companies')) return { rows: [{ balance: 11000 }] };
     return { rows: [] };
@@ -69,6 +71,42 @@ describe('m008 이니시스 호출 시간 제한', () => {
     await netCancelInicisPayment('https://fcstdpay.inicis.com/api/netCancel', callbackWith());
     expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
     expect(fetchMock.mock.calls[1][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe('승인 불명 분류 (PAY Codex 2R high · 매뉴얼 "승인결과 수신 실패")', () => {
+  const approveWith = async (resp: any) => {
+    vi.stubGlobal('fetch', typeof resp === 'function' ? resp : vi.fn().mockResolvedValue(resp));
+    return approveInicisPayment(callbackWith());
+  };
+  it('명시 결과코드가 오면 불명이 아니다(성공·거절)', async () => {
+    expect((await approveWith({ ok: true, text: async () => JSON.stringify({ resultCode: '0000', MOID: 'HJ-1-TEST', TotPrice: '10000' }) })).unknown).toBe(false);
+    const r = await approveWith({ ok: true, text: async () => JSON.stringify({ resultCode: 'V013', resultMsg: '거절' }) });
+    expect(r.success).toBe(false);
+    expect(r.unknown).toBe(false);
+    expect(r.resultCode).toBe('V013');
+  });
+  it.each([
+    ['JSON 아님', { ok: true, text: async () => '<html>err</html>' }],
+    ['빈 본문', { ok: true, text: async () => '' }],
+    ['결과코드 없는 JSON', { ok: true, text: async () => '{}' }],
+    ['HTTP 오류 + 결과코드 없음', { ok: false, status: 502, text: async () => 'bad gateway' }],
+  ])('%s → 승인 불명(콜백의 0000을 결과로 빌려 쓰지 않는다)', async (_n, resp) => {
+    const r = await approveWith(resp);
+    expect(r.success).toBe(false);
+    expect(r.unknown).toBe(true);
+    expect(r.resultCode).toBe('APPROVAL_UNKNOWN');
+  });
+  it('R201(같은 인증 데이터로 재승인) = 승인 불명 — 이전 승인이 살아 있거나 망취소됐을 수 있다(이니시스 FAQ · PAY Codex 3R high)', async () => {
+    const r = await approveWith({ ok: true, text: async () => JSON.stringify({ resultCode: 'R201', resultMsg: '중복 승인 요청' }) });
+    expect(r.success).toBe(false);
+    expect(r.unknown).toBe(true);
+    expect(r.resultCode).toBe('R201');
+  });
+  it('호출이 던지면(시간 제한 포함) 승인 불명', async () => {
+    const r = await approveWith(vi.fn().mockRejectedValue(new Error('timeout')));
+    expect(r.unknown).toBe(true);
+    expect(r.resultCode).toBe('NETWORK_ERROR');
   });
 });
 
@@ -222,10 +260,23 @@ describe('배선', () => {
     // 승인 실패 응답 = 망취소 없음
     const failSeg = h.slice(iApprove, h.indexOf('// 결제 성공 확정'));
     expect(failSeg).not.toContain('netCancelInicisPayment(');
-    // 승인 결과를 못 받음(NETWORK_ERROR) = 자동 망취소·상태 변경 없음 · 서명값이 맞는 실제 대기 주문일 때만 경보
-    expect(failSeg).toMatch(/approval\.resultCode === 'NETWORK_ERROR'\) \{[\s\S]*?verifyInicisCallback\(orderId, callbackToken\)[\s\S]*?sendSystemAlert\([\s\S]*?return;/);
+    // 승인 불명(미수신·해석 불가) = 자동 망취소·상태 변경 없음 · 서명값이 맞는 실제 대기 주문일 때만 경보 (2R high)
+    expect(failSeg).toMatch(/if \(!approval\.success && approval\.unknown\) \{[\s\S]*?verifyInicisCallback\(orderId, callbackToken\)[\s\S]*?sendSystemAlert\([\s\S]*?return;/);
+    expect(failSeg).not.toContain("approval.resultCode === 'NETWORK_ERROR'");
     // 승인 응답 주문번호가 이 주문과 다르면 확정·망취소·상태 변경 없음
     expect(h).toMatch(/if \(String\(approval\.moid \?\? ''\)\.trim\(\) !== orderId\) \{[\s\S]*?return;\s*\}\s*\n\s*\/\/ 결제 성공 확정/);
+  });
+
+  it('확정 실패 뒤: 상태를 다시 읽어 completed면 망취소 없이 성공 · 다시 읽기 실패면 망취소 없이 경보 · 그 밖은 망취소(빈 주소도 CT로 넘겨 경보) (2R medium · 범위 밖)', () => {
+    const h = route.slice(route.indexOf("router.post('/inicis/return'"), route.indexOf("router.post('/inicis/close'"));
+    const c = h.slice(h.indexOf('} catch (finalErr: any) {'));
+    const iReread = c.indexOf('await readInicisPaymentState(orderId)');
+    const iCancel = c.indexOf('netCancelInicisPayment(');
+    expect(iReread).toBeGreaterThan(-1);
+    expect(iReread).toBeLessThan(iCancel);
+    expect(c).toMatch(/after\.status === 'completed'\) \{[\s\S]*?renderResultHtml\('success'[\s\S]*?return;/);
+    expect(c).toMatch(/if \(!after\) \{[\s\S]*?sendSystemAlert\([\s\S]*?return;/);
+    expect(c).toContain("await netCancelInicisPayment(callback.netCancelUrl || '', callback)");
   });
 
   it('금액 CT를 쓴다 — 카드 준비·무통장 요청(정수 1,000~1억) · 관리자 조정(소수 둘째 자리)', () => {

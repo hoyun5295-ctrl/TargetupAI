@@ -138,9 +138,16 @@ export async function executeAgentChargeBatch(opts: {
               //   ⛔ 전건 선점이 아니면 롤백한다 — 부분 선점은 "일부만 충전"이라는 더 나쁜 상태다.
               if (orderIds.length > 0) {
                 const claimed = await client.query(
+                  // ★ 2026-09-27 한줄로 V2 m015 — 발송ID가 **지금도 주문 회사 소유**일 때만 선점한다. 매핑이 다른 회사로 옮겨졌으면
+                  //   선점이 모자라 아래에서 전체 롤백된다(다른 회사 지갑 충전 차단 · 화면·링크 입구 공통).
                   `UPDATE agent_charge_orders
                       SET status = 'processing', charge_request_id = $2, resolved_by = $3, resolved_at = NOW()
-                    WHERE id = ANY($1::uuid[]) AND status = 'pending' AND agent_send_id = ANY($4::text[])`,
+                    WHERE id = ANY($1::uuid[]) AND status = 'pending' AND agent_send_id = ANY($4::text[])
+                      AND EXISTS (
+                        SELECT 1 FROM company_agent_ids cai
+                         WHERE cai.agent_send_id = agent_charge_orders.agent_send_id
+                           AND cai.company_id = agent_charge_orders.company_id
+                      )`,
                   [orderIds, requestId, requestedBy || null, parsed.charges.map((c) => c.agentSendId)]
                 );
                 if ((claimed.rowCount ?? 0) !== orderIds.length) {

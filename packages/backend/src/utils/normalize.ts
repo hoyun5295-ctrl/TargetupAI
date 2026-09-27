@@ -952,3 +952,24 @@ export function parseWonAmount(value: unknown, opts: { min: number; max: number;
   if (!Number.isFinite(n) || n < opts.min || n > opts.max) return null;
   return n;
 }
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m112·m113·m140 — 목록 쿼리의 페이지·건수 보정(숫자 아님 · 음수 · 상한 초과).
+ * 옛 목록들은 `Number(limit)`를 그대로 LIMIT에 넣어 숫자가 아니면 `LIMIT NaN`(SQL 오류)이었고 상한이 없었다.
+ * offset = (page − 1) × limit.
+ */
+export function parsePageParams(
+  pageRaw: unknown, limitRaw: unknown, opts: { defaultLimit: number; maxLimit: number },
+): { page: number; limit: number; offset: number } {
+  const lim = Math.floor(Number(limitRaw));
+  const limit = Number.isFinite(lim) && lim >= 1 ? Math.min(lim, opts.maxLimit) : opts.defaultLimit;
+  const pg = Math.floor(Number(pageRaw));
+  const page = Number.isFinite(pg) && pg >= 1 ? pg : 1;
+  return { page, limit, offset: (page - 1) * limit };
+}
+
+/** offset을 직접 받는 목록용 — 숫자 아님·음수 = 0(음수 OFFSET은 SQL 오류다). */
+export function parseOffsetParam(v: unknown): number {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}

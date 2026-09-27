@@ -4,6 +4,11 @@ import pool, { mysqlQuery } from '../config/database';
 import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
+// ★ 2026-09-27 한줄로 V2 R131 — 테스트 통계도 이력(LOG) 테이블까지(정산과 같은 기간 테이블 CT)
+import { getTablesForBillingPeriod } from '../utils/send-usage-aggregation';
+import { kstDateString } from '../utils/planner-execution';
+/** 기간 지정이 없을 때 이력 테이블을 모으는 시작일(서비스 이전 · 있는 LOG만 붙는다) */
+const TEST_STATS_EPOCH = '2025-01-01';
 import { getSendTypeLabel } from '../utils/sms-result-map';
 // ★ 2026-07-25 `querySendStats`(campaigns 축) 미사용 — 화면·엑셀 모두 청구 축(send-usage-aggregation)으로 통일.
 //   슈퍼관리자 통계(admin.ts)는 계정·캠페인 단위 운영 뷰라 그 축을 계속 쓴다.
@@ -142,7 +147,8 @@ router.get('/send', async (req: Request, res: Response) => {
           mysqlParams.push(testEndDate);
         }
 
-        const testTables = await getTestSmsTables();
+        // ★ 2026-09-27 한줄로 V2 R131 — LIVE만 보면 LOG로 옮겨진 완료 테스트가 빠졌다 → 기간 LOG 합류(실존하는 것만)
+        const testTables = await getTablesForBillingPeriod(await getTestSmsTables(), testStartDate || TEST_STATS_EPOCH, testEndDate || kstDateString(new Date()));
         for (const tbl of testTables) {
           const testRows = await mysqlQuery(
             `SELECT

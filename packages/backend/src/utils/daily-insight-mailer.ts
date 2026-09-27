@@ -143,7 +143,7 @@ function buildInsightHtml(insight: CompanyInsight): string {
 
   <p style="margin-top: 32px; font-size: 11px; color: #64748b; text-align: center; line-height: 1.6;">
     본 메일은 한줄로 AI 오퍼레이션 무료체험 기간 안 매일 자동 발송됩니다.<br>
-    수신 거부는 대시보드 → 설정 → 알림 메뉴에서 가능합니다.
+    수신을 원하지 않으시면 <a href="https://hanjul.ai/onboarding?step=7" style="color: #94a3b8;">https://hanjul.ai/onboarding?step=7</a> 에서 '매일 9시 인사이트 메일'을 끄실 수 있습니다.
   </p>
 </body>
 </html>`;
@@ -213,10 +213,12 @@ export async function runDailyInsightTick(): Promise<{ sent: number; failed: num
     return { sent: 0, failed: 0, skipped: 0 };
   }
 
-  let candidates: Array<{ company_id: string; user_id: string }>;
+  let candidates: Array<{ company_id: string }>;
   try {
     const res = await query(
-      `SELECT DISTINCT ows.company_id, ows.user_id
+      // ★ 2026-09-27 한줄로 V2 R391 — 메일은 회사 단위(회사 인사이트 · 회사 수신 주소)라 대상도 회사 단위로 뽑는다.
+      //   옛 (회사, 사용자) 단위는 같은 회사 사용자 둘이 켜면 같은 메일을 같은 날 두 번 보냈다.
+      `SELECT DISTINCT ows.company_id
          FROM onboarding_wizard_state ows
          JOIN companies c ON c.id = ows.company_id
         WHERE ows.daily_insight_enabled = true

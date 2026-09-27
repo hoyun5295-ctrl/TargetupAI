@@ -26,6 +26,8 @@
  */
 
 import { Router, Request, Response, json } from 'express';
+// ★ 2026-09-27 한줄로 V2 R123 — 미오픈 재발송 원본 단위 잠금
+import { withKeyedLock } from '../utils/keyed-lock';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
 import { webLinkReason } from '../utils/normalize';
@@ -736,10 +738,16 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     }
 
     // 즉시 발송 — status='sending' 선점 후 응답, 실제 SMTP 루프는 백그라운드(타임아웃 차단)
-    await query(
-      `UPDATE email_campaigns SET status = 'sending', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+    // ★ 2026-09-27 한줄로 V2 R123 — 선점은 조건부(발송 중이 아닐 때만) · 못 잡으면 409. 옛: 위 상태 확인 뒤 id만으로 덮어
+    //   동시 요청 둘이 함께 통과해 같은 메일이 두 번 나갔다.
+    const claimed = await query(
+      `UPDATE email_campaigns SET status = 'sending', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status <> 'sending'
+       RETURNING id`,
       [campaign.id, auth.companyId],
     );
+    if (claimed.rows.length === 0) {
+      return res.status(409).json({ success: false, error: '이미 발송 중입니다.', code: 'ALREADY_SENDING' });
+    }
     setImmediate(() => {
       sendEmailCampaign({ campaignId: campaign.id, recipients: resolved, immediate: true })
         .catch(async (e: any) => {
@@ -1583,9 +1591,6 @@ router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Respo
     if (parent.resendGeneration > 0) {
       return res.status(400).json({ success: false, error: '재발송본은 다시 재발송할 수 없습니다.', code: 'RESEND_LIMIT' });
     }
-    if ((await countResendChildren(auth.companyId, parent.id)) > 0) {
-      return res.status(400).json({ success: false, error: '이미 재발송한 캠페인입니다 (재발송 1회 한도, 발신 도메인 평판 보호).', code: 'RESEND_LIMIT' });
-    }
     if (!(await isSmtpConfigured(auth.companyId))) {
       return res.status(400).json({ success: false, error: '회사 SMTP 설정 후 재발송할 수 있습니다.' });
     }
@@ -1600,7 +1605,15 @@ router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Respo
       return res.status(400).json({ success: false, error: '재발송 제목에 직접 입력이 필요한 자리가 남아 있습니다. 채운 뒤 다시 시도해주세요.', code: 'UNEDITED_PLACEHOLDER' });
     }
     // 자식 캠페인 생성(콘텐츠 재사용 = 무료, 완성 게이트 우회하도록 sendEmailCampaign 직접 호출)
-    const child = await createResendChildCampaign(parent, auth.userId, subjectOverride);
+    // ★ 2026-09-27 한줄로 V2 R123 — 원본당 1회 검사와 자식 생성을 **원본 단위 잠금** 안에서 한다. 옛: 동시 요청 둘이 함께 0건을 보고
+    //   자식을 둘 만들어 미오픈자에게 같은 메일이 두 번 나갔다(단일 프로세스 기동 · keyed-lock CT).
+    const child = await withKeyedLock('email-resend', parent.id, async () => {
+      if ((await countResendChildren(auth.companyId, parent.id)) > 0) return null;
+      return createResendChildCampaign(parent, auth.userId, subjectOverride);
+    });
+    if (!child) {
+      return res.status(400).json({ success: false, error: '이미 재발송한 캠페인입니다 (재발송 1회 한도, 발신 도메인 평판 보호).', code: 'RESEND_LIMIT' });
+    }
     // 즉시 발송 — status='sending' 선점 후 응답, 실제 SMTP 루프는 백그라운드(타임아웃 차단)
     await query(
       `UPDATE email_campaigns SET status = 'sending', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,

@@ -39,7 +39,7 @@ import {
   bulkInsertSmsQueue, AlimtalkQueueInsertError,
 } from './sms-queue';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
-import { markRefundPending } from './refund-pending';
+import { markRefundPending, settleZeroLoadAsObligation } from './refund-pending';
 import { normalizePhone } from './normalize-phone';
 import { resolveCustomerCallback } from './callback-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 차감 전 게이트 + 광고 발송 카운터
@@ -663,6 +663,8 @@ async function sendPreNotification(ac: any): Promise<void> {
 
 async function executeAutoCampaign(ac: any): Promise<void> {
   const logPrefix = `[auto-worker][${ac.id}][${ac.campaign_name}]`;
+  // ★ 2026-09-27 한줄로 V2 m088 — 차감이 끝났는가(바깥 catch가 환불 의무를 남길 근거). 적재·정산 경로가 끝나면 비운다.
+  let deductedFor: { campaignId: string; count: number; messageType: string } | null = null;
 
   try {
     console.log(`${logPrefix} 실행 시작`);
@@ -856,6 +858,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     // ★ 2026-09-26 한줄로 V2 F01·F04 자동발송 알림톡은 캠페인 행에 send_channel이 없다 — 자동발송 설정(channel)으로 표시해
     //   차감 행에 결과별 정산 단가를 싣는다(정산 스위퍼는 차감 행만 보고 판정한다).
     const deduct = await prepaidDeduct(ac.company_id, customers.length, ac.message_type, campaignId, ac.user_id, 'campaign', null, { alimtalk: ac.channel === 'alimtalk' });
+    if (deduct.ok) deductedFor = { campaignId, count: customers.length, messageType: ac.message_type };
     if (!deduct.ok) {
       console.warn(`${logPrefix} 잔액 부족 — ${deduct.error}`);
       await query(
@@ -1071,7 +1074,9 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     }
 
     // ★ 부분 실패 시 환불
-    const failCount = filteredCustomers.length - sentCount;
+    // ★ 2026-09-27 한줄로 V2 m089 — 미적재 = **차감한 건수(전체 대상)** − 적재. 옛: 개별 회신번호로 거른 뒤 대상으로 세어
+    //   거른 몫은 적재가 0이면 아무도 환불하지 않았다(1건 이상이면 스위퍼가 메웠다).
+    const failCount = customers.length - sentCount;
     if (failCount > 0) {
       console.warn(`${logPrefix} 부분 실패 — 성공: ${sentCount}, 실패: ${failCount}`);
       try {
@@ -1126,6 +1131,17 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     console.log(`${logPrefix} 완료 — ${sentCount}/${customers.length}건 발송 (${aiGenerationStatus})`);
   } catch (err: any) {
     console.error(`${logPrefix} 실행 중 에러:`, err);
+    // ★ 2026-09-27 한줄로 V2 m088 — 차감 뒤 예외면 환불 의무를 남긴다(옛: 실패 기록만 · 적재 0이면 스위퍼도 환불하지 않았다).
+    //   적재 0 의무 CT가 캠페인을 실패로 종결하고 의무를 한 트랜잭션에 남긴다 — 재시도 워커가 축별로 적재를 다시 확인해
+    //   들어간 축은 빼고(그 몫은 스위퍼가 미적재로 정산) 안 들어간 축을 갚는다. 모양이 안 맞으면(이미 적재 기록 등) 스위퍼 몫이다.
+    if (deductedFor) {
+      try {
+        const settled = await settleZeroLoadAsObligation(deductedFor.campaignId, [{ count: deductedFor.count, messageType: deductedFor.messageType, refundKey: REFUND_KEYS.NOT_LOADED }]);
+        if (!settled) console.warn(`${logPrefix} 차감 뒤 예외 — 적재 0 모양이 아니라 스위퍼 정산에 맡김 campaign=${deductedFor.campaignId}`);
+      } catch (settleErr: any) {
+        console.error(`${logPrefix} 차감 뒤 예외 환불 의무 기록 실패(스위퍼 정산에 맡김):`, settleErr?.message || settleErr);
+      }
+    }
     await markFailed(ac, `실행 에러: ${err.message || '알 수 없는 오류'}`);
   }
 }

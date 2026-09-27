@@ -63,6 +63,11 @@ export interface SendEmailInput {
   replyTo?: string;
   /** 추가 메일 헤더 (List-Unsubscribe 등 — 광고 캠페인 발송이 주입) */
   headers?: Record<string, string>;
+  /**
+   * ★ 2026-09-27 한줄로 V2 R226 — From 표시 이름(캠페인 발신자 · email-channel resolveEmailSender).
+   * 주소는 늘 설정 주소다(인증 계정과 다른 주소로 보내면 거절·스푸핑 판정). 법정 footer가 같은 이름·주소를 쓴다.
+   */
+  fromName?: string;
 }
 
 export interface SendEmailResult {
@@ -339,8 +344,9 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   const config = await getSmtpConfigPublic(input.companyId);
   if (!config) throw new Error('회사 SMTP 설정 조회 실패');
 
-  const fromText = config.fromName
-    ? `"${config.fromName}" <${config.fromEmail}>`
+  const fromNameUsed = input.fromName || config.fromName;
+  const fromText = fromNameUsed
+    ? `"${fromNameUsed}" <${config.fromEmail}>`
     : config.fromEmail;
   const toText = typeof input.to === 'string'
     ? input.to

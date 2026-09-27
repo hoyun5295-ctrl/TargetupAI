@@ -69,10 +69,14 @@ const KST_PERIOD_MONTH_SQL = `date_trunc('month', (NOW() AT TIME ZONE 'Asia/Seou
  *
  *  · `used_qty`      = 선불이 발송 시점에 소진한 양(시도 기준·미복원)
  *  · `SUM(free_count)` = 후불 발행이 청구에서 뺀 양(성공 기준). **발행을 지우면 함께 사라져** 되돌림이 자동이다
+ *
+ * ★ 2026-09-27 한줄로 V2 R234 — 항목을 **그 회사 청구서(billings · 회사당 몇 장)를 거쳐** 찾는다. billing_items 인덱스는
+ *   (billing_id, channel)뿐이라 company_id로만 거르면 선불 발송마다 항목 전체를 훑었다. 항목의 회사 = 그 청구서의 회사라 결과는 같다(DDL 0).
  */
 const REMAINING_EXPR = `GREATEST(0, g.granted_qty - g.used_qty - COALESCE((
   SELECT SUM(bi.free_count) FROM billing_items bi
-   WHERE bi.company_id = g.company_id
+   WHERE bi.billing_id IN (SELECT b.id FROM billings b WHERE b.company_id = g.company_id)
+     AND bi.company_id = g.company_id
      AND bi.channel = 'web'
      AND bi.message_type = g.msg_type
      AND date_trunc('month', bi.item_date)::date = g.period_month
@@ -213,11 +217,27 @@ export async function consumeFreeQuota(
 export async function recordFreeAttempt(
   client: { query: (sql: string, params?: any[]) => Promise<any> },
   companyId: string, messageType: string, count: number,
+  /**
+   * ★ 2026-09-27 한줄로 V2 R235 — 호출자가 **열린 트랜잭션 안**인가(consumeFreeQuota와 같은 계약).
+   * 트랜잭션 안에서 이 UPDATE가 실패하면 잡아도 그 트랜잭션이 aborted라 **선불 차감 전체가 실패**했다(아래 "발송을 막지 않는다"와 반대).
+   * SAVEPOINT로 감싸 실패는 이 카운터만 되돌린다.
+   */
+  opts: { inTransaction?: boolean } = {},
 ): Promise<number> {
   const want = Math.max(0, Math.floor(Number(count) || 0));
   if (want <= 0) return 0;
   const type = String(messageType || '').trim().toUpperCase();
   if (!FREE_TYPE_KEYS.has(type)) return 0;
+  const inTx = opts.inTransaction === true;
+  if (inTx) {
+    try {
+      await client.query('SAVEPOINT free_attempt');
+    } catch (spErr: any) {
+      // SAVEPOINT조차 못 잡으면 이 트랜잭션은 이미 성한 상태가 아니다 — 표시용이라 건드리지 않고 물러난다.
+      console.error(`[무료메시징][표시카운터 skip] company=${companyId} ${type} — SAVEPOINT 실패:`, spErr?.message || spErr);
+      return 0;
+    }
+  }
   try {
     const res = await client.query(
       `WITH claim AS (
@@ -235,8 +255,13 @@ export async function recordFreeAttempt(
        RETURNING claim.take::int AS taken`,
       [companyId, type, want],
     );
+    if (inTx) await client.query('RELEASE SAVEPOINT free_attempt');
     return Math.max(0, Number(res.rows?.[0]?.taken) || 0);
   } catch (err: any) {
+    // 트랜잭션을 오류 직전으로 되돌린다 — 안 하면 호출자의 차감·COMMIT이 통째로 죽는다(R235).
+    if (inTx) {
+      try { await client.query('ROLLBACK TO SAVEPOINT free_attempt'); } catch { /* 이미 끝난 트랜잭션 */ }
+    }
     // ⛔ 표시용이라 실패해도 발송을 막지 않는다 — 돈에 닿지 않는 축이다(청구는 `used_qty`·`free_count`가 소유).
     if (isSchemaMissing(err)) warnSchemaMissing('recordFreeAttempt', err);
     else console.error(`[무료메시징][표시카운터 실패] company=${companyId} ${type}:`, err?.message || err);

@@ -21,6 +21,7 @@
 
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
+import { sendSystemAlert } from './system-alert';
 // ★ 2026-09-12 검수상태 정규화는 5분 폴링과 **같은 함수**를 쓴다 — 두 경로가 다른 어휘를 쓰면 갈린다
 import { normalizeImcTemplateStatus } from './alimtalk-jobs';
 
@@ -49,6 +50,16 @@ export interface SyncResult {
 //   옛 500 영역 = IMC API 영역 영구 영역 영영 X 가능성 영역 = 영구 정정.
 const IMC_PAGE_SIZE = 100;
 const IMC_MAX_PAGES = 100;  // 최대 10,000건 영역 (운영 영역 영구 안전)
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R427 — 목록 순회가 상한(IMC_MAX_PAGES × IMC_PAGE_SIZE)에서 끊겼는데 마지막 쪽이 꽉 찼다 = 뒤에 더 있을 수 있다.
+ * 옛: 조용히 끊겨 그 뒤 템플릿은 코드·상태 동기화가 안 됐다. 사람이 알 수 있게 경보를 남긴다(상한을 올릴지 판단).
+ */
+function warnImcListCap(where: string): void {
+  const msg = `카카오 템플릿 목록 동기화(${where})가 상한 ${IMC_MAX_PAGES * IMC_PAGE_SIZE}건에서 끊겼습니다. 그 뒤 템플릿은 코드·상태가 갱신되지 않을 수 있습니다.`;
+  console.error(`[kakao-template-sync] ${msg}`);
+  void sendSystemAlert({ dedupKey: 'kakao-template-list-cap', message: msg }).catch(() => undefined);
+}
 
 /**
  * 한줄로 안 옛 Tmp_xxx 영역 = 진정 카카오 templateCode 영역 영구 정정.
@@ -160,6 +171,7 @@ export async function syncTemplateCodes(
       }
     }
     if (items.length < IMC_PAGE_SIZE) break;
+    if (page === IMC_MAX_PAGES - 1) warnImcListCap('코드');
   }
   console.log(`[kakao-template-sync][디버그] IMC 안 영구 매핑 영역 총 ${imcByKey.size}건`);
 
@@ -335,6 +347,7 @@ export async function syncTemplateStatuses(): Promise<{
       if (key) imcByKey.set(String(key), item);
     }
     if (items.length < IMC_PAGE_SIZE) break;
+    if (page === IMC_MAX_PAGES - 1) warnImcListCap('상태');
   }
   if (imcByKey.size === 0) return { scanned: pgRows.rows.length, updated: 0, skipped: false };
 

@@ -156,9 +156,10 @@ describe('buildBillingTotals — 청구 수량 합산 (2026-07-25)', () => {
   const day = (t: number, s: number, f = 0, p = 0) => ({ total: t, success: s, fail: f, pending: p });
 
   // ★ 2026-09-26 S1-H06 테스트 브랜드(TEST_BRAND) 합류 — 11개
-  it('빈 입력 — 11개 유형키가 전부 0으로 존재한다', () => {
+  // ★ 2026-09-27 한줄로 V2 m060 — 테스트 MMS 유형키 추가(12개)
+  it('빈 입력 — 12개 유형키가 전부 0으로 존재한다', () => {
     const t = buildBillingTotals({});
-    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, BRAND: 0, BRAND_NF: 0, TEST_SMS: 0, TEST_LMS: 0, TEST_BRAND: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
+    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, BRAND: 0, BRAND_NF: 0, TEST_SMS: 0, TEST_LMS: 0, TEST_MMS: 0, TEST_BRAND: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
     expect(buildBillingTotals(undefined as any).SMS).toBe(0);
   });
 
@@ -922,7 +923,8 @@ describe('resolveBillingUnitPricesDetailed — 미설정 유형키 색출 (2026-
     const { prices, unsetKeys } = resolveBillingUnitPricesDetailed({
       cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: null, cost_per_kakao: 8, cost_per_brand: 12,
     });
-    expect(unsetKeys).toEqual(['MMS']);
+    // ★ 2026-09-27 m060 — 테스트 MMS는 회사 MMS 단가를 따르므로 함께 미설정으로 드러난다(테스트 MMS 발송이 있을 때만 발행이 막힌다)
+    expect(unsetKeys).toEqual(['MMS', 'TEST_MMS']);
     expect(prices.MMS).toBe(0); // 값은 기존과 같다 — 막는 건 게이트 쪽
   });
 

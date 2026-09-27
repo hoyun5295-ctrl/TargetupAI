@@ -17,6 +17,8 @@ import { issueBilling, BillingIssueError } from './billing-issue';
 import { createAndSendConfirmations } from './invoice-confirm';
 // ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행·반영·취소·수동완료가 **같은 두 겹**을 잡아야 서로를 막는다.
 import { lockCompaniesForBilling } from './billing-lock';
+// ★ 2026-09-27 한줄로 V2 F34 — 목록도 「그 기간에」 후불이었는가로(전환 이력 CT)
+import { BILLING_TYPE_SWITCHES_CTE, periodPostpaidOrSwitchedSql } from './billing-type-history';
 
 export interface UnbilledCompanyRow {
   id: string;
@@ -59,7 +61,8 @@ export async function listUnbilledPostpaid(
   const r = await db.query(
     // ★ Codex 1R 수용 — 계정별(by_user) 회사는 계정 담당자 이메일 누락 수를 함께 내려
     //   담는 시점에 "계정 메일 N건 미등록"을 보여준다(회사 레벨 이메일만 보면 사각).
-    `SELECT c.id, c.company_name,
+    `WITH ${BILLING_TYPE_SWITCHES_CTE}
+     SELECT c.id, c.company_name,
             c.status                                   AS status,
             COALESCE(s.issue_scope, 'combined')        AS issue_scope,
             COALESCE(s.taxbill_day_policy, 'last_day') AS taxbill_day_policy,
@@ -93,7 +96,9 @@ export async function listUnbilledPostpaid(
           ORDER BY r.is_primary DESC, r.created_at
           LIMIT 1
        ) br ON true
-      WHERE c.billing_type = 'postpaid'
+      -- ★ 2026-09-27 F34 — 지금 값이 아니라 그 기간에 후불이었는가(기간 뒤 첫 전환의 직전 값 · 없으면 지금 값).
+      --   기간 안에 전환한 회사도 남긴다(사람이 보고 전환일을 뺀 앞·뒤로 나눠 발행 · 발행 코어가 섞임으로 막는다).
+      WHERE ${periodPostpaidOrSwitchedSql('c', '$1', '$2')}
         -- ★ 2026-08-06 해지 회사는 **목록에서 아예 뺀다**(Harold 지시). 0804에는 "담기에서만 빼고 목록엔
         --   남긴다"였는데, 41개사 중 28개가 담기지 않는 회사라 화면이 그 회사들로 덮였다.
         --   ⚠ 해지 회사의 미청구분은 이 목록에 안 뜬다 — 남았다면 단건 발행으로 처리한다.

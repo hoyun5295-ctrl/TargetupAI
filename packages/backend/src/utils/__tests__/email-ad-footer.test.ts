@@ -10,7 +10,19 @@
  *   [medium] 미리보기가 회사 SMTP 설정만 봐서, 캠페인별 발신자를 지정했거나 설정을 나중에 바꾼 회사는
  *            **확인한 전송자와 수신함 전송자가 갈렸다.**
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// ★ 2026-09-27 한줄로 V2 R226 — 미리보기도 발송과 같은 발신자 CT(resolveEmailSender)를 쓴다: 이름 = 캠페인 → SMTP 설정 → 회사 이름 · 주소 = 실제 SMTP 주소
+const smtpState = { fromName: '회사설정이름' as string | null, fromEmail: 'send@acme.test' };
+vi.mock('../company-smtp-client', () => ({
+  sendEmail: vi.fn(), isSmtpConfigured: vi.fn(),
+  getSmtpConfigPublic: vi.fn(async () => smtpState),
+}));
+vi.mock('../../config/database', () => ({
+  default: { query: vi.fn() },
+  query: vi.fn(async (sql: string) => (String(sql).includes('SELECT company_name FROM companies') ? { rows: [{ company_name: '에이크미' }] } : { rows: [] })),
+}));
+
 import { buildEmailAdFooter, withEmailPreviewAdFooter } from '../email-channel';
 import { EMAIL_FOOTER_SLOT } from '../email/email-section-renderer';
 
@@ -59,17 +71,21 @@ describe('편집 미리보기 footer 치환', () => {
     expect(out).not.toContain('수신거부');
   });
 
-  it('저장된 캠페인의 발신자가 회사 설정보다 앞선다 — 발송이 쓰는 값이 그것이다', async () => {
+  it('저장된 캠페인의 발신자 이름이 회사 설정보다 앞선다 · 주소는 실제로 보내는 SMTP 주소(From과 같다 · R226)', async () => {
     const out = await withEmailPreviewAdFooter(shell, 'company-1', true, { fromName: '캠페인 발신자', fromEmail: 'camp@b.com' });
     expect(out).toContain('캠페인 발신자');
-    expect(out).toContain('camp@b.com');
+    expect(out).toContain('send@acme.test');
+    expect(out, '실제 From은 설정 주소다 — 캠페인 주소를 쓰면 표기와 실제 발신자가 갈린다').not.toContain('camp@b.com');
   });
 
-  it('캠페인이 있으면 두 값을 묶어서 쓴다 — 한쪽만 폴백을 태우면 발송에 없는 조합이 미리보기에만 생긴다', async () => {
-    // 이름이 비어 있어도 회사 설정을 끌어오지 않는다(발송도 폴백 없이 그 값을 쓴다).
-    const out = await withEmailPreviewAdFooter(shell, 'company-1', true, { fromName: '', fromEmail: 'camp@b.com' });
-    expect(out).toContain('camp@b.com');
-    expect(out, '발송에는 없는 조합이 미리보기에만 나오면 그것도 거짓 표기다').not.toContain('한줄로AI');
+  it('이름이 비면 회사 설정 이름 → 회사 이름 · 한줄로AI는 쓰지 않는다(R223)', async () => {
+    let out = await withEmailPreviewAdFooter(shell, 'company-1', true, { fromName: '', fromEmail: 'camp@b.com' });
+    expect(out).toContain('회사설정이름');
+    smtpState.fromName = null;
+    out = await withEmailPreviewAdFooter(shell, 'company-1', true, { fromName: '', fromEmail: '' });
+    expect(out).toContain('에이크미');
+    expect(out).not.toContain('한줄로AI');
+    smtpState.fromName = '회사설정이름';
   });
 
   it('슬롯이 없는 HTML은 그대로 돌려준다(수동 작성·과거 저장분 무회귀)', async () => {

@@ -246,17 +246,35 @@ export async function findMissingSmsTables(tables: string[]): Promise<string[]> 
   return targets.filter((t) => !found.has(t));
 }
 
-/** 캐시 무효화 (라인그룹 설정 변경 시 호출) */
-export function invalidateLineGroupCache(companyId?: string, userId?: string) {
-  if (userId) {
-    lineGroupCache.delete(`user:${userId}`);
-  }
-  if (companyId) {
-    lineGroupCache.delete(`company:${companyId}`);
-  }
-  if (!companyId && !userId) {
-    lineGroupCache.clear();
-  }
+/**
+ * 캐시 무효화 (라인그룹 설정 변경 시 호출)
+ * ★ 2026-09-27 한줄로 V2 m065 — 인자가 있어도 전부 지운다. 회사·사용자 키만 지우면 그 값에서 파생된 합집합 키
+ *   (all-bulk · all-bito · companyUsers:)가 수명(CACHE_TTL.lineGroup)까지 옛 테이블 목록으로 남아 집계·취소가 새 라인을 못 봤다.
+ *   캐시는 라인 그룹 수만큼 작고 수명도 짧아 전부 지워도 비용이 없다. 인자는 호출부 호환으로만 남긴다.
+ */
+export function invalidateLineGroupCache(_companyId?: string, _userId?: string) {
+  lineGroupCache.clear();
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m136 — 캠페인 적재 테이블 기록(send_config.sentTables)을 **합친다**(덮어쓰지 않는다).
+ * 공유 캠페인(여정 단계·일당 1건)·재개된 대량 적재·재발송은 같은 캠페인에 여러 번 적재하는데, 매번 지금 라인으로 덮으면
+ * 그 사이 라인이 재배정됐을 때 앞 적재의 테이블이 기록에서 빠져 결과 조회·취소·안전망이 그 행을 못 본다.
+ * 한 문장으로 읽고 합쳐 쓴다(행 잠금 뒤 최신 값으로 다시 계산 · 동시 기록도 서로를 지우지 않는다). 기록은 집합이라 순서는 의미가 없다.
+ * ⛔ 적재 기록을 직접 jsonb_set으로 쓰지 마라 — 덮어쓰기가 되살아난다.
+ */
+export async function recordCampaignSentTables(campaignId: string, tables: string[]): Promise<void> {
+  await query(
+    `UPDATE campaigns
+        SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{sentTables}',
+              (SELECT COALESCE(jsonb_agg(DISTINCT t ORDER BY t), '[]'::jsonb)
+                 FROM jsonb_array_elements_text(
+                        CASE WHEN jsonb_typeof(send_config->'sentTables') = 'array' THEN send_config->'sentTables' ELSE '[]'::jsonb END
+                        || $1::jsonb) AS t)),
+            updated_at = NOW()
+      WHERE id = $2`,
+    [JSON.stringify(tables), campaignId],
+  );
 }
 
 /** INSERT용: 라운드로빈으로 다음 테이블 반환 */
@@ -804,8 +822,20 @@ export async function getCampaignSmsTablesFor(
   companyId: string,
   c: { created_by?: string | null; send_config?: any; sent_at?: any; scheduled_at?: any; created_at?: any },
 ): Promise<string[]> {
-  const refDate = new Date(c.sent_at || c.scheduled_at || c.created_at || Date.now());
-  return getCampaignSmsTables(companyId, refDate, c.created_by || undefined, c.send_config);
+  // ★ 2026-09-27 한줄로 V2 m135 — 기준 날짜를 **여럿**(적재·예약·생성)으로 본다(취소 CT campaignRowTables와 같은 방식).
+  //   직접발송은 sent_at = 적재 시각이라, 두 달 넘게 앞선 예약은 발송 월 이력이 기준월 ±1 창 밖이어서 결과·엑셀이 0행이었다.
+  //   같은 달은 한 번만 푼다. 셈은 app_etc1 = 캠페인 조건이라 넓혀도 과대 집계가 아니다.
+  const dates = [c.sent_at, c.scheduled_at, c.created_at]
+    .filter((d: any) => d)
+    .map((d: any) => new Date(d))
+    .filter((d: Date) => !Number.isNaN(d.getTime()));
+  if (dates.length === 0) dates.push(new Date());
+  const byMonth = new Map<string, Date>();
+  for (const d of dates) byMonth.set(`${d.getFullYear()}-${d.getMonth()}`, d);
+  const sets = await Promise.all(
+    Array.from(byMonth.values()).map((d) => getCampaignSmsTables(companyId, d, c.created_by || undefined, c.send_config)),
+  );
+  return Array.from(new Set(sets.flat()));
 }
 
 /**
@@ -923,6 +953,33 @@ export async function getBitoSmsTables(): Promise<string[]> {
 }
 
 /**
+ * ★ 2026-09-27 한줄로 V2 m063 — 꺼진(is_active=false) 대량·비토 라인 그룹의 테이블 중 MySQL에 **실존하는** 것(집계·정산 전용 · 캐시).
+ *   그룹을 끄면 그 라인의 과거 발송분(LIVE·LOG)이 집계 합집합·정산 테이블에서 빠져 후불 청구 누락 · 0건 실패 판정 ·
+ *   미적재 과환불이 났다. 발송 경로(getCompanySmsTables)와 비토 발신키 판정(getBitoSmsTables)은 활성 그룹만 그대로다.
+ *   ⛔ 실존 확인 없이 넣지 않는다 — 지운 테이블이 UNION에 끼면 쿼리 전체가 죽는다(활성 그룹은 쓰기 경로가 실존을 검증한다).
+ */
+export async function getInactiveLineGroupTables(): Promise<string[]> {
+  const cached = lineGroupCache.get('inactive-lines');
+  if (cached && cached.expires > Date.now()) return cached.tables;
+  const result = await query(
+    `SELECT sms_tables FROM sms_line_groups WHERE group_type IN ('bulk', 'bito') AND is_active = false`
+  );
+  const candidates: string[] = [];
+  for (const row of result.rows) {
+    for (const t of (row.sms_tables || []) as string[]) {
+      if (isValidSmsTable(t) && !candidates.includes(t)) candidates.push(t);
+    }
+  }
+  let tables: string[] = [];
+  if (candidates.length > 0) {
+    const { live } = await loadSmsTableSets();
+    tables = candidates.filter((t) => live.has(t));
+  }
+  lineGroupCache.set('inactive-lines', { tables, hasDedicatedGroup: tables.length > 0, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return tables;
+}
+
+/**
  * ★ 2026-06-11: 발송 큐 변경(취소/수신자삭제/예약시간변경/문안수정) 전용 — live 라인 테이블 합집합.
  *   배경 — 에이치피오 예약취소 미삭제 발송 사고: 적재는 사용자 라인(getCompanySmsTables(companyId, userId)),
  *   취소는 회사 라인(getCompanySmsTables(companyId))만 DELETE → 0건 삭제 → PG만 cancelled 표시 → 예약 시각 실발송.
@@ -942,9 +999,11 @@ export async function getCompanyAllLiveSmsTables(companyId: string, userId?: str
   //   "라인 해제/재배정 후에도 과거 발송 라인이 항상 보인다"는 이 함수의 약속을 bito 에도 지킨다.
   //   발송 경로(getCompanySmsTables)는 그대로다 — 여기는 집계·큐 작업 전용이다.
   const allBito = await getBitoSmsTables();
+  // ★ 2026-09-27 한줄로 V2 m063 — 꺼진 라인 그룹의 실존 테이블도(그룹을 끈 뒤에도 과거 발송 행을 본다 · 발송 경로는 무관)
+  const inactive = await getInactiveLineGroupTables();
   return mergeLineTables(
-    mergeLineTables(mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive), allBulk),
-    allBito,
+    mergeLineTables(mergeLineTables(mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive), allBulk), allBito),
+    inactive,
   );
 }
 
@@ -1276,6 +1335,10 @@ export async function insertAlimtalkQueue(
     }
   }
 
+  // ★ 2026-09-27 한줄로 V2 m048 — 제어 JSON 폭은 그 테이블의 실제 폭(폭 CT). 옛: 1024 하드코딩이라 비토 라인(8192)에서도
+  //   제어 JSON + SENDER_KEY가 1024를 넘으면 키 없이 적재돼 9999로 실패했다. 조회 실패는 CT가 1024로 본다(fail-closed).
+  const etcCap = bitoSenderKey ? await getEtcJsonCapacity(table) : K_ETC_JSON_BASE_MAX;
+
   // 배치 단위 INSERT (5000건씩)
   const BATCH = 5000;
   for (let i = 0; i < rows.length; i += BATCH) {
@@ -1285,14 +1348,14 @@ export async function insertAlimtalkQueue(
 
     for (const r of batch) {
       const idx = params.length;
-      // ★ 2026-07-07: 비토 라인만 SENDER_KEY 병합. varchar(1024) 초과 시 원본 유지(INSERT 오류로 배치 전체 실패 차단).
+      // ★ 2026-07-07: 비토 라인만 SENDER_KEY 병합. 폭 초과 시 원본 유지(INSERT 오류로 배치 전체 실패 차단).
       let rowEtcJson: string | null = r.etcJson || null;
       if (bitoSenderKey) {
         const mergedEtc = withSenderKey(r.etcJson, bitoSenderKey);
-        if (mergedEtc.length <= 1024) {
+        if (mergedEtc.length <= etcCap) {
           rowEtcJson = mergedEtc;
         } else {
-          console.error(`[QTmsg] ⚠️ k_etc_json 1024자 초과(${mergedEtc.length}) — SENDER_KEY 미주입(원본 유지), template=${r.templateCode}`);
+          console.error(`[QTmsg] ⚠️ k_etc_json ${etcCap}자 초과(${mergedEtc.length}) — SENDER_KEY 미주입(원본 유지), template=${r.templateCode}`);
         }
       }
       // ★ 2026-09-14 알림톡 예약·분할(박성용 접수): 예약·분할 시각이 있으면 그 시각, 없으면 NOW(). insertBrandQueue와 같은 기준.

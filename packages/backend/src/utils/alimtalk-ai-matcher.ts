@@ -336,9 +336,12 @@ function fallbackMatch(templates: AlimtalkTemplate[], input: MatchInput): Alimta
     vip: ['vip', 'VIP', '특별', '감사', '우수'],
   };
 
-  const objectiveKeywords = input.campaignType && KEYWORD_MAP[input.campaignType]
-    ? KEYWORD_MAP[input.campaignType]
-    : Object.values(KEYWORD_MAP).flat();
+  // ★ 2026-09-27 한줄로 V2 R360 — 유형이 없으면 **목표에 실제로 있는 키워드만** 쓰고, 템플릿에만 있는 키워드 가산(+5)은 하지 않는다.
+  //   옛: 전 키워드를 쓰고 템플릿에만 있어도 +5라 '확인'·'결제'·'쿠폰'이 든 무관한 템플릿이 점수를 얻었다. 유형이 있으면 종전 그대로.
+  const typed = !!(input.campaignType && KEYWORD_MAP[input.campaignType]);
+  const objectiveKeywords = typed
+    ? KEYWORD_MAP[input.campaignType as string]
+    : Array.from(new Set(Object.values(KEYWORD_MAP).flat())).filter((kw) => objective.includes(kw.toLowerCase()));
 
   let bestScore = 0;
   let bestTemplate: AlimtalkTemplate | null = null;
@@ -350,7 +353,7 @@ function fallbackMatch(templates: AlimtalkTemplate[], input: MatchInput): Alimta
     for (const kw of objectiveKeywords) {
       if (objective.includes(kw.toLowerCase()) && tplText.includes(kw.toLowerCase())) {
         score += 20;
-      } else if (tplText.includes(kw.toLowerCase())) {
+      } else if (typed && tplText.includes(kw.toLowerCase())) {
         score += 5;
       }
     }

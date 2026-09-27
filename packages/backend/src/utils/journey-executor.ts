@@ -30,6 +30,7 @@ import {
   getCompanySmsTables,
   hasCompanyLineGroup,
   bulkInsertSmsQueue,
+  recordCampaignSentTables,
   insertAlimtalkQueue,
 } from './sms-queue';
 import { sendSystemAlert } from './system-alert';
@@ -57,7 +58,7 @@ import { deductCreditSafe } from './ai-credit';
 import { getCreditCost, kstDateTag } from './ai-credit-calc';
 import { logCampaignTraining } from './training-logger';
 import { normalizePhone } from './normalize-phone';
-import { getCompanyCosts } from '../config/defaults';
+import { getCompanyCosts, SEND_HOURS } from '../config/defaults';
 import { sanitizeUnsendableForSms } from './message-sanitizer';
 import { shortenUrlsInText } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
@@ -992,16 +993,11 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     //   여정만 갖고 있지 않았다(실측: 여정 campaign의 send_config가 비어 있음).
     //   라인그룹이 나중에 재배정되면 "이 발송이 어느 테이블에 들어갔는지" 알 방법이 사라져,
     //   집계·결과조회·안전망이 발송 당시 라인을 못 찾는다(에이치피오 취소 미삭제와 같은 뿌리).
-    //   공유 campaign(여정·step·일당 1건)에 기록하므로 배치마다 덮어써도 값은 동일하다.
+    //   공유 campaign(여정·step·일당 1건)이라 실행마다 다시 기록한다.
+    //   ★ 2026-09-27 한줄로 V2 m136 — 덮어쓰지 않고 합친다(CT). 같은 날 라인이 재배정되면 앞 실행의 테이블이 기록에서 빠졌다.
     //   실패해도 발송은 계속한다 — 기록은 추적용이지 발송 조건이 아니다.
     try {
-      await query(
-        `UPDATE campaigns
-            SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{sentTables}', $1::jsonb),
-                updated_at = NOW()
-          WHERE id = $2::uuid`,
-        [JSON.stringify(tables), campaignId],
-      );
+      await recordCampaignSentTables(campaignId, tables);
     } catch (cfgErr: any) {
       console.error(`[JourneyExecutor] sentTables 기록 실패 campaign=${campaignId}:`, cfgErr?.message || cfgErr);
     }
@@ -1218,17 +1214,17 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
 function isWithinSendHours(now: Date = new Date()): boolean {
   const kstHour = (now.getUTCHours() + 9) % 24;
-  return kstHour >= 8 && kstHour < 21;
+  return kstHour >= SEND_HOURS.start && kstHour < SEND_HOURS.end;   // ★ 2026-09-27 V2 m109 플랫폼 창(ENV) — 옛 8~21 하드코딩
 }
 
 function computeNextSendWindow(now: Date = new Date()): Date {
   const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
   const kstTarget = new Date(kstNow);
   const kstHour = kstNow.getUTCHours();
-  if (kstHour >= 21) {
+  if (kstHour >= SEND_HOURS.end) {
     kstTarget.setUTCDate(kstTarget.getUTCDate() + 1);
   }
-  kstTarget.setUTCHours(8, 0, 0, 0);
+  kstTarget.setUTCHours(SEND_HOURS.start, 0, 0, 0);
   return new Date(kstTarget.getTime() - 9 * 60 * 60 * 1000);
 }
 

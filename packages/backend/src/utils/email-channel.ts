@@ -140,7 +140,8 @@ export async function createEmailCampaign(input: CreateCampaignInput): Promise<E
   // 회사 SMTP 설정 안 from_email/from_name 기본값 사용
   const smtpConfig = await getSmtpConfigPublic(input.companyId);
   const defaultFromEmail = input.fromEmail || smtpConfig?.fromEmail || '';
-  const defaultFromName = input.fromName || smtpConfig?.fromName || '한줄로AI';
+  // ★ 2026-09-27 R223 — 이름이 모두 비면 회사 이름(옛 '한줄로AI'는 보내는 회사가 아니다 · 발신자 CT와 같은 순서)
+  const defaultFromName = input.fromName || (await resolveEmailSender(input.companyId, null)).name;
 
   if (!defaultFromEmail) {
     throw new Error('fromEmail 필수: 회사 admin SMTP 설정 안 from_email 등록 후 진입 의무');
@@ -321,6 +322,33 @@ export function buildEmailAdFooter(fromName: string, fromEmail: string, unsubHre
   return `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${escapeEmailText(fromName)}(${escapeEmailText(fromEmail)})의 광고 정보입니다. 수신을 원하지 않으시면 <a href="${unsubHref}">수신거부</a>를 눌러주세요.</p>`;
 }
 
+/**
+ * ★ 2026-09-27 한줄로 V2 R227 — 텍스트 본문(text/plain)용 광고 표기. 문장은 HTML footer와 같다(한 곳에서 바꾼다).
+ * 텍스트로 여는 수신자에게도 전송자 명칭·연락처·수신거부 방법이 보여야 한다(정보통신망법 §50④).
+ */
+export function buildEmailAdFooterText(fromName: string, fromEmail: string, unsubUrl: string): string {
+  return `\n\n----\n본 메일은 ${fromName}(${fromEmail})의 광고 정보입니다. 수신을 원하지 않으시면 다음 주소에서 수신거부할 수 있습니다: ${unsubUrl}`;
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R223·R226 — 이 메일이 **실제로** 찍힐 발신자(From = 법정 footer = 미리보기).
+ *   이름 = 캠페인 발신자 이름 → 회사 SMTP 설정 이름 → 회사 이름(옛 기본값 '한줄로AI'는 보내는 회사가 아니라 법정 명칭으로 틀렸다).
+ *   주소 = 실제로 보내는 회사 SMTP 설정 주소(sendEmail이 늘 이 주소로 보낸다 · 캠페인 주소가 달라도 From은 설정 주소였다).
+ * 옛 코드는 footer를 캠페인 값으로, From을 SMTP 값으로 찍어 둘이 갈릴 수 있었다(R226).
+ */
+export async function resolveEmailSender(
+  companyId: string,
+  campaign: { fromName?: string | null; fromEmail?: string | null } | null,
+): Promise<{ name: string; email: string }> {
+  const smtp = await getSmtpConfigPublic(companyId);
+  let name = String(campaign?.fromName || '').trim() || String(smtp?.fromName || '').trim();
+  if (!name) {
+    const co = await query('SELECT company_name FROM companies WHERE id = $1', [companyId]);
+    name = String(co.rows[0]?.company_name || '').trim();
+  }
+  return { name, email: String(smtp?.fromEmail || '').trim() };
+}
+
 /** 미리보기 수신거부 자리 표시 — 누를 곳이 없다는 뜻. ⛔ 마커(UNSUB_URL_MARKER)를 쓰지 않는다(위 주석). */
 const EMAIL_PREVIEW_UNSUB_HREF = '#';
 
@@ -347,14 +375,10 @@ export async function withEmailPreviewAdFooter(
   //   조합(캠페인 주소 + 회사 설정 이름)이 미리보기에만 생긴다 — 발송은 `sendEmailCampaign`이
   //   campaign.fromName·fromEmail을 폴백 없이 쓰기 때문이다. 미리보기가 실물보다 친절해지면 그것도 거짓이다.
   //   (생성 시 두 값은 회사 SMTP 설정으로 이미 채워지고, fromEmail 없이는 캠페인이 만들어지지 않는다.)
-  if (campaign) {
-    return html.split(EMAIL_FOOTER_SLOT)
-      .join(buildEmailAdFooter(campaign.fromName || '', campaign.fromEmail || '', EMAIL_PREVIEW_UNSUB_HREF));
-  }
-  // 신규 작성 중 = 저장되면 붙을 값(createEmailCampaign과 같은 기본값 규칙).
-  const smtpConfig = await getSmtpConfigPublic(companyId);
+  // ★ 2026-09-27 R226 — 발송과 같은 CT(resolveEmailSender)로 정한다. 신규 작성 중(campaign 없음)이면 저장 뒤 붙을 값과 같다.
+  const sender = await resolveEmailSender(companyId, campaign || null);
   return html.split(EMAIL_FOOTER_SLOT)
-    .join(buildEmailAdFooter(smtpConfig?.fromName || '한줄로AI', smtpConfig?.fromEmail || '', EMAIL_PREVIEW_UNSUB_HREF));
+    .join(buildEmailAdFooter(sender.name, sender.email, EMAIL_PREVIEW_UNSUB_HREF));
 }
 
 /**
@@ -430,7 +454,9 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   const hasSections = campaignSections.length > 0;
   const brandKit = hasSections ? await getCompanyBrandKit(campaign.companyId) : null;
   // 정보통신망법 §50④ — 전송자 명칭 + 연락처(발신 이메일) + 수신거부 방법 명시
-  const adFooter = buildEmailAdFooter(campaign.fromName, campaign.fromEmail, UNSUB_URL_MARKER);
+  // ★ 2026-09-27 R226 — 실제 From과 같은 발신자(CT) · From 이름도 이 값으로 보낸다(아래 sendEmail fromName)
+  const sender = await resolveEmailSender(campaign.companyId, campaign);
+  const adFooter = buildEmailAdFooter(sender.name, sender.email, UNSUB_URL_MARKER);
   // 수신거부 링크 실존 판정 — 마커 또는 개인 토큰 URL이 실제로 있어야 생략.
   // 본문에 '수신거부' 단어만 있는 경우(링크 없는 안내 문구)에 footer가 빠지면 수신거부 수단 0 = 법 위반.
   const hasUnsubLink = (html: string): boolean => html.includes(UNSUB_URL_MARKER) || html.includes('/api/email/u/');
@@ -474,18 +500,24 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
             personalizedHtml = finalHtml;
             personalizedSubject = finalSubject;
           }
+          // ★ 2026-09-27 R227 — 텍스트 본문도 수신자별로 만든다(옛 코드는 원문 그대로 붙여 {{변수}}가 보이고 광고 표기가 빠졌다).
+          let personalizedText: string | undefined = campaign.textBody
+            ? (hasSections ? renderEmailText(campaign.textBody, recipient.customer || { name: recipient.name || '고객' }) : campaign.textBody)
+            : undefined;
           // 개인화 변수 치환 (substitutions {{변수}} 패턴 — 수동 HTML backward compat)
           if (recipient.substitutions) {
             for (const [key, value] of Object.entries(recipient.substitutions)) {
               const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
               personalizedHtml = personalizedHtml.replace(pattern, value);
               personalizedSubject = personalizedSubject.replace(pattern, value);
+              if (personalizedText) personalizedText = personalizedText.replace(pattern, value);
             }
           }
           // {{이름}} 기본 개인화 — 이름 없는 수신자도 토큰 원문이 남지 않게 '고객' fallback
           const nameForToken = recipient.name || '고객';
           personalizedHtml = personalizedHtml.replace(/\{\{\s*이름\s*\}\}/g, nameForToken);
           personalizedSubject = personalizedSubject.replace(/\{\{\s*이름\s*\}\}/g, nameForToken);
+          if (personalizedText) personalizedText = personalizedText.replace(/\{\{\s*이름\s*\}\}/g, nameForToken);
 
           // 오픈 픽셀 + 클릭 래핑 + 개인 토큰 수신거부 URL 치환 (수신자별)
           personalizedHtml = applyTracking(personalizedHtml, campaign.id, recipient.email);
@@ -495,13 +527,22 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
           //   노출되는 것을 차단. 수신거부 마커는 applyTracking이 이미 URL로 치환한 뒤라 안전.
           personalizedHtml = personalizedHtml.replace(/\{\{[^{}]*\}\}/g, '');
           personalizedSubject = personalizedSubject.replace(/\{\{[^{}]*\}\}/g, '');
+          if (personalizedText) {
+            personalizedText = personalizedText.replace(/\{\{[^{}]*\}\}/g, '');
+            // 광고면 텍스트에도 (광고)·전송자·수신거부 주소(정보통신망법 §50④ · HTML과 같은 문장)
+            if (campaign.isAd) {
+              if (!/^\s*[(（]\s*광고\s*[)）]/.test(personalizedText)) personalizedText = `(광고) ${personalizedText}`;
+              personalizedText += buildEmailAdFooterText(sender.name, sender.email, buildUnsubscribeUrl(campaign.id, recipient.email));
+            }
+          }
 
           const result = await sendEmail({
             companyId: campaign.companyId,
             to: recipient.name ? { email: recipient.email, name: recipient.name } : recipient.email,
             subject: personalizedSubject,
             htmlBody: personalizedHtml,
-            textBody: campaign.textBody || undefined,
+            textBody: personalizedText,
+            fromName: sender.name,
             // 광고 메일 = List-Unsubscribe + One-Click(RFC 8058) — Gmail/Yahoo 대량 발송 요건 + 원클릭 수신거부.
             //   POST /api/email/u/:token이 본문 없이 수신거부를 처리하므로 One-Click 규격과 그대로 호환.
             headers: campaign.isAd

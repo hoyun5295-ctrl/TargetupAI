@@ -33,7 +33,9 @@ import { getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-r
 import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ 크레딧 종량제 — 여정 저장(활성화) 등 endpoint 직접 차감용 (callAIWithFallback 경유 외)
-import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
+// ★ 2026-09-27 한줄로 V2 R079 — 묶음 과금 안의 AI 호출은 따로 차감하지 않는다
+import { runInCreditBundle } from '../utils/ai-credit-context';
 import { randomUUID } from 'crypto';
 import { getCreditCost, kstDateTag, dailyDbAnalysisCredits } from '../utils/ai-credit-calc';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
@@ -1746,7 +1748,8 @@ router.post('/operator/performance/report-pdf', async (req: Request, res: Respon
     let explanation: Awaited<ReturnType<typeof explainPerformance>> | null = null;
     let cohort: Awaited<ReturnType<typeof buildCohortRetention>> | null = null;
     let attribution: Awaited<ReturnType<typeof buildCampaignAttribution>> | null = null;
-    try { const sn = await buildPerformanceSnapshot(companyId); explanation = await explainPerformance(companyId, sn, companyInfo); } catch (e: any) { console.log('[report-pdf] explain skip:', e?.message); }
+    // ★ 2026-09-27 한줄로 V2 R079 — 리포트 차감(orchestrate) 하나가 전체를 덮는다. 안의 AI 진단이 따로 5크레딧을 빼지 않게 묶음으로 부른다.
+    try { const sn = await buildPerformanceSnapshot(companyId); explanation = await runInCreditBundle(() => explainPerformance(companyId, sn, companyInfo)); } catch (e: any) { console.log('[report-pdf] explain skip:', e?.message); }
     try { cohort = await buildCohortRetention(companyId, 12); } catch (e: any) { console.log('[report-pdf] cohort skip:', e?.message); }
     try { attribution = await buildCampaignAttribution(companyId, days); } catch (e: any) { console.log('[report-pdf] attribution skip:', e?.message); }
     // ★ 2026-07-03 고객 축 (실패 graceful — PDF 생성은 계속)
@@ -5174,16 +5177,28 @@ router.post('/operator/predictive/recompute', async (req: Request, res: Response
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const result = await computeCompanyPredictionsBatch(companyId);
     // DB 규모 기준 일일 분석 차감 (v2). 워커와 같은 멱등키(회사+날짜) → 오늘 이미 차감됐으면 no-op.
+    // ★ 2026-09-27 한줄로 V2 R299 — 무거운 전체 재계산 **전에** 잔액을 본다(옛: 계산을 다 끝낸 뒤 차감만). 오늘 이미 낸 날이면 무료라 보지 않는다(원장 CT).
     const cntRes = await query(`SELECT COUNT(*)::int AS n FROM customers WHERE company_id = $1::uuid`, [companyId]);
     const cost = dailyDbAnalysisCredits(Number(cntRes.rows[0]?.n) || 0);
+    const dailyKey = `predictive-daily:${companyId}:${kstDateTag(new Date())}`;
+    if (!(await isChargedByKey(companyId, dailyKey))) {
+      try {
+        await checkCredit(companyId, cost);
+      } catch (e: any) {
+        if (e instanceof InsufficientCreditError) {
+          return res.status(402).json({ success: false, error: '전체 재계산에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+        }
+        throw e;
+      }
+    }
+    const result = await computeCompanyPredictionsBatch(companyId);
     await deductCreditSafe({
       companyId,
       cost,
       source: 'predictive-daily',
       createdBy: req.user?.userId || null,
-      idempotencyKey: `predictive-daily:${companyId}:${kstDateTag(new Date())}`,
+      idempotencyKey: dailyKey,
     });
     return res.json({ success: true, ...result });
   } catch (err: any) {

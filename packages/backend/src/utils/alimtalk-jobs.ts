@@ -684,6 +684,10 @@ async function notifyTemplateInspectionResult(params: {
 // 3) 발신프로필 상태 폴링 (1시간 주기)
 // ════════════════════════════════════════════════════════════
 
+/** ★ 2026-09-27 R361 — 발신프로필 상태 동기화 한 번에 볼 수 · 순환 커서(id) */
+const SENDER_SYNC_BATCH = 200;
+let senderSyncCursor: string | null = null;
+
 export async function syncSenderStatusJob(): Promise<void> {
   if (!envReady()) {
     log('senderStatusSync', 'env 미설정 — skip');
@@ -698,14 +702,21 @@ export async function syncSenderStatusJob(): Promise<void> {
     yellow_id: string | null;
   }> = [];
   try {
+    // ★ 2026-09-27 한줄로 V2 R361 — 순서 없이 LIMIT 200이라 프로필이 200개를 넘으면 뒤쪽이 계속 갱신되지 않을 수 있었다 →
+    //   id 순 순환 커서(지난번 마지막 뒤부터 · 끝에 닿으면 처음부터 · 프로세스 안 값).
+    const from = senderSyncCursor;
     const res = await query(
       `SELECT id, profile_key, status, yellow_id
          FROM kakao_sender_profiles
         WHERE profile_key IS NOT NULL
           AND COALESCE(status, 'PENDING') NOT IN ('DELETED')
-        LIMIT 200`,
+          ${from ? 'AND id > $1::uuid' : ''}
+        ORDER BY id ASC
+        LIMIT ${SENDER_SYNC_BATCH}`,
+      from ? [from] : [],
     );
     rows = res.rows;
+    senderSyncCursor = rows.length >= SENDER_SYNC_BATCH ? String(rows[rows.length - 1].id) : null;
   } catch (err) {
     logErr('senderStatusSync-fetch', err);
     return;

@@ -151,10 +151,16 @@ export async function approveRechargeRequest(opts: { requestId: string; adminId:
 
     const credits = Number(req.credits) || 0;
     const co = await client.query(
-      `SELECT ai_credits_base_remaining AS base, ai_credits_purchased AS purchased FROM companies WHERE id = $1::uuid FOR UPDATE`,
+      `SELECT ai_credits_base_remaining AS base, ai_credits_purchased AS purchased, billing_type FROM companies WHERE id = $1::uuid FOR UPDATE`,
       [req.company_id]
     );
     if (co.rows.length === 0) { await client.query('ROLLBACK'); throw new RechargeError('회사를 찾을 수 없습니다.'); }
+    // ★ 2026-09-27 한줄로 V2 m016 — 요청 뒤 선불로 바뀐 회사에 월말 청구분 크레딧을 지급하면 선불 회사는 정산 발행이 막혀
+    //   영구 미청구가 된다. 잠금 아래에서 후불인지 다시 본다(요청은 대기 그대로 · 관리자가 거절한다).
+    if (String(co.rows[0].billing_type) !== 'postpaid') {
+      await client.query('ROLLBACK');
+      throw new RechargeError('요청 뒤 결제 방식이 후불이 아니게 바뀐 회사입니다. 이 요청은 거절해 주세요(선불 회사는 잔액으로 바로 충전합니다).', 'BILLING_TYPE_CHANGED');
+    }
 
     const purchasedAfter = (Number(co.rows[0].purchased) || 0) + credits;
     await client.query(`UPDATE companies SET ai_credits_purchased = $2 WHERE id = $1::uuid`, [req.company_id, purchasedAfter]);

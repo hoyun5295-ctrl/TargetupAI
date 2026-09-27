@@ -56,6 +56,22 @@ const TICK_MS = 5 * 60 * 1000;
 
 /** 한 번에 처리할 건수. 검사 1건이 몇 분 걸려 넉넉히 잡을 이유가 없다 */
 const BATCH = 5;
+/** ★ 2026-09-27 한줄로 V2 m020 — 배관이 방금 거절한 건은 이만큼 다시 쓰지 않는다(매 주기 명단 전체 staging 재기록 방지) */
+const DISPATCH_RETRY_BACKOFF_MINUTES = 10;
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m025 — 1차 검사 행 처리 직전 선점 시각 갱신(소유권 조건). 묶음으로 선점한 뒤 순서대로 처리해
+ * 뒤 행의 선점 시각이 낡으면 30분 회수가 그 행을 되돌려 다른 tick이 다시 검사한다(테스트 중복). 잃었으면 false.
+ */
+async function touchTestingLock(requestId: string, token: string): Promise<boolean> {
+  const r = await query(
+    `UPDATE agency_send_requests SET lock_at = NOW()
+      WHERE id = $1::uuid AND lock_token = $2::uuid AND status = 'testing'
+      RETURNING id`,
+    [requestId, token],
+  );
+  return r.rows.length > 0;
+}
 
 // ────────────── 공통 ──────────────
 
@@ -455,6 +471,8 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
     // 선점할 때 발급한 토큰이 이 핸들러의 소유권이다. 이 값이 바뀌면 남이 이 건을 가져간 것이다.
     const token: string = row.lock_token;
     try {
+      // ★ 2026-09-27 m025 — 이 행을 시작하는 지금 선점 시각을 새로 찍는다(잃었으면 건너뛴다)
+      if (!(await touchTestingLock(row.id, token))) continue;
       const { passed, finalContent, rounds, detail } = await runSpamRound(row, 0);
       // ⛔ 검사 결과부터 소유권을 확인하며 쓴다. 여기서 잃었으면 알림도 보내지 않는다 —
       //   담당자가 이미 문안을 고쳤는데 옛 문안으로 "승인해 주세요"를 보내면 그 문자가 거짓이 된다.
@@ -494,6 +512,22 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       )) continue;
       await logEvent(row.id, 'awaiting_approval', { rounds, sameDaySend });
 
+      // ★ 2026-09-27 한줄로 V2 R355 — 승인 기한 판정을 테스트 문자·맞춤법 검사 **앞**으로 옮겼다. 옛: 기한이 이미 지난 건에도
+      //   담당자 테스트 문자를 먼저 보내고(비용) 나서야 「시각 확인 요청」을 보냈다.
+      // ★2026-08-26(6) 승인 링크를 보내기 전에 **지금 승인이 통하는지** 먼저 본다.
+      //   검사가 오래 걸려 남은 시간이 적재 여유에 못 미치면 링크를 보내지 않는다 —
+      //   누를 수는 있는데 서버가 거절하는 상태(0823 §12-2의 그 함정)를 만들지 않기 위해서다.
+      // 판정은 만료 워커·승인 라우트가 쓰는 그 함수 하나다(갈리면 그 사이가 함정이 된다 · §12-2·§12-3)
+      if (isApprovalExpired('awaiting_approval', new Date(row.requested_at), passedAt, sameDaySend ? passedAt : null)) {
+        await logEvent(row.id, 'approval_window_missed', { rounds, requestedAt: row.requested_at });
+        await notifyManager({
+          companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+          callback: row.callback_number, title: '[대행발송] 시각 확인 요청',
+          text: buildTooTightNotify({ label, whenText }),
+        });
+        continue;
+      }
+
       // 통과한 문안을 담당자에게 **실물 그대로** 보낸다(MMS면 이미지까지).
       //   승인은 이 문자를 본 뒤에 하는 것이라, 여기서 실제와 다른 것을 보내면 승인의 의미가 없다.
       const sample = await buildSample({ ...row, current_content: finalContent });
@@ -510,20 +544,6 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
         requestId: row.id, companyId: row.company_id, userId: row.created_by,
         content: finalContent, messageType: row.message_type, version: savedVersion, logEvent,
       });
-      // ★2026-08-26(6) 승인 링크를 보내기 전에 **지금 승인이 통하는지** 먼저 본다.
-      //   검사가 오래 걸려 남은 시간이 적재 여유에 못 미치면 링크를 보내지 않는다 —
-      //   누를 수는 있는데 서버가 거절하는 상태(0823 §12-2의 그 함정)를 만들지 않기 위해서다.
-      // 판정은 만료 워커·승인 라우트가 쓰는 그 함수 하나다(갈리면 그 사이가 함정이 된다 · §12-2·§12-3)
-      if (isApprovalExpired('awaiting_approval', new Date(row.requested_at), passedAt, sameDaySend ? passedAt : null)) {
-        await logEvent(row.id, 'approval_window_missed', { rounds, requestedAt: row.requested_at });
-        await notifyManager({
-          companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
-          callback: row.callback_number, title: '[대행발송] 시각 확인 요청',
-          text: buildTooTightNotify({ label, whenText }),
-        });
-        continue;
-      }
-
       // ★2026-08-25 링크 승인: 담당자마다 자기 번호에 묶인 승인 주소를 받는다(agency-send-link CT).
       //   주소는 통지 직전의 신선한 문안 버전으로 서명한다(이 tick의 다듬기로 버전이 올라 있을 수 있다)
       // ★2026-08-26(4) 주소는 단축으로 싣고(실패 시 원본 폴백), 요청 건수를 함께 안내한다(Harold)
@@ -558,17 +578,20 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
 async function runFinalTest(onlyRequestId?: string): Promise<void> {
   // ⛔ 하한을 SQL에 넣는다(★2026-08-23 Codex high). 만료 대상(남은 시간 <= 여유)까지 후보에 담고
   //   LIMIT을 먼저 적용하면, 그런 행 다섯 개가 방금 재승인된 건을 가려 그 tick을 통째로 건너뛴다.
-  const params: any[] = [QUEUE_MARGIN_MINUTES];
+  const params: any[] = [QUEUE_MARGIN_MINUTES, DISPATCH_RETRY_BACKOFF_MINUTES];
   let idFilter = '';
   if (onlyRequestId) {
     params.push(onlyRequestId);
     idFilter = ` AND id = $${params.length}::uuid`;
   }
+  // ★ 2026-09-27 한줄로 V2 m020 — 배관이 방금(DISPATCH_RETRY_BACKOFF_MINUTES 안) 거절해 되돌린 건은 그 사이 다시 집지 않는다.
+  //   옛: 잔액 부족 등으로 거절되면 만료까지 매 주기 명단 전체를 staging에 다시 쓰고 지웠다. 만료 판정은 이 필터와 무관하게 돈다.
   const candidates = await query(
     `SELECT * FROM agency_send_requests
       WHERE status = 'approved'
         AND requested_at > NOW() + ($1::int * INTERVAL '1 minute')
         AND requested_at <= NOW() + INTERVAL '2 hours'${idFilter}
+        AND NOT EXISTS (SELECT 1 FROM agency_send_events e WHERE e.request_id = agency_send_requests.id AND e.kind = 'dispatch_retry' AND e.created_at > NOW() - ($2::int * INTERVAL '1 minute'))
       ORDER BY requested_at
       LIMIT ${BATCH}`,
     params,
@@ -1083,7 +1106,7 @@ async function dispatchAttempt(
   }
 
   // 정제 후 실제 발송 수(수신거부·중복 제외). 차감·청구가 이 수를 쓴다.
-  const { sendCount } = await countStagingFiltered(stagingId, row.company_id, row.created_by, true, true);
+  const { sendCount } = await countStagingFiltered(stagingId, row.company_id, row.created_by, true, true, !!row.is_ad);
   if (sendCount === 0) {
     await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
     if (!await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token)) return;
@@ -1574,7 +1597,7 @@ async function takeOverStuckAttempt(
     const dispatchKey: string | null = locked.rows[0].dispatch_key;
     const camp = dispatchKey
       ? await client.query(
-          `SELECT id, status, send_phase FROM campaigns
+          `SELECT id, status, send_phase, sent_count FROM campaigns
             WHERE staging_id = $1::uuid AND company_id = $2::uuid
             ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
           [dispatchKey, row.company_id],

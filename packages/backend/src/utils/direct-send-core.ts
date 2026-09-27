@@ -19,12 +19,21 @@ import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from './brand-link-core'
 import { nightAdRestrictionMessage } from './autosend-policy';
 import { SEND_HOURS } from '../config/defaults';
 
+/**
+ * ★ 2026-09-27 한줄로 V2 GATE S5-05(Harold 결정 「광고는 서버가 항상 켬」) — 수신거부 번호를 뺄지 판정.
+ * 광고면 사용자 선택(수신거부제거 체크박스)과 무관하게 뺀다(정보통신망법 · 수신 거부자에게 광고 금지). 광고가 아니면 선택대로(기본 켬).
+ * 필터가 실제로 도는 자리(건수 CT · 대량 확정 스펙 · 직접발송 동기 · 대량 적재 워커)가 모두 이 판정만 쓴다.
+ */
+export function effectiveUnsubFilter(adEnabled: boolean, requested: unknown): boolean {
+  return adEnabled === true || requested !== false;
+}
+
 // ★ 대량 발송 (2026-06-04 톤28 504 정정): 모달 카운트 + commit 차감 공용 헬퍼 — 실제 삭제 없이 COUNT만.
 //   중복 = phone당 1건 유지(total - distinct), 수신거부 = distinct phone 중 user_id+phone 매칭.
 //   count endpoint / commit / worker가 모두 이 기준이라 모달 숫자 = 실제 발송 정확히 일치.
 export async function countStagingFiltered(
   stagingId: string, companyId: string, userId: string,
-  dedupEnabled: boolean, unsubFilterEnabled: boolean,
+  dedupEnabled: boolean, unsubFilterEnabled: boolean, adEnabled: boolean,
 ): Promise<{ total: number; duplicateCount: number; unsubscribeCount: number; sendCount: number }> {
   const totalR = await query(
     `SELECT COUNT(*)::int AS c FROM campaign_send_staging WHERE staging_id = $1 AND company_id = $2`,
@@ -40,10 +49,12 @@ export async function countStagingFiltered(
     duplicateCount = r.rows[0]?.c || 0;
   }
   let unsubscribeCount = 0;
-  if (unsubFilterEnabled !== false) {
+  if (effectiveUnsubFilter(adEnabled, unsubFilterEnabled)) {   // ★ 2026-09-27 S5-05 광고면 항상
     // (user_id, phone) 인덱스 사용 — staging × unsubscribes 균등 조인이라 self-join과 달리 대량에서도 빠르다.
     const r = await query(
-      `SELECT COUNT(DISTINCT s.phone)::int AS c
+      // ★ 2026-09-27 한줄로 V2 m125 — 중복제거를 끄면 수신거부 번호의 줄이 여러 개일 수 있고 워커는 그 줄을 전부 지운다 → 줄 수로 센다.
+      //   켜면 중복은 duplicateCount가 이미 빼므로 번호 수(DISTINCT)가 맞다.
+      `SELECT COUNT(${dedupEnabled !== false ? 'DISTINCT s.phone' : '*'})::int AS c
        FROM campaign_send_staging s
        JOIN unsubscribes u ON u.user_id = $2 AND u.phone = s.phone
        WHERE s.staging_id = $1`,

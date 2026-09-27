@@ -2918,3 +2918,19 @@ export function fillTextTokens(text: string, data: { productName?: string | null
     .replace(/\{productName\}/g, (data.productName || '').trim())
     .replace(/\{salePrice\}/g, (data.salePrice || '').trim());
 }
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R242 — 템플릿 예시 문구가 그대로 남은 칸. 자리표시([혜택은 직접 입력해주세요] 꼴)나 채워지지 않은
+ * 토큰({productName}·{salePrice})이 있으면 그 칸 이름, 없으면 null. 그대로 만들면 포스터에 예시 문구가 그려진 채 2크레딧이 빠졌다.
+ */
+const UNFILLED_PLACEHOLDER_RE = /\[[^\[\]\n]{0,60}(직접|입력해|작성해)[^\[\]\n]{0,60}\]/;
+const UNFILLED_TOKEN_RE = /\{(productName|salePrice)\}/;
+export function findUnfilledTemplateText(
+  texts: { label?: string; title?: string; subtitle?: string } | null | undefined,
+): 'label' | 'title' | 'subtitle' | null {
+  for (const k of ['label', 'title', 'subtitle'] as const) {
+    const v = String(texts?.[k] ?? '');
+    if (UNFILLED_PLACEHOLDER_RE.test(v) || UNFILLED_TOKEN_RE.test(v)) return k;
+  }
+  return null;
+}

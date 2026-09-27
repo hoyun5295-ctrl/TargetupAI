@@ -8,6 +8,8 @@
  *
  * ⛔ 기간계에 닿지 않는다 — 만료 기준을 이 파일 하나가 소유하고, 정리와 commit이 같은 기준을 본다:
  *   ① 캠페인이 가리키는 적재분(campaigns.staging_id)은 고르지도 지우지도 않는다 = 발송 중·예약·대행 시도는 전부 제외.
+ *      ★ 2026-09-27 한줄로 V2 m021 — 단, 가리키는 캠페인이 **전부 발송 단계 failed**면 정리 대상이다(활성화 실패로 끝나 워커가 다시 집지 않고
+ *      적재분을 읽는 곳이 없다 · 0927 소비처 전수 확인). 옛 규칙은 이 적재분을 영영 남겨 전화번호·이름이 기한 없이 쌓였다.
  *   ② 적재분은 **통째로만** 지운다(모든 행이 24시간 지난 것). 일부만 지운 적재분이 발송으로 접수되면 나머지가
  *      조용히 빠진 채 정상 발송으로 끝난다(Codex 1R high) — 행 단위 배치를 쓰지 않는 이유다.
  *   ③ commit은 가장 오래된 행이 23시간을 넘은 적재분을 만료로 거절한다(resolveStagingCommitState). 정리가 고르는
@@ -46,7 +48,7 @@ const LOG = '[staging-sweeper]';
 export const STAGING_PICK_SQL = `SELECT s.staging_id
   FROM campaign_send_staging s
  WHERE s.created_at < NOW() - ($1::int * INTERVAL '1 hour')
-   AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = s.staging_id)
+   AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = s.staging_id AND COALESCE(c.send_phase, '') <> 'failed')
    AND NOT (s.staging_id = ANY($2::uuid[]))
  ORDER BY s.id
  LIMIT 1`;
@@ -57,7 +59,7 @@ export const STAGING_PICK_SQL = `SELECT s.staging_id
  */
 export const STAGING_DELETE_SQL = `DELETE FROM campaign_send_staging d
  WHERE d.staging_id = $1
-   AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = $1)
+   AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = $1 AND COALESCE(c.send_phase, '') <> 'failed')
    AND NOT EXISTS (
      SELECT 1 FROM campaign_send_staging y
       WHERE y.staging_id = $1

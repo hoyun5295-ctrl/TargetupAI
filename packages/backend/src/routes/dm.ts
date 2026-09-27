@@ -1323,19 +1323,8 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
         }
         throw e;
       }
-      await deductCreditSafe({
-        companyId, cost: publishFeeGate.cost, source: publishFeeGate.source,
-        createdBy: req.user?.userId, idempotencyKey: `dm-publish:${req.params.id}`,
-      });
+      // (차감은 아래 싼 검사 뒤 — ★ 2026-09-27 R327)
     }
-
-    // 발행(short_code) 보장
-    let shortCode = dm.short_code;
-    if (!shortCode) {
-      const pub = await publishDm(req.params.id, companyId);
-      shortCode = pub.short_code;
-    }
-    if (!shortCode) return res.status(500).json({ error: 'DM 발행에 실패했습니다.' });
 
     // 광고 가드 — 광고성이면 무료수신거부(080) 필수 (정보통신망법)
     if (isAd) {
@@ -1401,6 +1390,23 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       recipients = cbResult.filtered;
     }
 
+    // ★ 2026-09-27 한줄로 V2 R327 — 발행비 차감·발행을 싼 검사(080·발신번호·대상 0명·개별 회신) **뒤**로 옮겼다.
+    //   옛: 차감·발행을 먼저 해 검사에 걸리면 발송은 안 되는데 발행과 과금은 됐다. 발행 확인(402)·잔액 확인은 위에서 이미 했다.
+    if (publishFeeGate) {
+      await deductCreditSafe({
+        companyId, cost: publishFeeGate.cost, source: publishFeeGate.source,
+        createdBy: req.user?.userId, idempotencyKey: `dm-publish:${req.params.id}`,
+      });
+    }
+
+    // 발행(short_code) 보장
+    let shortCode = dm.short_code;
+    if (!shortCode) {
+      const pub = await publishDm(req.params.id, companyId);
+      shortCode = pub.short_code;
+    }
+    if (!shortCode) return res.status(500).json({ error: 'DM 발행에 실패했습니다.' });
+
     // 수신자별 토큰 발급(벌크) + 링크 구성
     let tokenPairs: Array<{ customerId: string; token: string; shortCode?: string }>;
     try {
@@ -1440,7 +1446,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     );
 
     // 정제 후 실제 발송 수(중복·수신거부 제외) — 커밋과 동일 기준으로 과금 정확
-    const { sendCount } = await countStagingFiltered(stagingId, companyId, userId, true, true);
+    const { sendCount } = await countStagingFiltered(stagingId, companyId, userId, true, true, isAd === true);
     if (sendCount === 0) {
       await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]);
       return res.status(400).json({ error: '수신 가능한 대상이 0명입니다(수신거부 제외 후).', code: 'ZERO_MATCH' });

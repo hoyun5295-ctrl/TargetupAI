@@ -53,7 +53,12 @@ import {
   readBillingPeriodConflicts, describeBillingPeriodConflict,
   // ★ 2026-08-20 정산월 라벨 파생·검증 소유자 — 재발행 라벨 승계의 사전 검증에 쓴다(Codex 1R high 수용).
   resolveBillingLabelMonth,
+  // ★ 2026-09-27 한줄로 V2 BILL — 미종료 기간(m027) · 재발행 사전 점검·정액 장 표식(R095·m029) · 추가 항목·조정 CT(m033)
+  isBillingPeriodOpen, MIN_CHARGE_ITEM_TYPE,
+  collectExtraBillingRows, loadAdjustmentItemsForIssue, assertNoNegativeAdjusted,
 } from '../utils/billing-issue';
+// ★ 2026-09-27 한줄로 V2 F34 — 미리보기도 「그 기간에 적용된」 결제 방식으로(발행과 같은 판정·문구)
+import { readPeriodBillingType, describePeriodBillingTypeBlock } from '../utils/billing-type-history';
 // ★ 2026-08-05 요금제 무료 제공 — 미리보기가 발행과 같은 공제를 적용하게 한다(§2-4 규약)
 import { readFreeDeductibleForBilling } from '../utils/free-messaging';
 // ★ 2026-08-05 청구 수량 정의 CT — 미리보기가 발행·인쇄와 같은 식을 쓰게 한다
@@ -71,7 +76,7 @@ const PRICEABLE_AGENT_TYPE_KEYS = new Set(
 // ★ 2026-07-30 수정세금계산서 — 사유별 장 구성 계약(순수). 라우트는 이 계획을 트랜잭션 INSERT만 한다.
 // ★ 2026-08-05 발행 완료분 메일 재발송(서수란 접수) — 재발행이 아니라 같은 문서번호로 메일만 다시 보낸다.
 import {
-  planModifyIssue, ModifyPlanError, resendIssuedTaxbillEmail, TaxbillResendError,
+  planModifyIssue, assertModifyCumulative, ModifyPlanError, resendIssuedTaxbillEmail, TaxbillResendError,
   // ★ 2026-08-06 운영 재발행은 **지금 환경이 운영일 때만** 연다(Codex high 부분 수용).
   getPopbillConfig,
 } from '../utils/taxbill-popbill';
@@ -772,6 +777,20 @@ router.post('/taxbill-issues/:id/modify', async (req: Request, res: Response) =>
           correctedSupply: body.corrected_supply,
           correctedTax: body.corrected_tax,
         },
+      );
+      // ★ 2026-09-27 한줄로 V2 m028 — 같은 당초 장의 수정분(취소 제외 · 발행·실패 포함)과 합쳐 본다.
+      //   진행 중만 보면 이미 발행된 전액 취소(4·6)를 또 만들 수 있었고, 누적 금액이 음수가 되는 수정도 막지 못했다.
+      const priorMods = await client.query(
+        `SELECT modify_code, supply_amount, tax_amount, status FROM taxbill_issues
+          WHERE org_nts_confirm_num = $1 AND kind = 'modify' AND status <> 'cancelled'`,
+        [orig.nts_confirm_num],
+      );
+      assertModifyCumulative(
+        { supplyAmount: Number(orig.supply_amount), taxAmount: Number(orig.tax_amount) },
+        priorMods.rows.map((r: any) => ({
+          modifyCode: Number(r.modify_code), supplyAmount: Number(r.supply_amount), taxAmount: Number(r.tax_amount), status: String(r.status),
+        })),
+        planned,
       );
 
       for (const row of planned) {
@@ -2040,8 +2059,18 @@ router.post('/:id/qty-adjustments', async (req: Request, res: Response) => {
 // DELETE /qty-adjustments/:adjId — 조정 삭제. 발행에 이미 반영됐으면 그 발행을 다시 내야 되돌아간다.
 router.delete('/qty-adjustments/:adjId', async (req: Request, res: Response) => {
   try {
-    const r = await pool.query(`DELETE FROM billing_qty_adjustments WHERE id = $1::uuid RETURNING id`, [req.params.adjId]);
-    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '삭제할 조정을 찾을 수 없습니다.' });
+    // ★ 2026-09-27 한줄로 V2 S1-H01 — 발행에 반영된 조정은 지우지 않는다(한 문장 조건). 지우면 재발행 기준 수량
+    //   (청구 수량 − 반영분)을 계산할 반영 기록이 사라져 재조정·재발행 수량이 틀어진다. 정산을 지우면 반영이 풀린다.
+    const r = await pool.query(`DELETE FROM billing_qty_adjustments WHERE id = $1::uuid AND applied_billing_id IS NULL RETURNING id`, [req.params.adjId]);
+    if (r.rows.length === 0) {
+      const ex = await pool.query(`SELECT applied_billing_id FROM billing_qty_adjustments WHERE id = $1::uuid`, [req.params.adjId]);
+      if (ex.rows.length === 0) return res.status(404).json({ success: false, error: '삭제할 조정을 찾을 수 없습니다.' });
+      return res.status(409).json({
+        success: false,
+        error: '발행에 반영된 조정은 지울 수 없습니다. 조정 값을 바꿔 수정 재발행하거나, 정산을 삭제해 반영을 푼 뒤 지워 주세요.',
+        code: 'BILLING_QTY_ADJUST_APPLIED',
+      });
+    }
     return res.json({ success: true });
   } catch (error: any) {
     console.error('수량 조정 삭제 오류:', error?.message || error);
@@ -2318,12 +2347,19 @@ router.put('/:id/status', async (req: Request, res: Response) => {
     if (!['draft', 'confirmed', 'paid'].includes(status)) {
       return res.status(400).json({ error: '유효한 상태: draft, confirmed, paid' });
     }
+    // ★ 2026-09-27 한줄로 V2 m032 — 확정·수금 → 초안 되돌림 금지(한 문장 조건). 되돌리면 삭제 가드(초안이 아니면 사유 필수)를
+    //   사유 없이 지난다. 화면은 초안으로 되돌리는 버튼이 없다(확정·수금만) — API 직접 호출을 막는다.
     const result = await pool.query(
-      `UPDATE billings SET status = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+      `UPDATE billings SET status = $1, updated_at = now() WHERE id = $2 AND ($1 <> 'draft' OR status = 'draft') RETURNING *`,
       [status, req.params.id]
     );
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: '정산을 찾을 수 없습니다' });
+      const exists = await pool.query(`SELECT 1 FROM billings WHERE id = $1`, [req.params.id]);
+      if (exists.rows.length === 0) return res.status(404).json({ error: '정산을 찾을 수 없습니다' });
+      return res.status(409).json({
+        error: '확정·수금된 정산은 초안으로 되돌릴 수 없습니다. 금액을 고치려면 사유와 함께 삭제한 뒤 다시 발행해 주세요.',
+        code: 'BILLING_STATUS_REVERT_BLOCKED',
+      });
     }
     return res.json(result.rows[0]);
   } catch (error: any) {
@@ -2471,6 +2507,16 @@ const handleBillingDelete = async (req: Request, res: Response) => {
       });
     }
 
+    // ★ 2026-09-27 한줄로 V2 m029 — 지우는 장이 정액(기본요금) 장이면 정액 발행으로 다시 만든다.
+    //   옛 재발행은 늘 사용량 발행(issueBilling)이라 정액 장을 사용량만큼(정액보다 적게) 다시 청구했다.
+    let reissueKind: 'usage' | 'min_charge' = 'usage';
+    if (reissue) {
+      const kindRes = await client.query(
+        `SELECT EXISTS (SELECT 1 FROM billing_items WHERE billing_id = ANY($1::uuid[]) AND channel = 'extra' AND message_type = $2) AS is_min`,
+        [targetIds, MIN_CHARGE_ITEM_TYPE],
+      );
+      reissueKind = kindRes.rows[0]?.is_min === true ? 'min_charge' : 'usage';
+    }
     if (reissue) {
       // ★ 2026-09-16 **세 번째 원인 — 발행이 쓰는 컬럼이 아직 없는 경우**(Codex 1R high 수용).
       //   0916에 상세 행이 `item_qty`·`item_label`을 쓰기 시작했다. ALTER 전 서버에서 재발행을 누르면
@@ -2492,6 +2538,8 @@ const handleBillingDelete = async (req: Request, res: Response) => {
       // ★ 2026-08-04 **삭제하기 전에** 조정이 적용 가능한지 본다(Codex 재검증 high 완화).
       //   삭제와 재발행은 트랜잭션이 둘이라, 재발행이 422로 막히면 정산만 사라진 채 남는다.
       //   재발행 실패의 실질 원인 둘(조정 대상 줄 없음·조정 후 음수)을 여기서 미리 걸러낸다.
+      //   ★ 2026-09-27 m029 — 사용량 장만(정액 장은 사용량 줄이 없어 대조할 것이 없다 · 정액 발행이 새 사용량으로 조정을 판정한다).
+      if (reissueKind === 'usage') {
       const adjRows = await client.query(
         `SELECT channel, type_key, agent_id, qty_delta, applied_delta
            FROM billing_qty_adjustments
@@ -2525,6 +2573,7 @@ const handleBillingDelete = async (req: Request, res: Response) => {
           });
         }
       }
+      }
     }
 
     // ★ 2026-08-04 이 장들이 실었던 수량 조정을 미적용으로 되돌린다 — 조정 자체는 회사×기간 축이라
@@ -2555,17 +2604,20 @@ const handleBillingDelete = async (req: Request, res: Response) => {
     // billing_items는 ON DELETE CASCADE로 자동 삭제 (billing_items_billing_id_fkey confdeltype='c' 실측)
     await client.query('DELETE FROM billings WHERE id = ANY($1::uuid[])', [targetIds]);
 
-    await client.query('COMMIT');
-    if (restored.rowCount) {
-      console.log(`[정산삭제] billing=${req.params.id} 후불 크레딧 충전 ${restored.rowCount}건 미청구 상태로 복구`);
-    }
-    if (restoredOverage.rowCount) {
-      console.log(`[정산삭제] billing=${req.params.id} 초과사용 크레딧 ${restoredOverage.rowCount}건 미청구 상태로 복구`);
-    }
-    // ★ 2026-08-04 수정 재발행 — 삭제가 커밋된 **같은 요청 안에서** 곧바로 다시 발행한다.
+    const logRestored = () => {
+      if (restored.rowCount) {
+        console.log(`[정산삭제] billing=${req.params.id} 후불 크레딧 충전 ${restored.rowCount}건 미청구 상태로 복구`);
+      }
+      if (restoredOverage.rowCount) {
+        console.log(`[정산삭제] billing=${req.params.id} 초과사용 크레딧 ${restoredOverage.rowCount}건 미청구 상태로 복구`);
+      }
+    };
+    // ★ 2026-08-04 수정 재발행 — 같은 요청 안에서 곧바로 다시 발행한다.
     //   회사·기간·발행 단위는 서버가 잠근 행에서 다시 구한다(화면이 넘긴 값을 믿지 않는다 —
     //   조회가 실패해 옛 값이 남아 있으면 다른 회사로 발행될 수 있었다).
     //   수량 조정은 회사×기간 축이라 이 재발행에 그대로 다시 실린다.
+    // ★ 2026-09-27 한줄로 V2 R095(구조) — 삭제와 재발행을 **한 트랜잭션**으로 묶는다(발행 코어가 이 연결에 SAVEPOINT로 참여).
+    //   옛: 삭제를 커밋한 뒤 발행해, 발행이 막히면 「지웠는데 재발행 불능」이었다. 이제 막히면 삭제도 함께 되돌아간다.
     if (reissue) {
       const issueScope = String(target.scope) === 'combined' ? 'combined' : 'by_user';
       // ★ 2026-08-20 지운 장의 정산월을 그대로 잇는다 — 안 넘기면 시작월을 골랐던 중간정산 장이
@@ -2580,29 +2632,46 @@ const handleBillingDelete = async (req: Request, res: Response) => {
       } catch {
         reissueLabel = null; // 기본값(종료월)로 발행 — 라벨 때문에 재발행을 막지 않는다
       }
+      let out: any;
       try {
-        const out = await issueBilling({
-          company_id: String(target.company_id),
-          scope: issueScope,
-          billing_start: toDayKey(target.billing_start),
-          billing_end: toDayKey(target.billing_end),
-          labelMonth: reissueLabel,
-          adminId: (req as any).user?.userId || null,
-        });
-        return res.json({ success: true, deleted_ids: targetIds, reissued: true, billing: out.billing, sheet_count: out.sheet_count });
+        out = reissueKind === 'min_charge'
+          ? await issueMinimumChargeBilling({
+            company_id: String(target.company_id),
+            billing_start: toDayKey(target.billing_start),
+            billing_end: toDayKey(target.billing_end),
+            adminId: (req as any).user?.userId || null,
+            txClient: client,
+          })
+          : await issueBilling({
+            company_id: String(target.company_id),
+            scope: issueScope,
+            billing_start: toDayKey(target.billing_start),
+            billing_end: toDayKey(target.billing_end),
+            labelMonth: reissueLabel,
+            adminId: (req as any).user?.userId || null,
+            txClient: client,
+          });
       } catch (reErr: any) {
-        // 삭제는 이미 커밋됐다 — 되돌릴 수 없으므로 상태를 정확히 알린다.
+        // 삭제도 함께 되돌린다 — 기존 정산은 그대로 남는다.
+        try { await client.query('ROLLBACK'); } catch (rbError: any) {
+          console.error('수정 재발행 롤백 실패:', rbError?.message || rbError);
+        }
         const body = reErr instanceof BillingIssueError ? reErr.body : { error: String(reErr?.message || reErr) };
-        console.error(`[정산][수정재발행실패] company=${target.company_id} ${toDayKey(target.billing_start)}~${toDayKey(target.billing_end)} — 삭제는 완료됨:`, body?.error || reErr);
+        console.error(`[정산][수정재발행실패] company=${target.company_id} ${toDayKey(target.billing_start)}~${toDayKey(target.billing_end)} — 삭제도 되돌림:`, body?.error || reErr);
         return res.status(reErr instanceof BillingIssueError ? reErr.status : 500).json({
           ...body,
           code: body?.code || 'BILLING_REISSUE_FAILED',
-          deleted: true,
-          error: `기존 정산은 삭제됐지만 재발행에 실패했습니다: ${body?.error || '알 수 없는 오류'}. 원인을 고친 뒤 정산 목록에서 같은 기간으로 다시 발행해주세요.`,
+          deleted: false,
+          error: `재발행할 수 없어 중단했습니다: ${body?.error || '알 수 없는 오류'}. 기존 정산은 그대로 있습니다.`,
         });
       }
+      await client.query('COMMIT');
+      logRestored();
+      return res.json({ success: true, deleted_ids: targetIds, reissued: true, reissue_kind: reissueKind, billing: out.billing, sheet_count: out.sheet_count ?? 1 });
     }
 
+    await client.query('COMMIT');
+    logRestored();
     return res.json({
       success: true,
       restored_credit_requests: restored.rowCount || 0,
@@ -2724,7 +2793,9 @@ router.get('/preview', async (req: Request, res: Response) => {
     const ledger = await loadBillingLedger(companyId);
     const { prices, unsetKeys: webUnsetPriceKeys } = resolveBillingUnitPricesDetailed(ledger.companyPriceRow);
     // 미리보기는 계산만 하므로 선불 회사도 막지 않는다. 대신 발행이 차단된다는 사실을 함께 돌려준다.
-    const billable = company.billing_type !== 'prepaid';
+    // ★ 2026-09-27 F34 — 발행 시점 값이 아니라 그 기간에 적용된 결제 방식(선불·기간 안 전환·알 수 없음이면 발행이 막힌다).
+    const periodBillingBlock = describePeriodBillingTypeBlock(await readPeriodBillingType(companyId, startDate, endDate));
+    const billable = periodBillingBlock === null;
 
     // 2) 사용량 — 발행과 완전히 같은 집계(일반·테스트·스팸·브랜드메시지 전부 포함)
     const dayData = await buildCompanyUsageByDay({ companyId, startDate, endDate, userId });
@@ -2767,7 +2838,43 @@ router.get('/preview', async (req: Request, res: Response) => {
     const planSegments = buildPlanSegments(await loadPlanChanges(companyId, endDate), startDate, endDate);
     // 원 단위 절사가 행 단위라, 미리보기 총액도 **발행이 저장할 그 행들**에서 더해야 값이 갈라지지 않는다.
     // (구 `sumPlanSegments` 합계는 절사 전 값이라 발행 금액과 몇 원 어긋난다 — 쓰지 않는다.)
-    const previewItems = [...buildPlanBillingItems(planSegments), ...priced.items];
+    // ★ 2026-09-27 한줄로 V2 m033 — 발행이 싣는 추가 항목(080·수기·080 고정료)·수량 조정을 미리보기도 싣는다(같은 CT).
+    //   080 고정료 근거 행 자동 생성이 있어 **되돌리는 트랜잭션** 안에서 부른다 — 미리보기는 아무것도 남기지 않는다.
+    //   정산월 = 발행 기본값(종료월) · 화면이 label_month를 넘기면 그 달. 계정 지정 미리보기(user_id)는 발행이 지원하지 않는 옛 축이라 종전 그대로.
+    let previewExtraItems: any[] = [];
+    let previewAdjustItems: any[] = [];
+    const previewPreBlockers: Array<{ code: string; message: string }> = [];
+    if (!userId) {
+      let labelYm: { year: number; month: number } | null = null;
+      try {
+        labelYm = resolveBillingLabelMonth(req.query.label_month ? String(req.query.label_month) : null, startDate, endDate);
+      } catch (labelErr: any) {
+        if (!(labelErr instanceof BillingIssueError)) throw labelErr;
+        previewPreBlockers.push({ code: labelErr.body?.code || 'BILLING_LABEL_MONTH_INVALID', message: String(labelErr.body?.error || '') });
+      }
+      if (labelYm) {
+        const dry = await pool.connect();
+        try {
+          await dry.query('BEGIN');
+          const extra = await collectExtraBillingRows(dry, companyId, labelYm.year, labelYm.month, null, { lockRows: false });
+          if (extra.blocking.length > 0) {
+            previewPreBlockers.push({ code: 'BILLING_080_MAPPING_MISSING', message: `080 번호 매핑이 없는 반영분: ${summarizeBlockList(extra.blocking.map((b) => `${b.periodMonth.slice(0, 7)} ${b.sourceRef}`))}` });
+          }
+          previewExtraItems = buildExtraBillingItems(extra.rows);
+          try {
+            previewAdjustItems = (await loadAdjustmentItemsForIssue(dry, companyId, startDate, endDate, priced.items, { lock: false })).items;
+            assertNoNegativeAdjusted([...priced.items, ...previewAdjustItems]);
+          } catch (adjErr: any) {
+            if (!(adjErr instanceof BillingIssueError)) throw adjErr;
+            previewPreBlockers.push({ code: adjErr.body?.code || 'BILLING_QTY_ADJUST_UNMATCHED', message: String(adjErr.body?.error || '') });
+          }
+        } finally {
+          try { await dry.query('ROLLBACK'); } catch { /* 되돌림 실패 = 연결 종료로 어차피 사라진다 */ }
+          dry.release();
+        }
+      }
+    }
+    const previewItems = [...buildPlanBillingItems(planSegments), ...priced.items, ...previewExtraItems, ...previewAdjustItems];
     // 발행이 막힐 이유를 미리보기에서 **같은 함수로** 판정한다 — 다른 기준으로 판정하면
     // 미리보기는 통과인데 발행만 422가 되고, 마감일에 그 차이를 찾을 시간이 없다.
     const planGate = evaluatePlanHistoryGate({
@@ -2864,7 +2971,10 @@ router.get('/preview', async (req: Request, res: Response) => {
     const blockers: string[] = [];
     const blockerCodes: string[] = [];
     const block = (code: string, msg: string) => { blockerCodes.push(code); blockers.push(msg); };
-    if (!billable) block('PREPAID_COMPANY_NOT_BILLABLE', '선불 고객사: 발송 시점에 잔액에서 이미 차감되어 월 정산서 발행 시 이중 청구');
+    if (periodBillingBlock) block(periodBillingBlock.code, periodBillingBlock.message);
+    // ★ 2026-09-27 m027 — 발행과 같은 판정(끝나지 않은 기간은 발행이 막힌다) · m033 추가 항목·조정 차단 사유
+    if (isBillingPeriodOpen(endDate)) block('BILLING_PERIOD_OPEN', '아직 끝나지 않은 기간: 발행은 기간이 끝난 다음 날부터');
+    for (const b of previewPreBlockers) block(b.code, b.message);
     if (axisDiffs.length > 0) block('BILLING_AXIS_MISMATCH', '청구 상세와 사용량 집계 수량 불일치');
     // ★ 2026-08-04 기간 축 차단 2종(겹치는 발행·수동 정산완료) — 발행이 409로 막는 사유인데 미리보기에 없어
     //   "미리보기 통과 → 발행 실패"가 났다(0731 별건 5). 판정·문구를 발행과 **같은 함수**에서 받는다.

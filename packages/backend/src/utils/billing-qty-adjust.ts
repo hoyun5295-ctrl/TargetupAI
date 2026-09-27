@@ -40,12 +40,18 @@ export async function loadQtyAdjustments(
   companyId: string,
   billingStart: string,
   billingEnd: string,
+  /** 발행 = true(잠금) · 미리보기 = false(되돌리는 트랜잭션이 잠그면 수정 재발행과 교착 · Codex BILL 2R) */
+  opts: { lock: boolean } = { lock: true },
 ): Promise<QtyAdjustmentRow[]> {
+  // ★ 2026-09-27 한줄로 V2 S1-H01(Codex BILL 1R) — 발행 트랜잭션 안에서 **잠근다**. 조회와 반영 마킹 사이에 조정이 지워지거나
+  //   값이 바뀌면 청구서에는 실렸는데 기록(applied_delta)은 없거나 다른 값이 된다. 잠가 두면 삭제·수정이 발행 커밋 뒤로 줄 선다
+  //   (삭제는 그때 반영분이라 막힌다). 소비처 = 발행 코어 CT(loadAdjustmentItemsForIssue) 하나.
   const r = await client.query(
     `SELECT id, channel, type_key, user_id, agent_id, qty_delta, reason
        FROM billing_qty_adjustments
       WHERE company_id = $1::uuid AND period_start = $2::date AND period_end = $3::date
-      ORDER BY channel, type_key`,
+      ORDER BY channel, type_key
+      ${opts.lock ? 'FOR UPDATE' : ''}`,
     [companyId, billingStart, billingEnd],
   );
   return r.rows as QtyAdjustmentRow[];

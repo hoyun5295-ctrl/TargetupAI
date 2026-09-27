@@ -2758,7 +2758,7 @@ const billingTypeLabel: Record<string, string> = {
   SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오알림톡',
   // ★ 2026-09-13 브랜드 두 줄 — 없으면 상세 행에 원문 키가 보인다(청구서 라벨 = billing-types.ts label)
   BRAND: '브랜드메시지', BRAND_NF: '브랜드메시지(비친구)',
-  TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS', SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS',
+  TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS', TEST_MMS: '테스트MMS', SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS',
   // ★ 2026-09-26 담당자 브랜드메시지 테스트(청구서 라벨 = billing-types.ts · PDF와 같은 이름)
   TEST_BRAND: '테스트브랜드메시지',
   // ★ 2026-09-16 추가 항목(서수란 접수) — 없으면 상세 행에 내부 키(EXTRA_MANUAL)가 그대로 보인다.

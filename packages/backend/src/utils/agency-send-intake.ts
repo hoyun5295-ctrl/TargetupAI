@@ -306,7 +306,7 @@ export async function createRequestCore(
   }
   // MMS는 이미지가 본체다. 0장이면 통신사가 파일 오류로 버린다(2026-04-21 9007 선례)
   const images = Array.isArray(mmsImagePaths) ? mmsImagePaths : [];
-  const mmsCheck = validateMmsPayload(type === 'AUTO' ? 'SMS' : type, images);
+  const mmsCheck = validateMmsPayload(type === 'AUTO' ? 'SMS' : type, images, auth.companyId);
   if (!mmsCheck.ok) return { ok: false, status: 400, error: mmsCheck.error || '이미지 구성을 확인해 주세요.', code: mmsCheck.code };
 
   // ── 발신번호(회사에 등록된 것만)

@@ -1,9 +1,12 @@
 import { randomUUID } from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
+import { checkBrandSendGate } from '../utils/kakao-brand-gate';
+// ★ 2026-09-27 한줄로 V2 m070 — 발송 뒤 상태(캠페인 상태 축 CT)
+import { CAMPAIGN_POST_SEND_STATUSES } from '../utils/campaign-sweep-scope';
 import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
-import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants, findLinkDefectInText } from '../utils/normalize';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants, findLinkDefectInText, parseOffsetParam } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSends } from '../utils/customer-send-stats';
@@ -33,7 +36,7 @@ import {
   invalidateLineGroupCache, getNextSmsTable,
   smsCountAll, smsAggAll, smsSelectAll, smsSelectPagedAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs, getCampaignQueueTables,
-  insertBrandQueue, BrandQueueInsertError, type BrandQueueRow,
+  insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, getEtcJsonCapacity,
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
 import { subjectForMsgType } from '../utils/qtmsg-type';
@@ -63,8 +66,8 @@ import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../util
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt } from '../utils/campaign-validation';
-import { calcSplitSendTime } from '../utils/send-time-util';
-import { countStagingFiltered, createDirectSendCampaign } from '../utils/direct-send-core';
+import { calcSplitSendTime, isWithinBrandSendWindow } from '../utils/send-time-util';
+import { countStagingFiltered, createDirectSendCampaign, effectiveUnsubFilter } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
 import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from '../utils/brand-link-core';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
@@ -304,7 +307,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
     }
 
     // ★ D131: MMS 이미지 첨부 필수 가드 — mms-validator 컨트롤타워 (9007 파일 오류 방지)
-    const testMmsCheck = validateMmsPayload(messageType, req.body.mmsImagePaths);
+    const testMmsCheck = validateMmsPayload(messageType, req.body.mmsImagePaths, companyId);
     if (!testMmsCheck.ok) {
       return res.status(400).json({ error: testMmsCheck.error, code: testMmsCheck.code });
     }
@@ -314,12 +317,10 @@ router.post('/test-send', async (req: Request, res: Response) => {
     const testKakaoSenderKey = req.body.kakaoSenderKey || '';
     const testKakaoBubbleType = req.body.kakaoBubbleType || 'TEXT';
 
-    // ★ 카카오 활성화 체크 (프론트 우회 방지)
+    // ★ 카카오 활성화 체크 (프론트 우회 방지) · ★ 2026-09-27 V2 R100 발신키 소유까지 — 게이트 CT(kakao-brand-gate)
     if (testChannel === 'kakao' || testChannel === 'both') {
-      const kakaoCheck = await query('SELECT kakao_enabled FROM companies WHERE id = $1', [companyId]);
-      if (!kakaoCheck.rows[0]?.kakao_enabled) {
-        return res.status(403).json({ error: '카카오 브랜드메시지가 활성화되지 않은 고객사입니다.', code: 'KAKAO_NOT_ENABLED' });
-      }
+      const gate = await checkBrandSendGate(companyId, testKakaoSenderKey);
+      if (!gate.ok) return res.status(gate.status).json({ error: gate.error, code: gate.code });
     }
 
     // 회사 설정에서 스키마 가져오기
@@ -585,6 +586,11 @@ router.post('/', async (req: Request, res: Response) => {
       console.warn(`[캠페인 생성] 발송 채널 거절 — company=${companyId} raw=${JSON.stringify(sendChannel)} reason=${createChannel.reason}`);
       return res.status(400).json({ error: createChannel.reason, code: 'UNSUPPORTED_SEND_CHANNEL' });
     }
+    // ★ 2026-09-27 한줄로 V2 R100 — 브랜드 채널이면 저장 전에 카카오 사용·발신키 소유를 본다(게이트 CT · 남의 발신키 저장 차단)
+    if (createChannel.channel === 'kakao' || createChannel.channel === 'both') {
+      const gate = await checkBrandSendGate(companyId, kakaoSenderKey);
+      if (!gate.ok) return res.status(gate.status).json({ error: gate.error, code: gate.code });
+    }
     // 메시지 유형은 채널과 **별개 축**이라 채널 게이트로는 안 걸린다. 목록 밖 유형은 단가표에 없어
     // `unknownType`으로 0원 통과(=무료 발송)가 되므로 저장 전에 확정한다.
     const createMsgType = resolveChargeMessageType(messageType);
@@ -610,7 +616,7 @@ router.post('/', async (req: Request, res: Response) => {
     const finalIsAdAi = isAd === true;               // ★ D143: 자동 승격 제거 — 사용자 광고체크 그대로
 
     // ★ D131: MMS 이미지 첨부 필수 가드 — mms-validator 컨트롤타워
-    const aiMmsCheck = validateMmsPayload(messageType, mmsImagePaths);
+    const aiMmsCheck = validateMmsPayload(messageType, mmsImagePaths, companyId);
     if (!aiMmsCheck.ok) {
       return res.status(400).json({ error: aiMmsCheck.error, code: aiMmsCheck.code });
     }
@@ -748,6 +754,21 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     const campaign = campaignResult.rows[0];
 
+    // ★ 2026-09-27 한줄로 V2 m070(MULTIRUN · 정책 추천안 · Harold 확인 필요) — 발송 뒤 상태(예약·발송 중·완료·취소·실패)의 캠페인은
+    //   이 문으로 다시 보내지 않는다. 옛 게이트는 'sending'만 막아 API로 재발송이 됐고, 환불 항아리가 캠페인 단위 누적이라
+    //   두 번째 실행의 환불이 앞 실행 누적에 삼켜졌다(m070) · 두 달 넘어 재발송하면 앞 회차 이력이 집계 창 밖이라 더 틀어졌다(m058) ·
+    //   완료 재발송은 대상 수 보호 트리거에 막혀 오류 응답만 났다(m071). 같은 id로 여러 회차를 도는 곳은 이 문뿐이다(자동발송은 회차마다 새 캠페인).
+    //   화면은 늘 새 캠페인을 만들어 보내고, 막혔던 발송(발신 인증·잔액 부족)을 다시 보낼 때는 캠페인이 발송 전 상태 그대로라 영향이 없다.
+    //   ⚠ 실행 행(campaign_runs) INSERT보다 앞이어야 한다 — 뒤에서 거절하면 'sending' 실행 행이 남는다(아래 주석).
+    if (CAMPAIGN_POST_SEND_STATUSES.includes(String(campaign.status))) {
+      return res.status(409).json({
+        error: campaign.status === 'sending'
+          ? '이미 발송 중입니다.'
+          : '이미 발송했거나 끝난 캠페인입니다. 다시 보내려면 새 캠페인으로 만들어 주세요.',
+        code: 'CAMPAIGN_ALREADY_SENT',
+      });
+    }
+
     // ★ 2026-08-17 **채널·유형 확정을 이 라우트의 첫 검사로 둔다.**
     //   이 문(AI 캠페인 발송)의 적재는 `bulkInsertSmsQueue`(sms·both)와 `insertBrandQueue`(kakao·both)
     //   둘뿐이다 — **알림톡 적재 경로가 없다**(`insertAlimtalkQueue` 호출 0건, 실측).
@@ -773,10 +794,9 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     // ★ 카카오 활성화 체크 (프론트 우회 방지) — 2026-08-17 run INSERT 앞으로 이동.
     //   여기서 걸리면 되돌릴 것 자체가 생기지 않는다.
     if (sendChannel === 'kakao' || sendChannel === 'both') {
-      const kakaoCheck = await query('SELECT kakao_enabled FROM companies WHERE id = $1', [companyId]);
-      if (!kakaoCheck.rows[0]?.kakao_enabled) {
-        return res.status(403).json({ error: '카카오 브랜드메시지가 활성화되지 않은 고객사입니다.', code: 'KAKAO_NOT_ENABLED' });
-      }
+      // ★ 2026-09-27 V2 R100 — 저장된 발신키 소유까지(게이트 CT · 이 수정 전에 저장된 캠페인도 발송 때 걸린다)
+      const gate = await checkBrandSendGate(companyId, campaign.kakao_sender_key);
+      if (!gate.ok) return res.status(gate.status).json({ error: gate.error, code: gate.code });
     }
 
     // ★ D91: LMS/MMS 제목 필수 검증
@@ -866,10 +886,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const mappingColumns = Object.values(fieldMappings).filter((m: VarCatalogEntry) => m.storageType !== 'custom_fields').map((m: VarCatalogEntry) => m.column);
     const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
 
-    // draft 또는 completed 상태에서 재발송 가능
-    if (campaign.status === 'sending') {
-      return res.status(400).json({ error: '이미 발송 중입니다.' });
-    }
+    // (발송 뒤 상태 게이트는 캠페인 조회 직후로 옮겼다 — ★ 2026-09-27 m070)
 
     // (채널·유형·카카오 활성 확정은 이 라우트 앞머리에서 이미 끝났다 — 2026-08-17.
     //  실패할 수 있는 검사를 `campaign_runs` INSERT보다 앞에 모아 두는 것이 이 라우트의 규약이다.)
@@ -975,13 +992,20 @@ if (campaign.is_ad) {
     //   옛: 조회 뒤 삽입이라 동시 요청 둘이 함께 통과했고(S1-H07), 초안 삭제 가드와 섞이면 삭제된 캠페인으로 차감·적재가 이어져
     //   예약분은 나가는데 정산 기준 행이 없었다. 실행 행이 생긴 뒤에 잠금을 푼다 — 그 뒤의 중복 요청·초안 삭제는 그 행을 본다.
     const startGate = await withCampaignStartLock(id, async () => {
-      const alive = await query(`SELECT 1 FROM campaigns WHERE id = $1 AND company_id = $2`, [id, companyId]);
+      const alive = await query(`SELECT status FROM campaigns WHERE id = $1 AND company_id = $2`, [id, companyId]);
       if (alive.rows.length === 0) return { run: null, blocked: 'gone' as const };
+      // ★ 2026-09-27 한줄로 V2 m070(Codex MULTIRUN 1R high) — 잠금 안에서 **최신 상태로 다시** 본다. 조회 직후 게이트만으로는
+      //   동시 요청 둘이 함께 초안을 읽고 앞 요청이 끝난 뒤 뒤 요청이 들어와 같은 캠페인을 또 보냈다.
+      //   실패가 아닌 실행 행도 막는다 — 앞 요청이 실행 행을 완료로 바꾼 뒤 캠페인 상태를 갱신하기 전의 틈(두 문장 사이)까지 닫는다.
+      //   실패한 실행 행만 있는 초안(잔액 부족 등으로 막혔던 발송)은 그대로 다시 보낼 수 있다.
+      if (CAMPAIGN_POST_SEND_STATUSES.includes(String(alive.rows[0].status))) return { run: null, blocked: 'sent' as const };
       const existingRun = await query(
-        `SELECT id FROM campaign_runs WHERE campaign_id = $1 AND status IN ('sending', 'scheduled') LIMIT 1`,
+        `SELECT status FROM campaign_runs WHERE campaign_id = $1 AND status <> 'failed' LIMIT 1`,
         [id]
       );
-      if (existingRun.rows.length > 0) return { run: null, blocked: 'duplicate' as const };
+      if (existingRun.rows.length > 0) {
+        return { run: null, blocked: ['sending', 'scheduled'].includes(String(existingRun.rows[0].status)) ? 'duplicate' as const : 'sent' as const };
+      }
 
       // campaign_runs에 발송 이력 생성 (CT-08 확인 모달 통과 후에만 INSERT)
       const runNumberResult = await query(
@@ -1013,6 +1037,9 @@ if (campaign.is_ad) {
     }
     if (startGate.blocked === 'duplicate') {
       return res.status(400).json({ error: '이미 발송이 진행 중이거나 예약되어 있습니다.' });
+    }
+    if (startGate.blocked === 'sent') {
+      return res.status(409).json({ error: '이미 발송했거나 끝난 캠페인입니다. 다시 보내려면 새 캠페인으로 만들어 주세요.', code: 'CAMPAIGN_ALREADY_SENT' });
     }
     const campaignRun = startGate.run;
     campaignRunId = campaignRun.id;  // 최상위 catch가 종결할 수 있게 밖으로 올린다(위 선언 주석 참조)
@@ -1083,6 +1110,8 @@ let opt080Auth = '';
 // 1단계: 메시지 치환 + 발송 데이터 준비 (메모리 연산)
 const aiSmsRows: any[][] = [];
 const aiBrandRows: BrandQueueRow[] = [];
+// ★ 2026-09-27 한줄로 V2 m049 — 브랜드 조립 폭 = 적재 테이블(insertBrandQueue의 첫 테이블)의 실제 폭(비토 라인 8192 · 그 외 1024)
+const aiEtcJsonMax = (sendChannel === 'kakao' || sendChannel === 'both') ? await getEtcJsonCapacity(companyTables[0]) : undefined;
 
 for (const customer of filteredCustomers) {
   // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
@@ -1128,6 +1157,7 @@ for (const customer of filteredCustomers) {
       immediate: !isScheduled,
       attachmentJson: kakaoAttachmentJson,
       carouselJson: kakaoCarouselJson,
+      etcJsonMax: aiEtcJsonMax,
     });
     aiBrandRows.push({
       phone: cleanPhone,
@@ -1752,9 +1782,10 @@ router.post('/direct-send/count', async (req: Request, res: Response) => {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
     if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
-    const { stagingId, dedupEnabled = true, unsubFilterEnabled = true } = req.body || {};
+    // ★ 2026-09-27 S5-05 — 광고 여부를 받아 확정·발송과 같은 판정으로 센다(미리보기 숫자 = 실제 발송 수)
+    const { stagingId, dedupEnabled = true, unsubFilterEnabled = true, adEnabled = false } = req.body || {};
     if (!stagingId) return res.status(400).json({ success: false, error: 'stagingId 누락' });
-    const r = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled);
+    const r = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled, adEnabled === true);
     return res.json({ success: true, ...r });
   } catch (err: any) {
     const msg = err?.message || '';
@@ -1801,11 +1832,26 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       console.warn(`[직접발송 commit] 발송 채널 거절 — company=${companyId} raw=${JSON.stringify(sendChannel)} reason=${commitChannel.reason}`);
       return res.status(400).json({ success: false, error: commitChannel.reason, code: 'UNSUPPORTED_SEND_CHANNEL' });
     }
+    // ★ 2026-09-27 한줄로 V2 m119·R100 — 이 문은 카카오 사용 검사가 없었다(동기 경로에는 있음 · 화면만 막음). 발신키 소유까지 게이트 CT로.
+    if (commitChannel.channel === 'kakao' || commitChannel.channel === 'both') {
+      const gate = await checkBrandSendGate(companyId, kakaoSenderKey);
+      if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, code: gate.code });
+    }
     // ★ 2026-08-17 (Codex 2R high) 유형도 확정한다 — `/direct-send`와 같은 축이고, 이 문도 차감에 그대로 넘긴다.
     const commitMsgResolved = resolveChargeMessageType(msgType);
     if (!commitMsgResolved.ok) {
       console.warn(`[직접발송 commit] 메시지 유형 거절 — company=${companyId} raw=${JSON.stringify(msgType)} reason=${commitMsgResolved.reason}`);
       return res.status(400).json({ success: false, error: commitMsgResolved.reason, code: 'UNSUPPORTED_MESSAGE_TYPE' });
+    }
+    // ★ 2026-09-27 한줄로 V2 m119·m026 — 이 문은 MMS 검사가 없었다(동기 경로에는 있음 · 화면만 막음). 이미지 필수 + 회사 저장소 경로(CT).
+    const commitMmsCheck = validateMmsPayload(commitMsgResolved.messageType, mmsImagePaths, companyId);
+    if (!commitMmsCheck.ok) {
+      return res.status(400).json({ success: false, error: commitMmsCheck.error, code: commitMmsCheck.code });
+    }
+    // ★ 2026-09-27 한줄로 V2 m119 — 본문 링크 결함도 차감 전에(동기·AI 발송과 같은 CT · 없는 도메인 오타 한 글자에 발송이 죽는다)
+    for (const t of [message, subject]) {
+      const r = findLinkDefectInText(t, '본문의 링크는');
+      if (r) return res.status(400).json({ success: false, error: r, code: 'LINK_DEFECT' });
     }
 
     const stagedCount = await query(
@@ -1894,7 +1940,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       if ((await resolveStagingCommitState(stagingId, companyId)) === 'expired') {
         return res.status(400).json({ success: false, code: 'STAGING_EXPIRED', error: '발송 준비가 만료됐습니다. 발송을 다시 눌러 주세요.' });
       }
-      const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled);
+      const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled, adEnabled === true);
       if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
 
       // 캠페인 생성 + 차감 + worker 트리거 — createDirectSendCampaign 공유(자율 발송과 동일 경로, MMS 이미지 컬럼 저장 포함).
@@ -1903,7 +1949,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
           stagingId, campaignName: `직접발송 ${new Date().toLocaleString('ko-KR')}`,
           msgType: commitMsgResolved.messageType, message, subject, callback, sendChannel: commitChannel.channel, adEnabled, total,
           scheduled, scheduledAt, splitEnabled, splitCount, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
-          dedupEnabled, unsubFilterEnabled,
+          dedupEnabled, unsubFilterEnabled: effectiveUnsubFilter(adEnabled === true, unsubFilterEnabled),
           kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
           alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson: alimtalkButtonJsonResolved, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
           alimtalkEtcJson, alimtalkTemplateUuid,
@@ -2112,7 +2158,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (!directSenderGate.ok) return res.status(403).json(senderAuthRejection(directSenderGate));
 
     // ★ D131: MMS 이미지 첨부 필수 가드 — mms-validator 컨트롤타워
-    const directMmsCheck = validateMmsPayload(msgType, mmsImagePaths);
+    const directMmsCheck = validateMmsPayload(msgType, mmsImagePaths, companyId);
     if (!directMmsCheck.ok) {
       return res.status(400).json({ success: false, error: directMmsCheck.error, code: directMmsCheck.code });
     }
@@ -2317,10 +2363,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ D102: 수신거부 필터링 — 사용자 선택에 따라 적용 (기본 true)
+    // ★ D102: 수신거부 필터링 — 사용자 선택에 따라 적용 (기본 true) · ★ 2026-09-27 S5-05 광고면 선택과 무관하게 항상(CT)
     let filteredRecipients = targetFilteredRecipients;
     let excludedCount = 0;
-    if (unsubFilterEnabled !== false) {
+    if (effectiveUnsubFilter(adEnabled === true, unsubFilterEnabled)) {
       const phones = targetFilteredRecipients.map((r: any) => normalizePhone(r.phone));
       const unsubResult = await query(
         `SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
@@ -2338,12 +2384,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // 2. 캠페인 레코드 생성 (원본 템플릿도 저장)
     // (채널 확정은 이 라우트 앞머리에서 끝났다 — 2026-08-17. `directChannel`이 그 결과다.)
 
-    // ★ 카카오 활성화 체크 (프론트 우회 방지)
+    // ★ 카카오 활성화 체크 (프론트 우회 방지) · ★ 2026-09-27 V2 R100 발신키 소유까지 — 게이트 CT(kakao-brand-gate)
     if (directChannel === 'kakao' || directChannel === 'both') {
-      const kakaoCheck = await query('SELECT kakao_enabled FROM companies WHERE id = $1', [companyId]);
-      if (!kakaoCheck.rows[0]?.kakao_enabled) {
-        return res.status(403).json({ success: false, error: '카카오 브랜드메시지가 활성화되지 않은 고객사입니다.', code: 'KAKAO_NOT_ENABLED' });
-      }
+      const gate = await checkBrandSendGate(companyId, kakaoSenderKey);
+      if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, code: gate.code });
     }
 
     // ★ 2026-08-04 알림톡 승인 게이트를 **차감 앞**으로 올렸다.
@@ -2536,6 +2580,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // 즉시 브랜드 발송의 기준 시각 — 요청 하나에 **한 번만** 정해 검증과 적재가 같은 값을 쓰게 한다.
     const directBrandSendAt = new Date();
     const directBrandRows: BrandQueueRow[] = [];
+    // ★ 2026-09-27 한줄로 V2 m049 — 브랜드 조립 폭 = 적재 테이블(insertBrandQueue의 첫 테이블)의 실제 폭
+    const directEtcJsonMax = await getEtcJsonCapacity(companyTables[0]);
     // ★ 2026-09-02 브랜드 이미지 확정 — 조립 루프 밖에서 한 번. 아래 조립기가 우리 서빙 URL을
     //   거절하므로 이 줄이 없으면 이미지 브랜드 직접발송은 그 자리에서 사유와 함께 멈춘다.
     const directBrandPreflight = (directChannel === 'kakao' || directChannel === 'both')
@@ -2610,6 +2656,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           immediate: !isScheduledSend,
           attachmentJson: directKakaoAttachmentJson || undefined,
           carouselJson: kakaoCarouselJson || undefined,
+          etcJsonMax: directEtcJsonMax,
         });
         directBrandRows.push({
           phone: cleanKakaoPhone,
@@ -3078,7 +3125,8 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     const campaignId = req.params.id;
     const { search } = req.query;
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-    const offset = parseInt(req.query.offset as string) || 0;
+    // ★ 2026-09-27 한줄로 V2 m140 — 음수 offset은 0(옛 parseInt 그대로 → 음수면 SQL 오류)
+    const offset = parseOffsetParam(req.query.offset);
 
     // 캠페인 확인
     const campaign = await query(
@@ -3105,7 +3153,8 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
         'seqno as idx, dest_no as phone, call_back as callback, msg_contents as message',
         `app_etc1 = ? AND status_code = 100${searchCondition}`,
         searchParams,
-        'seqno ASC', limit, offset
+        // ★ 2026-09-27 m140 — seqno는 테이블마다 독립이라 여러 라인 캠페인은 동률에서 페이지 경계가 흔들렸다(중복·누락) → 테이블로 동률을 가른다
+        'seqno ASC, _sms_table ASC', limit, offset
       );
 
       // MySQL에 데이터 있으면 그걸 반환
@@ -3389,6 +3438,18 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: rsCheck.error });
     }
     const newScheduledAt = rsCheck.normalizedDate!;
+
+    // ★ 2026-09-27 한줄로 V2 m072 — 새 시각도 접수 때와 같은 판정을 받는다(값을 바꾸기 전).
+    //   옛 코드는 형식·15분만 봐, 광고를 야간으로 옮기거나 브랜드를 창(08:00~20:50) 밖으로 옮기면 그대로 나갔다
+    //   (브랜드는 카카오가 3022로 버리는데 이미 차감된 뒤다).
+    const rsCamp = campaign.rows[0];
+    const rsNightMsg = nightAdRestrictionMessage(rsCamp.is_ad === true, true, newScheduledAt, SEND_HOURS.start, SEND_HOURS.end);
+    if (rsNightMsg) {
+      return res.status(400).json({ success: false, code: 'NIGHT_AD_RESTRICTED', error: rsNightMsg });
+    }
+    if (['kakao', 'both', 'kakao_brand'].includes(String(rsCamp.send_channel || '')) && !isWithinBrandSendWindow(newScheduledAt)) {
+      return res.status(400).json({ success: false, code: 'BRAND_SEND_WINDOW', error: '브랜드메시지는 오전 8시부터 저녁 8시 50분 사이에만 발송할 수 있습니다. 발송 시각을 조정해주세요' });
+    }
 
     // 15분 이내 체크
     const currentScheduledAt = new Date(campaign.rows[0].scheduled_at);
@@ -3858,6 +3919,11 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '수신자 목록이 필요합니다' });
     }
 
+    // ★ 2026-09-27 한줄로 V2 R100 — 카카오 사용·발신키 소유(게이트 CT). 옛 코드는 본문의 발신키를 그대로 실어
+    //   남의 senderKey를 알면 그 프로필로 발송할 수 있었다. 화면(BrandMessageEditor)은 자기 회사 프로필의 profile_key를 반드시 채운다.
+    const brandGate = await checkBrandSendGate(companyId, senderKey, { requireKey: true });
+    if (!brandGate.ok) return res.status(brandGate.status).json({ error: brandGate.error, code: brandGate.code });
+
     // 큐에 실릴 회신번호를 먼저 확정한다 — campaigns와 큐가 다른 번호를 갖지 않게(판정은 CT 한 곳).
     const resolvedCallback = await resolveBrandCallback(companyId, resendFrom);
 
@@ -3941,22 +4007,29 @@ router.post('/brand-send', async (req: Request, res: Response) => {
     };
 
     let result;
-    if (mode === 'template') {
-      const { sendBrandMessageTemplate } = await import('../utils/brand-message');
-      result = await sendBrandMessageTemplate({
-        ...baseParams,
-        templateCode,
-        messageVariableJson,
-        buttonVariableJson,
-        couponVariableJson,
-        imageVariableJson,
-        videoVariableJson,
-        commerceVariableJson,
-        carouselVariableJson,
-      });
-    } else {
-      const { sendBrandMessage } = await import('../utils/brand-message');
-      result = await sendBrandMessage(baseParams);
+    try {
+      if (mode === 'template') {
+        const { sendBrandMessageTemplate } = await import('../utils/brand-message');
+        result = await sendBrandMessageTemplate({
+          ...baseParams,
+          templateCode,
+          messageVariableJson,
+          buttonVariableJson,
+          couponVariableJson,
+          imageVariableJson,
+          videoVariableJson,
+          commerceVariableJson,
+          carouselVariableJson,
+        });
+      } else {
+        const { sendBrandMessage } = await import('../utils/brand-message');
+        result = await sendBrandMessage(baseParams);
+      }
+    } catch (sendErr) {
+      // ★ 2026-09-27 한줄로 V2 R316 — 발송 CT가 던지면 위에서 만든 'sending'이 영영 남았다 → 상태 수습(큐 행 있으면 completed · 없으면 failed)
+      const { settleBrandSendCrash } = await import('../utils/brand-message');
+      await settleBrandSendCrash(campaignId, companyId, userId);
+      throw sendErr;
     }
 
     if (!result.success) {
@@ -3966,9 +4039,13 @@ router.post('/brand-send', async (req: Request, res: Response) => {
     }
 
     // 성공 시 캠페인 업데이트
+    // ★ 2026-09-27 한줄로 V2 m050 — 예약(reservedDate가 미래)이면 **예약 상태**로 둔다. 옛: 즉시 completed로 기록해 취소 게이트
+    //   (scheduled·draft)를 못 지나 예약 브랜드 발송을 취소할 수 없었다. 예약 시각이 지나면 예약 정리가 결과로 종결한다.
+    const brandReserved = !!reservedDate && new Date(reservedDate).getTime() > Date.now();
+    const brandStatus = brandReserved ? 'scheduled' : 'completed';
     await query(
-      `UPDATE campaigns SET status = 'completed', target_count = $1 WHERE id = $2`,
-      [result.sentCount, campaignId]
+      `UPDATE campaigns SET status = $3, target_count = $1 WHERE id = $2`,
+      [result.sentCount, campaignId, brandStatus]
     );
 
     // campaign_runs INSERT
@@ -3980,8 +4057,8 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       //   SCHEMA.md에 있는 success_count는 여기 넣지 않았다(같은 날 send_channel 길이가 오기로 드러나
       //   문서를 근거로 컬럼을 쓰면 또 22001·42703을 밟는다). 필요해지면 information_schema 확인 후 추가.
       `INSERT INTO campaign_runs (campaign_id, run_number, target_count, sent_count, status, sent_at, created_at)
-       VALUES ($1, 1, $2, $2, 'completed', NOW(), NOW())`,
-      [campaignId, result.sentCount]
+       VALUES ($1, 1, $2, $2, $3, NOW(), NOW())`,
+      [campaignId, result.sentCount, brandStatus]
     );
 
     return res.json({

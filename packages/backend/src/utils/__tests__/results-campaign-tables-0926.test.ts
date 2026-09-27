@@ -46,10 +46,11 @@ describe('캠페인 기준 테이블', () => {
 });
 
 describe('getCampaignSmsTablesFor', () => {
-  it('기준일 = 발송 시각 → 예약 시각 → 생성 시각 순(관리자 상세와 같다) · 작성자·기록 테이블을 넘긴다', () => {
+  // ★ 2026-09-27 한줄로 V2 m135 — 기준일이 **여럿**(발송·예약·생성)이 됐다(한 날짜 ±1개월이면 먼 예약의 발송 월을 놓쳤다). 작성자·기록 테이블은 그대로 넘긴다.
+  it('기준일 = 발송·예약·생성 시각 각각(같은 달은 한 번) · 작성자·기록 테이블을 넘긴다', () => {
     const src = readFileSync(join(__dirname, '..', 'sms-queue.ts'), 'utf8');
     const fn = src.slice(src.indexOf('export async function getCampaignSmsTablesFor('), src.indexOf('export function mergeLineTables('));
-    expect(fn).toContain('new Date(c.sent_at || c.scheduled_at || c.created_at || Date.now())');
-    expect(fn).toContain('return getCampaignSmsTables(companyId, refDate, c.created_by || undefined, c.send_config);');
+    expect(fn).toContain('const dates = [c.sent_at, c.scheduled_at, c.created_at]');
+    expect(fn).toContain('getCampaignSmsTables(companyId, d, c.created_by || undefined, c.send_config)');
   });
 });

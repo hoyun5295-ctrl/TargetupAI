@@ -32,6 +32,13 @@ export const BRAND_CAMPAIGN_CHANNELS = ['kakao', 'kakao_brand', 'both'] as const
 export const BRAND_CHANNEL_SQL_IN = BRAND_CAMPAIGN_CHANNELS.map((c) => `'${c}'`).join(', ');
 
 /**
+ * ★ 2026-09-27 한줄로 V2 m004(Harold 결정 「7305 즉시 환불 유지 + 7305 캠페인 회수 창 30일」) — 카카오 결과
+ * (7305 성공불확실 · 30일 대기)가 나올 수 있는 캠페인 채널 = 브랜드 계열 + 알림톡. 정산 스위퍼가 이 채널만 후보 창을 30일로 넓힌다.
+ */
+export const KAKAO_RESULT_CHANNELS = [...BRAND_CAMPAIGN_CHANNELS, 'alimtalk'] as const;
+export const KAKAO_RESULT_CHANNEL_SQL_IN = KAKAO_RESULT_CHANNELS.map((c) => `'${c}'`).join(', ');
+
+/**
  * 이 채널의 발송이 **전량 브랜드메시지인가** = 선불 차감·환불 유형이 `BRAND`인가.
  * `both`는 문자가 섞여 있어 여기 해당하지 않는다(문자분은 `message_type`으로 차감된다).
  */
@@ -286,6 +293,9 @@ export const BILLING_TYPES: readonly BillingTypeDef[] = [
   { key: 'BRAND_NF', label: '브랜드메시지(비친구)', companyPriceColumn: 'cost_per_brand_nonfriend', agentPriceColumn: null, smsqCode: BRAND_NONFRIEND_SMSQ_CODE, agentCode: null },
   { key: 'TEST_SMS', label: '테스트 SMS',     companyPriceColumn: 'cost_per_test_sms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
   { key: 'TEST_LMS', label: '테스트 LMS',     companyPriceColumn: 'cost_per_test_lms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  // ★ 2026-09-27 한줄로 V2 m060(Harold 결정 「회사 MMS 단가로 청구」) — 테스트 MMS가 테스트 LMS 단가로 청구되던 것을 가른다.
+  //   전용 칸을 두지 않고 회사 MMS 단가를 따른다(선불 테스트 차감도 MMS 단가 · 테스트 브랜드와 같은 형태).
+  { key: 'TEST_MMS', label: '테스트 MMS',     companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
   // ★ 2026-09-26 한줄로 V2 S1-H06 담당자 브랜드메시지 테스트(Harold 결정 「브랜드 단가로 청구」). 전용 단가 칸을 두지 않고
   //   브랜드(친구) 단가를 따른다 — 스팸테스트가 일반 단가를 따르는 것과 같은 형태(단가 화면에 칸이 늘지 않는다).
   { key: 'TEST_BRAND', label: '테스트 브랜드메시지', companyPriceColumn: null,           agentPriceColumn: null,             smsqCode: null, agentCode: null },
@@ -298,8 +308,9 @@ export const BILLING_TYPES: readonly BillingTypeDef[] = [
  * 테스트 라인 행(`app_etc1 = 'test'`)의 청구 유형키. 일자축·상세축 두 집계가 이 한 벌을 쓴다.
  * ★ 2026-09-26 한줄로 V2 S1-H06 — 브랜드(F · 비친구 집계 코드 FN 포함)는 테스트 브랜드. 그 밖은 종전 그대로(S = 테스트 SMS · 나머지 = 테스트 LMS).
  */
-export function testBillingTypeKey(msgType: string): 'TEST_SMS' | 'TEST_LMS' | 'TEST_BRAND' {
+export function testBillingTypeKey(msgType: string): 'TEST_SMS' | 'TEST_LMS' | 'TEST_MMS' | 'TEST_BRAND' {
   if (msgType === 'S') return 'TEST_SMS';
+  if (msgType === 'M') return 'TEST_MMS';   // ★ 2026-09-27 m060
   if (msgType === 'F' || msgType === BRAND_NONFRIEND_SMSQ_CODE) return 'TEST_BRAND';
   return 'TEST_LMS';
 }

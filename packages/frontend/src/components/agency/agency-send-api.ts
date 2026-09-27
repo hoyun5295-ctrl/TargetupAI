@@ -147,10 +147,12 @@ export async function checkAgencyContentSpelling(content: string, messageType: s
   return { issues: Array.isArray(data.issues) ? data.issues : [], failed: !!data.failed };
 }
 
-export async function fetchAgencyRequests(): Promise<AgencySendRequest[]> {
-  const res = await fetch('/api/agency-send', { headers: auth() });
+/** ★ 2026-09-27 R286 — 최신순 100건씩(offset = 이미 불러온 건수) · total = 전체 건수 */
+export async function fetchAgencyRequests(offset = 0): Promise<{ requests: AgencySendRequest[]; total: number }> {
+  const res = await fetch(`/api/agency-send?offset=${Math.max(0, Math.floor(offset))}`, { headers: auth() });
   const data = await unwrap(res);
-  return data.requests || [];
+  const requests: AgencySendRequest[] = data.requests || [];
+  return { requests, total: Number(data.total) || requests.length };
 }
 
 export async function fetchAgencyRequest(id: string): Promise<{ request: AgencySendRequest; events: AgencySendEvent[] }> {

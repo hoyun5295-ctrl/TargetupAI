@@ -6,7 +6,7 @@
 
 import { query } from '../config/database';
 import {
-  getCompanySmsTablesWithLogs, getCampaignQueueTables,
+  getCompanySmsTablesWithLogs, getCampaignQueueTables, getCampaignSmsTablesWide, mergeLineTables,
   smsCountAll, smsExecAll, smsCampaignCountsSafe,
   type CampaignAggCounts,
 } from './sms-queue';
@@ -45,7 +45,8 @@ export interface CleanupScheduledFilter {
 export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter = {}): Promise<{ cleaned: number }> {
   let cleaned = 0;
 
-  let sql = `SELECT id, company_id, scheduled_at, send_channel, message_type FROM campaigns
+  // ★ 2026-09-27 한줄로 V2 m118 — 테이블 해석(getCampaignSmsTablesWide)에 필요한 칸을 함께 읽는다(작성자 · 적재 기록 · 기준 시각).
+  let sql = `SELECT id, company_id, created_by, scheduled_at, sent_at, created_at, send_config, send_channel, message_type FROM campaigns
              WHERE status = 'scheduled' AND scheduled_at < NOW()`;
   const params: any[] = [];
 
@@ -66,7 +67,14 @@ export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter =
 
   for (const camp of targets.rows) {
     try {
-      const tablesWithLogs = await getCompanySmsTablesWithLogs(camp.company_id);
+      // ★ 2026-09-27 한줄로 V2 m118 — 캠페인이 실제로 적재한 테이블(sentTables) ∪ 회사 전 라인으로 센다(「없다」를 판정하는 자리).
+      //   회사 라인만 보면 적재 뒤 라인이 바뀐 캠페인이 0건 → 10분 뒤 failed · sent_count 0 → 후불 청구에서 빠졌다.
+      //   (Codex LINE 1R) 기준일은 예약 시각이다 — 대량 워커는 예약도 적재 시각을 sent_at에 적어, sent_at 기준이면
+      //   먼 예약의 발송 월 이력을 놓친다. 기존 범위(회사 라인 당월·전월)도 그대로 합친다(범위가 좁아지지 않게).
+      const tablesWithLogs = mergeLineTables(
+        await getCompanySmsTablesWithLogs(camp.company_id),
+        await getCampaignSmsTablesWide(camp.company_id, { ...camp, sent_at: null }),
+      );
       // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
       const counts = (await smsCampaignCountsSafe(tablesWithLogs, [camp.id])).get(camp.id);
       const sentCount = counts?.total || 0;
@@ -84,11 +92,14 @@ export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter =
       // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 failCount 그대로 보냄
       //   prepaidRefund 함수가 alreadyRefunded와 비교해 차이만 환불 (idempotency 함수 측 보장)
       //   delta 계산 폐기 — 호출/함수 의미 일치 + 누락 사고 자동 보정
-      await query(
+      // ★ 2026-09-27 한줄로 V2 m096 — 예약 상태일 때만 바꾼다(후보를 고른 뒤 MySQL을 세는 사이 취소되면 completed로 되돌렸다 →
+      //   스위퍼 미적재 환불 뒤 회수). 못 바꿨으면 이 캠페인은 다른 경로(취소 정산)가 가졌다 — 환불도 하지 않고 다음으로.
+      const moved = await query(
         `UPDATE campaigns SET status = $1, sent_count = $2, success_count = $3, fail_count = $4,
-         sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $5`,
+         sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $5 AND status = 'scheduled'`,
         [newStatus, sentCount, successCount, failCount, camp.id]
       );
+      if ((moved.rowCount ?? 0) === 0) continue;
 
       // ★ 2026-07-30 적대검증 수용 — 브랜드 F행이 집계에 합류해 환불 축(BRAND vs message_type)을 가른다.
       //   both는 F/비F 실패를 각자 원장으로(섞으면 성공한 문자 원장이 환불되고 BRAND 원장이 남는다).
@@ -616,7 +627,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
               sent_at = CASE WHEN $3::text = 'completed' AND sent_at IS NULL
                 THEN COALESCE(scheduled_at, NOW())
                 ELSE sent_at END
-             WHERE id = $4`,
+             WHERE id = $4 AND status <> 'cancelled'`,
+            // ★ 2026-09-27 한줄로 V2 m074 — 취소는 덮지 않는다(집계와 갱신 사이에 취소된 캠페인을 completed로 되살렸다)
             [successCount, failCount, newStatus, runInfo.rows[0].campaign_id]
           );
 
@@ -746,7 +758,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
             sent_at = CASE WHEN $3::text = 'completed' AND sent_at IS NULL
               THEN COALESCE(scheduled_at, NOW())
               ELSE sent_at END
-           WHERE id = $4`,
+           WHERE id = $4 AND status <> 'cancelled'`,
+          // ★ 2026-09-27 한줄로 V2 m074 — 취소는 덮지 않는다(AI 동기화와 같은 조건)
           [successCount, failCount, newStatus, campaign.id]
         );
 

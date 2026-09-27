@@ -416,6 +416,42 @@ export function planModifyIssue(orig: ModifyIssueOriginal, req: ModifyIssueReque
 }
 
 /**
+ * ★ 2026-09-27 한줄로 V2 m028 — (순수) 같은 당초 장의 수정분을 합쳐 본다. planModifyIssue는 당초 금액만 보고 장을 만든다.
+ *  - 전액 취소(4 계약 해제 · 6 착오 이중발급)가 이미 있으면(발행·진행·실패 — 실패도 재시도로 발행될 수 있다) 더 만들지 않는다.
+ *  - 당초 + 기존 수정 + 이번 계획의 누적 공급가액·세액이 음수가 되면 거절한다(되돌린 것보다 더 되돌리는 수정).
+ * existing = 취소(cancelled)를 뺀 같은 당초 승인번호의 수정 장 — 걸러내기는 호출부 SQL이 한다.
+ */
+export function assertModifyCumulative(
+  orig: { supplyAmount: number; taxAmount: number },
+  existing: Array<{ modifyCode: number; supplyAmount: number; taxAmount: number; status?: string }>,
+  planned: Array<{ supplyAmount: number; taxAmount: number }>,
+): void {
+  const fullCancel = existing.find((r) => r.modifyCode === 4 || r.modifyCode === 6);
+  if (fullCancel) {
+    throw new ModifyPlanError(
+      `이 장은 이미 전액 취소(사유 ${fullCancel.modifyCode}${fullCancel.status && fullCancel.status !== 'issued' ? ` · ${fullCancel.status}` : ''}) 수정발행이 있습니다. 실패 건이면 재시도로 진행하고, 새 수정은 만들지 않습니다`,
+    );
+  }
+  const sum = (rows: Array<{ supplyAmount: number; taxAmount: number }>) =>
+    rows.reduce((a, r) => ({ s: a.s + (Number(r.supplyAmount) || 0), t: a.t + (Number(r.taxAmount) || 0) }), { s: 0, t: 0 });
+  // ★ Codex BILL 1R — 기존 수정분 중 **감액은 상태와 무관하게**(발행·진행·실패 — 실패도 재시도로 나갈 수 있다) 빼고,
+  //   **증액은 발행된 것만** 더한다. 발행이 확인되지 않은 증액을 가용 잔액으로 보면 실제 발행분보다 더 깎는 수정이 통과한다.
+  const counted = (v: number, status?: string) => (v < 0 || status === 'issued' ? v : 0);
+  const prior = existing.reduce(
+    (a, r) => ({ s: a.s + counted(Number(r.supplyAmount) || 0, r.status), t: a.t + counted(Number(r.taxAmount) || 0, r.status) }),
+    { s: 0, t: 0 },
+  );
+  const next = sum(planned);
+  const netSupply = Number(orig.supplyAmount) + prior.s + next.s;
+  const netTax = Number(orig.taxAmount) + prior.t + next.t;
+  if (netSupply < 0 || netTax < 0) {
+    throw new ModifyPlanError(
+      `이미 발행·진행 중인 수정분과 합치면 누적 금액이 음수가 됩니다(공급가액 ${netSupply}원 · 세액 ${netTax}원). 금액을 확인해 주세요`,
+    );
+  }
+}
+
+/**
  * (순수) getInfo 재조회의 stateCode 판정 — 팝빌 상태코드 계약(3xx=발행 계열 / 6xx=발행취소 계열).
  * truthy 응답을 곧 발행으로 읽으면 취소된 문서(6xx)까지 issued로 자가치유된다(0730 Codex 지적 ② 수용).
  * 모르는 코드는 'unknown' — 성공으로 승격하지 않고 submitted에 세워 사람이 본다(fail-closed).

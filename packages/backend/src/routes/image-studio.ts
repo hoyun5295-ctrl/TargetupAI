@@ -40,7 +40,7 @@ import {
   STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS,
   type ComposeTypography,
 } from '../utils/image-studio';
-import { getTemplate, listTemplatesPublic } from '../utils/image-studio-templates';
+import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
 
 export const imageStudioRouter = Router();
 
@@ -181,6 +181,12 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
       return res.status(404).json({ success: false, error: '제품 이미지를 찾을 수 없습니다. 다시 준비해주세요.' });
     }
     cutout = { base64: fs.readFileSync(cf.absPath).toString('base64'), mime: cf.mime };
+  }
+
+  // ★ 2026-09-27 한줄로 V2 R242 — 템플릿 예시 문구가 그대로면 만들지 않는다(포스터에 그려진 채 2크레딧이 빠졌다 · 화면은 미리 채워 둔다)
+  const unfilledField = findUnfilledTemplateText(texts);
+  if (unfilledField) {
+    return res.status(400).json({ success: false, error: '문구 칸에 예시 문구가 그대로 있습니다. 실제 문구로 바꾼 뒤 만들어 주세요.', code: 'PLACEHOLDER_TEXT', field: unfilledField });
   }
 
   // 사전 차단(최대 2크레딧 기준)

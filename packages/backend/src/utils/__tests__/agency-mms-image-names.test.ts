@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { alignMmsImageNames } from '../mms-image-util';
+import { alignMmsImageNames, MMS_IMAGE_BASE } from '../mms-image-util';
 import { withMmsImageNames, getMmsImageDisplayName } from '../../../../frontend/src/utils/mmsImage';
 
 const AUTH = { companyId: '00000000-0000-0000-0000-000000000001', userId: '00000000-0000-0000-0000-000000000002' };
@@ -25,8 +25,9 @@ const PRE = {
   registeredSet: new Set(['0500000000']),
   window: { startHour: 0, endHour: 24 } as { startHour: number | null; endHour: number | null },
 };
-const IMG_A = '/srv/uploads/mms/c1/aaaaaaaa-0000-4000-8000-000000000001.jpg';
-const IMG_B = '/srv/uploads/mms/c1/bbbbbbbb-0000-4000-8000-000000000002.jpg';
+// ★ 2026-09-27 GATE m026 — 경로는 저장소 규칙(MMS 저장소/회사ID/파일)대로 만든다(접수 CT가 회사 저장소 밖 경로를 거절한다)
+const IMG_A = path.join(MMS_IMAGE_BASE, AUTH.companyId, 'aaaaaaaa-0000-4000-8000-000000000001.jpg');
+const IMG_B = path.join(MMS_IMAGE_BASE, AUTH.companyId, 'bbbbbbbb-0000-4000-8000-000000000002.jpg');
 
 /** 접수 코어가 외부 트랜잭션으로 부르는 연결을 흉내 낸다(쿼리 기록 · 컬럼 존재 여부 주입) */
 function fakeClient(existingColumns: string[]) {

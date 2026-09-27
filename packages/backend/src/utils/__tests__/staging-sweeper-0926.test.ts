@@ -44,7 +44,8 @@ describe('만료 계약 — 정리와 commit이 같은 기준을 본다', () => 
   });
 
   it('고르기: 캠페인이 가리키지 않고 24시간 지난 행 중 제외 목록에 없는 적재분 하나(커서 없음 · id가 섞인 적재분도 빠뜨리지 않는다 · Codex 2R)', () => {
-    expect(STAGING_PICK_SQL).toContain('NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = s.staging_id)');
+    // ★ 2026-09-27 한줄로 V2 m021 — 가리키는 캠페인이 전부 발송 단계 failed(활성화 실패로 끝남 · 워커가 다시 집지 않음)면 정리 대상
+    expect(STAGING_PICK_SQL).toContain("NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = s.staging_id AND COALESCE(c.send_phase, '') <> 'failed')");
     expect(STAGING_PICK_SQL).toContain("s.created_at < NOW() - ($1::int * INTERVAL '1 hour')");
     expect(STAGING_PICK_SQL).toContain('NOT (s.staging_id = ANY($2::uuid[]))');
     expect(STAGING_PICK_SQL).toContain('ORDER BY s.id');
@@ -55,7 +56,7 @@ describe('만료 계약 — 정리와 commit이 같은 기준을 본다', () => 
 
   it('지우기: 적재분 통째 · 한 문장 안에서 캠페인 부재와 "24시간 안 된 행 없음"을 다시 건다', () => {
     expect(STAGING_DELETE_SQL).toContain('WHERE d.staging_id = $1');
-    expect(STAGING_DELETE_SQL).toContain('NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = $1)');
+    expect(STAGING_DELETE_SQL).toContain("NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = $1 AND COALESCE(c.send_phase, '') <> 'failed')");
     expect(STAGING_DELETE_SQL).toContain("y.created_at >= NOW() - ($2::int * INTERVAL '1 hour')");
     expect(STAGING_DELETE_SQL).not.toContain('LIMIT');
   });

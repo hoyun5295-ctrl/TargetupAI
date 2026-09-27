@@ -36,10 +36,11 @@ describe('청구 유형 TEST_BRAND', () => {
     expect(t!.smsqCode).toBeNull();
   });
 
-  it('테스트 행 유형 판정: S=테스트 SMS · F/FN=테스트 브랜드 · 그 밖 = 종전대로 테스트 LMS', () => {
+  // ★ 2026-09-27 한줄로 V2 m060(Harold 결정) — M = 테스트 MMS(회사 MMS 단가)
+  it('테스트 행 유형 판정: S=테스트 SMS · M=테스트 MMS · F/FN=테스트 브랜드 · 그 밖 = 테스트 LMS', () => {
     expect(testBillingTypeKey('S')).toBe('TEST_SMS');
     expect(testBillingTypeKey('L')).toBe('TEST_LMS');
-    expect(testBillingTypeKey('M')).toBe('TEST_LMS');
+    expect(testBillingTypeKey('M')).toBe('TEST_MMS');
     expect(testBillingTypeKey('F')).toBe('TEST_BRAND');
     expect(testBillingTypeKey('FN')).toBe('TEST_BRAND');
   });

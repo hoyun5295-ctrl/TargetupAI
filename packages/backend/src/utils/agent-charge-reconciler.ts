@@ -28,6 +28,27 @@ const MAX_PER_TICK = 20;
 let timer: NodeJS.Timeout | null = null;
 let running = false;
 
+/**
+ * ★ 2026-09-27 한줄로 V2 m013 — 실행 원장의 모든 충전 행에 게이트웨이 발송 번호(SeqNo)가 있는가.
+ * 없으면 대사 워커가 반영을 판정할 수 없다(이 워커 대상에서 빠진다) — 사람이 실반영을 확인한 해소 경로가 주문을 직접 완료로 넘긴다.
+ */
+export function chargesHaveSeqNo(charges: any[]): boolean {
+  if (!Array.isArray(charges) || charges.length === 0) return false;
+  return charges.every((c: any) => Number.isInteger(Number(c?.seqNo)) && Number(c?.seqNo) > 0);
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m014 — 순환 커서. 늘 가장 오래된 20건만 보면, 끝내 반영 안 되는 요청 20건이 쌓였을 때
+ * 뒤 요청이 영영 확인되지 않는다. 지난 틱이 본 마지막 자리 뒤부터 보고, 상한보다 적게 나오면(끝) 다음 틱은 처음부터.
+ * 프로세스 안 값이라 재기동하면 처음부터 다시 돈다(표시 수렴 축이라 충분하다).
+ */
+let cursor: { createdAt: string; id: string } | null = null;
+export function nextReconcileCursor(rows: Array<{ id: string; created_at: any }>, limit: number): { createdAt: string; id: string } | null {
+  if (rows.length < limit || rows.length === 0) return null;
+  const last = rows[rows.length - 1];
+  return { createdAt: new Date(last.created_at).toISOString(), id: String(last.id) };
+}
+
 export async function reconcileAgentChargeOrdersOnce(): Promise<{ checked: number; fulfilled: number }> {
   if (!isPayStatsConfigured()) return { checked: 0, fulfilled: 0 };
 
@@ -36,8 +57,10 @@ export async function reconcileAgentChargeOrdersOnce(): Promise<{ checked: numbe
   // ★2026-08-29 Codex 3R high — SeqNo가 없는 registered(해소 confirmed 경유 등)는 **영원히 판정 불가**라
   //   oldest-first 상위를 점유하면 그 뒤 요청이 한 번도 검사되지 않는다(기아). SQL에서 제외한다.
   //   표현식은 기존 전역 게이트(charges->0->>'seqNo')와 같은 한 벌이다.
+  // ★ 2026-09-27 m014 — 순환 커서(위 nextReconcileCursor) · 같은 시각 행은 id로 가른다.
+  const from = cursor;
   const targets = await query(
-    `SELECT r.id, r.charges
+    `SELECT r.id, r.charges, r.created_at
        FROM agent_charge_requests r
       WHERE r.status = 'registered'
         AND (r.charges->0->>'seqNo') IS NOT NULL
@@ -45,16 +68,18 @@ export async function reconcileAgentChargeOrdersOnce(): Promise<{ checked: numbe
           SELECT 1 FROM agent_charge_orders o
            WHERE o.charge_request_id = r.id AND o.status = 'processing'
         )
-      ORDER BY r.created_at ASC
+        ${from ? 'AND (r.created_at, r.id) > ($2::timestamptz, $3::uuid)' : ''}
+      ORDER BY r.created_at ASC, r.id ASC
       LIMIT $1`,
-    [MAX_PER_TICK],
+    from ? [MAX_PER_TICK, from.createdAt, from.id] : [MAX_PER_TICK],
   );
+  cursor = nextReconcileCursor(targets.rows, MAX_PER_TICK);
 
   let fulfilled = 0;
   for (const row of targets.rows) {
     const charges = Array.isArray(row.charges) ? row.charges : [];
-    const seqNos = charges.map((c: any) => Number(c?.seqNo)).filter((n: number) => Number.isInteger(n) && n > 0);
-    if (seqNos.length === 0 || seqNos.length !== charges.length) continue; // SeqNo 미확정 = 판정 불가
+    if (!chargesHaveSeqNo(charges)) continue; // SeqNo 미확정 = 판정 불가(판정 CT 하나 · 해소 경로와 같다)
+    const seqNos = charges.map((c: any) => Number(c?.seqNo));
 
     let applied: Array<{ seqNo: number; applied?: boolean }>;
     try {

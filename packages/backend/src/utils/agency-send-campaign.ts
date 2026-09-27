@@ -48,10 +48,10 @@ export async function inspectAttemptCampaign(
   companyId: string, dispatchKey: string | null,
   // ★2026-09-13(3) status·phase도 함께 돌려준다(이미 취소된 캠페인을 가려 취소가 갇히지 않게 · 한 통이라도 나갔을 수 있는지 가르게 ·
   //   기존 소비처는 id·kind만 읽는다)
-): Promise<{ id: string | null; kind: CampaignKind; status: string | null; phase: string | null }> {
+): Promise<{ id: string | null; kind: CampaignKind; status: string | null; phase: string | null; sent: number | null }> {
   if (!dispatchKey) return classifyAttemptCampaign(undefined);
   const r = await query(
-    `SELECT id, status, send_phase FROM campaigns
+    `SELECT id, status, send_phase, sent_count FROM campaigns
       WHERE staging_id = $1::uuid AND company_id = $2::uuid
       ORDER BY created_at DESC LIMIT 1`,
     [dispatchKey, companyId],
@@ -64,12 +64,14 @@ export async function inspectAttemptCampaign(
  * 배관은 `send_phase='queued'`만 집는다. `preparing`·`failed`는 더 나가지 않는다.
  */
 export function classifyAttemptCampaign(
-  row: { id: string; status: string | null; send_phase: string | null } | undefined,
-): { id: string | null; kind: CampaignKind; status: string | null; phase: string | null } {
-  if (!row) return { id: null, kind: 'missing', status: null, phase: null };
+  row: { id: string; status: string | null; send_phase: string | null; sent_count?: number | string | null } | undefined,
+): { id: string | null; kind: CampaignKind; status: string | null; phase: string | null; sent: number | null } {
+  if (!row) return { id: null, kind: 'missing', status: null, phase: null, sent: null };
   const { id, status, send_phase: phase } = row;
-  if (status === 'cancelled' || phase === 'failed' || phase === 'preparing') return { id, kind: 'stopped', status: status ?? null, phase: phase ?? null };
-  return { id, kind: 'live', status: status ?? null, phase: phase ?? null };
+  // ★ 2026-09-27 m023 — 적재 수(모르면 null · 발송 여부 판정이 보수로 읽는다)
+  const sent = row.sent_count === null || row.sent_count === undefined ? null : Number(row.sent_count);
+  if (status === 'cancelled' || phase === 'failed' || phase === 'preparing') return { id, kind: 'stopped', status: status ?? null, phase: phase ?? null, sent };
+  return { id, kind: 'live', status: status ?? null, phase: phase ?? null, sent };
 }
 
 /**
@@ -77,8 +79,12 @@ export function classifyAttemptCampaign(
  * `preparing`만 아니다(차감 완료 전 · 활성화 전이라 워커가 집지 않는다). `failed`는 적재 도중 종결이라 **일부가 나갔을 수 있다**.
  * ⛔ `kind === 'live'`로 대신하지 마라: `stopped`에는 일부 발송된 `failed`가 들어 있어, 막을 것이 없을 때 취소로 확정하면 화면이 거짓말을 한다.
  */
-export function campaignMayHaveSent(found: { id: string | null; phase: string | null }): boolean {
-  return !!found.id && found.phase !== 'preparing';
+export function campaignMayHaveSent(found: { id: string | null; phase: string | null; sent?: number | null }): boolean {
+  if (!found.id || found.phase === 'preparing') return false;
+  // ★ 2026-09-27 한줄로 V2 m023 — 적재 도중 실패(failed)라도 적재 수가 0으로 확정된 캠페인은 한 통도 안 나갔다.
+  //   옛 판정은 활성화 실패(적재 0)까지 「나갔을 수 있음」으로 봐 취소 안내가 「이미 발송」으로 틀렸다. 모르면(null) 종전대로 나갔을 수 있음.
+  if (found.phase === 'failed' && found.sent === 0) return false;
+  return true;
 }
 
 /**

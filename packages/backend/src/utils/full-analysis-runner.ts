@@ -14,6 +14,8 @@ import { buildMultiDimComparison, buildMessageAnalysis, buildForecast } from './
 import { buildActionPlan } from './action-plan';
 import { renderPerformanceReportPdf } from './performance-pdf-render';
 import { deductCreditSafe } from './ai-credit';
+// ★ 2026-09-27 한줄로 V2 R079 — 풀분석 차감(orchestrate 300) 하나가 전체를 덮는다
+import { runInCreditBundle } from './ai-credit-context';
 import { getCreditCost } from './ai-credit-calc';
 
 const PDF_DIR = path.join(__dirname, '../../full-analysis-pdfs');
@@ -36,7 +38,8 @@ export async function runFullAnalysis(jobId: string, companyId: string, period: 
     let explanation: Awaited<ReturnType<typeof explainPerformance>> | null = null;
     try {
       const sn = await buildPerformanceSnapshot(companyId);
-      explanation = await explainPerformance(companyId, sn, companyInfo);
+      // ★ 2026-09-27 R079 — 안의 AI 진단이 따로 5크레딧을 빼지 않게 묶음으로(안내 300 = 실제 300 · 뒤에서 실패하면 0)
+      explanation = await runInCreditBundle(() => explainPerformance(companyId, sn, companyInfo));
     } catch (e: any) { console.log('[full-analysis] explain skip:', e?.message); }
 
     const nowMs = Date.now();

@@ -231,6 +231,11 @@ export interface InicisApprovalResult {
   totPrice?: string;
   /** ★ 2026-09-27 m006 승인 응답의 주문번호(MOID) — 확정 때 우리 주문번호와 대조한다(실결제 pg_response 실측으로 칸 이름 확인) */
   moid?: string;
+  /**
+   * ★ 2026-09-27 PAY Codex 2R — 승인 결과를 알 수 없다(응답 미수신·시간 초과·해석 불가·결과코드 없음).
+   * 이니시스 매뉴얼의 "승인결과 수신 실패"라 승인됐을 수 있다 — 거절로 기록하면 카드 대금만 남는다. 호출부는 대기로 두고 사람이 확인한다.
+   */
+  unknown: boolean;
   raw: Record<string, any>;
 }
 
@@ -262,6 +267,7 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
   if (callback.resultCode !== '0000') {
     return {
       success: false,
+      unknown: false,   // 결제창 단계 실패 = 승인 호출 전(승인된 거래 없음)
       resultCode: callback.resultCode,
       resultMsg: callback.resultMsg,
       raw: callback as any,
@@ -272,6 +278,7 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
   if (callback.mid !== config.mid) {
     return {
       success: false,
+      unknown: false,
       resultCode: 'MID_MISMATCH',
       resultMsg: `mid 불일치 (callback=${callback.mid}, config=${config.mid})`,
       raw: callback as any,
@@ -283,6 +290,7 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
     console.error(`[inicis-client] 이니시스가 아닌 authUrl 거절: order=${callback.orderNumber} authUrl=${String(callback.authUrl).slice(0, 200)}`);
     return {
       success: false,
+      unknown: false,
       resultCode: 'UNTRUSTED_AUTH_URL',
       resultMsg: '승인 주소가 이니시스 주소가 아닙니다',
       raw: callback as any,
@@ -309,14 +317,16 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
   params.append('format', 'JSON');
 
   let json: Record<string, any> = {};
+  let httpStatus = 0;
   try {
     const response = await fetch(callback.authUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
       body: params.toString(),
-      // ★ 2026-09-27 m008 시간 제한 — 넘으면 아래 catch = 승인 실패 → 호출부가 망취소
+      // ★ 2026-09-27 m008 시간 제한 — 넘으면 아래 catch = 승인 불명(호출부가 대기로 두고 경보 · 자동 망취소 안 함)
       signal: AbortSignal.timeout(TIMEOUTS.inicisApi),
     });
+    httpStatus = response.status;
     const text = await response.text();
     try {
       json = JSON.parse(text);
@@ -326,16 +336,33 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
   } catch (err: any) {
     return {
       success: false,
+      unknown: true,
       resultCode: 'NETWORK_ERROR',
       resultMsg: `authUrl 호출 실패: ${err.message || err}`,
       raw: { callback, error: String(err) },
     };
   }
 
-  const approved = json.resultCode === '0000';
+  // ★ 2026-09-27 PAY Codex 2R high — 결과코드가 없으면(JSON 아님·빈 본문·칸 없음) 승인 불명이다.
+  //   옛 코드는 콜백의 resultCode('0000')를 결과로 빌려 써 "승인 거절 0000"처럼 보였고, 호출부가 주문을 실패로 닫았다.
+  const code = typeof json?.resultCode === 'string' ? json.resultCode.trim() : '';
+  if (!code) {
+    return {
+      success: false,
+      unknown: true,
+      resultCode: 'APPROVAL_UNKNOWN',
+      resultMsg: `승인 응답을 해석하지 못했습니다(HTTP ${httpStatus || '?'})`,
+      raw: json,
+    };
+  }
+
+  const approved = code === '0000';
   return {
     success: approved,
-    resultCode: json.resultCode || callback.resultCode,
+    // ★ 2026-09-27 PAY Codex 3R high — R201 = 같은 인증 데이터로 재승인 요청(이니시스 FAQ). 이전 승인이 살아 있거나 망취소됐을 수 있어
+    //   거절로 닫으면 승인된 주문을 failed로 만든다 → 승인 불명(대기 유지 · 사람이 확인).
+    unknown: code === 'R201',
+    resultCode: code,
     resultMsg: json.resultMsg || callback.resultMsg,
     tid: json.tid || json.TID,
     applNum: json.applNum || json.ApplNum,

@@ -1,4 +1,7 @@
 import { Request, Response, Router } from 'express';
+// ★ 2026-09-27 한줄로 V2 RES — 페이지·건수 보정(m112·m113) · KST 월(m114)
+import { parsePageParams } from '../utils/normalize';
+import { kstMonthTag } from '../utils/ai-credit-calc';
 import { logPrivacyExport } from '../utils/privacy-audit';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -84,7 +87,8 @@ router.get('/summary', async (req: Request, res: Response) => {
     }
 
     const { from, to, fromDate, toDate } = req.query;
-    const yearMonth = String(from || new Date().toISOString().slice(0, 7).replace('-', ''));
+    // ★ 2026-09-27 한줄로 V2 m114 — 기본 월은 KST(옛 toISOString = UTC라 매월 1일 00~09시에 전월이 보였다)
+    const yearMonth = String(from || kstMonthTag(new Date()));
 
     const userId = req.user?.userId;
     const userType = req.user?.userType;
@@ -234,7 +238,9 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     }
 
     const { from, to, channel, page = 1, limit = 20, fromDate, toDate, scope } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
+    // ★ 2026-09-27 한줄로 V2 m113 — 건수 상한(화면 최대 2000) · 숫자 아님은 기본값(옛: 상한 없음 · LIMIT NaN)
+    const pageParams = parsePageParams(page, limit, { defaultLimit: 20, maxLimit: 2000 });
+    const offset = pageParams.offset;
 
     // ★ 2026-08-17 예약내역 조회 축 — `scope=scheduled`면 **기간 필터를 걸지 않는다.**
     //   예약은 아직 안 나간 건이라 개수가 유한하고, 기간으로 자르면 "예약해 뒀는데 목록에 없는" 상태가 된다
@@ -301,7 +307,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     );
     const total = parseInt(countResult.rows[0].count);
 
-    params.push(Number(limit), offset);
+    params.push(pageParams.limit, offset);
     const aliasedWhere = whereClause
       .replace(/company_id/g, 'c.company_id')
       .replace(/created_by/g, 'c.created_by')
@@ -373,11 +379,12 @@ router.get('/campaigns', async (req: Request, res: Response) => {
 
     return res.json({
       campaigns,
+      // ★ 2026-09-27 m113(Codex RES 1R) — 응답 페이지 정보도 보정값(SQL이 쓴 값)으로. 옛 원본값이면 상한으로 잘린 만큼 뒤 페이지를 놓친다.
       pagination: {
         total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / Number(limit)),
+        page: pageParams.page,
+        limit: pageParams.limit,
+        totalPages: Math.ceil(total / pageParams.limit),
       },
     });
   } catch (error: any) {
@@ -692,9 +699,8 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     const { id } = req.params;
     const { searchType, searchValue, status, page = 1, limit = 100 } = req.query;
-    const pageNum = Number(page);
-    const limitNum = Number(limit);
-    const offset = (pageNum - 1) * limitNum;
+    // ★ 2026-09-27 한줄로 V2 m112 — 건수 상한 1000 · 숫자 아님은 기본값(옛: 상한 없음 · 숫자 아니면 LIMIT NaN = SQL 오류)
+    const { page: pageNum, limit: limitNum, offset } = parsePageParams(page, limit, { defaultLimit: 100, maxLimit: 1000 });
 
     if (!companyId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });

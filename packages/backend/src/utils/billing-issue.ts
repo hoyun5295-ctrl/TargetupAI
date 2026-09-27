@@ -15,6 +15,7 @@
 
 import { randomUUID } from 'crypto';
 import pool from '../config/database';
+import type { PoolClient } from 'pg';
 import { CREDIT_UNIT_PRICE } from './ai-credit-calc';
 import {
   buildCompanyUsageByDay, buildBillingTotals, resolveBillingUnitPricesDetailed, logUnbillableUsageKeys,
@@ -46,6 +47,21 @@ import {
 } from './plan-proration';
 // ★ 2026-08-05 회사 단위 정산 잠금 CT — 7벌 복제를 하나로. 인라인 복사 금지(그 순간 8번째 복제본이다).
 import { lockCompanyForBilling } from './billing-lock';
+// ★ 2026-09-27 한줄로 V2 F34 — 그 기간에 적용된 결제 방식(전환 이력 CT)
+import { readPeriodBillingType, describePeriodBillingTypeBlock, type PeriodBillingType } from './billing-type-history';
+
+/**
+ * ★ 2026-09-27 한줄로 V2 F34 — 그 기간에 적용된 결제 방식이 후불 하나가 아니면 던진다.
+ * 선불이면 경로별 오류(prepaidError · 코드·문구 계약 유지), 기간 안 전환(섞임)·알 수 없음은 409(미리보기와 같은 문구).
+ */
+function assertPeriodPostpaid(p: PeriodBillingType, prepaidError: () => BillingIssueError): void {
+  if (p.kind === 'single') {
+    if (p.type === 'prepaid') throw prepaidError();
+    return;
+  }
+  const b = describePeriodBillingTypeBlock(p)!;
+  throw new BillingIssueError(409, { error: b.message, code: b.code, ...(p.kind === 'mixed' ? { switches: p.switches } : {}) });
+}
 
 /** 발행 차단·검증 실패. status = HTTP 상태, body = 그대로 응답으로 나갈 JSON(코드·문구 계약 유지). */
 export class BillingIssueError extends Error {
@@ -55,6 +71,78 @@ export class BillingIssueError extends Error {
   ) {
     super(String(body?.error || `billing issue blocked (${status})`));
     this.name = 'BillingIssueError';
+  }
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m029 — 정액(기본요금) 장의 항목 유형. 정액 발행(issueMinimumChargeBilling)만 만든다.
+ * 수정 재발행이 지우는 장이 정액 장인지를 이것으로 가린다(사용량 발행으로 다시 만들면 정액보다 적게 청구된다).
+ */
+export const MIN_CHARGE_ITEM_TYPE = 'EXTRA_BASE_FEE' as const;
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R095(구조) — 발행 트랜잭션 문장. 호출자 트랜잭션에 참여하면 SAVEPOINT, 아니면 단독 BEGIN.
+ * 수정 재발행은 삭제와 한 트랜잭션에서 다시 발행한다 — 재발행이 막히면 삭제도 함께 되돌아간다.
+ */
+function billingTx(nested: boolean): { begin: string; commit: string; rollback: string } {
+  return nested
+    ? { begin: 'SAVEPOINT billing_issue', commit: 'RELEASE SAVEPOINT billing_issue', rollback: 'ROLLBACK TO SAVEPOINT billing_issue' }
+    : { begin: 'BEGIN', commit: 'COMMIT', rollback: 'ROLLBACK' };
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m027 — 끝나지 않은 기간인가(끝 ≥ 오늘 · KST). 일반·정액 발행 · 재발행 사전 점검 · 미리보기가 같은 판정.
+ * 발행 뒤~기간 끝 발송분은 그 청구서에 없고, 다음 발행은 기간 겹침으로 막혀 영구 미청구가 된다.
+ */
+export function isBillingPeriodOpen(billingEnd: string, nowMs: number = Date.now()): boolean {
+  const kstToday = new Date(nowMs + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  return String(billingEnd) >= kstToday;
+}
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m030 — 같은 기간 수량 조정 줄(일반·정액 발행 · 미리보기 공용). 오류 해석도 한 곳에서 한다.
+ * 조정은 회사×기간 축이라 발행이 바뀌어도 살아남고, 정액 판정도 조정 뒤 사용량으로 해야 한다(옛 정액 판정은 조정을 몰랐다).
+ */
+export async function loadAdjustmentItemsForIssue(
+  client: { query: (text: string, params?: any[]) => Promise<any> },
+  companyId: string,
+  billingStart: string,
+  billingEnd: string,
+  pricedItems: PricedBillingItem[],
+  /** 발행 = 잠금(기본) · 미리보기 = { lock: false } */
+  opts: { lock: boolean } = { lock: true },
+): Promise<{ items: PricedBillingItem[]; ids: string[] }> {
+  try {
+    const adjustRows = await loadQtyAdjustments(client, companyId, billingStart, billingEnd, opts);
+    return {
+      items: buildAdjustmentBillingItems(adjustRows, pricedItems, toDayKey(billingStart)),
+      ids: adjustRows.map((a) => String(a.id)),
+    };
+  } catch (adjErr: any) {
+    if (adjErr instanceof QtyAdjustmentError) {
+      throw new BillingIssueError(422, { error: adjErr.message, code: 'BILLING_QTY_ADJUST_UNMATCHED' });
+    }
+    const amsg = String(adjErr?.message || '');
+    if (amsg.includes('does not exist') && (amsg.includes('relation') || amsg.includes('column'))) {
+      throw new BillingIssueError(503, {
+        error: 'DB 마이그레이션 필요: billing_qty_adjustments 테이블 생성 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    throw adjErr;
+  }
+}
+
+/** ★ m030 — 조정 뒤 수량이 음수인 줄이 있으면 발행하지 않는다(일반 발행은 장마다 · 정액은 전체로 · 문구 한 곳). */
+export function assertNoNegativeAdjusted(items: PricedBillingItem[]): void {
+  const negatives = findNegativeAdjustedTypes(items);
+  if (negatives.length > 0) {
+    const shown = negatives.map((v) => `${v.channel}/${v.typeKey} ${v.total}건`).join(', ');
+    throw new BillingIssueError(422, {
+      error: `수량 조정이 실제 발송량보다 커서 수량이 음수가 됩니다 (${shown}). 조정 값을 확인해주세요.`,
+      code: 'BILLING_QTY_ADJUST_NEGATIVE',
+      negatives,
+    });
   }
 }
 
@@ -78,8 +166,9 @@ export async function readBillingPeriodConflicts(
   billingEnd: string,
   db: { query: (text: string, params?: any[]) => Promise<any> } = pool,
 ): Promise<BillingPeriodConflicts> {
+  // ★ 2026-09-27 한줄로 V2 R368 — 날짜는 문자열로 받는다. pg가 date를 JS Date로 파싱해 안내 문구가 'Wed Jul 01'처럼 잘렸다.
   const overlap = await db.query(
-    `SELECT id, status, scope, user_id, billing_start, billing_end FROM billings
+    `SELECT id, status, scope, user_id, billing_start::text AS billing_start, billing_end::text AS billing_end FROM billings
      WHERE company_id = $1
        AND billing_start <= $3::date AND billing_end >= $2::date
      LIMIT 1`,
@@ -87,7 +176,7 @@ export async function readBillingPeriodConflicts(
   );
   // ★ 2026-07-29 수동 정산완료 — 화면 목록은 "완전히 덮을 때만" 숨기지만 발급 차단은 **조금이라도 겹치면** 막는다.
   const manual = await db.query(
-    `SELECT period_start, period_end, reason FROM billing_manual_completions
+    `SELECT period_start::text AS period_start, period_end::text AS period_end, reason FROM billing_manual_completions
       WHERE company_id = $1
         AND period_start <= $3::date AND period_end >= $2::date
       LIMIT 1`,
@@ -176,9 +265,90 @@ export interface IssueBillingInput {
   adminId?: string | null;
   /** ★ 2026-08-20 정산월 라벨 'YYYY-MM'. 미지정 = 종료일의 역월. 기간에 걸친 달 밖이면 422. */
   labelMonth?: string | null;
+  /**
+   * ★ 2026-09-27 한줄로 V2 R095(구조) — 호출자 트랜잭션에 참여한다(SAVEPOINT). 수정 재발행이 삭제와 **한 트랜잭션**으로 다시 발행한다 —
+   * 재발행이 막히면 삭제도 함께 되돌아간다(옛: 삭제 커밋 뒤 발행이라 막히면 「지웠는데 재발행 불능」).
+   * 주면 잠금 전 겹침 판정·무료 공제도 이 연결로 읽는다(지운 장이 보이지 않아야 한다). 연결 반납·커밋은 호출자 몫.
+   */
+  txClient?: PoolClient;
 }
 
 /** 정산 발행 1건 — 성공 시 라우트가 그대로 res.json 하던 응답 객체를 반환한다. 차단은 BillingIssueError로 던진다. */
+/**
+ * ★ 2026-09-27 한줄로 V2 m033 — 발행에 실릴 추가 항목 행(080 고정료 근거 자동 생성 + 그 정산월 미소비 항목 + 매핑 없는 반영분 판정).
+ * 발행 코어(잠금 · lockRows)와 미리보기(되돌리는 트랜잭션 · 잠금 없음)가 같은 함수를 쓴다 — 미리보기가 추가 항목을 몰라
+ * 080·수기 항목·080 고정료가 있는 달은 미리보기와 실제 발행 금액이 달랐다. 자동 생성 행은 미리보기에선 되돌려져 남지 않는다.
+ */
+export async function collectExtraBillingRows(
+  client: { query: (text: string, params?: any[]) => Promise<any> },
+  company_id: string,
+  billing_year: number,
+  billing_month: number,
+  adminId: string | null,
+  opts: { lockRows: boolean },
+): Promise<{ rows: any[]; blocking: ReturnType<typeof extraRowsBlockingIssue> }> {
+  // ★ 2026-08-21 080 고정료(이용료·KT 부가서비스) 근거 행 자동 생성(서수란 0821 접수 — 전 고객사 공통).
+  //   고정료는 KT 명세서와 무관한 월정액인데 근거가 명세서 [반영] 행에 묶여 있어서, 명세서를 반영하지
+  //   않은 달은 고정료가 통째로 빠졌다(게스코리아 8월 실측). 활성 매핑이면 정산월마다 근거 행
+  //   (`080_base` · supply_amount=0)을 여기서 만들고 같은 트랜잭션에서 소비한다 — 금액은 행이 아니라
+  //   발행 시점의 매핑 원장에서 읽는다(0804 원칙). 발행 삭제 시 FK SET NULL로 미소비 복귀,
+  //   재발행이 NOT EXISTS로 재사용하므로 행이 늘지 않는다. UNIQUE(period_month, kind, source_ref)가
+  //   경합 이중 생성을 구조로 막는다(ON CONFLICT DO NOTHING).
+  //   옛 `080_fee`·`080_svc` 행이 있는 달은 그 행이 고정료의 근거라 생성하지 않는다(파생 스킵 규칙과 짝 —
+  //   buildExtraBillingItems 문서 주석). 회사 잠금(lockCompanyForBilling) 아래라 반영·취소와 직렬화된다.
+  //   ★ Codex 1R high 수용 — **소비된 `080_call`이 있는 달도 생성하지 않는다.** 이 배포 전의 080_call은
+  //   고정료까지 파생해 그 장에 이미 청구했으므로, 같은 라벨 월의 분할 2차 발행이 base를 만들면 재청구다.
+  //   미소비 080_call만 있는 달은 생성한다(그 통화료 행은 새 파생에서 고정료를 안 내므로 base가 근거).
+  //   발행 삭제로 080_call이 미소비 복귀하면 재발행이 base를 만들어 고정료 1회가 유지된다.
+  await client.query(
+    `INSERT INTO billing_extra_items (company_id, period_month, kind, label, supply_amount, source_ref, created_by)
+     SELECT n.company_id, $2::date, '080_base', '080 고정료(자동)', 0, n.number, $3
+       FROM billing_080_numbers n
+      WHERE n.company_id = $1 AND n.is_active = TRUE
+        AND NOT EXISTS (
+          SELECT 1 FROM billing_extra_items pe
+           WHERE pe.company_id = n.company_id AND pe.period_month = $2::date
+             AND pe.source_ref = n.number AND pe.kind IN ('080_base', '080_fee', '080_svc')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM billing_extra_items pc
+           WHERE pc.company_id = n.company_id AND pc.period_month = $2::date
+             AND pc.source_ref = n.number AND pc.kind = '080_call'
+             AND pc.billed_billing_id IS NOT NULL
+        )
+     ON CONFLICT DO NOTHING`,
+    [company_id, `${billing_year}-${String(billing_month).padStart(2, '0')}-01`, adminId],
+  );
+
+  // ★ 2026-07-30 월별 추가 항목(080 이용료·부가서비스·통화료 — billing_extra_items, 서수란 접수).
+  //   발행 기간과 겹치는 달의 **미소비** 항목만 싣는다 — 겹침 판정은 billings와 같은 식(월 = [1일, 말일]).
+  //   소비 마커 = billed_billing_id(AI 크레딧 billed_billing_id 선례 미러 — Codex 1R critical 수용):
+  //   분할 기간 발행(7/1~15 + 7/16~31)이 같은 달 항목을 두 번 싣는 이중청구를 마커가 구조로 막고,
+  //   FK ON DELETE SET NULL이라 발행 삭제 시 자동으로 미소비 복귀한다. FOR UPDATE = 반영 취소(DELETE)와의 경합 차단.
+  // ★ 2026-08-04 이용료·KT 부가서비스·통화료 청구 여부·귀속은 **매핑 원장에서 읽는다**(EXTRA_ITEM_SOURCE_*).
+  //   그전에는 [반영]이 그 값들을 항목 행에 복사해 굳혀서, 매핑을 고쳐도 청구서가 옛 값으로 나갔다
+  //   (서수란 0803 접수 2건 — 시세이도 이용료 9,000 고정 / 금강제화 귀속 무시하고 공통 장).
+  //   스냅샷은 명세서에서만 나오는 값(그 달 그 번호의 통화료) 하나뿐이다.
+  // ★ 2026-08-20 재오픈 정정(서수란 실측) — 귀속 축 = **청구월 = 정산월**. 그전에는 역월∩발행기간
+  //   겹침이라 중간정산(7/16~8/15 "8월 정산")이 7월분까지 쓸어 담았다. 역월 정산은 겹침과 월일치가
+  //   같은 답이라 동작 무변화. 항목은 자기 청구월 라벨의 정산에만 실린다(차단·표시 5곳도 같은 축).
+  const extraRes = await client.query(
+    // ★ 2026-09-16 `e.label`(수기 항목명) 추가 — 청구서·화면의 유형 칸이 이 값을 쓴다(서수란 접수).
+    //   수량은 EXTRA_ITEM_SOURCE_SELECT가 to_jsonb로 함께 내린다(ALTER 전 안전).
+    `SELECT e.id, e.kind, e.supply_amount, e.period_month, e.source_ref, e.label,
+${EXTRA_ITEM_SOURCE_SELECT}
+       FROM billing_extra_items e
+${EXTRA_ITEM_SOURCE_JOIN}
+      WHERE e.company_id = $1
+        AND e.billed_billing_id IS NULL
+        AND e.period_month = $2::date
+      ORDER BY e.period_month, e.kind, e.source_ref
+      ${opts.lockRows ? 'FOR UPDATE OF e' : ''}`,
+    [company_id, `${billing_year}-${String(billing_month).padStart(2, '0')}-01`],
+  );
+  return { rows: extraRes.rows, blocking: extraRowsBlockingIssue(extraRes.rows) };
+}
+
 export async function issueBilling(input: IssueBillingInput): Promise<any> {
   const { company_id, user_id, billing_start, billing_end } = input;
   const adminId = input.adminId ?? null;
@@ -189,6 +359,14 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
 
   if (billing_start > billing_end) {
     throw new BillingIssueError(400, { error: '시작일이 종료일보다 늦을 수 없습니다' });
+  }
+
+  // ★ 2026-09-27 한줄로 V2 m027 — 끝나지 않은 기간은 발행하지 않는다(정액 발행과 같은 규칙 · 일괄발급도 여기를 지난다).
+  if (isBillingPeriodOpen(billing_end)) {
+    throw new BillingIssueError(422, {
+      error: `아직 끝나지 않은 기간(${billing_end}까지)은 발행할 수 없습니다. 기간이 끝난 다음 날부터 발행해주세요.`,
+      code: 'BILLING_PERIOD_OPEN',
+    });
   }
 
   // ★ 2026-08-20 정산월 = 사람이 정하는 라벨(기본 종료월) — 파생 소유자는 resolveBillingLabelMonth 하나.
@@ -229,7 +407,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   // ★ 2026-08-04 판정을 CT로 통일(readBillingPeriodConflicts) — 미리보기가 같은 문을 본다.
   //   수동 정산완료도 여기서 함께 본다(전에는 잠금 안에서만 봐서 늦게 알았다. 잠금 안 재검사는 그대로 남는다).
   assertNoBillingPeriodConflict(
-    await readBillingPeriodConflicts(company_id, billing_start, billing_end),
+    await readBillingPeriodConflicts(company_id, billing_start, billing_end, input.txClient ?? pool),
   );
 
   // 2) 고객사 단가 조회 (스냅샷)
@@ -252,13 +430,15 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   const ledger = await loadBillingLedger(company_id);
 
   // ★ 2026-07-25 선불 회사 이중 청구 차단. 판정 근거 = 원장 스냅샷(Codex 3차 CRITICAL 수용).
-  if (String(ledger.companyPriceRow?.billing_type) === 'prepaid') {
-    throw new BillingIssueError(400, {
-      error: `${co.company_name || '해당 고객사'}는 선불 고객사입니다. 발송 시점에 잔액에서 이미 차감되었으므로 월 정산서를 발행하면 이중 청구가 됩니다.`,
-      code: 'PREPAID_COMPANY_NOT_BILLABLE',
-      billing_type: co.billing_type,
-    });
-  }
+  // ★ 2026-09-27 한줄로 V2 F34 — 「발행 시점」 값이 아니라 「그 기간에 적용된」 결제 방식으로 판정한다(전환 이력 CT).
+  //   전환 뒤 지난 기간을 발행하면 선불 기간이 후불로 청구되거나(이중 청구) 후불 기간이 선불이라 막혔다(누락).
+  //   여기는 무거운 집계 전 빠른 거절이고, 잠금·원장 재검증 뒤에 같은 판정을 다시 한다(전환 CT가 같은 회사 행을 잠근다).
+  const prepaidError = () => new BillingIssueError(400, {
+    error: `${co.company_name || '해당 고객사'}는 ${String(co.billing_type) === 'prepaid' ? '선불 고객사입니다' : '이 기간에 선불 고객사였습니다'}. 발송 시점에 잔액에서 이미 차감되었으므로 월 정산서를 발행하면 이중 청구가 됩니다.`,
+    code: 'PREPAID_COMPANY_NOT_BILLABLE',
+    billing_type: co.billing_type,
+  });
+  assertPeriodPostpaid(await readPeriodBillingType(company_id, billing_start, billing_end), prepaidError);
 
   // ★ 2026-07-25 단가 해석을 CT로 — 0원 설정이 `|| 일반단가` 폴백에 먹히던 결함 정정.
   const { prices, unsetKeys: webUnsetPriceKeys } = resolveBillingUnitPricesDetailed(ledger.companyPriceRow);
@@ -281,7 +461,8 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   const totalBrand = totals.BRAND;
   const totalBrandNf = totals.BRAND_NF;   // ★ 2026-09-13 비친구 브랜드 — 빠지면 같은 이유로 발행이 막힌다
   const totalTestSms = totals.TEST_SMS, totalTestLms = totals.TEST_LMS;
-  const totalTestBrand = totals.TEST_BRAND;   // ★ 2026-09-26 S1-H06 — 빠지면 상세합≠공급가액으로 발행이 막힌다(BRAND 선례)
+  const totalTestBrand = totals.TEST_BRAND;
+  const totalTestMms = totals.TEST_MMS;   // ★ 2026-09-27 한줄로 V2 m060 — 테스트 MMS(회사 MMS 단가) · 빠지면 상세합≠공급가액으로 발행이 막힌다   // ★ 2026-09-26 S1-H06 — 빠지면 상세합≠공급가액으로 발행이 막힌다(BRAND 선례)
   const totalSpamSms = totals.SPAM_SMS, totalSpamLms = totals.SPAM_LMS;
 
   // 스팸필터 단가 = 일반 단가와 동일 (D16 결정)
@@ -320,7 +501,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   await grantFreeMessagingForCompany(company_id);
   let freeDeductible: Record<string, number>;
   try {
-    freeDeductible = await readFreeDeductibleForBilling(company_id, billing_start, billing_end);
+    freeDeductible = await readFreeDeductibleForBilling(company_id, billing_start, billing_end, input.txClient);
   } catch (e: any) {
     // DDL 미실행이면 발행을 멈춘다 — 무료 공제 없이 나가면 고객에게 틀린 금액이 청구된다(§2-1).
     if (e instanceof FreeMessagingSchemaPendingError) {
@@ -460,7 +641,10 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   // ★ 2026-07-25 7~9) 정산 쓰기를 단일 트랜잭션으로.
   //   무거운 사용량 집계는 트랜잭션 밖, 쓰기와 그 근거가 되는 PG 조회만 안에 넣는다.
   //   ※ config/database.ts의 `query`는 pool.query라 BEGIN/COMMIT이 서로 다른 커넥션에 나뉜다 — 반드시 client 고정.
-  const client = await pool.connect();
+  // ★ 2026-09-27 R095(구조) — 호출자 트랜잭션이면 그 연결로 SAVEPOINT 참여(반납은 호출자 몫)
+  const outerTx = input.txClient ?? null;
+  const client = outerTx ?? await pool.connect();
+  const tx = billingTx(outerTx !== null);
   let billing: any;
   let itemsCount = 0;
   let aiCreditCount = 0, aiCreditSupply = 0;
@@ -469,7 +653,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   let batchIdIssued: string | null = null;
   let extraSupplyIssued = 0; // ★ 2026-07-30 월별 추가 항목(080 등) 공급가 합 — 응답 channel_amounts용
   try {
-    await client.query('BEGIN');
+    await client.query(tx.begin);
 
     // 같은 회사 정산을 동시에 생성하면 위 1번 중복검사를 양쪽 다 통과할 수 있다 — 직렬화한다.
     // ★ 2026-07-26 잠금 축은 **회사 단위**다. ★ 2026-08-05 두 겹(advisory + 회사 행)을 CT 하나가 소유한다.
@@ -490,6 +674,8 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
         code: 'BILLING_LEDGER_CHANGED',
       });
     }
+    // ★ 2026-09-27 F34 — 잠금·원장 재검증 뒤 같은 판정을 다시 한다. 전환 CT가 같은 회사 행을 잠그므로 여기부터 커밋까지 전환이 끼어들 수 없다.
+    assertPeriodPostpaid(await readPeriodBillingType(company_id, billing_start, billing_end, client), prepaidError);
 
     // ★ 2026-07-26 요금제 이력 재검증(Codex 7차 ②-2 수용) — 기간에 걸리는 이력만으로 대조.
     const planFingerprintNow = planChangesFingerprint(await loadPlanChanges(company_id, billing_end, client));
@@ -549,70 +735,13 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     aiCreditCount = chargeCount + overageCount;                       // 충전 + 초과사용 크레딧 수량
     aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE; // 공급가(크레딧×단가=공급가 일관)
 
-    // ★ 2026-08-21 080 고정료(이용료·KT 부가서비스) 근거 행 자동 생성(서수란 0821 접수 — 전 고객사 공통).
-    //   고정료는 KT 명세서와 무관한 월정액인데 근거가 명세서 [반영] 행에 묶여 있어서, 명세서를 반영하지
-    //   않은 달은 고정료가 통째로 빠졌다(게스코리아 8월 실측). 활성 매핑이면 정산월마다 근거 행
-    //   (`080_base` · supply_amount=0)을 여기서 만들고 같은 트랜잭션에서 소비한다 — 금액은 행이 아니라
-    //   발행 시점의 매핑 원장에서 읽는다(0804 원칙). 발행 삭제 시 FK SET NULL로 미소비 복귀,
-    //   재발행이 NOT EXISTS로 재사용하므로 행이 늘지 않는다. UNIQUE(period_month, kind, source_ref)가
-    //   경합 이중 생성을 구조로 막는다(ON CONFLICT DO NOTHING).
-    //   옛 `080_fee`·`080_svc` 행이 있는 달은 그 행이 고정료의 근거라 생성하지 않는다(파생 스킵 규칙과 짝 —
-    //   buildExtraBillingItems 문서 주석). 회사 잠금(lockCompanyForBilling) 아래라 반영·취소와 직렬화된다.
-    //   ★ Codex 1R high 수용 — **소비된 `080_call`이 있는 달도 생성하지 않는다.** 이 배포 전의 080_call은
-    //   고정료까지 파생해 그 장에 이미 청구했으므로, 같은 라벨 월의 분할 2차 발행이 base를 만들면 재청구다.
-    //   미소비 080_call만 있는 달은 생성한다(그 통화료 행은 새 파생에서 고정료를 안 내므로 base가 근거).
-    //   발행 삭제로 080_call이 미소비 복귀하면 재발행이 base를 만들어 고정료 1회가 유지된다.
-    await client.query(
-      `INSERT INTO billing_extra_items (company_id, period_month, kind, label, supply_amount, source_ref, created_by)
-       SELECT n.company_id, $2::date, '080_base', '080 고정료(자동)', 0, n.number, $3
-         FROM billing_080_numbers n
-        WHERE n.company_id = $1 AND n.is_active = TRUE
-          AND NOT EXISTS (
-            SELECT 1 FROM billing_extra_items pe
-             WHERE pe.company_id = n.company_id AND pe.period_month = $2::date
-               AND pe.source_ref = n.number AND pe.kind IN ('080_base', '080_fee', '080_svc')
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM billing_extra_items pc
-             WHERE pc.company_id = n.company_id AND pc.period_month = $2::date
-               AND pc.source_ref = n.number AND pc.kind = '080_call'
-               AND pc.billed_billing_id IS NOT NULL
-          )
-       ON CONFLICT DO NOTHING`,
-      [company_id, `${billing_year}-${String(billing_month).padStart(2, '0')}-01`, adminId],
-    );
-
-    // ★ 2026-07-30 월별 추가 항목(080 이용료·부가서비스·통화료 — billing_extra_items, 서수란 접수).
-    //   발행 기간과 겹치는 달의 **미소비** 항목만 싣는다 — 겹침 판정은 billings와 같은 식(월 = [1일, 말일]).
-    //   소비 마커 = billed_billing_id(AI 크레딧 billed_billing_id 선례 미러 — Codex 1R critical 수용):
-    //   분할 기간 발행(7/1~15 + 7/16~31)이 같은 달 항목을 두 번 싣는 이중청구를 마커가 구조로 막고,
-    //   FK ON DELETE SET NULL이라 발행 삭제 시 자동으로 미소비 복귀한다. FOR UPDATE = 반영 취소(DELETE)와의 경합 차단.
-    // ★ 2026-08-04 이용료·KT 부가서비스·통화료 청구 여부·귀속은 **매핑 원장에서 읽는다**(EXTRA_ITEM_SOURCE_*).
-    //   그전에는 [반영]이 그 값들을 항목 행에 복사해 굳혀서, 매핑을 고쳐도 청구서가 옛 값으로 나갔다
-    //   (서수란 0803 접수 2건 — 시세이도 이용료 9,000 고정 / 금강제화 귀속 무시하고 공통 장).
-    //   스냅샷은 명세서에서만 나오는 값(그 달 그 번호의 통화료) 하나뿐이다.
-    // ★ 2026-08-20 재오픈 정정(서수란 실측) — 귀속 축 = **청구월 = 정산월**. 그전에는 역월∩발행기간
-    //   겹침이라 중간정산(7/16~8/15 "8월 정산")이 7월분까지 쓸어 담았다. 역월 정산은 겹침과 월일치가
-    //   같은 답이라 동작 무변화. 항목은 자기 청구월 라벨의 정산에만 실린다(차단·표시 5곳도 같은 축).
-    const extraRes = await client.query(
-      // ★ 2026-09-16 `e.label`(수기 항목명) 추가 — 청구서·화면의 유형 칸이 이 값을 쓴다(서수란 접수).
-      //   수량은 EXTRA_ITEM_SOURCE_SELECT가 to_jsonb로 함께 내린다(ALTER 전 안전).
-      `SELECT e.id, e.kind, e.supply_amount, e.period_month, e.source_ref, e.label,
-${EXTRA_ITEM_SOURCE_SELECT}
-         FROM billing_extra_items e
-${EXTRA_ITEM_SOURCE_JOIN}
-        WHERE e.company_id = $1
-          AND e.billed_billing_id IS NULL
-          AND e.period_month = $2::date
-        ORDER BY e.period_month, e.kind, e.source_ref
-        FOR UPDATE OF e`,
-      [company_id, `${billing_year}-${String(billing_month).padStart(2, '0')}-01`],
-    );
-
+    // ★ 2026-09-27 한줄로 V2 m033 — 080 고정료 근거 생성 + 미소비 항목 조회는 CT(collectExtraBillingRows)가 소유한다(미리보기와 같은 함수).
+    const extraCollected = await collectExtraBillingRows(client, company_id, billing_year, billing_month, adminId, { lockRows: true });
+    const extraRes = { rows: extraCollected.rows };
     // ★ 2026-08-04 근거가 사라진 080 스냅샷이 있으면 **발행하지 않는다**(Codex 적대검증 high 수용).
     //   번호 매핑을 지우거나 다른 회사로 옮기면 그 달 스냅샷의 계약값 근거가 없어진다. 통화료만이라도
     //   싣는 폴백을 뒀더니, 통화료를 안 받기로 등록한 번호에 **없던 통화료가 새로 청구되는** fail-open이었다.
-    const extraBlocking = extraRowsBlockingIssue(extraRes.rows);
+    const extraBlocking = extraCollected.blocking;
     if (extraBlocking.length > 0) {
       const shown = extraBlocking.slice(0, 5).map((b) => `${b.periodMonth.slice(0, 7)} ${b.sourceRef}`).join(', ');
       throw new BillingIssueError(422, {
@@ -630,25 +759,10 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     //   상세 행으로 얹는다. 항목줄이 (채널·유형·단가)로 묶이므로 조정 줄이 따로 서지 않고
     //   `LMS 9,435건 × ₩22.8` 한 줄로 인쇄된다. 발송 실적 자체는 사실이라 건드리지 않는다.
     //   조정은 발행이 아니라 회사×기간 축이라, 삭제 후 재발행해도 그대로 살아남는다.
-    let adjustItems: PricedBillingItem[] = [];
-    let adjustAppliedIds: string[] = [];
-    try {
-      const adjustRows = await loadQtyAdjustments(client, company_id, billing_start, billing_end);
-      adjustItems = buildAdjustmentBillingItems(adjustRows, priced.items, toDayKey(billing_start));
-      adjustAppliedIds = adjustRows.map((a) => String(a.id));
-    } catch (adjErr: any) {
-      if (adjErr instanceof QtyAdjustmentError) {
-        throw new BillingIssueError(422, { error: adjErr.message, code: 'BILLING_QTY_ADJUST_UNMATCHED' });
-      }
-      const amsg = String(adjErr?.message || '');
-      if (amsg.includes('does not exist') && (amsg.includes('relation') || amsg.includes('column'))) {
-        throw new BillingIssueError(503, {
-          error: 'DB 마이그레이션 필요: billing_qty_adjustments 테이블 생성 요청',
-          code: 'DB_MIGRATION_PENDING',
-        });
-      }
-      throw adjErr;
-    }
+    // ★ 2026-09-27 m030 — 조정 줄·오류 해석은 CT 하나(정액 발행·미리보기와 같은 함수).
+    const adjustLoaded = await loadAdjustmentItemsForIssue(client, company_id, billing_start, billing_end, priced.items);
+    const adjustItems: PricedBillingItem[] = adjustLoaded.items;
+    const adjustAppliedIds: string[] = adjustLoaded.ids;
     const adjustSupply = adjustItems.reduce((s, i) => s + i.amountExact, 0);
 
     const allBillingItems = [...billingItems, ...extraItems, ...adjustItems];
@@ -666,7 +780,7 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     const subtotalExact =
       (totalSms * prices.SMS) + (totalLms * prices.LMS) +
       (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) + (totalBrand * prices.BRAND) + (totalBrandNf * prices.BRAND_NF) +
-      (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) + (totalTestBrand * prices.TEST_BRAND) +
+      (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) + (totalTestBrand * prices.TEST_BRAND) + (totalTestMms * prices.TEST_MMS) +
       (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
       agentAmountExact +
       planAmount +
@@ -700,15 +814,7 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     //   ★ 2026-08-05 재오픈 정정 — 판정 축에서 발송ID를 뺐다. 인쇄 줄(`buildInvoiceLines`)이 쓰는
     //   축과 정확히 같아야 한다(상세 = `billing-qty-adjust.ts` 함수 주석).
     for (const sh of sheets) {
-      const negatives = findNegativeAdjustedTypes(sh.items as PricedBillingItem[]);
-      if (negatives.length > 0) {
-        const shown = negatives.map((v) => `${v.channel}/${v.typeKey} ${v.total}건`).join(', ');
-        throw new BillingIssueError(422, {
-          error: `수량 조정이 실제 발송량보다 커서 수량이 음수가 됩니다 (${shown}). 조정 값을 확인해주세요.`,
-          code: 'BILLING_QTY_ADJUST_NEGATIVE',
-          negatives,
-        });
-      }
+      assertNoNegativeAdjusted(sh.items as PricedBillingItem[]);
     }
 
     // ★ 2026-07-30 절사 위치 정정(Harold — "최종 청구 금액의 소수점만 버려라").
@@ -898,28 +1004,37 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     //   고치면 base가 9,435가 되어 다음 계산이 통째로 어긋난다). 추론을 버리고 사실을 적는다.
     //   정산을 지우면 삭제 경로가 이 값을 0으로 되돌린다.
     if (adjustAppliedIds.length > 0 && billing?.id) {
-      await client.query(
+      // ★ 2026-09-27 한줄로 V2 S1-H01(Codex BILL 1R) — 조정 행은 조회 때부터 잠겨 있다(loadQtyAdjustments FOR UPDATE).
+      //   그래도 실은 조정과 마킹한 행 수가 다르면 발행하지 않는다(실은 조정의 기록이 없는 청구서 = 다음 재발행 기준 수량이 틀어진다).
+      const marked = await client.query(
         `UPDATE billing_qty_adjustments SET applied_delta = qty_delta, applied_billing_id = $1::uuid
-          WHERE id = ANY($2::uuid[])`,
+          WHERE id = ANY($2::uuid[])
+          RETURNING id`,
         [billing.id, adjustAppliedIds],
       );
+      if ((marked.rowCount ?? 0) !== adjustAppliedIds.length) {
+        throw new BillingIssueError(409, {
+          error: '발행 중에 수량 조정이 바뀌어 중단했습니다. 다시 발행해 주세요.',
+          code: 'BILLING_QTY_ADJUST_CHANGED',
+        });
+      }
     }
 
     sheetsIssued = issuedSheets;
     batchIdIssued = batchId;
 
-    await client.query('COMMIT');
+    await client.query(tx.commit);
   } catch (txError: any) {
     // ※ 옛 라우트와 의도적 차이(Codex 1R 불수용 — 현 동작 유지): 옛 코드는 조기 반환 앞의 선행
     //   ROLLBACK이 실패하면 그 롤백 에러가 500으로 나갔다. 지금은 롤백 실패를 로그로 남기고
     //   **원래 차단 사유**(409/422)를 응답한다 — 커넥션은 release로 파기되어 트랜잭션이 남지 않고,
     //   운영자에게는 롤백 에러보다 차단 사유가 행동 가능한 정보다.
-    try { await client.query('ROLLBACK'); } catch (rbError: any) {
+    try { await client.query(tx.rollback); } catch (rbError: any) {
       console.error('정산 생성 롤백 실패:', rbError?.message || rbError);
     }
     throw txError;
   } finally {
-    client.release();
+    if (!outerTx) client.release();
   }
 
   return {
@@ -972,6 +1087,8 @@ export async function issueMinimumChargeBilling(input: {
   billing_start: string;
   billing_end: string;
   adminId?: string | null;
+  /** ★ 2026-09-27 R095(구조) — 호출자 트랜잭션 참여(수정 재발행 = 삭제와 한 트랜잭션 · IssueBillingInput.txClient와 같은 계약) */
+  txClient?: PoolClient;
 }): Promise<any> {
   const { company_id, billing_start, billing_end } = input;
   if (!company_id || !billing_start || !billing_end || billing_start > billing_end) {
@@ -981,8 +1098,8 @@ export async function issueMinimumChargeBilling(input: {
   // ★ Codex 1R 수용 — **끝나지 않은 달은 발행하지 않는다**(KST). 사용량은 가변(MySQL 발송 결과)이라
   //   진행 중인 달의 스냅샷으로 정액을 확정하면 이후 발송이 최소과금을 넘어도 겹침 차단 때문에 되돌릴 수 없다.
   //   서수란 정산 관례도 익월 초라 운영 영향 0.
-  const kstToday = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-  if (billing_end >= kstToday) {
+  //   ★ 2026-09-27 m027 — 판정은 CT 하나(일반 발행·미리보기와 같다).
+  if (isBillingPeriodOpen(billing_end)) {
     throw new BillingIssueError(422, {
       error: `아직 끝나지 않은 기간(${billing_end}까지)은 정액 발행할 수 없습니다. 달이 끝난 뒤 발행해주세요.`,
       code: 'MIN_CHARGE_MONTH_OPEN',
@@ -1012,15 +1129,18 @@ export async function issueMinimumChargeBilling(input: {
   if (!Number.isSafeInteger(minCharge) || minCharge <= 0) {
     throw new BillingIssueError(422, { error: `${co.company_name}은(는) 최소과금 회사로 등록돼 있지 않습니다.`, code: 'MIN_CHARGE_NOT_SET' });
   }
-  if (String(co.billing_type) !== 'postpaid') {
-    throw new BillingIssueError(400, { error: `${co.company_name}은(는) 후불 회사가 아닙니다.`, code: 'MIN_CHARGE_NOT_POSTPAID' });
-  }
+  // ★ 2026-09-27 한줄로 V2 F34 — 그 기간에 적용된 결제 방식으로(일반 발행과 같은 판정 · 잠금 뒤 다시 본다).
+  const minNotPostpaid = () => new BillingIssueError(400, { error: `${co.company_name}은(는) 후불 회사가 아닙니다.`, code: 'MIN_CHARGE_NOT_POSTPAID' });
+  assertPeriodPostpaid(await readPeriodBillingType(company_id, billing_start, billing_end), minNotPostpaid);
 
   const ledger = await loadBillingLedger(company_id);
 
-  const client = await pool.connect();
+  // ★ 2026-09-27 R095(구조) — 호출자 트랜잭션이면 SAVEPOINT 참여
+  const outerTx = input.txClient ?? null;
+  const client = outerTx ?? await pool.connect();
+  const tx = billingTx(outerTx !== null);
   try {
-    await client.query('BEGIN');
+    await client.query(tx.begin);
     // 발행·반영·취소와 같은 회사 잠금 — 한 회사·한 기간 = 발행 1건 불변식을 같은 축에서 지킨다.
     // ★ 2026-08-05 회사 행 잠금이 **요금제 이력을 읽기 전으로** 올라왔다(CT가 두 겹을 함께 잡는다).
     //   아래에서 잡으면 그 사이에 소급 요금제 변경이 커밋될 수 있고, 표기가 갈린 두 발행도 못 막는다.
@@ -1032,6 +1152,8 @@ export async function issueMinimumChargeBilling(input: {
     assertNoBillingPeriodConflict(
       await readBillingPeriodConflicts(company_id, billing_start, billing_end, client),
     );
+    // ★ 2026-09-27 F34 — 잠금 아래에서 다시(전환 CT가 같은 회사 행을 잠근다).
+    assertPeriodPostpaid(await readPeriodBillingType(company_id, billing_start, billing_end, client), minNotPostpaid);
 
     // ★ 2026-08-05 (서수란 접수) 판정 축을 `plan_id`가 있는가에서 **요금제 요금이 실제로 청구되는가**로 옮긴다.
     //   체험이 끝난 회사는 Cron이 `plan_id`를 FREE(월정액 0)로 강등하므로 `plan_id`는 그대로 남는다 —
@@ -1192,7 +1314,12 @@ ${EXTRA_ITEM_SOURCE_JOIN}
         code: 'MIN_CHARGE_PRICE_UNSET',
       });
     }
-    const usageSupply = priced.items.reduce((s, i) => s + (Number(i.amountExact) || 0), 0);
+    // ★ 2026-09-27 한줄로 V2 m030 — 같은 기간 수량 조정을 사용량에 싣는다(일반 발행과 같은 CT). 조정으로 늘어난 사용량이
+    //   최소과금을 넘으면 정액이 아니라 일반 발행이 맞다 — 옛 판정은 조정을 몰라 정액을 끊었고, 겹침 차단 때문에 정정 경로가 없었다.
+    const minAdjust = await loadAdjustmentItemsForIssue(client, company_id, billing_start, billing_end, priced.items);
+    const usageItems = [...priced.items, ...minAdjust.items];
+    assertNoNegativeAdjusted(usageItems);
+    const usageSupply = usageItems.reduce((s, i) => s + (Number(i.amountExact) || 0), 0);
     if (usageSupply > minCharge) {
       throw new BillingIssueError(422, {
         error: `${co.company_name}의 이 기간 실사용 공급가가 ${Math.ceil(usageSupply).toLocaleString()}원으로 최소과금 ${minCharge.toLocaleString()}원을 넘습니다. 일반 발행(일괄발급)으로 청구해주세요.`,
@@ -1243,7 +1370,7 @@ ${EXTRA_ITEM_SOURCE_JOIN}
       `INSERT INTO billing_items (
         billing_id, company_id, user_id, agent_id, store_id, channel, item_date, message_type,
         total_count, success_count, fail_count, pending_count, unit_price, amount, plan_days, plan_month_days
-      ) VALUES ($1, $2, NULL, NULL, NULL, 'extra', $3::date, 'EXTRA_BASE_FEE', 0,0,0,0, $4, $4, NULL, NULL)`,
+      ) VALUES ($1, $2, NULL, NULL, NULL, 'extra', $3::date, '${MIN_CHARGE_ITEM_TYPE}', 0,0,0,0, $4, $4, NULL, NULL)`,
       [billing.id, company_id, billing_start, minCharge],
     );
 
@@ -1258,14 +1385,14 @@ ${EXTRA_ITEM_SOURCE_JOIN}
       );
     }
 
-    await client.query('COMMIT');
+    await client.query(tx.commit);
     return { billing, usage_supply: usageSupply, min_charge_supply: minCharge };
   } catch (txError: any) {
-    try { await client.query('ROLLBACK'); } catch (rbError: any) {
+    try { await client.query(tx.rollback); } catch (rbError: any) {
       console.error('최소과금 발행 롤백 실패:', rbError?.message || rbError);
     }
     throw txError;
   } finally {
-    client.release();
+    if (!outerTx) client.release();
   }
 }

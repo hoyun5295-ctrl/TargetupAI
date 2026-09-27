@@ -162,6 +162,17 @@ export async function finalizePaymentSuccess(input: FinalizePaymentSuccessInput)
       throw new Error(`[payment-processor] 결제 주문번호 불일치: order=${orderId}, inicis=${String(approval.moid ?? '') || '(없음)'}`);
     }
 
+    // ★ 2026-09-27 한줄로 V2 m009 — 회사 행을 잠그고 결제 방식을 다시 본다. 결제창을 연 뒤 후불로 바뀐 회사에
+    //   선불 잔액을 적립하면 후불 청구와 잔액이 겹친다. 선불이 아니면 확정하지 않는다(던짐 → 호출부가 상태 재확인 뒤 망취소 · 실패 기록).
+    //   잠금 순서 = 결제 행 → 회사 행(아래 잔액 UPDATE와 같은 순서 · 순서가 바뀌지 않는다).
+    const coLock = await client.query(`SELECT billing_type FROM companies WHERE id = $1 FOR UPDATE`, [pending.company_id]);
+    if (coLock.rows.length === 0) {
+      throw new Error(`[payment-processor] 회사 영역 미존재: ${pending.company_id}`);
+    }
+    if (String(coLock.rows[0].billing_type) !== 'prepaid') {
+      throw new Error(`[payment-processor] 선불 회사가 아니라 충전을 확정하지 않음(billing_type=${coLock.rows[0].billing_type}): orderId=${orderId}`);
+    }
+
     // 3) payments UPDATE (pending → completed)
     const updateResult = await client.query(
       `UPDATE payments

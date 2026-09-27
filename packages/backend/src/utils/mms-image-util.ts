@@ -77,6 +77,18 @@ export function normalizeMmsImagePaths(items: MmsImageItem[] | null | undefined)
 /** 라우트·image-studio와 같은 정의 미러(둘 다 자기 사본을 갖고 있다 · 통합은 추가 과제) */
 export const MMS_IMAGE_BASE = process.env.MMS_IMAGE_PATH || path.resolve('./uploads/mms');
 
+/**
+ * ★ 2026-09-27 한줄로 V2 GATE m026 — 이 경로가 그 회사 MMS 저장소(MMS_IMAGE_BASE/회사ID/) 안의 파일인가.
+ * 업로드·메일 접수가 저장하는 자리와 같은 규칙이다. 상대경로·저장소 밖·다른 회사 폴더·폴더 자체·'..' 탈출은 거절한다.
+ * 발송 에이전트는 이 절대경로를 그대로 읽으므로, 클라이언트가 준 경로를 이 판정 없이 큐에 실으면 서버의 아무 파일이나 읽히려 한다.
+ */
+export function isCompanyMmsPath(companyId: string, p: unknown): boolean {
+  if (!companyId || typeof p !== 'string' || !p.trim() || !path.isAbsolute(p)) return false;
+  const root = path.resolve(MMS_IMAGE_BASE, companyId) + path.sep;
+  const resolved = path.resolve(p);
+  return resolved.startsWith(root) && resolved.length > root.length;
+}
+
 /** JPG 실체 판정: 확장자·MIME이 아니라 파일 첫 두 바이트(SOI 마커)로 본다. */
 export function isJpegBuffer(buf: Buffer | null | undefined): boolean {
   return !!buf && buf.length > 2 && buf[0] === 0xff && buf[1] === 0xd8;

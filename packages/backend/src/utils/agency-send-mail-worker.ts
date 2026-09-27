@@ -31,7 +31,7 @@ import { describeMmsFitNote } from './mms-image-fit';
 import { canUseAgencySend, loadPlanContext } from './plan-guard';
 import { getRegisteredCallbackSet } from './callback-filter';
 import {
-  analyzeOneStep, createRequestCore, hasAgencyColumn, loadSendWindow, logEvent, parseOneStepOverrides,
+  analyzeOneStep, createRequestCore, hasAgencyColumn, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
   type AgencyCallbackKinds,
 } from './agency-send-intake';
 import {
@@ -1080,6 +1080,8 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     });
   }
   log(`이메일 접수 company=${plans[0].acct.companyId} ${requestRows.length}건 [${requestRows.map((r) => r.id).join(', ')}] from=${fromAddr}${dupSkipped.length > 0 ? ` (중복 건너뜀 ${dupSkipped.length})` : ''}`);
+  // ★ 2026-09-27 한줄로 V2 m018 — 커밋 뒤 건마다 1차 검사를 즉시 깨운다(화면 원스텝과 같은 순서 · 옛: 다음 워커 주기까지 최대 5분 밀려 승인 시간이 줄었다)
+  for (const r of requestRows) kickFirstTest(r.id);
 
   // 12) 접수 완료 회신 — 이 경로의 확인 화면(실패해도 접수는 유효 · 재시도 패스가 있다 · 회의론자 필수 3)
   const blocks = plans.map((p, i) => buildAcceptedReply({

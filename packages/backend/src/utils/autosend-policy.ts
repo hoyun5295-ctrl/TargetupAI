@@ -130,6 +130,33 @@ export function nightAdRestrictionMessage(
 }
 
 /**
+ * ★ 2026-09-27 한줄로 V2 m126 — 대량 광고 묶음을 지금 적재하면 발송 창 밖에 나가는가(적재 중단 판정 · 대량 워커가 묶음마다 부른다).
+ * 광고 아님 = 계속 · 분할 발송 = 계속(분할 시각 CT가 창 끝을 넘는 묶음을 다음 날 시작으로 넘긴다) ·
+ * 그 밖 = 실제 나갈 시각(예약이면 max(지금, 예약 시각) · 즉시면 지금)이 창 밖이면 멈춘다(★ Harold 결정 「멈추고 남은 분량 환불」).
+ * 지난 예약은 적재하는 즉시 나가므로 지금으로 잰다(워커가 늦게 집은 예약 광고가 야간에 나가지 않게).
+ * leadMs(Codex NIGHT 1R·2R) = 적재가 끝나는 데 걸릴 여유. 적재 구간 = [max(지금, 예약), max(지금 + leadMs, 예약)] 이고
+ *   **시작·끝 둘 다** 창 안이어야 계속한다(끝만 보면 07:59:30 즉시 적재가 08:00:30으로 보여 08시 전에 나간다 · 2R).
+ *   미리 적재하는 예약(예약이 지금+여유보다 늦음)은 구간이 예약 시각 한 점이라 그대로다.
+ */
+export function isNightStopDue(
+  cfg: { adEnabled?: boolean; scheduled?: boolean; scheduledAt?: string | null; splitEnabled?: boolean; splitCount?: number },
+  now: Date,
+  startHour: number,
+  endHour: number,
+  leadMs = 0,
+): boolean {
+  if (cfg.adEnabled !== true) return false;
+  if (cfg.splitEnabled && Number(cfg.splitCount) > 0) return false;
+  let from = now.getTime();
+  let to = now.getTime() + leadMs;
+  if (cfg.scheduled && cfg.scheduledAt) {
+    const s = new Date(cfg.scheduledAt).getTime();
+    if (!Number.isNaN(s)) { from = Math.max(from, s); to = Math.max(to, s); }
+  }
+  return !isSendableHourKst(new Date(from), startHour, endHour) || !isSendableHourKst(new Date(to), startHour, endHour);
+}
+
+/**
  * 발송 희망 시각(HH:mm) 저장 가드 — 발송 가능 창 밖이면 저장 거부(조용한 시프트 대신 명시 안내).
  * 형식 이상(파싱 불가)은 기존 파서의 09시 기본값에 위임(ok) — computeNextOccurrence와 동일 관용.
  */

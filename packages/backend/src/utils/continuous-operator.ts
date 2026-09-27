@@ -1203,16 +1203,20 @@ export async function adminStopProposal(
   const messageBody = proposal.proposal_json?.messages?.[0]?.body || proposal.proposal_json?.messages?.[0]?.message || '';
 
   // 정지 처리 — scheduled_send_at 해제로 발송 패스에서 제외
-  await query(
+  // ★ 2026-09-27 한줄로 V2 R081 — 정지 가능한 상태일 때만 바꾼다(조건부 · 건수 확인). 옛: 확인 뒤 id만으로 덮어, 그 사이 발송 패스가
+  //   'sending'으로 선점하면 화면은 '정지됨'인데 실제로는 발송됐다. 못 바꿨으면 정지 실패(학습도 남기지 않는다).
+  const stopped = await query(
     `UPDATE operator_proposals SET
        status = 'admin_stopped',
        admin_response = 'stopped',
        admin_stop_reason = $2,
        scheduled_send_at = NULL,
        reviewed_at = NOW()
-     WHERE id = $1::uuid`,
-    [proposalId, JSON.stringify(stopReason)],
+     WHERE id = $1::uuid AND company_id = $3::uuid AND status IN ('pending', 'admin_review', 'scheduled')
+     RETURNING id`,
+    [proposalId, JSON.stringify(stopReason), companyId],
   );
+  if (stopped.rows.length === 0) return false;
 
   // 담당자 정지 사유 → ai_company_memory 학습 (다음 생성에 반영)
   await recordAdminStopLearning(companyId, proposalId, stopReason, messageBody);
@@ -2016,7 +2020,7 @@ async function dispatchProposalSend(
       );
       const arr = imgRes.rows[0]?.mms_image_paths;
       const cleaned = Array.isArray(arr) ? arr.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : [];
-      if (imgRes.rows.length === 0 || !validateMmsPayload(msgType, cleaned).ok) {
+      if (imgRes.rows.length === 0 || !validateMmsPayload(msgType, cleaned, companyId).ok) {
         await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = 'MMS 이미지 미첨부. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
         await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' MMS 이미지가 없어 발송을 보류했습니다. 자동마케팅 수정에서 이미지를 첨부한 뒤 승인해 주세요.`);
         return { action: 'skipped', reason: 'MMS 이미지 미첨부. 발송 보류' };

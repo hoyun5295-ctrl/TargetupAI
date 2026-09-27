@@ -93,18 +93,13 @@ export async function computeMonthlyUsage(
     mmsSent * costMms +
     kakaoSent * costKakao;
 
-  // ★ D79: 테스트발송 + 스팸필터 — 발송건수/성공률에서 제외, 사용금액만 요금제별 차등 포함
-  // - 사용금액: 무료/스타터/베이직 → 포함 (유료), 프로 이상 → 미포함 (무료 제공)
+  // ★ D79: 테스트발송 + 스팸필터 — 발송건수/성공률에서 제외, 사용금액에는 포함
+  // ★ 2026-09-27 한줄로 V2 m045 — 요금제 예외(프로 이상 미포함)를 없앴다. 값의 근거가 실제 차감 원장(balance_transactions)이라
+  //   차감된 만큼이 곧 사용금액이다 — 테스트 발송·수동 스팸 검사는 요금제와 무관하게 차감되는데 프로 이상이면 통째로 빼
+  //   화면이 실제 차감보다 적게 보였다. 무료로 덮인 건은 차감액이 0이라 그대로 0이다.
   let testCost = 0;
   try {
-    const planResult = await query(
-      `SELECT p.plan_code FROM companies c JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
-      [companyId],
-    );
-    const planCode = (planResult.rows[0]?.plan_code || 'FREE').toUpperCase();
-    const isProOrAbove = ['PRO', 'BUSINESS', 'ENTERPRISE'].includes(planCode);
-
-    if (!isProOrAbove) {
+    {
       // ★ D100: balance_transactions 기반 테스트 비용
       // ★ 2026-09-26 한줄로 V2 F15·F17: 테스트 발송 참조가 요청마다 고유해졌다 — 유형(reference_type='test', 0707부터 기록)으로 찾는다.
       //   옛 행 호환으로 고정 zero-uuid도 함께 본다(이번 달 조회라 사실상 test 유형만 걸린다).
@@ -135,7 +130,6 @@ export async function computeMonthlyUsage(
       );
       testCost += parseFloat(sfCostResult.rows[0]?.total ?? 0);
     }
-    // 프로 이상: testCost = 0 (무료 제공, 사용금액 미포함)
   } catch (testCostErr) {
     console.warn('[monthly-usage] 테스트/스팸필터 비용 조회 실패 (무시):', testCostErr);
   }

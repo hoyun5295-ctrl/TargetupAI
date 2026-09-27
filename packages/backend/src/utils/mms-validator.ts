@@ -12,6 +12,8 @@
  *       대책 = 큐 INSERT 전 라우트 단계 + INSERT 시점(insertTestSmsQueue) 2중 방어.
  */
 
+import { getMmsImagePath, isCompanyMmsPath, type MmsImageItem } from './mms-image-util';
+
 export interface MmsValidationResult {
   ok: boolean;
   error?: string;
@@ -20,13 +22,27 @@ export interface MmsValidationResult {
 
 /**
  * MMS payload 검증.
+ *   - ★ 2026-09-27 한줄로 V2 GATE m026 — 들어온 이미지 경로가 하나라도 그 회사 MMS 저장소 밖이면 실패(유형과 무관).
+ *     companyId는 필수 인자다(빠뜨린 호출부가 컴파일로 잡힌다).
  *   - msgType이 'MMS'(대/소문자 무관) 이면서 mmsImagePaths가 빈 배열/비어있는 경우 실패.
  *   - 그 외 (SMS/LMS/기타 타입 또는 이미지 1장 이상) 통과.
  */
 export function validateMmsPayload(
   msgType: unknown,
   mmsImagePaths: unknown,
+  companyId: string,
 ): MmsValidationResult {
+  if (Array.isArray(mmsImagePaths) && mmsImagePaths.length > 0) {
+    const bad = (mmsImagePaths as MmsImageItem[]).some((it) => !isCompanyMmsPath(companyId, getMmsImagePath(it)));
+    if (bad) {
+      return {
+        ok: false,
+        code: 'MMS_IMAGE_PATH_INVALID',
+        error: '첨부 이미지 경로가 올바르지 않습니다. 이미지를 다시 올려 주세요.',
+      };
+    }
+  }
+
   const normalized = String(msgType ?? '').toUpperCase();
   if (normalized !== 'MMS') return { ok: true };
 

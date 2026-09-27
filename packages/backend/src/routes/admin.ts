@@ -46,6 +46,8 @@ import {
   parseAgentCharges, insertAgentCharges, getAgentChargeStatus, listAgentCharges, countAgentCharges, latestAgentChargeAt, findGatewayCharges, matchHealWindow,
   getAgentCustNameMap, queryLedgerBalancesByIds,
 } from '../utils/pay-stats';
+// ★ 2026-09-27 m013 — 발송 번호 판정 CT(대사 워커와 같은 판정)
+import { chargesHaveSeqNo } from '../utils/agent-charge-reconciler';
 // ★ 2026-07-27 §5-4: 고객사 충전 요청 접수 원장 (요청 → 직원 1클릭 실행 → 반영 확인 후 완료)
 import { parseRejectReason } from '../utils/agent-charge-orders';
 import { handleDbMigrationError } from '../utils/db-migration-error';
@@ -72,6 +74,7 @@ import { grantFreeTrial } from '../utils/basic-trial';
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
+import { switchCompanyBillingType } from '../utils/billing-type-history';
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, diffFields } from '../utils/audit-log';
 // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용 · 읽기 전용 집계 CT)
 import { loadPrecheckUsage, parsePrecheckUsageQuery } from '../utils/precheck-usage';
@@ -3670,16 +3673,17 @@ router.patch('/companies/:id/billing-type', authenticate, requireSuperAdmin, asy
       return res.status(400).json({ error: '진행 중이거나 예약된 캠페인이 있어 요금제 유형을 변경할 수 없습니다.' });
     }
 
-    const result = await query(
-      'UPDATE companies SET billing_type = $1, updated_at = NOW() WHERE id = $2 RETURNING id, company_name, billing_type, balance',
-      [billingType, id]
-    );
+    // ★ 2026-09-27 한줄로 V2 F34 — 전환은 이력과 한 트랜잭션(전환 CT). 정산 발행이 이 이력으로 「그 기간의」 결제 방식을 판정한다.
+    const switched = await switchCompanyBillingType({
+      companyId: String(id), to: billingType, actorUserId: (req as any).user?.userId || null,
+      ip: req.ip || null, userAgent: String(req.headers['user-agent'] || ''),
+    });
 
-    if (result.rows.length === 0) {
+    if (!switched.found) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
     }
 
-    const c = result.rows[0];
+    const c = switched.company;
     console.log(`[요금제변경] ${c.company_name} → ${billingType} (잔액: ${c.balance}원)`);
 
     res.json({
@@ -4408,17 +4412,41 @@ router.post('/agent-charges/:requestId/resolve', authenticate, requireSuperAdmin
     }
 
     const next = outcome === 'confirmed' ? 'registered' : 'not_applied';
-    // 효과 검증: 해소 대상 상태였던 행만 전이 — RETURNING으로 실제 갱신 확정. 해소 주체·시각·메모 영속(Codex 11R)
-    const r = await query(
-      `UPDATE agent_charge_requests
-          SET status = $2, resolved_by = $3, resolved_at = now(), resolve_note = $4
-        WHERE id = $1
-          AND created_at < now() - interval '3 minutes'
-          AND (status = 'uncertain'
-               OR (status = 'reserved' AND (charges->0->>'seqNo') IS NULL))
-        RETURNING id`,
-      [requestId, next, String((req as any).user?.userId || ''), note]
-    );
+    // ★ 2026-09-27 한줄로 V2 m013(Codex AGC 1R) — 발송 번호(SeqNo) 없는 실반영 확인은 대사 워커가 판정할 수 없어(그 대상에서 빠진다)
+    //   여기서 주문을 완료로 넘긴다. 해소 전이와 **한 트랜잭션**이어야 한다 — 따로 커밋하면 그 사이 장애로 주문이 처리 중에 영영 남는다
+    //   (재해소는 registered를 제외하고 워커도 번호 없는 요청을 제외한다). 번호가 있으면 종전대로 대사 워커가 넘긴다.
+    const fulfillHere = next === 'registered' && !chargesHaveSeqNo(rowCharges);
+    const resolveClient = await pool.connect();
+    let r: any;
+    try {
+      await resolveClient.query('BEGIN');
+      // 효과 검증: 해소 대상 상태였던 행만 전이 — RETURNING으로 실제 갱신 확정. 해소 주체·시각·메모 영속(Codex 11R)
+      r = await resolveClient.query(
+        `UPDATE agent_charge_requests
+            SET status = $2, resolved_by = $3, resolved_at = now(), resolve_note = $4
+          WHERE id = $1
+            AND created_at < now() - interval '3 minutes'
+            AND (status = 'uncertain'
+                 OR (status = 'reserved' AND (charges->0->>'seqNo') IS NULL))
+          RETURNING id`,
+        [requestId, next, String((req as any).user?.userId || ''), note]
+      );
+      if (r.rows.length > 0 && fulfillHere) {
+        const done = await resolveClient.query(
+          `UPDATE agent_charge_orders
+              SET status = 'fulfilled', resolved_at = NOW()
+            WHERE charge_request_id = $1::uuid AND status = 'processing'`,
+          [requestId]
+        );
+        if ((done.rowCount ?? 0) > 0) console.log(`[agent-charges] 실반영 확인 해소로 충전 요청 ${done.rowCount}건 완료 (req ${requestId})`);
+      }
+      await resolveClient.query('COMMIT');
+    } catch (txErr) {
+      try { await resolveClient.query('ROLLBACK'); } catch { /* 이미 끝난 트랜잭션 */ }
+      throw txErr;
+    } finally {
+      resolveClient.release();
+    }
     if (r.rows.length === 0) {
       return res.status(409).json({ error: '이미 다른 세션에서 해소된 요청입니다.' });
     }

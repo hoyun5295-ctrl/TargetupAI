@@ -44,8 +44,9 @@ describe('초안 삭제 ↔ 발송 시작 직렬화', () => {
     const iLock = src.indexOf('const startGate = await withCampaignStartLock(id, async () => {');
     expect(iLock).toBeGreaterThan(-1);
     const g = src.slice(iLock, src.indexOf('const campaignRun = startGate.run;', iLock));
-    const iAlive = g.indexOf('SELECT 1 FROM campaigns WHERE id = $1 AND company_id = $2');
-    const iDup = g.indexOf("SELECT id FROM campaign_runs WHERE campaign_id = $1 AND status IN ('sending', 'scheduled') LIMIT 1");
+    // ★ 2026-09-27 m070 — 존재 재확인이 상태도 함께 읽고, 중복 확인은 실패 아닌 실행 행 전부(발송 뒤 재발송 차단 · 순서는 그대로)
+    const iAlive = g.indexOf('SELECT status FROM campaigns WHERE id = $1 AND company_id = $2');
+    const iDup = g.indexOf("SELECT status FROM campaign_runs WHERE campaign_id = $1 AND status <> 'failed' LIMIT 1");
     const iIns = g.indexOf('INSERT INTO campaign_runs (');
     expect(iAlive).toBeGreaterThan(-1);
     expect(iDup).toBeGreaterThan(iAlive);

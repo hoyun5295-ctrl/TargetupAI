@@ -692,7 +692,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     const countRes = await fetch('/api/campaigns/direct-send/count', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ stagingId, dedupEnabled, unsubFilterEnabled }),
+      // ★ 2026-09-27 한줄로 V2 S5-05 — 광고면 수신거부를 항상 뺀다(서버와 같은 판정 · 확인 창 숫자 = 실제 발송 수)
+      body: JSON.stringify({ stagingId, dedupEnabled, unsubFilterEnabled: unsubFilterEnabled || adTextEnabled, adEnabled: adTextEnabled }),
     });
     const countData = await countRes.json();
     if (!countData.success) {
@@ -710,7 +711,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       from: 'direct',
       msgType: directMsgType,
       dedupEnabled,
-      unsubFilterEnabled,
+      unsubFilterEnabled: unsubFilterEnabled || adTextEnabled,
       stagingId,
     });
   };
@@ -1258,14 +1259,16 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   />
                   <span>중복제거</span>
                 </label>
-                <label>
+                {/* ★ 2026-09-27 한줄로 V2 S5-05 — 광고는 수신거부 번호를 항상 뺀다(법) · 켠 채로 잠근다 */}
+                <label title={adTextEnabled ? '광고 문자는 수신거부 번호를 항상 뺍니다' : undefined}>
                   <input
                     type="checkbox"
                     className="ds-chk"
-                    checked={unsubFilterEnabled}
+                    checked={unsubFilterEnabled || adTextEnabled}
+                    disabled={adTextEnabled}
                     onChange={e => setUnsubFilterEnabled(e.target.checked)}
                   />
-                  <span>수신거부제거</span>
+                  <span>수신거부제거{adTextEnabled ? ' (광고는 항상)' : ''}</span>
                 </label>
               </div>
             </div>

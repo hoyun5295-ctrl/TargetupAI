@@ -150,7 +150,7 @@ export async function prepaidDeduct(
   if (pre.rows[0].billing_type !== 'prepaid') {
     // 청구 축은 그대로 두고 **표시용 시도 카운터만** 올린다 — 안 올리면 후불 고객 화면이 영원히 0이다.
     if (isFreeMessagingEligible(messageType, referenceType)) {
-      await recordFreeAttempt({ query: run }, companyId, messageType, count);
+      await recordFreeAttempt({ query: run }, companyId, messageType, count, { inTransaction: !!callerClient });
     }
     return { ok: true, amount: 0 };
   }
@@ -205,7 +205,7 @@ export async function prepaidDeduct(
       ? await consumeFreeQuota(client, companyId, messageType, count, { inTransaction: true })
       : 0;
     // 표시 축도 함께 올린다 — 선불·후불 화면이 같은 뜻("보낸 만큼 줄어든다")을 갖게 한다.
-    if (freeUsed > 0) await recordFreeAttempt(client, companyId, messageType, freeUsed);
+    if (freeUsed > 0) await recordFreeAttempt(client, companyId, messageType, freeUsed, { inTransaction: true });
     const chargeCount = Math.max(0, count - freeUsed);
 
     const totalAmount = Math.round(unitPrice * chargeCount * 100) / 100; // 부동소수점 보정

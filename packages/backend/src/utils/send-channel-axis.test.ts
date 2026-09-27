@@ -128,7 +128,8 @@ describe('게이트가 차감·실행 행보다 앞에 있다', () => {
   });
 
   it('AI 캠페인 발송 — 카카오 활성 검사도 campaign_runs INSERT보다 앞이다', () => {
-    const kakaoGate = CAMPAIGN_SEND.indexOf('kakao_enabled');
+    // ★ 2026-09-27 GATE R100 — 카카오 사용 검사는 게이트 CT(checkBrandSendGate)로 옮겼다(발신키 소유까지 · 계약 = 실행 행보다 앞)
+    const kakaoGate = CAMPAIGN_SEND.indexOf('checkBrandSendGate(');
     const runInsert = CAMPAIGN_SEND.indexOf('INSERT INTO campaign_runs');
     expect(kakaoGate).toBeGreaterThan(-1);
     expect(kakaoGate, '뒤에 두면 거절 시 실행 행이 남는다(2026-08-17 정정)').toBeLessThan(runInsert);
