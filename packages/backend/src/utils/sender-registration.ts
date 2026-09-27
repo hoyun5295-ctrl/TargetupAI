@@ -106,24 +106,7 @@ export async function createManager(
   return result.rows[0];
 }
 
-/** 담당자 수정 */
-export async function updateManager(
-  managerId: string,
-  companyId: string,
-  data: { managerName?: string; managerPhone?: string; managerEmail?: string }
-): Promise<SenderManager | null> {
-  const result = await pool.query(
-    `UPDATE sender_managers
-     SET manager_name = COALESCE($1, manager_name),
-         manager_phone = COALESCE($2, manager_phone),
-         manager_email = COALESCE($3, manager_email),
-         updated_at = now()
-     WHERE id = $4 AND company_id = $5
-     RETURNING *`,
-    [data.managerName, data.managerPhone, data.managerEmail, managerId, companyId]
-  );
-  return result.rows[0] || null;
-}
+// ★ 2026-09-27 한줄로 V2 R342 — updateManager 제거(유일 소비처였던 수정 라우트 제거 · 승인 우회)
 
 /** 담당자 삭제 (soft delete) */
 export async function deleteManager(managerId: string, companyId: string): Promise<boolean> {

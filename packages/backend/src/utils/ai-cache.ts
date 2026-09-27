@@ -20,6 +20,7 @@ interface CacheEntry {
   response: string;
   expiresAt: number;
   createdAt: number;
+  companyId?: string;   // ★ 2026-09-27 R073·R300 — 회사별 통계용
 }
 
 const responseCache = new Map<string, CacheEntry>();
@@ -28,6 +29,14 @@ const CACHE_MAX_SIZE = 1000;
 
 let hitCount = 0;
 let missCount = 0;
+// ★ 2026-09-27 한줄로 V2 R073·R300 — 회사별 적중·실패(옛: 프로세스 전역 수만 있어 모든 회사 화면에 전사 합산과 그로 계산한 절감액이 나갔다)
+const companyCounts = new Map<string, { hit: number; miss: number }>();
+function bump(companyId: string | undefined, kind: 'hit' | 'miss'): void {
+  if (!companyId) return;
+  const c = companyCounts.get(companyId) || { hit: 0, miss: 0 };
+  c[kind] += 1;
+  companyCounts.set(companyId, c);
+}
 
 /**
  * 회사별 입력 hash 생성 (SHA-256)
@@ -42,25 +51,28 @@ export function generateCacheKey(companyId: string, system: string, userMessage:
 /**
  * cache 조회 — hit 시 response 반환, miss 시 null
  */
-export function getCachedResponse(key: string): string | null {
+export function getCachedResponse(key: string, companyId?: string): string | null {
   const entry = responseCache.get(key);
   if (!entry) {
     missCount++;
+    bump(companyId, 'miss');
     return null;
   }
   if (entry.expiresAt <= Date.now()) {
     responseCache.delete(key);
     missCount++;
+    bump(companyId, 'miss');
     return null;
   }
   hitCount++;
+  bump(companyId, 'hit');
   return entry.response;
 }
 
 /**
  * cache 저장 — 5분 TTL + 메모리 영역 자동 관리
  */
-export function setCachedResponse(key: string, response: string): void {
+export function setCachedResponse(key: string, response: string, companyId?: string): void {
   if (!response || response.length === 0) return;
   if (responseCache.size >= CACHE_MAX_SIZE) {
     const oldestKey = responseCache.keys().next().value;
@@ -70,13 +82,23 @@ export function setCachedResponse(key: string, response: string): void {
     response,
     expiresAt: Date.now() + CACHE_TTL_MS,
     createdAt: Date.now(),
+    companyId,
   });
 }
 
 /**
  * cache 통계 (관리자 진단용)
  */
-export function getCacheStats(): { size: number; hit: number; miss: number; hitRate: number } {
+export function getCacheStats(companyId?: string): { size: number; hit: number; miss: number; hitRate: number } {
+  // ★ 2026-09-27 R073·R300 — 회사 화면은 그 회사 몫만(회사 id가 오면 회사별 · 없으면 종전 전역)
+  if (companyId) {
+    const c = companyCounts.get(companyId) || { hit: 0, miss: 0 };
+    let size = 0;
+    const now = Date.now();
+    for (const e of responseCache.values()) if (e.companyId === companyId && e.expiresAt > now) size++;
+    const t = c.hit + c.miss;
+    return { size, hit: c.hit, miss: c.miss, hitRate: t > 0 ? c.hit / t : 0 };
+  }
   const total = hitCount + missCount;
   return {
     size: responseCache.size,

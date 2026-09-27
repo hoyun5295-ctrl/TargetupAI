@@ -54,7 +54,7 @@ router.get('/overview', async (req: Request, res: Response) => {
       getDailyUsage(companyId, 30),
       getModelBreakdown(companyId, 30),
     ]);
-    const cache = getCacheStats();
+    const cache = getCacheStats(companyId);   // ★ 2026-09-27 R073 — 그 회사 몫만
 
     // 모델별 호출 집계 (추상 명칭 매핑)
     const modelTotals: Record<string, { count: number; cost: number }> = {};
@@ -287,7 +287,7 @@ router.post('/search-natural', async (req: Request, res: Response) => {
       getDailyUsage(companyId, 30),
       getModelBreakdown(companyId, 30),
     ]);
-    const cache = getCacheStats();
+    const cache = getCacheStats(companyId);   // ★ 2026-09-27 R073 — 그 회사 몫만
 
     if (daily.length === 0 && monthly.used === 0) {
       return res.json({

@@ -21,8 +21,8 @@ import { Router, Response } from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
-import dns from 'dns';
-import net from 'net';
+// ★ 2026-09-27 R126 — 가드 이미지 CT
+import { fetchImageGuarded } from '../utils/sales-outreach-produce';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
 import { LIMITS } from '../config/defaults';
@@ -302,58 +302,20 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
 });
 
 // ── POST /ingest-product (SSRF 가드 fetch) ──────────────────────
-function isPrivateIp(ip: string): boolean {
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split('.').map(Number);
-    if (a === 10 || a === 127 || a === 0) return true;
-    if (a === 169 && b === 254) return true;             // link-local
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true;   // CGNAT
-    return false;
-  }
-  const low = ip.toLowerCase();
-  return low === '::1' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80') || low.startsWith('::ffff:127.') || low.startsWith('::ffff:10.') || low.startsWith('::ffff:192.168.');
-}
-
+// ★ 2026-09-27 한줄로 V2 R126 — 가드 이미지 CT(sales-outreach-produce fetchImageGuarded)로 통일:
+//   https만 · 계정 정보 URL 거부 · 사설·예약 주소 차단 · **검증한 DNS 주소로 연결 고정**(재바인딩 창 제거) ·
+//   리다이렉트 거부 · image/* · 10MB · 시간 상한. 옛: 조회 뒤 fetch가 호스트를 다시 해석했고(재바인딩 창)
+//   라우트 안의 사설 판정이 CT보다 약했다(::ffff:169.254 등 누락).
 imageStudioRouter.post('/ingest-product', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
   const rawUrl = String(req.body?.url || '').trim();
 
-  let parsed: URL;
-  try { parsed = new URL(rawUrl); } catch { return respondStudioError(res, new StudioError('INGEST_FAILED', 400)); }
-  if (parsed.protocol !== 'https:') return respondStudioError(res, new StudioError('INGEST_FAILED', 400));
-  if (parsed.username || parsed.password) return respondStudioError(res, new StudioError('INGEST_FAILED', 400));
-
   try {
-    // DNS 해석 후 사설 IP 차단(SSRF). IP 리터럴도 동일 검사.
-    const host = parsed.hostname;
-    const addrs = net.isIP(host) ? [host] : (await dns.promises.lookup(host, { all: true })).map((a) => a.address);
-    if (addrs.length === 0 || addrs.some((ip) => isPrivateIp(ip))) {
-      return respondStudioError(res, new StudioError('INGEST_FAILED', 400));
-    }
-
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 10_000);
-    let r: Awaited<ReturnType<typeof fetch>>;
-    try {
-      r = await fetch(parsed.toString(), { redirect: 'manual', signal: ac.signal });
-    } finally { clearTimeout(timer); }
-    // 리다이렉트는 SSRF 우회 경로 → 거부(직접 CDN URL만 허용)
-    if (r.status >= 300 && r.status < 400) return respondStudioError(res, new StudioError('INGEST_FAILED', 400));
-    if (!r.ok) return respondStudioError(res, new StudioError('INGEST_FAILED', 400));
-
-    const ctype = String(r.headers.get('content-type') || '').toLowerCase();
-    if (!ctype.startsWith('image/')) return respondStudioError(res, new StudioError('INGEST_FAILED', 400));
-    const clen = Number(r.headers.get('content-length') || 0);
-    if (clen && clen > 10 * 1024 * 1024) return respondStudioError(res, new StudioError('INGEST_FAILED', 413));
-
-    const ab = await r.arrayBuffer();
-    if (ab.byteLength > 10 * 1024 * 1024) return respondStudioError(res, new StudioError('INGEST_FAILED', 413));
-    const buf = Buffer.from(ab);
-    const ext = ctype.includes('png') ? 'png' : ctype.includes('webp') ? 'webp' : 'jpeg';
-    const tempId = writeTempBuffer(companyId, buf, { kind: 'source', ext, mime: ctype, width: null, height: null });
+    const img = await fetchImageGuarded(rawUrl);
+    if (!img) return respondStudioError(res, new StudioError('INGEST_FAILED', 400));
+    const ext = img.mime.includes('png') ? 'png' : img.mime.includes('webp') ? 'webp' : 'jpeg';
+    const tempId = writeTempBuffer(companyId, img.buffer, { kind: 'source', ext, mime: img.mime, width: null, height: null });
     return res.json({ success: true, source: { tempId, url: `/api/image-studio/temp/${tempId}` } });
   } catch (err) {
     return respondStudioError(res, err);

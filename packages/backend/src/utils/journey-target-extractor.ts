@@ -37,6 +37,9 @@ export async function selectJourneyTargetCustomerIds(
   limit: number,
   journeyId?: string,
   reentry?: { allowReentry: boolean; cooldownDays: number },
+  // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자(또는 미리보기 요청자)의 분류코드 범위 조각(store-scope · 관리자 = 빈 조각).
+  //   추출 SQL **안**(LIMIT 앞)에 건다 — 뒤에서 거르면 범위 밖 고객이 진입하지 않은 채 매 회차 상한을 차지해 범위 안 고객이 굶는다.
+  scopeSql = '',
 ): Promise<string[]> {
   const filters = triggerFilters || {};
   // 이관 유예 일수 — 대상 트리거 목록은 CT가 소유한다(isBulkStateTrigger). 대상이 아니면 0 = 조건 없음.
@@ -80,7 +83,7 @@ export async function selectJourneyTargetCustomerIds(
              FROM customers c
             WHERE c.company_id = $1::uuid
               AND COALESCE(c.phone, '') <> ''
-              AND ${buildJourneySafetyFilter('c')}
+              AND ${buildJourneySafetyFilter('c')}${scopeSql}
               AND ${entryClause}
               AND NOT ${existingPred}
               ${cond ? ` AND ${cond}` : ''}
@@ -96,16 +99,16 @@ export async function selectJourneyTargetCustomerIds(
     // 2. 재구매 / 6. 예약 (cdp_events 직전 N분)
     // 라이브 발송은 trigger-watcher가 selectCdpEvent를 커서 모드로 직접 호출. 여기(미리보기)는 추정 모드.
     case 'cdp.purchase':
-      return selectCdpEvent(companyId, 'purchase', filters, limit);
+      return selectCdpEvent(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql);
     // ★ §11-5 #2·#5 — 같은 구매 스트림의 분기(자격 필터는 라이브 경로가 적용). 미리보기는 구매 근사치.
     case 'purchase.first':
     case 'customer.dormant_return':
-      return selectCdpEvent(companyId, 'purchase', filters, limit);
+      return selectCdpEvent(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql);
     case 'cdp.reservation_created':
-      return selectCdpEvent(companyId, 'reservation_created', filters, limit);
+      return selectCdpEvent(companyId, 'reservation_created', filters, limit, undefined, undefined, scopeSql);
     // ★ 2026-06-22: 배송 시작 = 자사몰 custom 이벤트(cdp_events.event_name='custom_order_shipped'). 라이브는 watcher가 커서 경로 호출, 여기는 미리보기·카운트 추정.
     case 'custom_order_shipped':
-      return selectCdpEvent(companyId, 'custom_order_shipped', filters, limit);
+      return selectCdpEvent(companyId, 'custom_order_shipped', filters, limit, undefined, undefined, scopeSql);
 
     // 3. 휴면 (customers.recent_purchase_date < NOW - N일)
     case 'customer.dormant': {
@@ -119,7 +122,7 @@ export async function selectJourneyTargetCustomerIds(
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND ${buildJourneySafetyFilter('c')}
+           AND ${buildJourneySafetyFilter('c')}${scopeSql}
            AND c.recent_purchase_date IS NOT NULL
            AND c.recent_purchase_date < (CURRENT_DATE - ($2 || ' days')::interval)
            AND c.recent_purchase_date > (CURRENT_DATE - ($3 || ' days')::interval)
@@ -171,7 +174,7 @@ export async function selectJourneyTargetCustomerIds(
                AND p2.purchase_date IS NOT NULL
                AND p2.purchase_date > (a.cart_add_at AT TIME ZONE 'Asia/Seoul')
            )
-           AND ${buildJourneySafetyFilter('c')}
+           AND ${buildJourneySafetyFilter('c')}${scopeSql}
          ${antiJoin}
          ${cond ? ` AND ${cond}` : ''}
          LIMIT $${params.length}::int`,
@@ -213,7 +216,7 @@ export async function selectJourneyTargetCustomerIds(
                AND p2.purchase_date IS NOT NULL
                AND p2.purchase_date > (v.viewed_at AT TIME ZONE 'Asia/Seoul')
            )
-           AND ${buildJourneySafetyFilter('c')}
+           AND ${buildJourneySafetyFilter('c')}${scopeSql}
          ${antiJoin}
          ${cond ? ` AND ${cond}` : ''}
          LIMIT $${params.length}::int`,
@@ -253,7 +256,7 @@ export async function selectJourneyTargetCustomerIds(
          FROM hist h
          INNER JOIN customers c ON c.id = h.customer_id AND c.company_id = $1::uuid
          WHERE (EXTRACT(EPOCH FROM NOW()) - h.last_e) > ((h.last_e - h.first_e) / GREATEST(h.cnt - 1, 1)) * $2::float
-           AND ${buildJourneySafetyFilter('c')}
+           AND ${buildJourneySafetyFilter('c')}${scopeSql}
          ${antiJoin}
          ${grace ? ` AND ${grace}` : ''}
          ${cond ? ` AND ${cond}` : ''}
@@ -304,7 +307,7 @@ export async function selectJourneyTargetCustomerIds(
                 AND rn.rank_order IS NOT NULL
                 AND ro.rank_order IS NOT NULL
                 AND rn.rank_order > ro.rank_order
-                AND ${buildJourneySafetyFilter('c')}
+                AND ${buildJourneySafetyFilter('c')}${scopeSql}
                 ${antiJoin}
                 ${cond ? ` AND ${cond}` : ''}
            ) s
@@ -331,7 +334,7 @@ export async function selectJourneyTargetCustomerIds(
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND ${buildJourneySafetyFilter('c')}
+           AND ${buildJourneySafetyFilter('c')}${scopeSql}
            AND (
              (c.birth_month_day IS NOT NULL AND c.birth_month_day = TO_CHAR((CURRENT_DATE + ($2 || ' days')::interval), 'MM-DD'))
              OR
@@ -367,7 +370,7 @@ export async function selectJourneyTargetCustomerIds(
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND ${buildJourneySafetyFilter('c')}
+           AND ${buildJourneySafetyFilter('c')}${scopeSql}
            AND c.points IS NOT NULL AND c.points >= $2::int
            AND ${edgeClause}
            ${antiJoin}
@@ -396,7 +399,7 @@ export async function selectJourneyTargetCustomerIds(
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND ${buildJourneySafetyFilter('c')}
+           AND ${buildJourneySafetyFilter('c')}${scopeSql}
            ${dedupClause}
            ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
@@ -422,6 +425,7 @@ export async function selectAnchorAudienceIds(
   companyId: string,
   triggerFilters: Record<string, any>,
   limit: number,
+  scopeSql = '',   // ★ 2026-09-27 S5-04 — 여정 작성자 분류코드 범위
 ): Promise<string[]> {
   const f = triggerFilters || {};
   const params: any[] = [companyId];
@@ -436,7 +440,7 @@ export async function selectAnchorAudienceIds(
   const r = await query(
     `SELECT id AS customer_id FROM customers c
      WHERE c.company_id = $1::uuid
-       AND ${buildJourneySafetyFilter('c')}
+       AND ${buildJourneySafetyFilter('c')}${scopeSql}
        ${pointsClause}
        ${cond ? ` AND ${cond}` : ''}
      ORDER BY c.id
@@ -455,6 +459,7 @@ export async function selectCdpEvent(
   limit: number,
   cursorStart?: Date | string | null,
   windowEnd?: Date | string | null,
+  scopeSql = '',   // ★ 2026-09-27 S5-04
 ): Promise<string[]> {
   const params: any[] = [companyId, eventName];
   let timeClause: string;
@@ -474,7 +479,7 @@ export async function selectCdpEvent(
        AND e.event_name = $2
        AND e.customer_id IS NOT NULL
        AND ${timeClause}
-       AND ${buildJourneySafetyFilter('c')}
+       AND ${buildJourneySafetyFilter('c')}${scopeSql}
        ${cond ? ` AND ${cond}` : ''}
      LIMIT $${params.length}::int`,
     params,
@@ -516,6 +521,7 @@ export async function selectCdpEventRowsForCursor(
   windowEnd: Date | string,
   maxAgeHours: number,
   chunkLimit: number,
+  scopeSql = '',   // ★ 2026-09-27 S5-04 — 커서 창 안에서 거른다(범위 밖 행은 커서가 지나가며 소비된다)
 ): Promise<CdpEventRow[]> {
   // 축은 화이트리스트 두 값뿐 — 문자열이 그대로 SQL에 들어가므로 여기서 닫는다(주입 표면 0).
   const axis = cursor.axis === 'created_at' ? 'created_at' : 'occurred_at';
@@ -540,7 +546,7 @@ export async function selectCdpEventRowsForCursor(
        AND ${cursorClause}
        AND e.${axis} <= $4::timestamptz
        AND e.occurred_at >= NOW() - ($5 || ' hours')::interval
-       AND ${buildJourneySafetyFilter('c')}
+       AND ${buildJourneySafetyFilter('c')}${scopeSql}
        ${cond ? ` AND ${cond}` : ''}
      ORDER BY e.${axis} ASC, e.id ASC
      LIMIT $${params.length}::int`,
@@ -575,6 +581,7 @@ export async function selectPurchaseLedgerRowsForCursor(
   windowEnd: Date | string,
   maxAgeHours: number,
   chunkLimit: number,
+  scopeSql = '',   // ★ 2026-09-27 S5-04
 ): Promise<CdpEventRow[]> {
   const params: any[] = [companyId, cursor.at, windowEnd, String(maxAgeHours)];
   let cursorClause: string;
@@ -607,7 +614,7 @@ export async function selectPurchaseLedgerRowsForCursor(
         AND p.purchase_date IS NOT NULL
         AND p.purchase_date >= ((NOW() - ($4 || ' hours')::interval) AT TIME ZONE 'Asia/Seoul')
         AND p.purchase_date <= (NOW() AT TIME ZONE 'Asia/Seoul')
-        AND ${buildJourneySafetyFilter('c')}
+        AND ${buildJourneySafetyFilter('c')}${scopeSql}
         ${cond ? ` AND ${cond}` : ''}
       ORDER BY p.created_at ASC, p.id ASC
       LIMIT $${params.length}::int`,
@@ -710,8 +717,9 @@ export async function buildJourneyPreviewSamples(
   triggerFilters: Record<string, any>,
   limit: number,
   journeyId?: string,
+  scopeSql = '',   // ★ 2026-09-27 S5-04 — 미리보기도 발송과 같은 범위
 ): Promise<JourneyPreviewSample[]> {
-  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, limit, journeyId);
+  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, limit, journeyId, undefined, scopeSql);
   if (ids.length === 0) return [];
 
   // 추출 순서(trigger ORDER BY — 신규가입=created_at DESC 등) 유지 + 예측 점수 LEFT JOIN
@@ -817,8 +825,9 @@ export async function countJourneyTargetCustomers(
   triggerEvent: string,
   triggerFilters: Record<string, any>,
   journeyId?: string,
+  scopeSql = '',   // ★ 2026-09-27 S5-04
 ): Promise<JourneyTargetCount> {
-  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId);
+  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId, undefined, scopeSql);
   const { total, segments } = await gradeBreakdownForIds(companyId, ids);
   return { total, segments, capped: ids.length >= JOURNEY_COUNT_CAP };
 }

@@ -17,6 +17,7 @@
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants, normalizeDate } from './normalize';
 import { isValidCustomFieldKey } from './safe-field-name';
 import { getColumnFields } from './standard-field-map';
+import { kstDateMinusDays } from './automarketing-segment';
 
 // ============================================================
 // 타입 정의
@@ -261,8 +262,8 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             if (operator === 'days_within') {
               const days = /^\d{1,4}$/.test(String(value).trim()) ? parseInt(value) : NaN;
               if (!isNaN(days)) {
-                const daysAgo = new Date(); daysAgo.setDate(daysAgo.getDate() - days);
-                sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(daysAgo.toISOString().split('T')[0]);
+                // ★ 2026-09-27 한줄로 V2 R202 — 기준일 = KST(옛 UTC 날짜는 KST 00~09시에 하루가 더 들어갔다)
+                sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(kstDateMinusDays(new Date(), days));
               } else if (value != null && value !== '') { sql += ' AND FALSE'; }
             } else if (operator === 'birth_month') {
               const month = /^\d{1,2}$/.test(String(value).trim()) ? parseInt(value) : NaN;
@@ -481,10 +482,9 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
       if (operator === 'days_within') {
         const days = /^\d{1,4}$/.test(String(value).trim()) ? parseInt(value) : NaN;
         if (!isNaN(days)) {
-          const daysAgo = new Date();
-          daysAgo.setDate(daysAgo.getDate() - days);
+          // ★ 2026-09-27 한줄로 V2 R202 — 기준일 = KST
           sql += ` AND ${columnRef} >= $${paramIndex++}`;
-          params.push(daysAgo.toISOString().split('T')[0]);
+          params.push(kstDateMinusDays(new Date(), days));
         } else if (value != null && value !== '') { sql += ' AND FALSE'; }
       } else if (operator === 'birth_month') {
         const month = /^\d{1,2}$/.test(String(value).trim()) ? parseInt(value) : NaN;
@@ -638,15 +638,13 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
  * ★ store_code는 'direct' 모드 + alias 'c' 사용.
  */
 export function buildFilterQueryCompat(filter: any, _companyId: string): { where: string; params: any[]; nextIndex: number } {
-  // ★ D83: 디버그 로그
-  console.log('[CT-01 DEBUG] buildFilterQueryCompat input:', JSON.stringify(filter));
+  // ★ 2026-09-27 한줄로 V2 R203 — D83 디버그 로그 제거(호출마다 필터·SQL·검색값을 로그에 남겼다)
   const result = buildCustomerFilter(filter, {
     tableAlias: 'c',
     startParamIndex: 2,  // campaigns.ts는 항상 $1 = companyId
     storeCodeMode: 'direct',
     inputFormat: 'mixed',
   });
-  console.log('[CT-01 DEBUG] buildFilterQueryCompat output SQL:', result.sql, '| params:', JSON.stringify(result.params));
   return { where: result.sql, params: result.params, nextIndex: result.nextIndex };
 }
 
@@ -656,8 +654,7 @@ export function buildFilterQueryCompat(filter: any, _companyId: string): { where
  * ★ store_code는 'subquery' 모드.
  */
 export function buildDynamicFilterCompat(filters: any, startIndex: number): { where: string; params: any[]; nextIndex: number } {
-  // ★ D83: 디버그 로그 — 필터 입력 → 생성된 SQL 추적 (문제 필드 특정용)
-  console.log('[CT-01 DEBUG] buildDynamicFilterCompat input:', JSON.stringify(filters));
+  // ★ 2026-09-27 한줄로 V2 R203 — D83 디버그 로그 제거(검색값이 로그에 남았다)
   const result = buildCustomerFilter(filters, {
     tableAlias: '',
     startParamIndex: startIndex,
@@ -665,7 +662,6 @@ export function buildDynamicFilterCompat(filters: any, startIndex: number): { wh
     companyIdParamRef: '$1',
     inputFormat: 'structured',
   });
-  console.log('[CT-01 DEBUG] buildDynamicFilterCompat output SQL:', result.sql, '| params:', JSON.stringify(result.params));
   return { where: result.sql, params: result.params, nextIndex: result.nextIndex };
 }
 

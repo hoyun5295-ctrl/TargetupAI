@@ -62,7 +62,8 @@ export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
       const r1 = await fetch(`${apiBase}/api/dm/brand-basic-info`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(info),
       });
-      if (!r1.ok) { onToast('기본정보 저장에 실패했어요', 'error'); return; }
+      // ★ 2026-09-27 한줄로 V2 R170 — 서버 거절 사유(관리자 전용 칸 · 사업자등록번호 형식)를 그대로 보여 준다
+      if (!r1.ok) { const d = await r1.json().catch(() => ({})); onToast(d?.error || '기본정보 저장에 실패했어요', 'error'); return; }
       basicSaved = true;
       // ★ 연락처·SNS는 정상 로드된 경우에만 저장(로드 실패 시 빈값 덮어쓰기 방지). 서버 merge로 다른 brand_kit 필드 보존.
       if (!kitOk) {

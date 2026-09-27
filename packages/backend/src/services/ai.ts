@@ -119,7 +119,7 @@ export async function callAIWithFallback(params: {
     cacheKey = generateCacheKey(params.companyId, system, params.userMessage);
     // ★ 2026-07-08 vision 요청은 cache 조회 우회 — cacheKey가 이미지 데이터를 안 담아 다른 이미지가 같은 텍스트면 오탐 hit. (차감 게이트용 cacheKey 자체는 유지)
     if (!skipCache) {
-      const cached = getCachedResponse(cacheKey);
+      const cached = getCachedResponse(cacheKey, params.companyId);
       if (cached) {
         console.log(`[AI] cache hit (company ${params.companyId.slice(0, 8)}, source ${params.source || 'unknown'})`);
         return cached;
@@ -216,7 +216,7 @@ export async function callAIWithFallback(params: {
       // 캐시·통계 = best-effort (실패해도 무방, 차감과 분리)
       try {
         const { setCachedResponse } = await import('../utils/ai-cache');
-        if (!skipCache) setCachedResponse(cacheKey, text);
+        if (!skipCache) setCachedResponse(cacheKey, text, params.companyId);
         const { recordAiCall } = await import('../utils/ai-rate-limit');
         aiCallLogId = await recordAiCall({
           companyId: params.companyId,
@@ -308,7 +308,7 @@ export async function callAIWithFallback(params: {
       // 캐시·통계 = best-effort (실패해도 무방, 차감과 분리)
       try {
         const { setCachedResponse } = await import('../utils/ai-cache');
-        if (!skipCache) setCachedResponse(cacheKey, text);
+        if (!skipCache) setCachedResponse(cacheKey, text, params.companyId);
         const { recordAiCall } = await import('../utils/ai-rate-limit');
         aiCallLogId = await recordAiCall({
           companyId: params.companyId,

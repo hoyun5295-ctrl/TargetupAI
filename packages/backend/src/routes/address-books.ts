@@ -3,6 +3,8 @@ import { logPrivacyExport } from '../utils/privacy-audit';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+// ★ 2026-09-27 한줄로 V2 R061 — 주소록 그룹 = (주인, 이름) · 주인 판정 CT
+import { resolveTargetOwner, ownerClause } from '../utils/owner-scope';
 import { cellToString } from '../utils/normalize';
 import { insertAddressBookContacts, type AddressBookRow } from '../utils/address-book-insert';
 // ★ 2026-09-14 박성용 접수(주소록 번호 앞 0 생략): 업로드 파서가 CSV·엑셀의 앞 0을 숫자로 떨어뜨린다.
@@ -23,16 +25,22 @@ router.get('/groups', async (req: Request, res: Response) => {
     }
 
     // ★ 사용자별 격리: company_admin은 회사 전체, company_user는 본인 것만
+    // ★ 2026-09-27 한줄로 V2 R061 — 그룹 = (주인, 이름). 이름은 사용자마다 따로 만들어지므로(생성 중복 검사도 사용자 단위)
+    //   주인까지 묶어 돌려준다. 옛: 이름만으로 묶어 관리자 화면에서 다른 사용자의 같은 이름 그룹이 한 줄로 합쳐졌고,
+    //   그 줄의 조회·추가·삭제가 여러 사람의 그룹에 한꺼번에 닿았다. owner_name = 관리자 화면 구분 표시용(담당자는 늘 본인이라 비움).
     const userType = req.user?.userType;
-    const userFilter = userType === 'company_user' && userId ? ' AND user_id = $2' : '';
-    const params = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
+    const isUserScoped = userType === 'company_user' && !!userId;
+    const userFilter = isUserScoped ? ' AND a.user_id = $2' : '';
+    const params = isUserScoped ? [companyId, userId] : [companyId];
 
     const result = await query(
-      `SELECT group_name, COUNT(*) as count, MAX(created_at) as created_at
-       FROM address_books
-       WHERE company_id = $1${userFilter}
-       GROUP BY group_name
-       ORDER BY MAX(created_at) DESC`,
+      `SELECT a.group_name, a.user_id AS owner_id, ${isUserScoped ? 'NULL' : 'MAX(u.name)'} AS owner_name,
+              COUNT(*) as count, MAX(a.created_at) as created_at
+       FROM address_books a
+       LEFT JOIN users u ON u.id = a.user_id
+       WHERE a.company_id = $1${userFilter}
+       GROUP BY a.group_name, a.user_id
+       ORDER BY MAX(a.created_at) DESC`,
       params
     );
 
@@ -54,9 +62,9 @@ router.get('/:groupName', async (req: Request, res: Response) => {
 
     const { groupName } = req.params;
 
-    const userType = req.user?.userType;
-    const userFilter = userType === 'company_user' && userId ? ' AND user_id = $3' : '';
-    const params = userType === 'company_user' && userId ? [companyId, groupName, userId] : [companyId, groupName];
+    // ★ 2026-09-27 한줄로 V2 R061 — 한 그룹 = (주인, 이름) · 담당자 = 본인 · 관리자 = 화면이 보낸 주인(owner)
+    const params: any[] = [companyId, groupName];
+    const userFilter = ownerClause(resolveTargetOwner(req, req.query.owner), params);
 
     const result = await query(
       `SELECT id, phone, name, extra1, extra2, extra3
@@ -147,9 +155,9 @@ router.get('/:groupName/export', async (req: Request, res: Response) => {
     }
 
     const { groupName } = req.params;
-    const userType = req.user?.userType;
-    const userFilter = userType === 'company_user' && userId ? ' AND user_id = $3' : '';
-    const params = userType === 'company_user' && userId ? [companyId, groupName, userId] : [companyId, groupName];
+    // ★ 2026-09-27 한줄로 V2 R061 — 한 그룹 = (주인, 이름)
+    const params: any[] = [companyId, groupName];
+    const userFilter = ownerClause(resolveTargetOwner(req, req.query.owner), params);
 
     const result = await query(
       `SELECT phone, name, extra1, extra2, extra3
@@ -225,9 +233,11 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
     if (limitErrA) return res.status(403).json({ error: limitErrA, code: 'ADDRESS_BOOK_LIMIT' });
 
     // 기존 그룹 존재 검증 (본인 그룹만 추가 가능 — company_user 격리)
-    const userType = req.user?.userType;
-    const ownerFilter = userType === 'company_user' && userId ? ' AND user_id = $3' : '';
-    const ownerParams = userType === 'company_user' && userId ? [companyId, groupName, userId] : [companyId, groupName];
+    // ★ 2026-09-27 한줄로 V2 R061 — 한 그룹 = (주인, 이름). 추가 행도 **그 그룹 주인** 이름으로 적재한다
+    //   (옛: 관리자가 남의 그룹에 추가하면 관리자 id로 적재돼 같은 이름의 새 그룹이 갈라져 생겼다).
+    const ownerId = resolveTargetOwner(req, req.query.owner);
+    const ownerParams: any[] = [companyId, groupName];
+    const ownerFilter = ownerClause(ownerId, ownerParams);
 
     const groupCheck = await query(
       `SELECT COUNT(*)::int AS cnt FROM address_books
@@ -272,7 +282,7 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
       });
     }
     // ★ 2026-09-26 한줄로 V2 R1-01 — 적재 CT 한 문장(전부 추가 또는 전부 안 함)
-    const appendedCount = await insertAddressBookContacts({ companyId, userId, groupName, rows });
+    const appendedCount = await insertAddressBookContacts({ companyId, userId: ownerId, groupName, rows });
 
     return res.json({
       success: true,
@@ -299,9 +309,9 @@ router.delete('/:groupName', async (req: Request, res: Response) => {
     const { groupName } = req.params;
 
     // ★ 본인 주소록만 삭제 가능 (admin은 전체 삭제 가능)
-    const userType = req.user?.userType;
-    const userFilter = userType === 'company_user' && userId ? ' AND user_id = $3' : '';
-    const params = userType === 'company_user' && userId ? [companyId, groupName, userId] : [companyId, groupName];
+    // ★ 2026-09-27 한줄로 V2 R061 — 한 그룹 = (주인, 이름). 옛: 관리자 삭제가 이름만으로 여러 사람의 같은 이름 그룹을 함께 지웠다.
+    const params: any[] = [companyId, groupName];
+    const userFilter = ownerClause(resolveTargetOwner(req, req.query.owner), params);
 
     await query(
       `DELETE FROM address_books WHERE company_id = $1 AND group_name = $2${userFilter}`,

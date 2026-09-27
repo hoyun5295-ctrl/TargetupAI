@@ -43,8 +43,9 @@ export async function countStagingFiltered(
   let duplicateCount = 0;
   if (dedupEnabled !== false) {
     const r = await query(
-      `SELECT (COUNT(*) - COUNT(DISTINCT phone))::int AS c FROM campaign_send_staging WHERE staging_id = $1`,
-      [stagingId]
+      // ★ 2026-09-27 한줄로 V2 m128 — 회사 조건(총수와 같게). 옛: 남의 stagingId를 알면 그 명단의 중복 수가 보였다.
+      `SELECT (COUNT(*) - COUNT(DISTINCT phone))::int AS c FROM campaign_send_staging WHERE staging_id = $1 AND company_id = $2`,
+      [stagingId, companyId]
     );
     duplicateCount = r.rows[0]?.c || 0;
   }
@@ -57,8 +58,8 @@ export async function countStagingFiltered(
       `SELECT COUNT(${dedupEnabled !== false ? 'DISTINCT s.phone' : '*'})::int AS c
        FROM campaign_send_staging s
        JOIN unsubscribes u ON u.user_id = $2 AND u.phone = s.phone
-       WHERE s.staging_id = $1`,
-      [stagingId, userId]
+       WHERE s.staging_id = $1 AND s.company_id = $3`,
+      [stagingId, userId, companyId]
     );
     unsubscribeCount = r.rows[0]?.c || 0;
   }

@@ -82,6 +82,8 @@ import { buildSeasonPromptBlock, getSeasonContext } from './season-context';
 // ★ 2026-07-05: 'yearly' 신설 — 마케팅 캘린더 시즌 캠페인(연 1회, schedule_month 월 + schedule_day_of_month 일).
 export type OperatorSchedule = 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type OperatorStatus = 'active' | 'paused' | 'paused_no_credit' | 'archived';
+/** ★ 2026-09-27 한줄로 V2 R080 — 저장할 수 있는 상태값(라우트가 이 목록 밖 값을 무시한다 · 옛: 타입 선언만이라 아무 문자열이나 저장됐다) */
+export const OPERATOR_STATUSES: readonly OperatorStatus[] = ['active', 'paused', 'paused_no_credit', 'archived'];
 export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review' | 'admin_stopped' | 'scheduled' | 'sending' | 'sent' | 'skipped';
 
 export interface CreateOperatorInput {

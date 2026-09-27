@@ -515,7 +515,10 @@ export function verifyCafe24WebhookSignature(rawBody: Buffer | string, signature
   try {
     const body = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
     const computed = createHmac('sha256', secret).update(body).digest('base64');
-    return computed === signature;
+    // ★ 2026-09-27 한줄로 V2 R372 — 상수 시간 비교(옛 === 는 앞에서부터 다른 글자에서 멈춰 비교 시간이 새었다)
+    const a = Buffer.from(computed);
+    const b = Buffer.from(String(signature));
+    return a.length === b.length && timingSafeEqual(a, b);
   } catch {
     return false;
   }

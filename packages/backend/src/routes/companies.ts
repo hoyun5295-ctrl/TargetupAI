@@ -9,6 +9,8 @@ import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/a
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope, buildCustomerStoreFilterLiteral } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
+// ★ 2026-09-27 한줄로 V2 R105 — 공개 문의 메일 본문 이스케이프 CT
+import { escapeHtml } from '../utils/dm/dm-section-renderer';
 import { normalizeOpt080Input, findLinkDefectInText, findLinkDefectDeep, webLinkReason } from '../utils/normalize';
 import { grantFreeTrial, isTrialApplyOpen } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
@@ -61,6 +63,7 @@ router.post('/inquiry', publicInquiryLimiter, async (req: Request, res: Response
       },
     });
 
+    // ★ 2026-09-27 한줄로 V2 R105 — 방문자 입력은 전부 이스케이프(옛: 그대로 HTML에 넣어 직원 메일함으로 가짜 링크·HTML 주입이 됐다)
     const htmlBody = `
       <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background: linear-gradient(135deg, #3B82F6, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
@@ -70,28 +73,28 @@ router.post('/inquiry', publicInquiryLimiter, async (req: Request, res: Response
           <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
             <tr style="border-bottom: 1px solid #F3F4F6;">
               <td style="padding: 10px 0; color: #6B7280; width: 100px;">회사명</td>
-              <td style="padding: 10px 0; font-weight: 600;">${companyName || '-'}</td>
+              <td style="padding: 10px 0; font-weight: 600;">${companyName ? escapeHtml(companyName) : '-'}</td>
             </tr>
             <tr style="border-bottom: 1px solid #F3F4F6;">
               <td style="padding: 10px 0; color: #6B7280;">담당자</td>
-              <td style="padding: 10px 0; font-weight: 600;">${contactName}</td>
+              <td style="padding: 10px 0; font-weight: 600;">${escapeHtml(contactName)}</td>
             </tr>
             <tr style="border-bottom: 1px solid #F3F4F6;">
               <td style="padding: 10px 0; color: #6B7280;">연락처</td>
-              <td style="padding: 10px 0;">${phone}</td>
+              <td style="padding: 10px 0;">${escapeHtml(phone)}</td>
             </tr>
             <tr style="border-bottom: 1px solid #F3F4F6;">
               <td style="padding: 10px 0; color: #6B7280;">이메일</td>
-              <td style="padding: 10px 0;"><a href="mailto:${email}" style="color: #3B82F6;">${email}</a></td>
+              <td style="padding: 10px 0;"><a href="mailto:${escapeHtml(email)}" style="color: #3B82F6;">${escapeHtml(email)}</a></td>
             </tr>
             ${planInterest ? `<tr style="border-bottom: 1px solid #F3F4F6;">
               <td style="padding: 10px 0; color: #6B7280;">관심 요금제</td>
-              <td style="padding: 10px 0;"><span style="background: #EFF6FF; color: #2563EB; padding: 2px 10px; border-radius: 12px; font-size: 13px;">${planInterest}</span></td>
+              <td style="padding: 10px 0;"><span style="background: #EFF6FF; color: #2563EB; padding: 2px 10px; border-radius: 12px; font-size: 13px;">${escapeHtml(planInterest)}</span></td>
             </tr>` : ''}
           </table>
           <div style="margin-top: 20px; padding: 16px; background: #F9FAFB; border-radius: 8px;">
             <div style="font-size: 13px; color: #6B7280; margin-bottom: 8px;">문의 내용</div>
-            <div style="font-size: 14px; color: #111827; white-space: pre-line;">${message}</div>
+            <div style="font-size: 14px; color: #111827; white-space: pre-line;">${escapeHtml(message)}</div>
           </div>
           <div style="margin-top: 20px; font-size: 12px; color: #9CA3AF; text-align: center;">
             이 메일은 한줄로(hanjul.ai) 솔루션 문의 폼에서 자동 발송되었습니다.

@@ -2,6 +2,15 @@ import React, { useState } from 'react';
 import { cellToString } from '../utils/formatDate';
 import ConfirmModal, { type ConfirmState } from './ConfirmModal';
 
+/**
+ * ★ 2026-09-27 한줄로 V2 R061 — 주소록 그룹 = (주인, 이름). 이름은 사용자마다 따로 만들어지므로 관리자 화면에는
+ *   같은 이름이 여러 줄일 수 있다(owner_name으로 구분). 서버 요청마다 주인(owner)을 함께 보낸다 — 옛: 이름만 보내
+ *   관리자 조회·추가·삭제가 여러 사람의 같은 이름 그룹에 한꺼번에 닿았다. owner 없는 옛 행 = 'none'.
+ */
+type AddressGroup = { group_name: string; count: number; owner_id?: string | null; owner_name?: string | null };
+const groupKey = (g: AddressGroup) => `${g.owner_id ?? 'none'}::${g.group_name}`;
+const ownerParam = (g: AddressGroup) => `owner=${encodeURIComponent(g.owner_id ?? 'none')}`;
+
 interface AddressBookModalProps {
   show: boolean;
   onClose: () => void;
@@ -17,7 +26,7 @@ export default function AddressBookModal({
   setDirectRecipients,
   setToast,
 }: AddressBookModalProps) {
-  const [addressGroups, setAddressGroups] = useState<{group_name: string, count: number}[]>([]);
+  const [addressGroups, setAddressGroups] = useState<AddressGroup[]>([]);
   const [addressSaveMode, setAddressSaveMode] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [addressFileHeaders, setAddressFileHeaders] = useState<string[]>([]);
@@ -55,6 +64,7 @@ export default function AddressBookModal({
   // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 기존 그룹에 번호 추가 모드
   //   null = 신규 그룹 신설 모드 / string = 기존 그룹명 (append endpoint 호출 분기)
   const [appendingGroupName, setAppendingGroupName] = useState<string | null>(null);
+  const [appendingOwnerParam, setAppendingOwnerParam] = useState('');   // ★ R061 추가 대상 그룹의 주인
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const showError = (message: string) => {
@@ -64,12 +74,13 @@ export default function AddressBookModal({
 
 
   // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 그룹 단위 xlsx 다운로드
-  const handleDownloadGroup = async (groupName: string) => {
+  const handleDownloadGroup = async (group: AddressGroup) => {
+    const groupName = group.group_name;
     try {
       setIsUploading(true);
       setUploadingMsg(`${groupName} 다운로드 중...`);
       const token = localStorage.getItem('token');
-      const res = await fetch(`/api/address-books/${encodeURIComponent(groupName)}/export`, {
+      const res = await fetch(`/api/address-books/${encodeURIComponent(groupName)}/export?${ownerParam(group)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -98,8 +109,10 @@ export default function AddressBookModal({
   };
 
   // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 기존 그룹 안 번호 추가 모드 진입
-  const handleStartAppend = (groupName: string) => {
+  const handleStartAppend = (group: AddressGroup) => {
+    const groupName = group.group_name;
     setAppendingGroupName(groupName);
+    setAppendingOwnerParam(ownerParam(group));
     setNewGroupName(groupName); // 표시용 (read-only)
     setDirectInputMode(true);
     setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' })));
@@ -131,9 +144,9 @@ export default function AddressBookModal({
       const token = localStorage.getItem('token');
       const allContacts: { phone: string; name: string; extra1: string; extra2: string; extra3: string }[] = [];
       const seenPhones = new Set<string>();
-      for (const groupName of selectedGroupNames) {
+      for (const g of addressGroups.filter((x) => selectedGroupNames.has(groupKey(x)))) {
         try {
-          const res = await fetch(`/api/address-books/${encodeURIComponent(groupName)}`, {
+          const res = await fetch(`/api/address-books/${encodeURIComponent(g.group_name)}?${ownerParam(g)}`, {
             headers: { Authorization: `Bearer ${token}` }
           });
           const data = await res.json();
@@ -332,7 +345,7 @@ export default function AddressBookModal({
                     try {
                       // ★ D219+ Part 2 박과장님 신고: appendingGroupName 분기 — append endpoint 호출
                       const url = appendingGroupName
-                        ? `/api/address-books/${encodeURIComponent(appendingGroupName)}/append`
+                        ? `/api/address-books/${encodeURIComponent(appendingGroupName)}/append?${appendingOwnerParam}`
                         : '/api/address-books';
                       const body = appendingGroupName
                         ? { contacts: valid }
@@ -607,51 +620,54 @@ export default function AddressBookModal({
             <>
               <div className="space-y-2">
                 {addressGroups.slice(addressPage * 5, addressPage * 5 + 5).map((group) => (
-                  <div key={group.group_name} className="border rounded-lg overflow-hidden">
+                  <div key={groupKey(group)} className="border rounded-lg overflow-hidden">
                     <div className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100">
                       <div className="flex items-center gap-2">
                         {/* ★ D144 P3-(b): 다중 선택 체크박스 */}
                         <input
                           type="checkbox"
-                          checked={selectedGroupNames.has(group.group_name)}
-                          onChange={() => toggleGroupSelection(group.group_name)}
+                          checked={selectedGroupNames.has(groupKey(group))}
+                          onChange={() => toggleGroupSelection(groupKey(group))}
                           className="w-4 h-4 cursor-pointer accent-blue-600"
                           title="다중 선택"
                         />
                         <div>
-                          <div className="font-medium">{group.group_name}</div>
+                          <div className="font-medium">
+                            {group.group_name}
+                            {group.owner_name && <span className="ml-1.5 text-xs font-normal text-gray-400">· {group.owner_name}</span>}
+                          </div>
                           <div className="text-sm text-gray-500">{group.count}명</div>
                         </div>
                       </div>
                       <div className="flex gap-2">
                         <button
                           onClick={async () => {
-                            if (addressViewGroup === group.group_name) {
+                            if (addressViewGroup === groupKey(group)) {
                               setAddressViewGroup(null);
                               setAddressViewContacts([]);
                               setAddressViewSearch('');
                             } else {
                               const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}`, {
+                              const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}?${ownerParam(group)}`, {
                                 headers: { Authorization: `Bearer ${token}` }
                               });
                               const data = await res.json();
                               if (data.success) {
-                                setAddressViewGroup(group.group_name);
+                                setAddressViewGroup(groupKey(group));
                                 setAddressViewContacts(data.contacts || []);
                                 setAddressViewSearch('');
                               }
                             }
                           }}
                           className="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-sm"
-                        >{addressViewGroup === group.group_name ? '닫기' : '조회'}</button>
+                        >{addressViewGroup === groupKey(group) ? '닫기' : '조회'}</button>
                         <button
                           onClick={async () => {
                             const seq = ++loadSeqRef.current;
                             setListLoading(true);
                             try {
                               const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}`, {
+                              const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}?${ownerParam(group)}`, {
                                 headers: { Authorization: `Bearer ${token}` }
                               });
                               const data = await res.json();
@@ -684,14 +700,14 @@ export default function AddressBookModal({
                         >불러오기</button>
                         {/* ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 추가 버튼 */}
                         <button
-                          onClick={() => handleStartAppend(group.group_name)}
+                          onClick={() => handleStartAppend(group)}
                           disabled={isUploading}
                           className="px-3 py-1 bg-violet-100 text-violet-700 rounded hover:bg-violet-200 text-sm disabled:opacity-40"
                           title="기존 그룹에 번호 추가"
                         >+ 추가</button>
                         {/* ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 다운로드 버튼 (xlsx) */}
                         <button
-                          onClick={() => handleDownloadGroup(group.group_name)}
+                          onClick={() => handleDownloadGroup(group)}
                           disabled={isUploading}
                           className="px-3 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-sm disabled:opacity-40"
                           title="Excel 다운로드"
@@ -704,14 +720,14 @@ export default function AddressBookModal({
                             confirmLabel: '삭제',
                             onConfirm: async () => {
                               const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}`, {
+                              const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}?${ownerParam(group)}`, {
                                 method: 'DELETE',
                                 headers: { Authorization: `Bearer ${token}` }
                               });
                               const data = await res.json();
                               if (data.success) {
-                                setAddressGroups(prev => prev.filter(g => g.group_name !== group.group_name));
-                                if (addressViewGroup === group.group_name) {
+                                setAddressGroups(prev => prev.filter(g => groupKey(g) !== groupKey(group)));
+                                if (addressViewGroup === groupKey(group)) {
                                   setAddressViewGroup(null);
                                   setAddressViewContacts([]);
                                 }
@@ -724,7 +740,7 @@ export default function AddressBookModal({
                         >삭제</button>
                       </div>
                     </div>
-                    {addressViewGroup === group.group_name && (
+                    {addressViewGroup === groupKey(group) && (
                       <div className="p-3 border-t bg-white">
                         <div className="flex gap-2 mb-2">
                           <input

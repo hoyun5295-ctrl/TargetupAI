@@ -30,6 +30,8 @@ import { resolveEmailSectionsForCustomer, renderEmailText } from './email/email-
 import type { EmailDesign } from './email/email-tokens';
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
 import { buildCustomerFilter } from './customer-filter';
+// ★ 2026-09-27 한줄로 V2 S5-04 — 발송 주인 분류코드 범위
+import { getOwnerCustomerScopeSql } from './store-scope';
 import { hasUneditedPlaceholder } from './email-ai';
 // ★ 2026-07-02 개인화 변수 동적화 — CT-58 회사 실측 프로필(채워진 필드만 노출)
 import { getCompanyDataProfile } from './company-data-profile';
@@ -782,7 +784,10 @@ function mapEmailRecipientRow(r: any): EmailRecipient {
 export async function resolveCustomerRecipients(
   companyId: string,
   grades?: string[],
+  ownerUserId?: string | null,
 ): Promise<EmailRecipient[]> {
+  // ★ 2026-09-27 한줄로 V2 S5-04 — 발송 주인(즉시 = 요청 담당자 · 예약 = 캠페인 작성자)의 분류코드 범위. 관리자·주인 없음 = 빈 조각(종전).
+  const scopeSql = await getOwnerCustomerScopeSql(companyId, ownerUserId, '');
   const params: any[] = [companyId];
   let gradeClause = '';
   if (grades && grades.length > 0) {
@@ -792,7 +797,7 @@ export async function resolveCustomerRecipients(
   const result = await query(
     `SELECT DISTINCT ON (lower(email)) email, ${RECIPIENT_SELECT_COLS}
      FROM customers
-     WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}
+     WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}${scopeSql}
      ORDER BY lower(email)`,
     params,
   );
@@ -807,7 +812,10 @@ export async function resolveCustomerRecipients(
 export async function resolveCustomerRecipientsByFilter(
   companyId: string,
   filter: Record<string, { operator: string; value: any }>,
+  ownerUserId?: string | null,
 ): Promise<EmailRecipient[]> {
+  // ★ 2026-09-27 한줄로 V2 S5-04 — 발송 주인 분류코드 범위(등급 경로와 같은 규칙)
+  const scopeSql = await getOwnerCustomerScopeSql(companyId, ownerUserId, 'c');
   const { sql: filterSql, params: filterParams } = buildCustomerFilter(filter, {
     tableAlias: 'c',
     startParamIndex: 2,
@@ -817,7 +825,7 @@ export async function resolveCustomerRecipientsByFilter(
   const result = await query(
     `SELECT DISTINCT ON (lower(c.email)) c.email, ${RECIPIENT_PERSONALIZATION_COLS.map((c) => `c.${c}`).join(', ')}
      FROM customers c
-     WHERE c.company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${filterSql}
+     WHERE c.company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${filterSql}${scopeSql}
      ORDER BY lower(c.email)`,
     [companyId, ...filterParams],
   );

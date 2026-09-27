@@ -3,8 +3,9 @@
  *
  * 생성 시점의 "언제·어떤 맥락에서 나가는지"를 한국어로 정리해 프롬프트에 주입한다.
  * 전부 달력 사실(코드 테이블)만 — 추정·임의 상수 0.
- * 음력 공휴일/명절은 연도별 양력 날짜가 달라지므로 확정된 연도(2026)만 표기.
- *   미확정 연도는 양력 공휴일만 인식한다(추측 날짜 금지).
+ * 음력 공휴일/명절은 연도별 양력 날짜가 달라지므로 확정된 연도(2026·2027)만 표기.
+ *   미확정 연도는 양력 공휴일만 인식하고, 설·추석 시즌도 만들지 않는다(추측 날짜 금지).
+ *   ★ 2026-09-27 한줄로 V2 R199 — 설·추석 시즌 창은 그해 음력 공휴일 표에서 계산한다(옛: 2026 날짜 MM-DD 고정 → 2027부터 틀림).
  * 날씨(weather)는 발송 직전 주입용 슬롯 — 본 모듈은 타입만 정의(데이터 어댑터는 후속 Phase).
  */
 
@@ -50,11 +51,15 @@ const SOLAR_HOLIDAYS: Record<string, string> = {
 };
 
 // 음력 공휴일 — 연도별 양력 날짜 (확정 연도만, 추측 금지). YYYY-MM-DD.
-// 2027+ 설/추석/부처님오신날은 확정 후 여기 추가한다.
+// 2028+ 설/추석/부처님오신날은 확정 후 여기 추가한다(월력요항 · 대체공휴일은 넣지 않는다 = 2026과 같은 규칙).
+// ★ 2026-09-27 2027 추가 — 공휴일표 두 출처 대조(설 02-06~08 · 부처님오신날 05-13 · 추석 09-14~16 · 요일 계산 일치).
 const LUNAR_HOLIDAYS: Record<string, string> = {
   '2026-02-16': '설날', '2026-02-17': '설날', '2026-02-18': '설날',
   '2026-05-24': '부처님오신날',
   '2026-09-24': '추석', '2026-09-25': '추석', '2026-09-26': '추석',
+  '2027-02-06': '설날', '2027-02-07': '설날', '2027-02-08': '설날',
+  '2027-05-13': '부처님오신날',
+  '2027-09-14': '추석', '2027-09-15': '추석', '2027-09-16': '추석',
 };
 
 // 기념일 (공휴일 아님, MM-DD)
@@ -74,19 +79,22 @@ const SOLAR_TERMS: Record<string, string> = {
   '11-07': '입동', '11-22': '소설', '12-07': '대설', '12-22': '동지',
 };
 
-interface EventDef { key: string; label: string; industries: string[] | 'all'; start: string; end: string; }
+interface EventDef { key: string; label: string; industries: string[] | 'all'; start: string; end: string; lunar?: string; }
+
+/** 음력 명절 시즌 = 연휴 첫날 N일 전 ~ 연휴 마지막 날(2026 창 02-10~02-18 · 09-18~09-26과 같다) */
+const LUNAR_EVENT_LEAD_DAYS = 6;
 
 // 업종 시즌 이벤트 — window는 'MM-DD' (같은 달/연 내 범위만; 연을 넘는 범위는 분리해 정의)
-// 음력 명절 window는 2026 기준 근사. 'all'은 전 업종 공통.
+// 음력 명절(lunar)은 start/end 대신 그해 LUNAR_HOLIDAYS에서 창을 계산한다. 'all'은 전 업종 공통.
 const EVENTS: EventDef[] = [
   { key: 'new_year', label: '새해', industries: 'all', start: '01-01', end: '01-10' },
-  { key: 'lunar_new_year', label: '설 명절', industries: 'all', start: '02-10', end: '02-18' },
+  { key: 'lunar_new_year', label: '설 명절', industries: 'all', start: '', end: '', lunar: '설날' },
   { key: 'valentine', label: '발렌타인 시즌', industries: ['fashion', 'beauty', 'food'], start: '02-07', end: '02-14' },
   { key: 'new_semester', label: '새 학기', industries: ['edu', 'stationery', 'fashion'], start: '02-25', end: '03-10' },
   { key: 'white_day', label: '화이트데이 시즌', industries: ['fashion', 'beauty', 'food'], start: '03-07', end: '03-14' },
   { key: 'family_month', label: '가정의 달', industries: 'all', start: '05-01', end: '05-15' },
   { key: 'summer_vacation', label: '여름 휴가철', industries: 'all', start: '07-15', end: '08-15' },
-  { key: 'chuseok', label: '추석 명절', industries: 'all', start: '09-18', end: '09-26' },
+  { key: 'chuseok', label: '추석 명절', industries: 'all', start: '', end: '', lunar: '추석' },
   { key: 'halloween', label: '핼러윈', industries: ['fashion', 'beauty', 'food'], start: '10-25', end: '10-31' },
   { key: 'black_friday', label: '블랙프라이데이', industries: 'all', start: '11-20', end: '11-30' },
   { key: 'year_end', label: '연말 시즌', industries: 'all', start: '12-15', end: '12-31' },
@@ -138,13 +146,27 @@ export function buildTemporalContext(now: Date): TemporalContext {
   };
 }
 
+/** 그해 창. 음력 명절은 LUNAR_HOLIDAYS에서 계산하고, 그해 날짜가 없으면 null(명절 문맥을 만들지 않는다 · 추측 금지). */
+function resolveEventWindow(e: EventDef, year: number): { start: string; end: string } | null {
+  if (!e.lunar) return { start: e.start, end: e.end };
+  const days = Object.keys(LUNAR_HOLIDAYS).filter((k) => k.startsWith(`${year}-`) && LUNAR_HOLIDAYS[k] === e.lunar).sort();
+  if (days.length === 0) return null;
+  const first = new Date(`${days[0]}T00:00:00Z`);
+  first.setUTCDate(first.getUTCDate() - LUNAR_EVENT_LEAD_DAYS);
+  return { start: `${pad(first.getUTCMonth() + 1)}-${pad(first.getUTCDate())}`, end: days[days.length - 1].slice(5) };
+}
+
 export function buildIndustryEvents(industryCode: string | null, now: Date): IndustryEvent[] {
-  const { m, d } = kstParts(now);
+  const { y, m, d } = kstParts(now);
   const mmdd = `${pad(m)}-${pad(d)}`;
-  return EVENTS
-    .filter((e) => e.industries === 'all' || (!!industryCode && e.industries.includes(industryCode)))
-    .filter((e) => mmdd >= e.start && mmdd <= e.end)
-    .map((e) => ({ key: e.key, label: e.label, window: `${e.start}~${e.end}` }));
+  const out: IndustryEvent[] = [];
+  for (const e of EVENTS) {
+    if (!(e.industries === 'all' || (!!industryCode && e.industries.includes(industryCode)))) continue;
+    const w = resolveEventWindow(e, y);
+    if (!w || mmdd < w.start || mmdd > w.end) continue;
+    out.push({ key: e.key, label: e.label, window: `${w.start}~${w.end}` });
+  }
+  return out;
 }
 
 export function renderContextForPrompt(ctx: CopyContext): string {

@@ -621,3 +621,18 @@ export async function prepaidReverseOverRefund(
     client.release();
   }
 }
+
+/**
+ * ★ 2026-09-27 한줄로 V2 m075 — 차감 실패 응답. **잔액 부족만** 402 + insufficientBalance(화면이 충전 안내를 연다) ·
+ * 그 밖(차감 처리 오류 · 회사 없음)은 500. 옛: 라우트가 모든 실패를 402 잔액 부족으로 응답해 DB 오류에도 충전 안내가 떴다.
+ */
+export function deductFailureHttp(d: { error?: string; insufficientBalance?: boolean; balance?: number; amount?: number }): {
+  status: number;
+  body: { error?: string; insufficientBalance: boolean; balance?: number; requiredAmount?: number };
+} {
+  const insufficient = d.insufficientBalance === true;
+  return {
+    status: insufficient ? 402 : 500,
+    body: { error: d.error, insufficientBalance: insufficient, balance: d.balance, requiredAmount: d.amount },
+  };
+}

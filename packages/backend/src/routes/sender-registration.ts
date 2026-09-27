@@ -7,7 +7,6 @@ import {
   // 담당자
   getManagers,
   createManager,
-  updateManager,
   deleteManager,
   // 담당자 승인/반려
   getPendingManagers,
@@ -112,20 +111,8 @@ router.post('/managers', authenticate, requireCompanyAdmin, docUpload.single('au
   }
 });
 
-// PUT /managers/:id — 담당자 수정
-router.put('/managers/:id', authenticate, requireCompanyAdmin, async (req: Request, res: Response) => {
-  try {
-    const companyId = (req as any).user!.companyId;
-    const manager = await updateManager(req.params.id, companyId, req.body);
-    if (!manager) {
-      return res.status(404).json({ error: '담당자를 찾을 수 없습니다.' });
-    }
-    res.json({ success: true, manager });
-  } catch (error: any) {
-    console.error('담당자 수정 실패:', error);
-    res.status(500).json({ error: '담당자 수정 실패' });
-  }
-});
+// ★ 2026-09-27 한줄로 V2 R342 — PUT /managers/:id(담당자 수정) 제거: 상태 확인 없이 **승인된** 담당자의 이름·전화를
+//   재승인 없이 바꿨다(위임장 승인 우회). 화면 소비처 0(CallbacksTab은 목록·등록·삭제만). 바꾸려면 삭제 뒤 새로 등록해 승인받는다.
 
 // DELETE /managers/:id — 담당자 삭제
 router.delete('/managers/:id', authenticate, requireCompanyAdmin, async (req: Request, res: Response) => {

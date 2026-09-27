@@ -50,7 +50,9 @@ export async function countTargetByFilter(
   companyId: string,
   channel: ChannelKey,
   filter: Record<string, unknown>,
+  scopeSql = '',
 ): Promise<TargetCountResult> {
+  // ★ 2026-09-27 한줄로 V2 S5-04 — scopeSql = 요청자 분류코드 범위(store-scope getOwnerCustomerScopeSql · 관리자 = 빈 조각)
   const { sql: filterSql, params } = buildCustomerFilter(filter, {
     tableAlias: 'c',
     startParamIndex: 2,
@@ -60,13 +62,13 @@ export async function countTargetByFilter(
   const channelWhere = buildChannelEligibilityWhere(channel, 'c');
   const fullParams = [companyId, ...params];
 
-  const matchSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid${filterSql}`;
-  const eligSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}`;
+  const matchSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid${filterSql}${scopeSql}`;
+  const eligSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}${scopeSql}`;
   // grade 동봉 — 발송 모달 미리보기가 하드코딩 샘플 대신 실제 추출 타겟으로 치환 (SCHEMA.md:418 실측)
   const sampleSql = `
       SELECT c.id, c.phone, c.name, c.gender, c.grade, c.region, c.last_purchase_date, c.total_purchase_amount
         FROM customers c
-       WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}
+       WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}${scopeSql}
        ORDER BY c.id ASC
        LIMIT 5`;
 

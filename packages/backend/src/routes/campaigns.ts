@@ -27,6 +27,8 @@ import { convertButtonsToQTmsg } from '../utils/alimtalk-button';
 import { buildAlimtalkEtcJson } from '../utils/alimtalk-emphasize';
 import { decideKakaoTemplateSendable, getImcTemplateStatusSafe } from '../utils/kakao-template-guard';
 import { getStoreScope } from '../utils/store-scope';
+// ★ 2026-09-27 한줄로 V2 m103 — 캠페인 id 라우트 작성자 소유 CT
+import { canAccessOwnedRow } from '../utils/owner-scope';
 import { buildSendConsent, resolveSendConsent, isMallConsentMigrationPending, MALL_CONSENT_MIGRATION_PENDING } from '../utils/mall-consent';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 // ★ 메시징 컨트롤타워 import
@@ -46,7 +48,7 @@ import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback,
 // ★ 2026-09-02 브랜드 이미지의 카카오 콘텐츠 서버 확정 — img_url에는 업로드본만 실을 수 있다(IMC 회신).
 //   조립기가 우리 서빙 URL을 거절하므로, 조립기를 부르는 경로는 그 앞에서 이 치환을 거쳐야 한다.
 // (판정 → 치환 순서는 prepareBrandAttachmentForSend가 소유한다 — brand-message에서 가져온다)
-import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
+import { prepaidDeduct, prepaidRefund, REFUND_KEYS, deductFailureHttp } from '../utils/prepaid';
 // ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
 //   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
 import { isBrandOnlyChannel, resolveRefundAxes, resolveSendChannel, resolveChargeMessageType, BRAND_CAMPAIGN_CHANNELS } from '../utils/billing-types';
@@ -407,7 +409,9 @@ router.post('/test-send', async (req: Request, res: Response) => {
             void sendSystemAlert({ dedupKey: `test-refund-miss:${companyId}:${doneType}`, message: `테스트 발송 보상 환불 실패 — company=${companyId} ${doneType} ${managerContacts.length}건 수동 확인 필요` });
           }
         }
-        return res.status(402).json({ error: testDeduct.error, insufficientBalance: true, balance: testDeduct.balance, requiredAmount: testDeduct.amount });
+        // ★ 2026-09-27 한줄로 V2 m075 — 잔액 부족만 402(차감 처리 오류는 500 · 충전 안내를 띄우지 않는다)
+        const testFail = deductFailureHttp(testDeduct);
+        return res.status(testFail.status).json(testFail.body);
       }
       testDeductedTypes.push(axis.type);
     }
@@ -753,6 +757,10 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     }
 
     const campaign = campaignResult.rows[0];
+    // ★ 2026-09-27 한줄로 V2 m103(SCOPE) — 담당자는 본인이 만든 캠페인만(목록과 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
+    if (!canAccessOwnedRow(req, campaign.created_by)) {
+      return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+    }
 
     // ★ 2026-09-27 한줄로 V2 m070(MULTIRUN · 정책 추천안 · Harold 확인 필요) — 발송 뒤 상태(예약·발송 중·완료·취소·실패)의 캠페인은
     //   이 문으로 다시 보내지 않는다. 옛 게이트는 'sending'만 막아 API로 재발송이 됐고, 환불 항아리가 캠페인 단위 누적이라
@@ -1185,12 +1193,9 @@ if (sendDeduct.ok) aiDeductedAxes.add(deductType);
 if (!sendDeduct.ok) {
   // 실행 행을 남겨 두면 위쪽 중복 발송 방지 검사가 이후 발송을 영구히 막는다(충전해도 못 보낸다).
   await failCampaignRun(campaignRun.id, '선불 잔액 부족으로 발송 중단');
-  return res.status(402).json({
-    error: sendDeduct.error,
-    insufficientBalance: true,
-    balance: sendDeduct.balance,
-    requiredAmount: sendDeduct.amount
-  });
+  // ★ 2026-09-27 한줄로 V2 m075 — 잔액 부족만 402(차감 처리 오류는 500)
+  const sendDeductFail = deductFailureHttp(sendDeduct);
+  return res.status(sendDeductFail.status).json({ ...sendDeductFail.body });
 }
 
 // ★ 2026-07-29 `both`는 **같은 수신자를 두 축으로 적재한다** — 아래 발송 단계가
@@ -1223,12 +1228,9 @@ if (sendChannel === 'both') {
     }
     // 차감은 되돌렸지만 실행 행은 그대로 남아 캠페인을 잠그던 자리다(2026-08-17).
     await failCampaignRun(campaignRun.id, '브랜드메시지 차감 실패로 발송 중단');
-    return res.status(402).json({
-      error: brandDeduct.error,
-      insufficientBalance: true,
-      balance: brandDeduct.balance,
-      requiredAmount: brandDeduct.amount,
-    });
+    // ★ 2026-09-27 한줄로 V2 m075 — 잔액 부족만 402(차감 처리 오류는 500)
+    const brandDeductFail = deductFailureHttp(brandDeduct);
+    return res.status(brandDeductFail.status).json({ ...brandDeductFail.body });
   }
 }
 
@@ -1666,6 +1668,10 @@ router.get('/:id', async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     }
+    // ★ 2026-09-27 한줄로 V2 m103(SCOPE) — 담당자는 본인이 만든 캠페인만(목록과 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
+    if (!canAccessOwnedRow(req, result.rows[0].created_by)) {
+      return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+    }
 
     // 발송 이력도 함께 조회
     const runs = await query(
@@ -1989,10 +1995,12 @@ router.get('/:id/send-progress', async (req: Request, res: Response) => {
     const companyId = (req as any).user?.companyId;
     if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
     const result = await query(
-      `SELECT target_count, processed_count, send_phase, sent_count, fail_count FROM campaigns WHERE id = $1 AND company_id = $2`,
+      `SELECT target_count, processed_count, send_phase, sent_count, fail_count, created_by FROM campaigns WHERE id = $1 AND company_id = $2`,
       [req.params.id, companyId]
     );
     if (result.rows.length === 0) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다' });
+    // ★ 2026-09-27 한줄로 V2 m103(SCOPE) — 담당자는 본인이 만든 캠페인만(목록과 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
+    if (!canAccessOwnedRow(req, result.rows[0].created_by)) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다' });
     const r = result.rows[0];
     const total = r.target_count || 0;
     const processed = r.processed_count || 0;
@@ -2683,13 +2691,9 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (!directDeduct.ok) {
       // 캠페인 레코드 롤백
       await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
-      return res.status(402).json({
-        success: false,
-        error: directDeduct.error,
-        insufficientBalance: true,
-        balance: directDeduct.balance,
-        requiredAmount: directDeduct.amount
-      });
+      // ★ 2026-09-27 한줄로 V2 m075 — 잔액 부족만 402(차감 처리 오류는 500)
+      const directDeductFail = deductFailureHttp(directDeduct);
+      return res.status(directDeductFail.status).json({ success: false, ...directDeductFail.body });
     }
 
     // ★ 2026-07-29 캠페인 발송과 같은 구멍이 직접발송에도 있었다 — `both`는 아래에서
@@ -2720,13 +2724,9 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           await markRefundPendingAxes(campaignId, [{ count: filteredRecipients.length, messageType: directDeductType, refundKey: REFUND_KEYS.CANCEL }]);
           await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [campaignId]).catch(() => {});
         }
-        return res.status(402).json({
-          success: false,
-          error: brandDeduct.error,
-          insufficientBalance: true,
-          balance: brandDeduct.balance,
-          requiredAmount: brandDeduct.amount,
-        });
+        // ★ 2026-09-27 한줄로 V2 m075 — 잔액 부족만 402(차감 처리 오류는 500)
+        const brandDeductFail = deductFailureHttp(brandDeduct);
+        return res.status(brandDeductFail.status).json({ success: false, ...brandDeductFail.body });
       }
     }
 
@@ -3099,6 +3099,13 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     const userId = (req as any).user?.userId;
     const campaignId = req.params.id;
 
+    // ★ 2026-09-27 한줄로 V2 m103(SCOPE) — 담당자는 본인이 만든 캠페인만(목록과 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
+    //   취소 CT(cancelCampaign)는 작성자를 대조하지 않으므로 부르기 전에 본다.
+    const own = await query(`SELECT created_by FROM campaigns WHERE id = $1 AND company_id = $2`, [campaignId, companyId]);
+    if (own.rows.length === 0 || !canAccessOwnedRow(req, own.rows[0].created_by)) {
+      return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다' });
+    }
+
     const result = await cancelCampaign(campaignId, companyId, {
       cancelledBy: userId,
       cancelledByType: (req as any).user?.userType,
@@ -3139,6 +3146,10 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     }
 
     const camp = campaign.rows[0];
+    // ★ 2026-09-27 한줄로 V2 m103(SCOPE) — 담당자는 본인이 만든 캠페인만(목록과 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
+    if (!canAccessOwnedRow(req, camp.created_by)) {
+      return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다' });
+    }
 
     // 예약 상태면 먼저 MySQL 라인 테이블(발송 당시 기록 1순위 + 전 라인 합집합)에서 조회 시도 — 2026-06-11 라인 불일치 fix
     const recipientTables = await getCampaignQueueTables(companyId, camp.created_by || undefined, camp.send_config);
@@ -3295,6 +3306,10 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
     if (campaign.rows.length === 0) {
       return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
     }
+    // ★ 2026-09-27 한줄로 V2 m103(SCOPE) — 담당자는 본인이 만든 캠페인만(목록과 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
+    if (!canAccessOwnedRow(req, campaign.rows[0].created_by)) {
+      return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
+    }
 
     // 15분 이내 체크
     const scheduledAt = new Date(campaign.rows[0].scheduled_at);
@@ -3425,6 +3440,10 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
     if (campaign.rows.length === 0) {
       return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
     }
+    // ★ 2026-09-27 한줄로 V2 m103(SCOPE) — 담당자는 본인이 만든 캠페인만(목록과 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
+    if (!canAccessOwnedRow(req, campaign.rows[0].created_by)) {
+      return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
+    }
 
     // ★ 2026-09-26 한줄로 V2 F24 — 대량 직접발송은 워커가 선점할 때 읽은 send_config로 적재한다.
     //   적재 중(preparing·processing)에 고치면 적재된 행과 나머지 청크가 옛·새 값으로 갈라진다 → 적재가 끝난 뒤 다시.
@@ -3521,6 +3540,10 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     );
 
     if (campaign.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
+    }
+    // ★ 2026-09-27 한줄로 V2 m103(SCOPE) — 담당자는 본인이 만든 캠페인만(목록과 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
+    if (!canAccessOwnedRow(req, campaign.rows[0].created_by)) {
       return res.status(404).json({ success: false, error: '예약 캠페인을 찾을 수 없습니다' });
     }
 

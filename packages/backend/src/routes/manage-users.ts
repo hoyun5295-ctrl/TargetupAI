@@ -213,7 +213,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
       if (check.rows[0].company_id !== callerCompanyId) {
         return res.status(403).json({ error: '자사 사용자만 삭제할 수 있습니다.' });
       }
-      if (check.rows[0].user_type === 'company_admin') {
+      // ★ 2026-09-27 한줄로 V2 R132 — DB 값은 'admin'(JWT의 company_admin은 토큰 변환값 · SCHEMA users.user_type).
+      //   옛 비교('company_admin')는 늘 거짓이라 회사 관리자가 다른 관리자 계정을 지울 수 있었다.
+      if (check.rows[0].user_type === 'admin') {
         return res.status(403).json({ error: '관리자 계정은 삭제할 수 없습니다.' });
       }
     }

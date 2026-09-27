@@ -173,9 +173,10 @@ export async function updateSegment(
 /**
  * 세그먼트 사용 시각 갱신 (fire-and-forget)
  */
-export async function touchSegment(segmentId: string): Promise<void> {
+export async function touchSegment(segmentId: string, companyId: string, userId: string): Promise<void> {
+  // ★ 2026-09-27 한줄로 V2 R340 — 본인 것만(삭제·수정과 같은 조건). 옛: id만으로 UPDATE.
   await query(
-    'UPDATE saved_segments SET last_used_at = NOW() WHERE id = $1',
-    [segmentId]
+    'UPDATE saved_segments SET last_used_at = NOW() WHERE id = $1 AND company_id = $2 AND user_id = $3',
+    [segmentId, companyId, userId]
   );
 }

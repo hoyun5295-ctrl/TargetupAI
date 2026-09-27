@@ -3580,7 +3580,8 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
                 <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_inapp_impressions KST 시간대별 집계</div>
               </div>
 
-              {/* 디바이스 */}
+              {/* 디바이스 — ★ 2026-09-27 한줄로 V2 R252: 실측이 있을 때만(노출 기록에 기기 정보가 아직 없다 · 옛 70·30 나눔 표시 제거) */}
+              {stats.device.length > 0 && (
               <div className="bg-white/5 border border-white/10 rounded-xl p-4">
                 <h4 className="text-sm font-bold text-white mb-3">디바이스 분포</h4>
                 <div className="grid grid-cols-2 gap-3">
@@ -3592,8 +3593,9 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-2">Data source: 추정 분포 (첫 단계, 정확한 user_agent 매핑은 추후 강화)</div>
+                <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_inapp_impressions 기기 정보</div>
               </div>
+              )}
             </>
           )}
 

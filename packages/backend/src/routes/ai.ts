@@ -9,7 +9,7 @@ import { STANDARD_FIELD_FALLBACKS } from '../utils/var-fallback';
 import { selectJourneyTargetCustomerIds } from '../utils/journey-target-extractor';
 import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
-import { getStoreScope } from '../utils/store-scope';
+import { getStoreScope, getOwnerCustomerScopeSql, getJourneyOwnerScopeSql } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
 // ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
@@ -71,6 +71,7 @@ import {
   generateProposalForOperator,
   // ★ 2026-08-04 리마인드 명단 — 발송과 같은 코호트를 읽는다(보여준 수 = 나가는 수)
   readCampaignQueuedPhones,
+  OPERATOR_STATUSES,
 } from '../utils/continuous-operator';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit (Thompson Sampling)
 // ★ D188 Phase 2-B-3 (2026-05-21): journey_step_variants CRUD + reward + 추천 헬퍼 import 추가.
@@ -1244,7 +1245,8 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
     }
 
     // 여정 trigger 기준 후보 추출 (발송과 동일 컨트롤타워). 상위 30명 추출 후 store-scope 통과 첫 1명.
-    const targetIds = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters || {}, 30);
+    // ★ 2026-09-27 한줄로 V2 S5-04 — 저장 전 여정 미리보기 = 요청자 분류코드 범위
+    const targetIds = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters || {}, 30, undefined, undefined, await getOwnerCustomerScopeSql(companyId, req.user?.userId));
     if (targetIds.length === 0) {
       return res.json({ success: true, sampleCustomer: null });
     }
@@ -2553,7 +2555,9 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     // ★ 2026-07-12 C-2: 죽은 설정 수신 제거(delivery_policy·verification_required_days·opt_out_minutes·
     //   spam_score_threshold·max_spam_retries) — 소비 로직 0. 구클라이언트가 보내도 무시(에러 없음).
     const operator = await updateOperator(companyId, req.params.id, {
-      name, objective, schedule, scheduleTime: schedule_time, status,
+      name, objective, schedule, scheduleTime: schedule_time,
+      // ★ 2026-09-27 한줄로 V2 R080 — 선언된 상태값만(목록 밖 = 변경 없음 · 화면은 편집 때 현재 상태를 그대로 보낸다)
+      status: (OPERATOR_STATUSES as readonly string[]).includes(status) ? status : undefined,
       scheduleDayOfWeek: schedule_day_of_week === undefined ? undefined : (schedule_day_of_week === null ? null : Number(schedule_day_of_week)),
       scheduleDayOfMonth: schedule_day_of_month === undefined ? undefined : (schedule_day_of_month === null ? null : Number(schedule_day_of_month)),
       scheduleMonth: schedule_month === undefined ? undefined : (schedule_month === null ? null : Number(schedule_month)),  // ★ 2026-07-05 yearly
@@ -2724,7 +2728,7 @@ router.get('/operator/continuous/learning-summary', async (req: Request, res: Re
     });
   } catch (err: any) {
     console.error('[Continuous learning-summary] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '학습 영역 요약 조회 실패' });
+    return res.status(500).json({ success: false, error: err?.message || '학습 요약 조회 실패' });
   }
 });
 
@@ -3031,14 +3035,14 @@ router.post('/operator/proposals/:id/admin-stop', async (req: Request, res: Resp
     const { reason, detail } = req.body || {};
     const validReasons = ['spam_suspicion', 'content_correction', 'no_send', 'other'];
     if (!validReasons.includes(reason)) {
-      return res.status(400).json({ success: false, error: '정지 사유 영역 의무 (spam_suspicion / content_correction / no_send / other).' });
+      return res.status(400).json({ success: false, error: '정지 사유를 골라 주세요(spam_suspicion · content_correction · no_send · other).' });
     }
     const ok = await adminStopProposal(companyId, req.params.id, { reason, detail });
-    if (!ok) return res.status(404).json({ success: false, error: '제안 영역 안 찾을 수 없습니다.' });
+    if (!ok) return res.status(404).json({ success: false, error: '제안을 찾을 수 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Proposals admin-stop] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '정지 영역 오류' });
+    return res.status(500).json({ success: false, error: err?.message || '정지 처리 중 오류가 발생했습니다.' });
   }
 });
 
@@ -3298,12 +3302,12 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
 
     const documents = await buildCompanyDocuments(companyId);
     if (documents.length === 0) {
-      return res.status(400).json({ success: false, error: '회사 데이터가 부족하여 근거를 제시할 영역이 없습니다. 일부 캠페인을 진행한 후 다시 시도해주세요.' });
+      return res.status(400).json({ success: false, error: '회사 데이터가 부족하여 근거를 제시할 수 없습니다. 일부 캠페인을 진행한 후 다시 시도해주세요.' });
     }
 
     const systemPrompt = `당신은 한줄로AI Operator의 분석 에이전트입니다.
 제공된 document에 명시된 사실만 응답 + 출처 근거 명시 (citations 활용).
-추측/창작 X. document에 없는 영역은 "정보가 없습니다"로 응답.
+추측/창작 X. document에 없는 내용은 "정보가 없습니다"로 응답.
 한국어 존댓말 (~입니다 / ~합니다).`;
 
     const answer = await callAIWithCitations({
@@ -3544,7 +3548,7 @@ router.post('/operator/journeys/preview-message', async (req: Request, res: Resp
       const j = jrow.rows[0];
       if (j?.trigger_event) {
         try {
-          const ids = await selectJourneyTargetCustomerIds(companyId, j.trigger_event, j.trigger_filters || {}, 50);
+          const ids = await selectJourneyTargetCustomerIds(companyId, j.trigger_event, j.trigger_filters || {}, 50, undefined, undefined, await getJourneyOwnerScopeSql(companyId, journeyId));
           if (ids.length > 0) {
             const cr = await query(
               `SELECT name, gender, age, grade, points, email, address,
@@ -3642,7 +3646,7 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
     const confirmCbExcl = !!(req.body && (req.body as any).confirmCallbackExclusion);
     if (stRow.rows[0].callback_mode === 'store' && stRow.rows[0].trigger_event && !confirmCbExcl) {
       try {
-        const cbIds = await selectJourneyTargetCustomerIds(companyId, stRow.rows[0].trigger_event, stRow.rows[0].trigger_filters || {}, 1000);
+        const cbIds = await selectJourneyTargetCustomerIds(companyId, stRow.rows[0].trigger_event, stRow.rows[0].trigger_filters || {}, 1000, undefined, undefined, await getJourneyOwnerScopeSql(companyId, req.params.id));
         if (cbIds.length > 0) {
           const cbCust = await query(
             `SELECT store_phone, callback, custom_fields FROM customers WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
@@ -4026,8 +4030,10 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
     // 여정 trigger 기준 미리보기 샘플 10명 + 전체 매칭 수 (발송과 동일 추출 함수). 0명이면 빈 결과 (자동완화 X).
     const triggerEvent = String(jr.rows[0].trigger_event || '');
     const triggerFilters = jr.rows[0].trigger_filters || {};
-    const samples = await buildJourneyPreviewSamples(companyId, triggerEvent, triggerFilters, 10, req.params.id);
-    const count = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id);
+    // ★ 2026-09-27 한줄로 V2 S5-04 — 미리보기도 발송과 같은 범위(여정 작성자)
+    const scopeSql = await getJourneyOwnerScopeSql(companyId, req.params.id);
+    const samples = await buildJourneyPreviewSamples(companyId, triggerEvent, triggerFilters, 10, req.params.id, scopeSql);
+    const count = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, scopeSql);
 
     return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
@@ -4058,20 +4064,22 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
     const triggerEvent = String(journeyRow.trigger_event || '');
     const triggerFilters = journeyRow.trigger_filters || {};
     const startKind = normalizeStartKind(journeyRow.start_kind);
+    // ★ 2026-09-27 한줄로 V2 S5-04 — [타겟확인]도 발송과 같은 범위(여정 작성자)
+    const targetScopeSql = await getJourneyOwnerScopeSql(companyId, req.params.id);
 
     // 추출 — 발송과 동일 함수(자동완화 X). date_anchor는 앵커 대상 함수, 그 외는 트리거 추출.
     let ids: string[] = [];
     let displayTotal = 0;
     let capped = false;
     if (startKind === 'date_anchor') {
-      ids = await selectAnchorAudienceIds(companyId, triggerFilters, 100);
+      ids = await selectAnchorAudienceIds(companyId, triggerFilters, 100, targetScopeSql);
       // 앵커 대상 전용 count 헬퍼 없음 — 10,000 상한 실측(정직 표기)
-      const totalProbe = await selectAnchorAudienceIds(companyId, triggerFilters, 10001);
+      const totalProbe = await selectAnchorAudienceIds(companyId, triggerFilters, 10001, targetScopeSql);
       capped = totalProbe.length > 10000;
       displayTotal = capped ? 10000 : totalProbe.length;
     } else {
-      ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id);
-      const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id);
+      ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id, undefined, targetScopeSql);
+      const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, targetScopeSql);
       displayTotal = cnt.total;
       capped = cnt.capped;
     }
@@ -4134,8 +4142,10 @@ router.post('/operator/preview-target-samples', async (req: Request, res: Respon
       return res.json({ success: true, samples: [], total: 0, segments: [], capped: false });
     }
 
-    const samples = await buildJourneyPreviewSamples(companyId, triggerEvent, triggerFilters || {}, 10);
-    const count = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters || {});
+    // ★ 2026-09-27 한줄로 V2 S5-04 — 저장 전 미리보기 = 요청자 분류코드 범위
+    const draftScopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
+    const samples = await buildJourneyPreviewSamples(companyId, triggerEvent, triggerFilters || {}, 10, undefined, draftScopeSql);
+    const count = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters || {}, undefined, draftScopeSql);
     return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
     console.error('[Journeys preview-target-samples] 오류:', err);
@@ -4773,7 +4783,7 @@ router.patch('/operator/journeys/:id/archive', async (req: Request, res: Respons
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     const ok = await archiveJourney(companyId, req.params.id);
-    if (!ok) return res.status(409).json({ success: false, error: '보관 영역 이동 X: 활성 여정 또는 이미 보관함 영역.' });
+    if (!ok) return res.status(409).json({ success: false, error: '보관할 수 없습니다. 실행 중인 여정이거나 이미 보관함에 있습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Journeys archive] 오류:', err);
@@ -4792,7 +4802,7 @@ router.patch('/operator/journeys/:id/unarchive', async (req: Request, res: Respo
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     const ok = await unarchiveJourney(companyId, req.params.id);
-    if (!ok) return res.status(404).json({ success: false, error: '보관함 영역 안 찾을 수 없습니다.' });
+    if (!ok) return res.status(404).json({ success: false, error: '보관함에서 찾을 수 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Journeys unarchive] 오류:', err);
@@ -5249,7 +5259,7 @@ router.get('/operator/journeys/:id/step-diagnosis', async (req: Request, res: Re
   } catch (err: any) {
     console.error('[Journey step-diagnosis] 오류:', err);
     const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '진단 영역 오류' });
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '진단 중 오류가 발생했습니다.' });
   }
 });
 
@@ -5268,7 +5278,7 @@ router.get('/operator/journeys/:id/recommend-next-step', async (req: Request, re
   } catch (err: any) {
     console.error('[Journey recommend-next-step] 오류:', err);
     const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '추천 영역 오류' });
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '추천 중 오류가 발생했습니다.' });
   }
 });
 
@@ -5291,7 +5301,7 @@ router.get('/operator/journeys/:id/simulate', async (req: Request, res: Response
   } catch (err: any) {
     console.error('[Journey simulate] 오류:', err);
     const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '시뮬레이션 영역 오류' });
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '시뮬레이션 중 오류가 발생했습니다.' });
   }
 });
 
@@ -5310,7 +5320,7 @@ router.get('/operator/journeys/:id/live-positions', async (req: Request, res: Re
   } catch (err: any) {
     console.error('[Journey live-positions] 오류:', err);
     const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '실시간 위치 영역 오류' });
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '실시간 위치 조회 중 오류가 발생했습니다.' });
   }
 });
 
@@ -5332,14 +5342,14 @@ router.post('/operator/journeys/steps/:stepId/variants/auto-generate', async (re
       [req.params.stepId, companyId]
     );
     if (own.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'step 영역 찾을 수 없습니다.' });
+      return res.status(404).json({ success: false, error: '단계를 찾을 수 없습니다.' });
     }
     const { baseMessage, channel, subject, isAd } = req.body || {};
     if (typeof baseMessage !== 'string' || baseMessage.trim().length < 10) {
-      return res.status(400).json({ success: false, error: 'base 메시지 영역 10자 이상 의무.' });
+      return res.status(400).json({ success: false, error: '기준 메시지는 10자 이상이어야 합니다.' });
     }
     if (!['sms', 'lms', 'mms', 'kakao'].includes(channel)) {
-      return res.status(400).json({ success: false, error: 'channel 영역 sms/lms/mms/kakao 의무.' });
+      return res.status(400).json({ success: false, error: '채널은 sms·lms·mms·kakao 중 하나여야 합니다.' });
     }
     const result = await generateVariantsFromMessage({
       stepId: req.params.stepId,
@@ -5352,7 +5362,7 @@ router.post('/operator/journeys/steps/:stepId/variants/auto-generate', async (re
     return res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('[Journey variants auto-generate] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'variant 자동 생성 영역 오류' });
+    return res.status(500).json({ success: false, error: err?.message || '변형 자동 생성 중 오류가 발생했습니다.' });
   }
 });
 
@@ -5404,7 +5414,7 @@ router.get('/usage', authenticate, async (req: Request, res: Response) => {
       getDailyUsage(companyId, 30),
       getModelBreakdown(companyId, 30),
     ]);
-    const cache = getCacheStats();
+    const cache = getCacheStats(companyId);   // ★ 2026-09-27 R300 — 그 회사 몫만(옛: 전 회사 합산 적중 수와 그로 계산한 절감액)
 
     // ★ D210+ Phase 3 B-8 (2026-05-23 Harold 명시): cache 비용 절감 영역 계산 (hit rate × 평균 호출 비용)
     const avgCostWon = daily.length > 0

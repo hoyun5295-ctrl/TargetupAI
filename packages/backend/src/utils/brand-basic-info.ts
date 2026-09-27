@@ -7,6 +7,7 @@
  */
 import { query } from '../config/database';
 import { isIndustryCode } from './industry-codes';
+import { normalizeBizNumber } from './billing-settings';
 
 /** 화이트리스트 = 실측 확인된 companies 컬럼. 이 목록 밖 키는 무시(임의 컬럼 UPDATE 차단).
  *  ★ 2026-07-21 업태=business_type / 종목=business_category (거래내역서 billing.ts 기준·문안 생성이 business_type 참조). */
@@ -51,8 +52,30 @@ export async function getBrandBasicInfo(companyId: string): Promise<BrandBasicIn
   return out;
 }
 
+/**
+ * ★ 2026-09-27 한줄로 V2 R170 — 세금계산서 공급받는자 정보(상호·사업자등록번호·업태·종목). 관리자만 바꾼다(라우트).
+ * 담당자는 브랜드명·업종만(문안 참고 정보).
+ */
+export const BRAND_LEGAL_FIELDS = ['company_name', 'business_number', 'business_type', 'business_category'] as const;
+
+const bizDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
+const sameLegalValue = (field: string, a: unknown, b: unknown) =>
+  field === 'business_number' ? bizDigits(a) === bizDigits(b) : String(a ?? '').trim() === String(b ?? '').trim();
+
+/** 요청이 법정 칸을 **실제로** 바꾸는가. 화면은 저장 때 전체를 보내므로 지금 값과 같으면(사업자번호는 숫자만 비교) 바뀐 것이 아니다. */
+export function findLegalFieldChanges(current: BrandBasicInfo, picked: BrandBasicInfo): string[] {
+  return BRAND_LEGAL_FIELDS.filter((f) => f in picked && !sameLegalValue(f, picked[f], current[f]));
+}
+
 export async function updateBrandBasicInfo(companyId: string, patch: unknown): Promise<BrandBasicInfo> {
   const picked = pickBasicInfoFields(patch);
+  // ★ 2026-09-27 R170 — 사업자등록번호는 바뀔 때만 형식 CT(숫자 10자리 → 000-00-00000 · 형식 오류면 던진다 → 라우트 400).
+  //   같은 번호면 저장값을 그대로 둔다(옛 표기로 저장된 값 때문에 다른 칸 저장이 막히지 않게).
+  if ('business_number' in picked) {
+    const current = await getBrandBasicInfo(companyId);
+    if (bizDigits(picked.business_number) === bizDigits(current.business_number)) delete picked.business_number;
+    else picked.business_number = normalizeBizNumber(picked.business_number);
+  }
   const keys = Object.keys(picked) as (typeof BRAND_BASIC_FIELDS)[number][];
   if (keys.length === 0) return getBrandBasicInfo(companyId);
   // 컬럼명은 화이트리스트 리터럴, 값만 파라미터 바인딩 — 전달된 키만 부분 업데이트.

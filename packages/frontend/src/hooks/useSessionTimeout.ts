@@ -16,6 +16,9 @@ interface UseSessionTimeoutReturn {
 const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
 const WARNING_BEFORE_SECONDS = 300; // 5분 전 경고
 const TICK_INTERVAL = 1000;
+// ★ 2026-09-27 한줄로 V2 S2-04 — 입력이 이어지면 5분에 한 번 서버 세션도 연장한다(서버 활동 갱신 간격과 같은 5분).
+//   옛: 입력은 화면 타이머만 늘리고 서버에 알리지 않아, 긴 글을 쓰는 동안 서버 세션만 만료돼 저장 순간 강제 로그아웃될 수 있었다.
+const SERVER_PING_INTERVAL_MS = 5 * 60 * 1000;
 
 export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSessionTimeoutReturn {
   const [showWarningModal, setShowWarningModal] = useState(false);
@@ -25,6 +28,21 @@ export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSe
   const timeoutMinutesRef = useRef<number>(30);
   const warningShownRef = useRef(false);
   const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastServerPingRef = useRef<number>(Date.now());
+
+  // 서버 세션 연장 알림(실패해도 화면 타이머는 그대로)
+  const pingServer = useCallback(() => {
+    lastServerPingRef.current = Date.now();
+    try {
+      const token = localStorage.getItem('token');
+      if (token) {
+        fetch('/api/auth/extend-session', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        }).catch(() => {});
+      }
+    } catch {}
+  }, []);
 
   // localStorage에서 세션 타임아웃 분 가져오기
   const getTimeoutMinutes = useCallback((): number => {
@@ -41,11 +59,12 @@ export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSe
   // 활동 감지 → 마지막 활동 시각 갱신
   const handleActivity = useCallback(() => {
     lastActivityRef.current = Date.now();
+    if (!warningShownRef.current && Date.now() - lastServerPingRef.current > SERVER_PING_INTERVAL_MS) pingServer();
     // 경고 모달이 안 떠있을 때만 리셋 (경고 중엔 활동해도 무시)
     if (!warningShownRef.current) {
       // 활동이 감지되면 타이머 리셋됨 (tick에서 자동 계산)
     }
-  }, []);
+  }, [pingServer]);
 
   // 세션 연장
   const extendSession = useCallback(() => {
@@ -54,20 +73,9 @@ export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSe
     setShowWarningModal(false);
     setRemainingSeconds(0);
 
-    // 서버에 세션 연장 알림 (선택적)
-    try {
-      const token = localStorage.getItem('token');
-      if (token) {
-        fetch('/api/auth/extend-session', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        }).catch(() => {}); // 실패해도 프론트 타이머는 리셋
-      }
-    } catch {}
-  }, []);
+    // 서버에 세션 연장 알림 (실패해도 프론트 타이머는 리셋)
+    pingServer();
+  }, [pingServer]);
 
   // 로그아웃 처리
   const handleLogout = useCallback(() => {

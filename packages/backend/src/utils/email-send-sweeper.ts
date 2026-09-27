@@ -32,7 +32,8 @@ function isColumnMissing(err: any): boolean {
 }
 
 /** target_spec → 발송 수신자 해석 */
-async function resolveRecipients(companyId: string, spec: EmailTargetSpec | null): Promise<EmailRecipient[]> {
+// ★ 2026-09-27 한줄로 V2 S5-04 — ownerUserId = 캠페인 작성자(예약 발송에는 요청 사용자가 없다 · 분류코드 범위의 주인)
+async function resolveRecipients(companyId: string, spec: EmailTargetSpec | null, ownerUserId: string | null): Promise<EmailRecipient[]> {
   if (!spec) return [];
   if (spec.type === 'list') {
     const list = (spec.recipients || [])
@@ -46,10 +47,10 @@ async function resolveRecipients(companyId: string, spec: EmailTargetSpec | null
     return filtered.recipients;
   }
   if (spec.type === 'customers') {
-    return resolveCustomerRecipients(companyId, spec.grades);
+    return resolveCustomerRecipients(companyId, spec.grades, ownerUserId);
   }
   if (spec.type === 'filter') {
-    return resolveCustomerRecipientsByFilter(companyId, spec.filter);
+    return resolveCustomerRecipientsByFilter(companyId, spec.filter, ownerUserId);
   }
   return [];
 }
@@ -62,7 +63,7 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
   let dueRows: any[] = [];
   try {
     const res = await query(
-      `SELECT id, company_id, target_spec, subject, html_body, text_body
+      `SELECT id, company_id, created_by, target_spec, subject, html_body, text_body
        FROM email_campaigns
        WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()
        ORDER BY scheduled_at ASC LIMIT 5`,
@@ -101,7 +102,7 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
       continue;
     }
 
-    const recipients = await resolveRecipients(companyId, spec);
+    const recipients = await resolveRecipients(companyId, spec, row.created_by || null);
     if (recipients.length === 0) {
       // Zero-Count — 발송 대상 0건이면 발송하지 않고 failed (자동 완화 금지 원칙)
       await query(

@@ -270,41 +270,9 @@ export async function buildDeviceBreakdown(
 ): Promise<DeviceBreakdown[]> {
   if (!companyId || !messageId) return [];
 
-  // cdp_inapp_impressions 자체에 user_agent 없음 → anonymous_id prefix 또는 cdp_events join
-  // 단순화 — 본 영역은 회사별 cdp_events page_view user_agent 매핑 가능
-  // 우선 단순 응답 (D215+ 첫 단계 — 추후 user_agent 컬럼 추가 가능)
-  const r = await query(
-    `SELECT COUNT(*) FILTER (WHERE event_type = 'impression')::int AS impressions,
-            COUNT(*) FILTER (WHERE event_type = 'click')::int AS clicks
-     FROM cdp_inapp_impressions
-     WHERE company_id = $1::uuid AND message_id = $2::uuid`,
-    [companyId, messageId]
-  );
-  const total = {
-    impressions: Number(r.rows[0]?.impressions || 0),
-    clicks: Number(r.rows[0]?.clicks || 0),
-  };
-
-  // 단순 추정 — mobile 70 / PC 30 (D215+ 추후 정확한 매핑)
-  const mobileImp = Math.round(total.impressions * 0.7);
-  const mobileClk = Math.round(total.clicks * 0.7);
-  const pcImp = total.impressions - mobileImp;
-  const pcClk = total.clicks - mobileClk;
-
-  return [
-    {
-      device: 'mobile',
-      impressions: mobileImp,
-      clicks: mobileClk,
-      ctr: mobileImp > 0 ? mobileClk / mobileImp : 0,
-    },
-    {
-      device: 'pc',
-      impressions: pcImp,
-      clicks: pcClk,
-      ctr: pcImp > 0 ? pcClk / pcImp : 0,
-    },
-  ];
+  // ★ 2026-09-27 한줄로 V2 R252 — 노출 기록(cdp_inapp_impressions)에 기기 정보(user_agent)가 없어 실제 분포를 낼 수 없다.
+  //   옛: 전체 수를 모바일 70 · PC 30으로 나눈 값이 통계처럼 화면에 나갔다(목업 지표 금지 위반) → 실측이 생길 때까지 빈 목록.
+  return [];
 }
 
 // ════════════════════════════════════════════════════════════════════

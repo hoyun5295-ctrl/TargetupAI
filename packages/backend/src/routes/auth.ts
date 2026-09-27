@@ -686,7 +686,8 @@ router.post('/register-super-admin', async (req: Request, res: Response) => {
 });
 
 // 비밀번호 변경 (최초 로그인 시)
-router.post('/change-password', async (req: Request, res: Response) => {
+// ★ 2026-09-27 한줄로 V2 S2-02 — 로그인과 같은 요청 제한기(옛: 제한 없이 userId + 현재 비밀번호만으로 대입 가능)
+router.post('/change-password', loginLimiter, async (req: Request, res: Response) => {
   try {
     const { userId, currentPassword, newPassword } = req.body;
 

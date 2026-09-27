@@ -19,6 +19,8 @@ import { convertNaturalLanguageToFilter, SegmentGenerationError } from '../utils
 import { buildCustomerFilter } from '../utils/customer-filter';
 import { buildChannelEligibilityWhere, type ChannelKey } from '../utils/channel-eligibility';
 import { countTargetByFilter } from '../utils/target-count';
+// ★ 2026-09-27 한줄로 V2 S5-04 — 요청자 분류코드 범위(담당자 = 자기 분류 고객만)
+import { getOwnerCustomerScopeSql } from '../utils/store-scope';
 import { query } from '../config/database';
 
 const router = Router();
@@ -61,7 +63,8 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
 
     // 2~3. 조건 → 인원수 2종 + 샘플. ★ 2026-09-12 SQL은 CT 한 벌(`countTargetByFilter`)로 옮겼다 —
     //      직접 선택(/count)과 자연어(/extract)가 같은 숫자를 내야 발송 인원과 어긋나지 않는다.
-    const { matchCount, channelEligibleCount, samples } = await countTargetByFilter(companyId, ch, filter);
+    const scopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
+    const { matchCount, channelEligibleCount, samples } = await countTargetByFilter(companyId, ch, filter, scopeSql);
 
     // 4. 0건 자동완화 X (D171) — 조건 자체가 0이면 조건 정정 안내
     if (matchCount === 0) {
@@ -122,7 +125,8 @@ router.post('/count', requirePlanFeature('ai_messaging'), async (req: Request, r
     const ch = channel as ChannelKey;
     const safeFilter = filter && typeof filter === 'object' && !Array.isArray(filter) ? filter : {};
 
-    const { matchCount, channelEligibleCount, samples } = await countTargetByFilter(companyId, ch, safeFilter);
+    const scopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
+    const { matchCount, channelEligibleCount, samples } = await countTargetByFilter(companyId, ch, safeFilter, scopeSql);
 
     return res.json({
       success: true,
@@ -185,13 +189,14 @@ router.post('/recipients', requirePlanFeature('ai_messaging'), async (req: Reque
       inputFormat: 'structured',
     });
     const channelWhere = buildChannelEligibilityWhere(ch, 'c');
+    const scopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
     const baseParams = [companyId, ...params];
 
-    const countSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}`;
+    const countSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}${scopeSql}`;
     const listSql = `
       SELECT c.id, c.phone, c.name, c.gender, c.grade, c.region, c.last_purchase_date, c.total_purchase_amount
         FROM customers c
-       WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}
+       WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}${scopeSql}
        ORDER BY c.id ASC
        LIMIT $${baseParams.length + 1} OFFSET $${baseParams.length + 2}`;
 

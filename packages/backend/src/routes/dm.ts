@@ -68,13 +68,16 @@ import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-
 import { DirectSendError } from '../utils/direct-send-spec';
 import { getOpt080Number, stripAdPartsDeep, normalizeSmsSeparatorLines } from '../utils/messageUtils';
 import { isUuid, findLinkDefectDeep } from '../utils/normalize';
+import { canAccessDm, requireDmAccess } from '../utils/dm-access';
+// ★ 2026-09-27 한줄로 V2 S5-04 — 고객 범위 SQL CT
+import { getOwnerCustomerScopeSql } from '../utils/store-scope';
 import { callAIWithFallback, getSeasonContext } from '../services/ai';
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
 import { validateDm } from '../utils/dm/dm-validate';
 import { getCompanyBrandKit, updateCompanyBrandKit, DEFAULT_BRAND_KIT } from '../utils/dm/dm-brand-kit';
 // ★ 2026-07-21 브랜드 학습 통합 — 회사 기본정보(브랜드명·사업자·업종) CRUD (companies 컬럼, Phase 0 실측)
-import { getBrandBasicInfo, updateBrandBasicInfo } from '../utils/brand-basic-info';
+import { getBrandBasicInfo, updateBrandBasicInfo, findLegalFieldChanges, pickBasicInfoFields } from '../utils/brand-basic-info';
 import { INDUSTRY_CODES, INDUSTRY_LABELS } from '../utils/industry-codes';
 import { buildEventPromptBlock, normalizeEventText } from '../utils/event-brief';
 // ★ 2026-07-16 M3 — 상품 이미지 후보(네이버 쇼핑 검색 — 원탭 확정 전용) + 행사 URL 본문 수집
@@ -551,16 +554,7 @@ dmRouter.patch('/short-links/:linkId', async (req: any, res: any) => {
   }
 });
 
-// ★ 2026-07-14 사용자별 소유 가드(서수란 신고) — 일반 사용자는 본인 생성 DM만 조회·수정·삭제·복제.
-//   관리자(company_admin/super_admin)=회사 전체. 0709 자동마케팅 선례 동일. created_by=createDm에서 항상 기록되는 기존 컬럼.
-async function canAccessDm(dmId: string, companyId: string, userType?: string, userId?: string): Promise<boolean> {
-  if (userType === 'company_admin' || userType === 'super_admin') {
-    const r = await query(`SELECT 1 FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId]);
-    return r.rows.length > 0;
-  }
-  const r = await query(`SELECT 1 FROM dm_pages WHERE id = $1 AND company_id = $2 AND created_by = $3`, [dmId, companyId, userId || '']);
-  return r.rows.length > 0;
-}
+// DM 소유 가드 = utils/dm-access.ts(canAccessDm · requireDmAccess) — ★ 2026-09-27 한줄로 V2 R117 CT로 옮겼다(라우트 인라인 정의 0).
 
 // ============================================================
 // ★ 2026-07-15 발행 DM 한글 주소 별칭 (Harold 확정 — 이새 vo.la/반짝이새_07 사례)
@@ -792,7 +786,8 @@ dmRouter.post('/:id/clone', async (req: any, res: any) => {
 });
 
 // POST /api/dm/:id/publish — 발행
-dmRouter.post('/:id/publish', async (req: any, res: any) => {
+// ★ 2026-09-27 한줄로 V2 R117 — 아래 `requireDmAccess` = 소유 가드(담당자는 본인 DM만 · 관리자 = 회사 전체). 옛: 이 20개 라우트는 회사 조건만.
+dmRouter.post('/:id/publish', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -954,7 +949,7 @@ dmRouter.post('/:id/resume', async (req: any, res: any) => {
 });
 
 // GET /api/dm/:id/stats — 통계
-dmRouter.get('/:id/stats', async (req: any, res: any) => {
+dmRouter.get('/:id/stats', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -1208,7 +1203,7 @@ dmRouter.get('/sample-customers', async (req: any, res: any) => {
 // POST /api/dm/:id/send-to-target — 타겟 추출 대상에게 수신자별 개인화 DM 링크 문자 발송 (P4)
 //   직접발송 파이프라인(createDirectSendCampaign) 재사용 = 크레딧·수신거부/무효·(광고)/080·취소 스위퍼 안전망 보존.
 //   수신자별 고유 링크(?r=<token>) = staging extra1 → 템플릿 %기타1% 치환(direct-send-worker).
-dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
+dmRouter.post('/:id/send-to-target', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId || companyId;
@@ -1359,18 +1354,20 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       tableAlias: 'c', startParamIndex: 2, storeCodeMode: 'skip', inputFormat: 'structured',
     });
     const dmWhere = buildChannelEligibilityWhere('dm', 'c');
+    // ★ 2026-09-27 한줄로 V2 S5-04 — 분류코드 범위(담당자 = 자기 분류 고객만 · 관리자·분류 체계 없는 회사 = 빈 조각)
+    const scopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
     const recRes = isResend
       ? await query(
           `SELECT DISTINCT ON (c.phone) c.id, c.phone, c.name, c.store_phone
              FROM customers c
-            WHERE c.company_id = $1::uuid AND c.id = ANY($2::uuid[]) AND (${dmWhere})
+            WHERE c.company_id = $1::uuid AND c.id = ANY($2::uuid[]) AND (${dmWhere})${scopeSql}
             ORDER BY c.phone, c.id`,
           [companyId, resendIds],
         )
       : await query(
           `SELECT DISTINCT ON (c.phone) c.id, c.phone, c.name, c.store_phone
              FROM customers c
-            WHERE c.company_id = $1::uuid AND (${dmWhere})${filterSql}
+            WHERE c.company_id = $1::uuid AND (${dmWhere})${filterSql}${scopeSql}
             ORDER BY c.phone, c.id`,
           [companyId, ...filterParams],
         );
@@ -1539,7 +1536,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
 
 // GET /api/dm/:id/recipients-tracking — DM 타겟 발송 수신자별 열람/액션 현황 (P4 추적)
 //   dm_recipient_tokens(발송 대상) × dm_views(열람, phone 매칭) → 누가 열었고 어디까지 봤는지.
-dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
+dmRouter.get('/:id/recipients-tracking', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -1693,7 +1690,7 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
 
 // GET /api/dm/:id/recipient-detail?customerId= — 수신자 1명 상세 (섹션 여정 + 요소 클릭 + 응답 이력)
 //   ★ 2026-07-02(5) Harold 지시 — "어떤 섹션을 보고 어떤 버튼을 눌렀고 무슨 액션을 했는지" 행 단위 상세.
-dmRouter.get('/:id/recipient-detail', async (req: any, res: any) => {
+dmRouter.get('/:id/recipient-detail', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -1773,7 +1770,7 @@ dmRouter.get('/:id/recipient-detail', async (req: any, res: any) => {
 // POST /api/dm/:id/generate-copy — DM 발송용 문안 1개 생성 (브랜드보이스 주입, %DM링크% 포함) — P4 편집기
 //   경량 단일 생성(캠페인 다변형 generate-message와 별개). 종량제 3크레딧(callAIWithFallback creditCost).
 //   ★ 2026-07-02(3) Harold 지시 — 문안은 "DM 편집 내용"에 근거해 생성(섹션 요약 주입) + JSON 응답 방어 파싱.
-dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
+dmRouter.post('/:id/generate-copy', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -1885,7 +1882,7 @@ ${lengthRule}
 });
 
 // POST /api/dm/:id/render-sample — 샘플 고객 기준 뷰어 HTML 렌더링
-dmRouter.post('/:id/render-sample', async (req: any, res: any) => {
+dmRouter.post('/:id/render-sample', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -1909,7 +1906,7 @@ dmRouter.post('/:id/render-sample', async (req: any, res: any) => {
 // ============================================================
 
 // POST /api/dm/:id/convert-to-scroll — slides 모드 DM을 sections 모드로 변환
-dmRouter.post('/:id/convert-to-scroll', async (req: any, res: any) => {
+dmRouter.post('/:id/convert-to-scroll', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -1947,7 +1944,7 @@ dmRouter.post('/:id/convert-to-scroll', async (req: any, res: any) => {
 // ============================================================
 
 // POST /api/dm/:id/test-send — 담당자 번호로 테스트 SMS + DM 링크
-dmRouter.post('/:id/test-send', async (req: any, res: any) => {
+dmRouter.post('/:id/test-send', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -2130,7 +2127,7 @@ dmRouter.post('/:id/versions/:vid/restore', async (req: any, res: any) => {
 });
 
 // POST /api/dm/:id/request-approval — 검수 요청 (draft → review)
-dmRouter.post('/:id/request-approval', async (req: any, res: any) => {
+dmRouter.post('/:id/request-approval', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -2143,7 +2140,7 @@ dmRouter.post('/:id/request-approval', async (req: any, res: any) => {
 });
 
 // POST /api/dm/:id/approve — 승인 (review → approved)
-dmRouter.post('/:id/approve', async (req: any, res: any) => {
+dmRouter.post('/:id/approve', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     const userType = req.user?.userType;
@@ -2160,7 +2157,7 @@ dmRouter.post('/:id/approve', async (req: any, res: any) => {
 });
 
 // POST /api/dm/:id/reject — 반려 (review → rejected, reason 기록)
-dmRouter.post('/:id/reject', async (req: any, res: any) => {
+dmRouter.post('/:id/reject', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     const userType = req.user?.userType;
@@ -2238,9 +2235,22 @@ dmRouter.put('/brand-basic-info', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    // ★ 2026-09-27 한줄로 V2 R170 — 상호·사업자등록번호·업태·종목 = 세금계산서 공급받는자 정보 → 관리자만 바꾼다.
+    //   화면은 저장 때 전체를 보내므로 **실제로 바뀐 칸**만 막는다(담당자의 브랜드명·업종 저장은 그대로).
+    const isAdmin = req.user?.userType === 'company_admin' || req.user?.userType === 'super_admin';
+    if (!isAdmin) {
+      const changed = findLegalFieldChanges(await getBrandBasicInfo(companyId), pickBasicInfoFields(req.body || {}));
+      if (changed.length > 0) {
+        return res.status(403).json({ error: '상호·사업자등록번호·업태·종목은 관리자만 바꿀 수 있어요.', code: 'LEGAL_FIELDS_ADMIN_ONLY' });
+      }
+    }
     const info = await updateBrandBasicInfo(companyId, req.body || {});
     return res.json({ basic_info: info });
   } catch (err: any) {
+    // 사업자등록번호 형식(normalizeBizNumber CT) = 입력 오류 → 400
+    if (String(err?.message || '').startsWith('사업자등록번호는')) {
+      return res.status(400).json({ error: '사업자등록번호는 숫자 10자리여야 해요.', code: 'INVALID_BUSINESS_NUMBER' });
+    }
     console.error('[DM BrandBasicInfo PUT] 오류:', err.message);
     return res.status(500).json({ error: err.message });
   }
@@ -2303,7 +2313,7 @@ dmRouter.post('/from-template', async (req: any, res: any) => {
 // ============================================================
 
 // POST /api/dm/:id/validate — 10영역 자동 검수
-dmRouter.post('/:id/validate', async (req: any, res: any) => {
+dmRouter.post('/:id/validate', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -2937,7 +2947,7 @@ function handleInteractionError(res: any, err: any): void {
 }
 
 // GET /api/dm/:id/responses?page=&limit= — 응모자 명단
-dmRouter.get('/:id/responses', async (req: any, res: any) => {
+dmRouter.get('/:id/responses', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -2951,7 +2961,7 @@ dmRouter.get('/:id/responses', async (req: any, res: any) => {
 });
 
 // GET /api/dm/:id/winners — 당첨자 명단
-dmRouter.get('/:id/winners', async (req: any, res: any) => {
+dmRouter.get('/:id/winners', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -2963,7 +2973,7 @@ dmRouter.get('/:id/winners', async (req: any, res: any) => {
 });
 
 // GET /api/dm/:id/event-stats — 응모·당첨·열람 집계 (열람 통계 /:id/stats와 별개)
-dmRouter.get('/:id/event-stats', async (req: any, res: any) => {
+dmRouter.get('/:id/event-stats', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -2975,7 +2985,7 @@ dmRouter.get('/:id/event-stats', async (req: any, res: any) => {
 });
 
 // GET /api/dm/:id/event-insight — 결과 분석 (응모·당첨·열람 실측 기반 인사이트, 임의 상수 0)
-dmRouter.get('/:id/event-insight', async (req: any, res: any) => {
+dmRouter.get('/:id/event-insight', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -2988,7 +2998,7 @@ dmRouter.get('/:id/event-insight', async (req: any, res: any) => {
 });
 
 // GET /api/dm/:id/responses/export — 응모자 xlsx 다운로드 (전체, 페이지 루프 — 무 silent 절단)
-dmRouter.get('/:id/responses/export', async (req: any, res: any) => {
+dmRouter.get('/:id/responses/export', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -3016,7 +3026,7 @@ dmRouter.get('/:id/responses/export', async (req: any, res: any) => {
 });
 
 // POST /api/dm/:id/winners/import — 엑셀 사전 지정 당첨자 업로드
-dmRouter.post('/:id/winners/import', dmXlsxUpload.single('file'), async (req: any, res: any) => {
+dmRouter.post('/:id/winners/import', requireDmAccess, dmXlsxUpload.single('file'), async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -3035,7 +3045,7 @@ dmRouter.post('/:id/winners/import', dmXlsxUpload.single('file'), async (req: an
 });
 
 // PUT /api/dm/:id/prizes — 경품 설정(A editor·발행 공용). body: { section_id, prizes:[{rank,name,total_count,win_method,roulette_segment_id?}] }
-dmRouter.put('/:id/prizes', async (req: any, res: any) => {
+dmRouter.put('/:id/prizes', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });

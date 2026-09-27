@@ -26,6 +26,8 @@
 
 import { query, pool } from '../config/database';
 // 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
+// ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자 분류코드 범위
+import { getJourneyOwnerScopeSql } from './store-scope';
 import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectCartAbandonProperties, selectLastPriorPurchase, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, usesPurchaseLedger, type CdpCursorBatch, type CdpEventRow } from './journey-cdp-cursor';
 import { clampInt } from './journey-points-trigger';
@@ -209,7 +211,7 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
       console.warn(`[JourneyTrigger] 등급 state 관측 — 컬럼 미마이그레이션(§11-D-3 DDL 필요) journey=${j.id}`);
     }
   }
-  const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry);
+  const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry, await getJourneyOwnerScopeSql(j.company_id, j.id));
   if (ids.length === 0) {
     return { matched: 0, enqueued: 0, skipped: 0 };
   }
@@ -445,6 +447,7 @@ async function processPurchaseLedgerJourney(j: ActiveJourney): Promise<CursorRun
     windowEnd,
     PURCHASE_TRIGGER_MAX_AGE_HOURS,
     CDP_EVENT_CHUNK + 1,
+    await getJourneyOwnerScopeSql(j.company_id, j.id),
   );
   const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, 'created_at');
   // 절단은 "오늘 아침에 다 못 냈다"는 뜻이다. 밀린 분이 발생 시각 창(3일)을 넘기면 그대로 못 나가므로
@@ -514,6 +517,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
     // ★ 2026-08-10: 원장 문과 같은 상수 — 소급 적재(고도몰 백필·주기 수집)가 "방금 사건"으로 진입하는 것을 막는다.
     PURCHASE_TRIGGER_MAX_AGE_HOURS,
     CDP_EVENT_CHUNK + 1,
+    await getJourneyOwnerScopeSql(j.company_id, j.id),
   );
   const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, axis);
   await qualifyPurchaseTransition(j, batch, rows);

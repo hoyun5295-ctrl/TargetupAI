@@ -696,12 +696,13 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     } else if (target && target.type === 'customers') {
       const grades = Array.isArray(target.grades) ? target.grades.map((g: any) => String(g)) : undefined;
       targetSpec = { type: 'customers', grades };
-      resolved = await resolveCustomerRecipients(auth.companyId, grades);
+      // ★ 2026-09-27 한줄로 V2 S5-04 — 담당자면 자기 분류 고객만(ownerId = 담당자 본인 · 관리자 null)
+      resolved = await resolveCustomerRecipients(auth.companyId, grades, auth.ownerId);
     } else if (target && target.type === 'filter' && target.filter && typeof target.filter === 'object') {
       // 타겟 추출(/api/targets/extract)로 확정한 filter → 이메일 발송 대상 결합.
       // ★ 2026-07-02(3) 빈 filter {} = "전체 고객"(isAll) — 조건 없음 = 이메일 자격자 전체 (명시적 type:'filter' 확정분만 도달)
       targetSpec = { type: 'filter', filter: target.filter };
-      resolved = await resolveCustomerRecipientsByFilter(auth.companyId, target.filter);
+      resolved = await resolveCustomerRecipientsByFilter(auth.companyId, target.filter, auth.ownerId);
     } else {
       return res.status(400).json({ success: false, error: '발송 대상을 지정해주세요 (recipients 또는 target).' });
     }

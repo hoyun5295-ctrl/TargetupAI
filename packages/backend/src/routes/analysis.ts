@@ -4,6 +4,9 @@ import * as fs from 'fs';
 import OpenAI from 'openai';
 import * as path from 'path';
 import { query } from '../config/database';
+// ★ 2026-09-27 한줄로 V2 R092 — 이탈 위험 고객 가림 CT
+import { maskPersonName } from '../utils/pii-masking';
+import { maskPhone } from '../utils/mfa';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, getCompanyCosts, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 import { withCopyRules } from '../services/ai';
@@ -805,7 +808,8 @@ router.post('/run', async (req: Request, res: Response) => {
         LIMIT 20
       `, [companyId]);
 
-      collectedData.churnRiskCustomers = churnRisk.rows;
+      // ★ 2026-09-27 한줄로 V2 R092 — 이름·전화는 가린 뒤 싣는다(옛: 원문이 외부 AI 지시문·analysis_results·화면 응답에 나갔다)
+      collectedData.churnRiskCustomers = churnRisk.rows.map((r: any) => ({ ...r, name: maskPersonName(r.name), phone: maskPhone(r.phone) }));
 
       // 10) RFM 세그먼트 분석용 데이터
       const rfmData = await query(`

@@ -21,6 +21,8 @@
 
 import { query, pool } from '../config/database';
 import { selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from './journey-target-extractor';
+// ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자 분류코드 범위
+import { getJourneyOwnerScopeSql } from './store-scope';
 import { getJourneyHoldoutPct } from './journey-entry-ledger';
 import {
   computeAnchorStepRunAt,
@@ -159,7 +161,7 @@ async function dispatchAnchorStep(
   // 대상 추출 — 안전필터 + 대상 조건(audience). 대량 차단(threshold) 적용.
   const cap = j.threshold_recipients_per_step;
   const extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
-  const ids = await selectAnchorAudienceIds(j.company_id, j.trigger_filters || {}, extractLimit);
+  const ids = await selectAnchorAudienceIds(j.company_id, j.trigger_filters || {}, extractLimit, await getJourneyOwnerScopeSql(j.company_id, j.id));
   if (ids.length === 0) return { enqueued: 0 };
   if (cap != null && ids.length > Number(cap)) {
     await query(
@@ -251,7 +253,7 @@ export async function dispatchOneShotJourney(companyId: string, journeyId: strin
 
   const cap = j.threshold_recipients_per_step;
   const extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
-  const ids = await selectAnchorAudienceIds(companyId, j.trigger_filters || {}, extractLimit);
+  const ids = await selectAnchorAudienceIds(companyId, j.trigger_filters || {}, extractLimit, await getJourneyOwnerScopeSql(companyId, journeyId));
   if (ids.length === 0) return { enqueued: 0, reason: 'no_target' };
   if (cap != null && ids.length > Number(cap)) {
     await query(

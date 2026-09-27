@@ -178,6 +178,15 @@ export function kstDate(column: string): string {
 }
 
 /**
+ * ★ 2026-09-27 한줄로 V2 R274 — KST 오늘 0시(timestamptz). DB 세션 TimeZone = UTC라 CURRENT_DATE는 UTC 자정(= KST 09시)이다.
+ * 컬럼 쪽은 변환하지 않아 인덱스를 그대로 탄다(timestamptz 컬럼과 비교).
+ */
+export const KST_TODAY_START_SQL = `(date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')`;
+
+/** ★ 2026-09-27 한줄로 V2 R111 — KST 현재 연도(정수). 연도를 코드에 박지 않는다(옛 2026 하드코딩은 해가 바뀌면 나이가 틀어진다). */
+export const KST_CURRENT_YEAR_SQL = `EXTRACT(YEAR FROM (NOW() AT TIME ZONE 'Asia/Seoul'))::int`;
+
+/**
  * ★ 발송통계 날짜 기준 — 예약은 발송예정일(scheduled_at), 즉시발송은 실제 발송일(sent_at).
  * 예약 캠페인이 등록일에 잡히던 문제 정정. sent_at 컬럼 자체는 환불/결과동기화 의존이 있어 보존하고,
  * 통계 표시 날짜만 이 식으로 산출한다. 캠페인 alias는 'c' 고정.

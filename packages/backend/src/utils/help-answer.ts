@@ -34,6 +34,7 @@ import { detectBenefits } from './copy-benefit-detector';
 import { extractJsonFromAiText } from './ai-json';
 import { generateCacheKey, getCachedResponse, setCachedResponse } from './ai-cache';
 import { recordAiCall } from './ai-rate-limit';
+import { kstDateTag } from './ai-credit-calc';
 
 export const HELP_SOURCE = 'help-ask';
 
@@ -222,7 +223,7 @@ const buckets = new Map<string, Bucket>();
 
 /** 초과하면 false. 잠그지 않고 호출부가 후보 카드만 돌려준다 */
 export function takeHelpQuota(companyId: string, now: Date = new Date()): boolean {
-  const day = now.toISOString().slice(0, 10);
+  const day = kstDateTag(now);   // ★ 2026-09-27 한줄로 V2 R411 — KST 날짜(옛 UTC 날짜는 KST 09시에 초기화됐다)
   const minute = Math.floor(now.getTime() / 60000);
   const b = buckets.get(companyId) || { day, dayCount: 0, minute, minuteCount: 0 };
   if (b.day !== day) { b.day = day; b.dayCount = 0; }

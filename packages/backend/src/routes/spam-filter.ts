@@ -12,6 +12,7 @@ import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpa
 // ★ 2026-09-26 한줄로 V2 m040 — 검사 발신번호 = 등록 번호만(발송 경로와 같은 CT)
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { getSampleCustomerScope } from '../utils/store-scope';
+import { resolveOwnerScope } from '../utils/owner-scope';
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
 import {
   SPAM_TRIAL_LIMIT, SPAM_TRIAL_LOCK_SQL, SPAM_TRIAL_SOURCE, countSpamTrialsInTx, judgeSpamVerdict, readSpamTrialStatus, withExpectedSpamDevices,
@@ -755,8 +756,10 @@ router.get('/tests', authenticate, async (req: Request, res: Response) => {
     const offset = (page - 1) * limit;
 
     // mine=true: 본인 테스트만 조회
+    // ★ 2026-09-27 한줄로 V2 m044(SCOPE) — 담당자는 mine과 무관하게 본인 것만(관리자 = 회사 전체 · mine이면 본인)
     const userId = (req as any).user.userId;
-    const mineOnly = req.query.mine === 'true';
+    const ownerId = resolveOwnerScope(req);
+    const mineOnly = req.query.mine === 'true' || !!ownerId;
     const whereClause = mineOnly
       ? 'WHERE t.company_id = $1 AND t.user_id = $4'
       : 'WHERE t.company_id = $1';
@@ -808,12 +811,14 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
     const companyId = (req as any).user.companyId;
     const testId = req.params.id;
 
+    // ★ 2026-09-27 한줄로 V2 m044(SCOPE) — 담당자는 본인 검사만(단건에는 첫 수신자 고객 정보가 있다 · 범위 밖 = 없는 것과 같게 404)
+    const ownerId = resolveOwnerScope(req);
     const test = await query(
       `SELECT t.*, u.name as user_name
        FROM spam_filter_tests t
        JOIN users u ON u.id = t.user_id
-       WHERE t.id = $1 AND t.company_id = $2`,
-      [testId, companyId]
+       WHERE t.id = $1 AND t.company_id = $2${ownerId ? ' AND t.user_id = $3' : ''}`,
+      ownerId ? [testId, companyId, ownerId] : [testId, companyId]
     );
     if (test.rows.length === 0) {
       return res.status(404).json({ error: '테스트를 찾을 수 없습니다.' });

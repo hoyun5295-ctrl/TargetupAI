@@ -50,3 +50,15 @@ export function maskPII(input: unknown): unknown {
   }
   return input;
 }
+
+/**
+ * ★ 2026-09-27 한줄로 V2 R092 — 사람 이름 가림(첫 글자만 남긴다 · 한 글자는 전부).
+ * 외부 AI 지시문·분석 저장·화면 응답에 고객 이름 원문을 싣지 않기 위해 쓴다.
+ */
+export function maskPersonName(name: unknown): string {
+  const s = String(name ?? '').trim();
+  if (!s) return '';
+  const chars = Array.from(s);
+  if (chars.length === 1) return '*';
+  return chars[0] + '*'.repeat(chars.length - 1);
+}

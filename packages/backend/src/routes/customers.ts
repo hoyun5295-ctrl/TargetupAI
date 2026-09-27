@@ -4,7 +4,9 @@ import { logPrivacyExport, logPrivacyView, logPrivacyEdit } from '../utils/priva
 // ★ 2026-09-11 전송자격인증 4.2 — 삭제 감사 기록의 전화번호는 저장 시점에 가린다(마스킹 CT 재사용)
 import { maskPhone } from '../utils/mfa';
 import * as XLSX from 'xlsx';
-import { query, mysqlQuery } from '../config/database';
+import { query, mysqlQuery, pool } from '../config/database';
+// ★ 2026-09-27 한줄로 V2 R111 — KST 현재 연도 SQL CT
+import { KST_CURRENT_YEAR_SQL } from '../utils/stats-aggregation';
 import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
 // ★ 2026-06-25: 고객 전체 삭제 시 데이터 프로필 캐시 무효화(게이트 즉시 반영)
@@ -12,7 +14,7 @@ import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { getColumnFields, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
-import { getStoreScope } from '../utils/store-scope';
+import { getStoreScope, getOwnerCustomerScopeSql } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { computeMonthlyUsage } from '../utils/monthly-usage';
@@ -744,12 +746,12 @@ router.get('/stats', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 2}::text[])) as female_count,
         COUNT(*) FILTER (WHERE c.grade = 'VIP') as vip_count,
         COUNT(*) FILTER (WHERE c.sms_opt_in = false OR uo.phone IS NOT NULL) as unsubscribe_count,
-        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) < 20) as age_under20,
-        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 20 AND 29) as age_20s,
-        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 30 AND 39) as age_30s,
-        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 40 AND 49) as age_40s,
-        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 50 AND 59) as age_50s,
-        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) >= 60) as age_60plus
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) < 20) as age_under20,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) BETWEEN 20 AND 29) as age_20s,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) BETWEEN 30 AND 39) as age_30s,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) BETWEEN 40 AND 49) as age_40s,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) BETWEEN 50 AND 59) as age_50s,
+        COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) >= 60) as age_60plus
        FROM customers_unified c
        LEFT JOIN (SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $${unsubStatIdx}) uo ON uo.phone = c.phone
        WHERE c.company_id = $1 AND c.is_active = true${storeFilter}`,
@@ -1249,12 +1251,21 @@ router.delete('/:id', blockIfSyncActive, async (req: Request, res: Response) => 
 
     const customer = target.rows[0];
 
-    // 연관 데이터 삭제 (purchases, consents)
-    await query('DELETE FROM purchases WHERE customer_id = $1 AND company_id = $2', [id, companyId]);
-    await query('DELETE FROM consents WHERE customer_id = $1', [id]);
-
-    // 고객 삭제 (하드 삭제)
-    await query('DELETE FROM customers WHERE id = $1 AND company_id = $2', [id, companyId]);
+    // 연관 데이터 삭제 (purchases, consents) → 고객 삭제 (하드 삭제)
+    // ★ 2026-09-27 한줄로 V2 R325 — 한 트랜잭션(옛: 중간에 실패하면 고객은 남고 구매·동의 이력만 사라졌다)
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM purchases WHERE customer_id = $1 AND company_id = $2', [id, companyId]);
+      await client.query('DELETE FROM consents WHERE customer_id = $1', [id]);
+      await client.query('DELETE FROM customers WHERE id = $1 AND company_id = $2', [id, companyId]);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     // ★ Codex 4R — 개별 삭제도 활성 필드/샘플 캐시 무효화 (bulk-delete·전체삭제·업로드와 동일 길목.
     //   삭제된 고객이 sample이거나 필드 마지막 값 보유자면 캐시 잔존 = 삭제 고객 노출)
@@ -1319,15 +1330,25 @@ router.post('/bulk-delete', blockIfSyncActive, async (req: Request, res: Respons
       return res.status(404).json({ error: '삭제할 고객이 없습니다' });
     }
 
-    // 연관 데이터 삭제
-    await query('DELETE FROM purchases WHERE customer_id = ANY($1) AND company_id = $2', [validIds, companyId]);
-    await query('DELETE FROM consents WHERE customer_id = ANY($1)', [validIds]);
-
-    // 고객 삭제
-    const deleteResult = await query(
-      'DELETE FROM customers WHERE id = ANY($1) AND company_id = $2',
-      [validIds, companyId]
-    );
+    // 연관 데이터 삭제 → 고객 삭제
+    // ★ 2026-09-27 한줄로 V2 R325 — 한 트랜잭션(개별 삭제와 같은 이유)
+    let deleteResult: any;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM purchases WHERE customer_id = ANY($1) AND company_id = $2', [validIds, companyId]);
+      await client.query('DELETE FROM consents WHERE customer_id = ANY($1)', [validIds]);
+      deleteResult = await client.query(
+        'DELETE FROM customers WHERE id = ANY($1) AND company_id = $2',
+        [validIds, companyId]
+      );
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     // 감사 로그
     await query(
@@ -1407,22 +1428,35 @@ router.post('/delete-all', blockIfSyncActive, async (req: Request, res: Response
       return res.status(400).json({ error: '삭제할 고객 데이터가 없습니다' });
     }
 
-    // 연관 데이터 삭제 (해당 회사 전체)
-    const purchaseResult = await query('DELETE FROM purchases WHERE company_id = $1', [deleteCompanyId]);
-    await query('DELETE FROM consents WHERE customer_id IN (SELECT id FROM customers WHERE company_id = $1)', [deleteCompanyId]);
+    // ★ 2026-09-27 한줄로 V2 R325 — 연관 데이터·필드 정의·고객 삭제를 한 트랜잭션으로(중간 실패 = 전부 되돌림)
+    let purchaseResult: any;
+    let deleteResult: any;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // 연관 데이터 삭제 (해당 회사 전체)
+      purchaseResult = await client.query('DELETE FROM purchases WHERE company_id = $1', [deleteCompanyId]);
+      await client.query('DELETE FROM consents WHERE customer_id IN (SELECT id FROM customers WHERE company_id = $1)', [deleteCompanyId]);
 
-    // ★ D114 P1: 필드 정의 + customer_schema + customer_stores 정리
-    // 고객 전체삭제 시 customer_field_definitions가 잔존하면 다음 업로드에서 매핑 충돌 오감지
-    // ★ 2026-09-25 한줄로 전수점검 C-01: 수신거부(unsubscribes)는 지우지 않는다.
-    //   080 ARS 거부('080_ars')도 이 표에 있고 발송 대상 제외가 이 표로 이뤄진다. 여기서 지우면
-    //   전체삭제 → 재업로드 한 번에 거부 번호가 다시 광고 대상이 된다(정보통신망법 수신거부).
-    //   수신거부를 지우려면 수신거부 관리 화면(unsubscribe-helper 삭제 경로)을 쓴다. 업로드 충돌 원인(필드 정의)과는 무관하다.
-    await query('DELETE FROM customer_field_definitions WHERE company_id = $1', [deleteCompanyId]);
-    await query('DELETE FROM customer_stores WHERE company_id = $1', [deleteCompanyId]);
-    await query(`UPDATE companies SET customer_schema = '{}'::jsonb WHERE id = $1`, [deleteCompanyId]);
+      // ★ D114 P1: 필드 정의 + customer_schema + customer_stores 정리
+      // 고객 전체삭제 시 customer_field_definitions가 잔존하면 다음 업로드에서 매핑 충돌 오감지
+      // ★ 2026-09-25 한줄로 전수점검 C-01: 수신거부(unsubscribes)는 지우지 않는다.
+      //   080 ARS 거부('080_ars')도 이 표에 있고 발송 대상 제외가 이 표로 이뤄진다. 여기서 지우면
+      //   전체삭제 → 재업로드 한 번에 거부 번호가 다시 광고 대상이 된다(정보통신망법 수신거부).
+      //   수신거부를 지우려면 수신거부 관리 화면(unsubscribe-helper 삭제 경로)을 쓴다. 업로드 충돌 원인(필드 정의)과는 무관하다.
+      await client.query('DELETE FROM customer_field_definitions WHERE company_id = $1', [deleteCompanyId]);
+      await client.query('DELETE FROM customer_stores WHERE company_id = $1', [deleteCompanyId]);
+      await client.query(`UPDATE companies SET customer_schema = '{}'::jsonb WHERE id = $1`, [deleteCompanyId]);
 
-    // 고객 전체 삭제
-    const deleteResult = await query('DELETE FROM customers WHERE company_id = $1', [deleteCompanyId]);
+      // 고객 전체 삭제
+      deleteResult = await client.query('DELETE FROM customers WHERE company_id = $1', [deleteCompanyId]);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     // ★ 2026-06-25: 고객 0건이 됐으므로 데이터 프로필 캐시 무효화 → 게이트 즉시 재표시
     clearCompanyDataProfileCache(deleteCompanyId);
@@ -1748,6 +1782,13 @@ router.get('/:id/timeline', requirePlanFeature('customer_db_view'), async (req: 
     const to = DATE_RE.test(String(req.query.to || '')) ? String(req.query.to) : null;
     const withSummary = String(req.query.summary ?? '') !== '0';
 
+    // ★ 2026-09-27 한줄로 V2 R113 — 분류코드 범위(상세와 같은 CT · 범위 밖 = 404). 관리자·분류 체계 없는 회사는 빈 조각 = 조회 없음.
+    const scopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
+    if (scopeSql) {
+      const inScope = await query(`SELECT 1 FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid${scopeSql}`, [String(id), companyId]);
+      if (inScope.rows.length === 0) return res.status(404).json({ success: false, error: '고객을 찾을 수 없습니다.' });
+    }
+
     const result = await buildCustomerTimeline({
       companyId,
       customerId: String(id),
@@ -1785,13 +1826,15 @@ router.get('/:id', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     const { id } = req.params;
 
+    // ★ 2026-09-27 한줄로 V2 R113 — 담당자는 분류코드 범위 안 고객만(구매 이력 라우트와 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
+    const scopeSql = await getOwnerCustomerScopeSql(companyId || '', userId);
     // ★ B17-01: 수신거부 user_id 기준 통일
     const result = await query(
       `SELECT c.*,
               CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $3 AND u.phone = c.phone)
                    THEN false ELSE c.sms_opt_in END as sms_opt_in,
               EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $3 AND u.phone = c.phone) as is_unsubscribed
-       FROM customers_unified c WHERE c.id = $1 AND c.company_id = $2 AND c.is_active = true`,
+       FROM customers_unified c WHERE c.id = $1 AND c.company_id = $2 AND c.is_active = true${scopeSql}`,
       [id, companyId, userId]
     );
 

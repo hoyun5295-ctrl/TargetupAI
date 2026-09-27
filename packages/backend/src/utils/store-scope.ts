@@ -16,9 +16,11 @@ import { query } from '../config/database';
  *   따옴표로만 감싸 붙이면 SQL을 바꿀 수 있고 따옴표 하나에도 500이 난다 → 값은 반드시 pg escapeLiteral로 감싼다.
  *   파라미터 바인딩(`ANY($n::text[])`)을 쓸 수 있는 자리는 그쪽이 우선이다.
  */
-export function buildCustomerStoreFilterLiteral(companyId: string, storeCodes: string[]): string {
+export function buildCustomerStoreFilterLiteral(companyId: string, storeCodes: string[], alias?: string): string {
   const codes = storeCodes.map((s) => escapeLiteral(String(s))).join(',');
-  return ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = ${escapeLiteral(String(companyId))} AND store_code = ANY(ARRAY[${codes}]::text[]))`;
+  // ★ 2026-09-27 S5-04 — 조인 쿼리(cdp_events e JOIN customers c 등)에서 id가 모호해지지 않게 별칭(선택). 없으면 종전과 1바이트도 같다.
+  const col = alias ? `${alias}.id` : 'id';
+  return ` AND ${col} IN (SELECT customer_id FROM customer_stores WHERE company_id = ${escapeLiteral(String(companyId))} AND store_code = ANY(ARRAY[${codes}]::text[]))`;
 }
 
 export type StoreScopeResult =
@@ -90,6 +92,45 @@ export async function getStoreScope(companyId: string, userId: string): Promise<
 
   // 브랜드 체계 없는 회사 → 필터 없이 전체
   return { type: 'no_filter' };
+}
+
+// ============================================================
+// 고객 범위 SQL 조각 — 주인(사용자 id) 기준 (★2026-09-27 한줄로 V2 S5-04 · R113)
+// ============================================================
+
+/**
+ * 주인(요청 사용자 · 캠페인·여정 작성자)의 분류코드 범위를 고객 쿼리에 붙일 **리터럴** 조각으로 돌려준다.
+ * 파라미터 번호를 맞출 필요가 없어 쿼리 모양이 여럿인 곳(여정 추출 13곳 · 타겟 인원 · 이메일 대상)에 같은 한 줄로 붙는다.
+ * - 주인 없음 · 사용자 유형이 'user'(담당자)가 아님(관리자·시스템·슈퍼) = 빈 조각(종전 SQL 그대로)
+ * - filtered = 범위 서브쿼리 · blocked(분류 체계가 있는데 미배정) = ' AND FALSE' · no_filter(분류 체계 없는 회사) = 빈 조각
+ * 판정은 getStoreScope 하나(재구현 금지). 값은 escapeLiteral로 감싼다(buildCustomerStoreFilterLiteral).
+ */
+export async function getOwnerCustomerScopeSql(
+  companyId: string,
+  ownerUserId: string | null | undefined,
+  alias = 'c',
+): Promise<string> {
+  if (!ownerUserId) return '';
+  const u = await query('SELECT user_type FROM users WHERE id = $1', [ownerUserId]);
+  if (u.rows[0]?.user_type !== 'user') return '';
+  const scope = await getStoreScope(companyId, ownerUserId);
+  if (scope.type === 'filtered') return buildCustomerStoreFilterLiteral(companyId, scope.storeCodes, alias);
+  if (scope.type === 'blocked') return ' AND FALSE';
+  return '';
+}
+
+/**
+ * 여정 대상의 분류코드 범위 = 그 여정 **작성자** 기준(발송 워커에는 요청 사용자가 없다).
+ * 관리자가 만든 여정·분류 체계 없는 회사는 빈 조각이라 추출 SQL이 종전과 같다.
+ */
+export async function getJourneyOwnerScopeSql(
+  companyId: string,
+  journeyId: string | null | undefined,
+  alias = 'c',
+): Promise<string> {
+  if (!journeyId) return '';
+  const j = await query('SELECT created_by FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid', [journeyId, companyId]);
+  return getOwnerCustomerScopeSql(companyId, j.rows[0]?.created_by || null, alias);
 }
 
 // ============================================================

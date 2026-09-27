@@ -12,6 +12,8 @@ import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
+// ★ 2026-09-27 한줄로 V2 R274 — KST 오늘 0시 SQL CT
+import { KST_TODAY_START_SQL } from '../utils/stats-aggregation';
 import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, buildReleaseDownloadUrl, isPackageKeyVerified, PlatformId } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리: 진단 명령 버전 게이트 (v1.6.1+ ACK 전용)
 import { isAgentVersionGte, ACK_MIN_AGENT_VERSION } from '../utils/agent-protocol';
@@ -162,7 +164,7 @@ router.get('/agents', authenticate, requireSuperAdmin, async (req: Request, res:
     const { rows: todayRows } = await query(`
       SELECT agent_id, COUNT(*)::int as cnt
       FROM sync_logs
-      WHERE started_at >= CURRENT_DATE
+      WHERE started_at >= ${KST_TODAY_START_SQL}
         AND agent_id = ANY($1)
       GROUP BY agent_id
     `, [agentIds]);
@@ -263,7 +265,7 @@ router.get('/agents/:agentId', authenticate, requireSuperAdmin, async (req: Requ
         COALESCE(SUM(CASE WHEN fail_count > 0 THEN 1 ELSE 0 END), 0)::int as total_errors_today,
         COALESCE(AVG(duration_ms), 0)::int as avg_sync_duration_ms
       FROM sync_logs
-      WHERE agent_id = $1 AND started_at >= CURRENT_DATE
+      WHERE agent_id = $1 AND started_at >= ${KST_TODAY_START_SQL}
     `, [agentId]);
 
     const stats = statsRows[0];

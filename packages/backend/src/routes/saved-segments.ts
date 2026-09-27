@@ -108,7 +108,10 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // 사용 시각 갱신
 router.post('/:id/touch', async (req: Request, res: Response) => {
   try {
-    await touchSegment(req.params.id);
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ error: '권한이 필요합니다.' });
+    await touchSegment(req.params.id, companyId, userId);
     return res.json({ success: true });
   } catch (error: any) {
     console.error('세그먼트 touch 에러:', error);
