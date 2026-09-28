@@ -298,6 +298,8 @@ export default function Dashboard() {
   const [showSmsConvert, setShowSmsConvert] = useState<{show: boolean, from: 'direct' | 'target', currentBytes: number, smsBytes: number, count: number}>({show: false, from: 'direct', currentBytes: 0, smsBytes: 0, count: 0});
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitCount, setSplitCount] = useState<number>(1000);
+  // ★ 0928 분할 간격(분) — 직접발송 패널·타겟 발송 창이 함께 쓴다(두 창 모두 칸이 있다)
+  const [splitInterval, setSplitInterval] = useState<number>(1);
   const [isAd, setIsAd] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -608,6 +610,7 @@ export default function Dashboard() {
       const alimScheduled = isAlimtalk && sendConfirm.type === 'scheduled' && !!sendConfirm.dateTime;
       const alimSplitEnabled = isAlimtalk && (sendConfirm as any).alimtalkSplitEnabled === true;
       const alimSplitCount = Number((sendConfirm as any).alimtalkSplitCount) || 0;
+      const alimSplitInterval = Number((sendConfirm as any).alimtalkSplitInterval) || 1;
       const convertButtonsToQTmsg = (buttons: any[]) => {
         if (!buttons || buttons.length === 0) return null;
         const obj: Record<string, string> = {};
@@ -639,6 +642,7 @@ export default function Dashboard() {
           : (reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null),
         splitEnabled: isAlimtalk ? alimSplitEnabled : splitEnabled,
         splitCount: isAlimtalk ? (alimSplitEnabled ? alimSplitCount : null) : (splitEnabled ? splitCount : null),
+        splitIntervalMinutes: isAlimtalk ? (alimSplitEnabled ? alimSplitInterval : null) : (splitEnabled ? splitInterval : null),
         mmsImagePaths: (isAlimtalk || directMsgType !== 'MMS') ? [] : toMmsImagePaths(mmsUploadedImages),
         dedupEnabled: sendConfirm.dedupEnabled ?? true,
         unsubFilterEnabled: sendConfirm.unsubFilterEnabled ?? true,
@@ -804,6 +808,7 @@ export default function Dashboard() {
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
           splitEnabled: isTargetAlimtalk ? false : splitEnabled,
           splitCount: isTargetAlimtalk ? null : (splitEnabled ? splitCount : null),
+          splitIntervalMinutes: isTargetAlimtalk ? null : (splitEnabled ? splitInterval : null),
           // ★ D141 B4 심화: 채널이 MMS일 때만 이미지 paths 전달 (5경로 일관성)
           mmsImagePaths: (isTargetAlimtalk || targetMsgType !== 'MMS') ? [] : toMmsImagePaths(mmsUploadedImages),
           ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
@@ -3440,6 +3445,8 @@ const campaignData = {
         setSplitEnabled={setSplitEnabled}
         splitCount={splitCount}
         setSplitCount={setSplitCount}
+        splitInterval={splitInterval}
+        setSplitInterval={setSplitInterval}
         mmsUploadedImages={mmsUploadedImages}
         setMmsUploadedImages={setMmsUploadedImages}
         setShowMmsUploadModal={setShowMmsUploadModal}
@@ -3642,6 +3649,7 @@ const campaignData = {
           reserveDateTime={reserveDateTime} setShowReservePicker={setShowReservePicker}
           splitEnabled={splitEnabled} setSplitEnabled={setSplitEnabled}
           splitCount={splitCount} setSplitCount={setSplitCount}
+          splitInterval={splitInterval} setSplitInterval={setSplitInterval}
           optOutNumber={optOutNumber}
           mmsUploadedImages={mmsUploadedImages} setMmsUploadedImages={setMmsUploadedImages}
           setShowMmsUploadModal={setShowMmsUploadModal}
@@ -3797,6 +3805,7 @@ const campaignData = {
             dateTime: data.dateTime,
             alimtalkSplitEnabled: data.splitEnabled,
             alimtalkSplitCount: data.splitCount,
+            alimtalkSplitInterval: data.splitInterval,
           } as any);
           // ★ D225+ (2026-05-28 영업팀장 박성용 신고 재발 fix): 알림톡 팝업 close 호출 제거 — 옛 흐름 = 모달 유지 (executeDirectSend line 556 주석 정합).
           //   옛 D224+ 후속 사고 = setShowAlimtalkSend(false) 호출 = 발송 후 알림톡 팝업 닫힘 + 직접발송 팝업 복귀 사고.

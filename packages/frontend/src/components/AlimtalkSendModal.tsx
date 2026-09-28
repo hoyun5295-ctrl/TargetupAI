@@ -33,6 +33,7 @@ import AlimtalkPreview from './alimtalk/AlimtalkPreview';
 import AlimtalkTemplatePickerModal from './alimtalk/AlimtalkTemplatePickerModal';
 import KakaoSendHeader from './kakao-send/KakaoSendHeader';
 import SplitSendPopover from './direct-send/SplitSendPopover';
+import { splitTileLabel } from '../utils/split-send';
 import '../styles/direct-send.css';
 import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 import AddressBookModal from './AddressBookModal';
@@ -94,9 +95,10 @@ export interface AlimtalkSendModalProps {
     stagingId?: string;
     /** ★ 2026-09-14 알림톡 예약·분할(박성용 접수): 예약 시각(ScheduleTimeModal의 로컬 시각 문자열). 즉시 발송이면 없음. */
     dateTime?: string;
-    /** 분할전송 여부·분당 건수. Dashboard 전역(직접발송 패널) 값이 아니라 이 창의 값이다. */
+    /** 분할전송 여부·한 묶음 건수·간격(분 · ★0928). Dashboard 전역(직접발송 패널) 값이 아니라 이 창의 값이다. */
     splitEnabled: boolean;
     splitCount: number;
+    splitInterval: number;
   }) => void;
 
   setToast: (t: { show: boolean; type: 'success' | 'error' | 'warning'; message: string }) => void;
@@ -157,6 +159,7 @@ export default function AlimtalkSendModal({
   const [showReservePicker, setShowReservePicker] = useState(false);
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitCount, setSplitCount] = useState(1000);
+  const [splitInterval, setSplitInterval] = useState(1);
 
   // ★ D162-4 (2026-05-15) 5차: Harold님 명시 정합 — 알림톡 모달 진입 시 매핑/state 전체 reset.
   //   기존엔 Dashboard 전역 state(kakaoTemplateVars/kakaoSelectedTemplate/등)가 직접발송 ↔ 직접타겟발송 간 유출되어
@@ -587,6 +590,7 @@ export default function AlimtalkSendModal({
         dateTime: reserveEnabled ? reserveDateTime : undefined,
         splitEnabled,
         splitCount,
+        splitInterval,
         count: recipients.length - unsubCount - dupCount,
         unsubscribeCount: unsubCount,
         duplicateCount: dupCount,
@@ -1070,7 +1074,7 @@ export default function AlimtalkSendModal({
                 <span className="ds-tile__ic"><Timer size={17} strokeWidth={2} /></span>
                 <span className="ds-tile__tx">
                   <span className="ds-tile__t1">분할</span>
-                  <span className="ds-tile__t2">{splitEnabled ? `1분에 ${splitCount.toLocaleString()}건` : '안 함'}</span>
+                  <span className="ds-tile__t2">{splitEnabled ? splitTileLabel(splitCount, splitInterval) : '안 함'}</span>
                 </span>
                 <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />
               </button>
@@ -1078,9 +1082,10 @@ export default function AlimtalkSendModal({
                 open={splitOpen}
                 enabled={splitEnabled}
                 value={splitCount}
+                interval={splitInterval}
                 recipientCount={recipients.length}
                 startAt={reserveEnabled && reserveDateTime ? reserveDateTime : null}
-                onApply={(n) => { setSplitCount(n); setSplitEnabled(true); }}
+                onApply={(n, g) => { setSplitCount(n); setSplitInterval(g); setSplitEnabled(true); }}
                 onOff={() => setSplitEnabled(false)}
                 onClose={() => setSplitOpen(false)}
               />

@@ -89,6 +89,9 @@ interface TargetSendModalProps {
   setSplitEnabled: (b: boolean) => void;
   splitCount: number;
   setSplitCount: (n: number) => void;
+  /** ★ 0928 분할 간격(분) — 직접발송 패널과 같은 Dashboard 값이라 이 창에도 칸이 있어야 숨은 값이 안 생긴다 */
+  splitInterval: number;
+  setSplitInterval: (n: number) => void;
 
   // MMS
   mmsUploadedImages: any[];
@@ -189,6 +192,7 @@ export default function TargetSendModal({
   reserveDateTime, setShowReservePicker,
   splitEnabled, setSplitEnabled,
   splitCount, setSplitCount,
+  splitInterval, setSplitInterval,
   mmsUploadedImages, setMmsUploadedImages, setShowMmsUploadModal,
   formatPhoneNumber, formatRejectNumber, calculateBytes,
   setToast,
@@ -703,8 +707,10 @@ export default function TargetSendModal({
                 <span className={`font-semibold ${splitEnabled ? 'text-indigo-700' : 'text-slate-700'}`}>분할전송</span>
               </label>
               <div className="mt-1.5 flex items-center justify-center gap-1">
-                <input type="number" className="w-16 h-7 rounded-lg ring-1 ring-slate-200 px-1.5 text-[12px] text-center focus:outline-none focus:ring-2 focus:ring-indigo-500/50 disabled:opacity-50" placeholder="1000" value={splitCount} onChange={(e) => setSplitCount(Number(e.target.value) || 1000)} disabled={!splitEnabled} />
-                <span className="text-slate-500">건/분</span>
+                <input type="number" min={1} max={9999} className="w-16 h-7 rounded-lg ring-1 ring-slate-200 px-1.5 text-[12px] text-center focus:outline-none focus:ring-2 focus:ring-indigo-500/50 disabled:opacity-50" placeholder="1000" value={splitCount} onChange={(e) => setSplitCount(Math.max(1, Math.min(9999, Math.floor(Number(e.target.value)) || 1000)))} disabled={!splitEnabled} aria-label="한 번에 보낼 건수" />
+                <span className="text-slate-500">건 ·</span>
+                <input type="number" min={1} max={60} className="w-11 h-7 rounded-lg ring-1 ring-slate-200 px-1 text-[12px] text-center focus:outline-none focus:ring-2 focus:ring-indigo-500/50 disabled:opacity-50" placeholder="1" value={splitInterval} onChange={(e) => setSplitInterval(Math.max(1, Math.min(60, Math.floor(Number(e.target.value)) || 1)))} disabled={!splitEnabled} aria-label="보내는 간격(분)" />
+                <span className="text-slate-500">분마다</span>
               </div>
             </div>
             <div className={adTextEnabled ? OPT_ON : OPT_OFF}>

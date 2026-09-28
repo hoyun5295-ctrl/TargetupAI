@@ -28,7 +28,7 @@
 | 본문 칸 | (광고) · 본문(textarea 자동 높이) · 수신거부 줄(고정 · 자물쇠)이 한 흐름 · 칸 안 도구 줄(특수문자·보관함·문자저장·변수 · byte · 미리보기) | `DirectSendPanel.tsx` · `styles/direct-send.css` "보내기 전 점검 개편" 절 |
 | 보내기 전 점검 | 스팸 검사 칸(아직 = 노란 면) · 맞춤법 검사 칸(NEW · 아직 = 초록 테두리) · 58px | `direct-send/DirectCheckTiles.tsx` |
 | 발송 바 | 왼쪽 열(512px)에 맞춘 예약·분할·광고 3칸(58px) · 오른쪽 발신번호(옛 본문 아래 줄에서 원본 그대로 옮김 · 위로 열림) · 전송 | `DirectSendPanel.tsx` footer |
-| 분할 풍선 | 100/500/1,000/3,000 · 직접 입력(1~9999) · "N번에 나눠 · 몇 시쯤 다 나가요"(안내 추정 · 실제 시각은 서버 `calcSplitSendTime`) | `direct-send/SplitSendPopover.tsx` |
+| 분할 풍선 | ~~100/500/1,000/3,000 · 직접 입력(1~9999) · 안내 추정~~ → **★0928 개편(Harold · 목업 승인)**: 한 번에 보낼 건수(1~9,999) + 보내는 간격(1~60분) 두 칸 · 시각표 = 서버 `GET /api/campaigns/split-preview`(CT `send-time-util` planSplitSchedule · 밤 9시~아침 8시 건너뜀 반영) · 마지막 회차가 시작부터 11일(환불 워커 14일 − 문자 결과 최장 2일 − 여유 1일 · ★Codex 1R high로 12→11)을 넘으면 적용 금지 + 서버도 접수 전 400 `SPLIT_SPAN_TOO_LONG` · 분할 칸 "N건 · M분마다"(`utils/split-send.ts splitTileLabel`) · 알림톡 창·타겟 발송 창에도 간격 칸 · 간격은 `send_config.splitIntervalMinutes`(없으면 1분) | `direct-send/SplitSendPopover.tsx` · `utils/split-send.ts` |
 | 맞춤법 결과 창 | 줄마다 그대로 두기·고치기 · 모두 고치기 · "문장까지 AI로 다듬기 · 1크레딧"(옛 AI 다듬기 자리) · 단문 90byte 초과 고치기 잠금(화면 바이트 계산과 같은 함수) | `direct-send/DirectSpellModal.tsx` |
 | 발송 전 경고 | 안 함(24시간 다시 보지 않기) · 막힘 · 진행 중 · 결과 없음 · 맞춤법 남음 | `direct-send/SendSpamWarnModal.tsx` |
 | 요금제 안내 | 써 본 효과(검사 원장) → 스타터 카드 1장 → [스타터 요금제 알아보기] · [다음에 할게요] · "이번 문자는 검사 없이 그대로 보낼 수 있어요" | `direct-send/TrialUpsellModal.tsx` |

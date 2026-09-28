@@ -14,7 +14,7 @@ import { prepaidRefund, REFUND_KEYS } from './prepaid';
 import { buildRefundPending, recheckZeroLoadObligation, dropRefundPendingAxes } from './refund-pending';
 import { getCampaignQueueTables, smsCountAll } from './sms-queue';
 import { getCompanySmsTables, smsExecAll, toKoreaTimeStr, recordCampaignSentTables } from './sms-queue';
-import { calcSplitSendTime } from './send-time-util';
+import { readStoredSplit, splitSendTime } from './send-time-util';
 import { processSendChunk, type ChunkRecipient } from './direct-send-processor';
 // ★2026-09-02 브랜드 이미지 preflight(AI 판정 → 카카오 URL 치환) — 캠페인당 한 번
 import { prepareBrandAttachmentForSend } from './brand-message';
@@ -463,7 +463,9 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   const callbackFilterUserId = cfg.useIndividualCallback && !skipLoad
     ? callbackAssignmentUserId((await query(`SELECT user_type FROM users WHERE id = $1`, [userId])).rows[0]?.user_type, userId)
     : undefined;
-  const useNow = !cfg.scheduled && !(cfg.splitEnabled && cfg.splitCount > 0);
+  // ★ 2026-09-28 분할 = 저장 설정을 너그럽게 읽는 CT(옛 캠페인 = 간격 1분 · 판정은 옛 `splitEnabled && splitCount > 0`과 같다)
+  const split = readStoredSplit(cfg);
+  const useNow = !cfg.scheduled && !split;
 
   // ★2026-09-02(2) 브랜드 이미지 preflight — **청크 루프 밖에서 캠페인당 한 번**이다.
   //   Codex 2R high3: 청크마다 돌리면 같은 이미지를 청크 수만큼 올린다(processSendChunk는
@@ -586,11 +588,11 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
       const globalIndex = processed + i;
       let sendTime = '';
       if (cfg.scheduled && cfg.scheduledAt) {
-        sendTime = (cfg.splitEnabled && cfg.splitCount > 0)
-          ? toKoreaTimeStr(calcSplitSendTime(new Date(cfg.scheduledAt), Math.floor(globalIndex / cfg.splitCount)))
+        sendTime = split
+          ? toKoreaTimeStr(splitSendTime(new Date(cfg.scheduledAt), globalIndex, split))
           : toKoreaTimeStr(new Date(cfg.scheduledAt));
-      } else if (cfg.splitEnabled && cfg.splitCount > 0) {
-        sendTime = toKoreaTimeStr(calcSplitSendTime(new Date(), Math.floor(globalIndex / cfg.splitCount)));
+      } else if (split) {
+        sendTime = toKoreaTimeStr(splitSendTime(new Date(), globalIndex, split));
       }
       return {
         phone: r.phone, name: r.name, extra1: r.extra1, extra2: r.extra2, extra3: r.extra3,

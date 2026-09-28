@@ -61,6 +61,7 @@ import DirectCheckTiles, { type SpamTileState, type SpellTileState } from './dir
 import DirectSpellModal from './direct-send/DirectSpellModal';
 import SendSpamWarnModal, { type SendWarnVariant } from './direct-send/SendSpamWarnModal';
 import SplitSendPopover from './direct-send/SplitSendPopover';
+import { splitTileLabel } from '../utils/split-send';
 import TrialUpsellModal from './direct-send/TrialUpsellModal';
 import {
   applySpellIssue, carrierLabel, dismissSendWarn, fetchRecentSpamCheck, fetchSendCheckStatus, isSendWarnDismissed,
@@ -110,6 +111,9 @@ export interface DirectSendPanelProps {
   setSplitEnabled: (b: boolean) => void;
   splitCount: number;
   setSplitCount: (n: number) => void;
+  /** ★ 0928 분할 간격(분) */
+  splitInterval: number;
+  setSplitInterval: (n: number) => void;
   optOutNumber: string;
 
   // MMS
@@ -209,7 +213,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     individualCallbackColumn, setIndividualCallbackColumn,
     adTextEnabled, handleAdToggle,
     reserveEnabled, setReserveEnabled, reserveDateTime, setShowReservePicker,
-    splitEnabled, setSplitEnabled, splitCount, setSplitCount,
+    splitEnabled, setSplitEnabled, splitCount, setSplitCount, splitInterval, setSplitInterval,
     optOutNumber,
     mmsUploadedImages, setMmsUploadedImages, setShowMmsUploadModal,
     isSpamFilterLocked, setSpamFilterData, setShowSpamFilter, spamModalOpen = false,
@@ -1536,7 +1540,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     </button>
                   )}
                 </div>
-                {/* 분할 — 누르면 몇 건씩 나눌지 묻는다 */}
+                {/* 분할 — 누르면 몇 건씩·몇 분마다 나눌지 묻는다(★0928) */}
                 <div className="ds-opt-anchor">
                   <button
                     type="button"
@@ -1549,7 +1553,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     <span className="ds-tile__ic"><Timer size={17} strokeWidth={2} /></span>
                     <span className="ds-tile__tx">
                       <span className="ds-tile__t1">분할</span>
-                      <span className="ds-tile__t2">{splitEnabled ? `1분에 ${splitCount.toLocaleString()}건` : '안 함'}</span>
+                      <span className="ds-tile__t2">{splitEnabled ? splitTileLabel(splitCount, splitInterval) : '안 함'}</span>
                     </span>
                     <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />
                   </button>
@@ -1557,9 +1561,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     open={splitOpen}
                     enabled={splitEnabled}
                     value={splitCount}
+                    interval={splitInterval}
                     recipientCount={directRecipients.length}
                     startAt={reserveEnabled && reserveDateTime ? reserveDateTime : null}
-                    onApply={(n) => { setSplitCount(n); setSplitEnabled(true); }}
+                    onApply={(n, g) => { setSplitCount(n); setSplitInterval(g); setSplitEnabled(true); }}
                     onOff={() => setSplitEnabled(false)}
                     onClose={() => setSplitOpen(false)}
                   />

@@ -18,6 +18,7 @@ import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from './brand-link-core'
 // ★ 2026-07-12 D-2: 야간 광고 발송 제한 — SEND_HOURS 창 밖 광고 접수 거부(순수 판정 CT 재사용)
 import { nightAdRestrictionMessage } from './autosend-policy';
 import { SEND_HOURS } from '../config/defaults';
+import { parseSplitSetting, splitSpanError } from './send-time-util';
 
 /**
  * ★ 2026-09-27 한줄로 V2 GATE S5-05(Harold 결정 「광고는 서버가 항상 켬」) — 수신거부 번호를 뺄지 판정.
@@ -128,6 +129,17 @@ export async function createDirectSendCampaign(
   const nightAdMsg = nightAdRestrictionMessage(spec.adEnabled, spec.scheduled, spec.scheduledAt, SEND_HOURS.start, SEND_HOURS.end);
   if (nightAdMsg) {
     throw new DirectSendError('NIGHT_AD_RESTRICTED', nightAdMsg, 400);
+  }
+
+  // ★ 2026-09-28 분할 값 검사 + 끝나는 날 한도(CT send-time-util) — 직접발송 commit·자율 발송 공통 길목. 캠페인 생성·차감 전에 막는다.
+  //   저장 설정(send_config)에는 검사를 통과한 값(정수 건수·간격)을 싣는다 — 워커는 readStoredSplit로 읽는다.
+  const splitParsed = parseSplitSetting(spec.splitEnabled, spec.splitCount, spec.splitIntervalMinutes);
+  if (!splitParsed.ok) throw new DirectSendError(splitParsed.code, splitParsed.error, 400);
+  if (splitParsed.split) {
+    const splitBase = spec.scheduled && spec.scheduledAt ? new Date(spec.scheduledAt) : new Date();
+    const spanErr = splitSpanError(splitBase, spec.total, splitParsed.split);
+    if (spanErr) throw new DirectSendError('SPLIT_SPAN_TOO_LONG', spanErr, 400);
+    spec = { ...spec, splitEnabled: true, splitCount: splitParsed.split.count, splitIntervalMinutes: splitParsed.split.intervalMinutes };
   }
 
   const campaignResult = await query(CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams(spec, ctx));

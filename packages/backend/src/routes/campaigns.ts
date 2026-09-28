@@ -68,7 +68,7 @@ import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../util
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt } from '../utils/campaign-validation';
-import { calcSplitSendTime, isWithinBrandSendWindow } from '../utils/send-time-util';
+import { isWithinBrandSendWindow, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError } from '../utils/send-time-util';
 import { countStagingFiltered, createDirectSendCampaign, effectiveUnsubFilter } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
 import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from '../utils/brand-link-core';
@@ -1421,6 +1421,34 @@ await query(
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterQueryCompat 직접 사용
 
 // 담당자 테스트 발송 통계
+/**
+ * ★ 2026-09-28 분할 미리보기(Harold 지시) — 화면 풍선의 시각표를 서버 CT(planSplitSchedule)로 계산한다.
+ * 전에는 화면이 「시작 + 회차×1분」으로 따로 셌다(21~08시 건너뜀 미반영 · 끝나는 날 한도 없음). 읽기만 · DB 0.
+ */
+router.get('/split-preview', async (req: Request, res: Response) => {
+  const parsed = parseSplitSetting(true, req.query.count, req.query.interval);
+  if (!parsed.ok || !parsed.split) return res.status(400).json({ success: false, code: 'SPLIT_INVALID', error: parsed.ok ? '분할 값을 확인해 주세요.' : parsed.error });
+  const total = Number(req.query.total);
+  if (!Number.isInteger(total) || total < 0 || total > 10_000_000) {
+    return res.status(400).json({ success: false, error: '받는 사람 수를 확인해 주세요.' });
+  }
+  const startRaw = typeof req.query.startAt === 'string' ? req.query.startAt : '';
+  const base = startRaw ? new Date(startRaw) : new Date();
+  if (Number.isNaN(base.getTime())) return res.status(400).json({ success: false, error: '시작 시각을 확인해 주세요.' });
+  const plan = planSplitSchedule(base, total, parsed.split);
+  return res.json({
+    success: true,
+    plan: {
+      rounds: plan.rounds,
+      lastCount: plan.lastCount,
+      startAt: base.toISOString(),
+      lastAt: plan.lastAt.toISOString(),
+      withinLimit: plan.withinLimit,
+      slots: plan.slots.map((x) => ({ index: x.index, at: x.at.toISOString(), count: x.count })),
+    },
+  });
+});
+
 router.get('/test-stats', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1818,7 +1846,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
 
     const {
       stagingId, msgType, subject, message, callback, sendChannel,
-      adEnabled, scheduled, scheduledAt, splitEnabled, splitCount,
+      adEnabled, scheduled, scheduledAt, splitEnabled, splitCount, splitIntervalMinutes,
       useIndividualCallback, individualCallbackColumn, mmsImagePaths,
       dedupEnabled = true, unsubFilterEnabled = true,
       kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
@@ -1954,7 +1982,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
         const { campaignId, accepted } = await createDirectSendCampaign({
           stagingId, campaignName: `직접발송 ${new Date().toLocaleString('ko-KR')}`,
           msgType: commitMsgResolved.messageType, message, subject, callback, sendChannel: commitChannel.channel, adEnabled, total,
-          scheduled, scheduledAt, splitEnabled, splitCount, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
+          scheduled, scheduledAt, splitEnabled, splitCount, splitIntervalMinutes, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
           dedupEnabled, unsubFilterEnabled: effectiveUnsubFilter(adEnabled === true, unsubFilterEnabled),
           kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
           alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson: alimtalkButtonJsonResolved, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
@@ -2050,7 +2078,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       scheduled,      // 예약 여부
       scheduledAt,    // 예약 시간
       splitEnabled,   // 분할전송 여부
-      splitCount,     // 분당 발송 건수
+      splitCount,     // 한 묶음 건수
+      splitIntervalMinutes, // ★ 0928 묶음 간격(분) — 안 보내면 1분(옛 화면과 같다)
       useIndividualCallback,  // 개별회신번호 사용 여부
       individualCallbackColumn,  // ★ D99: 회신번호로 사용할 컬럼명 (store_phone, callback, custom_N 등)
       confirmCallbackExclusion, // ★ 미등록 회신번호 제외 확인 플래그
@@ -2081,6 +2110,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       campaignName,         // (선택) 호출부가 지은 캠페인명. 없으면 서버가 `직접발송 {일시}`로 짓는다
       sendType,             // (선택) send_type 값. CT 화이트리스트 밖이면 무시하고 'direct'
     } = req.body;
+
+    // ★ 2026-09-28 분할 값 검사(CT) — 서버가 건수를 안 보던 구멍 · 간격(분) 추가. 범위 밖은 돈이 움직이기 전에 거절.
+    const splitParsed = parseSplitSetting(splitEnabled, splitCount, splitIntervalMinutes);
+    if (!splitParsed.ok) return res.status(400).json({ success: false, code: splitParsed.code, error: splitParsed.error });
+    const split = splitParsed.split;
 
     // ★ 화이트리스트 밖 값은 **거절이 아니라 강등**한다 — 여기서 400을 내면 옛 프론트가 예상 못 한 값을
     //   보내던 순간 발송 자체가 막힌다. 축이 틀리는 것보다 발송이 멎는 쪽이 더 크다.
@@ -2389,6 +2423,13 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '모든 수신자가 수신거부 상태이거나 필터 조건에 해당하지 않습니다' });
     }
 
+    // ★ 2026-09-28 분할 기준 시각은 요청에 한 번(예약이면 예약 시각) · 끝나는 날 한도(CT) — 캠페인 생성·차감 전에 막는다.
+    const splitBase = scheduled && scheduledAt ? new Date(scheduledAt) : new Date();
+    if (split) {
+      const spanErr = splitSpanError(splitBase, filteredRecipients.length, split);
+      if (spanErr) return res.status(400).json({ success: false, code: 'SPLIT_SPAN_TOO_LONG', error: spanErr });
+    }
+
     // 2. 캠페인 레코드 생성 (원본 템플릿도 저장)
     // (채널 확정은 이 라우트 앞머리에서 끝났다 — 2026-08-17. `directChannel`이 그 결과다.)
 
@@ -2529,7 +2570,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     //   문자만 발송 후 500). 검증을 아무리 정교하게 만들어도 위치가 그대로면 같은 사고가 반복된다.
     //   이제 두 채널의 행을 **전량 만들어 본 뒤**에 차감한다 — 규격 위반은 돈이 움직이기 전에 끝난다.
     const directSmsRows: any[][] = [];
-    const useNow = !isScheduledSend && !(splitEnabled && splitCount > 0);
+    const useNow = !isScheduledSend && !split;
     // SMS 발송 (sms 또는 both) — ★ D72: sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
     if (directChannel === 'sms' || directChannel === 'both') {
 
@@ -2554,18 +2595,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           skipNumberFormatting: true,
         });
 
-        // ★ C3: 분할전송 시간 계산
+        // ★ C3: 분할전송 시간 계산 — ★ 0928 분할 CT(묶음 번호 × 간격분 · 발송 가능 시간 안에서)
         let sendTime: string;
-        if (isScheduledSend) {
-          if (splitEnabled && splitCount > 0) {
-            const batchIndex = Math.floor(i / splitCount);
-            sendTime = toKoreaTimeStr(calcSplitSendTime(new Date(scheduledAt), batchIndex));
-          } else {
-            sendTime = toKoreaTimeStr(new Date(scheduledAt));
-          }
-        } else if (splitEnabled && splitCount > 0) {
-          const batchIndex = Math.floor(i / splitCount);
-          sendTime = toKoreaTimeStr(calcSplitSendTime(new Date(), batchIndex));
+        if (split) {
+          sendTime = toKoreaTimeStr(splitSendTime(splitBase, i, split));
+        } else if (isScheduledSend) {
+          sendTime = toKoreaTimeStr(new Date(scheduledAt));
         } else {
           sendTime = '';  // useNow=true이면 bulkInsertSmsQueue에서 NOW() 사용
         }
@@ -2618,21 +2653,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           callback: recipient.callback,
         }, { skipNumberFormatting: true });
 
-        // ★ C3: 분할전송 시간 계산 (오버플로우 방지 — calcSplitSendTime 적용)
+        // ★ C3: 분할전송 시간 계산 — ★ 0928 분할 CT(문자 축과 같은 기준 시각·같은 함수)
         let kakaoSendTime: string | undefined;
-        if (isScheduledSend) {
-          if (splitEnabled && splitCount > 0) {
-            const batchIndex = Math.floor(i / splitCount);
-            kakaoSendTime = toKoreaTimeStr(calcSplitSendTime(new Date(scheduledAt), batchIndex));
-          } else {
-            kakaoSendTime = toKoreaTimeStr(new Date(scheduledAt));
-          }
-        } else if (splitEnabled && splitCount > 0) {
+        if (split) {
           // ★ 2026-08-18 즉시 분할발송에도 시각을 매긴다 — 문자 축은 예약이 아니어도 분할 시각을
           //   계산하는데(위 sendTime 블록) 브랜드만 비워 두고 있었다. `both`면 같은 수신자가
           //   두 채널에서 서로 다른 시각에 나가고, 브랜드는 분할이 사실상 무시됐다.
-          const batchIndex = Math.floor(i / splitCount);
-          kakaoSendTime = toKoreaTimeStr(calcSplitSendTime(new Date(), batchIndex));
+          kakaoSendTime = toKoreaTimeStr(splitSendTime(splitBase, i, split));
+        } else if (isScheduledSend) {
+          kakaoSendTime = toKoreaTimeStr(new Date(scheduledAt));
         } else {
           // ★ 2026-08-18 즉시발송도 **검증한 시각을 그대로 큐에 넣는다.**
           //   비워 두면 큐가 MySQL NOW()를 쓰는데, 검사는 조립 시점(preflight)이고 적재는 차감·문자

@@ -67,6 +67,111 @@ export function calcSplitSendTime(
   }
 }
 
+// ─────────────── ★ 2026-09-28 분할 전송 CT (Harold 지시 · 건수 + 간격) ───────────────
+// 입구(동기 /direct-send · 대량 commit·자율 공용 createDirectSendCampaign · 워커 · 화면 미리보기)가 전부 이 한 벌을 쓴다.
+// 전에는 `Math.floor(i / splitCount)`분 계산이 6곳에 인라인이었고, 서버는 건수를 검사하지 않았으며, 끝나는 날 한도가 없었다.
+
+export const SPLIT_LIMITS = {
+  countMin: 1,
+  countMax: 9999,
+  intervalMin: 1,
+  intervalMax: 60,
+  /**
+   * 마지막 회차 ≤ 시작 + 11일. 근거 = 선불 실패 자동 환불(`mysql-refund-sweeper`)이 발송 기준 **14일** 안의 캠페인만 보고,
+   * 문자 결과는 최장 **48시간** 뒤에 확정된다(`expired-pending-sweeper` EXPIRE_HOURS · 1분 주기). 거기에 **1일 여유** —
+   * 48시간 지난 캠페인은 환불 집계가 **60분에 1회**이고(환불 워커 차등 주기), 대량 적재는 워커가 청크를 도는 동안 기준 시각이 늦어진다.
+   * 14 − 2 − 1 = 11. 넘기면 마지막 회차의 실패분이 환불 창 밖으로 나간다(★Codex 0928 1R high — 첫 설계 12일은 여유가 0이었다).
+   */
+  maxSpanDays: 11,
+} as const;
+
+export interface SplitSetting {
+  /** 한 묶음(회차)에 보내는 건수 */
+  count: number;
+  /** 묶음 사이 간격(분) */
+  intervalMinutes: number;
+}
+
+export type SplitParse =
+  | { ok: true; split: SplitSetting | null }
+  | { ok: false; code: 'SPLIT_INVALID'; error: string };
+
+const toInt = (v: unknown): number | null => {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
+  const n = Number(v);
+  return Number.isInteger(n) ? n : NaN;
+};
+
+/**
+ * 요청의 분할 값 검사. 꺼져 있으면 분할 없음(null).
+ * 켜져 있으면 건수 1~9,999 정수 · 간격 1~60분 정수. **간격을 안 보낸 옛 화면·옛 요청 = 1분**(지금까지와 같다).
+ * 범위 밖은 거절한다 — 옛 코드는 건수가 0이면 조용히 한 번에 보냈다(사용자는 나눠 보낸다고 알았다).
+ */
+export function parseSplitSetting(enabled: unknown, count: unknown, intervalMinutes: unknown): SplitParse {
+  if (!enabled) return { ok: true, split: null };
+  const c = toInt(count);
+  if (c === null || Number.isNaN(c) || c < SPLIT_LIMITS.countMin || c > SPLIT_LIMITS.countMax) {
+    return { ok: false, code: 'SPLIT_INVALID', error: '분할 건수는 1~9,999건 사이로 정해 주세요.' };
+  }
+  const g = toInt(intervalMinutes);
+  if (g === null) return { ok: true, split: { count: c, intervalMinutes: 1 } };
+  if (Number.isNaN(g) || g < SPLIT_LIMITS.intervalMin || g > SPLIT_LIMITS.intervalMax) {
+    return { ok: false, code: 'SPLIT_INVALID', error: '분할 간격은 1~60분 사이로 정해 주세요.' };
+  }
+  return { ok: true, split: { count: c, intervalMinutes: g } };
+}
+
+/**
+ * 저장된 캠페인 설정(send_config)의 분할 — 워커용. **너그럽게** 읽는다: 이 CT 전에 저장된 예약 캠페인이 그대로 나가야 한다.
+ * 옛 판정(`splitEnabled && splitCount > 0`)과 같고, 간격이 없거나 이상하면 1분.
+ */
+export function readStoredSplit(cfg: any): SplitSetting | null {
+  if (!cfg || !cfg.splitEnabled) return null;
+  const count = Number(cfg.splitCount);
+  if (!(count > 0)) return null;
+  const g = Number(cfg.splitIntervalMinutes);
+  const intervalMinutes = Number.isInteger(g) && g >= SPLIT_LIMITS.intervalMin && g <= SPLIT_LIMITS.intervalMax ? g : 1;
+  return { count, intervalMinutes };
+}
+
+/** i번째 수신자(0부터)의 발송 시각 = (묶음 번호 × 간격)분을 발송 가능 시간 안에서 흘린다(calcSplitSendTime) */
+export function splitSendTime(base: Date, index: number, split: SplitSetting): Date {
+  return calcSplitSendTime(base, Math.floor(index / split.count) * split.intervalMinutes);
+}
+
+export interface SplitPlan {
+  rounds: number;
+  lastCount: number;
+  lastAt: Date;
+  /** 화면 시각표 — 회차가 5번 이하면 전부, 넘으면 앞 3번 + 마지막 */
+  slots: { index: number; at: Date; count: number }[];
+  /** 마지막 회차가 시작부터 SPLIT_LIMITS.maxSpanDays 안인가 */
+  withinLimit: boolean;
+}
+
+/** 분할 계획 — 화면 미리보기와 서버 한도 검사가 같은 값을 본다 */
+export function planSplitSchedule(base: Date, total: number, split: SplitSetting): SplitPlan {
+  const n = Math.max(0, Math.floor(Number(total) || 0));
+  const rounds = n > 0 ? Math.ceil(n / split.count) : 0;
+  const at = (r: number) => calcSplitSendTime(base, r * split.intervalMinutes);
+  const countOf = (r: number) => (r === rounds - 1 ? n - split.count * (rounds - 1) : split.count);
+  const picks = rounds <= 5 ? Array.from({ length: rounds }, (_, i) => i) : [0, 1, 2, rounds - 1];
+  const lastAt = rounds > 0 ? at(rounds - 1) : new Date(base.getTime());
+  return {
+    rounds,
+    lastCount: rounds > 0 ? countOf(rounds - 1) : 0,
+    lastAt,
+    slots: picks.map((r) => ({ index: r, at: at(r), count: countOf(r) })),
+    withinLimit: lastAt.getTime() - base.getTime() <= SPLIT_LIMITS.maxSpanDays * 24 * 60 * 60 * 1000,
+  };
+}
+
+/** 끝나는 날 한도 밖이면 사용자에게 줄 문장, 안이면 null */
+export function splitSpanError(base: Date, total: number, split: SplitSetting): string | null {
+  if (planSplitSchedule(base, total, split).withinLimit) return null;
+  return `분할이 시작부터 ${SPLIT_LIMITS.maxSpanDays}일을 넘겨 끝나요. 한 번에 보낼 건수를 늘리거나 간격을 줄여 주세요.`;
+}
+
 /**
  * 발송 가능 시간(SEND_HOURS) 밖이면 다음 발송 가능 시각(startHour)으로 이동.
  * - 새벽(0 ~ startHour 미만) → 당일 startHour

@@ -33,6 +33,8 @@ export interface DirectSendSpec {
   scheduledAt?: string | null;
   splitEnabled?: boolean;
   splitCount?: number;
+  /** ★ 0928 묶음 간격(분) — 없으면 1분(send-time-util readStoredSplit) */
+  splitIntervalMinutes?: number;
   useIndividualCallback?: boolean;
   individualCallbackColumn?: string | null;
   mmsImagePaths?: string[] | null;
@@ -86,7 +88,7 @@ export function buildDirectSendCampaignParams(
     msgType: spec.msgType, sendChannel: directChannel, message: spec.message, subject: spec.subject,
     callback: spec.callback, useIndividualCallback: spec.useIndividualCallback, individualCallbackColumn: spec.individualCallbackColumn,
     adEnabled: finalIsAd, scheduled: spec.scheduled, scheduledAt: spec.scheduledAt,
-    splitEnabled: spec.splitEnabled, splitCount: spec.splitCount, mmsImagePaths: spec.mmsImagePaths,
+    splitEnabled: spec.splitEnabled, splitCount: spec.splitCount, splitIntervalMinutes: spec.splitIntervalMinutes, mmsImagePaths: spec.mmsImagePaths,
     kakaoBubbleType: spec.kakaoBubbleType, kakaoSenderKey: spec.kakaoSenderKey, kakaoTargeting: spec.kakaoTargeting,
     kakaoAttachmentJson: spec.kakaoAttachmentJson, kakaoCarouselJson: spec.kakaoCarouselJson, kakaoResendType: spec.kakaoResendType,
     alimtalkTemplateCode: spec.alimtalkTemplateCode, alimtalkVariableMap: spec.alimtalkVariableMap, alimtalkButtonJson: spec.alimtalkButtonJson,
