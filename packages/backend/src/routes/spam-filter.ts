@@ -19,6 +19,8 @@ import {
 } from '../utils/spam-trial';
 
 import { spamAppTokenVerdict } from '../utils/spam-app-auth';
+// ★ 2026-09-28 검사 입구 글자 검사 — 발송 버튼과 같은 판정(게이트웨이 CP949 표)
+import { unsupportedSmsCharCodes } from '../utils/sms-charset';
 
 const router = Router();
 
@@ -173,6 +175,27 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     const spamSendCount = devices.rows.length * messageTypes.length;
     const spamDeductType = messageTypes[0] || 'SMS';
 
+    // ★ 2026-09-28 실제로 나갈 본문·제목을 여기서 한 번 만든다(샘플 고객 치환 · (광고) 제목). 아래 적재 반복은 이 값을 그대로 보낸다.
+    //   문자로 보낼 수 없는 글자(보이지 않는 글자 포함)가 있으면 검사 행·체험 횟수·차감 전에 멈춘다.
+    //   옛: 검사 없이 적재 → 게이트웨이가 9401로 반려 → 3사 모두 '전달 실패' · 체험 횟수는 빠졌다(0928 실측 U+200B 15곳 4건).
+    const outgoing = messageTypes.map((msgType) => {
+      // ★ #3+D92: 개인화 변수를 샘플 데이터로 치환하여 발송 (원본은 DB에 보관) · %회신번호%도 callbackNumber로 치환
+      const rawContent = msgType === 'SMS' ? messageContentSms : messageContentLms;
+      const content = replaceVariables(rawContent || '', firstCustomer, spamFieldMappings, spamAddressBookFields);
+      // ★ KISA 2026-05: 본문에 (광고) 포함 여부로 광고 판단 → 제목에도 (광고) 부착
+      const isAdDetected = /^\s*[(（]\s*광고\s*[)）]/.test(content || ''); // 반각·전각 (광고) 모두 감지
+      const titleStr = (msgType === 'LMS' || msgType === 'MMS') ? buildAdSubject(subject || '', msgType, isAdDetected) : '';
+      return { msgType, content, titleStr };
+    });
+    const unsupportedChars = unsupportedSmsCharCodes(...outgoing.flatMap((o) => [o.content, o.titleStr]));
+    if (unsupportedChars.length > 0) {
+      return res.status(400).json({
+        error: '문자로 보낼 수 없는 글자(보이지 않는 글자 포함)가 있어 검사하지 않았어요. 작성 화면 안내에서 바꾸거나 지운 뒤 다시 검사해 주세요(안내가 없으면 받는 사람 정보의 글자를 확인해 주세요). 검사 횟수와 요금은 그대로예요.',
+        code: 'SMS_UNSUPPORTED_CHARS',
+        chars: unsupportedChars,
+      });
+    }
+
     // ★ D103: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)
     const spamCheckNumber = await getOpt080Number(userId || null, companyId) || null;
 
@@ -278,7 +301,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     let pendingResultId: string | null = null;
     try {
     for (const device of devices.rows) {
-      for (const msgType of messageTypes) {
+      for (const { msgType, content, titleStr } of outgoing) {
         // 결과 행 생성
         const inserted = await query(
           `INSERT INTO spam_filter_test_results (test_id, carrier, message_type, phone)
@@ -287,15 +310,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         );
         pendingResultId = inserted.rows[0]?.id ?? null;
 
-        // ★ #3+D92: 개인화 변수를 샘플 데이터로 치환하여 발송 (원본은 DB에 보관)
-        // %회신번호%도 callbackNumber로 치환
-        const rawContent = msgType === 'SMS' ? messageContentSms : messageContentLms;
-        const content = replaceVariables(rawContent || '', firstCustomer, spamFieldMappings, spamAddressBookFields);
-
-        // QTmsg 테스트 라인으로 발송
-        // ★ KISA 2026-05: 본문에 (광고) 포함 여부로 광고 판단 → 제목에도 (광고) 부착
-        const isAdDetected = /^\s*[(（]\s*광고\s*[)）]/.test(content || ''); // 반각·전각 (광고) 모두 감지
-        const titleStr = (msgType === 'LMS' || msgType === 'MMS') ? buildAdSubject(subject || '', msgType, isAdDetected) : '';
+        // QTmsg 테스트 라인으로 발송 — 본문·제목 = 위에서 글자 검사를 마친 값(outgoing)
         await insertTestSmsQueue(
           device.phone,
           callbackNumber,
