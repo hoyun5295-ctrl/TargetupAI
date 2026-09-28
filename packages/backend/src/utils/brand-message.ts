@@ -28,7 +28,7 @@ import { insertBrandQueue, BrandQueueInsertError, getCompanySmsTables, getEtcJso
 import { isPilotTarget } from './rollout-gate';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 import { markRefundPending } from './refund-pending';
-import { buildUnsubscribeExistsFilter } from './unsubscribe-helper';
+import { buildUnsubscribeExistsFilter, getUnsubscribedPhones } from './unsubscribe-helper';
 import { normalizePhone } from './normalize-phone';
 import { normalize080Number, format080Number, isHttpLinkOrVariable, webLinkReason } from './normalize';
 // 발송 가능 시간 판정은 시각 CT가 소유한다(브랜드 창 08:00~20:50 — config/defaults BRAND_SEND_WINDOW).
@@ -1592,12 +1592,10 @@ function logBrandKakaoTraining(
  * 수신거부 필터 — 두 발송 함수 공용.
  */
 async function filterUnsubscribed(userId: string, phones: string[]): Promise<string[]> {
-  const unsubResult = await query(
-    `SELECT phone FROM unsubscribes WHERE user_id = $1`,
-    [userId]
-  );
-  const unsubPhones = new Set(unsubResult.rows.map((r: any) => normalizePhone(r.phone)));
-  return phones.map(p => normalizePhone(p)).filter(p => p && !unsubPhones.has(p));
+  // ★ 2026-09-28 한줄로 V2 R171 — 받는 번호만 DB에서 찾는다(CT · 숫자만 남겨 비교). 옛: 계정 수신거부 전량을 매 발송 읽었다.
+  const normalized = phones.map(p => normalizePhone(p)).filter(Boolean);
+  const unsubPhones = new Set(await getUnsubscribedPhones(userId, normalized));
+  return normalized.filter(p => !unsubPhones.has(p));
 }
 
 /**

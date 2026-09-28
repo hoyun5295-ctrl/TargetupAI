@@ -156,9 +156,13 @@ export function clearEnabledFieldsCache(companyId?: string): void {
     redis.incr(enabledFieldsGenKey(companyId)).catch(() => { /* 세대 가드 실패 = 키 삭제·TTL이 상한 */ });
   }
   const redisPattern = companyId ? `enabled-fields:${companyId}:*` : 'enabled-fields:*';
-  redis.keys(redisPattern)
-    .then((keys) => (keys.length > 0 ? redis.del(...keys) : 0))
-    .catch(() => { /* TTL 60초 상한 */ });
+  // ★ 2026-09-28 한줄로 V2 R232 — KEYS 는 전체 키 공간을 한 번에 훑는 블로킹 명령이다(싱크 배치마다 불렸다).
+  //   SCAN 으로 나눠 훑으며 찾은 만큼 지운다. 실패하면 종전처럼 TTL(60초)이 상한이다.
+  const stream = redis.scanStream({ match: redisPattern, count: 200 });
+  stream.on('data', (keys: string[]) => {
+    if (keys.length > 0) redis.del(...keys).catch(() => { /* TTL 60초 상한 */ });
+  });
+  stream.on('error', () => { /* TTL 60초 상한 */ });
   // ★ 2026-07-17(3) — 무효화 = 사전 워밍 예약(5초 디바운스). 데이터가 바뀐 직후 백그라운드로
   //   'all' 스코프 payload를 다시 계산해 공용 키를 데워 두므로, 사용자가 콜드 1초를 물지 않는다.
   if (companyId) scheduleEnabledFieldsWarm(companyId);

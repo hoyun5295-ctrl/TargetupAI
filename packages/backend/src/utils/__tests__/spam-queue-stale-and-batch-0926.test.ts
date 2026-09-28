@@ -19,6 +19,10 @@ const queryMock = vi.fn(async (sql: string, params?: any[]) => {
   if (s.includes("FROM spam_filter_tests WHERE status = 'active'") && s.includes('created_at')) return { rows: state.active };
   if (s.includes('FROM spam_filter_tests') && s.includes('WHERE batch_id = $1')) return { rows: state.tests };
   if (s.includes('FROM spam_filter_test_results') && s.includes('WHERE test_id = $1')) return { rows: state.results[params![0]] || [] };
+  // ★ 2026-09-28 한줄로 V2 m005 — 배치 결과는 변형들의 결과를 한 번에(ANY) 읽는다
+  if (s.includes('FROM spam_filter_test_results') && s.includes('WHERE test_id = ANY($1::uuid[])')) {
+    return { rows: (params![0] as string[]).flatMap((id) => (state.results[id] || []).map((r: any) => ({ test_id: id, ...r }))) };
+  }
   if (s.startsWith('UPDATE')) { state.updates.push({ sql: s, params }); return { rows: [], rowCount: 1 }; }
   return { rows: [] };
 });

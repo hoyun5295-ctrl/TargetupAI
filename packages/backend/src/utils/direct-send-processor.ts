@@ -350,8 +350,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
   }
 
   // ★ 2026-07-05 발송 피로도 카운터 — 광고성만, 큐 커밋 후 fire-and-forget (staging 대량·자동마케팅 발송 공용 지점)
+  // ★ 2026-09-28 한줄로 V2 m076·m106 — 수신자마다 나가는 날(워커가 채운 sendTime 'YYYY-MM-DD HH:mm:ss' · 즉시면 비어 있어 오늘)로 센다.
   if (p.finalIsAd && sentCount > 0) {
-    void recordFatigueSends(p.companyId, recipients.map((r) => String(r.phone || '')));
+    void recordFatigueSends(p.companyId, recipients.map((r) => String(r.phone || '')), recipients.map((r) => (r.sendTime ? String(r.sendTime).slice(0, 10) : null)));
   }
 
   return { sentCount, failedCount: recipients.length - sentCount, brandSentCount };

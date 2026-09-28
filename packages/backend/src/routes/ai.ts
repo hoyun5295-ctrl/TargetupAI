@@ -43,8 +43,6 @@ import { buildPerformanceSnapshot, recommendNextAction, buildPerformanceSnapshot
 import { explainPerformance } from '../utils/performance-explainer';
 import { generateQuickAction, type QuickActionType } from '../utils/performance-quick-action';
 import { buildCohortRetention } from '../utils/performance-cohort';
-import { buildBenchmark } from '../utils/performance-benchmark';
-import { renderPerformanceReportPdf } from '../utils/performance-pdf-render';
 import { buildCampaignAttribution } from '../utils/campaign-response-attribution';
 import { buildGradePerformance, buildRecipientAttribution } from '../utils/performance-customer-axis';
 import { createJob, getJob } from '../utils/full-analysis-job';
@@ -141,7 +139,7 @@ import { suggestJourneyTrigger } from '../utils/journey-trigger-suggest';
 import { editJourneyPackage } from '../utils/journey-ai-editor';
 // ★ 2026-06-29: AI 꾸미기 — 추천 메시지에 선택 컬럼(%변수%) 자연스럽게 녹임
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
-import { buildJourneyPreviewSamples, countJourneyTargetCustomers, selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from '../utils/journey-target-extractor';
+import { countJourneyTargetCustomers, previewJourneyTargets, selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from '../utils/journey-target-extractor';
 import { describeJourneyTrigger } from '../utils/journey-step-format';
 import { normalizeStartKind } from '../utils/journey-start-kind';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
@@ -181,6 +179,7 @@ import { explainCustomerPrediction } from '../utils/predictive-explainer';
 const router = Router();
 
 router.use(authenticate);
+// ★ 2026-09-28 한줄로 V2 R290 — 아래 라우트에 authenticate 를 또 걸지 않는다(요청마다 세션 조회가 두 번 돌았다).
 
 // GET /api/ai/status - API 상태 확인
 router.get('/status', async (req: Request, res: Response) => {
@@ -192,7 +191,7 @@ router.get('/status', async (req: Request, res: Response) => {
 // ★ 2026-07-04 스타일 참고 갤러리 — AI 문구 추천 모달용.
 //   myBest = 자사 발송 이력 성과 상위(자기 데이터 자기 노출 = 오해 소지 0)
 //   styles = 업종 스타일 예시(AI 재창작본만 — 타사 실발송 원문은 탈색본이라도 절대 미노출)
-router.get('/style-gallery', authenticate, async (req: Request, res: Response) => {
+router.get('/style-gallery', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
@@ -638,7 +637,7 @@ router.post('/recommend-next-campaign', async (req: Request, res: Response) => {
 // ============================================================
 // 타겟 조건 수정 후 재조회 (AI 맞춤한줄 Step 3 수정하기)
 // ============================================================
-router.post('/recount-target', authenticate, async (req: Request, res: Response) => {
+router.post('/recount-target', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -775,7 +774,7 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
  *   - 컬럼은 targets/extract 샘플 SQL과 동일(운영 중 검증됨). SELECT 전용.
  *   - 맞춤한줄(AiCustomSendFlow) 등 compat targetFilters 발송툴이 "추출 대상 리스트 보기" 공용 모달에서 소비.
  */
-router.post('/target-recipients', authenticate, async (req: Request, res: Response) => {
+router.post('/target-recipients', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -852,7 +851,7 @@ router.post('/target-recipients', authenticate, async (req: Request, res: Respon
 });
 
 // POST /api/ai/parse-briefing - 프로모션 브리핑 → 구조화 파싱 + 타겟 고객 수 산출
-router.post('/parse-briefing', authenticate, async (req: Request, res: Response) => {
+router.post('/parse-briefing', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -955,7 +954,7 @@ router.post('/parse-briefing', authenticate, async (req: Request, res: Response)
 });
 
 // POST /api/ai/generate-custom - 개인화 맞춤 문안 생성
-router.post('/generate-custom', authenticate, async (req: Request, res: Response) => {
+router.post('/generate-custom', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -1691,7 +1690,6 @@ router.post('/operator/next-action', async (req: Request, res: Response) => {
 //   - POST /operator/performance/quick-action (Opus 4.7 1-click 액션)
 //   - GET  /operator/performance/campaigns (드릴다운 페이지네이션)
 //   - GET  /operator/performance/cohort (가입월별 retention)
-//   - GET  /operator/performance/benchmark (요금제별 평균)
 //   - GET  /operator/performance/attribution (캠페인 진행 후 반응)
 //   - GET  /operator/performance/data-availability (데이터 부족 진단)
 // ============================================================
@@ -1720,79 +1718,8 @@ router.get('/operator/performance/snapshot-v2', async (req: Request, res: Respon
   }
 });
 
-// POST /api/ai/operator/performance/report-pdf — 기간 성과 종합 PDF 보고서 (풀분석 300 · 회사+기간+날짜 멱등)
-//   화면 조회(snapshot-v2)는 무료. 보고서 생성(PDF 다운로드)에만 풀분석 차감. 같은 날 같은 기간 재다운로드는 멱등(무료).
-router.post('/operator/performance/report-pdf', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
-
-    const periodParam = String(req.body?.period || '30d');
-    const period: PerformancePeriod = (['7d', '14d', '30d', '90d'] as const).includes(periodParam as any)
-      ? (periodParam as PerformancePeriod)
-      : '30d';
-
-    // 풀분석 300 — 사전 차단(부족 시 402, PDF 스트림 시작 전)
-    const cost = getCreditCost('orchestrate');  // 300
-    await checkCredit(companyId, cost);
-
-    const snapshot = await buildPerformanceSnapshotV2(companyId, period);
-    const days = { '7d': 7, '14d': 14, '30d': 30, '90d': 90 }[period];
-    const companyMeta = await query(
-      `SELECT company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
-      [companyId],
-    );
-    const companyInfo = companyMeta.rows[0] || {};
-    const companyName = companyInfo.company_name || '';
-    // 풀 보고서 부가 데이터 (실패 graceful — PDF 생성은 계속). AI 진단은 최근 30일 기준.
-    let explanation: Awaited<ReturnType<typeof explainPerformance>> | null = null;
-    let cohort: Awaited<ReturnType<typeof buildCohortRetention>> | null = null;
-    let attribution: Awaited<ReturnType<typeof buildCampaignAttribution>> | null = null;
-    // ★ 2026-09-27 한줄로 V2 R079 — 리포트 차감(orchestrate) 하나가 전체를 덮는다. 안의 AI 진단이 따로 5크레딧을 빼지 않게 묶음으로 부른다.
-    try { const sn = await buildPerformanceSnapshot(companyId); explanation = await runInCreditBundle(() => explainPerformance(companyId, sn, companyInfo)); } catch (e: any) { console.log('[report-pdf] explain skip:', e?.message); }
-    try { cohort = await buildCohortRetention(companyId, 12); } catch (e: any) { console.log('[report-pdf] cohort skip:', e?.message); }
-    try { attribution = await buildCampaignAttribution(companyId, days); } catch (e: any) { console.log('[report-pdf] attribution skip:', e?.message); }
-    // ★ 2026-07-03 고객 축 (실패 graceful — PDF 생성은 계속)
-    let gradePerformance: Awaited<ReturnType<typeof buildGradePerformance>> | null = null;
-    let recipientAttribution: Awaited<ReturnType<typeof buildRecipientAttribution>> | null = null;
-    try { gradePerformance = await buildGradePerformance(companyId, days); } catch (e: any) { console.log('[report-pdf] grade skip:', e?.message); }
-    try { recipientAttribution = await buildRecipientAttribution(companyId, days); } catch (e: any) { console.log('[report-pdf] recipient-attr skip:', e?.message); }
-
-    // 차감 — 회사+기간+날짜 멱등(같은 날 같은 기간 재다운로드는 무료)
-    const todayKst = kstDateTag(new Date());
-    await deductCreditSafe({
-      companyId, cost, source: 'orchestrate', createdBy: userId,
-      idempotencyKey: `perf-report:${companyId}:${period}:${todayKst}`,
-    });
-
-    // PDF 생성 (billing.ts 패턴 — malgun.ttf 한글 폰트, res 직접 스트림)
-    const PDFDocument = require('pdfkit');
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="performance_${period}_${todayKst}.pdf"`);
-    doc.pipe(res);
-
-    // 본문 렌더 = 공통 CT(performance-pdf-render) 재사용 — 인라인 중복 제거(no_inline_duplication).
-    renderPerformanceReportPdf(doc, { snapshot, explanation, cohort, attribution, companyName, period, gradePerformance, recipientAttribution });
-
-    doc.end();
-    console.log(`[Performance] report-pdf 생성 company=${companyId} period=${period}`);
-  } catch (err: any) {
-    if (err instanceof InsufficientCreditError) {
-      if (!res.headersSent) return res.status(402).json({ success: false, error: '성과 리포트에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
-    }
-    console.error('[Performance] report-pdf 오류:', err);
-    if (!res.headersSent) return res.status(500).json({ success: false, error: err?.message || 'PDF 보고서 생성 실패' });
-    try { res.end(); } catch { /* 이미 종료된 스트림 */ }
-  }
-});
+// ★ 2026-09-28 한줄로 V2 R293 — POST /operator/performance/report-pdf 제거(화면 호출 0 · 풀분석 크레딧을 깎는 닿지 않는 경로).
+//   기간 성과 PDF는 풀분석 job(아래 start·status·download)이 소유한다.
 
 // === 풀분석(Full Analysis) 비동기 job — start/status/download (spec 2026-06-08) ===
 router.post('/operator/performance/full-analysis/start', async (req: Request, res: Response) => {
@@ -1840,12 +1767,22 @@ router.get('/operator/performance/full-analysis/download/:id', async (req: Reque
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const job = await getJob(req.params.id, companyId);
-    if (!job || job.status !== 'done' || !job.pdf_path) return res.status(409).json({ success: false, error: '아직 준비되지 않았습니다.' });
+    if (!job || job.status !== 'done') return res.status(409).json({ success: false, error: '아직 준비되지 않았습니다.' });
     const fsmod = require('fs');
-    if (!fsmod.existsSync(job.pdf_path)) return res.status(404).json({ success: false, error: 'PDF 파일이 없습니다.' });
+    // ★ 2026-09-28 한줄로 V2 차수 4 — 보관 기한 정리(retention-sweeper)가 90일 지난 PDF 를 지우고 경로를 비운다
+    //   파일을 먼저 연다 — 확인과 읽기 사이에 정리가 지워도 열린 파일은 끝까지 읽힌다. 열기 실패 = 보관 기간 지남(Codex 1R).
+    let fd: number | null = null;
+    try { if (job.pdf_path) fd = fsmod.openSync(job.pdf_path, 'r'); } catch { fd = null; }
+    if (fd === null) {
+      return res.status(410).json({ success: false, code: 'PDF_EXPIRED', error: '보관 기간(90일)이 지나 보고서 파일을 지웠어요. 분석을 다시 실행하면 새로 만들어요.' });
+    }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="full_analysis_${job.period}.pdf"`);
-    fsmod.createReadStream(job.pdf_path).pipe(res);
+    // pipeline = 응답이 중간에 끊기거나 읽기 오류가 나도 읽기 스트림(열린 파일)을 닫는다(Codex 2R · 옛 pipe 는 끊김에 파일을 남겼다)
+    const stream = fsmod.createReadStream('', { fd });
+    require('stream').pipeline(stream, res, (e: any) => {
+      if (e && e.code !== 'ERR_STREAM_PREMATURE_CLOSE') console.error('[full-analysis download] 전송 오류:', e?.message || e);
+    });
   } catch (err: any) {
     if (!res.headersSent) return res.status(500).json({ success: false, error: err?.message || 'PDF 다운로드 실패' });
   }
@@ -2049,25 +1986,7 @@ router.get('/operator/performance/cohort', async (req: Request, res: Response) =
   }
 });
 
-// 6) GET /operator/performance/benchmark
-router.get('/operator/performance/benchmark', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
-    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
-    const result = await buildBenchmark(companyId, days);
-    return res.json({ success: true, benchmark: result });
-  } catch (err: any) {
-    console.error('[Performance] benchmark 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '벤치마크 조회 실패' });
-  }
-});
-
+// 6) (제거) GET /operator/performance/benchmark — ★ 2026-09-28 한줄로 V2 R293: 화면 호출 0
 // 7) GET /operator/performance/attribution
 router.get('/operator/performance/attribution', async (req: Request, res: Response) => {
   try {
@@ -4048,8 +3967,8 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
     const triggerFilters = jr.rows[0].trigger_filters || {};
     // ★ 2026-09-27 한줄로 V2 S5-04 — 미리보기도 발송과 같은 범위(여정 작성자)
     const scopeSql = await getJourneyOwnerScopeSql(companyId, req.params.id);
-    const samples = await buildJourneyPreviewSamples(companyId, triggerEvent, triggerFilters, 10, req.params.id, scopeSql);
-    const count = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, scopeSql);
+    // ★ 2026-09-28 한줄로 V2 R265 — 표본·인원을 한 번의 추출로(CT)
+    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters, 10, req.params.id, scopeSql);
 
     return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
@@ -4160,8 +4079,8 @@ router.post('/operator/preview-target-samples', async (req: Request, res: Respon
 
     // ★ 2026-09-27 한줄로 V2 S5-04 — 저장 전 미리보기 = 요청자 분류코드 범위
     const draftScopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
-    const samples = await buildJourneyPreviewSamples(companyId, triggerEvent, triggerFilters || {}, 10, undefined, draftScopeSql);
-    const count = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters || {}, undefined, draftScopeSql);
+    // ★ 2026-09-28 한줄로 V2 R265 — 표본·인원을 한 번의 추출로(CT)
+    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters || {}, 10, undefined, draftScopeSql);
     return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
     console.error('[Journeys preview-target-samples] 오류:', err);
@@ -5399,7 +5318,7 @@ router.post('/operator/journeys/steps/:stepId/variants/auto-generate', async (re
 //   - AI 추천만 — 회사 admin 검토 + 승인 후 발송 (영구 원칙 #1)
 //   - 정합 0건 시 회사 admin 안내 (자동완화 절대 금지)
 // ════════════════════════════════════════════════════════════════════
-router.post('/operator/alimtalk/match', authenticate, async (req: Request, res: Response) => {
+router.post('/operator/alimtalk/match', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
@@ -5430,7 +5349,7 @@ router.post('/operator/alimtalk/match', authenticate, async (req: Request, res: 
 
 // ★ D209+ Phase D 비용 안전 매트릭스 — 회사별 AI 사용량 진단 endpoint
 //   회사 admin 진입 시 월 사용량 + 한도 + 30일 일별 통계 + cache 통계 반환
-router.get('/usage', authenticate, async (req: Request, res: Response) => {
+router.get('/usage', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(401).json({ success: false, error: '회사 권한이 필요합니다.' });

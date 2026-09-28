@@ -533,7 +533,8 @@ export function kickFirstTest(requestId: string): void {
 // ════════════════════════════════════════════════════════════
 // 요청서 원스텝 분석 (★2026-08-25(3) · 0826 승격)
 // ════════════════════════════════════════════════════════════
-export interface OneStepGroup { callback: string; count: number; registered: boolean; recipients: Array<{ phone: string; vars: Record<string, any> }> }
+// ★ 2026-09-28 한줄로 V2 R149 — 그룹은 건수만 든다(옛: 수신자 객체를 allRecipients 와 두 벌 만들었는데 그룹 쪽은 읽는 곳이 없었다 · 큰 명단 메모리 두 배)
+export interface OneStepGroup { callback: string; count: number; registered: boolean }
 
 /** 접수에 실제로 넘기는 수신자 한 명. `callback`은 고객별 회신번호(열 방식일 때만 채워진다) */
 export interface OneStepRecipient { phone: string; vars: Record<string, any>; callback: string | null }
@@ -764,7 +765,7 @@ export async function analyzeOneStep(
   // 수신자 정리 + 집계(서버가 다 세고, 화면에는 숫자와 상위 50만 보낸다)
   const seen = new Set<string>();
   let dup = 0; let invalid = 0; let callbackMissing = 0;
-  const groupMap = new Map<string, Array<{ phone: string; vars: Record<string, any> }>>();
+  const groupMap = new Map<string, number>();
   let groupsOverflow = false;
   // ★2026-09-12 접수는 하나다 — 명단 순서 그대로의 전체 수신자와, 첫 행의 회신번호(대표 번호)를 함께 모은다.
   const allRecipients: OneStepRecipient[] = [];
@@ -791,15 +792,14 @@ export async function analyzeOneStep(
       for (const vm of varMappingColumns) {
         if (r[vm.column!] !== undefined && r[vm.column!] !== null) vars[vm.name] = r[vm.column!];
       }
-      if (!groupMap.has(groupKey)) groupMap.set(groupKey, []);
-      groupMap.get(groupKey)!.push({ phone, vars });
+      groupMap.set(groupKey, (groupMap.get(groupKey) || 0) + 1);
       // 열 방식일 때만 고객별 번호를 싣는다. 고정 번호면 접수 대표 번호로 나가므로 비워 둔다(종전 동작).
       allRecipients.push({ phone, vars, callback: callback.mode === 'column' ? groupKey : null });
       if (!firstCallback) firstCallback = groupKey;
       if (sample.length < 50) sample.push({ phone, ...(callback.mode === 'column' ? { callback: groupKey } : {}) });
     }
   }
-  const valid = [...groupMap.values()].reduce((a, g) => a + g.length, 0);
+  const valid = [...groupMap.values()].reduce((a, n) => a + n, 0);
   if (rows.length > 0 && valid === 0 && errors.length === 0) {
     errors.push({ field: '명단', error: '보낼 수 있는 번호가 없습니다.' });
   }
@@ -811,9 +811,9 @@ export async function analyzeOneStep(
   const groups: OneStepGroup[] = [];
   const overLimit = groupsOverflow || groupMap.size > MAX_CALLBACK_GROUPS;
   const registeredSet = overLimit ? new Set<string>() : await getRegisteredCallbackSet(auth.companyId, auth.userId);
-  for (const [cb, recipients] of groupMap) {
+  for (const [cb, count] of groupMap) {
     if (!cb) continue;
-    groups.push({ callback: cb, count: recipients.length, registered: overLimit ? false : registeredSet.has(cb), recipients });
+    groups.push({ callback: cb, count, registered: overLimit ? false : registeredSet.has(cb) });
   }
   groups.sort((a, b) => b.count - a.count);
   if (overLimit) {

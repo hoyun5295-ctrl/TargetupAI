@@ -16,6 +16,7 @@ import { selfHostPreloadUrls } from '../design-core/fonts';
 // ★ 2026-06-25 (P1) 아트디렉션 — 뷰어 :root 변수 주입 + 섹션 ctx 동봉(신규 treatment에만 영향, classic 불변).
 import { normalizeArtDirection, artDirectionToCssVars } from './dm-art-direction';
 import { resolveSections } from './dm-variable-resolver';
+import { prepareFieldMappings } from '../messageUtils';
 import type { Section } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
 import { expandSlidePagesForSwipe, isSwipeImagePage } from './dm-slides-expand';
@@ -1105,8 +1106,10 @@ export async function renderDmViewerHtmlWithCustomer(
   // ★ 2026-06-23: 슬라이드 모드 — 이미지 N장을 각 1페이지로 펼친 뒤 변수 치환·렌더
   const pages = mode === 'slides' ? (expandSlidePagesForSwipe(parsed as any) as DmPageGroup[]) : parsed;
   const resolvedPages: DmPageGroup[] = [];
+  // ★ 2026-09-28 한줄로 V2 R114 — 필드 매핑(DB 조회)은 열람 한 번에 한 번. 옛: 쪽 수만큼 다시 조회했다.
+  const fieldMappings = await prepareFieldMappings(companyId);
   for (const p of pages) {
-    const resolvedSecs = await resolveSections(p.sections, customer, companyId);
+    const resolvedSecs = await resolveSections(p.sections, customer, companyId, fieldMappings);
     resolvedPages.push({ id: p.id, name: p.name, sections: resolvedSecs });
   }
   return renderPagesHtml(dm, trackApiBase, resolvedPages, mode);

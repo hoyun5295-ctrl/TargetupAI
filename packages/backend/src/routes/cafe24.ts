@@ -121,26 +121,8 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
   }
 });
 
-// ════════════════════════════════════════════════════════════════════
-// 앱 실행 랜딩 파라미터 실측 로그 (A-0) — 공개(인증 전).
-//   카페24 "앱 실행" 시 App URL이 붙이는 쿼리(mall_id/user_id/timestamp/hmac 등)를
-//   PM2 로그로 캡처해 확정용. 저장/부작용 없음(로그만). 공개 라우터라 자체 json 파서 필수
-//   (전역 파서 앞 마운트 대비 — LESSONS_BACKEND 2026-07-02 공개 라우터 body 유실 교훈).
-// ════════════════════════════════════════════════════════════════════
-router.post('/launch-log', json({ limit: '16kb' }), (req: Request, res: Response) => {
-  try {
-    const src = { ...(req.body || {}), ...(req.query || {}) } as Record<string, unknown>;
-    const WHITELIST = ['mall_id', 'user_id', 'user_name', 'user_type', 'shop_no', 'timestamp', 'hmac', 'lang', 'nation', 'is_multi_shop', 'multi_shop_no', 'path', 'referer'];
-    const picked: Record<string, string> = {};
-    for (const k of WHITELIST) {
-      if (src[k] !== undefined && src[k] !== null) picked[k] = String(src[k]).slice(0, 200);
-    }
-    console.log('[Cafe24 Launch] 앱 실행 파라미터 실측:', JSON.stringify(picked));
-    return res.json({ success: true });
-  } catch {
-    return res.json({ success: true }); // 로그 실패는 랜딩 방해 X
-  }
-});
+// ★ 2026-09-28 한줄로 V2 R310 — 앱 실행 파라미터 실측 로그(A-0 · POST /launch-log) 제거.
+//   확정용 임시 경로였고, 인증 없이 받은 값(사용자 이름 등)을 로그에 남겼다. 화면 호출도 함께 뺐다(Cafe24LaunchPage).
 
 // ════════════════════════════════════════════════════════════════════
 // SDK 서빙 (CORS) — 공개(인증 전). ★ 2026-07-08 공용 CT(utils/sdk-serve.ts)로 추출·재사용.

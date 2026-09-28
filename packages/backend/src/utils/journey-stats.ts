@@ -290,53 +290,59 @@ async function getJourneyStepStats(journeyId: string): Promise<JourneyStepStat[]
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function getJourneySegmentStats(journeyId: string): Promise<JourneySegmentStat[]> {
+  // ★ 2026-09-28 한줄로 V2 R263 — 고객 단위로 한 번에 모아 등급별로 더한다.
+  //   옛: 실행 1건당 한 행을 받아 행마다 cdp_events 하위 쿼리 2개를 돌렸고, 같은 고객의 실행이 여러 건이면
+  //   (날짜축 반복 진입) 그 고객의 클릭·구매가 실행 수만큼 중복 합산됐다.
+  //   지금: 진입·완료 = 실행 수(종전과 같다) · 클릭 = 이 여정 클릭 이벤트 1건당 1번 · 전환 = 첫 진입 뒤 구매 1건당 1번.
+  //   여정 id 는 글자로 비교한다(속성 값을 uuid 로 바꾸다 형식이 어긋난 이벤트 한 건에 조회 전체가 멈추지 않게).
   const r = await query(
-    `SELECT
-       COALESCE(c.grade, '(미설정)') AS segment,
-       COUNT(DISTINCT e.id) AS entered_count,
-       COUNT(DISTINCT e.id) FILTER (WHERE e.status = 'completed') AS completed_count,
-       (
-         SELECT COUNT(*)
-         FROM cdp_events ce
-         WHERE ce.event_name = 'message_click'
-           AND ce.customer_id = c.id
-           AND (ce.properties->>'journey_id')::uuid = $1::uuid
-       ) AS click_count,
-       (
-         SELECT COUNT(*)
-         FROM cdp_events ce
-         WHERE ce.event_name = 'purchase'   -- ★ 2026-09-26 R1-43 주문은 표준 이름 purchase로 저장된다(cdp-orders · 옛 'order'는 저장되지 않아 전환이 항상 0)
-           AND ce.customer_id = c.id
-           AND ce.occurred_at > e.entered_at
-       ) AS conversion_count
-     FROM journey_executions e
-     INNER JOIN customers c ON c.id = e.customer_id
-     WHERE e.journey_id = $1::uuid
-     GROUP BY c.grade, c.id, e.id, e.entered_at
+    `WITH ex AS (
+       SELECT e.customer_id,
+              COALESCE(c.grade, '(미설정)') AS segment,
+              COUNT(*) AS entered_count,
+              COUNT(*) FILTER (WHERE e.status = 'completed') AS completed_count,
+              MIN(e.entered_at) AS first_entered_at
+       FROM journey_executions e
+       INNER JOIN customers c ON c.id = e.customer_id
+       WHERE e.journey_id = $1::uuid
+       GROUP BY e.customer_id, COALESCE(c.grade, '(미설정)')
+     ),
+     clk AS (
+       SELECT ex.customer_id, COUNT(*) AS click_count
+       FROM ex
+       INNER JOIN cdp_events ce ON ce.customer_id = ex.customer_id
+       WHERE ce.event_name = 'message_click'
+         AND lower(ce.properties->>'journey_id') = lower($1::text)
+       GROUP BY ex.customer_id
+     ),
+     conv AS (
+       SELECT ex.customer_id, COUNT(*) AS conversion_count
+       FROM ex
+       INNER JOIN cdp_events ce ON ce.customer_id = ex.customer_id
+       WHERE ce.event_name = 'purchase'   -- ★ 2026-09-26 R1-43 주문은 표준 이름 purchase로 저장된다(cdp-orders)
+         AND ce.occurred_at > ex.first_entered_at
+       GROUP BY ex.customer_id
+     )
+     SELECT ex.segment,
+            SUM(ex.entered_count) AS entered_count,
+            SUM(ex.completed_count) AS completed_count,
+            COALESCE(SUM(clk.click_count), 0) AS click_count,
+            COALESCE(SUM(conv.conversion_count), 0) AS conversion_count
+     FROM ex
+     LEFT JOIN clk ON clk.customer_id = ex.customer_id
+     LEFT JOIN conv ON conv.customer_id = ex.customer_id
+     GROUP BY ex.segment
      ORDER BY entered_count DESC`,
     [journeyId]
   );
 
-  // 등급별 집계 (위 쿼리는 row별 — segment 단위 reduce)
-  const segmentMap = new Map<string, JourneySegmentStat>();
-  for (const row of r.rows) {
-    const seg = row.segment;
-    if (!segmentMap.has(seg)) {
-      segmentMap.set(seg, {
-        segment: seg,
-        enteredCount: 0,
-        completedCount: 0,
-        clickCount: 0,
-        conversionCount: 0,
-      });
-    }
-    const s = segmentMap.get(seg)!;
-    s.enteredCount += Number(row.entered_count) || 0;
-    s.completedCount += Number(row.completed_count) || 0;
-    s.clickCount += Number(row.click_count) || 0;
-    s.conversionCount += Number(row.conversion_count) || 0;
-  }
-  return Array.from(segmentMap.values()).sort((a, b) => b.enteredCount - a.enteredCount);
+  return r.rows.map((row: any) => ({
+    segment: row.segment,
+    enteredCount: Number(row.entered_count) || 0,
+    completedCount: Number(row.completed_count) || 0,
+    clickCount: Number(row.click_count) || 0,
+    conversionCount: Number(row.conversion_count) || 0,
+  }));
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

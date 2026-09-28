@@ -725,6 +725,11 @@ export async function buildJourneyPreviewSamples(
   scopeSql = '',   // ★ 2026-09-27 S5-04 — 미리보기도 발송과 같은 범위
 ): Promise<JourneyPreviewSample[]> {
   const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, limit, journeyId, undefined, scopeSql);
+  return buildPreviewSamplesForIds(companyId, ids);
+}
+
+/** 추출된 고객 id(추출 순서)로 미리보기 표본을 만든다 — 표본 추출과 인원 추출을 한 번의 추출로 나눠 쓰는 자리 공용. */
+async function buildPreviewSamplesForIds(companyId: string, ids: string[]): Promise<JourneyPreviewSample[]> {
   if (ids.length === 0) return [];
 
   // 추출 순서(trigger ORDER BY — 신규가입=created_at DESC 등) 유지 + 예측 점수 LEFT JOIN
@@ -822,6 +827,27 @@ export async function averageScoresForIds(
   const row = r.rows[0] || {};
   const num = (v: any) => (v != null ? Number(v) : null);
   return { avgOrderValue: num(row.aov), avgConversion: num(row.conv), avgClick: num(row.clk) };
+}
+
+/**
+ * ★ 2026-09-28 한줄로 V2 R265 — 미리보기 = 표본 + 인원·등급 분포를 **한 번의 추출**로.
+ *   옛: 표본(10명)과 인원(상한까지)을 같은 추출 함수로 두 번 돌렸다. 표본 = 같은 추출의 앞 N명(추출 순서 그대로).
+ *   추출은 발송과 같은 함수다(미리보기 = 실제 대상 계약) — 그래서 인원을 SQL COUNT 로 따로 세지 않는다.
+ */
+export async function previewJourneyTargets(
+  companyId: string,
+  triggerEvent: string,
+  triggerFilters: Record<string, any>,
+  sampleLimit: number,
+  journeyId?: string,
+  scopeSql = '',
+): Promise<{ samples: JourneyPreviewSample[]; count: JourneyTargetCount }> {
+  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId, undefined, scopeSql);
+  const [samples, breakdown] = await Promise.all([
+    buildPreviewSamplesForIds(companyId, ids.slice(0, sampleLimit)),
+    gradeBreakdownForIds(companyId, ids),
+  ]);
+  return { samples, count: { total: breakdown.total, segments: breakdown.segments, capped: ids.length >= JOURNEY_COUNT_CAP } };
 }
 
 /** 전체 매칭 수 + 등급 분포 (미리보기·시뮬레이션 공용). 발송과 동일 함수로 ID 추출. */

@@ -154,8 +154,10 @@ export async function resolveSections(
   sections: Section[],
   customer: Record<string, any> | null,
   companyId: string,
+  /** ★ 2026-09-28 한줄로 V2 R114 — 쪽마다 부르는 호출부는 한 번 구한 매핑을 넘긴다(없으면 여기서 구한다 · 결과 같다) */
+  preparedFieldMappings?: Awaited<ReturnType<typeof prepareFieldMappings>>,
 ): Promise<Section[]> {
-  const fieldMappings = await prepareFieldMappings(companyId);
+  const fieldMappings = preparedFieldMappings ?? await prepareFieldMappings(companyId);
   const resolved: Section[] = [];
   for (const s of sections) {
     if (!s.visible) continue;

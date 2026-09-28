@@ -28,9 +28,12 @@ describe('CDP 개선', () => {
     const e = src('cdp-events.ts');
     expect(e).not.toContain('void recomputeProfile(');
   });
-  it('R187 처리 끝난 웹훅 기록은 180일 뒤 정리', () => {
+  it('R187 처리 끝난 웹훅 기록은 보관 기한(★0928 전송자격인증 4.2 = 1년 이상 → 13개월) 뒤 정리', () => {
     const w = src('cdp-webhook-retry-worker.ts');
-    expect(w).toContain("WHERE status IN ('processed', 'duplicate') AND created_at < NOW() - INTERVAL '180 days'");
+    expect(w).toContain("WHERE status IN ('processed', 'duplicate') AND created_at < NOW() - make_interval(days => $1)");
+    expect(w).toContain('[LOG_RETENTION_DAYS],');
+    expect(w).not.toContain("INTERVAL '180 days'");
+    expect(readFileSync(join(__dirname, '..', '..', 'config', 'defaults.ts'), 'utf8')).toContain('export const LOG_RETENTION_DAYS = 395;');
   });
   it('R200 페이지 조회 고객 행 갱신 = 10분 간격', () => {
     const f = src('customer-cdp-fusion.ts');

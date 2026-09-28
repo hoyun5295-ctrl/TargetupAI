@@ -183,13 +183,16 @@ describe('R361 발신프로필 상태 동기화 순환 커서', () => {
 });
 
 describe('R427 템플릿 목록 상한 경보', () => {
-  it('두 순회 모두 마지막 허용 쪽이 꽉 차면 경보', () => {
+  it('목록 순회(★0928 R267 공용 로더 한 곳)가 마지막 허용 쪽이 꽉 차면 경보', () => {
     const s = src('kakao-template-sync.ts');
     expect(s).toContain("import { sendSystemAlert } from './system-alert';");
-    expect(s).toContain("if (page === IMC_MAX_PAGES - 1) warnImcListCap('코드');");
-    expect(s).toContain("if (page === IMC_MAX_PAGES - 1) warnImcListCap('상태');");
+    expect(s).toContain('if (page === IMC_MAX_PAGES - 1) warnImcListCap(where);');
     // 경보는 "쪽이 꽉 찼다"(= items.length < IMC_PAGE_SIZE 로 끝나지 않았다) 뒤에만 닿는다
-    const loop1 = s.indexOf("warnImcListCap('코드')");
+    const loop1 = s.indexOf('warnImcListCap(where)');
     expect(s.lastIndexOf('if (items.length < IMC_PAGE_SIZE) break;', loop1)).toBeGreaterThan(s.lastIndexOf('for (', loop1));
+    // 코드·상태 동기화는 둘 다 공용 로더를 쓴다(워커는 한 사이클에 한 번 받아 나눠 쓴다)
+    expect(s).toContain("await (options.loadImc ? options.loadImc() : loadImcTemplateMap('코드'))");
+    expect(s).toContain("await (loadImc ? loadImc() : loadImcTemplateMap('상태'))");
+    expect(src('kakao-template-sync-worker.ts')).toContain("const loadImc = () => (imcMap ??= loadImcTemplateMap('공용'));");
   });
 });

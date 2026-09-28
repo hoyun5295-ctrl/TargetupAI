@@ -91,7 +91,9 @@ describe('배선', () => {
     const c = src('routes/campaigns.ts');
     expect(c).toContain('type: getSendTypeLabel(r.msg_type),');
     expect(c).toContain('content: getDisplayContents(r.msg_type, r.msg_contents),');
-    expect(c).toContain("r.msg_type === 'F' ? costRow.brand");
+    // ★ 2026-09-28 한줄로 V2 m046 — 비용은 SQL 집계(성공 건수 유형별)로 센다 · 브랜드(F) = 브랜드 단가(의도 유지)
+    expect(c).toContain("SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'F' THEN 1 ELSE 0 END) AS ok_brand");
+    expect(c).toContain('stats.cost = okBrand * costRow.brand + okSms * costSms + okMms * costMms + okOther * costLms;');
     expect(src('routes/admin.ts')).toContain('msgType: getSendTypeLabel(r.msg_type),');
     expect(src('routes/manage-stats.ts')).toContain('msgType: getSendTypeLabel(r.msg_type),');
   });

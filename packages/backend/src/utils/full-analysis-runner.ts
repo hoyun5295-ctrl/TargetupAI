@@ -4,7 +4,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { query } from '../config/database';
-import { updateProgress, completeJob, failJob } from './full-analysis-job';
+import { updateProgress, completeJob, failJob, FULL_ANALYSIS_PDF_DIR } from './full-analysis-job';
 import { buildPerformanceSnapshot, buildPerformanceSnapshotV2, type PerformancePeriod } from './next-action-advisor';
 import { explainPerformance } from './performance-explainer';
 import { buildCohortRetention } from './performance-cohort';
@@ -18,7 +18,7 @@ import { deductCreditSafe } from './ai-credit';
 import { runInCreditBundle } from './ai-credit-context';
 import { getCreditCost } from './ai-credit-calc';
 
-const PDF_DIR = path.join(__dirname, '../../full-analysis-pdfs');
+const PDF_DIR = FULL_ANALYSIS_PDF_DIR;
 
 export async function runFullAnalysis(jobId: string, companyId: string, period: PerformancePeriod, createdBy: string | null): Promise<void> {
   try {

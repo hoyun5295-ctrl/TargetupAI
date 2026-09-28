@@ -15,6 +15,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../config/database';
 import { loadPlanContext } from './plan-guard';
+import { dropServeVariants } from './image-serve';
 
 // 인앱 이미지 실물 저장 경로 — routes/cdp.ts INAPP_IMAGE_BASE와 동일 정의 미러 (단일 env 소스)
 const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
@@ -265,6 +266,7 @@ export async function deleteAsset(
     try { if (fs.existsSync(filepath)) fs.unlinkSync(filepath); } catch (e: any) {
       console.warn('[assets] 파일 삭제 실패(행은 삭제됨):', e?.message);
     }
+    dropServeVariants(filepath);   // ★ 2026-09-28 한줄로 V2 R412 — 서빙 변환본도 함께(CT)
   }
   return { deleted: true, inUse: false };
 }

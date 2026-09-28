@@ -468,7 +468,9 @@ describe('install-status source 분리 (Phase 0)', () => {
     expect(src).toContain('bySource');
     // 기존 소비처가 보던 키가 그대로 남아 있어야 한다(additive 보장)
     expect(src).toMatch(/firstEventAt: row\.first_event_at/);
-    expect(src).toMatch(/count24h: parseInt\(row\.count_24h/);
+    // ★ 2026-09-28 한줄로 V2 R102 — 회사 합계는 몰별 집계를 더해 만든다(이미 숫자라 parseInt 없음 · 키는 그대로)
+    expect(src).toMatch(/count24h: row\.count_24h/);
+    expect(src).toMatch(/row\.count_24h \+= parseInt\(r\.count_24h/);
   });
 });
 

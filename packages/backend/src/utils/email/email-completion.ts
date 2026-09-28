@@ -60,16 +60,30 @@ export async function isEmailCampaignCompleted(
  * 목록용 — 회사 한 번 조회로 캠페인 여러 개의 완성 여부를 판정할 재료.
  * `notApplicable` 이 참이면 전부 완성, 아니면 `paidIds`에 있는 것만 완성.
  */
-export async function emailCompletionContextOf(companyId: string): Promise<{ notApplicable: boolean; paidIds: Set<string> }> {
-  const keysRes = await query(
-    `SELECT idempotency_key FROM ai_credit_transactions
-      WHERE company_id = $1::uuid
-        AND (idempotency_key LIKE 'email-campaign-complete:%' OR idempotency_key LIKE 'email-ai-publish:%')`,
-    [companyId],
-  );
+export async function emailCompletionContextOf(
+  companyId: string,
+  /** ★ 2026-09-28 한줄로 V2 R122 — 목록에 실린 캠페인 id. 주면 그 캠페인의 키만 정확히 찾는다(옛: 회사 크레딧 거래 전체를 LIKE 로 훑음). */
+  campaignIds?: readonly string[],
+): Promise<{ notApplicable: boolean; paidIds: Set<string> }> {
+  const notApplicable = isCreditNotApplicableRow(await loadCreditRow(pool, companyId, false));
+  // 크레딧제 미적용이면 전부 완성 — 키를 볼 필요가 없다.
+  if (notApplicable) return { notApplicable, paidIds: new Set<string>() };
+  const keysRes = campaignIds
+    ? (campaignIds.length === 0
+      ? { rows: [] as any[] }
+      : await query(
+          `SELECT idempotency_key FROM ai_credit_transactions
+            WHERE company_id = $1::uuid AND idempotency_key = ANY($2::text[])`,
+          [companyId, campaignIds.flatMap((id) => [`email-campaign-complete:${id}`, `email-ai-publish:${id}`])],
+        ))
+    : await query(
+        `SELECT idempotency_key FROM ai_credit_transactions
+          WHERE company_id = $1::uuid
+            AND (idempotency_key LIKE 'email-campaign-complete:%' OR idempotency_key LIKE 'email-ai-publish:%')`,
+        [companyId],
+      );
   const paidIds = new Set<string>(
     keysRes.rows.map((r: any) => String(r.idempotency_key || '').split(':')[1]).filter(Boolean),
   );
-  const notApplicable = isCreditNotApplicableRow(await loadCreditRow(pool, companyId, false));
   return { notApplicable, paidIds };
 }

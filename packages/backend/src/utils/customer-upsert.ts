@@ -31,6 +31,12 @@ export interface CustomerUpsertBuilderOptions {
   includeUploadedBy: boolean;
   /** RETURNING 절 제어 — 단건 API는 'all' (전체 row 반환), 배치는 'insert_phone' (기본) */
   returning?: 'insert_phone' | 'all';
+  /**
+   * ★ 2026-09-28 한줄로 V2 R206 — 값이 바뀐 기존 행만 다시 쓴다(ON CONFLICT DO UPDATE ... WHERE 새 값 IS DISTINCT FROM 옛 값).
+   *   full 싱크마다 전 행을 재작성하던 것(죽은 튜플 · 쓰기 부하)을 막는다. 바뀌지 않은 행은 RETURNING 에 나오지 않으므로
+   *   반환 행으로 건수를 세거나 id 를 받아 쓰는 경로(업로드 건수 · 수동 등록 매장 연결)는 켜지 않는다. 지금 켜는 곳 = sync.
+   */
+  skipUnchanged?: boolean;
 }
 
 export interface CustomerUpsertBuilder {
@@ -104,35 +110,44 @@ export function createCustomerUpsertBuilder(
     // ★ D214+ RFM 영역 = 별도 GREATEST 영역 정합 (옛 COALESCE 덮어쓰기 사고 차단)
     'recent_purchase_date', 'purchase_count', 'last_purchase_date',
   ]);
-  const updateClauses = [
+  // [칸, 새 값 식] — SET 절과 「바뀌었나」 판정(skipUnchanged)이 같은 식을 쓴다.
+  const updatePairs: Array<[string, string]> = [
     ...columnNames
       .filter((c) => !updateExclusions.has(c))
-      .map((c) => `${c} = COALESCE(EXCLUDED.${c}, customers.${c})`),
+      .map((c): [string, string] => [c, `COALESCE(EXCLUDED.${c}, customers.${c})`]),
     // ★ D214+ RFM 영역 GREATEST 강제 매트릭스 (자사몰 ↔ POS 충돌 해결)
-    `recent_purchase_date = GREATEST(COALESCE(EXCLUDED.recent_purchase_date, customers.recent_purchase_date), COALESCE(customers.recent_purchase_date, EXCLUDED.recent_purchase_date))`,
-    `purchase_count = GREATEST(COALESCE(EXCLUDED.purchase_count, customers.purchase_count, 0), COALESCE(customers.purchase_count, 0))`,
-    `last_purchase_date = GREATEST(COALESCE(EXCLUDED.last_purchase_date, customers.last_purchase_date), COALESCE(customers.last_purchase_date, EXCLUDED.last_purchase_date))`,
-    'birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year)',
-    'birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day)',
-    `custom_fields = CASE WHEN EXCLUDED.custom_fields IS NOT NULL THEN COALESCE(customers.custom_fields, '{}'::jsonb) || EXCLUDED.custom_fields ELSE customers.custom_fields END`,
+    ['recent_purchase_date', `GREATEST(COALESCE(EXCLUDED.recent_purchase_date, customers.recent_purchase_date), COALESCE(customers.recent_purchase_date, EXCLUDED.recent_purchase_date))`],
+    ['purchase_count', `GREATEST(COALESCE(EXCLUDED.purchase_count, customers.purchase_count, 0), COALESCE(customers.purchase_count, 0))`],
+    ['last_purchase_date', `GREATEST(COALESCE(EXCLUDED.last_purchase_date, customers.last_purchase_date), COALESCE(customers.last_purchase_date, EXCLUDED.last_purchase_date))`],
+    ['birth_year', 'COALESCE(EXCLUDED.birth_year, customers.birth_year)'],
+    ['birth_month_day', 'COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day)'],
+    ['custom_fields', `CASE WHEN EXCLUDED.custom_fields IS NOT NULL THEN COALESCE(customers.custom_fields, '{}'::jsonb) || EXCLUDED.custom_fields ELSE customers.custom_fields END`],
     // ★ D214+ active_sources jsonb 영역 안 source push (옛 영역 안 미존재 시 append)
-    `active_sources = CASE WHEN customers.active_sources @> ('"' || ${sourceLiteral} || '"')::jsonb THEN customers.active_sources ELSE COALESCE(customers.active_sources, '[]'::jsonb) || ('["' || ${sourceLiteral} || '"]')::jsonb END`,
-    // ★ D214+ last_activity_at 영역 = NOW() (sync/upload/manual 영역 = 활동 시각 본질)
-    'last_activity_at = GREATEST(COALESCE(customers.last_activity_at, NOW()), NOW())',
+    ['active_sources', `CASE WHEN customers.active_sources @> ('"' || ${sourceLiteral} || '"')::jsonb THEN customers.active_sources ELSE COALESCE(customers.active_sources, '[]'::jsonb) || ('["' || ${sourceLiteral} || '"]')::jsonb END`],
+    // ★ 2026-09-28 한줄로 V2 R206(Harold 승인) — 적재(싱크·업로드·수동)는 고객 활동이 아니다 → last_activity_at 을 다시 쓰지 않는다.
+    //   옛: 적재마다 전원의 마지막 활동 시각을 지금으로 바꿔, 인앱 「최근 N일 활동」 조건에 적재된 고객 전원이 잡혔다.
+    //   활동 시각은 실제 이벤트(cdp-profile-recompute)가 소유한다. 신규 행의 첫 값(INSERT NOW())은 종전 그대로다.
     ...(options.includeUploadedBy
-      ? ['uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by)']
+      ? [['uploaded_by', 'COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by)'] as [string, string]]
       : []),
     // source 덮어쓰기 규칙 (우선순위: sync > upload > manual):
     //   - upload: 기존 sync 유지, 아니면 'upload'
     //   - sync:   항상 'sync' (Agent 원본이 정답)
     //   - manual: 기존 sync/upload 유지, 아니면 'manual'
-    options.source === 'upload'
-      ? `source = CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END`
+    ['source', options.source === 'upload'
+      ? `CASE WHEN customers.source = 'sync' THEN 'sync' ELSE 'upload' END`
       : options.source === 'sync'
-      ? `source = 'sync'`
-      : `source = CASE WHEN customers.source IN ('sync','upload') THEN customers.source ELSE 'manual' END`,
+      ? `'sync'`
+      : `CASE WHEN customers.source IN ('sync','upload') THEN customers.source ELSE 'manual' END`],
+  ];
+  const updateClauses = [
+    ...updatePairs.map(([c, e]) => `${c} = ${e}`),
     'updated_at = NOW()',
   ].join(',\n              ');
+  // 바뀐 행만 쓰기(R206) — 새 값 묶음이 옛 값 묶음과 다를 때만 UPDATE 한다(NULL 도 값으로 비교).
+  const unchangedGuard = options.skipUnchanged
+    ? `\n      WHERE ROW(${updatePairs.map(([, e]) => e).join(', ')}) IS DISTINCT FROM ROW(${updatePairs.map(([c]) => `customers.${c}`).join(', ')})`
+    : '';
 
   const buildRowValues = (
     companyId: string,
@@ -189,7 +204,7 @@ export function createCustomerUpsertBuilder(
       INSERT INTO customers (${insertCols.join(', ')})
       VALUES ${placeholders.join(', ')}
       ON CONFLICT (company_id, phone) DO UPDATE SET
-              ${updateClauses}
+              ${updateClauses}${unchangedGuard}
       ${returningClause}
     `;
     return { sql, values };

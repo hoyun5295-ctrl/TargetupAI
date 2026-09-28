@@ -507,7 +507,9 @@ export async function getDmList(companyId: string, ownerUserId?: string | null) 
   try {
     result = await query(
       `SELECT id, title, store_name, status, approval_status, layout_mode,
-              short_code, view_count, sections, brand_kit, settings,
+              short_code, view_count, sections,
+              jsonb_build_object('primary_color', brand_kit->'primary_color') AS brand_kit,
+              jsonb_build_object('catalog', settings->'catalog') AS settings,
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               pages->0 AS first_page,
               EXISTS (SELECT 1 FROM dm_recipient_tokens t WHERE t.dm_id = dm_pages.id) AS has_send_history,
@@ -521,7 +523,9 @@ export async function getDmList(companyId: string, ownerUserId?: string | null) 
     if (!(msg.includes('relation') && msg.includes('does not exist'))) throw e;
     result = await query(
       `SELECT id, title, store_name, status, approval_status, layout_mode,
-              short_code, view_count, sections, brand_kit, settings,
+              short_code, view_count, sections,
+              jsonb_build_object('primary_color', brand_kit->'primary_color') AS brand_kit,
+              jsonb_build_object('catalog', settings->'catalog') AS settings,
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               pages->0 AS first_page,
               false AS has_send_history,
@@ -531,6 +535,8 @@ export async function getDmList(companyId: string, ownerUserId?: string | null) 
       params
     );
   }
+  // ★ 2026-09-28 한줄로 V2 R213 — brand_kit·settings 는 목록이 읽는 키만 DB에서 꺼낸다(요약 = 강조색 · 카탈로그 뱃지 = catalog).
+  //   옛: 두 JSON 전체(로고·카탈로그 설정 등)를 DM마다 받아 요약에만 썼다. 칸 타입 = jsonb(0903 information_schema 실측).
   // sections/brand_kit 원본은 요약으로 압축해 응답에서 제거(목록 payload 경량)
   return result.rows.map((row: any) => {
     const summary = buildSectionSummary(row);
@@ -597,6 +603,18 @@ export async function getDmByCode(code: string) {
   // ★ 2026-06-22: 공개 URL이 dm-{short_code} 형식이라 선두 "dm-" 제거 후 조회 (저장 short_code는 접두사 없음).
   const result = await query(
     `SELECT * FROM dm_pages WHERE short_code = $1 AND status = 'published'`,
+    [normalizeDmShortCode(code)]
+  );
+  return result.rows[0] || null;
+}
+
+/**
+ * ★ 2026-09-28 한줄로 V2 R115 — 열람 비콘(15초마다)용. 필요한 것은 DM id·회사뿐이다.
+ * 옛 비콘은 getDmByCode(`SELECT *` = 쪽·섹션 JSON 전체)를 매번 읽어 동시 열람이 많을수록 무거웠다. 발행 판정은 같다.
+ */
+export async function getDmTrackTargetByCode(code: string): Promise<{ id: string; company_id: string } | null> {
+  const result = await query(
+    `SELECT id, company_id FROM dm_pages WHERE short_code = $1 AND status = 'published'`,
     [normalizeDmShortCode(code)]
   );
   return result.rows[0] || null;
@@ -935,7 +953,13 @@ export async function trackDmView(input: DmViewTrackInput) {
                  THEN seen_anon_ids || to_jsonb($2::text)
                ELSE seen_anon_ids
              END
-           WHERE id = $3`,
+           WHERE id = $3
+             -- ★ 2026-09-28 한줄로 V2 R216 — 바뀔 때만 쓴다. 하트비트는 익명ID를 늘 실어 와서, 이미 목록에 있어도
+             --   15초마다 같은 값으로 행을 다시 썼다(죽은 튜플). 진입 비콘이거나 새 익명ID를 더할 수 있을 때만.
+             AND ($1::int > 0
+                  OR ($2::text IS NOT NULL
+                      AND (seen_anon_ids IS NULL
+                           OR (NOT (seen_anon_ids @> to_jsonb($2::text)) AND jsonb_array_length(seen_anon_ids) < 20))))`,
           [input.isInit ? 1 : 0, anonymousId, existing.id],
         );
       } catch (e: any) {

@@ -3,6 +3,7 @@ import { authenticate, requireCompanyAdmin, requireSuperAdmin } from '../middlew
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { dropUploadedFiles } from '../utils/upload-cleanup';
 import {
   // 담당자
   getManagers,
@@ -85,8 +86,10 @@ router.post('/managers', authenticate, requireCompanyAdmin, docUpload.single('au
   try {
     const companyId = (req as any).user!.companyId;
     const { managerName, managerPhone, managerEmail } = req.body;
-
+    // ★ 2026-09-28 한줄로 V2 R341 — multer 가 위임장을 먼저 저장한다. 등록이 안 되는 응답(검사 400·등록 실패)에서는
+    //   그 파일을 지운다(개인정보가 든 문서가 주인 없이 남았다).
     if (!managerName || !managerPhone) {
+      dropUploadedFiles(req);
       return res.status(400).json({ error: '담당자 이름과 전화번호는 필수입니다.' });
     }
 
@@ -106,6 +109,7 @@ router.post('/managers', authenticate, requireCompanyAdmin, docUpload.single('au
     const manager = await createManager(companyId, { managerName, managerPhone, managerEmail, authorizationDoc });
     res.json({ success: true, manager });
   } catch (error: any) {
+    dropUploadedFiles(req); // R341 등록 실패 = 저장한 위임장 삭제
     console.error('담당자 등록 실패:', error);
     res.status(400).json({ error: error.message || '담당자 등록 실패' });
   }
@@ -143,6 +147,7 @@ router.post(
       const { phone, label, storeCode, storeName, requestNote, documentTypes, numberType } = req.body;
 
       if (!phone) {
+        dropUploadedFiles(req); // ★ R341 같은 뿌리(위 담당자 등록과 같다)
         return res.status(400).json({ error: '발신번호는 필수입니다.' });
       }
 
@@ -183,6 +188,7 @@ router.post(
 
       res.json({ success: true, registration });
     } catch (error: any) {
+      dropUploadedFiles(req); // ★ R341 신청 실패 = 저장한 서류 삭제
       console.error('발신번호 등록 신청 실패:', error);
       res.status(400).json({ error: error.message || '등록 신청 실패' });
     }

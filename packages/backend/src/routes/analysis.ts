@@ -851,11 +851,12 @@ router.post('/run', async (req: Request, res: Response) => {
 
     } else if (analysisLevel === 'advanced') {
       // 비즈니스: 3회 호출 (멀티턴)
-      // 1턴: 캠페인 심층 분석
-      const turn1Insights = await callClaude(buildBusinessPrompt1(collectedData));
-      
-      // 2턴: 고객 심층 분석
-      const turn2Insights = await callClaude(buildBusinessPrompt2(collectedData));
+      // 1턴: 캠페인 심층 분석 · 2턴: 고객 심층 분석 — ★ 2026-09-28 한줄로 V2 R094: 서로 독립이라 함께 기다린다(옛: 순차).
+      //   이 경로에는 크레딧 차감이 없다(요금제 기능) · 결과·배열 순서는 같다.
+      const [turn1Insights, turn2Insights] = await Promise.all([
+        callClaude(buildBusinessPrompt1(collectedData)),
+        callClaude(buildBusinessPrompt2(collectedData)),
+      ]);
       
       // 3턴: 전략 종합 (1턴+2턴 결과 기반)
       const turn3Insights = await callClaude(buildBusinessPrompt3(turn1Insights, turn2Insights, collectedData));
@@ -945,7 +946,9 @@ router.get('/pdf', async (req: Request, res: Response) => {
     const pdfDir = path.join(__dirname, '../../pdfs');
     if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true });
     const pdfFilename = `한줄로_AI분석_${companyName}_${periodFrom}_${periodTo}.pdf`;
-    const pdfPath = path.join(pdfDir, `analysis_${String(analysisId).slice(0, 8)}.pdf`);
+    // ★ 2026-09-28 한줄로 V2 R303 — 요청마다 다른 파일에 쓰고 보낸 뒤 지운다. 옛 코드는 분석마다 같은 이름에 써서
+    //   같은 분석을 동시에 받으면 한 파일에 겹쳐 썼고, 보낸 뒤 지우지 않아 pdfs/ 에 쌓였다.
+    const pdfPath = path.join(pdfDir, `analysis_${String(analysisId).slice(0, 8)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.pdf`);
     const stream = fs.createWriteStream(pdfPath);
     doc.pipe(stream);
 
@@ -1167,6 +1170,9 @@ router.get('/pdf', async (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(pdfFilename)}"`);
     const fileStream = fs.createReadStream(pdfPath);
+    const removePdf = () => fs.unlink(pdfPath, () => { /* 이미 없으면 그만 */ });
+    res.on('close', removePdf);
+    fileStream.on('error', removePdf);
     fileStream.pipe(res);
 
   } catch (error: any) {

@@ -634,18 +634,23 @@ export async function getSpamTestBatchResults(batchId: string): Promise<SpamTest
   const variants: SpamTestBatchResult['variants'] = [];
   let allCompleted = true;
 
-  for (const test of tests.rows) {
+  // ★ 2026-09-28 한줄로 V2 m005 — 변형들의 결과를 한 번에 읽는다(옛: 변형마다 조회 · 여정 사전검사가 끝날 때까지 반복 호출된다).
+  const resultsByTest = new Map<string, Array<{ carrier: any; messageType: any; result: any }>>();
+  if (tests.rows.length > 0) {
     const results = await query(
-      `SELECT carrier, message_type, result FROM spam_filter_test_results
-       WHERE test_id = $1 ORDER BY carrier, message_type`,
-      [test.id]
+      `SELECT test_id, carrier, message_type, result FROM spam_filter_test_results
+       WHERE test_id = ANY($1::uuid[]) ORDER BY carrier, message_type`,
+      [tests.rows.map((t: any) => t.id)]
     );
+    for (const r of results.rows as any[]) {
+      const key = String(r.test_id);
+      if (!resultsByTest.has(key)) resultsByTest.set(key, []);
+      resultsByTest.get(key)!.push({ carrier: r.carrier, messageType: r.message_type, result: r.result });
+    }
+  }
 
-    const carrierResults = results.rows.map((r: any) => ({
-      carrier: r.carrier,
-      messageType: r.message_type,
-      result: r.result,
-    }));
+  for (const test of tests.rows) {
+    const carrierResults = resultsByTest.get(String(test.id)) || [];
 
     // 전체 결과 판정
     let overallResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'pending' = 'pending';

@@ -15,7 +15,7 @@
  *   - 옛 캠페인 sync worker 영역 패턴 정합 (campaign-sync-worker.ts 영역)
  */
 
-import { syncTemplateCodes, syncTemplateStatuses } from './kakao-template-sync';
+import { loadImcTemplateMap, syncTemplateCodes, syncTemplateStatuses } from './kakao-template-sync';
 
 const INTERVAL_MS = 30 * 60 * 1000; // 30분 영역
 const BOOT_DELAY_MS = 60 * 1000;    // 60초 영역 (서버 부팅 영구 안전)
@@ -35,8 +35,11 @@ async function runOnce(): Promise<void> {
   }
   _running = true;
   const startedAt = Date.now();
+  // ★ 2026-09-28 한줄로 V2 R267 — IMC 전체 목록은 한 사이클에 한 번만 받아 코드·상태 동기화가 나눠 쓴다(필요할 때 처음 받는다).
+  let imcMap: Promise<Map<string, any>> | null = null;
+  const loadImc = () => (imcMap ??= loadImcTemplateMap('공용'));
   try {
-    const result = await syncTemplateCodes();
+    const result = await syncTemplateCodes({ loadImc });
     const elapsedMs = Date.now() - startedAt;
     if (result.scanned > 0) {
       log(
@@ -46,7 +49,7 @@ async function runOnce(): Promise<void> {
 
     // ★ 2026-06-10: IMC 템플릿 활성상태(A/R/S) 동기화 — 검수 승인인데 활성 대기(R)라 7300 나던 사례의 영구 안전망
     try {
-      const st = await syncTemplateStatuses();
+      const st = await syncTemplateStatuses(loadImc);
       if (st.updated > 0) {
         log(`활성상태 동기화 — scanned=${st.scanned} updated=${st.updated}`);
       }

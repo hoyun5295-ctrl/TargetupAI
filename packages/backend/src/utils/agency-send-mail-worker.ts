@@ -714,10 +714,15 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   /** ★0910 규격에 맞게 바꾼 이미지의 고지 조각. 접수 완료 회신이 유일한 확인 자리다(조용히 바꾸지 않는다) */
   const savedImageFitNotes: string[] = [];
   // 청구 계정 미확정(auth null) 반려는 회사·사용자 없이 기록한다 — 후보가 여러 회사일 수 있어 추정 기록은 오귀속이다
-  const reject = async (reasons: string[], reasonCode: string, headers?: string[]) => {
+  // ★ 2026-09-28 한줄로 V2 R354 — 저장한 이미지를 지우는 자리를 하나로. 반려만 지우고 있어서
+  //   중복 접수 종결(plans 0)과 접수 트랜잭션 예외에서는 파일이 남았다(재시도하면 새 파일을 또 저장한다).
+  const dropSavedImages = () => {
     for (const p of savedImagePaths.splice(0)) {
       try { fs.unlinkSync(p); } catch { /* 이미 없으면 그만 · 반려 자체를 막지 않는다 */ }
     }
+  };
+  const reject = async (reasons: string[], reasonCode: string, headers?: string[]) => {
+    dropSavedImages();
     await finalizeIntake(claimed.id, 'rejected', { reason: reasonCode, companyId: mailCompanyId, userId: lastAcct?.userId ?? null, replyStatus: 'pending' });
     await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가', buildRejectedReply(reasons, headers), messageId);
   };
@@ -991,6 +996,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
 
   // 전량이 이미 접수된 상태면 오늘 단일 경로와 같은 자리에서 종결한다(새 상태를 만들지 않는다)
   if (plans.length === 0) {
+    dropSavedImages();
     await finalizeIntake(claimed.id, 'rejected', { reason: 'duplicate_request', companyId: mailCompanyId, userId: lastAcct?.userId ?? null, replyStatus: 'pending' });
     await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 이미 접수된 요청서입니다',
       buildRejectedReply([
@@ -1018,6 +1024,8 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   const txClient = await pool.connect();
   const requestRows: any[] = [];
   const requestKinds: AgencyCallbackKinds[] = [];
+  // COMMIT 을 보낸 뒤의 오류는 결과를 모른다(커밋됐을 수 있다) — 그때는 접수가 이미지를 가리킬 수 있어 지우지 않는다.
+  let commitSent = false;
   try {
     await txClient.query('BEGIN');
     for (let i = 0; i < plans.length; i++) {
@@ -1061,9 +1069,11 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       [claimed.id, plans[0].acct.companyId, plans[0].acct.userId, requestRows.map((r) => r.id),
         dupSkipped.length > 0 ? `duplicate_skipped:${dupSkipped.length}` : null],
     );
+    commitSent = true;
     await txClient.query('COMMIT');
   } catch (txErr) {
     await txClient.query('ROLLBACK').catch(() => { /* noop */ });
+    if (!commitSent) dropSavedImages();
     throw txErr;
   } finally {
     txClient.release();

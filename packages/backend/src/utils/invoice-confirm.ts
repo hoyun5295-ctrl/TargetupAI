@@ -424,9 +424,13 @@ export async function createAndSendConfirmations(opts: {
 
     // 총 60초 상한 — 넘으면 발송 여부 불확정. sendMail은 취소되지 않으므로 "안 갔다"로 단정할 수 없다.
     let mailTimedOut = false;
+    // ★ 2026-09-28 한줄로 V2 R422·R369 — 첨부 PDF는 **전송이 끝나면(성공·실패·시간 초과 뒤 늦게 끝나도)** 지운다.
+    //   옛 코드는 확실한 실패에서만 지워 성공·불확정 발송의 렌더본이 pdfs/ 에 쌓였다. 시간 초과로 먼저 넘어가도
+    //   sendMail 은 뒤에서 첨부를 계속 읽으므로 경주 결과가 아니라 전송 자체의 끝에 건다.
+    const attachmentPath = attachment.path;
+    let rawSend: Promise<any>;
     try {
-      const mailInfo: any = await Promise.race([
-        transporter.sendMail({
+      rawSend = transporter.sendMail({
           // 고객문의 메일과 같은 계정(SMTP_USER)이다 — 표시명·회신 주소만 명시한다.
           from: `"한줄로" <${process.env.SMTP_USER || INVITO_INFO.email}>`,
           replyTo: INVITO_INFO.email,
@@ -437,7 +441,10 @@ export async function createAndSendConfirmations(opts: {
           subject: `[한줄로] ${companyName} 거래내역서 (${billingStart.slice(0, 7)}) · 확인 요청`,
           html,
           attachments: [attachment],
-        }),
+        });
+      void rawSend.catch(() => undefined).finally(() => { try { unlinkSync(attachmentPath); } catch { /* 이미 없으면 그만 */ } });
+      const mailInfo: any = await Promise.race([
+        rawSend,
         new Promise((_, reject) => setTimeout(() => { mailTimedOut = true; reject(new Error('MAIL_TOTAL_TIMEOUT')); }, MAIL_TOTAL_TIMEOUT_MS)),
       ]);
       // ★ 2026-07-31 부분 거부를 성공으로 세지 않는다(판정은 CT — 발송 지점 셋이 같은 규칙을 쓴다).
@@ -459,8 +466,7 @@ export async function createAndSendConfirmations(opts: {
         } catch (releaseErr: any) {
           console.error(`[일괄발급][표시해제실패] billing=${sheet.id} — 미발송인데 발송 표시가 남았다(재시도 대상에서 빠짐 · 수동 확인):`, releaseErr?.message || releaseErr);
         }
-        // 안 나간 첨부는 남기지 않는다. 추적행은 살아 있으니 재시도하면 새로 렌더된다.
-        try { unlinkSync(attachment.path); } catch { /* 이미 없으면 그만 */ }
+        // 안 나간 첨부는 위 전송 끝(finally)에서 지운다. 추적행은 살아 있으니 재시도하면 새로 렌더된다.
       } else {
         // 발송 불확정 — 표시를 **그대로 둔다**(전달됐을 수 있으므로 중복 발송을 막는 쪽을 택한다).
         //   추적행은 1단계에서 만들어졌고 전달 확정은 못 했으므로 적재 시점 값(manual_wait)이 남는다.

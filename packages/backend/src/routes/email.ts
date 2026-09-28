@@ -462,7 +462,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     // ★ 2026-07-02 완성 여부 플래그 — 프론트 발송/PC 미리보기 잠금 판단용 (신·구 멱등키 인정)
     try {
       // ★ 2026-09-27 S2 — 발송 게이트와 같은 판정(크레딧제 미적용 회사 = 전부 완성)
-      const { notApplicable, paidIds } = await emailCompletionContextOf(companyId);
+      const { notApplicable, paidIds } = await emailCompletionContextOf(companyId, (campaigns as any[]).map((c) => String(c.id))); // ★ R122 목록 id 만
       for (const c of campaigns as any[]) {
         c.completed = notApplicable || paidIds.has(String(c.id));
       }

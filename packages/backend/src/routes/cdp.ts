@@ -74,6 +74,7 @@ import {
   getActiveMessagesForCustomerV2,
   trackImpression,
   getMessageStats,
+  getMessageStatsBatch,
   getCompanyInAppStats,
   setInAppAudienceFilter,
   sanitizeAppMessageColors,
@@ -926,21 +927,6 @@ router.get('/install-status', async (req: Request, res: Response) => {
     );
     const keyIssuedAt = keyRow.rows[0]?.cdp_api_key_issued_at || null;
 
-    const ev = await query(
-      `SELECT
-         MIN(received_at) AS first_event_at,
-         COUNT(*) AS total,
-         COUNT(*) FILTER (WHERE received_at >= NOW() - INTERVAL '24 hours') AS count_24h,
-         BOOL_OR(event_name = 'page_view') AS has_pageview,
-         BOOL_OR(event_name = 'identify')  AS has_identify,
-         BOOL_OR(event_name = 'consent')   AS has_consent,
-         BOOL_OR(event_name = 'click')     AS has_click
-       FROM cdp_events
-       WHERE company_id = $1::uuid`,
-      [companyId],
-    );
-    const row = ev.rows[0] || {};
-
     // ★ 2026-08-10 Phase 0 — 자사몰(source)별 분리 집계 추가.
     //   기존 쿼리·응답 키는 그대로 둔다(additive) — 회사 단위 값을 보는 기존 소비처 무파손.
     //   연동 현황판이 몰 카드별 배지를 그리려면 회사 합계가 아니라 source별 실적이 필요하다(설계서 §2-3-1·§6).
@@ -961,6 +947,18 @@ router.get('/install-status', async (req: Request, res: Response) => {
        GROUP BY COALESCE(source, 'unknown')`,
       [companyId],
     );
+    // ★ 2026-09-28 한줄로 V2 R102 — 회사 합계는 몰별 집계에서 합친다. 옛: 같은 회사 cdp_events 전 기간을 두 번 훑었다
+    //   (회사 합계 1번 + 몰별 1번). 값은 같다(최초 = 몰별 최초의 최솟값 · 건수 = 합 · 신호 = 하나라도).
+    const row = { first_event_at: null as any, total: 0, count_24h: 0, has_pageview: false, has_identify: false, has_consent: false, has_click: false };
+    for (const r of bySourceRows.rows) {
+      if (r.first_event_at && (!row.first_event_at || new Date(r.first_event_at) < new Date(row.first_event_at))) row.first_event_at = r.first_event_at;
+      row.total += parseInt(r.total || '0');
+      row.count_24h += parseInt(r.count_24h || '0');
+      row.has_pageview = row.has_pageview || !!r.has_pageview;
+      row.has_identify = row.has_identify || !!r.has_identify;
+      row.has_consent = row.has_consent || !!r.has_consent;
+      row.has_click = row.has_click || !!r.has_click;
+    }
     const bySource: Record<string, {
       firstEventAt: string | null; lastEventAt: string | null;
       total: number; count24h: number;
@@ -985,8 +983,8 @@ router.get('/install-status', async (req: Request, res: Response) => {
       success: true,
       keyIssuedAt,
       firstEventAt: row.first_event_at || null,
-      total: parseInt(row.total || '0'),
-      count24h: parseInt(row.count_24h || '0'),
+      total: row.total,
+      count24h: row.count_24h,
       signals: {
         pageview: !!row.has_pageview,
         identify: !!row.has_identify,
@@ -1228,13 +1226,9 @@ router.get('/inapp', async (req: Request, res: Response) => {
     const channelRaw = req.query.channel ? String(req.query.channel) : undefined;
     const channel = channelRaw === 'web' || channelRaw === 'app' ? channelRaw : undefined;
     const messages = await listInAppMessages(companyId, channel, resolveOwnerScope(req));
-    // 메시지별 통계 추가
-    const withStats = await Promise.all(
-      messages.map(async (m) => ({
-        ...m,
-        stats: await getMessageStats(companyId, m.id),
-      }))
-    );
+    // 메시지별 통계 추가 — ★ 2026-09-28 한줄로 V2 R104: 쿼리 한 번(CT getMessageStatsBatch · 옛 N+1)
+    const statsById = await getMessageStatsBatch(companyId, messages.map((m) => m.id));
+    const withStats = messages.map((m) => ({ ...m, stats: statsById.get(String(m.id)) }));
     return res.json({ success: true, messages: withStats });
   } catch (err: any) {
     console.error('[CDP /inapp GET] 오류:', err);

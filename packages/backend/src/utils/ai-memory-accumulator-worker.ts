@@ -36,6 +36,22 @@ const TYPE_CAPS: Record<string, number> = {
 let _workerTimer: NodeJS.Timeout | null = null;
 let _workerRunning = false;
 
+// ★ 2026-09-28 한줄로 V2 R156~R159 — 매시간 다시 도는 무거운 조회를 결과의 멱등 창(20시간)에 맞춘다.
+//   이 워커의 기록은 전부 20시간 멱등이라, 그 사이 같은 대상을 다시 집계해도 결과가 같다(헛돎).
+//   표식은 프로세스 메모리다 — 재시작하면 한 번 더 돌 뿐 결과는 같다(기록 쪽 멱등이 그대로 막는다).
+const REPEAT_GATE_MS = 20 * 60 * 60 * 1000;
+let _journeyLearnedAt = 0;          // R156 여정 학습(cdp_events 조인) 마지막 실행
+let _insightIdleAt = 0;             // R157 등급 인사이트 — 밀린 회사가 없던 마지막 실행
+const _dmDoneAt = new Map<string, number>();     // R159 DM별 마지막 학습
+const _emailDoneAt = new Map<string, number>();  // R159 이메일 캠페인별 마지막 학습
+
+/** 20시간 안에 처리한 대상이면 true. 오래된 표식은 지운다(메모리 상한). */
+function doneRecently(map: Map<string, number>, id: string, nowMs: number): boolean {
+  for (const [k, at] of map) if (nowMs - at >= REPEAT_GATE_MS) map.delete(k);
+  const at = map.get(id);
+  return at !== undefined && nowMs - at < REPEAT_GATE_MS;
+}
+
 /** 1시간 cron tick — 여정 학습 + 등급 인사이트 + 수명관리. idempotent. */
 export async function runAiMemoryAccumulatorTick(): Promise<void> {
   if (_workerRunning) return;
@@ -74,6 +90,11 @@ export async function runAiMemoryAccumulatorTick(): Promise<void> {
 //      핸들러 전용 마커·SDK ingest는 'sdk' 하드코딩·CDP API는 키 provider라 클라이언트가 설정 불가).
 //    실측 0이면 지금처럼 보류(가짜 0% 차단 원칙 유지).
 async function accumulateJourneyLearning(): Promise<number> {
+  // ★ 2026-09-28 한줄로 V2 R156 — 7일치 실행을 cdp_events와 조인하는 무거운 집계라 20시간에 한 번만 돈다.
+  //   기록(recordCampaignLearning)은 여정마다 같은 키라 매시간 다시 써도 결과가 같았다.
+  const nowMs = Date.now();
+  if (nowMs - _journeyLearnedAt < REPEAT_GATE_MS) return 0;
+  _journeyLearnedAt = nowMs;
   const recentRes = await query(
     `SELECT e.company_id, e.journey_id, j.name AS journey_name,
             COUNT(*) FILTER (
@@ -131,6 +152,10 @@ async function accumulateJourneyLearning(): Promise<number> {
 // 2) 등급별 고객 인사이트 — customers 실측 집계(cdp 불요). 회사+20h 멱등(UPSERT).
 //    qualifying 등급(표본 ≥ MIN_SAMPLE)이 있는 회사만 선정 → 0 인사이트 회사 재선정 방지.
 async function accumulateCustomerInsights(): Promise<number> {
+  // ★ 2026-09-28 한줄로 V2 R157 — 대상 선정이 회사마다 customers 전체를 등급별로 세는 무거운 조회다.
+  //   한 번 돌아 밀린 회사가 없었으면(배치를 다 못 채움) 결과 멱등 창(20시간) 동안 다시 세지 않는다.
+  const nowMs = Date.now();
+  if (_insightIdleAt > 0 && nowMs - _insightIdleAt < REPEAT_GATE_MS) return 0;
   // ★ Codex 1R — qualifying 등급이 0이 된 회사도 stale 자동 인사이트가 남아 있으면 선정(정리 전용 진입).
   //   정리 후 다음 tick부터는 두 branch 모두 거짓이라 자연 이탈 — 무한 재선정 없음.
   const companies = await query(
@@ -158,6 +183,8 @@ async function accumulateCustomerInsights(): Promise<number> {
       LIMIT $2`,
     [INSIGHT_MIN_SAMPLE, INSIGHT_BATCH],
   );
+  // 배치를 다 못 채웠으면 밀린 회사가 없다 → 다음 20시간은 선정 조회를 건너뛴다(꽉 찼으면 다음 시간에 이어서 돈다)
+  _insightIdleAt = companies.rows.length < INSIGHT_BATCH ? nowMs : 0;
   let done = 0;
   for (const row of companies.rows) {
     const companyId = row.company_id;
@@ -230,26 +257,30 @@ async function accumulateCustomerInsights(): Promise<number> {
 // 4) ★ 2026-07-02(5) DM 참여 학습 — 최근 7일 열람 활동이 있는 발송 DM을 회사·DM별 집계 후 메모리 기록.
 //    멱등: metadata.last_dm_id + 20h 윈도우(NOT EXISTS). 표본·실측 게이트는 record CT 내부(shouldRecordDmEngagement).
 async function accumulateDmEngagement(): Promise<number> {
+  // ★ 2026-09-28 한줄로 V2 R158 — 후보는 최근 7일 열람이 있는 DM에서 출발한다. 옛 조회는 매시간 수신자 토큰 전체를
+  //   DISTINCT로 훑었다. 토큰이 있는(= 발송된) DM만 · 같은 회사 토큰만(옛 결과와 같은 집합).
   const dms = await query(
-    `SELECT DISTINCT t.company_id, t.dm_id, p.title
-       FROM dm_recipient_tokens t
-       JOIN dm_pages p ON p.id = t.dm_id
-      WHERE EXISTS (
-              SELECT 1 FROM dm_views v
-               WHERE v.dm_id = t.dm_id AND v.last_active_at >= NOW() - INTERVAL '7 days'
-            )
+    `SELECT p.company_id, p.id AS dm_id, p.title
+       FROM dm_pages p
+      WHERE p.id IN (SELECT v.dm_id FROM dm_views v WHERE v.last_active_at >= NOW() - INTERVAL '7 days')
+        AND EXISTS (SELECT 1 FROM dm_recipient_tokens t WHERE t.dm_id = p.id AND t.company_id = p.company_id)
         AND NOT EXISTS (
               SELECT 1 FROM ai_company_memory m
-               WHERE m.company_id = t.company_id
+               WHERE m.company_id = p.company_id
                  AND m.memory_type = 'channel_performance'
                  AND m.memory_key = 'channel_dm'
-                 AND m.metadata->>'last_dm_id' = t.dm_id::text
+                 AND m.metadata->>'last_dm_id' = p.id::text
                  AND m.updated_at >= NOW() - INTERVAL '20 hours'
             )
       LIMIT 20`,
   );
   let learned = 0;
+  const dmNow = Date.now();
   for (const row of dms.rows) {
+    // ★ 2026-09-28 한줄로 V2 R159 — DB 멱등 표식(last_dm_id)은 회사당 한 행이라 마지막 DM만 기억한다.
+    //   회사에 DM이 여럿이면 나머지가 매시간 다시 집계됐다 → DM마다 20시간 표식을 여기서 둔다.
+    if (doneRecently(_dmDoneAt, String(row.dm_id), dmNow)) continue;
+    _dmDoneAt.set(String(row.dm_id), dmNow);
     try {
       const rows = await getDmRecipientEngagementRows(row.dm_id, row.company_id);
       const sentCount = rows.length;
@@ -323,7 +354,11 @@ async function accumulateEmailEngagement(): Promise<number> {
       LIMIT 50`,
   );
   let learned = 0;
+  const emailNow = Date.now();
   for (const row of campaigns.rows) {
+    // ★ 2026-09-28 한줄로 V2 R159 — DM과 같은 이유(회사당 한 행 표식) · 캠페인마다 20시간 표식
+    if (doneRecently(_emailDoneAt, String(row.id), emailNow)) continue;
+    _emailDoneAt.set(String(row.id), emailNow);
     try {
       const ok = await recordEmailEngagementLearning({
         companyId: row.company_id,

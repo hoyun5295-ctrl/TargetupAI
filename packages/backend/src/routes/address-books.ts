@@ -66,6 +66,37 @@ router.get('/:groupName', async (req: Request, res: Response) => {
     const params: any[] = [companyId, groupName];
     const userFilter = ownerClause(resolveTargetOwner(req, req.query.owner), params);
 
+    // ★ 2026-09-28 한줄로 V2 R060 — 미리보기(조회) = 서버 검색 + 상위 N건 + 전체 건수(limit 이 있을 때).
+    //   옛: 조회도 그룹 전체(최대 10만)를 받아 화면이 10건만 보여 줬다. 불러오기(발송 목록 채우기)는 전부 필요해 limit 없이 그대로다.
+    const previewLimit = req.query.limit !== undefined ? Math.min(Math.max(parseInt(String(req.query.limit), 10) || 10, 1), 100) : null;
+    if (previewLimit !== null) {
+      const q = String(req.query.q || '').trim().slice(0, 50);
+      let searchSql = '';
+      if (q) {
+        const digits = q.replace(/\D/g, '');
+        params.push(`%${q}%`);
+        const textIdx = params.length;
+        const conds = [`name ILIKE $${textIdx}`, `extra1 ILIKE $${textIdx}`, `extra2 ILIKE $${textIdx}`, `extra3 ILIKE $${textIdx}`];
+        if (digits) {
+          params.push(`%${digits}%`);
+          conds.push(`regexp_replace(phone, '\\D', '', 'g') LIKE $${params.length}`);
+        }
+        searchSql = ` AND (${conds.join(' OR ')})`;
+      }
+      params.push(previewLimit);
+      const preview = await query(
+        `SELECT id, phone, name, extra1, extra2, extra3, COUNT(*) OVER() AS total_count_all
+         FROM address_books
+         WHERE company_id = $1 AND group_name = $2${userFilter}${searchSql}
+         ORDER BY created_at
+         LIMIT $${params.length}`,
+        params
+      );
+      const total = preview.rows.length > 0 ? Number(preview.rows[0].total_count_all) : 0;
+      const contacts = preview.rows.map(({ total_count_all: _t, ...r }: any) => ({ ...r, phone: normalizeBookPhone(r.phone) }));
+      return res.json({ success: true, contacts, total });
+    }
+
     const result = await query(
       `SELECT id, phone, name, extra1, extra2, extra3
        FROM address_books

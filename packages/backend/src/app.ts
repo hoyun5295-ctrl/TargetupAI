@@ -140,6 +140,7 @@ import { startGatewayTemplateMappingWorker } from './utils/gateway-template-mapp
 import { startScheduledCleanupWorker } from './utils/scheduled-cleanup-worker';
 // ★ 대량 발송 파이프라인 (2026-05-30): direct-send-worker — staging 청크 발송 + 진행률 (5초 주기)
 import { startDirectSendWorker } from './utils/direct-send-worker';
+import { failOrphanedJobsOnBoot } from './utils/full-analysis-job';
 // ★ 2026-06-11: 취소 잔존 큐 안전망 — 취소됐는데 발송 큐에 남은 행 자동 삭제 (에이치피오 사고 재발 차단)
 import { startCancelledQueueSweeper } from './utils/cancelled-queue-sweeper';
 // ★ 2026-06-17: 만료 발송요청 안전망 — rsv1=3(서버전송요청완료) 2일+ 결과없음 미발송 발송 차단 (시세이도 늦은 발송 사고 차단)
@@ -159,6 +160,8 @@ import { logMallConsentGate } from './utils/mall-consent';
 import { startSystemMonitorWorker } from './utils/system-monitor-worker';
 // ★ 2026-07-05: 발송 피로도 보호 — send_fatigue_daily 45일 초과 버킷 프루닝 (6시간 주기)
 import { startFatiguePruneWorker } from './utils/fatigue-guard';
+// ★ 2026-09-28 한줄로 V2 차수 4 — 보관 기한 정리(로그 13개월 · 임시·작성 중 · 파일) 하루 1번
+import { startRetentionSweeper } from './utils/retention-sweeper';
 // ★ 2026-08-13 마케팅 플래너 실행·대조 워커 (Phase 3·4)
 import { startPlannerExecutor } from './utils/planner-executor';
 import { startPlannerReconcileWorker } from './utils/planner-reconcile';
@@ -594,6 +597,9 @@ app.listen(PORT, () => {
   // ★ D151 (2026-05-11): 캠페인 결과 자동 sync (5분 주기) — fire-and-forget 사용자 진입 의존 → 백그라운드 자동
   startCampaignSyncWorker();
 
+  // ★ 2026-09-28 한줄로 V2 R294: 재시작으로 끊긴 풀분석 작업을 실패로 닫는다(화면 영구 "진행 중" 방지 · 차감은 성공 뒤라 돈 영향 없음)
+  void failOrphanedJobsOnBoot().then((n) => { if (n > 0) console.log(`[full-analysis] 끊긴 작업 ${n}건 실패 처리`); });
+
   // ★ D153 (2026-05-13): MySQL 진실 원천 환불 sweep (5분 주기) — PG fail_count 의존 X
   //   balance_transactions 회계 진실 + MySQL status_code 직접 카운트로 차액 환불 보정
   //   기존 syncCampaignResults가 `target > success+fail` 조건으로 SELECT 누락된 캠페인까지 sweep
@@ -704,6 +710,7 @@ app.listen(PORT, () => {
 
   // ★ 2026-07-05: 발송 피로도 보호 — 일일 버킷 프루닝 (6시간 주기, 42P01 무해)
   startFatiguePruneWorker();
+  startRetentionSweeper();
 
   // ★ 2026-06-13: 예약 Email 발송 + 정체 캠페인 복구 (1분 주기) — scheduled 도래 발송 + sending 30분+ 정체 failed
   startEmailSendSweeper();

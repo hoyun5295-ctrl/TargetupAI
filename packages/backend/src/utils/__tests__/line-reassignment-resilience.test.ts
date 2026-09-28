@@ -149,7 +149,13 @@ describe('재대조 워커 계약 — 0건 가드를 지나고, 판정에 쓸 se
     const block = fn.slice(guardAt, continueAt);
     expect(block).toContain('SET result_synced_at = NOW()');
     // 카운트·result_final 은 그 블록에서 건드리지 않는다.
+    // ★ 2026-09-28 m117(Codex 차수4 1R high): 보류 건을 굳히면 라인 복구 뒤 failed→completed 복원이 멈춰 후불 청구에서 빠진다.
     expect(block).not.toContain('success_count =');
     expect(block).not.toContain('result_final =');
+  });
+
+  it('m117 — 72h 탈출구 무리는 24시간에 한 번만 다시 본다(보류 건 매시간 재집계 차단 · 복원 경로는 유지)', () => {
+    expect(src).toContain(`AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '72 hours'
+               AND (result_synced_at IS NULL OR result_synced_at < NOW() - INTERVAL '24 hours'))`);
   });
 });

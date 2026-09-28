@@ -99,6 +99,9 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   const [scheduledLoading, setScheduledLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [testStats, setTestStats] = useState<any>(null);
+  // ★ 2026-09-28 m046 — 담당자 테스트 건수 = 서버 집계(목록은 최근 N건까지만 온다)
+  const [managerTestTotal, setManagerTestTotal] = useState<number | null>(null);
+  const [testListCapped, setTestListCapped] = useState<{ capped: boolean; limit: number }>({ capped: false, limit: 0 });
   const [testList, setTestList] = useState<any[]>([]);
   const [spamFilterList, setSpamFilterList] = useState<any[]>([]);
   const [spamFilterStats, setSpamFilterStats] = useState<any>(null);
@@ -225,6 +228,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
       const res = await fetch(`/api/campaigns/test-stats?yearMonth=${testFrom}&fromDate=${startDate}&toDate=${endDate}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       setTestStats(data.stats);
+      setManagerTestTotal(typeof data.managerStats?.total === 'number' ? data.managerStats.total : null);
+      setTestListCapped({ capped: !!data.listCapped, limit: Number(data.listLimit) || 0 });
       setTestList(data.list);
       setSpamFilterStats(data.spamFilterStats || null);
       setSpamFilterList(data.spamFilterList || []);
@@ -896,7 +901,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   <div className="font-medium text-neutral-700 mb-2">담당자 테스트</div>
                   <div className="flex justify-between items-end">
                     <div>
-                      <span className="text-xl font-bold text-orange-600">{(testList || []).length}</span>
+                      <span className="text-xl font-bold text-orange-600">{managerTestTotal ?? (testList || []).length}</span>
                       <span className="text-sm text-neutral-500 ml-1">건</span>
                     </div>
                     <div className="text-right">
@@ -973,6 +978,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                     </tbody>
                   </table>
                 </div>
+                {testListCapped.capped && (
+                  <div className="px-3 py-2 text-xs text-neutral-500 border-t bg-neutral-50">
+                    목록에는 최근 {testListCapped.limit.toLocaleString()}건만 보여요. 건수와 비용은 기간 전체 기준이에요.
+                  </div>
+                )}
                 {testList && testList.length > itemsPerPage && (
                   <div className="flex justify-center items-center gap-2 py-3 border-t bg-neutral-50">
                     <button onClick={() => setTestCurrentPage(p => Math.max(1, p - 1))} disabled={testCurrentPage === 1} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-neutral-50 disabled:opacity-40">이전</button>

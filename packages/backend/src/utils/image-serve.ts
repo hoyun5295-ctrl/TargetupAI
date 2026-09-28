@@ -120,8 +120,43 @@ export async function fitToCanvas(buf: Buffer, canvasW: number, canvasH: number,
  * 이 함수 때문에 이미지가 안 나가는 일은 없어야 한다(서빙은 실패보다 원본이 낫다).
  *
  * `fit`을 주면 그 비율로 캔버스를 만들어 원본을 통째로 넣고(잘림 0) 남는 자리를 `bg`로 채운다.
+ *
+ * ★ 2026-09-28 한줄로 V2 R240 — 같은 원본·같은 맞춤의 동시 요청은 진행 중인 한 작업을 함께 기다린다.
+ *   옛: 캐시가 없는 큰 이미지를 여러 방문자가 동시에 열면 요청마다 sharp 변환을 따로 돌렸다(CPU·메모리 중복).
+ *   작업이 끝나면 묶음을 지운다 — 다음 요청은 만들어 둔 변환본(캐시 확인)으로 간다.
  */
-export async function getServePath(
+const inflightServe = new Map<string, Promise<string>>();
+
+/**
+ * ★ 2026-09-28 한줄로 V2 R412 — 원본을 지울 때 서빙 변환본(`.opt/<변형>/<파일명>`)도 함께 지운다.
+ *   옛: 원본 삭제 경로(DM 이미지 삭제 · 에셋 삭제)가 원본만 지워 변환본이 디스크에 남았다.
+ *   best-effort — 정리 실패가 삭제 자체를 막지 않는다. 호출부는 원본을 지운 **뒤에** 부른다.
+ */
+export function dropServeVariants(originalPath: string): void {
+  try {
+    const optDir = path.join(path.dirname(originalPath), CACHE_DIR_NAME);
+    if (!fs.existsSync(optDir)) return;
+    const base = path.basename(originalPath);
+    for (const variant of fs.readdirSync(optDir)) {
+      const cached = path.join(optDir, variant, base);
+      try { if (fs.existsSync(cached)) fs.unlinkSync(cached); } catch { /* 다음 변형 */ }
+    }
+  } catch { /* 정리 실패는 삭제를 막지 않는다 */ }
+}
+
+export function getServePath(
+  originalPath: string,
+  fit?: { aspect: string; mode?: FitMode } | null,
+): Promise<string> {
+  const key = `${originalPath}|${fit ? `${fit.aspect}|${fit.mode === 'crop' ? 'crop' : 'pad'}` : ''}`;
+  const running = inflightServe.get(key);
+  if (running) return running;
+  const job = buildServePath(originalPath, fit).finally(() => inflightServe.delete(key));
+  inflightServe.set(key, job);
+  return job;
+}
+
+async function buildServePath(
   originalPath: string,
   fit?: { aspect: string; mode?: FitMode } | null,
 ): Promise<string> {

@@ -86,6 +86,7 @@ import { runPredictiveBatchNow } from '../utils/predictive-worker';
 import { sendTypeLabel } from '../utils/send-type-axis';
 // ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
 import { spamBillableTestSql, isSpamTestBillable } from '../utils/spam-trial';
+import { swrCache } from '../utils/swr-cache';
 
 const router = Router();
 
@@ -2962,70 +2963,81 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
       : `TO_CHAR(${STAT_DATE_EXPR} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
     const groupAlias = view === 'monthly' ? 'month' : 'date';
 
-    const metaResult = await query(`
-      SELECT
-        c.id, c.company_id, c.created_by, c.message_type,
-        c.result_final, c.sent_count, c.success_count, c.fail_count,
-        jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
-        ${groupCol} as period,
-        co.company_name,
-        lg.group_name as line_group_name
-      FROM campaigns c
-      JOIN companies co ON c.company_id = co.id
-      LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
-      WHERE ${STAT_DATE_EXPR} IS NOT NULL
-        AND ${STAT_STARTED_GUARD}
-        AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
-    `, baseParams);
+    // ★ 2026-09-28 한줄로 V2 R281 — 기간 집계를 캐시 CT로(같은 조건의 페이지 넘김 = 다시 집계하지 않는다).
+    //   옛: 페이지마다 기간 전체(캠페인 메타 + MySQL 결과 집계)를 다시 돌린 뒤 JS로 잘랐다. 신선도 = 최대 1분(soft 30초 · hard 60초).
+    const aggregated = await swrCache({
+      key: `admin:stats-send:${JSON.stringify([view, startDate, endDate, companyId])}`,
+      softTtlSec: 30,
+      hardTtlSec: 60,
+      compute: async () => {
+        const metaResult = await query(`
+          SELECT
+            c.id, c.company_id, c.created_by, c.message_type,
+            c.result_final, c.sent_count, c.success_count, c.fail_count,
+            jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
+            ${groupCol} as period,
+            co.company_name,
+            lg.group_name as line_group_name
+          FROM campaigns c
+          JOIN companies co ON c.company_id = co.id
+          LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
+          WHERE ${STAT_DATE_EXPR} IS NOT NULL
+            AND ${STAT_STARTED_GUARD}
+            AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
+        `, baseParams);
 
-    const metaCampaigns = metaResult.rows;
-    // ★ result_final 캐시 우선 — 완료 캠페인 MySQL skip, 진행 중만 실시간(라인그룹 합집합 포함).
-    const resultCountMap = await getCampaignResultCounts(metaCampaigns);
+        const metaCampaigns = metaResult.rows;
+        // ★ result_final 캐시 우선 — 완료 캠페인 MySQL skip, 진행 중만 실시간(라인그룹 합집합 포함).
+        const resultCountMap = await getCampaignResultCounts(metaCampaigns);
 
-    // (period, company_id)별 그룹핑 + 전체 summary 합산
-    type Bucket = { period: string; company_id: any; company_name: any; line_group_name: any; runs: Set<string>; sent: number; success: number; fail: number; pending: number };
-    const byKey = new Map<string, Bucket>();
-    let totalSent = 0, totalSuccess = 0, totalFail = 0, totalPending = 0;
+        // (period, company_id)별 그룹핑 + 전체 summary 합산
+        type Bucket = { period: string; company_id: any; company_name: any; line_group_name: any; runs: Set<string>; sent: number; success: number; fail: number; pending: number };
+        const byKey = new Map<string, Bucket>();
+        let totalSent = 0, totalSuccess = 0, totalFail = 0, totalPending = 0;
 
-    for (const c of metaCampaigns) {
-      const counts = resultCountMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
-      const sent = counts.sent;
-      const success = counts.success;
-      const fail = counts.fail;
-      const pending = counts.pending;
-      totalSent += sent; totalSuccess += success; totalFail += fail; totalPending += pending;
+        for (const c of metaCampaigns) {
+          const counts = resultCountMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
+          const sent = counts.sent;
+          const success = counts.success;
+          const fail = counts.fail;
+          const pending = counts.pending;
+          totalSent += sent; totalSuccess += success; totalFail += fail; totalPending += pending;
 
-      const key = `${c.period}|${c.company_id}`;
-      if (!byKey.has(key)) {
-        byKey.set(key, {
-          period: c.period, company_id: c.company_id,
-          company_name: c.company_name, line_group_name: c.line_group_name,
-          runs: new Set<string>(), sent: 0, success: 0, fail: 0, pending: 0,
-        });
-      }
-      const b = byKey.get(key)!;
-      b.runs.add(c.id);
-      b.sent += sent; b.success += success; b.fail += fail; b.pending += pending;
-    }
+          const key = `${c.period}|${c.company_id}`;
+          if (!byKey.has(key)) {
+            byKey.set(key, {
+              period: c.period, company_id: c.company_id,
+              company_name: c.company_name, line_group_name: c.line_group_name,
+              runs: new Set<string>(), sent: 0, success: 0, fail: 0, pending: 0,
+            });
+          }
+          const b = byKey.get(key)!;
+          b.runs.add(c.id);
+          b.sent += sent; b.success += success; b.fail += fail; b.pending += pending;
+        }
 
-    const allRows = Array.from(byKey.values())
-      .map((v) => ({
-        [groupAlias]: v.period,
-        company_id: v.company_id,
-        company_name: v.company_name,
-        line_group_name: v.line_group_name,
-        runs: v.runs.size,
-        sent: v.sent,
-        success: v.success,
-        fail: v.fail,
-        pending: v.pending,
-      }))
-      .sort((a: any, b: any) => {
-        const pa = a[groupAlias], pb = b[groupAlias];
-        if (pa < pb) return 1;
-        if (pa > pb) return -1;
-        return String(a.company_name || '').localeCompare(String(b.company_name || ''));
-      });
+        const allRows = Array.from(byKey.values())
+          .map((v) => ({
+            [groupAlias]: v.period,
+            company_id: v.company_id,
+            company_name: v.company_name,
+            line_group_name: v.line_group_name,
+            runs: v.runs.size,
+            sent: v.sent,
+            success: v.success,
+            fail: v.fail,
+            pending: v.pending,
+          }))
+          .sort((a: any, b: any) => {
+            const pa = a[groupAlias], pb = b[groupAlias];
+            if (pa < pb) return 1;
+            if (pa > pb) return -1;
+            return String(a.company_name || '').localeCompare(String(b.company_name || ''));
+          });
+        return { allRows, totalSent, totalSuccess, totalFail, totalPending };
+      },
+    });
+    const { allRows, totalSent, totalSuccess, totalFail, totalPending } = aggregated;
 
     const total = allRows.length;
     const pagedRows = allRows.slice(offset, offset + limit);
@@ -3034,67 +3046,8 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     };
     const rowsResult = { rows: pagedRows };
 
-    // ===== 테스트 발송 통계 (담당자 + 스팸필터) =====
-    let testSummary = { total: 0, success: 0, fail: 0, pending: 0, sms: 0, lms: 0, cost: 0 };
-    const targetCompanyId = companyId || null;
-    if (targetCompanyId) {
-      try {
-        // 1) 담당자 테스트 (MySQL) — CT-04 컨트롤타워: 테스트 라인 테이블 동적 조회
-        const testTables = await getTestSmsTables();
-        let mysqlDateWhere = '';
-        const mysqlParams: any[] = [targetCompanyId];
-        if (startDate) { mysqlDateWhere += ` AND msg_instm >= ?`; mysqlParams.push(startDate); }
-        if (endDate) { mysqlDateWhere += ` AND msg_instm < DATE_ADD(?, INTERVAL 1 DAY)`; mysqlParams.push(endDate); }
-
-        const testAgg = await smsAggAll(
-          testTables,
-          `COUNT(*) as total,
-           SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success,
-           SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail,
-           SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending,
-           SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
-           SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms`,
-          `app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}`,
-          mysqlParams
-        );
-        testSummary.total += Number(testAgg.total) || 0;
-        testSummary.success += Number(testAgg.success) || 0;
-        testSummary.fail += Number(testAgg.fail) || 0;
-        testSummary.pending += Number(testAgg.pending) || 0;
-        testSummary.sms += Number(testAgg.sms) || 0;
-        testSummary.lms += Number(testAgg.lms) || 0;
-
-        // 2) 스팸필터 테스트 (PostgreSQL)
-        const sfDr = buildDateRangeFilter('t.created_at', startDate, endDate, 2);
-        const sfDateWhere = sfDr.sql;
-        const sfParams: any[] = [targetCompanyId, ...sfDr.params];
-        const sfIdx = sfDr.nextIndex;
-
-        const sfAgg = await query(`
-          SELECT COUNT(*) as total,
-            SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms,
-            SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms,
-            SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as completed,
-            SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
-          FROM spam_filter_test_results r
-          JOIN spam_filter_tests t ON r.test_id = t.id
-          WHERE t.company_id = $1 AND ${spamBillableTestSql('t')} ${sfDateWhere}
-        `, sfParams);
-        const sf = sfAgg.rows[0];
-        testSummary.total += Number(sf.total) || 0;
-        testSummary.success += Number(sf.completed) || 0;
-        testSummary.pending += Number(sf.pending) || 0;
-        testSummary.sms += Number(sf.sms) || 0;
-        testSummary.lms += Number(sf.lms) || 0;
-
-        // 비용 계산
-        const costRes = await query('SELECT cost_per_sms, cost_per_lms, unit_price_basis FROM companies WHERE id = $1', [targetCompanyId]);
-        const { sms: cSms, lms: cLms } = getCompanyCosts(costRes.rows[0] || {});
-        testSummary.cost = Math.round((testSummary.sms * cSms + testSummary.lms * cLms) * 10) / 10;
-      } catch (err) {
-        console.error('테스트 통계 조회 실패:', err);
-      }
-    }
+    // ★ 2026-09-28 한줄로 V2 R282 — 테스트 발송 통계(MySQL 집계 + 스팸필터 집계 + 단가) 제거. 슈퍼관리자 화면
+    //   (AdminDashboard)은 testSummary 를 쓰지 않는다 — 고객사 관리 화면(StatsTab)은 /manage/stats/send 를 쓴다.
 
     // ★ 2026-07-23: 슈퍼관리자 웹/에이전트 구분 — 에이전트(agent·both) 회사 엔진 통계를 (기간,회사)별 병행 반환.
     //   웹(campaigns) 축은 불변. env 미설정·실패 = agentRows 빈 배열(조용한 폴백). 별도 DB(pay-ingest) 조회라 발송 기간계 무관.
@@ -3112,7 +3065,6 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
 
     res.json({
       summary: summaryResult.rows[0],
-      testSummary,
       rows: rowsResult.rows,
       total,
       page,
@@ -5483,7 +5435,9 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
       return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
     }
 
-    const summaryR = await query(`
+    // ★ 2026-09-28 한줄로 V2 R283 — 서로 독립인 집계 7개를 함께 기다린다(옛: 하나씩 순차 await).
+    const [summaryR, channelR, sourceR, trendR, prefR, spamFilterR, spamSamplesR] = await Promise.all([
+      query(`
       SELECT
         COUNT(*)::int AS total,
         COUNT(DISTINCT tenant_ref)::int AS companies,
@@ -5493,29 +5447,29 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
         COUNT(*) FILTER (WHERE user_prompt IS NOT NULL AND user_prompt <> '')::int AS with_prompt,
         COUNT(*) FILTER (WHERE message_features IS NOT NULL)::int AS with_features
       FROM ai_training_logs
-    `);
-    const channelR = await query(
+    `),
+      query(
       `SELECT COALESCE(NULLIF(message_type, ''), '기타') AS k, COUNT(*)::int AS cnt
        FROM ai_training_logs GROUP BY 1 ORDER BY cnt DESC`,
-    );
-    const sourceR = await query(
+      ),
+      query(
       `SELECT COALESCE(NULLIF(final_source, ''), '기타') AS k, COUNT(*)::int AS cnt
        FROM ai_training_logs GROUP BY 1 ORDER BY cnt DESC`,
-    );
-    const trendR = await query(
+      ),
+      query(
       `SELECT to_char((send_at AT TIME ZONE 'Asia/Seoul')::date, 'MM-DD') AS day, COUNT(*)::int AS cnt
        FROM ai_training_logs
        WHERE send_at > NOW() - INTERVAL '14 days' AND send_at <= NOW()
        GROUP BY (send_at AT TIME ZONE 'Asia/Seoul')::date
        ORDER BY (send_at AT TIME ZONE 'Asia/Seoul')::date`,
-    );
-    const prefR = await query(
+      ),
+      query(
       `SELECT COUNT(*) FILTER (WHERE status IN ('approved','auto_executed'))::int AS accepted,
               COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected
        FROM operator_proposals`,
-    );
+      ),
     // 스팸필터 테스트 — 통신사 판정 집계 (buildSpamFilterExample과 동일: test별 하나라도 blocked → block)
-    const spamFilterR = await query(
+      query(
       `SELECT COUNT(*) FILTER (WHERE has_blocked)::int AS block,
               COUNT(*) FILTER (WHERE NOT has_blocked AND has_pass)::int AS pass
        FROM (
@@ -5527,9 +5481,9 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
          WHERE COALESCE(NULLIF(t.message_content_lms, ''), NULLIF(t.message_content_sms, '')) IS NOT NULL
          GROUP BY t.id
        ) x`,
-    );
+      ),
     // 차단된 문안 샘플 (어떤 문구가 스팸 처리됐는지 — 최근순 12건, 통신사 동봉)
-    const spamSamplesR = await query(
+      query(
       `SELECT msg, carriers FROM (
          SELECT COALESCE(NULLIF(t.message_content_lms,''), NULLIF(t.message_content_sms,'')) AS msg,
                 array_agg(DISTINCT r.carrier) FILTER (WHERE r.result = 'blocked') AS carriers,
@@ -5542,7 +5496,9 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
        ) x
        ORDER BY last_at DESC
        LIMIT 12`,
-    );
+      ),
+
+    ]);
 
     const s = summaryR.rows[0] || {};
     const pref = prefR.rows[0] || {};
@@ -5655,9 +5611,13 @@ router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, 
     );
 
     // 액션 유형 목록 (필터용)
-    const actionsResult = await query(
-      `SELECT DISTINCT action FROM audit_logs ORDER BY action`
-    );
+    // ★ 2026-09-28 한줄로 V2 R070 — 조회마다 audit_logs 전체 DISTINCT 를 돌았다 → 캐시 CT(10분 · 필터 목록이라 늦게 반영돼도 된다)
+    const actionsResult = await swrCache({
+      key: 'admin:audit-log-actions',
+      softTtlSec: 600,
+      hardTtlSec: 3600,
+      compute: async () => ({ rows: (await query(`SELECT DISTINCT action FROM audit_logs ORDER BY action`)).rows }),
+    });
 
     res.json({
       logs: result.rows,

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
+import { parsePageParams } from '../utils/normalize';
 // ★ 메시징 컨트롤타워 — 취소 로직 통합
 import { cancelCampaign, cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { getCompanyScope } from '../utils/permission-helper';
@@ -27,9 +28,8 @@ router.get('/', async (req: Request, res: Response) => {
     //   = utils/scheduled-cleanup-worker.ts 안 1분 cron 영역 통합 (app.ts:startScheduledCleanupWorker).
 
     // ★ D227+ (2026-05-28): 페이지네이션 + COUNT(*) 영역 추가 — 옛 흐름 = 전체 조회 → LIMIT/OFFSET 적용.
-    const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 50;
-    const offset = (page - 1) * limit;
+    // ★ 2026-09-28 한줄로 V2 R336 — 건수 상한(옛: 상한 없음 · 숫자 아님이면 NaN). 보정 = CT parsePageParams
+    const { page, limit, offset } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 50, maxLimit: 200 });
 
     let countSql = `SELECT COUNT(*) FROM campaigns c WHERE c.status IN ('scheduled', 'cancelled')`;
     let sql = `

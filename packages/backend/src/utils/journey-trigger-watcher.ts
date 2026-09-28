@@ -103,6 +103,16 @@ async function pauseJourneyForCompany(journeyId: string, companyId: string, reas
 
 let workerRunning = false;
 
+/**
+ * ★ 2026-09-28 한줄로 V2 R266 — 날짜가 지나야 바뀌는 상태형 트리거(휴면 · 생일 임박 · 포인트 소멸 임박)는 1시간에 1번만 추출한다.
+ *   옛: 5분마다 회사 고객 전체를 진입 안티조인으로 훑었다(하루에 288번 · 결과는 대부분 같다).
+ *   이벤트형(구매·장바구니·예약 등)·가입·등급 변경·상시 세그먼트는 그대로 5분. 여정을 새로 켜면 첫 틱에 바로 돈다(기록 없음).
+ *   추출이 실패하면 기록하지 않는다 — 다음 틱에 다시 시도한다.
+ */
+export const STATE_TRIGGER_EVENTS = new Set(['customer.dormant', 'customer.birthday_approaching', 'customer.points_expiring']);
+export const STATE_TRIGGER_INTERVAL_MS = 60 * 60 * 1000;
+const _stateTriggerRanAt = new Map<string, number>();
+
 export async function runJourneyTriggerWatcher(): Promise<{ matched: number; enqueued: number; skipped: number }> {
   if (workerRunning) {
     return { matched: 0, enqueued: 0, skipped: 0 };
@@ -124,9 +134,17 @@ export async function runJourneyTriggerWatcher(): Promise<{ matched: number; enq
        ORDER BY created_at ASC`
     );
 
+    // 활성 목록에서 빠진(정지·종료) 여정의 기록은 지운다 — 다시 켜면 첫 틱에 바로 돈다(Codex medium)
+    const activeIds = new Set((activeRes.rows as ActiveJourney[]).map((x) => x.id));
+    for (const id of Array.from(_stateTriggerRanAt.keys())) if (!activeIds.has(id)) _stateTriggerRanAt.delete(id);
+
     for (const j of activeRes.rows as ActiveJourney[]) {
+      const isStateTrigger = STATE_TRIGGER_EVENTS.has(j.trigger_event);
+      if (isStateTrigger && Date.now() - (_stateTriggerRanAt.get(j.id) || 0) < STATE_TRIGGER_INTERVAL_MS) continue;
       try {
         const result = await processJourneyTrigger(j);
+        // 대량 진입으로 자동 정지된 회차는 기록하지 않는다 — 고쳐서 다시 켜면 그 날 대상을 바로 다시 찾는다
+        if (isStateTrigger && !result.paused) _stateTriggerRanAt.set(j.id, Date.now());
         summary.matched += result.matched;
         summary.enqueued += result.enqueued;
         summary.skipped += result.skipped;
@@ -160,7 +178,7 @@ export function startJourneyTriggerWatcher(): void {
 // 여정별 trigger 처리
 // ════════════════════════════════════════════════════════════════════
 
-async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: number; enqueued: number; skipped: number }> {
+async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: number; enqueued: number; skipped: number; paused?: boolean }> {
   // ★ Phase 3: 구매·예약·배송(custom_order_shipped)은 이벤트 커서 경로(누락 0 + 정확히 1회 + properties 동봉). 그 외는 공유 컨트롤타워 추출.
   const cursorEvent = resolveCdpCursorEventName(j.trigger_event);
   if (cursorEvent) {
@@ -222,7 +240,7 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
       `대량 진입 감지 (신규 후보 ${Number(cap)}건 초과). 자동 정지, 담당자 확인 필요`,
     );
     console.warn(`[JourneyTrigger] 대량 차단 — journey=${j.id} 신규 후보 > 상한 ${cap} → 정지`);
-    return { matched: ids.length, enqueued: 0, skipped: ids.length };
+    return { matched: ids.length, enqueued: 0, skipped: ids.length, paused: true };
   }
   // ★ 2026-06-22: 장바구니는 진입 시점 cart_add properties를 entry_event_properties로 실어 알림톡 #{상품명}을 채운다.
   if (j.trigger_event === 'cdp.cart_abandon') {

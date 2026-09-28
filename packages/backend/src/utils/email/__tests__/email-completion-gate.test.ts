@@ -46,7 +46,7 @@ describe('S2 이메일 완성 판정', () => {
     expect(src).not.toMatch(/async function isEmailCampaignCompleted/);
     expect(src).toContain("from '../utils/email/email-completion'");
     expect((src.match(/isEmailCampaignCompleted\(auth\.companyId, campaign\.id\)/g) || []).length).toBeGreaterThanOrEqual(4);
-    expect(src).toContain('emailCompletionContextOf(companyId)');
+    expect(src).toContain('emailCompletionContextOf(companyId, (campaigns as any[]).map((c) => String(c.id)))'); // ★0928 R122 목록 id 만
   });
 });
 

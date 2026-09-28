@@ -83,9 +83,12 @@ export async function getInAppDisplayEligibility(companyId: string): Promise<InA
   }));
 
   // 2) SDK 생존 신호 — cdp_events source='sdk' 최근 30일
+  // ★ 2026-09-28 한줄로 V2 R248 — 판정 창(30일) 안에서만 찾는다. 옛: 회사 cdp_events 전 기간에서 MAX 를 구했다.
+  //   창 밖 신호는 판정(webSdkDetected)에 안 쓰이고, 화면은 감지됐을 때(창 안)만 마지막 시각을 보여 준다.
   const sdkRes = await query(
-    `SELECT MAX(occurred_at) AS last FROM cdp_events WHERE company_id = $1::uuid AND source = 'sdk'`,
-    [companyId],
+    `SELECT MAX(occurred_at) AS last FROM cdp_events
+      WHERE company_id = $1::uuid AND source = 'sdk' AND occurred_at >= NOW() - make_interval(days => $2)`,
+    [companyId, SDK_SIGNAL_WINDOW_DAYS],
   );
   const last = sdkRes.rows[0]?.last ? new Date(sdkRes.rows[0].last) : null;
   const webSdkDetected = !!last && Date.now() - last.getTime() < SDK_SIGNAL_WINDOW_DAYS * 24 * 3600 * 1000;

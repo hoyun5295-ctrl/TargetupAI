@@ -11,7 +11,7 @@ import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/t
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSends } from '../utils/customer-send-stats';
 import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts } from '../utils/messageUtils';
-import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT, getSendTypeLabel, getDisplayContents } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, getDisplayContents } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -513,17 +513,10 @@ router.post('/test-send', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ C5: 실패 건 DB 기록 (비동기, 발송 응답에 영향 없음)
+    // ★ C5: 실패 건 기록 — ★ 2026-09-28 한줄로 V2 R312: 옛 코드는 campaign_runs.campaign_id 에 캠페인이 아닌 testBillId 를 넣어
+    //   INSERT 가 매번 실패했다(실패 기록이 한 번도 저장되지 않았다). 테스트 결과는 testBillId 로 발송 결과에서 본다 → 로그만 남긴다.
     if (failedContacts.length > 0) {
-      try {
-        await query(
-          `INSERT INTO campaign_runs (campaign_id, run_number, target_count, sent_count, status, created_at)
-           VALUES ($1, 0, $2, $3, 'failed', NOW())`,
-          [testBillId, managerContacts.length, sentCount]
-        );
-      } catch (logErr) {
-        console.error('[테스트발송] 실패 기록 저장 오류 (발송에는 영향 없음):', logErr);
-      }
+      console.warn(`[테스트발송] 실패 ${failedContacts.length}건 / 대상 ${managerContacts.length}건 company=${companyId} bill=${testBillId}`);
     }
 
     return res.json({
@@ -974,11 +967,15 @@ if (filteredCustomers.length === 0) {
 }
 
 // ★ 2026-07-05 발송 피로도 보호 — 회사 opt-in(fatigue_cap) + 광고 캠페인만. 차감·run 생성 전 제외라 환불 배관 불필요.
+// ★ 2026-09-28 한줄로 V2 m076 후속 — 판정·기록 모두 **나가는 날**(예약이면 예약일 · 아니면 오늘) 기준. 아래 발송 시각과 같은 판정.
+const aiSendDay = (campaign.scheduled_at && new Date(campaign.scheduled_at) > new Date()
+  ? toKoreaTimeStr(new Date(campaign.scheduled_at))
+  : toKoreaTimeStr(new Date())).slice(0, 10);
 let fatigueSkippedCount = 0;
 if (campaign.is_ad) {
   const fatigueCap = await getFatigueCap(companyId);
   if (fatigueCap) {
-    const blockedSet = await getFatigueBlockedSet(companyId, fatigueCap, filteredCustomers.map((c: any) => c.phone));
+    const blockedSet = await getFatigueBlockedSet(companyId, fatigueCap, filteredCustomers.map((c: any) => c.phone), { from: aiSendDay, to: aiSendDay });
     if (blockedSet.size > 0) {
       const beforeFatigue = filteredCustomers.length;
       filteredCustomers = filteredCustomers.filter((c: any) => !blockedSet.has(normalizePhone(c.phone)));
@@ -1271,8 +1268,9 @@ if (aiBrandRows.length > 0) {
 }
 
 // ★ 2026-07-05 발송 피로도 카운터 — 광고성만, 큐 커밋 후 fire-and-forget(발송·응답 무영향)
-if (campaign.is_ad) {
-  void recordFatigueSends(companyId, filteredCustomers.map((c: any) => String(c.phone || '')));
+// ★ 2026-09-28 한줄로 V2 m076 — 적재가 된 때만(다른 경로와 같다) · 나가는 날(예약이면 예약일)로 센다.
+if (campaign.is_ad && aiSentCount > 0) {
+  void recordFatigueSends(companyId, filteredCustomers.map((c: any) => String(c.phone || '')), filteredCustomers.map(() => aiSendDay));
 }
 
 // ★ C1: 부분 실패 시 실패분만 선별적 환불
@@ -1489,6 +1487,10 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       const start = new Date(fromDate as string);
       const end = new Date(toDate as string);
       const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+      // ★ 2026-09-28 한줄로 V2 m130 — 월 순회 상한 24개월(끝 달 기준). 옛 코드는 0001~9999 같은 기간이면 수십만 번
+      //   로그 테이블 확인을 순차로 돌았다(형식 검사는 모양만 본다). 그보다 앞 달의 테스트 로그는 보지 않는다.
+      const floor = new Date(end.getFullYear(), end.getMonth() - 23, 1);
+      if (cur < floor) cur.setTime(floor.getTime());
       while (cur <= end) {
         const ym = `${cur.getFullYear()}${String(cur.getMonth() + 1).padStart(2, '0')}`;
         for (const t of testTables) {
@@ -1513,15 +1515,23 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       } catch { /* 테이블 없으면 스킵 */ }
     }
 
-    const allResults = await smsSelectAll(allTables,
-      'seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id',
-      `app_etc1 = 'test' AND app_etc2 = ?${userFilter}${dateFilter}`,
-      queryParams,
-      'ORDER BY sendreq_time DESC'
-    );
-
-    // 시간순 정렬 (여러 테이블 합산이므로 재정렬)
-    allResults.sort((a: any, b: any) => new Date(b.sendreq_time).getTime() - new Date(a.sendreq_time).getTime());
+    // ★ 2026-09-28 한줄로 V2 m046 — 통계는 SQL 집계로 기간 전체를, 목록은 최근 TEST_LIST_LIMIT건만 읽는다.
+    //   옛: 기간 안 테스트 행 전체(본문 포함)를 건수 제한 없이 읽어 메모리에서 정렬·집계했다.
+    const testWhere = `app_etc1 = 'test' AND app_etc2 = ?${userFilter}${dateFilter}`;
+    const TEST_LIST_LIMIT = 1000;
+    const [agg, allResults] = await Promise.all([
+      smsAggAll(allTables,
+        `COUNT(*) AS total,
+         SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) AS success,
+         SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) AS pending,
+         SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'S' THEN 1 ELSE 0 END) AS ok_sms,
+         SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'M' THEN 1 ELSE 0 END) AS ok_mms,
+         SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'F' THEN 1 ELSE 0 END) AS ok_brand`,
+        testWhere, queryParams),
+      smsSelectPagedAll(allTables,
+        'seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id',
+        testWhere, queryParams, 'sendreq_time DESC, seqno DESC', TEST_LIST_LIMIT, 0),
+    ]);
 
     // 발송자 정보 조회 (관리자용)
     const senderIds = [...new Set(allResults.map((r: any) => r.bill_id).filter(Boolean))];
@@ -1536,12 +1546,15 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       });
     }
 
-    // 통계 계산 (전체 결과 기준)
+    // 통계 계산 (기간 전체 · SQL 집계) — 실패 = 성공도 대기도 아닌 코드(isFail 과 같은 정의)
+    const aggTotal = Number(agg.total) || 0;
+    const aggSuccess = Number(agg.success) || 0;
+    const aggPending = Number(agg.pending) || 0;
     const stats = {
-      total: allResults.length,
-      success: allResults.filter((r: any) => isSuccess(r.status_code)).length,
-      fail: allResults.filter((r: any) => isFail(r.status_code)).length,
-      pending: allResults.filter((r: any) => PENDING_CODES.includes(r.status_code)).length,
+      total: aggTotal,
+      success: aggSuccess,
+      fail: Math.max(0, aggTotal - aggSuccess - aggPending),
+      pending: aggPending,
       cost: 0,
     };
 
@@ -1551,12 +1564,12 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     const costSms = costRow.sms;
     const costLms = costRow.lms;
     const costMms = costRow.mms;
-    allResults.forEach((r: any) => {
-      if (isSuccess(r.status_code)) {
-        // ★ 2026-09-26 S1-H06 브랜드 테스트 = 브랜드(친구) 단가(청구 유형 테스트 브랜드와 같은 값)
-        stats.cost += r.msg_type === 'F' ? costRow.brand : r.msg_type === 'S' ? costSms : r.msg_type === 'M' ? costMms : costLms;
-      }
-    });
+    // ★ 2026-09-26 S1-H06 브랜드 테스트 = 브랜드(친구) 단가(청구 유형 테스트 브랜드와 같은 값) · 그 밖(L 등) = LMS 단가(종전과 같다)
+    const okSms = Number(agg.ok_sms) || 0;
+    const okMms = Number(agg.ok_mms) || 0;
+    const okBrand = Number(agg.ok_brand) || 0;
+    const okOther = Math.max(0, aggSuccess - okSms - okMms - okBrand);
+    stats.cost = okBrand * costRow.brand + okSms * costSms + okMms * costMms + okOther * costLms;
 
     // 리스트 포맷팅
     const list = allResults.map((r: any) => ({
@@ -1670,6 +1683,9 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       managerStats: stats,
       spamFilterStats,
       list,
+      // ★ 2026-09-28 m046 — 목록은 최근 TEST_LIST_LIMIT건까지(건수·비용은 managerStats 가 기간 전체를 센다)
+      listLimit: TEST_LIST_LIMIT,
+      listCapped: aggTotal > list.length,
       spamFilterList,
     });
   } catch (error) {
@@ -2235,13 +2251,22 @@ router.post('/direct-send', async (req: Request, res: Response) => {
 
     // ★ 2026-07-05 발송 피로도 보호 — 고객DB 타겟 행(r.id 보유)만 게이트.
     //   수동 입력/파일 행(id 없음) = 사용자 명시 행동이라 제외하지 않음 (Harold 확정 정책).
+    // ★ 2026-09-28 한줄로 V2 m076 후속(Codex 1R medium) — 발송 기준 시각은 요청에 **한 번**만 만든다.
+    //   피로도 판정 · 분할 적재 · 피로도 기록이 같은 값을 쓴다. 옛: 판정 뒤 조회를 거쳐 기준을 다시 만들어,
+    //   분할 마지막 회차가 발송 창(21시)을 넘어 다음 날로 밀리면 판정은 오늘까지만 보고 적재·기록은 내일이 됐다.
+    const directSendBase = scheduled && scheduledAt ? new Date(scheduledAt) : new Date();
     let directFatigueSkipped = 0;
     if (adEnabled === true) {
       const directFatigueCap = await getFatigueCap(companyId);
       if (directFatigueCap) {
         const dbRows = finalRecipients.filter((r: any) => r.id);
         if (dbRows.length > 0) {
-          const blockedSet = await getFatigueBlockedSet(companyId, directFatigueCap, dbRows.map((r: any) => String(r.phone || '')));
+          // ★ 2026-09-28 한줄로 V2 m076 후속 — 판정 창 = 나가는 첫날 ~ 마지막 날(예약·분할). 기록(recordFatigueSends)과 같은 날 계산.
+          const directFatigueSpan = {
+            from: toKoreaTimeStr(split ? splitSendTime(directSendBase, 0, split) : directSendBase).slice(0, 10),
+            to: toKoreaTimeStr(split ? splitSendTime(directSendBase, finalRecipients.length - 1, split) : directSendBase).slice(0, 10),
+          };
+          const blockedSet = await getFatigueBlockedSet(companyId, directFatigueCap, dbRows.map((r: any) => String(r.phone || '')), directFatigueSpan);
           if (blockedSet.size > 0) {
             const beforeFatigue = finalRecipients.length;
             finalRecipients = finalRecipients.filter((r: any) => !r.id || !blockedSet.has(normalizePhone(String(r.phone || ''))));
@@ -2424,7 +2449,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     // ★ 2026-09-28 분할 기준 시각은 요청에 한 번(예약이면 예약 시각) · 끝나는 날 한도(CT) — 캠페인 생성·차감 전에 막는다.
-    const splitBase = scheduled && scheduledAt ? new Date(scheduledAt) : new Date();
+    const splitBase = directSendBase;
     if (split) {
       const spanErr = splitSpanError(splitBase, filteredRecipients.length, split);
       if (spanErr) return res.status(400).json({ success: false, code: 'SPLIT_SPAN_TOO_LONG', error: spanErr });
@@ -3023,8 +3048,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     });
 
     // ★ 2026-07-05 발송 피로도 카운터 — 광고성만(수동 입력 수신자 포함: 실제 수신 피로는 동일), fire-and-forget
-    if (finalIsAd) {
-      void recordFatigueSends(companyId, filteredRecipients.map((r: any) => String(r.phone || '')));
+    // ★ 2026-09-28 한줄로 V2 m076 — 적재가 된 때만 · 수신자마다 나가는 날(분할·예약 시각의 날짜)로 센다.
+    if (finalIsAd && directTotalSent > 0) {
+      void recordFatigueSends(
+        companyId,
+        filteredRecipients.map((r: any) => String(r.phone || '')),
+        filteredRecipients.map((_r: any, i: number) => (split
+          ? toKoreaTimeStr(splitSendTime(splitBase, i, split))
+          : toKoreaTimeStr(directSendBase)).slice(0, 10)),
+      );
     }
 
     // ★ AI 학습 데이터 적재 — 직접발송 (비동기, 실패해도 발송에 영향 없음)

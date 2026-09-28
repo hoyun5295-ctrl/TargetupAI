@@ -25,7 +25,7 @@ import { hashSecret, verifySecret } from '../utils/secret-hash';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 import { resolveBuildTierFromOsInfo } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리 P1: 명령 큐 정책 CT — ACK 반영·At-Least-Once 전달·버전 분기(구버전=기존 동작 불변)
-import { isAgentVersionGte, ACK_MIN_AGENT_VERSION, applyCommandAcks, markCommandsDelivered } from '../utils/agent-protocol';
+import { isAgentVersionGte, ACK_MIN_AGENT_VERSION, applyCommandAcks, markCommandsDelivered, isReportedWorthWriting } from '../utils/agent-protocol';
 // ★ 2026-07-03: 구매 배치 적재 직후 고객 구매요약 컬럼 재계산 (총구매액/최근구매 '-' 문제 근본)
 import { updateCustomerPurchaseAggregates } from '../utils/customer-purchase-aggregates';
 // ★ 2026-07-03: 필드정의 변경 시 활성 필드 캐시 무효화 (고객DB 현황 성능 캐시)
@@ -531,8 +531,11 @@ router.post('/heartbeat', async (req: SyncAuthRequest, res: Response) => {
       const delivery = markCommandsDelivered(queue, results, supportsAck, nowIso);
       deliverCommands = delivery.deliver;
       remainingQueue = delivery.queue;
+      // ★ 2026-09-28 한줄로 V2 R345·R357 — 에이전트가 매번 같은 reported를 보내면 매번 config 전체(명령 결과 포함)를 다시 썼다.
+      //   내용이 바뀌었을 때만 쓰고, 같으면 보고 시각만 1시간에 한 번 새로 쓴다(관리 화면 "보고 시각"이 너무 낡지 않게).
+      const reportedChanged = !!reported && isReportedWorthWriting(currentConfig.reported, reported, Date.parse(nowIso));
       const configChanged =
-        acks.length > 0 || delivery.deliver.length > 0 || delivery.expiredCount > 0 || !!reported;
+        acks.length > 0 || delivery.deliver.length > 0 || delivery.expiredCount > 0 || reportedChanged;
       if (!configChanged) break;
       const newConfig = {
         ...currentConfig,
@@ -803,6 +806,9 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     const upsertBuilder = createCustomerUpsertBuilder({
       source: 'sync',
       includeUploadedBy: false,
+      // ★ 2026-09-28 한줄로 V2 R206 — 바뀐 행만 다시 쓴다(full 싱크마다 전 행 재작성 금지). 이 경로는 반환 행을 쓰지 않는다
+      //   (매장 연결 = 청크의 폰 기준 · 건수 = 처리한 행 수).
+      skipUnchanged: true,
     });
     const CHUNK_SIZE = 500;
 
@@ -810,8 +816,9 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       const chunk = validRows.slice(i, i + CHUNK_SIZE);
       try {
         const { sql, values } = upsertBuilder.buildBatch(companyId, chunk);
-        const result = await query(sql, values);
-        upsertedCount += result.rowCount || chunk.length;
+        await query(sql, values);
+        // 처리한 행 수(바뀌지 않아 다시 쓰지 않은 행 포함 · 종전과 같은 뜻 — R206 뒤 rowCount 는 바뀐 행만 센다)
+        upsertedCount += chunk.length;
 
         // customer_stores 벌크 처리 (sync 경로 전용 — upload.ts는 별도 매핑 로직 사용)
         // ★ 2026-09-02 chunk 배열이 아니라 그 폰들의 매장 전량을 쓴다 — 폰 dedupe로 두 번째 행을
@@ -1564,21 +1571,9 @@ router.post('/field-definitions', async (req: SyncAuthRequest, res: Response) =>
       });
     }
 
-    // ===== M-3: customer_schema 자동 갱신 (upload.ts 동일 로직) =====
-    try {
-      await query(`
-        UPDATE companies SET customer_schema = (
-          SELECT jsonb_build_object(
-            'genders', (SELECT array_agg(DISTINCT gender) FROM customers WHERE company_id = $1 AND gender IS NOT NULL),
-            'grades', (SELECT array_agg(DISTINCT grade) FROM customers WHERE company_id = $1 AND grade IS NOT NULL),
-            'custom_field_keys', (SELECT array_agg(DISTINCT k) FROM customers, jsonb_object_keys(custom_fields) k WHERE company_id = $1),
-            'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customer_stores WHERE company_id = $1)
-          )
-        ) WHERE id = $1
-      `, [companyId]);
-    } catch (schemaErr) {
-      console.error('[Sync] customer_schema 갱신 실패:', schemaErr);
-    }
+    // ★ 2026-09-28 한줄로 V2 R350 — customer_schema 자동 갱신 제거(싱크 배치마다 돌았다). 이 UPDATE 는 고객 표 전체를 4번 훑어
+    //   genders·grades·custom_field_keys·store_codes 로 customer_schema 를 통째로 덮었는데, 그 네 키를 읽는 곳이 없다
+    //   (변수 목록은 field_mappings·available_vars 를 읽고, 화면 필터 목록은 filter-options 가 따로 센다).
 
     return res.json({
       success: true,

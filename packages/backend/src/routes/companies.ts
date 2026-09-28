@@ -30,6 +30,9 @@ import {
 // ★ 2026-09-23 RCS 템플릿 엑셀 다운로드 — 행 빌더 CT + 서식 CT
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { buildRcsTemplateSheet, templateExportFilename } from '../utils/template-export';
+// ★ 2026-09-28 한줄로 V2 R106 — 대시보드 카드 집계 캐시(고객 통계와 같은 SWR 정책)
+import { swrCache } from '../utils/swr-cache';
+import { CACHE_TTL } from '../config/defaults';
 
 const router = Router();
 
@@ -125,7 +128,7 @@ router.use(authenticate);
 
 // ⚠️ /settings 라우트를 /:id 보다 먼저 정의해야 함!
 // 회사 설정 조회
-router.get('/settings', authenticate, async (req: Request, res: Response) => {
+router.get('/settings', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
@@ -203,7 +206,7 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
 });
 
 // 회사 설정 수정
-router.put('/settings', authenticate, async (req: Request, res: Response) => {
+router.put('/settings', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
@@ -1365,7 +1368,15 @@ router.get('/dashboard-cards', async (req: Request, res: Response) => {
     }
 
     // 집계 실행 — 사용자 격리 정보 전달
-    const cards = await aggregateDashboardCards(companyId, cardIds, userId, userType);
+    // ★ 2026-09-28 한줄로 V2 R106 — 진입마다 고객 전수 집계(FILTER 30여 개)를 돌았다 → 캐시 CT(고객 통계와 같은 정책:
+    //   60초 안은 그대로 · 10분 안은 직전 값을 주고 뒤에서 1회 다시 계산). 키 = 회사 · 사용자 범위(담당자는 본인 매장) · 카드 목록.
+    const cardScope = userType === 'company_user' && userId ? `u:${userId}` : 'all';
+    const cards = await swrCache({
+      key: `dashboard-cards:${companyId}:${cardScope}:${cardIds.join(',')}`,
+      softTtlSec: CACHE_TTL.customerStats,
+      hardTtlSec: 600,
+      compute: () => aggregateDashboardCards(companyId, cardIds, userId, userType),
+    });
 
     res.json({
       configured: true,

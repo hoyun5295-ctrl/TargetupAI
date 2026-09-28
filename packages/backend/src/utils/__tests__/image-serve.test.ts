@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import sharp from 'sharp';
-import { getServePath, parseFitOption, SERVE_MAX_WIDTH, SERVE_JPEG_QUALITY, isOptimizableImage } from '../image-serve';
+import { getServePath, parseFitOption, SERVE_MAX_WIDTH, SERVE_JPEG_QUALITY, isOptimizableImage, dropServeVariants } from '../image-serve';
 import { PRODUCT_GRID_ASPECT } from '../image-fit-spec';
 
 let dir = '';
@@ -194,5 +194,50 @@ describe('서빙 이미지 최적화 — 품질 기준과 폴백', () => {
     const meta = await sharp(served).metadata();
     expect(meta.width).toBe(SERVE_MAX_WIDTH);
     expect(meta.channels).toBe(4);                                  // 알파 채널 유지
+  });
+});
+
+describe('동시 요청 — 같은 변환은 한 번만 (★ 2026-09-28 한줄로 V2 R240)', () => {
+  it('같은 원본·같은 맞춤을 동시에 요청하면 진행 중인 한 작업을 함께 기다린다', async () => {
+    const src = await makeJpeg('inflight.jpg', 2200, 1600);
+    const a = getServePath(src);
+    const b = getServePath(src);
+    expect(b).toBe(a);                                              // 같은 작업(두 번째 변환 없음)
+    expect(await a).toBe(await b);
+    // 끝난 뒤에는 다시 들어온 요청이 새 작업(캐시 확인)으로 간다 — 묶음이 남지 않는다
+    const c = getServePath(src);
+    expect(c).not.toBe(a);
+    expect(await c).toBe(await a);
+  });
+
+  it('맞춤이 다르면 따로 만든다 (다른 변환본이다)', async () => {
+    const src = await makeJpeg('inflight-fit.jpg', 2200, 1600);
+    const plain = getServePath(src);
+    const fitted = getServePath(src, { aspect: PRODUCT_GRID_ASPECT, mode: 'pad' });
+    expect(fitted).not.toBe(plain);
+    expect(await fitted).not.toBe(await plain);
+  });
+});
+
+describe('원본 삭제 = 변환본도 삭제 (★ 2026-09-28 한줄로 V2 R412)', () => {
+  it('원본을 지울 때 변형별 변환본을 모두 지운다 · 같은 폴더의 다른 파일 변환본은 남긴다', async () => {
+    const src = await makeJpeg('drop.jpg', 2200, 1600);
+    const other = await makeJpeg('keep.jpg', 2200, 1600);
+    const plain = await getServePath(src);
+    const fitted = await getServePath(src, { aspect: PRODUCT_GRID_ASPECT, mode: 'pad' });
+    const otherPlain = await getServePath(other);
+    expect(fs.existsSync(plain) && fs.existsSync(fitted)).toBe(true);
+    fs.unlinkSync(src);
+    dropServeVariants(src);
+    expect(fs.existsSync(plain)).toBe(false);
+    expect(fs.existsSync(fitted)).toBe(false);
+    expect(fs.existsSync(otherPlain)).toBe(true);
+  });
+
+  it('원본 삭제 경로 두 곳이 변환본 정리를 부른다 (DM 이미지 삭제 · 에셋 삭제)', () => {
+    const dm = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'dm.ts'), 'utf8');
+    const assets = fs.readFileSync(path.join(__dirname, '..', 'assets.ts'), 'utf8');
+    expect(dm).toMatch(/if \(fs\.existsSync\(filePath\)\) fs\.unlinkSync\(filePath\);\s*dropServeVariants\(filePath\);/);
+    expect(assets).toMatch(/dropServeVariants\(filepath\);/);
   });
 });

@@ -541,9 +541,12 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
        AND cr.status IN ('sending', 'scheduled', 'completed')
        AND (c.scheduled_at IS NULL OR c.scheduled_at <= NOW())
        AND COALESCE(c.scheduled_at, c.sent_at, cr.created_at) >= NOW() - INTERVAL '7 days'
+       -- ★ 2026-09-28 한줄로 V2 R175 — 끝났는지는 적재 수(sent_count)와 결과 합으로 본다. 대상 수(target_count)로 보면
+       --   수신거부·중복·미등록 회신번호로 빠진 수신자 몫이 영영 채워지지 않아 7일 동안 5분마다 다시 동기화했다.
+       --   적재 수가 없는 옛 세대(NULL·0)만 대상 수로 본다.
        AND (cr.target_count IS NULL
             OR cr.success_count IS NULL
-            OR cr.target_count > COALESCE(cr.success_count, 0) + COALESCE(cr.fail_count, 0))`,
+            OR COALESCE(NULLIF(cr.sent_count, 0), cr.target_count) > COALESCE(cr.success_count, 0) + COALESCE(cr.fail_count, 0))`,
     [companyId]
   );
   console.log(`[sync-results] AI캠페인 ${runsResult.rows.length}건 대상`);
@@ -695,9 +698,10 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
        -- ★ 2026-08-04 대상 상태는 CT(campaign-sweep-scope)가 소유 — 환불 sweeper와 같은 집합.
        --   'failed' 합류로 예외 종결 캠페인의 결과 카운트·환불도 여기서 수렴한다.
        AND (status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL}) OR (status = 'scheduled' AND scheduled_at <= NOW()))
+       -- ★ 2026-09-28 한줄로 V2 R175 — 위 AI 실행과 같은 기준(적재 수 · 없으면 대상 수)
        AND (target_count IS NULL
             OR success_count IS NULL
-            OR target_count > COALESCE(success_count, 0) + COALESCE(fail_count, 0))
+            OR COALESCE(NULLIF(sent_count, 0), target_count) > COALESCE(success_count, 0) + COALESCE(fail_count, 0))
        AND COALESCE(scheduled_at, sent_at, created_at) >= NOW() - INTERVAL '7 days'`,
     [companyId]
   );

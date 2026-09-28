@@ -75,17 +75,35 @@ export const mysqlPool = mysql.createPool({
 });
 
 // MySQL 연결 테스트 + TZ 확인 (서버 레벨 KST 영구 적용됨 — timezone.cnf)
-if (!IS_TEST) mysqlPool.getConnection()
-  .then(async conn => {
-    console.log('✅ MySQL(QTmsg) 연결됨');
-    const [rows] = await conn.execute("SELECT NOW() as mysql_now, @@global.time_zone as tz");
-    const row = (rows as any[])[0];
-    if (row) console.log(`[MySQL TZ] NOW()=${row.mysql_now}, global_tz=${row.tz}`);
-    conn.release();
-  })
-  .catch(err => {
-    console.error('❌ MySQL 연결 실패:', err.message);
-  });
+// ★ 2026-09-28 한줄로 V2 A-08: 위 PostgreSQL 검사(0828)와 같게 재시도한다. 1회 시도라 기동 순간 첫 연결이
+//   ETIMEDOUT이면 매 기동 ❌가 찍혔다(09-25부터 모든 기동 · 앱은 지연 연결로 정상). 정상이 오류로 남으면 진짜 장애가 묻힌다.
+void (async () => {
+  if (IS_TEST) return;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const conn = await mysqlPool.getConnection();
+      try {
+        console.log('✅ MySQL(QTmsg) 연결됨');
+        const [rows] = await conn.execute("SELECT NOW() as mysql_now, @@global.time_zone as tz");
+        const row = (rows as any[])[0];
+        if (row) console.log(`[MySQL TZ] NOW()=${row.mysql_now}, global_tz=${row.tz}`);
+      } finally {
+        conn.release();
+      }
+      return;
+    } catch (err: any) {
+      if (attempt === 5) {
+        console.error(`❌ MySQL 연결 실패 (${attempt}회 재시도 후):`, err?.message);
+        return;
+      }
+      // ⛔ 줄표 금지(위 PostgreSQL 검사 주석과 같은 이유 — 변수로 뺀 문자열은 줄표 불변식 대상)
+      const line = `[MySQL] 연결 재시도 ${attempt}/5: ${err?.message}`;
+      if (attempt === 1) console.log(line);
+      else console.warn(line);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+})();
 
 // MySQL 쿼리 헬퍼 (서버 레벨 KST이므로 세션 SET 불필요)
 // ★ conn.query() 사용: conn.execute()(prepared statement)는 UNION ALL + 다수 파라미터 조합에서

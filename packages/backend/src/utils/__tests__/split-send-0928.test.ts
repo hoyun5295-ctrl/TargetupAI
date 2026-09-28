@@ -146,7 +146,7 @@ describe('서버 배선 — 인라인 계산 0 · 모든 입구가 같은 CT', (
     const body = s.slice(s.indexOf("router.post('/direct-send', async"));
     expect(body.indexOf('parseSplitSetting(splitEnabled, splitCount, splitIntervalMinutes)')).toBeGreaterThan(-1);
     expect(body).toContain("code: 'SPLIT_SPAN_TOO_LONG'");
-    expect((body.match(/splitSendTime\(splitBase, i, split\)/g) || []).length).toBe(2); // 문자 1 · 브랜드 1
+    expect((body.match(/splitSendTime\(splitBase, i, split\)/g) || []).length).toBe(3); // 문자 1 · 브랜드 1 · 피로도 발송일 1(★0928 차수4 m076)
   });
 
   it('대량 커밋·자율 공용 길목(createDirectSendCampaign): 검사 + 한도 · 저장 설정에 간격', () => {

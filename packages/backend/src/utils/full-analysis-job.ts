@@ -1,7 +1,11 @@
 // 풀분석 job 상태 컨트롤타워 — full_analysis_jobs 테이블 CRUD.
 // 순수 단계 로직은 full-analysis-steps.ts(DB-free)에서 import.
+import * as path from 'path';
 import { query } from '../config/database';
 import { ANALYSIS_STEPS, stepLabel } from './full-analysis-steps';
+
+/** 풀분석 PDF 보관 폴더 — 만드는 쪽(runner)과 보관 기한 정리(retention-sweeper)가 같은 값을 쓴다 */
+export const FULL_ANALYSIS_PDF_DIR = path.join(__dirname, '../../full-analysis-pdfs');
 
 export interface AnalysisJob {
   id: string;
@@ -60,4 +64,24 @@ export async function failJob(id: string, err: string): Promise<void> {
     `UPDATE full_analysis_jobs SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`,
     [id, String(err).slice(0, 500)],
   );
+}
+
+/**
+ * ★ 2026-09-28 한줄로 V2 R294 — 기동 때 주인 없는 작업을 실패로 닫는다.
+ * 풀분석은 이 프로세스 안(setImmediate)에서만 돈다. 재시작(배포·OOM)으로 끊긴 작업은 'queued'·'running'으로 남아
+ * 화면이 영영 진행 중으로 보였다. 기동 순간에는 이 프로세스가 돌리는 작업이 없으므로(fork 1개) 남은 것은 전부 끊긴 것이다.
+ * 차감은 성공 뒤에만 하므로 돈 영향은 없다. 표가 없으면(42P01) 조용히 건너뛴다.
+ */
+export async function failOrphanedJobsOnBoot(): Promise<number> {
+  try {
+    const r = await query(
+      `UPDATE full_analysis_jobs SET status = 'failed', error = $1, updated_at = now()
+        WHERE status IN ('queued', 'running')`,
+      ['서버가 다시 시작되어 분석이 중단됐어요. 다시 시작해 주세요.'],
+    );
+    return r.rowCount ?? 0;
+  } catch (err: any) {
+    console.warn('[full-analysis] 기동 정리 건너뜀:', err?.message);
+    return 0;
+  }
 }

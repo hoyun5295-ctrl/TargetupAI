@@ -368,7 +368,12 @@ export default function PerformancePage() {
       const res = await fetch(`/api/ai/operator/performance/full-analysis/download/${jobId}`, {
         headers: { Authorization: `Bearer ${token()}` },
       });
-      if (!res.ok) { toast.error('보고서 다운로드에 실패했습니다.'); return; }
+      if (!res.ok) {
+        // ★ 2026-09-28 서버 안내를 그대로(보관 기간이 지나 지운 파일 = 다시 실행 안내)
+        const body = await res.json().catch(() => null);
+        toast.error(body?.error || '보고서 다운로드에 실패했습니다.');
+        return;
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

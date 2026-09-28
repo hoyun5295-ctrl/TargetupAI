@@ -185,3 +185,31 @@ export function markCommandsDelivered(
   nextResults = nextResults.slice(-COMMAND_RESULTS_MAX);
   return { deliver, queue: keep, results: nextResults, expiredCount };
 }
+
+/** 키 순서와 무관한 JSON(jsonb는 키 순서를 바꿔 저장한다) */
+function stableJson(v: any): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableJson(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v === undefined ? null : v);
+}
+
+/** reported 가 내용이 같을 때 보고 시각만 다시 쓰는 간격 */
+export const REPORTED_REFRESH_MS = 60 * 60 * 1000;
+
+/**
+ * ★ 2026-09-28 한줄로 V2 R345·R357 — heartbeat 의 reported 를 config 에 다시 쓸 가치가 있는가(순수).
+ * 보고 시각(reportedAt)을 뺀 내용이 다르면 쓴다. 같으면 저장된 보고 시각이 REPORTED_REFRESH_MS 넘었을 때만 쓴다.
+ * 전에는 reported 가 오기만 하면 config 전체(명령 결과 포함)를 매 heartbeat 다시 썼다.
+ */
+export function isReportedWorthWriting(stored: any, next: any, nowMs: number): boolean {
+  if (!stored || typeof stored !== 'object') return true;
+  const strip = (o: any) => {
+    const { reportedAt: _at, ...rest } = o || {};
+    return rest;
+  };
+  if (stableJson(strip(stored)) !== stableJson(strip(next))) return true;
+  const at = Date.parse(String(stored.reportedAt || ''));
+  return !Number.isFinite(at) || nowMs - at >= REPORTED_REFRESH_MS;
+}

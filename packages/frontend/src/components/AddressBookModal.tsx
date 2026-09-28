@@ -35,6 +35,29 @@ export default function AddressBookModal({
   const [addressViewGroup, setAddressViewGroup] = useState<string | null>(null);
   const [addressViewContacts, setAddressViewContacts] = useState<any[]>([]);
   const [addressViewSearch, setAddressViewSearch] = useState('');
+  // ★ 2026-09-28 R060 — 조회 = 서버 검색 + 상위 10건 + 전체 건수(그룹 전체를 받지 않는다)
+  const [addressViewTotal, setAddressViewTotal] = useState(0);
+  const addressViewTargetRef = React.useRef<AddressGroup | null>(null);
+  const addressViewSeqRef = React.useRef(0);
+  const loadAddressView = async (g: AddressGroup, q: string) => {
+    const seq = ++addressViewSeqRef.current;
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/address-books/${encodeURIComponent(g.group_name)}?${ownerParam(g)}&limit=10&q=${encodeURIComponent(q)}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (seq !== addressViewSeqRef.current || !data.success) return false;
+    setAddressViewContacts(data.contacts || []);
+    setAddressViewTotal(Number(data.total) || 0);
+    return true;
+  };
+  React.useEffect(() => {
+    const g = addressViewTargetRef.current;
+    if (!addressViewGroup || !g) return;
+    const t = setTimeout(() => { void loadAddressView(g, addressViewSearch); }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addressViewSearch]);
   const [addressPage, setAddressPage] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
@@ -647,14 +670,9 @@ export default function AddressBookModal({
                               setAddressViewContacts([]);
                               setAddressViewSearch('');
                             } else {
-                              const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}?${ownerParam(group)}`, {
-                                headers: { Authorization: `Bearer ${token}` }
-                              });
-                              const data = await res.json();
-                              if (data.success) {
+                              addressViewTargetRef.current = group;
+                              if (await loadAddressView(group, '')) {
                                 setAddressViewGroup(groupKey(group));
-                                setAddressViewContacts(data.contacts || []);
                                 setAddressViewSearch('');
                               }
                             }
@@ -764,13 +782,6 @@ export default function AddressBookModal({
                             </thead>
                             <tbody>
                               {addressViewContacts
-                                .filter(c => !addressViewSearch || 
-                                  c.phone?.includes(addressViewSearch) || 
-                                  c.name?.includes(addressViewSearch) ||
-                                  c.extra1?.includes(addressViewSearch) ||
-                                  c.extra2?.includes(addressViewSearch) ||
-                                  c.extra3?.includes(addressViewSearch))
-                                .slice(0, 10)
                                 .map((c, i) => (
                                   <tr key={i} className="border-t hover:bg-gray-50">
                                     <td className="px-2 py-1">{c.phone}</td>
@@ -782,11 +793,9 @@ export default function AddressBookModal({
                                 ))}
                             </tbody>
                           </table>
-                          {addressViewContacts.filter(c => !addressViewSearch || 
-                            c.phone?.includes(addressViewSearch) || 
-                            c.name?.includes(addressViewSearch)).length > 10 && (
+                          {addressViewTotal > addressViewContacts.length && (
                             <div className="text-center text-xs text-gray-400 py-2">
-                              상위 10건만 표시 (전체 {addressViewContacts.filter(c => !addressViewSearch || c.phone?.includes(addressViewSearch) || c.name?.includes(addressViewSearch)).length}건)
+                              상위 {addressViewContacts.length}건만 표시 (전체 {addressViewTotal.toLocaleString()}건)
                             </div>
                           )}
                         </div>

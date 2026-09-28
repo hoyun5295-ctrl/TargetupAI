@@ -62,16 +62,19 @@ async function sheetOf(res: Response): Promise<ExcelJS.Worksheet> {
 
 describe('GET /api/alimtalk/templates/export', () => {
   it('회사 범위로 조회해 엑셀을 돌려준다', async () => {
-    q.mockResolvedValue({
-      rows: [{ template_name: '수강신청 안내', template_code: 'T0001', status: 'APR', message_type: 'BA', emphasize_type: 'NONE', content: '본문' }],
-    });
+    // ★ 2026-09-28 한줄로 V2 R087 — 조회 칸 목록은 CT(kakao-template-columns)가 information_schema 에서 읽는다(증빙 바이너리 제외)
+    const columns = ['template_name', 'template_code', 'status', 'message_type', 'emphasize_type', 'content', 'inspection_evidence_data'];
+    q.mockImplementation(async (sql: string) => (/information_schema\.columns/.test(sql)
+      ? { rows: columns.map((column_name) => ({ column_name })) }
+      : { rows: [{ template_name: '수강신청 안내', template_code: 'T0001', status: 'APR', message_type: 'BA', emphasize_type: 'NONE', content: '본문' }] }));
     const res = await fetch(`${base}/alimtalk/templates/export`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('spreadsheetml');
     expect(res.headers.get('content-disposition')).toMatch(dispositionOf('알림톡템플릿'));
-    expect(q).toHaveBeenCalledTimes(1);
-    const [sql, params] = q.mock.calls[0];
-    expect(sql).toMatch(/FROM kakao_templates t/);
+    const tplCalls = q.mock.calls.filter(([s]) => /FROM kakao_templates t/.test(String(s)));
+    expect(tplCalls).toHaveLength(1);
+    const [sql, params] = tplCalls[0];
+    expect(sql).not.toMatch(/inspection_evidence_data/);
     expect(params).toEqual(['c-1']);
     const ws = await sheetOf(res);
     expect(ws.getCell(5, 1).value).toBe('수강신청 안내');

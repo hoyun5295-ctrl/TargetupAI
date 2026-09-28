@@ -8,6 +8,7 @@
  */
 
 import { query } from '../config/database';
+import { normalizePhone } from './normalize-phone';
 
 // ============================================================
 // 수신거부 필터 SQL 생성
@@ -265,13 +266,18 @@ export async function isUnsubscribed(userId: string, phone: string): Promise<boo
  * @returns 수신거부된 전화번호 배열
  */
 export async function getUnsubscribedPhones(userId: string, phones: string[]): Promise<string[]> {
-  if (!phones || phones.length === 0) return [];
+  // ★ 2026-09-28 한줄로 V2 R171 — 양쪽을 숫자만 남겨 비교한다(normalizePhone 과 같은 규칙 = 비숫자 제거).
+  //   저장된 번호에 하이픈이 섞여 있어도 놓치지 않는다(놓치면 수신거부자에게 나간다). 돌려주는 값 = 숫자만 남긴 번호.
+  //   옛 소비처(브랜드 발송)는 계정 수신거부 전량을 받아 앱에서 걸렀다 → 받는 번호만 DB에서 찾는다.
+  const normalized = Array.from(new Set((phones || []).map((p) => normalizePhone(p)).filter(Boolean)));
+  if (normalized.length === 0) return [];
 
   const result = await query(
-    'SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)',
-    [userId, phones]
+    `SELECT DISTINCT regexp_replace(phone, '\\D', '', 'g') AS phone FROM unsubscribes
+      WHERE user_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = ANY($2::text[])`,
+    [userId, normalized]
   );
-  return result.rows.map((r: any) => r.phone);
+  return result.rows.map((r: any) => String(r.phone));
 }
 
 // ============================================================
@@ -467,21 +473,22 @@ export async function getUserUnsubscribes(userId: string, options: {
     params
   );
 
+  // ★ 2026-09-28 한줄로 V2 R142 — 번호별 최신 1건(DISTINCT ON) 뒤 정렬·페이지를 SQL에서 한다.
+  //   옛: 대상 전체를 받아 JS에서 created_at 정렬·slice로 한 쪽(50건)을 잘랐다(큰 회사면 수만 건 전송). 결과는 같다.
+  const pageParams = [...params, limit, offset];
   const dataResult = await query(
-    `SELECT DISTINCT ON (phone) id, phone, source, created_at
-     FROM unsubscribes ${whereClause}
-     ORDER BY phone, created_at DESC`,
-    params
+    `SELECT id, phone, source, created_at FROM (
+       SELECT DISTINCT ON (phone) id, phone, source, created_at
+         FROM unsubscribes ${whereClause}
+        ORDER BY phone, created_at DESC
+     ) latest
+     ORDER BY created_at DESC
+     LIMIT $${pageParams.length - 1} OFFSET $${pageParams.length}`,
+    pageParams
   );
-
-  // phone 기준 중복 제거 후 created_at DESC 정렬 + 페이지네이션
-  const sorted = dataResult.rows.sort((a: any, b: any) =>
-    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
-  const paged = sorted.slice(offset, offset + limit);
 
   return {
-    data: paged,
+    data: dataResult.rows,
     total: parseInt(countResult.rows[0].count, 10),
   };
 }

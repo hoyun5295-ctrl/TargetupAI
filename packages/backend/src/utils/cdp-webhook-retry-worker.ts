@@ -13,6 +13,7 @@
  */
 
 import { query } from '../config/database';
+import { LOG_RETENTION_DAYS } from '../config/defaults';
 import { extractWebhookResource } from './cdp-webhook-delivery';
 import { getProvider } from './provider-registry';
 
@@ -85,15 +86,18 @@ async function runHousekeeping(): Promise<void> {
     `DELETE FROM cdp_webhook_deliveries
      WHERE webhook_event = 'oauth_state' AND created_at < NOW() - INTERVAL '1 hour'`
   );
-  // ★ 2026-09-27 한줄로 V2 R187 — 처리 끝난(processed·duplicate) 기록은 180일 뒤 지운다(한 번에 1000건).
+  // ★ 2026-09-27 한줄로 V2 R187 — 처리 끝난(processed·duplicate) 기록은 보관 기한 뒤 지운다(한 번에 1000건).
   //   옛: 지우지 않아 5분마다 훑는 이 표가 계속 커졌다. 실패 기록(재처리 대상·감사)은 남긴다.
+  // ★ 2026-09-28 한줄로 V2(Harold 지적) — 180일 → LOG_RETENTION_DAYS(13개월). 외부 몰 수신 기록은 API 로그라
+  //   전송자격인증 4.2 "1년 이상 보관" 대상이다(180일이면 요건 위반). payload 30일 비움(아래)은 개인정보 최소화라 그대로.
   await query(
     `DELETE FROM cdp_webhook_deliveries
      WHERE id IN (
        SELECT id FROM cdp_webhook_deliveries
-       WHERE status IN ('processed', 'duplicate') AND created_at < NOW() - INTERVAL '180 days'
+       WHERE status IN ('processed', 'duplicate') AND created_at < NOW() - make_interval(days => $1)
        LIMIT 1000
-     )`
+     )`,
+    [LOG_RETENTION_DAYS],
   );
   // 30일 경과 payload NULL (한 번에 500건씩 — 큰 일괄 UPDATE 차단)
   await query(

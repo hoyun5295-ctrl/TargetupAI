@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
-import { parseWonAmount } from '../utils/normalize';
+import { parsePageParams, parseWonAmount } from '../utils/normalize';
 import { authenticate } from '../middlewares/auth';
 import { queryPayAgentBalances, getAgentCustNameMap } from '../utils/pay-stats';
 import { resolveChargeUnitPrice } from '../utils/unit-price';
@@ -99,9 +99,8 @@ router.get('/transactions', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
 
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const offset = (page - 1) * limit;
+    // ★ 2026-09-28 한줄로 V2 m017 — 건수 상한(옛: limit 그대로 · 숫자 아님이면 NaN). 보정 = CT parsePageParams
+    const { page, limit, offset } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 20, maxLimit: 200 });
     const type = req.query.type as string; // charge, deduct, refund 등 필터
     const startDate = req.query.startDate as string;
     const endDate = req.query.endDate as string;
@@ -253,7 +252,18 @@ router.post('/deposit-request', async (req: Request, res: Response) => {
 
     // ★2026-08-28(3) 담당자 승인 안내 문자(Harold 지시) — 접수는 이미 끝났다. 발송 실패가 응답을 막지 않는다.
     //   명의 확인 보류 건은 링크로 승인할 수 없으므로(소명 확인 = 관리 화면) 문자를 보내지 않는다.
-    if (!heldReason) {
+    // ★ 2026-09-28 한줄로 V2 R306 — 같은 회사가 10분 안에 금액만 바꿔 요청을 거듭하면 담당자 전원에게 문자가 계속 나갔다
+    //   (중복 방지가 같은 금액뿐). 요청은 그대로 받고, 담당자 문자는 그 회사의 10분 안 첫 대기 요청에만 보낸다(나머지는 관리 화면에서 본다).
+    const recentPending = heldReason ? null : await query(
+      `SELECT 1 FROM deposit_requests
+        WHERE company_id = $1 AND status = 'pending' AND id <> $2
+          AND created_at > NOW() - INTERVAL '10 minutes'
+        LIMIT 1`,
+      [companyId, result.rows[0].id],
+    ).catch(() => null);
+    if (!heldReason && (recentPending?.rows.length ?? 0) > 0) {
+      console.log(`[무통장입금요청] ${companyName}: 10분 안 대기 요청이 있어 담당자 문자 생략(관리 화면에서 확인)`);
+    } else if (!heldReason) {
       notifyChargeApprovers({
         kind: 'deposit', targetId: String(result.rows[0].id), companyId,
         companyName, amount: Number(amount), depositorName: depositorName.trim(),

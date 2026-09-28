@@ -16,7 +16,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import {
-  createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode, cloneDm,
+  createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode, getDmTrackTargetByCode, cloneDm,
   publishDm, trackDmView, getDmStats, getDmRecipientEngagementRows,
   saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus, buildDmSnapshot,
   extractFlatSectionsFromDm, extractPagesFromDm, extractDmCopyText,
@@ -125,7 +125,7 @@ import {
 } from '../utils/dm/dm-interaction';
 import { parseWinnerRows, buildEventInsight } from '../utils/dm/dm-interaction-core';
 import * as XLSX from 'xlsx';
-import { getServePath, parseFitOption } from '../utils/image-serve';
+import { getServePath, parseFitOption, dropServeVariants } from '../utils/image-serve';
 
 // ────────────── D216+ 503 안전망 helper (db_alter_safety_net 영구 룰) ──────────────
 function isDbMigrationPendingError(err: any): boolean {
@@ -288,7 +288,7 @@ dmPublicRouter.get('/:code', async (req: Request, res: Response) => {
 // 열람 추적 API — ★ 2026-07-02 토큰(r) = 추적 1급 키. 서버가 토큰→고객 phone 확정(클라 phone 불신뢰).
 dmPublicRouter.post('/:code/track', async (req: Request, res: Response) => {
   try {
-    const dm = await getDmByCode(req.params.code);
+    const dm = await getDmTrackTargetByCode(req.params.code); // ★ R115 id·회사만
     if (!dm) return res.status(404).json({ error: 'Not found' });
 
     const b = req.body || {};
@@ -418,6 +418,7 @@ dmRouter.delete('/delete-image', (req: any, res: any) => {
 
   const filePath = path.join(DM_IMAGE_DIR, m[1], m[2]);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  dropServeVariants(filePath);   // ★ 2026-09-28 한줄로 V2 R412 — 서빙 변환본도 함께(CT)
   return res.json({ success: true });
 });
 

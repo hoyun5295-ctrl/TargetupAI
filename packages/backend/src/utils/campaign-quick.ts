@@ -921,7 +921,11 @@ export async function generateFromBuildMaterials(
     const r = await runInCreditBundle(() => deps.extractFromImages({ images: payload, companyId, userId: userId || undefined }));
     visionText = r.eventText; visionEvents = r.events;
     readKeyToCharge = buildReadIdempotencyKey(companyId, m.attemptToken, imagesHashOf(imageUrls));
-    buildVisionCache.set(visionKey, { at: Date.now(), eventText: r.eventText, events: r.events, settled: false, readKey: readKeyToCharge });
+    // ★ 2026-09-28 한줄로 V2 R374 — 저장 때 만료된 항목을 걷어낸다. 옛 코드는 같은 키를 다시 볼 때만 지워
+    //   프로세스 수명 동안 캐시가 계속 커졌다(10분 TTL 이 지난 항목도 남았다).
+    const nowMs = Date.now();
+    for (const [k, e] of buildVisionCache) if (nowMs - e.at >= BUILD_VISION_TTL_MS) buildVisionCache.delete(k);
+    buildVisionCache.set(visionKey, { at: nowMs, eventText: r.eventText, events: r.events, settled: false, readKey: readKeyToCharge });
   }
 
   // 엔진 재료 — 카드 → 같은 조각(materialsFromEventCards) · 면허 카드 종료일(연도 있는 표기만) → 카운트다운 재료 · 상품 = 카드(몰 이미지) + 글줄(면허)

@@ -1197,6 +1197,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   //   ★ 2026-09-26 V2 m105 — 표식 확정과 한 문장으로 옮겼다(confirmJourneyClaimSent · 위).
 
   // ★ D188 Phase 2-B-3 (2026-05-21): variants reward 누적 — sent=1 (click/conversion은 추후 트래킹 endpoint 영역).
+  //   ★ 2026-09-28 한줄로 V2 R166 판정 = 처방 철회: 실행기는 한 건씩 차례로 돌아 같은 행 경합이 없다. 모아 쓰면
+  //     재시작 때 누락·응답 유실 때 이중 가산이 생긴다(Codex medium 2) → 발송마다 기록하는 종전 방식을 유지한다.
   if (activeVariantId) {
     try {
       await recordJourneyStepVariantReward(activeVariantId, 1, 0, 0);

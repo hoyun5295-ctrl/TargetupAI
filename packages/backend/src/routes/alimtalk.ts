@@ -39,6 +39,7 @@ import {
 import { resolveImcCode } from '../utils/alimtalk-result-map';
 // ★ D217+ (2026-05-26 Harold 명시 진단 영역 정정): 옛 Tmp_xxx 영역 = 진정 카카오 templateCode 영역 동기화
 import { syncTemplateCodes, syncSingleTemplateCode } from '../utils/kakao-template-sync';
+import { kakaoTemplateSelectColumns, stripTemplateBinary } from '../utils/kakao-template-columns';
 import { normalizeImcTemplateStatus } from '../utils/alimtalk-jobs';
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { buildAlimtalkTemplateSheet, buildBrandTemplateSheet, templateExportFilename } from '../utils/template-export';
@@ -1186,7 +1187,7 @@ router.get('/templates', async (req: Request, res: Response) => {
     //   company_user가 만든 템플릿이 존재할 수 없음). 사용자 계정도 회사가 등록한 템플릿을 모두 볼 수 있게 필터 제거.
     //   쓰기(수정/삭제/검수요청 등)는 requireTemplateAccess의 소유권 검사(company_user=소유자, admin=전체)로 별도 게이팅.
     const r = await query(
-      `SELECT t.*, p.profile_key, p.profile_name,
+      `SELECT ${await kakaoTemplateSelectColumns()}, p.profile_key, p.profile_name,
               u.name AS created_by_name, u.login_id AS created_by_login_id
          FROM kakao_templates t
          LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
@@ -1197,11 +1198,8 @@ router.get('/templates', async (req: Request, res: Response) => {
     );
     // ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: BYTEA(증빙자료 data)는 목록 응답에서 제외.
     //   클라이언트로 base64 변환되어 전송되면 페이로드 폭증 + 보안 노출 위험. 파일명만 전달하여 UI 표시.
-    const rows = r.rows.map((row: any) => {
-      const { inspection_evidence_data, ...rest } = row;
-      void inspection_evidence_data;
-      return rest;
-    });
+    // ★ 2026-09-28 R087 — 바이너리는 조회 칸에서 이미 빠진다(CT). 폴백(t.*)일 때만 여기서 뺀다.
+    const rows = r.rows.map((row: any) => stripTemplateBinary(row));
     res.json({ success: true, templates: rows });
   } catch (err) {
     return handleImcError(res, err);
@@ -1216,7 +1214,7 @@ router.get('/templates/export', async (req: Request, res: Response) => {
     const companyId = requireCompany(req, res);
     if (!companyId) return;
     const r = await query(
-      `SELECT t.*, p.profile_key, p.profile_name,
+      `SELECT ${await kakaoTemplateSelectColumns()}, p.profile_key, p.profile_name,
               u.name AS created_by_name, u.login_id AS created_by_login_id
          FROM kakao_templates t
          LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
@@ -1564,7 +1562,7 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
     }
 
     const row = await query(
-      `SELECT t.*, p.profile_key, p.profile_name,
+      `SELECT ${await kakaoTemplateSelectColumns()}, p.profile_key, p.profile_name,
               u.name AS created_by_name, u.login_id AS created_by_login_id
          FROM kakao_templates t
          LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
@@ -1572,7 +1570,7 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
         WHERE t.id = $1`,
       [ctx.id],
     );
-    res.json({ success: true, template: row.rows[0] });
+    res.json({ success: true, template: row.rows[0] ? stripTemplateBinary(row.rows[0]) : row.rows[0] }); // ★ R087 상세도 바이너리를 내보내지 않는다
   } catch (err) {
     return handleImcError(res, err);
   }

@@ -127,7 +127,7 @@ async function runOnce(): Promise<void> {
 
 /**
  * ★ D218+ (2026-05-26) 여정 발송 결과 알림 LMS — 첫/마지막 step default ON.
- *   - journey_executions.status='completed' + result_notified_at IS NULL + 최근 2h 완료 대상.
+ *   - journey_executions.status='completed' + result_notified_at IS NULL + 최근 3h 완료 대상(보류 한도 2h보다 길게 · m115).
  *   - notify_manager_on_pretest TRUE = 무조건 발송 / NULL = 첫/마지막 step default ON / FALSE = skip.
  *   - 담당자 phone = kakao_alarm_users 첫 활성 (옛 D218+ Fix A 정합).
  *   - LMS 본문 = 여정명 + step + 성공/실패 카운트 + 다음 step 예정 영역.
@@ -155,7 +155,9 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
       WHERE e.status = 'completed'
         AND e.result_notified_at IS NULL
         AND e.completed_at IS NOT NULL
-        AND e.completed_at >= NOW() - INTERVAL '2 hours'
+        -- ★ 2026-09-28 한줄로 V2 m115 — 조회 창은 아래 보류 한도(2시간)보다 길어야 한다. 같은 2시간이면
+        --   "2시간 지나면 대기를 밝히고 보낸다" 분기에 닿기 전에 후보에서 빠져, 대기가 남는 단계는 안내가 영영 안 갔다.
+        AND e.completed_at >= NOW() - INTERVAL '3 hours'
         AND COALESCE(s.step_type, 'message') = 'message'
       ORDER BY e.completed_at DESC
       -- ★ 2026-07-27 묶음 발송으로 바뀌면서 상한을 올렸다. 실행행 50개에서 잘리면 같은 여정이
@@ -288,7 +290,9 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
       await markNotified(rows);
       const authTable = await getAuthSmsTable();
       try {
-      await bulkInsertSmsQueue(
+      // ★ 2026-09-28 한줄로 V2 m132 — 적재 함수는 MySQL 오류를 던지지 않고 적재 건수(0)로 돌려준다.
+      //   반환값을 안 보면 장애 중 안내가 적재 0건인데도 완료로 남았다 → 0이면 실패로 보고 표시를 되돌린다.
+      const loaded = await bulkInsertSmsQueue(
         [authTable],
         [[
           managerPhone,                // dest_no
@@ -305,6 +309,7 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
         ]],
         true,
       );
+      if (loaded === 0) throw new Error('여정 결과 안내 적재 0건');
       } catch (queueErr) {
         await query(
           `UPDATE journey_executions SET result_notified_at = NULL WHERE id = ANY($1::uuid[])`,
@@ -423,8 +428,11 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
              )
           -- ★ 2026-06-13 굳힘 탈출구 — 완전집계 조건 영구 미충족 terminal 무리(발송 72h 경과).
           --   21일 하한 없음: 유한 무리(실측 94건)이고 1회 굳힘으로 영구 졸업이라 부하 무한 누적 없음.
+          -- ★ 2026-09-28 한줄로 V2 m117 — 이 무리에서 0건 가드로 보류된 캠페인은 result_final 이 false 로 남아(굳히면
+          --   복원이 막힌다) 매시간 MySQL 재집계를 되풀이했다 → 재확인 간격을 24시간으로(라인이 돌아오면 그날 안에 복원).
           OR (status IN ('completed', 'failed') AND result_final = false
-               AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '72 hours')
+               AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '72 hours'
+               AND (result_synced_at IS NULL OR result_synced_at < NOW() - INTERVAL '24 hours'))
            )
        -- 같은 캠페인 반복 집계 차단 — 마지막 재대조 후 1시간 지나야 재확인 (MySQL 부하 상한)
        AND (result_synced_at IS NULL OR result_synced_at < NOW() - INTERVAL '1 hour')
@@ -457,6 +465,12 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
       //   (PG 카운트 또는 sentTables 기록)가 있는데 실측이 비면 쓰지 않고 로그만 남긴다.
       //   판정은 순수 함수(sms-table-split)가 소유한다. 증거 없는 진짜 0건은 종전대로 쓴다.
       const recorded = recordedLiveTables(camp);
+      const sendBaseMs = camp.send_base ? new Date(camp.send_base).getTime() : 0;
+      // ★ 2026-06-13 굳힘 탈출구 — 완전집계 미충족 terminal 무리는 발송 72h 경과 시 굳힌다(아래 교정 · 보류 둘 다 같은 판정).
+      const finalize =
+        camp.result_final === false &&
+        sendBaseMs > 0 &&
+        Date.now() - sendBaseMs > FINALIZE_FALLBACK_MS;
       if (shouldSkipReconcileWrite({
         aggTotal: sentCount,
         pgSentCount: camp.sent_count,
@@ -467,7 +481,10 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
         skipped++;
         // 보류해도 재대조 시각은 찍는다(Codex 1R high) — 위 SELECT 의 `result_synced_at < NOW() - 1 hour` 제한이
         //   보류 건에도 걸려야 같은 캠페인이 매 5분 배치(LIMIT 50 · 오래된 순)를 점유해 뒤 캠페인의 교정·복구를
-        //   막지 않는다. 카운트·result_final 은 건드리지 않는다 — 시각만.
+        //   막지 않는다. 카운트는 건드리지 않는다.
+        // ★ 2026-09-28 한줄로 V2 m117(Codex 차수4 1R high 반영) — 보류 건은 **굳히지 않는다.** 굳히면 라인이 돌아와도
+        //   failed→completed 복원이 멈춰 후불 청구(completed만 선정)에서 실제 발송이 빠진다. 반복 부하는 아래 SELECT 가
+        //   탈출구 무리의 재확인 간격을 24시간으로 늘려 막는다.
         await query(`UPDATE campaigns SET result_synced_at = NOW() WHERE id = $1`, [camp.id]);
         log(`재대조 0건 — 적재 증거가 있어 덮지 않음(보류) campaign=${camp.id} 기록=${recorded.join(',') || '없음'} ` +
             `PG sent=${camp.sent_count} succ=${camp.success_count} fail=${camp.fail_count} 조회=${tables.join(',')}`);
@@ -476,13 +493,7 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
 
       // 발송 기록이 있는 failed = 오판 → completed 복원. 진짜 0건 실패는 failed 유지.
       const newStatus = (camp.status === 'failed' && sentCount > 0) ? 'completed' : camp.status;
-      // ★ 2026-06-13 굳힘 탈출구 — 완전집계 미충족 terminal 무리는 발송 72h 경과 시
-      //   방금 쓴 실측값 그대로 굳힘(화면 숫자 연속). 선불은 굳힘 후에도 sweeper가 14일까지 보정.
-      const sendBaseMs = camp.send_base ? new Date(camp.send_base).getTime() : 0;
-      const finalize =
-        camp.result_final === false &&
-        sendBaseMs > 0 &&
-        Date.now() - sendBaseMs > FINALIZE_FALLBACK_MS;
+      // ★ 2026-06-13 굳힘 탈출구(위 finalize) — 방금 쓴 실측값 그대로 굳힘(화면 숫자 연속). 선불은 굳힘 후에도 sweeper가 14일까지 보정.
       const changed =
         newStatus !== camp.status ||
         sentCount !== Number(camp.sent_count || 0) ||

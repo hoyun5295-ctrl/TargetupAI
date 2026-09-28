@@ -917,26 +917,9 @@ async function processUploadInBackground(
       }
     }
 
-    // ===== customer_schema 자동 갱신 (customers.ts 일괄추가와 동일 로직) =====
-    // 업로드 완료 후 회사의 customer_schema를 실제 고객 데이터 기반으로 갱신
-    // → AI 메시지 생성, 직접발송 변수 치환 등에서 활용
-    if (companyId) {
-      try {
-        await query(`
-          UPDATE companies SET customer_schema = (
-            SELECT jsonb_build_object(
-              'genders', (SELECT array_agg(DISTINCT gender) FROM customers WHERE company_id = $1 AND gender IS NOT NULL),
-              'grades', (SELECT array_agg(DISTINCT grade) FROM customers WHERE company_id = $1 AND grade IS NOT NULL),
-              'custom_field_keys', (SELECT array_agg(DISTINCT k) FROM customers, jsonb_object_keys(custom_fields) k WHERE company_id = $1),
-              'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customer_stores WHERE company_id = $1)
-            )
-          ) WHERE id = $1
-        `, [companyId]);
-        console.log(`[업로드] customer_schema 갱신 완료 (company: ${companyId})`);
-      } catch (schemaErr) {
-        console.error('[업로드] customer_schema 갱신 실패:', schemaErr);
-      }
-    }
+    // ★ 2026-09-28 한줄로 V2 R350 — customer_schema 자동 갱신 제거. 이 UPDATE 는 고객 표 전체를 4번 훑어
+    //   genders·grades·custom_field_keys·store_codes 로 customer_schema 를 통째로 덮었는데, 그 네 키를 읽는 곳이 없다
+    //   (변수 목록은 field_mappings·available_vars 를 읽고, 화면 필터 목록은 filter-options 가 따로 센다).
 
   } catch (error: any) {
     console.error('[업로드 백그라운드] 처리 에러:', error);

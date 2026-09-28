@@ -1034,6 +1034,41 @@ export async function getMessageStats(companyId: string, messageId: string): Pro
   };
 }
 
+/**
+ * ★ 2026-09-28 한줄로 V2 R104 — 여러 메시지의 통계를 쿼리 한 번으로(목록용). 값은 getMessageStats 와 같다.
+ * 옛 목록은 메시지마다 getMessageStats 를 불렀다(N+1).
+ */
+export async function getMessageStatsBatch(companyId: string, messageIds: readonly string[]): Promise<Map<string, Awaited<ReturnType<typeof getMessageStats>>>> {
+  const out = new Map<string, Awaited<ReturnType<typeof getMessageStats>>>();
+  if (messageIds.length === 0) return out;
+  const result = await query(
+    `SELECT message_id, event_type, COUNT(*)::int AS cnt
+     FROM cdp_inapp_impressions
+     WHERE company_id = $1::uuid AND message_id = ANY($2::uuid[])
+     GROUP BY message_id, event_type`,
+    [companyId, [...messageIds]]
+  );
+  const maps = new Map<string, Record<string, number>>();
+  for (const r of result.rows as any[]) {
+    const id = String(r.message_id);
+    const m = maps.get(id) || { impression: 0, click: 0, dismiss: 0, opt_out: 0 };
+    m[r.event_type] = r.cnt;
+    maps.set(id, m);
+  }
+  for (const id of messageIds) {
+    const map = maps.get(String(id)) || { impression: 0, click: 0, dismiss: 0, opt_out: 0 };
+    const impressions = map.impression || 0;
+    out.set(String(id), {
+      impressions,
+      clicks: map.click || 0,
+      dismisses: map.dismiss || 0,
+      optOuts: map.opt_out || 0,
+      ctr: impressions > 0 ? (map.click || 0) / impressions : 0,
+    });
+  }
+  return out;
+}
+
 // ★ D210+ Phase 3 B-4 (2026-05-23 Harold 명시): 회사 전체 메시지 통계 (CTR funnel 시각화)
 //   회사 admin Dashboard 메시지별 funnel 시각화 + 비교 표 일치
 export async function getCompanyInAppStats(companyId: string, channel?: 'web' | 'app'): Promise<Array<{

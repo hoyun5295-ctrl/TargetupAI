@@ -58,6 +58,12 @@ function kstDateStr(d: Date): string {
 
 let workerRunning = false;
 
+// ★ 2026-09-28 한줄로 V2 R261 — (여정 · 스텝 · 발송일) 처리 완료 표식. 발송 시각이 지나면 그날 남은 30분 틱마다
+//   대상 전체를 다시 뽑고 ON CONFLICT로 버렸다(무거운 추출 반복). 게다가 그 사이 대상이 늘어 상한을 넘으면
+//   이미 보낸 뒤에 여정이 정지됐다. 지정일 발송은 발송 시각의 대상이 기준이다 → 한 번 처리한 날은 다시 뽑지 않는다.
+//   표식은 프로세스 메모리 — 재시작하면 한 번 더 뽑지만 ON CONFLICT가 중복 발송을 막는다(전과 같다).
+const _anchorStepDone = new Map<string, string>(); // `${journeyId}:${stepId}` → 처리한 발송일(KST)
+
 export async function runJourneyAnchorScheduler(now: Date = new Date()): Promise<{ journeys: number; dispatched: number; enqueued: number }> {
   if (workerRunning) return { journeys: 0, dispatched: 0, enqueued: 0 };
   workerRunning = true;
@@ -118,7 +124,11 @@ async function processAnchorJourney(j: AnchorJourneyRow, now: Date): Promise<{ d
     if (now.getTime() < runAt.getTime()) continue;
 
     const sendDate = kstDateStr(runAt); // = todayKst
+    const doneKey = `${j.id}:${step.id}`;
+    if (_anchorStepDone.get(doneKey) === sendDate) continue; // ★ R261 오늘 이미 처리한 스텝
     const res = await dispatchAnchorStep(j, step, runAt, sendDate, now);
+    _anchorStepDone.set(doneKey, sendDate); // 성공(던지지 않음)한 뒤에만 표시 — 실패는 다음 틱에 다시 시도
+    for (const [k, d] of _anchorStepDone) if (d !== todayKst) _anchorStepDone.delete(k);
     dispatched++;
     enqueued += res.enqueued;
   }

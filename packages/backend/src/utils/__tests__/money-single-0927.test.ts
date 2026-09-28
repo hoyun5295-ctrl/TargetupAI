@@ -19,8 +19,8 @@ const src = (...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf8'
 const ai = src('..', 'routes', 'ai.ts');
 
 describe('R079 전체 분석·리포트 안의 AI 진단 = 묶음 실행', () => {
-  it('리포트 PDF와 전체 분석 러너가 진단을 runInCreditBundle로 부른다', () => {
-    expect(ai).toContain('explanation = await runInCreditBundle(() => explainPerformance(companyId, sn, companyInfo));');
+  it('전체 분석 러너가 진단을 runInCreditBundle로 부른다(★0928 차수4 R293: 화면 호출 0이던 리포트 PDF 라우트는 제거)', () => {
+    expect(ai).not.toContain("router.post('/operator/performance/report-pdf'");
     expect(src('full-analysis-runner.ts')).toContain('explanation = await runInCreditBundle(() => explainPerformance(companyId, sn, companyInfo));');
   });
 });

@@ -42,6 +42,7 @@ export function buildFatigueGuardClause(params: any[], cap: FatigueCap, alias = 
           WHERE f.company_id = $1
             AND f.phone = regexp_replace(COALESCE(${alias}.phone, ''), '[^0-9]', '', 'g')
             AND f.day >= ((NOW() AT TIME ZONE 'Asia/Seoul')::date - ($${daysIdx}::int - 1))
+            AND f.day <= (NOW() AT TIME ZONE 'Asia/Seoul')::date   -- ★ 2026-09-28 m076 후속: 즉시 추출이라 창 = 오늘까지(미래 예약분은 세지 않는다)
          HAVING SUM(f.sent_count) >= $${maxIdx}::int
        )`;
 }

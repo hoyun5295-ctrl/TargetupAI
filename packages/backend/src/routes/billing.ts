@@ -3356,6 +3356,13 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
     }
     const { pdfPath, displayFilename } = await renderBillingStatementPdf(pdfData.bil, pdfData.items);
     const pdfFilename = displayFilename;
+    // ★ 2026-09-28 한줄로 V2 R309·R369 — 메일에 붙인 PDF를 지우는 곳이 없어 렌더마다 디스크에 쌓였다(검사에서 멈추는 422·404·409 경로 포함).
+    //   응답이 끝난 뒤 지우되, 메일 전송이 시작됐으면 그 전송이 끝날 때까지 기다린다 — 시간 초과로 먼저 응답해도
+    //   nodemailer 는 뒤에서 첨부를 계속 읽는다(아래 Promise.race 주석).
+    let statementMailSettled: Promise<unknown> = Promise.resolve();
+    res.on('finish', () => {
+      statementMailSettled.catch(() => undefined).finally(() => fs.unlink(pdfPath, () => { /* 이미 없으면 그만 */ }));
+    });
 
     const n = (v: any) => Number(v) || 0;
     const bStart = toDayKey(bil.billing_start);
@@ -3483,8 +3490,7 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
       //   조금씩 계속 오가면 40초를 넘길 수 있다. 그래서 총 시간 상한을 여기서 따로 건다.
       const transporter = getTransporter();
       let mailTimer: NodeJS.Timeout | undefined;
-      await Promise.race([
-        transporter.sendMail({
+      const statementSend = transporter.sendMail({
           // ★ 2026-09-27 R097 — 발신자·제목 = 일괄발급과 같은 한줄로 양식(같은 문서 · 거래내역서)
           from: `"한줄로" <${process.env.SMTP_USER || INVITO_INFO.email}>`,
           replyTo: INVITO_INFO.email,
@@ -3494,7 +3500,10 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
           subject: subjectOverride || `[한줄로] ${bil.company_name} 거래내역서 (${bStart.slice(0, 7)}) · 확인 요청`,
           html: htmlBody,
           attachments: [{ filename: pdfFilename, path: pdfPath }],
-        }).then((info: any) => {
+        });
+      statementMailSettled = statementSend;
+      await Promise.race([
+        statementSend.then((info: any) => {
           // ★ 2026-07-31 부분 거부를 성공으로 세지 않는다(판정은 CT — 발송 지점 셋이 같은 규칙).
           if (isRecipientRejected(info, sendTo)) {
             throw new Error(`수신자가 메일 서버에서 거부되었습니다 (${sendTo})`);
@@ -3613,6 +3622,8 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
     const bEnd = toDayKey(inv.billing_end);
     const { pdfPath, displayFilename } = await renderInvoicePdf(inv);
     const pdfFilename = displayFilename;
+    // ★ 2026-09-28 한줄로 V2 R309·R369 — 첨부 PDF는 응답이 끝나면 지운다(전송은 아래에서 기다린 뒤 응답한다)
+    res.on('finish', () => fs.unlink(pdfPath, () => { /* 이미 없으면 그만 */ }));
 
     const n = (v: any) => Number(v) || 0;
 

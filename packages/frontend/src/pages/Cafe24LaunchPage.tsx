@@ -33,18 +33,6 @@ export default function Cafe24LaunchPage() {
   const isCompanyAdmin = isAuthenticated && user?.userType === 'company_admin';
   const alreadyConnected = !!connectedMallId && (!mallId || connectedMallId === mallId);
 
-  // A-0 — 앱 실행 파라미터 서버 로그 (PM2 실측용). 최초 1회, 실패 무시.
-  useEffect(() => {
-    const params: Record<string, string> = {};
-    searchParams.forEach((v, k) => { params[k] = v; });
-    fetch('/api/cafe24/launch-log', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // ★ 2026-07-05 카페24 설치·심사 동선 — mall_id 있고 로그인(토큰) 없으면 버튼 없이 즉시 설치 OAuth로.
   //   카페24 반려 #1 "설치 시 인증 자동 수행" 정면 충족. 로그인 사용자(토큰 有)는 아래 분기 흐름 유지.
   //   리다이렉트 차단 등 예외 시 화면의 "카페24 연동 시작" 버튼이 폴백.

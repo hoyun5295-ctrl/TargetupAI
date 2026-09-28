@@ -244,11 +244,15 @@ describe('5. 스팸 무료 체험 · 청구 제외', () => {
     expect(tx).toContain('SPAM_TRIAL_SOURCE');
     expect(route).toMatch(/if \(trialMode && sentCount === 0\)/);
   });
-  it('청구·비용 집계 4곳이 같은 조건으로 뺀다 · 테스트 결과 화면 비용 0', () => {
+  it('청구·비용 집계가 같은 조건으로 뺀다 · 테스트 결과 화면 비용 0', () => {
     const agg = read('utils/send-usage-aggregation.ts');
     expect((agg.match(/\$\{spamBillableTestSql\('t'\)\}/g) || []).length).toBe(2);
     expect(read('routes/manage-stats.ts')).toContain("WHERE t.company_id = $1 AND ${spamBillableTestSql('t')} ${sfDateWhere}");
-    expect(read('routes/admin.ts')).toContain("WHERE t.company_id = $1 AND ${spamBillableTestSql('t')} ${sfDateWhere}");
+    // ★ 2026-09-28 한줄로 V2 R282 — 슈퍼관리자 /stats/send 의 테스트 집계는 화면(AdminDashboard)이 읽지 않아 제거했다
+    //   (testSummary 소비처 = 고객사 StatsTab 2곳 · 둘 다 /manage/stats/send). 상세 목록은 과금 여부를 같은 CT로 싣는다.
+    const admin = read('routes/admin.ts');
+    expect(admin).not.toMatch(/\btestSummary\s*[:,}]/);
+    expect(admin).toContain('billable: isSpamTestBillable(r.source)');
     const camp = read('routes/campaigns.ts');
     expect(camp).toContain('const isTrial = r.source === SPAM_TRIAL_SOURCE;');
     // ★ 2026-09-26 F49: 비용은 청구 제외 판정 CT(체험 + 무료 자동 검사)를 따른다

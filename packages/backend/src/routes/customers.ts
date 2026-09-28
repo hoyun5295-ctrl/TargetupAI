@@ -159,14 +159,10 @@ if (smsOptIn === 'true') {
       paramIndex++;
     }
 
-    // 총 개수
-    const countResult = await query(
-      `SELECT COUNT(*) FROM customers_unified ${whereClause}`,
-      params
-    );
-    const total = parseInt(countResult.rows[0].count);
-
     // 목록 조회 — ★ B17-01: 수신거부 user_id 기준 통일
+    // ★ 2026-09-28 한줄로 V2 R110 — 총 개수를 목록과 한 번에 센다(COUNT(*) OVER()). 옛: 중복 접기 뷰(customers_unified)를
+    //   COUNT 와 목록으로 두 번 계산했다. 창 함수는 행이 있어야 값이 나오므로, 마지막 페이지 뒤(행 0)만 개수를 따로 센다.
+    const whereParamCount = params.length;
     const unsubCaseIdx = paramIndex++;
     params.push(userId);
     params.push(Number(limit), offset);
@@ -178,7 +174,8 @@ if (smsOptIn === 'true') {
               CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubCaseIdx} AND u.phone = customers_unified.phone)
                    THEN false ELSE sms_opt_in END as sms_opt_in,
               TO_CHAR(recent_purchase_date, 'YYYY-MM-DD') as recent_purchase_date, total_purchase_amount, custom_fields,
-              created_at
+              created_at,
+              COUNT(*) OVER() AS total_count_all
        FROM customers_unified
        ${whereClause}
        ORDER BY created_at DESC
@@ -186,10 +183,20 @@ if (smsOptIn === 'true') {
       params
     );
 
+    let total = result.rows.length > 0 ? parseInt(result.rows[0].total_count_all) : 0;
+    if (result.rows.length === 0 && Number(page) > 1) {
+      const countResult = await query(
+        `SELECT COUNT(*) FROM customers_unified ${whereClause}`,
+        params.slice(0, whereParamCount)
+      );
+      total = parseInt(countResult.rows[0].count);
+    }
+    const customers = result.rows.map(({ total_count_all: _t, ...row }: any) => row);
+
     await logPrivacyView({ req, kind: 'customers', count: result.rows.length, companyId, filterKeys: Object.keys(req.query || {}) });
 
     return res.json({
-      customers: result.rows,
+      customers,
       pagination: {
         total,
         page: Number(page),
@@ -660,17 +667,9 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
       await query(backfill.sql, backfill.values);
     }
 
-    // 엑셀 업로드 완료 후 스키마 자동 갱신
-    await query(`
-      UPDATE companies SET customer_schema = (
-        SELECT jsonb_build_object(
-          'genders', (SELECT array_agg(DISTINCT gender) FROM customers WHERE company_id = $1 AND gender IS NOT NULL),
-          'grades', (SELECT array_agg(DISTINCT grade) FROM customers WHERE company_id = $1 AND grade IS NOT NULL),
-          'custom_field_keys', (SELECT array_agg(DISTINCT k) FROM customers, jsonb_object_keys(custom_fields) k WHERE company_id = $1),
-          'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customer_stores WHERE company_id = $1)
-        )
-      ) WHERE id = $1
-    `, [companyId]);
+    // ★ 2026-09-28 한줄로 V2 R350 — customer_schema 자동 갱신 제거. 이 UPDATE 는 고객 표 전체를 4번 훑어
+    //   genders·grades·custom_field_keys·store_codes 로 customer_schema 를 통째로 덮었는데, 그 네 키를 읽는 곳이 없다
+    //   (변수 목록은 field_mappings·available_vars 를 읽고, 화면 필터 목록은 filter-options 가 따로 센다).
 
     // ★ 2026-07-03: 일괄 등록 = 필드 구성 변경 가능 — 활성 필드 캐시 무효화
     clearEnabledFieldsCache(companyId);

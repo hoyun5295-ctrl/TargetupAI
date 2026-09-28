@@ -62,6 +62,50 @@ function warnImcListCap(where: string): void {
 }
 
 /**
+ * ★ 2026-09-28 한줄로 V2 R267 — IMC 알림톡 템플릿 전체 목록을 templateKey → item 으로 받는다(코드·상태 동기화 공용).
+ * 전에는 두 동기화가 30분마다 각자 전체 목록을 페이지 순회하고 페이지마다 로그를 남겼다
+ * (코드 미발급 반려 건이 Tm% 키로 영구히 남아 코드 동기화가 늘 돌았다). 응답 모양은 두 함수가 받던 것의 합집합으로 읽는다.
+ */
+export async function loadImcTemplateMap(where: string): Promise<Map<string, any>> {
+  const imcByKey = new Map<string, any>();
+  for (let page = 0; page < IMC_MAX_PAGES; page++) {
+    let r;
+    try {
+      r = await imc.listAlimtalkTemplates({ page, count: IMC_PAGE_SIZE });
+    } catch (err: any) {
+      console.log(
+        `[kakao-template-sync] IMC list page ${page} 오류: name=${err?.name || '(X)'} code=${err?.code || '(X)'} message=${err?.message || String(err)} httpStatus=${err?.httpStatus || '(X)'}`,
+      );
+      break;
+    }
+    if (r.code !== '0000') {
+      console.log(`[kakao-template-sync] IMC list page ${page} code=${r.code}: 중단`);
+      break;
+    }
+    // IMC 응답 필드명 = templateList(D217+ 실측). 옛 모양도 함께 읽는다.
+    const items: any[] =
+      (r.data as any)?.templateList ||
+      (r.data as any)?.list ||
+      (r.data as any)?.data?.list ||
+      (r.data as any)?.data?.templateList ||
+      (r.data as any)?.templates ||
+      (Array.isArray(r.data) ? (r.data as any) : null) ||
+      [];
+    if (items.length === 0) {
+      if (page === 0) console.log(`[kakao-template-sync] IMC 목록 0건: r.data 앞 300자 ${JSON.stringify(r.data).slice(0, 300)}`);
+      break;
+    }
+    for (const item of items) {
+      const key = item?.templateKey || item?.template_key;
+      if (key) imcByKey.set(String(key), item);
+    }
+    if (items.length < IMC_PAGE_SIZE) break;
+    if (page === IMC_MAX_PAGES - 1) warnImcListCap(where);
+  }
+  return imcByKey;
+}
+
+/**
  * 한줄로 안 옛 Tmp_xxx 영역 = 진정 카카오 templateCode 영역 영구 정정.
  *
  * 흐름:
@@ -74,7 +118,7 @@ function warnImcListCap(where: string): void {
  * @param options.companyId = 지정 시 본 회사 영역만 sync (admin endpoint 영역 영구 정합)
  */
 export async function syncTemplateCodes(
-  options: { dryRun?: boolean; companyId?: string } = {},
+  options: { dryRun?: boolean; companyId?: string; loadImc?: () => Promise<Map<string, any>> } = {},
 ): Promise<SyncResult> {
   const result: SyncResult = {
     scanned: 0,
@@ -110,70 +154,9 @@ export async function syncTemplateCodes(
   result.scanned = pgRows.rows.length;
   if (result.scanned === 0) return result;
 
-  // 2) IMC 안 전체 목록 조회 (페이지네이션 영역)
-  const imcByKey = new Map<string, any>();
-  console.log(`[kakao-template-sync] IMC listAlimtalkTemplates 호출 영역 영구 시작 — count=${IMC_PAGE_SIZE} max_pages=${IMC_MAX_PAGES}`);
-  for (let page = 0; page < IMC_MAX_PAGES; page++) {
-    let r;
-    try {
-      r = await imc.listAlimtalkTemplates({ page, count: IMC_PAGE_SIZE });
-    } catch (err: any) {
-      // ★ D217+ fix v2: stderr 영역 영구 X — console.log 영구 영역 영구 진단 영역
-      console.log(
-        `[kakao-template-sync] IMC list page ${page} 오류 — name=${err?.name || '(X)'} code=${err?.code || '(X)'} message=${err?.message || String(err)} httpStatus=${err?.httpStatus || '(X)'}`,
-      );
-      break;
-    }
-    // ★ D217+ fix v2: 응답 영역 영구 영역 영구 출력 (모든 페이지 영역 영구 영역)
-    console.log(
-      `[kakao-template-sync] IMC 응답 page=${page} r.code=${r.code} r.message=${(r.message || '').slice(0, 80)}`,
-    );
-    if (r.code !== '0000') {
-      console.log(`[kakao-template-sync] IMC list page ${page} code=${r.code} ≠ 0000 — break 영역`);
-      break;
-    }
-    // ★ D217+ fix v3 (2026-05-26 Harold 명시 진단 영역 확정): IMC 안 응답 필드명 = `templateList` 영구 정합
-    //   Harold raw 정독 결과 = r.data 최상위 키 = [hasNext, total, templateList] 영역 영구 정합
-    //   옛 sync = `list` / `data.list` / `templates` 영역 영구 X = 빈 배열 영역 = matched=0 사고 진정 root cause.
-    //   IMC 안 total = 4,849건 영구 전체 = templateList 영역 영구 정합 + hasNext 영역 영구 페이지네이션 영역.
-    const items: any[] =
-      (r.data as any)?.templateList ||   // ★ 진정 IMC 영역 영구 정합 (우선)
-      (r.data as any)?.list ||
-      (r.data as any)?.data?.list ||
-      (r.data as any)?.data?.templateList ||
-      (r.data as any)?.templates ||
-      (Array.isArray(r.data) ? (r.data as any) : null) ||
-      [];
-    if (page === 0) {
-      const rawKeys = r.data ? Object.keys(r.data) : [];
-      const firstItem = items[0] || null;
-      const firstItemKeys = firstItem ? Object.keys(firstItem) : [];
-      console.log(
-        `[kakao-template-sync][디버그] page=0 r.code=${r.code} r.data 최상위 키=[${rawKeys.join(',')}] items.length=${items.length} 첫 item 키=[${firstItemKeys.join(',')}]`,
-      );
-      if (firstItem) {
-        // 첫 item 영역 = templateKey + templateCode + templateName 영역 영구 확인
-        console.log(
-          `[kakao-template-sync][디버그] 첫 item 영역 = templateKey=${firstItem.templateKey || firstItem.template_key || '(X)'} templateCode=${firstItem.templateCode || firstItem.template_code || '(X)'} templateName=${firstItem.templateName || firstItem.template_name || '(X)'}`,
-        );
-      } else if (items.length === 0) {
-        // items 영역 0건 시 = r.data raw 영역 영구 출력 (영구 진단)
-        const rawSnippet = JSON.stringify(r.data).slice(0, 500);
-        console.log(`[kakao-template-sync][디버그] items 0건 — r.data raw (500자): ${rawSnippet}`);
-      }
-    }
-    if (items.length === 0) break;
-    for (const item of items) {
-      // 옛 templateKey + 신규 template_key 영역 영구 둘 다 영구 매핑
-      const key = item?.templateKey || item?.template_key;
-      if (key) {
-        imcByKey.set(String(key), item);
-      }
-    }
-    if (items.length < IMC_PAGE_SIZE) break;
-    if (page === IMC_MAX_PAGES - 1) warnImcListCap('코드');
-  }
-  console.log(`[kakao-template-sync][디버그] IMC 안 영구 매핑 영역 총 ${imcByKey.size}건`);
+  // 2) IMC 전체 목록 — ★ 2026-09-28 한줄로 V2 R267: 공용 로더(워커는 한 사이클에 한 번 받아 상태 동기화와 나눠 쓴다)
+  const imcByKey = await (options.loadImc ? options.loadImc() : loadImcTemplateMap('코드'));
+  console.log(`[kakao-template-sync] IMC 템플릿 목록 ${imcByKey.size}건`);
 
   // 3) 매칭 + UPDATE
   for (const row of pgRows.rows) {
@@ -296,7 +279,7 @@ export async function syncTemplateCodes(
  * 매칭, imc_template_status·reject_reason 변경분만 UPDATE.
  * kakao_templates.imc_template_status 컬럼 미마이그레이션(ALTER 전)이면 안내 로그 후 skip.
  */
-export async function syncTemplateStatuses(): Promise<{
+export async function syncTemplateStatuses(loadImc?: () => Promise<Map<string, any>>): Promise<{
   scanned: number;
   updated: number;
   skipped: boolean;
@@ -329,26 +312,8 @@ export async function syncTemplateStatuses(): Promise<{
   }
   if (pgRows.rows.length === 0) return { scanned: 0, updated: 0, skipped: false };
 
-  // 1) IMC 전체 목록 → templateKey 매핑 (syncTemplateCodes와 동일 페이지네이션 패턴)
-  const imcByKey = new Map<string, any>();
-  for (let page = 0; page < IMC_MAX_PAGES; page++) {
-    let r;
-    try {
-      r = await imc.listAlimtalkTemplates({ page, count: IMC_PAGE_SIZE });
-    } catch (err: any) {
-      console.log(`[kakao-template-sync][status] IMC list page ${page} 오류 — ${err?.message || err}`);
-      break;
-    }
-    if (r.code !== '0000') break;
-    const items: any[] = (r.data as any)?.templateList || (r.data as any)?.list || [];
-    if (items.length === 0) break;
-    for (const item of items) {
-      const key = item?.templateKey || item?.template_key;
-      if (key) imcByKey.set(String(key), item);
-    }
-    if (items.length < IMC_PAGE_SIZE) break;
-    if (page === IMC_MAX_PAGES - 1) warnImcListCap('상태');
-  }
+  // 1) IMC 전체 목록 → templateKey 매핑 — ★ 2026-09-28 한줄로 V2 R267: 공용 로더(코드 동기화와 같은 목록을 나눠 쓴다)
+  const imcByKey = await (loadImc ? loadImc() : loadImcTemplateMap('상태'));
   if (imcByKey.size === 0) return { scanned: pgRows.rows.length, updated: 0, skipped: false };
 
   // 2) 변경분만 UPDATE
