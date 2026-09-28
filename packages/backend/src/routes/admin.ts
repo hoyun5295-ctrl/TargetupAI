@@ -77,7 +77,7 @@ import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { switchCompanyBillingType } from '../utils/billing-type-history';
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, diffFields } from '../utils/audit-log';
 // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용 · 읽기 전용 집계 CT)
-import { loadPrecheckUsage, parsePrecheckUsageQuery } from '../utils/precheck-usage';
+import { loadPrecheckDetail, loadPrecheckUsage, parsePrecheckDetailQuery, parsePrecheckUsageQuery } from '../utils/precheck-usage';
 // ★ 2026-09-12 발신 프로필 사용 중지(직원 접수 4번) — 판정·기록은 CT가 소유한다
 import { disableSenderProfile } from '../utils/kakao-sender-profile-admin';
 import { classifyHelpDbError, helpQuestionKind, helpReasonLabel, HELP_REQUEST_PHRASES } from '../utils/help-answer';
@@ -4929,6 +4929,26 @@ router.get('/precheck-usage', authenticate, requireSuperAdmin, async (req: Reque
     if (isMissingSchemaError(err)) return res.status(503).json(migrationPendingBody('spell_check_uses CREATE TABLE'));
     console.error('[admin/precheck-usage] 조회 실패:', err);
     return res.status(500).json({ success: false, error: '사용 현황을 불러오지 못했습니다.' });
+  }
+});
+
+/**
+ * ★ 2026-09-28 사용 기록 상세 (Harold 지시 · ceo 전용 · 읽기만) — 한 줄의 문안·결과. 조립 소유 = utils/precheck-usage.ts
+ */
+router.get('/precheck-usage/detail', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isPrecheckUsageViewer(req.user?.userId))) {
+      return res.status(403).json({ success: false, error: '사용 현황 열람 권한이 없습니다.' });
+    }
+    const q = parsePrecheckDetailQuery(req.query);
+    if (!q) return res.status(400).json({ success: false, error: '잘못된 요청입니다.' });
+    const detail = await loadPrecheckDetail(q);
+    if (!detail) return res.status(404).json({ success: false, error: '기록을 찾을 수 없습니다.' });
+    return res.json({ success: true, detail });
+  } catch (err: any) {
+    if (isMissingSchemaError(err)) return res.status(503).json(migrationPendingBody('spell_check_uses ALTER (checked_text · issues)'));
+    console.error('[admin/precheck-usage/detail] 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '상세를 불러오지 못했습니다.' });
   }
 });
 

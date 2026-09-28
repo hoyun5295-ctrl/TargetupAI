@@ -7,7 +7,9 @@
  * 톤 = 부모 화면(슈퍼관리자 라이트) 그대로 · 강조색 = 발송 관리 그룹색(emerald).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { formatDateTimeShort } from '../../utils/formatDate';
+import PrecheckUsageDetailModal from './PrecheckUsageDetailModal';
 
 type Period = 'today' | '7d' | 'month';
 type Kind = 'all' | 'spam' | 'spell';
@@ -40,6 +42,9 @@ interface RecentRow {
   subLabel: string;
   trial: boolean;
   resultLabel: string;
+  /** ★ 0928 상세 창 — 어느 원천의 몇 번 기록인가 */
+  detailType: 'spam' | 'spell_direct' | 'spell_agency';
+  ref: string | null;
 }
 
 interface UsageData {
@@ -113,6 +118,8 @@ export default function PrecheckUsageTab({ companies }: Props) {
   const [data, setData] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ★ 0928 줄을 누르면 그 기록의 문안·결과 창
+  const [detailRow, setDetailRow] = useState<RecentRow | null>(null);
   // 늦게 도착한 옛 조건의 응답이 새 조건 화면을 덮지 않게(조건을 빨리 바꿀 때)
   const seq = useRef(0);
 
@@ -244,7 +251,7 @@ export default function PrecheckUsageTab({ companies }: Props) {
 
       <div className="px-6 pt-5 pb-2 flex items-baseline gap-2">
         <span className="text-sm font-semibold text-gray-800">최근 사용 기록</span>
-        <span className="text-xs text-gray-500">총 {data ? data.total.toLocaleString() : 0}건 · 10건씩</span>
+        <span className="text-xs text-gray-500">총 {data ? data.total.toLocaleString() : 0}건 · 10건씩 · 줄을 누르면 문안과 결과</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -256,15 +263,22 @@ export default function PrecheckUsageTab({ companies }: Props) {
               <th className="px-4 py-2 font-medium whitespace-nowrap">종류</th>
               <th className="px-4 py-2 font-medium whitespace-nowrap">구분</th>
               <th className="px-4 py-2 font-medium whitespace-nowrap">결과</th>
+              <th className="px-4 py-2 w-8" aria-hidden />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading && !data ? (
-              <tr><td colSpan={6} className="px-6 py-10 text-center text-gray-400">불러오는 중...</td></tr>
+              <tr><td colSpan={7} className="px-6 py-10 text-center text-gray-400">불러오는 중...</td></tr>
             ) : !data || data.recent.length === 0 ? (
-              <tr><td colSpan={6} className="px-6 py-10 text-center text-gray-400">사용 기록이 없습니다</td></tr>
+              <tr><td colSpan={7} className="px-6 py-10 text-center text-gray-400">사용 기록이 없습니다</td></tr>
             ) : data.recent.map((r, i) => (
-              <tr key={`${r.createdAt}-${i}`} className="hover:bg-gray-50/60">
+              <tr
+                key={`${r.createdAt}-${i}`}
+                onClick={() => setDetailRow(r)}
+                onKeyDown={(e) => { if (e.key === 'Enter') setDetailRow(r); }}
+                tabIndex={0}
+                className="group cursor-pointer hover:bg-emerald-50/50 focus:outline-none focus-visible:bg-emerald-50/70"
+              >
                 <td className="px-6 py-2.5 text-xs text-gray-500 whitespace-nowrap">{formatDateTimeShort(r.createdAt)}</td>
                 <td className="px-4 py-2.5 whitespace-nowrap font-medium text-gray-800">{r.companyName}</td>
                 <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">
@@ -273,6 +287,7 @@ export default function PrecheckUsageTab({ companies }: Props) {
                 <td className="px-4 py-2.5 whitespace-nowrap text-gray-700">{r.kindLabel}</td>
                 <td className="px-4 py-2.5 whitespace-nowrap"><SubBadge row={r} /></td>
                 <td className="px-4 py-2.5 whitespace-nowrap"><ResultText label={r.resultLabel} /></td>
+                <td className="px-4 py-2.5 text-gray-300 group-hover:text-emerald-600"><ChevronRight className="w-4 h-4" /></td>
               </tr>
             ))}
           </tbody>
@@ -292,6 +307,8 @@ export default function PrecheckUsageTab({ companies }: Props) {
       <p className="px-6 py-3 border-t text-[10px] text-gray-400 italic">
         자료: 스팸 검사 기록 · 직접발송 맞춤법 기록 · 대행 맞춤법 이력(테스트 문자 뒤 자동 검사) · 무료 한도는 고객 화면과 같은 판정
       </p>
+
+      {detailRow && <PrecheckUsageDetailModal target={detailRow} onClose={() => setDetailRow(null)} />}
     </div>
   );
 }

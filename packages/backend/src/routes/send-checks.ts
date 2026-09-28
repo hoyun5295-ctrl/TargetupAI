@@ -13,7 +13,7 @@ import { authenticate } from '../middlewares/auth';
 import { isActivePaidPlan, loadPlanContext } from '../utils/plan-guard';
 import { readSpamTrialStatus } from '../utils/spam-trial';
 import {
-  DIRECT_SPELL_SOURCE, SPELL_FREE_MONTHLY_LIMIT, finishSpellUse, readSpellUsage, reserveSpellUse, takeSpellMinuteSlot,
+  DIRECT_SPELL_SOURCE, SPELL_FREE_MONTHLY_LIMIT, finishSpellUse, readSpellUsage, recordSpellDetail, reserveSpellUse, takeSpellMinuteSlot,
 } from '../utils/spell-check-quota';
 import { checkSmsSpelling, loadSmsSpellProtectedWords } from '../utils/sms-spell-check';
 import { migrationPendingBody } from '../utils/db-errors';
@@ -91,6 +91,8 @@ router.post('/spell', authenticate, async (req: Request, res: Response) => {
       smsByteLimit: null,
     });
     const recorded = await finishSpellUse(useId, companyId, { failed: r.failed, issueCount: r.issues.length });
+    // ★ 2026-09-28 슈퍼관리자 사용 기록 상세 — 끝난 검사의 문안·고칠 곳을 싣는다(응답은 기다리지 않는다 · 실패해도 결과 무관)
+    if (recorded && !r.failed) void recordSpellDetail(useId, text, r.issues);
     useId = null;
     // ★Codex 5R: 무료 회사는 원장에 done 으로 남은 검사만 결과를 준다(수명 지남·기록 오류 = 한도 밖 결과를 내주지 않는다).
     if (!r.failed && !recorded && !paid) return res.status(502).json(SPELL_FAILED_BODY);

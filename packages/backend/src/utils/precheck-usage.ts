@@ -16,8 +16,10 @@ import { isUuid } from './normalize';
 import { mapWithConcurrency } from './concurrency';
 import { SPAM_TRIAL_SOURCE, isAutoSpamSource, readSpamTrialStatus } from './spam-trial';
 import { DIRECT_SPELL_SOURCE, SPELL_FREE_MONTHLY_LIMIT, readSpellUsage } from './spell-check-quota';
-import { AGENCY_SPELL_EVENT } from './agency-send-spell';
+import { AGENCY_SPELL_EVENT, readAgencySpell } from './agency-send-spell';
 import { isActivePaidPlan, loadPlanContext } from './plan-guard';
+import { getSpamResultLabel, getSpamResultType } from './sms-result-map';
+import type { SpellIssue } from './spell-check';
 
 export type PrecheckPeriod = 'today' | '7d' | 'month';
 export type PrecheckKind = 'all' | 'spam' | 'spell';
@@ -209,7 +211,7 @@ export async function loadPrecheckUsage(q: PrecheckUsageQuery) {
 
   const offset = (q.page - 1) * PRECHECK_PAGE_SIZE;
   const list = await query(
-    `SELECT ev.kind, ev.sub, ev.status, ev.issues, ev.created_at, c.company_name, u.name AS user_name, u.login_id AS user_login,
+    `SELECT ev.kind, ev.sub, ev.status, ev.issues, ev.created_at, ev.ref_id, c.company_name, u.name AS user_name, u.login_id AS user_login,
             CASE WHEN ev.kind = 'spam' THEN EXISTS (
               SELECT 1 FROM spam_filter_test_results x WHERE x.test_id = ev.ref_id::uuid AND x.result = 'blocked'
             ) END AS blocked
@@ -231,6 +233,9 @@ export async function loadPrecheckUsage(q: PrecheckUsageQuery) {
     subLabel: precheckSubLabel(r.kind, r.sub),
     trial: r.kind === 'spam' && spamSourceBucket(r.sub) === 'trial',
     resultLabel: precheckResultLabel({ kind: r.kind, status: r.status, issues: r.issues, blocked: r.blocked }),
+    // ★ 2026-09-28 상세 창 — 어느 원천의 몇 번 기록인가(스팸 = 검사 id · 직접발송 = 기록 id · 대행 = 접수 id)
+    detailType: precheckDetailType(r.kind, r.sub),
+    ref: r.ref_id ? String(r.ref_id) : null,
   }));
 
   return {
@@ -243,5 +248,145 @@ export async function loadPrecheckUsage(q: PrecheckUsageQuery) {
     total: summary.total,
     page: q.page,
     totalPages: Math.max(1, Math.ceil(summary.total / PRECHECK_PAGE_SIZE)),
+  };
+}
+
+// ─────────────── ★ 2026-09-28 사용 기록 상세 (Harold 지시 · ceo 전용 · 읽기만) ───────────────
+// 목록 한 줄 → 그 기록의 문안과 결과. 스팸 검사 = 통신사별 결과 · 맞춤법 = 고칠 곳(검사가 제안한 내용).
+// ⛔ 직접발송 맞춤법의 문안·고칠 곳은 0928부터 저장한다(`recordSpellDetail`) — 그 전 기록은 개수만 있다(stored=false).
+
+export type PrecheckDetailType = 'spam' | 'spell_direct' | 'spell_agency';
+
+/** (순수) 목록 줄의 종류·구분 → 상세 종류 */
+export function precheckDetailType(kind: string, sub: string | null | undefined): PrecheckDetailType {
+  if (kind === 'spam') return 'spam';
+  return sub === 'agency' ? 'spell_agency' : 'spell_direct';
+}
+
+/** (순수) 상세 조회 조건 — 스팸·대행 = uuid · 직접발송 = 숫자 id. 그 밖은 null(라우트가 400) */
+export function parsePrecheckDetailQuery(q: any): { type: PrecheckDetailType; ref: string } | null {
+  const type = (['spam', 'spell_direct', 'spell_agency'] as const).find((t) => t === q?.type);
+  const ref = typeof q?.ref === 'string' ? q.ref : '';
+  if (!type || !ref) return null;
+  if (type === 'spell_direct') return /^\d{1,18}$/.test(ref) ? { type, ref } : null;
+  return isUuid(ref) ? { type, ref } : null;
+}
+
+export interface SpamResultCell { label: string; tone: 'pass' | 'blocked' | 'fail' | 'pending'; receivedAt: string | null }
+export interface SpamResultGrid {
+  types: string[];
+  rows: { carrier: string; cells: Record<string, SpamResultCell | null> }[];
+  total: number;
+  pass: number;
+  blocked: number;
+}
+
+const SPAM_CARRIER_ORDER = ['SKT', 'KT', 'LGU'];
+const SPAM_TYPE_ORDER = ['SMS', 'LMS'];
+const orderOf = (list: string[], v: string) => { const i = list.indexOf(v); return i < 0 ? list.length : i; };
+
+/** (순수) 통신사 × 종류 결과표. 이름표·색 = 결과 CT(`getSpamResultLabel`·`getSpamResultType`) 그대로 */
+export function buildSpamResultGrid(results: readonly any[]): SpamResultGrid {
+  const types = [...new Set(results.map((r) => String(r.message_type)))]
+    .sort((a, b) => orderOf(SPAM_TYPE_ORDER, a) - orderOf(SPAM_TYPE_ORDER, b) || a.localeCompare(b));
+  const carriers = [...new Set(results.map((r) => String(r.carrier)))]
+    .sort((a, b) => orderOf(SPAM_CARRIER_ORDER, a) - orderOf(SPAM_CARRIER_ORDER, b) || a.localeCompare(b));
+  const rows = carriers.map((carrier) => {
+    const cells: Record<string, SpamResultCell | null> = {};
+    for (const t of types) {
+      const hit = results.find((r) => String(r.carrier) === carrier && String(r.message_type) === t);
+      cells[t] = hit
+        ? { label: getSpamResultLabel(hit.result), tone: getSpamResultType(hit.result), receivedAt: hit.received_at ?? null }
+        : null;
+    }
+    return { carrier, cells };
+  });
+  return {
+    types,
+    rows,
+    total: results.length,
+    pass: results.filter((r) => getSpamResultType(r.result) === 'pass').length,
+    blocked: results.filter((r) => getSpamResultType(r.result) === 'blocked').length,
+  };
+}
+
+/** (순수) 저장된 고칠 곳(jsonb) → 표시할 항목. 배열이 아니면 null · 모양이 틀린 항목은 뺀다 */
+export function readStoredSpellIssues(raw: unknown): SpellIssue[] | null {
+  let v: unknown = raw;
+  if (typeof v === 'string') {
+    try { v = JSON.parse(v); } catch { return null; }
+  }
+  if (!Array.isArray(v)) return null;
+  return v.filter((i: any) => i && typeof i === 'object'
+    && typeof i.before === 'string' && typeof i.after === 'string'
+    && Number.isInteger(i.start) && Number.isInteger(i.end)) as SpellIssue[];
+}
+
+/** 상세 한 건. 없는 기록 = null. 직접발송 칸이 아직 없으면(ALTER 전) 42703 을 던진다 → 라우트가 503 */
+export async function loadPrecheckDetail(q: { type: PrecheckDetailType; ref: string }) {
+  if (q.type === 'spam') {
+    const t = await query(
+      `SELECT callback_number, message_content_sms, message_content_lms, subject, status
+         FROM spam_filter_tests WHERE id = $1::uuid`,
+      [q.ref],
+    );
+    const test = t.rows[0];
+    if (!test) return null;
+    const r = await query(
+      `SELECT carrier, message_type, received, received_at, result
+         FROM spam_filter_test_results WHERE test_id = $1::uuid`,
+      [q.ref],
+    );
+    return {
+      type: 'spam' as const,
+      callbackNumber: test.callback_number || null,
+      sms: test.message_content_sms || null,
+      lms: test.message_content_lms || null,
+      subject: test.subject || null,
+      status: String(test.status || ''),
+      grid: buildSpamResultGrid(r.rows),
+    };
+  }
+
+  if (q.type === 'spell_direct') {
+    const u = await query(
+      `SELECT status, issue_count, checked_text, issues
+         FROM spell_check_uses WHERE id = $1::bigint AND source = $2`,
+      [q.ref, DIRECT_SPELL_SOURCE],
+    );
+    const row = u.rows[0];
+    if (!row) return null;
+    const text: string | null = typeof row.checked_text === 'string' ? row.checked_text : null;
+    return {
+      type: 'spell_direct' as const,
+      status: String(row.status || ''),
+      issueCount: Number(row.issue_count) || 0,
+      stored: text != null,
+      text,
+      issues: text != null ? readStoredSpellIssues(row.issues) : null,
+    };
+  }
+
+  const a = await query(
+    `SELECT message_type, subject, current_content, content_version, spell_check
+       FROM agency_send_requests WHERE id = $1::uuid`,
+    [q.ref],
+  );
+  const req = a.rows[0];
+  if (!req) return null;
+  // 결과를 쓸 수 있는지는 대행 CT(`readAgencySpell`)가 정한다. 못 쓰면 그 이유만 여기서 가른다(표시용).
+  const issues = readAgencySpell(req);
+  const raw: any = req.spell_check;
+  const state: 'ok' | 'changed' | 'failed' | 'missing' = issues
+    ? 'ok'
+    : !raw || typeof raw !== 'object' ? 'missing' : raw.failed === true ? 'failed' : 'changed';
+  return {
+    type: 'spell_agency' as const,
+    messageType: String(req.message_type || ''),
+    subject: req.subject || null,
+    text: String(req.current_content ?? ''),
+    state,
+    issues,
+    checkedAt: raw && typeof raw === 'object' && typeof raw.checkedAt === 'string' ? raw.checkedAt : null,
   };
 }

@@ -16,6 +16,7 @@
 import pool, { query } from '../config/database';
 import { isMissingSchemaError } from './db-errors';
 import { DIRECT_SPELL_AI_SOURCE } from './ai-rate-limit';
+import type { SpellIssue } from './spell-check';
 
 /** 미가입 회사의 한 달 무료 횟수 */
 export const SPELL_FREE_MONTHLY_LIMIT = 5;
@@ -173,5 +174,28 @@ export async function finishSpellUse(
     return false;
   } finally {
     client?.release();
+  }
+}
+
+/**
+ * ★ 2026-09-28 검사 내용 저장(슈퍼관리자 사용 기록 상세 · Harold 지시) — 검사한 문안과 고칠 곳을 그 기록 행에 싣는다.
+ * 기록 전용이다: 칸이 아직 없거나(ALTER 전) 저장이 실패해도 던지지 않는다 → 고객이 받는 검사 결과·한도 판정은 그대로.
+ * 칸 = `spell_check_uses.checked_text text NULL` · `issues jsonb NULL`(jsonb 는 JSON.stringify 로 싣는다 · B-0824-1).
+ */
+export async function recordSpellDetail(
+  useId: number | null,
+  text: string,
+  issues: readonly SpellIssue[],
+): Promise<void> {
+  if (useId == null) return;
+  try {
+    await query(
+      `UPDATE spell_check_uses SET checked_text = $2, issues = $3::jsonb
+        WHERE id = $1`,
+      [useId, text, JSON.stringify(issues)],
+    );
+  } catch (err: any) {
+    if (isMissingSchemaError(err)) return; // ALTER 전 — 개수만 남는다(옛 기록과 같다)
+    console.warn('[spell-quota] 검사 내용 저장 실패(결과에는 영향 없음):', err?.message);
   }
 }
