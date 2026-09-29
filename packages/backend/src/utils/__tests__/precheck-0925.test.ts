@@ -256,7 +256,8 @@ describe('5. 스팸 무료 체험 · 청구 제외', () => {
     const camp = read('routes/campaigns.ts');
     expect(camp).toContain('const isTrial = r.source === SPAM_TRIAL_SOURCE;');
     // ★ 2026-09-26 F49: 비용은 청구 제외 판정 CT(체험 + 무료 자동 검사)를 따른다
-    expect(camp).toContain('if (isCompleted && isSpamTestBillable(r.source)) {');
+    // ★ 2026-09-29 차수 5: 발송 실패 행도 비용 0(청구 판정 CT isSpamResultBilled · v2-round5-0929 ③)
+    expect(camp).toContain('if (isSpamResultBilled(r.result) && isSpamTestBillable(r.source)) {');
   });
   it('Codex 1R — 최근 검사 조회는 실제로 보낸 종류의 결과가 있는 검사만 인정한다', () => {
     const rc = route.slice(route.indexOf("router.post('/recent-check'"), route.indexOf("router.get('/tests'"));
@@ -410,15 +411,22 @@ describe('7. 월 AI 호출 한도 면제 = 문자 맞춤법만 · 검사와 셈�
 describe('8. 화면 계약', () => {
   const panel = readFront('components/DirectSendPanel.tsx');
   const warn = readFront('components/direct-send/SendSpamWarnModal.tsx');
+  // ★ 2026-09-29 R112 — 점검 판정·세 창 = 공용 훅(useSendPrecheck) · 발송 바 = 공용 부품(SendBar)으로 옮겼다(직접 타겟 발송 창과 같이 쓴다)
+  const precheckHook = readFront('components/direct-send/useSendPrecheck.tsx');
+  const sendBar = readFront('components/direct-send/SendBar.tsx');
   it('옛 보조 버튼 3개·옵션 카드가 사라지고 점검 칸 · 발송 바 · 경고 창이 선다', () => {
     expect(panel).not.toContain('<span>스팸필터테스트</span>');
     expect(panel).not.toContain('<span>AI 다듬기</span>');
     expect(panel).not.toContain('ds-optcard');
-    expect(panel).toContain('<DirectCheckTiles');
-    expect(panel).toContain('<footer className="ds-modal__foot">');
-    expect(panel).toContain('<SendSpamWarnModal');
-    expect(panel).toContain('<TrialUpsellModal');
-    expect(panel).toContain('await decideSendWarn()');
+    expect(panel).toContain('useSendPrecheck({');
+    expect(panel).toContain('{precheck.tiles}');
+    expect(panel).toContain('{precheck.modals}');
+    expect(panel).toContain('<SendBar');
+    expect(precheckHook).toContain('<DirectCheckTiles');
+    expect(sendBar).toContain('<footer className={`ds-modal__foot');
+    expect(precheckHook).toContain('<SendSpamWarnModal');
+    expect(precheckHook).toContain('<TrialUpsellModal');
+    expect(panel).toContain('await precheck.decideSendWarn()');
   });
   it('경고 창 — 통신사 스팸 서비스 이름 · 비용 청구 안내 · 24시간 다시 보지 않기(안 한 경우에만)', () => {
     expect(warn).toContain('SKT T스팸필터링');

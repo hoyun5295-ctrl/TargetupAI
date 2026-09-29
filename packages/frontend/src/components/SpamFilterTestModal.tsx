@@ -32,6 +32,9 @@ interface TestResult {
   received: boolean;
   received_at: string | null;
   result: 'received' | 'blocked' | 'timeout' | 'failed' | null;
+  /** ★ 2026-09-29 발송 실패 사유(서버가 결과 코드로 판정 · 없으면 옛 문구) — rejected = 게이트웨이가 보내기 전에 막음 · carrier = 통신사 실패 */
+  failKind?: 'rejected' | 'carrier';
+  failLabel?: string;
 }
 
 interface TestHistoryItem {
@@ -301,6 +304,7 @@ export default function SpamFilterTestModal({
     }
     if (status === 'completed') {
       if (r.result === 'blocked') return { cls: 'block', chip: '막혔어요', sub: '통신사 스팸 차단에 걸렸어요' };
+      if (r.result === 'failed' && r.failKind === 'rejected') return { cls: 'block', chip: '보내지 못했어요', sub: `보내기 전에 막혔어요: ${r.failLabel || '문자 규격 오류'}` };
       if (r.result === 'failed') return { cls: 'block', chip: '전달 실패', sub: '통신사가 문자를 받지 않았어요' };
       return { cls: 'warn', chip: '결과 없음', sub: '60초 안에 통신사 결과가 오지 않았어요' };
     }
@@ -561,7 +565,7 @@ export default function SpamFilterTestModal({
                               {historyDetail.results.map((r: any, idx: number) => {
                                 const chip = r.received ? ['통과', 'bg-emerald-50 text-emerald-700 ring-emerald-200']
                                   : r.result === 'blocked' ? ['막혔어요', 'bg-rose-50 text-rose-700 ring-rose-200']
-                                    : r.result === 'failed' ? ['전달 실패', 'bg-rose-50 text-rose-700 ring-rose-200']
+                                    : r.result === 'failed' ? [r.failKind === 'rejected' ? '보내지 못했어요' : '전달 실패', 'bg-rose-50 text-rose-700 ring-rose-200']
                                       : r.result === 'timeout' ? ['결과 없음', 'bg-amber-50 text-amber-800 ring-amber-200']
                                         : ['확인 중', 'bg-stone-100 text-stone-500 ring-transparent'];
                                 return (

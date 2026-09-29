@@ -95,7 +95,9 @@
 
 .ds-modal__body {
   display: grid;
-  grid-template-columns: 560px 1px 1fr;
+  /* ★ 2026-09-29 한줄로 V2 차수 5 — 왼쪽 열 = 창 폭의 55%(최소 500 · 최대 560). 1018 이상은 종전 560 그대로 · 좁은 폭에서 수신자 칸이
+     259px까지 줄던 것(820 = 319). 최소 500 = 점검 두 칸(스팸 · 맞춤법) 글자가 잘리지 않는 폭(한 칸 217 · 0929 실측). */
+  grid-template-columns: min(560px, max(500px, 55%)) 1px 1fr;
   grid-template-rows: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
@@ -2208,4 +2210,24 @@ p.ds-warn-good { margin: 0; display: flex; gap: 7px; align-items: center; paddin
   .rdi-foot { flex-wrap: wrap; }
   .rdi-note { flex: 1 1 100%; margin-bottom: 2px; }
   .rdi-note + button { margin-left: auto; }
+}
+
+/* ★ 2026-09-29 한줄로 V2 차수 5 — 공용 발송 바(SendBar = 직접발송 · 직접 타겟 발송) 폭 규칙. 알림톡·브랜드메시지(ks-foot)는 제 규칙 그대로.
+   옛: 왼쪽 옵션 칸이 본문 열(560)에 묶여 예약·분할·광고 표기 세 칸이 203/133/156px로 고정 → 「3,000건 · 15분마다」「광고 표기」「(광고) · 080 붙음」이
+   모든 PC 폭에서 말줄임(필요 폭 203/188/193 = 584 · 칸 안 492). 820·1100 폭은 오른쪽이 좁아 발신번호까지 잘렸다(0929 폭별 실측).
+   1280 이상 = 옵션 칸 640~760 · 발송 칸 나머지(최소 460 = 발신번호 + 보내기 최소 200) · 본문 구분선과 어긋나는 세로선은 숨김 / 768~1279 = 옵션 줄 · 발송 줄 두 줄. */
+@media (min-width: 1280px) {
+  .ds-modal__foot--send { grid-template-columns: minmax(640px, 760px) minmax(460px, 1fr); }
+  .ds-modal__foot--send > .ds-modal__vdiv { display: none; }
+  /* 발신번호는 줄이지 않고 보내기 버튼이 줄어든다(최소 200 · 발신번호는 버튼 몫을 뺀 폭까지만) — 1280·1366 에서 번호가 말줄임되던 것 */
+  .ds-modal__foot--send .ds-sender { flex-shrink: 0; max-width: calc(100% - 212px); }
+}
+@media (min-width: 768px) {
+  .ds-modal__foot--send .ds-foot-opts--reserve { grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr) minmax(0, 1.03fr); }
+}
+@media (min-width: 768px) and (max-width: 1279px) {
+  .ds-modal__foot--send { grid-template-columns: minmax(0, 1fr); }
+  .ds-modal__foot--send > .ds-modal__vdiv { display: none; }
+  .ds-modal__foot--send .ds-foot-opts { padding: 12px 24px 0; }
+  .ds-modal__foot--send .ds-foot-send { padding: 10px 24px 12px; }
 }

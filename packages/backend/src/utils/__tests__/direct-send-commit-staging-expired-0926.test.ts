@@ -16,7 +16,8 @@ const route = src.slice(at0, src.indexOf('\nrouter.', at0 + 10));
 describe('/direct-send/commit 적재 만료', () => {
   it('만료 판정은 CT(staging-sweeper resolveStagingCommitState) 하나를 쓴다', () => {
     // ★ 2026-09-26 F38 Codex 1R: 같은 CT에서 준비분 잠금(withStagingLock)도 함께 가져온다
-    expect(src).toMatch(/import \{ resolveStagingCommitState(, withStagingLock)? \} from '\.\.\/utils\/staging-sweeper'/);
+    // ★ 2026-09-29 R112 — 같은 CT 에서 수신자별 회신번호 보관 칸(옮김·되돌림·지움)도 가져온다
+    expect(src).toMatch(/import \{ resolveStagingCommitState(, withStagingLock)?(, [A-Za-z]+)* \} from '\.\.\/utils\/staging-sweeper'/);
     expect(route).toContain("(await resolveStagingCommitState(stagingId, companyId)) === 'expired'");
   });
 

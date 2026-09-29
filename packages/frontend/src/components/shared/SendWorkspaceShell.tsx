@@ -64,6 +64,11 @@ export interface SendWorkspaceShellProps {
    */
   headerActions?: ReactNode;
   /**
+   * ★ 2026-09-29 창 맨 아래 칸(두 열 아래 전체 폭) — 직접 타겟 발송 창의 발송 바(직접발송과 같은 SendBar).
+   *   안 넘기면 렌더하지 않는다(기존 소비처 변경 0).
+   */
+  footer?: ReactNode;
+  /**
    * 스크림 z-index 티어. 기본 z-[2000](인터럽트 티어).
    * 이 셸 위로 호출부(대시보드)가 z-[60]·z-[70] 모달(미리보기·특수문자·보관함·예약 시각)을 띄워야 하면
    * 옛 모달과 같은 `z-50`을 넘긴다. 포털은 body 끝에 붙어 같은 z면 나중 것이 위다.
@@ -73,7 +78,7 @@ export interface SendWorkspaceShellProps {
 
 export default function SendWorkspaceShell({
   show, onClose, title, subtitle, icon, accent = 'violet',
-  notice, aside, asideWidth = '380px', maxW = 'max-w-6xl', children, zClass = 'z-[2000]', headerActions,
+  notice, aside, asideWidth = '380px', maxW = 'max-w-6xl', children, zClass = 'z-[2000]', headerActions, footer,
 }: SendWorkspaceShellProps) {
   // ESC 닫기 — 백드롭 클릭은 작업 손실을 만들어 쓰지 않는다(2026-07-04 전면 제거 룰).
   useEffect(() => {
@@ -85,11 +90,16 @@ export default function SendWorkspaceShell({
 
   if (!show) return null;
   const tone = ACCENT[accent];
+  // ★ 2026-09-29 맨 아래 칸(footer)이 있으면 휴대폰 폭에서는 창 전체가 스크롤된다(직접발송 창과 같은 "자유 높이").
+  //   고정 높이 창에 발송 바(휴대폰 폭 약 290px)를 붙이면 가운데 수신자 목록이 거의 0이 됐다(0929 폭별 실측 390 · R112).
+  //   footer 를 안 넘기는 창은 클래스가 붙지 않는다(기존 소비처 변경 0).
+  const freeOnMobile = !!footer;
 
   return createPortal(
-    <div className={`fixed inset-0 ${zClass} bg-slate-900/35 backdrop-blur-[2px] flex items-center justify-center p-3 sm:p-5`}>
+    // ★ 2026-09-29 한줄로 V2 차수 5 — 발송 바가 있는 창은 휴대폰 폭에서 전체 화면(직접발송 창과 같다 · 둘레 여백 12px 때문에 발송 바 광고 칸이 잘렸다)
+    <div className={`fixed inset-0 ${zClass} bg-slate-900/35 backdrop-blur-[2px] flex items-center justify-center ${freeOnMobile ? 'p-0 md:p-5' : 'p-3 sm:p-5'}`}>
       <div
-        className={`bg-white rounded-[20px] w-full ${maxW} h-[94vh] sm:h-[92vh] flex flex-col overflow-hidden ring-1 ring-slate-900/5 shadow-[0_32px_90px_-24px_rgba(15,23,42,0.45)]`}
+        className={`bg-white ${freeOnMobile ? 'rounded-none md:rounded-[20px] h-full md:h-[92vh]' : 'rounded-[20px] h-[94vh] sm:h-[92vh]'} w-full ${maxW} flex flex-col overflow-hidden${freeOnMobile ? ' max-md:overflow-y-auto' : ''} ring-1 ring-slate-900/5 shadow-[0_32px_90px_-24px_rgba(15,23,42,0.45)]`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -121,13 +131,15 @@ export default function SendWorkspaceShell({
         {notice && <div className="shrink-0 px-5 sm:px-7 pt-4">{notice}</div>}
 
         {/* 본문 — 데스크톱 2컬럼 / 모바일 1컬럼(좌측이 위) */}
-        <div className="flex-1 min-h-0 flex flex-col md:flex-row">
+        <div className={`flex-1 min-h-0 flex flex-col md:flex-row${freeOnMobile ? ' max-md:flex-none' : ''}`}>
           <aside className="shrink-0 w-full md:w-[var(--aside-w)] flex flex-col min-h-0 max-h-[46vh] md:max-h-none border-b md:border-b-0 md:border-r border-slate-100 bg-slate-50/60"
             style={{ ['--aside-w' as any]: asideWidth }}>
             {aside}
           </aside>
           <main className="flex-1 min-h-0 overflow-y-auto bg-white">{children}</main>
         </div>
+
+        {footer && <div className="shrink-0">{footer}</div>}
       </div>
     </div>,
     document.body,

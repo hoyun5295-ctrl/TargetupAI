@@ -12,6 +12,7 @@
  */
 import { query } from '../config/database';
 import { normalizePhone } from './normalize';
+import { SPAM_RESULT } from './sms-result-map';
 
 /** 회사당 평생 체험 횟수 */
 export const SPAM_TRIAL_LIMIT = 3;
@@ -44,6 +45,19 @@ export function isAutoSpamSource(source: string | null | undefined): boolean {
   return source === 'auto_ai' || source === SPAM_AUTO_FREE_SOURCE;
 }
 
+/**
+ * ★ 2026-09-29 한줄로 V2 차수 5(B-0928-1 ②) — 체험 한 칸을 쓴 검사인가(SQL 조각 · WHERE에 AND로 붙인다).
+ * 결과 행이 있고 **전부 발송 실패**(failed = 게이트웨이 반려·통신사 실패)면 테스트폰에 한 통도 닿지 않았다 → 세지 않는다.
+ * 옛: 결과와 무관하게 검사 1건 = 1회. 적재 전에 실패한 체험은 행을 지워 되돌리면서(라우트), 적재 뒤 반려된 체험은 그대로 셌다
+ *   (0928 U+200B 반려 3회). 청구 규칙(m042 「발송 실패는 청구하지 않는다」)과 같은 뜻이다.
+ * 진행 중(결과 NULL)·결과 행이 아직 없는 검사는 센다 — 잠금 안 동시 요청이 3을 넘기지 못하게.
+ * 세는 두 곳(readSpamTrialStatus · countSpamTrialsInTx)이 이 조각 하나를 쓴다.
+ */
+export function spamTrialCountedSql(alias = 't'): string {
+  return `NOT (EXISTS (SELECT 1 FROM spam_filter_test_results fx WHERE fx.test_id = ${alias}.id)`
+    + ` AND NOT EXISTS (SELECT 1 FROM spam_filter_test_results fx WHERE fx.test_id = ${alias}.id AND (fx.result IS NULL OR fx.result <> '${SPAM_RESULT.FAILED}')))`;
+}
+
 /** 스팸 검사 표 advisory 잠금 키(체험 예약 전용) */
 export const SPAM_TRIAL_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('spam-trial'), hashtext($1::text))`;
 
@@ -65,7 +79,7 @@ export async function readSpamTrialStatus(companyId: string): Promise<SpamTrialS
   );
   const eligible = !plan.rows[0]?.spam_filter_enabled;
   const r = await query(
-    `SELECT COUNT(*)::int AS used,
+    `SELECT COUNT(*) FILTER (WHERE ${spamTrialCountedSql('t')})::int AS used,
             COUNT(*) FILTER (WHERE EXISTS (
               SELECT 1 FROM spam_filter_test_results x WHERE x.test_id = t.id AND x.result = 'blocked'
             ))::int AS blocked_found
@@ -86,7 +100,7 @@ export async function readSpamTrialStatus(companyId: string): Promise<SpamTrialS
 /** 트랜잭션 안에서 체험 한 칸이 남았는가(잠금을 잡은 뒤 부른다). */
 export async function countSpamTrialsInTx(client: { query: (sql: string, params?: any[]) => Promise<any> }, companyId: string): Promise<number> {
   const r = await client.query(
-    `SELECT COUNT(*)::int AS used FROM spam_filter_tests WHERE company_id = $1::uuid AND source = $2`,
+    `SELECT COUNT(*)::int AS used FROM spam_filter_tests t WHERE t.company_id = $1::uuid AND t.source = $2 AND ${spamTrialCountedSql('t')}`,
     [companyId, SPAM_TRIAL_SOURCE],
   );
   return Number(r.rows[0]?.used || 0);

@@ -188,7 +188,9 @@ describe('화면 배선', () => {
   });
 
   it('분할 칸 글자 = "N건 · M분마다"(직접발송·알림톡 같은 함수)', () => {
-    expect(front('components/DirectSendPanel.tsx')).toContain('splitTileLabel(splitCount, splitInterval)');
+    // ★ 2026-09-29 R112 — 직접발송 발송 바는 공용 부품(SendBar · 직접 타겟 발송 창과 같이 쓴다)
+    expect(front('components/DirectSendPanel.tsx')).toContain('<SendBar');
+    expect(front('components/direct-send/SendBar.tsx')).toContain('splitTileLabel(splitCount, splitInterval)');
     expect(front('components/AlimtalkSendModal.tsx')).toContain('splitTileLabel(splitCount, splitInterval)');
   });
 
@@ -197,7 +199,10 @@ describe('화면 배선', () => {
     expect(d).toContain('splitIntervalMinutes: isAlimtalk ? (alimSplitEnabled ? alimSplitInterval : null) : (splitEnabled ? splitInterval : null),');
     expect(d).toContain('splitIntervalMinutes: isTargetAlimtalk ? null : (splitEnabled ? splitInterval : null),');
     expect(d).toContain('alimtalkSplitInterval: data.splitInterval,');
+    // ★ 2026-09-29 R112 — 타겟 발송 창 발송 바 = 직접발송과 같은 부품(SendBar)이 간격 칸을 소유한다
     const t = front('components/TargetSendModal.tsx');
-    expect(t).toContain('setSplitInterval(');
+    expect(t).toContain('<SendBar');
+    expect(t).toContain('setSplitInterval={setSplitInterval}');
+    expect(front('components/direct-send/SendBar.tsx')).toContain('setSplitInterval(');
   });
 });

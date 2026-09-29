@@ -32,7 +32,7 @@ import { revokeTrustedDevices, maskPhone, isMfaSchemaMissing } from '../utils/mf
 import { restrictAccount, isRestrictedStatus, RestrictionOutcome } from '../utils/account-action';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents } from '../utils/sms-result-map';
+import { spamResultRowStatus, SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
 import { round2 } from '../utils/unit-price';
 import { validateSmsTables } from '../utils/sms-table-validator';
@@ -3237,7 +3237,8 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         testDetail.push({
           phone: r.phone,
           msgType: r.message_type || 'SMS',
-          status: r.result ? 'success' : 'pending',
+          // ★ 2026-09-29 한줄로 V2 차수 5 — 발송 실패 행은 실패(옛: 결과가 있으면 성공)
+          status: spamResultRowStatus(r.result),
           result: r.result || 'pending',
           carrier: r.carrier,
           sentAt: r.sent_at,

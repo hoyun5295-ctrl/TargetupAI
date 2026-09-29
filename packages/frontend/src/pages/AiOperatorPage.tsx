@@ -439,6 +439,7 @@ export default function AiOperatorPage() {
     handleMmsMultiUpload,
     handleMmsImageRemove,
     handleMmsFromAsset,
+    handleMmsImageSwap,
   } = useMmsUpload((msg) => setMmsError(msg));
   // 채널 변경 시 예상 비용 재계산용 회사 실단가 (SMS/LMS/MMS) — 임의 상수 미사용
   const [pricing, setPricing] = useState<{ sms: number; lms: number; mms: number } | null>(null);
@@ -1835,6 +1836,8 @@ export default function AiOperatorPage() {
                   handleMmsMultiUpload={handleMmsMultiUpload}
                   handleMmsImageRemove={handleMmsImageRemove}
                   handleMmsFromAsset={handleMmsFromAsset}
+                  /* ★ 2026-09-29 한줄로 V2 차수 5 — 사진 순서 바꾸기(끌어 놓기 · ◀ ▶) · 발송은 목록 순서(toMmsImagePaths) */
+                  handleMmsImageSwap={handleMmsImageSwap}
                   errorMessage={mmsError}
                   onConfirm={(count) => {
                     // 이미지 첨부 확정 시 발송 유형을 MMS로 고정 + 발송 에러 해제

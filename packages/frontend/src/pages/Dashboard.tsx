@@ -65,6 +65,11 @@ import AlimtalkSendModal from '../components/AlimtalkSendModal';
 // ★ 2026-07-29 브랜드메시지 발송 풀 화면 — 알림톡과 같은 진입 패턴, 성격은 다르다(템플릿 검수 불필요)
 import BrandSendModal from '../components/BrandSendModal';
 import { carryPhonesToDirectRecipients } from '../utils/send-checks';
+// ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 추출 보관본(서버) 요청 CT
+import {
+  requestKeptExtraction, fetchTargetExtractionRows, fillTargetExtractionCallback, longestRowOf,
+  type TargetExtraction,
+} from '../utils/target-extraction';
 import AgencySendIntroModal from '../components/agency/AgencySendIntroModal';
 // ★ 2026-08-16 AI 마케팅 진단(퍼널 A — 설계서 §5-2·§5-3): FREE 진단 → TRIAL 7일 자동 지급
 import DiagnosisModal from '../components/marketing-diagnosis/DiagnosisModal';
@@ -425,7 +430,16 @@ export default function Dashboard() {
   const [targetMsgType, setTargetMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
   const [targetSubject, setTargetSubject] = useState('');
   const [targetMessage, setTargetMessage] = useState('');
+  // ★ 2026-09-29 R112 — targetRecipients = 보관본 앞 15명(미리보기·스팸 검사 첫 행 등 앞 몇 명만 읽는 곳) · 명단 전체는 서버 보관본
   const [targetRecipients, setTargetRecipients] = useState<any[]>([]);
+  const [targetExtraction, setTargetExtraction] = useState<TargetExtraction | null>(null);
+  const [targetExtractionExpired, setTargetExtractionExpired] = useState(false);
+  const [targetReextracting, setTargetReextracting] = useState(false);
+  /** 수신자별 회신번호 칸이 빈 인원(서버 보관본) — null = 모름·채우는 중 */
+  const [targetCallbackMissing, setTargetCallbackMissing] = useState<number | null>(null);
+  const targetCallbackSeqRef = useRef(0);
+  /** 회신번호 제외 확인 창 뒤에 띄울 발송 확인 값(서버 집계) */
+  const [pendingTargetConfirm, setPendingTargetConfirm] = useState<any>(null);
   const [targetSending, setTargetSending] = useState(false);
   const [targetListPage, setTargetListPage] = useState(0);
   const [targetListSearch, setTargetListSearch] = useState('');
@@ -452,7 +466,6 @@ export default function Dashboard() {
   // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 발송(L/B) 시 LMS 제목 — 알림톡 자체는 제목 무관, 대체 발송만 사용.
   const [alimtalkNextSubject, setAlimtalkNextSubject] = useState<string>('');
   const [alimtalkSenders, setAlimtalkSenders] = useState<any[]>([]);
-  const kakaoEnabled = !!(user as any)?.company?.kakaoEnabled;
   // 카카오 템플릿 + 발신프로필 로드 (D130)
   const loadKakaoTemplates = async () => {
     try {
@@ -737,7 +750,68 @@ export default function Dashboard() {
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
 
-  // 직접타겟추출 발송 함수
+  /**
+   * ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 발송 확인 창 전 서버 집계(직접발송과 같은 /direct-send/count · stagingId = 보관본 id).
+   *   옛 동기 경로(/direct-send)가 발송 요청 안에서 하던 확인 두 가지(이름 빈 인원 · 수신자별 회신번호 제외)를 여기서 먼저 받는다.
+   *   회신번호 제외가 있으면 제외 확인 창 → [제외하고 발송] → 발송 확인 창. 전원 제외면 오류 안내.
+   */
+  const confirmTargetSend = async () => {
+    const ext = targetExtraction;
+    if (!ext || targetExtractionExpired) {
+      setToast({ show: true, type: 'error', message: '발송 명단이 만료됐습니다. 같은 조건으로 다시 추출해 주세요.' });
+      return;
+    }
+    const isTargetAlimtalk = targetSendChannel === 'kakao_alimtalk';
+    const adOn = isTargetAlimtalk ? false : adTextEnabled;
+    const individual = !isTargetAlimtalk && useIndividualCallback;
+    const hasNameVar = /%(이름|고객명|성함)%/.test(targetMessage || '');
+    try {
+      const res = await fetch('/api/campaigns/direct-send/count', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        // ★ 2026-09-27 S5-05 — 광고면 수신거부를 항상 뺀다(서버와 같은 판정 · 확인 창 숫자 = 실제 발송 수)
+        body: JSON.stringify({
+          stagingId: ext.extractionId, dedupEnabled: true, unsubFilterEnabled: true, adEnabled: adOn,
+          includeNameEmpty: hasNameVar, useIndividualCallback: individual,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setToast({ show: true, type: 'error', message: data.error || '발송 대상 집계에 실패했습니다.' });
+        return;
+      }
+      if (data.callbackError) {
+        setToast({ show: true, type: 'error', message: data.callbackError.error || '보낼 수 있는 수신자별 회신번호가 없습니다.' });
+        return;
+      }
+      const confirmData = {
+        show: true,
+        type: reserveEnabled ? 'scheduled' as const : 'immediate' as const,
+        // 회신번호 제외가 있으면 그것까지 뺀 실제 발송 인원(서버 · 워커 결과와 같은 집합)
+        count: data.callbackConfirm && typeof data.sendCountAfterCallback === 'number' ? data.sendCountAfterCallback : data.sendCount,
+        unsubscribeCount: data.unsubscribeCount,
+        duplicateCount: data.duplicateCount,
+        dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined,
+        from: 'target' as const,
+        msgType: isTargetAlimtalk ? '알림톡' : targetMsgType,
+        dedupEnabled: true,
+        unsubFilterEnabled: true,
+        nameEmptyCount: Number(data.nameEmptyCount) || 0,
+      };
+      if (data.callbackConfirm) {
+        // ★ 미등록 회신번호 확인 모달 — 옛 동기 경로와 같은 값(callback-filter CT) · 확인하면 발송 확인 창으로
+        setPendingTargetConfirm(confirmData);
+        setCallbackConfirm({ ...data.callbackConfirm, show: true, sendType: 'target' });
+        return;
+      }
+      setSendConfirm(confirmData as any);
+    } catch {
+      setToast({ show: true, type: 'error', message: '발송 대상 집계에 실패했습니다.' });
+    }
+  };
+
+  // 직접타겟추출 발송 함수 — ★ 2026-09-29 R112 보관본 = 직접발송과 같은 확정 길(/direct-send/commit · stagingId = 보관본 id)
+  //   명단은 서버 보관본에 있다(요청 본문에 싣지 않는다). 수신거부·중복·회신번호 제외·차감은 서버가 전체 1회.
   const executeTargetSend = async (confirmCallbackExclusion?: boolean, confirmNameEmpty?: boolean) => {
     // ★ D131: MMS 이미지 첨부 검증 — 채널 조건 제거 (MMS msgType은 어떤 채널에서도 이미지 필수)
     const mmsErr = validateMmsBeforeSend(targetMsgType, mmsUploadedImages.length);
@@ -745,34 +819,25 @@ export default function Dashboard() {
       setToast({ show: true, type: 'error', message: mmsErr });
       return;
     }
-    // ★ D111 P2: %이름%/%고객명%/%성함% 변수가 있는데 이름 비어있는 수신자 경고
+    const ext = targetExtraction;
+    if (!ext || targetExtractionExpired) {
+      setToast({ show: true, type: 'error', message: '발송 명단이 만료됐습니다. 같은 조건으로 다시 추출해 주세요.' });
+      setSendConfirm({ show: false, type: 'immediate', count: 0, unsubscribeCount: 0 });
+      return;
+    }
+    // ★ D111 P2: %이름%/%고객명%/%성함% 변수가 있는데 이름 비어있는 수신자 경고 — ★0929 R112 서버 집계 값(확인 창 전에 셌다)
     if (!confirmNameEmpty) {
-      const msgForCheck = targetMessage;
-      const hasNameVar = /%(이름|고객명|성함)%/.test(msgForCheck || '');
-      if (hasNameVar && targetRecipients && targetRecipients.length > 0) {
-        const emptyCount = targetRecipients.filter((r: any) => !r.name || String(r.name).trim() === '').length;
-        if (emptyCount > 0) {
-          setSendConfirm({ show: false, type: 'immediate', count: 0, unsubscribeCount: 0 });
-          setNameEmptyWarning({ show: true, emptyCount, totalCount: targetRecipients.length, sendType: 'target' });
-          return;
-        }
+      const hasNameVar = /%(이름|고객명|성함)%/.test(targetMessage || '');
+      const emptyCount = Number((sendConfirm as any).nameEmptyCount) || 0;
+      if (hasNameVar && emptyCount > 0) {
+        setSendConfirm({ show: false, type: 'immediate', count: 0, unsubscribeCount: 0 });
+        setNameEmptyWarning({ show: true, emptyCount, totalCount: ext.count, sendType: 'target' });
+        return;
       }
     }
     setTargetSending(true);
     try {
       const token = localStorage.getItem('token');
-      // ★ D102: 프론트 변수 치환 제거 — 백엔드 replaceVariables 컨트롤타워 하나로 통일
-      // customMessages를 보내지 않으므로 백엔드에서 DB 고객 데이터 기반으로 치환 + 포맷팅
-      const recipientsForSend = targetRecipients.map((r: any) => ({
-        // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
-        phone: r.phone,
-        name: cellToString(r.name),
-        extra1: cellToString(r.extra1),
-        extra2: cellToString(r.extra2),
-        extra3: cellToString(r.extra3),
-        callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn),
-      }));
-
       const isTargetAlimtalk = targetSendChannel === 'kakao_alimtalk';
       const targetConvertButtons = (buttons: any[]) => {
         if (!buttons || buttons.length === 0) return null;
@@ -787,13 +852,14 @@ export default function Dashboard() {
         });
         return JSON.stringify(obj);
       };
-      const res = await fetch('/api/campaigns/direct-send', {
+      const res = await fetch('/api/campaigns/direct-send/commit', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
+          stagingId: ext.extractionId,
           msgType: isTargetAlimtalk ? 'LMS' : targetMsgType,
           // ★ D130: 알림톡 매핑 버그 수정 — 'kakao' → 'alimtalk' (백엔드 directChannel === 'alimtalk' 체크와 정합)
           sendChannel: isTargetAlimtalk ? 'alimtalk' : 'sms',
@@ -802,7 +868,6 @@ export default function Dashboard() {
           callback: isTargetAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
           useIndividualCallback: isTargetAlimtalk ? false : useIndividualCallback,
           individualCallbackColumn: (!isTargetAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
-          recipients: recipientsForSend,
           adEnabled: isTargetAlimtalk ? false : adTextEnabled,
           scheduled: reserveEnabled,
           scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
@@ -811,10 +876,9 @@ export default function Dashboard() {
           splitIntervalMinutes: isTargetAlimtalk ? null : (splitEnabled ? splitInterval : null),
           // ★ D141 B4 심화: 채널이 MMS일 때만 이미지 paths 전달 (5경로 일관성)
           mmsImagePaths: (isTargetAlimtalk || targetMsgType !== 'MMS') ? [] : toMmsImagePaths(mmsUploadedImages),
-          ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
-          // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
-          dedupEnabled: sendConfirm.dedupEnabled ?? true,
-          unsubFilterEnabled: sendConfirm.unsubFilterEnabled ?? true,
+          // ★ D102 · D123: 직접 타겟 발송은 중복제거·수신거부제거가 항상 켜져 있다(화면 체크박스 없음 · 서버가 전체 1회)
+          dedupEnabled: true,
+          unsubFilterEnabled: true,
           // ★ D130 알림톡 전용 파라미터 (설계서 §6-3-D)
           ...(isTargetAlimtalk && kakaoSelectedTemplate ? {
             alimtalkProfileId: alimtalkProfileId || kakaoSelectedTemplate.profile_id || '',
@@ -848,23 +912,13 @@ export default function Dashboard() {
         setTargetSending(false);
         return;
       }
-      // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
-      if (data.callbackConfirmRequired) {
-        setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
-        setCallbackConfirm({
-          show: true,
-          callbackMissingCount: data.callbackMissingCount,
-          callbackUnregisteredCount: data.callbackUnregisteredCount,
-          unregisteredDetails: data.unregisteredDetails || [],
-          remainingCount: data.remainingCount,
-          message: data.message,
-          sendType: 'target',
-        });
-        setTargetSending(false);
-        return;
-      }
-      if (data.success) {
-        setToast({show: true, type: 'success', message: data.message});
+      // ★ 2026-09-29 R112 — 23시간 넘은 보관본은 서버가 받지 않는다(staging-sweeper 기준) → 만료 안내 띠
+      if (data.code === 'STAGING_EXPIRED') {
+        setTargetExtractionExpired(true);
+        setToast({show: true, type: 'error', message: '발송 명단이 만료됐습니다. 같은 조건으로 다시 추출해 주세요.'});
+        setTimeout(() => setToast({show: false, type: 'error', message: ''}), 4000);
+      } else if (data.success) {
+        setToast({show: true, type: 'success', message: data.message || `${(data.accepted || 0).toLocaleString()}건 발송이 접수됐습니다.`});
         setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
         if (balanceInfo?.billingType === 'prepaid') {
           const balanceRes = await fetch('/api/balance', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
@@ -872,6 +926,7 @@ export default function Dashboard() {
         }
         setShowTargetSend(false);
         setTargetRecipients([]);
+        setTargetExtraction(null);
         setTargetMessage('');
         setTargetSubject('');
         setKakaoMessage('');
@@ -879,7 +934,7 @@ export default function Dashboard() {
         loadRecentCampaigns();
         loadScheduledCampaigns();
       } else {
-        setToast({show: true, type: 'error', message: data.error});
+        setToast({show: true, type: 'error', message: data.error || '발송 접수에 실패했습니다.'});
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
       }
     } catch (err) {
@@ -890,7 +945,52 @@ export default function Dashboard() {
     }
     setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
   };
-  
+
+  /** ★ 2026-09-29 R112 — 수신자별 회신번호 칸을 고르면 서버 보관본 회신번호를 그 칸 값으로 채우고 빈 인원을 받는다(늦게 온 응답은 버린다) */
+  const handleTargetCallbackColumn = async (column: string) => {
+    const ext = targetExtraction;
+    if (!ext) return;
+    const seq = ++targetCallbackSeqRef.current;
+    setTargetCallbackMissing(null);
+    const r = await fillTargetExtractionCallback(ext, column);
+    if (seq !== targetCallbackSeqRef.current) return;
+    if (r.ok) { setTargetCallbackMissing(r.data.missing); return; }
+    if (r.expired) { setTargetExtractionExpired(true); return; }
+    setToast({ show: true, type: 'error', message: r.error || '수신자별 회신번호를 채우지 못했습니다. 다시 골라 주세요.' });
+  };
+
+  /** ★ 2026-09-29 R112 — 같은 조건으로 다시 추출(만료 뒤 1클릭 · 쓴 문자·설정 유지) */
+  const reextractTarget = async () => {
+    const ext = targetExtraction;
+    if (!ext || targetReextracting) return;
+    setTargetReextracting(true);
+    try {
+      const r = await requestKeptExtraction(ext.filterBody);
+      if (!r.ok) {
+        setToast({ show: true, type: 'error', message: r.error || '다시 추출하지 못했습니다.' });
+        return;
+      }
+      if (r.data.count === 0) {
+        setToast({ show: true, type: 'error', message: '같은 조건에 맞는 고객이 이제 없습니다. 타겟을 다시 설정해 주세요.' });
+        return;
+      }
+      setTargetExtraction(r.data);
+      setTargetRecipients(r.data.sample);
+      setTargetExtractionExpired(false);
+      setTargetCallbackMissing(null);
+      if (useIndividualCallback && individualCallbackColumn) {
+        // 수신자별 회신번호를 쓰던 중이면 새 보관본에도 같은 칸으로 채운다
+        const seq = ++targetCallbackSeqRef.current;
+        const cb = await fillTargetExtractionCallback(r.data, individualCallbackColumn);
+        if (seq === targetCallbackSeqRef.current && cb.ok) setTargetCallbackMissing(cb.data.missing);
+      }
+      setToast({ show: true, type: 'success', message: `같은 조건으로 ${r.data.count.toLocaleString()}명을 다시 추출했습니다` });
+      setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+    } finally {
+      setTargetReextracting(false);
+    }
+  };
+
   /**
    * ★ 2026-09-12 이미 만들어 둔 AI 캠페인을 그대로 다시 보낸다.
    *   발송이 한 번 세워졌다가 이어지는 경로가 둘이다 — 미등록 회신번호 확인, 발신 인증(3.5).
@@ -939,8 +1039,9 @@ export default function Dashboard() {
       // 직접발송 재호출 (confirmCallbackExclusion=true)
       await executeDirectSend(true);
     } else if (sendType === 'target') {
-      // 타겟추출 발송 재호출
-      await executeTargetSend(true);
+      // ★ 2026-09-29 R112 타겟 = 서버 집계를 이미 받았다 → 발송 확인 창(제외는 발송 워커가 같은 CT로 한다)
+      if (pendingTargetConfirm) setSendConfirm(pendingTargetConfirm);
+      setPendingTargetConfirm(null);
     } else if ((sendType === 'ai' || sendType === 'aiCustom') && pendingAiCampaignId) {
       await resumeAiCampaignSend(pendingAiCampaignId, { confirmCallbackExclusion: true });
     }
@@ -1218,7 +1319,8 @@ export default function Dashboard() {
         targetVarMap[fm.variable] = fm.field_key;
       }
     });
-    let fullMsg = getMaxByteMessage(targetMessage, targetRecipients, targetVarMap);
+    // ★ 2026-09-29 R112 — 명단 전체 대신 서버가 준 칸마다 가장 긴 값 한 행(같은 결과)
+    let fullMsg = getMaxByteMessage(targetMessage, longestRowOf(targetExtraction), targetVarMap);
     fullMsg = buildAdMessageFront(fullMsg, targetMsgType, adTextEnabled, optOutNumber);
     // ★ D95: 컨트롤타워 사용
     const bytes = calculateSmsBytes(fullMsg);
@@ -1226,7 +1328,7 @@ export default function Dashboard() {
       setPendingBytes(bytes);
       setShowLmsConfirm(true);
     }
-  }, [targetMessage, targetMsgType, adTextEnabled, optOutNumber, showTargetSend, targetRecipients, targetSendChannel, targetFieldsMeta]);
+  }, [targetMessage, targetMsgType, adTextEnabled, optOutNumber, showTargetSend, targetExtraction, targetSendChannel, targetFieldsMeta]);
 
   const loadStats = async () => {
     try {
@@ -1450,7 +1552,8 @@ export default function Dashboard() {
 
   // 직접 타겟 추출 완료 콜백 (DirectTargetFilterModal → Dashboard)
   // ★ D43-3c: fieldsMeta 파라미터 추가, B16-07: selectedCallbackPhone 추가
-  const handleTargetExtracted = async (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string, extractedPhoneFields?: string[]) => {
+  // ★ 2026-09-29 R112 — 명단 전체 대신 서버 보관본(건수·앞 15명·가장 긴 값)을 받는다
+  const handleTargetExtracted = async (extraction: TargetExtraction, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string, extractedPhoneFields?: string[]) => {
     try {
       const token = localStorage.getItem('token');
       // 080 수신거부번호 로드
@@ -1489,17 +1592,26 @@ export default function Dashboard() {
 
     // ★ D43-3c: 수신자 원본 저장 + 필드 메타 저장 (하드코딩 매핑 제거)
     // ★ B-D75-03: custom_fields flat 처리는 백엔드 extract API에서 수행 (컨트롤타워 원칙)
-    setTargetRecipients(recipients);
+    setTargetRecipients(extraction.sample);
+    setTargetExtraction(extraction);
+    setTargetExtractionExpired(false);
+    setTargetCallbackMissing(null);
+    targetCallbackSeqRef.current++;
     setTargetFieldsMeta(fieldsMeta);
     if (extractedPhoneFields) setPhoneFields(extractedPhoneFields);
-    // ★ D100: 직접타겟 추출 시 첫 번째 수신자를 샘플로 설정 (담당자테스트용)
-    //   이전: AI 추천에서만 setSampleCustomerRaw → 직접타겟 담당자테스트에 이전 AI 샘플 잔류
-    if (recipients.length > 0) {
-      setSampleCustomerRaw(recipients[0]);
+    // ★ D100: 직접타겟 추출 시 첫 번째 수신자를 샘플로 설정
+    //   이전: AI 추천에서만 setSampleCustomerRaw → 직접타겟에 이전 AI 샘플 잔류
+    if (extraction.sample.length > 0) {
+      setSampleCustomerRaw(extraction.sample[0]);
     }
     setShowDirectTargeting(false);
     setShowTargetSend(true);
-    setToast({ show: true, type: 'success', message: `${count.toLocaleString()}명 추출 완료` });
+    setToast({
+      show: true, type: 'success',
+      message: extraction.skippedNoPhone > 0
+        ? `${extraction.count.toLocaleString()}명 추출 완료 · 휴대폰 번호가 없는 ${extraction.skippedNoPhone.toLocaleString()}명은 뺐습니다`
+        : `${extraction.count.toLocaleString()}명 추출 완료`,
+    });
     setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
   };
 
@@ -2109,53 +2221,7 @@ const campaignData = {
     }
   };
 
-  // 직접타겟발송 담당자 테스트
-  const handleTargetTestSend = async () => {
-    setTestSending(true);
-    setTestSentResult(null);
-    try {
-      if (!targetMessage.trim()) {
-        setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' });
-        setTestSending(false);
-        return;
-      }
-      // ★ D131: MMS + 이미지 0장 차단 (QTmsg Agent 9007 파일 오류 방지)
-      if (targetMsgType === 'MMS' && mmsUploadedImages.length === 0) {
-        setToast({ show: true, type: 'error', message: 'MMS는 이미지 첨부가 필수입니다. 이미지를 업로드하거나 발송타입을 SMS/LMS로 변경해주세요.' });
-        setTestSending(false);
-        return;
-      }
-      // ★ D103: 순수 본문만. (광고)+080은 백엔드 test-send에서 추가
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/campaigns/test-send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          messageContent: targetMessage,
-          messageType: targetMsgType,
-          isAd: adTextEnabled,
-          subject: targetSubject || '',
-          // ★ D141 B4 심화: 채널이 MMS일 때만 이미지 paths 전달 (5경로 일관성 — 직접타겟 담당자 테스트)
-          mmsImagePaths: targetMsgType === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [],
-          // ★ D85: column 키 raw 데이터 전달
-          sampleCustomer: sampleCustomerRaw && Object.keys(sampleCustomerRaw).length > 0 ? sampleCustomerRaw : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        const contactList = data.contacts?.map((c: any) => `${c.name}(${c.phone})`).join(', ') || '';
-        setTestSentResult(`✅ ${data.message}\n${contactList}`);
-      } else {
-        setTestSentResult(`❌ ${data.error}`);
-      }
-    } catch (error) {
-      setTestSentResult('❌ 테스트 발송 실패');
-    } finally {
-      setTestSending(false);
-      setTestCooldown(true);
-      setTimeout(() => { setTestCooldown(false); setTestSentResult(null); }, 10000);
-    }
-  };
+  // ★ 2026-09-29 R112 직접 타겟 발송 담당자테스트 제거(Harold 0929 「굳이 필요없을 것 같다」) — 직접발송 창과 같게 점검 두 칸만 남긴다
 
   const handleLogout = () => {
     logout();
@@ -3398,12 +3464,20 @@ const campaignData = {
         />
       </main>
       {/* 직접 타겟 발송 모달 (D43-3c: TargetSendModal 컴포넌트 분리) */}
+      {/* ★ 2026-09-29 R112 — 열려 있을 때만 그린다(점검 칸이 열 때 검사 원장·요금제를 읽는다) */}
+      {showTargetSend && (
       <TargetSendModal
         show={showTargetSend}
-        onClose={() => { setShowTargetSend(false); setTargetRecipients([]); setTargetMessage(''); setTargetSubject(''); setKakaoMessage(''); setTargetSendChannel('sms'); }}
+        onClose={() => { setShowTargetSend(false); setTargetRecipients([]); setTargetExtraction(null); setTargetExtractionExpired(false); setTargetMessage(''); setTargetSubject(''); setKakaoMessage(''); setTargetSendChannel('sms'); }}
         fieldsMeta={targetFieldsMeta}
-        targetRecipients={targetRecipients}
-        setTargetRecipients={setTargetRecipients}
+        extraction={targetExtraction}
+        extractionExpired={targetExtractionExpired}
+        onExtractionChange={(next) => { setTargetExtraction(next); setTargetRecipients(next.sample); }}
+        onExtractionExpired={() => setTargetExtractionExpired(true)}
+        onReextract={() => { void reextractTarget(); }}
+        reextracting={targetReextracting}
+        onIndividualColumnPicked={(key) => { void handleTargetCallbackColumn(key); }}
+        callbackMissing={targetCallbackMissing}
         targetSendChannel={targetSendChannel}
         setTargetSendChannel={setTargetSendChannel}
         targetMsgType={targetMsgType}
@@ -3412,9 +3486,6 @@ const campaignData = {
         setTargetSubject={setTargetSubject}
         targetMessage={targetMessage}
         setTargetMessage={setTargetMessage}
-        kakaoMessage={kakaoMessage}
-        setKakaoMessage={setKakaoMessage}
-        kakaoEnabled={kakaoEnabled}
         kakaoTemplates={kakaoTemplates}
         kakaoSelectedTemplate={kakaoSelectedTemplate}
         setKakaoSelectedTemplate={setKakaoSelectedTemplate}
@@ -3463,6 +3534,10 @@ const campaignData = {
         setDirectSubject={setDirectSubject}
         setSpamFilterData={setSpamFilterData}
         setShowSpamFilter={setShowSpamFilter}
+        isSpamFilterLocked={isSpamFilterLocked}
+        spamModalOpen={showSpamFilter}
+        onLockedFeature={openPlanFeature}
+        isAiMessagingLocked={isAiMessagingLocked}
         handleAiMsgHelper={handleAiMsgHelper}
         onAiDecorate={handleAiDecorate}
         setShowSpecialChars={setShowSpecialChars}
@@ -3477,28 +3552,41 @@ const campaignData = {
         setShowSmsConvert={setShowSmsConvert}
         lmsKeepAccepted={lmsKeepAccepted}
         setLmsKeepAccepted={setLmsKeepAccepted}
-        setSendConfirm={setSendConfirm}
+        onRequestSend={confirmTargetSend}
         targetSending={targetSending}
         onResetTarget={() => { setShowTargetSend(false); setShowDirectTargeting(true); }}
-        onAlimtalkOpen={() => {
+        onAlimtalkOpen={async () => {
           // ★ D162-4 (2026-05-15) 4차: 직접타겟발송 → 알림톡 발송 진입 시 추출된 수신자 그대로 인계 (Harold님 명시 정합).
-          //   AlimtalkSendModal의 initialRecipients prop으로 targetRecipients 전달 → 자체 수신자 입력 동선 skip.
-          setAlimtalkInitialRecipients(targetRecipients);
+          //   AlimtalkSendModal의 initialRecipients prop으로 추출 명단 전달 → 자체 수신자 입력 동선 skip.
+          //   ★ 2026-09-29 R112 명단 전체는 서버 보관본 → 넘길 때만 전체 행을 받는다(두 창 보관본화 = 범위 밖)
+          if (!targetExtraction) return;
+          const r = await fetchTargetExtractionRows(targetExtraction);
+          if (!r.ok) {
+            if (r.expired) setTargetExtractionExpired(true);
+            else setToast({ show: true, type: 'error', message: r.error || '명단을 불러오지 못했습니다.' });
+            return;
+          }
+          setAlimtalkInitialRecipients(r.data.recipients);
           setShowAlimtalkSend(true);
           setShowTargetSend(false);
         }}
-        onBrandOpen={() => {
+        onBrandOpen={async () => {
           // ★ 2026-08-21 직접 타겟 발송 → 브랜드메시지. 알림톡과 같은 축: 추출된 수신자(번호만)를 들고 가고 이 창은 닫는다.
-          setBrandInitialRecipients(targetRecipients.map((r: any) => String(r?.phone ?? '')).filter(Boolean));
+          //   ★ 2026-09-29 R112 명단 전체는 서버 보관본 → 넘길 때만 전체 행을 받는다
+          if (!targetExtraction) return;
+          const r = await fetchTargetExtractionRows(targetExtraction);
+          if (!r.ok) {
+            if (r.expired) setTargetExtractionExpired(true);
+            else setToast({ show: true, type: 'error', message: r.error || '명단을 불러오지 못했습니다.' });
+            return;
+          }
+          setBrandInitialRecipients(r.data.recipients.map((row: any) => String(row?.phone ?? '')).filter(Boolean));
           setBrandEntry('target');
           setShowBrandSend(true);
           setShowTargetSend(false);
         }}
-        handleTargetTestSend={handleTargetTestSend}
-        testSending={testSending}
-        testCooldown={testCooldown}
-        testSentResult={testSentResult}
       />
+      )}
 
       {/* 예약전송 달력 모달 (공용) */}
       {showReservePicker && (
@@ -3933,7 +4021,7 @@ const campaignData = {
         directMessage={directMessage}
         targetMsgType={targetMsgType}
         directMsgType={directMsgType}
-        targetRecipients={targetRecipients}
+        targetRecipients={longestRowOf(targetExtraction)}
         directRecipients={directRecipients}
         adTextEnabled={adTextEnabled}
         optOutNumber={optOutNumber}

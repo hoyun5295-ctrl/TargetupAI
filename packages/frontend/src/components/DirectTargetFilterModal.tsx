@@ -9,6 +9,7 @@ import {
 import { useEffect, useState } from 'react';
 import { FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
 import { buildDynamicFiltersFromSelection } from '../utils/customerFilterBuild';
+import { requestKeptExtraction, type TargetExtraction } from '../utils/target-extraction';
 
 // ★ D43-3c: 필드 메타 인터페이스 (TargetSendModal에서도 사용)
 export interface FieldMeta {
@@ -23,7 +24,8 @@ interface DirectTargetFilterModalProps {
   show: boolean;
   onClose: () => void;
   // ★ D43-3c: fieldsMeta 추가
-  onExtracted: (recipients: any[], count: number, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string, phoneFields?: string[]) => void;
+  // ★ 2026-09-29 R112 — 명단 전체 대신 서버 보관본(건수·앞 15명·가장 긴 값)을 넘긴다
+  onExtracted: (extraction: TargetExtraction, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string, phoneFields?: string[]) => void;
 }
 
 export default function DirectTargetFilterModal({ show, onClose, onExtracted }: DirectTargetFilterModalProps) {
@@ -117,19 +119,17 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     if (!aiNlResult || aiNlResult.matchCount === 0) return;
     setAiNlExtracting(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/customers/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ dynamicFilters: aiNlResult.filter, smsOptIn: true, phoneField: 'phone' }),
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        showAlert('타겟 추출 실패', errData.error || '서버 오류', 'error');
+      // ★ 2026-09-29 R112 — 명단 전체 대신 서버 보관본(건수·앞 15명·가장 긴 값) · 요청 모양은 CT(target-extraction)
+      const r = await requestKeptExtraction({ dynamicFilters: aiNlResult.filter, smsOptIn: true, phoneField: 'phone' });
+      if (!r.ok) {
+        showAlert('타겟 추출 실패', r.error || '서버 오류', 'error');
         return;
       }
-      const data = await res.json();
-      if (data.success && data.recipients) {
+      if (r.data.count === 0) {
+        showAlert('타겟 추출 실패', '보낼 수 있는 휴대폰 번호가 있는 고객이 없습니다. 조건을 확인해주세요.', 'warning');
+        return;
+      }
+      {
         // ★ 2026-08-08 (임은지 접수 08-05) AI 자연어 모드도 필드 meta를 전달한다 — 축은 filter의 키 하나다
         //   ({ field: { operator, value } } 구조라 그 키가 곧 조건 필드고, extract 응답 행에 같은 키로 값이
         //   실려 온다). 라벨은 회사 스키마(enabledFields — FIELD_MAP displayName 파생) 우선, 없으면
@@ -147,12 +147,8 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             category: ef?.category || sf?.category || 'basic',
           };
         });
-        onExtracted(data.recipients, data.count, meta, undefined, extractedPhoneFields);
-      } else {
-        showAlert('타겟 추출 실패', data.error || '데이터 추출 실패', 'warning');
+        onExtracted(r.data, meta, undefined, extractedPhoneFields);
       }
-    } catch (err: any) {
-      showAlert('네트워크 오류', err?.message || '서버 연결 실패', 'error');
     } finally {
       setAiNlExtracting(false);
     }
@@ -348,20 +344,18 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     if (targetCount === 0) return;
     setExtracting(true);
     try {
-      const token = localStorage.getItem('token');
       const { dynamicFilters, smsOptIn } = buildDynamicFiltersForAPI();
-      const res = await fetch('/api/customers/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ dynamicFilters, smsOptIn, phoneField: 'phone' })
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        showAlert('타겟 추출 실패', errData.error || `서버 오류가 발생했습니다 (${res.status})`, 'error');
+      // ★ 2026-09-29 R112 — 명단 전체 대신 서버 보관본(건수·앞 15명·가장 긴 값) · 요청 모양은 CT(target-extraction)
+      const r = await requestKeptExtraction({ dynamicFilters, smsOptIn, phoneField: 'phone' });
+      if (!r.ok) {
+        showAlert('타겟 추출 실패', r.error || '데이터를 추출하지 못했습니다. 조건을 확인해주세요.', 'error');
         return;
       }
-      const data = await res.json();
-      if (data.success && data.recipients) {
+      if (r.data.count === 0) {
+        showAlert('타겟 추출 실패', '보낼 수 있는 휴대폰 번호가 있는 고객이 없습니다. 조건을 확인해주세요.', 'warning');
+        return;
+      }
+      {
         // ★ 선택된 필드의 메타 정보 구성 (phone은 항상 포함)
         const selectedKeys = new Set(selectedFields);
         selectedKeys.add('phone'); // phone 항상 포함
@@ -374,13 +368,8 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             data_type: f.data_type || 'string',
             category: f.category || 'basic',
           }));
-        onExtracted(data.recipients, data.count, meta, undefined, extractedPhoneFields);
-      } else {
-        showAlert('타겟 추출 실패', data.error || '데이터를 추출하지 못했습니다. 조건을 확인해주세요.', 'warning');
+        onExtracted(r.data, meta, undefined, extractedPhoneFields);
       }
-    } catch (error) {
-      console.error('타겟 추출 실패:', error);
-      showAlert('네트워크 오류', '서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.', 'error');
     } finally {
       setExtracting(false);
     }

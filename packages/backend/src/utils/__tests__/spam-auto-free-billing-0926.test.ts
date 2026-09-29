@@ -58,6 +58,7 @@ describe('적재·워커·비용 표시 배선', () => {
 
   it('테스트 결과 목록의 비용은 청구 제외 판정 CT를 따른다(체험 표시는 그대로)', () => {
     expect(campaigns).toContain('const isTrial = r.source === SPAM_TRIAL_SOURCE;');
-    expect(campaigns).toMatch(/if \(isCompleted && isSpamTestBillable\(r\.source\)\) \{/);
+    // ★ 2026-09-29 차수 5: 발송 실패 행도 비용 0(청구 판정 CT · v2-round5-0929 ③)
+    expect(campaigns).toMatch(/if \(isSpamResultBilled\(r\.result\) && isSpamTestBillable\(r\.source\)\) \{/);
   });
 });

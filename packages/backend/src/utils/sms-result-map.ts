@@ -176,6 +176,21 @@ export function getStatusLabel(statusCode: number): string {
   return STATUS_CODE_MAP[statusCode]?.label || `코드 ${statusCode}`;
 }
 
+/** ★ 2026-09-29 한줄로 V2 차수 5 — 비토 게이트웨이 접수 단계 영구 거부(위 9401~9409 묶음 · 통신사에 가지도 않았다) */
+export const GATEWAY_REJECT_CODES: readonly number[] = [9401, 9402, 9403, 9404, 9405, 9406, 9407, 9408, 9409];
+
+/**
+ * ★ 2026-09-29 한줄로 V2 차수 5(B-0928-1 범위 밖 ①) — 스팸 검사 발송 실패 행의 사유(화면용).
+ * 옛: 모달이 실패를 전부 「통신사가 문자를 받지 않았어요」로 보여 게이트웨이 반려(글자·길이 등 · 고쳐서 다시 검사하면 된다)와
+ *   통신사 실패를 가를 수 없었다(0928 U+200B 9401 반려 = 3사 모두 '전달 실패').
+ */
+export function spamFailDetail(statusCode: number): { failKind: 'rejected' | 'carrier'; failLabel: string } {
+  return {
+    failKind: GATEWAY_REJECT_CODES.includes(statusCode) ? 'rejected' : 'carrier',
+    failLabel: getStatusLabel(statusCode),
+  };
+}
+
 /** status_code → 타입 (매핑에 없으면 'unknown') */
 export function getStatusType(statusCode: number): StatusType {
   return STATUS_CODE_MAP[statusCode]?.type || 'unknown';
@@ -352,6 +367,27 @@ export function spamBilledResultSql(alias: string): string {
 export function spamFailedResultSql(alias: string): string {
   return `${alias}.result = '${SPAM_RESULT.FAILED}'`;
 }
+/**
+ * ★ 2026-09-29 한줄로 V2 차수 5 — 같은 판정의 함수판(행을 이미 읽은 화면: 테스트 목록 비용·상태).
+ * 옛: 화면 3곳(campaigns·manage-stats·admin)이 `result IS NOT NULL`을 완료=성공으로 세어 발송 실패 행도 비용·성공에 넣었다.
+ */
+export function isSpamResultBilled(result: string | null | undefined): boolean {
+  return result != null && result !== SPAM_RESULT.FAILED;
+}
+/** 스팸 검사 결과 행의 목록 상태 — 대기(결과 없음) · 실패(발송 실패) · 성공(통과·차단·시간 초과 = 청구) */
+export function spamResultRowStatus(result: string | null | undefined): 'pending' | 'fail' | 'success' {
+  if (result == null) return 'pending';
+  return result === SPAM_RESULT.FAILED ? 'fail' : 'success';
+}
+
+/**
+ * ★ 2026-09-29 한줄로 V2 차수 5(Codex 1R high) — 스팸 검사 결과 행 한 칸의 판정 쓰기. 폴링·시간 초과 자리 전부가 이 문장 하나를 쓴다
+ * ($1 = 결과 · $2 = 결과 행 id). **아직 판정 안 된 행**(앱 미수신 · 결과 없음)에만 쓴다.
+ * 옛: 행을 고른 뒤 조건 없이 id 로 덮어, 그 사이 다른 쪽이 쓴 발송 실패(선불 환불됨)를 시간 초과(청구)로, 앱 통과를 차단으로 바꿨다
+ *   → 환불은 남고 후불은 청구 · 전부 실패였던 체험이 다시 횟수에 들어갔다. 쓴 행 수(rowCount)로 "이번에 썼는가"를 가린다.
+ * 앱 수신 보고(/report)는 판정된 차단도 늦은 진짜 수신으로 바꾸는 규칙이 달라 이 문장을 쓰지 않는다(발송 실패만 지킨다).
+ */
+export const SPAM_RESULT_DECIDE_SQL = `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2 AND received = false AND result IS NULL`;
 
 /** 스팸필터 result → 표시명 */
 export const SPAM_RESULT_LABEL: Record<string, string> = {

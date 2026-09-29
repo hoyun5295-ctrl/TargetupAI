@@ -19,6 +19,7 @@ import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from './brand-link-core'
 import { nightAdRestrictionMessage } from './autosend-policy';
 import { SEND_HOURS } from '../config/defaults';
 import { parseSplitSetting, splitSpanError } from './send-time-util';
+import { filterByIndividualCallback, buildCallbackConfirmResponse, buildCallbackErrorResponse } from './callback-filter';
 
 /**
  * ★ 2026-09-27 한줄로 V2 GATE S5-05(Harold 결정 「광고는 서버가 항상 켬」) — 수신거부 번호를 뺄지 판정.
@@ -66,6 +67,110 @@ export async function countStagingFiltered(
   }
   const sendCount = Math.max(total - duplicateCount - unsubscribeCount, 0);
   return { total, duplicateCount, unsubscribeCount, sendCount };
+}
+
+/**
+ * ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 발송이 옛 동기 경로(/direct-send)에서 받던 확인 두 가지를 적재 경로에서도 준다(더하기만).
+ *   ① 이름 빈 행 수(%이름% 경고 · 옛 화면 판정 `!r.name || 공백` 과 같다)
+ *   ② 수신자별 회신번호 제외 판정 — callback-filter CT 그대로(없음·미등록·배정) · 응답 모양도 동기 경로와 같다.
+ *      발송 워커가 같은 CT로 같은 행을 빼므로 여기 숫자 = 실제 제외. 중복제거를 켜면 번호당 첫 행만 본다(동기 경로 순서와 같다).
+ *      sendCountAfterCallback = 회신번호 제외 뒤 수신거부까지 뺀 실제 발송 인원(발송 확인 창 숫자 · 워커 결과와 같은 집합:
+ *      워커 = 중복·수신거부 삭제 → 청크마다 회신번호 제외. 거르는 순서만 다르고 남는 집합은 같다).
+ *   요청한 것만 센다 — 직접발송 창은 이 칸을 요청하지 않아 동작·비용 무변경.
+ */
+export async function countStagingChecks(
+  stagingId: string, companyId: string,
+  opts: {
+    nameEmpty: boolean; individualCallback: boolean; callbackUserId?: string; dedupEnabled: boolean;
+    /** 수신거부를 빼는가(effectiveUnsubFilter 결과)와 수신거부 원장 사용자 — 회신번호 제외 뒤 실제 발송 인원 계산용 */
+    applyUnsub?: boolean; unsubUserId?: string;
+  },
+): Promise<{
+  nameEmptyCount?: number;
+  callbackConfirm?: ReturnType<typeof buildCallbackConfirmResponse>;
+  callbackError?: ReturnType<typeof buildCallbackErrorResponse>;
+  sendCountAfterCallback?: number;
+}> {
+  const out: {
+    nameEmptyCount?: number;
+    callbackConfirm?: ReturnType<typeof buildCallbackConfirmResponse>;
+    callbackError?: ReturnType<typeof buildCallbackErrorResponse>;
+    sendCountAfterCallback?: number;
+  } = {};
+  if (opts.nameEmpty) {
+    const r = await query(
+      `SELECT COUNT(*)::int AS c FROM campaign_send_staging
+        WHERE staging_id = $1 AND company_id = $2 AND COALESCE(btrim(name), '') = ''`,
+      [stagingId, companyId],
+    );
+    out.nameEmptyCount = r.rows[0]?.c || 0;
+  }
+  if (opts.individualCallback) {
+    const r = await query(
+      `SELECT phone, callback FROM campaign_send_staging WHERE staging_id = $1 AND company_id = $2 ORDER BY id`,
+      [stagingId, companyId],
+    );
+    let rows: any[] = r.rows;
+    if (opts.dedupEnabled !== false) {
+      const seen = new Set<string>();
+      rows = rows.filter((x: any) => (seen.has(x.phone) ? false : (seen.add(x.phone), true)));
+    }
+    const cb = await filterByIndividualCallback(rows, companyId, opts.callbackUserId);
+    if (cb.filtered.length === 0) out.callbackError = buildCallbackErrorResponse(cb.callbackMissingCount, cb.callbackUnregisteredCount);
+    else if (cb.callbackSkippedCount > 0) {
+      out.callbackConfirm = buildCallbackConfirmResponse(cb, cb.filtered.length);
+      let unsub = new Set<string>();
+      if (opts.applyUnsub && opts.unsubUserId) {
+        const phones = [...new Set(cb.filtered.map((x: any) => String(x.phone)))];
+        const u = await query(`SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2::text[])`, [opts.unsubUserId, phones]);
+        unsub = new Set(u.rows.map((x: any) => String(x.phone)));
+      }
+      out.sendCountAfterCallback = cb.filtered.filter((x: any) => !unsub.has(String(x.phone))).length;
+    }
+  }
+  return out;
+}
+
+/**
+ * ★ 2026-09-29 한줄로 V2 R112 (Codex 1R·2R·3R high) — 수신자별 회신번호 제외를 **차감·분할 계산 전에** 확정한다.
+ *   옛: /direct-send/commit 은 제외 전 인원으로 차감하고 워커가 청크마다 빼며 미적재(total − sent)로 현금 환불했다 →
+ *   ①차감에 쓰인 무료 문자량은 현금 환불로 돌아오지 않았고(prepaid) ②잔액이 실제 발송분만큼만 있으면 402
+ *   ③분할 회차 순번을 제외될 행이 차지해 실제 발송 시각이 밀렸다. 옛 동기 경로(/direct-send)는 차감 전에 뺐다.
+ *   이 함수는 **판정만** 한다(읽기) — 뺄 행은 확정 입구가 원본에서 정해지는 보관 칸으로 옮기고(staging-sweeper parkStagingRows)
+ *   접수되면 칸을 지우고 실패하면 되돌린다. 캠페인은 원본 id 하나만 가리킨다(중복 접수 409 판정과 같은 식별자).
+ *   판정 = callback-filter CT(동기 경로 · 워커 · countStagingChecks 와 같은 판정). 중복제거를 켜면 번호당 첫 행(id 순)으로 판정하고
+ *   제외된 번호는 그 번호의 행을 모두 옮긴다(워커 중복제거가 첫 행을 남기는 것과 같은 집합 · countStagingChecks 가 보여 준 집합과 같다).
+ */
+export async function planIndividualCallbackExclusion(
+  stagingId: string, companyId: string, callbackUserId: string | undefined, dedupEnabled: boolean,
+): Promise<{ moveIds: string[]; removed: number; remaining: number; callbackMissingCount: number; callbackUnregisteredCount: number }> {
+  const r = await query(
+    `SELECT id, phone, callback FROM campaign_send_staging WHERE staging_id = $1 AND company_id = $2 ORDER BY id`,
+    [stagingId, companyId],
+  );
+  const rows: Array<{ id: string; phone: string; callback: string | null }> = r.rows.map((x: any) => ({ id: String(x.id), phone: String(x.phone), callback: x.callback }));
+  let judged = rows;
+  if (dedupEnabled) {
+    const seen = new Set<string>();
+    judged = rows.filter((x) => (seen.has(x.phone) ? false : (seen.add(x.phone), true)));
+  }
+  // CT 가 행을 고치므로(회신번호 폴백 복사) 사본으로 판정한다
+  const cb = await filterByIndividualCallback(judged.map((x) => ({ ...x })), companyId, callbackUserId);
+  const kept = new Set(cb.filtered.map((x: any) => String(x.id)));
+  let moveIds: string[];
+  if (dedupEnabled) {
+    const badPhones = new Set(judged.filter((x) => !kept.has(x.id)).map((x) => x.phone));
+    moveIds = rows.filter((x) => badPhones.has(x.phone)).map((x) => x.id);
+  } else {
+    moveIds = rows.filter((x) => !kept.has(x.id)).map((x) => x.id);
+  }
+  return {
+    moveIds,
+    removed: judged.length - kept.size,
+    remaining: kept.size,
+    callbackMissingCount: cb.callbackMissingCount,
+    callbackUnregisteredCount: cb.callbackUnregisteredCount,
+  };
 }
 
 /**

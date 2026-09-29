@@ -619,9 +619,10 @@ export default function StatsTab() {
                                 <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
                                   t.result === 'pass' ? 'bg-emerald-100 text-emerald-700' :
                                   t.result === 'blocked' ? 'bg-rose-100 text-rose-700' :
+                                  (t.result === 'failed' || t.result === 'timeout') ? 'bg-orange-100 text-orange-800' :
                                   'bg-slate-100 text-slate-600'
                                 }`}>
-                                  {t.result === 'pass' ? '정상' : t.result === 'blocked' ? '차단' : '대기'}
+                                  {t.result === 'pass' ? '정상' : t.result === 'blocked' ? '차단' : t.result === 'failed' ? '실패' : t.result === 'timeout' ? '시간초과' : '대기'}
                                 </span>
                               ) : (
                                 <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${

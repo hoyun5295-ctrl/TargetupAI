@@ -75,7 +75,28 @@ export async function attributeClaimLoad(owner: JourneyClaimOwner, campaignId: s
  * 표식 'sending' → 'sent' 확정 + 단계 캠페인 발송 수 +1(bumpStepCampaignCount와 같은 증가) — 한 문장이라 둘 중 하나만 남지 않는다.
  * 표식이 이미 'sending'이 아니면 아무것도 바꾸지 않고 false. DB 오류는 던진다(★ 2R ⑤ — 삼키지 않는다).
  */
-export async function confirmJourneyClaimSent(claimId: string): Promise<boolean> {
+export async function confirmJourneyClaimSent(claimId: string, opts: { withStats?: boolean } = {}): Promise<boolean> {
+  if (opts.withStats) {
+    // ★ 2026-09-29 한줄로 V2 차수 5(Codex 1R high) — 전진 없이 확정하는 자리(활성 아닌 실행의 표식 정리)는 실행·여정 비용 통계도
+    //   **같은 문장**에서 더한다. 따로 더하면 확정 뒤 끊겼을 때 표식은 'sent'라 다시 오지 않고 비용만 빠졌다(재개 뒤 가드는 비용 0으로 전진).
+    const r = await query(
+      `WITH confirmed AS (
+         UPDATE journey_step_logs SET status = 'sent' WHERE id = $1::uuid AND status = 'sending' RETURNING campaign_id, execution_id, COALESCE(cost, 0) AS cost
+       ), camp AS (
+         UPDATE campaigns SET target_count = target_count + 1, sent_count = sent_count + 1, updated_at = NOW()
+          WHERE id = (SELECT campaign_id FROM confirmed) RETURNING id
+       ), ex AS (
+         UPDATE journey_executions SET total_cost = total_cost + (SELECT cost FROM confirmed)
+          WHERE id = (SELECT execution_id FROM confirmed) RETURNING journey_id
+       ), jr AS (
+         UPDATE journeys SET stats_total_cost = stats_total_cost + (SELECT cost FROM confirmed), updated_at = NOW()
+          WHERE id = (SELECT journey_id FROM ex) RETURNING id
+       )
+       SELECT (SELECT COUNT(*) FROM confirmed)::int AS confirmed`,
+      [claimId],
+    );
+    return Number(r.rows[0]?.confirmed || 0) === 1;
+  }
   const r = await query(
     `WITH confirmed AS (
        UPDATE journey_step_logs SET status = 'sent' WHERE id = $1::uuid AND status = 'sending' RETURNING campaign_id
@@ -99,7 +120,19 @@ export async function confirmJourneyClaimSent(claimId: string): Promise<boolean>
  * MySQL 조회 실패도 증명 안 됨으로 다룬다(셀 수 없으면 판정할 수 없다). 표식·캠페인 조회(PG) 실패는 던진다.
  */
 export async function resolveJourneyClaim(
-  owner: JourneyClaimOwner, claimId: string, opts: { closeNow?: boolean } = {},
+  owner: JourneyClaimOwner, claimId: string,
+  opts: {
+    closeNow?: boolean;
+    /**
+     * ★ 2026-09-29 한줄로 V2 차수 5(Codex 1R high) — 들어갔다고 판정되면 **확정 전에** 부른다(운영 크레딧 · 멱등키 = 여정+원 발송일).
+     * 확정 뒤에 받으면 그 사이 끊겼을 때 표식은 'sent'라 다시 판정되지 않아 크레딧이 영영 빠졌다. 앞에서 받으면 끊겨도 표식이
+     * 'sending'으로 남아 다음 판정이 다시 부르고(멱등 = 0원) 확정한다. 던지면 확정하지 않는다(표식이 남아 다시 판정된다).
+     * 차감이 실패로 끝나도(던지지 않고 false) 확정한다 — 운영 크레딧은 발송을 막지 않는 정책이다(journey-executor chargeJourneyOperationCredit).
+     */
+    beforeConfirm?: (sentAt: Date) => Promise<void>;
+    /** 확정과 같은 문장에서 실행·여정 비용 통계를 더한다(전진 없이 확정하는 자리 · confirmJourneyClaimSent withStats) */
+    withStats?: boolean;
+  } = {},
 ): Promise<
   | { result: 'sent'; cost: number; sentAt: Date }
   | { result: 'cleared' } | { result: 'held' } | { result: 'closed' } | { result: 'gone' }
@@ -121,7 +154,8 @@ export async function resolveJourneyClaim(
   }
 
   if (verdict === 'loaded') {
-    const confirmed = await confirmJourneyClaimSent(claimId);
+    if (opts.beforeConfirm) await opts.beforeConfirm(new Date(claim.sent_at));
+    const confirmed = await confirmJourneyClaimSent(claimId, { withStats: opts.withStats });
     return { result: 'sent', cost: confirmed ? Number(claim.cost) || 0 : 0, sentAt: new Date(claim.sent_at) };
   }
   if (verdict === 'not_loaded') {

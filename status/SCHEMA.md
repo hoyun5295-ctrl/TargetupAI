@@ -1488,13 +1488,13 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | id | bigint PK (`campaign_send_staging_id_seq`) |
 | staging_id | uuid · 캠페인이 `campaigns.staging_id`로 가리킨다 |
 | company_id | uuid |
-| phone | varchar |
+| phone | varchar(20) NOT NULL(★0929 information_schema 실측) |
 | name | text |
 | extra1 · extra2 · extra3 | text |
-| callback | varchar · 고객별 회신번호(대행 명단 열 방식) |
+| callback | varchar(20)(★0929 실측) · 고객별 회신번호(대행 명단 열 방식) |
 | created_at | timestamptz DEFAULT now() |
 - 인덱스: pkey(id) · `idx_css_staging (staging_id, id)` · `idx_css_company_created (company_id, created_at)` · `idx_css_staging_phone (staging_id, phone)`.
-- 적재 4곳(직접발송·알림톡 창 `/direct-send/stage` · DM 타겟 · 대행 · AI 운영자/플래너) · 삭제 = 워커 완료·각 경로 실패 처리 + **★0926 정리 워커 `utils/staging-sweeper.ts`**(KST 01~03시 · 모든 행이 24시간 지났고 캠페인이 가리키지 않는 적재분을 통째로). commit은 가장 오래된 행이 23시간을 넘으면 만료로 거절(`resolveStagingCommitState`).
+- 적재 5곳(직접발송·알림톡 창 `/direct-send/stage` · DM 타겟 · 대행 · AI 운영자/플래너 · **★0929 직접 타겟 추출 보관본** `/customers/extract` keep = `utils/extraction-keep.ts` · phone·name 만 · 보관 행 ↔ 고객 = phone(회사 안 유일)로만 잇는다) · 삭제 = 워커 완료·각 경로 실패 처리 + **★0926 정리 워커 `utils/staging-sweeper.ts`**(KST 01~03시 · 모든 행이 24시간 지났고 캠페인이 가리키지 않는 적재분을 통째로). commit은 가장 오래된 행이 23시간을 넘으면 만료로 거절(`resolveStagingCommitState`).
 - ⛔ 0926 실측: 정리 워커 이전 240만 행(863MB) 전량이 연결 캠페인 없는 잔존분이었다(발송 버튼마다 확인 창 전 적재 → 취소·재클릭분). 전수점검 S1-H08.
 
 ### users (사용자)

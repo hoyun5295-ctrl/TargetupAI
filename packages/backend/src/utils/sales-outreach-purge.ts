@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { query } from '../config/database';
 import { stopDm } from './dm/dm-builder';
+import { dropServeVariants } from './image-serve';
 
 // routes/cdp.ts INAPP_IMAGE_BASE와 동일 정의 미러(단일 env 소스 — utils/assets.ts와 같은 관례)
 const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
@@ -22,9 +23,11 @@ export function unlinkPublicImage(url: string): boolean {
   const filePath = path.join(INAPP_IMAGE_BASE, m[1], m[2]);
   try {
     fs.unlinkSync(filePath);
+    dropServeVariants(filePath);   // ★ 2026-09-29 메일용 사본(.mail.jpg|png)·서빙 변환본도 함께(CT · best-effort)
     return true;
   } catch (e: any) {
     if (e?.code !== 'ENOENT') throw e; // 없음 = 이미 지워짐(멱등) · 그 외 = 실패로 취급
+    dropServeVariants(filePath);   // 원본이 먼저 지워졌어도 사본은 남아 있을 수 있다
     return false;
   }
 }

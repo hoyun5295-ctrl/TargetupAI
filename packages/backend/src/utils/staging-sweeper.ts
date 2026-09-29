@@ -21,6 +21,7 @@
  * 지워도 파일은 줄지 않는다(공간 재사용만 · 이후 적재가 빈 공간을 다시 쓴다). VACUUM FULL은 적재·워커를 막으므로 하지 않는다(Codex 1R medium).
  */
 
+import { createHmac } from 'crypto';
 import { query as dbQuery } from '../config/database';
 import { withKeyedLock, uuidLockKey } from './keyed-lock';
 import { kstHour } from './ai-credit-calc';
@@ -183,4 +184,57 @@ export function startStagingSweeper(): void {
  */
 export async function withStagingLock<T>(stagingId: string, fn: () => Promise<T>): Promise<T> {
   return withKeyedLock('staging', uuidLockKey(stagingId), fn);
+}
+
+/**
+ * ★ 2026-09-29 한줄로 V2 R112 (Codex 3R high) — 수신자별 회신번호로 뺄 행을 **잠시 옮겨 두는 보관 칸**.
+ *   확정(commit)은 차감 전에 뺄 사람을 확정해야 하지만(무료 문자량·잔액·분할 순번) 원본 준비분을 지우면 접수 실패 뒤 돌아오지 않고,
+ *   사본을 만들면 캠페인이 사본 id를 들어 같은 원본의 재확정(응답 유실·중복 요청)을 409로 막지 못했다(식별자가 둘로 갈림).
+ *   → 캠페인은 원본 id 하나만 가리키고, 뺄 행은 원본 id에서 **정해지는** 보관 칸 id로 옮긴다(같은 원본 = 언제나 같은 칸).
+ *   접수되면 칸을 지우고, 실패하면 되돌린다. 중간에 끊겨도 다음 쓰기(확정·빼기·회신번호 채우기)가 잠금 안에서 먼저 되돌린다.
+ *   칸은 캠페인이 가리키지 않으므로 끝내 남으면 24시간 정리 대상이다(위 STAGING_PICK_SQL).
+ * ⛔ (Codex 4R) 칸 id 는 **서버 비밀키 HMAC** 이다 — 누구나 계산하는 해시면 발송 준비 입구(/direct-send/stage 는 호출자가 id 를 정할 수 있다)로
+ *   원본의 칸 id 에 다른 명단을 넣어 두었다가 원본 확정 때 되돌리기로 끌어들일 수 있었다. 서버는 칸 id 를 어디에도 돌려주지 않는다.
+ *   입력은 잠금 키와 같은 uuid 정규화(uuidLockKey) — 대소문자·하이픈·중괄호 표기가 달라도 DB 에서 같은 원본이면 같은 칸이다.
+ *   비밀키 없음 = 던진다(대행 승인 링크와 같은 fail-closed · auth.ts 가 기동을 막으므로 운영에선 도달하지 않는다).
+ */
+function stagingParkKey(): string {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error('JWT_SECRET 미설정: 발송 준비 보관 칸 id 를 만들 수 없습니다.');
+  return `staging-park:${s}`;
+}
+export function parkedStagingId(stagingId: string): string {
+  const h = createHmac('sha256', stagingParkKey()).update(uuidLockKey(stagingId)).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+/** 원본 준비분의 고른 행을 보관 칸으로 옮긴다(같은 회사) → 옮긴 행 수 */
+export async function parkStagingRows(stagingId: string, companyId: string, ids: string[], q: QueryFn = defaultQuery): Promise<number> {
+  if (ids.length === 0) return 0;
+  const r = await q(
+    `UPDATE campaign_send_staging SET staging_id = $3::uuid
+      WHERE staging_id = $1::uuid AND company_id = $2::uuid AND id = ANY($4::bigint[])`,
+    [stagingId, companyId, parkedStagingId(stagingId), ids],
+  );
+  return Number(r.rowCount) || 0;
+}
+
+/**
+ * 보관 칸의 행을 원본으로 되돌린다(끊긴 지난 시도 · 접수 실패) → 되돌린 행 수.
+ * ⛔ 살아 있는(발송 단계 failed 가 아닌) 캠페인이 원본을 가리키면 되돌리지 않는다 — 차감 건수보다 준비분 행이 많아지면
+ *   워커가 뒤쪽 정상 행을 읽기 전에 끝날 수 있다. 조건은 같은 문장 안에서 건다(판정과 쓰기 사이 틈 없음).
+ */
+export async function restoreParkedStagingRows(stagingId: string, companyId: string, q: QueryFn = defaultQuery): Promise<number> {
+  const r = await q(
+    `UPDATE campaign_send_staging SET staging_id = $1::uuid
+      WHERE staging_id = $3::uuid AND company_id = $2::uuid
+        AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = $1::uuid AND COALESCE(c.send_phase, '') <> 'failed')`,
+    [stagingId, companyId, parkedStagingId(stagingId)],
+  );
+  return Number(r.rowCount) || 0;
+}
+
+/** 보관 칸에 남은 행(접수돼 보내지 않을 사람)을 지운다 — 되돌리기 뒤에 부르면 남은 것 = 접수된 발송이 뺀 사람뿐이다 */
+export async function dropParkedStagingRows(stagingId: string, companyId: string, q: QueryFn = defaultQuery): Promise<void> {
+  await q(`DELETE FROM campaign_send_staging WHERE staging_id = $2::uuid AND company_id = $1::uuid`, [companyId, parkedStagingId(stagingId)]);
 }

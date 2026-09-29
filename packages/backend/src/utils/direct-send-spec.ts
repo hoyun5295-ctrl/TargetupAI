@@ -37,6 +37,13 @@ export interface DirectSendSpec {
   splitIntervalMinutes?: number;
   useIndividualCallback?: boolean;
   individualCallbackColumn?: string | null;
+  /**
+   * ★ 2026-09-29 한줄로 V2 차수 5(R112 Codex 2R 범위 밖) — 수신자별 회신번호 배정 제한을 걸 사용자(callbackAssignmentUserId 결과 · null = 제한 없음).
+   * 확정 입구가 차감 전에 판정한 값을 그대로 싣는다 → 워커가 같은 기준으로 거른다(옛: 워커는 users.user_type 을 다시 읽어 users 에 없는
+   * 슈퍼관리자를 일반 사용자로 판정 · 확정 입구는 JWT 로 관리자 판정 → 인원이 갈려 차감분 일부가 미적재 환불로 돌았다).
+   * 안 밝히면(undefined) 싣지 않는다 → 워커가 종전처럼 DB 로 판정(다른 호출부 무변경).
+   */
+  callbackFilterUserId?: string | null;
   mmsImagePaths?: string[] | null;
   dedupEnabled?: boolean;
   unsubFilterEnabled?: boolean;
@@ -87,6 +94,7 @@ export function buildDirectSendCampaignParams(
   const sendConfig = {
     msgType: spec.msgType, sendChannel: directChannel, message: spec.message, subject: spec.subject,
     callback: spec.callback, useIndividualCallback: spec.useIndividualCallback, individualCallbackColumn: spec.individualCallbackColumn,
+    ...(spec.callbackFilterUserId !== undefined ? { callbackFilter: { userId: spec.callbackFilterUserId } } : {}),
     adEnabled: finalIsAd, scheduled: spec.scheduled, scheduledAt: spec.scheduledAt,
     splitEnabled: spec.splitEnabled, splitCount: spec.splitCount, splitIntervalMinutes: spec.splitIntervalMinutes, mmsImagePaths: spec.mmsImagePaths,
     kakaoBubbleType: spec.kakaoBubbleType, kakaoSenderKey: spec.kakaoSenderKey, kakaoTargeting: spec.kakaoTargeting,

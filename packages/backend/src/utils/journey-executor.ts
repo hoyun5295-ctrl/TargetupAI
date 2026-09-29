@@ -258,11 +258,64 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
     if (summary.processed > 0) {
       console.log(`[JourneyExecutor] 처리 완료(묶음 ${batches}) — sent=${summary.sent} waited=${summary.waited} cond_pass=${summary.conditionPassed} cond_fail=${summary.conditionFailed} goal_exited=${summary.goalExited} skipped=${summary.skipped} paused=${summary.paused} failed=${summary.failed}`);
     }
+    // ★ 2026-09-29 한줄로 V2 차수 5(m105 5R 범위 밖) — 실행 후보에서 빠진 실행에 남은 '적재 중' 표식 정리.
+    await resolveOrphanJourneyClaims().catch((e: any) => console.error('[JourneyExecutor] 남은 적재 중 표식 정리 실패:', e?.message || e));
   } finally {
     workerRunning = false;
   }
 
   return summary;
+}
+
+/** 남은 표식으로 보는 나이 — 가드가 증명 안 됨을 다시 보는 간격(10분)과 같다. 그 안의 표식은 아직 발송 중일 수 있다. */
+export const ORPHAN_CLAIM_MIN_AGE_MIN = 10;
+
+/**
+ * ★ 2026-09-29 한줄로 V2 차수 5(m105 5R 범위 밖) — 활성이 아닌 실행(정지·목표 달성·종료 · 또는 여정 정지)에 남은 '적재 중' 표식을
+ * 가드와 **같은 판정 CT**(resolveJourneyClaim)로 정리한다.
+ * 옛: 표식은 그 실행의 다음 단계 처리(가드)에서만 풀렸다. 표식을 남긴 채 정지·목표 달성으로 실행 후보에서 빠지면 가드에 다시 오지 않아
+ *   실제로 나간 1건이 'sent'·발송 수·월 예산·운영 크레딧에서 빠졌다.
+ * 판정 = 가드와 같다: 들어갔으면 확정(+발송 수) · 운영 크레딧(키 = 여정+원 발송일 · 멱등) · 실행·여정 비용 통계에 그 몫을 더한다 /
+ *   안 들어갔으면 표식을 지운다(재개되면 가드 없이 그 단계를 보낸다 = 가드의 cleared 와 같다) / 증명 안 됨이면 1시간까지 두고 넘으면 닫는다(경보).
+ * 전진은 하지 않는다(활성 실행이 아니다 · 재개되면 가드가 'sent'·닫힘을 보고 전진한다).
+ */
+async function resolveOrphanJourneyClaims(): Promise<void> {
+  const r = await query(
+    `SELECT l.id AS claim_id, l.execution_id, e.customer_id, e.journey_id, j.company_id, j.created_by
+       FROM journey_step_logs l
+       JOIN journey_executions e ON e.id = l.execution_id
+       JOIN journeys j ON j.id = e.journey_id
+      WHERE l.status = 'sending'
+        AND l.sent_at < NOW() - ($1 || ' minutes')::interval
+        AND NOT (e.status = 'active' AND j.status = 'active')
+      ORDER BY l.sent_at ASC
+      LIMIT 50`,
+    [String(ORPHAN_CLAIM_MIN_AGE_MIN)]
+  );
+  for (const row of r.rows) {
+    try {
+      const owner = { company_id: String(row.company_id), created_by: row.created_by || null, customer_id: String(row.customer_id) };
+      const creditOwner = { company_id: owner.company_id, journey_id: String(row.journey_id), created_by: owner.created_by } as ExecutionRow;
+      // 크레딧은 확정 전에(멱등) · 비용 통계는 확정과 같은 문장에서 — 어디서 끊겨도 다음 주기가 표식('sending')을 다시 판정한다
+      const resolved = await resolveJourneyClaim(owner, String(row.claim_id), {
+        beforeConfirm: (at) => chargeJourneyOperationCredit(creditOwner, at),
+        withStats: true,
+      });
+      if (resolved.result === 'sent') {
+        console.warn(`[JourneyExecutor] 활성 아닌 실행의 적재 중 표식 → 큐 원행 확인 → 발송 확정 execution=${row.execution_id} 표식=${row.claim_id}`);
+      } else if (resolved.result === 'cleared') {
+        console.warn(`[JourneyExecutor] 활성 아닌 실행의 적재 중 표식 → 큐 원행 없음 → 표식 정리 execution=${row.execution_id} 표식=${row.claim_id}`);
+      } else if (resolved.result === 'closed') {
+        console.error(`[JourneyExecutor][적재미증명종료] 활성 아닌 실행 execution=${row.execution_id} 표식=${row.claim_id} — 다시 보내지 않고 닫음`);
+        void sendSystemAlert({
+          dedupKey: `journey-claim-unprovable:${row.claim_id}`,
+          message: `여정 발송 1건의 적재 여부를 증명하지 못해 닫았습니다(정지·종료된 실행). execution=${row.execution_id} 표식=${row.claim_id} (그 1건 요금은 정산이 환불)`,
+        }).catch(() => undefined);
+      }
+    } catch (e: any) {
+      console.error(`[JourneyExecutor] 적재 중 표식 정리 실패 표식=${row.claim_id}:`, e?.message || e);
+    }
+  }
 }
 
 export function startJourneyExecutor(): void {
@@ -508,11 +561,11 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     );
     const claimRow = pendingClaim.rows[0];
     if (claimRow) {
-      const resolved = await resolveJourneyClaim(exec, claimRow.id);
+      // 정상 발송의 마무리(운영 크레딧)를 여기서 받는다 — 확정 실패로 넘어온 발송은 정상 경로의 크레딧 차감에 닿지 않았다(3R ⑤)
+      // ★ 2026-09-29 차수 5 — 크레딧은 확정 **전에**(beforeConfirm · 멱등) = 'sent'면 크레딧 차감을 이미 시도했다
+      const resolved = await resolveJourneyClaim(exec, claimRow.id, { beforeConfirm: (at) => chargeJourneyOperationCredit(exec, at) });
       if (resolved.result === 'sent') {
         console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 적재 중 표식 → 큐 원행 확인 → 발송 확정 · 다시 보내지 않음`);
-        // 정상 발송의 마무리(운영 크레딧)를 여기서 받는다 — 확정 실패로 넘어온 발송은 정상 경로의 크레딧 차감에 닿지 않았다(3R ⑤)
-        await chargeJourneyOperationCredit(exec, resolved.sentAt);
         await advanceOrComplete(exec, step, resolved.cost);
         return 'skipped_already_sent';
       }
@@ -533,6 +586,9 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   }
   if (alreadySent.rows.length > 0) {
     console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 이미 발송됨(재처리 감지) → 중복 차감/발송 없이 advance`);
+    // ★ 2026-09-29 한줄로 V2 차수 5(m105 4R 범위 밖) — 옛: 'sent' 확정 직후(운영 크레딧 차감 전) 멈추면 여기서 크레딧 없이 전진했다.
+    //   이제 모든 확정 경로가 크레딧 차감을 확정 **전에** 시도한다(정상 발송 · 가드 · 재시도 소진 · 활성 아닌 실행 정리) → 'sent'면 이미 시도했다.
+    //   차감 실패(잔액 한도 초과 등)는 운영 크레딧 정책대로 발송·전진을 막지 않는다(한도 초과 = [CREDIT][SKIP] · 그 밖 실패 = [CREDIT][MISS] 로그 · 종전과 같다 · chargeJourneyOperationCredit 주석).
     await advanceOrComplete(exec, step, 0);
     return 'skipped_already_sent';
   }
@@ -1122,10 +1178,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       //   그 1건 차감은 정산이 미적재로 돌려준다) + 경보. 표식 조회(PG)마저 실패하면 표식이 남는다 — 경보로 사람이 본다.
       if (claimLogId) {
         try {
-          const resolved = await resolveJourneyClaim(exec, claimLogId, { closeNow: true });
+          // ★ 2026-09-29 차수 5 — 크레딧은 확정 전에(beforeConfirm · 멱등)
+          const resolved = await resolveJourneyClaim(exec, claimLogId, { closeNow: true, beforeConfirm: (at) => chargeJourneyOperationCredit(exec, at) });
           if (resolved.result === 'sent') {
             console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 적재 오류였으나 큐 원행 확인 → 발송으로 처리`);
-            await chargeJourneyOperationCredit(exec, resolved.sentAt);
             await advanceOrComplete(exec, step, resolved.cost);
             return 'sent';
           }
@@ -1161,12 +1217,15 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // ★ 2026-09-26 한줄로 V2 m105 — 적재가 끝났다 → 표식 'sent' 확정 + 단계 캠페인 발송 수 +1을 한 문장으로(CT · 차감은 적재 앞).
   //   ★ Codex 2R ⑤ 확정 실패를 삼키지 않는다 — 던지면 실행은 이 단계에 남고, 다음 틱의 가드가 큐 원행으로 확정한다(다시 보내지 않는다).
   //   삼키고 진행하면 'sent'도 발송 수도 빠져 월 예산에서 빠지고 정산이 보낸 1건을 미적재로 환불했다.
+  // ★ v2 운영 과금 (크레딧 모델 v2 2026-06-30) — 발송비(prepaidDeduct, 위)와 별개인 AI 운영 크레딧(본문 = chargeJourneyOperationCredit).
+  // ★ 2026-09-29 한줄로 V2 차수 5(Codex 1R high) — 크레딧을 확정 **전에** 받는다(멱등키 = 여정+날짜). 옛: 확정 뒤라 그 사이 끊기면
+  //   다음 틱은 'sent'를 보고 크레딧 없이 전진했다. 앞에서 받으면 끊겨도 표식이 'sending'으로 남아 가드가 다시 받고(0원) 확정한다.
+  //   차감 실패(false)는 확정을 막지 않는다 — 운영 크레딧은 발송을 막지 않는 정책(아래 chargeJourneyOperationCredit)이다(종전과 같다).
+  await chargeJourneyOperationCredit(exec, new Date());
   if (claimLogId) {
     const confirmed = await confirmJourneyClaimSent(claimLogId);
     if (!confirmed) console.error(`[JourneyExecutor][CRITICAL] 발송 표식 확정 0행 execution=${exec.execution_id} 표식=${claimLogId} — 표식이 sending이 아니다`);
   }
-  // ★ v2 운영 과금 (크레딧 모델 v2 2026-06-30) — 발송비(prepaidDeduct, 위)와 별개인 AI 운영 크레딧(본문 = chargeJourneyOperationCredit).
-  await chargeJourneyOperationCredit(exec, new Date());
 
   // ★ D218+ (2026-05-26) 시점 3: 발송 직후 status 재확인 — MySQL 큐 INSERT 도중 paused 동시 발화 사고 기록 안전망.
   //   본 시점 = MySQL 큐 INSERT 종결 후 = SMS 발송 영구 진행 영역. 정지 효과 X = log + execution_status_at_pause 추적.

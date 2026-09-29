@@ -49,6 +49,7 @@ describe('배정 필터 대상 사용자(CT)', () => {
   });
 
   it('워커는 작성자 유형을 캠페인당 한 번 읽어 CT로 정한다(적재할 때만)', () => {
-    expect(src).toMatch(/const callbackFilterUserId = cfg\.useIndividualCallback && !skipLoad\s*\? callbackAssignmentUserId\(\(await query\(`SELECT user_type FROM users WHERE id = \$1`, \[userId\]\)\)\.rows\[0\]\?\.user_type, userId\)\s*: undefined;/);
+    // ★ 2026-09-29 차수 5: 확정 입구가 실은 값(send_config.callbackFilter)이 있으면 그것을 쓰고, 없을 때만 DB 로 판정(v2-round5-0929 ⑦)
+    expect(src).toMatch(/const callbackFilterUserId = cfg\.useIndividualCallback && !skipLoad\s*\? \(storedCallbackFilter\s*\? storedCallbackFilter\.userId\s*: callbackAssignmentUserId\(\(await query\(`SELECT user_type FROM users WHERE id = \$1`, \[userId\]\)\)\.rows\[0\]\?\.user_type, userId\)\)\s*: undefined;/);
   });
 });

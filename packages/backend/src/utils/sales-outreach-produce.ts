@@ -255,7 +255,9 @@ export async function fetchImageGuarded(rawUrl: string, opts?: { referer?: strin
       headers: {
         Host: host,
         'User-Agent': 'Mozilla/5.0 (compatible; HanjulBot/1.0)',
-        Accept: 'image/avif,image/webp,image/*,*/*;q=0.8',
+        // ★ 2026-09-29 한줄로 V2 차수 5(B-0929-2 범위 밖 ①) — AVIF 는 청하지 않는다. 받으면 아래 확장자 판정이 '.jpeg' 로 붙이고
+        //   (서빙 최적화가 JPEG 로 다시 만들어 화면은 보이지만) 메일 입구는 파일 머리로 한 번 더 바꿔야 한다. 우리 파이프라인이 다루는 형식만 청한다.
+        Accept: 'image/webp,image/png,image/jpeg,image/*;q=0.8,*/*;q=0.5',
         ...(opts?.referer ? { Referer: opts.referer } : {}),
       },
       timeout: 10_000,              // 소켓 유휴 타임아웃

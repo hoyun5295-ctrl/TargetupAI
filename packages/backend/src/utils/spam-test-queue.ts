@@ -18,7 +18,8 @@ import { TIMEOUTS } from '../config/defaults';
 import { extractVarCatalog } from '../services/ai';
 import { replaceVariables, enrichWithCustomFields, buildAdMessage, buildAdSubject, prepareFieldMappings } from '../utils/messageUtils';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
-import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, spamFailedResultSql } from '../utils/sms-result-map';
+import { unsupportedSmsCharCodes } from './sms-charset';
+import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailedResultSql } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from './system-alert';
 import { getSampleCustomerScope } from './store-scope';
@@ -174,6 +175,21 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     }
     const sendCount = devices.rows.length * messageTypes.length;
     const deductType = messageTypes[0] || 'SMS';
+
+    // ★ 2026-09-29 한줄로 V2 차수 5(B-0928-1 범위 밖 ③) — 실제로 나갈 본문·제목(워커 executeSpamTest 와 같은 치환 · 제목 = 저장값)을
+    //   검사 행·차감 전에 글자 판정한다(수동 입구와 같은 CT). 옛: 판정 0 → 게이트웨이 9401 반려로 3사 모두 실패 · 유료 검사면 차감 뒤 환불.
+    const outgoingTexts = messageTypes.flatMap((t) => [
+      replaceVariables((t === 'SMS' ? messageContentSms : messageContentLms) || '', firstCustomer, fieldMappings, spamAddressBookFields),
+      t === 'LMS' || t === 'MMS' ? (subject || '') : '',
+    ]);
+    const unsupportedChars = unsupportedSmsCharCodes(...outgoingTexts);
+    if (unsupportedChars.length > 0) {
+      return {
+        ok: false,
+        error: '문자로 보낼 수 없는 글자(보이지 않는 글자 포함)가 있어 검사하지 않았어요.',
+        errorCode: 'SMS_UNSUPPORTED_CHARS',
+      };
+    }
 
     // 2-1) 고객사 080 수신거부번호 조회 (users 우선 → companies fallback)
     const opt080Result = await query(
@@ -541,11 +557,9 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
             }
 
             if (result) {
-              await query(
-                `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
-                [result, row.id]
-              );
-              if (result === SPAM_RESULT.FAILED) wroteFailed = true;
+              // ★ 2026-09-29 차수 5 — 아직 판정 안 된 행만(CT) · 이번에 쓴 때만 환불 신호
+              const w = await query(SPAM_RESULT_DECIDE_SQL, [result, row.id]);
+              if ((w.rowCount ?? 0) > 0 && result === SPAM_RESULT.FAILED) wroteFailed = true;
             }
           }
         } finally {
@@ -576,10 +590,7 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
           for (const row of remaining.rows) {
             const rowKey = row.id;
             const finalResult = qtmsgSuccessTime.has(rowKey) ? SPAM_RESULT.BLOCKED : SPAM_RESULT.TIMEOUT;
-            await query(
-              `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
-              [finalResult, row.id]
-            );
+            await query(SPAM_RESULT_DECIDE_SQL, [finalResult, row.id]);
           }
           await query(
             `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()

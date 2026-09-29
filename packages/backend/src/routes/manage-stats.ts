@@ -9,7 +9,7 @@ import { getTablesForBillingPeriod } from '../utils/send-usage-aggregation';
 import { kstDateString } from '../utils/planner-execution';
 /** 기간 지정이 없을 때 이력 테이블을 모으는 시작일(서비스 이전 · 있는 LOG만 붙는다) */
 const TEST_STATS_EPOCH = '2025-01-01';
-import { getSendTypeLabel } from '../utils/sms-result-map';
+import { getSendTypeLabel, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus } from '../utils/sms-result-map';
 // ★ 2026-07-25 `querySendStats`(campaigns 축) 미사용 — 화면·엑셀 모두 청구 축(send-usage-aggregation)으로 통일.
 //   슈퍼관리자 통계(admin.ts)는 계정·캠페인 단위 운영 뷰라 그 축을 계속 쓴다.
 import { buildDateRangeFilter, querySendStatsDetail } from '../utils/stats-aggregation';
@@ -183,7 +183,11 @@ router.get('/send', async (req: Request, res: Response) => {
             COUNT(*) as total,
             SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms,
             SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms,
-            SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as completed,
+            -- ★ 2026-09-29 한줄로 V2 차수 5 — 성공 = 청구 판정 CT · 발송 실패는 실패로(옛: 결과가 있으면 전부 성공 · 비용에도 들어갔다)
+            SUM(CASE WHEN ${spamBilledResultSql('r')} THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN ${spamFailedResultSql('r')} THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN ${spamFailedResultSql('r')} AND r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms_failed,
+            SUM(CASE WHEN ${spamFailedResultSql('r')} AND r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms_failed,
             SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
           FROM spam_filter_test_results r
           JOIN spam_filter_tests t ON r.test_id = t.id
@@ -192,14 +196,18 @@ router.get('/send', async (req: Request, res: Response) => {
         const sf = sfAgg.rows[0];
         testSummary.total += Number(sf.total) || 0;
         testSummary.success += Number(sf.completed) || 0;
+        testSummary.fail += Number(sf.failed) || 0;
         testSummary.pending += Number(sf.pending) || 0;
         testSummary.sms += Number(sf.sms) || 0;
         testSummary.lms += Number(sf.lms) || 0;
+        // 스팸 검사 발송 실패 행 = 청구하지 않는다(m042) → 비용에서 뺀다(건수 표시는 그대로)
+        const sfSmsFailed = Number(sf.sms_failed) || 0;
+        const sfLmsFailed = Number(sf.lms_failed) || 0;
 
         // 비용 계산 (회사 단가 기준)
         const costRes = await pool.query('SELECT cost_per_sms, cost_per_lms, unit_price_basis FROM companies WHERE id = $1', [companyScope]);
         const { sms: cSms, lms: cLms } = getCompanyCosts(costRes.rows[0] || {});
-        testSummary.cost = Math.round(((testSummary.sms - testSummary.pending) * cSms + testSummary.lms * cLms) * 10) / 10;
+        testSummary.cost = Math.round(((testSummary.sms - testSummary.pending - sfSmsFailed) * cSms + (testSummary.lms - sfLmsFailed) * cLms) * 10) / 10;
       } catch (mysqlErr) {
         console.error('테스트 통계 조회 실패:', mysqlErr);
       }
@@ -299,7 +307,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       sfDetail.rows.forEach((r: any) => {
         testDetail.push({
           phone: r.phone, msgType: r.message_type || 'SMS',
-          status: r.result ? 'success' : 'pending', result: r.result || 'pending',
+          status: spamResultRowStatus(r.result), result: r.result || 'pending',
           carrier: r.carrier, sentAt: r.sent_at, testType: 'spam_filter',
           // ★ 2026-09-27 한줄로 V2 m037 — 과금 여부(무료 체험·무료 자동 검사 = false · 정산 집계와 같은 판정 CT)
           billable: isSpamTestBillable(r.source),

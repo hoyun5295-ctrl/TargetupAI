@@ -11,7 +11,7 @@ import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/t
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSends } from '../utils/customer-send-stats';
 import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts } from '../utils/messageUtils';
-import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, getDisplayContents } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, getDisplayContents, spamBilledResultSql, spamFailedResultSql, isSpamResultBilled, spamResultRowStatus } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -19,7 +19,7 @@ import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { fieldKeyToColumn, getFieldByKey } from '../utils/standard-field-map';
 import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
 import { nightAdRestrictionMessage } from '../utils/autosend-policy';
-import { resolveStagingCommitState, withStagingLock } from '../utils/staging-sweeper';
+import { resolveStagingCommitState, withStagingLock, parkStagingRows, restoreParkedStagingRows, dropParkedStagingRows } from '../utils/staging-sweeper';
 import { isLoadingSendPhase } from '../utils/load-cancel';
 // ★ 2026-09-26 한줄로 V2 S1-H07·F09(Codex 4차 2R) — 캠페인 발송 시작 ↔ 초안 삭제 직렬화(프로세스 안 잠금 CT)
 import { withCampaignStartLock } from '../utils/keyed-lock';
@@ -69,7 +69,7 @@ import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt } from '../utils/campaign-validation';
 import { isWithinBrandSendWindow, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError } from '../utils/send-time-util';
-import { countStagingFiltered, createDirectSendCampaign, effectiveUnsubFilter } from '../utils/direct-send-core';
+import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, effectiveUnsubFilter } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
 import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from '../utils/brand-link-core';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
@@ -1603,7 +1603,9 @@ router.get('/test-stats', async (req: Request, res: Response) => {
         COUNT(*) as total,
         SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms,
         SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms,
-        SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as completed,
+        -- ★ 2026-09-29 한줄로 V2 차수 5 — 성공 = 청구 판정 CT(통과·차단·시간 초과) · 발송 실패는 실패로 따로 센다(옛: 결과가 있으면 전부 성공)
+        SUM(CASE WHEN ${spamBilledResultSql('r')} THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN ${spamFailedResultSql('r')} THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
       FROM spam_filter_test_results r
       JOIN spam_filter_tests t ON r.test_id = t.id
@@ -1613,6 +1615,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     const sf = spamAgg.rows[0];
     const sfTotal = Number(sf.total) || 0;
     const sfCompleted = Number(sf.completed) || 0;
+    const sfFailed = Number(sf.failed) || 0;
     const sfPending = Number(sf.pending) || 0;
     const sfSms = Number(sf.sms) || 0;
     const sfLms = Number(sf.lms) || 0;
@@ -1637,11 +1640,11 @@ router.get('/test-stats', async (req: Request, res: Response) => {
 
     const spamFilterList = spamListResult.rows.map((r: any) => {
       const msgType = r.message_type || 'SMS';
-      const isCompleted = r.result !== null;
       // ★2026-09-25 무료 체험 검사는 비용 0(청구하지 않는다 · spam-trial CT)
       const isTrial = r.source === SPAM_TRIAL_SOURCE;
       // ★ 2026-09-26 F49 — 비용은 청구 제외 판정 CT를 따른다(체험 + 무료 자동 검사 = 0원 · 정산 집계와 같은 집합)
-      if (isCompleted && isSpamTestBillable(r.source)) {
+      // ★ 2026-09-29 한줄로 V2 차수 5 — 발송 실패 행은 비용 0(청구 판정 CT · 옛: 결과가 있으면 비용에 넣었다)
+      if (isSpamResultBilled(r.result) && isSpamTestBillable(r.source)) {
         sfCostCalc += msgType === 'SMS' ? costSms : costLms;
       }
       return {
@@ -1650,7 +1653,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
         content: msgType === 'LMS' ? (r.message_content_lms || '') : (r.message_content_sms || ''),
         type: msgType,
         sentAt: r.sent_at,
-        status: isCompleted ? 'success' : 'pending',
+        status: spamResultRowStatus(r.result),
         result: r.result || SPAM_RESULT.PASS,
         carrier: r.carrier,
         testType: 'spam_filter',
@@ -1662,7 +1665,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     const spamFilterStats = {
       total: sfTotal,
       success: sfCompleted,
-      fail: 0,
+      fail: sfFailed,
       pending: sfPending,
       sms: sfSms,
       lms: sfLms,
@@ -1833,10 +1836,21 @@ router.post('/direct-send/count', async (req: Request, res: Response) => {
     const userId = (req as any).user?.userId;
     if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
     // ★ 2026-09-27 S5-05 — 광고 여부를 받아 확정·발송과 같은 판정으로 센다(미리보기 숫자 = 실제 발송 수)
-    const { stagingId, dedupEnabled = true, unsubFilterEnabled = true, adEnabled = false } = req.body || {};
+    const { stagingId, dedupEnabled = true, unsubFilterEnabled = true, adEnabled = false, includeNameEmpty = false, useIndividualCallback = false } = req.body || {};
     if (!stagingId) return res.status(400).json({ success: false, error: 'stagingId 누락' });
     const r = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled, adEnabled === true);
-    return res.json({ success: true, ...r });
+    // ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 발송(보관본)이 요청할 때만 이름 빈 행·수신자별 회신번호 제외를 더한다(직접발송 = 요청 안 함 · 무변경)
+    //   개별 회신번호는 확정·발송과 같은 읽기(!!) — 엄격 비교로 읽으면 문자열 값에서 발송과 갈린다(sender-auth 계약)
+    const checks = (includeNameEmpty === true || !!useIndividualCallback)
+      ? await countStagingChecks(stagingId, companyId, {
+        nameEmpty: includeNameEmpty === true,
+        individualCallback: !!useIndividualCallback,
+        callbackUserId: callbackAssignmentUserId((req as any).user?.userType, userId),
+        dedupEnabled: dedupEnabled !== false,
+        applyUnsub: effectiveUnsubFilter(adEnabled === true, unsubFilterEnabled), unsubUserId: userId,
+      })
+      : {};
+    return res.json({ success: true, ...r, ...checks });
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('relation') && msg.includes('does not exist')) {
@@ -1987,37 +2001,84 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     // ★ 2026-09-26 한줄로 V2 F38 (Codex 1R high) — 같은 준비분의 stage(검사 → INSERT)와 섞이지 않게 준비분 잠금 안에서
     //   만료 확인 → 집계 → 캠페인 생성을 한다. 캠페인이 생기면 stage는 409로 막힌다(집계 뒤 덧붙인 행이 발송되지 않는다).
     return await withStagingLock(stagingId, async () => {
+      // ★ 2026-09-29 한줄로 V2 R112 (Codex 2R high) — 이미 접수된 준비분(살아 있는 캠페인이 가리킴)에는 다시 확정하지 않는다.
+      //   옛: 같은 stagingId 로 다시 부르면 캠페인이 하나 더 생겨 같은 명단이 두 번 차감·발송될 수 있었다(stage 입구 F38 과 같은 규칙).
+      //   발송 단계 failed(차감 회수·활성화 실패로 중화된 캠페인)는 살아 있지 않다 = 재시도 허용(정리 워커와 같은 기준).
+      const liveCommitted = await query(
+        `SELECT 1 FROM campaigns WHERE staging_id = $1::uuid AND COALESCE(send_phase, '') <> 'failed' LIMIT 1`,
+        [stagingId],
+      );
+      if (liveCommitted.rows.length > 0) {
+        return res.status(409).json({ success: false, code: 'STAGING_COMMITTED', error: '이미 발송을 누른 명단입니다. 발송결과에서 확인해 주세요.' });
+      }
+      // ★ 2026-09-29 한줄로 V2 R112 (Codex 3R high) — 끊긴 지난 시도가 보관 칸에 옮겨 둔 행을 먼저 원본으로 되돌린다(판정은 매번 새로 · 만료 판정보다 먼저 = 행이 전부 칸에 있어도 만료로 오판하지 않는다)
+      await restoreParkedStagingRows(stagingId, companyId);
       if ((await resolveStagingCommitState(stagingId, companyId)) === 'expired') {
         return res.status(400).json({ success: false, code: 'STAGING_EXPIRED', error: '발송 준비가 만료됐습니다. 발송을 다시 눌러 주세요.' });
       }
-      const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled, adEnabled === true);
-      if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
-
-      // 캠페인 생성 + 차감 + worker 트리거 — createDirectSendCampaign 공유(자율 발송과 동일 경로, MMS 이미지 컬럼 저장 포함).
+      // ★ 2026-09-29 한줄로 V2 R112 (Codex 1R·2R·3R high) — 수신자별 회신번호 제외를 건수 확정·차감·분할 순번보다 먼저 확정한다
+      //   (옛: 제외 전 인원으로 차감 → 무료 문자량 소실 · 잔액 부족 오판 · 분할 순번 밀림). 판정 CT = 워커·동기 경로와 같다.
+      //   ⛔ 원본 준비분 행을 지우지 않고 · 사본도 만들지 않는다 — 뺄 행은 원본에서 정해지는 보관 칸으로 옮기고(캠페인은 원본 id 하나)
+      //   접수되면 칸을 지우고 실패하면 되돌린다(finally).
+      let parked = false;
+      // 배정 기준 사용자 — 판정과 워커가 같은 값을 쓴다(send_config.callbackFilter · 차수 5)
+      const commitCallbackUserId = callbackAssignmentUserId((req as any).user?.userType, userId);
+      if (commitIndividualCallback) {
+        const plan = await planIndividualCallbackExclusion(
+          stagingId, companyId, commitCallbackUserId, dedupEnabled !== false,
+        );
+        if (plan.remaining === 0) {
+          return res.status(400).json({ success: false, ...buildCallbackErrorResponse(plan.callbackMissingCount, plan.callbackUnregisteredCount) });
+        }
+        if (plan.moveIds.length > 0) {
+          parked = true;
+          const moved = await parkStagingRows(stagingId, companyId, plan.moveIds);
+          console.log(`[직접발송 commit] 수신자별 회신번호 제외 ${plan.removed}명(${moved}행 · 차감 전 · 보관 칸) — staging=${stagingId}`);
+        }
+      }
       try {
-        const { campaignId, accepted } = await createDirectSendCampaign({
-          stagingId, campaignName: `직접발송 ${new Date().toLocaleString('ko-KR')}`,
-          msgType: commitMsgResolved.messageType, message, subject, callback, sendChannel: commitChannel.channel, adEnabled, total,
-          scheduled, scheduledAt, splitEnabled, splitCount, splitIntervalMinutes, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
-          dedupEnabled, unsubFilterEnabled: effectiveUnsubFilter(adEnabled === true, unsubFilterEnabled),
-          kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
-          alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson: alimtalkButtonJsonResolved, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
-          alimtalkEtcJson, alimtalkTemplateUuid,
-        }, { companyId, userId }, { finalSource: 'manual' });
+        const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled, adEnabled === true);
+        if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
 
-        return res.status(202).json({
-          success: true, campaignId, accepted,
-          message: `${accepted}건 발송이 접수됐습니다. 진행 상황은 발송결과에서 확인하세요.`,
-        });
-      } catch (e: any) {
-        if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
-          return res.status(402).json({ success: false, error: e.message, ...(e.extra || {}) });
+        // 캠페인 생성 + 차감 + worker 트리거 — createDirectSendCampaign 공유(자율 발송과 동일 경로, MMS 이미지 컬럼 저장 포함).
+        try {
+          const { campaignId, accepted } = await createDirectSendCampaign({
+            stagingId, campaignName: `직접발송 ${new Date().toLocaleString('ko-KR')}`,
+            msgType: commitMsgResolved.messageType, message, subject, callback, sendChannel: commitChannel.channel, adEnabled, total,
+            scheduled, scheduledAt, splitEnabled, splitCount, splitIntervalMinutes, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
+            callbackFilterUserId: commitCallbackUserId ?? null,
+            dedupEnabled, unsubFilterEnabled: effectiveUnsubFilter(adEnabled === true, unsubFilterEnabled),
+            kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
+            alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson: alimtalkButtonJsonResolved, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
+            alimtalkEtcJson, alimtalkTemplateUuid,
+          }, { companyId, userId }, { finalSource: 'manual' });
+
+          return res.status(202).json({
+            success: true, campaignId, accepted,
+            message: `${accepted}건 발송이 접수됐습니다. 진행 상황은 발송결과에서 확인하세요.`,
+          });
+        } catch (e: any) {
+          if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
+            return res.status(402).json({ success: false, error: e.message, ...(e.extra || {}) });
+          }
+          // ★ 2026-07-02 그 외 DirectSendError(링크 placeholder 가드 등) = 정의된 상태코드 + 사용자 친화 메시지
+          if (e instanceof DirectSendError) {
+            return res.status(e.httpStatus || 400).json({ success: false, error: e.message, code: e.code, ...(e.extra || {}) });
+          }
+          throw e;
         }
-        // ★ 2026-07-02 그 외 DirectSendError(링크 placeholder 가드 등) = 정의된 상태코드 + 사용자 친화 메시지
-        if (e instanceof DirectSendError) {
-          return res.status(e.httpStatus || 400).json({ success: false, error: e.message, code: e.code, ...(e.extra || {}) });
+      } finally {
+        // 보관 칸 마무리 = 되돌리기 → 남은 칸 지우기(한 가지). 접수가 안 됐으면 되돌려져 설정을 바꿔 다시 보낼 수 있고,
+        //   접수됐으면(살아 있는 캠페인) 되돌리기가 조건으로 막혀 남은 칸 = 보내지 않을 사람 → 지운다.
+        //   실패해도 남은 행은 다음 확정·빼기·회신번호 채우기가 먼저 되돌리고, 끝내 남으면 24시간 정리 대상이다.
+        if (parked) {
+          try {
+            await restoreParkedStagingRows(stagingId, companyId);
+            await dropParkedStagingRows(stagingId, companyId);
+          } catch (parkErr) {
+            console.error(`[직접발송 commit] 보관 칸 마무리 실패 — staging=${stagingId}:`, parkErr);
+          }
         }
-        throw e;
       }
     });
   } catch (err: any) {

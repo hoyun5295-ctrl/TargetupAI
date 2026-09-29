@@ -1046,6 +1046,8 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
         handleMmsMultiUpload={mms.handleMmsMultiUpload}
         handleMmsImageRemove={mms.handleMmsImageRemove}
         handleMmsFromAsset={mms.handleMmsFromAsset}
+        /* ★ 2026-09-29 한줄로 V2 차수 5 — 사진 순서 바꾸기(끌어 놓기 · ◀ ▶) · 접수는 목록 순서(mmsImagePaths) */
+        handleMmsImageSwap={mms.handleMmsImageSwap}
         onConfirm={() => setMmsOpen(false)}
       />
     </div>

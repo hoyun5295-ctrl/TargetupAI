@@ -12,6 +12,7 @@
  */
 import nodemailer from 'nodemailer';
 import { INVITO_INFO } from '../config/defaults';
+import { emailSafeImageHtml } from './email-safe-image';
 
 export type OutreachMailOutcome = 'sent' | 'rejected' | 'unknown';
 
@@ -133,11 +134,14 @@ async function sendViaOutreachAccount(input: { to: string[]; subject: string; ht
     socketTimeout: 20_000,
   });
   try {
+    // ★ 2026-09-29 메일에 싣는 사진 = 메일 프로그램이 다 보여 주는 형식만(CT email-safe-image · 서수란 접수 "AI영업 메일 아웃룩에서 이미지 깨짐").
+    //   수집한 업체 사진이 WebP 로 저장돼 있으면 JPEG·PNG 사본 주소로 바꿔 보낸다(저장된 메일 판은 그대로 · 실패 = 원래 HTML).
+    const html = await emailSafeImageHtml(input.html);
     const send = transporter.sendMail({
       from: `"한줄로 제안" <${user}>`,
       to: input.to,
       subject: input.subject,
-      html: input.html,
+      html,
       ...(input.text ? { text: input.text } : {}),
       ...(input.headers ? { headers: input.headers } : {}),
     });

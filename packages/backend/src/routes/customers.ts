@@ -11,10 +11,17 @@ import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
 // ★ 2026-06-25: 고객 전체 삭제 시 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
-import { getColumnFields, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
+import { renderFieldValue } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope, getOwnerCustomerScopeSql } from '../utils/store-scope';
+import {
+  buildExtractSelect, buildKeptSelect, flattenExtractRow, keepExtraction, readExtractionState, searchExtraction, readExtractionRows,
+  removeFromExtraction, fillExtractionCallback, resolveExtractionScope,
+  EXTRACTION_SEARCH_MIN_DIGITS, EXTRACTION_REMOVE_MAX, EXTRACTION_EXPIRED_ERROR,
+} from '../utils/extraction-keep';
+import { normalizePhone } from '../utils/normalize-phone';
+import { isUuid } from '../utils/normalize';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { computeMonthlyUsage } from '../utils/monthly-usage';
@@ -1027,68 +1034,32 @@ router.post('/extract', async (req: Request, res: Response) => {
       }
     }
 
-    // 데이터 추출 (FIELD_MAP 기반 동적 SELECT — D43-3 동적화)
-    // ★ 2026-08-14 (Codex 2R critical): phoneField를 요청 문자열 그대로 SELECT에 삽입하던 자리 —
-    //   스칼라 서브쿼리를 넣으면 회사 WHERE 밖의 타사 PII까지 뽑히는 교차 테넌트 주입이었다.
-    //   서버가 아는 식별자만 허용: FIELD_MAP 실컬럼 또는 custom_1~15(jsonb 접근식). 그 외 = 400.
-    const requestedPhoneField = String(phoneField || 'phone');
-    const columnFields = getColumnFields();
-    let phoneExpr: string;
-    if (requestedPhoneField === 'phone') {
-      phoneExpr = 'phone';
-    } else if (columnFields.some(f => f.columnName === requestedPhoneField)) {
-      phoneExpr = requestedPhoneField;
-    } else if (/^custom_([1-9]|1[0-5])$/.test(requestedPhoneField)) {
-      phoneExpr = `custom_fields->>'${requestedPhoneField}'`;
-    } else {
-      return res.status(400).json({ error: '유효하지 않은 전화번호 필드입니다.' });
+    // 데이터 추출 (FIELD_MAP 기반 동적 SELECT — D43-3 동적화) · 번호 칸 허용 목록 = CT buildExtractSelect(★0929 R112 이동 · 원본 그대로)
+    const extractSelect = req.body?.keep === true ? buildKeptSelect(phoneField) : buildExtractSelect(phoneField);
+    if (!extractSelect.ok) {
+      return res.status(400).json({ error: extractSelect.error });
     }
 
-    // FIELD_MAP에서 직접 컬럼 동적 생성
-    const selectParts = columnFields.map(f => {
-      // phone은 phoneField 파라미터에 따라 별칭 처리 (허용 목록 통과분만)
-      if (f.columnName === 'phone') return `${phoneExpr} as phone`;
-      return f.columnName;
-    });
-    // 시스템/파생/레거시 필드 추가 (FIELD_MAP 외, 기존 흐름 호환)
-    selectParts.push('region', 'custom_fields', 'callback');
-    const selectClause = selectParts.join(', ');
-    
     // ★ B-D75-04: LIMIT 하드코딩 제거 — 필터 조건에 맞는 전체 고객을 추출 (제한 없음)
     const result = await query(
-      `SELECT ${selectClause}
+      `SELECT ${extractSelect.selectClause}
       FROM customers
       ${whereClause}
       ORDER BY created_at DESC`,
       params
     );
 
-    // ★ B-D75-03: custom_fields JSONB를 flat하게 풀어서 반환 (프론트에서 r[field_key]로 직접 접근 가능)
-    // ★ B+0407-1: enum 필드(gender F→여성) 미리 변환 — 모든 frontend 표시 경로 자동 정상화
-    // ★ D142 (2026-04-28): custom_fields 평면화 시 모든 값을 String()로 강제 (Harold님 원칙).
-    //   custom_1~15는 고객사 업로드 원본을 100% 보존해야 하는데, JSONB에 number/Date 객체 등으로
-    //   저장된 케이스가 있으면 프론트에서 typeof로 자동 추론되어 콤마 사고 발생 가능.
-    //   백엔드 출구에서 String() 박제 → 프론트 어디서든 number 추론 불가.
-    const flatRecipients = result.rows.map((r: any) => {
-      let flat: any;
-      if (r.custom_fields && typeof r.custom_fields === 'object') {
-        const { custom_fields, ...rest } = r;
-        const customFlat = Object.fromEntries(
-          Object.entries(custom_fields).map(([k, v]) => [k, v == null ? '' : String(v)])
-        );
-        flat = { ...rest, ...customFlat };
-      } else {
-        flat = { ...r };
-      }
-      for (const fk of Object.keys(FIELD_DISPLAY_MAP)) {
-        if (flat[fk] != null) {
-          flat[fk] = reverseDisplayValue(fk, flat[fk]);
-        }
-      }
-      return flat;
-    });
+    // 평면화(custom_fields 풀기 · enum 역변환 · String 박제) = CT flattenExtractRow(★0929 R112 이동 · 원본 그대로)
+    const flatRecipients = result.rows.map(flattenExtractRow);
 
     await logPrivacyView({ req, kind: 'customer_extract', count: flatRecipients.length, companyId, filterKeys: Object.keys(req.body || {}) });
+
+    // ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 발송 창은 명단 전체 대신 보관본(발송 준비 표)을 받는다.
+    //   keep 없으면 아래 응답은 옛날과 같다(브랜드메시지 창 AI 타겟추출이 쓴다).
+    if (req.body?.keep === true) {
+      const kept = await keepExtraction(companyId, flatRecipients);
+      return res.json({ success: true, ...kept });
+    }
 
     res.json({
       success: true,
@@ -1098,6 +1069,96 @@ router.post('/extract', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('타겟 추출 에러:', error);
     res.status(500).json({ error: '타겟 추출 실패' });
+  }
+});
+
+// ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 추출 보관본 입구 4개(설계 docs/2026-09-28-v2-round4-send-redesign.md §2-1).
+//   보관본 = 발송 준비 표(campaign_send_staging) · 만료 23시간 · 소유 = 회사(준비분과 같음) ·
+//   개인정보를 돌려주는 조회(검색·전체 행)는 요청 사용자 매장 범위를 다시 건다. SQL·판정은 전부 CT(extraction-keep).
+
+// POST /api/customers/extractions/:id/search — 보관본 전체에서 번호로 찾기(숫자만 · 3자리 이상 · 최대 50행)
+router.post('/extractions/:id/search', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다' });
+    const extractionId = String(req.params.id || '');
+    if (!isUuid(extractionId)) return res.status(410).json({ success: false, code: 'EXTRACTION_EXPIRED', error: EXTRACTION_EXPIRED_ERROR });
+    const digits = normalizePhone(String(req.body?.q ?? ''));
+    if (digits.length < EXTRACTION_SEARCH_MIN_DIGITS) {
+      return res.status(400).json({ success: false, code: 'SEARCH_TOO_SHORT', error: `번호를 ${EXTRACTION_SEARCH_MIN_DIGITS}자리 이상 넣어 주세요.` });
+    }
+    const select = buildKeptSelect(req.body?.phoneField);
+    if (!select.ok) return res.status(400).json({ success: false, error: select.error });
+    const st = await readExtractionState(extractionId, companyId);
+    if (st.state === 'expired') return res.status(410).json({ success: false, code: 'EXTRACTION_EXPIRED', error: EXTRACTION_EXPIRED_ERROR });
+    const scope = await resolveExtractionScope(companyId, req.user?.userId, req.user?.userType);
+    if (scope === 'blocked') return res.json({ success: true, count: st.count, matched: 0, rows: [] });
+    const found = await searchExtraction({ extractionId, companyId, digits, select, storeCodes: scope });
+    await logPrivacyView({ req, kind: 'customer_extract', count: found.rows.length, companyId });
+    return res.json({ success: true, count: st.count, ...found });
+  } catch (error) {
+    console.error('[extractions/search] 오류:', error);
+    return res.status(500).json({ success: false, error: '번호를 찾지 못했습니다.' });
+  }
+});
+
+// POST /api/customers/extractions/:id/remove — 고른 번호를 보관본에서 뺀다(커밋 뒤 409 · 만료 410)
+router.post('/extractions/:id/remove', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다' });
+    const extractionId = String(req.params.id || '');
+    if (!isUuid(extractionId)) return res.status(410).json({ success: false, code: 'EXTRACTION_EXPIRED', error: EXTRACTION_EXPIRED_ERROR });
+    const phones = req.body?.phones;
+    if (!Array.isArray(phones) || phones.length === 0) return res.status(400).json({ success: false, error: '뺄 번호를 골라 주세요.' });
+    if (phones.length > EXTRACTION_REMOVE_MAX) {
+      return res.status(400).json({ success: false, error: `한 번에 ${EXTRACTION_REMOVE_MAX.toLocaleString()}명까지 뺄 수 있습니다.` });
+    }
+    const r = await removeFromExtraction(extractionId, companyId, phones);
+    if (!r.ok) return res.status(r.status).json({ success: false, code: r.code, error: r.error });
+    return res.json({ success: true, count: r.count, removed: r.changed });
+  } catch (error) {
+    console.error('[extractions/remove] 오류:', error);
+    return res.status(500).json({ success: false, error: '번호를 빼지 못했습니다.' });
+  }
+});
+
+// POST /api/customers/extractions/:id/rows — 보관본 전체 행(추출 응답과 같은 칸) · 알림톡·브랜드메시지로 넘길 때만
+router.post('/extractions/:id/rows', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다' });
+    const extractionId = String(req.params.id || '');
+    if (!isUuid(extractionId)) return res.status(410).json({ success: false, code: 'EXTRACTION_EXPIRED', error: EXTRACTION_EXPIRED_ERROR });
+    const select = buildKeptSelect(req.body?.phoneField);
+    if (!select.ok) return res.status(400).json({ success: false, error: select.error });
+    const st = await readExtractionState(extractionId, companyId);
+    if (st.state === 'expired') return res.status(410).json({ success: false, code: 'EXTRACTION_EXPIRED', error: EXTRACTION_EXPIRED_ERROR });
+    const scope = await resolveExtractionScope(companyId, req.user?.userId, req.user?.userType);
+    const recipients = scope === 'blocked' ? [] : await readExtractionRows({ extractionId, companyId, select, storeCodes: scope });
+    await logPrivacyView({ req, kind: 'customer_extract', count: recipients.length, companyId });
+    return res.json({ success: true, count: recipients.length, recipients });
+  } catch (error) {
+    console.error('[extractions/rows] 오류:', error);
+    return res.status(500).json({ success: false, error: '명단을 불러오지 못했습니다.' });
+  }
+});
+
+// POST /api/customers/extractions/:id/callback — 수신자별 회신번호 칸을 골랐을 때 보관본 회신번호를 그 칸 값으로 채운다
+router.post('/extractions/:id/callback', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다' });
+    const extractionId = String(req.params.id || '');
+    if (!isUuid(extractionId)) return res.status(410).json({ success: false, code: 'EXTRACTION_EXPIRED', error: EXTRACTION_EXPIRED_ERROR });
+    const select = buildKeptSelect(req.body?.phoneField);
+    if (!select.ok) return res.status(400).json({ success: false, error: select.error });
+    const r = await fillExtractionCallback(extractionId, companyId, String(req.body?.column || ''));
+    if (!r.ok) return res.status(r.status).json({ success: false, code: r.code, error: r.error });
+    return res.json({ success: true, count: r.count, missing: r.missing ?? 0 });
+  } catch (error) {
+    console.error('[extractions/callback] 오류:', error);
+    return res.status(500).json({ success: false, error: '회신번호를 채우지 못했습니다.' });
   }
 });
 

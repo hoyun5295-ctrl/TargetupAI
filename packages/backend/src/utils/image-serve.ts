@@ -23,6 +23,7 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import sharp from 'sharp';
 import type { Sharp } from 'sharp';
+import { emailSafeCopyPaths } from './email-safe-image';
 
 /** 표시 최대 폭(px) — 이메일 본문 552 · 셸 600의 2.5배. 위 주석의 실측이 이 값의 근거다. */
 export const SERVE_MAX_WIDTH = 1400;
@@ -133,6 +134,15 @@ const inflightServe = new Map<string, Promise<string>>();
  *   best-effort — 정리 실패가 삭제 자체를 막지 않는다. 호출부는 원본을 지운 **뒤에** 부른다.
  */
 export function dropServeVariants(originalPath: string): void {
+  // ★ 2026-09-29 메일용 사본(email-safe-image.ts · `원래이름.mail.jpg|png`)과 그 서빙 변환본도 함께 지운다
+  for (const copy of emailSafeCopyPaths(originalPath)) {
+    try { if (fs.existsSync(copy)) fs.unlinkSync(copy); } catch { /* 다음 사본 */ }
+    dropServeVariantsOf(copy);
+  }
+  dropServeVariantsOf(originalPath);
+}
+
+function dropServeVariantsOf(originalPath: string): void {
   try {
     const optDir = path.join(path.dirname(originalPath), CACHE_DIR_NAME);
     if (!fs.existsSync(optDir)) return;

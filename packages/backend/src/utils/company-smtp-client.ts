@@ -28,6 +28,7 @@
 
 import nodemailer, { Transporter } from 'nodemailer';
 import crypto from 'crypto';
+import { emailSafeImageHtml } from './email-safe-image';
 import { query } from '../config/database';
 
 // ════════════════════════════════════════════════════════════════════
@@ -352,12 +353,16 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     ? input.to
     : (input.to.name ? `"${input.to.name}" <${input.to.email}>` : input.to.email);
 
+  // ★ 2026-09-29 메일에 싣는 사진 = 메일 프로그램이 다 보여 주는 형식만(CT email-safe-image · 서수란 접수 "아웃룩에서 이미지 깨짐").
+  //   우리 저장소의 WebP·AVIF 를 JPEG·PNG 사본 주소로 바꾼다 · 그 밖 한 글자도 안 바꾼다 · 절대 던지지 않는다(실패 = 원래 HTML).
+  const htmlBody = input.htmlBody ? await emailSafeImageHtml(input.htmlBody) : input.htmlBody;
+
   const info = await transporter.sendMail({
     from: fromText,
     to: toText,
     subject: input.subject,
     text: input.textBody,
-    html: input.htmlBody,
+    html: htmlBody,
     replyTo: input.replyTo,
     headers: input.headers,
   });

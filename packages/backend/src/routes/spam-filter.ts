@@ -4,7 +4,7 @@ import pool, { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 import { replaceVariables, prepareFieldMappings, getOpt080Number, buildAdSubject } from '../utils/messageUtils';
-import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailDetail } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from '../utils/system-alert';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
@@ -423,12 +423,12 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
             }
 
             if (result) {
-              await query(
-                `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
-                [result, row.id]
-              );
-              updatedCount++;
-              if (result === SPAM_RESULT.FAILED) wroteFailed = true;
+              // ★ 2026-09-29 차수 5 — 아직 판정 안 된 행만(CT) · 이번에 쓴 때만 센다
+              const w = await query(SPAM_RESULT_DECIDE_SQL, [result, row.id]);
+              if ((w.rowCount ?? 0) > 0) {
+                updatedCount++;
+                if (result === SPAM_RESULT.FAILED) wroteFailed = true;
+              }
             }
           }
         } finally {
@@ -465,10 +465,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
             } else {
               finalResult = SPAM_RESULT.TIMEOUT; // QTmsg 결과조차 없으면 TIMEOUT
             }
-            await query(
-              `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2`,
-              [finalResult, row.id]
-            );
+            await query(SPAM_RESULT_DECIDE_SQL, [finalResult, row.id]);
           }
           await query(
             `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
@@ -594,9 +591,12 @@ router.post('/report', async (req: Request, res: Response) => {
       `UPDATE spam_filter_test_results
        SET received = true, received_at = NOW(), result = $4
        WHERE test_id = $1 AND carrier = $2 AND message_type = $3 AND phone = $5 AND received = false
+         AND (result IS NULL OR result <> $6)
        RETURNING id`,
       // ★ 2026-09-26 한줄로 V2 m041 — 단말 번호까지 맞춘다(같은 통신사 단말이 2대면 한 대의 수신이 두 행을 통과로 만들었다)
-      [testId, device.carrier, detectedType, SPAM_RESULT.PASS, device.phone]
+      // ★ 2026-09-29 한줄로 V2 차수 5(m042 1R 범위 밖) — 통신사가 발송 실패로 확정한 행(failed)은 앱 보고로 바꾸지 않는다.
+      //   후보가 하나면 해시 없이 매칭하므로 이전 검사의 늦은 보고가 새 검사의 실패 행을 통과로 덮었다 → 청구 판정(failed 여부)이 뒤집혔다.
+      [testId, device.carrier, detectedType, SPAM_RESULT.PASS, device.phone, SPAM_RESULT.FAILED]
     );
 
     // 6) 모든 결과 수신 완료 체크 → 즉시 completed 전환
@@ -661,10 +661,7 @@ router.get('/active-test', authenticate, async (req: Request, res: Response) => 
         [test.id]
       );
       for (const row of stillUnresolved.rows) {
-        await query(
-          `UPDATE spam_filter_test_results SET result = $2 WHERE id = $1`,
-          [row.id, SPAM_RESULT.TIMEOUT]
-        );
+        await query(SPAM_RESULT_DECIDE_SQL, [SPAM_RESULT.TIMEOUT, row.id]);
       }
       await query(
         `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
@@ -840,12 +837,30 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
     }
 
     const results = await query(
-      `SELECT carrier, message_type, received, received_at, result
+      `SELECT carrier, message_type, received, received_at, result, phone
        FROM spam_filter_test_results
        WHERE test_id = $1
        ORDER BY carrier, message_type`,
       [testId]
     );
+    // ★ 2026-09-29 한줄로 V2 차수 5 — 발송 실패 행에 사유(게이트웨이 반려 / 통신사 실패)를 붙인다. 실패 행이 있을 때만 결과 코드를 읽는다
+    //   (폴링과 같은 CT · 같은 매칭 = 단말 번호 + 유형). 코드를 못 찾으면(오래돼 로그 밖 등) 사유 없이 보낸다 = 옛 문구.
+    //   단말 번호는 매칭에만 쓰고 응답에서 뺀다.
+    let failDetails = new Map<number, ReturnType<typeof spamFailDetail>>();
+    if (results.rows.some((r: any) => r.result === SPAM_RESULT.FAILED)) {
+      try {
+        const mqRows = await fetchSpamQtmsgRows(testId);
+        results.rows.forEach((r: any, i: number) => {
+          if (r.result !== SPAM_RESULT.FAILED) return;
+          const m = mqRows.find((q: any) => q.dest_no === r.phone && q.msg_type === toQtmsgType(r.message_type));
+          if (m && Number.isFinite(Number(m.status_code))) failDetails.set(i, spamFailDetail(Number(m.status_code)));
+        });
+      } catch (e: any) {
+        console.warn('[SpamFilter] 실패 사유 조회 실패(사유 없이 응답):', e?.message || e);
+        failDetails = new Map();
+      }
+    }
+    const resultRows = results.rows.map(({ phone: _phone, ...r }: any, i: number) => ({ ...r, ...(failDetails.get(i) || {}) }));
 
     // 타임아웃 체크 (active인데 3분 초과 시 자동 완료 처리)
     const testData = test.rows[0];
@@ -859,10 +874,7 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
           [testId]
         );
         for (const row of stillUnresolved.rows) {
-          await query(
-            `UPDATE spam_filter_test_results SET result = $2 WHERE id = $1`,
-            [row.id, SPAM_RESULT.TIMEOUT]
-          );
+          await query(SPAM_RESULT_DECIDE_SQL, [SPAM_RESULT.TIMEOUT, row.id]);
         }
         await query(
           `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
@@ -875,7 +887,7 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
 
     res.json({
       test: testData,
-      results: results.rows
+      results: resultRows
     });
 
   } catch (err) {

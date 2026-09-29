@@ -54,12 +54,19 @@ describe('배선', () => {
     expect(modal).toContain('const canReorder = !!handleMmsImageSwap && mmsUploadedImages.length > 1 && !mmsUploading;');
     expect(modal).toContain('draggable={canReorder}');
   });
-  it('직접발송만 켠다 · AI 운영자 · 대행발송 2곳은 지금 그대로', () => {
+  // ★ 2026-09-29 한줄로 V2 차수 5 — AI 운영자 · 대행발송 2곳도 켰다(0929 범위 밖 기록 → Harold 「추천안으로 전부」). 네 곳 모두 발송은 목록 순서.
+  it('직접발송 · AI 운영자 · 대행발송 2곳 = 네 곳 모두 켠다', () => {
     const dash = read('pages/Dashboard.tsx');
     const at = dash.indexOf('<MmsUploadModal');
     expect(dash.slice(at, dash.indexOf('/>', at))).toContain('handleMmsImageSwap={handleMmsImageSwap}');
-    for (const p of ['pages/AiOperatorPage.tsx', 'components/agency/AgencyOneStepModal.tsx', 'components/agency/AgencySendComposer.tsx']) {
-      expect(read(p)).not.toContain('handleMmsImageSwap');
+    const op = read('pages/AiOperatorPage.tsx');
+    const opAt = op.indexOf('<MmsUploadModal');
+    expect(op.slice(opAt, op.indexOf('/>', opAt))).toContain('handleMmsImageSwap={handleMmsImageSwap}');
+    for (const p of ['components/agency/AgencyOneStepModal.tsx', 'components/agency/AgencySendComposer.tsx']) {
+      const src = read(p);
+      const a = src.indexOf('<MmsUploadModal');
+      expect(src.slice(a, src.indexOf('/>', a))).toContain('handleMmsImageSwap={mms.handleMmsImageSwap}');
+      expect(src).toContain('mmsImagePaths: mms.mmsUploadedImages.map((i) => i.serverPath)');
     }
   });
 });

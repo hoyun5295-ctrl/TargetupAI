@@ -85,7 +85,9 @@ describe('배선', () => {
     for (const src of [route, queue]) {
       expect(src.split('await refundSpamSendFailures(testId);').length - 1).toBe(1);
       // 실패를 쓴 폴링 회차에서만 · 결과 기록 루프 바로 뒤
-      expect(src).toMatch(/if \(result === SPAM_RESULT\.FAILED\) wroteFailed = true;/);
+      // ★ 2026-09-29 차수 5(Codex 1R high) — 판정 쓰기 CT(아직 판정 안 된 행만)가 이번에 쓴 때만 환불 신호
+      expect(src).toMatch(/(\(w\.rowCount \?\? 0\) > 0 && result === SPAM_RESULT\.FAILED\) wroteFailed = true;|if \(result === SPAM_RESULT\.FAILED\) wroteFailed = true;)/);
+      expect(src).toContain('await query(SPAM_RESULT_DECIDE_SQL, [result, row.id]);');
       // 루프 뒤 finally — 실패 한 건을 기록한 뒤 다음 행 기록이 던져도 이미 기록한 실패분을 환불한다(Codex m042 1R high)
       expect(src).toMatch(/\} finally \{\s*\/\/[^\n]*\n\s*if \(wroteFailed\) await refundSpamSendFailures\(testId\);\s*\}/);
       const loopAt = src.indexOf('let wroteFailed = false;');

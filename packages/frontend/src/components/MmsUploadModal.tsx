@@ -69,8 +69,8 @@ export default function MmsUploadModal({
         {/* 헤더 */}
         <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/95 backdrop-blur-sm">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20">
-              <ImageIcon className="w-4.5 h-4.5 text-white" />
+            <div className="w-9 h-9 rounded-xl bg-violet-500/15 ring-1 ring-inset ring-violet-400/30 flex items-center justify-center">
+              <ImageIcon className="w-4.5 h-4.5 text-violet-300" />
             </div>
             <div>
               <h3 className="text-base font-bold text-white">MMS 이미지 첨부</h3>
@@ -255,7 +255,7 @@ export default function MmsUploadModal({
               onClose();
               onConfirm?.(mmsUploadedImages.length);
             }}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:brightness-110 text-white font-semibold text-sm shadow-lg shadow-fuchsia-500/20 transition-all"
+            className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition-colors"
           >
             {mmsUploadedImages.length > 0 ? `${mmsUploadedImages.length}장 첨부 완료` : '확인'}
           </button>

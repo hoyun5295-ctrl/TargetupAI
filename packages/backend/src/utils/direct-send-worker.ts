@@ -460,8 +460,16 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   // ★ 2026-09-26 F19(Codex 4차 1R) — 개별 회신번호 배정 제한을 걸 사용자(관리자 = 제한 없음 · 동기 경로와 같은 CT).
   //   작성자 유형은 캠페인당 한 번 읽는다. users에 없는 작성자(슈퍼관리자 계정)는 역할을 몰라 CT가 본인 기준으로 걸지만,
   //   그 id로 배정된 번호가 없어 'assigned' 번호만 빠진다 — 회사 등록 여부(법적 요건)는 그대로 검사된다.
+  // ★ 2026-09-29 한줄로 V2 차수 5 — 확정 입구가 차감 전에 판정해 실은 값이 있으면 그것을 쓴다(send_config.callbackFilter · null = 제한 없음).
+  //   확정 입구는 JWT 역할로 판정하는데 여기서 DB 로 다시 판정하면 users 에 없는 슈퍼관리자에서 갈렸다(차감 인원 ≠ 적재 인원).
+  //   값이 없는 캠페인(옛 캠페인 · 다른 호출부)은 종전처럼 DB 로 판정한다.
+  const storedCallbackFilter = cfg.callbackFilter && typeof cfg.callbackFilter === 'object' && 'userId' in cfg.callbackFilter
+    ? { userId: typeof cfg.callbackFilter.userId === 'string' && cfg.callbackFilter.userId ? cfg.callbackFilter.userId : undefined }
+    : null;
   const callbackFilterUserId = cfg.useIndividualCallback && !skipLoad
-    ? callbackAssignmentUserId((await query(`SELECT user_type FROM users WHERE id = $1`, [userId])).rows[0]?.user_type, userId)
+    ? (storedCallbackFilter
+      ? storedCallbackFilter.userId
+      : callbackAssignmentUserId((await query(`SELECT user_type FROM users WHERE id = $1`, [userId])).rows[0]?.user_type, userId))
     : undefined;
   // ★ 2026-09-28 분할 = 저장 설정을 너그럽게 읽는 CT(옛 캠페인 = 간격 1분 · 판정은 옛 `splitEnabled && splitCount > 0`과 같다)
   const split = readStoredSplit(cfg);
