@@ -1925,8 +1925,10 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
   const [pcView, setPcView] = useState(false);
   const [customerView, setCustomerView] = useState(false);
   const appLocked = isApp && posterMode && posterLayout !== 'overlay' && !APP_SHEET_LAYOUTS_UNLOCKED;
+  // ★ 2026-09-29 (Harold 「이벤트 카드로 바꾸니 글자를 눌러도 편집 칸이 안 뜬다」) — 구버전 앱 모습은 버튼을 눌렀을 때만 켠다.
+  //   옛: 앱 잠금(appLocked)이 켜지면 저절로 켜져, 새 모양을 고르자마자 휴대폰이 옛 포스터로 바뀌고 글자 편집이 막혔다. 모양을 바꾸면 다시 끈다.
   const [legacyApp, setLegacyApp] = useState(false);
-  useEffect(() => { setLegacyApp(appLocked); }, [appLocked]);
+  useEffect(() => { setLegacyApp(false); }, [posterLayout]);
   const [imgMenu, setImgMenu] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);

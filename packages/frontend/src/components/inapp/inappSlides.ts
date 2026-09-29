@@ -210,6 +210,7 @@ export const isPosterLayout = (k: LayoutKey): k is PosterLayout => k === 'overla
 /**
  * ★ 앱 채널 새 레이아웃 잠금(설계서 §3 · 1차 = 잠금 · 2차 = 앱 계약 구현 + OTA · 실기기 확인 뒤 해제).
  *   2차 코드(첫 고객 앱 렌더 + 계약서)는 들어갔다. 해제는 실기기에서 새 모양·하루 보지 않기를 확인한 뒤 이 값을 true 로.
- *   잠금 중에도 고를 수는 있다 — 발행 전 「앱 업데이트 필요」 확인을 거치고, 미리보기에 「구버전 앱 모습」이 켜진 채로 시작한다.
+ *   잠금 중에도 고를 수는 있다 — 「앱 업데이트 필요」 표시 · 안내가 붙는다. 「구버전 앱 모습」은 잠금과 무관하게 버튼으로 본다.
+ *   ★ 2026-09-29 해제 — 팝폰 OTA 뒤 실기기에서 이벤트 카드(새 시트 사진 누름 기록 slide_0_image) · 오늘 하루 보지 않기 확인(Harold).
  */
-export const APP_SHEET_LAYOUTS_UNLOCKED = false;
+export const APP_SHEET_LAYOUTS_UNLOCKED = true;
