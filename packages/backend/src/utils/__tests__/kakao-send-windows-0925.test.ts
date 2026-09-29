@@ -382,7 +382,10 @@ describe('7. 늦게 끝난 불러오기는 사람이 고친 명단을 덮지 않
     const multi = between(ab, 'const handleLoadMultipleGroups = async () => {', '// 모달 열릴 때 그룹 로드');
     expect(multi.indexOf('if (seq !== loadSeqRef.current) return;')).toBeLessThan(multi.indexOf('setDirectRecipients(allContacts);'));
     expect(multi).toContain('if (seq === loadSeqRef.current) setListLoading(false);');
-    const single = between(ab, 'const seq = ++loadSeqRef.current;\n                            setListLoading(true);', '>불러오기</button>');
+    // ★0929 주소록 창 개편 — 그룹 하나 불러오기가 버튼 안 인라인에서 함수(loadGroupIntoRecipients)로 옮겨졌다(규칙은 같다)
+    const single = between(ab, 'const loadGroupIntoRecipients = async (group: AddressGroup) => {', 'const handleLoadMultipleGroups = async () => {');
+    expect(single.indexOf('const seq = ++loadSeqRef.current;')).toBeLessThan(single.indexOf('setListLoading(true);'));
+    expect(single).toContain('if (seq !== loadSeqRef.current) return;');   // 없으면 아래 indexOf(-1) 비교가 거짓 통과한다
     expect(single.indexOf('if (seq !== loadSeqRef.current) return;')).toBeLessThan(single.indexOf('setDirectRecipients(data.contacts.map('));
     expect(ab).toContain('React.useEffect(() => () => { loadSeqRef.current++; }, []);');
     const hide = between(ab, 'if (!show) {', 'setLoaded(false);');
