@@ -7,7 +7,7 @@
  *   LayoutSwitcher = 모양 바꾸기(포스터 계열 3 · 기본 알림 · 작게 알리기)
  * 편집 상태는 편집기(InAppMessagesPage EditModal)가 쥔다 — 여기 부품은 값과 콜백만 받는다(강조만 · 동시 포커스 없음 · 회의론자 12).
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { AlertCircle, ChevronLeft, ChevronRight, FolderOpen, ImagePlus, Loader2, Plus, ShoppingBag, Trash2, Upload, X, Layers, Check } from 'lucide-react';
 import { BlockList } from '../make/EditShell';
 import MallProductPickerModal, { type PickedMallProduct } from '../dm/MallProductPickerModal';
@@ -157,6 +157,13 @@ export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, 
 
 // ─────────────────────────────── 가운데 — 무대 + 떠 있는 입력 칸 ───────────────────────────────
 
+/** 무대 아래 줄(장 넘김 버튼 · 안내 한두 줄)이 차지하는 높이 — 무대 맞춤 계산에서 뺀다 */
+const STAGE_CHROME_H = 96;
+/** 휴대폰 옆 편집 칸 폭(최소 · 최대)과 편집 칸 ↔ 휴대폰 사이(화살표 · 연결선) */
+const DOCK_MIN_W = 240;
+const DOCK_MAX_W = 360;
+const DOCK_GAP = 28;
+
 function FakeScreen({ app }: { app: boolean }) {
   return (
     <div style={{ position: 'absolute', inset: 0, background: app ? '#f5f5f7' : '#f1f5f9', padding: app ? '38px 14px 0' : '12px 14px 0', fontSize: 12, color: '#334155' }}>
@@ -193,48 +200,137 @@ export function PosterStage({
   variables: Array<{ key: string; label: string }>;
   busyImage?: boolean;
 }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const dockRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
-  const [float, setFloat] = useState<{ key: SheetEditKey; slideKey: string; left: number; top: number; width: number; original: string } | null>(null);
+  // ★ 2026-09-29 편집 칸 = 휴대폰 옆(Harold 0929 「사진을 가린다 · 왼쪽 빈 곳에」) — 글자를 누르면 휴대폰이 가운데 칸 오른쪽으로 비키고
+  //   왼쪽에 편집 칸이 그 글자 높이에 맞춰 붙는다(화살표 + 연결선). 휴대폰·사진을 가리지 않고, 장 수와 무관하다(장 목록 칸이 아니라 가운데 칸).
+  //   가운데 칸이 좁아 편집 칸이 들어가지 않으면(1024급 · 모바일) 떠 있는 칸 없이 오른쪽 패널 글자 칸으로 커서를 옮긴다.
+  const [dock, setDock] = useState<{
+    key: SheetEditKey; slideKey: string; original: string;
+    /** 가운데 칸(root) 기준 */
+    top: number; width: number; arrowY: number; gap: number; placed: boolean;
+  } | null>(null);
   const cur = slides[active];
   const isPc = pc && channel === 'web';
   // 구버전 앱 = 새 모양을 모르는 빌드 → 지금 포스터 · 다시 보지 않기로 그린다(설계서 §1-1 · §1-3)
   const drawLayout: PosterLayout = legacyApp ? 'overlay' : layout;
   const drawDesign = legacyApp ? { ...(design || {}), dismiss_mode: undefined } : design;
 
-  // 장이 바뀌거나 칸이 사라지면 떠 있는 입력 칸을 닫는다(다른 장 칸에 글이 들어가지 않게 · 장마다 고정 key)
-  useEffect(() => { if (float && float.slideKey !== cur?._k) setFloat(null); }, [cur?._k]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (float) setTimeout(() => taRef.current?.focus(), 0); }, [float?.key, float?.slideKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ★ 2026-09-29 무대 맞춤(Harold 0929 「화면에서 잘려 밑에 글 쓰기가 힘들다」 · 1455×740 에서 휴대폰 43px 잘림 실측) —
+  //   가운데 칸 높이를 재서 휴대폰(PC 틀)을 남는 높이에 맞게 줄인다. 원래 크기보다 키우지 않는다(DM·이메일 PreviewPair 와 같은 방식).
+  //   좁은 화면(1024 미만)은 칸이 위아래로 쌓여 페이지가 스크롤되므로 폭만 맞춘다.
+  const frameW = isPc ? 640 : 320;
+  const frameH = isPc ? 430 : 650;
+  const [fit, setFit] = useState(1);
+  const [rootW, setRootW] = useState(0);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const measure = () => {
+      const wide = typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(min-width: 1024px)').matches;
+      const availH = wide ? el.clientHeight - STAGE_CHROME_H : Number.POSITIVE_INFINITY;
+      const availW = el.clientWidth - 8;
+      const s = Math.min(1, availH / frameH, availW / frameW);
+      setFit(Math.max(0.5, Math.floor(s * 1000) / 1000));
+      setRootW(el.clientWidth);
+    };
+    measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    window.addEventListener('resize', measure);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', measure); };
+  }, [frameW, frameH]);
+  const phoneW = Math.round(frameW * fit);
+  const phoneH = Math.round(frameH * fit);
+  /** 편집 칸이 휴대폰 옆에 들어가는가 — 휴대폰을 오른쪽 끝에 붙였을 때 왼쪽 폭이 편집 칸 최소 폭 + 연결선보다 넓어야 */
+  const sideRoom = rootW - phoneW;
+  const canDock = sideRoom >= DOCK_MIN_W + DOCK_GAP;
+  const docked = !!dock && canDock;
+  const phoneShift = docked ? Math.max(0, Math.floor(sideRoom / 2)) : 0;
 
-  const openAt = (key: SheetEditKey, el: HTMLElement) => {
+  // 장이 바뀌거나 칸이 사라지면 편집 칸을 닫는다(다른 장 칸에 글이 들어가지 않게 · 장마다 고정 key)
+  useEffect(() => { if (dock && dock.slideKey !== cur?._k) setDock(null); }, [cur?._k]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 화면이 좁아져 옆에 못 붙으면 닫는다(오른쪽 패널에서 이어 고친다)
+  useEffect(() => { if (dock && !canDock) setDock(null); }, [canDock]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 열리면 커서를 글 끝에(옛: 맨 앞이라 입력이 글 앞에 붙었다 · 0929 브라우저 실측)
+  useEffect(() => {
+    if (!dock) return;
+    setTimeout(() => {
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.focus();
+      const n = ta.value.length;
+      ta.setSelectionRange(n, n);
+    }, 0);
+  }, [dock?.key, dock?.slideKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 고른 글자 높이에 맞춰 편집 칸 자리를 잡는다(보이는 가운데 칸 안 · 화살표는 글자 가운데) */
+  const place = (d: NonNullable<typeof dock>) => {
+    const root = rootRef.current;
     const host = stageRef.current;
-    if (!host || !cur) return;
-    const hr = host.getBoundingClientRect();
-    const r = el.getBoundingClientRect();
-    const width = Math.max(220, Math.min(hr.width - 16, r.width + 24));
-    const left = Math.max(8, Math.min(hr.width - width - 8, r.left - hr.left - 12));
-    const top = Math.min(hr.height - 150, r.bottom - hr.top + 8);
-    onSelect(key);
-    setFloat({ key, slideKey: cur._k, left, top, width, original: readField(cur, key) });
+    if (!root || !host) return d;
+    const field = host.querySelector(`[data-edit="${d.key}"]`) as HTMLElement | null;
+    if (!field) return d;
+    const rr = root.getBoundingClientRect();
+    const fr = field.getBoundingClientRect();
+    const h = dockRef.current ? dockRef.current.offsetHeight : 180;
+    const fieldMid = (fr.top + fr.bottom) / 2 - rr.top;
+    const visTop = Math.max(rr.top, 0) - rr.top + 4;
+    const visBottom = Math.min(rr.bottom, window.innerHeight) - rr.top - 4;
+    const top = Math.max(visTop, Math.min(fieldMid - h / 2, visBottom - h));
+    const arrowY = Math.max(18, Math.min(h - 18, fieldMid - top));
+    return { ...d, top, arrowY, placed: true };
   };
-  const close = () => setFloat(null);
-  const cancel = () => { if (float) onChangeField(float.key, float.original); setFloat(null); };
+
+  const openAt = (key: SheetEditKey) => {
+    if (!cur) return;
+    onSelect(key);
+    if (!canDock) {
+      // 옆자리가 없는 화면 = 오른쪽 패널 글자 칸으로 커서를 옮긴다(패널이 그 칸 편집으로 바뀐 뒤)
+      setDock(null);
+      setTimeout(() => {
+        const ta = document.querySelector('textarea[data-panel-text]') as HTMLTextAreaElement | null;
+        if (ta) { ta.focus(); const n = ta.value.length; ta.setSelectionRange(n, n); }
+      }, 30);
+      return;
+    }
+    const width = Math.min(DOCK_MAX_W, sideRoom - DOCK_GAP);
+    setDock({ key, slideKey: cur._k, original: readField(cur, key), top: 0, width, arrowY: 60, gap: sideRoom - width, placed: false });
+  };
+  // 그린 뒤 실제 높이로 자리 확정(칠하기 전에 옮겨 깜박임 없음) · 휴대폰 크기가 바뀌면 다시 잡는다
+  useLayoutEffect(() => {
+    if (!dock || dock.placed) return;
+    setDock(place(dock));
+  }, [dock]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!dock) return;
+    const width = Math.min(DOCK_MAX_W, sideRoom - DOCK_GAP);
+    setDock((d) => (d ? { ...d, width, gap: sideRoom - width, placed: false } : d));
+  }, [fit, rootW]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const close = () => setDock(null);
+  const cancel = () => { if (dock) onChangeField(dock.key, dock.original); setDock(null); };
   const insertVar = (token: string) => {
-    if (!float) return;
+    if (!dock) return;
     const ta = taRef.current;
-    const v = readField(cur, float.key);
+    const v = readField(cur, dock.key);
     const at = ta ? ta.selectionStart ?? v.length : v.length;
-    const next = (v.slice(0, at) + token + v.slice(ta?.selectionEnd ?? at)).slice(0, FIELD_MAX[float.key]);
-    onChangeField(float.key, next);
+    const next = (v.slice(0, at) + token + v.slice(ta?.selectionEnd ?? at)).slice(0, FIELD_MAX[dock.key]);
+    onChangeField(dock.key, next);
     setTimeout(() => { if (ta) { ta.focus(); const p = at + token.length; ta.setSelectionRange(p, p); } }, 0);
   };
   const names = fieldNamesFor(layout);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col items-center">
-      <div ref={stageRef} className="relative" onClick={() => { close(); onSelect(null); }}>
+    <div ref={rootRef} className="relative w-full flex-1 min-h-0 flex flex-col items-center" onClick={() => { if (dock) { close(); onSelect(null); } }}>
+      <div ref={stageRef} className="relative shrink-0"
+        style={{ width: phoneW, height: phoneH, transform: phoneShift ? `translateX(${phoneShift}px)` : undefined, transition: 'transform .22s cubic-bezier(.22,1,.36,1)' }}
+        onClick={(e) => { e.stopPropagation(); if (dock) close(); onSelect(null); }}>
+        <div style={{ width: frameW, height: frameH, transform: fit < 1 ? `scale(${fit})` : undefined, transformOrigin: 'top left' }}>
         <div className={`relative overflow-hidden bg-slate-800 shadow-[0_24px_60px_-20px_rgba(0,0,0,.8)] ${isPc ? 'rounded-xl' : 'rounded-[34px] border-[6px] border-slate-800'}`}
-          style={isPc ? { width: 640, height: 430 } : { width: 320, height: 650 }}>
+          style={{ width: frameW, height: frameH }}>
           {isPc && <div className="h-6 bg-slate-800 flex items-center gap-1.5 px-3"><i className="w-2 h-2 rounded-full bg-rose-400" /><i className="w-2 h-2 rounded-full bg-amber-300" /><i className="w-2 h-2 rounded-full bg-emerald-400" /></div>}
           <div className="relative w-full" style={{ height: isPc ? 406 : '100%' }}>
             <FakeScreen app={channel === 'app'} />
@@ -255,7 +351,7 @@ export function PosterStage({
                   arrows
                   editable={legacyApp ? undefined : {
                     selected,
-                    onPick: openAt,
+                    onPick: (key) => openAt(key),
                     onImagePick,
                     onImageDrop,
                   }}
@@ -267,43 +363,55 @@ export function PosterStage({
             )}
           </div>
         </div>
+        </div>
+      </div>
 
-        {float && cur && (
-          <div className="absolute z-20 rounded-xl border border-violet-400/60 bg-slate-900 shadow-2xl p-2" style={{ left: float.left, top: float.top, width: float.width }}
+      {docked && dock && cur && (
+        <>
+          {/* 연결선 — 편집 칸 오른쪽 화살표에서 휴대폰 왼쪽 끝까지 */}
+          <div aria-hidden className="absolute pointer-events-none" style={{ left: dock.width, top: dock.top + dock.arrowY - 1, width: Math.max(0, dock.gap), height: 2, background: 'rgba(139,92,246,.55)', visibility: dock.placed ? 'visible' : 'hidden' }} />
+          <div ref={dockRef} data-stage-dock className="absolute left-0 z-20 rounded-2xl border border-violet-400/60 bg-slate-900 shadow-2xl p-3"
+            style={{ top: dock.top, width: dock.width, visibility: dock.placed ? 'visible' : 'hidden' }}
             onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-1 mb-1">
-              <b className="text-[12px] text-white">{names[float.key]}</b>
-              <span className="text-[10.5px] text-white/45">Enter 완료 · Shift+Enter 줄바꿈 · Esc 취소</span>
+            {/* 화살표 — 고른 글자 쪽 */}
+            <span aria-hidden className="absolute" style={{ right: -7, top: dock.arrowY - 7, width: 12, height: 12, background: '#0f172a', borderTop: '1px solid rgba(167,139,250,.6)', borderRight: '1px solid rgba(167,139,250,.6)', transform: 'rotate(45deg)' }} />
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <b className="text-[13px] text-white">{names[dock.key]}</b>
+              <button type="button" onClick={cancel} className="text-[11px] text-white/45 hover:text-white">되돌리고 닫기</button>
             </div>
-            <textarea ref={taRef} rows={float.key === 'body' ? 3 : 2} maxLength={FIELD_MAX[float.key]}
-              value={readField(cur, float.key)}
-              onChange={(e) => onChangeField(float.key, e.target.value)}
+            <textarea ref={taRef} rows={dock.key === 'body' ? 5 : 3} maxLength={FIELD_MAX[dock.key]}
+              value={readField(cur, dock.key)}
+              onChange={(e) => onChangeField(dock.key, e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); close(); }
                 if (e.key === 'Escape') { e.preventDefault(); cancel(); }
               }}
-              className="w-full px-2.5 py-2 rounded-lg bg-slate-950/70 border border-white/15 text-[13px] leading-relaxed text-white outline-none focus:border-violet-400/70 resize-none" />
-            {variables.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1.5">
-                {variables.slice(0, 5).map((v) => (
+              className="w-full px-3 py-2.5 rounded-xl bg-slate-950/70 border border-white/15 text-[13.5px] leading-relaxed text-white outline-none focus:border-violet-400/70 resize-none" />
+            <div className="flex items-center justify-between mt-1.5">
+              <span className="text-[10.5px] text-white/40">Enter 완료 · Shift+Enter 줄바꿈 · Esc 취소</span>
+              <span className="text-[10.5px] text-white/35 tabular-nums">{readField(cur, dock.key).length}/{FIELD_MAX[dock.key]}</span>
+            </div>
+            {variables.length > 0 && dock.key !== 'cta' && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {variables.slice(0, 6).map((v) => (
                   <button key={v.key} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => insertVar(v.key)}
-                    className="h-6 px-2 rounded-md bg-violet-500/15 border border-violet-400/30 text-[11px] text-violet-100 hover:bg-violet-500/25">+ {v.label}</button>
+                    className="h-7 px-2 rounded-md bg-violet-500/15 border border-violet-400/30 text-[11.5px] text-violet-100 hover:bg-violet-500/25">+ {v.label}</button>
                 ))}
               </div>
             )}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
       <div className="mt-3 flex items-center gap-3">
-        <button type="button" onClick={() => onActive((active - 1 + slides.length) % slides.length)} disabled={slides.length < 2}
+        <button type="button" onClick={(e) => { e.stopPropagation(); onActive((active - 1 + slides.length) % slides.length); }} disabled={slides.length < 2}
           className="w-9 h-9 rounded-full border border-white/15 bg-white/[0.05] text-white/80 hover:bg-white/10 disabled:opacity-30 flex items-center justify-center" aria-label="이전 장"><ChevronLeft className="w-4 h-4" /></button>
         <span className="text-[12.5px] text-white/60 tabular-nums">{active + 1} / {slides.length}장</span>
-        <button type="button" onClick={() => onActive((active + 1) % slides.length)} disabled={slides.length < 2}
+        <button type="button" onClick={(e) => { e.stopPropagation(); onActive((active + 1) % slides.length); }} disabled={slides.length < 2}
           className="w-9 h-9 rounded-full border border-white/15 bg-white/[0.05] text-white/80 hover:bg-white/10 disabled:opacity-30 flex items-center justify-center" aria-label="다음 장"><ChevronRight className="w-4 h-4" /></button>
       </div>
       <p className="mt-2 text-[11.5px] text-white/40 text-center max-w-[420px]">
-        {legacyApp ? '구버전 앱이 그리는 모습입니다. 편집하려면 「구버전 앱 모습」을 끄세요.' : '글자를 누르면 그 자리에서 고칩니다 · 사진 칸을 누르거나 사진을 끌어 놓으세요 · ←/→ 로 장을 넘깁니다'}
+        {legacyApp ? '구버전 앱이 그리는 모습입니다. 편집하려면 「구버전 앱 모습」을 끄세요.' : `${canDock ? '글자를 누르면 휴대폰 옆에서 고칩니다' : '글자를 누르면 편집 칸으로 커서가 옮겨 갑니다'} · 사진 칸을 누르거나 사진을 끌어 놓으세요 · ←/→ 로 장을 넘깁니다`}
       </p>
     </div>
   );
@@ -353,7 +461,7 @@ export function SlidePanel({
         </div>
         <div>
           <label className={LBL}>글자</label>
-          <textarea rows={selected === 'body' ? 4 : 2} maxLength={FIELD_MAX[selected]} value={readField(s, selected)}
+          <textarea data-panel-text rows={selected === 'body' ? 4 : 2} maxLength={FIELD_MAX[selected]} value={readField(s, selected)}
             onChange={(e) => onPatchSlide(selected === 'cta' ? { cta: { ...(s.cta || {}), label: e.target.value } } : { [selected]: e.target.value } as any)}
             className="w-full px-3 py-2.5 rounded-xl bg-slate-950/60 border border-white/15 text-[13px] leading-relaxed text-white outline-none focus:border-violet-400/70 resize-none" />
         </div>
