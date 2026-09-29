@@ -26,6 +26,8 @@ import {
   triggerKeyForEvent,
   resolveTriggerAvailability,
   toAvailabilityMap,
+  getTriggerContract,
+  type TriggerContract,
 } from './journey-trigger-capability';
 // ★ 정답표를 갖지 않는다 — 이 회사가 그 트리거를 판정할 수 있는지는 회사 데이터가 정한다.
 import { getCompanyJourneyFacts } from './company-data-profile';
@@ -248,6 +250,33 @@ const SUCCESSION_COPY: Record<string, {
  */
 export function successionObjectiveFor(nextTriggerEvent: string): string | null {
   return SUCCESSION_COPY[nextTriggerEvent]?.objective ?? null;
+}
+
+/** 목표 신호(계약 exit)별 여정 목표 한 구절. ⛔ 혜택 · 숫자는 넣지 않는다(프리셋 1클릭 경로는 혜택 근거가 없다 · AI 임의 혜택 금지). */
+const EXIT_GOAL_PHRASE: Record<TriggerContract['exit'], string> = {
+  purchase: '구매로 이어지게 합니다',
+  second_purchase: '두 번째 구매로 이어지게 합니다',
+  next_purchase: '다음 구매로 이어지게 합니다',
+  steps_done: '필요한 안내를 제때 전합니다',
+  points_used: '포인트가 사라지기 전에 쓰도록 안내합니다',
+  reservation_closed: '예약한 방문까지 안내합니다',
+  product_repurchase: '같은 상품을 다시 사도록 권합니다',
+};
+
+/**
+ * ★ 2026-09-30 여정 V2 — 시작 사건만 온 1클릭 생성(지도 · 빈 곳 찾기 · 다음 수)의 목표 골격. **켤 수 있는 모든 시작 사건에 문장이 있다.**
+ *   이어받는 여정 3종은 추천 카드와 같은 문장(successionObjectiveFor) · 나머지는 계약의 시작 설명 · 이름 · 목표 신호로 만든다.
+ *   옛: 이어받는 3종에만 문장이 있어 지도 [만들기]가 가입 · 장바구니 · 생일 같은 나머지 시작 사건에서 개발용 문구 500 으로 멈췄다(0930 Harold 접수).
+ *   켤 수 없는(미구현 · 미등록) 시작 사건 = null(생성기가 앞에서 거부한다).
+ */
+export function presetObjectiveFor(triggerEvent: string): string | null {
+  const succession = successionObjectiveFor(triggerEvent);
+  if (succession) return succession;
+  const c = getTriggerContract(triggerEvent);
+  if (!c || !c.implemented) return null;
+  // 상시(고른 고객) 여정은 이름이 시작 설명과 같은 말이라 이름을 빼고 적는다.
+  const who = c.cls === 'standing' ? '' : ` ${c.label}`;
+  return `${c.desc} 보내는${who} 여정: ${EXIT_GOAL_PHRASE[c.exit]}`;
 }
 
 /** 겹침 안내 — 계약의 겹침 쌍에서 문장을 만든다(★ 0929 V2: 첫 구매 ↔ 주문 완료 쌍이 더해져 고정 문장이 틀리게 됐다). */

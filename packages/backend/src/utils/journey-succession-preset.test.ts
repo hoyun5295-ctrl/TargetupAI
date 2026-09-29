@@ -25,6 +25,8 @@ vi.mock('./company-data-profile', () => ({
 
 import { callAIWithFallback } from '../services/ai';
 import { generateJourneyPackage } from './journey-ai-generator';
+import { TRIGGER_CONTRACTS, aiSelectableTriggerEvents } from './journey-trigger-capability';
+import { presetObjectiveFor } from './journey-opportunities';
 import { editJourneyPackage } from './journey-ai-editor';
 
 const ai = callAIWithFallback as unknown as ReturnType<typeof vi.fn>;
@@ -209,5 +211,44 @@ describe('프리셋이 없으면 옛 흐름 그대로 (하위호환)', () => {
   it('시작 신호 고정 문구를 프롬프트에 넣지 않는다', async () => {
     await gen();
     expect(String(ai.mock.calls[0][0].userMessage)).not.toContain('시작 신호 고정');
+  });
+});
+
+/**
+ * ★ 2026-09-30 여정 V2 (0930 Harold 접수) — 지도 · 빈 곳 찾기의 [만들기]는 시작 사건만 넘긴다(목표 문장 없음).
+ *   옛 생성기는 이어받는 3종에만 목표 문장이 있어 가입 · 장바구니 · 생일 등에서 개발용 문구 500 으로 멈췄다.
+ *   AI 마케팅 여정이 받는 시작 사건 전부(= 생성기의 수용 목록 aiSelectableTriggerEvents · 지도 빈 자리 · 선 고치기 · 빈 곳 찾기가 내보내는 것은
+ *   전부 이 안이다 · 예약은 정보 알림 축 · 상품 재구매는 상품 고르기 창)를 한 번씩 통과시킨다.
+ */
+describe('시작 사건만 온 1클릭 생성 = 켤 수 있는 모든 시작 사건에서 만들어진다', () => {
+  const selectable = new Set(aiSelectableTriggerEvents());
+  const presetable = TRIGGER_CONTRACTS.filter((c) => selectable.has(c.event));
+
+  it('목표 골격: 켤 수 있는 시작 사건마다 문장이 있고 · 혜택 숫자 · 내부 이름이 없다', () => {
+    expect(presetable.length).toBeGreaterThan(10);
+    for (const c of TRIGGER_CONTRACTS.filter((x) => x.implemented)) {
+      const o = presetObjectiveFor(c.event);
+      expect(o, `${c.event} 목표 문장 없음`).toBeTruthy();
+      // 날짜 이름(생일 D-7)의 숫자는 혜택이 아니다 — 혜택 표현만 본다.
+      expect(o!, `${c.event}: 프리셋 경로는 혜택 근거가 없다`).not.toMatch(/%|\d+\s*원|쿠폰|무료|할인|적립/);
+      expect(o!, `${c.event}: 저장값이 문장에 새면 문안에 내부 용어가 샌다`).not.toContain(c.event);
+    }
+    expect(presetObjectiveFor('reservation.visit_dn'), '켤 수 없는 시작 사건은 문장을 만들지 않는다').toBeNull();
+    expect(presetObjectiveFor('purchase.zzz')).toBeNull();
+  });
+
+  it('이어받는 3종은 추천 카드와 같은 문장 그대로(하위호환)', () => {
+    expect(presetObjectiveFor('customer.dormant_return')).toContain('복귀 감사');
+    expect(presetObjectiveFor('purchase.first')).toContain('두 번째 구매');
+  });
+
+  it('화면이 만들 수 있는 시작 사건 전부 = 목표 문장 없이 생성 성공 · 시작 사건은 그대로 · 파생 문장이 AI 에 간다', async () => {
+    for (const c of presetable) {
+      ai.mockClear();
+      const pkg = await genPresetOnly(c.event);
+      expect(pkg.triggerEvent, `${c.event} 시작 사건이 바뀌었다`).toBe(c.event);
+      const userMessage = String(ai.mock.calls[0][0].userMessage);
+      expect(userMessage, `${c.event} 파생 목표가 AI 에 안 갔다`).toContain(presetObjectiveFor(c.event)!);
+    }
   });
 });

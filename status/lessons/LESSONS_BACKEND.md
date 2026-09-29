@@ -777,3 +777,4 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 - [ ] **외부 API 응답 구조 = 옛 코드 차용 X = 실제 raw 디버그 로그로 직접 확인 의무 (D217+ 영구 룰 `feedback_external_api_response_verification`)**
 - [ ] **`console.error` / `console.warn` 진단 의존 X = `console.log` (stdout) 의무 (grep 누락 차단)**
 - [ ] **list API 페이지네이션 `hasNext` 처리 — 첫 페이지만 break X**
+- [ ] **화면이 빈 칸을 서버 파생값에 맡기는 입력(시작 사건만 온 1클릭 생성 등)은 화면이 내보낼 수 있는 값 집합 전부를 그 서버 함수에 한 번씩 통과시키는 테스트 의무** — 0930 여정 V2: 목표 문장 파생 표가 3종뿐이라 지도 [만들기]가 나머지 시작 사건에서 개발용 문구 500(Codex 7라운드를 돈 · DB 쓰기 경로로만 좁혀 이 계약이 대상 밖이었다 · `journey-succession-preset.test.ts` 걸음 테스트)

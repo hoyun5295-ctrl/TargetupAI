@@ -40,7 +40,7 @@ import { assertStepsWithinLimit, clampStepDelayHours, JourneyInputError } from '
 // ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없는 것은 빼고 "반영 안 됨"으로 알린다(조용히 넓히지 않는다).
 import { partitionCustomerConditions } from './journey-target-extractor';
 // 추천 문구의 단일 출처 — "이어서 만들기"와 기회 카드가 같은 목표 골격을 쓴다.
-import { successionObjectiveFor } from './journey-opportunities';
+import { presetObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
 import { stripUnauthorizedBenefits } from './copy-benefit-detector';
 // ★ 2026-09-27 한줄로 V2 R260 — 여정 자동 생성은 사전 확인 → 묶음 생성 → 1회 차감
@@ -250,9 +250,10 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
     : null;
   const productPeriodDays = productFilters ? Math.max(1, Math.min(365, Math.floor(Number(input.product!.periodDays) || 0))) : 0;
   if (productFilters && productPeriodDays < 1) throw new JourneyInputError('사용 기간(일)을 정해 주세요.');
-  // 프리셋만 온 경로(다음 수 카드 = 클릭 한 번)는 목표 골격을 추천 문구에서 파생한다 —
+  // 프리셋만 온 경로(다음 수 카드 · 지도 [만들기] = 클릭 한 번)는 목표 골격을 서버가 파생한다 —
   // 화면이 자기 문장을 지어내면 같은 추천이 경로마다 다른 여정을 만든다.
-  const objectiveText = (input.objective || '').trim() || (presetTrigger ? successionObjectiveFor(presetTrigger) || '' : '');
+  // ★ 2026-09-30 V2 — 이어받는 3종만 문장이 있던 것을 켤 수 있는 모든 시작 사건으로(presetObjectiveFor · 0930 Harold 접수).
+  const objectiveText = (input.objective || '').trim() || (presetTrigger ? presetObjectiveFor(presetTrigger) || '' : '');
   if (!objectiveText && !input.templateHint) {
     throw new Error('objective (자연어) 또는 templateHint (7 표준 단축) 중 하나는 필수입니다.');
   }
