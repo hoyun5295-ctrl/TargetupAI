@@ -176,6 +176,14 @@ export interface PosterSlideSdk {
   body_color?: string | null;
   title_size?: number | null;
   body_size?: number | null;
+  /** ★ 2026-09-29 인앱 만들기 개편 — 작은 라벨(event_card) · 탭 칩(banner_sheet) · 배지 자리(overlay) */
+  eyebrow?: string | null;
+  /** 배너 윗줄(banner_sheet) */
+  subtitle?: string | null;
+  /** 글 칸 바탕(event_card) · 면 색(banner_sheet) */
+  bg_color?: string | null;
+  /** 사진 맞춤 — 미지정 = 레이아웃 기본 */
+  image_fit?: 'cover' | 'contain' | null;
 }
 
 /** ★ 2026-07-14 디자인 3.0 — design jsonb 스키마 (전 키 옵셔널. 서버 sanitize 통과값이지만 SDK도 fail-closed 소비) */
@@ -190,6 +198,10 @@ export interface InAppDesignSdk {
   backdrop?: { dim?: string | null; blur?: boolean | null } | null;
   /** ★ 2026-07-17 텍스트 정렬 — 'center'/'right'만 소비(루트 상속 + flex 행 블록 justify 미러), 그 외 = 기존 좌측 */
   text_align?: string | null;
+  /** ★ 2026-09-29 포스터 계열 레이아웃 — resolvePosterLayout fail-closed(모르는 값 = overlay = 지금 포스터) */
+  poster_layout?: string | null;
+  /** ★ 2026-09-29 닫기 방식 — 'snooze_day' = 「오늘 하루 보지 않기」(24시간 · 서버 억제와 같은 축) · 그 외 = 「다시 보지 않기」 */
+  dismiss_mode?: string | null;
 }
 
 export interface InAppInitInput {
@@ -235,12 +247,44 @@ const SESSION_KEY_STICKY = 'hanjullo_inapp_sticky';
 // ★ 2026-07-16 "다시 보지 않기" — 명시 거부 메시지 영구 억제 (닫기 X는 이번만 — 빈도 규칙대로 재표시).
 //   서버(cdp_inapp_impressions event_type='opt_out')가 진실, localStorage는 즉시 차단 보조.
 const STORAGE_KEY_OPTOUT = 'hanjullo_inapp_optout';
+// ★ 2026-09-29 「오늘 하루 보지 않기」 — 메시지 id → 만료 시각(ms). 서버(dismiss + button_id='snooze_day' · 24h)가 진실,
+//   localStorage 는 5분 캐시 경로까지 즉시 막는 보조(canDisplayMessage 단일 길목).
+const STORAGE_KEY_SNOOZE = 'hanjullo_inapp_snooze';
+export const INAPP_SNOOZE_MS = 24 * 60 * 60 * 1000;
 const CACHE_TTL_MS = 5 * 60 * 1000;  // 5분
 const MAX_RETRIES = 3;
 
 // ════════════════════════════════════════════════════════════════════
 // ★ 2026-07-12 인앱 강화 — 순수 판정 함수 (vitest 고정)
 // ════════════════════════════════════════════════════════════════════
+
+/**
+ * ★ 2026-09-29 인앱 만들기 개편 — 포스터 계열 레이아웃(백엔드 INAPP_POSTER_LAYOUTS · 편집 미리보기와 같은 값).
+ *   모르는 값·없음 = overlay(지금 포스터) — 옛 메시지 회귀 0.
+ */
+export const POSTER_LAYOUTS = ['overlay', 'event_card', 'banner_sheet'] as const;
+export type PosterLayout = typeof POSTER_LAYOUTS[number];
+export function resolvePosterLayout(design: any): PosterLayout {
+  const v = design && typeof design === 'object' ? String(design.poster_layout || '') : '';
+  return (POSTER_LAYOUTS as readonly string[]).includes(v) ? (v as PosterLayout) : 'overlay';
+}
+
+/**
+ * ★ 2026-09-29 새 레이아웃 기본값 — 편집 미리보기(frontend InAppMessagePreview POSTER_SHEET_DEFAULTS)와 1:1.
+ *   편집기는 장마다 색·크기를 명시 기록하므로 이 값은 "값이 빠진 장"의 폴백이다(대조 테스트가 두 표를 묶는다).
+ */
+export const POSTER_SHEET_DEFAULTS: Record<'event_card' | 'banner_sheet', {
+  bg: string; titleColor: string; bodyColor: string; titleSize: number; bodySize: number; fit: 'cover' | 'contain';
+}> = {
+  event_card: { bg: '#f7f1e3', titleColor: '#8a3b1f', bodyColor: '#57534e', titleSize: 26, bodySize: 14, fit: 'cover' },
+  banner_sheet: { bg: '#db2777', titleColor: '#fde047', bodyColor: '#ffffff', titleSize: 26, bodySize: 19, fit: 'contain' },
+};
+
+/** 「오늘 하루 보지 않기」 만료 판정 (순수) — 저장값이 지금보다 뒤면 억제. */
+export function isSnoozeActive(map: Record<string, any> | null | undefined, messageId: string, now: number): boolean {
+  const v = map && typeof map === 'object' ? Number(map[messageId]) : NaN;
+  return Number.isFinite(v) && v > now;
+}
 
 /**
  * ★ P0-2 — 버튼 action_url 스킴 화이트리스트 판정 (순수).
@@ -499,6 +543,10 @@ export class HanjulloInAppModule {
     if (this.isOptedOut(msg.id) || (msg.parentMessageId && this.isOptedOut(msg.parentMessageId)) || ((msg as any).parent_message_id && this.isOptedOut(String((msg as any).parent_message_id)))) {
       return false;
     }
+    // ★ 2026-09-29 「오늘 하루 보지 않기」 — 24시간 억제(부모 축 포함 · 캐시 경로도 이 길목을 지난다)
+    if (this.isSnoozed(msg.id) || (msg.parentMessageId && this.isSnoozed(msg.parentMessageId)) || ((msg as any).parent_message_id && this.isSnoozed(String((msg as any).parent_message_id)))) {
+      return false;
+    }
     // ★ 2026-07-17 닫기·버튼 누른 메시지는 이번 세션 억제 — always여도 닫으면 자동 트리거(스크롤·체류) 재표시 차단
     if (this.isDismissed(msg.id) || (msg.parentMessageId && this.isDismissed(msg.parentMessageId)) || ((msg as any).parent_message_id && this.isDismissed(String((msg as any).parent_message_id)))) {
       return false;
@@ -534,6 +582,29 @@ export class HanjulloInAppModule {
       localStorage.setItem(STORAGE_KEY_OPTOUT, JSON.stringify(map));
     } catch {
       // 조용히 실패 — 서버 opt_out 기록이 최종 방어
+    }
+  }
+
+  private isSnoozed(messageId: string): boolean {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_SNOOZE);
+      return isSnoozeActive(raw ? JSON.parse(raw) : {}, messageId, Date.now());
+    } catch {
+      return false;
+    }
+  }
+
+  private markSnoozed(messageId: string): void {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_SNOOZE);
+      const map = raw ? JSON.parse(raw) : {};
+      const now = Date.now();
+      // 지난 항목은 지워 둔다(키가 끝없이 늘지 않게)
+      for (const k of Object.keys(map)) if (!(Number(map[k]) > now)) delete map[k];
+      map[messageId] = now + INAPP_SNOOZE_MS;
+      localStorage.setItem(STORAGE_KEY_SNOOZE, JSON.stringify(map));
+    } catch {
+      // 조용히 실패 — 서버 snooze_day 기록이 최종 방어
     }
   }
 
@@ -939,8 +1010,27 @@ export class HanjulloInAppModule {
     buttons: InAppButton[], animation: string, autoDismissSec: number | null | undefined,
     input: InAppInitInput,
   ): void {
-    // ★ 2026-07-21 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 렌더. 1장·미보유 = 아래 단일 포스터(회귀 0).
     const slides = this.parsePosterSlides(msg);
+    // ★ 2026-09-29 인앱 만들기 개편 — 새 레이아웃은 1장이어도 레이아웃 경로(설계서 §1-1 · 옛 >=2 조건은 overlay 전용).
+    //   장이 없는 메시지(다른 입구로 만든 flat)는 flat 으로 첫 장을 만들어 같은 모양으로 그린다.
+    const layout = resolvePosterLayout((msg as any).design);
+    if (layout !== 'overlay') {
+      const sheetSlides: PosterSlideSdk[] = slides.length > 0
+        ? slides
+        : (imageUrl
+          ? [{
+              image_url: imageUrl, title, body,
+              eyebrow: badge || null,
+              cta: buttons[0] ? { label: buttons[0].label, action_url: buttons[0].action_url ?? null } : null,
+              link_url: this.resolveImageLink(msg),
+            }]
+          : []);
+      if (sheetSlides.length > 0) {
+        this.renderPosterSheet(msg, sheetSlides, layout, animation, autoDismissSec, input);
+        return;
+      }
+    }
+    // ★ 2026-07-21 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 렌더. 1장·미보유 = 아래 단일 포스터(회귀 0).
     if (slides.length >= 2) {
       this.renderPosterCarousel(msg, slides, badge, animation, autoDismissSec, input);
       return;
@@ -1182,7 +1272,8 @@ export class HanjulloInAppModule {
       const scrim = this.buildPosterScrim({
         title: this.replaceVariables(String(slide.title || ''), customer),
         body: this.replaceVariables(String(slide.body || ''), customer),
-        badge,
+        // ★ 2026-09-29 장마다 라벨(eyebrow) — 없으면 메시지 배지(모든 장 라벨이 같을 때만 값이 있다 · 설계서 §1-2)
+        badge: this.replaceVariables(String(slide.eyebrow || ''), customer) || badge,
         overlayColor: msgOverlay,
         titleColor: hexOr(slide.title_color, hexOr(design.poster_title_color, msgOverlay)),
         bodyColor: hexOr(slide.body_color, hexOr(design.poster_body_color, msgOverlay)),
@@ -1264,6 +1355,264 @@ export class HanjulloInAppModule {
 
     // ★ 2026-07-31 (Codex 1R ①) — SDK가 만든 래퍼임을 명시 마킹. 제거·페이드 판정은 이 마커로만 한다
     //   (parentElement 추론 금지 — inline_card의 부모는 고객사 호스트 컨테이너라 지우면 몰 DOM이 파손된다).
+    backdrop.setAttribute('data-hanjullo-wrap', '1');
+    backdrop.appendChild(root);
+    document.body.appendChild(backdrop);
+    if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // ★ 2026-09-29 인앱 만들기 개편 — 포스터 계열 새 레이아웃(event_card · banner_sheet)
+  // ────────────────────────────────────────────────────────────────
+
+  /** 새 레이아웃 렌더(설계서 §1-1). 한 장 = 글 + 사진이 한 몸이라 장 전체가 가로로 넘어간다(글도 장마다 다르다).
+   *  event_card = 위 글 칸(라벨 · 제목 · 본문 · 면색) / 아래 사진 4:3 · banner_sheet = 색 면 + 탭 칩 + 왼쪽 큰 글(윗줄 · 제목 · 아랫줄) + 오른쪽 사진.
+   *  여러 장 = 쪽 번호(N / M) · PC 좌우 화살표 · ←/→ 키. 바닥 = 글자 버튼 둘(「오늘 하루 보지 않기」 또는 「다시 보지 않기」 · 「닫기」).
+   *  편집 미리보기(InAppMessagePreview PosterSheetPreview)와 data-hjl-part 이름 · 기본값(POSTER_SHEET_DEFAULTS)이 같다. */
+  private renderPosterSheet(
+    msg: InAppMessageSdk,
+    slides: PosterSlideSdk[],
+    layout: 'event_card' | 'banner_sheet',
+    animation: string,
+    autoDismissSec: number | null | undefined,
+    input: InAppInitInput,
+  ): void {
+    this.ensureCarouselStyle();
+    const customer = input.customer || {};
+    const design: any = (msg as any).design || {};
+    const D = POSTER_SHEET_DEFAULTS[layout];
+    const hexOr = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
+    const sizeOr = (v: any, min: number, max: number, fb: number) => { const n = Number(v); return Number.isFinite(n) && n >= min && n <= max ? n : fb; };
+    const displayFont = safeFontFamily(design.font_display, '');
+    if (displayFont) ensureFontLink(displayFont);
+    const count = slides.length;
+    const txt = (v: any) => this.replaceVariables(String(v || ''), customer);
+
+    const backdrop = document.createElement('div');
+    Object.assign(backdrop.style, {
+      position: 'fixed', inset: '0', background: 'rgba(8,10,18,0.55)',
+      backdropFilter: 'blur(14px) saturate(1.35)', zIndex: '2147483646',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: '0',
+    });
+    (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
+    const close = () => { try { document.body.removeChild(backdrop); } catch {} };
+
+    const root = document.createElement('div');
+    root.setAttribute('data-hanjullo-msg', msg.id);
+    root.setAttribute('data-hjl-layout', layout);
+    Object.assign(root.style, {
+      width: '100%', maxWidth: '520px', maxHeight: '94vh', background: '#ffffff', color: '#1b1d23',
+      borderRadius: '22px 22px 0 0', overflow: 'hidden',
+      boxShadow: '0 -6px 24px rgba(0,0,0,0.22), 0 -24px 70px rgba(0,0,0,0.35)',
+      position: 'relative', zIndex: '2147483647', fontFamily: INAPP_FONT_STACK, boxSizing: 'border-box',
+      display: 'flex', flexDirection: 'column',
+    });
+    this.applyAnimation(root, animation, 'modal');
+
+    const part = (name: string, tag: string, style: Record<string, string>, text?: string): HTMLElement => {
+      const el = document.createElement(tag);
+      el.setAttribute('data-hjl-part', name);
+      Object.assign(el.style, style);
+      if (text !== undefined) el.textContent = text;
+      return el;
+    };
+    const fontOf = () => (displayFont ? `${displayFont}, ${INAPP_FONT_STACK}` : '');
+
+    // 넘기는 틀 — 쪽 번호 · 화살표는 틀에 고정(장과 함께 넘어가지 않는다)
+    const frame = document.createElement('div');
+    Object.assign(frame.style, { position: 'relative', width: '100%', flex: '1 1 auto', minHeight: '0' });
+    const track = document.createElement('div');
+    track.setAttribute('data-hjl-carousel', '1');
+    Object.assign(track.style, {
+      display: 'flex', overflowX: count > 1 ? 'auto' : 'hidden', overflowY: 'hidden',
+      scrollSnapType: 'x mandatory', scrollBehavior: 'smooth', width: '100%', height: '100%',
+    });
+    (track.style as any).webkitOverflowScrolling = 'touch';
+
+    slides.forEach((slide, i) => {
+      const cell = document.createElement('div');
+      cell.setAttribute('data-hjl-slide', String(i));
+      Object.assign(cell.style, {
+        position: 'relative', flex: '0 0 100%', width: '100%', scrollSnapAlign: 'start', scrollSnapStop: 'always',
+        boxSizing: 'border-box', display: 'flex', flexDirection: 'column',
+      });
+      const eyebrow = txt(slide.eyebrow);
+      const subtitle = txt(slide.subtitle);
+      const title = txt(slide.title);
+      const body = txt(slide.body);
+      const bg = hexOr(slide.bg_color, D.bg);
+      const titleColor = hexOr(slide.title_color, D.titleColor);
+      const bodyColor = hexOr(slide.body_color, D.bodyColor);
+      const titleSize = sizeOr(slide.title_size, 14, 32, D.titleSize);
+      const bodySize = sizeOr(slide.body_size, 10, 22, D.bodySize);
+      const fit = slide.image_fit === 'cover' || slide.image_fit === 'contain' ? slide.image_fit : D.fit;
+      const img = document.createElement('img');
+      img.src = this.toAbsoluteImageUrl(slide.image_url);
+      img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
+
+      if (layout === 'event_card') {
+        const top = part('text', 'div', { background: bg, padding: '26px 24px 18px', flex: '1 0 auto', boxSizing: 'border-box' });
+        if (eyebrow) top.appendChild(part('eyebrow', 'div', { fontSize: '13px', fontWeight: '800', letterSpacing: '0.06em', color: titleColor }, eyebrow));
+        if (title) {
+          const t = part('title', 'div', { fontSize: `${titleSize}px`, fontWeight: '800', color: titleColor, marginTop: eyebrow ? '8px' : '0', letterSpacing: '-0.02em', lineHeight: '1.2', whiteSpace: 'pre-wrap' }, title);
+          if (fontOf()) t.style.fontFamily = fontOf();
+          top.appendChild(t);
+        }
+        if (body) top.appendChild(part('body', 'div', { fontSize: `${bodySize}px`, color: bodyColor, marginTop: title || eyebrow ? '10px' : '0', lineHeight: '1.55', whiteSpace: 'pre-wrap' }, body));
+        cell.appendChild(top);
+        const media = part('media', 'div', {
+          position: 'relative', width: '100%', aspectRatio: '4 / 3', maxHeight: '46vh', overflow: 'hidden', flex: '0 0 auto',
+          background: fit === 'contain' ? bg : '#e7e0d2',
+        });
+        Object.assign(img.style, { width: '100%', height: '100%', objectFit: fit, display: 'block' });
+        img.onerror = () => { img.style.display = 'none'; media.style.background = 'linear-gradient(135deg,#d6cdbb,#b9ae98)'; };
+        this.makeImageClickable(img, msg, input, slide.link_url || (slide.cta && slide.cta.action_url) || null, `slide_${i}_image`);
+        media.appendChild(img);
+        cell.appendChild(media);
+      } else {
+        const panel = part('panel', 'div', {
+          position: 'relative', background: bg, color: bodyColor, padding: '48px 18px 22px', minHeight: '300px',
+          overflow: 'hidden', flex: '1 0 auto', boxSizing: 'border-box',
+        });
+        if (eyebrow) {
+          panel.appendChild(part('eyebrow', 'div', {
+            position: 'absolute', top: '0', left: '18px', height: '34px', padding: '0 14px', borderRadius: '0 0 12px 12px',
+            background: '#111827', color: '#ffffff', fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center',
+            zIndex: '3', whiteSpace: 'nowrap', maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis',
+          }, eyebrow));
+        }
+        const col = document.createElement('div');
+        Object.assign(col.style, { position: 'relative', zIndex: '2', width: '64%' });
+        if (subtitle) col.appendChild(part('subtitle', 'div', { fontSize: '14px', fontWeight: '700', opacity: '0.95', color: bodyColor, lineHeight: '1.35', whiteSpace: 'pre-wrap' }, subtitle));
+        if (title) {
+          const t = part('title', 'div', { fontSize: `${titleSize}px`, fontWeight: '900', color: titleColor, lineHeight: '1.12', marginTop: subtitle ? '10px' : '0', letterSpacing: '-0.03em', whiteSpace: 'pre-wrap' }, title);
+          if (fontOf()) t.style.fontFamily = fontOf();
+          col.appendChild(t);
+        }
+        if (body) col.appendChild(part('body', 'div', { fontSize: `${bodySize}px`, fontWeight: '900', color: bodyColor, lineHeight: '1.2', marginTop: '6px', letterSpacing: '-0.02em', whiteSpace: 'pre-wrap' }, body));
+        const cta = slide.cta;
+        if (cta && (cta.label || cta.action_url)) {
+          const b = part('cta', 'button', {
+            marginTop: '18px', height: '36px', padding: '0 16px', borderRadius: '999px', border: 'none', cursor: 'pointer',
+            background: hexOr(cta.background_color, '#ffffff'), color: hexOr(cta.text_color, '#111827'),
+            fontSize: '13px', fontWeight: '800', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center',
+          }, txt(cta.label || '자세히 보기'));
+          b.addEventListener('click', () => {
+            this.track(msg.id, 'click', input, `slide_${i}`);
+            this.dismissForSession(msg);
+            this.removeMessageDom(msg);
+            this.safeNavigate(cta.action_url);
+          });
+          col.appendChild(b);
+        }
+        panel.appendChild(col);
+        const media = part('media', 'div', { position: 'absolute', right: '-10px', bottom: '0', width: '58%', height: '78%', zIndex: '1' });
+        Object.assign(img.style, { width: '100%', height: '100%', objectFit: fit, objectPosition: 'center bottom', display: 'block' });
+        img.onerror = () => { img.style.display = 'none'; };
+        this.makeImageClickable(img, msg, input, slide.link_url || null, `slide_${i}_image`);
+        media.appendChild(img);
+        panel.appendChild(media);
+        cell.appendChild(panel);
+      }
+      track.appendChild(cell);
+    });
+    frame.appendChild(track);
+
+    // 쪽 번호 · 화살표 · 키보드 — 두 장 이상일 때만
+    let activeIdx = 0;
+    const pager = count > 1
+      ? part('pager', 'div', {
+          position: 'absolute', right: '12px', bottom: '12px', height: '24px', padding: '0 10px', borderRadius: '999px',
+          background: 'rgba(28,25,23,0.55)', color: '#ffffff', fontSize: '12px', fontWeight: '700',
+          display: 'flex', alignItems: 'center', zIndex: '4', pointerEvents: 'none',
+        })
+      : null;
+    const setActive = (idx: number) => {
+      activeIdx = idx;
+      if (pager) pager.textContent = `${idx + 1} / ${count}`;
+    };
+    const goTo = (idx: number) => {
+      const next = ((idx % count) + count) % count;
+      setActive(next);
+      const w = track.clientWidth || 0;
+      try {
+        if (typeof (track as any).scrollTo === 'function') (track as any).scrollTo({ left: next * w, behavior: this.prefersReducedMotion() ? 'auto' : 'smooth' });
+        else track.scrollLeft = next * w;
+      } catch { track.scrollLeft = next * w; }
+    };
+    if (pager) {
+      setActive(0);
+      frame.appendChild(pager);
+      let ticking = false;
+      track.addEventListener('scroll', () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          ticking = false;
+          const w = track.clientWidth || 1;
+          const idx = Math.max(0, Math.min(count - 1, Math.round(track.scrollLeft / w)));
+          if (idx !== activeIdx) setActive(idx);
+        });
+      });
+      // PC(마우스) = 좌우 화살표. 터치 기기는 넘기기가 기본이라 화살표를 두지 않는다.
+      let finePointer = false;
+      try { finePointer = !!window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches; } catch { finePointer = false; }
+      if (finePointer) {
+        const arrow = (dir: -1 | 1) => {
+          const a = part(dir < 0 ? 'prev' : 'next', 'button', {
+            position: 'absolute', top: '50%', [dir < 0 ? 'left' : 'right']: '10px', transform: 'translateY(-50%)',
+            width: '36px', height: '36px', borderRadius: '999px', border: 'none', cursor: 'pointer', zIndex: '4',
+            background: 'rgba(255,255,255,0.86)', color: '#1b1d23', fontSize: '20px', lineHeight: '1',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
+          } as Record<string, string>, dir < 0 ? '\u2039' : '\u203A');
+          a.setAttribute('aria-label', dir < 0 ? '이전 장' : '다음 장');
+          a.addEventListener('click', (e) => { e.stopPropagation(); goTo(activeIdx + dir); });
+          frame.appendChild(a);
+        };
+        arrow(-1); arrow(1);
+      }
+    }
+    // ←/→ = 장 넘기기 · Esc = 닫기. 메시지가 사라지면 스스로 떼어 낸다.
+    const onKey = (e: KeyboardEvent) => {
+      if (!document.body.contains(root)) { document.removeEventListener('keydown', onKey); return; }
+      if (count > 1 && e.key === 'ArrowRight') goTo(activeIdx + 1);
+      else if (count > 1 && e.key === 'ArrowLeft') goTo(activeIdx - 1);
+      else if (e.key === 'Escape') {
+        this.track(msg.id, 'dismiss', input);
+        this.dismissForSession(msg);
+        document.removeEventListener('keydown', onKey);
+        close();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    root.appendChild(frame);
+
+    // 배너 = 면 위 우상단 X(벤치마크 A). 이벤트 카드는 바닥 「닫기」로 충분(벤치마크 B).
+    if (layout === 'banner_sheet') {
+      const closeHost = document.createElement('div');
+      Object.assign(closeHost.style, { position: 'absolute', top: '10px', right: '12px', zIndex: '5', color: '#111827' });
+      this.appendCloseButton(closeHost, msg, input, close, 'inline');
+      root.appendChild(closeHost);
+    }
+
+    // 바닥 = 글자 버튼 둘
+    const foot = part('foot', 'div', {
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 22px 20px',
+      background: '#ffffff', color: '#57534e', fontSize: '14px', flex: '0 0 auto', boxSizing: 'border-box',
+    });
+    this.appendOptOutLink(foot, msg, input, close, 'foot');
+    const closeText = part('foot-close', 'button', {
+      background: 'none', border: 'none', color: 'inherit', fontSize: '14px', fontWeight: '500', cursor: 'pointer',
+      padding: '4px 2px', fontFamily: 'inherit',
+    }, '닫기');
+    closeText.addEventListener('click', () => {
+      this.track(msg.id, 'dismiss', input);
+      this.dismissForSession(msg);
+      this.gracefulClose(closeText, close);
+    });
+    foot.appendChild(closeText);
+    root.appendChild(foot);
+
     backdrop.setAttribute('data-hanjullo-wrap', '1');
     backdrop.appendChild(root);
     document.body.appendChild(backdrop);
@@ -2174,10 +2523,23 @@ export class HanjulloInAppModule {
     msg: InAppMessageSdk,
     input: InAppInitInput,
     removeFn: () => void,
-    layout: 'block' | 'inline' = 'block',
+    layout: 'block' | 'inline' | 'foot' = 'block',
   ): void {
+    // ★ 2026-09-29 닫기 방식(design.dismiss_mode · 설계서 §1-3) — snooze_day = 「오늘 하루 보지 않기」(24시간 · dismiss + button_id='snooze_day').
+    //   그 밖 = 지금 그대로(영구 opt_out). 라벨은 SDK 가 직접 그린다 — 이 값을 모르는 옛 SDK 는 「다시 보지 않기」(거짓 표시 0).
+    const snooze = String(((msg as any).design || {}).dismiss_mode || '') === 'snooze_day';
     const btn = document.createElement('button');
-    btn.textContent = '다시 보지 않기';
+    btn.textContent = snooze ? '오늘 하루 보지 않기' : '다시 보지 않기';
+    btn.setAttribute('data-hjl-part', snooze ? 'foot-snooze' : 'foot-optout');
+    if (layout === 'foot') {
+      Object.assign(btn.style, {
+        background: 'none', border: 'none', color: 'inherit', fontSize: '14px', fontWeight: '500', cursor: 'pointer',
+        padding: '4px 2px', fontFamily: 'inherit', whiteSpace: 'nowrap',
+      });
+      btn.addEventListener('click', () => this.onOptOutOrSnooze(btn, msg, input, removeFn, snooze));
+      parent.appendChild(btn);
+      return;
+    }
     Object.assign(btn.style, {
       background: 'none',
       border: 'none',
@@ -2198,14 +2560,24 @@ export class HanjulloInAppModule {
     });
     btn.addEventListener('mouseenter', () => { btn.style.opacity = '0.85'; });
     btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.5'; });
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', () => this.onOptOutOrSnooze(btn, msg, input, removeFn, snooze));
+    parent.appendChild(btn);
+  }
+
+  /** 다시 보지 않기(영구) · 오늘 하루 보지 않기(24시간) 공통 처리 — 부모 축까지 억제(서버와 같은 기준). */
+  private onOptOutOrSnooze(btn: HTMLElement, msg: InAppMessageSdk, input: InAppInitInput, removeFn: () => void, snooze: boolean): void {
+    const parentId = msg.parentMessageId ?? msg.parent_message_id;
+    if (snooze) {
+      this.markSnoozed(msg.id);
+      if (parentId) this.markSnoozed(String(parentId));
+      this.dismissForSession(msg);
+      this.track(msg.id, 'dismiss', input, 'snooze_day');
+    } else {
       this.markOptOut(msg.id);
-      const parentId = msg.parentMessageId ?? msg.parent_message_id;
       if (parentId) this.markOptOut(String(parentId)); // variant에서 눌러도 부모 축 억제 (서버와 동일 기준)
       this.track(msg.id, 'opt_out', input);
-      this.gracefulClose(btn, removeFn);
-    });
-    parent.appendChild(btn);
+    }
+    this.gracefulClose(btn, removeFn);
   }
 
   /** 닫기 — 카드가 살짝 줄며 사라진 뒤 제거 (reduced motion이면 즉시). onClose 실패해도 조용히. */

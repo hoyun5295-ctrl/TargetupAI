@@ -22,7 +22,7 @@
 import { query } from '../config/database';
 import { sampleBeta, computeBetaCredibleInterval } from './bandit-optimizer';
 // ★ P1-4/P0-2 (2026-07-12) — 블록 정규화·스킴 무해화는 CT-27 단일 정의 재사용 (인라인 중복 금지)
-import { sanitizeContentBlocks, sanitizeButtonsActionUrls, normalizeTheme, normalizeCardStyle, composeFlatFromPosterSlides } from './inapp-message';
+import { sanitizeContentBlocks, sanitizeButtonsActionUrls, normalizeTheme, normalizeCardStyle, composeFlatFromPosterSlides, inAppPublishDefect, inAppNotPublishableError, activateInAppMessage } from './inapp-message';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -157,6 +157,19 @@ export async function createVariant(
     ? composeFlatFromPosterSlides(variantSlides, { title: input.title, body: input.body, imageUrl: input.image_url, buttons: [] })
     : null;
 
+  // ★ 2026-09-29 게시 조건 CT(인앱 만들기 개편 §1-4) — 켜진 채로 만드는 변형도 같은 판정을 거친다.
+  //   부모가 편집기 초안(사진 없는 장 · placeholder 보관)이면 그 내용을 이어받은 변형이 바로 노출되는 길을 막는다.
+  if (input.status !== 'paused') {
+    const defect = inAppPublishDefect({
+      title: input.title, body: input.body, template: input.template || parent.template,
+      image_url: variantFlat ? variantFlat.imageUrl : (input.image_url ?? null),
+      buttons: variantFlat ? variantFlat.buttons : (input.buttons || []),
+      badge_text: input.badge_text !== undefined ? input.badge_text : (parent.badge_text ?? null),
+      content_blocks: variantBlocks, poster_slides: variantSlides,
+    });
+    if (defect) throw inAppNotPublishableError(defect);
+  }
+
   const r = await query(
     `INSERT INTO cdp_inapp_messages (
        id, company_id, created_by, title, body, template, image_url, buttons,
@@ -230,6 +243,12 @@ export async function setVariantStatus(
   variantId: string,
   status: 'active' | 'paused',
 ): Promise<boolean> {
+  // ★ 2026-09-29 켜기 = 켜기 단일 길목(행 잠금 → 게시 조건 CT → 켜기 · 한 트랜잭션 · Codex 1R). 끄기는 언제나 허용.
+  if (status === 'active') {
+    const act = await activateInAppMessage({ companyId, messageId: variantId, parentMessageId });
+    if (!act.ok && act.reason === 'defect') throw inAppNotPublishableError(act.defect);
+    return act.ok;
+  }
   const r = await query(
     `UPDATE cdp_inapp_messages
         SET status = $4, updated_at = NOW()

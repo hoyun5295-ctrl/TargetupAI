@@ -81,6 +81,8 @@ import {
   sanitizeActionUrl,
   sanitizeButtonsActionUrls,
   sanitizePosterSlidesActionUrls,
+  parseInAppNotPublishable,
+  INAPP_DRAFT_ON_LIVE_ERROR,
 } from '../utils/inapp-message';
 // ★ 2026-07-18 P3 에셋 라이브러리 — 업로드 자동 등재 + 플랜별 용량 한도
 import { registerAsset, getStorageUsage, isAssetsTableMissing } from '../utils/assets';
@@ -108,7 +110,7 @@ import {
   quickActionSegmentRefine,
 } from '../utils/inapp-quick-action';
 import { query } from '../config/database';
-import { checkCredit, deductCreditSafe, deductCreditOutcome, isChargedByKey, InsufficientCreditError } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, deductCreditOutcome, isChargedByKey, chargedKeysAmong, InsufficientCreditError } from '../utils/ai-credit';
 import { sendSystemAlert } from '../utils/system-alert';
 // ★ 2026-09-26 한줄로 V2 R1-03(Codex 7차 2R) — 같은 인앱 메시지의 게시 PUT 직렬화(공용 잠금 CT)
 import { withKeyedLock, uuidLockKey } from '../utils/keyed-lock';
@@ -709,6 +711,9 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
             const out: any = { ...s };
             if (typeof s.title === 'string') out.title = renderTextForCustomer(s.title, renderCustomer).rendered;
             if (typeof s.body === 'string') out.body = renderTextForCustomer(s.body, renderCustomer).rendered;
+            // ★ 2026-09-29 인앱 만들기 개편 — 라벨 · 배너 윗줄도 같은 기준으로 치환(설계서 §1-2)
+            if (typeof s.eyebrow === 'string') out.eyebrow = renderTextForCustomer(s.eyebrow, renderCustomer).rendered;
+            if (typeof s.subtitle === 'string') out.subtitle = renderTextForCustomer(s.subtitle, renderCustomer).rendered;
             if (s.cta && typeof s.cta === 'object' && typeof s.cta.label === 'string') {
               out.cta = { ...s.cta, label: renderTextForCustomer(s.cta.label, renderCustomer).rendered };
             }
@@ -1228,7 +1233,14 @@ router.get('/inapp', async (req: Request, res: Response) => {
     const messages = await listInAppMessages(companyId, channel, resolveOwnerScope(req));
     // 메시지별 통계 추가 — ★ 2026-09-28 한줄로 V2 R104: 쿼리 한 번(CT getMessageStatsBatch · 옛 N+1)
     const statsById = await getMessageStatsBatch(companyId, messages.map((m) => m.id));
-    const withStats = messages.map((m) => ({ ...m, stats: statsById.get(String(m.id)) }));
+    // ★ 2026-09-29 인앱 만들기 개편(설계서 §1-4) — 게시 과금 이력. 편집기가 초안을 게시할 때 확인 창을 띄울지 이 값으로 정한다
+    //   (첫 저장 = 게시였던 옛 흐름과 달리 초안은 id 가 먼저 생기므로 "새 메시지인가"로는 판정할 수 없다).
+    const chargedKeys = await chargedKeysAmong(companyId, messages.map((m) => `inapp-publish:${m.id}`));
+    const withStats = messages.map((m) => ({
+      ...m,
+      stats: statsById.get(String(m.id)),
+      publish_charged: chargedKeys.has(`inapp-publish:${m.id}`),
+    }));
     return res.json({ success: true, messages: withStats });
   } catch (err: any) {
     console.error('[CDP /inapp GET] 오류:', err);
@@ -1311,6 +1323,11 @@ router.post('/inapp', async (req: Request, res: Response) => {
     const msg = err?.message || '';
     if (msg.startsWith('BENEFIT_PLACEHOLDER_UNEDITED')) {
       return res.status(400).json({ success: false, error: msg.replace(/^BENEFIT_PLACEHOLDER_UNEDITED:\s*/, ''), code: 'BENEFIT_PLACEHOLDER_UNEDITED' });
+    }
+    // ★ 2026-09-29 게시 조건 미달(설계서 §1-4) — 편집기가 결함 자리(칸 · 장)로 데려간다
+    const notPublishable = parseInAppNotPublishable(msg);
+    if (notPublishable) {
+      return res.status(400).json({ success: false, error: notPublishable.message, code: 'INAPP_NOT_PUBLISHABLE', defect: notPublishable });
     }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
@@ -1414,6 +1431,15 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
     const msg = err?.message || '';
     if (msg.startsWith('BENEFIT_PLACEHOLDER_UNEDITED')) {
       return res.status(400).json({ success: false, error: msg.replace(/^BENEFIT_PLACEHOLDER_UNEDITED:\s*/, ''), code: 'BENEFIT_PLACEHOLDER_UNEDITED' });
+    }
+    // ★ 2026-09-29 게시 중 메시지에 도착한 초안 저장 = 거절(게시 · 과금 상태를 되돌리지 않는다)
+    if (msg === INAPP_DRAFT_ON_LIVE_ERROR) {
+      return res.status(409).json({ success: false, error: '게시 중인 메시지는 자동 저장하지 않습니다. [반영]으로 적용해 주세요.', code: 'INAPP_DRAFT_ON_LIVE' });
+    }
+    // ★ 2026-09-29 게시 조건 미달 — 수정 CT 가 결과 행으로 판정하고 트랜잭션을 되돌린 뒤 throw(상태·내용 모두 그대로 · 과금 전)
+    const notPublishable = parseInAppNotPublishable(msg);
+    if (notPublishable) {
+      return res.status(400).json({ success: false, error: notPublishable.message, code: 'INAPP_NOT_PUBLISHABLE', defect: notPublishable });
     }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
@@ -1835,6 +1861,10 @@ router.post('/inapp/variant', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: `허용되지 않는 action: ${action}` });
     }
   } catch (err: any) {
+    const notPublishable = parseInAppNotPublishable(err?.message || '');
+    if (notPublishable) {
+      return res.status(400).json({ success: false, error: notPublishable.message, code: 'INAPP_NOT_PUBLISHABLE', defect: notPublishable });
+    }
     console.error('[CDP /inapp/variant] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
     return res.status(500).json({ success: false, error: err?.message || 'Variant 처리 실패' });

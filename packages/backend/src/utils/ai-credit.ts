@@ -133,6 +133,20 @@ export async function isChargedByKey(companyId: string, idempotencyKey: string):
   return r.rows.length > 0;
 }
 
+/**
+ * ★ 2026-09-29 여러 멱등 키 중 이미 과금된 키(isChargedByKey 묶음판 · 목록 화면이 한 번에 묻는다).
+ *   인앱 만들기 개편 — 편집기 초안(멈춤)을 게시할 때 과금 확인 창을 띄울지 서버 과금 이력으로 정한다(설계서 §1-4).
+ */
+export async function chargedKeysAmong(companyId: string, keys: string[]): Promise<Set<string>> {
+  if (!companyId || !Array.isArray(keys) || keys.length === 0) return new Set();
+  const r = await pool.query(
+    `SELECT idempotency_key FROM ai_credit_transactions
+      WHERE company_id = $1::uuid AND idempotency_key = ANY($2::text[])`,
+    [companyId, keys],
+  );
+  return new Set(r.rows.map((row: any) => String(row.idempotency_key)));
+}
+
 /** 호출 성공 후 차감 (트랜잭션 + idempotent + 2버킷). 보유 부족 시 throw InsufficientCreditError. */
 export async function deductCredit(opts: {
   companyId: string | null;

@@ -12,6 +12,7 @@ import {
   type InAppTheme, type InAppTreatment,
 } from './inapp/blockTheme';
 import { BlockPreview } from './inapp/BlockPreview';
+import { PosterSheetPreview, resolvePosterLayout } from './inapp/PosterSheetPreview';
 
 // ★ 2026-07-07(5) 형태 골격 — ticket(2톤)/poster(풀블리드) 존 분할 시 구간별 패딩.
 //   SDK ZONE_PADS 미러 (미리보기 축소 스케일에 맞춰 비례 축소).
@@ -99,9 +100,9 @@ function PosterCarouselPreview({
               {s.link_url && String(s.link_url).trim() && (
                 <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 999, letterSpacing: '0.02em' }}>이미지 클릭 → 이동</div>
               )}
-              {(badge || title || body) && (
+              {(badge || s.eyebrow || title || body) && (
                 <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '42px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: msgOverlay, maxHeight: '100%', overflowY: 'auto' }}>
-                  {badge && <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, marginBottom: 7, color: tColor }}>{badge}</div>}
+                  {(rv(s.eyebrow) || badge) && <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, marginBottom: 7, color: tColor }}>{rv(s.eyebrow) || badge}</div>}
                   {title && <div style={{ fontWeight: 800, fontSize: tSize, lineHeight: 1.3, marginBottom: body ? 4 : 0, color: tColor, ...(font ? { fontFamily: font } : {}) }}>{title}</div>}
                   {body && <div style={{ fontSize: bSize, opacity: 0.94, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: bColor }}>{body}</div>}
                 </div>
@@ -202,7 +203,7 @@ function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant, 
 }
 
 /** template별 위치 + 카드 모양 오버레이 (블록 있으면 테마 토큰으로 BlockPreview) */
-function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Variant; themeTokens?: InAppTheme | null; treatment?: InAppTreatment } & InAppMessagePreviewProps) {
+function Overlay({ variant, themeTokens, treatment, device, ...rest }: { variant: Variant; themeTokens?: InAppTheme | null; treatment?: InAppTreatment; device?: 'desktop' | 'mobile' } & InAppMessagePreviewProps) {
   const { backgroundColor, textColor, blocks, replaceVars, isAd } = rest;
   const usingBlocks = !!(themeTokens && blocks && blocks.length > 0);
   // ★ 2026-07-07(2) 형태 축 — 카드형 variant에만 적용 (SDK와 동일 게이트)
@@ -255,8 +256,9 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
   const r = (def: number) => (usingBlocks ? themeTokens!.radius : def);
   const sh = (def: string) => cardShadow || def;
   // ★ 2026-07-16 SDK appendOptOutLink 미러 — 토스트·플로팅 제외 전 표면에 "다시 보지 않기"(명시 거부) 노출
+  // ★ 2026-09-29 닫기 방식(design.dismiss_mode = snooze_day) = 「오늘 하루 보지 않기」(SDK 와 같은 판정)
   const optOutHint = (
-    <div style={{ textAlign: 'center', fontSize: 10, opacity: 0.45, textDecoration: 'underline dotted', textUnderlineOffset: 3, padding: '6px 0 2px' }}>다시 보지 않기</div>
+    <div style={{ textAlign: 'center', fontSize: 10, opacity: 0.45, textDecoration: 'underline dotted', textUnderlineOffset: 3, padding: '6px 0 2px' }}>{String(rest.design?.dismiss_mode || '') === 'snooze_day' ? '오늘 하루 보지 않기' : '다시 보지 않기'}</div>
   );
 
   if (variant === 'banner') {
@@ -265,6 +267,19 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
   // ★ 2026-07-18 포스터형 v2 (SDK renderPoster 1:1 미러): 가로 꽉 찬 하단 시트(상단 모서리만 라운드) +
   //   본문 무클램프 + 서체(design.font_display)·오버레이 글자색(design.poster_text_color) 소비
   if (variant === 'poster') {
+    // ★ 2026-09-29 인앱 만들기 개편 — 새 레이아웃은 1장이어도 레이아웃 미리보기(SDK renderPosterSheet 미러 · 장이 없으면 flat 으로 첫 장)
+    const sheetLayout = resolvePosterLayout(rest.design);
+    if (sheetLayout !== 'overlay') {
+      const b0 = (rest.buttons || [])[0];
+      const sheetSlides = Array.isArray(rest.posterSlides) && rest.posterSlides.length > 0
+        ? rest.posterSlides
+        : [{ image_url: rest.imageUrl, title: rest.title, body: rest.body, eyebrow: rest.badge, cta: b0 ? { label: b0.label, background_color: b0.background_color, text_color: b0.text_color } : null }];
+      return (
+        <div style={{ position: 'absolute', inset: 0, background: backdropDim, ...(backdropBlurOn ? { backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)' } : {}), display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0 } as CSSProperties}>
+          <PosterSheetPreview layout={sheetLayout} slides={sheetSlides} design={rest.design} replaceVars={rest.replaceVars} arrows={device === 'desktop'} />
+        </div>
+      );
+    }
     // ★ 2026-07-21 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 미리보기 (SDK renderPosterCarousel 미러)
     if (Array.isArray(rest.posterSlides) && rest.posterSlides.length >= 2) {
       return (
@@ -467,7 +482,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
           {/* 콘텐츠 (더미 사이트 + 인앱 오버레이) */}
           <div style={{ position: 'relative', height: isMobile ? 580 : 540, overflow: 'hidden' }}>
             <DummySite dark={siteDark} blur={props.captureMode} />
-            <Overlay variant={variant} themeTokens={themeTokens} treatment={treatment} {...props} />
+            <Overlay variant={variant} themeTokens={themeTokens} treatment={treatment} device={device} {...props} />
           </div>
         </div>
       </div>
@@ -503,6 +518,8 @@ export interface AppInAppPreviewProps {
   replaceVars?: (t: string) => string;
   /** ★ 2026-07-22 테스트저장 — true면 하단 캡션 숨김(영업용 이미지 캡처). 폰 프레임 렌더는 미변경. */
   captureMode?: boolean;
+  /** ★ 2026-09-29 「구버전 앱 모습」 — 새 레이아웃 · 하루 보지 않기를 모르는 앱 빌드가 그리는 모양(지금 포스터 · 다시 보지 않기) */
+  legacyApp?: boolean;
 }
 
 /** 더미 앱 화면 — 인앱이 뜨는 맥락 (라이트 앱 리스트) */
@@ -529,7 +546,7 @@ function DummyAppScreen() {
   );
 }
 
-export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design, posterSlides, replaceVars, captureMode }: AppInAppPreviewProps) {
+export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design, posterSlides, replaceVars, captureMode, legacyApp }: AppInAppPreviewProps) {
   // ★ 2026-07-18 포스터형 v2 — 선택 서체 실로딩 (웹 미리보기 useEffect와 동일 가드)
   const appFontsUrl = inappGoogleFontsUrl(design?.font_display, undefined);
   useEffect(() => {
@@ -544,6 +561,9 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
   const isModal = template === 'center_modal';
   // ★ 2026-07-18 정정2 — 앱 포스터형(전면 이미지): 웹 renderPoster와 동일 규격(흰 바닥·CTA 1개·오버레이 텍스트)
   const isPoster = template === 'full_image';
+  // ★ 2026-09-29 새 레이아웃 · 닫기 방식 — 계약을 구현한 앱 빌드 기준. 구버전 앱 모습이면 지금 포스터 · 다시 보지 않기.
+  const sheetLayout = legacyApp ? 'overlay' : resolvePosterLayout(design);
+  const appOptOut = !legacyApp && String(design?.dismiss_mode || '') === 'snooze_day' ? '오늘 하루 보지 않기' : '다시 보지 않기';
   const img = imageUrl || undefined;
   // ★ 2026-07-17 텍스트 정렬 (design.text_align) — SDK 렌더 미러. 미지정=왼쪽
   const ta: 'left' | 'center' | 'right' = design?.text_align === 'center' ? 'center' : design?.text_align === 'right' ? 'right' : 'left';
@@ -586,7 +606,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
           </div>
         ))}
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 22, marginTop: 4 }}>
-          <span style={{ color: '#1b1d23', opacity: 0.45, fontSize: 12, textDecoration: 'underline', padding: '8px 0' }}>다시 보지 않기</span>
+          <span style={{ color: '#1b1d23', opacity: 0.45, fontSize: 12, textDecoration: 'underline', padding: '8px 0' }}>{appOptOut}</span>
           <span style={{ color: '#1b1d23', opacity: 0.55, fontSize: 12, padding: '8px 0' }}>닫기</span>
         </div>
       </div>
@@ -623,7 +643,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
           ))}
           {/* 앱 실렌더 미러 — 다시 보지 않기(영구 거부) · 닫기(이번만) */}
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 22 }}>
-            <span style={{ color: textColor, opacity: 0.45, fontSize: 12, textDecoration: 'underline', padding: '8px 0' }}>다시 보지 않기</span>
+            <span style={{ color: textColor, opacity: 0.45, fontSize: 12, textDecoration: 'underline', padding: '8px 0' }}>{appOptOut}</span>
             <span style={{ color: textColor, opacity: 0.55, fontSize: 12, padding: '8px 0' }}>닫기</span>
           </div>
         </div>
@@ -645,7 +665,18 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
           <div style={{ position: 'relative', height: 580, overflow: 'hidden' }}>
             <DummyAppScreen />
             <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal ? 'center' : 'flex-end', alignItems: 'center' }}>
-              {isPoster
+              {isPoster && sheetLayout !== 'overlay'
+                ? (
+                  <PosterSheetPreview
+                    layout={sheetLayout}
+                    slides={Array.isArray(posterSlides) && posterSlides.length > 0 ? posterSlides : [{ image_url: imageUrl, title, body, eyebrow: badge, cta: (buttons || [])[0] ? { label: (buttons || [])[0].label, background_color: (buttons || [])[0].background_color, text_color: (buttons || [])[0].text_color } : null }]}
+                    design={design}
+                    replaceVars={replaceVars}
+                    radius="24px 24px 0 0"
+                    shadow="none"
+                  />
+                )
+                : isPoster
                 ? (Array.isArray(posterSlides) && posterSlides.length >= 2
                     ? <PosterCarouselPreview
                         slides={posterSlides}
@@ -659,7 +690,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
                         fontFamily={'"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif'}
                         optOut={(
                           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 22, marginTop: 4 }}>
-                            <span style={{ color: '#1b1d23', opacity: 0.45, fontSize: 12, textDecoration: 'underline', padding: '8px 0' }}>다시 보지 않기</span>
+                            <span style={{ color: '#1b1d23', opacity: 0.45, fontSize: 12, textDecoration: 'underline', padding: '8px 0' }}>{appOptOut}</span>
                             <span style={{ color: '#1b1d23', opacity: 0.55, fontSize: 12, padding: '8px 0' }}>닫기</span>
                           </div>
                         )}

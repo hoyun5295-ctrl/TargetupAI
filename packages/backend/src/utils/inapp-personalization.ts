@@ -491,6 +491,8 @@ export function extractUsedInAppVariables(messages: UsedVarsMessageLike[]): stri
         if (!s || typeof s !== 'object') continue;
         scanText(s.title);
         scanText(s.body);
+        scanText(s.eyebrow);
+        scanText(s.subtitle);
         if (s.cta && typeof s.cta === 'object') scanText(s.cta.label);
       }
     }

@@ -7,7 +7,7 @@ import {
   Activity, AlertCircle, AlertTriangle, AlignLeft, ArrowLeft, BarChart3, ChevronDown, ChevronUp,
   Clock, Copy, CreditCard, Crown, Download, Edit2, Eye, Globe, GripVertical, ImageIcon, Layers, Lightbulb, ListChecks, Loader2, Minus, MousePointer,
   FolderOpen, MousePointerClick, MoveVertical, Plus, RefreshCw, ShoppingBag, ShoppingCart, Smartphone, Sparkles, Star,
-  Tag, Target, Ticket, Timer, Trash2, TrendingDown, TrendingUp, Type, Upload, UserPlus, Users, Wand2, X,
+  Tag, Target, Ticket, Timer, Trash2, TrendingDown, TrendingUp, Type, Upload, UserPlus, Users, Wand2, X, Send,
 } from 'lucide-react';
 // ★ P2-1 (2026-07-12) 블록 드래그앤드롭 — EmailVisualEditor SortableBlockRow 패턴 이식 (의존성 기존재, 라이브러리 추가 0)
 import {
@@ -47,6 +47,15 @@ import ImageToCopyButton from '../components/ImageToCopyButton';
 import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
 // ★ 2026-07-18 P3 — 에셋 라이브러리 픽커 (업로드 소재 재사용 — 전 채널 공용 컴포넌트)
 import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
+// ★ 2026-09-29 인앱 만들기 개편 — 전체 화면 편집기(EditShell) · 입구 갤러리 · 포스터 계열 장 편집(설계서 docs/2026-09-29-inapp-editor-redesign-design.md)
+import EditShell, { type SaveTone } from '../components/make/EditShell';
+import InAppEntryGallery from '../components/inapp/InAppEntryGallery';
+import { PosterStage, SlideRail, SlidePanel, LayoutSwitcher, ImageSourceMenu, useImageSources, readField, writeField, FIELD_MAX } from '../components/inapp/PosterEditor';
+import { resolvePosterLayout, type PosterLayout, type SheetEditKey } from '../components/inapp/PosterSheetPreview';
+import {
+  slidesFromMessage, messagePatchFromSlides, restyleSlides, duplicateSlide, publishDefectOf, layoutKeyOf, isPosterLayout,
+  MAX_SLIDES, APP_SHEET_LAYOUTS_UNLOCKED, type WsSlide, type LayoutKey,
+} from '../components/inapp/inappSlides';
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 — Journey Builder급 12 화면 영역
@@ -113,8 +122,10 @@ interface MessageRow {
   design?: Record<string, any> | null;
   // ★ 2026-07-21 포스터 캐러셀 — 서버 저장 슬라이드 전체(첫 장 포함). list 응답 snake_case. 빈/미설정 = 단일 포스터
   poster_slides?: any[] | null;
-  // ★ 2026-07-21 편집 중 "추가 슬라이드"(2번째~) 작업본 — 클라 전용. 저장 시 slide0(위 콘텐츠)와 합쳐 poster_slides로 전송
-  extra_slides?: any[];
+  // ★ 2026-09-29 인앱 만들기 개편 — 포스터 계열 장 작업본(첫 장 포함 · 클라 전용). 저장 때 messagePatchFromSlides 로 flat + poster_slides 합성
+  slides_ws?: WsSlide[];
+  // ★ 2026-09-29 게시 과금 이력(GET /inapp 동봉) — 초안을 게시할 때 과금 확인 창을 띄울지(설계서 §1-4)
+  publish_charged?: boolean;
   // ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체 클릭 시 이동 링크(선택). 캐러셀 첫 장 link_url도 이 값에서 합성
   image_link_url?: string | null;
   status: Status;
@@ -315,7 +326,8 @@ const EMPTY_FORM: Partial<MessageRow> = {
   display_frequency: 'once_per_session',
   allowed_weekdays: [0, 1, 2, 3, 4, 5, 6],
   animation: 'fade',
-  status: 'active',
+  // ★ 2026-09-29 인앱 만들기 개편 — 새 작업본 = 초안(멈춤 · 자동 저장). 게시는 [발행]에서만(옛: active 로 시작 → 첫 저장 = 게시 · 15크레딧).
+  status: 'paused',
   buttons: [],
   variant_weight: 100,
   card_style: 'classic',
@@ -393,7 +405,7 @@ export default function InAppMessagesPage() {
       accent_color: msg.accent_color || null,
       card_style: msg.card_style || 'classic',
       design: msg.design ?? null,
-      status: 'active',
+      status: 'paused',
       channel: 'web',
     });
     toast.success('행사 캠페인 인앱 초안을 불러왔습니다. 이미지만 올리고 다듬어주세요.');
@@ -615,7 +627,7 @@ export default function InAppMessagesPage() {
         card_style: pkg.message.card_style || 'classic',
         // ★ 2026-07-14 디자인 3.0 — 결정적 디자인 추천 (모션 2.0 + 시나리오 구도)
         design: pkg.message.design ?? null,
-        status: 'active',
+        status: 'paused',
         channel: channelOverride || channel || 'web',
       });
       setAiProgressStep(5);
@@ -680,109 +692,21 @@ export default function InAppMessagesPage() {
     });
   };
 
-  // ────────────────────────────────────────────────────────────────
-  const [confirmPublish, setConfirmPublish] = useState(false);
-
-  // 메시지 저장 / 삭제 / 상태 변경
-  // ────────────────────────────────────────────────────────────────
-
-  const handleSave = async () => {
-    const blocks = Array.isArray(editing?.content_blocks) ? editing!.content_blocks! : [];
-    const hasBlocks = blocks.length > 0;
-    const blockText = (type: string) => {
-      const b = blocks.find((x: any) => x?.type === type);
-      return b ? String(b.text || '').trim() : '';
-    };
-    // 블록 메시지는 블록이 제목/본문의 기준 (DB title/body = headline/body 블록과 동일 텍스트 — 접근성·폴백)
-    const effectiveTitle = hasBlocks ? (blockText('headline') || (editing?.title?.trim() || '')) : (editing?.title?.trim() || '');
-    const effectiveBody = hasBlocks ? (blockText('body') || blockText('headline') || (editing?.body?.trim() || '')) : (editing?.body?.trim() || '');
-    if (!effectiveTitle) {
-      showToast(hasBlocks ? '헤드라인 블록 또는 제목을 입력해주세요.' : '제목은 필수입니다.', { type: 'warning' });
-      return;
-    }
-    if (!effectiveBody) {
-      showToast(hasBlocks ? '본문 블록 또는 본문을 입력해주세요.' : '본문은 필수입니다.', { type: 'warning' });
-      return;
-    }
-    // 혜택 placeholder 검증 (본문 + 블록 — AI 임의 혜택 영구 룰)
-    const hasPh = (s: string) => s.includes('[혜택 안내') || s.includes('[직접 작성') || s.includes('직접 작성해주세요');
-    const benefitBad = blocks.some((b: any) => b?.type === 'benefit' && (!String(b.text || '').trim() || hasPh(String(b.text || ''))));
-    const textBad = ['headline', 'body', 'eyebrow', 'footer'].some((tp) => hasPh(blockText(tp)));
-    if (hasPh(editing?.body || '') || benefitBad || textBad) {
-      showToast('혜택 안내 placeholder를 회사 정책에 맞게 직접 작성 후 저장해주세요.', { type: 'warning' });
-      return;
-    }
-    // ★ 2026-07-18 P1 — 포스터형은 이미지 1장이 정체성: 이미지 없이 저장하면 실물이 중앙 모달 폴백으로 그려져
-    //   미리보기와 달라진다(조용한 불일치). 저장 시점에 정직하게 차단.
-    if (editing?.template === 'full_image' && !editing?.image_url) {
-      showToast('포스터형은 이미지 1장이 필수입니다. 이미지를 업로드해주세요.', { type: 'warning' });
-      return;
-    }
-    // ★ 2026-07-21 포스터 캐러셀 — 이미지 없는데 내용만 있는 추가 슬라이드 = 정직 차단(이미지가 슬라이드 필수 요소)
-    if (editing?.template === 'full_image') {
-      const rawExtra = editing.extra_slides ?? (Array.isArray(editing.poster_slides) ? editing.poster_slides.slice(1) : []);
-      const incomplete = (Array.isArray(rawExtra) ? rawExtra : []).find((s: any) => s && !String(s.image_url || '').trim()
-        && (String(s.title || '').trim() || String(s.body || '').trim() || (s.cta && (String(s.cta.label || '').trim() || String(s.cta.action_url || '').trim()))));
-      if (incomplete) {
-        showToast('추가 슬라이드에 이미지를 넣어주세요. 이미지가 슬라이드의 필수 요소입니다.', { type: 'warning' });
-        return;
-      }
-    }
-    // slide0(위 콘텐츠) + 추가 슬라이드 조립 — 미리보기와 동일 헬퍼. undefined(비 full_image) / [](단일) / 배열(캐러셀)
-    const posterSlidesPayload = assemblePosterSlides({ ...editing, title: effectiveTitle, body: effectiveBody } as Partial<MessageRow>);
-    // ★ 2026-07-06 표시 가능성 가드 — 웹 메시지를 active로 저장(게시)할 때 표시할 곳 없으면 차단 (paused 저장은 허용)
-    if ((editing?.channel === 'app' ? 'app' : 'web') === 'web' && (editing?.status ?? 'active') === 'active' && webBlocked) {
-      setShowDisplayBlock(true);
-      return;
-    }
-    try {
-      const isUpdate = !!editing!.id;
-      const url = isUpdate ? `/api/cdp/inapp/${editing!.id}` : '/api/cdp/inapp';
-      const method = isUpdate ? 'PUT' : 'POST';
-      const res = await fetch(url, {
-        method,
-        headers: authHeaders(),
-        body: JSON.stringify({
-          ...editing,
-          title: effectiveTitle,
-          body: effectiveBody,
-          // 기존 컬럼 호환 (position = template)
-          position: editing!.template || editing!.position,
-          backgroundColor: editing!.background_color,
-          textColor: editing!.text_color,
-          triggerEvent: editing!.trigger_event,
-          displayFrequency: editing!.display_frequency,
-          // ★ 2026-07-16 범용 보장 계약 — 앱 채널 = flat이 진실(블록 저장 안 함).
-          //   블록이 남아 저장되면 서버 블록→flat 합성이 폼 수정을 덮는다 (편집 진입 효과가 이미 비움 — 이중 안전망)
-          ...(editing!.channel === 'app' ? { content_blocks: [] } : {}),
-          // ★ 2026-07-21 포스터 캐러셀 — 헬퍼가 full_image만 값 반환(그 외 undefined=미전송). extra_slides(클라 작업본)는 항상 제외.
-          poster_slides: posterSlidesPayload,
-          extra_slides: undefined,
-        }),
-      });
-      const data = await res.json();
-      if (handle503(data)) return;
-      if (data.success) {
-        // 타겟 추출 표시 대상(audience_filter) persist — 저장으로 확정된 message id 사용 (신규/수정 공통)
-        const savedId = editing!.id || data.message?.id;
-        if (savedId && editing!.audience_filter !== undefined) {
-          await fetch(`/api/cdp/inapp/${savedId}/audience-filter`, {
-            method: 'PUT', headers: authHeaders(),
-            body: JSON.stringify({ filter: editing!.audience_filter || null }),
-          }).catch(() => {});
-        }
-        showToast(isUpdate ? '메시지 수정 완료' : '메시지 생성 완료', { type: 'success' });
-        setEditing(null);
-        await loadAll();
-      } else if (data.code === 'INAPP_DISPLAY_UNAVAILABLE') {
-        setShowDisplayBlock(true);
-      } else {
-        showToast(data.error || '저장 실패', { type: 'error' });
-      }
-    } catch (e: any) {
-      showToast(e?.message || '저장 중 오류', { type: 'error' });
-    }
+  // ★ 2026-09-29 인앱 만들기 개편 — 저장 · 발행은 편집기(EditModal)가 소유한다(초안 자동 저장 · [발행] · [반영]).
+  const [entryOpen, setEntryOpen] = useState(false);
+  const [entryGoldens, setEntryGoldens] = useState<Array<GoldenInAppTemplate & { difference?: string }>>([]);
+  const openEntry = () => {
+    setEntryOpen(true);
+    if (entryGoldens.length > 0) return;
+    fetch('/api/design/golden-templates?channel=inapp', { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => { if (d?.success && Array.isArray(d.templates)) setEntryGoldens(d.templates); })
+      .catch(() => { /* 조회 실패 = 문구 스타일 줄만 숨김 */ });
   };
+
+  // ────────────────────────────────────────────────────────────────
+  // 메시지 삭제 / 상태 변경
+  // ────────────────────────────────────────────────────────────────
 
   const handleDelete = (m: MessageRow) => {
     setConfirmState({
@@ -1227,7 +1151,7 @@ export default function InAppMessagesPage() {
               <span className="sm:hidden">라이브러리</span>
             </button>
             <button
-              onClick={() => setEditing({ ...EMPTY_FORM, channel: channel || 'web' })}
+              onClick={openEntry}
               className="text-xs bg-gradient-to-r from-rose-500/40 to-pink-500/40 hover:from-rose-500/60 hover:to-pink-500/60 text-rose-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-rose-400/30"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -1503,11 +1427,12 @@ export default function InAppMessagesPage() {
                           <div className="text-sm font-bold text-white">{m.title}</div>
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                             m.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' :
-                            m.status === 'paused' ? 'bg-amber-500/20 text-amber-300' :
+                            m.status === 'paused' && m.publish_charged ? 'bg-amber-500/20 text-amber-300' :
+                            m.status === 'paused' ? 'bg-slate-500/25 text-slate-200' :
                             'bg-white/10 text-white/50'
-                          }`}>{m.status}</span>
+                          }`}>{m.status === 'active' ? '게시 중' : m.status === 'paused' ? (m.publish_charged ? '멈춤' : '초안') : m.status}</span>
                           <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 rounded-full">
-                            {TEMPLATE_LABELS[template]}
+                            {template === 'full_image' ? ({ overlay: '포스터', event_card: '이벤트 카드', banner_sheet: '배너 시트' } as const)[resolvePosterLayout(m.design)] : TEMPLATE_LABELS[template]}
                           </span>
                         </div>
                         <div className="text-xs text-white/70 mb-2 line-clamp-2">{m.body}</div>
@@ -1554,25 +1479,32 @@ export default function InAppMessagesPage() {
         </div>
       </div>
 
-      {/* ▼ 영역 11: 편집 모달 전면 재작성 */}
+      {/* ★ 2026-09-29 인앱 만들기 개편 — 입구(모양 고르기 · 용도로 바로 시작) → 전체 화면 편집기 */}
+      {entryOpen && (
+        <InAppEntryGallery
+          channel={channel || 'web'}
+          onChannel={(c) => setChannel(c)}
+          goldens={entryGoldens}
+          onClose={() => setEntryOpen(false)}
+          onPick={(seed) => {
+            setEntryOpen(false);
+            setEditing({ ...EMPTY_FORM, ...seed, channel: channel || 'web', status: 'paused' });
+          }}
+        />
+      )}
       {editing && (
         <EditModal
           editing={editing}
           setEditing={setEditing}
           availableVariables={availableVariables}
-          onSave={() => (!editing?.id && editing?.status === 'active' ? setConfirmPublish(true) : handleSave())}
           fileInputRef={fileInputRef}
           onImageUpload={handleImageUpload}
           uploadImage={uploadImageReturnUrl}
+          webBlocked={webBlocked}
+          onDisplayBlocked={() => setShowDisplayBlock(true)}
+          onDone={() => { setEditing(null); void loadAll(); }}
         />
       )}
-
-      <CreditConfirmModal
-        open={confirmPublish}
-        source="inapp-publish"
-        onConfirm={() => { setConfirmPublish(false); handleSave(); }}
-        onCancel={() => setConfirmPublish(false)}
-      />
 
       {/* ★ 2026-09-26 R1-45 — A/B 변형 검토 */}
       {variantReview && (
@@ -1719,13 +1651,17 @@ interface EditModalProps {
   // ★ 2026-07-21 함수형 업데이터 허용(useState dispatch 원형) — 업로드 완료 콜백의 널-세이프 병합에 필요
   setEditing: Dispatch<SetStateAction<Partial<MessageRow> | null>>;
   availableVariables: AvailableVariable[];
-  onSave: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onImageUpload: (file: File) => void;
   uploadImage: (file: File) => Promise<string | null>;
+  /** 웹 표시 가능성 게이트(표시할 곳 없으면 발행 차단 · 서버 게이트 이중 방어) */
+  webBlocked: boolean;
+  onDisplayBlocked: () => void;
+  /** 편집기를 닫고 목록을 다시 읽는다 */
+  onDone: () => void;
 }
 
-function EditModal({ editing, setEditing, availableVariables, onSave, fileInputRef, onImageUpload, uploadImage }: EditModalProps) {
+function EditModal({ editing, setEditing, availableVariables, fileInputRef, onImageUpload, uploadImage, webBlocked, onDisplayBlocked, onDone }: EditModalProps) {
   const [segmentCount, setSegmentCount] = useState<number | null>(null);
   const [segmentDesc, setSegmentDesc] = useState<string>('');
   const [extractOpen, setExtractOpen] = useState(false);
@@ -1740,7 +1676,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   // ★ 2026-07-18 P3 — 에셋 라이브러리 픽커 (이미지 재사용)
   const [assetPickOpen, setAssetPickOpen] = useState(false);
   const pickToast = useToast();
-  const [activeTab, setActiveTab] = useState<'content' | 'design' | 'target'>('content');
+  const [activeTab, setActiveTab] = useState<'content' | 'design'>('content');
   // ★ 2026-07-22 테스트저장(영업용) — 담당 아이디에게만 노출. 웹·앱 실물을 실제 크기로 렌더해 PNG 저장(발송 아님·크레딧 무관).
   const testSaveUser = useAuthStore((s) => s.user);
   const canTestSave = ['hoyun', 'psy5868', 'mobile'].includes(testSaveUser?.loginId || '');
@@ -1907,35 +1843,32 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   };
 
   // ★ 2026-07-14 디자인 3.0 — 골든 템플릿 1클릭 적용 (형태·카드·테마·블록·디자인 교체. 트리거/타겟/시간대 무접촉)
-  const [goldenConfirm, setGoldenConfirm] = useState<ConfirmState | null>(null);
   // ★ 2026-07-17 앱(네이티브) 통합 계약 모달 — 단일 소스 = components/inapp/AppIntegrationContract
   const [showAppContract, setShowAppContract] = useState(false);
+  // ★ 2026-09-29 인앱 만들기 개편 3차 — 정예 템플릿 = 기본 알림의 「문구 스타일」(재분류) · 적용은 비파괴(LESSONS_FRONTEND 67):
+  //   블록이 있으면 블록은 두고 모양(형태·카드·테마·디자인)만 · 블록 없이 쓴 글이 있으면 글을 블록으로 옮긴 뒤(convertToBlocks · 글 보존) 모양 ·
+  //   빈 메시지면 구성까지 채운다. 옛: 블록을 템플릿 블록으로 통교체(경고 창으로 넘김 = 설계 실패).
   const applyGolden = (g: GoldenInAppTemplate) => {
     const chTemplates = (editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web) as string[];
+    const blocksNow = Array.isArray(editing.content_blocks) ? editing.content_blocks : [];
+    const hasFlat = !!(String(editing.title || '').trim() || String(editing.body || '').trim() || editing.image_url || (editing.buttons || []).length > 0);
+    const keep = blocksNow.length > 0 || hasFlat;
+    const nextBlocks = blocksNow.length > 0
+      ? blocksNow
+      : hasFlat ? convertToBlocks(editing).content_blocks : JSON.parse(JSON.stringify(g.content_blocks));
+    const d = { ...(editing.design || {}), ...(g.design || {}) };
     setEditing({
       ...editing,
       template: (chTemplates.includes(g.template) ? g.template : editing.template) as Template,
       card_style: g.card_style,
       theme: g.theme,
-      design: Object.keys(g.design).length > 0 ? { ...g.design } : null,
-      content_blocks: JSON.parse(JSON.stringify(g.content_blocks)),
-      ...(g.badge_text ? { badge_text: g.badge_text } : {}),
+      design: Object.keys(d).length > 0 ? d : null,
+      content_blocks: nextBlocks,
+      ...(!keep && g.badge_text ? { badge_text: g.badge_text } : {}),
     });
+    if (keep) pickToast.info('쓴 글은 그대로 두고 모양만 바꿨어요');
   };
-  const pickGolden = (g: GoldenInAppTemplate) => {
-    const blocksNow = Array.isArray(editing.content_blocks) ? editing.content_blocks : [];
-    if (blocksNow.length > 0) {
-      setGoldenConfirm({
-        mode: 'warning',
-        title: `골든 템플릿 적용: ${g.label}`,
-        description: '현재 편집 중인 블록 구성이 템플릿 블록으로 교체됩니다. 트리거·표시 대상·시간대 설정은 유지됩니다.',
-        confirmLabel: '적용',
-        onConfirm: () => applyGolden(g),
-      });
-    } else {
-      applyGolden(g);
-    }
-  };
+  const pickGolden = (g: GoldenInAppTemplate) => applyGolden(g);
 
   const replaceVars = (text: string, customer: Record<string, any>): string => {
     if (!text) return '';
@@ -1973,58 +1906,689 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   const blockHasPlaceholder = blocks.some((b: any) => b?.type === 'benefit' && (!String(b.text || '').trim() || String(b.text || '').includes('[혜택') || String(b.text || '').includes('[직접')));
   const hasPlaceholder = (editing.body || '').includes('[혜택') || (editing.body || '').includes('[직접') || blockHasPlaceholder;
 
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 border border-white/10 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        {/* 헤더 */}
-        <div className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur-sm border-b border-white/10 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/25">
-              <Layers className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-white leading-tight">{editing.id ? '메시지 수정' : '신규 메시지'}</h3>
-              <p className="text-[11px] text-white/50">자사몰에 뜨는 인앱: 실시간 미리보기로 확인하며 편집</p>
-            </div>
-          </div>
-          <button onClick={() => setEditing(null)} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+  // ════════════════════════════════════════════════════════════════════
+  // ★ 2026-09-29 인앱 만들기 개편 — 전체 화면 편집기(설계서 §1-4 · §2)
+  //   포스터 계열(이벤트 카드 · 배너 시트 · 포스터) = 왼쪽 장 목록 · 가운데 휴대폰 위 직접 편집 · 오른쪽 칸/장 패널.
+  //   기본 알림 · 작게 알리기 = 지금의 내용·디자인 편집을 오른쪽 패널로 · 가운데 미리보기.
+  //   저장 = 초안(멈춤) 자동 저장 · 요청 하나씩 순서대로 · 응답은 id 만 병합. 발행 = [발행] 확인 창 → 서버 게시 조건 CT · 과금.
+  //   게시 중 메시지 = 자동 저장 없이 [반영](변형에 모양 전파는 서버 수정 CT 가 같은 트랜잭션에서).
+  // ════════════════════════════════════════════════════════════════════
+  const layoutKey: LayoutKey = layoutKeyOf(editing);
+  const posterMode = isPosterLayout(layoutKey);
+  const posterLayout: PosterLayout = posterMode ? (layoutKey as PosterLayout) : 'overlay';
+  const slides: WsSlide[] = Array.isArray(editing.slides_ws) ? editing.slides_ws : [];
+  const [active, setActive] = useState(0);
+  const safeActive = Math.max(0, Math.min(active, Math.max(0, slides.length - 1)));
+  const activeRef = useRef(safeActive);
+  activeRef.current = safeActive;
+  const [selField, setSelField] = useState<SheetEditKey | null>(null);
+  const [pcView, setPcView] = useState(false);
+  const [customerView, setCustomerView] = useState(false);
+  const appLocked = isApp && posterMode && posterLayout !== 'overlay' && !APP_SHEET_LAYOUTS_UNLOCKED;
+  const [legacyApp, setLegacyApp] = useState(false);
+  useEffect(() => { setLegacyApp(appLocked); }, [appLocked]);
+  const [imgMenu, setImgMenu] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [creditOpen, setCreditOpen] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [editorConfirm, setEditorConfirm] = useState<ConfirmState | null>(null);
+  const isLive = editing.status === 'active' && !!editing.id;
+  const wasPublished = !!editing.publish_charged;
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr,480px] gap-0">
-          {/* 좌측 — 3탭 (내용 / 디자인 / 타겟·시점) */}
-          <div className="p-6 space-y-5 border-r border-white/5">
-            <div className="flex gap-1.5">
-              {([['content', '내용', Edit2], ['design', '디자인', Wand2], ['target', '타겟·시점', Target]] as const).map(([key, label, Icon]) => (
+  // 열린 직후(작업본 만들기 · 채널 정규화)는 변경이 아니다 — 자동 저장·되돌리기 기준점
+  const baselineRef = useRef(true);
+  useEffect(() => { const t = window.setTimeout(() => { baselineRef.current = false; }, 700); return () => window.clearTimeout(t); }, []);
+  // 포스터 계열 = 장 작업본으로 연다(첫 장 = flat · 저장된 장 · 기존 배지 = 장마다 라벨 · 장마다 색·크기 명시)
+  useEffect(() => {
+    if (posterMode && !Array.isArray(editing.slides_ws)) {
+      baselineRef.current = true;
+      setEditing((prev) => (prev ? { ...prev, slides_ws: slidesFromMessage(prev) } : prev));
+      window.setTimeout(() => { baselineRef.current = false; }, 300);
+    }
+  }, [posterMode, editing.slides_ws]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 저장 요청 몸(편집 상태 → 서버 입력). 포스터 계열은 장 → flat 합성 · 상태·과금 표시는 넣지 않는다(호출부가 정한다). */
+  const buildPayload = (m: Partial<MessageRow>): Record<string, any> => {
+    const poster = m.template === 'full_image' && Array.isArray(m.slides_ws)
+      ? messagePatchFromSlides(m.slides_ws as WsSlide[], resolvePosterLayout(m.design), m.design)
+      : null;
+    const base: Record<string, any> = { ...m, ...(poster || {}) };
+    if (!poster) {
+      // 블록 메시지 = 블록이 제목·본문 기준(DB title/body = headline/body 블록 · 옛 저장 규칙 그대로)
+      const bl = Array.isArray(m.content_blocks) ? m.content_blocks : [];
+      if (bl.length > 0) {
+        const bt = (tp: string) => { const b = bl.find((x: any) => x?.type === tp); return b ? String(b.text || '').trim() : ''; };
+        base.title = bt('headline') || String(m.title || '').trim();
+        base.body = bt('body') || bt('headline') || String(m.body || '').trim();
+      }
+      delete base.poster_slides;
+    }
+    for (const k of ['slides_ws', 'stats', 'publish_charged', 'created_at', 'updated_at', 'draft', 'status', 'id', 'company_id', 'created_by']) delete base[k];
+    return {
+      ...base,
+      position: m.template || m.position,
+      backgroundColor: m.background_color,
+      textColor: m.text_color,
+      triggerEvent: m.trigger_event,
+      displayFrequency: m.display_frequency,
+      // ★ 2026-07-16 범용 보장 계약 — 앱 채널 = flat 이 진실(블록 저장 안 함)
+      ...(m.channel === 'app' ? { content_blocks: [] } : {}),
+    };
+  };
+  const keyOf = (m: Partial<MessageRow>) => JSON.stringify(buildPayload(m));
+  const viewMsg: Partial<MessageRow> = posterMode && slides.length > 0
+    ? { ...editing, ...(messagePatchFromSlides(slides, posterLayout, editing.design) as any) }
+    : editing;
+
+  // ───────── 되돌리기 · 다시(변경 묶음 = 0.5초) ─────────
+  const pastRef = useRef<Partial<MessageRow>[]>([]);
+  const futureRef = useRef<Partial<MessageRow>[]>([]);
+  const burstBaseRef = useRef<Partial<MessageRow> | null>(null);
+  const burstTimerRef = useRef<number | null>(null);
+  const skipHistRef = useRef(false);
+  const prevEditingRef = useRef(editing);
+  const [, bumpHist] = useState(0);
+  const commitBurst = () => {
+    if (burstTimerRef.current) { window.clearTimeout(burstTimerRef.current); burstTimerRef.current = null; }
+    const base = burstBaseRef.current;
+    burstBaseRef.current = null;
+    if (!base) return;
+    pastRef.current.push(base);
+    if (pastRef.current.length > 60) pastRef.current.shift();
+    futureRef.current = [];
+    bumpHist((n) => n + 1);
+  };
+  useEffect(() => {
+    const prev = prevEditingRef.current;
+    prevEditingRef.current = editing;
+    if (prev === editing) return;
+    if (skipHistRef.current || baselineRef.current) { skipHistRef.current = false; return; }
+    if (!burstBaseRef.current) burstBaseRef.current = prev;
+    if (burstTimerRef.current) window.clearTimeout(burstTimerRef.current);
+    burstTimerRef.current = window.setTimeout(commitBurst, 500);
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  const restore = (snap: Partial<MessageRow>) => {
+    skipHistRef.current = true;
+    const cur = editingRef.current;
+    // id · 상태 · 과금 이력은 서버 사실 — 되돌리지 않는다
+    setEditing({ ...snap, id: cur.id || snap.id, status: cur.status, publish_charged: cur.publish_charged });
+    setSelField(null);
+    bumpHist((n) => n + 1);
+  };
+  const undo = () => { commitBurst(); const p = pastRef.current.pop(); if (!p) return; futureRef.current.push(editingRef.current); restore(p); };
+  const redo = () => { commitBurst(); const f = futureRef.current.pop(); if (!f) return; pastRef.current.push(editingRef.current); restore(f); };
+
+  // ───────── 초안 자동 저장(요청 하나씩 순서대로 · 응답은 id 만 병합 · 설계서 §1-4) ─────────
+  const idRef = useRef<string | null>(editing.id || null);
+  useEffect(() => { if (editing.id) idRef.current = editing.id; }, [editing.id]);
+  const savedKeyRef = useRef<string | null>(null);
+  const savedAudienceRef = useRef<string>(JSON.stringify(editing.audience_filter ?? null));
+  const [saveInfo, setSaveInfo] = useState<{ tone: SaveTone; text: string }>({ tone: 'saved', text: editing.id ? (editing.status === 'active' ? '게시 중' : '저장됨') : '새 초안 · 고치면 자동 저장' });
+  const inflightRef = useRef<Promise<boolean> | null>(null);
+  const againRef = useRef(false);
+  // 게시 요청을 보내는 동안 · 보낸 뒤에는 초안 저장을 새로 시작하지 않는다(늦은 초안 저장이 게시를 멈춤으로 되돌리지 않게 · 서버도 409 로 거절)
+  const saveLockRef = useRef(false);
+  const putAudience = async (id: string, snap: Partial<MessageRow>) => {
+    const aud = JSON.stringify(snap.audience_filter ?? null);
+    if (aud === savedAudienceRef.current) return;
+    await fetch(`/api/cdp/inapp/${id}/audience-filter`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ filter: snap.audience_filter || null }) }).catch(() => {});
+    savedAudienceRef.current = aud;
+  };
+  const saveDraftNow = async (): Promise<boolean> => {
+    if (saveLockRef.current) return true;
+    if (inflightRef.current) { againRef.current = true; return inflightRef.current; }
+    const run = (async (): Promise<boolean> => {
+      const snap = editingRef.current;
+      const key = keyOf(snap);
+      const id = snap.id || idRef.current;
+      if (id && key === savedKeyRef.current) { await putAudience(id, snap); return true; }
+      setSaveInfo({ tone: 'saving', text: '저장 중' });
+      try {
+        const res = await fetch(id ? `/api/cdp/inapp/${id}` : '/api/cdp/inapp', {
+          method: id ? 'PUT' : 'POST', headers: authHeaders(),
+          body: JSON.stringify({ ...buildPayload(snap), status: 'paused', draft: true }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.success) {
+          setSaveInfo({ tone: 'error', text: data?.code === 'DB_MIGRATION_PENDING' ? '기능 준비 중 · 잠시 후 다시' : (data?.error || '저장하지 못했어요') });
+          return false;
+        }
+        const newId: string | null = id || data.message?.id || null;
+        if (newId && !id) {
+          idRef.current = newId;
+          skipHistRef.current = true;
+          setEditing((prev) => (prev ? { ...prev, id: newId } : prev));
+        }
+        if (newId) await putAudience(newId, snap);
+        savedKeyRef.current = key;
+        setSaveInfo({ tone: 'saved', text: '자동 저장됨' });
+        return true;
+      } catch {
+        setSaveInfo({ tone: 'error', text: '저장하지 못했어요 · 연결 확인' });
+        return false;
+      }
+    })();
+    inflightRef.current = run;
+    const ok = await run;
+    inflightRef.current = null;
+    if (againRef.current) { againRef.current = false; return saveDraftNow(); }
+    return ok;
+  };
+  /** 게시 직전 — 진행 중 저장을 기다리고 마지막 변경까지 초안으로 저장해 둔다(id 확보 · 순서 보장). */
+  const flushDraft = async (): Promise<boolean> => {
+    for (let i = 0; i < 5; i += 1) {
+      if (inflightRef.current) { await inflightRef.current; continue; }
+      const id = editingRef.current.id || idRef.current;
+      if (id && keyOf(editingRef.current) === savedKeyRef.current) return true;
+      if (!(await saveDraftNow())) return false;
+    }
+    return !inflightRef.current && !!(editingRef.current.id || idRef.current);
+  };
+  useEffect(() => {
+    const key = keyOf(editing);
+    if (savedKeyRef.current === null || baselineRef.current) { savedKeyRef.current = key; return; }
+    if (key === savedKeyRef.current) {
+      if (isLive) setSaveInfo({ tone: 'saved', text: '게시 중' });
+      return;
+    }
+    if (isLive) { setSaveInfo({ tone: 'manual', text: '게시 중 · [반영]을 눌러야 고객 화면이 바뀝니다' }); return; }
+    setSaveInfo({ tone: 'dirty', text: '고치는 중' });
+    const t = window.setTimeout(() => { void saveDraftNow(); }, 1200);
+    return () => window.clearTimeout(t);
+  }, [editing, isLive]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ───────── 장 다루기(장마다 고정 키로 — 늦게 끝난 업로드가 다른 장에 들어가지 않게) ─────────
+  const setSlides = (next: WsSlide[]) => setEditing((prev) => (prev ? { ...prev, slides_ws: next } : prev));
+  const patchSlideKey = (k: string, patch: Partial<WsSlide>) => setEditing((prev) => (prev
+    ? { ...prev, slides_ws: (prev.slides_ws || []).map((sl) => (sl._k === k ? { ...sl, ...patch } : sl)) }
+    : prev));
+  const curKey = slides[safeActive]?._k;
+  const changeField = (key: SheetEditKey, v: string) => {
+    if (!curKey) return;
+    setEditing((prev) => (prev ? { ...prev, slides_ws: (prev.slides_ws || []).map((sl) => (sl._k === curKey ? writeField(sl, key, v) : sl)) } : prev));
+  };
+  const addSlide = () => {
+    if (slides.length >= MAX_SLIDES) return;
+    const ns = duplicateSlide(slides[safeActive], posterLayout, editing.design);
+    setSlides([...slides.slice(0, safeActive + 1), ns, ...slides.slice(safeActive + 1)]);
+    setActive(safeActive + 1);
+    setSelField(null);
+  };
+  const removeSlide = () => {
+    if (slides.length <= 1) return;
+    setSlides(slides.filter((_, i) => i !== safeActive));
+    setActive(Math.max(0, safeActive - 1));
+    setSelField(null);
+    pickToast.info('장을 뺐어요. 되돌리려면 Ctrl+Z');
+  };
+  // 사진이 들어오면: 첫 장 = 지금 장 · 나머지 = 지금 장 모양을 따라 뒤에 새 장(최대 5장 · 설계서 §2)
+  const takeImages = (urls: string[], meta?: { linkUrl?: string | null }) => {
+    let dropped = 0;
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const ss = [...(prev.slides_ws || [])];
+      if (ss.length === 0) return prev;
+      let at = Math.min(activeRef.current, ss.length - 1);
+      const layoutNow = resolvePosterLayout(prev.design);
+      urls.forEach((u, n) => {
+        if (n === 0) {
+          ss[at] = { ...ss[at], image_url: u, ...(meta?.linkUrl && !ss[at].link_url ? { link_url: meta.linkUrl } : {}) };
+          return;
+        }
+        if (ss.length >= MAX_SLIDES) { dropped += 1; return; }
+        ss.splice(at + 1, 0, { ...duplicateSlide(ss[at], layoutNow, prev.design), image_url: u });
+        at += 1;
+      });
+      return { ...prev, slides_ws: ss };
+    });
+    if (urls.length > 1) {
+      window.setTimeout(() => {
+        pickToast.success(dropped > 0 ? `사진 ${urls.length - dropped}장을 넣었어요. 최대 ${MAX_SLIDES}장이라 ${dropped}장은 빠졌어요.` : `사진 ${urls.length}장으로 장을 만들었어요`);
+      }, 0);
+    }
+  };
+  const images = useImageSources({ uploadImage, onImages: takeImages });
+
+  // ───────── 모양 바꾸기(글 · 사진은 두고 모양만 · 되돌리기 가능 · 설계서 §2 회의론자 7) ─────────
+  const switchLayout = (k: LayoutKey, opts?: { addSlide?: boolean }) => {
+    commitBurst();
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const fromKey = layoutKeyOf(prev);
+      if (isPosterLayout(k)) {
+        const d0: Record<string, any> = { ...(prev.design || {}) };
+        if (k === 'overlay') delete d0.poster_layout; else d0.poster_layout = k;
+        if (!d0.dismiss_mode) d0.dismiss_mode = 'snooze_day';
+        let ss: WsSlide[];
+        if (isPosterLayout(fromKey) && Array.isArray(prev.slides_ws)) {
+          ss = restyleSlides(prev.slides_ws, k, d0);
+        } else {
+          // 기본 알림 → 크게 보여 주기: 글 · 사진 · 첫 버튼을 첫 장으로(블록이면 블록에서 꺼낸다)
+          const bl = Array.isArray(prev.content_blocks) ? prev.content_blocks : [];
+          const flat = bl.length > 0 ? composeFlatFromBlocksFE(bl) : null;
+          const src: Partial<MessageRow> = {
+            ...prev,
+            ...(flat ? { title: flat.title || prev.title, body: flat.body || prev.body, image_url: flat.imageUrl || prev.image_url, buttons: flat.buttons.length > 0 ? flat.buttons : prev.buttons, badge_text: flat.badgeText || prev.badge_text } : {}),
+            poster_slides: [],
+            design: d0,
+          };
+          ss = restyleSlides(slidesFromMessage(src), k, d0);
+        }
+        if (opts?.addSlide && ss.length < MAX_SLIDES) ss = [...ss, duplicateSlide(ss[ss.length - 1], k, d0)];
+        return { ...prev, template: 'full_image', design: d0, slides_ws: ss, content_blocks: [] };
+      }
+      if (isPosterLayout(fromKey) && Array.isArray(prev.slides_ws)) {
+        // 크게 보여 주기 → 기본 알림 · 작게 알리기: 첫 장이 글 · 사진 · 버튼으로(나머지 장은 되돌리기로 복구)
+        const pt = messagePatchFromSlides(prev.slides_ws, fromKey as PosterLayout, prev.design);
+        const d1: Record<string, any> = { ...(pt.design || {}) };
+        delete d1.poster_layout;
+        return {
+          ...prev,
+          template: k as Template,
+          title: pt.title,
+          body: pt.body || pt.title,
+          image_url: pt.image_url,
+          buttons: pt.buttons,
+          badge_text: pt.badge_text || prev.badge_text,
+          image_link_url: pt.image_link_url,
+          design: Object.keys(d1).length > 0 ? d1 : null,
+          slides_ws: undefined,
+          poster_slides: [],
+        };
+      }
+      return { ...prev, template: k as Template };
+    });
+    setActive(opts?.addSlide ? 1 : 0);
+    setSelField(null);
+    pickToast.info('모양을 바꿨어요. 마음에 안 들면 되돌리기(Ctrl+Z)');
+  };
+  const askConvertToSlides = () => setEditorConfirm({
+    mode: 'info',
+    title: '크게 보여 주기로 바꿀까요?',
+    description: '장을 더하려면 이벤트 카드 모양으로 바꿉니다. 지금 쓴 글 · 사진 · 첫 버튼이 첫 장으로 옮겨지고 둘째 장이 생깁니다. 되돌리기(Ctrl+Z)로 돌아올 수 있어요.',
+    confirmLabel: '바꾸기',
+    onConfirm: () => switchLayout('event_card', { addSlide: true }),
+  });
+
+  // ───────── 발행 · 반영 ─────────
+  const checkPublish = (): boolean => {
+    const d = publishDefectOf(buildPayload(editingRef.current));
+    if (!d) return true;
+    pickToast.warning(d.message);
+    if (posterMode && typeof d.slide === 'number') {
+      setActive(d.slide);
+      setSelField(d.field === 'title' ? 'title' : null);
+    } else {
+      setActiveTab('content');
+    }
+    setDrawerOpen(false);
+    return false;
+  };
+  const handleServerError = (data: any) => {
+    if (data?.code === 'INAPP_NOT_PUBLISHABLE' && data.defect) {
+      pickToast.warning(String(data.defect.message || '발행 조건을 확인해 주세요'));
+      if (posterMode && typeof data.defect.slide === 'number') setActive(data.defect.slide);
+      setDrawerOpen(false);
+      return;
+    }
+    if (data?.code === 'INAPP_DISPLAY_UNAVAILABLE') { onDisplayBlocked(); return; }
+    if (data?.code === 'INSUFFICIENT_CREDIT') { pickToast.error(data.error || '크레딧이 부족합니다.'); return; }
+    if (data?.code === 'DB_MIGRATION_PENDING') { pickToast.warning('기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
+    pickToast.error(data?.error || '저장하지 못했어요');
+  };
+  const doPublish = async () => {
+    setPublishing(true);
+    try {
+      commitBurst();
+      if (!(await flushDraft())) { pickToast.error('초안을 저장하지 못해 발행하지 않았어요. 잠시 후 다시 시도해 주세요.'); return; }
+      const id = idRef.current || editingRef.current.id;
+      if (!id) return;
+      const snap = editingRef.current;
+      saveLockRef.current = true;
+      const res = await fetch(`/api/cdp/inapp/${id}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ...buildPayload(snap), status: 'active' }) }).catch(() => null);
+      const data = res ? await res.json().catch(() => ({})) : { error: '연결이 끊겨 발행 여부를 확인하지 못했어요. 목록에서 상태를 확인해 주세요.' };
+      if (data?.success) {
+        pickToast.success(wasPublished ? '다시 게시했어요' : '발행했어요. 고객 화면에 곧 보입니다');
+        setDrawerOpen(false);
+        onDone();
+        return;
+      }
+      saveLockRef.current = false;
+      handleServerError(data);
+    } finally {
+      setPublishing(false);
+    }
+  };
+  const confirmPublish = () => {
+    if (!checkPublish()) return;
+    if ((editing.channel === 'app' ? 'app' : 'web') === 'web' && webBlocked) { onDisplayBlocked(); return; }
+    if (!wasPublished) setCreditOpen(true);
+    else void doPublish();
+  };
+  const applyLive = async () => {
+    if (!checkPublish()) return;
+    setPublishing(true);
+    try {
+      commitBurst();
+      const snap = editingRef.current;
+      if (!snap.id) return;
+      const res = await fetch(`/api/cdp/inapp/${snap.id}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ...buildPayload(snap), status: 'active' }) });
+      const data = await res.json().catch(() => ({}));
+      if (data?.success) {
+        await putAudience(snap.id, snap);
+        savedKeyRef.current = keyOf(snap);
+        setSaveInfo({ tone: 'saved', text: '게시 중 · 반영됨' });
+        pickToast.success('게시 중인 메시지에 반영했어요');
+        return;
+      }
+      handleServerError(data);
+    } finally {
+      setPublishing(false);
+    }
+  };
+  const pauseLive = () => setEditorConfirm({
+    mode: 'warning',
+    title: '게시를 멈출까요?',
+    description: '고객 화면에서 바로 내려갑니다. 멈춘 동안 고친 내용은 자동 저장되고, 다시 게시할 때는 크레딧이 들지 않습니다.',
+    confirmLabel: '멈추기',
+    onConfirm: async () => {
+      if (!editing.id) return;
+      const res = await fetch(`/api/cdp/inapp/${editing.id}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ status: 'paused' }) });
+      const data = await res.json().catch(() => ({}));
+      if (data?.success) {
+        skipHistRef.current = true;
+        setEditing((prev) => (prev ? { ...prev, status: 'paused' } : prev));
+        setSaveInfo({ tone: 'saved', text: '멈춤 · 고치면 자동 저장' });
+        pickToast.success('게시를 멈췄어요');
+      } else {
+        handleServerError(data);
+      }
+    },
+  });
+  const leave = async () => {
+    commitBurst();
+    const dirty = keyOf(editingRef.current) !== savedKeyRef.current;
+    if (isLive && dirty) {
+      setEditorConfirm({ mode: 'warning', title: '반영하지 않은 변경이 있어요', description: '게시 중인 메시지는 [반영]을 눌러야 고객 화면이 바뀝니다. 나가면 이번 변경은 사라집니다.', confirmLabel: '나가기', onConfirm: () => onDone() });
+      return;
+    }
+    if (!isLive && dirty) {
+      const ok = await saveDraftNow();
+      if (!ok) {
+        setEditorConfirm({ mode: 'danger', title: '저장하지 못했어요', description: '지금 나가면 마지막 변경이 사라집니다.', confirmLabel: '그래도 나가기', onConfirm: () => onDone() });
+        return;
+      }
+    }
+    onDone();
+  };
+
+  // 키보드 — Ctrl+Z 되돌리기 · Ctrl+Shift+Z 다시 · ←/→ 장 넘기기(입력 중 · 확인 창 열림 = 무시)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if (typing || !posterMode || slides.length < 2 || drawerOpen || imgMenu || editorConfirm || creditOpen) return;
+      if (e.key === 'ArrowRight') setActive((a) => (a + 1) % slides.length);
+      if (e.key === 'ArrowLeft') setActive((a) => (a - 1 + slides.length) % slides.length);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const variableChips = availableVariables.map((v) => ({ key: v.key, label: v.label }));
+  const sendLabel = isLive ? '반영' : wasPublished ? '다시 게시' : '발행';
+  // 머리 제목 = 저장 제목의 기준 칸(포스터 = 첫 장 제목 · 블록 = 첫 헤드라인 블록 · 그 밖 = 제목)
+  const headlineIdx = !posterMode ? blocks.findIndex((b: any) => b?.type === 'headline') : -1;
+  const docTitle = (posterMode
+    ? String(slides[0]?.title || '')
+    : headlineIdx >= 0 ? String(blocks[headlineIdx]?.text || '') : String(editing.title || '')
+  ).replace(/\n/g, ' ') || '제목 없는 인앱';
+  const onTitleEdit = (v: string) => {
+    if (posterMode && slides[0]) setSlides(slides.map((sl, i) => (i === 0 ? { ...sl, title: v } : sl)));
+    else if (headlineIdx >= 0) updateField('content_blocks', blocks.map((b: any, i: number) => (i === headlineIdx ? { ...b, text: v } : b)));
+    else updateField('title', v);
+  };
+  const toggleBtn = (on: boolean) => `hidden md:inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-[12.5px] font-semibold transition-colors ${on ? 'border-violet-400/60 bg-violet-500/20 text-white' : 'border-white/10 bg-white/[0.04] text-white/70 hover:text-white'}`;
+
+  const channelSwitch = (
+    <div className="hidden md:inline-flex rounded-xl border border-white/10 bg-white/[0.04] p-1 shrink-0" role="tablist" aria-label="채널">
+      {(['web', 'app'] as const).map((c) => {
+        const on = (editing.channel === 'app' ? 'app' : 'web') === c;
+        const can = on || !wasPublished;
+        return (
+          <button key={c} type="button" role="tab" aria-selected={on} disabled={!can}
+            onClick={() => { if (!on && can) setEditing((prev) => (prev ? { ...prev, channel: c } : prev)); }}
+            title={!can ? '게시한 메시지는 채널을 바꿀 수 없어요' : undefined}
+            className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold ${on ? 'bg-violet-600 text-white' : can ? 'text-white/70 hover:text-white' : 'text-white/30 cursor-not-allowed'}`}>
+            {c === 'web' ? <Globe className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}{c === 'web' ? '웹' : '앱'}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const extraHeader = (
+    <div className="flex items-center gap-1.5 shrink-0">
+      {posterMode && (
+        <button type="button" onClick={() => setCustomerView((v) => !v)} className={toggleBtn(customerView)} title="이름 같은 값을 실제 고객 값으로 바꿔 봅니다">고객으로 보기</button>
+      )}
+      {posterMode && isApp && posterLayout !== 'overlay' && (
+        <button type="button" onClick={() => setLegacyApp((v) => !v)} className={toggleBtn(legacyApp)} title="새 모양을 모르는 이전 앱이 그리는 모습">구버전 앱 모습</button>
+      )}
+      {posterMode && !isApp && (
+        <button type="button" onClick={() => setPcView((v) => !v)} className={toggleBtn(pcView)}>PC</button>
+      )}
+      <button type="button" onClick={() => setDrawerOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-white/10 bg-white/[0.04] text-[12.5px] font-semibold text-white/75 hover:text-white">
+        <Target className="w-3.5 h-3.5" /><span className="hidden sm:inline">타겟·시점</span>
+      </button>
+      {canTestSave && (
+        <button type="button" onClick={() => setCaptureOpen(true)} className={toggleBtn(false)} title="영업 담당자에게 보낼 웹·앱 실물 이미지를 저장합니다 (발송 아님)"><Download className="w-3.5 h-3.5" />테스트저장</button>
+      )}
+      {isLive && (
+        <button type="button" onClick={pauseLive} className={toggleBtn(false)}>게시 멈춤</button>
+      )}
+    </div>
+  );
+
+  const banner = (isLive || isApp || appLocked || (!posterMode && hasPlaceholder)) ? (
+    <div className="px-3 md:px-5 pt-3 space-y-2">
+      {isLive && (
+        <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-[12px] text-emerald-100 flex items-start gap-2">
+          <Activity className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>게시 중인 메시지입니다. 고친 내용은 오른쪽 위 <b>[반영]</b>을 눌러야 고객 화면에 적용됩니다. A/B 변형에는 모양 · 장이 함께 적용되고 문안은 변형 것을 그대로 둡니다.</span>
+        </div>
+      )}
+      {isApp && (
+        <div className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-[12px] text-cyan-100 flex items-start gap-2">
+          <Smartphone className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            <b>앱(네이티브)이 직접 그리는 채널입니다</b>. 앱이 통합 계약을 구현해야 여기서 설정한 내용 · 색 · 닫기 동작이 그대로 나옵니다.{' '}
+            <button type="button" onClick={() => setShowAppContract(true)} className="underline underline-offset-2 font-semibold text-cyan-200 hover:text-white">앱 통합 계약 보기</button>
+          </span>
+        </div>
+      )}
+      {appLocked && (
+        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>이 모양은 <b>앱 업데이트 뒤</b>에 보입니다. 이전 앱에서는 같은 내용이 포스터 모양 · 「다시 보지 않기」로 보입니다. 위 「구버전 앱 모습」으로 확인하세요.</span>
+        </div>
+      )}
+      {!posterMode && hasPlaceholder && (
+        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span><b>혜택 안내 자리</b>가 남아 있어요. 회사 정책에 맞게 직접 작성해야 발행됩니다(AI는 구체 혜택을 임의로 쓰지 않습니다).</span>
+        </div>
+      )}
+    </div>
+  ) : undefined;
+
+  const left = posterMode ? (
+    <SlideRail
+      layout={posterLayout}
+      slides={slides}
+      active={safeActive}
+      onActive={(i) => { setActive(i); setSelField(null); }}
+      onReorder={(from, to) => { setSlides(arrayMove(slides, from, to)); setActive(to); }}
+      onAdd={addSlide}
+      onDropFiles={(f) => { void images.uploadFiles(f); }}
+      busy={images.busy}
+      top={<div className="mb-4"><LayoutSwitcher channel={isApp ? 'app' : 'web'} current={layoutKey} onPick={(k) => switchLayout(k)} /></div>}
+    />
+  ) : (
+    <div className="space-y-4">
+      <LayoutSwitcher channel={isApp ? 'app' : 'web'} current={layoutKey} onPick={(k) => switchLayout(k)} />
+      <div>
+        <div className="flex items-baseline gap-2 px-1 mb-3"><b className="text-[13.5px] text-white">장 1/1</b><span className="text-[11px] text-white/45">한 장짜리 모양</span></div>
+        <div className="rounded-xl border border-violet-400/60 bg-violet-500/[0.12] px-3 py-2.5">
+          <b className="block text-[13px] text-white truncate">{String(editing.title || '제목 없음').replace(/%이름%/g, '(이름)')}</b>
+          <span className="block text-[11.5px] text-white/50 mt-0.5">{editing.image_url ? '사진 있음' : '사진 없음'}</span>
+        </div>
+        <button type="button" onClick={askConvertToSlides}
+          className="mt-2.5 w-full h-11 rounded-xl border border-dashed border-white/20 text-[13px] font-semibold text-white/80 hover:text-white hover:border-violet-400/60 inline-flex items-center justify-center gap-2">
+          <Plus className="w-4 h-4" />장 추가 → 크게 보여 주기로 바꾸기
+        </button>
+        <p className="text-[11.5px] text-white/45 mt-2 px-1 leading-relaxed">좌우로 넘기는 여러 장이 필요하면 크게 보여 주기로 바꾸세요. 글 · 사진 · 첫 버튼이 첫 장으로 옮겨집니다.</p>
+      </div>
+    </div>
+  );
+
+  const renderSample = (t: string) => replaceVars(t, sampleCustomer);
+  // 「고객으로 보기」가 꺼져 있으면 원문 — 넣을 수 있는 값은 ‹이름› 모양으로 보여 준다(칸 안 원문은 그대로 · 설계서 §2)
+  const varLabel = new Map(availableVariables.map((v) => [v.key.replace(/\s+/g, ''), v.label]));
+  const renderTokens = (t: string) => String(t || '')
+    .replace(/\{\{\s*customer\.([a-zA-Z_]+)[^}]*\}\}/g, (m0, name) => `‹${varLabel.get(`{{customer.${name}}}`) || name}›`)
+    .replace(/%([가-힣A-Za-z_]{1,12})%/g, '‹$1›');
+  const center = posterMode ? (
+    slides.length > 0 ? (
+      <PosterStage
+        layout={posterLayout}
+        slides={slides}
+        design={editing.design}
+        badge={null}
+        active={safeActive}
+        onActive={(i) => { setActive(i); setSelField(null); }}
+        channel={isApp ? 'app' : 'web'}
+        pc={pcView}
+        legacyApp={legacyApp}
+        renderText={customerView ? renderSample : renderTokens}
+        selected={selField}
+        onSelect={setSelField}
+        onChangeField={changeField}
+        onImagePick={() => setImgMenu(true)}
+        onImageDrop={(f) => { void images.uploadFiles(f); }}
+        variables={variableChips}
+        busyImage={images.busy}
+      />
+    ) : (
+      <div className="flex-1 flex items-center justify-center text-white/50"><Loader2 className="w-5 h-5 animate-spin" /></div>
+    )
+  ) : (
+    <div className="flex-1 min-h-0 overflow-y-auto mk-scroll space-y-3 max-w-[520px] w-full mx-auto">
+            {editing.channel === 'app' && (
+              <div className="bg-sky-500/10 border border-sky-400/30 rounded-lg px-3 py-2 text-[11px] text-sky-200 flex items-start gap-1.5">
+                <Smartphone className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>아래 미리보기 = <strong>앱 실렌더와 동일 요소</strong>(이미지·배지·제목·본문·버튼)만 표시. 만든 그대로 앱에 뜹니다. (앱 SDK 연동 필요)</span>
+              </div>
+            )}
+            <div className="flex gap-1 flex-wrap">
+              {previewPeople.map((p, i) => (
                 <button
-                  key={key}
-                  onClick={() => setActiveTab(key)}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab === key ? 'bg-violet-500/30 border border-violet-400/50 text-white' : 'bg-white/5 border border-white/10 text-white/50 hover:text-white/80'}`}
+                  key={`${p.label}-${i}`}
+                  onClick={() => setPreviewIdx(i)}
+                  className={`flex-1 px-2 py-1.5 text-xs rounded ${
+                    previewIdx === i
+                      ? p.label === '타겟'
+                        ? 'bg-emerald-500/30 border border-emerald-400/40 text-white'
+                        : 'bg-violet-500/30 border border-violet-400/40 text-white'
+                      : 'bg-slate-900/60 border border-white/10 text-white/50'
+                  }`}
                 >
-                  <Icon className="w-3.5 h-3.5" /> {label}
+                  {p.label}
                 </button>
               ))}
             </div>
-            {/* ★ 2026-07-17 앱 채널 = 앱이 직접 그림 — 통합 계약 안내 (설정했는데 앱이 못 그리는 상황 차단) */}
-            {isApp && (
-              <div className="bg-cyan-500/10 border border-cyan-400/30 rounded-lg p-3 flex items-start gap-2">
-                <Smartphone className="w-4 h-4 text-cyan-300 mt-0.5 shrink-0" />
-                <div className="text-xs text-cyan-100 min-w-0">
-                  <strong>앱(네이티브)이 직접 그리는 채널입니다</strong>. 앱이 통합 계약을 구현해야 여기서 설정한 내용·색·정렬·닫기 동작이 그대로 나옵니다.{' '}
-                  <button onClick={() => setShowAppContract(true)} className="underline underline-offset-2 font-semibold text-cyan-200 hover:text-white">앱 통합 계약 보기</button>
-                </div>
-              </div>
-            )}
-            {hasPlaceholder && activeTab === 'content' && (
-              <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
-                <div className="text-xs text-amber-100">
-                  <strong>혜택 안내 placeholder 발견</strong>. 회사 정책에 맞게 직접 작성 후 저장해주세요. AI는 구체 혜택 임의 작성 X.
-                </div>
-              </div>
-            )}
+            <div className="text-[10px] text-white/40">
+              {samplePerson ? (
+                <>
+                  샘플: {String(sampleCustomer.name || '고객')} · {String(sampleCustomer.grade || '-')} · {Number(sampleCustomer.points || 0).toLocaleString()}P
+                  {samplePerson.is_sample
+                    ? <span className="text-amber-300/80"> · 가상 예시. 고객 DB에 데이터가 쌓이면 실제 고객으로 바뀝니다</span>
+                    : <span className="text-emerald-300/70"> · 실제 고객 DB{samplePerson.label === '타겟' ? ' (타겟 조건 최상단 고객)' : ''}</span>}
+                </>
+              ) : (
+                '실제 고객 샘플 불러오는 중...'
+              )}
+            </div>
 
+            {isApp ? (
+              // ★ 2026-07-16 범용 보장 계약 — 앱 채널 미리보기 = 앱 실렌더(바텀시트/중앙 모달) 1:1 미러
+              <AppInAppPreview
+                template={(editing.template || 'bottom_banner') as string}
+                title={renderedTitle}
+                body={renderedBody}
+                imageUrl={editing.image_url}
+                badge={editing.badge_text}
+                buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
+                backgroundColor={editing.background_color || '#4f46e5'}
+                textColor={editing.text_color || '#ffffff'}
+                design={editing.design}
+                posterSlides={assemblePosterSlides(editing)}
+                replaceVars={(t) => replaceVars(t, sampleCustomer)}
+              />
+            ) : (
+            <InAppMessagePreview
+              template={(editing.template || 'top_banner') as string}
+              title={renderedTitle}
+              body={renderedBody}
+              imageUrl={editing.image_url}
+              badge={editing.badge_text}
+              buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
+              backgroundColor={editing.background_color || '#4f46e5'}
+              textColor={editing.text_color || '#ffffff'}
+              blocks={hasBlocks ? blocks : undefined}
+              theme={editing.theme}
+              accentColor={editing.accent_color}
+              cardStyle={editing.card_style}
+              design={editing.design}
+              posterSlides={assemblePosterSlides(editing)}
+              replaceVars={(t) => replaceVars(t, sampleCustomer)}
+            />
+            )}
+    </div>
+  );
+
+  const right = posterMode ? (
+    <SlidePanel
+      layout={posterLayout}
+      slides={slides}
+      active={safeActive}
+      design={editing.design}
+      selected={selField}
+      onSelect={setSelField}
+      onPatchSlide={(patch) => { if (curKey) patchSlideKey(curKey, patch); }}
+      onRemoveSlide={removeSlide}
+      onDesign={setDesign}
+      images={images}
+      variables={variableChips}
+      onInsertVar={(key, token) => changeField(key, (readField(slides[safeActive], key) + token).slice(0, FIELD_MAX[key]))}
+    />
+  ) : (
+    <div className="space-y-5">
+      <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.04] p-1" role="tablist" aria-label="편집 탭">
+        {([['content', '내용', Edit2], ['design', '디자인', Wand2]] as const).map(([key, label, Icon]) => (
+          <button key={key} type="button" role="tab" aria-selected={activeTab === key} onClick={() => setActiveTab(key)}
+            className={`inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] font-semibold ${activeTab === key ? 'bg-violet-600 text-white' : 'text-white/70 hover:text-white'}`}>
+            <Icon className="w-3.5 h-3.5" />{label}
+          </button>
+        ))}
+      </div>
             {/* 탭 내용: 제목 · 본문 · 뱃지 */}
             <div className={activeTab === 'content' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
@@ -2039,50 +2603,6 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                   maxLength={100}
                 />
-              )}
-              {/* ★ 2026-07-19 (Harold) — 포스터형 제목 스타일은 입력 바로 아래: 서체 · 크기 · 색 */}
-              {!hasBlocks && editing.template === 'full_image' && (
-                <div className="flex flex-wrap items-center gap-2 mb-2 -mt-0.5">
-                  <select
-                    value={(() => {
-                      const fd = String(editing.design?.font_display || '');
-                      const hit = INAPP_FONT_CATALOG.find((c) => fd === c.css);
-                      return hit ? hit.id : 'default';
-                    })()}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      if (id === 'default') { setDesign({ font_display: null }); return; }
-                      const c = INAPP_FONT_CATALOG.find((x) => x.id === id);
-                      setDesign({ font_display: c ? c.css : null });
-                    }}
-                    className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-[11px] text-white"
-                    title="제목 서체"
-                  >
-                    <option value="default">서체 기본</option>
-                    {INAPP_FONT_CATALOG.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
-                  <div className="flex gap-1" title="제목 크기">
-                    {([['작게', 17], ['보통', 20], ['크게', 24]] as const).map(([label, px]) => {
-                      const cur = Number(editing.design?.poster_title_size || 20);
-                      return (
-                        <button
-                          key={px}
-                          onClick={() => setDesign({ poster_title_size: px === 20 ? null : px })}
-                          className={`px-2.5 py-1.5 rounded border text-[11px] font-bold transition-colors ${cur === px ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/50 hover:bg-white/5'}`}
-                        >{label}</button>
-                      );
-                    })}
-                  </div>
-                  <label className="flex items-center gap-1.5 text-[10px] text-white/50" title="제목 색 (이미지 위)">
-                    제목 색
-                    <input
-                      type="color"
-                      value={String(editing.design?.poster_title_color || editing.design?.poster_text_color || '#ffffff')}
-                      onChange={(e) => setDesign({ poster_title_color: e.target.value })}
-                      className="h-7 w-10 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
-                    />
-                  </label>
-                </div>
               )}
               {hasBlocks ? (
                 <div className="mt-3">
@@ -2102,32 +2622,6 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     className={`w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y ${editing.template === 'full_image' ? 'h-16' : 'h-24'} focus:outline-none focus:border-violet-400/50`}
                     maxLength={300}
                   />
-                  {editing.template === 'full_image' && (
-                    <div className="flex flex-wrap items-center gap-2 mb-2 -mt-0.5">
-                      <div className="flex gap-1" title="본문 크기">
-                        {([['작게', 12], ['보통', 14], ['크게', 16]] as const).map(([label, px]) => {
-                          const cur = Number(editing.design?.poster_body_size || 14);
-                          return (
-                            <button
-                              key={px}
-                              onClick={() => setDesign({ poster_body_size: px === 14 ? null : px })}
-                              className={`px-2.5 py-1.5 rounded border text-[11px] font-bold transition-colors ${cur === px ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/50 hover:bg-white/5'}`}
-                            >{label}</button>
-                          );
-                        })}
-                      </div>
-                      <label className="flex items-center gap-1.5 text-[10px] text-white/50" title="본문 색 (이미지 위)">
-                        본문 색
-                        <input
-                          type="color"
-                          value={String(editing.design?.poster_body_color || editing.design?.poster_text_color || '#ffffff')}
-                          onChange={(e) => setDesign({ poster_body_color: e.target.value })}
-                          className="h-7 w-10 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
-                        />
-                      </label>
-                      <span className="text-[10px] text-white/35">제목·본문은 이미지 위에 표시. 우측 미리보기로 확인</span>
-                    </div>
-                  )}
                   <input
                     type="text"
                     value={editing.badge_text || ''}
@@ -2136,15 +2630,6 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                     maxLength={20}
                   />
-                  {/* ★ 2026-07-21 포스터 캐러셀 — 좌우 스와이프(N장). 위 이미지·문구=첫 장, 여기서 장 추가 */}
-                  {editing.template === 'full_image' && (
-                    <PosterSlidesEditor
-                      slides={editing.extra_slides ?? (Array.isArray(editing.poster_slides) ? editing.poster_slides.slice(1) : [])}
-                      // ★ 2026-07-21 널-세이프 + 메시지 식별 가드 — 업로드 지연 콜백이 (a)모달 닫힘 후 재오픈, (b)다른 메시지로 전환 후 그 메시지의 슬라이드를 덮는 것 차단(Codex 2R·3R ③)
-                      onChange={(s) => { const eid = editing?.id ?? null; setEditing((prev) => (prev && (prev.id ?? null) === eid ? { ...prev, extra_slides: s } : prev)); }}
-                      uploadImage={uploadImage}
-                    />
-                  )}
                   {/* ★ 2026-07-18 정정 — 웹 기존 UX 원복(신규에서도 블록 전환 가능). 포스터형만 flat 전용이라 숨김 유지 */}
                   {!isApp && editing.template !== 'full_image' && (
                     <button
@@ -2184,7 +2669,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             {SHOW_ELITE_TEMPLATES && eliteTemplates.length > 0 && !isApp && (
               <div className={activeTab === 'design' ? 'mb-5' : 'hidden'}>
                 <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3 text-amber-300" /> 정예 템플릿: 목적으로 고르세요
+                  <Sparkles className="w-3 h-3 text-amber-300" /> 문구 스타일: 목적으로 고르세요
                 </h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {eliteTemplates.map((g) => (
@@ -2202,63 +2687,11 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     </button>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/40 mt-1.5">브랜드 학습(AI 메모리)의 색·고객센터가 자동 반영됩니다. 혜택 문구는 직접 작성해야 저장됩니다.</div>
+                <div className="text-[10px] text-white/40 mt-1.5">쓴 글이 있으면 글은 두고 모양(형태·테마·서체)만 입힙니다. 빈 메시지면 구성까지 채웁니다. 혜택 문구는 직접 작성해야 발행됩니다.</div>
               </div>
             )}
 
             {/* ★ 2026-07-14 Harold 지시 — 옛 골든 12종 노출 제거(정예 10종만 유지, 위 그리드) */}
-
-            {/* 탭 디자인: 표시 형태 — ★ 2026-07-18 정정: 웹 = 기존 4종 + 포스터형 추가. 목록 밖 값(옛 배너 등)은 현재 값을 옵션에 추가(비파괴) */}
-            <div className={activeTab === 'design' ? '' : 'hidden'}>
-              {(() => {
-                const base = editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web;
-                // position 폴백 포함 — 옛 행(template NULL·position만 존재)도 현재 형태가 옵션·선택 표시되게 (서빙과 동일 기준)
-                const cur = (editing.template || (editing as any).position) as Template | undefined;
-                const options: Template[] = cur && !base.includes(cur) ? [...base, cur] : base;
-                return (
-                  <>
-                    <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                      <Layers className="w-3 h-3" /> 표시 형태
-                    </h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {options.map((tpl) => {
-                        const pick = !isApp ? WEB_PICKER_LABELS[tpl] : undefined;
-                        // ★ 2026-07-18 P1 — 블록 메시지에서 포스터형 선택 금지: 저장 시 서버 허용표(빈 Set)가 블록을 전부
-                        //   제거해 콘텐츠가 조용히 사라진다 (미리보기≠실물 사고 부류). 정직하게 비활성 + 사유 표기.
-                        const blockedPoster = tpl === 'full_image' && hasBlocks;
-                        return (
-                          <button
-                            key={tpl}
-                            disabled={blockedPoster}
-                            onClick={() => { if (!blockedPoster) updateField('template', tpl); }}
-                            className={`text-xs px-2 py-2 rounded-lg border text-left transition-colors ${
-                              editing.template === tpl
-                                ? 'bg-violet-500/30 border-violet-400/60 text-white'
-                                : blockedPoster
-                                  ? 'bg-slate-900/40 border-white/5 text-white/25 cursor-not-allowed'
-                                  : 'bg-slate-900/60 border-white/10 text-white/70 hover:bg-white/5'
-                            }`}
-                            title={blockedPoster ? '포스터형은 블록 메시지에서 쓸 수 없습니다 (이미지·문구·버튼만 쓰는 메시지 전용)' : undefined}
-                          >
-                            <span className="block font-bold">{isApp ? (APP_TEMPLATE_LABELS[tpl] || TEMPLATE_LABELS[tpl]) : (pick?.label || TEMPLATE_LABELS[tpl])}</span>
-                            {pick && <span className="block text-[9px] text-white/45 mt-0.5">{blockedPoster ? '블록 메시지 사용 불가' : pick.hint}</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {isApp && editing.template !== 'full_image' && (
-                      <div className="text-[10px] text-white/40 mt-1.5">기본형 = 이미지·문구·버튼 카드. 위치를 중앙 모달/바텀 시트로 나눕니다. 포스터형 = 전면 이미지 1장.</div>
-                    )}
-                    {editing.template === 'full_image' && (
-                      <div className="text-[10px] text-white/40 mt-1.5">
-                        포스터형 = 이미지가 카드 전체입니다. 이미지 1장 필수, 버튼은 1개만 표시되고 바닥은 흰색 고정, 제목·본문은 이미지 위에 얹힙니다(선택).
-                        {isApp && ' 앱은 통합 계약(포스터 렌더)을 구현한 빌드에서 전면 이미지로 표시되며, 이전 빌드는 바텀 시트로 안전 표시됩니다.'}
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
 
             {/* 탭 디자인: 형태(디자인) + 색상 + 강조색 (블록 모드) */}
             <div className={activeTab === 'design' && hasBlocks ? '' : 'hidden'}>
@@ -2715,8 +3148,54 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
+            {/* ★ 2026-09-29 색상 — 옛 타겟·시점 탭에서 디자인 탭으로(발행 확인 창에는 표시 조건만). 블록 메시지는 테마가 색을 정한다 */}
+            {!hasBlocks && (
+              <div className={activeTab === 'design' ? '' : 'hidden'}>
+                <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                  <Layers className="w-3 h-3" /> 색상
+                </h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-white/50 block mb-1">배경색</label>
+                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(String(editing.background_color || '')) ? String(editing.background_color) : '#4f46e5'} onChange={(e) => updateField('background_color', e.target.value)} className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-white/50 block mb-1">글자색</label>
+                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(String(editing.text_color || '')) ? String(editing.text_color) : '#ffffff'} onChange={(e) => updateField('text_color', e.target.value)} className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer" />
+                  </div>
+                </div>
+              </div>
+            )}
+    </div>
+  );
+
+  const defectNow = drawerOpen ? publishDefectOf(buildPayload(editing)) : null;
+  const drawer = drawerOpen ? (
+    <div className="fixed inset-0 z-[60]" role="dialog" aria-label={isLive ? '타겟 · 시점' : '발행 전 확인'}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} />
+      <div className="absolute right-0 top-0 h-full w-full max-w-[540px] bg-slate-900 border-l border-white/10 shadow-2xl flex flex-col">
+        <div className="h-16 px-5 flex items-center justify-between border-b border-white/10 shrink-0">
+          <b className="text-[16px] text-white">{isLive ? '타겟 · 시점' : wasPublished ? '다시 게시 전 확인' : '발행 전 확인'}</b>
+          <button type="button" onClick={() => setDrawerOpen(false)} className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto mk-scroll px-5 py-4 space-y-5">
+          <div className={`rounded-xl border px-3.5 py-3 text-[12.5px] ${defectNow ? 'border-amber-400/30 bg-amber-500/10 text-amber-100' : 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'}`}>
+            <b className="block mb-0.5">점검</b>
+            {defectNow ? defectNow.message : posterMode ? `장 ${slides.length}개 모두 사진 있음 · 혜택 칸 채움` : '제목 · 본문 · 혜택 칸 확인됨'}
+            {defectNow && <span className="block text-[11.5px] opacity-80 mt-1">빈 사진이나 채우지 않은 혜택 칸이 있으면 발행하지 않고 그 장으로 데려갑니다.</span>}
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-3 text-[12.5px] text-white/75">
+            <b className="block text-white mb-0.5">아래쪽 버튼</b>
+            {editing.design?.dismiss_mode === 'snooze_day'
+              ? '오늘 하루 보지 않기 · 닫기: 누른 고객에게는 24시간 동안 뜨지 않습니다.'
+              : '다시 보지 않기 · 닫기: 다시 보지 않기를 누른 고객에게는 더 뜨지 않습니다.'}
+            {isApp && editing.design?.dismiss_mode === 'snooze_day' && ' 앱은 업데이트된 앱에서만 「오늘 하루 보지 않기」가 보이고, 이전 앱은 「다시 보지 않기 · 닫기」로 나옵니다.'}
+          </div>
+          {appLocked && (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3.5 py-3 text-[12.5px] text-amber-100">이 모양은 앱 업데이트 뒤에 보입니다. 이전 앱에서는 같은 내용이 포스터 모양으로 보입니다.</div>
+          )}
             {/* 탭 타겟·시점: 세그먼트 */}
-            <div className={activeTab === 'target' ? '' : 'hidden'}>
+            <div className="">
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Target className="w-3 h-3" /> 타겟 세그먼트
               </h4>
@@ -2759,7 +3238,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             </div>
 
             {/* AI 정밀 타겟 (표시 대상) — 자연어 추출 filter를 표시 대상으로 (단 1 오차 없는 타겟) */}
-            <div className={activeTab === 'target' ? 'mt-3' : 'hidden'}>
+            <div className="mt-3">
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Sparkles className="w-3 h-3" /> AI 정밀 타겟 (표시 대상)
               </h4>
@@ -2788,8 +3267,9 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             />
 
             {/* 탭 타겟·시점: 개인화 · 트리거 · 시간 · 색상 */}
-            <div className={activeTab === 'target' ? 'space-y-5' : 'hidden'}>
-            {/* 개인화 변수 */}
+            <div className="space-y-5">
+            {/* 개인화 변수 — 기본 알림만(포스터 계열은 칸마다 「넣을 수 있는 값」) */}
+            {!posterMode && (
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Wand2 className="w-3 h-3" /> 개인화 변수 (본문 안 활용)
@@ -2811,6 +3291,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 ))}
               </div>
             </div>
+            )}
 
             {/* 트리거 조건 */}
             <div>
@@ -3041,155 +3522,60 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 색상 + 상태 — ★ 2026-07-18 정정: 웹 기존 노출 원복. 포스터형만 배경 흰 고정이라 색 입력 숨김.
-                블록 모드는 테마가 색 결정 → 상태만 */}
-            <div>
-              {(() => {
-                const showColors = !hasBlocks && editing.template !== 'full_image';
-                return (
-                  <>
-                    <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                      <Layers className="w-3 h-3" /> {showColors ? '색상 + 상태' : '상태'}
-                    </h4>
-                    <div className={`grid ${showColors ? 'grid-cols-3' : 'grid-cols-1'} gap-2`}>
-                      {showColors && (
-                        <div>
-                          <label className="text-[10px] text-white/50 block mb-1">배경색</label>
-                          <input
-                            type="color"
-                            value={editing.background_color || '#4f46e5'}
-                            onChange={(e) => updateField('background_color', e.target.value)}
-                            className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
-                          />
-                        </div>
-                      )}
-                      {showColors && (
-                        <div>
-                          <label className="text-[10px] text-white/50 block mb-1">글자색</label>
-                          <input
-                            type="color"
-                            value={editing.text_color || '#ffffff'}
-                            onChange={(e) => updateField('text_color', e.target.value)}
-                            className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <label className="text-[10px] text-white/50 block mb-1">상태</label>
-                        <select
-                          value={editing.status || 'active'}
-                          onChange={(e) => updateField('status', e.target.value as Status)}
-                          className="w-full h-9 px-2 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
-                        >
-                          <option value="active">활성</option>
-                          <option value="paused">일시 중지</option>
-                        </select>
-                      </div>
-                    </div>
-                    {hasBlocks && <div className="text-[10px] text-white/40 mt-1.5">색상은 디자인 탭의 테마·강조색으로 정해집니다.</div>}
-                    {!hasBlocks && !showColors && <div className="text-[10px] text-white/40 mt-1.5">포스터형은 바닥이 흰색 고정. 색은 버튼(브랜드 컬러)으로만 줍니다.</div>}
-                  </>
-                );
-              })()}
             </div>
-            </div>
-          </div>
-
-          {/* 우측 — 실시간 미리보기 */}
-          <div className="bg-slate-950/40 p-6 space-y-3 sticky top-[76px] h-fit max-h-[80vh] overflow-y-auto">
-            <h4 className="text-xs font-bold text-white/80 mb-1 flex items-center gap-1.5">
-              <Eye className="w-3 h-3" /> 실시간 미리보기
-            </h4>
-            {editing.channel === 'app' && (
-              <div className="bg-sky-500/10 border border-sky-400/30 rounded-lg px-3 py-2 text-[11px] text-sky-200 flex items-start gap-1.5">
-                <Smartphone className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                <span>아래 미리보기 = <strong>앱 실렌더와 동일 요소</strong>(이미지·배지·제목·본문·버튼)만 표시. 만든 그대로 앱에 뜹니다. (앱 SDK 연동 필요)</span>
-              </div>
-            )}
-            <div className="flex gap-1 flex-wrap">
-              {previewPeople.map((p, i) => (
-                <button
-                  key={`${p.label}-${i}`}
-                  onClick={() => setPreviewIdx(i)}
-                  className={`flex-1 px-2 py-1.5 text-xs rounded ${
-                    previewIdx === i
-                      ? p.label === '타겟'
-                        ? 'bg-emerald-500/30 border border-emerald-400/40 text-white'
-                        : 'bg-violet-500/30 border border-violet-400/40 text-white'
-                      : 'bg-slate-900/60 border border-white/10 text-white/50'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            <div className="text-[10px] text-white/40">
-              {samplePerson ? (
-                <>
-                  샘플: {String(sampleCustomer.name || '고객')} · {String(sampleCustomer.grade || '-')} · {Number(sampleCustomer.points || 0).toLocaleString()}P
-                  {samplePerson.is_sample
-                    ? <span className="text-amber-300/80"> · 가상 예시. 고객 DB에 데이터가 쌓이면 실제 고객으로 바뀝니다</span>
-                    : <span className="text-emerald-300/70"> · 실제 고객 DB{samplePerson.label === '타겟' ? ' (타겟 조건 최상단 고객)' : ''}</span>}
-                </>
-              ) : (
-                '실제 고객 샘플 불러오는 중...'
-              )}
-            </div>
-
-            {isApp ? (
-              // ★ 2026-07-16 범용 보장 계약 — 앱 채널 미리보기 = 앱 실렌더(바텀시트/중앙 모달) 1:1 미러
-              <AppInAppPreview
-                template={(editing.template || 'bottom_banner') as string}
-                title={renderedTitle}
-                body={renderedBody}
-                imageUrl={editing.image_url}
-                badge={editing.badge_text}
-                buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
-                backgroundColor={editing.background_color || '#4f46e5'}
-                textColor={editing.text_color || '#ffffff'}
-                design={editing.design}
-                posterSlides={assemblePosterSlides(editing)}
-                replaceVars={(t) => replaceVars(t, sampleCustomer)}
-              />
-            ) : (
-            <InAppMessagePreview
-              template={(editing.template || 'top_banner') as string}
-              title={renderedTitle}
-              body={renderedBody}
-              imageUrl={editing.image_url}
-              badge={editing.badge_text}
-              buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
-              backgroundColor={editing.background_color || '#4f46e5'}
-              textColor={editing.text_color || '#ffffff'}
-              blocks={hasBlocks ? blocks : undefined}
-              theme={editing.theme}
-              accentColor={editing.accent_color}
-              cardStyle={editing.card_style}
-              design={editing.design}
-              posterSlides={assemblePosterSlides(editing)}
-              replaceVars={(t) => replaceVars(t, sampleCustomer)}
-            />
-            )}
-          </div>
         </div>
-
-        {/* 푸터 */}
-        <div className="sticky bottom-0 bg-slate-900/60 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
-          {canTestSave && (
-            <button
-              onClick={() => setCaptureOpen(true)}
-              className="mr-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm text-violet-200 hover:bg-violet-500/10 border border-violet-400/25 rounded-lg"
-              title="영업 담당자에게 보낼 웹·앱 실물 이미지를 저장합니다 (발송 아님)"
-            >
-              <Download className="w-4 h-4" /> 테스트저장
+        <div className="px-5 py-4 border-t border-white/10 flex gap-2 shrink-0">
+          <button type="button" onClick={() => setDrawerOpen(false)} className="flex-1 h-11 rounded-xl border border-white/15 text-[14px] font-semibold text-white/80 hover:bg-white/5">{isLive ? '닫기' : '계속 편집'}</button>
+          {!isLive && (
+            <button type="button" onClick={confirmPublish} disabled={publishing || !!defectNow}
+              className="flex-[1.4] h-11 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-[14px] font-bold disabled:opacity-40 inline-flex items-center justify-center gap-2">
+              {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}{wasPublished ? '다시 게시' : '지금 발행'}
             </button>
           )}
-          <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
-          <button onClick={onSave} className="px-5 py-2 bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white text-sm font-bold rounded-lg">
-            저장
-          </button>
         </div>
+        {isLive && <p className="px-5 pb-4 -mt-2 text-[11.5px] text-white/45">바꾼 표시 조건은 오른쪽 위 [반영]으로 적용됩니다.</p>}
+        <p className="px-5 pb-3 text-[10px] text-white/30 italic">Data source: 게시 조건은 서버가 저장된 메시지로 다시 확인합니다 · 첫 게시만 크레딧이 듭니다</p>
       </div>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto lg:overflow-hidden">
+        <EditShell
+          title={docTitle}
+          onTitle={onTitleEdit}
+          save={saveInfo}
+          channel="dm"
+          channelSwitch={channelSwitch}
+          onBack={() => { void leave(); }}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={pastRef.current.length > 0 || !!burstBaseRef.current}
+          canRedo={futureRef.current.length > 0}
+          onSend={() => {
+            if (publishing) return;
+            if (isLive) { void applyLive(); return; }
+            if (checkPublish()) setDrawerOpen(true);
+          }}
+          sendLabel={publishing ? '처리 중' : sendLabel}
+          extraHeader={extraHeader}
+          banner={banner}
+          left={left}
+          center={center}
+          right={right}
+        />
+      </div>
+      {drawer}
+      <CreditConfirmModal
+        open={creditOpen}
+        source="inapp-publish"
+        onConfirm={() => { setCreditOpen(false); void doPublish(); }}
+        onCancel={() => setCreditOpen(false)}
+      />
+      <ImageSourceMenu open={imgMenu} onClose={() => setImgMenu(false)} images={images} />
+      {images.node}
+      <ConfirmModal state={editorConfirm} onClose={() => setEditorConfirm(null)} />
       {/* ★ 2026-07-22 테스트저장 — 웹·앱 실물을 실제 크기로 렌더해 PNG 저장(영업용, 발송 아님). 백드롭 클릭 닫힘 없음(작업 손실 방지). */}
       {captureOpen && (
         <div className="fixed inset-0 z-[2000] flex items-start justify-center bg-black/75 backdrop-blur-sm px-4 py-8 overflow-y-auto">
@@ -3211,20 +3597,20 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 </div>
                 <div ref={webShotRef} style={{ background: '#0f172a', padding: 16, borderRadius: 12 }}>
                   <InAppMessagePreview
-                    template={(editing.template || 'top_banner') as string}
-                    title={renderedTitle}
-                    body={renderedBody}
-                    imageUrl={editing.image_url}
-                    badge={editing.badge_text}
-                    buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
+                    template={(viewMsg.template || 'top_banner') as string}
+                    title={replaceVars(viewMsg.title || '', sampleCustomer)}
+                    body={replaceVars(viewMsg.body || '', sampleCustomer)}
+                    imageUrl={viewMsg.image_url}
+                    badge={viewMsg.badge_text}
+                    buttons={(viewMsg.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
                     backgroundColor={editing.background_color || '#4f46e5'}
                     textColor={editing.text_color || '#ffffff'}
                     blocks={hasBlocks ? blocks : undefined}
                     theme={editing.theme}
                     accentColor={editing.accent_color}
                     cardStyle={editing.card_style}
-                    design={editing.design}
-                    posterSlides={assemblePosterSlides(editing)}
+                    design={viewMsg.design}
+                    posterSlides={assemblePosterSlides(viewMsg)}
                     replaceVars={(t) => replaceVars(t, sampleCustomer)}
                     captureMode
                   />
@@ -3239,16 +3625,16 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 </div>
                 <div ref={appShotRef} style={{ background: '#0f172a', padding: 16, borderRadius: 12 }}>
                   <AppInAppPreview
-                    template={(editing.template || 'bottom_banner') as string}
-                    title={renderedTitle}
-                    body={renderedBody}
-                    imageUrl={editing.image_url}
-                    badge={editing.badge_text}
-                    buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
+                    template={(viewMsg.template || 'bottom_banner') as string}
+                    title={replaceVars(viewMsg.title || '', sampleCustomer)}
+                    body={replaceVars(viewMsg.body || '', sampleCustomer)}
+                    imageUrl={viewMsg.image_url}
+                    badge={viewMsg.badge_text}
+                    buttons={(viewMsg.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
                     backgroundColor={editing.background_color || '#4f46e5'}
                     textColor={editing.text_color || '#ffffff'}
-                    design={editing.design}
-                    posterSlides={assemblePosterSlides(editing)}
+                    design={viewMsg.design}
+                    posterSlides={assemblePosterSlides(viewMsg)}
                     replaceVars={(t) => replaceVars(t, sampleCustomer)}
                     captureMode
                   />
@@ -3323,11 +3709,9 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
           pickToast.success('라이브러리 소재를 이미지로 넣었습니다.');
         }}
       />
-      {/* ★ 2026-07-14 디자인 3.0 — 골든 템플릿 덮어쓰기 확인 (기존 블록 있을 때만) */}
-      <ConfirmModal state={goldenConfirm} onClose={() => setGoldenConfirm(null)} />
       {/* ★ 2026-07-17 앱(네이티브) 통합 계약 — CDP 설정 앱 탭과 동일 단일 소스 */}
       <AppInAppContractModal open={showAppContract} onClose={() => setShowAppContract(false)} />
-    </div>
+    </>
   );
 }
 
@@ -3797,105 +4181,11 @@ function SortableInAppBlock({
   );
 }
 
-/** ★ 2026-07-21 편집 상태 → poster_slides 조립 (저장·라이브 미리보기 공용 — 인라인 중복 금지).
- *  full_image만: 첫 장=상단 콘텐츠(이미지·제목·본문·buttons[0]·design 포스터색), 추가=extra_slides.
- *  반환: undefined(full_image 아님) / [](단일 포스터) / [slide0, ...extra](2장+ 캐러셀). 이미지 없는 추가 슬라이드 제외. */
-function assemblePosterSlides(editing: Partial<MessageRow>): any[] | undefined {
-  if (editing.template !== 'full_image') return undefined;
-  const rawExtra = editing.extra_slides ?? (Array.isArray(editing.poster_slides) ? editing.poster_slides.slice(1) : []);
-  const extra = (Array.isArray(rawExtra) ? rawExtra : []).filter((s: any) => s && String(s.image_url || '').trim());
-  if (extra.length === 0) return [];
-  const b0: any = editing.buttons && editing.buttons[0];
-  const d: any = editing.design || {};
-  return [
-    {
-      image_url: editing.image_url,
-      title: editing.title,
-      body: editing.body,
-      ...(b0 ? { cta: { label: b0.label, action_url: b0.action_url, ...(b0.background_color ? { background_color: b0.background_color } : {}), ...(b0.text_color ? { text_color: b0.text_color } : {}) } } : {}),
-      // ★ 2026-07-31 이미지 클릭 링크 — 첫 장은 메시지 수준 값에서 합성(단일·캐러셀 동작 일치)
-      ...(editing.image_link_url ? { link_url: editing.image_link_url } : {}),
-      ...(d.poster_title_color ? { title_color: d.poster_title_color } : {}),
-      ...(d.poster_body_color ? { body_color: d.poster_body_color } : {}),
-      ...(d.poster_title_size ? { title_size: d.poster_title_size } : {}),
-      ...(d.poster_body_size ? { body_size: d.poster_body_size } : {}),
-    },
-    ...extra,
-  ];
-}
-
-// ★ 2026-07-21 포스터 캐러셀 — "추가 슬라이드"(2번째~) 편집기. 위 이미지·문구=첫 장(비파괴), 여기서 장을 늘려 좌우 스와이프.
-//   각 장 = 자기 이미지(필수) + 오버레이 제목/본문(선택) + CTA 1개(선택). 총 5장(첫 장 + 추가 4).
-function PosterSlidesEditor({ slides, onChange, uploadImage }: { slides: any[]; onChange: (s: any[]) => void; uploadImage: (file: File) => Promise<string | null> }) {
-  const [busy, setBusy] = useState<number | null>(null);
-  const MAX_EXTRA = 4;
-  const list = Array.isArray(slides) ? slides : [];
-  const update = (i: number, patch: any) => onChange(list.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
-  const updateCta = (i: number, patch: any) => onChange(list.map((s, idx) => (idx === i ? { ...s, cta: { ...(s.cta || {}), ...patch } } : s)));
-  const remove = (i: number) => onChange(list.filter((_, idx) => idx !== i));
-  const move = (i: number, dir: -1 | 1) => {
-    const j = i + dir;
-    if (j < 0 || j >= list.length) return;
-    const next = list.slice();
-    [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
-  };
-  const add = () => { if (list.length >= MAX_EXTRA) return; onChange([...list, { image_url: '', title: '', body: '', cta: { label: '', action_url: '' } }]); };
-  const onFile = async (i: number, file: File) => {
-    setBusy(i);
-    try { const url = await uploadImage(file); if (url) update(i, { image_url: url }); }
-    finally { setBusy(null); }
-  };
-  return (
-    <div className="mt-3 border-t border-white/10 pt-3">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[11px] font-bold text-white/70 flex items-center gap-1.5"><Layers className="w-3 h-3" /> 추가 슬라이드 (좌우 스와이프)</span>
-        <span className="text-[10px] text-white/35">{list.length > 0 ? `총 ${list.length + 1}장` : '단일 포스터'}</span>
-      </div>
-      <p className="text-[10px] text-white/40 mb-2">위 이미지·문구가 <strong className="text-white/60">첫 장</strong>입니다. 장을 추가하면 좌우로 넘겨보는 카드가 됩니다. 각 장은 자기 이미지·문구·버튼을 가집니다.</p>
-      {list.map((s, i) => (
-        <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 mb-2">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-white/70">{i + 2}번째 장</span>
-            <div className="flex items-center gap-1">
-              {/* ★ 2026-07-21 업로드 중(busy)엔 순서·삭제 잠금 — in-flight 업로드가 stale 인덱스로 덮어쓰는 race 차단(Codex ③) */}
-              <button onClick={() => move(i, -1)} disabled={i === 0 || busy !== null} className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed" title="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
-              <button onClick={() => move(i, 1)} disabled={i === list.length - 1 || busy !== null} className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed" title="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
-              <button onClick={() => remove(i)} disabled={busy !== null} className="p-1 rounded text-rose-300/70 hover:text-rose-200 hover:bg-rose-500/10 disabled:opacity-30 disabled:cursor-not-allowed" title="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <label className="shrink-0 w-20 h-24 rounded-lg border border-dashed border-white/15 bg-slate-900/60 flex items-center justify-center overflow-hidden cursor-pointer hover:border-violet-400/50 transition-colors">
-              {s.image_url ? (
-                <img src={s.image_url} alt="" className="w-full h-full object-cover" />
-              ) : busy === i ? (
-                <Loader2 className="w-4 h-4 text-white/40 animate-spin" />
-              ) : (
-                <span className="text-[10px] text-white/40 text-center leading-tight px-1">이미지<br />업로드</span>
-              )}
-              <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f && busy === null) onFile(i, f); }} />
-            </label>
-            <div className="flex-1 min-w-0 space-y-1.5">
-              {/* ★ 2026-07-21 업로드 중(busy)엔 문안 입력도 잠금 — 업로드 완료 콜백이 stale 배열로 덮는 race 완전 차단(Codex 2R ③) */}
-              <input type="text" value={s.title || ''} disabled={busy !== null} onChange={(e) => update(i, { title: e.target.value })} placeholder="제목 (이미지 위, 선택)" className="w-full px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" maxLength={100} />
-              <input type="text" value={s.body || ''} disabled={busy !== null} onChange={(e) => update(i, { body: e.target.value })} placeholder="짧은 문구 (선택)" className="w-full px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" maxLength={300} />
-              <div className="flex gap-1.5">
-                <input type="text" value={s.cta?.label || ''} disabled={busy !== null} onChange={(e) => updateCta(i, { label: e.target.value })} placeholder="버튼 문구" className="w-1/3 min-w-0 px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" maxLength={30} />
-                <input type="text" value={s.cta?.action_url || ''} disabled={busy !== null} onChange={(e) => updateCta(i, { action_url: e.target.value })} placeholder="이동 링크 (https://…)" className="flex-1 min-w-0 px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" />
-              </div>
-              {/* ★ 2026-07-31 이미지 클릭 랜딩 — 슬라이드 이미지 자체 클릭 시 이동(버튼과 별개·선택) */}
-              <input type="text" value={s.link_url || ''} disabled={busy !== null} onChange={(e) => update(i, { link_url: e.target.value })} placeholder="이미지 클릭 링크 (선택, https://…)" className="w-full px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" />
-            </div>
-          </div>
-        </div>
-      ))}
-      {list.length < MAX_EXTRA && (
-        <button onClick={add} disabled={busy !== null} className="w-full text-xs text-violet-100 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 hover:from-violet-500/40 hover:to-fuchsia-500/40 border border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-          <Plus className="w-3.5 h-3.5" /> 슬라이드 추가 (최대 {MAX_EXTRA + 1}장)
-        </button>
-      )}
-    </div>
-  );
+/** ★ 2026-07-21 → ★ 2026-09-29 미리보기용 poster_slides — 포스터(full_image)만. 편집기는 장 작업본을 messagePatchFromSlides 로
+ *  합성한 값(viewMsg.poster_slides)을 넘기고, 목록 미리보기는 저장된 값을 넘긴다. 반환: undefined(포스터 아님) / 장 배열. */
+function assemblePosterSlides(m: Partial<MessageRow>): any[] | undefined {
+  if (m.template !== 'full_image') return undefined;
+  return Array.isArray(m.poster_slides) ? m.poster_slides : [];
 }
 
 // ★ 2026-07-17 template — SDK 실렌더가 템플릿 미허용 블록을 건너뛰므로(isBlockAllowed) 추가 메뉴 필터 + 기존 블록 경고에 사용

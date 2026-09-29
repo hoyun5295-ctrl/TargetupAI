@@ -14,7 +14,7 @@
  *   - status='active' + start_at/end_at 윈도우 + 트리거 이벤트 매칭만 반환
  */
 
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
 // ★ D215+ (2026-05-25) 통합 영역 — CT-78 (segment) + CT-80 (variant) + CT-82 (trigger window)
 import { customerMatchesSegment, customerMatchesFilter, isEmptySegment, normalizeSegmentConditions } from './inapp-segment-matcher';
 import { selectVariantForCustomer } from './inapp-variant-optimizer';
@@ -91,6 +91,9 @@ export interface CreateInAppMessageInput {
   //   캐러셀 첫 장(slide0)의 link_url도 이 값에서 합성(프론트 assemblePosterSlides) — 단일·캐러셀 동작 일치.
   imageLinkUrl?: string | null;
   image_link_url?: string | null;
+  /** ★ 2026-09-29 인앱 만들기 개편(설계서 §1-4) — 편집기 초안 저장 표시. status='paused' 와 함께 올 때만 초안으로 본다
+   *  (빈 제목 · 혜택 placeholder · 사진 없는 장을 받아 둔다). 그 밖 저장(플래너 제작 · 옛 경로)은 지금처럼 엄격. */
+  draft?: boolean;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -117,6 +120,10 @@ export const BENEFIT_PLACEHOLDER = '[혜택 안내: 직접 작성해주세요]';
 export const INAPP_DESIGN_TREATMENTS = ['classic', 'framed', 'typographic', 'spotlight'] as const;
 export const INAPP_DESIGN_MOTIONS = ['rich', 'none'] as const;
 export const INAPP_DESIGN_DIMS = ['soft', 'standard', 'deep'] as const;
+// ★ 2026-09-29 인앱 만들기 개편 — 포스터 계열 레이아웃(설계서 §1-1) · 닫기 방식(§1-3). 미지정 = 지금 포스터 · 지금 닫기(회귀 0).
+//   SDK inapp.ts POSTER_LAYOUTS · 프론트 InAppMessagePreview · 앱 계약서와 같은 값.
+export const INAPP_POSTER_LAYOUTS = ['overlay', 'event_card', 'banner_sheet'] as const;
+export const INAPP_DISMISS_MODES = ['snooze_day'] as const;
 
 // ★ 2026-07-19 포스터 색 hex = 3/4/6/8자리만 (5·7자리는 RN 색 파서가 거부 — Codex 지적. CSS·RN 공통 유효 길이).
 //   design(제목/본문 색) + poster_slides(슬라이드별 색·CTA 색) 공용 단일 기준.
@@ -157,6 +164,8 @@ export function sanitizeInAppDesign(raw: any): Record<string, any> | null {
   if (Number.isFinite(posterBodySize) && posterBodySize >= 10 && posterBodySize <= 22) {
     out.poster_body_size = Math.round(posterBodySize);
   }
+  if ((INAPP_POSTER_LAYOUTS as readonly string[]).includes(String(raw.poster_layout))) out.poster_layout = String(raw.poster_layout);
+  if ((INAPP_DISMISS_MODES as readonly string[]).includes(String(raw.dismiss_mode))) out.dismiss_mode = String(raw.dismiss_mode);
   if (raw.backdrop && typeof raw.backdrop === 'object' && !Array.isArray(raw.backdrop)) {
     const bd: Record<string, any> = {};
     if ((INAPP_DESIGN_DIMS as readonly string[]).includes(String(raw.backdrop.dim))) bd.dim = String(raw.backdrop.dim);
@@ -342,6 +351,14 @@ export interface PosterSlide {
   body_color?: string;
   title_size?: number;
   body_size?: number;
+  /** ★ 2026-09-29 인앱 만들기 개편(설계서 §1-2) — 작은 라벨 · 배너 탭 칩 */
+  eyebrow?: string;
+  /** 배너 윗줄(banner_sheet) */
+  subtitle?: string;
+  /** 글 칸 바탕(event_card) · 면 색(banner_sheet) · hex만 */
+  bg_color?: string;
+  /** 사진 맞춤 — 미지정 = 레이아웃 기본(event_card cover · banner_sheet contain) */
+  image_fit?: 'cover' | 'contain';
 }
 
 function posterHexOrUndef(v: any): string | undefined {
@@ -356,14 +373,17 @@ function posterSizeOrUndef(v: any, min: number, max: number): number | undefined
  * 포스터 캐러셀 슬라이드 정규화 (순수). image_url 필수(없으면 슬라이드 제거)·최대 5장.
  * CTA action_url은 sanitizeActionUrl 무해화(위험 스킴 null·placeholder 보존), 색은 POSTER_HEX(3/4/6/8자리)만,
  * 크기는 제목 14~32·본문 10~22 clamp. SDK renderPoster·편집 미리보기와 동일 폴백 기준.
+ * ★ 2026-09-29 인앱 만들기 개편 — allowEmptyImage = 사진을 아직 안 넣은 장도 자리를 지킨다(빈 image_url 로 보관).
+ *   저장 CT(create · update)는 늘 true 로 부른다(Codex 1R: 엄격 저장이 사진 없는 장을 조용히 버리면 게시 판정을 비껴가고
+ *   이미 저장한 장의 문안이 사라진다). 게시로 넘어가는 행은 inAppPublishDefect 가 장마다 사진을 요구해 거절한다.
  */
-export function sanitizePosterSlides(raw: any): PosterSlide[] {
+export function sanitizePosterSlides(raw: any, opts?: { allowEmptyImage?: boolean }): PosterSlide[] {
   if (!Array.isArray(raw)) return [];
   const out: PosterSlide[] = [];
   for (const s of raw) {
     if (!s || typeof s !== 'object') continue;
     const imageUrl = String(s.image_url ?? s.imageUrl ?? '').trim();
-    if (!imageUrl) continue;  // 이미지 없는 슬라이드는 포스터 성립 X
+    if (!imageUrl && !opts?.allowEmptyImage) continue;  // 이미지 없는 슬라이드는 포스터 성립 X
     const slide: PosterSlide = { image_url: imageUrl };
     const title = String(s.title ?? '').trim();
     if (title) slide.title = title;
@@ -395,6 +415,10 @@ export function sanitizePosterSlides(raw: any): PosterSlide[] {
     const bc = posterHexOrUndef(s.body_color); if (bc) slide.body_color = bc;
     const ts = posterSizeOrUndef(s.title_size, 14, 32); if (ts) slide.title_size = ts;
     const bs = posterSizeOrUndef(s.body_size, 10, 22); if (bs) slide.body_size = bs;
+    const eyebrow = String(s.eyebrow ?? '').trim(); if (eyebrow) slide.eyebrow = eyebrow;
+    const subtitle = String(s.subtitle ?? '').trim(); if (subtitle) slide.subtitle = subtitle;
+    const bg = posterHexOrUndef(s.bg_color); if (bg) slide.bg_color = bg;
+    if (s.image_fit === 'cover' || s.image_fit === 'contain') slide.image_fit = s.image_fit;
     out.push(slide);
     if (out.length >= POSTER_SLIDE_MAX) break;
   }
@@ -407,6 +431,7 @@ export function posterSlidesHaveUneditedPlaceholder(slides: any[]): boolean {
   for (const s of slides) {
     if (!s || typeof s !== 'object') continue;
     if (textHasPlaceholder(s.title) || textHasPlaceholder(s.body)) return true;
+    if (textHasPlaceholder(s.eyebrow) || textHasPlaceholder(s.subtitle)) return true;
     if (s.cta && typeof s.cta === 'object' && textHasPlaceholder(s.cta.label)) return true;
   }
   return false;
@@ -446,8 +471,20 @@ export function composeFlatFromPosterSlides(
     body: first.body || (fallback.body ?? null),
     imageUrl: first.image_url,
     buttons,
-    badgeText: null,
+    badgeText: commonPosterEyebrow(slides),
   };
+}
+
+/**
+ * ★ 2026-09-29 배지 규칙(설계서 §1-2 · 회의론자 3) — 모든 장의 eyebrow 가 같으면 그 값, 하나라도 다르거나 비면 null.
+ *   badge_text 는 flat 소비자(옛 앱)가 전 장에 같은 배지로 읽는다 → 장마다 다른 라벨을 한 장의 값으로 퍼뜨리지 않는다.
+ *   null = 합성값 없음(입력 badge_text 가 있으면 그것 · update 는 기존값 유지). 편집기는 '' 를 명시해 비운다.
+ */
+export function commonPosterEyebrow(slides: PosterSlide[]): string | null {
+  if (!Array.isArray(slides) || slides.length === 0) return null;
+  const first = String(slides[0]?.eyebrow ?? '').trim();
+  if (!first) return null;
+  return slides.every((sl) => String(sl?.eyebrow ?? '').trim() === first) ? first : null;
 }
 
 /** 서빙 시 슬라이드 CTA action_url + 이미지 클릭 link_url 재정규화 (프로토콜 없는 도메인 → https 보정 — sanitizeButtonsActionUrls 미러, DB 무변경). */
@@ -523,6 +560,71 @@ export function blocksHaveUneditedPlaceholder(blocks: any[]): boolean {
 /** 에러 메시지 접두 — 라우트가 400 + BENEFIT_PLACEHOLDER_UNEDITED 코드로 매핑 */
 export const BENEFIT_PLACEHOLDER_ERROR = 'BENEFIT_PLACEHOLDER_UNEDITED';
 
+/** ★ 2026-09-29 게시 조건 미달 접두 — 라우트가 400 + INAPP_NOT_PUBLISHABLE(+ 장 번호)로 매핑 */
+export const INAPP_NOT_PUBLISHABLE_ERROR = 'INAPP_NOT_PUBLISHABLE';
+
+/** 게시 중 메시지에 초안 저장이 오면 거절(라우트 409) — 늦게 도착한 자동 저장이 게시(과금 완료)를 멈춤으로 되돌리지 않게. */
+export const INAPP_DRAFT_ON_LIVE_ERROR = 'INAPP_DRAFT_ON_LIVE';
+
+/** 편집기 초안 저장인가 — draft 표시 + 멈춤 상태가 함께 와야 한다(설계서 §1-4). */
+export function isInAppDraftSave(input: { draft?: any; status?: any }): boolean {
+  return input?.draft === true && input?.status === 'paused';
+}
+
+export interface InAppPublishDefect {
+  /** 사용자 노출 문구 */
+  message: string;
+  /** 편집기가 데려갈 자리 */
+  field: 'title' | 'body' | 'placeholder' | 'image' | 'slide_image';
+  /** 0부터 · slide_image 일 때 */
+  slide?: number;
+}
+
+/**
+ * ★ 2026-09-29 게시 조건 CT(설계서 §1-4) — 저장된 행(snake_case) 기준 판정. 순수. null = 게시 가능.
+ *   초안은 빈 제목 · placeholder · 사진 없는 장을 받아 두므로, active 로 넘어가는 모든 길목(생성 · 수정 · 플래너 실행)이
+ *   이 판정 하나를 거친다. 기준은 옛 편집기 저장 검사(제목·본문 · placeholder · 포스터 사진 · 장마다 사진)와 같다.
+ */
+export function inAppPublishDefect(row: Record<string, any>): InAppPublishDefect | null {
+  if (!row || typeof row !== 'object') return { message: '메시지를 찾을 수 없습니다.', field: 'title' };
+  const buttons = Array.isArray(row.buttons) ? row.buttons : [];
+  const slides = Array.isArray(row.poster_slides) ? row.poster_slides : [];
+  if (!String(row.title ?? '').trim()) return { message: '제목을 입력해 주세요.', field: 'title' };
+  // 장이 있는 포스터 계열은 본문이 선택이다(배너 = 큰 글 한 줄 · 이벤트 카드 = 제목만 가능 · SDK·앱은 빈 본문을 그리지 않는다).
+  const posterWithSlides = row.template === 'full_image' && slides.length > 0;
+  if (!posterWithSlides && !String(row.body ?? '').trim()) return { message: '본문을 입력해 주세요.', field: 'body' };
+  if (
+    textHasPlaceholder(row.title) || textHasPlaceholder(row.body) || textHasPlaceholder(row.badge_text)
+    || buttons.some((b: any) => b && typeof b === 'object' && textHasPlaceholder(b.label))
+    || blocksHaveUneditedPlaceholder(Array.isArray(row.content_blocks) ? row.content_blocks : [])
+    || posterSlidesHaveUneditedPlaceholder(slides)
+  ) {
+    return { message: '혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 게시해 주세요.', field: 'placeholder' };
+  }
+  if (row.template === 'full_image') {
+    const idx = slides.findIndex((sl: any) => !sl || typeof sl !== 'object' || !String(sl.image_url ?? '').trim());
+    if (idx >= 0) return { message: `${idx + 1}번째 장에 사진을 넣어 주세요.`, field: 'slide_image', slide: idx };
+    if (!String(row.image_url ?? '').trim()) return { message: '포스터 사진을 넣어 주세요.', field: 'image' };
+  }
+  return null;
+}
+
+/** 게시 조건 미달 → throw 문구(접두 + JSON). 라우트가 풀어서 400 으로 답한다. */
+export function inAppNotPublishableError(defect: InAppPublishDefect): Error {
+  return new Error(`${INAPP_NOT_PUBLISHABLE_ERROR}: ${JSON.stringify(defect)}`);
+}
+
+/** throw 문구 → 결함(라우트용). 접두가 아니면 null. */
+export function parseInAppNotPublishable(msg: string): InAppPublishDefect | null {
+  if (!msg || !msg.startsWith(`${INAPP_NOT_PUBLISHABLE_ERROR}: `)) return null;
+  try {
+    const d = JSON.parse(msg.slice(INAPP_NOT_PUBLISHABLE_ERROR.length + 2));
+    return d && typeof d.message === 'string' ? d : null;
+  } catch {
+    return null;
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════
 // 회사 admin — CRUD
 // ════════════════════════════════════════════════════════════════════
@@ -562,6 +664,7 @@ export function sanitizeAppMessageColors(m: any): void {
       if (!s || typeof s !== 'object') continue;
       if (s.title_color != null) s.title_color = solidColorForApp(s.title_color, '#ffffff');
       if (s.body_color != null) s.body_color = solidColorForApp(s.body_color, '#ffffff');
+      if (s.bg_color != null) s.bg_color = solidColorForApp(s.bg_color, '#ffffff');
       if (s.cta && typeof s.cta === 'object') {
         if (s.cta.text_color != null) s.cta.text_color = solidColorForApp(s.cta.text_color, '#ffffff');
         if (s.cta.background_color != null) s.cta.background_color = solidColorForApp(s.cta.background_color, '#f59e0b');
@@ -575,7 +678,9 @@ export async function createInAppMessage(
   createdBy: string,
   input: CreateInAppMessageInput
 ): Promise<InAppMessage> {
-  if (!input.title || !input.body) throw new Error('title과 body는 필수입니다.');
+  // ★ 2026-09-29 초안(편집기 자동 저장)은 빈 제목·본문을 받아 둔다 — 게시로 넘어갈 때 inAppPublishDefect 가 요구한다.
+  const draft = isInAppDraftSave(input);
+  if (!draft && (!input.title || !input.body)) throw new Error('title과 body는 필수입니다.');
   const validPositions: InAppPosition[] = ['top_banner', 'bottom_banner', 'center_modal'];
   const validFrequencies: InAppFrequency[] = ['once_per_session', 'once_per_day', 'always'];
 
@@ -590,12 +695,12 @@ export async function createInAppMessage(
 
   // ★ D230+ 블록 — 정규화 + 혜택 placeholder 미편집 차단 (AI 임의 혜택 영구 룰)
   const contentBlocks = template === 'full_image' ? [] : sanitizeContentBlocks(input.content_blocks);
-  if (blocksHaveUneditedPlaceholder(contentBlocks)) {
+  if (!draft && blocksHaveUneditedPlaceholder(contentBlocks)) {
     throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
   }
   // ★ 2026-07-21 포스터 캐러셀 — full_image 전용. 슬라이드 정규화 + 혜택 placeholder 차단.
-  const posterSlides = template === 'full_image' ? sanitizePosterSlides(input.poster_slides) : [];
-  if (posterSlidesHaveUneditedPlaceholder(posterSlides)) {
+  const posterSlides = template === 'full_image' ? sanitizePosterSlides(input.poster_slides, { allowEmptyImage: true }) : [];
+  if (!draft && posterSlidesHaveUneditedPlaceholder(posterSlides)) {
     throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
   }
   const hasSlides = posterSlides.length > 0;
@@ -619,6 +724,20 @@ export async function createInAppMessage(
   //   legacy 폴백이 잔존 링크를 되살리는 경로 차단(범용 보장 계약: composed가 flat을 소유).
   const blocksAreTruth = contentBlocks.length > 0 && !hasSlides;
   const imageLinkPatch = blocksAreTruth ? { set: true, value: null } : resolveImageLinkUrlPatch(input);
+  const finalStatus = draft ? 'paused' : (input.status || 'active');
+  const finalTitle = composed?.title || input.title || '';
+  const finalBody = composed?.body || input.body || '';
+  const finalButtons = sanitizeButtonsActionUrls(composed ? composed.buttons : (input.buttons || []));
+  const finalBadge = input.badge_text ?? composed?.badgeText ?? null;
+  const finalImage = composed ? composed.imageUrl : (input.image_url || null);
+  // ★ 2026-09-29 게시로 만드는 생성은 게시 조건 CT 를 거친다(초안 경로가 생겨 옛 편집기 검사만으로는 닫히지 않는다).
+  if (finalStatus === 'active') {
+    const defect = inAppPublishDefect({
+      title: finalTitle, body: finalBody, template, image_url: finalImage, buttons: finalButtons,
+      badge_text: finalBadge, content_blocks: contentBlocks, poster_slides: posterSlides,
+    });
+    if (defect) throw inAppNotPublishableError(defect);
+  }
 
   const result = await query(
     `INSERT INTO cdp_inapp_messages (
@@ -641,19 +760,19 @@ export async function createInAppMessage(
       NOW(), NOW()
     ) RETURNING *`,
     [
-      companyId, createdBy, composed?.title || input.title, composed?.body || input.body,
+      companyId, createdBy, finalTitle, finalBody,
       resolveActionUrlPatch(input).value, input.actionLabel || '자세히 보기',
       position, input.backgroundColor || '#4f46e5', input.textColor || '#ffffff',
       // ★ 2026-09-27 한줄로 V2 R247 — 트리거가 따로 안 오면 trigger_conditions.event(화면 저장 경로와 같은 규칙).
       //   옛: page_load로 고정돼 AI가 고른 트리거와 무관하게 모든 페이지 로드에 노출됐다(플래너 제작 경로).
       input.triggerEvent || (typeof (input.trigger_conditions as any)?.event === 'string' ? (input.trigger_conditions as any).event : '') || 'page_load', frequency,
       input.startAt || null, input.endAt || null,
-      input.status || 'active', channel,
-      template, composed ? composed.imageUrl : (input.image_url || null),
-      JSON.stringify(sanitizeButtonsActionUrls(composed ? composed.buttons : (input.buttons || []))), JSON.stringify(normalizeSegmentConditions(input.segment_conditions || {})), JSON.stringify(input.trigger_conditions || {}),
+      finalStatus, channel,
+      template, finalImage,
+      JSON.stringify(finalButtons), JSON.stringify(normalizeSegmentConditions(input.segment_conditions || {})), JSON.stringify(input.trigger_conditions || {}),
       JSON.stringify(input.personalization_vars || []), input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
       input.send_start_hour ?? null, input.send_end_hour ?? null, input.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6], input.animation || 'fade',
-      input.badge_text ?? composed?.badgeText ?? null,
+      finalBadge,
       JSON.stringify(contentBlocks), normalizeTheme(input.theme), input.accent_color ?? null,
       normalizeCardStyle(input.card_style),
       hasSlides ? JSON.stringify(posterSlides) : null,
@@ -720,6 +839,8 @@ export async function updateInAppMessage(
     );
     if (own.rows.length === 0) return null;
   }
+  // ★ 2026-09-29 초안(편집기 자동 저장 · 설계서 §1-4)은 placeholder·사진 없는 장을 받아 둔다. 그 밖은 지금처럼 엄격.
+  const draft = isInAppDraftSave(input);
   // ★ D230+ 블록 — 제공된 경우만 정규화 + 혜택 placeholder 차단
   let blocksParam: string | null = null;
   // ★ 2026-07-16 범용 보장 계약 — 블록이 제공되고 비어있지 않으면 blocks가 진실:
@@ -729,7 +850,7 @@ export async function updateInAppMessage(
   let composedFromSlides = false;
   if (input.content_blocks !== undefined) {
     const blocks = sanitizeContentBlocks(input.content_blocks);
-    if (blocksHaveUneditedPlaceholder(blocks)) {
+    if (!draft && blocksHaveUneditedPlaceholder(blocks)) {
       throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
     }
     blocksParam = JSON.stringify(blocks);
@@ -740,8 +861,8 @@ export async function updateInAppMessage(
   let posterSlidesParam: string | null = null;
   const posterSlidesProvided = input.poster_slides !== undefined;
   if (posterSlidesProvided) {
-    const slides = sanitizePosterSlides(input.poster_slides);
-    if (posterSlidesHaveUneditedPlaceholder(slides)) {
+    const slides = sanitizePosterSlides(input.poster_slides, { allowEmptyImage: true });
+    if (!draft && posterSlidesHaveUneditedPlaceholder(slides)) {
       throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
     }
     posterSlidesParam = slides.length > 0 ? JSON.stringify(slides) : null;
@@ -771,7 +892,23 @@ export async function updateInAppMessage(
   // ★ 2026-07-31 image_link_url도 항상 참조(CASE $40/$41) → 동일 선확인. design은 $42로 이동.
   await ensureImageLinkUrlColumnOrThrow();
   const imageLinkPatch = resolveImageLinkUrlPatch(input);
-  const result = await query(
+  // ★ 2026-09-29 게시 조건은 **결과 행**으로 판정한다(설계서 §1-4). 부분 PUT 은 빠진 칸을 기존 값으로 채우므로
+  //   요청만 봐서는 게시 가능 여부를 알 수 없다 → 한 트랜잭션 안에서 UPDATE … RETURNING 한 행이 active 인데
+  //   게시 조건 CT(inAppPublishDefect)를 못 넘으면 되돌리고 throw(라우트 400). 초안 저장은 멈춤이라 판정 대상이 아니다.
+  //   게시 중 메시지의 내용 수정(상태 생략)도 같은 판정을 거친다 — 게시 중인 메시지가 조건 미달로 바뀌는 길이 없다.
+  const client = await pool.connect();
+  let result: any;
+  try {
+    await client.query('BEGIN');
+    // ★ 2026-09-29 초안 저장은 게시 중이 아닌 행에만 — 행을 잠그고 확인한다(게시 PUT 과 순서가 바뀌어 도착해도 게시가 이긴다).
+    if (draft) {
+      const cur = await client.query(
+        `SELECT status FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+        [messageId, companyId],
+      );
+      if (cur.rows[0]?.status === 'active') throw new Error(INAPP_DRAFT_ON_LIVE_ERROR);
+    }
+    result = await client.query(
     `UPDATE cdp_inapp_messages SET
       ${designProvided ? 'design = $42::jsonb,' : ''}
       title = COALESCE($3, title),
@@ -810,7 +947,12 @@ export async function updateInAppMessage(
       accent_color = COALESCE($30, accent_color),
       card_style = COALESCE($31, card_style),
       -- ★ 2026-07-21 포스터 캐러셀 슬라이드 — presence flag(제공 시 교체/비우기, 미제공 시 유지). full_image 아닌 메시지엔 무해(미판독).
-      poster_slides = CASE WHEN $38::boolean THEN $39::jsonb ELSE poster_slides END,
+      -- ★ 2026-09-29 남은 슬라이드 게이트(설계서 §1-5) — 최종 형태가 포스터가 아니면 비운다(판정식은 content_blocks 와 같은 반복).
+      poster_slides = CASE
+        WHEN COALESCE($15, template) IS DISTINCT FROM 'full_image' THEN NULL
+        WHEN $38::boolean THEN $39::jsonb
+        ELSE poster_slides
+      END,
       -- ★ 2026-07-31 이미지 클릭 랜딩 — presence flag(제공 시 교체/비우기, 미제공 시 유지).
       -- ★ (Codex 2R) 최종 블록이 비어있지 않은 메시지(블록이 진실)는 무조건 비움 — 부분 PUT로 블록만 갱신해도
       --   flat 전용 잔존 링크가 legacy 폴백에서 되살아나지 않는다(content_blocks SET 판정식과 동일 반복).
@@ -855,8 +997,140 @@ export async function updateInAppMessage(
       imageLinkPatch.set, imageLinkPatch.value,
       ...(designProvided ? [designValue ? JSON.stringify(designValue) : null] : []),
     ]
-  );
+    );
+    const row = result.rows[0];
+    const defect = row && row.status === 'active' ? inAppPublishDefect(row) : null;
+    if (defect) throw inAppNotPublishableError(defect);
+    // ★ 2026-09-29 [반영] = A/B 변형에 모양 전파(설계서 §1-4 · 회의론자 8). 같은 트랜잭션 — 부모만 바뀌고 변형이 옛 모양으로 남는 틈이 없다.
+    if (row && !draft && !row.parent_message_id && (posterSlidesProvided || designProvided || input.template !== undefined)) {
+      await propagatePosterToVariants(client, row);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
   return result.rows.length > 0 ? mapRowToMessage(result.rows[0]) : null;
+}
+
+/**
+ * ★ 2026-09-29 인앱 만들기 개편 — 포스터 부모의 모양을 A/B 변형에 전파(설계서 §1-4 · 회의론자 8).
+ *   변형 생성(createVariant)과 같은 규칙: 부모 장 사본 + 첫 장 제목·본문만 변형 값 · flat 은 첫 장에서 합성(버튼 fallback 없음).
+ *   변형이 시험하는 것은 문안이다 → 부모에서 레이아웃·장·디자인을 바꿔도 변형만 옛 모양으로 남아 "디자인 세대 차이" 비교가 되지 않게 한다.
+ *   포스터가 아닌 부모는 건드리지 않는다(블록 변형은 지금처럼 생성 때 사본 · 범위 밖).
+ */
+export async function propagatePosterToVariants(
+  client: { query: (text: string, params?: any[]) => Promise<any> },
+  parent: Record<string, any>,
+): Promise<number> {
+  if (!parent || parent.template !== 'full_image') return 0;
+  const kids = await client.query(
+    // (Codex 2R 범위 밖 지적) 변형 문안을 잠그고 읽는다 — 동시에 변형을 고친 PUT 의 문안을 옛 값으로 덮지 않게
+    `SELECT id, title, body FROM cdp_inapp_messages
+      WHERE company_id = $1::uuid AND parent_message_id = $2::uuid AND status <> 'archived'
+      FOR UPDATE`,
+    [parent.company_id, parent.id],
+  );
+  const parentSlides: PosterSlide[] = Array.isArray(parent.poster_slides) ? parent.poster_slides : [];
+  let n = 0;
+  for (const k of kids.rows) {
+    const slides = parentSlides.length > 0
+      ? [{ ...parentSlides[0], title: k.title, body: k.body }, ...parentSlides.slice(1)]
+      : null;
+    const flat = slides
+      ? composeFlatFromPosterSlides(slides, { title: k.title, body: k.body, imageUrl: parent.image_url, buttons: [] })
+      : null;
+    const upd = await client.query(
+      `UPDATE cdp_inapp_messages SET
+         template = 'full_image',
+         content_blocks = '[]'::jsonb,
+         design = $3::jsonb,
+         poster_slides = $4::jsonb,
+         image_url = CASE WHEN $9::boolean OR COALESCE(image_url, '') = '' THEN $5 ELSE image_url END,
+         buttons = CASE WHEN $9::boolean THEN $6::jsonb ELSE buttons END,
+         badge_text = $7,
+         image_link_url = $8,
+         updated_at = NOW()
+       WHERE id = $1::uuid AND company_id = $2::uuid
+       RETURNING *`,
+      [
+        k.id, parent.company_id,
+        parent.design ? JSON.stringify(parent.design) : null,
+        slides ? JSON.stringify(slides) : null,
+        flat ? flat.imageUrl : (parent.image_url ?? null),
+        JSON.stringify(sanitizeButtonsActionUrls(flat ? flat.buttons : (Array.isArray(parent.buttons) ? parent.buttons : []))),
+        parent.badge_text ?? null,
+        parent.image_link_url ?? null,
+        // 장이 없는 단일 포스터 부모 = 변형의 사진·버튼은 변형 것(수동 변형은 사진을 따로 고를 수 있다) · 사진이 비었으면 부모 사진
+        slides !== null,
+      ],
+    );
+    // ★ (Codex 1R) 켜진 변형도 게시 조건 CT — 미달이면 throw(부모 수정까지 같은 트랜잭션에서 되돌린다)
+    const kidRow = upd.rows[0];
+    const kidDefect = kidRow && kidRow.status === 'active' ? inAppPublishDefect(kidRow) : null;
+    if (kidDefect) throw inAppNotPublishableError({ ...kidDefect, message: `A/B 변형에 적용할 수 없어요: ${kidDefect.message}` });
+    n++;
+  }
+  return n;
+}
+
+/**
+ * ★ 2026-09-29 (Codex 1R high) 상태만 바꾸는 켜기 단일 길목 — 플래너 실행 · A/B 변형 켜기.
+ *   한 트랜잭션에서 행을 잠그고(FOR UPDATE) 그 행으로 게시 조건 CT 를 판정한 뒤 켠다. 옛: 판정(별도 SELECT)과 켜기(UPDATE)가
+ *   잠금 밖에 따로 있어 그 사이 초안 저장이 제목·사진을 비우면 미완성 초안이 켜졌다. 초안 저장도 같은 행을 FOR UPDATE 로 잠근다.
+ *   parentMessageId = 변형 켜기(부모가 맞아야) · window = 플래너 행사 기간(start_at = 지금 · end_at).
+ */
+export async function activateInAppMessage(opts: {
+  companyId: string;
+  messageId: string;
+  parentMessageId?: string | null;
+  window?: { endAt: string } | null;
+}): Promise<{ ok: true } | { ok: false; reason: 'not_found' } | { ok: false; reason: 'defect'; defect: InAppPublishDefect }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const params: any[] = [opts.messageId, opts.companyId];
+    let parentClause = '';
+    if (opts.parentMessageId) {
+      params.push(opts.parentMessageId);
+      parentClause = ` AND parent_message_id = $${params.length}::uuid`;
+    }
+    const cur = await client.query(
+      `SELECT * FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid${parentClause} FOR UPDATE`,
+      params,
+    );
+    if (cur.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'not_found' };
+    }
+    const defect = inAppPublishDefect(cur.rows[0]);
+    if (defect) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'defect', defect };
+    }
+    if (opts.window) {
+      await client.query(
+        `UPDATE cdp_inapp_messages
+            SET status = 'active', start_at = NOW(), end_at = $3::timestamptz, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [opts.messageId, opts.companyId, opts.window.endAt],
+      );
+    } else {
+      await client.query(
+        `UPDATE cdp_inapp_messages SET status = 'active', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [opts.messageId, opts.companyId],
+      );
+    }
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function deleteInAppMessage(companyId: string, messageId: string, ownerId?: string | null): Promise<boolean> {
@@ -1202,7 +1476,8 @@ function mapRowToMessageDetail(row: any): InAppMessageDetail {
     accentColor: row.accent_color || null,
     cardStyle: normalizeCardStyle(row.card_style),
     design: row.design && typeof row.design === 'object' ? row.design : null,
-    posterSlides: Array.isArray(row.poster_slides) ? row.poster_slides : [],
+    // ★ 2026-09-29 남은 슬라이드 게이트(설계서 §1-5) — 포스터가 아닌 형태에 남은 장은 내보내지 않는다(SDK·앱이 장을 먼저 보는 경로 차단).
+    posterSlides: (row.template || row.position) === 'full_image' && Array.isArray(row.poster_slides) ? row.poster_slides : [],
     imageLinkUrl: row.image_link_url || null,
     audienceFilter: row.audience_filter || null,
   };
@@ -1375,7 +1650,13 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
       `SELECT DISTINCT COALESCE(m2.parent_message_id, m2.id) AS root_id
        FROM cdp_inapp_impressions i
        JOIN cdp_inapp_messages m2 ON m2.id = i.message_id AND m2.company_id = i.company_id
-       WHERE i.company_id = $1::uuid AND i.event_type = 'opt_out' AND (${optConds.join(' OR ')})`,
+       WHERE i.company_id = $1::uuid
+         AND (
+           i.event_type = 'opt_out'
+           -- ★ 2026-09-29 「오늘 하루 보지 않기」(design.dismiss_mode = snooze_day · 설계서 §1-3) — 24시간 억제 · 같은 부모 축
+           OR (i.event_type = 'dismiss' AND i.button_id = 'snooze_day' AND i.occurred_at > NOW() - INTERVAL '24 hours')
+         )
+         AND (${optConds.join(' OR ')})`,
       optParams
     );
     if (optR.rows.length > 0) {

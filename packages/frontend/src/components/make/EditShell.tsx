@@ -20,7 +20,7 @@ import '../../styles/make.css';
 export type SaveTone = 'saved' | 'saving' | 'dirty' | 'error' | 'manual';
 
 export default function EditShell({
-  title, onTitle, save, channel, pair, onBack, onUndo, onRedo, canUndo, canRedo, onSend, sendLabel = '보내기', banner, left, center, right, extraHeader,
+  title, onTitle, save, channel, pair, onBack, onUndo, onRedo, canUndo, canRedo, onSend, sendLabel = '보내기', banner, left, center, right, extraHeader, channelSwitch,
 }: {
   title: string;
   onTitle: (v: string) => void;
@@ -40,6 +40,8 @@ export default function EditShell({
   center: ReactNode;
   right: ReactNode;
   extraHeader?: ReactNode;
+  /** ★ 2026-09-29 인앱 만들기 개편 — 모바일 DM·이메일 탭 대신 쓸 채널 전환(인앱 웹/앱). 없으면 지금 그대로. */
+  channelSwitch?: ReactNode;
 }) {
   const [editingTitle, setEditingTitle] = useState(false);
   const [draft, setDraft] = useState(title);
@@ -71,7 +73,7 @@ export default function EditShell({
             </div>
           </div>
 
-          <div className="hidden md:inline-flex rounded-xl border border-white/10 bg-white/[0.04] p-1 shrink-0" role="tablist" aria-label="채널">
+          {channelSwitch ?? <div className="hidden md:inline-flex rounded-xl border border-white/10 bg-white/[0.04] p-1 shrink-0" role="tablist" aria-label="채널">
             {(['dm', 'email'] as const).map((c) => {
               const on = channel === c;
               const can = on || !!pair;
@@ -83,7 +85,7 @@ export default function EditShell({
                 </button>
               );
             })}
-          </div>
+          </div>}
           {extraHeader}
           <div className="flex items-center gap-1.5 shrink-0">
             <button type="button" onClick={onUndo} disabled={!canUndo} className="w-10 h-10 rounded-xl border border-white/10 bg-white/[0.04] text-white/80 hover:bg-white/10 disabled:opacity-30 flex items-center justify-center" aria-label="되돌리기"><Undo2 className="w-4 h-4" /></button>

@@ -60,6 +60,15 @@ Header: X-Hanjullo-Key: hjl_...
         desc: '메시지에 imageLinkUrl이 오면(선택) 이미지 자체를 눌렀을 때 그 주소로 이동합니다. 버튼과 동일 계약(트래킹 → 이번 세션 재표시 억제 → 시트 닫기 → 이동). 트래킹 button_id = "image". 캐러셀은 슬라이드별 link_url(선택)을 쓰고 button_id = "slide_{index}_image"(0부터)로 보냅니다. 링크가 없으면 지금처럼 아무 동작 없음. 이 필드를 모르는 구버전 앱도 그대로 무동작이라 안전합니다. http/https만 오며(서버 무해화), 상대경로·커스텀 스킴은 오지 않습니다.',
       },
       {
+        // ★ 2026-09-29 계약 v3 — 인앱 만들기 개편(설계서 docs/2026-09-29-inapp-editor-redesign-design.md §1)
+        title: '포스터 새 레이아웃 (design.poster_layout = "event_card" | "banner_sheet")',
+        desc: 'full_image 메시지의 design.poster_layout 이 오면 레이아웃대로 그립니다. 새 레이아웃은 posterSlides 가 1장이어도 레이아웃으로 그립니다(좌우 넘기기는 2장부터). event_card = 위 글 칸(바탕 = slide.bg_color · eyebrow 작은 라벨 · title · body) + 아래 사진 4:3(image_fit, 기본 cover) + 여러 장이면 오른쪽 아래 "N / M" 쪽 번호. banner_sheet = 면 색(bg_color) · 좌상단 탭 칩(eyebrow) · 우상단 X · 왼쪽 글(subtitle 윗줄 · title 큰 제목 · body 아랫줄 · cta 알약 버튼) · 오른쪽 사진(image_fit, 기본 contain · 아래 정렬). 바닥은 두 레이아웃 모두 글자 버튼 둘(왼쪽 = 닫기 방식 라벨 · 오른쪽 "닫기"). 장 전체(글 + 사진)가 좌우로 넘어갑니다. 슬라이드 새 키: eyebrow · subtitle · bg_color(hex) · image_fit("cover"|"contain"). 값이 빠지면 기본값: event_card 바탕 #f7f1e3 · 제목 #8a3b1f(26) · 본문 #57534e(14) / banner_sheet 면 #db2777 · 제목 #fde047(26) · 본문 #ffffff(19). 사진 누름 = link_url(event_card 는 없으면 cta.action_url), 트래킹 button_id = "slide_{index}_image". poster_layout 이 없거나 모르는 값이면 지금 포스터(overlay)로 그리세요. 이 값을 모르는 구버전 앱은 같은 내용을 지금 포스터 모양으로 안전하게 보여 줍니다(flat 필드 = 첫 장).',
+      },
+      {
+        title: '장마다 라벨 (poster slides eyebrow · overlay 포스터)',
+        desc: '지금 포스터(overlay) 캐러셀도 slide.eyebrow 가 있으면 그 장의 배지 자리에 그 값을 보여 주고, 없으면 메시지 badgeText 를 씁니다. badgeText 는 모든 장 라벨이 같을 때만 값이 오고 다르면 빈 값입니다(장마다 다른 라벨을 한 장의 값으로 퍼뜨리지 않게).',
+      },
+      {
         title: '캐러셀 클릭 트래킹 + 그라데이션(네이티브 주의)',
         desc: '슬라이드 CTA 클릭은 button_id = "slide_{index}"(0부터)로 트래킹을 보내면 슬라이드별 성과가 집계됩니다. 스크림(이미지 하단 어두운 그라데이션)은 반투명 View를 여러 장 쌓지 말고 단일 요소(LinearGradient 또는 코드 내장 base64 PNG 알파 램프 1장을 늘려서)로 그리세요. 반투명 뷰 쌓기는 Android에서 이음새마다 가로줄이 생깁니다(실사고). 좌우 스와이프는 RN 기본 가로 페이징(FlatList/ScrollView pagingEnabled)으로 충분해 네이티브 모듈 추가가 필요 없습니다(OTA 가능).',
       },
@@ -89,6 +98,11 @@ Header: X-Hanjullo-Key: hjl_...
       {
         title: '"다시 보지 않기" = 영구 (opt_out)',
         desc: "명시 거부 버튼을 제공하는 경우에만 영구 억제합니다. event_type 'opt_out'으로 트래킹을 보내면 서버가 기록하고 이후 조회 응답에서 제외됩니다.",
+      },
+      {
+        // ★ 2026-09-29 계약 v3
+        title: '"오늘 하루 보지 않기" = 24시간 (design.dismiss_mode = "snooze_day")',
+        desc: "design.dismiss_mode 가 'snooze_day' 이면 명시 거부 버튼 자리에 「오늘 하루 보지 않기」를 그리고, 누르면 event_type 'dismiss' + button_id 'snooze_day' 로 트래킹을 보낸 뒤 24시간 동안 표시하지 않습니다(영구 저장소에 만료 시각 기록 · A/B 변형이면 parentMessageId 도 함께). 서버도 같은 기록으로 24시간 동안 응답에서 제외합니다. 라벨은 앱이 직접 그립니다. 이 값을 모르는 구버전 앱은 지금처럼 「다시 보지 않기」(opt_out)로 동작합니다.",
       },
       {
         title: 'displayFrequency 의미',

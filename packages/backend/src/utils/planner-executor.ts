@@ -76,6 +76,7 @@ import {
 } from './planner-execution';
 import { cleanupPlannerStaging, loadPlannerStaging, resolvePlannerAudience } from './planner-audience';
 import { inspectDmForCarry, isDmCarryable, produceTouchpoint, syncDmPublishState } from './planner-production';
+import { activateInAppMessage } from './inapp-message';
 
 type ExecOutcome = 'sent' | 'skipped' | 'held' | 'locked' | 'not_due';
 
@@ -671,14 +672,13 @@ async function executeInapp(tp: PlannerTouchpointRow): Promise<ExecOutcome> {
   if (!messageId) {
     return lock(tp, '인앱 소재가 준비되지 않았습니다.', `'${tp.title}' 인앱 메시지가 없어 게시를 보류했습니다.`);
   }
-  const r = await query(
-    `UPDATE cdp_inapp_messages
-        SET status = 'active', start_at = NOW(), end_at = $3::timestamptz, updated_at = NOW()
-      WHERE id = $1::uuid AND company_id = $2::uuid
-      RETURNING id`,
-    [messageId, tp.companyId, `${tp.endsOn}T23:59:59+09:00`],
-  );
-  if (r.rows.length === 0) {
+  // ★ 2026-09-29 켜기 단일 길목(인앱 만들기 개편 §1-4 · Codex 1R) — 행 잠금 → 게시 조건 CT → 켜기(행사 기간)를 한 트랜잭션에서.
+  //   제작 뒤 편집기에서 고치다 둔 초안(빈 칸 · 사진 없는 장)이 예정일에 그대로 켜지지 않는다.
+  const act = await activateInAppMessage({ companyId: tp.companyId, messageId, window: { endAt: `${tp.endsOn}T23:59:59+09:00` } });
+  if (!act.ok && act.reason === 'defect') {
+    return lock(tp, `인앱 메시지에 고칠 곳이 있어 게시를 보류했습니다: ${act.defect.message}`, `'${tp.title}' 인앱 메시지에 고칠 곳이 있어 게시를 보류했습니다. ${act.defect.message}`);
+  }
+  if (!act.ok) {
     return lock(tp, '인앱 메시지를 게시하지 못했습니다.', `'${tp.title}' 인앱 메시지를 게시하지 못해 보류했습니다.`);
   }
   await markSent(tp, messageId, 0, { inapp_message_id: messageId, inapp_activated_at: new Date().toISOString() });
