@@ -84,6 +84,19 @@ export function precheckMmsAutoFitFile(file: { name: string; size: number; type?
   return null;
 }
 
+/**
+ * ★ 2026-09-29 남지현 접수 — MMS 첨부 사진 순서 바꾸기. 두 칸(0부터)의 사진이 서로 자리를 바꾼 새 목록을 돌려준다.
+ *   발송 순서·번호·미리보기는 모두 목록 순서를 따르므로(toMmsImagePaths) 이 함수 하나로 전부 함께 바뀐다.
+ *   같은 칸·빈 칸·범위 밖이면 순서 그대로(빈 자리를 만들지 않는다 · 원본 목록은 건드리지 않는다).
+ *   계약 = backend `utils/__tests__/mms-image-reorder-0929.test.ts`.
+ */
+export function swapMmsImages<T>(images: T[], from: number, to: number): T[] {
+  const out = images.slice();
+  if (from === to || from < 0 || to < 0 || from >= out.length || to >= out.length) return out;
+  [out[from], out[to]] = [out[to], out[from]];
+  return out;
+}
+
 export function toMmsImagePaths(
   images: Array<{ serverPath?: string; path?: string; originalName?: string } | any>,
 ): Array<{ path: string; originalName: string }> {

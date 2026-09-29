@@ -70,7 +70,10 @@ export default function PreviewPair({
   const [rect, setRect] = useState<{ id: string | null; top: number; height: number } | null>(null);
   const box = useBoxHeight(420, 700);
   const phoneW = 316;
-  const headH = inboxHead ? 64 : 0;
+  // 받은편지함 머리 높이 = 안의 줄 높이 합(글꼴과 무관하게 줄 높이를 px로 고정한다).
+  //   ★ 2026-09-29 남지현 접수 — 옛 64px는 내용(약 76px)보다 작아 제목 줄이 아래 미리보기에 가려 잘려 보였다.
+  //   위 12 + 보낸 사람 줄 30(이름 16 · 시각 14) + 간격 4 + 제목 19 + 아래 10 + 선 1 = 76.
+  const headH = inboxHead ? 76 : 0;
   const screenH = Math.max(360, box.h - 40 - (phoneTop ? 44 : 0));
 
   return (
@@ -87,15 +90,15 @@ export default function PreviewPair({
           <div className="mk-phone mx-auto" style={{ width: phoneW + 20 }}>
             <div className="mk-phone-screen" style={{ width: phoneW, height: screenH }}>
               {inboxHead && (
-                <div className="px-4 pt-3.5 pb-2.5 border-b border-slate-200 bg-white" style={{ height: headH }}>
+                <div className="px-4 pt-3 pb-2.5 border-b border-slate-200 bg-white" style={{ height: headH }}>
                   <div className="flex items-center gap-2">
                     <span className="w-7 h-7 rounded-full bg-[#9a4f2c] text-white text-[12px] font-bold flex items-center justify-center shrink-0">{(inboxHead.from || 'H').slice(0, 1)}</span>
                     <div className="min-w-0">
-                      <div className="text-[12px] font-bold text-slate-900 truncate">{inboxHead.from || '보내는 사람'}</div>
-                      <div className="text-[10.5px] text-slate-500">지금 · 나에게</div>
+                      <div className="text-[12px] leading-[16px] font-bold text-slate-900 truncate">{inboxHead.from || '보내는 사람'}</div>
+                      <div className="text-[10.5px] leading-[14px] text-slate-500">지금 · 나에게</div>
                     </div>
                   </div>
-                  <div className="text-[12.5px] font-bold text-slate-900 mt-1 truncate">{inboxHead.subject || '제목을 넣어 주세요'}</div>
+                  <div className="text-[12.5px] leading-[19px] font-bold text-slate-900 mt-1 truncate">{inboxHead.subject || '제목을 넣어 주세요'}</div>
                 </div>
               )}
               {html ? (

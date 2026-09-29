@@ -958,6 +958,7 @@ export default function Dashboard() {
     handleMmsMultiUpload,
     handleMmsImageRemove,
     handleMmsFromAsset,
+    handleMmsImageSwap,
   } = useMmsUpload((msg) => {
     setToast({ show: true, type: 'error', message: msg });
     setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
@@ -3329,6 +3330,8 @@ const campaignData = {
           handleMmsMultiUpload={handleMmsMultiUpload}
           handleMmsImageRemove={handleMmsImageRemove}
           handleMmsFromAsset={handleMmsFromAsset}
+          /* ★ 2026-09-29 남지현 접수 — 사진 순서 바꾸기(끌어 놓기 · ◀ ▶) = 직접발송에서만 켠다 */
+          handleMmsImageSwap={handleMmsImageSwap}
           onConfirm={(count) => {
             // 이미지 있으면 3채널 상태 MMS로 동기화 (기존 동작 유지)
             if (count > 0) {

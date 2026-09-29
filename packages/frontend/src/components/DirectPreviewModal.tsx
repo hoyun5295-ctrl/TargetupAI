@@ -161,7 +161,11 @@ export default function DirectPreviewModal({
                   </span>
                 )}
               </div>
-              <div className="border rounded-lg overflow-hidden flex-1 overflow-y-auto" style={{ maxHeight: '420px' }}>
+              {/* ★ 2026-09-29 남지현 접수 — 표 높이 = 왼쪽 열 높이(PC). 0925에 왼쪽 휴대폰이 글 길이만큼 늘어나게 바뀌었는데
+                  표는 420 고정이라 아래가 비었다. 표를 절대 위치로 띄워 열 높이 계산에서 빼고(왼쪽이 높이를 정한다) 남는 칸을 채운다.
+                  휴대폰 화면(세로 쌓기)은 지금처럼 420 안에서 스크롤. */}
+              <div className="relative flex-1 min-h-0">
+              <div className="border rounded-lg overflow-hidden overflow-y-auto max-h-[420px] md:max-h-none md:absolute md:inset-0">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-100 sticky top-0">
                     <tr>
@@ -198,6 +202,7 @@ export default function DirectPreviewModal({
                     })}
                   </tbody>
                 </table>
+              </div>
               </div>
             </div>
           )}

@@ -1036,8 +1036,8 @@ export default function AlimtalkSendModal({
 
         {/* ====== 발송 바 — 예약 · 분할 · 실패 시 문자 / 발신프로필 · 보내기 ====== */}
         <footer className="ds-modal__foot ks-foot">
-          <div className="ds-foot-opts">
-            <div className="ds-opt-anchor">
+          <div className="ds-foot-opts ds-foot-opts--reserve">
+            <div className="ds-opt-anchor ds-opt-anchor--reserve">
               <button
                 type="button"
                 className={`ds-tile ds-tile--opt ${reserveEnabled ? 'ds-tile--opt-blue' : ''}`}

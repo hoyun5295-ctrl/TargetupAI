@@ -33,6 +33,37 @@ describe('guardPreviewHtml', () => {
     expect(guardPreviewHtml(DOC, { tap: false })).toContain('TAP=false');
     expect(guardPreviewHtml(DOC, { tap: true })).toContain('TAP=true');
   });
+  // ★ 2026-09-29 남지현 접수(이메일 미리보기 수신거부 클릭 = 문구 사라짐) — 다리 스크립트가 문법 오류로 한 번도 돌지 않았다
+  //   (report() 의 따옴표 이스케이프 누락). 글자 포함 검사는 이것을 못 잡는다 → 실제로 해석·실행한다.
+  it('다리 스크립트는 문법 오류 없이 해석되고, 가짜 문서 위에서 링크 이동을 막고 탭을 알린다', () => {
+    for (const tap of [false, true]) {
+      const out = guardPreviewHtml(DOC, { tap });
+      const src = out.slice(out.lastIndexOf('<script>') + '<script>'.length, out.lastIndexOf('</script>'));
+      expect(() => new Function(src)).not.toThrow();
+      // DOM 라이브러리 없이 최소 가짜 문서로 실제 실행한다(클릭 리스너 · 링크 막기 · 탭 알림 · 선택 자리 보고)
+      const docListeners: Record<string, (e: any) => void> = {};
+      const sent: any[] = [];
+      const section = { style: {} as Record<string, string>, getAttribute: () => 's1', getBoundingClientRect: () => ({ top: 10, height: 20 }) };
+      const fakeDoc = {
+        addEventListener: (t: string, fn: (e: any) => void) => { docListeners[t] = fn; },
+        querySelector: (sel: string) => (sel === '[data-section-id="s1"]' ? section : null),
+        querySelectorAll: () => [section],
+      };
+      const winListeners: Record<string, (e: any) => void> = {};
+      const parent = { postMessage: (m: any) => sent.push(m) };
+      const fakeWin = { parent, scrollY: 0, addEventListener: (t: string, fn: (e: any) => void) => { winListeners[t] = fn; }, scrollTo: () => {} };
+      new Function('window', 'document', src)(fakeWin, fakeDoc);
+      expect(sent.some((m) => m.type === 'ready')).toBe(true);
+      let prevented = false;
+      const link = { closest: (s: string) => (s === 'a[href]' ? {} : s === '[data-section-id]' ? section : null) };
+      docListeners.click({ target: link, preventDefault: () => { prevented = true; } });
+      expect(prevented).toBe(true);
+      expect(sent.some((m) => m.type === 'tap')).toBe(tap);
+      winListeners.message({ source: parent, data: { src: 'mk-preview', type: 'select', id: 's1', reveal: false } });
+      expect(section.style.outline).toContain('#8b5cf6');
+      expect(sent.find((m) => m.type === 'rect' && m.id === 's1')).toMatchObject({ top: 10, height: 20 });
+    }
+  });
 });
 
 describe('고칠 곳 판정', () => {

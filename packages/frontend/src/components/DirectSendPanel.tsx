@@ -1513,9 +1513,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     : callbackNumbers;
           return (
             <footer className="ds-modal__foot">
-              <div className="ds-foot-opts">
+              <div className="ds-foot-opts ds-foot-opts--reserve">
                 {/* 예약 */}
-                <div className="ds-opt-anchor">
+                <div className="ds-opt-anchor ds-opt-anchor--reserve">
                   <button
                     type="button"
                     className={`ds-tile ds-tile--opt ${reserveEnabled ? 'ds-tile--opt-blue' : ''}`}

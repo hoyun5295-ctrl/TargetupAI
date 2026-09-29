@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { precheckMmsAutoFitFile } from '../utils/mmsImage';
+import { precheckMmsAutoFitFile, swapMmsImages } from '../utils/mmsImage';
 
 /**
  * useMmsUpload — MMS 이미지 업로드 공용 훅 (컨트롤타워)
@@ -191,6 +191,11 @@ export function useMmsUpload(onError: (msg: string) => void, opts?: MmsUploadOpt
     setMmsUploadedImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  // ★ 2026-09-29 두 칸의 사진 자리 바꾸기(끌어 놓기 · ◀ ▶). 서버 파일은 그대로 · 목록 순서만 바뀐다.
+  const handleMmsImageSwap = (from: number, to: number) => {
+    setMmsUploadedImages(prev => swapMmsImages(prev, from, to));
+  };
+
   return {
     mmsUploadedImages,
     setMmsUploadedImages,
@@ -199,5 +204,6 @@ export function useMmsUpload(onError: (msg: string) => void, opts?: MmsUploadOpt
     handleMmsMultiUpload,
     handleMmsImageRemove,
     handleMmsFromAsset,
+    handleMmsImageSwap,
   };
 }

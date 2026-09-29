@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Image as ImageIcon, X, Paperclip, Lock, Plus, Loader2, AlertTriangle, FolderOpen } from 'lucide-react';
+import { Image as ImageIcon, X, Paperclip, Lock, Plus, Loader2, AlertTriangle, FolderOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getMmsImageDisplayName } from '../utils/mmsImage';
 import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
 
@@ -23,6 +23,11 @@ interface MmsUploadModalProps {
    * 규격 안내·파일 선택 형식이 바뀌고, 서버가 바꾼 사진에 "자동 맞춤" 표시가 붙는다. 미전달 = 지금 그대로.
    */
   autoFit?: boolean;
+  /**
+   * ★2026-09-29 두 칸의 사진 자리 바꾸기(useMmsUpload.handleMmsImageSwap). 넘기면 사진을 끌어 다른 칸에 놓거나
+   * ◀ ▶ 로 순서를 바꿀 수 있다(발송 순서 = 1번부터 칸 순서). 미전달 = 지금 그대로(선택 기능 · 지금 켠 곳 = 직접발송).
+   */
+  handleMmsImageSwap?: (from: number, to: number) => void;
 }
 
 /**
@@ -41,13 +46,20 @@ export default function MmsUploadModal({
   errorMessage,
   handleMmsFromAsset,
   autoFit = false,
+  handleMmsImageSwap,
 }: MmsUploadModalProps) {
   // ★ 훅은 조기 return 위에 (조건부 렌더 컴포넌트 훅 개수 불일치 크래시 차단 — 2026-07-06 교훈)
   const [libOpen, setLibOpen] = useState(false);
+  // 끌어서 순서 바꾸기 — 잡은 칸 · 놓을 칸(표시용)
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
 
   if (!show) return null;
 
   const remaining = 3 - mmsUploadedImages.length;
+  // 사진이 2장 이상이고 올리는 중이 아닐 때만 순서를 바꾼다(올리는 중에는 다른 첨부 버튼도 잠시 막는 것과 같은 규칙)
+  const canReorder = !!handleMmsImageSwap && mmsUploadedImages.length > 1 && !mmsUploading;
+  const endDrag = () => { setDragFrom(null); setDragOver(null); };
   // 자동 맞춤이면 사진 형식은 서버가 판정한다(브라우저 선택창은 사진 전체를 보여 준다)
   const accept = autoFit ? 'image/*' : '.jpg,.jpeg';
 
@@ -134,19 +146,46 @@ export default function MmsUploadModal({
               const filenameDisplay = img ? getMmsImageDisplayName(img, `이미지 ${slotIdx + 1}`) : '';
               // 빈 앞슬롯 존재 시 뒷슬롯 잠금 — "왼쪽부터 순서대로" 강제
               const isLockedSlot = !img && slotIdx > mmsUploadedImages.length;
+              const isDragSource = canReorder && dragFrom === slotIdx;
+              const isDropTarget = canReorder && dragOver === slotIdx && dragFrom !== null && dragFrom !== slotIdx;
               return (
                 <div key={slotIdx} className="flex flex-col">
-                  <div className="aspect-square relative">
+                  <div
+                    className="aspect-square relative"
+                    onDragOver={img && canReorder && dragFrom !== null ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOver !== slotIdx) setDragOver(slotIdx); } : undefined}
+                    onDragLeave={img && canReorder ? () => { if (dragOver === slotIdx) setDragOver(null); } : undefined}
+                    onDrop={img && canReorder ? (e) => { e.preventDefault(); if (dragFrom !== null && dragFrom !== slotIdx) handleMmsImageSwap?.(dragFrom, slotIdx); endDrag(); } : undefined}
+                  >
                     {img ? (
-                      /* 업로드 완료 */
-                      <div className="w-full h-full rounded-xl border border-emerald-400/40 bg-emerald-500/10 overflow-hidden relative group">
-                        <img src={img.url} alt={filenameDisplay} title={filenameDisplay} className="w-full h-full object-cover" />
+                      /* 업로드 완료 — 순서 바꾸기가 켜져 있으면 끌어서 다른 칸에 놓는다(두 사진이 자리를 바꾼다) */
+                      <div
+                        draggable={canReorder}
+                        onDragStart={canReorder ? (e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(slotIdx)); setDragFrom(slotIdx); } : undefined}
+                        onDragEnd={canReorder ? endDrag : undefined}
+                        className={`w-full h-full rounded-xl border overflow-hidden relative group transition-all ${isDropTarget ? 'border-violet-400 ring-2 ring-violet-400/70 bg-violet-500/10' : 'border-emerald-400/40 bg-emerald-500/10'} ${isDragSource ? 'opacity-40' : ''} ${canReorder ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                      >
+                        <img src={img.url} alt={filenameDisplay} title={filenameDisplay} draggable={false} className="w-full h-full object-cover" />
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
                           <button
                             onClick={() => handleMmsImageRemove(slotIdx)}
                             className="opacity-0 group-hover:opacity-100 transition-opacity bg-rose-500 hover:bg-rose-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-lg"
                           >×</button>
                         </div>
+                        {/* ◀ ▶ = 이웃 칸과 자리 바꾸기(손가락 화면·키보드용 · 누를 수 없는 끝 쪽은 그리지 않는다) */}
+                        {canReorder && (
+                          <div className="absolute bottom-1 left-1 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+                            {slotIdx > 0 && (
+                              <button type="button" onClick={() => handleMmsImageSwap?.(slotIdx, slotIdx - 1)} className="w-6 h-6 rounded-md bg-slate-950/75 hover:bg-violet-600 text-white flex items-center justify-center" aria-label={`${slotIdx + 1}번 사진을 왼쪽 칸과 바꾸기`} title="왼쪽 칸과 바꾸기">
+                                <ChevronLeft className="w-4 h-4" />
+                              </button>
+                            )}
+                            {slotIdx < mmsUploadedImages.length - 1 && (
+                              <button type="button" onClick={() => handleMmsImageSwap?.(slotIdx, slotIdx + 1)} className="w-6 h-6 rounded-md bg-slate-950/75 hover:bg-violet-600 text-white flex items-center justify-center" aria-label={`${slotIdx + 1}번 사진을 오른쪽 칸과 바꾸기`} title="오른쪽 칸과 바꾸기">
+                                <ChevronRight className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        )}
                         <div className="absolute bottom-1 right-1 bg-emerald-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
                           {(img.size / 1024).toFixed(0)}KB
                         </div>
@@ -193,6 +232,10 @@ export default function MmsUploadModal({
               );
             })}
           </div>
+
+          {canReorder && (
+            <p className="mt-3 text-[11px] text-white/50 text-center">사진을 끌어 다른 칸에 놓으면 서로 자리가 바뀌어요. 1번부터 이 순서로 보내요.</p>
+          )}
 
           {mmsUploading && (
             <div className="flex items-center justify-center gap-2 mt-4 text-sm text-violet-300">

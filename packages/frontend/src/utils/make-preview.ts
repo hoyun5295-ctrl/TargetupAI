@@ -27,7 +27,10 @@ function bridgeSource(tap: boolean): string {
     'var P=window.parent,TAP=' + (tap ? 'true' : 'false') + ',SRC=' + JSON.stringify(MK_PREVIEW_SRC) + ';',
     'function send(m){try{m.src=SRC;P.postMessage(m,"*");}catch(e){}}',
     'var SEL=null;',
-    'function report(){if(!SEL){send({type:"rect",id:null,top:0,height:0});return;}var el=document.querySelector("[data-section-id=\""+String(SEL).replace(/"/g,"")+"\"]");',
+    // ★ 2026-09-29 남지현 접수 — 여기 `\"` 가 `\\"` 가 아니어서 스크립트 전체가 문법 오류로 한 번도 돌지 않았다
+    //   (링크 막기·탭·선택 테두리·스크롤 복원 전부 죽음 · 수신거부 누르면 미리보기가 다른 주소로 넘어가 문구가 사라짐).
+    //   계약 = make-preview-guard.test.ts 가 이 스크립트를 실제로 해석·실행한다.
+    'function report(){if(!SEL){send({type:"rect",id:null,top:0,height:0});return;}var el=document.querySelector("[data-section-id=\\""+String(SEL).replace(/"/g,"")+"\\"]");',
     'if(!el){send({type:"rect",id:null,top:0,height:0});return;}var r=el.getBoundingClientRect();send({type:"rect",id:SEL,top:r.top,height:r.height});}',
     'function mark(id){SEL=id||null;var ns=document.querySelectorAll("[data-section-id]");for(var i=0;i<ns.length;i++){var n=ns[i];',
     'if(id&&n.getAttribute("data-section-id")===id){n.style.outline="2px solid #8b5cf6";n.style.outlineOffset="-2px";}else{n.style.outline="";n.style.outlineOffset="";}}report();}',
