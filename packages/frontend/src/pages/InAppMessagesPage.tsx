@@ -2397,37 +2397,39 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
     </div>
   );
 
-  const banner = (isLive || isApp || appLocked || (!posterMode && hasPlaceholder)) ? (
-    <div className="px-3 md:px-5 pt-3 space-y-2">
+  // ★ 2026-09-29 (Harold 「화면이 너무 작다」) — 위 알림 두 줄을 치우고 짧은 알림으로 왼쪽 칸 아래에 둔다(가운데 휴대폰이 높이를 다 쓴다).
+  //   게시 중은 제목 옆 표시가 이미 있고, 혜택 자리 알림은 기본 알림 오른쪽 칸 맨 위로 옮긴다.
+  const railNotes = (isLive || isApp || appLocked || (posterMode && legacyApp)) ? (
+    <div className="mt-4 space-y-2">
+      {posterMode && legacyApp && (
+        <div className="rounded-xl border border-amber-400/40 bg-amber-500/15 px-3 py-2 text-[11.5px] leading-relaxed text-amber-50">
+          <b>구버전 앱 모습을 보는 중</b> · 이때는 글자를 고칠 수 없어요. 편집하려면 위 「구버전 앱 모습」을 끄세요.
+        </div>
+      )}
       {isLive && (
-        <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-[12px] text-emerald-100 flex items-start gap-2">
-          <Activity className="w-4 h-4 mt-0.5 shrink-0" />
-          <span>게시 중인 메시지입니다. 고친 내용은 오른쪽 위 <b>[반영]</b>을 눌러야 고객 화면에 적용됩니다. A/B 변형에는 모양 · 장이 함께 적용되고 문안은 변형 것을 그대로 둡니다.</span>
+        <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-emerald-100">
+          <b>게시 중</b> · 고친 내용은 오른쪽 위 [반영]으로 적용돼요. A/B 변형에는 모양 · 장이 함께 가고 문안은 변형 것 그대로예요.
         </div>
       )}
       {isApp && (
-        <div className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-[12px] text-cyan-100 flex items-start gap-2">
-          <Smartphone className="w-4 h-4 mt-0.5 shrink-0" />
-          <span>
-            <b>앱(네이티브)이 직접 그리는 채널입니다</b>. 앱이 통합 계약을 구현해야 여기서 설정한 내용 · 색 · 닫기 동작이 그대로 나옵니다.{' '}
-            <button type="button" onClick={() => setShowAppContract(true)} className="underline underline-offset-2 font-semibold text-cyan-200 hover:text-white">앱 통합 계약 보기</button>
-          </span>
+        <div className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-cyan-100">
+          <b>앱이 직접 그리는 채널</b> · 앱이 통합 계약을 구현해야 설정한 그대로 나와요.{' '}
+          <button type="button" onClick={() => setShowAppContract(true)} className="underline underline-offset-2 font-semibold text-cyan-200 hover:text-white">계약 보기</button>
         </div>
       )}
       {appLocked && (
-        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 flex items-start gap-2">
-          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-          <span>이 모양은 <b>앱 업데이트 뒤</b>에 보입니다. 이전 앱에서는 같은 내용이 포스터 모양 · 「다시 보지 않기」로 보입니다. 위 「구버전 앱 모습」으로 확인하세요.</span>
-        </div>
-      )}
-      {!posterMode && hasPlaceholder && (
-        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-          <span><b>혜택 안내 자리</b>가 남아 있어요. 회사 정책에 맞게 직접 작성해야 발행됩니다(AI는 구체 혜택을 임의로 쓰지 않습니다).</span>
+        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-amber-100">
+          <b>앱 업데이트 뒤에 보이는 모양</b> · 이전 앱은 같은 내용을 포스터 모양 · 「다시 보지 않기」로 보여요. 위 「구버전 앱 모습」으로 확인하세요.
         </div>
       )}
     </div>
-  ) : undefined;
+  ) : null;
+  const placeholderNote = !posterMode && hasPlaceholder ? (
+    <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 flex items-start gap-2">
+      <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+      <span><b>혜택 안내 자리</b>가 남아 있어요. 회사 정책에 맞게 직접 작성해야 발행됩니다(AI는 구체 혜택을 임의로 쓰지 않습니다).</span>
+    </div>
+  ) : null;
 
   const left = posterMode ? (
     <SlideRail
@@ -2440,6 +2442,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       onDropFiles={(f) => { void images.uploadFiles(f); }}
       busy={images.busy}
       top={<div className="mb-4"><LayoutSwitcher channel={isApp ? 'app' : 'web'} current={layoutKey} onPick={(k) => switchLayout(k)} /></div>}
+      notes={railNotes}
     />
   ) : (
     <div className="space-y-4">
@@ -2455,6 +2458,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
           <Plus className="w-4 h-4" />장 추가 → 크게 보여 주기로 바꾸기
         </button>
         <p className="text-[11.5px] text-white/45 mt-2 px-1 leading-relaxed">좌우로 넘기는 여러 장이 필요하면 크게 보여 주기로 바꾸세요. 글 · 사진 · 첫 버튼이 첫 장으로 옮겨집니다.</p>
+        {railNotes}
       </div>
     </div>
   );
@@ -2581,6 +2585,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
     />
   ) : (
     <div className="space-y-5">
+      {placeholderNote}
       <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.04] p-1" role="tablist" aria-label="편집 탭">
         {([['content', '내용', Edit2], ['design', '디자인', Wand2]] as const).map(([key, label, Icon]) => (
           <button key={key} type="button" role="tab" aria-selected={activeTab === key} onClick={() => setActiveTab(key)}
@@ -3560,7 +3565,6 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
           }}
           sendLabel={publishing ? '처리 중' : sendLabel}
           extraHeader={extraHeader}
-          banner={banner}
           left={left}
           center={center}
           right={right}

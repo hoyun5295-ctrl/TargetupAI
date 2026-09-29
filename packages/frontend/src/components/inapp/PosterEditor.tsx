@@ -8,7 +8,7 @@
  * 편집 상태는 편집기(InAppMessagesPage EditModal)가 쥔다 — 여기 부품은 값과 콜백만 받는다(강조만 · 동시 포커스 없음 · 회의론자 12).
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { AlertCircle, ChevronLeft, ChevronRight, FolderOpen, ImagePlus, Loader2, Plus, ShoppingBag, Trash2, Upload, X, Layers, Check } from 'lucide-react';
+import { AlertCircle, FolderOpen, ImagePlus, Loader2, Plus, ShoppingBag, Trash2, Upload, X, Layers, Check } from 'lucide-react';
 import { BlockList } from '../make/EditShell';
 import MallProductPickerModal, { type PickedMallProduct } from '../dm/MallProductPickerModal';
 import AssetLibraryPickerModal, { type PickedAsset } from '../assets/AssetLibraryPickerModal';
@@ -105,7 +105,7 @@ export function useImageSources(opts: {
 
 // ─────────────────────────────── 왼쪽 — 장 목록 ───────────────────────────────
 
-export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, onDropFiles, busy, top }: {
+export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, onDropFiles, busy, top, notes }: {
   layout: PosterLayout;
   slides: WsSlide[];
   active: number;
@@ -115,6 +115,8 @@ export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, 
   onDropFiles: (files: FileList) => void;
   busy?: boolean;
   top?: ReactNode;
+  /** 짧은 알림(게시 중 · 앱 채널 · 앱 업데이트) — 가운데 휴대폰이 높이를 다 쓰게 위 알림 줄 대신 여기 */
+  notes?: ReactNode;
 }) {
   const [over, setOver] = useState(false);
   const full = slides.length >= MAX_SLIDES;
@@ -148,6 +150,10 @@ export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, 
             <p className="text-[11.5px] text-white/45 leading-relaxed px-1">
               사진 여러 장을 여기나 가운데 사진 칸에 한 번에 끌어 놓으면 <b className="text-white/80">장이 자동으로 늘어납니다</b>. 같은 모양 · 같은 버튼 설정을 따라갑니다.
             </p>
+            <p className="text-[11.5px] text-white/45 leading-relaxed px-1">
+              글자는 휴대폰 위를 눌러 고칩니다 · 장 넘기기 = 휴대폰 안 화살표 · 이 목록 · ←/→ 키
+            </p>
+            {notes}
           </div>
         )}
       />
@@ -157,10 +163,19 @@ export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, 
 
 // ─────────────────────────────── 가운데 — 무대 + 떠 있는 입력 칸 ───────────────────────────────
 
-/** 무대 아래 줄(장 넘김 버튼 · 안내 한두 줄)이 차지하는 높이 — 무대 맞춤 계산에서 뺀다 */
-const STAGE_CHROME_H = 96;
+/** 무대 위아래 숨 쉴 틈 — 무대 맞춤 계산에서 뺀다(★ 0929 Harold 「너무 작다」: 무대 아래 장 넘김 줄 · 안내 줄을 치워 휴대폰이 높이를 다 쓴다) */
+const STAGE_CHROME_H = 8;
+/** 휴대폰 논리 크기 = 흔한 작은 폰(375×667) · 안 내용은 실제 크기(1배)로 그리고 무대 전체를 칸에 맞춘다.
+ *  (옛 320×650 틀 + 안 내용 0.84배 = 긴 틀에 줄인 글씨 → 1455×735 에서 제목이 실제의 58%) */
+const PHONE_W = 375;
+const PHONE_H = 667;
+const PC_W = 1200;
+const PC_H = 750;
+/** 무대 맞춤 비율 범위 — 큰 화면은 1.2배까지 키운다(읽기 쉽게) */
+const FIT_MIN = 0.5;
+const FIT_MAX = 1.2;
 /** 휴대폰 옆 편집 칸 폭(최소 · 최대)과 편집 칸 ↔ 휴대폰 사이(화살표 · 연결선) */
-const DOCK_MIN_W = 240;
+const DOCK_MIN_W = 220;
 const DOCK_MAX_W = 360;
 const DOCK_GAP = 28;
 
@@ -219,10 +234,10 @@ export function PosterStage({
   const drawDesign = legacyApp ? { ...(design || {}), dismiss_mode: undefined } : design;
 
   // ★ 2026-09-29 무대 맞춤(Harold 0929 「화면에서 잘려 밑에 글 쓰기가 힘들다」 · 1455×740 에서 휴대폰 43px 잘림 실측) —
-  //   가운데 칸 높이를 재서 휴대폰(PC 틀)을 남는 높이에 맞게 줄인다. 원래 크기보다 키우지 않는다(DM·이메일 PreviewPair 와 같은 방식).
+  //   가운데 칸 높이를 재서 휴대폰(PC 틀)을 남는 높이에 맞춘다(DM·이메일 PreviewPair 와 같은 방식 · 큰 화면은 FIT_MAX 까지 키운다).
   //   좁은 화면(1024 미만)은 칸이 위아래로 쌓여 페이지가 스크롤되므로 폭만 맞춘다.
-  const frameW = isPc ? 640 : 320;
-  const frameH = isPc ? 430 : 650;
+  const frameW = isPc ? PC_W : PHONE_W;
+  const frameH = isPc ? PC_H : PHONE_H;
   const [fit, setFit] = useState(1);
   const [rootW, setRootW] = useState(0);
   useEffect(() => {
@@ -232,8 +247,8 @@ export function PosterStage({
       const wide = typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(min-width: 1024px)').matches;
       const availH = wide ? el.clientHeight - STAGE_CHROME_H : Number.POSITIVE_INFINITY;
       const availW = el.clientWidth - 8;
-      const s = Math.min(1, availH / frameH, availW / frameW);
-      setFit(Math.max(0.5, Math.floor(s * 1000) / 1000));
+      const s = Math.min(FIT_MAX, availH / frameH, availW / frameW);
+      setFit(Math.max(FIT_MIN, Math.floor(s * 1000) / 1000));
       setRootW(el.clientWidth);
     };
     measure();
@@ -324,19 +339,19 @@ export function PosterStage({
   const names = fieldNamesFor(layout);
 
   return (
-    <div ref={rootRef} className="relative w-full flex-1 min-h-0 flex flex-col items-center" onClick={() => { if (dock) { close(); onSelect(null); } }}>
+    <div ref={rootRef} className="relative w-full flex-1 min-h-0 flex flex-col items-center justify-center" onClick={() => { if (dock) { close(); onSelect(null); } }}>
       <div ref={stageRef} className="relative shrink-0"
         style={{ width: phoneW, height: phoneH, transform: phoneShift ? `translateX(${phoneShift}px)` : undefined, transition: 'transform .22s cubic-bezier(.22,1,.36,1)' }}
         onClick={(e) => { e.stopPropagation(); if (dock) close(); onSelect(null); }}>
-        <div style={{ width: frameW, height: frameH, transform: fit < 1 ? `scale(${fit})` : undefined, transformOrigin: 'top left' }}>
+        <div style={{ width: frameW, height: frameH, transform: fit !== 1 ? `scale(${fit})` : undefined, transformOrigin: 'top left' }}>
         <div className={`relative overflow-hidden bg-slate-800 shadow-[0_24px_60px_-20px_rgba(0,0,0,.8)] ${isPc ? 'rounded-xl' : 'rounded-[34px] border-[6px] border-slate-800'}`}
           style={{ width: frameW, height: frameH }}>
           {isPc && <div className="h-6 bg-slate-800 flex items-center gap-1.5 px-3"><i className="w-2 h-2 rounded-full bg-rose-400" /><i className="w-2 h-2 rounded-full bg-amber-300" /><i className="w-2 h-2 rounded-full bg-emerald-400" /></div>}
-          <div className="relative w-full" style={{ height: isPc ? 406 : '100%' }}>
+          <div className="relative w-full" style={{ height: isPc ? PC_H - 24 : '100%' }}>
             <FakeScreen app={channel === 'app'} />
             <div className="absolute inset-0" style={{ background: 'rgba(15,23,42,.45)' }} />
             <div className="absolute inset-x-0 bottom-0 flex justify-center" style={{ top: 0, alignItems: 'flex-end' }}>
-              <div style={{ width: '100%', maxWidth: isPc ? 360 : undefined, maxHeight: '100%', display: 'flex' }}>
+              <div style={{ width: '100%', maxWidth: isPc ? 520 : undefined, maxHeight: '100%', display: 'flex' }}>
                 <PosterSheetPreview
                   layout={drawLayout}
                   slides={slides}
@@ -345,8 +360,8 @@ export function PosterStage({
                   replaceVars={renderText}
                   active={active}
                   onActiveChange={onActive}
-                  scale={isPc ? 0.72 : 0.84}
-                  radius={isPc ? '16px 16px 0 0' : '22px 22px 0 0'}
+                  scale={1}
+                  radius="22px 22px 0 0"
                   shadow="0 -10px 40px rgba(0,0,0,.25)"
                   arrows
                   editable={legacyApp ? undefined : {
@@ -403,16 +418,6 @@ export function PosterStage({
         </>
       )}
 
-      <div className="mt-3 flex items-center gap-3">
-        <button type="button" onClick={(e) => { e.stopPropagation(); onActive((active - 1 + slides.length) % slides.length); }} disabled={slides.length < 2}
-          className="w-9 h-9 rounded-full border border-white/15 bg-white/[0.05] text-white/80 hover:bg-white/10 disabled:opacity-30 flex items-center justify-center" aria-label="이전 장"><ChevronLeft className="w-4 h-4" /></button>
-        <span className="text-[12.5px] text-white/60 tabular-nums">{active + 1} / {slides.length}장</span>
-        <button type="button" onClick={(e) => { e.stopPropagation(); onActive((active + 1) % slides.length); }} disabled={slides.length < 2}
-          className="w-9 h-9 rounded-full border border-white/15 bg-white/[0.05] text-white/80 hover:bg-white/10 disabled:opacity-30 flex items-center justify-center" aria-label="다음 장"><ChevronRight className="w-4 h-4" /></button>
-      </div>
-      <p className="mt-2 text-[11.5px] text-white/40 text-center max-w-[420px]">
-        {legacyApp ? '구버전 앱이 그리는 모습입니다. 편집하려면 「구버전 앱 모습」을 끄세요.' : `${canDock ? '글자를 누르면 휴대폰 옆에서 고칩니다' : '글자를 누르면 편집 칸으로 커서가 옮겨 갑니다'} · 사진 칸을 누르거나 사진을 끌어 놓으세요 · ←/→ 로 장을 넘깁니다`}
-      </p>
     </div>
   );
 }
