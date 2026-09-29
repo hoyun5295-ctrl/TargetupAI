@@ -254,7 +254,12 @@ export async function getCompanyJourneyFacts(companyId: string): Promise<Company
        EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'cart_add') AS has_cart_events,
        EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'product_view') AS has_browse_events,
        EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid AND COALESCE(grade, '') <> '') AS has_grade,
-       EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'custom_order_shipped') AS has_shipped_events`,
+       EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'custom_order_shipped') AS has_shipped_events,
+       -- ★ 2026-09-30 여정 V2 3차 — 상품 단위 구매(자사몰 주문 상품 목록 · 매장 원장 상품 코드/이름). 상품 재구매 여정의 근거.
+       (EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'purchase'
+                  AND jsonb_typeof(properties->'items') = 'array' AND jsonb_array_length(properties->'items') > 0)
+        OR EXISTS (SELECT 1 FROM purchases WHERE company_id = $1::uuid AND purchase_date IS NOT NULL AND customer_id IS NOT NULL
+                     AND (COALESCE(product_code, '') <> '' OR COALESCE(product_name, '') <> ''))) AS has_product_purchases`,
     [companyId],
   );
   const row = r.rows[0] || {};
@@ -272,6 +277,7 @@ export async function getCompanyJourneyFacts(companyId: string): Promise<Company
     hasGrade: row.has_grade === true,
     hasGradeOrder,
     hasShippedEvents: row.has_shipped_events === true,
+    hasProductPurchases: row.has_product_purchases === true,
   };
 }
 

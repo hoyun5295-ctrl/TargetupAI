@@ -21,7 +21,7 @@ export interface NormalizedJourneyOptions {
     /** ★ 2026-07-10 목표 달성 시 자동 종료 — 진입 이후 구매 확인 시 잔여 step 중단 */
     goalExitEnabled: boolean;
     /** ★ 2026-07-11 목표 종류 — purchase(구매)/click(이 여정 발송 링크 클릭)/visit(자사몰 방문 page_view) */
-    goalKind: 'purchase' | 'click' | 'visit';
+    goalKind: 'purchase' | 'click' | 'visit' | 'points_used';
     /** ★ 2026-07-11 홀드아웃 대조군 % (0~30 클램프, 0=비활성) — 신규 진입의 N%를 미발송 대조군으로 배정 */
     holdoutPct: number;
     /** ★ 2026-07-11 send-time 개인화 — 시각 지정 step 발송 시각을 고객 반응 최빈 시간대로 대체 */
@@ -29,7 +29,9 @@ export interface NormalizedJourneyOptions {
   };
 }
 
-const GOAL_KINDS = ['purchase', 'click', 'visit'] as const;
+// ★ 2026-09-29 여정 V2 0차 ⑫ — points_used(포인트 사용) 추가: 포인트 여정 옵션을 저장하면 목표가 '구매'로 떨어지던 자리.
+// ★ 2026-09-30 V2 3차 — 'product'(같은 상품 재구매)는 상품 재구매 여정에서만 유효하다(라우트가 트리거를 보고 거부).
+const GOAL_KINDS = ['purchase', 'click', 'visit', 'points_used', 'product'] as const;
 
 /** 0 이상 정수 또는 null(미설정/음수/비숫자). 한도·예산은 비우면 무제한(null). */
 function clampOrNull(val: any): number | null {
@@ -52,6 +54,10 @@ export function normalizeJourneyOptions(input: Record<string, any>): NormalizedJ
   if (has('points_min')) triggerFilters.points_min = clampInt(src.points_min, 0, 0, Number.MAX_SAFE_INTEGER);
   if (has('inactive_days')) triggerFilters.inactive_days = clampInt(src.inactive_days, 180, 1, 100000);
   if (has('expiry_mode')) triggerFilters.expiry_mode = src.expiry_mode === 'annual_date' ? 'annual_date' : 'inactivity';
+  // ★ 2026-09-30 V2 3차 — 진입 교체(다시 사면 옛 실행을 닫고 처음부터) · 명시 불리언만 저장한다(journey-entry-replace).
+  if (has('entry_replace')) triggerFilters.entry_replace = src.entry_replace === true || src.entry_replace === 'true';
+  // ★ 2026-09-30 V2 3차 — 겹침 해소: 주문 완료 여정에서 첫 구매 고객 빼기(첫 구매 여정이 맡는다 · 워커 자격 필터).
+  if (has('exclude_first_purchase')) triggerFilters.exclude_first_purchase = src.exclude_first_purchase === true || src.exclude_first_purchase === 'true';
   if (has('expiry_month_day')) {
     const raw = String(src.expiry_month_day || '').trim();
     triggerFilters.expiry_month_day = isValidMmdd(raw) ? raw : '';

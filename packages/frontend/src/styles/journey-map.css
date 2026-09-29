@@ -1,0 +1,20 @@
+/*
+ * 여정 지도 선 흐름 (★ 2026-09-29 여정 V2 1차)
+ * 최근 7일 안에 실제로 이어받은 고객이 있는 선에만 붙인다(움직임 = 사실). 움직임 줄이기 설정이면 멈춘다.
+ */
+.jmap-flow {
+  stroke-dasharray: 4 10;
+  animation: jmap-flow 1.4s linear infinite;
+}
+
+@keyframes jmap-flow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jmap-flow {
+    animation: none;
+  }
+}

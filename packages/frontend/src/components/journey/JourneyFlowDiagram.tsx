@@ -11,7 +11,9 @@
  * 다크 톤 정합 (bg-slate-900 + border-white/10 + violet 액센트)
  */
 
-import { MessageSquare, Clock, GitBranch, ArrowDown, Users, Send, MousePointerClick } from 'lucide-react';
+import { MessageSquare, Clock, GitBranch, ArrowDown, Users, Send, MousePointerClick, Flag } from 'lucide-react';
+// ★ 2026-09-29 여정 V2 0차 ⑤ — 시간 표기 · 흐름 색은 공용 유틸 한 곳(화면마다 다른 말 금지).
+import { formatDelayAfter, funnelBarClass } from '../../utils/journey-labels';
 
 interface StepRow {
   id: string;
@@ -21,6 +23,10 @@ interface StepRow {
   channel: string | null;
   message_template: string | null;
   is_ad: boolean;
+  /** ★ 2026-09-29 V2 0차 ⑤ — 조건 미충족 시 이동할 칸(없으면 여정 끝). 상세 응답(SELECT *)에 이미 있다. */
+  not_met_goto?: number | null;
+  /** ★ 2026-09-29 V2 0차 ⑤ — 사건 대기(설정 시 사건이 오면 바로 · 최대 대기 뒤 다음 칸). */
+  wait_event_name?: string | null;
 }
 
 interface StepFunnelStat {
@@ -47,9 +53,18 @@ const STEP_TYPE_CONFIG: Record<string, { icon: typeof MessageSquare; label: stri
   message: { icon: MessageSquare, label: '메시지 발송', accent: 'violet' },
   wait: { icon: Clock, label: '대기', accent: 'amber' },
   condition: { icon: GitBranch, label: '조건 분기', accent: 'cyan' },
+  // ★ 2026-09-30 V2 4차 — 끝 칸(발송 0 · 이 갈래를 여기서 마침)
+  end: { icon: Flag, label: '끝 · 이 갈래를 여기서 마침', accent: 'slate' },
 };
 
 const ACCENT_CLASSES: Record<string, { bg: string; border: string; text: string; iconBg: string; iconText: string }> = {
+  slate: {
+    bg: 'bg-white/[0.03]',
+    border: 'border-white/15',
+    text: 'text-white/70',
+    iconBg: 'bg-white/10',
+    iconText: 'text-white/70',
+  },
   violet: {
     bg: 'bg-violet-500/10',
     border: 'border-violet-400/40',
@@ -73,17 +88,12 @@ const ACCENT_CLASSES: Record<string, { bg: string; border: string; text: string;
   },
 };
 
-function getFunnelColor(pct: number): string {
-  if (pct > 70) return 'bg-emerald-400';
-  if (pct > 40) return 'bg-amber-400';
-  return 'bg-rose-400';
-}
 
 export default function JourneyFlowDiagram({ steps, funnelStats, livePositions }: Props) {
   if (steps.length === 0) {
     return (
       <div className="p-6 bg-slate-950/60 border border-dashed border-white/10 rounded-xl text-center">
-        <span className="text-[12px] text-white/40">step 영역 없음: 흐름 시각화 X</span>
+        <span className="text-[12px] text-white/40">아직 칸이 없어요. 칸을 추가하면 흐름이 여기에 그려집니다.</span>
       </div>
     );
   }
@@ -118,7 +128,7 @@ export default function JourneyFlowDiagram({ steps, funnelStats, livePositions }
                     <div className={`w-9 h-9 rounded-lg ${accent.iconBg} flex items-center justify-center`}>
                       <Icon className={`w-4 h-4 ${accent.iconText}`} />
                     </div>
-                    <span className="text-[10px] text-white/40 font-mono">#{step.step_order}</span>
+                    <span className="text-[11px] text-white/40">{step.step_order}번째</span>
                   </div>
 
                   {/* step 내용 */}
@@ -132,10 +142,13 @@ export default function JourneyFlowDiagram({ steps, funnelStats, livePositions }
                         </span>
                       )}
                       {step.delay_hours > 0 && (
-                        <span className="text-[10px] text-white/50 font-mono">
+                        <span className="text-[11px] text-white/50">
                           <Clock className="w-2.5 h-2.5 inline mr-0.5" />
-                          {step.delay_hours}h 후
+                          앞 칸 {formatDelayAfter(step.delay_hours)}
                         </span>
+                      )}
+                      {step.step_type === 'wait' && step.wait_event_name && (
+                        <span className="text-[11px] text-white/50">사건이 오면 바로 다음 칸</span>
                       )}
                     </div>
 
@@ -150,10 +163,10 @@ export default function JourneyFlowDiagram({ steps, funnelStats, livePositions }
                       <div className="mt-2 pt-2 border-t border-white/10 space-y-1">
                         {funnel && funnel.enteredCount > 0 && (
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-white/40 w-12">funnel</span>
+                            <span className="text-[11px] text-white/40 w-12">도착</span>
                             <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
                               <div
-                                className={`h-full ${getFunnelColor(funnel.funnelPercentage)}`}
+                                className={`h-full ${funnelBarClass(funnel.funnelPercentage)}`}
                                 style={{ width: `${Math.min(100, Math.max(2, funnel.funnelPercentage))}%` }}
                               />
                             </div>
@@ -186,16 +199,22 @@ export default function JourneyFlowDiagram({ steps, funnelStats, livePositions }
               {/* step 간 화살표 (condition step = 분기 영역 시각화) */}
               {!isLast && (
                 <div className="flex justify-center py-1">
-                  {step.step_type === 'condition' ? (
+                  {step.step_type === 'end' ? (
+                    // ★ 2026-09-30 V2 4차 — 끝 칸 뒤 칸은 조건의 "아니면"으로만 닿는다(흐름이 이어지지 않는다).
+                    <span className="text-[11px] text-white/40">아래 칸은 앞 조건의 "아니면" 갈래로만 닿아요</span>
+                  ) : step.step_type === 'condition' ? (
                     <div className="flex items-center gap-3">
                       <div className="flex flex-col items-center">
                         <ArrowDown className="w-4 h-4 text-emerald-300" />
-                        <span className="text-[9px] text-emerald-200/70">조건 충족</span>
+                        <span className="text-[11px] text-emerald-200/80">맞으면 다음 칸</span>
                       </div>
                       <div className="w-4 h-px bg-white/20" />
                       <div className="flex flex-col items-center">
                         <ArrowDown className="w-4 h-4 text-rose-300" />
-                        <span className="text-[9px] text-rose-200/70">조건 미충족 (skip)</span>
+                        {/* ★ 2026-09-29 V2 0차 ⑤ — 옛 "조건 미충족 (skip)"은 실행기와 반대였다. 미충족 = 지정한 칸으로 이동 · 없으면 여정 끝(journey-executor.ts). */}
+                        <span className="text-[11px] text-rose-200/80">
+                          {step.not_met_goto != null && step.not_met_goto > step.step_order ? `아니면 ${step.not_met_goto}번째 칸으로` : '아니면 여정 끝'}
+                        </span>
                       </div>
                     </div>
                   ) : (

@@ -30,6 +30,8 @@ import { buildExistingCustomerPredicate } from './journey-identity-signals';
 import { isBulkStateTrigger, resolveIntakeGraceDays, buildIntakeGraceClause } from './journey-intake-grace';
 import { buildSegmentBreakdown, SegmentBreakdown } from './journey-simulator-core';
 import type { CdpEventRow } from './journey-cdp-cursor';
+// ★ 2026-09-30 여정 V2 3차 — 상품 재구매: 상품 키 규칙은 journey-product 한 곳(진입 · 목표 · 목록이 같은 규칙).
+import { normalizeProductFilters, mallItemKeySql, mallItemsSql, ledgerProductKeySql } from './journey-product';
 
 export async function selectJourneyTargetCustomerIds(
   companyId: string,
@@ -37,7 +39,7 @@ export async function selectJourneyTargetCustomerIds(
   triggerFilters: Record<string, any>,
   limit: number,
   journeyId?: string,
-  reentry?: { allowReentry: boolean; cooldownDays: number },
+  reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },   // ★ 0930 V2 5차 lineageIds = 같은 계보(새 판 · 옛 판)
   // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자(또는 미리보기 요청자)의 분류코드 범위 조각(store-scope · 관리자 = 빈 조각).
   //   추출 SQL **안**(LIMIT 앞)에 건다 — 뒤에서 거르면 범위 밖 고객이 진입하지 않은 채 매 회차 상한을 차지해 범위 안 고객이 굶는다.
   scopeSql = '',
@@ -105,6 +107,9 @@ export async function selectJourneyTargetCustomerIds(
     case 'purchase.first':
     case 'customer.dormant_return':
       return selectCdpEvent(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql);
+    // ★ 2026-09-30 V2 3차 — 상품 재구매. 미리보기 · 인원 = 최근 7일 고른 상품 구매자(저장된 문 기준). 라이브는 커서 경로 + 상품 자격 필터.
+    case 'purchase.product':
+      return selectRecentProductBuyers(companyId, filters, limit, scopeSql);
     case 'cdp.reservation_created':
       return selectCdpEvent(companyId, 'reservation_created', filters, limit, undefined, undefined, scopeSql);
     // ★ 2026-06-22: 배송 시작 = 자사몰 custom 이벤트(cdp_events.event_name='custom_order_shipped'). 라이브는 watcher가 커서 경로 호출, 여기는 미리보기·카운트 추정.
@@ -115,7 +120,7 @@ export async function selectJourneyTargetCustomerIds(
     case 'customer.dormant': {
       const d = Number(filters.dormant_days || 30);
       const params: any[] = [companyId, String(d), String(d + 7)];
-      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       // 이관 유예 — 3년 전 최근구매일이 오늘 적재되면 그 사람은 즉시 휴면 대상이 된다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
@@ -141,7 +146,7 @@ export async function selectJourneyTargetCustomerIds(
     case 'cdp.cart_abandon': {
       const h = Number(filters.abandon_hours || 24);
       const params: any[] = [companyId, String(h)];
-      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -189,7 +194,7 @@ export async function selectJourneyTargetCustomerIds(
       const d = clampInt(filters.browse_days, 3, 1, 30);
       const h = d * 24;
       const params: any[] = [companyId, String(h)];
-      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -231,7 +236,7 @@ export async function selectJourneyTargetCustomerIds(
     case 'customer.cycle_lapsed': {
       const factor = Math.max(1.1, Math.min(5, Number(filters.cycle_factor) || 1.5));
       const params: any[] = [companyId, String(factor)];
-      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
@@ -280,7 +285,7 @@ export async function selectJourneyTargetCustomerIds(
     case 'customer.grade_changed': {
       if (!journeyId) return [];
       const params: any[] = [companyId, journeyId];
-      const antiJoin = reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const antiJoin = reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       try {
@@ -333,7 +338,7 @@ export async function selectJourneyTargetCustomerIds(
       const birthdayTargetMd = `TO_CHAR(${birthdayTarget}, 'MM-DD')`;
       const birthdayLeapMd = `CASE WHEN TO_CHAR(${birthdayTarget}, 'MM-DD') = '02-28' AND TO_CHAR(${birthdayTarget} + INTERVAL '1 day', 'MM-DD') = '03-01' THEN '02-29' END`;
       const params: any[] = [companyId, String(days)];
-      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -367,7 +372,7 @@ export async function selectJourneyTargetCustomerIds(
         params.push(String(cfg.inactiveDays));  // $3
         edgeClause = `(c.recent_purchase_date IS NULL OR c.recent_purchase_date < (${KST_TODAY_DATE_SQL} - ($3 || ' days')::interval))`;
       }
-      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       // 이관 유예 — inactivity 모드는 최근구매일 기반이라 이관 배치가 통째로 걸린다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
@@ -394,8 +399,12 @@ export async function selectJourneyTargetCustomerIds(
       const params: any[] = [companyId];
       let dedupClause = '';
       if (journeyId) {
-        params.push(journeyId);
-        dedupClause = `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $${params.length}::uuid AND je.customer_id = c.id)`;
+        // ★ 2026-09-30 V2 5차 — 새 판은 옛 판이 이미 보낸 고객을 다시 받지 않는다(계보 전체 · 계보 없으면 옛 문장 그대로).
+        const lineage = reentry?.lineageIds && reentry.lineageIds.length > 1 ? reentry.lineageIds : null;
+        params.push(lineage || journeyId);
+        dedupClause = lineage
+          ? `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = ANY($${params.length}::uuid[]) AND je.customer_id = c.id)`
+          : `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $${params.length}::uuid AND je.customer_id = c.id)`;
       }
       // 이관 유예 — 상시 세그먼트는 조건 맞는 전원이 들어오므로 이관 배치가 그대로 폭발한다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
@@ -450,6 +459,41 @@ export async function selectAnchorAudienceIds(
        ${cond ? ` AND ${cond}` : ''}
      ORDER BY c.id
      LIMIT $${params.length}::int`,
+    params,
+  );
+  return r.rows.map((x: any) => x.customer_id);
+}
+
+/**
+ * ★ 2026-09-30 여정 V2 3차 — 최근 7일 고른 상품을 산 고객(미리보기 · 대상 인원 추정). 상품 · 문이 없으면 0명(만들 수 없는 여정).
+ * 안전 필터 · 대상 조건 · 작성자 범위는 다른 트리거와 같다.
+ */
+async function selectRecentProductBuyers(
+  companyId: string,
+  filters: Record<string, any>,
+  limit: number,
+  scopeSql = '',
+): Promise<string[]> {
+  let pf;
+  try { pf = normalizeProductFilters(filters); } catch { return []; }
+  const params: any[] = [companyId, pf.product_keys];
+  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+  params.push(String(limit));
+  const buyers = pf.door === 'mall'
+    ? `SELECT DISTINCT e.customer_id FROM cdp_events e, ${mallItemsSql('e')} it
+        WHERE e.company_id = $1::uuid AND e.event_name = 'purchase' AND e.customer_id IS NOT NULL
+          AND e.occurred_at >= NOW() - INTERVAL '7 days'
+          AND ${mallItemKeySql('it')} = ANY($2::text[])`
+    : `SELECT DISTINCT p.customer_id FROM purchases p
+        WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
+          AND p.purchase_date >= ((NOW() AT TIME ZONE 'Asia/Seoul') - INTERVAL '7 days')
+          AND ${ledgerProductKeySql('p')} = ANY($2::text[])`;
+  const r = await query(
+    `SELECT b.customer_id FROM (${buyers}) b
+       INNER JOIN customers c ON c.id = b.customer_id AND c.company_id = $1::uuid
+      WHERE ${buildJourneySafetyFilter('c')}${scopeSql}
+        ${cond ? ` AND ${cond}` : ''}
+      LIMIT $${params.length}::int`,
     params,
   );
   return r.rows.map((x: any) => x.customer_id);
@@ -868,18 +912,113 @@ export async function countJourneyTargetCustomers(
 //   순수(파라미터 배열에 push). journey-simulator에서 이동(Phase 9 순환 참조 제거).
 // ════════════════════════════════════════════════════════════════════
 
+// ★ 2026-06-26: store_name(매장명)/store_code(매장코드) 추가 — 여정 자연어 타겟에서
+//   "매장명이 송파가락점인 회원" 같은 매장 세그먼트가 무시되고 전체 발송되던 #1 fix.
+//   customers.store_name varchar(100) / store_code varchar(50) (SCHEMA.md 검증).
+// ★ 2026-06-30 여정 일반화 — points 추가(날짜축/대상 조건에서 포인트를 일반 조건으로). customers.points numeric(SCHEMA 검증). 추가만 = 기존 경로 회귀 0.
+// ★ 2026-09-29 여정 V2 — 허용 목록을 밖으로 꺼내 저장 · 활성화 검증(findCustomerConditionIssues)과 같은 단일 출처로 쓴다.
+export const CUSTOMER_CONDITION_FIELDS = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in', 'store_name', 'store_code', 'points'] as const;
+export const CUSTOMER_CONDITION_OPS = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'] as const;
+
+export interface CustomerConditionIssue {
+  index: number;
+  field: string;
+  op: string;
+  reason: 'unknown_field' | 'unknown_op' | 'empty_value' | 'bad_shape' | 'bad_logic';
+}
+
+/**
+ * ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 검증(순수).
+ *   추출기(applyCustomerConditions)는 모르는 필드 · 연산자를 **조용히 건너뛴다** → 조건이 빠진 만큼 대상이 넓어진다
+ *   ("VIP만"이 "전 고객"이 된다). 추출기의 동작은 기존 활성 여정 보호를 위해 그대로 두고,
+ *   저장 · 활성화 길목이 이 함수로 거부한다(더 보내는 쪽으로 새는 입력을 발송 전에 막는다).
+ *   빈 목록 · 미지정 = 이슈 0(조건 없음은 유효한 선택이다 — 상시 여정 등).
+ */
+export function findCustomerConditionIssues(conditions: unknown, logic?: unknown): CustomerConditionIssue[] {
+  const issues: CustomerConditionIssue[] = [];
+  if (logic !== undefined && logic !== null && logic !== 'AND' && logic !== 'OR') {
+    issues.push({ index: -1, field: '', op: String(logic), reason: 'bad_logic' });
+  }
+  if (conditions === undefined || conditions === null) return issues;
+  if (!Array.isArray(conditions)) {
+    issues.push({ index: -1, field: '', op: '', reason: 'bad_shape' });
+    return issues;
+  }
+  conditions.forEach((raw: any, index: number) => {
+    if (!raw || typeof raw !== 'object') {
+      issues.push({ index, field: '', op: '', reason: 'bad_shape' });
+      return;
+    }
+    const field = String(raw.field ?? '');
+    const op = String(raw.op ?? '');
+    if (!(CUSTOMER_CONDITION_FIELDS as readonly string[]).includes(field)) {
+      issues.push({ index, field, op, reason: 'unknown_field' });
+      return;
+    }
+    if (!(CUSTOMER_CONDITION_OPS as readonly string[]).includes(op)) {
+      issues.push({ index, field, op, reason: 'unknown_op' });
+      return;
+    }
+    if (op === 'is_null' || op === 'not_null') return;
+    const v = raw.value;
+    const emptyList = (op === 'in' || op === 'not_in') && (Array.isArray(v) ? v.length === 0 : v === undefined || v === null || v === '');
+    if (emptyList || v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) {
+      issues.push({ index, field, op, reason: 'empty_value' });
+    }
+  });
+  return issues;
+}
+
+/**
+ * ★ 2026-09-29 여정 V2 — AI 초안용: 쓸 수 있는 조건만 남기고 빠진 것은 **문구로 돌려준다**(조용히 버리지 않는다).
+ *   저장 · 활성화는 findCustomerConditionIssues 로 거부하고, AI 생성 · 수정 결과는 이 함수로 걸러 화면에 "반영 안 됨"을 보인다.
+ */
+export function partitionCustomerConditions(filters: Record<string, any> | null | undefined): {
+  filters: Record<string, any>;
+  droppedNotices: string[];
+} {
+  const f: Record<string, any> = { ...(filters || {}) };
+  const droppedNotices: string[] = [];
+  if (f.logic !== undefined && f.logic !== 'AND' && f.logic !== 'OR') {
+    droppedNotices.push('대상 조건을 묶는 방식을 알 수 없어 "모두 만족"으로 두었어요.');
+    f.logic = 'AND';
+  }
+  if (f.customer_conditions === undefined || f.customer_conditions === null) return { filters: f, droppedNotices };
+  if (!Array.isArray(f.customer_conditions)) {
+    droppedNotices.push('대상 조건의 모양이 올바르지 않아 반영하지 못했어요.');
+    f.customer_conditions = [];
+    return { filters: f, droppedNotices };
+  }
+  const kept: any[] = [];
+  f.customer_conditions.forEach((c: any, i: number) => {
+    const issues = findCustomerConditionIssues([c]);
+    if (issues.length === 0) kept.push(c);
+    else droppedNotices.push(`반영 안 됨: ${describeCustomerConditionIssue({ ...issues[0], index: i })}`);
+  });
+  f.customer_conditions = kept;
+  return { filters: f, droppedNotices };
+}
+
+/** 이슈 → 화면 문구(고객 언어 · 내부 필드명 노출 없음). 첫 이슈 하나로 안내한다. */
+export function describeCustomerConditionIssue(issue: CustomerConditionIssue): string {
+  const n = issue.index >= 0 ? `대상 조건 ${issue.index + 1}번째` : '대상 조건';
+  switch (issue.reason) {
+    case 'unknown_field': return `${n}은 여정에서 쓸 수 없는 항목이라 저장하지 않았어요. 등급 · 지역 · 나이 · 구매 횟수 · 총 구매액 · 매장 · 포인트 · 수신 동의로 다시 골라 주세요.`;
+    case 'unknown_op': return `${n}의 비교 방식을 알 수 없어요. 다시 골라 주세요.`;
+    case 'empty_value': return `${n}의 값이 비어 있어요. 값을 넣어 주세요.`;
+    case 'bad_logic': return '대상 조건을 묶는 방식(모두 만족 / 하나라도 만족)을 알 수 없어요. 다시 골라 주세요.';
+    default: return `${n}의 모양이 올바르지 않아요. 다시 만들어 주세요.`;
+  }
+}
+
 export function applyCustomerConditions(
   conditions: Array<{ field: string; op: string; value: any }>,
   logic: 'AND' | 'OR',
   params: any[],
 ): string | null {
   if (!conditions || conditions.length === 0) return null;
-  // ★ 2026-06-26: store_name(매장명)/store_code(매장코드) 추가 — 여정 자연어 타겟에서
-  //   "매장명이 송파가락점인 회원" 같은 매장 세그먼트가 무시되고 전체 발송되던 #1 fix.
-  //   customers.store_name varchar(100) / store_code varchar(50) (SCHEMA.md 검증).
-  // ★ 2026-06-30 여정 일반화 — points 추가(날짜축/대상 조건에서 포인트를 일반 조건으로). customers.points numeric(SCHEMA 검증). 추가만 = 기존 경로 회귀 0.
-  const allowedFields = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in', 'store_name', 'store_code', 'points'];
-  const allowedOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
+  const allowedFields: readonly string[] = CUSTOMER_CONDITION_FIELDS;
+  const allowedOps: readonly string[] = CUSTOMER_CONDITION_OPS;
   const clauses: string[] = [];
 
   for (const cond of conditions) {

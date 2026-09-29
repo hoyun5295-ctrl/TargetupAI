@@ -24,8 +24,25 @@ import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
 import { validateAlimtalkFallback, AlimtalkFallbackError } from './alimtalk-fallback';
 // ★ 2026-08-01 여정 재설계 — 활성화가 발송이 시작되는 유일한 길목이라 게이트를 여기 둔다(Codex 4R).
-import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, requiresRecipientCap, CAP_EXEMPT_TRIGGERS, isImplementedTriggerEvent, getTriggerContract } from './journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, requiresRecipientCap, CAP_EXEMPT_TRIGGERS, isImplementedTriggerEvent, getTriggerContract, goalKindForTrigger, defaultGoalExitFor, isProductPickTrigger } from './journey-trigger-capability';
+// ★ 2026-09-30 여정 V2 3차 — 상품 재구매 필터 검증(상품 · 문) · 키 규칙은 journey-product 한 곳.
+import { normalizeProductFilters } from './journey-product';
+// ★ 2026-09-30 여정 V2 4차 — 활성화는 그래프 CT 의 구조 결함(닿지 않는 칸 · 첫 칸이 끝 칸)을 막는다(그림과 같은 규칙).
+import { buildJourneyGraph } from './journey-graph';
+// ★ 2026-09-30 여정 V2 5차 — 새 판을 켜면 같은 트랜잭션에서 같은 계보의 옛 판 진입을 닫는다(진행 중 고객만 마무리).
+import { lineageColumnsReady, lockLineageEntry, CLOSE_OTHER_VERSIONS_ENTRY_SQL, INHERIT_ENTRY_CURSORS_SQL } from './journey-lineage';
+// ★ 2026-09-29 V2 (회의론자 0차 검증 2-나) — 생성 경로의 타이밍 필터도 옵션 PATCH 와 같은 정규화를 지난다(AI 가 지은 값 clamp).
+import { normalizeJourneyOptions } from './journey-options-validator';
 import { getCompanyJourneyFacts } from './company-data-profile';
+// ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 칸 종류 · 개수 · 대기 상한은 CT 한 곳(자르지 않고 거부 · 모르는 종류는 거부).
+import {
+  MAX_JOURNEY_STEPS, MAX_STEP_DELAY_HOURS, MAX_WAIT_TIMEOUT_HOURS, isKnownStepType, resolveStepType,
+  assertStepCountWithinLimit, assertStepsWithinLimit, MAX_MESSAGE_STEPS, JourneyInputError,
+} from './journey-step-limits';
+// ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 검증은 추출기와 같은 허용 목록(단일 출처).
+import { findCustomerConditionIssues, describeCustomerConditionIssue } from './journey-target-extractor';
+
+export { MAX_JOURNEY_STEPS, JourneyInputError };
 
 // 앵커 반복 규칙 화이트리스트 — 설계 잠금(4종). 미지원 값은 'none'으로.
 const ANCHOR_RECURRENCES = ['none', 'monthly_day', 'monthly_last', 'yearly'];
@@ -48,7 +65,8 @@ export type JourneyTemplateCode =
   | 'custom';
 
 export type JourneyStatus = 'draft' | 'active' | 'paused' | 'ended';
-export type StepType = 'message' | 'wait' | 'condition';
+// ★ 2026-09-30 V2 4차 — 'end'(끝 칸 · 발송 0). 저장은 JOURNEY_END_CHIP_ENABLED 일 때만(journey-step-limits isKnownStepType).
+export type StepType = 'message' | 'wait' | 'condition' | 'end';
 export type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao' | 'email';
 
 export interface JourneyStepDefinition {
@@ -112,7 +130,10 @@ export interface CreateJourneyInput {
   budgetMonthly?: number | null;
   allowReentry?: boolean;
   reentryCooldownDays?: number | null;
-  /** ★ 2026-07-10 목표 달성 시 자동 종료 — 진입 이후 구매 확인 시 잔여 step 중단 (기본 false) */
+  /**
+   * ★ 2026-07-10 목표 달성 시 자동 종료 — 진입 이후 구매 확인 시 잔여 step 중단.
+   * ★ 2026-09-29 V2 0차 ⑪ — 값을 주지 않으면(undefined) 트리거 계약에서 파생한다(새 여정). 명시값은 그대로.
+   */
   goalExitEnabled?: boolean;
   // ★ 2026-06-30 여정 일반화 — 시작 방식(start_kind) 1급화 + 날짜축/one_shot 필드.
   startKind?: StartKind;                 // 미지정 시 classifyStartKind(triggerEvent)로 도출
@@ -131,8 +152,7 @@ export interface CreateJourneyInput {
 //   email-ai.ts hasUneditedPlaceholder 패턴과 동일 철학.
 const PLACEHOLDER_PATTERN = /\[[^\[\]\n]{0,80}(직접|작성해|수정해|입력해|URL)[^\[\]\n]{0,80}\]/;
 
-// 여정 step 최대 지연(시간) = 365일. 생성·AI생성·편집 전 경로 공통(상한 불일치 정정 #9).
-const MAX_STEP_DELAY_HOURS = 8760;
+// 여정 step 최대 지연(시간) = 365일 — ★ 2026-09-29 V2: journey-step-limits CT 가 소유(여기서 다시 적지 않는다).
 
 export function hasUneditedPlaceholder(message: string | null | undefined): boolean {
   if (!message) return true;
@@ -282,12 +302,19 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
 
   let steps: JourneyStepDefinition[];
   if (input.steps && input.steps.length > 0) {
+    // ★ 2026-09-29 V2 0차 ⑧ — 생성 경로에는 칸 수 상한이 없었다(추가 경로에만 있었다). 넘치면 자르지 않고 거부.
+    // ★ 2026-09-30 V2 4차 — 문자 칸 7 + 전체 12(갈림 두 갈래 여유).
+    assertStepsWithinLimit(input.steps, '여정 저장');
     steps = input.steps.map((s, idx) => {
       const channel = s.channel || 'lms';
+      const stepType = resolveStepType(s.stepType, `${idx + 1}번째 칸`);
+      if (stepType === 'end' && idx === 0) throw new JourneyInputError('첫 칸은 끝 칸일 수 없어요. 끝 칸은 한 갈래를 마치는 자리에 둡니다.');
       return {
         stepOrder: s.stepOrder || idx + 1,
-        stepType: s.stepType || 'message',
-        delayHours: Math.max(0, Math.min(MAX_STEP_DELAY_HOURS, Number(s.delayHours) || 0)),
+        // ★ 2026-09-29 V2 0차 ⑩ — 옛: `s.stepType || 'message'` = 모르는 값이 검증 없이 저장됐다(실행기는 문자로 보낸다).
+        stepType,
+        // ★ 2026-09-30 V2 4차 — 끝 칸은 기다리지 않는다(도착하면 그 자리에서 끝 · 대기 0 고정).
+        delayHours: stepType === 'end' ? 0 : Math.max(0, Math.min(MAX_STEP_DELAY_HOURS, Number(s.delayHours) || 0)),
         channel,
         messageTemplate: (s.messageTemplate || '').slice(0, 2000),
         subject: channel === 'sms' ? '' : (s.subject || '').slice(0, 50),
@@ -297,7 +324,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         notMetGoto: s.notMetGoto != null && Number.isFinite(Number(s.notMetGoto)) ? Math.floor(Number(s.notMetGoto)) : undefined,
         waitEventName: typeof s.waitEventName === 'string' && s.waitEventName.trim() ? s.waitEventName.trim().slice(0, 50) : undefined,
         waitTimeoutHours: s.waitTimeoutHours != null && Number.isFinite(Number(s.waitTimeoutHours)) && Number(s.waitTimeoutHours) > 0
-          ? Math.min(720, Math.floor(Number(s.waitTimeoutHours)))
+          ? Math.min(MAX_WAIT_TIMEOUT_HOURS, Math.floor(Number(s.waitTimeoutHours)))
           : undefined,
         // ★ Phase 9 fix: 발송 시점(시각) + 알림톡/MMS 필드 보존 — 이전엔 map에서 누락돼 09시·알림톡 설정이 저장 안 됐음.
         delayMode: s.delayMode,
@@ -322,8 +349,8 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   }
 
   const journeyName = input.name || tmpl.name;
-  const allowReentry = input.allowReentry !== undefined ? input.allowReentry : tmpl.allowReentry;
-  const reentryCooldownDays = input.reentryCooldownDays !== undefined ? input.reentryCooldownDays : tmpl.reentryCooldownDays;
+  let allowReentry = input.allowReentry !== undefined ? input.allowReentry : tmpl.allowReentry;
+  let reentryCooldownDays = input.reentryCooldownDays !== undefined ? input.reentryCooldownDays : tmpl.reentryCooldownDays;
 
   // ★ 2026-06-30 여정 일반화 — 트리거/대상 오버라이드(미지정 시 템플릿 기본) + start_kind 도출 + 앵커 값.
   //   event = 거래 이벤트 트리거 / standing·one_shot·date_anchor = 'custom'(대상 조건 audience). 회귀: 미지정이면 옛 동작 그대로.
@@ -335,7 +362,27 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   if (!isImplementedTriggerEvent(resolvedTriggerEvent)) {
     throw new Error('지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.');
   }
-  const resolvedTriggerFilters = input.triggerFilters !== undefined ? input.triggerFilters : tmpl.triggerFilters;
+  const rawTriggerFilters = input.triggerFilters !== undefined ? input.triggerFilters : tmpl.triggerFilters;
+  // ★ 2026-09-29 V2 (회의론자 0차 검증 2-나) — 타이밍 키(휴면 일수 · 방치 시간 등)는 옵션 PATCH 와 같은 범위로 정규화한다.
+  //   옛: 생성 경로는 원문 그대로 저장해 AI 가 지은 "휴면 1일" 같은 값이 그대로 발송 조건이 됐다. 대상 조건 · 그 밖 키는 그대로 둔다.
+  const resolvedTriggerFilters: Record<string, unknown> = {
+    ...((rawTriggerFilters || {}) as Record<string, unknown>),
+    ...normalizeJourneyOptions((rawTriggerFilters || {}) as Record<string, any>).triggerFilters,
+  };
+  // ★ 2026-09-29 여정 V2 0차 ② — 모르는 대상 조건은 저장에서 거부한다. 추출기는 모르는 항목을 조용히 건너뛰어
+  //   "VIP만"이 "전 고객"이 된다(더 보내는 쪽으로 샘). 화면이 보여 준 대상과 저장되는 대상이 같아야 한다.
+  {
+    const rf: any = resolvedTriggerFilters || {};
+    const issues = findCustomerConditionIssues(rf.customer_conditions, rf.logic);
+    if (issues.length > 0) throw new JourneyInputError(describeCustomerConditionIssue(issues[0]));
+  }
+  // ★ 2026-09-30 여정 V2 3차 — 상품 재구매: 상품 · 문이 없으면 거부(만들어도 영영 0건).
+  //   새 주기(같은 상품 재구매)마다 다시 받아야 하므로 재진입 켜짐 · 쿨다운 0 · 진입 교체 켜짐을 서버가 고정한다(설계서 §6 · 승인 결정 3).
+  if (isProductPickTrigger(resolvedTriggerEvent)) {
+    Object.assign(resolvedTriggerFilters, normalizeProductFilters(resolvedTriggerFilters as Record<string, any>), { entry_replace: true });
+    allowReentry = true;
+    reentryCooldownDays = 0;
+  }
   const startKind: StartKind = normalizeStartKind(
     input.startKind || classifyStartKind(resolvedTriggerEvent, { expiryMode: (resolvedTriggerFilters as any)?.expiry_mode }),
   );
@@ -353,7 +400,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       threshold_recipients_per_step, threshold_cost_per_step, threshold_risk_level,
       callback_number, callback_mode,
       start_kind, anchor_date, anchor_recurrence, anchor_recurrence_day, anchor_hour_kst, one_shot_scheduled_at,
-      goal_exit_enabled,
+      goal_exit_enabled, goal_kind,
       created_by, created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2, $3, $4, $5::jsonb,
@@ -361,7 +408,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       $9, $10, $11,
       $12, $13,
       $15, $16::date, $17, $18, $19, $20::timestamptz,
-      $21,
+      $21, $22,
       $14::uuid, NOW(), NOW()
     ) RETURNING id`,
     [
@@ -385,7 +432,11 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       anchorRecurrenceDayVal,
       anchorHourKstVal,
       oneShotScheduledAtVal,
-      input.goalExitEnabled === true,  // ★ 2026-07-10 목표 달성 자동 종료 (실측 컬럼 — DDL 실행 확인)
+      // ★ 2026-07-10 목표 달성 자동 종료 (실측 컬럼 — DDL 실행 확인) · ★ 0929 V2 0차 ⑪ 미지정 = 계약 파생
+      typeof input.goalExitEnabled === 'boolean' ? input.goalExitEnabled : defaultGoalExitFor(resolvedTriggerEvent),
+      // ★ 2026-09-29 여정 V2 0차 ⑫(Harold 승인 결정 2) — 새 여정의 목표 종류를 트리거 계약에서 정한다.
+      //   옛: 컬럼 기본값 'purchase'라 포인트 소멸 여정도 "구매"로 끝났다. goal_kind = 0929 information_schema 실측 컬럼(NOT NULL · CHECK 없음).
+      goalKindForTrigger(resolvedTriggerEvent),
     ]
   );
 
@@ -394,8 +445,30 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   // ★ 2026-08-02 §13-1: step INSERT는 insertJourneyStepRow 단일 정의를 쓴다.
   //   저장 후 스텝 추가 API(addJourneyStep)가 같은 컬럼 집합을 두 번째로 적으면 알림톡·MMS·앵커 컬럼이
   //   한쪽에만 추가되는 어긋남이 생긴다 — 그래서 생성 경로도 같은 함수를 부른다.
+  // ★ 2026-09-30 여정 V2 4차 — "이 칸 링크를 눌렀나" 조건은 검토 화면에서 칸 번호(step_ref_order)로 고른다(저장 전엔 칸 id 가 없다).
+  //   저장 뒤 그 번호의 칸 id 로 바꿔 넣는다(실행기 · 활성화 검증 · 통계는 step_id 축). 앞쪽 문자 칸만 받는다.
+  const byOrder = new Map(steps.map((st) => [Number(st.stepOrder), st]));
+  for (const st of steps) {
+    const c: any = st.stepType === 'condition' ? st.conditionJsonb : null;
+    if (c && c.type === 'step_link_clicked' && !c.step_id) {
+      const ref = Number(c.step_ref_order);
+      const target = byOrder.get(ref);
+      if (!Number.isFinite(ref) || !target || ref >= Number(st.stepOrder) || target.stepType !== 'message') {
+        throw new JourneyInputError(`${st.stepOrder}번째 조건 칸: 링크를 볼 앞쪽 문자 칸을 골라 주세요.`);
+      }
+    }
+  }
+  const idByOrder = new Map<number, string>();
   for (const step of steps) {
-    await insertJourneyStepRow(journeyId, step);
+    const stepId = await insertJourneyStepRow(journeyId, step);
+    idByOrder.set(Number(step.stepOrder), stepId);
+  }
+  for (const st of steps) {
+    const c: any = st.stepType === 'condition' ? st.conditionJsonb : null;
+    if (c && c.type === 'step_link_clicked' && !c.step_id) {
+      const converted = { type: 'step_link_clicked', step_id: idByOrder.get(Number(c.step_ref_order)), clicked: c.clicked !== false };
+      await query(`UPDATE journey_steps SET condition_jsonb = $2::jsonb WHERE id = $1::uuid`, [idByOrder.get(Number(st.stepOrder)), JSON.stringify(converted)]);
+    }
   }
 
   return { journeyId };
@@ -531,10 +604,11 @@ JSON 형식만 응답:
   const parsed = JSON.parse(jsonStr);
   const rawSteps: any[] = Array.isArray(parsed.steps) ? parsed.steps : [];
 
-  // ★ D188 Phase 2-B-1 (2026-05-21): step_type 3종 정합 — message/wait/condition.
-  //   AI가 잘못된 step_type 반환 시 'message' default. condition_jsonb 정합 검증 X — activateJourney에서 검증.
-  const steps: JourneyStepDefinition[] = rawSteps.slice(0, 7).map((s: any, idx: number) => {
-    const stepType: StepType = ['message', 'wait', 'condition'].includes(s.stepType) ? s.stepType : 'message';
+  // ★ D188 Phase 2-B-1 (2026-05-21): step_type 3종 정합 — message/wait/condition. condition_jsonb 정합 검증 X — activateJourney에서 검증.
+  // ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 옛: 7칸 넘는 응답은 조용히 잘랐고 모르는 종류는 문자로 바꿨다. 이제 둘 다 거부한다.
+  assertStepsWithinLimit(rawSteps, 'AI 생성 결과');
+  const steps: JourneyStepDefinition[] = rawSteps.map((s: any, idx: number) => {
+    const stepType: StepType = resolveStepType(s.stepType, `AI 생성 ${idx + 1}번째 칸`);
     const base: JourneyStepDefinition = {
       stepOrder: idx + 1,
       stepType,
@@ -572,6 +646,8 @@ export async function activateJourney(companyId: string, journeyId: string, user
             j.trigger_event, j.threshold_recipients_per_step,
             j.allow_reentry, j.reentry_cooldown_days, j.trigger_filters,
             (SELECT json_agg(json_build_object(
+              'id', id,
+              'notMetGoto', not_met_goto,
               'order', step_order,
               'type', step_type,
               'message', message_template,
@@ -637,6 +713,15 @@ export async function activateJourney(companyId: string, journeyId: string, user
     }
   }
 
+  // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 최종 게이트. 저장이 먼저 막지만 옛 저장분 · 직접 UPDATE가 남을 수 있어
+  //   발송이 시작되는 유일한 길목(활성화)에서 한 번 더 본다. 추출기는 모르는 항목을 조용히 건너뛰어 대상을 넓힌다.
+  {
+    const tf: any = row.trigger_filters || {};
+    const issues = findCustomerConditionIssues(tf.customer_conditions, tf.logic);
+    // (회의론자 0차 검증 2-다) 저장된 여정은 대상 조건을 고치는 화면이 없다 — "다시 골라 주세요"가 아니라 새로 만들라고 말한다.
+    if (issues.length > 0) return { ok: false, reason: `${describeCustomerConditionIssue(issues[0])} 저장된 여정은 대상 조건을 고칠 수 없어 여정을 새로 만들어야 해요.` };
+  }
+
   // ★ §11-5(§9-N6 종결) — 포인트 임계 양수 강제. 기본값 0은 사실상 전원이다.
   if (triggerEvent === 'customer.points_expiring') {
     const pm = Number((row.trigger_filters || {}).points_min);
@@ -675,8 +760,24 @@ export async function activateJourney(companyId: string, journeyId: string, user
       return { ok: false, reason: '1회 발송(one_shot) 여정은 발송 step이 정확히 1개여야 합니다.' };
     }
   }
+  // ★ 2026-09-30 V2 4차 — 갈림 구조 결함은 켜지 않는다(끝 칸 뒤 칸이 어느 갈래에서도 닿지 않음 · 첫 칸이 끝 칸).
+  {
+    const graph = buildJourneyGraph(
+      steps.map((x: any) => ({ id: String(x.id || ''), step_order: Number(x.order), step_type: String(x.type || 'message'), delay_hours: Number(x.delay || 0), not_met_goto: x.notMetGoto ?? null })),
+      { goalExitEnabled: false, startKind: row.start_kind },
+    );
+    if (graph.blockingIssues.length > 0) return { ok: false, reason: graph.blockingIssues[0] };
+  }
+  const stepIdOrder = new Map<string, { order: number; type: string }>(steps.map((x: any) => [String(x.id || ''), { order: Number(x.order), type: String(x.type || 'message') }]));
+
   for (const s of steps) {
     const stepType = String(s.type || 'message');
+
+    // ★ 2026-09-30 V2 4차 — 끝 칸: 발송 0 · 대기 0 고정. 본문 검증 없음.
+    if (stepType === 'end') {
+      if (Number(s.delay || 0) !== 0) return { ok: false, reason: `step ${s.order} (끝) 끝 칸은 기다리지 않아요. 대기 시간을 0으로 두세요.` };
+      continue;
+    }
 
     // ★ D188 Phase 2-B-1: step_type별 검증 분기
     // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step delay_mode 영역 검증 추가
@@ -716,7 +817,8 @@ export async function activateJourney(companyId: string, journeyId: string, user
         return { ok: false, reason: `step ${s.order} (condition) condition_jsonb 미설정. 조건을 작성해주세요.` };
       }
       const condType = String((cond as any).type || '');
-      const validTypes = ['customer_field', 'cdp_event_exists', 'journey_step_clicked'];
+      // ★ 2026-09-30 V2 4차 — 새 조건 2종: 이 여정에 들어온 뒤 구매했나 · 이 칸 링크를 눌렀나(통계와 같은 step_id 축).
+      const validTypes = ['customer_field', 'cdp_event_exists', 'journey_step_clicked', 'purchase_since_entry', 'step_link_clicked'];
       if (!validTypes.includes(condType)) {
         return { ok: false, reason: `step ${s.order} (condition) type은 ${validTypes.join(' / ')} 중 하나여야 합니다.` };
       }
@@ -771,6 +873,22 @@ export async function activateJourney(companyId: string, journeyId: string, user
         if (typeof clicked !== 'boolean') {
           return { ok: false, reason: `step ${s.order} (condition journey_step_clicked) clicked 영역 = true / false 의무.` };
         }
+      }
+
+      // ★ 2026-09-30 V2 4차 — purchase_since_entry: purchased = true(샀으면) / false(안 샀으면) · 없으면 true.
+      if (condType === 'purchase_since_entry') {
+        const purchased = (cond as any).purchased;
+        if (purchased !== undefined && typeof purchased !== 'boolean') {
+          return { ok: false, reason: `step ${s.order} (조건: 들어온 뒤 구매) "샀으면 / 안 샀으면" 중 하나를 골라 주세요.` };
+        }
+      }
+      // ★ 2026-09-30 V2 4차 — step_link_clicked: 이 여정의 **앞쪽 문자 칸** 하나 + clicked(true/false).
+      if (condType === 'step_link_clicked') {
+        const target = stepIdOrder.get(String((cond as any).step_id || ''));
+        if (!target) return { ok: false, reason: `step ${s.order} (조건: 링크 클릭) 볼 문자 칸을 이 여정 안에서 골라 주세요.` };
+        if (target.type !== 'message') return { ok: false, reason: `step ${s.order} (조건: 링크 클릭) 링크를 볼 칸은 문자 칸이어야 해요.` };
+        if (target.order >= Number(s.order)) return { ok: false, reason: `step ${s.order} (조건: 링크 클릭) 앞쪽 문자 칸만 볼 수 있어요.` };
+        if (typeof (cond as any).clicked !== 'boolean') return { ok: false, reason: `step ${s.order} (조건: 링크 클릭) "눌렀으면 / 안 눌렀으면" 중 하나를 골라 주세요.` };
       }
 
       continue; // condition step은 본문 검증 skip
@@ -849,7 +967,27 @@ export async function activateJourney(companyId: string, journeyId: string, user
     return { ok: false, reason: '진입 기준 기록에 실패해 여정을 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
   }
 
-  const r = await query(
+  // ★ 2026-09-30 V2 5차 — 활성화와 옛 판 진입 닫기를 한 트랜잭션으로(켜졌는데 옛 판도 새 고객을 받는 틈 0).
+  //   DDL(lineage_id · entry_closed_at) 전이면 닫기 문장을 내지 않는다(옛 동작 그대로).
+  //   ★ 0930 Codex 2R — 확인 오류를 "DDL 전"으로 접지 않는다. 모르면 켜지 않는다(켜고 옛 판 닫기를 건너뛰면 두 판이 새 고객을 받는다).
+  let closeOthers: boolean;
+  try {
+    closeOthers = await lineageColumnsReady();
+  } catch (e: any) {
+    console.warn('[activateJourney] 계보 컬럼 확인 실패 — 활성화 중단:', e?.message);
+    return { ok: false, reason: '여정 상태를 확인하지 못해 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
+  }
+  // DDL 전(계보 컬럼 없음) = 옛 경로 그대로(단일 문장). 계보가 있을 때만 트랜잭션으로 묶는다.
+  const actClient: { query: (text: string, params?: any[]) => Promise<any>; release?: () => void } = closeOthers ? await pool.connect() : { query: (text: string, params?: any[]) => query(text, params) };
+  let r: { rows: any[] };
+  let inheritConflict = false;
+  try {
+    if (closeOthers) {
+      await actClient.query('BEGIN');
+      // ★ 0930 Codex 3R — 진입 워커 · 재진입 워커와 같은 진입 잠금을 켜기 전에 잡는다(켜기 · 옛 판 닫기와 진입이 엇갈리지 않게).
+      await lockLineageEntry(actClient, journeyId);
+    }
+    r = await actClient.query(
     `UPDATE journeys SET
       status = 'active',
       approved_by = $3::uuid,
@@ -869,7 +1007,24 @@ export async function activateJourney(companyId: string, journeyId: string, user
     //   라우트가 SELECT로 마커를 확인한 뒤 여기까지 오는 사이에 스텝이 추가되면(추가는 마커를 NULL로 만든다)
     //   확인은 통과했는데 검사받지 않은 문안이 켜진다. 확인과 반영이 갈라져 있으면 그 틈이 곧 구멍이다.
     [journeyId, companyId, userId, CAP_EXEMPT_TRIGGERS]
-  );
+    );
+    if (r.rows.length > 0 && closeOthers) {
+      // ★ 0930 Codex 3R · 4R — 닫기 전에 켜진 옛 판 커서 이어받기. 이어받을 판이 둘 이상(비정상)이면 켜지 않는다(누락 · 재처리 0).
+      const inh = await actClient.query(INHERIT_ENTRY_CURSORS_SQL, [journeyId]);
+      if (Number(inh.rows[0]?.sources || 0) > 1) inheritConflict = true;
+      else await actClient.query(CLOSE_OTHER_VERSIONS_ENTRY_SQL, [journeyId]);
+    }
+    if (closeOthers) await actClient.query(inheritConflict ? 'ROLLBACK' : 'COMMIT');
+  } catch (txErr) {
+    if (closeOthers) await actClient.query('ROLLBACK').catch(() => {});
+    throw txErr;
+  } finally {
+    actClient.release?.();
+  }
+  if (inheritConflict) {
+    console.warn(`[activateJourney] 같은 계보에 새 고객을 받는 옛 판이 둘 이상 — 활성화 되돌림 journey=${journeyId}`);
+    return { ok: false, reason: '같은 여정의 다른 판 둘 이상이 아직 새 고객을 받고 있어 켜지 못했습니다. 옛 판 하나를 멈춘 뒤 다시 켜 주세요.' };
+  }
   if (r.rows.length === 0) {
     return { ok: false, reason: '여정 설정이 방금 바뀌어 켜지 못했습니다. 새로고침 후 다시 시도해 주세요.' };
   }
@@ -887,7 +1042,7 @@ export async function activateJourney(companyId: string, journeyId: string, user
       await query(
         `UPDATE journeys SET last_event_cursor = NOW()
           WHERE id = $1::uuid
-            AND trigger_event IN ('cdp.purchase', 'purchase.first', 'customer.dormant_return', 'cdp.reservation_created')
+            AND trigger_event IN ('cdp.purchase', 'purchase.first', 'customer.dormant_return', 'purchase.product', 'cdp.reservation_created')
             AND last_event_cursor IS NULL`,
         [journeyId],
       );
@@ -909,7 +1064,7 @@ export async function activateJourney(companyId: string, journeyId: string, user
       await query(
         `UPDATE journeys SET last_purchase_cursor = $2::timestamptz
           WHERE id = $1::uuid
-            AND trigger_event IN ('cdp.purchase', 'purchase.first', 'customer.dormant_return')
+            AND trigger_event IN ('cdp.purchase', 'purchase.first', 'customer.dormant_return', 'purchase.product')
             AND last_purchase_cursor IS NULL`,
         [journeyId, r.rows[0].approved_at],
       );
@@ -1007,6 +1162,11 @@ export async function updateJourneyStep(
     allowActiveMessageEdit?: boolean;
   }
 ): Promise<boolean> {
+  // ★ 2026-09-29 여정 V2 0차 ⑩ (회의론자 0차 검증 3) — 칸 편집 경로에도 칸 종류 화이트리스트를 건다.
+  //   옛: `step_type = COALESCE($n, step_type)`로 모르는 값이 그대로 저장됐다(실행기는 이제 그 칸을 보내지 않고 끝낸다 = 조용한 0건).
+  if (patch.stepType !== undefined && patch.stepType !== null && !isKnownStepType(patch.stepType)) {
+    throw new JourneyInputError('알 수 없는 칸 종류라 저장하지 않았어요. 문자 · 대기 · 조건 중에서 골라 주세요.');
+  }
   // ⛔ 2026-08-02 Codex 5R — 활성 상태 게이트는 **잠금 안에서** 판정한다(아래 withJourneyValidationReset).
   //   여기서 미리 읽으면 그 직후 활성화가 먼저 잠금을 가져갔을 때, 운영 중 여정을 비활성인 줄 알고 고친다.
   const assertActiveEditAllowed = (status: string): boolean => {
@@ -1159,8 +1319,7 @@ export async function updateJourneyStep(
 //   (condeferrable = f — 2026-08-02 pg_constraint 실조회) 한 문장으로 당기면 갱신 순서에 따라 충돌한다 → 2단계로 옮긴다.
 // ════════════════════════════════════════════════════════════════════
 
-/** step 상한 — 화면(JourneysPage)과 같은 값. 서버가 단일 출처로 강제한다. */
-export const MAX_JOURNEY_STEPS = 7;
+/** step 상한 — ★ 2026-09-29 V2: journey-step-limits CT 가 소유(위 import · 재수출). 화면(JourneysPage)과 같은 값. */
 
 /** 재번호 임시 자리 — 상한이 7이라 실제 순번과 겹칠 수 없다. */
 const RENUMBER_OFFSET = 1000;
@@ -1168,9 +1327,11 @@ const RENUMBER_OFFSET = 1000;
 /**
  * ⛔ 런타임 화이트리스트 (Codex 1R P2-4) — **TypeScript 유니온은 `req.body`를 검사하지 않는다.**
  *   `stepType: 'unknown'`이 그대로 저장되면 실행기는 message 경로로 흘려보내고, 그 step은
- *   아무도 의도하지 않은 문안을 보낸다. 값 집합은 SCHEMA의 CHECK·주석과 같은 집합이다.
+ *   아무도 의도하지 않은 문안을 보낸다.
+ * ★ 2026-09-29 정정 — 옛 주석은 "SCHEMA의 CHECK와 같은 집합"이라 했지만 journey_steps.step_type 에는 CHECK가 없다
+ *   (0929 pg_constraint 실측: UNIQUE(journey_id, step_order) 뿐). **이 화이트리스트가 유일한 문이다** — 값 집합은
+ *   journey-step-limits CT(KNOWN_STEP_TYPES)가 소유한다.
  */
-const STEP_TYPES = ['message', 'wait', 'condition'];
 /**
  * ⛔ 집합의 출처는 **실제로 검사·발송하는 쪽**이다 (Codex 2R).
  *   `ChannelType`에는 email이 있지만 활성화 사전검사는 kakao·sms·lms·mms만 처리하고
@@ -1392,7 +1553,7 @@ export async function addJourneyStep(
     throw new JourneyStepGateError('조건 스텝은 조건 설정이 있어야 합니다.', 'CONDITION_REQUIRED');
   }
   // 런타임 화이트리스트 — 타입 유니온은 요청 본문을 검사하지 않는다.
-  if (!STEP_TYPES.includes(String(step.stepType))) {
+  if (!isKnownStepType(step.stepType)) {
     throw new JourneyStepGateError('지원하지 않는 스텝 종류입니다.', 'INVALID_STEP_TYPE');
   }
   // ⛔ message 스텝은 채널이 **반드시** 있어야 한다. 비워 두면 검증도 건너뛰고 실행기가 기본 경로로 보낸다.
@@ -1430,8 +1591,25 @@ export async function addJourneyStep(
          FROM journey_steps WHERE journey_id = $1::uuid`,
       [journeyId]
     );
+    // ★ 2026-09-30 V2 4차 — 문자 칸 수 · 갈림 유무는 따로 센다(행이 없으면 0 · 없음).
+    const kinds = await run(
+      `SELECT COUNT(*) FILTER (WHERE COALESCE(step_type, 'message') = 'message')::int AS msgs,
+              COUNT(*) FILTER (WHERE step_type IN ('condition', 'end'))::int AS branches
+         FROM journey_steps kjs WHERE kjs.journey_id = $1::uuid`,
+      [journeyId]
+    );
+    const msgCount = Number(kinds.rows[0]?.msgs || 0);
+    const branchCount = Number(kinds.rows[0]?.branches || 0);
     if (agg.rows[0].n >= MAX_JOURNEY_STEPS) {
       throw new JourneyStepGateError(`스텝은 최대 ${MAX_JOURNEY_STEPS}개까지 만들 수 있습니다.`, 'STEP_LIMIT');
+    }
+    // ★ 2026-09-30 V2 4차 — 문자 칸은 7개까지(전체 12 안에서).
+    if (String(step.stepType || 'message') === 'message' && msgCount >= MAX_MESSAGE_STEPS) {
+      throw new JourneyStepGateError(`문자 칸은 최대 ${MAX_MESSAGE_STEPS}개까지 만들 수 있습니다.`, 'STEP_LIMIT');
+    }
+    // ★ 2026-09-30 V2 4차 — 갈림(조건 · 끝 칸)이 있는 여정은 진행 중(active · paused) 고객이 있으면 칸을 넣지 않는다(설계서 §7 · 새 판으로).
+    if (branchCount > 0 || String(step.stepType) === 'end' || String(step.stepType) === 'condition') {
+      await assertNoInProgressForBranchEdit(run, journeyId);
     }
     const stepOrder = agg.rows[0].mx + 1;
 
@@ -1452,6 +1630,21 @@ export async function addJourneyStep(
     throw e;
   } finally {
     client.release();
+  }
+}
+
+/**
+ * ★ 2026-09-30 여정 V2 4차 — 갈림(조건 · 끝 칸) 여정의 칸 넣기 · 지우기 게이트(설계서 §7).
+ *   진행 중(active · paused) 실행이 하나라도 있으면 거부한다 — 갈래 번호(not_met_goto)와 current_step_order 가 함께 어긋난다.
+ *   구조를 바꾸려면 새 판(5차)으로 고친다.
+ */
+async function assertNoInProgressForBranchEdit(run: SqlRunner, journeyId: string): Promise<void> {
+  const r = await run(
+    `SELECT 1 FROM journey_executions WHERE journey_id = $1::uuid AND status IN ('active', 'paused') LIMIT 1`,
+    [journeyId],
+  );
+  if (r.rows.length > 0) {
+    throw new JourneyStepGateError('갈림이 있는 여정은 진행 중인 고객이 있으면 칸을 넣거나 지울 수 없어요. 새 판으로 고쳐 주세요.', 'BRANCH_LOCKED');
   }
 }
 
@@ -1503,6 +1696,23 @@ export async function deleteJourneyStep(
     const cnt = await run(`SELECT COUNT(*)::int AS n FROM journey_steps WHERE journey_id = $1::uuid`, [journeyId]);
     if (cnt.rows[0].n <= 1) {
       throw new JourneyStepGateError('스텝이 하나뿐인 여정은 그 스텝을 지울 수 없습니다.', 'LAST_STEP');
+    }
+    // ★ 2026-09-30 V2 4차 — 갈림 여정은 진행 중 고객이 있으면 칸을 지우지 않는다(갈래 번호가 바뀐다 · 새 판으로).
+    const branch = await run(
+      `SELECT EXISTS (SELECT 1 FROM journey_steps WHERE journey_id = $1::uuid AND step_type IN ('condition', 'end')) AS has_branch`,
+      [journeyId],
+    );
+    if (branch.rows[0]?.has_branch === true) await assertNoInProgressForBranchEdit(run, journeyId);
+    // ★ 2026-09-30 V2 4차 — "이 칸 링크를 눌렀나" 조건이 가리키는 칸은 지우지 않는다(조건이 영영 거짓이 된다).
+    const referenced = await run(
+      `SELECT jsr.step_order AS ref_order FROM journey_steps jsr
+        WHERE jsr.journey_id = $1::uuid AND jsr.step_type = 'condition'
+          AND jsr.condition_jsonb->>'type' = 'step_link_clicked' AND jsr.condition_jsonb->>'step_id' = $2::text
+        LIMIT 1`,
+      [journeyId, stepId],
+    );
+    if (referenced.rows.length > 0) {
+      throw new JourneyStepGateError(`${referenced.rows[0].ref_order}번째 조건 칸이 이 칸의 링크 클릭을 보고 있어 지울 수 없어요. 조건을 먼저 바꿔 주세요.`, 'REFERENCED_BY_CONDITION');
     }
 
     const logs = await run(`SELECT 1 FROM journey_step_logs WHERE step_id = $1::uuid LIMIT 1`, [stepId]);

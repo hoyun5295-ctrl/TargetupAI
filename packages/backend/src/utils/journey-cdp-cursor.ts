@@ -58,6 +58,11 @@ export type CdpCursorAxis = 'created_at' | 'occurred_at';
 export interface CdpCursorBatch {
   ids: string[];
   propertiesByCustomer: Record<string, Record<string, any>>;  // customerId → 첫 등장 이벤트 properties (알림톡 변수 치환용)
+  /**
+   * ★ 2026-09-29 여정 V2 1차 — customerId → 진입 사건 id(첫 등장 행). 진입 행의 진입 표식(__entry.key)으로 남아
+   *   생애 지도 선 숫자가 "같은 구매로 두 여정에 동시에 들어온 경우"를 가려낸다(설계서 §3 숫자). 선택 필드 — 없으면 표식 key = null.
+   */
+  eventIdByCustomer?: Record<string, string | null>;
   newCursor: CdpCursorPosition;
   truncated: boolean;
 }
@@ -74,10 +79,12 @@ export function planCdpCursorBatch(
   const seen = new Set<string>();
   const ids: string[] = [];
   const propertiesByCustomer: Record<string, Record<string, any>> = {};
+  const eventIdByCustomer: Record<string, string | null> = {};
   for (const r of usable) {
     if (!seen.has(r.customerId)) {
       seen.add(r.customerId);
       ids.push(r.customerId);
+      eventIdByCustomer[r.customerId] = r.eventId ?? null;
       if (r.properties && typeof r.properties === 'object') {
         propertiesByCustomer[r.customerId] = r.properties;
       }
@@ -98,7 +105,7 @@ export function planCdpCursorBatch(
       }
     : { at: windowEnd, eventId: null };
 
-  return { ids, propertiesByCustomer, newCursor, truncated };
+  return { ids, propertiesByCustomer, eventIdByCustomer, newCursor, truncated };
 }
 
 /**
@@ -143,7 +150,9 @@ export function usesPurchaseLedger(triggerEvent: string): boolean {
   // ★ §11-5: 첫 구매·휴면 복귀는 같은 구매 스트림의 분기 필터다 — 문 규약도 같다.
   return triggerEvent === 'cdp.purchase'
     || triggerEvent === 'purchase.first'
-    || triggerEvent === 'customer.dormant_return';
+    || triggerEvent === 'customer.dormant_return'
+    // ★ 2026-09-30 V2 3차 — 상품 재구매도 같은 구매 스트림(두 문)을 읽고 상품으로 거른다.
+    || triggerEvent === 'purchase.product';
 }
 
 /**
@@ -157,6 +166,7 @@ export function resolveCdpCursorEventName(triggerEvent: string): string | null {
     // ★ §11-5: 첫 구매(#2)·휴면 복귀(#5)는 구매 스트림을 같이 읽고 자격 필터로 갈린다(§3-1).
     case 'purchase.first': return 'purchase';
     case 'customer.dormant_return': return 'purchase';
+    case 'purchase.product': return 'purchase';
     case 'cdp.reservation_created': return 'reservation_created';
     case 'custom_order_shipped': return 'custom_order_shipped';
     default: return null;
@@ -178,6 +188,7 @@ export function classifyJourneyTrigger(triggerEvent: string): JourneyTriggerClas
     case 'cdp.purchase':
     case 'purchase.first':
     case 'customer.dormant_return':
+    case 'purchase.product':
     case 'cdp.reservation_created':
     case 'custom_order_shipped':
       return 'event_cursor';

@@ -30,6 +30,7 @@
 | **과거분 소급 금지** | 이관·전량 재적재가 과거 사실을 오늘 올려도 트리거로 인정하지 않는다(발생 시각 기준) | 3년 전 구매에 "구매 감사합니다"가 나간다 |
 | **상한 없이 켜지지 않는다** | 전 트리거 수신자 상한 필수 | 대량 적재 한 번에 코호트 전체 발화 |
 | **새 트리거 = 레지스트리 + DB CHECK 동시** | `TRIGGER_CONTRACTS`와 `journeys_trigger_event_registered`는 같은 집합 | 저장은 되는데 DB가 거부하거나 그 반대 |
+| **다른 여정으로 자동으로 태우지 않는다** (★0929 V2) | 여정 사이 선 = A 목표 종료 + B 자기 트리거 정상 진입(동의 · 상한 · 소급 금지 그대로). 같은 여정 재진입(구매 없이 N일마다)은 담당자가 켠 경우만 · 프리셋 · AI 초안은 자동 재진입 꺼짐 | 특수 진입로가 겹침 · 동의 축을 통째로 연다(Braze Send to Destination 모양) |
 
 ---
 
@@ -54,6 +55,8 @@
 | **화면 — 마케팅 진입** | `frontend/components/journey/MarketingJourneyModal.tsx` | 자연어 입력 · 빠른 시작(메인에서 옮겨 온 것) |
 | **화면 — 데이터 안내** | `frontend/components/journey/JourneyDataScopeNote.tsx` | "연동이 여정의 폭을 정한다" 공통 문구 — 메인·세 모달이 공유 |
 | **화면 — 모달 껍데기** | `frontend/components/journey/JourneyModalShell.tsx` | dialog 의미 · 초기 포커스 · Tab 가둠 · Esc · 포커스 복귀. 여정 모달 전부가 이 안에 |
+| **칸 한도** (★0929 V2) | `utils/journey-step-limits.ts` | 칸 종류 화이트리스트 · 칸 수 · 대기 상한 단일 출처 · 넘치면 거부(자르지 않음) · 모르는 종류 거부 · `JourneyInputError`(400) |
+| **V2 설계 · 차수** | [여정 V2 마스터 설계서](2026-09-29-journey-v2-master-design.md) | 생애 지도 · 칸 서랍 · 문장으로 만들기 · 0~5차 · 구현 기록 §13 |
 
 **정합 가드** — `journey-trigger-catalog-parity.test.ts`가 카탈로그↔백엔드↔AI 추천 집합 일치를 고정한다. 어긋나면 화면엔 보이는데 0건이 된다.
 

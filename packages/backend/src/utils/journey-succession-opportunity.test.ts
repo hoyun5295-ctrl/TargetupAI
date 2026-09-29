@@ -54,7 +54,8 @@ function mockEngine(opts: {
   const convRows = opts.convRows || [];
   q.mockImplementation(async (sql: string) => {
     const s = String(sql);
-    if (s.includes('DISTINCT template_code')) return { rows: activeRows };
+    // ★ 0930 V2 1차 — 활성 트리거 조회 = 마케팅 여정의 trigger_event(옛 DISTINCT template_code 축 폐기 · journey-opportunities.ts)
+    if (s.includes('SELECT DISTINCT j.trigger_event FROM journeys j')) return { rows: activeRows };
     if (s.includes('PERCENTILE_CONT')) return { rows: [{ median_aov: 0, median_days: null, p75_days: null }] };
     if (s.includes('cart_cnt')) {
       // 기존 6신호는 전부 0 — 이 테스트는 이어달리기 축만 본다.
@@ -164,8 +165,17 @@ describe('전환 관측 질의 — 무엇을 세고 무엇으로 격리하는가
 
 describe('간선과 문구는 함께 늘어난다', () => {
   it('모든 후속 트리거에 목표 골격이 있다 (없으면 추천이 조용히 안 뜨고 "이어서 만들기"도 못 만든다)', () => {
-    const missing = TRIGGER_CONTRACTS.flatMap((c) => c.nextEvents || []).filter((e) => !successionObjectiveFor(e));
+    // ★ 0930 V2 3차 — 상품 고르기 전용 트리거(상품 재구매)는 1클릭 다음 수가 아니다(엔진이 건너뛴다 · 아래 테스트).
+    const missing = TRIGGER_CONTRACTS.flatMap((c) => c.nextEvents || [])
+      .filter((e) => !TRIGGER_CONTRACTS.find((c) => c.event === e)?.productPick)
+      .filter((e) => !successionObjectiveFor(e));
     expect(missing, `문구 없는 간선: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('상품 고르기 전용 트리거는 다음 수 카드로 권하지 않는다(상품 없이 만들면 영영 0건)', async () => {
+    mockEngine({ convRows: [{ trigger_event: 'cdp.purchase', goal_met_count: 5, value_at_stake: 0 }] });
+    const cards = succession(await buildJourneyOpportunities(COMPANY_ID));
+    expect(cards.map((c: any) => c.preferTriggerEvent)).not.toContain('purchase.product');
   });
 });
 

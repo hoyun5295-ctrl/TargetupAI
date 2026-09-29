@@ -77,6 +77,8 @@ const JourneysPage = lazyPage(() => import('./pages/JourneysPage'));
 // ★ D192 (2026-05-22): Journey monitoring + 통계 페이지 신규
 const JourneyDetailPage = lazyPage(() => import('./pages/JourneyDetailPage'));
 const JourneyStatsPage = lazyPage(() => import('./pages/JourneyStatsPage'));
+// ★ 2026-09-29 여정 V2 1차 — 생애 지도(읽기 전용)
+const JourneyMapPage = lazyPage(() => import('./pages/JourneyMapPage'));
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite 대시보드 — AI 자율 예측 분석
 const PredictiveDashboardPage = lazyPage(() => import('./pages/PredictiveDashboardPage'));
 // ★ D209+ (2026-05-22) Phase D 비용 안전 — AI 호출 월 한도 + cache 통계 대시보드
@@ -607,6 +609,15 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <PlanGate featureId="journeys"><JourneysPage /></PlanGate>
+            </PrivateRoute>
+          }
+        />
+        {/* ★ 2026-09-29 여정 V2 1차: 여정 지도(생애 레인 · 여정 사이 선 · 빈 곳 찾기) — :id 보다 먼저 */}
+        <Route
+          path="/ai-journeys/map"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <PlanGate featureId="journeys"><JourneyMapPage /></PlanGate>
             </PrivateRoute>
           }
         />

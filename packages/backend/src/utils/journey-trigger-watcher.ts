@@ -38,6 +38,12 @@ import { resolveNewCustomerJudgement } from './journey-identity-signals';
 import { getCompanyIdentityCapability } from './company-data-profile';
 import { calculateNextRunAt } from './send-time-util';
 import { getJourneyHoldoutPct, syncGradeStateWithClient, observeGradeStateForJourney } from './journey-entry-ledger';
+// ★ 2026-09-30 여정 V2 3차 — 상품 재구매(상품 자격 · 문 확인) · 진입 교체(새 주기면 옛 실행을 닫고 새로 넣는다).
+import { PRODUCT_TRIGGER_EVENT, normalizeProductFilters, currentPurchaseDoor, qualifyProductBatch } from './journey-product';
+import { usesEntryReplacement, CLOSE_ACTIVE_FOR_REPLACEMENT_SQL } from './journey-entry-replace';
+// ★ 2026-09-30 여정 V2 5차 — 새 판 · 계보: 진입이 닫힌 옛 판은 받지 않고, 재진입 판정은 계보 단위(DDL 전 = 옛 동작).
+import { entryOpenClause, lineageJourneyIds, endDrainedVersions, lockLineageEntry } from './journey-lineage';
+import { JourneyInputError } from './journey-step-limits';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -46,6 +52,8 @@ import { getJourneyHoldoutPct, syncGradeStateWithClient, observeGradeStateForJou
 interface ActiveJourney {
   id: string;
   company_id: string;
+  /** ★ 0930 V2 5차 — 같은 계보 여정 id(자기 포함 · 계보 없으면 [자기]). 회차마다 한 번 읽는다. */
+  lineageIds?: string[];
   template_code: string;
   trigger_event: string;
   trigger_filters: Record<string, any>;
@@ -130,7 +138,7 @@ export async function runJourneyTriggerWatcher(): Promise<{ matched: number; enq
               threshold_recipients_per_step, last_event_cursor
        FROM journeys
        WHERE status = 'active'
-         AND COALESCE(start_kind, 'event') IN ('event', 'standing')
+         AND COALESCE(start_kind, 'event') IN ('event', 'standing')${await entryOpenClause()}
        ORDER BY created_at ASC`
     );
 
@@ -156,6 +164,13 @@ export async function runJourneyTriggerWatcher(): Promise<{ matched: number; enq
     if (summary.matched > 0 || summary.enqueued > 0) {
       console.log(`[JourneyTrigger] 처리 완료 — matched=${summary.matched} enqueued=${summary.enqueued} skipped=${summary.skipped}`);
     }
+    // ★ 2026-09-30 V2 5차 — 진입이 닫히고 진행 중 고객이 다 끝난 옛 판은 끝남으로(실패해도 진입과 무관).
+    try {
+      const ended = await endDrainedVersions();
+      if (ended > 0) console.log(`[JourneyTrigger] 옛 판 마무리 끝 ${ended}개 → ended`);
+    } catch (err: any) {
+      console.warn('[JourneyTrigger] 옛 판 마무리 확인 실패(다음 회차 재시도):', err?.message || err);
+    }
   } finally {
     workerRunning = false;
   }
@@ -179,8 +194,26 @@ export function startJourneyTriggerWatcher(): void {
 // ════════════════════════════════════════════════════════════════════
 
 async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: number; enqueued: number; skipped: number; paused?: boolean }> {
+  j.lineageIds = await lineageJourneyIds(j.id);
   // ★ Phase 3: 구매·예약·배송(custom_order_shipped)은 이벤트 커서 경로(누락 0 + 정확히 1회 + properties 동봉). 그 외는 공유 컨트롤타워 추출.
   const cursorEvent = resolveCdpCursorEventName(j.trigger_event);
+  // ★ 2026-09-30 V2 3차 — 상품 재구매: 상품이 없거나 저장한 문(자사몰 ↔ 매장)이 지금 문과 다르면 상품 키가 맞지 않아 영영 0건이다.
+  //   조용히 0건으로 두지 않고 사유를 남겨 멈춘다(판정 불가 = 멈춤 · 신규 판정 불가와 같은 규약).
+  if (j.trigger_event === PRODUCT_TRIGGER_EVENT) {
+    let door: 'mall' | 'ledger';
+    try {
+      door = normalizeProductFilters(j.trigger_filters).door;
+    } catch (e: any) {
+      const why = e instanceof JourneyInputError ? e.message : '상품 설정을 읽지 못했어요.';
+      await pauseJourneyForCompany(j.id, j.company_id, `상품 재구매 설정 오류: ${why}`);
+      return { matched: 0, enqueued: 0, skipped: 0, paused: true };
+    }
+    if (door !== await currentPurchaseDoor(j.company_id)) {
+      await pauseJourneyForCompany(j.id, j.company_id, '구매가 들어오는 곳이 바뀌어(자사몰 · 매장) 고른 상품을 알아볼 수 없어요. 상품을 다시 골라 새로 만들어 주세요.');
+      console.log(`[JourneyTrigger] 상품 재구매 문 변경 → 정지 journey=${j.id}`);
+      return { matched: 0, enqueued: 0, skipped: 0, paused: true };
+    }
+  }
   if (cursorEvent) {
     const fromEvents = await processCdpCursorJourney(j, cursorEvent);
     // ★ 2026-08-01 §11-4: 구매는 문이 둘이다(자사몰 cdp_events / 싱크 purchases 원장).
@@ -214,7 +247,7 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
 
   // 추출 = journey-target-extractor 공유 컨트롤타워. journeyId + 재진입 정보 전달.
   //   휴면·생일·포인트는 진입 안티조인으로 회차마다 다음 분이 들어와 501번째+ 누락이 없다.
-  const reentry = { allowReentry: j.allow_reentry, cooldownDays: Number(j.reentry_cooldown_days || 0) };
+  const reentry = { allowReentry: j.allow_reentry, cooldownDays: Number(j.reentry_cooldown_days || 0), lineageIds: j.lineageIds };
   // ★ Fix #2 (2026-06-05): 대량 차단기를 LIMIT 500이 무력화하던 문제 정정.
   //   상한 설정 시 cap+1까지 추출 → 진짜 급증(후보 > 상한)만 정지. 미설정(무제한)이면 500 스로틀로 회차 분산.
   const cap = j.threshold_recipients_per_step;
@@ -298,8 +331,19 @@ async function resolveCursorWindow(cursorAt: Date | string | null): Promise<{ cu
  *   batch.ids만 좁힌다 — 커서는 자격과 무관하게 전진해야 같은 구매를 다음 회차가 다시 재평가하지 않는다.
  *   이력 판정은 selectLastPriorPurchase(양 문 합산)가 소유. 진입 시각은 배치 행의 발생 시각(첫 등장)이다.
  */
-async function qualifyPurchaseTransition(j: ActiveJourney, batch: CdpCursorBatch, rows: CdpEventRow[]): Promise<void> {
-  if (j.trigger_event !== 'purchase.first' && j.trigger_event !== 'customer.dormant_return') return;
+async function qualifyPurchaseTransition(j: ActiveJourney, batch: CdpCursorBatch, fetched: CdpEventRow[]): Promise<void> {
+  // ★ 0930 Codex 1R — 자격 · 진입 변수는 플래너가 실제로 소비한 행(앞 CDP_EVENT_CHUNK 건)만 본다. 절단 판별용으로 한 건 더 읽은 행은
+  //   다음 회차 몫이다(그 행으로 먼저 진입시키면 다음 회차에 같은 사건으로 또 들어간다). 두 호출부 모두 같은 CHUNK 로 계획한다.
+  const rows = fetched.length > CDP_EVENT_CHUNK ? fetched.slice(0, CDP_EVENT_CHUNK) : fetched;
+  // ★ 2026-09-30 V2 3차 — 상품 재구매 = 고른 상품이 든 구매만(같은 자리 · 커서는 자격과 무관하게 전진).
+  if (j.trigger_event === PRODUCT_TRIGGER_EVENT) {
+    qualifyProductBatch(batch, rows, normalizeProductFilters(j.trigger_filters).product_keys);
+    return;
+  }
+  // ★ 2026-09-30 V2 3차 — 겹침 해소(담당자가 고른 것만): 주문 완료 여정에서 첫 구매 고객 빼기 = 이전 구매가 있는 고객만.
+  //   키가 없는 기존 행은 그대로(아래 return). 첫 구매 여정과 같은 판정(양 문 합산 이전 구매)을 쓴다.
+  const excludeFirst = j.trigger_event === 'cdp.purchase' && (j.trigger_filters || {}).exclude_first_purchase === true;
+  if (j.trigger_event !== 'purchase.first' && j.trigger_event !== 'customer.dormant_return' && !excludeFirst) return;
   if (batch.ids.length === 0) return;
   // 도착 역순 배치(늦게 온 옛 구매가 앞에)에서 첫 등장 행이 최신 구매일 수 있다(Codex 지적) —
   // 자격 판정 기준은 그 고객 배치 행들 중 **가장 이른 발생 시각**으로 잡는다.
@@ -315,6 +359,10 @@ async function qualifyPurchaseTransition(j: ActiveJourney, batch: CdpCursorBatch
   if (j.trigger_event === 'purchase.first') {
     // 이전 구매가 하나라도 있으면 첫 구매가 아니다 — 3년 단골에게 "첫 구매 감사"가 나가는 경로 차단.
     batch.ids = batch.ids.filter((id) => !prior.has(id));
+    return;
+  }
+  if (excludeFirst) {
+    batch.ids = batch.ids.filter((id) => prior.has(id));
     return;
   }
   // 휴면 복귀 — 직전 구매가 휴면 기준일 이상 과거여야 "돌아온 것"이다. 이전 구매가 없으면 첫 구매지 복귀가 아니다.
@@ -368,17 +416,39 @@ async function finishCursorBatch(
 
   // ★ 정확히 1회: 진입 전부 + 커서 전진을 한 트랜잭션 (크래시 시 통째 롤백 → 다음 회차 동일 창 재처리, 중복 0).
   const holdoutPct = await getJourneyHoldoutPct(j.id);  // ★ 2026-07-11 홀드아웃 — 여정당 1회 조회
+  // ★ 2026-09-30 V2 3차 — 진입 교체(새 여정 · 직접 켠 여정만): 새 주기가 오면 옛 실행을 목표 달성으로 닫고 새로 넣는다(같은 트랜잭션).
+  // ★ 0930 Codex 1R — 교체는 재진입이 허용된 여정에서만(재진입 불가 여정은 옛 판정 그대로 · 닫지 않는다).
+  const replaceEntry = usesEntryReplacement(j.trigger_filters) && j.allow_reentry === true;
   let enqueued = 0;
   let skipped = 0;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★ 0930 Codex 2R · 3R — 재진입 워커 · 새 판 활성화와 한 줄로. 잠금 뒤 다시 읽은 진입 상태 · 계보로 판정한다
+    //   (진입이 그사이 닫혔으면 넣지 않고 커서도 그대로 — 새 판이 그 커서를 이어받았다).
+    const fresh = await lockLineageEntry(client, j.id);
+    if (!fresh.open) {
+      await client.query('ROLLBACK');
+      return { matched: ids.length, enqueued: 0, skipped: ids.length };
+    }
+    j.lineageIds = fresh.lineageIds;
     for (const customerId of ids) {
-      const allowed = await checkCooldown(j, customerId);
-      if (!allowed) { skipped++; continue; }
+      // ★ 0930 V2 5차 · Codex 1R — 진입 교체: 시간 쿨다운이 지났을 때만 계보 전체의 진행 중 실행을 닫고 새 주기로 넣는다
+      //   (옛 판에서 돌던 주기도 교체 · 닫기와 넣기가 늘 함께 · 닫기만 하고 못 넣는 경우 0). 교체가 아니면 옛 판정 그대로.
+      if (replaceEntry) {
+        if (!(await cooldownElapsed(j, customerId, client))) { skipped++; continue; }
+        for (const lid of j.lineageIds || [j.id]) await client.query(CLOSE_ACTIVE_FOR_REPLACEMENT_SQL, [lid, customerId]);
+      } else {
+        const allowed = await checkCooldown(j, customerId, client);
+        if (!allowed) { skipped++; continue; }
+      }
       const nextRunAt = calculateNextRunAt(firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst);
       const evProps = batch.propertiesByCustomer[customerId];
-      await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt, evProps ? JSON.stringify(evProps) : null, holdoutPct]);
+      // ★ 2026-09-29 여정 V2 1차 — 진입 표식(__entry): 트리거 사건으로 들어왔다는 것 + 그 사건 id.
+      //   생애 지도 "이어받음" 숫자가 ①재진입 워커가 넣은 행(표식 없음)과 ②같은 구매로 두 여정에 동시에 들어온 경우(같은 key)를
+      //   가려내는 유일한 근거다(설계서 §3 · 회의론자 최종 검증 1). 발송 · 변수 치환에는 쓰이지 않는다(키 이름이 변수와 겹치지 않음).
+      const entryProps = { ...(evProps || {}), __entry: { src: 'trigger', key: batch.eventIdByCustomer?.[customerId] ?? null } };
+      await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt, JSON.stringify(entryProps), holdoutPct]);
       enqueued++;
     }
     await client.query(cursorSql, cursorParams);
@@ -590,6 +660,17 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★ 0930 Codex 2R · 3R — 재진입 워커 · 새 판 활성화와 한 줄로. 진입이 그사이 닫혔으면 넣지 않는다.
+    const fresh = await lockLineageEntry(client, j.id);
+    if (!fresh.open) {
+      await client.query('ROLLBACK');
+      return { matched, enqueued: 0, skipped: matched };
+    }
+    j.lineageIds = fresh.lineageIds;
+    // ★ 0930 V2 5차 — 계보가 있으면 같은 계보의 다른 판 실행도 본다(옛 판 진행 중 고객 이중 진입 0). 없으면 옛 문장 그대로.
+    //   계보는 잠금 뒤 다시 읽은 목록(Codex 3R).
+    const lineage = (j.lineageIds || [j.id]).length > 1 ? j.lineageIds! : null;
+    const journeyMatch = lineage ? `je.journey_id = ANY($6::uuid[])` : `je.journey_id = $1::uuid`;
     const insRes = await client.query(
       `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at, entry_event_properties)
        SELECT gen_random_uuid(), $1::uuid, t.cid, 0,
@@ -604,10 +685,10 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
          FROM unnest($2::uuid[], $4::jsonb[]) AS t(cid, props)
         WHERE NOT EXISTS (
           SELECT 1 FROM journey_executions je
-           WHERE je.journey_id = $1::uuid AND je.customer_id = t.cid ${reentryGuard}
+           WHERE ${journeyMatch} AND je.customer_id = t.cid ${reentryGuard}
         )
        RETURNING customer_id`,
-      [j.id, customerIds, nextRunAt, entryProps, holdoutPct]
+      lineage ? [j.id, customerIds, nextRunAt, entryProps, holdoutPct, lineage] : [j.id, customerIds, nextRunAt, entryProps, holdoutPct]
     );
     enqueued = insRes.rows.length;
 
@@ -646,28 +727,50 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
   return { matched, enqueued, skipped: matched - enqueued };
 }
 
-async function checkCooldown(j: ActiveJourney, customerId: string): Promise<boolean> {
+async function checkCooldown(j: ActiveJourney, customerId: string, runner?: { query: (text: string, params?: any[]) => Promise<any> }): Promise<boolean> {
+  const run = runner ? (t: string, p: any[]) => runner.query(t, p) : (t: string, p: any[]) => query(t, p);
+  // ★ 0930 V2 5차 — 같은 계보(새 판 · 옛 판)는 한 여정으로 본다. 계보가 없으면 옛 문장 그대로(자기 여정만).
+  const lineage = (j.lineageIds || [j.id]).length > 1 ? j.lineageIds! : null;
   if (!j.allow_reentry) {
     // 재진입 불가 — 어떤 execution이라도 존재 시 차단
-    const r = await query(
-      `SELECT 1 FROM journey_executions WHERE journey_id = $1::uuid AND customer_id = $2::uuid LIMIT 1`,
-      [j.id, customerId]
-    );
+    const r = lineage
+      ? await run(`SELECT 1 FROM journey_executions WHERE journey_id = ANY($1::uuid[]) AND customer_id = $2::uuid LIMIT 1`, [lineage, customerId])
+      : await run(`SELECT 1 FROM journey_executions WHERE journey_id = $1::uuid AND customer_id = $2::uuid LIMIT 1`, [j.id, customerId]);
     return r.rows.length === 0;
   }
 
-  // 재진입 가능
+  // 재진입 가능 — 계보의 다른 판에서 아직 진행 중이면 그 판에서 마무리한다(이중 진입 0).
+  if (lineage) {
+    const others = lineage.filter((x) => x !== j.id);
+    const busy = await run(
+      `SELECT 1 FROM journey_executions WHERE journey_id = ANY($1::uuid[]) AND customer_id = $2::uuid AND status = 'active' LIMIT 1`,
+      [others, customerId],
+    );
+    if (busy.rows.length > 0) return false;
+  }
+  return cooldownElapsed(j, customerId, runner);
+}
+
+/** 재진입 쿨다운(시간)만 본다 — 계보의 마지막 진입 뒤 쿨다운 일수가 지났는가. 쿨다운 0 = 늘 참. (★ 0930 Codex 1R 분리 · 문장 동일) */
+async function cooldownElapsed(j: ActiveJourney, customerId: string, runner?: { query: (text: string, params?: any[]) => Promise<any> }): Promise<boolean> {
+  const run = runner ? (t: string, p: any[]) => runner.query(t, p) : (t: string, p: any[]) => query(t, p);
+  const lineage = (j.lineageIds || [j.id]).length > 1 ? j.lineageIds! : null;
   const cooldownDays = Number(j.reentry_cooldown_days || 0);
   if (cooldownDays <= 0) {
     return true;
   }
 
-  const last = await query(
-    `SELECT entered_at FROM journey_executions
-     WHERE journey_id = $1::uuid AND customer_id = $2::uuid
-     ORDER BY entered_at DESC LIMIT 1`,
-    [j.id, customerId]
-  );
+  const last = lineage
+    ? await run(
+      `SELECT entered_at FROM journey_executions
+       WHERE journey_id = ANY($1::uuid[]) AND customer_id = $2::uuid
+       ORDER BY entered_at DESC LIMIT 1`,
+      [lineage, customerId])
+    : await run(
+      `SELECT entered_at FROM journey_executions
+       WHERE journey_id = $1::uuid AND customer_id = $2::uuid
+       ORDER BY entered_at DESC LIMIT 1`,
+      [j.id, customerId]);
   if (last.rows.length === 0) return true;
 
   const lastEntered = new Date(last.rows[0].entered_at).getTime();

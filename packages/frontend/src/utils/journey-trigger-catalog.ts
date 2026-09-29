@@ -25,12 +25,16 @@ export const TRIGGERS_WITH_EVENT_PROPS = [
   'cdp.purchase',
   'purchase.first',
   'customer.dormant_return',
+  'purchase.product',
   'cdp.reservation_created',
   'custom_order_shipped',
   'cdp.cart_abandon',
 ] as const;
 
 export type TriggerGroup = 'tx' | 'lifecycle';
+
+/** ★ 2026-09-29 여정 V2 — 생애 지도 레인. 백엔드 계약 `TriggerContract.lane` 미러(parity 고정). */
+export type JourneyLane = 'signup' | 'first_purchase' | 'repurchase' | 'product' | 'winback' | 'moment' | 'standing';
 
 export interface TriggerDef {
   key: string;
@@ -47,7 +51,11 @@ export interface TriggerDef {
   /** 자사몰 연동이 있어야 발생하는 이벤트인가. */
   gated?: boolean;
   /** 사용자가 값을 넣어야 대상이 정해지는 트리거(기본값을 지어내지 않는다). */
-  requiresConfig?: 'points_min';
+  /**
+   * 사용자가 값을 넣어야 대상이 정해지는 트리거(기본값을 지어내지 않는다).
+   * ★ 2026-09-30 V2 3차 'product_pick' = 상품 고르기 창에서만 만든다 — 정보 알림 빌더 · 다음 수 카드 · AI 추천 후보에서 뺀다(PICKER_TRIGGERS).
+   */
+  requiresConfig?: 'points_min' | 'product_pick';
   /**
    * ★ 2026-08-08 이어달리기 — 이 여정의 목표가 이뤄진 고객을 받는 다음 트리거(key 축).
    * 백엔드 계약 `TriggerContract.nextEvents`의 미러다. parity 테스트가 둘의 1:1을 고정한다.
@@ -58,6 +66,10 @@ export interface TriggerDef {
    * 막지 않고 화면이 알린다 — 한 번의 구매에 두 통이 나가는 것을 사용자가 알고 켜야 한다.
    */
   overlapKeys?: string[];
+  /** ★ 2026-09-29 V2 — 같은 구매 스트림이지만 자격이 배타인 트리거(key 축). 백엔드 `exclusiveEvents` 미러. */
+  exclusiveKeys?: string[];
+  /** ★ 2026-09-29 V2 — 생애 지도 레인. 백엔드 `lane` 미러. */
+  lane: JourneyLane;
 }
 
 /**
@@ -67,89 +79,102 @@ export interface TriggerDef {
 export const TRIGGER_EVENTS: TriggerDef[] = [
   // ── 거래가 일어날 때 (이벤트 properties 있음) ──
   {
-    key: 'purchase', triggerEvent: 'cdp.purchase', templateCode: 'repeat', group: 'tx',
+    key: 'purchase', triggerEvent: 'cdp.purchase', templateCode: 'repeat', group: 'tx', lane: 'repurchase',
     label: '주문 완료', desc: '구매가 일어나면',
     eventFields: [{ key: 'order_no', label: '주문번호' }, { key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }],
     filters: {},
-    overlapKeys: ['dormant_return'],   // 같은 구매 한 번에 둘 다 발화한다
+    nextKeys: ['product'],   // ★ 0930 V2 3차 — 다음 구매가 고른 상품이면 상품 재구매 여정이 이어받는다
+    overlapKeys: ['dormant_return', 'first_purchase', 'product'],   // 같은 구매 한 번에 둘 다 발화한다(★ 0929 첫 구매 · 0930 상품 쌍 추가)
   },
   // ★ §13-5 (2026-08-02) — 배열 순서 = 화면 표시 순서다(소비처가 group으로 거르고 그대로 그린다).
   //   신규 5종이 뒤에 붙어 묻히던 것을 자주 쓰는 순서로 다시 놓았다. 구매 계열끼리 이웃하게 둔다.
   //   ⛔ `purchase`는 첫 자리를 유지한다 — 소비처가 TRIGGER_EVENTS[0]을 기본값으로 쓴다.
   {
-    key: 'first_purchase', triggerEvent: 'purchase.first', templateCode: 'repeat', group: 'tx',
+    key: 'first_purchase', triggerEvent: 'purchase.first', templateCode: 'repeat', group: 'tx', lane: 'first_purchase',
     label: '첫 구매', desc: '생애 첫 구매가 일어나면',
     eventFields: [{ key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }, { key: 'store_name', label: '매장명' }],
     filters: {},
-    nextKeys: ['purchase'],   // 두 번째 구매 = 재구매
+    nextKeys: ['purchase', 'product'],   // 두 번째 구매 = 재구매(고른 상품이면 상품 재구매)
+    overlapKeys: ['purchase', 'product'],          // ★ 0929 첫 구매 1건은 주문 완료도 함께 발화한다(0930 상품 구매도)
+    exclusiveKeys: ['dormant_return'],  // 이전 구매 0건 vs 있음 — 한 구매로 둘 다 발화하지 않는다
   },
   {
-    key: 'dormant_return', triggerEvent: 'customer.dormant_return', templateCode: 'repeat', group: 'tx',
+    key: 'dormant_return', triggerEvent: 'customer.dormant_return', templateCode: 'repeat', group: 'tx', lane: 'winback',
     label: '휴면 복귀', desc: '오래 쉬었다가 다시 구매하면',
     eventFields: [{ key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }, { key: 'store_name', label: '매장명' }],
     filters: { dormant_days: 30 },   // 복귀 판정 기준(직전 구매와의 간격) — 백엔드 기본값과 동일
-    overlapKeys: ['purchase'],       // 같은 구매 한 번에 둘 다 발화한다
+    overlapKeys: ['purchase', 'product'],       // 같은 구매 한 번에 둘 다 발화한다
+    exclusiveKeys: ['first_purchase'],
+  },
+  // ★ 2026-09-30 여정 V2 3차 — 상품 재구매. 상품은 여정 지도의 상품 고르기 창에서만 고른다(관측 목록 · 직접 입력 없음).
+  {
+    key: 'product', triggerEvent: 'purchase.product', templateCode: 'repeat', group: 'tx', lane: 'product',
+    label: '상품 구매', desc: '고른 상품을 사면',
+    eventFields: [{ key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }],
+    filters: {},
+    requiresConfig: 'product_pick',
+    overlapKeys: ['purchase', 'first_purchase', 'dormant_return'],
   },
   {
-    key: 'cart', triggerEvent: 'cdp.cart_abandon', templateCode: 'cart', group: 'tx',
+    key: 'cart', triggerEvent: 'cdp.cart_abandon', templateCode: 'cart', group: 'tx', lane: 'moment',
     label: '장바구니', desc: '장바구니에 담기면',
     eventFields: [{ key: 'product_name', label: '상품명' }],
     filters: { abandon_hours: 24 },
   },
   {
-    key: 'browse', triggerEvent: 'cdp.browse_no_purchase', templateCode: 'cart', group: 'tx',
+    key: 'browse', triggerEvent: 'cdp.browse_no_purchase', templateCode: 'cart', group: 'tx', lane: 'moment',
     label: '조회 후 미구매', desc: '상품을 보고 구매하지 않으면',
     eventFields: [],
     filters: { browse_days: 3 },   // 백엔드 기본값과 동일(journey-target-extractor)
     gated: true,   // product_view는 자사몰 연동이 있어야 발생한다(Codex 지적 수용)
   },
   {
-    key: 'shipped', triggerEvent: 'custom_order_shipped', templateCode: 'cart', group: 'tx',
+    key: 'shipped', triggerEvent: 'custom_order_shipped', templateCode: 'cart', group: 'tx', lane: 'moment',
     label: '배송 시작', desc: '배송이 시작되면',
     eventFields: [{ key: 'tracking_no', label: '운송장번호' }, { key: 'carrier', label: '택배사' }],
     filters: {}, gated: true,
   },
   {
-    key: 'reservation', triggerEvent: 'cdp.reservation_created', templateCode: 'reservation', group: 'tx',
+    key: 'reservation', triggerEvent: 'cdp.reservation_created', templateCode: 'reservation', group: 'tx', lane: 'moment',
     label: '예약 확인', desc: '예약이 등록되면',
     eventFields: [{ key: 'reservation_no', label: '예약번호' }, { key: 'reservation_date', label: '예약일시' }],
     filters: {},
   },
   // ── 고객 상태가 바뀔 때 (이벤트 properties 없음 — 고객 변수만 쓸 수 있다) ──
   {
-    key: 'signup', triggerEvent: 'customer.created', templateCode: 'custom', group: 'lifecycle',
+    key: 'signup', triggerEvent: 'customer.created', templateCode: 'custom', group: 'lifecycle', lane: 'signup',
     label: '신규 가입', desc: '회원이 가입하면',
     eventFields: [],
     filters: {},
     nextKeys: ['first_purchase'],   // 신규 고객의 구매 = 생애 첫 구매
   },
   {
-    key: 'birthday', triggerEvent: 'customer.birthday_approaching', templateCode: 'custom', group: 'lifecycle',
+    key: 'birthday', triggerEvent: 'customer.birthday_approaching', templateCode: 'custom', group: 'lifecycle', lane: 'moment',
     label: '생일 D-7', desc: '생일이 다가오면',
     eventFields: [],
     filters: { days_before: 7 },     // 백엔드 기본값과 동일
   },
   {
-    key: 'dormant', triggerEvent: 'customer.dormant', templateCode: 'custom', group: 'lifecycle',
+    key: 'dormant', triggerEvent: 'customer.dormant', templateCode: 'custom', group: 'lifecycle', lane: 'winback',
     label: '휴면 전환', desc: '한동안 구매가 없으면',
     eventFields: [],
     filters: { dormant_days: 30 },   // 백엔드 기본값과 동일(journey-target-extractor)
     nextKeys: ['dormant_return'],    // 휴면 중 구매 = 복귀
   },
   {
-    key: 'cycle_lapsed', triggerEvent: 'customer.cycle_lapsed', templateCode: 'custom', group: 'lifecycle',
+    key: 'cycle_lapsed', triggerEvent: 'customer.cycle_lapsed', templateCode: 'custom', group: 'lifecycle', lane: 'winback',
     label: '구매 주기 이탈', desc: '평소 구매 주기를 넘기면',
     eventFields: [],
     filters: { cycle_factor: 1.5 },   // 평균 구매 간격 × 계수 — 백엔드 기본값과 동일
   },
   {
-    key: 'grade', triggerEvent: 'customer.grade_changed', templateCode: 'custom', group: 'lifecycle',
+    key: 'grade', triggerEvent: 'customer.grade_changed', templateCode: 'custom', group: 'lifecycle', lane: 'moment',
     label: '등급 상승', desc: '회원 등급이 올라가면',
     eventFields: [],
     filters: {},
   },
   {
-    key: 'points', triggerEvent: 'customer.points_expiring', templateCode: 'custom', group: 'lifecycle',
+    key: 'points', triggerEvent: 'customer.points_expiring', templateCode: 'custom', group: 'lifecycle', lane: 'moment',
     label: '포인트 소멸 임박', desc: '보유 포인트가 사라지기 전에',
     eventFields: [],
     // points_min 기본값은 백엔드가 0이라 그대로 열면 사실상 전원이 대상이 된다.
@@ -158,6 +183,9 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     requiresConfig: 'points_min',
   },
 ];
+
+/** ★ 2026-09-30 V2 3차 — 목록에서 바로 고를 수 있는 트리거(상품 고르기 창 전용 트리거 제외). 고르기 화면 · AI 추천 후보는 이 목록만. */
+export const PICKER_TRIGGERS: TriggerDef[] = TRIGGER_EVENTS.filter((t) => t.requiresConfig !== 'product_pick');
 
 /** 템플릿 내용에서 `#{...}` 변수명을 뽑는다(중괄호 제외). */
 export function extractTemplateVariableNames(content: string): string[] {
@@ -187,7 +215,7 @@ export interface TriggerCompatResult {
  */
 export function resolveTriggerCompat(templateContent: string, hasMallIntegration = false): TriggerCompatResult {
   const vars = extractTemplateVariableNames(templateContent);
-  const available = TRIGGER_EVENTS.filter((t) => !t.gated || hasMallIntegration);
+  const available = PICKER_TRIGGERS.filter((t) => !t.gated || hasMallIntegration);
 
   // 변수명 → 그 변수를 채워줄 수 있는 트리거 목록.
   // ★ 소유자 판정은 **전체 카탈로그**로 한다(available 아님). gated로 먼저 걸러내면

@@ -1046,6 +1046,7 @@ export const NOT_DOCUMENTED_ROUTES: Record<string, string> = {
   '/admin/outreach-grab': '슈퍼관리자(AI 영업 · 네이버 스토어 북마크 버튼이 여는 수신 탭 · 메뉴 없음)',
   '/admin/campaign-agency': '슈퍼관리자',
   '/ai-journeys/:id': '여정 상세(= journeys)',
+  '/ai-journeys/map': '여정 지도(= journeys · 여정 목록 머리 [지도로 보기])',
   '/ai-journeys/:id/stats': '여정 통계(= journeys)',
   '/marketing-planner/brief/:month': '플래너 월간 브리프(= marketing-planner)',
   '/quick-campaign/result': '만들기 결과 화면(= quick-campaign · 만들기가 끝나면 여기로 온다)', // ★ 2026-09-27 만들기 개편

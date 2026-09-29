@@ -35,6 +35,7 @@ const STORED_EVENTS: Array<[string, string | null]> = [
   ['customer.points_expiring', 'points'],
   ['custom', null],
   ['customer.grade_changed', 'grade'],            // ★ §11-5 신설(#7)
+  ['purchase.product', 'product'],                // ★ 0930 V2 3차 상품 재구매
   ['customer.made_up_thing', null],
 ];
 
@@ -108,6 +109,7 @@ describe('예약은 구조적으로 잠긴다', () => {
     const all: CompanyJourneyFacts = {
       canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true, hasGradeOrder: true,
       hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
+      hasProductPurchases: true,   // ★ 0930 V2 3차 — 상품 단위 구매(상품 재구매 여정 근거)
     };
     expect(map(all).reservation.available).toBe(false);
     // 나머지는 전부 열려야 한다(예약만 막는 것이지 전부 막는 게 아니다).

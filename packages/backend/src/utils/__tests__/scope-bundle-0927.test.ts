@@ -289,9 +289,10 @@ describe('S5-04 소비처 배선', () => {
     expect(sw).toContain('return resolveCustomerRecipients(companyId, spec.grades, ownerUserId);');
     expect(sw).toContain('return resolveCustomerRecipientsByFilter(companyId, spec.filter, ownerUserId);');
   });
-  it('여정 추출 13곳 = 안전 필터 바로 뒤 범위 조각', () => {
+  it('여정 추출 14곳 = 안전 필터 바로 뒤 범위 조각', () => {
     const x = src('journey-target-extractor.ts');
-    expect((x.match(/\$\{buildJourneySafetyFilter\('c'\)\}\$\{scopeSql\}/g) || []).length).toBe(13);
+    // ★ 0930 V2 3차 — 상품 재구매 미리보기 추출(selectRecentProductBuyers)이 같은 규약으로 하나 늘었다.
+    expect((x.match(/\$\{buildJourneySafetyFilter\('c'\)\}\$\{scopeSql\}/g) || []).length).toBe(14);
     expect((x.match(/\$\{buildJourneySafetyFilter\('c'\)\}(?!\$\{scopeSql\})/g) || []).length).toBe(0);
   });
   it('여정 발송 입구(트리거 3 · 기념일 2)가 작성자 범위를 넘긴다', () => {

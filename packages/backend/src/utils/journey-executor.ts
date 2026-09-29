@@ -71,6 +71,8 @@ import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey
 import { isCustomerSendable } from './journey-safety-filter';
 // ★ §11-5(§5-1) — 종료 신호는 트리거 계약(단일 출처)에서 파생한다.
 import { getTriggerContract } from './journey-trigger-capability';
+// ★ 2026-09-30 여정 V2 3차 — 상품 재구매 목표(같은 상품을 다시 샀는가) · 키 규칙은 journey-product 한 곳.
+import { PRODUCT_REPURCHASE_SINCE_ENTRY_SQL } from './journey-product';
 import { isSingleStepKind, normalizeStartKind } from './journey-start-kind';
 
 // ════════════════════════════════════════════════════════════════════
@@ -147,7 +149,7 @@ interface CustomerRow {
 
 // ★ D188 Phase 2-B-1 (2026-05-21): wait/condition step 신규 outcome — 통계 분리 영역.
 // ★ D218+ (2026-05-26): paused_external 추가 — 담당자 단축 URL 정지 / 관리자 직접 정지 / race condition 안전망 사고 차단.
-type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'skipped_already_sent' | 'waited' | 'condition_passed' | 'condition_failed' | 'condition_branched' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'paused_external' | 'failed' | 'completed' | 'exited_goal';
+type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'skipped_already_sent' | 'waited' | 'condition_passed' | 'condition_failed' | 'condition_branched' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'paused_external' | 'failed' | 'completed' | 'exited_goal' | 'unknown_step_type';
 
 // ════════════════════════════════════════════════════════════════════
 // Worker — 5분 cron
@@ -225,7 +227,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
         else if (outcome === 'exited_goal') summary.goalExited++;
         else if (outcome.startsWith('paused')) summary.paused++;
         else if (outcome.startsWith('skipped')) summary.skipped++;
-        else if (outcome === 'failed') summary.failed++;
+        else if (outcome === 'failed' || outcome === 'unknown_step_type') summary.failed++;  // ★ 0929 V2 — 모르는 칸 종류 = 실패로 집계(보내지 않음)
       } catch (err: any) {
         summary.failed++;
         const reason = err?.message || String(err);
@@ -413,6 +415,12 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   //   wait step = 메시지 발송 0 + 다음 step 진입 (delay_hours는 advanceOrComplete가 다음 step 영역 사용).
   //   condition step = 고객 조회 후 conditionJsonb 평가 — 만족 시 다음 step 진입 / 미만족 시 execution 종료.
   //   message step = 기존 흐름 (메시지 발송).
+  // ★ 2026-09-30 여정 V2 4차 — 끝 칸: 발송 0 · 도착하면 그 자리에서 완료(한 갈래를 마친다). 점프로 도착해도 같다.
+  if (step.step_type === 'end') {
+    await completeAtEndStep(exec, step.id, step.step_order, 0);
+    return 'completed';
+  }
+
   if (step.step_type === 'wait') {
     // ★ 2026-07-11 wait-until-event: wait_event_name(신규 컬럼)이 설정된 wait step은 이벤트 대기 —
     //   발생 시 즉시 다음 step, 타임아웃 시 다음 step(현행과 동일 방향 진행 — 분기는 뒤 condition step 몫).
@@ -537,6 +545,21 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     await logSkippedStep(exec.execution_id, step.id, 'condition_failed_ended');
     console.log(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} condition 미충족 → ended`);
     return 'condition_failed';
+  }
+
+  // ★ 2026-09-29 여정 V2 0차 ⑩ — 모르는 칸 종류는 **보내지 않는다**(fail-closed).
+  //   옛: wait · condition 이 아니면 전부 아래 문자 흐름으로 떨어졌다 — 모르는 값이 저장되면(검증 없는 옛 생성 경로 ·
+  //   되돌린 배포 · 새 칸 종류를 모르는 경로) 아무도 의도하지 않은 칸이 발송되고 과금됐다.
+  //   이 실행은 발송 없이 끝내고 사유를 남긴다. 다른 고객 · 다른 칸은 영향 없다. step_type 에는 DB CHECK 가 없다(0929 실측).
+  if (step.step_type !== 'message') {
+    await logSkippedStep(exec.execution_id, step.id, 'unknown_step_type');
+    await query(
+      `UPDATE journey_executions SET status = 'ended', completed_at = NOW(), current_step_order = $2
+       WHERE id = $1::uuid AND status = 'active'`,
+      [exec.execution_id, step.step_order]
+    );
+    console.error(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 모르는 칸 종류(${String(step.step_type)}) → 발송 없이 종료`);
+    return 'unknown_step_type';
   }
 
   // ──────────── message step (기존 흐름) ────────────
@@ -1363,11 +1386,16 @@ async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, added
   // 다음 step 조회
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): delay_mode + target_hour_kst 컬럼 SELECT 추가
   const nextRes = await query(
-    `SELECT step_order, delay_hours, delay_mode, target_hour_kst FROM journey_steps
+    `SELECT id, step_type, step_order, delay_hours, delay_mode, target_hour_kst FROM journey_steps
      WHERE journey_id = $1::uuid AND step_order > $2
      ORDER BY step_order ASC LIMIT 1`,
     [exec.journey_id, currentStep.step_order]
   );
+  // ★ 2026-09-30 V2 4차 — 다음 칸이 끝 칸이면 기다리지 않고 지금 끝낸다(끝 칸은 대기 0 · 발송 0 · 설계서 §7).
+  if (nextRes.rows.length > 0 && String(nextRes.rows[0].step_type) === 'end') {
+    await completeAtEndStep(exec, String(nextRes.rows[0].id), Number(nextRes.rows[0].step_order), addedCost);
+    return;
+  }
 
   if (nextRes.rows.length === 0) {
     await query(
@@ -1475,10 +1503,19 @@ async function jumpToStep(exec: ExecutionRow, targetOrder: number): Promise<bool
  *  goal_kind 컬럼 미마이그레이션(42703) = 'purchase' 폴백(현행과 동일 — 발송 본류 무영향). */
 async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
   let goalKind = 'purchase';
+  let productKeys: string[] = [];
   try {
-    const gk = await query(`SELECT goal_kind, trigger_event FROM journeys WHERE id = $1::uuid`, [exec.journey_id]);
+    const gk = await query(`SELECT goal_kind, trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid`, [exec.journey_id]);
     const v = String(gk.rows[0]?.goal_kind || '');
-    if (v === 'click' || v === 'visit') goalKind = v;
+    // ★ 2026-09-30 V2 3차 — 상품 재구매 여정(새 여정만 'product' 로 저장된다 · 기존 행 동작 무변경).
+    if (v === 'product') {
+      const tf = gk.rows[0]?.trigger_filters || {};
+      productKeys = Array.isArray(tf.product_keys) ? tf.product_keys.map((k: unknown) => String(k).trim()).filter(Boolean) : [];
+      goalKind = 'product';
+    }
+    // ★ 2026-09-29 여정 V2 0차 ⑫ — 저장된 'points_used'도 읽는다(새 포인트 여정은 저장 때 계약에서 정한다).
+    //   기존 행은 'purchase'·'click'·'visit' 뿐이라 동작이 바뀌는 행은 없다(옵션 검증기가 points_used 를 받게 된 것도 0929).
+    if (v === 'click' || v === 'visit' || v === 'points_used') goalKind = v;
     else if (!v) {
       // ★ §11-5(§5-1) — goal_kind 미지정이면 트리거 계약의 종료 신호에서 파생한다.
       //   purchase 계열은 기존 폴백과 동일 = 회귀 0. points_used만 신규 분기.
@@ -1529,38 +1566,84 @@ async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
       return Number.isFinite(now) && now < snap;
     }
 
-    // purchase (기본 · 현행 동작 보존)
-    const byProfile = await query(
-      `SELECT 1 FROM customers
-        WHERE id = $1::uuid AND company_id = $2::uuid
-          AND recent_purchase_date IS NOT NULL
-          AND recent_purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')::date
-        LIMIT 1`,
-      [exec.customer_id, exec.company_id, exec.entered_at]
-    );
-    if (byProfile.rows.length > 0) return true;
-    const byEvent = await query(
-      `SELECT 1
-        WHERE EXISTS (
-          SELECT 1 FROM cdp_events
-           WHERE company_id = $1::uuid AND customer_id = $2::uuid
-             AND event_name = 'purchase' AND occurred_at > $3::timestamptz
-        )
-        -- ★ 2026-08-01 §11-4: 매장(싱크) 구매는 원장에만 있다. 위 프로필 신호는 날짜 정밀이라
-        --   진입 당일 구매를 못 가르므로, 시각 정밀 판정을 위해 원장을 함께 본다(KST naive 규약).
-        OR EXISTS (
-          SELECT 1 FROM purchases
-           WHERE company_id = $1::uuid AND customer_id = $2::uuid
-             AND purchase_date IS NOT NULL
-             AND purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')
-        )`,
-      [exec.company_id, exec.customer_id, exec.entered_at]
-    );
-    return byEvent.rows.length > 0;
+    // ★ 2026-09-30 V2 3차 — 같은 상품 재구매: 진입 뒤 고른 상품이 든 구매(두 문 OR). 상품을 모르면 판정 불가 = 계속(덜 끄는 방향).
+    if (goalKind === 'product') {
+      if (productKeys.length === 0) return false;
+      const byProduct = await query(PRODUCT_REPURCHASE_SINCE_ENTRY_SQL, [exec.company_id, exec.customer_id, exec.entered_at, productKeys]);
+      return byProduct.rows.length > 0;
+    }
+
+    // purchase (기본 · 현행 동작 보존) — ★ 2026-09-30 V2 4차: 조건 "들어온 뒤 구매했나"와 같은 판정이라 함수로 옮겼다(SQL 동일).
+    return await hasPurchasedSinceEntry(exec.company_id, exec.customer_id, exec.entered_at);
   } catch (e: any) {
     console.log(`[JourneyExecutor] 목표 달성 판정 실패 — 통과(여정 계속):`, e?.message || e);
     return false;
   }
+}
+
+/**
+ * ★ 2026-09-30 여정 V2 4차 — 끝 칸에서 완료: 실행 completed(current_step_order = 끝 칸) + 기록(end_step) + 여정 완료 수.
+ *   완료 전환은 진행 중(active)일 때만(동시에 목표 달성 · 멈춤이 끼어들면 상태는 그쪽이 이긴다).
+ * ★ 0930 Codex 1R — 직전 문자의 발송비(addedCost)는 상태와 무관하게 여기서 한 번 반영한다(문자는 이미 나갔다).
+ *   멈춤이 끼어들어 완료를 건너뛰어도 비용이 실행 · 여정 합계에서 빠지지 않는다(다시 처리돼도 sent 가드가 0 으로 넘어와 이중 가산 0).
+ */
+async function completeAtEndStep(exec: ExecutionRow, endStepId: string, endStepOrder: number, addedCost: number): Promise<void> {
+  const r = await query(
+    `WITH prev AS (SELECT id, status FROM journey_executions WHERE id = $1::uuid FOR UPDATE)
+     UPDATE journey_executions e SET
+        total_cost = e.total_cost + $3,
+        status = CASE WHEN prev.status = 'active' THEN 'completed' ELSE e.status END,
+        completed_at = CASE WHEN prev.status = 'active' THEN NOW() ELSE e.completed_at END,
+        current_step_order = CASE WHEN prev.status = 'active' THEN $2 ELSE e.current_step_order END
+       FROM prev
+      WHERE e.id = prev.id
+      RETURNING (prev.status = 'active') AS completed`,
+    [exec.execution_id, endStepOrder, addedCost]
+  );
+  if (r.rows.length === 0) return;
+  const completed = r.rows[0].completed === true;
+  if (completed) await logSkippedStep(exec.execution_id, endStepId, 'end_step');
+  if (!completed && !(addedCost > 0)) return;
+  await query(
+    `UPDATE journeys SET stats_total_completed = stats_total_completed + $3, stats_total_cost = stats_total_cost + $2, updated_at = NOW()
+      WHERE id = $1::uuid`,
+    [exec.journey_id, addedCost, completed ? 1 : 0]
+  );
+}
+
+/**
+ * 진입 뒤 구매가 있었는가 — 목표(purchase) · 조건(purchase_since_entry)이 같이 쓴다(한 판정 · 두 자리).
+ *   신호 1 = 프로필 최근 구매일 > 진입일(KST · 엄격) / 신호 2 = 자사몰 구매 사건 · 매장 원장 구매가 진입 시각 뒤(KST naive).
+ *   ⛔ SQL 은 2026-07-10 ~ 0929 목표 판정 원문 그대로(0930 이동 · 동작 동일). 오류는 호출부가 받는다.
+ */
+async function hasPurchasedSinceEntry(companyId: string, customerId: string, enteredAt: unknown): Promise<boolean> {
+  const byProfile = await query(
+    `SELECT 1 FROM customers
+      WHERE id = $1::uuid AND company_id = $2::uuid
+        AND recent_purchase_date IS NOT NULL
+        AND recent_purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')::date
+      LIMIT 1`,
+    [customerId, companyId, enteredAt]
+  );
+  if (byProfile.rows.length > 0) return true;
+  const byEvent = await query(
+    `SELECT 1
+      WHERE EXISTS (
+        SELECT 1 FROM cdp_events
+         WHERE company_id = $1::uuid AND customer_id = $2::uuid
+           AND event_name = 'purchase' AND occurred_at > $3::timestamptz
+      )
+      -- ★ 2026-08-01 §11-4: 매장(싱크) 구매는 원장에만 있다. 위 프로필 신호는 날짜 정밀이라
+      --   진입 당일 구매를 못 가르므로, 시각 정밀 판정을 위해 원장을 함께 본다(KST naive 규약).
+      OR EXISTS (
+        SELECT 1 FROM purchases
+         WHERE company_id = $1::uuid AND customer_id = $2::uuid
+           AND purchase_date IS NOT NULL
+           AND purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')
+      )`,
+    [companyId, customerId, enteredAt]
+  );
+  return byEvent.rows.length > 0;
 }
 
 async function markExecutionCompleted(executionId: string, journeyId: string): Promise<void> {
@@ -1702,6 +1785,48 @@ async function evaluateCondition(
       return matched ? 'met' : 'not_met';
     } catch (err: any) {
       console.error('[Journey condition] journey_step_clicked 평가 DB 오류 → 발송 보류(재시도):', err?.message);
+      return 'error';
+    }
+  }
+
+  // ★ 2026-09-30 V2 4차 — 이 여정에 들어온 뒤 구매했나(목표 판정과 같은 신호). purchased: true(샀으면 맞음) / false(안 샀으면 맞음).
+  if (type === 'purchase_since_entry') {
+    try {
+      const ex = await query(`SELECT customer_id, entered_at FROM journey_executions WHERE id = $1::uuid`, [executionId]);
+      if (ex.rows.length === 0) return 'not_met';
+      const purchased = await hasPurchasedSinceEntry(companyId, String(ex.rows[0].customer_id), ex.rows[0].entered_at);
+      const want = condJsonb.purchased !== false;
+      return purchased === want ? 'met' : 'not_met';
+    } catch (err: any) {
+      console.error('[Journey condition] purchase_since_entry 평가 DB 오류 → 발송 보류(재시도):', err?.message);
+      return 'error';
+    }
+  }
+
+  // ★ 2026-09-30 V2 4차 — 이 칸 링크를 눌렀나: 이 실행에 그 칸이 보내진 뒤 그 칸의 클릭(message_click.properties.step_id · 통계와 같은 축).
+  //   그 칸이 이 고객에게 안 보내졌으면 "안 눌렀음". clicked: true(눌렀으면 맞음) / false(안 눌렀으면 맞음).
+  if (type === 'step_link_clicked') {
+    const targetStepId = String(condJsonb.step_id || '').trim();
+    if (!targetStepId) return 'not_met';
+    try {
+      const r = await query(
+        `SELECT EXISTS (
+           SELECT 1 FROM journey_step_logs jsl
+             JOIN journey_executions je ON je.id = jsl.execution_id
+             JOIN cdp_events ce ON ce.customer_id = je.customer_id
+              AND ce.company_id = $3::uuid
+              AND ce.event_name = 'message_click'
+              AND ce.properties->>'step_id' = $2::text
+              AND ce.occurred_at >= jsl.sent_at
+            WHERE jsl.execution_id = $1::uuid AND jsl.step_id = $2::uuid AND jsl.status = 'sent'
+         ) AS clicked`,
+        [executionId, targetStepId, companyId]
+      );
+      const clicked = Boolean(r.rows[0]?.clicked);
+      const want = condJsonb.clicked !== false;
+      return clicked === want ? 'met' : 'not_met';
+    } catch (err: any) {
+      console.error('[Journey condition] step_link_clicked 평가 DB 오류 → 발송 보류(재시도):', err?.message);
       return 'error';
     }
   }

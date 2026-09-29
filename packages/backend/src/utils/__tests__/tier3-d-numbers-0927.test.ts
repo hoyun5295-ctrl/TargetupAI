@@ -128,9 +128,11 @@ describe('R264 여정 실시간 위치', () => {
 
 describe('R296 · R417 · R204 표시', () => {
   it('매장번호 사전 확인 = 미리보기 수와 같은 상한', () => {
-    const a = src('..', 'routes', 'ai.ts');
-    const b = between(a, "router.post('/operator/journeys/:id/activate'", '\nrouter.');
-    expect(b).toContain('stRow.rows[0].trigger_filters || {}, JOURNEY_COUNT_CAP, undefined, undefined,');
+    // ★ 0930 V2 2차 — 켜기 게이트가 라우트에서 CT(journey-activation.ts activateJourneyGuarded)로 옮겨졌다(단건 · 묶음 공용).
+    const a = src('journey-activation.ts');
+    const b = between(a, 'export async function activateJourneyGuarded', '\nexport ');
+    expect(b).toContain('row.trigger_filters || {}, JOURNEY_COUNT_CAP, undefined, undefined,');
+    expect(src('..', 'routes', 'ai.ts')).toContain('activateJourneyGuarded(companyId, req.params.id, userId');
   });
   it('식별 고객 수 = 전체', () => {
     const i = src('inapp-funnel-stats.ts');

@@ -25,7 +25,8 @@
  *   - 한 회사 batch limit 1,000명 (큰 회사 영역 분산 정합 — 다음 cron 영역 잔존 매트릭스 정합)
  */
 
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
+import { entryOpenClause, lockLineageEntry } from './journey-lineage';
 import { buildJourneySafetyFilter } from './journey-safety-filter';
 
 const WORKER_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6h
@@ -57,6 +58,9 @@ export function stopJourneyReentryWorker(): void {
   }
 }
 
+/** 진입 잠금 뒤 보니 그 판의 진입이 닫혔다 — 롤백하고 이 여정만 건너뛴다(오류 아님). */
+class EntryClosedSkip extends Error {}
+
 async function runReentryBatch(): Promise<void> {
   if (workerRunning) {
     console.log('[JourneyReentryWorker] 옛 batch 진행 중 — skip');
@@ -69,11 +73,12 @@ async function runReentryBatch(): Promise<void> {
 
   try {
     // 1) auto_reentry_enabled = true + status = 'active' 영역 journey 매트릭스
+    // ★ 2026-09-30 여정 V2 5차 — 진입이 닫힌 옛 판은 다시 태우지 않는다(DDL 전 = 옛 문장 그대로).
     const journeyRes = await query(
       `SELECT id, company_id, reentry_cooldown_days
        FROM journeys
        WHERE auto_reentry_enabled = true
-         AND status = 'active'
+         AND status = 'active'${await entryOpenClause()}
        ORDER BY id`
     );
 
@@ -84,52 +89,69 @@ async function runReentryBatch(): Promise<void> {
         const cooldownDays = Number(j.reentry_cooldown_days) || 0;
 
         // 2) 진입 조건 매트릭스 매칭 + 신규 execution INSERT (한 SQL UPSERT)
-        const r = await query(
-          `INSERT INTO journey_executions
-             (id, journey_id, customer_id, current_step_order, status, next_run_at, entered_at, created_at)
-           SELECT
-             gen_random_uuid(), $1::uuid, je.customer_id, 0, 'active', NOW(), NOW(), NOW()
-           FROM journey_executions je
-           JOIN customers c ON c.id = je.customer_id AND c.company_id = $2::uuid
-           WHERE je.journey_id = $1::uuid
-             -- ★ 2026-07-10: goal_met(목표 달성 종료)도 완주와 동급으로 재진입 대상 — 구매로 이탈한 고객이
-             --   쿨다운 뒤 다시 대상이 되면(휴면 재발 등) 자동 재진입이 막히면 안 된다.
-             -- ★ Codex P2 정정: 단 쿨다운 0일이면 goal_met은 제외 — 방금 구매로 이탈한 고객이 같은 날
-             --   즉시 재진입해 독려를 다시 받는 루프 차단(완주 재진입은 기존 동작 보존).
-             AND (je.status = 'completed' OR (je.status = 'goal_met' AND $3 > 0))
-             AND je.completed_at IS NOT NULL
-             AND je.completed_at <= NOW() - ($3 * INTERVAL '1 day')
-             -- ★ Fix #1 (2026-06-05): 추출과 동일한 공통 안전필터(is_active·sms_opt_in·is_opt_out·is_invalid·수신거부 회사+전화).
-             AND ${buildJourneySafetyFilter('c')}
-             -- 옛 customer 영역 안 신규 active execution 영역 X (중복 진입 차단)
-             AND NOT EXISTS (
-               SELECT 1 FROM journey_executions je2
-               WHERE je2.journey_id = $1::uuid
-                 AND je2.customer_id = je.customer_id
-                 AND je2.status = 'active'
-             )
-             -- 가장 최근 completed execution 영역만 정합 (중복 신규 entry 차단)
-             AND je.completed_at = (
-               SELECT MAX(je3.completed_at) FROM journey_executions je3
-               WHERE je3.journey_id = $1::uuid
-                 AND je3.customer_id = je.customer_id
-                 AND je3.status IN ('completed', 'goal_met')
-             )
-           LIMIT $4
-           RETURNING id`,
-          [journeyId, companyId, cooldownDays, PER_JOURNEY_BATCH_LIMIT]
-        );
-
-        const reenteredCount = r.rows.length;
-        if (reenteredCount > 0) {
-          // journeys stats_total_entered 갱신
-          await query(
-            `UPDATE journeys SET
-               stats_total_entered = stats_total_entered + $2,
-               updated_at = NOW()
-             WHERE id = $1::uuid`,
-            [journeyId, reenteredCount]
+        // ★ 0930 Codex 2R — 진입 워커와 같은 진입 잠금 안에서 넣고 합계까지 한 트랜잭션(두 워커가 같은 고객을 동시에 넣지 않는다).
+        const client = await pool.connect();
+        let reenteredCount = 0;
+        try {
+          await client.query('BEGIN');
+          // ★ 0930 Codex 1R · 3R — 새 판으로 옮겨도 옛 판에서 끝낸 고객이 쿨다운 뒤 다시 들어오게: 이력 · 진행 중 판정은 계보 전체,
+          //   넣는 곳은 이 판. 계보는 진입 잠금 뒤 다시 읽은 목록 · 진입이 그사이 닫혔으면 넣지 않는다.
+          const fresh = await lockLineageEntry(client, journeyId);
+          const lineage = fresh.lineageIds;
+          if (!fresh.open) throw new EntryClosedSkip();
+          const r = await client.query(
+            `INSERT INTO journey_executions
+               (id, journey_id, customer_id, current_step_order, status, next_run_at, entered_at, created_at)
+             SELECT
+               gen_random_uuid(), $1::uuid, je.customer_id, 0, 'active', NOW(), NOW(), NOW()
+             FROM journey_executions je
+             JOIN customers c ON c.id = je.customer_id AND c.company_id = $2::uuid
+             WHERE je.journey_id = ANY($5::uuid[])
+               -- ★ 2026-07-10: goal_met(목표 달성 종료)도 완주와 동급으로 재진입 대상 — 구매로 이탈한 고객이
+               --   쿨다운 뒤 다시 대상이 되면(휴면 재발 등) 자동 재진입이 막히면 안 된다.
+               -- ★ Codex P2 정정: 단 쿨다운 0일이면 goal_met은 제외 — 방금 구매로 이탈한 고객이 같은 날
+               --   즉시 재진입해 독려를 다시 받는 루프 차단(완주 재진입은 기존 동작 보존).
+               AND (je.status = 'completed' OR (je.status = 'goal_met' AND $3 > 0))
+               AND je.completed_at IS NOT NULL
+               AND je.completed_at <= NOW() - ($3 * INTERVAL '1 day')
+               -- ★ Fix #1 (2026-06-05): 추출과 동일한 공통 안전필터(is_active·sms_opt_in·is_opt_out·is_invalid·수신거부 회사+전화).
+               AND ${buildJourneySafetyFilter('c')}
+               -- 옛 customer 영역 안 신규 active execution 영역 X (중복 진입 차단)
+               AND NOT EXISTS (
+                 SELECT 1 FROM journey_executions je2
+                 WHERE je2.journey_id = ANY($5::uuid[])
+                   AND je2.customer_id = je.customer_id
+                   AND je2.status = 'active'
+               )
+               -- 가장 최근 completed execution 영역만 정합 (중복 신규 entry 차단)
+               AND je.completed_at = (
+                 SELECT MAX(je3.completed_at) FROM journey_executions je3
+                 WHERE je3.journey_id = ANY($5::uuid[])
+                   AND je3.customer_id = je.customer_id
+                   AND je3.status IN ('completed', 'goal_met')
+               )
+             LIMIT $4
+             RETURNING id`,
+            [journeyId, companyId, cooldownDays, PER_JOURNEY_BATCH_LIMIT, lineage]
           );
+
+          reenteredCount = r.rows.length;
+          if (reenteredCount > 0) {
+            // journeys stats_total_entered 갱신
+            await client.query(
+              `UPDATE journeys SET
+                 stats_total_entered = stats_total_entered + $2,
+                 updated_at = NOW()
+               WHERE id = $1::uuid`,
+              [journeyId, reenteredCount]
+            );
+          }
+          await client.query('COMMIT');
+        } catch (txErr) {
+          await client.query('ROLLBACK').catch(() => {});
+          if (!(txErr instanceof EntryClosedSkip)) throw txErr;
+        } finally {
+          client.release();
         }
         totalReentered += reenteredCount;
         journeysProcessed++;

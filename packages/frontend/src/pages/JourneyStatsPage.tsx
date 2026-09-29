@@ -16,6 +16,8 @@ import OperatorAura from '../components/operator/OperatorAura';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
+// ★ 2026-09-29 여정 V2 0차 ⑤⑦ — 칸 종류 표기는 공용 유틸 한 곳.
+import { stepTypeLabel } from '../utils/journey-labels';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid,
 } from 'recharts';
@@ -167,7 +169,7 @@ export default function JourneyStatsPage() {
             <h1 className={`${OUI_TITLE} flex items-center gap-2`}>
               {journeyName || '여정'} · 통계 분석
             </h1>
-            <p className={OUI_SUBTITLE}>전체 효과 + 등급별 + 시간대 + 요일 + Variant Bandit</p>
+            <p className={OUI_SUBTITLE}>전체 효과 · 등급별 · 시간대 · 요일 · A/B 자동 배분</p>
           </div>
         </div>
       </div>
@@ -230,7 +232,7 @@ export default function JourneyStatsPage() {
                   <th className="px-3 py-2.5 font-medium text-right">진입</th>
                   <th className="px-3 py-2.5 font-medium text-right">발송</th>
                   <th className="px-3 py-2.5 font-medium text-right">실패</th>
-                  <th className="px-3 py-2.5 font-medium text-right">Skip</th>
+                  <th className="px-3 py-2.5 font-medium text-right">건너뜀</th>
                   <th className="px-3 py-2.5 font-medium text-right">클릭</th>
                   <th className="px-3 py-2.5 font-medium text-right">전환</th>
                   <th className="px-3 py-2.5 font-medium text-right">클릭률</th>
@@ -241,8 +243,8 @@ export default function JourneyStatsPage() {
               <tbody>
                 {stats.steps.map((s) => (
                   <tr key={s.stepId} className="border-b border-white/5 hover:bg-white/5">
-                    <td className="px-3 py-2.5">#{s.stepOrder + 1}</td>
-                    <td className="px-3 py-2.5 text-xs">{s.stepType}</td>
+                    <td className="px-3 py-2.5">{s.stepOrder}번째</td>
+                    <td className="px-3 py-2.5 text-xs">{stepTypeLabel(s.stepType)}</td>
                     <td className="px-3 py-2.5 text-xs uppercase">{s.channel || '-'}</td>
                     <td className="px-3 py-2.5 text-right font-mono">{s.enteredCount.toLocaleString()}</td>
                     <td className="px-3 py-2.5 text-right font-mono">{s.sentCount.toLocaleString()}</td>

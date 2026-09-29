@@ -17,13 +17,16 @@ import { sanitizeForSms } from './message-sanitizer';
 import { stripAdParts } from './messageUtils';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 // ★ 2026-08-08 이어달리기 — 고정된 트리거는 편집으로 풀리지 않는다(설계서 §6).
-import { isImplementedTriggerEvent, triggerTemplateCode } from './journey-trigger-capability';
-import { describeJourneyTrigger } from './journey-step-format';
+import { isImplementedTriggerEvent, triggerTemplateCode, contractReentryPolicy, defaultGoalExitFor, storageTemplateCodeFor } from './journey-trigger-capability';
+// ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 칸 종류 · 개수 · 대기 상한은 CT 한 곳. 넘치면 자르지 않고 거부 · 모르는 종류는 거부.
+import { resolveStepType, assertStepsWithinLimit, clampStepDelayHours, MAX_JOURNEY_STEPS, MAX_MESSAGE_STEPS, MAX_WAIT_TIMEOUT_HOURS, JourneyInputError } from './journey-step-limits';
+// ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없는 것은 빼고 "반영 안 됨"으로 알린다.
+import { partitionCustomerConditions } from './journey-target-extractor';
+import { describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 — 편집 결과도 생성과 같은 기계 차단을 지난다(프롬프트는 경계가 아니다).
 import { stripUnauthorizedBenefits } from './copy-benefit-detector';
 
 type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
-type StepType = 'message' | 'wait' | 'condition';
 
 export interface EditJourneyInput {
   companyId: string;
@@ -54,13 +57,15 @@ function clampInt(v: any, min: number, max: number, fallback: number): number {
 
 // 풍부 step 정규화 — 유형/채널/알림톡/조건 보존 (생성기의 message 전용 정규화와 분리)
 function normalizeStep(s: any, idx: number): any {
-  const stepType: StepType = ['message', 'wait', 'condition'].includes(s?.stepType) ? s.stepType : 'message';
+  // ★ 2026-09-29 V2 0차 ⑩ — 옛: 모르는 종류는 문자로 바꿨다. 이제 거부한다(라우트 400).
+  const stepType = resolveStepType(s?.stepType, `수정 결과 ${idx + 1}번째 칸`);
   const channel: ChannelType = ['sms', 'lms', 'mms', 'kakao'].includes(s?.channel) ? s.channel : 'lms';
 
   const base: any = {
     stepOrder: idx + 1,
     stepType,
-    delayHours: clampInt(s?.delayHours, 0, 720, 0),
+    // ★ 2026-09-29 V2 0차 ⑧ — 옛: 720시간(30일)으로 잘랐다. 담당자가 넣은 60일 대기가 수정 한 번에 30일이 됐다.
+    delayHours: clampStepDelayHours(s?.delayHours),
     stepIntent: String(s?.stepIntent || '').slice(0, 100),
   };
 
@@ -79,6 +84,9 @@ function normalizeStep(s: any, idx: number): any {
     base.subject = '';
     base.isAd = false;
     if (s?.conditionJsonb && typeof s.conditionJsonb === 'object') base.conditionJsonb = s.conditionJsonb;
+    // ★ 2026-09-29 V2 0차 ⑧ — 갈림 도착 칸 보존. 옛: 옮기지 않아 수정 한 번에 "안 샀으면 리마인드" 갈래가 "종료"가 됐다.
+    const g = Number(s?.notMetGoto);
+    if (s?.notMetGoto != null && Number.isFinite(g) && g > 0) base.notMetGoto = Math.floor(g);
     return base;
   }
 
@@ -87,6 +95,12 @@ function normalizeStep(s: any, idx: number): any {
     base.messageTemplate = '';
     base.subject = '';
     base.isAd = false;
+    // ★ 2026-09-29 V2 0차 ⑧ — 사건 대기(구매 오면 바로 · 최대 N시간) 보존. 옛: 수정 한 번에 시간 대기로 바뀌었다.
+    if (typeof s?.waitEventName === 'string' && s.waitEventName.trim()) {
+      base.waitEventName = s.waitEventName.trim().slice(0, 50);
+      const t = Number(s?.waitTimeoutHours);
+      if (Number.isFinite(t) && t > 0) base.waitTimeoutHours = Math.min(MAX_WAIT_TIMEOUT_HOURS, Math.floor(t));
+    }
     return base;
   }
 
@@ -110,6 +124,9 @@ function normalizeStep(s: any, idx: number): any {
   }
   // MMS 이미지 보존
   if (channel === 'mms' && Array.isArray(s?.mmsImagePaths)) base.mmsImagePaths = s.mmsImagePaths.slice(0, 3).map((p: any) => String(p));
+  // ★ 2026-09-29 V2 (회의론자 0차 검증 1 · 치명) — 날짜축 칸의 D-N 보존. 옛: 버려져 D-N 칸이 전부 지연 0이 됐다.
+  const ao = Number(s?.anchorOffsetDays);
+  if (s?.anchorOffsetDays != null && Number.isFinite(ao) && ao >= 0) base.anchorOffsetDays = Math.floor(ao);
 
   return base;
 }
@@ -128,6 +145,21 @@ export async function editJourneyPackage(input: EditJourneyInput): Promise<any> 
   //   그래서 AI에게 전제를 먼저 주고(아래 프롬프트), 결과는 계약값으로 다시 고정한다(아래 후처리).
   const presetTrigger = typeof cur.presetTriggerEvent === 'string' && isImplementedTriggerEvent(cur.presetTriggerEvent)
     ? cur.presetTriggerEvent : null;
+  // ★ 2026-09-29 V2 (회의론자 0차 검증 1 · 치명) — 정보 알림 · 날짜축 · 1회 발송(시작 방식이 정해진 패키지)은
+  //   시작 방식 · 트리거 · 대상 · 날짜 설정을 받은 그대로 돌려준다(프리셋과 같은 규약).
+  //   옛: 반환에 startKind · anchor 5필드 · oneShotScheduledAt 이 없어, 대화형 수정 한 번에 화면이 저장에서 시작 방식을 잃고
+  //   trigger 'custom' 상시 여정(전 고객 · 지연 0)으로 저장됐다.
+  const lockedStart = typeof cur.startKind === 'string' && cur.startKind ? {
+    startKind: cur.startKind,
+    triggerEvent: String(cur.triggerEvent || 'custom'),
+    templateCode: String(cur.templateCode || 'custom'),
+    triggerFilters: (cur.triggerFilters && typeof cur.triggerFilters === 'object') ? cur.triggerFilters : {},
+    anchorDate: cur.anchorDate ?? null,
+    anchorRecurrence: cur.anchorRecurrence ?? null,
+    anchorRecurrenceDay: cur.anchorRecurrenceDay ?? null,
+    anchorHourKst: cur.anchorHourKst ?? null,
+    oneShotScheduledAt: cur.oneShotScheduledAt ?? null,
+  } : null;
   const presetLabel = presetTrigger ? describeJourneyTrigger(presetTrigger, {}) : '';
 
   // ★ 2026-08-08 혜택 입력 (Codex 1R) — benefitText를 메타데이터로만 복사하면 문안과 갈린다:
@@ -146,7 +178,7 @@ export async function editJourneyPackage(input: EditJourneyInput): Promise<any> 
   그 밖의 혜택 자리는 [혜택 안내: 직접 수정해주세요] 형태 placeholder를 유지한다.
 - (광고) 접두사·무료수신거부·제목 자동 합성은 시스템이 처리하므로 본문에 직접 쓰지 않는다.
 - 여정은 연중 상시 자동 발송이다. 문안을 새로 쓰거나 다듬을 때 계절·월·날씨·명절 언급 금지 (시간 불문 감성으로). 원본에 계절 표현이 있으면 시간 불문 표현으로 교체한다. 단, 사용자 요청문에 계절·명절이 명시된 경우에만 반영.
-- step은 최대 7개.
+- 문자 칸은 최대 ${MAX_MESSAGE_STEPS}개, 전체 칸은 최대 ${MAX_JOURNEY_STEPS}개. 조건 칸의 notMetGoto(미충족 시 이동할 칸 번호) · 대기 칸의 waitEventName/waitTimeoutHours 는 요청이 없으면 받은 값 그대로 돌려준다.
 - 개인화 변수는 %고객명% 형태만 쓰고, 불확실한 변수는 만들지 않는다.
 
 응답은 코드블록 없이 JSON만. 스키마:
@@ -155,7 +187,7 @@ export async function editJourneyPackage(input: EditJourneyInput): Promise<any> 
   "templateCode": "onboarding"|"repeat"|"dormant"|"cart"|"birthday"|"reservation"|"custom",
   "triggerEvent": string,
   "triggerFilters": object,
-  "steps": [{ "stepOrder": number, "stepType": "message"|"wait"|"condition", "delayHours": number, "channel": "sms"|"lms"|"mms"|"kakao", "messageTemplate": string, "subject": string, "isAd": boolean, "stepIntent": string, "conditionJsonb": object|null, "delayMode": string|null, "targetHourKst": number|null, "alimtalkProfileId": string|null, "alimtalkTemplateCode": string|null, "alimtalkVariableMap": object|null }],
+  "steps": [{ "stepOrder": number, "stepType": "message"|"wait"|"condition", "delayHours": number, "channel": "sms"|"lms"|"mms"|"kakao", "messageTemplate": string, "subject": string, "isAd": boolean, "stepIntent": string, "conditionJsonb": object|null, "notMetGoto": number|null, "waitEventName": string|null, "waitTimeoutHours": number|null, "delayMode": string|null, "targetHourKst": number|null, "alimtalkProfileId": string|null, "alimtalkTemplateCode": string|null, "alimtalkVariableMap": object|null }],
   "allowReentry": boolean,
   "reentryCooldownDays": number|null,
   "reasoning": "무엇을 어떻게 바꿨는지 한국어 한 줄"
@@ -197,7 +229,10 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
   }
 
   const rawSteps: any[] = Array.isArray(parsed?.steps) ? parsed.steps : [];
-  const steps = rawSteps.slice(0, 7).map((s, idx) => normalizeStep(s, idx));
+  // ★ 2026-09-29 V2 0차 ⑧ — 옛: 7칸 넘으면 조용히 잘랐다(뒤쪽 갈래 · 끝이 잘리면 더 보낸다). 이제 거부.
+  // ★ 2026-09-30 V2 4차 — 문자 칸 7 + 전체 12(칸 종류를 보고 센다).
+  assertStepsWithinLimit(rawSteps.map((s: any) => ({ stepType: s?.stepType })), '수정 결과');
+  const steps = rawSteps.map((s, idx) => normalizeStep(s, idx));
   if (steps.length === 0) throw new Error('수정 결과에 유효한 step이 없습니다.');
 
   // ★ 2026-08-08 (Codex 1R) — 프롬프트는 경계가 아니다. 편집 결과의 지어낸 혜택도 기계로 되돌린다.
@@ -220,6 +255,12 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
   const validTemplates = ['onboarding', 'repeat', 'dormant', 'cart', 'birthday', 'reservation', 'custom'];
   let templateCode = validTemplates.includes(parsed?.templateCode) ? parsed.templateCode : (cur.templateCode || 'custom');
   let triggerEvent = String(parsed?.triggerEvent || cur.triggerEvent || 'custom').slice(0, 50);
+  // ★ 2026-09-29 V2 0차 ① — 모르는 트리거로 바뀐 응답은 받지 않는다(현재값 유지).
+  //   (회의론자 0차 검증 1) 현재값도 모르는 값이면 'custom'(= 전 고객)으로 떨어뜨리지 않고 거부한다.
+  if (!isImplementedTriggerEvent(triggerEvent)) {
+    if (isImplementedTriggerEvent(String(cur.triggerEvent || ''))) triggerEvent = String(cur.triggerEvent);
+    else throw new JourneyInputError('수정 결과의 시작 사건을 알 수 없어요. 여정을 다시 만들어 주세요.');
+  }
   let triggerFilters = (parsed?.triggerFilters && typeof parsed.triggerFilters === 'object') ? parsed.triggerFilters : (cur.triggerFilters || {});
 
   // ★ 2026-08-08 이어달리기 — 표식을 잃으면 화면이 저장에 트리거를 안 실어 약속과 다른 여정이 만들어지고,
@@ -244,6 +285,21 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
     triggerFilters = {};
   }
 
+  if (lockedStart) {
+    triggerEvent = lockedStart.triggerEvent;
+    templateCode = lockedStart.templateCode;
+    triggerFilters = lockedStart.triggerFilters;
+  } else if (!presetTrigger) {
+    // ★ 2026-09-29 V2 (회의론자 0차 검증 2-가) — 저장 템플릿 코드는 트리거에서 파생한다.
+    templateCode = storageTemplateCodeFor(triggerEvent);
+  }
+
+  // ★ 2026-09-29 V2 0차 ② — 쓸 수 없는 대상 조건은 빼고 문구로 알린다(조용히 넓히지 않는다).
+  const cond = partitionCustomerConditions(triggerFilters);
+  triggerFilters = cond.filters;
+  // ★ 2026-09-29 V2 0차 ③ — 사건마다 받아야 하는 트리거(주문 완료 · 휴면 복귀)는 재진입을 계약이 정한다(AI 출력 무시).
+  const reentry = contractReentryPolicy(triggerEvent);
+
   // 발송·타겟에 직결되는 trigger/회신/예산 힌트는 편집으로 잃지 않도록 현재값 유지 우선
   return {
     name: String(parsed?.name || cur.name || '여정').slice(0, 100),
@@ -255,8 +311,21 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
     //   재생성 축에서 혜택이 사라진다(프리셋 유실과 같은 뿌리). 정규화 값은 위에서 한 번만 만든다.
     benefitText,
     steps,
-    allowReentry: typeof parsed?.allowReentry === 'boolean' ? parsed.allowReentry : !!cur.allowReentry,
-    reentryCooldownDays: parsed?.reentryCooldownDays != null ? clampInt(parsed.reentryCooldownDays, 0, 3650, 0) : (cur.reentryCooldownDays ?? null),
+    allowReentry: reentry ? reentry.allowReentry : (typeof parsed?.allowReentry === 'boolean' ? parsed.allowReentry : !!cur.allowReentry),
+    reentryCooldownDays: reentry ? reentry.cooldownDays : (parsed?.reentryCooldownDays != null ? clampInt(parsed.reentryCooldownDays, 0, 3650, 0) : (cur.reentryCooldownDays ?? null)),
+    droppedConditionNotices: cond.droppedNotices,
+    // ★ 2026-09-29 V2 0차 ⑪ — 트리거가 바뀐 수정 뒤에도 화면 기본값을 계약에서 다시 맞춘다.
+    goalExitDefault: defaultGoalExitFor(triggerEvent),
+    targetSummary: describeJourneyTarget(triggerEvent, triggerFilters),
+    // 시작 방식이 정해진 패키지는 그 설정을 그대로 싣는다(없으면 키 자체를 싣지 않는다 = 옛 마케팅 패키지 그대로).
+    ...(lockedStart ? {
+      startKind: lockedStart.startKind,
+      anchorDate: lockedStart.anchorDate,
+      anchorRecurrence: lockedStart.anchorRecurrence,
+      anchorRecurrenceDay: lockedStart.anchorRecurrenceDay,
+      anchorHourKst: lockedStart.anchorHourKst,
+      oneShotScheduledAt: lockedStart.oneShotScheduledAt,
+    } : {}),
     callbackNumberHint: cur.callbackNumberHint ?? null,
     budgetMonthlyHint: cur.budgetMonthlyHint ?? null,
     thresholdCostHint: cur.thresholdCostHint ?? null,

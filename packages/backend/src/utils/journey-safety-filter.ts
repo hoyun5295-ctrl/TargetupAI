@@ -60,17 +60,27 @@ export function buildReentryAntiJoin(
   journeyId: string,
   allowReentry: boolean,
   cooldownDays: number,
+  // ★ 2026-09-30 여정 V2 5차 — 같은 계보(새 판 · 옛 판) 여정 id. 2개 이상일 때만 계보로 본다(없으면 옛 문장 그대로).
+  lineageIds?: string[],
 ): string {
   const a = alias;
+  const lineage = lineageIds && lineageIds.length > 1 ? lineageIds : null;
   if (!allowReentry) {
-    params.push(journeyId);
-    return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $${params.length}::uuid AND je.customer_id = ${a}.id)`;
+    params.push(lineage || journeyId);
+    const match = lineage ? `je.journey_id = ANY($${params.length}::uuid[])` : `je.journey_id = $${params.length}::uuid`;
+    return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id)`;
   }
   const cd = Math.floor(Number(cooldownDays) || 0);
-  if (cd <= 0) return '';
-  params.push(journeyId);
+  if (cd <= 0) {
+    if (!lineage) return '';
+    // 쿨다운 0이어도 다른 판에서 진행 중이면 그 판에서 마무리한다(이중 진입 0).
+    params.push(lineage.filter((x) => x !== journeyId));
+    return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = ANY($${params.length}::uuid[]) AND je.customer_id = ${a}.id AND je.status = 'active')`;
+  }
+  params.push(lineage || journeyId);
   const jIdx = params.length;
   params.push(String(cd));
   const cdIdx = params.length;
-  return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $${jIdx}::uuid AND je.customer_id = ${a}.id AND (je.status = 'active' OR je.entered_at > NOW() - ($${cdIdx} || ' days')::interval))`;
+  const match = lineage ? `je.journey_id = ANY($${jIdx}::uuid[])` : `je.journey_id = $${jIdx}::uuid`;
+  return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id AND (je.status = 'active' OR je.entered_at > NOW() - ($${cdIdx} || ' days')::interval))`;
 }

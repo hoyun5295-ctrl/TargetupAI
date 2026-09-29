@@ -30,9 +30,15 @@ import { stripAdParts } from './messageUtils';
 //   본질 = AI가 어설픈 변수 임의 작성 차단 (Harold 명시: "개인화 어설프게 실수로 들어가는게 더 안좋다").
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 // ★ 2026-08-02 §13-3: 발송 시점 문구는 화면·브리핑과 같은 단일 출처를 쓴다(AI에게 다른 말로 설명하지 않는다).
-import { formatStepTiming, describeJourneyTrigger } from './journey-step-format';
+import { formatStepTiming, describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 이어달리기 — 트리거는 계약이 정한다(AI 출력에 약속을 걸지 않는다). 설계서 §6.
-import { isImplementedTriggerEvent, triggerTemplateCode } from './journey-trigger-capability';
+import { isImplementedTriggerEvent, triggerTemplateCode, aiSelectableTriggerEvents, formatTriggerMenuForAi, contractReentryPolicy, defaultGoalExitFor, storageTemplateCodeFor, isProductPickTrigger } from './journey-trigger-capability';
+// ★ 2026-09-30 여정 V2 3차 — 상품 재구매: 상품 필터 검증 · 저장 형태는 journey-product 한 곳.
+import { normalizeProductFilters, type PurchaseDoor } from './journey-product';
+// ★ 2026-09-29 여정 V2 0차 ⑧ — 칸 개수 · 대기 상한은 CT 한 곳(자르지 않고 거부).
+import { assertStepsWithinLimit, clampStepDelayHours, JourneyInputError } from './journey-step-limits';
+// ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없는 것은 빼고 "반영 안 됨"으로 알린다(조용히 넓히지 않는다).
+import { partitionCustomerConditions } from './journey-target-extractor';
 // 추천 문구의 단일 출처 — "이어서 만들기"와 기회 카드가 같은 목표 골격을 쓴다.
 import { successionObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
@@ -66,6 +72,11 @@ export interface JourneyAIGenerateInput {
    *   입력한 혜택은 살고, AI가 덧붙인 다른 혜택은 여전히 placeholder로 되돌아간다.
    */
   benefitText?: string;
+  /**
+   * ★ 2026-09-30 여정 V2 3차 — 상품 재구매 여정(상품 고르기 창에서만 온다). 상품은 담당자가 관측 목록에서 고른 것,
+   *   사용 기간은 담당자가 확정한 일수 → 첫 문자 대기(delay)에 그대로 저장한다(AI 가 정하지 않는다).
+   */
+  product?: { keys: string[]; names: string[]; door: PurchaseDoor; periodDays: number };
 }
 
 export interface GeneratedStep {
@@ -103,6 +114,15 @@ export interface JourneyAIPackage {
    *   (프리셋 유실과 같은 뿌리 — 패키지를 다시 만드는 자리가 축을 떨어뜨린다).
    */
   benefitText: string | null;
+  /**
+   * ★ 2026-09-29 여정 V2 0차 ⑪(Harold 승인 결정 1) — "목표를 이루면 남은 문자 안 보냄" 기본값.
+   *   트리거 계약에서 파생한다(화면 템플릿 목록이 정하던 것을 서버 한 곳으로). 화면은 이 값을 토글 초기값으로 쓴다.
+   */
+  goalExitDefault: boolean;
+  /** ★ 2026-09-29 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없어 뺀 것(화면에 "반영 안 됨"으로 보인다). */
+  droppedConditionNotices: string[];
+  /** ★ 2026-09-29 V2 0차 ① — 계획 모달 "누구에게"(저장될 대상 조건을 사람 말로). 보이는 것 = 저장되는 것. */
+  targetSummary: string;
 }
 
 /**
@@ -221,6 +241,15 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   if (presetTrigger && !isImplementedTriggerEvent(presetTrigger)) {
     throw new Error('지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.');
   }
+  // ★ 2026-09-30 V2 3차 — 상품을 골라야 하는 트리거는 상품 고르기 창(product 입력)에서만 만든다(상품 없이 만들면 영영 0건).
+  if (presetTrigger && isProductPickTrigger(presetTrigger) && !input.product) {
+    throw new JourneyInputError('상품 재구매 여정은 상품을 고르는 창에서 만들어요.');
+  }
+  const productFilters = input.product && presetTrigger && isProductPickTrigger(presetTrigger)
+    ? normalizeProductFilters({ product_keys: input.product.keys, product_names: input.product.names, door: input.product.door })
+    : null;
+  const productPeriodDays = productFilters ? Math.max(1, Math.min(365, Math.floor(Number(input.product!.periodDays) || 0))) : 0;
+  if (productFilters && productPeriodDays < 1) throw new JourneyInputError('사용 기간(일)을 정해 주세요.');
   // 프리셋만 온 경로(다음 수 카드 = 클릭 한 번)는 목표 골격을 추천 문구에서 파생한다 —
   // 화면이 자기 문장을 지어내면 같은 추천이 경로마다 다른 여정을 만든다.
   const objectiveText = (input.objective || '').trim() || (presetTrigger ? successionObjectiveFor(presetTrigger) || '' : '');
@@ -264,14 +293,10 @@ ${getKoreanCalendar()}
 ${memoryContext}
 
 [설계 원칙]
-1. 표준 트리거 매트릭스 (자연어 목표에서 자동 매칭):
-   - customer.created (24h 안 신규 가입): 환영/온보딩 시리즈
-   - cdp.purchase (구매 직후 5분): 후기/재구매 유도
-   - customer.dormant (휴면 N일+): 회수 시리즈
-   - cdp.cart_abandon (장바구니 24h+ 결제 X): 회복 시리즈
-   - customer.birthday_approaching (D-N): 생일 축하
-   - cdp.reservation_created: 예약 follow-up
-   - custom (위 외 자유: 정기 발송 / 신상품 알림 / VIP 감사 등)
+1. 시작 사건(triggerEvent): 아래 목록의 값 중 하나만 쓴다(목록 밖 값은 저장되지 않는다).
+${formatTriggerMenuForAi()}
+   ★ 사용자가 "첫 구매 고객", "처음 산 고객"을 말하면 purchase.first, "다시 산 고객"·"휴면에서 돌아온 고객"은 customer.dormant_return 처럼 가장 좁게 맞는 값을 고른다.
+   ★ custom 은 위 사건에 해당하지 않는 정기 안내 · 특정 고객군 1회 안내에만 쓴다. custom 에 대상 조건이 없으면 전 고객이 대상이 된다.
 
 1-2. ★ 타겟 세그먼트 추출 (매우 중요, 절대 누락 금지)
    사용자가 "어떤 고객에게" 보낼지 조건을 말하면(예: "매장명이 송파가락점인 회원", "VIP 등급만", "서울 지역", "3회 이상 구매") 반드시 triggerFilters.customer_conditions 배열로 담는다.
@@ -285,7 +310,7 @@ ${memoryContext}
 2. step 개수: 기본 2~5개 (목표 + 시계열에 맞춰 자동 결정).
    ★ 단발성 발송 의무 룰: 사용자가 한 번만 보내려는 의도를 명시하면(예: "한번만", "1회만", "한 번", "딱 한 번", "한 차례") 반드시 step 1개만 생성한다. 시계열 시리즈로 늘리지 말 것. 사용자가 지정한 발송 횟수를 절대 무시하지 않는다.
    ★ 단발성·단순 일률 발송의 본문은 Liquid 문법({{ }} / {% %})을 쓰지 말고 %고객명% 같은 단순 변수만 사용한다 (마케팅 담당자가 직접 편집하기 쉽도록). 등급별/조건 분기 등 고급 1:1 개인화를 명시한 경우에만 Liquid를 사용한다.
-3. delay_hours: 0(즉시) / 24(1일) / 72(3일) / 168(7일) / 336(14일) / 720(30일) 자연 단위
+3. delay_hours: 0(즉시) / 24(1일) / 72(3일) / 168(7일) / 336(14일) / 720(30일) / 1440(60일) / 2160(90일) 자연 단위 (앞 칸 기준 상대값 · 최대 8760)
 4. channel: 'lms' default (광고 표기 + 무료거부 자동 합성 시 90바이트 SMS 한계 초과)
 5. isAd: 마케팅성은 true default (정보 안내성만 false)
 6. subject (제목): LMS/MMS 채널 시 필수: 한 줄 20자 안 / 본문 핵심을 단순 요약 / 호기심 유발 / 따뜻한 감성 (계절 단어 금지)
@@ -615,7 +640,10 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
   }
 
   const rawSteps: any[] = Array.isArray(parsed.steps) ? parsed.steps : [];
-  const steps: GeneratedStep[] = rawSteps.slice(0, 5).map((s: any, idx: number) => {
+  // ★ 2026-09-29 V2 0차 ⑧ — 옛: 5칸 넘으면 조용히 잘랐다. 이제 여정 칸 상한(CT)을 넘을 때만 거부한다(자르지 않는다).
+  // ★ 2026-09-30 V2 4차 — 생성기 칸은 전부 문자다(문자 칸 7 상한 · 0차 의미 그대로).
+  assertStepsWithinLimit(rawSteps.map(() => ({ stepType: 'message' })), 'AI 생성 결과');
+  const steps: GeneratedStep[] = rawSteps.map((s: any, idx: number) => {
     const channel = ['sms', 'lms', 'mms'].includes(s.channel) ? s.channel : 'lms';
     // ★ D187-fix5: AI 응답에 이모지/비표준 특수문자 포함 가능성 — sanitize 자동 적용
     const rawMessage = String(s.messageTemplate || '').slice(0, 2000);
@@ -631,7 +659,8 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
     return {
       stepOrder: Number(s.stepOrder) || idx + 1,
       stepType: 'message' as const,
-      delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
+      // ★ 2026-09-29 V2 0차 ⑧ — 옛: 720시간(30일)에서 잘라 "2달 뒤"를 문장으로 말해도 30일로 저장됐다. 상한 = CT(365일).
+      delayHours: clampStepDelayHours(s.delayHours),
       channel,
       // ★ 본문/제목은 순수 상태로 저장 — (광고)/무료수신거부는 발송·미리보기 시 buildAdMessage가 합성.
       //   AI가 본문에 (광고)를 넣어도 여기서 제거해야 이중부착(미리보기·발송)이 안 남.
@@ -673,6 +702,26 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
     templateCode = triggerTemplateCode(presetTrigger) || 'custom';
     triggerFilters = {};
   }
+  // ★ 2026-09-30 V2 3차 — 상품 재구매: 대상 = 고른 상품(담당자) · 첫 문자 = 확정한 사용 기간 뒤(AI 값 무시) · 진입 교체 켜짐.
+  if (productFilters) {
+    triggerFilters = { ...productFilters, entry_replace: true };
+    if (steps.length > 0) steps[0] = { ...steps[0], delayHours: clampStepDelayHours(productPeriodDays * 24) };
+  }
+
+  // ★ 2026-09-29 여정 V2 0차 ① — AI 가 고른 시작 사건은 레지스트리 목록 안에서만 받는다.
+  //   옛: 어떤 문자열이든 패키지에 실렸고, 화면은 그 값을 계획 모달에 보여 주면서 저장에서는 빼 템플릿 기본값으로 저장했다.
+  //   이제 화면이 이 값을 그대로 저장하므로(0차 ①) 여기서 목록 밖 값을 막는다 — 추측으로 다른 사건을 고르지 않는다.
+  if (!productFilters && !aiSelectableTriggerEvents().includes(triggerEvent)) {
+    throw new JourneyInputError('AI가 시작 사건을 정하지 못했어요. "첫 구매한 고객에게"처럼 언제 보낼지를 한 번 더 적어 주세요.');
+  }
+  // ★ 2026-09-29 V2 0차 ② — 쓸 수 없는 대상 조건은 빼고 "반영 안 됨"으로 알린다.
+  const cond = partitionCustomerConditions(triggerFilters);
+  triggerFilters = cond.filters;
+  // ★ 2026-09-29 V2 (회의론자 0차 검증 2-가) — 저장 템플릿 코드는 트리거에서 파생한다(AI 가 따로 낸 값과 어긋나지 않게).
+  if (!presetTrigger) templateCode = storageTemplateCodeFor(triggerEvent);
+  // ★ 2026-09-29 V2 0차 ③ — 사건마다 받아야 하는 트리거(주문 완료 · 휴면 복귀)는 재진입을 계약이 정한다(AI 출력 무시).
+  //   옛: AI 가 재진입을 끄면 "첫 구매 → 주문 완료" 선이 두 번째 구매부터 끊긴 채로 만들어졌다.
+  const reentry = contractReentryPolicy(triggerEvent);
 
   return {
     name: String(parsed.name || '여정').slice(0, 100),
@@ -682,12 +731,15 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
     presetTriggerEvent: presetTrigger,
     benefitText: benefitText || null,
     steps,
-    allowReentry: !!parsed.allowReentry,
-    reentryCooldownDays: parsed.reentryCooldownDays != null ? Math.max(0, Math.min(3650, Number(parsed.reentryCooldownDays))) : null,
+    allowReentry: reentry ? reentry.allowReentry : !!parsed.allowReentry,
+    reentryCooldownDays: reentry ? reentry.cooldownDays : (parsed.reentryCooldownDays != null ? Math.max(0, Math.min(3650, Number(parsed.reentryCooldownDays))) : null),
     callbackNumberHint: callbackHint,
     budgetMonthlyHint: parsed.budgetMonthlyHint != null ? Number(parsed.budgetMonthlyHint) : null,
     thresholdCostHint: parsed.thresholdCostHint != null ? Number(parsed.thresholdCostHint) : null,
     reasoning: String(parsed.reasoning || '').slice(0, 500),
+    goalExitDefault: defaultGoalExitFor(triggerEvent),
+    droppedConditionNotices: cond.droppedNotices,
+    targetSummary: describeJourneyTarget(triggerEvent, triggerFilters),
   };
 }
 

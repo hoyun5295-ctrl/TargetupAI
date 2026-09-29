@@ -29,6 +29,9 @@ import {
 } from './journey-trigger-capability';
 // ★ 정답표를 갖지 않는다 — 이 회사가 그 트리거를 판정할 수 있는지는 회사 데이터가 정한다.
 import { getCompanyJourneyFacts } from './company-data-profile';
+// ★ 2026-09-29 여정 V2 1차 — 정보 알림(알림톡 · 광고 아님)은 마케팅 구간을 채운 것으로 세지 않는다(생애 지도와 같은 판정).
+import { MARKETING_JOURNEY_SQL } from './journey-lifecycle-map';
+import { triggerLabel, isProductPickTrigger } from './journey-trigger-capability';
 
 export type JourneyOpportunityType =
   | 'cart_recovery' | 'onboarding' | 'dormant' | 'birthday' | 'repurchase_due' | 'wishlist'
@@ -72,12 +75,14 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
   // 1) 활성(미보관) 여정 유형 — 이미 커버 중인 기회는 제안하지 않는다.
   //    ★ 2026-08-08 이어달리기 — trigger_event도 함께 읽는다. 후속 트리거 3종이 전부 template_code='repeat'을
   //      공유해, 이어달리기 dedup을 template_code로 하면 서로를 오차단한다(설계서 사실 10).
+  // ★ 2026-09-29 여정 V2 1차 — 판정 축을 trigger_event 하나로 옮겼다(설계서 §5 · 회의론자 검증 9).
+  //   옛: template_code 로 셌다 — 첫 구매 · 주문 완료 · 휴면 복귀가 같은 'repeat' 을 써서 서로를 "이미 있음"으로 가렸고,
+  //   주문 완료 알림톡(정보 알림)이 재구매 구간을 채운 것으로 셌다. 이제 마케팅 여정의 트리거만 센다.
   const activeRes = await query(
-    `SELECT DISTINCT template_code, trigger_event FROM journeys
-      WHERE company_id = $1 AND status = 'active' AND archived_at IS NULL`,
+    `SELECT DISTINCT j.trigger_event FROM journeys j
+      WHERE j.company_id = $1 AND j.status = 'active' AND j.archived_at IS NULL AND ${MARKETING_JOURNEY_SQL}`,
     [companyId],
   );
-  const active = new Set<string>(activeRes.rows.map((r: any) => String(r.template_code)));
   const activeTriggers = new Set<string>(activeRes.rows.map((r: any) => String(r.trigger_event)));
 
   // 2) 회사 구매 분포 — 데이터 기반 임계값 (하드코딩 대신 분포에서 도출)
@@ -134,41 +139,41 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
 
   const out: JourneyOpportunity[] = [];
 
-  if (!active.has('cart') && num(a.cart_cnt) > 0) {
+  if (!activeTriggers.has('cdp.cart_abandon') && num(a.cart_cnt) > 0) {
     out.push({
-      type: 'cart_recovery', templateCode: 'cart', title: '장바구니 이탈 미회복',
+      type: 'cart_recovery', templateCode: 'cart', title: '장바구니 이탈 미회복', preferTriggerEvent: 'cdp.cart_abandon',
       count: num(a.cart_cnt), valueAtStake: num(a.cart_val), priority: 'medium',
       description: `최근 14일 안에 담고 구매하지 않은 ${num(a.cart_cnt).toLocaleString()}명. 1인 평균 ${perHead(num(a.cart_val), num(a.cart_cnt))} 규모라 회복 여력이 큽니다.`,
       suggestedObjective: '장바구니에 담고 구매하지 않은 고객 회복: 담은 상품 리마인드 + 결제 유도 2단계',
     });
   }
-  if (!active.has('onboarding') && num(a.onb_cnt) > 0) {
+  if (!activeTriggers.has('customer.created') && num(a.onb_cnt) > 0) {
     out.push({
-      type: 'onboarding', templateCode: 'onboarding', title: '신규 가입 미환영',
+      type: 'onboarding', templateCode: 'onboarding', title: '신규 가입 미환영', preferTriggerEvent: 'customer.created',
       count: num(a.onb_cnt), valueAtStake: Math.round(num(a.onb_cnt) * aov), priority: 'medium',
       description: `최근 7일 안에 가입한 ${num(a.onb_cnt).toLocaleString()}명. 첫 구매 전환의 골든타임입니다.`,
       suggestedObjective: '신규 가입자 환영 시리즈: 첫 인사 + 첫 구매 유도',
     });
   }
-  if (!active.has('dormant') && num(a.dorm_cnt) > 0) {
+  if (!activeTriggers.has('customer.dormant') && num(a.dorm_cnt) > 0) {
     out.push({
-      type: 'dormant', templateCode: 'dormant', title: '장기 무구매 휴면',
+      type: 'dormant', templateCode: 'dormant', title: '장기 무구매 휴면', preferTriggerEvent: 'customer.dormant',
       count: num(a.dorm_cnt), valueAtStake: num(a.dorm_val), priority: 'medium',
       description: `평소 구매 주기를 넘겨 ${p75Days}일 이상 무구매인 ${num(a.dorm_cnt).toLocaleString()}명. 누적 ${won(num(a.dorm_val))} 구매한 고객층이라 재활성 가치가 높습니다.`,
       suggestedObjective: '장기 휴면 고객 복귀 유도: 재방문 안내',
     });
   }
-  if (!active.has('birthday') && num(a.bday_cnt) > 0) {
+  if (!activeTriggers.has('customer.birthday_approaching') && num(a.bday_cnt) > 0) {
     out.push({
-      type: 'birthday', templateCode: 'birthday', title: '생일 임박',
+      type: 'birthday', templateCode: 'birthday', title: '생일 임박', preferTriggerEvent: 'customer.birthday_approaching',
       count: num(a.bday_cnt), valueAtStake: Math.round(num(a.bday_cnt) * aov), priority: 'medium',
       description: `7일 안에 생일인 ${num(a.bday_cnt).toLocaleString()}명. 축하 메시지로 재방문 유도 적기입니다.`,
       suggestedObjective: '생일 7일 전 사전 축하 + 등급별 인사',
     });
   }
-  if (!active.has('repeat') && num(a.repur_cnt) > 0) {
+  if (!activeTriggers.has('customer.cycle_lapsed') && num(a.repur_cnt) > 0) {
     out.push({
-      type: 'repurchase_due', templateCode: 'repeat', title: '재구매 주기 도래',
+      type: 'repurchase_due', templateCode: 'repeat', title: '재구매 주기 도래', preferTriggerEvent: 'customer.cycle_lapsed',
       count: num(a.repur_cnt), valueAtStake: num(a.repur_val), priority: 'medium',
       description: `평소 재구매 주기(${medianDays}~${p75Days}일)에 접어든 ${num(a.repur_cnt).toLocaleString()}명. 휴면 전 리마인드 적기입니다.`,
       suggestedObjective: '재구매 주기 도래 고객 리마인드: 재구매 유도',
@@ -245,8 +250,11 @@ export function successionObjectiveFor(nextTriggerEvent: string): string | null 
   return SUCCESSION_COPY[nextTriggerEvent]?.objective ?? null;
 }
 
-/** 겹침 안내 — 어느 쪽에서 추천하든 같은 문장 하나(여정 문서 §4의 의무를 추천 카드가 승계). */
-const OVERLAP_NOTICE = '재구매 여정과 휴면 복귀 여정은 같은 구매 한 번에 둘 다 발송될 수 있어요.';
+/** 겹침 안내 — 계약의 겹침 쌍에서 문장을 만든다(★ 0929 V2: 첫 구매 ↔ 주문 완료 쌍이 더해져 고정 문장이 틀리게 됐다). */
+function overlapNotice(nextEvent: string, activeOverlaps: string[]): string {
+  const names = activeOverlaps.map((e) => triggerLabel(e)).filter(Boolean).join(' · ');
+  return `${triggerLabel(nextEvent)} 여정과 ${names} 여정은 같은 구매 한 번에 둘 다 발송될 수 있어요.`;
+}
 
 /** 카드 시각 코드로 쓸 수 있는 값인가 — 계약의 카탈로그 코드 중 카드가 모르는 값은 custom으로 둔다. */
 function toCardTemplateCode(code: string | null): JourneyOpportunity['templateCode'] {
@@ -297,6 +305,8 @@ async function buildSuccessionOpportunities(
     const count = Number(row.goal_met_count || 0);
     for (const nextEvent of nextTriggerEvents(String(row.trigger_event))) {
       if (taken.has(nextEvent)) continue;
+      // ★ 2026-09-30 V2 3차 — 상품을 골라야 만드는 여정(상품 재구매)은 1클릭 다음 수가 될 수 없다(지도 · 상품 고르기 창에서 권한다).
+      if (isProductPickTrigger(nextEvent)) continue;
       // ⛔ dedup 축은 trigger_event다 — template_code로 하면 repeat 3종이 서로를 오차단한다.
       if (activeTriggers.has(nextEvent)) continue;
       const key = triggerKeyForEvent(nextEvent);
@@ -305,7 +315,8 @@ async function buildSuccessionOpportunities(
       if (!copy) continue;   // 문구 없는 간선은 권하지 않는다(모르는 것을 지어내지 않는다)
 
       const notices = [copy.futureNotice];
-      if (overlapTriggerEvents(nextEvent).some((e) => activeTriggers.has(e))) notices.push(OVERLAP_NOTICE);
+      const activeOverlaps = overlapTriggerEvents(nextEvent).filter((e) => activeTriggers.has(e));
+      if (activeOverlaps.length > 0) notices.push(overlapNotice(nextEvent, activeOverlaps));
 
       taken.add(nextEvent);
       out.push({

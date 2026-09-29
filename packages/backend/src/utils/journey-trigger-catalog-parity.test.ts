@@ -68,6 +68,7 @@ describe('여정 트리거 카탈로그 ↔ 백엔드 실동작', () => {
       'customer.grade_changed',
       'customer.points_expiring',
       'purchase.first',
+      'purchase.product',   // ★ 0930 V2 3차 상품 재구매(상품 고르기 창 전용)
     ]);
   });
 
@@ -169,6 +170,52 @@ describe('이어달리기 간선 — 계약 ↔ 카탈로그', () => {
         ).toContain(c.event);
       }
     }
+  });
+
+  // ★ 2026-09-29 여정 V2 — 레인 · 이름 · 배타는 계약이 소유하고 카탈로그가 미러한다.
+  it('레인 · 이름 · 설명이 카탈로그와 계약이 같다 (지도 · AI 트리거 표의 단일 출처)', () => {
+    const fromCatalog = TRIGGER_EVENTS.map((t) => `${t.triggerEvent}=${t.lane}|${t.label}|${t.desc}`).sort();
+    const fromContract = TRIGGER_CONTRACTS
+      .filter((c) => c.key !== null)
+      .map((c) => `${c.event}=${c.lane}|${c.label}|${c.desc}`)
+      .sort();
+    expect(fromCatalog, '카탈로그와 계약의 레인 · 이름이 어긋나면 지도에 다른 칸 · 다른 이름이 보인다').toEqual(fromContract);
+  });
+
+  it('프론트 exclusiveKeys ↔ 백엔드 exclusiveEvents 가 1:1이고 대칭이다', () => {
+    const fromCatalog = TRIGGER_EVENTS
+      .filter((t) => (t.exclusiveKeys || []).length > 0)
+      .map((t) => `${t.triggerEvent} ⊥ ${(t.exclusiveKeys || []).map((k) => eventOfKey.get(k) || `(미등록 key: ${k})`).sort().join(',')}`)
+      .sort();
+    const fromContract = TRIGGER_CONTRACTS
+      .filter((c) => (c.exclusiveEvents || []).length > 0)
+      .map((c) => `${c.event} ⊥ ${[...(c.exclusiveEvents || [])].sort().join(',')}`)
+      .sort();
+    expect(fromCatalog).toEqual(fromContract);
+    for (const c of TRIGGER_CONTRACTS) {
+      for (const other of c.exclusiveEvents || []) {
+        expect(getTriggerContract(other)?.exclusiveEvents || [], `${other} 쪽에 ${c.event} 배타가 안 적혀 있다`).toContain(c.event);
+      }
+    }
+  });
+
+  it('구매 스트림의 모든 쌍은 겹침 또는 배타 중 정확히 한쪽에 선언돼 있다 (선언 누락 = 한 구매에 두 여정인데 화면이 모름)', () => {
+    const stream = TRIGGER_CONTRACTS.filter((c) => c.purchaseStream).map((c) => c.event);
+    // 회귀 기준: 0929 시점 구매 스트림 = 첫 구매 · 주문 완료 · 휴면 복귀(상품 구매는 3차에 더해진다)
+    expect(stream.length).toBeGreaterThanOrEqual(3);
+    const missing: string[] = [];
+    const both: string[] = [];
+    for (let i = 0; i < stream.length; i++) {
+      for (let j = i + 1; j < stream.length; j++) {
+        const a = getTriggerContract(stream[i])!;
+        const ov = (a.overlapEvents || []).includes(stream[j]);
+        const ex = (a.exclusiveEvents || []).includes(stream[j]);
+        if (!ov && !ex) missing.push(`${stream[i]} · ${stream[j]}`);
+        if (ov && ex) both.push(`${stream[i]} · ${stream[j]}`);
+      }
+    }
+    expect(missing, `겹침/배타 선언이 없는 구매 스트림 쌍: ${missing.join(' / ')}`).toEqual([]);
+    expect(both, `겹침과 배타에 동시에 선언된 쌍: ${both.join(' / ')}`).toEqual([]);
   });
 
   it('templateCode는 카탈로그와 계약이 같다 (추천 카드 모양·프리셋 저장값의 단일 출처)', () => {

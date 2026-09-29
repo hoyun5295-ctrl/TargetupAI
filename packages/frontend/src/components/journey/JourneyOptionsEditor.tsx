@@ -5,7 +5,7 @@
  *   고객 복합 조건은 읽기 전용(편집은 범위 밖).
  */
 import { useEffect, useState } from 'react';
-import { Settings, Save, Loader2, Target, ChevronDown, ChevronUp } from 'lucide-react';
+import { Settings, Save, Loader2, Target, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 
 interface Props {
@@ -27,8 +27,17 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
   const tf = journey.trigger_filters || {};
   const editable = journey.status === 'draft' || journey.status === 'paused';
   // ★ 목표 달성 자동 종료 토글만 운영(active) 중에도 변경 가능 — 발송을 줄이는 안전 방향(backend 동일 게이트)
+  // ★ 2026-09-29 여정 V2 0차 ⑨ — 운영 중에는 **켜기만** 된다(backend 409 JOURNEY_GOAL_CHANGE_NEEDS_PAUSE 와 같은 규칙).
+  //   끄면 이미 목표를 이룬 진행 중 고객도 남은 문자를 받는다 → 끄기 · 목표 종류 변경은 일시정지 뒤에.
   const goalEditable = editable || journey.status === 'active';
   const isPoints = journey.trigger_event === 'customer.points_expiring';
+  // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 여정(목표 = 같은 상품 재구매 · 진입 교체는 서버가 늘 켠다)
+  const isProduct = journey.trigger_event === 'purchase.product';
+  // 진입 교체(다시 사면 옛 실행을 닫고 처음부터)를 켤 수 있는 구매 흐름 여정 — 새 여정 · 직접 켠 여정만(승인 결정 3).
+  const canReplaceEntry = ['cdp.purchase', 'purchase.first', 'customer.dormant_return', 'purchase.product'].includes(journey.trigger_event);
+  const [entryReplace, setEntryReplace] = useState<boolean>(tf.entry_replace === true);
+  useEffect(() => { setEntryReplace((journey.trigger_filters || {}).entry_replace === true); }, [journey.id, journey.trigger_filters]);
+  const [replaceSaving, setReplaceSaving] = useState(false);
   const timing = TRIGGER_TIMING[journey.trigger_event];
   const conditions: any[] = Array.isArray(tf.customer_conditions) ? tf.customer_conditions : [];
 
@@ -69,6 +78,10 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
   const toggleGoalExit = async () => {
     if (!goalEditable || goalSaving) return;
     const next = !goalExit;
+    if (!next && !editable) {
+      toast.warning('운영 중에는 끌 수 없어요. 끄면 이미 목표를 이룬 고객도 남은 문자를 받습니다. 먼저 일시정지해 주세요.');
+      return;
+    }
     setGoalSaving(true);
     try {
       const ok = await patchOptions({ goalExitEnabled: next });
@@ -86,12 +99,36 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
 
   // ★ 2026-07-11 목표 종류 선택 = 즉시 저장(토글과 동일 1클릭 패턴 — 운영 중에도 변경 가능)
   const GOAL_KIND_META: Record<string, { label: string; desc: string }> = {
-    purchase: { label: '구매', desc: '진입 후 구매(연동몰 실시간 · ERP는 반영분)가 확인되면 종료' },
+    purchase: { label: '구매', desc: '진입 후 구매(연동몰 실시간 · 매장은 반영분)가 확인되면 종료' },
     click: { label: '링크 클릭', desc: '이 여정이 보낸 메시지의 링크를 클릭하면 종료' },
     visit: { label: '몰 방문', desc: '자사몰 재방문(사이트 스크립트 설치 몰)이 확인되면 종료' },
+    // ★ 2026-09-29 V2 0차 ⑫ — 포인트 소멸 여정의 목표 = 포인트 사용(새 여정 기본값 · 서버 계약 파생과 같다)
+    ...(isPoints ? { points_used: { label: '포인트 사용', desc: '진입 후 포인트를 쓰면 종료' } } : {}),
+    ...(isProduct ? { product: { label: '같은 상품 재구매', desc: '진입 후 고른 상품을 다시 사면 종료' } } : {}),
+  };
+
+  // ★ 2026-09-30 V2 3차 — 진입 교체 토글(초안 · 멈춤만 · 즉시 저장). 바꾸면 켜기 전 점검을 다시 받는다(서버 규약).
+  const toggleEntryReplace = async () => {
+    if (!editable || replaceSaving || isProduct) return;
+    const next = !entryReplace;
+    setReplaceSaving(true);
+    try {
+      const ok = await patchOptions({ entry_replace: next });
+      if (ok) {
+        setEntryReplace(next);
+        toast.success(next ? '다시 사면 처음부터 시작하도록 켰어요. 켜기 전 점검을 다시 받아 주세요.' : '다시 사도 진행 중인 흐름을 그대로 두도록 바꿨어요.');
+        onSaved();
+      }
+    } catch (e: any) {
+      toast.error(e?.message || '옵션 저장 중 오류가 났습니다.');
+    } finally { setReplaceSaving(false); }
   };
   const selectGoalKind = async (kind: string) => {
     if (!goalEditable || goalSaving || kind === goalKind) return;
+    if (!editable) {
+      toast.warning('운영 중에는 목표를 바꿀 수 없어요. 먼저 일시정지해 주세요.');
+      return;
+    }
     setGoalSaving(true);
     try {
       const ok = await patchOptions({ goalKind: kind });
@@ -153,7 +190,7 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
             <div className="text-[12px] font-semibold text-white">목표 달성 시 자동 종료</div>
             <div className="text-[10px] text-white/45 leading-relaxed mt-0.5">
               여정 진입 후 목표 달성이 확인된 고객은 남은 메시지를 받지 않고 "목표 달성"으로 종료됩니다.
-              운영 중에도 바꿀 수 있습니다.
+              운영 중에는 켜기만 할 수 있어요. 끄거나 목표를 바꾸려면 일시정지해 주세요.
             </div>
           </div>
           <button onClick={toggleGoalExit} disabled={!goalEditable || goalSaving} aria-label="목표 달성 시 자동 종료"
@@ -168,7 +205,7 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
           <div className="mt-2 pl-6">
             <div className="flex gap-1.5">
               {Object.entries(GOAL_KIND_META).map(([kind, meta]) => (
-                <button key={kind} onClick={() => selectGoalKind(kind)} disabled={!goalEditable || goalSaving}
+                <button key={kind} onClick={() => selectGoalKind(kind)} disabled={!editable || goalSaving}
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-40 ${
                     goalKind === kind
                       ? 'bg-emerald-500/25 border-emerald-400/50 text-emerald-100'
@@ -182,6 +219,30 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
           </div>
         )}
       </div>
+
+      {/* ★ 2026-09-30 V2 3차 — 진입 교체(구매 흐름 여정) */}
+      {canReplaceEntry && (
+        <div className="p-2.5 bg-slate-950/50 border border-white/10 rounded-lg">
+          <div className="flex items-start gap-2.5">
+            <RotateCcw className="w-4 h-4 text-violet-300 mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-semibold text-white">다시 사면 처음부터</div>
+              <div className="text-[11px] text-white/45 leading-relaxed mt-0.5">
+                {isProduct
+                  ? '상품 재구매 여정은 늘 켜져 있어요. 같은 상품을 다시 사면 지금 흐름을 마치고 새 주기로 처음부터 시작합니다.'
+                  : '진행 중인 고객이 다시 사면 지금 흐름을 마치고 처음부터 다시 시작해요. 꺼 두면 두 흐름이 함께 돌 수 있어요.'}
+                {!editable && !isProduct ? ' 일시정지 후 바꿀 수 있어요.' : ''}
+              </div>
+            </div>
+            <button onClick={toggleEntryReplace} disabled={!editable || replaceSaving || isProduct} aria-label="다시 사면 처음부터"
+              className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 disabled:opacity-40 ${entryReplace ? 'bg-violet-500/70' : 'bg-white/15'}`}>
+              {replaceSaving
+                ? <Loader2 className="w-3 h-3 animate-spin text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                : <span className={`absolute top-0.5 w-[18px] h-[18px] bg-white rounded-full transition-all ${entryReplace ? 'left-[20px]' : 'left-0.5'}`} />}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 고급 설정 — 접기 */}
       <button onClick={() => setShowAdvanced((v) => !v)}

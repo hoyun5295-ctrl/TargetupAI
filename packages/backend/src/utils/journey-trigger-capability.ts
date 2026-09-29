@@ -19,12 +19,15 @@ export type TriggerKey =
   | 'purchase' | 'reservation' | 'cart' | 'shipped'
   | 'signup' | 'dormant' | 'birthday' | 'points'
   // ★ §11-5 신설 — 구매 스트림 분기 2종(#2 첫 구매 · #5 휴면 복귀)
-  | 'first_purchase' | 'dormant_return' | 'cycle_lapsed' | 'browse' | 'grade';
+  | 'first_purchase' | 'dormant_return' | 'cycle_lapsed' | 'browse' | 'grade'
+  // ★ 2026-09-30 여정 V2 3차 — 상품 재구매(고른 상품을 사면)
+  | 'product';
 
 export const TRIGGER_KEYS: TriggerKey[] = [
   'purchase', 'reservation', 'cart', 'shipped',
   'signup', 'dormant', 'birthday', 'points',
   'first_purchase', 'dormant_return', 'cycle_lapsed', 'browse', 'grade',
+  'product',
 ];
 
 /**
@@ -51,6 +54,11 @@ export interface CompanyJourneyFacts {
   /** 상품 조회(product_view) 기록 — #12 조회 후 미구매의 근거. */
   hasBrowseEvents: boolean;
   hasShippedEvents: boolean;
+  /**
+   * ★ 2026-09-30 여정 V2 3차 — 상품 단위 구매가 들어오는가(자사몰 주문 상품 목록 · 매장 원장 상품 코드/이름).
+   *   없으면 상품 재구매 여정을 열지 않는다(고를 상품이 없다 = 영영 0건).
+   */
+  hasProductPurchases?: boolean;
 }
 
 export interface TriggerAvailability {
@@ -127,6 +135,11 @@ export function resolveTriggerAvailability(facts: CompanyJourneyFacts): TriggerA
       : !f.hasGradeOrder
         ? no('grade', '등급 순서를 한 번 정해 주시면 열립니다. 어느 등급이 위인지 알아야 올라간 분에게만 보낼 수 있어요.')
         : yes('grade', '회원 등급이 올라가면 발송합니다.'),
+
+    // ★ 2026-09-30 여정 V2 3차 — 상품은 그 회사 현역 문에서 관측된 목록에서만 고른다(정답표 없음).
+    f.hasProductPurchases
+      ? yes('product', '고른 상품을 사면 발송하고, 같은 상품을 다시 사면 끝냅니다.')
+      : no('product', '주문에 상품 정보가 아직 들어오지 않았어요. 자사몰 주문이나 매장 구매에 상품이 실려 오면 열립니다.'),
   ];
 }
 
@@ -143,11 +156,43 @@ export function resolveTriggerAvailability(facts: CompanyJourneyFacts): TriggerA
  */
 export type CatalogTemplateCode = 'repeat' | 'reservation' | 'cart' | 'custom';
 
+/**
+ * ★ 2026-09-29 여정 V2 — 생애 지도 레인(설계서 docs/2026-09-29-journey-v2-master-design.md §3).
+ *   레인은 이 계약이 소유하고 프론트 카탈로그가 미러한다(parity: 모든 트리거 = 레인 하나).
+ *   signup 가입 · first_purchase 첫 구매 · repurchase 재구매 · product 상품 재구매 · winback 이탈·복귀 ·
+ *   moment 언제든 생기는 순간 · standing 상시.
+ */
+export type JourneyLane = 'signup' | 'first_purchase' | 'repurchase' | 'product' | 'winback' | 'moment' | 'standing';
+
 export interface TriggerContract {
   /** journeys.trigger_event 저장값. */
   event: string;
+  /** ★ 2026-09-29 V2 — 사람 말 이름(카탈로그 label 미러 · parity). AI 트리거 표 · 지도가 이 이름을 쓴다. */
+  label: string;
+  /** ★ 2026-09-29 V2 — "언제 시작하나" 한 줄(카탈로그 desc 미러 · parity). AI 트리거 표가 이 문장을 쓴다. */
+  desc: string;
+  /** ★ 2026-09-29 V2 — 생애 지도 레인. */
+  lane: JourneyLane;
+  /**
+   * ★ 2026-09-29 V2 — 구매 사건 하나로 발화하는 트리거(구매 스트림).
+   *   이 집합의 모든 쌍은 overlapEvents(같이 발화) 또는 exclusiveEvents(자격이 배타) 중 한쪽에 선언돼야 한다(parity).
+   *   옛: 첫 구매 ↔ 주문 완료 쌍이 어디에도 없어 첫 구매 1건에 두 여정이 시작되는데 화면이 알리지 않았다.
+   */
+  purchaseStream?: boolean;
+  /** ★ 2026-09-29 V2 — 같은 구매 스트림이지만 자격이 배타라 한 사건으로 둘 다 발화하지 않는 트리거(대칭). */
+  exclusiveEvents?: string[];
+  /**
+   * ★ 2026-09-29 V2 — 사건마다 다시 받아야 의미가 있는 트리거(받는 여정으로 쓰이면 재진입이 꺼지면 선이 끊긴다).
+   *   프리셋 · AI 초안에서 서버가 allow_reentry를 켜고 쿨다운을 계약 최솟값으로 둔다(AI 출력에 맡기지 않는다).
+   */
+  reentryRequired?: boolean;
   /** 화면 카탈로그 key. null = 화면 비노출(custom·미구현 전이형). */
   key: TriggerKey | null;
+  /**
+   * ★ 2026-09-30 여정 V2 3차 — 상품을 골라야 대상이 정해지는 트리거(상품 재구매).
+   *   AI 선택 목록 · 1클릭 프리셋 · 다음 수 추천에서 뺀다(상품을 못 고른 채 만들면 영영 0건). 만드는 길 = 상품 고르기 창 하나.
+   */
+  productPick?: boolean;
   /**
    * ★ 2026-08-08 이어달리기 — 화면 카탈로그 템플릿 코드(프론트 카탈로그 미러, parity 고정).
    * key가 있는 트리거만 갖는다. 추천 카드의 모양과 프리셋 생성의 저장값이 여기서 나온다.
@@ -172,7 +217,7 @@ export interface TriggerContract {
    */
   implemented: boolean;
   /** §5-1 종료 신호 — 실행기 배선은 §11-5 C조각. 계약 선언이 먼저다. */
-  exit: 'purchase' | 'second_purchase' | 'next_purchase' | 'steps_done' | 'points_used' | 'reservation_closed';
+  exit: 'purchase' | 'second_purchase' | 'next_purchase' | 'steps_done' | 'points_used' | 'reservation_closed' | 'product_repurchase';
   /** 재진입 허용 시 최소 쿨다운 일수(§9-N1). 미달이면 활성화 거부. */
   cooldownMinDays?: number;
 }
@@ -181,29 +226,34 @@ export const TRIGGER_CONTRACTS: TriggerContract[] = [
   // §3-1 상태 전이형
   // ★ 2026-08-08 이어달리기 v1 간선 3 — exit 신호와 의미가 일치하는 것만 잇는다(설계서 §3).
   //   신규가입(exit=purchase, 신규 고객의 구매 = 생애 첫 구매) → 첫 구매
-  { event: 'customer.created',              key: 'signup',   cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['purchase.first'] },
+  { event: 'customer.created',              key: 'signup',   label: '신규 가입', desc: '회원이 가입하면', lane: 'signup', cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['purchase.first'] },
   //   첫 구매(exit=second_purchase, 두 번째 구매 = 재구매) → 재구매
-  { event: 'purchase.first',                key: 'first_purchase', cls: 'transition', implemented: true, exit: 'second_purchase', templateCode: 'repeat', nextEvents: ['cdp.purchase'] }, // #2 — 구매 스트림 분기(이전 구매 0건)
-  { event: 'cdp.purchase',                  key: 'purchase', cls: 'event',      implemented: true,  exit: 'next_purchase', templateCode: 'repeat', overlapEvents: ['customer.dormant_return'] },     // #3 재구매(현행 구매)
+  // ★ 2026-09-29 V2 — 첫 구매 1건은 주문 완료(모든 구매)도 함께 발화한다(자격 필터는 첫 구매 · 휴면 복귀 두 종뿐 · journey-trigger-watcher.ts:302).
+  //   옛 계약에 이 쌍이 없어 한 번의 첫 구매에 두 여정이 시작되는데 화면이 알리지 않았다. 휴면 복귀와는 자격이 배타다(이전 구매 0건 vs 있음).
+  { event: 'purchase.first',                key: 'first_purchase', label: '첫 구매', desc: '생애 첫 구매가 일어나면', lane: 'first_purchase', cls: 'transition', implemented: true, exit: 'second_purchase', templateCode: 'repeat', nextEvents: ['cdp.purchase', 'purchase.product'], purchaseStream: true, overlapEvents: ['cdp.purchase', 'purchase.product'], exclusiveEvents: ['customer.dormant_return'] }, // #2 — 구매 스트림 분기(이전 구매 0건)
+  { event: 'cdp.purchase',                  key: 'purchase', label: '주문 완료', desc: '구매가 일어나면', lane: 'repurchase', cls: 'event',      implemented: true,  exit: 'next_purchase', templateCode: 'repeat', nextEvents: ['purchase.product'], purchaseStream: true, reentryRequired: true, overlapEvents: ['customer.dormant_return', 'purchase.first', 'purchase.product'] },     // #3 재구매(현행 구매)
+  // ★ 2026-09-30 여정 V2 3차 — 상품 재구매. 고른 상품을 사면 시작 · 같은 상품을 다시 사면 끝(목표 = product_repurchase).
+  //   구매 한 건이 주문 완료 · 첫 구매 · 휴면 복귀와 함께 발화한다(겹침). 받는 쪽이므로 사건마다 다시 받는다(reentryRequired).
+  { event: 'purchase.product',              key: 'product',  label: '상품 구매', desc: '고른 상품을 사면', lane: 'product', cls: 'event',     implemented: true,  exit: 'product_repurchase', templateCode: 'repeat', productPick: true, purchaseStream: true, reentryRequired: true, overlapEvents: ['cdp.purchase', 'purchase.first', 'customer.dormant_return'] },
   //   휴면(exit=purchase, 휴면 중 구매 = 복귀) → 휴면 복귀
-  { event: 'customer.dormant',              key: 'dormant',  cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['customer.dormant_return'] },
-  { event: 'customer.dormant_return',       key: 'dormant_return', cls: 'transition', implemented: true, exit: 'steps_done', templateCode: 'repeat', overlapEvents: ['cdp.purchase'] },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
-  { event: 'customer.cycle_lapsed',         key: 'cycle_lapsed', cls: 'transition', implemented: true, exit: 'purchase', cooldownMinDays: 1, templateCode: 'custom' }, // #6
+  { event: 'customer.dormant',              key: 'dormant',  label: '휴면 전환', desc: '한동안 구매가 없으면', lane: 'winback', cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['customer.dormant_return'] },
+  { event: 'customer.dormant_return',       key: 'dormant_return', label: '휴면 복귀', desc: '오래 쉬었다가 다시 구매하면', lane: 'winback', cls: 'transition', implemented: true, exit: 'steps_done', templateCode: 'repeat', purchaseStream: true, reentryRequired: true, overlapEvents: ['cdp.purchase', 'purchase.product'], exclusiveEvents: ['purchase.first'] },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
+  { event: 'customer.cycle_lapsed',         key: 'cycle_lapsed', label: '구매 주기 이탈', desc: '평소 구매 주기를 넘기면', lane: 'winback', cls: 'transition', implemented: true, exit: 'purchase', cooldownMinDays: 1, templateCode: 'custom' }, // #6
   // #7 — 원장 state와 **서열 비교**(상승만). 쿨다운은 오르내리락 왕복에서 축하가 연달아 나가는 것을 막는 바닥값이고,
   //   진짜 방어는 "상승만 + 같은 급 제외"다(2026-08-02).
-  { event: 'customer.grade_changed',        key: 'grade',    cls: 'transition', implemented: true,  exit: 'steps_done', cooldownMinDays: 1, templateCode: 'custom' },
-  { event: 'customer.birthday_approaching', key: 'birthday', cls: 'transition', implemented: true,  exit: 'steps_done', templateCode: 'custom' },
-  { event: 'customer.points_expiring',      key: 'points',   cls: 'transition', implemented: true,  exit: 'points_used', templateCode: 'custom' },
+  { event: 'customer.grade_changed',        key: 'grade',    label: '등급 상승', desc: '회원 등급이 올라가면', lane: 'moment', cls: 'transition', implemented: true,  exit: 'steps_done', cooldownMinDays: 1, templateCode: 'custom' },
+  { event: 'customer.birthday_approaching', key: 'birthday', label: '생일 D-7', desc: '생일이 다가오면', lane: 'moment', cls: 'transition', implemented: true,  exit: 'steps_done', templateCode: 'custom' },
+  { event: 'customer.points_expiring',      key: 'points',   label: '포인트 소멸 임박', desc: '보유 포인트가 사라지기 전에', lane: 'moment', cls: 'transition', implemented: true,  exit: 'points_used', templateCode: 'custom' },
   // §3-2 사건 발생형
-  { event: 'cdp.cart_abandon',              key: 'cart',     cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart' },  // §9-N1
-  { event: 'custom_order_shipped',          key: 'shipped',  cls: 'event',      implemented: true,  exit: 'steps_done', templateCode: 'cart' },
-  { event: 'cdp.browse_no_purchase',        key: 'browse',   cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart' }, // #12
+  { event: 'cdp.cart_abandon',              key: 'cart',     label: '장바구니', desc: '장바구니에 담기면', lane: 'moment', cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart' },  // §9-N1
+  { event: 'custom_order_shipped',          key: 'shipped',  label: '배송 시작', desc: '배송이 시작되면', lane: 'moment', cls: 'event',      implemented: true,  exit: 'steps_done', templateCode: 'cart' },
+  { event: 'cdp.browse_no_purchase',        key: 'browse',   label: '조회 후 미구매', desc: '상품을 보고 구매하지 않으면', lane: 'moment', cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart' }, // #12
   // §3-3 예약 (원장 §8 선행 — 착수 6번. 커서 경로는 있으나 데이터 문이 없어 capability가 잠근다)
-  { event: 'cdp.reservation_created',       key: 'reservation', cls: 'reservation', implemented: true,  exit: 'reservation_closed', templateCode: 'reservation' },
-  { event: 'reservation.visit_dn',          key: null,       cls: 'reservation', implemented: false, exit: 'reservation_closed' }, // #14 — 착수 6번
-  { event: 'reservation.visit_done',        key: null,       cls: 'reservation', implemented: false, exit: 'steps_done' },         // #15 — 착수 6번
+  { event: 'cdp.reservation_created',       key: 'reservation', label: '예약 확인', desc: '예약이 등록되면', lane: 'moment', cls: 'reservation', implemented: true,  exit: 'reservation_closed', templateCode: 'reservation' },
+  { event: 'reservation.visit_dn',          key: null,       label: '방문 전 안내', desc: '방문 며칠 전에', lane: 'moment', cls: 'reservation', implemented: false, exit: 'reservation_closed' }, // #14 — 착수 6번
+  { event: 'reservation.visit_done',        key: null,       label: '방문 뒤 안내', desc: '방문을 마치면', lane: 'moment', cls: 'reservation', implemented: false, exit: 'steps_done' },         // #15 — 착수 6번
   // 상시(자유 세그먼트) — §3-5: §5-4 게이트 뒤로
-  { event: 'custom',                        key: null,       cls: 'standing',   implemented: true,  exit: 'steps_done' },
+  { event: 'custom',                        key: null,       label: '고른 고객에게', desc: '고른 고객에게 한 번', lane: 'standing', cls: 'standing',   implemented: true,  exit: 'steps_done' },
 ];
 
 const CONTRACT_BY_EVENT = new Map(TRIGGER_CONTRACTS.map((c) => [c.event, c]));
@@ -244,6 +294,103 @@ export function overlapTriggerEvents(triggerEvent: string): string[] {
   return CONTRACT_BY_EVENT.get(triggerEvent)?.overlapEvents ?? [];
 }
 
+/** ★ 2026-09-29 V2 — 같은 구매 스트림이지만 자격이 배타인 트리거들(겹침 판정에서 빼는 근거). */
+export function exclusiveTriggerEvents(triggerEvent: string): string[] {
+  return CONTRACT_BY_EVENT.get(triggerEvent)?.exclusiveEvents ?? [];
+}
+
+/** ★ 2026-09-29 V2 — 사람 말 이름. 모르는 값은 빈 문자열(화면이 지어내지 않는다). */
+export function triggerLabel(triggerEvent: string): string {
+  return CONTRACT_BY_EVENT.get(triggerEvent)?.label ?? '';
+}
+
+/** ★ 2026-09-29 V2 — 생애 지도 레인. 모르는 값은 null(지도가 "분류 안 됨"으로 보인다 · 숨기지 않는다). */
+export function laneForTrigger(triggerEvent: string): JourneyLane | null {
+  return CONTRACT_BY_EVENT.get(triggerEvent)?.lane ?? null;
+}
+
+/** 목표 달성으로 끝낼 사건이 있는 종료 신호(steps_done · reservation_closed = 끝까지 보내는 여정). */
+const GOAL_EXIT_SIGNALS: ReadonlyArray<TriggerContract['exit']> = ['purchase', 'second_purchase', 'next_purchase', 'points_used', 'product_repurchase'];
+
+/**
+ * ★ 2026-09-29 V2(Harold 승인 결정 1) — **새 여정**의 "목표를 이루면 남은 문자 안 보냄" 기본값.
+ *   옛: 화면 템플릿 목록(repeat · cart · dormant)이 정했고 같은 트리거도 만드는 길마다 달랐다
+ *   (AI 자유 생성 'dormant' = 켜짐 · 프리셋 'custom' = 꺼짐 · 가입은 목록에 없어 늘 꺼짐 → 첫 구매 뒤에도 가입 문자 계속).
+ *   이제 계약의 종료 신호 하나가 정한다. 기존 여정 행은 건드리지 않는다(저장값 그대로).
+ */
+export function defaultGoalExitFor(triggerEvent: string): boolean {
+  const exit = CONTRACT_BY_EVENT.get(triggerEvent)?.exit;
+  return !!exit && GOAL_EXIT_SIGNALS.includes(exit);
+}
+
+/**
+ * ★ 2026-09-29 V2(Harold 승인 결정 2) — **새 여정**에 저장할 목표 종류. 포인트 소멸 여정은 "포인트 사용"이 목표다.
+ *   옛: goal_kind가 NOT NULL DEFAULT 'purchase'라 계약 파생 분기(journey-executor.ts isGoalConvertedSinceEntry)에
+ *   도달하지 못하고 포인트 여정도 "구매"로 끝났다. 기존 행은 건드리지 않는다.
+ */
+export function goalKindForTrigger(triggerEvent: string): 'purchase' | 'points_used' | 'product' {
+  const exit = CONTRACT_BY_EVENT.get(triggerEvent)?.exit;
+  // ★ 2026-09-30 V2 3차 — 상품 재구매 여정의 목표 = 같은 상품을 다시 산 것(journey-product CT 판정).
+  if (exit === 'product_repurchase') return 'product';
+  return exit === 'points_used' ? 'points_used' : 'purchase';
+}
+
+/** ★ 2026-09-30 V2 3차 — 상품을 골라야 만들 수 있는 트리거인가(AI 선택 · 1클릭 프리셋 · 다음 수에서 뺀다). */
+export function isProductPickTrigger(triggerEvent: string): boolean {
+  return CONTRACT_BY_EVENT.get(triggerEvent)?.productPick === true;
+}
+
+/**
+ * ★ 2026-09-29 V2 — 프리셋 · AI 초안의 재진입 값을 계약이 정한다(AI 출력에 맡기지 않는다).
+ *   사건마다 받아야 하는 트리거(reentryRequired)는 "다음 사건 때 다시 받기"를 켜고 쿨다운 = 계약 최솟값.
+ *   그 밖은 null = 기존 규칙(AI 제안 + 활성화 게이트의 최소 쿨다운)을 그대로 둔다.
+ */
+export function contractReentryPolicy(triggerEvent: string): { allowReentry: true; cooldownDays: number } | null {
+  const c = CONTRACT_BY_EVENT.get(triggerEvent);
+  if (!c?.reentryRequired) return null;
+  return { allowReentry: true, cooldownDays: c.cooldownMinDays ?? 0 };
+}
+
+/**
+ * ★ 2026-09-29 V2 0차 ⑧ — AI 여정 설계가 고를 수 있는 시작 사건(레지스트리 파생 · 단일 출처).
+ *   옛: 프롬프트에 7종을 손으로 적어 첫 구매 · 휴면 복귀 · 구매 주기 이탈 · 등급 · 포인트 · 조회 후 미구매 · 배송에 문장이 닿지 않았다.
+ *   예약은 정보 알림 축으로 빠졌다(여정 문서 §4) → 제외. 프롬프트와 서버 검증이 이 한 목록을 같이 쓴다.
+ */
+export function aiSelectableTriggerEvents(): string[] {
+  // ★ 2026-09-30 V2 3차 — 상품을 골라야 하는 트리거는 AI 가 고르지 않는다(상품은 담당자가 관측 목록에서 고른다).
+  return TRIGGER_CONTRACTS.filter((c) => c.implemented && c.cls !== 'reservation' && !c.productPick).map((c) => c.event);
+}
+
+/** AI 프롬프트용 시작 사건 표 — "- 값: 이름 (언제)" 한 줄씩. */
+export function formatTriggerMenuForAi(): string {
+  return TRIGGER_CONTRACTS
+    .filter((c) => c.implemented && c.cls !== 'reservation' && !c.productPick)
+    .map((c) => `   - ${c.event}: ${c.label} (${c.desc})`)
+    .join('\n');
+}
+
+/**
+ * ★ 2026-09-29 V2 (회의론자 0차 검증 2-가) — 저장 템플릿 코드(journeys.template_code)를 **트리거에서 파생**한다.
+ *   옛: AI 가 templateCode 와 triggerEvent 를 따로 냈다. 화면이 트리거를 저장하기 시작하면(0차 ①) 둘이 어긋난 채 저장돼
+ *   template_code 로 여정 종류를 세는 곳(기회 엔진 · 목록 아이콘)이 엉뚱하게 판정한다. 저장 템플릿 7종 + 포인트.
+ */
+export function storageTemplateCodeFor(triggerEvent: string):
+  'onboarding' | 'repeat' | 'dormant' | 'points_expiring' | 'cart' | 'birthday' | 'reservation' | 'custom' {
+  switch (triggerEvent) {
+    case 'customer.created': return 'onboarding';
+    case 'purchase.first':
+    case 'cdp.purchase':
+    case 'customer.dormant_return':
+    case 'purchase.product': return 'repeat';
+    case 'customer.dormant': return 'dormant';
+    case 'customer.points_expiring': return 'points_expiring';
+    case 'cdp.cart_abandon': return 'cart';
+    case 'customer.birthday_approaching': return 'birthday';
+    case 'cdp.reservation_created': return 'reservation';
+    default: return 'custom';
+  }
+}
+
 /** ★ 2026-08-08 — 화면 카탈로그 템플릿 코드. 없으면 null(화면 비노출 트리거). */
 export function triggerTemplateCode(triggerEvent: string): CatalogTemplateCode | null {
   return CONTRACT_BY_EVENT.get(triggerEvent)?.templateCode ?? null;
@@ -276,4 +423,17 @@ export function toAvailabilityMap(list: TriggerAvailability[]): Record<string, {
 /** 하나라도 만들 수 있는가 — 전부 잠기면 화면이 "무엇을 연동해야 하는지"만 안내한다. */
 export function hasAnyAvailableTrigger(list: TriggerAvailability[]): boolean {
   return list.some((a) => a.available);
+}
+
+/**
+ * ★ 2026-09-30 여정 V2 2차 — 시작 사건(trigger_event) 기준 가능 여부. toAvailabilityMap 은 트리거 키 기준이다.
+ * 키가 없는 사건(상시 · 구현 전 예약)은 넣지 않는다(= 판정 없음 · 호출부가 막지 않는다).
+ */
+export function availabilityByEvent(list: TriggerAvailability[]): Record<string, { available: boolean; reason: string }> {
+  const byKey = toAvailabilityMap(list);
+  const out: Record<string, { available: boolean; reason: string }> = {};
+  for (const c of TRIGGER_CONTRACTS) {
+    if (c.key && byKey[c.key]) out[c.event] = { ...byKey[c.key] };
+  }
+  return out;
 }

@@ -78,7 +78,8 @@ describe('발송 시점 — 직접 입력', () => {
 
   it('상한이 백엔드와 같다 (365일)', () => {
     expect(studio()).toMatch(/MAX_DELAY_HOURS = 8760/);
-    expect(backend('utils/journey-builder.ts')).toMatch(/MAX_STEP_DELAY_HOURS = 8760/);
+    // ★ 2026-09-29 여정 V2 0차 ⑧ — 상한의 주인이 journey-step-limits CT 로 옮겨졌다(빌더 · 생성기 · 수정기가 같이 쓴다).
+    expect(backend('utils/journey-step-limits.ts')).toMatch(/MAX_STEP_DELAY_HOURS = 8760/);
   });
 
   // ★ 2026-08-08 정정 (Harold 지시) — 시간·일 셀렉트는 값이 0일 때 `0 × 24 = 0`이라 단위를 바꿔도

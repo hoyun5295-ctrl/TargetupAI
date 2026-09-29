@@ -20,6 +20,8 @@
  */
 
 import { query, pool } from '../config/database';
+// ★ 2026-09-30 여정 V2 5차 — 진입이 닫힌 옛 판은 새 날짜 사이클을 받지 않는다.
+import { entryOpenClause } from './journey-lineage';
 import { selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자 분류코드 범위
 import { getJourneyOwnerScopeSql } from './store-scope';
@@ -74,7 +76,7 @@ export async function runJourneyAnchorScheduler(now: Date = new Date()): Promise
       `SELECT id, company_id, anchor_date, anchor_recurrence, anchor_recurrence_day, anchor_hour_kst,
               trigger_filters, threshold_recipients_per_step
        FROM journeys
-       WHERE status = 'active' AND start_kind = 'date_anchor'
+       WHERE status = 'active' AND start_kind = 'date_anchor'${await entryOpenClause()}
        ORDER BY created_at ASC`,
     );
     for (const j of jres.rows as AnchorJourneyRow[]) {

@@ -44,13 +44,18 @@ interface Props {
    * 판정은 페이지가 한다. 이 모달은 문구를 만들지 않는다.
    */
   notice?: string;
+  /**
+   * ★ 2026-09-29 여정 V2 0차 ② — AI 가 문장에서 읽었지만 쓸 수 없어 **반영하지 않은** 대상 조건(서버 문구 그대로).
+   *   옛: 조용히 버려져 "VIP만"이 "전 고객"이 됐다. 이제 빠진 것을 보인다.
+   */
+  warnings?: string[];
   /** 잠금을 그 자리에서 풀 수 있으면 그 행동(예: 등급 순서 정하기). 판단은 페이지가 한다. */
   lockAction?: { label: string; onClick: () => void };
 }
 
 export default function JourneyPlanModal({
   open, onClose, onNext, onRegenerate, regenerating = false,
-  name, triggerLabel, reasoning, objective, steps, available, unavailableReason, notice, lockAction,
+  name, triggerLabel, reasoning, objective, steps, available, unavailableReason, notice, warnings, lockAction,
 }: Props) {
   return (
     <JourneyModalShell open={open} onClose={onClose} labelledBy="journey-plan-modal-title" zIndexClassName="z-[70]">
@@ -82,6 +87,11 @@ export default function JourneyPlanModal({
                 {notice}
               </p>
             )}
+            {(warnings || []).map((w, i) => (
+              <p key={i} className="mt-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2.5 py-2 text-[11.5px] leading-relaxed text-amber-100">
+                {w}
+              </p>
+            ))}
             <p className="mt-2 text-[10px] italic text-white/30">Data source: 입력한 문장을 읽고 AI가 고른 시작 신호</p>
           </section>
 

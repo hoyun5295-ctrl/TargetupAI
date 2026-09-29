@@ -99,10 +99,61 @@ const TRIGGER_KO: Record<string, string> = {
   'customer.cycle_lapsed': '구매 주기를 넘긴 고객',
   'customer.grade_changed': '등급이 올라간 고객',
   'cdp.browse_no_purchase': '상품을 보고 구매하지 않은 고객',
+  // ★ 2026-09-30 여정 V2 3차
+  'purchase.product': '고른 상품을 산 고객',
   'custom': '지정 조건 매칭 고객',
 };
 
+/** ★ 2026-09-30 V2 3차 — 상품 재구매 대상 문장("샤워비누 · 바디워시 외 2개를 산 고객"). 상품이 없으면 빈 문자열. */
+export function describeProductPick(triggerFilters: Record<string, any> | null | undefined): string {
+  const f = triggerFilters || {};
+  const names: string[] = Array.isArray(f.product_names) && f.product_names.length > 0
+    ? f.product_names.map((x: unknown) => String(x))
+    : (Array.isArray(f.product_keys) ? f.product_keys.map((x: unknown) => String(x)) : []);
+  if (names.length === 0) return '';
+  const head = names.slice(0, 3).join(' · ');
+  return `${head}${names.length > 3 ? ` 외 ${names.length - 3}개` : ''}를 산 고객`;
+}
+
 /** "휴면 고객 (60일+) · 추가 조건 2건" — 여정 타겟확인 모달의 추출 조건 라벨. */
+/**
+ * ★ 2026-09-29 여정 V2 0차 ① — 대상 조건을 사람 말로(계획 모달 "누구에게"). 식별자 · 필드명을 화면에 내지 않는다.
+ *   옛: 계획 모달은 트리거 이름만 보여 주고 대상 조건은 "추가 조건 N건"뿐이라, 저장값과 보인 것이 같은지 확인할 수 없었다.
+ */
+const COND_FIELD_KO: Record<string, string> = {
+  grade: '등급', region: '지역', age: '나이', purchase_count: '구매 횟수', total_purchase_amount: '총 구매액',
+  sms_opt_in: '수신 동의', store_name: '매장', store_code: '매장 코드', points: '포인트',
+};
+const COND_OP_KO: Record<string, (v: string) => string> = {
+  '==': (v) => `${v}`, '!=': (v) => `${v} 아님`, '>=': (v) => `${v} 이상`, '<=': (v) => `${v} 이하`,
+  '>': (v) => `${v} 초과`, '<': (v) => `${v} 미만`, in: (v) => `${v} 중 하나`, not_in: (v) => `${v} 제외`,
+  is_null: () => '비어 있음', not_null: () => '있음',
+};
+
+export function describeCustomerConditions(conditions: unknown, logic?: unknown): string {
+  if (!Array.isArray(conditions) || conditions.length === 0) return '';
+  const parts = conditions.map((c: any) => {
+    const field = COND_FIELD_KO[String(c?.field || '')] || '알 수 없는 항목';
+    const raw = Array.isArray(c?.value) ? c.value.join(' · ') : c?.value === true ? '예' : c?.value === false ? '아니오' : String(c?.value ?? '');
+    const op = COND_OP_KO[String(c?.op || '')];
+    return op ? `${field} ${op(raw)}` : `${field} ${raw}`;
+  });
+  return parts.join(logic === 'OR' ? ' 또는 ' : ' · ');
+}
+
+/** 계획 모달 한 줄 — "언제 · 누구에게". 조건이 없으면 그 사실을 그대로 말한다(상시 여정은 전 고객). */
+export function describeJourneyTarget(triggerEvent: string | null | undefined, triggerFilters: Record<string, any> | null | undefined): string {
+  const f = triggerFilters || {};
+  const who = describeCustomerConditions(f.customer_conditions, f.logic);
+  // ★ 2026-09-30 V2 3차 — 상품 재구매는 고른 상품이 대상의 첫 조건이다(보이는 것 = 저장된 것).
+  const product = describeProductPick(f);
+  if (product) return who ? `대상: ${product} · ${who}` : `대상: ${product}`;
+  // ★ 2026-09-30 V2 3차 — 겹침 해소로 첫 구매 고객을 뺀 주문 완료 여정
+  if (f.exclude_first_purchase === true) return who ? `대상: 첫 구매 고객 제외 · ${who}` : '대상: 첫 구매 고객 제외 · 이 사건이 생긴 고객';
+  if (who) return `대상: ${who}`;
+  return String(triggerEvent || '') === 'custom' ? '대상: 조건 없음 · 전 고객' : '대상: 조건 없음 · 이 사건이 생긴 고객 전부';
+}
+
 export function describeJourneyTrigger(
   triggerEvent: string | null | undefined,
   triggerFilters: Record<string, any> | null | undefined,

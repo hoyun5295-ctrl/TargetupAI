@@ -1,8 +1,8 @@
-import { OUI_BACK, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
+import { OUI_BACK, OUI_BTN_OUTLINE, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
 import OperatorAura from '../components/operator/OperatorAura';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   ArrowLeft, ChevronDown, ChevronUp, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
@@ -19,6 +19,8 @@ import {
   CalendarClock,
   // ★ 2026-07-10 목표 달성 시 자동 종료
   Target,
+  // ★ 2026-09-29 여정 V2 1차 — 생애 지도 입구
+  Map as MapIcon,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
@@ -49,6 +51,8 @@ import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
 import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
 import { TRIGGER_EVENTS } from '../utils/journey-trigger-catalog';
+// ★ 2026-09-29 여정 V2 0차 ⑤⑦ — 칸 종류 · 흐름 색 표기는 공용 유틸 한 곳.
+import { stepTypeLabel, funnelBarClass } from '../utils/journey-labels';
 // ★ 2026-08-08 — 문안 placeholder(혜택·링크) 판정·치환 단일 정의(스튜디오 카드와 같은 규약).
 import { fillBenefitPlaceholders, fillUrlPlaceholders, isSendableUrl } from '../utils/message-placeholders';
 // ★ 2026-08-08 — 다듬기 결과는 비포/애프터로 본다. 하이라이트는 직접발송 모달과 같은 CT.
@@ -254,7 +258,11 @@ interface JourneyOpportunity {
 }
 
 // ★ D188 Phase 2-B-1 (2026-05-21): step_type 3종 확장 — message/wait/condition.
-type StepType = 'message' | 'wait' | 'condition';
+// ★ 2026-09-30 V2 4차 — 'end'(끝 칸 · 발송 0). 서버 스위치(features.endChip)가 켜졌을 때만 고를 수 있다.
+type StepType = 'message' | 'wait' | 'condition' | 'end';
+/** ★ 2026-09-30 V2 4차 — 칸 수 상한(서버 journey-step-limits 와 같은 두 값): 문자 칸 7 · 전체 12. */
+const MAX_MESSAGE_STEPS = 7;
+const MAX_TOTAL_STEPS = 12;
 
 // ★ D210+ Phase 3 (2026-05-23 Harold 명시): condition step type 3 union 확장
 //   1. customer_field — 옛 매트릭스 (9 operator)
@@ -284,10 +292,24 @@ interface ConditionJsonbJourneyStepClicked {
   clicked: boolean;
 }
 
+// ★ 2026-09-30 V2 4차 — 새 조건 2종. 이 여정에 들어온 뒤 구매했나 · 앞쪽 문자 칸 링크를 눌렀나(저장 전 = 칸 번호 · 서버가 칸 id 로 바꾼다).
+interface ConditionJsonbPurchaseSinceEntry {
+  type: 'purchase_since_entry';
+  purchased: boolean;
+}
+interface ConditionJsonbStepLinkClicked {
+  type: 'step_link_clicked';
+  step_ref_order?: number;
+  step_id?: string;
+  clicked: boolean;
+}
+
 type ConditionJsonb =
   | ConditionJsonbCustomerField
   | ConditionJsonbCdpEventExists
-  | ConditionJsonbJourneyStepClicked;
+  | ConditionJsonbJourneyStepClicked
+  | ConditionJsonbPurchaseSinceEntry
+  | ConditionJsonbStepLinkClicked;
 
 interface AIGeneratedStep {
   stepOrder: number;
@@ -343,6 +365,12 @@ interface AIJourneyPackage {
   presetTriggerEvent?: string | null;
   /** ★ 2026-08-08 혜택 입력 — 이 패키지 생성에 실제로 쓰인 혜택. 재생성이 다시 싣는다. */
   benefitText?: string | null;
+  /** ★ 2026-09-29 여정 V2 0차 ⑪ — "목표를 이루면 남은 문자 안 보냄" 기본값(서버가 트리거 계약에서 파생 · 화면 목록 아님). */
+  goalExitDefault?: boolean;
+  /** ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없어 뺀 것("반영 안 됨"으로 보인다). */
+  droppedConditionNotices?: string[];
+  /** ★ 2026-09-29 여정 V2 0차 ① — 계획 모달 "누구에게"(저장될 대상 조건을 사람 말로 · 서버가 만든 문장). */
+  targetSummary?: string;
   // ★ 2026-06-30 여정 일반화 — 시작 방식(start_kind) + 날짜축/one_shot. 미설정(기존 마케팅 여정)이면 저장 시 미전송 = 옛 동작 그대로.
   startKind?: 'event' | 'standing' | 'date_anchor' | 'one_shot';
   anchorDate?: string | null;
@@ -483,9 +511,25 @@ function collectStepIssues(steps: AIGeneratedStep[]): Array<{ stepOrder: number;
       if (Number(s.delayHours) <= 0) out.push({ stepOrder: s.stepOrder, message: '대기 시간을 1시간 이상으로' });
       continue;
     }
+    // ★ 2026-09-30 V2 4차 — 끝 칸은 확인할 것이 없다(대기 0 · 발송 0). 첫 칸이면 안 된다.
+    if (s.stepType === 'end') {
+      if (s.stepOrder === 1) out.push({ stepOrder: s.stepOrder, message: '첫 칸은 끝 칸일 수 없어요' });
+      continue;
+    }
     if (s.stepType === 'condition') {
       const c = s.conditionJsonb;
-      if (!c || c.type !== 'customer_field' || !c.field || !c.field.trim()) {
+      if (c && c.type === 'purchase_since_entry') continue;
+      if (c && c.type === 'step_link_clicked') {
+        const target = steps.find((t) => t.stepOrder === c.step_ref_order);
+        if (!c.step_id && (!target || target.stepOrder >= s.stepOrder || target.stepType !== 'message')) {
+          out.push({ stepOrder: s.stepOrder, message: '링크를 볼 앞쪽 문자 칸을 골라 주세요' });
+        }
+        continue;
+      }
+      if (c && c.type !== 'customer_field') {
+        // ★ 2026-09-29 V2 0차 ⑦ — 옛 두 종류는 지금 저장할 수 없다(사유를 그대로 말한다 · "필드 선택 필요"는 엉뚱한 안내였다).
+        out.push({ stepOrder: s.stepOrder, message: '이 조건 종류는 지금 저장할 수 없어요. 고객 정보 조건으로 바꿔 주세요' });
+      } else if (!c || !c.field || !c.field.trim()) {
         out.push({ stepOrder: s.stepOrder, message: '조건 필드 선택 필요' });
       } else if (!CONDITION_OPS.includes(c.operator)) {
         out.push({ stepOrder: s.stepOrder, message: '조건 연산자 선택 필요' });
@@ -546,6 +590,8 @@ export default function JourneysPage() {
    *   세션 한정이라 닫으면 끝이다(운영 중 추천은 기회 카드가 상시 담당한다).
    */
   const [successionFrom, setSuccessionFrom] = useState<string | null>(null);
+  // ★ 2026-09-29 여정 V2 0차 ⑥ — 방금 저장한 여정의 "목표를 이루면 남은 문자 안 보냄" 실제 저장값.
+  const [successionGoalExit, setSuccessionGoalExit] = useState<boolean | null>(null);
   const [callbackOptions, setCallbackOptions] = useState<CallbackOption[]>([]);
   const [opt080Number, setOpt080Number] = useState('');
   const [loading, setLoading] = useState(true);
@@ -620,6 +666,8 @@ export default function JourneysPage() {
   // ★ 2026-08-01 설계서 §2-3 — 이 회사가 지금 만들 수 있는 여정. 못 만드는 것은 사유와 함께 잠근다.
   //   조회 실패면 잠그지 않는다(화면 편의 게이트). 실제 발송 차단은 백엔드가 담당한다.
   const [dataCap, setDataCap] = useState<Record<string, { available: boolean; reason: string }> | null>(null);
+  // ★ 2026-09-30 V2 4차 — 끝 칸 쓰기 스위치(서버 JOURNEY_END_CHIP_ENABLED). 꺼져 있으면 끝 칸을 고를 수 없다.
+  const [endChipEnabled, setEndChipEnabled] = useState(false);
   // ★ 2026-08-02 §13-5 — 구매가 어느 문으로 들어오는지 + 마지막 도착 시각. 매장 문이면 하루 모아 다음 날 오전에 나간다.
   const [purchaseDoor, setPurchaseDoor] = useState<{ door: 'mall' | 'ledger'; lastArrivalAt: string | null } | null>(null);
   // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 + 샘플 고객 머지 토글
@@ -646,12 +694,19 @@ export default function JourneysPage() {
   const [hasMallIntegration, setHasMallIntegration] = useState(false);
   const [reviewBudget, setReviewBudget] = useState('');
   const [reviewThreshold, setReviewThreshold] = useState('');
-  // ★ 2026-07-10 목표 달성 시 자동 종료 — 구매 독려형(재구매·장바구니·휴면)이면 기본 켜짐 제안(끌 수 있음)
+  // ★ 2026-07-10 목표 달성 시 자동 종료 — 기본값 제안(끌 수 있음)
+  // ★ 2026-09-29 여정 V2 0차 ⑪(Harold 승인 결정 1) — 기본값은 **서버가 트리거 계약에서 파생**한다(aiPkg.goalExitDefault).
+  //   옛: 이 화면의 템플릿 목록(repeat · cart · dormant)이 정해 같은 트리거도 만드는 길마다 달랐다
+  //   (AI 자유 생성 'dormant' = 켜짐 · 이어달리기 프리셋 'custom' = 꺼짐 · 가입은 목록에 없어 늘 꺼짐).
+  //   트리거가 바뀌는 수정(대화형 수정) 뒤에도 그 트리거의 기본값으로 다시 맞춘다.
   const [reviewGoalExit, setReviewGoalExit] = useState(false);
+  // (회의론자 0차 검증 4-가) 담당자가 토글을 직접 만졌는가 — 안 만졌고 패키지에 기본값이 없으면(정보 알림 · 날짜축처럼
+  //   화면이 조립한 패키지) 저장 요청에서 값을 빼 서버가 트리거 계약에서 정하게 한다. 경로마다 다른 기본값을 막는다.
+  const [reviewGoalExitTouched, setReviewGoalExitTouched] = useState(false);
   useEffect(() => {
-    const code = aiPkg?.templateCode;
-    setReviewGoalExit(code === 'repeat' || code === 'cart' || code === 'dormant');
-  }, [aiPkg?.templateCode]);
+    setReviewGoalExit(aiPkg?.goalExitDefault === true);
+    setReviewGoalExitTouched(false);
+  }, [aiPkg?.goalExitDefault, aiPkg?.triggerEvent]);
 
   // step 수정
   const [previewSteps, setPreviewSteps] = useState<Set<number>>(new Set());
@@ -715,6 +770,7 @@ export default function JourneysPage() {
       });
       const data = await res.json();
       if (data?.success && data.triggers) setDataCap(data.triggers);
+      if (data?.success) setEndChipEnabled(data?.features?.endChip === true);
       if (data?.success && data.purchaseDoor) setPurchaseDoor(data.purchaseDoor);
     } catch {
       /* 조회 실패 = 잠그지 않음(기존 동작 유지) */
@@ -735,6 +791,20 @@ export default function JourneysPage() {
       sessionStorage.removeItem('journeyObjectivePrefill');
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ★ 2026-09-29 여정 V2 1차 — 생애 지도 · 빈 곳 찾기의 [만들기]가 이 화면으로 온다(?preset=시작 사건&objective=문장).
+  //   기존 "오늘의 여정 기회" 1클릭 생성과 같은 경로(handleAIGenerate)를 한 번만 부른다. 고객 수 게이트가 읽힌 뒤에 부른다.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const presetHandledRef = useRef(false);
+  useEffect(() => {
+    if (presetHandledRef.current || customerGate.loading) return;
+    const preset = searchParams.get('preset');
+    if (!preset) return;
+    presetHandledRef.current = true;
+    const presetObjective = searchParams.get('objective') || undefined;
+    setSearchParams({}, { replace: true });
+    void handleAIGenerate(undefined, presetObjective, preset);
+  }, [customerGate.loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ★ D189 #2 (2026-05-22): 알림톡 발신프로필 + 템플릿 + 활성 필드 fetch (review view 알림톡 step UI용)
   useEffect(() => {
@@ -1156,6 +1226,15 @@ export default function JourneysPage() {
    *   목적은 **생성에 실제로 쓴 문장**(genObjective)에서 온다. 입력창 값은 그 뒤에 바뀌었을 수 있다.
    */
   const regenerateFromPackage = (pkg: AIJourneyPackage) => {
+    // ★ 2026-09-29 V2 (회의론자 0차 검증 1 · 치명) — 정보 알림 · 날짜축 · 1회 발송 패키지는 AI 다시 생성으로 만들면
+    //   시작 방식 · 날짜 설정이 사라진 마케팅 여정이 된다. 처음 만든 빌더로 돌려보낸다(설정은 그 화면이 소유한다).
+    if (pkg.startKind) {
+      setAiPkg(null);
+      setView('main');
+      setPurpose(pkg.startKind === 'date_anchor' ? 'date-anchor' : 'info-alert');
+      toast.info('이 여정은 처음 만든 화면에서 다시 만들어 주세요.');
+      return;
+    }
     const obj = genObjective.trim();
     // 혜택도 프리셋과 같은 축이다 — 다시 만들기 한 번에 혜택이 placeholder로 되돌아가면 안 된다.
     const benefit = pkg.benefitText || undefined;
@@ -1235,8 +1314,9 @@ export default function JourneysPage() {
 
   const addStep = () => {
     if (!aiPkg) return;
-    // ★ D188 Phase 2-B-1 (2026-05-21): 최대 step 5개 → 7개 확장 (wait/condition 추가 영역 확보).
-    if (aiPkg.steps.length >= 7) { toast.warning('최대 7개 step까지 가능합니다.'); return; }
+    // ★ 2026-09-30 V2 4차 — 문자 칸 7 + 전체 12(서버와 같은 두 값). 새 칸은 문자 칸으로 붙으므로 둘 다 본다.
+    if (aiPkg.steps.length >= MAX_TOTAL_STEPS) { toast.warning(`칸은 최대 ${MAX_TOTAL_STEPS}개까지 만들 수 있어요.`); return; }
+    if (aiPkg.steps.filter((x) => x.stepType === 'message').length >= MAX_MESSAGE_STEPS) { toast.warning(`문자 칸은 최대 ${MAX_MESSAGE_STEPS}개까지예요. 대기 · 조건 칸은 있는 칸의 종류를 바꿔 만들어 주세요.`); return; }
     const lastDelay = aiPkg.steps[aiPkg.steps.length - 1]?.delayHours || 0;
     const newStep: AIGeneratedStep = {
       stepOrder: aiPkg.steps.length + 1,
@@ -1588,7 +1668,8 @@ export default function JourneysPage() {
         thresholdCost: reviewThreshold ? Number(reviewThreshold) : null,
         allowReentry: aiPkg.allowReentry,
         reentryCooldownDays: aiPkg.reentryCooldownDays,
-        goalExitEnabled: reviewGoalExit,
+        // ★ 2026-09-29 V2 0차 ⑪ — 기본값의 주인은 서버 계약. 담당자가 만졌거나 서버가 기본값을 준 패키지일 때만 싣는다.
+        ...(reviewGoalExitTouched || aiPkg.goalExitDefault !== undefined ? { goalExitEnabled: reviewGoalExit } : {}),
       };
       // ★ 2026-06-30 여정 일반화 — 시작 방식이 설정된 신규 흐름(SP-A 알림톡 / SP-B 날짜축)만 트리거·앵커 오버라이드 전송.
       //   미설정(기존 마케팅 여정)이면 미전송 = 백엔드가 템플릿 기본 트리거 사용(옛 동작 byte 불변).
@@ -1603,10 +1684,16 @@ export default function JourneysPage() {
         body.oneShotScheduledAt = aiPkg.oneShotScheduledAt ?? null;
       } else if (aiPkg.presetTriggerEvent) {
         // ★ 2026-08-08 이어달리기 — 추천이 약속한 트리거로 저장한다.
-        //   마케팅 여정은 원래 트리거를 안 보내고 templateCode의 템플릿 기본값을 쓴다(repeat → 주문 완료).
         //   여기서 안 실으면 "휴면 복귀를 권했는데 재구매 여정이 저장되는" 어긋남이 그대로 남는다.
         //   조건은 서버가 비워 보낸 값을 그대로 — 기본값은 추출기·워커가 소유한다.
         body.triggerEvent = aiPkg.presetTriggerEvent;
+        body.triggerFilters = aiPkg.triggerFilters || {};
+      } else if (aiPkg.triggerEvent) {
+        // ★ 2026-09-29 여정 V2 0차 ① — **계획 모달 · 대상 미리보기가 보여 준 트리거 · 대상 조건을 그대로 저장한다.**
+        //   옛: 마케팅 여정은 트리거 · 조건을 보내지 않아 서버가 템플릿 기본값으로 저장했다
+        //   (화면 "서울 VIP 첫 구매" → 저장 "모든 구매 · 조건 없음", custom 이면 "전 고객"). 더 보내는 쪽으로 새는 자리였다.
+        //   서버는 레지스트리 · 대상 조건 검증(journey-builder)을 지나야만 저장한다.
+        body.triggerEvent = aiPkg.triggerEvent;
         body.triggerFilters = aiPkg.triggerFilters || {};
       }
       const res = await fetch('/api/ai/operator/journeys', {
@@ -1623,6 +1710,9 @@ export default function JourneysPage() {
         // ★ 2026-08-08 이어달리기 — 다음 수 안내의 근거는 **저장된 여정의 실제 시작 신호**다.
         //   응답에 상세가 없으면 안내하지 않는다(무엇을 만들었는지 모르는 채로 다음 수를 권하지 않는다).
         setSuccessionFrom(String(data?.detail?.journey?.trigger_event || '') || null);
+        // ★ 2026-09-29 여정 V2 0차 ⑥ — 다음 수 카드가 "이어받습니다"라고 말하려면 원 여정이 목표를 이뤘을 때 끝나야 한다.
+        //   저장 응답의 실제 값을 쥔다(화면 토글이 아니라 서버가 저장한 값).
+        setSuccessionGoalExit(data?.detail?.journey?.goal_exit_enabled === true);
         await loadAll();
         toast.success('초안 여정이 저장되었습니다. 활성 여정 목록에서 활성화 가능합니다.');
       } else {
@@ -1755,6 +1845,13 @@ export default function JourneysPage() {
             </p>
           </div>
           {view === 'main' && (
+            // ★ 2026-09-29 여정 V2 1차 — 생애 지도(읽기 전용). 옛 목록은 그대로 두고 입구만 더한다.
+            <button onClick={() => navigate('/ai-journeys/map')} className={OUI_BTN_OUTLINE} aria-label="여정 지도로 보기">
+              <MapIcon className="w-4 h-4" />
+              <span className="hidden sm:inline">지도로 보기</span>
+            </button>
+          )}
+          {view === 'main' && (
             <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/15 transition-colors disabled:opacity-50">
               <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -1784,7 +1881,8 @@ export default function JourneysPage() {
             {(() => {
               if (!successionFrom) return null;
               const fromDef = TRIGGER_EVENTS.find((t) => t.triggerEvent === successionFrom);
-              const nextKey = (fromDef?.nextKeys || [])[0];
+              // ★ 2026-09-30 V2 3차 — 상품 고르기 창 전용 트리거(상품 재구매)는 1클릭 다음 수로 권하지 않는다(상품 없이 만들 수 없다).
+              const nextKey = (fromDef?.nextKeys || []).find((k) => TRIGGER_EVENTS.find((t) => t.key === k)?.requiresConfig !== 'product_pick');
               const nextDef = nextKey ? TRIGGER_EVENTS.find((t) => t.key === nextKey) : undefined;
               if (!fromDef || !nextDef) return null;
               // 게이트 ① 이 회사 데이터로 그 여정을 만들 수 있는가 — 모르면 권하지 않는다(fail-closed).
@@ -1822,6 +1920,13 @@ export default function JourneysPage() {
                         <span className="font-semibold text-white">{nextDef.label}</span> 여정이 이어받습니다.
                       </p>
                       <div className="mt-2 space-y-1">
+                        {/* ★ 2026-09-29 V2 0차 ⑥ — 원 여정이 목표를 이뤄도 안 끝나면 "이어받습니다"는 절반만 사실이다(두 여정 문자를 같이 받는다). */}
+                        {successionGoalExit === false && (
+                          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
+                            <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                            <span>방금 만든 {fromDef.label} 여정은 목표를 이뤄도 남은 문자가 계속 나가요. 두 여정 문자를 같이 받지 않게 하려면 그 여정 옵션에서 "목표 달성 시 자동 종료"를 켜 주세요.</span>
+                          </div>
+                        )}
                         <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
                           <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
                           <span>여정은 켠 뒤에 생기는 일부터 받습니다. 지금 만들면 앞으로 해당하는 고객부터 나갑니다.</span>
@@ -2042,9 +2147,10 @@ export default function JourneysPage() {
                         <button
                           key={idx}
                           onClick={() => {
+                            // ★ 2026-09-29 여정 V2 0차 ⑦ — 옛: 목표만 바꾸고 위로 스크롤했다. 입력칸은 모달로 옮겨져(0802) 화면에 없어서
+                            //   누르면 아무 일도 안 일어났다(죽은 버튼). 목표를 채운 채 마케팅 여정 모달을 연다.
                             setObjective(ex.objective);
-                            // 자연어 입력 영역으로 스크롤
-                            setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50);
+                            setPurpose('marketing-modal');
                           }}
                           className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-violet-400/30 rounded-lg text-left flex items-center gap-2 transition-all"
                         >
@@ -2055,7 +2161,7 @@ export default function JourneysPage() {
                     })}
                   </div>
                   <p className="text-[11px] text-white/40 text-center mt-4">
-                    또는 위 자연어 입력란에 직접 작성, 회사 admin이 원하는 모든 시나리오 가능
+                    예시를 누르면 문장이 채워진 채로 여정 만들기 창이 열립니다. 원하는 내용으로 고쳐 쓰셔도 됩니다.
                   </p>
                 </div>
               )}
@@ -2293,19 +2399,19 @@ export default function JourneysPage() {
                             <div className="p-3 bg-violet-500/5 border border-violet-400/30 rounded-lg space-y-2">
                               <div className="flex items-center gap-2 mb-1">
                                 <Activity className="w-4 h-4 text-violet-300" />
-                                <span className="text-sm font-semibold text-violet-100">Step funnel 시각화</span>
-                                <span className="text-[10px] text-white/40 ml-auto">journey_step_logs 영역 source</span>
+                                <span className="text-sm font-semibold text-violet-100">칸별 흐름</span>
+                                <span className="text-[11px] text-white/40 ml-auto">출처: 칸별 발송 기록</span>
                               </div>
                               {statsMap[j.id].map((st) => (
                                 <div key={st.stepId} className="space-y-1">
                                   <div className="flex items-center gap-2 text-[11px]">
-                                    <span className="font-mono text-white/60 w-12">Step {st.stepOrder}</span>
-                                    <span className="text-white/40">{st.stepType}{st.channel ? ` · ${st.channel.toUpperCase()}` : ''}</span>
+                                    <span className="text-white/60 w-14">{st.stepOrder}번째 칸</span>
+                                    <span className="text-white/40">{stepTypeLabel(st.stepType)}{st.channel ? ` · ${st.channel.toUpperCase()}` : ''}</span>
                                     <span className="ml-auto text-white/70 font-mono">{st.enteredCount.toLocaleString()}명 ({st.funnelPercentage.toFixed(1)}%)</span>
                                   </div>
                                   <div className="h-2 bg-white/10 rounded-full overflow-hidden">
                                     <div
-                                      className={`h-full ${st.funnelPercentage > 50 ? 'bg-emerald-400' : st.funnelPercentage > 20 ? 'bg-amber-400' : 'bg-rose-400'}`}
+                                      className={`h-full ${funnelBarClass(st.funnelPercentage)}`}
                                       style={{ width: `${Math.min(100, Math.max(2, st.funnelPercentage))}%` }}
                                     />
                                   </div>
@@ -2313,8 +2419,8 @@ export default function JourneysPage() {
                                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-white/40 pl-12">
                                       {st.waitedCount > 0 && <span><Clock className="w-2.5 h-2.5 inline" /> 대기 {st.waitedCount}</span>}
                                       {st.skippedHoursCount > 0 && <span><Clock className="w-2.5 h-2.5 inline text-amber-300/70" /> 시간대 {st.skippedHoursCount}</span>}
-                                      {st.skippedOptOutCount > 0 && <span><AlertTriangle className="w-2.5 h-2.5 inline text-rose-300/70" /> opt-out {st.skippedOptOutCount}</span>}
-                                      {st.skippedNoCustomerCount > 0 && <span><Users className="w-2.5 h-2.5 inline text-rose-300/70" /> 고객 X {st.skippedNoCustomerCount}</span>}
+                                      {st.skippedOptOutCount > 0 && <span><AlertTriangle className="w-2.5 h-2.5 inline text-rose-300/70" /> 수신 거부 {st.skippedOptOutCount}</span>}
+                                      {st.skippedNoCustomerCount > 0 && <span><Users className="w-2.5 h-2.5 inline text-rose-300/70" /> 고객 정보 없음 {st.skippedNoCustomerCount}</span>}
                                       {st.conditionFailedCount > 0 && <span><FilterIcon className="w-2.5 h-2.5 inline text-rose-300/70" /> 조건 미충족 {st.conditionFailedCount}</span>}
                                     </div>
                                   )}
@@ -2819,7 +2925,7 @@ export default function JourneysPage() {
                 {/* ★ 2026-07-10 목표 달성 시 자동 종료 — 구매 독려형이면 기본 켜짐 제안 */}
                 <div className="md:col-span-2 p-2.5 bg-slate-950/50 border border-emerald-400/20 rounded-lg">
                   <label className="flex items-start gap-2.5 cursor-pointer">
-                    <input type="checkbox" checked={reviewGoalExit} onChange={(e) => setReviewGoalExit(e.target.checked)} className="rounded mt-0.5" />
+                    <input type="checkbox" checked={reviewGoalExit} onChange={(e) => { setReviewGoalExit(e.target.checked); setReviewGoalExitTouched(true); }} className="rounded mt-0.5" />
                     <span className="min-w-0">
                       <span className="flex items-center gap-1.5 text-xs font-semibold text-white"><Target className="w-3.5 h-3.5 text-emerald-300" />목표 달성 시 자동 종료</span>
                       <span className="block text-[10px] text-white/45 leading-relaxed mt-0.5">
@@ -2851,6 +2957,7 @@ export default function JourneysPage() {
                 const stepTypeColor =
                   s.stepType === 'wait' ? 'bg-sky-500/20 text-sky-300' :
                   s.stepType === 'condition' ? 'bg-emerald-500/20 text-emerald-300' :
+                  s.stepType === 'end' ? 'bg-white/10 text-white/60' :
                   'bg-fuchsia-500/20 text-fuchsia-300';
                 return (
                   <div key={idx} className={`bg-white/[0.04] border rounded-2xl p-3 shadow-lg shadow-black/20 ${s.stepType === 'wait' ? 'border-sky-400/30' : s.stepType === 'condition' ? 'border-emerald-400/30' : 'border-fuchsia-400/25'}`}>
@@ -2860,7 +2967,7 @@ export default function JourneysPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-semibold text-white/90 truncate">{s.stepIntent || `Step ${s.stepOrder}`}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${stepTypeColor}`}>{s.stepType === 'wait' ? '대기' : s.stepType === 'condition' ? '조건' : '메시지'}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${stepTypeColor}`}>{s.stepType === 'wait' ? '대기' : s.stepType === 'condition' ? '조건' : s.stepType === 'end' ? '끝' : '메시지'}</span>
                           {s.stepType === 'message' && <span className="text-[10px] uppercase tracking-wide text-white/45">{s.channel}</span>}
                         </div>
                         <div className="text-[11px] text-white/45 mt-0.5 truncate">
@@ -2868,6 +2975,7 @@ export default function JourneysPage() {
                           {s.stepType === 'message' && s.messageTemplate.trim() ? ` · ${s.messageTemplate.replace(/\s+/g, ' ').trim().slice(0, 36)}` : ''}
                           {s.stepType === 'condition' ? (s.notMetGoto ? ` · 만족 시 다음 / 미충족 시 Step ${s.notMetGoto}` : ' · 조건 만족 시 다음 단계') : ''}
                           {s.stepType === 'wait' ? (s.waitEventName ? ` · ${s.waitEventName} 이벤트 대기 (최대 ${s.waitTimeoutHours ?? 72}시간)` : ' · 대기 후 다음 단계') : ''}
+                          {s.stepType === 'end' ? ' · 이 갈래는 여기서 끝(보내지 않음)' : ''}
                         </div>
                       </div>
                       <button onClick={() => setEditingStepIdx(idx)} className="shrink-0 px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 text-xs font-medium flex items-center gap-1">
@@ -3014,34 +3122,36 @@ export default function JourneysPage() {
                           3. journey_step_clicked — 옛 step N 클릭 영역 EXISTS */}
                     {s.stepType === 'condition' && (
                       <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs space-y-3">
-                        <div className="font-semibold text-emerald-200">조건 평가 step</div>
+                        <div className="font-semibold text-emerald-200">조건 칸</div>
                         <div className="text-emerald-200/60 leading-relaxed">
-                          고객 정보 또는 사건을 평가해 만족 시 다음 step으로 진입합니다. 미충족 시 동작은 아래에서 선택합니다.
+                          고객 정보를 확인해 맞으면 바로 다음 칸으로 갑니다. 아니면 아래에서 고른 대로 여정을 끝내거나 뒤쪽 칸으로 건너뜁니다.
                         </div>
 
                         {/* ★ 2026-07-11 진짜 분기 — 미충족 시: 종료(기본) 또는 뒤쪽 step으로 이동 (yes/no 경로) */}
                         <div>
-                          <label className="block text-[10px] text-emerald-200/70 mb-1">조건 미충족 시</label>
+                          <label className="block text-[11px] text-emerald-200/70 mb-1">조건이 맞지 않으면</label>
                           <select
                             value={s.notMetGoto ?? ''}
                             onChange={(e) => updateStep(idx, { notMetGoto: e.target.value === '' ? null : Number(e.target.value) })}
                             className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
                           >
-                            <option value="">여정 종료 (기본)</option>
+                            <option value="">여정 끝 (기본)</option>
                             {aiPkg.steps.filter((t) => t.stepOrder > s.stepOrder).map((t) => (
                               <option key={t.stepOrder} value={t.stepOrder}>
-                                Step {t.stepOrder}(으)로 이동{t.stepIntent ? `: ${String(t.stepIntent).slice(0, 20)}` : ''}
+                                {t.stepOrder}번째 칸으로 건너뛰기{t.stepIntent ? `: ${String(t.stepIntent).slice(0, 20)}` : ''}
                               </option>
                             ))}
                           </select>
-                          <div className="text-[10px] text-emerald-200/50 mt-1">
-                            예: "클릭했나?" 미충족 → 리마인드 단계로 이동. 만족한 고객은 리마인드를 건너뛰게 하려면 이동 대상을 뒤쪽 단계로 두세요.
+                          {/* ★ 2026-09-29 여정 V2 0차 ⑦ — 옛 안내는 실행기와 반대로 설명했다. 실제 동작(journey-executor.ts):
+                              맞으면 = 바로 다음 칸 · 아니면 = 고른 뒤쪽 칸으로 점프(사이 칸은 안 받음) · 맞는 쪽은 그 뒤 칸까지 이어서 받는다. */}
+                          <div className="text-[11px] text-emerald-200/50 mt-1 leading-relaxed">
+                            조건이 맞는 고객은 다음 칸부터 끝까지 이어서 받습니다. 맞지 않는 고객은 고른 칸으로 건너뛰고 그 사이 칸은 받지 않습니다.
                           </div>
                         </div>
 
                         {/* type dropdown */}
                         <div>
-                          <label className="block text-[10px] text-emerald-200/70 mb-1">조건 type</label>
+                          <label className="block text-[11px] text-emerald-200/70 mb-1">조건 종류</label>
                           <select
                             value={s.conditionJsonb?.type || 'customer_field'}
                             onChange={(e) => {
@@ -3073,15 +3183,67 @@ export default function JourneysPage() {
                                     clicked: false,
                                   },
                                 });
+                              } else if (newType === 'purchase_since_entry') {
+                                updateStep(idx, { conditionJsonb: { type: 'purchase_since_entry', purchased: true } });
+                              } else if (newType === 'step_link_clicked') {
+                                const prevMsg = [...aiPkg.steps].filter((t) => t.stepOrder < s.stepOrder && t.stepType === 'message').pop();
+                                updateStep(idx, { conditionJsonb: { type: 'step_link_clicked', step_ref_order: prevMsg?.stepOrder, clicked: true } });
                               }
                             }}
                             className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
                           >
-                            <option value="customer_field">고객 필드 조건 (등급 / 구매 금액 / 지역 영역)</option>
-                            <option value="cdp_event_exists">CDP 이벤트 영역 (지난 N일 안 구매 / 클릭 EXISTS)</option>
-                            <option value="journey_step_clicked">옛 step 클릭 영역 (Step N 클릭 EXISTS)</option>
+                            <option value="customer_field">고객 정보 (등급 · 구매 금액 · 지역 등)</option>
+                            {/* ★ 2026-09-30 V2 4차 — 새 조건 2종(목표 판정 · 통계와 같은 기준) */}
+                            <option value="purchase_since_entry">이 여정에 들어온 뒤 구매했나</option>
+                            <option value="step_link_clicked">앞쪽 문자 칸의 링크를 눌렀나</option>
+                            {/* ★ 2026-09-29 여정 V2 0차 ⑦ — 아래 두 종류는 고를 수는 있는데 저장이 막히는 죽은 선택지였다(collectStepIssues).
+                                기준도 틀려 있다(구매 여정에서는 진입 구매로 늘 참 · 매장 구매는 못 봄 · 아무 클릭이나 셈).
+                                "이 여정에 들어온 뒤 구매했나" · "이 칸 링크를 눌렀나"로 다시 여는 것은 4차. AI 가 낸 옛 조건은 표시만 한다. */}
+                            {s.conditionJsonb?.type === 'cdp_event_exists' && (
+                              <option value="cdp_event_exists" disabled>최근 사건 조건 (지금은 저장할 수 없어요)</option>
+                            )}
+                            {s.conditionJsonb?.type === 'journey_step_clicked' && (
+                              <option value="journey_step_clicked" disabled>앞 칸 클릭 조건 (지금은 저장할 수 없어요)</option>
+                            )}
                           </select>
                         </div>
+
+                        {/* ★ 2026-09-30 V2 4차 — 들어온 뒤 구매 */}
+                        {s.conditionJsonb?.type === 'purchase_since_entry' && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {[{ v: true, label: '샀으면 맞음' }, { v: false, label: '안 샀으면 맞음' }].map((o) => (
+                              <button key={String(o.v)} type="button"
+                                onClick={() => updateStep(idx, { conditionJsonb: { type: 'purchase_since_entry', purchased: o.v } })}
+                                className={(s.conditionJsonb as ConditionJsonbPurchaseSinceEntry).purchased === o.v ? 'px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-500/30 border border-emerald-400/50 text-emerald-100' : 'px-2.5 py-1 rounded-lg text-[11px] border border-white/15 text-white/60 hover:bg-white/10'}>
+                                {o.label}
+                              </button>
+                            ))}
+                            <div className="w-full text-[11px] text-emerald-200/50">자사몰 주문 · 매장 구매 · 최근 구매일 중 하나라도 들어온 뒤면 "샀음"(목표 판정과 같은 기준)</div>
+                          </div>
+                        )}
+                        {/* ★ 2026-09-30 V2 4차 — 앞쪽 문자 칸 링크 클릭(통계의 칸별 클릭과 같은 기준) */}
+                        {s.conditionJsonb?.type === 'step_link_clicked' && (() => {
+                          const c = s.conditionJsonb as ConditionJsonbStepLinkClicked;
+                          const prevMsgs = aiPkg.steps.filter((t) => t.stepOrder < s.stepOrder && t.stepType === 'message');
+                          return (
+                            <div className="space-y-2">
+                              <select value={c.step_ref_order ?? ''} onChange={(e) => updateStep(idx, { conditionJsonb: { ...c, step_ref_order: e.target.value === '' ? undefined : Number(e.target.value) } })}
+                                className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs">
+                                <option value="">볼 문자 칸 고르기</option>
+                                {prevMsgs.map((t) => <option key={t.stepOrder} value={t.stepOrder}>{t.stepOrder}번째 칸{t.stepIntent ? `: ${String(t.stepIntent).slice(0, 20)}` : ''}</option>)}
+                              </select>
+                              <div className="flex flex-wrap gap-1.5">
+                                {[{ v: true, label: '눌렀으면 맞음' }, { v: false, label: '안 눌렀으면 맞음' }].map((o) => (
+                                  <button key={String(o.v)} type="button" onClick={() => updateStep(idx, { conditionJsonb: { ...c, clicked: o.v } })}
+                                    className={c.clicked === o.v ? 'px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-500/30 border border-emerald-400/50 text-emerald-100' : 'px-2.5 py-1 rounded-lg text-[11px] border border-white/15 text-white/60 hover:bg-white/10'}>
+                                    {o.label}
+                                  </button>
+                                ))}
+                              </div>
+                              {prevMsgs.length === 0 && <div className="text-[11px] text-amber-200/80">이 칸 앞에 문자 칸이 없어요.</div>}
+                            </div>
+                          );
+                        })()}
 
                         {/* type 1: customer_field 영역 */}
                         {(!s.conditionJsonb || s.conditionJsonb.type === 'customer_field') && (
@@ -3472,6 +3634,8 @@ export default function JourneysPage() {
                             if (newType === 'condition' && !s.conditionJsonb) {
                               patch.conditionJsonb = { type: 'customer_field', field: 'recent_purchase_amount', operator: '>=', value: 100000 };
                             }
+                            // ★ 2026-09-30 V2 4차 — 끝 칸은 기다리지 않는다(대기 0 고정).
+                            if (newType === 'end') patch.delayHours = 0;
                             updateStep(idx, patch);
                           }}
                           className="px-2 py-1 bg-slate-800 border border-white/10 rounded" title="step 유형"
@@ -3479,6 +3643,7 @@ export default function JourneysPage() {
                           <option value="message">메시지</option>
                           <option value="wait">대기</option>
                           <option value="condition">조건</option>
+                          {(endChipEnabled || s.stepType === 'end') && <option value="end">끝 (이 갈래를 여기서 마침)</option>}
                         </select>
                         {s.stepType === 'message' && (
                           <>
@@ -3514,7 +3679,7 @@ export default function JourneysPage() {
                 );
               })}
 
-              {aiPkg.steps.length < 7 && (
+              {aiPkg.steps.length < MAX_TOTAL_STEPS && (
                 <button onClick={addStep} className="w-full p-3 border-2 border-dashed border-white/10 hover:border-white/30 rounded-xl text-sm text-white/50 hover:text-white/80 flex items-center justify-center gap-2">
                   <Plus className="w-4 h-4" /> Step 추가
                 </button>
@@ -3878,7 +4043,8 @@ export default function JourneysPage() {
             objective={genObjective.trim() || undefined}
             available={available}
             unavailableReason={cap?.reason}
-            notice={storePurchaseNotice(trgKey, purchaseDoor)}
+            notice={[aiPkg.targetSummary, storePurchaseNotice(trgKey, purchaseDoor)].filter(Boolean).join(' · ') || undefined}
+            warnings={aiPkg.droppedConditionNotices}
             lockAction={!available && trgKey === 'grade' ? { label: '등급 순서 정하기', onClick: () => setGradeOrderOpen(true) } : undefined}
             steps={aiPkg.steps.map((s) => ({
               stepOrder: s.stepOrder,

@@ -11,7 +11,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Bell, ShoppingBag, CalendarCheck, ShoppingCart, Truck, ArrowLeft, Zap, Clock, Users, MessageSquare, UserPlus, Moon, Cake, Coins } from 'lucide-react';
 // ★ 2026-07-28 트리거 카탈로그 + 템플릿 호환 판정 — 백엔드 switch 8종과 1:1(단일 출처).
-import { TRIGGER_EVENTS, resolveTriggerCompat, type TriggerDef } from '../../utils/journey-trigger-catalog';
+import { TRIGGER_EVENTS, PICKER_TRIGGERS, resolveTriggerCompat, type TriggerDef } from '../../utils/journey-trigger-catalog';
 import AlimtalkChannelPanel, {
   validateAlimtalkChannelState,
   type AlimtalkSenderProfile,
@@ -336,7 +336,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
                 </p>
               )}
               {groups.map(({ group, title }) => {
-                const items = TRIGGER_EVENTS.filter((t) => t.group === group);
+                const items = PICKER_TRIGGERS.filter((t) => t.group === group);
                 return (
                   <div key={group}>
                     <p className="text-[11px] text-white/50 mb-1.5">{title}</p>

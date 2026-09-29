@@ -46,6 +46,8 @@ const SERVER_TRIGGER_KEYS = new Set([
   'signup', 'dormant', 'birthday', 'points',
   // ★ §11-5 — 구매 스트림 분기 2종(카탈로그 parity 가드가 카탈로그와의 일치를 고정한다)
   'first_purchase', 'dormant_return', 'cycle_lapsed', 'browse', 'grade',
+  // ★ 2026-09-30 V2 3차 — 카탈로그 parity 용. 화면은 상품 재구매를 추천 후보로 보내지 않는다(PICKER_TRIGGERS).
+  'product',
 ]);
 
 /**

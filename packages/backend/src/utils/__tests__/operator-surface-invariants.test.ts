@@ -38,6 +38,7 @@ const OPERATOR_PAGES = [
   'JourneysPage.tsx',
   'JourneyDetailPage.tsx',
   'JourneyStatsPage.tsx',
+  'JourneyMapPage.tsx',        // ★ 2026-09-29 여정 V2 1차 캔버스 뷰
   'EmailCampaignsPage.tsx',
   'CdpSettingsPage.tsx',
   'InAppMessagesPage.tsx',
