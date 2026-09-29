@@ -93,7 +93,8 @@ export default function EditShell({
         </div>
       </header>
       {banner}
-      <div className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-[250px_minmax(0,1fr)_370px] xl:grid-cols-[260px_minmax(0,1fr)_380px]">
+      {/* ★ 2026-09-29 남지현 접수 — 넓은 화면(2xl · 1536+)은 왼쪽 블록 칸 320. xl(1280~)은 가운데 칸이 휴대폰+PC 미리보기(약 650)에 빠듯해 260 유지 */}
+      <div className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-[250px_minmax(0,1fr)_370px] xl:grid-cols-[260px_minmax(0,1fr)_380px] 2xl:grid-cols-[320px_minmax(0,1fr)_380px]">
         <aside className="lg:min-h-0 lg:overflow-y-auto mk-scroll border-b lg:border-b-0 lg:border-r border-white/10 px-3.5 py-4">{left}</aside>
         <main className="min-h-[640px] lg:min-h-0 lg:overflow-hidden px-4 py-4 flex flex-col">{center}</main>
         <section className="lg:min-h-0 lg:overflow-y-auto mk-scroll border-t lg:border-t-0 lg:border-l border-white/10 px-5 py-4">{right}</section>
@@ -205,26 +206,29 @@ export function PalettePopover({ items, interaction, onPick, onClose, note, feeT
   }, [onClose]);
   const list = showInteraction && interaction ? interaction : items;
   return (
-    <div className="absolute left-0 lg:left-full lg:ml-3 bottom-0 lg:bottom-auto lg:top-[-260px] z-40 w-[min(420px,92vw)] rounded-2xl border border-violet-400/40 bg-slate-900 shadow-2xl p-4" role="dialog" aria-label="블록 추가">
+    // ★ 2026-09-29 남지현 접수 — 버튼 바로 아래에 펼친다(떠 있는 창 아님). 옛: 왼쪽 칸 오른쪽 바깥(left-full · 위로 260)에 떠서
+    //   세로 스크롤 칸(overflow-y auto = 가로도 auto)에 갇혀 좌우 스크롤이 생기고 윗부분이 화면 밖으로 잘렸다(휴대폰 폭은 위로 튀어나감).
+    //   폭 = 왼쪽 칸 폭 · 칸이 좁은 PC 격자(lg+)는 타일 3줄.
+    <div className="mt-2 rounded-2xl border border-violet-400/40 bg-slate-900 shadow-2xl p-3.5" role="dialog" aria-label="블록 추가">
       <div className="flex items-start justify-between gap-2 mb-3">
-        <div>
+        <div className="min-w-0">
           <div className="text-[14px] font-bold text-white">{showInteraction ? '참여 이벤트' : '블록 추가'}</div>
-          <div className="text-[11.5px] text-white/50">누르면 고른 자리 아래에 들어가고, 필요한 것만 물어봐요</div>
+          <div className="text-[11.5px] text-white/50 leading-snug">누르면 고른 자리 아래에 들어가고, 필요한 것만 물어봐요</div>
         </div>
-        <button type="button" onClick={showInteraction ? () => setShowInteraction(false) : onClose} className="p-1 rounded-lg text-white/50 hover:text-white hover:bg-white/10" aria-label={showInteraction ? '뒤로' : '닫기'}><X className="w-4 h-4" /></button>
+        <button type="button" onClick={showInteraction ? () => setShowInteraction(false) : onClose} className="p-1 rounded-lg text-white/50 hover:text-white hover:bg-white/10 shrink-0" aria-label={showInteraction ? '뒤로' : '닫기'}><X className="w-4 h-4" /></button>
       </div>
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-3 gap-2">
         {list.map((it) => (
-          <button key={it.key} type="button" onClick={() => onPick(it)} className="relative h-[66px] rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] hover:border-violet-400/50 flex flex-col items-center justify-center gap-1.5">
+          <button key={it.key} type="button" onClick={() => onPick(it)} className="relative h-[66px] rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] hover:border-violet-400/50 flex flex-col items-center justify-center gap-1.5 px-1">
             <span className="text-violet-200"><BlockIcon type={it.section} /></span>
-            <span className="text-[12px] font-semibold text-white/90">{it.label}</span>
+            <span className="text-[12px] font-semibold text-white/90 text-center leading-tight break-keep">{it.label}</span>
           </button>
         ))}
         {!showInteraction && interaction && interaction.length > 0 && (
-          <button type="button" onClick={() => setShowInteraction(true)} className="relative h-[66px] rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] hover:border-violet-400/50 flex flex-col items-center justify-center gap-1.5">
+          <button type="button" onClick={() => setShowInteraction(true)} className="relative h-[66px] rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] hover:border-violet-400/50 flex flex-col items-center justify-center gap-1.5 px-1">
             {feeTag && <em className="not-italic absolute -top-2 right-1 text-[10px] font-bold text-amber-950 bg-amber-400 rounded-md px-1.5 py-px">{feeTag}</em>}
             <span className="text-violet-200"><Gift className="w-4 h-4" /></span>
-            <span className="text-[12px] font-semibold text-white/90">참여 이벤트</span>
+            <span className="text-[12px] font-semibold text-white/90 text-center leading-tight break-keep">참여 이벤트</span>
           </button>
         )}
       </div>

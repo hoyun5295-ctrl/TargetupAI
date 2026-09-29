@@ -513,9 +513,10 @@ function CatalogLeft() {
         onReorder={(from, to) => reorderPages(from, to)}
         footer={(
           <AddBlockButton label="쪽 추가" open={menu} onToggle={() => setMenu((v) => !v)}>
-            <div className="absolute left-0 lg:left-full lg:ml-3 bottom-0 lg:bottom-auto lg:top-[-200px] z-40 w-[min(380px,92vw)] rounded-2xl border border-violet-400/40 bg-slate-900 shadow-2xl p-4">
+            {/* ★ 2026-09-29 — 블록 추가 창과 같은 규칙: 버튼 바로 아래에 펼친다(옛: 왼쪽 칸 오른쪽 바깥에 떠서 좌우 스크롤·위쪽 잘림) */}
+            <div className="mt-2 rounded-2xl border border-violet-400/40 bg-slate-900 shadow-2xl p-3.5">
               <div className="flex items-center justify-between mb-3"><b className="text-[14px] text-white">쪽 추가</b><button type="button" onClick={() => setMenu(false)} className="p-1 rounded-lg text-white/50 hover:text-white"><X className="w-4 h-4" /></button></div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2 gap-2">
                 {CATALOG_BLOCKS.map((b) => (
                   <button key={b.key} type="button" onClick={() => { setMenu(false); setTpl(b.key); }} className="text-left rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] px-3 py-2.5">
                     <div className="text-[12.5px] font-bold text-white">{b.label}</div><div className="text-[11px] text-white/50">{b.desc}</div>
@@ -523,9 +524,9 @@ function CatalogLeft() {
                 ))}
               </div>
               <div className="grid grid-cols-3 gap-2 mt-2">
-                <button type="button" onClick={() => { setMenu(false); fileRef.current?.click(); }} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] flex flex-col items-center justify-center gap-1 text-[11.5px] text-white/85"><Upload className="w-4 h-4" />완성 이미지</button>
-                <button type="button" onClick={() => { setMenu(false); setStudio(true); }} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] flex flex-col items-center justify-center gap-1 text-[11.5px] text-white/85"><Sparkles className="w-4 h-4" />이미지 스튜디오</button>
-                <button type="button" onClick={() => { setMenu(false); setLib(true); }} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] flex flex-col items-center justify-center gap-1 text-[11.5px] text-white/85"><FolderOpen className="w-4 h-4" />저장 소재</button>
+                <button type="button" onClick={() => { setMenu(false); fileRef.current?.click(); }} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] flex flex-col items-center justify-center gap-1 px-1 text-[11.5px] text-white/85 text-center leading-tight break-keep"><Upload className="w-4 h-4" />완성 이미지</button>
+                <button type="button" onClick={() => { setMenu(false); setStudio(true); }} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] flex flex-col items-center justify-center gap-1 px-1 text-[11.5px] text-white/85 text-center leading-tight break-keep"><Sparkles className="w-4 h-4" />이미지 스튜디오</button>
+                <button type="button" onClick={() => { setMenu(false); setLib(true); }} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] flex flex-col items-center justify-center gap-1 px-1 text-[11.5px] text-white/85 text-center leading-tight break-keep"><FolderOpen className="w-4 h-4" />저장 소재</button>
               </div>
             </div>
           </AddBlockButton>
