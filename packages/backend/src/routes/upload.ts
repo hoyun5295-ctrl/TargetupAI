@@ -5,7 +5,7 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
+import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
 import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
@@ -228,7 +228,7 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
     //   7/1 Sonnet 5 전환의 게이팅 sweep이 raw fetch만 놓쳐, 적응형 사고 블록이 첫 블록으로 오면
     //   content[0].text=undefined → 빈 매핑인데 "호출 성공" 로그가 찍히던 사고(박성용 0706 18:01)의 뿌리.)
     try {
-      const adaptiveGuard: any = isAdaptiveOnlyModel(AI_MODELS.claude) ? { thinking: { type: 'disabled' } } : {};
+      const adaptiveGuard: any = claudeRequestShape(AI_MODELS.claude);   // 모델별 생각 끄기 형태
       const response: any = await anthropic.messages.create({
         model: AI_MODELS.claude,
         max_tokens: resolveMaxTokens(AI_MAX_TOKENS.fieldMapping, AI_MODELS.claude),

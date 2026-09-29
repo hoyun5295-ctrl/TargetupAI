@@ -96,6 +96,7 @@
 | 주제 | SoT 문서 | 읽는 범위 |
 |---|---|---|
 | AI Operator·CDP·Provider | [AI_OPERATOR_기능정의서.md](../docs/AI_OPERATOR_기능정의서.md) + [ai_operator_progress.md](ai_operator_progress.md) | 해당 절 |
+| **AI 모델 최신화 · 프롬프트 품질 점검**(0930~ · 문안 Sonnet 5.5 · 정밀 Opus 5.5 · 프롬프트 전수 점검 장부) | [2026-09-30-ai-model-prompt-upgrade.md](../docs/2026-09-30-ai-model-prompt-upgrade.md) | §2 모델 전환(실측 · 되돌리기) → §3-4 진행표 · 호출어 **AI 모델 최신화 / 프롬프트 점검** |
 | AI 영업 아웃리치(슈퍼관리자·ceo 전용) | [2026-07-31-ai-sales-outreach-design.md](../docs/2026-07-31-ai-sales-outreach-design.md) | 전체 — 착수 전 확정 = §13, 재사용 맵 = §6-1 |
 | CRM 캠페인 대행(설계 대행) | [2026-07-09-crm-campaign-agency-implementation.md](../docs/2026-07-09-crm-campaign-agency-implementation.md) | 전체 |
 | 요금제 무료 메시징(월 제공량·소진·정산 제외) | [2026-08-05-plan-free-messaging-design.md](../docs/2026-08-05-plan-free-messaging-design.md) | 전체 — 확정 대기 = §9 (Harold 확정 전 착수 금지) |

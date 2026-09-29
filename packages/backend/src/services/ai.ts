@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import { FIELD_MAP, getFieldByKey, getColumnFields, applyFieldAliases, applyFieldDisplayNames } from '../utils/standard-field-map';
 import { query } from '../config/database';
 import { currentUserId } from '../utils/request-context';
-import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
+import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, claudeRequestShape, gptRequestShape, resolveMaxTokens } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildJourneySafetyFilter } from '../utils/journey-safety-filter';
 import { cleanLeftoverVars } from '../utils/messageUtils';
@@ -47,7 +47,7 @@ const openai = new OpenAI({
 });
 
 // ============================================================
-// AI 호출 (Claude → gpt-5.1 자동 fallback)
+// AI 호출 (Claude → GPT 자동 fallback · 모델 = AI_MODELS)
 // ★ D167 (2026-05-19) Braze급 SaaS Step 0 — Prompt Caching 적용:
 //   system 블록을 cache_control: 'ephemeral'로 박아 회사별 시스템 프롬프트
 //   (브랜드 톤 + 30일 history + 고객 DB 스키마)를 1h TTL 캐싱.
@@ -138,10 +138,8 @@ export async function callAIWithFallback(params: {
   // 1차: Claude (모델 선택: sonnet/opus)
   try {
     const modelName = params.model === 'opus' ? AI_MODELS.opus : AI_MODELS.claude;
-    // ★ 2026-07-01: 실제 모델 문자열 기준 API 표면 분기 (model 파라미터가 아님 — env로 모델이 바뀌어도 안전).
-    //   adaptive-only(Sonnet 5·Opus 4.7/4.8): temperature 보내면 400, thinking은 adaptive/disabled만.
-    //   legacy(Sonnet 4.6·Haiku): temperature 허용 + thinking enabled+budget.
-    const adaptiveOnly = isAdaptiveOnlyModel(modelName);
+    // ★ 2026-07-01 · 0930: 실제 모델 문자열 기준 API 표면 분기 (model 파라미터가 아님 — env로 모델이 바뀌어도 안전).
+    //   temperature · thinking · effort 는 claudeRequestShape(config/defaults.ts) 한 곳이 모델별로 정한다.
 
     // ★ 2026-07-08 vision — 이미지 있으면 image 블록 + text 블록 배열, 없으면 문자열(기존 동작 불변)
     // ★ 2026-07-30 PDF — `application/pdf`는 image 블록이 아니라 **document 블록**으로 보낸다
@@ -178,19 +176,12 @@ export async function callAIWithFallback(params: {
       messages: [{ role: 'user', content: claudeUserContent }],
     };
 
-    // temperature — adaptive-only 모델(Sonnet 5·Opus 4.7/4.8)은 보내면 400
-    if (!adaptiveOnly) {
-      requestParams.temperature = params.thinking ? 1 : params.temperature;
-    }
-
-    // thinking — adaptive-only: 요청 시 adaptive / 미요청 시 disabled(생략 시 자동 ON 방지). legacy: enabled+budget.
-    if (params.thinking) {
-      requestParams.thinking = adaptiveOnly
-        ? { type: 'adaptive' }
-        : { type: 'enabled', budget_tokens: params.thinkingBudget || 5000 };
-    } else if (adaptiveOnly) {
-      requestParams.thinking = { type: 'disabled' };
-    }
+    // temperature · thinking · effort — 모델이 받는 모양으로(옛 모델만 temperature · 새 모델은 끄기 형태가 모델마다 다르다).
+    Object.assign(requestParams, claudeRequestShape(modelName, {
+      temperature: params.temperature,
+      thinking: params.thinking,
+      thinkingBudget: params.thinkingBudget,
+    }));
 
     const response = await anthropic.messages.create(requestParams);
 
@@ -245,25 +236,20 @@ export async function callAIWithFallback(params: {
     }
     return text;
   } catch (claudeError: any) {
-    console.warn(`[AI] Claude 실패 (${claudeError.status || claudeError.message}) → gpt-5.1 fallback`);
+    console.warn(`[AI] Claude 실패 (${claudeError.status || claudeError.message}) → GPT fallback`);
   }
 
   // 2차: GPT fallback
-  // ★ D170+ (Harold 명시 2026-05-19): AI Operator 호출(model: 'opus'/'haiku')과 기존 흐름의 fallback 모델 분리
-  //   - AI Operator: gpt-5.5
-  //   - 기존 한줄로AI 흐름 (sonnet 또는 model 미박힘): gpt-5.4-mini — 절대 건드리지 말 것
+  // ★ D170+ (Harold 명시 2026-05-19): AI Operator 호출(model: 'opus')과 기존 흐름의 fallback 모델 분리(변수 둘 · 값은 defaults.ts)
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
   }
 
   const fallbackModel = params.model === 'opus'
-    ? AI_MODELS.gptOperator  // AI Operator: gpt-5.5
-    : AI_MODELS.gpt;         // 기존 한줄로AI: gpt-5.4-mini
+    ? AI_MODELS.gptOperator  // AI Operator
+    : AI_MODELS.gpt;         // 기존 한줄로AI 흐름
 
-  // ★ D170+ (PM2 로그 진단 2026-05-19): GPT-5.5도 temperature 박으면 400 error
-  //   "Unsupported value: 'temperature' does not support 0.3 with this model. Only the default (1) value is supported."
-  //   = GPT-5 series (5.5) sampling 파라미터 제한. gpt-5.4-mini는 그대로 박음(검증된 모델).
-  const isOperatorFallback = fallbackModel === AI_MODELS.gptOperator;
+  // ★ D170+ · 0930: 최신 GPT 는 temperature 를 보내면 400("Only the default (1) value is supported") — 보낼지는 gptRequestShape 가 정한다.
 
   try {
     // ★ 2026-07-08 vision — GPT fallback도 이미지 지원(data URL). 없으면 문자열(기존 동작 불변)
@@ -294,10 +280,8 @@ export async function callAIWithFallback(params: {
         { role: 'user', content: gptUserContent },
       ],
     };
-    // gpt-5.5는 temperature 박지 X (default 1만 지원). gpt-5.4-mini는 그대로 박음.
-    if (!isOperatorFallback) {
-      gptRequest.temperature = params.temperature;
-    }
+    // temperature — 옛 GPT 계열만(gptRequestShape · 0930 실측 최신 GPT = 400)
+    Object.assign(gptRequest, gptRequestShape(fallbackModel, { temperature: params.temperature }));
 
     const gptResponse = await openai.chat.completions.create(gptRequest);
     const text = gptResponse.choices[0]?.message?.content || '';
@@ -2776,7 +2760,7 @@ export function checkAPIStatus(): { available: boolean; message: string; fallbac
     available: hasClaude || hasGPT,
     message: hasClaude
       ? hasGPT ? 'Claude API 준비 완료 (GPT fallback 대기)' : 'Claude API 준비 완료 (fallback 없음)'
-      : hasGPT ? 'gpt-5.1만 사용 가능 (Claude 키 없음)' : 'AI API 키가 설정되지 않았습니다.',
+      : hasGPT ? 'GPT 보조 경로만 사용 가능 (Claude 키 없음)' : 'AI API 키가 설정되지 않았습니다.',
     fallback: hasGPT,
   };
 }
@@ -3369,8 +3353,8 @@ export async function refineDirectMessage(
   // Claude 우선
   if (process.env.ANTHROPIC_API_KEY) {
     try {
-      // Sonnet 5는 thinking 생략 시 adaptive 자동 ON → max_tokens 잠식·다듬기 잘림 방지
-      const refineThinking: any = isAdaptiveOnlyModel(AI_MODELS.claude) ? { thinking: { type: 'disabled' } } : {};
+      // 모델별 생각 끄기 형태(claudeRequestShape) — 생략하면 adaptive 자동 ON 으로 max_tokens 잠식 · 다듬기 잘림
+      const refineThinking: any = claudeRequestShape(AI_MODELS.claude);
       const response = await anthropic.messages.create({
         model: AI_MODELS.claude,
         max_tokens: resolveMaxTokens(AI_MAX_TOKENS.refineMessage, AI_MODELS.claude),
@@ -3411,7 +3395,7 @@ export async function refineDirectMessage(
   // OpenAI fallback
   if (process.env.OPENAI_API_KEY) {
     try {
-      // ★ D152+ Harold님 PM2 로그 진단: gpt-5.1은 max_tokens 미지원 → max_completion_tokens 사용 (OpenAI 최신 모델 정책).
+      // ★ D152+ Harold님 PM2 로그 진단: 최신 GPT 는 max_tokens 미지원 → max_completion_tokens 사용 (OpenAI 최신 모델 정책).
       //   temperature도 일부 최신 모델에서 1.0만 허용 → 기본값 유지(전달 안 함).
       const gptResponse = await openai.chat.completions.create({
         model: AI_MODELS.gpt,

@@ -19,9 +19,17 @@ describe('AI 직접 호출 불변식 (소스 전수 스캔)', () => {
     expect(offenders).toEqual([]);
   }, SCAN_TIMEOUT_MS);
 
-  it('불변식 2 — anthropic.messages.create 직접 호출 파일은 isAdaptiveOnlyModel 게이팅 동반 의무 (Sonnet 5·Opus 4.7+는 thinking 생략 시 자동 ON)', () => {
+  it('불변식 2 — anthropic.messages.create 직접 호출 파일은 모델별 요청 형태 CT(claudeRequestShape) 동반 의무 (새 모델은 생각 끄기 형태가 모델마다 다르다 · 0930 실측)', () => {
     const offenders = sources()
-      .filter(({ src }) => /anthropic\s*\.messages\.create\s*\(/.test(src) && !src.includes('isAdaptiveOnlyModel'))
+      .filter(({ src }) => /anthropic\s*\.messages\.(create|batches)/.test(src) && !src.includes('claudeRequestShape'))
+      .map(({ rel }) => rel);
+    expect(offenders).toEqual([]);
+  }, SCAN_TIMEOUT_MS);
+
+  it('불변식 2-2 — 옛 두 갈래 판정(isAdaptiveOnlyModel) 재유입 금지 · 직접 호출부가 thinking 을 손으로 적지 않는다', () => {
+    const offenders = sources()
+      .filter(({ rel }) => !rel.includes('__tests__') && !rel.endsWith('config/defaults.ts') && !rel.endsWith('config\\defaults.ts'))
+      .filter(({ src }) => src.includes('isAdaptiveOnlyModel') || /thinking:\s*\{\s*type:\s*'(disabled|between_tools)'/.test(src))
       .map(({ rel }) => rel);
     expect(offenders).toEqual([]);
   }, SCAN_TIMEOUT_MS);

@@ -16,7 +16,7 @@
  *   기록만 `ai_call_log`에 `agency-send-refine`으로 남겨 원가를 잰다.
  */
 import Anthropic from '@anthropic-ai/sdk';
-import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
+import { AI_MODELS, claudeRequestShape } from '../config/defaults';
 import { stripUnauthorizedBenefits } from './copy-benefit-detector';
 import { recordAiCall } from './ai-rate-limit';
 
@@ -178,7 +178,7 @@ export async function refineForSpam(opts: {
 
 async function callAnthropic(system: string, user: string) {
   const modelId = AI_MODELS.claude;
-  const adaptiveGuard: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
+  const adaptiveGuard: any = claudeRequestShape(modelId);   // 모델별 생각 끄기 형태
   const response: any = await anthropic.messages.create({
     model: modelId,
     max_tokens: 1200,

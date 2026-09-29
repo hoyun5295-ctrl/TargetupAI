@@ -7,7 +7,7 @@ import { query } from '../config/database';
 // ★ 2026-09-27 한줄로 V2 R092 — 이탈 위험 고객 가림 CT
 import { maskPersonName } from '../utils/pii-masking';
 import { maskPhone } from '../utils/mfa';
-import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, getCompanyCosts, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
+import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, getCompanyCosts, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 import { withCopyRules } from '../services/ai';
 import { kstFromNaiveUtc, kstDayStartNaiveUtc } from '../utils/stats-aggregation';
@@ -302,8 +302,8 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
   // 1차: Claude 재시도
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // Sonnet 5: temperature 보내면 400 → 미전송 + thinking 자동 ON 방지. legacy 모델만 temperature 유지.
-      const analysisGuard: any = isAdaptiveOnlyModel(AI_MODELS.claude) ? { thinking: { type: 'disabled' } } : { temperature: 0.3 };
+      // 모델별 형태(claudeRequestShape) — 옛 모델만 temperature 0.3 · 새 모델은 생각 끄기 형태.
+      const analysisGuard: any = claudeRequestShape(AI_MODELS.claude, { temperature: 0.3 });
       const response = await anthropic.messages.create({
         model: AI_MODELS.claude,
         max_tokens: resolveMaxTokens(AI_MAX_TOKENS.analysis, AI_MODELS.claude),
@@ -324,27 +324,27 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
     }
   }
 
-  // 2차: gpt-5.1 fallback
+  // 2차: GPT fallback(AI_MODELS.gpt)
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
   }
 
-  console.warn('[AI 분석] Claude 전부 실패 → gpt-5.1 fallback');
+  console.warn('[AI 분석] Claude 전부 실패 → GPT fallback');
   try {
     const gptResponse = await openai.chat.completions.create({
       model: AI_MODELS.gpt,
       max_completion_tokens: AI_MAX_TOKENS.analysis,
-      // ★ 2026-07-22 gpt-5.5는 temperature 0.3 보내면 400("only default 1 supported") → 미전송(기본값). 다른 GPT 폴백 3곳과 동일.
+      // ★ 2026-07-22 · 0930 최신 GPT 는 temperature 0.3 보내면 400("only default 1 supported") → 미전송(기본값). 다른 GPT 폴백 3곳과 동일.
       messages: [
         { role: 'system', content: withCopyRules(ANALYSIS_SYSTEM_PROMPT) },
         { role: 'user', content: userMessage },
       ],
     });
     const text = gptResponse.choices[0]?.message?.content || '';
-    console.log('[AI 분석] gpt-5.1 fallback 성공');
+    console.log(`[AI 분석] GPT fallback 성공 · model=${AI_MODELS.gpt}`);
     return parseClaudeResponse(text);
   } catch (gptError: any) {
-    console.error(`[AI 분석] gpt-5.1도 실패:`, gptError.message);
+    console.error(`[AI 분석] GPT fallback도 실패:`, gptError.message);
     throw new Error('AI 서비스 일시 장애 (Claude + GPT 모두 실패)');
   }
 }

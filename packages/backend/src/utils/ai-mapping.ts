@@ -19,7 +19,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
 import { FIELD_MAP } from './standard-field-map';
-import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
+import { AI_MODELS, claudeRequestShape } from '../config/defaults';
 // ★2026-09-02 대상별 허용 필드 = 매핑 계약 CT(저장 검증과 같은 표를 본다)
 import { SYNC_PURCHASE_FIELD_GUIDE, SYNC_PURCHASE_TARGET_FIELDS } from './sync-mapping-fields';
 
@@ -30,7 +30,9 @@ import { SYNC_PURCHASE_FIELD_GUIDE, SYNC_PURCHASE_TARGET_FIELDS } from './sync-m
 // ★ 2026-07-06 Harold 지시 — 매핑 1차 모델을 Sonnet 5(AI_MODELS.claude)로 통일. 모델 정책은 defaults.ts 한 곳이 진실.
 //   (서버 .env에 CLAUDE_MAPPING_MODEL이 명시돼 있으면 그 값이 우선 — 배포 시 확인)
 const MODEL_PRIMARY = process.env.CLAUDE_MAPPING_MODEL || AI_MODELS.claude;
-const MODEL_SONNET_FALLBACK = process.env.CLAUDE_MAPPING_FALLBACK || 'claude-sonnet-4-5-20250929';
+// ★ 2026-09-30 — 대체 모델 기본값 = 정밀 모델(AI_MODELS.opus · Opus 5.5 · 운영 키 접근 실측). 옛 Sonnet 4.5 고정값 폐기.
+//   1차와 다른 모델이어야 대체의 의미가 있다(1차 = AI_MODELS.claude). 1차 실패 때만 불리므로 원가 영향은 작다.
+const MODEL_SONNET_FALLBACK = process.env.CLAUDE_MAPPING_FALLBACK || AI_MODELS.opus;
 const MAX_TOKENS = 4000;
 
 const anthropic = new Anthropic({
@@ -53,7 +55,7 @@ export interface AiMappingInput {
 
 export interface AiMappingResult {
   mapping: Record<string, string | null>;
-  modelUsed: 'claude-opus-4-7' | 'claude-sonnet-4-5-20250929' | string;
+  modelUsed: string;   // 실제 응답 모델(1차 AI_MODELS.claude · 대체 AI_MODELS.opus)
   cacheHit: boolean;
   tokensUsed: number;
   costEstimate: number; // USD 추정
@@ -276,7 +278,7 @@ async function callClaudeModel(modelId: string, input: AiMappingInput): Promise<
 
   // ★ 2026-07-06 적응형 사고 게이팅 — Sonnet 5·Opus 4.7/4.8은 thinking 생략 시 자동 ON.
   //   사고 블록이 첫 블록으로 오면 아래 추출이 빈손이 되므로 disabled 명시 (7/1 SDK 7곳 정정과 동일 정합).
-  const adaptiveGuard: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
+  const adaptiveGuard: any = claudeRequestShape(modelId);   // 모델별 생각 끄기 형태(claudeRequestShape)
   const response: any = await anthropic.messages.create({
     model: modelId,
     max_tokens: MAX_TOKENS,

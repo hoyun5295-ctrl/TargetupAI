@@ -21,7 +21,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { getCompanyCosts, AI_MODELS, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
+import { getCompanyCosts, AI_MODELS, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
 // ★ D181 (2026-05-19): Anthropic Memory 패턴 박음 — 회사별 누적 학습
 import { buildMemoryPromptContext as buildCompanyMemoryPromptContext } from '../utils/company-memory';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필.
@@ -944,8 +944,8 @@ ${memoryContext}
 
   try {
     for (let iter = 1; iter <= maxIterations; iter++) {
-      // Sonnet 5는 thinking 생략 시 adaptive 자동 ON → tool 루프 max_tokens 잠식·응답 잘림 방지
-      const orchThinking: any = isAdaptiveOnlyModel(AI_MODELS.opus) ? { thinking: { type: 'disabled' } } : {};
+      // 생각 끄기 형태는 모델마다 다르다(claudeRequestShape) — 생략하면 adaptive 자동 ON 으로 tool 루프 max_tokens 잠식.
+      const orchThinking: any = claudeRequestShape(AI_MODELS.opus);
       const response = await orchestratorAnthropic.messages.create({
         model: AI_MODELS.opus,
         max_tokens: resolveMaxTokens(4096, AI_MODELS.opus),

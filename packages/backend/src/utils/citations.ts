@@ -24,7 +24,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { AI_MODELS, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
+import { AI_MODELS, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
 import { listMemories as listCompanyMemories, LEARNING_MEMORY_TYPES } from './company-memory';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -191,8 +191,8 @@ export async function callAIWithCitations(input: {
     citations: { enabled: true },
   }));
 
-  // Sonnet 5는 thinking 생략 시 adaptive 자동 ON → max_tokens 잠식·citations 누락 방지
-  const citationThinking: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
+  // 모델별 생각 끄기 형태(claudeRequestShape) — 생략하면 adaptive 자동 ON 으로 max_tokens 잠식 · citations 누락
+  const citationThinking: any = claudeRequestShape(modelId);
   const response = await (anthropic.messages as any).create({
     model: modelId,
     max_tokens: resolveMaxTokens(input.maxTokens || 2000, modelId),

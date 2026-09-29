@@ -28,7 +28,7 @@
  * 남용 방지 = 캐시(5분·단발 질문만) · 회사당 일 30회·분 3회(초과 시 잠그지 않고 후보 카드만) · 입력 240자 · 후속 문답 3쌍.
  */
 import Anthropic from '@anthropic-ai/sdk';
-import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
+import { AI_MODELS, claudeRequestShape } from '../config/defaults';
 import { FEATURE_CATALOG, toPublicJob, normalizePath, type FeatureJob, type PublicFeatureJob } from '../content/feature-catalog';
 import { detectBenefits } from './copy-benefit-detector';
 import { extractJsonFromAiText } from './ai-json';
@@ -451,7 +451,7 @@ async function callAnthropic(
   system: string, messages: { role: 'user' | 'assistant'; content: string }[],
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const modelId = AI_MODELS.claude; // = Sonnet 5 (Harold 2026-08-24 확정. 이 안내 축은 모델 경로가 어려운 꼬리만 받는다)
-  const adaptiveGuard: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
+  const adaptiveGuard: any = claudeRequestShape(modelId);   // 모델별 생각 끄기 형태(claudeRequestShape)
   const response: any = await anthropic.messages.create({
     model: modelId,
     max_tokens: MAX_TOKENS,

@@ -30,39 +30,100 @@ export const AI_MODELS = {
   //        오퍼레이터는 저빈도라 단가 영향 작음.)
   //   - ★ 두 모델 모두 adaptive-only 표면: temperature/top_p/top_k 보내면 400, thinking은 adaptive/disabled만.
   //     Sonnet 5는 thinking 생략 시 adaptive 자동 ON → max_tokens 잠식·문안 잘림. Anthropic 직접 호출부는
-  //     isAdaptiveOnlyModel()로 분기(temperature 미전송 + thinking 미요청 시 {type:'disabled'}) + resolveMaxTokens 여유.
+  //     claudeRequestShape()로 분기(★0930 — 모델별 temperature · thinking · effort 형태를 한 곳이 정한다) + resolveMaxTokens 여유.
   //   - 필드 매핑(ai-mapping.ts)은 별도 env CLAUDE_MAPPING_MODEL — 범위 밖.
   //   ※ 서버 .env에 CLAUDE_MODEL / CLAUDE_OPUS_MODEL 설정 시 그 값 우선 → 함께 변경 필요.
-  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-5',                  // 문안 생성 — Sonnet 5
-  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-4-8',               // AI Operator 정밀(검수·타겟) — Opus 4.8
-  gpt: process.env.GPT_MODEL || 'gpt-5.5',                               // ★ 2026-07-22 Harold 명시 — 전부 gpt-5.5 통일(구 gpt-5.4-mini). gpt-5.5는 temperature 미전송(400 방지)
-  gptOperator: process.env.GPT_OPERATOR_MODEL || 'gpt-5.5',              // AI Operator fallback
+  // ★ 2026-09-30 (Harold 결정 B) 문안 = Sonnet 5.5 · 정밀(검수·타겟) = Opus 5.5 — 07-01 분리 유지.
+  //   요청 형태는 claudeRequestShape 가 모델별로 정한다(운영 키 실측 0930: 둘 다 thinking disabled · temperature 400).
+  //   되돌리기 = .env 에 CLAUDE_MODEL=claude-sonnet-5 · CLAUDE_OPUS_MODEL=claude-opus-4-8 두 줄 + pm2 restart --update-env(배포 불요).
+  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-5-5',                // 문안 생성 — Sonnet 5.5
+  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-5-5',               // AI Operator 정밀(검수·타겟) — Opus 5.5
+  // ★ 2026-09-30 (Harold) GPT 대체도 최신 = gpt-6-luna(문안 · AI Operator 둘 다). 운영 키 실측: 기본 · JSON 응답 모드 OK · temperature 0.3 = 400(기본 1만).
+  //   temperature 는 gptRequestShape 가 모델별로 정한다. 되돌리기 = .env GPT_MODEL · GPT_OPERATOR_MODEL + pm2 restart --update-env.
+  gpt: process.env.GPT_MODEL || 'gpt-6-luna',                            // 문안 흐름 GPT 대체
+  gptOperator: process.env.GPT_OPERATOR_MODEL || 'gpt-6-luna',           // AI Operator GPT 대체
 };
 
 /**
- * adaptive-only 모델 판정 — sampling 파라미터(temperature/top_p/top_k)를 보내면 400 +
- * thinking은 adaptive/disabled만 허용하는 모델군. 대상: Sonnet 5 · Opus 4.7 · Opus 4.8.
- * (Sonnet 4.6 / Haiku 4.5 = false — temperature·enabled+budget thinking 허용)
- *
- * Anthropic 직접 호출부 분기 규칙: 반환값이 true면
- *   ① temperature/top_p/top_k 미전송
- *   ② thinking 미요청 시 {type:'disabled'} 명시 (Sonnet 5는 생략 시 adaptive 자동 ON → max_tokens 잠식·문안 잘림 방지)
+ * ★ 2026-09-30 Claude 모델별 요청 형태 — **temperature · thinking · effort 를 정하는 유일한 자리**(직접 호출 9곳 · 공통 CT 전부 이것만 본다).
+ *   옛: `isAdaptiveOnlyModel` 정규식(sonnet-5|opus-4-7|opus-4-8) 두 갈래 — 새 모델(Sonnet 5.5 · Opus 5.5)은 판정이 틀리거나
+ *   "생각 끄기 = disabled" 가 400 이라, .env 만 바꾸면 전 호출이 실패 → 조용히 GPT 대체로 넘어갔다.
+ *   운영 키 실측(0930 Harold 서버 · API 원문):
+ *     - Sonnet 5.5: thinking disabled 400("between_tools 로 보내라") · between_tools OK(생각 0) · adaptive OK · temperature 400(deprecated)
+ *     - Opus 5.5: thinking disabled 400(미지원 · adaptive + output_config.effort 로 조절) · adaptive+low OK(생각 35) · adaptive+high OK(생각 93) · temperature 400
+ *   ⛔ 모르는 모델은 새 모델이 모두 받는 형태(adaptive · temperature 없음)로 보낸다 — 틀려도 400 이 아니라 생각 토큰을 더 쓰는 쪽(허용 목록 원칙).
  */
-export function isAdaptiveOnlyModel(modelName: string): boolean {
-  const m = (modelName || '').toLowerCase();
-  return /sonnet-5|opus-4-7|opus-4-8/.test(m);
+/**
+ * ★ 2026-09-30 GPT 대체 요청 형태 — temperature 를 보낼지 정하는 유일한 자리(허용 목록).
+ *   운영 키 실측(0930): gpt-6-luna · gpt-6-astra · gpt-6-sol · gpt-6.1-sol · gpt-5.6-luna 모두 temperature 0.3 = 400("기본 1만") ·
+ *   옛 코드는 "두 GPT 변수 값이 같은가"로 우연히 안 보내고 있었다(값이 갈리면 문안 흐름에만 보내 400 → 대체까지 실패).
+ *   옛 계열(gpt-3.5 · gpt-4 계열)만 temperature 를 싣는다 · 그 밖(모르는 모델 포함) = 안 보냄.
+ */
+export function gptRequestShape(modelName: string, opts: { temperature?: number } = {}): { temperature?: number } {
+  const m = (modelName || '').toLowerCase().trim();
+  if (typeof opts.temperature === 'number' && /^gpt-(3\.5|4)(o|\.|-|$)/.test(m)) return { temperature: opts.temperature };
+  return {};
+}
+
+export type ClaudeModelFamily = 'legacy' | 'adaptive_v1' | 'sonnet_5_5' | 'opus_5_5' | 'unknown';
+
+export function claudeModelFamily(modelName: string): ClaudeModelFamily {
+  const m = (modelName || '').toLowerCase().trim();
+  if (/^claude-sonnet-5-5(-|$)/.test(m)) return 'sonnet_5_5';
+  if (/^claude-opus-5-5(-|$)/.test(m)) return 'opus_5_5';
+  // 지금 운영(0930 전) — Sonnet 5 · Opus 4.7 · 4.8: temperature 400 · thinking adaptive/disabled
+  if (/^claude-sonnet-5(-20\d{6})?$/.test(m) || /^claude-opus-4-[78](-|$)/.test(m)) return 'adaptive_v1';
+  // temperature · enabled+budget 를 받는 옛 모델(확인된 것만 · 허용 목록)
+  if (/^claude-(sonnet-4-[0-6]|haiku-4-5|opus-4-[0-6])(-|$)/.test(m) || /^claude-3/.test(m)) return 'legacy';
+  return 'unknown';
+}
+
+export interface ClaudeRequestShape {
+  temperature?: number;
+  thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'adaptive' | 'disabled' | 'between_tools' };
+  output_config?: { effort: 'low' | 'high' };
 }
 
 /**
- * Sonnet 5 새 토크나이저 대응 — 같은 한국어 문안이 Sonnet 4.6보다 ~30% 더 많은 토큰을 차지하므로,
- * 옛 max_tokens 한도에 맞춰 들어가던 문안이 그대로 잘릴 수 있다. adaptive-only(Sonnet 5) 모델은
- * 출력 한도를 1.5배(상한 16000 = 비스트리밍 HTTP 타임아웃 안전 한계)로 확장해 잘림을 원천 차단.
- * cap은 상한일 뿐 — 모델이 더 길게 쓰게 만들지 않음(정상 출력은 그대로, 잘림만 방지하는 무비용 여유).
- * 수학적 보장: 옛 한도 C에 들어가던 X토큰(X≤C) → Sonnet 5에서 ~1.3X ≤ 1.3C < 1.5C → 항상 수용.
+ * 모델이 받는 모양으로 temperature · thinking · effort 조각을 만든다(요청 객체에 펼쳐 넣는다).
+ *   thinking = 호출부가 생각을 원하는가(검수 등). temperature = 옛 모델에만 실린다(생각 켜면 1 · API 제약).
+ */
+export function claudeRequestShape(
+  modelName: string,
+  opts: { temperature?: number; thinking?: boolean; thinkingBudget?: number } = {},
+): ClaudeRequestShape {
+  const want = opts.thinking === true;
+  switch (claudeModelFamily(modelName)) {
+    case 'legacy': {
+      const out: ClaudeRequestShape = {};
+      if (typeof opts.temperature === 'number') out.temperature = want ? 1 : opts.temperature;
+      if (want) out.thinking = { type: 'enabled', budget_tokens: opts.thinkingBudget || 5000 };
+      return out;
+    }
+    case 'adaptive_v1':
+      // 생략하면 adaptive 가 자동으로 켜져 출력 한도를 잠식한다 → 끄기를 명시(0701 이래 동작 그대로).
+      return { thinking: want ? { type: 'adaptive' } : { type: 'disabled' } };
+    case 'sonnet_5_5':
+      return { thinking: want ? { type: 'adaptive' } : { type: 'between_tools' } };
+    case 'opus_5_5':
+      // 생각을 끌 수 없다 — 원치 않으면 effort 를 낮춘다.
+      return want ? { thinking: { type: 'adaptive' } } : { thinking: { type: 'adaptive' }, output_config: { effort: 'low' } };
+    default:
+      return { thinking: { type: 'adaptive' } };
+  }
+}
+
+/**
+ * 출력 한도 여유 — 상한일 뿐 모델이 더 길게 쓰게 만들지 않는다(정상 출력은 그대로 · 잘림만 막는 무비용 여유 · 상한 16000 = 비스트리밍 HTTP 타임아웃 안전 한계).
+ *   - adaptive_v1 · sonnet_5_5: 1.5배(Sonnet 5 토크나이저 ~30%↑ 대응 · 0701 근거 그대로 · 5.5 는 같은 계열로 둔다).
+ *   - opus_5_5 · unknown: 생각을 끌 수 없어 생각 토큰이 같은 한도를 쓴다 → 2배와 +1024 중 큰 값.
+ *   - legacy: 그대로.
  */
 export function resolveMaxTokens(baseMaxTokens: number, modelName: string): number {
-  if (!isAdaptiveOnlyModel(modelName)) return baseMaxTokens;
-  return Math.min(Math.ceil(baseMaxTokens * 1.5), 16000);
+  const fam = claudeModelFamily(modelName);
+  if (fam === 'legacy') return baseMaxTokens;
+  if (fam === 'adaptive_v1' || fam === 'sonnet_5_5') return Math.min(Math.ceil(baseMaxTokens * 1.5), 16000);
+  return Math.min(Math.max(baseMaxTokens * 2, baseMaxTokens + 1024), 16000);
 }
 
 // ============================================================

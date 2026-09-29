@@ -25,7 +25,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { AI_MODELS, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
+import { AI_MODELS, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 
@@ -96,8 +96,8 @@ export async function submitBatch(input: {
   const modelId = modelKey === 'opus' ? AI_MODELS.opus : AI_MODELS.claude;
 
   // Anthropic Batch API — custom_id 단위 요청 구성
-  // Sonnet 5는 thinking 생략 시 adaptive 자동 ON → max_tokens 잠식 방지
-  const batchThinking: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
+  // 모델별 생각 끄기 형태(claudeRequestShape) — 생략하면 adaptive 자동 ON 으로 max_tokens 잠식
+  const batchThinking: any = claudeRequestShape(modelId);
   const requests = input.requests.map((r) => ({
     custom_id: r.customId.slice(0, 64),
     params: {
