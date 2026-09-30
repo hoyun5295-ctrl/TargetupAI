@@ -29,6 +29,11 @@
 
 ## 사고 이력
 
+### 2026-09-30 (66번 소스 동기화 — targetup 묶음이 한 번도 만들어진 적 없음)
+- **사례**: `Sync-Source66.ps1 -Project targetup` 이 "Unsafe source: .claude/worktrees/…" 로 멈췄다. CureOPS artifacts 에 bito-gateway 묶음은 여럿인데 targetup 묶음은 0개 — 9-27 `.claude/skills` 정션을 고친 뒤에도 정렬상 다음 차례에서 계속 막혀 있었다.
+- **Root cause**: 묶음은 `git ls-files --cached --others --exclude-standard`(추적 + 무시 안 된 미추적) 전부를 담고, 링크 · 하드링크 · 파일 아닌 항목이면 멈춘다. Claude Code 가 노트북에 만드는 `.claude` 하위(스킬 정션 · 에이전트 worktree)가 무시 목록에 없었다.
+- **대책**: `.gitignore` 에 `.claude/worktrees/` 추가 + 추적 제외. **막히면 한 건씩 고치지 말고 작업 폴더 전수(링크 · 하드링크 · 안쪽 .git)를 먼저 훑는다** — 0930 전수 = 스킬 정션 8 + worktree 2 외 0건.
+
 ### 2026-06-19 (싱크에이전트 INSTALL bat 한글 → 2008R2 cp949 파싱 깨짐 = 설치 실행 실패)
 - **사례**: 싱크에이전트 1053 수정 때 INSTALL bat에 한글 안내문(`chcp 65001` 동반)을 추가 → 2008R2(cp949 콘솔)에서 bat 명령들이 깨져 "X은(는) 명령 아님" 연발 + diagnose.txt 생성 실패 = 설치 자체가 실행 불가.
 - **Root cause**: cmd.exe는 배치파일을 현재 콘솔 코드페이지로 파싱한다. UTF-8 한글이 든 bat는 cp949 콘솔에서 명령 파싱이 깨진다(`chcp 65001`이 있어도). cp949 콘솔 실측 — 한글 bat = 명령 깨짐 / ASCII bat = 정상.
