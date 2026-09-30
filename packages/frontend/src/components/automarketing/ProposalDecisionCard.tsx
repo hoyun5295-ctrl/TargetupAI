@@ -137,21 +137,26 @@ export default function ProposalDecisionCard({
     onApprove({ variantIndex: effectiveIdx, body: effectiveBody, subject: editedSubject != null ? editedSubject : effectiveMsg?.subject });
   };
 
+  // ★ 2026-09-30 AI 존 보정: 대상·발송비를 오른쪽 끝에 떼어 두면 가운데가 빈다 → 기대 매출·ROI 옆 같은 칸(모바일 2×2)
   const hero = (
-    <div className="flex items-end gap-5 flex-wrap">
+    <div className="grid grid-cols-2 gap-y-3 sm:flex sm:items-end sm:gap-5">
       <div>
         <div className="text-[11px] text-slate-500 mb-1">기대 매출</div>
         <div className="text-[22px] md:text-[24px] font-bold text-slate-900 tabular-nums leading-none">{revenue != null ? won(revenue) : '—'}</div>
       </div>
       {roi != null && (
-        <div className="pl-5 border-l border-slate-200">
+        <div className="pl-4 sm:pl-5 border-l border-slate-200">
           <div className="text-[11px] text-slate-500 mb-1">ROI</div>
           <div className="text-[20px] md:text-[22px] font-bold text-emerald-700 tabular-nums leading-none">{roi.toFixed(1)}×</div>
         </div>
       )}
-      <div className="ml-auto text-right text-[11px] text-slate-500 leading-relaxed">
-        대상 <span className="text-slate-900 font-medium">{proposal.recipientCount.toLocaleString()}명</span><br />
-        발송비 <span className="text-slate-900 font-medium">{won(cost)}</span> · {channelName}
+      <div className={`${roi != null ? 'sm:pl-5 sm:border-l' : 'pl-4 sm:pl-5 border-l'} border-slate-200`}>
+        <div className="text-[11px] text-slate-500 mb-1">대상</div>
+        <div className="text-[17px] md:text-[18px] font-bold text-slate-900 tabular-nums leading-none">{proposal.recipientCount.toLocaleString()}명</div>
+      </div>
+      <div className={`${roi != null ? 'pl-4 sm:pl-5 border-l' : 'sm:pl-5 sm:border-l'} border-slate-200`}>
+        <div className="text-[11px] text-slate-500 mb-1">발송비 · {channelName}</div>
+        <div className="text-[17px] md:text-[18px] font-bold text-slate-900 tabular-nums leading-none">{won(cost)}</div>
       </div>
     </div>
   );
@@ -253,8 +258,8 @@ export default function ProposalDecisionCard({
         </button>
       )}
       {showToggle && (
-        <button onClick={onToggleExpand} className="ml-auto inline-flex items-center gap-1 text-slate-500 hover:text-slate-700 text-sm px-2 py-2">
-          상세 {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        <button onClick={onToggleExpand} aria-expanded={expanded} className="inline-flex items-center gap-1 border border-slate-200 hover:bg-slate-100 text-slate-600 text-sm px-3 py-2 rounded-lg transition-colors">
+          {expanded ? '상세 접기' : '상세 보기'} {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
       )}
     </div>

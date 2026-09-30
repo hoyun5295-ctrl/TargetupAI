@@ -408,7 +408,12 @@ export default function SnsPage() {
   return (
     <ZoneFrame
       moduleId="sns"
-      aux={enabled ? { label: '채널 관리', icon: Link2, onClick: () => document.getElementById('sns-channels')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : null}
+      kpis={enabled ? [
+        { label: '연결 계정', value: `${liveCount}개` },
+        { label: '확인할 것', value: `${attention?.total ?? 0}건`, tone: attention && attention.total > 0 ? 'amber' : undefined },
+      ] : undefined}
+      links={enabled ? [{ label: '채널 관리', icon: Link2, onClick: () => document.getElementById('sns-channels')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }] : []}
+      stamp={enabled ? { text: '다시 읽기', onRefresh: () => { void load(); setHistoryKey((k) => k + 1); } } : null}
       command={enabled ? {
         line: {
           value: snsLine,
@@ -421,9 +426,6 @@ export default function SnsPage() {
           disabled: !composerOn,
           busy: composerAiBusy,
         },
-        stats: [{ label: '연결 계정', value: liveCount }],
-        checks: attention && attention.total > 0 ? [{ label: `확인할 것 ${attention.total}` }] : [],
-        stamp: { text: '다시 읽기', onRefresh: () => { void load(); setHistoryKey((k) => k + 1); } },
       } : null}
     >
       <div>

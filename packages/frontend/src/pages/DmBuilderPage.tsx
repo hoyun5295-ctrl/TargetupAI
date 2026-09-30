@@ -58,14 +58,15 @@ import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
 // ★ 2026-09-27 만들기 개편 — 첫 화면(만들기 카드 · 다른 방법 접힘 · 카드칩 · 상세 창) · 수정 화면(DmEditScreen) · 보내기 창
 import '../styles/make.css';
-import { ArrowLeft, Link as LinkIcon, Layers, BookOpen, Smartphone, Sparkles, Package, FilePlus2, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Link as LinkIcon, Layers, BookOpen, Smartphone, Sparkles, Package, FilePlus2, Images, FolderOpen } from 'lucide-react';
+import { MK_LINE_EXTRA_BTN } from '../utils/make-ui';
 import ZoneFrame from '../components/zone/ZoneFrame';
 import { SurfaceToneProvider } from '../components/zone/surface-tone';
 import { zoneModule } from '../constants/ai-operator-modules';
 import DmEditScreen from '../components/make/DmEditScreen';
 import MakeSendModal from '../components/make/MakeSendModal';
 import DmDetailModal from '../components/make/DmDetailModal';
-import { OtherMethods, ListHead, DmChip, Meter, fmtDate } from '../components/make/HomeParts';
+import { ListHead, DmChip, Meter, fmtDate } from '../components/make/HomeParts';
 import { dmChipStatus, type ChipStatus } from '../utils/make-flow';
 
 const api = axios.create({ baseURL: '/api' });
@@ -159,7 +160,7 @@ export default function DmBuilderPage() {
   }, [mode, isDirty, isSavingGlobal, isPublishedGlobal]);
   const [confirmBackOpen, setConfirmBackOpen] = useState(false);
   // ★ 2026-09-27 만들기 개편 — 첫 화면 상태 · 보내기 창 · 발행(플래너)·자세한 발송 창 신호(TopBarWithBack 이 흐름을 그대로 가진다)
-  const [otherOpen, setOtherOpen] = useState(entry.other === '1');
+  // ★ 2026-09-30 AI 존 보정: 접힌 "다른 방법" 패널 폐지 — ?other=1(만들기 화면의 [한 줄로 자동 생성]·[이미지로 불러오기]) 은 명령 카드·그 밖에 줄이 처음부터 보이므로 펼칠 것이 없다
   const [listFilter, setListFilter] = useState<'all' | ChipStatus>('all');
   const [listQuery, setListQuery] = useState('');
   const [listSort, setListSort] = useState('updated');
@@ -876,7 +877,6 @@ export default function DmBuilderPage() {
   return (
     <ZoneFrame
       moduleId="dm"
-      aux={{ label: '단축 URL', icon: LinkIcon, onClick: () => setShortLinkOpen(true) }}
       command={{
         line: {
           value: naturalLanguage,
@@ -886,22 +886,53 @@ export default function DmBuilderPage() {
           verb: dmOneLine.verb,
           icon: Sparkles,
           busy: generating,
+          extra: (
+        <ImageToCopyButton
+          label="이미지로 불러오기"
+          onExtracted={(t) => setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+          onStructured={({ events, text }) => {
+            // ★ 기획전 스샷 → 행사별 [히어로+상품 카드] 즉시 조립 (AI 생성 없이 코드 매핑 — 크레딧 추가 0)
+            try {
+              const sections = buildDmSectionsFromEvents(events);
+              if (sections.length === 0) {
+                setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
+                return;
+              }
+              createNew({ title: deriveDmTitleFromEvents(events) });
+              applyAiGenerated(sections, undefined, text || '이미지 행사 추출', { layoutMode: 'scroll' });
+              save({ silent: true }).catch(() => {});
+              setMode('edit');
+              const sum = summarizeEvents(events);
+              setToast({ type: 'success', message: `행사 ${sum.events}건·상품 ${sum.products}개로 DM 초안을 만들었어요. 상품 이미지와 문구만 다듬어주세요.` });
+            } catch {
+              // 조립 실패 = 산문 폴백(기존 흐름 무손상)
+              setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
+            }
+          }}
+          disabled={generating}
+          className={MK_LINE_EXTRA_BTN}
+        />
+          ),
         },
-        stats: metricsLoading ? [{ label: '요약', value: '불러오는 중' }] : [
-          { label: '보낸 DM', value: ov.published_dm.toLocaleString() },
-          { label: '30일 열람', value: ov.total_views_30d.toLocaleString() },
-          { label: '30일 응답', value: ov.total_responses_30d.toLocaleString() },
-          { label: '평균 클릭률', value: `${ov.avg_ctr_30d}%` },
-        ],
-        alts: [
-          { label: '재료로 만들기', icon: Package, onClick: () => navigate('/quick-campaign?channel=dm'), disabled: generating },
-          { label: '블록으로 직접', icon: Layers, onClick: handleStartBlockBuild, disabled: generating },
-          { label: '카탈로그 DM', icon: BookOpen, onClick: () => navigate('/quick-campaign?channel=catalog'), disabled: generating },
+      }}
+      kpis={[
+        { label: '보낸 DM', value: metricsLoading ? '—' : ov.published_dm.toLocaleString() },
+        { label: '30일 열람', value: metricsLoading ? '—' : ov.total_views_30d.toLocaleString() },
+        { label: '30일 응답', value: metricsLoading ? '—' : ov.total_responses_30d.toLocaleString() },
+        { label: '평균 클릭률', value: metricsLoading ? '—' : `${ov.avg_ctr_30d}%` },
+      ]}
+      start={{
+        items: [
+          { icon: Package, title: '재료로 만들기', desc: '행사 주소·사진만 넣으면 완성', tint: 'from-amber-400 to-orange-500', featured: true, badge: '추천', onClick: () => navigate('/quick-campaign?channel=dm'), disabled: generating },
+          { icon: Layers, title: '블록으로 직접', desc: '블록을 고르면 필요한 것만 물어봐요', tint: 'from-violet-400 to-fuchsia-500', onClick: handleStartBlockBuild, disabled: generating },
+          { icon: BookOpen, title: '카탈로그 DM', desc: '쪽 이미지를 넘겨 보는 카탈로그', tint: 'from-sky-400 to-blue-500', onClick: () => navigate('/quick-campaign?channel=catalog'), disabled: generating },
+          { icon: Wand2, title: '질문 몇 개로', desc: '답하면 그 답으로 DM · 생성 5 + 오토설계 50', tint: 'from-emerald-400 to-teal-500', onClick: () => { if (!generating) setOneStepOpen(true); }, disabled: generating },
         ],
         more: [
-          { label: '질문 몇 개로 정확하게', icon: Wand2, onClick: () => { if (!generating) setOneStepOpen(true); } },
-          { label: '빈 화면에서 시작', icon: FilePlus2, onClick: handleCreateNew },
-          { label: '이미지 · 완성 이미지 · 저장 소재', icon: ChevronDown, onClick: () => setOtherOpen(true), divider: true },
+          { label: '빈 화면에서', icon: FilePlus2, onClick: handleCreateNew },
+          { label: uploadingImages ? '업로드 중' : '완성 이미지로', icon: Images, onClick: () => { if (!generating && !uploadingImages) { uploadModeRef.current = 'catalog'; completedImagesInputRef.current?.click(); } }, disabled: generating || uploadingImages },
+          { label: '저장 소재에서', icon: FolderOpen, onClick: () => { if (!generating && !uploadingImages) setLibPickerOpen(true); }, disabled: generating || uploadingImages },
+          { label: '단축 URL 만들기', icon: LinkIcon, onClick: () => setShortLinkOpen(true) },
         ],
       }}
       blocks={[
@@ -951,195 +982,41 @@ export default function DmBuilderPage() {
           )}
 
 
-        <OtherMethods open={otherOpen} onToggle={() => setOtherOpen((v) => !v)} summary="한 줄로 자동 생성 · 질문 몇 개로 · 이미지로 불러오기 · 저장 소재에서">
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-          <button type="button" onClick={handleCreateNew} className="text-[12px] text-slate-500 hover:text-slate-900 underline underline-offset-4">빈 화면에서 시작</button>
-        </div>
-        {/* 자연어 한 줄 입력 + 블록으로 만들기 + 완성 이미지 (★ 2026-09-16 블록 조립 전환) */}
-        <div style={{
-          background: '#ffffff',
-          border: '1px solid rgba(15,23,42,0.1)',
-          borderRadius: 16,
-          padding: 20,
-          marginBottom: 20,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <span style={{ fontSize: 18 }}>✨</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>어떻게 만들까요</span>
+        {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
+        {/* ★ 2026-09-06 S6 재료 입구 — AI 자동제작이 안 열린 회사만(열린 회사는 시작 카드 [재료로 만들기] = 같은 곳) · ★0930 접힌 패널에서 꺼냄 */}
+        {autoBuild !== true && (
+          <div className="mb-6">
+            <MaterialQuickPanel
+              channel="dm"
+              disabled={generating}
+              onToast={(message, type) => setToast({ type: type === 'error' ? 'error' : type === 'warning' ? 'info' : 'success', message })}
+              onDone={async ({ draftId }) => {
+                if (!draftId) { setToast({ type: 'error', message: '초안이 만들어지지 않았습니다. 다시 시도해주세요.' }); return; }
+                await useDmBuilderStore.getState().loadDm(draftId);
+                setMode('edit');
+                setToast({ type: 'success', message: '재료로 초안을 만들었습니다. 이미지와 문구만 다듬어 주세요.' });
+              }}
+            />
           </div>
-          {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-3" />}
-          {/* 좌: 한 줄 입력 + 자동 생성 · 우: 만드는 방법 스택 */}
-          <style>{`
-            .dm-hub-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
-            /* ★ 2026-09-16(3) 오른쪽 = 만드는 방법 스택. 마지막 카드가 남는 높이를 먹어 빈칸이 남지 않는다 */
-            .dm-hub-side { display: flex; flex-direction: column; gap: 10px; }
-            /* ★ 2026-08-21 한글은 기본 줄바꿈이 글자 단위라 "추 가"·"슬라 이드"·"불러 오기"처럼 낱말이 잘렸다.
-               keep-all = 띄어쓰기에서만 끊는다(줄 위치는 아래 타일이 <br/>로 직접 정한다). */
-            .dm-hub-side button { word-break: keep-all; }
-            @media (max-width: 767px) { .dm-hub-grid { grid-template-columns: 1fr; } }
-          `}</style>
-          <div className="dm-hub-grid">
-            {/* 좌 — 프롬프트 입력 */}
-            <div style={{ background: 'rgba(15,23,42,0.05)', border: '1px solid rgba(15,23,42,0.14)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(15,23,42,0.85)' }}>만들 내용을 한 줄로 적어주세요</div>
-              <textarea
-                value={naturalLanguage}
-                onChange={(e) => setNaturalLanguage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    if (naturalLanguage.trim() && !generating) setPendingGen({ prompt: naturalLanguage.trim(), desc: `"${naturalLanguage.trim()}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` });
-                  }
-                }}
-                disabled={generating}
-                placeholder={'예: "봄 신상 프로모션, 30대 여성, 추첨 이벤트"\nEnter = AI 자동 생성 · Shift+Enter = 줄바꿈'}
-                style={{
-                  flex: 1, minHeight: 128, padding: '12px 14px',
-                  background: '#ffffff',
-                  border: '1px solid rgba(15,23,42,0.15)',
-                  borderRadius: 10, fontSize: 14, lineHeight: 1.6, color: '#0F172A', outline: 'none',
-                  resize: 'none', opacity: generating ? 0.6 : 1,
-                }}
-              />
-              {/* ★ 2026-08-13 원스텝 — 자유 입력이 어려운 담당자를 위한 별도 경로(설계서 §5).
-                  기존 [자동 생성] 1클릭 흐름은 손대지 않는다 — 형제 버튼으로만 선다. */}
-              {/* ★ 2026-09-14 T6 AI 자동제작이 열린 회사에서는 접힘 줄 [더 정확하게 만들기]로 강등(설계서 §3-2 · 제거 0) */}
-              <button
-                onClick={() => { if (!generating) setOneStepOpen(true); }}
-                disabled={generating}
-                className={autoBuild === true
-                  ? 'w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] text-slate-500 text-[12px] py-1.5 hover:text-slate-900 hover:bg-white disabled:opacity-40 transition-colors'
-                  : 'w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-900 text-sm font-medium py-2.5 hover:bg-fuchsia-100 disabled:opacity-40 transition-colors'}
-              >
-                <Wand2 className="w-4 h-4" />
-                {autoBuild === true ? '더 정확하게 만들기(질문 몇 개)' : '질문 몇 개로 정확하게 만들기'}
-                <span className={autoBuild === true ? 'text-[11px] text-slate-400' : 'text-[11px] text-fuchsia-800'}>생성 5 + 오토설계 50</span>
-              </button>
-              <button
-                onClick={() => { if (naturalLanguage.trim() && !generating) { setPendingGen({ prompt: naturalLanguage.trim(), desc: `"${naturalLanguage.trim()}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` }); } }}
-                disabled={!naturalLanguage.trim() || generating}
-                style={{
-                  height: 46,
-                  background: naturalLanguage.trim() && !generating ? '#4F46E5' : 'rgba(15,23,42,0.05)',
-                  color: naturalLanguage.trim() && !generating ? '#fff' : '#64748B', border: 'none', borderRadius: 10,
-                  fontSize: 14, fontWeight: 700,
-                  cursor: naturalLanguage.trim() && !generating ? 'pointer' : 'not-allowed',
-                  opacity: naturalLanguage.trim() && !generating ? 1 : 0.4,
-                }}
-              >
-                {generating ? 'AI 생성 중...' : '✨ 자동 생성'}
-              </button>
-            </div>
+        )}
+        {/* 완성 이미지 파일 입력 · 저장 소재 픽커 = "그 밖에" 버튼이 연다(상시 마운트) */}
+        <input
+          ref={completedImagesInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => handleCompletedImagesSelected(e.target.files, uploadModeRef.current)}
+        />
 
-            {/* 우 — 만드는 방법(블록·사진 읽기·재료·완성 이미지). 왼쪽 입력 높이에 맞춰 채운다 */}
-            <div className="dm-hub-side">
-              {/* ★ 2026-09-16(2) 상단 카드띠가 이미 [블록으로 만들기]다 — 카드띠가 안 보이는 회사(기능 미개방)에서만 여기 둔다 */}
-              {autoBuild !== true && (
-                <button
-                  onClick={handleStartBlockBuild}
-                  disabled={generating}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', textAlign: 'left',
-                    background: '#EEF2FF',
-                    border: '1px solid #C7D2FE', borderRadius: 12,
-                    cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
-                  }}
-                >
-                  <span style={{ fontSize: 20, lineHeight: 1 }}>🧱</span>
-                  <span style={{ minWidth: 0 }}>
-                    <span style={{ display: 'block', fontSize: 13, fontWeight: 800, color: '#0F172A' }}>블록으로 만들기</span>
-                    <span style={{ display: 'block', fontSize: 11, color: 'rgba(15,23,42,0.6)', marginTop: 2 }}>고르면 필요한 것만 물어봐요</span>
-                  </span>
-                </button>
-              )}
-              <ImageToCopyButton
-                label="이미지로 불러오기"
-                onExtracted={(t) => setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
-                onStructured={({ events, text }) => {
-                  // ★ 기획전 스샷 → 행사별 [히어로+상품 카드] 즉시 조립 (AI 생성 없이 코드 매핑 — 크레딧 추가 0)
-                  try {
-                    const sections = buildDmSectionsFromEvents(events);
-                    if (sections.length === 0) {
-                      setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
-                      return;
-                    }
-                    createNew({ title: deriveDmTitleFromEvents(events) });
-                    applyAiGenerated(sections, undefined, text || '이미지 행사 추출', { layoutMode: 'scroll' });
-                    save({ silent: true }).catch(() => {});
-                    setMode('edit');
-                    const sum = summarizeEvents(events);
-                    setToast({ type: 'success', message: `행사 ${sum.events}건·상품 ${sum.products}개로 DM 초안을 만들었어요. 상품 이미지와 문구만 다듬어주세요.` });
-                  } catch {
-                    // 조립 실패 = 산문 폴백(기존 흐름 무손상)
-                    setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
-                  }
-                }}
-                disabled={generating}
-                className="w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-violet-300 bg-violet-50 text-violet-900 text-sm font-medium py-2.5 hover:bg-violet-100 disabled:opacity-40 transition-colors"
-              />
-              {/* ★ 2026-09-06 S6 재료 입구 — 이미지 몇 장 + 행사 내용 → 서버가 초안 DM 을 만들고(아웃리치 엔진) 그 id 를 그대로 연다 · 기존 두 버튼은 무접촉 */}
-              <MaterialQuickPanel
-                channel="dm"
-                disabled={generating}
-                onToast={(message, type) => setToast({ type: type === 'error' ? 'error' : type === 'warning' ? 'info' : 'success', message })}
-                onDone={async ({ draftId }) => {
-                  if (!draftId) { setToast({ type: 'error', message: '초안이 만들어지지 않았습니다. 다시 시도해주세요.' }); return; }
-                  await useDmBuilderStore.getState().loadDm(draftId);
-                  setMode('edit');
-                  setToast({ type: 'success', message: '재료로 초안을 만들었습니다. 이미지와 문구만 다듬어 주세요.' });
-                }}
-              />
-              {/* ★ 2026-09-16(3) 완성 이미지 = 남는 높이를 채운다(빈칸 0). 라이브러리는 이 카드 안 보조 입구 */}
-              <div
-                onClick={() => { if (!generating && !uploadingImages) { uploadModeRef.current = 'catalog'; completedImagesInputRef.current?.click(); } }}
-                title="완성된 이미지를 순서대로 올리면 휴대폰은 슬라이드, PC는 책처럼 두 쪽씩 펼쳐 보입니다. 편집기에서 끌 수 있어요"
-                style={{
-                  flex: 1, minHeight: 92, padding: '14px 16px',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, textAlign: 'center',
-                  background: 'rgba(15,23,42,0.04)', border: '1px dashed rgba(15,23,42,0.22)', borderRadius: 12,
-                  cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
-                }}
-              >
-                <span style={{ fontSize: 22, lineHeight: 1 }}>🖼️</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{uploadingImages ? '업로드 중...' : '완성 이미지로 만들기'}</span>
-                <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.55)', lineHeight: 1.5 }}>이미지 그대로 슬라이드 · PC는 책 펼침</span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); if (!generating && !uploadingImages) setLibPickerOpen(true); }}
-                  disabled={generating || uploadingImages}
-                  style={{
-                    marginTop: 2, background: 'transparent', border: 0, color: 'rgba(15,23,42,0.5)',
-                    fontSize: 11, cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', textDecoration: 'underline',
-                  }}
-                >
-                  저장 소재에서 고르기
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* ★ 2026-06-19: 완성 이미지(디자인 시안) 업로드 → 슬라이드 DM 자동 생성 (외주 완성본 대응)
-              2026-07-02(5): 진입 버튼은 우측 [완성 슬라이드] 타일로 통합 (가로/세로 선택지 폐지 — Harold 지시) */}
-          <input
-            ref={completedImagesInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            style={{ display: 'none' }}
-            onChange={(e) => handleCompletedImagesSelected(e.target.files, uploadModeRef.current)}
-          />
-
-          {/* ★ 2026-07-19 P4: 라이브러리 다중 선택 픽커 (시작 허브 타일) */}
-          <AssetLibraryPickerModal
-            open={libPickerOpen}
-            onClose={() => setLibPickerOpen(false)}
-            multiSelect
-            onPick={(a) => handleLibraryImagesSelected([a])}
-            onPickMany={handleLibraryImagesSelected}
-          />
-        </div>
-
-        </OtherMethods>
+        {/* ★ 2026-07-19 P4: 라이브러리 다중 선택 픽커 (시작 허브 타일) */}
+        <AssetLibraryPickerModal
+          open={libPickerOpen}
+          onClose={() => setLibPickerOpen(false)}
+          multiSelect
+          onPick={(a) => handleLibraryImagesSelected([a])}
+          onPickMany={handleLibraryImagesSelected}
+        />
 
         {/* ★ 2026-09-27 만들기 개편 — 내 DM = 요약 한 줄 + 상태 거름 칩 + 찾기·정렬 + 휴대폰 모양 카드칩(목업 마 ①) · 누르면 상세 창 · 초안 = 이어서 만들기 */}
         {(() => {

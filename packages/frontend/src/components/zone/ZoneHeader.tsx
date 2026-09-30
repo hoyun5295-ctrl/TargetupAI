@@ -1,19 +1,21 @@
 /**
- * ZoneHeader.tsx — AI 존 남색 머리 띠(★ 2026-09-30 AI 존 대개편 · 설계서 §3-2 ①)
+ * ZoneHeader.tsx — AI 존 남색 머리 띠(★ 2026-09-30 AI 존 대개편 · ★ 같은 날 보정: 빈자리 쓰기)
  *
- * 모든 메뉴가 같은 좌표·같은 순서: [← 부모로] [메뉴 타일] [제목 · 부제] … [보조 ≤1] [? 도움말] [⋯ 더보기]
- * 제목·타일·부제는 허브 카드와 **같은 객체**(`ai-operator-modules.ts`)를 읽는다 — 손으로 옮겨 적으면 갈라진다(0821 이후 실측).
- * 탭이 있는 메뉴는 띠 둘째 줄에 흰 글자 탭(주소가 탭을 소유 · `to` 가 있으면 링크).
- * 머리에 두지 않는 것: 새로고침(명령 카드 "다시 읽기" 한 곳) · 기간 칩 · NEW · 상태 뱃지 · 크레딧 칩.
+ * 왼쪽 = [← 부모로] [메뉴 타일] [제목 · 부제] [? 도움말] [⋯ 더보기]
+ * 오른쪽 = 탭이 있으면 **숫자 타일이 곧 탭**(고른 것 = 흰 판) · 없으면 **핵심 숫자 묶음**(누르는 것 아님 · 테두리 한 덩어리)
+ *          그 아래 한 줄 = 링크(자세히 분석 · 관리 등) + 기준 시각 · 다시 읽기(새로고침은 이 한 곳)
+ * Harold 0930: "공간이 많이 남는데 왜 저렇게 배치하지 · 탭이 누르는 거라고 보이겠냐" → 탭 글자 줄·외톨이 오른쪽 버튼을 없앴다.
+ * 제목·타일·부제는 허브 카드와 같은 객체(ai-operator-modules.ts). 머리 띠 빛 = 메뉴 색(zone-color.ts).
  *
- * ⛔ className prop 이 없다. 탈출구가 생기면 메뉴마다 다시 갈라진다(0821 → 0930 재분열의 경로).
+ * ⛔ className prop 없음 · 오른쪽 끝 외톨이 버튼 prop 없음(aux 폐지 — 입구는 시작 카드·링크·명령 카드로).
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, CircleHelp, Ellipsis, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, CircleHelp, Ellipsis, RotateCw, type LucideIcon } from 'lucide-react';
 import { zoneModule, type ZoneModuleId } from '../../constants/ai-operator-modules';
 import { goBackOr } from '../../lib/scroll-restoration';
+import { zoneBand } from './zone-color';
 
 export interface ZoneAction {
   label: string;
@@ -35,9 +37,27 @@ export interface ZoneMenuItem {
 export interface ZoneTab {
   id: string;
   label: string;
+  /** 숫자(있으면 큰 숫자 타일) */
   count?: number | string | null;
+  unit?: string;
+  /** 숫자 없는 타일의 아이콘 */
+  icon?: LucideIcon;
+  /** 상태 점(승인 대기 = amber · 실행 중 = emerald) */
+  dot?: 'amber' | 'emerald' | 'rose' | 'indigo';
   /** 주소가 있는 탭(다른 라우트) — 없으면 onSelect */
   to?: string;
+}
+
+export interface ZoneKpi {
+  label: string;
+  value: ReactNode;
+  tone?: 'emerald' | 'amber' | 'rose';
+}
+
+export interface ZoneStamp {
+  text: string;
+  onRefresh?: () => void;
+  loading?: boolean;
 }
 
 export interface ZoneHeaderProps {
@@ -48,16 +68,25 @@ export interface ZoneHeaderProps {
   backTo?: string;
   backLabel?: string;
   onBack?: () => void;
-  aux?: ZoneAction | null;
   onHelp?: (() => void) | null;
+  /** 제목 옆 ⋯ (자주 안 쓰는 설정) */
   more?: ZoneMenuItem[];
   tabs?: ZoneTab[];
   activeTab?: string;
   onSelectTab?: (id: string) => void;
+  /** 탭이 없을 때 오른쪽 = 핵심 숫자 */
+  kpis?: ZoneKpi[];
+  /** 오른쪽 아래 한 줄: 링크 + 기준 시각 */
+  links?: ZoneAction[];
+  stamp?: ZoneStamp | null;
   /** 제목 칸 대신 그릴 것(편집기 변형: 제목 인라인 수정 · 저장 상태) */
   titleSlot?: ReactNode;
   /** 오른쪽 끝(편집기 변형의 1차 동작 · 보내기) */
   endSlot?: ReactNode;
+  /** ZoneFrame 이 바탕을 한 덩어리로 칠할 때 false(머리 + 명령 카드 걸침 띠가 이어진다) */
+  paint?: boolean;
+  /** 전폭 화면(여정 지도 캔버스 등) — 머리 좌우 끝을 작업면과 같은 전폭에 맞춘다. ZoneFrame 이 width 로 정한다. */
+  full?: boolean;
 }
 
 const MENU_MIN_W = 200;
@@ -146,63 +175,127 @@ export function ZoneMoreMenu({ items, align = 'right', tone = 'dark' }: { items:
   );
 }
 
+const DOT = { amber: 'bg-amber-500', emerald: 'bg-emerald-400', rose: 'bg-rose-400', indigo: 'bg-indigo-400' } as const;
+const KPI_TONE = { emerald: 'text-emerald-300', amber: 'text-amber-300', rose: 'text-rose-300' } as const;
+const KPI_COLS: Record<number, string> = { 1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-2 sm:grid-cols-4', 5: 'grid-cols-3 sm:grid-cols-5' };
+const TAB_COLS: Record<number, string> = { 1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-2 sm:grid-cols-4' };
+
+// 타일 폭 = 개수에 맞춰 오른쪽 자리를 채운다(한쪽에 몰고 가운데를 비우지 않는다 · 빈 가운데 검사 기준)
+const TILE_W: Record<number, string> = { 1: 'sm:w-[240px]', 2: 'sm:w-[232px]', 3: 'sm:w-[184px]', 4: 'sm:w-[140px]' };
+
+function TabTile({ t, on, width, onSelect }: { t: ZoneTab; on: boolean; width: string; onSelect?: (id: string) => void }) {
+  const hasCount = t.count != null && t.count !== '';
+  const cls = `${width} h-[62px] rounded-xl px-4 text-left flex flex-col justify-center transition-colors ${on
+    ? 'bg-white text-slate-900 shadow-[0_8px_24px_-10px_rgba(0,0,0,0.5)]'
+    : 'bg-white/[0.07] hover:bg-white/[0.14] border border-white/15 text-white'}`;
+  const inner = hasCount ? (
+    <>
+      <span className={`flex items-center justify-between gap-2 text-[12.5px] font-semibold ${on ? 'text-slate-500' : 'text-slate-300'}`}>
+        <span className="truncate">{t.label}</span>
+        {t.dot && <span className={`w-2 h-2 rounded-full shrink-0 ${DOT[t.dot]}`} />}
+      </span>
+      <span className="block text-[22px] font-bold tabular-nums leading-tight mt-0.5">
+        {t.count}{t.unit && <span className={`text-[13px] font-semibold ml-0.5 ${on ? 'text-slate-500' : 'text-slate-400'}`}>{t.unit}</span>}
+      </span>
+    </>
+  ) : (
+    <span className="flex items-center gap-2 text-[14px] font-semibold">
+      {t.icon && <t.icon className={`w-[17px] h-[17px] shrink-0 ${on ? 'text-slate-700' : 'text-white/75'}`} />}
+      <span className="truncate">{t.label}</span>
+    </span>
+  );
+  return t.to ? (
+    <Link to={t.to} role="tab" aria-selected={on} aria-current={on ? 'page' : undefined} className={cls} data-zone="tab">{inner}</Link>
+  ) : (
+    <button type="button" role="tab" aria-selected={on} onClick={() => onSelect?.(t.id)} className={cls} data-zone="tab">{inner}</button>
+  );
+}
+
 export default function ZoneHeader({
-  moduleId, sub, backTo = '/ai-operator', backLabel, onBack, aux, onHelp, more = [], tabs, activeTab, onSelectTab, titleSlot, endSlot,
+  moduleId, sub, backTo = '/ai-operator', backLabel, onBack, onHelp, more = [], tabs, activeTab, onSelectTab,
+  kpis, links = [], stamp, titleSlot, endSlot, paint = true, full = false,
 }: ZoneHeaderProps) {
+  const box = full ? 'w-full px-4 md:px-6' : 'max-w-[1240px] mx-auto px-4 md:px-6';
   const navigate = useNavigate();
   const m = zoneModule(moduleId);
   const Icon = m.icon;
   const back = onBack ?? (() => goBackOr(navigate, backTo));
-  return (
-    <header className="sticky top-0 z-30 bg-slate-900 text-white bg-[radial-gradient(360px_120px_at_8%_0%,rgba(99,102,241,0.20),transparent_70%)]" data-zone="head">
-      <div className="max-w-[1240px] mx-auto px-4 md:px-6 h-14 md:h-16 flex items-center gap-2 md:gap-3">
-        <button type="button" onClick={back} className={MENU_BTN} aria-label={backLabel ?? (backTo === '/ai-operator' ? 'AI Operator로' : '이전 화면으로')} data-zone="back">
-          <ArrowLeft className="w-[18px] h-[18px]" />
+  const editor = !!(titleSlot || endSlot);
+  const hasTabs = !!tabs && tabs.length > 0;
+  const hasKpis = !hasTabs && !!kpis && kpis.length > 0;
+  const hasFoot = links.length > 0 || !!stamp;
+  const rightSlot = hasTabs || hasKpis;
+  const foot = (
+    <>
+      {links.map((l) => (
+        <button key={l.label} type="button" onClick={l.onClick} disabled={l.disabled} className="inline-flex items-center gap-1 text-slate-300 hover:text-white hover:underline underline-offset-2 disabled:opacity-40">
+          {l.icon && <l.icon className="w-[13px] h-[13px]" />}{l.label}
         </button>
-        <span className={`w-8 h-8 md:w-10 md:h-10 rounded-[10px] bg-gradient-to-br ${m.gradient} flex items-center justify-center shadow-md shrink-0`} data-zone="tile">
-          <Icon className="w-4 h-4 md:w-5 md:h-5 text-white" />
-        </span>
-        {titleSlot ?? (
-          <div className="min-w-0 ml-0.5" data-zone="title">
-            <h1 className="text-[16px] md:text-[18px] font-semibold tracking-[-0.02em] leading-tight truncate">
-              {m.label}
-              {sub && <span className="font-normal text-white/60"> <span className="text-white/40">›</span> {sub}</span>}
-            </h1>
-            <p className="hidden md:block text-[13px] text-slate-400 leading-tight mt-0.5 truncate">{m.description}</p>
-          </div>
-        )}
-        <div className="ml-auto flex items-center gap-1 shrink-0">
-          {aux && (
-            <button type="button" onClick={aux.onClick} disabled={aux.disabled} className="hidden md:inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] text-white/85 hover:bg-white/10 disabled:opacity-40 transition-colors">
-              {aux.icon && <aux.icon className="w-[15px] h-[15px]" />}
-              {aux.label}
-            </button>
+      ))}
+      {stamp && (
+        <button type="button" onClick={stamp.onRefresh} disabled={!stamp.onRefresh || stamp.loading} className="inline-flex items-center gap-1 text-slate-400 hover:text-white disabled:cursor-default whitespace-nowrap" aria-label="다시 읽기">
+          <RotateCw className={`w-3 h-3 ${stamp.loading ? 'animate-spin' : ''}`} />{stamp.text}
+        </button>
+      )}
+    </>
+  );
+  return (
+    <header
+      className={`${editor ? 'sticky top-0 z-30' : 'relative'} text-white`}
+      style={paint || editor ? { background: zoneBand(moduleId) } : undefined}
+      data-zone="head"
+    >
+      <div className={editor
+        ? `${box} h-14 md:h-16 flex items-center gap-2 md:gap-3`
+        : `${box} pt-4 md:pt-5 pb-4 flex flex-wrap items-center gap-x-4 gap-y-3`}
+      >
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+          <button type="button" onClick={back} className={MENU_BTN} aria-label={backLabel ?? (backTo === '/ai-operator' ? 'AI Operator로' : '이전 화면으로')} data-zone="back">
+            <ArrowLeft className="w-[18px] h-[18px]" />
+          </button>
+          <span className={`${editor ? 'w-8 h-8 md:w-10 md:h-10' : 'w-10 h-10 md:w-11 md:h-11'} rounded-xl bg-gradient-to-br ${m.gradient} flex items-center justify-center shadow-md shrink-0`} data-zone="tile">
+            <Icon className="w-5 h-5 text-white" />
+          </span>
+          {titleSlot ?? (
+            <div className="min-w-0 ml-0.5" data-zone="title">
+              <h1 className="text-[17px] md:text-[19px] font-semibold tracking-[-0.02em] leading-tight truncate">
+                {m.label}
+                {sub && <span className="font-normal text-white/60"> <span className="text-white/40">›</span> {sub}</span>}
+              </h1>
+              <p className="text-[12.5px] md:text-[13px] text-slate-400 leading-tight mt-0.5 truncate">{m.description}</p>
+              {/* 오른쪽 자리(숫자·탭)가 없는 화면 = 기준 시각·링크를 제목 아래에(오른쪽 끝에 혼자 떠 있지 않게) */}
+              {!editor && !rightSlot && hasFoot && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] mt-1.5" data-zone="band-foot">{foot}</div>}
+            </div>
           )}
           {onHelp && (
             <button type="button" onClick={onHelp} className={MENU_BTN} aria-label="도움말">
               <CircleHelp className="w-[17px] h-[17px]" />
             </button>
           )}
-          {/* 보조 동작은 넓은 화면에서 글자 버튼, 좁은 화면에서는 ⋯ 안으로(사라지지 않게) */}
-          <div className="hidden md:block"><ZoneMoreMenu items={more} /></div>
-          <div className="md:hidden"><ZoneMoreMenu items={aux ? [{ label: aux.label, icon: aux.icon, onClick: aux.onClick, disabled: aux.disabled }, ...more.map((it, i) => (i === 0 ? { ...it, divider: true } : it))] : more} /></div>
-          {endSlot}
+          <ZoneMoreMenu items={more} align="left" />
         </div>
+        {!editor && rightSlot && (
+          <div className="ml-auto w-full sm:w-auto flex flex-col items-stretch sm:items-end gap-1.5" data-zone="band-right">
+            {hasTabs && (
+              <nav role="tablist" aria-label={`${m.label} 보기`} className={`grid gap-2 ${TAB_COLS[Math.min(tabs!.length, 4)]}`} data-zone="tabs">
+                {tabs!.map((t) => <TabTile key={t.id} t={t} on={t.id === activeTab} width={TILE_W[Math.min(tabs!.length, 4)]} onSelect={onSelectTab} />)}
+              </nav>
+            )}
+            {hasKpis && (
+              <div className={`grid ${KPI_COLS[Math.min(kpis!.length, 5)]} rounded-xl bg-white/[0.06] border border-white/10 divide-x divide-white/10`} data-zone="kpi">
+                {kpis!.map((k) => (
+                  <div key={k.label} className={`px-4 py-2 min-w-0 ${kpis!.length <= 2 ? 'sm:min-w-[200px]' : kpis!.length === 3 ? 'sm:min-w-[160px]' : 'sm:min-w-[128px]'}`}>
+                    <div className="text-[12px] text-slate-400 whitespace-nowrap truncate">{k.label}</div>
+                    <div className={`text-[20px] font-bold tabular-nums leading-tight truncate ${k.tone ? KPI_TONE[k.tone] : 'text-white'}`}>{k.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {hasFoot && <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[12px]" data-zone="band-foot">{foot}</div>}
+          </div>
+        )}
+        {endSlot && <div className="ml-auto flex items-center gap-1 shrink-0">{endSlot}</div>}
       </div>
-      {tabs && tabs.length > 0 && (
-        <nav className="max-w-[1240px] mx-auto px-4 md:px-6 h-10 flex items-end gap-5 overflow-x-auto" data-zone="tabs" aria-label={`${m.label} 보기`}>
-          {tabs.map((t) => {
-            const on = t.id === activeTab;
-            const cls = `h-10 inline-flex items-center gap-1 text-[13.5px] whitespace-nowrap transition-colors ${on ? 'text-white font-semibold shadow-[inset_0_-2px_0_#fff]' : 'text-white/55 hover:text-white'}`;
-            const count = t.count != null && t.count !== '' ? <span className={`text-[12px] tabular-nums ${on ? 'text-white/70' : 'text-white/40'}`}>{t.count}</span> : null;
-            return t.to ? (
-              <Link key={t.id} to={t.to} className={cls} aria-current={on ? 'page' : undefined}>{t.label}{count}</Link>
-            ) : (
-              <button key={t.id} type="button" onClick={() => onSelectTab?.(t.id)} className={cls} aria-current={on ? 'page' : undefined}>{t.label}{count}</button>
-            );
-          })}
-        </nav>
-      )}
     </header>
   );
 }

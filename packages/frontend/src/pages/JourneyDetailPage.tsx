@@ -1,5 +1,6 @@
 import { Workflow } from 'lucide-react';
 import ZoneFrame from '../components/zone/ZoneFrame';
+import { journeyItemTabs } from '../components/zone/zone-tabs';
 import StatusPill from '../components/console/StatusPill';
 import { JOURNEY_STATUS_LABEL } from '../utils/journey-row-actions';
 /**
@@ -158,10 +159,11 @@ export default function JourneyDetailPage() {
   return (
     <ZoneFrame
       moduleId="journeys"
-      sub={`${journey?.name || '여정'} · 진입 고객`}
+      sub={journey?.name || '여정'}
       backTo="/ai-journeys"
       backLabel="여정 목록으로"
-      aux={{ label: '성과', icon: BarChart3, onClick: () => navigate(`/ai-journeys/${id}/stats`) }}
+      tabs={journeyItemTabs(id)}
+      activeTab="entrants"
     >
       <div>
         {journey?.status && (

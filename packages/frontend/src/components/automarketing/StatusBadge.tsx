@@ -20,5 +20,5 @@ const MAP: Record<string, { label: string; cls: string }> = {
 
 export default function StatusBadge({ status }: { status: string }) {
   const e = MAP[status] || { label: status, cls: 'bg-slate-100 text-slate-600' };
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${e.cls}`}>{e.label}</span>;
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap shrink-0 ${e.cls}`}>{e.label}</span>;
 }

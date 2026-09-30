@@ -1025,16 +1025,17 @@ export default function CdpSettingsPage() {
   return (
     <ZoneFrame
       moduleId="cdp"
-      command={{
-        stats: showDashboard ? [
-          { label: '데이터 수신 중', value: integrationStatus.summary.receiving },
-          { label: '준비 중', value: integrationStatus.summary.preparing },
-          { label: '조치 필요', value: integrationStatus.summary.action },
-        ] : [{ label: '연동', value: isConnected ? '됨' : '안 됨' }],
-        primary: !cdpLocked ? { label: '몰 연결하기', icon: ZPlus, tone: 'indigo', onClick: () => document.getElementById('cdp-malls')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined,
-        alts: !cdpLocked && hasCdpData ? [{ label: '데이터 분석 · AI 진단', icon: Activity, onClick: () => setActiveModal('analytics') }] : undefined,
-        stamp: { text: '다시 읽기', onRefresh: loadAll, loading },
-      }}
+      kpis={showDashboard ? [
+        { label: '데이터 수신 중', value: integrationStatus.summary.receiving, tone: 'emerald' },
+        { label: '준비 중', value: integrationStatus.summary.preparing },
+        { label: '조치 필요', value: integrationStatus.summary.action, tone: integrationStatus.summary.action > 0 ? 'rose' : undefined },
+      ] : [{ label: '연동', value: isConnected ? '됨' : '안 됨' }]}
+      stamp={{ text: '다시 읽기', onRefresh: loadAll, loading }}
+      command={!cdpLocked ? {
+        note: '자사몰 주문·회원·상품을 자동으로 받아 타겟·성과·인앱에 씁니다',
+        actions: hasCdpData ? [{ label: '데이터 분석 · AI 진단', icon: Activity, onClick: () => setActiveModal('analytics') }] : undefined,
+        primary: { label: '몰 연결하기', icon: ZPlus, tone: 'indigo', onClick: () => document.getElementById('cdp-malls')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
+      } : null}
       blocks={error ? [{ text: error }] : []}
     >
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />

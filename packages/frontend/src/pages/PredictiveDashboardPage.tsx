@@ -485,15 +485,15 @@ export default function PredictiveDashboardPage() {
       tabs={AI_MEMORY_TABS}
       activeTab="predictive"
       command={{
-        stats: [
+        facts: [
           { label: '분석 고객', value: summary.totalCustomersInPredictions.toLocaleString() },
           { label: '분석', value: settingsMigrationPending ? 'DB 준비 중' : '매일 1회 자동' },
         ],
+        note: <span><span className="text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-semibold border border-violet-200 mr-1.5">실험실</span>위험·기회 고객을 AI가 먼저 찾아 제안합니다{!settingsMigrationPending && ' · 연동 시 DB 규모 기준 자동 차감 · 미연동 0'}</span>,
         primary: { label: recomputing ? '계산 중' : '지금 재계산', icon: RefreshCw, tone: 'indigo', onClick: handleRecompute, busy: recomputing },
       }}
     >
       <div>
-        <div className="mb-3 inline-flex items-center gap-1.5 text-[12px] text-slate-500"><span className="text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-medium border border-violet-200">실험실</span>위험·기회 고객을 AI가 먼저 찾아 제안합니다{!settingsMigrationPending && ' · 연동 시 DB 규모 기준 자동 차감 · 미연동 0'}</div>
         {/* 블록2: 안내 1줄 — cold start면 추정 안내, 학습 후면 한 줄 요약 */}
         <div className={`mb-5 px-4 py-3 rounded-xl border flex items-start gap-2.5 text-xs leading-relaxed ${summary.isAllColdStart
           ? 'bg-amber-50 border-amber-200 text-amber-900'

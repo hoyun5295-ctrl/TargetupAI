@@ -138,25 +138,36 @@ describe('AI 존 표면 불변식', () => {
 
   // ★ Codex R1: 이메일 [라이브러리에서 시작]이 접힌 "다른 방법" 패널 안의 창을 열려다 아무 일도 없었다.
   //   명령 카드·머리로 옮긴 입구(onClick/onAction 의 set 함수)가 여는 상태는 접힌 패널(OtherMethods) 밖에서 소비돼야 한다.
-  it('명령 카드·머리 입구가 여는 창은 접힌 패널 밖에 있다', () => {
-    const offenders: string[] = [];
-    for (const rel of ZONE_ROOTS) {
-      const src = code(rel);
-      const setters = new Set<string>();
-      for (const m of src.matchAll(/<ZoneFrame\b/g)) {
-        const block = src.slice(m.index!, m.index! + 7000);
-        for (const s of block.matchAll(/on(?:Click|Action):\s*\(\)\s*=>\s*\{?\s*(set[A-Z]\w*)\(/g)) setters.add(s[1]);
-      }
-      for (const st of setters) {
-        const v = st[3].toLowerCase() + st.slice(4);
-        for (const u of src.matchAll(new RegExp(`open=\\{\\s*!?!?${v}\\b|\\{\\s*${v}\\s*&&`, 'g'))) {
-          const pre = src.slice(0, u.index!);
-          if (pre.slice(pre.lastIndexOf('<')).startsWith('<OtherMethods')) continue; // 패널 자신을 여는 입구(설계대로)
-          if ((pre.match(/<OtherMethods\b/g) || []).length > (pre.match(/<\/OtherMethods>/g) || []).length) offenders.push(`${rel} :: ${st} → 접힌 패널 안`);
-        }
-      }
+  // ★ 2026-10-01 보정 v3(Harold "입구가 칩으로 작게 있으니 안 보인다 · 같은 줄에 있어야 · 공간이 남는데 한쪽에 몰았다")
+  it('보정 v3: 입구 = 시작 카드 · 접힌 입구 패널·외톨이 버튼 0 · 명령 카드 아랫줄 0', () => {
+    // 옛 큰 입구 자리 = 시작 카드(ZoneFrame start). 접힌 "다른 방법" 패널(OtherMethods)은 없앴다(창을 여는 입구가 접힌 패널 안에 숨지 않는다).
+    for (const rel of ['pages/ContinuousOperatorPage.tsx', 'pages/DmBuilderPage.tsx', 'pages/EmailCampaignsPage.tsx', 'pages/JourneysPage.tsx', 'pages/JourneyMapPage.tsx', 'pages/InAppMessagesPage.tsx', 'pages/QuickCampaignPage.tsx']) {
+      expect(code(rel), rel).toMatch(/\bstart=\{/);
     }
-    expect(offenders).toEqual([]);
+    for (const rel of ZONE_ROOTS) {
+      expect(code(rel), rel).not.toMatch(/<OtherMethods\b|\baux=\{/);
+    }
+    expect(code('components/make/HomeParts.tsx')).not.toMatch(/export function OtherMethods\b/);
+    // 명령 카드 = 한 줄 입력 또는 [앞머리·숫자·설명 … 보조 ≤2 · 1차]. 아랫줄(stats·checks·stamp) 없음 — 숫자는 머리 오른쪽, 기준 시각은 머리 아래.
+    expect(code('components/zone/ZoneCommand.tsx')).not.toMatch(/\b(stats|checks|stamp|alts|more)\?:/);
+  });
+
+  it('보정 v3: 좌우 끝 한 줄 — 머리 · 명령 카드 · 확정 바가 화면 폭(wrap)을 같이 쓴다', () => {
+    const f = code('components/zone/ZoneFrame.tsx');
+    expect(f).toMatch(/<ZoneHeader \{\.\.\.head\} paint=\{false\} full=\{width === 'full'\} \/>/);
+    // 1240 상자 선언은 wrap 한 곳뿐(명령 카드·확정 바가 따로 1240 을 박으면 전폭 화면에서 끝이 어긋난다)
+    expect((f.match(/max-w-\[1240px\]/g) || []).length).toBe(1);
+    expect(f).toMatch(/\$\{wrap\} -mt-7 relative z-10/);
+    expect(f).toMatch(/\$\{wrap\} min-h-16 py-2\.5/);
+  });
+
+  it('보정 v3: 목록 걸러보기 = 한 덩어리 전환 버튼(ZoneSegmented) · 숫자 띠 7~8칸 = 4칸 2줄(금액 잘림 0)', () => {
+    for (const rel of ['components/make/HomeParts.tsx', 'pages/JourneysPage.tsx', 'pages/JourneyMapPage.tsx', 'pages/ContinuousOperatorPage.tsx', 'pages/InAppMessagesPage.tsx', 'pages/PerformancePage.tsx']) {
+      expect(code(rel), rel).toMatch(/<ZoneSegmented\b/);
+    }
+    const strip = code('components/zone/ZoneStatStrip.tsx');
+    expect(strip).toMatch(/7: 'grid-cols-2 md:grid-cols-4', 8: 'grid-cols-2 md:grid-cols-4'/);
+    expect(strip).not.toMatch(/lg:grid-cols-[78]\b/);
   });
 
   it('존 차트는 흰 격자·축을 쓰지 않는다', () => {

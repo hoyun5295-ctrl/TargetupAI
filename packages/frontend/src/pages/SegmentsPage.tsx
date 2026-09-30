@@ -258,11 +258,11 @@ export default function SegmentsPage() {
       moduleId="ai-memory"
       tabs={AI_MEMORY_TABS}
       activeTab="segments"
+      stamp={{ text: '다시 읽기', onRefresh: loadSegments, loading }}
       command={{
-        stats: [{ label: '저장 세그먼트', value: loading ? '—' : `${segments.length.toLocaleString()}개` }],
-        checks: [{ label: '자연어 → 검증된 필터 · 매칭 수 즉시 확인 · 발송 흐름에서 재활용' }],
+        facts: [{ label: '저장 세그먼트', value: loading ? '—' : `${segments.length.toLocaleString()}개` }],
+        note: '자연어 → 검증된 필터 · 매칭 수 즉시 확인 · 발송 흐름에서 재활용',
         primary: { label: '신규 세그먼트', icon: Plus, tone: 'indigo', onClick: () => { setCreateOpen(true); setNlInput(''); setNewName(''); setNlResult(null); setNlError(null); } },
-        stamp: { text: '다시 읽기', onRefresh: loadSegments, loading },
       }}
     >
       <div className="space-y-4">

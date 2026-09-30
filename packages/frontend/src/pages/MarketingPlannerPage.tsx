@@ -432,16 +432,36 @@ export default function MarketingPlannerPage() {
   return (
     <ZoneFrame
       moduleId="planner"
-      aux={{ label: '1년 설계', icon: CalendarRange, onClick: () => navigate('/marketing-calendar') }}
+      kpis={[
+        { label: `${Number(month.slice(5))}월 행사`, value: `${events.length}건` },
+        { label: '실행 예정', value: `${schedule.length}건` },
+        { label: '예상 제작', value: monthEstTotal > 0 ? `${monthEstTotal.toLocaleString()}크레딧` : '—' },
+      ]}
+      links={[{ label: '1년 설계 보기', icon: CalendarRange, onClick: () => navigate('/marketing-calendar') }]}
+      stamp={{ text: '다시 읽기', onRefresh: () => loadEvents(month), loading: false }}
       command={{
-        stats: [
-          { label: `${Number(month.slice(5))}월 행사`, value: `${events.length}건` },
-          { label: '실행 예정', value: schedule.length },
-          ...(monthEstTotal > 0 ? [{ label: '예상 제작', value: `${monthEstTotal.toLocaleString()}크레딧` }] : []),
-        ],
-        checks: dmTodo > 0 ? [{ label: `DM 완성 필요 ${dmTodo}` }] : [],
+        lead: (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-[3px]">
+              <button onClick={() => setMonth((m) => shiftMonth(m, -1))} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center" aria-label="이전 달">
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="px-2 text-[14px] font-semibold tabular-nums">{month.replace('-', '년 ')}월</span>
+              <button onClick={() => setMonth((m) => shiftMonth(m, 1))} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center" aria-label="다음 달">
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+            {month !== todayMonth() && (
+              <button onClick={() => setMonth(todayMonth())} className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-[13px] font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
+                이번 달
+              </button>
+            )}
+          </div>
+        ),
+        note: dmTodo > 0
+          ? <span className="text-amber-800">DM 완성이 필요한 발송 {dmTodo}건 · 실행 예정에서 [DM 완성하기]</span>
+          : '행사를 담으면 DM·문자·이메일 제작과 발송 일정이 이 달에 채워집니다',
         primary: { label: '행사 담기', icon: Plus, onClick: () => openCreate(), tone: 'indigo' },
-        stamp: { text: '다시 읽기', onRefresh: () => loadEvents(month), loading: false },
       }}
       blocks={migrationPending ? [{ text: '플래너 준비 작업이 진행 중입니다. 잠시 후 새로고침해 주세요.' }] : []}
       emphasis={events.length > 0 && !migrationPending ? (
@@ -469,26 +489,8 @@ export default function MarketingPlannerPage() {
       ) : null}
     >
       <div className="space-y-4">
-        {/* ── 월 내비게이션 + 월 요약 ──────────────────────────────── */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
-            <button onClick={() => setMonth((m) => shiftMonth(m, -1))} className="p-2 rounded-lg hover:bg-slate-100" aria-label="이전 달">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="px-2 text-sm font-semibold tabular-nums">{month.replace('-', '년 ')}월</span>
-            <button onClick={() => setMonth((m) => shiftMonth(m, 1))} className="p-2 rounded-lg hover:bg-slate-100" aria-label="다음 달">
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-          {month !== todayMonth() && (
-            <button onClick={() => setMonth(todayMonth())} className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-100 transition-colors">
-              이번 달
-            </button>
-          )}
-        </div>
-
         {/* ── 좌: 캘린더 / 우: 실행 예정 ───────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           {/* 캘린더 */}
           <div className="lg:col-span-7 rounded-2xl border border-slate-200 bg-white overflow-hidden">
             <div className="grid grid-cols-7 border-b border-slate-200 text-center text-[11px] font-medium">
@@ -551,7 +553,7 @@ export default function MarketingPlannerPage() {
           </div>
 
           {/* 실행 예정 패널 */}
-          <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white">
+          <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white flex flex-col lg:h-0 lg:min-h-full">
             <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
               <h2 className="text-sm font-semibold">실행 예정</h2>
               <span className="text-[11px] text-slate-400">{schedule.length}건</span>
@@ -568,7 +570,7 @@ export default function MarketingPlannerPage() {
                 <p className="text-xs text-slate-400 mt-1">행사를 담으면 채널별 발송 일정이 여기에 순서대로 섭니다</p>
               </div>
             ) : (
-              <div className="divide-y divide-slate-100 max-h-[720px] overflow-y-auto">
+              <div className="divide-y divide-slate-100 max-h-[720px] lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto">
                 {schedule.map(({ ev, tp }, i) => {
                   const st = TP_STATUS[String(tp.status || 'planned')] || TP_STATUS.planned;
                   const arrived = !!tp.scheduledOn && tp.scheduledOn <= today;

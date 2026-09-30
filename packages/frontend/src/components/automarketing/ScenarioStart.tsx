@@ -33,26 +33,31 @@ const SCENARIOS: Array<ScenarioPick & { icon: LucideIcon; desc: string }> = [
   { key: 'vip_day', icon: Star, name: 'VIP 데이 (매월)', desc: '매월 정한 날, VIP에게 감사 안내', objective: 'VIP 등급 고객에게 이번 달 VIP 감사 안내', schedule: 'monthly', scheduleDayOfMonth: 1, segmentKey: 'vip' },
 ];
 
+// ★ 2026-09-30 AI 존 보정(Harold "너무 단조롭다"): 시나리오마다 다른 색 타일(글자 그대로 · Tailwind 가 읽는다)
+const SCENARIO_TINTS = ['from-amber-400 to-orange-500', 'from-indigo-400 to-violet-500', 'from-emerald-400 to-teal-500', 'from-sky-400 to-blue-500', 'from-orange-400 to-pink-500', 'from-slate-400 to-slate-600', 'from-fuchsia-400 to-purple-500', 'from-rose-400 to-pink-500', 'from-cyan-400 to-sky-500'];
+
 export default function ScenarioStart({ onSelect }: { onSelect: (s: ScenarioPick) => void }) {
   return (
     <div>
       <h2 className="text-lg md:text-xl font-semibold text-slate-900">검증된 시나리오로 바로 시작</h2>
       <p className="text-[13px] text-slate-500 mt-1.5 mb-4">고르면 타겟·문안·발송 시각이 미리 채워집니다. 가동 전 한 번 확인합니다.</p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {SCENARIOS.map((s) => {
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {SCENARIOS.map((s, i) => {
           const Icon = s.icon;
           return (
             <button
               key={s.key}
               onClick={() => onSelect({ key: s.key, name: s.name, objective: s.objective, schedule: s.schedule, scheduleDayOfMonth: s.scheduleDayOfMonth, segmentKey: s.segmentKey, segmentParams: s.segmentParams })}
-              className="text-left bg-white hover:bg-slate-100 border border-slate-200 hover:border-indigo-200 rounded-xl p-4 min-h-[118px] transition-colors"
+              className="group text-left bg-white border border-slate-200 hover:border-slate-300 rounded-2xl p-5 flex items-start gap-4 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_32px_-16px_rgba(15,23,42,0.25)] hover:-translate-y-0.5 transition-all duration-200"
             >
-              <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+              <span className={`w-11 h-11 rounded-xl bg-gradient-to-br ${SCENARIO_TINTS[i % SCENARIO_TINTS.length]} text-white flex items-center justify-center shrink-0 shadow-md`}>
                 <Icon className="w-5 h-5" />
-              </div>
-              <div className="mt-3 text-sm font-medium text-slate-900">{s.name}</div>
-              <div className="mt-1 text-xs text-slate-500 leading-relaxed">{s.desc}</div>
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[15px] font-semibold text-slate-900">{s.name}</span>
+                <span className="block mt-1 text-[12.5px] text-slate-500 leading-snug">{s.desc}</span>
+              </span>
             </button>
           );
         })}

@@ -86,15 +86,12 @@ export default function AiBatchesPage() {
     <ZoneFrame
       moduleId="ai-memory"
       sub="AI Batch"
-      command={{
-        stats: !loading && batches.length > 0 ? [
-          { label: '누적 batch', value: `${batches.length}건` },
-          { label: '누적 요청', value: `${totalRequests.toLocaleString()}건` },
-          { label: '성공률', value: `${totalRequests > 0 ? ((totalSucceeded / totalRequests) * 100).toFixed(1) : 0}%` },
-        ] : [{ label: '누적 batch', value: loading ? '—' : '0건' }],
-        checks: [{ label: '대량 AI 호출 50% 비용 절감' }],
-        stamp: { text: '다시 읽기', onRefresh: load, loading },
-      }}
+      kpis={[
+        { label: '누적 batch', value: loading ? '—' : `${batches.length}건` },
+        { label: '누적 요청', value: loading ? '—' : `${totalRequests.toLocaleString()}건` },
+        { label: '성공률', value: loading ? '—' : `${totalRequests > 0 ? ((totalSucceeded / totalRequests) * 100).toFixed(1) : 0}%`, tone: 'emerald' },
+      ]}
+      stamp={{ text: '다시 읽기', onRefresh: load, loading }}
     >
       <div className="space-y-4">
 <div className="mb-3 inline-flex items-center gap-1.5 text-[12px] text-slate-500"><span className="text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-medium border border-violet-200">실험실</span>AI 자동 마케팅 실행 시 자동으로 batch 처리됩니다</div>

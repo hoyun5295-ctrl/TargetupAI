@@ -11,6 +11,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, List, Loader2, Map as MapIcon, MessageSquarePlus, Power, RefreshCw, Search, Sparkles } from 'lucide-react';
+import { JOURNEY_TABS } from '../components/zone/zone-tabs';
+import ZoneSegmented from '../components/zone/ZoneSegmented';
 import { OUI_BTN_GHOST, OUI_BTN_PRIMARY, OUI_SRC, OUI_WRAP_FULL } from '../utils/operator-ui';
 import ZoneFrame from '../components/zone/ZoneFrame';
 import { zoneModule } from '../constants/ai-operator-modules';
@@ -231,7 +233,7 @@ export default function JourneyMapPage() {
   }, [data]);
 
   // ★ 2026-09-30 AI 존 대개편: 지도 = 여정 메뉴의 두 번째 탭(머리·명령 카드는 목록과 같은 틀)
-  const mapTabs = [{ id: 'list', label: '목록', to: '/ai-journeys' }, { id: 'map', label: '지도', to: '/ai-journeys/map' }];
+  const mapTabs = JOURNEY_TABS;
   if (loading && !data) {
     return (
       <ZoneFrame moduleId="journeys" tabs={mapTabs} activeTab="map" backTo="/ai-journeys">
@@ -279,42 +281,33 @@ export default function JourneyMapPage() {
           verb: oneLine.verb,
           icon: Sparkles,
         },
-        stats: [{ label: '손볼 곳', value: gapCount }],
-        alts: [
-          { label: gapCount > 0 ? `빈 곳 찾기 ${gapCount}` : '빈 곳 찾기', icon: Sparkles, onClick: () => setGapOpen(true) },
-          { label: '문장으로 만들기', icon: MessageSquarePlus, onClick: () => setInterviewOpen(true) },
+      }}
+      stamp={{ text: `${timeText(data.generatedAt)} 기준 · 다시 읽기`, onRefresh: () => void load(true), loading: refreshing }}
+      start={{
+        items: [
+          { icon: Sparkles, title: '빈 곳 찾기', desc: gapCount > 0 ? `손볼 곳 ${gapCount}곳을 찾아 한 번에 채워요` : '비어 있는 여정 자리를 찾아 채워요', tint: 'from-fuchsia-400 to-purple-500', featured: gapCount > 0, badge: gapCount > 0 ? `${gapCount}곳` : undefined, onClick: () => setGapOpen(true) },
+          { icon: MessageSquarePlus, title: '문장으로 만들기', desc: '하고 싶은 것을 문장으로 쓰면 지도에 놓아요', tint: 'from-sky-400 to-indigo-500', onClick: () => setInterviewOpen(true) },
         ],
-        stamp: { text: `${timeText(data.generatedAt)} 기준 · 다시 읽기`, onRefresh: () => void load(true), loading: refreshing },
       }}
       blocks={error ? [{ text: error }] : []}
     >
-      {/* 도구 줄: 상태 · 찾기 · 범례 */}
-      <div className="max-w-[1240px] mx-auto">
+      {/* 도구 줄: 상태 · 찾기 · 범례(캔버스와 같은 전폭 · 좌우 끝 한 줄) */}
+      <div>
         <div className="pb-3 flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1" role="tablist" aria-label="여정 상태">
-            {FILTERS.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                role="tab"
-                aria-selected={statusFilter === f.key}
-                onClick={() => setStatusFilter(f.key)}
-                className={statusFilter === f.key
-                  ? 'h-8 px-3 rounded-lg text-xs font-semibold bg-violet-200 text-slate-900'
-                  : 'h-8 px-3 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors'}
-              >
-                {f.label} <span className="tabular-nums text-slate-500">{counts[f.key]}</span>
-              </button>
-            ))}
-          </div>
-          <label className="relative flex-1 min-w-[160px] max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" aria-hidden />
+          <ZoneSegmented
+            ariaLabel="여정 상태"
+            items={FILTERS.map((f) => ({ id: f.key, label: f.label, count: counts[f.key] }))}
+            value={statusFilter}
+            onChange={(id) => setStatusFilter(id)}
+          />
+          <label className="relative flex-1 min-w-[180px] max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-slate-400" aria-hidden />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="여정 이름 · 시작 사건 찾기"
               aria-label="여정 찾기"
-              className="w-full h-8 pl-8 pr-3 rounded-lg bg-white border border-slate-200 text-xs placeholder-slate-400 focus:outline-none focus:border-violet-400"
+              className="w-full h-10 pl-9 pr-3 rounded-xl bg-white border border-slate-200 shadow-sm text-[13px] text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
             />
           </label>
           <div className="hidden xl:flex items-center gap-3 ml-auto text-[11px] text-slate-500">
@@ -330,7 +323,7 @@ export default function JourneyMapPage() {
       </div>
 
       {/* 캔버스: 데스크톱은 이 칸 안에서만 스크롤(레인 머리 고정) · 모바일은 페이지 스크롤 */}
-      <div className="rounded-2xl border border-slate-200 bg-white md:h-[calc(100vh-128px)] md:overflow-auto">
+      <div className="rounded-2xl border border-slate-200 bg-white md:h-[calc(100vh-120px)] md:min-h-[560px] md:overflow-auto">
         <LifecycleMapCanvas
           data={data}
           statusFilter={statusFilter}

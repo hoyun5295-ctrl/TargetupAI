@@ -429,13 +429,15 @@ export default function AiUsagePage() {
       moduleId="ai-memory"
       tabs={AI_MEMORY_TABS}
       activeTab="usage"
+      stamp={{ text: '다시 읽기', onRefresh: reloadAll, loading: overviewLoading || forecastLoading }}
       command={{
-        stats: overview ? [
+        facts: overview ? [
           { label: '이번 달', value: `${overview.monthly_calls.toLocaleString()}회` },
-          ...(overview.monthly_limit !== null ? [{ label: '한도', value: `${overview.monthly_percent}%` }] : []),
+          ...(overview.monthly_limit !== null ? [{ label: '한도', value: `${overview.monthly_percent}%`, tone: (overview.monthly_percent >= 80 ? 'amber' : undefined) as 'amber' | undefined }] : []),
           { label: '일평균', value: `${overview.daily_avg.toLocaleString()}회` },
         ] : [{ label: '이번 달', value: '—' }],
-        stamp: { text: '다시 읽기', onRefresh: reloadAll, loading: overviewLoading || forecastLoading },
+        note: '회사별 AI 호출 · 한도 · 캐시 효율 · 비용 예측',
+        actions: [{ label: '한도 알림', icon: Bell, onClick: () => setShowThresholdModal(true) }],
       }}
       emphasis={
         <ZoneEmphasis kind="ai" title="AI 자율 진단" meta="실시간">

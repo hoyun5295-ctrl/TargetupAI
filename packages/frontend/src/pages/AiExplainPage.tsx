@@ -82,11 +82,8 @@ export default function AiExplainPage() {
     <ZoneFrame
       moduleId="ai-memory"
       sub="AI에게 질문"
-      command={{
-        checks: [{ label: '회사 데이터만 참고' }, { label: '근거 출처 인용' }, { label: '없는 정보는 "정보 없음"' }],
-      }}
     >
-      <div className="max-w-4xl space-y-4">
+      <div className="max-w-4xl mx-auto space-y-4">
 <div className="mb-3 inline-flex items-center gap-1.5 text-[12px] text-slate-500"><span className="text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-medium border border-violet-200">실험실</span><BookOpen className="w-3.5 h-3.5 text-indigo-600" />근거를 인용해 답합니다</div>
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />

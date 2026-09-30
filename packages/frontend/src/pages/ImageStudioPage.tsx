@@ -322,7 +322,6 @@ export default function ImageStudioPage() {
   return (
     <ZoneFrame
       moduleId="image-studio"
-      aux={stage !== 'gallery' ? { label: '템플릿으로', icon: ChevronLeft, onClick: () => setStage('gallery') } : null}
       command={{
         lead: (
           <span className="inline-flex items-center gap-1.5 text-[12.5px]">
@@ -335,7 +334,10 @@ export default function ImageStudioPage() {
             ))}
           </span>
         ),
-        stats: [{ label: '저장 소재', value: `${libAssets.length}개`, action: { label: '관리', onClick: () => setLibManageOpen(true) } }],
+        facts: [{ label: '저장 소재', value: `${libAssets.length}개` }],
+        actions: stage !== 'gallery'
+          ? [{ label: '템플릿으로', icon: ChevronLeft, onClick: () => setStage('gallery') }, { label: '저장 소재 관리', icon: FolderOpen, onClick: () => setLibManageOpen(true) }]
+          : [{ label: '저장 소재 관리', icon: FolderOpen, onClick: () => setLibManageOpen(true) }],
       }}
       blocks={!ready ? [{ text: '이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.' }] : []}
     >

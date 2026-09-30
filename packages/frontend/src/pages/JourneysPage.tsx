@@ -1,6 +1,9 @@
 import ZoneFrame from '../components/zone/ZoneFrame';
 import ZoneEmphasis from '../components/zone/ZoneEmphasis';
 import ZoneRowActions from '../components/zone/ZoneRowActions';
+import ZoneSection from '../components/zone/ZoneSection';
+import ZoneSegmented from '../components/zone/ZoneSegmented';
+import { JOURNEY_TABS } from '../components/zone/zone-tabs';
 import StatusPill from '../components/console/StatusPill';
 import { zoneModule } from '../constants/ai-operator-modules';
 import { journeyRowActionPlan, journeyRowActionLabel, JOURNEY_STATUS_LABEL, type JourneyRowActionId } from '../utils/journey-row-actions';
@@ -1998,7 +2001,7 @@ export default function JourneysPage() {
       sub={view === 'studio' ? `${aiPkg?.name || '여정'} · 스텝 ${studioIdx + 1}` : view === 'review' ? 'AI 생성 여정 검토' : null}
       onBack={backFromView}
       backLabel={view === 'main' ? 'AI Operator로' : '여정 목록으로'}
-      tabs={view === 'main' ? [{ id: 'list', label: '목록', to: '/ai-journeys' }, { id: 'map', label: '지도', to: '/ai-journeys/map' }] : undefined}
+      tabs={view === 'main' ? JOURNEY_TABS : undefined}
       activeTab="list"
       command={view === 'main' ? {
         line: {
@@ -2010,20 +2013,20 @@ export default function JourneysPage() {
           icon: Sparkles,
           busy: generating,
         },
-        stats: [
-          { label: '만들 수 있는 여정', value: `${journeyScope.availableCount}/${scopeTotal}종`, action: { label: showScopeNote ? '접기' : '자세히', onClick: () => setShowScopeNote((v) => !v) } },
-        ],
-        alts: [
-          { label: '정보 알림', icon: Bell, onClick: () => setPurpose('info-alert') },
-          { label: '날짜축 여정', icon: CalendarClock, onClick: () => setPurpose('date-anchor') },
-          { label: '빠른 시작 · 혜택 넣기', icon: Megaphone, onClick: () => setPurpose('marketing-modal') },
-        ],
-        stamp: { text: '다시 읽기', onRefresh: loadAll, loading },
       } : null}
       blocks={[
         ...(error ? [{ text: error, tone: 'rose' as const }] : []),
         ...(callbackOptions.length === 0 && !loading && view === 'main' ? [{ text: '회사에 등록된 발신번호가 없어 여정을 켤 수 없습니다. 만들기는 지금도 됩니다.' }] : []),
       ]}
+      links={view === 'main' ? [{ label: `만들 수 있는 여정 ${journeyScope.availableCount}/${scopeTotal}종 · ${showScopeNote ? '접기' : '자세히'}`, onClick: () => setShowScopeNote((v) => !v) }] : []}
+      stamp={view === 'main' ? { text: '다시 읽기', onRefresh: loadAll, loading } : null}
+      start={view === 'main' ? {
+        items: [
+          { icon: Megaphone, title: '마케팅 여정', desc: '빠른 시작을 고르고 혜택까지 넣어 설계', tint: 'from-fuchsia-400 to-purple-500', featured: true, badge: '추천', onClick: () => setPurpose('marketing-modal') },
+          { icon: Bell, title: '정보 알림', desc: '주문·배송 같은 거래가 일어나면 알림톡', tint: 'from-teal-400 to-emerald-500', onClick: () => setPurpose('info-alert') },
+          { icon: CalendarClock, title: '날짜축 여정', desc: '정해 둔 날짜 기준 D-7·D-3·D-1·당일', tint: 'from-indigo-400 to-violet-500', onClick: () => setPurpose('date-anchor') },
+        ],
+      } : null}
       emphasis={journeyEmphasis}
     >
         {view === 'main' && customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4 md:mb-5" />}
@@ -2045,32 +2048,24 @@ export default function JourneysPage() {
 
             {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): 여정 목록 + status 필터 토글 (보관함 영역 분리) */}
             <div>
-              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                <h3 className="text-[15px] font-semibold text-slate-900">
-                  {statusFilter === 'archived' ? '보관함' : '내 여정'} <span className="text-[12.5px] font-normal text-slate-400 tabular-nums">{journeys.length}</span>
-                </h3>
-                <div className="flex items-center gap-1 flex-wrap">
-                  {([
-                    { key: 'all', label: '전체' },
-                    { key: 'active', label: JOURNEY_STATUS_LABEL.active },
-                    { key: 'paused', label: JOURNEY_STATUS_LABEL.paused },
-                    { key: 'ended', label: JOURNEY_STATUS_LABEL.ended },
-                    { key: 'archived', label: '보관함' },
-                  ] as Array<{ key: JourneyStatusFilter; label: string }>).map((f) => (
-                    <button
-                      key={f.key}
-                      onClick={() => setStatusFilter(f.key)}
-                      className={`h-8 px-3 rounded-full border text-[13px] whitespace-nowrap transition-colors ${
-                        statusFilter === f.key
-                          ? 'bg-indigo-600 border-indigo-600 text-white font-semibold'
-                          : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200'
-                      }`}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <ZoneSection
+                title={statusFilter === 'archived' ? '보관함' : '내 여정'}
+                count={journeys.length}
+                filter={(
+                  <ZoneSegmented
+                    ariaLabel="여정 거르기"
+                    items={[
+                      { id: 'all', label: '전체' },
+                      { id: 'active', label: JOURNEY_STATUS_LABEL.active },
+                      { id: 'paused', label: JOURNEY_STATUS_LABEL.paused },
+                      { id: 'ended', label: JOURNEY_STATUS_LABEL.ended },
+                      { id: 'archived', label: '보관함' },
+                    ] as Array<{ id: JourneyStatusFilter; label: string }>}
+                    value={statusFilter}
+                    onChange={(id) => setStatusFilter(id)}
+                  />
+                )}
+              />
               {loading && (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-6 h-6 animate-spin text-slate-400" />

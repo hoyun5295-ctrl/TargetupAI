@@ -1,5 +1,9 @@
 import ZoneFrame from '../components/zone/ZoneFrame';
 import ZoneEmphasis from '../components/zone/ZoneEmphasis';
+import ZoneStatStrip from '../components/zone/ZoneStatStrip';
+import ZoneSection from '../components/zone/ZoneSection';
+import ZoneSegmented from '../components/zone/ZoneSegmented';
+import ZoneSelect from '../components/zone/ZoneSelect';
 import { INAPP_CHANNEL_TABS } from '../components/zone/zone-tabs';
 import { zoneModule } from '../constants/ai-operator-modules';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Dispatch, type SetStateAction } from 'react';
@@ -44,7 +48,7 @@ import { DateTimeField } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
 import { STUDIO_INAPP_DRAFT_KEY } from '../lib/studio-draft';
 import ImageToCopyButton from '../components/ImageToCopyButton';
-import { MK_HEAD_BTN, MK_HEAD_BTN_ON, MK_HEAD_SEG, MK_HEAD_SEG_DISABLED, MK_HEAD_SEG_OFF, MK_HEAD_SEG_ON } from '../utils/make-ui';
+import { MK_HEAD_BTN, MK_HEAD_BTN_ON, MK_HEAD_SEG, MK_HEAD_SEG_DISABLED, MK_HEAD_SEG_OFF, MK_HEAD_SEG_ON, MK_LINE_EXTRA_BTN } from '../utils/make-ui';
 // ★ 2026-07-18 P2 — CTA 자동 연결: DM의 연동 몰 상품 픽커 재사용 (URL 수기 입력 사고 차단 — 0718 팝폰 m/xxx 무반응 근본)
 import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
 // ★ 2026-07-18 P3 — 에셋 라이브러리 픽커 (업로드 소재 재사용 — 전 채널 공용 컴포넌트)
@@ -338,8 +342,6 @@ const EMPTY_FORM: Partial<MessageRow> = {
 // ════════════════════════════════════════════════════════════════════
 // 메인 컴포넌트
 // ════════════════════════════════════════════════════════════════════
-
-const INAPP_LINE_IMAGE_BTN = 'h-10 px-3 inline-flex items-center gap-1.5 rounded-[10px] border border-slate-200 bg-white text-slate-700 text-[13px] font-medium hover:bg-slate-50 disabled:opacity-40 shrink-0 transition-colors';
 
 export default function InAppMessagesPage() {
   const navigate = useNavigate();
@@ -911,26 +913,26 @@ export default function InAppMessagesPage() {
             verb: inappOneLine.verb,
             icon: Sparkles,
             busy: aiGenerating,
-            extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))} disabled={aiGenerating} className={INAPP_LINE_IMAGE_BTN} />,
+            extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
           },
         }}
         emphasis={
           <ZoneEmphasis kind="ai" title="빠른 시작" meta="시나리오만 고르면 AI가 제목·본문·트리거까지">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {(Object.keys(SCENARIO_VISUAL) as QuickStartScenario[]).map((sc) => {
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            {(Object.keys(SCENARIO_VISUAL) as QuickStartScenario[]).map((sc, i, all) => {
               const v = SCENARIO_VISUAL[sc];
               const Icon = v.icon;
               return (
                 <button
                   key={sc}
                   onClick={() => { if (customerGate.isEmpty) { setShowDataGate(true); return; } setScenarioPick(sc); }}
-                  className="group text-left bg-white hover:bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-2xl p-4 transition-all"
+                  className={`group text-left bg-white hover:bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-2xl p-4 transition-all ${all.length % 2 === 1 && i === all.length - 1 ? 'col-span-2 lg:col-span-1' : ''}`}
                 >
                   <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${v.gradient} flex items-center justify-center mb-3 shadow-md`}>
                     <Icon className="w-5 h-5 text-white" />
                   </div>
                   <div className="text-sm font-bold text-slate-900">{v.label}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">{v.hint}</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5 leading-snug break-keep">{v.hint}</div>
                 </button>
               );
             })}
@@ -1131,18 +1133,15 @@ export default function InAppMessagesPage() {
           verb: inappOneLine.verb,
           icon: Sparkles,
           busy: aiGenerating,
-          extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))} disabled={aiGenerating} className={INAPP_LINE_IMAGE_BTN} />,
+          extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
         },
-        stats: overview ? [
-          { label: '메시지', value: overview.totalMessages.toLocaleString() },
-          { label: '게시 중', value: overview.activeMessages.toLocaleString() },
-        ] : [],
-        checks: [{ label: channel === 'app' ? '기본형(중앙 모달·바텀 시트) · 포스터형 · 앱 SDK 연동 후 표시' : '모달 · 슬라이드 · 토스트 · 플로팅 버튼 · 포스터형' }],
-        alts: [
-          { label: '모양 골라 시작', icon: Plus, onClick: openEntry },
-          { label: '라이브러리 소재로', icon: FolderOpen, onClick: () => setStartLibOpen(true) },
+      }}
+      stamp={{ text: '다시 읽기', onRefresh: loadAll, loading }}
+      start={{
+        items: [
+          { icon: Plus, title: '모양 골라 시작', desc: channel === 'app' ? '기본형(중앙 모달·바텀 시트) · 포스터형' : '모달·슬라이드·토스트·플로팅·포스터형', tint: 'from-rose-400 to-pink-500', featured: true, onClick: openEntry },
+          { icon: FolderOpen, title: '라이브러리 소재로', desc: '저장 소재로 포스터형 인앱을 바로 시작', tint: 'from-amber-400 to-orange-500', onClick: () => setStartLibOpen(true) },
         ],
-        stamp: { text: '다시 읽기', onRefresh: loadAll, loading },
       }}
       blocks={[
         ...(error ? [{ text: error, tone: 'rose' as const }] : []),
@@ -1228,33 +1227,31 @@ export default function InAppMessagesPage() {
           </div>
         )}
 
-        {/* ▼ 영역 7: 요약 5 metric + 격차 */}
-        {overview && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[
-              { label: '평균 CTR', value: `${(overview.avgCTR * 100).toFixed(2)}%`, delta: overview.delta.avgCTRPercent, icon: MousePointer },
-              { label: '30일 impression', value: overview.totalImpressions30d.toLocaleString(), delta: overview.delta.impressionsPercent, icon: Eye },
-              { label: '24h 매핑 구매', value: overview.totalAttributedPurchases30d.toLocaleString(), delta: overview.delta.purchasesPercent, icon: TrendingUp },
-            ].map((metric, idx) => (
-              <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <metric.icon className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="text-[11px] text-slate-500">{metric.label}</span>
-                </div>
-                <div className="text-lg font-bold text-slate-900">{metric.value}</div>
-                {metric.delta !== null && (
-                  <div className={`text-[10px] mt-1 flex items-center gap-1 ${metric.delta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                    {metric.delta >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                    {metric.delta >= 0 ? '+' : ''}{metric.delta.toFixed(1)}% 이전 30일 대비
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        {overview && (
-          <div className="text-[10px] text-slate-400 italic">Data source: {overview.dataSource}</div>
-        )}
+        {/* ▼ 영역 7: 요약 숫자 한 줄(★ 2026-09-30 AI 존 보정 · 메시지·게시 중 + 성과 3 · 증감은 숫자 아래) */}
+        {overview && (() => {
+          const withDelta = (v: string, d: number | null) => (
+            <>
+              {v}
+              {d !== null && (
+                <span className={`block text-[11px] font-semibold mt-0.5 ${d >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{d >= 0 ? '+' : ''}{d.toFixed(1)}% 이전 30일 대비</span>
+              )}
+            </>
+          );
+          return (
+            <ZoneStatStrip
+              title="요약"
+              icon={BarChart3}
+              source={overview.dataSource}
+              cells={[
+                { label: '메시지', value: overview.totalMessages.toLocaleString() },
+                { label: '게시 중', value: overview.activeMessages.toLocaleString() },
+                { label: '평균 CTR', value: withDelta(`${(overview.avgCTR * 100).toFixed(2)}%`, overview.delta.avgCTRPercent) },
+                { label: '30일 impression', value: withDelta(overview.totalImpressions30d.toLocaleString(), overview.delta.impressionsPercent) },
+                { label: '24h 매핑 구매', value: withDelta(overview.totalAttributedPurchases30d.toLocaleString(), overview.delta.purchasesPercent) },
+              ]}
+            />
+          );
+        })()}
 
         {/* ▼ AI 개선 — 진단 + 1-click 통합 (한 카드) */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5">
@@ -1303,43 +1300,37 @@ export default function InAppMessagesPage() {
 
         {/* ▼ 영역 10: 메시지 목록 (filter + sort + 카드) */}
         <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 flex-wrap mb-4">
-            <h3 className="text-sm font-bold text-slate-900">메시지 목록 ({filteredMessages.length}건)</h3>
-            <div className="ml-auto flex gap-2 flex-wrap">
-              <button onClick={() => setShowDetails(true)} className="text-xs text-slate-600 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                <BarChart3 className="w-3.5 h-3.5" /> 자세히 분석
-              </button>
-              <select
+          <ZoneSection
+            title="메시지 목록"
+            count={filteredMessages.length}
+            filter={(
+              <ZoneSegmented
+                ariaLabel="메시지 상태 거르기"
+                items={[{ id: 'all', label: '전체' }, { id: 'active', label: '게시 중' }, { id: 'paused', label: '멈춤' }, { id: 'archived', label: '보관함' }] as Array<{ id: Status | 'all'; label: string }>}
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as Status | 'all')}
-                className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900"
-              >
-                <option value="all">전체 상태</option>
-                <option value="active">활성</option>
-                <option value="paused">일시 중지</option>
-                <option value="archived">보관함</option>
-              </select>
-              <select
-                value={templateFilter}
-                onChange={(e) => setTemplateFilter(e.target.value as Template | 'all')}
-                className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900"
-              >
-                <option value="all">전체 템플릿</option>
-                {Object.entries(TEMPLATE_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-              <select
-                value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-                className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900"
-              >
-                <option value="created_desc">최신순</option>
-                <option value="ctr_desc">CTR 높은순</option>
-                <option value="impressions_desc">노출 많은순</option>
-              </select>
-            </div>
-          </div>
+                onChange={(id) => setStatusFilter(id)}
+              />
+            )}
+            right={(
+              <>
+                <ZoneSelect
+                  ariaLabel="템플릿 거르기"
+                  value={templateFilter}
+                  onChange={(v) => setTemplateFilter(v)}
+                  options={[{ value: 'all' as Template | 'all', label: '전체 템플릿' }, ...Object.entries(TEMPLATE_LABELS).map(([key, label]) => ({ value: key as Template | 'all', label }))]}
+                />
+                <ZoneSelect
+                  ariaLabel="정렬"
+                  value={sortMode}
+                  onChange={(v) => setSortMode(v)}
+                  options={[{ value: 'created_desc' as SortMode, label: '최신순' }, { value: 'ctr_desc' as SortMode, label: 'CTR 높은순' }, { value: 'impressions_desc' as SortMode, label: '노출 많은순' }]}
+                />
+                <button onClick={() => setShowDetails(true)} className="h-10 px-3.5 rounded-xl border border-slate-200 bg-white shadow-sm text-[13px] font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5 transition-colors">
+                  <BarChart3 className="w-[15px] h-[15px] text-slate-500" /> 자세히 분석
+                </button>
+              </>
+            )}
+          />
 
           {loading ? (
             <div className="py-12 flex justify-center text-slate-500">

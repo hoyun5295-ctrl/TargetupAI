@@ -1,28 +1,16 @@
 /**
- * ZoneCommand.tsx — 명령 카드(★ 2026-09-30 AI 존 대개편 · 설계서 §3-2 ②)
+ * ZoneCommand.tsx — 명령 카드(★ 2026-09-30 AI 존 대개편 · ★ 같은 날 보정)
  *
- * 허브 명령 카드("한줄로 ___" 입력)를 줄인 모양. 남색 띠 아래 경계에 걸친 흰 카드 하나가 모든 메뉴의 같은 자리에 있다.
- *   - 한 줄 입력형(자동화 7메뉴 · 원장 `oneLine`): 워드마크 + 밑줄 입력 + 오른쪽 끝 버튼(AI 생성 = 앰버)
- *   - 일반형(나머지): 상태 숫자 + 오른쪽 끝 1차 버튼(인디고)
- *   아랫줄 = 상태 숫자 · 확인할 것 · 다른 방법(1클릭 칩) · 기준 시각 · 다시 읽기(새로고침은 전 메뉴 이 한 곳)
+ * 남색 띠 아래 경계에 걸친 흰 카드 하나가 모든 메뉴의 같은 자리에 있다.
+ *   - 한 줄 입력형(자동화 7메뉴 · 원장 `oneLine`): 워드마크 + 밑줄 입력 + 오른쪽 끝 버튼(AI 생성 = 앰버). **입력 한 줄만.**
+ *   - 일반형(나머지): [앞머리(기간·단계 등) · 설명] … [보조 외곽선 ≤2] [1차 버튼]
+ * 보정(Harold 0930): 아랫줄(숫자·칩·기준 시각)을 없앴다 — 숫자는 머리 띠 오른쪽, 입구는 시작 카드, 기준 시각은 머리 띠 아래 한 줄.
  *
- * ⛔ className prop 없음. 다른 방법은 최대 3개(튜플) — 넘치면 `more`(다른 방법 더보기)로.
+ * ⛔ className prop 없음.
  */
 import { useRef, type ReactNode } from 'react';
-import { CircleAlert, Loader2, RotateCw, type LucideIcon } from 'lucide-react';
-import { ZoneMoreMenu, type ZoneAction, type ZoneMenuItem } from './ZoneHeader';
-
-export interface ZoneStat {
-  label: string;
-  value: ReactNode;
-  /** 숫자 옆 작은 글자 링크(예: "자세히" · "바꾸기") */
-  action?: { label: string; onClick: () => void };
-}
-
-export interface ZoneCheck {
-  label: string;
-  onClick?: () => void;
-}
+import { Loader2, type LucideIcon } from 'lucide-react';
+import type { ZoneAction } from './ZoneHeader';
 
 export interface ZonePrimary extends ZoneAction {
   /** AI 생성·크레딧 = 앰버 / 그 밖 = 인디고 */
@@ -43,7 +31,7 @@ export interface ZoneLine {
   busy?: boolean;
   disabled?: boolean;
   credit?: string;
-  /** 입력과 버튼 사이에 둘 것(예: 허브 [이미지]) */
+  /** 입력과 버튼 사이에 둘 것(예: [이미지] · 광고성 표기) */
   extra?: ReactNode;
   /** 입력이 비어 있어도 버튼을 누를 수 있는가(예: 만들기 = 판의 재료로 진행) */
   allowEmpty?: boolean;
@@ -51,15 +39,16 @@ export interface ZoneLine {
 }
 
 export interface ZoneCommandProps {
-  stats?: ZoneStat[];
-  checks?: ZoneCheck[];
-  alts?: [ZoneAction] | [ZoneAction, ZoneAction] | [ZoneAction, ZoneAction, ZoneAction];
-  more?: ZoneMenuItem[];
-  stamp?: { text: string; onRefresh?: () => void; loading?: boolean };
   line?: ZoneLine;
-  primary?: ZonePrimary;
-  /** 아랫줄 맨 앞에 둘 것(예: 만들기 단계 표시) */
+  /** 일반형: 왼쪽 앞머리(기간 선택 · 단계 표시 등) */
   lead?: ReactNode;
+  /** 일반형: 왼쪽 핵심 숫자(탭이 머리 오른쪽을 쓰는 메뉴 · 작은 이름표 + 굵은 숫자) */
+  facts?: Array<{ label: string; value: ReactNode; tone?: 'emerald' | 'amber' | 'rose' }>;
+  /** 일반형: 왼쪽 설명 한 줄(이 메뉴에서 지금 할 수 있는 일) */
+  note?: ReactNode;
+  /** 일반형: 1차 앞의 보조 외곽선 버튼(≤2) */
+  actions?: [ZoneAction] | [ZoneAction, ZoneAction];
+  primary?: ZonePrimary;
 }
 
 const TONE = {
@@ -83,44 +72,16 @@ function PrimaryButton({ label, icon: Icon, onClick, disabled, busy, tone = 'ind
   );
 }
 
-const Divider = () => <span className="w-px h-3 bg-slate-200 shrink-0" aria-hidden="true" />;
+const FACT_TONE = { emerald: 'text-emerald-700', amber: 'text-amber-700', rose: 'text-rose-700' } as const;
 
-export default function ZoneCommand({ stats = [], checks = [], alts, more = [], stamp, line, primary, lead }: ZoneCommandProps) {
+export default function ZoneCommand({ line, lead, facts = [], note, actions = [] as unknown as [ZoneAction], primary }: ZoneCommandProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const altList = (alts || []) as ZoneAction[];
-  const statNodes = stats.map((s, i) => (
-    <span key={`${s.label}-${i}`} className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
-      <span className="text-[12.5px] text-slate-500">{s.label}</span>
-      <b className="text-[13.5px] font-semibold tabular-nums text-slate-900">{s.value}</b>
-      {s.action && <button type="button" onClick={s.action.onClick} className="text-[12px] text-indigo-600 hover:underline">{s.action.label}</button>}
-    </span>
-  ));
-  const checkNodes = checks.map((c, i) => (
-    c.onClick
-      ? <button key={`${c.label}-${i}`} type="button" onClick={c.onClick} className="inline-flex items-center gap-1 text-[12.5px] text-amber-700 hover:underline whitespace-nowrap"><CircleAlert className="w-[13px] h-[13px]" />{c.label}</button>
-      : <span key={`${c.label}-${i}`} className="inline-flex items-center gap-1 text-[12.5px] text-amber-700 whitespace-nowrap"><CircleAlert className="w-[13px] h-[13px]" />{c.label}</span>
-  ));
-  const altNodes = altList.map((a) => (
-    <button key={a.label} type="button" onClick={a.onClick} disabled={a.disabled} className="h-7 px-2.5 rounded-full border border-slate-200 bg-white text-[12.5px] text-slate-600 hover:border-indigo-200 hover:text-indigo-700 inline-flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-40">
-      {a.icon && <a.icon className="w-[13px] h-[13px]" />}
-      {a.label}
-    </button>
-  ));
-  const stampNode = stamp && (
-    <button type="button" onClick={stamp.onRefresh} disabled={!stamp.onRefresh || stamp.loading} className="md:ml-auto inline-flex items-center gap-1 text-[12px] text-slate-400 hover:text-slate-600 whitespace-nowrap disabled:cursor-default" aria-label="다시 읽기">
-      <RotateCw className={`w-3 h-3 ${stamp.loading ? 'animate-spin' : ''}`} />{stamp.text}
-    </button>
-  );
-  const bottomLeft = [
-    ...(lead ? [<span key="lead" className="inline-flex items-center">{lead}</span>] : []),
-    ...statNodes,
-  ];
-
+  const acts = (actions || []) as ZoneAction[];
   return (
     <div className="bg-white rounded-2xl shadow-[0_2px_4px_rgba(15,23,42,0.06),0_18px_36px_-16px_rgba(15,23,42,0.30)]" data-zone="command">
       {line ? (
         <form
-          className="flex flex-wrap sm:flex-nowrap items-end gap-x-3 gap-y-2 px-4 md:px-5 pt-3.5 pb-3"
+          className="flex flex-wrap sm:flex-nowrap items-end gap-x-3 gap-y-2 px-4 md:px-5 pt-3.5 pb-3.5"
           onSubmit={(e) => { e.preventDefault(); if (!line.busy && !line.disabled && (line.allowEmpty || line.value.trim())) line.onSubmit(); }}
         >
           <img src="/brand/wordmark.png" alt="한줄로" className="h-[18px] md:h-5 mb-1.5 shrink-0 select-none" draggable={false} />
@@ -150,27 +111,25 @@ export default function ZoneCommand({ stats = [], checks = [], alts, more = [], 
           </button>
         </form>
       ) : (
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-2 px-4 md:px-5 py-2.5 min-h-14">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1">
-            {bottomLeft.flatMap((n, i) => (i ? [<Divider key={`d${i}`} />, n] : [n]))}
-            {checkNodes.length > 0 && <><Divider />{checkNodes}</>}
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-2.5 px-4 md:px-5 py-3 min-h-16">
+          <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            {lead}
+            {facts.map((f, i) => (
+              <span key={f.label} className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
+                {i > 0 && <span className="w-px h-3.5 bg-slate-200 self-center mr-2.5" aria-hidden="true" />}
+                <span className="text-[12.5px] text-slate-500">{f.label}</span>
+                <b className={`text-[17px] font-bold tabular-nums ${f.tone ? FACT_TONE[f.tone] : 'text-slate-900'}`}>{f.value}</b>
+              </span>
+            ))}
+            {note && <span className="text-[13.5px] text-slate-600 leading-snug">{note}</span>}
           </div>
+          {acts.map((a) => (
+            <button key={a.label} type="button" onClick={a.onClick} disabled={a.disabled} className="h-10 px-3.5 rounded-[10px] border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-[13px] font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors disabled:opacity-40 w-full sm:w-auto shrink-0">
+              {a.icon && <a.icon className="w-[15px] h-[15px] text-slate-500" />}
+              {a.label}
+            </button>
+          ))}
           {primary && <PrimaryButton {...primary} />}
-        </div>
-      )}
-      {(line || altNodes.length > 0 || more.length > 0 || stampNode) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 md:px-5 py-2 border-t border-slate-100">
-          {line && bottomLeft.flatMap((n, i) => (i ? [<Divider key={`ld${i}`} />, n] : [n]))}
-          {line && checkNodes.length > 0 && <><Divider />{checkNodes}</>}
-          {(altNodes.length > 0 || more.length > 0) && (
-            <>
-              {line && (bottomLeft.length > 0 || checkNodes.length > 0) && <Divider />}
-              <span className="text-[12px] text-slate-400">다른 방법</span>
-              {altNodes}
-              {more.length > 0 && <ZoneMoreMenu items={more} align="left" tone="light" />}
-            </>
-          )}
-          {stampNode}
         </div>
       )}
     </div>

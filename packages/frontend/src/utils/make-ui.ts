@@ -12,6 +12,9 @@ export const MK_TILE = 'w-10 h-10 rounded-[10px] flex items-center justify-cente
 export const MK_TITLE = 'text-[16px] md:text-[18px] font-semibold tracking-[-0.02em] text-white leading-tight flex items-center gap-2 min-w-0';
 export const MK_SUB = 'text-[13px] text-slate-400 mt-0.5 hidden md:block truncate';
 
+/** 명령 카드 한 줄 입력 옆 보조 버튼([이미지로 불러오기] 등 · 1차 버튼과 같은 높이 40) */
+export const MK_LINE_EXTRA_BTN = 'h-10 px-3 inline-flex items-center gap-1.5 rounded-[10px] border border-slate-200 bg-white text-slate-700 text-[13px] font-semibold hover:bg-slate-50 hover:border-slate-300 disabled:opacity-40 shrink-0 transition-colors whitespace-nowrap';
+
 /** 남색 머리 안 보조 버튼·전환(★ 2026-09-30 편집기 머리 규칙): 채움은 오른쪽 끝 1차 하나 — 나머지는 반투명 외곽선 */
 export const MK_HEAD_BTN = 'inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg border border-white/15 bg-white/[0.06] text-[12.5px] font-semibold text-slate-200 hover:bg-white/[0.12] hover:text-white transition-colors disabled:opacity-30';
 export const MK_HEAD_BTN_ON = 'inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg border border-white bg-white text-[12.5px] font-semibold text-slate-900 transition-colors';

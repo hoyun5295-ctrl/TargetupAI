@@ -6,17 +6,19 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
-import { GitMerge, LayoutGrid, Loader2, PenLine, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { GitMerge, LayoutGrid, Loader2, PenLine, SlidersHorizontal, Sparkles, TrendingUp } from 'lucide-react';
 import ZoneFrame from '../components/zone/ZoneFrame';
+import ZoneSection from '../components/zone/ZoneSection';
+import ZoneSegmented from '../components/zone/ZoneSegmented';
+import ZoneStatStrip from '../components/zone/ZoneStatStrip';
 import { zoneModule } from '../constants/ai-operator-modules';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 import {
   ContinuousOperator, OperatorProposal, ProposalVariant, BanditRecommendation,
-  LearningSummary, AutoMarketingView, ProposalApproveSelection, AutoMarketingRoi,
+  LearningSummary, AutoMarketingView, ProposalApproveSelection, AutoMarketingRoi, won,
 } from '../components/automarketing/types';
-import AutoMarketingRoiCard from '../components/automarketing/AutoMarketingRoiCard';
 import ProposalDecisionCard from '../components/automarketing/ProposalDecisionCard';
 import NaturalLanguageStart from '../components/automarketing/NaturalLanguageStart';
 import ScenarioStart, { ScenarioPick } from '../components/automarketing/ScenarioStart';
@@ -406,10 +408,9 @@ export default function ContinuousOperatorPage() {
       moduleId="auto-marketing"
       sub={VIEW_SUB[view] ?? null}
       onBack={headerBack}
-      aux={{ label: '여러 목표 분석', icon: GitMerge, onClick: () => setShowMultiGoal(true) }}
       tabs={[
-        { id: 'pending', label: '승인할 제안', count: pendingCount || null },
-        { id: 'running', label: '실행 중', count: activeCount || null },
+        { id: 'pending', label: '승인할 제안', count: pendingCount, unit: '건', dot: 'amber' },
+        { id: 'running', label: '실행 중', count: activeCount, unit: '개', dot: 'emerald' },
       ]}
       activeTab={subView ? undefined : tabId}
       onSelectTab={(id) => setView(id === 'running' ? 'operators' : 'recommendations')}
@@ -423,17 +424,15 @@ export default function ContinuousOperatorPage() {
           icon: Sparkles,
           busy: creating,
         },
-        stats: [
-          { label: '발송 예약', value: scheduledCount },
-          { label: '30일 귀속 매출', value: roi ? (roi.hasCdpData ? `₩${Math.round(roi.revenue7dKrw || 0).toLocaleString('ko-KR')}` : '연동 후') : '—' },
-          { label: '학습', value: learningSummary ? `${learningSummary.memory.total}건` : '—' },
+      }}
+      stamp={{ text: stampText, onRefresh: loadAll, loading }}
+      start={subView ? null : {
+        items: [
+          { icon: LayoutGrid, title: '시나리오로 시작', desc: '검증된 시나리오를 골라 바로 시작', tint: 'from-indigo-500 to-violet-500', featured: true, badge: '추천', onClick: () => setView('scenario') },
+          { icon: SlidersHorizontal, title: '세부설정으로 시작', desc: '채널·주기·예산을 직접 잡아 시작', tint: 'from-sky-400 to-indigo-500', onClick: () => setEditing({ ...SMART_DEFAULTS, name: '', objective: '' }) },
+          { icon: PenLine, title: '자세히 쓰기', desc: '목표를 길게 쓰고 말투까지 골라요', tint: 'from-violet-400 to-fuchsia-500', onClick: () => setView('natural') },
+          { icon: GitMerge, title: '여러 목표 분석', desc: '목표 여러 개를 한 번에 비교해요', tint: 'from-emerald-400 to-teal-500', onClick: () => setShowMultiGoal(true) },
         ],
-        alts: [
-          { label: '시나리오로 시작', icon: LayoutGrid, onClick: () => setView('scenario') },
-          { label: '세부설정으로 시작', icon: SlidersHorizontal, onClick: () => setEditing({ ...SMART_DEFAULTS, name: '', objective: '' }) },
-          { label: '자세히 쓰기', icon: PenLine, onClick: () => setView('natural') },
-        ],
-        stamp: { text: stampText, onRefresh: loadAll, loading },
       }}
       blocks={error ? [{ text: error, tone: 'rose' }] : []}
       emphasis={view === 'recommendations' && dailyBrief ? (
@@ -447,20 +446,49 @@ export default function ContinuousOperatorPage() {
       ) : (
         <>
           {view === 'recommendations' && (
-            <div className="grid xl:grid-cols-[minmax(0,1fr)_300px] gap-4 items-start">
-              <div className="min-w-0 space-y-3">
-                <div className="flex items-center gap-1.5">
-                  {([['pending', '대기', pendingCount], ['all', '전체', null]] as const).map(([k, label, n]) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setProposalStatus(k)}
-                      className={`h-8 px-3 rounded-full border text-[13px] whitespace-nowrap transition-colors ${proposalStatus === k ? 'bg-indigo-600 border-indigo-600 text-white font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200'}`}
-                    >
-                      {label}{n != null && <span className={`ml-1 tabular-nums ${proposalStatus === k ? 'text-white/70' : 'text-slate-400'}`}>{n}</span>}
-                    </button>
-                  ))}
-                </div>
+            <div className="space-y-6">
+              <ZoneStatStrip
+                title="최근 30일 성과"
+                icon={TrendingUp}
+                source="발송 후 7일 구매 귀속 · 최근 30일 실측 · 회사별 누적 학습"
+                cells={[
+                  { label: '발송 예약', value: `${scheduledCount}건` },
+                  { label: '발송 캠페인', value: roi ? `${roi.campaigns.toLocaleString()}건` : '—' },
+                  { label: '발송', value: roi ? `${roi.totalSent.toLocaleString()}명` : '—' },
+                  { label: '비용', value: roi ? won(roi.spendKrw) : '—' },
+                  // 못 읽음(null) · 미연동(false) · 연동(true)을 가른다 — 조회 실패를 "연동 후"로 보이지 않게(Codex v3 R1)
+                  !roi ? { label: '귀속 매출', value: '—' }
+                    : roi.hasCdpData ? { label: '귀속 매출(7일)', value: won(roi.revenue7dKrw), tone: 'emerald' }
+                      : { label: '귀속 매출', value: '연동 후' },
+                  { label: '성공 패턴', value: learningSummary ? `${learningSummary.memory.successPatterns}건` : '—' },
+                  { label: '승인률', value: learningSummary && learningSummary.performance.totalProposals30d > 0 ? `${Math.round((learningSummary.performance.approvedCount / learningSummary.performance.totalProposals30d) * 100)}%` : '—' },
+                  { label: '학습', value: learningSummary ? `${learningSummary.memory.total}건` : '—' },
+                ]}
+                footnote={(learningSummary?.variantWinner && learningSummary.variantWinner.sent > 0) || roi ? (
+                  <span className="flex flex-wrap gap-x-4 gap-y-1">
+                    {roi && (roi.hasCdpData
+                      ? (roi.purchases7d > 0 && <span>발송 후 7일 안 구매 {roi.purchases7d.toLocaleString()}건이 귀속된 실측 매출입니다.</span>)
+                      : <span>매출 귀속은 자사몰 연동(구매 데이터 수집) 후 표시됩니다.</span>)}
+                    {learningSummary?.variantWinner && learningSummary.variantWinner.sent > 0 && (
+                      <span>지난 14일 가장 효과 좋은 변형 = <b className="font-semibold text-slate-700">변형 {learningSummary.variantWinner.variantLabel}</b> (클릭률 {(learningSummary.variantWinner.ctr * 100).toFixed(1)}% · 발송 {learningSummary.variantWinner.sent}건)</span>
+                    )}
+                  </span>
+                ) : null}
+              />
+              <div className="min-w-0">
+                <ZoneSection
+                  title="승인할 제안"
+                  filter={(
+                    <ZoneSegmented
+                      ariaLabel="제안 거르기"
+                      items={[{ id: 'pending', label: '대기', count: pendingCount }, { id: 'all', label: '전체' }]}
+                      value={proposalStatus}
+                      onChange={(id) => setProposalStatus(id)}
+                    />
+                  )}
+                  desc="확인하고 승인하면 발송됩니다"
+                />
+                <div className="space-y-3">
                 {proposals.length === 0 ? (
                   <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
                     <div className="text-[15px] font-semibold text-slate-900">{proposalStatus === 'pending' ? '승인할 제안이 없습니다' : '제안이 없습니다'}</div>
@@ -485,20 +513,17 @@ export default function ContinuousOperatorPage() {
                     />
                   ))
                 )}
+                </div>
               </div>
-              <aside className="space-y-4">
-                <AutoMarketingRoiCard roi={roi} />
-                {learningSummary && learningSummary.memory.total > 0 && <LearningCard summary={learningSummary} />}
-              </aside>
             </div>
           )}
 
-          {view === 'natural' && <div className="max-w-3xl"><NaturalLanguageStart submitting={creating} onSubmit={handleNaturalSubmit} /></div>}
+          {view === 'natural' && <div className="max-w-3xl mx-auto"><NaturalLanguageStart submitting={creating} onSubmit={handleNaturalSubmit} /></div>}
 
-          {view === 'scenario' && <div className="max-w-3xl"><ScenarioStart onSelect={handleScenarioSelect} /></div>}
+          {view === 'scenario' && <ScenarioStart onSelect={handleScenarioSelect} />}
 
           {view === 'operators' && (
-            <div className="max-w-3xl">
+            <div>
               <OperatorsManageList
                 operators={operators}
                 onRunNow={handleRunNow}
@@ -534,43 +559,3 @@ export default function ContinuousOperatorPage() {
   );
 }
 
-// AI 학습 현황 — 추천 화면 상단 (회사별 누적 학습)
-function LearningCard({ summary }: { summary: LearningSummary }) {
-  const approvalPct = summary.performance.totalProposals30d > 0
-    ? Math.round((summary.performance.approvedCount / summary.performance.totalProposals30d) * 100)
-    : null;
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_32px_-16px_rgba(15,23,42,0.25)]">
-      <div className="flex items-center gap-2 mb-3">
-        <Sparkles className="w-4 h-4 text-indigo-700" />
-        <span className="text-[13px] font-semibold text-slate-900">AI 학습 현황</span>
-        {summary.memory.lastLearnedAt && (
-          <span className="ml-auto text-[10px] text-slate-400">마지막 학습 {new Date(summary.memory.lastLearnedAt).toLocaleDateString('ko-KR')}</span>
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Stat label="학습 누적" value={`${summary.memory.total}건`} tone="text-indigo-800" />
-        <Stat label="성공 패턴" value={`${summary.memory.successPatterns}건`} tone="text-emerald-800" />
-        <Stat label="30일 제안" value={`${summary.performance.totalProposals30d}건`} tone="text-cyan-800" />
-        <Stat label="승인률" value={approvalPct != null ? `${approvalPct}%` : '-'} tone="text-amber-800" />
-      </div>
-      {summary.variantWinner && summary.variantWinner.sent > 0 && (
-        <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-600 p-2 bg-white border border-slate-200 rounded-lg">
-          <Sparkles className="w-3 h-3 text-indigo-700 flex-shrink-0" />
-          <span>지난 14일 가장 효과 좋은 변형 = <span className="font-semibold text-indigo-800">변형 {summary.variantWinner.variantLabel}</span>
-            <span className="text-slate-400"> (클릭률 {(summary.variantWinner.ctr * 100).toFixed(1)}% · 발송 {summary.variantWinner.sent}건)</span></span>
-        </div>
-      )}
-      <div className="text-[10px] text-slate-400 italic mt-2">Data source: 회사별 누적 학습 · 최근 30일 제안</div>
-    </div>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return (
-    <div className="p-2.5 bg-slate-50 rounded-lg">
-      <div className="text-[11px] text-slate-500">{label}</div>
-      <div className={`text-[15px] font-bold tabular-nums ${tone}`}>{value}</div>
-    </div>
-  );
-}

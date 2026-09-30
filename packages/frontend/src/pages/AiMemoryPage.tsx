@@ -571,14 +571,15 @@ export default function AiMemoryPage() {
       moduleId="ai-memory"
       tabs={AI_MEMORY_TABS}
       activeTab="learn"
-      aux={{ label: '가이드', icon: BookOpen, onClick: () => setShowGuideModal(true) }}
+      stamp={{ text: '다시 읽기', onRefresh: reloadAll, loading: overviewLoading || topLoading }}
       command={{
-        stats: overview ? [
-          { label: '누적 학습', value: `${overview.total_memories.toLocaleString()}건` },
-          { label: '최근 30일', value: `${Number(overview.recent_30d_added || 0).toLocaleString()}건` },
-        ] : [{ label: '누적 학습', value: '—' }],
+        facts: [
+          { label: '누적 학습', value: overview ? `${overview.total_memories.toLocaleString()}건` : '—' },
+          { label: '최근 30일', value: overview ? `${Number(overview.recent_30d_added || 0).toLocaleString()}건` : '—' },
+        ],
+        note: '회사마다 쌓인 학습이 문안·타겟·발송 시각 추천에 반영됩니다',
+        actions: [{ label: '가이드', icon: BookOpen, onClick: () => setShowGuideModal(true) }],
         primary: { label: '직접 가르치기', icon: ZPlus, tone: 'indigo', onClick: () => setShowAddModal(true) },
-        stamp: { text: '다시 읽기', onRefresh: reloadAll, loading: overviewLoading || topLoading },
       }}
     >
       <div className="space-y-3">

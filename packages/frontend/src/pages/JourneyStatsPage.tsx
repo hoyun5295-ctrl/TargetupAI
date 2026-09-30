@@ -1,6 +1,7 @@
 import { Workflow } from 'lucide-react';
 import { OUI_CHART_AXIS, OUI_CHART_GRID, OUI_CHART_TOOLTIP } from '../utils/operator-ui';
 import ZoneFrame from '../components/zone/ZoneFrame';
+import { journeyItemTabs } from '../components/zone/zone-tabs';
 /**
  * JourneyStatsPage.tsx — Journey 통계 시각화 (D192 2026-05-22)
  *
@@ -156,10 +157,11 @@ export default function JourneyStatsPage() {
   return (
     <ZoneFrame
       moduleId="journeys"
-      sub={`${journeyName || '여정'} · 성과`}
+      sub={journeyName || '여정'}
       backTo={`/ai-journeys/${id}`}
       backLabel="여정 상세로"
-      aux={{ label: '진입 고객', icon: Users, onClick: () => navigate(`/ai-journeys/${id}`) }}
+      tabs={journeyItemTabs(id)}
+      activeTab="stats"
     >
       <div>
         {/* Overview 카드 — ★ 2026-07-10 목표 달성(진입 후 구매 확인 이탈 = 성과) 추가 */}

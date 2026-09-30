@@ -6,22 +6,11 @@
  * 카드칩 숫자는 저장값만(열람 수 · 오픈/클릭 = 서버 집계) — 화면이 지어내는 비율 0.
  */
 import { useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronUp, Search } from 'lucide-react';
-import { MK_STATUS_CHIP } from '../../utils/make-ui';
+import { Search } from 'lucide-react';
 import { CHIP_STATUS_LABEL, type ChipStatus } from '../../utils/make-flow';
-
-export function OtherMethods({ open, onToggle, summary, children }: { open: boolean; onToggle: () => void; summary: string; children: ReactNode }) {
-  return (
-    <section className={`rounded-[16px] border border-dashed ${open ? 'border-slate-300 bg-white' : 'border-slate-300'}`}>
-      <button type="button" onClick={onToggle} aria-expanded={open} className="w-full flex items-center gap-2.5 px-5 py-3.5 text-left">
-        {open ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
-        <b className="text-[13px] text-slate-700">다른 방법으로 만들기</b>
-        <span className="text-[12px] text-slate-400 truncate">{summary}</span>
-      </button>
-      {open && <div className="px-5 pb-5">{children}</div>}
-    </section>
-  );
-}
+import ZoneSection from '../zone/ZoneSection';
+import ZoneSegmented from '../zone/ZoneSegmented';
+import ZoneSelect from '../zone/ZoneSelect';
 
 export function ListHead<F extends string>({ title, summary, filters, filter, onFilter, query, onQuery, sort, onSort, sortOptions }: {
   title: string; summary?: string;
@@ -29,35 +18,41 @@ export function ListHead<F extends string>({ title, summary, filters, filter, on
   query: string; onQuery: (v: string) => void;
   sort: string; onSort: (v: string) => void; sortOptions: Array<{ value: string; label: string }>;
 }) {
+  // ★ 2026-09-30 AI 존 보정: 흩어진 알약 칩 → 전환 버튼 한 덩어리(제목 옆) · 찾기·정렬은 같은 40 높이(줄 어긋남 0)
   return (
-    <div className="space-y-3">
-      <div className="flex items-baseline gap-3 flex-wrap">
-        <b className="text-[15px] text-slate-900">{title}</b>
-        {summary && <span className="text-[12px] text-slate-500">{summary}</span>}
-      </div>
-      <div className="flex items-center gap-2 flex-wrap">
-        {filters.map((f) => (
-          <button key={f.key} type="button" onClick={() => onFilter(f.key)} aria-pressed={filter === f.key}
-            className={`h-8 px-3 rounded-full text-[13px] border transition-colors ${filter === f.key ? 'bg-indigo-600 text-white border-indigo-600 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200'}`}>
-            {f.label} <span className={`tabular-nums ${filter === f.key ? 'text-white/70' : 'text-slate-400'}`}>{f.count}</span>
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-2">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="제목으로 찾기" className="h-9 w-[180px] md:w-[200px] pl-8 pr-3 rounded-lg bg-white border border-slate-200 text-[12.5px] text-slate-900 placeholder-slate-400 outline-none focus:border-violet-300" />
-          </div>
-          <select value={sort} onChange={(e) => onSort(e.target.value)} className="h-9 px-3 rounded-lg bg-white border border-slate-200 text-[12.5px] text-slate-700 outline-none">
-            {sortOptions.map((o) => <option key={o.value} value={o.value} className="bg-white">{o.label}</option>)}
-          </select>
-        </div>
-      </div>
-    </div>
+    <ZoneSection
+      title={title}
+      filter={(
+        <ZoneSegmented
+          ariaLabel={`${title} 거르기`}
+          items={filters.map((f) => ({ id: f.key, label: f.label, count: f.count }))}
+          value={filter}
+          onChange={onFilter}
+        />
+      )}
+      desc={summary}
+      right={(
+        <>
+          <label className="relative h-10 w-[200px] md:w-[240px] rounded-xl bg-white border border-slate-200 shadow-sm flex items-center">
+            <Search className="w-[15px] h-[15px] absolute left-3 text-slate-400" />
+            <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="제목으로 찾기" className="w-full h-full pl-9 pr-3 rounded-xl bg-transparent text-[13px] text-slate-900 placeholder-slate-400 outline-none focus:ring-2 focus:ring-indigo-100" />
+          </label>
+          <ZoneSelect ariaLabel="정렬" value={sort} onChange={onSort} options={sortOptions} />
+        </>
+      )}
+    />
   );
 }
 
+const STATUS_DOT: Record<ChipStatus, string> = { draft: 'bg-slate-400', scheduled: 'bg-amber-500', sent: 'bg-emerald-500', stopped: 'bg-slate-300', failed: 'bg-rose-500' };
+const STATUS_TEXT: Record<ChipStatus, string> = { draft: 'text-slate-700', scheduled: 'text-amber-800', sent: 'text-emerald-700', stopped: 'text-slate-500', failed: 'text-rose-700' };
+/** 상태 표지 = 점 + 글자(★ 2026-09-30 AI 존 보정 · 사진 위에서도 읽히게 흰 바탕) */
 export function StatusChip({ status, className = '' }: { status: ChipStatus; className?: string }) {
-  return <span className={`text-[10.5px] font-bold rounded-md px-1.5 py-0.5 ${MK_STATUS_CHIP[status]} ${className}`}>{CHIP_STATUS_LABEL[status]}</span>;
+  return (
+    <span className={`inline-flex items-center gap-1 h-6 px-2 rounded-full bg-white/95 border border-slate-200 text-[11.5px] font-semibold ${STATUS_TEXT[status]} ${className}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[status]}`} />{CHIP_STATUS_LABEL[status]}
+    </span>
+  );
 }
 
 /** DM 카드칩(휴대폰 모양 표지) */
@@ -71,10 +66,10 @@ export function DmChip({ cover, fallback, status, catalog, title, meta, metric, 
         <div className="relative aspect-[3/4] bg-white overflow-hidden">
           {cover ? <img src={cover} alt="" className="w-full h-full object-cover" loading="lazy" /> : <div className="w-full h-full flex items-center justify-center">{fallback}</div>}
           <StatusChip status={status} className="absolute left-2.5 top-2.5" />
-          {catalog && <span className="absolute right-2.5 top-2.5 text-[10.5px] font-bold rounded-md px-1.5 py-0.5 bg-violet-500 text-white">카탈로그</span>}
+          {catalog && <span className="absolute right-2.5 top-2.5 inline-flex items-center h-6 px-2 rounded-full bg-white/95 border border-slate-200 text-[11.5px] font-semibold text-sky-700">카탈로그</span>}
           {status === 'draft' && onContinue && (
-            <span className={`absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-center transition-opacity ${hover ? 'opacity-100' : 'opacity-90'}`}>
-              <span onClick={(e) => { e.stopPropagation(); onContinue(); }} className="text-[12px] font-bold text-white bg-violet-600 rounded-lg px-3 py-1.5 shadow-lg">이어서 만들기</span>
+            <span className={`absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-center transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100`}>
+              <span onClick={(e) => { e.stopPropagation(); onContinue(); }} className="text-[12.5px] font-bold text-white bg-slate-900/90 hover:bg-slate-900 rounded-lg px-3.5 py-2 shadow-lg inline-flex items-center gap-1">이어서 만들기</span>
             </span>
           )}
         </div>

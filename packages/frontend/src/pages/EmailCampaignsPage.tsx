@@ -1,6 +1,7 @@
 import ZoneFrame from '../components/zone/ZoneFrame';
 import { zoneModule } from '../constants/ai-operator-modules';
-import { Package, FolderOpen as ZFolderOpen, ChevronDown as ZChevronDown } from 'lucide-react';
+import { Package, FolderOpen as ZFolderOpen } from 'lucide-react';
+import { MK_LINE_EXTRA_BTN } from '../utils/make-ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 // ★ 2026-09-14 T5·T6 AI 자동제작 — 상단 카드띠(입구) · ?edit={campaignId} 딥링크(완성본 착지) · 생성 금액 단일 출처
@@ -42,7 +43,7 @@ import { Layers } from 'lucide-react';
 import EmailEditScreen from '../components/make/EmailEditScreen';
 import EmailDetailModal from '../components/make/EmailDetailModal';
 import MakeSendModal from '../components/make/MakeSendModal';
-import { OtherMethods, ListHead, EmailChip, Meter, fmtDate } from '../components/make/HomeParts';
+import { ListHead, EmailChip, Meter, fmtDate } from '../components/make/HomeParts';
 import { emailChipStatus, emailCoverOf, type ChipStatus } from '../utils/make-flow';
 import '../styles/make.css';
 
@@ -209,7 +210,7 @@ export default function EmailCampaignsPage() {
   const [entryOther] = useState(() => String(searchParams.get('other') || '').trim() || null);
   const [entrySmtp] = useState(() => searchParams.get('smtp') === '1');
   const [pairDmId] = useState(() => String(searchParams.get('pair') || '').trim() || null);
-  const [otherOpen, setOtherOpen] = useState(entryOther === '1');
+  // ★ 2026-09-30 AI 존 보정: 접힌 "다른 방법" 패널 폐지 — ?other=1 로 오면 명령 카드([광고성]·[이미지])·시작 카드가 처음부터 보인다
   const [listFilter, setListFilter] = useState<'all' | ChipStatus>('all');
   const [listQuery, setListQuery] = useState('');
   const [listSort, setListSort] = useState('recent');
@@ -827,7 +828,7 @@ export default function EmailCampaignsPage() {
   return (
     <ZoneFrame
       moduleId="email"
-      aux={campaigns.length > 0 ? { label: '분석', icon: BarChart3, onClick: () => setShowAnalytics(true) } : null}
+      links={campaigns.length > 0 ? [{ label: '자세히 분석', icon: BarChart3, onClick: () => setShowAnalytics(true) }] : []}
       more={smtpConfigured && smtpConfig?.isConfigured ? [
         { label: `회사 메일 설정 · ${smtpConfig.fromEmail}`, icon: Settings, onClick: () => setSmtpFormOpen(true) },
         { label: '연결 점검(내 메일로 보내 보기)', icon: Send, onClick: () => setTestModalOpen(true) },
@@ -842,23 +843,36 @@ export default function EmailCampaignsPage() {
           icon: Wand2,
           busy: genStep !== null,
           credit: `${AI_GENERATE_COSTS['email-ai-generate']}크레딧`,
+          extra: (
+            <>
+              <label className={`${MK_LINE_EXTRA_BTN} cursor-pointer select-none ${aiAsAd ? '!border-amber-300 !bg-amber-50 !text-amber-900' : ''}`} title='광고성 이메일로 만들기: 발송 시 "(광고)" + 수신거부 링크 자동 부착'>
+                <input type="checkbox" checked={aiAsAd} onChange={(e) => setAiAsAd(e.target.checked)} disabled={genStep !== null} className="rounded accent-amber-500" />
+                광고성
+              </label>
+              <ImageToCopyButton
+                label="이미지"
+                onExtracted={(t) => setAiPrompt((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                disabled={genStep !== null}
+                className={MK_LINE_EXTRA_BTN}
+              />
+            </>
+          ),
         },
-        stats: campaigns.length ? [
-          { label: '보낸 메일', value: sentCampaignCount.toLocaleString() },
-          { label: '평균 오픈율', value: `${stats.openRate.toFixed(1)}%` },
-          { label: '클릭률', value: `${stats.clickRate.toFixed(1)}%` },
-          { label: '반송률', value: `${stats.bounceRate.toFixed(1)}%` },
-        ] : [{ label: '보낸 메일', value: 0 }],
-        alts: [
-          { label: '재료로 만들기', icon: Package, onClick: () => navigate('/quick-campaign?channel=email'), disabled: genStep !== null },
-          { label: '블록으로 직접', icon: Layers, onClick: () => setVisualEditor({ sections: [], isAd: true, aiGenerated: false }), disabled: genStep !== null },
-          { label: '템플릿에서', icon: LayoutTemplate, onClick: () => setShowGallery(true), disabled: genStep !== null },
+      }}
+      kpis={[
+        { label: '보낸 메일', value: sentCampaignCount.toLocaleString() },
+        { label: '평균 오픈율', value: campaigns.length ? `${stats.openRate.toFixed(1)}%` : '—' },
+        { label: '클릭률', value: campaigns.length ? `${stats.clickRate.toFixed(1)}%` : '—' },
+        { label: '반송률', value: campaigns.length ? `${stats.bounceRate.toFixed(1)}%` : '—' },
+      ]}
+      stamp={{ text: '다시 읽기', onRefresh: loadAll, loading }}
+      start={{
+        items: [
+          { icon: Package, title: '재료로 만들기', desc: '행사 주소·사진만 넣으면 완성', tint: 'from-blue-400 to-cyan-500', featured: true, badge: '추천', onClick: () => navigate('/quick-campaign?channel=email'), disabled: genStep !== null },
+          { icon: Layers, title: '블록으로 직접', desc: '빈 캔버스에서 블록을 직접 조립해요', tint: 'from-violet-400 to-fuchsia-500', onClick: () => setVisualEditor({ sections: [], isAd: true, aiGenerated: false }), disabled: genStep !== null },
+          { icon: LayoutTemplate, title: '템플릿에서', desc: '완성된 골격을 한 번에 · 크레딧 0', tint: 'from-emerald-400 to-teal-500', onClick: () => setShowGallery(true), disabled: genStep !== null },
+          { icon: ZFolderOpen, title: '라이브러리에서', desc: '저장 소재를 골라 이미지 이메일로', tint: 'from-amber-400 to-orange-500', onClick: () => setStartLibOpen(true), disabled: genStep !== null },
         ],
-        more: [
-          { label: '라이브러리에서 시작', icon: ZFolderOpen, onClick: () => setStartLibOpen(true) },
-          { label: '광고성 표기 · 이미지로 불러오기', icon: ZChevronDown, onClick: () => setOtherOpen(true), divider: true },
-        ],
-        stamp: { text: '다시 읽기', onRefresh: loadAll, loading },
       }}
       blocks={[
         ...(error ? [{ text: error, tone: 'rose' as const }] : []),
@@ -874,94 +888,8 @@ export default function EmailCampaignsPage() {
           onPick={(a) => startFromLibrary([a])}
           onPickMany={startFromLibrary}
         />
-        <OtherMethods open={otherOpen} onToggle={() => setOtherOpen((v) => !v)} summary="한 줄로 자동 생성 · 저장 소재에서 · 빈 화면에서">
-          <div className="bg-gradient-to-br from-fuchsia-50 via-purple-50 to-indigo-50 border border-fuchsia-200 rounded-2xl p-5">
-            {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-fuchsia-500 to-purple-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-slate-900">AI로 이메일 만들기</div>
-                <div className="text-[11px] text-slate-500">한 줄만 입력하면 제목·본문·HTML까지 한 번에 ({AI_GENERATE_COSTS['email-ai-generate']} 크레딧)</div>
-              </div>
-            </div>
-            <div className="flex flex-col md:flex-row gap-2 mb-3">
-              <input
-                type="text"
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && genStep === null) handleAiGenerate({ prompt: aiPrompt }); }}
-                placeholder="예: 여름 신상 입고 안내, VIP 고객에게 정중한 톤으로"
-                disabled={genStep !== null}
-                className="flex-1 px-4 py-2.5 bg-violet-50 border border-slate-300 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300 disabled:opacity-50"
-              />
-              <ImageToCopyButton
-                label="이미지"
-                onExtracted={(t) => setAiPrompt((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
-                disabled={genStep !== null}
-                className="px-3 py-2.5 rounded-xl border border-violet-300 bg-violet-50 text-violet-900 text-sm font-medium hover:bg-violet-100 disabled:opacity-40 inline-flex items-center gap-1.5 whitespace-nowrap"
-              />
-              <button
-                onClick={() => handleAiGenerate({ prompt: aiPrompt })}
-                disabled={genStep !== null || !aiPrompt.trim()}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 whitespace-nowrap"
-              >
-                {genStep !== null ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                {genStep !== null ? '생성 중...' : 'AI 생성'}
-              </button>
-            </div>
-            <label className="flex items-center gap-2 text-[11px] text-slate-500 cursor-pointer w-fit">
-              <input type="checkbox" checked={aiAsAd} onChange={(e) => setAiAsAd(e.target.checked)} disabled={genStep !== null} className="rounded" />
-              광고성 이메일로 만들기 (발송 시 "(광고)" + 수신거부 링크 자동 부착)
-            </label>
-            {/* ★ 2026-07-02(3) 시작 허브 — [템플릿에서 시작]/[비주얼로 만들기] + ★2026-07-19 P4 [라이브러리에서 시작] */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
-              <button
-                onClick={() => setShowGallery(true)}
-                disabled={genStep !== null}
-                className="group flex items-center gap-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 hover:border-emerald-300 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-md shrink-0">
-                  <LayoutTemplate className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900">템플릿에서 시작</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">완성된 골격을 한 번에 (크레딧 0 · 바로 편집)</div>
-                </div>
-              </button>
-              <button
-                onClick={() => setVisualEditor({ sections: [], isAd: true, aiGenerated: false })}
-                disabled={genStep !== null}
-                className="group flex items-center gap-3 bg-violet-50 hover:bg-violet-100 border border-violet-200 hover:border-violet-300 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-md shrink-0">
-                  <Sparkles className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900">직접 제작</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">빈 캔버스에서 블록 직접 조립</div>
-                </div>
-              </button>
-              <button
-                onClick={() => setStartLibOpen(true)}
-                disabled={genStep !== null}
-                className="group flex items-center gap-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 hover:border-amber-300 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-md shrink-0">
-                  <FolderOpen className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900">라이브러리에서 시작</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">저장 소재 다중 선택 → 이미지 이메일</div>
-                </div>
-              </button>
-            </div>
-            <div className="text-[10px] text-slate-400 italic mt-3">
-              Data source: 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력
-            </div>
-          </div>
-        </OtherMethods>
+        {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
+        <div className="text-[10px] text-slate-400 italic -mt-1">Data source: 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력</div>
 
         {/* ★ 2026-09-27 만들기 개편 — 내 이메일 = 요약 한 줄 + 상태 거름 칩 + 찾기·정렬 + 받은편지함 모양 카드칩(목업 마 ③) · 누르면 상세 창 · 초안 = 이어서 고치기 */}
         {(() => {

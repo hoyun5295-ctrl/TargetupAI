@@ -1,5 +1,6 @@
 import { OUI_CHART_AXIS, OUI_CHART_GRID, OUI_CHART_TOOLTIP } from '../utils/operator-ui';
 import ZoneFrame from '../components/zone/ZoneFrame';
+import ZoneSegmented from '../components/zone/ZoneSegmented';
 /**
  * PerformancePage.tsx — 성과 리포트 전면 재설계 (2026-06-08)
  *
@@ -634,20 +635,15 @@ export default function PerformancePage() {
       moduleId="performance"
       command={{
         lead: (
-          <span className="inline-flex items-center rounded-lg border border-slate-200 p-0.5" role="group" aria-label="기간">
-            {PERIOD_OPTIONS.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                onClick={() => setPeriod(o.value)}
-                className={`h-7 px-2.5 rounded-md text-[12.5px] transition-colors ${period === o.value ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-600 hover:bg-slate-100'}`}
-              >
-                {o.label}
-              </button>
-            ))}
-          </span>
+          <ZoneSegmented
+            ariaLabel="기간"
+            items={PERIOD_OPTIONS.map((o) => ({ id: o.value, label: o.label }))}
+            value={period}
+            onChange={(v) => setPeriod(v)}
+          />
         ),
-        stats: availability ? [{ label: '자사몰', value: hasCdp ? '연동됨' : '미연동' }] : [],
+        facts: availability ? [{ label: '자사몰', value: hasCdp ? '연동됨' : '미연동', tone: hasCdp ? 'emerald' : undefined }] : [],
+        note: '발송 성과와 다음에 할 일을 기간별로 봅니다',
         primary: {
           label: '풀분석 보고서',
           icon: Sparkles,
@@ -656,8 +652,8 @@ export default function PerformancePage() {
           onClick: () => setShowSettings(true),
           disabled: loading || !snapshot || snapshot.totalCampaigns.current === 0,
         },
-        stamp: { text: '다시 읽기', onRefresh: load, loading },
       }}
+      stamp={{ text: '다시 읽기', onRefresh: load, loading }}
     >
             {createPortal(
               <CreditConfirmModal

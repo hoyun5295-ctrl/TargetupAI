@@ -432,13 +432,15 @@ export default function QuickCampaignPage() {
           disabled: planLocked,
           tone: 'indigo',
         },
-        stats: [{ label: '만들 것', value: CHANNEL_NOUN[channel] }],
+      }}
+      start={{
+        items: [],
         more: [
           { label: '한 줄로 자동 생성', icon: MessageSquareText, onClick: () => navigate(otherTo('auto')) },
           { label: '질문 몇 개로 만들기', icon: HelpCircle, onClick: () => navigate('/dm-builder?other=onestep') },
           { label: '이미지로 불러오기 · 저장 소재에서', icon: ImageDown, onClick: () => navigate(otherTo('image')) },
           { label: '블록으로 직접 만들기', icon: Blocks, onClick: () => navigate(otherTo('blocks')) },
-          { label: 'DM·이메일·인앱 세트 한 번에(옛 방식)', icon: Layers3, onClick: () => { setResumeDraftId(null); setSetOpen(true); }, divider: true },
+          { label: 'DM·이메일·인앱 세트 한 번에(옛 방식)', icon: Layers3, onClick: () => { setResumeDraftId(null); setSetOpen(true); } },
         ],
       }}
       commitBar={(
