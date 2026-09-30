@@ -46,6 +46,10 @@
   background: #fff;
   position: relative;
 }
+/* 미리보기 틀 — 375 폭 문서를 scale 로 줄여 담아 배치 폭이 보이는 폭보다 59px 넓다.
+   hidden 은 스크롤 칸이라 코드로 밀리면 쪽이 왼쪽으로 치우치고 오른쪽에 흰 띠가 생긴다(★2026-10-01 박성용 접수 cmunux3e4).
+   clip = 스크롤 칸이 아니다(밀 수 없음) · 지원 안 하는 옛 브라우저는 앞줄 hidden 을 쓴다. */
+.mk-preview-box { overflow: hidden; overflow: clip; }
 .mk-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .mk-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 8px; }
 .mk-scroll::-webkit-scrollbar-track { background: transparent; }

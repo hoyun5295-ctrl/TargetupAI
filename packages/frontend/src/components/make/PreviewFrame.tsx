@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useRef } from 'react';
 import { guardPreviewHtml, postToPreview, readPreviewMessage } from '../../utils/make-preview';
+import '../../styles/make.css';
 
 export default function PreviewFrame({
   html, viewport, displayWidth, displayHeight, tap = false, selectedId = null, onTap, onRect, title,
@@ -64,7 +65,8 @@ export default function PreviewFrame({
   }, [selectedId]);
 
   return (
-    <div style={{ width: displayWidth, height: displayHeight, overflow: 'hidden', position: 'relative', background: '#fff' }}>
+    // 바깥 칸 = mk-preview-box(overflow clip) — 배치 폭(viewport)이 보이는 폭보다 넓어 hidden 이면 코드로 옆으로 밀렸다(★2026-10-01 박성용 접수)
+    <div className="mk-preview-box" style={{ width: displayWidth, height: displayHeight, position: 'relative', background: '#fff' }}>
       <iframe
         ref={frameRef}
         title={title}

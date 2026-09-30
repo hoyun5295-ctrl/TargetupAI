@@ -209,11 +209,13 @@ function ButtonRow({
     <div className="mb-2 bg-neutral-50 border border-neutral-200 p-3 rounded-lg space-y-2">
       <div className="flex gap-2 items-center">
         <span className="text-[12px] text-neutral-500 w-6 tabular-nums">{idx + 1}.</span>
+        {/* ★ 2026-10-01 폭은 !w-24 — CUI_INPUT 의 w-full 이 빌드 CSS 순서상 w-24 를 이겨 선택 칸이 줄을 다 차지하고 버튼명 칸이 26px 로 눌렸다
+            (글자가 거꾸로 쌓이고 띄어쓰기·지우기가 안 됨 · 박성용 접수 cmunc1yb5) */}
         <select
           value={btn.type}
           disabled={typeLocked}
           onChange={(e) => onPatch({ type: e.target.value as ButtonLinkType })}
-          className={`${CUI_INPUT} h-8 text-[13px] w-24`}
+          className={`${CUI_INPUT} h-8 text-[13px] !w-24 shrink-0`}
         >
           {typesForSelect.map((t) => (
             <option key={t.value} value={t.value}>
@@ -255,14 +257,14 @@ function ButtonRow({
             onChange={(e) => onPatch({ urlMobile: e.target.value })}
             onBlur={recheckUrls}
             placeholder="모바일 URL"
-            className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
+            className={`${CUI_INPUT} h-8 text-[13px]`}
           />
           <input
             value={btn.urlPc || ''}
             onChange={(e) => onPatch({ urlPc: e.target.value })}
             onBlur={recheckUrls}
             placeholder="PC URL (선택)"
-            className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
+            className={`${CUI_INPUT} h-8 text-[13px]`}
           />
         </div>
       )}
@@ -275,14 +277,14 @@ function ButtonRow({
               onChange={(e) => onPatch({ urlMobile: e.target.value })}
             onBlur={recheckUrls}
               placeholder="모바일 URL"
-              className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
             <input
               value={btn.urlPc || ''}
               onChange={(e) => onPatch({ urlPc: e.target.value })}
             onBlur={recheckUrls}
               placeholder="PC URL (선택)"
-              className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -290,13 +292,13 @@ function ButtonRow({
               value={btn.schemeAndroid || ''}
               onChange={(e) => onPatch({ schemeAndroid: e.target.value })}
               placeholder="Android scheme"
-              className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
             <input
               value={btn.schemeIos || ''}
               onChange={(e) => onPatch({ schemeIos: e.target.value })}
               placeholder="iOS scheme"
-              className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
           </div>
         </div>

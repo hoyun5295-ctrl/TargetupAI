@@ -271,7 +271,7 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
             <select
               value={profileFilter}
               onChange={(e) => setProfileFilter(e.target.value)}
-              className={`${CUI_SELECT} w-auto min-w-[168px]`}
+              className={`${CUI_SELECT} !w-auto min-w-[168px]`}
               aria-label="발신프로필 거르기"
             >
               <option value="">전체 발신프로필</option>

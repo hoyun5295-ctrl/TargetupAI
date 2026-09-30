@@ -276,7 +276,7 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
                   <div key={idx} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                     <div className="flex items-center gap-2 mb-2">
                       <select value={btn.buttonType} onChange={e => updateButton(idx, 'buttonType', e.target.value)}
-                        className={`${CUI_SELECT} h-8 w-auto min-w-[120px] text-[13px] bg-white`}
+                        className={`${CUI_SELECT} h-8 !w-auto min-w-[120px] shrink-0 text-[13px] bg-white`}
                         aria-label={`${idx + 1}번 버튼 종류`}>
                         {BUTTON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                       </select>

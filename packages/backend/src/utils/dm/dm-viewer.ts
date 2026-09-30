@@ -627,7 +627,13 @@ ${fx ? '    fxGo(i); return;\n' : ''}    if (MODE === 'slides') {
 
   // 페이지 단위 가시성 → 현재 페이지 추적 + dots/counter 갱신
   if ('IntersectionObserver' in window && pageEls.length > 0) {
-    var pageObserver = new IntersectionObserver(function(entries){
+${fx
+    // ★ 2026-10-01 효과(책장 넘김·페이드) DM = 장을 한자리에 겹쳐 둔다 → 가시성으로는 지금 장을 알 수 없다.
+    //   책장 넘김은 넘김이 끝나 앞 장 회전을 되돌리는 순간 앞 장이 "다시 보임"으로 잡혀 현재 장을 되돌렸다
+    //   (다음을 눌러도 2쪽에서 멈추고 쪽 번호가 1에 고정 · 박성용 접수 cmunux3e4). 효과 DM 의 현재 장은 fxGo → updateCurrent 가 소유한다.
+    //   효과가 없는 DM 은 아래 글자가 그대로 실린다(발행 HTML 무변경 · dm-effect 계약).
+    ? ''
+    : `    var pageObserver = new IntersectionObserver(function(entries){
       var best = null;
       entries.forEach(function(e){
         if (e.isIntersecting && (!best || e.intersectionRatio > best.intersectionRatio)) best = e;
@@ -638,7 +644,7 @@ ${fx ? '    fxGo(i); return;\n' : ''}    if (MODE === 'slides') {
       }
     }, { threshold: [0.3, 0.6, 0.9] });
     pageEls.forEach(function(el){ pageObserver.observe(el); });
-
+`}
     // 섹션 단위 뷰 카운트 (섹션별 성과)
     var sectionObserver = new IntersectionObserver(function(entries){
       entries.forEach(function(e){

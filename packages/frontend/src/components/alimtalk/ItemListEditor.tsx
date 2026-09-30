@@ -290,7 +290,7 @@ export default function ItemListEditor({
               onChange={(e) => patchRow(i, { title: e.target.value })}
               placeholder="제목 (최대 6자)"
               maxLength={6}
-              className={`${CUI_INPUT} h-8 text-[13px] w-28`}
+              className={`${CUI_INPUT} h-8 text-[13px] !w-28 shrink-0`}
             />
             <input
               value={item.description}

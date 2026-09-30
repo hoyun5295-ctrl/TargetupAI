@@ -263,9 +263,11 @@ export default function DmBuilderPage() {
   const uploadModeRef = useRef<'slides' | 'scroll' | 'catalog'>('scroll');
   const [uploadingImages, setUploadingImages] = useState(false);
 
+  // ★ 2026-10-01 기본 제목 — 제목이 비면 서버 생성(POST /dm)이 400 이라 저장·자동 저장·미리보기가 모두 멈췄다(임은지 접수 cmunneeeb · cmunern60).
+  //   다른 7개 입구(카탈로그 DM · 완성 이미지 DM 등)와 같게 처음부터 이름을 준다 · 편집기 머리에서 바로 고칠 수 있다.
   const handleCreateNew = () => {
     setLegacyDmError(null);
-    createNew({ layoutMode: 'scroll' });
+    createNew({ layoutMode: 'scroll', title: '새 DM' });
     setMode('edit');
   };
 
@@ -273,7 +275,7 @@ export default function DmBuilderPage() {
   const handleStartBlockBuild = () => {
     if (generating) return;
     setLegacyDmError(null);
-    createNew({ layoutMode: 'scroll' });
+    createNew({ layoutMode: 'scroll', title: '블록으로 만든 DM' });
     setMode('build');
   };
 
@@ -680,12 +682,16 @@ export default function DmBuilderPage() {
 
   // ── 편집 모드 ──
   if (mode === 'build') {
+    // ★ 2026-10-01 조립 화면에도 저장 알림을 그린다 — 전에는 [임시저장] 결과(성공·실패)가 어디에도 보이지 않았다(임은지 접수 cmunern60)
     return (
-      <DmBlockBuilder
-        onBack={() => setMode('list')}
-        onBlankCanvas={() => setMode('edit')}
-        onDone={() => { void save({ silent: true }); setMode('edit'); }}
-      />
+      <>
+        <DmBlockBuilder
+          onBack={() => setMode('list')}
+          onBlankCanvas={() => setMode('edit')}
+          onDone={() => { void save({ silent: true }); setMode('edit'); }}
+        />
+        {toast && <Toast toast={toast} />}
+      </>
     );
   }
 

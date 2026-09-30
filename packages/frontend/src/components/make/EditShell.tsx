@@ -196,6 +196,11 @@ export function AddBlockButton({ label = '블록 추가', open, onToggle, childr
   );
 }
 
+// [참여 이벤트] 칸 폭 = 끝줄에 남는 칸 수(격자 = 기본 3칸 · sm 4칸 · lg 3칸) · Tailwind 완성 리터럴
+const SPAN3: Record<number, string> = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3' };
+const SPAN4_SM: Record<number, string> = { 1: 'sm:col-span-1', 2: 'sm:col-span-2', 3: 'sm:col-span-3', 4: 'sm:col-span-4' };
+const SPAN3_LG: Record<number, string> = { 1: 'lg:col-span-1', 2: 'lg:col-span-2', 3: 'lg:col-span-3' };
+
 export function PalettePopover({ items, interaction, onPick, onClose, note, feeTag }: {
   items: MakePaletteItem[];
   interaction?: MakePaletteItem[];
@@ -211,6 +216,10 @@ export function PalettePopover({ items, interaction, onPick, onClose, note, feeT
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   const list = showInteraction && interaction ? interaction : items;
+  // ★ 2026-10-01 DM 목록에 머리가 더해져 13칸 — [참여 이벤트] 가 끝줄에 혼자 남아 두세 칸이 비었다 → 남는 폭을 채운다
+  const span3 = 3 - (items.length % 3);
+  const span4 = 4 - (items.length % 4);
+  const interactionSpan = `${SPAN3[span3]} ${SPAN4_SM[span4]} ${SPAN3_LG[span3]}`;
   return (
     // ★ 2026-09-29 남지현 접수 — 버튼 바로 아래에 펼친다(떠 있는 창 아님). 옛: 왼쪽 칸 오른쪽 바깥(left-full · 위로 260)에 떠서
     //   세로 스크롤 칸(overflow-y auto = 가로도 auto)에 갇혀 좌우 스크롤이 생기고 윗부분이 화면 밖으로 잘렸다(휴대폰 폭은 위로 튀어나감).
@@ -231,7 +240,7 @@ export function PalettePopover({ items, interaction, onPick, onClose, note, feeT
           </button>
         ))}
         {!showInteraction && interaction && interaction.length > 0 && (
-          <button type="button" onClick={() => setShowInteraction(true)} className="relative h-[66px] rounded-xl border border-slate-200 bg-white hover:bg-slate-100 hover:border-violet-300 flex flex-col items-center justify-center gap-1.5 px-1">
+          <button type="button" onClick={() => setShowInteraction(true)} className={`${interactionSpan} relative h-[66px] rounded-xl border border-slate-200 bg-white hover:bg-slate-100 hover:border-violet-300 flex flex-col items-center justify-center gap-1.5 px-1`}>
             {feeTag && <em className="not-italic absolute -top-2 right-1 text-[10px] font-bold text-amber-950 bg-amber-400 rounded-md px-1.5 py-px">{feeTag}</em>}
             <span className="text-violet-800"><Gift className="w-4 h-4" /></span>
             <span className="text-[12px] font-semibold text-slate-800 text-center leading-tight break-keep">참여 이벤트</span>

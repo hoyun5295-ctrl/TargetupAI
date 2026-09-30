@@ -46,7 +46,11 @@ function bridgeSource(tap: boolean): string {
     'window.addEventListener("message",function(e){if(e.source!==P)return;var d=e.data||{};if(d.src!==SRC)return;',
     'if(d.type==="scrollTo"&&typeof d.y==="number"){window.scrollTo(0,d.y);}',
     'if(d.type==="select"){mark(d.id||null);if(d.id&&d.reveal){var el=document.querySelector("[data-section-id=\\""+String(d.id).replace(/"/g,"")+"\\"]");',
-    'if(el&&el.scrollIntoView){el.scrollIntoView({block:"center"});setTimeout(report,60);}}}});',
+    // ★ 2026-10-01 장 넘김 효과(책장 넘김·페이드) DM 은 장을 한자리에 겹쳐 두어 스크롤이 없다 — scrollIntoView 로는 고른 장으로 가지 않았다
+    //   (편집기 왼쪽에서 쪽을 골라도 미리보기가 1쪽에 멈춤 · 박성용 접수 cmunux3e4). 그 장의 점을 눌러 뷰어의 장 이동(goToPage → fxGo)을 탄다.
+    'if(el&&document.body&&document.body.classList&&document.body.classList.contains("dm-fx")){var pg=el.closest?el.closest(".dm-page"):null;',
+    'var pi=pg?parseInt(pg.getAttribute("data-page-idx")||"-1",10):-1;var ds=document.querySelectorAll(".dm-page-dots .dot");if(pi>=0&&ds[pi]&&ds[pi].click)ds[pi].click();setTimeout(report,700);}',
+    'else if(el&&el.scrollIntoView){el.scrollIntoView({block:"center"});setTimeout(report,60);}}}});',
     'send({type:"ready"});',
     '})();',
   ].join('');
