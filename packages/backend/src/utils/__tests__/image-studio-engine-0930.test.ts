@@ -96,6 +96,8 @@ describe('generatePoster — 엔진 분기', () => {
     expect(openaiCalls()).toHaveLength(0);
     expect(geminiCalls()).toHaveLength(1);
     expect(img).toMatchObject({ base64: 'R0VNSU5J', engine: 'gemini' });
+    // Gemini 프롬프트는 그대로(금지 줄은 OpenAI 전용)
+    expect(JSON.parse(String(geminiCalls()[0].init?.body)).contents[0].parts[0].text).toBe('p');
   });
   it('openai · 사진 없음 = 생성 끝점(JSON · 모델 · 1536x2048 · high · jpeg)', async () => {
     const m = await load();
@@ -105,7 +107,8 @@ describe('generatePoster — 엔진 분기', () => {
     const c = openaiCalls()[0];
     expect(c.url).toBe('https://api.openai.com/v1/images/generations');
     const body = JSON.parse(String(c.init?.body));
-    expect(body).toMatchObject({ model: 'gpt-image-2.5-sunburst', prompt: '포스터 프롬프트', size: '1536x2048', quality: 'high', output_format: 'jpeg', n: 1 });
+    // 사진 없음 = 지어낸 상품 · 인물 금지 한 줄을 OpenAI 에만 붙인다(2차 블라인드 2/6)
+    expect(body).toMatchObject({ model: 'gpt-image-2.5-sunburst', prompt: `포스터 프롬프트\n${m.OPENAI_NO_INVENTED_SUBJECT}`, size: '1536x2048', quality: 'high', output_format: 'jpeg', n: 1 });
     expect((c.init?.headers as any).Authorization).toBe('Bearer test-openai-key');
     expect(img).toMatchObject({ base64: 'T1BFTkFJ', mime: 'image/jpeg', imageTokens: 2223, engine: 'openai' });
   });
@@ -118,6 +121,7 @@ describe('generatePoster — 엔진 분기', () => {
     expect(form).toBeInstanceOf(FormData);
     expect(form.get('model')).toBe('gpt-image-2.5-sunburst');
     expect(form.get('size')).toBe('1536x2048');
+    expect(form.get('prompt')).toBe('p');  // 사진이 있으면 금지 줄 없음(첨부 상품이 주인공)
     const file = form.getAll('image[]')[0] as Blob;
     expect(file.type).toBe('image/png');
     expect(Buffer.from(await file.arrayBuffer()).toString()).toBe('png-bytes');

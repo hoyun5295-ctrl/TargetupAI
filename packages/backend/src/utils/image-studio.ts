@@ -370,6 +370,13 @@ export function openaiImageSize(aspectRatio: string, imageSize: '1K' | '2K'): st
   return `${w}x${h}`;
 }
 
+/**
+ * 사진 없이 OpenAI 로 만들 때만 붙인다 — 상품 · 기기 · 포장 · 입은 옷 = 장면 지시나 제목이 이름을 대면 허용,
+ * 사람 · 모델 · 마네킹 · 손 = 장면 지시가 명시할 때만(0930 확인: 사람을 상품과 한 줄로 묶었더니 "잡지 화보"를 사람 요구로 읽어 2/2 모델을 넣었다).
+ */
+export const OPENAI_NO_INVENTED_SUBJECT =
+  'No product photo is attached: do not invent any specific product, device, packaged item or worn garment unless the scene description above or the headline names it. Do not show any person, model, mannequin or hands unless the scene description above explicitly asks for one. If the scene refers to a product area, leave it as an empty, softly lit display surface.';
+
 /** OpenAI 실패 중 Gemini 로 대체해도 되는 것(일시 장애 · 설정 문제). 안전 거부 · 시간 초과는 StudioError 로 바로 던진다. */
 class OpenAIFallback extends Error {
   constructor(message: string, readonly ms = 0) { super(message); }
@@ -482,7 +489,13 @@ export async function generatePoster(
   return runOnEngine(
     opts?.engine || 'gemini',
     cutout ? 'poster+product' : 'poster',
-    () => callOpenAIImage({ prompt, size: openaiImageSize(preset.aspectRatio, preset.imageSize), images: cutout ? [cutout] : [], timeoutMs: 120_000 }),
+    () => callOpenAIImage({
+      // ★ 2차 블라인드 — OpenAI 는 사진 없이 "상품 자리"를 지어낸 상품으로 채우고 소품 자리에 인물을 넣었다(2/6) · Gemini 에는 붙이지 않는다(동작 무변경)
+      prompt: cutout ? prompt : `${prompt}\n${OPENAI_NO_INVENTED_SUBJECT}`,
+      size: openaiImageSize(preset.aspectRatio, preset.imageSize),
+      images: cutout ? [cutout] : [],
+      timeoutMs: 120_000,
+    }),
     () => {
       const parts: GeminiPart[] = [{ text: prompt }];
       if (cutout) parts.push({ inlineData: { mimeType: cutout.mime, data: cutout.base64 } });
