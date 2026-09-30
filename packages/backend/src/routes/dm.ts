@@ -430,7 +430,10 @@ dmRouter.get('/', async (req: any, res: any) => {
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     // ★ 2026-07-14 사용자별 노출(서수란 신고): 관리자=회사 전체, 일반 사용자=본인 생성분만.
     const isDmAdmin = req.user?.userType === 'company_admin' || req.user?.userType === 'super_admin';
-    const list = await getDmList(companyId, isDmAdmin ? null : req.user?.userId);
+    // ★ 2026-10-01 AI 영업 회사(mobile 계정)만 — 삭제·만료로 파기된 영업 건이 만든 DM(이미지 깨진 「중지」 카드)을 목록에서 뺀다.
+    //   다른 고객사는 false 라 목록 SQL 이 글자 그대로다(판정 = utils/sales-outreach-dm-ownership.ts).
+    const hidePurgedOutreach = String(companyId) === getOutreachContext()?.companyId;
+    const list = await getDmList(companyId, isDmAdmin ? null : req.user?.userId, { hidePurgedOutreach });
     return res.json(list);
   } catch (err: any) {
     console.error('[DM목록] 오류:', err.message);

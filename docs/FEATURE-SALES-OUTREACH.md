@@ -93,6 +93,10 @@
 
 51. **⛔ 렌더·이미지 제작은 프로세스 안 대기열 한 자리**(★2026-09-23 · `outreach-slot-queue.ts`). 겹친 렌더가 409 로 떨어져 재료·채점이 조용히 빠지던 것을 막는다(대기 상한 90초 초과만 옛 busy) · 이미지 제작은 대기(120초 초과만 옛 예외) · 일괄 체인은 한 건의 제작 완료까지 기다린 뒤 다음 건(대기 건 lock_at 갱신) · 자동 확정(면허 후보만 · `confirmedBy='auto:v1'` · 포스터 누끼는 인물 판정 none 만).
 
+52. **⛔ 「이 영업 건이 직접 만든 DM」 판정은 한 곳이다**(★2026-10-01 · 서수란 접수 2건 · `sales-outreach-dm-ownership.ts`). DM 기록(assets kind='dm')에는 AI 가 만든 DM(dmId · 카탈로그 짝)과 담당자가 불러온 지원팀 DM(`payload.imported = true`)이 섞인다. **불러온 DM 은 지원팀 자산이라 옛 DM 중지(`stopSupersededDms`) · 파기(`purgeOutreachJobArtifacts`) · mobile 목록 숨김 세 곳 모두에서 빠진다**(판정 = `ownedOutreachDmIds` · SQL = `OUTREACH_MADE_DM_SQL`·`EXCLUDE_PURGED_OUTREACH_DMS_SQL`). 블록 숨기기·레시피 승격은 불러온 DM 이면 거절한다(섹션 원본·레시피가 없고 재발행은 지원팀 DM 을 복제한다). AI 영업이 만든 DM 은 불러올 수 없다(불러온 기록이 되면 파기 대상에서 빠져 영원히 남는다).
+
+53. **⛔ 파기된 영업 건의 DM 은 행을 지우지 않고 mobile 계정 목록에서만 뺀다**(★2026-10-01). 지우면 제안 메일을 받은 사람이 링크를 열 때 「종료된 페이지입니다」가 「존재하지 않는 DM입니다」로 바뀐다(0806 서수란 접수로 나눈 두 문구). 조건은 영업 회사 목록에서만 붙는다(`routes/dm.ts` 목록 → `getDmList(..., { hidePurgedOutreach })` · 다른 고객사 SQL 글자 그대로).
+
 > **개정 메모(★v3)** — 불변 1: 자동 재시도 0 의 유일 예외 = 불변 37. 불변 18: 행사 1홉 = 이벤트 목록 1 + 면허 있는 카드 상세 최대 2(크롤 단계 · 정적 · 카드당 10초 · 총 30초 · 3값 `crawling_cards`). 불변 26: "갤러리는 배너를 통째로" 는 고객 입구에만 남고 아웃리치는 불변 35. 불변 28: 팔레트 렌더 1회 예외 = 불변 38. 불변 30: 포스터 생략 조건 = 불변 35.
 
 ---
@@ -119,6 +123,7 @@
 | `packages/backend/src/utils/sales-outreach-bulk.ts` | 엑셀 양식 생성(ExcelJS · 예시·업종 드롭다운 포함) + 업로드 파싱(SheetJS · 행별 거절 사유) |
 | `packages/backend/src/utils/sales-outreach-sweeper.ts` | 좀비 잡 종결(markFailed) · **대기 초과 2시간 종결** · 끊긴 발송 선점 복구(unknown) · 만료 파기(스탬프·롤백 소유 · 본문은 ★S4 공용 `purgeOutreachJobArtifacts`). **발송·재시도·재생성 능력 0** |
 | `packages/backend/src/utils/sales-outreach-purge.ts` | ★2026-09-06 S4 **파기 공용** — DM 중지(not_published 멱등) + 포스터·16:9 배너·재료 사본·로고 파일 삭제 · 만료 파기(sweeper)와 사람 삭제가 같은 본문 · 발송 능력 0 |
+| `packages/backend/src/utils/sales-outreach-dm-ownership.ts` | ★2026-10-01 **DM 소유 판정 CT**(import 0) — 불러온 지원팀 DM 판정 · 이 건이 만든 DM 번호 · AI 영업 DM 조건 SQL · 파기 건 DM 목록 숨김 SQL(불변 52·53) |
 | `packages/backend/src/utils/sales-outreach-slices.ts` | ★2026-09-09 **기획전 슬라이스 CT(순수)** — 렌더 기하 → 세로 묶음 판정(`detectEventSlices` · 픽스처 = 아이소이 렌더 기하 73장) · 자격(`sliceModeCard` · 면허 카드 + 사본 ≥3 · 상세 주소 대조) · 4블록 구성(`composeSliceSections` · 600폭 환산 예산) · `sales-outreach-produce.ts` 를 import 하지 않는다(produce 가 이 파일을 쓴다) |
 | `packages/backend/src/utils/campaign-engine.ts` | ★2026-09-06 S5 **조립 엔진(결정 구간 단일 소유자)** — `assembleDmCampaign(materials, options, deps)` · `sales-outreach-*` import 0 · 아웃리치·고객 재료 입구 공용(불변 32) |
 | `packages/backend/src/utils/campaign-quick.ts` | ★2026-09-06 S5·S6 **고객 재료 입구** — ENV 노출 스위치 · 견적(기존 키) · 사본 저장 · 재료 정규화(이 회사 서빙 경로만 · origin 서버 판정) · `generateDmFromMaterials`(엔진 → 초안 DM · 멱등 차감) · `generateEmailFromMaterials`(브랜드 이메일 시안 함수 재사용) |
@@ -168,6 +173,7 @@
 
 | 시점 | 무엇 | 근거 |
 |---|---|---|
+| **2026-10-01** | **서수란 접수 2건 + 포스터 템플릿 날짜(코드 완료 · 미배포 · DDL 0 · AI 0)** — ①파기된 영업 건 DM 이 mobile 계정 내 DM 목록에 깨진 「중지」 카드로 남음 → 영업 회사 목록에서만 뺀다(행 유지 · 불변 53) ②미리 만든 모바일 DM 불러오기 = 4단계 「담당자가 열 주소 > 모바일 DM」 [다른 DM으로 바꾸기](지원팀 발행 DM 카드 1클릭 · 단축 주소 붙여넣기 → 첫 화면만 캡처(채점 AI 0) → 잠금 안에서 imported 기록 → 메일 재조립 · 제목·서두 보존 · 불변 52) ③포스터 자동 선택이 날짜를 안 봄(9월 말 윈터 홀리데이·추석 보름달) → 달력 묶음 58개 달 표(`OUTREACH_TEMPLATE_MONTHS`) · 이번 달(한국 시간)에 맞는 것만 · 스튜디오 목록 무변경. 남은 것 = 금강제화 사진 못 받은 원인 · 「상품 0개」 원인(운영 기록 조회) | memory `project_2026_1001_ai_sales_tickets` · 시험 `outreach-dm-ownership-1001` · `outreach-dm-import-1001` · `outreach-template-month-1001` |
 | **2026-09-24(3)** | **B 네이버 스토어 전용 판독기(★0924 배포완료 · DDL 0 · 실측 대기 · 북마크 버튼 다시 설치)** — 북마크 1차 글자 긁기는 네이버 메뉴·계정 패널이 2000자를 먹어 못 씀(Harold). Harold 저장 원본(톤28 1.8MB)의 `__PRELOADED_STATE__` 확인 → 버튼 판 2 = 허용 칸 6개(상품·위젯·1단 메뉴·관심고객수·가게 이름·홈 위젯)만 · 판독기 = 기획 4(톤캉스 · 추석선물 · 슈퍼 적립 · NEW)·상품 12·관심고객 118,182 · 기획 후보 본문 "톤업 파데프리 선비비 미백 50ml 8,900원(74%) 외 14개" · 링크 = 스토어 메뉴. 이미지(네이버 서버)는 쓰지 않음(약관 판단 전). 기획 판정 규칙은 톤28 1건 근거(다른 스토어 2건 실측 = 설계서 §5) | [B 설계서](2026-09-24-outreach-naver-store-reader-design.md) |
 | **2026-09-24(2)** | **산출물 품질 A(홈페이지만으로 만든 결과물 결함 6종 · ★0924 배포완료 · DDL 0 · 실측 대기)** — Harold 「홈페이지만 읽어서 해도 퀄리티를 끌어올려야」 → 톤28 잡 원문·이미지 실측으로 원인 확정. ①포스터 제목: 업체명 숫자는 게이트 밖(`posterTextOkFor`) · 확정 행사 전부 순서대로 ②행사 카드: 분석 AI 가 제목·혜택·기간 세 조각(원문 그대로)을 함께 내고 `quotePartsOf` 가 부분 문자열 대조 → 카드 제목·기간·본문(혜택은 면허 있을 때만) · 제목 30자(괄호 설명 제외) · 버튼 대체 문구 행사형 ③DM·카탈로그 제목 = 업체명(내부 표식 노출 0 · 학습 제외는 원장 dmId·catalogDmId) ④메일 요약 카드 = 시안에 행사 카드 있으면 생략 ⑤포스터 배경 소품·화장품·미용 도구 금지 ⑥카탈로그 캡션(용량 낱말 제거 · `productNameForImage`) · 여백 자르기 · 글자 없는 사진 쪽 제외. 새 jsonb 키 = `event_quote.candidates[].parts`. 추가 과제 = 공용 `cutAtWord` 경계 | [품질 A 설계서](2026-09-24-outreach-quality-a-design.md) |
 | **2026-09-24** | **네이버 스토어 화면 가져오기(B안 · ★0924 배포완료 · DDL 0 · 글자 긁기는 같은 날 0924(3) 판 2로 대체)** — Harold 「네이버스마트스토어는 영영 안 되나」 → 안 3개(다른 출구 / 직원 브라우저 1클릭 / 저장본) 중 B 동의. 코드 전 실측: G0 이 PC 크롬 = 스토어 정상(같은 PC curl = 429 → 0923 "서버 IP만" 설명 정정) · G1 시험 북마크 = 네이버 화면에서 실행됨 · 글자 13,749 · 정리본 130KB · 압축 24KB. 구현 = 북마크(걷어내기·gzip·`#` 전달·설치 열쇠) → `/admin/outreach-grab` → `POST /store-grab` → `store_grab` 저장 → 확인 화면 후보 카드("네이버 스토어에서 가져옴" · 서버에는 직접 붙여넣기 경로) · 작업대 [스토어 열기]·"가져옴" · 자동 확정 제외. 불변 50 보강 | [설계서 §9-1](2026-09-23-outreach-direct-send-design.md) |

@@ -2,7 +2,7 @@
  * ★ 2026-09-06 S4 AI 영업 아웃리치 — 산출물 파기 공용 함수 (설계 = docs/2026-09-06-campaign-engine-design.md §6)
  *
  * 만료 파기(sweeper)와 사람 삭제(deleteOutreachJob)가 같은 본문을 쓴다. 두 갈래로 갈라 놓으면 한쪽만 고쳐져 한쪽에 파일이 남는다.
- *  - DM 발행 중지(stopDm · not_published = 멱등 성공 · 그 밖 block = 실패로 던진다 · 불변 23)
+ *  - DM 발행 중지(stopDm · not_published = 멱등 성공 · 그 밖 block = 실패로 던진다 · 불변 23) — ★1001 이 건이 직접 만든 DM 만(불러온 지원팀 DM 제외)
  *  - 포스터·16:9 배너·재료 사본(brand_profile.media) 공개 파일 삭제(없으면 무시 = 멱등)
  * purged_at 스탬프·롤백은 호출자가 소유한다(선점은 호출자의 상태 조건이 다르다).
  * 이 파일은 발송 능력이 없다(sendMail·runOutreachJob 없음 · 불변식 4).
@@ -12,6 +12,7 @@ import * as path from 'path';
 import { query } from '../config/database';
 import { stopDm } from './dm/dm-builder';
 import { dropServeVariants } from './image-serve';
+import { ownedOutreachDmIds } from './sales-outreach-dm-ownership';
 
 // routes/cdp.ts INAPP_IMAGE_BASE와 동일 정의 미러(단일 env 소스 — utils/assets.ts와 같은 관례)
 const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
@@ -43,21 +44,16 @@ export async function purgeOutreachJobArtifacts(jobId: string, companyId: string
   let filesDeleted = 0;
   const dms = await query(`SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'dm'`, [jobId]);
   for (const a of dms.rows) {
-    const dmId = String(a.payload?.dmId || '');
-    if (dmId) {
+    // ★ 2026-10-01 이 영업 건이 직접 만든 DM 만 중지한다(DM · 카탈로그 짝). 불러온 지원팀 DM 은 지원팀 자산이라 건드리지 않는다
+    //   (판정 = sales-outreach-dm-ownership.ts · 옛 DM 중지·mobile 목록 숨김과 같은 판정).
+    for (const dmId of ownedOutreachDmIds(a.payload)) {
       const res = await stopDm(dmId, companyId);
       if (res.block && res.block !== 'not_published') throw new Error(`DM 중지 실패(${res.block}): ${dmId}`);
       if (!res.block) dmsStopped += 1;
     }
-    // ★ v3 DM 첫 화면 캡처 사본(제안 메일 대조 오른쪽)도 같은 저장소 · 같이 지운다(리뷰 #10)
+    // ★ v3 DM 첫 화면 캡처 사본(제안 메일 대조 오른쪽)도 같은 저장소 · 같이 지운다(리뷰 #10) — 불러온 DM 의 캡처도 이 건이 만든 사본이다
     if (a.payload?.captureUrl && unlinkPublicImage(String(a.payload.captureUrl))) filesDeleted += 1;
-    // ★ 2026-09-15 카탈로그 DM(같은 회차의 짝) 중지 + 서버가 합성한 상품 카드 파일 삭제
-    const catalogDmId = String(a.payload?.catalogDmId || '');
-    if (catalogDmId) {
-      const res = await stopDm(catalogDmId, companyId);
-      if (res.block && res.block !== 'not_published') throw new Error(`카탈로그 DM 중지 실패(${res.block}): ${catalogDmId}`);
-      if (!res.block) dmsStopped += 1;
-    }
+    // ★ 2026-09-15 카탈로그 DM(같은 회차의 짝) — 중지는 위 ownedOutreachDmIds · 서버가 합성한 상품 카드 파일 삭제
     for (const u of (Array.isArray(a.payload?.catalogImageUrls) ? a.payload.catalogImageUrls : [])) {
       if (unlinkPublicImage(String(u || ''))) filesDeleted += 1;
     }

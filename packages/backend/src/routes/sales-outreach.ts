@@ -20,6 +20,8 @@ import {
   deleteOutreachJob, deleteOutreachJobsBulk,
   // ★ v3 회신 문장 · 레시피 승격
   editOutreachReplyLine, promoteOutreachRecipe,
+  // ★ 2026-10-01 미리 만든 모바일 DM 불러오기(서수란 접수)
+  listImportableOutreachDms, importOutreachDm,
 } from '../utils/sales-outreach-jobs';
 import { outreachMailTo, outreachMailToList, isOutreachMailerReady, outreachTestMailDomains, outreachTestMailAddresses } from '../utils/outreach-mailer';
 // ★ 2026-09-23 담당자 직접 발송(설계서 docs/2026-09-23-outreach-direct-send-design.md) — 효과 함수는 전부 그 파일 안에서 assertOperator 를 먼저 지난다
@@ -599,6 +601,26 @@ router.post('/jobs/:id/rebuild-email', async (req: Request, res: Response) => {
     res.status(202).json({ ok: true });
   } catch (err: any) {
     respondError(res, err, '메일 재조립');
+  }
+});
+
+// ★ 2026-10-01 미리 만든 모바일 DM 불러오기(서수란 접수) — 후보 = 영업 계정의 발행 DM 중 AI 영업이 만들지 않은 것(최근 수정 순)
+router.get('/importable-dms', async (req: Request, res: Response) => {
+  try {
+    res.json({ items: await listImportableOutreachDms(req.user?.userId) });
+  } catch (err: any) {
+    respondError(res, err, 'DM 불러오기 후보');
+  }
+});
+
+// ★ 2026-10-01 고른 DM(dmId) 또는 붙여 넣은 주소(link)로 이 건의 DM 을 바꾸고 메일을 다시 조립한다(AI 0 · 제목·서두 보존)
+router.post('/jobs/:id/import-dm', async (req: Request, res: Response) => {
+  try {
+    const r = await importOutreachDm(req.params.id, { dmId: req.body?.dmId, link: req.body?.link }, req.user?.userId);
+    if (!r.unchanged) audit(req, 'import_dm', req.params.id, { dmId: r.dmId, captured: r.captured });
+    res.status(r.unchanged ? 200 : 202).json({ ok: true, ...r });
+  } catch (err: any) {
+    respondError(res, err, 'DM 불러오기');
   }
 });
 

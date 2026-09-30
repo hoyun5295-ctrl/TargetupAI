@@ -42,6 +42,7 @@ import { getDefaultProps, createSection, type Section, type SectionType } from '
 import { firstBenefitPhrase } from './event-brief';
 import { AI_AUTO_BUILD_FEATURES } from './ai-auto-build-materials';
 import { industryLabel, isIndustryCode, INDUSTRY_CODES, type IndustryCode } from './industry-codes';
+import { kstMonth } from './automarketing-segment';   // ★ 2026-10-01 템플릿 자동 선택 = 한국 시간 달(순수 · import 0 파일)
 import type { EventCandidate } from './sales-outreach-jobs';
 // ★ 2026-09-03 참조 골격(설계서 §6-3) — 아웃리치 파일이 읽고 감산해 구성 힌트로 넘긴다(공용 CT는 아웃리치 사정을 모른다 · 불변 20)
 import { getStructureSkeleton } from './best-copy-assets';
@@ -350,12 +351,51 @@ function hashSeed(seed: string): number {
   return h;
 }
 
-export function pickTemplate(industry: string | null | undefined, seed: string, needProduct: boolean): StudioTemplate {
+/**
+ * ★ 2026-10-01 계절·명절·기념일 템플릿이 어울리는 달(한국 시간 · 1~12) — AI 영업 자동 선택 전용(서수란 접수 · 금강제화 9월 말에
+ * 「윈터 홀리데이」 눈 · 「추석 보름달」 송편이 나옴). 옛 pickTemplate 은 잡 번호 해시로만 골라 날짜를 보지 않았다.
+ * 표는 여기(호출부)에 둔다 — 템플릿 목록(image-studio-templates.ts)은 이미지 스튜디오와 공용이라 이 접수로 고치지 않는다.
+ * 이름 오탈자·새 계절 템플릿 누락은 계약 테스트가 잡는다(표의 id 는 실제 템플릿 · 달력 묶음 템플릿은 표 또는 OUTREACH_TEMPLATE_ANY_MONTH).
+ */
+export const OUTREACH_TEMPLATE_MONTHS: Readonly<Record<string, readonly number[]>> = {
+  // 시즌·명절 행사
+  'event-season-gift': [1, 2, 8, 9], 'event-season-summer': [6, 7, 8], 'event-season-winter': [12, 1, 2], 'event-season-autumn': [9, 10, 11],
+  'event-season-picnic': [3, 4, 5], 'event-season-yearend': [12], 'event-season-blackweek': [11], 'event-season-wedding': [4, 5, 9, 10],
+  'event-season-carechange': [3, 4, 9, 10], 'event-season-chuseok': [9, 10], 'event-season-sunrise': [12, 1], 'event-season-xmaseve': [12],
+  'event-season-boknal': [7, 8], 'event-season-seollal': [1, 2], 'event-season-daeboreum': [2, 3], 'event-season-cherryfest': [3, 4],
+  'event-season-monsoon': [6, 7], 'event-season-foliage': [10, 11], 'event-season-kimjang': [11, 12], 'event-season-longholiday': [5, 9, 10],
+  'event-season-backtoschool': [2, 8], 'event-season-heatwave': [7, 8], 'event-season-firstcold': [10, 11],
+  // 데이·기념일
+  'event-day-valentine': [2], 'event-day-whiteday': [3], 'event-day-carnation': [5], 'event-day-children': [5], 'event-day-newsemester': [2, 3],
+  'event-day-suneung': [11], 'event-day-halloween': [10], 'event-day-roseday': [5], 'event-day-pepero': [11], 'event-day-teacher': [5],
+  'event-day-adult': [5], 'event-day-black': [4], 'event-day-advent': [12], 'event-day-samgyeop': [3], 'event-day-earth': [4], 'event-day-firstsnow': [11, 12],
+  // 시즌(제품 누끼)
+  'season-korean-holiday': [1, 2, 8, 9], 'season-yearend-festive': [12], 'season-spring-blossom': [3, 4], 'season-rainy-mood': [6, 7],
+  'season-first-snow': [11, 12], 'season-golden-hour': [8, 9], 'season-fresh-green': [5, 6], 'season-summer-night': [6, 7, 8],
+  'season-cozy-reading': [9, 10, 11], 'season-winter-healing': [12, 1, 2],
+};
+
+/** 달력 묶음 안이지만 특정 달에 묶이지 않는 템플릿(연중) — 계약 테스트가 「표 또는 이 목록」을 강제한다. */
+export const OUTREACH_TEMPLATE_ANY_MONTH: readonly string[] = [
+  'season-auto', 'event-season-beforeholiday', 'event-day-petday', 'event-day-payday', 'event-day-friendship', 'event-day-founding', 'event-day-weekend', 'event-day-monthend',
+];
+
+/** 이 달에 써도 되는 템플릿인가(표에 없으면 연중). */
+export function templateFitsMonth(templateId: string, month: number): boolean {
+  const months = OUTREACH_TEMPLATE_MONTHS[templateId];
+  return !months || months.includes(month);
+}
+
+export function pickTemplate(industry: string | null | undefined, seed: string, needProduct: boolean, now: Date = new Date()): StudioTemplate {
   const code: IndustryCode = isIndustryCode(industry) ? industry : 'etc';
   const wantKind = needProduct ? 'product' : 'event';
   let pool = TEMPLATE_POOLS[code][wantKind];
   if (pool.length === 0) pool = STUDIO_TEMPLATES.filter((t) => (t.kind ?? 'product') === wantKind);
   if (pool.length === 0) pool = STUDIO_TEMPLATES;
+  // ★ 2026-10-01 이번 달(한국 시간)에 어울리는 것만. 하나도 없으면 옛 묶음 그대로(선택이 비지 않게).
+  const month = kstMonth(now);
+  const fitting = pool.filter((t) => templateFitsMonth(t.id, month));
+  if (fitting.length > 0) pool = fitting;
   return pool[hashSeed(seed) % pool.length];
 }
 
@@ -860,6 +900,16 @@ export async function captureAndScoreDm(viewerUrl: string, opts: { companyId?: s
   if (!shot.result.screenshotBase64) return { score: null, captureUrl };
   const score = await scoreDmCapture(shot.result.screenshotBase64);
   return { score, captureUrl };
+}
+
+/**
+ * ★ 2026-10-01 불러온 지원팀 DM 의 첫 화면 캡처만(채점 AI 호출 0 · 서수란 접수 「미리 만든 DM 불러오기」).
+ * 제안 메일·직접 발송 메일의 DM 첫 화면 칸(dm asset captureUrl)이 읽는다. 워커 부재·장애 = null(메일은 캡처 칸 없이 계속).
+ */
+export async function captureOutreachDmFirstScreen(viewerUrl: string, companyId: string | null): Promise<string | null> {
+  const shot = await renderPageGuarded(viewerUrl, { screenshot: false, screenshotViewport: true, viewportWidth: 375, deadlineMs: 20_000, requestTimeoutMs: 40_000 });
+  if (!shot.ok || !shot.result.screenshotViewportBase64) return null;
+  return storeViewportCapture(shot.result.screenshotViewportBase64, companyId);
 }
 
 /** ★ v3 뷰포트 캡처(JPEG base64) → 공개 사본 URL(우리 저장소 · 파기 시 함께 삭제) · 회사 컨텍스트 없음·실패 = null(계속) — DM 캡처·홈 첫 화면 캡처가 같은 함수 */

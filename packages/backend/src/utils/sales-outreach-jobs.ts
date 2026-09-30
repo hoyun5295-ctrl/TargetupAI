@@ -28,7 +28,7 @@ import { isIndustryCode, industryLabel } from './industry-codes';
 import {
   getOutreachContext, produceOutreachImage, produceOutreachBrandEmail, collectOutreachMedia, fetchImageGuarded,
   generateSubjectIntro, assembleProposalEmail, countBenefitPlaceholders, captureAndScoreDm, bannerAltMapOf, buildOutreachSubject,
-  storeViewportCapture, stripSelfLinkButtons,
+  storeViewportCapture, stripSelfLinkButtons, captureOutreachDmFirstScreen, outreachDmUrlsOf,
   // ★ v3 조립/발행 분리 · 자동 재조립 · 배너 전사 폴백 · AI 계수기
   assembleOutreachDm, publishOutreachDm, updateOutreachDm, produceResultOf, autoRetryReasons, bannerCardsFromTranscripts, assertLicensedQuoteSources,
   callOutreachAi, withOutreachAiMeter, newOutreachAiCost, addOutreachAiCost,
@@ -59,7 +59,11 @@ import {
   extractEventListCards, extractRenderedProductCards, findContactPageLinks,
   OUTREACH_FETCH_OPTS, type OutreachProduct, type OutreachEventCard,
 } from './sales-outreach-media';
-import { stopDm } from './dm/dm-builder';
+import { stopDm, buildSectionSummary } from './dm/dm-builder';
+// ★ 2026-10-01 AI 영업 DM 소유 판정(불러온 지원팀 DM 은 중지·파기·숨김 제외) · 미리 만든 DM 불러오기(서수란 접수)
+import { ownedOutreachDmIds, isImportedOutreachDmAsset, OUTREACH_MADE_DM_SQL } from './sales-outreach-dm-ownership';
+import { normalizeShortCodeInput } from './sales-outreach-examples';
+import { isUuid } from './normalize';
 // ★ 2026-09-06 S1 렌더 승격 — 워커 클라이언트(127.0.0.1) + 순수 계측·합집합·재료 v2
 import {
   renderPageGuarded, countMaterials, shouldEscalateToRender, unionStrings, unionProducts, unionImageDetails, mergeCtaLinks, buildMaterialsV2, bannersOf, pickBrandColorFromPalette,
@@ -77,7 +81,7 @@ const OUTREACH_EVENT_BANNER_RENDER_MS = 15_000;
 const OUTREACH_EVENT_BANNER_BUDGET_MS = 40_000;
 import { isSameSite } from './sales-outreach-render-guard';
 // ★ 2026-09-06 S4 파기 공용(sweeper 와 같은 본문)
-import { purgeOutreachJobArtifacts } from './sales-outreach-purge';
+import { purgeOutreachJobArtifacts, unlinkPublicImage } from './sales-outreach-purge';
 // ★ 2026-09-06 v3 행사 카드(엔진 타입 · 엔진은 이 파일을 모른다) · 레시피 승격(best-copy CT · 쓰기는 그 CT 만)
 import type { EngineEventCard } from './campaign-engine';
 import { insertOutreachRecipe, findOutreachRecipeByJob } from './best-copy-assets';
@@ -1538,8 +1542,8 @@ async function stopSupersededDms(jobId: string, companyId: string): Promise<void
   const olds = r.rows.slice(1);
   for (const row of olds) {
     // ★ 2026-09-15 카탈로그 DM(catalogDmId)도 같은 회차의 짝 · 함께 내린다
-    for (const dmId of [String(row.payload?.dmId || ''), String(row.payload?.catalogDmId || '')]) {
-      if (!dmId) continue;
+    // ★ 2026-10-01 불러온 지원팀 DM 은 이 건의 것이 아니다 — 밀려나도 내리지 않는다(판정 = sales-outreach-dm-ownership.ts)
+    for (const dmId of ownedOutreachDmIds(row.payload)) {
       try {
         const res = await stopDm(dmId, companyId);
         if (res.block && res.block !== 'not_published') console.error('[sales-outreach] 옛 DM 중지 실패:', jobId, dmId, res.block);
@@ -2417,6 +2421,7 @@ export async function promoteOutreachRecipe(jobId: string, operatorSuperAdminId:
   if (cur.rows.length === 0) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
   if (cur.rows[0].stage !== 'ready' && cur.rows[0].stage !== 'sent') throw new OutreachError('CONFLICT', '제작이 끝난 건만 승격할 수 있습니다.');
   const dmAsset = await latestAsset(jobId, 'dm');
+  if (isImportedOutreachDmAsset(dmAsset)) throw new OutreachError('CONFLICT', '불러온 DM을 쓰는 건은 레시피를 올리지 않습니다(AI가 만든 DM의 레시피만 올립니다).');
   const recipe = dmAsset?.recipe && typeof dmAsset.recipe === 'object' ? dmAsset.recipe : null;
   if (!recipe || !Array.isArray(recipe.sectionTypes) || recipe.sectionTypes.length === 0) throw new OutreachError('CONFLICT', '이 건에는 승격할 레시피가 없습니다(v3 이전 산출물).');
   const dup = await findOutreachRecipeByJob(jobId);
@@ -2490,6 +2495,128 @@ export async function rebuildOutreachEmail(jobId: string, operatorSuperAdminId: 
     console.error('[sales-outreach] 메일 재조립 실패:', jobId, err?.message);
     markFailed(jobId, 'producing_email', '메일 재조립에 실패했습니다.', { lockToken, detail: detailOf(err) }).catch(() => {});
   });
+}
+
+// ===== ★ 2026-10-01 미리 만든 모바일 DM 불러오기(서수란 접수 cmunppsm · 설계 = memory project_2026_1001_ai_sales_tickets) =====
+// 지원팀이 mobile 계정에서 업종별로 미리 만든 DM 을 이 건의 DM 으로 쓴다. 새 DM 기록(imported)을 더하면 제안 메일 링크·캡처·
+// 직접 발송·열람 집계가 모두 「가장 최근 DM 기록」을 읽으므로 한 번에 따라간다. AI 호출 0 · 크레딧 0.
+// 불러온 DM 은 지원팀 자산 — 옛 DM 중지·파기·mobile 목록 숨김에서 빠진다(판정 한 곳 = sales-outreach-dm-ownership.ts).
+
+/** 후보 목록 상한(최근 수정 순) — 지원팀이 하루 몇 건씩 만든다(서수란 접수) */
+export const IMPORTABLE_OUTREACH_DM_LIMIT = 60;
+
+export interface ImportableOutreachDm { id: string; title: string; dmUrl: string; updatedAt: string; cover: string | null }
+
+/** 불러오기 후보 = 영업 계정의 발행된 DM 중 AI 영업이 만들지 않은 것(최근 수정 순). */
+export async function listImportableOutreachDms(operatorSuperAdminId: string | null | undefined): Promise<ImportableOutreachDm[]> {
+  await assertOperator(operatorSuperAdminId);
+  const ctx = getOutreachContext();
+  if (!ctx) throw new OutreachError('NOT_READY', 'AI 영업 내부 계정이 설정되지 않았습니다.');
+  const r = await query(
+    `SELECT d.id, d.title, d.short_code, d.updated_at, d.sections,
+            jsonb_build_object('primary_color', d.brand_kit->'primary_color') AS brand_kit,
+            d.pages->0 AS first_page
+       FROM dm_pages d
+      WHERE d.company_id = $1 AND d.status = 'published' AND d.short_code IS NOT NULL
+        AND NOT ${OUTREACH_MADE_DM_SQL}
+      ORDER BY d.updated_at DESC
+      LIMIT $2`,
+    [ctx.companyId, IMPORTABLE_OUTREACH_DM_LIMIT],
+  );
+  return r.rows.map((row: any) => ({
+    id: String(row.id),
+    title: String(row.title || '제목 없음'),
+    dmUrl: outreachDmUrlsOf(String(row.short_code)).dmUrl,
+    updatedAt: new Date(row.updated_at).toISOString(),
+    cover: buildSectionSummary(row).cover,
+  }));
+}
+
+/** 붙여 넣은 주소 → DM 행(영업 계정 안) · DM 단축 코드 먼저, 없으면 수신자 링크 코드(sales-outreach-examples 와 같은 두 단계). */
+async function findOutreachDmByLink(companyId: string, code: string): Promise<any | null> {
+  const cols = `d.id, d.title, d.short_code, d.status, ${OUTREACH_MADE_DM_SQL} AS made`;
+  const direct = await query(`SELECT ${cols} FROM dm_pages d WHERE d.company_id = $1 AND d.short_code = $2`, [companyId, code]);
+  if (direct.rows[0]) return direct.rows[0];
+  try {
+    const viaToken = await query(
+      `SELECT ${cols} FROM dm_recipient_tokens t JOIN dm_pages d ON d.id = t.dm_id WHERE d.company_id = $1 AND t.short_code = $2 LIMIT 1`,
+      [companyId, code],
+    );
+    return viaToken.rows[0] || null;
+  } catch (err: any) {
+    // 수신자 링크 표가 없는 옛 환경 = 단축 코드만 본다
+    if (String(err?.message || '').includes('does not exist')) return null;
+    throw err;
+  }
+}
+
+/**
+ * 미리 만든 DM 을 이 건의 DM 으로 바꾼다. 순서 = 대상 확인 → 첫 화면 캡처(느림 · 잠금 전) → 잠금(ready → producing_email)
+ * → 잠금 안에서 DM 기록 추가 → 메일 재조립(기존 경로 · 제목·서두 보존). 잠금을 못 잡거나 기록을 못 넣으면 캡처 사본을 지운다.
+ */
+export async function importOutreachDm(
+  jobId: string,
+  input: { dmId?: unknown; link?: unknown },
+  operatorSuperAdminId: string | null | undefined,
+): Promise<{ dmId: string; dmUrl: string; captured: boolean; unchanged: boolean }> {
+  await assertOperator(operatorSuperAdminId);
+  const ctx = getOutreachContext();
+  if (!ctx) throw new OutreachError('NOT_READY', 'AI 영업 내부 계정이 설정되지 않았습니다.');
+  const cur = await query(`SELECT stage, mail_result, purged_at, stage_results FROM sales_outreach_jobs WHERE id = $1`, [jobId]);
+  if (cur.rows.length === 0) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
+  if (cur.rows[0].stage !== 'ready' || cur.rows[0].mail_result === 'sending' || cur.rows[0].purged_at) {
+    throw new OutreachError('CONFLICT', '제작 완료 상태에서만 DM을 바꿀 수 있습니다.');
+  }
+
+  const dmIdIn = String(input.dmId ?? '').trim();
+  const linkIn = String(input.link ?? '').trim();
+  let row: any = null;
+  let from: 'list' | 'link';
+  if (dmIdIn) {
+    if (!isUuid(dmIdIn)) throw new OutreachError('VALIDATION', '고른 DM 정보가 올바르지 않습니다. 목록을 새로고침해 주세요.');
+    const r = await query(
+      `SELECT d.id, d.title, d.short_code, d.status, ${OUTREACH_MADE_DM_SQL} AS made FROM dm_pages d WHERE d.id = $1 AND d.company_id = $2`,
+      [dmIdIn, ctx.companyId],
+    );
+    row = r.rows[0] || null;
+    from = 'list';
+  } else if (linkIn) {
+    const code = normalizeShortCodeInput(linkIn);
+    if (!code) throw new OutreachError('VALIDATION', '모바일 DM 주소 형식이 아닙니다. hlj.kr/… 주소를 그대로 붙여 넣어 주세요.');
+    row = await findOutreachDmByLink(ctx.companyId, code);
+    from = 'link';
+  } else {
+    throw new OutreachError('VALIDATION', '불러올 DM을 고르거나 주소를 넣어 주세요.');
+  }
+  if (!row) throw new OutreachError('NOT_FOUND', '영업 계정(mobile)의 모바일 DM에서 찾지 못했습니다. 주소를 확인해 주세요.');
+  if (row.made === true) throw new OutreachError('CONFLICT', 'AI 영업이 만든 DM은 불러올 수 없습니다. 지원팀이 만든 DM을 골라 주세요.');
+  if (row.status !== 'published' || !row.short_code) {
+    throw new OutreachError('CONFLICT', '발행된 DM만 불러올 수 있습니다. 모바일 DM에서 발행한 뒤 다시 시도해 주세요.');
+  }
+  const dmId = String(row.id);
+  const urls = outreachDmUrlsOf(String(row.short_code));
+  const latest = await latestAsset(jobId, 'dm');
+  if (latest && String(latest.dmId || '') === dmId) return { dmId, dmUrl: String(latest.dmUrl || urls.dmUrl), captured: !!latest.captureUrl, unchanged: true };
+
+  const captureUrl = await captureOutreachDmFirstScreen(urls.viewerUrl, ctx.companyId).catch(() => null);
+  const dropCapture = () => { if (captureUrl) { try { unlinkPublicImage(captureUrl); } catch { /* 사본 정리 실패 = 계속 */ } } };
+  const seq = regenSeqOf(cur.rows[0].stage_results || {}, 'dm');
+  const lockToken = randomUUID();
+  const ok = await resetJobTo(jobId, { expect: ['ready'], to: 'producing_email', lockToken, clear: ['regen'] });
+  if (!ok) { dropCapture(); throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.'); }
+  const at = new Date().toISOString();
+  const inserted = await insertAssetOwned(jobId, 'dm', {
+    dmId, dmUrl: urls.dmUrl, viewerUrl: urls.viewerUrl,
+    imported: true, importedFrom: from, importedTitle: String(row.title || ''), importedAt: at, importedBy: operatorSuperAdminId || null,
+    captureUrl, catalogDmId: null, catalogUrl: null, visionScore: null, regenCount: seq,
+  }, 'producing_email', lockToken, seq);
+  if (!inserted) { dropCapture(); throw new OutreachError('CONFLICT', '다른 요청이 먼저 처리했습니다. 화면을 새로고침해주세요.'); }
+  await recordOutreachEdit(jobId, { kind: 'edit', fieldPath: 'dm.import', at, by: operatorSuperAdminId || null });
+  runProduction(jobId, lockToken).catch((err: any) => {
+    console.error('[sales-outreach] DM 불러오기 뒤 메일 재조립 실패:', jobId, err?.message);
+    markFailed(jobId, 'producing_email', '메일 재조립에 실패했습니다.', { lockToken, detail: detailOf(err) }).catch(() => {});
+  });
+  return { dmId, dmUrl: urls.dmUrl, captured: !!captureUrl, unchanged: false };
 }
 
 /** ★ B-3 산출물별 재생성 — 잡당 kind별 5회 · 카운터는 요청 시점 · 의존 순서 = copy→email / image→dm→email / dm→email / email 단독 */
@@ -2579,6 +2706,10 @@ export async function hideOutreachSections(jobId: string, input: { kind: string;
   if (cur.rows.length === 0) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
   if (cur.rows[0].stage !== 'ready') throw new OutreachError('CONFLICT', '제작 완료 상태에서만 블록을 숨길 수 있습니다.');
   const asset = await latestAsset(jobId, kind === 'dm' ? 'dm' : 'email_html');
+  // ★ 2026-10-01 불러온 지원팀 DM 은 여기서 고치지 않는다(섹션 원본이 없고 · 재발행은 지원팀 DM 을 영업 DM 으로 복제한다)
+  if (kind === 'dm' && isImportedOutreachDmAsset(asset)) {
+    throw new OutreachError('CONFLICT', '불러온 DM은 여기서 블록을 숨길 수 없습니다. 모바일 DM 편집기에서 고쳐 주세요.');
+  }
   const base: any[] = kind === 'dm'
     ? (Array.isArray(asset?.sectionsBase) ? asset.sectionsBase : Array.isArray(asset?.sections) ? asset.sections : [])
     : (Array.isArray(asset?.brandSectionsBase) ? asset.brandSectionsBase : Array.isArray(asset?.brandSections) ? asset.brandSections : []);

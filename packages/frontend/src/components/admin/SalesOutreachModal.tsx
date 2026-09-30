@@ -16,6 +16,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Loader2, RefreshCw, Send, Check, ExternalLink, Pencil, Upload, Download, List, Search, EyeOff, Eye, Mail, ChevronDown, ChevronUp, Smartphone, Monitor, Trash2, CheckSquare, Square, LayoutGrid, FileUp, Store } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../ConfirmModal';
+// ★ 2026-10-01 미리 만든 모바일 DM 불러오기 창(서수란 접수)
+import OutreachDmImportModal from './OutreachDmImportModal';
 import { useToast } from '../ToastProvider';
 // ★ 2026-09-23 담당자 직접 발송 · 작업대(설계서 docs/2026-09-23-outreach-direct-send-design.md §12) — 공용 조각은 한 파일
 import OutreachDirectPanel from './OutreachDirectPanel';
@@ -220,6 +222,8 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [matGallery, setMatGallery] = useState<string[]>([]);
   const matDirtyRef = useRef(false);
   const [hiddenDm, setHiddenDm] = useState<string[]>([]);
+  // ★ 2026-10-01 미리 만든 모바일 DM 불러오기 창
+  const [dmImportOpen, setDmImportOpen] = useState(false);
   const [hiddenEmail, setHiddenEmail] = useState<string[]>([]);
   const hiddenDirtyRef = useRef<{ dm: boolean; email: boolean }>({ dm: false, email: false });
   const [copyDraft, setCopyDraft] = useState('');
@@ -1935,6 +1939,22 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                               <button onClick={() => { navigator.clipboard?.writeText(String(dmAsset.dmUrl)).then(() => toast.success('주소를 복사했습니다.')).catch(() => {}); }} className="shrink-0 text-gray-500 hover:text-gray-800">복사</button>
                             </div>
                           )}
+                          {/* ★ 2026-10-01 미리 만든 모바일 DM 불러오기(서수란 접수) — 불러온 DM 이면 표시 · 제작 완료 상태에서만 바꾸기 */}
+                          {dmAsset?.dmUrl && (dmAsset?.imported === true || stage === 'ready') && (
+                            <div className="flex items-center gap-2 text-xs pl-[4.5rem]">
+                              {dmAsset?.imported === true && (
+                                <span className="min-w-0 truncate text-gray-500">
+                                  <span className="mr-1.5 px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 text-[10px] font-semibold">지원팀 DM</span>
+                                  {String(dmAsset.importedTitle || '')}
+                                </span>
+                              )}
+                              {stage === 'ready' && (
+                                <button onClick={() => setDmImportOpen(true)} disabled={busy} className="shrink-0 ml-auto text-indigo-600 hover:text-indigo-800 font-semibold disabled:opacity-40">
+                                  다른 DM으로 바꾸기
+                                </button>
+                              )}
+                            </div>
+                          )}
                           {/* ★ 2026-09-15 카탈로그 DM(크롤 사본으로 장마다 1장 · PC 책 펼침) · 만들어진 건에만 */}
                           {dmAsset?.catalogUrl && (
                             <div className="flex items-center gap-2 text-xs">
@@ -2054,6 +2074,20 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
         </div>
       </div>
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+      {job && (
+        <OutreachDmImportModal
+          open={dmImportOpen}
+          jobId={job.id}
+          companyName={String(job.company_name || '')}
+          currentDmId={dmAsset?.dmId ? String(dmAsset.dmId) : null}
+          onClose={() => setDmImportOpen(false)}
+          onImported={({ unchanged }) => {
+            setDmImportOpen(false);
+            toast.success(unchanged ? '이미 이 DM을 쓰고 있습니다.' : '지원팀 DM으로 바꿨습니다. 메일을 다시 조립하고 있습니다.');
+            void loadJob(job.id);
+          }}
+        />
+      )}
       {/* ★ 2026-09-23 작업대(전체 화면 · 이 모달 위) */}
       {workbenchOpen && <SalesOutreachWorkbench onClose={() => setWorkbenchOpen(false)} onOpenJob={openFromWorkbench} />}
     </div>,

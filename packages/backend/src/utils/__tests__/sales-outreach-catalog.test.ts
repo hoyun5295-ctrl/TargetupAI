@@ -191,12 +191,14 @@ describe('배선 계약(소스)', () => {
     expect(jobs).toContain('buildOutreachCatalog(');
     for (const k of ['catalogDmId', 'catalogUrl', 'catalogViewerUrl', 'catalogPages', 'catalogImageUrls', 'catalogSkipped']) expect(jobs, k).toContain(`${k}:`);
     expect(jobs).toContain("catalogUrl: dmAsset?.catalogUrl ? String(dmAsset.catalogUrl) : null");
+    // ★ 2026-10-01 중지 대상 = 소유 판정 CT(ownedOutreachDmIds · DM + 카탈로그 짝 · 불러온 지원팀 DM 제외) 한 곳
     const stop = jobs.slice(jobs.indexOf('async function stopSupersededDms('), jobs.indexOf('async function runProduction('));
-    expect(stop).toContain('catalogDmId');
+    expect(stop).toContain('ownedOutreachDmIds(row.payload)');
+    expect(SRC('sales-outreach-dm-ownership.ts')).toMatch(/\[String\(p\.dmId \|\| ''\), String\(p\.catalogDmId \|\| ''\)\]/);
   });
   it('파기(purge)도 카탈로그 DM 중지 + 합성 카드 파일 삭제', () => {
     const purge = SRC('sales-outreach-purge.ts');
-    expect(purge).toContain('catalogDmId');
+    expect(purge).toContain('ownedOutreachDmIds(a.payload)');
     expect(purge).toContain('catalogImageUrls');
   });
   it('카탈로그 조립 파일은 AI 를 부르지 않는다(callOutreachAi 0 · generate 0)', () => {
