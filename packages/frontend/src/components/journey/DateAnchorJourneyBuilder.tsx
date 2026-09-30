@@ -59,41 +59,41 @@ function SettingsModal({ initial, onSave, onClose }: {
   const [recurrenceDay, setRecurrenceDay] = useState(initial.recurrenceDay);
   const [hourKst, setHourKst] = useState(initial.hourKst);
   return (
-    <ModalShell title="발송 설정" subtitle="기준 날짜 · 발송 시각 · 반복" icon={<CalendarDays className="w-4 h-4 text-white" />} onClose={onClose}
+    <ModalShell title="발송 설정" subtitle="기준 날짜 · 발송 시각 · 반복" icon={<CalendarDays className="w-4 h-4 text-slate-900" />} onClose={onClose}
       footer={<>
-        <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm text-white/70">닫기</button>
-        <button onClick={() => onSave({ anchorDate, recurrence, recurrenceDay, hourKst })} disabled={!anchorDate} className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">저장</button>
+        <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-sm text-slate-600">닫기</button>
+        <button onClick={() => onSave({ anchorDate, recurrence, recurrenceDay, hourKst })} disabled={!anchorDate} className="text-white px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed">저장</button>
       </>}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <div>
-          <label className="block text-[11px] text-white/50 mb-1">기준 날짜</label>
-          <input type="date" value={anchorDate} onChange={(e) => setAnchorDate(e.target.value)} className="w-full bg-white/[0.06] border border-white/15 rounded-lg px-3 py-2 text-sm text-white [color-scheme:dark]" />
+          <label className="block text-[11px] text-slate-500 mb-1">기준 날짜</label>
+          <input type="date" value={anchorDate} onChange={(e) => setAnchorDate(e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900" />
         </div>
         <div>
-          <label className="block text-[11px] text-white/50 mb-1">발송 시각 (KST)</label>
-          <select value={hourKst} onChange={(e) => setHourKst(e.target.value)} className="w-full bg-white/[0.06] border border-white/15 rounded-lg px-3 py-2 text-sm text-white">
+          <label className="block text-[11px] text-slate-500 mb-1">발송 시각 (KST)</label>
+          <select value={hourKst} onChange={(e) => setHourKst(e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900">
             {Array.from({ length: 14 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{h}시</option>)}
           </select>
         </div>
       </div>
       <div>
-        <label className="block text-[11px] text-white/50 mb-1"><Repeat className="w-3 h-3 inline mr-1" />반복</label>
+        <label className="block text-[11px] text-slate-500 mb-1"><Repeat className="w-3 h-3 inline mr-1" />반복</label>
         <div className="grid grid-cols-2 gap-2">
           {RECURRENCES.map((r) => {
             const active = r.key === recurrence;
             return (
-              <button key={r.key} onClick={() => setRecurrence(r.key)} className={`p-2.5 rounded-lg border text-left transition-colors ${active ? 'bg-indigo-500/20 border-indigo-400/60' : 'bg-white/[0.06] border-white/15 hover:bg-white/[0.1]'}`}>
-                <div className="text-xs font-semibold text-white">{r.label}</div>
-                <div className="text-[10px] text-white/55 mt-0.5 leading-tight">{r.desc}</div>
+              <button key={r.key} onClick={() => setRecurrence(r.key)} className={`p-2.5 rounded-lg border text-left transition-colors ${active ? 'bg-indigo-100 border-indigo-300' : 'bg-white border-slate-300 hover:bg-slate-100'}`}>
+                <div className="text-xs font-semibold text-slate-900">{r.label}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">{r.desc}</div>
               </button>
             );
           })}
         </div>
         {recurrence === 'monthly_day' && (
           <div className="mt-2 flex items-center gap-2">
-            <span className="text-[11px] text-white/50">매달</span>
-            <input type="number" min={1} max={31} value={recurrenceDay} onChange={(e) => setRecurrenceDay(e.target.value)} className="w-16 bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white" />
-            <span className="text-[11px] text-white/50">일</span>
+            <span className="text-[11px] text-slate-500">매달</span>
+            <input type="number" min={1} max={31} value={recurrenceDay} onChange={(e) => setRecurrenceDay(e.target.value)} className="w-16 bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-900" />
+            <span className="text-[11px] text-slate-500">일</span>
           </div>
         )}
       </div>
@@ -123,38 +123,38 @@ function StepEditModal({ step, dataProfileVars, opt080Number, onRefine, onDecora
   const doDecorate = async () => { if (decorating || selectedVars.size === 0 || message.trim().length < 5) return; setDecorating(true); try { const m = await onDecorate(message, Array.from(selectedVars)); if (m) { setMessage(m); setCandidates([]); } } finally { setDecorating(false); } };
 
   return (
-    <ModalShell title={`단계 문안 편집 · D-${offset}`} subtitle="AI 다듬기·꾸미기로 손보고 저장" icon={<Pencil className="w-4 h-4 text-white" />} onClose={onClose}
+    <ModalShell title={`단계 문안 편집 · D-${offset}`} subtitle="AI 다듬기·꾸미기로 손보고 저장" icon={<Pencil className="w-4 h-4 text-slate-900" />} onClose={onClose}
       footer={<>
-        <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm text-white/70">닫기</button>
+        <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-sm text-slate-600">닫기</button>
         <button onClick={() => onSave(offset, subject, message)} disabled={message.trim().length < 10 || !subject.trim()} className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">저장</button>
       </>}>
       <div className="flex items-center gap-2">
-        <span className="text-[11px] text-white/50">기준일</span>
-        <input type="number" min={0} max={365} value={offset} onChange={(e) => setOffset(Math.max(0, Math.min(365, Math.floor(Number(e.target.value) || 0))))} className="w-16 bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white text-center" />
-        <span className="text-[11px] text-white/50">일 전{offset === 0 ? ' (당일)' : ''}</span>
-        <span className="ml-auto text-[11px] text-indigo-300 font-mono">D-{offset}</span>
+        <span className="text-[11px] text-slate-500">기준일</span>
+        <input type="number" min={0} max={365} value={offset} onChange={(e) => setOffset(Math.max(0, Math.min(365, Math.floor(Number(e.target.value) || 0))))} className="w-16 bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-900 text-center" />
+        <span className="text-[11px] text-slate-500">일 전{offset === 0 ? ' (당일)' : ''}</span>
+        <span className="ml-auto text-[11px] text-indigo-700 font-mono">D-{offset}</span>
       </div>
       <div>
-        <label className="block text-[11px] text-white/50 mb-1">제목 (LMS 필수)</label>
-        <input value={subject} onChange={(e) => setSubject(e.target.value.slice(0, 40))} placeholder="본문 요약 한 줄" className="w-full bg-white/[0.06] border border-white/15 rounded-lg px-3 py-2 text-sm text-white" />
+        <label className="block text-[11px] text-slate-500 mb-1">제목 (LMS 필수)</label>
+        <input value={subject} onChange={(e) => setSubject(e.target.value.slice(0, 40))} placeholder="본문 요약 한 줄" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900" />
       </div>
       <div>
-        <label className="block text-[11px] text-white/50 mb-1">본문 <span className="text-white/35">(순수 본문, (광고)·무료수신거부는 직접 쓰지 마세요)</span></label>
-        <textarea value={message} onChange={(e) => setMessage(e.target.value.slice(0, 2000))} rows={8} placeholder="AI 다듬기/꾸미기로 손보세요. 구체 혜택(%·원·쿠폰)은 직접 채워주세요." className="w-full bg-white/[0.06] border border-white/15 rounded-lg px-3 py-2 text-sm text-white resize-y leading-relaxed" />
-        <div className="text-right text-[10px] text-white/35 mt-0.5">{message.length} / 2000자</div>
+        <label className="block text-[11px] text-slate-500 mb-1">본문 <span className="text-slate-400">(순수 본문, (광고)·무료수신거부는 직접 쓰지 마세요)</span></label>
+        <textarea value={message} onChange={(e) => setMessage(e.target.value.slice(0, 2000))} rows={8} placeholder="AI 다듬기/꾸미기로 손보세요. 구체 혜택(%·원·쿠폰)은 직접 채워주세요." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 resize-y leading-relaxed" />
+        <div className="text-right text-[10px] text-slate-400 mt-0.5">{message.length} / 2000자</div>
       </div>
 
       {/* 발송 미리보기 — (광고)+무료수신거부 080 자동 합성(실발송 형태). 읽기 전용. */}
       {message.trim().length >= 5 && (
-        <div className="p-3 rounded-xl bg-emerald-500/[0.06] border border-emerald-400/20">
-          <div className="text-[11px] text-emerald-200/80 font-medium mb-1">발송 미리보기 <span className="text-white/40 font-normal">실제 발송 형태 (자동 합성)</span></div>
-          <p className="text-[11px] text-white/75 whitespace-pre-wrap leading-relaxed">{buildAdMessageFront(message, 'LMS', true, opt080Number)}</p>
-          {!opt080Number && <p className="text-[10px] text-amber-200/60 mt-1">무료수신거부 080번호는 발신번호 설정에서 등록하면 함께 표시됩니다.</p>}
+        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+          <div className="text-[11px] text-emerald-800 font-medium mb-1">발송 미리보기 <span className="text-slate-400 font-normal">실제 발송 형태 (자동 합성)</span></div>
+          <p className="text-[11px] text-slate-600 whitespace-pre-wrap leading-relaxed">{buildAdMessageFront(message, 'LMS', true, opt080Number)}</p>
+          {!opt080Number && <p className="text-[10px] text-amber-800 mt-1">무료수신거부 080번호는 발신번호 설정에서 등록하면 함께 표시됩니다.</p>}
         </div>
       )}
-      <div className="p-3 rounded-xl bg-white/[0.04] border border-white/10">
+      <div className="p-3 rounded-xl bg-white border border-slate-200">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold text-white/85">AI 다듬기 <span className="text-white/40 font-normal">3가지 톤</span></span>
+          <span className="text-xs font-semibold text-slate-700">AI 다듬기 <span className="text-slate-400 font-normal">3가지 톤</span></span>
           <button onClick={doRefine} disabled={refining || message.trim().length < 10} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-sky-500 to-indigo-500 text-[11px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
             {refining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />} 다듬기
           </button>
@@ -162,33 +162,33 @@ function StepEditModal({ step, dataProfileVars, opt080Number, onRefine, onDecora
         {candidates.length > 0 && (
           <div className="space-y-1.5">
             {candidates.map((c, i) => (
-              <div key={i} className="p-2 rounded-lg bg-white/[0.05] border border-white/10">
+              <div key={i} className="p-2 rounded-lg bg-white border border-slate-200">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] text-indigo-300 font-medium">{c.tone}</span>
-                  <button onClick={() => { setMessage(c.message); setCandidates([]); }} className="inline-flex items-center gap-1 text-[10px] text-emerald-300 hover:text-emerald-200"><Check className="w-3 h-3" /> 적용</button>
+                  <span className="text-[10px] text-indigo-700 font-medium">{c.tone}</span>
+                  <button onClick={() => { setMessage(c.message); setCandidates([]); }} className="inline-flex items-center gap-1 text-[10px] text-emerald-700 hover:text-emerald-800"><Check className="w-3 h-3" /> 적용</button>
                 </div>
-                <p className="text-[11px] text-white/70 whitespace-pre-wrap leading-relaxed">{c.message}</p>
+                <p className="text-[11px] text-slate-600 whitespace-pre-wrap leading-relaxed">{c.message}</p>
               </div>
             ))}
           </div>
         )}
       </div>
-      <div className="p-3 rounded-xl bg-white/[0.04] border border-violet-400/20">
+      <div className="p-3 rounded-xl bg-white border border-violet-200">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold text-white/85">AI 꾸미기 <span className="text-white/40 font-normal">{selectedVars.size > 0 ? `${selectedVars.size}개 선택` : '컬럼 선택'}</span></span>
+          <span className="text-xs font-semibold text-slate-700">AI 꾸미기 <span className="text-slate-400 font-normal">{selectedVars.size > 0 ? `${selectedVars.size}개 선택` : '컬럼 선택'}</span></span>
           <button onClick={doDecorate} disabled={decorating || selectedVars.size === 0 || message.trim().length < 5} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-[11px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
             {decorating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} 꾸미기
           </button>
         </div>
         {dataProfileVars.length === 0 ? (
-          <p className="text-[11px] text-white/40">고객 데이터가 있어야 개인화 컬럼이 표시됩니다.</p>
+          <p className="text-[11px] text-slate-400">고객 데이터가 있어야 개인화 컬럼이 표시됩니다.</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {dataProfileVars.map((v) => {
               const on = selectedVars.has(v.token);
               return (
                 <button key={v.token} onClick={() => setSelectedVars((prev) => { const n = new Set(prev); if (n.has(v.token)) n.delete(v.token); else n.add(v.token); return n; })}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all ${on ? 'bg-violet-500/30 text-violet-100 border-violet-400/50' : 'bg-white/5 text-white/55 border-white/10 hover:bg-white/10'}`}>
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all ${on ? 'bg-violet-100 text-violet-900 border-violet-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}>
                   %{v.label}%
                 </button>
               );
@@ -245,30 +245,30 @@ export default function DateAnchorJourneyBuilder({ embedded = false, dataProfile
   };
 
   return (
-    <div className="space-y-3 text-white">
+    <div className="space-y-3 text-slate-900">
       {!embedded && (
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10" aria-label="뒤로"><ArrowLeft className="w-4 h-4 text-white/70" /></button>
+          <button onClick={onBack} className="p-2 rounded-lg bg-white hover:bg-slate-100 border border-slate-200" aria-label="뒤로"><ArrowLeft className="w-4 h-4 text-slate-600" /></button>
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center"><CalendarClock className="w-5 h-5 text-white" /></div>
           <div>
             <h2 className="text-base md:text-lg font-semibold">날짜축 여정 만들기</h2>
-            <p className="text-xs text-white/50">기준 날짜 기준 D-N 단계 발송 · AI가 만들어드려요</p>
+            <p className="text-xs text-slate-500">기준 날짜 기준 D-N 단계 발송 · AI가 만들어드려요</p>
           </div>
         </div>
       )}
 
       {/* 히어로 — 자연어 목표 + AI 자동 생성 */}
-      <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/10 to-indigo-500/10 border border-fuchsia-500/30 rounded-2xl p-4">
-        <div className="flex items-center gap-2 mb-2"><Sparkles className="w-4 h-4 text-fuchsia-300" /><span className="text-sm font-semibold">무엇을 알릴까요</span></div>
+      <div className="bg-gradient-to-br from-fuchsia-50 via-purple-50 to-indigo-50 border border-fuchsia-200 rounded-2xl p-4">
+        <div className="flex items-center gap-2 mb-2"><Sparkles className="w-4 h-4 text-fuchsia-700" /><span className="text-sm font-semibold">무엇을 알릴까요</span></div>
         <input
           value={objective}
           onChange={(e) => setObjective(e.target.value)}
           placeholder="예: 포인트 소멸 임박 고객에게 7일전 3일전 당일 사용 독려"
-          className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2.5 text-sm placeholder-white/30 focus:outline-none focus:border-fuchsia-400"
+          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm placeholder-slate-400 focus:outline-none focus:border-fuchsia-400"
           onKeyDown={(e) => { if (e.key === 'Enter' && !generating && objective.trim()) { e.preventDefault(); handleAutoGenerate(); } }}
         />
         <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
-          <p className="text-[11px] text-white/45">"7일전 3일전 당일"처럼 시점을 적으면 단계까지 자동 생성됩니다.</p>
+          <p className="text-[11px] text-slate-400">"7일전 3일전 당일"처럼 시점을 적으면 단계까지 자동 생성됩니다.</p>
           <button onClick={handleAutoGenerate} disabled={generating || objective.trim().length < 3} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-purple-500 text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
             {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} AI 자동 생성
           </button>
@@ -276,51 +276,51 @@ export default function DateAnchorJourneyBuilder({ embedded = false, dataProfile
       </div>
 
       {/* 발송 설정 — 요약 버튼 → 모달 */}
-      <SummaryButton icon={<CalendarDays className="w-4 h-4 text-white" />} label="발송 설정" onClick={() => setShowSettings(true)}
+      <SummaryButton icon={<CalendarDays className="w-4 h-4 text-slate-900" />} label="발송 설정" onClick={() => setShowSettings(true)}
         value={anchorDate ? `${anchorDate} · ${hourKst}시 · ${recurrenceLabel(recurrence)}` : '기준 날짜를 설정하세요'} />
 
       {/* 단계 — 요약 카드 + 문안 편집 모달 */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold text-white/70">단계 {steps.length > 0 ? `${steps.length}개` : ''}</span>
-          <button onClick={addStep} className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200"><Plus className="w-3.5 h-3.5" /> 단계 추가</button>
+          <span className="text-xs font-semibold text-slate-600">단계 {steps.length > 0 ? `${steps.length}개` : ''}</span>
+          <button onClick={addStep} className="inline-flex items-center gap-1 text-xs text-indigo-700 hover:text-indigo-800"><Plus className="w-3.5 h-3.5" /> 단계 추가</button>
         </div>
         {steps.length === 0 ? (
-          <div className="p-4 rounded-2xl bg-white/[0.03] border border-dashed border-white/15 text-center">
-            <p className="text-[11px] text-white/45">위에서 [AI 자동 생성]을 누르거나 [단계 추가]로 직접 만드세요.</p>
+          <div className="p-4 rounded-2xl bg-white border border-dashed border-slate-300 text-center">
+            <p className="text-[11px] text-slate-400">위에서 [AI 자동 생성]을 누르거나 [단계 추가]로 직접 만드세요.</p>
           </div>
         ) : (
           <div className="space-y-2">
             {steps.map((s, i) => {
               const empty = s.messageTemplate.trim().length < 10;
               return (
-                <div key={i} className="flex items-center gap-2.5 p-3 rounded-2xl bg-white/[0.05] border border-white/10">
-                  <span className="w-12 text-center text-[11px] font-mono text-indigo-300 bg-indigo-500/15 border border-indigo-400/30 rounded-lg py-1.5 shrink-0">D-{s.anchorOffsetDays}</span>
+                <div key={i} className="flex items-center gap-2.5 p-3 rounded-2xl bg-white border border-slate-200">
+                  <span className="w-12 text-center text-[11px] font-mono text-indigo-700 bg-indigo-100 border border-indigo-200 rounded-lg py-1.5 shrink-0">D-{s.anchorOffsetDays}</span>
                   <div className="flex-1 min-w-0">
                     {empty ? (
-                      <p className="text-[11px] text-amber-200/70">문안 미작성: [문안 편집]에서 작성</p>
+                      <p className="text-[11px] text-amber-800">문안 미작성: [문안 편집]에서 작성</p>
                     ) : (
                       <>
-                        <p className="text-xs font-medium text-white/85 truncate">{s.subject || '(제목 없음)'}</p>
-                        <p className="text-[11px] text-white/45 truncate">{s.messageTemplate.replace(/\n/g, ' ')}</p>
+                        <p className="text-xs font-medium text-slate-700 truncate">{s.subject || '(제목 없음)'}</p>
+                        <p className="text-[11px] text-slate-400 truncate">{s.messageTemplate.replace(/\n/g, ' ')}</p>
                       </>
                     )}
                   </div>
-                  <button onClick={() => setEditIdx(i)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-[11px] font-medium shrink-0"><Pencil className="w-3.5 h-3.5" /> 문안 편집</button>
-                  <button onClick={() => removeStep(i)} className="p-1.5 rounded bg-white/5 hover:bg-rose-500/20 border border-white/10 shrink-0" aria-label="단계 삭제"><X className="w-3.5 h-3.5 text-white/60" /></button>
+                  <button onClick={() => setEditIdx(i)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-300 text-[11px] font-medium shrink-0"><Pencil className="w-3.5 h-3.5" /> 문안 편집</button>
+                  <button onClick={() => removeStep(i)} className="p-1.5 rounded bg-white hover:bg-rose-100 border border-slate-200 shrink-0" aria-label="단계 삭제"><X className="w-3.5 h-3.5 text-slate-500" /></button>
                 </div>
               );
             })}
           </div>
         )}
-        <p className="text-[10px] text-white/40 italic mt-1.5">LMS로 발송되며 (광고) 표기·무료수신거부가 자동 부착됩니다. 활성화 시 전체 문안 스팸필터 테스트를 거칩니다.</p>
+        <p className="text-[10px] text-slate-400 italic mt-1.5">LMS로 발송되며 (광고) 표기·무료수신거부가 자동 부착됩니다. 활성화 시 전체 문안 스팸필터 테스트를 거칩니다.</p>
       </div>
 
       {/* 대상 — 요약 버튼 → 모달 */}
-      <SummaryButton icon={<Users className="w-4 h-4 text-white" />} label="대상" value={audienceSummary(conditions)} onClick={() => setShowAudience(true)} />
+      <SummaryButton icon={<Users className="w-4 h-4 text-slate-900" />} label="대상" value={audienceSummary(conditions)} onClick={() => setShowAudience(true)} />
 
       <div className="flex justify-end pt-1">
-        <button onClick={handleBuild} disabled={!canBuild} className="px-5 py-3 bg-gradient-to-r from-indigo-500 to-violet-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">다음: 흐름 검토</button>
+        <button onClick={handleBuild} disabled={!canBuild} className="text-white px-5 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed">다음: 흐름 검토</button>
       </div>
 
       {showSettings && (

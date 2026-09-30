@@ -131,7 +131,7 @@ export default function CatalogPageModal({
                 </button>
               )}
             </div>
-            {chips.length === 0 && <div className="text-[11px] text-slate-400">넣지 않아도 됩니다. 넣으면 누를 수 있는 알약 버튼이 쪽 아래에 붙어요.</div>}
+            {chips.length === 0 && <div className="text-[11px] text-slate-500">넣지 않아도 됩니다. 넣으면 누를 수 있는 알약 버튼이 쪽 아래에 붙어요.</div>}
             {chips.map((c, i) => (
               <div key={i} className="grid grid-cols-[1fr_88px_28px] gap-1.5 mb-1.5">
                 <input
@@ -154,7 +154,7 @@ export default function CatalogPageModal({
             ))}
           </div>
 
-          <p className="text-[11px] text-slate-400 leading-relaxed">
+          <p className="text-[11px] text-slate-500 leading-relaxed">
             가격·할인율은 쪽 이미지에 새기지 않아요. 값이 바뀌면 이미지가 거짓말을 하기 때문입니다. 칩은 글자라 나중에 고칠 수 있어요.
           </p>
         </div>

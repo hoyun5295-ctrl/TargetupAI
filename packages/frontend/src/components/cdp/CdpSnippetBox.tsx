@@ -34,7 +34,7 @@ export default function CdpSnippetBox({ variants, onCopy }: CdpSnippetBoxProps) 
   return (
     <div className="space-y-2.5">
       {variants.length > 1 && (
-        <div className="inline-flex gap-1 bg-white/5 border border-white/10 rounded-lg p-1" role="tablist">
+        <div className="inline-flex gap-1 bg-white border border-slate-200 rounded-lg p-1" role="tablist">
           {variants.map((v) => (
             <button
               key={v.key}
@@ -43,7 +43,7 @@ export default function CdpSnippetBox({ variants, onCopy }: CdpSnippetBoxProps) 
               aria-selected={v.key === active.key}
               onClick={() => setActiveKey(v.key)}
               className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
-                v.key === active.key ? 'bg-violet-500/40 text-white' : 'text-white/55 hover:bg-white/5'
+                v.key === active.key ? 'bg-violet-200 text-slate-900' : 'text-slate-500 hover:bg-white'
               }`}
             >
               {v.label}
@@ -52,19 +52,19 @@ export default function CdpSnippetBox({ variants, onCopy }: CdpSnippetBoxProps) 
         </div>
       )}
 
-      {active.note && <p className="text-[11.5px] text-white/45 leading-relaxed">{active.note}</p>}
+      {active.note && <p className="text-[11.5px] text-slate-400 leading-relaxed">{active.note}</p>}
 
-      <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{active.code}</pre>
+      <pre className="bg-slate-100 border border-slate-200 rounded-xl p-3 text-[11px] text-emerald-800 overflow-x-auto whitespace-pre-wrap break-all">{active.code}</pre>
 
       <button
         type="button"
         onClick={() => onCopy(active.code, `${active.label} 설치 스크립트`)}
-        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-violet-500/35 hover:bg-violet-500/55 text-white text-[12px] font-medium transition-colors"
+        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-violet-200 hover:bg-violet-200 text-slate-900 text-[12px] font-medium transition-colors"
       >
         <Copy className="w-3.5 h-3.5" /> {active.label} 스크립트 복사
       </button>
-      <p className="text-[11px] text-white/35 inline-flex items-center gap-1">
-        <Check className="w-3 h-3 text-emerald-400/70" /> 붙여넣고 페이지를 한 번 열면 아래 &quot;첫 데이터 확인&quot;이 자동으로 켜집니다.
+      <p className="text-[11px] text-slate-400 inline-flex items-center gap-1">
+        <Check className="w-3 h-3 text-emerald-600" /> 붙여넣고 페이지를 한 번 열면 아래 &quot;첫 데이터 확인&quot;이 자동으로 켜집니다.
       </p>
     </div>
   );

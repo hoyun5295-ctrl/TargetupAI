@@ -92,9 +92,9 @@ export default function MaterialQuickPanel({ channel, isAd, disabled, onDone, on
   if (autoBuild === true) {
     return (
       <button type="button" disabled={disabled} onClick={() => navigate(`/quick-campaign?channel=${channel}`)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 rounded-[10px] border border-violet-400/30 bg-violet-500/5 text-sm font-medium text-violet-100 hover:bg-violet-500/10 disabled:opacity-40 transition-colors">
-        <Sparkles className="w-4 h-4 text-fuchsia-300" /> AI 자동제작으로 만들기
-        <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-white/45">재료만 넣으면 완성본까지 <ArrowRight className="w-3 h-3" /></span>
+        className="w-full flex items-center gap-2 px-3 py-2.5 rounded-[10px] border border-violet-200 bg-violet-50 text-sm font-medium text-violet-900 hover:bg-violet-50 disabled:opacity-40 transition-colors">
+        <Sparkles className="w-4 h-4 text-fuchsia-700" /> AI 자동제작으로 만들기
+        <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-slate-400">재료만 넣으면 완성본까지 <ArrowRight className="w-3 h-3" /></span>
       </button>
     );
   }
@@ -102,22 +102,22 @@ export default function MaterialQuickPanel({ channel, isAd, disabled, onDone, on
   const planLocked = !!quote?.plan_locked;
 
   return (
-    <div className="rounded-[10px] border border-violet-400/30 bg-violet-500/5">
+    <div className="rounded-[10px] border border-violet-200 bg-violet-50">
       <button type="button" onClick={() => setOpen((v) => !v)} disabled={disabled}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium text-violet-100 hover:bg-violet-500/10 disabled:opacity-40 rounded-[10px]">
-        <span className="inline-flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-fuchsia-300" /> 재료(이미지·행사 내용)로 만들기</span>
-        {open ? <ChevronUp className="w-4 h-4 text-white/50" /> : <ChevronDown className="w-4 h-4 text-white/50" />}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium text-violet-900 hover:bg-violet-50 disabled:opacity-40 rounded-[10px]">
+        <span className="inline-flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-fuchsia-700" /> 재료(이미지·행사 내용)로 만들기</span>
+        {open ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
       </button>
       {open && (
         <div className="px-3 pb-3 space-y-3">
-          {planLocked && <div className="text-[11px] text-amber-200 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> 모바일 DM 요금제에서 열립니다</div>}
+          {planLocked && <div className="text-[11px] text-amber-800 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> 모바일 DM 요금제에서 열립니다</div>}
           <MaterialInput value={material} onChange={setMaterial} disabled={busy || !!disabled || planLocked} compact={channel === 'email'} onReject={(m) => onToast(m, 'warning')} />
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-[11px] text-white/45">
+            <span className="text-[11px] text-slate-400">
               {quote ? `${quote.parts.map((p) => `${p.label} ${p.cost}`).join(' + ')} = ${quote.total} 크레딧` : '견적 계산 중'}
             </span>
             <button type="button" onClick={() => setConfirmOpen(true)} disabled={!canRun || busy || !!disabled || planLocked}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gradient-to-r from-amber-400 to-fuchsia-500 text-indigo-950 text-xs font-bold hover:brightness-110 disabled:opacity-40">
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold hover:brightness-110 disabled:opacity-40">
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
               {busy ? (stage || '만드는 중') : (channel === 'dm' ? '재료로 DM 초안 만들기' : '재료로 이메일 초안 만들기')}
             </button>

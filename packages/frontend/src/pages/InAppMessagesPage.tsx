@@ -1,8 +1,9 @@
-import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import ZoneEmphasis from '../components/zone/ZoneEmphasis';
+import { INAPP_CHANNEL_TABS } from '../components/zone/zone-tabs';
+import { zoneModule } from '../constants/ai-operator-modules';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { goBackOr } from '../lib/scroll-restoration';
 import {
   Activity, AlertCircle, AlertTriangle, AlignLeft, ArrowLeft, BarChart3, ChevronDown, ChevronUp,
   Clock, Copy, CreditCard, Crown, Download, Edit2, Eye, Globe, GripVertical, ImageIcon, Layers, Lightbulb, ListChecks, Loader2, Minus, MousePointer,
@@ -43,6 +44,7 @@ import { DateTimeField } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
 import { STUDIO_INAPP_DRAFT_KEY } from '../lib/studio-draft';
 import ImageToCopyButton from '../components/ImageToCopyButton';
+import { MK_HEAD_BTN, MK_HEAD_BTN_ON, MK_HEAD_SEG, MK_HEAD_SEG_DISABLED, MK_HEAD_SEG_OFF, MK_HEAD_SEG_ON } from '../utils/make-ui';
 // ★ 2026-07-18 P2 — CTA 자동 연결: DM의 연동 몰 상품 픽커 재사용 (URL 수기 입력 사고 차단 — 0718 팝폰 m/xxx 무반응 근본)
 import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
 // ★ 2026-07-18 P3 — 에셋 라이브러리 픽커 (업로드 소재 재사용 — 전 채널 공용 컴포넌트)
@@ -337,6 +339,8 @@ const EMPTY_FORM: Partial<MessageRow> = {
 // 메인 컴포넌트
 // ════════════════════════════════════════════════════════════════════
 
+const INAPP_LINE_IMAGE_BTN = 'h-10 px-3 inline-flex items-center gap-1.5 rounded-[10px] border border-slate-200 bg-white text-slate-700 text-[13px] font-medium hover:bg-slate-50 disabled:opacity-40 shrink-0 transition-colors';
+
 export default function InAppMessagesPage() {
   const navigate = useNavigate();
   const customerGate = useCustomerDataGate(localStorage.getItem('token'));
@@ -362,6 +366,8 @@ export default function InAppMessagesPage() {
   // ★ 2026-06-28 진입 화면 재설계 — 채널 무관 최근 인앱 + 빠른 시작 채널 선택 모달 + 폰 미리보기 모달
   const [recentMessages, setRecentMessages] = useState<MessageRow[]>([]);
   const [scenarioPick, setScenarioPick] = useState<QuickStartScenario | null>(null);
+  // ★ 2026-09-30 AI 존 대개편 — 첫 화면 한 줄 입력도 같은 채널 고르기 창을 거쳐 생성(채널을 추측하지 않는다)
+  const [objectivePick, setObjectivePick] = useState<string | null>(null);
   const [previewMsg, setPreviewMsg] = useState<MessageRow | null>(null);
   // ★ 2026-07-19 P4: 라이브러리 소재로 시작(목록 헤더) — 소재 선택 → 포스터형 새 초안
   const [startLibOpen, setStartLibOpen] = useState(false);
@@ -695,6 +701,12 @@ export default function InAppMessagesPage() {
   // ★ 2026-09-29 인앱 만들기 개편 — 저장 · 발행은 편집기(EditModal)가 소유한다(초안 자동 저장 · [발행] · [반영]).
   const [entryOpen, setEntryOpen] = useState(false);
   const [entryGoldens, setEntryGoldens] = useState<Array<GoldenInAppTemplate & { difference?: string }>>([]);
+  const inappOneLine = zoneModule('inapp').oneLine!;
+  const selectChannelTab = (id: string) => {
+    if (id === 'web') { if (webBlocked) { setShowDisplayBlock(true); return; } setChannel('web'); return; }
+    if (id === 'app') setChannel('app');
+  };
+
   const openEntry = () => {
     setEntryOpen(true);
     if (entryGoldens.length > 0) return;
@@ -888,87 +900,80 @@ export default function InAppMessagesPage() {
   // ★ 2026-06-17 채널 분리 — 진입 시 웹/앱 선택 (인앱메시지 안에서 채널 가름)
   if (!channel) {
     return (
-      <div className={OUI_PAGE}>
-        <OperatorAura />
-        <div className={OUI_HEADER}>
-          <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
-            <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="뒤로가기">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-pink-400 to-rose-500`}>
-              <Layers className="w-5 h-5 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className={OUI_TITLE}>인앱 메시지</h1>
-              </div>
-              <p className={OUI_SUBTITLE}>시나리오를 고르면 AI가 제목·본문·트리거까지 자동, 웹·앱 어디든</p>
-            </div>
+      <ZoneFrame
+        moduleId="inapp"
+        command={{
+          line: {
+            value: aiObjective,
+            onChange: setAiObjective,
+            onSubmit: () => { if (customerGate.isEmpty) { setShowDataGate(true); return; } setObjectivePick(aiObjective.trim()); },
+            placeholder: inappOneLine.placeholder,
+            verb: inappOneLine.verb,
+            icon: Sparkles,
+            busy: aiGenerating,
+            extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))} disabled={aiGenerating} className={INAPP_LINE_IMAGE_BTN} />,
+          },
+        }}
+        emphasis={
+          <ZoneEmphasis kind="ai" title="빠른 시작" meta="시나리오만 고르면 AI가 제목·본문·트리거까지">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {(Object.keys(SCENARIO_VISUAL) as QuickStartScenario[]).map((sc) => {
+              const v = SCENARIO_VISUAL[sc];
+              const Icon = v.icon;
+              return (
+                <button
+                  key={sc}
+                  onClick={() => { if (customerGate.isEmpty) { setShowDataGate(true); return; } setScenarioPick(sc); }}
+                  className="group text-left bg-white hover:bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-2xl p-4 transition-all"
+                >
+                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${v.gradient} flex items-center justify-center mb-3 shadow-md`}>
+                    <Icon className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="text-sm font-bold text-slate-900">{v.label}</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">{v.hint}</div>
+                </button>
+              );
+            })}
           </div>
-        </div>
-        <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-7">
+          </ZoneEmphasis>
+        }
+      >
+        <div className="space-y-7">
           {customerGate.isEmpty && <CustomerDataRequiredBanner />}
-
-          {/* 1) 빠른 시작 (채널 무관) — 클릭 한 번 = 채널 선택 → AI 자동 생성 → 편집 (1흐름) */}
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <Sparkles className="w-4 h-4 text-fuchsia-300" />
-              <h2 className="text-sm font-bold text-white">빠른 시작<span className="text-white/40 font-normal">: 시나리오만 고르면 AI가 제목·본문·트리거까지</span></h2>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {(Object.keys(SCENARIO_VISUAL) as QuickStartScenario[]).map((sc) => {
-                const v = SCENARIO_VISUAL[sc];
-                const Icon = v.icon;
-                return (
-                  <button
-                    key={sc}
-                    onClick={() => { if (customerGate.isEmpty) { setShowDataGate(true); return; } setScenarioPick(sc); }}
-                    className="group text-left bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/25 rounded-2xl p-4 transition-all"
-                  >
-                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${v.gradient} flex items-center justify-center mb-3 shadow-md`}>
-                      <Icon className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="text-sm font-bold text-white">{v.label}</div>
-                    <div className="text-[11px] text-white/50 mt-0.5 leading-tight">{v.hint}</div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
           {/* 2) 직접 만들기 — 채널 컴팩트 2카드 + 미니 미리보기 썸네일 */}
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Layers className="w-4 h-4 text-violet-300" />
-              <h2 className="text-sm font-bold text-white">직접 만들기<span className="text-white/40 font-normal">: 띄울 곳을 고르면 빈 편집기로</span></h2>
+              <Layers className="w-4 h-4 text-violet-700" />
+              <h2 className="text-sm font-bold text-slate-900">직접 만들기<span className="text-slate-400 font-normal">: 띄울 곳을 고르면 빈 편집기로</span></h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button onClick={() => { if (webBlocked) { setShowDisplayBlock(true); return; } setChannel('web'); }} className="group flex items-center gap-4 bg-gradient-to-br from-violet-500/12 to-fuchsia-500/12 border border-violet-400/25 hover:border-violet-300/55 rounded-2xl p-4 transition-all text-left">
-                <div className="w-16 h-12 rounded-md bg-slate-800/80 border border-white/10 relative shrink-0 overflow-hidden">
-                  <div className="h-2.5 bg-white/10 flex items-center gap-0.5 px-1.5"><span className="w-1 h-1 rounded-full bg-white/30" /><span className="w-1 h-1 rounded-full bg-white/30" /></div>
-                  <div className="absolute inset-x-2.5 bottom-1.5 top-4 rounded bg-violet-400/30 border border-violet-300/40" />
+              <button onClick={() => { if (webBlocked) { setShowDisplayBlock(true); return; } setChannel('web'); }} className="group flex items-center gap-4 bg-gradient-to-br from-violet-50 to-fuchsia-50 border border-violet-200 hover:border-violet-300 rounded-2xl p-4 transition-all text-left">
+                <div className="w-16 h-12 rounded-md bg-slate-100 border border-slate-200 relative shrink-0 overflow-hidden">
+                  <div className="h-2.5 bg-slate-100 flex items-center gap-0.5 px-1.5"><span className="w-1 h-1 rounded-full bg-slate-300" /><span className="w-1 h-1 rounded-full bg-slate-300" /></div>
+                  <div className="absolute inset-x-2.5 bottom-1.5 top-4 rounded bg-violet-100 border border-violet-300" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-bold text-white flex items-center gap-1.5"><Globe className="w-3.5 h-3.5 text-violet-200" />웹 자사몰 팝업</div>
-                  <div className="text-[11px] text-white/55 mt-0.5 leading-tight">모달 · 슬라이드 · 토스트 · 플로팅</div>
+                  <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5"><Globe className="w-3.5 h-3.5 text-violet-800" />웹 자사몰 팝업</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">모달 · 슬라이드 · 토스트 · 플로팅</div>
                   {webBlocked ? (
-                    <div className="text-[10px] text-amber-300/90 mt-1">표시할 쇼핑몰 연동 필요. 눌러서 안내 보기</div>
+                    <div className="text-[10px] text-amber-700 mt-1">표시할 쇼핑몰 연동 필요. 눌러서 안내 보기</div>
                   ) : eligibility?.warnWeb ? (
-                    <div className="text-[10px] text-amber-300/80 mt-1">연동됨. 쇼핑몰에 SDK 설치 후 표시</div>
+                    <div className="text-[10px] text-amber-700 mt-1">연동됨. 쇼핑몰에 SDK 설치 후 표시</div>
                   ) : (
-                    <div className="text-[10px] text-emerald-300/80 mt-1">즉시 사용 가능</div>
+                    <div className="text-[10px] text-emerald-700 mt-1">즉시 사용 가능</div>
                   )}
                 </div>
               </button>
-              <button onClick={() => setChannel('app')} className="group flex items-center gap-4 bg-gradient-to-br from-sky-500/12 to-indigo-500/12 border border-sky-400/25 hover:border-sky-300/55 rounded-2xl p-4 transition-all text-left">
-                <div className="w-9 h-12 rounded-lg bg-slate-800/80 border border-white/10 relative shrink-0 overflow-hidden mx-[14px]">
-                  <div className="absolute inset-x-1 top-1.5 h-3.5 rounded-sm bg-sky-400/30 border border-sky-300/40" />
-                  <div className="absolute inset-x-1.5 bottom-1 h-1 rounded-full bg-white/15" />
+              <button onClick={() => setChannel('app')} className="group flex items-center gap-4 bg-gradient-to-br from-sky-50 to-indigo-50 border border-sky-200 hover:border-sky-300 rounded-2xl p-4 transition-all text-left">
+                <div className="w-9 h-12 rounded-lg bg-slate-100 border border-slate-200 relative shrink-0 overflow-hidden mx-[14px]">
+                  <div className="absolute inset-x-1 top-1.5 h-3.5 rounded-sm bg-sky-100 border border-sky-300" />
+                  <div className="absolute inset-x-1.5 bottom-1 h-1 rounded-full bg-slate-200" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-bold text-white flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5 text-sky-200" />모바일 앱 인앱</div>
-                  <div className="text-[11px] text-white/55 mt-0.5 leading-tight">모달 · 전면 · 배너 · 토스트</div>
-                  <div className="text-[10px] text-amber-300/80 mt-1">웹뷰 앱 지원 (네이티브는 추후)</div>
+                  <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5 text-sky-800" />모바일 앱 인앱</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">모달 · 전면 · 배너 · 토스트</div>
+                  <div className="text-[10px] text-amber-700 mt-1">웹뷰 앱 지원 (네이티브는 추후)</div>
                 </div>
               </button>
             </div>
@@ -978,20 +983,20 @@ export default function InAppMessagesPage() {
           {recentMessages.length > 0 && (
             <div>
               <div className="flex items-center gap-2 mb-3">
-                <Clock className="w-4 h-4 text-cyan-300" />
-                <h2 className="text-sm font-bold text-white">최근 인앱 메시지<span className="text-white/40 font-normal">: 눌러서 미리보기·편집</span></h2>
+                <Clock className="w-4 h-4 text-cyan-700" />
+                <h2 className="text-sm font-bold text-slate-900">최근 인앱 메시지<span className="text-slate-400 font-normal">: 눌러서 미리보기·편집</span></h2>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {recentMessages.map((m) => (
-                  <button key={m.id} onClick={() => setPreviewMsg(m)} className="text-left bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/25 rounded-xl p-3 transition-all">
+                  <button key={m.id} onClick={() => setPreviewMsg(m)} className="text-left bg-white hover:bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-xl p-3 transition-all">
                     <div className="flex items-center gap-1.5 mb-1">
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${m.channel === 'app' ? 'bg-sky-500/20 text-sky-300' : 'bg-violet-500/20 text-violet-300'}`}>{m.channel === 'app' ? '앱' : '웹'}</span>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${m.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-white/50'}`}>{m.status === 'active' ? '활성' : m.status === 'paused' ? '일시중지' : m.status}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${m.channel === 'app' ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}>{m.channel === 'app' ? '앱' : '웹'}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${m.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{m.status === 'active' ? '활성' : m.status === 'paused' ? '일시중지' : m.status}</span>
                     </div>
-                    <div className="text-sm font-bold text-white truncate">{m.title || '(제목 없음)'}</div>
-                    <div className="text-[11px] text-white/50 mt-0.5 line-clamp-2 leading-tight">{m.body}</div>
+                    <div className="text-sm font-bold text-slate-900 truncate">{m.title || '(제목 없음)'}</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2 leading-tight">{m.body}</div>
                     {m.stats && (
-                      <div className="mt-2 flex gap-2 text-[10px] text-white/45 border-t border-white/5 pt-1.5">
+                      <div className="mt-2 flex gap-2 text-[10px] text-slate-400 border-t border-slate-100 pt-1.5">
                         <span>표시 {m.stats.impressions.toLocaleString()}</span>
                         <span>클릭 {m.stats.clicks.toLocaleString()}</span>
                       </div>
@@ -999,36 +1004,36 @@ export default function InAppMessagesPage() {
                   </button>
                 ))}
               </div>
-              <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_inapp_messages (회사 격리)</div>
+              <div className="text-[10px] text-slate-400 italic mt-2">Data source: cdp_inapp_messages (회사 격리)</div>
             </div>
           )}
         </div>
 
         {/* 채널 선택 모달 — 빠른 시작 클릭 시 웹/앱 선택 → AI 자동 생성 */}
-        {scenarioPick && (
+        {(scenarioPick || objectivePick) && (
           <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-            <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-1">
-                <h3 className="text-base font-bold text-white">어디에 띄울까요?</h3>
-                <button onClick={() => setScenarioPick(null)} className="text-white/50 hover:text-white p-1 rounded hover:bg-white/10" aria-label="닫기"><X className="w-4 h-4" /></button>
+                <h3 className="text-base font-bold text-slate-900">어디에 띄울까요?</h3>
+                <button onClick={() => { setScenarioPick(null); setObjectivePick(null); }} className="text-slate-500 hover:text-slate-900 p-1 rounded hover:bg-slate-100" aria-label="닫기"><X className="w-4 h-4" /></button>
               </div>
-              <p className="text-xs text-white/50 mb-4">{SCENARIO_VISUAL[scenarioPick].label}: 채널을 고르면 AI가 바로 만들어요</p>
+              <p className="text-xs text-slate-500 mb-4 line-clamp-2">{scenarioPick ? SCENARIO_VISUAL[scenarioPick].label : `"${objectivePick}"`}: 채널을 고르면 AI가 바로 만들어요</p>
               <div className="grid grid-cols-2 gap-3">
                 <button
-                  onClick={() => { if (webBlocked) { setScenarioPick(null); setShowDisplayBlock(true); return; } const sc = scenarioPick; setScenarioPick(null); setChannel('web'); if (sc) handleAIGenerate('', sc, 'web'); }}
-                  className="flex flex-col items-center gap-2 bg-violet-500/15 hover:bg-violet-500/25 border border-violet-400/30 rounded-xl p-4 transition-colors"
+                  onClick={() => { if (webBlocked) { setScenarioPick(null); setObjectivePick(null); setShowDisplayBlock(true); return; } const sc = scenarioPick; const ob = objectivePick; setScenarioPick(null); setObjectivePick(null); setChannel('web'); if (sc) handleAIGenerate('', sc, 'web'); else if (ob) handleAIGenerate(ob, undefined, 'web'); }}
+                  className="flex flex-col items-center gap-2 bg-violet-100 hover:bg-violet-100 border border-violet-200 rounded-xl p-4 transition-colors"
                 >
-                  <Globe className="w-6 h-6 text-violet-200" />
-                  <span className="text-sm font-bold text-white">웹 자사몰</span>
-                  <span className="text-[10px] text-white/50">{webBlocked ? '쇼핑몰 연동 필요' : '팝업·슬라이드·토스트'}</span>
+                  <Globe className="w-6 h-6 text-violet-800" />
+                  <span className="text-sm font-bold text-slate-900">웹 자사몰</span>
+                  <span className="text-[10px] text-slate-500">{webBlocked ? '쇼핑몰 연동 필요' : '팝업·슬라이드·토스트'}</span>
                 </button>
                 <button
-                  onClick={() => { const sc = scenarioPick; setScenarioPick(null); setChannel('app'); if (sc) handleAIGenerate('', sc, 'app'); }}
-                  className="flex flex-col items-center gap-2 bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/30 rounded-xl p-4 transition-colors"
+                  onClick={() => { const sc = scenarioPick; const ob = objectivePick; setScenarioPick(null); setObjectivePick(null); setChannel('app'); if (sc) handleAIGenerate('', sc, 'app'); else if (ob) handleAIGenerate(ob, undefined, 'app'); }}
+                  className="flex flex-col items-center gap-2 bg-sky-100 hover:bg-sky-100 border border-sky-200 rounded-xl p-4 transition-colors"
                 >
-                  <Smartphone className="w-6 h-6 text-sky-200" />
-                  <span className="text-sm font-bold text-white">모바일 앱</span>
-                  <span className="text-[10px] text-white/50">중앙 모달·바텀 시트</span>
+                  <Smartphone className="w-6 h-6 text-sky-800" />
+                  <span className="text-sm font-bold text-slate-900">모바일 앱</span>
+                  <span className="text-[10px] text-slate-500">중앙 모달·바텀 시트</span>
                 </button>
               </div>
             </div>
@@ -1038,15 +1043,15 @@ export default function InAppMessagesPage() {
         {/* 최근 인앱 폰 미리보기 모달 */}
         {previewMsg && (
           <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-8 overflow-y-auto">
-            <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${previewMsg.channel === 'app' ? 'bg-sky-500/20 text-sky-300' : 'bg-violet-500/20 text-violet-300'}`}>{previewMsg.channel === 'app' ? '앱' : '웹'}</span>
-                  <h3 className="text-sm font-bold text-white truncate">{previewMsg.title || '(제목 없음)'}</h3>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${previewMsg.channel === 'app' ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}>{previewMsg.channel === 'app' ? '앱' : '웹'}</span>
+                  <h3 className="text-sm font-bold text-slate-900 truncate">{previewMsg.title || '(제목 없음)'}</h3>
                 </div>
-                <button onClick={() => setPreviewMsg(null)} className="text-white/50 hover:text-white p-1 rounded hover:bg-white/10 shrink-0" aria-label="닫기"><X className="w-4 h-4" /></button>
+                <button onClick={() => setPreviewMsg(null)} className="text-slate-500 hover:text-slate-900 p-1 rounded hover:bg-slate-100 shrink-0" aria-label="닫기"><X className="w-4 h-4" /></button>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-100 p-3">
                 {previewMsg.channel === 'app' ? (() => {
                   // ★ 2026-07-16 앱 메시지 = 앱 실렌더 미러 미리보기 (옛 블록 저장분은 flat 승계해 표시)
                   const flat = composeFlatFromBlocksFE(previewMsg.content_blocks || []);
@@ -1086,11 +1091,11 @@ export default function InAppMessagesPage() {
               <div className="flex gap-2 mt-4">
                 <button
                   onClick={() => { const msg = previewMsg; const ch: 'web' | 'app' = msg.channel === 'app' ? 'app' : 'web'; setPreviewMsg(null); setChannel(ch); setEditing(msg); }}
-                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-semibold text-white"
                 >
                   <Edit2 className="w-4 h-4" />수정
                 </button>
-                <button onClick={() => setPreviewMsg(null)} className="px-4 py-2 rounded-lg border border-white/15 text-sm text-white/70 hover:bg-white/5">닫기</button>
+                <button onClick={() => setPreviewMsg(null)} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-white">닫기</button>
               </div>
             </div>
           </div>
@@ -1106,141 +1111,50 @@ export default function InAppMessagesPage() {
             onClose={() => setShowDisplayBlock(false)}
           />
         )}
-      </div>
+      </ZoneFrame>
     );
   }
 
   return (
-    // ★ 2026-08-21 오퍼레이터 표면 단계(OUI): 작업면 = slate-950 단색 + 상단 아우라 1. 값은 utils/operator-ui.ts가 소유(0527 보라화 → 0627 slate 복귀 이력의 옛 주석 정정)
-    <div className={OUI_PAGE}>
-      {/* ▼ 1: 상단 헤더 (sticky + BETA badge) — D222+ Phase 3 보라 톤 다운 */}
-      <div className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="뒤로가기">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-rose-500/20">
-            <Layers className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-semibold text-white">인앱 메시지</h1>
-              <button onClick={() => setChannel(null)} className="text-[11px] text-white/70 hover:text-white bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors">
-                {channel === 'app' ? <><Smartphone className="w-3 h-3" /> 앱</> : <><Globe className="w-3 h-3" /> 웹</>}
-                <span className="text-white/40">· 바꾸기</span>
-              </button>
-            </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">
-              {channel === 'app'
-                ? '모바일 앱 인앱: 기본형(중앙 모달·바텀 시트) · 포스터형 (앱 SDK 연동 후 표시)'
-                : '웹 자사몰 팝업: 모달 · 슬라이드 · 토스트 · 플로팅 버튼 · 포스터형'}
-            </p>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <button onClick={loadAll} className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors" aria-label="새로고침">
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">새로고침</span>
-            </button>
-            {/* ★ 2026-07-19 P4: 라이브러리 소재로 시작 — 소재 선택 → 포스터형(full_image) 새 초안 */}
-            <button
-              onClick={() => setStartLibOpen(true)}
-              className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors border border-white/10"
-            >
-              <FolderOpen className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">라이브러리로 시작</span>
-              <span className="sm:hidden">라이브러리</span>
-            </button>
-            <button
-              onClick={openEntry}
-              className="text-xs bg-gradient-to-r from-rose-500/40 to-pink-500/40 hover:from-rose-500/60 hover:to-pink-500/60 text-rose-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-rose-400/30"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              신규 메시지
-            </button>
-            <AssetLibraryPickerModal
-              open={startLibOpen}
-              onClose={() => setStartLibOpen(false)}
-              onPick={(a) => {
-                setChannel('web');
-                setEditing({ ...EMPTY_FORM, template: 'full_image', image_url: a.url, channel: 'web' });
-                toast.success('라이브러리 소재로 포스터형 인앱을 시작했어요. 문구·타겟만 다듬어주세요.');
-              }}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
-        {error && (
-          <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-300 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
-
-        {/* ★ 2026-07-06 인앱 표시 채널 상태 — 표시 불가/미설치를 만들기 전에 인지시켜 크레딧 낭비 차단 */}
-        {channel === 'web' && eligibility && (
-          webBlocked ? (
-            <div className="bg-rose-500/10 border border-rose-400/30 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-rose-300 shrink-0" />
-              <div className="flex-1 text-xs text-rose-200 leading-relaxed">{eligibility.blockReasonWeb}</div>
-              <button onClick={() => navigate('/cdp-settings')} className="shrink-0 px-3 py-2 bg-rose-500/30 hover:bg-rose-500/50 border border-rose-400/30 rounded-lg text-xs font-semibold text-white">쇼핑몰 연동하러 가기</button>
-            </div>
-          ) : eligibility.warnWeb ? (
-            <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-300 shrink-0" />
-              <div className="flex-1 text-xs text-amber-200 leading-relaxed">
-                {eligibility.platforms.filter((p) => p.support !== 'unsupported').map((p) => p.label).join(' · ')} 연동됨. 아직 쇼핑몰에서 SDK 신호가 감지되지 않았습니다. 쇼핑몰에 SDK 스크립트를 설치해야 만든 메시지가 실제로 표시됩니다.
-                {eligibility.platforms.some((p) => p.support === 'unsupported') && ' (네이버 스마트스토어는 인앱 표시 미지원, 데이터 연동만)'}
-              </div>
-              <button onClick={() => navigate('/cdp-settings')} className="shrink-0 px-3 py-2 bg-amber-500/25 hover:bg-amber-500/40 border border-amber-400/30 rounded-lg text-xs font-semibold text-white">설치 가이드 보기</button>
-            </div>
-          ) : (
-            <div className="bg-emerald-500/10 border border-emerald-400/20 rounded-xl px-4 py-2.5 flex items-center gap-2 text-[11px] text-emerald-200/90 flex-wrap">
-              <Activity className="w-3.5 h-3.5 shrink-0" />
-              <span>SDK 신호 감지됨{eligibility.webSdkLastSeenAt ? `: 최근 ${new Date(eligibility.webSdkLastSeenAt).toLocaleString('ko-KR')}` : ''}</span>
-              {eligibility.platforms.length > 0 && <span className="text-white/40">· 연동: {eligibility.platforms.map((p) => p.label).join(', ')}</span>}
-              {eligibility.platforms.some((p) => p.support === 'unsupported') && <span className="text-amber-300/70">· 네이버 스마트스토어는 인앱 표시 미지원(데이터 연동만)</span>}
-            </div>
-          )
-        )}
-        {/* ▼ HERO: 메시지 만들기 (자연어 입력 + 빠른 시작) */}
-        <div className="bg-gradient-to-br from-violet-500/12 via-fuchsia-500/8 to-indigo-500/12 border border-violet-400/25 rounded-2xl p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles className="w-4 h-4 text-fuchsia-300" />
-            <h3 className="text-sm font-bold text-white">메시지 만들기<span className="text-white/40 font-normal">: 한 줄이면 AI가 제목·본문·트리거·세그먼트까지</span></h3>
-          </div>
-          <div className="flex gap-2 mb-4 flex-wrap">
-            <input
-              type="text"
-              value={aiObjective}
-              onChange={(e) => setAiObjective(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleAIGenerate(aiObjective); }}
-              placeholder="예: 장바구니 24시간 후 회복 메시지 / 신규 가입자 환영 인사"
-              className="flex-1 min-w-[240px] px-4 py-2.5 bg-slate-900/60 border border-fuchsia-400/30 rounded-lg text-sm text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-400/60"
-              disabled={aiGenerating}
-            />
-            <ImageToCopyButton
-              label="이미지"
-              onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
-              disabled={aiGenerating}
-              className="h-11 px-3 inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-400/30 bg-slate-900/60 text-fuchsia-200 text-sm font-medium hover:bg-fuchsia-500/15 hover:border-fuchsia-400/50 disabled:opacity-40 transition-colors"
-            />
-            <button
-              onClick={() => handleAIGenerate(aiObjective)}
-              disabled={aiGenerating || !aiObjective.trim()}
-              className="px-5 py-2.5 bg-gradient-to-r from-fuchsia-500 to-purple-500 hover:from-fuchsia-600 hover:to-purple-600 text-white text-sm font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-            >
-              {aiGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {aiGenerating ? 'AI 생성 중...' : 'AI 자동 생성'}
-            </button>
-          </div>
-
-          {/* ★ 2026-07-18 재편 (Harold 확정) — 원색 나열 폐기 → 모던 다크 카드 + 그라데이션 아이콘 칩.
-              카드의 대상·시점 문구 = 백엔드가 결정 주입하는 실조건 그대로 (선택 즉시 세그·트리거까지 설정 완료) */}
-          <div className="text-xs text-white/60 mb-3">또는 빠른 시작 (카드에 적힌 대상·시점이 그대로 설정됩니다):</div>
+    <ZoneFrame
+      moduleId="inapp"
+      tabs={INAPP_CHANNEL_TABS}
+      activeTab={channel}
+      onSelectTab={selectChannelTab}
+      more={[{ label: '시작 화면으로', onClick: () => setChannel(null) }]}
+      command={{
+        line: {
+          value: aiObjective,
+          onChange: setAiObjective,
+          onSubmit: () => handleAIGenerate(aiObjective),
+          placeholder: inappOneLine.placeholder,
+          verb: inappOneLine.verb,
+          icon: Sparkles,
+          busy: aiGenerating,
+          extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))} disabled={aiGenerating} className={INAPP_LINE_IMAGE_BTN} />,
+        },
+        stats: overview ? [
+          { label: '메시지', value: overview.totalMessages.toLocaleString() },
+          { label: '게시 중', value: overview.activeMessages.toLocaleString() },
+        ] : [],
+        checks: [{ label: channel === 'app' ? '기본형(중앙 모달·바텀 시트) · 포스터형 · 앱 SDK 연동 후 표시' : '모달 · 슬라이드 · 토스트 · 플로팅 버튼 · 포스터형' }],
+        alts: [
+          { label: '모양 골라 시작', icon: Plus, onClick: openEntry },
+          { label: '라이브러리 소재로', icon: FolderOpen, onClick: () => setStartLibOpen(true) },
+        ],
+        stamp: { text: '다시 읽기', onRefresh: loadAll, loading },
+      }}
+      blocks={[
+        ...(error ? [{ text: error, tone: 'rose' as const }] : []),
+        ...(channel === 'web' && eligibility && webBlocked ? [{ text: eligibility.blockReasonWeb || '표시할 쇼핑몰 연동이 필요합니다.', tone: 'rose' as const, actionLabel: '쇼핑몰 연동하러 가기', onAction: () => navigate('/cdp-settings') }] : []),
+        ...(channel === 'web' && eligibility && !webBlocked && eligibility.warnWeb ? [{
+          text: `${eligibility.platforms.filter((p) => p.support !== 'unsupported').map((p) => p.label).join(' · ')} 연동됨. 아직 쇼핑몰에서 SDK 신호가 감지되지 않았습니다. 쇼핑몰에 SDK 스크립트를 설치해야 만든 메시지가 실제로 표시됩니다.${eligibility.platforms.some((p) => p.support === 'unsupported') ? ' (네이버 스마트스토어는 인앱 표시 미지원, 데이터 연동만)' : ''}`,
+          actionLabel: '설치 가이드 보기',
+          onAction: () => navigate('/cdp-settings'),
+        }] : []),
+      ]}
+      emphasis={
+        <ZoneEmphasis kind="ai" title="빠른 시작" meta="카드에 적힌 대상·시점이 그대로 설정됩니다">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
             {quickStartCards.map((card) => {
               const visual = SCENARIO_VISUAL[card.scenario] || SCENARIO_VISUAL.cart_recovery;
@@ -1250,23 +1164,45 @@ export default function InAppMessagesPage() {
                   key={card.scenario}
                   onClick={() => handleAIGenerate('', card.scenario)}
                   disabled={aiGenerating}
-                  className="group text-left bg-slate-900/60 hover:bg-white/[0.07] border border-white/10 hover:border-violet-400/40 rounded-2xl p-3.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="group text-left bg-white hover:bg-slate-100 border border-slate-200 hover:border-violet-300 rounded-2xl p-3.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${visual.gradient} flex items-center justify-center mb-2.5 shadow-md group-hover:scale-105 transition-transform`}>
                     <Icon className="w-4.5 h-4.5 text-white" />
                   </div>
-                  <div className="text-xs font-bold text-white">{card.label}</div>
-                  <div className="text-[10px] text-white/45 mt-1 leading-snug">{card.hint}</div>
+                  <div className="text-xs font-bold text-slate-900">{card.label}</div>
+                  <div className="text-[10px] text-slate-400 mt-1 leading-snug">{card.hint}</div>
                 </button>
               );
             })}
           </div>
-        </div>
+        </ZoneEmphasis>
+      }
+    >
+        <AssetLibraryPickerModal
+          open={startLibOpen}
+          onClose={() => setStartLibOpen(false)}
+          onPick={(a) => {
+            setChannel('web');
+            setEditing({ ...EMPTY_FORM, template: 'full_image', image_url: a.url, channel: 'web' });
+            toast.success('라이브러리 소재로 포스터형 인앱을 시작했어요. 문구·타겟만 다듬어주세요.');
+          }}
+        />
+      <div className="space-y-5">
+        {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
 
+        {/* ★ 2026-07-06 인앱 표시 채널 상태 — 표시 불가·미설치는 위 차단 상자, 정상은 한 줄 */}
+        {channel === 'web' && eligibility && !webBlocked && !eligibility.warnWeb && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 flex items-center gap-2 text-[11px] text-emerald-800 flex-wrap">
+          <Activity className="w-3.5 h-3.5 shrink-0" />
+          <span>SDK 신호 감지됨{eligibility.webSdkLastSeenAt ? `: 최근 ${new Date(eligibility.webSdkLastSeenAt).toLocaleString('ko-KR')}` : ''}</span>
+          {eligibility.platforms.length > 0 && <span className="text-slate-400">· 연동: {eligibility.platforms.map((p) => p.label).join(', ')}</span>}
+          {eligibility.platforms.some((p) => p.support === 'unsupported') && <span className="text-amber-700">· 네이버 스마트스토어는 인앱 표시 미지원(데이터 연동만)</span>}
+        </div>
+        )}
         {/* ▼ 영역 6: 6 sub-agent 진행 카드 (조건부 — 생성 중일 때만) */}
         {aiGenerating && (
-          <div className="bg-slate-900/60 border border-white/10 rounded-xl p-5">
-            <h3 className="text-sm font-bold text-white mb-3">AI 생성 진행 중...</h3>
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <h3 className="text-sm font-bold text-slate-900 mb-3">AI 생성 진행 중...</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               {Object.entries(SUB_AGENT_VISUAL).map(([key, visual], idx) => {
                 const Icon = visual.icon;
@@ -1276,15 +1212,15 @@ export default function InAppMessagesPage() {
                     key={key}
                     className={`p-3 rounded-lg border transition-all ${
                       isDone
-                        ? `bg-gradient-to-br ${visual.gradient} border-white/30 shadow-lg`
-                        : 'bg-slate-900/60 border-white/5 opacity-50'
+                        ? `bg-gradient-to-br ${visual.gradient} border-slate-300 shadow-lg`
+                        : 'bg-white border-slate-100 opacity-50'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      {isDone ? <Icon className="w-4 h-4 text-white" /> : <Loader2 className="w-4 h-4 animate-spin text-white/40" />}
-                      <span className="text-xs font-bold text-white">{visual.label}</span>
+                      {isDone ? <Icon className="w-4 h-4 text-slate-900" /> : <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
+                      <span className="text-xs font-bold text-slate-900">{visual.label}</span>
                     </div>
-                    <div className="text-[10px] text-white/70">{idx + 1}/6</div>
+                    <div className="text-[10px] text-slate-600">{idx + 1}/6</div>
                   </div>
                 );
               })}
@@ -1294,22 +1230,20 @@ export default function InAppMessagesPage() {
 
         {/* ▼ 영역 7: 요약 5 metric + 격차 */}
         {overview && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              { label: '총 메시지', value: overview.totalMessages.toLocaleString(), delta: null, icon: Layers },
-              { label: '활성', value: overview.activeMessages.toLocaleString(), delta: null, icon: Activity },
               { label: '평균 CTR', value: `${(overview.avgCTR * 100).toFixed(2)}%`, delta: overview.delta.avgCTRPercent, icon: MousePointer },
               { label: '30일 impression', value: overview.totalImpressions30d.toLocaleString(), delta: overview.delta.impressionsPercent, icon: Eye },
               { label: '24h 매핑 구매', value: overview.totalAttributedPurchases30d.toLocaleString(), delta: overview.delta.purchasesPercent, icon: TrendingUp },
             ].map((metric, idx) => (
-              <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-4">
+              <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-2">
-                  <metric.icon className="w-3.5 h-3.5 text-white/50" />
-                  <span className="text-[11px] text-white/50">{metric.label}</span>
+                  <metric.icon className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="text-[11px] text-slate-500">{metric.label}</span>
                 </div>
-                <div className="text-lg font-bold text-white">{metric.value}</div>
+                <div className="text-lg font-bold text-slate-900">{metric.value}</div>
                 {metric.delta !== null && (
-                  <div className={`text-[10px] mt-1 flex items-center gap-1 ${metric.delta >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  <div className={`text-[10px] mt-1 flex items-center gap-1 ${metric.delta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                     {metric.delta >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                     {metric.delta >= 0 ? '+' : ''}{metric.delta.toFixed(1)}% 이전 30일 대비
                   </div>
@@ -1319,23 +1253,23 @@ export default function InAppMessagesPage() {
           </div>
         )}
         {overview && (
-          <div className="text-[10px] text-white/30 italic">Data source: {overview.dataSource}</div>
+          <div className="text-[10px] text-slate-400 italic">Data source: {overview.dataSource}</div>
         )}
 
         {/* ▼ AI 개선 — 진단 + 1-click 통합 (한 카드) */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
+        <div className="bg-white border border-slate-200 rounded-2xl p-5">
           <div className="flex items-start gap-3 flex-wrap">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/40 to-fuchsia-500/40 flex items-center justify-center flex-shrink-0">
-              <Lightbulb className="w-5 h-5 text-violet-200" />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-50 to-fuchsia-50 flex items-center justify-center flex-shrink-0">
+              <Lightbulb className="w-5 h-5 text-violet-800" />
             </div>
             <div className="flex-1 min-w-[200px]">
-              <h3 className="text-sm font-bold text-white">AI 개선</h3>
-              <p className="text-xs text-white/60 mt-0.5">{topInsight || (dataShortage.length > 0 ? dataShortage[0] : '성과를 분석해 개선점을 제안합니다. 아래 버튼으로 바로 적용하세요.')}</p>
+              <h3 className="text-sm font-bold text-slate-900">AI 개선</h3>
+              <p className="text-xs text-slate-500 mt-0.5">{topInsight || (dataShortage.length > 0 ? dataShortage[0] : '성과를 분석해 개선점을 제안합니다. 아래 버튼으로 바로 적용하세요.')}</p>
             </div>
             <button
               onClick={handleDiagnose}
               disabled={diagnosing || messages.length === 0}
-              className="text-xs bg-violet-500/25 hover:bg-violet-500/40 disabled:opacity-40 disabled:cursor-not-allowed text-violet-100 px-3.5 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors"
+              className="text-xs border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed px-3.5 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors"
             >
               {diagnosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
               {diagnosing ? '진단 중...' : 'AI 진단'}
@@ -1343,23 +1277,23 @@ export default function InAppMessagesPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-4">
             {[
-              { type: 'ai_refine' as const, icon: Wand2, title: '본문 다듬기', desc: '감성·실용·캐주얼 3안', iconBg: 'from-violet-500/40 to-purple-500/40', iconColor: 'text-violet-200' },
-              { type: 'time_optimize' as const, icon: Clock, title: '시간대 최적화', desc: 'best CTR 시간 적용', iconBg: 'from-emerald-500/40 to-teal-500/40', iconColor: 'text-emerald-200' },
-              { type: 'segment_refine' as const, icon: Target, title: '세그먼트 정밀화', desc: 'LTV 상위 + 활성', iconBg: 'from-amber-500/40 to-orange-500/40', iconColor: 'text-amber-200' },
+              { type: 'ai_refine' as const, icon: Wand2, title: '본문 다듬기', desc: '감성·실용·캐주얼 3안', iconBg: 'from-violet-50 to-purple-50', iconColor: 'text-violet-800' },
+              { type: 'time_optimize' as const, icon: Clock, title: '시간대 최적화', desc: 'best CTR 시간 적용', iconBg: 'from-emerald-50 to-teal-50', iconColor: 'text-emerald-800' },
+              { type: 'segment_refine' as const, icon: Target, title: '세그먼트 정밀화', desc: 'LTV 상위 + 활성', iconBg: 'from-amber-50 to-orange-50', iconColor: 'text-amber-800' },
             ].map((action) => (
               <button
                 key={action.type}
                 onClick={() => handleQuickAction(action.type)}
                 disabled={messages.length === 0}
-                className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-3 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="bg-white hover:bg-slate-100 border border-slate-200 rounded-xl p-3 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center gap-2.5">
                   <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${action.iconBg} flex items-center justify-center flex-shrink-0`}>
                     <action.icon className={`w-4 h-4 ${action.iconColor}`} />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white">{action.title}</div>
-                    <div className="text-[10px] text-white/50 truncate">{action.desc}</div>
+                    <div className="text-xs font-bold text-slate-900">{action.title}</div>
+                    <div className="text-[10px] text-slate-500 truncate">{action.desc}</div>
                   </div>
                 </div>
               </button>
@@ -1368,17 +1302,17 @@ export default function InAppMessagesPage() {
         </div>
 
         {/* ▼ 영역 10: 메시지 목록 (filter + sort + 카드) */}
-        <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
           <div className="flex items-center gap-2 flex-wrap mb-4">
-            <h3 className="text-sm font-bold text-white">메시지 목록 ({filteredMessages.length}건)</h3>
+            <h3 className="text-sm font-bold text-slate-900">메시지 목록 ({filteredMessages.length}건)</h3>
             <div className="ml-auto flex gap-2 flex-wrap">
-              <button onClick={() => setShowDetails(true)} className="text-xs text-white/70 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+              <button onClick={() => setShowDetails(true)} className="text-xs text-slate-600 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                 <BarChart3 className="w-3.5 h-3.5" /> 자세히 분석
               </button>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as Status | 'all')}
-                className="text-xs bg-slate-900/60 border border-white/10 rounded-lg px-2 py-1.5 text-white"
+                className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900"
               >
                 <option value="all">전체 상태</option>
                 <option value="active">활성</option>
@@ -1388,7 +1322,7 @@ export default function InAppMessagesPage() {
               <select
                 value={templateFilter}
                 onChange={(e) => setTemplateFilter(e.target.value as Template | 'all')}
-                className="text-xs bg-slate-900/60 border border-white/10 rounded-lg px-2 py-1.5 text-white"
+                className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900"
               >
                 <option value="all">전체 템플릿</option>
                 {Object.entries(TEMPLATE_LABELS).map(([key, label]) => (
@@ -1398,7 +1332,7 @@ export default function InAppMessagesPage() {
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as SortMode)}
-                className="text-xs bg-slate-900/60 border border-white/10 rounded-lg px-2 py-1.5 text-white"
+                className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900"
               >
                 <option value="created_desc">최신순</option>
                 <option value="ctr_desc">CTR 높은순</option>
@@ -1408,11 +1342,11 @@ export default function InAppMessagesPage() {
           </div>
 
           {loading ? (
-            <div className="py-12 flex justify-center text-white/50">
+            <div className="py-12 flex justify-center text-slate-500">
               <Loader2 className="w-5 h-5 animate-spin" />
             </div>
           ) : filteredMessages.length === 0 ? (
-            <div className="py-12 text-center text-white/50 text-sm">
+            <div className="py-12 text-center text-slate-500 text-sm">
               조건에 일치하는 메시지가 없습니다.
             </div>
           ) : (
@@ -1420,23 +1354,23 @@ export default function InAppMessagesPage() {
               {filteredMessages.map((m) => {
                 const template = (m.template || m.position || 'top_banner') as Template;
                 return (
-                  <div key={m.id} className="bg-white/5 border border-white/10 rounded-lg p-4 hover:bg-white/10 transition-colors">
+                  <div key={m.id} className="bg-white border border-slate-200 rounded-lg p-4 hover:bg-slate-100 transition-colors">
                     <div className="flex items-start justify-between gap-4 flex-wrap">
                       <div className="flex-1 min-w-[200px]">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <div className="text-sm font-bold text-white">{m.title}</div>
+                          <div className="text-sm font-bold text-slate-900">{m.title}</div>
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                            m.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' :
-                            m.status === 'paused' && m.publish_charged ? 'bg-amber-500/20 text-amber-300' :
-                            m.status === 'paused' ? 'bg-slate-500/25 text-slate-200' :
-                            'bg-white/10 text-white/50'
+                            m.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
+                            m.status === 'paused' && m.publish_charged ? 'bg-amber-100 text-amber-700' :
+                            m.status === 'paused' ? 'bg-slate-500/25 text-slate-700' :
+                            'bg-slate-100 text-slate-500'
                           }`}>{m.status === 'active' ? '게시 중' : m.status === 'paused' ? (m.publish_charged ? '멈춤' : '초안') : m.status}</span>
-                          <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 rounded-full">
+                          <span className="text-[10px] px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded-full">
                             {template === 'full_image' ? ({ overlay: '포스터', event_card: '이벤트 카드', banner_sheet: '배너 시트' } as const)[resolvePosterLayout(m.design)] : TEMPLATE_LABELS[template]}
                           </span>
                         </div>
-                        <div className="text-xs text-white/70 mb-2 line-clamp-2">{m.body}</div>
-                        <div className="flex flex-wrap gap-2 text-[10px] text-white/50">
+                        <div className="text-xs text-slate-600 mb-2 line-clamp-2">{m.body}</div>
+                        <div className="flex flex-wrap gap-2 text-[10px] text-slate-500">
                           <span>트리거: {m.trigger_event}</span>
                           <span>·</span>
                           <span>빈도: {FREQ_LABELS[m.display_frequency || ''] || m.display_frequency}</span>
@@ -1448,25 +1382,25 @@ export default function InAppMessagesPage() {
                           )}
                         </div>
                         {m.stats && (
-                          <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-white/70 border-t border-white/5 pt-2">
-                            <span>표시 <strong className="text-indigo-300">{m.stats.impressions.toLocaleString()}</strong></span>
-                            <span>클릭 <strong className="text-emerald-300">{m.stats.clicks.toLocaleString()}</strong></span>
-                            <span>닫힘 <strong className="text-white/50">{m.stats.dismisses.toLocaleString()}</strong></span>
+                          <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-600 border-t border-slate-100 pt-2">
+                            <span>표시 <strong className="text-indigo-700">{m.stats.impressions.toLocaleString()}</strong></span>
+                            <span>클릭 <strong className="text-emerald-700">{m.stats.clicks.toLocaleString()}</strong></span>
+                            <span>닫힘 <strong className="text-slate-500">{m.stats.dismisses.toLocaleString()}</strong></span>
                             <span>CTR <strong>{(m.stats.ctr * 100).toFixed(2)}%</strong></span>
                           </div>
                         )}
                       </div>
                       <div className="flex flex-col gap-1.5 flex-shrink-0">
-                        <button onClick={() => openDrillDown(m)} className="text-[11px] text-cyan-300 hover:bg-cyan-500/10 px-2.5 py-1 rounded flex items-center gap-1">
+                        <button onClick={() => openDrillDown(m)} className="text-[11px] text-cyan-700 hover:bg-cyan-50 px-2.5 py-1 rounded flex items-center gap-1">
                           <BarChart3 className="w-3 h-3" /> 통계
                         </button>
-                        <button onClick={() => setVariantReview({ parentId: m.id, title: m.title })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2.5 py-1 rounded flex items-center gap-1">
+                        <button onClick={() => setVariantReview({ parentId: m.id, title: m.title })} className="text-[11px] text-violet-700 hover:bg-violet-50 px-2.5 py-1 rounded flex items-center gap-1">
                           <Layers className="w-3 h-3" /> A/B 변형
                         </button>
-                        <button onClick={() => setEditing(m)} className="text-[11px] text-indigo-300 hover:bg-indigo-500/10 px-2.5 py-1 rounded flex items-center gap-1">
+                        <button onClick={() => setEditing(m)} className="text-[11px] text-indigo-700 hover:bg-indigo-50 px-2.5 py-1 rounded flex items-center gap-1">
                           <Edit2 className="w-3 h-3" /> 수정
                         </button>
-                        <button onClick={() => handleDelete(m)} className="text-[11px] text-rose-300 hover:bg-rose-500/10 px-2.5 py-1 rounded flex items-center gap-1">
+                        <button onClick={() => handleDelete(m)} className="text-[11px] text-rose-700 hover:bg-rose-50 px-2.5 py-1 rounded flex items-center gap-1">
                           <Trash2 className="w-3 h-3" /> 삭제
                         </button>
                       </div>
@@ -1547,32 +1481,32 @@ export default function InAppMessagesPage() {
       {/* 자세히 분석 모달 (Top CTR 메시지) */}
       {showDetails && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="sticky top-0 bg-slate-900/90 backdrop-blur-sm border-b border-white/10 px-5 py-4 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2"><BarChart3 className="w-4 h-4 text-cyan-300" /> 자세히 분석: Top CTR 메시지</h3>
-              <button onClick={() => setShowDetails(false)} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10"><X className="w-5 h-5" /></button>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white backdrop-blur-sm border-b border-slate-200 px-5 py-4 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-cyan-700" /> 자세히 분석: Top CTR 메시지</h3>
+              <button onClick={() => setShowDetails(false)} className="text-slate-500 hover:text-slate-900 p-1.5 rounded-lg hover:bg-slate-100"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5">
               {topMessages.length === 0 ? (
-                <div className="text-xs text-white/40 py-8 text-center">데이터 누적 부족. impression 10건 이상 쌓이면 표시됩니다.</div>
+                <div className="text-xs text-slate-400 py-8 text-center">데이터 누적 부족. impression 10건 이상 쌓이면 표시됩니다.</div>
               ) : (
                 <div className="space-y-1.5">
                   {topMessages.map((m) => (
-                    <div key={m.messageId} className="flex items-center gap-3 text-xs bg-white/5 rounded px-3 py-2.5">
-                      <span className="text-white/40 font-mono w-6">{m.rank}.</span>
-                      <span className="flex-1 text-white/80 truncate">{m.title}</span>
-                      <span className="text-emerald-300 font-bold">{(m.ctr * 100).toFixed(2)}%</span>
-                      <span className="text-white/40">{m.impressions.toLocaleString()}건</span>
+                    <div key={m.messageId} className="flex items-center gap-3 text-xs bg-white rounded px-3 py-2.5">
+                      <span className="text-slate-400 font-mono w-6">{m.rank}.</span>
+                      <span className="flex-1 text-slate-700 truncate">{m.title}</span>
+                      <span className="text-emerald-700 font-bold">{(m.ctr * 100).toFixed(2)}%</span>
+                      <span className="text-slate-400">{m.impressions.toLocaleString()}건</span>
                     </div>
                   ))}
                 </div>
               )}
-              <div className="text-[10px] text-white/30 italic mt-3">Data source: 회사 30일 누적 impression ≥ 10건 메시지</div>
+              <div className="text-[10px] text-slate-400 italic mt-3">Data source: 회사 30일 누적 impression ≥ 10건 메시지</div>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </ZoneFrame>
   );
 }
 
@@ -2357,10 +2291,11 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
     else if (headlineIdx >= 0) updateField('content_blocks', blocks.map((b: any, i: number) => (i === headlineIdx ? { ...b, text: v } : b)));
     else updateField('title', v);
   };
-  const toggleBtn = (on: boolean) => `hidden md:inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-[12.5px] font-semibold transition-colors ${on ? 'border-violet-400/60 bg-violet-500/20 text-white' : 'border-white/10 bg-white/[0.04] text-white/70 hover:text-white'}`;
+  // ★ 2026-09-30 편집기 머리 = 남색 띠 → 머리 안 보조 버튼 값은 make-ui(MK_HEAD_*)가 소유
+  const toggleBtn = (on: boolean) => `hidden md:!inline-flex ${on ? MK_HEAD_BTN_ON : MK_HEAD_BTN}`;
 
   const channelSwitch = (
-    <div className="hidden md:inline-flex rounded-xl border border-white/10 bg-white/[0.04] p-1 shrink-0" role="tablist" aria-label="채널">
+    <div className={`hidden md:inline-flex ${MK_HEAD_SEG}`} role="tablist" aria-label="채널">
       {(['web', 'app'] as const).map((c) => {
         const on = (editing.channel === 'app' ? 'app' : 'web') === c;
         const can = on || !wasPublished;
@@ -2368,7 +2303,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
           <button key={c} type="button" role="tab" aria-selected={on} disabled={!can}
             onClick={() => { if (!on && can) setEditing((prev) => (prev ? { ...prev, channel: c } : prev)); }}
             title={!can ? '게시한 메시지는 채널을 바꿀 수 없어요' : undefined}
-            className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold ${on ? 'bg-violet-600 text-white' : can ? 'text-white/70 hover:text-white' : 'text-white/30 cursor-not-allowed'}`}>
+            className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold ${on ? MK_HEAD_SEG_ON : can ? MK_HEAD_SEG_OFF : MK_HEAD_SEG_DISABLED}`}>
             {c === 'web' ? <Globe className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}{c === 'web' ? '웹' : '앱'}
           </button>
         );
@@ -2387,7 +2322,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       {posterMode && !isApp && (
         <button type="button" onClick={() => setPcView((v) => !v)} className={toggleBtn(pcView)}>PC</button>
       )}
-      <button type="button" onClick={() => setDrawerOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-white/10 bg-white/[0.04] text-[12.5px] font-semibold text-white/75 hover:text-white">
+      <button type="button" onClick={() => setDrawerOpen(true)} className={MK_HEAD_BTN}>
         <Target className="w-3.5 h-3.5" /><span className="hidden sm:inline">타겟·시점</span>
       </button>
       {canTestSave && (
@@ -2404,30 +2339,30 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
   const railNotes = (isLive || isApp || appLocked || (posterMode && legacyApp)) ? (
     <div className="mt-4 space-y-2">
       {posterMode && legacyApp && (
-        <div className="rounded-xl border border-amber-400/40 bg-amber-500/15 px-3 py-2 text-[11.5px] leading-relaxed text-amber-50">
+        <div className="rounded-xl border border-amber-300 bg-amber-100 px-3 py-2 text-[11.5px] leading-relaxed text-amber-900">
           <b>구버전 앱 모습을 보는 중</b> · 이때는 글자를 고칠 수 없어요. 편집하려면 위 「구버전 앱 모습」을 끄세요.
         </div>
       )}
       {isLive && (
-        <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-emerald-100">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11.5px] leading-relaxed text-emerald-900">
           <b>게시 중</b> · 고친 내용은 오른쪽 위 [반영]으로 적용돼요. A/B 변형에는 모양 · 장이 함께 가고 문안은 변형 것 그대로예요.
         </div>
       )}
       {isApp && (
-        <div className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-cyan-100">
+        <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-[11.5px] leading-relaxed text-cyan-900">
           <b>앱이 직접 그리는 채널</b> · 앱이 통합 계약을 구현해야 설정한 그대로 나와요.{' '}
-          <button type="button" onClick={() => setShowAppContract(true)} className="underline underline-offset-2 font-semibold text-cyan-200 hover:text-white">계약 보기</button>
+          <button type="button" onClick={() => setShowAppContract(true)} className="underline underline-offset-2 font-semibold text-cyan-800 hover:text-slate-900">계약 보기</button>
         </div>
       )}
       {appLocked && (
-        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-amber-100">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11.5px] leading-relaxed text-amber-900">
           <b>앱 업데이트 뒤에 보이는 모양</b> · 이전 앱은 같은 내용을 포스터 모양 · 「다시 보지 않기」로 보여요. 위 「구버전 앱 모습」으로 확인하세요.
         </div>
       )}
     </div>
   ) : null;
   const placeholderNote = !posterMode && hasPlaceholder ? (
-    <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 flex items-start gap-2">
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 flex items-start gap-2">
       <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
       <span><b>혜택 안내 자리</b>가 남아 있어요. 회사 정책에 맞게 직접 작성해야 발행됩니다(AI는 구체 혜택을 임의로 쓰지 않습니다).</span>
     </div>
@@ -2450,16 +2385,16 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
     <div className="space-y-4">
       <LayoutSwitcher channel={isApp ? 'app' : 'web'} current={layoutKey} onPick={(k) => switchLayout(k)} />
       <div>
-        <div className="flex items-baseline gap-2 px-1 mb-3"><b className="text-[13.5px] text-white">장 1/1</b><span className="text-[11px] text-white/45">한 장짜리 모양</span></div>
-        <div className="rounded-xl border border-violet-400/60 bg-violet-500/[0.12] px-3 py-2.5">
-          <b className="block text-[13px] text-white truncate">{String(editing.title || '제목 없음').replace(/%이름%/g, '(이름)')}</b>
-          <span className="block text-[11.5px] text-white/50 mt-0.5">{editing.image_url ? '사진 있음' : '사진 없음'}</span>
+        <div className="flex items-baseline gap-2 px-1 mb-3"><b className="text-[13.5px] text-slate-900">장 1/1</b><span className="text-[11px] text-slate-400">한 장짜리 모양</span></div>
+        <div className="rounded-xl border border-violet-300 bg-violet-50 px-3 py-2.5">
+          <b className="block text-[13px] text-slate-900 truncate">{String(editing.title || '제목 없음').replace(/%이름%/g, '(이름)')}</b>
+          <span className="block text-[11.5px] text-slate-500 mt-0.5">{editing.image_url ? '사진 있음' : '사진 없음'}</span>
         </div>
         <button type="button" onClick={askConvertToSlides}
-          className="mt-2.5 w-full h-11 rounded-xl border border-dashed border-white/20 text-[13px] font-semibold text-white/80 hover:text-white hover:border-violet-400/60 inline-flex items-center justify-center gap-2">
+          className="mt-2.5 w-full h-11 rounded-xl border border-dashed border-slate-300 text-[13px] font-semibold text-slate-700 hover:text-slate-900 hover:border-violet-300 inline-flex items-center justify-center gap-2">
           <Plus className="w-4 h-4" />장 추가 → 크게 보여 주기로 바꾸기
         </button>
-        <p className="text-[11.5px] text-white/45 mt-2 px-1 leading-relaxed">좌우로 넘기는 여러 장이 필요하면 크게 보여 주기로 바꾸세요. 글 · 사진 · 첫 버튼이 첫 장으로 옮겨집니다.</p>
+        <p className="text-[11.5px] text-slate-400 mt-2 px-1 leading-relaxed">좌우로 넘기는 여러 장이 필요하면 크게 보여 주기로 바꾸세요. 글 · 사진 · 첫 버튼이 첫 장으로 옮겨집니다.</p>
         {railNotes}
       </div>
     </div>
@@ -2493,12 +2428,12 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
         busyImage={images.busy}
       />
     ) : (
-      <div className="flex-1 flex items-center justify-center text-white/50"><Loader2 className="w-5 h-5 animate-spin" /></div>
+      <div className="flex-1 flex items-center justify-center text-slate-500"><Loader2 className="w-5 h-5 animate-spin" /></div>
     )
   ) : (
     <div className="flex-1 min-h-0 overflow-y-auto mk-scroll space-y-3 max-w-[520px] w-full mx-auto">
             {editing.channel === 'app' && (
-              <div className="bg-sky-500/10 border border-sky-400/30 rounded-lg px-3 py-2 text-[11px] text-sky-200 flex items-start gap-1.5">
+              <div className="bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 text-[11px] text-sky-800 flex items-start gap-1.5">
                 <Smartphone className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                 <span>아래 미리보기 = <strong>앱 실렌더와 동일 요소</strong>(이미지·배지·제목·본문·버튼)만 표시. 만든 그대로 앱에 뜹니다. (앱 SDK 연동 필요)</span>
               </div>
@@ -2511,22 +2446,22 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                   className={`flex-1 px-2 py-1.5 text-xs rounded ${
                     previewIdx === i
                       ? p.label === '타겟'
-                        ? 'bg-emerald-500/30 border border-emerald-400/40 text-white'
-                        : 'bg-violet-500/30 border border-violet-400/40 text-white'
-                      : 'bg-slate-900/60 border border-white/10 text-white/50'
+                        ? 'bg-emerald-100 border border-emerald-300 text-slate-900'
+                        : 'bg-violet-100 border border-violet-300 text-slate-900'
+                      : 'bg-white border border-slate-200 text-slate-500'
                   }`}
                 >
                   {p.label}
                 </button>
               ))}
             </div>
-            <div className="text-[10px] text-white/40">
+            <div className="text-[10px] text-slate-400">
               {samplePerson ? (
                 <>
                   샘플: {String(sampleCustomer.name || '고객')} · {String(sampleCustomer.grade || '-')} · {Number(sampleCustomer.points || 0).toLocaleString()}P
                   {samplePerson.is_sample
-                    ? <span className="text-amber-300/80"> · 가상 예시. 고객 DB에 데이터가 쌓이면 실제 고객으로 바뀝니다</span>
-                    : <span className="text-emerald-300/70"> · 실제 고객 DB{samplePerson.label === '타겟' ? ' (타겟 조건 최상단 고객)' : ''}</span>}
+                    ? <span className="text-amber-700"> · 가상 예시. 고객 DB에 데이터가 쌓이면 실제 고객으로 바뀝니다</span>
+                    : <span className="text-emerald-700"> · 실제 고객 DB{samplePerson.label === '타겟' ? ' (타겟 조건 최상단 고객)' : ''}</span>}
                 </>
               ) : (
                 '실제 고객 샘플 불러오는 중...'
@@ -2588,17 +2523,17 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
   ) : (
     <div className="space-y-5">
       {placeholderNote}
-      <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.04] p-1" role="tablist" aria-label="편집 탭">
+      <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1" role="tablist" aria-label="편집 탭">
         {([['content', '내용', Edit2], ['design', '디자인', Wand2]] as const).map(([key, label, Icon]) => (
           <button key={key} type="button" role="tab" aria-selected={activeTab === key} onClick={() => setActiveTab(key)}
-            className={`inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] font-semibold ${activeTab === key ? 'bg-violet-600 text-white' : 'text-white/70 hover:text-white'}`}>
+            className={`inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] font-semibold ${activeTab === key ? 'bg-violet-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}>
             <Icon className="w-3.5 h-3.5" />{label}
           </button>
         ))}
       </div>
             {/* 탭 내용: 제목 · 본문 · 뱃지 */}
             <div className={activeTab === 'content' ? '' : 'hidden'}>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                 <Edit2 className="w-3 h-3" /> 내용
               </h4>
               {!hasBlocks && (
@@ -2607,15 +2542,15 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                   value={editing.title || ''}
                   onChange={(e) => updateField('title', e.target.value)}
                   placeholder="메시지 제목 (20자 안, 변수 X)"
-                  className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                  className="w-full px-3 py-2 mb-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300"
                   maxLength={100}
                 />
               )}
               {hasBlocks ? (
                 <div className="mt-3">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-bold text-white/70 flex items-center gap-1.5"><Layers className="w-3 h-3" /> 블록 구성</span>
-                    <button onClick={() => updateField('content_blocks', [])} className="text-[10px] text-white/40 hover:text-white/70">단순 폼으로</button>
+                    <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><Layers className="w-3 h-3" /> 블록 구성</span>
+                    <button onClick={() => updateField('content_blocks', [])} className="text-[10px] text-slate-400 hover:text-slate-600">단순 폼으로</button>
                   </div>
                   <BlockComposer blocks={blocks} onChange={(b) => updateField('content_blocks', b)} uploadImage={uploadImage} template={(editing.template || '') as string} cardStyle={editing.card_style as string | undefined} />
                 </div>
@@ -2626,7 +2561,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     value={editing.body || ''}
                     onChange={(e) => updateField('body', e.target.value)}
                     placeholder={editing.template === 'full_image' ? '이미지 위에 얹는 짧은 문구 1~3줄. 길면 이미지 밖으로 잘려 보일 수 있어요' : '짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내: 직접 작성해주세요] placeholder 사용'}
-                    className={`w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y ${editing.template === 'full_image' ? 'h-16' : 'h-24'} focus:outline-none focus:border-violet-400/50`}
+                    className={`w-full px-3 py-2 mb-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 resize-y ${editing.template === 'full_image' ? 'h-16' : 'h-24'} focus:outline-none focus:border-violet-300`}
                     maxLength={300}
                   />
                   <input
@@ -2634,20 +2569,20 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     value={editing.badge_text || ''}
                     onChange={(e) => updateField('badge_text', e.target.value)}
                     placeholder="뱃지 (선택, 8자 안: NEW · VIP · 오랜만이에요)"
-                    className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                    className="w-full px-3 py-2 mb-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300"
                     maxLength={20}
                   />
                   {/* ★ 2026-07-18 정정 — 웹 기존 UX 원복(신규에서도 블록 전환 가능). 포스터형만 flat 전용이라 숨김 유지 */}
                   {!isApp && editing.template !== 'full_image' && (
                     <button
                       onClick={() => { const c = convertToBlocks(editing); setEditing({ ...editing, ...c }); }}
-                      className="w-full text-xs text-violet-100 bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 hover:from-violet-500/50 hover:to-fuchsia-500/50 border border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
+                      className="w-full text-xs text-violet-900 bg-gradient-to-r from-violet-50 to-fuchsia-50 hover:from-violet-50 hover:to-fuchsia-50 border border-violet-200 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
                     >
                       <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환 (모던 메시지, 권장)
                     </button>
                   )}
                   {isApp && (
-                    <div className="text-[10px] text-white/40 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                    <div className="text-[10px] text-slate-400 bg-white border border-slate-200 rounded-lg px-3 py-2">
                       앱 인앱은 위 보장 요소(제목·본문·이미지·버튼·배지)가 그대로 앱에 표시됩니다. 미리보기와 실물이 1:1로 일치합니다.
                     </div>
                   )}
@@ -2655,7 +2590,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
               )}
               {/* ★ 2026-07-17 텍스트 정렬 (좌/중/우) — 제목·본문. 웹·앱·블록·flat 전부 공통 노출 */}
               <div className="mt-3">
-                <label className="text-[10px] text-white/50 block mb-1.5">텍스트 정렬</label>
+                <label className="text-[10px] text-slate-500 block mb-1.5">텍스트 정렬</label>
                 <div className="flex gap-1.5">
                   {([['left', '왼쪽'], ['center', '가운데'], ['right', '오른쪽']] as const).map(([v, label]) => {
                     const cur = String(editing.design?.text_align || 'left');
@@ -2663,7 +2598,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                       <button
                         key={v}
                         onClick={() => setDesign({ text_align: v === 'left' ? null : v })}
-                        className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                        className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-500 hover:bg-white'}`}
                       >{label}</button>
                     );
                   })}
@@ -2675,26 +2610,26 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                 ★ 2026-07-18 P1 (Harold 확정) — 테마 축 정리로 신규 UI 비노출. 데이터·렌더는 무접촉(기존 발행물 회귀 0) */}
             {SHOW_ELITE_TEMPLATES && eliteTemplates.length > 0 && !isApp && (
               <div className={activeTab === 'design' ? 'mb-5' : 'hidden'}>
-                <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3 text-amber-300" /> 문구 스타일: 목적으로 고르세요
+                <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-amber-700" /> 문구 스타일: 목적으로 고르세요
                 </h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {eliteTemplates.map((g) => (
                     <button
                       key={g.id}
                       onClick={() => pickGolden(g)}
-                      className="rounded-xl border border-amber-400/25 bg-slate-900/60 hover:bg-white/5 hover:border-amber-400/60 p-2 text-left transition-colors"
+                      className="rounded-xl border border-amber-200 bg-white hover:bg-white hover:border-amber-300 p-2 text-left transition-colors"
                       title={g.difference || ''}
                     >
-                      <span className="flex h-7 rounded-lg overflow-hidden border border-white/10">
+                      <span className="flex h-7 rounded-lg overflow-hidden border border-slate-200">
                         {g.swatches.map((s, i) => <span key={i} className="flex-1" style={{ background: s }} />)}
                       </span>
-                      <span className="block text-[11px] font-bold mt-1.5 text-white/85">{g.label}</span>
-                      <span className="block text-[9px] text-white/45 mt-0.5">{g.hint}</span>
+                      <span className="block text-[11px] font-bold mt-1.5 text-slate-700">{g.label}</span>
+                      <span className="block text-[9px] text-slate-400 mt-0.5">{g.hint}</span>
                     </button>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/40 mt-1.5">쓴 글이 있으면 글은 두고 모양(형태·테마·서체)만 입힙니다. 빈 메시지면 구성까지 채웁니다. 혜택 문구는 직접 작성해야 발행됩니다.</div>
+                <div className="text-[10px] text-slate-400 mt-1.5">쓴 글이 있으면 글은 두고 모양(형태·테마·서체)만 입힙니다. 빈 메시지면 구성까지 채웁니다. 혜택 문구는 직접 작성해야 발행됩니다.</div>
               </div>
             )}
 
@@ -2702,8 +2637,8 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
 
             {/* 탭 디자인: 형태(디자인) + 색상 + 강조색 (블록 모드) */}
             <div className={activeTab === 'design' && hasBlocks ? '' : 'hidden'}>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Layers className="w-3 h-3 text-fuchsia-300" /> 디자인 (형태 4종)
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                <Layers className="w-3 h-3 text-fuchsia-700" /> 디자인 (형태 4종)
               </h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
                 {CARD_STYLE_OPTIONS.map((cs) => {
@@ -2712,36 +2647,36 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     <button
                       key={cs.key}
                       onClick={() => updateField('card_style', cs.key)}
-                      className={`rounded-xl border p-2 text-left transition-colors ${active ? 'bg-violet-500/25 border-violet-400/60' : 'bg-slate-900/60 border-white/10 hover:bg-white/5'}`}
+                      className={`rounded-xl border p-2 text-left transition-colors ${active ? 'bg-violet-100 border-violet-300' : 'bg-white border-slate-200 hover:bg-white'}`}
                     >
                       <CardStyleThumb k={cs.key} active={active} />
-                      <span className={`block text-[11px] font-bold mt-1.5 ${active ? 'text-white' : 'text-white/80'}`}>{cs.label}</span>
-                      <span className="block text-[9px] text-white/45 mt-0.5">{cs.hint}</span>
+                      <span className={`block text-[11px] font-bold mt-1.5 ${active ? 'text-slate-900' : 'text-slate-700'}`}>{cs.label}</span>
+                      <span className="block text-[9px] text-slate-400 mt-0.5">{cs.hint}</span>
                     </button>
                   );
                 })}
               </div>
               {['toast', 'floating_button', 'top_banner', 'bottom_banner'].includes(editing.template || '') && (
-                <div className="text-[10px] text-white/40 -mt-2 mb-3">토스트·배너·플로팅 버튼은 자체 형태라 형태 선택이 적용되지 않습니다 (모달·슬라이드에서 적용).</div>
+                <div className="text-[10px] text-slate-400 -mt-2 mb-3">토스트·배너·플로팅 버튼은 자체 형태라 형태 선택이 적용되지 않습니다 (모달·슬라이드에서 적용).</div>
               )}
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 색상
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                <Wand2 className="w-3 h-3 text-fuchsia-700" /> 색상
               </h4>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
                 {THEME_OPTIONS.map((t) => (
                   <button
                     key={t.key}
                     onClick={() => updateField('theme', t.key)}
-                    className={`px-2 py-2 rounded-lg border text-left transition-colors ${(editing.theme || 'auto') === t.key ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/70 hover:bg-white/5'}`}
+                    className={`px-2 py-2 rounded-lg border text-left transition-colors ${(editing.theme || 'auto') === t.key ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-600 hover:bg-white'}`}
                   >
                     <span className="block text-xs font-bold">{t.label}</span>
-                    <span className="block text-[9px] text-white/45 mt-0.5">{t.hint}</span>
+                    <span className="block text-[9px] text-slate-400 mt-0.5">{t.hint}</span>
                   </button>
                 ))}
               </div>
               {/* ★ 2026-07-14 디자인 3.0 — 시그니처 테마 (서체·조판·모티프 내장 큐레이션. 1클릭 — 문안 무변) */}
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 시그니처 테마 (아트디렉션 내장)
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                <Wand2 className="w-3 h-3 text-fuchsia-700" /> 시그니처 테마 (아트디렉션 내장)
               </h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
                 {SIGNATURE_THEME_OPTIONS.map((t) => {
@@ -2750,36 +2685,36 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     <button
                       key={t.key}
                       onClick={() => updateField('theme', t.key)}
-                      className={`rounded-xl border p-2 text-left transition-colors ${active ? 'bg-violet-500/25 border-violet-400/60' : 'bg-slate-900/60 border-white/10 hover:bg-white/5'}`}
+                      className={`rounded-xl border p-2 text-left transition-colors ${active ? 'bg-violet-100 border-violet-300' : 'bg-white border-slate-200 hover:bg-white'}`}
                     >
-                      <span className="flex h-5 rounded-md overflow-hidden border border-white/10">
+                      <span className="flex h-5 rounded-md overflow-hidden border border-slate-200">
                         {t.swatches.map((s, i) => <span key={i} className="flex-1" style={{ background: s }} />)}
                       </span>
-                      <span className={`block text-[11px] font-bold mt-1.5 ${active ? 'text-white' : 'text-white/80'}`}>{t.label}</span>
-                      <span className="block text-[9px] text-white/45 mt-0.5">{t.hint}</span>
+                      <span className={`block text-[11px] font-bold mt-1.5 ${active ? 'text-slate-900' : 'text-slate-700'}`}>{t.label}</span>
+                      <span className="block text-[9px] text-slate-400 mt-0.5">{t.hint}</span>
                     </button>
                   );
                 })}
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                <label className="text-[11px] text-white/60">강조색</label>
+                <label className="text-[11px] text-slate-500">강조색</label>
                 <input
                   type="color"
                   value={editing.accent_color || brandAccent || '#6d5cf0'}
                   onChange={(e) => updateField('accent_color', e.target.value)}
-                  className="h-9 w-16 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                  className="h-9 w-16 bg-white border border-slate-200 rounded cursor-pointer"
                 />
                 {brandAccent && (
                   <button
                     onClick={() => updateField('accent_color', brandAccent)}
-                    className="flex items-center gap-1.5 text-[10px] px-2 py-1.5 rounded-lg border border-white/10 bg-slate-900/60 text-white/70 hover:bg-white/5"
+                    className="flex items-center gap-1.5 text-[10px] px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-white"
                     title="설정에 저장된 회사 브랜드 색으로 되돌리기"
                   >
-                    <span className="w-3 h-3 rounded-full border border-white/20" style={{ background: brandAccent }} />
+                    <span className="w-3 h-3 rounded-full border border-slate-300" style={{ background: brandAccent }} />
                     브랜드 색
                   </button>
                 )}
-                <span className="text-[10px] text-white/40">{brandAccent ? '브랜드 킷에 저장된 회사 색이 기본 적용됩니다' : '면·구조는 테마가, 강조색만 회사 색'}</span>
+                <span className="text-[10px] text-slate-400">{brandAccent ? '브랜드 킷에 저장된 회사 색이 기본 적용됩니다' : '면·구조는 테마가, 강조색만 회사 색'}</span>
               </div>
 
               {/* ★ 2026-07-14 디자인 3.0 — 구도·모션·서체·배경 (소비하는 형태 조합에서만 노출 — 죽은 컨트롤 금지) */}
@@ -2810,16 +2745,16 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                   <div className="mt-4 space-y-3">
                     {treatAllowed && treatAllowed.length > 1 && (
                       <div>
-                        <label className="text-[10px] text-white/50 block mb-1">구도 (지금 형태 조합에서 쓸 수 있는 조판)</label>
+                        <label className="text-[10px] text-slate-500 block mb-1">구도 (지금 형태 조합에서 쓸 수 있는 조판)</label>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                           {INAPP_TREATMENT_OPTIONS.filter((o) => treatAllowed.includes(o.key)).map((o) => (
                             <button
                               key={o.key}
                               onClick={() => setDesign({ treatment: o.key === 'classic' ? null : o.key })}
-                              className={`px-2 py-2 rounded-lg border text-left transition-colors ${currentTreatment === o.key ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/70 hover:bg-white/5'}`}
+                              className={`px-2 py-2 rounded-lg border text-left transition-colors ${currentTreatment === o.key ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-600 hover:bg-white'}`}
                             >
                               <span className="block text-[11px] font-bold">{o.label}</span>
-                              <span className="block text-[9px] text-white/45 mt-0.5">{o.hint}</span>
+                              <span className="block text-[9px] text-slate-400 mt-0.5">{o.hint}</span>
                             </button>
                           ))}
                         </div>
@@ -2827,21 +2762,21 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     )}
                     <div className="flex flex-wrap items-end gap-4">
                       <div>
-                        <label className="text-[10px] text-white/50 block mb-1">모션 2.0 (CTA 맥동·쿠폰 샤인·초침 팝)</label>
+                        <label className="text-[10px] text-slate-500 block mb-1">모션 2.0 (CTA 맥동·쿠폰 샤인·초침 팝)</label>
                         <div className="flex gap-1.5">
                           <button
                             onClick={() => setDesign({ motion: 'rich' })}
-                            className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${motionOn ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                            className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${motionOn ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-500 hover:bg-white'}`}
                           >켬</button>
                           <button
                             onClick={() => setDesign({ motion: null })}
-                            className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${!motionOn ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                            className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${!motionOn ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-500 hover:bg-white'}`}
                           >끔</button>
                         </div>
-                        <div className="text-[9px] text-white/35 mt-1">수신자 기기의 모션 줄이기 설정이 켜져 있으면 자동으로 꺼집니다.</div>
+                        <div className="text-[9px] text-slate-400 mt-1">수신자 기기의 모션 줄이기 설정이 켜져 있으면 자동으로 꺼집니다.</div>
                       </div>
                       <div>
-                        <label className="text-[10px] text-white/50 block mb-1">헤드라인 서체</label>
+                        <label className="text-[10px] text-slate-500 block mb-1">헤드라인 서체</label>
                         <select
                           value={currentFontId}
                           onChange={(e) => {
@@ -2850,7 +2785,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                             const c = INAPP_FONT_CATALOG.find((x) => x.id === id);
                             setDesign({ font_display: c ? c.css : null });
                           }}
-                          className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
+                          className="px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900"
                         >
                           <option value="theme_default">테마 기본</option>
                           {INAPP_FONT_CATALOG.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -2858,13 +2793,13 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                       </div>
                       {headlineBlockIdx >= 0 && (
                         <div>
-                          <label className="text-[10px] text-white/50 block mb-1">헤드라인 강조</label>
+                          <label className="text-[10px] text-slate-500 block mb-1">헤드라인 강조</label>
                           <div className="flex gap-1.5">
                             {([['', '없음'], ['marker', '형광 마커'], ['underline', '밑줄']] as const).map(([v, label]) => (
                               <button
                                 key={v || 'none'}
                                 onClick={() => setHeadlineEmphasis(v)}
-                                className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${currentEmphasis === v ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                                className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${currentEmphasis === v ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-500 hover:bg-white'}`}
                               >{label}</button>
                             ))}
                           </div>
@@ -2874,7 +2809,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     {editing.template === 'center_modal' && (
                       <div className="flex flex-wrap items-end gap-4">
                         <div>
-                          <label className="text-[10px] text-white/50 block mb-1">배경 어둡기 (모달 뒤 딤)</label>
+                          <label className="text-[10px] text-slate-500 block mb-1">배경 어둡기 (모달 뒤 딤)</label>
                           <div className="flex gap-1.5">
                             {([['soft', '옅게'], ['standard', '기본'], ['deep', '깊게']] as const).map(([v, label]) => {
                               const cur = String(editing.design?.backdrop?.dim || 'standard');
@@ -2886,14 +2821,14 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                                     if (v === 'standard') delete bd.dim; else bd.dim = v;
                                     setDesign({ backdrop: Object.keys(bd).length > 0 ? bd : null });
                                   }}
-                                  className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                                  className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-500 hover:bg-white'}`}
                                 >{label}</button>
                               );
                             })}
                           </div>
                         </div>
                         <div>
-                          <label className="text-[10px] text-white/50 block mb-1">배경 블러</label>
+                          <label className="text-[10px] text-slate-500 block mb-1">배경 블러</label>
                           <div className="flex gap-1.5">
                             {([[true, '켬'], [false, '끔']] as const).map(([v, label]) => {
                               const cur = editing.design?.backdrop?.blur !== false;
@@ -2905,7 +2840,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                                     if (v) delete bd.blur; else bd.blur = false;
                                     setDesign({ backdrop: Object.keys(bd).length > 0 ? bd : null });
                                   }}
-                                  className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                                  className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-500 hover:bg-white'}`}
                                 >{label}</button>
                               );
                             })}
@@ -2922,8 +2857,8 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
             {/* ★ 2026-07-19 재구성 (Harold) — 포스터 서체·색·크기 컨트롤은 내용 탭의 입력 바로 옆으로 이동 (여기서 제거) */}
             {/* ★ 2026-07-18 정정2 — 포스터형은 카드 배경이 이미지+흰 바닥 고정이라 색 프리셋이 죽은 컨트롤 → 숨김 */}
             <div className={activeTab === 'design' && !hasBlocks && editing.template !== 'full_image' ? '' : 'hidden'}>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 디자인 (클릭해서 골라보세요)
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                <Wand2 className="w-3 h-3 text-fuchsia-700" /> 디자인 (클릭해서 골라보세요)
               </h4>
               <div className="grid grid-cols-4 gap-2">
                 {DESIGN_PRESETS.map((p) => {
@@ -2933,7 +2868,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                       key={p.key}
                       type="button"
                       onClick={() => applyPreset(p)}
-                      className={`relative h-14 rounded-xl border overflow-hidden transition-all ${active ? 'border-fuchsia-400 ring-2 ring-fuchsia-400/50' : 'border-white/10 hover:border-white/40 hover:scale-[1.03]'}`}
+                      className={`relative h-14 rounded-xl border overflow-hidden transition-all ${active ? 'border-fuchsia-400 ring-2 ring-fuchsia-300' : 'border-slate-200 hover:border-slate-300 hover:scale-[1.03]'}`}
                       style={{ background: p.background }}
                       title={p.label}
                     >
@@ -2946,18 +2881,18 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
 
             {/* 탭 디자인: 이미지 업로드 */}
             <div className={activeTab === 'design' ? '' : 'hidden'}>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                 <ImageIcon className="w-3 h-3" /> 이미지 (선택)
               </h4>
               {!['center_modal', 'slide_in', 'top_banner', 'bottom_banner', 'full_screen', 'inline_card', 'full_image'].includes(editing.template || '') ? (
-                <div className="text-[11px] text-white/50 bg-white/5 border border-white/10 rounded-lg px-3 py-2.5">
+                <div className="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-lg px-3 py-2.5">
                   토스트·플로팅 버튼 형태는 이미지를 지원하지 않습니다. 이미지를 쓰려면 중앙 모달이나 슬라이드 인을 선택해주세요.
                 </div>
               ) : (
               <div className="flex gap-2 items-center">
                 {editing.image_url ? (
                   <div className="relative">
-                    <img src={editing.image_url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className="w-20 h-20 object-cover rounded-lg bg-white/5" />
+                    <img src={editing.image_url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className="w-20 h-20 object-cover rounded-lg bg-white" />
                     <button
                       onClick={() => {
                         if (hasBlocks) setEditing({ ...editing, image_url: null, content_blocks: blocks.filter((bl: any) => bl?.type !== 'media') });
@@ -2973,7 +2908,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                   <div className="flex flex-wrap gap-2">
                     <button
                       onClick={() => fileInputRef.current?.click()}
-                      className="px-3 py-2 bg-slate-900/60 border border-dashed border-white/20 rounded-lg text-xs text-white/70 hover:bg-white/5 flex items-center gap-2"
+                      className="px-3 py-2 bg-white border border-dashed border-slate-300 rounded-lg text-xs text-slate-600 hover:bg-white flex items-center gap-2"
                     >
                       <Upload className="w-3.5 h-3.5" />
                       이미지 업로드 (2MB 이하)
@@ -2981,7 +2916,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     {/* ★ 2026-07-18 P3 — 업로드한 소재 재사용 (에셋 라이브러리) */}
                     <button
                       onClick={() => setAssetPickOpen(true)}
-                      className="px-3 py-2 bg-violet-500/10 border border-violet-400/30 rounded-lg text-xs text-violet-300 hover:bg-violet-500/20 flex items-center gap-2"
+                      className="px-3 py-2 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-700 hover:bg-violet-100 flex items-center gap-2"
                     >
                       라이브러리에서 선택
                     </button>
@@ -3001,10 +2936,10 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
               {!hasBlocks && ['center_modal', 'slide_in', 'top_banner', 'bottom_banner', 'full_screen', 'inline_card', 'full_image'].includes(editing.template || '') && (
                 <div className="mt-2.5">
                   <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-[11px] font-semibold text-white/60">이미지 클릭 링크 (선택)</span>
+                    <span className="text-[11px] font-semibold text-slate-500">이미지 클릭 링크 (선택)</span>
                     <button
                       onClick={() => setMallPickTarget({ kind: 'image' })}
-                      className="px-2 py-0.5 rounded bg-violet-500/15 border border-violet-400/30 text-[10px] text-violet-300 hover:bg-violet-500/25"
+                      className="px-2 py-0.5 rounded bg-violet-100 border border-violet-200 text-[10px] text-violet-700 hover:bg-violet-100"
                     >
                       연동 몰에서
                     </button>
@@ -3014,7 +2949,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     value={editing.image_link_url || ''}
                     onChange={(e) => updateField('image_link_url', e.target.value || null)}
                     placeholder="이미지를 누르면 이동할 주소 (https://…). 비우면 이동 없음"
-                    className="w-full px-3 py-2 bg-slate-900/60 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300"
                   />
                 </div>
               )}
@@ -3022,7 +2957,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
 
             {/* 탭 내용: CTA 버튼 (블록 모드는 cta_group 블록 사용 — 레거시만) */}
             <div className={activeTab === 'content' && !hasBlocks ? '' : 'hidden'}>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                 <MousePointer className="w-3 h-3" /> CTA 버튼 (최대 3개)
               </h4>
               <div className="space-y-2">
@@ -3058,7 +2993,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                         updateField('buttons', newButtons);
                       }}
                       placeholder="버튼 라벨"
-                      className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                     />
                     <input
                       type="url"
@@ -3069,12 +3004,12 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                         updateField('buttons', newButtons);
                       }}
                       placeholder="이동 URL"
-                      className={`px-2 py-1.5 bg-slate-900/60 border rounded text-xs text-white placeholder-white/30 ${urlBad ? 'border-rose-400/60' : 'border-white/10'}`}
+                      className={`px-2 py-1.5 bg-white border rounded text-xs text-slate-900 placeholder-slate-400 ${urlBad ? 'border-rose-300' : 'border-slate-200'}`}
                     />
                     {/* ★ 2026-07-18 P2 — 연동 몰 상품 선택 → URL 자동 주입 (수기 입력 사고 차단) */}
                     <button
                       onClick={() => setMallPickTarget({ kind: 'button', id: btn.id || `btn_${idx}` })}
-                      className="px-2 py-1.5 rounded border border-emerald-400/30 bg-emerald-500/10 text-[11px] text-emerald-300 hover:bg-emerald-500/20 whitespace-nowrap"
+                      className="px-2 py-1.5 rounded border border-emerald-200 bg-emerald-50 text-[11px] text-emerald-700 hover:bg-emerald-100 whitespace-nowrap"
                       title="연동 몰에서 상품을 골라 이동 URL을 자동으로 채웁니다"
                     >
                       연동 몰
@@ -3089,7 +3024,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                           newButtons[idx] = { ...newButtons[idx], background_color: e.target.value };
                           updateField('buttons', newButtons);
                         }}
-                        className="h-8 w-full bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                        className="h-8 w-full bg-white border border-slate-200 rounded cursor-pointer"
                         title="버튼 배경색"
                       />
                     )}
@@ -3102,7 +3037,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                           newButtons[idx] = { ...newButtons[idx], text_color: e.target.value };
                           updateField('buttons', newButtons);
                         }}
-                        className="h-8 w-full bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                        className="h-8 w-full bg-white border border-slate-200 rounded cursor-pointer"
                         title="버튼 글자색"
                       />
                     )}
@@ -3115,7 +3050,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                         newButtons[idx] = { ...newButtons[idx], style: e.target.value as any };
                         updateField('buttons', newButtons);
                       }}
-                      className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
+                      className="px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900"
                     >
                       <option value="primary">강조</option>
                       <option value="secondary">보통</option>
@@ -3124,14 +3059,14 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     )}
                     <button
                       onClick={() => updateField('buttons', (editing.buttons || []).filter((_, i) => i !== idx))}
-                      className="text-rose-300 hover:bg-rose-500/10 rounded p-1.5"
+                      className="text-rose-700 hover:bg-rose-50 rounded p-1.5"
                       aria-label="버튼 삭제"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                   {urlBad && (
-                    <div className="text-[10px] text-rose-300/90 mt-1">{urlBadMsg}</div>
+                    <div className="text-[10px] text-rose-700 mt-1">{urlBadMsg}</div>
                   )}
                   </div>
                   );
@@ -3147,7 +3082,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                       background_color: brandAccent || '#4f46e5',
                       text_color: '#ffffff',
                     }])}
-                    className="text-xs text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"
+                    className="text-xs text-violet-700 hover:bg-violet-50 px-2 py-1 rounded flex items-center gap-1"
                   >
                     <Plus className="w-3 h-3" /> 버튼 추가
                   </button>
@@ -3158,17 +3093,17 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
             {/* ★ 2026-09-29 색상 — 옛 타겟·시점 탭에서 디자인 탭으로(발행 확인 창에는 표시 조건만). 블록 메시지는 테마가 색을 정한다 */}
             {!hasBlocks && (
               <div className={activeTab === 'design' ? '' : 'hidden'}>
-                <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                   <Layers className="w-3 h-3" /> 색상
                 </h4>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-white/50 block mb-1">배경색</label>
-                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(String(editing.background_color || '')) ? String(editing.background_color) : '#4f46e5'} onChange={(e) => updateField('background_color', e.target.value)} className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer" />
+                    <label className="text-[10px] text-slate-500 block mb-1">배경색</label>
+                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(String(editing.background_color || '')) ? String(editing.background_color) : '#4f46e5'} onChange={(e) => updateField('background_color', e.target.value)} className="w-full h-9 bg-white border border-slate-200 rounded cursor-pointer" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-white/50 block mb-1">글자색</label>
-                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(String(editing.text_color || '')) ? String(editing.text_color) : '#ffffff'} onChange={(e) => updateField('text_color', e.target.value)} className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer" />
+                    <label className="text-[10px] text-slate-500 block mb-1">글자색</label>
+                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(String(editing.text_color || '')) ? String(editing.text_color) : '#ffffff'} onChange={(e) => updateField('text_color', e.target.value)} className="w-full h-9 bg-white border border-slate-200 rounded cursor-pointer" />
                   </div>
                 </div>
               </div>
@@ -3180,33 +3115,33 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
   const drawer = drawerOpen ? (
     <div className="fixed inset-0 z-[60]" role="dialog" aria-label={isLive ? '타겟 · 시점' : '발행 전 확인'}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} />
-      <div className="absolute right-0 top-0 h-full w-full max-w-[540px] bg-slate-900 border-l border-white/10 shadow-2xl flex flex-col">
-        <div className="h-16 px-5 flex items-center justify-between border-b border-white/10 shrink-0">
-          <b className="text-[16px] text-white">{isLive ? '타겟 · 시점' : wasPublished ? '다시 게시 전 확인' : '발행 전 확인'}</b>
-          <button type="button" onClick={() => setDrawerOpen(false)} className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+      <div className="absolute right-0 top-0 h-full w-full max-w-[540px] bg-white border-l border-slate-200 shadow-2xl flex flex-col">
+        <div className="h-16 px-5 flex items-center justify-between border-b border-slate-200 shrink-0">
+          <b className="text-[16px] text-slate-900">{isLive ? '타겟 · 시점' : wasPublished ? '다시 게시 전 확인' : '발행 전 확인'}</b>
+          <button type="button" onClick={() => setDrawerOpen(false)} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto mk-scroll px-5 py-4 space-y-5">
-          <div className={`rounded-xl border px-3.5 py-3 text-[12.5px] ${defectNow ? 'border-amber-400/30 bg-amber-500/10 text-amber-100' : 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'}`}>
+          <div className={`rounded-xl border px-3.5 py-3 text-[12.5px] ${defectNow ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>
             <b className="block mb-0.5">점검</b>
             {defectNow ? defectNow.message : posterMode ? `장 ${slides.length}개 모두 사진 있음 · 혜택 칸 채움` : '제목 · 본문 · 혜택 칸 확인됨'}
             {defectNow && <span className="block text-[11.5px] opacity-80 mt-1">빈 사진이나 채우지 않은 혜택 칸이 있으면 발행하지 않고 그 장으로 데려갑니다.</span>}
           </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-3 text-[12.5px] text-white/75">
-            <b className="block text-white mb-0.5">아래쪽 버튼</b>
+          <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-[12.5px] text-slate-600">
+            <b className="block text-slate-900 mb-0.5">아래쪽 버튼</b>
             {editing.design?.dismiss_mode === 'snooze_day'
               ? '오늘 하루 보지 않기 · 닫기: 누른 고객에게는 24시간 동안 뜨지 않습니다.'
               : '다시 보지 않기 · 닫기: 다시 보지 않기를 누른 고객에게는 더 뜨지 않습니다.'}
             {isApp && editing.design?.dismiss_mode === 'snooze_day' && ' 앱은 업데이트된 앱에서만 「오늘 하루 보지 않기」가 보이고, 이전 앱은 「다시 보지 않기 · 닫기」로 나옵니다.'}
           </div>
           {appLocked && (
-            <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3.5 py-3 text-[12.5px] text-amber-100">이 모양은 앱 업데이트 뒤에 보입니다. 이전 앱에서는 같은 내용이 포스터 모양으로 보입니다.</div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-[12.5px] text-amber-900">이 모양은 앱 업데이트 뒤에 보입니다. 이전 앱에서는 같은 내용이 포스터 모양으로 보입니다.</div>
           )}
             {/* 탭 타겟·시점: 세그먼트 */}
             <div className="">
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                 <Target className="w-3 h-3" /> 타겟 세그먼트
               </h4>
-              <div className="bg-slate-900/60 border border-white/10 rounded-lg p-3 space-y-2">
+              <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2">
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="text"
@@ -3219,7 +3154,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                         customer: { ...(editing.segment_conditions?.customer || {}), grade: grades.length > 0 ? grades : undefined },
                       });
                     }}
-                    className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                    className="px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                   />
                   <input
                     type="text"
@@ -3232,13 +3167,13 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                         customer: { ...(editing.segment_conditions?.customer || {}), region: regions.length > 0 ? regions : undefined },
                       });
                     }}
-                    className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                    className="px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                   />
                 </div>
-                <div className="text-[11px] text-cyan-300 flex items-center gap-2 pt-1 border-t border-white/5">
+                <div className="text-[11px] text-cyan-700 flex items-center gap-2 pt-1 border-t border-slate-100">
                   <Users className="w-3 h-3" />
                   {segmentCount === null ? '실시간 매칭 중...' : (
-                    <span>매칭 회원: <strong className="text-white">{segmentCount.toLocaleString()}명</strong> ({segmentDesc})</span>
+                    <span>매칭 회원: <strong className="text-slate-900">{segmentCount.toLocaleString()}명</strong> ({segmentDesc})</span>
                   )}
                 </div>
               </div>
@@ -3246,24 +3181,24 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
 
             {/* AI 정밀 타겟 (표시 대상) — 자연어 추출 filter를 표시 대상으로 (단 1 오차 없는 타겟) */}
             <div className="mt-3">
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                 <Sparkles className="w-3 h-3" /> AI 정밀 타겟 (표시 대상)
               </h4>
-              <div className="bg-slate-900/60 border border-white/10 rounded-lg p-3 space-y-2">
+              <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2">
                 {editing.audience_filter && Object.keys(editing.audience_filter).length > 0 ? (
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-emerald-300">정밀 타겟 지정됨. 이 조건에 맞는 회원에게만 표시</span>
+                    <span className="text-[11px] text-emerald-700">정밀 타겟 지정됨. 이 조건에 맞는 회원에게만 표시</span>
                     <div className="flex items-center gap-1.5">
-                      <button onClick={() => setExtractOpen(true)} className="text-[11px] text-fuchsia-300 hover:text-fuchsia-200">다시 추출</button>
-                      <button onClick={() => updateField('audience_filter', null)} className="text-[11px] text-white/40 hover:text-white/70">해제</button>
+                      <button onClick={() => setExtractOpen(true)} className="text-[11px] text-fuchsia-700 hover:text-fuchsia-800">다시 추출</button>
+                      <button onClick={() => updateField('audience_filter', null)} className="text-[11px] text-slate-400 hover:text-slate-600">해제</button>
                     </div>
                   </div>
                 ) : (
-                  <button onClick={() => setExtractOpen(true)} className="w-full py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 flex items-center justify-center gap-1.5">
+                  <button onClick={() => setExtractOpen(true)} className="w-full py-2 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5" /> 자연어로 표시 대상 추출
                   </button>
                 )}
-                <p className="text-[10px] text-white/30">세그먼트와 함께 적용됩니다. 표시는 저장 후 반영됩니다.</p>
+                <p className="text-[10px] text-slate-400">세그먼트와 함께 적용됩니다. 표시는 저장 후 반영됩니다.</p>
               </div>
             </div>
             <TargetExtractModal
@@ -3278,10 +3213,10 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
             {/* 개인화 변수 — 기본 알림만(포스터 계열은 칸마다 「넣을 수 있는 값」) */}
             {!posterMode && (
             <div>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                 <Wand2 className="w-3 h-3" /> 개인화 변수 (본문 안 활용)
               </h4>
-              <div className="bg-slate-900/60 border border-white/10 rounded-lg p-3 grid grid-cols-2 md:grid-cols-3 gap-1.5">
+              <div className="bg-white border border-slate-200 rounded-lg p-3 grid grid-cols-2 md:grid-cols-3 gap-1.5">
                 {availableVariables.slice(0, 9).map((v) => (
                   <button
                     key={v.key}
@@ -3289,11 +3224,11 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                       const cursorBody = (editing.body || '') + ' ' + v.key;
                       updateField('body', cursorBody);
                     }}
-                    className="text-[10px] bg-slate-900/60 hover:bg-violet-500/20 border border-white/10 rounded px-2 py-1 text-left transition-colors"
+                    className="text-[10px] bg-white hover:bg-violet-100 border border-slate-200 rounded px-2 py-1 text-left transition-colors"
                     title={v.hint}
                   >
-                    <div className="text-violet-300 font-mono truncate">{v.key}</div>
-                    <div className="text-white/50">{v.label}</div>
+                    <div className="text-violet-700 font-mono truncate">{v.key}</div>
+                    <div className="text-slate-500">{v.label}</div>
                   </button>
                 ))}
               </div>
@@ -3302,13 +3237,13 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
 
             {/* 트리거 조건 */}
             <div>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                 <Activity className="w-3 h-3" /> 트리거 조건
               </h4>
               <div className="grid grid-cols-2 gap-2">
                 {isApp ? (
                   // ★ 2026-07-16 앱 = 실행(접속) 시에만 조회 — 다른 트리거로 저장되면 영원히 미표시라 고정
-                  <div className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white/70 flex items-center">
+                  <div className="px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-600 flex items-center">
                     앱 실행(접속) 시 표시
                   </div>
                 ) : (
@@ -3325,7 +3260,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     if (event === 'cart_value' && typeof prev.cart_value_min === 'number') conds.cart_value_min = prev.cart_value_min;
                     setEditing({ ...editing, trigger_event: event, trigger_conditions: conds });
                   }}
-                  className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
+                  className="px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900"
                 >
                   <option value="page_load">페이지 로드</option>
                   <option value="cart_add">장바구니 담음</option>
@@ -3340,7 +3275,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                 <select
                   value={editing.display_frequency || 'once_per_session'}
                   onChange={(e) => updateField('display_frequency', e.target.value as Frequency)}
-                  className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
+                  className="px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900"
                 >
                   {/* ★ 2026-07-17 라벨 통일 — 웹/앱 전부 "세션당 1회" (세션 정의만 채널별 각주. 옛 "접속당 1회" 라벨 폐기) */}
                   <option value="once_per_session">세션당 1회</option>
@@ -3349,15 +3284,15 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                 </select>
               </div>
               {/* ★ 2026-07-16 재노출 계약 안내 — 닫기 ≠ 영구 거부. ★ 2026-07-17 앱 채널 = 계약 구현 빌드 기준 단서(구 빌드 앱에선 빈도가 다르게 동작할 수 있음 — 팝폰 구 빌드 세션 영구화 실사례) */}
-              <div className="text-[10px] text-white/40 mt-1.5">
+              <div className="text-[10px] text-slate-400 mt-1.5">
                 세션 = {isApp ? '앱 실행 1회(완전 종료 후 재실행하면 다시 표시)' : '브라우저 방문 1회'} 기준. 닫기(X)는 이번만 닫히고 위 빈도 규칙에 따라 다시 표시됩니다. "다시 보지 않기"를 누른 고객에게는 더 이상 표시되지 않습니다.{isApp ? ' 빈도·닫기 동작은 앱이 통합 계약을 구현한 빌드에서 이 정의대로 동작합니다.' : ''}
               </div>
               {/* ★ P0-1 — 트리거 임계값 입력 (없으면 "스크롤 도달"을 골라도 % 지정 불가 = 트리거 정밀 표시 무동작이던 결함) */}
               {(editing.trigger_event === 'scroll' || editing.trigger_event === 'time_on_page' || editing.trigger_event === 'cart_value') && (
-                <div className="mt-2 bg-slate-900/40 border border-white/10 rounded-lg p-2.5">
+                <div className="mt-2 bg-white border border-slate-200 rounded-lg p-2.5">
                   {editing.trigger_event === 'scroll' && (
                     <div>
-                      <label className="text-[10px] text-white/50 block mb-1">스크롤 도달 % (10~100, 비우면 50%)</label>
+                      <label className="text-[10px] text-slate-500 block mb-1">스크롤 도달 % (10~100, 비우면 50%)</label>
                       <input
                         type="number" min={10} max={100}
                         value={editing.trigger_conditions?.scroll_percent ?? ''}
@@ -3368,14 +3303,14 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                           updateField('trigger_conditions', conds);
                         }}
                         placeholder="50"
-                        className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                        className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                       />
-                      <div className="text-[10px] text-white/40 mt-1">방문자가 페이지를 이만큼 내렸을 때 표시됩니다.</div>
+                      <div className="text-[10px] text-slate-400 mt-1">방문자가 페이지를 이만큼 내렸을 때 표시됩니다.</div>
                     </div>
                   )}
                   {editing.trigger_event === 'time_on_page' && (
                     <div>
-                      <label className="text-[10px] text-white/50 block mb-1">체류 초 (5~600, 비우면 10초)</label>
+                      <label className="text-[10px] text-slate-500 block mb-1">체류 초 (5~600, 비우면 10초)</label>
                       <input
                         type="number" min={5} max={600}
                         value={editing.trigger_conditions?.time_on_page_seconds ?? ''}
@@ -3386,14 +3321,14 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                           updateField('trigger_conditions', conds);
                         }}
                         placeholder="10"
-                        className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                        className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                       />
-                      <div className="text-[10px] text-white/40 mt-1">체류 판정은 10·30·60초 시점에 확인됩니다 (예: 30 입력 시 30초 시점 표시).</div>
+                      <div className="text-[10px] text-slate-400 mt-1">체류 판정은 10·30·60초 시점에 확인됩니다 (예: 30 입력 시 30초 시점 표시).</div>
                     </div>
                   )}
                   {editing.trigger_event === 'cart_value' && (
                     <div>
-                      <label className="text-[10px] text-white/50 block mb-1">장바구니 금액 (원 이상)</label>
+                      <label className="text-[10px] text-slate-500 block mb-1">장바구니 금액 (원 이상)</label>
                       <input
                         type="number" min={0}
                         value={editing.trigger_conditions?.cart_value_min ?? ''}
@@ -3404,9 +3339,9 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                           updateField('trigger_conditions', conds);
                         }}
                         placeholder="50000"
-                        className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                        className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                       />
-                      <div className="text-[10px] text-white/40 mt-1">자사몰이 SDK에 장바구니 금액을 전달할 때 비교됩니다.</div>
+                      <div className="text-[10px] text-slate-400 mt-1">자사몰이 SDK에 장바구니 금액을 전달할 때 비교됩니다.</div>
                     </div>
                   )}
                 </div>
@@ -3415,31 +3350,31 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
 
             {/* 시간대 / 요일 / 한도 */}
             <div>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                 <Clock className="w-3 h-3" /> 시간대 / 요일 / 한도
               </h4>
-              <div className="space-y-3 pl-4 border-l-2 border-white/10">
+              <div className="space-y-3 pl-4 border-l-2 border-slate-200">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-white/50 block mb-1">시작 시간 (9~22 권장)</label>
+                    <label className="text-[10px] text-slate-500 block mb-1">시작 시간 (9~22 권장)</label>
                     <input
                       type="number"
                       min={0} max={23}
                       value={editing.send_start_hour ?? ''}
                       onChange={(e) => updateField('send_start_hour', e.target.value ? Number(e.target.value) : null)}
                       placeholder="9"
-                      className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-white/50 block mb-1">종료 시간</label>
+                    <label className="text-[10px] text-slate-500 block mb-1">종료 시간</label>
                     <input
                       type="number"
                       min={0} max={23}
                       value={editing.send_end_hour ?? ''}
                       onChange={(e) => updateField('send_end_hour', e.target.value ? Number(e.target.value) : null)}
                       placeholder="22"
-                      className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                     />
                   </div>
                 </div>
@@ -3450,16 +3385,16 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                   const dawn = (typeof s === 'number' && s < 8) || (typeof e2 === 'number' && (e2 < 8 || e2 >= 23));
                   if (!dawn) return null;
                   return (
-                    <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-2">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-amber-200/90 leading-relaxed">
+                    <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                      <div className="text-[11px] text-amber-800 leading-relaxed">
                         새벽 시간대 노출 설정입니다. 인앱은 방문자에게만 표시돼 법적 제한은 없지만, 새벽 방문 고객 경험을 고려해주세요.
                       </div>
                     </div>
                   );
                 })()}
                 <div>
-                  <label className="text-[10px] text-white/50 block mb-1">노출 요일</label>
+                  <label className="text-[10px] text-slate-500 block mb-1">노출 요일</label>
                   <div className="flex gap-1">
                     {['일','월','화','수','목','금','토'].map((day, idx) => {
                       const allowed = (editing.allowed_weekdays || [0,1,2,3,4,5,6]).includes(idx);
@@ -3472,7 +3407,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                             updateField('allowed_weekdays', next);
                           }}
                           className={`flex-1 py-1.5 text-[11px] rounded ${
-                            allowed ? 'bg-emerald-500/30 text-emerald-100 border border-emerald-400/40' : 'bg-slate-900/60 border border-white/10 text-white/40'
+                            allowed ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-white border border-slate-200 text-slate-400'
                           }`}
                         >
                           {day}
@@ -3485,37 +3420,37 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                   {/* ★ 2026-07-16 — 자동 닫힘은 앱이 소비하지 않는 옵션이라 앱 채널에서 숨김 (죽은 컨트롤 금지) */}
                   {!isApp && (
                     <div>
-                      <label className="text-[10px] text-white/50 block mb-1">자동 닫힘 (초, 비우면 사용자 직접)</label>
+                      <label className="text-[10px] text-slate-500 block mb-1">자동 닫힘 (초, 비우면 사용자 직접)</label>
                       <input
                         type="number"
                         min={1}
                         value={editing.auto_dismiss_seconds ?? ''}
                         onChange={(e) => updateField('auto_dismiss_seconds', e.target.value ? Number(e.target.value) : null)}
                         placeholder="비우면 수동"
-                        className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                        className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                       />
                     </div>
                   )}
                   <div>
-                    <label className="text-[10px] text-white/50 block mb-1">사용자별 최대 노출 횟수</label>
+                    <label className="text-[10px] text-slate-500 block mb-1">사용자별 최대 노출 횟수</label>
                     <input
                       type="number"
                       min={1}
                       value={editing.max_displays_per_user ?? ''}
                       onChange={(e) => updateField('max_displays_per_user', e.target.value ? Number(e.target.value) : null)}
                       placeholder="비우면 무한"
-                      className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400"
                     />
                   </div>
                 </div>
                 {/* ★ 2026-07-16 — 애니메이션도 앱 미소비(네이티브 슬라이드업 고정)라 앱 채널에서 숨김 */}
                 {!isApp && (
                 <div>
-                  <label className="text-[10px] text-white/50 block mb-1">애니메이션</label>
+                  <label className="text-[10px] text-slate-500 block mb-1">애니메이션</label>
                   <select
                     value={editing.animation || 'fade'}
                     onChange={(e) => updateField('animation', e.target.value as Animation)}
-                    className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
+                    className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900"
                   >
                     <option value="fade">기본 (Fade)</option>
                     <option value="slide">슬라이드</option>
@@ -3531,8 +3466,8 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
 
             </div>
         </div>
-        <div className="px-5 py-4 border-t border-white/10 flex gap-2 shrink-0">
-          <button type="button" onClick={() => setDrawerOpen(false)} className="flex-1 h-11 rounded-xl border border-white/15 text-[14px] font-semibold text-white/80 hover:bg-white/5">{isLive ? '닫기' : '계속 편집'}</button>
+        <div className="px-5 py-4 border-t border-slate-200 flex gap-2 shrink-0">
+          <button type="button" onClick={() => setDrawerOpen(false)} className="flex-1 h-11 rounded-xl border border-slate-300 text-[14px] font-semibold text-slate-700 hover:bg-white">{isLive ? '닫기' : '계속 편집'}</button>
           {!isLive && (
             <button type="button" onClick={confirmPublish} disabled={publishing || !!defectNow}
               className="flex-[1.4] h-11 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-[14px] font-bold disabled:opacity-40 inline-flex items-center justify-center gap-2">
@@ -3540,15 +3475,15 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
             </button>
           )}
         </div>
-        {isLive && <p className="px-5 pb-4 -mt-2 text-[11.5px] text-white/45">바꾼 표시 조건은 오른쪽 위 [반영]으로 적용됩니다.</p>}
-        <p className="px-5 pb-3 text-[10px] text-white/30 italic">Data source: 게시 조건은 서버가 저장된 메시지로 다시 확인합니다 · 첫 게시만 크레딧이 듭니다</p>
+        {isLive && <p className="px-5 pb-4 -mt-2 text-[11.5px] text-slate-400">바꾼 표시 조건은 오른쪽 위 [반영]으로 적용됩니다.</p>}
+        <p className="px-5 pb-3 text-[10px] text-slate-400 italic">Data source: 게시 조건은 서버가 저장된 메시지로 다시 확인합니다 · 첫 게시만 크레딧이 듭니다</p>
       </div>
     </div>
   ) : null;
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto lg:overflow-hidden">
+      <div className="fixed inset-0 z-50 bg-slate-100 overflow-y-auto lg:overflow-hidden">
         <EditShell
           title={docTitle}
           onTitle={onTitleEdit}
@@ -3585,19 +3520,19 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       {/* ★ 2026-07-22 테스트저장 — 웹·앱 실물을 실제 크기로 렌더해 PNG 저장(영업용, 발송 아님). 백드롭 클릭 닫힘 없음(작업 손실 방지). */}
       {captureOpen && (
         <div className="fixed inset-0 z-[2000] flex items-start justify-center bg-black/75 backdrop-blur-sm px-4 py-8 overflow-y-auto">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-5xl w-full my-auto">
-            <div className="sticky top-0 bg-slate-900/95 border-b border-white/10 px-6 py-4 flex items-start justify-between rounded-t-2xl">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-5xl w-full my-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-start justify-between rounded-t-2xl">
               <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2"><Download className="w-4.5 h-4.5 text-violet-300" /> 테스트 이미지 저장: 웹·앱 실물</h3>
-                <p className="text-[11px] text-white/50 mt-1">담당자에게 보낼 이미지입니다. 각 [이미지 저장]으로 PNG를 내려받아 이메일에 첨부하세요. (실제 발송이 아닙니다)</p>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2"><Download className="w-4.5 h-4.5 text-violet-700" /> 테스트 이미지 저장: 웹·앱 실물</h3>
+                <p className="text-[11px] text-slate-500 mt-1">담당자에게 보낼 이미지입니다. 각 [이미지 저장]으로 PNG를 내려받아 이메일에 첨부하세요. (실제 발송이 아닙니다)</p>
               </div>
-              <button onClick={() => setCaptureOpen(false)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
+              <button onClick={() => setCaptureOpen(false)} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100 shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-white/70 flex items-center gap-1.5"><Globe className="w-3.5 h-3.5" /> 웹 (자사몰 브라우저)</span>
-                  <button onClick={() => saveShot('web')} disabled={savingShot !== null} className="inline-flex items-center gap-1.5 text-xs font-semibold bg-violet-500/25 hover:bg-violet-500/40 text-violet-100 border border-violet-400/30 px-3 py-1.5 rounded-lg disabled:opacity-50">
+                  <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5"><Globe className="w-3.5 h-3.5" /> 웹 (자사몰 브라우저)</span>
+                  <button onClick={() => saveShot('web')} disabled={savingShot !== null} className="inline-flex items-center gap-1.5 text-xs font-semibold bg-violet-100 hover:bg-violet-200 text-violet-900 border border-violet-200 px-3 py-1.5 rounded-lg disabled:opacity-50">
                     {savingShot === 'web' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 이미지 저장
                   </button>
                 </div>
@@ -3624,8 +3559,8 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
               </div>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-white/70 flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> 앱 (네이티브)</span>
-                  <button onClick={() => saveShot('app')} disabled={savingShot !== null} className="inline-flex items-center gap-1.5 text-xs font-semibold bg-violet-500/25 hover:bg-violet-500/40 text-violet-100 border border-violet-400/30 px-3 py-1.5 rounded-lg disabled:opacity-50">
+                  <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> 앱 (네이티브)</span>
+                  <button onClick={() => saveShot('app')} disabled={savingShot !== null} className="inline-flex items-center gap-1.5 text-xs font-semibold bg-violet-100 hover:bg-violet-200 text-violet-900 border border-violet-200 px-3 py-1.5 rounded-lg disabled:opacity-50">
                     {savingShot === 'app' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 이미지 저장
                   </button>
                 </div>
@@ -3790,42 +3725,42 @@ function VariantReviewModal({ parentId, messageTitle, authHeaders, onToast, onCl
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-5 py-4 flex items-center justify-between gap-3">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-base font-bold text-white flex items-center gap-2"><Layers className="w-4 h-4 text-violet-300" /> A/B 변형</h3>
-            <p className="text-[11px] text-white/50 truncate">{messageTitle}</p>
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2"><Layers className="w-4 h-4 text-violet-700" /> A/B 변형</h3>
+            <p className="text-[11px] text-slate-500 truncate">{messageTitle}</p>
           </div>
-          <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10"><X className="w-5 h-5" /></button>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-5 space-y-3">
-          <p className="text-xs text-white/60">AI가 만든 변형은 꺼진 상태로 만들어집니다. 문안을 확인하고 켜면 방문자에게 원본과 번갈아 보이고, 성과가 좋은 쪽을 자동으로 고릅니다.</p>
+          <p className="text-xs text-slate-500">AI가 만든 변형은 꺼진 상태로 만들어집니다. 문안을 확인하고 켜면 방문자에게 원본과 번갈아 보이고, 성과가 좋은 쪽을 자동으로 고릅니다.</p>
           {rows === null ? (
-            <div className="py-10 flex justify-center text-white/50"><Loader2 className="w-6 h-6 animate-spin" /></div>
+            <div className="py-10 flex justify-center text-slate-500"><Loader2 className="w-6 h-6 animate-spin" /></div>
           ) : rows.length === 0 ? (
-            <p className="text-xs text-white/40 text-center py-8">아직 변형이 없습니다. AI 개선의 '본문 다듬기'로 만들 수 있어요.</p>
+            <p className="text-xs text-slate-400 text-center py-8">아직 변형이 없습니다. AI 개선의 '본문 다듬기'로 만들 수 있어요.</p>
           ) : rows.map((v) => (
-            <div key={v.messageId} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+            <div key={v.messageId} className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-start gap-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${v.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-white/60'}`}>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${v.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                     {v.status === 'active' ? '노출 중' : '꺼짐'}
                   </span>
-                  <span className="text-[10px] text-white/40">표시 {Number(v.impressions || 0).toLocaleString()} · 클릭 {Number(v.clicks || 0).toLocaleString()} · CTR {((Number(v.ctr) || 0) * 100).toFixed(2)}%</span>
+                  <span className="text-[10px] text-slate-400">표시 {Number(v.impressions || 0).toLocaleString()} · 클릭 {Number(v.clicks || 0).toLocaleString()} · CTR {((Number(v.ctr) || 0) * 100).toFixed(2)}%</span>
                 </div>
-                <p className="text-sm font-semibold text-white break-words">{v.title}</p>
-                <p className="text-xs text-white/70 whitespace-pre-wrap break-words mt-1">{v.body}</p>
+                <p className="text-sm font-semibold text-slate-900 break-words">{v.title}</p>
+                <p className="text-xs text-slate-600 whitespace-pre-wrap break-words mt-1">{v.body}</p>
               </div>
               <button
                 onClick={() => toggle(v)}
                 disabled={busyId === v.messageId}
-                className={`shrink-0 px-3.5 py-2 rounded-lg text-xs font-semibold disabled:opacity-50 ${v.status === 'active' ? 'bg-white/10 hover:bg-white/15 text-white/80' : 'bg-violet-600 hover:bg-violet-500 text-white'}`}
+                className={`shrink-0 px-3.5 py-2 rounded-lg text-xs font-semibold disabled:opacity-50 ${v.status === 'active' ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' : 'bg-violet-600 hover:bg-violet-500 text-white'}`}
               >
                 {busyId === v.messageId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : v.status === 'active' ? '끄기' : '노출 켜기'}
               </button>
             </div>
           ))}
-          <p className="text-[10px] text-white/30 italic">Data source: cdp_inapp_messages 변형 · cdp_inapp_impressions 표시·클릭</p>
+          <p className="text-[10px] text-slate-400 italic">Data source: cdp_inapp_messages 변형 · cdp_inapp_impressions 표시·클릭</p>
         </div>
       </div>
     </div>
@@ -3850,20 +3785,20 @@ interface DrillDownProps {
 function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExplain, viewers, messageTitle, onClose }: DrillDownProps) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-slate-900/60 border border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-slate-900/60 border-b border-white/10 px-6 py-4 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-cyan-300" />
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-cyan-700" />
             메시지 통계 + AI 영향 요인 분석
           </h3>
-          <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10">
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-6 space-y-5">
           {loading && (
-            <div className="py-12 flex justify-center text-white/50">
+            <div className="py-12 flex justify-center text-slate-500">
               <Loader2 className="w-6 h-6 animate-spin" />
             </div>
           )}
@@ -3871,40 +3806,40 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
           {!loading && stats && (
             <>
               {/* Funnel */}
-              <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                <h4 className="text-sm font-bold text-white mb-3">Funnel: impression → click → 24h 매핑 구매</h4>
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <h4 className="text-sm font-bold text-slate-900 mb-3">Funnel: impression → click → 24h 매핑 구매</h4>
                 <div className="space-y-2">
                   {stats.funnel.steps.map((step, idx) => {
-                    const colors = ['bg-indigo-500/40', 'bg-emerald-500/40', 'bg-rose-500/40', 'bg-amber-500/40'];
+                    const colors = ['bg-indigo-200', 'bg-emerald-200', 'bg-rose-200', 'bg-amber-200'];
                     return (
                       <div key={idx}>
                         <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="text-white/70">{step.name}</span>
-                          <span className="text-white font-bold">{step.count.toLocaleString()} ({step.percentOfTotal.toFixed(1)}%)</span>
+                          <span className="text-slate-600">{step.name}</span>
+                          <span className="text-slate-900 font-bold">{step.count.toLocaleString()} ({step.percentOfTotal.toFixed(1)}%)</span>
                         </div>
-                        <div className="h-6 bg-slate-900/60 rounded overflow-hidden">
+                        <div className="h-6 bg-white rounded overflow-hidden">
                           <div className={`h-full ${colors[idx]} transition-all`} style={{ width: `${Math.max(step.percentOfTotal, 2)}%` }} />
                         </div>
                         {step.dropoffReason && (
-                          <div className="text-[10px] text-amber-200/70 mt-1">⚠ {step.dropoffReason}</div>
+                          <div className="text-[10px] text-amber-800 mt-1">⚠ {step.dropoffReason}</div>
                         )}
                       </div>
                     );
                   })}
                 </div>
                 {stats.funnel.attributedRevenueKrw > 0 && (
-                  <div className="mt-3 pt-3 border-t border-white/5 text-xs text-emerald-300">
+                  <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-emerald-700">
                     24h 매핑 매출: <strong>{stats.funnel.attributedRevenueKrw.toLocaleString()}원</strong>
                   </div>
                 )}
-                <div className="text-[10px] text-white/30 italic mt-3">Data source: {stats.funnel.dataSource}</div>
+                <div className="text-[10px] text-slate-400 italic mt-3">Data source: {stats.funnel.dataSource}</div>
               </div>
 
               {/* ★ 2026-07-06 누가 봤는지 — 식별 고객 목록 + 익명 합산 (절충안: 익명 다수 구조라 전 명단은 불가, 가능한 범위만 정직 표시) */}
               {viewers && (
-                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
                   <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
-                    <h4 className="text-sm font-bold text-white">누가 봤는지: 식별된 고객 {viewers.identifiedTotal.toLocaleString()}명</h4>
+                    <h4 className="text-sm font-bold text-slate-900">누가 봤는지: 식별된 고객 {viewers.identifiedTotal.toLocaleString()}명</h4>
                     {viewers.viewers.length > 0 && (
                       <button
                         onClick={() => {
@@ -3918,39 +3853,39 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
                             ]),
                           );
                         }}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-200"
                       >
                         <Download className="w-3.5 h-3.5" /> CSV
                       </button>
                     )}
                   </div>
                   {viewers.viewers.length === 0 ? (
-                    <p className="text-xs text-white/40">아직 로그인 등으로 식별된 열람 고객이 없습니다.</p>
+                    <p className="text-xs text-slate-400">아직 로그인 등으로 식별된 열람 고객이 없습니다.</p>
                   ) : (
-                    <div className="divide-y divide-white/5 max-h-[240px] overflow-y-auto rounded-lg border border-white/5">
+                    <div className="divide-y divide-slate-100 max-h-[240px] overflow-y-auto rounded-lg border border-slate-100">
                       {viewers.viewers.slice(0, 100).map((v) => (
                         <div key={v.customerId} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[11px]">
-                          <span className="text-white/80 w-20 truncate">{v.name || '-'}</span>
-                          <span className="text-white/40 font-mono w-28 truncate">{v.phone || '-'}</span>
-                          <span className="text-white/50">표시 {v.impressions}</span>
-                          <span className={v.clicks > 0 ? 'text-amber-300 font-semibold' : 'text-white/30'}>클릭 {v.clicks}</span>
-                          {v.purchaseCount > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-400/30 font-semibold">구매 {Math.round(Number(v.purchaseAmount)).toLocaleString()}원</span>}
-                          <span className="ml-auto text-white/30">{v.lastSeenAt ? new Date(v.lastSeenAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                          <span className="text-slate-700 w-20 truncate">{v.name || '-'}</span>
+                          <span className="text-slate-400 font-mono w-28 truncate">{v.phone || '-'}</span>
+                          <span className="text-slate-500">표시 {v.impressions}</span>
+                          <span className={v.clicks > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400'}>클릭 {v.clicks}</span>
+                          {v.purchaseCount > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 font-semibold">구매 {Math.round(Number(v.purchaseAmount)).toLocaleString()}원</span>}
+                          <span className="ml-auto text-slate-400">{v.lastSeenAt ? new Date(v.lastSeenAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
                         </div>
                       ))}
-                      {viewers.viewers.length > 100 && <div className="px-3 py-2 text-[10px] text-white/40 text-center">외 {(viewers.viewers.length - 100).toLocaleString()}명. CSV로 전체 확인</div>}
+                      {viewers.viewers.length > 100 && <div className="px-3 py-2 text-[10px] text-slate-400 text-center">외 {(viewers.viewers.length - 100).toLocaleString()}명. CSV로 전체 확인</div>}
                     </div>
                   )}
-                  <div className="mt-2.5 text-[11px] text-white/50">
-                    익명 방문자 <strong className="text-white/80">{viewers.anonymous.visitors.toLocaleString()}명</strong>: 표시 {viewers.anonymous.impressions.toLocaleString()} · 클릭 {viewers.anonymous.clicks.toLocaleString()} <span className="text-white/35">(비로그인 방문은 개인 식별이 불가해 합산으로만 표시)</span>
+                  <div className="mt-2.5 text-[11px] text-slate-500">
+                    익명 방문자 <strong className="text-slate-700">{viewers.anonymous.visitors.toLocaleString()}명</strong>: 표시 {viewers.anonymous.impressions.toLocaleString()} · 클릭 {viewers.anonymous.clicks.toLocaleString()} <span className="text-slate-400">(비로그인 방문은 개인 식별이 불가해 합산으로만 표시)</span>
                   </div>
-                  <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_inapp_impressions × customers(식별분) + 익명 합산 · purchases 7일 실측</div>
+                  <div className="text-[10px] text-slate-400 italic mt-2">Data source: cdp_inapp_impressions × customers(식별분) + 익명 합산 · purchases 7일 실측</div>
                 </div>
               )}
 
               {/* 24시간 분포 */}
-              <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                <h4 className="text-sm font-bold text-white mb-3">24시간 CTR 분포</h4>
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <h4 className="text-sm font-bold text-slate-900 mb-3">24시간 CTR 분포</h4>
                 <div className="grid grid-cols-12 gap-0.5 h-24">
                   {stats.hourly.map((h) => {
                     const maxCtr = Math.max(...stats.hourly.map((x) => x.ctr), 0.01);
@@ -3962,28 +3897,28 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
                     );
                   })}
                 </div>
-                <div className="grid grid-cols-12 gap-0.5 text-[9px] text-white/40 text-center mt-1">
+                <div className="grid grid-cols-12 gap-0.5 text-[9px] text-slate-400 text-center mt-1">
                   {stats.hourly.filter((_, idx) => idx % 3 === 0).map((h) => (
                     <div key={h.hour} className="col-span-3">{h.hour}시</div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_inapp_impressions KST 시간대별 집계</div>
+                <div className="text-[10px] text-slate-400 italic mt-2">Data source: cdp_inapp_impressions KST 시간대별 집계</div>
               </div>
 
               {/* 디바이스 — ★ 2026-09-27 한줄로 V2 R252: 실측이 있을 때만(노출 기록에 기기 정보가 아직 없다 · 옛 70·30 나눔 표시 제거) */}
               {stats.device.length > 0 && (
-              <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                <h4 className="text-sm font-bold text-white mb-3">디바이스 분포</h4>
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <h4 className="text-sm font-bold text-slate-900 mb-3">디바이스 분포</h4>
                 <div className="grid grid-cols-2 gap-3">
                   {stats.device.map((d) => (
-                    <div key={d.device} className="bg-slate-900/60 rounded p-3">
-                      <div className="text-xs text-white/50">{d.device === 'mobile' ? '모바일' : 'PC'}</div>
-                      <div className="text-lg font-bold text-white">{d.impressions.toLocaleString()}</div>
-                      <div className="text-xs text-emerald-300">CTR {(d.ctr * 100).toFixed(2)}%</div>
+                    <div key={d.device} className="bg-white rounded p-3">
+                      <div className="text-xs text-slate-500">{d.device === 'mobile' ? '모바일' : 'PC'}</div>
+                      <div className="text-lg font-bold text-slate-900">{d.impressions.toLocaleString()}</div>
+                      <div className="text-xs text-emerald-700">CTR {(d.ctr * 100).toFixed(2)}%</div>
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_inapp_impressions 기기 정보</div>
+                <div className="text-[10px] text-slate-400 italic mt-2">Data source: cdp_inapp_impressions 기기 정보</div>
               </div>
               )}
             </>
@@ -3991,13 +3926,13 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
 
           {/* ★ 2026-09-26 한줄로 V2 R1-42 — AI 영향 요인 분석은 누를 때만(유료 · 창을 열 때마다 빠지지 않게) */}
           {!loading && !explain && (
-            <div className="bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 border border-violet-400/30 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="bg-gradient-to-br from-violet-50 to-fuchsia-50 border border-violet-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-3">
               <div className="flex-1 min-w-0">
-                <h4 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4 text-amber-300" />
+                <h4 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-2">
+                  <Lightbulb className="w-4 h-4 text-amber-700" />
                   AI 영향 요인 분석
                 </h4>
-                <p className="text-xs text-white/60">이 메시지 성과에 영향을 준 요인 5가지와 개선 추천 3가지를 뽑아 드려요.</p>
+                <p className="text-xs text-slate-500">이 메시지 성과에 영향을 준 요인 5가지와 개선 추천 3가지를 뽑아 드려요.</p>
               </div>
               <button
                 onClick={onRequestExplain}
@@ -4012,36 +3947,36 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
 
           {/* AI 영향 요인 */}
           {!loading && explain && (
-            <div className="bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 border border-violet-400/30 rounded-xl p-5">
-              <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-                <Lightbulb className="w-4 h-4 text-amber-300" />
+            <div className="bg-gradient-to-br from-violet-50 to-fuchsia-50 border border-violet-200 rounded-xl p-5">
+              <h4 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2">
+                <Lightbulb className="w-4 h-4 text-amber-700" />
                 AI 영향 요인 분석
               </h4>
-              <div className="text-xs text-violet-100 mb-3 italic">{explain.topInsight}</div>
+              <div className="text-xs text-violet-900 mb-3 italic">{explain.topInsight}</div>
               <div className="space-y-2">
                 {explain.factors.map((f, idx) => (
-                  <div key={idx} className="bg-slate-900/60 rounded p-3">
+                  <div key={idx} className="bg-white rounded p-3">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold text-white">{f.factor}</span>
+                      <span className="text-xs font-bold text-slate-900">{f.factor}</span>
                       <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                        f.direction === 'positive' ? 'bg-emerald-500/20 text-emerald-300' :
-                        f.direction === 'negative' ? 'bg-rose-500/20 text-rose-300' :
-                        'bg-white/10 text-white/50'
+                        f.direction === 'positive' ? 'bg-emerald-100 text-emerald-700' :
+                        f.direction === 'negative' ? 'bg-rose-100 text-rose-700' :
+                        'bg-slate-100 text-slate-500'
                       }`}>
                         {f.direction === 'positive' ? '긍정' : f.direction === 'negative' ? '개선 필요' : '중립'}
                       </span>
                     </div>
-                    <div className="text-[11px] text-white/70 mb-1">{f.description}</div>
-                    <div className="h-1.5 bg-slate-900/60 rounded overflow-hidden mb-1">
+                    <div className="text-[11px] text-slate-600 mb-1">{f.description}</div>
+                    <div className="h-1.5 bg-white rounded overflow-hidden mb-1">
                       <div
                         className={`h-full transition-all ${
                           f.direction === 'positive' ? 'bg-emerald-500' :
-                          f.direction === 'negative' ? 'bg-rose-500' : 'bg-white/30'
+                          f.direction === 'negative' ? 'bg-rose-500' : 'bg-slate-300'
                         }`}
                         style={{ width: `${f.impact * 100}%` }}
                       />
                     </div>
-                    <div className="text-[10px] text-white/30 italic">Data source: {f.dataSource}</div>
+                    <div className="text-[10px] text-slate-400 italic">Data source: {f.dataSource}</div>
                   </div>
                 ))}
               </div>
@@ -4129,7 +4064,7 @@ export function convertToBlocks(m: Partial<MessageRow>): { content_blocks: any[]
   return { content_blocks: blocks, theme: isHex ? 'vibrant' : 'brand', accent_color: isHex ? bg : '#6d5cf0' };
 }
 
-const COMPOSER_INPUT = 'w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/40';
+const COMPOSER_INPUT = 'w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300';
 
 // ★ P2-1 — 드래그용 임시 uid 시퀀스 (블록 jsonb에 id 필드를 저장하지 않기 위해 배열과 나란히만 유지)
 let inappBlockUidSeq = 0;
@@ -4159,7 +4094,7 @@ function SortableInAppBlock({
   };
   const Ic = BLOCK_ICONS[block.type] || Layers;
   return (
-    <div ref={setNodeRef} style={style} className={`bg-slate-800/50 border rounded-xl p-3 transition-all ${highlighted ? 'border-violet-400/70 ring-2 ring-violet-400/30' : 'border-white/10'}`}>
+    <div ref={setNodeRef} style={style} className={`bg-slate-100 border rounded-xl p-3 transition-all ${highlighted ? 'border-violet-300 ring-2 ring-violet-200' : 'border-slate-200'}`}>
       <div className="flex items-center justify-between mb-2">
         <span className="inline-flex items-center gap-1.5 min-w-0">
           <span
@@ -4167,19 +4102,19 @@ function SortableInAppBlock({
             {...listeners}
             title="드래그하여 순서 변경"
             aria-label="드래그 핸들"
-            className="shrink-0 text-white/30 hover:text-white/70 cursor-grab active:cursor-grabbing touch-none px-0.5"
+            className="shrink-0 text-slate-400 hover:text-slate-600 cursor-grab active:cursor-grabbing touch-none px-0.5"
           >
             <GripVertical className="w-3.5 h-3.5" />
           </span>
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-violet-200 bg-violet-500/15 px-2 py-0.5 rounded-full">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-violet-800 bg-violet-100 px-2 py-0.5 rounded-full">
             <Ic className="w-3 h-3" /> {BLOCK_LABELS[block.type] || block.type}
           </span>
         </span>
         <div className="flex items-center gap-0.5">
-          <button onClick={onUp} disabled={isFirst} className="p-1 text-white/40 hover:text-white disabled:opacity-30" aria-label="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
-          <button onClick={onDown} disabled={isLast} className="p-1 text-white/40 hover:text-white disabled:opacity-30" aria-label="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
-          <button onClick={onDuplicate} className="p-1 text-white/40 hover:text-violet-300" aria-label="복제"><Copy className="w-3.5 h-3.5" /></button>
-          <button onClick={onRemove} className="p-1 text-rose-300/70 hover:text-rose-300" aria-label="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+          <button onClick={onUp} disabled={isFirst} className="p-1 text-slate-400 hover:text-slate-900 disabled:opacity-30" aria-label="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
+          <button onClick={onDown} disabled={isLast} className="p-1 text-slate-400 hover:text-slate-900 disabled:opacity-30" aria-label="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
+          <button onClick={onDuplicate} className="p-1 text-slate-400 hover:text-violet-700" aria-label="복제"><Copy className="w-3.5 h-3.5" /></button>
+          <button onClick={onRemove} className="p-1 text-rose-700 hover:text-rose-700" aria-label="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
         </div>
       </div>
       {children}
@@ -4292,7 +4227,7 @@ function BlockComposer({ blocks, onChange, uploadImage, template, cardStyle }: {
               >
                 {/* ★ 2026-07-17 템플릿 미허용 블록 = 실물에서 조용히 사라짐(SDK 필터) → 정직 경고 (조용한 소실 차단) */}
                 {b?.type && !isInAppBlockAllowed(template, String(b.type)) && (
-                  <div className="mb-1.5 bg-amber-500/10 border border-amber-400/30 rounded px-2 py-1.5 text-[10px] text-amber-100">
+                  <div className="mb-1.5 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 text-[10px] text-amber-900">
                     현재 표시 형태에서는 이 블록이 표시되지 않습니다. 형태를 바꾸거나 블록을 제거해주세요.
                   </div>
                 )}
@@ -4305,18 +4240,18 @@ function BlockComposer({ blocks, onChange, uploadImage, template, cardStyle }: {
       <div ref={listEndRef} />
 
       <div className="relative">
-        <button onClick={() => setShowAdd((v) => !v)} className="w-full text-xs text-violet-200 bg-violet-500/10 hover:bg-violet-500/20 border border-dashed border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5">
+        <button onClick={() => setShowAdd((v) => !v)} className="w-full text-xs text-violet-800 bg-violet-50 hover:bg-violet-100 border border-dashed border-violet-200 rounded-lg py-2 flex items-center justify-center gap-1.5">
           <Plus className="w-3.5 h-3.5" /> 블록 추가
         </button>
         {showAdd && (
-          <div className="mt-2 bg-slate-900/80 border border-white/10 rounded-xl p-3 space-y-3">
+          <div className="mt-2 bg-white border border-slate-200 rounded-xl p-3 space-y-3">
             {BLOCK_CATS.map((cat) => {
               // ★ 2026-07-17 템플릿 허용 블록만 노출 (SDK isBlockAllowed 미러) — 추가해도 실물에 안 나오는 항목 제거
               const items = BLOCK_ADD_MENU.filter((m) => m.cat === cat && isInAppBlockAllowed(template, m.type));
               if (items.length === 0) return null;
               return (
               <div key={cat}>
-                <div className="text-[10px] font-bold text-white/40 mb-1.5 tracking-wide">{cat}</div>
+                <div className="text-[10px] font-bold text-slate-400 mb-1.5 tracking-wide">{cat}</div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
                   {items.map((m) => {
                     const Ic = m.icon;
@@ -4324,14 +4259,14 @@ function BlockComposer({ blocks, onChange, uploadImage, template, cardStyle }: {
                       <button
                         key={m.type}
                         onClick={() => add(m.type)}
-                        className="flex items-start gap-2 text-left bg-white/5 hover:bg-violet-500/20 border border-white/10 hover:border-violet-400/40 rounded-lg px-2.5 py-2 transition-colors"
+                        className="flex items-start gap-2 text-left bg-white hover:bg-violet-100 border border-slate-200 hover:border-violet-300 rounded-lg px-2.5 py-2 transition-colors"
                       >
-                        <span className="w-6 h-6 rounded-md bg-violet-500/15 border border-violet-400/20 flex items-center justify-center shrink-0 mt-0.5">
-                          <Ic className="w-3.5 h-3.5 text-violet-200" />
+                        <span className="w-6 h-6 rounded-md bg-violet-100 border border-violet-200 flex items-center justify-center shrink-0 mt-0.5">
+                          <Ic className="w-3.5 h-3.5 text-violet-800" />
                         </span>
                         <span className="min-w-0">
-                          <span className="block text-[11px] font-bold text-white/85">{m.label}</span>
-                          <span className="block text-[9px] text-white/45 leading-tight mt-0.5">{m.desc}</span>
+                          <span className="block text-[11px] font-bold text-slate-700">{m.label}</span>
+                          <span className="block text-[9px] text-slate-400 leading-tight mt-0.5">{m.desc}</span>
                         </span>
                       </button>
                     );
@@ -4352,13 +4287,13 @@ function BlockComposer({ blocks, onChange, uploadImage, template, cardStyle }: {
 /** 세그먼트 버튼 — 드롭다운 대체 (한눈에 보고 즉시 클릭) */
 function Seg({ options, value, onChange }: { options: { v: string; label: string }[]; value: string; onChange: (v: string) => void }) {
   return (
-    <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
+    <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
       {options.map((o) => (
         <button
           key={o.v}
           type="button"
           onClick={() => onChange(o.v)}
-          className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${value === o.v ? 'bg-violet-500/30 text-white' : 'bg-slate-900/60 text-white/50 hover:text-white/80'}`}
+          className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${value === o.v ? 'bg-violet-100 text-slate-900' : 'bg-white text-slate-500 hover:text-slate-700'}`}
         >
           {o.label}
         </button>
@@ -4380,7 +4315,7 @@ function IconGrid({ keys, value, onChange, illustration }: { keys: string[]; val
           type="button"
           onClick={() => onChange(k)}
           title={k}
-          className={`w-8 h-8 rounded-lg border flex items-center justify-center transition-colors ${value === k ? 'bg-violet-500/30 border-violet-400/60' : 'bg-slate-900/60 border-white/10 hover:bg-white/5'}`}
+          className={`w-8 h-8 rounded-lg border flex items-center justify-center transition-colors ${value === k ? 'bg-violet-100 border-violet-300' : 'bg-white border-slate-200 hover:bg-white'}`}
         >
           <BlockIcon name={illustration ? (ILLUS_DISPLAY[k] || k) : k} color={value === k ? '#e9d5ff' : 'rgba(255,255,255,0.6)'} size={15} />
         </button>
@@ -4400,7 +4335,7 @@ function StarInput({ value, onChange }: { value: number; onChange: (v: number) =
           <button type="button" aria-label={`${n}점`} onClick={() => onChange(n)} className="absolute inset-y-0 right-0 w-1/2" />
         </span>
       ))}
-      <span className="text-xs text-white/70 font-bold ml-1.5 tabular-nums">{Number(value || 0).toFixed(1)}</span>
+      <span className="text-xs text-slate-600 font-bold ml-1.5 tabular-nums">{Number(value || 0).toFixed(1)}</span>
     </div>
   );
 }
@@ -4414,14 +4349,14 @@ function RemainBadge({ endsAt }: { endsAt: string }) {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [end]);
-  if (!isFinite(end)) return <span className="text-[10px] text-white/40">마감 시각을 설정하면 남은 시간이 표시됩니다</span>;
+  if (!isFinite(end)) return <span className="text-[10px] text-slate-400">마감 시각을 설정하면 남은 시간이 표시됩니다</span>;
   const remain = end - now;
-  if (remain <= 0) return <span className="text-[10px] text-rose-300">이미 지난 시각. 자사몰에 표시되지 않습니다</span>;
+  if (remain <= 0) return <span className="text-[10px] text-rose-700">이미 지난 시각. 자사몰에 표시되지 않습니다</span>;
   const s = Math.floor(remain / 1000);
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
-  return <span className="text-[10px] text-emerald-300 tabular-nums">지금 기준 {d > 0 ? `${d}일 ${h}시간` : `${h}시간 ${m}분`} 남음</span>;
+  return <span className="text-[10px] text-emerald-700 tabular-nums">지금 기준 {d > 0 ? `${d}일 ${h}시간` : `${h}시간 ${m}분`} 남음</span>;
 }
 
 /** 체크 리스트 편집 — 항목별 아이콘 그리드 토글 */
@@ -4436,18 +4371,18 @@ function BulletsEditor({ b, onChange }: { b: any; onChange: (patch: any) => void
   return (
     <div className="space-y-1.5">
       {items.map((it: any, j: number) => (
-        <div key={j} className="bg-slate-900/40 border border-white/10 rounded-lg p-1.5 space-y-1.5">
+        <div key={j} className="bg-white border border-slate-200 rounded-lg p-1.5 space-y-1.5">
           <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => setIconOpenIdx(iconOpenIdx === j ? null : j)}
-              className="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-400/30 flex items-center justify-center shrink-0"
+              className="w-8 h-8 rounded-lg bg-violet-100 border border-violet-200 flex items-center justify-center shrink-0"
               title="아이콘 선택"
             >
               <BlockIcon name={it.icon || 'check'} color="#e9d5ff" size={15} />
             </button>
             <input type="text" value={it.text || ''} onChange={(e) => setItem(j, { text: e.target.value })} placeholder="항목 텍스트" className={COMPOSER_INPUT} />
-            <button onClick={() => onChange({ items: items.filter((_: any, x: number) => x !== j) })} className="text-rose-300/70 hover:text-rose-300 p-1 shrink-0" aria-label="항목 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+            <button onClick={() => onChange({ items: items.filter((_: any, x: number) => x !== j) })} className="text-rose-700 hover:text-rose-700 p-1 shrink-0" aria-label="항목 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
           </div>
           {iconOpenIdx === j && (
             <IconGrid keys={ICON_KEYS} value={it.icon || 'check'} onChange={(k) => { setItem(j, { icon: k }); setIconOpenIdx(null); }} />
@@ -4455,7 +4390,7 @@ function BulletsEditor({ b, onChange }: { b: any; onChange: (patch: any) => void
         </div>
       ))}
       {items.length < 4 && (
-        <button onClick={() => onChange({ items: [...items, { icon: 'check', text: '' }] })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 항목 추가</button>
+        <button onClick={() => onChange({ items: [...items, { icon: 'check', text: '' }] })} className="text-[11px] text-violet-700 hover:bg-violet-50 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 항목 추가</button>
       )}
     </div>
   );
@@ -4474,7 +4409,7 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
         <div className="space-y-1.5">
           <input type="text" value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="헤드라인 (변수 X)" className={COMPOSER_INPUT} />
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-white/40">크기</span>
+            <span className="text-[10px] text-slate-400">크기</span>
             <Seg options={[{ v: 'sm', label: '작게' }, { v: 'lg', label: '보통' }, { v: 'xl', label: '크게' }]} value={b.size || 'lg'} onChange={(v) => onChange({ size: v })} />
           </div>
         </div>
@@ -4484,7 +4419,7 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
         <div className="space-y-1.5">
           <textarea value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="본문 (변수/Liquid 활용 가능)" className={`${COMPOSER_INPUT} resize-y h-16`} />
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-white/40">글자 크기</span>
+            <span className="text-[10px] text-slate-400">글자 크기</span>
             <Seg options={[{ v: 'sm', label: '작게' }, { v: 'md', label: '보통' }, { v: 'lg', label: '크게' }]} value={b.size || 'md'} onChange={(v) => onChange({ size: v })} />
           </div>
         </div>
@@ -4493,7 +4428,7 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
       return (
         <div>
           <textarea value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="[혜택 안내: 직접 작성해주세요]" className={`${COMPOSER_INPUT} resize-y h-14`} />
-          <div className="text-[10px] text-amber-200/70 mt-1">혜택은 회사 정책에 맞게 직접 작성하세요. placeholder 그대로면 저장이 막힙니다.</div>
+          <div className="text-[10px] text-amber-800 mt-1">혜택은 회사 정책에 맞게 직접 작성하세요. placeholder 그대로면 저장이 막힙니다.</div>
         </div>
       );
     case 'bullets':
@@ -4502,12 +4437,12 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
       return (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-white/40">별점 (클릭, 반쪽 = 0.5)</span>
+            <span className="text-[10px] text-slate-400">별점 (클릭, 반쪽 = 0.5)</span>
             <StarInput value={Number(b.value ?? 0)} onChange={(v) => onChange({ value: v })} />
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-[10px] text-white/50">후기 수<input type="number" min={0} value={b.count ?? ''} onChange={(e) => onChange({ count: e.target.value === '' ? 0 : Number(e.target.value) })} className={COMPOSER_INPUT} /></label>
-            <label className="text-[10px] text-white/50">라벨<input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} placeholder="후기" className={COMPOSER_INPUT} /></label>
+            <label className="text-[10px] text-slate-500">후기 수<input type="number" min={0} value={b.count ?? ''} onChange={(e) => onChange({ count: e.target.value === '' ? 0 : Number(e.target.value) })} className={COMPOSER_INPUT} /></label>
+            <label className="text-[10px] text-slate-500">라벨<input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} placeholder="후기" className={COMPOSER_INPUT} /></label>
           </div>
         </div>
       );
@@ -4517,11 +4452,11 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
           <div className="flex gap-2 items-start">
             {b.image ? (
               <div className="relative shrink-0">
-                <img src={b.image} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className="w-14 h-14 object-cover rounded-lg border border-white/10 bg-white/5" />
+                <img src={b.image} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className="w-14 h-14 object-cover rounded-lg border border-slate-200 bg-white" />
                 <button onClick={() => onChange({ image: '' })} className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full w-4 h-4 flex items-center justify-center text-[9px]" aria-label="이미지 제거">✕</button>
               </div>
             ) : (
-              <label className="w-14 h-14 shrink-0 flex flex-col items-center justify-center text-[9px] text-white/50 bg-white/5 hover:bg-white/10 border border-dashed border-white/20 rounded-lg cursor-pointer transition-colors">
+              <label className="w-14 h-14 shrink-0 flex flex-col items-center justify-center text-[9px] text-slate-500 bg-white hover:bg-slate-100 border border-dashed border-slate-300 rounded-lg cursor-pointer transition-colors">
                 <ImageIcon className="w-4 h-4 mb-0.5" />이미지
                 <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden"
                   onChange={async (e) => { const f = e.target.files?.[0]; const el = e.currentTarget; if (f) { const url = await uploadImage(f); if (url) onChange({ image: url }); } el.value = ''; }} />
@@ -4535,15 +4470,15 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
           {/* ★ P2-2 (2026-07-12) — 가격 구조화 (이메일 product_carousel과 동일 구조). 비우면 기존 meta 문자열 그대로 = 하위호환 */}
           <div className="grid grid-cols-2 gap-1.5">
             <div>
-              <label className="text-[10px] text-white/50 block mb-1">정가 (원)</label>
+              <label className="text-[10px] text-slate-500 block mb-1">정가 (원)</label>
               <input type="number" min={0} value={b.price ?? ''} onChange={(e) => onChange({ price: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} placeholder="예: 39000" className={COMPOSER_INPUT} />
             </div>
             <div>
-              <label className="text-[10px] text-white/50 block mb-1">할인가 (원)</label>
+              <label className="text-[10px] text-slate-500 block mb-1">할인가 (원)</label>
               <input type="number" min={0} value={b.discount_price ?? ''} onChange={(e) => onChange({ discount_price: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} placeholder="예: 29000" className={COMPOSER_INPUT} />
             </div>
           </div>
-          <div className="text-[10px] text-white/40">가격을 입력하면 카드에 가격이 표시되고(할인가는 강조 + 정가 취소선), 간단 설명은 가격이 없을 때만 표시됩니다.</div>
+          <div className="text-[10px] text-slate-400">가격을 입력하면 카드에 가격이 표시되고(할인가는 강조 + 정가 취소선), 간단 설명은 가격이 없을 때만 표시됩니다.</div>
         </div>
       );
     case 'media':
@@ -4562,9 +4497,9 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
                 value={String(b.aspect) === 'natural' ? 'full' : 'fill'}
                 onChange={(v) => onChange({ aspect: v === 'full' ? 'natural' : '16:9' })}
               />
-              {b.url && <img src={b.url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className={`w-full rounded-lg border border-white/10 ${String(b.aspect) === 'natural' ? 'max-h-56 object-contain' : 'max-h-28 object-cover'}`} />}
+              {b.url && <img src={b.url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className={`w-full rounded-lg border border-slate-200 ${String(b.aspect) === 'natural' ? 'max-h-56 object-contain' : 'max-h-28 object-cover'}`} />}
               <div className="flex gap-1.5 items-center">
-                <label className="flex-1 text-center text-[11px] text-white/70 bg-white/5 hover:bg-white/10 border border-dashed border-white/20 rounded px-2 py-1.5 cursor-pointer transition-colors">
+                <label className="flex-1 text-center text-[11px] text-slate-600 bg-white hover:bg-slate-100 border border-dashed border-slate-300 rounded px-2 py-1.5 cursor-pointer transition-colors">
                   이미지 업로드 (2MB 이하)
                   <input
                     type="file"
@@ -4573,7 +4508,7 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
                     onChange={async (e) => { const f = e.target.files?.[0]; const el = e.currentTarget; if (f) { const url = await uploadImage(f); if (url) onChange({ url }); } el.value = ''; }}
                   />
                 </label>
-                {b.url && <button onClick={() => onChange({ url: '' })} className="text-rose-300/70 hover:text-rose-300 px-2 py-1 text-[11px]">제거</button>}
+                {b.url && <button onClick={() => onChange({ url: '' })} className="text-rose-700 hover:text-rose-700 px-2 py-1 text-[11px]">제거</button>}
               </div>
               <input type="text" value={b.url || ''} onChange={(e) => onChange({ url: e.target.value })} placeholder="또는 이미지 URL 직접 입력" className={COMPOSER_INPUT} />
             </div>
@@ -4590,7 +4525,7 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
     case 'countdown':
       return (
         <div className="space-y-1.5">
-          <div className="text-[10px] text-white/50 mb-1">마감 시각: 날짜는 캘린더, 시간은 직접 입력</div>
+          <div className="text-[10px] text-slate-500 mb-1">마감 시각: 날짜는 캘린더, 시간은 직접 입력</div>
           <DateTimeField value={b.ends_at || ''} onChange={(iso) => onChange({ ends_at: iso })} tone="dark" />
           <div className="flex items-center gap-2">
             <input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} placeholder="라벨 (마감까지)" className={`${COMPOSER_INPUT} w-40`} />
@@ -4603,7 +4538,7 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
         <Seg options={[{ v: 'sm', label: '좁게' }, { v: 'md', label: '보통' }, { v: 'lg', label: '넓게' }]} value={b.size || 'md'} onChange={(v) => onChange({ size: v })} />
       );
     case 'divider':
-      return <div className="text-[10px] text-white/40">구분선 (옵션 없음)</div>;
+      return <div className="text-[10px] text-slate-400">구분선 (옵션 없음)</div>;
     case 'cta_group':
       return (
         <div className="space-y-1.5">
@@ -4611,17 +4546,17 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
               그 형태에서는 이 선택이 출력을 못 바꾸므로 컨트롤 자체를 감춘다(no_dead_controls). */}
           {cardStyle !== 'bubble' && (
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-white/40">정렬</span>
+              <span className="text-[10px] text-slate-400">정렬</span>
               <Seg options={[{ v: 'stack', label: '세로' }, { v: 'inline', label: '가로' }]} value={b.layout || 'stack'} onChange={(v) => onChange({ layout: v })} />
             </div>
           )}
           {(b.buttons || []).map((btn: any, j: number) => {
             const setBtn = (patch: any) => { const buttons = [...(b.buttons || [])]; buttons[j] = { ...buttons[j], ...patch }; onChange({ buttons }); };
             return (
-              <div key={j} className="bg-slate-900/40 border border-white/10 rounded-lg p-2 space-y-1.5">
+              <div key={j} className="bg-white border border-slate-200 rounded-lg p-2 space-y-1.5">
                 <div className="flex items-center gap-1.5">
                   <input type="text" value={btn.label || ''} onChange={(e) => setBtn({ label: e.target.value })} placeholder="버튼 문구" className={COMPOSER_INPUT} />
-                  <button onClick={() => onChange({ buttons: (b.buttons || []).filter((_: any, x: number) => x !== j) })} className="text-rose-300/70 hover:text-rose-300 p-1 shrink-0" aria-label="버튼 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => onChange({ buttons: (b.buttons || []).filter((_: any, x: number) => x !== j) })} className="text-rose-700 hover:text-rose-700 p-1 shrink-0" aria-label="버튼 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
                 <input type="text" value={btn.action_url || ''} onChange={(e) => setBtn({ action_url: e.target.value })} placeholder="이동 URL (https://...)" className={COMPOSER_INPUT} />
                 <Seg
@@ -4633,7 +4568,7 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
             );
           })}
           {(b.buttons || []).length < 3 && (
-            <button onClick={() => onChange({ buttons: [...(b.buttons || []), { id: `btn_${(b.buttons || []).length}`, label: '버튼', action_url: '[URL: 회사 admin 수정]', style: 'secondary' }] })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 버튼 추가</button>
+            <button onClick={() => onChange({ buttons: [...(b.buttons || []), { id: `btn_${(b.buttons || []).length}`, label: '버튼', action_url: '[URL: 회사 admin 수정]', style: 'secondary' }] })} className="text-[11px] text-violet-700 hover:bg-violet-50 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 버튼 추가</button>
           )}
         </div>
       );
@@ -4649,22 +4584,22 @@ function BlockEditor({ block, onChange, uploadImage, cardStyle }: { block: any; 
 function InAppDisplayBlockModal({ reason, onGoSettings, onClose }: { reason: string | null; onGoSettings: () => void; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-      <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start gap-3 mb-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center shrink-0">
-            <AlertTriangle className="w-5 h-5 text-amber-300" />
+          <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-5 h-5 text-amber-700" />
           </div>
           <div className="min-w-0">
-            <h3 className="text-base font-bold text-white">인앱 메시지를 표시할 곳이 없습니다</h3>
-            <p className="text-xs text-white/60 mt-1.5 leading-relaxed">
+            <h3 className="text-base font-bold text-slate-900">인앱 메시지를 표시할 곳이 없습니다</h3>
+            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
               {reason || '인앱 메시지를 표시할 수 있는 쇼핑몰 연동이 없습니다. 카페24·고도몰·메이크샵·아임웹 연동 또는 자체 쇼핑몰에 SDK 설치 후 이용할 수 있습니다.'}
             </p>
-            <p className="text-[11px] text-white/40 mt-2">표시할 곳이 없는 상태에서는 크레딧이 소모되는 생성·게시가 진행되지 않습니다.</p>
+            <p className="text-[11px] text-slate-400 mt-2">표시할 곳이 없는 상태에서는 크레딧이 소모되는 생성·게시가 진행되지 않습니다.</p>
           </div>
         </div>
         <div className="flex gap-2 mt-4">
-          <button onClick={onGoSettings} className="flex-1 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 rounded-lg text-sm font-bold text-white">쇼핑몰 연동하러 가기</button>
-          <button onClick={onClose} className="px-4 py-2.5 rounded-lg border border-white/15 text-sm text-white/70 hover:bg-white/5">닫기</button>
+          <button onClick={onGoSettings} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-bold text-white">쇼핑몰 연동하러 가기</button>
+          <button onClick={onClose} className="px-4 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-white">닫기</button>
         </div>
       </div>
     </div>

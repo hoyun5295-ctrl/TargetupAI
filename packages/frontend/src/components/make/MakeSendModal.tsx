@@ -68,21 +68,21 @@ export default function MakeSendModal({
     <div className={MK_MODAL_BACKDROP} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={`${MK_MODAL} w-full max-w-[560px] max-h-[94vh] overflow-y-auto mk-scroll p-5 md:p-6`} role="dialog" aria-label="보내기">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[18px] font-bold text-white">보내기</h2>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+          <h2 className="text-[18px] font-bold text-slate-900">보내기</h2>
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
 
         {active === 'dm' && dm && <DmCard dm={dm} beforeSend={beforeSend} onSent={() => { onSent?.('dm'); onClose(); }} onOpenAdvanced={onOpenAdvancedDm} />}
         {active === 'email' && email && <EmailCard email={email} beforeSend={beforeSend} onSent={() => { onSent?.('email'); onClose(); }} />}
         {((active === 'dm' && !dm) || (active === 'email' && !email)) && (
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-[13px] text-white/60">먼저 저장된 초안이 있어야 보낼 수 있어요.</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 text-[13px] text-slate-500">먼저 저장된 초안이 있어야 보낼 수 있어요.</div>
         )}
 
         {/* 다른 채널 카드(접힘) */}
-        <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3.5 flex items-center gap-3 flex-wrap">
-          {other === 'email' ? <Mail className="w-4 h-4 text-violet-300 shrink-0" /> : <Smartphone className="w-4 h-4 text-violet-300 shrink-0" />}
-          <b className="text-[14px] text-white">{other === 'email' ? '이메일' : '모바일 DM'}</b>
-          <span className="text-[12px] text-white/55 flex-1 min-w-[160px]">
+        <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 flex items-center gap-3 flex-wrap">
+          {other === 'email' ? <Mail className="w-4 h-4 text-violet-700 shrink-0" /> : <Smartphone className="w-4 h-4 text-violet-700 shrink-0" />}
+          <b className="text-[14px] text-slate-900">{other === 'email' ? '이메일' : '모바일 DM'}</b>
+          <span className="text-[12px] text-slate-500 flex-1 min-w-[160px]">
             {otherExists
               ? (other === 'email' ? `제목: ${email?.subject || '(제목 없음)'}` : `${dm?.title || '(제목 없음)'}`)
               : '아직 만들지 않았어요 · 같은 재료로 바로 만들 수 있어요'}
@@ -307,30 +307,30 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
   }, [message, isAd, opt080]);
 
   return (
-    <div className="rounded-2xl border border-violet-400/50 bg-violet-500/[0.06] p-4 md:p-5">
-      <div className="flex items-center gap-2 pb-3 border-b border-white/10">
-        <Smartphone className="w-4 h-4 text-violet-300" /><b className="text-[15px] text-white">모바일 DM</b>
-        <span className="text-[12px] text-white/55">문자에 DM 링크를 담아 보내요</span>
+    <div className="rounded-2xl border border-violet-300 bg-violet-50 p-4 md:p-5">
+      <div className="flex items-center gap-2 pb-3 border-b border-slate-200">
+        <Smartphone className="w-4 h-4 text-violet-700" /><b className="text-[15px] text-slate-900">모바일 DM</b>
+        <span className="text-[12px] text-slate-500">문자에 DM 링크를 담아 보내요</span>
       </div>
 
       <Row icon={<Users className="w-4 h-4" />} label="받는 사람">
         {target ? (
           <div className="flex items-center gap-2 flex-wrap">
-            <b className="text-[14px] text-white">{target.isAll ? '문자 수신 동의 고객' : '고른 고객'} {fmt(count)}명</b>
-            <button type="button" onClick={() => setExtractOpen(true)} className="text-[12.5px] font-semibold text-violet-300 hover:text-violet-200">바꾸기</button>
+            <b className="text-[14px] text-slate-900">{target.isAll ? '문자 수신 동의 고객' : '고른 고객'} {fmt(count)}명</b>
+            <button type="button" onClick={() => setExtractOpen(true)} className="text-[12.5px] font-semibold text-violet-700 hover:text-violet-800">바꾸기</button>
           </div>
         ) : targetFailed ? (
           <button type="button" onClick={() => setExtractOpen(true)} className={MK_BTN_OUTLINE}>받는 사람 고르기</button>
-        ) : <Loader2 className="w-4 h-4 animate-spin text-white/50" />}
+        ) : <Loader2 className="w-4 h-4 animate-spin text-slate-500" />}
       </Row>
 
       <Row icon={<Type className="w-4 h-4" />} label="문자 문안">
         {editing ? (
           <div className="space-y-2">
-            <input value={subject} onChange={(e) => setSubject(e.target.value.slice(0, 40))} placeholder="문자 제목" className="w-full h-9 px-3 rounded-lg bg-slate-950/60 border border-white/15 text-[13px] text-white outline-none focus:border-violet-400/70" />
-            <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/15 text-[13px] leading-relaxed text-white outline-none focus:border-violet-400/70 resize-none" />
-            <div className="text-[11.5px] text-white/45">%DM링크% 자리에 받는 사람별 DM 링크가 들어가요. 없으면 끝에 붙어요.</div>
-            <button type="button" onClick={() => setEditing(false)} className="text-[12.5px] font-semibold text-violet-300">다 됐어요</button>
+            <input value={subject} onChange={(e) => setSubject(e.target.value.slice(0, 40))} placeholder="문자 제목" className="w-full h-9 px-3 rounded-lg bg-slate-100 border border-slate-300 text-[13px] text-slate-900 outline-none focus:border-violet-300" />
+            <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-300 text-[13px] leading-relaxed text-slate-900 outline-none focus:border-violet-300 resize-none" />
+            <div className="text-[11.5px] text-slate-400">%DM링크% 자리에 받는 사람별 DM 링크가 들어가요. 없으면 끝에 붙어요.</div>
+            <button type="button" onClick={() => setEditing(false)} className="text-[12.5px] font-semibold text-violet-700">다 됐어요</button>
           </div>
         ) : (
           <div>
@@ -341,8 +341,8 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
               {bubble.parts.length === 1 && <span className="inline-block align-middle ml-1 px-1.5 py-0.5 rounded-md bg-violet-200 text-violet-800 text-[11px] font-bold">DM 링크 자동</span>}
               {bubble.tail && <>{'\n'}{bubble.tail}</>}
             </div>
-            <div className="mt-1.5 text-[12px] text-white/50 flex items-center gap-2 flex-wrap">
-              DM 내용으로 채웠어요 · <button type="button" onClick={() => setEditing(true)} className="font-semibold text-violet-300 hover:text-violet-200">다듬기</button>
+            <div className="mt-1.5 text-[12px] text-slate-500 flex items-center gap-2 flex-wrap">
+              DM 내용으로 채웠어요 · <button type="button" onClick={() => setEditing(true)} className="font-semibold text-violet-700 hover:text-violet-800">다듬기</button>
               <label className="inline-flex items-center gap-1.5 ml-2 cursor-pointer"><input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="accent-violet-500" />광고 문자</label>
             </div>
           </div>
@@ -351,67 +351,67 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
 
       <Row icon={<Phone className="w-4 h-4" />} label="보내는 번호">
         {callbacks.length > 0 ? (
-          <select value={callback} onChange={(e) => setCallback(e.target.value)} className="h-9 px-2.5 rounded-lg bg-slate-950/60 border border-white/15 text-[13px] text-white outline-none">
+          <select value={callback} onChange={(e) => setCallback(e.target.value)} className="h-9 px-2.5 rounded-lg bg-slate-100 border border-slate-300 text-[13px] text-slate-900 outline-none">
             {callbacks.map((c) => <option key={c.phone} value={c.phone}>{c.phone}{c.isDefault ? ' (기본)' : ''}</option>)}
           </select>
-        ) : <span className="text-[12.5px] text-white/50">{ready ? '등록된 번호가 없어요' : '불러오는 중'}</span>}
+        ) : <span className="text-[12.5px] text-slate-500">{ready ? '등록된 번호가 없어요' : '불러오는 중'}</span>}
       </Row>
 
       <Row icon={<Clock className="w-4 h-4" />} label="보낼 때">
         <div className="space-y-2">
-          <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.03] p-1">
+          <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
             {([['now', '지금'], ['scheduled', '예약'], ['recommend', '추천 시간']] as const).map(([k, l]) => (
               <button key={k} type="button" onClick={() => { setWhen(k); if (k === 'recommend') setScheduledAt(localNextMorning()); }}
-                className={`h-8 px-3.5 rounded-lg text-[12.5px] font-semibold ${when === k ? 'bg-violet-600 text-white' : 'text-white/65 hover:text-white'}`}>{l}</button>
+                className={`h-8 px-3.5 rounded-lg text-[12.5px] font-semibold ${when === k ? 'bg-violet-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}>{l}</button>
             ))}
           </div>
           {when === 'scheduled' && <DateTimeField value={localInputToIso(scheduledAt)} onChange={(iso) => setScheduledAt(isoToLocalInput(iso))} tone="dark" />}
-          {when === 'recommend' && scheduledAt && <div className="text-[12px] text-white/55">내일 오전 10시 · 문자 열람이 많은 시간대예요</div>}
+          {when === 'recommend' && scheduledAt && <div className="text-[12px] text-slate-500">내일 오전 10시 · 문자 열람이 많은 시간대예요</div>}
         </div>
       </Row>
 
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5 py-3 border-b border-white/10">
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 py-3 border-b border-slate-200">
         {checks.map((c) => (
-          <span key={c.label} className={`inline-flex items-center gap-1.5 text-[12px] ${c.ok ? 'text-white/75' : 'text-amber-300'}`}>
-            {c.ok ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <AlertCircle className="w-3.5 h-3.5" />}{c.label}
+          <span key={c.label} className={`inline-flex items-center gap-1.5 text-[12px] ${c.ok ? 'text-slate-600' : 'text-amber-700'}`}>
+            {c.ok ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <AlertCircle className="w-3.5 h-3.5" />}{c.label}
           </span>
         ))}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-3">
-        <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-          <div className="text-[11px] text-white/50">크레딧</div>
+        <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
+          <div className="text-[11px] text-slate-500">크레딧</div>
           {quote?.required ? (
             <>
-              <div className="text-[14.5px] font-bold text-white mt-0.5">DM 발행 {fmt(feeCost)}</div>
-              <div className="text-[11.5px] text-white/50 mt-0.5">처음 한 번만{balance?.enabled ? ` · 남은 ${fmt(balance.total)}` : ''}</div>
+              <div className="text-[14.5px] font-bold text-slate-900 mt-0.5">DM 발행 {fmt(feeCost)}</div>
+              <div className="text-[11.5px] text-slate-500 mt-0.5">처음 한 번만{balance?.enabled ? ` · 남은 ${fmt(balance.total)}` : ''}</div>
             </>
           ) : (
             <>
-              <div className="text-[14.5px] font-bold text-white mt-0.5">{quote ? '추가 크레딧 없음' : '확인 중'}</div>
-              <div className="text-[11.5px] text-white/50 mt-0.5">{quote ? '이미 발행한 DM이에요' : ' '}</div>
+              <div className="text-[14.5px] font-bold text-slate-900 mt-0.5">{quote ? '추가 크레딧 없음' : '확인 중'}</div>
+              <div className="text-[11.5px] text-slate-500 mt-0.5">{quote ? '이미 발행한 DM이에요' : ' '}</div>
             </>
           )}
         </div>
-        <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-          <div className="text-[11px] text-white/50">문자 발송 요금</div>
-          <div className="text-[14.5px] font-bold text-white mt-0.5">LMS {fmt(count)}건</div>
-          <div className="text-[11.5px] text-white/50 mt-0.5">발송 잔액에서 차감 · 회사 단가 적용</div>
+        <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
+          <div className="text-[11px] text-slate-500">문자 발송 요금</div>
+          <div className="text-[14.5px] font-bold text-slate-900 mt-0.5">LMS {fmt(count)}건</div>
+          <div className="text-[11.5px] text-slate-500 mt-0.5">발송 잔액에서 차감 · 회사 단가 적용</div>
         </div>
       </div>
 
       {linkUrl && (
-        <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2.5">
-          <Link2 className="w-4 h-4 text-emerald-300 shrink-0" />
-          <span className="text-[13px] font-semibold text-emerald-100 break-all flex-1 select-all">{linkUrl}</span>
+        <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+          <Link2 className="w-4 h-4 text-emerald-700 shrink-0" />
+          <span className="text-[13px] font-semibold text-emerald-900 break-all flex-1 select-all">{linkUrl}</span>
           <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(linkUrl); toast.success('주소를 복사했어요.'); } catch { toast.error('복사하지 못했어요. 주소를 길게 눌러 복사해 주세요.'); } }} className={MK_BTN_OUTLINE}><Copy className="w-4 h-4" />복사</button>
         </div>
       )}
-      {blockMsg && <div className="mt-3 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2.5 text-[12.5px] text-rose-100 inline-flex items-start gap-2 w-full"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{blockMsg}</div>}
+      {blockMsg && <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12.5px] text-rose-900 inline-flex items-start gap-2 w-full"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{blockMsg}</div>}
 
       <div className="flex items-center justify-end gap-2 pt-4 flex-wrap">
-        {onOpenAdvanced && <button type="button" onClick={onOpenAdvanced} className="mr-auto inline-flex items-center gap-1.5 text-[12.5px] text-white/55 hover:text-white"><Settings2 className="w-4 h-4" />자세히 설정</button>}
-        <button type="button" onClick={onLinkClick} disabled={!!busy || !ready} className="inline-flex items-center gap-1.5 h-10 px-3 rounded-xl text-[13.5px] font-semibold text-white/85 hover:bg-white/10 disabled:opacity-40">
+        {onOpenAdvanced && <button type="button" onClick={onOpenAdvanced} className="mr-auto inline-flex items-center gap-1.5 text-[12.5px] text-slate-500 hover:text-slate-900"><Settings2 className="w-4 h-4" />자세히 설정</button>}
+        <button type="button" onClick={onLinkClick} disabled={!!busy || !ready} className="inline-flex items-center gap-1.5 h-10 px-3 rounded-xl text-[13.5px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40">
           {busy === 'link' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}링크만 받기
         </button>
         <button type="button" onClick={onSendClick} disabled={!!busy || !ready || !target} className={`${MK_BTN_PRIMARY} h-11 px-5`}>
@@ -546,25 +546,25 @@ function EmailCard({ email, beforeSend, onSent }: { email: SendEmail; beforeSend
   const campaignForPicker = { id: email.id, name: email.name, isAd: email.isAd } as unknown as EmailCampaign;
 
   return (
-    <div className="rounded-2xl border border-violet-400/50 bg-violet-500/[0.06] p-4 md:p-5">
-      <div className="flex items-center gap-2 pb-3 border-b border-white/10">
-        <Mail className="w-4 h-4 text-violet-300" /><b className="text-[15px] text-white">이메일</b>
-        <span className="text-[12px] text-white/55">회사 메일로 보내요</span>
+    <div className="rounded-2xl border border-violet-300 bg-violet-50 p-4 md:p-5">
+      <div className="flex items-center gap-2 pb-3 border-b border-slate-200">
+        <Mail className="w-4 h-4 text-violet-700" /><b className="text-[15px] text-slate-900">이메일</b>
+        <span className="text-[12px] text-slate-500">회사 메일로 보내요</span>
       </div>
 
       <Row icon={<Users className="w-4 h-4" />} label="받는 사람">
         <div className="flex items-center gap-2 flex-wrap">
-          <b className="text-[14px] text-white">{picked ? `고른 받는 사람 ${fmt(total)}명` : allTotal === null ? '확인 중' : `이메일 수신 동의 고객 ${fmt(total)}명`}</b>
-          <button type="button" onClick={() => setPickOpen(true)} className="text-[12.5px] font-semibold text-violet-300 hover:text-violet-200">바꾸기</button>
-          {picked && <button type="button" onClick={() => setPicked(null)} className="text-[12px] text-white/45 hover:text-white">전체로</button>}
+          <b className="text-[14px] text-slate-900">{picked ? `고른 받는 사람 ${fmt(total)}명` : allTotal === null ? '확인 중' : `이메일 수신 동의 고객 ${fmt(total)}명`}</b>
+          <button type="button" onClick={() => setPickOpen(true)} className="text-[12.5px] font-semibold text-violet-700 hover:text-violet-800">바꾸기</button>
+          {picked && <button type="button" onClick={() => setPicked(null)} className="text-[12px] text-slate-400 hover:text-slate-900">전체로</button>}
         </div>
       </Row>
       <Row icon={<Type className="w-4 h-4" />} label="제목">
-        <div className="text-[13.5px] text-white/90">{email.isAd ? '(광고) ' : ''}{email.subject || '(제목 없음)'}</div>
+        <div className="text-[13.5px] text-slate-800">{email.isAd ? '(광고) ' : ''}{email.subject || '(제목 없음)'}</div>
       </Row>
       <Row icon={<Mail className="w-4 h-4" />} label="보내는 메일">
-        {smtp === null ? <Loader2 className="w-4 h-4 animate-spin text-white/50" /> : smtp.ok ? (
-          <span className="inline-flex items-center gap-1.5 text-[13px] text-emerald-200"><Check className="w-4 h-4 text-emerald-400" />{smtp.from}</span>
+        {smtp === null ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : smtp.ok ? (
+          <span className="inline-flex items-center gap-1.5 text-[13px] text-emerald-800"><Check className="w-4 h-4 text-emerald-600" />{smtp.from}</span>
         ) : (
           <button type="button" onClick={() => navigate('/email-campaigns?smtp=1')} className={MK_BTN_OUTLINE}>회사 메일 연결하기</button>
         )}
@@ -572,9 +572,9 @@ function EmailCard({ email, beforeSend, onSent }: { email: SendEmail; beforeSend
       {!picked && (
         <Row icon={<Clock className="w-4 h-4" />} label="보낼 때">
           <div className="space-y-2">
-            <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.03] p-1">
+            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
               {([['now', '지금'], ['scheduled', '예약']] as const).map(([k, l]) => (
-                <button key={k} type="button" onClick={() => setWhen(k)} className={`h-8 px-3.5 rounded-lg text-[12.5px] font-semibold ${when === k ? 'bg-violet-600 text-white' : 'text-white/65 hover:text-white'}`}>{l}</button>
+                <button key={k} type="button" onClick={() => setWhen(k)} className={`h-8 px-3.5 rounded-lg text-[12.5px] font-semibold ${when === k ? 'bg-violet-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}>{l}</button>
               ))}
             </div>
             {when === 'scheduled' && <DateTimeField value={localInputToIso(scheduledAt)} onChange={(iso) => setScheduledAt(isoToLocalInput(iso))} tone="dark" />}
@@ -582,42 +582,42 @@ function EmailCard({ email, beforeSend, onSent }: { email: SendEmail; beforeSend
         </Row>
       )}
 
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5 py-3 border-b border-white/10">
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 py-3 border-b border-slate-200">
         {[
           { ok: !!smtp?.ok, label: smtp?.ok ? '회사 메일 연결' : '회사 메일 연결 필요' },
           { ok: !email.hasPlaceholder, label: email.hasPlaceholder ? '채울 자리 남음' : '채울 자리 없음' },
           ...(email.isAd ? [{ ok: true, label: '광고 표기 · 수신거부 자동' }] : []),
         ].map((c) => (
-          <span key={c.label} className={`inline-flex items-center gap-1.5 text-[12px] ${c.ok ? 'text-white/75' : 'text-amber-300'}`}>
-            {c.ok ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <AlertCircle className="w-3.5 h-3.5" />}{c.label}
+          <span key={c.label} className={`inline-flex items-center gap-1.5 text-[12px] ${c.ok ? 'text-slate-600' : 'text-amber-700'}`}>
+            {c.ok ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <AlertCircle className="w-3.5 h-3.5" />}{c.label}
           </span>
         ))}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-3">
-        <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-          <div className="text-[11px] text-white/50">크레딧</div>
-          <div className="text-[14.5px] font-bold text-white mt-0.5">{completed ? '추가 크레딧 없음' : `이메일 완성 ${fmt(CONFIRM_CREDIT_COSTS['email-campaign-complete'])}`}</div>
-          <div className="text-[11.5px] text-white/50 mt-0.5">{completed ? '이미 완성한 이메일이에요' : `처음 한 번만${balance?.enabled ? ` · 남은 ${fmt(balance.total)}` : ''}`}</div>
+        <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
+          <div className="text-[11px] text-slate-500">크레딧</div>
+          <div className="text-[14.5px] font-bold text-slate-900 mt-0.5">{completed ? '추가 크레딧 없음' : `이메일 완성 ${fmt(CONFIRM_CREDIT_COSTS['email-campaign-complete'])}`}</div>
+          <div className="text-[11.5px] text-slate-500 mt-0.5">{completed ? '이미 완성한 이메일이에요' : `처음 한 번만${balance?.enabled ? ` · 남은 ${fmt(balance.total)}` : ''}`}</div>
         </div>
-        <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-          <div className="text-[11px] text-white/50">발송 요금</div>
-          <div className="text-[14.5px] font-bold text-white mt-0.5">없음</div>
-          <div className="text-[11.5px] text-white/50 mt-0.5">회사 메일로 나가요</div>
+        <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
+          <div className="text-[11px] text-slate-500">발송 요금</div>
+          <div className="text-[14.5px] font-bold text-slate-900 mt-0.5">없음</div>
+          <div className="text-[11.5px] text-slate-500 mt-0.5">회사 메일로 나가요</div>
         </div>
       </div>
 
       {testOpen && (
         <div className="mt-3 flex items-center gap-2">
-          <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="테스트로 받을 메일 주소" className="flex-1 h-10 px-3 rounded-lg bg-slate-950/60 border border-white/15 text-[13px] text-white outline-none focus:border-violet-400/70" />
+          <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="테스트로 받을 메일 주소" className="flex-1 h-10 px-3 rounded-lg bg-slate-100 border border-slate-300 text-[13px] text-slate-900 outline-none focus:border-violet-300" />
           <button type="button" onClick={() => { void sendTest(); }} className={MK_BTN_OUTLINE}>받아 보기</button>
         </div>
       )}
-      {blockMsg && <div className="mt-3 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2.5 text-[12.5px] text-rose-100 inline-flex items-start gap-2 w-full"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{blockMsg}</div>}
+      {blockMsg && <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12.5px] text-rose-900 inline-flex items-start gap-2 w-full"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{blockMsg}</div>}
 
       <div className="flex items-center justify-end gap-2 pt-4 flex-wrap">
         {completed && smtp?.ok && !testOpen && (
-          <button type="button" onClick={() => setTestOpen(true)} className="mr-auto inline-flex items-center gap-1.5 text-[12.5px] text-white/55 hover:text-white"><Sparkles className="w-4 h-4" />테스트로 받아 보기</button>
+          <button type="button" onClick={() => setTestOpen(true)} className="mr-auto inline-flex items-center gap-1.5 text-[12.5px] text-slate-500 hover:text-slate-900"><Sparkles className="w-4 h-4" />테스트로 받아 보기</button>
         )}
         <button type="button" onClick={onSendClick} disabled={busy || !ready} className={`${MK_BTN_PRIMARY} h-11 px-5`}>
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}{fmt(total)}명에게 {payload.mode === 'scheduled' ? '예약' : '보내기'}
@@ -647,8 +647,8 @@ function EmailCard({ email, beforeSend, onSent }: { email: SendEmail; beforeSend
 
 function Row({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-3 py-3 border-b border-white/10">
-      <div className="w-[88px] shrink-0 flex items-center gap-1.5 text-[12.5px] text-white/60 self-start pt-1.5">{icon}{label}</div>
+    <div className="flex gap-3 py-3 border-b border-slate-200">
+      <div className="w-[88px] shrink-0 flex items-center gap-1.5 text-[12.5px] text-slate-500 self-start pt-1.5">{icon}{label}</div>
       <div className="flex-1 min-w-0">{children}</div>
     </div>
   );

@@ -229,18 +229,18 @@ export default function JourneyStepStudio({
   };
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-slate-900/60 shadow-2xl overflow-hidden">
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
       {/* 헤더 — 지금이 몇 번째인지 한눈에 */}
-      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3 backdrop-blur md:px-5">
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 backdrop-blur md:px-5">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-sm font-bold text-white">
           {step.stepOrder}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-sm font-semibold text-white">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
             스텝 {step.stepOrder}
-            <span className="text-white/35">/ {steps.length}</span>
+            <span className="text-slate-400">/ {steps.length}</span>
           </div>
-          <div className="truncate text-[11px] text-white/45">
+          <div className="truncate text-[11px] text-slate-400">
             {triggerLabel ? `${triggerLabel} 발생 후` : '트리거 발생 후'} · {hoursFromTrigger === 0 ? '즉시' : hoursFromTrigger % 24 === 0 ? `${hoursFromTrigger / 24}일 뒤` : `${hoursFromTrigger}시간 뒤`}
           </div>
         </div>
@@ -250,7 +250,7 @@ export default function JourneyStepStudio({
             type="button"
             onClick={() => onIndex(Math.max(0, index - 1))}
             disabled={index === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/60 transition-colors hover:bg-white/5 disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-white disabled:opacity-30"
             aria-label="이전 스텝"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -262,7 +262,7 @@ export default function JourneyStepStudio({
                 type="button"
                 onClick={() => onIndex(i)}
                 aria-label={`스텝 ${s.stepOrder}로 이동`}
-                className={`h-1.5 rounded-full transition-all ${i === index ? 'w-5 bg-violet-400' : 'w-1.5 bg-white/20 hover:bg-white/40'}`}
+                className={`h-1.5 rounded-full transition-all ${i === index ? 'w-5 bg-violet-400' : 'w-1.5 bg-slate-200 hover:bg-slate-300'}`}
               />
             ))}
           </div>
@@ -270,7 +270,7 @@ export default function JourneyStepStudio({
             type="button"
             onClick={() => onIndex(Math.min(steps.length - 1, index + 1))}
             disabled={index >= steps.length - 1}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/60 transition-colors hover:bg-white/5 disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-white disabled:opacity-30"
             aria-label="다음 스텝"
           >
             <ChevronRight className="h-4 w-4" />
@@ -288,15 +288,15 @@ export default function JourneyStepStudio({
                 type="button"
                 onClick={() => onPatch(index, { channel: c })}
                 className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                  channel === c ? 'bg-violet-500/25 text-violet-100 ring-1 ring-violet-400/40' : 'text-white/45 hover:bg-white/5'
+                  channel === c ? 'bg-violet-100 text-violet-900 ring-1 ring-violet-300' : 'text-slate-400 hover:bg-white'
                 }`}
               >
                 {c.toUpperCase()}
               </button>
             ))}
-            <span className={`ml-auto text-[11px] tabular-nums ${over ? 'text-rose-300' : 'text-white/35'}`}>
+            <span className={`ml-auto text-[11px] tabular-nums ${over ? 'text-rose-700' : 'text-slate-400'}`}>
               {bytes} / {maxBytes} byte
-              {isAdStep && <span className="ml-1 font-sans text-[10px] text-white/30">(광고 표기 포함)</span>}
+              {isAdStep && <span className="ml-1 font-sans text-[10px] text-slate-400">(광고 표기 포함)</span>}
             </span>
           </div>
 
@@ -305,7 +305,7 @@ export default function JourneyStepStudio({
               value={step.subject || ''}
               onChange={(e) => onPatch(index, { subject: e.target.value.slice(0, 50) })}
               placeholder="제목 (LMS·MMS 필수)"
-              className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white placeholder:text-white/25 focus:border-violet-400/50 focus:outline-none"
+              className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-300 focus:border-violet-300 focus:outline-none"
             />
           )}
 
@@ -315,26 +315,26 @@ export default function JourneyStepStudio({
             onChange={(e) => onPatch(index, { messageTemplate: e.target.value })}
             rows={9}
             placeholder="이 스텝에서 보낼 문안입니다. 비워 두고 [AI 문안생성]을 눌러도 됩니다."
-            className={`w-full resize-y rounded-xl border bg-slate-950/60 px-3 py-2.5 text-sm leading-relaxed text-white placeholder:text-white/25 focus:outline-none ${
-              over ? 'border-rose-400/50' : 'border-white/10 focus:border-violet-400/50'
+            className={`w-full resize-y rounded-xl border bg-slate-100 px-3 py-2.5 text-sm leading-relaxed text-slate-900 placeholder:text-slate-300 focus:outline-none ${
+              over ? 'border-rose-300' : 'border-slate-200 focus:border-violet-300'
             }`}
           />
 
           {/* MMS 이미지 — 채널을 MMS로 바꾸면 바로 붙일 자리가 나온다.
               ⛔ 이미지가 없는 MMS는 만들다 만 스텝이다. 채널만 바꿔 두고 넘어가지 못하게 이 자리에서 알린다. */}
           {channel === 'mms' && (
-            <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
               <div className="mb-2 flex items-center gap-2">
-                <ImageIcon className="h-3.5 w-3.5 text-violet-300" />
-                <span className="text-[11px] font-semibold text-white/75">이미지 첨부</span>
-                <span className="text-[10px] text-white/35">MMS는 이미지가 함께 나갑니다</span>
+                <ImageIcon className="h-3.5 w-3.5 text-violet-700" />
+                <span className="text-[11px] font-semibold text-slate-600">이미지 첨부</span>
+                <span className="text-[10px] text-slate-400">MMS는 이미지가 함께 나갑니다</span>
               </div>
               <JourneyMmsUploader
                 value={step.mmsImagePaths || []}
                 onChange={(paths) => onPatch(index, { mmsImagePaths: paths })}
               />
               {(step.mmsImagePaths?.length ?? 0) === 0 && (
-                <p className="mt-2 text-[11px] leading-relaxed text-amber-200/80">
+                <p className="mt-2 text-[11px] leading-relaxed text-amber-800">
                   아직 이미지가 없습니다. 이대로 두면 글자만 나가니, 이미지를 넣거나 채널을 LMS로 되돌려 주세요.
                 </p>
               )}
@@ -344,15 +344,15 @@ export default function JourneyStepStudio({
           {/* ★ 2026-08-08 — 혜택·링크는 값으로 받는다. 문안 속 placeholder를 손으로 고치게 하지 않는다.
               남은 자리만큼만 줄이 뜨고, 입력 한 번이 전 스텝을 채운다. */}
           {((benefitSlots && onFillBenefit) || (urlSlots && onFillUrl)) && (
-            <div className="space-y-2.5 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 p-3">
+            <div className="space-y-2.5 rounded-xl border border-fuchsia-200 bg-fuchsia-50 p-3">
               <div className="flex items-center gap-1.5">
-                <Gift className="h-3.5 w-3.5 text-fuchsia-300" />
-                <span className="text-xs font-semibold text-white/85">마지막 한 가지만 알려 주세요. 문장은 그대로 잇습니다</span>
+                <Gift className="h-3.5 w-3.5 text-fuchsia-700" />
+                <span className="text-xs font-semibold text-slate-700">마지막 한 가지만 알려 주세요. 문장은 그대로 잇습니다</span>
               </div>
 
               {benefitSlots && onFillBenefit && (
                 <div>
-                  <p className="mb-1.5 text-[11px] leading-relaxed text-white/50">
+                  <p className="mb-1.5 text-[11px] leading-relaxed text-slate-500">
                     문안의 혜택 자리에 들어갈 실제 혜택입니다. 입력하면 모든 스텝에 한 번에 채워 드려요.
                   </p>
                   <div className="flex gap-2">
@@ -367,13 +367,13 @@ export default function JourneyStepStudio({
                           setBenefitInput('');
                         }
                       }}
-                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-white placeholder:text-white/25 focus:border-fuchsia-400/50 focus:outline-none"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-300 focus:border-fuchsia-300 focus:outline-none"
                     />
                     <button
                       type="button"
                       disabled={!benefitInput.trim()}
                       onClick={() => { onFillBenefit(benefitInput); setBenefitInput(''); }}
-                      className="shrink-0 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                      className="shrink-0 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-3 py-2 text-xs font-semibold text-white transition-opacity disabled:opacity-40"
                     >
                       혜택 넣기
                     </button>
@@ -383,7 +383,7 @@ export default function JourneyStepStudio({
 
               {urlSlots && onFillUrl && (
                 <div>
-                  <p className="mb-1.5 text-[11px] leading-relaxed text-white/50">
+                  <p className="mb-1.5 text-[11px] leading-relaxed text-slate-500">
                     문안에 넣을 링크 주소입니다. 주소는 발송할 때 짧은 링크로 바뀝니다.
                   </p>
                   <div className="flex gap-2">
@@ -399,13 +399,13 @@ export default function JourneyStepStudio({
                           setUrlInput('');
                         }
                       }}
-                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-white placeholder:text-white/25 focus:border-fuchsia-400/50 focus:outline-none"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-300 focus:border-fuchsia-300 focus:outline-none"
                     />
                     <button
                       type="button"
                       disabled={!urlInput.trim()}
                       onClick={() => { onFillUrl(urlInput); setUrlInput(''); }}
-                      className="shrink-0 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                      className="shrink-0 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-3 py-2 text-xs font-semibold text-white transition-opacity disabled:opacity-40"
                     >
                       링크 넣기
                     </button>
@@ -417,11 +417,11 @@ export default function JourneyStepStudio({
 
           {/* 변수 — 회사가 가진 컬럼만 나온다 */}
           {variables.length > 0 && (
-            <div className="rounded-xl border border-white/10 bg-slate-950/40 p-2.5">
+            <div className="rounded-xl border border-slate-200 bg-slate-100 p-2.5">
               <button
                 type="button"
                 onClick={() => setShowVars((v) => !v)}
-                className="text-[11px] font-medium text-white/55 hover:text-white/80"
+                className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
               >
                 변수 넣기 {showVars ? '접기' : `(${variables.length})`}
               </button>
@@ -432,14 +432,14 @@ export default function JourneyStepStudio({
                       key={v}
                       type="button"
                       onClick={() => insertVar(v)}
-                      className="rounded-md bg-white/5 px-2 py-1 text-[11px] text-violet-200 transition-colors hover:bg-violet-500/20"
+                      className="rounded-md bg-white px-2 py-1 text-[11px] text-violet-800 transition-colors hover:bg-violet-100"
                     >
                       %{v}%
                     </button>
                   ))}
                 </div>
               )}
-              <p className="mt-1.5 text-[10px] italic text-white/30">Data source: 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
+              <p className="mt-1.5 text-[10px] italic text-slate-400">Data source: 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
             </div>
           )}
 
@@ -447,20 +447,20 @@ export default function JourneyStepStudio({
               전체를 넘기면 AI가 아무 컬럼이나 골라 넣는다. 0개면 잠금(날짜축·Operator와 같은 규약). */}
           {/* ⛔ 컬럼이 0이어도 카드를 숨기지 않는다 — 숨기면 "왜 안 나오지"가 화면에서 안 보인다
               (2026-08-08: 데이터가 안 실려 카드가 통째로 사라졌는데 원인을 화면에서 알 수 없었다). */}
-          <div className="rounded-xl border border-violet-400/20 bg-white/[0.04] p-3">
+          <div className="rounded-xl border border-violet-200 bg-white p-3">
             <div className="mb-1.5 flex items-center gap-1.5">
-              <Wand2 className="h-3.5 w-3.5 text-violet-300" />
-              <span className="text-xs font-semibold text-white/85">
-                AI 꾸미기 <span className="font-normal text-white/40">{selectedVars.size > 0 ? `${selectedVars.size}개 선택` : '컬럼 선택'}</span>
+              <Wand2 className="h-3.5 w-3.5 text-violet-700" />
+              <span className="text-xs font-semibold text-slate-700">
+                AI 꾸미기 <span className="font-normal text-slate-400">{selectedVars.size > 0 ? `${selectedVars.size}개 선택` : '컬럼 선택'}</span>
               </span>
             </div>
             {decorateVars.length === 0 ? (
-              <p className="text-[11px] leading-relaxed text-amber-200/80">
+              <p className="text-[11px] leading-relaxed text-amber-800">
                 문안에 넣을 수 있는 고객 데이터 항목이 아직 없습니다. 고객 정보를 올리면 여기에 컬럼이 나타납니다.
               </p>
             ) : (
               <>
-              <p className="mb-2 text-[11px] leading-relaxed text-white/50">넣고 싶은 데이터를 골라 주세요. AI가 문안에 자연스럽게 녹입니다.</p>
+              <p className="mb-2 text-[11px] leading-relaxed text-slate-500">넣고 싶은 데이터를 골라 주세요. AI가 문안에 자연스럽게 녹입니다.</p>
               <div className="flex flex-wrap gap-1.5">
                 {decorateVars.map((v) => {
                   const on = selectedVars.has(v.token);
@@ -474,7 +474,7 @@ export default function JourneyStepStudio({
                         return n;
                       })}
                       className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-all ${
-                        on ? 'border-violet-400/50 bg-violet-500/30 text-violet-100' : 'border-white/10 bg-white/5 text-white/55 hover:bg-white/10'
+                        on ? 'border-violet-300 bg-violet-100 text-violet-900' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-100'
                       }`}
                     >
                       %{v.label}%
@@ -482,7 +482,7 @@ export default function JourneyStepStudio({
                   );
                 })}
               </div>
-              <p className="mt-1.5 text-[10px] italic text-white/30">Data source: 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
+              <p className="mt-1.5 text-[10px] italic text-slate-400">Data source: 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
               </>
             )}
           </div>
@@ -493,7 +493,7 @@ export default function JourneyStepStudio({
               type="button"
               onClick={() => onAi(index)}
               disabled={aiBusy}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-3 py-2 text-xs font-semibold text-white shadow-lg shadow-violet-500/20 transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 px-3 py-2 text-xs font-semibold text-white transition-opacity disabled:opacity-50"
             >
               {aiBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               {(step.messageTemplate || '').trim().length >= 5 ? 'AI 다듬기' : 'AI 문안생성'}
@@ -503,38 +503,38 @@ export default function JourneyStepStudio({
               onClick={() => onDecorate(index, Array.from(selectedVars))}
               disabled={aiBusy || selectedVars.size === 0}
               title={selectedVars.size === 0 ? '아래에서 넣을 컬럼을 먼저 골라 주세요' : undefined}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Wand2 className="h-3.5 w-3.5" /> AI 꾸미기{selectedVars.size > 0 ? ` (${selectedVars.size})` : ''}
             </button>
             <button
               type="button"
               onClick={() => onSpamTest(index)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 transition-colors hover:bg-white/10"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100"
             >
               <Beaker className="h-3.5 w-3.5" /> 스팸필터 테스트
             </button>
           </div>
 
           {(step.messageTemplate || '').trim() && (
-            <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
               <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-medium text-white/45">보이는 모습</span>
+                <span className="text-[11px] font-medium text-slate-400">보이는 모습</span>
                 {sampleCustomer
-                  ? <span className="text-[10px] text-emerald-300/70">타겟 최상위 고객 기준 · 실제 발송 형태</span>
-                  : <span className="text-[10px] text-amber-300/70">아직 이 조건의 타겟 고객이 없어 원본으로 표시됩니다</span>}
+                  ? <span className="text-[10px] text-emerald-700">타겟 최상위 고객 기준 · 실제 발송 형태</span>
+                  : <span className="text-[10px] text-amber-700">아직 이 조건의 타겟 고객이 없어 원본으로 표시됩니다</span>}
               </div>
               {/* 제목도 발송 형태로 — 광고 문자는 제목에 (광고)가 붙는다. */}
               {channel !== 'sms' && step.subject && (
-                <div className="mb-2 border-b border-white/10 pb-2 text-[12px]">
-                  <span className="text-white/45">제목 </span>
-                  <span className="text-white/85">{buildAdSubjectFront(step.subject, msgType, isAdStep)}</span>
+                <div className="mb-2 border-b border-slate-200 pb-2 text-[12px]">
+                  <span className="text-slate-400">제목 </span>
+                  <span className="text-slate-700">{buildAdSubjectFront(step.subject, msgType, isAdStep)}</span>
                 </div>
               )}
-              <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-white/85">
+              <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-700">
                 {sampleCustomer ? previewBody : highlightVars(previewBody)}
               </div>
-              <p className="mt-2 text-[10px] italic text-white/30">
+              <p className="mt-2 text-[10px] italic text-slate-400">
                 Data source: 저장된 스텝 본문{sampleCustomer ? ' + 추출된 타겟 최상위 고객 1명' : ''}. (광고) 표기와 무료수신거부는 발송할 때 자동으로 붙고, 위 미리보기·바이트에 이미 반영돼 있습니다.
               </p>
             </div>
@@ -543,9 +543,9 @@ export default function JourneyStepStudio({
 
         {/* 우 — 언제 보낼지 */}
         <div className="space-y-3 md:col-span-2">
-          <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white/70">
-              <Clock className="h-3.5 w-3.5 text-violet-300" />
+          <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+              <Clock className="h-3.5 w-3.5 text-violet-700" />
               {index === 0 ? '트리거가 발생하면' : '앞 스텝을 보낸 뒤'}
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -556,8 +556,8 @@ export default function JourneyStepStudio({
                   onClick={() => { setCustomDelayOpen(false); onPatch(index, { delayHours: p.hours }); }}
                   className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
                     !customDelay && Number(step.delayHours) === p.hours
-                      ? 'bg-violet-500/25 text-violet-100 ring-1 ring-violet-400/40'
-                      : 'bg-white/5 text-white/55 hover:bg-white/10'
+                      ? 'bg-violet-100 text-violet-900 ring-1 ring-violet-300'
+                      : 'bg-white text-slate-500 hover:bg-slate-100'
                   }`}
                 >
                   {p.label}
@@ -569,8 +569,8 @@ export default function JourneyStepStudio({
                 onClick={() => setCustomDelayOpen(true)}
                 className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
                   customDelay
-                    ? 'bg-violet-500/25 text-violet-100 ring-1 ring-violet-400/40'
-                    : 'bg-white/5 text-white/55 hover:bg-white/10'
+                    ? 'bg-violet-100 text-violet-900 ring-1 ring-violet-300'
+                    : 'bg-white text-slate-500 hover:bg-slate-100'
                 }`}
               >
                 직접 입력
@@ -589,21 +589,21 @@ export default function JourneyStepStudio({
                       const days = Math.max(0, Math.floor(Number(e.target.value) || 0));
                       onPatch(index, { delayHours: Math.min(MAX_DELAY_HOURS, days * 24) });
                     }}
-                    className="w-20 rounded-lg border border-white/10 bg-slate-950/60 px-2.5 py-1.5 text-xs text-white focus:border-violet-400/50 focus:outline-none"
+                    className="w-20 rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs text-slate-900 focus:border-violet-300 focus:outline-none"
                   />
-                  <span className="text-xs text-white/70">일 뒤</span>
-                  <span className="text-[11px] text-white/35">최대 365일</span>
+                  <span className="text-xs text-slate-600">일 뒤</span>
+                  <span className="text-[11px] text-slate-400">최대 365일</span>
                 </div>
                 {delayHasOddHours && (
                   // 지금 값이 시간 단위라 일수로 딱 떨어지지 않는다 — 조용히 바꾸지 않고 사실을 알린다.
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-amber-200/80">
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-amber-800">
                     지금은 {delayHoursNow}시간 뒤로 설정돼 있습니다. 위 일수를 입력하면 그 값으로 바뀝니다.
                   </p>
                 )}
               </div>
             )}
 
-            <label className="mt-3 flex items-center gap-2 text-[11px] text-white/55">
+            <label className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
               <input
                 type="checkbox"
                 checked={hourFixed}
@@ -613,7 +613,7 @@ export default function JourneyStepStudio({
                     targetHourKst: e.target.checked ? (step.targetHourKst ?? 10) : undefined,
                   })
                 }
-                className="h-3.5 w-3.5 rounded border-white/20 bg-slate-950"
+                className="h-3.5 w-3.5 rounded border-slate-300 bg-slate-100"
               />
               보내는 시각도 정하기
             </label>
@@ -621,7 +621,7 @@ export default function JourneyStepStudio({
               <select
                 value={step.targetHourKst ?? 10}
                 onChange={(e) => onPatch(index, { targetHourKst: Number(e.target.value) })}
-                className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950/60 px-2.5 py-1.5 text-xs text-white focus:border-violet-400/50 focus:outline-none"
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs text-slate-900 focus:border-violet-300 focus:outline-none"
               >
                 {Array.from({ length: 24 }, (_, h) => (
                   <option key={h} value={h}>{String(h).padStart(2, '0')}시</option>
@@ -634,10 +634,10 @@ export default function JourneyStepStudio({
           {step.isAd !== false && (
             <div
               className={`flex gap-2 rounded-xl border p-3 text-[11px] leading-relaxed ${
-                nightHit ? 'border-amber-400/30 bg-amber-500/10 text-amber-100' : 'border-white/10 bg-slate-950/40 text-white/50'
+                nightHit ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-100 text-slate-500'
               }`}
             >
-              <AlertTriangle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${nightHit ? 'text-amber-300' : 'text-white/30'}`} />
+              <AlertTriangle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${nightHit ? 'text-amber-700' : 'text-slate-400'}`} />
               {nightHit ? (
                 <span>
                   <strong className="font-semibold">밤 9시~아침 8시에는 광고 문자를 보낼 수 없습니다.</strong> 이 설정에 걸리는 문자는 자동으로 <strong>오전 {SHIFTED_ARRIVE_HOUR}시</strong>에 나갑니다.
@@ -649,9 +649,9 @@ export default function JourneyStepStudio({
           )}
 
           {objective && (
-            <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-              <div className="mb-1 text-[11px] font-medium text-white/45">이 여정의 목적</div>
-              <p className="text-[12px] leading-relaxed text-white/70">{objective}</p>
+            <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
+              <div className="mb-1 text-[11px] font-medium text-slate-400">이 여정의 목적</div>
+              <p className="text-[12px] leading-relaxed text-slate-600">{objective}</p>
             </div>
           )}
 
@@ -660,7 +660,7 @@ export default function JourneyStepStudio({
               type="button"
               onClick={onAdd}
               disabled={steps.length >= maxSteps}
-              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2.5 text-xs font-semibold text-violet-100 transition-colors hover:bg-violet-500/20 disabled:opacity-40"
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs font-semibold text-violet-900 transition-colors hover:bg-violet-100 disabled:opacity-40"
             >
               <Plus className="h-4 w-4" />
               {steps.length >= maxSteps ? `스텝은 최대 ${maxSteps}개` : '스텝 추가'}
@@ -678,7 +678,7 @@ export default function JourneyStepStudio({
               <button
                 type="button"
                 onClick={() => onDelete(index)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-white/10 px-3 py-2 text-[11px] font-medium text-white/45 transition-colors hover:border-rose-400/30 hover:text-rose-200"
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-medium text-slate-400 transition-colors hover:border-rose-200 hover:text-rose-800"
               >
                 <Trash2 className="h-3.5 w-3.5" /> 이 스텝 지우기
               </button>

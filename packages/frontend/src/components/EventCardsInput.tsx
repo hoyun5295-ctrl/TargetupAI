@@ -50,24 +50,24 @@ function EventCard({ index, value, onChange, onRemove, disabled, canRemove, onRe
   };
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
       <div className="flex items-center gap-2">
-        <span className="w-6 h-6 rounded-full bg-violet-500/30 text-violet-100 text-[11px] font-bold flex items-center justify-center shrink-0">{index + 1}</span>
+        <span className="w-6 h-6 rounded-full bg-violet-100 text-violet-900 text-[11px] font-bold flex items-center justify-center shrink-0">{index + 1}</span>
         <input value={value.title} onChange={(e) => onChange({ ...value, title: e.target.value.slice(0, 40) })} disabled={disabled}
           placeholder="행사 제목(40자) · 예: 추석 선물세트 기획전"
-          className="flex-1 min-w-0 rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-violet-400/60 disabled:opacity-50" />
+          className="flex-1 min-w-0 rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-violet-300 disabled:opacity-50" />
         {canRemove && !disabled && (
-          <button type="button" onClick={onRemove} aria-label="이 행사 삭제" className="shrink-0 p-1.5 rounded-lg text-white/50 hover:text-rose-300 hover:bg-rose-500/10"><Trash2 className="w-4 h-4" /></button>
+          <button type="button" onClick={onRemove} aria-label="이 행사 삭제" className="shrink-0 p-1.5 rounded-lg text-slate-500 hover:text-rose-700 hover:bg-rose-50"><Trash2 className="w-4 h-4" /></button>
         )}
       </div>
       <div
         onDragOver={(e) => { e.preventDefault(); }}
         onDrop={(e) => { e.preventDefault(); if (!disabled) addFiles(e.dataTransfer.files); }}
-        className={`rounded-xl border border-dashed ${disabled ? 'border-white/10' : 'border-violet-400/40 hover:border-violet-300/60'} bg-white/[0.02] p-2.5`}
+        className={`rounded-xl border border-dashed ${disabled ? 'border-slate-200' : 'border-violet-300 hover:border-violet-300'} bg-white p-2.5`}
       >
         <div className="flex items-center gap-2 flex-wrap">
           {previews.map((src, i) => (
-            <div key={src} className="relative w-16 h-16 rounded-lg overflow-hidden bg-slate-900 border border-white/10">
+            <div key={src} className="relative w-16 h-16 rounded-lg overflow-hidden bg-white border border-slate-200">
               <img src={src} alt={`행사 ${index + 1} 이미지 ${i + 1}`} className="w-full h-full object-cover" />
               {i === 0 && <span className="absolute left-1 bottom-1 px-1 rounded bg-black/70 text-white/90 text-[9px]">첫 화면</span>}
               {!disabled && (
@@ -78,23 +78,23 @@ function EventCard({ index, value, onChange, onRemove, disabled, canRemove, onRe
           ))}
           {value.files.length < EVENT_CARD_IMAGES_MAX && (
             <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()}
-              className="w-16 h-16 rounded-lg border border-white/15 bg-white/5 text-violet-200 hover:bg-violet-500/20 disabled:opacity-40 flex flex-col items-center justify-center gap-0.5">
+              className="w-16 h-16 rounded-lg border border-slate-300 bg-white text-violet-800 hover:bg-violet-100 disabled:opacity-40 flex flex-col items-center justify-center gap-0.5">
               <ImagePlus className="w-4 h-4" /><span className="text-[10px]">{value.files.length === 0 ? '배너' : '추가'}</span>
             </button>
           )}
           <input ref={inputRef} type="file" accept={ACCEPT.join(',')} multiple hidden onChange={(e) => { addFiles(e.target.files); e.currentTarget.value = ''; }} />
-          <p className="text-[11px] text-white/45 ml-1">행사 배너·상품 사진 최대 {EVENT_CARD_IMAGES_MAX}장 · 첫 장이 이 행사의 대표 이미지</p>
+          <p className="text-[11px] text-slate-400 ml-1">행사 배너·상품 사진 최대 {EVENT_CARD_IMAGES_MAX}장 · 첫 장이 이 행사의 대표 이미지</p>
         </div>
       </div>
       <textarea value={value.text} onChange={(e) => onChange({ ...value, text: e.target.value.slice(0, 4000) })} disabled={disabled} rows={3}
         placeholder="행사 내용(기간 · 혜택 · 상품 · 조건)을 그대로 붙여넣어 주세요. 비워 두면 올린 이미지에서 읽어 채웁니다."
-        className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-violet-400/60 disabled:opacity-50" />
+        className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-violet-300 disabled:opacity-50" />
       <div className="flex items-center gap-2 flex-wrap">
-        <Link2 className="w-4 h-4 text-white/40 shrink-0" />
+        <Link2 className="w-4 h-4 text-slate-400 shrink-0" />
         <input value={value.link} onChange={(e) => onChange({ ...value, link: e.target.value.slice(0, 500) })} disabled={disabled}
           placeholder="이 행사의 버튼이 열 주소(행사 페이지)"
-          className="flex-1 min-w-[180px] rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-violet-400/60 disabled:opacity-50" />
-        <label className={`inline-flex items-center gap-1.5 text-[12px] ${value.text.trim() ? 'text-white/80 cursor-pointer' : 'text-white/35'}`} title={value.text.trim() ? undefined : '행사 내용을 쓰면 체크할 수 있습니다'}>
+          className="flex-1 min-w-[180px] rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-violet-300 disabled:opacity-50" />
+        <label className={`inline-flex items-center gap-1.5 text-[12px] ${value.text.trim() ? 'text-slate-700 cursor-pointer' : 'text-slate-400'}`} title={value.text.trim() ? undefined : '행사 내용을 쓰면 체크할 수 있습니다'}>
           <input type="checkbox" className="accent-violet-500" checked={value.licensed && !!value.text.trim()} disabled={disabled || !value.text.trim()} onChange={(e) => onChange({ ...value, licensed: e.target.checked })} />
           이 문구를 그대로 씁니다(숫자 포함)
         </label>
@@ -119,7 +119,7 @@ export default function EventCardsInput({ value, onChange, disabled, onReject }:
       ))}
       <button type="button" disabled={disabled || full} onClick={() => onChange([...value, newEventCard()])}
         title={full ? `행사는 ${EVENT_CARDS_MAX}개까지 담깁니다` : undefined}
-        className="w-full rounded-2xl border border-dashed border-violet-400/30 py-2.5 text-sm text-violet-200 hover:bg-violet-500/10 disabled:opacity-40 disabled:hover:bg-transparent inline-flex items-center justify-center gap-1.5">
+        className="w-full rounded-2xl border border-dashed border-violet-200 py-2.5 text-sm text-violet-800 hover:bg-violet-50 disabled:opacity-40 disabled:hover:bg-transparent inline-flex items-center justify-center gap-1.5">
         <Plus className="w-4 h-4" /> 행사 추가{full ? ` (${EVENT_CARDS_MAX}개까지)` : ` (${value.length}/${EVENT_CARDS_MAX})`}
       </button>
     </div>

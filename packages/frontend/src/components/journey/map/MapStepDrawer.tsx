@@ -60,56 +60,56 @@ export default function MapStepDrawer({ journey, step, onClose, onOpenJourney, o
       labelledBy="jmap-step-title"
       panelClassName="w-full max-w-lg"
     >
-      <div className="flex min-h-0 flex-1 flex-col text-white">
-        <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-white/10">
-          <div className="w-9 h-9 rounded-xl bg-violet-500/15 border border-violet-400/30 flex items-center justify-center shrink-0">
-            <Icon className="w-4 h-4 text-violet-200" />
+      <div className="flex min-h-0 flex-1 flex-col text-slate-900">
+        <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-slate-200">
+          <div className="w-9 h-9 rounded-xl bg-violet-100 border border-violet-200 flex items-center justify-center shrink-0">
+            <Icon className="w-4 h-4 text-violet-800" />
           </div>
           <div className="flex-1 min-w-0">
             <h2 id="jmap-step-title" className="text-sm font-semibold truncate">
               {step.order}번째 칸 · {stepTypeLabel(step.kind)}{step.kind === 'message' ? ` · ${stepChannelLabel(step.channel)}` : ''}
             </h2>
-            <p className="mt-0.5 text-[11px] text-white/50 truncate">{journey.name}</p>
+            <p className="mt-0.5 text-[11px] text-slate-500 truncate">{journey.name}</p>
           </div>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10" aria-label="닫기">
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-lg bg-white/[0.04] px-3 py-2">
-              <div className="text-[11px] text-white/45">언제</div>
+            <div className="rounded-lg bg-white px-3 py-2">
+              <div className="text-[11px] text-slate-400">언제</div>
               <div className="text-xs font-semibold tabular-nums">{step.timingLabel}</div>
             </div>
-            <div className="rounded-lg bg-white/[0.04] px-3 py-2">
-              <div className="text-[11px] text-white/45">앞 칸 뒤</div>
+            <div className="rounded-lg bg-white px-3 py-2">
+              <div className="text-[11px] text-slate-400">앞 칸 뒤</div>
               <div className="text-xs font-semibold">{step.intervalLabel}</div>
             </div>
-            <div className="rounded-lg bg-white/[0.04] px-3 py-2">
-              <div className="text-[11px] text-white/45">이 칸 차례</div>
+            <div className="rounded-lg bg-white px-3 py-2">
+              <div className="text-[11px] text-slate-400">이 칸 차례</div>
               <div className="text-xs font-semibold tabular-nums">{step.waitingHere.toLocaleString('ko-KR')}명</div>
             </div>
-            <div className="rounded-lg bg-white/[0.04] px-3 py-2">
-              <div className="text-[11px] text-white/45">여기서 {journey.goalLabel}(30일)</div>
-              <div className="text-xs font-semibold tabular-nums text-emerald-300">{step.exitsAfter == null ? '자동 종료 꺼짐' : `${step.exitsAfter.toLocaleString('ko-KR')}명`}</div>
+            <div className="rounded-lg bg-white px-3 py-2">
+              <div className="text-[11px] text-slate-400">여기서 {journey.goalLabel}(30일)</div>
+              <div className="text-xs font-semibold tabular-nums text-emerald-700">{step.exitsAfter == null ? '자동 종료 꺼짐' : `${step.exitsAfter.toLocaleString('ko-KR')}명`}</div>
             </div>
           </div>
 
           {step.kind === 'message' && (
             <div>
               <div className="flex items-center gap-2 mb-1.5">
-                <span className="text-[11px] font-semibold text-white/70">문안</span>
-                {step.isAd && <span className="text-[11px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">광고</span>}
+                <span className="text-[11px] font-semibold text-slate-600">문안</span>
+                {step.isAd && <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">광고</span>}
               </div>
               {loading ? (
-                <div className="flex items-center gap-2 text-[11px] text-white/50 py-6 justify-center">
+                <div className="flex items-center gap-2 text-[11px] text-slate-500 py-6 justify-center">
                   <Loader2 className="w-4 h-4 animate-spin" /> 문안을 불러오는 중
                 </div>
               ) : (
-                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+                <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
                   {full?.subject && <div className="text-xs font-semibold mb-1.5">{full.subject}</div>}
-                  <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-white/80">
+                  <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-700">
                     {full?.message_template || step.preview || (failed ? '문안을 불러오지 못했어요.' : '문안이 비어 있어요.')}
                   </pre>
                 </div>
@@ -118,18 +118,18 @@ export default function MapStepDrawer({ journey, step, onClose, onOpenJourney, o
           )}
 
           {step.kind === 'wait' && (
-            <p className="text-xs leading-relaxed text-white/70">
+            <p className="text-xs leading-relaxed text-slate-600">
               {full?.wait_event_name ? '정한 행동이 일어나면 바로 다음 칸으로, 늦어도 정한 시간이 지나면 다음 칸으로 넘어갑니다.' : '정한 시간만큼 기다린 뒤 다음 칸으로 넘어갑니다.'}
             </p>
           )}
 
-          <div className="flex items-start gap-2 rounded-lg bg-white/[0.03] px-3 py-2.5 text-[11px] leading-relaxed text-white/55">
+          <div className="flex items-start gap-2 rounded-lg bg-white px-3 py-2.5 text-[11px] leading-relaxed text-slate-500">
             <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>{journey.lock.reason}</span>
           </div>
         </div>
 
-        <div className="px-5 py-4 border-t border-white/10 flex gap-2">
+        <div className="px-5 py-4 border-t border-slate-200 flex gap-2">
           {(journey.status === 'draft' || journey.status === 'paused') && step.kind === 'message' && (
             <button
               type="button"
@@ -142,7 +142,7 @@ export default function MapStepDrawer({ journey, step, onClose, onOpenJourney, o
           <button
             type="button"
             onClick={() => onOpenJourney(journey.id)}
-            className="flex-1 h-10 rounded-lg text-xs font-semibold text-violet-100 border border-violet-400/30 hover:bg-violet-500/15 transition-colors"
+            className="flex-1 h-10 rounded-lg text-xs font-semibold text-violet-900 border border-violet-200 hover:bg-violet-100 transition-colors"
           >
             여정 자세히 보기
           </button>

@@ -252,20 +252,20 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
       : '알림톡 템플릿을 선택하세요';
 
   return (
-    <div className="space-y-3 text-white">
+    <div className="space-y-3 text-slate-900">
       {!embedded && (
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10" aria-label="뒤로"><ArrowLeft className="w-4 h-4 text-white/70" /></button>
+          <button onClick={onBack} className="p-2 rounded-lg bg-white hover:bg-slate-100 border border-slate-200" aria-label="뒤로"><ArrowLeft className="w-4 h-4 text-slate-600" /></button>
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center"><Bell className="w-5 h-5 text-white" /></div>
           <div>
             <h2 className="text-base md:text-lg font-semibold">정보 알림 만들기</h2>
-            <p className="text-xs text-white/50">카카오 승인 템플릿으로 알림톡 발송 (광고 아님)</p>
+            <p className="text-xs text-slate-500">카카오 승인 템플릿으로 알림톡 발송 (광고 아님)</p>
           </div>
         </div>
       )}
 
       {/* 어떤 알림톡 — 요약 버튼 → 모달 */}
-      <SummaryButton icon={<MessageSquare className="w-4 h-4 text-white" />} label="어떤 알림톡" value={templateSummary} accent="teal" onClick={() => setShowTemplate(true)} />
+      <SummaryButton icon={<MessageSquare className="w-4 h-4 text-slate-900" />} label="어떤 알림톡" value={templateSummary} accent="teal" onClick={() => setShowTemplate(true)} />
 
       {/* ★ 2026-07-28 템플릿을 고르면 본문을 읽고 트리거를 제안한다 — 사용자가 8개를 훑지 않아도 되게. */}
       {selectedTemplate && (
@@ -273,36 +273,36 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
           <button
             onClick={handleSuggestTrigger}
             disabled={suggesting || allowedTriggers.length === 0}
-            className="px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 border border-violet-400/40 text-violet-100 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 rounded-lg bg-violet-100 hover:bg-violet-100 border border-violet-300 text-violet-900 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {suggesting ? '템플릿 읽는 중…' : '이 템플릿, 언제 보낼까요? (AI 추천)'}
           </button>
           {/* 추천·실패 표시는 **지금 고른 템플릿에 대한 것일 때만** 보여준다(템플릿 바꾸면 자동 소멸). */}
           {suggestion && suggestion.forTemplate === alimtalk.templateCode && (
-            <span className="text-[11px] text-violet-200/90">
+            <span className="text-[11px] text-violet-800">
               {TRIGGER_EVENTS.find((t) => t.key === suggestion.key)?.label || suggestion.key} 추천
               {` · ${suggestion.delayDays === 0 ? '발생 즉시' : `${suggestion.delayDays}일 뒤`}`}
               {suggestion.reason ? `: ${suggestion.reason}` : ''}
             </span>
           )}
           {suggestFailed === alimtalk.templateCode && (
-            <span className="text-[11px] text-white/50">추천하지 못했어요. 아래에서 직접 골라주세요.</span>
+            <span className="text-[11px] text-slate-500">추천하지 못했어요. 아래에서 직접 골라주세요.</span>
           )}
         </div>
       )}
 
       {/* 언제 보낼까 — 시작 방식 카드 */}
       <div>
-        <div className="text-xs font-semibold text-white/70 mb-1.5">언제 보낼까요</div>
+        <div className="text-xs font-semibold text-slate-600 mb-1.5">언제 보낼까요</div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           {START_KINDS.map((sk) => {
             const Icon = sk.icon;
             const active = sk.key === startKind;
             return (
-              <button key={sk.key} onClick={() => setStartKind(sk.key)} className={`p-3 rounded-xl border text-left transition-colors ${active ? 'bg-teal-500/20 border-teal-400/60' : 'bg-white/[0.07] border-white/15 hover:bg-white/[0.12]'}`}>
+              <button key={sk.key} onClick={() => setStartKind(sk.key)} className={`p-3 rounded-xl border text-left transition-colors ${active ? 'bg-teal-100 border-teal-300' : 'bg-slate-100 border-slate-300 hover:bg-slate-100'}`}>
                 <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${sk.gradient} flex items-center justify-center mb-2`}><Icon className="w-4 h-4 text-white" /></div>
-                <div className="text-sm font-semibold text-white">{sk.label}</div>
-                <div className="text-[11px] text-white/60 mt-0.5">{sk.desc}</div>
+                <div className="text-sm font-semibold text-slate-900">{sk.label}</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">{sk.desc}</div>
               </button>
             );
           })}
@@ -319,19 +319,19 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
           return (
             <div className="mt-2 space-y-2.5">
               {compat.eventVarsFound.length > 0 && (
-                <p className="text-[11px] text-teal-200/80">
+                <p className="text-[11px] text-teal-800">
                   이 템플릿은 <strong>{compat.eventVarsFound.join('·')}</strong>를 쓰기 때문에, 그 값을 주는 트리거만 고를 수 있어요.
                 </p>
               )}
               {/* ★ 2026-08-01 §2-3 — 회사 데이터로 못 만드는 트리거는 잠긴다. 왜 잠겼는지와 무엇을 연동하면 되는지를 보여준다. */}
               {dataBlockedForSelected && (
-                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-400/30">
-                  <p className="text-[11px] text-rose-100/90">{dataBlockedForSelected}</p>
-                  <p className="text-[10px] text-white/45 mt-1">지금 만들면 대상이 한 명도 잡히지 않아 다른 트리거를 골라 주세요.</p>
+                <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200">
+                  <p className="text-[11px] text-rose-900">{dataBlockedForSelected}</p>
+                  <p className="text-[10px] text-slate-400 mt-1">지금 만들면 대상이 한 명도 잡히지 않아 다른 트리거를 골라 주세요.</p>
                 </div>
               )}
               {dataCapFailed && (
-                <p className="text-[11px] text-amber-200/70">
+                <p className="text-[11px] text-amber-800">
                   어떤 여정을 만들 수 있는지 지금 확인하지 못했어요. 만들기 전에 대상 인원을 꼭 확인해 주세요.
                 </p>
               )}
@@ -339,7 +339,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
                 const items = PICKER_TRIGGERS.filter((t) => t.group === group);
                 return (
                   <div key={group}>
-                    <p className="text-[11px] text-white/50 mb-1.5">{title}</p>
+                    <p className="text-[11px] text-slate-500 mb-1.5">{title}</p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {items.map((t) => {
                         const decor = TRIGGER_DECOR[t.key] || { icon: Zap, gradient: 'from-slate-400 to-slate-600' };
@@ -354,10 +354,10 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
                         return (
                           <button key={t.key} onClick={() => { if (!locked) setTxKey(t.key); }} disabled={locked}
                             title={dataBlocked || blockedReason || undefined}
-                            className={`p-2.5 rounded-lg border text-left transition-colors ${active ? 'bg-teal-500/20 border-teal-400/60' : 'bg-white/[0.06] border-white/15 hover:bg-white/[0.1]'} ${locked ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                            className={`p-2.5 rounded-lg border text-left transition-colors ${active ? 'bg-teal-100 border-teal-300' : 'bg-white border-slate-300 hover:bg-slate-100'} ${locked ? 'opacity-40 cursor-not-allowed' : ''}`}>
                             <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${decor.gradient} flex items-center justify-center mb-1.5`}><Icon className="w-3.5 h-3.5 text-white" /></div>
-                            <div className="text-xs font-semibold text-white">{t.label}</div>
-                            <div className="text-[10px] text-white/55 mt-0.5">
+                            <div className="text-xs font-semibold text-slate-900">{t.label}</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
                               {dataBlocked || blockedReason || (gatedOff ? '자사몰 연동 시' : t.desc)}
                             </div>
                           </button>
@@ -368,16 +368,16 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
                 );
               })}
               {needsPointsMin && (
-                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-400/30">
-                  <label className="block text-[11px] text-amber-100/90 mb-1">
+                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                  <label className="block text-[11px] text-amber-900 mb-1">
                     보유 포인트 최소 (이 값 이상인 고객만). 입력해야 만들 수 있어요
                   </label>
                   <input
                     type="number" min={1} value={pointsMin} onChange={(e) => setPointsMin(e.target.value)}
                     placeholder="예: 1000"
-                    className="w-40 px-2 py-1.5 rounded-lg bg-slate-800 border border-white/15 text-sm text-white"
+                    className="w-40 px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-300 text-sm text-slate-900"
                   />
-                  <p className="text-[10px] text-white/45 mt-1">비워두면 포인트가 0인 고객까지 전부 대상이 되어 막아두었습니다.</p>
+                  <p className="text-[10px] text-slate-400 mt-1">비워두면 포인트가 0인 고객까지 전부 대상이 되어 막아두었습니다.</p>
                 </div>
               )}
             </div>
@@ -388,7 +388,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
           <div className="mt-2 space-y-2">
             <div className="flex gap-2">
               {(['now', 'scheduled'] as const).map((m) => (
-                <button key={m} onClick={() => setScheduleMode(m)} className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${scheduleMode === m ? 'bg-sky-500/20 border-sky-400/60 text-white' : 'bg-white/[0.06] border-white/15 text-white/70 hover:bg-white/[0.1]'}`}>
+                <button key={m} onClick={() => setScheduleMode(m)} className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${scheduleMode === m ? 'bg-sky-100 border-sky-300 text-slate-900' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}>
                   {m === 'now' ? '지금 발송' : '예약 발송'}
                 </button>
               ))}
@@ -400,20 +400,20 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
                 tone="dark"
               />
             )}
-            <p className="text-[10px] text-white/40 italic">발송 가능 시간(08~21시 KST) 밖이면 다음 가능 시각으로 자동 조정됩니다.</p>
+            <p className="text-[10px] text-slate-400 italic">발송 가능 시간(08~21시 KST) 밖이면 다음 가능 시각으로 자동 조정됩니다.</p>
           </div>
         )}
 
         {(startKind !== 'event' || tx.eventFields.length === 0) && (
-          <p className="text-[11px] text-amber-200/70 mt-2">이벤트 데이터가 없어 템플릿 변수는 고객 필드(이름·등급 등)만 매핑됩니다.</p>
+          <p className="text-[11px] text-amber-800 mt-2">이벤트 데이터가 없어 템플릿 변수는 고객 필드(이름·등급 등)만 매핑됩니다.</p>
         )}
         {triggerMismatch && (
-          <p className="text-[11px] text-rose-300 mt-2">
+          <p className="text-[11px] text-rose-700 mt-2">
             이 템플릿에 맞는 트리거를 다시 골라주세요. 지금 선택({tx.label})은 템플릿이 쓰는 값을 채워줄 수 없습니다.
           </p>
         )}
         {eventVarsInNonEventFlow && (
-          <p className="text-[11px] text-rose-300 mt-2">
+          <p className="text-[11px] text-rose-700 mt-2">
             이 템플릿은 {compat.eventVarsFound.join('·')}를 쓰기 때문에 이 방식으로는 보낼 수 없어요.
             값을 채우려면 “어떤 일이 생기면”을 골라 해당 거래 트리거를 지정해주세요.
           </p>
@@ -421,22 +421,22 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
       </div>
 
       {/* 대상 — 요약 버튼 → 모달 */}
-      <SummaryButton icon={<Users className="w-4 h-4 text-white" />} label={startKind === 'event' ? '대상 (이벤트 발생 고객 + 조건)' : '대상'} value={audienceSummary(conditions)} accent="teal" onClick={() => setShowAudience(true)} />
+      <SummaryButton icon={<Users className="w-4 h-4 text-slate-900" />} label={startKind === 'event' ? '대상 (이벤트 발생 고객 + 조건)' : '대상'} value={audienceSummary(conditions)} accent="teal" onClick={() => setShowAudience(true)} />
 
       <div className="flex justify-end items-center gap-3 pt-1">
         {alimtalk.templateCode && fallbackViolation && (
-          <span className="text-[11px] text-rose-300">{fallbackViolation}</span>
+          <span className="text-[11px] text-rose-700">{fallbackViolation}</span>
         )}
-        <button onClick={handleBuild} disabled={!canBuild} className="px-5 py-3 bg-gradient-to-r from-teal-500 to-emerald-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">다음: 흐름 검토</button>
+        <button onClick={handleBuild} disabled={!canBuild} className="text-white px-5 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed">다음: 흐름 검토</button>
       </div>
 
       {showTemplate && (
-        <ModalShell title="어떤 알림톡을 보낼까요" subtitle="카카오 승인 템플릿 선택 (광고 아님)" icon={<MessageSquare className="w-4 h-4 text-white" />} onClose={() => setShowTemplate(false)}
-          footer={<button onClick={() => setShowTemplate(false)} className="px-4 py-2 rounded-lg bg-gradient-to-r from-teal-500 to-emerald-500 text-sm font-medium hover:opacity-90">완료</button>}>
+        <ModalShell title="어떤 알림톡을 보낼까요" subtitle="카카오 승인 템플릿 선택 (광고 아님)" icon={<MessageSquare className="w-4 h-4 text-slate-900" />} onClose={() => setShowTemplate(false)}
+          footer={<button onClick={() => setShowTemplate(false)} className="text-white px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-medium">완료</button>}>
           {senders.length === 0 ? (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded text-xs text-rose-200">승인된 발신프로필이 없습니다. 알림톡 발송 메뉴에서 발신프로필을 먼저 등록해주세요.</div>
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-800">승인된 발신프로필이 없습니다. 알림톡 발송 메뉴에서 발신프로필을 먼저 등록해주세요.</div>
           ) : templates.length === 0 ? (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded text-xs text-rose-200">승인된 알림톡 템플릿이 없습니다. 알림톡 발송 메뉴에서 템플릿 등록 + 검수 통과 후 사용해주세요.</div>
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-800">승인된 알림톡 템플릿이 없습니다. 알림톡 발송 메뉴에서 템플릿 등록 + 검수 통과 후 사용해주세요.</div>
           ) : (
             <AlimtalkChannelPanel
               senders={senders}

@@ -10,6 +10,7 @@
  *
  *   다크 모달 z-[2000](다른 모달 안에서 열려도 위) + createPortal(backdrop-filter 조상 탈출) + 모바일 반응형 + Source caption.
  */
+import { useLightSurface } from './zone/surface-tone';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Target, X, Users, Sparkles, Loader2, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -91,6 +92,7 @@ export default function TargetRecipientsModal({
   totalCount, fetchPage, sourceLabel = '실제 발송 대상 조회 (customer-filter)', pageSize = PAGE_SIZE_DEFAULT,
   extraColumns,
 }: Props) {
+  const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -163,42 +165,42 @@ export default function TargetRecipientsModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[2000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
-      <div className="w-full max-w-3xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden max-md:max-h-[92vh]">
+      <div className={light ? "w-full max-w-3xl bg-white border border-slate-200 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden max-md:max-h-[92vh]" : "w-full max-w-3xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden max-md:max-h-[92vh]"}>
         {/* 헤더 */}
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-white/10 bg-gradient-to-r from-slate-950 via-rose-950/30 to-slate-950 shrink-0">
+        <div className={light ? "flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 via-rose-50 to-slate-50 shrink-0" : "flex items-center justify-between gap-3 px-5 py-4 border-b border-white/10 bg-gradient-to-r from-slate-950 via-rose-950/30 to-slate-950 shrink-0"}>
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center shadow-lg shadow-rose-500/20 shrink-0">
-              <Target className="w-5 h-5 text-white" />
+              <Target className={light ? "w-5 h-5 text-slate-900" : "w-5 h-5 text-white"} />
             </div>
             <div className="min-w-0">
-              <h3 className="text-white font-bold text-base truncate">{title}</h3>
-              <div className="text-xs text-white/50 mt-0.5 flex items-center gap-2 flex-wrap">
+              <h3 className={light ? "text-slate-900 font-bold text-base truncate" : "text-white font-bold text-base truncate"}>{title}</h3>
+              <div className={light ? "text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap" : "text-xs text-white/50 mt-0.5 flex items-center gap-2 flex-wrap"}>
                 <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {total.toLocaleString()}명</span>
                 {pct && <span>· 전체 {totalCount!.toLocaleString()}명 중 {pct}%</span>}
-                {channelLabel && <span className="px-1.5 py-0.5 rounded bg-white/10 text-white/70">{channelLabel}</span>}
+                {channelLabel && <span className={light ? "px-1.5 py-0.5 rounded bg-slate-100 text-slate-600" : "px-1.5 py-0.5 rounded bg-white/10 text-white/70"}>{channelLabel}</span>}
               </div>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="text-white/50 hover:text-white p-1.5 hover:bg-white/5 rounded transition-colors shrink-0" aria-label="닫기">
+          <button type="button" onClick={onClose} className={light ? "text-slate-500 hover:text-slate-900 p-1.5 hover:bg-white rounded transition-colors shrink-0" : "text-white/50 hover:text-white p-1.5 hover:bg-white/5 rounded transition-colors shrink-0"} aria-label="닫기">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* 조건 영역 */}
         {(objective || criteria) && (
-          <div className="px-5 py-3 border-b border-white/10 bg-white/[0.02] space-y-2 shrink-0">
+          <div className={light ? "px-5 py-3 border-b border-slate-200 bg-white space-y-2 shrink-0" : "px-5 py-3 border-b border-white/10 bg-white/[0.02] space-y-2 shrink-0"}>
             {objective && (
               <div>
-                <div className="text-[10px] font-semibold tracking-wider uppercase text-fuchsia-300/80 mb-0.5">입력한 목표</div>
-                <p className="text-sm text-white/85 leading-relaxed">{objective}</p>
+                <div className={light ? "text-[10px] font-semibold tracking-wider uppercase text-fuchsia-700 mb-0.5" : "text-[10px] font-semibold tracking-wider uppercase text-fuchsia-300/80 mb-0.5"}>입력한 목표</div>
+                <p className={light ? "text-sm text-slate-700 leading-relaxed" : "text-sm text-white/85 leading-relaxed"}>{objective}</p>
               </div>
             )}
             {criteria && (
               <div>
-                <div className="text-[10px] font-semibold tracking-wider uppercase text-violet-300/80 mb-0.5 flex items-center gap-1">
+                <div className={light ? "text-[10px] font-semibold tracking-wider uppercase text-violet-700 mb-0.5 flex items-center gap-1" : "text-[10px] font-semibold tracking-wider uppercase text-violet-300/80 mb-0.5 flex items-center gap-1"}>
                   <Sparkles className="w-3 h-3" /> 추출 조건
                 </div>
-                <p className="text-sm text-white/75 leading-relaxed">{criteria}</p>
+                <p className={light ? "text-sm text-slate-600 leading-relaxed" : "text-sm text-white/75 leading-relaxed"}>{criteria}</p>
               </div>
             )}
           </div>
@@ -207,26 +209,26 @@ export default function TargetRecipientsModal({
         {/* 리스트 */}
         <div className="flex-1 overflow-y-auto px-5 py-3 min-h-[220px]">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 text-white/50 gap-2">
-              <Loader2 className="w-6 h-6 animate-spin text-violet-300" />
+            <div className={light ? "flex flex-col items-center justify-center py-16 text-slate-500 gap-2" : "flex flex-col items-center justify-center py-16 text-white/50 gap-2"}>
+              <Loader2 className={light ? "w-6 h-6 animate-spin text-violet-700" : "w-6 h-6 animate-spin text-violet-300"} />
               <span className="text-sm">추출 대상을 불러오는 중...</span>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-center">
-              <AlertTriangle className="w-6 h-6 text-rose-400" />
-              <span className="text-sm text-rose-300">{error}</span>
+              <AlertTriangle className={light ? "w-6 h-6 text-rose-600" : "w-6 h-6 text-rose-400"} />
+              <span className={light ? "text-sm text-rose-700" : "text-sm text-rose-300"}>{error}</span>
             </div>
           ) : total === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-center">
-              <Users className="w-6 h-6 text-white/30" />
-              <span className="text-sm text-white/50">조건에 맞는 대상이 0명입니다.</span>
-              <span className="text-xs text-white/30">조건을 넓히거나 고객 데이터를 확인해주세요.</span>
+              <Users className={light ? "w-6 h-6 text-slate-400" : "w-6 h-6 text-white/30"} />
+              <span className={light ? "text-sm text-slate-500" : "text-sm text-white/50"}>조건에 맞는 대상이 0명입니다.</span>
+              <span className={light ? "text-xs text-slate-400" : "text-xs text-white/30"}>조건을 넓히거나 고객 데이터를 확인해주세요.</span>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
                 <thead>
-                  <tr className="text-left text-[11px] text-white/45 border-b border-white/10">
+                  <tr className={light ? "text-left text-[11px] text-slate-400 border-b border-slate-200" : "text-left text-[11px] text-white/45 border-b border-white/10"}>
                     <th className="py-2 pr-2 font-medium w-10">#</th>
                     <th className="py-2 px-2 font-medium">고객명</th>
                     {showGrade && <th className="py-2 px-2 font-medium whitespace-nowrap">등급</th>}
@@ -241,16 +243,16 @@ export default function TargetRecipientsModal({
                 </thead>
                 <tbody>
                   {rows.map((r, i) => (
-                    <tr key={`${r.phone || ''}-${startIdx + i}`} className="border-b border-white/5 hover:bg-white/[0.03]">
-                      <td className="py-2 pr-2 text-white/40 tabular-nums">{startIdx + i + 1}</td>
-                      <td className="py-2 px-2 text-white/90">{val(r.name)}</td>
-                      {showGrade && <td className="py-2 px-2 text-white/70 whitespace-nowrap">{val(r.grade)}</td>}
-                      {showGender && <td className="py-2 px-2 text-white/70 whitespace-nowrap">{genderLabel(r.gender)}</td>}
-                      {showAge && <td className="py-2 px-2 text-white/70 tabular-nums whitespace-nowrap">{val(r.age)}</td>}
-                      {showRegion && <td className="py-2 px-2 text-white/70 whitespace-nowrap">{val(r.region)}</td>}
-                      <td className="py-2 px-2 text-white/70 tabular-nums whitespace-nowrap">{maskPhone(r.phone)}</td>
+                    <tr key={`${r.phone || ''}-${startIdx + i}`} className={light ? "border-b border-slate-100 hover:bg-white" : "border-b border-white/5 hover:bg-white/[0.03]"}>
+                      <td className={light ? "py-2 pr-2 text-slate-400 tabular-nums" : "py-2 pr-2 text-white/40 tabular-nums"}>{startIdx + i + 1}</td>
+                      <td className={light ? "py-2 px-2 text-slate-800" : "py-2 px-2 text-white/90"}>{val(r.name)}</td>
+                      {showGrade && <td className={light ? "py-2 px-2 text-slate-600 whitespace-nowrap" : "py-2 px-2 text-white/70 whitespace-nowrap"}>{val(r.grade)}</td>}
+                      {showGender && <td className={light ? "py-2 px-2 text-slate-600 whitespace-nowrap" : "py-2 px-2 text-white/70 whitespace-nowrap"}>{genderLabel(r.gender)}</td>}
+                      {showAge && <td className={light ? "py-2 px-2 text-slate-600 tabular-nums whitespace-nowrap" : "py-2 px-2 text-white/70 tabular-nums whitespace-nowrap"}>{val(r.age)}</td>}
+                      {showRegion && <td className={light ? "py-2 px-2 text-slate-600 whitespace-nowrap" : "py-2 px-2 text-white/70 whitespace-nowrap"}>{val(r.region)}</td>}
+                      <td className={light ? "py-2 px-2 text-slate-600 tabular-nums whitespace-nowrap" : "py-2 px-2 text-white/70 tabular-nums whitespace-nowrap"}>{maskPhone(r.phone)}</td>
                       {extras.map((c) => (
-                        <td key={c.key} className="py-2 px-2 text-white/70 tabular-nums whitespace-nowrap">{extraVal(r, c.key)}</td>
+                        <td key={c.key} className={light ? "py-2 px-2 text-slate-600 tabular-nums whitespace-nowrap" : "py-2 px-2 text-white/70 tabular-nums whitespace-nowrap"}>{extraVal(r, c.key)}</td>
                       ))}
                     </tr>
                   ))}
@@ -261,10 +263,10 @@ export default function TargetRecipientsModal({
         </div>
 
         {/* 푸터 — 페이징 + Source caption */}
-        <div className="px-5 py-3 border-t border-white/10 shrink-0">
+        <div className={light ? "px-5 py-3 border-t border-slate-200 shrink-0" : "px-5 py-3 border-t border-white/10 shrink-0"}>
           {!loading && !error && total > 0 && (
             <div className="flex items-center justify-between gap-3 mb-2">
-              <div className="text-xs text-white/50 tabular-nums">
+              <div className={light ? "text-xs text-slate-500 tabular-nums" : "text-xs text-white/50 tabular-nums"}>
                 {startIdx + 1}–{Math.min(startIdx + pageSize, total)} / {total.toLocaleString()}명
               </div>
               <div className="flex items-center gap-1.5">
@@ -272,17 +274,17 @@ export default function TargetRecipientsModal({
                   type="button"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className={light ? "p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed" : "p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"}
                   aria-label="이전 페이지"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="text-xs text-white/70 tabular-nums px-1">{page} / {totalPages}</span>
+                <span className={light ? "text-xs text-slate-600 tabular-nums px-1" : "text-xs text-white/70 tabular-nums px-1"}>{page} / {totalPages}</span>
                 <button
                   type="button"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className={light ? "p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed" : "p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"}
                   aria-label="다음 페이지"
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -290,7 +292,7 @@ export default function TargetRecipientsModal({
               </div>
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic">Data source: {sourceLabel} · 연락처 중간자리 마스킹</div>
+          <div className={light ? "text-[10px] text-slate-400 italic" : "text-[10px] text-white/30 italic"}>Data source: {sourceLabel} · 연락처 중간자리 마스킹</div>
         </div>
       </div>
     </div>,

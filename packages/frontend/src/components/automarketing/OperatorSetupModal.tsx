@@ -12,8 +12,8 @@ import SegmentPicker from './SegmentPicker';
 // ★ 2026-07-30 (임은지 접수): MMS 이미지 첨부 — 여정 MMS 업로더 재사용(300KB JPG·최대 3장·라이브러리 자동 변환)
 import JourneyMmsUploader from '../journey/JourneyMmsUploader';
 
-const INP = 'w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors';
-const LAB = 'text-xs font-medium text-white/70 block mb-1.5';
+const INP = 'w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 transition-colors';
+const LAB = 'text-xs font-medium text-slate-600 block mb-1.5';
 
 interface Props {
   editing: Partial<ContinuousOperator>;
@@ -33,30 +33,30 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-3 p-5 border-b border-white/10 shrink-0">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center">
-            <Brain className="w-5 h-5 text-indigo-300" />
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3 p-5 border-b border-slate-200 shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
+            <Brain className="w-5 h-5 text-indigo-700" />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-base font-semibold text-white">{isEdit ? '자동 마케팅 수정' : '세부설정으로 시작'}</h3>
-            <p className="text-[11px] text-white/50 mt-0.5">기본만 정하면 됩니다. 고급 설정은 필요할 때만 펼치세요.</p>
+            <h3 className="text-base font-semibold text-slate-900">{isEdit ? '자동 마케팅 수정' : '세부설정으로 시작'}</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">기본만 정하면 됩니다. 고급 설정은 필요할 때만 펼치세요.</p>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors" aria-label="닫기">
-            <X className="w-4 h-4 text-white/50" />
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" aria-label="닫기">
+            <X className="w-4 h-4 text-slate-500" />
           </button>
         </div>
 
         <div className="p-5 overflow-y-auto space-y-4">
-          <div className="text-xs text-white/40">기본</div>
+          <div className="text-xs text-slate-400">기본</div>
 
           <div>
-            <label className={LAB}>이름 <span className="text-rose-400">*</span></label>
+            <label className={LAB}>이름 <span className="text-rose-600">*</span></label>
             <input type="text" value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} className={INP} placeholder="예: VIP 재구매 유도" maxLength={100} />
           </div>
 
           <div>
-            <label className={LAB}>마케팅 목표 (자연어) <span className="text-rose-400">*</span></label>
+            <label className={LAB}>마케팅 목표 (자연어) <span className="text-rose-600">*</span></label>
             <textarea value={editing.objective || ''} onChange={(e) => setEditing({ ...editing, objective: e.target.value })} className={`${INP} h-20 resize-none leading-relaxed`} placeholder="예: VIP 등급 고객 중 최근 30일 미구매 고객에게 재구매를 유도" maxLength={500} />
           </div>
 
@@ -66,7 +66,7 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
               {(['sms', 'lms', 'mms'] as const).map((ch) => {
                 const on = (editing.channel || 'lms') === ch;
                 return (
-                  <button key={ch} type="button" onClick={() => setEditing({ ...editing, channel: ch })} className={`flex-1 py-2 text-xs font-medium rounded-lg border transition-colors ${on ? 'bg-indigo-500/30 border-indigo-400/50 text-indigo-100' : 'bg-white/5 border-white/10 text-white/60 hover:text-white/90'}`}>
+                  <button key={ch} type="button" onClick={() => setEditing({ ...editing, channel: ch })} className={`flex-1 py-2 text-xs font-medium rounded-lg border transition-colors ${on ? 'bg-indigo-100 border-indigo-300 text-indigo-900' : 'bg-white border-slate-200 text-slate-500 hover:text-slate-800'}`}>
                     {ch.toUpperCase()}
                   </button>
                 );
@@ -80,7 +80,7 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
                   onChange={(paths) => setEditing({ ...editing, mmsImagePaths: paths })}
                   disabled={saving}
                 />
-                <div className="text-[10px] text-white/40 mt-1.5">MMS로 나가는 매 발송에 이 이미지가 첨부됩니다. 비워두면 이미지 없이 발송됩니다.</div>
+                <div className="text-[10px] text-slate-400 mt-1.5">MMS로 나가는 매 발송에 이 이미지가 첨부됩니다. 비워두면 이미지 없이 발송됩니다.</div>
               </div>
             )}
           </div>
@@ -119,20 +119,20 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
               <label className={LAB}>발송 희망 시각 (KST)</label>
               {/* ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 08:00~20:59만. 백엔드 저장 가드가 최종 차단 */}
               <input type="time" min="08:00" max="20:59" value={editing.scheduleTime || '09:00'} onChange={(e) => setEditing({ ...editing, scheduleTime: e.target.value })} className={INP} />
-              <div className="text-[10px] text-white/40 mt-1">야간(21시~다음날 08시)에는 광고 발송이 제한되어 08:00~20:59만 선택할 수 있습니다.</div>
+              <div className="text-[10px] text-slate-400 mt-1">야간(21시~다음날 08시)에는 광고 발송이 제한되어 08:00~20:59만 선택할 수 있습니다.</div>
             </div>
           </div>
 
-          <label className="flex items-center justify-between rounded-xl border border-white/10 px-4 py-3">
+          <label className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
             <span className="min-w-0">
-              <span className="text-xs text-white/80 block">발송 시각을 AI에게 맡기기</span>
-              <span className="text-[10px] text-white/40 block mt-0.5">
+              <span className="text-xs text-slate-700 block">발송 시각을 AI에게 맡기기</span>
+              <span className="text-[10px] text-slate-400 block mt-0.5">
                 {editing.sendTimeMode === 'ai_optimal'
                   ? '고객 반응(클릭)이 가장 많았던 시간대에 맞춰 발송합니다. 데이터가 부족하면 희망 시각대로 나갑니다.'
                   : '끄면 위에서 정한 희망 시각 정각에 발송됩니다.'}
               </span>
             </span>
-            <button type="button" onClick={() => setEditing({ ...editing, sendTimeMode: editing.sendTimeMode === 'ai_optimal' ? 'fixed' : 'ai_optimal' })} className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-3 ${editing.sendTimeMode === 'ai_optimal' ? 'bg-indigo-500' : 'bg-white/15'}`} aria-label="발송 시각 AI 조정">
+            <button type="button" onClick={() => setEditing({ ...editing, sendTimeMode: editing.sendTimeMode === 'ai_optimal' ? 'fixed' : 'ai_optimal' })} className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-3 ${editing.sendTimeMode === 'ai_optimal' ? 'bg-indigo-500' : 'bg-slate-200'}`} aria-label="발송 시각 AI 조정">
               <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${editing.sendTimeMode === 'ai_optimal' ? 'translate-x-5' : ''}`} />
             </button>
           </label>
@@ -151,7 +151,7 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
               <select value={editing.scheduleDayOfMonth ?? 1} onChange={(e) => setEditing({ ...editing, scheduleDayOfMonth: Number(e.target.value) })} className={INP}>
                 {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}일</option>)}
               </select>
-              <div className="text-[10px] text-white/40 mt-1">없는 날짜(예: 31일)는 그 달 말일에 발송됩니다.</div>
+              <div className="text-[10px] text-slate-400 mt-1">없는 날짜(예: 31일)는 그 달 말일에 발송됩니다.</div>
             </div>
           )}
           {editing.schedule === 'yearly' && (
@@ -171,7 +171,7 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
                   </select>
                 </div>
               </div>
-              <div className="text-[10px] text-white/40 mt-1">매년 지정한 월·일에 1회 발송됩니다. 없는 날짜는 그 달 말일로 조정됩니다.</div>
+              <div className="text-[10px] text-slate-400 mt-1">매년 지정한 월·일에 1회 발송됩니다. 없는 날짜는 그 달 말일로 조정됩니다.</div>
             </div>
           )}
           {isEdit && (
@@ -184,38 +184,38 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             </div>
           )}
 
-          <div className="h-px bg-white/10 my-1" />
-          <div className="text-xs text-white/40">고급 설정 · 필요할 때만 펼치기</div>
+          <div className="h-px bg-slate-100 my-1" />
+          <div className="text-xs text-slate-400">고급 설정 · 필요할 때만 펼치기</div>
 
           <Section icon={<Gift className="w-4 h-4" />} title="혜택 내용" summary={editing.benefitContent?.trim() ? '입력됨' : '비우면 제안 단계에서 작성'}>
             <input type="text" value={editing.benefitContent || ''} onChange={(e) => setEditing({ ...editing, benefitContent: e.target.value })} className={INP} placeholder="예: 마스크팩 30% 할인 쿠폰 (유효기간 발급일+3일)" maxLength={200} />
-            <div className="text-[10px] text-white/40">입력하면 생성 문안의 [혜택 내용을 입력해주세요] 자리에 그대로 들어갑니다. 비워두면 제안 단계에서 작성합니다. AI가 혜택을 임의로 만들지 않습니다.</div>
+            <div className="text-[10px] text-slate-400">입력하면 생성 문안의 [혜택 내용을 입력해주세요] 자리에 그대로 들어갑니다. 비워두면 제안 단계에서 작성합니다. AI가 혜택을 임의로 만들지 않습니다.</div>
           </Section>
 
           {/* ★ 2026-08-04 되살림 — 1차 수신 명단을 발송 기록에서 정확히 확보할 수 있게 되어 다시 열었다.
               대상 = 1차를 실제로 받은 분 중 클릭하지 않은 분만(그 사이 새로 들어온 고객에게는 안 나간다). */}
           <Section icon={<Layers className="w-4 h-4" />} title="미반응자 리마인드" summary={editing.sequenceEnabled ? `1차 후 ${editing.sequenceDelayDays ?? 3}일 뒤 재발송` : '꺼짐'}>
-            <label className="flex items-center justify-between rounded-lg border border-white/10 px-3 py-2.5">
+            <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2.5">
               <span className="min-w-0">
-                <span className="text-xs text-white/80 block">리마인드 사용</span>
-                <span className="text-[10px] text-white/40 block mt-0.5">
-                  1차 문자를 <span className="text-white/60">실제로 받은 분 중 클릭하지 않은 분에게만</span> 정한 일수 뒤 한 번 더 보냅니다.
+                <span className="text-xs text-slate-700 block">리마인드 사용</span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  1차 문자를 <span className="text-slate-500">실제로 받은 분 중 클릭하지 않은 분에게만</span> 정한 일수 뒤 한 번 더 보냅니다.
                 </span>
               </span>
-              <button type="button" onClick={() => setEditing({ ...editing, sequenceEnabled: !editing.sequenceEnabled })} className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-3 ${editing.sequenceEnabled ? 'bg-indigo-500' : 'bg-white/15'}`} aria-label="미반응자 리마인드">
+              <button type="button" onClick={() => setEditing({ ...editing, sequenceEnabled: !editing.sequenceEnabled })} className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-3 ${editing.sequenceEnabled ? 'bg-indigo-500' : 'bg-slate-200'}`} aria-label="미반응자 리마인드">
                 <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${editing.sequenceEnabled ? 'translate-x-5' : ''}`} />
               </button>
             </label>
             {editing.sequenceEnabled && (
               <>
                 <div>
-                  <label className="text-[11px] text-white/60 block mb-1">1차 발송 후 대기 일수 (1~30일)</label>
+                  <label className="text-[11px] text-slate-500 block mb-1">1차 발송 후 대기 일수 (1~30일)</label>
                   <input type="number" min="1" max="30" value={editing.sequenceDelayDays ?? 3} onChange={(e) => setEditing({ ...editing, sequenceDelayDays: Math.min(30, Math.max(1, Number(e.target.value) || 3)) })} className={INP} />
                 </div>
                 <div>
-                  <label className="text-[11px] text-white/60 block mb-1">리마인드 문안 <span className="text-rose-400">*</span></label>
+                  <label className="text-[11px] text-slate-500 block mb-1">리마인드 문안 <span className="text-rose-600">*</span></label>
                   <textarea value={editing.sequenceReminderContent || ''} onChange={(e) => setEditing({ ...editing, sequenceReminderContent: e.target.value })} className={`${INP} h-20 resize-none leading-relaxed`} placeholder="예: 지난번 안내드린 혜택이 곧 마감됩니다. 놓치지 마세요!" maxLength={2000} />
-                  <div className="text-[10px] text-white/40 mt-1">직접 작성한 문안 그대로 나갑니다(AI가 고쳐 쓰지 않습니다). 발송 전 스팸 검증을 거치며, 통과하지 못하면 예약을 멈추고 알려드립니다.</div>
+                  <div className="text-[10px] text-slate-400 mt-1">직접 작성한 문안 그대로 나갑니다(AI가 고쳐 쓰지 않습니다). 발송 전 스팸 검증을 거치며, 통과하지 못하면 예약을 멈추고 알려드립니다.</div>
                 </div>
               </>
             )}
@@ -225,57 +225,57 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
           <Section icon={<Bell className="w-4 h-4" />} title="담당자 알림" summary={`담당자 ${phones.length}명`}>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[11px] text-white/60 block mb-1">담당자 연락처 (쉼표, 최대 3명)</label>
+                <label className="text-[11px] text-slate-500 block mb-1">담당자 연락처 (쉼표, 최대 3명)</label>
                 <input type="text" value={phones.join(', ')} onChange={(e) => setEditing({ ...editing, adminPhoneNumbers: e.target.value.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 3) })} className={INP} placeholder="01012345678, 01098765432" />
               </div>
               <div>
-                <label className="text-[11px] text-white/60 block mb-1">백업 담당자 (휴가 대비)</label>
+                <label className="text-[11px] text-slate-500 block mb-1">백업 담당자 (휴가 대비)</label>
                 <input type="text" value={editing.backupAdminPhone ?? ''} onChange={(e) => setEditing({ ...editing, backupAdminPhone: e.target.value.trim() || null })} className={INP} placeholder="01087654321" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[11px] text-white/60 block mb-1">담당자 알림 채널</label>
-                <div className={`${INP} flex items-center text-white/70`}>문자 (LMS)</div>
-                <div className="text-[10px] text-white/40 mt-1">담당자 안내는 문자로 발송됩니다.</div>
+                <label className="text-[11px] text-slate-500 block mb-1">담당자 알림 채널</label>
+                <div className={`${INP} flex items-center text-slate-600`}>문자 (LMS)</div>
+                <div className="text-[10px] text-slate-400 mt-1">담당자 안내는 문자로 발송됩니다.</div>
               </div>
               <div>
-                <label className="text-[11px] text-white/60 block mb-1">자율 발송 준비 시간 (분)</label>
+                <label className="text-[11px] text-slate-500 block mb-1">자율 발송 준비 시간 (분)</label>
                 <input type="number" min="10" max="1440" value={editing.autoSendLeadMinutes ?? 120} onChange={(e) => setEditing({ ...editing, autoSendLeadMinutes: Number(e.target.value) })} className={INP} />
               </div>
             </div>
-            <div className="text-[10px] text-white/40 leading-relaxed">발송 희망 시각의 준비 시간(기본 120분) 전에 문안을 생성해 스팸필터 테스트를 거치고, 담당자에게 실제 문안과 발송 정보(일시·대상·예상 비용)를 문자로 안내합니다. 희망 시각 정각에 자동 발송되며, 그 전까지 [정지]로 취소할 수 있습니다. 스팸필터를 통과한 문안만 나갑니다.</div>
+            <div className="text-[10px] text-slate-400 leading-relaxed">발송 희망 시각의 준비 시간(기본 120분) 전에 문안을 생성해 스팸필터 테스트를 거치고, 담당자에게 실제 문안과 발송 정보(일시·대상·예상 비용)를 문자로 안내합니다. 희망 시각 정각에 자동 발송되며, 그 전까지 [정지]로 취소할 수 있습니다. 스팸필터를 통과한 문안만 나갑니다.</div>
           </Section>
 
           <Section icon={<Wallet className="w-4 h-4" />} title="비용 제어" summary={editing.budgetMonthly ? `월 ${won(editing.budgetMonthly)}` : '예산 무제한'} accent>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[11px] text-white/60 block mb-1">월 예산 (원)</label>
+                <label className="text-[11px] text-slate-500 block mb-1">월 예산 (원)</label>
                 <input type="number" min="0" step="10000" value={editing.budgetMonthly ?? ''} onChange={(e) => setEditing({ ...editing, budgetMonthly: e.target.value === '' ? null : Number(e.target.value) })} className={INP} placeholder="예: 2000000" />
               </div>
               <div>
-                <label className="text-[11px] text-white/60 block mb-1">일별 한도 (원)</label>
+                <label className="text-[11px] text-slate-500 block mb-1">일별 한도 (원)</label>
                 <input type="number" min="0" step="5000" value={editing.budgetDaily ?? ''} onChange={(e) => setEditing({ ...editing, budgetDaily: e.target.value === '' ? null : Number(e.target.value) })} className={INP} placeholder="비움 = 무제한" />
               </div>
             </div>
             <div>
-              <label className="text-[11px] text-white/60 block mb-1">알림 임계값 (%)</label>
+              <label className="text-[11px] text-slate-500 block mb-1">알림 임계값 (%)</label>
               <input type="number" min="50" max="100" step="5" value={editing.budgetAlertThreshold ?? 80} onChange={(e) => setEditing({ ...editing, budgetAlertThreshold: Number(e.target.value) })} className={INP} />
-              <div className="text-[10px] text-white/40 mt-1">사용률이 임계값에 도달하면 담당자에게 알림 (기본 80%). 예산 초과 시 새 제안 생성이 자동 차단됩니다.</div>
+              <div className="text-[10px] text-slate-400 mt-1">사용률이 임계값에 도달하면 담당자에게 알림 (기본 80%). 예산 초과 시 새 제안 생성이 자동 차단됩니다.</div>
             </div>
           </Section>
 
           {error && (
-            <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-200 flex items-start gap-2">
+            <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-800 flex items-start gap-2">
               <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <div>{error}</div>
             </div>
           )}
         </div>
 
-        <div className="flex items-center gap-2 p-5 border-t border-white/10 bg-slate-950/50 shrink-0">
-          <button onClick={onClose} className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors">취소</button>
-          <button onClick={onSubmit} disabled={!canSubmit} className="flex-1 px-4 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-30 disabled:cursor-not-allowed text-indigo-50 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors">
+        <div className="flex items-center gap-2 p-5 border-t border-slate-200 bg-slate-100 shrink-0">
+          <button onClick={onClose} className="flex-1 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-colors">취소</button>
+          <button onClick={onSubmit} disabled={!canSubmit} className="flex-1 px-4 py-2 bg-indigo-200 hover:bg-indigo-200 disabled:opacity-30 disabled:cursor-not-allowed text-indigo-900 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors">
             {saving ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />저장 중</> : isEdit ? '수정 저장' : '자동마케팅 시작'}
           </button>
         </div>
@@ -287,16 +287,16 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
 function Section({ icon, title, summary, accent, children }: { icon: ReactNode; title: string; summary: string; accent?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={`rounded-xl border overflow-hidden ${accent ? 'border-indigo-400/30' : 'border-white/10'}`}>
+    <div className={`rounded-xl border overflow-hidden ${accent ? 'border-indigo-200' : 'border-slate-200'}`}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-3 px-4 py-3 text-left">
-        <span className={accent ? 'text-indigo-300' : 'text-white/50'}>{icon}</span>
+        <span className={accent ? 'text-indigo-700' : 'text-slate-500'}>{icon}</span>
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-medium text-white">{title}</div>
-          {!open && <div className="text-xs text-white/45 mt-0.5 truncate">{summary}</div>}
+          <div className="text-[13px] font-medium text-slate-900">{title}</div>
+          {!open && <div className="text-xs text-slate-400 mt-0.5 truncate">{summary}</div>}
         </div>
-        {open ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />}
+        {open ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
       </button>
-      {open && <div className="px-4 pb-4 pt-3 space-y-3 border-t border-white/10">{children}</div>}
+      {open && <div className="px-4 pb-4 pt-3 space-y-3 border-t border-slate-200">{children}</div>}
     </div>
   );
 }

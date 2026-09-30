@@ -294,9 +294,9 @@ export default function EmailEditScreen({
       onSelect={setSelectedId}
       onReorder={(from, to) => changeSections((prev) => moveWithin(prev.slice().sort((a, b) => a.order - b.order), from, to))}
       top={(
-        <button type="button" onClick={() => setSelectedId(INBOX_ID)} className={`w-full mb-3 flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left ${selectedId === INBOX_ID ? 'border-sky-400/70 bg-sky-500/[0.12]' : 'border-sky-400/25 bg-sky-500/[0.06] hover:bg-sky-500/10'}`}>
-          <span className="w-9 h-9 rounded-lg bg-sky-500/15 text-sky-200 flex items-center justify-center shrink-0"><Inbox className="w-4 h-4" /></span>
-          <span className="min-w-0"><b className="block text-[13px] text-white">받은편지함에 보이는 글</b><span className="block text-[11.5px] text-white/50 truncate">{subject ? subject : '제목 · 미리보기 글'}</span></span>
+        <button type="button" onClick={() => setSelectedId(INBOX_ID)} className={`w-full mb-3 flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left ${selectedId === INBOX_ID ? 'border-sky-300 bg-sky-50' : 'border-sky-200 bg-sky-50 hover:bg-sky-50'}`}>
+          <span className="w-9 h-9 rounded-lg bg-sky-100 text-sky-800 flex items-center justify-center shrink-0"><Inbox className="w-4 h-4" /></span>
+          <span className="min-w-0"><b className="block text-[13px] text-slate-900">받은편지함에 보이는 글</b><span className="block text-[11.5px] text-slate-500 truncate">{subject ? subject : '제목 · 미리보기 글'}</span></span>
         </button>
       )}
       footer={(
@@ -317,7 +317,7 @@ export default function EmailEditScreen({
       inboxHead={{ from: fromName || '', subject: `${isAd ? '(광고) ' : ''}${subject}` }}
       phoneTop={samples.length > 0 ? (
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[12px] text-white/55">받는 사람</span>
+          <span className="text-[12px] text-slate-500">받는 사람</span>
           <Segmented value={sample} onChange={setSample} options={[{ value: 'none', label: '변수 그대로' }, ...samples.map((c) => ({ value: c.label, label: c.label }))]} />
         </div>
       ) : undefined}
@@ -339,7 +339,7 @@ export default function EmailEditScreen({
         <Counter value={name} max={60} onChange={(v) => { record(); setName(v); }} />
       </PanelBlock>
       <PanelBlock title="광고 메일">
-        <label className="inline-flex items-center gap-2.5 cursor-pointer"><input type="checkbox" checked={isAd} onChange={(e) => { record(); setIsAd(e.target.checked); }} className="w-4 h-4 accent-violet-600" /><span className="text-[12.5px] text-white/80">"(광고)" 표기와 수신거부가 보낼 때 자동으로 붙어요</span></label>
+        <label className="inline-flex items-center gap-2.5 cursor-pointer"><input type="checkbox" checked={isAd} onChange={(e) => { record(); setIsAd(e.target.checked); }} className="w-4 h-4 accent-violet-600" /><span className="text-[12.5px] text-slate-700">"(광고)" 표기와 수신거부가 보낼 때 자동으로 붙어요</span></label>
       </PanelBlock>
     </div>
   ) : selected ? (
@@ -354,12 +354,12 @@ export default function EmailEditScreen({
       )} />
       <PanelBlock title="내용">
         <div className="mk-dark-editor"><SectionPropsEditor key={selected.id} section={selected} onUpdate={updateProps} hiddenFields={emailHiddenFieldsFor(selected.type)} /></div>
-        {selected.type === 'footer' && <div className={`mt-3 rounded-xl border px-3 py-2.5 text-[11.5px] leading-relaxed ${isAd ? 'border-violet-400/30 bg-violet-500/10 text-violet-100/90' : 'border-white/10 bg-white/5 text-white/60'}`}>{isAd ? '광고 메일이라 보내는 사람 정보와 수신거부 링크가 메일 맨 아래에 자동으로 붙어요. 가운데 미리보기 맨 끝에서 실제 문구를 확인하세요.' : '광고 메일이 아니어서 수신거부 링크가 붙지 않아요. 할인·행사 같은 광고 내용이 있으면 받은편지함 칸에서 광고 메일을 켜 주세요.'}</div>}
+        {selected.type === 'footer' && <div className={`mt-3 rounded-xl border px-3 py-2.5 text-[11.5px] leading-relaxed ${isAd ? 'border-violet-200 bg-violet-50 text-violet-900' : 'border-slate-200 bg-white text-slate-500'}`}>{isAd ? '광고 메일이라 보내는 사람 정보와 수신거부 링크가 메일 맨 아래에 자동으로 붙어요. 가운데 미리보기 맨 끝에서 실제 문구를 확인하세요.' : '광고 메일이 아니어서 수신거부 링크가 붙지 않아요. 할인·행사 같은 광고 내용이 있으면 받은편지함 칸에서 광고 메일을 켜 주세요.'}</div>}
       </PanelBlock>
       {EMAIL_TREATMENT_OPTIONS[selected.type] && (
         <PanelBlock title={selected.type === 'cta' ? '모양' : selected.type === 'product_carousel' ? '배열' : '구도'} hint="누르면 가운데에 바로 보여요">
           <TreatmentTiles type={selected.type} options={EMAIL_TREATMENT_OPTIONS[selected.type]} value={(selected as any).treatment || 'classic'} onChange={(v) => updateSection({ treatment: v } as Partial<Section>)} color={brand} />
-          {selected.type === 'hero' && (selected as any).treatment === 'split' && <div className="text-[11px] text-amber-300/85 mt-2">나란히 구도는 PC 메일에서 사진이 왼쪽, 글이 오른쪽으로 나가요. 휴대폰에서는 위아래로 쌓여요.</div>}
+          {selected.type === 'hero' && (selected as any).treatment === 'split' && <div className="text-[11px] text-amber-700 mt-2">나란히 구도는 PC 메일에서 사진이 왼쪽, 글이 오른쪽으로 나가요. 휴대폰에서는 위아래로 쌓여요.</div>}
         </PanelBlock>
       )}
       {EMAIL_BAND_AWARE.has(selected.type) && (
@@ -373,16 +373,16 @@ export default function EmailEditScreen({
         </PanelBlock>
       )}
       {(selected.type === 'hero' || selected.type === 'text_card' || EMAIL_ALIGN_AWARE.has(selected.type)) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4 border-t border-white/10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4 border-t border-slate-200">
           {(selected.type === 'hero' || selected.type === 'text_card') && (
             <div>
-              <div className="text-[12.5px] font-bold text-white mb-2.5">제목 강조</div>
+              <div className="text-[12.5px] font-bold text-slate-900 mb-2.5">제목 강조</div>
               <Segmented value={((selected.props as any)?.headline_emphasis || '') as string} onChange={(v) => updateProps({ headline_emphasis: v || undefined })} options={[{ value: '', label: '없음' }, { value: 'marker', label: '형광펜' }, { value: 'underline', label: '밑줄' }]} />
             </div>
           )}
           {EMAIL_ALIGN_AWARE.has(selected.type) && (
             <div>
-              <div className="text-[12.5px] font-bold text-white mb-2.5">정렬</div>
+              <div className="text-[12.5px] font-bold text-slate-900 mb-2.5">정렬</div>
               <AlignControl value={(selected.align as any) || 'center'} onChange={(v) => updateSection({ align: v })} />
             </div>
           )}
@@ -395,20 +395,20 @@ export default function EmailEditScreen({
       )}
       <PanelBlock title="받는 사람에 맞추기" hint="칸을 누른 뒤 변수를 누르면 그 자리에 들어가요">
         <div className="flex flex-wrap gap-1.5">
-          {emailVars.map((v) => <button key={v.token} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => insertVar(v.token, v.label)} className="h-7 px-2.5 rounded-full text-[11.5px] text-white/75 border border-white/15 bg-white/[0.04] hover:bg-violet-500/20">{v.label}</button>)}
+          {emailVars.map((v) => <button key={v.token} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => insertVar(v.token, v.label)} className="h-7 px-2.5 rounded-full text-[11.5px] text-slate-600 border border-slate-300 bg-white hover:bg-violet-100">{v.label}</button>)}
         </div>
-        <label className="flex items-center gap-2 mt-3 text-[12px] text-white/70 cursor-pointer">
+        <label className="flex items-center gap-2 mt-3 text-[12px] text-slate-600 cursor-pointer">
           <input type="checkbox" checked={!!selected.display_condition} onChange={(e) => updateSection({ display_condition: e.target.checked ? { field: 'grade', op: 'eq', value: '' } : undefined })} className="accent-violet-600" />특정 고객에게만 보이기
         </label>
         {selected.display_condition && (
           <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-            <select value={selected.display_condition.field} onChange={(e) => updateSection({ display_condition: { ...selected.display_condition!, field: e.target.value } })} className="h-8 px-2 rounded-lg bg-slate-950/60 border border-white/15 text-[12px] text-white">
+            <select value={selected.display_condition.field} onChange={(e) => updateSection({ display_condition: { ...selected.display_condition!, field: e.target.value } })} className="h-8 px-2 rounded-lg bg-slate-100 border border-slate-300 text-[12px] text-slate-900">
               {emailVars.filter((v) => v.field !== 'name').map((v) => <option key={v.field} value={v.field}>{v.label}</option>)}
             </select>
-            <select value={selected.display_condition.op} onChange={(e) => updateSection({ display_condition: { ...selected.display_condition!, op: e.target.value as any } })} className="h-8 px-2 rounded-lg bg-slate-950/60 border border-white/15 text-[12px] text-white">
+            <select value={selected.display_condition.op} onChange={(e) => updateSection({ display_condition: { ...selected.display_condition!, op: e.target.value as any } })} className="h-8 px-2 rounded-lg bg-slate-100 border border-slate-300 text-[12px] text-slate-900">
               <option value="eq">같음</option><option value="ne">다름</option><option value="gte">이상</option><option value="lte">이하</option><option value="gt">초과</option><option value="lt">미만</option><option value="contains">포함</option>
             </select>
-            <input value={selected.display_condition.value} onChange={(e) => updateSection({ display_condition: { ...selected.display_condition!, value: e.target.value } })} placeholder="값(예: VIP)" className="h-8 w-24 px-2 rounded-lg bg-slate-950/60 border border-white/15 text-[12px] text-white" />
+            <input value={selected.display_condition.value} onChange={(e) => updateSection({ display_condition: { ...selected.display_condition!, value: e.target.value } })} placeholder="값(예: VIP)" className="h-8 w-24 px-2 rounded-lg bg-slate-100 border border-slate-300 text-[12px] text-slate-900" />
           </div>
         )}
       </PanelBlock>
@@ -418,18 +418,18 @@ export default function EmailEditScreen({
       <Head icon={<Palette className="w-5 h-5" />} title="전체 설정" sub="블록을 고르지 않았을 때 · 이메일 전체에 적용" />
       <PanelBlock title="디자인 테마" hint="색·서체·조판만 바뀌고 내용은 그대로">
         <div className="flex items-center gap-2 flex-wrap">
-          <button type="button" onClick={() => setThemeOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-white/15 bg-white/[0.04] text-[12.5px] text-white/85 hover:bg-white/10"><Palette className="w-4 h-4" />테마 고르기</button>
-          <button type="button" onClick={() => setFontOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-white/15 bg-white/[0.04] text-[12.5px] text-white/85 hover:bg-white/10"><Type className="w-4 h-4" />서체 고르기</button>
-          <span className="text-[11.5px] text-white/45">{design?.theme ? `지금: ${design.theme}` : '지금: 기본'}</span>
+          <button type="button" onClick={() => setThemeOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-300 bg-white text-[12.5px] text-slate-700 hover:bg-slate-100"><Palette className="w-4 h-4" />테마 고르기</button>
+          <button type="button" onClick={() => setFontOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-300 bg-white text-[12.5px] text-slate-700 hover:bg-slate-100"><Type className="w-4 h-4" />서체 고르기</button>
+          <span className="text-[11.5px] text-slate-400">{design?.theme ? `지금: ${design.theme}` : '지금: 기본'}</span>
         </div>
       </PanelBlock>
       <PanelBlock title="AI로 다시 구성" hint="블록 전체를 새로 짜요">
         <div className="space-y-2">
-          <textarea value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} rows={2} placeholder="예: 가을 신상 안내, VIP에게 정중한 톤" className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/15 text-[12.5px] text-white placeholder-white/30 outline-none resize-none" />
-          <textarea value={aiEvent} onChange={(e) => setAiEvent(e.target.value)} rows={3} placeholder={'행사·상품 정보 붙여넣기(선택)\n상품명 · 가격 · 주소를 넣으면 상품 카드가 원문 그대로 만들어져요'} className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/15 text-[12px] text-white placeholder-white/30 outline-none resize-none" />
+          <textarea value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} rows={2} placeholder="예: 가을 신상 안내, VIP에게 정중한 톤" className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-300 text-[12.5px] text-slate-900 placeholder-slate-400 outline-none resize-none" />
+          <textarea value={aiEvent} onChange={(e) => setAiEvent(e.target.value)} rows={3} placeholder={'행사·상품 정보 붙여넣기(선택)\n상품명 · 가격 · 주소를 넣으면 상품 카드가 원문 그대로 만들어져요'} className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-300 text-[12px] text-slate-900 placeholder-slate-400 outline-none resize-none" />
           <div className="flex items-center gap-2 flex-wrap">
-            <button type="button" onClick={() => { void generate(); }} disabled={!!aiBusy || (!aiPrompt.trim() && !aiEvent.trim())} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 disabled:opacity-40">{aiBusy === 'gen' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}AI로 만들기 · {AI_GENERATE_COSTS['email-ai-generate']}</button>
-            <button type="button" onClick={() => { void refine(); }} disabled={!!aiBusy || sections.length === 0} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold text-fuchsia-100 border border-fuchsia-400/40 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 disabled:opacity-40">{aiBusy === 'refine' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}문구 다듬기 · 1</button>
+            <button type="button" onClick={() => { void generate(); }} disabled={!!aiBusy || (!aiPrompt.trim() && !aiEvent.trim())} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40">{aiBusy === 'gen' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}AI로 만들기 · {AI_GENERATE_COSTS['email-ai-generate']}</button>
+            <button type="button" onClick={() => { void refine(); }} disabled={!!aiBusy || sections.length === 0} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold text-fuchsia-900 border border-fuchsia-300 bg-fuchsia-50 hover:bg-fuchsia-100 disabled:opacity-40">{aiBusy === 'refine' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}문구 다듬기 · 1</button>
           </div>
           <MaterialQuickPanel channel="email" isAd={isAd} disabled={!!aiBusy} onToast={(m, t) => onToast(m, t)} onDone={({ data }) => {
             const g = data || {};
@@ -443,8 +443,8 @@ export default function EmailEditScreen({
         </div>
       </PanelBlock>
       <PanelBlock title="완성" hint={completedState ? '완성한 이메일이에요' : '처음 보낼 때 한 번 완성돼요'}>
-        {completedState ? <div className="text-[12.5px] text-emerald-300">완성됨 · 테스트 발송·HTML 저장·발송에 추가 크레딧이 없어요</div> : (
-          <button type="button" onClick={completeOnly} disabled={!!aiBusy} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-white/15 bg-white/[0.04] text-[12.5px] text-white/85 hover:bg-white/10 disabled:opacity-40"><Lock className="w-4 h-4" />보내지 않고 완성만 하기 · {CONFIRM_CREDIT_COSTS['email-campaign-complete']}</button>
+        {completedState ? <div className="text-[12.5px] text-emerald-700">완성됨 · 테스트 발송·HTML 저장·발송에 추가 크레딧이 없어요</div> : (
+          <button type="button" onClick={completeOnly} disabled={!!aiBusy} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-300 bg-white text-[12.5px] text-slate-700 hover:bg-slate-100 disabled:opacity-40"><Lock className="w-4 h-4" />보내지 않고 완성만 하기 · {CONFIRM_CREDIT_COSTS['email-campaign-complete']}</button>
         )}
       </PanelBlock>
     </div>
@@ -457,7 +457,7 @@ export default function EmailEditScreen({
   };
 
   return (
-    <div className="fixed inset-0 z-[120] bg-slate-950 overflow-y-auto lg:overflow-hidden">
+    <div className="fixed inset-0 z-[120] bg-slate-100 overflow-y-auto lg:overflow-hidden">
       <EditShell
         title={name}
         onTitle={(v) => { record(); setName(v); }}
@@ -495,21 +495,21 @@ export default function EmailEditScreen({
 
 function Head({ icon, title, sub, right }: { icon: React.ReactNode; title: string; sub: string; right?: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-3 pb-4 border-b border-white/10">
-      <span className="w-10 h-10 rounded-xl bg-violet-500/15 text-violet-200 flex items-center justify-center shrink-0">{icon}</span>
-      <div className="min-w-0 flex-1"><b className="block text-[15px] text-white truncate">{title}</b><span className="block text-[11.5px] text-white/50 truncate">{sub}</span></div>
+    <div className="flex items-center gap-3 pb-4 border-b border-slate-200">
+      <span className="w-10 h-10 rounded-xl bg-violet-100 text-violet-800 flex items-center justify-center shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1"><b className="block text-[15px] text-slate-900 truncate">{title}</b><span className="block text-[11.5px] text-slate-500 truncate">{sub}</span></div>
       {right}
     </div>
   );
 }
 function IconBtn({ label, onClick, disabled, danger, children }: { label: string; onClick: () => void; disabled?: boolean; danger?: boolean; children: React.ReactNode }) {
-  return <button type="button" onClick={onClick} disabled={disabled} aria-label={label} title={label} className={`w-8 h-8 rounded-lg flex items-center justify-center disabled:opacity-30 ${danger ? 'text-rose-300 hover:bg-rose-500/15' : 'text-white/75 hover:bg-white/10'}`}>{children}</button>;
+  return <button type="button" onClick={onClick} disabled={disabled} aria-label={label} title={label} className={`w-8 h-8 rounded-lg flex items-center justify-center disabled:opacity-30 ${danger ? 'text-rose-700 hover:bg-rose-100' : 'text-slate-600 hover:bg-slate-100'}`}>{children}</button>;
 }
 function Counter({ value, max, onChange, placeholder }: { value: string; max: number; onChange: (v: string) => void; placeholder?: string }) {
   return (
     <div className="relative">
-      <input value={value} maxLength={max} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full h-11 pl-3.5 pr-16 rounded-xl bg-slate-950/60 border border-white/15 text-[13.5px] text-white placeholder-white/30 outline-none focus:border-violet-400/70" />
-      <em className="not-italic absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-white/40">{value.length} / {max}</em>
+      <input value={value} maxLength={max} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full h-11 pl-3.5 pr-16 rounded-xl bg-slate-100 border border-slate-300 text-[13.5px] text-slate-900 placeholder-slate-400 outline-none focus:border-violet-300" />
+      <em className="not-italic absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">{value.length} / {max}</em>
     </div>
   );
 }

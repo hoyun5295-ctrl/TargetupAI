@@ -1,13 +1,14 @@
-import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_TITLE, OUI_WRAP_NARROW } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
 // AI 자동 마케팅 (Continuous Operator) — 재설계 (2026-06-27)
-// 메인 = 런처(시작 방법 2×2 + 브리핑). 각 버튼이 화면을 연다.
-//   오늘의 추천(의사결정 카드·버리는 데이터 0) / 자연어 시작 / 시나리오 시작 / 세부설정.
-// 다크 slate 톤 + 단일 인디고 액센트. native dialog 0(ConfirmModal·useToast). 모델명 0.
+// ★ 2026-09-30 AI 존 대개편(설계서 §4-2): 첫 화면 = 승인할 제안(런처 2×2 → 명령 카드로 흡수).
+//   한 줄 입력 = 자연어 시작(스마트 기본값 + 목표 → 크레딧 확인 → 생성) · 다른 방법 = 시나리오 · 세부설정 · 자세히 쓰기.
+//   탭 = 승인할 제안 / 실행 중(`?tab=running` · 허브 "관리 →" 착지). 핸들러·저장 계약은 그대로.
+// native dialog 0(ConfirmModal·useToast). 모델명 0.
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
-import { ArrowLeft, Brain, RefreshCw, GitMerge, Loader2, Sparkles } from 'lucide-react';
+import { GitMerge, LayoutGrid, Loader2, PenLine, SlidersHorizontal, Sparkles } from 'lucide-react';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { zoneModule } from '../constants/ai-operator-modules';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
@@ -15,7 +16,7 @@ import {
   ContinuousOperator, OperatorProposal, ProposalVariant, BanditRecommendation,
   LearningSummary, AutoMarketingView, ProposalApproveSelection, AutoMarketingRoi,
 } from '../components/automarketing/types';
-import AutoMarketingLauncher from '../components/automarketing/AutoMarketingLauncher';
+import AutoMarketingRoiCard from '../components/automarketing/AutoMarketingRoiCard';
 import ProposalDecisionCard from '../components/automarketing/ProposalDecisionCard';
 import NaturalLanguageStart from '../components/automarketing/NaturalLanguageStart';
 import ScenarioStart, { ScenarioPick } from '../components/automarketing/ScenarioStart';
@@ -24,12 +25,10 @@ import MultiGoalModal from '../components/automarketing/MultiGoalModal';
 import OperatorsManageList from '../components/automarketing/OperatorsManageList';
 import DailyBriefCard, { DailyBrief, DailyBriefRecommendation } from '../components/automarketing/DailyBriefCard';
 
-const VIEW_TITLE: Record<AutoMarketingView, string> = {
-  launcher: 'AI 자동 마케팅',
-  recommendations: '오늘의 추천 마케팅',
-  natural: '자연어로 시작',
+/** 하위 보기의 머리 표시(제목은 메뉴 이름 한 벌 · 하위 위치만 "› …") */
+const VIEW_SUB: Partial<Record<AutoMarketingView, string>> = {
+  natural: '자세히 쓰기',
   scenario: '시나리오로 시작',
-  operators: '실행 중인 자동 마케팅',
 };
 
 const SMART_DEFAULTS: Partial<ContinuousOperator> = {
@@ -39,8 +38,12 @@ const SMART_DEFAULTS: Partial<ContinuousOperator> = {
 export default function ContinuousOperatorPage() {
   const navigate = useNavigate();
   const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [view, setView] = useState<AutoMarketingView>('launcher');
+  // ★ 2026-09-30: 첫 화면 = 승인할 제안. 실행 중 탭은 주소가 소유(허브 "관리 →" = ?tab=running)
+  const [view, setView] = useState<AutoMarketingView>(() => (searchParams.get('tab') === 'running' ? 'operators' : 'recommendations'));
+  const [line, setLine] = useState('');
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [operators, setOperators] = useState<ContinuousOperator[]>([]);
   const [proposals, setProposals] = useState<OperatorProposal[]>([]);
   const [proposalStatus, setProposalStatus] = useState<'pending' | 'all'>('pending');
@@ -103,6 +106,7 @@ export default function ContinuousOperatorPage() {
       // ROI는 부가 정보 — 오류 시 조용히 숨김
       if (roiData.success) setRoi(roiData.roi || null);
       if (!opRes.ok && opData.code === 'BETA_GATE') setError('본 기능은 요금제 가입 후 이용 가능합니다.');
+      setLoadedAt(new Date());
     } catch (e: any) {
       setError(e?.message || '조회 중 오류');
     } finally {
@@ -111,6 +115,16 @@ export default function ContinuousOperatorPage() {
   };
 
   useEffect(() => { loadAll(); }, [proposalStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 탭 ↔ 주소: 실행 중이면 ?tab=running, 그 밖은 비움(뒤로가기가 탭을 되돌리지 않게 replace)
+  useEffect(() => {
+    const want = view === 'operators' ? 'running' : null;
+    if (searchParams.get('tab') !== want) {
+      const next = new URLSearchParams(searchParams);
+      if (want) next.set('tab', want); else next.delete('tab');
+      setSearchParams(next, { replace: true });
+    }
+  }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 추천 화면 진입 시 featured 제안의 변형(Bandit) 자동 로드
   useEffect(() => { if (featuredId) loadVariants(featuredId); }, [featuredId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -189,6 +203,7 @@ export default function ContinuousOperatorPage() {
         return;
       }
       toast.success('자동 마케팅이 시작되었습니다.');
+      setLine('');
       // ★ 2026-08-04 계약 필수화 — 등록 1회 AI 매핑으로 축이 고정됐으면 즉시 알린다.
       //   사용자 몰래 고정되는 상태를 만들지 않는다(수정 화면에서 언제든 바꿀 수 있다).
       if (data.appliedSegment?.label) {
@@ -377,83 +392,82 @@ export default function ContinuousOperatorPage() {
     navigate('/ai-journeys');
   };
 
-  const goLauncher = () => setView('launcher');
-  const headerBack = () => (view === 'launcher' ? goBackOr(navigate, '/ai-operator') : goLauncher());
+  const goHome = () => setView('recommendations');
+  const headerBack = () => (view === 'natural' || view === 'scenario' ? goHome() : goBackOr(navigate, '/ai-operator'));
+  const oneLine = zoneModule('auto-marketing').oneLine!;
+  const scheduledCount = proposals.filter((p) => p.status === 'scheduled').length;
+  const stampText = loadedAt ? `${loadedAt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })} 기준 · 다시 읽기` : '다시 읽기';
+
+  const tabId = view === 'operators' ? 'running' : 'pending';
+  const subView = view === 'natural' || view === 'scenario';
 
   return (
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-      {/* 헤더 */}
-      <div className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_NARROW} ${OUI_HEADER_ROW}`}>
-          <button onClick={headerBack} className={OUI_BACK} aria-label="뒤로">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-indigo-400 to-violet-500`}>
-            <Brain className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className={`${OUI_TITLE} truncate`}>{VIEW_TITLE[view]}</h1>
-            </div>
-          </div>
-          <div className="ml-auto flex items-center gap-1.5 shrink-0">
-            {view === 'launcher' && (
-              <button onClick={() => setShowMultiGoal(true)} className="hidden sm:flex text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg items-center gap-1.5 transition-colors" title="여러 목표를 동시에 설정할 때 충돌을 분석">
-                <GitMerge className="w-3.5 h-3.5" />여러 목표 분석
-              </button>
-            )}
-            <button onClick={loadAll} className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors">
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">새로고침</span>
-            </button>
-          </div>
+    <ZoneFrame
+      moduleId="auto-marketing"
+      sub={VIEW_SUB[view] ?? null}
+      onBack={headerBack}
+      aux={{ label: '여러 목표 분석', icon: GitMerge, onClick: () => setShowMultiGoal(true) }}
+      tabs={[
+        { id: 'pending', label: '승인할 제안', count: pendingCount || null },
+        { id: 'running', label: '실행 중', count: activeCount || null },
+      ]}
+      activeTab={subView ? undefined : tabId}
+      onSelectTab={(id) => setView(id === 'running' ? 'operators' : 'recommendations')}
+      command={{
+        line: {
+          value: line,
+          onChange: setLine,
+          onSubmit: () => handleNaturalSubmit(line.trim(), null),
+          placeholder: oneLine.placeholder,
+          verb: oneLine.verb,
+          icon: Sparkles,
+          busy: creating,
+        },
+        stats: [
+          { label: '발송 예약', value: scheduledCount },
+          { label: '30일 귀속 매출', value: roi ? (roi.hasCdpData ? `₩${Math.round(roi.revenue7dKrw || 0).toLocaleString('ko-KR')}` : '연동 후') : '—' },
+          { label: '학습', value: learningSummary ? `${learningSummary.memory.total}건` : '—' },
+        ],
+        alts: [
+          { label: '시나리오로 시작', icon: LayoutGrid, onClick: () => setView('scenario') },
+          { label: '세부설정으로 시작', icon: SlidersHorizontal, onClick: () => setEditing({ ...SMART_DEFAULTS, name: '', objective: '' }) },
+          { label: '자세히 쓰기', icon: PenLine, onClick: () => setView('natural') },
+        ],
+        stamp: { text: stampText, onRefresh: loadAll, loading },
+      }}
+      blocks={error ? [{ text: error, tone: 'rose' }] : []}
+      emphasis={view === 'recommendations' && dailyBrief ? (
+        <DailyBriefCard brief={dailyBrief} submitting={creating} onStart={handleBriefStart} />
+      ) : null}
+    >
+      {loading && !subView ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-12 flex justify-center text-slate-500">
+          <Loader2 className="w-5 h-5 animate-spin" />
         </div>
-      </div>
-
-      <div className="max-w-3xl mx-auto px-4 md:px-6 py-6">
-        {error && <div className="mb-5 bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-300">{error}</div>}
-
-        {loading && view !== 'natural' && view !== 'scenario' ? (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-12 flex justify-center text-white/50">
-            <Loader2 className="w-5 h-5 animate-spin" />
-          </div>
-        ) : (
-          <>
-            {view === 'launcher' && (
-              <AutoMarketingLauncher
-                pendingCount={pendingCount}
-                activeCount={activeCount}
-                roi={roi}
-                onOpenRecommendations={() => setView('recommendations')}
-                onOpenNatural={() => setView('natural')}
-                onOpenScenario={() => setView('scenario')}
-                onOpenAdvanced={() => setEditing({ ...SMART_DEFAULTS, name: '', objective: '' })}
-                onManage={() => setView('operators')}
-              />
-            )}
-
-            {view === 'recommendations' && (
-              <div className="space-y-4">
-                {dailyBrief && (
-                  <DailyBriefCard
-                    brief={dailyBrief}
-                    submitting={creating}
-                    onStart={handleBriefStart}
-                  />
-                )}
-                {learningSummary && learningSummary.memory.total > 0 && <LearningCard summary={learningSummary} />}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-white/50">상태</span>
-                  <select value={proposalStatus} onChange={(e) => setProposalStatus(e.target.value as 'pending' | 'all')} className="text-xs px-2 py-1 bg-white/5 border border-white/10 rounded text-white focus:outline-none focus:border-indigo-400/50">
-                    <option value="pending">대기 중</option>
-                    <option value="all">전체 보기</option>
-                  </select>
+      ) : (
+        <>
+          {view === 'recommendations' && (
+            <div className="grid xl:grid-cols-[minmax(0,1fr)_300px] gap-4 items-start">
+              <div className="min-w-0 space-y-3">
+                <div className="flex items-center gap-1.5">
+                  {([['pending', '대기', pendingCount], ['all', '전체', null]] as const).map(([k, label, n]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setProposalStatus(k)}
+                      className={`h-8 px-3 rounded-full border text-[13px] whitespace-nowrap transition-colors ${proposalStatus === k ? 'bg-indigo-600 border-indigo-600 text-white font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200'}`}
+                    >
+                      {label}{n != null && <span className={`ml-1 tabular-nums ${proposalStatus === k ? 'text-white/70' : 'text-slate-400'}`}>{n}</span>}
+                    </button>
+                  ))}
                 </div>
                 {proposals.length === 0 ? (
-                  <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
-                    {proposalStatus === 'pending' ? '오늘 받은 제안이 없습니다.' : '제안이 없습니다.'}
-                    <div className="text-xs text-white/40 mt-2">자동 마케팅이 활성 상태면 정해진 시간에 AI가 새 캠페인을 추천합니다.</div>
+                  <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
+                    <div className="text-[15px] font-semibold text-slate-900">{proposalStatus === 'pending' ? '승인할 제안이 없습니다' : '제안이 없습니다'}</div>
+                    <div className="text-[13px] text-slate-500 mt-1">자동 마케팅이 켜져 있으면 정해진 시간에 AI가 새 캠페인을 제안합니다. 지금 바로 시작하려면 위에 한 줄로 목표를 쓰세요.</div>
+                    {activeCount > 0 && (
+                      <button type="button" onClick={() => setView('operators')} className="mt-3 text-[13px] font-semibold text-indigo-600 hover:underline">실행 중 {activeCount} →</button>
+                    )}
                   </div>
                 ) : (
                   proposals.map((p) => (
@@ -472,13 +486,19 @@ export default function ContinuousOperatorPage() {
                   ))
                 )}
               </div>
-            )}
+              <aside className="space-y-4">
+                <AutoMarketingRoiCard roi={roi} />
+                {learningSummary && learningSummary.memory.total > 0 && <LearningCard summary={learningSummary} />}
+              </aside>
+            </div>
+          )}
 
-            {view === 'natural' && <NaturalLanguageStart submitting={creating} onSubmit={handleNaturalSubmit} />}
+          {view === 'natural' && <div className="max-w-3xl"><NaturalLanguageStart submitting={creating} onSubmit={handleNaturalSubmit} /></div>}
 
-            {view === 'scenario' && <ScenarioStart onSelect={handleScenarioSelect} />}
+          {view === 'scenario' && <div className="max-w-3xl"><ScenarioStart onSelect={handleScenarioSelect} /></div>}
 
-            {view === 'operators' && (
+          {view === 'operators' && (
+            <div className="max-w-3xl">
               <OperatorsManageList
                 operators={operators}
                 onRunNow={handleRunNow}
@@ -486,10 +506,10 @@ export default function ContinuousOperatorPage() {
                 onDelete={handleDelete}
                 onCreate={() => setEditing({ ...SMART_DEFAULTS, name: '', objective: '' })}
               />
-            )}
-          </>
-        )}
-      </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* 모달 */}
       {editing && (
@@ -510,7 +530,7 @@ export default function ContinuousOperatorPage() {
         onConfirm={() => { const c = pendingConfig; setPendingConfig(null); if (c) createOperator(c); }}
         onCancel={() => setPendingConfig(null)}
       />
-    </div>
+    </ZoneFrame>
   );
 }
 
@@ -520,37 +540,37 @@ function LearningCard({ summary }: { summary: LearningSummary }) {
     ? Math.round((summary.performance.approvedCount / summary.performance.totalProposals30d) * 100)
     : null;
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_32px_-16px_rgba(15,23,42,0.25)]">
       <div className="flex items-center gap-2 mb-3">
-        <Sparkles className="w-4 h-4 text-indigo-300" />
-        <span className="text-sm font-semibold text-white">AI 학습 현황</span>
+        <Sparkles className="w-4 h-4 text-indigo-700" />
+        <span className="text-[13px] font-semibold text-slate-900">AI 학습 현황</span>
         {summary.memory.lastLearnedAt && (
-          <span className="ml-auto text-[10px] text-white/40">마지막 학습 {new Date(summary.memory.lastLearnedAt).toLocaleDateString('ko-KR')}</span>
+          <span className="ml-auto text-[10px] text-slate-400">마지막 학습 {new Date(summary.memory.lastLearnedAt).toLocaleDateString('ko-KR')}</span>
         )}
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <Stat label="학습 누적" value={`${summary.memory.total}건`} tone="text-indigo-200" />
-        <Stat label="성공 패턴" value={`${summary.memory.successPatterns}건`} tone="text-emerald-200" />
-        <Stat label="30일 제안" value={`${summary.performance.totalProposals30d}건`} tone="text-cyan-200" />
-        <Stat label="승인률" value={approvalPct != null ? `${approvalPct}%` : '-'} tone="text-amber-200" />
+      <div className="grid grid-cols-2 gap-2">
+        <Stat label="학습 누적" value={`${summary.memory.total}건`} tone="text-indigo-800" />
+        <Stat label="성공 패턴" value={`${summary.memory.successPatterns}건`} tone="text-emerald-800" />
+        <Stat label="30일 제안" value={`${summary.performance.totalProposals30d}건`} tone="text-cyan-800" />
+        <Stat label="승인률" value={approvalPct != null ? `${approvalPct}%` : '-'} tone="text-amber-800" />
       </div>
       {summary.variantWinner && summary.variantWinner.sent > 0 && (
-        <div className="mt-3 flex items-center gap-2 text-[11px] text-white/70 p-2 bg-white/5 border border-white/10 rounded-lg">
-          <Sparkles className="w-3 h-3 text-indigo-300 flex-shrink-0" />
-          <span>지난 14일 가장 효과 좋은 변형 = <span className="font-semibold text-indigo-200">변형 {summary.variantWinner.variantLabel}</span>
-            <span className="text-white/40"> (클릭률 {(summary.variantWinner.ctr * 100).toFixed(1)}% · 발송 {summary.variantWinner.sent}건)</span></span>
+        <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-600 p-2 bg-white border border-slate-200 rounded-lg">
+          <Sparkles className="w-3 h-3 text-indigo-700 flex-shrink-0" />
+          <span>지난 14일 가장 효과 좋은 변형 = <span className="font-semibold text-indigo-800">변형 {summary.variantWinner.variantLabel}</span>
+            <span className="text-slate-400"> (클릭률 {(summary.variantWinner.ctr * 100).toFixed(1)}% · 발송 {summary.variantWinner.sent}건)</span></span>
         </div>
       )}
-      <div className="text-[10px] text-white/30 italic mt-2">Data source: 회사별 누적 학습 · 최근 30일 제안</div>
+      <div className="text-[10px] text-slate-400 italic mt-2">Data source: 회사별 누적 학습 · 최근 30일 제안</div>
     </div>
   );
 }
 
 function Stat({ label, value, tone }: { label: string; value: string; tone: string }) {
   return (
-    <div className="p-2.5 bg-white/5 rounded-lg">
-      <div className="text-[10px] text-white/40">{label}</div>
-      <div className={`text-base font-bold font-mono tabular-nums ${tone}`}>{value}</div>
+    <div className="p-2.5 bg-slate-50 rounded-lg">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className={`text-[15px] font-bold tabular-nums ${tone}`}>{value}</div>
     </div>
   );
 }

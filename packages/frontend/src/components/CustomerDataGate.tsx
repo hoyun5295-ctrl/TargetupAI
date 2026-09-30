@@ -67,20 +67,20 @@ const LEAD = 'AI가 정확한 문안과 타겟을 만들려면 고객 데이터�
 export function CustomerDataRequiredBanner({ className = '' }: { className?: string }) {
   const navigate = useNavigate();
   return (
-    <div className={`flex items-start gap-3 rounded-xl border border-amber-400/25 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent px-4 py-3 ${className}`}>
-      <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0">
-        <Database className="w-4 h-4 text-amber-300" />
+    <div className={`flex items-start gap-3 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 via-amber-50 to-transparent px-4 py-3 ${className}`}>
+      <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+        <Database className="w-4 h-4 text-amber-700" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-medium text-amber-100">고객 데이터가 없어요</p>
-        <p className="text-[12px] text-amber-100/70 leading-relaxed mt-0.5">
+        <p className="text-[13px] font-medium text-amber-900">고객 데이터가 없어요</p>
+        <p className="text-[12px] text-amber-900 leading-relaxed mt-0.5">
           싱크에이전트 연동 또는 직접 업로드로 고객 데이터를 먼저 올리면 문안·타겟추출이 정확해집니다.
         </p>
       </div>
       <button
         type="button"
         onClick={() => navigate('/dashboard?upload=1')}
-        className="shrink-0 self-center inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 text-[12px] font-semibold transition-colors"
+        className="shrink-0 self-center inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-100 text-amber-900 text-[12px] font-semibold transition-colors"
       >
         올리러 가기 <ArrowRight className="w-3.5 h-3.5" />
       </button>
@@ -110,86 +110,86 @@ export function CustomerDataRequiredModal({ open, onClose }: { open: boolean; on
       className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
     >
       <div
-        className={`relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl transition-all duration-200 ${shown ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+        className={`relative w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl transition-all duration-200 ${shown ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
         {/* 상단 그라데이션 글로우 */}
-        <div className="pointer-events-none absolute -top-24 left-1/2 h-48 w-48 -translate-x-1/2 rounded-full bg-violet-500/20 blur-3xl" />
+        <div className="pointer-events-none absolute -top-24 left-1/2 h-48 w-48 -translate-x-1/2 rounded-full bg-violet-100 blur-3xl" />
 
         {/* 헤더 */}
-        <div className="relative flex items-start justify-between gap-3 p-5 border-b border-white/10">
+        <div className="relative flex items-start justify-between gap-3 p-5 border-b border-slate-200">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/30">
               <Database className="w-6 h-6 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-1.5 text-[10px] font-semibold tracking-wider text-violet-300/80 uppercase">
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold tracking-wider text-violet-700 uppercase">
                 <Sparkles className="w-3 h-3" /> AI 문안 · 타겟추출
               </div>
-              <h3 className="text-base font-semibold text-white mt-0.5">{TITLE}</h3>
+              <h3 className="text-base font-semibold text-slate-900 mt-0.5">{TITLE}</h3>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors" aria-label="닫기">
-            <X className="w-4 h-4 text-white/50" />
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" aria-label="닫기">
+            <X className="w-4 h-4 text-slate-500" />
           </button>
         </div>
 
         {/* 본문 */}
         <div className="relative p-5 space-y-3">
-          <p className="text-sm text-white/75 leading-relaxed">{LEAD}</p>
+          <p className="text-sm text-slate-600 leading-relaxed">{LEAD}</p>
 
           {/* 직접 업로드 — 바로 실행 */}
           <button
             type="button"
             onClick={() => { onClose(); navigate('/dashboard?upload=1'); }}
-            className="group w-full text-left rounded-xl border border-emerald-400/25 bg-emerald-500/5 hover:bg-emerald-500/10 p-4 transition-colors"
+            className="group w-full text-left rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-50 p-4 transition-colors"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center shrink-0">
-                <Upload className="w-5 h-5 text-emerald-300" />
+              <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                <Upload className="w-5 h-5 text-emerald-700" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-white">엑셀·CSV 직접 업로드</p>
-                <p className="text-[12px] text-white/55 mt-0.5">고객 관리에서 파일로 바로 올리기 (가장 빠른 방법)</p>
+                <p className="text-sm font-semibold text-slate-900">엑셀·CSV 직접 업로드</p>
+                <p className="text-[12px] text-slate-500 mt-0.5">고객 관리에서 파일로 바로 올리기 (가장 빠른 방법)</p>
               </div>
-              <span className="shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-200 group-hover:gap-1.5 transition-all">
+              <span className="shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-800 group-hover:gap-1.5 transition-all">
                 올리러 가기 <ArrowRight className="w-4 h-4" />
               </span>
             </div>
           </button>
 
           {/* 싱크에이전트 — 운영자 배포라 안내 */}
-          <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-4">
+          <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center shrink-0">
-                <RefreshCw className="w-5 h-5 text-cyan-300" />
+              <div className="w-10 h-10 rounded-lg bg-cyan-100 flex items-center justify-center shrink-0">
+                <RefreshCw className="w-5 h-5 text-cyan-700" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-white">회사 DB 자동 연동 (싱크에이전트)</p>
-                <p className="text-[12px] text-white/55 mt-0.5">회사 DB를 주기적으로 자동 동기화. 한줄로 담당자에게 문의해 주세요.</p>
+                <p className="text-sm font-semibold text-slate-900">회사 DB 자동 연동 (싱크에이전트)</p>
+                <p className="text-[12px] text-slate-500 mt-0.5">회사 DB를 주기적으로 자동 동기화. 한줄로 담당자에게 문의해 주세요.</p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 pt-1 text-[11px] text-white/40">
+          <div className="flex items-center gap-1.5 pt-1 text-[11px] text-slate-400">
             <Users className="w-3.5 h-3.5" />
             <span className="italic">Data source: customers (현재 등록 고객 0명)</span>
           </div>
         </div>
 
         {/* 액션 */}
-        <div className="relative flex items-center gap-2 p-5 border-t border-white/10 bg-slate-950/50">
+        <div className="relative flex items-center gap-2 p-5 border-t border-slate-200 bg-slate-100">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors"
+            className="flex-1 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-colors"
           >
             닫기
           </button>
           <button
             onClick={() => { onClose(); navigate('/dashboard?upload=1'); }}
-            className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white text-sm font-semibold shadow-lg shadow-violet-500/30 transition-colors inline-flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition-colors inline-flex items-center justify-center gap-2"
           >
             <Upload className="w-4 h-4" /> 고객 데이터 올리러 가기
           </button>

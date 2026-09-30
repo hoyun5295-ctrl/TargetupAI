@@ -1,5 +1,6 @@
-import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import ZoneEmphasis from '../components/zone/ZoneEmphasis';
+import { AI_MEMORY_TABS } from '../components/zone/zone-tabs';
 /**
  * AiUsagePage.tsx — D217+ AI 사용량 (Journey Builder 동급 8 화면)
  *
@@ -24,10 +25,8 @@ import OperatorAura from '../components/operator/OperatorAura';
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { goBackOr } from '../lib/scroll-restoration';
 import {
-  ArrowLeft, TrendingUp, TrendingDown, ChevronDown, ChevronUp, Loader2, RefreshCw, Sparkles,
+  TrendingUp, TrendingDown, ChevronDown, ChevronUp, Loader2, RefreshCw, Sparkles,
   Send, X, Bell, Layers, BarChart3, Activity, Database, Calendar, DollarSign, Info,
   Wallet, Gauge, AlertTriangle,
 } from 'lucide-react';
@@ -221,7 +220,6 @@ function buildModelDonut(distribution: ModelDistRow[], total: number) {
 // ════════════════════════════════════════════════════════════════════
 
 export default function AiUsagePage() {
-  const navigate = useNavigate();
   const toast = useToast();
 
   // 데이터
@@ -420,112 +418,68 @@ export default function AiUsagePage() {
   }, [daily]);
 
   const monthlyPercentDeltaClass = (delta: number | null) => {
-    if (delta === null) return 'text-white/40';
-    if (delta > 0) return 'text-amber-300';
-    if (delta < 0) return 'text-emerald-300';
-    return 'text-white/40';
+    if (delta === null) return 'text-slate-400';
+    if (delta > 0) return 'text-amber-700';
+    if (delta < 0) return 'text-emerald-700';
+    return 'text-slate-400';
   };
 
   return (
-    // ★ 2026-08-21 오퍼레이터 표면 단계(OUI): 작업면 = slate-950 단색 + 상단 아우라 1. 값은 utils/operator-ui.ts가 소유(0527 보라화 → 0627 slate 복귀 이력의 옛 주석 정정)
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-      {/* ───────── 1. sticky 헤더 — D222+ Phase 3 보라 톤 다운 ───────── */}
-      <div className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="AI Operator로 돌아가기">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-emerald-400 to-cyan-500`}>
-            <TrendingUp className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className={OUI_TITLE}>AI 사용량 + 비용 안전</h1>
+    <ZoneFrame
+      moduleId="ai-memory"
+      tabs={AI_MEMORY_TABS}
+      activeTab="usage"
+      command={{
+        stats: overview ? [
+          { label: '이번 달', value: `${overview.monthly_calls.toLocaleString()}회` },
+          ...(overview.monthly_limit !== null ? [{ label: '한도', value: `${overview.monthly_percent}%` }] : []),
+          { label: '일평균', value: `${overview.daily_avg.toLocaleString()}회` },
+        ] : [{ label: '이번 달', value: '—' }],
+        stamp: { text: '다시 읽기', onRefresh: reloadAll, loading: overviewLoading || forecastLoading },
+      }}
+      emphasis={
+        <ZoneEmphasis kind="ai" title="AI 자율 진단" meta="실시간">
+          {overviewLoading ? (
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              사용량 데이터 분석 중...
             </div>
-            <p className={OUI_SUBTITLE}>회사별 AI 호출 + 한도 + cache 효율 + 비용 예측</p>
+          ) : overview ? (
+            <p className="text-sm text-slate-800 leading-relaxed">{overview.top_insight}</p>
+          ) : (
+            <p className="text-sm text-slate-500">진단 정보를 불러올 수 없습니다.</p>
+          )}
+          {overview && overview.predicted_days_to_limit !== null && (
+            <div className="mt-2 text-[12px] text-slate-500">
+              한도 도달 예측 <strong className="text-amber-700">약 {overview.predicted_days_to_limit}일 후</strong>
+            </div>
+          )}
+          <div className="text-[10px] text-slate-400 italic mt-3">
+            Data source: ai_call_log + plans.ai_calls_per_month + cache 통계 (5분 TTL) + 지난달 같은 기간 대비 격차
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={reloadAll}
-              className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
-              aria-label="새로고침"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${overviewLoading || forecastLoading ? 'animate-spin' : ''}`} />
-              <span className="hidden md:inline">새로고침</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-6">
+        </ZoneEmphasis>
+      }
+    >
+      <div className="space-y-6">
         {/* DB 마이그레이션 안내 */}
         {migrationPending && (
-          <div className="p-4 bg-amber-500/10 border border-amber-400/30 rounded-xl flex items-start gap-3">
-            <Info className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" />
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+            <Info className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
-              <div className="text-sm font-semibold text-amber-100 mb-1">잠시 후 다시 시도해 주세요</div>
-              <div className="text-xs text-white/70 leading-relaxed">기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.</div>
+              <div className="text-sm font-semibold text-amber-900 mb-1">잠시 후 다시 시도해 주세요</div>
+              <div className="text-xs text-slate-600 leading-relaxed">기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.</div>
             </div>
           </div>
         )}
 
-        {/* ───────── 2. AI 자율 진단 카드 ───────── */}
-        <div className="p-5 bg-gradient-to-br from-emerald-500/20 via-teal-500/15 to-cyan-500/20 border border-emerald-400/30 rounded-2xl">
-          <div className="flex items-start gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/30">
-              <Sparkles className="w-6 h-6 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-base font-bold text-white">AI 자율 진단</h2>
-                <span className="text-[10px] bg-emerald-500/30 text-emerald-100 px-2 py-0.5 rounded-full font-medium">실시간</span>
-              </div>
-              {overviewLoading ? (
-                <div className="flex items-center gap-2 text-sm text-white/60">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  사용량 데이터 분석 중...
-                </div>
-              ) : overview ? (
-                <p className="text-sm text-white/90 leading-relaxed">{overview.top_insight}</p>
-              ) : (
-                <p className="text-sm text-white/50">진단 정보를 불러올 수 없습니다.</p>
-              )}
-              {overview && (
-                <div className="mt-3 flex flex-wrap gap-3 text-[11px]">
-                  <span className="text-white/60">
-                    이번 달 <strong className="text-white">{overview.monthly_calls.toLocaleString()}회</strong>
-                  </span>
-                  {overview.monthly_limit !== null && (
-                    <span className="text-white/60">
-                      한도 <strong className="text-white">{overview.monthly_percent}%</strong>
-                    </span>
-                  )}
-                  <span className="text-white/60">
-                    일평균 <strong className="text-white">{overview.daily_avg.toLocaleString()}회</strong>
-                  </span>
-                  {overview.predicted_days_to_limit !== null && (
-                    <span className="text-white/60">
-                      한도 도달 예측 <strong className="text-amber-300">약 {overview.predicted_days_to_limit}일 후</strong>
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="text-[10px] text-white/30 italic mt-3">
-            Data source: ai_call_log + plans.ai_calls_per_month + cache 통계 (5분 TTL) + 지난달 같은 기간 대비 격차
-          </div>
-        </div>
-
         {/* ───────── 3. 자연어 입력 + 빠른 시작 5 카드 ───────── */}
         <div className="space-y-3">
-          <div className="p-4 bg-gradient-to-br from-cyan-500/15 via-sky-500/10 to-indigo-500/15 border border-cyan-400/30 rounded-2xl">
+          <div className="p-4 bg-white border border-slate-200 rounded-2xl">
             <div className="flex items-center gap-2 mb-2">
-              <Sparkles className="w-4 h-4 text-cyan-300" />
-              <span className="text-sm font-semibold text-white">자연어로 사용량 데이터에 질문하기</span>
+              <Sparkles className="w-4 h-4 text-indigo-600" />
+              <span className="text-sm font-semibold text-slate-900">자연어로 사용량 데이터에 질문하기</span>
             </div>
-            <p className="text-[11px] text-white/60 mb-3">예: "이번 달 가장 비용이 많이 든 호출 출처는?" (Enter 키로 즉시 검색)</p>
+            <p className="text-[11px] text-slate-500 mb-3">예: "이번 달 가장 비용이 많이 든 호출 출처는?" (Enter 키로 즉시 검색)</p>
             <div className="flex gap-2">
               <input
                 ref={queryInputRef}
@@ -540,12 +494,12 @@ export default function AiUsagePage() {
                 placeholder="질문을 입력하고 Enter 키를 눌러주세요 (2~500자)"
                 maxLength={500}
                 disabled={naturalLoading}
-                className="flex-1 px-4 py-2.5 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 focus:ring-1 focus:ring-cyan-400/30 disabled:opacity-40"
+                className="flex-1 min-w-0 px-4 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 disabled:opacity-40"
               />
               <button
                 onClick={() => runNaturalSearch(naturalQuery)}
                 disabled={naturalLoading || naturalQuery.trim().length < 2}
-                className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-white text-sm rounded-lg font-medium disabled:opacity-40 flex items-center gap-1.5"
+                className="px-4 py-2.5 border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm rounded-lg font-medium disabled:opacity-40 flex items-center gap-1.5 shrink-0"
               >
                 {naturalLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                 질문
@@ -561,13 +515,13 @@ export default function AiUsagePage() {
                   key={card.id}
                   onClick={() => handleQuickStart(card)}
                   disabled={naturalLoading && !!card.query}
-                  className="p-3 bg-white/5 border border-white/10 hover:bg-white/[0.08] hover:border-white/20 rounded-xl text-left transition-all group disabled:opacity-50"
+                  className="p-3 bg-white border border-slate-200 hover:bg-slate-100 hover:border-slate-300 rounded-xl text-left transition-all group disabled:opacity-50"
                 >
                   <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-2 shadow-md group-hover:scale-110 transition-transform`}>
                     <Icon className="w-4 h-4 text-white" />
                   </div>
-                  <div className="text-xs font-semibold text-white mb-0.5 truncate">{card.label}</div>
-                  <div className="text-[10px] text-white/50 leading-snug line-clamp-2">{card.hint}</div>
+                  <div className="text-xs font-semibold text-slate-900 mb-0.5 truncate">{card.label}</div>
+                  <div className="text-[10px] text-slate-500 leading-snug line-clamp-2">{card.hint}</div>
                 </button>
               );
             })}
@@ -576,31 +530,31 @@ export default function AiUsagePage() {
 
         {/* ───────── 자연어 검색 결과 ───────── */}
         {naturalResult && (
-          <div className="p-5 bg-gradient-to-br from-indigo-500/15 via-cyan-500/10 to-sky-500/15 border border-indigo-400/30 rounded-2xl space-y-3">
+          <div className="p-5 bg-gradient-to-br from-indigo-50 via-cyan-50 to-sky-50 border border-indigo-200 rounded-2xl space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] text-white/40 mb-1">질문</div>
-                <div className="text-sm text-white/90 italic">"{naturalResult.query}"</div>
+                <div className="text-[10px] text-slate-400 mb-1">질문</div>
+                <div className="text-sm text-slate-800 italic">"{naturalResult.query}"</div>
               </div>
-              <button onClick={() => setNaturalResult(null)} className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/10" aria-label="결과 닫기">
+              <button onClick={() => setNaturalResult(null)} className="p-1.5 rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100" aria-label="결과 닫기">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            <div className="pt-3 border-t border-white/10">
-              <div className="text-[10px] text-cyan-300 mb-1.5 flex items-center gap-1">
+            <div className="pt-3 border-t border-slate-200">
+              <div className="text-[10px] text-cyan-700 mb-1.5 flex items-center gap-1">
                 <Sparkles className="w-3 h-3" />
                 AI 답변
               </div>
               {naturalLoading ? (
-                <div className="flex items-center gap-2 text-sm text-white/60">
+                <div className="flex items-center gap-2 text-sm text-slate-500">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   사용량 데이터를 분석하여 답변 생성 중...
                 </div>
               ) : (
-                <div className="text-sm text-white whitespace-pre-wrap leading-relaxed">{naturalResult.answer}</div>
+                <div className="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">{naturalResult.answer}</div>
               )}
             </div>
-            <div className="text-[10px] text-white/30 italic">
+            <div className="text-[10px] text-slate-400 italic">
               Data source: ai_call_log 30일 + cache 통계 + 모델 추상 분포 (시스템 프롬프트 자동 포함)
             </div>
           </div>
@@ -616,7 +570,7 @@ export default function AiUsagePage() {
             gradient="from-cyan-400 to-sky-500"
             footer={overview && overview.prev_month_delta_percent !== null
               ? <DeltaChip delta={overview.prev_month_delta_percent} />
-              : <span className="text-[10px] text-white/40">지난달 같은 기간 데이터 없음</span>}
+              : <span className="text-[10px] text-slate-400">지난달 같은 기간 데이터 없음</span>}
           />
           <MetricCard
             icon={Gauge}
@@ -625,9 +579,9 @@ export default function AiUsagePage() {
             unit={overview?.monthly_limit !== null ? '%' : ''}
             gradient={overview && overview.monthly_percent >= 80 ? 'from-rose-400 to-pink-500' : 'from-emerald-400 to-teal-500'}
             footer={overview?.monthly_limit === null
-              ? <span className="text-[10px] text-emerald-300">무제한 요금제</span>
+              ? <span className="text-[10px] text-emerald-700">무제한 요금제</span>
               : overview && (
-                <span className="text-[10px] text-white/60">
+                <span className="text-[10px] text-slate-500">
                   / {overview.monthly_limit?.toLocaleString()}회
                 </span>
               )}
@@ -639,7 +593,7 @@ export default function AiUsagePage() {
             unit="%"
             gradient="from-emerald-400 to-teal-500"
             footer={overview && (
-              <span className="text-[10px] text-white/60">
+              <span className="text-[10px] text-slate-500">
                 hit {overview.cache_hit.toLocaleString()} / miss {overview.cache_miss.toLocaleString()}
               </span>
             )}
@@ -651,8 +605,8 @@ export default function AiUsagePage() {
             unit="회"
             gradient="from-violet-400 to-purple-500"
             footer={overview?.predicted_days_to_limit !== null && overview
-              ? <span className="text-[10px] text-amber-300">한도 도달 {overview.predicted_days_to_limit}일 후 예측</span>
-              : <span className="text-[10px] text-white/40">직전 30일 평균</span>}
+              ? <span className="text-[10px] text-amber-700">한도 도달 {overview.predicted_days_to_limit}일 후 예측</span>
+              : <span className="text-[10px] text-slate-400">직전 30일 평균</span>}
           />
           <MetricCard
             icon={Layers}
@@ -660,21 +614,21 @@ export default function AiUsagePage() {
             value={overview ? overview.batch_calls.toLocaleString() : '—'}
             unit="건"
             gradient="from-amber-400 to-orange-500"
-            footer={<span className="text-[10px] text-white/60">직전 30일 일괄 처리 (50% 절감)</span>}
+            footer={<span className="text-[10px] text-slate-500">직전 30일 일괄 처리 (50% 절감)</span>}
           />
         </div>
 
         {/* ───────── 5. AI 비용 예측 라인 차트 ───────── */}
-        <div className="p-5 bg-white/5 border border-white/10 rounded-2xl">
+        <div className="p-5 bg-white border border-slate-200 rounded-2xl">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-cyan-300" />
-              <h3 className="text-sm font-semibold text-white">향후 30일 호출 예측 (선형 회귀)</h3>
+              <BarChart3 className="w-4 h-4 text-cyan-700" />
+              <h3 className="text-sm font-semibold text-slate-900">향후 30일 호출 예측 (선형 회귀)</h3>
             </div>
             {forecast && !forecast.no_data && (
-              <span className="text-[11px] text-white/50">
-                일평균 <strong className="text-white">{forecast.avg_daily_calls.toLocaleString()}회</strong>
-                <span className="ml-2">추세 <strong className={forecast.trend_slope > 0 ? 'text-amber-300' : forecast.trend_slope < 0 ? 'text-emerald-300' : 'text-white/60'}>
+              <span className="text-[11px] text-slate-500">
+                일평균 <strong className="text-slate-900">{forecast.avg_daily_calls.toLocaleString()}회</strong>
+                <span className="ml-2">추세 <strong className={forecast.trend_slope > 0 ? 'text-amber-700' : forecast.trend_slope < 0 ? 'text-emerald-700' : 'text-slate-500'}>
                   {forecast.trend_slope > 0 ? '+' : ''}{forecast.trend_slope}/일
                 </strong></span>
               </span>
@@ -685,7 +639,7 @@ export default function AiUsagePage() {
             monthlyLimit={overview?.monthly_limit || null}
             loading={forecastLoading}
           />
-          <div className="text-[10px] text-white/30 italic mt-3">
+          <div className="text-[10px] text-slate-400 italic mt-3">
             Data source: ai_call_log 직전 30일 일별 + 선형 회귀 (y = ax + b) 향후 30일 예측 + 일평균 한도 비교
           </div>
         </div>
@@ -698,26 +652,26 @@ export default function AiUsagePage() {
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
               else toast.info('비용 예측 차트를 위에서 확인하실 수 있습니다.');
             }}
-            className="p-4 bg-gradient-to-br from-sky-500/15 to-cyan-500/15 border border-sky-400/30 hover:border-sky-400/50 rounded-xl text-left transition-all group"
+            className="p-4 bg-gradient-to-br from-sky-50 to-cyan-50 border border-sky-200 hover:border-sky-300 rounded-xl text-left transition-all group"
           >
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-sky-400 to-cyan-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
               <TrendingUp className="w-5 h-5 text-white" />
             </div>
-            <div className="text-sm font-semibold text-white mb-1">비용 예측 보기</div>
-            <div className="text-[11px] text-white/60 leading-relaxed">
+            <div className="text-sm font-semibold text-slate-900 mb-1">비용 예측 보기</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
               향후 30일 호출 + 비용 예측 + 한도 도달 시점.
             </div>
           </button>
 
           <button
             onClick={() => setShowBatchGuide(true)}
-            className="p-4 bg-gradient-to-br from-violet-500/15 to-purple-500/15 border border-violet-400/30 hover:border-violet-400/50 rounded-xl text-left transition-all group"
+            className="p-4 bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-200 hover:border-violet-300 rounded-xl text-left transition-all group"
           >
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
               <Layers className="w-5 h-5 text-white" />
             </div>
-            <div className="text-sm font-semibold text-white mb-1">Batch 모드 가이드</div>
-            <div className="text-[11px] text-white/60 leading-relaxed">
+            <div className="text-sm font-semibold text-slate-900 mb-1">Batch 모드 가이드</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
               24시간 SLA + 50% 비용 절감. 언제 사용하면 좋은가요?
             </div>
           </button>
@@ -725,17 +679,17 @@ export default function AiUsagePage() {
           <button
             onClick={() => setShowThresholdModal(true)}
             disabled={!!migrationPending}
-            className="p-4 bg-gradient-to-br from-amber-500/15 to-orange-500/15 border border-amber-400/30 hover:border-amber-400/50 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
+            className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 hover:border-amber-300 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
               <Bell className="w-5 h-5 text-white" />
             </div>
-            <div className="text-sm font-semibold text-white mb-1">한도 알림 설정</div>
-            <div className="text-[11px] text-white/60 leading-relaxed">
+            <div className="text-sm font-semibold text-slate-900 mb-1">한도 알림 설정</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
               50% / 80% / 95% 임계값 + 이메일/SMS/앱 알림 채널.
             </div>
             {overview?.threshold_config?.enabled && !migrationPending && (
-              <div className="text-[10px] text-emerald-300 mt-1.5">
+              <div className="text-[10px] text-emerald-700 mt-1.5">
                 활성: {overview.threshold_config.threshold_percent}% / {(overview.threshold_config.channels || []).length}개 채널
               </div>
             )}
@@ -744,7 +698,7 @@ export default function AiUsagePage() {
               && (overview.threshold_config.channels || []).includes('inapp')
               && overview.monthly_limit !== null
               && overview.monthly_percent >= Number(overview.threshold_config.threshold_percent || 0) && (
-              <div className="text-[10px] text-amber-300 mt-1">
+              <div className="text-[10px] text-amber-700 mt-1">
                 이번 달 사용량이 알림 기준 {overview.threshold_config.threshold_percent}%에 도달했습니다
               </div>
             )}
@@ -752,32 +706,32 @@ export default function AiUsagePage() {
         </div>
 
         {/* ───────── 7. 자세히 분석 토글 ───────── */}
-        <div data-section="forecast" className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+        <div data-section="forecast" className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           <button
             onClick={() => setShowDetailedAnalysis((v) => !v)}
-            className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/[0.03] transition-colors"
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-white transition-colors"
           >
             <div className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-cyan-300" />
-              <span className="text-sm font-semibold text-white">자세히 분석</span>
-              <span className="text-[10px] text-white/40">AI 추론 분포 · 출처별 호출 · 일별 비용 · cache 효율</span>
+              <BarChart3 className="w-4 h-4 text-cyan-700" />
+              <span className="text-sm font-semibold text-slate-900">자세히 분석</span>
+              <span className="text-[10px] text-slate-400">AI 추론 분포 · 출처별 호출 · 일별 비용 · cache 효율</span>
             </div>
-            {showDetailedAnalysis ? <ChevronUp className="w-4 h-4 text-white/50" /> : <ChevronDown className="w-4 h-4 text-white/50" />}
+            {showDetailedAnalysis ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
           </button>
 
           {showDetailedAnalysis && (
-            <div className="px-5 pb-5 space-y-5 border-t border-white/5 pt-5">
+            <div className="px-5 pb-5 space-y-5 border-t border-slate-100 pt-5">
               {detailedLoading ? (
                 <div className="flex justify-center py-12">
-                  <Loader2 className="w-5 h-5 animate-spin text-white/40" />
+                  <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
                 </div>
               ) : (
                 <div className="grid md:grid-cols-2 gap-5">
                   {/* a. AI 추론 모드 도넛 */}
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-                    <div className="text-xs font-semibold text-white mb-3">AI 추론 모드 분포 (30일)</div>
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3">AI 추론 모드 분포 (30일)</div>
                     {modelTotal === 0 ? (
-                      <div className="text-center py-6 text-white/40 text-xs">데이터 부족</div>
+                      <div className="text-center py-6 text-slate-400 text-xs">데이터 부족</div>
                     ) : (
                       <div className="flex items-center gap-4">
                         <svg viewBox="0 0 200 200" className="w-32 h-32">
@@ -786,7 +740,7 @@ export default function AiUsagePage() {
                               <title>{d.label}: {d.count.toLocaleString()}회 ({(d.percent * 100).toFixed(1)}%)</title>
                             </path>
                           ))}
-                          <text x="100" y="100" textAnchor="middle" dominantBaseline="middle" className="fill-white" style={{ fontSize: '18px', fontWeight: 700 }}>
+                          <text x="100" y="100" textAnchor="middle" dominantBaseline="middle" className="fill-slate-900" style={{ fontSize: '18px', fontWeight: 700 }}>
                             {modelTotal.toLocaleString()}
                           </text>
                         </svg>
@@ -794,48 +748,48 @@ export default function AiUsagePage() {
                           {modelDonut.map((d) => (
                             <div key={d.modelType} className="flex items-center gap-2 text-[11px]">
                               <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: d.color }} />
-                              <span className="text-white/80 flex-1 truncate">{d.label}</span>
-                              <span className="text-white/60 font-mono">{d.count.toLocaleString()}</span>
+                              <span className="text-slate-700 flex-1 truncate">{d.label}</span>
+                              <span className="text-slate-500 font-mono">{d.count.toLocaleString()}</span>
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_call_log.model_type 추상 매핑</div>
+                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: ai_call_log.model_type 추상 매핑</div>
                   </div>
 
                   {/* b. source 상위 10 bar */}
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-                    <div className="text-xs font-semibold text-white mb-3">호출 출처 Top 10 (30일)</div>
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3">호출 출처 Top 10 (30일)</div>
                     {detailedSources.length === 0 ? (
-                      <div className="text-center py-6 text-white/40 text-xs">데이터 부족</div>
+                      <div className="text-center py-6 text-slate-400 text-xs">데이터 부족</div>
                     ) : (
                       <div className="space-y-1.5">
                         {(() => {
                           const max = Math.max(...detailedSources.map((s) => s.count), 1);
                           return detailedSources.map((s) => (
                             <div key={s.source} className="flex items-center gap-2 text-[11px]">
-                              <div className="w-24 text-white/70 truncate" title={s.source}>{s.source}</div>
-                              <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                              <div className="w-24 text-slate-600 truncate" title={s.source}>{s.source}</div>
+                              <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                 <div
                                   className="h-full bg-gradient-to-r from-cyan-400 to-sky-500"
                                   style={{ width: `${(s.count / max) * 100}%` }}
                                 />
                               </div>
-                              <span className="text-white/60 font-mono w-14 text-right">{s.count.toLocaleString()}</span>
+                              <span className="text-slate-500 font-mono w-14 text-right">{s.count.toLocaleString()}</span>
                             </div>
                           ));
                         })()}
                       </div>
                     )}
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_call_log.source GROUP BY</div>
+                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: ai_call_log.source GROUP BY</div>
                   </div>
 
                   {/* c. 일별 비용 area */}
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl md:col-span-2">
-                    <div className="text-xs font-semibold text-white mb-3">직전 30일 일별 비용 추이</div>
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl md:col-span-2">
+                    <div className="text-xs font-semibold text-slate-900 mb-3">직전 30일 일별 비용 추이</div>
                     {!dailyCosts ? (
-                      <div className="text-center py-6 text-white/40 text-xs">데이터 부족</div>
+                      <div className="text-center py-6 text-slate-400 text-xs">데이터 부족</div>
                     ) : (
                       <div className="flex items-end gap-1 h-32">
                         {dailyCosts.rows.map((d) => {
@@ -844,7 +798,7 @@ export default function AiUsagePage() {
                             <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group">
                               <div className="flex-1 w-full flex items-end">
                                 <div
-                                  className="w-full bg-gradient-to-t from-amber-500/60 to-orange-400 rounded-t-md hover:opacity-100 opacity-80 transition-opacity"
+                                  className="w-full bg-gradient-to-t from-amber-50 to-orange-400 rounded-t-md hover:opacity-100 opacity-80 transition-opacity"
                                   style={{ height: `${heightPercent}%`, minHeight: d.cost > 0 ? '2px' : '0' }}
                                   title={`${d.date}: ${d.cost.toLocaleString()}원 / ${d.count.toLocaleString()}회`}
                                 />
@@ -855,7 +809,7 @@ export default function AiUsagePage() {
                       </div>
                     )}
                     {dailyCosts && (
-                      <div className="flex justify-between text-[10px] text-white/40 mt-1">
+                      <div className="flex justify-between text-[10px] text-slate-400 mt-1">
                         <span>{dailyCosts.rows[0]?.date.slice(5)}</span>
                         <span className="font-mono">
                           총 {dailyCosts.rows.reduce((s, d) => s + d.cost, 0).toLocaleString()}원
@@ -865,7 +819,7 @@ export default function AiUsagePage() {
                         <span>{dailyCosts.rows[dailyCosts.rows.length - 1]?.date.slice(5)}</span>
                       </div>
                     )}
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_call_log.cost_won 일별 합계</div>
+                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: ai_call_log.cost_won 일별 합계</div>
                   </div>
                 </div>
               )}
@@ -874,7 +828,7 @@ export default function AiUsagePage() {
         </div>
 
         {/* ───────── 8. Source caption ───────── */}
-        <div className="text-center text-[10px] text-white/30 italic pt-4">
+        <div className="text-center text-[10px] text-slate-400 italic pt-4">
           Data source: ai_call_log (호출별 비용 + 모델 + source) + plans.ai_calls_per_month (월 한도) + ai_cache (5분 TTL) + ai_batch_jobs (Batch 처리)
           <br />
           AI 모델은 호출 의도에 따라 자동 선택됩니다. 추상 명칭으로 표시 (고급/표준/보조 추론 모드)
@@ -890,7 +844,7 @@ export default function AiUsagePage() {
         onSave={handleThresholdSave}
       />
       <BatchModeGuideModal open={showBatchGuide} onClose={() => setShowBatchGuide(false)} />
-    </div>
+    </ZoneFrame>
   );
 }
 
@@ -909,16 +863,16 @@ interface MetricCardProps {
 
 function MetricCard({ icon: Icon, label, value, unit, gradient, footer }: MetricCardProps) {
   return (
-    <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
+    <div className="p-4 bg-white border border-slate-200 rounded-xl">
       <div className="flex items-center gap-2 mb-2">
         <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${gradient} flex items-center justify-center flex-shrink-0`}>
           <Icon className="w-3.5 h-3.5 text-white" />
         </div>
-        <span className="text-[11px] text-white/60 font-medium">{label}</span>
+        <span className="text-[11px] text-slate-500 font-medium">{label}</span>
       </div>
-      <div className="text-2xl font-bold text-white">
+      <div className="text-2xl font-bold text-slate-900">
         {value}
-        {unit && <span className="text-sm text-white/40 font-normal ml-1">{unit}</span>}
+        {unit && <span className="text-sm text-slate-400 font-normal ml-1">{unit}</span>}
       </div>
       <div className="mt-1">{footer}</div>
     </div>
@@ -931,11 +885,11 @@ function MetricCard({ icon: Icon, label, value, unit, gradient, footer }: Metric
 
 function DeltaChip({ delta }: { delta: number }) {
   if (delta === 0) {
-    return <span className="text-[10px] text-white/40">지난달 같은 기간 대비 변동 없음</span>;
+    return <span className="text-[10px] text-slate-400">지난달 같은 기간 대비 변동 없음</span>;
   }
   const isUp = delta > 0;
   const Icon = isUp ? TrendingUp : TrendingDown;
-  const tone = isUp ? 'text-amber-300' : 'text-emerald-300';
+  const tone = isUp ? 'text-amber-700' : 'text-emerald-700';
   return (
     <span className={`text-[10px] ${tone} flex items-center gap-0.5`}>
       <Icon className="w-2.5 h-2.5" />

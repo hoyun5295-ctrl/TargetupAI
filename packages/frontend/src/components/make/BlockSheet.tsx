@@ -44,36 +44,36 @@ export default function BlockSheet({
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-[900] flex justify-center px-3 pointer-events-none">
-      <div className="mk-sheet-in pointer-events-auto w-full max-w-[520px] max-h-[62vh] flex flex-col rounded-t-2xl border border-white/15 border-b-0 bg-slate-900 shadow-[0_-20px_50px_-20px_rgba(0,0,0,0.8)]" role="dialog" aria-label={`${blockLabel(section)} 고치기`}>
-        <div className="flex justify-center pt-2"><span className="w-10 h-1 rounded-full bg-white/20" /></div>
+      <div className="mk-sheet-in pointer-events-auto w-full max-w-[520px] max-h-[62vh] flex flex-col rounded-t-2xl border border-slate-300 border-b-0 bg-white shadow-[0_-20px_50px_-20px_rgba(0,0,0,0.8)]" role="dialog" aria-label={`${blockLabel(section)} 고치기`}>
+        <div className="flex justify-center pt-2"><span className="w-10 h-1 rounded-full bg-slate-200" /></div>
         <div className="flex items-center justify-between px-5 pt-2 pb-3">
-          <b className="text-[16px] text-white">{blockLabel(section)} 고치기</b>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+          <b className="text-[16px] text-slate-900">{blockLabel(section)} 고치기</b>
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto mk-scroll px-5 pb-3">
           {isCta ? (
             <div className="space-y-4">
               <label className="block">
-                <span className="block text-[12.5px] font-semibold text-white/75 mb-1.5">버튼 글자</span>
+                <span className="block text-[12.5px] font-semibold text-slate-600 mb-1.5">버튼 글자</span>
                 <div className="relative">
                   <input value={b0.label} maxLength={CTA_LABEL_MAX} onChange={(e) => setB0({ label: e.target.value })} className={`${MK_INPUT} pr-16`} />
-                  <em className="not-italic absolute right-3 top-1/2 -translate-y-1/2 text-[11.5px] text-white/40">{b0.label.length} / {CTA_LABEL_MAX}</em>
+                  <em className="not-italic absolute right-3 top-1/2 -translate-y-1/2 text-[11.5px] text-slate-400">{b0.label.length} / {CTA_LABEL_MAX}</em>
                 </div>
               </label>
               <label className="block">
-                <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-white/75 mb-1.5">누르면 갈 주소<em className="not-italic text-[10.5px] font-bold text-amber-950 bg-amber-400 rounded px-1.5 py-px">필수</em></span>
-                <input ref={urlRef} value={b0.url} onChange={(e) => setB0({ url: e.target.value.trim() })} placeholder="https://" inputMode="url" className={`${MK_INPUT} ${!b0.url ? 'border-violet-400/70' : ''}`} />
+                <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-600 mb-1.5">누르면 갈 주소<em className="not-italic text-[10.5px] font-bold text-amber-950 bg-amber-400 rounded px-1.5 py-px">필수</em></span>
+                <input ref={urlRef} value={b0.url} onChange={(e) => setB0({ url: e.target.value.trim() })} placeholder="https://" inputMode="url" className={`${MK_INPUT} ${!b0.url ? 'border-violet-300' : ''}`} />
               </label>
               {suggestions.length > 0 && (
                 <div className="flex flex-wrap gap-2 -mt-2">
                   {suggestions.map((s) => (
-                    <button key={s.url} type="button" onClick={() => setB0({ url: s.url })} className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-white/15 bg-white/[0.05] text-[12px] text-white/80 hover:bg-white/10 max-w-full">
+                    <button key={s.url} type="button" onClick={() => setB0({ url: s.url })} className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-[12px] text-slate-700 hover:bg-slate-100 max-w-full">
                       {s.icon === 'home' ? <Globe className="w-3.5 h-3.5 shrink-0" /> : <RotateCcw className="w-3.5 h-3.5 shrink-0" />}<span className="truncate">{s.label}</span>
                     </button>
                   ))}
                 </div>
               )}
-              {buttons.length > 1 && <p className="text-[11.5px] text-white/45">버튼이 {buttons.length}개예요. 나머지는 [자세히 편집]에서 고칠 수 있어요.</p>}
+              {buttons.length > 1 && <p className="text-[11.5px] text-slate-400">버튼이 {buttons.length}개예요. 나머지는 [자세히 편집]에서 고칠 수 있어요.</p>}
             </div>
           ) : (
             <div className="mk-dark-editor">
@@ -81,9 +81,9 @@ export default function BlockSheet({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 px-5 py-3.5 border-t border-white/10">
-          {onAiRewrite && <button type="button" onClick={onAiRewrite} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-white/15 bg-white/[0.05] text-[12.5px] text-white/85 hover:bg-white/10"><Type className="w-4 h-4" />문구 다르게</button>}
-          <button type="button" onClick={onRemove} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-white/15 bg-white/[0.05] text-[12.5px] text-white/85 hover:bg-white/10"><Trash2 className="w-4 h-4" />빼기</button>
+        <div className="flex items-center gap-2 px-5 py-3.5 border-t border-slate-200">
+          {onAiRewrite && <button type="button" onClick={onAiRewrite} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-300 bg-white text-[12.5px] text-slate-700 hover:bg-slate-100"><Type className="w-4 h-4" />문구 다르게</button>}
+          <button type="button" onClick={onRemove} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-300 bg-white text-[12.5px] text-slate-700 hover:bg-slate-100"><Trash2 className="w-4 h-4" />빼기</button>
           <button type="button" onClick={onDone} disabled={saving} className={`${MK_BTN_PRIMARY} ml-auto`}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}저장</button>
         </div>
       </div>

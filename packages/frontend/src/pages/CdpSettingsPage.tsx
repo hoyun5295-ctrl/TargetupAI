@@ -1,5 +1,5 @@
-import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_PAGE_CENTER, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { Plus as ZPlus } from 'lucide-react';
 /**
  * CdpSettingsPage.tsx — D214+ (2026-05-24) 5번 메뉴 자사몰 연동 전면 재작성
  *
@@ -1010,70 +1010,58 @@ export default function CdpSettingsPage() {
 
   if (loading) {
     return (
-      <div className={OUI_PAGE_CENTER}>
-        <div className="text-white/50 flex items-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
+      <ZoneFrame moduleId="cdp">
+      <div className="py-24 flex justify-center">
+        <div className="text-slate-500 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
           자사몰 진단 데이터를 불러오는 중...
         </div>
       </div>
+      </ZoneFrame>
     );
   }
 
+  const showDashboard = !cdpLocked && CDP_DASHBOARD_V2;
   return (
-    <div className={OUI_PAGE}>
-      <OperatorAura />
+    <ZoneFrame
+      moduleId="cdp"
+      command={{
+        stats: showDashboard ? [
+          { label: '데이터 수신 중', value: integrationStatus.summary.receiving },
+          { label: '준비 중', value: integrationStatus.summary.preparing },
+          { label: '조치 필요', value: integrationStatus.summary.action },
+        ] : [{ label: '연동', value: isConnected ? '됨' : '안 됨' }],
+        primary: !cdpLocked ? { label: '몰 연결하기', icon: ZPlus, tone: 'indigo', onClick: () => document.getElementById('cdp-malls')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined,
+        alts: !cdpLocked && hasCdpData ? [{ label: '데이터 분석 · AI 진단', icon: Activity, onClick: () => setActiveModal('analytics') }] : undefined,
+        stamp: { text: '다시 읽기', onRefresh: loadAll, loading },
+      }}
+      blocks={error ? [{ text: error }] : []}
+    >
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
-
-      {/* 1. 상단 헤더 */}
-      {/* ★ D222+ Phase 2 (2026-05-27): 다크 → 보라 톤 다운 sticky 헤더 */}
-      <div className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW} flex-wrap`}>
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK}>
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-emerald-400 to-cyan-500`}>
-            <Database className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className={OUI_TITLE}>자사몰 연동 (CDP)</h1>
-            </div>
-            <p className={OUI_SUBTITLE}>카페24 · 네이버 · 메이크샵 · 고도몰 · 아임웹 · 자체 호스팅 · 싱크에이전트: 고객 데이터를 한 곳으로 모읍니다</p>
-          </div>
-          <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/10 transition-colors" title="새로고침">
-            <RefreshCw className={`w-4 h-4 text-white/60 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
-        {error && (
-          <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-6 text-amber-200">{error}</div>
-        )}
-
+      <div className="space-y-5">
         {/* 2. 요금제 게이팅 안내 */}
         {cdpLocked && (
-          <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-5 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-300 mt-0.5 shrink-0" />
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-700 mt-0.5 shrink-0" />
             <div>
-              <div className="font-bold text-amber-100 mb-1">CDP는 유료 요금제부터 이용 가능합니다</div>
-              <div className="text-sm text-amber-200">스타터 요금제 이상에서 자사몰 연동(SDK·webhook)이 모두 열립니다. 현재: {usage?.plan_name || '미가입'}.</div>
+              <div className="font-bold text-amber-900 mb-1">CDP는 유료 요금제부터 이용 가능합니다</div>
+              <div className="text-sm text-amber-800">스타터 요금제 이상에서 자사몰 연동(SDK·webhook)이 모두 열립니다. 현재: {usage?.plan_name || '미가입'}.</div>
             </div>
           </div>
         )}
 
         {/* 자사몰 연동 상태 안내 */}
         {!cdpLocked && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex items-start gap-3">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
               <Database className="w-5 h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="font-semibold text-white mb-1">{isConnected ? '자사몰이 연동되어 있습니다' : '어떤 자사몰이든 연동해 드립니다'}</div>
-              <div className="text-sm text-white/70 leading-relaxed">
+              <div className="font-semibold text-slate-900 mb-1">{isConnected ? '자사몰이 연동되어 있습니다' : '어떤 자사몰이든 연동해 드립니다'}</div>
+              <div className="text-sm text-slate-600 leading-relaxed">
                 {isConnected
-                  ? <>연동됨: <span className="text-emerald-200">{connectedProviders.length > 0 ? connectedProviders.join(' · ') : 'CDP 키 발급'}</span>. 아래에서 자사몰을 선택해 연동을 추가하거나 관리할 수 있습니다.</>
-                  : <>아래에서 사용 중인 자사몰을 선택하면 바로 연동을 시작합니다. 표준 SDK·webhook로 대부분 연결되고, 특수한 환경이면 <span className="text-violet-200">고객센터</span>로 문의 주세요.</>}
+                  ? <>연동됨: <span className="text-emerald-800">{connectedProviders.length > 0 ? connectedProviders.join(' · ') : 'CDP 키 발급'}</span>. 아래에서 자사몰을 선택해 연동을 추가하거나 관리할 수 있습니다.</>
+                  : <>아래에서 사용 중인 자사몰을 선택하면 바로 연동을 시작합니다. 표준 SDK·webhook로 대부분 연결되고, 특수한 환경이면 <span className="text-violet-800">고객센터</span>로 문의 주세요.</>}
               </div>
             </div>
           </div>
@@ -1082,6 +1070,7 @@ export default function CdpSettingsPage() {
         {/* ★ 2026-08-10 Phase 2 — 연동 현황판(1층). 실측 상태 배지 + 요약 3지표.
             판정 근거 = install-status bySource(Phase 0) + 몰별 connected. 플래그 off면 아래 옛 그리드가 그대로 뜬다. */}
         {!cdpLocked && CDP_DASHBOARD_V2 && (
+          <div id="cdp-malls" className="scroll-mt-28">
           <CdpIntegrationDashboard
             providers={providerCards
               .filter((p) => p.modalKey)
@@ -1090,9 +1079,10 @@ export default function CdpSettingsPage() {
             summary={integrationStatus.summary}
             brand={providerBrand}
             onOpen={(key) => setConnectProvider(key)}
-            onRefresh={loadAll}
             loading={loading}
+            hideSummary
           />
+          </div>
         )}
 
         {/* 자사몰 선택 — 좌측 대형 자체 호스팅(그 외 모든 몰 webhook 흡수) + 우측 2×3 그리드 */}
@@ -1103,21 +1093,21 @@ export default function CdpSettingsPage() {
               type="button"
               onClick={() => setConnectProvider('custom')}
               title="자체 호스팅 · 그 외 모든 자사몰"
-              className={`lg:col-span-2 group flex flex-col justify-between p-5 rounded-2xl border text-left transition-all duration-200 ${customInfo?.hasSecret ? 'bg-emerald-500/[0.06] border-emerald-400/25' : 'bg-white/[0.04] border-white/10'} cursor-pointer hover:border-violet-400/40 hover:bg-white/[0.07] hover:-translate-y-0.5`}
+              className={`lg:col-span-2 group flex flex-col justify-between p-5 rounded-2xl border text-left transition-all duration-200 ${customInfo?.hasSecret ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'} cursor-pointer hover:border-violet-300 hover:bg-slate-100 hover:-translate-y-0.5`}
             >
               <div className="flex items-start gap-3.5">
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 text-white shadow-lg bg-gradient-to-br from-violet-500 to-fuchsia-600 shadow-violet-500/25">
                   <Database className="w-6 h-6" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-base font-semibold text-white">자체 호스팅 · 그 외 모든 몰</div>
-                  <div className="text-[12px] text-white/55 mt-1 leading-relaxed">직접 개발한 자사몰은 물론 <span className="text-white/80">Shopify · WooCommerce · 식스샵</span> 등 목록에 없는 모든 몰을 webhook 한 줄로 연결합니다.</div>
+                  <div className="text-base font-semibold text-slate-900">자체 호스팅 · 그 외 모든 몰</div>
+                  <div className="text-[12px] text-slate-500 mt-1 leading-relaxed">직접 개발한 자사몰은 물론 <span className="text-slate-700">Shopify · WooCommerce · 식스샵</span> 등 목록에 없는 모든 몰을 webhook 한 줄로 연결합니다.</div>
                 </div>
                 {customInfo?.hasSecret
-                  ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연동됨</span>
-                  : <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-violet-500/15 text-violet-200 border border-violet-400/25 font-medium">연동하기</span>}
+                  ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연동됨</span>
+                  : <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200 font-medium">연동하기</span>}
               </div>
-              <div className="mt-4 flex items-center gap-1.5 text-[11px] text-white/40">
+              <div className="mt-4 flex items-center gap-1.5 text-[11px] text-slate-400">
                 <Server className="w-3.5 h-3.5" /> Secret 발급 → SDK/webhook 설정 → 수신 검증
               </div>
             </button>
@@ -1141,20 +1131,20 @@ export default function CdpSettingsPage() {
                     disabled={!clickable}
                     onClick={clickable ? () => setConnectProvider(p.modalKey as ProviderKey) : undefined}
                     title={p.name}
-                    className={`group flex items-center gap-3.5 p-4 rounded-2xl border text-left transition-all duration-200 ${connected ? 'bg-emerald-500/[0.06] border-emerald-400/25' : 'bg-white/[0.04] border-white/10'} ${clickable ? 'cursor-pointer hover:border-violet-400/40 hover:bg-white/[0.07] hover:-translate-y-0.5' : 'opacity-45 cursor-default'}`}
+                    className={`group flex items-center gap-3.5 p-4 rounded-2xl border text-left transition-all duration-200 ${connected ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'} ${clickable ? 'cursor-pointer hover:border-violet-300 hover:bg-slate-100 hover:-translate-y-0.5' : 'opacity-45 cursor-default'}`}
                   >
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-lg bg-gradient-to-br ${badge}`}>
                       <Icon className="w-5 h-5" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-white truncate">{p.name}</div>
-                      <div className="text-[11px] text-white/45 truncate mt-0.5">{p.desc}</div>
+                      <div className="text-sm font-semibold text-slate-900 truncate">{p.name}</div>
+                      <div className="text-[11px] text-slate-400 truncate mt-0.5">{p.desc}</div>
                     </div>
                     {!p.available
-                      ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-white/5 text-white/40 border border-white/10 font-medium">곧 출시</span>
+                      ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-white text-slate-400 border border-slate-200 font-medium">곧 출시</span>
                       : connected
-                        ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연동됨</span>
-                        : <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-violet-500/15 text-violet-200 border border-violet-400/25 font-medium">연동하기</span>}
+                        ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연동됨</span>
+                        : <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200 font-medium">연동하기</span>}
                   </button>
                 );
               })}
@@ -1164,35 +1154,35 @@ export default function CdpSettingsPage() {
 
         {/* 6. 요약 5 metric */}
         {diagnostics && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              <MetricBlock label="전체 고객" value={diagnostics.totalCustomers.toLocaleString()} color="text-blue-300" />
-              <MetricBlock label="자사몰 연결 고객" value={diagnostics.mappedLinks.toLocaleString()} sub={`연결률 ${formatPct(diagnostics.overallMappingRate)}`} color="text-cyan-300" />
-              <MetricBlock label="30일 이벤트" value={diagnostics.events30d.toLocaleString()} sub={`24h ${diagnostics.events24h.toLocaleString()}`} color="text-violet-300" />
-              <MetricBlock label="통합 고객" value={diagnostics.fusedCustomers.toLocaleString()} sub="매장·자사몰 양쪽 보유" color="text-emerald-300" />
-              <MetricBlock label="자사몰 전용 고객" value={diagnostics.cdpOnlyCustomers.toLocaleString()} sub="자사몰에서만 확인된 고객" color="text-amber-300" />
+              <MetricBlock label="전체 고객" value={diagnostics.totalCustomers.toLocaleString()} color="text-blue-700" />
+              <MetricBlock label="자사몰 연결 고객" value={diagnostics.mappedLinks.toLocaleString()} sub={`연결률 ${formatPct(diagnostics.overallMappingRate)}`} color="text-cyan-700" />
+              <MetricBlock label="30일 이벤트" value={diagnostics.events30d.toLocaleString()} sub={`24h ${diagnostics.events24h.toLocaleString()}`} color="text-violet-700" />
+              <MetricBlock label="통합 고객" value={diagnostics.fusedCustomers.toLocaleString()} sub="매장·자사몰 양쪽 보유" color="text-emerald-700" />
+              <MetricBlock label="자사몰 전용 고객" value={diagnostics.cdpOnlyCustomers.toLocaleString()} sub="자사몰에서만 확인된 고객" color="text-amber-700" />
             </div>
-            <div className="mt-2 text-[10px] text-white/40">{diagnostics.source}</div>
+            <div className="mt-2 text-[10px] text-slate-400">{diagnostics.source}</div>
           </div>
         )}
 
         {/* 요약 칩 — 연동 데이터 있을 때만 노출 (미연동이면 숨김) */}
         {!cdpLocked && hasCdpData && (
           <div className="flex gap-2 flex-wrap">
-            <button onClick={() => setActiveModal('analytics')} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[12px] text-white/80 transition-colors">
-              <Activity className="w-3.5 h-3.5 text-cyan-300" /> 데이터 분석 · AI 진단
+            <button onClick={() => setActiveModal('analytics')} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-[12px] text-slate-700 transition-colors">
+              <Activity className="w-3.5 h-3.5 text-cyan-700" /> 데이터 분석 · AI 진단
             </button>
             {/* 활성 고객 = 이름·전화가 보이는 목록이라 관리자에게만 진입점을 둔다(서버도 403). 담당자는 연동 상태까지만 본다. */}
             {isAdmin && (
-              <button onClick={() => setActiveModal('customers')} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[12px] text-white/80 transition-colors">
-                <Users className="w-3.5 h-3.5 text-violet-300" /> 활성 고객
+              <button onClick={() => setActiveModal('customers')} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-[12px] text-slate-700 transition-colors">
+                <Users className="w-3.5 h-3.5 text-violet-700" /> 활성 고객
               </button>
             )}
           </div>
         )}
 
         {/* 데이터 분석 · AI 진단 모달 (createPortal) */}
-        <CdpModal open={activeModal === 'analytics'} onClose={closeModal} title="데이터 분석 · AI 진단" icon={<Sparkles className="w-4 h-4 text-violet-300" />}>
+        <CdpModal open={activeModal === 'analytics'} onClose={closeModal} title="데이터 분석 · AI 진단" icon={<Sparkles className="w-4 h-4 text-violet-700" />}>
           {/* ★ 2026-08-10 Phase 5 — 차트·AI 진단 본문은 표시 전용이라 컴포넌트로 분리(상태는 props로만). */}
           <CdpAnalyticsPanels
             explanation={explanation}
@@ -1208,7 +1198,7 @@ export default function CdpSettingsPage() {
         </CdpModal>
 
         {/* 활성 고객 모달 (createPortal) */}
-        <CdpModal open={activeModal === 'customers'} onClose={closeModal} title="자사몰 활성 고객" icon={<Users className="w-4 h-4 text-cyan-300" />}>
+        <CdpModal open={activeModal === 'customers'} onClose={closeModal} title="자사몰 활성 고객" icon={<Users className="w-4 h-4 text-cyan-700" />}>
           <CdpActiveCustomersTable data={activeCustomers} />
         </CdpModal>
 
@@ -1217,11 +1207,11 @@ export default function CdpSettingsPage() {
           open={connectProvider !== null}
           onClose={closeModal}
           title={connectProvider ? PROVIDER_META[connectProvider].title : '자사몰 연동'}
-          icon={connectProvider === 'cafe24' ? <Store className="w-4 h-4 text-amber-300" /> : connectProvider === 'naver' ? <ShoppingCart className="w-4 h-4 text-emerald-300" /> : connectProvider === 'custom' ? <Database className="w-4 h-4 text-violet-300" /> : <Server className="w-4 h-4 text-indigo-300" />}
+          icon={connectProvider === 'cafe24' ? <Store className="w-4 h-4 text-amber-700" /> : connectProvider === 'naver' ? <ShoppingCart className="w-4 h-4 text-emerald-700" /> : connectProvider === 'custom' ? <Database className="w-4 h-4 text-violet-700" /> : <Server className="w-4 h-4 text-indigo-700" />}
         >
           <div className="space-y-4">
             {connectProvider && (
-              <div className="text-xs text-white/70 leading-relaxed bg-white/5 border border-white/10 rounded-lg p-3">
+              <div className="text-xs text-slate-600 leading-relaxed bg-white border border-slate-200 rounded-lg p-3">
                 {PROVIDER_META[connectProvider].note}
               </div>
             )}
@@ -1253,7 +1243,7 @@ export default function CdpSettingsPage() {
 
         {/* webhook 자사몰 — 탭. ★Phase 3: 검증 탭은 스테퍼 ③이 대신한다(플래그 on일 때 제외) */}
         {webhookProviderOpen && (
-          <div className="flex gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
+          <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1">
             {(CDP_DASHBOARD_V2
               ? ([['connect', '연결'], ['web', '웹'], ['app', '앱']] as const)
               : ([['connect', '연결'], ['web', '웹'], ['app', '앱'], ['verify', '검증']] as const)
@@ -1261,7 +1251,7 @@ export default function CdpSettingsPage() {
               <button
                 key={key}
                 onClick={() => setCustomTab(key)}
-                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${customTab === key ? 'bg-violet-500/40 text-white' : 'text-white/60 hover:bg-white/5'}`}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${customTab === key ? 'bg-violet-200 text-slate-900' : 'text-slate-500 hover:bg-white'}`}
               >
                 {label}
               </button>
@@ -1271,23 +1261,23 @@ export default function CdpSettingsPage() {
 
         {/* 자체 호스팅 — webhook 방식 (연결 탭) */}
         {webhookProviderOpen && customTab === 'connect' && (
-          <div id="section-custom" className="bg-white/5 border border-white/10 rounded-xl p-6">
+          <div id="section-custom" className="bg-white border border-slate-200 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-1">
-              <Server className="w-5 h-5 text-indigo-300" />
-              <h2 className="text-base font-bold text-white">자체 호스팅 자사몰 (Webhook + SDK)</h2>
-              <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium">권장</span>
+              <Server className="w-5 h-5 text-indigo-700" />
+              <h2 className="text-base font-bold text-slate-900">자체 호스팅 자사몰 (Webhook + SDK)</h2>
+              <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">권장</span>
             </div>
-            <div className="text-xs text-white/50 mb-4">
+            <div className="text-xs text-slate-500 mb-4">
               자체 서버 자사몰 (Next.js / Node / Django / PHP / Rails 등) → webhook_secret 발급 → 표준 endpoint → 한줄로AI 자동 동기화.
             </div>
 
             {customIssuedSecret && (
-              <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-5 mb-4">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 mb-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <Check className="w-5 h-5 text-emerald-300" />
-                  <h3 className="text-sm font-bold text-emerald-100">webhook_secret 발급 완료</h3>
+                  <Check className="w-5 h-5 text-emerald-700" />
+                  <h3 className="text-sm font-bold text-emerald-900">webhook_secret 발급 완료</h3>
                 </div>
-                <div className="text-xs text-emerald-200 mb-4 leading-relaxed">
+                <div className="text-xs text-emerald-800 mb-4 leading-relaxed">
                   ★ <strong>이 화면을 닫으면 webhook_secret을 다시 볼 수 없습니다.</strong> 자사몰 서버 환경변수에 지금 바로 저장해 주세요.
                 </div>
                 <div className="space-y-3">
@@ -1295,7 +1285,7 @@ export default function CdpSettingsPage() {
                   <SecretRow label="Webhook URL" value={customIssuedSecret.webhook_url} copied={copyStatusCustom === 'url'} onCopy={() => copyCustom(customIssuedSecret.webhook_url, 'url')} />
                   <SecretRow label="Company ID" value={customIssuedSecret.company_id} copied={copyStatusCustom === 'companyId'} onCopy={() => copyCustom(customIssuedSecret.company_id, 'companyId')} />
                 </div>
-                <button onClick={() => setCustomIssuedSecret(null)} className="mt-4 px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg">
+                <button onClick={() => setCustomIssuedSecret(null)} className="mt-4 px-4 py-2 bg-emerald-100 border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-sm font-medium rounded-lg">
                   확인 · secret 저장 완료
                 </button>
               </div>
@@ -1303,18 +1293,18 @@ export default function CdpSettingsPage() {
 
             {customInfo?.hasSecret && !customIssuedSecret ? (
               <div className="space-y-3">
-                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3 text-sm text-emerald-100">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-900">
                   webhook_secret 발급됨 · 발급일 {customInfo.issuedAt ? new Date(customInfo.issuedAt).toLocaleString('ko-KR') : '-'}
                 </div>
-                <div className="text-xs text-white/50 leading-relaxed">
-                  Webhook URL: <code className="text-white/70 font-mono">{customInfo.webhookUrl}</code>
+                <div className="text-xs text-slate-500 leading-relaxed">
+                  Webhook URL: <code className="text-slate-600 font-mono">{customInfo.webhookUrl}</code>
                 </div>
                 {isAdmin && (
                   <div className="flex gap-2">
-                    <button onClick={handleCustomIssue} disabled={customIssuing} className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg disabled:opacity-40">
+                    <button onClick={handleCustomIssue} disabled={customIssuing} className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-sm font-medium rounded-lg disabled:opacity-40">
                       {customIssuing ? '재발급 중...' : 'Secret 재발급'}
                     </button>
-                    <button onClick={handleCustomRevoke} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                    <button onClick={handleCustomRevoke} className="px-4 py-2 bg-rose-100 border border-rose-300 hover:bg-rose-100 text-rose-800 text-sm font-medium rounded-lg flex items-center gap-2">
                       <Unlink className="w-4 h-4" /> 연동 해제
                     </button>
                   </div>
@@ -1322,12 +1312,12 @@ export default function CdpSettingsPage() {
               </div>
             ) : !customIssuedSecret && (
               <div className="space-y-3">
-                <div className="text-sm text-white/70">webhook_secret이 아직 발급되지 않았습니다. 발급 시 secret + URL + company_id 한 쌍이 생성됩니다.</div>
+                <div className="text-sm text-slate-600">webhook_secret이 아직 발급되지 않았습니다. 발급 시 secret + URL + company_id 한 쌍이 생성됩니다.</div>
                 {isAdmin ? (
-                  <button onClick={handleCustomIssue} disabled={customIssuing} className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2">
+                  <button onClick={handleCustomIssue} disabled={customIssuing} className="px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2">
                     <KeyRound className="w-4 h-4" /> {customIssuing ? '발급 중...' : 'webhook_secret 발급'}
                   </button>
-                ) : <div className="text-xs text-white/50">발급은 회사 관리자만 가능합니다.</div>}
+                ) : <div className="text-xs text-slate-500">발급은 회사 관리자만 가능합니다.</div>}
               </div>
             )}
           </div>
@@ -1507,45 +1497,45 @@ export default function CdpSettingsPage() {
             2026-06-10 정정: webhook secret 발급 후에도 표시 (이전에는 숨겨져 public key를 발급할 수 없어
             SDK 스니펫·설치검증까지 막히던 흐름 결함) */}
         {webhookProviderOpen && usage && customTab === 'connect' && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+          <div className="bg-white border border-slate-200 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
-              <KeyRound className="w-5 h-5 text-indigo-300" />
-              <h2 className="text-base font-bold text-white">CDP 키 (SDK 설치 · 서버 API 공용)</h2>
+              <KeyRound className="w-5 h-5 text-indigo-700" />
+              <h2 className="text-base font-bold text-slate-900">CDP 키 (SDK 설치 · 서버 API 공용)</h2>
             </div>
             {issuedSecret ? (
               <div className="space-y-3">
-                <div className="text-xs text-amber-200 bg-amber-500/10 border border-amber-400/30 rounded p-2">
+                <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
                   ★ Secret은 이 화면에서만 1회 노출됩니다. 자사몰 서버에 지금 바로 저장해 주세요.
                 </div>
                 <SecretRow label="Public Key (X-Hanjullo-Key)" value={issuedSecret.cdp_api_key} copied={copyStatus === 'key'} onCopy={() => copy(issuedSecret.cdp_api_key, 'key')} />
                 <SecretRow label="Secret Key (X-Hanjullo-Secret) ★ 1회 노출" value={issuedSecret.cdp_api_secret} copied={copyStatus === 'secret'} onCopy={() => copy(issuedSecret.cdp_api_secret, 'secret')} danger />
-                <button onClick={() => setIssuedSecret(null)} className="px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg">
+                <button onClick={() => setIssuedSecret(null)} className="px-4 py-2 bg-emerald-100 border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-sm font-medium rounded-lg">
                   확인 · 키 저장 완료
                 </button>
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="text-sm text-white/70">
+                <div className="text-sm text-slate-600">
                   {usage.has_key
                     ? `발급 일시: ${usage.issued_at ? new Date(usage.issued_at).toLocaleString('ko-KR') : '-'}`
                     : 'CDP 키 미발급. 발급 시 Public Key + Secret 한 쌍 생성.'}
                 </div>
                 {isAdmin && (
-                  <button onClick={handleIssueKey} disabled={issuing} className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40">
+                  <button onClick={handleIssueKey} disabled={issuing} className="px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-sm font-medium rounded-lg disabled:opacity-40">
                     {issuing ? '발급 중...' : (usage.has_key ? '재발급' : '키 발급')}
                   </button>
                 )}
               </div>
             )}
             {!cdpLocked && usage && (
-              <div className="mt-4 pt-4 border-t border-white/10">
-                <div className="text-xs text-white/50 mb-1">이번 달 API 호출</div>
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <div className="text-xs text-slate-500 mb-1">이번 달 API 호출</div>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-bold text-indigo-300">{usage.used.toLocaleString()}</span>
-                  <span className="text-xs text-white/50">/ {usage.monthly_limit === null ? '무제한' : `${usage.monthly_limit.toLocaleString()}건`}</span>
+                  <span className="text-2xl font-bold text-indigo-700">{usage.used.toLocaleString()}</span>
+                  <span className="text-xs text-slate-500">/ {usage.monthly_limit === null ? '무제한' : `${usage.monthly_limit.toLocaleString()}건`}</span>
                 </div>
                 {usage.monthly_limit !== null && (
-                  <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden mt-2">
+                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mt-2">
                     <div className="bg-indigo-500 h-2 transition-all" style={{ width: `${Math.min((usage.used / usage.monthly_limit) * 100, 100)}%` }} />
                   </div>
                 )}
@@ -1556,14 +1546,14 @@ export default function CdpSettingsPage() {
 
         {/* 12-0. 수집 허용 도메인 등록 (웹 탭) */}
         {webhookProviderOpen && customTab === 'web' && (
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
                 <Link2 className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-white">수집 허용 도메인</h2>
-                <div className="text-xs text-white/50">자사몰 도메인을 등록해야 브라우저 SDK 수집이 허용됩니다. (예: https://www.example.com)</div>
+                <h2 className="text-base font-bold text-slate-900">수집 허용 도메인</h2>
+                <div className="text-xs text-slate-500">자사몰 도메인을 등록해야 브라우저 SDK 수집이 허용됩니다. (예: https://www.example.com)</div>
               </div>
             </div>
             {isAdmin ? (
@@ -1573,41 +1563,41 @@ export default function CdpSettingsPage() {
                   onChange={(e) => setNewOrigin(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') addOrigin(); }}
                   placeholder="https://www.example.com"
-                  className="flex-1 min-w-[200px] bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400"
+                  className="flex-1 min-w-[200px] bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-400"
                 />
-                <button onClick={addOrigin} className="px-4 py-2 bg-violet-500/40 hover:bg-violet-500/60 text-white rounded-lg text-sm font-medium">추가</button>
+                <button onClick={addOrigin} className="px-4 py-2 bg-violet-200 hover:bg-violet-200 text-slate-900 rounded-lg text-sm font-medium">추가</button>
               </div>
             ) : (
-              <div className="text-xs text-white/40 mb-3">도메인 등록은 회사 관리자만 가능합니다.</div>
+              <div className="text-xs text-slate-400 mb-3">도메인 등록은 회사 관리자만 가능합니다.</div>
             )}
             {allowedOrigins.length > 0 ? (
               <div className="space-y-1.5">
                 {allowedOrigins.map((o) => (
-                  <div key={o} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-                    <span className="text-sm text-white/80 font-mono break-all">{o}</span>
+                  <div key={o} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2">
+                    <span className="text-sm text-slate-700 font-mono break-all">{o}</span>
                     {isAdmin && (
-                      <button onClick={() => removeOrigin(o)} className="text-rose-300 hover:text-rose-200 text-xs shrink-0 ml-2">삭제</button>
+                      <button onClick={() => removeOrigin(o)} className="text-rose-700 hover:text-rose-800 text-xs shrink-0 ml-2">삭제</button>
                     )}
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-xs text-white/40">등록된 도메인이 없습니다. 자사몰 도메인을 추가해주세요.</div>
+              <div className="text-xs text-slate-400">등록된 도메인이 없습니다. 자사몰 도메인을 추가해주세요.</div>
             )}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source: companies.cdp_allowed_origins</div>
+            <div className="text-[10px] text-slate-400 italic mt-2">Data source: companies.cdp_allowed_origins</div>
           </div>
         )}
 
         {/* 12-0b. 네이티브 앱 등록 (cdp_allowed_app_ids) — 앱 SDK 키 인증 허용 번들ID (앱 탭) */}
         {webhookProviderOpen && customTab === 'app' && (
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
                 <Code2 className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-white">앱(네이티브) 등록</h2>
-                <div className="text-xs text-white/50">iOS·안드로이드 앱에 인앱 메시지를 띄우려면 앱 번들ID(패키지명)를 등록하세요. 앱은 퍼블릭키 + 등록 번들ID로 인증하며 시크릿은 앱에 넣지 않습니다. (예: kr.poppon.app)</div>
+                <h2 className="text-base font-bold text-slate-900">앱(네이티브) 등록</h2>
+                <div className="text-xs text-slate-500">iOS·안드로이드 앱에 인앱 메시지를 띄우려면 앱 번들ID(패키지명)를 등록하세요. 앱은 퍼블릭키 + 등록 번들ID로 인증하며 시크릿은 앱에 넣지 않습니다. (예: kr.poppon.app)</div>
               </div>
             </div>
             {isAdmin ? (
@@ -1617,41 +1607,41 @@ export default function CdpSettingsPage() {
                   onChange={(e) => setNewAppId(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') addAppId(); }}
                   placeholder="kr.poppon.app"
-                  className="flex-1 min-w-[200px] bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400"
+                  className="flex-1 min-w-[200px] bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-400"
                 />
-                <button onClick={addAppId} className="px-4 py-2 bg-violet-500/40 hover:bg-violet-500/60 text-white rounded-lg text-sm font-medium">추가</button>
+                <button onClick={addAppId} className="px-4 py-2 bg-violet-200 hover:bg-violet-200 text-slate-900 rounded-lg text-sm font-medium">추가</button>
               </div>
             ) : (
-              <div className="text-xs text-white/40 mb-3">앱 등록은 회사 관리자만 가능합니다.</div>
+              <div className="text-xs text-slate-400 mb-3">앱 등록은 회사 관리자만 가능합니다.</div>
             )}
             {allowedAppIds.length > 0 ? (
               <div className="space-y-1.5">
                 {allowedAppIds.map((id) => (
-                  <div key={id} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-                    <span className="text-sm text-white/80 font-mono break-all">{id}</span>
+                  <div key={id} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2">
+                    <span className="text-sm text-slate-700 font-mono break-all">{id}</span>
                     {isAdmin && (
-                      <button onClick={() => removeAppId(id)} className="text-rose-300 hover:text-rose-200 text-xs shrink-0 ml-2">삭제</button>
+                      <button onClick={() => removeAppId(id)} className="text-rose-700 hover:text-rose-800 text-xs shrink-0 ml-2">삭제</button>
                     )}
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-xs text-white/40">등록된 앱이 없습니다. 앱 번들ID를 추가해주세요.</div>
+              <div className="text-xs text-slate-400">등록된 앱이 없습니다. 앱 번들ID를 추가해주세요.</div>
             )}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source: companies.cdp_allowed_app_ids</div>
+            <div className="text-[10px] text-slate-400 italic mt-2">Data source: companies.cdp_allowed_app_ids</div>
           </div>
         )}
 
         {/* 12-1. SDK 설치 스크립트 스니펫 (웹 탭) */}
         {webhookProviderOpen && usage?.public_key && customTab === 'web' && (
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
                 <Code2 className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-white">SDK 설치 스크립트</h2>
-                <div className="text-xs text-white/50">자사몰 &lt;head&gt;에 붙여넣으면 고객 행동 수집이 시작됩니다.</div>
+                <h2 className="text-base font-bold text-slate-900">SDK 설치 스크립트</h2>
+                <div className="text-xs text-slate-500">자사몰 &lt;head&gt;에 붙여넣으면 고객 행동 수집이 시작됩니다.</div>
               </div>
             </div>
             {/* ★ 2026-08-10 §5-4 — 거의 같은 스크립트 2개를 나란히 쌓지 않는다. 토글 하나로 전환(코드 블록 동시 노출 1개). */}
@@ -1672,14 +1662,14 @@ export default function CdpSettingsPage() {
               ]}
               onCopy={copyText}
             />
-            <div className="text-[10px] text-white/30 italic mt-3">Data source: app.hanjul.ai/sdk/{CDP_SDK_VERSION}</div>
+            <div className="text-[10px] text-slate-400 italic mt-3">Data source: app.hanjul.ai/sdk/{CDP_SDK_VERSION}</div>
           </div>
         )}
 
           </div>
         </CdpModal>
       </div>
-    </div>
+    </ZoneFrame>
   );
 }
 
@@ -1689,10 +1679,10 @@ export default function CdpSettingsPage() {
 
 function MetricBlock({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
   return (
-    <div className="p-3 bg-white/5 rounded-lg">
-      <div className="text-[10px] text-white/40 mb-1">{label}</div>
+    <div className="p-3 bg-white rounded-lg">
+      <div className="text-[10px] text-slate-400 mb-1">{label}</div>
       <div className={`text-base md:text-lg font-bold font-mono ${color}`}>{value}</div>
-      {sub && <div className="text-[10px] text-white/40 mt-0.5">{sub}</div>}
+      {sub && <div className="text-[10px] text-slate-400 mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -1701,11 +1691,11 @@ function CdpModal({ open, onClose, title, icon, children }: { open: boolean; onC
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-8 overflow-y-auto">
-      <div className="w-full max-w-3xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl my-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-white/10 sticky top-0 bg-slate-900 rounded-t-2xl z-10">
-          <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">{icon}</div>
-          <div className="text-sm font-semibold text-white">{title}</div>
-          <button onClick={onClose} className="ml-auto p-1 hover:bg-white/10 rounded-lg" aria-label="닫기"><X className="w-4 h-4 text-white/40" /></button>
+      <div className="w-full max-w-3xl bg-white border border-slate-200 rounded-2xl shadow-2xl my-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200 sticky top-0 bg-white rounded-t-2xl z-10">
+          <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">{icon}</div>
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          <button onClick={onClose} className="ml-auto p-1 hover:bg-slate-100 rounded-lg" aria-label="닫기"><X className="w-4 h-4 text-slate-400" /></button>
         </div>
         <div className="p-5">{children}</div>
       </div>
@@ -1721,10 +1711,10 @@ function CdpModal({ open, onClose, title, icon, children }: { open: boolean; onC
 function SecretRow({ label, value, copied, onCopy, danger }: { label: string; value: string; copied: boolean; onCopy: () => void; danger?: boolean }) {
   return (
     <div>
-      <label className="text-xs font-medium text-white/80 block mb-1">{label}</label>
+      <label className="text-xs font-medium text-slate-700 block mb-1">{label}</label>
       <div className="flex gap-2">
-        <input readOnly value={value} className={`flex-1 px-3 py-2 bg-violet-900/40 border rounded-lg text-xs font-mono text-white/80 ${danger ? 'border-rose-400/40 border-2' : 'border-white/10'}`} />
-        <button onClick={onCopy} className={`px-3 py-2 ${danger ? 'bg-rose-500/40 hover:bg-rose-500/60' : 'bg-indigo-500/40 hover:bg-indigo-500/60'} text-white rounded-lg text-xs font-medium flex items-center gap-1.5`}>
+        <input readOnly value={value} className={`flex-1 px-3 py-2 bg-violet-50 border rounded-lg text-xs font-mono text-slate-700 ${danger ? 'border-rose-300 border-2' : 'border-slate-200'}`} />
+        <button onClick={onCopy} className={`px-3 py-2 ${danger ? 'bg-rose-200 hover:bg-rose-200' : 'bg-indigo-200 hover:bg-indigo-200'} text-slate-900 rounded-lg text-xs font-medium flex items-center gap-1.5`}>
           {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           {copied ? '복사됨' : '복사'}
         </button>

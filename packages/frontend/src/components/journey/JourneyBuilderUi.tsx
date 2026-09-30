@@ -43,16 +43,16 @@ export function ModalShell({ title, subtitle, icon, onClose, children, footer, m
 }) {
   return createPortal(
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[2000] p-4">
-      <div className={`bg-slate-900 border border-white/10 rounded-2xl shadow-2xl ${maxW} w-full max-h-[92vh] overflow-hidden flex flex-col text-white`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <div className="flex items-center justify-between p-4 border-b border-white/10 bg-gradient-to-r from-indigo-500/10 to-violet-500/10">
+      <div className={`bg-white border border-slate-200 rounded-2xl shadow-2xl ${maxW} w-full max-h-[92vh] overflow-hidden flex flex-col text-slate-900`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-violet-50">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shrink-0">{icon}</div>
-            <div><h3 className="text-sm font-semibold">{title}</h3>{subtitle && <p className="text-[11px] text-white/45">{subtitle}</p>}</div>
+            <div><h3 className="text-sm font-semibold">{title}</h3>{subtitle && <p className="text-[11px] text-slate-400">{subtitle}</p>}</div>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg" aria-label="닫기"><X className="w-4 h-4 text-white/50" /></button>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg" aria-label="닫기"><X className="w-4 h-4 text-slate-500" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">{children}</div>
-        {footer && <div className="flex items-center justify-end gap-2 p-4 border-t border-white/10">{footer}</div>}
+        {footer && <div className="flex items-center justify-end gap-2 p-4 border-t border-slate-200">{footer}</div>}
       </div>
     </div>,
     document.body,
@@ -61,15 +61,15 @@ export function ModalShell({ title, subtitle, icon, onClose, children, footer, m
 
 // 메인의 요약 버튼 — 누르면 모달. (아이콘 + 라벨 + 현재 값 + chevron)
 export function SummaryButton({ icon, label, value, onClick, accent = 'indigo' }: { icon: ReactNode; label: string; value: string; onClick: () => void; accent?: 'indigo' | 'teal' }) {
-  const grad = accent === 'teal' ? 'from-teal-400/80 to-emerald-500/80' : 'from-indigo-400/80 to-violet-500/80';
+  const grad = accent === 'teal' ? 'from-teal-50 to-emerald-50' : 'from-indigo-50 to-violet-50';
   return (
-    <button onClick={onClick} className="w-full flex items-center gap-3 p-3.5 rounded-2xl bg-white/[0.05] border border-white/10 hover:bg-white/[0.08] transition-colors text-left">
+    <button onClick={onClick} className="w-full flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200 hover:bg-slate-100 transition-colors text-left">
       <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${grad} flex items-center justify-center shrink-0`}>{icon}</div>
       <div className="flex-1 min-w-0">
-        <div className="text-[11px] text-white/45">{label}</div>
-        <div className="text-sm font-medium text-white/90 truncate">{value}</div>
+        <div className="text-[11px] text-slate-400">{label}</div>
+        <div className="text-sm font-medium text-slate-800 truncate">{value}</div>
       </div>
-      <ChevronRight className="w-4 h-4 text-white/40 shrink-0" />
+      <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
     </button>
   );
 }
@@ -81,25 +81,25 @@ export function AudienceModal({ initial, onSave, onClose }: { initial: AudienceC
   const upd = (i: number, patch: Partial<AudienceCondition>) => setConditions((c) => c.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
   const rm = (i: number) => setConditions((c) => c.filter((_, idx) => idx !== i));
   return (
-    <ModalShell title="대상" subtitle="조건을 만족하는 고객 · 없으면 전체 활성 고객" icon={<Users className="w-4 h-4 text-white" />} onClose={onClose}
+    <ModalShell title="대상" subtitle="조건을 만족하는 고객 · 없으면 전체 활성 고객" icon={<Users className="w-4 h-4 text-slate-900" />} onClose={onClose}
       footer={<>
-        <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm text-white/70">닫기</button>
-        <button onClick={() => onSave(conditions)} className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-sm font-medium hover:opacity-90">저장</button>
+        <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-sm text-slate-600">닫기</button>
+        <button onClick={() => onSave(conditions)} className="text-white px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-medium">저장</button>
       </>}>
-      <p className="text-[11px] text-white/50">등급·지역·매장·포인트 등 자유롭게 조합합니다. 조건이 없으면 전체 활성 고객이 대상입니다.</p>
+      <p className="text-[11px] text-slate-500">등급·지역·매장·포인트 등 자유롭게 조합합니다. 조건이 없으면 전체 활성 고객이 대상입니다.</p>
       {conditions.map((c, i) => (
         <div key={i} className="flex items-center gap-1.5">
-          <select value={c.field} onChange={(e) => upd(i, { field: e.target.value })} className="bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white">
+          <select value={c.field} onChange={(e) => upd(i, { field: e.target.value })} className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-900">
             {COND_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
           </select>
-          <select value={c.op} onChange={(e) => upd(i, { op: e.target.value })} className="bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white">
+          <select value={c.op} onChange={(e) => upd(i, { op: e.target.value })} className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-900">
             {COND_OPS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
           </select>
-          <input value={c.value} onChange={(e) => upd(i, { value: e.target.value })} placeholder="값" className="flex-1 min-w-0 bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white" />
-          <button onClick={() => rm(i)} className="p-1.5 rounded bg-white/5 hover:bg-rose-500/20 border border-white/10" aria-label="조건 삭제"><X className="w-3.5 h-3.5 text-white/60" /></button>
+          <input value={c.value} onChange={(e) => upd(i, { value: e.target.value })} placeholder="값" className="flex-1 min-w-0 bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-900" />
+          <button onClick={() => rm(i)} className="p-1.5 rounded bg-white hover:bg-rose-100 border border-slate-200" aria-label="조건 삭제"><X className="w-3.5 h-3.5 text-slate-500" /></button>
         </div>
       ))}
-      <button onClick={add} className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200"><Plus className="w-3.5 h-3.5" /> 조건 추가</button>
+      <button onClick={add} className="inline-flex items-center gap-1 text-xs text-indigo-700 hover:text-indigo-800"><Plus className="w-3.5 h-3.5" /> 조건 추가</button>
     </ModalShell>
   );
 }

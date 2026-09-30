@@ -16,7 +16,7 @@ export function Field({ icon, label, badge, hint, right, children, className = '
   return (
     <section className={`${MK_CARD} px-4 md:px-[18px] py-3.5 ${className}`}>
       <div className="flex items-center gap-2 mb-3 flex-wrap min-h-[28px]">
-        <span className="text-violet-300">{icon}</span>
+        <span className="text-violet-700">{icon}</span>
         <span className={MK_LABEL}>{label}</span>
         {badge}
         {hint && <span className={MK_HINT}>{hint}</span>}
@@ -37,7 +37,7 @@ export function AddressField({ value, onChange, onRead, state, disabled, label =
   const looksUrl = (v: string) => /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(v.trim());
   const done = state.kind === 'done';
   return (
-    <Field icon={<Globe className="w-4 h-4" />} label={label} badge={done ? undefined : <span className="text-[11px] font-semibold text-white/40 border border-white/10 rounded-md px-1.5 py-px">있으면</span>}>
+    <Field icon={<Globe className="w-4 h-4" />} label={label} badge={done ? undefined : <span className="text-[11px] font-semibold text-slate-400 border border-slate-200 rounded-md px-1.5 py-px">있으면</span>}>
       <div className="relative">
         <input
           value={value}
@@ -47,18 +47,18 @@ export function AddressField({ value, onChange, onRead, state, disabled, label =
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && looksUrl(value)) onRead(value.trim()); }}
           onBlur={() => { if (looksUrl(value) && state.kind === 'idle') onRead(value.trim()); }}
           placeholder="주소를 붙여넣으면 사진·행사 내용을 알아서 읽어요"
-          className={`${MK_INPUT} pr-28 ${done ? 'border-violet-400/60' : ''}`}
+          className={`${MK_INPUT} pr-28 ${done ? 'border-violet-300' : ''}`}
           inputMode="url"
           aria-label={label}
         />
         <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[12.5px] font-semibold">
-          {state.kind === 'reading' && <span className="inline-flex items-center gap-1.5 text-violet-200"><Loader2 className="w-4 h-4 animate-spin" />읽는 중</span>}
-          {done && <span className="inline-flex items-center gap-1 text-emerald-300"><Check className="w-4 h-4" />읽었어요</span>}
-          {state.kind === 'idle' && looksUrl(value) && <button type="button" onClick={() => onRead(value.trim())} className="text-violet-300 hover:text-violet-200">읽기</button>}
+          {state.kind === 'reading' && <span className="inline-flex items-center gap-1.5 text-violet-800"><Loader2 className="w-4 h-4 animate-spin" />읽는 중</span>}
+          {done && <span className="inline-flex items-center gap-1 text-emerald-700"><Check className="w-4 h-4" />읽었어요</span>}
+          {state.kind === 'idle' && looksUrl(value) && <button type="button" onClick={() => onRead(value.trim())} className="text-violet-700 hover:text-violet-800">읽기</button>}
         </div>
       </div>
-      {done && <div className="text-[12px] text-white/55 mt-2">{state.summary}</div>}
-      {state.kind === 'failed' && <div className="text-[12px] text-amber-300 mt-2 inline-flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" />{state.message}</div>}
+      {done && <div className="text-[12px] text-slate-500 mt-2">{state.summary}</div>}
+      {state.kind === 'failed' && <div className="text-[12px] text-amber-700 mt-2 inline-flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" />{state.message}</div>}
     </Field>
   );
 }
@@ -87,18 +87,18 @@ export function ReadMaterialsCard({ cards, images, heroUrl, host, onToggleCard, 
         {shown.map((c) => {
           const note = readCardUseNote(c);
           return (
-            <div key={c.id} className={`rounded-xl border px-3.5 py-3 ${c.licensed ? 'bg-violet-500/[0.07] border-violet-400/30' : 'bg-white/[0.04] border-white/10'}`}>
+            <div key={c.id} className={`rounded-xl border px-3.5 py-3 ${c.licensed ? 'bg-violet-50 border-violet-200' : 'bg-white border-slate-200'}`}>
               <div className="flex items-center gap-2">
-                <b className="text-[14px] text-white min-w-0 truncate">{c.title || '행사'}</b>
-                <button type="button" disabled={disabled} onClick={() => onToggleCard(c.id)} className="ml-auto shrink-0 p-1 rounded text-white/50 hover:text-white hover:bg-white/10" aria-label={`${c.title} 빼기`}><X className="w-4 h-4" /></button>
+                <b className="text-[14px] text-slate-900 min-w-0 truncate">{c.title || '행사'}</b>
+                <button type="button" disabled={disabled} onClick={() => onToggleCard(c.id)} className="ml-auto shrink-0 p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label={`${c.title} 빼기`}><X className="w-4 h-4" /></button>
               </div>
-              {c.text && <div className="text-[12.5px] text-white/60 mt-1.5 line-clamp-2">{c.text}</div>}
+              {c.text && <div className="text-[12.5px] text-slate-500 mt-1.5 line-clamp-2">{c.text}</div>}
               <div className="flex items-center gap-x-3 gap-y-1 mt-2.5 flex-wrap">
                 <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                   <input type="checkbox" checked={c.licensed} disabled={disabled} onChange={(e) => onLicensed(c.id, e.target.checked)} className="w-[18px] h-[18px] accent-violet-600" />
-                  <span className="text-[13px] font-semibold text-white">이 문구 그대로 쓰기</span>
+                  <span className="text-[13px] font-semibold text-slate-900">이 문구 그대로 쓰기</span>
                 </label>
-                <span className={`inline-flex items-center gap-1 text-[11.5px] ${note.tone === 'ok' ? 'text-emerald-300' : 'text-white/45'}`}>
+                <span className={`inline-flex items-center gap-1 text-[11.5px] ${note.tone === 'ok' ? 'text-emerald-700' : 'text-slate-400'}`}>
                   {note.tone === 'ok' ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}{note.text}
                 </span>
               </div>
@@ -106,9 +106,9 @@ export function ReadMaterialsCard({ cards, images, heroUrl, host, onToggleCard, 
           );
         })}
         {cards.some((c) => !c.included) && (
-          <div className="text-[12px] text-white/45">
+          <div className="text-[12px] text-slate-400">
             뺀 행사: {cards.filter((c) => !c.included).map((c) => (
-              <button key={c.id} type="button" onClick={() => onToggleCard(c.id)} className="underline underline-offset-2 mr-2 hover:text-white">{c.title || '행사'} 다시 넣기</button>
+              <button key={c.id} type="button" onClick={() => onToggleCard(c.id)} className="underline underline-offset-2 mr-2 hover:text-slate-900">{c.title || '행사'} 다시 넣기</button>
             ))}
           </div>
         )}
@@ -122,18 +122,18 @@ export function ReadMaterialsCard({ cards, images, heroUrl, host, onToggleCard, 
       )}
       {siteProducts.length > 0 && (
         <div className="mt-3">
-          <div className="text-[12px] text-white/55 mb-1.5">홈페이지 상품 {siteProducts.length} · 가격은 싣지 않아요</div>
+          <div className="text-[12px] text-slate-500 mb-1.5">홈페이지 상품 {siteProducts.length} · 가격은 싣지 않아요</div>
           <div className="flex flex-wrap gap-1.5">
             {siteProducts.map((p) => (
-              <span key={p.key} className="inline-flex items-center gap-1.5 h-7 pl-1 pr-1.5 rounded-lg bg-white/[0.05] border border-white/10 text-[12px] text-white/80">
+              <span key={p.key} className="inline-flex items-center gap-1.5 h-7 pl-1 pr-1.5 rounded-lg bg-white border border-slate-200 text-[12px] text-slate-700">
                 {p.imageUrl && <img src={p.imageUrl} alt="" className="w-5 h-5 rounded object-cover" />}{p.name}
-                <button type="button" disabled={disabled} onClick={() => onRemoveProduct(p.key)} className="text-white/45 hover:text-white" aria-label={`${p.name} 빼기`}><X className="w-3.5 h-3.5" /></button>
+                <button type="button" disabled={disabled} onClick={() => onRemoveProduct(p.key)} className="text-slate-400 hover:text-slate-900" aria-label={`${p.name} 빼기`}><X className="w-3.5 h-3.5" /></button>
               </span>
             ))}
           </div>
         </div>
       )}
-      <div className="text-[11.5px] text-white/45 mt-3 inline-flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" />{host ? `${host} ` : '홈페이지 '}사진 {images.length}장은 우리 저장소에 사본으로 담아 씁니다</div>
+      <div className="text-[11.5px] text-slate-400 mt-3 inline-flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" />{host ? `${host} ` : '홈페이지 '}사진 {images.length}장은 우리 저장소에 사본으로 담아 씁니다</div>
     </Field>
   );
 }
@@ -142,7 +142,7 @@ export function ReadMaterialsCard({ cards, images, heroUrl, host, onToggleCard, 
 
 export function Thumb({ url, size = 86, badge, onRemove, wide = false }: { url: string; size?: number; badge?: string; onRemove?: () => void; wide?: boolean }) {
   return (
-    <span className="group relative rounded-xl overflow-hidden border border-white/10 bg-white/5 shrink-0" style={{ width: wide ? Math.round(size * 1.75) : size, height: size }}>
+    <span className="group relative rounded-xl overflow-hidden border border-slate-200 bg-white shrink-0" style={{ width: wide ? Math.round(size * 1.75) : size, height: size }}>
       <img src={url} alt="" className="w-full h-full object-cover" />
       {badge && <em className="absolute left-1.5 bottom-1.5 not-italic text-[10.5px] font-bold text-white bg-violet-600 rounded px-1.5 py-0.5">{badge}</em>}
       {onRemove && (
@@ -185,7 +185,7 @@ export function PhotoTextBoard({ images, roles, onAddFiles, onRemoveImage, onOpe
         onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); if (!disabled) take(e.dataTransfer.files); }}
         onPaste={(e) => { if (disabled) return; const files = Array.from(e.clipboardData.files || []); if (files.length > 0) { e.preventDefault(); take(files); } }}
-        className={`rounded-xl transition-colors ${over ? 'bg-violet-500/10 ring-1 ring-violet-400/60' : ''}`}
+        className={`rounded-xl transition-colors ${over ? 'bg-violet-50 ring-1 ring-violet-300' : ''}`}
       >
         <div className={compact ? 'flex gap-3 items-stretch' : ''}>
           <div className={`flex gap-2.5 flex-wrap ${compact ? 'shrink-0' : ''}`}>
@@ -194,7 +194,7 @@ export function PhotoTextBoard({ images, roles, onAddFiles, onRemoveImage, onOpe
             ))}
             {room > 0 && (
               <button type="button" disabled={disabled || uploading} onClick={() => fileRef.current?.click()}
-                className="w-[86px] h-[86px] rounded-xl border border-dashed border-white/20 text-white/45 hover:text-white/80 hover:border-white/35 flex flex-col items-center justify-center gap-1 text-[11.5px] disabled:opacity-50">
+                className="w-[86px] h-[86px] rounded-xl border border-dashed border-slate-300 text-slate-400 hover:text-slate-700 hover:border-slate-300 flex flex-col items-center justify-center gap-1 text-[11.5px] disabled:opacity-50">
                 {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}사진
               </button>
             )}
@@ -213,10 +213,10 @@ export function PhotoTextBoard({ images, roles, onAddFiles, onRemoveImage, onOpe
       <div className="flex items-center gap-3 mt-2.5 flex-wrap">
         <label className="inline-flex items-center gap-2 cursor-pointer select-none">
           <input type="checkbox" checked={licensed} disabled={disabled} onChange={(e) => onLicensed(e.target.checked)} className="w-[18px] h-[18px] accent-violet-600" />
-          <span className="text-[13px] font-semibold text-white">이 문구 그대로 쓰기</span>
-          {!compact && <span className="text-[12px] text-white/45">할인율·기간이 적은 그대로 실려요</span>}
+          <span className="text-[13px] font-semibold text-slate-900">이 문구 그대로 쓰기</span>
+          {!compact && <span className="text-[12px] text-slate-400">할인율·기간이 적은 그대로 실려요</span>}
         </label>
-        <button type="button" disabled={disabled} onClick={onOpenLibrary} className="ml-auto inline-flex items-center gap-1.5 text-[12px] text-white/50 hover:text-white/85"><FolderOpen className="w-3.5 h-3.5" />저장 소재에서</button>
+        <button type="button" disabled={disabled} onClick={onOpenLibrary} className="ml-auto inline-flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-slate-700"><FolderOpen className="w-3.5 h-3.5" />저장 소재에서</button>
       </div>
       <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(e) => { take(e.target.files); e.currentTarget.value = ''; }} />
     </Field>
@@ -245,19 +245,19 @@ export function MallStrip({ providerLabel, candidates, loading, error, selectedK
     <Field
       icon={<ShoppingBag className="w-4 h-4" />}
       label="우리 몰 상품"
-      badge={<span className="text-[11px] font-bold text-emerald-300 bg-emerald-500/15 rounded-md px-1.5 py-0.5">{providerLabel} 연동</span>}
+      badge={<span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 rounded-md px-1.5 py-0.5">{providerLabel} 연동</span>}
       right={(
         <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/35" />
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={query} onChange={(e) => onQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) onSearch(); }} placeholder="상품 이름으로 찾기"
-            className="h-8 w-[200px] md:w-[220px] pl-8 pr-3 rounded-[9px] bg-slate-950/50 border border-white/10 text-[12px] text-white placeholder-white/35 outline-none focus:border-violet-400/60" />
+            className="h-8 w-[200px] md:w-[220px] pl-8 pr-3 rounded-[9px] bg-slate-100 border border-slate-200 text-[12px] text-slate-900 placeholder-slate-400 outline-none focus:border-violet-300" />
         </div>
       )}
     >
       {loading ? (
-        <div className="h-[132px] flex items-center justify-center text-white/45"><Loader2 className="w-5 h-5 animate-spin" /></div>
+        <div className="h-[132px] flex items-center justify-center text-slate-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
       ) : error ? (
-        <div className="text-[12.5px] text-amber-300 inline-flex items-center gap-1.5"><AlertCircle className="w-4 h-4" />{error}</div>
+        <div className="text-[12.5px] text-amber-700 inline-flex items-center gap-1.5"><AlertCircle className="w-4 h-4" />{error}</div>
       ) : (
         <div className="flex gap-2.5 overflow-x-auto mk-scroll pb-1.5">
           {candidates.map((c) => {
@@ -265,20 +265,20 @@ export function MallStrip({ providerLabel, candidates, loading, error, selectedK
             const on = selectedKeys.has(key);
             return (
               <button key={key} type="button" disabled={disabled} onClick={() => onToggle(c)}
-                className={`shrink-0 w-[86px] text-left rounded-xl p-1.5 border transition-colors ${on ? 'border-violet-400/80 bg-violet-500/15' : 'border-transparent opacity-80 hover:opacity-100'}`}>
-                <span className="relative block w-full aspect-square rounded-lg overflow-hidden bg-white/10">
+                className={`shrink-0 w-[86px] text-left rounded-xl p-1.5 border transition-colors ${on ? 'border-violet-300 bg-violet-100' : 'border-transparent opacity-80 hover:opacity-100'}`}>
+                <span className="relative block w-full aspect-square rounded-lg overflow-hidden bg-slate-100">
                   {c.imageUrl ? <img src={c.imageUrl} alt="" className="w-full h-full object-cover" /> : null}
                   {on && <em className="absolute right-1 top-1 w-5 h-5 rounded-full bg-violet-600 text-white flex items-center justify-center"><Check className="w-3 h-3" /></em>}
                 </span>
-                <span className="block text-[11.5px] text-white/85 mt-1.5 leading-tight line-clamp-2 min-h-[28px]">{c.name}</span>
-                <span className="block text-[12px] font-bold text-white mt-0.5">{won(c.salePrice || c.price)}</span>
+                <span className="block text-[11.5px] text-slate-700 mt-1.5 leading-tight line-clamp-2 min-h-[28px]">{c.name}</span>
+                <span className="block text-[12px] font-bold text-slate-900 mt-0.5">{won(c.salePrice || c.price)}</span>
               </button>
             );
           })}
-          {candidates.length === 0 && <div className="text-[12.5px] text-white/45 py-6">찾은 상품이 없어요.</div>}
+          {candidates.length === 0 && <div className="text-[12.5px] text-slate-400 py-6">찾은 상품이 없어요.</div>}
         </div>
       )}
-      <div className="text-[12px] text-white/55 mt-2"><b className="text-white">{count}개 담음</b> · 누르면 담기고, 가격·링크는 만들 때 몰에서 다시 확인해요</div>
+      <div className="text-[12px] text-slate-500 mt-2"><b className="text-slate-900">{count}개 담음</b> · 누르면 담기고, 가격·링크는 만들 때 몰에서 다시 확인해요</div>
     </Field>
   );
 }
@@ -318,10 +318,10 @@ export function ManualProducts({ products, onChange, max, onNotice, onConnect, d
       {manual.length > 0 && (
         <div className="space-y-1.5 mb-2">
           {manual.map((p) => (
-            <div key={p.key} className="flex items-center gap-3 h-[34px] px-3 rounded-lg bg-white/[0.05]">
-              <span className="text-[13px] text-white/90 flex-1 min-w-0 truncate">{p.name}</span>
-              <b className="text-[13px] text-white">{won(p.salePrice ?? p.price)}</b>
-              <button type="button" disabled={disabled} onClick={() => onChange(products.filter((x) => x.key !== p.key))} className="text-white/45 hover:text-white" aria-label={`${p.name} 빼기`}><X className="w-4 h-4" /></button>
+            <div key={p.key} className="flex items-center gap-3 h-[34px] px-3 rounded-lg bg-white">
+              <span className="text-[13px] text-slate-800 flex-1 min-w-0 truncate">{p.name}</span>
+              <b className="text-[13px] text-slate-900">{won(p.salePrice ?? p.price)}</b>
+              <button type="button" disabled={disabled} onClick={() => onChange(products.filter((x) => x.key !== p.key))} className="text-slate-400 hover:text-slate-900" aria-label={`${p.name} 빼기`}><X className="w-4 h-4" /></button>
             </div>
           ))}
         </div>
@@ -330,14 +330,14 @@ export function ManualProducts({ products, onChange, max, onNotice, onConnect, d
         <div className="mb-2">
           <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={3} placeholder={'상품명 가격을 한 줄씩\n예) 어텀 리페어 세럼 50ml 30,400원'} className={MK_TEXTAREA} />
           <div className="flex justify-end gap-2 mt-1.5">
-            <button type="button" onClick={() => setPasteOpen(false)} className="text-[12.5px] text-white/55 hover:text-white px-2">닫기</button>
-            <button type="button" disabled={!paste.trim()} onClick={add} className="text-[12.5px] font-semibold text-violet-300 hover:text-violet-200 disabled:opacity-40 px-2">담기</button>
+            <button type="button" onClick={() => setPasteOpen(false)} className="text-[12.5px] text-slate-500 hover:text-slate-900 px-2">닫기</button>
+            <button type="button" disabled={!paste.trim()} onClick={add} className="text-[12.5px] font-semibold text-violet-700 hover:text-violet-800 disabled:opacity-40 px-2">담기</button>
           </div>
         </div>
       )}
-      <div className="flex items-center justify-between text-[12.5px] text-white/55">
-        <button type="button" disabled={disabled} onClick={() => setPasteOpen(true)} className="inline-flex items-center gap-1.5 hover:text-white/85"><ClipboardPaste className="w-3.5 h-3.5" />상품 붙여넣기</button>
-        <button type="button" onClick={onConnect} className="font-semibold text-violet-300 hover:text-violet-200">몰 연동하기</button>
+      <div className="flex items-center justify-between text-[12.5px] text-slate-500">
+        <button type="button" disabled={disabled} onClick={() => setPasteOpen(true)} className="inline-flex items-center gap-1.5 hover:text-slate-700"><ClipboardPaste className="w-3.5 h-3.5" />상품 붙여넣기</button>
+        <button type="button" onClick={onConnect} className="font-semibold text-violet-700 hover:text-violet-800">몰 연동하기</button>
       </div>
     </Field>
   );
@@ -348,10 +348,10 @@ export function ManualProducts({ products, onChange, max, onNotice, onConnect, d
 export function BrandChip({ logoUrl, name, color, note }: { logoUrl?: string | null; name?: string | null; color?: string | null; note: string }) {
   if (!logoUrl && !name && !color) return null;
   return (
-    <div className="flex items-center gap-2 text-[12px] text-white/55 px-1">
+    <div className="flex items-center gap-2 text-[12px] text-slate-500 px-1">
       {logoUrl ? <img src={logoUrl} alt="" className="h-6 max-w-[90px] object-contain rounded bg-white px-1.5" />
         : name ? <span className="h-6 px-2 rounded bg-white text-slate-900 text-[11px] font-extrabold tracking-[0.18em] inline-flex items-center">{name}</span> : null}
-      {color && <span className="w-4 h-4 rounded border border-white/20" style={{ background: color }} />}
+      {color && <span className="w-4 h-4 rounded border border-slate-300" style={{ background: color }} />}
       <span>{note}</span>
     </div>
   );

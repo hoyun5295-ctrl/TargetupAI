@@ -57,15 +57,15 @@ export default function MarketingJourneyModal({
   return (
     <JourneyModalShell open={open} onClose={onClose} labelledBy="marketing-journey-modal-title">
       <>
-        <div className="flex items-start gap-3 border-b border-white/10 bg-gradient-to-r from-fuchsia-500/10 via-purple-500/10 to-indigo-500/10 px-5 py-4">
+        <div className="flex items-start gap-3 border-b border-slate-200 bg-gradient-to-r from-fuchsia-50 via-purple-50 to-indigo-50 px-5 py-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-400 to-purple-500">
             <Megaphone className="h-5 w-5 text-white" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 id="marketing-journey-modal-title" className="text-base font-bold text-white">마케팅 여정 만들기</h3>
-            <p className="text-[11px] text-white/50">광고성 문자·LMS: 하고 싶은 것을 한 줄로 쓰면 AI가 흐름을 설계합니다</p>
+            <h3 id="marketing-journey-modal-title" className="text-base font-bold text-slate-900">마케팅 여정 만들기</h3>
+            <p className="text-[11px] text-slate-500">광고성 문자·LMS: 하고 싶은 것을 한 줄로 쓰면 AI가 흐름을 설계합니다</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-white/40 transition-colors hover:bg-white/5 hover:text-white/70" aria-label="닫기">
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white hover:text-slate-600" aria-label="닫기">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -75,7 +75,7 @@ export default function MarketingJourneyModal({
 
           {/* 자연어 한 줄 */}
           <section>
-            <label htmlFor="marketing-journey-objective" className="mb-1.5 block text-xs font-semibold text-white/80">
+            <label htmlFor="marketing-journey-objective" className="mb-1.5 block text-xs font-semibold text-slate-700">
               무엇을 하고 싶으신가요
             </label>
             <textarea
@@ -91,12 +91,12 @@ export default function MarketingJourneyModal({
                   onGenerate();
                 }
               }}
-              className="w-full resize-none rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-3 text-sm leading-relaxed text-white placeholder:text-white/25 focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-60"
+              className="w-full resize-none rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-3 text-sm leading-relaxed text-slate-900 placeholder:text-slate-300 focus:border-fuchsia-300 focus:outline-none disabled:opacity-60"
             />
             {/* ★ 2026-08-08 — 혜택은 값으로 받는다. 문안 속 placeholder를 손으로 고치게 하지 않는다. */}
             <div className="mt-2.5">
-              <label htmlFor="marketing-journey-benefit" className="mb-1.5 block text-xs font-semibold text-white/80">
-                고객에게 줄 혜택 <span className="font-normal text-white/40">(선택)</span>
+              <label htmlFor="marketing-journey-benefit" className="mb-1.5 block text-xs font-semibold text-slate-700">
+                고객에게 줄 혜택 <span className="font-normal text-slate-400">(선택)</span>
               </label>
               <input
                 id="marketing-journey-benefit"
@@ -104,14 +104,14 @@ export default function MarketingJourneyModal({
                 onChange={(e) => onBenefitChange(e.target.value.slice(0, 200))}
                 placeholder="예: 신규 가입 10% 쿠폰 · 5,000원 적립"
                 disabled={generating}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-sm text-white placeholder:text-white/25 focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-60"
+                className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-300 focus:border-fuchsia-300 focus:outline-none disabled:opacity-60"
               />
-              <p className="mt-1 text-[11px] leading-relaxed text-white/35">
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
                 적어 주시면 문안에 바로 녹여 드려요. 비워 두면 문안에 혜택 자리만 표시됩니다.
               </p>
             </div>
             <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-[11px] text-white/35">Ctrl(⌘) + Enter로도 만들 수 있어요</span>
+              <span className="text-[11px] text-slate-400">Ctrl(⌘) + Enter로도 만들 수 있어요</span>
               <button
                 type="button"
                 onClick={() => onGenerate()}
@@ -127,8 +127,8 @@ export default function MarketingJourneyModal({
           {/* 빠른 시작 — 누르면 바로 생성 */}
           <section>
             <div className="mb-2 flex items-center gap-2">
-              <span className="text-xs font-semibold text-white/80">자주 쓰는 여정</span>
-              <span className="text-[11px] text-white/35">누르면 바로 만들어 드려요</span>
+              <span className="text-xs font-semibold text-slate-700">자주 쓰는 여정</span>
+              <span className="text-[11px] text-slate-400">누르면 바로 만들어 드려요</span>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {quickStarts.map((q) => {
@@ -143,8 +143,8 @@ export default function MarketingJourneyModal({
                     title={q.lockedReason || undefined}
                     className={`flex items-start gap-2.5 rounded-xl border p-3 text-left transition-colors ${
                       locked
-                        ? 'cursor-not-allowed border-white/5 bg-white/[0.02] opacity-60'
-                        : 'border-white/10 bg-white/5 hover:border-fuchsia-400/40 hover:bg-white/10'
+                        ? 'cursor-not-allowed border-slate-100 bg-white opacity-60'
+                        : 'border-slate-200 bg-white hover:border-fuchsia-300 hover:bg-slate-100'
                     }`}
                   >
                     <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${q.gradient} ${locked ? 'grayscale' : ''}`}>
@@ -152,10 +152,10 @@ export default function MarketingJourneyModal({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate text-[12.5px] font-semibold text-white/90">{q.label}</span>
-                        {locked && <Lock className="h-3 w-3 shrink-0 text-white/35" />}
+                        <span className="truncate text-[12.5px] font-semibold text-slate-800">{q.label}</span>
+                        {locked && <Lock className="h-3 w-3 shrink-0 text-slate-400" />}
                       </div>
-                      <p className="mt-0.5 text-[11px] leading-relaxed text-white/45">
+                      <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">
                         {q.lockedReason || q.hint}
                       </p>
                       {locked && q.lockedAction && (
@@ -164,7 +164,7 @@ export default function MarketingJourneyModal({
                           tabIndex={0}
                           onClick={(e) => { e.stopPropagation(); q.lockedAction!.onClick(); }}
                           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); q.lockedAction!.onClick(); } }}
-                          className="mt-1.5 inline-block cursor-pointer rounded-lg border border-amber-400/40 bg-amber-500/15 px-2 py-1 text-[11px] font-semibold text-amber-100 hover:bg-amber-500/25"
+                          className="mt-1.5 inline-block cursor-pointer rounded-lg border border-amber-300 bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100"
                         >
                           {q.lockedAction.label}
                         </span>

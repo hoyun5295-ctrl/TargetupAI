@@ -197,14 +197,32 @@ describe('generatePoster — 엔진 분기', () => {
   });
 });
 
-describe('editOrUpscale — 4K 는 늘 Gemini · 2K 수정 지시만 스위치', () => {
-  const base = { baseImageBase64: Buffer.from('jpg-bytes').toString('base64'), baseMime: 'image/jpeg', basePrompt: '원 프롬프트', aspectRatio: '3:4' };
-  it('4K + engine openai = Gemini 만', async () => {
-    const m = await load();
-    await m.editOrUpscale({ ...base, instruction: m.UPSCALE_4K_INSTRUCTION, imageSize: '4K', engine: 'openai' });
-    expect(openaiCalls()).toHaveLength(0);
-    expect(geminiCalls()).toHaveLength(1);
+describe('4K 격상 제거(0930 · 생성 모델이 새 그림을 그렸다)', () => {
+  const src = (...p: string[]) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8');
+  it('라우트: targetSize 4K 는 검사 · 잠금 · 차감 전에 410 으로 돌려보낸다', () => {
+    const r = src('..', 'routes', 'image-studio.ts');
+    const edit = r.slice(r.indexOf("imageStudioRouter.post('/edit'"), r.indexOf('// ── POST /ingest-product'));
+    const reject = edit.indexOf("String(targetSize || '') === '4K'");
+    expect(reject).toBeGreaterThan(0);
+    expect(edit.indexOf("code: 'UPSCALE_REMOVED'")).toBeGreaterThan(reject);
+    expect(reject).toBeLessThan(edit.indexOf('checkCredit('));
+    expect(reject).toBeLessThan(edit.indexOf('tryAcquireGenerateLock('));
+    expect(edit).not.toMatch(/upscale4k|UPSCALE_4K|imageSize: is4k|'4K' : '2K'/);
   });
+  it('CT: 4K 지시문 · 4K 차감 출처가 없다', async () => {
+    const m: any = await load();
+    expect(m.UPSCALE_4K_INSTRUCTION).toBeUndefined();
+    expect(Object.values(m.CREDIT_SOURCE)).not.toContain('image-studio-4k');
+  });
+  it('화면: 스튜디오 4K 버튼 · 요금 안내의 4K 항목이 없다', () => {
+    const fe = (...p: string[]) => fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'frontend', 'src', ...p), 'utf8');
+    expect(fe('pages', 'ImageStudioPage.tsx')).not.toMatch(/'4K'|targetSize|Maximize2/);  // 주석의 경위 설명은 대상 아님
+    expect(fe('constants', 'plan-feature-intros.ts')).not.toContain('image-studio-4k');
+  });
+});
+
+describe('editOrUpscale — 수정 지시만 스위치', () => {
+  const base = { baseImageBase64: Buffer.from('jpg-bytes').toString('base64'), baseMime: 'image/jpeg', basePrompt: '원 프롬프트', aspectRatio: '3:4' };
   it('2K 수정 + engine openai = 수정 끝점(지시 + 나머지 유지 · 원본 이미지)', async () => {
     const m = await load();
     await m.editOrUpscale({ ...base, instruction: '배경을 밤으로', imageSize: '2K', engine: 'openai' });

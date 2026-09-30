@@ -13,6 +13,7 @@
  * 저장 규약(서버와 동일)
  *   같은 순위 = 같은 급(그 사이 이동은 상승이 아니다) · 순서 없음 = 등급이 아닌 값(그 값은 판정에서 빠진다).
  */
+import { useLightSurface } from '../zone/surface-tone';
 import { useEffect, useMemo, useState } from 'react';
 import { Layers, ChevronUp, ChevronDown, Loader2, Save, X, Info } from 'lucide-react';
 import JourneyModalShell from './JourneyModalShell';
@@ -49,6 +50,7 @@ function draftScore(value: string): number {
 }
 
 export default function GradeOrderModal({ open, onClose, onSaved, token }: Props) {
+  const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -160,44 +162,44 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
   return (
     <JourneyModalShell open={open} onClose={onClose} labelledBy="grade-order-modal-title" zIndexClassName="z-[75]">
       <>
-        <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
+        <div className={light ? "flex items-start gap-3 border-b border-slate-200 px-5 py-4" : "flex items-start gap-3 border-b border-white/10 px-5 py-4"}>
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500">
-            <Layers className="h-5 w-5 text-white" />
+            <Layers className={light ? "h-5 w-5 text-slate-900" : "h-5 w-5 text-white"} />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 id="grade-order-modal-title" className="text-base font-bold text-white">등급 순서 정하기</h3>
-            <p className="text-[11px] text-white/50">어느 등급이 위인지 알아야 <span className="text-amber-200">올라간 분에게만</span> 보낼 수 있습니다</p>
+            <h3 id="grade-order-modal-title" className={light ? "text-base font-bold text-slate-900" : "text-base font-bold text-white"}>등급 순서 정하기</h3>
+            <p className={light ? "text-[11px] text-slate-500" : "text-[11px] text-white/50"}>어느 등급이 위인지 알아야 <span className={light ? "text-amber-800" : "text-amber-200"}>올라간 분에게만</span> 보낼 수 있습니다</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-white/40 transition-colors hover:bg-white/5 hover:text-white/70" aria-label="닫기">
+          <button type="button" onClick={onClose} className={light ? "rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white hover:text-slate-600" : "rounded-lg p-1.5 text-white/40 transition-colors hover:bg-white/5 hover:text-white/70"} aria-label="닫기">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-sm text-white/50">
+            <div className={light ? "flex items-center justify-center gap-2 py-10 text-sm text-slate-500" : "flex items-center justify-center gap-2 py-10 text-sm text-white/50"}>
               <Loader2 className="h-4 w-4 animate-spin" /> 등급을 불러오는 중
             </div>
           ) : rows.length === 0 ? (
-            <div className="rounded-xl border border-white/10 bg-slate-950/50 p-4 text-center text-[12.5px] text-white/55">
+            <div className={light ? "rounded-xl border border-slate-200 bg-slate-100 p-4 text-center text-[12.5px] text-slate-500" : "rounded-xl border border-white/10 bg-slate-950/50 p-4 text-center text-[12.5px] text-white/55"}>
               고객 정보에 등급이 아직 없습니다. 등급이 들어오면 여기에서 순서를 정할 수 있습니다.
             </div>
           ) : (
             <>
-              <div className="flex gap-2 rounded-xl border border-white/10 bg-slate-950/50 p-3 text-[11.5px] leading-relaxed text-white/55">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300" />
+              <div className={light ? "flex gap-2 rounded-xl border border-slate-200 bg-slate-100 p-3 text-[11.5px] leading-relaxed text-slate-500" : "flex gap-2 rounded-xl border border-white/10 bg-slate-950/50 p-3 text-[11.5px] leading-relaxed text-white/55"}>
+                <Info className={light ? "mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-700" : "mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300"} />
                 <span>
-                  <strong className="text-white/80">아래가 낮은 등급, 위로 갈수록 높은 등급</strong>입니다. 초안을 매겨 뒀으니 어긋난 것만 고쳐 주세요.
-                  같은 급이면 <span className="text-white/75">같은 급으로 묶기</span>를 켜면 됩니다.
+                  <strong className={light ? "text-slate-700" : "text-white/80"}>아래가 낮은 등급, 위로 갈수록 높은 등급</strong>입니다. 초안을 매겨 뒀으니 어긋난 것만 고쳐 주세요.
+                  같은 급이면 <span className={light ? "text-slate-600" : "text-white/75"}>같은 급으로 묶기</span>를 켜면 됩니다.
                 </span>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2.5 text-[11.5px] text-white/55">
-                <span>등급이 아닌 값은 줄마다 <span className="text-white/75">등급 아님</span>을 켜서 빼세요.</span>
+              <div className={light ? "flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-[11.5px] text-slate-500" : "flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2.5 text-[11.5px] text-white/55"}>
+                <span>등급이 아닌 값은 줄마다 <span className={light ? "text-slate-600" : "text-white/75"}>등급 아님</span>을 켜서 빼세요.</span>
                 <button
                   type="button"
                   onClick={() => setRows((prev) => prev.map((r) => ({ ...r, unranked: true })))}
-                  className="ml-auto rounded-lg border border-white/10 px-2 py-1 text-[11px] text-white/60 hover:bg-white/5"
+                  className={light ? "ml-auto rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-500 hover:bg-white" : "ml-auto rounded-lg border border-white/10 px-2 py-1 text-[11px] text-white/60 hover:bg-white/5"}
                 >
                   전부 등급 아님
                 </button>
@@ -205,34 +207,34 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
 
               <ol className="space-y-1.5">
                 {rows.map((r, i) => (
-                  <li key={r.gradeValue} className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5">
-                    <span className="w-7 shrink-0 text-center text-[11px] tabular-nums text-white/35">
+                  <li key={r.gradeValue} className={light ? "flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5" : "flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5"}>
+                    <span className={light ? "w-7 shrink-0 text-center text-[11px] tabular-nums text-slate-400" : "w-7 shrink-0 text-center text-[11px] tabular-nums text-white/35"}>
                       {payload[i]?.rankOrder ?? '—'}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-semibold text-white/90">{r.gradeValue}</div>
-                      <div className="text-[10.5px] text-white/40">{r.customerCount.toLocaleString()}명</div>
+                      <div className={light ? "truncate text-[13px] font-semibold text-slate-800" : "truncate text-[13px] font-semibold text-white/90"}>{r.gradeValue}</div>
+                      <div className={light ? "text-[10.5px] text-slate-400" : "text-[10.5px] text-white/40"}>{r.customerCount.toLocaleString()}명</div>
                     </div>
-                    <label className="flex shrink-0 items-center gap-1 text-[10.5px] text-white/45">
+                    <label className={light ? "flex shrink-0 items-center gap-1 text-[10.5px] text-slate-400" : "flex shrink-0 items-center gap-1 text-[10.5px] text-white/45"}>
                       <input
                         type="checkbox"
                         checked={r.unranked}
                         onChange={(e) =>
                           setRows((prev) => prev.map((x, xi) => (xi === i ? { ...x, unranked: e.target.checked, sameAsPrev: false } : x)))
                         }
-                        className="h-3 w-3 rounded border-white/20 bg-slate-950"
+                        className={light ? "h-3 w-3 rounded border-slate-300 bg-slate-100" : "h-3 w-3 rounded border-white/20 bg-slate-950"}
                       />
                       등급 아님
                     </label>
                     {i > 0 && !r.unranked && (
-                      <label className="flex shrink-0 items-center gap-1 text-[10.5px] text-white/45">
+                      <label className={light ? "flex shrink-0 items-center gap-1 text-[10.5px] text-slate-400" : "flex shrink-0 items-center gap-1 text-[10.5px] text-white/45"}>
                         <input
                           type="checkbox"
                           checked={r.sameAsPrev}
                           onChange={(e) =>
                             setRows((prev) => prev.map((x, xi) => (xi === i ? { ...x, sameAsPrev: e.target.checked } : x)))
                           }
-                          className="h-3 w-3 rounded border-white/20 bg-slate-950"
+                          className={light ? "h-3 w-3 rounded border-slate-300 bg-slate-100" : "h-3 w-3 rounded border-white/20 bg-slate-950"}
                         />
                         위와 같은 급
                       </label>
@@ -243,7 +245,7 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
                         onClick={() => move(i, -1)}
                         disabled={i === 0}
                         aria-label={`${r.gradeValue} 한 칸 위로`}
-                        className="rounded border border-white/10 p-1 text-white/50 transition-colors hover:bg-white/10 disabled:opacity-30"
+                        className={light ? "rounded border border-slate-200 p-1 text-slate-500 transition-colors hover:bg-slate-100 disabled:opacity-30" : "rounded border border-white/10 p-1 text-white/50 transition-colors hover:bg-white/10 disabled:opacity-30"}
                       >
                         <ChevronUp className="h-3 w-3" />
                       </button>
@@ -252,7 +254,7 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
                         onClick={() => move(i, 1)}
                         disabled={i === rows.length - 1}
                         aria-label={`${r.gradeValue} 한 칸 아래로`}
-                        className="rounded border border-white/10 p-1 text-white/50 transition-colors hover:bg-white/10 disabled:opacity-30"
+                        className={light ? "rounded border border-slate-200 p-1 text-slate-500 transition-colors hover:bg-slate-100 disabled:opacity-30" : "rounded border border-white/10 p-1 text-white/50 transition-colors hover:bg-white/10 disabled:opacity-30"}
                       >
                         <ChevronDown className="h-3 w-3" />
                       </button>
@@ -260,15 +262,15 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
                   </li>
                 ))}
               </ol>
-              <p className="text-[10px] italic text-white/30">Data source: 회사 고객 데이터에 실제로 있는 등급 값과 인원수</p>
+              <p className={light ? "text-[10px] italic text-slate-400" : "text-[10px] italic text-white/30"}>Data source: 회사 고객 데이터에 실제로 있는 등급 값과 인원수</p>
             </>
           )}
 
-          {error && <p className="text-[11.5px] text-rose-200/85">{error}</p>}
+          {error && <p className={light ? "text-[11.5px] text-rose-800" : "text-[11.5px] text-rose-200/85"}>{error}</p>}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-white/10 bg-slate-900/95 px-5 py-3.5">
-          <span className="text-[11px] text-white/45">
+        <div className={light ? "flex flex-wrap items-center gap-2 border-t border-slate-200 bg-white px-5 py-3.5" : "flex flex-wrap items-center gap-2 border-t border-white/10 bg-slate-900/95 px-5 py-3.5"}>
+          <span className={light ? "text-[11px] text-slate-400" : "text-[11px] text-white/45"}>
             {rankedCount === 0
               ? '순서 없음으로 저장합니다 (등급 여정은 잠긴 채로 둡니다)'
               : rankedCount < 2

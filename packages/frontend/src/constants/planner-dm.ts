@@ -20,11 +20,11 @@ export interface PlannerDmInfo {
 }
 
 export const DM_STAGE_BADGE: Record<PlannerDmStage, { label: string; cls: string }> = {
-  pending: { label: 'DM 초안 준비 중', cls: 'bg-white/10 text-white/55 border-white/15' },
-  drafted: { label: 'DM 완성 필요', cls: 'bg-amber-500/20 text-amber-100 border-amber-400/40' },
-  incomplete: { label: 'DM 빈 자리 남음', cls: 'bg-amber-500/20 text-amber-100 border-amber-400/40' },
-  published: { label: 'DM 발행 완료', cls: 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25' },
-  stopped: { label: 'DM 발행 중지', cls: 'bg-rose-500/15 text-rose-200 border-rose-400/25' },
+  pending: { label: 'DM 초안 준비 중', cls: 'bg-slate-100 text-slate-500 border-slate-300' },
+  drafted: { label: 'DM 완성 필요', cls: 'bg-amber-100 text-amber-900 border-amber-300' },
+  incomplete: { label: 'DM 빈 자리 남음', cls: 'bg-amber-100 text-amber-900 border-amber-300' },
+  published: { label: 'DM 발행 완료', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  stopped: { label: 'DM 발행 중지', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
 };
 
 /** 사전에 없는 단계(배포 스큐)는 배지를 그리지 않는다 — undefined.cls로 화면이 죽지 않게. */

@@ -10,8 +10,8 @@ import type { ReactNode } from 'react';
 export function GuideStep({ n, children }: { n: number; children: ReactNode }) {
   return (
     <div className="flex gap-2">
-      <span className="shrink-0 w-4 h-4 mt-0.5 rounded-full bg-violet-500/30 text-violet-100 text-[10px] flex items-center justify-center font-bold">{n}</span>
-      <div className="flex-1 text-xs text-white/70 leading-relaxed">{children}</div>
+      <span className="shrink-0 w-4 h-4 mt-0.5 rounded-full bg-violet-100 text-violet-900 text-[10px] flex items-center justify-center font-bold">{n}</span>
+      <div className="flex-1 text-xs text-slate-600 leading-relaxed">{children}</div>
     </div>
   );
 }

@@ -82,12 +82,12 @@ export default function JourneyStepNotifyToggle({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-1.5 text-[11px] text-white/60">
+      <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
         <BellRing className="w-3 h-3" />
         담당자 알림 (발송 2시간 전 + 결과)
-        {saving && <Loader2 className="w-3 h-3 animate-spin text-violet-300" />}
+        {saving && <Loader2 className="w-3 h-3 animate-spin text-violet-700" />}
       </div>
-      <div className="inline-flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5 gap-0.5">
+      <div className="inline-flex items-center bg-white border border-slate-200 rounded-lg p-0.5 gap-0.5">
         <ToggleBtn
           active={state === 'on'}
           onClick={() => onSelect('on')}
@@ -113,7 +113,7 @@ export default function JourneyStepNotifyToggle({
           disabled={saving}
         />
       </div>
-      <div className="text-[10px] text-white/30 italic">
+      <div className="text-[10px] text-slate-400 italic">
         Data source: journey_steps.notify_manager_on_pretest · 첫·마지막 step 기본 ON / 중간 기본 OFF
       </div>
     </div>
@@ -131,9 +131,9 @@ function ToggleBtn({
   disabled?: boolean;
 }) {
   const activeColor = {
-    emerald: 'bg-emerald-500/30 text-emerald-100 border-emerald-400/40',
-    violet: 'bg-violet-500/30 text-violet-100 border-violet-400/40',
-    rose: 'bg-rose-500/30 text-rose-100 border-rose-400/40',
+    emerald: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+    violet: 'bg-violet-100 text-violet-900 border-violet-300',
+    rose: 'bg-rose-100 text-rose-900 border-rose-300',
   }[color];
   return (
     <button
@@ -141,7 +141,7 @@ function ToggleBtn({
       onClick={onClick}
       disabled={disabled}
       className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 border transition-all ${
-        active ? activeColor : 'border-transparent text-white/50 hover:text-white/80 hover:bg-white/5'
+        active ? activeColor : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-white'
       } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       <Icon className="w-3 h-3" />

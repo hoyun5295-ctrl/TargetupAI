@@ -139,7 +139,7 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
       onTap={(id) => focus(id)}
       phoneTop={isSlides ? (
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[12px] text-white/55">넘김 효과</span>
+          <span className="text-[12px] text-slate-500">넘김 효과</span>
           <Segmented value={s.pageEffect} onChange={(v) => s.setPageEffect(v)} options={[{ value: 'slide', label: '밀어내기' }, { value: 'flip', label: '책장 넘김' }, { value: 'fade', label: '페이드' }]} />
         </div>
       ) : undefined}
@@ -190,9 +190,9 @@ function PageChips() {
   return (
     <div className="flex flex-wrap gap-1.5 mb-3">
       {pages.map((p, i) => (
-        <button key={p.id} type="button" onClick={() => selectPage(i)} className={`h-7 px-2.5 rounded-lg text-[12px] font-semibold ${i === cur ? 'bg-violet-600 text-white' : 'bg-white/[0.05] text-white/65 hover:text-white'}`}>{i + 1}장</button>
+        <button key={p.id} type="button" onClick={() => selectPage(i)} className={`h-7 px-2.5 rounded-lg text-[12px] font-semibold ${i === cur ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:text-slate-900'}`}>{i + 1}장</button>
       ))}
-      <button type="button" onClick={() => addPage()} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold border border-dashed border-white/20 text-white/60 hover:text-white inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" />장 추가</button>
+      <button type="button" onClick={() => addPage()} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold border border-dashed border-slate-300 text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" />장 추가</button>
     </div>
   );
 }
@@ -201,9 +201,9 @@ function PageChips() {
 
 function PanelHead({ icon, title, sub, right }: { icon: React.ReactNode; title: string; sub: string; right?: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-3 pb-4 border-b border-white/10">
-      <span className="w-10 h-10 rounded-xl bg-violet-500/15 text-violet-200 flex items-center justify-center shrink-0">{icon}</span>
-      <div className="min-w-0 flex-1"><b className="block text-[15px] text-white truncate">{title}</b><span className="block text-[11.5px] text-white/50 truncate">{sub}</span></div>
+    <div className="flex items-center gap-3 pb-4 border-b border-slate-200">
+      <span className="w-10 h-10 rounded-xl bg-violet-100 text-violet-800 flex items-center justify-center shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1"><b className="block text-[15px] text-slate-900 truncate">{title}</b><span className="block text-[11.5px] text-slate-500 truncate">{sub}</span></div>
       {right}
     </div>
   );
@@ -224,7 +224,7 @@ function DmBlockPanel({ section }: { section: Section }) {
   return (
     <div>
       <PanelHead icon={<BlockIcon type={section.type} className="w-5 h-5" />} title={blockLabel(section)} sub={blockPanelSub(section.type)} />
-      <PanelBlock title="내용" right={<button type="button" onClick={() => setOpenModal('ai-improve')} className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[11.5px] font-semibold text-fuchsia-100 border border-fuchsia-400/40 bg-fuchsia-500/10 hover:bg-fuchsia-500/20"><Sparkles className="w-3.5 h-3.5" />다르게 쓰기</button>}>
+      <PanelBlock title="내용" right={<button type="button" onClick={() => setOpenModal('ai-improve')} className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[11.5px] font-semibold text-fuchsia-900 border border-fuchsia-300 bg-fuchsia-50 hover:bg-fuchsia-100"><Sparkles className="w-3.5 h-3.5" />다르게 쓰기</button>}>
         <div className="mk-dark-editor">
           <SectionPropsEditor key={section.id} section={section} onUpdate={(patch) => updateSectionProps(section.id, patch)} />
         </div>
@@ -247,27 +247,27 @@ function DmBlockPanel({ section }: { section: Section }) {
           />
         </PanelBlock>
       )}
-      <div className="grid grid-cols-2 gap-4 py-4 border-t border-white/10">
+      <div className="grid grid-cols-2 gap-4 py-4 border-t border-slate-200">
         {TEXT_SIZE_AWARE && (
           <div>
-            <div className="text-[12.5px] font-bold text-white mb-2.5">글자 크기</div>
+            <div className="text-[12.5px] font-bold text-slate-900 mb-2.5">글자 크기</div>
             <Segmented value={size} onChange={(v) => setSectionStyle(section.id, { title_size: TEXT_SIZE_PRESETS[v].title, text_size: TEXT_SIZE_PRESETS[v].text })} options={[{ value: 'sm', label: '작게' }, { value: 'md', label: '보통' }, { value: 'lg', label: '크게' }]} />
           </div>
         )}
         <div>
-          <div className="text-[12.5px] font-bold text-white mb-2.5">정렬</div>
+          <div className="text-[12.5px] font-bold text-slate-900 mb-2.5">정렬</div>
           <AlignControl value={(section.align as any) || 'center'} onChange={(v) => setSectionStyle(section.id, { align: v })} />
         </div>
       </div>
-      <div className="border-t border-white/10 pt-3">
-        <button type="button" onClick={() => setAdvanced((v) => !v)} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-white/55 hover:text-white">
+      <div className="border-t border-slate-200 pt-3">
+        <button type="button" onClick={() => setAdvanced((v) => !v)} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-slate-500 hover:text-slate-900">
           {advanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}더 고치기(분위기 · 연결부 · 표시)
         </button>
         {advanced && (
           <div className="mt-3 space-y-3 text-[12.5px]">
             {meta.supportsStyleVariants.length > 1 && (
               <Row label="분위기">
-                <select value={section.style_variant || 'default'} onChange={(e) => setSectionVariant(section.id, e.target.value)} className="h-8 px-2 rounded-lg bg-slate-950/60 border border-white/15 text-white">
+                <select value={section.style_variant || 'default'} onChange={(e) => setSectionVariant(section.id, e.target.value)} className="h-8 px-2 rounded-lg bg-slate-100 border border-slate-300 text-slate-900">
                   {meta.supportsStyleVariants.map((v) => <option key={v} value={v}>{styleVariantLabel(v)}</option>)}
                 </select>
               </Row>
@@ -279,7 +279,7 @@ function DmBlockPanel({ section }: { section: Section }) {
               <Segmented value={section.background === 'gradient' || section.background === 'glass' ? section.background : ''} onChange={(v) => setSectionStyle(section.id, { background: (v || undefined) as any })} options={[{ value: '', label: '위에서 고름' }, { value: 'gradient', label: '그라데이션' }, { value: 'glass', label: '유리' }]} />
             </Row>
             {section.background === 'gradient' && (
-              <Row label="그라데이션 끝 색"><input type="color" value={section.accent_color_2 || '#a855f7'} onChange={(e) => setSectionStyle(section.id, { accent_color_2: e.target.value })} className="w-9 h-8 rounded-lg bg-transparent border border-white/15" /></Row>
+              <Row label="그라데이션 끝 색"><input type="color" value={section.accent_color_2 || '#a855f7'} onChange={(e) => setSectionStyle(section.id, { accent_color_2: e.target.value })} className="w-9 h-8 rounded-lg bg-transparent border border-slate-300" /></Row>
             )}
             <Row label="위 블록에 겹치기"><Toggle on={!!section.pull_up} onClick={() => setSectionStyle(section.id, { pull_up: !section.pull_up })} /></Row>
             <Row label="보이기"><Toggle on={section.visible !== false} onClick={() => setSectionVisible(section.id, section.visible === false)} /></Row>
@@ -292,11 +292,11 @@ function DmBlockPanel({ section }: { section: Section }) {
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="flex items-center justify-between gap-3"><span className="text-white/65">{label}</span>{children}</div>;
+  return <div className="flex items-center justify-between gap-3"><span className="text-slate-500">{label}</span>{children}</div>;
 }
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={on} className={`w-11 h-6 rounded-full p-0.5 transition-colors ${on ? 'bg-violet-600' : 'bg-white/15'}`}>
+    <button type="button" onClick={onClick} aria-pressed={on} className={`w-11 h-6 rounded-full p-0.5 transition-colors ${on ? 'bg-violet-600' : 'bg-slate-200'}`}>
       <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${on ? 'translate-x-5' : ''}`} />
     </button>
   );
@@ -380,7 +380,7 @@ function DmGlobalPanel({ onValidate }: { onValidate: () => void }) {
   return (
     <div className="flex flex-col min-h-full">
       <PanelHead icon={<Palette className="w-5 h-5" />} title="전체 설정" sub="블록을 고르지 않았을 때 · DM 전체에 적용" />
-      <PanelBlock title="디자인 테마" hint="색·서체만 바뀌고 내용은 그대로" right={<button type="button" onClick={() => setOpenModal('design-theme')} className="text-[11.5px] font-semibold text-violet-300 hover:text-violet-200">더 보기</button>}>
+      <PanelBlock title="디자인 테마" hint="색·서체만 바뀌고 내용은 그대로" right={<button type="button" onClick={() => setOpenModal('design-theme')} className="text-[11.5px] font-semibold text-violet-700 hover:text-violet-800">더 보기</button>}>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {companyKit && (
             <ThemeTile name="브랜드 기본" swatches={[companyKit.primary_color || '#9a4f2c', companyKit.secondary_color || '#2b2320', '#ffffff']} onClick={() => applyBrandKit({ ...brandKit, ...companyKit })} />
@@ -388,41 +388,41 @@ function DmGlobalPanel({ onValidate }: { onValidate: () => void }) {
           {themes.map((t) => <ThemeTile key={t.id} name={t.name} swatches={t.swatches} onClick={() => updateBrandKit(t.kit)} />)}
         </div>
       </PanelBlock>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4 border-t border-white/10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4 border-t border-slate-200">
         <div>
-          <div className="text-[12.5px] font-bold text-white mb-2.5">브랜드 색</div>
+          <div className="text-[12.5px] font-bold text-slate-900 mb-2.5">브랜드 색</div>
           <Swatches options={[{ value: primary, color: primary, label: '지금 색' }, { value: '#2b2320', color: '#2b2320', label: '진한 갈색' }, { value: '#0f766e', color: '#0f766e', label: '청록' }]} value={primary} onChange={(v) => updateBrandKit({ primary_color: v })} custom={{ value: primary, onChange: (hex) => updateBrandKit({ primary_color: hex }) }} />
         </div>
         <div>
-          <div className="text-[12.5px] font-bold text-white mb-2.5 flex items-center justify-between">서체<button type="button" onClick={() => setOpenModal('font')} className="text-[11.5px] font-semibold text-violet-300">더 보기</button></div>
+          <div className="text-[12.5px] font-bold text-slate-900 mb-2.5 flex items-center justify-between">서체<button type="button" onClick={() => setOpenModal('font')} className="text-[11.5px] font-semibold text-violet-700">더 보기</button></div>
           <Segmented value={fonts.some((f) => f.id === fontId) ? fontId : 'pretendard'} onChange={(id) => { const f = DM_FONT_CATALOG.find((x) => x.id === id); if (f) updateBrandKit({ font_family: f.css, font_display: f.css }); }} options={fonts.map((f) => ({ value: f.id, label: f.label }))} />
         </div>
       </div>
       <PanelBlock title="보기 방식">
         <Segmented value={view} onChange={setView} options={[{ value: 'scroll', label: '세로로 길게' }, { value: 'slides', label: '옆으로 넘기기' }, { value: 'catalog', label: <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5" />책처럼(카탈로그)</span> }]} />
       </PanelBlock>
-      <PanelBlock title="버전 기록" hint="남긴 모습으로 되돌릴 수 있어요" right={<button type="button" onClick={() => { void snapshot(); }} disabled={busy === 'snap'} className="text-[11.5px] font-semibold text-violet-300 hover:text-violet-200 disabled:opacity-40">{busy === 'snap' ? '남기는 중' : '지금 모습 남기기'}</button>}>
-        {versions === null ? <Loader2 className="w-4 h-4 animate-spin text-white/40" /> : versions.length === 0 ? (
-          <div className="text-[12px] text-white/45">아직 남긴 모습이 없어요.</div>
+      <PanelBlock title="버전 기록" hint="남긴 모습으로 되돌릴 수 있어요" right={<button type="button" onClick={() => { void snapshot(); }} disabled={busy === 'snap'} className="text-[11.5px] font-semibold text-violet-700 hover:text-violet-800 disabled:opacity-40">{busy === 'snap' ? '남기는 중' : '지금 모습 남기기'}</button>}>
+        {versions === null ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" /> : versions.length === 0 ? (
+          <div className="text-[12px] text-slate-400">아직 남긴 모습이 없어요.</div>
         ) : (
           <div className="space-y-1.5">
             {versions.slice(0, 3).map((v) => (
-              <div key={v.id} className="flex items-center gap-3 h-9 px-3 rounded-lg bg-white/[0.04]">
-                <span className="text-[12px] text-white/60 w-[64px] shrink-0">{v.created_at ? new Date(v.created_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }) : ''}</span>
-                <span className="text-[12.5px] text-white/85 flex-1 truncate">{v.label || v.note || '남긴 모습'}</span>
-                <button type="button" onClick={() => { void restore(v); }} disabled={!!busy} className="text-[12px] font-semibold text-violet-300 hover:text-violet-200 disabled:opacity-40">{busy === v.id ? '되돌리는 중' : '되돌리기'}</button>
+              <div key={v.id} className="flex items-center gap-3 h-9 px-3 rounded-lg bg-white">
+                <span className="text-[12px] text-slate-500 w-[64px] shrink-0">{v.created_at ? new Date(v.created_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }) : ''}</span>
+                <span className="text-[12.5px] text-slate-700 flex-1 truncate">{v.label || v.note || '남긴 모습'}</span>
+                <button type="button" onClick={() => { void restore(v); }} disabled={!!busy} className="text-[12px] font-semibold text-violet-700 hover:text-violet-800 disabled:opacity-40">{busy === v.id ? '되돌리는 중' : '되돌리기'}</button>
               </div>
             ))}
-            {versions.length > 3 && <button type="button" onClick={() => setOpenModal('version-history')} className="text-[12px] text-white/55 hover:text-white inline-flex items-center gap-1"><History className="w-3.5 h-3.5" />전체 보기</button>}
+            {versions.length > 3 && <button type="button" onClick={() => setOpenModal('version-history')} className="text-[12px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><History className="w-3.5 h-3.5" />전체 보기</button>}
           </div>
         )}
       </PanelBlock>
       <PanelBlock title="AI로 다시 구성" hint="한 줄로 방향을 주면 블록 구성을 새로 짜요">
-        <button type="button" onClick={() => setOpenModal('ai-prompt')} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold text-fuchsia-100 border border-fuchsia-400/40 bg-fuchsia-500/10 hover:bg-fuchsia-500/20"><Wand2 className="w-4 h-4" />AI로 다시 구성하기</button>
+        <button type="button" onClick={() => setOpenModal('ai-prompt')} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold text-fuchsia-900 border border-fuchsia-300 bg-fuchsia-50 hover:bg-fuchsia-100"><Wand2 className="w-4 h-4" />AI로 다시 구성하기</button>
       </PanelBlock>
-      <div className="mt-auto pt-6 flex items-center gap-5 text-[12.5px] text-white/65">
-        <button type="button" onClick={() => setOpenModal('ab-test')} className="inline-flex items-center gap-1.5 hover:text-white"><FlaskConical className="w-4 h-4" />A/B 테스트</button>
-        <button type="button" onClick={onValidate} className="inline-flex items-center gap-1.5 hover:text-white"><ShieldCheck className="w-4 h-4" />보내기 전 점검 다시 하기</button>
+      <div className="mt-auto pt-6 flex items-center gap-5 text-[12.5px] text-slate-500">
+        <button type="button" onClick={() => setOpenModal('ab-test')} className="inline-flex items-center gap-1.5 hover:text-slate-900"><FlaskConical className="w-4 h-4" />A/B 테스트</button>
+        <button type="button" onClick={onValidate} className="inline-flex items-center gap-1.5 hover:text-slate-900"><ShieldCheck className="w-4 h-4" />보내기 전 점검 다시 하기</button>
       </div>
     </div>
   );
@@ -431,11 +431,11 @@ function DmGlobalPanel({ onValidate }: { onValidate: () => void }) {
 function ThemeTile({ name, swatches, onClick }: { name: string; swatches: [string, string, string] | string[]; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className="flex flex-col items-center gap-1.5 group">
-      <span className="w-full h-12 rounded-lg p-2 bg-white/10 group-hover:bg-white/20 flex flex-col justify-center gap-1.5" style={{ background: swatches[2] }}>
+      <span className="w-full h-12 rounded-lg p-2 bg-slate-100 group-hover:bg-slate-200 flex flex-col justify-center gap-1.5" style={{ background: swatches[2] }}>
         <span className="block h-1.5 w-3/4 rounded-full" style={{ background: swatches[0] }} />
         <span className="block h-2.5 w-1/2 rounded" style={{ background: swatches[1] }} />
       </span>
-      <span className="text-[11.5px] text-white/75">{name}</span>
+      <span className="text-[11.5px] text-slate-600">{name}</span>
     </button>
   );
 }
@@ -514,25 +514,25 @@ function CatalogLeft() {
         footer={(
           <AddBlockButton label="쪽 추가" open={menu} onToggle={() => setMenu((v) => !v)}>
             {/* ★ 2026-09-29 — 블록 추가 창과 같은 규칙: 버튼 바로 아래에 펼친다(옛: 왼쪽 칸 오른쪽 바깥에 떠서 좌우 스크롤·위쪽 잘림) */}
-            <div className="mt-2 rounded-2xl border border-violet-400/40 bg-slate-900 shadow-2xl p-3.5">
-              <div className="flex items-center justify-between mb-3"><b className="text-[14px] text-white">쪽 추가</b><button type="button" onClick={() => setMenu(false)} className="p-1 rounded-lg text-white/50 hover:text-white"><X className="w-4 h-4" /></button></div>
+            <div className="mt-2 rounded-2xl border border-violet-300 bg-white shadow-2xl p-3.5">
+              <div className="flex items-center justify-between mb-3"><b className="text-[14px] text-slate-900">쪽 추가</b><button type="button" onClick={() => setMenu(false)} className="p-1 rounded-lg text-slate-500 hover:text-slate-900"><X className="w-4 h-4" /></button></div>
               <div className="grid grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2 gap-2">
                 {CATALOG_BLOCKS.map((b) => (
-                  <button key={b.key} type="button" onClick={() => { setMenu(false); setTpl(b.key); }} className="text-left rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] px-3 py-2.5">
-                    <div className="text-[12.5px] font-bold text-white">{b.label}</div><div className="text-[11px] text-white/50">{b.desc}</div>
+                  <button key={b.key} type="button" onClick={() => { setMenu(false); setTpl(b.key); }} className="text-left rounded-xl border border-slate-200 bg-white hover:bg-slate-100 px-3 py-2.5">
+                    <div className="text-[12.5px] font-bold text-slate-900">{b.label}</div><div className="text-[11px] text-slate-500">{b.desc}</div>
                   </button>
                 ))}
               </div>
               <div className="grid grid-cols-3 gap-2 mt-2">
-                <button type="button" onClick={() => { setMenu(false); fileRef.current?.click(); }} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] flex flex-col items-center justify-center gap-1 px-1 text-[11.5px] text-white/85 text-center leading-tight break-keep"><Upload className="w-4 h-4" />완성 이미지</button>
-                <button type="button" onClick={() => { setMenu(false); setStudio(true); }} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] flex flex-col items-center justify-center gap-1 px-1 text-[11.5px] text-white/85 text-center leading-tight break-keep"><Sparkles className="w-4 h-4" />이미지 스튜디오</button>
-                <button type="button" onClick={() => { setMenu(false); setLib(true); }} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] flex flex-col items-center justify-center gap-1 px-1 text-[11.5px] text-white/85 text-center leading-tight break-keep"><FolderOpen className="w-4 h-4" />저장 소재</button>
+                <button type="button" onClick={() => { setMenu(false); fileRef.current?.click(); }} className="h-16 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 flex flex-col items-center justify-center gap-1 px-1 text-[11.5px] text-slate-700 text-center leading-tight break-keep"><Upload className="w-4 h-4" />완성 이미지</button>
+                <button type="button" onClick={() => { setMenu(false); setStudio(true); }} className="h-16 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 flex flex-col items-center justify-center gap-1 px-1 text-[11.5px] text-slate-700 text-center leading-tight break-keep"><Sparkles className="w-4 h-4" />이미지 스튜디오</button>
+                <button type="button" onClick={() => { setMenu(false); setLib(true); }} className="h-16 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 flex flex-col items-center justify-center gap-1 px-1 text-[11.5px] text-slate-700 text-center leading-tight break-keep"><FolderOpen className="w-4 h-4" />저장 소재</button>
               </div>
             </div>
           </AddBlockButton>
         )}
       />
-      <p className="text-[11px] text-white/40 mt-2.5 px-1 leading-relaxed">쪽 템플릿 4종 · 완성 이미지 올리기 · 이미지 스튜디오 · 저장 소재{uploading ? ' · 올리는 중' : ''}</p>
+      <p className="text-[11px] text-slate-400 mt-2.5 px-1 leading-relaxed">쪽 템플릿 4종 · 완성 이미지 올리기 · 이미지 스튜디오 · 저장 소재{uploading ? ' · 올리는 중' : ''}</p>
       <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { void uploadFiles(e.target.files); e.currentTarget.value = ''; }} />
       <CatalogPageModal templateKey={tpl} open={!!tpl} onClose={() => setTpl(null)} onMade={(url, chips) => { addPageWith(url, chips); setTpl(null); }} brandColor={brandColor || null} />
       <StudioInsertModal open={studio} onClose={() => setStudio(false)} onInserted={(url) => { addPageWith(url, []); setStudio(false); }} />
@@ -563,40 +563,40 @@ function CatalogPagePanel({ section }: { section: Section }) {
         <div className="grid grid-cols-4 gap-2">
           {CATALOG_BLOCKS.map((b) => (
             <button key={b.key} type="button" onClick={() => setTpl(b.key)} className="flex flex-col items-center gap-1.5 group">
-              <span className="w-full aspect-[3/4] rounded-lg bg-white/10 group-hover:bg-white/20 flex items-center justify-center text-[20px]" aria-hidden>{b.photos === 0 ? '✎' : b.photos === 2 ? '▤' : '▣'}</span>
-              <span className="text-[11px] text-white/70 text-center leading-tight">{b.label.replace(' 쪽', '')}</span>
+              <span className="w-full aspect-[3/4] rounded-lg bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center text-[20px]" aria-hidden>{b.photos === 0 ? '✎' : b.photos === 2 ? '▤' : '▣'}</span>
+              <span className="text-[11px] text-slate-600 text-center leading-tight">{b.label.replace(' 쪽', '')}</span>
             </button>
           ))}
         </div>
       </PanelBlock>
       <PanelBlock title="사진">
         <div className="flex items-center gap-3">
-          <span className="w-16 h-20 rounded-lg overflow-hidden bg-white/10 shrink-0">{url ? <img src={url} alt="" className="w-full h-full object-cover" /> : <ImageIcon className="w-5 h-5 m-auto text-white/30" />}</span>
+          <span className="w-16 h-20 rounded-lg overflow-hidden bg-slate-100 shrink-0">{url ? <img src={url} alt="" className="w-full h-full object-cover" /> : <ImageIcon className="w-5 h-5 m-auto text-slate-400" />}</span>
           <div className="flex flex-col gap-2">
-            <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/15 bg-white/[0.04] text-[12px] text-white/85 hover:bg-white/10"><Upload className="w-3.5 h-3.5" />바꾸기</button>
-            <button type="button" onClick={() => setStudio(true)} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/10 text-[12px] text-fuchsia-100 hover:bg-fuchsia-500/20"><Sparkles className="w-3.5 h-3.5" />스튜디오</button>
+            <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-300 bg-white text-[12px] text-slate-700 hover:bg-slate-100"><Upload className="w-3.5 h-3.5" />바꾸기</button>
+            <button type="button" onClick={() => setStudio(true)} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-fuchsia-300 bg-fuchsia-50 text-[12px] text-fuchsia-900 hover:bg-fuchsia-100"><Sparkles className="w-3.5 h-3.5" />스튜디오</button>
           </div>
         </div>
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; e.currentTarget.value = ''; if (!f) return; try { setImage(await uploadOne(f)); } catch { toast.error('사진을 올리지 못했어요.'); } }} />
       </PanelBlock>
-      <PanelBlock title="상품 칩" hint="쪽 아래 알약 · 가격·링크는 여기서만" right={chips.length < 4 ? <button type="button" onClick={() => setChips([...chips, { label: '', price: '', url: '' }])} className="text-[11.5px] font-semibold text-violet-300 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" />넣기</button> : undefined}>
-        {chips.length === 0 && <div className="text-[12px] text-white/45">넣지 않아도 돼요. 넣으면 휴대폰에서 누를 수 있는 알약이 쪽 아래에 붙어요.</div>}
+      <PanelBlock title="상품 칩" hint="쪽 아래 알약 · 가격·링크는 여기서만" right={chips.length < 4 ? <button type="button" onClick={() => setChips([...chips, { label: '', price: '', url: '' }])} className="text-[11.5px] font-semibold text-violet-700 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" />넣기</button> : undefined}>
+        {chips.length === 0 && <div className="text-[12px] text-slate-400">넣지 않아도 돼요. 넣으면 휴대폰에서 누를 수 있는 알약이 쪽 아래에 붙어요.</div>}
         <div className="space-y-2">
           {chips.map((c, i) => (
-            <div key={i} className="rounded-xl bg-white/[0.04] border border-white/10 p-2 space-y-1.5">
+            <div key={i} className="rounded-xl bg-white border border-slate-200 p-2 space-y-1.5">
               <div className="flex gap-1.5">
-                <input value={c.label} placeholder="상품명" onChange={(e) => setChips(chips.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className="flex-1 min-w-0 h-8 px-2.5 rounded-lg bg-slate-950/60 border border-white/15 text-[12.5px] text-white outline-none" />
-                <input value={c.price || ''} placeholder="가격" onChange={(e) => setChips(chips.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))} className="w-24 h-8 px-2.5 rounded-lg bg-slate-950/60 border border-white/15 text-[12.5px] text-amber-200 font-bold outline-none" />
-                <button type="button" onClick={() => setChips(chips.filter((_, j) => j !== i))} className="w-8 h-8 rounded-lg text-white/50 hover:text-rose-300 flex items-center justify-center" aria-label="칩 빼기"><X className="w-4 h-4" /></button>
+                <input value={c.label} placeholder="상품명" onChange={(e) => setChips(chips.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className="flex-1 min-w-0 h-8 px-2.5 rounded-lg bg-slate-100 border border-slate-300 text-[12.5px] text-slate-900 outline-none" />
+                <input value={c.price || ''} placeholder="가격" onChange={(e) => setChips(chips.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))} className="w-24 h-8 px-2.5 rounded-lg bg-slate-100 border border-slate-300 text-[12.5px] text-amber-800 font-bold outline-none" />
+                <button type="button" onClick={() => setChips(chips.filter((_, j) => j !== i))} className="w-8 h-8 rounded-lg text-slate-500 hover:text-rose-700 flex items-center justify-center" aria-label="칩 빼기"><X className="w-4 h-4" /></button>
               </div>
-              <div className="flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5 text-white/40" /><input value={c.url || ''} placeholder="상품 주소(선택)" onChange={(e) => setChips(chips.map((x, j) => (j === i ? { ...x, url: e.target.value.trim() } : x)))} className="flex-1 min-w-0 h-8 px-2.5 rounded-lg bg-slate-950/60 border border-white/15 text-[12px] text-white/85 outline-none" /></div>
+              <div className="flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5 text-slate-400" /><input value={c.url || ''} placeholder="상품 주소(선택)" onChange={(e) => setChips(chips.map((x, j) => (j === i ? { ...x, url: e.target.value.trim() } : x)))} className="flex-1 min-w-0 h-8 px-2.5 rounded-lg bg-slate-100 border border-slate-300 text-[12px] text-slate-700 outline-none" /></div>
             </div>
           ))}
         </div>
       </PanelBlock>
       <div className="mt-auto pt-6 flex items-center gap-3">
         <button type="button" onClick={() => setTpl('one')} className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-violet-600 hover:bg-violet-500"><Wand2 className="w-4 h-4" />이 쪽 다시 만들기</button>
-        <span className="text-[12px] text-white/50">크레딧 0</span>
+        <span className="text-[12px] text-slate-500">크레딧 0</span>
       </div>
       <CatalogPageModal templateKey={tpl} open={!!tpl} onClose={() => setTpl(null)} onMade={(u, c) => { setImage(u); if (c.length) setChips(c); setTpl(null); }} brandColor={brandColor || null} />
       <StudioInsertModal open={studio} onClose={() => setStudio(false)} onInserted={(u) => { setImage(u); setStudio(false); }} />

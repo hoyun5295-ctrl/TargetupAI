@@ -244,7 +244,7 @@ export default function LifecycleMapCanvas({
         type="button"
         data-anchor={quiet.map((j) => `j:${j.id}`).join(' ')}
         onClick={() => toggle(setShowQuiet, groupKey)}
-        className="w-full rounded-lg border border-dashed border-white/15 px-3 py-2 text-left text-[11px] text-white/50 hover:bg-white/[0.04] transition-colors"
+        className="w-full rounded-lg border border-dashed border-slate-300 px-3 py-2 text-left text-[11px] text-slate-500 hover:bg-white transition-colors"
       >
         {parts} 펼쳐 보기
       </button>
@@ -252,22 +252,22 @@ export default function LifecycleMapCanvas({
   };
 
   const renderGhost = (g: LifecycleMapData['ghosts'][number]) => (
-    <div key={g.triggerEvent} data-anchor={`g:${g.triggerEvent}`} className="rounded-xl border border-dashed border-white/20 bg-white/[0.02] p-3">
-      <div className="text-xs font-semibold text-white/75">{g.label} 여정이 없어요</div>
+    <div key={g.triggerEvent} data-anchor={`g:${g.triggerEvent}`} className="rounded-xl border border-dashed border-slate-300 bg-white p-3">
+      <div className="text-xs font-semibold text-slate-600">{g.label} 여정이 없어요</div>
       {g.available ? (
         <>
-          <p className="mt-1 text-[11px] leading-relaxed text-white/45">이 구간에 들어온 고객에게 보낼 여정이 아직 없습니다.</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-400">이 구간에 들어온 고객에게 보낼 여정이 아직 없습니다.</p>
           <button
             type="button"
             onClick={() => onCreate(g.triggerEvent, g.createMode)}
-            className="mt-2 h-8 w-full rounded-lg text-[11px] font-semibold text-violet-100 bg-violet-600/80 hover:bg-violet-500 inline-flex items-center justify-center gap-1 transition-colors"
+            className="mt-2 h-8 w-full rounded-lg text-[11px] font-semibold text-violet-900 bg-violet-200 hover:bg-violet-500 inline-flex items-center justify-center gap-1 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" /> {g.label} 여정 만들기
           </button>
-          <p className="mt-1 text-center text-[11px] text-white/35">초안 만들기 {data.costs.generate} 크레딧 · 켜기 전에는 보내지 않아요</p>
+          <p className="mt-1 text-center text-[11px] text-slate-400">초안 만들기 {data.costs.generate} 크레딧 · 켜기 전에는 보내지 않아요</p>
         </>
       ) : (
-        <p className="mt-1 flex items-start gap-1.5 text-[11px] leading-relaxed text-white/45">
+        <p className="mt-1 flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-400">
           <Lock className="w-3 h-3 mt-0.5 shrink-0" />
           <span>{g.reason || '데이터 연동이 필요해요.'}</span>
         </p>
@@ -282,10 +282,10 @@ export default function LifecycleMapCanvas({
       aria-expanded={!closedLanes.has(groupKey)}
       className="w-full flex items-center gap-2 py-2 text-left md:cursor-default"
     >
-      <span className="text-xs font-semibold tracking-wide text-white/80">{label}</span>
-      <span className="text-[11px] text-white/40 tabular-nums">{count}</span>
-      {hint && <span className="hidden md:inline text-[11px] text-white/35 truncate">{hint}</span>}
-      <ChevronDown className={`md:hidden ml-auto w-4 h-4 text-white/40 transition-transform ${closedLanes.has(groupKey) ? '' : 'rotate-180'}`} />
+      <span className="text-xs font-semibold tracking-wide text-slate-700">{label}</span>
+      <span className="text-[11px] text-slate-400 tabular-nums">{count}</span>
+      {hint && <span className="hidden md:inline text-[11px] text-slate-400 truncate">{hint}</span>}
+      <ChevronDown className={`md:hidden ml-auto w-4 h-4 text-slate-400 transition-transform ${closedLanes.has(groupKey) ? '' : 'rotate-180'}`} />
     </button>
   );
 
@@ -301,7 +301,7 @@ export default function LifecycleMapCanvas({
         <div className={`${closedLanes.has(groupKey) ? 'hidden' : 'grid'} md:grid gap-3 grid-cols-1 md:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]`}>
           {shown.map(renderCard)}
           {renderQuiet(quiet, groupKey)}
-          {shown.length === 0 && quiet.length === 0 && <div className="text-[11px] text-white/35 py-2">조건에 맞는 여정이 없어요.</div>}
+          {shown.length === 0 && quiet.length === 0 && <div className="text-[11px] text-slate-400 py-2">조건에 맞는 여정이 없어요.</div>}
         </div>
       </section>
     );
@@ -346,7 +346,7 @@ export default function LifecycleMapCanvas({
           const count = inLane.filter(matches).length;
           return (
             <section key={lane.key} className="min-w-0">
-              <div className="md:sticky md:top-0 z-[3] bg-slate-950/95 backdrop-blur-sm border-b border-white/10 mb-3">
+              <div className="md:sticky md:top-0 z-[3] bg-slate-100 backdrop-blur-sm border-b border-slate-200 mb-3">
                 {laneHead(groupKey, lane.label, count)}
               </div>
               <div className={`${closedLanes.has(groupKey) ? 'hidden' : 'flex'} md:flex flex-col gap-3`}>
@@ -362,10 +362,10 @@ export default function LifecycleMapCanvas({
       {/* 선 위 이름표 — 누르면 사유 · 숫자 */}
       {isDesktop && geo.map((g) => {
         const tone = g.line.tier === 'solid'
-          ? 'border-violet-400/40 bg-slate-900 text-violet-100'
+          ? 'border-violet-300 bg-white text-violet-900'
           : g.line.tier === 'warn'
-            ? 'border-amber-400/50 bg-slate-900 text-amber-100'
-            : 'border-white/20 bg-slate-900 text-white/60';
+            ? 'border-amber-300 bg-white text-amber-900'
+            : 'border-slate-300 bg-white text-slate-500';
         const text = g.line.tier === 'solid' ? `이어받음 ${countText(g.line.handedOver)}` : LINE_SHORT[g.line.state];
         return (
           <button
@@ -389,29 +389,29 @@ export default function LifecycleMapCanvas({
           <div
             role="dialog"
             aria-label="선 설명"
-            className="absolute z-[4] rounded-xl border border-white/15 bg-slate-900 p-3 shadow-2xl shadow-black/50"
+            className="absolute z-[4] rounded-xl border border-slate-300 bg-white p-3 shadow-2xl shadow-black/50"
             style={{ left, top: openLine.my + 16, width }}
           >
             <div className="flex items-start gap-2">
-              <div className="flex-1 min-w-0 text-xs font-semibold text-white">
+              <div className="flex-1 min-w-0 text-xs font-semibold text-slate-900">
                 {from?.name || '여정'} → {ln.toLabel} 여정
               </div>
-              <button type="button" onClick={() => setOpenLineId(null)} className="p-0.5 rounded text-white/50 hover:text-white hover:bg-white/10" aria-label="닫기">
+              <button type="button" onClick={() => setOpenLineId(null)} className="p-0.5 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            <p className={`mt-1.5 text-[11px] leading-relaxed ${ln.tier === 'warn' ? 'text-amber-200' : 'text-white/65'}`}>{ln.reason}</p>
+            <p className={`mt-1.5 text-[11px] leading-relaxed ${ln.tier === 'warn' ? 'text-amber-800' : 'text-slate-500'}`}>{ln.reason}</p>
             <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <div className="rounded-lg bg-white/[0.04] px-2 py-1.5">
-                <div className="text-[11px] text-white/45">구매 확인(30일)</div>
-                <div className="text-xs font-semibold text-emerald-300 tabular-nums">{ln.goalMet.toLocaleString('ko-KR')}명</div>
+              <div className="rounded-lg bg-white px-2 py-1.5">
+                <div className="text-[11px] text-slate-400">구매 확인(30일)</div>
+                <div className="text-xs font-semibold text-emerald-700 tabular-nums">{ln.goalMet.toLocaleString('ko-KR')}명</div>
               </div>
-              <div className="rounded-lg bg-white/[0.04] px-2 py-1.5">
-                <div className="text-[11px] text-white/45">다음 여정에 들어옴</div>
-                <div className="text-xs font-semibold text-violet-200 tabular-nums">{ln.handedOver == null ? '측정 전' : `${ln.handedOver.toLocaleString('ko-KR')}명`}</div>
+              <div className="rounded-lg bg-white px-2 py-1.5">
+                <div className="text-[11px] text-slate-400">다음 여정에 들어옴</div>
+                <div className="text-xs font-semibold text-violet-800 tabular-nums">{ln.handedOver == null ? '측정 전' : `${ln.handedOver.toLocaleString('ko-KR')}명`}</div>
               </div>
             </div>
-            <p className="mt-1.5 text-[11px] leading-relaxed text-white/40">
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
               {ln.handedOver == null
                 ? '다음 여정에 들어온 고객은 이번 업데이트 뒤 들어온 고객부터 셉니다.'
                 : ln.handedOver === 0
@@ -424,11 +424,11 @@ export default function LifecycleMapCanvas({
               </button>
             )}
             <div className="mt-1.5 flex gap-1.5">
-              <button type="button" onClick={() => { setOpenLineId(null); onFocusJourney(ln.fromJourneyId); }} className="flex-1 h-8 rounded-lg text-[11px] font-medium text-white/80 border border-white/15 hover:bg-white/10 transition-colors">
+              <button type="button" onClick={() => { setOpenLineId(null); onFocusJourney(ln.fromJourneyId); }} className="flex-1 h-8 rounded-lg text-[11px] font-medium text-slate-700 border border-slate-300 hover:bg-slate-100 transition-colors">
                 보내는 여정
               </button>
               {ln.toJourneyId && (
-                <button type="button" onClick={() => { setOpenLineId(null); onFocusJourney(ln.toJourneyId!); }} className="flex-1 h-8 rounded-lg text-[11px] font-medium text-white/80 border border-white/15 hover:bg-white/10 transition-colors">
+                <button type="button" onClick={() => { setOpenLineId(null); onFocusJourney(ln.toJourneyId!); }} className="flex-1 h-8 rounded-lg text-[11px] font-medium text-slate-700 border border-slate-300 hover:bg-slate-100 transition-colors">
                   받는 여정
                 </button>
               )}

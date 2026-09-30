@@ -58,13 +58,15 @@ import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
 // ★ 2026-09-27 만들기 개편 — 첫 화면(만들기 카드 · 다른 방법 접힘 · 카드칩 · 상세 창) · 수정 화면(DmEditScreen) · 보내기 창
 import '../styles/make.css';
-import { ArrowLeft, Link as LinkIcon, Layers, BookOpen, Smartphone } from 'lucide-react';
+import { ArrowLeft, Link as LinkIcon, Layers, BookOpen, Smartphone, Sparkles, Package, FilePlus2, ChevronDown } from 'lucide-react';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { SurfaceToneProvider } from '../components/zone/surface-tone';
+import { zoneModule } from '../constants/ai-operator-modules';
 import DmEditScreen from '../components/make/DmEditScreen';
 import MakeSendModal from '../components/make/MakeSendModal';
 import DmDetailModal from '../components/make/DmDetailModal';
-import { MakeHeroCard, OtherMethods, ListHead, DmChip, Meter, fmtDate } from '../components/make/HomeParts';
+import { OtherMethods, ListHead, DmChip, Meter, fmtDate } from '../components/make/HomeParts';
 import { dmChipStatus, type ChipStatus } from '../utils/make-flow';
-import { MK_HEADER, MK_HEADER_ROW, MK_BACK, MK_TILE, MK_TITLE, MK_SUB } from '../utils/make-ui';
 
 const api = axios.create({ baseURL: '/api' });
 attachCreditInterceptor(api);
@@ -691,7 +693,9 @@ export default function DmBuilderPage() {
     //   [보내기] = 보내기 창(DM 카드 · 이메일 짝) · 플래너에서 온 DM = 옛 발행 흐름(발행 뒤 문자 실림 확인) 그대로.
     const st = useDmBuilderStore.getState();
     const heroSub = String(((st.pages.flatMap((pg) => pg.sections).find((x) => x.type === 'hero')?.props) as any)?.sub_copy || '');
+    // ★ 2026-09-30 AI 존 대개편: 수정 화면에서 여는 공용 창(발행·확인)도 밝은 짝 — 문맥을 바깥에서 내린다
     return (
+      <SurfaceToneProvider tone="light">
       <div className="dm-builder" style={{ minHeight: '100vh' }}>
         <DmEditScreen
           onBack={handleBackRequest}
@@ -828,43 +832,28 @@ export default function DmBuilderPage() {
 
         {toast && <Toast toast={toast} />}
       </div>
+      </SurfaceToneProvider>
     );
   }
 
   // ── 요금제 게이팅 (CT-17, mobile_dm) ──
   if (planLocked) {
+    // ★ 2026-09-30 AI 존 대개편: 잠김 화면도 같은 머리·밝은 작업대(옛 짙은 인라인 화면 대체 · 문구·이동은 그대로)
     return (
-      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#020617,#0f172a,#020617)', fontFamily: 'var(--dm-font-primary)', color: '#fff', display: 'flex', flexDirection: 'column' }}>
-        <header style={{ background: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8, color: '#fff' }} title="AI Operator로">←</button>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: '#fff', margin: 0 }}>모바일 DM 빌더</h1>
-          <span style={{ fontSize: 11, padding: '3px 8px', background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', borderRadius: 12, fontWeight: 700 }}>PRO</span>
-        </header>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-          <div style={{ maxWidth: 480, textAlign: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '40px 32px', boxShadow: '0 10px 30px rgba(0,0,0,0.4)' }}>
-            <div style={{ width: 64, height: 64, borderRadius: 16, margin: '0 auto 20px', background: 'linear-gradient(135deg,#a78bfa,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>📱</div>
-            <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 800, color: '#fff' }}>프로 요금제 전용 기능</h2>
-            <p style={{ margin: '0 0 24px', fontSize: 14, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6 }}>
-              {planLocked.msg}<br />
-              업그레이드하시면 AI 구조·카피 자동 생성, 검수 10종, A/B 테스트까지 바로 이용하실 수 있어요.
-            </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-              <button
-                onClick={() => navigate('/pricing')}
-                style={{ height: 44, padding: '0 24px', background: 'rgba(139,92,246,0.3)', color: '#ddd6fe', border: '1px solid rgba(139,92,246,0.5)', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
-              >
-                요금제 안내 보기
-              </button>
-              <button
-                onClick={() => navigate('/ai-operator')}
-                style={{ height: 44, padding: '0 20px', background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
-              >
-                AI Operator로
-              </button>
-            </div>
+      <ZoneFrame moduleId="dm">
+        <div className="max-w-md mx-auto mt-8 text-center rounded-2xl bg-white border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_32px_-16px_rgba(15,23,42,0.25)] px-8 py-10">
+          <div className="w-16 h-16 rounded-2xl mx-auto mb-5 bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center text-[28px]">📱</div>
+          <h2 className="text-[19px] font-bold text-slate-900 mb-2">프로 요금제 전용 기능</h2>
+          <p className="text-[14px] text-slate-600 leading-relaxed mb-6">
+            {planLocked.msg}<br />
+            업그레이드하시면 AI 구조·카피 자동 생성, 검수 10종, A/B 테스트까지 바로 이용하실 수 있어요.
+          </p>
+          <div className="flex gap-2.5 justify-center">
+            <button onClick={() => navigate('/pricing')} className="h-11 px-6 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white text-[14px] font-bold transition-colors">요금제 안내 보기</button>
+            <button onClick={() => navigate('/ai-operator')} className="h-11 px-5 rounded-[10px] border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[14px] font-semibold transition-colors">AI Operator로</button>
           </div>
         </div>
-      </div>
+      </ZoneFrame>
     );
   }
 
@@ -879,62 +868,104 @@ export default function DmBuilderPage() {
     avg_ctr_30d: 0,
   };
   const metricsLoading = !overviewTried;
+  const dmOneLine = zoneModule('dm').oneLine!;
+  const startOneLine = () => {
+    const t = naturalLanguage.trim();
+    if (t && !generating) setPendingGen({ prompt: t, desc: `"${t}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` });
+  };
   return (
-    <div className="relative min-h-screen bg-slate-950 text-white" style={{ fontFamily: 'var(--dm-font-primary)' }}>
-      {/* ★ 2026-09-27 만들기 개편 — 첫 화면 머리(목업 마 ①) · 단축 URL 은 그대로 */}
-      <header className={MK_HEADER}>
-        <div className={`${MK_HEADER_ROW} max-w-[1280px] mx-auto`}>
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={MK_BACK} aria-label="돌아가기"><ArrowLeft className="w-5 h-5" /></button>
-          <div className={`${MK_TILE} bg-gradient-to-br from-violet-500 to-fuchsia-500`}><Smartphone className="w-5 h-5 text-white" /></div>
-          <div className="min-w-0 flex-1">
-            <h1 className={MK_TITLE}>모바일 DM</h1>
-            <p className={MK_SUB}>휴대폰으로 보는 행사 페이지를 만들어 문자로 보내요</p>
-          </div>
-          {/* ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능 */}
-          <button onClick={() => setShortLinkOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold text-white/85 hover:bg-white/10"><LinkIcon className="w-4 h-4" />단축 URL</button>
-        </div>
-      </header>
-
+    <ZoneFrame
+      moduleId="dm"
+      aux={{ label: '단축 URL', icon: LinkIcon, onClick: () => setShortLinkOpen(true) }}
+      command={{
+        line: {
+          value: naturalLanguage,
+          onChange: setNaturalLanguage,
+          onSubmit: startOneLine,
+          placeholder: dmOneLine.placeholder,
+          verb: dmOneLine.verb,
+          icon: Sparkles,
+          busy: generating,
+        },
+        stats: metricsLoading ? [{ label: '요약', value: '불러오는 중' }] : [
+          { label: '보낸 DM', value: ov.published_dm.toLocaleString() },
+          { label: '30일 열람', value: ov.total_views_30d.toLocaleString() },
+          { label: '30일 응답', value: ov.total_responses_30d.toLocaleString() },
+          { label: '평균 클릭률', value: `${ov.avg_ctr_30d}%` },
+        ],
+        alts: [
+          { label: '재료로 만들기', icon: Package, onClick: () => navigate('/quick-campaign?channel=dm'), disabled: generating },
+          { label: '블록으로 직접', icon: Layers, onClick: handleStartBlockBuild, disabled: generating },
+          { label: '카탈로그 DM', icon: BookOpen, onClick: () => navigate('/quick-campaign?channel=catalog'), disabled: generating },
+        ],
+        more: [
+          { label: '질문 몇 개로 정확하게', icon: Wand2, onClick: () => { if (!generating) setOneStepOpen(true); } },
+          { label: '빈 화면에서 시작', icon: FilePlus2, onClick: handleCreateNew },
+          { label: '이미지 · 완성 이미지 · 저장 소재', icon: ChevronDown, onClick: () => setOtherOpen(true), divider: true },
+        ],
+      }}
+      blocks={[
+        ...(legacyDmError ? [{ text: legacyDmError }] : []),
+        ...(loadError ? [{ text: loadError, tone: 'rose' as const }] : []),
+      ]}
+    >
       <DmShortLinkModal open={shortLinkOpen} onClose={() => setShortLinkOpen(false)} />
+      <div className="space-y-3">
+          {/* ★ D216+ 6 sub-agent 진행 시각 효과 (generating 활성 시점만 표시) */}
+        {generating && generationStep >= 0 && (
+            <div style={{ marginBottom: 12, padding: 16, background: '#ffffff', border: '1px solid rgba(15,23,42,0.08)', borderRadius: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#0F172A', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid #a855f7', borderTopColor: 'transparent', borderRadius: '50%', animation: 'dm-spin 1s linear infinite' }} />
+                AI 자동 생성 진행 중
+              </div>
+              <style>{`@keyframes dm-spin { to { transform: rotate(360deg); } }`}</style>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {SUB_AGENTS.map((agent, i) => {
+                  const isDone = i < generationStep;
+                  const isActive = i === generationStep;
+                  const isPending = i > generationStep;
+                  return (
+                    <div key={agent.label} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                      background: isActive ? `rgba(168, 85, 247, 0.15)` : isDone ? 'rgba(16, 185, 129, 0.08)' : 'rgba(15,23,42,0.02)',
+                      border: `1px solid ${isActive ? 'rgba(168, 85, 247, 0.5)' : isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(15,23,42,0.05)'}`,
+                      borderRadius: 8,
+                      opacity: isPending ? 0.4 : 1,
+                      transition: 'all 0.3s',
+                    }}>
+                      <div style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#fff', background: agent.gradient, flexShrink: 0 }}>
+                        {isDone ? '✓' : isActive ? '◐' : i + 1}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#0F172A' }}>{agent.label}</div>
+                        <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.5)', marginTop: 1 }}>{agent.desc}</div>
+                      </div>
+                      {isActive && (
+                        <span style={{ display: 'inline-block', width: 10, height: 10, border: '2px solid #4F46E5', borderTopColor: 'transparent', borderRadius: '50%', animation: 'dm-spin 0.8s linear infinite', flexShrink: 0 }} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-      {legacyDmError && (
-        <div style={{ maxWidth: 1100, margin: '16px auto', padding: '12px 16px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, color: '#fde68a', fontSize: 13 }}>
-          {legacyDmError}
-        </div>
-      )}
-      {loadError && (
-        <div style={{ maxWidth: 1100, margin: '16px auto', padding: '12px 16px', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: 8, color: '#fca5a5', fontSize: 13 }}>
-          {loadError}
-        </div>
-      )}
 
-      <main className="max-w-[1280px] mx-auto px-4 md:px-12 py-6 space-y-3">
-        {/* ★ 2026-09-27 만들기 개편 — 입구 하나(만들기) + 작은 링크 2 · 쓰던 입구는 지우지 않고 "다른 방법"으로 접는다(결재 ④ · 핸들러 무변경) */}
-        <MakeHeroCard
-          title="재료만 넣으면 DM이 완성돼요"
-          desc="사진·글·홈페이지 주소, 가진 것 무엇이든 넣으세요. 몰을 연동했다면 상품도 바로 불러와요."
-          links={[
-            { icon: <Layers className="w-3.5 h-3.5" />, label: '블록으로 직접 만들기', onClick: handleStartBlockBuild },
-            { icon: <BookOpen className="w-3.5 h-3.5" />, label: '카탈로그 DM 만들기', onClick: () => navigate('/quick-campaign?channel=catalog') },
-          ]}
-          onMake={() => navigate('/quick-campaign?channel=dm')}
-          disabled={generating}
-        />
         <OtherMethods open={otherOpen} onToggle={() => setOtherOpen((v) => !v)} summary="한 줄로 자동 생성 · 질문 몇 개로 · 이미지로 불러오기 · 저장 소재에서">
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-          <button type="button" onClick={handleCreateNew} className="text-[12px] text-white/50 hover:text-white underline underline-offset-4">빈 화면에서 시작</button>
+          <button type="button" onClick={handleCreateNew} className="text-[12px] text-slate-500 hover:text-slate-900 underline underline-offset-4">빈 화면에서 시작</button>
         </div>
         {/* 자연어 한 줄 입력 + 블록으로 만들기 + 완성 이미지 (★ 2026-09-16 블록 조립 전환) */}
         <div style={{
-          background: 'linear-gradient(135deg, rgba(217,70,239,0.10), rgba(168,85,247,0.08), rgba(99,102,241,0.10))',
-          border: '1px solid rgba(255,255,255,0.1)',
+          background: '#ffffff',
+          border: '1px solid rgba(15,23,42,0.1)',
           borderRadius: 16,
           padding: 20,
           marginBottom: 20,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <span style={{ fontSize: 18 }}>✨</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>어떻게 만들까요</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>어떻게 만들까요</span>
           </div>
           {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-3" />}
           {/* 좌: 한 줄 입력 + 자동 생성 · 우: 만드는 방법 스택 */}
@@ -949,8 +980,8 @@ export default function DmBuilderPage() {
           `}</style>
           <div className="dm-hub-grid">
             {/* 좌 — 프롬프트 입력 */}
-            <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>만들 내용을 한 줄로 적어주세요</div>
+            <div style={{ background: 'rgba(15,23,42,0.05)', border: '1px solid rgba(15,23,42,0.14)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(15,23,42,0.85)' }}>만들 내용을 한 줄로 적어주세요</div>
               <textarea
                 value={naturalLanguage}
                 onChange={(e) => setNaturalLanguage(e.target.value)}
@@ -964,9 +995,9 @@ export default function DmBuilderPage() {
                 placeholder={'예: "봄 신상 프로모션, 30대 여성, 추첨 이벤트"\nEnter = AI 자동 생성 · Shift+Enter = 줄바꿈'}
                 style={{
                   flex: 1, minHeight: 128, padding: '12px 14px',
-                  background: 'rgba(2,6,23,0.5)',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  borderRadius: 10, fontSize: 14, lineHeight: 1.6, color: '#fff', outline: 'none',
+                  background: '#ffffff',
+                  border: '1px solid rgba(15,23,42,0.15)',
+                  borderRadius: 10, fontSize: 14, lineHeight: 1.6, color: '#0F172A', outline: 'none',
                   resize: 'none', opacity: generating ? 0.6 : 1,
                 }}
               />
@@ -977,20 +1008,20 @@ export default function DmBuilderPage() {
                 onClick={() => { if (!generating) setOneStepOpen(true); }}
                 disabled={generating}
                 className={autoBuild === true
-                  ? 'w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] text-white/55 text-[12px] py-1.5 hover:text-white hover:bg-white/5 disabled:opacity-40 transition-colors'
-                  : 'w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-fuchsia-400/40 bg-fuchsia-500/10 text-fuchsia-100 text-sm font-medium py-2.5 hover:bg-fuchsia-500/20 disabled:opacity-40 transition-colors'}
+                  ? 'w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] text-slate-500 text-[12px] py-1.5 hover:text-slate-900 hover:bg-white disabled:opacity-40 transition-colors'
+                  : 'w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-900 text-sm font-medium py-2.5 hover:bg-fuchsia-100 disabled:opacity-40 transition-colors'}
               >
                 <Wand2 className="w-4 h-4" />
                 {autoBuild === true ? '더 정확하게 만들기(질문 몇 개)' : '질문 몇 개로 정확하게 만들기'}
-                <span className={autoBuild === true ? 'text-[11px] text-white/35' : 'text-[11px] text-fuchsia-200/70'}>생성 5 + 오토설계 50</span>
+                <span className={autoBuild === true ? 'text-[11px] text-slate-400' : 'text-[11px] text-fuchsia-800'}>생성 5 + 오토설계 50</span>
               </button>
               <button
                 onClick={() => { if (naturalLanguage.trim() && !generating) { setPendingGen({ prompt: naturalLanguage.trim(), desc: `"${naturalLanguage.trim()}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` }); } }}
                 disabled={!naturalLanguage.trim() || generating}
                 style={{
                   height: 46,
-                  background: naturalLanguage.trim() && !generating ? 'linear-gradient(135deg, #a855f7, #d946ef)' : 'rgba(255,255,255,0.05)',
-                  color: '#fff', border: 'none', borderRadius: 10,
+                  background: naturalLanguage.trim() && !generating ? '#4F46E5' : 'rgba(15,23,42,0.05)',
+                  color: naturalLanguage.trim() && !generating ? '#fff' : '#64748B', border: 'none', borderRadius: 10,
                   fontSize: 14, fontWeight: 700,
                   cursor: naturalLanguage.trim() && !generating ? 'pointer' : 'not-allowed',
                   opacity: naturalLanguage.trim() && !generating ? 1 : 0.4,
@@ -1009,15 +1040,15 @@ export default function DmBuilderPage() {
                   disabled={generating}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', textAlign: 'left',
-                    background: 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(217,70,239,0.12))',
-                    border: '1px solid rgba(168,85,247,0.45)', borderRadius: 12,
+                    background: '#EEF2FF',
+                    border: '1px solid #C7D2FE', borderRadius: 12,
                     cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
                   }}
                 >
                   <span style={{ fontSize: 20, lineHeight: 1 }}>🧱</span>
                   <span style={{ minWidth: 0 }}>
-                    <span style={{ display: 'block', fontSize: 13, fontWeight: 800, color: '#fff' }}>블록으로 만들기</span>
-                    <span style={{ display: 'block', fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 2 }}>고르면 필요한 것만 물어봐요</span>
+                    <span style={{ display: 'block', fontSize: 13, fontWeight: 800, color: '#0F172A' }}>블록으로 만들기</span>
+                    <span style={{ display: 'block', fontSize: 11, color: 'rgba(15,23,42,0.6)', marginTop: 2 }}>고르면 필요한 것만 물어봐요</span>
                   </span>
                 </button>
               )}
@@ -1044,7 +1075,7 @@ export default function DmBuilderPage() {
                   }
                 }}
                 disabled={generating}
-                className="w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-violet-400/40 bg-violet-500/10 text-violet-100 text-sm font-medium py-2.5 hover:bg-violet-500/20 disabled:opacity-40 transition-colors"
+                className="w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-violet-300 bg-violet-50 text-violet-900 text-sm font-medium py-2.5 hover:bg-violet-100 disabled:opacity-40 transition-colors"
               />
               {/* ★ 2026-09-06 S6 재료 입구 — 이미지 몇 장 + 행사 내용 → 서버가 초안 DM 을 만들고(아웃리치 엔진) 그 id 를 그대로 연다 · 기존 두 버튼은 무접촉 */}
               <MaterialQuickPanel
@@ -1065,19 +1096,19 @@ export default function DmBuilderPage() {
                 style={{
                   flex: 1, minHeight: 92, padding: '14px 16px',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, textAlign: 'center',
-                  background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
+                  background: 'rgba(15,23,42,0.04)', border: '1px dashed rgba(15,23,42,0.22)', borderRadius: 12,
                   cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
                 }}
               >
                 <span style={{ fontSize: 22, lineHeight: 1 }}>🖼️</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 이미지로 만들기'}</span>
-                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>이미지 그대로 슬라이드 · PC는 책 펼침</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{uploadingImages ? '업로드 중...' : '완성 이미지로 만들기'}</span>
+                <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.55)', lineHeight: 1.5 }}>이미지 그대로 슬라이드 · PC는 책 펼침</span>
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); if (!generating && !uploadingImages) setLibPickerOpen(true); }}
                   disabled={generating || uploadingImages}
                   style={{
-                    marginTop: 2, background: 'transparent', border: 0, color: 'rgba(255,255,255,0.5)',
+                    marginTop: 2, background: 'transparent', border: 0, color: 'rgba(15,23,42,0.5)',
                     fontSize: 11, cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', textDecoration: 'underline',
                   }}
                 >
@@ -1086,45 +1117,6 @@ export default function DmBuilderPage() {
               </div>
             </div>
           </div>
-
-          {/* ★ D216+ 6 sub-agent 진행 시각 효과 (generating 활성 시점만 표시) */}
-          {generating && generationStep >= 0 && (
-            <div style={{ marginTop: 14, padding: 16, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid #a855f7', borderTopColor: 'transparent', borderRadius: '50%', animation: 'dm-spin 1s linear infinite' }} />
-                AI 자동 생성 진행 중
-              </div>
-              <style>{`@keyframes dm-spin { to { transform: rotate(360deg); } }`}</style>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {SUB_AGENTS.map((agent, i) => {
-                  const isDone = i < generationStep;
-                  const isActive = i === generationStep;
-                  const isPending = i > generationStep;
-                  return (
-                    <div key={agent.label} style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                      background: isActive ? `rgba(168, 85, 247, 0.15)` : isDone ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255,255,255,0.02)',
-                      border: `1px solid ${isActive ? 'rgba(168, 85, 247, 0.5)' : isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255,255,255,0.05)'}`,
-                      borderRadius: 8,
-                      opacity: isPending ? 0.4 : 1,
-                      transition: 'all 0.3s',
-                    }}>
-                      <div style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#fff', background: agent.gradient, flexShrink: 0 }}>
-                        {isDone ? '✓' : isActive ? '◐' : i + 1}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>{agent.label}</div>
-                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', marginTop: 1 }}>{agent.desc}</div>
-                      </div>
-                      {isActive && (
-                        <span style={{ display: 'inline-block', width: 10, height: 10, border: '2px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'dm-spin 0.8s linear infinite', flexShrink: 0 }} />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
           {/* ★ 2026-06-19: 완성 이미지(디자인 시안) 업로드 → 슬라이드 DM 자동 생성 (외주 완성본 대응)
               2026-07-02(5): 진입 버튼은 우측 [완성 슬라이드] 타일로 통합 (가로/세로 선택지 폐지 — Harold 지시) */}
@@ -1162,7 +1154,6 @@ export default function DmBuilderPage() {
             <section className="pt-5">
               <ListHead
                 title="내 DM"
-                summary={metricsLoading ? '불러오는 중' : `보낸 DM ${ov.published_dm.toLocaleString()} · 30일 열람 ${ov.total_views_30d.toLocaleString()} · 30일 응답 ${ov.total_responses_30d.toLocaleString()} · 평균 클릭률 ${ov.avg_ctr_30d}%`}
                 filters={[
                   { key: 'all' as const, label: '전체', count: cnt.all },
                   { key: 'draft' as const, label: '초안', count: cnt.draft || 0 },
@@ -1178,18 +1169,18 @@ export default function DmBuilderPage() {
                 sortOptions={[{ value: 'updated', label: '최근 수정 순' }, { value: 'views', label: '열람 많은 순' }, { value: 'title', label: '이름 순' }]}
               />
               {listLoading ? (
-                <div className="py-16 text-center text-white/50 text-[13px]">불러오는 중</div>
+                <div className="py-16 text-center text-slate-500 text-[13px]">불러오는 중</div>
               ) : list.length === 0 ? (
-                <div className="mt-4 rounded-2xl border border-dashed border-white/15 py-12 px-5 text-center">
-                  <div className="text-[15px] font-bold text-white">아직 만든 DM이 없어요</div>
-                  <div className="text-[13px] text-white/55 mt-1.5">사진과 글만 넣으면 첫 DM이 완성돼요.</div>
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-300 py-12 px-5 text-center">
+                  <div className="text-[15px] font-bold text-slate-900">아직 만든 DM이 없어요</div>
+                  <div className="text-[13px] text-slate-500 mt-1.5">사진과 글만 넣으면 첫 DM이 완성돼요.</div>
                   <div className="flex items-center justify-center gap-3 mt-4">
-                    <button type="button" onClick={() => navigate('/quick-campaign?channel=dm')} className="h-10 px-5 rounded-xl text-[13.5px] font-bold text-indigo-950 bg-gradient-to-r from-amber-400 to-fuchsia-400">만들기</button>
-                    <button type="button" onClick={handleStartBlockBuild} disabled={generating} className="h-10 px-4 rounded-xl text-[13px] font-semibold text-white/80 border border-white/15 hover:bg-white/10">블록으로 첫 DM 만들기</button>
+                    <button type="button" onClick={() => navigate('/quick-campaign?channel=dm')} className="h-10 px-5 rounded-xl text-[13.5px] font-bold text-white bg-indigo-600 hover:bg-indigo-700">만들기</button>
+                    <button type="button" onClick={handleStartBlockBuild} disabled={generating} className="h-10 px-4 rounded-xl text-[13px] font-semibold text-slate-700 border border-slate-300 hover:bg-slate-100">블록으로 첫 DM 만들기</button>
                   </div>
                 </div>
               ) : shown.length === 0 ? (
-                <div className="py-14 text-center text-[13px] text-white/45">조건에 맞는 DM이 없어요.</div>
+                <div className="py-14 text-center text-[13px] text-slate-400">조건에 맞는 DM이 없어요.</div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4 mt-4">
                   {shown.slice(0, listLimit).map(({ d, st }) => (
@@ -1209,13 +1200,13 @@ export default function DmBuilderPage() {
                 </div>
               )}
               {shown.length > listLimit && (
-                <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-white/75 border border-white/15 hover:bg-white/10">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
+                <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-600 border border-slate-300 hover:bg-slate-100">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
               )}
-              <p className="text-[10px] text-white/30 italic mt-4">Data source: DM 목록 · 열람 = 공용·개인화 링크 누적 열람 수 · 요약 = 최근 30일</p>
+              <p className="text-[10px] text-slate-400 italic mt-4">Data source: DM 목록 · 열람 = 공용·개인화 링크 누적 열람 수 · 요약 = 최근 30일</p>
             </section>
           );
         })()}
-      </main>
+      </div>
 
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
@@ -1300,7 +1291,7 @@ export default function DmBuilderPage() {
       )}
 
       {toast && <Toast toast={toast} />}
-    </div>
+    </ZoneFrame>
   );
 }
 

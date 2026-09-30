@@ -1,6 +1,7 @@
 // 오늘의 추천 브리핑 — 매일 9시 일일 분석 엔진이 만든 회사 맞춤 추천 (2026-07-02 3단계)
 // 카드 클릭 한 번 = 크레딧 확인 → 자동마케팅 생성 + 즉시 초안(전체 AI 체인은 이 순간에만 실행 — 원가 통제).
-import { Sparkles, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
+import ZoneEmphasis from '../zone/ZoneEmphasis';
 
 export interface DailyBriefRecommendation {
   title: string;
@@ -43,37 +44,31 @@ export default function DailyBriefCard({ brief, submitting, onStart }: Props) {
     } catch { return ''; }
   })();
 
+  // ★ 2026-09-30 AI 존 대개편: 화면당 강조 카드 1장(ZoneEmphasis · AI 추천 표지) · 추천 줄은 가로 3칸(내용·1클릭 그대로)
   return (
-    <div className="bg-gradient-to-br from-indigo-500/15 to-slate-900 border border-indigo-400/25 rounded-2xl p-5">
-      <div className="flex items-center gap-2.5">
-        <div className="w-9 h-9 rounded-xl bg-indigo-500/25 flex items-center justify-center shrink-0">
-          <Sparkles className="w-4.5 h-4.5 text-indigo-300" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-white">AI 일일 브리핑 {dateLabel && <span className="text-white/40 font-normal">· {dateLabel}</span>}</div>
-          {brief.headline && <div className="text-[13px] text-white/70 mt-0.5 leading-relaxed">{brief.headline}</div>}
-        </div>
-      </div>
-
+    <ZoneEmphasis
+      kind="ai"
+      title="AI 일일 브리핑"
+      meta={dateLabel || undefined}
+    >
+      {brief.headline && <div className="text-[13px] text-slate-600 -mt-1 mb-3 leading-relaxed">{brief.headline}</div>}
       {recs.length > 0 ? (
-        <div className="mt-4 space-y-2">
+        <div className="grid md:grid-cols-3 gap-3">
           {recs.map((rec, i) => (
-            <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3.5 flex flex-wrap items-center gap-3">
-              <div className="flex-1 min-w-[200px]">
-                <div className="text-[13px] font-medium text-white flex items-center gap-2 flex-wrap">
-                  {rec.title}
-                  {rec.targetCount != null && <span className="text-[11px] text-indigo-300">대상 {rec.targetCount.toLocaleString()}명</span>}
-                  {rec.opportunityType === 'journey_promotion' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium">성과 검증</span>}
-                  {rec.recommendedChannel && CHANNEL_LABEL[rec.recommendedChannel] && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-medium">{CHANNEL_LABEL[rec.recommendedChannel]}</span>
-                  )}
-                </div>
-                <div className="text-[11px] text-white/50 mt-1 leading-relaxed">{rec.reason}</div>
+            <div key={i} className="rounded-xl border border-slate-200 p-3.5 flex flex-col">
+              <div className="text-[13.5px] font-semibold text-slate-900 leading-snug flex items-center gap-1.5 flex-wrap">
+                {rec.title}
+                {rec.opportunityType === 'journey_promotion' && <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">성과 검증</span>}
+                {rec.recommendedChannel && CHANNEL_LABEL[rec.recommendedChannel] && (
+                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-cyan-50 text-cyan-700 font-medium">{CHANNEL_LABEL[rec.recommendedChannel]}</span>
+                )}
               </div>
+              {rec.targetCount != null && <div className="text-[12px] text-indigo-700 mt-1">대상 {rec.targetCount.toLocaleString()}명</div>}
+              <div className="text-[12.5px] text-slate-500 mt-1 leading-relaxed flex-1">{rec.reason}</div>
               <button
                 onClick={() => onStart(rec)}
                 disabled={submitting}
-                className="inline-flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-30 text-indigo-50 font-medium transition-colors"
+                className="mt-2.5 self-start inline-flex items-center gap-1 text-[13px] font-semibold text-indigo-600 hover:text-indigo-800 disabled:opacity-30 transition-colors"
               >
                 {startLabel(rec)}<ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -81,10 +76,9 @@ export default function DailyBriefCard({ brief, submitting, onStart }: Props) {
           ))}
         </div>
       ) : (
-        <div className="mt-4 text-xs text-white/45">오늘은 새로 추천할 만한 신호가 없습니다. 데이터가 쌓이면 추천이 늘어납니다.</div>
+        <div className="text-[13px] text-slate-500">오늘은 새로 추천할 만한 신호가 없습니다. 데이터가 쌓이면 추천이 늘어납니다.</div>
       )}
-
-      <div className="mt-3 text-[10px] text-white/30 italic">Data source: 회사 고객 DB 실측 신호 · 누적 학습 메모리 · 운영 현황 (매일 오전 분석)</div>
-    </div>
+      <div className="mt-3 text-[10px] text-slate-400 italic">Data source: 회사 고객 DB 실측 신호 · 누적 학습 메모리 · 운영 현황 (매일 오전 분석)</div>
+    </ZoneEmphasis>
   );
 }

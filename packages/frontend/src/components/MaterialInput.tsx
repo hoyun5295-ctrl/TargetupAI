@@ -54,11 +54,11 @@ export default function MaterialInput({ value, onChange, disabled, compact, onRe
       <div
         onDragOver={(e) => { e.preventDefault(); }}
         onDrop={(e) => { e.preventDefault(); if (!disabled) addFiles(e.dataTransfer.files); }}
-        className={`rounded-2xl border border-dashed ${disabled ? 'border-white/10' : 'border-violet-400/40 hover:border-violet-300/60'} bg-white/[0.03] p-3 transition-colors`}
+        className={`rounded-2xl border border-dashed ${disabled ? 'border-slate-200' : 'border-violet-300 hover:border-violet-300'} bg-white p-3 transition-colors`}
       >
         <div className="flex items-center gap-2 flex-wrap">
           {previews.map((src, i) => (
-            <div key={src} className="relative w-20 h-20 rounded-xl overflow-hidden bg-slate-900 border border-white/10">
+            <div key={src} className="relative w-20 h-20 rounded-xl overflow-hidden bg-white border border-slate-200">
               <img src={src} alt={`재료 이미지 ${i + 1}`} className="w-full h-full object-cover" />
               {!disabled && (
                 <button type="button" onClick={() => removeAt(i)} aria-label="이미지 제외"
@@ -70,13 +70,13 @@ export default function MaterialInput({ value, onChange, disabled, compact, onRe
           ))}
           {value.files.length < MATERIAL_MAX_IMAGES && (
             <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()}
-              className="w-20 h-20 rounded-xl border border-white/15 bg-white/5 text-violet-200 hover:bg-violet-500/20 hover:border-violet-400/40 disabled:opacity-40 flex flex-col items-center justify-center gap-1">
+              className="w-20 h-20 rounded-xl border border-slate-300 bg-white text-violet-800 hover:bg-violet-100 hover:border-violet-300 disabled:opacity-40 flex flex-col items-center justify-center gap-1">
               <ImagePlus className="w-5 h-5" />
               <span className="text-[10px]">{value.files.length === 0 ? '이미지' : '추가'}</span>
             </button>
           )}
           <input ref={inputRef} type="file" accept={ACCEPT.join(',')} multiple hidden onChange={(e) => { addFiles(e.target.files); e.currentTarget.value = ''; }} />
-          <p className="text-[11px] text-white/45 ml-1">
+          <p className="text-[11px] text-slate-400 ml-1">
             행사 배너·상품 사진을 올려주세요. 최대 {MATERIAL_MAX_IMAGES}장 · 첫 장이 첫 화면이 됩니다.
           </p>
         </div>
@@ -89,19 +89,19 @@ export default function MaterialInput({ value, onChange, disabled, compact, onRe
         disabled={disabled}
         rows={compact ? 3 : 5}
         placeholder={'행사 내용을 그대로 붙여넣어 주세요(기간 · 혜택 · 상품 · 조건). 비워 두면 올린 이미지에서 읽어 채웁니다.'}
-        className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white placeholder:text-white/30 outline-none focus:border-violet-400/60 focus:ring-2 focus:ring-violet-500/30 disabled:opacity-50"
+        className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-200 disabled:opacity-50"
       />
 
       {/* 링크 */}
       {!compact && (
         <div className="flex items-center gap-2">
-          <Link2 className="w-4 h-4 text-white/40 shrink-0" />
+          <Link2 className="w-4 h-4 text-slate-400 shrink-0" />
           <input
             value={value.link}
             onChange={(e) => onChange({ ...value, link: e.target.value.slice(0, 500) })}
             disabled={disabled}
             placeholder="버튼이 열 주소(행사 페이지 · 쇼핑몰) · 없으면 편집기에서 채웁니다"
-            className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-violet-400/60 disabled:opacity-50"
+            className="flex-1 rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-violet-300 disabled:opacity-50"
           />
         </div>
       )}

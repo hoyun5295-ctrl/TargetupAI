@@ -7,7 +7,7 @@
  *
  * SoT = docs/2026-07-18-p4-image-studio-design.md (v3). 실측 확정(2026-07-19):
  *   - API 표면 = generateContent (x-goog-api-key). imageSize 대문자 K 의무.
- *   - 4K 격상·편집 = 멀티턴 보존. ★단, 이전 응답의 thoughtSignature를 재전송하면 imageSize 변경 시 404
+ *   - 편집 = 멀티턴 보존(4K 격상은 2026-09-30 제거). ★단, 이전 응답의 thoughtSignature를 재전송하면 imageSize 변경 시 404
  *     ("Requested entity was not found") → 재전송 파트에서 thoughtSignature를 반드시 제거(strip). (V1=sig+4K 404 / V2=nosig+4K OK 실측)
  *   - 누끼·합성 = 상주 python 서비스(127.0.0.1, rembg isnet-general-use + PIL). 0.0.0.0 금지.
  *   - 에러 원문 UI 노출 금지(모델명 노출 사고) → 코드 매핑만 반환, 원문은 PM2 로그.
@@ -269,7 +269,7 @@ export interface GeneratedImage {
 
 async function callGemini(
   contents: any[],
-  imageSize: '1K' | '2K' | '4K',
+  imageSize: '1K' | '2K',
   aspectRatio: string,
   timeoutMs: number,
 ): Promise<GeneratedImage> {
@@ -330,9 +330,9 @@ async function callGemini(
 }
 
 // ── ★ 2026-09-30 생성 엔진 스위치 (3방식 블라인드 · 원장 docs/2026-09-30-ai-model-prompt-upgrade.md §2-4) ──
-//   STUDIO_IMAGE_ENGINE=openai 이면 스튜디오 화면의 생성(/generate)·수정 지시(/edit 2K)를 OpenAI 이미지 모델로 만든다.
+//   STUDIO_IMAGE_ENGINE=openai 이면 스튜디오 화면의 생성(/generate)·수정 지시(/edit)를 OpenAI 이미지 모델로 만든다.
 //   기본 = gemini(배포만으로 동작 무변경). 엔진은 호출부가 넘긴다 — 넘기지 않으면 Gemini:
-//     · 4K 격상 = 늘 Gemini(OpenAI 최대 8,294,400 화소 → 3:4 4K 불가)
+//     · 4K 격상 = 0930 제거(생성 모델이 새 그림을 그렸다)
 //     · 아웃리치(배경만 생성 + 서버 글자) · 템플릿 예시 배치 = Gemini 그대로(별도 파이프라인 · 이번 비교 대상 아님)
 //   OpenAI 가 30초 안에 일시 장애(429 · 5xx · 연결 실패 · 키/권한)면 같은 요청을 Gemini 로 한 번 더 만든다(차감은 성공 1회 뒤 1번 그대로).
 //   안전 거부 · 그 밖의 400 · 시간 초과 · 늦은 실패는 대체하지 않는다(안전 우회 금지 · 대기 시간 두 배 금지).
@@ -518,18 +518,19 @@ function stripSignature(parts: GeminiPart[]): GeminiPart[] {
 }
 
 /**
- * 멀티턴 보존 편집/격상 (§4-3). basePrompt(원 생성 프롬프트) + base 이미지(sig 제거) + instruction.
- *  - 4K 격상: instruction = 구도 유지 재출력, imageSize '4K'.
+ * 멀티턴 보존 편집 (§4-3). basePrompt(원 생성 프롬프트) + base 이미지(sig 제거) + instruction.
  *  - 배경/무드 편집: instruction = 유저 요청(배경·전체 무드 한정), imageSize '2K'.
+ *  ★ 2026-09-30 4K 격상 제거(Harold 확정) — "같은 그림 4K" 요청에 생성 모델이 구도·색을 새로 그렸다(운영 실측 3584×4800).
+ *    크기 키우기는 생성 모델 금지 원칙(LESSONS_BACKEND 0721)과 같은 뿌리. 원장 docs/2026-09-30-ai-model-prompt-upgrade.md §2-4
  */
 export async function editOrUpscale(opts: {
   baseImageBase64: string;
   baseMime: string;
   basePrompt: string;
   instruction: string;
-  imageSize: '2K' | '4K';
+  imageSize: '2K';
   aspectRatio: string;
-  /** ★0930 스위치 — 2K 수정 지시에만 적용. 4K 는 늘 Gemini(OpenAI 화소 상한). */
+  /** ★0930 생성 엔진 스위치(미지정 = Gemini). */
   engine?: StudioImageEngine;
 }): Promise<GeneratedImage> {
   const gemini = () => {
@@ -543,7 +544,6 @@ export async function editOrUpscale(opts: {
     ];
     return callGemini(contents, opts.imageSize, opts.aspectRatio, 120_000);
   };
-  if (opts.imageSize === '4K') return gemini();
   // OpenAI 수정 끝점은 대화 맥락이 없다 — 원 생성 프롬프트 대신 "나머지는 그대로(글자 포함)"를 지시에 붙인다
   return runOnEngine(
     opts.engine || 'gemini',
@@ -560,9 +560,6 @@ export async function editOrUpscale(opts: {
 
 export const OPENAI_EDIT_KEEP_REST =
   'Keep everything else in the attached image unchanged, including every existing text element exactly as written and where it sits, and any product exactly as shown.';
-
-export const UPSCALE_4K_INSTRUCTION =
-  'Output the exact same image at 4K resolution. Do not change the composition, layout, colors, lighting, or any element. Same scene, higher resolution only.';
 
 /** 배경/무드 편집 지시 — 제품 픽셀 재생성 뒷문 차단(배경·전체 무드만, M-8). */
 export function buildEditInstruction(userInstruction: string): string {
@@ -780,9 +777,9 @@ export function releaseGenerateLock(companyId: string): void {
 }
 
 // ── 크레딧 source 상수 (ai-credit-calc.ts CREDIT_COST_MAP과 1:1) ──
+//   ★ 2026-09-30 4K 격상 제거 — 'image-studio-4k' 는 새 차감이 없다(단가표 · 화면 이름표에는 지난 이력 표시용으로 남긴다).
 export const CREDIT_SOURCE = {
   generate: 'image-studio-generate',
-  upscale4k: 'image-studio-4k',
   edit: 'image-studio-edit',
 } as const;
 

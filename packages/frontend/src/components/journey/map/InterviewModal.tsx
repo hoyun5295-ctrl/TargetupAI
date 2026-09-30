@@ -212,22 +212,22 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
   };
 
   const pill = (selected: boolean, disabled?: boolean) => disabled
-    ? 'h-8 px-3 rounded-lg text-xs border border-white/10 text-white/30 cursor-not-allowed inline-flex items-center gap-1'
+    ? 'h-8 px-3 rounded-lg text-xs border border-slate-200 text-slate-400 cursor-not-allowed inline-flex items-center gap-1'
     : selected
-      ? 'h-8 px-3 rounded-lg text-xs font-semibold border border-violet-400/60 bg-violet-600/40 text-white inline-flex items-center gap-1.5'
-      : 'h-8 px-3 rounded-lg text-xs border border-white/15 text-white/70 hover:bg-white/10 transition-colors inline-flex items-center gap-1.5';
+      ? 'h-8 px-3 rounded-lg text-xs font-semibold border border-violet-300 bg-violet-200 text-slate-900 inline-flex items-center gap-1.5'
+      : 'h-8 px-3 rounded-lg text-xs border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors inline-flex items-center gap-1.5';
 
   return (
     <JourneyModalShell open={open} onClose={close} labelledBy="jmap-interview-title" panelClassName="w-full max-w-2xl" disableDismiss={phase === 'designing'}>
-      <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-white/10">
+      <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-slate-200">
         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
           <MessageSquarePlus className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <h2 id="jmap-interview-title" className="text-sm font-semibold text-white">문장으로 여정 만들기</h2>
-          <p className="mt-0.5 text-[11px] text-white/50">한 문장이면 몇 가지만 묻고 여정 초안을 만들어요. 켜기 전에는 아무것도 보내지 않아요.</p>
+          <h2 id="jmap-interview-title" className="text-sm font-semibold text-slate-900">문장으로 여정 만들기</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">한 문장이면 몇 가지만 묻고 여정 초안을 만들어요. 켜기 전에는 아무것도 보내지 않아요.</p>
         </div>
-        <button type="button" onClick={close} className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10" aria-label={phase === 'designing' ? '그만 만들기' : '닫기'}>
+        <button type="button" onClick={close} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label={phase === 'designing' ? '그만 만들기' : '닫기'}>
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -235,7 +235,7 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {(phase === 'input' || phase === 'reading') && (
           <div className="space-y-3">
-            <label className="block text-xs font-semibold text-white/80" htmlFor="jmap-interview-input">어떤 여정을 만들고 싶으세요?</label>
+            <label className="block text-xs font-semibold text-slate-700" htmlFor="jmap-interview-input">어떤 여정을 만들고 싶으세요?</label>
             <textarea
               id="jmap-interview-input"
               value={sentence}
@@ -245,29 +245,29 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
               maxLength={300}
               disabled={phase === 'reading'}
               placeholder="예: 가입한 고객이 첫 구매까지 오고 재구매로 이어지게 해 줘"
-              className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm placeholder-white/30 focus:outline-none focus:border-violet-400 resize-none"
+              className="w-full px-3 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-sm placeholder-slate-400 focus:outline-none focus:border-violet-400 resize-none"
             />
             <div className="flex flex-wrap gap-1.5">
               {EXAMPLES.map((ex) => (
-                <button key={ex} type="button" onClick={() => setSentence(ex)} disabled={phase === 'reading'} className="px-2.5 py-1 rounded-full text-[11px] text-white/60 border border-white/10 hover:bg-white/10 hover:text-white/85 transition-colors">
+                <button key={ex} type="button" onClick={() => setSentence(ex)} disabled={phase === 'reading'} className="px-2.5 py-1 rounded-full text-[11px] text-slate-500 border border-slate-200 hover:bg-slate-100 hover:text-slate-700 transition-colors">
                   {ex}
                 </button>
               ))}
             </div>
-            {error && <p className="flex items-start gap-1.5 text-[11px] text-rose-300"><AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />{error}</p>}
+            {error && <p className="flex items-start gap-1.5 text-[11px] text-rose-700"><AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />{error}</p>}
           </div>
         )}
 
         {phase === 'questions' && prepared && (
           <div className="space-y-4">
-            <div className="rounded-xl bg-white/[0.03] border border-white/10 px-3 py-2 text-[11px] text-white/55">
+            <div className="rounded-xl bg-white border border-slate-200 px-3 py-2 text-[11px] text-slate-500">
               “{sentence}”을 이렇게 나눴어요. 추천 답을 골라 두었으니 그대로 만들어도 돼요.
             </div>
             {needsCallbackChoice && (
-              <section className="rounded-xl border border-amber-400/30 bg-amber-500/[0.05] p-3">
-                <div className="text-xs font-semibold text-amber-100">어느 번호로 보낼까요?</div>
+              <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <div className="text-xs font-semibold text-amber-900">어느 번호로 보낼까요?</div>
                 {noCallback ? (
-                  <p className="mt-1 text-[11px] text-amber-100/80">등록된 회신번호가 없어요. 회신번호를 먼저 등록해 주세요.</p>
+                  <p className="mt-1 text-[11px] text-amber-900">등록된 회신번호가 없어요. 회신번호를 먼저 등록해 주세요.</p>
                 ) : (
                   <div className="mt-2 flex flex-wrap gap-1.5" role="radiogroup" aria-label="회신번호">
                     {prepared.callback.options.map((o) => (
@@ -280,15 +280,15 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
               </section>
             )}
             {plans.map((p, idx) => (
-              <section key={p.key} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+              <section key={p.key} className="rounded-2xl border border-slate-200 bg-slate-100 p-4">
                 <div className="flex items-start gap-2">
-                  <span className="w-6 h-6 rounded-full bg-violet-500/20 text-violet-200 text-[11px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
+                  <span className="w-6 h-6 rounded-full bg-violet-100 text-violet-800 text-[11px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-white">{p.title}</div>
-                    {p.objective && <p className="mt-0.5 text-[11px] text-white/50">{p.objective}</p>}
+                    <div className="text-sm font-semibold text-slate-900">{p.title}</div>
+                    {p.objective && <p className="mt-0.5 text-[11px] text-slate-500">{p.objective}</p>}
                   </div>
                   {plans.length > 1 && (
-                    <button type="button" onClick={() => setPlans((prev) => prev.filter((x) => x.key !== p.key))} className="text-[11px] text-white/45 hover:text-white/80 px-2 py-1 rounded hover:bg-white/10">
+                    <button type="button" onClick={() => setPlans((prev) => prev.filter((x) => x.key !== p.key))} className="text-[11px] text-slate-400 hover:text-slate-700 px-2 py-1 rounded hover:bg-slate-100">
                       이 여정 빼기
                     </button>
                   )}
@@ -296,7 +296,7 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
                 <div className="mt-3 space-y-3">
                   {prepared.questions.filter((q) => q.planKey === p.key && visible(q)).map((q) => (
                     <div key={q.id}>
-                      <div className="text-xs font-medium text-white/80">{q.label}</div>
+                      <div className="text-xs font-medium text-slate-700">{q.label}</div>
                       {q.kind === 'choice' ? (
                         <div className="mt-1.5 flex flex-wrap gap-1.5" role="radiogroup" aria-label={q.label}>
                           {(q.options || []).map((o) => (
@@ -312,7 +312,7 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
                             >
                               {o.disabled && <Lock className="w-3 h-3" />}
                               {o.label}
-                              {!o.disabled && recommendedOf(q) === o.value && <span className="text-[11px] text-violet-200/80">추천</span>}
+                              {!o.disabled && recommendedOf(q) === o.value && <span className="text-[11px] text-violet-800">추천</span>}
                             </button>
                           ))}
                         </div>
@@ -323,12 +323,12 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
                           placeholder={q.placeholder}
                           maxLength={q.maxLength}
                           aria-label={q.label}
-                          className="mt-1.5 w-full h-9 px-3 rounded-lg bg-slate-900 border border-white/10 text-xs placeholder-white/30 focus:outline-none focus:border-violet-400"
+                          className="mt-1.5 w-full h-9 px-3 rounded-lg bg-white border border-slate-200 text-xs placeholder-slate-400 focus:outline-none focus:border-violet-400"
                         />
                       )}
-                      {q.help && <p className="mt-1 text-[11px] text-white/40">{q.help}</p>}
+                      {q.help && <p className="mt-1 text-[11px] text-slate-400">{q.help}</p>}
                       {q.kind === 'choice' && (q.options || []).filter((o) => o.disabled).map((o) => (
-                        <p key={o.value} className="mt-1 flex items-start gap-1 text-[11px] text-white/40">
+                        <p key={o.value} className="mt-1 flex items-start gap-1 text-[11px] text-slate-400">
                           <Lock className="w-3 h-3 mt-0.5 shrink-0" />
                           <span>{o.label}: {o.reason || '지금 데이터로는 만들 수 없어요.'}</span>
                         </p>
@@ -345,19 +345,19 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
           <div className="space-y-4">
             <div className="space-y-2">
               {progress.map((p) => (
-                <div key={p.planKey} className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
-                  {p.status === 'run' ? <Loader2 className="w-4 h-4 animate-spin text-violet-300" />
-                    : p.status === 'ok' ? <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                      : p.status === 'fail' ? <XCircle className="w-4 h-4 text-rose-300" />
-                        : <span className="w-4 h-4 rounded-full border border-white/20" aria-hidden />}
+                <div key={p.planKey} className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  {p.status === 'run' ? <Loader2 className="w-4 h-4 animate-spin text-violet-700" />
+                    : p.status === 'ok' ? <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                      : p.status === 'fail' ? <XCircle className="w-4 h-4 text-rose-700" />
+                        : <span className="w-4 h-4 rounded-full border border-slate-300" aria-hidden />}
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-white truncate">{p.title}</div>
-                    <div className="text-[11px] text-white/45">
+                    <div className="text-xs font-semibold text-slate-900 truncate">{p.title}</div>
+                    <div className="text-[11px] text-slate-400">
                       {p.status === 'run' ? '설계하는 중(30초 안팎)' : p.status === 'ok' ? '초안으로 저장했어요' : p.status === 'fail' ? p.message : '차례를 기다리는 중'}
                     </div>
                   </div>
                   {p.status === 'ok' && p.journeyId && (
-                    <button type="button" onClick={() => { close(); onFocusJourney(p.journeyId!); }} className="text-[11px] text-violet-200 hover:underline inline-flex items-center gap-0.5">
+                    <button type="button" onClick={() => { close(); onFocusJourney(p.journeyId!); }} className="text-[11px] text-violet-800 hover:underline inline-flex items-center gap-0.5">
                       지도에서 <ArrowRight className="w-3 h-3" />
                     </button>
                   )}
@@ -365,21 +365,21 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
               ))}
             </div>
             {phase === 'designing' && (
-              <p className="text-[11px] text-white/40">닫으면 남은 여정은 만들지 않아요. 지금 만드는 여정은 끝까지 만들어집니다.</p>
+              <p className="text-[11px] text-slate-400">닫으면 남은 여정은 만들지 않아요. 지금 만드는 여정은 끝까지 만들어집니다.</p>
             )}
 
             {phase === 'done' && createdIds.length > 0 && (
               <section>
-                <h3 className="text-sm font-semibold text-white">이어붙이기 점검</h3>
-                <p className="mt-0.5 text-[11px] text-white/45">새 여정이 다른 여정과 어떻게 이어지는지 봤어요.</p>
+                <h3 className="text-sm font-semibold text-slate-900">이어붙이기 점검</h3>
+                <p className="mt-0.5 text-[11px] text-slate-400">새 여정이 다른 여정과 어떻게 이어지는지 봤어요.</p>
                 <div className="mt-2 space-y-2">
-                  {attach === null && <div className="flex items-center gap-2 text-[11px] text-white/50"><Loader2 className="w-3.5 h-3.5 animate-spin" />점검하는 중</div>}
-                  {attach !== null && attach.length === 0 && <div className="text-[11px] text-white/40">이어질 곳과 손볼 곳이 없어요.</div>}
+                  {attach === null && <div className="flex items-center gap-2 text-[11px] text-slate-500"><Loader2 className="w-3.5 h-3.5 animate-spin" />점검하는 중</div>}
+                  {attach !== null && attach.length === 0 && <div className="text-[11px] text-slate-400">이어질 곳과 손볼 곳이 없어요.</div>}
                   {(attach || []).map((r) => (
-                    <div key={r.id} className={`rounded-xl border px-3 py-2.5 flex items-center gap-3 ${r.tier === 'warn' ? 'border-amber-400/30 bg-amber-500/[0.06]' : r.tier === 'solid' ? 'border-violet-400/25 bg-violet-500/[0.06]' : 'border-white/10 bg-white/[0.02]'}`}>
+                    <div key={r.id} className={`rounded-xl border px-3 py-2.5 flex items-center gap-3 ${r.tier === 'warn' ? 'border-amber-200 bg-amber-50' : r.tier === 'solid' ? 'border-violet-200 bg-violet-50' : 'border-slate-200 bg-white'}`}>
                       <div className="flex-1 min-w-0">
-                        <div className={`text-xs font-semibold ${r.tier === 'warn' ? 'text-amber-100' : 'text-white/85'}`}>{r.text}</div>
-                        <p className="mt-0.5 text-[11px] leading-relaxed text-white/55">{r.reason}</p>
+                        <div className={`text-xs font-semibold ${r.tier === 'warn' ? 'text-amber-900' : 'text-slate-700'}`}>{r.text}</div>
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{r.reason}</p>
                       </div>
                       {r.fix && (
                         <button
@@ -401,11 +401,11 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
         )}
       </div>
 
-      <div className="px-5 py-3 border-t border-white/10 flex items-center gap-2">
+      <div className="px-5 py-3 border-t border-slate-200 flex items-center gap-2">
         {(phase === 'input' || phase === 'reading') && (
           <>
-            <span className="flex-1 text-[11px] text-white/40">문장을 읽는 데는 크레딧이 들지 않아요.</span>
-            <button type="button" onClick={() => void read()} disabled={phase === 'reading'} className="h-9 px-4 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-50 inline-flex items-center gap-1.5">
+            <span className="flex-1 text-[11px] text-slate-400">문장을 읽는 데는 크레딧이 들지 않아요.</span>
+            <button type="button" onClick={() => void read()} disabled={phase === 'reading'} className="h-9 px-4 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-1.5">
               {phase === 'reading' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {phase === 'reading' ? '문장을 읽는 중' : '질문 받기'}
             </button>
@@ -413,22 +413,22 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
         )}
         {phase === 'questions' && (
           <>
-            <button type="button" onClick={restart} className="h-9 px-3 rounded-lg text-xs text-white/60 hover:bg-white/10">다시 쓰기</button>
-            <span className="flex-1 text-right text-[11px] text-white/50 tabular-nums">여정 {plans.length}개 · 초안 만들기 {totalCost} 크레딧</span>
+            <button type="button" onClick={restart} className="h-9 px-3 rounded-lg text-xs text-slate-500 hover:bg-slate-100">다시 쓰기</button>
+            <span className="flex-1 text-right text-[11px] text-slate-500 tabular-nums">여정 {plans.length}개 · 초안 만들기 {totalCost} 크레딧</span>
             <button type="button" onClick={() => void build()} disabled={!canBuild} className="h-9 px-4 rounded-lg text-xs font-semibold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-50">
               이대로 만들기
             </button>
           </>
         )}
         {phase === 'designing' && (
-          <span className="flex-1 flex items-center gap-2 text-[11px] text-white/50"><Loader2 className="w-3.5 h-3.5 animate-spin" />여정을 차례로 설계하고 있어요</span>
+          <span className="flex-1 flex items-center gap-2 text-[11px] text-slate-500"><Loader2 className="w-3.5 h-3.5 animate-spin" />여정을 차례로 설계하고 있어요</span>
         )}
         {phase === 'done' && (
           <>
-            <button type="button" onClick={restart} className="h-9 px-3 rounded-lg text-xs text-white/60 hover:bg-white/10">새로 만들기</button>
+            <button type="button" onClick={restart} className="h-9 px-3 rounded-lg text-xs text-slate-500 hover:bg-slate-100">새로 만들기</button>
             <span className="flex-1" />
             {createdIds.length > 0 && (
-              <button type="button" onClick={() => { close(); onFocusJourney(createdIds[0]); }} className="h-9 px-3 rounded-lg text-xs font-medium text-white/80 border border-white/15 hover:bg-white/10">
+              <button type="button" onClick={() => { close(); onFocusJourney(createdIds[0]); }} className="h-9 px-3 rounded-lg text-xs font-medium text-slate-700 border border-slate-300 hover:bg-slate-100">
                 지도에서 보기
               </button>
             )}

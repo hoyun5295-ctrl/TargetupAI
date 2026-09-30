@@ -440,7 +440,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
             <button
               key={d}
               onClick={() => setDevice(d)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${active ? 'bg-violet-500/30 border border-violet-400/50 text-white' : 'bg-white/5 border border-white/10 text-white/50 hover:text-white/80'}`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${active ? 'bg-violet-100 border border-violet-300 text-slate-900' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700'}`}
             >
               <Icon className="w-3.5 h-3.5" /> {d === 'desktop' ? '데스크탑' : '모바일'}
             </button>
@@ -449,14 +449,14 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
         <button
           onClick={() => setSiteMode(siteDark ? 'light' : 'dark')}
           title="자사몰 라이트/다크 모드로 보기 (자동 테마는 몰 모드를 따라갑니다)"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${siteDark ? 'bg-slate-500/30 border border-slate-400/50 text-white' : 'bg-white/5 border border-white/10 text-white/50 hover:text-white/80'}`}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${siteDark ? 'bg-slate-500/30 border border-slate-400/50 text-slate-900' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700'}`}
         >
           {siteDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />} 몰 {siteDark ? '다크' : '라이트'}
         </button>
       </div>
       )}
       {props.theme === 'auto' && useBlocks && !props.captureMode && (
-        <div className="text-[10px] text-white/40 text-center -mt-1 mb-2">자동 테마 = 고객 자사몰의 라이트/다크 모드를 따라갑니다. 위 토글로 양쪽 확인</div>
+        <div className="text-[10px] text-slate-400 text-center -mt-1 mb-2">자동 테마 = 고객 자사몰의 라이트/다크 모드를 따라갑니다. 위 토글로 양쪽 확인</div>
       )}
 
       {/* 디바이스 프레임 */}
@@ -488,7 +488,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
       </div>
 
       {!props.captureMode && (
-      <div className="text-[10px] text-white/30 italic mt-2.5 text-center">
+      <div className="text-[10px] text-slate-400 italic mt-2.5 text-center">
         Data source: 선택한 형태·내용 그대로 자사몰에 표시됩니다
       </div>
       )}
@@ -702,7 +702,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
         </div>
       </div>
       {!captureMode && (
-      <div className="text-[10px] text-white/30 italic mt-2.5 text-center">
+      <div className="text-[10px] text-slate-400 italic mt-2.5 text-center">
         Data source: 앱 실렌더와 동일 요소(이미지·배지·제목·본문·버튼·정렬) 표시 · 닫기/다시 보지 않기는 앱이 통합 계약을 구현한 빌드에서 동작
       </div>
       )}

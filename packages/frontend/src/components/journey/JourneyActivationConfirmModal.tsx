@@ -247,22 +247,22 @@ export default function JourneyActivationConfirmModal({
         className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       >
       <div
-        className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}
-        <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-purple-500/10">
+        <div className="flex items-center justify-between p-5 border-b border-slate-200 bg-gradient-to-r from-violet-50 via-fuchsia-50 to-purple-50">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/30">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-white">
+              <h3 className="text-base font-semibold text-slate-900">
                 여정 활성화 자동 검증
               </h3>
-              <p className="text-[11px] text-white/50 mt-0.5">
+              <p className="text-[11px] text-slate-500 mt-0.5">
                 {journeyName}
-                <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${goalExitEnabled ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-white/40'}`}>
+                <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${goalExitEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
                   목표 달성 자동 종료 {goalExitEnabled ? '켜짐' : '꺼짐'}
                 </span>
               </p>
@@ -271,10 +271,10 @@ export default function JourneyActivationConfirmModal({
           {phase !== 'activating' && (
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+              className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
               aria-label="닫기"
             >
-              <X className="w-4 h-4 text-white/50" />
+              <X className="w-4 h-4 text-slate-500" />
             </button>
           )}
         </div>
@@ -284,8 +284,8 @@ export default function JourneyActivationConfirmModal({
           {/* 검증 진행 시각 효과 */}
           {phase === 'validating' && (
             <div>
-              <div className="text-[11px] text-white/50 mb-3 flex items-center gap-1.5">
-                <Loader2 className="w-3 h-3 animate-spin text-violet-300" />
+              <div className="text-[11px] text-slate-500 mb-3 flex items-center gap-1.5">
+                <Loader2 className="w-3 h-3 animate-spin text-violet-700" />
                 AI 자율 진단 진행 중: 모든 step + variant 일제 검증
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -298,27 +298,27 @@ export default function JourneyActivationConfirmModal({
                       key={card.label}
                       className={`p-3 rounded-xl border transition-all duration-500 ${
                         isActive
-                          ? 'bg-white/5 border-white/20 opacity-100'
-                          : 'bg-white/[0.02] border-white/5 opacity-40'
-                      } ${isCurrent ? 'ring-1 ring-violet-400/40 shadow-lg shadow-violet-500/10' : ''}`}
+                          ? 'bg-white border-slate-300 opacity-100'
+                          : 'bg-white border-slate-100 opacity-40'
+                      } ${isCurrent ? 'ring-1 ring-violet-300 shadow-lg shadow-violet-500/10' : ''}`}
                     >
                       <div className="flex items-center gap-2">
                         <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${card.color} flex items-center justify-center flex-shrink-0`}>
                           {isActive && !isCurrent ? (
-                            <CheckCircle2 className="w-4 h-4 text-white" />
+                            <CheckCircle2 className="w-4 h-4 text-slate-900" />
                           ) : isCurrent ? (
-                            <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
+                            <Loader2 className="w-3.5 h-3.5 text-slate-900 animate-spin" />
                           ) : (
-                            <Icon className="w-3.5 h-3.5 text-white" />
+                            <Icon className="w-3.5 h-3.5 text-slate-900" />
                           )}
                         </div>
-                        <span className="text-[12px] text-white/80 leading-tight">{card.label}</span>
+                        <span className="text-[12px] text-slate-700 leading-tight">{card.label}</span>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              <div className="text-[10px] text-white/30 italic mt-3">
+              <div className="text-[10px] text-slate-400 italic mt-3">
                 Data source: 여정 자동 검증 엔진
               </div>
             </div>
@@ -326,12 +326,12 @@ export default function JourneyActivationConfirmModal({
 
           {/* DB 마이그레이션 대기 */}
           {phase === 'migration_pending' && (
-            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-400/30">
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200">
               <div className="flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
+                <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-[13px] font-semibold text-amber-100">잠시 후 다시 시도해 주세요</div>
-                  <div className="text-[12px] text-amber-100/80 mt-1 leading-relaxed">
+                  <div className="text-[13px] font-semibold text-amber-900">잠시 후 다시 시도해 주세요</div>
+                  <div className="text-[12px] text-amber-900 mt-1 leading-relaxed">
                     여정 자동 검증 기능을 준비 중입니다. 잠시 후 다시 활성화를 눌러주세요.
                     계속 반복되면 고객센터로 문의해 주세요.
                   </div>
@@ -345,10 +345,10 @@ export default function JourneyActivationConfirmModal({
             <div className="space-y-3">
               {/* ★ 2026-08-02 §13-5 — 한 번에 보낼 최대 인원. 전 트리거 필수라 받는 자리를 여기 만든다.
                   옛 화면은 값이 없으면 활성화가 거부되는데 그 값을 넣을 곳이 없었다. */}
-              <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+              <div className="p-4 rounded-xl bg-white border border-slate-200">
                 <div className="flex items-center gap-2 mb-1.5">
-                  <ShieldCheck className="w-4 h-4 text-violet-300" />
-                  <span className="text-[12px] font-semibold text-white/85">한 번에 보낼 최대 인원</span>
+                  <ShieldCheck className="w-4 h-4 text-violet-700" />
+                  <span className="text-[12px] font-semibold text-slate-700">한 번에 보낼 최대 인원</span>
                 </div>
                 <input
                   type="number"
@@ -356,23 +356,23 @@ export default function JourneyActivationConfirmModal({
                   value={capInput}
                   onChange={(e) => setCapInput(e.target.value)}
                   placeholder="예: 500"
-                  className="w-full rounded-lg border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white placeholder:text-white/25 focus:border-violet-400/50 focus:outline-none"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-300 focus:border-violet-300 focus:outline-none"
                 />
-                <p className="text-[11px] text-white/45 mt-1.5">
+                <p className="text-[11px] text-slate-400 mt-1.5">
                   고객 정보를 한꺼번에 옮겨 올 때 예상보다 많은 분께 나가는 것을 막습니다. 한 회차에 이 인원을 넘지 않습니다.
                 </p>
               </div>
 
-              <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-400/30">
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
                 <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-300" />
-                  <div className="text-[14px] font-semibold text-emerald-100">자동 검증 통과: 모든 step 정합 OK</div>
+                  <CheckCircle2 className="w-5 h-5 text-emerald-700" />
+                  <div className="text-[14px] font-semibold text-emerald-900">자동 검증 통과: 모든 step 정합 OK</div>
                 </div>
                 {result.confidenceScore > 0 && (
-                  <div className="text-[12px] text-emerald-100/80">
+                  <div className="text-[12px] text-emerald-900">
                     스팸필터 신뢰도 점수: <span className="font-mono font-semibold">{result.confidenceScore}</span> / 100
                     {result.perCarrierScore && (
-                      <div className="grid grid-cols-3 gap-1 mt-2 text-[10px] text-emerald-100/60">
+                      <div className="grid grid-cols-3 gap-1 mt-2 text-[10px] text-emerald-900">
                         <div>SKT {result.perCarrierScore.skt}</div>
                         <div>KT {result.perCarrierScore.kt}</div>
                         <div>LG U+ {result.perCarrierScore.lguplus}</div>
@@ -384,29 +384,29 @@ export default function JourneyActivationConfirmModal({
 
               {/* 비용 카드 */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                <div className="p-4 rounded-xl bg-white border border-slate-200">
                   <div className="flex items-center gap-2 mb-1">
-                    <Calculator className="w-4 h-4 text-violet-300" />
-                    <span className="text-[11px] text-white/60">7일 누적 예상 비용</span>
+                    <Calculator className="w-4 h-4 text-violet-700" />
+                    <span className="text-[11px] text-slate-500">7일 누적 예상 비용</span>
                   </div>
-                  <div className="text-xl font-bold text-white font-mono">
+                  <div className="text-xl font-bold text-slate-900 font-mono">
                     {result.totalCost.toLocaleString()}원
                   </div>
-                  <div className="text-[10px] text-white/40 mt-1">
+                  <div className="text-[10px] text-slate-400 mt-1">
                     7일 트리거 {result.estimatedWeeklyTriggerCount.toLocaleString()}건 × step 단가
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                <div className="p-4 rounded-xl bg-white border border-slate-200">
                   <div className="flex items-center gap-2 mb-1">
-                    <Wallet className="w-4 h-4 text-amber-300" />
-                    <span className="text-[11px] text-white/60">회사 현재 잔액</span>
+                    <Wallet className="w-4 h-4 text-amber-700" />
+                    <span className="text-[11px] text-slate-500">회사 현재 잔액</span>
                   </div>
-                  <div className={`text-xl font-bold font-mono ${isInsufficientBalance ? 'text-rose-300' : 'text-white'}`}>
+                  <div className={`text-xl font-bold font-mono ${isInsufficientBalance ? 'text-rose-700' : 'text-slate-900'}`}>
                     {balance != null ? `${balance.toLocaleString()}원` : '조회 불가'}
                   </div>
                   {isInsufficientBalance && (
-                    <div className="text-[10px] text-rose-300 mt-1 flex items-center gap-1">
+                    <div className="text-[10px] text-rose-700 mt-1 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" />
                       잔액 부족: 충전 의무
                     </div>
@@ -414,17 +414,17 @@ export default function JourneyActivationConfirmModal({
                 </div>
               </div>
 
-              <div className="p-3 rounded-xl bg-violet-500/5 border border-violet-400/20">
+              <div className="p-3 rounded-xl bg-violet-50 border border-violet-200">
                 <div className="flex items-start gap-2">
-                  <TrendingUp className="w-4 h-4 text-violet-300 flex-shrink-0 mt-0.5" />
-                  <div className="text-[12px] text-violet-100/90 leading-relaxed">
+                  <TrendingUp className="w-4 h-4 text-violet-700 flex-shrink-0 mt-0.5" />
+                  <div className="text-[12px] text-violet-900 leading-relaxed">
                     활성화 직후 = 모든 step + variant 본문 snapshot 저장 + 발송 2시간 전 담당자 LMS 자동 발송 스케줄 진행.
                     회사 admin이 step 본문을 편집해도 발송 시점 = 활성화 시점 본문 100% 동일 보장.
                   </div>
                 </div>
               </div>
 
-              <div className="text-[10px] text-white/30 italic">
+              <div className="text-[10px] text-slate-400 italic">
                 Data source: 여정 자동 검증 엔진
               </div>
             </div>
@@ -434,20 +434,20 @@ export default function JourneyActivationConfirmModal({
           {phase === 'failed' && (
             <div className="space-y-3">
               {error && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-400/30">
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
                   <div className="flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
-                    <div className="text-[12px] text-rose-100">{error}</div>
+                    <AlertTriangle className="w-4 h-4 text-rose-700 flex-shrink-0 mt-0.5" />
+                    <div className="text-[12px] text-rose-900">{error}</div>
                   </div>
                 </div>
               )}
 
               {result && result.failedSteps.length > 0 && (
                 <>
-                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-400/30">
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
                     <div className="flex items-center gap-2">
-                      <AlertTriangle className="w-5 h-5 text-rose-300" />
-                      <div className="text-[14px] font-semibold text-rose-100">
+                      <AlertTriangle className="w-5 h-5 text-rose-700" />
+                      <div className="text-[14px] font-semibold text-rose-900">
                         자동 검증 미통과: {result.failedSteps.length}건 정정 의무
                       </div>
                     </div>
@@ -455,21 +455,21 @@ export default function JourneyActivationConfirmModal({
 
                   <div className="space-y-2">
                     {result.failedSteps.map((fs, i) => (
-                      <div key={`${fs.stepId}-${i}`} className="p-3 rounded-xl bg-white/5 border border-white/10">
+                      <div key={`${fs.stepId}-${i}`} className="p-3 rounded-xl bg-white border border-slate-200">
                         <div className="flex items-start gap-2 mb-2">
-                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-200 font-mono uppercase">
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-mono uppercase">
                             {REASON_LABEL[fs.reason] || fs.reason}
                           </span>
                         </div>
-                        <div className="text-[12px] text-white/80 mb-2">{fs.details}</div>
+                        <div className="text-[12px] text-slate-700 mb-2">{fs.details}</div>
                         {fs.matchedStopWords && fs.matchedStopWords.length > 0 && (
-                          <div className="text-[11px] text-white/50">
+                          <div className="text-[11px] text-slate-500">
                             매칭된 stop word: {fs.matchedStopWords.slice(0, 5).join(', ')}
                           </div>
                         )}
                         <button
                           onClick={() => onRegenerate(fs)}
-                          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 text-violet-100 text-[11px] font-semibold transition-colors"
+                          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-100 hover:bg-violet-100 text-violet-900 text-[11px] font-semibold transition-colors"
                         >
                           <Wand2 className="w-3 h-3" />
                           step 편집 영역 진입
@@ -478,7 +478,7 @@ export default function JourneyActivationConfirmModal({
                     ))}
                   </div>
 
-                  <div className="text-[10px] text-white/30 italic">
+                  <div className="text-[10px] text-slate-400 italic">
                     Data source: 여정 자동 검증 엔진
                   </div>
                 </>
@@ -488,14 +488,14 @@ export default function JourneyActivationConfirmModal({
           {/* 매장번호 발송 — 미등록 회신번호 실패 예정 고지 */}
           {phase === 'callback_confirm' && callbackConfirm && (
             <div className="space-y-3">
-              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-400/30">
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200">
                 <div className="flex items-start gap-2">
-                  <AlertTriangle className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" />
+                  <AlertTriangle className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" />
                   <div>
-                    <div className="text-[14px] font-semibold text-amber-100">
+                    <div className="text-[14px] font-semibold text-amber-900">
                       미등록 매장번호: 발송 실패 예정 {callbackConfirm.count.toLocaleString()}명
                     </div>
-                    <div className="text-[12px] text-amber-100/80 mt-1 leading-relaxed">
+                    <div className="text-[12px] text-amber-900 mt-1 leading-relaxed">
                       {callbackConfirm.message || '매장번호가 등록 발신번호가 아닌 고객은 발송이 자동 실패 처리됩니다.'}
                       {' '}발신번호 관리에서 매장번호를 등록하면 정상 발송됩니다. 매장번호가 없는 고객은 기본 회신번호로 발송됩니다.
                     </div>
@@ -503,19 +503,19 @@ export default function JourneyActivationConfirmModal({
                 </div>
               </div>
               {callbackConfirm.details.length > 0 && (
-                <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-                  <div className="text-[11px] text-white/60 mb-2">미등록 매장번호별 실패 예정 인원</div>
+                <div className="p-3 rounded-xl bg-white border border-slate-200">
+                  <div className="text-[11px] text-slate-500 mb-2">미등록 매장번호별 실패 예정 인원</div>
                   <div className="space-y-1 max-h-40 overflow-y-auto">
                     {callbackConfirm.details.slice(0, 20).map((d) => (
                       <div key={d.phone} className="flex items-center justify-between text-[12px]">
-                        <span className="font-mono text-white/80">{d.phone}</span>
-                        <span className="text-rose-300">{d.excludedCount.toLocaleString()}명 실패</span>
+                        <span className="font-mono text-slate-700">{d.phone}</span>
+                        <span className="text-rose-700">{d.excludedCount.toLocaleString()}명 실패</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-              <div className="text-[10px] text-white/30 italic">
+              <div className="text-[10px] text-slate-400 italic">
                 Data source: customers.store_phone ↔ 등록 발신번호(callback_numbers) 대조
               </div>
             </div>
@@ -523,19 +523,19 @@ export default function JourneyActivationConfirmModal({
         </div>
 
         {/* 액션 */}
-        <div className="flex items-center gap-2 p-5 border-t border-white/10 bg-slate-950/50">
+        <div className="flex items-center gap-2 p-5 border-t border-slate-200 bg-slate-100">
           {phase === 'ready' && (
             <>
               <button
                 onClick={onClose}
-                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors"
+                className="flex-1 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-colors"
               >
                 취소
               </button>
               <button
                 onClick={journeyStatus === 'draft' ? () => setCreditConfirm(true) : () => runActivate()}
                 disabled={isInsufficientBalance}
-                className="flex-1 px-4 py-2 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-violet-500/30"
+                className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold transition-colors"
               >
                 {journeyStatus === 'draft' ? '활성화 확인' : '재개 확인'}
               </button>
@@ -546,13 +546,13 @@ export default function JourneyActivationConfirmModal({
             <>
               <button
                 onClick={onClose}
-                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors"
+                className="flex-1 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-colors"
               >
                 닫기
               </button>
               <button
                 onClick={runValidate}
-                className="flex-1 px-4 py-2 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 rounded-lg text-sm font-semibold transition-colors"
+                className="flex-1 px-4 py-2 bg-violet-100 hover:bg-violet-200 text-violet-900 rounded-lg text-sm font-semibold transition-colors"
               >
                 다시 검증
               </button>
@@ -563,13 +563,13 @@ export default function JourneyActivationConfirmModal({
             <>
               <button
                 onClick={onClose}
-                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors"
+                className="flex-1 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-colors"
               >
                 취소
               </button>
               <button
                 onClick={() => runActivate(true)}
-                className="flex-1 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-amber-500/30"
+                className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-amber-500/30"
               >
                 확인하고 활성화
               </button>
@@ -577,13 +577,13 @@ export default function JourneyActivationConfirmModal({
           )}
 
           {phase === 'validating' && (
-            <div className="w-full text-center text-[11px] text-white/40">
+            <div className="w-full text-center text-[11px] text-slate-400">
               검증 진행 중 (5~10초 소요)
             </div>
           )}
 
           {phase === 'activating' && (
-            <div className="w-full text-center text-[12px] text-violet-200 flex items-center justify-center gap-2">
+            <div className="w-full text-center text-[12px] text-violet-800 flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
               활성화 진행 중: snapshot 보존 + 알림 스케줄 등록
             </div>
@@ -592,7 +592,7 @@ export default function JourneyActivationConfirmModal({
           {phase === 'migration_pending' && (
             <button
               onClick={onClose}
-              className="w-full px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors"
+              className="w-full px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-colors"
             >
               닫기
             </button>

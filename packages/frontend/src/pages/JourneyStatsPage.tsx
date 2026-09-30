@@ -1,6 +1,6 @@
 import { Workflow } from 'lucide-react';
-import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_PAGE_CENTER, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import { OUI_CHART_AXIS, OUI_CHART_GRID, OUI_CHART_TOOLTIP } from '../utils/operator-ui';
+import ZoneFrame from '../components/zone/ZoneFrame';
 /**
  * JourneyStatsPage.tsx — Journey 통계 시각화 (D192 2026-05-22)
  *
@@ -135,17 +135,17 @@ export default function JourneyStatsPage() {
 
   if (loading) {
     return (
-      <div className={OUI_PAGE_CENTER}>
-        <Loader2 className="w-8 h-8 animate-spin text-violet-400" />
-      </div>
+      <ZoneFrame moduleId="journeys" sub="성과" backTo={`/ai-journeys/${id}`} backLabel="여정 상세로">
+        <div className="py-24 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-indigo-600" /></div>
+      </ZoneFrame>
     );
   }
 
   if (error || !stats) {
     return (
-      <div className={OUI_PAGE_CENTER}>
-        <div className="text-rose-300">{error || '통계 데이터 없음'}</div>
-      </div>
+      <ZoneFrame moduleId="journeys" sub="성과" backTo={`/ai-journeys/${id}`} backLabel="여정 상세로">
+        <div className="py-24 text-center text-rose-700">{error || '통계 데이터 없음'}</div>
+      </ZoneFrame>
     );
   }
 
@@ -154,69 +154,56 @@ export default function JourneyStatsPage() {
   const segmentData = stats.segments.map((s) => ({ name: s.segment, 진입: s.enteredCount, 완료: s.completedCount, 클릭: s.clickCount, 전환: s.conversionCount }));
 
   return (
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-      {/* 헤더: 오퍼레이터 표면 단계(OUI) 1규격 = 뒤로가기 · 타일 · 제목 · 부제 */}
-      <div className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
-          <button onClick={() => goBackOr(navigate, `/ai-journeys/${id}`)} className={OUI_BACK} aria-label="여정 상세로">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-fuchsia-400 to-purple-500`}>
-            <Workflow className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h1 className={`${OUI_TITLE} flex items-center gap-2`}>
-              {journeyName || '여정'} · 통계 분석
-            </h1>
-            <p className={OUI_SUBTITLE}>전체 효과 · 등급별 · 시간대 · 요일 · A/B 자동 배분</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto p-4 md:p-6">
+    <ZoneFrame
+      moduleId="journeys"
+      sub={`${journeyName || '여정'} · 성과`}
+      backTo={`/ai-journeys/${id}`}
+      backLabel="여정 상세로"
+      aux={{ label: '진입 고객', icon: Users, onClick: () => navigate(`/ai-journeys/${id}`) }}
+    >
+      <div>
         {/* Overview 카드 — ★ 2026-07-10 목표 달성(진입 후 구매 확인 이탈 = 성과) 추가 */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
-          <Card icon={<Users className="w-4 h-4" />} label="총 진입" value={stats.overview.totalEntered.toLocaleString()} color="text-blue-300" />
-          <Card icon={<TrendingUp className="w-4 h-4" />} label="진행 중" value={stats.overview.active.toLocaleString()} color="text-cyan-300" />
-          <Card icon={<CheckCircle2 className="w-4 h-4" />} label="완료" value={stats.overview.completed.toLocaleString()} color="text-emerald-300" />
-          <Card icon={<Target className="w-4 h-4" />} label="목표 달성" value={Number(stats.overview.goalMet || 0).toLocaleString()} color="text-emerald-300" />
-          <Card icon={<Pause className="w-4 h-4" />} label="일시정지" value={stats.overview.paused.toLocaleString()} color="text-amber-300" />
-          <Card icon={<XCircle className="w-4 h-4" />} label="실패" value={stats.overview.failed.toLocaleString()} color="text-rose-300" />
-          <Card icon={<DollarSign className="w-4 h-4" />} label="총 비용" value={formatCost(stats.overview.totalCost)} color="text-fuchsia-300" />
+          <Card icon={<Users className="w-4 h-4" />} label="총 진입" value={stats.overview.totalEntered.toLocaleString()} color="text-blue-700" />
+          <Card icon={<TrendingUp className="w-4 h-4" />} label="진행 중" value={stats.overview.active.toLocaleString()} color="text-cyan-700" />
+          <Card icon={<CheckCircle2 className="w-4 h-4" />} label="완료" value={stats.overview.completed.toLocaleString()} color="text-emerald-700" />
+          <Card icon={<Target className="w-4 h-4" />} label="목표 달성" value={Number(stats.overview.goalMet || 0).toLocaleString()} color="text-emerald-700" />
+          <Card icon={<Pause className="w-4 h-4" />} label="일시정지" value={stats.overview.paused.toLocaleString()} color="text-amber-700" />
+          <Card icon={<XCircle className="w-4 h-4" />} label="실패" value={stats.overview.failed.toLocaleString()} color="text-rose-700" />
+          <Card icon={<DollarSign className="w-4 h-4" />} label="총 비용" value={formatCost(stats.overview.totalCost)} color="text-fuchsia-700" />
         </div>
         {Number(stats.overview.goalMet || 0) > 0 && (
-          <div className="text-[11px] text-emerald-300/70 -mt-4 mb-6">목표 달성 = 여정 진입 후 목표 달성이 확인되어 남은 발송 없이 종료된 고객. 이 여정이 만든 성과입니다.</div>
+          <div className="text-[11px] text-emerald-700 -mt-4 mb-6">목표 달성 = 여정 진입 후 목표 달성이 확인되어 남은 발송 없이 종료된 고객. 이 여정이 만든 성과입니다.</div>
         )}
 
         {/* ★ 2026-07-11 홀드아웃 증분 비교 — 발송군 vs 미발송 대조군 전환율 */}
         {stats.holdoutCompare && stats.holdoutCompare.holdoutTotal > 0 && (
-          <div className="mb-6 p-4 bg-sky-500/5 border border-sky-400/25 rounded-xl">
+          <div className="mb-6 p-4 bg-sky-50 border border-sky-200 rounded-xl">
             <div className="flex items-center gap-2 mb-3">
-              <Beaker className="w-4 h-4 text-sky-300" />
-              <span className="text-sm font-semibold text-sky-100">홀드아웃 증분 비교</span>
-              <span className="text-[10px] text-white/40">이 여정이 실제로 전환을 만드는지: 발송군 vs 미발송 대조군</span>
+              <Beaker className="w-4 h-4 text-sky-700" />
+              <span className="text-sm font-semibold text-sky-900">홀드아웃 증분 비교</span>
+              <span className="text-[10px] text-slate-400">이 여정이 실제로 전환을 만드는지: 발송군 vs 미발송 대조군</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="p-3 bg-white/[0.04] border border-white/10 rounded-lg">
-                <div className="text-[10px] text-white/45 mb-1">발송군 전환율</div>
-                <div className="text-xl font-bold text-emerald-300 tabular-nums">{(stats.holdoutCompare.sentRate * 100).toFixed(1)}%</div>
-                <div className="text-[10px] text-white/40 mt-0.5">{stats.holdoutCompare.sentConverted.toLocaleString()} / {stats.holdoutCompare.sentTotal.toLocaleString()}명</div>
+              <div className="p-3 bg-white border border-slate-200 rounded-lg">
+                <div className="text-[10px] text-slate-400 mb-1">발송군 전환율</div>
+                <div className="text-xl font-bold text-emerald-700 tabular-nums">{(stats.holdoutCompare.sentRate * 100).toFixed(1)}%</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{stats.holdoutCompare.sentConverted.toLocaleString()} / {stats.holdoutCompare.sentTotal.toLocaleString()}명</div>
               </div>
-              <div className="p-3 bg-white/[0.04] border border-white/10 rounded-lg">
-                <div className="text-[10px] text-white/45 mb-1">대조군 전환율 (미발송)</div>
-                <div className="text-xl font-bold text-white/70 tabular-nums">{(stats.holdoutCompare.holdoutRate * 100).toFixed(1)}%</div>
-                <div className="text-[10px] text-white/40 mt-0.5">{stats.holdoutCompare.holdoutConverted.toLocaleString()} / {stats.holdoutCompare.holdoutTotal.toLocaleString()}명</div>
+              <div className="p-3 bg-white border border-slate-200 rounded-lg">
+                <div className="text-[10px] text-slate-400 mb-1">대조군 전환율 (미발송)</div>
+                <div className="text-xl font-bold text-slate-600 tabular-nums">{(stats.holdoutCompare.holdoutRate * 100).toFixed(1)}%</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{stats.holdoutCompare.holdoutConverted.toLocaleString()} / {stats.holdoutCompare.holdoutTotal.toLocaleString()}명</div>
               </div>
-              <div className="p-3 bg-white/[0.04] border border-white/10 rounded-lg">
-                <div className="text-[10px] text-white/45 mb-1">증분 효과 (발송군 − 대조군)</div>
-                <div className={`text-xl font-bold tabular-nums ${stats.holdoutCompare.sentRate >= stats.holdoutCompare.holdoutRate ? 'text-sky-300' : 'text-rose-300'}`}>
+              <div className="p-3 bg-white border border-slate-200 rounded-lg">
+                <div className="text-[10px] text-slate-400 mb-1">증분 효과 (발송군 − 대조군)</div>
+                <div className={`text-xl font-bold tabular-nums ${stats.holdoutCompare.sentRate >= stats.holdoutCompare.holdoutRate ? 'text-sky-700' : 'text-rose-700'}`}>
                   {((stats.holdoutCompare.sentRate - stats.holdoutCompare.holdoutRate) * 100).toFixed(1)}%p
                 </div>
-                <div className="text-[10px] text-white/40 mt-0.5">전환 판정 = 진입 이후 구매(이벤트·프로필)</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">전환 판정 = 진입 이후 구매(이벤트·프로필)</div>
               </div>
             </div>
-            <div className="text-[10px] text-white/30 italic mt-2">Data source: journey_executions(holdout) × cdp_events·customers 실측</div>
+            <div className="text-[10px] text-slate-400 italic mt-2">Data source: journey_executions(holdout) × cdp_events·customers 실측</div>
           </div>
         )}
 
@@ -224,8 +211,8 @@ export default function JourneyStatsPage() {
         <Section title="Step별 효과 매트릭스" subtitle="발송/실패/Skip + 클릭률 + 전환율">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-white/5 border-b border-white/10">
-                <tr className="text-left text-white/60 text-xs">
+              <thead className="bg-white border-b border-slate-200">
+                <tr className="text-left text-slate-500 text-xs">
                   <th className="px-3 py-2.5 font-medium">Step</th>
                   <th className="px-3 py-2.5 font-medium">유형</th>
                   <th className="px-3 py-2.5 font-medium">채널</th>
@@ -242,23 +229,23 @@ export default function JourneyStatsPage() {
               </thead>
               <tbody>
                 {stats.steps.map((s) => (
-                  <tr key={s.stepId} className="border-b border-white/5 hover:bg-white/5">
+                  <tr key={s.stepId} className="border-b border-slate-100 hover:bg-white">
                     <td className="px-3 py-2.5">{s.stepOrder}번째</td>
                     <td className="px-3 py-2.5 text-xs">{stepTypeLabel(s.stepType)}</td>
                     <td className="px-3 py-2.5 text-xs uppercase">{s.channel || '-'}</td>
                     <td className="px-3 py-2.5 text-right font-mono">{s.enteredCount.toLocaleString()}</td>
                     <td className="px-3 py-2.5 text-right font-mono">{s.sentCount.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-rose-300">{s.failedCount.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-amber-300">{s.skippedCount.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-cyan-300">{s.clickCount.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{s.conversionCount.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-rose-700">{s.failedCount.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-amber-700">{s.skippedCount.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-cyan-700">{s.clickCount.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-emerald-700">{s.conversionCount.toLocaleString()}</td>
                     <td className="px-3 py-2.5 text-right font-mono">{formatPct(s.clickRate)}</td>
                     <td className="px-3 py-2.5 text-right font-mono">{formatPct(s.conversionRate)}</td>
                     <td className="px-3 py-2.5 text-right font-mono">{formatCost(s.totalCost)}</td>
                   </tr>
                 ))}
                 {stats.steps.length === 0 && (
-                  <tr><td colSpan={12} className="text-center py-8 text-white/40">step 데이터 없음</td></tr>
+                  <tr><td colSpan={12} className="text-center py-8 text-slate-400">step 데이터 없음</td></tr>
                 )}
               </tbody>
             </table>
@@ -268,14 +255,14 @@ export default function JourneyStatsPage() {
         {/* 등급별 Bar chart */}
         <Section title="등급별 효과 매트릭스" subtitle="진입/완료/클릭/전환 카운트">
           {segmentData.length === 0 ? (
-            <div className="text-center py-8 text-white/40">데이터 없음</div>
+            <div className="text-center py-8 text-slate-400">데이터 없음</div>
           ) : (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={segmentData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                <XAxis dataKey="name" stroke="rgba(255,255,255,0.6)" />
-                <YAxis stroke="rgba(255,255,255,0.6)" />
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={OUI_CHART_GRID} />
+                <XAxis dataKey="name" stroke={OUI_CHART_AXIS} />
+                <YAxis stroke={OUI_CHART_AXIS} />
+                <Tooltip contentStyle={OUI_CHART_TOOLTIP} />
                 <Legend />
                 <Bar dataKey="진입" fill="#3b82f6" />
                 <Bar dataKey="완료" fill="#10b981" />
@@ -290,10 +277,10 @@ export default function JourneyStatsPage() {
         <Section title="시간대별 효과 (24시간 KST)" subtitle="발송 + 클릭 정시별 매트릭스">
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={hourlyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-              <XAxis dataKey="name" stroke="rgba(255,255,255,0.6)" />
-              <YAxis stroke="rgba(255,255,255,0.6)" />
-              <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke={OUI_CHART_GRID} />
+              <XAxis dataKey="name" stroke={OUI_CHART_AXIS} />
+              <YAxis stroke={OUI_CHART_AXIS} />
+              <Tooltip contentStyle={OUI_CHART_TOOLTIP} />
               <Legend />
               <Line type="monotone" dataKey="발송" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
               <Line type="monotone" dataKey="클릭" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
@@ -305,10 +292,10 @@ export default function JourneyStatsPage() {
         <Section title="요일별 효과" subtitle="발송 + 클릭 요일별 매트릭스">
           <ResponsiveContainer width="100%" height={250}>
             <BarChart data={weekdayData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-              <XAxis dataKey="name" stroke="rgba(255,255,255,0.6)" />
-              <YAxis stroke="rgba(255,255,255,0.6)" />
-              <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke={OUI_CHART_GRID} />
+              <XAxis dataKey="name" stroke={OUI_CHART_AXIS} />
+              <YAxis stroke={OUI_CHART_AXIS} />
+              <Tooltip contentStyle={OUI_CHART_TOOLTIP} />
               <Legend />
               <Bar dataKey="발송" fill="#3b82f6" />
               <Bar dataKey="클릭" fill="#06b6d4" />
@@ -321,8 +308,8 @@ export default function JourneyStatsPage() {
           <Section title="A/B Variant Bandit 효과" subtitle="Thompson Sampling posterior 매트릭스: 자동 최적화 효과">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-white/5 border-b border-white/10">
-                  <tr className="text-left text-white/60 text-xs">
+                <thead className="bg-white border-b border-slate-200">
+                  <tr className="text-left text-slate-500 text-xs">
                     <th className="px-3 py-2.5 font-medium">Step</th>
                     <th className="px-3 py-2.5 font-medium">Variant</th>
                     <th className="px-3 py-2.5 font-medium text-right">분배율</th>
@@ -335,34 +322,34 @@ export default function JourneyStatsPage() {
                 </thead>
                 <tbody>
                   {stats.variants.map((v) => (
-                    <tr key={v.variantId} className="border-b border-white/5 hover:bg-white/5">
+                    <tr key={v.variantId} className="border-b border-slate-100 hover:bg-white">
                       <td className="px-3 py-2.5 text-xs font-mono">{v.stepId.slice(0, 8)}</td>
-                      <td className="px-3 py-2.5"><span className="px-2 py-0.5 bg-violet-500/20 text-violet-200 rounded text-xs">{v.variantLabel}</span></td>
+                      <td className="px-3 py-2.5"><span className="px-2 py-0.5 bg-violet-100 text-violet-800 rounded text-xs">{v.variantLabel}</span></td>
                       <td className="px-3 py-2.5 text-right font-mono">{formatPct(v.trafficWeight)}</td>
                       <td className="px-3 py-2.5 text-right font-mono">{v.sentCount.toLocaleString()}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-cyan-300">{v.clickCount.toLocaleString()}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{v.conversionCount.toLocaleString()}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-violet-300">{formatPct(v.posteriorMean)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-xs text-white/50">α={v.posteriorAlpha.toFixed(1)} β={v.posteriorBeta.toFixed(1)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-cyan-700">{v.clickCount.toLocaleString()}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-emerald-700">{v.conversionCount.toLocaleString()}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-violet-700">{formatPct(v.posteriorMean)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-xs text-slate-500">α={v.posteriorAlpha.toFixed(1)} β={v.posteriorBeta.toFixed(1)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <div className="mt-3 p-2 bg-violet-500/5 border border-violet-400/20 rounded text-[11px] text-violet-200/80 flex items-start gap-1.5">
+            <div className="mt-3 p-2 bg-violet-50 border border-violet-200 rounded text-[11px] text-violet-800 flex items-start gap-1.5">
               <Beaker className="w-3 h-3 flex-shrink-0 mt-0.5" />
               <span>Thompson Sampling 자동 최적화. 효과 높은 variant 자동 가중치 증가. 사후 평균이 높을수록 우수 variant.</span>
             </div>
           </Section>
         )}
       </div>
-    </div>
+    </ZoneFrame>
   );
 }
 
 function Card({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {
   return (
-    <div className="p-3 bg-white/5 border border-white/10 rounded-lg">
+    <div className="p-3 bg-white border border-slate-200 rounded-lg">
       <div className={`flex items-center gap-1.5 text-xs ${color} mb-1.5`}>
         {icon}<span>{label}</span>
       </div>
@@ -373,10 +360,10 @@ function Card({ icon, label, value, color }: { icon: React.ReactNode; label: str
 
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="mb-6 bg-white/5 border border-white/10 rounded-lg overflow-hidden">
-      <div className="px-4 py-3 border-b border-white/10">
+    <div className="mb-6 bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-200">
         <h2 className="text-sm font-semibold">{title}</h2>
-        {subtitle && <p className="text-[11px] text-white/40 mt-0.5">{subtitle}</p>}
+        {subtitle && <p className="text-[11px] text-slate-400 mt-0.5">{subtitle}</p>}
       </div>
       <div className="p-4">{children}</div>
     </div>

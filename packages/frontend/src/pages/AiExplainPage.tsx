@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { goBackOr } from '../lib/scroll-restoration';
-import { AlertCircle, ArrowLeft, BookOpen, FileText, Loader2, Search, Sparkles } from 'lucide-react';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { AlertCircle, BookOpen, FileText, Loader2, Search, Sparkles } from 'lucide-react';
 
 // ★ D181 (2026-05-19): Anthropic Citations 페이지
 //   사용자 자연어 질문 → 회사 데이터 documents → AI 응답 + 근거 인용
@@ -29,7 +28,6 @@ const EXAMPLE_QUESTIONS = [
 ];
 
 export default function AiExplainPage() {
-  const navigate = useNavigate();
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState<CitedAnswer | null>(null);
@@ -81,19 +79,15 @@ export default function AiExplainPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
-      <div className="bg-white border-b">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center gap-3">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <BookOpen className="w-5 h-5 text-indigo-600" />
-          <h1 className="text-lg font-bold text-gray-800">AI에게 질문 (근거 인용)</h1>
-          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">실험실</span>
-        </div>
-      </div>
-
-      <div className="max-w-4xl mx-auto px-6 py-6 space-y-4">
+    <ZoneFrame
+      moduleId="ai-memory"
+      sub="AI에게 질문"
+      command={{
+        checks: [{ label: '회사 데이터만 참고' }, { label: '근거 출처 인용' }, { label: '없는 정보는 "정보 없음"' }],
+      }}
+    >
+      <div className="max-w-4xl space-y-4">
+<div className="mb-3 inline-flex items-center gap-1.5 text-[12px] text-slate-500"><span className="text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-medium border border-violet-200">실험실</span><BookOpen className="w-3.5 h-3.5 text-indigo-600" />근거를 인용해 답합니다</div>
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
@@ -204,6 +198,6 @@ export default function AiExplainPage() {
           </>
         )}
       </div>
-    </div>
+    </ZoneFrame>
   );
 }

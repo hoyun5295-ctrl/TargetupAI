@@ -28,39 +28,39 @@ export default function JourneyDataScopeNote({ availableCount, lockedCount, lock
   const ratio = total > 0 ? Math.round((availableCount / total) * 100) : 0;
 
   return (
-    <div className={`rounded-xl border border-white/10 bg-slate-950/50 p-3.5 ${className}`}>
+    <div className={`rounded-xl border border-slate-200 bg-slate-100 p-3.5 ${className}`}>
       <div className="flex items-start gap-2.5">
         <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500">
           <Database className="h-3.5 w-3.5 text-white" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[12.5px] font-semibold leading-snug text-white/90">
+          <p className="text-[12.5px] font-semibold leading-snug text-slate-800">
             연동한 데이터가 많을수록 만들 수 있는 여정이 늘어납니다
           </p>
-          <p className="mt-0.5 text-[11.5px] leading-relaxed text-white/55">
+          <p className="mt-0.5 text-[11.5px] leading-relaxed text-slate-500">
             매장 시스템이나 자사몰을 연동하면 구매·등급·행동이 들어오고, 그만큼 고를 수 있는 시작 신호가 많아집니다.
           </p>
 
           {total > 0 && (
             <>
               <div className="mt-2.5 flex items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-violet-400 to-fuchsia-400 transition-all"
                     style={{ width: `${ratio}%` }}
                   />
                 </div>
-                <span className="shrink-0 text-[11px] tabular-nums text-white/60">
-                  <span className="font-semibold text-violet-200">{availableCount}</span> / {total}종
+                <span className="shrink-0 text-[11px] tabular-nums text-slate-500">
+                  <span className="font-semibold text-violet-800">{availableCount}</span> / {total}종
                 </span>
               </div>
 
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                <span className="inline-flex items-center gap-1 text-emerald-200/90">
+                <span className="inline-flex items-center gap-1 text-emerald-800">
                   <Sparkles className="h-3 w-3" /> 지금 만들 수 있어요 {availableCount}종
                 </span>
                 {lockedCount > 0 && (
-                  <span className="inline-flex items-center gap-1 text-amber-200/85">
+                  <span className="inline-flex items-center gap-1 text-amber-800">
                     <Lock className="h-3 w-3" /> 데이터가 오면 열려요 {lockedCount}종
                   </span>
                 )}
@@ -71,12 +71,12 @@ export default function JourneyDataScopeNote({ availableCount, lockedCount, lock
           {hints.length > 0 && (
             <ul className="mt-2 space-y-0.5">
               {hints.map((h) => (
-                <li key={h} className="text-[11px] leading-relaxed text-white/45">· {h}</li>
+                <li key={h} className="text-[11px] leading-relaxed text-slate-400">· {h}</li>
               ))}
             </ul>
           )}
 
-          <p className="mt-2 text-[10px] italic text-white/30">
+          <p className="mt-2 text-[10px] italic text-slate-400">
             Data source: 회사 고객 데이터로 실시간 판정한 결과입니다.
           </p>
         </div>

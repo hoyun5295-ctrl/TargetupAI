@@ -188,26 +188,26 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
   return (
     <>
     <div className="fixed inset-0 z-[1200] flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-[560px] max-h-[92vh] overflow-hidden flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl">
+      <div className="w-full max-w-[560px] max-h-[92vh] overflow-hidden flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl">
         {/* 헤더 */}
-        <div className="sticky top-0 z-10 px-5 py-4 border-b border-white/10 bg-slate-950/80 backdrop-blur-sm flex items-center justify-between">
+        <div className="sticky top-0 z-10 px-5 py-4 border-b border-slate-200 bg-slate-100 backdrop-blur-sm flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 타겟 추출
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 border border-violet-400/20">
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-200">
                   {CHANNEL_LABEL[channel]}
                 </span>
               </h3>
-              <p className="text-[11px] text-white/50">
+              <p className="text-[11px] text-slate-500">
                 {pickMode === 'direct' ? '조건을 골라 보낼 대상을 정확히 잡습니다' : '자연어로 조건을 입력하면 보낼 대상을 정확히 추출합니다'}
               </p>
             </div>
           </div>
-          <button onClick={close} className="w-8 h-8 flex items-center justify-center rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors">
+          <button onClick={close} className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -222,7 +222,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
                   /* 세는 중에 탭을 옮기면 그 상태가 남아 자연어 쪽 진행까지 잠긴다 — 함께 푼다 */
                   onClick={() => { setPickMode(m); setResult(null); setError(null); setDirectCounting(false); }}
                   className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                    pickMode === m ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white' : 'bg-white/5 text-white/50 hover:text-white/80'
+                    pickMode === m ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-white text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   {label}
@@ -235,8 +235,8 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
             <TargetDirectPickPanel channel={channel} onResult={setResult} onCountingChange={setDirectCounting} />
           ) : (
           /* 자연어 입력 */
-          <div className="rounded-xl border border-white/10 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 p-4">
-            <label className="text-[11px] text-white/60 mb-1.5 block">조건 자연어 입력</label>
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4">
+            <label className="text-[11px] text-slate-500 mb-1.5 block">조건 자연어 입력</label>
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -244,7 +244,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
               placeholder="예: 30일 안 구매하지 않은 30대 여성"
               rows={3}
               disabled={generating}
-              className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400/60 focus:ring-1 focus:ring-violet-400/40 resize-none"
+              className="w-full bg-slate-100 border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-300 resize-none"
             />
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {EXAMPLES.map((ex) => (
@@ -252,18 +252,18 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
                   key={ex}
                   onClick={() => setInput(ex)}
                   disabled={generating}
-                  className="text-[11px] px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 border border-white/10 transition-colors"
+                  className="text-[11px] px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition-colors"
                 >
                   {ex}
                 </button>
               ))}
             </div>
             <div className="mt-3 flex items-center justify-between gap-2">
-              <p className="text-[10px] text-white/30">검증된 필터만 사용: 단 1의 오차 없는 추출</p>
+              <p className="text-[10px] text-slate-400">검증된 필터만 사용: 단 1의 오차 없는 추출</p>
               <button
                 onClick={handleExtract}
                 disabled={!input.trim() || generating}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               >
                 {generating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                 {generating ? '추출 중...' : '타겟 추출'}
@@ -274,9 +274,9 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
 
           {/* 추출 실패 — 모달 안 지속 표시 (토스트만으로는 놓침) */}
           {error && !result && (
-            <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-rose-200">{error}</p>
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-700 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-rose-800">{error}</p>
             </div>
           )}
 
@@ -285,24 +285,24 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
             <div className="space-y-3">
               {/* 인원수 2칸 */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-[10px] text-white/40 mb-1">조건에 맞는 고객</p>
-                  <p className="text-2xl font-bold text-white">{result.matchCount.toLocaleString()}<span className="text-sm font-normal text-white/50 ml-1">명</span></p>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-[10px] text-slate-400 mb-1">조건에 맞는 고객</p>
+                  <p className="text-2xl font-bold text-slate-900">{result.matchCount.toLocaleString()}<span className="text-sm font-normal text-slate-500 ml-1">명</span></p>
                 </div>
-                <div className={`rounded-xl border p-4 ${result.channelEligibleCount > 0 ? 'border-emerald-400/30 bg-emerald-500/10' : 'border-amber-400/30 bg-amber-500/10'}`}>
-                  <p className="text-[10px] text-white/40 mb-1">{CHANNEL_LABEL[channel]} 발송 가능</p>
-                  <p className={`text-2xl font-bold ${result.channelEligibleCount > 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
-                    {result.channelEligibleCount.toLocaleString()}<span className="text-sm font-normal text-white/50 ml-1">명</span>
+                <div className={`rounded-xl border p-4 ${result.channelEligibleCount > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                  <p className="text-[10px] text-slate-400 mb-1">{CHANNEL_LABEL[channel]} 발송 가능</p>
+                  <p className={`text-2xl font-bold ${result.channelEligibleCount > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {result.channelEligibleCount.toLocaleString()}<span className="text-sm font-normal text-slate-500 ml-1">명</span>
                   </p>
-                  <p className="text-[9px] text-white/30 mt-0.5">{CHANNEL_ELIGIBLE_HINT[channel]}</p>
+                  <p className="text-[9px] text-slate-400 mt-0.5">{CHANNEL_ELIGIBLE_HINT[channel]}</p>
                 </div>
               </div>
 
               {/* 해석 — 자연어는 AI가 읽은 내용, 직접 선택은 고른 조건 */}
               {result.explanation && (
-                <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                  <p className="text-[11px] text-white/70 leading-relaxed">
-                    <span className="font-semibold text-white/80">{pickMode === 'direct' ? '고른 조건:' : '해석:'}</span> {result.explanation}
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-[11px] text-slate-600 leading-relaxed">
+                    <span className="font-semibold text-slate-700">{pickMode === 'direct' ? '고른 조건:' : '해석:'}</span> {result.explanation}
                   </p>
                 </div>
               )}
@@ -310,31 +310,31 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
               {/* ★ 2026-09-12 조건 자체가 0건 — 직접 선택은 고치는 대로 숫자를 보여 주므로 여기서 사유를 가른다.
                   (자연어 경로는 서버가 0건을 400으로 돌려줘 여기까지 오지 않는다) */}
               {result.matchCount === 0 && (
-                <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-200">조건에 맞는 고객이 0명입니다. 조건을 더 넓혀주세요. (자동 완화는 마케팅 의도 보호를 위해 차단됩니다)</p>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-800">조건에 맞는 고객이 0명입니다. 조건을 더 넓혀주세요. (자동 완화는 마케팅 의도 보호를 위해 차단됩니다)</p>
                 </div>
               )}
 
               {/* 채널 자격 0건 안내 */}
               {result.matchCount > 0 && result.channelEligibleCount === 0 && (
-                <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-200">이 채널로 보낼 수 있는 고객이 없습니다. 조건을 조정하거나 다른 채널을 이용해주세요. (자동 완화는 마케팅 의도 보호를 위해 차단됩니다)</p>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-800">이 채널로 보낼 수 있는 고객이 없습니다. 조건을 조정하거나 다른 채널을 이용해주세요. (자동 완화는 마케팅 의도 보호를 위해 차단됩니다)</p>
                 </div>
               )}
 
               {/* 샘플 */}
               {result.samples.length > 0 && (
-                <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
                   <div className="flex items-center gap-1.5 mb-2">
-                    <Eye className="w-3.5 h-3.5 text-white/40" />
-                    <p className="text-[11px] text-white/60 font-medium">샘플 {result.samples.length}건</p>
+                    <Eye className="w-3.5 h-3.5 text-slate-400" />
+                    <p className="text-[11px] text-slate-500 font-medium">샘플 {result.samples.length}건</p>
                     {result.channelEligibleCount > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowList(true)}
-                        className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-violet-200 hover:text-white px-2 py-1 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-400/30 transition-colors"
+                        className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-violet-800 hover:text-slate-900 px-2 py-1 rounded-lg bg-violet-100 hover:bg-violet-100 border border-violet-200 transition-colors"
                       >
                         <Users className="w-3 h-3" /> 전체 {result.channelEligibleCount.toLocaleString()}명 리스트 보기
                       </button>
@@ -342,19 +342,19 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
                   </div>
                   <div className="space-y-1">
                     {result.samples.map((s) => (
-                      <div key={s.id} className="flex items-center gap-2 text-[10px] py-1 border-b border-white/5 last:border-0">
-                        <span className="text-white/80 font-mono w-28">{s.phone}</span>
-                        <span className="text-white/60 w-16 truncate">{s.name || '-'}</span>
-                        <span className="text-white/40 w-10">{s.gender || '-'}</span>
-                        <span className="text-white/40 w-16 truncate">{s.region || '-'}</span>
-                        <span className="text-white/40 ml-auto truncate">{s.total_purchase_amount != null ? s.total_purchase_amount.toLocaleString() : '-'}</span>
+                      <div key={s.id} className="flex items-center gap-2 text-[10px] py-1 border-b border-slate-100 last:border-0">
+                        <span className="text-slate-700 font-mono w-28">{s.phone}</span>
+                        <span className="text-slate-500 w-16 truncate">{s.name || '-'}</span>
+                        <span className="text-slate-400 w-10">{s.gender || '-'}</span>
+                        <span className="text-slate-400 w-16 truncate">{s.region || '-'}</span>
+                        <span className="text-slate-400 ml-auto truncate">{s.total_purchase_amount != null ? s.total_purchase_amount.toLocaleString() : '-'}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              <p className="text-[10px] text-white/30 italic text-center">
+              <p className="text-[10px] text-slate-400 italic text-center">
                 Data source: {pickMode === 'direct' ? '화면에서 고른 조건' : 'AI 자연어 변환'} + 검증된 SQL 필터 + 채널 발송 자격
               </p>
             </div>
@@ -362,8 +362,8 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
         </div>
 
         {/* 푸터 */}
-        <div className="px-5 py-3.5 border-t border-white/10 bg-slate-950/60 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          <div className="flex items-center gap-2 text-white/50 text-xs mr-auto">
+        <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <div className="flex items-center gap-2 text-slate-500 text-xs mr-auto">
             <Users className="w-4 h-4" />
             {result
               ? `${result.channelEligibleCount.toLocaleString()}명 발송 가능`
@@ -373,7 +373,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
             <button
               onClick={handleSaveSegment}
               disabled={saving}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-40 transition-colors"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 disabled:opacity-40 transition-colors"
             >
               <Bookmark className="w-3.5 h-3.5" />
               {saving ? '저장 중...' : '세그먼트로 저장'}
@@ -383,7 +383,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
             onClick={handleApply}
             /* ★ 2026-09-12 직접 선택은 고르는 동안 숫자가 갱신된다 — 세는 중에는 확정하지 않는다 */
             disabled={!result || result.channelEligibleCount === 0 || directCounting}
-            className="flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            className="flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
           >
             <Check className="w-4 h-4" />
             {result ? `이 타겟으로 진행 (${result.channelEligibleCount.toLocaleString()}명)` : '이 타겟으로 진행'}

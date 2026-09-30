@@ -63,11 +63,11 @@ const LIGHT_BORDER = { borderColor: '#d7d9e0' } as const;
 
 const TRIGGER = {
   dark: {
-    btn: 'w-full flex items-center gap-2 pl-3 pr-2 py-2 bg-slate-900/70 border border-white/12 rounded-lg text-xs text-left hover:border-violet-400/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
-    icon: 'text-violet-300/70',
-    text: 'text-white truncate',
-    placeholder: 'text-white/40 truncate',
-    clear: 'text-white/40 hover:text-white/70',
+    btn: 'w-full flex items-center gap-2 pl-3 pr-2 py-2 bg-white border border-slate-200 rounded-lg text-xs text-left hover:border-violet-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+    icon: 'text-violet-700',
+    text: 'text-slate-900 truncate',
+    placeholder: 'text-slate-400 truncate',
+    clear: 'text-slate-400 hover:text-slate-600',
   },
   light: {
     btn: 'w-full flex items-center gap-2 pl-3 pr-2 py-2 bg-white border rounded-lg text-xs text-left hover:border-violet-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
@@ -185,16 +185,16 @@ export function DateTimeField({
           className="fixed inset-0 z-[2000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
             {/* 헤더 */}
-            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10 bg-gradient-to-r from-slate-950 via-violet-950/40 to-slate-950">
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 bg-gradient-to-r from-slate-50 via-violet-50 to-slate-50">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
                   <Calendar className="w-4 h-4 text-white" />
                 </div>
-                <h3 className="text-white font-bold text-sm">{title}</h3>
+                <h3 className="text-slate-900 font-bold text-sm">{title}</h3>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="text-white/50 hover:text-white p-1.5 hover:bg-white/5 rounded" aria-label="닫기">
+              <button type="button" onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-900 p-1.5 hover:bg-white rounded" aria-label="닫기">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -207,16 +207,16 @@ export function DateTimeField({
                     type="button"
                     onClick={() => setViewYM(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }))}
                     disabled={!canPrevMonth}
-                    className="p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
                     aria-label="이전 달"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <div className="text-sm font-semibold text-white tabular-nums">{viewYM.y}년 {viewYM.m + 1}월</div>
+                  <div className="text-sm font-semibold text-slate-900 tabular-nums">{viewYM.y}년 {viewYM.m + 1}월</div>
                   <button
                     type="button"
                     onClick={() => setViewYM(({ y, m }) => (m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }))}
-                    className="p-1.5 rounded-lg text-white/70 hover:bg-white/10"
+                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100"
                     aria-label="다음 달"
                   >
                     <ChevronRight className="w-4 h-4" />
@@ -224,7 +224,7 @@ export function DateTimeField({
                 </div>
                 <div className="grid grid-cols-7 gap-1 mb-1">
                   {WEEKDAYS.map((w, i) => (
-                    <div key={w} className={`text-center text-[10px] font-semibold py-1 ${i === 0 ? 'text-rose-300/70' : i === 6 ? 'text-cyan-300/70' : 'text-white/40'}`}>{w}</div>
+                    <div key={w} className={`text-center text-[10px] font-semibold py-1 ${i === 0 ? 'text-rose-700' : i === 6 ? 'text-cyan-700' : 'text-slate-400'}`}>{w}</div>
                   ))}
                 </div>
                 <div className="grid grid-cols-7 gap-1">
@@ -241,12 +241,12 @@ export function DateTimeField({
                         onClick={() => setDraftDate(`${viewYM.y}-${pad2(viewYM.m + 1)}-${pad2(d)}`)}
                         className={`aspect-square rounded-lg text-xs font-medium tabular-nums transition-colors ${
                           selected
-                            ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-bold shadow-md'
+                            ? 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-md'
                             : past
-                              ? 'text-white/15 cursor-not-allowed'
+                              ? 'text-slate-300 cursor-not-allowed'
                               : today
-                                ? 'text-violet-200 ring-1 ring-violet-400/50 hover:bg-white/10'
-                                : 'text-white/75 hover:bg-white/10'
+                                ? 'text-violet-800 ring-1 ring-violet-300 hover:bg-slate-100'
+                                : 'text-slate-600 hover:bg-slate-100'
                         }`}
                       >
                         {d}
@@ -257,9 +257,9 @@ export function DateTimeField({
               </div>
 
               {/* 시간 */}
-              <div className="border-t border-white/10 pt-3 space-y-2.5">
-                <div className="flex items-center gap-1.5 text-[11px] text-white/50">
-                  <Clock className="w-3.5 h-3.5 text-violet-300/70" /> 시각
+              <div className="border-t border-slate-200 pt-3 space-y-2.5">
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <Clock className="w-3.5 h-3.5 text-violet-700" /> 시각
                 </div>
                 {/* 오전/오후 */}
                 <div className="grid grid-cols-2 gap-1.5">
@@ -268,7 +268,7 @@ export function DateTimeField({
                       key={lb}
                       type="button"
                       onClick={() => setDraftPm(pm)}
-                      className={`py-2 rounded-lg text-xs font-semibold transition-colors ${draftPm === pm ? 'bg-violet-500/40 text-white ring-1 ring-violet-400/50' : 'bg-white/5 text-white/55 hover:bg-white/10'}`}
+                      className={`py-2 rounded-lg text-xs font-semibold transition-colors ${draftPm === pm ? 'bg-violet-200 text-slate-900 ring-1 ring-violet-300' : 'bg-white text-slate-500 hover:bg-slate-100'}`}
                     >
                       {lb}
                     </button>
@@ -276,14 +276,14 @@ export function DateTimeField({
                 </div>
                 {/* 시 */}
                 <div>
-                  <div className="text-[10px] text-white/40 mb-1">시</div>
+                  <div className="text-[10px] text-slate-400 mb-1">시</div>
                   <div className="grid grid-cols-6 gap-1">
                     {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
                       <button
                         key={h}
                         type="button"
                         onClick={() => setDraftHour(h)}
-                        className={`py-1.5 rounded-md text-xs font-semibold tabular-nums transition-colors ${draftHour === h ? 'bg-violet-500/40 text-white ring-1 ring-violet-400/50' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}
+                        className={`py-1.5 rounded-md text-xs font-semibold tabular-nums transition-colors ${draftHour === h ? 'bg-violet-200 text-slate-900 ring-1 ring-violet-300' : 'bg-white text-slate-500 hover:bg-slate-100'}`}
                       >
                         {h}
                       </button>
@@ -292,14 +292,14 @@ export function DateTimeField({
                 </div>
                 {/* 분 (5분 단위) */}
                 <div>
-                  <div className="text-[10px] text-white/40 mb-1">분 (5분 단위)</div>
+                  <div className="text-[10px] text-slate-400 mb-1">분 (5분 단위)</div>
                   <div className="grid grid-cols-6 gap-1">
                     {MINUTE_STEPS.map((mnt) => (
                       <button
                         key={mnt}
                         type="button"
                         onClick={() => setDraftMin(mnt)}
-                        className={`py-1.5 rounded-md text-xs font-semibold tabular-nums transition-colors ${draftMin === mnt ? 'bg-violet-500/40 text-white ring-1 ring-violet-400/50' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}
+                        className={`py-1.5 rounded-md text-xs font-semibold tabular-nums transition-colors ${draftMin === mnt ? 'bg-violet-200 text-slate-900 ring-1 ring-violet-300' : 'bg-white text-slate-500 hover:bg-slate-100'}`}
                       >
                         {pad2(mnt)}
                       </button>
@@ -309,21 +309,21 @@ export function DateTimeField({
               </div>
 
               {/* 선택 미리보기 */}
-              <div className="rounded-lg bg-violet-500/10 border border-violet-400/20 px-3 py-2 text-center">
-                <span className="text-xs text-violet-100 font-medium tabular-nums">{draftPreview || '날짜를 선택해주세요'}</span>
+              <div className="rounded-lg bg-violet-50 border border-violet-200 px-3 py-2 text-center">
+                <span className="text-xs text-violet-900 font-medium tabular-nums">{draftPreview || '날짜를 선택해주세요'}</span>
               </div>
             </div>
 
             {/* 푸터 */}
-            <div className="flex gap-2 px-4 py-3 border-t border-white/10">
-              <button type="button" onClick={() => setOpen(false)} className="flex-1 py-2.5 rounded-lg border border-white/15 text-white/70 text-sm font-medium hover:bg-white/5 transition-colors">
+            <div className="flex gap-2 px-4 py-3 border-t border-slate-200">
+              <button type="button" onClick={() => setOpen(false)} className="flex-1 py-2.5 rounded-lg border border-slate-300 text-slate-600 text-sm font-medium hover:bg-white transition-colors">
                 취소
               </button>
               <button
                 type="button"
                 onClick={commit}
                 disabled={!draftDate}
-                className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-sm font-semibold hover:from-violet-500 hover:to-fuchsia-500 shadow-md shadow-violet-500/30 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
+                className="flex-1 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-md shadow-violet-500/30 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
               >
                 <Check className="w-4 h-4" /> 확인
               </button>

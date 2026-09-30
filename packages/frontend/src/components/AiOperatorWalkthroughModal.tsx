@@ -113,20 +113,15 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-200">
       <div
-        className={`relative w-full ${isLast ? 'max-w-5xl' : 'max-w-2xl'} rounded-3xl border border-white/10 shadow-2xl bg-gradient-to-br from-indigo-950 via-purple-950 to-fuchsia-950 overflow-hidden animate-in fade-in zoom-in-95 duration-300 transition-[max-width]`}
+        className={`relative w-full ${isLast ? 'max-w-5xl' : 'max-w-2xl'} rounded-3xl border border-slate-200 shadow-2xl bg-white overflow-hidden animate-in fade-in zoom-in-95 duration-300 transition-[max-width]`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 배경 글로우 */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-fuchsia-500/20 blur-3xl" />
-          <div className="absolute -bottom-20 -right-20 w-72 h-72 rounded-full bg-indigo-500/20 blur-3xl" />
-        </div>
 
         <div className="relative p-6 md:p-8">
           {/* 닫기 버튼 */}
           <button
             onClick={() => handleClose(false)}
-            className="absolute top-4 right-4 w-9 h-9 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all"
+            className="absolute top-4 right-4 w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-all"
             aria-label="닫기"
           >
             <X className="w-5 h-5" />
@@ -138,11 +133,11 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
               <div
                 key={idx}
                 className={`h-1 rounded-full transition-all ${
-                  idx === stepIdx ? 'w-8 bg-fuchsia-400' : idx < stepIdx ? 'w-4 bg-violet-400/60' : 'w-4 bg-white/10'
+                  idx === stepIdx ? 'w-8 bg-fuchsia-400' : idx < stepIdx ? 'w-4 bg-violet-200' : 'w-4 bg-slate-100'
                 }`}
               />
             ))}
-            <span className="ml-2 text-[10px] text-white/40 font-mono">{stepIdx + 1} / {STEPS.length}</span>
+            <span className="ml-2 text-[10px] text-slate-400 font-mono">{stepIdx + 1} / {STEPS.length}</span>
           </div>
 
           {/* 콘텐츠 */}
@@ -152,12 +147,12 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
             <div className={`${isLast ? 'w-12 h-12 mb-3' : 'w-16 h-16 mb-5'} mx-auto rounded-2xl bg-gradient-to-br ${step.gradient} flex items-center justify-center shadow-lg`}>
               <Icon className={isLast ? 'w-6 h-6 text-white' : 'w-8 h-8 text-white'} />
             </div>
-            <h2 className={`${isLast ? 'text-lg md:text-xl mb-2' : 'text-xl md:text-2xl mb-3'} font-semibold text-white`}>{step.title}</h2>
+            <h2 className={`${isLast ? 'text-lg md:text-xl mb-2' : 'text-xl md:text-2xl mb-3'} font-semibold text-slate-900`}>{step.title}</h2>
             {isLast ? (
               <>
                 {/* ★ D210+ (Harold 명시 2026-05-23): STEP 6 = 메뉴 매트릭스 + 하단 안내 박스 통합 — 사용자 한 눈에 메뉴 확인.
                     ★ Harold 명시 2026-05-23 추가: 노트북 화면 잘림 차단 = 본문 여백 + 카드 padding + 안내 박스 padding 축소. */}
-                <p className="text-sm text-white/60 leading-relaxed mb-3 whitespace-pre-line">{step.description}</p>
+                <p className="text-sm text-slate-500 leading-relaxed mb-3 whitespace-pre-line">{step.description}</p>
                 {/* ★ 2026-07-18 P1 — 3열 고정(lg 4열 폐기): 카드 순서가 행 정체성(자동화/채널/제작/분석) 기준이라 4열이면 행이 섞인다 */}
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3 text-left">
                   {SUB_MODULE_CARDS.map((card) => {
@@ -165,34 +160,34 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
                     return (
                       <div
                         key={card.label}
-                        className="group relative p-3 rounded-2xl bg-white/[0.06] border border-white/10 hover:bg-white/[0.12] hover:border-violet-400/40 hover:scale-[1.02] transition-all duration-300"
+                        className="group relative p-3 rounded-2xl bg-white border border-slate-200 hover:bg-slate-100 hover:border-violet-300 hover:scale-[1.02] transition-all duration-300"
                       >
                         <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-2 shadow-lg`}>
                           <CardIcon className="w-5 h-5 text-white" />
                         </div>
                         <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                          <h3 className="text-white font-semibold text-sm">{card.label}</h3>
+                          <h3 className="text-slate-900 font-semibold text-sm">{card.label}</h3>
                           {card.adminOnly && (
-                            <span className="text-[8px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-amber-500/30 text-amber-200 border border-amber-400/30">관리자</span>
+                            <span className="text-[8px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">관리자</span>
                           )}
                         </div>
-                        <p className="text-white/55 text-[11px] leading-relaxed">{card.description}</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">{card.description}</p>
                       </div>
                     );
                   })}
                 </div>
-                <div className="rounded-xl p-3 bg-gradient-to-r from-amber-500/15 to-fuchsia-500/15 border border-amber-400/30 text-left">
-                  <p className="text-xs font-semibold text-amber-200 mb-1 flex items-center gap-1.5">
+                <div className="rounded-xl p-3 bg-gradient-to-r from-amber-50 to-fuchsia-50 border border-amber-200 text-left">
+                  <p className="text-xs font-semibold text-amber-800 mb-1 flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5" />
                     요금제 안내
                   </p>
-                  <p className="text-[11px] text-white/70 leading-relaxed whitespace-pre-line">{step.highlight}</p>
+                  <p className="text-[11px] text-slate-600 leading-relaxed whitespace-pre-line">{step.highlight}</p>
                 </div>
               </>
             ) : (
               <>
-                <p className="text-sm md:text-base text-white/70 leading-relaxed mb-4 whitespace-pre-line">{step.description}</p>
-                <div className="inline-block px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-xs md:text-sm text-violet-200">
+                <p className="text-sm md:text-base text-slate-600 leading-relaxed mb-4 whitespace-pre-line">{step.description}</p>
+                <div className="inline-block px-4 py-2 bg-white border border-slate-200 rounded-lg text-xs md:text-sm text-violet-800">
                   {step.highlight}
                 </div>
               </>
@@ -204,21 +199,21 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
             <button
               onClick={() => setStepIdx(Math.max(0, stepIdx - 1))}
               disabled={stepIdx === 0}
-              className="px-4 py-2 text-sm text-white/60 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="px-4 py-2 text-sm text-slate-500 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               이전
             </button>
             {isLast ? (
               <button
                 onClick={() => handleClose(true)}
-                className="px-6 py-2.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 hover:opacity-90 text-white text-sm font-medium flex items-center gap-2 transition-all"
+                className="px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium flex items-center gap-2 transition-all"
               >
                 시작하기 <ArrowRight className="w-4 h-4" />
               </button>
             ) : (
               <button
                 onClick={() => setStepIdx(stepIdx + 1)}
-                className="px-5 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-medium flex items-center gap-1.5 transition-colors"
+                className="px-5 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-900 text-sm font-medium flex items-center gap-1.5 transition-colors"
               >
                 다음 <ArrowRight className="w-4 h-4" />
               </button>
@@ -230,7 +225,7 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
             <div className="mt-4 text-center">
               <button
                 onClick={() => handleClose(true)}
-                className="text-[11px] text-white/40 hover:text-white/60 underline-offset-2 hover:underline"
+                className="text-[11px] text-slate-400 hover:text-slate-500 underline-offset-2 hover:underline"
               >
                 다시 보지 않기
               </button>

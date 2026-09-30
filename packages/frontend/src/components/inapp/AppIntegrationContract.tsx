@@ -166,37 +166,37 @@ export function AppInAppContractModal({ open, onClose }: { open: boolean; onClos
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
               <Smartphone className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="text-base font-bold text-white">앱(네이티브) 인앱 메시지 통합 계약</div>
-              <div className="text-xs text-white/50">앱이 이 계약을 구현해야 편집기의 설정이 앱에서 그대로 동작합니다</div>
+              <div className="text-base font-bold text-slate-900">앱(네이티브) 인앱 메시지 통합 계약</div>
+              <div className="text-xs text-slate-500">앱이 이 계약을 구현해야 편집기의 설정이 앱에서 그대로 동작합니다</div>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/5" aria-label="닫기">
+          <button onClick={onClose} className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-white" aria-label="닫기">
             <X className="w-5 h-5" />
           </button>
         </div>
         <div className="px-6 py-4 overflow-y-auto space-y-5">
           {APP_INAPP_CONTRACT_SECTIONS.map((sec) => (
             <div key={sec.key}>
-              <div className="text-sm font-bold text-white mb-2">{sec.heading}</div>
+              <div className="text-sm font-bold text-slate-900 mb-2">{sec.heading}</div>
               <div className="space-y-2.5">
                 {sec.items.map((it, i) => (
-                  <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3">
+                  <div key={i} className="bg-white border border-slate-200 rounded-xl p-3">
                     <div className="flex items-start gap-2">
                       {sec.key === 'pitfalls'
-                        ? <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 flex-shrink-0" />
-                        : <CheckCircle2 className="w-4 h-4 text-emerald-300 mt-0.5 flex-shrink-0" />}
+                        ? <AlertTriangle className="w-4 h-4 text-amber-700 mt-0.5 flex-shrink-0" />
+                        : <CheckCircle2 className="w-4 h-4 text-emerald-700 mt-0.5 flex-shrink-0" />}
                       <div className="min-w-0">
-                        <div className="text-xs font-semibold text-white/90">{it.title}</div>
-                        <div className="text-xs text-white/60 leading-relaxed mt-0.5">{it.desc}</div>
+                        <div className="text-xs font-semibold text-slate-800">{it.title}</div>
+                        <div className="text-xs text-slate-500 leading-relaxed mt-0.5">{it.desc}</div>
                         {it.code && (
-                          <pre className="mt-2 bg-slate-950 border border-white/10 rounded-lg p-2.5 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{it.code}</pre>
+                          <pre className="mt-2 bg-slate-100 border border-slate-200 rounded-lg p-2.5 text-[11px] text-cyan-800 overflow-x-auto whitespace-pre">{it.code}</pre>
                         )}
                       </div>
                     </div>
@@ -205,10 +205,10 @@ export function AppInAppContractModal({ open, onClose }: { open: boolean; onClos
               </div>
             </div>
           ))}
-          <div className="text-[10px] text-white/30 italic">Data source: /api/cdp/inapp/active · /api/cdp/inapp/track (앱 채널 보장 계약)</div>
+          <div className="text-[10px] text-slate-400 italic">Data source: /api/cdp/inapp/active · /api/cdp/inapp/track (앱 채널 보장 계약)</div>
         </div>
-        <div className="px-6 py-3 border-t border-white/10 flex justify-end">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 text-sm font-semibold text-white hover:opacity-90">확인</button>
+        <div className="px-6 py-3 border-t border-slate-200 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold text-white">확인</button>
         </div>
       </div>
     </div>

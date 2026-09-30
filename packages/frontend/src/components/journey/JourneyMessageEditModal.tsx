@@ -185,28 +185,28 @@ export default function JourneyMessageEditModal({
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-3"
     >
       <div
-        className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-[96vw] h-[94vh] flex flex-col overflow-hidden"
+        className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-[96vw] h-[94vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}
-        <div className="flex items-center justify-between gap-3 p-4 border-b border-white/10 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-purple-500/10 shrink-0">
+        <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-200 bg-gradient-to-r from-violet-50 via-fuchsia-50 to-purple-50 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/30 shrink-0">
               <PenLine className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-base font-semibold text-white">문안 수정</h3>
-              <p className="text-[11px] text-white/50 mt-0.5 truncate">{journeyName}</p>
+              <h3 className="text-base font-semibold text-slate-900">문안 수정</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5 truncate">{journeyName}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {showToggle && (
-              <div className="flex rounded-lg bg-white/5 border border-white/10 p-0.5">
+              <div className="flex rounded-lg bg-white border border-slate-200 p-0.5">
                 <button
                   onClick={() => setViewMode('edit')}
                   disabled={saving}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors disabled:opacity-50 ${
-                    viewMode === 'edit' ? 'bg-violet-500/30 text-violet-100' : 'text-white/50 hover:text-white/80'
+                    viewMode === 'edit' ? 'bg-violet-100 text-violet-900' : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   <Pencil className="w-3.5 h-3.5" /> 편집
@@ -215,7 +215,7 @@ export default function JourneyMessageEditModal({
                   onClick={() => setViewMode('preview')}
                   disabled={saving}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors disabled:opacity-50 ${
-                    viewMode === 'preview' ? 'bg-emerald-500/30 text-emerald-100' : 'text-white/50 hover:text-white/80'
+                    viewMode === 'preview' ? 'bg-emerald-100 text-emerald-900' : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   <Eye className="w-3.5 h-3.5" /> 미리보기
@@ -223,17 +223,17 @@ export default function JourneyMessageEditModal({
               </div>
             )}
             {!saving && (
-              <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors" aria-label="닫기">
-                <X className="w-4 h-4 text-white/50" />
+              <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" aria-label="닫기">
+                <X className="w-4 h-4 text-slate-500" />
               </button>
             )}
           </div>
         </div>
 
         {/* 안내 바 */}
-        <div className="px-4 py-2.5 border-b border-white/10 bg-cyan-500/5 flex items-start gap-2 shrink-0">
-          <Info className="w-4 h-4 text-cyan-300 shrink-0 mt-0.5" />
-          <div className="text-[12px] text-cyan-100/90 leading-relaxed">
+        <div className="px-4 py-2.5 border-b border-slate-200 bg-cyan-50 flex items-start gap-2 shrink-0">
+          <Info className="w-4 h-4 text-cyan-700 shrink-0 mt-0.5" />
+          <div className="text-[12px] text-cyan-900 leading-relaxed">
             문안(본문·제목)만 고칠 수 있습니다. 발송 일정·단계 구조는 새 여정으로 바꿔주세요(진행 중 발송 보호).
             {journeyStatus === 'paused' && ' 일시정지 여정은 재개하면 새 문안으로 발송됩니다.'}
             {journeyStatus === 'draft' && ' 초안 여정은 활성화 시 이 문안으로 발송됩니다.'}
@@ -245,15 +245,15 @@ export default function JourneyMessageEditModal({
         {/* 본문 — 가로 스텝 컬럼 */}
         <div className="flex-1 min-h-0 p-4">
           {loading ? (
-            <div className="h-full flex items-center justify-center text-white/50 text-sm">
+            <div className="h-full flex items-center justify-center text-slate-500 text-sm">
               <Loader2 className="w-5 h-5 animate-spin mr-2" /> 불러오는 중...
             </div>
           ) : error ? (
             <div className="h-full flex items-center justify-center">
-              <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-400/30 text-[13px] text-rose-100 max-w-md">{error}</div>
+              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-[13px] text-rose-900 max-w-md">{error}</div>
             </div>
           ) : steps.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-white/50 text-sm">수정할 문안 단계가 없습니다.</div>
+            <div className="h-full flex items-center justify-center text-slate-500 text-sm">수정할 문안 단계가 없습니다.</div>
           ) : (
             <div className={`h-full flex gap-4 pb-2 ${steps.length > 3 ? 'overflow-x-auto' : ''}`}>
               {steps.map((s) => {
@@ -262,28 +262,28 @@ export default function JourneyMessageEditModal({
                 return (
                   <div
                     key={s.id}
-                    className={`h-full flex flex-col rounded-xl bg-white/5 border border-white/10 overflow-hidden ${
+                    className={`h-full flex flex-col rounded-xl bg-white border border-slate-200 overflow-hidden ${
                       steps.length > 3 ? 'w-[360px] shrink-0' : 'flex-1 min-w-0'
                     }`}
                   >
                     {/* 컬럼 헤더 */}
-                    <div className="p-3 border-b border-white/10 bg-slate-950/40 space-y-2 shrink-0">
+                    <div className="p-3 border-b border-slate-200 bg-slate-100 space-y-2 shrink-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-200 font-semibold">
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 font-semibold">
                           Step {s.stepOrder}
                         </span>
-                        <span className="text-[11px] px-2 py-0.5 rounded bg-white/10 text-white/70 flex items-center gap-1">
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 flex items-center gap-1">
                           <MessageSquare className="w-3 h-3" />{CHANNEL_LABEL[s.channel] || s.channel.toUpperCase()}
                         </span>
                       </div>
                       {undefaulted.length > 0 && (
-                        <div className="flex items-start gap-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-400/25">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
-                          <div className="text-[11px] text-amber-100/90 leading-relaxed">
+                        <div className="flex items-start gap-1.5 p-2 rounded-lg bg-amber-50 border border-amber-200">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                          <div className="text-[11px] text-amber-900 leading-relaxed">
                             값이 없으면 그 줄이 빕니다.{' '}
-                            <code className="px-1 rounded bg-amber-400/15 text-amber-100 break-all">{undefaulted.join(', ')}</code>
+                            <code className="px-1 rounded bg-amber-100 text-amber-900 break-all">{undefaulted.join(', ')}</code>
                             {' '}에{' '}
-                            <code className="px-1 rounded bg-amber-400/15 text-amber-100">| default: &apos;...&apos;</code>
+                            <code className="px-1 rounded bg-amber-100 text-amber-900">| default: &apos;...&apos;</code>
                             {' '}추가를 권합니다.
                           </div>
                         </div>
@@ -294,7 +294,7 @@ export default function JourneyMessageEditModal({
                     <div className="flex-1 min-h-0 flex flex-col p-3 gap-3">
                       {needSubject && (
                         <div className="shrink-0">
-                          <label className="block text-[11px] text-white/50 mb-1">제목</label>
+                          <label className="block text-[11px] text-slate-500 mb-1">제목</label>
                           {viewMode === 'edit' ? (
                             <input
                               type="text"
@@ -303,13 +303,13 @@ export default function JourneyMessageEditModal({
                               disabled={saving}
                               maxLength={50}
                               placeholder={`${CHANNEL_LABEL[s.channel]} 제목`}
-                              className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/10 text-sm text-white placeholder-white/30 focus:border-violet-400/50 focus:outline-none disabled:opacity-50"
+                              className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-sm text-slate-900 placeholder-slate-400 focus:border-violet-300 focus:outline-none disabled:opacity-50"
                             />
                           ) : (
-                            <div className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/10 text-sm text-white whitespace-pre-wrap break-words min-h-[38px]">
+                            <div className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-sm text-slate-900 whitespace-pre-wrap break-words min-h-[38px]">
                               {s.subject
                                 ? (() => { const t = previewResults[s.id]?.subject ?? mergeVarsPlain(s.subject, SAMPLE_KO, SAMPLE); return (s.isAd && !/^\s*[(（]\s*광고\s*[)）]/.test(t)) ? '(광고) ' + t : t; })()
-                                : <span className="text-white/30">(제목 없음)</span>}
+                                : <span className="text-slate-400">(제목 없음)</span>}
                             </div>
                           )}
                         </div>
@@ -317,9 +317,9 @@ export default function JourneyMessageEditModal({
 
                       <div className="flex-1 min-h-0 flex flex-col">
                         <div className="flex items-center justify-between mb-1">
-                          <label className="block text-[11px] text-white/50">본문</label>
+                          <label className="block text-[11px] text-slate-500">본문</label>
                           {viewMode === 'edit' && (
-                            <span className="text-[10px] text-white/40">{s.messageTemplate.length} / 2000</span>
+                            <span className="text-[10px] text-slate-400">{s.messageTemplate.length} / 2000</span>
                           )}
                         </div>
                         {viewMode === 'edit' ? (
@@ -328,13 +328,13 @@ export default function JourneyMessageEditModal({
                             onChange={(e) => patchStep(s.id, { messageTemplate: e.target.value })}
                             disabled={saving}
                             maxLength={2000}
-                            className="flex-1 min-h-0 w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/10 text-sm text-white placeholder-white/30 focus:border-violet-400/50 focus:outline-none resize-none disabled:opacity-50 leading-relaxed"
+                            className="flex-1 min-h-0 w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-sm text-slate-900 placeholder-slate-400 focus:border-violet-300 focus:outline-none resize-none disabled:opacity-50 leading-relaxed"
                           />
                         ) : (
-                          <div className="flex-1 min-h-0 overflow-y-auto w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/10 text-sm text-white whitespace-pre-wrap break-words leading-relaxed">
+                          <div className="flex-1 min-h-0 overflow-y-auto w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-sm text-slate-900 whitespace-pre-wrap break-words leading-relaxed">
                             {s.messageTemplate
                               ? (previewResults[s.id]?.message ?? mergeVarsPlain(s.messageTemplate, SAMPLE_KO, SAMPLE))
-                              : <span className="text-white/30">(본문 없음)</span>}
+                              : <span className="text-slate-400">(본문 없음)</span>}
                           </div>
                         )}
                       </div>
@@ -348,24 +348,24 @@ export default function JourneyMessageEditModal({
 
         {/* Source caption */}
         <div className="px-4 pt-2 shrink-0">
-          <div className="text-[10px] text-white/30 italic">
+          <div className="text-[10px] text-slate-400 italic">
             Data source: journey_steps (문안 수정은 PATCH steps · 발송은 활성화 시점 snapshot 기준 · 미리보기 변수 치환은 샘플 고객)
           </div>
         </div>
 
         {/* 액션 */}
-        <div className="flex items-center gap-2 p-4 border-t border-white/10 bg-slate-950/50 shrink-0">
+        <div className="flex items-center gap-2 p-4 border-t border-slate-200 bg-slate-100 shrink-0">
           <button
             onClick={onClose}
             disabled={saving}
-            className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            className="flex-1 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
           >
             취소
           </button>
           <button
             onClick={handleSave}
             disabled={saving || loading || changed.length === 0}
-            className="flex-1 px-4 py-2 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-violet-500/30 flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             {changed.length > 0 ? `${changed.length}개 단계 저장` : '저장'}

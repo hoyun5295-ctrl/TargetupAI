@@ -11,7 +11,7 @@
  *   POST /ingest-product {url}         — 연동몰 CDN 이미지 SSRF 가드 fetch → source temp
  *   POST /upload-product (multipart)   — 제품 이미지 업로드 → source temp
  *   POST /remove-bg {sourceTempId}     — 누끼(무료) → cutout temp
- *   POST /edit {tempId, instruction?, targetSize?} — 멀티턴 보존 편집/4K 격상
+ *   POST /edit {tempId, instruction}  — AI 수정 지시(1크레딧) ★2026-09-30 4K 격상 제거(targetSize 4K = 410 · 차감 없음)
  *   POST /compose {...}                — 서버 합성(무료) → composite temp
  *   POST /save {tempId, channelSpec?}  — 영구 저장 + cdp_assets 등재(tempId 1회성)
  *   GET  /temp/:tempId                 — 인증 서빙(프론트 fetch+blob)
@@ -31,7 +31,7 @@ import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset } from '
 import {
   isStudioReady, StudioError, CREDIT_SOURCE,
   resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName,
-  generatePoster, editOrUpscale, UPSCALE_4K_INSTRUCTION, buildEditInstruction, studioImageEngine,
+  generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine,
   removeBackground, composeImage,
   writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, findTempFile, moveTempToPermanent,
   companyTempUsageBytes, isValidTempId, newTempId,
@@ -247,15 +247,21 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   }
 });
 
-// ── POST /edit (멀티턴 보존 편집 / 4K 격상) ─────────────────────
+// ── POST /edit (AI 수정 지시) ─────────────────────
 imageStudioRouter.post('/edit', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   const userId = req.user?.userId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+  const { tempId, instruction, targetSize } = req.body || {};
+  // ★ 2026-09-30 4K 격상 제거(Harold 확정) — 생성 모델이 "같은 그림 4K"를 새로 그려 다른 포스터가 나왔다(운영 실측 · 원장 docs/2026-09-30-ai-model-prompt-upgrade.md §2-4).
+  //   캐시된 옛 화면이 보내면 차감 없이 안내만 돌려준다(검사 · 잠금 · 차감 전).
+  if (String(targetSize || '') === '4K') {
+    return res.status(410).json({ success: false, error: '4K 격상은 더 이상 제공하지 않아요. 만든 포스터를 그대로 저장해 쓰시면 됩니다.', code: 'UPSCALE_REMOVED' });
+  }
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
   if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
 
-  const { tempId, instruction, targetSize } = req.body || {};
   if (!isValidTempId(tempId)) return res.status(400).json({ success: false, error: '대상 이미지를 찾을 수 없습니다.' });
   const found = findTempFile(companyId, tempId);
   const meta = readTempMeta(companyId, tempId);
@@ -263,10 +269,9 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
     return res.status(404).json({ success: false, error: '편집 가능한 생성 이미지가 아닙니다.', code: 'NOT_EDITABLE' });
   }
 
-  const is4k = String(targetSize) === '4K';
-  const cost = is4k ? 2 : 1;
-  const source = is4k ? CREDIT_SOURCE.upscale4k : CREDIT_SOURCE.edit;
-  if (!is4k && !(instruction && String(instruction).trim())) {
+  const cost = 1;
+  const source = CREDIT_SOURCE.edit;
+  if (!(instruction && String(instruction).trim())) {
     return res.status(400).json({ success: false, error: '어떻게 바꿀지 알려주세요.' });
   }
 
@@ -278,10 +283,10 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
     const result = await editOrUpscale({
       baseImageBase64: base, baseMime: found.mime,
       basePrompt: meta.prompt || 'A clean product-staging background scene.',
-      instruction: is4k ? UPSCALE_4K_INSTRUCTION : buildEditInstruction(instruction),
-      imageSize: is4k ? '4K' : '2K',
+      instruction: buildEditInstruction(instruction),
+      imageSize: '2K',
       aspectRatio: meta.aspectRatio || resolvePreset(meta.presetKey || undefined).aspectRatio,
-      engine: studioImageEngine(),  // ★0930 수정 지시만 적용 · 4K 는 CT 가 늘 Gemini
+      engine: studioImageEngine(),  // ★0930 생성 엔진 스위치
     });
 
     const buf = Buffer.from(result.base64, 'base64');

@@ -194,7 +194,8 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   //   값과 확인 창이 한 결정으로 맞물린다. ⚠ 정산 수기 청구(건당 5만원 · 서수란 소관)와는 별개 축이다.
   'dm-custom-short-link': 20,
   // ★ 2026-07-19 P4 이미지 스튜디오 (AI 오퍼레이터 스튜디오 — 1크레딧=500원, 전부 20 미만 = CreditConfirmModal 비대상).
-  //   생성 1회 = Pro 2K 후보 2장 = 2 (부분 성공 1장 = 호출측이 cost 1 override). 같은 구도 4K 격상 = +2. 배경·무드 AI 편집 = 1.
+  //   생성 1회 = 2. 배경·무드 AI 편집 = 1.
+  //   ★ 2026-09-30 4K 격상 제거(생성 모델이 새 그림을 그렸다) — 'image-studio-4k' 는 새 차감 0 · 지난 차감 이력 표시(화면 이름표 짝)용으로만 남긴다.
   //   누끼·서버 합성(/compose)·타이포 오버레이·MMS 변환은 무료(CREDIT_COST_MAP 미등록 = 0).
   //   frontend constants/credit.ts CREDIT_SOURCE_LABELS와 1:1 유지 (한쪽만 바꾸지 말 것).
   'image-studio-generate': 2,

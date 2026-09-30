@@ -17,8 +17,8 @@ type Sns = { instagram?: string; youtube?: string; naver?: string; facebook?: st
 
 interface Props { apiBase: string; token: string; onToast: (msg: string, type?: 'success' | 'error' | 'info') => void; }
 
-const IN = 'w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-sky-400/50';
-const LB = 'text-[11px] font-semibold text-white/55 mb-1 block';
+const IN = 'w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-sky-300';
+const LB = 'text-[11px] font-semibold text-slate-500 mb-1 block';
 
 export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
   const [loading, setLoading] = useState(true);
@@ -81,13 +81,13 @@ export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
     } finally { setSaving(false); }
   };
 
-  if (loading) return <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-sky-300 animate-spin" /></div>;
+  if (loading) return <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-sky-700 animate-spin" /></div>;
 
   return (
     <div className="space-y-5">
       {/* 회사·사업자 */}
-      <section className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-3">
-        <div className="flex items-center gap-2 text-xs font-semibold text-white/70"><Building2 className="w-4 h-4 text-sky-300" /> 회사·사업자 정보</div>
+      <section className="p-4 bg-white border border-slate-200 rounded-xl space-y-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Building2 className="w-4 h-4 text-sky-700" /> 회사·사업자 정보</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div><label className={LB}>브랜드명</label><input className={IN} value={info.brand_name || ''} onChange={(e) => setInfo((s) => ({ ...s, brand_name: e.target.value }))} placeholder="예: 폴라초이스" /></div>
           <div><label className={LB}>상호(법인명)</label><input className={IN} value={info.company_name || ''} onChange={(e) => setInfo((s) => ({ ...s, company_name: e.target.value }))} placeholder="예: (주)폴라초이스코리아" /></div>
@@ -105,8 +105,8 @@ export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
       </section>
 
       {/* 연락처 */}
-      <section className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-3">
-        <div className="flex items-center gap-2 text-xs font-semibold text-white/70"><Phone className="w-4 h-4 text-sky-300" /> 연락처 · 주소 (DM·이메일 푸터 자동 기입)</div>
+      <section className="p-4 bg-white border border-slate-200 rounded-xl space-y-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Phone className="w-4 h-4 text-sky-700" /> 연락처 · 주소 (DM·이메일 푸터 자동 기입)</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div><label className={LB}>대표전화</label><input className={IN} value={contact.phone || ''} onChange={(e) => setContact((s) => ({ ...s, phone: e.target.value }))} placeholder="02-000-0000" /></div>
           <div><label className={LB}>고객센터 번호</label><input className={IN} value={contact.cs_phone || ''} onChange={(e) => setContact((s) => ({ ...s, cs_phone: e.target.value }))} placeholder="1544-0000" /></div>
@@ -117,8 +117,8 @@ export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
       </section>
 
       {/* 공식 SNS */}
-      <section className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-3">
-        <div className="flex items-center gap-2 text-xs font-semibold text-white/70"><Share2 className="w-4 h-4 text-sky-300" /> 공식 SNS <span className="text-white/35 font-normal">· 있는 것만</span></div>
+      <section className="p-4 bg-white border border-slate-200 rounded-xl space-y-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Share2 className="w-4 h-4 text-sky-700" /> 공식 SNS <span className="text-slate-400 font-normal">· 있는 것만</span></div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div><label className={LB}>인스타그램</label><input className={IN} value={sns.instagram || ''} onChange={(e) => setSns((s) => ({ ...s, instagram: e.target.value }))} placeholder="https://instagram.com/..." /></div>
           <div><label className={LB}>유튜브</label><input className={IN} value={sns.youtube || ''} onChange={(e) => setSns((s) => ({ ...s, youtube: e.target.value }))} placeholder="https://youtube.com/@..." /></div>
@@ -128,11 +128,11 @@ export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
       </section>
 
       <div className="flex justify-end">
-        <button onClick={save} disabled={saving} className="px-5 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-500 hover:from-sky-400 hover:to-indigo-400 text-white text-sm font-semibold rounded-xl shadow-lg shadow-sky-500/25 transition-all disabled:opacity-40 flex items-center gap-2">
+        <button onClick={save} disabled={saving} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-lg shadow-sky-500/25 transition-all disabled:opacity-40 flex items-center gap-2">
           {saving && <Loader2 className="w-4 h-4 animate-spin" />} 기본정보 저장
         </button>
       </div>
-      <div className="text-[10px] text-white/30 italic">Data source: companies(기본정보) + companies.brand_kit(연락처·SNS) · 전 채널 생성 공용 참조</div>
+      <div className="text-[10px] text-slate-400 italic">Data source: companies(기본정보) + companies.brand_kit(연락처·SNS) · 전 채널 생성 공용 참조</div>
     </div>
   );
 }

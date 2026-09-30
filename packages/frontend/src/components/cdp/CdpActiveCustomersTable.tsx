@@ -14,22 +14,22 @@ import type { CdpActiveCustomers } from './cdp-analytics-types';
 
 export default function CdpActiveCustomersTable({ data }: { data: CdpActiveCustomers | null }) {
   if (!data || data.topCustomers.length === 0) {
-    return <div className="text-sm text-white/50 py-10 text-center">아직 자사몰 활성 고객 데이터가 없습니다.</div>;
+    return <div className="text-sm text-slate-500 py-10 text-center">아직 자사몰 활성 고객 데이터가 없습니다.</div>;
   }
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
-        <Users className="w-4 h-4 text-cyan-300" />
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+        <Users className="w-4 h-4 text-cyan-700" />
         <h2 className="text-sm font-semibold">자사몰 활성 Customer Top {data.topCustomers.length}</h2>
-        <span className="ml-auto text-[10px] text-white/40">
+        <span className="ml-auto text-[10px] text-slate-400">
           30일 활성 전체 {data.totalActiveCustomers.toLocaleString()}명 · 비회원 이벤트 {data.anonymousEventCount.toLocaleString()}건
         </span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
-          <thead className="bg-white/5 border-b border-white/10">
-            <tr className="text-left text-white/60">
+          <thead className="bg-white border-b border-slate-200">
+            <tr className="text-left text-slate-500">
               <th className="px-3 py-2 font-medium">Customer</th>
               <th className="px-3 py-2 font-medium text-center">primary source</th>
               <th className="px-3 py-2 font-medium text-center">채널</th>
@@ -40,14 +40,14 @@ export default function CdpActiveCustomersTable({ data }: { data: CdpActiveCusto
           </thead>
           <tbody>
             {data.topCustomers.map((c) => (
-              <tr key={c.customerId} className="border-b border-white/5 hover:bg-white/5">
+              <tr key={c.customerId} className="border-b border-slate-100 hover:bg-white">
                 <td className="px-3 py-2">
-                  <div className="text-white/80">{c.customerName || '-'}</div>
-                  <div className="text-[10px] text-white/40 font-mono">{c.customerPhone || ''} · {c.customerGrade || ''}</div>
+                  <div className="text-slate-700">{c.customerName || '-'}</div>
+                  <div className="text-[10px] text-slate-400 font-mono">{c.customerPhone || ''} · {c.customerGrade || ''}</div>
                 </td>
                 <td className="px-3 py-2 text-center">
                   {c.primarySource ? (
-                    <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 rounded">
+                    <span className="text-[10px] px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded">
                       {SOURCE_LABEL[c.primarySource] || c.primarySource}
                     </span>
                   ) : '-'}
@@ -59,9 +59,9 @@ export default function CdpActiveCustomersTable({ data }: { data: CdpActiveCusto
                     </span>
                   ) : '-'}
                 </td>
-                <td className="px-3 py-2 text-right font-mono text-cyan-300">{c.events30d.toLocaleString()}</td>
-                <td className="px-3 py-2 text-right font-mono text-amber-300">{c.revenue30d > 0 ? formatWon(c.revenue30d) : '-'}</td>
-                <td className="px-3 py-2 text-right text-[10px] text-white/50">{c.lastActivityAt ? new Date(c.lastActivityAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '-'}</td>
+                <td className="px-3 py-2 text-right font-mono text-cyan-700">{c.events30d.toLocaleString()}</td>
+                <td className="px-3 py-2 text-right font-mono text-amber-700">{c.revenue30d > 0 ? formatWon(c.revenue30d) : '-'}</td>
+                <td className="px-3 py-2 text-right text-[10px] text-slate-500">{c.lastActivityAt ? new Date(c.lastActivityAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '-'}</td>
               </tr>
             ))}
           </tbody>

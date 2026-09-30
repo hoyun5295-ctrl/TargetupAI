@@ -11,10 +11,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, List, Loader2, Map as MapIcon, MessageSquarePlus, Power, RefreshCw, Search, Sparkles } from 'lucide-react';
-import {
-  OUI_BACK, OUI_BTN_AI, OUI_BTN_GHOST, OUI_BTN_OUTLINE, OUI_BTN_PRIMARY, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_PAGE_CENTER,
-  OUI_SRC, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_FULL,
-} from '../utils/operator-ui';
+import { OUI_BTN_GHOST, OUI_BTN_PRIMARY, OUI_SRC, OUI_WRAP_FULL } from '../utils/operator-ui';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { zoneModule } from '../constants/ai-operator-modules';
 import { goBackOr } from '../lib/scroll-restoration';
 import LifecycleMapCanvas, { type MapStatusFilter } from '../components/journey/map/LifecycleMapCanvas';
 import GapFinderModal, { type GapOpportunity } from '../components/journey/map/GapFinderModal';
@@ -222,6 +221,7 @@ export default function JourneyMapPage() {
     };
   }, [data]);
 
+  const [mapLine, setMapLine] = useState('');
   const gapCount = useMemo(() => {
     if (!data) return 0;
     return data.ghosts.filter((g) => g.available).length
@@ -230,66 +230,67 @@ export default function JourneyMapPage() {
       + data.journeys.filter((j) => j.broadAudience && j.status !== 'ended').length;
   }, [data]);
 
+  // ★ 2026-09-30 AI 존 대개편: 지도 = 여정 메뉴의 두 번째 탭(머리·명령 카드는 목록과 같은 틀)
+  const mapTabs = [{ id: 'list', label: '목록', to: '/ai-journeys' }, { id: 'map', label: '지도', to: '/ai-journeys/map' }];
   if (loading && !data) {
     return (
-      <div className={OUI_PAGE_CENTER}>
-        <div className="flex flex-col items-center gap-3 text-white/60">
-          <Loader2 className="w-8 h-8 animate-spin text-violet-400" />
+      <ZoneFrame moduleId="journeys" tabs={mapTabs} activeTab="map" backTo="/ai-journeys">
+      <div className="py-24 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-slate-500">
+          <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
           <span className="text-xs">여정 지도를 그리는 중</span>
         </div>
       </div>
+      </ZoneFrame>
     );
   }
 
   if (!data) {
     return (
-      <div className={OUI_PAGE_CENTER}>
+      <ZoneFrame moduleId="journeys" tabs={mapTabs} activeTab="map" backTo="/ai-journeys">
+      <div className="py-24 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3 px-6 text-center">
-          <div className="text-sm text-rose-300">{error || '여정 지도를 불러오지 못했어요.'}</div>
+          <div className="text-sm text-rose-700">{error || '여정 지도를 불러오지 못했어요.'}</div>
           <div className="flex gap-2">
             <button type="button" onClick={() => void load(false)} className={OUI_BTN_PRIMARY}>다시 불러오기</button>
             <button type="button" onClick={() => navigate('/ai-journeys')} className={OUI_BTN_GHOST}>여정 목록으로</button>
           </div>
         </div>
       </div>
+      </ZoneFrame>
     );
   }
 
+  const oneLine = zoneModule('journeys').oneLine!;
   return (
-    <div className={`${OUI_PAGE} md:h-screen md:flex md:flex-col`}>
-      <div className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_FULL} ${OUI_HEADER_ROW}`}>
-          <button onClick={() => goBackOr(navigate, '/ai-journeys')} className={OUI_BACK} aria-label="여정 목록으로">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-fuchsia-400 to-purple-500`}>
-            <MapIcon className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h1 className={`${OUI_TITLE} truncate`}>여정 지도</h1>
-            <p className={OUI_SUBTITLE}>가입부터 첫 구매 · 재구매 · 이탈까지 여정이 어떻게 이어지는지 한 화면에서 봅니다</p>
-          </div>
-          <button type="button" onClick={() => setGapOpen(true)} className={OUI_BTN_OUTLINE} aria-label="빈 곳 찾기">
-            <Sparkles className="w-4 h-4" />
-            <span className="hidden sm:inline">빈 곳 찾기</span>
-            {gapCount > 0 && <span className="rounded-full bg-violet-500/30 px-1.5 text-[11px] tabular-nums">{gapCount}</span>}
-          </button>
-          <button type="button" onClick={() => setInterviewOpen(true)} className={OUI_BTN_AI} aria-label="문장으로 만들기">
-            <MessageSquarePlus className="w-4 h-4" />
-            <span className="hidden sm:inline">문장으로 만들기</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 도구 줄: 지도/목록 · 상태 · 찾기 · 범례 · 갱신 */}
-      <div className="border-b border-white/10 bg-slate-950">
-        <div className={`${OUI_WRAP_FULL} py-2.5 flex flex-wrap items-center gap-2`}>
-          <div className="flex items-center rounded-lg border border-white/10 p-0.5" role="group" aria-label="보기 방식">
-            <span className="h-7 px-2.5 rounded-md text-xs font-semibold bg-white/10 text-white inline-flex items-center gap-1"><MapIcon className="w-3.5 h-3.5" />지도</span>
-            <button type="button" onClick={() => navigate('/ai-journeys')} className="h-7 px-2.5 rounded-md text-xs text-white/55 hover:text-white inline-flex items-center gap-1 transition-colors">
-              <List className="w-3.5 h-3.5" />목록
-            </button>
-          </div>
+    <ZoneFrame
+      moduleId="journeys"
+      tabs={mapTabs}
+      activeTab="map"
+      backTo="/ai-journeys"
+      width="full"
+      command={{
+        line: {
+          value: mapLine,
+          onChange: setMapLine,
+          // 목록 탭과 같은 경로: 목표 문장을 여정 목록으로 넘기면 거기서 바로 생성한다(?objective= · JourneysPage 자동 생성)
+          onSubmit: () => navigate(`/ai-journeys?objective=${encodeURIComponent(mapLine.trim())}`),
+          placeholder: oneLine.placeholder,
+          verb: oneLine.verb,
+          icon: Sparkles,
+        },
+        stats: [{ label: '손볼 곳', value: gapCount }],
+        alts: [
+          { label: gapCount > 0 ? `빈 곳 찾기 ${gapCount}` : '빈 곳 찾기', icon: Sparkles, onClick: () => setGapOpen(true) },
+          { label: '문장으로 만들기', icon: MessageSquarePlus, onClick: () => setInterviewOpen(true) },
+        ],
+        stamp: { text: `${timeText(data.generatedAt)} 기준 · 다시 읽기`, onRefresh: () => void load(true), loading: refreshing },
+      }}
+      blocks={error ? [{ text: error }] : []}
+    >
+      {/* 도구 줄: 상태 · 찾기 · 범례 */}
+      <div className="max-w-[1240px] mx-auto">
+        <div className="pb-3 flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1" role="tablist" aria-label="여정 상태">
             {FILTERS.map((f) => (
               <button
@@ -299,53 +300,37 @@ export default function JourneyMapPage() {
                 aria-selected={statusFilter === f.key}
                 onClick={() => setStatusFilter(f.key)}
                 className={statusFilter === f.key
-                  ? 'h-8 px-3 rounded-lg text-xs font-semibold bg-violet-600/80 text-white'
-                  : 'h-8 px-3 rounded-lg text-xs font-medium text-white/60 hover:bg-white/10 hover:text-white transition-colors'}
+                  ? 'h-8 px-3 rounded-lg text-xs font-semibold bg-violet-200 text-slate-900'
+                  : 'h-8 px-3 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors'}
               >
-                {f.label} <span className="tabular-nums text-white/60">{counts[f.key]}</span>
+                {f.label} <span className="tabular-nums text-slate-500">{counts[f.key]}</span>
               </button>
             ))}
           </div>
           <label className="relative flex-1 min-w-[160px] max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/35" aria-hidden />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" aria-hidden />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="여정 이름 · 시작 사건 찾기"
               aria-label="여정 찾기"
-              className="w-full h-8 pl-8 pr-3 rounded-lg bg-slate-900 border border-white/10 text-xs placeholder-white/30 focus:outline-none focus:border-violet-400"
+              className="w-full h-8 pl-8 pr-3 rounded-lg bg-white border border-slate-200 text-xs placeholder-slate-400 focus:outline-none focus:border-violet-400"
             />
           </label>
-          <div className="hidden xl:flex items-center gap-3 ml-auto text-[11px] text-white/50">
+          <div className="hidden xl:flex items-center gap-3 ml-auto text-[11px] text-slate-500">
             {(['solid', 'warn', 'empty'] as const).map((t) => (
               <span key={t} className="inline-flex items-center gap-1.5">
                 <svg width="22" height="6" aria-hidden><line x1="0" y1="3" x2="22" y2="3" stroke={LINE_STYLE[t].stroke} strokeWidth="2" strokeDasharray={LINE_STYLE[t].dash} /></svg>
                 {LINE_STYLE[t].label}
               </span>
             ))}
-            <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500/40 border border-rose-400/50" aria-hidden />같이 받음</span>
+            <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-200 border border-rose-300" aria-hidden />같이 받음</span>
           </div>
-          <button
-            type="button"
-            onClick={() => void load(true)}
-            disabled={refreshing}
-            className="h-8 px-2 rounded-lg text-[11px] text-white/50 hover:bg-white/10 hover:text-white inline-flex items-center gap-1 transition-colors disabled:opacity-50 xl:ml-0 ml-auto"
-            aria-label="다시 읽기"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-            <span className="tabular-nums">{timeText(data.generatedAt)}</span>
-          </button>
         </div>
       </div>
 
-      {error && (
-        <div className={`${OUI_WRAP_FULL} pt-3`}>
-          <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">{error}</div>
-        </div>
-      )}
-
       {/* 캔버스: 데스크톱은 이 칸 안에서만 스크롤(레인 머리 고정) · 모바일은 페이지 스크롤 */}
-      <div className="md:flex-1 md:min-h-0 md:overflow-auto">
+      <div className="rounded-2xl border border-slate-200 bg-white md:h-[calc(100vh-128px)] md:overflow-auto">
         <LifecycleMapCanvas
           data={data}
           statusFilter={statusFilter}
@@ -366,9 +351,9 @@ export default function JourneyMapPage() {
 
       {/* 초안이 있으면 켜기 전 점검 입구(자동으로 켜지 않는다) */}
       {counts.draft > 0 && (
-        <div className="sticky bottom-0 z-20 border-t border-white/10 bg-slate-950/95 backdrop-blur-md">
+        <div className="sticky bottom-0 z-20 border-t border-slate-200 bg-slate-100 backdrop-blur-md">
           <div className={`${OUI_WRAP_FULL} py-2.5 flex items-center gap-3`}>
-            <span className="flex-1 text-xs text-white/65">초안 {counts.draft}개가 켜지기를 기다려요.</span>
+            <span className="flex-1 text-xs text-slate-500">초안 {counts.draft}개가 켜지기를 기다려요.</span>
             <button type="button" onClick={() => setBatch({ open: true, preselect: [] })} className={OUI_BTN_PRIMARY}>
               <Power className="w-4 h-4" />
               켜기 전 점검
@@ -439,6 +424,6 @@ export default function JourneyMapPage() {
           if (confirmResolve.current) { confirmResolve.current(); confirmResolve.current = null; }
         }}
       />
-    </div>
+    </ZoneFrame>
   );
 }

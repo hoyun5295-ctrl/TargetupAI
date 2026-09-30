@@ -61,90 +61,90 @@ export default function JourneyPlanModal({
     <JourneyModalShell open={open} onClose={onClose} labelledBy="journey-plan-modal-title" zIndexClassName="z-[70]">
       <>
         {/* 헤더 */}
-        <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
+        <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500">
             <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 id="journey-plan-modal-title" className="truncate text-base font-bold text-white">{name || '추천 여정'}</h3>
-            <p className="text-[11px] text-white/45">이렇게 만들어 드릴게요. 확인하고 넘어가면 스텝을 하나씩 다듬습니다.</p>
+            <h3 id="journey-plan-modal-title" className="truncate text-base font-bold text-slate-900">{name || '추천 여정'}</h3>
+            <p className="text-[11px] text-slate-400">이렇게 만들어 드릴게요. 확인하고 넘어가면 스텝을 하나씩 다듬습니다.</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-white/40 transition-colors hover:bg-white/5 hover:text-white/70" aria-label="닫기">
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white hover:text-slate-600" aria-label="닫기">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           {/* 1 — 왜 이 트리거인가 */}
-          <section className="rounded-xl border border-white/10 bg-slate-950/50 p-3.5">
+          <section className="rounded-xl border border-slate-200 bg-slate-100 p-3.5">
             <div className="mb-2 flex items-center gap-2">
-              <span className="rounded-lg bg-violet-500/20 px-2 py-0.5 text-[11px] font-semibold text-violet-100">{triggerLabel}</span>
-              <span className="text-[11px] text-white/40">일 때 시작합니다</span>
+              <span className="rounded-lg bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-900">{triggerLabel}</span>
+              <span className="text-[11px] text-slate-400">일 때 시작합니다</span>
             </div>
-            <p className="text-[12.5px] leading-relaxed text-white/75">{reasoning || '입력하신 내용에 맞는 시작 신호를 골랐습니다.'}</p>
+            <p className="text-[12.5px] leading-relaxed text-slate-600">{reasoning || '입력하신 내용에 맞는 시작 신호를 골랐습니다.'}</p>
             {notice && (
-              <p className="mt-2 rounded-lg border border-sky-400/25 bg-sky-500/10 px-2.5 py-2 text-[11.5px] leading-relaxed text-sky-100">
+              <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-2 text-[11.5px] leading-relaxed text-sky-900">
                 {notice}
               </p>
             )}
             {(warnings || []).map((w, i) => (
-              <p key={i} className="mt-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2.5 py-2 text-[11.5px] leading-relaxed text-amber-100">
+              <p key={i} className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11.5px] leading-relaxed text-amber-900">
                 {w}
               </p>
             ))}
-            <p className="mt-2 text-[10px] italic text-white/30">Data source: 입력한 문장을 읽고 AI가 고른 시작 신호</p>
+            <p className="mt-2 text-[10px] italic text-slate-400">Data source: 입력한 문장을 읽고 AI가 고른 시작 신호</p>
           </section>
 
           {/* 2 — 목적 */}
           {objective && (
-            <section className="rounded-xl border border-white/10 bg-slate-950/50 p-3.5">
-              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-white/70">
-                <Target className="h-3.5 w-3.5 text-fuchsia-300" /> 이 여정의 목적
+            <section className="rounded-xl border border-slate-200 bg-slate-100 p-3.5">
+              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                <Target className="h-3.5 w-3.5 text-fuchsia-700" /> 이 여정의 목적
               </div>
-              <p className="text-[12.5px] leading-relaxed text-white/70">{objective}</p>
+              <p className="text-[12.5px] leading-relaxed text-slate-600">{objective}</p>
             </section>
           )}
 
           {/* 3 — 스텝 계획 */}
-          <section className="rounded-xl border border-white/10 bg-slate-950/50 p-3.5">
-            <div className="mb-2.5 text-xs font-semibold text-white/70">
+          <section className="rounded-xl border border-slate-200 bg-slate-100 p-3.5">
+            <div className="mb-2.5 text-xs font-semibold text-slate-600">
               스텝 {steps.length}개로 나눴습니다
             </div>
             <ol className="space-y-2">
               {steps.map((s) => (
                 <li key={s.stepOrder} className="flex gap-2.5">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white/10 text-[10px] font-bold text-white/70">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[10px] font-bold text-slate-600">
                     {s.stepOrder}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[12px] font-medium text-white/85">{s.timingLabel}</span>
-                      <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase text-white/40">{s.channel}</span>
+                      <span className="text-[12px] font-medium text-slate-700">{s.timingLabel}</span>
+                      <span className="rounded bg-white px-1.5 py-0.5 text-[10px] uppercase text-slate-400">{s.channel}</span>
                     </div>
-                    {s.intent && <p className="text-[11.5px] leading-relaxed text-white/50">{s.intent}</p>}
+                    {s.intent && <p className="text-[11.5px] leading-relaxed text-slate-500">{s.intent}</p>}
                   </div>
                 </li>
               ))}
             </ol>
-            <p className="mt-2.5 text-[10px] italic text-white/30">Data source: AI가 만든 스텝 구성. 다음 화면에서 하나씩 고칠 수 있습니다.</p>
+            <p className="mt-2.5 text-[10px] italic text-slate-400">Data source: AI가 만든 스텝 구성. 다음 화면에서 하나씩 고칠 수 있습니다.</p>
           </section>
 
           {/* 4 — 이 회사 데이터로 가능한가 */}
           <section
             className={`flex gap-2.5 rounded-xl border p-3.5 ${
-              available ? 'border-emerald-400/25 bg-emerald-500/10' : 'border-amber-400/30 bg-amber-500/10'
+              available ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'
             }`}
           >
             {available ? (
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
             ) : (
-              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
             )}
             <div className="min-w-0 flex-1">
-              <div className={`text-xs font-semibold ${available ? 'text-emerald-100' : 'text-amber-100'}`}>
+              <div className={`text-xs font-semibold ${available ? 'text-emerald-900' : 'text-amber-900'}`}>
                 {available ? '지금 바로 만들 수 있어요' : '아직 만들 수 없어요'}
               </div>
-              <p className={`mt-0.5 text-[11.5px] leading-relaxed ${available ? 'text-emerald-100/75' : 'text-amber-100/80'}`}>
+              <p className={`mt-0.5 text-[11.5px] leading-relaxed ${available ? 'text-emerald-900' : 'text-amber-900'}`}>
                 {available
                   ? '이 여정을 판단할 데이터가 들어와 있습니다.'
                   : unavailableReason || '이 여정을 판단할 데이터가 아직 들어오지 않았어요.'}
@@ -153,7 +153,7 @@ export default function JourneyPlanModal({
                 <button
                   type="button"
                   onClick={lockAction.onClick}
-                  className="mt-2 rounded-lg border border-amber-400/40 bg-amber-500/20 px-2.5 py-1.5 text-[11.5px] font-semibold text-amber-50 transition-colors hover:bg-amber-500/30"
+                  className="mt-2 rounded-lg border border-amber-300 bg-amber-100 px-2.5 py-1.5 text-[11.5px] font-semibold text-amber-900 transition-colors hover:bg-amber-100"
                 >
                   {lockAction.label}
                 </button>
@@ -163,13 +163,13 @@ export default function JourneyPlanModal({
         </div>
 
         {/* 푸터 */}
-        <div className="flex flex-wrap items-center gap-2 border-t border-white/10 bg-slate-900/95 px-5 py-3.5">
+        <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 bg-white px-5 py-3.5">
           {onRegenerate && (
             <button
               type="button"
               onClick={onRegenerate}
               disabled={regenerating}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-2 text-xs font-medium text-white/60 transition-colors hover:bg-white/5 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-500 transition-colors hover:bg-white disabled:opacity-50"
             >
               {regenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               다시 만들기
@@ -179,7 +179,7 @@ export default function JourneyPlanModal({
             type="button"
             onClick={onNext}
             disabled={!available}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-500/20 transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5 text-xs font-bold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
           >
             스텝 1 설정하기 <ArrowRight className="h-3.5 w-3.5" />
           </button>

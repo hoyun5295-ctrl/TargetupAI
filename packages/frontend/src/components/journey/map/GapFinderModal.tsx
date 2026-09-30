@@ -36,17 +36,17 @@ function Group({ title, count, desc, children }: { title: string; count: number;
   return (
     <section>
       <div className="flex items-baseline gap-2">
-        <h3 className="text-sm font-semibold text-white">{title}</h3>
-        <span className="text-[11px] text-white/45 tabular-nums">{count}</span>
+        <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+        <span className="text-[11px] text-slate-400 tabular-nums">{count}</span>
       </div>
-      <p className="mt-0.5 text-[11px] text-white/45">{desc}</p>
+      <p className="mt-0.5 text-[11px] text-slate-400">{desc}</p>
       <div className="mt-2.5 space-y-2">{children}</div>
     </section>
   );
 }
 
 function Empty({ text }: { text: string }) {
-  return <div className="rounded-lg border border-dashed border-white/10 px-3 py-2.5 text-[11px] text-white/40">{text}</div>;
+  return <div className="rounded-lg border border-dashed border-slate-200 px-3 py-2.5 text-[11px] text-slate-400">{text}</div>;
 }
 
 export default function GapFinderModal({ open, onClose, data, opportunities, onCreate, onFocusJourney, onFix }: Props) {
@@ -71,7 +71,7 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
     <button
       type="button"
       onClick={() => { onClose(); onFocusJourney(id); }}
-      className="shrink-0 h-7 px-2.5 rounded-lg text-[11px] font-medium text-white/75 border border-white/15 hover:bg-white/10 inline-flex items-center gap-1 transition-colors"
+      className="shrink-0 h-7 px-2.5 rounded-lg text-[11px] font-medium text-slate-600 border border-slate-300 hover:bg-slate-100 inline-flex items-center gap-1 transition-colors"
     >
       {label} <ArrowRight className="w-3 h-3" />
     </button>
@@ -79,15 +79,15 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
 
   return (
     <JourneyModalShell open={open} onClose={onClose} labelledBy="jmap-gap-title" panelClassName="w-full max-w-2xl">
-      <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-white/10">
+      <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-slate-200">
         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
           <Sparkles className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <h2 id="jmap-gap-title" className="text-sm font-semibold text-white">빈 곳 찾기</h2>
-          <p className="mt-0.5 text-[11px] text-white/50">지금 있는 여정을 보고 비어 있거나 손봐야 할 곳을 모았어요.</p>
+          <h2 id="jmap-gap-title" className="text-sm font-semibold text-slate-900">빈 곳 찾기</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">지금 있는 여정을 보고 비어 있거나 손봐야 할 곳을 모았어요.</p>
         </div>
-        <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10" aria-label="닫기">
+        <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -96,16 +96,16 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
         <Group title="비어 있는 구간" count={opportunities.length + ghostsOpen.length} desc={`초안 만들기 ${data.costs.generate} 크레딧 · 켜기 전에는 아무것도 발송되지 않습니다.`}>
           {opportunities.length === 0 && ghostsOpen.length === 0 && <Empty text="지금 데이터로 비어 보이는 구간이 없어요." />}
           {opportunities.map((o) => (
-            <div key={`${o.type}:${o.preferTriggerEvent || ''}`} className={`${row} border-white/10 bg-white/[0.03]`}>
+            <div key={`${o.type}:${o.preferTriggerEvent || ''}`} className={`${row} border-slate-200 bg-white`}>
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2">
-                    <span className="text-xs font-semibold text-white">{o.title}</span>
-                    <span className="text-xs font-bold text-white tabular-nums">{o.count.toLocaleString('ko-KR')}<span className="text-[11px] font-medium text-white/50 ml-0.5">명</span></span>
+                    <span className="text-xs font-semibold text-slate-900">{o.title}</span>
+                    <span className="text-xs font-bold text-slate-900 tabular-nums">{o.count.toLocaleString('ko-KR')}<span className="text-[11px] font-medium text-slate-500 ml-0.5">명</span></span>
                   </div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-white/60">{o.description}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{o.description}</p>
                   {(o.notices || []).map((n) => (
-                    <div key={n} className="mt-1 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
+                    <div key={n} className="mt-1 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-800">
                       <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
                       <span>{n}</span>
                     </div>
@@ -115,7 +115,7 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
                   <button
                     type="button"
                     onClick={() => onCreate(o.preferTriggerEvent!, o.suggestedObjective)}
-                    className="shrink-0 h-8 px-3 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 inline-flex items-center gap-1 transition-colors"
+                    className="shrink-0 h-8 px-3 rounded-lg text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 inline-flex items-center gap-1 transition-colors"
                   >
                     <Plus className="w-3.5 h-3.5" /> 바로 만들기
                   </button>
@@ -124,10 +124,10 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
             </div>
           ))}
           {ghostsOpen.map((g) => (
-            <div key={g.triggerEvent} className={`${row} border-dashed border-white/15 bg-transparent flex items-center gap-3`}>
+            <div key={g.triggerEvent} className={`${row} border-dashed border-slate-300 bg-transparent flex items-center gap-3`}>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-white/85">{g.label} 여정이 없어요</div>
-                <p className="mt-0.5 text-[11px] text-white/50">이 구간에 들어온 고객에게 보낼 여정이 아직 없습니다.</p>
+                <div className="text-xs font-semibold text-slate-700">{g.label} 여정이 없어요</div>
+                <p className="mt-0.5 text-[11px] text-slate-500">이 구간에 들어온 고객에게 보낼 여정이 아직 없습니다.</p>
               </div>
               <button
                 type="button"
@@ -143,10 +143,10 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
         <Group title="손봐야 할 곳" count={fixCount} desc="여정끼리 이어지지 않거나 뜻과 다르게 보내질 수 있는 곳이에요.">
           {fixCount === 0 && <Empty text="지금 손봐야 할 곳이 없어요." />}
           {warnLines.map((l) => (
-            <div key={l.id} className={`${row} border-amber-400/30 bg-amber-500/[0.06] flex items-center gap-3`}>
+            <div key={l.id} className={`${row} border-amber-200 bg-amber-50 flex items-center gap-3`}>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-amber-100">{nameOf(l.fromJourneyId)} → {l.toLabel} 여정 · {LINE_SHORT[l.state]}</div>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-amber-100/70">{l.reason}</p>
+                <div className="text-xs font-semibold text-amber-900">{nameOf(l.fromJourneyId)} → {l.toLabel} 여정 · {LINE_SHORT[l.state]}</div>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-amber-900">{l.reason}</p>
               </div>
               {l.fix ? (
                 <button
@@ -160,28 +160,28 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
             </div>
           ))}
           {broad.map((j) => (
-            <div key={`broad:${j.id}`} className={`${row} border-amber-400/30 bg-amber-500/[0.06] flex items-center gap-3`}>
+            <div key={`broad:${j.id}`} className={`${row} border-amber-200 bg-amber-50 flex items-center gap-3`}>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-amber-100">{j.name}</div>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-amber-100/70">대상 조건이 없어 모든 고객에게 보냅니다. 뜻한 대상이 맞는지 확인해 주세요.</p>
+                <div className="text-xs font-semibold text-amber-900">{j.name}</div>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-amber-900">대상 조건이 없어 모든 고객에게 보냅니다. 뜻한 대상이 맞는지 확인해 주세요.</p>
               </div>
               {focusBtn(j.id)}
             </div>
           ))}
           {issues.map((j) => (
-            <div key={`issue:${j.id}`} className={`${row} border-amber-400/30 bg-amber-500/[0.06] flex items-center gap-3`}>
+            <div key={`issue:${j.id}`} className={`${row} border-amber-200 bg-amber-50 flex items-center gap-3`}>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-amber-100">{j.name}</div>
-                {j.graph.issues.map((m) => <p key={m} className="mt-0.5 text-[11px] leading-relaxed text-amber-100/70">{m}</p>)}
+                <div className="text-xs font-semibold text-amber-900">{j.name}</div>
+                {j.graph.issues.map((m) => <p key={m} className="mt-0.5 text-[11px] leading-relaxed text-amber-900">{m}</p>)}
               </div>
               {focusBtn(j.id)}
             </div>
           ))}
           {starving.map((j) => (
-            <div key={`starve:${j.id}`} className={`${row} border-amber-400/30 bg-amber-500/[0.06] flex items-center gap-3`}>
+            <div key={`starve:${j.id}`} className={`${row} border-amber-200 bg-amber-50 flex items-center gap-3`}>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-amber-100">{j.name} · 새 고객이 들어오지 않아요</div>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-amber-100/70">{j.capability?.reason}</p>
+                <div className="text-xs font-semibold text-amber-900">{j.name} · 새 고객이 들어오지 않아요</div>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-amber-900">{j.capability?.reason}</p>
               </div>
               {focusBtn(j.id)}
             </div>
@@ -191,11 +191,11 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
         <Group title="겹침" count={data.overlaps.length} desc="같은 구매 한 번에 두 여정이 함께 시작될 수 있어요. 한 고객이 두 여정의 문자를 모두 받습니다.">
           {data.overlaps.length === 0 && <Empty text="함께 시작되는 여정 쌍이 없어요." />}
           {data.overlaps.map((o) => (
-            <div key={`${o.a}|${o.b}`} className={`${row} border-rose-400/30 bg-rose-500/[0.06] flex items-center gap-3`}>
-              <Users className="w-4 h-4 text-rose-200 shrink-0" />
+            <div key={`${o.a}|${o.b}`} className={`${row} border-rose-200 bg-rose-50 flex items-center gap-3`}>
+              <Users className="w-4 h-4 text-rose-800 shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-rose-100 truncate">{nameOf(o.a)} · {nameOf(o.b)}</div>
-                <p className="mt-0.5 text-[11px] text-rose-100/70 tabular-nums">지금 두 여정을 함께 받는 고객 {o.concurrentActive.toLocaleString('ko-KR')}명</p>
+                <div className="text-xs font-semibold text-rose-900 truncate">{nameOf(o.a)} · {nameOf(o.b)}</div>
+                <p className="mt-0.5 text-[11px] text-rose-900 tabular-nums">지금 두 여정을 함께 받는 고객 {o.concurrentActive.toLocaleString('ko-KR')}명</p>
               </div>
               {focusBtn(o.a, '두 여정 보기')}
             </div>
@@ -205,18 +205,18 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
         <Group title="데이터가 있어야 열리는 여정" count={locked.length} desc="연동하면 이 시작 사건으로 여정을 만들 수 있어요.">
           {locked.length === 0 && <Empty text="지금 데이터로 모든 시작 사건을 쓸 수 있어요." />}
           {locked.map((t) => (
-            <div key={t.triggerEvent} className={`${row} border-white/10 bg-white/[0.02] flex items-start gap-2.5`}>
-              <Lock className="w-3.5 h-3.5 mt-0.5 text-white/40 shrink-0" />
+            <div key={t.triggerEvent} className={`${row} border-slate-200 bg-white flex items-start gap-2.5`}>
+              <Lock className="w-3.5 h-3.5 mt-0.5 text-slate-400 shrink-0" />
               <div className="min-w-0">
-                <div className="text-xs font-semibold text-white/80">{t.label}</div>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-white/50">{t.reason}</p>
+                <div className="text-xs font-semibold text-slate-700">{t.label}</div>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{t.reason}</p>
               </div>
             </div>
           ))}
         </Group>
       </div>
 
-      <div className="px-5 py-3 border-t border-white/10 text-[10px] text-white/30 italic">
+      <div className="px-5 py-3 border-t border-slate-200 text-[10px] text-slate-400 italic">
         출처: 여정 · 여정 진행 기록 · 고객 데이터 실시간 집계(AI 호출 없음)
       </div>
     </JourneyModalShell>

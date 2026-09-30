@@ -31,16 +31,16 @@ export default function EmailFontModal({
 
   return (
     <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden">
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-white/10">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shrink-0">
             <Type className="w-4.5 h-4.5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold text-white">서체</div>
-            <div className="text-[11px] text-white/50">이 캠페인 전체 글꼴을 바꿉니다. 문안과 블록 구성은 그대로예요.</div>
+            <div className="text-sm font-bold text-slate-900">서체</div>
+            <div className="text-[11px] text-slate-500">이 캠페인 전체 글꼴을 바꿉니다. 문안과 블록 구성은 그대로예요.</div>
           </div>
-          <button type="button" onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 shrink-0" aria-label="닫기">
+          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100 shrink-0" aria-label="닫기">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -56,40 +56,40 @@ export default function EmailFontModal({
                   onClick={() => { onApply({ ...(current || {}), font_family: f.css, font_display: f.css }); onClose(); }}
                   className={`text-left rounded-xl border px-4 py-3 transition-colors ${
                     active
-                      ? 'border-violet-400/60 bg-violet-500/15'
-                      : 'border-white/10 bg-slate-950/50 hover:border-white/25 hover:bg-slate-950/80'
+                      ? 'border-violet-300 bg-violet-100'
+                      : 'border-slate-200 bg-slate-100 hover:border-slate-300 hover:bg-slate-100'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <span className="text-[11px] text-white/50">{f.label}</span>
-                    {active && <Check className="w-3.5 h-3.5 text-violet-300 shrink-0" />}
+                    <span className="text-[11px] text-slate-500">{f.label}</span>
+                    {active && <Check className="w-3.5 h-3.5 text-violet-700 shrink-0" />}
                   </div>
                   {/* 실제 글꼴로 크게 — 어떤 서체인지 이름이 아니라 모양으로 고른다.
                       .font-live = index.css 전역 !important 서체 강제의 탈출구(인라인 fontFamily는 눌려서 무효). */}
-                  <div className="font-live text-[19px] leading-snug text-white truncate" style={{ ['--font-live']: f.css } as CSSProperties}>
+                  <div className="font-live text-[19px] leading-snug text-slate-900 truncate" style={{ ['--font-live']: f.css } as CSSProperties}>
                     가나다 마케팅 ABC 123
                   </div>
                 </button>
               );
             })}
           </div>
-          <div className="mt-3 text-[11px] leading-relaxed text-white/40">
+          <div className="mt-3 text-[11px] leading-relaxed text-slate-400">
             보이는 글꼴 그대로 메일에 실립니다. 글꼴을 지원하지 않는 일부 수신함에서는 같은 계열의 기본 글꼴로 보입니다.
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-white/10">
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-slate-200">
           <button
             type="button"
             onClick={() => { onReset(); onClose(); }}
-            className="inline-flex items-center gap-1.5 text-[12px] text-white/60 hover:text-white px-3 py-1.5 rounded-lg hover:bg-white/10"
+            className="inline-flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-slate-900 px-3 py-1.5 rounded-lg hover:bg-slate-100"
           >
             <RotateCcw className="w-3.5 h-3.5" />기본 서체로
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="text-[12px] text-white/70 hover:text-white px-4 py-1.5 rounded-lg border border-white/10 hover:bg-white/10"
+            className="text-[12px] text-slate-600 hover:text-slate-900 px-4 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100"
           >
             취소
           </button>

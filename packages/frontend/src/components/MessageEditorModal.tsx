@@ -124,19 +124,19 @@ export default function MessageEditorModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 backdrop-blur-sm p-2 md:p-4">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden">
         {/* 헤더 */}
-        <div className="flex items-center justify-between gap-3 px-4 md:px-5 py-3 border-b border-white/10 shrink-0">
+        <div className="flex items-center justify-between gap-3 px-4 md:px-5 py-3 border-b border-slate-200 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-fuchsia-500 flex items-center justify-center shadow-lg shrink-0">
               <Pencil className="w-[18px] h-[18px] text-white" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-white truncate">문안 편집기</h3>
-              <p className="text-[11px] text-white/40">{channelUpper} · 우측 도구로 변수·링크·표현을 커서 위치에 삽입</p>
+              <h3 className="text-sm font-semibold text-slate-900 truncate">문안 편집기</h3>
+              <p className="text-[11px] text-slate-400">{channelUpper} · 우측 도구로 변수·링크·표현을 커서 위치에 삽입</p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors" aria-label="닫기">
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors" aria-label="닫기">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -150,7 +150,7 @@ export default function MessageEditorModal({
                 type="button"
                 onClick={() => setTab('edit')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  tab === 'edit' ? 'bg-amber-400/25 text-amber-100 ring-1 ring-amber-300/40' : 'bg-white/5 text-white/45 hover:text-white/70'
+                  tab === 'edit' ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300' : 'bg-white text-slate-400 hover:text-slate-600'
                 }`}
               >
                 <Type className="w-3.5 h-3.5" /> 편집
@@ -159,7 +159,7 @@ export default function MessageEditorModal({
                 type="button"
                 onClick={() => setTab('preview')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  tab === 'preview' ? 'bg-emerald-400/25 text-emerald-100 ring-1 ring-emerald-400/40' : 'bg-white/5 text-white/45 hover:text-white/70'
+                  tab === 'preview' ? 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300' : 'bg-white text-slate-400 hover:text-slate-600'
                 }`}
               >
                 <Eye className="w-3.5 h-3.5" /> 미리보기
@@ -169,7 +169,7 @@ export default function MessageEditorModal({
                   type="button"
                   onClick={() => setMergedPreview((v) => !v)}
                   className={`ml-auto px-2.5 py-1.5 rounded-lg text-[11px] transition-all ${
-                    mergedPreview ? 'bg-emerald-400/20 text-emerald-100 ring-1 ring-emerald-400/30' : 'bg-white/5 text-white/45 hover:text-white/70'
+                    mergedPreview ? 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200' : 'bg-white text-slate-400 hover:text-slate-600'
                   }`}
                   title="상위 고객 데이터로 변수 치환 미리보기"
                 >
@@ -186,27 +186,27 @@ export default function MessageEditorModal({
                   onChange={(e) => setDraft(e.target.value)}
                   autoFocus
                   placeholder="문안을 입력하세요"
-                  className="flex-1 min-h-[280px] lg:min-h-[380px] w-full bg-slate-950/70 border border-white/10 focus:border-amber-400/50 rounded-xl p-4 text-[15px] text-white/90 leading-relaxed font-sans resize-none outline-none placeholder-white/25 transition-colors"
+                  className="flex-1 min-h-[280px] lg:min-h-[380px] w-full bg-slate-100 border border-slate-200 focus:border-amber-300 rounded-xl p-4 text-[15px] text-slate-800 leading-relaxed font-sans resize-none outline-none placeholder-slate-400 transition-colors"
                 />
                 {isAd && (
-                  <p className="mt-2 text-[11px] text-white/35 italic shrink-0">
+                  <p className="mt-2 text-[11px] text-slate-400 italic shrink-0">
                     (광고)·무료거부 {rejectNumber}는 발송 시 자동으로 붙습니다. 본문만 입력하세요.
                   </p>
                 )}
               </>
             ) : (
               <div className="flex-1 flex justify-center items-start py-2">
-                <div className="w-full max-w-[340px] rounded-[2.5rem] border-4 border-slate-700 bg-slate-950 p-3 shadow-2xl">
-                  <div className="rounded-[2rem] bg-slate-900 overflow-hidden">
-                    <div className="px-4 py-2 text-center text-[11px] text-white/40 border-b border-white/5 flex items-center justify-center gap-1.5">
+                <div className="w-full max-w-[340px] rounded-[2.5rem] border-4 border-slate-200 bg-slate-100 p-3 shadow-2xl">
+                  <div className="rounded-[2rem] bg-white overflow-hidden">
+                    <div className="px-4 py-2 text-center text-[11px] text-slate-400 border-b border-slate-100 flex items-center justify-center gap-1.5">
                       <Smartphone className="w-3 h-3" /> {channelUpper} 실제 수신 모습
                     </div>
                     <div className="p-4 min-h-[380px]">
-                      <div className="rounded-2xl rounded-tl-sm bg-violet-600/90 text-white text-[14px] px-4 py-3 whitespace-pre-wrap leading-relaxed break-words">
+                      <div className="rounded-2xl rounded-tl-sm bg-violet-200 text-slate-900 text-[14px] px-4 py-3 whitespace-pre-wrap leading-relaxed break-words">
                         {previewBody
                           ? (mergedPreview && sampleCustomer
-                              ? mergeAndHighlightVars(previewBody, sampleCustomer, 'dark', sampleCustomerFields || undefined)
-                              : highlightVars(previewBody, 'dark'))
+                              ? mergeAndHighlightVars(previewBody, sampleCustomer, 'light', sampleCustomerFields || undefined)
+                              : highlightVars(previewBody, 'light'))
                           : '(본문 없음)'}
                       </div>
                     </div>
@@ -218,12 +218,12 @@ export default function MessageEditorModal({
             {/* 바이트 게이지 + 경고 */}
             <div className="mt-3 shrink-0">
               <div className="flex items-center justify-between text-[11px] mb-1">
-                <span className="text-white/40">본문 {draft.length.toLocaleString()}자</span>
-                <span className={overLimit ? 'text-rose-300 font-semibold' : 'text-white/50'}>
+                <span className="text-slate-400">본문 {draft.length.toLocaleString()}자</span>
+                <span className={overLimit ? 'text-rose-700 font-semibold' : 'text-slate-500'}>
                   {bytes.toLocaleString()} / {byteLimit.toLocaleString()} bytes
                 </span>
               </div>
-              <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all ${overLimit ? 'bg-rose-500' : bytePercent > 85 ? 'bg-amber-400' : 'bg-emerald-400'}`}
                   style={{ width: `${bytePercent}%` }}
@@ -232,7 +232,7 @@ export default function MessageEditorModal({
               {warnings.length > 0 && (
                 <div className="mt-2 space-y-1">
                   {warnings.map((w, i) => (
-                    <div key={i} className="flex items-start gap-1.5 text-[11px] text-amber-300/90">
+                    <div key={i} className="flex items-start gap-1.5 text-[11px] text-amber-700">
                       <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
                       <span>{w}</span>
                     </div>
@@ -240,17 +240,17 @@ export default function MessageEditorModal({
                 </div>
               )}
               {isSmsFamily && (
-                <SmsCharsetNotice tone="dark" className="mt-2" texts={[draft]} onApply={(fix) => setDraft((prev) => fix(prev))} />
+                <SmsCharsetNotice tone="light" className="mt-2" texts={[draft]} onApply={(fix) => setDraft((prev) => fix(prev))} />
               )}
             </div>
           </div>
 
           {/* 우측 — 삽입 도구 패널 */}
-          <div className="w-full lg:w-[320px] shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 p-4 space-y-4 overflow-y-auto bg-slate-950/40">
+          <div className="w-full lg:w-[320px] shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200 p-4 space-y-4 overflow-y-auto bg-slate-100">
             {variables.length > 0 && (
               <section>
-                <h4 className="flex items-center gap-1.5 text-xs font-semibold text-white/70 mb-2">
-                  <AtSign className="w-3.5 h-3.5 text-violet-300" /> 개인화 변수
+                <h4 className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-2">
+                  <AtSign className="w-3.5 h-3.5 text-violet-700" /> 개인화 변수
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {variables.map((v) => (
@@ -258,7 +258,7 @@ export default function MessageEditorModal({
                       key={v.token}
                       type="button"
                       onClick={() => insertText(`%${v.token}%`)}
-                      className="px-2 py-1 text-[11px] rounded-lg border bg-violet-500/15 text-violet-200 border-violet-400/30 hover:bg-violet-500/30 hover:text-white transition-colors"
+                      className="px-2 py-1 text-[11px] rounded-lg border bg-violet-100 text-violet-800 border-violet-200 hover:bg-violet-100 hover:text-slate-900 transition-colors"
                       title={`%${v.token}% 삽입`}
                     >
                       {v.label}
@@ -270,9 +270,9 @@ export default function MessageEditorModal({
 
             {hasBrandExpr && (
               <section>
-                <h4 className="flex items-center gap-1.5 text-xs font-semibold text-white/70 mb-2">
-                  <Sparkles className="w-3.5 h-3.5 text-fuchsia-300" /> 우리 회사 표현
-                  <span className="font-normal text-white/35">(브랜드보이스 학습값)</span>
+                <h4 className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-2">
+                  <Sparkles className="w-3.5 h-3.5 text-fuchsia-700" /> 우리 회사 표현
+                  <span className="font-normal text-slate-400">(브랜드보이스 학습값)</span>
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {brandExpr!.ctaPatterns.map((c, i) => (
@@ -280,7 +280,7 @@ export default function MessageEditorModal({
                       key={`cta-${i}`}
                       type="button"
                       onClick={() => insertText(c)}
-                      className="px-2 py-1 text-[11px] rounded-lg border bg-fuchsia-500/15 text-fuchsia-200 border-fuchsia-400/30 hover:bg-fuchsia-500/30 hover:text-white transition-colors"
+                      className="px-2 py-1 text-[11px] rounded-lg border bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200 hover:bg-fuchsia-100 hover:text-slate-900 transition-colors"
                       title="CTA 패턴 삽입"
                     >
                       {c}
@@ -291,7 +291,7 @@ export default function MessageEditorModal({
                       key={`freq-${i}`}
                       type="button"
                       onClick={() => insertText(f)}
-                      className="px-2 py-1 text-[11px] rounded-lg border bg-white/5 text-white/70 border-white/15 hover:bg-white/15 hover:text-white transition-colors"
+                      className="px-2 py-1 text-[11px] rounded-lg border bg-white text-slate-600 border-slate-300 hover:bg-slate-200 hover:text-slate-900 transition-colors"
                       title="빈출 표현 삽입"
                     >
                       {f}
@@ -302,16 +302,16 @@ export default function MessageEditorModal({
             )}
 
             <section>
-              <h4 className="flex items-center gap-1.5 text-xs font-semibold text-white/70 mb-2">
-                <Link2 className="w-3.5 h-3.5 text-sky-300" /> 브랜드 링크
+              <h4 className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-2">
+                <Link2 className="w-3.5 h-3.5 text-sky-700" /> 브랜드 링크
               </h4>
-              <BrandLinkChips tone="dark" onInsert={(u) => insertText(u)} />
+              <BrandLinkChips tone="light" onInsert={(u) => insertText(u)} />
             </section>
 
             <section>
-              <h4 className="flex items-center gap-1.5 text-xs font-semibold text-white/70 mb-2">
-                <Hash className="w-3.5 h-3.5 text-emerald-300" /> 특수문자
-                <span className="font-normal text-white/35">(문자 발송 안전 기호만)</span>
+              <h4 className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-2">
+                <Hash className="w-3.5 h-3.5 text-emerald-700" /> 특수문자
+                <span className="font-normal text-slate-400">(문자 발송 안전 기호만)</span>
               </h4>
               <div className="grid grid-cols-8 gap-1">
                 {specialChars.map((c, i) => (
@@ -319,7 +319,7 @@ export default function MessageEditorModal({
                     key={`${c}-${i}`}
                     type="button"
                     onClick={() => insertText(c)}
-                    className="h-8 flex items-center justify-center text-sm rounded-lg border border-white/10 bg-white/5 text-white/80 hover:bg-emerald-500/20 hover:border-emerald-400/40 hover:text-white transition-colors"
+                    className="h-8 flex items-center justify-center text-sm rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-emerald-100 hover:border-emerald-300 hover:text-slate-900 transition-colors"
                   >
                     {c}
                   </button>
@@ -330,13 +330,13 @@ export default function MessageEditorModal({
         </div>
 
         {/* 푸터 */}
-        <div className="flex items-center justify-between gap-2 px-4 md:px-5 py-3 border-t border-white/10 shrink-0">
+        <div className="flex items-center justify-between gap-2 px-4 md:px-5 py-3 border-t border-slate-200 shrink-0">
           <div>
             {originalText !== undefined && draft !== originalText && (
               <button
                 type="button"
                 onClick={() => setDraft(originalText)}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs text-white/60 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors"
                 title="AI가 만든 원본 문안으로 되돌립니다"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> 원본 복원
@@ -347,14 +347,14 @@ export default function MessageEditorModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-white/70 border border-white/15 rounded-lg hover:bg-white/10 transition-colors"
+              className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors"
             >
               취소
             </button>
             <button
               type="button"
               onClick={() => onApply(draft)}
-              className="flex items-center gap-1.5 px-5 py-2 text-sm bg-gradient-to-r from-amber-500 to-fuchsia-600 hover:from-amber-400 hover:to-fuchsia-500 text-white rounded-lg font-semibold shadow-lg transition-all"
+              className="flex items-center gap-1.5 px-5 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold shadow-lg transition-all"
             >
               <Check className="w-4 h-4" /> 적용
             </button>

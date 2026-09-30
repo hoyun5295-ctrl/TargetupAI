@@ -146,76 +146,76 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
   return createPortal(
     <>
       <div className="fixed inset-0 z-[1200] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-        <div className="w-full max-w-2xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="w-full max-w-2xl bg-white border border-slate-200 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
           {/* 헤더 */}
-          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-white/10 bg-gradient-to-r from-slate-950 via-violet-950/30 to-slate-950 shrink-0">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 via-violet-50 to-slate-50 shrink-0">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/20 shrink-0">
                 <Link2 className="w-5 h-5 text-white" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-white font-bold text-base">단축 URL 만들기</h3>
-                <p className="text-xs text-white/50 mt-0.5">내가 만든 페이지 주소를 hlj.kr 짧은 주소로, 클릭 수까지 집계</p>
+                <h3 className="text-slate-900 font-bold text-base">단축 URL 만들기</h3>
+                <p className="text-xs text-slate-500 mt-0.5">내가 만든 페이지 주소를 hlj.kr 짧은 주소로, 클릭 수까지 집계</p>
               </div>
             </div>
-            <button type="button" onClick={onClose} className="text-white/50 hover:text-white p-1.5 hover:bg-white/5 rounded transition-colors shrink-0" aria-label="닫기">
+            <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 hover:bg-white rounded transition-colors shrink-0" aria-label="닫기">
               <X className="w-5 h-5" />
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
             {/* 생성 폼 */}
-            <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+            <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
               <div>
-                <label className="text-xs text-white/60 font-medium mb-1.5 block">단축할 URL</label>
+                <label className="text-xs text-slate-500 font-medium mb-1.5 block">단축할 URL</label>
                 <input
                   value={url}
                   onChange={(e) => { setUrl(e.target.value); setInputError(null); }}
                   placeholder="https:// 로 시작하는 전체 주소"
                   disabled={creating}
-                  className="w-full px-3 py-2.5 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400"
+                  className="w-full px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-400"
                 />
               </div>
               {/* ★ 2026-09-16 한글 주소 지정(박성용 접수) — 비우면 종전대로 난수가 붙는다.
                   발행 DM 별칭과 같은 규칙(2~20자·한글/영문/숫자/-/_)이라 서버 검증 함수도 같다. */}
               <div>
-                <label className="text-xs text-white/60 font-medium mb-1.5 block">
-                  주소 직접 지정 <span className="text-white/30 font-normal">(선택 · 비우면 자동)</span>
+                <label className="text-xs text-slate-500 font-medium mb-1.5 block">
+                  주소 직접 지정 <span className="text-slate-400 font-normal">(선택 · 비우면 자동)</span>
                 </label>
-                <div className="flex items-stretch rounded-lg border border-white/10 bg-slate-950 focus-within:border-violet-400 overflow-hidden">
-                  <span className="px-3 py-2.5 text-sm text-white/35 border-r border-white/10 shrink-0 select-none">hlj.kr/</span>
+                <div className="flex items-stretch rounded-lg border border-slate-200 bg-slate-100 focus-within:border-violet-400 overflow-hidden">
+                  <span className="px-3 py-2.5 text-sm text-slate-400 border-r border-slate-200 shrink-0 select-none">hlj.kr/</span>
                   <input
                     value={slug}
                     onChange={(e) => { setSlug(e.target.value); setInputError(null); }}
                     placeholder="예: 여름세일"
                     maxLength={20}
                     disabled={creating}
-                    className="flex-1 min-w-0 px-3 py-2.5 bg-transparent text-sm text-white placeholder-white/30 focus:outline-none"
+                    className="flex-1 min-w-0 px-3 py-2.5 bg-transparent text-sm text-slate-900 placeholder-slate-400 focus:outline-none"
                   />
                 </div>
-                <div className="text-[11px] text-white/35 mt-1">
+                <div className="text-[11px] text-slate-400 mt-1">
                   한글·영문·숫자·하이픈·밑줄 2~20자. 한 번 만든 주소는 다른 곳에 다시 쓸 수 없습니다.
                 </div>
               </div>
               <div>
-                <label className="text-xs text-white/60 font-medium mb-1.5 block">이름 (선택, 목록 구분용)</label>
+                <label className="text-xs text-slate-500 font-medium mb-1.5 block">이름 (선택, 목록 구분용)</label>
                 <input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="예: 7월 신상품 MDM"
                   maxLength={100}
                   disabled={creating}
-                  className="w-full px-3 py-2.5 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400"
+                  className="w-full px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-400"
                 />
               </div>
               {inputError && (
-                <div className="flex items-start gap-1.5 text-xs text-rose-300 bg-rose-500/10 border border-rose-400/30 rounded-lg p-2.5">
+                <div className="flex items-start gap-1.5 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2.5">
                   <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>{inputError}</span>
                 </div>
               )}
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-[11px] text-white/40">
+                <span className="text-[11px] text-slate-400">
                   http/https 공개 주소만 가능 · 내부망/IP 불가{dailyLimit ? ` · 하루 ${dailyLimit}건` : ''}
                 </span>
                 <button
@@ -231,37 +231,37 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
 
             {/* 목록 */}
             <div>
-              <div className="text-sm font-semibold text-white/80 mb-2">내 단축 링크</div>
+              <div className="text-sm font-semibold text-slate-700 mb-2">내 단축 링크</div>
               {listLoading ? (
-                <div className="flex items-center justify-center py-10 text-white/50 gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-violet-300" />
+                <div className="flex items-center justify-center py-10 text-slate-500 gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-violet-700" />
                   <span className="text-sm">불러오는 중...</span>
                 </div>
               ) : listError ? (
-                <div className="flex items-start gap-1.5 text-xs text-rose-300 bg-rose-500/10 border border-rose-400/30 rounded-lg p-3">
+                <div className="flex items-start gap-1.5 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">
                   <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>{listError}</span>
                 </div>
               ) : links.length === 0 ? (
-                <div className="text-center py-10 text-white/40 text-sm">아직 만든 단축 링크가 없습니다.</div>
+                <div className="text-center py-10 text-slate-400 text-sm">아직 만든 단축 링크가 없습니다.</div>
               ) : (
                 <div className="space-y-2">
                   {links.map((l) => (
-                    <div key={l.id} className={`border rounded-xl p-3 ${l.isActive ? 'bg-white/5 border-white/10' : 'bg-white/[0.02] border-white/5 opacity-60'}`}>
+                    <div key={l.id} className={`border rounded-xl p-3 ${l.isActive ? 'bg-white border-slate-200' : 'bg-white border-slate-100 opacity-60'}`}>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-sm text-violet-300">{l.shortUrl || `(${l.code})`}</span>
-                        {!l.isActive && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/50">비활성</span>}
-                        <span className="inline-flex items-center gap-1 text-[11px] text-white/50 ml-auto">
+                        <span className="font-mono text-sm text-violet-700">{l.shortUrl || `(${l.code})`}</span>
+                        {!l.isActive && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">비활성</span>}
+                        <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 ml-auto">
                           <MousePointerClick className="w-3 h-3" />클릭 {l.clickCount.toLocaleString()}
                         </span>
                       </div>
-                      {l.title && <div className="text-xs text-white/70 mt-1">{l.title}</div>}
-                      <div className="text-[11px] text-white/40 mt-0.5 break-all">{l.targetUrl}</div>
+                      {l.title && <div className="text-xs text-slate-600 mt-1">{l.title}</div>}
+                      <div className="text-[11px] text-slate-400 mt-0.5 break-all">{l.targetUrl}</div>
                       <div className="flex items-center gap-2 mt-2">
                         {l.shortUrl && (
                           <button
                             onClick={() => copyText(l.shortUrl!)}
-                            className="inline-flex items-center gap-1 text-[11px] text-violet-200 border border-violet-400/30 hover:bg-violet-500/20 px-2 py-1 rounded-lg transition-colors"
+                            className="inline-flex items-center gap-1 text-[11px] text-violet-800 border border-violet-200 hover:bg-violet-100 px-2 py-1 rounded-lg transition-colors"
                           >
                             <Copy className="w-3 h-3" />복사
                           </button>
@@ -269,7 +269,7 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
                         <button
                           onClick={() => handleToggle(l)}
                           disabled={togglingId === l.id}
-                          className="inline-flex items-center gap-1 text-[11px] text-white/60 border border-white/15 hover:bg-white/10 px-2 py-1 rounded-lg transition-colors disabled:opacity-40"
+                          className="inline-flex items-center gap-1 text-[11px] text-slate-500 border border-slate-300 hover:bg-slate-100 px-2 py-1 rounded-lg transition-colors disabled:opacity-40"
                         >
                           {togglingId === l.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Power className="w-3 h-3" />}
                           {l.isActive ? '비활성화' : '활성화'}
@@ -283,9 +283,9 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
           </div>
 
           {/* 푸터 */}
-          <div className="px-5 py-3 border-t border-white/10 shrink-0">
+          <div className="px-5 py-3 border-t border-slate-200 shrink-0">
             {/* ★ 2026-09-16 크레딧 수치는 원장(CONFIRM_CREDIT_COSTS)에서 읽는다 — 하드코딩은 값이 바뀌는 날 거짓말이 된다 */}
-            <div className="text-[10px] text-white/30 italic">Data source: dm_custom_short_links 실시간 · 발급 1건 = {SHORT_LINK_CREDIT}크레딧 · 비활성 시 접속은 서비스 홈으로 이동</div>
+            <div className="text-[10px] text-slate-400 italic">Data source: dm_custom_short_links 실시간 · 발급 1건 = {SHORT_LINK_CREDIT}크레딧 · 비활성 시 접속은 서비스 홈으로 이동</div>
           </div>
         </div>
       </div>

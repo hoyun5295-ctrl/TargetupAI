@@ -6,7 +6,8 @@
  *
  * 색은 **저장소가 이미 쓰는 값 그대로**다 — `components/dm/canvas/SnsSection.tsx` 의 `SNS_COLORS`
  * (인스타 #e1306c · 페북 #1877f2). 같은 브랜드가 화면마다 다른 색이면 그게 곧 어색함이다.
- * 다크 지면에서 검정이 브랜드색인 채널(Threads · X)은 흰색으로 둔다.
+ * ★ 2026-09-30 AI 존 대개편: 지면이 밝은 작업대로 바뀌어 검정이 브랜드색인 채널(Threads · X)도 검정으로 둔다(옛: 다크 지면이라 흰색).
+ * 타일(`SNS_TILE_BG`) = 브랜드 바탕 + 흰 글리프. 인스타그램 타일만 그라데이션(단색 #e1306c 보다 채널이 바로 읽힌다 · Harold 0930 "로고를 넣어 임팩트 있게").
  *
  * ⛔ 로고는 **단순화한 글리프**다. 각 플랫폼 공식 로고 파일을 복제해 넣지 않는다 —
  *   브랜드 가이드가 변형을 제한하고, 우리 화면의 선 굵기·크기 체계와도 어긋난다.
@@ -16,9 +17,17 @@
 
 export const SNS_BRAND_COLOR: Record<string, string> = {
   instagram: '#e1306c',
-  threads: '#ffffff',
+  threads: '#000000',
   facebook_page: '#1877f2',
-  x: '#ffffff',
+  x: '#000000',
+};
+
+/** 로고 타일 바탕(인라인 style background 값 · 완성 리터럴) */
+export const SNS_TILE_BG: Record<string, string> = {
+  instagram: 'linear-gradient(45deg, #F58529 0%, #DD2A7B 45%, #8134AF 75%, #515BD4 100%)',
+  threads: '#000000',
+  facebook_page: '#1877f2',
+  x: '#000000',
 };
 
 /** 채널 색. 목록에 없으면 액센트 바이올렛으로 떨어뜨린다(색이 없다고 카드가 깨지지 않게). */

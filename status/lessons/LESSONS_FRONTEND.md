@@ -79,6 +79,17 @@
 
 ## 사고 이력
 
+### 2026-09-30 — AI 존 대개편: 짙은→밝은 기계 변환이 놓친 자리 5종 · 공용 창은 파일이 아니라 여는 쪽 문맥으로 톤을 고른다
+- **드러난 형태**: 문자열 단위 변환(글자·면·선 사다리)이 끝났는데도 실측에서 글씨가 안 보이는 창이 나왔다 — 허브 발송 결과 창·첫 안내 창(바탕 `from-*-950` 그라데이션은 그대로, 글자만 짙게 바뀜) · 플래너 결재 칸·DM 인터뷰 입력칸(`bg-black/30` + `text-white` 유지) · 날짜 입력 `[color-scheme:dark]` · 공용 부품에 `tone="dark"`·`highlightVars(…, 'dark')` 를 넘기는 호출부.
+- **뿌리**: 변환표가 **색 이름 사다리만** 알고 "짙은 그라데이션 정지점·반투명 검정·브라우저 색 체계·부품 톤 인자"를 몰랐다. 캡처 대비 점검도 그라데이션 바탕은 건너뛰어(판정 불가) 첫 안내 창을 못 잡았다.
+- **처방**: 변환 뒤 **다섯 자리 전수 스캔**을 따로 돌린다 — ① `(from|via|to)-*-9[05]0` ② `bg-black/N`(사진 위 배지 제외) ③ `color-scheme:dark` ④ 부품 톤 인자 `tone="dark"` · `'dark'` 테마 인자 ⑤ 인라인 `rgba(255,255,255,…)` 차트 선. 차트 선·축·툴팁은 `OUI_CHART_*` 토큰으로만 쓴다.
+- **공용 창(존 밖에서도 쓰는 8개)**: 파일을 통째로 밝게 바꾸면 대시보드 등 존 밖 화면이 같이 바뀐다. `SurfaceToneProvider`(ZoneFrame·EditShell·허브·DM 조립이 'light')를 읽어 `light ? 밝은 : 원래` 로 **두 값을 공존**시킨다(기본값 'dark' = 존 밖 회귀 0). 계약 = `zone-surface-invariants.test.ts`.
+- **자가 점검**: 개편 화면은 캡처(1440·390)만으로 닫지 않는다 — 첫 안내·추천 창·확인 창처럼 **눌러야 열리는 상태**를 스크립트로 열어 찍는다. 누르는 확인은 **`elementFromPoint` 최상위 여부**로 판정한다(DOM `click()` 은 부모 `overflow-hidden` 에 잘려 안 보이는 메뉴 항목도 눌러 통과시켰다 · Codex R1). 떠 있는 층(⋯ 메뉴)은 포털 + 버튼 좌표 + 가용 높이 maxHeight + 안쪽 스크롤 + resize 닫힘.
+
+### 2026-09-30 — 격자 안 `<button>` 카드는 내용을 세로 가운데로 놓는다(설명 줄 수가 다르면 행 안에서 아이콘·제목이 어긋남)
+- **드러난 형태**: AI Operator "함께 사용하는 AI 영역" 3열 카드 — 한 행의 카드 키가 가장 긴 설명에 맞춰 같아지면 설명 1줄 카드만 내용이 아래로 밀렸다(2·3행 `[26,17,26]` px 실측). 옛 방지책은 "설명 1줄 유지"(글자 수 규칙)라 설명이 바뀔 때마다 재발했다.
+- **처방**: 카드 버튼에 `flex flex-col`(내용을 위에서부터 쌓음) — 글자 수에 기대지 않는다. 같은 구조 후보(정렬 지정 없는 카드형 버튼) 29곳은 기록만(실제 어긋남은 배치별 미검증).
+
 ### 2026-09-25 — 코드 리뷰 13라운드를 통과한 발송 창이 배포 뒤 모양 결함 3건 · 경합을 닫기 잠금으로 막으면 영구히 갇힌다
 - **드러난 형태 1(모양)**: 알림톡 탭 글자가 한 글자씩 세로로 꺾임 · 브랜드 탭 칸이 세로로 늘어남 · [파일 선택] 아이콘 56px. 원인 = 자손 선택자(`.ds-dropzone svg`)가 버튼 안 14px 아이콘까지 잡음 · `flex: 1` 부품을 세로 열에 바로 넣음 · 기준 폭 0(`flex: 1 1 0`) 항목은 부모 자연 폭을 0 에 가깝게 만들어 flex-wrap 줄바꿈이 안 일어남. **코드 리뷰는 모양을 못 본다.** 처방 = 빌드 CSS 위에서 여러 폭(390·820·1100·1280·1366·1440·1920 × 낮은 높이)으로 그려 잰다(서버 렌더 HTML 또는 브라우저 실행 + 헤드리스) · **수정 전 빌드로 증상부터 재현**해 측정 도구를 믿을 수 있게 한다 · 아이콘 크기는 직계(`> svg`)나 클래스로 · 폭 기준이 열이면 컨테이너 쿼리.
 - **드러난 형태 2(경합)**: 늦게 끝난 불러오기(주소록 · 파일 매핑 · AI 담기)가 사람이 고친 명단을 덮음. 1차 처방 = 불러오는 동안 닫기 잠금 → 응답이 안 오거나 처리가 예외로 멈추면 **영구히 갇힘**(Codex 12R). 처방 = **닫기 = 취소(세대 올림)** · 가림막에 [불러오기 취소]. 확인 창은 포커스를 가두지 않아 Enter 가 뒤쪽 보내기로 들어간다 → 확인 창은 **연 순간의 명단을 떠 두고** 그것만 보낸다 · 확인 대기 중 새 보내기를 받지 않는다(11R·12R).
@@ -228,11 +239,11 @@
 
 ## 디자인 톤앤매너 매트릭스 (D211+ + D214+ 정합)
 
-### 다크 톤 표준
-- 배경: `bg-slate-950` 또는 `bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950`
-- 카드: `bg-white/5 border border-white/10 rounded-xl`
-- 모달: `bg-slate-900 border border-white/10 rounded-2xl shadow-2xl`
-- 헤더: `bg-slate-950/80 backdrop-blur-sm sticky top-0 z-30`
+### AI 존 표준 (★2026-09-30 대개편 · D95 · 옛 "다크 톤 표준" 대체)
+- 틀: `components/zone/ZoneFrame` 이 바닥(`bg-slate-100`)·남색 머리 띠(`bg-slate-900` · 안쪽 폭 1240)·명령 카드·차단 상자·강조 카드 자리를 소유한다. **화면이 머리를 직접 짜지 않는다**(className prop 없음).
+- 카드: `bg-white border border-slate-200 rounded-2xl` + 2겹 그림자(`OUI_CARD`) · 모달: 흰 판(`MK_MODAL`) · 편집기 머리: `MK_HEADER`(같은 남색) + `MK_HEAD_*`(반투명 외곽선).
+- 채움 버튼 = 명령 카드 오른쪽 끝(편집기 머리 끝·확정 바 끝) 1개 · AI 생성·크레딧 = 앰버, 그 밖 = 인디고. 카드·행·창 안은 외곽선.
+- 존 밖 화면(대시보드 등)의 짙은 공용 창은 그대로다 — 존 안에서 열릴 때만 `useLightSurface()` 로 밝은 짝.
 
 ### 액센트 색상
 - **violet/fuchsia/indigo** — AI/Predictive/지능 영역
@@ -248,7 +259,7 @@
 - disabled 영역 = `disabled:opacity-30 disabled:cursor-not-allowed`
 
 ### Source caption 의무 (모든 카드/차트)
-- `<div className="text-[10px] text-white/30 italic mt-2">Data source: ...</div>`
+- `<div className="text-[10px] text-slate-400 italic mt-2">Data source: ...</div>` (★0930 밝은 작업대 · 옛 `text-white/30` 은 존 밖 짙은 화면에서만)
 
 ---
 
@@ -268,7 +279,7 @@
 
 | 요소 | 적용 범위 |
 |------|-----------|
-| 상단 헤더 sticky + 그라데이션 아이콘(10x10 rounded-xl) | 모든 페이지 |
+| 머리 = `ZoneHeader`(남색 띠 · 타일 40 · 제목 18 · 탭은 둘째 줄) — 화면이 직접 짜지 않는다 | AI 존 모든 페이지 |
 | AI 자율 진단 카드 (violet→fuchsia 그라데이션 + Sparkles + topInsight) | AI 활용 페이지 |
 | 자연어 입력 카드 (fuchsia/purple/indigo 그라데이션 + Enter 키) | 자동 생성 페이지 |
 | 빠른 시작 카드 7건 (시나리오별 고유 icon + gradient) | 자동 생성 페이지 |
@@ -276,20 +287,17 @@
 | 1-click 액션 3 카드 (color-coded rose/emerald/amber) | 개선 추천 |
 | 요약 5 metric + 이전 30일 대비 +/-% (TrendingUp/Down) | 통계 |
 | 자세히 분석 토글 (ChevronDown/Up + 6 차트) | 통계 |
-| 다크 톤 + violet 액센트 (`bg-slate-950` + `border-white/10`) | 모든 페이지 |
-| Source caption (`text-[10px] text-white/30 italic` + `Data source: …`) | 모든 차트/카드 |
+| AI 존 틀(`ZoneFrame` · 밝은 작업대 + 명령 카드 · 한 줄 입력은 자동화 7메뉴만) | AI 존 모든 페이지 |
+| Source caption (`text-[10px] text-slate-400 italic` + `Data source: …`) | 모든 차트/카드 |
 | 모바일 반응형 (flex-wrap + md:/lg: 분기 + grid-cols-2 md:grid-cols-4) | 모든 페이지 |
 | ConfirmModal + useToast (native dialog 0건) | 모든 페이지 |
-| 모달 (`bg-slate-900` + `border-white/10` + `rounded-2xl` + `shadow-2xl`) | 모든 모달 |
+| 모달 = 흰 판(`MK_MODAL`) · 존 밖과 같이 쓰는 공용 창은 `useLightSurface()` 로 밝은 짝 | 모든 모달 |
 
 > 라벨 3단 정책·1클릭 UX 정합·절대금지 항목은 **CLAUDE.md가 소유**한다(`design_quality_minimum_ceiling_free` / `marketing_user_ux_priority`). 여기 복사하지 않는다.
 
-> ⛔ **★2026-08-21 Harold 판정 — AI Operator 허브의 지면·글로우·유리 카드·그라데이션 글자는 그대로 둔다.** 같은 날 단색(violet-950 + 글로우 1)과
-> 라이트(gray-100) 두 안을 실물·위젯으로 보였는데 **둘 다 "기존이 낫다"**(A > 단색 > 라이트 — 대표 부부 일치). 깊이(세 방향 그라데이션 + 빛 3개 + 유리)가
-> 이 화면의 힘이다. **"퀄리티 상승"은 빼기(색·층·대비 감축)로 하지 않는다 — 네 번 졌다.** 허용된 변경 = 제목 크기 한 단 축소 + ! 호버 팝오버(제목 아래 중앙).
-> ★0821 저녁 Harold 정정: 위 판정은 "대안이 못했다"는 상대 평가이지 **보라 선호가 아니다**. 허브(아이덴티티)와 작업 화면(slate 작업면)을 역할별로 나누는 체계 제안이 요구였다.
-> ★0821 밤 전원 합의·구현완료: **허브는 무접촉, 메뉴 안 작업면 16개는 `bg-slate-950` 단색 + 아우라 1 + 바이올렛 액센트**(`utils/operator-ui.ts` OUI_*). CT 규칙 = 뒤로가기 뿌리가 `/ai-operator`면 OUI_ / 관리·조회면 CUI_ / DM 편집기면 DM_. 불변식 = `backend/src/utils/__tests__/operator-surface-invariants.test.ts`. 체계·⛔·회의록 = [오퍼레이터 표면 단계](../../docs/2026-08-21-operator-surface-tier-design.md).
-> 경위·기각 설계서 = [AI Operator 표면 개편](../../docs/2026-08-21-ai-operator-surface-design.md) §13 · memory `feedback_ai_tell_is_surface_signal_not_decoration`.
+> ★2026-09-30 **0821 "허브 무접촉 · 메뉴 slate-950" 판정은 AI 존 대개편(D95)으로 대체됐다** — Harold 확정 목업 1안(남색 명령 띠 + 밝은 작업대 + 흰 명령 카드)을
+> 허브와 메뉴 24개가 같은 틀로 쓴다. 불변식 = `backend/src/utils/__tests__/zone-surface-invariants.test.ts`(옛 operator-surface-invariants 폐기).
+> 설계·결정 D1~D12 = [AI 존 대개편 설계서](../../docs/2026-09-30-ai-zone-redesign-design.md) · 0821 경위 = [AI Operator 표면 개편](../../docs/2026-08-21-ai-operator-surface-design.md) §13.
 
 ---
 

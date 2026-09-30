@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { goBackOr } from '../lib/scroll-restoration';
-import { AlertCircle, ArrowLeft, CheckCircle2, Layers, Loader2, RefreshCw, XCircle, Zap } from 'lucide-react';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { AlertCircle, CheckCircle2, Layers, Loader2, RefreshCw, XCircle, Zap } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 
 // ★ D181 (2026-05-19): Anthropic Batch API 모니터링 페이지
@@ -32,7 +31,6 @@ const STATUS_META: Record<BatchStatus, { label: string; cls: string; icon: typeo
 };
 
 export default function AiBatchesPage() {
-  const navigate = useNavigate();
   const toast = useToast();
   const [batches, setBatches] = useState<BatchJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,25 +83,21 @@ export default function AiBatchesPage() {
   const totalSucceeded = batches.reduce((sum, b) => sum + b.succeededCount, 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-violet-50">
-      <div className="bg-white border-b">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <Layers className="w-5 h-5 text-violet-600" />
-          <h1 className="text-lg font-bold text-gray-800">AI Batch (50% 비용 절감)</h1>
-          <span className="text-xs bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full font-medium">실험실</span>
-          <div className="ml-auto">
-            <button onClick={load} className="text-xs text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              새로고침
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto px-6 py-6 space-y-4">
+    <ZoneFrame
+      moduleId="ai-memory"
+      sub="AI Batch"
+      command={{
+        stats: !loading && batches.length > 0 ? [
+          { label: '누적 batch', value: `${batches.length}건` },
+          { label: '누적 요청', value: `${totalRequests.toLocaleString()}건` },
+          { label: '성공률', value: `${totalRequests > 0 ? ((totalSucceeded / totalRequests) * 100).toFixed(1) : 0}%` },
+        ] : [{ label: '누적 batch', value: loading ? '—' : '0건' }],
+        checks: [{ label: '대량 AI 호출 50% 비용 절감' }],
+        stamp: { text: '다시 읽기', onRefresh: load, loading },
+      }}
+    >
+      <div className="space-y-4">
+<div className="mb-3 inline-flex items-center gap-1.5 text-[12px] text-slate-500"><span className="text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-medium border border-violet-200">실험실</span>AI 자동 마케팅 실행 시 자동으로 batch 처리됩니다</div>
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
@@ -111,26 +105,6 @@ export default function AiBatchesPage() {
             24시간 SLA (대부분 1시간 이내 완료). AI 자동 마케팅 실행 시 자동 사용됩니다.
           </div>
         </div>
-
-        {/* 통계 카드 */}
-        {!loading && batches.length > 0 && (
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-white border rounded-xl p-4">
-              <div className="text-xs text-gray-500 mb-1">누적 batch</div>
-              <div className="text-2xl font-bold text-gray-800">{batches.length}건</div>
-            </div>
-            <div className="bg-white border rounded-xl p-4">
-              <div className="text-xs text-gray-500 mb-1">누적 요청</div>
-              <div className="text-2xl font-bold text-violet-600">{totalRequests.toLocaleString()}건</div>
-            </div>
-            <div className="bg-white border rounded-xl p-4">
-              <div className="text-xs text-gray-500 mb-1">성공률</div>
-              <div className="text-2xl font-bold text-emerald-600">
-                {totalRequests > 0 ? ((totalSucceeded / totalRequests) * 100).toFixed(1) : 0}%
-              </div>
-            </div>
-          </div>
-        )}
 
         {error && <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-700">{error}</div>}
 
@@ -178,7 +152,7 @@ export default function AiBatchesPage() {
                   <button
                     onClick={() => handlePoll(b.batchId)}
                     disabled={pollingId === b.batchId}
-                    className="text-xs bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded flex items-center gap-1 disabled:opacity-40"
+                    className="text-xs border border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-40"
                   >
                     <Zap className="w-3 h-3" />
                     {pollingId === b.batchId ? 'poll 중...' : '상태 갱신'}
@@ -212,6 +186,6 @@ export default function AiBatchesPage() {
           );
         })}
       </div>
-    </div>
+    </ZoneFrame>
   );
 }

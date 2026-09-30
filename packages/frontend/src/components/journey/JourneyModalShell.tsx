@@ -12,6 +12,7 @@
  *
  * 모양(헤더·본문·푸터)은 각 모달이 그린다 — 껍데기는 동작만 가진다.
  */
+import { useLightSurface } from '../zone/surface-tone';
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -42,6 +43,7 @@ export default function JourneyModalShell({
   zIndexClassName = 'z-[60]',
   disableDismiss = false,
 }: Props) {
+  const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const panelRef = useRef<HTMLDivElement | null>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
@@ -122,7 +124,7 @@ export default function JourneyModalShell({
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className={`flex max-h-[92vh] flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-slate-900 shadow-2xl outline-none md:rounded-2xl ${panelClassName}`}
+        className={light ? `flex max-h-[92vh] flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl outline-none md:rounded-2xl ${panelClassName}` : `flex max-h-[92vh] flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-slate-900 shadow-2xl outline-none md:rounded-2xl ${panelClassName}`}
       >
         {children}
       </div>

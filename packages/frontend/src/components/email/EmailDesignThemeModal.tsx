@@ -20,16 +20,16 @@ export default function EmailDesignThemeModal({
   useEffect(() => { ensureSelfHostFontsLoaded(); }, []);
   return (
     <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden">
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-white/10">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shrink-0">
             <Palette className="w-4.5 h-4.5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold text-white">디자인 테마</div>
-            <div className="text-[11px] text-white/50">색·서체·타이포 스케일·섹션 리듬을 한 번에 바꿉니다. 문안과 블록 구성은 그대로예요.</div>
+            <div className="text-sm font-bold text-slate-900">디자인 테마</div>
+            <div className="text-[11px] text-slate-500">색·서체·타이포 스케일·섹션 리듬을 한 번에 바꿉니다. 문안과 블록 구성은 그대로예요.</div>
           </div>
-          <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 shrink-0" aria-label="닫기">
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100 shrink-0" aria-label="닫기">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -43,7 +43,7 @@ export default function EmailDesignThemeModal({
                 <button
                   key={t.id}
                   onClick={() => { onApply(applyEmailTheme(current, t)); onClose(); }}
-                  className={`text-left rounded-2xl overflow-hidden border transition-all ${active ? 'border-violet-400/70 ring-1 ring-violet-400/40' : 'border-white/10 hover:border-violet-400/40'}`}
+                  className={`text-left rounded-2xl overflow-hidden border transition-all ${active ? 'border-violet-300 ring-1 ring-violet-300' : 'border-slate-200 hover:border-violet-300'}`}
                 >
                   {/* 미리보기 스트립 — 테마 배경 + 서체 샘플 + 스와치 */}
                   <div style={{ background: t.design.palette?.background || '#fff' }} className="px-4 pt-3.5 pb-3 border-b border-black/5">
@@ -60,16 +60,16 @@ export default function EmailDesignThemeModal({
                       ))}
                     </div>
                   </div>
-                  <div className="px-4 py-3 bg-white/5">
+                  <div className="px-4 py-3 bg-white">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[13px] font-bold text-white">{t.name}</span>
+                      <span className="text-[13px] font-bold text-slate-900">{t.name}</span>
                       {active && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 rounded-full">
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-1.5 py-0.5 rounded-full">
                           <Check className="w-2.5 h-2.5" /> 적용됨
                         </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-white/50 mt-1 leading-relaxed">{t.description}</div>
+                    <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">{t.description}</div>
                   </div>
                 </button>
               );
@@ -78,9 +78,9 @@ export default function EmailDesignThemeModal({
           {/* ★ 2026-09-04 포인트 장식(남지현 접수) — 테마가 함께 싣는 장식을 따로 고른다.
               렌더러는 이 값을 이미 읽고 있었고 고를 입구만 없어서, 번호를 끄려면 테마를 갈아타야 했다.
               테마를 다시 고르면 그 테마의 장식으로 덮인다(테마 = 룩 한 벌) — 아래 안내 한 줄로 알린다. */}
-          <div className="mt-4 pt-3.5 border-t border-white/10">
-            <div className="text-[11px] font-semibold text-white/70">포인트 장식</div>
-            <div className="text-[10px] text-white/45 mt-1 leading-relaxed">
+          <div className="mt-4 pt-3.5 border-t border-slate-200">
+            <div className="text-[11px] font-semibold text-slate-600">포인트 장식</div>
+            <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">
               제목 위에 붙는 작은 표식이에요. 번호를 고르면 블록 순번(01·02…)이 붙습니다. 테마를 다시 고르면 그 테마의 장식으로 바뀌어요.
             </div>
             <div className="flex flex-wrap gap-1.5 mt-2.5">
@@ -94,8 +94,8 @@ export default function EmailDesignThemeModal({
                     onClick={() => onApply(applyEmailMotif(current, o.value))}
                     className={`px-3 h-8 text-[11px] rounded-lg border transition-colors ${
                       on
-                        ? 'bg-violet-500/40 border-violet-400/60 text-white font-bold'
-                        : 'bg-white/5 border-white/10 text-white/65 hover:bg-white/10'
+                        ? 'bg-violet-200 border-violet-300 text-slate-900 font-bold'
+                        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
                     }`}
                   >
                     {o.label}
@@ -103,19 +103,19 @@ export default function EmailDesignThemeModal({
                 );
               })}
             </div>
-            <div className="text-[10px] text-white/35 mt-2 leading-relaxed">
+            <div className="text-[10px] text-slate-400 mt-2 leading-relaxed">
               블록 하나만 빼려면 그 블록의 편집 패널에서 포인트 장식을 숨김으로 바꾸세요.
             </div>
           </div>
 
           <div className="mt-3 flex items-center justify-between gap-3">
-            <div className="text-[10px] text-white/35 leading-relaxed">
+            <div className="text-[10px] text-slate-400 leading-relaxed">
               적용 후에도 블록별 구도·배경면·강조색은 편집 패널에서 개별 조정할 수 있어요. 다크 테마는 수신함에서 어두운 발송물로 보입니다.
             </div>
             {current && (
               <button
                 onClick={() => { onReset(); onClose(); }}
-                className="inline-flex items-center gap-1.5 shrink-0 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:bg-white/10"
+                className="inline-flex items-center gap-1.5 shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
                 title="테마를 지우고 기본 룩(브랜드 색)으로 돌아갑니다"
               >
                 <RotateCcw className="w-3 h-3" /> 기본 룩

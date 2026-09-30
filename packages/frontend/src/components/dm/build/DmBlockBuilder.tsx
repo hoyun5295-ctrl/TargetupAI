@@ -13,6 +13,8 @@ import BlockEditModal from './BlockEditModal';
 import CatalogPageModal, { CATALOG_BLOCKS, type CatalogTemplateKey } from './CatalogPageModal';
 import type { Section } from '../../../utils/dm-section-defaults';
 import { useMediaQuery } from '../../../hooks/useMediaQuery';
+import { MK_BACK, MK_BTN_PRIMARY, MK_HEADER, MK_HEADER_ROW, MK_HEAD_BTN, MK_PAGE } from '../../../utils/make-ui';
+import { SurfaceToneProvider } from '../../zone/surface-tone';
 
 const EFFECTS: Array<{ k: 'slide' | 'flip' | 'fade'; n: string; d: string }> = [
   { k: 'slide', n: '밀어내기', d: '손가락을 따라 밀림 (기본)' },
@@ -111,18 +113,21 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      <header className="sticky top-0 z-30 flex items-center gap-3 px-6 py-3 bg-slate-950/85 backdrop-blur border-b border-white/10">
-        <button onClick={onBack} className="w-9 h-9 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10" aria-label="뒤로">←</button>
+    // ★ 2026-09-30 AI 존 대개편: 조립 화면 = 밝은 작업대 + 남색 편집기 머리(DM·이메일·인앱 편집기와 같은 머리 · 값은 make-ui 소유)
+    <SurfaceToneProvider tone="light">
+    <div className={MK_PAGE}>
+      <header className={MK_HEADER}>
+        <div className={MK_HEADER_ROW}>
+        <button onClick={onBack} className={MK_BACK} aria-label="뒤로">←</button>
         <div className="min-w-0">
-          <div className="text-[15px] font-extrabold">블록으로 만들기</div>
-          <div className="text-[11px] text-white/45">블록을 누르면 필요한 것만 물어봐요. 저장하면 바로 쌓입니다</div>
+          <div className="text-[15px] font-extrabold text-white">블록으로 만들기</div>
+          <div className="text-[11px] text-slate-400 hidden sm:block truncate">블록을 누르면 필요한 것만 물어봐요. 저장하면 바로 쌓입니다</div>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {onBlankCanvas && (
             <button
               onClick={onBlankCanvas}
-              className="h-9 px-3 rounded-[10px] border border-white/12 bg-transparent text-[12.5px] font-bold text-white/60 hover:text-white hover:bg-white/10"
+              className={MK_HEAD_BTN}
               title="블록 대신 빈 캔버스에서 섹션을 직접 추가해요"
             >
               빈 캔버스로
@@ -131,53 +136,54 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
           <button
             onClick={() => void save({ silent: false })}
             disabled={isSaving}
-            className="h-9 px-3 rounded-[10px] border border-white/14 bg-white/5 text-[12.5px] font-bold hover:bg-white/10 disabled:opacity-40"
+            className={MK_HEAD_BTN}
           >
             {isSaving ? '저장 중...' : '임시저장'}
           </button>
           <button
             onClick={onDone}
             disabled={sections.length === 0}
-            className="h-9 px-4 rounded-[10px] bg-gradient-to-r from-violet-500 to-fuchsia-500 text-[13px] font-extrabold disabled:opacity-40"
+            className={`${MK_BTN_PRIMARY} !h-9`}
           >
             완성하고 편집기로
           </button>
+        </div>
         </div>
       </header>
 
       <div className={`max-w-[1320px] mx-auto px-6 py-5 grid grid-cols-1 ${dockedEditing ? 'lg:grid-cols-[250px_minmax(0,1fr)_400px]' : 'lg:grid-cols-[250px_minmax(0,1fr)_300px]'} gap-4 items-start`}>
         {/* 왼쪽 — 블록 팔레트 */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-          <div className="text-[12px] text-white/70 mb-2 font-bold">블록 고르기</div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+          <div className="text-[12px] text-slate-600 mb-2 font-bold">블록 고르기</div>
           {DM_BLOCK_GROUPS.map((g) => (
             <div key={g}>
-              <div className="text-[10.5px] text-white/35 font-bold mt-3 mb-1.5">{g}</div>
+              <div className="text-[10.5px] text-slate-400 font-bold mt-3 mb-1.5">{g}</div>
               {DM_BLOCKS.filter((b) => b.group === g).map((b) => (
                 <button
                   key={b.key}
                   onClick={() => addBlock(b.key)}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 mb-1.5 rounded-[10px] border border-white/[0.09] bg-white/[0.03] text-left hover:border-violet-400/60 hover:bg-violet-500/10 transition-colors"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 mb-1.5 rounded-[10px] border border-slate-200 bg-white text-left hover:border-violet-300 hover:bg-violet-50 transition-colors"
                 >
-                  <span className="w-7 h-7 rounded-lg bg-violet-500/20 flex items-center justify-center text-[14px] shrink-0">{b.icon}</span>
+                  <span className="w-7 h-7 rounded-lg bg-violet-100 flex items-center justify-center text-[14px] shrink-0">{b.icon}</span>
                   <span className="min-w-0">
                     <span className="block text-[12.5px] font-bold">{b.label}</span>
-                    <span className="block text-[10.5px] text-white/45">{b.desc}</span>
+                    <span className="block text-[10.5px] text-slate-400">{b.desc}</span>
                   </span>
                 </button>
               ))}
             </div>
           ))}
-          <div className="text-[10.5px] text-white/35 font-bold mt-3 mb-1.5">카탈로그 쪽</div>
+          <div className="text-[10.5px] text-slate-400 font-bold mt-3 mb-1.5">카탈로그 쪽</div>
           {CATALOG_BLOCKS.map((b) => (
             <button
               key={b.key}
               onClick={() => setCatalogAt(b.key)}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 mb-1.5 rounded-[10px] border border-white/[0.09] bg-white/[0.03] text-left hover:border-violet-400/60 hover:bg-violet-500/10 transition-colors"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 mb-1.5 rounded-[10px] border border-slate-200 bg-white text-left hover:border-violet-300 hover:bg-violet-50 transition-colors"
             >
-              <span className="w-7 h-7 rounded-lg bg-fuchsia-500/20 flex items-center justify-center text-[14px] shrink-0">{b.icon}</span>
+              <span className="w-7 h-7 rounded-lg bg-fuchsia-100 flex items-center justify-center text-[14px] shrink-0">{b.icon}</span>
               <span className="min-w-0">
                 <span className="block text-[12.5px] font-bold">{b.label}</span>
-                <span className="block text-[10.5px] text-white/45">{b.desc}</span>
+                <span className="block text-[10.5px] text-slate-400">{b.desc}</span>
               </span>
             </button>
           ))}
@@ -191,9 +197,9 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
                 <button
                   key={s.key}
                   onClick={() => addSet(s.blocks)}
-                  className="h-10 px-3.5 rounded-[11px] border border-violet-400/35 bg-violet-500/12 text-[12.5px] font-bold hover:bg-violet-500/20"
+                  className="h-10 px-3.5 rounded-[11px] border border-violet-300 bg-violet-50 text-[12.5px] font-bold hover:bg-violet-100"
                 >
-                  ⚡ {s.label} <span className="text-[10.5px] font-medium text-white/50 ml-1">{s.desc}</span>
+                  ⚡ {s.label} <span className="text-[10.5px] font-medium text-slate-500 ml-1">{s.desc}</span>
                 </button>
               ))}
             </div>
@@ -211,10 +217,10 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
             onUpdate={(patch) => { if (editingSection) updateSectionProps(editingSection.id, patch as any); }}
           />
         ) : (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-          <div className="text-[12px] text-white/70 mb-2 font-bold">쌓인 블록 {sections.length}개</div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+          <div className="text-[12px] text-slate-600 mb-2 font-bold">쌓인 블록 {sections.length}개</div>
           {sections.length === 0 ? (
-            <div className="text-[11.5px] text-white/40 leading-relaxed py-3">
+            <div className="text-[11.5px] text-slate-400 leading-relaxed py-3">
               왼쪽에서 블록을 눌러 쌓아보세요. 위의 시작 세트를 누르면 서너 개가 한 번에 올라갑니다.
             </div>
           ) : (
@@ -226,40 +232,40 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
                   <div
                     key={s.id}
                     onClick={() => selectSection(s.id)}
-                    className={`flex items-center gap-2 px-2.5 py-2 rounded-[10px] border text-[12px] cursor-pointer ${selectedSectionId === s.id ? 'border-violet-400/70 bg-violet-500/12' : 'border-white/[0.09] bg-white/[0.03]'}`}
+                    className={`flex items-center gap-2 px-2.5 py-2 rounded-[10px] border text-[12px] cursor-pointer ${selectedSectionId === s.id ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-white'}`}
                   >
                     <span className="text-[13px]">{def?.icon || '🧩'}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block font-bold truncate">{def?.label || s.type}</span>
-                      {!ready && <span className="block text-[10.5px] text-amber-200/90">{def?.need} 필요</span>}
+                      {!ready && <span className="block text-[10.5px] text-amber-800">{def?.need} 필요</span>}
                     </span>
-                    <button onClick={(e) => { e.stopPropagation(); moveSection(s.id, 'up'); }} disabled={i === 0} className="w-6 h-6 rounded border border-white/12 bg-white/5 disabled:opacity-30" aria-label="위로">↑</button>
-                    <button onClick={(e) => { e.stopPropagation(); moveSection(s.id, 'down'); }} disabled={i === sections.length - 1} className="w-6 h-6 rounded border border-white/12 bg-white/5 disabled:opacity-30" aria-label="아래로">↓</button>
-                    <button onClick={(e) => { e.stopPropagation(); setEditing(s.id); }} className="w-6 h-6 rounded border border-white/12 bg-white/5" aria-label="수정">✎</button>
-                    <button onClick={(e) => { e.stopPropagation(); removeSection(s.id); }} className="w-6 h-6 rounded border border-rose-400/30 bg-rose-500/10 text-rose-200" aria-label="삭제">✕</button>
+                    <button onClick={(e) => { e.stopPropagation(); moveSection(s.id, 'up'); }} disabled={i === 0} className="w-6 h-6 rounded border border-slate-200 bg-white disabled:opacity-30" aria-label="위로">↑</button>
+                    <button onClick={(e) => { e.stopPropagation(); moveSection(s.id, 'down'); }} disabled={i === sections.length - 1} className="w-6 h-6 rounded border border-slate-200 bg-white disabled:opacity-30" aria-label="아래로">↓</button>
+                    <button onClick={(e) => { e.stopPropagation(); setEditing(s.id); }} className="w-6 h-6 rounded border border-slate-200 bg-white" aria-label="수정">✎</button>
+                    <button onClick={(e) => { e.stopPropagation(); removeSection(s.id); }} className="w-6 h-6 rounded border border-rose-200 bg-rose-50 text-rose-800" aria-label="삭제">✕</button>
                   </div>
                 );
               })}
             </div>
           )}
 
-          <div className="flex items-center gap-2 px-2.5 py-2 rounded-[10px] border border-white/[0.09] bg-white/[0.03] text-[12px] mb-3">
+          <div className="flex items-center gap-2 px-2.5 py-2 rounded-[10px] border border-slate-200 bg-white text-[12px] mb-3">
             내용 채울 블록
-            <span className={`ml-auto font-bold ${todo ? 'text-amber-200' : 'text-emerald-300'}`}>{todo ? `${todo}개` : '없음'}</span>
+            <span className={`ml-auto font-bold ${todo ? 'text-amber-800' : 'text-emerald-700'}`}>{todo ? `${todo}개` : '없음'}</span>
           </div>
 
           {layoutMode === 'slides' && (
             <>
-              <div className="text-[12px] text-white/70 mb-2 font-bold">넘김 효과</div>
+              <div className="text-[12px] text-slate-600 mb-2 font-bold">넘김 효과</div>
               <div className="flex flex-col gap-1.5">
                 {EFFECTS.map((e) => (
                   <button
                     key={e.k}
                     onClick={() => setPageEffect(e.k)}
-                    className={`px-2.5 py-2 rounded-[10px] border text-left text-[12px] font-bold ${pageEffect === e.k ? 'border-violet-400/70 bg-violet-500/15' : 'border-white/[0.09] bg-white/[0.03]'}`}
+                    className={`px-2.5 py-2 rounded-[10px] border text-left text-[12px] font-bold ${pageEffect === e.k ? 'border-violet-300 bg-violet-100' : 'border-slate-200 bg-white'}`}
                   >
                     {e.n}
-                    <span className="block text-[10.5px] font-medium text-white/45 mt-0.5">{e.d}</span>
+                    <span className="block text-[10.5px] font-medium text-slate-400 mt-0.5">{e.d}</span>
                   </button>
                 ))}
               </div>
@@ -285,5 +291,6 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
         onUpdate={(patch) => { if (editingSection) updateSectionProps(editingSection.id, patch as any); }}
       />
     </div>
+    </SurfaceToneProvider>
   );
 }

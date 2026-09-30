@@ -1,5 +1,6 @@
-import { OUI_BACK, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import ZoneEmphasis from '../components/zone/ZoneEmphasis';
+import { CalendarRange } from 'lucide-react';
 /**
  * MarketingPlannerPage.tsx — 마케팅 플래너 (★ 2026-08-12 Phase 1 · 설계서 = docs/2026-08-12-ax-marketing-planner-design.md)
  *
@@ -59,20 +60,20 @@ interface TouchpointDetail {
 
 const ANCHOR_LABEL: Record<Anchor, string> = { start: '행사 시작일', end: '행사 종료일', before_start: '시작 전 사전 안내' };
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
-  draft: { label: '작성 중', cls: 'bg-white/10 text-white/60' },
-  briefed: { label: '브리핑 대기', cls: 'bg-amber-500/20 text-amber-200' },
-  approved: { label: '승인됨', cls: 'bg-emerald-500/20 text-emerald-200' },
+  draft: { label: '작성 중', cls: 'bg-slate-100 text-slate-500' },
+  briefed: { label: '브리핑 대기', cls: 'bg-amber-100 text-amber-800' },
+  approved: { label: '승인됨', cls: 'bg-emerald-100 text-emerald-800' },
 };
 /** 터치포인트 실행 상태 — 예정 패널·상세가 같은 라벨을 쓴다(두 벌 금지). */
 const TP_STATUS: Record<string, { label: string; cls: string }> = {
-  planned: { label: '실행 예정', cls: 'bg-white/10 text-white/60 border-white/15' },
-  ready: { label: '준비 완료', cls: 'bg-sky-500/15 text-sky-200 border-sky-400/25' },
-  producing: { label: '제작 중', cls: 'bg-violet-500/15 text-violet-200 border-violet-400/25' },
-  scheduled: { label: '발송 예약', cls: 'bg-sky-500/15 text-sky-200 border-sky-400/25' },
-  sent: { label: '발송 완료', cls: 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25' },
-  skipped: { label: '생략', cls: 'bg-white/10 text-white/45 border-white/15' },
-  hold_credit: { label: '보류 (크레딧)', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
-  locked: { label: '보류', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
+  planned: { label: '실행 예정', cls: 'bg-slate-100 text-slate-500 border-slate-300' },
+  ready: { label: '준비 완료', cls: 'bg-sky-100 text-sky-800 border-sky-200' },
+  producing: { label: '제작 중', cls: 'bg-violet-100 text-violet-800 border-violet-200' },
+  scheduled: { label: '발송 예약', cls: 'bg-sky-100 text-sky-800 border-sky-200' },
+  sent: { label: '발송 완료', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  skipped: { label: '생략', cls: 'bg-slate-100 text-slate-400 border-slate-300' },
+  hold_credit: { label: '보류 (크레딧)', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  locked: { label: '보류', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
 };
 const CHANNEL_ICON: Record<Channel, typeof MailOpen> = {
   sms: Smartphone, alimtalk: Smartphone, email: MailOpen, dm: Smartphone, inapp: Smartphone,
@@ -425,117 +426,78 @@ export default function MarketingPlannerPage() {
 
   const monthEstTotal = events.reduce((s, e) => s + (e.estCreditsTotal || 0), 0);
 
+  // ★ 2026-09-30 AI 존 대개편(설계서 §4-3): 담당자 할 일(DM 완성 필요) 수 = 실행 예정 목록과 같은 판정(dmAction)
+  const dmTodo = schedule.filter(({ tp }) => tp.channel === 'dm' && tp.dm && !tp.carrierDone && DM_NEEDS_ACTION.has(tp.dm.stage) && tp.dm.editPath).length;
+
   return (
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-      {/* ── sticky 헤더 ───────────────────────────────────────────── */}
-      <div className={OUI_HEADER}>
-        <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="AI Operator로 돌아가기">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-violet-400 to-fuchsia-500`}>
-            <CalendarDays className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className={OUI_TITLE}>마케팅 플래너</h1>
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-fuchsia-500/25 text-fuchsia-200">NEW</span>
-            </div>
-            <p className={OUI_SUBTITLE}>한 달 행사를 담아 두면, 채널별 제작과 발송을 AI가 이어받습니다</p>
-          </div>
-          <button
-            onClick={() => navigate('/marketing-calendar')}
-            className="text-xs text-violet-200 border border-violet-400/30 hover:bg-violet-500/20 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
-          >
-            <Wand2 className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">AI 추천으로 채우기</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-5 space-y-4">
-        {/* 준비 안내 — 테이블 미생성(배포 직후) 상태를 숨기지 않는다 */}
-        {migrationPending && (
-          <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-            플래너 준비 작업이 진행 중입니다. 잠시 후 새로고침해 주세요.
-          </div>
-        )}
-
+    <ZoneFrame
+      moduleId="planner"
+      aux={{ label: '1년 설계', icon: CalendarRange, onClick: () => navigate('/marketing-calendar') }}
+      command={{
+        stats: [
+          { label: `${Number(month.slice(5))}월 행사`, value: `${events.length}건` },
+          { label: '실행 예정', value: schedule.length },
+          ...(monthEstTotal > 0 ? [{ label: '예상 제작', value: `${monthEstTotal.toLocaleString()}크레딧` }] : []),
+        ],
+        checks: dmTodo > 0 ? [{ label: `DM 완성 필요 ${dmTodo}` }] : [],
+        primary: { label: '행사 담기', icon: Plus, onClick: () => openCreate(), tone: 'indigo' },
+        stamp: { text: '다시 읽기', onRefresh: () => loadEvents(month), loading: false },
+      }}
+      blocks={migrationPending ? [{ text: '플래너 준비 작업이 진행 중입니다. 잠시 후 새로고침해 주세요.' }] : []}
+      emphasis={events.length > 0 && !migrationPending ? (
+        <ZoneEmphasis
+          kind="status"
+          tone={approval?.status === 'approved' ? 'emerald' : approval ? 'amber' : 'indigo'}
+          icon={approval?.status === 'approved' ? CheckCircle2 : ClipboardCheck}
+          title={approval?.status === 'approved'
+            ? '이번 달 대행이 시작되었습니다'
+            : approval
+              ? '결재 대기: 승인만 하면 대행이 시작됩니다'
+              : '이번 달 계획을 결재에 올리세요'}
+          meta={approval?.status === 'approved'
+            ? '계획대로 제작과 발송이 이어집니다. 소재 제작분은 각 제작 시점에 차감됩니다.'
+            : '승인 전에는 제작·발송·차감이 일어나지 않습니다.'}
+          right={(
+            <button
+              onClick={() => navigate(`/marketing-planner/brief/${month}`)}
+              className="h-9 px-4 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-bold transition-colors"
+            >
+              {approval?.status === 'approved' ? '브리핑 보기' : approval ? '승인하러 가기' : '브리핑 열기'}
+            </button>
+          )}
+        />
+      ) : null}
+    >
+      <div className="space-y-4">
         {/* ── 월 내비게이션 + 월 요약 ──────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1">
-            <button onClick={() => setMonth((m) => shiftMonth(m, -1))} className="p-2 rounded-lg hover:bg-white/10" aria-label="이전 달">
+          <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
+            <button onClick={() => setMonth((m) => shiftMonth(m, -1))} className="p-2 rounded-lg hover:bg-slate-100" aria-label="이전 달">
               <ChevronLeft className="w-4 h-4" />
             </button>
             <span className="px-2 text-sm font-semibold tabular-nums">{month.replace('-', '년 ')}월</span>
-            <button onClick={() => setMonth((m) => shiftMonth(m, 1))} className="p-2 rounded-lg hover:bg-white/10" aria-label="다음 달">
+            <button onClick={() => setMonth((m) => shiftMonth(m, 1))} className="p-2 rounded-lg hover:bg-slate-100" aria-label="다음 달">
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
           {month !== todayMonth() && (
-            <button onClick={() => setMonth(todayMonth())} className="text-xs px-2.5 py-1.5 rounded-lg border border-white/15 text-white/60 hover:bg-white/10 transition-colors">
+            <button onClick={() => setMonth(todayMonth())} className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-100 transition-colors">
               이번 달
             </button>
           )}
-          <div className="text-xs text-white/50">
-            행사 <b className="text-white/80">{events.length}건</b>
-            {monthEstTotal > 0 && <> · 예상 제작 크레딧 <b className="text-violet-200 tabular-nums">{monthEstTotal.toLocaleString()}</b></>}
-          </div>
-          <button
-            onClick={() => openCreate()}
-            className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-sm font-semibold hover:opacity-90 transition-opacity"
-          >
-            <Plus className="w-4 h-4" /> 행사 담기
-          </button>
         </div>
-
-        {/* ── 결재 배너 (★ Phase 2) — 문자 링크 말고도 화면에서 결재로 갈 수 있는 두 번째 경로 ── */}
-        {events.length > 0 && !migrationPending && (
-          <div className={`rounded-2xl border px-4 md:px-5 py-3.5 flex flex-wrap items-center gap-3 ${
-            approval?.status === 'approved'
-              ? 'border-emerald-400/25 bg-emerald-500/[0.08]'
-              : approval
-                ? 'border-amber-400/25 bg-amber-500/[0.08]'
-                : 'border-violet-400/25 bg-gradient-to-r from-violet-500/[0.12] to-fuchsia-500/[0.08]'
-          }`}>
-            {approval?.status === 'approved'
-              ? <CheckCircle2 className="w-5 h-5 text-emerald-300 flex-shrink-0" />
-              : <ClipboardCheck className="w-5 h-5 text-violet-300 flex-shrink-0" />}
-            <div className="flex-1 min-w-[12rem]">
-              <p className="text-sm font-semibold">
-                {approval?.status === 'approved'
-                  ? '이번 달 대행이 시작되었습니다'
-                  : approval
-                    ? '결재 대기: 승인만 하면 대행이 시작됩니다'
-                    : '이번 달 계획을 결재에 올리세요'}
-              </p>
-              <p className="text-xs text-white/55 mt-0.5">
-                {approval?.status === 'approved'
-                  ? '계획대로 제작과 발송이 이어집니다. 소재 제작분은 각 제작 시점에 차감됩니다.'
-                  : '승인 전에는 제작·발송·차감이 일어나지 않습니다.'}
-              </p>
-            </div>
-            <button
-              onClick={() => navigate(`/marketing-planner/brief/${month}`)}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-sm font-semibold hover:opacity-90 transition-opacity"
-            >
-              {approval?.status === 'approved' ? '브리핑 보기' : approval ? '승인하러 가기' : '브리핑 열기'}
-            </button>
-          </div>
-        )}
 
         {/* ── 좌: 캘린더 / 우: 실행 예정 ───────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
           {/* 캘린더 */}
-          <div className="lg:col-span-7 rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
-            <div className="grid grid-cols-7 border-b border-white/10 text-center text-[11px] font-medium">
+          <div className="lg:col-span-7 rounded-2xl border border-slate-200 bg-white overflow-hidden">
+            <div className="grid grid-cols-7 border-b border-slate-200 text-center text-[11px] font-medium">
               {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
-                <div key={d} className={`py-2 ${i === 0 ? 'text-rose-300/80' : i === 6 ? 'text-sky-300/80' : 'text-white/45'}`}>{d}</div>
+                <div key={d} className={`py-2 ${i === 0 ? 'text-rose-700' : i === 6 ? 'text-sky-700' : 'text-slate-400'}`}>{d}</div>
               ))}
             </div>
             {loading ? (
-              <div className="py-24 flex items-center justify-center text-white/40 text-sm">
+              <div className="py-24 flex items-center justify-center text-slate-400 text-sm">
                 <Loader2 className="w-4 h-4 animate-spin mr-2" /> 불러오는 중...
               </div>
             ) : (
@@ -550,30 +512,30 @@ export default function MarketingPlannerPage() {
                     <button
                       key={c.date}
                       onClick={() => onCellClick(c)}
-                      className={`relative min-h-[84px] md:min-h-[104px] p-1.5 text-left border-b border-r border-white/5 align-top transition-colors ${
-                        c.inMonth ? 'hover:bg-white/[0.06]' : 'bg-black/20 hover:bg-white/[0.03]'
+                      className={`relative min-h-[84px] md:min-h-[104px] p-1.5 text-left border-b border-r border-slate-100 align-top transition-colors ${
+                        c.inMonth ? 'hover:bg-white' : 'bg-slate-50 hover:bg-white'
                       }`}
                     >
                       <div className="flex items-baseline gap-1">
                         <span className={`text-[12px] tabular-nums font-medium ${
-                          !c.inMonth ? 'text-white/20'
+                          !c.inMonth ? 'text-slate-400'
                             : isToday ? 'text-white'
-                              : red ? 'text-rose-300' : dow === 6 ? 'text-sky-300/90' : 'text-white/70'
-                        } ${isToday ? 'inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-violet-500' : ''}`}>
+                              : red ? 'text-rose-700' : dow === 6 ? 'text-sky-700' : 'text-slate-600'
+                        } ${isToday ? 'inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-indigo-600' : ''}`}>
                           {Number(c.date.slice(8))}
                         </span>
                         {holiday && c.inMonth && (
-                          <span className="text-[9px] text-rose-300/80 truncate">{holiday.name}</span>
+                          <span className="text-[9px] text-rose-700 truncate">{holiday.name}</span>
                         )}
                       </div>
                       {c.inMonth && (
                         <div className="mt-1 space-y-1">
                           {dayEvents.slice(0, 3).map((ev) => (
-                            <div key={ev.id} className="truncate rounded px-1.5 py-0.5 text-[10px] font-medium bg-violet-500/25 text-violet-100 border border-violet-400/20">
+                            <div key={ev.id} className="truncate rounded px-1.5 py-0.5 text-[10px] font-medium bg-violet-100 text-violet-900 border border-violet-200">
                               {ev.title}
                             </div>
                           ))}
-                          {dayEvents.length > 3 && <div className="text-[9px] text-white/35 pl-1">+{dayEvents.length - 3}</div>}
+                          {dayEvents.length > 3 && <div className="text-[9px] text-slate-400 pl-1">+{dayEvents.length - 3}</div>}
                         </div>
                       )}
                     </button>
@@ -582,31 +544,31 @@ export default function MarketingPlannerPage() {
               </div>
             )}
             {!holidaysReady && (
-              <div className="px-4 py-2.5 border-t border-white/10 text-[11px] text-amber-200/70">
+              <div className="px-4 py-2.5 border-t border-slate-200 text-[11px] text-amber-800">
                 {month.slice(0, 4)}년 공휴일 정보가 아직 등록되지 않아 표시하지 않습니다. 확정된 뒤 반영됩니다.
               </div>
             )}
           </div>
 
           {/* 실행 예정 패널 */}
-          <div className="lg:col-span-5 rounded-2xl border border-white/10 bg-white/[0.03]">
-            <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+          <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white">
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
               <h2 className="text-sm font-semibold">실행 예정</h2>
-              <span className="text-[11px] text-white/40">{schedule.length}건</span>
-              <span className="ml-auto text-[11px] text-white/35">항목을 누르면 상세가 열립니다</span>
+              <span className="text-[11px] text-slate-400">{schedule.length}건</span>
+              <span className="ml-auto text-[11px] text-slate-400">항목을 누르면 상세가 열립니다</span>
             </div>
             {loading ? (
-              <div className="py-20 flex items-center justify-center text-white/40 text-sm">
+              <div className="py-20 flex items-center justify-center text-slate-400 text-sm">
                 <Loader2 className="w-4 h-4 animate-spin mr-2" /> 불러오는 중...
               </div>
             ) : schedule.length === 0 ? (
               <div className="py-16 px-6 text-center">
-                <Sparkles className="w-6 h-6 text-violet-300/50 mx-auto mb-2" />
-                <p className="text-sm text-white/60">이번 달 실행 예정이 없습니다</p>
-                <p className="text-xs text-white/35 mt-1">행사를 담으면 채널별 발송 일정이 여기에 순서대로 섭니다</p>
+                <Sparkles className="w-6 h-6 text-violet-700 mx-auto mb-2" />
+                <p className="text-sm text-slate-500">이번 달 실행 예정이 없습니다</p>
+                <p className="text-xs text-slate-400 mt-1">행사를 담으면 채널별 발송 일정이 여기에 순서대로 섭니다</p>
               </div>
             ) : (
-              <div className="divide-y divide-white/5 max-h-[720px] overflow-y-auto">
+              <div className="divide-y divide-slate-100 max-h-[720px] overflow-y-auto">
                 {schedule.map(({ ev, tp }, i) => {
                   const st = TP_STATUS[String(tp.status || 'planned')] || TP_STATUS.planned;
                   const arrived = !!tp.scheduledOn && tp.scheduledOn <= today;
@@ -616,60 +578,60 @@ export default function MarketingPlannerPage() {
                   const dmBadge = tp.channel === 'dm' && tp.dm ? dmBadgeOf(tp.dm.stage) : null;
                   const dmAction = tp.channel === 'dm' && tp.dm && !tp.carrierDone && DM_NEEDS_ACTION.has(tp.dm.stage) && tp.dm.editPath ? tp.dm.editPath : null;
                   return (
-                    <div key={tp.id || `${ev.id}-${i}`} className="hover:bg-white/[0.04] transition-colors">
+                    <div key={tp.id || `${ev.id}-${i}`} className="hover:bg-white transition-colors">
                       <button
                         onClick={() => openDetail(ev, tp)}
                         className="w-full text-left px-4 pt-3 pb-2"
                       >
                         <div className="flex items-center gap-2">
                           <span className={`text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded ${
-                            arrived ? 'bg-white/10 text-white/50' : 'bg-violet-500/20 text-violet-200'
+                            arrived ? 'bg-slate-100 text-slate-500' : 'bg-violet-100 text-violet-800'
                           }`}>
                             {tp.scheduledOn ? ddayLabel(tp.scheduledOn, today) : '-'}
                           </span>
-                          <Icon className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />
+                          <Icon className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                           <span className="text-sm font-medium truncate">{tp.label || tp.channel}</span>
                           <span className="ml-auto flex items-center gap-1 flex-shrink-0">
                             {dmBadge && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${dmBadge.cls}`}>{dmBadge.label}</span>}
                             <span className={`text-[10px] px-1.5 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
                           </span>
                         </div>
-                        <div className="mt-1 flex items-center gap-2 text-[11px] text-white/45">
+                        <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
                           <span className="truncate">{ev.title}</span>
                           <span className="tabular-nums flex-shrink-0">{tp.scheduledOn}</span>
                           {tp.timing?.audience === 'participants' && (
-                            <span className="text-[10px] px-1.5 rounded bg-sky-500/15 text-sky-200 flex-shrink-0">참여자</span>
+                            <span className="text-[10px] px-1.5 rounded bg-sky-100 text-sky-800 flex-shrink-0">참여자</span>
                           )}
                           {tp.carriedBySms && (
-                            <span className="text-[10px] px-1.5 rounded bg-violet-500/15 text-violet-200 flex-shrink-0">같은 날 문자에 링크로 실림</span>
+                            <span className="text-[10px] px-1.5 rounded bg-violet-100 text-violet-800 flex-shrink-0">같은 날 문자에 링크로 실림</span>
                           )}
                           {tp.carrierDone && (
-                            <span className="text-[10px] px-1.5 rounded bg-white/10 text-white/50 flex-shrink-0">같은 날 문자가 이미 끝나 실리지 않음</span>
+                            <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500 flex-shrink-0">같은 날 문자가 이미 끝나 실리지 않음</span>
                           )}
                           {tp.channel === 'sms' && tp.dmLinked && (
-                            <span className="text-[10px] px-1.5 rounded bg-violet-500/15 text-violet-200 flex-shrink-0">모바일 DM 링크 포함</span>
+                            <span className="text-[10px] px-1.5 rounded bg-violet-100 text-violet-800 flex-shrink-0">모바일 DM 링크 포함</span>
                           )}
                         </div>
                         {tp.lockReason && (
-                          <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-200/80">
+                          <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-800">
                             <PauseCircle className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
                             <span className="flex-1">{tp.lockReason}</span>
                           </div>
                         )}
                         {tp.dm && tp.dm.stage === 'incomplete' && tp.dm.residue && (
-                          <div className="mt-1.5 text-[11px] text-amber-200/80">남은 자리: {tp.dm.residue}</div>
+                          <div className="mt-1.5 text-[11px] text-amber-800">남은 자리: {tp.dm.residue}</div>
                         )}
                       </button>
                       {dmAction && tp.dm && (
                         <div className="px-4 pb-3 flex items-center gap-2">
-                          <span className="text-[11px] text-amber-100/80 flex-1">
+                          <span className="text-[11px] text-amber-900 flex-1">
                             {tp.dm.stage === 'stopped'
                               ? '발행이 중지돼 있어 재개 전에는 문자에 실리지 않습니다.'
                               : tp.carriedBySms ? '발행 전에는 같은 날 문자가 나가지 않습니다.' : '발행 전에는 이 문자가 나가지 않습니다.'}
                           </span>
                           <button
                             onClick={(e) => { e.stopPropagation(); navigate(dmAction); }}
-                            className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-50 hover:bg-amber-500/30 transition-colors"
+                            className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-amber-100 border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors"
                           >
                             <Smartphone className="w-3 h-3" /> {dmActionLabel(tp.dm.stage)}
                           </button>
@@ -687,20 +649,20 @@ export default function MarketingPlannerPage() {
         {events.length > 0 && (
           <div className="space-y-2">
             {events.map((ev) => (
-              <div key={ev.id} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+              <div key={ev.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold">{ev.title}</span>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${(STATUS_BADGE[ev.status] || STATUS_BADGE.draft).cls}`}>
                     {(STATUS_BADGE[ev.status] || STATUS_BADGE.draft).label}
                   </span>
-                  <span className="text-xs text-white/40 tabular-nums">{ev.startsOn} ~ {ev.endsOn}</span>
+                  <span className="text-xs text-slate-400 tabular-nums">{ev.startsOn} ~ {ev.endsOn}</span>
                   {ev.estCreditsTotal > 0 && (
-                    <span className="text-[11px] text-violet-200/80 tabular-nums">제작 예상 {ev.estCreditsTotal.toLocaleString()}크레딧</span>
+                    <span className="text-[11px] text-violet-800 tabular-nums">제작 예상 {ev.estCreditsTotal.toLocaleString()}크레딧</span>
                   )}
                   <span className="ml-auto flex gap-1.5">
-                    <button onClick={() => openEdit(ev)} className="text-xs px-2.5 py-1 rounded-lg border border-white/15 text-white/70 hover:bg-white/10">편집</button>
+                    <button onClick={() => openEdit(ev)} className="text-xs px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100">편집</button>
                     {ev.status === 'draft' && (
-                      <button onClick={() => removeEvent(ev)} className="p-1.5 rounded-lg text-white/40 hover:text-rose-300 hover:bg-rose-500/10" aria-label="삭제">
+                      <button onClick={() => removeEvent(ev)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-700 hover:bg-rose-50" aria-label="삭제">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     )}
@@ -712,14 +674,14 @@ export default function MarketingPlannerPage() {
         )}
 
         {!loading && events.length === 0 && !migrationPending && (
-          <div className="rounded-2xl border border-dashed border-white/10 py-14 text-center">
-            <Sparkles className="w-6 h-6 text-violet-300/50 mx-auto mb-2" />
-            <p className="text-sm text-white/60">이번 달 행사가 아직 없습니다</p>
-            <p className="text-xs text-white/35 mt-1">날짜를 누르거나 [행사 담기]로 시작하세요. 채널 제작·발송은 AI가 이어받습니다</p>
+          <div className="rounded-2xl border border-dashed border-slate-200 py-14 text-center">
+            <Sparkles className="w-6 h-6 text-violet-700 mx-auto mb-2" />
+            <p className="text-sm text-slate-500">이번 달 행사가 아직 없습니다</p>
+            <p className="text-xs text-slate-400 mt-1">날짜를 누르거나 [행사 담기]로 시작하세요. 채널 제작·발송은 AI가 이어받습니다</p>
           </div>
         )}
 
-        <p className="text-[10px] text-white/30 italic">
+        <p className="text-[10px] text-slate-400 italic">
           Data source: 행사·채널 구성은 저장 즉시 반영, 예상 크레딧은 소재 제작 기준이며 문자·알림톡은 실행 시 별도 과금됩니다.
           공휴일은 관보 확정분이고, 발송 결과·대상 수는 실제 발송 기록입니다. 월간 결재는 브리핑 화면에서 진행합니다.
           모바일 DM 단계는 발행 상태를 실시간으로 읽으며, 같은 날 같은 대상의 문자와 DM은 문자 1통(링크 포함)으로 나갑니다.
@@ -729,16 +691,16 @@ export default function MarketingPlannerPage() {
       {/* ── 터치포인트 상세 모달 (★ 2026-08-13(2)) ─────────────────── */}
       {detailOf && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={() => setDetailOf(null)}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-white/10 flex items-start gap-3 sticky top-0 bg-slate-900 z-10">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-200 flex items-start gap-3 sticky top-0 bg-white z-10">
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-bold truncate">{detailOf.ev.title}</h3>
-                <p className="text-[11px] text-white/45 mt-0.5">
+                <p className="text-[11px] text-slate-400 mt-0.5">
                   {detailOf.tp.label || detailOf.tp.channel} · {detailOf.tp.scheduledOn}
                   {detailOf.tp.timing?.anchor && <> · {ANCHOR_LABEL[detailOf.tp.timing.anchor]}</>}
                 </p>
               </div>
-              <button onClick={() => setDetailOf(null)} className="p-1.5 rounded-lg text-white/40 hover:bg-white/10" aria-label="닫기">
+              <button onClick={() => setDetailOf(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="닫기">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -752,29 +714,29 @@ export default function MarketingPlannerPage() {
                   <>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`text-[11px] px-2 py-1 rounded-lg border ${st.cls}`}>{st.label}</span>
-                      {!arrived && <span className="text-[11px] text-white/45">{ddayLabel(String(tp.scheduledOn), today)}에 실행됩니다</span>}
+                      {!arrived && <span className="text-[11px] text-slate-400">{ddayLabel(String(tp.scheduledOn), today)}에 실행됩니다</span>}
                       {tp.timing?.audience === 'participants' && (
-                        <span className="text-[11px] px-2 py-1 rounded-lg bg-sky-500/15 text-sky-200 border border-sky-400/25">행사 참여 신청자</span>
+                        <span className="text-[11px] px-2 py-1 rounded-lg bg-sky-100 text-sky-800 border border-sky-200">행사 참여 신청자</span>
                       )}
                     </div>
 
                     {tp.lockReason && (
-                      <div className="rounded-xl border border-amber-400/25 bg-amber-500/[0.08] px-3 py-2.5 flex items-start gap-2">
-                        <PauseCircle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-px" />
-                        <p className="text-[12px] text-amber-100/90">{tp.lockReason}</p>
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 flex items-start gap-2">
+                        <PauseCircle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-px" />
+                        <p className="text-[12px] text-amber-900">{tp.lockReason}</p>
                       </div>
                     )}
 
                     {/* 계획 — 도래 전에는 이것이 전부다(없는 실측을 지어내지 않는다) */}
-                    <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 space-y-1.5 text-[12px]">
-                      <div className="flex justify-between"><span className="text-white/45">행사 기간</span><span className="tabular-nums">{detailOf.ev.startsOn} ~ {detailOf.ev.endsOn}</span></div>
-                      <div className="flex justify-between"><span className="text-white/45">발송 예정일</span><span className="tabular-nums">{tp.scheduledOn}</span></div>
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 space-y-1.5 text-[12px]">
+                      <div className="flex justify-between"><span className="text-slate-400">행사 기간</span><span className="tabular-nums">{detailOf.ev.startsOn} ~ {detailOf.ev.endsOn}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">발송 예정일</span><span className="tabular-nums">{tp.scheduledOn}</span></div>
                       <div className="flex justify-between">
-                        <span className="text-white/45">제작 크레딧</span>
+                        <span className="text-slate-400">제작 크레딧</span>
                         <span className="tabular-nums">{tp.estCredits != null ? `${Number(tp.estCredits).toLocaleString()}크레딧` : '실행 시 과금'}</span>
                       </div>
                       {detailOf.ev.benefitText && (
-                        <div className="flex justify-between gap-3"><span className="text-white/45 flex-shrink-0">혜택</span><span className="text-right">{detailOf.ev.benefitText}</span></div>
+                        <div className="flex justify-between gap-3"><span className="text-slate-400 flex-shrink-0">혜택</span><span className="text-right">{detailOf.ev.benefitText}</span></div>
                       )}
                     </div>
 
@@ -784,24 +746,24 @@ export default function MarketingPlannerPage() {
                       const actionable = !tp.carrierDone && DM_NEEDS_ACTION.has(tp.dm.stage);
                       return (
                         <div className={`rounded-xl border px-4 py-3 space-y-2 ${
-                          actionable ? 'border-amber-400/30 bg-amber-500/[0.08]' : 'border-white/10 bg-white/[0.03]'
+                          actionable ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'
                         }`}>
                           <div className="flex items-center gap-2">
                             {badge && <span className={`text-[11px] px-2 py-1 rounded-lg border ${badge.cls}`}>{badge.label}</span>}
                             {tp.dm.url && (
-                              <a href={tp.dm.url} target="_blank" rel="noopener noreferrer" className="ml-auto text-[11px] text-violet-200 flex items-center gap-1 hover:underline">
+                              <a href={tp.dm.url} target="_blank" rel="noopener noreferrer" className="ml-auto text-[11px] text-violet-800 flex items-center gap-1 hover:underline">
                                 발행 페이지 <ExternalLink className="w-3 h-3" />
                               </a>
                             )}
                           </div>
-                          <p className="text-[12px] text-white/75">{describeDmStage(tp.dm, !!tp.carriedBySms, !!tp.carrierDone)}</p>
+                          <p className="text-[12px] text-slate-600">{describeDmStage(tp.dm, !!tp.carriedBySms, !!tp.carrierDone)}</p>
                           {tp.dm.editPath && !tp.carrierDone && (
                             <button
                               onClick={() => navigate(tp.dm!.editPath!)}
                               className={`w-full flex items-center justify-center gap-1.5 text-[12px] font-semibold px-3 py-2 rounded-lg transition-colors ${
                                 actionable
-                                  ? 'bg-amber-500/25 border border-amber-400/40 text-amber-50 hover:bg-amber-500/35'
-                                  : 'border border-white/15 text-white/70 hover:bg-white/10'
+                                  ? 'bg-amber-100 border border-amber-300 text-amber-900 hover:bg-amber-200'
+                                  : 'border border-slate-300 text-slate-600 hover:bg-slate-100'
                               }`}
                             >
                               <Smartphone className="w-3.5 h-3.5" /> {actionable ? dmActionLabel(tp.dm.stage) : 'DM 편집 열기'}
@@ -811,98 +773,98 @@ export default function MarketingPlannerPage() {
                       );
                     })()}
                     {tp.channel === 'sms' && tp.dmLinked && !arrived && (
-                      <p className="text-[11px] text-violet-200/80">
+                      <p className="text-[11px] text-violet-800">
                         같은 날의 모바일 DM 링크를 실어 문자 1통으로 보냅니다. DM이 발행돼야 이 문자가 나갑니다.
                       </p>
                     )}
 
                     {!arrived && (
-                      <p className="text-[11px] text-white/40">
+                      <p className="text-[11px] text-slate-400">
                         아직 도래하지 않은 일정입니다. 문자 문안은 발송 당일에 만들어지고, 소재는 승인 후 제작됩니다.
                       </p>
                     )}
 
                     {arrived && detailLoading && (
-                      <div className="py-8 flex items-center justify-center text-white/40 text-sm">
+                      <div className="py-8 flex items-center justify-center text-slate-400 text-sm">
                         <Loader2 className="w-4 h-4 animate-spin mr-2" /> 실행 내역을 불러오는 중...
                       </div>
                     )}
 
                     {arrived && !detailLoading && detail && (
                       <div className="space-y-3">
-                        <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 space-y-1.5 text-[12px]">
+                        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 space-y-1.5 text-[12px]">
                           {detail.sentAt && (
-                            <div className="flex justify-between"><span className="text-white/45">발송 시각</span><span className="tabular-nums">{new Date(detail.sentAt).toLocaleString('ko-KR')}</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">발송 시각</span><span className="tabular-nums">{new Date(detail.sentAt).toLocaleString('ko-KR')}</span></div>
                           )}
                           <div className="flex justify-between">
-                            <span className="text-white/45">대상</span>
+                            <span className="text-slate-400">대상</span>
                             <span className="tabular-nums">
                               {detail.sentCount != null ? `${detail.sentCount.toLocaleString()}명 발송` : detail.audienceCount != null ? `${detail.audienceCount.toLocaleString()}명` : '집계 없음'}
                             </span>
                           </div>
-                          {detail.audienceNote && <p className="text-[11px] text-white/40 pt-0.5">{detail.audienceNote}</p>}
+                          {detail.audienceNote && <p className="text-[11px] text-slate-400 pt-0.5">{detail.audienceNote}</p>}
                         </div>
 
                         {detail.message && (
                           <div>
-                            <p className="text-[11px] font-medium text-white/50 mb-1.5">실제 발송 문안</p>
-                            <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+                            <p className="text-[11px] font-medium text-slate-500 mb-1.5">실제 발송 문안</p>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                               {detail.message.subject && <p className="text-[12px] font-semibold mb-1">{detail.message.subject}</p>}
-                              <p className="text-[12px] text-white/75 whitespace-pre-wrap leading-relaxed">{detail.message.body}</p>
+                              <p className="text-[12px] text-slate-600 whitespace-pre-wrap leading-relaxed">{detail.message.body}</p>
                             </div>
                           </div>
                         )}
 
                         {detail.asset && (
                           <div>
-                            <p className="text-[11px] font-medium text-white/50 mb-1.5">발행된 소재</p>
+                            <p className="text-[11px] font-medium text-slate-500 mb-1.5">발행된 소재</p>
                             {detail.asset.kind === 'email' && detail.asset.html && (
                               <button
                                 onClick={() => setPreview({ title: '이메일 미리보기', html: String(detail.asset?.html || '') })}
-                                className="w-full flex items-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-left"
+                                className="w-full flex items-center gap-2 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-white transition-colors text-left"
                               >
-                                <MailOpen className="w-4 h-4 text-violet-300 flex-shrink-0" />
+                                <MailOpen className="w-4 h-4 text-violet-700 flex-shrink-0" />
                                 <span className="text-[12px] flex-1 truncate">{detail.asset.title || '이메일 소재'}</span>
-                                <span className="text-[11px] text-violet-200">미리보기</span>
+                                <span className="text-[11px] text-violet-800">미리보기</span>
                               </button>
                             )}
                             {detail.asset.kind === 'dm' && detail.asset.url && (
                               <a
                                 href={detail.asset.url} target="_blank" rel="noopener noreferrer"
-                                className="w-full flex items-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition-colors"
+                                className="w-full flex items-center gap-2 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-white transition-colors"
                               >
-                                <Smartphone className="w-4 h-4 text-violet-300 flex-shrink-0" />
+                                <Smartphone className="w-4 h-4 text-violet-700 flex-shrink-0" />
                                 <span className="text-[12px] flex-1 truncate">모바일 DM: {detail.asset.url}</span>
-                                <ExternalLink className="w-3.5 h-3.5 text-violet-200 flex-shrink-0" />
+                                <ExternalLink className="w-3.5 h-3.5 text-violet-800 flex-shrink-0" />
                               </a>
                             )}
                             {detail.asset.kind === 'dm' && !detail.asset.url && (
-                              <p className="text-[11px] text-white/45">
+                              <p className="text-[11px] text-slate-400">
                                 {detail.sentAt
                                   ? '발행이 확인되지 않아 문자에 실리지 않았습니다.'
                                   : '아직 발행 확인 전입니다. 지금 완성해 발행하면 오늘 문자에 실립니다.'}
                               </p>
                             )}
                             {detail.asset.kind === 'inapp' && (
-                              <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+                              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                                 {detail.asset.imageUrl && (
                                   <img src={detail.asset.imageUrl} alt="" className="w-full max-h-40 object-cover rounded-lg mb-2" />
                                 )}
                                 <p className="text-[12px] font-semibold">{detail.asset.title}</p>
-                                <p className="text-[12px] text-white/70 mt-1 whitespace-pre-wrap">{detail.asset.body}</p>
+                                <p className="text-[12px] text-slate-600 mt-1 whitespace-pre-wrap">{detail.asset.body}</p>
                               </div>
                             )}
                             {detail.asset.kind === 'alimtalk' && (
-                              <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
-                                {detail.asset.inspection && <p className="text-[11px] text-white/45 mb-1.5">검수 상태: {detail.asset.inspection}</p>}
-                                <p className="text-[12px] text-white/75 whitespace-pre-wrap leading-relaxed">{detail.asset.body}</p>
+                              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                {detail.asset.inspection && <p className="text-[11px] text-slate-400 mb-1.5">검수 상태: {detail.asset.inspection}</p>}
+                                <p className="text-[12px] text-slate-600 whitespace-pre-wrap leading-relaxed">{detail.asset.body}</p>
                               </div>
                             )}
                           </div>
                         )}
 
                         {!detail.message && !detail.asset && (
-                          <p className="text-[11px] text-white/40">이 항목의 발송 내역이 아직 없습니다.</p>
+                          <p className="text-[11px] text-slate-400">이 항목의 발송 내역이 아직 없습니다.</p>
                         )}
                       </div>
                     )}
@@ -911,11 +873,11 @@ export default function MarketingPlannerPage() {
               })()}
             </div>
 
-            <div className="px-5 py-4 border-t border-white/10 flex gap-2">
-              <button onClick={() => { const ev = detailOf.ev; setDetailOf(null); openEdit(ev); }} className="text-xs px-3 py-2 rounded-lg border border-white/15 text-white/70 hover:bg-white/10">
+            <div className="px-5 py-4 border-t border-slate-200 flex gap-2">
+              <button onClick={() => { const ev = detailOf.ev; setDetailOf(null); openEdit(ev); }} className="text-xs px-3 py-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100">
                 행사 편집
               </button>
-              <button onClick={() => navigate(`/marketing-planner/brief/${month}`)} className="ml-auto text-xs px-3 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 font-semibold hover:opacity-90">
+              <button onClick={() => navigate(`/marketing-planner/brief/${month}`)} className="text-white ml-auto text-xs px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 font-semibold">
                 브리핑에서 보기
               </button>
             </div>
@@ -926,10 +888,10 @@ export default function MarketingPlannerPage() {
       {/* 소재 미리보기 — 발행된 HTML을 그대로 띄운다(sandbox: 스크립트 차단) */}
       {preview && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70" onClick={() => setPreview(null)}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl h-[82vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl h-[82vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
               <h3 className="text-sm font-bold">{preview.title}</h3>
-              <button onClick={() => setPreview(null)} className="p-1.5 rounded-lg text-white/40 hover:bg-white/10" aria-label="닫기">
+              <button onClick={() => setPreview(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="닫기">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -941,58 +903,58 @@ export default function MarketingPlannerPage() {
       {/* ── 행사 기입 모달 ─────────────────────────────────────────── */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between sticky top-0 bg-slate-900 z-10">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
               <h3 className="text-sm font-bold">{editing ? '행사 편집' : '행사 담기'}</h3>
-              <button onClick={() => setModalOpen(false)} className="p-1.5 rounded-lg text-white/40 hover:bg-white/10" aria-label="닫기">
+              <button onClick={() => setModalOpen(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="닫기">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="p-5 space-y-4">
               <label className="block">
-                <span className="text-xs font-medium text-white/50">행사명</span>
+                <span className="text-xs font-medium text-slate-500">행사명</span>
                 <input
                   type="text" value={fTitle} onChange={(e) => setFTitle(e.target.value.slice(0, 120))}
                   placeholder="예: 가을 신상 위크"
-                  className="mt-1 w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none"
+                  className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none"
                 />
               </label>
 
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="text-xs font-medium text-white/50">시작일</span>
+                  <span className="text-xs font-medium text-slate-500">시작일</span>
                   <input type="date" value={fStart} onChange={(e) => setFStart(e.target.value)}
-                    className="mt-1 w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none [color-scheme:dark]" />
+                    className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
                 </label>
                 <label className="block">
-                  <span className="text-xs font-medium text-white/50">종료일</span>
+                  <span className="text-xs font-medium text-slate-500">종료일</span>
                   <input type="date" value={fEnd} onChange={(e) => setFEnd(e.target.value)}
-                    className="mt-1 w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none [color-scheme:dark]" />
+                    className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
                 </label>
               </div>
 
               <label className="block">
-                <span className="text-xs font-medium text-white/50">혜택 문구 <span className="text-white/30">(직접 입력, AI가 대신 만들지 않습니다)</span></span>
+                <span className="text-xs font-medium text-slate-500">혜택 문구 <span className="text-slate-400">(직접 입력, AI가 대신 만들지 않습니다)</span></span>
                 <input
                   type="text" value={fBenefit} onChange={(e) => setFBenefit(e.target.value.slice(0, 300))}
                   placeholder="예: 전 품목 신상 특가, 첫 구매 사은품"
-                  className="mt-1 w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none"
+                  className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none"
                 />
               </label>
 
               <label className="block">
-                <span className="text-xs font-medium text-white/50">행사 상품 <span className="text-white/30">(한 줄에 하나 · 선택)</span></span>
+                <span className="text-xs font-medium text-slate-500">행사 상품 <span className="text-slate-400">(한 줄에 하나 · 선택)</span></span>
                 <textarea
                   value={fProducts} onChange={(e) => setFProducts(e.target.value)} rows={2}
                   placeholder={'니트 가디건\n울 머플러'}
-                  className="mt-1 w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none resize-none"
+                  className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none resize-none"
                 />
               </label>
 
               {/* 채널 선택 — 가용성 잠금 + 시점 규칙 */}
               <div>
-                <span className="text-xs font-medium text-white/50">채널과 시점</span>
+                <span className="text-xs font-medium text-slate-500">채널과 시점</span>
                 <div className="mt-2 space-y-2">
                   {availability.map((a) => {
                     // 한 채널에 시점이 여럿일 수 있다 — 선택 여부는 "접점이 하나라도 있는가"다
@@ -1000,28 +962,28 @@ export default function MarketingPlannerPage() {
                     const selected = picked.length > 0;
                     const beforeTp = picked.find((t) => t.timing.anchor === 'before_start');
                     return (
-                      <div key={a.channel} className={`rounded-xl border px-3 py-2.5 ${selected ? 'border-violet-400/40 bg-violet-500/10' : 'border-white/10 bg-white/[0.03]'} ${!a.available ? 'opacity-60' : ''}`}>
+                      <div key={a.channel} className={`rounded-xl border px-3 py-2.5 ${selected ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-white'} ${!a.available ? 'opacity-60' : ''}`}>
                         <div className="flex items-center gap-2.5">
                           <button
                             type="button"
                             onClick={() => toggleChannel(a.channel)}
                             disabled={!a.available}
                             className={`w-4.5 h-4.5 w-[18px] h-[18px] rounded border flex items-center justify-center shrink-0 ${
-                              selected ? 'bg-violet-500 border-violet-400' : 'border-white/25'
+                              selected ? 'bg-violet-500 border-violet-400' : 'border-slate-300'
                             } ${!a.available ? 'cursor-not-allowed' : ''}`}
                             aria-label={a.label}
                           >
                             {selected && <span className="text-[10px] leading-none">✓</span>}
-                            {!a.available && <Lock className="w-2.5 h-2.5 text-white/40" />}
+                            {!a.available && <Lock className="w-2.5 h-2.5 text-slate-400" />}
                           </button>
                           <span className="text-sm">{a.label}</span>
-                          <span className="ml-auto text-[11px] text-white/40 tabular-nums">
-                            {picked.length > 1 && <span className="text-violet-200/80 mr-1.5">시점 {picked.length}회</span>}
+                          <span className="ml-auto text-[11px] text-slate-400 tabular-nums">
+                            {picked.length > 1 && <span className="text-violet-800 mr-1.5">시점 {picked.length}회</span>}
                             {a.estCredits != null ? `제작 ${a.estCredits}크레딧` : '실행 시 과금'}
                           </span>
                         </div>
                         {!a.available && a.reason && (
-                          <p className="mt-1.5 ml-[28px] text-[11px] text-amber-200/70">{a.reason}</p>
+                          <p className="mt-1.5 ml-[28px] text-[11px] text-amber-800">{a.reason}</p>
                         )}
                         {selected && (
                           <div className="mt-2 ml-[28px]">
@@ -1036,8 +998,8 @@ export default function MarketingPlannerPage() {
                                     aria-pressed={on}
                                     className={`text-[11px] px-2 py-1 rounded-lg border ${
                                       on
-                                        ? 'border-violet-400/60 bg-violet-500/25 text-violet-100'
-                                        : 'border-white/10 text-white/50 hover:bg-white/5'
+                                        ? 'border-violet-300 bg-violet-100 text-violet-900'
+                                        : 'border-slate-200 text-slate-500 hover:bg-white'
                                     }`}
                                   >
                                     {ANCHOR_LABEL[anchor]}
@@ -1045,19 +1007,19 @@ export default function MarketingPlannerPage() {
                                 );
                               })}
                               {beforeTp && (
-                                <span className="flex items-center gap-1 text-[11px] text-white/60">
+                                <span className="flex items-center gap-1 text-[11px] text-slate-500">
                                   시작
                                   <input
                                     type="number" min={1} max={30}
                                     value={beforeTp.timing.offsetDays || 5}
                                     onChange={(e) => setOffsetDays(a.channel, Math.max(1, Math.min(30, Number(e.target.value) || 5)))}
-                                    className="w-14 px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-center tabular-nums outline-none focus:ring-1 focus:ring-violet-500"
+                                    className="w-14 px-2 py-1 bg-white border border-slate-200 rounded-lg text-center tabular-nums outline-none focus:ring-1 focus:ring-violet-500"
                                   />
                                   일 전
                                 </span>
                               )}
                             </div>
-                            <p className="mt-1.5 text-[11px] text-white/40">
+                            <p className="mt-1.5 text-[11px] text-slate-400">
                               {picked.length > 1
                                 ? `고른 시점마다 따로 만들어 보냅니다. 지금 ${picked.length}회입니다.`
                                 : '시점을 여러 개 골라 시작과 종료에 나눠 보낼 수 있습니다.'}
@@ -1067,7 +1029,7 @@ export default function MarketingPlannerPage() {
                               const smsPicked = fTouchpoints.filter((t) => t.channel === 'sms');
                               const shared = picked.filter((t) => smsPicked.some((s) => sharesTiming(s.timing, t.timing))).length;
                               return (
-                                <p className="mt-1 text-[11px] text-violet-200/80">
+                                <p className="mt-1 text-[11px] text-violet-800">
                                   AI가 초안을 만들면 담당자가 사진과 문구를 채워 발행합니다.{' '}
                                   {smsPicked.length > 0 && shared > 0
                                     ? `문자와 같은 날(${shared}회)은 문자 1통에 링크로 함께 나갑니다. 발행 전에는 그 문자가 나가지 않습니다.`
@@ -1082,11 +1044,11 @@ export default function MarketingPlannerPage() {
                               const dmPicked = fTouchpoints.filter((t) => t.channel === 'dm');
                               const shared = picked.filter((t) => dmPicked.some((d) => sharesTiming(d.timing, t.timing))).length;
                               return shared > 0 ? (
-                                <p className="mt-1 text-[11px] text-violet-200/80">
+                                <p className="mt-1 text-[11px] text-violet-800">
                                   같은 날의 모바일 DM 링크를 실어 1통으로 보냅니다({shared}회). DM이 발행돼야 그 문자가 나갑니다.
                                 </p>
                               ) : dmPicked.length > 0 ? (
-                                <p className="mt-1 text-[11px] text-amber-200/80">
+                                <p className="mt-1 text-[11px] text-amber-800">
                                   모바일 DM과 다른 날이라 각각 나갑니다. 같은 날로 맞추면 문자 1통에 링크로 함께 나갑니다.
                                 </p>
                               ) : null;
@@ -1096,7 +1058,7 @@ export default function MarketingPlannerPage() {
                         {/* ★ 2026-08-13 대상 축 — 문자·DM만 고를 수 있다.
                             알림톡은 언제나 참여 신청자(정보성 안내)라 선택지가 없고, 이메일은 참여 접수의 입구다. */}
                         {selected && (a.channel === 'sms' || a.channel === 'dm') && (
-                          <label className="mt-2 ml-[28px] flex items-center gap-2 text-[11px] text-white/60 cursor-pointer">
+                          <label className="mt-2 ml-[28px] flex items-center gap-2 text-[11px] text-slate-500 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={picked[0]?.timing.audience === 'participants'}
@@ -1107,7 +1069,7 @@ export default function MarketingPlannerPage() {
                           </label>
                         )}
                         {selected && a.channel === 'alimtalk' && (
-                          <p className="mt-2 ml-[28px] text-[11px] text-white/45">
+                          <p className="mt-2 ml-[28px] text-[11px] text-slate-400">
                             알림톡은 행사 참여를 신청한 고객에게 보내는 안내입니다. 템플릿 검수는 대행해 드립니다.
                           </p>
                         )}
@@ -1115,20 +1077,20 @@ export default function MarketingPlannerPage() {
                     );
                   })}
                   {availability.length === 0 && (
-                    <p className="text-xs text-white/40 py-3 text-center">채널 상태를 불러오는 중입니다...</p>
+                    <p className="text-xs text-slate-400 py-3 text-center">채널 상태를 불러오는 중입니다...</p>
                   )}
                 </div>
               </div>
             </div>
 
-            <div className="px-5 py-4 border-t border-white/10 flex items-center gap-3 sticky bottom-0 bg-slate-900">
-              <span className="text-xs text-white/50">
-                예상 제작 크레딧 <b className="text-violet-200 tabular-nums">{estTotal.toLocaleString()}</b>
-                <span className="text-white/30"> · 저장만으로는 차감되지 않습니다</span>
+            <div className="px-5 py-4 border-t border-slate-200 flex items-center gap-3 sticky bottom-0 bg-white">
+              <span className="text-xs text-slate-500">
+                예상 제작 크레딧 <b className="text-violet-800 tabular-nums">{estTotal.toLocaleString()}</b>
+                <span className="text-slate-400"> · 저장만으로는 차감되지 않습니다</span>
               </span>
               <button
                 onClick={submit} disabled={saving}
-                className="ml-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
+                className="text-white ml-auto px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold disabled:opacity-40 transition-opacity"
               >
                 {saving ? '저장 중...' : editing ? '수정 저장' : '캘린더에 담기'}
               </button>
@@ -1138,6 +1100,6 @@ export default function MarketingPlannerPage() {
       )}
 
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
-    </div>
+    </ZoneFrame>
   );
 }

@@ -94,9 +94,9 @@ const GUIDES: TypeGuide[] = [
 ];
 
 const ADDABLE_BADGE: Record<TypeGuide['addable'], { label: string; bg: string; text: string }> = {
-  auto:  { label: '자동 누적',     bg: 'bg-emerald-500/20', text: 'text-emerald-200' },
-  admin: { label: '직접 입력 의무', bg: 'bg-blue-500/20',    text: 'text-blue-200' },
-  both:  { label: '자동 + 직접',   bg: 'bg-violet-500/20',  text: 'text-violet-200' },
+  auto:  { label: '자동 누적',     bg: 'bg-emerald-100', text: 'text-emerald-800' },
+  admin: { label: '직접 입력 의무', bg: 'bg-blue-100',    text: 'text-blue-800' },
+  both:  { label: '자동 + 직접',   bg: 'bg-violet-100',  text: 'text-violet-800' },
 };
 
 export default function MemoryTypeGuideModal({ open, onClose }: Props) {
@@ -118,20 +118,20 @@ export default function MemoryTypeGuideModal({ open, onClose }: Props) {
       aria-modal="true"
     >
       <div
-        className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+        className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm border-b border-white/10 px-6 py-4 flex items-center gap-3">
+        <div className="sticky top-0 bg-white backdrop-blur-sm border-b border-slate-200 px-6 py-4 flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1">
-            <h3 className="text-base font-bold text-white">5 메모리 타입 가이드</h3>
-            <p className="text-xs text-white/50 mt-0.5">어떤 학습이 자동으로 쌓이고, 어떤 학습을 직접 입력해야 하는지 안내</p>
+            <h3 className="text-base font-bold text-slate-900">5 메모리 타입 가이드</h3>
+            <p className="text-xs text-slate-500 mt-0.5">어떤 학습이 자동으로 쌓이고, 어떤 학습을 직접 입력해야 하는지 안내</p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+            className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors"
             aria-label="닫기"
           >
             <X className="w-4 h-4" />
@@ -142,12 +142,12 @@ export default function MemoryTypeGuideModal({ open, onClose }: Props) {
           {GUIDES.map((g) => {
             const addableMeta = ADDABLE_BADGE[g.addable];
             return (
-              <div key={g.type} className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+              <div key={g.type} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className={`p-4 bg-gradient-to-r ${g.gradient}`}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="text-sm font-bold text-white">{g.label}</div>
-                      <div className="text-xs text-white/90 mt-0.5">{g.description}</div>
+                      <div className="text-sm font-bold text-slate-900">{g.label}</div>
+                      <div className="text-xs text-slate-800 mt-0.5">{g.description}</div>
                     </div>
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${addableMeta.bg} ${addableMeta.text}`}>
                       {addableMeta.label}
@@ -156,15 +156,15 @@ export default function MemoryTypeGuideModal({ open, onClose }: Props) {
                 </div>
                 <div className="p-4 space-y-2">
                   <div className="flex items-start gap-2 text-xs">
-                    <Brain className="w-3.5 h-3.5 text-violet-300 flex-shrink-0 mt-0.5" />
-                    <span className="text-white/70">{g.flow}</span>
+                    <Brain className="w-3.5 h-3.5 text-violet-700 flex-shrink-0 mt-0.5" />
+                    <span className="text-slate-600">{g.flow}</span>
                   </div>
-                  <div className="pt-2 border-t border-white/5">
-                    <div className="text-[11px] text-white/40 mb-1.5 font-medium">학습 예시</div>
+                  <div className="pt-2 border-t border-slate-100">
+                    <div className="text-[11px] text-slate-400 mb-1.5 font-medium">학습 예시</div>
                     <ul className="space-y-1">
                       {g.examples.map((ex, i) => (
-                        <li key={i} className="text-xs text-white/60 flex items-start gap-2">
-                          <span className="text-white/30">·</span>
+                        <li key={i} className="text-xs text-slate-500 flex items-start gap-2">
+                          <span className="text-slate-400">·</span>
                           <span className="flex-1">{ex}</span>
                         </li>
                       ))}
@@ -175,9 +175,9 @@ export default function MemoryTypeGuideModal({ open, onClose }: Props) {
             );
           })}
 
-          <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-pink-500/15 border border-violet-400/30 rounded-xl">
-            <div className="text-sm font-semibold text-violet-100 mb-1">왜 학습 메모리가 중요한가요?</div>
-            <p className="text-xs text-white/80 leading-relaxed">
+          <div className="p-4 bg-gradient-to-br from-violet-50 via-fuchsia-50 to-pink-50 border border-violet-200 rounded-xl">
+            <div className="text-sm font-semibold text-violet-900 mb-1">왜 학습 메모리가 중요한가요?</div>
+            <p className="text-xs text-slate-700 leading-relaxed">
               AI는 메시지 생성, 캠페인 추천, 자율 진단 시 회사 메모리를 시스템 프롬프트에 자동 포함합니다.
               누적 학습이 많을수록 회사 고유 톤과 고객 특성을 더 정확히 반영하므로, 시간이 지날수록 추천 정확도가 향상됩니다.
               회사 admin이 직접 입력한 학습은 자동 학습보다 중요도를 높게 설정하여 우선 참고됩니다.
@@ -185,10 +185,10 @@ export default function MemoryTypeGuideModal({ open, onClose }: Props) {
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-slate-900/95 backdrop-blur-sm border-t border-white/10 px-6 py-3 flex justify-end">
+        <div className="sticky bottom-0 bg-white backdrop-blur-sm border-t border-slate-200 px-6 py-3 flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-violet-500/40 hover:bg-violet-500/60 text-violet-50 text-sm rounded-lg font-medium"
+            className="px-4 py-2 bg-violet-200 hover:bg-violet-200 text-violet-900 text-sm rounded-lg font-medium"
           >
             확인
           </button>

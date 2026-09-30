@@ -84,53 +84,53 @@ export default function EmailDetailModal({ campaign, cover, authHeaders, onClose
   return (
     <div className={MK_MODAL_BACKDROP} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={`${MK_MODAL} w-full max-w-[1060px] max-h-[92vh] flex flex-col md:flex-row overflow-hidden`} role="dialog" aria-label={`${c.name} 상세`}>
-        <aside className="md:w-[250px] shrink-0 border-b md:border-b-0 md:border-r border-white/10 p-5 flex flex-col gap-4 overflow-y-auto mk-scroll">
-          <div className="rounded-xl overflow-hidden border border-white/10">
+        <aside className="md:w-[250px] shrink-0 border-b md:border-b-0 md:border-r border-slate-200 p-5 flex flex-col gap-4 overflow-y-auto mk-scroll">
+          <div className="rounded-xl overflow-hidden border border-slate-200">
             <div className="bg-white px-3 py-2.5 flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-[#9a4f2c] text-white text-[12px] font-bold flex items-center justify-center shrink-0">{(c.fromName || 'H').slice(0, 1)}</span>
               <div className="min-w-0"><div className="text-[12px] font-bold text-slate-900 truncate">{c.fromName || '보내는 사람'}</div><div className="text-[11px] text-slate-600 truncate">{c.subject}</div></div>
             </div>
-            <div className="h-[120px] bg-white/[0.05]">{cover ? <img src={cover} alt="" className="w-full h-full object-cover" /> : null}</div>
+            <div className="h-[120px] bg-white">{cover ? <img src={cover} alt="" className="w-full h-full object-cover" /> : null}</div>
           </div>
           <div className="space-y-1.5">
-            <div className="text-[11.5px] text-white/50">보낸 메일</div>
-            <div className="h-9 px-3 rounded-lg bg-slate-950/60 border border-white/10 flex items-center text-[12.5px] font-semibold text-white truncate">{c.fromEmail || '-'}</div>
-            <div className="rounded-lg bg-slate-950/60 border border-white/10 px-3 py-2">
-              <div className="text-[12.5px] font-bold text-white">{c.isAd ? '광고 메일' : '정보 메일'}</div>
-              <div className="text-[11px] text-white/50">{c.isAd ? '(광고) 표기 · 수신거부 붙음' : '광고 표기 없음'}</div>
+            <div className="text-[11.5px] text-slate-500">보낸 메일</div>
+            <div className="h-9 px-3 rounded-lg bg-slate-100 border border-slate-200 flex items-center text-[12.5px] font-semibold text-slate-900 truncate">{c.fromEmail || '-'}</div>
+            <div className="rounded-lg bg-slate-100 border border-slate-200 px-3 py-2">
+              <div className="text-[12.5px] font-bold text-slate-900">{c.isAd ? '광고 메일' : '정보 메일'}</div>
+              <div className="text-[11px] text-slate-500">{c.isAd ? '(광고) 표기 · 수신거부 붙음' : '광고 표기 없음'}</div>
             </div>
           </div>
-          <dl className="space-y-1.5 text-[12px] border-t border-white/10 pt-3">
-            <div className="flex justify-between"><dt className="text-white/50">다시 보낸 횟수</dt><dd className="text-white/85 font-semibold">{c.resendGeneration ?? 0} / 1회</dd></div>
-            {c.status === 'scheduled' && c.scheduledAt && <div className="flex justify-between"><dt className="text-white/50">예약</dt><dd className="text-amber-300 font-semibold">{new Date(c.scheduledAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</dd></div>}
-            <div className="flex justify-between"><dt className="text-white/50">완성</dt><dd className="text-white/85 font-semibold">{c.completed ? '완성' : '완성 전'}</dd></div>
+          <dl className="space-y-1.5 text-[12px] border-t border-slate-200 pt-3">
+            <div className="flex justify-between"><dt className="text-slate-500">다시 보낸 횟수</dt><dd className="text-slate-700 font-semibold">{c.resendGeneration ?? 0} / 1회</dd></div>
+            {c.status === 'scheduled' && c.scheduledAt && <div className="flex justify-between"><dt className="text-slate-500">예약</dt><dd className="text-amber-700 font-semibold">{new Date(c.scheduledAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</dd></div>}
+            <div className="flex justify-between"><dt className="text-slate-500">완성</dt><dd className="text-slate-700 font-semibold">{c.completed ? '완성' : '완성 전'}</dd></div>
           </dl>
           <div className="mt-auto grid grid-cols-2 gap-2">
             <button type="button" onClick={onEdit} className={MK_BTN_OUTLINE}><PenLine className="w-4 h-4" />수정</button>
             <button type="button" onClick={onTest} disabled={!c.completed} title={c.completed ? undefined : '완성한 이메일만 테스트로 보낼 수 있어요'} className={MK_BTN_OUTLINE}><Send className="w-4 h-4" />테스트 발송</button>
             <button type="button" onClick={onExportHtml} disabled={!c.completed || exporting} title={c.completed ? undefined : '완성한 이메일만 저장할 수 있어요'} className={MK_BTN_OUTLINE}>{exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}HTML 저장</button>
             <button type="button" onClick={onClone} disabled={cloning} className={MK_BTN_OUTLINE}>{cloning ? <Loader2 className="w-4 h-4 animate-spin" /> : <CopyPlus className="w-4 h-4" />}복제</button>
-            <button type="button" onClick={onDelete} className="col-span-2 inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold text-rose-300 hover:bg-rose-500/10"><Trash2 className="w-4 h-4" />삭제</button>
+            <button type="button" onClick={onDelete} className="col-span-2 inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold text-rose-700 hover:bg-rose-50"><Trash2 className="w-4 h-4" />삭제</button>
           </div>
         </aside>
 
         <section className="flex-1 min-w-0 flex flex-col p-5 md:p-6 overflow-hidden">
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2"><h3 className="text-[19px] font-bold text-white truncate">{c.name}</h3><StatusChip status={status} /></div>
-              <div className="text-[12px] text-white/50 mt-1 truncate">{c.sentAt ? `${new Date(c.sentAt).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${sent.toLocaleString()}명 · ` : ''}제목 "{c.subject}"</div>
+              <div className="flex items-center gap-2"><h3 className="text-[19px] font-bold text-slate-900 truncate">{c.name}</h3><StatusChip status={status} /></div>
+              <div className="text-[12px] text-slate-500 mt-1 truncate">{c.sentAt ? `${new Date(c.sentAt).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${sent.toLocaleString()}명 · ` : ''}제목 "{c.subject}"</div>
             </div>
-            <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+            <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
           </div>
-          <div className="flex gap-1 border-b border-white/10 mt-4">
+          <div className="flex gap-1 border-b border-slate-200 mt-4">
             {([['perf', '성과'], ['events', '발송 이력'], ['people', '받은 사람별'], ['ai', 'AI 진단']] as Array<[typeof tab, string]>).map(([k, l]) => (
-              <button key={k} type="button" onClick={() => setTab(k)} className={`px-3 py-2 text-[13px] font-semibold border-b-2 -mb-px inline-flex items-center gap-1 ${tab === k ? 'text-white border-violet-500' : 'text-white/50 border-transparent hover:text-white/80'}`}>{k === 'ai' && <Sparkles className="w-3.5 h-3.5" />}{l}</button>
+              <button key={k} type="button" onClick={() => setTab(k)} className={`px-3 py-2 text-[13px] font-semibold border-b-2 -mb-px inline-flex items-center gap-1 ${tab === k ? 'text-slate-900 border-violet-500' : 'text-slate-500 border-transparent hover:text-slate-700'}`}>{k === 'ai' && <Sparkles className="w-3.5 h-3.5" />}{l}</button>
             ))}
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto mk-scroll pt-4">
-            {status === 'failed' && <div className="mb-3 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2.5 text-[12.5px] text-rose-100">보내지 못했어요. 회사 메일 연결을 확인한 뒤 다시 보내 주세요.</div>}
-            {status === 'draft' && <div className="mb-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-[12.5px] text-white/70">아직 보내지 않은 이메일이에요.</div>}
+            {status === 'failed' && <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12.5px] text-rose-900">보내지 못했어요. 회사 메일 연결을 확인한 뒤 다시 보내 주세요.</div>}
+            {status === 'draft' && <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[12.5px] text-slate-600">아직 보내지 않은 이메일이에요.</div>}
             {tab === 'perf' ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
@@ -142,24 +142,24 @@ export default function EmailDetailModal({ campaign, cover, authHeaders, onClose
                 </div>
                 {sent > 0 && (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    <div className="rounded-2xl border border-white/10 p-4">
-                      <div className="text-[13px] font-bold text-white mb-3">많이 누른 링크</div>
-                      {clicksSample === null ? <Loader2 className="w-4 h-4 animate-spin text-white/40" /> : links.length === 0 ? <div className="text-[12px] text-white/45">아직 누른 링크가 없어요.</div> : links.map(([u, n]) => (
+                    <div className="rounded-2xl border border-slate-200 p-4">
+                      <div className="text-[13px] font-bold text-slate-900 mb-3">많이 누른 링크</div>
+                      {clicksSample === null ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" /> : links.length === 0 ? <div className="text-[12px] text-slate-400">아직 누른 링크가 없어요.</div> : links.map(([u, n]) => (
                         <div key={u} className="grid grid-cols-[1fr_120px_40px] items-center gap-2 py-1 text-[12px]">
-                          <span className="text-white/70 truncate" title={u}>{u.replace(/^https?:\/\//, '')}</span>
-                          <span className="h-2 rounded-full bg-white/10 overflow-hidden"><span className="block h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-400" style={{ width: `${(n / links[0][1]) * 100}%` }} /></span>
-                          <b className="text-white text-right">{n}</b>
+                          <span className="text-slate-600 truncate" title={u}>{u.replace(/^https?:\/\//, '')}</span>
+                          <span className="h-2 rounded-full bg-slate-100 overflow-hidden"><span className="block h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-400" style={{ width: `${(n / links[0][1]) * 100}%` }} /></span>
+                          <b className="text-slate-900 text-right">{n}</b>
                         </div>
                       ))}
                     </div>
-                    <div className="rounded-2xl border border-white/10 p-4">
-                      <div className="text-[13px] font-bold text-white mb-3">오픈 시간대</div>
+                    <div className="rounded-2xl border border-slate-200 p-4">
+                      <div className="text-[13px] font-bold text-slate-900 mb-3">오픈 시간대</div>
                       <div className="flex items-end gap-[3px] h-[72px]">
                         {hours.map((h, i) => <span key={i} className="flex-1 rounded-t bg-gradient-to-t from-violet-600 to-violet-400" style={{ height: `${Math.max(4, (h / maxH) * 100)}%`, opacity: h ? 1 : 0.25 }} title={`${i}시 ${h}회`} />)}
                       </div>
-                      <div className="flex justify-between text-[10.5px] text-white/40 mt-1"><span>0시</span><span>12시</span><span>23시</span></div>
+                      <div className="flex justify-between text-[10.5px] text-slate-400 mt-1"><span>0시</span><span>12시</span><span>23시</span></div>
                       {Math.max(...hours) > 0 && (
-                        <div className="mt-3 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-2.5 text-[12px] text-white/85 flex gap-2"><Clock className="w-4 h-4 text-fuchsia-300 shrink-0 mt-0.5" />{top}시에 가장 많이 열었어요. 다음에도 이 시간에 보내면 좋아요.</div>
+                        <div className="mt-3 rounded-xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2.5 text-[12px] text-slate-700 flex gap-2"><Clock className="w-4 h-4 text-fuchsia-700 shrink-0 mt-0.5" />{top}시에 가장 많이 열었어요. 다음에도 이 시간에 보내면 좋아요.</div>
                       )}
                     </div>
                   </div>
@@ -168,41 +168,41 @@ export default function EmailDetailModal({ campaign, cover, authHeaders, onClose
             ) : tab === 'events' ? (
               !data ? <Spin /> : data.events.length === 0 ? <Empty text="발송 이력이 없어요." /> : (
                 <div className="space-y-1">
-                  <div className="flex justify-end mb-1"><button type="button" onClick={onOpenEvents} className="text-[12px] font-semibold text-violet-300 hover:text-violet-200">전체 이력 보기</button></div>
+                  <div className="flex justify-end mb-1"><button type="button" onClick={onOpenEvents} className="text-[12px] font-semibold text-violet-700 hover:text-violet-800">전체 이력 보기</button></div>
                   {data.events.slice(0, 100).map((e, i) => (
-                    <div key={i} className="grid grid-cols-[120px_90px_1fr] gap-2 items-center h-9 px-3 rounded-lg bg-white/[0.04] text-[12px] text-white/80">
-                      <span className="text-white/50">{new Date(e.occurredAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    <div key={i} className="grid grid-cols-[120px_90px_1fr] gap-2 items-center h-9 px-3 rounded-lg bg-white text-[12px] text-slate-700">
+                      <span className="text-slate-500">{new Date(e.occurredAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                       <span className="font-semibold">{EVENT_LABEL[e.eventType] || e.eventType}</span>
-                      <span className="truncate text-white/60">{maskEmail(e.email)}</span>
+                      <span className="truncate text-slate-500">{maskEmail(e.email)}</span>
                     </div>
                   ))}
                 </div>
               )
             ) : tab === 'people' ? (
               !data ? <Spin /> : data.recipients.length === 0 ? <Empty text="받은 사람 기록이 없어요." /> : (
-                <div className="rounded-xl border border-white/10 overflow-hidden">
-                  <div className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-2 text-[11px] text-white/45 bg-white/[0.03]"><span>메일</span><span>오픈</span><span>클릭</span><span>상태</span></div>
+                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-2 text-[11px] text-slate-400 bg-white"><span>메일</span><span>오픈</span><span>클릭</span><span>상태</span></div>
                   {data.recipients.slice(0, 100).map((r) => (
-                    <div key={r.email} className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-2 text-[12px] text-white/80 border-t border-white/[0.06]">
+                    <div key={r.email} className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-2 text-[12px] text-slate-700 border-t border-slate-100">
                       <span className="truncate">{maskEmail(r.email)}</span><span>{r.openCount || 0}</span><span>{r.clickCount || 0}</span>
-                      <span className={r.bouncedAt || r.unsubscribedAt ? 'text-rose-300' : r.openedAt ? 'text-emerald-300' : 'text-white/40'}>{r.bouncedAt ? '반송' : r.unsubscribedAt ? '수신거부' : r.openedAt ? '열어 봄' : '안 열어 봄'}</span>
+                      <span className={r.bouncedAt || r.unsubscribedAt ? 'text-rose-700' : r.openedAt ? 'text-emerald-700' : 'text-slate-400'}>{r.bouncedAt ? '반송' : r.unsubscribedAt ? '수신거부' : r.openedAt ? '열어 봄' : '안 열어 봄'}</span>
                     </div>
                   ))}
-                  {data.total > 100 && <div className="px-3 py-2 text-[11.5px] text-white/45 border-t border-white/[0.06]">최근 100명만 보여요 · 전체 {data.total.toLocaleString()}명</div>}
+                  {data.total > 100 && <div className="px-3 py-2 text-[11.5px] text-slate-400 border-t border-slate-100">최근 100명만 보여요 · 전체 {data.total.toLocaleString()}명</div>}
                 </div>
               )
             ) : (
               <div className="py-8 text-center">
-                <div className="text-[14px] font-bold text-white">AI가 이 메일 성과를 풀어 드려요</div>
-                <div className="text-[12.5px] text-white/55 mt-1.5">오픈·클릭 기록으로 무엇이 잘 됐는지, 다음에 무엇을 바꾸면 좋을지 알려 드려요.</div>
-                <button type="button" onClick={onInsight} disabled={sent === 0} className="mt-4 inline-flex items-center gap-1.5 h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 disabled:opacity-40"><Sparkles className="w-4 h-4" />AI 진단 받기</button>
-                {sent === 0 && <div className="text-[11.5px] text-white/40 mt-2">보낸 뒤에 받을 수 있어요.</div>}
+                <div className="text-[14px] font-bold text-slate-900">AI가 이 메일 성과를 풀어 드려요</div>
+                <div className="text-[12.5px] text-slate-500 mt-1.5">오픈·클릭 기록으로 무엇이 잘 됐는지, 다음에 무엇을 바꾸면 좋을지 알려 드려요.</div>
+                <button type="button" onClick={onInsight} disabled={sent === 0} className="mt-4 inline-flex items-center gap-1.5 h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40"><Sparkles className="w-4 h-4" />AI 진단 받기</button>
+                {sent === 0 && <div className="text-[11.5px] text-slate-400 mt-2">보낸 뒤에 받을 수 있어요.</div>}
               </div>
             )}
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-4 mt-2 border-t border-white/10 flex-wrap">
-            <span className="mr-auto text-[10px] text-white/30 italic">Data source: 메일 집계 · 링크·시간대 = 최근 500건 표본{sampleCapped ? '(상한 도달)' : ''} · 오픈 = 메일 이미지 로딩 기준</span>
+          <div className="flex items-center justify-end gap-2 pt-4 mt-2 border-t border-slate-200 flex-wrap">
+            <span className="mr-auto text-[10px] text-slate-400 italic">Data source: 메일 집계 · 링크·시간대 = 최근 500건 표본{sampleCapped ? '(상한 도달)' : ''} · 오픈 = 메일 이미지 로딩 기준</span>
             {c.status === 'scheduled' && <button type="button" onClick={onCancelSchedule} className={MK_BTN_OUTLINE}>예약 취소</button>}
             {c.status === 'completed' && sent > 0 && (
               <>
@@ -220,11 +220,11 @@ export default function EmailDetailModal({ campaign, cover, authHeaders, onClose
 
 function Tile({ k, v, p }: { k: string; v: number; p?: number }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
-      <div className="text-[11px] text-white/50">{k}</div>
-      <div className="text-[18px] font-extrabold text-white leading-tight mt-0.5">{v.toLocaleString()}{typeof p === 'number' && <span className="text-[11.5px] font-bold text-violet-300 ml-1.5">{p}%</span>}</div>
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+      <div className="text-[11px] text-slate-500">{k}</div>
+      <div className="text-[18px] font-extrabold text-slate-900 leading-tight mt-0.5">{v.toLocaleString()}{typeof p === 'number' && <span className="text-[11.5px] font-bold text-violet-700 ml-1.5">{p}%</span>}</div>
     </div>
   );
 }
-function Spin() { return <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-white/40" /></div>; }
-function Empty({ text }: { text: string }) { return <div className="py-14 text-center text-[13px] text-white/45">{text}</div>; }
+function Spin() { return <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>; }
+function Empty({ text }: { text: string }) { return <div className="py-14 text-center text-[13px] text-slate-400">{text}</div>; }

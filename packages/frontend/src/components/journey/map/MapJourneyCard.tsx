@@ -48,7 +48,7 @@ function conditionBranches(journey: MapJourney, order: number): { met: string; n
 function ExitMarker({ n, label, first }: { n: number; label: string; first?: boolean }) {
   if (n <= 0) return null;
   return (
-    <div className="flex items-center gap-1.5 pl-3 text-[11px] text-emerald-300/90">
+    <div className="flex items-center gap-1.5 pl-3 text-[11px] text-emerald-700">
       <Target className="w-3 h-3 shrink-0" />
       <span>{first ? '첫 문자 전에' : '여기서'} {label} {n.toLocaleString('ko-KR')}명 빠짐</span>
     </div>
@@ -65,7 +65,7 @@ export default function MapJourneyCard({
   return (
     <div
       data-anchor={`j:${j.id}`}
-      className={`rounded-xl border bg-slate-900/70 transition-shadow ${dim ? 'border-white/10 border-dashed' : 'border-white/15'} ${focused ? 'ring-2 ring-violet-400/80 shadow-lg shadow-violet-900/40' : ''}`}
+      className={`rounded-xl border bg-white transition-shadow ${dim ? 'border-slate-200 border-dashed' : 'border-slate-300'} ${focused ? 'ring-2 ring-violet-300 shadow-lg shadow-violet-900/40' : ''}`}
     >
       {/* 머리: 선이 붙는 자리(카드 윗부분 · 펼쳐도 위치가 변하지 않는다) */}
       <button
@@ -73,14 +73,14 @@ export default function MapJourneyCard({
         onClick={onToggle}
         aria-expanded={expanded}
         aria-controls={bodyId}
-        className="w-full text-left px-3 pt-3 pb-2 rounded-t-xl hover:bg-white/[0.04] transition-colors"
+        className="w-full text-left px-3 pt-3 pb-2 rounded-t-xl hover:bg-white transition-colors"
       >
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full shrink-0 ${st.dot}`} aria-hidden />
-          <span className="flex-1 min-w-0 text-sm font-semibold text-white truncate">{j.name || '이름 없는 여정'}</span>
-          <ChevronDown className={`w-4 h-4 text-white/40 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          <span className="flex-1 min-w-0 text-sm font-semibold text-slate-900 truncate">{j.name || '이름 없는 여정'}</span>
+          <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </div>
-        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-white/50">
+        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
           <span>{st.label}</span>
           <span aria-hidden>·</span>
           <span className="truncate">{j.band === 'standing' ? '고른 고객에게' : `${j.triggerLabel} 때 시작`}</span>
@@ -88,37 +88,37 @@ export default function MapJourneyCard({
       </button>
 
       <div className="px-3 pb-3 space-y-2">
-        <p className="text-[11px] leading-relaxed text-white/45 line-clamp-2">{j.targetSummary}</p>
+        <p className="text-[11px] leading-relaxed text-slate-400 line-clamp-2">{j.targetSummary}</p>
 
         <div className="grid grid-cols-3 gap-1.5 text-center">
-          <div className="rounded-lg bg-white/[0.04] px-1 py-1.5">
-            <div className="text-[11px] text-white/45">진행 중</div>
-            <div className="text-xs font-semibold text-white tabular-nums">{countText(j.counts.activeNow, '0')}</div>
+          <div className="rounded-lg bg-white px-1 py-1.5">
+            <div className="text-[11px] text-slate-400">진행 중</div>
+            <div className="text-xs font-semibold text-slate-900 tabular-nums">{countText(j.counts.activeNow, '0')}</div>
           </div>
-          <div className="rounded-lg bg-white/[0.04] px-1 py-1.5">
-            <div className="text-[11px] text-white/45">30일 진입</div>
-            <div className="text-xs font-semibold text-white tabular-nums">{countText(j.counts.entered30d, '0')}</div>
+          <div className="rounded-lg bg-white px-1 py-1.5">
+            <div className="text-[11px] text-slate-400">30일 진입</div>
+            <div className="text-xs font-semibold text-slate-900 tabular-nums">{countText(j.counts.entered30d, '0')}</div>
           </div>
-          <div className="rounded-lg bg-white/[0.04] px-1 py-1.5">
-            <div className="text-[11px] text-white/45 truncate">{j.goalLabel}</div>
-            <div className="text-xs font-semibold text-emerald-300 tabular-nums">
+          <div className="rounded-lg bg-white px-1 py-1.5">
+            <div className="text-[11px] text-slate-400 truncate">{j.goalLabel}</div>
+            <div className="text-xs font-semibold text-emerald-700 tabular-nums">
               {j.goalExitEnabled ? countText(j.counts.goalMet30d, '0') : '꺼짐'}
             </div>
           </div>
         </div>
 
         {j.pendingGoalExit != null && j.pendingGoalExit > 0 && (
-          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-emerald-300/85">
+          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-emerald-700">
             <Target className="w-3 h-3 mt-0.5 shrink-0" />
             <span>이미 구매해서 다음 칸 전에 빠질 고객 약 {j.pendingGoalExit.toLocaleString('ko-KR')}명</span>
           </div>
         )}
         {j.notices.map((n) => (
-          <p key={n} className="text-[11px] leading-relaxed text-white/50">{n}</p>
+          <p key={n} className="text-[11px] leading-relaxed text-slate-500">{n}</p>
         ))}
         {/* ★ 0930 V2 5차 — 옛 판(새 고객 안 받음 · 진행 중 고객 마무리 중) */}
         {j.olderVersions.length > 0 && (
-          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-white/50">
+          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-500">
             <Layers className="w-3 h-3 mt-0.5 shrink-0" />
             <span>
               옛 판 {j.olderVersions.length}개 · 진행 중 {j.olderVersions.reduce((a, v) => a + v.activeNow, 0).toLocaleString('ko-KR')}명 마무리 중(새 고객은 이 판이 받아요)
@@ -128,19 +128,19 @@ export default function MapJourneyCard({
 
         {/* 손봐야 함 = 호박색 전용 */}
         {j.broadAudience && (
-          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
+          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-800">
             <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
             <span>대상 조건이 없어 모든 고객에게 보냅니다.</span>
           </div>
         )}
         {j.capability && !j.capability.available && j.status !== 'ended' && (
-          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
+          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-800">
             <Lock className="w-3 h-3 mt-0.5 shrink-0" />
             <span>새 고객이 들어오지 않아요. {j.capability.reason}</span>
           </div>
         )}
         {j.graph.issues.map((msg) => (
-          <div key={msg} className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
+          <div key={msg} className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-800">
             <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
             <span>{msg}</span>
           </div>
@@ -151,11 +151,11 @@ export default function MapJourneyCard({
             key={o.id}
             type="button"
             onClick={() => onFocusJourney(o.id)}
-            className="w-full flex items-center gap-1.5 rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 py-1.5 text-left text-[11px] text-rose-100 hover:bg-rose-500/15 transition-colors"
+            className="w-full flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-left text-[11px] text-rose-900 hover:bg-rose-100 transition-colors"
           >
             <Users className="w-3 h-3 shrink-0" />
             <span className="flex-1 min-w-0 truncate">같이 받음: {o.name}</span>
-            <span className="shrink-0 tabular-nums text-rose-200/80">{o.concurrentActive > 0 ? `지금 ${o.concurrentActive.toLocaleString('ko-KR')}명` : '지금 0명'}</span>
+            <span className="shrink-0 tabular-nums text-rose-800">{o.concurrentActive > 0 ? `지금 ${o.concurrentActive.toLocaleString('ko-KR')}명` : '지금 0명'}</span>
           </button>
         ))}
 
@@ -163,33 +163,33 @@ export default function MapJourneyCard({
         {outgoing.map((ln) => {
           const style = LINE_STYLE[ln.tier];
           return (
-            <div key={ln.id} className="flex items-center gap-1.5 text-[11px] text-white/60">
+            <div key={ln.id} className="flex items-center gap-1.5 text-[11px] text-slate-500">
               <span className="w-3 h-0 border-t-2 shrink-0" style={{ borderColor: style.stroke, borderStyle: ln.tier === 'solid' ? 'solid' : 'dashed' }} aria-hidden />
-              <ArrowRight className="w-3 h-3 shrink-0 text-white/35" />
+              <ArrowRight className="w-3 h-3 shrink-0 text-slate-400" />
               <span className="flex-1 min-w-0 truncate">
-                {ln.toLabel} 여정 · <span className={ln.tier === 'warn' ? 'text-amber-200' : ln.tier === 'solid' ? 'text-violet-200' : 'text-white/45'}>{LINE_SHORT[ln.state]}</span>
+                {ln.toLabel} 여정 · <span className={ln.tier === 'warn' ? 'text-amber-800' : ln.tier === 'solid' ? 'text-violet-800' : 'text-slate-400'}>{LINE_SHORT[ln.state]}</span>
               </span>
               {ln.tier === 'solid' && (
-                <span className="shrink-0 tabular-nums text-white/50">이어받음 {countText(ln.handedOver)}</span>
+                <span className="shrink-0 tabular-nums text-slate-500">이어받음 {countText(ln.handedOver)}</span>
               )}
             </div>
           );
         })}
 
         {expanded && (
-          <div id={bodyId} className="pt-2 mt-1 border-t border-white/10 space-y-1.5">
-            <div className="flex items-center gap-1.5 text-[11px] text-white/55">
-              <Flag className="w-3 h-3 shrink-0 text-violet-300" />
+          <div id={bodyId} className="pt-2 mt-1 border-t border-slate-200 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+              <Flag className="w-3 h-3 shrink-0 text-violet-700" />
               <span>시작: {j.band === 'standing' ? '고른 고객에게' : j.triggerLabel}</span>
             </div>
             <ExitMarker n={j.exitsBeforeFirst || 0} label={j.goalLabel} first />
-            {j.steps.length === 0 && <div className="text-[11px] text-white/40 pl-3">아직 칸이 없어요.</div>}
+            {j.steps.length === 0 && <div className="text-[11px] text-slate-400 pl-3">아직 칸이 없어요.</div>}
             {j.steps.map((s) => {
               const chip = CHIP_STYLE[s.kind] || CHIP_STYLE.unknown;
               const br = s.kind === 'condition' ? conditionBranches(j, s.order) : null;
               return (
                 <div key={s.stepId} className="space-y-1.5">
-                  <div className="pl-3 text-[11px] text-white/35">↓ {s.intervalLabel}</div>
+                  <div className="pl-3 text-[11px] text-slate-400">↓ {s.intervalLabel}</div>
                   <button
                     type="button"
                     onClick={() => onOpenStep(s)}
@@ -198,27 +198,27 @@ export default function MapJourneyCard({
                     <div className="flex items-center gap-1.5 text-[11px] font-semibold">
                       <ChipIcon kind={s.kind} />
                       <span className="min-w-0 truncate">{s.order}번째 · {s.kind === 'message' ? stepChannelLabel(s.channel) : chip.label}</span>
-                      <span className="ml-auto shrink-0 whitespace-nowrap font-normal text-white/50 tabular-nums">{s.timingLabel}</span>
+                      <span className="ml-auto shrink-0 whitespace-nowrap font-normal text-slate-500 tabular-nums">{s.timingLabel}</span>
                     </div>
                     {s.kind === 'message' && s.preview && (
-                      <div className="mt-1 text-[11px] leading-relaxed text-white/60 line-clamp-2">{s.preview}</div>
+                      <div className="mt-1 text-[11px] leading-relaxed text-slate-500 line-clamp-2">{s.preview}</div>
                     )}
                     {br && (
-                      <div className="mt-1 text-[11px] text-white/60">{br.met} · {br.notMet}</div>
+                      <div className="mt-1 text-[11px] text-slate-500">{br.met} · {br.notMet}</div>
                     )}
                     {s.waitingHere > 0 && (
-                      <div className="mt-1 text-[11px] text-white/45 tabular-nums">이 칸 차례 {s.waitingHere.toLocaleString('ko-KR')}명</div>
+                      <div className="mt-1 text-[11px] text-slate-400 tabular-nums">이 칸 차례 {s.waitingHere.toLocaleString('ko-KR')}명</div>
                     )}
                   </button>
                   {s.exitsAfter != null && <ExitMarker n={s.exitsAfter} label={j.goalLabel} />}
                 </div>
               );
             })}
-            <div className="flex items-center gap-1.5 pl-3 text-[11px] text-white/35">
-              <span className="w-1.5 h-1.5 rounded-full bg-white/20" aria-hidden />
+            <div className="flex items-center gap-1.5 pl-3 text-[11px] text-slate-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-200" aria-hidden />
               <span>여정 끝</span>
             </div>
-            <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-white/40 pt-1">
+            <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-400 pt-1">
               <Lock className="w-3 h-3 mt-0.5 shrink-0" />
               <span>{j.lock.reason}</span>
             </div>
@@ -226,7 +226,7 @@ export default function MapJourneyCard({
               <button
                 type="button"
                 onClick={() => onNewVersion(j)}
-                className="w-full h-8 rounded-lg text-[11px] font-semibold text-white bg-violet-600/80 hover:bg-violet-500 inline-flex items-center justify-center gap-1 transition-colors"
+                className="w-full h-8 rounded-lg text-[11px] font-semibold text-slate-900 bg-violet-200 hover:bg-violet-500 inline-flex items-center justify-center gap-1 transition-colors"
               >
                 <Copy className="w-3.5 h-3.5" /> 새 판으로 고치기
               </button>
@@ -234,7 +234,7 @@ export default function MapJourneyCard({
             <button
               type="button"
               onClick={() => onOpenJourney(j.id)}
-              className="w-full h-8 rounded-lg text-[11px] font-medium text-violet-200 border border-violet-400/30 hover:bg-violet-500/15 transition-colors"
+              className="w-full h-8 rounded-lg text-[11px] font-medium text-violet-800 border border-violet-200 hover:bg-violet-100 transition-colors"
             >
               여정 자세히 보기
             </button>

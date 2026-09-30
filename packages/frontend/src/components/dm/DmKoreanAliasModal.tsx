@@ -107,46 +107,46 @@ export default function DmKoreanAliasModal({ open, dmId, dmTitle, onClose }: Pro
 
   return createPortal(
     <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden">
         {/* 헤더 */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
               <AtSign className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-bold text-white">한글 주소 만들기</h3>
-              <p className="text-[11px] text-white/40 truncate">{dmTitle || '발행 DM 공용 링크에 기억하기 쉬운 주소를 붙입니다'}</p>
+              <h3 className="text-sm font-bold text-slate-900">한글 주소 만들기</h3>
+              <p className="text-[11px] text-slate-400 truncate">{dmTitle || '발행 DM 공용 링크에 기억하기 쉬운 주소를 붙입니다'}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors" aria-label="닫기">
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors" aria-label="닫기">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="p-5 space-y-4">
           {loading ? (
-            <div className="flex items-center justify-center py-8 text-white/40 text-sm gap-2">
+            <div className="flex items-center justify-center py-8 text-slate-400 text-sm gap-2">
               <Loader2 className="w-4 h-4 animate-spin" /> 불러오는 중
             </div>
           ) : (
             <>
               {/* 입력 — hlj.kr/ 프리픽스 고정 표시 */}
               <div>
-                <label className="block text-[11px] font-semibold text-white/50 mb-1.5">주소 문구 (한글 가능 · 2~20자)</label>
-                <div className="flex items-stretch rounded-xl border border-white/15 bg-white/5 focus-within:border-violet-400/60 overflow-hidden">
-                  <span className="flex items-center px-3 text-sm text-white/40 bg-white/5 border-r border-white/10 select-none">hlj.kr/</span>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">주소 문구 (한글 가능 · 2~20자)</label>
+                <div className="flex items-stretch rounded-xl border border-slate-300 bg-white focus-within:border-violet-300 overflow-hidden">
+                  <span className="flex items-center px-3 text-sm text-slate-400 bg-white border-r border-slate-200 select-none">hlj.kr/</span>
                   <input
                     value={slug}
                     onChange={(e) => { setSlug(e.target.value); setError(null); }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !saving) void handleSave(); }}
                     placeholder="반짝세일_07"
                     maxLength={20}
-                    className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-white placeholder-white/25 outline-none"
+                    className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none"
                   />
                 </div>
                 {error && (
-                  <div className="flex items-start gap-1.5 mt-2 text-[11px] text-rose-300">
+                  <div className="flex items-start gap-1.5 mt-2 text-[11px] text-rose-700">
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-[1px]" /> {error}
                   </div>
                 )}
@@ -154,41 +154,41 @@ export default function DmKoreanAliasModal({ open, dmId, dmTitle, onClose }: Pro
 
               {/* 현재 별칭 + 클릭수 */}
               {alias?.shortUrl && (
-                <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/[0.07] p-3.5 space-y-2">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3.5 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <Check className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0" />
-                      <span className="text-sm text-emerald-200 font-semibold truncate">{alias.shortUrl.replace(/^https?:\/\//, '')}</span>
+                      <Check className="w-3.5 h-3.5 text-emerald-700 flex-shrink-0" />
+                      <span className="text-sm text-emerald-800 font-semibold truncate">{alias.shortUrl.replace(/^https?:\/\//, '')}</span>
                     </div>
                     <button
                       onClick={() => copyText(alias.shortUrl!)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-emerald-200 bg-emerald-400/15 hover:bg-emerald-400/25 transition-colors flex-shrink-0"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-100 transition-colors flex-shrink-0"
                     >
                       <Copy className="w-3 h-3" /> 복사
                     </button>
                   </div>
-                  <div className="flex items-center gap-1.5 text-[11px] text-white/45">
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
                     <MousePointerClick className="w-3.5 h-3.5" /> 누적 클릭 {alias.clickCount.toLocaleString()}회. 상세 퍼널은 [발송 추적 → 공용 링크] 탭
                   </div>
                 </div>
               )}
 
               {/* 안내 */}
-              <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3.5 space-y-1.5">
-                <p className="text-[11px] text-white/50 leading-relaxed">전체 대상 발송·카톡 공유·SNS에 쓰는 <span className="text-white/75 font-semibold">공용 주소</span>입니다. 기존 발행 주소도 계속 사용할 수 있어요.</p>
-                <p className="text-[11px] text-white/50 leading-relaxed">공용 주소는 누가 열었는지 개인 단위 추적은 되지 않고, 클릭·열람 횟수로 집계됩니다. 고객별 추적은 문자 발송의 개인화 링크가 담당해요.</p>
-                <p className="text-[11px] text-white/35">무료: DM 1개당 주소 1개, 언제든 변경 가능</p>
+              <div className="rounded-xl bg-white border border-slate-200 p-3.5 space-y-1.5">
+                <p className="text-[11px] text-slate-500 leading-relaxed">전체 대상 발송·카톡 공유·SNS에 쓰는 <span className="text-slate-600 font-semibold">공용 주소</span>입니다. 기존 발행 주소도 계속 사용할 수 있어요.</p>
+                <p className="text-[11px] text-slate-500 leading-relaxed">공용 주소는 누가 열었는지 개인 단위 추적은 되지 않고, 클릭·열람 횟수로 집계됩니다. 고객별 추적은 문자 발송의 개인화 링크가 담당해요.</p>
+                <p className="text-[11px] text-slate-400">무료: DM 1개당 주소 1개, 언제든 변경 가능</p>
               </div>
 
               <button
                 onClick={() => void handleSave()}
                 disabled={saving || !slug.trim()}
-                className="w-full h-11 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                className="w-full h-11 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 {saving ? (<><Loader2 className="w-4 h-4 animate-spin" /> 저장 중</>) : alias ? '주소 변경하고 복사' : '주소 만들고 복사'}
               </button>
 
-              <div className="text-[10px] text-white/30 italic">Data source: dm_custom_short_links 클릭 집계 (실시간)</div>
+              <div className="text-[10px] text-slate-400 italic">Data source: dm_custom_short_links 클릭 집계 (실시간)</div>
             </>
           )}
         </div>

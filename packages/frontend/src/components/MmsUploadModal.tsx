@@ -1,3 +1,4 @@
+import { useLightSurface } from './zone/surface-tone';
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Image as ImageIcon, X, Paperclip, Lock, Plus, Loader2, AlertTriangle, FolderOpen, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -48,6 +49,7 @@ export default function MmsUploadModal({
   autoFit = false,
   handleMmsImageSwap,
 }: MmsUploadModalProps) {
+  const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   // ★ 훅은 조기 return 위에 (조건부 렌더 컴포넌트 훅 개수 불일치 크래시 차단 — 2026-07-06 교훈)
   const [libOpen, setLibOpen] = useState(false);
   // 끌어서 순서 바꾸기 — 잡은 칸 · 놓을 칸(표시용)
@@ -65,38 +67,38 @@ export default function MmsUploadModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-[560px] max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 shadow-2xl animate-in fade-in zoom-in duration-200">
+      <div className={light ? "w-full max-w-[560px] max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl animate-in fade-in zoom-in duration-200" : "w-full max-w-[560px] max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 shadow-2xl animate-in fade-in zoom-in duration-200"}>
         {/* 헤더 */}
-        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/95 backdrop-blur-sm">
+        <div className={light ? "sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white backdrop-blur-sm" : "sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/95 backdrop-blur-sm"}>
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-violet-500/15 ring-1 ring-inset ring-violet-400/30 flex items-center justify-center">
-              <ImageIcon className="w-4.5 h-4.5 text-violet-300" />
+            <div className={light ? "w-9 h-9 rounded-xl bg-violet-100 ring-1 ring-inset ring-violet-200 flex items-center justify-center" : "w-9 h-9 rounded-xl bg-violet-500/15 ring-1 ring-inset ring-violet-400/30 flex items-center justify-center"}>
+              <ImageIcon className={light ? "w-4.5 h-4.5 text-violet-700" : "w-4.5 h-4.5 text-violet-300"} />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">MMS 이미지 첨부</h3>
-              <p className="text-[11px] text-white/45">이미지를 담아 비주얼 메시지로 발송</p>
+              <h3 className={light ? "text-base font-bold text-slate-900" : "text-base font-bold text-white"}>MMS 이미지 첨부</h3>
+              <p className={light ? "text-[11px] text-slate-400" : "text-[11px] text-white/45"}>이미지를 담아 비주얼 메시지로 발송</p>
             </div>
           </div>
-          <button onClick={onClose} className="text-white/40 hover:text-white transition-colors">
+          <button onClick={onClose} className={light ? "text-slate-400 hover:text-slate-900 transition-colors" : "text-white/40 hover:text-white transition-colors"}>
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* 규격 안내 */}
-        <div className="px-6 py-3 border-b border-white/10 bg-white/[0.03]">
+        <div className={light ? "px-6 py-3 border-b border-slate-200 bg-white" : "px-6 py-3 border-b border-white/10 bg-white/[0.03]"}>
           {autoFit ? (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-white/55">
-              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 형식 <span className="font-semibold text-white/85">JPG · PNG 등 사진</span></div>
-              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 용량 <span className="font-semibold text-white/85">큰 사진도 가능</span></div>
-              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 최대 <span className="font-semibold text-white/85">3장</span></div>
-              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> <span className="text-white/70">규격(JPG · 300KB)에 맞게 자동으로 줄입니다</span></div>
+            <div className={light ? "grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-slate-500" : "grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-white/55"}>
+              <div className="flex items-center gap-1.5"><span className={light ? "text-violet-700" : "text-violet-300"}>•</span> 형식 <span className={light ? "font-semibold text-slate-700" : "font-semibold text-white/85"}>JPG · PNG 등 사진</span></div>
+              <div className="flex items-center gap-1.5"><span className={light ? "text-violet-700" : "text-violet-300"}>•</span> 용량 <span className={light ? "font-semibold text-slate-700" : "font-semibold text-white/85"}>큰 사진도 가능</span></div>
+              <div className="flex items-center gap-1.5"><span className={light ? "text-violet-700" : "text-violet-300"}>•</span> 최대 <span className={light ? "font-semibold text-slate-700" : "font-semibold text-white/85"}>3장</span></div>
+              <div className="flex items-center gap-1.5"><span className={light ? "text-violet-700" : "text-violet-300"}>•</span> <span className={light ? "text-slate-600" : "text-white/70"}>규격(JPG · 300KB)에 맞게 자동으로 줄입니다</span></div>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-white/55">
-              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 형식 <span className="font-semibold text-white/85">JPG/JPEG</span></div>
-              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 용량 <span className="font-semibold text-white/85">300KB 이하</span></div>
-              <div className="flex items-center gap-1.5"><span className="text-violet-300">•</span> 최대 <span className="font-semibold text-white/85">3장</span></div>
-              <div className="flex items-center gap-1.5"><span className="text-white/25">•</span> <span className="text-white/40">PNG/GIF 미지원</span></div>
+            <div className={light ? "grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-slate-500" : "grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-white/55"}>
+              <div className="flex items-center gap-1.5"><span className={light ? "text-violet-700" : "text-violet-300"}>•</span> 형식 <span className={light ? "font-semibold text-slate-700" : "font-semibold text-white/85"}>JPG/JPEG</span></div>
+              <div className="flex items-center gap-1.5"><span className={light ? "text-violet-700" : "text-violet-300"}>•</span> 용량 <span className={light ? "font-semibold text-slate-700" : "font-semibold text-white/85"}>300KB 이하</span></div>
+              <div className="flex items-center gap-1.5"><span className={light ? "text-violet-700" : "text-violet-300"}>•</span> 최대 <span className={light ? "font-semibold text-slate-700" : "font-semibold text-white/85"}>3장</span></div>
+              <div className="flex items-center gap-1.5"><span className={light ? "text-slate-300" : "text-white/25"}>•</span> <span className={light ? "text-slate-400" : "text-white/40"}>PNG/GIF 미지원</span></div>
             </div>
           )}
         </div>
@@ -104,7 +106,7 @@ export default function MmsUploadModal({
         {/* 슬롯 영역 */}
         <div className="p-6">
           {errorMessage && (
-            <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-200">
+            <div className={light ? "mb-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-800" : "mb-4 flex items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-200"}>
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <span>{errorMessage}</span>
             </div>
@@ -115,18 +117,18 @@ export default function MmsUploadModal({
             <button
               onClick={() => setLibOpen(true)}
               disabled={mmsUploading}
-              className={`w-full flex items-center justify-center gap-2 mb-3 py-3 rounded-xl border border-emerald-400/30 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.12] hover:border-emerald-400/50 transition-colors ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}
+              className={light ? `w-full flex items-center justify-center gap-2 mb-3 py-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-50 hover:border-emerald-300 transition-colors ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}` : `w-full flex items-center justify-center gap-2 mb-3 py-3 rounded-xl border border-emerald-400/30 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.12] hover:border-emerald-400/50 transition-colors ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}
             >
-              <FolderOpen className="w-4 h-4 text-emerald-300" />
-              <span className="text-sm font-medium text-emerald-200">라이브러리에서 가져오기 <span className="text-emerald-300/60 text-xs">(MMS 규격 자동 변환)</span></span>
+              <FolderOpen className={light ? "w-4 h-4 text-emerald-700" : "w-4 h-4 text-emerald-300"} />
+              <span className={light ? "text-sm font-medium text-emerald-800" : "text-sm font-medium text-emerald-200"}>라이브러리에서 가져오기 <span className={light ? "text-emerald-700 text-xs" : "text-emerald-300/60 text-xs"}>(MMS 규격 자동 변환)</span></span>
             </button>
           )}
 
           {/* 다중 첨부 */}
           {mmsUploadedImages.length < 3 && (
-            <label className={`flex items-center justify-center gap-2 mb-4 py-3 rounded-xl border-2 border-dashed border-violet-400/40 bg-violet-500/[0.06] cursor-pointer hover:bg-violet-500/[0.12] hover:border-violet-400/60 transition-colors ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
-              <Paperclip className="w-4 h-4 text-violet-300" />
-              <span className="text-sm font-medium text-violet-200">여러 장 한번에 첨부 (최대 {remaining}장)</span>
+            <label className={light ? `flex items-center justify-center gap-2 mb-4 py-3 rounded-xl border-2 border-dashed border-violet-300 bg-violet-50 cursor-pointer hover:bg-violet-50 hover:border-violet-300 transition-colors ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}` : `flex items-center justify-center gap-2 mb-4 py-3 rounded-xl border-2 border-dashed border-violet-400/40 bg-violet-500/[0.06] cursor-pointer hover:bg-violet-500/[0.12] hover:border-violet-400/60 transition-colors ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+              <Paperclip className={light ? "w-4 h-4 text-violet-700" : "w-4 h-4 text-violet-300"} />
+              <span className={light ? "text-sm font-medium text-violet-800" : "text-sm font-medium text-violet-200"}>여러 장 한번에 첨부 (최대 {remaining}장)</span>
               <input
                 type="file"
                 accept={accept}
@@ -162,7 +164,7 @@ export default function MmsUploadModal({
                         draggable={canReorder}
                         onDragStart={canReorder ? (e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(slotIdx)); setDragFrom(slotIdx); } : undefined}
                         onDragEnd={canReorder ? endDrag : undefined}
-                        className={`w-full h-full rounded-xl border overflow-hidden relative group transition-all ${isDropTarget ? 'border-violet-400 ring-2 ring-violet-400/70 bg-violet-500/10' : 'border-emerald-400/40 bg-emerald-500/10'} ${isDragSource ? 'opacity-40' : ''} ${canReorder ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                        className={light ? `w-full h-full rounded-xl border overflow-hidden relative group transition-all ${isDropTarget ? 'border-violet-400 ring-2 ring-violet-300 bg-violet-50' : 'border-emerald-300 bg-emerald-50'} ${isDragSource ? 'opacity-40' : ''} ${canReorder ? 'cursor-grab active:cursor-grabbing' : ''}` : `w-full h-full rounded-xl border overflow-hidden relative group transition-all ${isDropTarget ? 'border-violet-400 ring-2 ring-violet-400/70 bg-violet-500/10' : 'border-emerald-400/40 bg-emerald-500/10'} ${isDragSource ? 'opacity-40' : ''} ${canReorder ? 'cursor-grab active:cursor-grabbing' : ''}`}
                       >
                         <img src={img.url} alt={filenameDisplay} title={filenameDisplay} draggable={false} className="w-full h-full object-cover" />
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
@@ -175,12 +177,12 @@ export default function MmsUploadModal({
                         {canReorder && (
                           <div className="absolute bottom-1 left-1 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                             {slotIdx > 0 && (
-                              <button type="button" onClick={() => handleMmsImageSwap?.(slotIdx, slotIdx - 1)} className="w-6 h-6 rounded-md bg-slate-950/75 hover:bg-violet-600 text-white flex items-center justify-center" aria-label={`${slotIdx + 1}번 사진을 왼쪽 칸과 바꾸기`} title="왼쪽 칸과 바꾸기">
+                              <button type="button" onClick={() => handleMmsImageSwap?.(slotIdx, slotIdx - 1)} className={light ? "w-6 h-6 rounded-md bg-slate-100 hover:bg-violet-600 text-slate-900 flex items-center justify-center" : "w-6 h-6 rounded-md bg-slate-950/75 hover:bg-violet-600 text-white flex items-center justify-center"} aria-label={`${slotIdx + 1}번 사진을 왼쪽 칸과 바꾸기`} title="왼쪽 칸과 바꾸기">
                                 <ChevronLeft className="w-4 h-4" />
                               </button>
                             )}
                             {slotIdx < mmsUploadedImages.length - 1 && (
-                              <button type="button" onClick={() => handleMmsImageSwap?.(slotIdx, slotIdx + 1)} className="w-6 h-6 rounded-md bg-slate-950/75 hover:bg-violet-600 text-white flex items-center justify-center" aria-label={`${slotIdx + 1}번 사진을 오른쪽 칸과 바꾸기`} title="오른쪽 칸과 바꾸기">
+                              <button type="button" onClick={() => handleMmsImageSwap?.(slotIdx, slotIdx + 1)} className={light ? "w-6 h-6 rounded-md bg-slate-100 hover:bg-violet-600 text-slate-900 flex items-center justify-center" : "w-6 h-6 rounded-md bg-slate-950/75 hover:bg-violet-600 text-white flex items-center justify-center"} aria-label={`${slotIdx + 1}번 사진을 오른쪽 칸과 바꾸기`} title="오른쪽 칸과 바꾸기">
                                 <ChevronRight className="w-4 h-4" />
                               </button>
                             )}
@@ -200,17 +202,17 @@ export default function MmsUploadModal({
                       </div>
                     ) : isLockedSlot ? (
                       /* 잠긴 슬롯 */
-                      <div className="w-full h-full rounded-xl border-2 border-dashed border-white/10 bg-white/[0.02] flex flex-col items-center justify-center cursor-not-allowed opacity-50">
-                        <Lock className="w-6 h-6 text-white/25 mb-2" />
-                        <div className="text-xs text-white/40 font-medium">이미지 {slotIdx + 1}</div>
-                        <div className="text-[10px] text-white/25 mt-1 px-2 text-center leading-tight">이미지 {mmsUploadedImages.length + 1}부터<br />순서대로</div>
+                      <div className={light ? "w-full h-full rounded-xl border-2 border-dashed border-slate-200 bg-white flex flex-col items-center justify-center cursor-not-allowed opacity-50" : "w-full h-full rounded-xl border-2 border-dashed border-white/10 bg-white/[0.02] flex flex-col items-center justify-center cursor-not-allowed opacity-50"}>
+                        <Lock className={light ? "w-6 h-6 text-slate-300 mb-2" : "w-6 h-6 text-white/25 mb-2"} />
+                        <div className={light ? "text-xs text-slate-400 font-medium" : "text-xs text-white/40 font-medium"}>이미지 {slotIdx + 1}</div>
+                        <div className={light ? "text-[10px] text-slate-300 mt-1 px-2 text-center leading-tight" : "text-[10px] text-white/25 mt-1 px-2 text-center leading-tight"}>이미지 {mmsUploadedImages.length + 1}부터<br />순서대로</div>
                       </div>
                     ) : (
                       /* 빈 슬롯 (등록 가능) */
-                      <label className={`w-full h-full rounded-xl border-2 border-dashed border-white/15 bg-white/[0.03] flex flex-col items-center justify-center cursor-pointer hover:border-violet-400/50 hover:bg-violet-500/[0.06] transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <Plus className="w-7 h-7 text-white/30 mb-2" />
-                        <div className="text-xs text-white/45 font-medium">이미지 {slotIdx + 1}</div>
-                        <div className="text-[10px] text-white/25 mt-1">{autoFit ? '큰 사진도 가능' : 'JPG · 300KB'}</div>
+                      <label className={light ? `w-full h-full rounded-xl border-2 border-dashed border-slate-300 bg-white flex flex-col items-center justify-center cursor-pointer hover:border-violet-300 hover:bg-violet-50 transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}` : `w-full h-full rounded-xl border-2 border-dashed border-white/15 bg-white/[0.03] flex flex-col items-center justify-center cursor-pointer hover:border-violet-400/50 hover:bg-violet-500/[0.06] transition-all ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <Plus className={light ? "w-7 h-7 text-slate-400 mb-2" : "w-7 h-7 text-white/30 mb-2"} />
+                        <div className={light ? "text-xs text-slate-400 font-medium" : "text-xs text-white/45 font-medium"}>이미지 {slotIdx + 1}</div>
+                        <div className={light ? "text-[10px] text-slate-300 mt-1" : "text-[10px] text-white/25 mt-1"}>{autoFit ? '큰 사진도 가능' : 'JPG · 300KB'}</div>
                         <input
                           type="file"
                           accept={accept}
@@ -225,7 +227,7 @@ export default function MmsUploadModal({
                     )}
                   </div>
                   {/* 파일명 — 동일 이미지/변경 여부 식별용 */}
-                  <div className="mt-1 text-[11px] text-white/45 text-center truncate px-1 min-h-[18px]" title={filenameDisplay}>
+                  <div className={light ? "mt-1 text-[11px] text-slate-400 text-center truncate px-1 min-h-[18px]" : "mt-1 text-[11px] text-white/45 text-center truncate px-1 min-h-[18px]"} title={filenameDisplay}>
                     {filenameDisplay}
                   </div>
                 </div>
@@ -234,11 +236,11 @@ export default function MmsUploadModal({
           </div>
 
           {canReorder && (
-            <p className="mt-3 text-[11px] text-white/50 text-center">사진을 끌어 다른 칸에 놓으면 서로 자리가 바뀌어요. 1번부터 이 순서로 보내요.</p>
+            <p className={light ? "mt-3 text-[11px] text-slate-500 text-center" : "mt-3 text-[11px] text-white/50 text-center"}>사진을 끌어 다른 칸에 놓으면 서로 자리가 바뀌어요. 1번부터 이 순서로 보내요.</p>
           )}
 
           {mmsUploading && (
-            <div className="flex items-center justify-center gap-2 mt-4 text-sm text-violet-300">
+            <div className={light ? "flex items-center justify-center gap-2 mt-4 text-sm text-violet-700" : "flex items-center justify-center gap-2 mt-4 text-sm text-violet-300"}>
               <Loader2 className="w-4 h-4 animate-spin" /> 이미지 업로드 중...
             </div>
           )}
@@ -246,7 +248,7 @@ export default function MmsUploadModal({
 
         {/* 안내 + 확인 */}
         <div className="px-6 pb-6 space-y-3">
-          <div className="flex items-center justify-center gap-1.5 text-[11px] text-amber-300/90 bg-amber-500/[0.08] border border-amber-400/20 rounded-lg px-3 py-2.5 text-center">
+          <div className={light ? "flex items-center justify-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-center" : "flex items-center justify-center gap-1.5 text-[11px] text-amber-300/90 bg-amber-500/[0.08] border border-amber-400/20 rounded-lg px-3 py-2.5 text-center"}>
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
             실제 수신 화면은 이통사 및 휴대폰 기종에 따라 다르게 보일 수 있습니다
           </div>

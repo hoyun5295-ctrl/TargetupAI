@@ -180,15 +180,15 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
 
   return (
     <JourneyModalShell open={open} onClose={onClose} labelledBy="jmap-batch-title" panelClassName="w-full max-w-2xl" disableDismiss={running}>
-      <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-white/10">
+      <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-slate-200">
         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-violet-500 flex items-center justify-center shrink-0">
           <Power className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <h2 id="jmap-batch-title" className="text-sm font-semibold text-white">켜기 전 점검</h2>
-          <p className="mt-0.5 text-[11px] text-white/50">받는 여정부터 차례로 켭니다. 켠 뒤에 조건을 새로 만족한 고객부터 보내요(지난 사건으로는 보내지 않아요).</p>
+          <h2 id="jmap-batch-title" className="text-sm font-semibold text-slate-900">켜기 전 점검</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">받는 여정부터 차례로 켭니다. 켠 뒤에 조건을 새로 만족한 고객부터 보내요(지난 사건으로는 보내지 않아요).</p>
         </div>
-        <button type="button" onClick={onClose} disabled={running} className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-40" aria-label="닫기">
+        <button type="button" onClick={onClose} disabled={running} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40" aria-label="닫기">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -197,11 +197,11 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
         {results ? (
           <div className="space-y-2">
             {results.map((it) => (
-              <div key={it.journeyId} className={`rounded-xl border px-3 py-2.5 flex items-start gap-2.5 ${it.result.ok ? 'border-emerald-400/30 bg-emerald-500/[0.06]' : 'border-rose-400/30 bg-rose-500/[0.06]'}`}>
-                {it.result.ok ? <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-300 shrink-0" /> : <XCircle className="w-4 h-4 mt-0.5 text-rose-300 shrink-0" />}
+              <div key={it.journeyId} className={`rounded-xl border px-3 py-2.5 flex items-start gap-2.5 ${it.result.ok ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}>
+                {it.result.ok ? <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-700 shrink-0" /> : <XCircle className="w-4 h-4 mt-0.5 text-rose-700 shrink-0" />}
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-white">{it.name || nameOf(it.journeyId)}</div>
-                  <p className="mt-0.5 text-[11px] text-white/60">
+                  <div className="text-xs font-semibold text-slate-900">{it.name || nameOf(it.journeyId)}</div>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
                     {it.result.ok ? (it.result.firstActivation ? `켰어요 · ${data.costs.activate} 크레딧` : '다시 켰어요') : it.result.message}
                   </p>
                 </div>
@@ -215,30 +215,30 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
           </div>
         ) : (
           <>
-            {candidates.length === 0 && <div className="text-[11px] text-white/45">켤 초안이나 멈춘 여정이 없어요.</div>}
+            {candidates.length === 0 && <div className="text-[11px] text-slate-400">켤 초안이나 멈춘 여정이 없어요.</div>}
             <div className="space-y-2">
               {candidates.map((c) => {
                 const ck = checks[c.id];
                 const on = selected.has(c.id);
                 return (
-                  <div key={c.id} className={`rounded-xl border px-3 py-3 ${on ? 'border-violet-400/30 bg-violet-500/[0.05]' : 'border-white/10 bg-white/[0.02]'}`}>
+                  <div key={c.id} className={`rounded-xl border px-3 py-3 ${on ? 'border-violet-200 bg-violet-50' : 'border-slate-200 bg-white'}`}>
                     <div className="flex items-center gap-2.5">
                       <input type="checkbox" checked={on} onChange={() => toggle(c.id)} disabled={running} className="w-4 h-4 accent-violet-500" aria-label={`${c.name} 켜기에 넣기`} />
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs font-semibold text-white truncate">{c.name}</div>
-                        <div className="text-[11px] text-white/45">{c.status === 'draft' ? `초안 · 처음 켜기 ${data.costs.activate} 크레딧` : '멈춤 · 다시 켜기 0 크레딧'} · {c.triggerLabel}</div>
+                        <div className="text-xs font-semibold text-slate-900 truncate">{c.name}</div>
+                        <div className="text-[11px] text-slate-400">{c.status === 'draft' ? `초안 · 처음 켜기 ${data.costs.activate} 크레딧` : '멈춤 · 다시 켜기 0 크레딧'} · {c.triggerLabel}</div>
                       </div>
                       {on && (
                         <span className="shrink-0 text-[11px] inline-flex items-center gap-1">
-                          {!ck || ck.state === 'checking' ? <><Loader2 className="w-3.5 h-3.5 animate-spin text-violet-300" /><span className="text-white/50">검증 중</span></>
-                            : ck.state === 'pass' ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" /><span className="text-emerald-200">통과</span></>
-                              : <><AlertCircle className="w-3.5 h-3.5 text-amber-300" /><span className="text-amber-200">고칠 곳</span></>}
+                          {!ck || ck.state === 'checking' ? <><Loader2 className="w-3.5 h-3.5 animate-spin text-violet-700" /><span className="text-slate-500">검증 중</span></>
+                            : ck.state === 'pass' ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" /><span className="text-emerald-800">통과</span></>
+                              : <><AlertCircle className="w-3.5 h-3.5 text-amber-700" /><span className="text-amber-800">고칠 곳</span></>}
                         </span>
                       )}
                     </div>
                     {on && (
                       <div className="mt-2.5 pl-6 space-y-2">
-                        <label className="flex items-center gap-2 text-[11px] text-white/60">
+                        <label className="flex items-center gap-2 text-[11px] text-slate-500">
                           <span className="shrink-0">한 번에 보낼 최대 인원</span>
                           <input
                             value={caps[c.id] ?? ''}
@@ -246,19 +246,19 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                             inputMode="numeric"
                             placeholder="예: 500"
                             disabled={running}
-                            className={`w-28 h-8 px-2 rounded-lg bg-slate-900 border text-xs tabular-nums focus:outline-none focus:border-violet-400 ${capOk(c.id) ? 'border-white/10' : 'border-amber-400/50'}`}
+                            className={`w-28 h-8 px-2 rounded-lg bg-white border text-xs tabular-nums focus:outline-none focus:border-violet-400 ${capOk(c.id) ? 'border-slate-200' : 'border-amber-300'}`}
                           />
-                          <span className="text-white/35">명</span>
+                          <span className="text-slate-400">명</span>
                         </label>
                         {ck?.state === 'pass' && (ck.weeklyCount != null) && (
-                          <p className="text-[11px] text-white/45 tabular-nums">7일 예상 {Number(ck.weeklyCount).toLocaleString('ko-KR')}건 · 발송비 약 {Number(ck.weeklyCost || 0).toLocaleString('ko-KR')}원</p>
+                          <p className="text-[11px] text-slate-400 tabular-nums">7일 예상 {Number(ck.weeklyCount).toLocaleString('ko-KR')}건 · 발송비 약 {Number(ck.weeklyCost || 0).toLocaleString('ko-KR')}원</p>
                         )}
                         {ck?.state === 'fail' && (
                           <div className="space-y-1">
-                            {ck.issues.map((m) => <p key={m} className="text-[11px] text-amber-200/90">{m}</p>)}
+                            {ck.issues.map((m) => <p key={m} className="text-[11px] text-amber-800">{m}</p>)}
                             <div className="flex gap-1.5">
-                              <button type="button" onClick={() => onEditMessages(c)} className="h-7 px-2.5 rounded-lg text-[11px] font-medium text-violet-100 border border-violet-400/30 hover:bg-violet-500/15">문안 고치기</button>
-                              <button type="button" onClick={() => { const rid = ++runId.current; void validateOne(c.id, rid); }} className="h-7 px-2.5 rounded-lg text-[11px] text-white/70 border border-white/15 hover:bg-white/10">다시 검증</button>
+                              <button type="button" onClick={() => onEditMessages(c)} className="h-7 px-2.5 rounded-lg text-[11px] font-medium text-violet-900 border border-violet-200 hover:bg-violet-100">문안 고치기</button>
+                              <button type="button" onClick={() => { const rid = ++runId.current; void validateOne(c.id, rid); }} className="h-7 px-2.5 rounded-lg text-[11px] text-slate-600 border border-slate-300 hover:bg-slate-100">다시 검증</button>
                             </div>
                           </div>
                         )}
@@ -271,18 +271,18 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
 
             {pairs.length > 0 && (
               <section className="space-y-2">
-                <h3 className="text-xs font-semibold text-white">함께 시작되는 여정</h3>
+                <h3 className="text-xs font-semibold text-slate-900">함께 시작되는 여정</h3>
                 {pairs.map((o) => {
                   const k = pairKey(o);
                   return (
-                    <div key={k} className="rounded-xl border border-rose-400/30 bg-rose-500/[0.06] px-3 py-2.5">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-rose-100">
+                    <div key={k} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-rose-900">
                         <Users className="w-3.5 h-3.5 shrink-0" />
                         <span className="truncate">{nameOf(o.a)} · {nameOf(o.b)}</span>
                       </div>
-                      <p className="mt-0.5 text-[11px] text-rose-100/70">같은 구매 한 번에 두 여정이 함께 시작돼 한 고객이 두 여정의 문자를 모두 받을 수 있어요.</p>
+                      <p className="mt-0.5 text-[11px] text-rose-900">같은 구매 한 번에 두 여정이 함께 시작돼 한 고객이 두 여정의 문자를 모두 받을 수 있어요.</p>
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        <button type="button" onClick={() => setAcks((prev) => new Set(prev).add(k))} className={acks.has(k) ? 'h-7 px-2.5 rounded-lg text-[11px] font-semibold bg-rose-500/40 text-white' : 'h-7 px-2.5 rounded-lg text-[11px] text-rose-100 border border-rose-400/30 hover:bg-rose-500/15'}>
+                        <button type="button" onClick={() => setAcks((prev) => new Set(prev).add(k))} className={acks.has(k) ? 'h-7 px-2.5 rounded-lg text-[11px] font-semibold bg-rose-200 text-slate-900' : 'h-7 px-2.5 rounded-lg text-[11px] text-rose-900 border border-rose-200 hover:bg-rose-100'}>
                           알고 둘 다 보냄
                         </button>
                         {(() => {
@@ -292,13 +292,13 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                           const first = [ja, jb].find((j) => j?.triggerEvent === 'purchase.first');
                           if (!order || !first || (order.status !== 'draft' && order.status !== 'paused')) return null;
                           return (
-                            <button type="button" onClick={() => void excludeFirstPurchase(k, order.id)} className="h-7 px-2.5 rounded-lg text-[11px] text-violet-100 border border-violet-400/30 hover:bg-violet-500/15">
+                            <button type="button" onClick={() => void excludeFirstPurchase(k, order.id)} className="h-7 px-2.5 rounded-lg text-[11px] text-violet-900 border border-violet-200 hover:bg-violet-100">
                               {order.name}에서 첫 구매 고객 빼기
                             </button>
                           );
                         })()}
                         {[o.a, o.b].filter((id) => selected.has(id)).map((id) => (
-                          <button key={id} type="button" onClick={() => { toggle(id); setAcks((prev) => { const n = new Set(prev); n.delete(k); return n; }); }} className="h-7 px-2.5 rounded-lg text-[11px] text-white/70 border border-white/15 hover:bg-white/10">
+                          <button key={id} type="button" onClick={() => { toggle(id); setAcks((prev) => { const n = new Set(prev); n.delete(k); return n; }); }} className="h-7 px-2.5 rounded-lg text-[11px] text-slate-600 border border-slate-300 hover:bg-slate-100">
                             {nameOf(id)} 이번엔 켜지 않기
                           </button>
                         ))}
@@ -310,10 +310,10 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
             )}
           </>
         )}
-        {error && <p className="flex items-start gap-1.5 text-[11px] text-amber-200"><AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />{error}</p>}
+        {error && <p className="flex items-start gap-1.5 text-[11px] text-amber-800"><AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />{error}</p>}
       </div>
 
-      <div className="px-5 py-3 border-t border-white/10 flex items-center gap-2">
+      <div className="px-5 py-3 border-t border-slate-200 flex items-center gap-2">
         {results ? (
           <>
             <span className="flex-1" />
@@ -321,7 +321,7 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
           </>
         ) : (
           <>
-            <span className="flex-1 text-[11px] text-white/50 tabular-nums">
+            <span className="flex-1 text-[11px] text-slate-500 tabular-nums">
               {selectedList.length}개 켜기 · {credit > 0 ? `처음 켜기 ${credit} 크레딧` : '크레딧 0'}
               {!allCaps && selectedList.length > 0 ? ' · 최대 인원을 정해 주세요' : !allPass && selectedList.length > 0 ? ' · 검증을 통과해야 켤 수 있어요' : !allAck ? ' · 함께 시작되는 여정을 골라 주세요' : ''}
             </span>

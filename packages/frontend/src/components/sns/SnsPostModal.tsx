@@ -51,7 +51,7 @@ function AuthImage({ url, className, alt = '' }: { url: string; className: strin
   if (src) return <img src={src} alt={alt} className={className} />;
   return (
     <div className={`${className} flex items-center justify-center`}>
-      {failed ? <ImageIcon className="w-5 h-5 text-white/25" /> : <Loader2 className="w-5 h-5 animate-spin text-white/30" />}
+      {failed ? <ImageIcon className="w-5 h-5 text-slate-300" /> : <Loader2 className="w-5 h-5 animate-spin text-slate-400" />}
     </div>
   );
 }
@@ -96,34 +96,34 @@ export default function SnsPostModal({ post, specs, accounts, busyTargetId, onCl
   const noticePart = noticeAt >= 0 ? tailPart.slice(noticeAt) : '';
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="sns-post-modal-title">
-      <div className="w-full max-w-4xl max-h-[90vh] bg-slate-900 border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center gap-3 px-4 sm:px-5 py-3.5 border-b border-white/10">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4 bg-slate-100 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="sns-post-modal-title">
+      <div className="w-full max-w-4xl max-h-[90vh] bg-white border border-slate-200 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="flex items-center gap-3 px-4 sm:px-5 py-3.5 border-b border-slate-200">
           <div className="min-w-0 flex-1">
-            <p id="sns-post-modal-title" className="text-sm font-semibold text-white">올린 글</p>
-            <p className="text-xs text-white/45 mt-0.5 tabular-nums">
+            <p id="sns-post-modal-title" className="text-sm font-semibold text-slate-900">올린 글</p>
+            <p className="text-xs text-slate-400 mt-0.5 tabular-nums">
               {when(post.scheduled_at ?? post.created_at)} · {post.scheduled_at ? '예약해서 올림' : '바로 올림'} · {latest.length}곳
             </p>
           </div>
-          <button ref={closeRef} onClick={onClose} className="p-2 rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors" aria-label="닫기">
+          <button ref={closeRef} onClick={onClose} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors" aria-label="닫기">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 min-h-0 flex-1 overflow-y-auto md:overflow-hidden">
           {/* 왼쪽 — 올린 것 */}
-          <div className="p-4 border-b md:border-b-0 md:border-r border-white/10 flex flex-col gap-2.5 min-h-0">
+          <div className="p-4 border-b md:border-b-0 md:border-r border-slate-200 flex flex-col gap-2.5 min-h-0">
             {photos.length > 0 ? (
               <>
-                <div className="relative aspect-square rounded-xl overflow-hidden bg-slate-950/60">
+                <div className="relative aspect-square rounded-xl overflow-hidden bg-slate-100">
                   <AuthImage url={`/api/sns/media/${photos[Math.min(shown, photos.length - 1)].id}`} className="w-full h-full object-contain" alt="올린 사진" />
                 </div>
                 {photos.length > 1 && (
                   <div className="flex gap-1.5 flex-wrap">
                     {photos.map((m, i) => (
                       <button key={m.id} onClick={() => setShown(i)} aria-label={`${i + 1}번째 사진`} aria-pressed={i === shown}
-                        className={`w-11 h-11 rounded-lg overflow-hidden border transition-colors ${i === shown ? 'border-violet-400/70' : 'border-white/10 hover:border-white/30'}`}>
-                        <AuthImage url={`/api/sns/media/${m.id}?thumb=1`} className="w-full h-full object-cover bg-white/5" />
+                        className={`w-11 h-11 rounded-lg overflow-hidden border transition-colors ${i === shown ? 'border-violet-300' : 'border-slate-200 hover:border-slate-300'}`}>
+                        <AuthImage url={`/api/sns/media/${m.id}?thumb=1`} className="w-full h-full object-cover bg-white" />
                       </button>
                     ))}
                   </div>
@@ -131,12 +131,12 @@ export default function SnsPostModal({ post, specs, accounts, busyTargetId, onCl
               </>
             ) : video ? (
               <div className="relative aspect-square rounded-xl overflow-hidden bg-[radial-gradient(120%_90%_at_30%_20%,#1f2a4a_0%,#0b1224_70%)] flex flex-col items-center justify-center gap-3">
-                <span className="w-14 h-14 rounded-full bg-slate-950/65 flex items-center justify-center"><Play className="w-6 h-6 text-white" /></span>
-                <span className="text-xs text-white/55">영상은 채널에서 볼 수 있어요</span>
+                <span className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center"><Play className="w-6 h-6 text-slate-900" /></span>
+                <span className="text-xs text-slate-500">영상은 채널에서 볼 수 있어요</span>
               </div>
             ) : (
-              <div className="aspect-square rounded-xl bg-slate-950/50 border border-white/10 p-5 overflow-y-auto">
-                <p className="text-[13px] leading-relaxed text-white/80 whitespace-pre-wrap break-keep">{post.body || '(글 없음)'}</p>
+              <div className="aspect-square rounded-xl bg-slate-100 border border-slate-200 p-5 overflow-y-auto">
+                <p className="text-[13px] leading-relaxed text-slate-700 whitespace-pre-wrap break-keep">{post.body || '(글 없음)'}</p>
               </div>
             )}
           </div>
@@ -149,11 +149,11 @@ export default function SnsPostModal({ post, specs, accounts, busyTargetId, onCl
                 return (
                   <button key={x.targetId} role="tab" aria-selected={i === tab} onClick={() => setTab(i)}
                     className={`h-8 px-2.5 rounded-lg border text-xs inline-flex items-center gap-2 transition-colors ${
-                      i === tab ? 'bg-violet-500/15 border-violet-400/45 text-white' : 'bg-white/[0.03] border-white/10 text-white/65 hover:text-white hover:border-white/25'
+                      i === tab ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300'
                     }`}>
                     <span className="relative inline-flex">
                       <SnsChannelLogo platform={x.platform} size={14} />
-                      <i className={`absolute -right-1 -bottom-1 w-1.5 h-1.5 rounded-full ring-2 ring-slate-900 ${s.dot}`} />
+                      <i className={`absolute -right-1 -bottom-1 w-1.5 h-1.5 rounded-full ring-2 ring-slate-200 ${s.dot}`} />
                     </span>
                     {labelOf(x.platform)}
                   </button>
@@ -164,12 +164,12 @@ export default function SnsPostModal({ post, specs, accounts, busyTargetId, onCl
             {t && look && (
               <>
                 <div className="flex items-center gap-2 flex-wrap text-xs">
-                  <span className="text-white/55">{snsTargetAccountName(t, accounts)}</span>
+                  <span className="text-slate-500">{snsTargetAccountName(t, accounts)}</span>
                   <span className={`text-[11px] px-1.5 py-0.5 rounded border ${look.badge}`}>{look.label}</span>
-                  {state === 'gone' && <span className="text-white/40">채널에서 삭제된 것으로 확인됐어요</span>}
+                  {state === 'gone' && <span className="text-slate-400">채널에서 삭제된 것으로 확인됐어요</span>}
                   <div className="flex-1" />
                   {t.permalink && (
-                    <a href={t.permalink} target="_blank" rel="noreferrer" className="text-violet-300 hover:text-violet-200 inline-flex items-center gap-1">
+                    <a href={t.permalink} target="_blank" rel="noreferrer" className="text-violet-700 hover:text-violet-800 inline-flex items-center gap-1">
                       게시물 보기 <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
@@ -177,22 +177,22 @@ export default function SnsPostModal({ post, specs, accounts, busyTargetId, onCl
 
                 {(state === 'fail' || state === 'check') && t.lastError && (
                   <p className={`text-xs leading-relaxed rounded-lg border px-3 py-2 break-keep ${
-                    state === 'check' ? 'text-amber-100 bg-amber-500/[0.08] border-amber-400/25' : 'text-rose-100 bg-rose-500/[0.08] border-rose-400/25'
+                    state === 'check' ? 'text-amber-900 bg-amber-50 border-amber-200' : 'text-rose-900 bg-rose-50 border-rose-200'
                   }`}>{t.lastError}</p>
                 )}
 
-                <p className="text-[11px] text-white/45">이 채널에 올라간 글 그대로</p>
-                <div className="flex-1 min-h-[8rem] md:max-h-[40vh] overflow-y-auto rounded-xl border border-white/10 bg-slate-950/45 px-3.5 py-3 text-[13px] leading-relaxed text-white/80 whitespace-pre-wrap break-words">
+                <p className="text-[11px] text-slate-400">이 채널에 올라간 글 그대로</p>
+                <div className="flex-1 min-h-[8rem] md:max-h-[40vh] overflow-y-auto rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-3 text-[13px] leading-relaxed text-slate-700 whitespace-pre-wrap break-words">
                   {bodyPart}
-                  {tagPart && <span className="text-violet-300">{tagPart}</span>}
-                  {noticePart && <span className="text-white/40">{noticePart}</span>}
-                  {!caption && <span className="text-white/35">(글 없음)</span>}
+                  {tagPart && <span className="text-violet-700">{tagPart}</span>}
+                  {noticePart && <span className="text-slate-400">{noticePart}</span>}
+                  {!caption && <span className="text-slate-400">(글 없음)</span>}
                 </div>
 
                 {action !== 'none' && (
                   <div className="flex gap-2 flex-wrap">
                     {action === 'reconnect' && t.accountId && (
-                      <button onClick={() => onReconnect(t.accountId!)} className={`${OUI_BTN_OUTLINE} !text-amber-100 !border-amber-400/40 hover:!bg-amber-500/15`}>
+                      <button onClick={() => onReconnect(t.accountId!)} className={`${OUI_BTN_OUTLINE} !text-amber-900 !border-amber-300 hover:!bg-amber-100`}>
                         <Link2 className="w-3.5 h-3.5" /> {SNS_ACTION_LABEL.reconnect}
                       </button>
                     )}
@@ -214,8 +214,8 @@ export default function SnsPostModal({ post, specs, accounts, busyTargetId, onCl
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 flex-wrap px-4 sm:px-5 py-3 border-t border-white/10">
-          <span className="text-[11px] text-white/45 break-keep">
+        <div className="flex items-center justify-between gap-3 flex-wrap px-4 sm:px-5 py-3 border-t border-slate-200">
+          <span className="text-[11px] text-slate-400 break-keep">
             {latest.length > 1 ? '채널마다 올라간 글이 다를 수 있어요. 위 탭으로 바꿔 보세요.' : ''}
           </span>
           <button onClick={() => onReuse(post)} className={OUI_BTN_PRIMARY}>

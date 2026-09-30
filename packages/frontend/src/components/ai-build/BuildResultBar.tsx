@@ -43,54 +43,54 @@ export default function BuildResultBar({ handoff, collapsed, onRegenerate, onDis
   });
 
   return (
-    <div className="sticky top-0 z-20 border-b border-violet-400/25 bg-slate-950/90 backdrop-blur">
+    <div className="sticky top-0 z-20 border-b border-violet-200 bg-slate-100 backdrop-blur">
       <div className="px-3 md:px-4 py-2 flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] font-semibold text-violet-200 shrink-0">AI 자동제작 결과</span>
+        <span className="text-[11px] font-semibold text-violet-800 shrink-0">AI 자동제작 결과</span>
         {showFull ? (
           <>
             <ul className="flex items-center gap-3 flex-wrap">
               {verdicts.map((v) => (
                 <li key={v.label} className="inline-flex items-center gap-1.5 text-[12px]">
                   <span className={`w-1.5 h-1.5 rounded-full ${v.ok ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                  <span className="text-white/50">{v.label}</span>
-                  <span className="text-white/85">{v.value}</span>
+                  <span className="text-slate-500">{v.label}</span>
+                  <span className="text-slate-700">{v.value}</span>
                 </li>
               ))}
             </ul>
             <button type="button" onClick={() => setListOpen((v) => !v)} aria-expanded={listOpen}
-              className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] border ${items.length ? 'border-amber-400/40 text-amber-100 bg-amber-500/10 hover:bg-amber-500/20' : 'border-emerald-400/30 text-emerald-100 bg-emerald-500/10'}`}>
+              className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] border ${items.length ? 'border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100' : 'border-emerald-200 text-emerald-900 bg-emerald-50'}`}>
               미반영 {items.length}건 {items.length ? (listOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : null}
             </button>
             <div className="ml-auto flex items-center gap-1">
               <button type="button" onClick={askRegenerate}
-                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[11px] font-semibold text-violet-100 border border-violet-400/30 hover:bg-violet-500/15 transition-colors">
+                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[11px] font-semibold text-violet-900 border border-violet-200 hover:bg-violet-100 transition-colors">
                 <RotateCcw className="w-3.5 h-3.5" /> 다시 만들기
               </button>
               {collapsed && (
-                <button type="button" onClick={() => setExpanded(false)} aria-label="접기" className="h-7 w-7 rounded-lg text-white/50 hover:text-white hover:bg-white/10 inline-flex items-center justify-center"><ChevronUp className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => setExpanded(false)} aria-label="접기" className="h-7 w-7 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center"><ChevronUp className="w-3.5 h-3.5" /></button>
               )}
-              <button type="button" onClick={onDismiss} aria-label="결과 바 닫기" className="h-7 w-7 rounded-lg text-white/50 hover:text-white hover:bg-white/10 inline-flex items-center justify-center"><X className="w-3.5 h-3.5" /></button>
+              <button type="button" onClick={onDismiss} aria-label="결과 바 닫기" className="h-7 w-7 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center"><X className="w-3.5 h-3.5" /></button>
             </div>
           </>
         ) : (
           <>
             <button type="button" onClick={() => setExpanded(true)}
-              className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] border ${items.length ? 'border-amber-400/40 text-amber-100 bg-amber-500/10' : 'border-emerald-400/30 text-emerald-100 bg-emerald-500/10'}`}>
+              className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] border ${items.length ? 'border-amber-300 text-amber-900 bg-amber-50' : 'border-emerald-200 text-emerald-900 bg-emerald-50'}`}>
               미반영 {items.length}건 <ChevronDown className="w-3 h-3" />
             </button>
-            <button type="button" onClick={onDismiss} aria-label="결과 바 닫기" className="ml-auto h-7 w-7 rounded-lg text-white/50 hover:text-white hover:bg-white/10 inline-flex items-center justify-center"><X className="w-3.5 h-3.5" /></button>
+            <button type="button" onClick={onDismiss} aria-label="결과 바 닫기" className="ml-auto h-7 w-7 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center"><X className="w-3.5 h-3.5" /></button>
           </>
         )}
       </div>
       {showFull && listOpen && items.length > 0 && (
         <ul className="px-3 md:px-4 pb-2 space-y-1">
           {items.map((t, i) => (
-            <li key={i} className="flex items-start gap-2 text-[12px] text-white/80"><span className="mt-1.5 w-1 h-1 rounded-full bg-amber-400 shrink-0" />{t}</li>
+            <li key={i} className="flex items-start gap-2 text-[12px] text-slate-700"><span className="mt-1.5 w-1 h-1 rounded-full bg-amber-400 shrink-0" />{t}</li>
           ))}
         </ul>
       )}
       {showFull && (
-        <p className="px-3 md:px-4 pb-2 text-[11px] text-white/40">룰렛·설문은 편집기에서 추가할 수 있어요.</p>
+        <p className="px-3 md:px-4 pb-2 text-[11px] text-slate-400">룰렛·설문은 편집기에서 추가할 수 있어요.</p>
       )}
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     </div>

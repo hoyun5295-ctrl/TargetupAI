@@ -77,9 +77,9 @@ function SnsThumb({ mediaId, count }: { mediaId: string | undefined; count: numb
     return () => { alive = false; if (made) URL.revokeObjectURL(made); };
   }, [mediaId]);
   return (
-    <div className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden border border-white/10 bg-white/5 flex-shrink-0 flex items-center justify-center">
-      {url ? <img src={url} alt="" className="w-full h-full object-cover" /> : <ImageIcon className="w-4 h-4 text-white/25" />}
-      {count > 1 && <span className="absolute right-0.5 bottom-0.5 text-[9px] px-1 rounded bg-slate-950/75 text-white/80">{count}</span>}
+    <div className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden border border-slate-200 bg-white flex-shrink-0 flex items-center justify-center">
+      {url ? <img src={url} alt="" className="w-full h-full object-cover" /> : <ImageIcon className="w-4 h-4 text-slate-300" />}
+      {count > 1 && <span className="absolute right-0.5 bottom-0.5 text-[9px] px-1 rounded bg-slate-100 text-slate-700">{count}</span>}
     </div>
   );
 }
@@ -97,7 +97,7 @@ function SnsCover({ mediaId }: { mediaId: string }) {
   }, [mediaId]);
   return url
     ? <img src={url} alt="" className="w-full h-full object-cover" />
-    : <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-5 h-5 text-white/20" /></div>;
+    : <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-5 h-5 text-slate-300" /></div>;
 }
 
 export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, onAttention, onCompose, onReconnect }: Props) {
@@ -295,12 +295,12 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
     return (
       <div className="mt-3 space-y-2">
         {rows.map((t) => (
-          <div key={t.targetId} className="rounded-lg border border-white/10 bg-slate-950/40 p-2.5">
-            <div className="flex items-center gap-1.5 mb-1 text-[11px] text-white/55">
+          <div key={t.targetId} className="rounded-lg border border-slate-200 bg-slate-100 p-2.5">
+            <div className="flex items-center gap-1.5 mb-1 text-[11px] text-slate-500">
               <SnsChannelLogo platform={t.platform} size={12} />
               {labelOf(t.platform)} · {snsTargetAccountName(t, accounts)}
             </div>
-            <p className="text-[12px] text-white/75 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{t.caption}</p>
+            <p className="text-[12px] text-slate-600 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{t.caption}</p>
           </div>
         ))}
       </div>
@@ -322,52 +322,52 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
     const media = p.media ?? p.media_ids.map((id) => ({ id, kind: 'image' }));
     const first = media[0];
     const toneCls = {
-      rose: 'bg-rose-500/25 text-rose-100 border-rose-400/45',
-      amber: 'bg-amber-500/25 text-amber-100 border-amber-400/40',
-      violet: 'bg-violet-500/25 text-violet-100 border-violet-400/40',
-      gray: 'bg-slate-950/60 text-white/70 border-white/15',
+      rose: 'bg-rose-100 text-rose-900 border-rose-300',
+      amber: 'bg-amber-100 text-amber-900 border-amber-300',
+      violet: 'bg-violet-100 text-violet-900 border-violet-300',
+      gray: 'bg-slate-100 text-slate-600 border-slate-300',
     } as const;
-    const ring = state?.tone === 'rose' ? 'border-rose-400/40' : state?.tone === 'amber' ? 'border-amber-400/35' : 'border-white/10';
+    const ring = state?.tone === 'rose' ? 'border-rose-300' : state?.tone === 'amber' ? 'border-amber-300' : 'border-slate-200';
     const d = new Date(p.scheduled_at ?? p.created_at);
     const day = Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}월 ${d.getDate()}일`;
     return (
       <button key={p.id} onClick={() => setModalPost(p)} aria-label={`${when(p.scheduled_at ?? p.created_at)} 올린 글 열기`}
-        className={`text-left rounded-2xl border ${ring} bg-white/5 hover:bg-white/[0.07] hover:border-violet-400/40 overflow-hidden flex flex-col transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70`}>
-        <div className="relative aspect-square bg-[#0b1224] overflow-hidden">
+        className={`text-left rounded-2xl border ${ring} bg-white hover:bg-slate-100 hover:border-violet-300 overflow-hidden flex flex-col transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300`}>
+        <div className="relative aspect-square bg-slate-100 overflow-hidden">
           {first && first.kind === 'video' ? (
-            <div className="w-full h-full flex items-center justify-center bg-[radial-gradient(120%_90%_at_30%_20%,#1f2a4a_0%,#0b1224_70%)]">
-              <span className="w-10 h-10 rounded-full bg-slate-950/65 flex items-center justify-center"><Play className="w-4 h-4 text-white" /></span>
+            <div className="w-full h-full flex items-center justify-center bg-[radial-gradient(120%_90%_at_30%_20%,#E2E8F0_0%,#CBD5E1_70%)]">
+              <span className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center"><Play className="w-4 h-4 text-slate-900" /></span>
             </div>
           ) : first ? (
             <SnsCover mediaId={first.id} />
           ) : (
-            <div className="w-full h-full p-3.5 bg-gradient-to-br from-[#111a33] to-[#0b1224] relative">
-              <p className="text-xs leading-relaxed text-white/70 whitespace-pre-wrap break-keep line-clamp-[7]">{p.body || '(글 없음)'}</p>
-              <span className="absolute inset-x-0 bottom-0 h-9 bg-gradient-to-b from-transparent to-[#0b1224]" />
+            <div className="w-full h-full p-3.5 bg-gradient-to-br from-slate-50 to-slate-100 relative">
+              <p className="text-xs leading-relaxed text-slate-600 whitespace-pre-wrap break-keep line-clamp-[7]">{p.body || '(글 없음)'}</p>
+              <span className="absolute inset-x-0 bottom-0 h-9 bg-gradient-to-b from-transparent to-slate-100" />
             </div>
           )}
           {media.length > 1 && (
-            <span className="absolute right-2 top-2 text-[11px] px-1.5 rounded-md bg-slate-950/75 text-white/80">{media.length}장</span>
+            <span className="absolute right-2 top-2 text-[11px] px-1.5 rounded-md bg-white/90 text-slate-700">{media.length}장</span>
           )}
           {state && (
             <span className={`absolute left-2 top-2 text-[11px] px-1.5 py-0.5 rounded-md border backdrop-blur-sm ${toneCls[state.tone]}`}>{state.label}</span>
           )}
         </div>
         <div className="p-3 flex flex-col gap-2 flex-1">
-          <p className="text-xs leading-normal text-white/80 line-clamp-2 break-keep min-h-[2.25rem]">{(p.body || '').split('\n')[0] || '(글 없음)'}</p>
+          <p className="text-xs leading-normal text-slate-700 line-clamp-2 break-keep min-h-[2.25rem]">{(p.body || '').split('\n')[0] || '(글 없음)'}</p>
           <div className="mt-auto flex items-center justify-between gap-1.5">
             <span className="flex items-center gap-1.5">
               {latest.map((t) => {
                 const look = SNS_TARGET_DISPLAY[snsTargetDisplayState(t)];
                 return (
                   <span key={t.targetId} className="relative inline-flex" title={`${snsTargetAccountName(t, accounts)} · ${look.label}`}>
-                    <SnsChannelLogo platform={t.platform} size={17} />
-                    <i className={`absolute -right-0.5 -bottom-0.5 w-[7px] h-[7px] rounded-full ring-2 ring-[#0e1528] ${look.dot}`} />
+                    <SnsChannelLogo platform={t.platform} size={12} tile />
+                    <i className={`absolute -right-0.5 -bottom-0.5 w-[7px] h-[7px] rounded-full ring-2 ring-white ${look.dot}`} />
                   </span>
                 );
               })}
             </span>
-            <span className="text-[11px] text-white/45 tabular-nums whitespace-nowrap">{day}</span>
+            <span className="text-[11px] text-slate-400 tabular-nums whitespace-nowrap">{day}</span>
           </div>
         </div>
       </button>
@@ -387,7 +387,7 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
   if (loading) {
     return (
       <div className={`${OUI_CARD} p-8 flex justify-center`}>
-        <Loader2 className="w-5 h-5 animate-spin text-violet-400" />
+        <Loader2 className="w-5 h-5 animate-spin text-violet-600" />
       </div>
     );
   }
@@ -397,37 +397,37 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
       {/* 예약 */}
       {upcoming.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-white/80 inline-flex items-center gap-2">
-            <CalendarClock className="w-4 h-4 text-sky-300" /> 예약 {upcoming.length}
+          <h2 className="text-sm font-semibold text-slate-700 inline-flex items-center gap-2">
+            <CalendarClock className="w-4 h-4 text-sky-700" /> 예약 {upcoming.length}
           </h2>
           {upcomingGroups.map((g) => (
             <div key={g.head} className="space-y-2">
-              <p className="text-[11px] text-white/45">{g.head}</p>
+              <p className="text-[11px] text-slate-400">{g.head}</p>
               {g.items.map((p) => {
                 const latest = p.targets.filter((t) => !t.superseded);
                 const broken = latest.some((t) => t.accountStatus && t.accountStatus !== 'active');
                 const expanded = !!open[p.id];
                 return (
                   <div key={p.id} id={`sns-post-${p.id}`}
-                    className={`${OUI_CARD} p-3.5 sm:p-4 transition-shadow ${flash === p.id ? 'ring-2 ring-violet-400/60' : ''}`}>
+                    className={`${OUI_CARD} p-3.5 sm:p-4 transition-shadow ${flash === p.id ? 'ring-2 ring-violet-300' : ''}`}>
                     <div className="flex items-start gap-3">
                       <SnsThumb mediaId={p.media_ids[0]} count={p.media_ids.length} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-sky-200 tabular-nums inline-flex items-center gap-1">
+                          <span className="text-sm font-semibold text-sky-800 tabular-nums inline-flex items-center gap-1">
                             <Clock className="w-3.5 h-3.5" />{timeOnly(p.nextAt ?? p.scheduled_at)}
                           </span>
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {latest.map((t) => (
-                              <span key={t.targetId} className="inline-flex items-center gap-1 text-[11px] text-white/55">
+                              <span key={t.targetId} className="inline-flex items-center gap-1 text-[11px] text-slate-500">
                                 <SnsChannelLogo platform={t.platform} size={12} />{snsTargetAccountName(t, accounts)}
                               </span>
                             ))}
                           </div>
                         </div>
-                        <p className="text-sm text-white/80 mt-1 line-clamp-2 break-keep">{p.body || '(글 없음)'}</p>
+                        <p className="text-sm text-slate-700 mt-1 line-clamp-2 break-keep">{p.body || '(글 없음)'}</p>
                         {broken && (
-                          <p className="mt-1 text-[11px] text-amber-200/80 break-keep">연결이 끊긴 채널이 있어요. 다시 연결하면 이 시각에 그대로 올라가요.</p>
+                          <p className="mt-1 text-[11px] text-amber-800 break-keep">연결이 끊긴 채널이 있어요. 다시 연결하면 이 시각에 그대로 올라가요.</p>
                         )}
                       </div>
                     </div>
@@ -446,7 +446,7 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
                       </button>
                       <div className="flex-1" />
                       <button onClick={() => setOpen((prev) => ({ ...prev, [p.id]: !expanded }))}
-                        className="text-[11px] text-white/45 hover:text-white/75 inline-flex items-center gap-1">
+                        className="text-[11px] text-slate-400 hover:text-slate-600 inline-flex items-center gap-1">
                         올라갈 글 {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                       </button>
                     </div>
@@ -462,26 +462,26 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
       {/* 올린 기록 — 카드 5 × 2 · 페이지 번호 · 누르면 상세 창 */}
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="text-sm font-semibold text-white/80 inline-flex items-center gap-2">
-            올린 기록 {total > 0 && <span className="text-xs font-medium text-white/35 tabular-nums">{total}개</span>}
-            {pageLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-400" />}
+          <h2 className="text-sm font-semibold text-slate-700 inline-flex items-center gap-2">
+            올린 기록 {total > 0 && <span className="text-xs font-medium text-slate-400 tabular-nums">{total}개</span>}
+            {pageLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-600" />}
           </h2>
           {pageCount > 1 && (
             <nav className="flex items-center gap-1" aria-label="올린 기록 페이지">
               <button onClick={() => goPage(page - 1)} disabled={page <= 1 || pageLoading} aria-label="이전 페이지"
-                className="h-8 min-w-[2rem] px-2 rounded-lg text-white/55 hover:bg-white/10 hover:text-white disabled:opacity-40 disabled:hover:bg-transparent inline-flex items-center justify-center">
+                className="h-8 min-w-[2rem] px-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-40 disabled:hover:bg-transparent inline-flex items-center justify-center">
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
               {pageNumbers.map((n) => (
                 <button key={n} onClick={() => goPage(n)} disabled={pageLoading} aria-current={n === page ? 'page' : undefined}
                   className={`h-8 min-w-[2rem] px-2 rounded-lg text-xs tabular-nums border transition-colors ${
-                    n === page ? 'bg-violet-500/20 border-violet-400/35 text-violet-100 font-semibold' : 'border-transparent text-white/55 hover:bg-white/10 hover:text-white'
+                    n === page ? 'bg-violet-100 border-violet-300 text-violet-900 font-semibold' : 'border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-900'
                   }`}>
                   {n}
                 </button>
               ))}
               <button onClick={() => goPage(page + 1)} disabled={page >= pageCount || pageLoading} aria-label="다음 페이지"
-                className="h-8 min-w-[2rem] px-2 rounded-lg text-white/55 hover:bg-white/10 hover:text-white disabled:opacity-40 disabled:hover:bg-transparent inline-flex items-center justify-center">
+                className="h-8 min-w-[2rem] px-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-40 disabled:hover:bg-transparent inline-flex items-center justify-center">
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </nav>
@@ -489,7 +489,7 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
         </div>
         {posts.length === 0 ? (
           <div className={`${OUI_CARD} ${OUI_EMPTY}`}>
-            <div className={OUI_EMPTY_ICON}><RefreshCw className="w-5 h-5 text-white/40" /></div>
+            <div className={OUI_EMPTY_ICON}><RefreshCw className="w-5 h-5 text-slate-400" /></div>
             <p className={OUI_EMPTY_TITLE}>아직 올린 글이 없어요</p>
             <p className={OUI_EMPTY_DESC}>위에서 사진과 글을 올리면 여기에 쌓입니다.</p>
           </div>

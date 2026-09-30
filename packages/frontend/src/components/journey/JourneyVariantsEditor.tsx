@@ -330,33 +330,33 @@ export default function JourneyVariantsEditor({
   const channelOfActive = (activeVariant?.channel || defaultChannel) as ChannelType;
 
   return (
-    <div className="border-2 border-violet-500/30 rounded-xl bg-violet-500/5 p-4 space-y-3">
+    <div className="border-2 border-violet-200 rounded-xl bg-violet-50 p-4 space-y-3">
       <div className="flex items-center gap-2">
-        <Beaker className="w-4 h-4 text-violet-300" />
-        <h4 className="text-sm font-semibold text-violet-200">A/B 테스트 (Bandit 자동 최적화)</h4>
+        <Beaker className="w-4 h-4 text-violet-700" />
+        <h4 className="text-sm font-semibold text-violet-800">A/B 테스트 (Bandit 자동 최적화)</h4>
         {onClose && (
-          <button onClick={onClose} className="ml-auto p-1 hover:bg-white/10 rounded" title="닫기">
-            <X className="w-3.5 h-3.5 text-white/50" />
+          <button onClick={onClose} className="ml-auto p-1 hover:bg-slate-100 rounded" title="닫기">
+            <X className="w-3.5 h-3.5 text-slate-500" />
           </button>
         )}
       </div>
 
-      <div className="text-[11px] text-violet-200/60 leading-relaxed">
+      <div className="text-[11px] text-violet-800 leading-relaxed">
         Variant A/B/C에 다른 메시지를 작성하면 Thompson Sampling이 누적 발송 결과(클릭/전환)를 학습하여 자동으로 최선의 variant를 선택합니다.
         <br />
-        <span className="text-amber-300/70">구체 혜택(%·원·쿠폰)은 AI가 임의로 만들지 않아요. 관리자가 직접 작성해주세요.</span>
+        <span className="text-amber-700">구체 혜택(%·원·쿠폰)은 AI가 임의로 만들지 않아요. 관리자가 직접 작성해주세요.</span>
       </div>
 
       {/* ★ D211+ Phase A 3번 (2026-05-23 Harold 명시): AI 자동 생성 영역 — 3 톤 (감성/실용/캐주얼) */}
       {!isReadOnly && variants.length < 3 && (
-        <div className="p-2.5 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 border border-violet-400/20 rounded-lg">
+        <div className="p-2.5 bg-gradient-to-br from-violet-50 to-fuchsia-50 border border-violet-200 rounded-lg">
           <div className="flex items-center gap-2 mb-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-violet-300" />
-            <span className="text-[11px] font-semibold text-violet-100">AI 자동 생성: 3 톤 다양화</span>
+            <Sparkles className="w-3.5 h-3.5 text-violet-700" />
+            <span className="text-[11px] font-semibold text-violet-900">AI 자동 생성: 3 톤 다양화</span>
             <button
               onClick={handleAutoGenerate}
               disabled={autoGenerating || !defaultMessageTemplate || defaultMessageTemplate.trim().length < 10}
-              className="ml-auto px-2.5 py-1 bg-violet-500/30 hover:bg-violet-500/50 disabled:opacity-30 text-violet-100 rounded text-[10px] flex items-center gap-1 transition-colors"
+              className="ml-auto px-2.5 py-1 bg-violet-100 hover:bg-violet-200 disabled:opacity-30 text-violet-900 rounded text-[10px] flex items-center gap-1 transition-colors"
             >
               {autoGenerating ? (
                 <><Loader2 className="w-3 h-3 animate-spin" /> 생성 중</>
@@ -365,7 +365,7 @@ export default function JourneyVariantsEditor({
               )}
             </button>
           </div>
-          <div className="text-[10px] text-white/50 leading-relaxed">
+          <div className="text-[10px] text-slate-500 leading-relaxed">
             base 메시지 기준으로 감성적 · 실용적 · 캐주얼 3 톤 자동 생성 (혜택 영역 보존 / 인사·안내·마무리만 톤 다양화).
           </div>
 
@@ -373,25 +373,25 @@ export default function JourneyVariantsEditor({
           {generatedVariants.length > 0 && (
             <div className="mt-2 space-y-1.5">
               {generatedVariants.map((gen, idx) => (
-                <div key={idx} className="p-2 bg-slate-900 border border-white/10 rounded">
+                <div key={idx} className="p-2 bg-white border border-slate-200 rounded">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-100 font-medium">{gen.tone}</span>
-                    <span className="text-[9px] text-white/40 font-mono">{gen.byteCount}바이트</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-900 font-medium">{gen.tone}</span>
+                    <span className="text-[9px] text-slate-400 font-mono">{gen.byteCount}바이트</span>
                     <button
                       onClick={() => handleApplyGenerated(gen)}
                       disabled={saving}
-                      className="ml-auto px-2 py-0.5 bg-emerald-500/30 hover:bg-emerald-500/50 disabled:opacity-30 text-emerald-100 rounded text-[10px] flex items-center gap-1 transition-colors"
+                      className="ml-auto px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 disabled:opacity-30 text-emerald-900 rounded text-[10px] flex items-center gap-1 transition-colors"
                     >
                       <Plus className="w-2.5 h-2.5" /> 적용
                     </button>
                   </div>
-                  <div className="text-[10px] text-white/80 whitespace-pre-wrap leading-relaxed mb-1">{gen.messageTemplate}</div>
+                  <div className="text-[10px] text-slate-700 whitespace-pre-wrap leading-relaxed mb-1">{gen.messageTemplate}</div>
                   {gen.reasoning && (
-                    <div className="text-[9px] text-white/40 italic">{gen.reasoning}</div>
+                    <div className="text-[9px] text-slate-400 italic">{gen.reasoning}</div>
                   )}
                 </div>
               ))}
-              <div className="text-[9px] text-amber-200/60 italic">
+              <div className="text-[9px] text-amber-800 italic">
                 회사 admin 명시 검토 + "적용" 클릭 의무, 자동 저장 X.
               </div>
             </div>
@@ -401,7 +401,7 @@ export default function JourneyVariantsEditor({
           {generationWarnings.length > 0 && (
             <div className="mt-1.5 space-y-0.5">
               {generationWarnings.map((w, idx) => (
-                <div key={idx} className="flex items-start gap-1 text-[9px] text-amber-200/70">
+                <div key={idx} className="flex items-start gap-1 text-[9px] text-amber-800">
                   <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0 mt-0.5" />
                   <span>{w}</span>
                 </div>
@@ -412,14 +412,14 @@ export default function JourneyVariantsEditor({
       )}
 
       {isReadOnly && (
-        <div className="flex items-center gap-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded text-[11px] text-amber-200">
+        <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800">
           <Info className="w-3.5 h-3.5 flex-shrink-0" />
           활성 여정의 variants는 수정 불가. 먼저 일시정지 후 수정해주세요.
         </div>
       )}
 
       {error && (
-        <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded text-[11px] text-rose-200">
+        <div className="p-2 bg-rose-50 border border-rose-200 rounded text-[11px] text-rose-800">
           {error}
         </div>
       )}
@@ -427,45 +427,45 @@ export default function JourneyVariantsEditor({
       {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): winner 자동 선언 안내 카드 (회사 admin 명시 적용 의무 — 자동 변경 X) */}
       {winnerDeclaration && variants.length >= 2 && (
         <div className={`p-3 rounded-lg border ${
-          winnerDeclaration.status === 'winner' ? 'bg-emerald-500/10 border-emerald-400/40' :
-          winnerDeclaration.status === 'leading' ? 'bg-amber-500/10 border-amber-400/40' :
-          'bg-white/5 border-white/10'
+          winnerDeclaration.status === 'winner' ? 'bg-emerald-50 border-emerald-300' :
+          winnerDeclaration.status === 'leading' ? 'bg-amber-50 border-amber-300' :
+          'bg-white border-slate-200'
         }`}>
           <div className="flex items-start gap-2">
             <Trophy className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
-              winnerDeclaration.status === 'winner' ? 'text-emerald-300' :
-              winnerDeclaration.status === 'leading' ? 'text-amber-300' :
-              'text-white/40'
+              winnerDeclaration.status === 'winner' ? 'text-emerald-700' :
+              winnerDeclaration.status === 'leading' ? 'text-amber-700' :
+              'text-slate-400'
             }`} />
             <div className="flex-1 text-[11px]">
               <div className={`font-semibold mb-1 ${
-                winnerDeclaration.status === 'winner' ? 'text-emerald-200' :
-                winnerDeclaration.status === 'leading' ? 'text-amber-200' :
-                'text-white/70'
+                winnerDeclaration.status === 'winner' ? 'text-emerald-800' :
+                winnerDeclaration.status === 'leading' ? 'text-amber-800' :
+                'text-slate-600'
               }`}>
                 {winnerDeclaration.status === 'winner' && '🏆 Winner 자동 선언'}
                 {winnerDeclaration.status === 'leading' && '선두 영역 진입'}
                 {winnerDeclaration.status === 'low_confidence' && '데이터 누적 영역'}
                 {winnerDeclaration.status === 'cold_start' && '초기 탐색 영역'}
               </div>
-              <div className="text-white/70 leading-relaxed mb-2">{winnerDeclaration.reasoning}</div>
+              <div className="text-slate-600 leading-relaxed mb-2">{winnerDeclaration.reasoning}</div>
               {Object.keys(winnerDeclaration.variantProbabilities).length > 0 && (
                 <div className="space-y-1">
-                  <div className="text-[10px] text-white/40">Variant별 winner 확률 (Monte Carlo 1,000회)</div>
+                  <div className="text-[10px] text-slate-400">Variant별 winner 확률 (Monte Carlo 1,000회)</div>
                   {Object.entries(winnerDeclaration.variantProbabilities).map(([vid, prob]) => (
                     <div key={vid} className="flex items-center gap-2">
-                      <div className="text-[10px] text-white/60 w-16">Variant {vid}</div>
-                      <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <div className="text-[10px] text-slate-500 w-16">Variant {vid}</div>
+                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div
                           className={`h-full ${
                             vid === winnerDeclaration.winnerVariantId
                               ? winnerDeclaration.status === 'winner' ? 'bg-emerald-400' : 'bg-amber-400'
-                              : 'bg-white/30'
+                              : 'bg-slate-300'
                           }`}
                           style={{ width: `${prob * 100}%` }}
                         />
                       </div>
-                      <div className="text-[10px] text-white/60 font-mono w-12 text-right">{(prob * 100).toFixed(1)}%</div>
+                      <div className="text-[10px] text-slate-500 font-mono w-12 text-right">{(prob * 100).toFixed(1)}%</div>
                     </div>
                   ))}
                 </div>
@@ -475,8 +475,8 @@ export default function JourneyVariantsEditor({
                   onClick={() => setPendingTrafficApply(true)}
                   className={`mt-2 px-3 py-1 rounded text-[11px] font-medium ${
                     winnerDeclaration.status === 'winner'
-                      ? 'bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100'
-                      : 'bg-amber-500/30 hover:bg-amber-500/50 text-amber-100'
+                      ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900'
+                      : 'bg-amber-100 hover:bg-amber-200 text-amber-900'
                   }`}
                 >
                   권장 traffic 적용 (회사 admin 명시 확인)
@@ -484,15 +484,15 @@ export default function JourneyVariantsEditor({
               )}
               {/* ★ D211+ Phase A-fix (2026-05-23 Harold 명시): native confirm 폐기 — 인라인 confirm 카드 (권장 traffic 적용) */}
               {pendingTrafficApply && winnerDeclaration.winnerVariantId && (
-                <div className="mt-2 p-2.5 bg-slate-950 border border-violet-400/40 rounded-lg">
-                  <div className="text-[11px] text-white/80 mb-2 leading-relaxed">
-                    Variant <span className="font-semibold text-violet-200">{winnerDeclaration.winnerVariantId}</span> 영역 권장 traffic 적용하시겠습니까?
-                    <div className="mt-1 text-[10px] text-white/50">{winnerDeclaration.reasoning}</div>
+                <div className="mt-2 p-2.5 bg-slate-100 border border-violet-300 rounded-lg">
+                  <div className="text-[11px] text-slate-700 mb-2 leading-relaxed">
+                    Variant <span className="font-semibold text-violet-800">{winnerDeclaration.winnerVariantId}</span> 영역 권장 traffic 적용하시겠습니까?
+                    <div className="mt-1 text-[10px] text-slate-500">{winnerDeclaration.reasoning}</div>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => setPendingTrafficApply(false)}
-                      className="flex-1 px-2 py-1 bg-white/5 hover:bg-white/10 text-white/80 rounded text-[10px]"
+                      className="flex-1 px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded text-[10px]"
                     >
                       취소
                     </button>
@@ -529,8 +529,8 @@ export default function JourneyVariantsEditor({
                       }}
                       className={`flex-1 px-2 py-1 rounded text-[10px] font-semibold ${
                         winnerDeclaration.status === 'winner'
-                          ? 'bg-emerald-500/40 hover:bg-emerald-500/60 text-emerald-50'
-                          : 'bg-amber-500/40 hover:bg-amber-500/60 text-amber-50'
+                          ? 'bg-emerald-200 hover:bg-emerald-200 text-emerald-900'
+                          : 'bg-amber-200 hover:bg-amber-200 text-amber-900'
                       }`}
                     >
                       적용
@@ -545,15 +545,15 @@ export default function JourneyVariantsEditor({
 
       {loading ? (
         <div className="flex justify-center py-6">
-          <Loader2 className="w-5 h-5 animate-spin text-violet-300" />
+          <Loader2 className="w-5 h-5 animate-spin text-violet-700" />
         </div>
       ) : variants.length === 0 ? (
-        <div className="text-center py-6 border border-dashed border-white/10 rounded-lg">
-          <p className="text-xs text-white/50 mb-2">A/B 테스트 variants가 없습니다.</p>
+        <div className="text-center py-6 border border-dashed border-slate-200 rounded-lg">
+          <p className="text-xs text-slate-500 mb-2">A/B 테스트 variants가 없습니다.</p>
           <button
             onClick={handleAddVariant}
             disabled={isReadOnly || saving}
-            className="px-3 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 disabled:opacity-50 text-violet-200 rounded text-xs flex items-center gap-1 mx-auto"
+            className="px-3 py-1.5 bg-violet-100 hover:bg-violet-100 disabled:opacity-50 text-violet-800 rounded text-xs flex items-center gap-1 mx-auto"
           >
             <Plus className="w-3 h-3" /> 첫 Variant 추가 (기본 메시지 복제)
           </button>
@@ -561,19 +561,19 @@ export default function JourneyVariantsEditor({
       ) : (
         <>
           {/* Tab — A/B/C */}
-          <div className="flex items-center gap-1 border-b border-white/10">
+          <div className="flex items-center gap-1 border-b border-slate-200">
             {variants.map((v) => (
               <button
                 key={v.id}
                 onClick={() => setActiveTab(v.variantId)}
                 className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
                   activeTab === v.variantId
-                    ? 'border-violet-400 text-violet-200'
-                    : 'border-transparent text-white/40 hover:text-white/70'
+                    ? 'border-violet-400 text-violet-800'
+                    : 'border-transparent text-slate-400 hover:text-slate-600'
                 }`}
               >
                 Variant {v.variantId}
-                <span className="ml-1 text-[10px] text-white/30">
+                <span className="ml-1 text-[10px] text-slate-400">
                   ({(v.trafficWeight * 100).toFixed(0)}%)
                 </span>
               </button>
@@ -582,7 +582,7 @@ export default function JourneyVariantsEditor({
               <button
                 onClick={handleAddVariant}
                 disabled={isReadOnly || saving}
-                className="ml-auto p-1.5 hover:bg-white/10 disabled:opacity-50 rounded text-violet-300"
+                className="ml-auto p-1.5 hover:bg-slate-100 disabled:opacity-50 rounded text-violet-700"
                 title="Variant 추가"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -595,51 +595,51 @@ export default function JourneyVariantsEditor({
             <div className="space-y-3 pt-2">
               {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): funnel 시각화 영역 — 발송 → 클릭 → 전환 매트릭스 */}
               {activeVariant.sentCount > 0 && (
-                <div className="p-3 bg-slate-950/40 border border-white/10 rounded-lg">
+                <div className="p-3 bg-slate-100 border border-slate-200 rounded-lg">
                   <div className="flex items-center gap-1.5 mb-2">
-                    <Activity className="w-3 h-3 text-violet-300" />
-                    <span className="text-[11px] font-semibold text-white/80">Funnel: Variant {activeVariant.variantId}</span>
+                    <Activity className="w-3 h-3 text-violet-700" />
+                    <span className="text-[11px] font-semibold text-slate-700">Funnel: Variant {activeVariant.variantId}</span>
                   </div>
                   <div className="space-y-2">
                     {/* 발송 100% */}
                     <div className="flex items-center gap-2">
-                      <div className="w-16 text-[10px] text-white/60 flex items-center gap-1">
+                      <div className="w-16 text-[10px] text-slate-500 flex items-center gap-1">
                         <Activity className="w-2.5 h-2.5" /> 발송
                       </div>
-                      <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div className="h-full bg-violet-400" style={{ width: '100%' }} />
                       </div>
-                      <div className="text-[10px] text-white/70 font-mono w-20 text-right">
+                      <div className="text-[10px] text-slate-600 font-mono w-20 text-right">
                         {activeVariant.sentCount} (100%)
                       </div>
                     </div>
                     {/* 클릭 */}
                     <div className="flex items-center gap-2">
-                      <div className="w-16 text-[10px] text-white/60 flex items-center gap-1">
+                      <div className="w-16 text-[10px] text-slate-500 flex items-center gap-1">
                         <MousePointerClick className="w-2.5 h-2.5" /> 클릭
                       </div>
-                      <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-cyan-400"
                           style={{ width: `${(activeVariant.clickCount / activeVariant.sentCount) * 100}%` }}
                         />
                       </div>
-                      <div className="text-[10px] text-white/70 font-mono w-20 text-right">
+                      <div className="text-[10px] text-slate-600 font-mono w-20 text-right">
                         {activeVariant.clickCount} ({((activeVariant.clickCount / activeVariant.sentCount) * 100).toFixed(1)}%)
                       </div>
                     </div>
                     {/* 전환 */}
                     <div className="flex items-center gap-2">
-                      <div className="w-16 text-[10px] text-white/60 flex items-center gap-1">
+                      <div className="w-16 text-[10px] text-slate-500 flex items-center gap-1">
                         <ShoppingCart className="w-2.5 h-2.5" /> 전환
                       </div>
-                      <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-emerald-400"
                           style={{ width: `${(activeVariant.conversionCount / activeVariant.sentCount) * 100}%` }}
                         />
                       </div>
-                      <div className="text-[10px] text-white/70 font-mono w-20 text-right">
+                      <div className="text-[10px] text-slate-600 font-mono w-20 text-right">
                         {activeVariant.conversionCount} ({((activeVariant.conversionCount / activeVariant.sentCount) * 100).toFixed(1)}%)
                       </div>
                     </div>
@@ -649,21 +649,21 @@ export default function JourneyVariantsEditor({
 
               {/* Bandit 통계 */}
               <div className="grid grid-cols-4 gap-2">
-                <div className="p-2 bg-white/5 rounded text-center">
-                  <div className="text-[10px] text-white/40">발송</div>
-                  <div className="text-sm font-semibold text-white/90">{activeVariant.sentCount}</div>
+                <div className="p-2 bg-white rounded text-center">
+                  <div className="text-[10px] text-slate-400">발송</div>
+                  <div className="text-sm font-semibold text-slate-800">{activeVariant.sentCount}</div>
                 </div>
-                <div className="p-2 bg-white/5 rounded text-center">
-                  <div className="text-[10px] text-white/40">클릭</div>
-                  <div className="text-sm font-semibold text-white/90">{activeVariant.clickCount}</div>
+                <div className="p-2 bg-white rounded text-center">
+                  <div className="text-[10px] text-slate-400">클릭</div>
+                  <div className="text-sm font-semibold text-slate-800">{activeVariant.clickCount}</div>
                 </div>
-                <div className="p-2 bg-white/5 rounded text-center">
-                  <div className="text-[10px] text-white/40">전환</div>
-                  <div className="text-sm font-semibold text-white/90">{activeVariant.conversionCount}</div>
+                <div className="p-2 bg-white rounded text-center">
+                  <div className="text-[10px] text-slate-400">전환</div>
+                  <div className="text-sm font-semibold text-slate-800">{activeVariant.conversionCount}</div>
                 </div>
-                <div className="p-2 bg-white/5 rounded text-center">
-                  <div className="text-[10px] text-white/40">평균 클릭률</div>
-                  <div className="text-sm font-semibold text-violet-300">
+                <div className="p-2 bg-white rounded text-center">
+                  <div className="text-[10px] text-slate-400">평균 클릭률</div>
+                  <div className="text-sm font-semibold text-violet-700">
                     {((activeVariant.banditAlpha / (activeVariant.banditAlpha + activeVariant.banditBeta)) * 100).toFixed(1)}%
                   </div>
                 </div>
@@ -684,23 +684,23 @@ export default function JourneyVariantsEditor({
                   intervalWidth < 0.25 ? '신뢰도 중간: 추가 발송 후 좁아짐' :
                   '신뢰도 부족: 누적 발송 영역 부족';
                 const reliabilityColor =
-                  intervalWidth < 0.10 ? 'text-emerald-300' :
-                  intervalWidth < 0.25 ? 'text-amber-300' :
-                  'text-rose-300';
+                  intervalWidth < 0.10 ? 'text-emerald-700' :
+                  intervalWidth < 0.25 ? 'text-amber-700' :
+                  'text-rose-700';
                 return (
-                  <div className="p-3 bg-violet-500/5 border border-violet-400/20 rounded-lg">
+                  <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg">
                     <div className="flex items-center justify-between mb-2">
-                      <div className="text-[11px] font-semibold text-violet-200 flex items-center gap-1.5">
+                      <div className="text-[11px] font-semibold text-violet-800 flex items-center gap-1.5">
                         <BarChart3 className="w-3 h-3" />
                         95% 신뢰 구간 (Beta-Bernoulli)
                       </div>
                       <div className={`text-[10px] font-medium ${reliabilityColor}`}>{reliabilityLabel}</div>
                     </div>
                     {/* CI 막대 시각화 — 0~100% 영역 안 lower~upper 범위 표시 + mean 점 */}
-                    <div className="relative h-6 bg-white/5 rounded">
+                    <div className="relative h-6 bg-white rounded">
                       {/* CI 범위 막대 */}
                       <div
-                        className="absolute top-1 bottom-1 bg-violet-400/40 border-l-2 border-r-2 border-violet-300 rounded-sm"
+                        className="absolute top-1 bottom-1 bg-violet-200 border-l-2 border-r-2 border-violet-300 rounded-sm"
                         style={{
                           left: `${lower95 * 100}%`,
                           width: `${Math.max(0.5, (upper95 - lower95) * 100)}%`,
@@ -712,28 +712,28 @@ export default function JourneyVariantsEditor({
                         style={{ left: `calc(${mean * 100}% - 1px)` }}
                       />
                       {/* 눈금 0% / 50% / 100% */}
-                      <div className="absolute -bottom-3.5 left-0 text-[9px] text-white/30">0%</div>
-                      <div className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 text-[9px] text-white/30">50%</div>
-                      <div className="absolute -bottom-3.5 right-0 text-[9px] text-white/30">100%</div>
+                      <div className="absolute -bottom-3.5 left-0 text-[9px] text-slate-400">0%</div>
+                      <div className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 text-[9px] text-slate-400">50%</div>
+                      <div className="absolute -bottom-3.5 right-0 text-[9px] text-slate-400">100%</div>
                     </div>
-                    <div className="mt-5 flex items-center justify-between text-[10px] text-white/60">
+                    <div className="mt-5 flex items-center justify-between text-[10px] text-slate-500">
                       <span>
-                        평균 <span className="font-mono text-violet-200 font-semibold">{meanPct}%</span>
+                        평균 <span className="font-mono text-violet-800 font-semibold">{meanPct}%</span>
                       </span>
                       <span>
-                        95% CI <span className="font-mono text-violet-200">{lowerPct}% ~ {upperPct}%</span>
-                        <span className="ml-1 text-white/30">(폭 {widthPct}%p)</span>
+                        95% CI <span className="font-mono text-violet-800">{lowerPct}% ~ {upperPct}%</span>
+                        <span className="ml-1 text-slate-400">(폭 {widthPct}%p)</span>
                       </span>
                     </div>
-                    <div className="mt-1.5 text-[10px] text-white/40 leading-relaxed">
-                      클릭률은 통계적으로 <span className="text-violet-200/70 font-mono">{lowerPct}%~{upperPct}%</span> 사이 95% 확률.
+                    <div className="mt-1.5 text-[10px] text-slate-400 leading-relaxed">
+                      클릭률은 통계적으로 <span className="text-violet-800 font-mono">{lowerPct}%~{upperPct}%</span> 사이 95% 확률.
                       구간이 좁을수록 자동 winner 선언 신뢰도 높음.
                     </div>
                   </div>
                 );
               })()}
 
-              <div className="text-[10px] text-white/40 flex items-start gap-1.5 leading-relaxed">
+              <div className="text-[10px] text-slate-400 flex items-start gap-1.5 leading-relaxed">
                 <BarChart3 className="w-3 h-3 mt-0.5 flex-shrink-0" />
                 <span>
                   {activeVariant.sentCount < 3
@@ -744,12 +744,12 @@ export default function JourneyVariantsEditor({
 
               {/* channel select */}
               <div>
-                <label className="block text-[11px] text-white/50 mb-1">채널</label>
+                <label className="block text-[11px] text-slate-500 mb-1">채널</label>
                 <select
                   value={channelOfActive}
                   onChange={(e) => handleUpdateVariant(activeVariant, { channel: e.target.value })}
                   disabled={isReadOnly}
-                  className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs disabled:opacity-50"
+                  className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs disabled:opacity-50"
                 >
                   <option value="sms">SMS</option>
                   <option value="lms">LMS</option>
@@ -760,10 +760,10 @@ export default function JourneyVariantsEditor({
 
               {/* traffic_weight 슬라이더 */}
               <div>
-                <label className="block text-[11px] text-white/50 mb-1">
-                  Traffic Weight: <span className="text-violet-300 font-semibold">{(activeVariant.trafficWeight * 100).toFixed(0)}%</span>
+                <label className="block text-[11px] text-slate-500 mb-1">
+                  Traffic Weight: <span className="text-violet-700 font-semibold">{(activeVariant.trafficWeight * 100).toFixed(0)}%</span>
                   {trafficSum > 0 && (
-                    <span className="ml-2 text-[10px] text-white/30">
+                    <span className="ml-2 text-[10px] text-slate-400">
                       (전체 합산 {(trafficSum * 100).toFixed(0)}%, Bandit이 자동 정규화)
                     </span>
                   )}
@@ -784,8 +784,8 @@ export default function JourneyVariantsEditor({
               {channelOfActive === 'kakao' ? (
                 <>
                   <div>
-                    <label className="block text-[11px] text-white/50 mb-1">
-                      알림톡 템플릿 코드 <span className="text-rose-400">*</span>
+                    <label className="block text-[11px] text-slate-500 mb-1">
+                      알림톡 템플릿 코드 <span className="text-rose-600">*</span>
                     </label>
                     <input
                       type="text"
@@ -793,11 +793,11 @@ export default function JourneyVariantsEditor({
                       onChange={(e) => handleUpdateVariant(activeVariant, { alimtalkTemplateCode: e.target.value })}
                       placeholder="kakao_templates.template_code"
                       disabled={isReadOnly}
-                      className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs disabled:opacity-50"
+                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs disabled:opacity-50"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-white/50 mb-1">변수 매핑 (JSON)</label>
+                    <label className="block text-[11px] text-slate-500 mb-1">변수 매핑 (JSON)</label>
                     <textarea
                       value={JSON.stringify(activeVariant.alimtalkVariableMap || {}, null, 2)}
                       onChange={(e) => {
@@ -811,9 +811,9 @@ export default function JourneyVariantsEditor({
                       rows={4}
                       disabled={isReadOnly}
                       placeholder='{"name": "@@고객명@@", "amount": "@@최근구매금액@@"}'
-                      className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs font-mono disabled:opacity-50"
+                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs font-mono disabled:opacity-50"
                     />
-                    <div className="text-[10px] text-white/30 mt-1">
+                    <div className="text-[10px] text-slate-400 mt-1">
                       알림톡 #{`{변수}`} → @@고객필드@@ 형식 매핑 (회사 admin 직접 작성).
                     </div>
                   </div>
@@ -822,9 +822,9 @@ export default function JourneyVariantsEditor({
                 <>
                   {(channelOfActive === 'lms' || channelOfActive === 'mms') && (
                     <div>
-                      <label className="block text-[11px] text-white/50 mb-1">
-                        제목 <span className="text-rose-400">*</span>
-                        <span className="ml-1 text-white/30">(LMS/MMS 필수, 최대 40자)</span>
+                      <label className="block text-[11px] text-slate-500 mb-1">
+                        제목 <span className="text-rose-600">*</span>
+                        <span className="ml-1 text-slate-400">(LMS/MMS 필수, 최대 40자)</span>
                       </label>
                       <input
                         type="text"
@@ -833,19 +833,19 @@ export default function JourneyVariantsEditor({
                         maxLength={40}
                         placeholder="한 줄 제목"
                         disabled={isReadOnly}
-                        className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs disabled:opacity-50"
+                        className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs disabled:opacity-50"
                       />
                     </div>
                   )}
                   <div>
-                    <label className="block text-[11px] text-white/50 mb-1">메시지 본문</label>
+                    <label className="block text-[11px] text-slate-500 mb-1">메시지 본문</label>
                     <textarea
                       value={activeVariant.messageTemplate || ''}
                       onChange={(e) => handleUpdateVariant(activeVariant, { messageTemplate: e.target.value })}
                       rows={5}
                       placeholder="회사 admin이 직접 작성 (AI 임의 혜택 X)"
                       disabled={isReadOnly}
-                      className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs font-mono resize-y disabled:opacity-50"
+                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs font-mono resize-y disabled:opacity-50"
                     />
                   </div>
                 </>
@@ -856,25 +856,25 @@ export default function JourneyVariantsEditor({
                 <>
                   {/* ★ D211+ Phase A-fix (2026-05-23 Harold 명시): native confirm 폐기 — 인라인 삭제 confirm 카드 */}
                   {pendingDelete?.id === activeVariant.id && (
-                    <div className="p-2.5 bg-slate-950 border border-rose-400/40 rounded-lg">
+                    <div className="p-2.5 bg-slate-100 border border-rose-300 rounded-lg">
                       <div className="flex items-start gap-2 mb-2">
-                        <AlertTriangle className="w-3.5 h-3.5 text-rose-300 flex-shrink-0 mt-0.5" />
-                        <span className="text-[11px] text-white/80 leading-relaxed">
-                          Variant <span className="font-semibold text-rose-200">{activeVariant.variantId}</span> 삭제하시겠습니까?
-                          <span className="block text-[10px] text-white/40 mt-0.5">옛 누적 발송/클릭/전환 통계 영역 함께 손실</span>
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-700 flex-shrink-0 mt-0.5" />
+                        <span className="text-[11px] text-slate-700 leading-relaxed">
+                          Variant <span className="font-semibold text-rose-800">{activeVariant.variantId}</span> 삭제하시겠습니까?
+                          <span className="block text-[10px] text-slate-400 mt-0.5">옛 누적 발송/클릭/전환 통계 영역 함께 손실</span>
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => setPendingDelete(null)}
-                          className="flex-1 px-2 py-1 bg-white/5 hover:bg-white/10 text-white/80 rounded text-[10px]"
+                          className="flex-1 px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded text-[10px]"
                         >
                           취소
                         </button>
                         <button
                           onClick={() => executeDeleteVariant(activeVariant)}
                           disabled={saving}
-                          className="flex-1 px-2 py-1 bg-rose-500/40 hover:bg-rose-500/60 disabled:opacity-30 text-rose-50 rounded text-[10px] font-semibold"
+                          className="flex-1 px-2 py-1 bg-rose-200 hover:bg-rose-200 disabled:opacity-30 text-rose-900 rounded text-[10px] font-semibold"
                         >
                           삭제
                         </button>
@@ -882,11 +882,11 @@ export default function JourneyVariantsEditor({
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2 pt-2 border-t border-white/10">
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
                     <button
                       onClick={() => handleSaveVariant(activeVariant)}
                       disabled={saving}
-                      className="flex-1 px-3 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 disabled:opacity-50 text-violet-200 rounded text-xs flex items-center justify-center gap-1"
+                      className="flex-1 px-3 py-1.5 bg-violet-100 hover:bg-violet-100 disabled:opacity-50 text-violet-800 rounded text-xs flex items-center justify-center gap-1"
                     >
                       {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
                       Variant {activeVariant.variantId} 저장
@@ -894,7 +894,7 @@ export default function JourneyVariantsEditor({
                     <button
                       onClick={() => handleDeleteVariant(activeVariant)}
                       disabled={saving || pendingDelete?.id === activeVariant.id}
-                      className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 disabled:opacity-50 text-rose-200 rounded text-xs flex items-center gap-1"
+                      className="px-3 py-1.5 bg-rose-100 hover:bg-rose-100 disabled:opacity-50 text-rose-800 rounded text-xs flex items-center gap-1"
                     >
                       <Trash2 className="w-3 h-3" /> 삭제
                     </button>

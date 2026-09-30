@@ -30,7 +30,7 @@ export const CREDIT_TASK_COSTS: CreditTaskCost[] = [
   { key: 'copy', label: '문안·분석', cost: 5, icon: PenLine },
   { key: 'decorate', label: '꾸미기', cost: 3, icon: Wand2 },
   { key: 'generate', label: '생성·돌려보기', cost: 3, icon: Play },
-  { key: 'image', label: '이미지 생성', cost: 2, icon: ImagePlus }, // ★ 2026-07-19 P4 이미지 스튜디오 (생성 2·4K +2·편집 1)
+  { key: 'image', label: '이미지 생성', cost: 2, icon: ImagePlus }, // ★ 2026-07-19 P4 이미지 스튜디오 (생성 2·편집 1 · 4K 격상은 2026-09-30 제거 · 아래 'image-studio-4k' 이름표는 지난 차감 이력 표시용)
   { key: 'refine', label: '다듬기·질문', cost: 1, icon: Wand2 },
 ];
 

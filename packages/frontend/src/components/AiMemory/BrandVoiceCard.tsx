@@ -319,8 +319,8 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-violet-500/30 bg-slate-900/60 backdrop-blur-md p-6 shadow-2xl">
-        <div className="flex items-center gap-3 text-violet-200">
+      <div className="rounded-2xl border border-violet-200 bg-white backdrop-blur-md p-6 shadow-2xl">
+        <div className="flex items-center gap-3 text-violet-800">
           <Loader2 className="w-5 h-5 animate-spin" />
           <span>회사 Brand Voice 로딩 중...</span>
         </div>
@@ -330,19 +330,19 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
   return (
     <>
-    <div className="rounded-2xl border border-violet-500/30 bg-gradient-to-br from-slate-900/80 via-violet-950/40 to-slate-900/80 backdrop-blur-md shadow-2xl overflow-hidden">
+    <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-slate-50 via-violet-50 to-slate-50 backdrop-blur-md shadow-2xl overflow-hidden">
       {/* 헤더 */}
-      <div className="px-6 py-5 border-b border-violet-500/20 flex items-center justify-between flex-wrap gap-3">
+      <div className="px-6 py-5 border-b border-violet-200 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg">
             <Sparkles className="w-5 h-5 text-white" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-base font-semibold text-white">회사 Brand Voice 가이드라인</h3>
-              <span className="px-1.5 py-0.5 text-[10px] rounded bg-violet-500/20 text-violet-200 border border-violet-500/40 font-semibold">NEW</span>
+              <h3 className="text-base font-semibold text-slate-900">회사 Brand Voice 가이드라인</h3>
+              <span className="px-1.5 py-0.5 text-[10px] rounded bg-violet-100 text-violet-800 border border-violet-300 font-semibold">NEW</span>
             </div>
-            <p className="text-xs text-violet-200/70 mt-0.5">
+            <p className="text-xs text-violet-800 mt-0.5">
               {guideline
                 ? `${messages.length}건 학습 완료. AI 문안이 회사 톤으로 자동 적용 중`
                 : registered
@@ -353,7 +353,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
         </div>
         <button
           onClick={() => setExpanded(!expanded)}
-          className="px-3 py-1.5 text-xs text-violet-200 hover:text-white rounded-lg border border-violet-500/40 hover:bg-violet-500/20 flex items-center gap-1 transition-colors"
+          className="px-3 py-1.5 text-xs text-violet-800 hover:text-slate-900 rounded-lg border border-violet-300 hover:bg-violet-100 flex items-center gap-1 transition-colors"
         >
           {expanded ? <><ChevronUp className="w-3 h-3" />접기</> : <><ChevronDown className="w-3 h-3" />열기</>}
         </button>
@@ -361,13 +361,13 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
       {/* 미적용 안내 (접힌 상태 + 가이드라인 없음 = 브랜드보이스 미적용) */}
       {!expanded && !guideline && (
-        <div className="px-6 py-4 bg-amber-500/10 border-t border-amber-400/20">
+        <div className="px-6 py-4 bg-amber-50 border-t border-amber-200">
           <div className="flex items-start gap-3 text-sm">
-            <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-            <div className="text-violet-100">
-              <strong className="text-amber-200">브랜드보이스 미적용</strong>. AI 문안이 일반 한국어 톤으로 생성됩니다.
+            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="text-violet-900">
+              <strong className="text-amber-800">브랜드보이스 미적용</strong>. AI 문안이 일반 한국어 톤으로 생성됩니다.
               <br />
-              <span className="text-violet-200/70">{registered ? '가이드라인 추출을 누르면' : '대표 문안을 등록하고 가이드라인을 추출하면'} 다음 발송부터 회사 톤으로 자동 작성됩니다.</span>
+              <span className="text-violet-800">{registered ? '가이드라인 추출을 누르면' : '대표 문안을 등록하고 가이드라인을 추출하면'} 다음 발송부터 회사 톤으로 자동 작성됩니다.</span>
             </div>
           </div>
         </div>
@@ -379,14 +379,14 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
           {/* 대표 문안 — 버튼화 + 휴대폰 모달 (인라인 나열 X) */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                <FileText className="w-4 h-4 text-violet-300" />
+              <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-violet-700" />
                 LMS/MMS 대표 문안 ({savedList().length}/10)
               </h4>
               <button
                 onClick={openNewEditor}
                 disabled={savedList().length >= 10}
-                className="px-2.5 py-1 text-xs text-violet-200 hover:text-white rounded border border-violet-500/40 hover:bg-violet-500/20 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-2.5 py-1 text-xs text-violet-800 hover:text-slate-900 rounded border border-violet-300 hover:bg-violet-100 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <Plus className="w-3 h-3" />
                 신규 등록
@@ -396,9 +396,9 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
             {savedList().length === 0 ? (
               <button
                 onClick={openNewEditor}
-                className="w-full rounded-xl bg-slate-950/40 border border-dashed border-white/10 hover:border-violet-400/40 hover:bg-violet-500/5 p-5 text-center text-xs text-white/40 transition-colors"
+                className="w-full rounded-xl bg-slate-100 border border-dashed border-slate-200 hover:border-violet-300 hover:bg-violet-50 p-5 text-center text-xs text-slate-400 transition-colors"
               >
-                아직 등록된 대표 문안이 없습니다. <span className="text-violet-300">신규 등록</span>을 눌러 회사 실제 발송 문안을 넣어주세요.
+                아직 등록된 대표 문안이 없습니다. <span className="text-violet-700">신규 등록</span>을 눌러 회사 실제 발송 문안을 넣어주세요.
               </button>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -406,14 +406,14 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                   <button
                     key={m.id || i}
                     onClick={() => openEditEditor(i)}
-                    className="group text-left rounded-xl bg-slate-950/60 border border-white/10 hover:border-violet-400/40 hover:bg-violet-500/10 px-3 py-2 w-[calc(50%-0.25rem)] md:w-[220px] transition-colors"
+                    className="group text-left rounded-xl bg-slate-100 border border-slate-200 hover:border-violet-300 hover:bg-violet-50 px-3 py-2 w-[calc(50%-0.25rem)] md:w-[220px] transition-colors"
                   >
                     <div className="flex items-center gap-1.5 mb-1">
-                      <span className="text-[10px] font-mono text-violet-300">#{m.priority}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 border border-violet-400/20">{m.channel}</span>
-                      {m.imageUrl && <Image className="w-3 h-3 text-violet-300" />}
+                      <span className="text-[10px] font-mono text-violet-700">#{m.priority}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-200">{m.channel}</span>
+                      {m.imageUrl && <Image className="w-3 h-3 text-violet-700" />}
                     </div>
-                    <div className="text-xs text-white/80 leading-snug line-clamp-2">{m.text || '(본문 없음)'}</div>
+                    <div className="text-xs text-slate-700 leading-snug line-clamp-2">{m.text || '(본문 없음)'}</div>
                   </button>
                 ))}
               </div>
@@ -423,7 +423,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
               <button
                 onClick={extractGuideline}
                 disabled={extracting || !registered}
-                className="px-4 py-2 text-xs bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-500 hover:to-violet-500 text-white rounded-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold shadow-lg"
+                className="px-4 py-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold shadow-lg"
               >
                 {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                 AI 가이드라인 자동 추출
@@ -433,7 +433,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                 <button
                   onClick={extractGuideline}
                   disabled={extracting}
-                  className="px-3 py-2 text-xs text-violet-200 hover:text-white rounded-lg border border-violet-500/40 hover:bg-violet-500/20 flex items-center gap-1 disabled:opacity-50 transition-colors"
+                  className="px-3 py-2 text-xs text-violet-800 hover:text-slate-900 rounded-lg border border-violet-300 hover:bg-violet-100 flex items-center gap-1 disabled:opacity-50 transition-colors"
                 >
                   <RefreshCw className="w-3 h-3" />
                   재추출
@@ -444,18 +444,18 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
           {/* 가이드라인 — 요약 카드 + 전체 보기·정정 모달 (길게 나열 대신 모달) */}
           {guideline && (
-            <div className="rounded-xl bg-gradient-to-br from-violet-950/60 to-fuchsia-950/40 border border-violet-500/30 p-4">
+            <div className="rounded-xl bg-gradient-to-br from-violet-50 to-fuchsia-50 border border-violet-200 p-4">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2 min-w-0">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <h4 className="text-sm font-semibold text-white">Brand Voice 가이드라인</h4>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <h4 className="text-sm font-semibold text-slate-900">Brand Voice 가이드라인</h4>
                   {guideline.admin_edited && (
-                    <span className="px-1.5 py-0.5 text-[10px] rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40">직접 정정됨</span>
+                    <span className="px-1.5 py-0.5 text-[10px] rounded bg-emerald-100 text-emerald-800 border border-emerald-300">직접 정정됨</span>
                   )}
                 </div>
                 <button
                   onClick={() => { setEditingGuideline(false); setShowGuidelineModal(true); }}
-                  className="text-xs text-violet-100 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-400/30 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
+                  className="text-xs text-violet-900 bg-violet-100 hover:bg-violet-100 border border-violet-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
                 >
                   <Pencil className="w-3 h-3" /> 전체 보기·정정
                 </button>
@@ -469,23 +469,23 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
               {showGuidelineModal && createPortal(
                 <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4">
-                  <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-                      <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+                      <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                         Brand Voice 가이드라인
                         {guideline.admin_edited && (
-                          <span className="px-1.5 py-0.5 text-[10px] rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40">직접 정정됨</span>
+                          <span className="px-1.5 py-0.5 text-[10px] rounded bg-emerald-100 text-emerald-800 border border-emerald-300">직접 정정됨</span>
                         )}
                       </h4>
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => setEditingGuideline(!editingGuideline)}
-                          className="text-xs text-violet-200 hover:text-white transition-colors"
+                          className="text-xs text-violet-800 hover:text-slate-900 transition-colors"
                         >
                           {editingGuideline ? '정정 취소' : '직접 정정'}
                         </button>
-                        <button onClick={() => setShowGuidelineModal(false)} className="text-white/50 hover:text-white p-1 rounded hover:bg-white/10" aria-label="닫기"><X className="w-4 h-4" /></button>
+                        <button onClick={() => setShowGuidelineModal(false)} className="text-slate-500 hover:text-slate-900 p-1 rounded hover:bg-slate-100" aria-label="닫기"><X className="w-4 h-4" /></button>
                       </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-5">
@@ -546,22 +546,22 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
               </div>
 
               {guidelineUpdatedAt && (
-                <div className="mt-3 text-[10px] text-white/40 italic">
+                <div className="mt-3 text-[10px] text-slate-400 italic">
                   Data source: 회사 대표 문안 {messages.length}건 + AI 자동 추출 · 마지막 갱신: {new Date(guidelineUpdatedAt).toLocaleString('ko-KR')}
                 </div>
               )}
                     </div>
                     {/* ★ 2026-07-09 (Harold): 초기화 + 저장 footer. 초기화=가이드라인 삭제(대표 문안 유지→재추출 가능). 저장='직접 정정' 편집분 반영. */}
-                    <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-white/10">
+                    <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-slate-200">
                       <button
                         onClick={resetGuideline}
                         disabled={saving}
-                        className="px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 border border-rose-400/30 rounded-lg flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+                        className="px-3 py-2 text-xs text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-lg flex items-center gap-1.5 disabled:opacity-50 transition-colors"
                       >
                         <RotateCcw className="w-3.5 h-3.5" /> 초기화
                       </button>
                       <div className="flex items-center gap-2">
-                        <button onClick={() => setShowGuidelineModal(false)} className="px-4 py-2 text-xs text-white/70 border border-white/15 rounded-lg hover:bg-white/10 transition-colors">닫기</button>
+                        <button onClick={() => setShowGuidelineModal(false)} className="px-4 py-2 text-xs text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors">닫기</button>
                         <button
                           onClick={saveGuideline}
                           disabled={saving || !editingGuideline}
@@ -580,14 +580,14 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
           {/* ★ 2026-07-02 브랜드 링크 — 회사 URL 라이브러리 관리 (문안 편집기 칩 + AI 자동 배치와 같은 데이터) */}
           <div>
-            <h4 className="text-sm font-semibold text-white flex items-center gap-2 mb-2">
-              <Link2 className="w-4 h-4 text-violet-300" />
+            <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-2">
+              <Link2 className="w-4 h-4 text-violet-700" />
               브랜드 링크
             </h4>
-            <p className="text-[11px] text-violet-200/60 mb-2">
+            <p className="text-[11px] text-violet-800 mb-2">
               공식몰·이벤트관 등 회사 URL을 등록하면 문안 편집기에서 칩 클릭 한 번으로 삽입되고, AI가 문안을 만들 때도 등록된 링크만 자동 배치됩니다.
             </p>
-            <BrandLinkChips tone="dark" onToast={onToast} />
+            <BrandLinkChips tone="light" onToast={onToast} />
           </div>
         </div>
       )}
@@ -595,60 +595,60 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
     {editor && (
       <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4">
-        <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-            <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Smartphone className="w-4 h-4 text-violet-300" />
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+            <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <Smartphone className="w-4 h-4 text-violet-700" />
               {editor.index === null ? '신규 대표 문안' : `대표 문안 #${editor.draft.priority} 수정`}
             </h4>
-            <button onClick={() => setEditor(null)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+            <button onClick={() => setEditor(null)} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 md:p-6 flex flex-col md:flex-row gap-6 items-start">
             {/* 입력 */}
             <div className="flex-1 w-full space-y-3">
               <div>
-                <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">채널</label>
+                <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">채널</label>
                 <select
                   value={editor.draft.channel}
                   onChange={(e) => updateDraft({ channel: e.target.value as 'LMS' | 'MMS' })}
-                  className="w-full px-3 py-1.5 text-xs bg-slate-950 border border-white/10 rounded-lg text-white focus:border-violet-500 focus:outline-none"
+                  className="w-full px-3 py-1.5 text-xs bg-slate-100 border border-slate-200 rounded-lg text-slate-900 focus:border-violet-500 focus:outline-none"
                 >
                   <option value="LMS">LMS</option>
                   <option value="MMS">MMS (이미지 첨부)</option>
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">제목 (옵션)</label>
+                <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">제목 (옵션)</label>
                 <input
                   type="text"
                   value={editor.draft.subject}
                   onChange={(e) => updateDraft({ subject: e.target.value })}
                   placeholder="제목 (LMS/MMS 한정)"
-                  className="w-full px-3 py-2 text-xs bg-slate-950 border border-white/10 rounded-lg text-white placeholder-white/30 focus:border-violet-500 focus:outline-none"
+                  className="w-full px-3 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 focus:border-violet-500 focus:outline-none"
                 />
               </div>
               <div>
-                <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">본문 (10자 이상, 2000자 이내)</label>
+                <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">본문 (10자 이상, 2000자 이내)</label>
                 <textarea
                   value={editor.draft.text}
                   onChange={(e) => updateDraft({ text: e.target.value })}
                   placeholder="회사 실제 발송 문안을 그대로 입력해주세요."
                   rows={11}
                   maxLength={2000}
-                  className="w-full px-3 py-2 text-xs bg-slate-950 border border-white/10 rounded-lg text-white placeholder-white/30 focus:border-violet-500 focus:outline-none resize-none"
+                  className="w-full px-3 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 focus:border-violet-500 focus:outline-none resize-none"
                 />
-                <div className="text-[10px] text-white/40 mt-1 text-right">{editor.draft.text.length}자 / 2000자</div>
+                <div className="text-[10px] text-slate-400 mt-1 text-right">{editor.draft.text.length}자 / 2000자</div>
               </div>
               {editor.draft.channel === 'MMS' && (
                 <div>
-                  <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">이미지 URL (옵션)</label>
+                  <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">이미지 URL (옵션)</label>
                   <input
                     type="text"
                     value={editor.draft.imageUrl || ''}
                     onChange={(e) => updateDraft({ imageUrl: e.target.value || null })}
                     placeholder="https://..."
-                    className="w-full px-3 py-2 text-xs bg-slate-950 border border-white/10 rounded-lg text-white placeholder-white/30 focus:border-violet-500 focus:outline-none"
+                    className="w-full px-3 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 focus:border-violet-500 focus:outline-none"
                   />
                 </div>
               )}
@@ -656,29 +656,29 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
             {/* 휴대폰 미리보기 — 크게 + 데스크탑 sticky(입력 스크롤해도 따라옴) */}
             <div className="w-full md:w-[360px] shrink-0 flex justify-center md:sticky md:top-0 md:self-start">
-              <div className="w-full max-w-[330px] rounded-[2.75rem] border-4 border-slate-700 bg-slate-950 p-3 shadow-2xl">
-                <div className="rounded-[2.25rem] bg-slate-900 overflow-hidden">
-                  <div className="px-4 py-2.5 text-center text-xs text-white/40 border-b border-white/5">{editor.draft.channel} 미리보기</div>
+              <div className="w-full max-w-[330px] rounded-[2.75rem] border-4 border-slate-200 bg-slate-100 p-3 shadow-2xl">
+                <div className="rounded-[2.25rem] bg-white overflow-hidden">
+                  <div className="px-4 py-2.5 text-center text-xs text-slate-400 border-b border-slate-100">{editor.draft.channel} 미리보기</div>
                   <div className="p-5 min-h-[460px]">
-                    {editor.draft.subject && <div className="text-sm font-semibold text-white/70 mb-2">{editor.draft.subject}</div>}
-                    <div className="rounded-2xl rounded-tl-sm bg-violet-600/90 text-white text-[15px] px-4 py-3 whitespace-pre-wrap leading-relaxed">{editor.draft.text || '(본문 없음)'}</div>
-                    {editor.draft.imageUrl && <img src={editor.draft.imageUrl} alt="첨부 이미지" className="mt-2.5 rounded-xl max-w-full border border-white/10" />}
+                    {editor.draft.subject && <div className="text-sm font-semibold text-slate-600 mb-2">{editor.draft.subject}</div>}
+                    <div className="rounded-2xl rounded-tl-sm bg-violet-200 text-slate-900 text-[15px] px-4 py-3 whitespace-pre-wrap leading-relaxed">{editor.draft.text || '(본문 없음)'}</div>
+                    {editor.draft.imageUrl && <img src={editor.draft.imageUrl} alt="첨부 이미지" className="mt-2.5 rounded-xl max-w-full border border-slate-200" />}
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-white/10">
+          <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-slate-200">
             <div>
               {editor.draft.id && (
-                <button onClick={deleteFromEditor} className="px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 rounded-lg flex items-center gap-1.5 transition-colors">
+                <button onClick={deleteFromEditor} className="px-3 py-2 text-xs text-rose-700 hover:bg-rose-50 rounded-lg flex items-center gap-1.5 transition-colors">
                   <Trash2 className="w-3.5 h-3.5" /> 삭제
                 </button>
               )}
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setEditor(null)} className="px-4 py-2 text-sm text-white/70 border border-white/15 rounded-lg hover:bg-white/10 transition-colors">닫기</button>
+              <button onClick={() => setEditor(null)} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors">닫기</button>
               <button onClick={saveFromEditor} disabled={saving} className="px-5 py-2 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg flex items-center gap-1.5 font-semibold disabled:opacity-50 transition-colors">
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} 저장
               </button>
@@ -697,9 +697,9 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
 function SummaryChip({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-white/5 border border-white/10 px-2.5 py-2 min-w-0">
-      <div className="text-[10px] text-white/40">{label}</div>
-      <div className="text-xs font-semibold text-white truncate mt-0.5">{value}</div>
+    <div className="rounded-lg bg-white border border-slate-200 px-2.5 py-2 min-w-0">
+      <div className="text-[10px] text-slate-400">{label}</div>
+      <div className="text-xs font-semibold text-slate-900 truncate mt-0.5">{value}</div>
     </div>
   );
 }
@@ -716,13 +716,13 @@ function GuidelineField({
 }) {
   return (
     <div>
-      <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">{label}</label>
+      <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">{label}</label>
       {editing && onChange ? (
         select ? (
           <select
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full px-2 py-1 bg-slate-900 border border-white/10 rounded text-white text-xs focus:border-violet-500 focus:outline-none"
+            className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-slate-900 text-xs focus:border-violet-500 focus:outline-none"
           >
             {select.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>
@@ -733,11 +733,11 @@ function GuidelineField({
             type="text"
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full px-2 py-1 bg-slate-900 border border-white/10 rounded text-white text-xs focus:border-violet-500 focus:outline-none"
+            className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-slate-900 text-xs focus:border-violet-500 focus:outline-none"
           />
         )
       ) : (
-        <div className="px-2 py-1 bg-slate-950/40 rounded text-white/90 text-xs border border-white/5">{value || '(미설정)'}</div>
+        <div className="px-2 py-1 bg-slate-100 rounded text-slate-800 text-xs border border-slate-100">{value || '(미설정)'}</div>
       )}
     </div>
   );
@@ -755,20 +755,20 @@ function GuidelineArrayField({
   const joined = values.join(' / ');
   return (
     <div>
-      <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">{label} ({values.length})</label>
+      <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">{label} ({values.length})</label>
       {editing ? (
         <input
           type="text"
           value={joined}
           onChange={(e) => onChange(e.target.value.split(/\s*\/\s*/).map((s) => s.trim()).filter(Boolean))}
           placeholder="슬래시(/)로 구분, 예: 준비했어요 / 꼭 받아가세요"
-          className="w-full px-2 py-1 bg-slate-900 border border-white/10 rounded text-white text-xs placeholder-white/30 focus:border-violet-500 focus:outline-none"
+          className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-slate-900 text-xs placeholder-slate-400 focus:border-violet-500 focus:outline-none"
         />
       ) : (
-        <div className="px-2 py-1 bg-slate-950/40 rounded text-white/90 text-xs border border-white/5 min-h-[28px]">
+        <div className="px-2 py-1 bg-slate-100 rounded text-slate-800 text-xs border border-slate-100 min-h-[28px]">
           {values.length > 0 ? values.map((v, i) => (
-            <span key={i} className="inline-block px-1.5 py-0.5 mr-1 mb-1 bg-violet-500/20 text-violet-200 rounded text-[10px]">{v}</span>
-          )) : <span className="text-white/30">(없음)</span>}
+            <span key={i} className="inline-block px-1.5 py-0.5 mr-1 mb-1 bg-violet-100 text-violet-800 rounded text-[10px]">{v}</span>
+          )) : <span className="text-slate-400">(없음)</span>}
         </div>
       )}
     </div>

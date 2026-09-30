@@ -19,6 +19,7 @@
  *   - no_model_name_ui_exposure (AI 모델명 노출 0건)
  */
 
+import { useLightSurface } from './zone/surface-tone';
 import { useState, useMemo } from 'react';
 import { X, Sparkles, ArrowRight, Loader2, RotateCcw } from 'lucide-react';
 // ★ 2026-08-08 — Before/After 하이라이트(글자 단위 LCS)는 CT가 소유한다. 여정 다듬기도 같은 것을 쓴다.
@@ -59,6 +60,7 @@ export default function AiRefineModal({
   onClose,
   onApply,
 }: Props) {
+  const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const [tone, setTone] = useState<Tone>('seasonal');
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState<RefineCandidate[]>([]);
@@ -119,25 +121,25 @@ export default function AiRefineModal({
       aria-modal="true"
     >
       {/* 3 column 레이아웃 (좌 원본 / 가운데 ▶ + CTA + 톤 선택 / 우 결과). 모바일은 1단 (lg: 분기). */}
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+      <div className={light ? "bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200" : "bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"}>
         {/* 헤더 — 그라데이션 + violet 액센트 */}
-        <div className="px-6 py-4 border-b border-white/10 bg-gradient-to-r from-violet-500/15 via-fuchsia-500/15 to-purple-500/15 flex justify-between items-center flex-shrink-0">
+        <div className={light ? "px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-violet-50 via-fuchsia-50 to-purple-50 flex justify-between items-center flex-shrink-0" : "px-6 py-4 border-b border-white/10 bg-gradient-to-r from-violet-500/15 via-fuchsia-500/15 to-purple-500/15 flex justify-between items-center flex-shrink-0"}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/40">
-              <Sparkles className="w-5 h-5 text-white" strokeWidth={2.25} />
+              <Sparkles className={light ? "w-5 h-5 text-slate-900" : "w-5 h-5 text-white"} strokeWidth={2.25} />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white leading-tight flex items-center gap-2">
+              <h2 className={light ? "text-base font-bold text-slate-900 leading-tight flex items-center gap-2" : "text-base font-bold text-white leading-tight flex items-center gap-2"}>
                 AI 문안 다듬기
               </h2>
-              <p className="text-[11px] text-white/50 mt-0.5">톤 · 길이 · 이모지 · 스팸 회피를 한 번에</p>
+              <p className={light ? "text-[11px] text-slate-500 mt-0.5" : "text-[11px] text-white/50 mt-0.5"}>톤 · 길이 · 이모지 · 스팸 회피를 한 번에</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={loading}
-            className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white transition-colors disabled:opacity-30"
+            className={light ? "w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-900 transition-colors disabled:opacity-30" : "w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white transition-colors disabled:opacity-30"}
           >
             <X className="w-5 h-5" strokeWidth={2} />
           </button>
@@ -149,23 +151,23 @@ export default function AiRefineModal({
           <div className="space-y-5">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-[11px] font-semibold text-white/50 uppercase tracking-wider">원본 메시지</label>
-                <span className="text-[10px] text-white/30 font-mono">
+                <label className={light ? "text-[11px] font-semibold text-slate-500 uppercase tracking-wider" : "text-[11px] font-semibold text-white/50 uppercase tracking-wider"}>원본 메시지</label>
+                <span className={light ? "text-[10px] text-slate-400 font-mono" : "text-[10px] text-white/30 font-mono"}>
                   {originalMessage.length}자
                 </span>
               </div>
-              <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-white/85 whitespace-pre-wrap break-words min-h-[64px]">
+              <div className={light ? "bg-white border border-slate-200 rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap break-words min-h-[64px]" : "bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-white/85 whitespace-pre-wrap break-words min-h-[64px]"}>
                 {originalMessage.trim()
                   ? originalMessage
-                  : <span className="text-white/30">메시지를 먼저 입력해주세요</span>}
+                  : <span className={light ? "text-slate-400" : "text-white/30"}>메시지를 먼저 입력해주세요</span>}
               </div>
             </div>
           </div>
 
           {/* 가운데 — ▶ + CTA/로딩/다시 다듬기 + (아래) 톤 선택 세로 */}
           <div className="flex lg:flex-col items-center justify-start gap-3 lg:gap-6 lg:pt-8 lg:px-2 lg:min-w-[180px]">
-            <ArrowRight className="hidden lg:block w-12 h-12 text-violet-400" strokeWidth={2.5} />
-            <ArrowRight className="block lg:hidden w-8 h-8 text-violet-300 rotate-90" strokeWidth={2.5} />
+            <ArrowRight className={light ? "hidden lg:block w-12 h-12 text-violet-600" : "hidden lg:block w-12 h-12 text-violet-400"} strokeWidth={2.5} />
+            <ArrowRight className={light ? "block lg:hidden w-8 h-8 text-violet-700 rotate-90" : "block lg:hidden w-8 h-8 text-violet-300 rotate-90"} strokeWidth={2.5} />
 
             {/* CTA — 결과 없고 로딩 아닐 때 */}
             {candidates.length === 0 && !loading && !error && (
@@ -183,8 +185,8 @@ export default function AiRefineModal({
             {/* 로딩 */}
             {loading && (
               <div className="flex flex-col items-center gap-2">
-                <Loader2 className="w-9 h-9 text-violet-400 animate-spin" strokeWidth={2.5} />
-                <p className="text-[11px] text-white/60 text-center leading-tight whitespace-nowrap">다듬는 중...</p>
+                <Loader2 className={light ? "w-9 h-9 text-violet-600 animate-spin" : "w-9 h-9 text-violet-400 animate-spin"} strokeWidth={2.5} />
+                <p className={light ? "text-[11px] text-slate-500 text-center leading-tight whitespace-nowrap" : "text-[11px] text-white/60 text-center leading-tight whitespace-nowrap"}>다듬는 중...</p>
               </div>
             )}
 
@@ -193,7 +195,7 @@ export default function AiRefineModal({
               <button
                 type="button"
                 onClick={handleRefine}
-                className="px-3 py-2 rounded-lg border border-violet-400/40 hover:bg-violet-500/10 text-xs text-violet-200 font-medium flex items-center gap-1 transition-colors whitespace-nowrap"
+                className={light ? "px-3 py-2 rounded-lg border border-violet-300 hover:bg-violet-50 text-xs text-violet-800 font-medium flex items-center gap-1 transition-colors whitespace-nowrap" : "px-3 py-2 rounded-lg border border-violet-400/40 hover:bg-violet-500/10 text-xs text-violet-200 font-medium flex items-center gap-1 transition-colors whitespace-nowrap"}
               >
                 <RotateCcw className="w-3.5 h-3.5" strokeWidth={2} />
                 다시 다듬기
@@ -202,7 +204,7 @@ export default function AiRefineModal({
 
             {/* 톤 선택 — 다듬기 시작 아래 세로 배치 */}
             <div className="w-full mt-4 lg:mt-12">
-              <label className="text-[10px] font-semibold text-white/50 uppercase tracking-wider mb-2 block text-center">톤 선택</label>
+              <label className={light ? "text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2 block text-center" : "text-[10px] font-semibold text-white/50 uppercase tracking-wider mb-2 block text-center"}>톤 선택</label>
               <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
                 {TONES.map((t) => {
                   const active = tone === t.value;
@@ -212,7 +214,11 @@ export default function AiRefineModal({
                       type="button"
                       disabled={loading}
                       onClick={() => setTone(t.value)}
-                      className={`relative px-2.5 py-2.5 rounded-xl border-2 text-left transition-all ${
+                      className={light ? `relative px-2.5 py-2.5 rounded-xl border-2 text-left transition-all ${
+                        active
+                          ? 'border-violet-400 bg-violet-100 shadow-lg shadow-violet-500/20'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-white'
+                      } disabled:opacity-50 disabled:cursor-not-allowed` : `relative px-2.5 py-2.5 rounded-xl border-2 text-left transition-all ${
                         active
                           ? 'border-violet-400 bg-violet-500/15 shadow-lg shadow-violet-500/20'
                           : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/5'
@@ -221,13 +227,13 @@ export default function AiRefineModal({
                       <div className="flex items-center gap-2">
                         <div className="text-lg leading-none flex-shrink-0">{t.emoji}</div>
                         <div className="min-w-0 flex-1">
-                          <div className={`text-xs font-semibold leading-tight ${active ? 'text-violet-100' : 'text-white/90'}`}>{t.label}</div>
-                          <div className={`text-[10px] mt-0.5 leading-tight truncate ${active ? 'text-violet-200/80' : 'text-white/50'}`}>{t.desc}</div>
+                          <div className={light ? `text-xs font-semibold leading-tight ${active ? 'text-violet-900' : 'text-slate-800'}` : `text-xs font-semibold leading-tight ${active ? 'text-violet-100' : 'text-white/90'}`}>{t.label}</div>
+                          <div className={light ? `text-[10px] mt-0.5 leading-tight truncate ${active ? 'text-violet-800' : 'text-slate-500'}` : `text-[10px] mt-0.5 leading-tight truncate ${active ? 'text-violet-200/80' : 'text-white/50'}`}>{t.desc}</div>
                         </div>
                       </div>
                       {active && (
                         <div className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-violet-500 flex items-center justify-center shadow-sm">
-                          <svg className="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
+                          <svg className={light ? "w-2 h-2 text-slate-900" : "w-2 h-2 text-white"} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
                             <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         </div>
@@ -241,15 +247,15 @@ export default function AiRefineModal({
 
           {/* 우측 — 결과 / 에러 / placeholder */}
           <div className="space-y-3">
-            <label className="text-[11px] font-semibold text-white/50 uppercase tracking-wider block">
+            <label className={light ? "text-[11px] font-semibold text-slate-500 uppercase tracking-wider block" : "text-[11px] font-semibold text-white/50 uppercase tracking-wider block"}>
               AI 다듬은 안
             </label>
 
             {/* Placeholder — 다듬기 전 */}
             {candidates.length === 0 && !loading && !error && (
-              <div className="border-2 border-dashed border-white/10 rounded-xl p-6 min-h-[200px] flex items-center justify-center text-center bg-white/[0.02]">
-                <p className="text-xs text-white/40 leading-relaxed">
-                  가운데 <span className="text-violet-300 font-semibold">다듬기 시작</span> 버튼을 누르면<br />
+              <div className={light ? "border-2 border-dashed border-slate-200 rounded-xl p-6 min-h-[200px] flex items-center justify-center text-center bg-white" : "border-2 border-dashed border-white/10 rounded-xl p-6 min-h-[200px] flex items-center justify-center text-center bg-white/[0.02]"}>
+                <p className={light ? "text-xs text-slate-400 leading-relaxed" : "text-xs text-white/40 leading-relaxed"}>
+                  가운데 <span className={light ? "text-violet-700 font-semibold" : "text-violet-300 font-semibold"}>다듬기 시작</span> 버튼을 누르면<br />
                   여기에 AI가 풍성하게 다듬은 결과가 표시됩니다
                 </p>
               </div>
@@ -258,13 +264,13 @@ export default function AiRefineModal({
             {/* 에러 */}
             {error && !loading && (
               <div>
-                <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-400/30 text-sm text-rose-100 leading-relaxed">
+                <div className={light ? "p-4 rounded-xl bg-rose-50 border border-rose-200 text-sm text-rose-900 leading-relaxed" : "p-4 rounded-xl bg-rose-500/10 border border-rose-400/30 text-sm text-rose-100 leading-relaxed"}>
                   {error}
                 </div>
                 <button
                   type="button"
                   onClick={reset}
-                  className="mt-3 w-full py-2.5 rounded-xl border border-white/10 hover:bg-white/5 text-sm text-white/80 font-medium transition-colors"
+                  className={light ? "mt-3 w-full py-2.5 rounded-xl border border-slate-200 hover:bg-white text-sm text-slate-700 font-medium transition-colors" : "mt-3 w-full py-2.5 rounded-xl border border-white/10 hover:bg-white/5 text-sm text-white/80 font-medium transition-colors"}
                 >
                   다시 시도
                 </button>
@@ -285,8 +291,8 @@ export default function AiRefineModal({
                     />
                   ))}
                 </div>
-                <p className="mt-3 text-[11px] text-white/50 text-center leading-relaxed">
-                  <span className="bg-violet-500/30 text-violet-100 font-semibold rounded px-1">강조된 부분</span>이 AI가 풍성하게 다듬은 표현입니다 · 안을 클릭하면 본문에 즉시 적용됩니다
+                <p className={light ? "mt-3 text-[11px] text-slate-500 text-center leading-relaxed" : "mt-3 text-[11px] text-white/50 text-center leading-relaxed"}>
+                  <span className={light ? "bg-violet-100 text-violet-900 font-semibold rounded px-1" : "bg-violet-500/30 text-violet-100 font-semibold rounded px-1"}>강조된 부분</span>이 AI가 풍성하게 다듬은 표현입니다 · 안을 클릭하면 본문에 즉시 적용됩니다
                 </p>
               </div>
             )}
@@ -294,12 +300,12 @@ export default function AiRefineModal({
         </div>
 
         {/* Footer — 다크 톤 정합 */}
-        <div className="px-6 py-3 border-t border-white/10 bg-slate-950/50 flex flex-col items-center gap-1 text-[11px] text-white/50 flex-shrink-0">
+        <div className={light ? "px-6 py-3 border-t border-slate-200 bg-slate-100 flex flex-col items-center gap-1 text-[11px] text-slate-500 flex-shrink-0" : "px-6 py-3 border-t border-white/10 bg-slate-950/50 flex flex-col items-center gap-1 text-[11px] text-white/50 flex-shrink-0"}>
           <span className="flex items-center gap-1">
-            <span className="font-mono text-white/70">%이름%</span> 등 변수 자리 보존 · (광고) 표기 자동 정합
+            <span className={light ? "font-mono text-slate-600" : "font-mono text-white/70"}>%이름%</span> 등 변수 자리 보존 · (광고) 표기 자동 정합
           </span>
-          <span className="text-amber-300 font-medium">AI 결과는 참고용 · 발송 전 반드시 미리보기로 확인하세요</span>
-          <div className="text-[10px] text-white/30 italic mt-1">
+          <span className={light ? "text-amber-700 font-medium" : "text-amber-300 font-medium"}>AI 결과는 참고용 · 발송 전 반드시 미리보기로 확인하세요</span>
+          <div className={light ? "text-[10px] text-slate-400 italic mt-1" : "text-[10px] text-white/30 italic mt-1"}>
             Data source: AI 문안 다듬기 (회사 30일 발송 패턴 학습 + 톤 자동 반영)
           </div>
         </div>
@@ -324,6 +330,7 @@ function ResultCard({
   originalMessage: string;
   onApply: (text: string) => void;
 }) {
+  const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const parts = useMemo(
     () => highlightAdditions(originalMessage, candidate.text),
     [originalMessage, candidate.text],
@@ -337,19 +344,19 @@ function ResultCard({
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') onApply(candidate.text);
       }}
-      className="group relative p-4 rounded-xl border-2 border-white/10 hover:border-violet-400/60 hover:bg-violet-500/5 cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-violet-400/40 bg-white/[0.02]"
+      className={light ? "group relative p-4 rounded-xl border-2 border-slate-200 hover:border-violet-300 hover:bg-violet-50 cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white" : "group relative p-4 rounded-xl border-2 border-white/10 hover:border-violet-400/60 hover:bg-violet-500/5 cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-violet-400/40 bg-white/[0.02]"}
     >
       <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-violet-500/20 group-hover:bg-violet-500/40 flex items-center justify-center text-[11px] font-bold text-violet-200 transition-colors">
+        <div className={light ? "flex-shrink-0 w-7 h-7 rounded-lg bg-violet-100 group-hover:bg-violet-200 flex items-center justify-center text-[11px] font-bold text-violet-800 transition-colors" : "flex-shrink-0 w-7 h-7 rounded-lg bg-violet-500/20 group-hover:bg-violet-500/40 flex items-center justify-center text-[11px] font-bold text-violet-200 transition-colors"}>
           {index + 1}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-white/90 whitespace-pre-wrap break-words leading-relaxed">
+          <p className={light ? "text-sm text-slate-800 whitespace-pre-wrap break-words leading-relaxed" : "text-sm text-white/90 whitespace-pre-wrap break-words leading-relaxed"}>
             {parts.map((p, idx) =>
               p.added ? (
                 <span
                   key={idx}
-                  className="bg-violet-500/30 text-violet-50 font-semibold rounded px-0.5"
+                  className={light ? "bg-violet-100 text-violet-900 font-semibold rounded px-0.5" : "bg-violet-500/30 text-violet-50 font-semibold rounded px-0.5"}
                 >
                   {p.text}
                 </span>
@@ -360,7 +367,11 @@ function ResultCard({
           </p>
           <div className="flex items-center gap-2 mt-2">
             <span
-              className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+              className={light ? `text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                candidate.type === 'SMS'
+                  ? 'bg-cyan-100 text-cyan-800'
+                  : 'bg-amber-100 text-amber-800'
+              }` : `text-[10px] px-2 py-0.5 rounded-full font-semibold ${
                 candidate.type === 'SMS'
                   ? 'bg-cyan-500/20 text-cyan-200'
                   : 'bg-amber-500/20 text-amber-200'
@@ -368,7 +379,7 @@ function ResultCard({
             >
               {candidate.type}
             </span>
-            <span className="text-[11px] text-white/50 font-mono">
+            <span className={light ? "text-[11px] text-slate-500 font-mono" : "text-[11px] text-white/50 font-mono"}>
               {candidate.bytes}B
             </span>
           </div>

@@ -107,18 +107,18 @@ export const LINE_SHORT: Record<LineState, string> = {
 
 /** 칸 종류 → 모양 · 색(Tailwind 완성 리터럴 · 조립 금지). */
 export const CHIP_STYLE: Record<string, { box: string; label: string }> = {
-  message: { box: 'bg-violet-500/10 border border-violet-400/35 text-violet-100', label: '문자' },
-  wait: { box: 'bg-slate-800/60 border border-dashed border-slate-500/50 text-slate-200', label: '대기' },
-  condition: { box: 'bg-cyan-500/10 border border-cyan-400/35 text-cyan-100', label: '조건' },
-  end: { box: 'bg-white/[0.03] border border-white/15 text-white/70', label: '끝' },
-  unknown: { box: 'bg-rose-500/10 border border-rose-400/40 text-rose-100', label: '알 수 없는 칸' },
+  message: { box: 'bg-violet-50 border border-violet-300 text-violet-900', label: '문자' },
+  wait: { box: 'bg-slate-100 border border-dashed border-slate-500/50 text-slate-700', label: '대기' },
+  condition: { box: 'bg-cyan-50 border border-cyan-300 text-cyan-900', label: '조건' },
+  end: { box: 'bg-white border border-slate-300 text-slate-600', label: '끝' },
+  unknown: { box: 'bg-rose-50 border border-rose-300 text-rose-900', label: '알 수 없는 칸' },
 };
 
 export const STATUS_META: Record<string, { label: string; dot: string; rank: number }> = {
   active: { label: '켜짐', dot: 'bg-emerald-400', rank: 0 },
   paused: { label: '멈춤', dot: 'bg-amber-400', rank: 1 },
   draft: { label: '초안', dot: 'bg-slate-400', rank: 2 },
-  ended: { label: '끝남', dot: 'bg-white/30', rank: 3 },
+  ended: { label: '끝남', dot: 'bg-slate-300', rank: 3 },
 };
 
 /** 레인 안 정렬 — 켜짐 → 멈춤 → 초안 → 끝남(디자이너 최종 검증 · 방대해져도 읽히게). */

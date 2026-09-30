@@ -10,10 +10,10 @@ import { AlignLeft, AlignCenter, AlignRight, Plus } from 'lucide-react';
 
 export function PanelBlock({ title, hint, children, right }: { title: string; hint?: string; children: ReactNode; right?: ReactNode }) {
   return (
-    <div className="py-4 border-t border-white/10 first:border-t-0">
+    <div className="py-4 border-t border-slate-200 first:border-t-0">
       <div className="flex items-center gap-2 mb-2.5">
-        <span className="text-[12.5px] font-bold text-white">{title}</span>
-        {hint && <span className="text-[11px] text-white/45">{hint}</span>}
+        <span className="text-[12.5px] font-bold text-slate-900">{title}</span>
+        {hint && <span className="text-[11px] text-slate-400">{hint}</span>}
         {right && <span className="ml-auto">{right}</span>}
       </div>
       {children}
@@ -77,10 +77,10 @@ export function TreatmentTiles({ type, options, value, onChange, color }: { type
         const on = (value || 'classic') === o.value;
         return (
           <button key={o.value} type="button" onClick={() => onChange(o.value)} className="flex flex-col items-center gap-1.5 group" aria-pressed={on}>
-            <span className={`block w-full aspect-[5/6] rounded-lg p-[3px] transition-colors ${on ? 'bg-violet-500 ring-2 ring-violet-400/50' : 'bg-white/10 group-hover:bg-white/20'}`}>
+            <span className={`block w-full aspect-[5/6] rounded-lg p-[3px] transition-colors ${on ? 'bg-violet-500 ring-2 ring-violet-300' : 'bg-slate-100 group-hover:bg-slate-200'}`}>
               <Thumb type={type} value={o.value} color={color} />
             </span>
-            <span className={`text-[11px] ${on ? 'text-white font-bold' : 'text-white/60'}`}>{treatmentName(type, o.value, o.label)}</span>
+            <span className={`text-[11px] ${on ? 'text-slate-900 font-bold' : 'text-slate-500'}`}>{treatmentName(type, o.value, o.label)}</span>
           </button>
         );
       })}
@@ -101,13 +101,13 @@ export function Swatches({ options, value, onChange, custom }: {
         const on = value === o.value;
         return (
           <button key={o.value || 'none'} type="button" title={o.label} aria-label={o.label} aria-pressed={on} onClick={() => onChange(o.value)}
-            className={`w-8 h-8 rounded-lg p-[3px] ${on ? 'ring-2 ring-violet-400 bg-violet-500/30' : 'bg-white/10 hover:bg-white/20'}`}>
+            className={`w-8 h-8 rounded-lg p-[3px] ${on ? 'ring-2 ring-violet-400 bg-violet-100' : 'bg-slate-100 hover:bg-slate-200'}`}>
             <span className="block w-full h-full rounded-md border border-black/10" style={{ background: o.color }} />
           </button>
         );
       })}
       {custom && (
-        <label className="w-8 h-8 rounded-lg border border-dashed border-white/25 flex items-center justify-center cursor-pointer text-white/55 hover:text-white relative overflow-hidden" title="색 직접 고르기">
+        <label className="w-8 h-8 rounded-lg border border-dashed border-slate-300 flex items-center justify-center cursor-pointer text-slate-500 hover:text-slate-900 relative overflow-hidden" title="색 직접 고르기">
           <Plus className="w-4 h-4" />
           <input type="color" value={custom.value || '#8b5cf6'} onChange={(e) => custom.onChange(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="색 직접 고르기" />
         </label>
@@ -118,10 +118,10 @@ export function Swatches({ options, value, onChange, custom }: {
 
 export function Segmented<T extends string>({ options, value, onChange }: { options: Array<{ value: T; label: ReactNode; aria?: string }>; value: T; onChange: (v: T) => void }) {
   return (
-    <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.03] p-1">
+    <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
       {options.map((o) => (
         <button key={o.value} type="button" aria-label={o.aria} aria-pressed={value === o.value} onClick={() => onChange(o.value)}
-          className={`h-8 px-3 rounded-lg text-[12.5px] font-semibold inline-flex items-center justify-center ${value === o.value ? 'bg-violet-600 text-white' : 'text-white/65 hover:text-white'}`}>{o.label}</button>
+          className={`h-8 px-3 rounded-lg text-[12.5px] font-semibold inline-flex items-center justify-center ${value === o.value ? 'bg-violet-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}>{o.label}</button>
       ))}
     </div>
   );

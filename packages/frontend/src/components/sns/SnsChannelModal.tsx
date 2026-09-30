@@ -41,24 +41,24 @@ export default function SnsChannelModal({
 
   return (
     // ★ 2026-09-24 바깥을 눌러 닫지 않는다(설계 0924 · 닫기는 X 버튼)
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-white/10">
-          <div className="w-10 h-10 rounded-xl bg-white/[0.08] border border-white/15 flex items-center justify-center flex-shrink-0">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-100 backdrop-blur-sm">
+      <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200">
+          <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-300 flex items-center justify-center flex-shrink-0">
             <SnsChannelLogo platform={platform} size={22} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-white">{label}</p>
-            <p className="text-[11px] text-white/50 mt-0.5">{abilityText}</p>
+            <p className="text-sm font-semibold text-slate-900">{label}</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">{abilityText}</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors" aria-label="닫기">
+          <button onClick={onClose} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors" aria-label="닫기">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="px-5 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
           {accounts.length === 0 && (
-            <p className="text-xs text-white/50 py-6 text-center">연결된 계정이 없습니다.</p>
+            <p className="text-xs text-slate-500 py-6 text-center">연결된 계정이 없습니다.</p>
           )}
 
           {accounts.map((a) => {
@@ -66,49 +66,49 @@ export default function SnsChannelModal({
             const left = daysLeft(a.tokenExpiresAt);
             const needsReconnect = snsNeedsReconnect(a);
             return (
-              <div key={a.id} className="rounded-xl bg-white/[0.04] border border-white/10 p-3.5">
+              <div key={a.id} className="rounded-xl bg-white border border-slate-200 p-3.5">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-full bg-white/10 overflow-hidden flex items-center justify-center flex-shrink-0">
+                  <div className="w-9 h-9 rounded-full bg-slate-100 overflow-hidden flex items-center justify-center flex-shrink-0">
                     {a.avatarUrl
                       ? <img src={a.avatarUrl} alt="" className="w-full h-full object-cover" />
-                      : <span className="text-[11px] text-white/50">{(a.username || a.displayName || '?').slice(0, 2)}</span>}
+                      : <span className="text-[11px] text-slate-500">{(a.username || a.displayName || '?').slice(0, 2)}</span>}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-white truncate">{snsAccountName(a, accounts)}</p>
-                    {a.displayName && a.username && <p className="text-[11px] text-white/45 truncate">{a.displayName}</p>}
+                    <p className="text-sm text-slate-900 truncate">{snsAccountName(a, accounts)}</p>
+                    {a.displayName && a.username && <p className="text-[11px] text-slate-400 truncate">{a.displayName}</p>}
                   </div>
                   {badge && <span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${badge.cls}`}>{badge.label}</span>}
                 </div>
 
                 {a.statusReason && (
-                  <div className="mt-2.5 flex items-start gap-1.5 rounded-lg bg-amber-500/10 border border-amber-400/25 px-2.5 py-2">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-300 flex-shrink-0 mt-0.5" />
-                    <p className="text-[11px] text-amber-100 leading-relaxed break-keep">{a.statusReason}</p>
+                  <div className="mt-2.5 flex items-start gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-700 flex-shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-amber-900 leading-relaxed break-keep">{a.statusReason}</p>
                   </div>
                 )}
 
                 <dl className="mt-3 space-y-1.5">
                   <div className="flex justify-between gap-3 text-[11.5px]">
-                    <dt className="text-white/45">연결한 날</dt>
-                    <dd className="text-white/80">{fmt(a.connectedAt)}</dd>
+                    <dt className="text-slate-400">연결한 날</dt>
+                    <dd className="text-slate-700">{fmt(a.connectedAt)}</dd>
                   </div>
                   <div className="flex justify-between gap-3 text-[11.5px]">
-                    <dt className="text-white/45">마지막 확인</dt>
-                    <dd className="text-white/80">{fmt(a.lastVerifiedAt)}</dd>
+                    <dt className="text-slate-400">마지막 확인</dt>
+                    <dd className="text-slate-700">{fmt(a.lastVerifiedAt)}</dd>
                   </div>
                   {left !== null && (
                     <div className="flex justify-between gap-3 text-[11.5px]">
-                      <dt className="text-white/45">연결 유지</dt>
+                      <dt className="text-slate-400">연결 유지</dt>
                       {/* ★ 2026-09-24 C4 — 연장이 실패하고 있으면 '자동 연장'이라고 말하지 않는다 · Threads 에는 쓰지 않는다 */}
-                      <dd className={a.renewFailing ? 'text-amber-200' : 'text-white/80'}>
+                      <dd className={a.renewFailing ? 'text-amber-800' : 'text-slate-700'}>
                         {left}일 남음{a.renewFailing ? ' · 연장이 안 되고 있어요. 다시 연결해 주세요.' : platform !== 'threads' ? ' · 자동 연장' : ''}
                       </dd>
                     </div>
                   )}
                   {(a.waitingScheduled ?? 0) > 0 && (
                     <div className="flex justify-between gap-3 text-[11.5px]">
-                      <dt className="text-white/45">기다리는 예약</dt>
-                      <dd className="text-white/80">{a.waitingScheduled}건</dd>
+                      <dt className="text-slate-400">기다리는 예약</dt>
+                      <dd className="text-slate-700">{a.waitingScheduled}건</dd>
                     </div>
                   )}
                 </dl>
@@ -117,7 +117,7 @@ export default function SnsChannelModal({
                   {(needsReconnect || a.renewFailing || a.status === 'ineligible') && (
                     <button
                       onClick={() => onReconnect(a.id)}
-                      className="h-8 px-2.5 rounded-lg text-[11.5px] font-medium text-violet-200 border border-violet-400/30 hover:bg-violet-500/15 inline-flex items-center gap-1.5 transition-colors"
+                      className="h-8 px-2.5 rounded-lg text-[11.5px] font-medium text-violet-800 border border-violet-200 hover:bg-violet-100 inline-flex items-center gap-1.5 transition-colors"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
                       다시 연결
@@ -126,7 +126,7 @@ export default function SnsChannelModal({
                   {a.status !== 'revoked' && (
                     <button
                       onClick={() => onDisconnect(a)}
-                      className="h-8 px-2.5 rounded-lg text-[11.5px] font-medium text-rose-200 bg-rose-500/10 border border-rose-400/25 hover:bg-rose-500/20 inline-flex items-center gap-1.5 transition-colors"
+                      className="h-8 px-2.5 rounded-lg text-[11.5px] font-medium text-rose-800 bg-rose-50 border border-rose-200 hover:bg-rose-100 inline-flex items-center gap-1.5 transition-colors"
                     >
                       <Unlink className="w-3.5 h-3.5" />
                       연결 해제

@@ -19,8 +19,8 @@ export default function ImageToCopyButton({ onExtracted, onStructured, className
 }) {
   const [open, setOpen] = useState(false);
   const base = label
-    ? 'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-400/40 bg-violet-500/10 text-violet-100 text-sm font-medium hover:bg-violet-500/20 disabled:opacity-40 transition-colors'
-    : 'inline-flex items-center justify-center w-10 h-10 rounded-xl border border-white/15 bg-white/5 text-violet-200 hover:bg-violet-500/20 hover:border-violet-400/40 disabled:opacity-40 transition-colors';
+    ? 'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-300 bg-violet-50 text-violet-900 text-sm font-medium hover:bg-violet-100 disabled:opacity-40 transition-colors'
+    : 'inline-flex items-center justify-center w-10 h-10 rounded-xl border border-slate-300 bg-white text-violet-800 hover:bg-violet-100 hover:border-violet-300 disabled:opacity-40 transition-colors';
   return (
     <>
       <button

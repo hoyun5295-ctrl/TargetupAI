@@ -216,9 +216,12 @@ describe('허브 타일 계약 (§3-11)', () => {
   });
 
   it('AI 자율 예측은 버린 것이 아니라 AI 메모리 안에서 들어간다 — 입구 실존', () => {
+    // ★ 2026-09-30 AI 존 대개편: 머리 버튼 → 같은 탭 줄(AI_MEMORY_TABS). 입구는 탭 목록이 소유하고 AI 메모리 화면이 그 탭을 건다.
     const MEMORY = readFileSync(resolve(FRONT, 'pages/AiMemoryPage.tsx'), 'utf8');
+    const TABS = readFileSync(resolve(FRONT, 'components/zone/zone-tabs.ts'), 'utf8');
     expect(MEMORY, '타일만 내리고 입구를 안 내면 주소를 아는 사람만 쓰는 죽은 기능이 된다')
-      .toMatch(/navigate\('\/predictive'\)/);
+      .toMatch(/tabs=\{AI_MEMORY_TABS\}/);
+    expect(TABS).toMatch(/to: '\/predictive'/);
     expect(MODULES).not.toMatch(/label: 'AI 자율 예측'/);
   });
 

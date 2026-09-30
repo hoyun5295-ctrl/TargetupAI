@@ -16,14 +16,15 @@
 import { Check, Clock, Loader2, RefreshCw, AlertTriangle, Circle, ChevronRight } from 'lucide-react';
 import type { CdpProviderKey } from '../../utils/cdp-provider-keys';
 import type { CdpIntegrationBadge, CdpProviderStatus } from '../../hooks/useCdpIntegrationStatus';
+import MallLogo from '../zone/MallLogo';
 
 /** 배지의 겉모습 — 의미(문구)는 훅이, 픽셀은 여기가 소유한다. */
 const BADGE_VIEW: Record<CdpIntegrationBadge, { chip: string; Icon: typeof Check }> = {
-  receiving: { chip: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/25', Icon: Check },
-  awaiting: { chip: 'bg-amber-500/15 text-amber-200 border-amber-400/25', Icon: Clock },
-  preparing: { chip: 'bg-violet-500/15 text-violet-200 border-violet-400/25', Icon: Loader2 },
-  action: { chip: 'bg-rose-500/15 text-rose-200 border-rose-400/25', Icon: AlertTriangle },
-  disconnected: { chip: 'bg-white/[0.06] text-white/45 border-white/12', Icon: Circle },
+  receiving: { chip: 'bg-emerald-100 text-emerald-700 border-emerald-200', Icon: Check },
+  awaiting: { chip: 'bg-amber-100 text-amber-800 border-amber-200', Icon: Clock },
+  preparing: { chip: 'bg-violet-100 text-violet-800 border-violet-200', Icon: Loader2 },
+  action: { chip: 'bg-rose-100 text-rose-800 border-rose-200', Icon: AlertTriangle },
+  disconnected: { chip: 'bg-white text-slate-400 border-slate-200', Icon: Circle },
 };
 
 /**
@@ -47,40 +48,42 @@ export interface CdpIntegrationDashboardProps {
   onOpen: (key: CdpProviderKey) => void;
   onRefresh?: () => void;
   loading?: boolean;
+  /** ★ 2026-09-30 AI 존 대개편: 요약 3지표를 화면 명령 카드가 보여 주면 여기서는 그리지 않는다(같은 숫자 두 번 금지) */
+  hideSummary?: boolean;
 }
 
 function SummaryTile({ n, label, tone }: { n: number; label: string; tone: string }) {
   return (
-    <div className="flex-1 min-w-[104px] rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+    <div className="flex-1 min-w-[104px] rounded-2xl border border-slate-200 bg-white px-4 py-3">
       <div className={`text-2xl font-bold leading-none ${tone}`}>{n}</div>
-      <div className="text-[11px] text-white/45 mt-1.5">{label}</div>
+      <div className="text-[11px] text-slate-400 mt-1.5">{label}</div>
     </div>
   );
 }
 
 export default function CdpIntegrationDashboard({
-  providers, statuses, summary, brand, onOpen, onRefresh, loading,
+  providers, statuses, summary, brand, onOpen, onRefresh, loading, hideSummary = false,
 }: CdpIntegrationDashboardProps) {
   return (
     <section className="space-y-4">
       {/* 요약 지표 3개 — 숫자만 크게, 설명은 작게(§5-1) */}
-      <div className="flex flex-wrap items-stretch gap-2.5" aria-live="polite">
-        <SummaryTile n={summary.receiving} label="데이터 수신 중" tone="text-emerald-300" />
-        <SummaryTile n={summary.preparing} label="연동 준비 중" tone="text-violet-200" />
-        <SummaryTile n={summary.action} label="조치 필요" tone="text-rose-200" />
+      {!hideSummary && <div className="flex flex-wrap items-stretch gap-2.5" aria-live="polite">
+        <SummaryTile n={summary.receiving} label="데이터 수신 중" tone="text-emerald-700" />
+        <SummaryTile n={summary.preparing} label="연동 준비 중" tone="text-violet-800" />
+        <SummaryTile n={summary.action} label="조치 필요" tone="text-rose-800" />
         {onRefresh && (
           <button
             type="button"
             onClick={onRefresh}
             disabled={loading}
-            className="px-3 rounded-2xl border border-white/10 bg-white/[0.03] text-white/50 hover:text-white/80 hover:border-white/25 transition-colors disabled:opacity-40"
+            className="px-3 rounded-2xl border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:border-slate-300 transition-colors disabled:opacity-40"
             title="상태 새로고침"
             aria-label="연동 상태 새로고침"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         )}
-      </div>
+      </div>}
 
       {/* 몰 카드 — 모바일 1열 / md 2열 / lg 3열. 카드 1장 = 4줄 + 버튼 1개 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -96,14 +99,13 @@ export default function CdpIntegrationDashboard({
               type="button"
               onClick={() => onOpen(p.key)}
               aria-label={`${p.name}: ${st.label}. ${st.actionLabel}`}
-              className="group flex flex-col gap-3 p-4 rounded-2xl border border-white/10 bg-white/[0.03] text-left transition-all duration-200 hover:border-violet-400/40 hover:bg-white/[0.06] hover:-translate-y-0.5"
+              className="group flex flex-col gap-3 p-4 rounded-2xl border border-slate-200 bg-white text-left transition-all duration-200 hover:border-violet-300 hover:bg-white hover:-translate-y-0.5"
             >
               {/* 1줄 — 아이콘 + 이름 */}
               <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-lg bg-gradient-to-br ${brandBadge}`}>
-                  <BrandIcon className="w-5 h-5" />
-                </div>
-                <div className="text-sm font-semibold text-white truncate">{p.name}</div>
+                {/* ★ 2026-09-30 몰 로고 타일(Harold "해당 채널 로고를 넣어 임팩트 있게") · 공식 파일이 오면 MallLogo 가 그 파일을 그린다 */}
+                <MallLogo provider={p.key} name={p.name} size={44} />
+                <div className="text-[14px] font-semibold text-slate-900 truncate">{p.name}</div>
               </div>
 
               {/* 2줄 — 상태 배지(색 + 아이콘 + 문장) */}
@@ -113,10 +115,10 @@ export default function CdpIntegrationDashboard({
               </span>
 
               {/* 3줄 — 한 줄 요약 */}
-              <p className="text-[11.5px] text-white/45 leading-relaxed line-clamp-2">{p.desc}</p>
+              <p className="text-[11.5px] text-slate-400 leading-relaxed line-clamp-2">{p.desc}</p>
 
               {/* 4줄 — 액션 1개 */}
-              <div className="mt-auto inline-flex items-center gap-1 text-[12px] font-medium text-violet-200 group-hover:text-violet-100">
+              <div className="mt-auto inline-flex items-center gap-1 text-[12px] font-medium text-violet-800 group-hover:text-violet-900">
                 {st.actionLabel}
                 <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
               </div>

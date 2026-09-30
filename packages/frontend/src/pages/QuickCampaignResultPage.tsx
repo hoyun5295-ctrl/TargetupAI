@@ -10,8 +10,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Sparkles, PenLine, Send, Smartphone, Mail, Check, AlertCircle, Eye, RotateCcw, ShoppingBag, Loader2, Monitor, Info } from 'lucide-react';
-import { OUI_PAGE, OUI_PAGE_CENTER } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import ZoneHeader from '../components/zone/ZoneHeader';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { SurfaceToneProvider } from '../components/zone/surface-tone';
 import { goBackOr } from '../lib/scroll-restoration';
 import { useToast } from '../components/ToastProvider';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
@@ -28,7 +29,7 @@ import {
 } from '../utils/ai-build';
 import { AI_GENERATE_COSTS } from '../constants/credit';
 import { fixHeadline, fixItemsOf, makeResultPath, type FixItem, type MakeChannel } from '../utils/make-flow';
-import { MK_BTN_AI, MK_BTN_GHOST, MK_BTN_PRIMARY, MK_BACK, MK_HEADER, MK_HEADER_ROW, MK_SUB, MK_TILE, MK_TITLE } from '../utils/make-ui';
+import { MK_BTN_AI, MK_BTN_GHOST, MK_BTN_PRIMARY } from '../utils/make-ui';
 import type { EmailCampaign } from '../components/email/email-campaign-types';
 import '../styles/make.css';
 
@@ -199,7 +200,7 @@ export default function QuickCampaignResultPage() {
     return out;
   }, [brandKit, flat, draft]);
 
-  if (!draftId) return <div className={OUI_PAGE_CENTER}><span className="text-white/60 text-sm">열 초안이 없어요.</span></div>;
+  if (!draftId) return <ZoneFrame moduleId="make" sub="완성본" backTo="/quick-campaign"><div className="py-24 text-center text-slate-500 text-sm">열 초안이 없어요.</div></ZoneFrame>;
 
   const primaryLoading = channel === 'dm' ? (!dmReady && !loadError) : !email;
   const sendLocked = head.count > 0;
@@ -212,66 +213,70 @@ export default function QuickCampaignResultPage() {
   };
 
   return (
-    <div className={`${OUI_PAGE} flex flex-col`} style={{ height: '100vh', overflow: 'hidden' }}>
-      <OperatorAura />
-      <div className={MK_HEADER}>
-        <div className={`${MK_HEADER_ROW}`}>
-          <button onClick={() => goBackOr(navigate, channel === 'dm' ? '/dm-builder' : '/email-campaigns')} className={MK_BACK} aria-label="돌아가기"><ArrowLeft className="w-5 h-5" /></button>
-          <div className={`${MK_TILE} bg-gradient-to-br from-amber-400 to-fuchsia-500`}><Sparkles className="w-5 h-5 text-white" /></div>
-          <div className="min-w-0">
-            <h1 className={MK_TITLE}>
+    <SurfaceToneProvider tone="light">
+    <div className="relative bg-slate-100 text-slate-900 flex flex-col" style={{ height: '100vh', overflow: 'hidden' }}>
+      {/* ★ 2026-09-30 AI 존 대개편: 편집기 변형 머리(같은 남색 띠 · 같은 좌표) · 제목 칸 = 초안 이름 + 상태 · 오른쪽 끝 = 보내기 */}
+      <ZoneHeader
+        moduleId="make"
+        backTo={channel === 'dm' ? '/dm-builder' : '/email-campaigns'}
+        backLabel="돌아가기"
+        titleSlot={(
+          <div className="min-w-0 ml-0.5">
+            <h1 className="text-[16px] md:text-[18px] font-semibold tracking-[-0.02em] leading-tight flex items-center gap-2 min-w-0">
               <span className="truncate">{titleText}</span>
               {items.length > 0 && (head.count > 0
-                ? <span className="shrink-0 text-[11.5px] font-bold text-amber-300 bg-amber-500/15 border border-amber-400/40 rounded-full px-2 py-0.5">고칠 곳 {head.count}</span>
-                : <span className="shrink-0 text-[11.5px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-400/40 rounded-full px-2 py-0.5">보낼 준비 완료</span>)}
+                ? <span className="shrink-0 text-[11.5px] font-bold text-amber-800 bg-amber-100 border border-amber-300 rounded-full px-2 py-0.5">고칠 곳 {head.count}</span>
+                : <span className="shrink-0 text-[11.5px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 rounded-full px-2 py-0.5">보낼 준비 완료</span>)}
             </h1>
-            <p className={MK_SUB}>초안 · 방금 만들었어요 · 받는 사람이 보는 그대로 보여 드려요</p>
+            <p className="hidden md:block text-[13px] text-slate-400 leading-tight mt-0.5 truncate">초안 · 방금 만들었어요 · 받는 사람이 보는 그대로 보여 드려요</p>
           </div>
-          <div className="ml-auto flex items-center gap-2 shrink-0">
-            <button type="button" onClick={() => navigate(editPath(channel, draftId))} className={MK_BTN_GHOST}><PenLine className="w-4 h-4" /><span className="hidden sm:inline">자세히 편집</span></button>
+        )}
+        endSlot={(
+          <div className="flex items-center gap-2 shrink-0 ml-1">
+            <button type="button" onClick={() => navigate(editPath(channel, draftId))} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold text-white/85 hover:bg-white/10"><PenLine className="w-4 h-4" /><span className="hidden sm:inline">자세히 편집</span></button>
             <div className="relative">
               <button type="button" onClick={() => { if (sendLocked) { const first = items.find((i) => i.kind === 'must' && i.sectionId); if (first?.sectionId) { focusSection(first.sectionId); setSheetOpen(true); } else toast.warning('고칠 곳을 먼저 채워 주세요.'); return; } setSendOpen(true); }}
                 className={`${MK_BTN_PRIMARY} ${sendLocked ? 'opacity-60' : ''}`}><Send className="w-4 h-4" />보내기</button>
               {sendLocked && <div className="absolute right-0 top-full mt-1 whitespace-nowrap text-[11px] font-semibold text-amber-300">{items.find((i) => i.kind === 'must')?.title === '버튼이 갈 주소가 없어요' ? '링크를 넣으면 보내기가 열려요' : '고칠 곳을 채우면 보내기가 열려요'}</div>}
             </div>
           </div>
-        </div>
-      </div>
+        )}
+      />
 
       <div className="flex-1 min-h-0 flex">
         {/* 왼쪽 — 고칠 곳 */}
-        <aside className="hidden md:flex w-[272px] shrink-0 flex-col border-r border-white/10 px-5 py-5">
-          <div className="text-[11.5px] text-white/45 mb-2">고칠 곳</div>
-          <div className={`text-[15px] font-bold mb-4 ${head.tone === 'warn' ? 'text-white' : head.tone === 'good' ? 'text-emerald-300' : 'text-white'}`}>
-            {head.tone === 'warn' ? <>보내기 전에 <b className="text-amber-300">{head.count}곳</b>만 채워 주세요</> : head.text}
+        <aside className="hidden md:flex w-[272px] shrink-0 flex-col border-r border-slate-200 px-5 py-5">
+          <div className="text-[11.5px] text-slate-400 mb-2">고칠 곳</div>
+          <div className={`text-[15px] font-bold mb-4 ${head.tone === 'warn' ? 'text-slate-900' : head.tone === 'good' ? 'text-emerald-700' : 'text-slate-900'}`}>
+            {head.tone === 'warn' ? <>보내기 전에 <b className="text-amber-700">{head.count}곳</b>만 채워 주세요</> : head.text}
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto mk-scroll space-y-2.5">
-            {primaryLoading && <Loader2 className="w-5 h-5 animate-spin text-white/40" />}
+            {primaryLoading && <Loader2 className="w-5 h-5 animate-spin text-slate-400" />}
             {items.map((it, i) => <FixRow key={i} item={it} onClick={() => {
               if (channel === 'dm' && it.sectionId) { focusSection(it.sectionId); setSheetOpen(true); }
               else if (channel === 'email' && it.kind === 'must') navigate(editPath('email', draftId));
             }} />)}
           </div>
-          <div className="pt-4 space-y-2.5 border-t border-white/10 mt-3">
-            <button type="button" onClick={() => navigate(`/quick-campaign?channel=${channel}`)} className="flex items-center gap-2 text-[12.5px] text-white/65 hover:text-white"><Eye className="w-4 h-4" />넣은 재료 다시 보기</button>
+          <div className="pt-4 space-y-2.5 border-t border-slate-200 mt-3">
+            <button type="button" onClick={() => navigate(`/quick-campaign?channel=${channel}`)} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900"><Eye className="w-4 h-4" />넣은 재료 다시 보기</button>
             {draft && (
               <button type="button" onClick={() => setConfirm({
                 mode: 'warning', title: '같은 재료로 다시 만들까요?',
                 description: `지금 고친 내용 대신 새 초안을 만들어요(${AI_GENERATE_COSTS[channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate']} 크레딧). 지금 초안은 목록에 그대로 남아요.`,
                 confirmLabel: '다시 만들기', onConfirm: () => navigate(`/quick-campaign?channel=${channel}&regen=1`),
-              })} className="flex items-center gap-2 text-[12.5px] text-white/65 hover:text-white"><RotateCcw className="w-4 h-4" />다시 만들기 · {AI_GENERATE_COSTS[channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate']} 크레딧</button>
+              })} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900"><RotateCcw className="w-4 h-4" />다시 만들기 · {AI_GENERATE_COSTS[channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate']} 크레딧</button>
             )}
-            <div className="text-[11px] text-white/35">{channel === 'dm' ? '여기서 고친 내용은 바로 저장돼요' : '이메일은 [자세히 편집]에서 고쳐요'}</div>
+            <div className="text-[11px] text-slate-400">{channel === 'dm' ? '여기서 고친 내용은 바로 저장돼요' : '이메일은 [자세히 편집]에서 고쳐요'}</div>
           </div>
         </aside>
 
         {/* 가운데 — 받는 사람 실물 */}
-        <main className="flex-1 min-w-0 flex flex-col items-center border-r border-white/10 px-4 py-5 overflow-hidden">
+        <main className="flex-1 min-w-0 flex flex-col items-center border-r border-slate-200 px-4 py-5 overflow-hidden">
           <div className="w-full max-w-[380px] flex items-center justify-between mb-3">
-            <div className="flex items-center gap-1.5 text-[13px] font-semibold text-white/85">{channel === 'dm' ? <Smartphone className="w-4 h-4 text-violet-300" /> : <Mail className="w-4 h-4 text-violet-300" />}{channel === 'dm' ? '모바일 DM' : '이메일'}</div>
-            <div className="flex items-center gap-3 text-[11.5px] text-white/45">
+            <div className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-700">{channel === 'dm' ? <Smartphone className="w-4 h-4 text-violet-700" /> : <Mail className="w-4 h-4 text-violet-700" />}{channel === 'dm' ? '모바일 DM' : '이메일'}</div>
+            <div className="flex items-center gap-3 text-[11.5px] text-slate-400">
               <span>받는 사람 화면 그대로</span>
-              <button type="button" onClick={() => setPcOpen(channel)} className="inline-flex items-center gap-1 text-violet-300 hover:text-violet-200"><Monitor className="w-3.5 h-3.5" />PC</button>
+              <button type="button" onClick={() => setPcOpen(channel)} className="inline-flex items-center gap-1 text-violet-700 hover:text-violet-800"><Monitor className="w-3.5 h-3.5" />PC</button>
             </div>
           </div>
           <PhoneShell
@@ -282,43 +287,43 @@ export default function QuickCampaignResultPage() {
             onTap={channel === 'dm' ? (id) => { focusSection(id); setSheetOpen(true); } : undefined}
             inbox={channel === 'email' && email ? { from: email.fromName || '', subject: email.subject } : null}
           />
-          {channel === 'dm' && <div className="text-[11.5px] text-white/40 mt-2.5 inline-flex items-center gap-1.5"><Info className="w-3.5 h-3.5" />블록을 누르면 그 자리만 고칠 수 있어요</div>}
+          {channel === 'dm' && <div className="text-[11.5px] text-slate-400 mt-2.5 inline-flex items-center gap-1.5"><Info className="w-3.5 h-3.5" />블록을 누르면 그 자리만 고칠 수 있어요</div>}
         </main>
 
         {/* 오른쪽 — 다른 채널 */}
         <section className="hidden lg:flex w-[min(34vw,470px)] shrink-0 flex-col px-6 py-5 overflow-hidden">
-          <div className="flex items-center gap-1.5 text-[13px] font-semibold text-white/85 mb-3">{otherChannel === 'email' ? <Mail className="w-4 h-4 text-violet-300" /> : <Smartphone className="w-4 h-4 text-violet-300" />}{otherChannel === 'email' ? '이메일' : '모바일 DM'}</div>
+          <div className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-700 mb-3">{otherChannel === 'email' ? <Mail className="w-4 h-4 text-violet-700" /> : <Smartphone className="w-4 h-4 text-violet-700" />}{otherChannel === 'email' ? '이메일' : '모바일 DM'}</div>
           {otherChannel === 'email' && email ? (
             <div className="flex-1 min-h-0 flex flex-col items-center">
               <PhoneShell html={emailPreview.html} loading={emailPreview.loading} error={emailPreview.error} inbox={{ from: email.fromName || '', subject: email.subject }} small />
               <div className="flex items-center gap-3 mt-3">
-                <button type="button" onClick={() => setPcOpen('email')} className="text-[12.5px] text-violet-300 hover:text-violet-200 inline-flex items-center gap-1"><Monitor className="w-3.5 h-3.5" />PC로 보기</button>
-                <button type="button" onClick={() => navigate(editPath('email', email.id))} className="text-[12.5px] text-white/65 hover:text-white inline-flex items-center gap-1"><PenLine className="w-3.5 h-3.5" />이메일 자세히 편집</button>
+                <button type="button" onClick={() => setPcOpen('email')} className="text-[12.5px] text-violet-700 hover:text-violet-800 inline-flex items-center gap-1"><Monitor className="w-3.5 h-3.5" />PC로 보기</button>
+                <button type="button" onClick={() => navigate(editPath('email', email.id))} className="text-[12.5px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><PenLine className="w-3.5 h-3.5" />이메일 자세히 편집</button>
               </div>
             </div>
           ) : otherChannel === 'dm' && pairId && dmReady ? (
             <div className="flex-1 min-h-0 flex flex-col items-center">
               <PhoneShell html={dmPreview.html} loading={dmPreview.loading} error={dmPreview.error} small />
-              <button type="button" onClick={() => navigate(editPath('dm', pairId))} className="mt-3 text-[12.5px] text-white/65 hover:text-white inline-flex items-center gap-1"><PenLine className="w-3.5 h-3.5" />DM 자세히 편집</button>
+              <button type="button" onClick={() => navigate(editPath('dm', pairId))} className="mt-3 text-[12.5px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><PenLine className="w-3.5 h-3.5" />DM 자세히 편집</button>
             </div>
           ) : (
-            <div className="relative flex-1 min-h-0 rounded-2xl border border-dashed border-white/15 overflow-hidden">
+            <div className="relative flex-1 min-h-0 rounded-2xl border border-dashed border-slate-300 overflow-hidden">
               <div className="absolute inset-0 p-5 space-y-4 opacity-40" aria-hidden>
-                <div className="flex gap-3 items-center"><span className="w-8 h-8 rounded-full bg-white/10" /><span className="h-2.5 rounded bg-white/10 flex-1" /></div>
-                <div className="h-24 rounded-xl bg-white/[0.06]" /><div className="h-24 rounded-xl bg-white/[0.06]" /><div className="h-3 rounded bg-white/[0.06] w-2/3" />
+                <div className="flex gap-3 items-center"><span className="w-8 h-8 rounded-full bg-slate-100" /><span className="h-2.5 rounded bg-slate-100 flex-1" /></div>
+                <div className="h-24 rounded-xl bg-white" /><div className="h-24 rounded-xl bg-white" /><div className="h-3 rounded bg-white w-2/3" />
               </div>
-              <div className="absolute inset-x-6 top-1/2 -translate-y-1/2 rounded-2xl border border-white/15 bg-slate-900/95 p-5 text-center shadow-2xl">
-                <div className="text-[15px] font-bold text-white">같은 재료로 {otherChannel === 'email' ? '이메일' : '모바일 DM'}도 만들 수 있어요</div>
-                <div className="text-[12.5px] text-white/55 mt-1.5">{channel === 'dm' ? 'DM' : '이메일'}에 넣은 사진·문구·상품을 그대로 씁니다. 다시 넣을 것은 없어요.</div>
+              <div className="absolute inset-x-6 top-1/2 -translate-y-1/2 rounded-2xl border border-slate-300 bg-white p-5 text-center shadow-2xl">
+                <div className="text-[15px] font-bold text-slate-900">같은 재료로 {otherChannel === 'email' ? '이메일' : '모바일 DM'}도 만들 수 있어요</div>
+                <div className="text-[12.5px] text-slate-500 mt-1.5">{channel === 'dm' ? 'DM' : '이메일'}에 넣은 사진·문구·상품을 그대로 씁니다. 다시 넣을 것은 없어요.</div>
                 {draft ? (
                   <button type="button" onClick={() => { void makeOther(); }} disabled={makingOther} className={`${MK_BTN_AI} h-[42px] px-5 text-[13.5px] mt-4`}>
                     {makingOther ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}{otherChannel === 'email' ? '이메일도 만들기' : '모바일 DM도 만들기'}
-                    <span className="text-[11px] font-bold bg-white/45 rounded-md px-1.5 py-0.5">{otherCost} 크레딧</span>
+                    <span className="text-[11px] font-bold bg-slate-300 rounded-md px-1.5 py-0.5">{otherCost} 크레딧</span>
                   </button>
                 ) : (
                   <button type="button" onClick={() => navigate(`/quick-campaign?channel=${otherChannel}`)} className={`${MK_BTN_GHOST} mt-4`}>만들기 화면에서 {otherChannel === 'email' ? '이메일' : 'DM'} 만들기</button>
                 )}
-                {otherChannel === 'email' && emailSmtp === false && <div className="text-[11.5px] text-amber-300 mt-3 inline-flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" />보내려면 회사 메일 연결이 필요해요. 만들기와 미리보기는 지금 돼요.</div>}
+                {otherChannel === 'email' && emailSmtp === false && <div className="text-[11.5px] text-amber-700 mt-3 inline-flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" />보내려면 회사 메일 연결이 필요해요. 만들기와 미리보기는 지금 돼요.</div>}
               </div>
             </div>
           )}
@@ -352,21 +357,22 @@ export default function QuickCampaignResultPage() {
       {pcOpen && <PcBigModal kind={pcOpen === 'email' ? 'email' : dmPreview.kind} html={pcOpen === 'email' ? emailPreview.html : dmPreview.html} onClose={() => setPcOpen(null)} />}
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     </div>
+    </SurfaceToneProvider>
   );
 }
 
 function FixRow({ item, onClick }: { item: FixItem; onClick: () => void }) {
-  if (item.kind === 'ok') return <div className="flex items-center gap-2 text-[13px] text-white/80"><Check className="w-4 h-4 text-emerald-400 shrink-0" />{item.title}</div>;
-  if (item.kind === 'info') return <div className="flex gap-2 rounded-xl bg-white/[0.05] px-3 py-2.5 text-[12px] text-white/65"><ShoppingBag className="w-4 h-4 text-violet-300 shrink-0 mt-0.5" />{item.title}</div>;
+  if (item.kind === 'ok') return <div className="flex items-center gap-2 text-[13px] text-slate-700"><Check className="w-4 h-4 text-emerald-600 shrink-0" />{item.title}</div>;
+  if (item.kind === 'info') return <div className="flex gap-2 rounded-xl bg-white px-3 py-2.5 text-[12px] text-slate-500"><ShoppingBag className="w-4 h-4 text-violet-700 shrink-0 mt-0.5" />{item.title}</div>;
   const must = item.kind === 'must';
   return (
-    <button type="button" onClick={onClick} className={`w-full text-left flex items-start gap-2.5 rounded-xl border px-3 py-3 ${must ? 'border-amber-400/50 bg-amber-500/[0.07] hover:bg-amber-500/[0.12]' : 'border-violet-400/40 bg-violet-500/[0.07] hover:bg-violet-500/[0.12]'}`}>
-      {must ? <AlertCircle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" /> : <Sparkles className="w-4 h-4 text-violet-300 shrink-0 mt-0.5" />}
+    <button type="button" onClick={onClick} className={`w-full text-left flex items-start gap-2.5 rounded-xl border px-3 py-3 ${must ? 'border-amber-300 bg-amber-50 hover:bg-amber-50' : 'border-violet-300 bg-violet-50 hover:bg-violet-50'}`}>
+      {must ? <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" /> : <Sparkles className="w-4 h-4 text-violet-700 shrink-0 mt-0.5" />}
       <span className="flex-1 min-w-0">
-        <b className="block text-[13px] text-white leading-snug">{item.title}</b>
-        {item.sub && <span className="block text-[11.5px] text-white/55 mt-0.5">{item.sub}</span>}
+        <b className="block text-[13px] text-slate-900 leading-snug">{item.title}</b>
+        {item.sub && <span className="block text-[11.5px] text-slate-500 mt-0.5">{item.sub}</span>}
       </span>
-      {item.action && <em className={`not-italic shrink-0 text-[11.5px] font-bold rounded-md px-2 py-1 ${must ? 'bg-amber-400 text-amber-950' : 'bg-violet-500/30 text-violet-100'}`}>{item.action}</em>}
+      {item.action && <em className={`not-italic shrink-0 text-[11.5px] font-bold rounded-md px-2 py-1 ${must ? 'bg-amber-400 text-amber-950' : 'bg-violet-100 text-violet-900'}`}>{item.action}</em>}
     </button>
   );
 }

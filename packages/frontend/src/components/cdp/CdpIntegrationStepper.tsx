@@ -50,15 +50,15 @@ type StepState = 'done' | 'active' | 'locked';
 
 function StepHead({ n, title, state }: { n: number; title: string; state: StepState }) {
   const tone =
-    state === 'done' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/25'
-      : state === 'active' ? 'bg-violet-500/20 text-violet-100 border-violet-400/40'
-        : 'bg-white/[0.04] text-white/35 border-white/10';
+    state === 'done' ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+      : state === 'active' ? 'bg-violet-100 text-violet-900 border-violet-300'
+        : 'bg-white text-slate-400 border-slate-200';
   return (
     <div className="flex items-center gap-2.5">
       <span className={`w-6 h-6 rounded-full border inline-flex items-center justify-center text-[11px] font-bold ${tone}`}>
         {state === 'done' ? <Check className="w-3.5 h-3.5" /> : state === 'locked' ? <Lock className="w-3 h-3" /> : n}
       </span>
-      <span className={`text-sm font-semibold ${state === 'locked' ? 'text-white/35' : 'text-white'}`}>{title}</span>
+      <span className={`text-sm font-semibold ${state === 'locked' ? 'text-slate-400' : 'text-slate-900'}`}>{title}</span>
     </div>
   );
 }
@@ -93,14 +93,14 @@ export default function CdpIntegrationStepper({
     return (
       <div className="space-y-4">
         <StepHead n={1} title="연결" state="done" />
-        <div className="rounded-2xl border border-violet-400/25 bg-violet-500/[0.07] p-5">
+        <div className="rounded-2xl border border-violet-200 bg-violet-50 p-5">
           <div className="flex items-start gap-3">
-            <Loader2 className="w-5 h-5 text-violet-300 animate-spin flex-shrink-0 mt-0.5" />
+            <Loader2 className="w-5 h-5 text-violet-700 animate-spin flex-shrink-0 mt-0.5" />
             <div className="space-y-1.5">
-              <div className="text-sm font-semibold text-violet-100">연결이 끝났습니다 · 데이터 연동을 준비 중이에요</div>
-              <p className="text-[12px] text-white/55 leading-relaxed">
+              <div className="text-sm font-semibold text-violet-900">연결이 끝났습니다 · 데이터 연동을 준비 중이에요</div>
+              <p className="text-[12px] text-slate-500 leading-relaxed">
                 {providerName}의 회원·주문을 한줄로 형식에 맞추는 작업이 남아 있습니다. 영업일 1일 안에 끝나며,
-                준비가 되면 이 화면이 자동으로 <span className="text-emerald-300">데이터 수신 중</span>으로 바뀝니다.
+                준비가 되면 이 화면이 자동으로 <span className="text-emerald-700">데이터 수신 중</span>으로 바뀝니다.
                 지금 하실 일은 없습니다.
               </p>
             </div>
@@ -119,13 +119,13 @@ export default function CdpIntegrationStepper({
           <div className="pl-[2.15rem]">{connectSlot}</div>
         ) : (
           <div className="pl-[2.15rem] flex items-center gap-2.5">
-            <span className="text-[12px] text-emerald-300/80">연결 완료</span>
+            <span className="text-[12px] text-emerald-700">연결 완료</span>
             {onToggleConnect && (
               <button
                 type="button"
                 onClick={onToggleConnect}
                 aria-expanded={!!connectExpanded}
-                className="text-[11.5px] text-white/45 hover:text-white/80 transition-colors"
+                className="text-[11.5px] text-slate-400 hover:text-slate-700 transition-colors"
               >
                 {connectExpanded ? '접기' : '연결 정보 보기'}
               </button>
@@ -142,11 +142,11 @@ export default function CdpIntegrationStepper({
           <div className="pl-[2.15rem] space-y-3">
             {installSlot ?? (
               needsInstall ? (
-                <p className="text-[12px] text-white/55 leading-relaxed">
+                <p className="text-[12px] text-slate-500 leading-relaxed">
                   설치 코드를 고객사 개발자에게 전달해야 데이터가 들어옵니다. 아래에서 안내를 한 번에 복사할 수 있습니다.
                 </p>
               ) : (
-                <p className="text-[12px] text-white/55 leading-relaxed">
+                <p className="text-[12px] text-slate-500 leading-relaxed">
                   따로 설치할 것은 없습니다. 한줄로가 {providerName}에서 데이터를 가져옵니다. 첫 주문·회원 활동이 생기면 다음 단계가 켜집니다.
                 </p>
               )
@@ -156,14 +156,14 @@ export default function CdpIntegrationStepper({
               <button
                 type="button"
                 onClick={onDeveloperSend}
-                className="inline-flex items-center gap-1.5 text-[12px] text-white/55 hover:text-white/85 transition-colors"
+                className="inline-flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-slate-700 transition-colors"
               >
                 <Send className="w-3.5 h-3.5" /> 개발자에게 설치 안내 보내기
               </button>
             )}
           </div>
         )}
-        {steps.s2 === 'done' && <div className="pl-[2.15rem] text-[12px] text-emerald-300/80">설치 확인됨</div>}
+        {steps.s2 === 'done' && <div className="pl-[2.15rem] text-[12px] text-emerald-700">설치 확인됨</div>}
       </section>
 
       {/* ③ 첫 데이터 확인 — 이 재설계의 심장. 옛 검증 탭이 여기로 흡수된다. */}
@@ -172,7 +172,7 @@ export default function CdpIntegrationStepper({
         <div className="pl-[2.15rem]" aria-live="polite">
           {status.total > 0 ? (
             <div className="space-y-3">
-              <div className="inline-flex items-center gap-1.5 text-[12px] text-emerald-300">
+              <div className="inline-flex items-center gap-1.5 text-[12px] text-emerald-700">
                 <Check className="w-3.5 h-3.5" /> {status.label}
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -182,8 +182,8 @@ export default function CdpIntegrationStepper({
                     <span
                       key={key}
                       className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border ${on
-                        ? 'bg-emerald-500/12 text-emerald-300 border-emerald-400/25'
-                        : 'bg-white/[0.04] text-white/35 border-white/10'}`}
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-white text-slate-400 border-slate-200'}`}
                     >
                       {on ? <Check className="w-3 h-3" /> : <Loader2 className="w-3 h-3" />} {label}
                     </span>
@@ -192,38 +192,38 @@ export default function CdpIntegrationStepper({
               </div>
             </div>
           ) : steps.s3 === 'locked' ? (
-            <p className="text-[12px] text-white/35">앞 단계가 끝나면 자동으로 확인합니다.</p>
+            <p className="text-[12px] text-slate-400">앞 단계가 끝나면 자동으로 확인합니다.</p>
           ) : (
             <div className="space-y-3">
-              <div className="inline-flex items-center gap-2 text-[12px] text-white/60">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-300" /> 첫 데이터를 기다리는 중입니다
+              <div className="inline-flex items-center gap-2 text-[12px] text-slate-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-700" /> 첫 데이터를 기다리는 중입니다
               </div>
               {stalled && (
-                <div className="rounded-xl border border-amber-400/25 bg-amber-500/[0.07] p-3.5 space-y-2">
-                  <div className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-amber-200">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 space-y-2">
+                  <div className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-amber-800">
                     <HelpCircle className="w-3.5 h-3.5" /> 데이터가 안 들어오나요?
                   </div>
                   {/* 확인 항목도 몰 유형을 따른다 — 폴링·웹훅 몰에 "설치 코드가 모든 페이지에"는 물어볼 수 없는 것이다. */}
                   {needsInstall ? (
-                    <ul className="text-[11.5px] text-white/55 leading-relaxed list-disc pl-4 space-y-0.5">
+                    <ul className="text-[11.5px] text-slate-500 leading-relaxed list-disc pl-4 space-y-0.5">
                       <li>설치한 페이지를 한 번 열어보셨나요. 방문이 있어야 첫 데이터가 만들어집니다.</li>
                       <li>설치 코드가 모든 페이지에 들어갔는지 개발자에게 확인해 주세요.</li>
                       <li>쇼핑몰 도메인이 수집 허용 목록에 등록됐는지 확인해 주세요.</li>
                     </ul>
                   ) : (
-                    <ul className="text-[11.5px] text-white/55 leading-relaxed list-disc pl-4 space-y-0.5">
+                    <ul className="text-[11.5px] text-slate-500 leading-relaxed list-disc pl-4 space-y-0.5">
                       <li>연결한 뒤에 새 주문·가입이 있었는지 확인해 주세요. 활동이 있어야 첫 데이터가 만들어집니다.</li>
                       <li>쇼핑몰 관리자에서 연동 계정의 조회 권한이 그대로인지 확인해 주세요.</li>
                     </ul>
                   )}
                   <div className="flex flex-wrap gap-3 pt-0.5">
                     {onRetryCheck && (
-                      <button type="button" onClick={onRetryCheck} className="text-[12px] text-violet-200 hover:text-violet-100">
+                      <button type="button" onClick={onRetryCheck} className="text-[12px] text-violet-800 hover:text-violet-900">
                         다시 확인하기
                       </button>
                     )}
                     {needsInstall && onDeveloperSend && (
-                      <button type="button" onClick={onDeveloperSend} className="text-[12px] text-white/55 hover:text-white/85">
+                      <button type="button" onClick={onDeveloperSend} className="text-[12px] text-slate-500 hover:text-slate-700">
                         개발자에게 다시 보내기
                       </button>
                     )}

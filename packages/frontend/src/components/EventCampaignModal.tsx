@@ -320,19 +320,19 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-8 overflow-y-auto">
-      <div className="w-full max-w-2xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-2xl bg-white border border-slate-200 rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
         {/* 헤더 */}
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/25">
               <CalendarRange className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">원클릭 캠페인</h3>
-              <p className="text-[11px] text-white/50">행사 내용을 붙여넣거나 이미지로 불러오면 고른 채널만 AI 초안 생성, 잔손질만 하면 됩니다</p>
+              <h3 className="text-base font-bold text-slate-900">원클릭 캠페인</h3>
+              <p className="text-[11px] text-slate-500">행사 내용을 붙여넣거나 이미지로 불러오면 고른 채널만 AI 초안 생성, 잔손질만 하면 됩니다</p>
             </div>
           </div>
-          <button onClick={onClose} disabled={busy} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10 disabled:opacity-40" aria-label="닫기">
+          <button onClick={onClose} disabled={busy} className="text-slate-500 hover:text-slate-900 p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-40" aria-label="닫기">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -340,19 +340,19 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
         <div className="p-6 space-y-4">
           {/* 이미지로 행사 내용 불러오기 */}
           {!anyResult && (
-            <div className="rounded-xl border border-dashed border-violet-400/30 bg-violet-500/[0.06] p-3">
+            <div className="rounded-xl border border-dashed border-violet-200 bg-violet-50 p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-white/80">
-                  <ImagePlus className="w-3.5 h-3.5 text-violet-300" /> 이미지로 행사 내용 불러오기
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                  <ImagePlus className="w-3.5 h-3.5 text-violet-700" /> 이미지로 행사 내용 불러오기
                 </span>
-                <span className="text-[10px] text-white/40">스샷 여러 장 가능 (최대 {MAX_IMAGES}장)</span>
+                <span className="text-[10px] text-slate-400">스샷 여러 장 가능 (최대 {MAX_IMAGES}장)</span>
               </div>
-              <p className="text-[10px] text-white/45 mt-1">상품 목록·행사 안내 이미지를 올리면 AI가 보이는 내용(상품·정가·할인·기간·혜택)을 그대로 읽어 아래 행사 내용에 채워 드려요.</p>
+              <p className="text-[10px] text-slate-400 mt-1">상품 목록·행사 안내 이미지를 올리면 AI가 보이는 내용(상품·정가·할인·기간·혜택)을 그대로 읽어 아래 행사 내용에 채워 드려요.</p>
 
               {previews.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2.5">
                   {previews.map((p, i) => (
-                    <div key={p.url} className="relative w-14 h-14 rounded-lg overflow-hidden border border-white/10">
+                    <div key={p.url} className="relative w-14 h-14 rounded-lg overflow-hidden border border-slate-200">
                       <img src={p.url} alt={`업로드 이미지 ${i + 1}`} className="w-full h-full object-cover" />
                       <button
                         onClick={() => removeImage(i)}
@@ -373,7 +373,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
                   type="button"
                   onClick={() => fileRef.current?.click()}
                   disabled={busy || images.length >= MAX_IMAGES}
-                  className="text-[11px] font-medium text-violet-100 border border-violet-400/40 hover:bg-violet-500/15 rounded-lg px-3 py-1.5 disabled:opacity-40"
+                  className="text-[11px] font-medium text-violet-900 border border-violet-300 hover:bg-violet-100 rounded-lg px-3 py-1.5 disabled:opacity-40"
                 >
                   직접 업로드
                 </button>
@@ -381,7 +381,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
                   type="button"
                   onClick={() => setLibOpen(true)}
                   disabled={busy || images.length >= MAX_IMAGES}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-100 border border-emerald-400/40 hover:bg-emerald-500/15 rounded-lg px-3 py-1.5 disabled:opacity-40"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-900 border border-emerald-300 hover:bg-emerald-100 rounded-lg px-3 py-1.5 disabled:opacity-40"
                 >
                   <FolderOpen className="w-3 h-3" /> 라이브러리에서
                 </button>
@@ -402,27 +402,27 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
                   type="button"
                   onClick={() => extractFromImages()}
                   disabled={busy || images.length === 0}
-                  className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 rounded-lg px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {extracting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                   {extracting ? '이미지 판독 중...' : `이미지로 행사 내용 불러오기 (예상 ${IMAGE_EXTRACT_COST} 크레딧)`}
                 </button>
               </div>
-              {imgErr && <p className="text-[10px] text-rose-300 mt-1.5">{imgErr}</p>}
+              {imgErr && <p className="text-[10px] text-rose-700 mt-1.5">{imgErr}</p>}
             </div>
           )}
 
           {/* 행사 내용 입력 */}
           <div>
-            <label className="text-xs font-bold text-white/80 mb-1.5 block">행사 내용</label>
+            <label className="text-xs font-bold text-slate-700 mb-1.5 block">행사 내용</label>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
               disabled={busy || anyResult}
               placeholder={'행사 내용을 자유롭게 붙여넣거나, 위에서 이미지로 불러오세요. 한 줄이든 줄바꿈 나열이든 무관합니다.\n예)\n여름맞이 신상품 출시전\n7/10~7/20\n전 품목 신상품 대상\n구매 고객 사은품 증정'}
-              className="w-full h-32 px-3 py-2.5 bg-slate-950/60 border border-white/10 rounded-xl text-sm text-white placeholder-white/25 resize-y focus:outline-none focus:border-fuchsia-400/40"
+              className="w-full h-32 px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 resize-y focus:outline-none focus:border-fuchsia-300"
             />
-            <p className="text-[10px] text-white/40 mt-1">행사 내용에 직접 적으신(또는 이미지에서 읽어온) 혜택만 초안에 그대로 사용됩니다. AI가 혜택을 지어내지 않습니다.</p>
+            <p className="text-[10px] text-slate-400 mt-1">행사 내용에 직접 적으신(또는 이미지에서 읽어온) 혜택만 초안에 그대로 사용됩니다. AI가 혜택을 지어내지 않습니다.</p>
           </div>
 
           {/* 채널 3슬롯 */}
@@ -437,7 +437,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
               return (
                 <div
                   key={c.key}
-                  className={`rounded-xl border p-3 transition-colors ${done ? 'bg-emerald-500/10 border-emerald-400/40' : locked ? 'bg-white/[0.03] border-white/10 opacity-60' : sel[c.key] ? 'bg-violet-500/15 border-violet-400/50' : 'bg-slate-950/50 border-white/10'}`}
+                  className={`rounded-xl border p-3 transition-colors ${done ? 'bg-emerald-50 border-emerald-300' : locked ? 'bg-white border-slate-200 opacity-60' : sel[c.key] ? 'bg-violet-100 border-violet-300' : 'bg-slate-100 border-slate-200'}`}
                 >
                   <button
                     type="button"
@@ -446,28 +446,28 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
                     className="w-full text-left"
                   >
                     <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-white">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900">
                         <Ic className="w-3.5 h-3.5" /> {c.label}
                       </span>
-                      {locked ? <Lock className="w-3.5 h-3.5 text-white/40" /> : (
-                        <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${sel[c.key] || done ? 'bg-violet-500 border-violet-400 text-white' : 'border-white/25 text-transparent'}`}>✓</span>
+                      {locked ? <Lock className="w-3.5 h-3.5 text-slate-400" /> : (
+                        <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${sel[c.key] || done ? 'bg-violet-500 border-violet-400 text-white' : 'border-slate-300 text-transparent'}`}>✓</span>
                       )}
                     </div>
-                    <p className="text-[10px] text-white/45 mt-1">{c.desc}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">{c.desc}</p>
                     <p className="text-[10px] mt-1.5">
                       {done
-                        ? <span className="text-emerald-300">{opened ? '편집함' : '생성 완료'}: {summaryOf(c.key)}</span>
+                        ? <span className="text-emerald-700">{opened ? '편집함' : '생성 완료'}: {summaryOf(c.key)}</span>
                         : locked
-                          ? <span className="text-amber-300/80">{c.key === 'email' ? '관리자만 생성 가능' : '표시할 곳 없음. 연동 후 이용 가능'}</span>
-                          : <span className="text-white/50">예상 {CH_COSTS[c.key]} 크레딧</span>}
+                          ? <span className="text-amber-700">{c.key === 'email' ? '관리자만 생성 가능' : '표시할 곳 없음. 연동 후 이용 가능'}</span>
+                          : <span className="text-slate-500">예상 {CH_COSTS[c.key]} 크레딧</span>}
                     </p>
-                    {err && <p className="text-[10px] text-rose-300 mt-1">{err}</p>}
+                    {err && <p className="text-[10px] text-rose-700 mt-1">{err}</p>}
                   </button>
                   {isRunning && (
-                    <div className="mt-2 flex items-center gap-1.5 text-[10px] text-fuchsia-200"><Loader2 className="w-3 h-3 animate-spin" /> 생성 중...</div>
+                    <div className="mt-2 flex items-center gap-1.5 text-[10px] text-fuchsia-800"><Loader2 className="w-3 h-3 animate-spin" /> 생성 중...</div>
                   )}
                   {done && (
-                    <button onClick={() => openEditor(c.key)} className="mt-2 w-full text-[11px] font-bold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 rounded-lg py-1.5">
+                    <button onClick={() => openEditor(c.key)} className="mt-2 w-full text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg py-1.5">
                       {opened ? '다시 편집 열기' : '편집 열기 (이미지·잔손질)'}
                     </button>
                   )}
@@ -475,7 +475,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
                     <button
                       onClick={() => { setSel((s) => ({ ...s, [c.key]: true })); generateOne(c.key); }}
                       disabled={busy || !text.trim()}
-                      className="mt-2 w-full text-[11px] text-violet-200 border border-dashed border-violet-400/40 hover:bg-violet-500/10 rounded-lg py-1.5 disabled:opacity-40"
+                      className="mt-2 w-full text-[11px] text-violet-800 border border-dashed border-violet-300 hover:bg-violet-50 rounded-lg py-1.5 disabled:opacity-40"
                     >
                       + 이 행사로 이어서 만들기 ({CH_COSTS[c.key]} 크레딧)
                     </button>
@@ -487,13 +487,13 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
 
           {/* 실행 */}
           <div className="flex items-center justify-between gap-3 pt-1">
-            <p className="text-[11px] text-white/45">
-              {totalCost > 0 ? <>선택 채널 생성 시 <strong className="text-white/80">{totalCost} 크레딧</strong>이 차감됩니다 (성공한 채널만)</> : anyResult ? '빈 슬롯은 언제든 이 행사로 이어서 만들 수 있습니다 · 초안은 임시 보관됩니다' : '생성할 채널을 선택해주세요'}
+            <p className="text-[11px] text-slate-400">
+              {totalCost > 0 ? <>선택 채널 생성 시 <strong className="text-slate-700">{totalCost} 크레딧</strong>이 차감됩니다 (성공한 채널만)</> : anyResult ? '빈 슬롯은 언제든 이 행사로 이어서 만들 수 있습니다 · 초안은 임시 보관됩니다' : '생성할 채널을 선택해주세요'}
             </p>
             <button
               onClick={generateSelected}
               disabled={busy || !text.trim() || totalCost === 0}
-              className="shrink-0 inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-fuchsia-500 text-indigo-950 text-sm font-bold hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="shrink-0 inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {running !== null ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {running !== null ? '생성 중...' : anyResult ? '선택 채널 마저 생성' : '선택 채널 생성'}

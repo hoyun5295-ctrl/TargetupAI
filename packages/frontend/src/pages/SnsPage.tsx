@@ -30,11 +30,12 @@ import {
   type SnsAccount, type SnsSpec, type SnsAttention, type SnsAttentionItem, type SnsComposeDefaults, type SnsPostView,
 } from '../utils/sns-view';
 import {
-  OUI_BACK, OUI_CARD, OUI_EMPTY, OUI_EMPTY_DESC, OUI_EMPTY_ICON, OUI_EMPTY_TITLE, OUI_HEADER,
-  OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_PAGE_CENTER, OUI_SRC, OUI_SUBTITLE, OUI_TITLE,
-  OUI_WRAP_WIDE, OUI_BTN_PRIMARY, OUI_BTN_GHOST, OUI_BTN_OUTLINE,
+  OUI_CARD, OUI_EMPTY, OUI_EMPTY_DESC, OUI_EMPTY_ICON, OUI_EMPTY_TITLE, OUI_SRC,
+  OUI_BTN_PRIMARY, OUI_BTN_OUTLINE, OUI_BTN_GHOST,
 } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import { Sparkles } from 'lucide-react';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { zoneModule } from '../constants/ai-operator-modules';
 
 function daysLeft(iso: string | null | undefined): number | null {
   if (!iso) return null;
@@ -61,6 +62,8 @@ export default function SnsPage() {
   /** 게시 뒤 이력을 다시 읽게 하는 신호. 값이 바뀌는 것만 의미가 있다. */
   const [historyKey, setHistoryKey] = useState(0);
   const [composeRequest, setComposeRequest] = useState<SnsComposeRequest | null>(null);
+  const [snsLine, setSnsLine] = useState('');
+  const [composerAiBusy, setComposerAiBusy] = useState(false);
   const [focusPostId, setFocusPostId] = useState<string | null>(null);
 
   /** 이 화면이 연 승인 창의 state. 다른 창이 보낸 메시지를 무시하는 근거. */
@@ -228,9 +231,9 @@ export default function SnsPage() {
 
   if (loading) {
     return (
-      <div className={OUI_PAGE_CENTER}>
-        <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
-      </div>
+      <ZoneFrame moduleId="sns">
+        <div className="py-24 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>
+      </ZoneFrame>
     );
   }
 
@@ -239,10 +242,10 @@ export default function SnsPage() {
   const hasActive = accounts.some((a) => a.status === 'active');
 
   const attentionBand = attention && attention.items.length > 0 && (
-    <section className="rounded-2xl border border-amber-400/25 bg-amber-500/[0.06] p-3.5 sm:p-4" aria-label="확인할 것">
+    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-3.5 sm:p-4" aria-label="확인할 것">
       <div className="flex items-center gap-2 mb-2.5">
-        <AlertTriangle className="w-4 h-4 text-amber-300" />
-        <h2 className="text-sm font-semibold text-amber-100">확인할 것 {attention.total}</h2>
+        <AlertTriangle className="w-4 h-4 text-amber-700" />
+        <h2 className="text-sm font-semibold text-amber-900">확인할 것 {attention.total}</h2>
       </div>
       <ul className="space-y-2">
         {attention.items.map((it, i) => {
@@ -250,7 +253,7 @@ export default function SnsPage() {
           return (
             <li key={`${it.kind}-${it.accountId}-${it.targetId ?? i}`} className="flex items-center gap-2.5 flex-wrap">
               <SnsChannelLogo platform={it.platform} size={15} />
-              <span className="text-xs text-white/80 flex-1 min-w-[12rem] break-keep">{attentionText(it)}</span>
+              <span className="text-xs text-slate-700 flex-1 min-w-[12rem] break-keep">{attentionText(it)}</span>
               <div className="flex items-center gap-1.5">
                 {needsLink && (
                   <button onClick={() => reconnect(it.accountId)} disabled={!!busyPlatform} className={`${OUI_BTN_OUTLINE} !h-8`}>
@@ -274,25 +277,25 @@ export default function SnsPage() {
         })}
       </ul>
       {attention.total > attention.items.length && (
-        <p className="mt-2.5 text-[11px] text-white/45">외 {attention.total - attention.items.length}건은 아래 기록과 채널 카드에서 볼 수 있어요.</p>
+        <p className="mt-2.5 text-[11px] text-slate-400">외 {attention.total - attention.items.length}건은 아래 기록과 채널 카드에서 볼 수 있어요.</p>
       )}
     </section>
   );
 
   const channelCards = (
-    <section className="space-y-3">
+    <section className="space-y-3 scroll-mt-28" id="sns-channels">
       <div>
-        <h2 className="text-sm font-semibold text-white/80">채널 연결</h2>
-        <p className="text-xs text-white/50 mt-0.5">연결한 채널에만 글이 올라갑니다. 한 채널에 계정을 여러 개 연결할 수도 있어요.</p>
+        <h2 className="text-sm font-semibold text-slate-700">채널 연결</h2>
+        <p className="text-xs text-slate-500 mt-0.5">연결한 채널에만 글이 올라갑니다. 한 채널에 계정을 여러 개 연결할 수도 있어요.</p>
       </div>
 
       {popupBlockedUrl && (
-        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 flex items-start gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1">
-            <p className="text-xs text-amber-100">새 창이 열리지 않았습니다. 브라우저가 팝업을 막은 것 같아요.</p>
+            <p className="text-xs text-amber-900">새 창이 열리지 않았습니다. 브라우저가 팝업을 막은 것 같아요.</p>
             <a href={popupBlockedUrl} target="_blank" rel="noreferrer"
-              className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100">
+              className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-amber-800 hover:text-amber-900">
               승인 창 직접 열기
               <ExternalLink className="w-3 h-3" />
             </a>
@@ -314,8 +317,8 @@ export default function SnsPage() {
             <div
               key={spec.platform}
               className={`relative overflow-hidden rounded-2xl p-3.5 sm:p-4 flex flex-col transition-colors ${
-                soon ? 'border border-dashed border-white/15 bg-white/[0.02]'
-                  : sum.connected ? 'bg-white/5 border border-transparent' : `${OUI_CARD} border`
+                soon ? 'border border-dashed border-slate-300 bg-white'
+                  : sum.connected ? 'bg-white border border-transparent' : `${OUI_CARD} border`
               }`}
             >
               {/* 연결된 채널만 브랜드 색이 번진다. 지면 규칙을 깨지 않도록 배경에만, 옅게. */}
@@ -331,44 +334,38 @@ export default function SnsPage() {
               {/* 머리 = 채널 창 열기(계정이 있을 때) · 아래 = 주 동작 1개. 버튼을 겹치지 않는다(형제). */}
               {live.length > 0 && !soon ? (
                 <button onClick={() => setOpenChannel(spec.platform)}
-                  className="relative text-left rounded-xl -m-1 p-1 hover:bg-white/[0.04] transition-colors" aria-label={`${spec.label} 연결 계정 보기`}>
+                  className="relative text-left rounded-xl -m-1 p-1 hover:bg-white transition-colors" aria-label={`${spec.label} 연결 계정 보기`}>
                   <div className="flex items-start justify-between gap-2 mb-3">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border ${
-                      sum.connected ? 'bg-white/[0.12] border-white/20' : 'bg-white/[0.06] border-white/10'
-                    }`}>
-                      <SnsChannelLogo platform={spec.platform} size={22} />
-                    </div>
+                    <SnsChannelLogo platform={spec.platform} size={22} tile />
                     {sum.badge && (
                       <span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${sum.badge.cls}`}>
                         {sum.badge.label}{sum.count > 1 ? ` · ${sum.count}` : ''}
                       </span>
                     )}
                   </div>
-                  <p className="text-sm font-semibold text-white inline-flex items-center gap-1">
-                    {spec.label}<ChevronRight className="w-3.5 h-3.5 text-white/35" />
+                  <p className="text-sm font-semibold text-slate-900 inline-flex items-center gap-1">
+                    {spec.label}<ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </p>
-                  <p className="text-[11px] text-white/50 mt-1 truncate">
+                  <p className="text-[11px] text-slate-500 mt-1 truncate">
                     {worst ? snsAccountName(worst, accounts) : ''}{sum.count > 1 ? ` 외 ${sum.count - 1}` : ''}
                   </p>
                 </button>
               ) : (
                 <div className="relative">
                   <div className="flex items-start justify-between gap-2 mb-3">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border bg-white/[0.06] border-white/10">
-                      <SnsChannelLogo platform={spec.platform} size={22} muted={soon} />
-                    </div>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.08] text-white/55 border border-white/15 whitespace-nowrap">
+                    <SnsChannelLogo platform={spec.platform} size={22} muted={soon} tile />
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-300 whitespace-nowrap">
                       {soon ? '준비 중' : '연결 안 됨'}
                     </span>
                   </div>
-                  <p className="text-sm font-semibold text-white">{spec.label}</p>
-                  <p className="text-[11px] text-white/50 mt-1 truncate">{snsAccountAbility(spec.capabilities)}</p>
+                  <p className="text-sm font-semibold text-slate-900">{spec.label}</p>
+                  <p className="text-[11px] text-slate-500 mt-1 truncate">{snsAccountAbility(spec.capabilities)}</p>
                 </div>
               )}
 
               <div className="relative mt-3.5 pt-0 flex-1 flex items-end">
                 {soon ? (
-                  <p className="text-[11px] text-white/40 break-keep">지금은 연결할 수 없어요</p>
+                  <p className="text-[11px] text-slate-400 break-keep">지금은 연결할 수 없어요</p>
                 ) : live.length === 0 ? (
                   <button onClick={() => startConnect(spec.platform)} disabled={!!busyPlatform}
                     className={`${OUI_BTN_PRIMARY} w-full justify-center`}>
@@ -377,7 +374,7 @@ export default function SnsPage() {
                   </button>
                 ) : worstBroken && worst ? (
                   <button onClick={() => reconnect(worst.id)} disabled={!!busyPlatform}
-                    className={`${OUI_BTN_OUTLINE} w-full justify-center !text-amber-100 !border-amber-400/40 hover:!bg-amber-500/15`}>
+                    className={`${OUI_BTN_OUTLINE} w-full justify-center !text-amber-900 !border-amber-300 hover:!bg-amber-100`}>
                     {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                     다시 연결
                   </button>
@@ -398,7 +395,7 @@ export default function SnsPage() {
 
       {!hasActive && (
         <div className={`${OUI_CARD} p-4`}>
-          <p className="text-xs text-white/50 leading-relaxed break-keep">
+          <p className="text-xs text-slate-500 leading-relaxed break-keep">
             채널을 하나 연결하면 바로 올릴 수 있어요. 인스타그램은 프로페셔널(비즈니스·크리에이터) 계정만, 페이스북은 관리하는 페이지가 연결됩니다.
           </p>
         </div>
@@ -406,36 +403,34 @@ export default function SnsPage() {
     </section>
   );
 
+  const snsOneLine = zoneModule('sns').oneLine!;
+  const composerOn = enabled && liveCount > 0;
   return (
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-
-      <header className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="뒤로">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-sky-400 to-violet-500`}>
-            <Share2 className="w-5 h-5 text-white" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className={OUI_TITLE}>SNS 채널</h1>
-            <p className={OUI_SUBTITLE}>회사 SNS 계정을 연결하고 사진·영상과 글을 올립니다.</p>
-          </div>
-          {enabled && (
-            <button onClick={() => { void load(); setHistoryKey((k) => k + 1); }} className={OUI_BTN_GHOST}>
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">새로고침</span>
-            </button>
-          )}
-        </div>
-      </header>
-
-      <main className={`${OUI_WRAP_WIDE} py-6 md:py-8 relative z-10`}>
+    <ZoneFrame
+      moduleId="sns"
+      aux={enabled ? { label: '채널 관리', icon: Link2, onClick: () => document.getElementById('sns-channels')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : null}
+      command={enabled ? {
+        line: {
+          value: snsLine,
+          onChange: setSnsLine,
+          // 한 줄 → 작성기 글 칸에 넣고 기존 [AI로 캡션 쓰기]와 같은 경로로 채널 글을 쓴다(SnsComposer seed 요청)
+          onSubmit: () => { setComposeRequest({ kind: 'seed', text: snsLine.trim(), nonce: Date.now() }); setSnsLine(''); },
+          placeholder: composerOn ? snsOneLine.placeholder : '먼저 아래에서 채널을 연결해 주세요',
+          verb: snsOneLine.verb,
+          icon: Sparkles,
+          disabled: !composerOn,
+          busy: composerAiBusy,
+        },
+        stats: [{ label: '연결 계정', value: liveCount }],
+        checks: attention && attention.total > 0 ? [{ label: `확인할 것 ${attention.total}` }] : [],
+        stamp: { text: '다시 읽기', onRefresh: () => { void load(); setHistoryKey((k) => k + 1); } },
+      } : null}
+    >
+      <div>
         {!enabled ? (
           <section className={`${OUI_CARD} ${OUI_EMPTY} max-w-xl mx-auto`}>
             <div className={OUI_EMPTY_ICON}>
-              <Share2 className="w-6 h-6 text-white/40" />
+              <Share2 className="w-6 h-6 text-slate-400" />
             </div>
             <p className={OUI_EMPTY_TITLE}>준비 중인 기능이에요</p>
             <p className={OUI_EMPTY_DESC}>
@@ -460,6 +455,7 @@ export default function SnsPage() {
               userId={user?.id ?? null}
               request={composeRequest}
               onRequestHandled={() => setComposeRequest(null)}
+              onAiBusyChange={setComposerAiBusy}
               onPublished={() => { setHistoryKey((k) => k + 1); void load(); }}
               onReconnect={reconnect}
               onAccountsChanged={() => void load()}
@@ -470,7 +466,7 @@ export default function SnsPage() {
             {channelCards}
           </div>
         )}
-      </main>
+      </div>
 
       {openSpec && (
         <SnsChannelModal
@@ -486,6 +482,6 @@ export default function SnsPage() {
       )}
 
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
-    </div>
+    </ZoneFrame>
   );
 }

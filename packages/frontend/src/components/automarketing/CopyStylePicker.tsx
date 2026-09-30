@@ -31,14 +31,14 @@ export default function CopyStylePicker({ value, onChange, disabled, compact }: 
                 type="button"
                 disabled={disabled}
                 onClick={() => onChange(on ? null : s.key)}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${on ? 'bg-indigo-500/30 border-indigo-400/50 text-indigo-100' : 'bg-white/5 hover:bg-white/10 border-white/10 text-white/60'}`}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${on ? 'bg-indigo-100 border-indigo-300 text-indigo-900' : 'bg-white hover:bg-slate-100 border-slate-200 text-slate-500'}`}
               >
                 {s.label}
               </button>
             );
           })}
         </div>
-        <div className="mt-1.5 text-[11px] text-white/40 italic leading-relaxed">
+        <div className="mt-1.5 text-[11px] text-slate-400 italic leading-relaxed">
           {selected ? `예: ${selected.example}` : '선택하지 않으면 브랜드 톤에 맞춰 자동으로 작성됩니다.'}
         </div>
       </div>
@@ -56,16 +56,16 @@ export default function CopyStylePicker({ value, onChange, disabled, compact }: 
               type="button"
               disabled={disabled}
               onClick={() => onChange(on ? null : s.key)}
-              className={`text-left rounded-xl border p-3 transition-colors ${on ? 'bg-indigo-500/20 border-indigo-400/50' : 'bg-white/5 hover:bg-white/10 border-white/10'}`}
+              className={`text-left rounded-xl border p-3 transition-colors ${on ? 'bg-indigo-100 border-indigo-300' : 'bg-white hover:bg-slate-100 border-slate-200'}`}
             >
-              <div className={`text-[13px] font-medium ${on ? 'text-indigo-100' : 'text-white'}`}>{s.label}</div>
-              <div className="mt-0.5 text-[11px] text-white/50">{s.desc}</div>
-              <div className="mt-1.5 text-[11px] text-white/40 italic leading-relaxed">예: {s.example}</div>
+              <div className={`text-[13px] font-medium ${on ? 'text-indigo-900' : 'text-slate-900'}`}>{s.label}</div>
+              <div className="mt-0.5 text-[11px] text-slate-500">{s.desc}</div>
+              <div className="mt-1.5 text-[11px] text-slate-400 italic leading-relaxed">예: {s.example}</div>
             </button>
           );
         })}
       </div>
-      <div className="mt-1.5 text-[10px] text-white/40">선택하지 않으면 브랜드 톤에 맞춰 자동으로 작성됩니다. 같은 카드를 다시 누르면 해제됩니다.</div>
+      <div className="mt-1.5 text-[10px] text-slate-400">선택하지 않으면 브랜드 톤에 맞춰 자동으로 작성됩니다. 같은 카드를 다시 누르면 해제됩니다.</div>
     </div>
   );
 }

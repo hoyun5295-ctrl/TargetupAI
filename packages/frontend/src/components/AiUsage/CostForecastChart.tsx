@@ -7,6 +7,7 @@
  * SVG 직접 구현 — recharts 의존 X (단일 차트 + 다크 톤 정합 우선).
  */
 
+import { OUI_CHART_GRID } from '../../utils/operator-ui';
 import { useMemo } from 'react';
 import { TrendingUp, AlertTriangle } from 'lucide-react';
 
@@ -129,7 +130,7 @@ export default function CostForecastChart({ forecast, monthlyLimit, loading }: P
 
   if (loading) {
     return (
-      <div className="flex justify-center py-16 text-white/40">
+      <div className="flex justify-center py-16 text-slate-400">
         <div className="text-sm">예측 계산 중...</div>
       </div>
     );
@@ -137,7 +138,7 @@ export default function CostForecastChart({ forecast, monthlyLimit, loading }: P
 
   if (!stats || forecast.length === 0) {
     return (
-      <div className="text-center py-10 text-white/40 text-sm">
+      <div className="text-center py-10 text-slate-400 text-sm">
         예측할 호출 데이터가 부족합니다.
         <br />
         <span className="text-xs">AI 호출이 누적되면 향후 30일 예측을 제공합니다.</span>
@@ -157,14 +158,14 @@ export default function CostForecastChart({ forecast, monthlyLimit, loading }: P
                 y1={t.y}
                 x2={W - PADDING_RIGHT}
                 y2={t.y}
-                stroke="rgba(255,255,255,0.06)"
+                stroke={OUI_CHART_GRID}
                 strokeWidth="1"
               />
               <text
                 x={PADDING_LEFT - 8}
                 y={t.y + 4}
                 textAnchor="end"
-                className="fill-white/40"
+                className="fill-slate-400"
                 style={{ fontSize: '10px' }}
               >
                 {t.value.toLocaleString()}
@@ -267,7 +268,7 @@ export default function CostForecastChart({ forecast, monthlyLimit, loading }: P
               x={t.x}
               y={H - PADDING_BOTTOM + 16}
               textAnchor="middle"
-              className="fill-white/40"
+              className="fill-slate-400"
               style={{ fontSize: '10px' }}
             >
               {t.label}
@@ -277,29 +278,29 @@ export default function CostForecastChart({ forecast, monthlyLimit, loading }: P
           {/* 범례 */}
           <g transform={`translate(${PADDING_LEFT}, ${H - 8})`}>
             <circle cx="4" cy="0" r="3" fill="#60a5fa" />
-            <text x="12" y="3" className="fill-white/60" style={{ fontSize: '10px' }}>옛 30일 실제</text>
+            <text x="12" y="3" className="fill-slate-500" style={{ fontSize: '10px' }}>옛 30일 실제</text>
             <circle cx="100" cy="0" r="3" fill="#a78bfa" />
-            <text x="108" y="3" className="fill-white/60" style={{ fontSize: '10px' }}>향후 30일 예측 (선형 회귀)</text>
+            <text x="108" y="3" className="fill-slate-500" style={{ fontSize: '10px' }}>향후 30일 예측 (선형 회귀)</text>
           </g>
         </svg>
       </div>
 
       {/* 한도 도달 예측 경고 */}
       {stats.limitReachedDate && (
-        <div className="mt-3 p-3 bg-rose-500/10 border border-rose-400/30 rounded-lg flex items-start gap-2">
-          <AlertTriangle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-white/80 leading-relaxed">
-            <strong className="text-rose-200">한도 도달 예측:</strong> 현재 추세가 유지되면 <strong className="text-white">{stats.limitReachedDate}</strong> 경 일평균 한도를 초과할 가능성이 있습니다.
+        <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-rose-700 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-slate-700 leading-relaxed">
+            <strong className="text-rose-800">한도 도달 예측:</strong> 현재 추세가 유지되면 <strong className="text-slate-900">{stats.limitReachedDate}</strong> 경 일평균 한도를 초과할 가능성이 있습니다.
             Batch 처리 모드 전환 또는 한도 알림 설정을 권장합니다.
           </div>
         </div>
       )}
 
       {!stats.limitReachedDate && monthlyLimit !== null && (
-        <div className="mt-3 p-3 bg-emerald-500/10 border border-emerald-400/30 rounded-lg flex items-start gap-2">
-          <TrendingUp className="w-4 h-4 text-emerald-300 flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-white/80 leading-relaxed">
-            <strong className="text-emerald-200">안정적 운영 중:</strong> 향후 30일 예측에서 일평균 한도 초과 시점이 발견되지 않았습니다.
+        <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-2">
+          <TrendingUp className="w-4 h-4 text-emerald-700 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-slate-700 leading-relaxed">
+            <strong className="text-emerald-800">안정적 운영 중:</strong> 향후 30일 예측에서 일평균 한도 초과 시점이 발견되지 않았습니다.
           </div>
         </div>
       )}

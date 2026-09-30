@@ -153,7 +153,7 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 px-3 py-6 text-xs text-white/50 bg-white/5 border border-white/10 rounded-lg">
+      <div className="flex items-center gap-2 px-3 py-6 text-xs text-slate-500 bg-white border border-slate-200 rounded-lg">
         <Loader2 className="w-4 h-4 animate-spin" /> 이 계정에서 쓸 수 있는 발송 대상을 확인하는 중입니다
       </div>
     );
@@ -161,7 +161,7 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
 
   if (loadError) {
     return (
-      <div className="flex items-start gap-2 px-3 py-3 text-xs text-amber-200 bg-amber-500/10 border border-amber-400/30 rounded-lg">
+      <div className="flex items-start gap-2 px-3 py-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg">
         <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
         <span>{loadError}</span>
       </div>
@@ -178,16 +178,16 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
           disabled={disabled}
           className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
             value === null
-              ? 'bg-indigo-500/25 border-indigo-400/50'
-              : 'bg-white/5 border-white/10 hover:border-white/25'
+              ? 'bg-indigo-100 border-indigo-300'
+              : 'bg-white border-slate-200 hover:border-slate-300'
           } disabled:opacity-40`}
         >
           <div className="flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
-            <span className="text-xs font-medium text-white">목표 문장으로 자동 판단</span>
-            {value === null && <Check className="w-3.5 h-3.5 text-indigo-300 ml-auto shrink-0" />}
+            <Sparkles className="w-3.5 h-3.5 text-indigo-700 shrink-0" />
+            <span className="text-xs font-medium text-slate-900">목표 문장으로 자동 판단</span>
+            {value === null && <Check className="w-3.5 h-3.5 text-indigo-700 ml-auto shrink-0" />}
           </div>
-          <div className="text-[10px] text-white/45 mt-1 leading-relaxed">
+          <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">
             {value === null && legacyHint
               ? `지금은 예전에 지정한 '${LEGACY_HINT_LABEL[legacyHint] || legacyHint}' 축으로 나갑니다. 아래에서 대상을 고르면 그 축으로 바뀝니다.`
               : '매 회차 목표 문장을 다시 해석합니다. 회차마다 대상이 달라질 수 있습니다.'}
@@ -204,17 +204,17 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
               disabled={disabled || !s.available}
               title={s.reason}
               className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
-                on ? 'bg-indigo-500/25 border-indigo-400/50'
-                  : s.available ? 'bg-white/5 border-white/10 hover:border-white/25'
-                  : 'bg-white/[0.02] border-white/5 cursor-not-allowed'
+                on ? 'bg-indigo-100 border-indigo-300'
+                  : s.available ? 'bg-white border-slate-200 hover:border-slate-300'
+                  : 'bg-white border-slate-100 cursor-not-allowed'
               } ${disabled ? 'opacity-40' : ''}`}
             >
               <div className="flex items-center gap-1.5">
-                {!s.available && <Lock className="w-3.5 h-3.5 text-white/30 shrink-0" />}
-                <span className={`text-xs font-medium ${s.available ? 'text-white' : 'text-white/40'}`}>{s.label}</span>
-                {on && <Check className="w-3.5 h-3.5 text-indigo-300 ml-auto shrink-0" />}
+                {!s.available && <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+                <span className={`text-xs font-medium ${s.available ? 'text-slate-900' : 'text-slate-400'}`}>{s.label}</span>
+                {on && <Check className="w-3.5 h-3.5 text-indigo-700 ml-auto shrink-0" />}
               </div>
-              <div className={`text-[10px] mt-1 leading-relaxed ${s.available ? 'text-white/45' : 'text-white/35'}`}>
+              <div className={`text-[10px] mt-1 leading-relaxed ${s.available ? 'text-slate-400' : 'text-slate-400'}`}>
                 {s.reason}
               </div>
             </button>
@@ -226,10 +226,10 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
         const cur = Number(params?.[def.key] ?? def.default);
         const presets = (def.presets || []).filter((p) => p >= def.min && p <= def.max);
         return (
-          <div key={def.key} className="px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg">
+          <div key={def.key} className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-white/60">{def.label}</span>
-              <span className="text-[11px] text-white/80 font-medium">{cur.toLocaleString()}{def.unit}</span>
+              <span className="text-[11px] text-slate-500">{def.label}</span>
+              <span className="text-[11px] text-slate-700 font-medium">{cur.toLocaleString()}{def.unit}</span>
             </div>
             {presets.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
@@ -240,8 +240,8 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
                     onClick={() => setParam(def.key, p)}
                     disabled={disabled}
                     className={`px-2.5 py-1 text-[11px] rounded-md border transition-colors ${
-                      cur === p ? 'bg-indigo-500/30 border-indigo-400/50 text-indigo-100'
-                        : 'bg-white/5 border-white/10 text-white/60 hover:text-white/90'
+                      cur === p ? 'bg-indigo-100 border-indigo-300 text-indigo-900'
+                        : 'bg-white border-slate-200 text-slate-500 hover:text-slate-800'
                     } disabled:opacity-40`}
                   >
                     {p.toLocaleString()}{def.unit}
@@ -255,9 +255,9 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
 
       {/* 변화 축 첫 회차 — 대상 수 대신 무슨 일이 일어날지 먼저 말한다(오류 아님). */}
       {awaitingBaseline && (
-        <div className="flex items-start gap-2 px-3 py-2.5 bg-indigo-500/10 border border-indigo-400/30 rounded-lg">
-          <Sparkles className="w-3.5 h-3.5 text-indigo-300 shrink-0 mt-0.5" />
-          <span className="text-[11px] text-indigo-100/90 leading-relaxed">
+        <div className="flex items-start gap-2 px-3 py-2.5 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <Sparkles className="w-3.5 h-3.5 text-indigo-700 shrink-0 mt-0.5" />
+          <span className="text-[11px] text-indigo-900 leading-relaxed">
             지난번 발송 때와 비교해서 대상을 정하는 조건입니다. 저장하면 <span className="font-semibold">첫 회차에 비교 기준을 잡고</span>,
             그다음 회차부터 달라진 분들이 대상으로 잡힙니다.
           </span>
@@ -266,31 +266,31 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
 
       {/* 셀 수 없는 상태 — 수를 그리지 않는다. 0명으로 보이면 담당자는 조건을 넓히려 든다(원인이 조건이 아닌데). */}
       {value && !awaitingBaseline && blockedReason && (
-        <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-500/10 border border-amber-400/30 rounded-lg">
-          <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
-          <span className="text-[11px] text-amber-100/90 leading-relaxed">{blockedReason}</span>
+        <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+          <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+          <span className="text-[11px] text-amber-900 leading-relaxed">{blockedReason}</span>
         </div>
       )}
 
       {value && !awaitingBaseline && !blockedReason && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg">
-          <Users className="w-3.5 h-3.5 text-white/40 shrink-0" />
+        <div className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg">
+          <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           {counting ? (
-            <span className="flex items-center gap-1.5 text-[11px] text-white/50">
+            <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
               <Loader2 className="w-3 h-3 animate-spin" /> 지금 기준으로 세는 중입니다
             </span>
           ) : countError ? (
-            <span className="text-[11px] text-amber-200">{countError}</span>
+            <span className="text-[11px] text-amber-800">{countError}</span>
           ) : count !== null ? (
-            <span className="text-[11px] text-white/70">
-              지금 기준 <span className="text-white font-semibold">{count.toLocaleString()}명</span>
-              <span className="text-white/40"> · 수신거부·발송 피로도까지 걸러낸 실제 발송 대상입니다</span>
+            <span className="text-[11px] text-slate-600">
+              지금 기준 <span className="text-slate-900 font-semibold">{count.toLocaleString()}명</span>
+              <span className="text-slate-400"> · 수신거부·발송 피로도까지 걸러낸 실제 발송 대상입니다</span>
             </span>
           ) : null}
         </div>
       )}
 
-      <div className="text-[10px] text-white/40 leading-relaxed">
+      <div className="text-[10px] text-slate-400 leading-relaxed">
         {value
           ? '고른 조건이 그대로 저장됩니다. 매 회차 같은 조건으로 대상을 뽑고, 발송 직전에 다시 한 번 추출합니다.'
           : '조건을 고르면 회차마다 같은 기준으로 대상을 뽑습니다.'}

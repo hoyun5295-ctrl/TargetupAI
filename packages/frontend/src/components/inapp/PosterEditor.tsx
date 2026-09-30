@@ -50,9 +50,9 @@ const COLOR_SUGGEST: Record<PosterLayout, { title: string[]; body: string[]; bg:
   overlay: { title: ['#ffffff', '#fde047', '#111827'], body: ['#ffffff', '#e5e7eb', '#fde047'], bg: [] },
 };
 
-const BTN_SEG = (on: boolean) => `px-3 h-8 rounded-lg border text-[12px] font-bold transition-colors ${on ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-white/[0.04] border-white/10 text-white/60 hover:bg-white/10'}`;
-const LBL = 'block text-[12px] font-bold text-white/80 mb-1.5';
-const INPUT = 'w-full h-10 px-3 rounded-xl bg-slate-950/60 border border-white/15 text-[13px] text-white placeholder-white/35 outline-none focus:border-violet-400/70';
+const BTN_SEG = (on: boolean) => `px-3 h-8 rounded-lg border text-[12px] font-bold transition-colors ${on ? 'bg-violet-100 border-violet-300 text-slate-900' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'}`;
+const LBL = 'block text-[12px] font-bold text-slate-700 mb-1.5';
+const INPUT = 'w-full h-10 px-3 rounded-xl bg-slate-100 border border-slate-300 text-[13px] text-slate-900 placeholder-slate-400 outline-none focus:border-violet-300';
 
 // ─────────────────────────────── 사진 넣기(파일 · 라이브러리 · 몰 상품) ───────────────────────────────
 
@@ -124,7 +124,7 @@ export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, 
   return (
     <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
       onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files?.length) onDropFiles(e.dataTransfer.files); }}
-      className={`rounded-2xl transition-colors ${over ? 'bg-violet-500/10 ring-2 ring-violet-400/50' : ''}`}>
+      className={`rounded-2xl transition-colors ${over ? 'bg-violet-50 ring-2 ring-violet-300' : ''}`}>
       {top}
       <BlockList
         title={`장 ${slides.length}/${MAX_SLIDES}`}
@@ -143,14 +143,14 @@ export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, 
         footer={(
           <div className="space-y-2.5">
             <button type="button" onClick={onAdd} disabled={full || busy}
-              className="w-full h-11 rounded-xl border border-dashed border-white/20 text-[13px] font-semibold text-white/80 hover:text-white hover:border-violet-400/60 disabled:opacity-40 inline-flex items-center justify-center gap-2">
+              className="w-full h-11 rounded-xl border border-dashed border-slate-300 text-[13px] font-semibold text-slate-700 hover:text-slate-900 hover:border-violet-300 disabled:opacity-40 inline-flex items-center justify-center gap-2">
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
               {full ? `최대 ${MAX_SLIDES}장까지` : '장 추가 (지금 장 모양 따라가기)'}
             </button>
-            <p className="text-[11.5px] text-white/45 leading-relaxed px-1">
-              사진 여러 장을 여기나 가운데 사진 칸에 한 번에 끌어 놓으면 <b className="text-white/80">장이 자동으로 늘어납니다</b>. 같은 모양 · 같은 버튼 설정을 따라갑니다.
+            <p className="text-[11.5px] text-slate-400 leading-relaxed px-1">
+              사진 여러 장을 여기나 가운데 사진 칸에 한 번에 끌어 놓으면 <b className="text-slate-700">장이 자동으로 늘어납니다</b>. 같은 모양 · 같은 버튼 설정을 따라갑니다.
             </p>
-            <p className="text-[11.5px] text-white/45 leading-relaxed px-1">
+            <p className="text-[11.5px] text-slate-400 leading-relaxed px-1">
               글자는 휴대폰 위를 눌러 고칩니다 · 장 넘기기 = 휴대폰 안 화살표 · 이 목록 · ←/→ 키
             </p>
             {notes}
@@ -344,9 +344,9 @@ export function PosterStage({
         style={{ width: phoneW, height: phoneH, transform: phoneShift ? `translateX(${phoneShift}px)` : undefined, transition: 'transform .22s cubic-bezier(.22,1,.36,1)' }}
         onClick={(e) => { e.stopPropagation(); if (dock) close(); onSelect(null); }}>
         <div style={{ width: frameW, height: frameH, transform: fit !== 1 ? `scale(${fit})` : undefined, transformOrigin: 'top left' }}>
-        <div className={`relative overflow-hidden bg-slate-800 shadow-[0_24px_60px_-20px_rgba(0,0,0,.8)] ${isPc ? 'rounded-xl' : 'rounded-[34px] border-[6px] border-slate-800'}`}
+        <div className={`relative overflow-hidden bg-slate-100 shadow-[0_24px_60px_-20px_rgba(0,0,0,.8)] ${isPc ? 'rounded-xl' : 'rounded-[34px] border-[6px] border-slate-200'}`}
           style={{ width: frameW, height: frameH }}>
-          {isPc && <div className="h-6 bg-slate-800 flex items-center gap-1.5 px-3"><i className="w-2 h-2 rounded-full bg-rose-400" /><i className="w-2 h-2 rounded-full bg-amber-300" /><i className="w-2 h-2 rounded-full bg-emerald-400" /></div>}
+          {isPc && <div className="h-6 bg-slate-100 flex items-center gap-1.5 px-3"><i className="w-2 h-2 rounded-full bg-rose-400" /><i className="w-2 h-2 rounded-full bg-amber-300" /><i className="w-2 h-2 rounded-full bg-emerald-400" /></div>}
           <div className="relative w-full" style={{ height: isPc ? PC_H - 24 : '100%' }}>
             <FakeScreen app={channel === 'app'} />
             <div className="absolute inset-0" style={{ background: 'rgba(15,23,42,.45)' }} />
@@ -374,7 +374,7 @@ export function PosterStage({
               </div>
             </div>
             {busyImage && (
-              <div className="absolute inset-0 bg-slate-950/50 flex items-center justify-center text-white text-[13px] font-semibold gap-2"><Loader2 className="w-4 h-4 animate-spin" />사진 올리는 중</div>
+              <div className="absolute inset-0 bg-slate-100 flex items-center justify-center text-slate-900 text-[13px] font-semibold gap-2"><Loader2 className="w-4 h-4 animate-spin" />사진 올리는 중</div>
             )}
           </div>
         </div>
@@ -385,14 +385,14 @@ export function PosterStage({
         <>
           {/* 연결선 — 편집 칸 오른쪽 화살표에서 휴대폰 왼쪽 끝까지 */}
           <div aria-hidden className="absolute pointer-events-none" style={{ left: dock.width, top: dock.top + dock.arrowY - 1, width: Math.max(0, dock.gap), height: 2, background: 'rgba(139,92,246,.55)', visibility: dock.placed ? 'visible' : 'hidden' }} />
-          <div ref={dockRef} data-stage-dock className="absolute left-0 z-20 rounded-2xl border border-violet-400/60 bg-slate-900 shadow-2xl p-3"
+          <div ref={dockRef} data-stage-dock className="absolute left-0 z-20 rounded-2xl border border-violet-300 bg-white shadow-2xl p-3"
             style={{ top: dock.top, width: dock.width, visibility: dock.placed ? 'visible' : 'hidden' }}
             onClick={(e) => e.stopPropagation()}>
             {/* 화살표 — 고른 글자 쪽 */}
             <span aria-hidden className="absolute" style={{ right: -7, top: dock.arrowY - 7, width: 12, height: 12, background: '#0f172a', borderTop: '1px solid rgba(167,139,250,.6)', borderRight: '1px solid rgba(167,139,250,.6)', transform: 'rotate(45deg)' }} />
             <div className="flex items-center justify-between gap-2 mb-1.5">
-              <b className="text-[13px] text-white">{names[dock.key]}</b>
-              <button type="button" onClick={cancel} className="text-[11px] text-white/45 hover:text-white">되돌리고 닫기</button>
+              <b className="text-[13px] text-slate-900">{names[dock.key]}</b>
+              <button type="button" onClick={cancel} className="text-[11px] text-slate-400 hover:text-slate-900">되돌리고 닫기</button>
             </div>
             <textarea ref={taRef} rows={dock.key === 'body' ? 5 : 3} maxLength={FIELD_MAX[dock.key]}
               value={readField(cur, dock.key)}
@@ -401,16 +401,16 @@ export function PosterStage({
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); close(); }
                 if (e.key === 'Escape') { e.preventDefault(); cancel(); }
               }}
-              className="w-full px-3 py-2.5 rounded-xl bg-slate-950/70 border border-white/15 text-[13.5px] leading-relaxed text-white outline-none focus:border-violet-400/70 resize-none" />
+              className="w-full px-3 py-2.5 rounded-xl bg-slate-100 border border-slate-300 text-[13.5px] leading-relaxed text-slate-900 outline-none focus:border-violet-300 resize-none" />
             <div className="flex items-center justify-between mt-1.5">
-              <span className="text-[10.5px] text-white/40">Enter 완료 · Shift+Enter 줄바꿈 · Esc 취소</span>
-              <span className="text-[10.5px] text-white/35 tabular-nums">{readField(cur, dock.key).length}/{FIELD_MAX[dock.key]}</span>
+              <span className="text-[10.5px] text-slate-400">Enter 완료 · Shift+Enter 줄바꿈 · Esc 취소</span>
+              <span className="text-[10.5px] text-slate-400 tabular-nums">{readField(cur, dock.key).length}/{FIELD_MAX[dock.key]}</span>
             </div>
             {variables.length > 0 && dock.key !== 'cta' && (
               <div className="flex flex-wrap gap-1 mt-2">
                 {variables.slice(0, 6).map((v) => (
                   <button key={v.key} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => insertVar(v.key)}
-                    className="h-7 px-2 rounded-md bg-violet-500/15 border border-violet-400/30 text-[11.5px] text-violet-100 hover:bg-violet-500/25">+ {v.label}</button>
+                    className="h-7 px-2 rounded-md bg-violet-100 border border-violet-200 text-[11.5px] text-violet-900 hover:bg-violet-100">+ {v.label}</button>
                 ))}
               </div>
             )}
@@ -459,16 +459,16 @@ export function SlidePanel({
       <div className="space-y-4">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-[15px] font-bold text-white">{names[selected]}</p>
-            <p className="text-[11.5px] text-white/45 mt-0.5">휴대폰 위에서 바로 고치고 있어요. 여기서 고쳐도 같습니다.</p>
+            <p className="text-[15px] font-bold text-slate-900">{names[selected]}</p>
+            <p className="text-[11.5px] text-slate-400 mt-0.5">휴대폰 위에서 바로 고치고 있어요. 여기서 고쳐도 같습니다.</p>
           </div>
-          <button type="button" onClick={() => onSelect(null)} className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10" aria-label="칸 선택 풀기"><X className="w-4 h-4" /></button>
+          <button type="button" onClick={() => onSelect(null)} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="칸 선택 풀기"><X className="w-4 h-4" /></button>
         </div>
         <div>
           <label className={LBL}>글자</label>
           <textarea data-panel-text rows={selected === 'body' ? 4 : 2} maxLength={FIELD_MAX[selected]} value={readField(s, selected)}
             onChange={(e) => onPatchSlide(selected === 'cta' ? { cta: { ...(s.cta || {}), label: e.target.value } } : { [selected]: e.target.value } as any)}
-            className="w-full px-3 py-2.5 rounded-xl bg-slate-950/60 border border-white/15 text-[13px] leading-relaxed text-white outline-none focus:border-violet-400/70 resize-none" />
+            className="w-full px-3 py-2.5 rounded-xl bg-slate-100 border border-slate-300 text-[13px] leading-relaxed text-slate-900 outline-none focus:border-violet-300 resize-none" />
         </div>
         {sizeKey && (
           <div>
@@ -482,13 +482,13 @@ export function SlidePanel({
         )}
         {colorKey && (
           <div>
-            <label className={LBL}>색 <span className="font-normal text-white/40">이 칸에 어울리는 색</span></label>
+            <label className={LBL}>색 <span className="font-normal text-slate-400">이 칸에 어울리는 색</span></label>
             <div className="flex items-center gap-2">
               {palette.map((c) => (
                 <button key={c} type="button" onClick={() => onPatchSlide({ [colorKey]: c } as any)}
-                  className={`w-8 h-8 rounded-full border-2 ${curColor.toLowerCase() === c.toLowerCase() ? 'border-violet-300 ring-2 ring-violet-400/40' : 'border-white/20'}`} style={{ background: c }} aria-label={`색 ${c}`} />
+                  className={`w-8 h-8 rounded-full border-2 ${curColor.toLowerCase() === c.toLowerCase() ? 'border-violet-300 ring-2 ring-violet-300' : 'border-slate-300'}`} style={{ background: c }} aria-label={`색 ${c}`} />
               ))}
-              <label className="relative w-8 h-8 rounded-full border-2 border-dashed border-white/25 flex items-center justify-center text-white/50 cursor-pointer overflow-hidden" title="직접 고르기">
+              <label className="relative w-8 h-8 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-500 cursor-pointer overflow-hidden" title="직접 고르기">
                 <Plus className="w-3.5 h-3.5" />
                 <input type="color" value={curColor || '#ffffff'} onChange={(e) => onPatchSlide({ [colorKey]: e.target.value } as any)} className="absolute inset-0 opacity-0 cursor-pointer" />
               </label>
@@ -497,10 +497,10 @@ export function SlidePanel({
         )}
         {isText && variables.length > 0 && (
           <div>
-            <label className={LBL}>넣을 수 있는 값 <span className="font-normal text-white/40">고객마다 바뀌어 들어갑니다</span></label>
+            <label className={LBL}>넣을 수 있는 값 <span className="font-normal text-slate-400">고객마다 바뀌어 들어갑니다</span></label>
             <div className="flex flex-wrap gap-1.5">
               {variables.slice(0, 8).map((v) => (
-                <button key={v.key} type="button" onClick={() => onInsertVar(selected, v.key)} className="h-8 px-2.5 rounded-lg bg-violet-500/15 border border-violet-400/30 text-[12px] text-violet-100 hover:bg-violet-500/25">+ {v.label}</button>
+                <button key={v.key} type="button" onClick={() => onInsertVar(selected, v.key)} className="h-8 px-2.5 rounded-lg bg-violet-100 border border-violet-200 text-[12px] text-violet-900 hover:bg-violet-100">+ {v.label}</button>
               ))}
             </div>
           </div>
@@ -513,15 +513,15 @@ export function SlidePanel({
                 placeholder="https://… 또는 /event/…" className={INPUT} />
             </div>
             <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-[12px] text-white/60">버튼 바탕
-                <input type="color" value={hexOr(s.cta?.background_color, layout === 'banner_sheet' ? '#ffffff' : '#4f46e5')} onChange={(e) => onPatchSlide({ cta: { ...(s.cta || {}), background_color: e.target.value } })} className="h-8 w-10 rounded bg-transparent border border-white/15 cursor-pointer" />
+              <label className="flex items-center gap-2 text-[12px] text-slate-500">버튼 바탕
+                <input type="color" value={hexOr(s.cta?.background_color, layout === 'banner_sheet' ? '#ffffff' : '#4f46e5')} onChange={(e) => onPatchSlide({ cta: { ...(s.cta || {}), background_color: e.target.value } })} className="h-8 w-10 rounded bg-transparent border border-slate-300 cursor-pointer" />
               </label>
-              <label className="flex items-center gap-2 text-[12px] text-white/60">버튼 글자
-                <input type="color" value={hexOr(s.cta?.text_color, layout === 'banner_sheet' ? '#111827' : '#ffffff')} onChange={(e) => onPatchSlide({ cta: { ...(s.cta || {}), text_color: e.target.value } })} className="h-8 w-10 rounded bg-transparent border border-white/15 cursor-pointer" />
+              <label className="flex items-center gap-2 text-[12px] text-slate-500">버튼 글자
+                <input type="color" value={hexOr(s.cta?.text_color, layout === 'banner_sheet' ? '#111827' : '#ffffff')} onChange={(e) => onPatchSlide({ cta: { ...(s.cta || {}), text_color: e.target.value } })} className="h-8 w-10 rounded bg-transparent border border-slate-300 cursor-pointer" />
               </label>
             </div>
             {(s.cta?.label || s.cta?.action_url) && (
-              <button type="button" onClick={() => onPatchSlide({ cta: null })} className="text-[12px] text-rose-300 hover:text-rose-200">이 장 버튼 없애기</button>
+              <button type="button" onClick={() => onPatchSlide({ cta: null })} className="text-[12px] text-rose-700 hover:text-rose-800">이 장 버튼 없애기</button>
             )}
           </>
         )}
@@ -535,24 +535,24 @@ export function SlidePanel({
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-[15px] font-bold text-white">{active + 1}번째 장</p>
-        <p className="text-[11.5px] text-white/45 mt-0.5">장마다 사진 · 글 · 버튼 · 이동 주소가 따로입니다. 글자는 휴대폰 위를 눌러 고치세요.</p>
+        <p className="text-[15px] font-bold text-slate-900">{active + 1}번째 장</p>
+        <p className="text-[11.5px] text-slate-400 mt-0.5">장마다 사진 · 글 · 버튼 · 이동 주소가 따로입니다. 글자는 휴대폰 위를 눌러 고치세요.</p>
       </div>
       {noImg && (
-        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-100 flex items-start gap-2">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />이 장에 사진이 없어요. 사진 없는 장은 발행할 수 없어요.
         </div>
       )}
       <div>
         <label className={LBL}>사진</label>
         <div className="grid grid-cols-3 gap-1.5">
-          <button type="button" onClick={images.pickFile} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/10 text-[12px] text-white/85 flex flex-col items-center justify-center gap-1"><Upload className="w-4 h-4 text-violet-200" />내 파일</button>
-          <button type="button" onClick={images.pickLibrary} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/10 text-[12px] text-white/85 flex flex-col items-center justify-center gap-1"><FolderOpen className="w-4 h-4 text-violet-200" />라이브러리</button>
-          <button type="button" onClick={images.pickMall} className="h-16 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/10 text-[12px] text-white/85 flex flex-col items-center justify-center gap-1"><ShoppingBag className="w-4 h-4 text-violet-200" />몰 상품</button>
+          <button type="button" onClick={images.pickFile} className="h-16 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-[12px] text-slate-700 flex flex-col items-center justify-center gap-1"><Upload className="w-4 h-4 text-violet-800" />내 파일</button>
+          <button type="button" onClick={images.pickLibrary} className="h-16 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-[12px] text-slate-700 flex flex-col items-center justify-center gap-1"><FolderOpen className="w-4 h-4 text-violet-800" />라이브러리</button>
+          <button type="button" onClick={images.pickMall} className="h-16 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-[12px] text-slate-700 flex flex-col items-center justify-center gap-1"><ShoppingBag className="w-4 h-4 text-violet-800" />몰 상품</button>
         </div>
-        {layout === 'banner_sheet' && <p className="text-[11px] text-white/45 mt-1.5">상품 사진은 배경을 지운 사진(누끼)이 이 모양에 가장 잘 삽니다.</p>}
+        {layout === 'banner_sheet' && <p className="text-[11px] text-slate-400 mt-1.5">상품 사진은 배경을 지운 사진(누끼)이 이 모양에 가장 잘 삽니다.</p>}
         {!noImg && (
-          <button type="button" onClick={() => onPatchSlide({ image_url: '' })} className="mt-1.5 text-[11.5px] text-white/50 hover:text-white inline-flex items-center gap-1"><Trash2 className="w-3 h-3" />이 장 사진 빼기</button>
+          <button type="button" onClick={() => onPatchSlide({ image_url: '' })} className="mt-1.5 text-[11.5px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><Trash2 className="w-3 h-3" />이 장 사진 빼기</button>
         )}
       </div>
       {layout !== 'overlay' && (
@@ -565,7 +565,7 @@ export function SlidePanel({
         </div>
       )}
       <div>
-        <label className={LBL}>사진을 누르면 이동 <span className="font-normal text-white/40">선택</span></label>
+        <label className={LBL}>사진을 누르면 이동 <span className="font-normal text-slate-400">선택</span></label>
         <input value={String(s.link_url || '')} onChange={(e) => onPatchSlide({ link_url: e.target.value })} placeholder="/event/… 또는 https://…" className={INPUT} />
       </div>
       {layout !== 'overlay' && D && (
@@ -574,9 +574,9 @@ export function SlidePanel({
           <div className="flex items-center gap-2 flex-wrap">
             {colors.bg.map((c) => (
               <button key={c} type="button" onClick={() => onPatchSlide({ bg_color: c })}
-                className={`w-8 h-8 rounded-full border-2 ${hexOr(s.bg_color, D.bg).toLowerCase() === c.toLowerCase() ? 'border-violet-300 ring-2 ring-violet-400/40' : 'border-white/20'}`} style={{ background: c }} aria-label={`바탕 ${c}`} />
+                className={`w-8 h-8 rounded-full border-2 ${hexOr(s.bg_color, D.bg).toLowerCase() === c.toLowerCase() ? 'border-violet-300 ring-2 ring-violet-300' : 'border-slate-300'}`} style={{ background: c }} aria-label={`바탕 ${c}`} />
             ))}
-            <label className="relative w-8 h-8 rounded-full border-2 border-dashed border-white/25 flex items-center justify-center text-white/50 cursor-pointer overflow-hidden" title="직접 고르기">
+            <label className="relative w-8 h-8 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-500 cursor-pointer overflow-hidden" title="직접 고르기">
               <Plus className="w-3.5 h-3.5" />
               <input type="color" value={hexOr(s.bg_color, D.bg)} onChange={(e) => onPatchSlide({ bg_color: e.target.value })} className="absolute inset-0 opacity-0 cursor-pointer" />
             </label>
@@ -585,27 +585,27 @@ export function SlidePanel({
       )}
       {layout !== 'event_card' && !(s.cta?.label || s.cta?.action_url) && (
         <button type="button" onClick={() => { onPatchSlide({ cta: { label: '자세히 보기', action_url: '' } }); onSelect('cta'); }}
-          className="w-full h-10 rounded-xl border border-dashed border-white/20 text-[12.5px] text-white/75 hover:text-white hover:border-violet-400/60 inline-flex items-center justify-center gap-1.5"><Plus className="w-3.5 h-3.5" />이 장에 버튼 넣기</button>
+          className="w-full h-10 rounded-xl border border-dashed border-slate-300 text-[12.5px] text-slate-600 hover:text-slate-900 hover:border-violet-300 inline-flex items-center justify-center gap-1.5"><Plus className="w-3.5 h-3.5" />이 장에 버튼 넣기</button>
       )}
-      <div className="h-px bg-white/10" />
+      <div className="h-px bg-slate-100" />
       <div>
         <label className={LBL}>아래쪽 버튼</label>
         <div className="flex gap-1.5 flex-wrap">
           <button type="button" onClick={() => onDesign({ dismiss_mode: 'snooze_day' })} className={BTN_SEG(design?.dismiss_mode === 'snooze_day')}>오늘 하루 보지 않기 · 닫기</button>
           <button type="button" onClick={() => onDesign({ dismiss_mode: null })} className={BTN_SEG(design?.dismiss_mode !== 'snooze_day')}>다시 보지 않기 · 닫기</button>
         </div>
-        <p className="text-[11px] text-white/40 mt-1.5">「오늘 하루 보지 않기」를 누른 고객에게는 24시간 동안 뜨지 않습니다.</p>
+        <p className="text-[11px] text-slate-400 mt-1.5">「오늘 하루 보지 않기」를 누른 고객에게는 24시간 동안 뜨지 않습니다.</p>
       </div>
       <div>
         <label className={LBL}>제목 서체</label>
         <select value={fontId} onChange={(e) => { const c = INAPP_FONT_CATALOG.find((x) => x.id === e.target.value); onDesign({ font_display: c ? c.css : null }); }}
-          className="w-full h-10 px-3 rounded-xl bg-slate-950/60 border border-white/15 text-[13px] text-white">
+          className="w-full h-10 px-3 rounded-xl bg-slate-100 border border-slate-300 text-[13px] text-slate-900">
           <option value="default">기본</option>
           {INAPP_FONT_CATALOG.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
         </select>
       </div>
       {slides.length > 1 && (
-        <button type="button" onClick={onRemoveSlide} className="w-full h-10 rounded-xl border border-rose-400/35 text-[12.5px] text-rose-200 hover:bg-rose-500/10 inline-flex items-center justify-center gap-1.5"><Trash2 className="w-3.5 h-3.5" />이 장 빼기</button>
+        <button type="button" onClick={onRemoveSlide} className="w-full h-10 rounded-xl border border-rose-300 text-[12.5px] text-rose-800 hover:bg-rose-50 inline-flex items-center justify-center gap-1.5"><Trash2 className="w-3.5 h-3.5" />이 장 빼기</button>
       )}
     </div>
   );
@@ -627,35 +627,35 @@ export function LayoutSwitcher({ channel, current, onPick }: {
   ].filter((g) => g.ks.length > 0);
   return (
     <div className="relative">
-      <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5">
-        <Layers className="w-4 h-4 text-violet-200 shrink-0" />
+      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+        <Layers className="w-4 h-4 text-violet-800 shrink-0" />
         <div className="min-w-0 flex-1">
-          <b className="block text-[13px] text-white truncate">{LAYOUT_INFO[current].name}</b>
-          <span className="block text-[11px] text-white/45 truncate">{LAYOUT_INFO[current].desc}</span>
+          <b className="block text-[13px] text-slate-900 truncate">{LAYOUT_INFO[current].name}</b>
+          <span className="block text-[11px] text-slate-400 truncate">{LAYOUT_INFO[current].desc}</span>
         </div>
-        <button type="button" onClick={() => setOpen((v) => !v)} className="h-8 px-2.5 rounded-lg border border-white/15 text-[12px] font-semibold text-white/80 hover:bg-white/10 shrink-0">모양 바꾸기</button>
+        <button type="button" onClick={() => setOpen((v) => !v)} className="h-8 px-2.5 rounded-lg border border-slate-300 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 shrink-0">모양 바꾸기</button>
       </div>
       {open && (
-        <div className="mt-2 rounded-2xl border border-violet-400/40 bg-slate-900 shadow-2xl p-3 space-y-3" role="dialog" aria-label="모양 바꾸기">
+        <div className="mt-2 rounded-2xl border border-violet-300 bg-white shadow-2xl p-3 space-y-3" role="dialog" aria-label="모양 바꾸기">
           {groups.map((g) => (
             <div key={g.t}>
-              <div className="text-[11.5px] font-bold text-white/55 mb-1.5">{g.t}</div>
+              <div className="text-[11.5px] font-bold text-slate-500 mb-1.5">{g.t}</div>
               <div className="grid grid-cols-2 gap-1.5">
                 {g.ks.map((k) => {
                   const on = k === current;
                   const lock = channel === 'app' && !!LAYOUT_INFO[k].isNew && !APP_SHEET_LAYOUTS_UNLOCKED;
                   return (
                     <button key={k} type="button" onClick={() => { setOpen(false); if (!on) onPick(k); }}
-                      className={`text-left rounded-xl border px-2.5 py-2 ${on ? 'border-violet-400/70 bg-violet-500/15' : 'border-white/10 bg-white/[0.04] hover:bg-white/10'}`}>
-                      <span className="flex items-center gap-1 text-[12.5px] font-bold text-white">{on && <Check className="w-3 h-3 text-violet-200" />}{LAYOUT_INFO[k].name}</span>
-                      <span className="block text-[10.5px] text-white/45 mt-0.5 leading-snug">{lock ? '앱 업데이트 필요' : LAYOUT_INFO[k].desc}</span>
+                      className={`text-left rounded-xl border px-2.5 py-2 ${on ? 'border-violet-300 bg-violet-100' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>
+                      <span className="flex items-center gap-1 text-[12.5px] font-bold text-slate-900">{on && <Check className="w-3 h-3 text-violet-800" />}{LAYOUT_INFO[k].name}</span>
+                      <span className="block text-[10.5px] text-slate-400 mt-0.5 leading-snug">{lock ? '앱 업데이트 필요' : LAYOUT_INFO[k].desc}</span>
                     </button>
                   );
                 })}
               </div>
             </div>
           ))}
-          <p className="text-[11px] text-white/40">글 · 사진은 그대로 두고 모양만 바꿉니다. 마음에 안 들면 되돌리기(Ctrl+Z).</p>
+          <p className="text-[11px] text-slate-400">글 · 사진은 그대로 두고 모양만 바꿉니다. 마음에 안 들면 되돌리기(Ctrl+Z).</p>
         </div>
       )}
     </div>
@@ -673,19 +673,19 @@ export function ImageSourceMenu({ open, onClose, images }: { open: boolean; onCl
   }, [open, onClose]);
   if (!open) return null;
   const item = (icon: ReactNode, label: string, run: () => void) => (
-    <button type="button" onClick={() => { onClose(); run(); }} className="w-full h-12 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/10 text-[13px] text-white/90 inline-flex items-center gap-2.5 px-3">{icon}{label}</button>
+    <button type="button" onClick={() => { onClose(); run(); }} className="w-full h-12 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-[13px] text-slate-800 inline-flex items-center gap-2.5 px-3">{icon}{label}</button>
   );
   return (
     <div className="fixed inset-0 z-[1300] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
-          <b className="text-[15px] text-white inline-flex items-center gap-2"><ImagePlus className="w-4 h-4 text-violet-200" />사진 넣기</b>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10" aria-label="닫기"><X className="w-4 h-4" /></button>
+          <b className="text-[15px] text-slate-900 inline-flex items-center gap-2"><ImagePlus className="w-4 h-4 text-violet-800" />사진 넣기</b>
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-4 h-4" /></button>
         </div>
         <div className="space-y-2">
-          {item(<Upload className="w-4 h-4 text-violet-200" />, '내 파일 (여러 장 고르면 장이 늘어납니다)', images.pickFile)}
-          {item(<FolderOpen className="w-4 h-4 text-violet-200" />, '라이브러리', images.pickLibrary)}
-          {item(<ShoppingBag className="w-4 h-4 text-violet-200" />, '몰 상품 (사진 + 상품 링크)', images.pickMall)}
+          {item(<Upload className="w-4 h-4 text-violet-800" />, '내 파일 (여러 장 고르면 장이 늘어납니다)', images.pickFile)}
+          {item(<FolderOpen className="w-4 h-4 text-violet-800" />, '라이브러리', images.pickLibrary)}
+          {item(<ShoppingBag className="w-4 h-4 text-violet-800" />, '몰 상품 (사진 + 상품 링크)', images.pickMall)}
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
-import { OUI_BACK, OUI_CARD, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SRC, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import { OUI_CARD, OUI_SRC } from '../utils/operator-ui';
+import ZoneFrame from '../components/zone/ZoneFrame';
 /**
  * QuickCampaignLegacyPage — 원클릭 캠페인 v0 (★2026-09-14 T5 AI 자동제작 승격 뒤, 신규 ENV(AI_AUTO_BUILD_COMPANY_IDS) 미개방 회사가 보는 옛 화면 · 원본 QuickCampaignPage.tsx 를 파일째 옮김 · 로직 무변경)
  * 옛 이름 QuickCampaignPage — 원클릭 캠페인 (2026-07-08 · ★ 2026-09-06 S5 재료 입구 인라인 · ★ v3 행사 카드 페이지 = 설계서 docs/2026-09-06-outreach-v3-brand-page-recomposition-design.md §10)
@@ -209,67 +209,47 @@ export default function QuickCampaignLegacyPage() {
     { label: '구도', value: `${(Number(result.look?.treatments) || 0) + (Number(result.look?.backgrounds) || 0)}곳 배정`, ok: (Number(result.look?.treatments) || 0) + (Number(result.look?.backgrounds) || 0) > 0 },
   ] : [];
 
+  // ★ 2026-09-30 AI 존 대개편: 옛 원클릭 캠페인(신규 기능 미개방 회사) = 만들기 메뉴 같은 머리
   return (
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-      {/* 헤더 (sticky) */}
-      <div className={OUI_HEADER}>
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
-          <button
-            onClick={() => goBackOr(navigate, '/ai-operator')}
-            className={OUI_BACK}
-            aria-label="AI Operator로 돌아가기"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-amber-400 to-fuchsia-500`}>
-            <Wand2 className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className={OUI_TITLE}>원클릭 캠페인</h1>
-            <p className={OUI_SUBTITLE}>행사를 카드로 올려 두고 [제작] 하나로 모바일 DM 시안을 받습니다</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-5">
+    <ZoneFrame moduleId="make" sub="원클릭 캠페인">
+      <div className="space-y-5">
         {/* ★ v3 재료 페이지 — 브랜드 줄 · 행사 카드 목록 · 하단 바 */}
         {enabled && (
           <div ref={inputCardRef} className={`${OUI_CARD} p-5 md:p-6 space-y-4`}>
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
-                <div className="text-sm font-bold text-white flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-fuchsia-300" /> 행사 재료로 시안 만들기
+                <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-fuchsia-700" /> 행사 재료로 시안 만들기
                 </div>
-                <p className="text-[12px] text-white/50 mt-1">행사마다 카드 하나(제목 · 내용 · 이미지 · 링크). 카드가 여러 개면 첫 카드가 첫 화면, 다음 카드는 설명 카드와 버튼으로 이어집니다. 설명 없는 이미지 블록은 만들지 않습니다.</p>
+                <p className="text-[12px] text-slate-500 mt-1">행사마다 카드 하나(제목 · 내용 · 이미지 · 링크). 카드가 여러 개면 첫 카드가 첫 화면, 다음 카드는 설명 카드와 버튼으로 이어집니다. 설명 없는 이미지 블록은 만들지 않습니다.</p>
               </div>
               {planLocked && (
-                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-amber-500/15 text-amber-200 border border-amber-400/30"><Lock className="w-3 h-3" /> 모바일 DM 요금제에서 열립니다</span>
+                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200"><Lock className="w-3 h-3" /> 모바일 DM 요금제에서 열립니다</span>
               )}
             </div>
 
             {/* 브랜드 줄 — 서버 브랜드 킷 그대로(표시만) */}
             {brand && (brand.name || brand.primary || brand.logo) && (
-              <div className="flex items-center gap-3 rounded-xl bg-white/[0.03] border border-white/10 px-3 py-2">
+              <div className="flex items-center gap-3 rounded-xl bg-white border border-slate-200 px-3 py-2">
                 {brand.logo ? <img src={brand.logo} alt="" className="h-6 max-w-[96px] object-contain" /> : null}
-                <span className="text-sm text-white/85 font-medium">{brand.name || '우리 브랜드'}</span>
+                <span className="text-sm text-slate-700 font-medium">{brand.name || '우리 브랜드'}</span>
                 {brand.primary ? (
-                  <span className="inline-flex items-center gap-1.5 text-[11px] text-white/60"><span className="w-4 h-4 rounded-full border border-white/20" style={{ background: brand.primary }} /> 주색 {brand.primary}</span>
+                  <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500"><span className="w-4 h-4 rounded-full border border-slate-300" style={{ background: brand.primary }} /> 주색 {brand.primary}</span>
                 ) : (
-                  <span className="text-[11px] text-white/45">주색 미설정 · 무채색으로 만들고 DM 빌더의 브랜드 킷에서 바꿀 수 있습니다</span>
+                  <span className="text-[11px] text-slate-400">주색 미설정 · 무채색으로 만들고 DM 빌더의 브랜드 킷에서 바꿀 수 있습니다</span>
                 )}
-                <span className="ml-auto text-[11px] text-white/35">브랜드 킷 기준</span>
+                <span className="ml-auto text-[11px] text-slate-400">브랜드 킷 기준</span>
               </div>
             )}
 
             <EventCardsInput value={cards} onChange={setCards} disabled={busy || planLocked} onReject={(m) => toast.error(m)} />
 
             {/* 하단 바 — 견적 1줄 + [제작] 1개 */}
-            <div className="sticky bottom-3 z-10 rounded-2xl bg-slate-950/90 backdrop-blur border border-white/10 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-              <p className="text-[11px] text-white/55">
+            <div className="sticky bottom-3 z-10 rounded-2xl bg-slate-100 backdrop-blur border border-slate-200 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-[11px] text-slate-500">
                 {quote ? (
                   <>
-                    {quote.parts.map((p) => `${p.label} ${p.cost}`).join(' + ')} = <span className="text-white/85 font-medium">{quote.total} 크레딧</span>
+                    {quote.parts.map((p) => `${p.label} ${p.cost}`).join(' + ')} = <span className="text-slate-700 font-medium">{quote.total} 크레딧</span>
                     {readsNeeded ? ' · 내용이 빈 카드의 대표 이미지에서 내용을 먼저 읽습니다(1회)' : ''}
                     {` · 행사 ${filled.length}건 · 이미지 ${imageCount}장`}
                   </>
@@ -278,14 +258,14 @@ export default function QuickCampaignLegacyPage() {
               <button
                 onClick={() => setConfirmOpen(true)}
                 disabled={!canRun || busy || planLocked}
-                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-fuchsia-500 text-indigo-950 text-sm font-bold hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition-all"
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition-all"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                 {busy ? '만드는 중' : '제작'}
               </button>
             </div>
             {busy && (
-              <div className="rounded-xl bg-violet-500/10 border border-violet-400/20 px-4 py-3 text-sm text-violet-100 flex items-center gap-2">
+              <div className="rounded-xl bg-violet-50 border border-violet-200 px-4 py-3 text-sm text-violet-900 flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                 <span>
                   {elapsed < 3 ? '시작합니다' : PHASE_TEXT[phase]}
@@ -294,7 +274,7 @@ export default function QuickCampaignLegacyPage() {
               </div>
             )}
             {error && (
-              <div className="rounded-xl bg-rose-500/10 border border-rose-400/30 px-4 py-3 text-sm text-rose-100">{error}</div>
+              <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-900">{error}</div>
             )}
           </div>
         )}
@@ -304,19 +284,19 @@ export default function QuickCampaignLegacyPage() {
           <div className="grid grid-cols-1 md:grid-cols-[1fr_420px] gap-4">
             <div className="space-y-4">
               <div className={`${OUI_CARD} p-5 space-y-3`}>
-                <div className="text-sm font-bold text-white">쓴 재료</div>
+                <div className="text-sm font-bold text-slate-900">쓴 재료</div>
                 <ul className="space-y-2">
                   {result.cards.map((c, i) => (
                     <li key={i} className="flex items-start gap-3">
-                      <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-500/30 text-violet-100 text-[10px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                      <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-100 text-violet-900 text-[10px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
                       <div className="min-w-0 flex-1">
-                        <div className="text-[13px] text-white/90 truncate">{c.title}</div>
-                        <div className="text-[11px] text-white/50">
+                        <div className="text-[13px] text-slate-800 truncate">{c.title}</div>
+                        <div className="text-[11px] text-slate-500">
                           이미지 {c.images.length}장 · 내용 {c.textChars}자{c.licensed ? ' · 문구 그대로' : ''}{c.read ? ' · 이미지에서 읽음(확인 뒤 체크하면 그대로 반영)' : ''}
                         </div>
                         {c.images.length > 0 && (
                           <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                            {c.images.map((im) => <img key={im.url} src={im.url} alt="" className="w-12 h-12 rounded-md object-cover border border-white/10 bg-slate-900" />)}
+                            {c.images.map((im) => <img key={im.url} src={im.url} alt="" className="w-12 h-12 rounded-md object-cover border border-slate-200 bg-white" />)}
                           </div>
                         )}
                       </div>
@@ -325,13 +305,13 @@ export default function QuickCampaignLegacyPage() {
                 </ul>
               </div>
               <div className={`${OUI_CARD} p-5 space-y-2`}>
-                <div className="text-sm font-bold text-white">판정</div>
+                <div className="text-sm font-bold text-slate-900">판정</div>
                 <ul className="space-y-1.5">
                   {verdicts.map((v) => (
                     <li key={v.label} className="flex items-start gap-2 text-[12px]">
                       <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${v.ok ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                      <span className="text-white/50 w-20 shrink-0">{v.label}</span>
-                      <span className="text-white/85">{v.value}</span>
+                      <span className="text-slate-500 w-20 shrink-0">{v.label}</span>
+                      <span className="text-slate-700">{v.value}</span>
                     </li>
                   ))}
                 </ul>
@@ -341,25 +321,25 @@ export default function QuickCampaignLegacyPage() {
                     <PencilLine className="w-4 h-4" /> DM 편집으로
                   </button>
                   <button onClick={backToInput}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-violet-400/30 text-violet-100 text-sm hover:bg-violet-500/15">
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-violet-200 text-violet-900 text-sm hover:bg-violet-100">
                     <ImagePlus className="w-4 h-4" /> 카드 고치고 다시 만들기
                   </button>
-                  <button onClick={resetAll} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-white/60 text-sm hover:bg-white/10">
+                  <button onClick={resetAll} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-slate-500 text-sm hover:bg-slate-100">
                     <RotateCcw className="w-4 h-4" /> 새로 시작
                   </button>
                 </div>
                 <p className={OUI_SRC}>Data source: 올린 행사 카드 · 서버가 조립한 초안(초안은 모바일 DM 목록에 저장됩니다)</p>
               </div>
             </div>
-            <div className="bg-slate-950 rounded-2xl border border-white/10 p-3 md:p-4 min-h-[560px]">
+            <div className="bg-slate-100 rounded-2xl border border-slate-200 p-3 md:p-4 min-h-[560px]">
               <div className="mb-2 flex items-center justify-end gap-1">
-                <button onClick={() => setPreviewWidth(600)} className={`p-1.5 rounded-lg ${previewWidth === 600 ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white'}`} title="데스크탑 폭"><Monitor className="w-4 h-4" /></button>
-                <button onClick={() => setPreviewWidth(375)} className={`p-1.5 rounded-lg ${previewWidth === 375 ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white'}`} title="모바일 폭"><Smartphone className="w-4 h-4" /></button>
+                <button onClick={() => setPreviewWidth(600)} className={`p-1.5 rounded-lg ${previewWidth === 600 ? 'bg-slate-200 text-slate-900' : 'text-slate-500 hover:text-slate-900'}`} title="데스크탑 폭"><Monitor className="w-4 h-4" /></button>
+                <button onClick={() => setPreviewWidth(375)} className={`p-1.5 rounded-lg ${previewWidth === 375 ? 'bg-slate-200 text-slate-900' : 'text-slate-500 hover:text-slate-900'}`} title="모바일 폭"><Smartphone className="w-4 h-4" /></button>
               </div>
               {result.html ? (
-                <iframe title="모바일 DM 시안" srcDoc={result.html} sandbox="allow-same-origin" className="mx-auto block max-w-full h-[720px] rounded-xl bg-white border border-white/10 transition-all" style={{ width: previewWidth }} />
+                <iframe title="모바일 DM 시안" srcDoc={result.html} sandbox="allow-same-origin" className="mx-auto block max-w-full h-[720px] rounded-xl bg-white border border-slate-200 transition-all" style={{ width: previewWidth }} />
               ) : (
-                <div className="text-sm text-white/50 py-20 text-center">시안 미리보기를 그리지 못했습니다. [DM 편집으로]에서 확인할 수 있습니다.</div>
+                <div className="text-sm text-slate-500 py-20 text-center">시안 미리보기를 그리지 못했습니다. [DM 편집으로]에서 확인할 수 있습니다.</div>
               )}
             </div>
           </div>
@@ -371,15 +351,15 @@ export default function QuickCampaignLegacyPage() {
         />
 
         {/* 3채널(DM·이메일·인앱) 세트 시작 카드 — 옛 흐름 그대로 */}
-        <div className="rounded-2xl border border-violet-400/30 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 p-6 text-center">
+        <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-6 text-center">
           <div className="w-12 h-12 mx-auto rounded-2xl bg-gradient-to-br from-amber-400 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/25 mb-3">
             <Sparkles className="w-6 h-6 text-white" />
           </div>
-          <div className="text-sm font-bold text-white">DM·이메일·인앱 한 번에</div>
-          <p className="text-[12px] text-white/50 mt-1 mb-4">행사 내용을 붙여넣거나 이미지를 올리면, 고른 채널(DM·이메일·인앱) 초안을 한 번에 만들어 드려요.</p>
+          <div className="text-sm font-bold text-slate-900">DM·이메일·인앱 한 번에</div>
+          <p className="text-[12px] text-slate-500 mt-1 mb-4">행사 내용을 붙여넣거나 이미지를 올리면, 고른 채널(DM·이메일·인앱) 초안을 한 번에 만들어 드려요.</p>
           <button
             onClick={startNew}
-            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl border border-violet-400/40 text-violet-100 text-sm font-semibold hover:bg-violet-500/15 transition-colors"
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl border border-violet-300 text-violet-900 text-sm font-semibold hover:bg-violet-100 transition-colors"
           >
             <Wand2 className="w-4 h-4" /> 3채널 세트 만들기
           </button>
@@ -399,6 +379,6 @@ export default function QuickCampaignLegacyPage() {
         onConfirm={run}
         onCancel={() => setConfirmOpen(false)}
       />
-    </div>
+    </ZoneFrame>
   );
 }

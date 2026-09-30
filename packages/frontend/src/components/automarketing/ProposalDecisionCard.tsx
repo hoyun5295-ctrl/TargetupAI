@@ -140,29 +140,29 @@ export default function ProposalDecisionCard({
   const hero = (
     <div className="flex items-end gap-5 flex-wrap">
       <div>
-        <div className="text-[11px] text-white/50 mb-1">기대 매출</div>
-        <div className="text-3xl md:text-4xl font-semibold text-white tabular-nums leading-none">{revenue != null ? won(revenue) : '—'}</div>
+        <div className="text-[11px] text-slate-500 mb-1">기대 매출</div>
+        <div className="text-[22px] md:text-[24px] font-bold text-slate-900 tabular-nums leading-none">{revenue != null ? won(revenue) : '—'}</div>
       </div>
       {roi != null && (
-        <div className="pl-5 border-l border-white/10">
-          <div className="text-[11px] text-white/50 mb-1">ROI</div>
-          <div className="text-2xl md:text-3xl font-semibold text-emerald-300 tabular-nums leading-none">{roi.toFixed(1)}×</div>
+        <div className="pl-5 border-l border-slate-200">
+          <div className="text-[11px] text-slate-500 mb-1">ROI</div>
+          <div className="text-[20px] md:text-[22px] font-bold text-emerald-700 tabular-nums leading-none">{roi.toFixed(1)}×</div>
         </div>
       )}
-      <div className="ml-auto text-right text-[11px] text-white/60 leading-relaxed">
-        대상 <span className="text-white font-medium">{proposal.recipientCount.toLocaleString()}명</span><br />
-        발송비 <span className="text-white font-medium">{won(cost)}</span> · {channelName}
+      <div className="ml-auto text-right text-[11px] text-slate-500 leading-relaxed">
+        대상 <span className="text-slate-900 font-medium">{proposal.recipientCount.toLocaleString()}명</span><br />
+        발송비 <span className="text-slate-900 font-medium">{won(cost)}</span> · {channelName}
       </div>
     </div>
   );
 
   const diagnosisBlock = (diagnosis || insufficient) && (
-    <div className="mt-4 rounded-r-lg border-l-2 border-indigo-400 bg-slate-950/40 px-3 py-2.5">
+    <div className="mt-4 rounded-r-lg border-l-2 border-indigo-400 bg-slate-100 px-3 py-2.5">
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-[11px] text-indigo-300 font-medium">왜 지금인가: AI 진단</span>
-        {confidenceText && <span className="text-[10px] text-white/40">신뢰도 {confidenceText}</span>}
+        <span className="text-[11px] text-indigo-700 font-medium">왜 지금인가: AI 진단</span>
+        {confidenceText && <span className="text-[10px] text-slate-400">신뢰도 {confidenceText}</span>}
       </div>
-      <div className="text-[13px] text-white/75 leading-relaxed">
+      <div className="text-[13px] text-slate-600 leading-relaxed">
         {diagnosis || '고객 데이터가 더 쌓이면 추정이 정확해집니다. 지금은 보수적으로 안내합니다.'}
       </div>
     </div>
@@ -170,37 +170,37 @@ export default function ProposalDecisionCard({
 
   const gradeBlock = grades.length > 0 && (
     <div className="mt-4">
-      <div className="text-[11px] text-white/50 mb-2">등급별 기대 전환</div>
+      <div className="text-[11px] text-slate-500 mb-2">등급별 기대 전환</div>
       <div className="space-y-1.5">
         {grades.map((g, i) => (
           <div key={i} className="flex items-center gap-2.5">
-            <span className="text-[11px] text-white/70 w-12 shrink-0">{g.grade}</span>
-            <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
-              <div className="h-full bg-indigo-500/70 rounded-full" style={{ width: `${Math.min(100, ((g.expectedRevenue || 0) / maxGradeRev) * 100)}%` }} />
+            <span className="text-[11px] text-slate-600 w-12 shrink-0">{g.grade}</span>
+            <div className="flex-1 h-2 bg-white rounded-full overflow-hidden">
+              <div className="h-full bg-indigo-200 rounded-full" style={{ width: `${Math.min(100, ((g.expectedRevenue || 0) / maxGradeRev) * 100)}%` }} />
             </div>
-            <span className="text-[11px] text-white/60 tabular-nums shrink-0">{Math.round(g.expectedConversions || 0)}건 · {won(g.expectedRevenue)}</span>
+            <span className="text-[11px] text-slate-500 tabular-nums shrink-0">{Math.round(g.expectedConversions || 0)}건 · {won(g.expectedRevenue)}</span>
           </div>
         ))}
       </div>
-      {sourceLabel && <div className="text-[10px] text-white/30 italic mt-1.5">Data source: {sourceLabel}</div>}
+      {sourceLabel && <div className="text-[10px] text-slate-400 italic mt-1.5">Data source: {sourceLabel}</div>}
     </div>
   );
 
   const chips = (
     <div className="mt-4 flex flex-wrap gap-1.5">
       {compliance && (
-        <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full ${compliance.passed ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>
+        <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full ${compliance.passed ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
           <ShieldCheck className="w-3 h-3" />
           {compliance.passed ? '발송 안전' : '검토 필요'} · 위험도 {RISK_LABEL[compliance.riskLevel || 'low'] || compliance.riskLevel}
         </span>
       )}
       {channelReason && (
-        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-white/5 text-white/60">
+        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-white text-slate-500">
           <MessageSquare className="w-3 h-3" />{channelName}: {channelReason}
         </span>
       )}
       {recommendedIdx != null && (
-        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-indigo-500/15 text-indigo-200">
+        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-indigo-100 text-indigo-800">
           <Target className="w-3 h-3" />Bandit 추천 변형 {variantLetter(recommendedIdx)}
         </span>
       )}
@@ -208,52 +208,52 @@ export default function ProposalDecisionCard({
   );
 
   const messagePreview = effectiveMsg && (
-    <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2.5">
-      <div className="text-[10px] text-white/40 mb-1">
+    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2.5">
+      <div className="text-[10px] text-slate-400 mb-1">
         발송 문안 · 변형 {variantLetter(effectiveIdx)}{(editedBody != null || editedSubject != null) ? ' · 편집됨' : ''}
       </div>
       {/* ★ 2026-07-10: LMS/MMS 제목 표시 — 광고 발송 시 "(광고)"는 발송 시점 자동 부착(buildAdSubject) */}
       {isLongType && (
-        <div className="text-[12px] text-white/80 mb-1.5 pb-1.5 border-b border-white/10">
-          <span className="text-white/40 mr-1.5">제목</span>{effectiveSubject || <span className="text-rose-300">제목 없음. 상세에서 입력해주세요</span>}
+        <div className="text-[12px] text-slate-700 mb-1.5 pb-1.5 border-b border-slate-200">
+          <span className="text-slate-400 mr-1.5">제목</span>{effectiveSubject || <span className="text-rose-700">제목 없음. 상세에서 입력해주세요</span>}
         </div>
       )}
-      <div className="text-[13px] text-white/80 leading-relaxed whitespace-pre-wrap">{effectiveBody}</div>
+      <div className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap">{effectiveBody}</div>
     </div>
   );
 
   const actions = (showToggle: boolean) => (
     <div className="mt-4 flex items-center gap-2 flex-wrap">
       {canViewTargets && (
-        <button onClick={() => setShowTargets(true)} disabled={busy} className="inline-flex items-center gap-1.5 border border-white/15 hover:bg-white/10 disabled:opacity-40 text-white/80 text-sm px-3 py-2 rounded-lg transition-colors">
+        <button onClick={() => setShowTargets(true)} disabled={busy} className="inline-flex items-center gap-1.5 border border-slate-300 hover:bg-slate-100 disabled:opacity-40 text-slate-700 text-sm px-3 py-2 rounded-lg transition-colors">
           <Users className="w-3.5 h-3.5" />타겟확인
         </button>
       )}
       {sentLike && (
-        <span className="text-[11px] text-white/40">발송 명단은 발송결과 화면의 수신자 상세에서 확인할 수 있습니다.</span>
+        <span className="text-[11px] text-slate-400">발송 명단은 발송결과 화면의 수신자 상세에서 확인할 수 있습니다.</span>
       )}
       {canApprove && (
         <>
-          <button onClick={submitApprove} disabled={busy || subjectInvalid || charsetInvalid} title={charsetInvalid ? SMS_CHARSET_BLOCK_MESSAGE : undefined} className="inline-flex items-center gap-1.5 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-40 text-indigo-50 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <button onClick={submitApprove} disabled={busy || subjectInvalid || charsetInvalid} title={charsetInvalid ? SMS_CHARSET_BLOCK_MESSAGE : undefined} className="inline-flex items-center gap-1.5 bg-indigo-200 hover:bg-indigo-200 disabled:opacity-40 text-indigo-900 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
             <Send className="w-4 h-4" />승인하고 발송
           </button>
-          <button onClick={onReject} disabled={busy} className="inline-flex items-center gap-1.5 border border-rose-400/30 hover:bg-rose-500/20 disabled:opacity-40 text-rose-300 text-sm px-3 py-2 rounded-lg transition-colors">
+          <button onClick={onReject} disabled={busy} className="inline-flex items-center gap-1.5 border border-rose-200 hover:bg-rose-100 disabled:opacity-40 text-rose-700 text-sm px-3 py-2 rounded-lg transition-colors">
             <X className="w-3.5 h-3.5" />거부
           </button>
         </>
       )}
       {canStop && (
-        <button onClick={onStop} disabled={busy} className="inline-flex items-center gap-1.5 border border-rose-400/30 hover:bg-rose-500/20 disabled:opacity-40 text-rose-300 text-sm px-3 py-2 rounded-lg transition-colors">
+        <button onClick={onStop} disabled={busy} className="inline-flex items-center gap-1.5 border border-rose-200 hover:bg-rose-100 disabled:opacity-40 text-rose-700 text-sm px-3 py-2 rounded-lg transition-colors">
           <X className="w-3.5 h-3.5" />자동 발송 정지
         </button>
       )}
       {canPromote && (
-        <button onClick={onPromoteToJourney} className="inline-flex items-center gap-1.5 border border-emerald-400/30 hover:bg-emerald-500/20 text-emerald-300 text-sm px-3 py-2 rounded-lg transition-colors">
+        <button onClick={onPromoteToJourney} className="inline-flex items-center gap-1.5 border border-emerald-200 hover:bg-emerald-100 text-emerald-700 text-sm px-3 py-2 rounded-lg transition-colors">
           <GitMerge className="w-3.5 h-3.5" />여정으로 굳히기
         </button>
       )}
       {showToggle && (
-        <button onClick={onToggleExpand} className="ml-auto inline-flex items-center gap-1 text-white/50 hover:text-white/80 text-sm px-2 py-2">
+        <button onClick={onToggleExpand} className="ml-auto inline-flex items-center gap-1 text-slate-500 hover:text-slate-700 text-sm px-2 py-2">
           상세 {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
       )}
@@ -261,18 +261,18 @@ export default function ProposalDecisionCard({
   );
 
   const detail = (
-    <div className="mt-4 pt-4 border-t border-white/10 space-y-3 text-xs">
+    <div className="mt-4 pt-4 border-t border-slate-200 space-y-3 text-xs">
       {pj.target?.criteria && (
         <DetailRow label="타겟 근거">
           {pj.target.criteria}
           {pj.target.count != null && (
-            <span className="text-white/40 ml-1">(매칭 {pj.target.count?.toLocaleString()} / 전체 {pj.target.totalCount?.toLocaleString()})</span>
+            <span className="text-slate-400 ml-1">(매칭 {pj.target.count?.toLocaleString()} / 전체 {pj.target.totalCount?.toLocaleString()})</span>
           )}
         </DetailRow>
       )}
       {messages.length > 0 && (
         <div>
-          <div className="font-medium text-white/70 mb-1.5">
+          <div className="font-medium text-slate-600 mb-1.5">
             메시지 {messages.length}안{canApprove ? ' · 눌러서 발송할 문안 선택' : ''}
           </div>
           <div className="space-y-1.5">
@@ -284,34 +284,34 @@ export default function ProposalDecisionCard({
                 <div
                   key={i}
                   onClick={() => canApprove && selectVariant(i)}
-                  className={`rounded-lg border px-2.5 py-2 transition-colors ${canApprove ? 'cursor-pointer' : ''} ${isSel ? 'bg-indigo-500/20 border-indigo-400/60 ring-1 ring-indigo-400/50' : `bg-white/5 border-white/10${canApprove ? ' hover:border-white/30' : ''}`}`}
+                  className={`rounded-lg border px-2.5 py-2 transition-colors ${canApprove ? 'cursor-pointer' : ''} ${isSel ? 'bg-indigo-100 border-indigo-300 ring-1 ring-indigo-300' : `bg-white border-slate-200${canApprove ? ' hover:border-slate-300' : ''}`}`}
                 >
                   <div className="flex items-center gap-2 flex-wrap mb-1">
-                    {isSel && <Check className="w-3.5 h-3.5 text-indigo-300 shrink-0" />}
-                    <span className="text-white/80 font-medium">{m.variantName || `변형 ${variantLetter(i)}`}</span>
-                    {(m.byteCount || m.byte_count) ? <span className="text-[10px] text-white/40">{m.byteCount || m.byte_count}byte</span> : null}
+                    {isSel && <Check className="w-3.5 h-3.5 text-indigo-700 shrink-0" />}
+                    <span className="text-slate-700 font-medium">{m.variantName || `변형 ${variantLetter(i)}`}</span>
+                    {(m.byteCount || m.byte_count) ? <span className="text-[10px] text-slate-400">{m.byteCount || m.byte_count}byte</span> : null}
                     {rec && <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">Bandit 추천</span>}
-                    {isSel && <span className="text-[10px] bg-indigo-500/30 text-indigo-100 px-1.5 py-0.5 rounded-full">발송 선택됨</span>}
-                    {v && <span className="text-[10px] text-white/40">발송 {v.sentCount} · 클릭 {v.clickCount} · 전환 {v.conversionCount}</span>}
+                    {isSel && <span className="text-[10px] bg-indigo-100 text-indigo-900 px-1.5 py-0.5 rounded-full">발송 선택됨</span>}
+                    {v && <span className="text-[10px] text-slate-400">발송 {v.sentCount} · 클릭 {v.clickCount} · 전환 {v.conversionCount}</span>}
                   </div>
                   {/* ★ 2026-07-10: LMS/MMS 제목 — 변형별 표시 + 선택 변형 편집(비우면 승인 차단). "(광고)"는 발송 시점 자동 부착 */}
                   {isLongType && (
                     isSel && editing ? (
                       <div className="mt-1 mb-1.5" onClick={(e) => e.stopPropagation()}>
-                        <label className="block text-[10px] text-white/40 mb-0.5">제목 (문자 상단에 표시) · 광고 발송 시 "(광고)" 자동 부착</label>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">제목 (문자 상단에 표시) · 광고 발송 시 "(광고)" 자동 부착</label>
                         <input
                           type="text"
                           value={effectiveSubject}
                           onChange={(e) => setEditedSubject(e.target.value)}
                           maxLength={50}
                           placeholder="발송 제목 입력"
-                          className="w-full rounded-lg bg-slate-950/60 border border-indigo-400/40 text-white/90 text-[12px] px-2.5 py-1.5 focus:outline-none focus:border-indigo-300"
+                          className="w-full rounded-lg bg-slate-100 border border-indigo-300 text-slate-800 text-[12px] px-2.5 py-1.5 focus:outline-none focus:border-indigo-300"
                         />
-                        {subjectInvalid && <div className="text-[10px] text-rose-300 mt-0.5">제목을 입력해주세요. 비워두면 승인·발송할 수 없습니다.</div>}
+                        {subjectInvalid && <div className="text-[10px] text-rose-700 mt-0.5">제목을 입력해주세요. 비워두면 승인·발송할 수 없습니다.</div>}
                       </div>
                     ) : (
-                      <div className="text-[11px] text-white/50 mb-1">
-                        <span className="text-white/35 mr-1.5">제목</span>{isSel ? (effectiveSubject || '—') : (m.subject || '—')}
+                      <div className="text-[11px] text-slate-500 mb-1">
+                        <span className="text-slate-400 mr-1.5">제목</span>{isSel ? (effectiveSubject || '—') : (m.subject || '—')}
                       </div>
                     )
                   )}
@@ -321,11 +321,11 @@ export default function ProposalDecisionCard({
                       onChange={(e) => setEditedBody(e.target.value)}
                       onClick={(e) => e.stopPropagation()}
                       rows={6}
-                      className="w-full mt-1 rounded-lg bg-slate-950/60 border border-indigo-400/40 text-white/90 text-[13px] leading-relaxed p-2.5 resize-y focus:outline-none focus:border-indigo-300"
+                      className="w-full mt-1 rounded-lg bg-slate-100 border border-indigo-300 text-slate-800 text-[13px] leading-relaxed p-2.5 resize-y focus:outline-none focus:border-indigo-300"
                       placeholder="발송할 문안을 자유롭게 편집하세요"
                     />
                   ) : (
-                    <div className="text-white/70 whitespace-pre-wrap leading-relaxed">{isSel ? effectiveBody : (m.body || m.message || '')}</div>
+                    <div className="text-slate-600 whitespace-pre-wrap leading-relaxed">{isSel ? effectiveBody : (m.body || m.message || '')}</div>
                   )}
                   {/* ★ 2026-09-10 발송할 문안에 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다(편집값으로 승인) */}
                   {isSel && ['SMS', 'LMS', 'MMS'].includes(channelName) && (
@@ -345,14 +345,14 @@ export default function ProposalDecisionCard({
                     <div className="mt-1.5 flex items-center gap-2">
                       <button
                         onClick={(e) => { e.stopPropagation(); setEditing((prev) => !prev); }}
-                        className="inline-flex items-center gap-1 text-[11px] text-indigo-200 hover:text-indigo-100 border border-indigo-400/30 hover:bg-indigo-500/20 px-2 py-1 rounded-lg transition-colors"
+                        className="inline-flex items-center gap-1 text-[11px] text-indigo-800 hover:text-indigo-900 border border-indigo-200 hover:bg-indigo-100 px-2 py-1 rounded-lg transition-colors"
                       >
                         <Pencil className="w-3 h-3" />{editing ? '편집 완료' : '문안 편집'}
                       </button>
                       {(editedBody != null || editedSubject != null) && !editing && (
                         <button
                           onClick={(e) => { e.stopPropagation(); setEditedBody(null); setEditedSubject(null); }}
-                          className="text-[11px] text-white/50 hover:text-white/80 px-1.5 py-1"
+                          className="text-[11px] text-slate-500 hover:text-slate-700 px-1.5 py-1"
                         >원래대로</button>
                       )}
                     </div>
@@ -362,9 +362,9 @@ export default function ProposalDecisionCard({
             })}
           </div>
           {variantData?.recommendation && (
-            <div className="mt-2 rounded-lg bg-indigo-500/10 border border-indigo-400/30 px-2.5 py-2 text-indigo-200 text-[11px]">
+            <div className="mt-2 rounded-lg bg-indigo-50 border border-indigo-200 px-2.5 py-2 text-indigo-800 text-[11px]">
               <span className="font-medium">자동 최적화 추천:</span> {variantData.recommendation.reasoning}
-              <div className="text-indigo-200/70 mt-0.5">AI 추천은 참고이며, 발송은 위에서 고른 변형(편집분 포함)으로 진행됩니다.</div>
+              <div className="text-indigo-800 mt-0.5">AI 추천은 참고이며, 발송은 위에서 고른 변형(편집분 포함)으로 진행됩니다.</div>
             </div>
           )}
         </div>
@@ -388,7 +388,7 @@ export default function ProposalDecisionCard({
   );
 
   const reviewNotice = proposal.status === 'admin_review' && (
-    <div className="mt-3 flex items-start gap-1.5 text-[11px] text-amber-100 bg-amber-500/10 border border-amber-400/30 rounded-lg p-2">
+    <div className="mt-3 flex items-start gap-1.5 text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-2">
       <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
       <span>{proposal.autoExecuteReason || '스팸 필터를 끝내 통과하지 못했습니다.'}. 문안을 확인하고 발송 여부를 직접 판단해주세요.</span>
     </div>
@@ -398,10 +398,10 @@ export default function ProposalDecisionCard({
     <div className="flex items-start gap-2">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-white">{proposal.operatorName || '제안'}</span>
+          <span className="text-sm font-semibold text-slate-900">{proposal.operatorName || '제안'}</span>
           <StatusBadge status={proposal.status} />
         </div>
-        {proposal.operatorObjective && <div className="text-[11px] text-white/50 mt-0.5">목표: {proposal.operatorObjective}</div>}
+        {proposal.operatorObjective && <div className="text-[11px] text-slate-500 mt-0.5">목표: {proposal.operatorObjective}</div>}
       </div>
     </div>
   );
@@ -425,7 +425,7 @@ export default function ProposalDecisionCard({
 
   if (featured) {
     return (
-      <div className="bg-white/5 border border-indigo-400/30 rounded-2xl p-5">
+      <div className="bg-white border border-indigo-200 rounded-2xl p-5">
         {header}
         {reviewNotice}
         <div className="mt-4">{hero}</div>
@@ -441,20 +441,20 @@ export default function ProposalDecisionCard({
   }
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl">
+    <div className="bg-white border border-slate-200 rounded-xl">
       <button onClick={onToggleExpand} className="w-full flex items-center gap-3 px-4 py-3 text-left">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-white truncate">{proposal.operatorName || '제안'}</span>
+            <span className="text-sm font-medium text-slate-900 truncate">{proposal.operatorName || '제안'}</span>
             <StatusBadge status={proposal.status} />
           </div>
-          {proposal.operatorObjective && <div className="text-[11px] text-white/50 mt-0.5 truncate">{proposal.operatorObjective}</div>}
+          {proposal.operatorObjective && <div className="text-[11px] text-slate-500 mt-0.5 truncate">{proposal.operatorObjective}</div>}
         </div>
         <div className="text-right shrink-0">
-          <div className="text-sm font-semibold text-white tabular-nums">{revenue != null ? won(revenue) : '—'}</div>
-          {roi != null && <div className="text-[11px] text-emerald-300 tabular-nums">ROI {roi.toFixed(1)}×</div>}
+          <div className="text-sm font-semibold text-slate-900 tabular-nums">{revenue != null ? won(revenue) : '—'}</div>
+          {roi != null && <div className="text-[11px] text-emerald-700 tabular-nums">ROI {roi.toFixed(1)}×</div>}
         </div>
-        {expanded ? <ChevronUp className="w-4 h-4 text-white/40 shrink-0" /> : <ChevronDown className="w-4 h-4 text-white/40 shrink-0" />}
+        {expanded ? <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
       </button>
       {expanded && (
         <div className="px-4 pb-4">
@@ -476,15 +476,15 @@ export default function ProposalDecisionCard({
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <div className="font-medium text-white/70 mb-0.5">{label}</div>
-      <div className="text-white/60 leading-relaxed whitespace-pre-wrap">{children}</div>
+      <div className="font-medium text-slate-600 mb-0.5">{label}</div>
+      <div className="text-slate-500 leading-relaxed whitespace-pre-wrap">{children}</div>
     </div>
   );
 }
 
 function DetailList({ items, tone }: { items: string[]; tone?: 'amber' }) {
   return (
-    <ul className={`list-disc pl-4 space-y-0.5 ${tone === 'amber' ? 'text-amber-200/80' : 'text-white/60'}`}>
+    <ul className={`list-disc pl-4 space-y-0.5 ${tone === 'amber' ? 'text-amber-800' : 'text-slate-500'}`}>
       {items.map((s, i) => <li key={i}>{s}</li>)}
     </ul>
   );

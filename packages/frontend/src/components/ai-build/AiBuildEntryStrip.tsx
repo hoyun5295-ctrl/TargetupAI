@@ -27,30 +27,30 @@ export default function AiBuildEntryStrip({ channel, enabled, onDirect, directDe
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
       <button type="button" disabled={disabled} onClick={() => navigate(`/quick-campaign?channel=${channel}`)}
-        className={`${OUI_CARD_ACCENT} text-left p-4 md:p-5 hover:border-violet-300/60 transition-colors disabled:opacity-50`}>
+        className={`${OUI_CARD_ACCENT} text-left p-4 md:p-5 hover:border-violet-300 transition-colors disabled:opacity-50`}>
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20 shrink-0">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-bold text-white flex items-center gap-2">AI 자동제작 <span className={OUI_BADGE_NEW}>NEW</span></div>
-            <div className="text-[11px] text-white/60 mt-0.5">재료만 넣으면 완성본까지</div>
+            <div className="text-sm font-bold text-slate-900 flex items-center gap-2">AI 자동제작 <span className={OUI_BADGE_NEW}>NEW</span></div>
+            <div className="text-[11px] text-slate-500 mt-0.5">재료만 넣으면 완성본까지</div>
           </div>
         </div>
-        <p className="text-[12px] text-white/70 mt-3 leading-relaxed">행사 내용과 사진, 상품을 넣고 버튼 하나면 {channel === 'email' ? '이메일' : '모바일 DM'} 완성본이 편집기에 열려요.</p>
+        <p className="text-[12px] text-slate-600 mt-3 leading-relaxed">행사 내용과 사진, 상품을 넣고 버튼 하나면 {channel === 'email' ? '이메일' : '모바일 DM'} 완성본이 편집기에 열려요.</p>
       </button>
       <button type="button" disabled={disabled} onClick={onDirect}
-        className={`${OUI_CARD} border-dashed text-left p-4 md:p-5 hover:bg-white/[0.08] hover:border-white/25 transition-colors disabled:opacity-50`}>
+        className={`${OUI_CARD} border-dashed text-left p-4 md:p-5 hover:bg-slate-100 hover:border-slate-300 transition-colors disabled:opacity-50`}>
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
-            {directIcon || <PencilLine className="w-4 h-4 text-white/85" />}
+          <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-300 flex items-center justify-center shrink-0">
+            {directIcon || <PencilLine className="w-4 h-4 text-slate-700" />}
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-bold text-white">{directLabel || '직접 제작'}</div>
-            <div className="text-[11px] text-white/60 mt-0.5">{directSub || '빈 캔버스에서 시작'}</div>
+            <div className="text-sm font-bold text-slate-900">{directLabel || '직접 제작'}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">{directSub || '빈 캔버스에서 시작'}</div>
           </div>
         </div>
-        <p className="text-[12px] text-white/60 mt-3 leading-relaxed">{directDesc}</p>
+        <p className="text-[12px] text-slate-500 mt-3 leading-relaxed">{directDesc}</p>
       </button>
     </div>
   );

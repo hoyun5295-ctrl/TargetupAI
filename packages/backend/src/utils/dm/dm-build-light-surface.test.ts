@@ -58,9 +58,13 @@ describe('블록 조립 창 표면 색', () => {
     }
   });
 
-  it('조립 화면(전체 화면)은 다크 그대로다 — 창과 화면의 표면이 다르다', () => {
+  // ★ 2026-09-30 AI 존 대개편: 조립 화면도 밝은 작업대로 바뀌었다 — 창과 화면이 같은 흰 계열 표면이 된다.
+  //   남는 짙은 면은 편집기 머리(남색 띠) 하나이고, 그 값은 make-ui(MK_HEADER·MK_PAGE)가 소유한다.
+  it('조립 화면(전체 화면)은 밝은 작업대 + 남색 편집기 머리다(값은 make-ui 소유)', () => {
     const src = front('components/dm/build/DmBlockBuilder.tsx');
-    expect(src).toContain('from-slate-950');
-    expect(src).toContain('text-white');
+    expect(src).toContain('className={MK_PAGE}');
+    expect(src).toContain('className={MK_HEADER}');
+    expect(src).not.toMatch(/className=[^\n]*bg-slate-950/);
+    expect(src).not.toContain('from-slate-950');
   });
 });

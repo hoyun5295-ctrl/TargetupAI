@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  Brain,
   Check,
   CheckCircle2,
   Clock,
@@ -43,7 +42,8 @@ import SmsCharsetNotice from '../components/SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
-import { SUB_MODULE_CARDS, isCardOpen } from '../constants/ai-operator-modules';
+import { SUB_MODULE_CARDS, HUB_CARD_ROWS, isCardOpen } from '../constants/ai-operator-modules';
+import { SurfaceToneProvider } from '../components/zone/surface-tone';
 import PlanFeatureModal from '../components/PlanFeatureModal';
 import { findPlanFeatureIntro, planFeatureIdForPath, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
 import { fetchAiOperatorAccess, fetchAiOperatorFeatures } from '../utils/ai-operator-access';
@@ -154,6 +154,9 @@ const WHAT_AI_DECIDES: { k: string; v: string }[] = [
   { k: '성과', v: '클릭 · 전환 추정' },
 ];
 
+// ★ 2026-09-30 명령 카드 [이미지] 버튼(잠김 안내 버튼과 같은 모양)
+const HUB_IMAGE_BTN = 'h-10 px-3.5 rounded-xl border border-slate-200 bg-white text-[14px] text-slate-700 font-semibold inline-flex items-center gap-2 hover:bg-slate-50 disabled:opacity-40 transition-colors shrink-0';
+
 const EXAMPLE_PROMPTS = [
   '최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘',
   '장바구니 이탈 24시간 고객에게 10% 할인 알림',
@@ -198,12 +201,12 @@ interface AccentTokens {
 }
 
 const ACCENT_TOKENS: Record<string, AccentTokens> = {
-  rose:    { iconBg: 'from-rose-400 to-pink-500',       border: 'border-rose-400/20',    glow: 'hover:shadow-rose-500/20',    text: 'text-rose-200' },
-  amber:   { iconBg: 'from-amber-400 to-orange-500',    border: 'border-amber-400/20',   glow: 'hover:shadow-amber-500/20',   text: 'text-amber-200' },
-  emerald: { iconBg: 'from-emerald-400 to-teal-500',    border: 'border-emerald-400/20', glow: 'hover:shadow-emerald-500/20', text: 'text-emerald-200' },
-  cyan:    { iconBg: 'from-cyan-400 to-blue-500',       border: 'border-cyan-400/20',    glow: 'hover:shadow-cyan-500/20',    text: 'text-cyan-200' },
-  violet:  { iconBg: 'from-violet-400 to-purple-500',   border: 'border-violet-400/20',  glow: 'hover:shadow-violet-500/20',  text: 'text-violet-200' },
-  fuchsia: { iconBg: 'from-fuchsia-400 to-pink-500',    border: 'border-fuchsia-400/20', glow: 'hover:shadow-fuchsia-500/20', text: 'text-fuchsia-200' },
+  rose:    { iconBg: 'from-rose-400 to-pink-500',       border: 'border-rose-200',    glow: 'hover:shadow-rose-500/20',    text: 'text-rose-800' },
+  amber:   { iconBg: 'from-amber-400 to-orange-500',    border: 'border-amber-200',   glow: 'hover:shadow-amber-500/20',   text: 'text-amber-800' },
+  emerald: { iconBg: 'from-emerald-400 to-teal-500',    border: 'border-emerald-200', glow: 'hover:shadow-emerald-500/20', text: 'text-emerald-800' },
+  cyan:    { iconBg: 'from-cyan-400 to-blue-500',       border: 'border-cyan-200',    glow: 'hover:shadow-cyan-500/20',    text: 'text-cyan-800' },
+  violet:  { iconBg: 'from-violet-400 to-purple-500',   border: 'border-violet-200',  glow: 'hover:shadow-violet-500/20',  text: 'text-violet-800' },
+  fuchsia: { iconBg: 'from-fuchsia-400 to-pink-500',    border: 'border-fuchsia-200', glow: 'hover:shadow-fuchsia-500/20', text: 'text-fuchsia-800' },
 };
 
 // ============================================================
@@ -252,7 +255,7 @@ function ResultCard({ accent, icon: Icon, label, headline, subtitle, description
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
-      className={`group relative p-6 rounded-2xl bg-white/[0.04] backdrop-blur-xl border ${tokens.border} hover:bg-white/[0.07] hover:scale-[1.01] transition-all duration-300 shadow-lg ${tokens.glow} animate-in fade-in slide-in-from-bottom-3 fill-mode-both ${onClick ? 'cursor-pointer' : ''} ${className || ''}`}
+      className={`group relative p-6 rounded-2xl bg-white backdrop-blur-xl border ${tokens.border} hover:bg-slate-100 hover:scale-[1.01] transition-all duration-300 shadow-lg ${tokens.glow} animate-in fade-in slide-in-from-bottom-3 fill-mode-both ${onClick ? 'cursor-pointer' : ''} ${className || ''}`}
       style={{ animationDelay: `${index * 60}ms`, animationDuration: '500ms' }}
     >
       <div className="flex items-start gap-4 mb-4">
@@ -261,12 +264,12 @@ function ResultCard({ accent, icon: Icon, label, headline, subtitle, description
         </div>
         <div className="flex-1 min-w-0">
           <p className={`text-[10px] font-semibold tracking-[0.22em] uppercase mb-1 ${tokens.text}`}>{label}</p>
-          <p className={`text-2xl font-bold text-white ${truncateHeadline ? 'truncate' : ''}`} title={headline}>{headline}</p>
-          <p className="text-xs text-white/50 mt-0.5">{subtitle}</p>
+          <p className={`text-2xl font-bold text-slate-900 ${truncateHeadline ? 'truncate' : ''}`} title={headline}>{headline}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
         </div>
       </div>
       {description && (
-        <p className="text-sm text-white/65 leading-relaxed line-clamp-3 mb-3">{description}</p>
+        <p className="text-sm text-slate-500 leading-relaxed line-clamp-3 mb-3">{description}</p>
       )}
       {extra && <div className="mt-1">{extra}</div>}
       {onClick && actionHint && (
@@ -896,64 +899,106 @@ export default function AiOperatorPage() {
 
   const showAbout = !loading && !proposal;
 
+  // ★ D216+ 추천 채우기 = 상위 setObjective 직접 호출(옛 sessionStorage·DOM 조작 사고의 정정 그대로) + 입력창으로 올려 초점
+  const applyRecommendation = (objectiveText: string) => {
+    setObjective(objectiveText);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => textareaRef.current?.focus(), 200);
+  };
+
   // ★ 2026-07-08 (Harold 명시): 문안 미생성(0건 매칭 등) → 빈 제안서 대신 조건 재입력 안내.
   //   판정 = 문안 개수(백엔드 크레딧 차감 게이트와 동일 신호) — "차감 안 됨" 안내와 실제 차감 정합.
   const isZeroTarget = !!proposal && (proposal.messages?.length ?? 0) === 0;
 
-  // ★ 2026-08-21 Harold 판정 — 지면·글로우는 **옛 그라데이션 그대로 둔다.** 같은 날 단색(violet-950 + 글로우 1)·라이트 두 안을
-  //   실물/위젯으로 보였는데 둘 다 "기존이 낫다"(A > 단색 > 라이트). 깊이(세 방향 그라데이션 + 빛 3개 + 유리 카드)가 이 화면의
-  //   힘이다 — 빼지 않는다. 바뀐 것은 히어로(제목 축소 + ! 호버)뿐.
+  // ★ 2026-09-30 AI 존 대개편(Harold 확정 목업 1안) — 0821 "옛 보라 그라데이션 유지" 판정을 뒤집는다(설계서 D-결정 · DECISIONS).
+  //   남색 명령 띠 + 밝은 작업대 + 명령 카드. 메뉴 화면(ZoneFrame)과 같은 머리 좌표·같은 명령 카드 문법이라 허브 → 메뉴가 한 서비스로 읽힌다.
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+    <SurfaceToneProvider tone="light">
+    <div className="relative min-h-screen bg-slate-100 text-slate-900" data-zone-frame="hub">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       {/* ★ 2026-09-15 요금제 공통 안내 창 — 못 쓰는 회사가 카드·[생성]·[이미지]를 눌렀을 때 */}
       <PlanFeatureModal featureId={planFeatureId} onClose={() => setPlanFeatureId(null)} />
-      {/* 배경 글로우 — D222+ Phase 1 톤 다운 정정 */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-fuchsia-400/15 blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-[600px] h-[600px] rounded-full bg-violet-400/15 blur-3xl" />
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[800px] h-[800px] rounded-full bg-purple-400/10 blur-3xl" />
-      </div>
 
-      {/* 헤더 — D222+ Phase 1: 보라 톤 다운 + 시인성 강화 */}
-      <header className="relative border-b border-violet-400/30 backdrop-blur-md bg-violet-800/50 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+      {/* ★ 2026-09-30 AI 존 대개편(목업 1안): 남색 명령 띠 — 머리 안쪽 폭 1240 = 메뉴 머리와 같은 좌표(허브 → 메뉴로 가도 뒤로·로고 자리가 안 뛴다) */}
+      <section className="bg-slate-900 text-white" data-zone="hub-band">
+        <header className="max-w-[1240px] mx-auto px-4 md:px-6 h-14 md:h-16 flex items-center gap-3" data-zone="head">
           <button
             type="button"
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/15 transition-all text-sm"
+            className="inline-flex items-center gap-1.5 h-9 px-2.5 -ml-2.5 rounded-lg text-[13px] text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="대시보드로 돌아가기"
+            data-zone="back"
           >
             <ArrowLeft className="w-4 h-4" />
-            대시보드로 돌아가기
+            <span className="hidden sm:inline">대시보드</span>
           </button>
-
-          <div className="flex items-center gap-3">
+          <span className="w-px h-4 bg-white/15" aria-hidden="true" />
+          <img src="/brand/wordmark.png" alt="한줄로" className="h-[18px] md:h-5 brightness-0 invert select-none" draggable={false} />
+          <span className="text-[13px] text-slate-400">AI Operator</span>
+          <span className="ml-auto flex items-center gap-2">
             {aiCredit?.creditEnabled && (aiCredit.planCredits > 0 || aiCredit.purchased > 0) && (
               <button
                 type="button"
                 onClick={() => setShowCreditHistory(true)}
-                className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs transition-all hover:bg-white/15"
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-white/10 hover:bg-white/15 text-[12.5px] transition-colors"
                 title="AI 크레딧 사용 이력"
               >
-                <Sparkles className="w-3.5 h-3.5 text-fuchsia-300" />
-                <span className="font-semibold tabular-nums text-white/90">{Number(aiCredit.total).toLocaleString()}</span>
-                <span className="text-white/40">크레딧</span>
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span className="hidden sm:inline text-slate-300">크레딧</span>
+                <b className="font-semibold tabular-nums">{Number(aiCredit.total).toLocaleString()}</b>
                 {Number(aiCredit.monthlyUsed) > 0 && (
-                  <span className="text-white/40">· 이번달 {Number(aiCredit.monthlyUsed).toLocaleString()}</span>
+                  <span className="hidden md:inline text-slate-400">· 이번달 {Number(aiCredit.monthlyUsed).toLocaleString()}</span>
                 )}
               </button>
             )}
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-fuchsia-400 flex items-center justify-center shadow-lg shadow-fuchsia-500/30">
-              <Sparkles className="w-5 h-5 text-indigo-950" />
+          </span>
+        </header>
+        {!proposal ? (
+          <div className="max-w-[1240px] mx-auto px-4 md:px-6 pt-7 md:pt-9 pb-14">
+            {/* ★ 2026-08-21 ! 버튼(여섯 가지 설명) 유지 — 호버(데스크톱)·탭(모바일) */}
+            <div className="relative inline-flex items-start gap-2" onMouseEnter={() => setShowWhat(true)} onMouseLeave={() => setShowWhat(false)}>
+              <h1 className="text-[24px] md:text-[30px] font-bold leading-[1.25] tracking-[-0.025em]">
+                <span className="underline decoration-amber-400 decoration-[3px] underline-offset-[7px]">한 줄</span>이 실행 가능한 제안서가 됩니다
+              </h1>
+              <button
+                type="button"
+                aria-label="AI Operator가 하는 일"
+                aria-expanded={showWhat}
+                onClick={() => setShowWhat((v) => !v)}
+                className={`mt-0.5 md:mt-1.5 w-7 h-7 shrink-0 rounded-lg text-[13px] font-bold transition-colors ${showWhat ? 'bg-white text-slate-900' : 'bg-white/10 text-slate-200 hover:bg-white/20'}`}
+              >
+                !
+              </button>
+              <div
+                role="tooltip"
+                className={`absolute left-0 top-full mt-3 w-[min(720px,calc(100vw-32px))] text-left rounded-2xl border border-slate-200 bg-white text-slate-900 p-5 shadow-[0_24px_64px_-12px_rgba(15,23,42,0.45)] z-20 transition-all duration-200 ${
+                  showWhat ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-1 pointer-events-none'
+                }`}
+              >
+                <p className="text-[17px] font-bold tracking-[-0.02em] leading-snug">AI가 한 번에 정하는 여섯 가지</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+                  {WHAT_AI_DECIDES.map((s) => (
+                    <div key={s.k} className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-center">
+                      <div className="text-[14px] font-semibold text-slate-900">{s.k}</div>
+                      <div className="text-[12.5px] text-slate-500 mt-0.5 leading-snug break-keep">{s.v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 pt-3 border-t border-slate-200 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[12.5px] text-slate-500">
+                  <span>제안서를 보고 <b className="font-medium text-slate-700">발송 여부는 직접 결정</b>합니다</span>
+                  <span>수정 요청도 한 줄로</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-lg font-bold bg-gradient-to-r from-amber-200 via-fuchsia-200 to-indigo-200 bg-clip-text text-transparent">
-                AI Operator
-              </span>
-            </div>
+            <p className="mt-2.5 text-[14px] text-slate-300 max-w-2xl leading-relaxed">누구에게·무엇을·어디로·언제·얼마에·얼마나, 여섯 가지를 AI가 정합니다. 발송 여부는 직접 결정합니다.</p>
+            {showAbout && (
+              <HubRecommendBand planLocked={planLocked} onLocked={() => setPlanFeatureId('ai-operator')} onApply={applyRecommendation} />
+            )}
           </div>
-        </div>
-      </header>
+        ) : (
+          <div className="h-12" aria-hidden="true" />
+        )}
+      </section>
 
       {showCreditHistory && (
         <CreditHistoryModal
@@ -966,165 +1011,102 @@ export default function AiOperatorPage() {
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
 
       {/* 메인 본문 */}
-      <main className="relative max-w-5xl mx-auto px-6 py-10 md:py-14">
-        {/* ============= Hero + 입력창 (항상 표시 — 결과 모드에서도 상단 유지) ============= */}
-        {/* ★ 2026-08-21 Harold 지시 — 배지·영문 eyebrow·부제 2줄(5단)을 제목 1개 + ! 버튼으로. 설명은 ! 호버(모바일은 탭)에서
-            여섯 단계 카드로 펼친다. 제목은 옛 그라데이션 글자 그대로, 크기만 한 단 줄인다(48px이 "촌스럽다" — Harold).
-            팝오버는 제목 **아래 중앙**으로 연다 — 버튼에 붙이면 제목 2행을 가렸다(첫 배포 스크린샷). */}
-        {!proposal && (
-          <div className="text-center mb-8">
-            <div
-              className="relative inline-flex items-start justify-center gap-3"
-              onMouseEnter={() => setShowWhat(true)}
-              onMouseLeave={() => setShowWhat(false)}
-            >
-              <h1 className="text-3xl md:text-4xl font-bold leading-tight bg-gradient-to-r from-amber-200 via-fuchsia-200 to-indigo-200 bg-clip-text text-transparent">
-                한 줄 명령으로 작동하는<br />차세대 마케팅 오퍼레이션
-              </h1>
-              <div className="mt-0.5 md:mt-1">
+      <main className="relative max-w-[1240px] mx-auto px-4 md:px-6 pb-16">
+        {/* 명령 카드 — 띠 아래 경계에 걸친다(결과 모드에서도 같은 자리) */}
+        <div className="-mt-8 relative z-10">
+          <div className="bg-white rounded-2xl shadow-[0_2px_4px_rgba(15,23,42,0.06),0_24px_48px_-16px_rgba(15,23,42,0.35)] px-4 py-3 md:px-5 md:py-3.5" data-zone="command">
+            <div className="flex flex-wrap md:flex-nowrap items-end gap-3 md:gap-4">
+              <img src="/brand/wordmark.png" alt="한줄로" className="h-5 md:h-6 mb-2 shrink-0 select-none" draggable={false} />
+              <label className="flex-1 min-w-[220px] border-b-2 border-slate-900 focus-within:border-indigo-600 pb-1 transition-colors">
+                <span className="sr-only">한 줄로 캠페인 맡기기</span>
+                <textarea
+                  ref={textareaRef}
+                  value={objective}
+                  onChange={(e) => setObjective(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="예: 최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘"
+                  disabled={loading}
+                  rows={1}
+                  className="block w-full bg-transparent text-[16px] font-medium text-slate-900 placeholder:text-slate-400 py-1 resize-none focus:outline-none leading-relaxed min-h-[36px] max-h-[200px] disabled:opacity-50"
+                  data-zone="line"
+                />
+              </label>
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                {planLocked ? (
+                  // ★ 2026-09-15 이미지 글자 읽기도 크레딧 기능 — 못 쓰는 회사는 파일 선택 대신 안내 창
+                  <button type="button" onClick={() => setPlanFeatureId('ai-operator')} className={HUB_IMAGE_BTN}>
+                    <ImageIcon className="w-4 h-4" />
+                    이미지
+                  </button>
+                ) : (
+                  <ImageToCopyButton
+                    label="이미지"
+                    onExtracted={(t) => setObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                    disabled={loading}
+                    className={HUB_IMAGE_BTN}
+                  />
+                )}
                 <button
                   type="button"
-                  aria-label="AI Operator가 하는 일"
-                  aria-expanded={showWhat}
-                  onClick={() => setShowWhat((v) => !v)}
-                  className={`w-8 h-8 rounded-lg border text-base font-bold transition-colors ${
-                    showWhat
-                      ? 'bg-violet-500 border-violet-500 text-white'
-                      : 'bg-white/5 border-white/20 text-violet-200 hover:bg-violet-500 hover:border-violet-500 hover:text-white'
-                  }`}
+                  onClick={handleSubmit}
+                  disabled={loading || objective.trim().length < 5}
+                  className="flex-1 md:flex-none h-10 px-5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-900 text-[14px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  aria-label="AI 제안서 생성"
+                  data-zone="primary"
                 >
-                  !
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {loading ? '생성 중' : '생성'}
                 </button>
-                <div
-                  role="tooltip"
-                  className={`absolute left-1/2 -translate-x-1/2 top-full mt-4 w-[min(720px,calc(100vw-48px))] text-left rounded-2xl border border-white/15 bg-[#180a38]/95 backdrop-blur-xl p-5 shadow-2xl shadow-black/50 z-20 transition-all duration-200 ${
-                    showWhat ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-1 pointer-events-none'
-                  }`}
-                >
-                  <p className="text-[22px] font-bold tracking-[-0.02em] text-white leading-snug">
-                    한 줄이 <span className="text-violet-200">실행 가능한 제안서</span>가 됩니다
-                  </p>
-                  <p className="text-[14px] text-white/70 mt-1.5">
-                    누구에게·무엇을·어디로·언제·얼마에·얼마나, 여섯 가지를 AI가 한 번에 정합니다.
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4">
-                    {WHAT_AI_DECIDES.map((s) => (
-                      <div key={s.k} className="rounded-lg bg-white/5 border border-white/10 px-4 py-3.5 text-center">
-                        <div className="text-[15px] font-semibold text-white">{s.k}</div>
-                        <div className="text-[13px] text-white/65 mt-0.5 leading-snug break-keep">{s.v}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-3.5 pt-3 border-t border-white/10 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[12.5px] text-white/45">
-                    <span>제안서를 보고 <b className="font-medium text-white/80">발송 여부는 직접 결정</b>합니다</span>
-                    <span>수정 요청도 한 줄로</span>
-                  </div>
-                </div>
               </div>
             </div>
+          </div>
+        </div>
+        <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap px-1 text-[12px] text-slate-500">
+          <span>Ctrl(⌘) + Enter로 바로 생성 · 이미지 버튼으로 이미지 속 문안 불러오기</span>
+          <span className="tabular-nums text-slate-400">{objective.length}자</span>
+        </div>
+
+        {customerGate.isEmpty && !proposal && <CustomerDataRequiredBanner className="mt-3" />}
+        {error && (
+          <div className="mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-sm">
+            {error}
           </div>
         )}
 
-        {customerGate.isEmpty && !proposal && <CustomerDataRequiredBanner className="mb-4 max-w-3xl mx-auto" />}
-        {/* 입력 영역 (항상 노출 — 결과 모드에서는 축소된 형태로) */}
-        <div className={`mb-${proposal ? '10' : '6'} ${proposal ? 'mt-2' : ''}`}>
-          <div className="relative group">
-            {/* 그라데이션 보더 */}
-            <div className="absolute -inset-px rounded-2xl bg-gradient-to-r from-amber-400/40 via-fuchsia-400/40 to-indigo-400/40 opacity-60 group-focus-within:opacity-100 blur-sm transition-opacity" />
-            <div className="relative flex items-end gap-3 p-2 rounded-2xl bg-indigo-950/80 backdrop-blur-xl border border-white/10">
-              <div className="flex-shrink-0 ml-3 mb-3">
-                <Sparkles className="w-5 h-5 text-amber-300" />
-              </div>
-              <textarea
-                ref={textareaRef}
-                value={objective}
-                onChange={(e) => setObjective(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="예: 최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘"
-                disabled={loading}
-                rows={1}
-                className="flex-1 bg-transparent text-white placeholder-white/30 px-1 py-3 resize-none focus:outline-none text-base leading-relaxed min-h-[44px] max-h-[200px] disabled:opacity-50"
-              />
-              {planLocked ? (
-                // ★ 2026-09-15 이미지 글자 읽기도 크레딧 기능 — 못 쓰는 회사는 파일 선택 대신 안내 창
-                <button
-                  type="button"
-                  onClick={() => setPlanFeatureId('ai-operator')}
-                  className="flex-shrink-0 px-5 py-3 inline-flex items-center gap-2 rounded-xl bg-violet-500/20 border border-violet-400/40 text-violet-100 font-semibold hover:bg-violet-500/30 hover:border-violet-400/60 transition-all"
-                >
-                  <ImageIcon className="w-4 h-4" />
-                  이미지
-                </button>
-              ) : (
-                <ImageToCopyButton
-                  label="이미지"
-                  onExtracted={(t) => setObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
-                  disabled={loading}
-                  className="flex-shrink-0 px-5 py-3 inline-flex items-center gap-2 rounded-xl bg-violet-500/20 border border-violet-400/40 text-violet-100 font-semibold hover:bg-violet-500/30 hover:border-violet-400/60 disabled:opacity-40 transition-all"
-                />
-              )}
+        {/* 예시 칩 (입력 전만) */}
+        {!loading && !proposal && objective.length === 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-[13px] font-semibold text-slate-600 mr-1">예시로 시작</span>
+            {EXAMPLE_PROMPTS.map((p) => (
               <button
+                key={p}
                 type="button"
-                onClick={handleSubmit}
-                disabled={loading || objective.trim().length < 5}
-                className="flex-shrink-0 px-5 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-fuchsia-400 text-indigo-950 font-semibold hover:brightness-110 hover:shadow-lg hover:shadow-fuchsia-500/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center gap-2"
-                aria-label="AI 제안서 생성"
+                onClick={() => {
+                  setObjective(p);
+                  textareaRef.current?.focus();
+                }}
+                className="min-h-9 py-1.5 px-3.5 rounded-2xl text-left bg-white border border-slate-200 text-[13px] text-slate-700 hover:border-indigo-400 hover:text-indigo-800 transition-colors"
               >
-                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                <span className="hidden sm:inline">{loading ? '생성 중' : '생성'}</span>
+                {p}
               </button>
-            </div>
+            ))}
           </div>
-          <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap px-2 text-[11px] text-white/35">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span>⌘ + Enter 단축키로 즉시 제출</span>
-              <span className="text-white/25">· 이미지 버튼으로 이미지에서 문안 불러오기</span>
-            </div>
-            <span>{objective.length} chars</span>
-          </div>
-
-          {error && (
-            <div className="mt-3 p-3 rounded-lg bg-rose-500/10 border border-rose-400/30 text-rose-200 text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* 예시 프롬프트 칩 (입력 전만) */}
-          {!loading && !proposal && objective.length === 0 && (
-            <div className="mt-5">
-              <p className="text-[11px] font-semibold tracking-[0.2em] text-white/35 uppercase mb-2.5">Suggested Prompts</p>
-              <div className="flex flex-wrap gap-2">
-                {EXAMPLE_PROMPTS.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => {
-                      setObjective(p);
-                      textareaRef.current?.focus();
-                    }}
-                    className="px-3.5 py-1.5 text-xs rounded-full bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all"
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        )}
+        <div className={proposal ? 'h-10' : 'h-8'} aria-hidden="true" />
 
         {/* ============= Loading State — 6 sub-agent 시각화 ============= */}
         {loading && (
           <div className="mb-14 animate-in fade-in duration-300">
             <div className="text-center mb-8">
-              <p className="text-[11px] font-semibold tracking-[0.28em] text-white/40 uppercase mb-2">AI Operator · Multi-Agent Pipeline</p>
-              <p className="text-white/70 text-sm">6개 sub-agent가 협업하여 제안서를 설계하고 있습니다</p>
+              <p className="text-[11px] font-semibold tracking-[0.28em] text-slate-400 uppercase mb-2">AI Operator · Multi-Agent Pipeline</p>
+              <p className="text-slate-600 text-sm">6개 sub-agent가 협업하여 제안서를 설계하고 있습니다</p>
             </div>
             {/* ★ D210+ Phase 2-fix8 (Harold 명시 2026-05-23): Stage 2 — 6단 모두 완료 후 둥근 스피너 + "마지막 다듬는 중" 안내 영역 */}
             {progressStep >= SUB_AGENT_STEPS.length && (
               <div className="mb-6 text-center animate-in fade-in duration-300">
-                <Loader2 className="w-10 h-10 animate-spin text-fuchsia-400 mx-auto mb-3" />
-                <p className="text-white/85 text-sm font-medium">AI Operator가 마지막 다듬는 중입니다</p>
-                <p className="text-white/50 text-xs mt-1">제안서 화면을 준비 중입니다. 잠시만 기다려주세요</p>
+                <Loader2 className="w-10 h-10 animate-spin text-fuchsia-600 mx-auto mb-3" />
+                <p className="text-slate-700 text-sm font-medium">AI Operator가 마지막 다듬는 중입니다</p>
+                <p className="text-slate-500 text-xs mt-1">제안서 화면을 준비 중입니다. 잠시만 기다려주세요</p>
               </div>
             )}
 
@@ -1138,38 +1120,38 @@ export default function AiOperatorPage() {
                   <div
                     key={step.label}
                     className={`relative p-4 rounded-xl border backdrop-blur-xl transition-all duration-500 ${
-                      isDone ? 'bg-emerald-500/10 border-emerald-400/30' :
-                      isActive ? 'bg-white/10 border-fuchsia-400/40 scale-[1.02] shadow-lg shadow-fuchsia-500/20' :
-                      'bg-white/[0.02] border-white/5'
+                      isDone ? 'bg-emerald-50 border-emerald-200' :
+                      isActive ? 'bg-slate-100 border-fuchsia-300 scale-[1.02] shadow-lg shadow-fuchsia-500/20' :
+                      'bg-white border-slate-100'
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <div className={`relative flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
                         isDone ? 'bg-gradient-to-br from-emerald-400 to-teal-500' :
                         isActive ? `bg-gradient-to-br ${step.gradient}` :
-                        'bg-white/5'
+                        'bg-white'
                       }`}>
                         {isDone ? (
-                          <Check className="w-5 h-5 text-white" strokeWidth={3} />
+                          <Check className="w-5 h-5 text-slate-900" strokeWidth={3} />
                         ) : isActive ? (
                           <>
-                            <Icon className="w-5 h-5 text-white relative z-10" />
-                            <span className="absolute inset-0 rounded-lg bg-white/20 animate-ping" />
+                            <Icon className="w-5 h-5 text-slate-900 relative z-10" />
+                            <span className="absolute inset-0 rounded-lg bg-slate-200 animate-ping" />
                           </>
                         ) : (
-                          <Icon className={`w-5 h-5 ${isPending ? 'text-white/25' : 'text-white'}`} />
+                          <Icon className={`w-5 h-5 ${isPending ? 'text-slate-300' : 'text-slate-900'}`} />
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className={`text-[10px] font-bold tracking-wider uppercase ${
-                          isDone ? 'text-emerald-300' :
-                          isActive ? 'text-white' :
-                          'text-white/30'
+                          isDone ? 'text-emerald-700' :
+                          isActive ? 'text-slate-900' :
+                          'text-slate-400'
                         }`}>
                           {step.label}
                         </p>
                         <p className={`text-xs mt-0.5 truncate ${
-                          isDone || isActive ? 'text-white/70' : 'text-white/25'
+                          isDone || isActive ? 'text-slate-600' : 'text-slate-300'
                         }`}>
                           {isActive ? '진행 중...' : isDone ? '완료' : step.hint}
                         </p>
@@ -1187,33 +1169,33 @@ export default function AiOperatorPage() {
           <div className="mb-14">
             <div className="flex items-center justify-between mb-5">
               <div>
-                <p className="text-[11px] font-semibold tracking-[0.28em] text-white/40 uppercase mb-1">AI Proposal · Generated</p>
-                <h2 className="text-xl font-bold text-white">{proposal.target.suggestedName || 'AI 마케팅 제안서'}</h2>
+                <p className="text-[11px] font-semibold tracking-[0.28em] text-slate-400 uppercase mb-1">AI Proposal · Generated</p>
+                <h2 className="text-xl font-bold text-slate-900">{proposal.target.suggestedName || 'AI 마케팅 제안서'}</h2>
               </div>
-              <span className="text-xs text-white/40">
+              <span className="text-xs text-slate-400">
                 {new Date(proposal.meta.generatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 생성
               </span>
             </div>
 
             {/* ★ 2026-07-08 (Harold 명시): 타겟 0건 — 빈 제안서 대신 조건 재입력 안내 (크레딧 미차감). */}
             {isZeroTarget && (
-              <div className="mb-5 p-6 rounded-2xl border border-amber-400/30 bg-amber-500/[0.07] backdrop-blur-xl">
+              <div className="mb-5 p-6 rounded-2xl border border-amber-200 bg-amber-50 backdrop-blur-xl">
                 <div className="flex items-start gap-3">
-                  <div className="shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400/30 to-orange-500/20 flex items-center justify-center">
-                    <AlertTriangle className="w-5 h-5 text-amber-300" />
+                  <div className="shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center">
+                    <AlertTriangle className="w-5 h-5 text-amber-700" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-base font-bold text-white mb-1">조건에 맞는 고객이 없습니다</h3>
-                    <p className="text-sm text-white/70 leading-relaxed">
+                    <h3 className="text-base font-bold text-slate-900 mb-1">조건에 맞는 고객이 없습니다</h3>
+                    <p className="text-sm text-slate-600 leading-relaxed">
                       {proposal.recommendationReason?.trim()
                         || '입력하신 조건에 해당하는 고객이 DB에 없어 제안서를 만들지 못했습니다.'}
                     </p>
-                    <p className="text-xs text-white/45 mt-2">
+                    <p className="text-xs text-slate-400 mt-2">
                       조건을 넓히거나 다른 등급·기간으로 바꿔 다시 생성해 보세요. 이 경우 크레딧은 차감되지 않습니다.
                     </p>
                     <button
                       onClick={() => setProposal(null)}
-                      className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-sm font-medium text-white transition-colors"
+                      className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-sm font-medium text-slate-900 transition-colors"
                     >
                       조건 다시 입력
                     </button>
@@ -1228,24 +1210,24 @@ export default function AiOperatorPage() {
                 {(proposal.compliance.riskLevel !== 'low' || !proposal.compliance.passed) && (
                   <div className={`mb-5 p-4 rounded-xl border backdrop-blur-xl ${
                     proposal.compliance.riskLevel === 'high'
-                      ? 'bg-rose-500/10 border-rose-400/40'
-                      : 'bg-amber-500/10 border-amber-400/40'
+                      ? 'bg-rose-50 border-rose-300'
+                      : 'bg-amber-50 border-amber-300'
                   }`}>
                     <div className="flex items-center gap-2 mb-2.5">
-                      <AlertTriangle className={`w-4 h-4 ${proposal.compliance.riskLevel === 'high' ? 'text-rose-300' : 'text-amber-300'}`} />
-                      <p className={`text-sm font-semibold ${proposal.compliance.riskLevel === 'high' ? 'text-rose-100' : 'text-amber-100'}`}>
+                      <AlertTriangle className={`w-4 h-4 ${proposal.compliance.riskLevel === 'high' ? 'text-rose-700' : 'text-amber-700'}`} />
+                      <p className={`text-sm font-semibold ${proposal.compliance.riskLevel === 'high' ? 'text-rose-900' : 'text-amber-900'}`}>
                         Compliance Check · {proposal.compliance.riskLevel === 'high' ? '발송 차단 권장' : '검토 필요'}
                       </p>
                     </div>
                     {proposal.compliance.warnings.length > 0 && (
-                      <ul className="text-xs text-white/75 space-y-1 mb-2">
+                      <ul className="text-xs text-slate-600 space-y-1 mb-2">
                         {proposal.compliance.warnings.map((w, i) => (
                           <li key={i} className="flex gap-1.5"><span className="opacity-60">·</span><span>{w}</span></li>
                         ))}
                       </ul>
                     )}
                     {proposal.compliance.suggestions.length > 0 && (
-                      <ul className="text-xs text-white/60 space-y-1 mt-2 pt-2 border-t border-white/10">
+                      <ul className="text-xs text-slate-500 space-y-1 mt-2 pt-2 border-t border-slate-200">
                         {proposal.compliance.suggestions.map((s, i) => (
                           <li key={i} className="flex gap-1.5"><span className="opacity-60">→</span><span>{s}</span></li>
                         ))}
@@ -1254,9 +1236,9 @@ export default function AiOperatorPage() {
                   </div>
                 )}
                 {proposal.compliance.riskLevel === 'low' && proposal.compliance.passed && (
-                  <div className="mb-5 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-400/30 text-xs">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
-                    <span className="text-emerald-200">Compliance Check 통과</span>
+                  <div className="mb-5 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                    <span className="text-emerald-800">Compliance Check 통과</span>
                   </div>
                 )}
               </>
@@ -1323,16 +1305,16 @@ export default function AiOperatorPage() {
                                 onClick={() => setSelectedVariantIdx(idx)}
                                 className={`group/tab relative px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
                                   isActive
-                                    ? 'bg-gradient-to-r from-amber-400/30 to-fuchsia-400/30 text-white border border-amber-300/40 shadow-md'
-                                    : 'bg-white/[0.04] text-white/55 border border-white/10 hover:bg-white/[0.08] hover:text-white/80'
+                                    ? 'bg-gradient-to-r from-amber-50 to-fuchsia-50 text-slate-900 border border-amber-300 shadow-md'
+                                    : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100 hover:text-slate-700'
                                 }`}
                               >
                                 {isAnswerRecommended && (
-                                  <Star className={`w-3 h-3 ${isActive ? 'text-amber-300 fill-amber-300' : 'text-amber-400/60 fill-amber-400/60'}`} />
+                                  <Star className={`w-3 h-3 ${isActive ? 'text-amber-700 fill-amber-300' : 'text-amber-600 fill-amber-400/60'}`} />
                                 )}
                                 <span>{v.variantName || `${String.fromCharCode(65 + idx)}안`}</span>
                                 {v.score > 0 && (
-                                  <span className={`ml-0.5 text-[10px] tabular-nums ${isActive ? 'text-amber-200' : 'text-white/40'}`}>
+                                  <span className={`ml-0.5 text-[10px] tabular-nums ${isActive ? 'text-amber-800' : 'text-slate-400'}`}>
                                     {v.score}
                                   </span>
                                 )}
@@ -1340,7 +1322,7 @@ export default function AiOperatorPage() {
                             );
                           })}
                           {isRecommended && (
-                            <span className="ml-auto text-[10px] font-semibold tracking-[0.2em] uppercase text-amber-300/80">
+                            <span className="ml-auto text-[10px] font-semibold tracking-[0.2em] uppercase text-amber-700">
                               AI Recommended
                             </span>
                           )}
@@ -1348,8 +1330,8 @@ export default function AiOperatorPage() {
 
                         {/* 콘셉트 */}
                         {activeVariant?.concept && (
-                          <p className="text-xs text-white/45 mb-2">
-                            <span className="font-semibold text-white/60">콘셉트:</span> {activeVariant.concept}
+                          <p className="text-xs text-slate-400 mb-2">
+                            <span className="font-semibold text-slate-500">콘셉트:</span> {activeVariant.concept}
                           </p>
                         )}
 
@@ -1361,8 +1343,8 @@ export default function AiOperatorPage() {
                               onClick={() => setShowMergedPreview(false)}
                               className={`flex-1 text-[11px] py-1.5 rounded-lg transition-all ${
                                 !showMergedPreview
-                                  ? 'bg-amber-400/25 text-amber-100 font-semibold ring-1 ring-amber-300/40'
-                                  : 'bg-white/5 text-white/40 hover:text-white/60'
+                                  ? 'bg-amber-100 text-amber-900 font-semibold ring-1 ring-amber-300'
+                                  : 'bg-white text-slate-400 hover:text-slate-500'
                               }`}
                               title="개인화 변수 위치 강조 (%고객명% 형태 그대로 표시)"
                             >
@@ -1373,8 +1355,8 @@ export default function AiOperatorPage() {
                               onClick={() => setShowMergedPreview(true)}
                               className={`flex-1 text-[11px] py-1.5 rounded-lg transition-all ${
                                 showMergedPreview
-                                  ? 'bg-emerald-400/25 text-emerald-100 font-semibold ring-1 ring-emerald-400/40'
-                                  : 'bg-white/5 text-white/40 hover:text-white/60'
+                                  ? 'bg-emerald-100 text-emerald-900 font-semibold ring-1 ring-emerald-300'
+                                  : 'bg-white text-slate-400 hover:text-slate-500'
                               }`}
                               title="상위 고객 데이터로 치환된 결과 미리보기"
                             >
@@ -1384,10 +1366,10 @@ export default function AiOperatorPage() {
                         )}
 
                         {/* ★ 2026-07-22 (Harold 명시): 광고표기 on/off 토글 — 직접발송 미러·기본 ON. 끄면 (광고)/무료거부 미부착 정보성 발송(백엔드 D143이 사용자 선택 존중). SMS도 본문 (광고)에 영향 → 채널 무관 노출 */}
-                        <label className={`flex items-center justify-between gap-3 mb-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${isAd ? 'bg-amber-400/15 border-amber-300/40' : 'bg-white/5 border-white/10 hover:bg-white/[0.07]'}`}>
+                        <label className={`flex items-center justify-between gap-3 mb-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${isAd ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200 hover:bg-slate-100'}`}>
                           <div className="min-w-0">
-                            <div className={`text-xs font-semibold ${isAd ? 'text-amber-100' : 'text-white/70'}`}>광고표기 <span className="font-bold">(광고)</span></div>
-                            <div className="text-[10px] text-white/45 mt-0.5">{isAd ? '제목·본문 맨 앞에 (광고)+무료거부 자동 부착' : '정보성 발송: (광고) 미부착 (광고성 문안은 법상 (광고) 표기 의무)'}</div>
+                            <div className={`text-xs font-semibold ${isAd ? 'text-amber-900' : 'text-slate-600'}`}>광고표기 <span className="font-bold">(광고)</span></div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">{isAd ? '제목·본문 맨 앞에 (광고)+무료거부 자동 부착' : '정보성 발송: (광고) 미부착 (광고성 문안은 법상 (광고) 표기 의무)'}</div>
                           </div>
                           <input type="checkbox" checked={isAd} onChange={(e) => setAdEnabled(e.target.checked)} className="w-4 h-4 accent-amber-400 flex-shrink-0" />
                         </label>
@@ -1395,11 +1377,11 @@ export default function AiOperatorPage() {
                         {/* ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 발송 전 확인 불가 문제 해소. 표시 값 = 발송 값(resolveSubject) */}
                         {(activeChannel === 'LMS' || activeChannel === 'MMS') && (
                           <div className="mb-3">
-                            <label className="block text-[11px] text-white/50 mb-1">제목 (문자 상단에 표시)</label>
+                            <label className="block text-[11px] text-slate-500 mb-1">제목 (문자 상단에 표시)</label>
                             {/* ★ 2026-07-22 (Harold 명시): 광고표기 ON이면 제목 입력칸 앞에 (광고) 고정 접두 오버레이(직접발송 미러). 입력값은 순수 제목 유지 → 백엔드 buildAdSubject가 부착·이중부착 없음 */}
                             <div className="relative">
                               {isAd && (
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-amber-300 pointer-events-none select-none">(광고)</span>
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-amber-700 pointer-events-none select-none">(광고)</span>
                               )}
                               <input
                                 type="text"
@@ -1407,22 +1389,22 @@ export default function AiOperatorPage() {
                                 onChange={(e) => setSubjectOverrides((prev) => ({ ...prev, [safeIdx]: e.target.value }))}
                                 maxLength={17}
                                 placeholder="제목 입력 (최대 17자)"
-                                className={`w-full ${isAd ? 'pl-[54px]' : 'pl-3'} pr-3 py-2 rounded-xl bg-indigo-950/60 border border-white/10 text-sm text-white placeholder-white/30 focus:border-amber-300/50 focus:outline-none transition-colors`}
+                                className={`w-full ${isAd ? 'pl-[54px]' : 'pl-3'} pr-3 py-2 rounded-xl bg-indigo-50 border border-slate-200 text-sm text-slate-900 placeholder-slate-400 focus:border-amber-300 focus:outline-none transition-colors`}
                               />
                             </div>
                             {!resolveSubject(safeIdx).trim() && (
-                              <p className="text-[10px] text-rose-300 mt-1">제목을 입력해주세요. LMS/MMS는 제목이 필요합니다.</p>
+                              <p className="text-[10px] text-rose-700 mt-1">제목을 입력해주세요. LMS/MMS는 제목이 필요합니다.</p>
                             )}
                           </div>
                         )}
 
                         {/* 본문 박스 — 보기(pre). 직접 편집 = 전용 편집기 모달(MessageEditorModal) */}
-                        <div className="relative p-4 rounded-xl bg-indigo-950/60 border border-white/10 mb-3">
-                          <pre className="whitespace-pre-wrap break-words text-sm text-white/85 leading-relaxed font-sans">
+                        <div className="relative p-4 rounded-xl bg-indigo-50 border border-slate-200 mb-3">
+                          <pre className="whitespace-pre-wrap break-words text-sm text-slate-700 leading-relaxed font-sans">
                             {activeBody
                               ? (showMergedPreview && sampleCustomer
-                                  ? mergeAndHighlightVars(activeBody, sampleCustomer, 'dark', sampleCustomerFields || undefined)
-                                  : highlightVars(activeBody, 'dark'))
+                                  ? mergeAndHighlightVars(activeBody, sampleCustomer, 'light', sampleCustomerFields || undefined)
+                                  : highlightVars(activeBody, 'light'))
                               : '메시지 본문이 비어있습니다.'}
                           </pre>
                           {overrideText && !editingBody && (
@@ -1433,7 +1415,7 @@ export default function AiOperatorPage() {
                                 delete next[safeIdx];
                                 return next;
                               })}
-                              className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 hover:bg-emerald-500/30 transition-all"
+                              className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-all"
                               title="원본 안으로 되돌리기"
                             >
                               다듬어짐 · 되돌리기
@@ -1465,7 +1447,7 @@ export default function AiOperatorPage() {
                           <button
                             type="button"
                             onClick={() => setEditingBody(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white transition-all"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900 transition-all"
                           >
                             <Pencil className="w-3.5 h-3.5" />
                             직접 편집
@@ -1474,7 +1456,7 @@ export default function AiOperatorPage() {
                             type="button"
                             onClick={() => setShowRefineModal(true)}
                             disabled={!activeBody}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-amber-400/20 to-fuchsia-400/20 text-amber-100 border border-amber-300/30 hover:from-amber-400/30 hover:to-fuchsia-400/30 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-amber-50 to-fuchsia-50 text-amber-900 border border-amber-200 hover:from-amber-50 hover:to-fuchsia-50 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                           >
                             <Wand2 className="w-3.5 h-3.5" />
                             AI로 다듬기
@@ -1488,9 +1470,9 @@ export default function AiOperatorPage() {
                                 setTimeout(() => setCopiedAt(null), 1500);
                               });
                             }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-white/70 border border-white/10 hover:bg-white/10 hover:text-white transition-all"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 hover:text-slate-900 transition-all"
                           >
-                            {copiedAt ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copiedAt ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
                             {copiedAt ? '복사 완료' : '본문 복사'}
                           </button>
                         </div>
@@ -1547,7 +1529,7 @@ export default function AiOperatorPage() {
                     extra={
                       <div className="mt-3 space-y-2.5">
                         {/* 유형 변경 세그먼트 */}
-                        <div className="flex items-center gap-1 p-1 rounded-xl bg-white/[0.04] border border-white/10">
+                        <div className="flex items-center gap-1 p-1 rounded-xl bg-white border border-slate-200">
                           {(['SMS', 'LMS', 'MMS'] as const).map((ch) => {
                             const active = effectiveChannel === ch;
                             const isAiRec = (proposal.channel.recommended || '').toUpperCase() === ch;
@@ -1563,8 +1545,8 @@ export default function AiOperatorPage() {
                                 }}
                                 className={`relative flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                                   active
-                                    ? 'bg-gradient-to-r from-emerald-500/30 to-teal-500/30 text-white border border-emerald-400/40 shadow'
-                                    : 'text-white/55 hover:text-white/85 hover:bg-white/5 border border-transparent'
+                                    ? 'bg-gradient-to-r from-emerald-50 to-teal-50 text-slate-900 border border-emerald-300 shadow'
+                                    : 'text-slate-500 hover:text-slate-700 hover:bg-white border border-transparent'
                                 }`}
                               >
                                 {ch}
@@ -1583,8 +1565,8 @@ export default function AiOperatorPage() {
                             onClick={() => { setMmsError(null); setShowMmsModal(true); }}
                             className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
                               mmsUploadedImages.length > 0
-                                ? 'bg-emerald-500/10 text-emerald-200 border-emerald-400/30 hover:bg-emerald-500/15'
-                                : 'bg-amber-500/10 text-amber-200 border-amber-400/40 hover:bg-amber-500/15'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
                             }`}
                           >
                             <ImageIcon className="w-3.5 h-3.5" />
@@ -1594,7 +1576,7 @@ export default function AiOperatorPage() {
 
                         {/* SMS 바이트 경고 */}
                         {effectiveChannel === 'SMS' && activeBytes > 90 && (
-                          <p className="flex items-center gap-1 text-[11px] text-amber-300/90">
+                          <p className="flex items-center gap-1 text-[11px] text-amber-700">
                             <AlertTriangle className="w-3 h-3 shrink-0" />
                             SMS 90byte 초과분은 잘립니다 · LMS 권장
                           </p>
@@ -1627,7 +1609,7 @@ export default function AiOperatorPage() {
                     extra={
                       <div className="mt-3 space-y-2">
                         {/* AI 추천 시점 — radio */}
-                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white/[0.04] border border-white/10 hover:bg-white/[0.07] cursor-pointer transition-all">
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 cursor-pointer transition-all">
                           <input
                             type="radio"
                             name="sendMode"
@@ -1636,13 +1618,13 @@ export default function AiOperatorPage() {
                             className="mt-0.5 accent-cyan-400"
                           />
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-white">AI 추천 시점 사용</p>
-                            <p className="text-[11px] text-white/55 mt-0.5">{formatScheduleTime(proposal.schedule.recommendedTime)} 자동 예약</p>
+                            <p className="text-xs font-semibold text-slate-900">AI 추천 시점 사용</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{formatScheduleTime(proposal.schedule.recommendedTime)} 자동 예약</p>
                           </div>
                         </label>
 
                         {/* 즉시 발송 — radio */}
-                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white/[0.04] border border-white/10 hover:bg-white/[0.07] cursor-pointer transition-all">
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 cursor-pointer transition-all">
                           <input
                             type="radio"
                             name="sendMode"
@@ -1651,14 +1633,14 @@ export default function AiOperatorPage() {
                             className="mt-0.5 accent-amber-400"
                           />
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-white">지금 즉시 발송</p>
-                            <p className="text-[11px] text-white/55 mt-0.5">승인 클릭 즉시 발송 큐 진입</p>
+                            <p className="text-xs font-semibold text-slate-900">지금 즉시 발송</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">승인 클릭 즉시 발송 큐 진입</p>
                           </div>
                         </label>
 
                         {/* 사용자 직접 선택 — radio + 모달 피커 (클릭 시 모달 바로 오픈) */}
                         <div
-                          className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white/[0.04] border border-white/10 hover:bg-white/[0.07] cursor-pointer transition-all"
+                          className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 cursor-pointer transition-all"
                           onClick={() => { setSendMode('custom'); setCustomPickerOpen(true); }}
                         >
                           <input
@@ -1669,7 +1651,7 @@ export default function AiOperatorPage() {
                             className="mt-0.5 accent-fuchsia-400"
                           />
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-white mb-1.5">직접 시점 선택</p>
+                            <p className="text-xs font-semibold text-slate-900 mb-1.5">직접 시점 선택</p>
                             <DateTimeField
                               value={localInputToIso(customScheduledAt)}
                               onChange={(iso) => {
@@ -1680,7 +1662,7 @@ export default function AiOperatorPage() {
                               onOpenChange={setCustomPickerOpen}
                               tone="dark"
                             />
-                            <p className="text-[10px] text-white/40 mt-1">발송 허용 시간 · 08:00 ~ 21:00 KST</p>
+                            <p className="text-[10px] text-slate-400 mt-1">발송 허용 시간 · 08:00 ~ 21:00 KST</p>
                           </div>
                         </div>
                       </div>
@@ -1698,49 +1680,49 @@ export default function AiOperatorPage() {
                     truncateHeadline={false}
                     extra={
                       <div className="mt-2 space-y-1.5">
-                        <div className="flex items-center justify-between text-xs text-white/60 px-2 py-1.5 rounded-md bg-white/5 border border-white/10">
+                        <div className="flex items-center justify-between text-xs text-slate-500 px-2 py-1.5 rounded-md bg-white border border-slate-200">
                           <span>건당 단가</span>
-                          <span className="font-mono font-semibold text-white">{effectiveUnitCost.toLocaleString()}원</span>
+                          <span className="font-mono font-semibold text-slate-900">{effectiveUnitCost.toLocaleString()}원</span>
                         </div>
-                        <div className="flex items-center justify-between text-xs text-white/60 px-2 py-1.5 rounded-md bg-white/5 border border-white/10">
+                        <div className="flex items-center justify-between text-xs text-slate-500 px-2 py-1.5 rounded-md bg-white border border-slate-200">
                           <span>발송 건수</span>
-                          <span className="font-mono font-semibold text-white">{proposal.target.count.toLocaleString()}건</span>
+                          <span className="font-mono font-semibold text-slate-900">{proposal.target.count.toLocaleString()}건</span>
                         </div>
-                        <div className="flex items-center justify-between text-xs px-2 py-1.5 rounded-md bg-gradient-to-r from-violet-500/15 to-purple-500/15 border border-violet-400/30">
-                          <span className="font-semibold text-violet-200">총 예상 비용</span>
-                          <span className="font-mono font-bold text-white">{effectiveEstimatedCost.toLocaleString()}원</span>
+                        <div className="flex items-center justify-between text-xs px-2 py-1.5 rounded-md bg-gradient-to-r from-violet-50 to-purple-50 border border-violet-200">
+                          <span className="font-semibold text-violet-800">총 예상 비용</span>
+                          <span className="font-mono font-bold text-slate-900">{effectiveEstimatedCost.toLocaleString()}원</span>
                         </div>
                         {channelOverride && (
-                          <p className="text-[10px] text-white/40 italic pt-0.5">채널 변경 반영 · 실제 차감은 발송 시 {effectiveChannel} 단가로 확정</p>
+                          <p className="text-[10px] text-slate-400 italic pt-0.5">채널 변경 반영 · 실제 차감은 발송 시 {effectiveChannel} 단가로 확정</p>
                         )}
                       </div>
                     }
                   />
 
                   {/* ★ 2026-06-29: 활용 가능 컬럼 다중 선택 + AI 꾸미기 (우측 전체폭) */}
-                  <div className="sm:col-span-2 p-5 rounded-2xl bg-white/[0.04] backdrop-blur-xl border border-violet-400/20 shadow-lg">
+                  <div className="sm:col-span-2 p-5 rounded-2xl bg-white backdrop-blur-xl border border-violet-200 shadow-lg">
                     <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center shrink-0">
                           <Wand2 className="w-4 h-4 text-white" />
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-white">활용 가능 컬럼</p>
-                          <p className="text-[10px] text-white/45">넣고 싶은 데이터를 골라 AI가 메시지에 자연스럽게 녹입니다{selectedVars.size > 0 ? ` · ${selectedVars.size}개 선택` : ''}</p>
+                          <p className="text-sm font-bold text-slate-900">활용 가능 컬럼</p>
+                          <p className="text-[10px] text-slate-400">넣고 싶은 데이터를 골라 AI가 메시지에 자연스럽게 녹입니다{selectedVars.size > 0 ? ` · ${selectedVars.size}개 선택` : ''}</p>
                         </div>
                       </div>
                       <button
                         type="button"
                         onClick={handleDecorate}
                         disabled={decorating || selectedVars.size === 0}
-                        className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all"
+                        className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all"
                       >
                         {decorating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                         AI 꾸미기
                       </button>
                     </div>
                     {dataProfileVars.length === 0 ? (
-                      <p className="text-[11px] text-white/40 mt-1">고객 데이터가 있어야 개인화 컬럼이 표시됩니다.</p>
+                      <p className="text-[11px] text-slate-400 mt-1">고객 데이터가 있어야 개인화 컬럼이 표시됩니다.</p>
                     ) : (
                       <div className="flex flex-wrap gap-1.5 mt-1">
                         {dataProfileVars.map((v) => {
@@ -1750,7 +1732,7 @@ export default function AiOperatorPage() {
                               key={v.token}
                               type="button"
                               onClick={() => setSelectedVars((prev) => { const n = new Set(prev); if (n.has(v.token)) n.delete(v.token); else n.add(v.token); return n; })}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all ${on ? 'bg-violet-500/30 text-violet-100 border-violet-400/50' : 'bg-white/5 text-white/55 border-white/10 hover:bg-white/10 hover:text-white/80'}`}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all ${on ? 'bg-violet-100 text-violet-900 border-violet-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100 hover:text-slate-700'}`}
                             >
                               %{v.label}%
                             </button>
@@ -1774,7 +1756,7 @@ export default function AiOperatorPage() {
                 type="button"
                 onClick={handleApprove}
                 disabled={sending}
-                className="flex-1 px-6 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 via-fuchsia-400 to-indigo-400 text-indigo-950 font-semibold hover:brightness-110 hover:shadow-xl hover:shadow-fuchsia-500/40 disabled:opacity-50 disabled:cursor-wait transition-all flex items-center justify-center gap-2"
+                className="flex-1 px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold hover:brightness-110 hover:shadow-xl hover:shadow-fuchsia-500/40 disabled:opacity-50 disabled:cursor-wait transition-all flex items-center justify-center gap-2"
               >
                 {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {sending ? '발송 처리 중...' : '승인 후 발송 시작'}
@@ -1783,16 +1765,16 @@ export default function AiOperatorPage() {
                 type="button"
                 onClick={() => setShowSummary(true)}
                 disabled={sending}
-                className="px-5 py-3.5 rounded-xl bg-white/10 text-white font-medium border border-white/20 hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                className="px-5 py-3.5 rounded-xl bg-slate-100 text-slate-900 font-medium border border-slate-300 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
-                <Sparkles className="w-4 h-4 text-violet-300" />
+                <Sparkles className="w-4 h-4 text-violet-700" />
                 AI 제안 요약
               </button>
               <button
                 type="button"
                 onClick={handleReset}
                 disabled={sending}
-                className="px-6 py-3.5 rounded-xl bg-white/10 text-white font-medium border border-white/20 hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                className="px-6 py-3.5 rounded-xl bg-slate-100 text-slate-900 font-medium border border-slate-300 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 <RefreshCw className="w-4 h-4" />
                 다시 생성
@@ -1802,7 +1784,7 @@ export default function AiOperatorPage() {
 
             {/* 발송 에러 */}
             {sendError && (
-              <div className="mt-3 p-3 rounded-lg bg-rose-500/10 border border-rose-400/30 text-rose-200 text-sm">
+              <div className="mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-sm">
                 <span className="font-semibold">발송 오류 · </span>{sendError}
               </div>
             )}
@@ -1849,83 +1831,62 @@ export default function AiOperatorPage() {
           </div>
         )}
 
-        {/* ============= About (입력 전만 표시) ============= */}
-        {/* ★ D177-fix: 진행률 카드 영구 제거 (Harold 명시 — 업그레이드 노출 X / 방향성 이미 잡음) */}
+        {/* ============= 기능 카드 (입력 전만 표시) — ★ 2026-09-30 목업 1안: 행 이름표 + 가로 카드(80px) ============= */}
         {showAbout && (
-          <>
-            {/* ★ D209+ (Harold 명시 2026-05-22): 좌우 분할 매트릭스 — 좌측 AI 자율 진단 세로 길게 / 우측 SUB_MODULE_CARDS 2열 세로. */}
-            {/* ★ 2026-09-15 요금제를 못 쓰는 회사 = 왼쪽 AI 진단(서버가 막는 조회)을 그리지 않고 기능 카드를 한 줄 4개로 넓게 편다(목업 승인안) */}
-            <div className={`grid grid-cols-1 ${planLocked ? '' : 'lg:grid-cols-2'} gap-6 mb-14`}>
-              {/* 좌측 — AI 자율 진단 (세로 길게) */}
-              {!planLocked && (
-                <div>
-                  {/* ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 — 회사 admin 첫 진입 시 자동 제안 */}
-                  <AiSelfDiagnosisCards
-                    onApply={(objectiveText) => {
-                      setObjective(objectiveText);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                      setTimeout(() => textareaRef.current?.focus(), 200);
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* 우측 — SUB_MODULE_CARDS 2열 세로 나열 */}
-              {/* ★ D177-ux2: AI Operator 페이지 안 sub-module 배치 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴) */}
-              <div>
-                <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">AI Operator Modules</p>
-                <h2 className="text-xl font-bold mb-1.5 text-white">함께 사용하는 AI 영역</h2>
-                <p className="text-sm text-white/50 mb-6">
-                  자연어 한 줄 진입 외에도 AI Operator 안에 내장된 기능입니다. {planLocked ? '누르면 어떤 기능인지 바로 볼 수 있어요' : '클릭하면 바로 이동합니다'}
-                </p>
-                {/* ★ D209+ (Harold 명시 2026-05-22): 우측 3열 세로 나열 매트릭스 + description \n 줄바꿈 정합 (whitespace-pre-line). */}
-                <div className={`grid grid-cols-1 sm:grid-cols-2 ${planLocked ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3`}>
-                  {SUB_MODULE_CARDS
-                    .filter((card) => !card.adminOnly || (user as any)?.userType === 'company_admin')
-                    .map((card) => {
-                      const Icon = card.icon;
-                      return (
-                        <button
-                          key={card.label}
-                          onClick={() => {
-                            // ★ 2026-09-15 못 쓰는 회사 = 이동 대신 그 기능의 안내(요금제 공통 안내 창)
-                            const featureId = planFeatureIdForPath(card.path);
-                            if (planLocked && featureId) { setPlanFeatureId(featureId); return; }
-                            // ★ 2026-09-20 순차 개방 중인 기능(카드 flag) = 카드는 보이되 아직인 회사는 같은 안내 창으로.
-                            //   숨기지 않는다 — 없는 메뉴는 물어볼 수도 없다(Harold 확정).
-                            if (!isCardOpen(card, featureFlags) && featureId) { setPlanFeatureId(featureId); return; }
-                            navigate(card.path);
-                          }}
-                          // ★ D209+ (Harold 명시 2026-05-22): 호버 효과 강화 — shadow + glow + scale + 색감 강화.
-                          className="group relative p-4 rounded-2xl bg-white/[0.07] backdrop-blur-xl border border-white/15 hover:bg-white/[0.18] hover:border-violet-400/50 hover:scale-[1.04] hover:shadow-2xl hover:shadow-violet-500/30 hover:-translate-y-0.5 transition-all duration-300 text-left"
-                        >
-                          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-3 shadow-lg group-hover:scale-110 transition-transform`}>
-                            <Icon className="w-5 h-5 text-white" />
-                          </div>
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <h3 className="text-white font-semibold text-sm">{card.label}</h3>
-                          </div>
-                          <p className="text-white/60 text-[11px] leading-relaxed">{card.description}</p>
-                          {planLocked ? (
-                            <span className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold text-amber-200 bg-amber-300/[0.12] border border-amber-300/[0.28]">
-                              <Lock className="w-3 h-3" />
-                              {PLAN_FEATURE_MIN_PLAN}부터
+          <section className="mt-4" data-zone="hub-cards">
+            <h2 className="text-[17px] font-bold tracking-[-0.02em] text-slate-900">이 안에서 바로 쓰는 기능</h2>
+            <p className="text-[13.5px] text-slate-500 mt-1 mb-5">{planLocked ? '누르면 어떤 기능인지 바로 볼 수 있어요' : '한 줄 말고도, 누르면 바로 이동합니다'}</p>
+            <div className="space-y-7">
+              {HUB_CARD_ROWS.map((row) => (
+                <div key={row.label}>
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className="text-[13px] font-bold text-slate-900 relative pb-1 after:absolute after:left-0 after:bottom-0 after:w-6 after:h-[2px] after:bg-indigo-500">{row.label}</span>
+                    <span className="flex-1 h-px bg-slate-200" />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {SUB_MODULE_CARDS
+                      .filter((card) => row.ids.includes(card.id) && (!card.adminOnly || (user as any)?.userType === 'company_admin'))
+                      .map((card) => {
+                        const Icon = card.icon;
+                        return (
+                          <button
+                            key={card.label}
+                            type="button"
+                            onClick={() => {
+                              // ★ 2026-09-15 못 쓰는 회사 = 이동 대신 그 기능의 안내(요금제 공통 안내 창)
+                              const featureId = planFeatureIdForPath(card.path);
+                              if (planLocked && featureId) { setPlanFeatureId(featureId); return; }
+                              // ★ 2026-09-20 순차 개방 중인 기능(카드 flag) = 카드는 보이되 아직인 회사는 같은 안내 창으로.
+                              //   숨기지 않는다 — 없는 메뉴는 물어볼 수도 없다(Harold 확정).
+                              if (!isCardOpen(card, featureFlags) && featureId) { setPlanFeatureId(featureId); return; }
+                              navigate(card.path);
+                            }}
+                            className="group relative flex items-center gap-3.5 p-4 min-h-[80px] rounded-2xl text-left bg-white border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_32px_-16px_rgba(15,23,42,0.25)] hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-[0_2px_4px_rgba(15,23,42,0.06),0_18px_40px_-16px_rgba(15,23,42,0.32)] transition-all duration-200"
+                            data-zone="tile"
+                          >
+                            <span className={`shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center shadow-md group-hover:scale-105 transition-transform`}>
+                              <Icon className="w-5 h-5 text-white" />
                             </span>
-                          ) : (
-                            <div className="absolute top-4 right-4 text-white/30 group-hover:text-white/70 group-hover:translate-x-0.5 transition-all text-base">
-                              →
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-[15px] font-semibold text-slate-900">{card.label}</span>
+                              <span className="block text-[12.5px] leading-snug mt-0.5 text-slate-500">{card.description}</span>
+                            </span>
+                            {planLocked ? (
+                              <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200">
+                                <Lock className="w-3 h-3" />
+                                {PLAN_FEATURE_MIN_PLAN}부터
+                              </span>
+                            ) : (
+                              <ArrowRight className="shrink-0 w-[18px] h-[18px] text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
+                            )}
+                          </button>
+                        );
+                      })}
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
-
-            {/* ★ D209+ (Harold 명시 2026-05-22): "7 코어 엔진 아키텍처" + "Enterprise Beta Program" section 영구 제거. */}
-            {/* ★ D177-fix: 9 세션 로드맵 영구 제거 (Harold 명시 — 미래 로드맵 직원/외부 노출 X) */}
-          </>
+          </section>
         )}
       </main>
 
@@ -1935,20 +1896,14 @@ export default function AiOperatorPage() {
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200"
         >
           <div
-            className="relative w-full max-w-md rounded-3xl border border-white/10 shadow-2xl bg-gradient-to-br from-emerald-950 via-teal-950 to-indigo-950 animate-in fade-in zoom-in-95 duration-300"
+            className="relative w-full max-w-md rounded-3xl border border-slate-200 shadow-2xl bg-white animate-in fade-in zoom-in-95 duration-300"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* 배경 글로우 */}
-            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
-              <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-emerald-500/20 blur-3xl" />
-              <div className="absolute -bottom-20 -right-20 w-72 h-72 rounded-full bg-teal-500/20 blur-3xl" />
-            </div>
-
             <div className="relative p-8">
               <button
                 type="button"
                 onClick={() => setSendResult(null)}
-                className="absolute top-5 right-5 w-9 h-9 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all"
+                className="absolute top-5 right-5 w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-all"
                 aria-label="닫기"
               >
                 <X className="w-5 h-5" />
@@ -1958,7 +1913,7 @@ export default function AiOperatorPage() {
               <div className="flex justify-center mb-5">
                 <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-2xl shadow-emerald-500/40">
                   <CheckCircle2 className="w-12 h-12 text-white" strokeWidth={2.5} />
-                  <span className="absolute inset-0 rounded-full bg-emerald-400/30 animate-ping" />
+                  <span className="absolute inset-0 rounded-full bg-emerald-100 animate-ping" />
                 </div>
               </div>
 
@@ -1966,46 +1921,46 @@ export default function AiOperatorPage() {
                   예약인데 "발송 처리 완료 · 발송 성공 0건"을 띄우면 사용자는 나갔는데 실패한 것으로 읽는다.
                   예약은 아직 안 나간 것이므로 성공·실패 지표 자체를 그리지 않고 **언제 나가는지**를 말한다. */}
               <div className="text-center mb-6">
-                <p className="text-[10px] font-semibold tracking-[0.3em] uppercase text-emerald-300 mb-2">
+                <p className="text-[10px] font-semibold tracking-[0.3em] uppercase text-emerald-700 mb-2">
                   {sendResult.scheduledAt ? 'Campaign Scheduled' : 'Campaign Dispatched'}
                 </p>
-                <h3 className="text-2xl font-bold text-white mb-1.5">
+                <h3 className="text-2xl font-bold text-slate-900 mb-1.5">
                   {sendResult.scheduledAt ? '예약 완료' : '발송 처리 완료'}
                 </h3>
-                <p className="text-sm text-white/70 truncate" title={sendResult.suggestedName}>{sendResult.suggestedName}</p>
+                <p className="text-sm text-slate-600 truncate" title={sendResult.suggestedName}>{sendResult.suggestedName}</p>
               </div>
 
               {sendResult.scheduledAt ? (
-                <div className="mb-6 p-4 rounded-xl bg-violet-500/10 border border-violet-400/30 text-center">
-                  <p className="text-[10px] font-semibold tracking-wider uppercase text-violet-300 mb-1.5">발송 예정</p>
-                  <p className="text-xl font-bold text-white">
+                <div className="mb-6 p-4 rounded-xl bg-violet-50 border border-violet-200 text-center">
+                  <p className="text-[10px] font-semibold tracking-wider uppercase text-violet-700 mb-1.5">발송 예정</p>
+                  <p className="text-xl font-bold text-slate-900">
                     {new Date(sendResult.scheduledAt).toLocaleString('ko-KR', {
                       year: 'numeric', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
                     })}
                   </p>
-                  <p className="text-[11px] text-white/55 mt-1.5">지금은 나가지 않습니다 · 예약내역에서 확인·취소할 수 있습니다</p>
+                  <p className="text-[11px] text-slate-500 mt-1.5">지금은 나가지 않습니다 · 예약내역에서 확인·취소할 수 있습니다</p>
                 </div>
               ) : (
                 /* 결과 숫자 — 즉시 발송일 때만 */
                 <div className="grid grid-cols-2 gap-3 mb-6">
-                  <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
-                    <p className="text-[10px] font-semibold tracking-wider uppercase text-emerald-300 mb-1.5">발송 성공</p>
-                    <p className="text-2xl font-bold text-white tabular-nums">{sendResult.sentCount.toLocaleString()}</p>
-                    <p className="text-[11px] text-white/40 mt-0.5">건</p>
+                  <div className="p-4 rounded-xl bg-white border border-slate-200 text-center">
+                    <p className="text-[10px] font-semibold tracking-wider uppercase text-emerald-700 mb-1.5">발송 성공</p>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums">{sendResult.sentCount.toLocaleString()}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">건</p>
                   </div>
-                  <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
-                    <p className="text-[10px] font-semibold tracking-wider uppercase text-white/40 mb-1.5">발송 실패</p>
-                    <p className={`text-2xl font-bold tabular-nums ${sendResult.failCount > 0 ? 'text-rose-300' : 'text-white/30'}`}>
+                  <div className="p-4 rounded-xl bg-white border border-slate-200 text-center">
+                    <p className="text-[10px] font-semibold tracking-wider uppercase text-slate-400 mb-1.5">발송 실패</p>
+                    <p className={`text-2xl font-bold tabular-nums ${sendResult.failCount > 0 ? 'text-rose-700' : 'text-slate-400'}`}>
                       {sendResult.failCount.toLocaleString()}
                     </p>
-                    <p className="text-[11px] text-white/40 mt-0.5">건 {sendResult.failCount > 0 ? '· 자동 환불' : ''}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">건 {sendResult.failCount > 0 ? '· 자동 환불' : ''}</p>
                   </div>
                 </div>
               )}
 
               {sendResult.message && (
-                <div className="mb-5 p-3 rounded-lg bg-white/[0.03] border border-white/10">
-                  <p className="text-xs text-white/65 leading-relaxed">{sendResult.message}</p>
+                <div className="mb-5 p-3 rounded-lg bg-white border border-slate-200">
+                  <p className="text-xs text-slate-500 leading-relaxed">{sendResult.message}</p>
                 </div>
               )}
 
@@ -2017,7 +1972,7 @@ export default function AiOperatorPage() {
                     setSendResult(null);
                     navigate('/dashboard?results=1');
                   }}
-                  className="flex-1 px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 text-emerald-950 font-semibold hover:brightness-110 hover:shadow-lg hover:shadow-emerald-500/30 transition-all"
+                  className="text-white flex-1 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 font-semibold hover:brightness-110 hover:shadow-lg hover:shadow-emerald-500/30 transition-all"
                 >
                   발송 결과 보기
                 </button>
@@ -2027,7 +1982,7 @@ export default function AiOperatorPage() {
                     setSendResult(null);
                     handleReset();
                   }}
-                  className="px-5 py-3 rounded-xl bg-white/10 text-white font-medium border border-white/20 hover:bg-white/20 transition-all"
+                  className="px-5 py-3 rounded-xl bg-slate-100 text-slate-900 font-medium border border-slate-300 hover:bg-slate-200 transition-all"
                 >
                   새 캠페인
                 </button>
@@ -2073,6 +2028,7 @@ export default function AiOperatorPage() {
         />
       )}
     </div>
+    </SurfaceToneProvider>
   );
 }
 
@@ -2114,14 +2070,32 @@ interface DiagnosisBrief {
   }>;
 }
 
-function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => void }) {
+// ★ 2026-09-30 AI 존 대개편(목업 1안): 옛 좌측 "AI 자율 진단" 카드 → 남색 띠 안 추천 띠(4상태) + 추천 창(X·ESC만).
+//   조회·분기는 옛 카드 그대로다(같은 endpoint · 브리핑 우선 · 정착 제안 = 여정 · 채널 제안 = 그 채널 화면 · 기본 = 입력창 채우기).
+//   못 쓰는 회사 = 조회하지 않는다(서버가 막는 조회 · 옛 카드도 잠김이면 그리지 않았다) → 잠김 띠 + 안내 창.
+type BriefRec = DiagnosisBrief['recommendations'][number];
+type HubRec =
+  | { kind: 'brief'; rec: BriefRec }
+  | { kind: 'rule'; rec: AutoRecommendation };
+
+function hubRecLabel(r: HubRec): string {
+  if (r.kind === 'rule') return '입력창에 채우기';
+  if (r.rec.opportunityType === 'journey_promotion') return '여정으로 굳히기';
+  if (r.rec.recommendedChannel === 'email') return '이메일에서 진행';
+  if (r.rec.recommendedChannel === 'dm') return '모바일 DM에서 진행';
+  return '입력창에 채우기';
+}
+
+function HubRecommendBand({ planLocked, onLocked, onApply }: { planLocked: boolean; onLocked: () => void; onApply: (objective: string) => void }) {
   const navigate = useNavigate();
   const [diagnosis, setDiagnosis] = useState<CompanyHealthDiagnosis | null>(null);
   const [brief, setBrief] = useState<DiagnosisBrief | null>(null);
   const [autoMarketing, setAutoMarketing] = useState<{ active: number; pendingProposals: number }>({ active: 0, pendingProposals: 0 });
   const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    if (planLocked) return;
     const load = async () => {
       try {
         const token = localStorage.getItem('token');
@@ -2141,23 +2115,18 @@ function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => voi
       }
     };
     load();
-  }, []);
+  }, [planLocked]);
 
-  const briefRecs = Array.isArray(brief?.recommendations) ? brief!.recommendations : [];
-  const useBrief = briefRecs.length > 0;
-
-  if (loading || !diagnosis) return null;
-  if (!useBrief && diagnosis.recommendations.length === 0 && diagnosis.topConcerns.length === 0) return null;
-
-  // ★ D216+ 사고 영구 정정 (Harold 명시 2026-05-25):
-  //   옛 사고 = sessionStorage 키 불일치 (하이픈 vs 언더스코어) + DOM .value 직접 조작 = React state 동기화 X 영역
-  //   정정 = props onApply 영역 직접 호출 매트릭스 정합 (상위 setObjective 영역 직접 호출)
-  const handleOneClick = (objective: string) => {
-    onApply(objective);
-  };
+  // 창은 X·ESC로만 닫는다(바깥 눌러 닫기 없음 — 전역 규칙)
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
 
   // ★ 5차: 브리핑 추천 분기 — 정착 제안 = 여정 승격다리 / 채널 제안 = 해당 채널 화면 / 기본 = 자연어 prefill
-  const handleBriefRec = (rec: DiagnosisBrief['recommendations'][number]) => {
+  const handleBriefRec = (rec: BriefRec) => {
     if (rec.opportunityType === 'journey_promotion') {
       sessionStorage.setItem('journeyObjectivePrefill', JSON.stringify({ objective: rec.objective, message: '' }));
       navigate('/ai-journeys');
@@ -2167,123 +2136,153 @@ function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => voi
     if (rec.recommendedChannel === 'dm') { navigate('/dm-builder'); return; }
     onApply(rec.objective);
   };
-
-  // ★ D209+ (Harold 명시 2026-05-22): 우선순위 카드 색감 명확 구분 + border-2 + shadow 강화.
-  //   우선순위 3 violet 영역 → blue 영역 정정 (wrapper violet 톤과 시각 충돌 차단).
-  const priorityColor: Record<number, string> = {
-    1: 'from-rose-500/30 to-pink-500/20 border-rose-400/60 shadow-lg shadow-rose-500/20',
-    2: 'from-emerald-500/30 to-teal-500/20 border-emerald-400/60 shadow-lg shadow-emerald-500/20',
-    3: 'from-blue-500/30 to-cyan-500/20 border-blue-400/60 shadow-lg shadow-blue-500/20',
+  const runRec = (r: HubRec) => {
+    setOpen(false);
+    if (r.kind === 'brief') handleBriefRec(r.rec);
+    else onApply(r.rec.oneClickObjective);
   };
 
+  const row = 'mt-6 flex flex-wrap items-center gap-2 text-[13px]';
+  const mark = 'w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-amber-300 shrink-0';
+  const textLink = 'text-white font-semibold underline underline-offset-4 decoration-white/40 hover:decoration-white';
+
+  if (planLocked) {
+    return (
+      <div className={`${row} gap-3 text-slate-200`} data-zone="hub-rec" data-state="locked">
+        <span className={mark}><Lock className="w-4 h-4" /></span>
+        <span>추천 캠페인은 AI Operator 요금제에서 열립니다</span>
+        <button type="button" onClick={onLocked} className={textLink}>어떤 기능인지 보기 →</button>
+      </div>
+    );
+  }
+  if (loading) return <div className="mt-6 h-10" aria-hidden="true" />;
+  if (!diagnosis) return null;
+
+  const briefRecs = Array.isArray(brief?.recommendations) ? brief!.recommendations : [];
+  const useBrief = briefRecs.length > 0;
+  const recs: HubRec[] = useBrief
+    ? briefRecs.map((rec) => ({ kind: 'brief' as const, rec }))
+    : diagnosis.recommendations.map((rec) => ({ kind: 'rule' as const, rec }));
+  const first = recs[0];
+  const firstCount = first ? first.rec.targetCount : null;
+  const pending = autoMarketing.pendingProposals;
+  const pendingLink = pending > 0 && (
+    <button type="button" onClick={() => navigate('/continuous-operator')} className="h-10 px-4 rounded-xl border border-white/15 inline-flex items-center gap-2 text-slate-200 hover:bg-white/[0.08] transition-colors">
+      <span className="w-2 h-2 rounded-full bg-amber-300" />승인 대기 {pending.toLocaleString()}건 →
+    </button>
+  );
+  const scoreTone = diagnosis.overallScore >= 70 ? 'text-emerald-700' : diagnosis.overallScore >= 40 ? 'text-amber-700' : 'text-rose-700';
+
   return (
-    // ★ D209+ (Harold 명시 2026-05-22): 좌측 wrapper 색감 강화 + border-2 + shadow 명확 visual 구분.
-    <div className="p-5 bg-gradient-to-br from-violet-900/50 via-purple-900/40 to-fuchsia-900/30 border-2 border-violet-400/40 rounded-2xl h-full shadow-2xl shadow-violet-500/20">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <p className="text-[10px] font-semibold tracking-[0.28em] text-violet-300/70 mb-1 uppercase">AI Self-Diagnosis</p>
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <Brain className="w-5 h-5 text-violet-400" />
-            AI가 분석한 오늘 추천 캠페인
-          </h3>
+    <>
+      {useBrief && first ? (
+        <div className={row} data-zone="hub-rec" data-state="today">
+          <button type="button" onClick={() => setOpen(true)} className="group inline-flex items-center gap-3 h-10 pl-1.5 pr-4 rounded-xl bg-white/[0.08] border border-white/15 hover:bg-white/[0.14] transition-colors max-w-full">
+            <span className="relative w-8 h-8 rounded-lg bg-amber-500 text-slate-900 flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4" />
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-white text-slate-900 text-[11px] font-bold flex items-center justify-center">{recs.length}</span>
+            </span>
+            <span className="text-left leading-tight min-w-0">
+              <span className="block text-[12px] text-slate-300">오늘 분석 · 1순위</span>
+              <span className="block font-semibold truncate">
+                {first.rec.title}
+                {firstCount != null && firstCount > 0 && <span className="text-slate-300 font-normal"> {firstCount.toLocaleString()}명</span>}
+              </span>
+            </span>
+            <span className="text-slate-300 group-hover:text-white shrink-0">모두 보기 →</span>
+          </button>
+          <button type="button" onClick={() => runRec(first)} className="h-10 px-4 rounded-xl bg-amber-500 text-slate-900 font-semibold hover:bg-amber-400 transition-colors">1순위 {hubRecLabel(first)}</button>
+          {pendingLink}
+          <span className="h-10 px-2 inline-flex items-center text-slate-300">회사 점수 <b className="ml-1.5 text-white tabular-nums">{diagnosis.overallScore}</b></span>
         </div>
-        <div className="text-right">
-          <div className="text-[10px] text-white/40">회사 건강 점수</div>
-          <div className={`text-2xl font-bold font-mono ${diagnosis.overallScore >= 70 ? 'text-emerald-300' : diagnosis.overallScore >= 40 ? 'text-amber-300' : 'text-rose-300'}`}>
-            {diagnosis.overallScore}
+      ) : recs.length > 0 ? (
+        <div className={`${row} gap-3 text-slate-200`} data-zone="hub-rec" data-state="fallback">
+          <span className={mark}><Sparkles className="w-4 h-4" /></span>
+          <span>기본 추천 {recs.length}건 · 일일 분석이 쌓이기 전 추천입니다</span>
+          <button type="button" onClick={() => setOpen(true)} className={textLink}>모두 보기 →</button>
+          {pendingLink}
+        </div>
+      ) : (
+        <div className={`${row} gap-3 text-slate-200`} data-zone="hub-rec" data-state="empty">
+          <span className={mark}><CheckCircle2 className="w-4 h-4" /></span>
+          <span>오늘은 새 추천이 없습니다. 한 줄로 바로 시작하세요.</span>
+          {diagnosis.topConcerns.length > 0 && <button type="button" onClick={() => setOpen(true)} className={textLink}>진단 보기 →</button>}
+          {pendingLink}
+        </div>
+      )}
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60" role="dialog" aria-modal="true" aria-labelledby="hub-rec-title">
+          <div className="relative w-full max-w-4xl max-h-[88vh] overflow-y-auto rounded-3xl p-6 md:p-8 bg-white text-slate-900 shadow-[0_24px_64px_-12px_rgba(15,23,42,0.45)]">
+            <button type="button" onClick={() => setOpen(false)} className="absolute top-5 right-5 w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900" aria-label="닫기">
+              <X className="w-[18px] h-[18px]" />
+            </button>
+            <div className="flex items-start justify-between gap-6 pr-12 mb-5">
+              <div className="min-w-0">
+                <h3 id="hub-rec-title" className="text-[19px] font-bold tracking-[-0.02em]">오늘의 추천 캠페인</h3>
+                <p className="text-[14px] mt-1 text-slate-600">
+                  {useBrief ? (brief?.headline || '매일 오전 분석 · 우리 고객 데이터에서 오늘 할 만한 캠페인을 골랐습니다.') : '일일 분석이 쌓이기 전 기본 추천입니다. 회사 실측 신호로 골랐습니다.'}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-[12px] text-slate-500">회사 건강 점수</div>
+                <div className={`text-[24px] font-bold tabular-nums ${scoreTone}`}>{diagnosis.overallScore}</div>
+              </div>
+            </div>
+
+            {diagnosis.topConcerns.length > 0 && (
+              <div className="mb-5 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                <div className="text-[13px] font-semibold mb-2 text-slate-600">AI 진단 우선 항목</div>
+                <ul className="space-y-1.5 text-[14px] text-slate-700">
+                  {diagnosis.topConcerns.map((c, i) => (
+                    <li key={i} className="flex gap-2"><span className="text-amber-600">•</span><span>{c}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {recs.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {recs.map((r, i) => {
+                  const count = r.rec.targetCount;
+                  return (
+                    <div key={r.kind === 'rule' ? r.rec.id : `brief-${i}`} className="flex flex-col p-5 rounded-2xl bg-white border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_10px_24px_-14px_rgba(15,23,42,0.25)]">
+                      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                        <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${i === 0 ? 'bg-slate-900 text-white' : 'bg-indigo-50 text-indigo-800'}`}>{r.kind === 'rule' ? r.rec.priority : i + 1}순위</span>
+                        {count != null && count > 0 && <span className="text-[13px] text-slate-500">{count.toLocaleString()}명</span>}
+                        {r.kind === 'brief' && r.rec.opportunityType === 'journey_promotion' && <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800">성과 검증</span>}
+                        {r.kind === 'brief' && r.rec.recommendedChannel === 'email' && <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-800">이메일 추천</span>}
+                        {r.kind === 'brief' && r.rec.recommendedChannel === 'dm' && <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-800">모바일 DM 추천</span>}
+                      </div>
+                      <h4 className="text-[16px] font-bold mb-1.5">{r.rec.title}</h4>
+                      <p className="text-[13px] leading-relaxed mb-2 text-slate-700">{r.rec.reason}</p>
+                      {r.kind === 'rule' && r.rec.expectedImpact && <p className="text-[12px] text-slate-500 mb-2">{r.rec.expectedImpact}</p>}
+                      <div className="flex-1" />
+                      <button type="button" onClick={() => runRec(r)} className="mt-2 w-full h-10 rounded-xl text-[14px] font-semibold bg-amber-500 text-slate-900 hover:bg-amber-400 transition-colors">{hubRecLabel(r)}</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ★ 2026-07-02 1차: 자동마케팅 현황 요약 — 승인 대기가 있으면 바로 가게 */}
+            <button
+              type="button"
+              onClick={() => { setOpen(false); navigate('/continuous-operator?tab=running'); }}
+              className="mt-4 w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-[14px] bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 transition-colors"
+            >
+              <span>
+                실행 중인 자동 마케팅 <b>{autoMarketing.active}</b>개
+                {pending > 0 && <> · 승인 대기 <b>{pending.toLocaleString()}</b>건</>}
+              </span>
+              <span className="font-semibold text-indigo-700 shrink-0">자동 마케팅 관리 →</span>
+            </button>
+            <p className="mt-3 text-[12px] text-slate-500 italic">
+              Data source: {useBrief ? '매일 오전 일일 분석 (고객 DB 실측 신호 · 누적 학습)' : '회사 실측 신호 (일일 분석 누적 전 기본 추천)'}
+            </p>
           </div>
         </div>
-      </div>
-
-      {diagnosis.topConcerns.length > 0 && (
-        <div className="mb-4 p-3 bg-white/5 border border-white/10 rounded-lg">
-          <div className="text-[10px] text-white/40 mb-1.5">AI 진단 우선 항목</div>
-          <ul className="text-xs text-white/80 space-y-1">
-            {diagnosis.topConcerns.map((c, i) => (
-              <li key={i} className="flex items-start gap-1.5">
-                <span className="text-amber-300 mt-0.5">•</span>
-                <span>{c}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
       )}
-
-      {/* ★ 2026-07-02 1차: 일일 브리핑 = 추천의 단일 소스 (있으면 룰 기반 추천 대체) */}
-      {useBrief && brief?.headline && (
-        <div className="mb-3 p-3 bg-white/5 border border-violet-400/25 rounded-lg">
-          <div className="text-[10px] text-violet-300/70 mb-1">오늘의 브리핑</div>
-          <div className="text-xs text-white/85 leading-relaxed">{brief.headline}</div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-3">
-        {useBrief
-          ? briefRecs.map((rec, i) => (
-              <div
-                key={`brief-${i}`}
-                className={`p-4 bg-gradient-to-br ${priorityColor[(Math.min(i, 2) + 1) as 1 | 2 | 3]} border-2 rounded-2xl`}
-              >
-                <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-                  <span className="px-1.5 py-0.5 bg-white/10 rounded text-[9px] font-medium text-white/70">우선순위 {i + 1}</span>
-                  {rec.targetCount != null && rec.targetCount > 0 && (
-                    <span className="text-[10px] text-white/50">{rec.targetCount.toLocaleString()}명</span>
-                  )}
-                  {rec.opportunityType === 'journey_promotion' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium">성과 검증</span>}
-                  {rec.recommendedChannel === 'email' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-medium">이메일 추천</span>}
-                  {rec.recommendedChannel === 'dm' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-medium">모바일 DM 추천</span>}
-                </div>
-                <h4 className="text-sm font-semibold text-white mb-1.5">{rec.title}</h4>
-                <p className="text-[11px] text-white/70 leading-relaxed mb-3">{rec.reason}</p>
-                <button
-                  onClick={() => handleBriefRec(rec)}
-                  className="w-full px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-1"
-                >
-                  {rec.opportunityType === 'journey_promotion' ? '여정으로 굳히기 →' : rec.recommendedChannel === 'email' ? '이메일에서 진행 →' : rec.recommendedChannel === 'dm' ? '모바일 DM에서 진행 →' : '원클릭 진행 →'}
-                </button>
-              </div>
-            ))
-          : diagnosis.recommendations.map((rec) => (
-              <div
-                key={rec.id}
-                className={`p-4 bg-gradient-to-br ${priorityColor[rec.priority]} border-2 rounded-2xl`}
-              >
-                <div className="flex items-center gap-1.5 mb-2">
-                  <span className="px-1.5 py-0.5 bg-white/10 rounded text-[9px] font-medium text-white/70">우선순위 {rec.priority}</span>
-                  {rec.targetCount > 0 && (
-                    <span className="text-[10px] text-white/50">{rec.targetCount.toLocaleString()}명</span>
-                  )}
-                </div>
-                <h4 className="text-sm font-semibold text-white mb-1.5">{rec.title}</h4>
-                <p className="text-[11px] text-white/70 leading-relaxed mb-2">{rec.reason}</p>
-                <p className="text-[10px] text-white/40 mb-3">{rec.expectedImpact}</p>
-                <button
-                  onClick={() => handleOneClick(rec.oneClickObjective)}
-                  className="w-full px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-1"
-                >
-                  원클릭 진행 →
-                </button>
-              </div>
-            ))}
-      </div>
-
-      {/* ★ 2026-07-02 1차: 자동마케팅 현황 요약 — 승인 대기가 있으면 바로 가게 */}
-      <button
-        onClick={() => navigate('/continuous-operator')}
-        className="mt-4 w-full flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-colors"
-      >
-        <span className="text-xs text-white/70">
-          실행 중인 자동마케팅 <span className="text-white font-semibold">{autoMarketing.active}</span>개
-          {autoMarketing.pendingProposals > 0 && (
-            <span className="ml-2 px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[10px] font-medium">승인 대기 {autoMarketing.pendingProposals}건</span>
-          )}
-        </span>
-        <span className="text-xs text-violet-300">관리 →</span>
-      </button>
-
-      <div className="mt-3 text-[10px] text-white/30 italic">
-        Data source: {useBrief ? '매일 오전 일일 분석 (고객 DB 실측 신호 · 누적 학습)' : '회사 실측 신호 (일일 분석 누적 전 기본 추천)'}
-      </div>
-    </div>
+    </>
   );
 }

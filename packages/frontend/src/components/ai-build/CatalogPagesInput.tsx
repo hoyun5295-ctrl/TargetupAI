@@ -71,16 +71,16 @@ export default function CatalogPagesInput({ value, onChange, title, onTitleChang
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <BookOpen className="w-4 h-4 text-violet-300 shrink-0" />
+        <BookOpen className="w-4 h-4 text-violet-700 shrink-0" />
         <input value={title} onChange={(e) => onTitleChange(e.target.value.slice(0, 40))} disabled={disabled}
           placeholder="카탈로그 제목(선택 · 40자) · 예: 2026 겨울 컬렉션"
-          className="flex-1 min-w-0 rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-violet-400/60 disabled:opacity-50" />
+          className="flex-1 min-w-0 rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-violet-300 disabled:opacity-50" />
       </div>
 
       <div
         onDragOver={(e) => { e.preventDefault(); }}
         onDrop={(e) => { e.preventDefault(); if (dragFrom.current === null) void addFiles(e.dataTransfer.files); }}
-        className={`rounded-xl border border-dashed ${disabled ? 'border-white/10' : 'border-violet-400/40 hover:border-violet-300/60'} bg-white/[0.02] p-3`}
+        className={`rounded-xl border border-dashed ${disabled ? 'border-slate-200' : 'border-violet-300 hover:border-violet-300'} bg-white p-3`}
       >
         <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
           {value.map((im, i) => (
@@ -91,14 +91,14 @@ export default function CatalogPagesInput({ value, onChange, title, onTitleChang
               onDragEnd={() => { dragFrom.current = null; }}
               onDragOver={(e) => { e.preventDefault(); }}
               onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (dragFrom.current !== null) move(dragFrom.current, i); dragFrom.current = null; }}
-              className="relative aspect-[640/920] rounded-lg overflow-hidden bg-white border border-white/10 group cursor-grab active:cursor-grabbing"
+              className="relative aspect-[640/920] rounded-lg overflow-hidden bg-white border border-slate-200 group cursor-grab active:cursor-grabbing"
               title="끌어서 쪽 순서를 바꿀 수 있어요 · 첫 장이 표지"
             >
               <img src={im.url} alt={`${i + 1}쪽`} className="w-full h-full object-contain" draggable={false} />
               <span className="absolute left-1 top-1 px-1.5 rounded text-[10px] font-bold bg-black/70 text-white">{i + 1}</span>
               {!disabled && !uploading && (
                 <>
-                  <span className="absolute left-1 bottom-1 text-white/80 drop-shadow"><GripVertical className="w-3 h-3" /></span>
+                  <span className="absolute left-1 bottom-1 text-slate-700 drop-shadow"><GripVertical className="w-3 h-3" /></span>
                   <button type="button" onClick={() => onChange(value.filter((_, n) => n !== i))} aria-label={`${i + 1}쪽 제외`}
                     className="absolute top-1 right-1 w-4 h-4 rounded-full bg-black/70 text-white/90 flex items-center justify-center hover:bg-rose-600"><X className="w-2.5 h-2.5" /></button>
                 </>
@@ -106,18 +106,18 @@ export default function CatalogPagesInput({ value, onChange, title, onTitleChang
             </div>
           ))}
           <button type="button" disabled={disabled || uploading} onClick={() => inputRef.current?.click()}
-            className="aspect-[640/920] rounded-lg border border-white/15 bg-white/5 text-violet-200 hover:bg-violet-500/20 disabled:opacity-40 flex flex-col items-center justify-center gap-1 px-1">
+            className="aspect-[640/920] rounded-lg border border-slate-300 bg-white text-violet-800 hover:bg-violet-100 disabled:opacity-40 flex flex-col items-center justify-center gap-1 px-1">
             {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}
             <span className="text-[10px] text-center leading-tight">{uploading ? `${progress.done}/${progress.total} 올리는 중` : value.length === 0 ? '쪽 이미지 추가' : '쪽 추가'}</span>
           </button>
           <button type="button" disabled={disabled || uploading} onClick={onOpenLibrary}
-            className="aspect-[640/920] rounded-lg border border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/10 hover:text-white/85 disabled:opacity-40 flex flex-col items-center justify-center gap-1 px-1"
+            className="aspect-[640/920] rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 flex flex-col items-center justify-center gap-1 px-1"
             title="저장해 둔 소재에서 고르기">
             <FolderOpen className="w-4 h-4" /><span className="text-[10px]">라이브러리</span>
           </button>
         </div>
         <input ref={inputRef} type="file" accept={ACCEPT.join(',')} multiple hidden onChange={(e) => { void addFiles(e.target.files); e.currentTarget.value = ''; }} />
-        <p className="text-[11px] text-white/45 mt-2">
+        <p className="text-[11px] text-slate-400 mt-2">
           {value.length > 0 ? `${value.length}쪽 · ` : ''}장수 제한 없음 · JPG·PNG·WebP · 5MB/장 · 올린 순서가 쪽 순서(첫 장 = 표지) · 2쪽 이상이면 만들 수 있어요
         </p>
       </div>

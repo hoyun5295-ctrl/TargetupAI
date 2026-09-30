@@ -42,11 +42,11 @@ export default function EventCampaignResumeBar({ refreshKey, onResume }: {
   const savedChannels = (ch: any) => CHANNELS.filter((c) => ch?.[c.key]?.payload);
 
   return (
-    <div className="rounded-xl border border-white/10 bg-slate-900/60 p-3 mb-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 mb-4">
       <div className="flex items-center gap-1.5 mb-2">
-        <CalendarClock className="w-3.5 h-3.5 text-violet-300" />
-        <span className="text-xs font-bold text-white/80">임시 보관한 행사 캠페인</span>
-        <span className="text-[10px] text-white/40">(이어서 편집할 수 있어요)</span>
+        <CalendarClock className="w-3.5 h-3.5 text-violet-700" />
+        <span className="text-xs font-bold text-slate-700">임시 보관한 행사 캠페인</span>
+        <span className="text-[10px] text-slate-400">(이어서 편집할 수 있어요)</span>
       </div>
       <div className="flex flex-wrap gap-2">
         {drafts.map((d) => (
@@ -54,13 +54,13 @@ export default function EventCampaignResumeBar({ refreshKey, onResume }: {
             key={d.id}
             type="button"
             onClick={() => onResume(d.id)}
-            className="inline-flex items-center gap-1.5 text-[11px] text-violet-100 border border-violet-400/40 bg-violet-500/10 hover:bg-violet-500/20 rounded-lg px-2.5 py-1.5 transition-colors max-w-full"
+            className="inline-flex items-center gap-1.5 text-[11px] text-violet-900 border border-violet-300 bg-violet-50 hover:bg-violet-100 rounded-lg px-2.5 py-1.5 transition-colors max-w-full"
           >
             <span className="truncate max-w-[220px]">{d.title || '행사 캠페인'}</span>
             {savedChannels(d.channels).map((c) => (
               <span
                 key={c.key}
-                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-medium text-white/70 bg-white/10 border border-white/10 rounded px-1.5 py-0.5"
+                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-medium text-slate-600 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5"
               >
                 <c.icon className="w-2.5 h-2.5" />
                 {c.label}

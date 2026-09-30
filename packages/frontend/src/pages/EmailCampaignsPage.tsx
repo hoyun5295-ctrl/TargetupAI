@@ -1,5 +1,6 @@
-import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { zoneModule } from '../constants/ai-operator-modules';
+import { Package, FolderOpen as ZFolderOpen, ChevronDown as ZChevronDown } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 // ★ 2026-09-14 T5·T6 AI 자동제작 — 상단 카드띠(입구) · ?edit={campaignId} 딥링크(완성본 착지) · 생성 금액 단일 출처
@@ -41,7 +42,7 @@ import { Layers } from 'lucide-react';
 import EmailEditScreen from '../components/make/EmailEditScreen';
 import EmailDetailModal from '../components/make/EmailDetailModal';
 import MakeSendModal from '../components/make/MakeSendModal';
-import { MakeHeroCard, OtherMethods, ListHead, EmailChip, Meter, fmtDate } from '../components/make/HomeParts';
+import { OtherMethods, ListHead, EmailChip, Meter, fmtDate } from '../components/make/HomeParts';
 import { emailChipStatus, emailCoverOf, type ChipStatus } from '../utils/make-flow';
 import '../styles/make.css';
 
@@ -821,108 +822,68 @@ export default function EmailCampaignsPage() {
   // 렌더링
   // ════════════════════════════════════════════════════════════════
 
+  const emailOneLine = zoneModule('email').oneLine!;
+  const sentCampaignCount = campaigns.filter((c) => c.sentCount > 0).length;
   return (
-    // ★ 2026-08-21 오퍼레이터 표면 단계(OUI): 작업면 = slate-950 단색 + 상단 아우라 1. 값은 utils/operator-ui.ts가 소유(0527 보라화 → 0627 slate 복귀 이력의 옛 주석 정정)
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-      {/* 상단 헤더 — D222+ Phase 3 보라 톤 다운 */}
-      <div className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="뒤로가기">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-sky-400 to-blue-500`}>
-            <Mail className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className={OUI_TITLE}>이메일 마케팅</h1>
-            </div>
-            <p className={OUI_SUBTITLE}>회사 메일로 보내고 열람·클릭까지 확인해요</p>
-          </div>
-          <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
-            {/* ★ 2026-09-27 만들기 개편 — 머리 칩 = 발신 연결 상태(누르면 회사 메일 설정 · 연결 점검은 옆 버튼) */}
-            {smtpConfigured && smtpConfig?.isConfigured ? (
-              <>
-                <button
-                  onClick={() => setSmtpFormOpen(true)}
-                  className="text-xs flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 hover:bg-emerald-500/25 transition-colors"
-                  title="회사 메일(발신) 설정: 수정 / 해제"
-                >
-                  <Check className="w-3.5 h-3.5 text-emerald-300" />
-                  <span className="font-medium">발신 {smtpConfig.fromEmail}</span>
-                </button>
-                <button
-                  onClick={() => setTestModalOpen(true)}
-                  className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
-                  title="회사 메일 연결이 정상인지 내 메일로 보내 확인해요"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">연결 점검</span>
-                </button>
-              </>
-            ) : !loading ? (
-              <button onClick={() => setSmtpFormOpen(true)} className="text-xs flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/15 border border-amber-400/30 text-amber-100 hover:bg-amber-500/25 transition-colors">
-                <Settings className="w-3.5 h-3.5" />회사 메일 연결하기
-              </button>
-            ) : null}
-            {campaigns.length > 0 && (
-              <button
-                onClick={() => setShowAnalytics(true)}
-                className="text-xs bg-gradient-to-r from-indigo-500/40 to-violet-500/40 hover:from-indigo-500/60 hover:to-violet-500/60 text-indigo-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-indigo-400/30"
-              >
-                <BarChart3 className="w-3.5 h-3.5" />
-                분석
-              </button>
-            )}
-            <button onClick={loadAll} className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors" aria-label="새로고침">
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">새로고침</span>
-            </button>
-            {/* ★ 2026-07-02(3) 시작 버튼(템플릿/비주얼)은 아래 AI 카드 안 시작 허브로 이동 — 헤더 정리.
-                [신규 캠페인](레거시 HTML 폼) 진입 제거 — 레거시 폼은 기존 HTML 전용 캠페인 수정(openEditor 폴백)에만 유지 */}
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
-        {error && (
-          <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-300 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {/* ★ 2026-09-27 만들기 개편 — 회사 메일 미연결 = 만들기·미리보기는 지금 되고 보낼 때 연결(결재 ③) */}
-        {!smtpConfigured && !loading && (
-          <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
-            <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0" />
-            <span className="text-[12.5px] text-amber-100 flex-1 min-w-[200px]">보내려면 회사 메일 연결이 필요해요. 만들기와 미리보기는 지금 돼요.</span>
-            <button onClick={() => setSmtpFormOpen(true)} className="text-xs bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 px-3 py-2 rounded-lg font-medium flex items-center gap-1.5"><Settings className="w-3.5 h-3.5" />회사 메일 연결하기</button>
-          </div>
-        )}
-
-        {/* ★ 2026-09-27 만들기 개편 — 입구 하나(만들기) + 작은 링크 2 · 쓰던 입구는 "다른 방법"으로 접는다(결재 ④ · 핸들러 무변경) */}
-        <MakeHeroCard
-          title="재료만 넣으면 이메일이 완성돼요"
-          desc="모바일 DM에 쓴 재료를 그대로 불러올 수도 있어요. 광고 표기와 수신거부는 보낼 때 자동으로 붙어요."
-          links={[
-            { icon: <Layers className="w-3.5 h-3.5" />, label: '블록으로 직접 만들기', onClick: () => setVisualEditor({ sections: [], isAd: true, aiGenerated: false }) },
-            { icon: <LayoutTemplate className="w-3.5 h-3.5" />, label: '템플릿에서 고르기', onClick: () => setShowGallery(true) },
-          ]}
-          onMake={() => navigate('/quick-campaign?channel=email')}
-          disabled={genStep !== null}
+    <ZoneFrame
+      moduleId="email"
+      aux={campaigns.length > 0 ? { label: '분석', icon: BarChart3, onClick: () => setShowAnalytics(true) } : null}
+      more={smtpConfigured && smtpConfig?.isConfigured ? [
+        { label: `회사 메일 설정 · ${smtpConfig.fromEmail}`, icon: Settings, onClick: () => setSmtpFormOpen(true) },
+        { label: '연결 점검(내 메일로 보내 보기)', icon: Send, onClick: () => setTestModalOpen(true) },
+      ] : []}
+      command={{
+        line: {
+          value: aiPrompt,
+          onChange: setAiPrompt,
+          onSubmit: () => handleAiGenerate({ prompt: aiPrompt }),
+          placeholder: emailOneLine.placeholder,
+          verb: emailOneLine.verb,
+          icon: Wand2,
+          busy: genStep !== null,
+          credit: `${AI_GENERATE_COSTS['email-ai-generate']}크레딧`,
+        },
+        stats: campaigns.length ? [
+          { label: '보낸 메일', value: sentCampaignCount.toLocaleString() },
+          { label: '평균 오픈율', value: `${stats.openRate.toFixed(1)}%` },
+          { label: '클릭률', value: `${stats.clickRate.toFixed(1)}%` },
+          { label: '반송률', value: `${stats.bounceRate.toFixed(1)}%` },
+        ] : [{ label: '보낸 메일', value: 0 }],
+        alts: [
+          { label: '재료로 만들기', icon: Package, onClick: () => navigate('/quick-campaign?channel=email'), disabled: genStep !== null },
+          { label: '블록으로 직접', icon: Layers, onClick: () => setVisualEditor({ sections: [], isAd: true, aiGenerated: false }), disabled: genStep !== null },
+          { label: '템플릿에서', icon: LayoutTemplate, onClick: () => setShowGallery(true), disabled: genStep !== null },
+        ],
+        more: [
+          { label: '라이브러리에서 시작', icon: ZFolderOpen, onClick: () => setStartLibOpen(true) },
+          { label: '광고성 표기 · 이미지로 불러오기', icon: ZChevronDown, onClick: () => setOtherOpen(true), divider: true },
+        ],
+        stamp: { text: '다시 읽기', onRefresh: loadAll, loading },
+      }}
+      blocks={[
+        ...(error ? [{ text: error, tone: 'rose' as const }] : []),
+        ...(!smtpConfigured && !loading ? [{ text: '보내려면 회사 메일 연결이 필요해요. 만들기와 미리보기는 지금 돼요.', actionLabel: '회사 메일 연결하기', onAction: () => setSmtpFormOpen(true) }] : []),
+      ]}
+    >
+      <div className="space-y-5">
+        {/* ★ 2026-07-19 P4: 라이브러리 다중 선택 → 이미지 섹션 이메일 · ★0930 명령 카드 더보기에서도 열리므로 접힌 패널 밖에 둔다(Codex R1) */}
+        <AssetLibraryPickerModal
+          open={startLibOpen}
+          onClose={() => setStartLibOpen(false)}
+          multiSelect
+          onPick={(a) => startFromLibrary([a])}
+          onPickMany={startFromLibrary}
         />
         <OtherMethods open={otherOpen} onToggle={() => setOtherOpen((v) => !v)} summary="한 줄로 자동 생성 · 저장 소재에서 · 빈 화면에서">
-          <div className="bg-gradient-to-br from-fuchsia-600/20 via-purple-600/15 to-indigo-600/20 border border-fuchsia-400/30 rounded-2xl p-5">
+          <div className="bg-gradient-to-br from-fuchsia-50 via-purple-50 to-indigo-50 border border-fuchsia-200 rounded-2xl p-5">
             {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
             <div className="flex items-center gap-2 mb-3">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-fuchsia-500 to-purple-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20">
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
               <div>
-                <div className="text-sm font-bold text-white">AI로 이메일 만들기</div>
-                <div className="text-[11px] text-white/50">한 줄만 입력하면 제목·본문·HTML까지 한 번에 ({AI_GENERATE_COSTS['email-ai-generate']} 크레딧)</div>
+                <div className="text-sm font-bold text-slate-900">AI로 이메일 만들기</div>
+                <div className="text-[11px] text-slate-500">한 줄만 입력하면 제목·본문·HTML까지 한 번에 ({AI_GENERATE_COSTS['email-ai-generate']} 크레딧)</div>
               </div>
             </div>
             <div className="flex flex-col md:flex-row gap-2 mb-3">
@@ -933,24 +894,24 @@ export default function EmailCampaignsPage() {
                 onKeyDown={(e) => { if (e.key === 'Enter' && genStep === null) handleAiGenerate({ prompt: aiPrompt }); }}
                 placeholder="예: 여름 신상 입고 안내, VIP 고객에게 정중한 톤으로"
                 disabled={genStep !== null}
-                className="flex-1 px-4 py-2.5 bg-violet-950/50 border border-white/15 rounded-xl text-sm text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/60 disabled:opacity-50"
+                className="flex-1 px-4 py-2.5 bg-violet-50 border border-slate-300 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300 disabled:opacity-50"
               />
               <ImageToCopyButton
                 label="이미지"
                 onExtracted={(t) => setAiPrompt((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
                 disabled={genStep !== null}
-                className="px-3 py-2.5 rounded-xl border border-violet-400/40 bg-violet-500/10 text-violet-100 text-sm font-medium hover:bg-violet-500/20 disabled:opacity-40 inline-flex items-center gap-1.5 whitespace-nowrap"
+                className="px-3 py-2.5 rounded-xl border border-violet-300 bg-violet-50 text-violet-900 text-sm font-medium hover:bg-violet-100 disabled:opacity-40 inline-flex items-center gap-1.5 whitespace-nowrap"
               />
               <button
                 onClick={() => handleAiGenerate({ prompt: aiPrompt })}
                 disabled={genStep !== null || !aiPrompt.trim()}
-                className="px-5 py-2.5 bg-gradient-to-r from-fuchsia-500 to-purple-500 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 whitespace-nowrap"
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 whitespace-nowrap"
               >
                 {genStep !== null ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                 {genStep !== null ? '생성 중...' : 'AI 생성'}
               </button>
             </div>
-            <label className="flex items-center gap-2 text-[11px] text-white/60 cursor-pointer w-fit">
+            <label className="flex items-center gap-2 text-[11px] text-slate-500 cursor-pointer w-fit">
               <input type="checkbox" checked={aiAsAd} onChange={(e) => setAiAsAd(e.target.checked)} disabled={genStep !== null} className="rounded" />
               광고성 이메일로 만들기 (발송 시 "(광고)" + 수신거부 링크 자동 부착)
             </label>
@@ -959,52 +920,44 @@ export default function EmailCampaignsPage() {
               <button
                 onClick={() => setShowGallery(true)}
                 disabled={genStep !== null}
-                className="group flex items-center gap-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-400/25 hover:border-emerald-400/50 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                className="group flex items-center gap-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 hover:border-emerald-300 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-md shrink-0">
                   <LayoutTemplate className="w-4 h-4 text-white" />
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-white">템플릿에서 시작</div>
-                  <div className="text-[10px] text-white/45 mt-0.5">완성된 골격을 한 번에 (크레딧 0 · 바로 편집)</div>
+                  <div className="text-xs font-bold text-slate-900">템플릿에서 시작</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">완성된 골격을 한 번에 (크레딧 0 · 바로 편집)</div>
                 </div>
               </button>
               <button
                 onClick={() => setVisualEditor({ sections: [], isAd: true, aiGenerated: false })}
                 disabled={genStep !== null}
-                className="group flex items-center gap-3 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-400/25 hover:border-violet-400/50 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                className="group flex items-center gap-3 bg-violet-50 hover:bg-violet-100 border border-violet-200 hover:border-violet-300 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-md shrink-0">
                   <Sparkles className="w-4 h-4 text-white" />
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-white">직접 제작</div>
-                  <div className="text-[10px] text-white/45 mt-0.5">빈 캔버스에서 블록 직접 조립</div>
+                  <div className="text-xs font-bold text-slate-900">직접 제작</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">빈 캔버스에서 블록 직접 조립</div>
                 </div>
               </button>
               <button
                 onClick={() => setStartLibOpen(true)}
                 disabled={genStep !== null}
-                className="group flex items-center gap-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/25 hover:border-amber-400/50 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                className="group flex items-center gap-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 hover:border-amber-300 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-md shrink-0">
                   <FolderOpen className="w-4 h-4 text-white" />
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-white">라이브러리에서 시작</div>
-                  <div className="text-[10px] text-white/45 mt-0.5">저장 소재 다중 선택 → 이미지 이메일</div>
+                  <div className="text-xs font-bold text-slate-900">라이브러리에서 시작</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">저장 소재 다중 선택 → 이미지 이메일</div>
                 </div>
               </button>
             </div>
-            {/* ★ 2026-07-19 P4: 라이브러리 다중 선택 → 이미지 섹션 이메일 */}
-            <AssetLibraryPickerModal
-              open={startLibOpen}
-              onClose={() => setStartLibOpen(false)}
-              multiSelect
-              onPick={(a) => startFromLibrary([a])}
-              onPickMany={startFromLibrary}
-            />
-            <div className="text-[10px] text-white/30 italic mt-3">
+            <div className="text-[10px] text-slate-400 italic mt-3">
               Data source: 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력
             </div>
           </div>
@@ -1025,7 +978,6 @@ export default function EmailCampaignsPage() {
             <section className="pt-3">
               <ListHead
                 title="내 이메일"
-                summary={campaigns.length ? `보낸 메일 ${sentCampaigns.toLocaleString()} · 평균 오픈율 ${stats.openRate.toFixed(1)}% · 평균 클릭률 ${stats.clickRate.toFixed(1)}% · 반송률 ${stats.bounceRate.toFixed(1)}%` : undefined}
                 filters={[
                   { key: 'all' as const, label: '전체', count: cnt.all || 0 },
                   { key: 'draft' as const, label: '초안', count: cnt.draft || 0 },
@@ -1042,15 +994,15 @@ export default function EmailCampaignsPage() {
                 sortOptions={[{ value: 'recent', label: '최근 순' }, { value: 'open', label: '오픈율 높은 순' }, { value: 'title', label: '이름 순' }]}
               />
               {loading ? (
-                <div className="bg-white/5 border border-white/10 rounded-xl p-12 mt-4 flex justify-center text-white/50"><Loader2 className="w-5 h-5 animate-spin" /></div>
+                <div className="bg-white border border-slate-200 rounded-xl p-12 mt-4 flex justify-center text-slate-500"><Loader2 className="w-5 h-5 animate-spin" /></div>
               ) : campaigns.length === 0 ? (
-                <div className="mt-4 rounded-2xl border border-dashed border-white/15 py-12 px-5 text-center">
-                  <div className="text-[15px] font-bold text-white">아직 만든 이메일이 없어요</div>
-                  <div className="text-[13px] text-white/55 mt-1.5">사진과 글만 넣으면 첫 이메일이 완성돼요.</div>
-                  <button type="button" onClick={() => navigate('/quick-campaign?channel=email')} className="mt-4 h-10 px-5 rounded-xl text-[13.5px] font-bold text-indigo-950 bg-gradient-to-r from-amber-400 to-fuchsia-400">만들기</button>
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-300 py-12 px-5 text-center">
+                  <div className="text-[15px] font-bold text-slate-900">아직 만든 이메일이 없어요</div>
+                  <div className="text-[13px] text-slate-500 mt-1.5">사진과 글만 넣으면 첫 이메일이 완성돼요.</div>
+                  <button type="button" onClick={() => navigate('/quick-campaign?channel=email')} className="mt-4 h-10 px-5 rounded-xl text-[13.5px] font-bold text-white bg-indigo-600 hover:bg-indigo-700">만들기</button>
                 </div>
               ) : shown.length === 0 ? (
-                <div className="py-14 text-center text-[13px] text-white/45">조건에 맞는 이메일이 없어요.</div>
+                <div className="py-14 text-center text-[13px] text-slate-400">조건에 맞는 이메일이 없어요.</div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-4">
                   {shown.slice(0, listLimit).map(({ c, st }) => (
@@ -1063,7 +1015,7 @@ export default function EmailCampaignsPage() {
                       title={c.name}
                       meta={st === 'draft' ? `${fmtDate(c.createdAt)} 만듦${c.completed ? ' · 완성' : ''}`
                         : st === 'scheduled' ? `${c.scheduledAt ? new Date(c.scheduledAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''} 예약`
-                          : st === 'failed' ? <span className="text-rose-300">보내지 못했어요 · 다시 보내기</span>
+                          : st === 'failed' ? <span className="text-rose-700">보내지 못했어요 · 다시 보내기</span>
                             : c.status === 'sending' ? `보내는 중 · ${c.sentCount.toLocaleString()}명`
                               : `${fmtDate(c.sentAt)} · ${c.sentCount.toLocaleString()}명`}
                       metric={st === 'sent' && c.sentCount > 0 ? <Meter label={`오픈 ${((c.openCount / c.sentCount) * 100).toFixed(1)}% · 클릭 ${((c.clickCount / c.sentCount) * 100).toFixed(1)}%`} pct={(c.openCount / c.sentCount) * 100} /> : undefined}
@@ -1073,9 +1025,9 @@ export default function EmailCampaignsPage() {
                 </div>
               )}
               {shown.length > listLimit && (
-                <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-white/75 border border-white/15 hover:bg-white/10">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
+                <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-600 border border-slate-300 hover:bg-slate-100">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
               )}
-              <div className="text-[10px] text-white/30 italic mt-4">Data source: email_campaigns + email_events 누적 집계</div>
+              <div className="text-[10px] text-slate-400 italic mt-4">Data source: email_campaigns + email_events 누적 집계</div>
             </section>
           );
         })()}
@@ -1147,25 +1099,25 @@ export default function EmailCampaignsPage() {
       {/* 테스트 발송 — 작은 모달 (가로 큰 카드 대체) */}
       {testModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2"><Send className="w-4 h-4 text-cyan-300" /> 테스트 발송</h3>
-              <button onClick={() => setTestModalOpen(false)} disabled={testSending} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 disabled:opacity-40" aria-label="닫기"><X className="w-5 h-5" /></button>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><Send className="w-4 h-4 text-cyan-700" /> 테스트 발송</h3>
+              <button onClick={() => setTestModalOpen(false)} disabled={testSending} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100 disabled:opacity-40" aria-label="닫기"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-3">
-              <p className="text-xs text-white/50">회사 admin 본인 이메일에 테스트 발송 → SMTP 설정 정상 동작 확인 (스팸 폴더도 확인)</p>
+              <p className="text-xs text-slate-500">회사 admin 본인 이메일에 테스트 발송 → SMTP 설정 정상 동작 확인 (스팸 폴더도 확인)</p>
               <input
                 type="email"
                 value={testEmail}
                 onChange={(e) => setTestEmail(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !testSending && testEmail.trim()) handleTestSend(); }}
                 placeholder="테스트 수신 이메일 (예: admin@example.com)"
-                className="w-full px-3 py-2 bg-violet-950/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-cyan-300"
               />
               <button
                 onClick={handleTestSend}
                 disabled={testSending || !testEmail.trim()}
-                className="w-full px-4 py-2 bg-cyan-500/30 hover:bg-cyan-500/50 disabled:opacity-40 disabled:cursor-not-allowed text-cyan-100 text-sm font-medium rounded-lg flex items-center justify-center gap-1.5"
+                className="w-full px-4 py-2 bg-cyan-100 hover:bg-cyan-200 disabled:opacity-40 disabled:cursor-not-allowed text-cyan-900 text-sm font-medium rounded-lg flex items-center justify-center gap-1.5"
               >
                 {testSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {testSending ? '발송 중...' : '테스트 발송'}
@@ -1178,16 +1130,16 @@ export default function EmailCampaignsPage() {
       {/* ★ 2026-07-22 테스트발송 — 완성된 이 캠페인을 직접 입력 최대 3개 주소로 발송(영업/자체 점검). (광고) 없음·통계 미반영. */}
       {campaignTest && (
         <div className="fixed inset-0 z-[2000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between px-5 py-3 border-b border-white/10">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between px-5 py-3 border-b border-slate-200">
               <div className="min-w-0">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2"><Send className="w-4 h-4 text-teal-300" /> 테스트발송</h3>
-                <p className="text-[11px] text-white/50 mt-1 truncate">{campaignTest.name}</p>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><Send className="w-4 h-4 text-teal-700" /> 테스트발송</h3>
+                <p className="text-[11px] text-slate-500 mt-1 truncate">{campaignTest.name}</p>
               </div>
-              <button onClick={() => setCampaignTest(null)} disabled={campaignTestSending} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 disabled:opacity-40 shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
+              <button onClick={() => setCampaignTest(null)} disabled={campaignTestSending} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100 disabled:opacity-40 shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-3">
-              <p className="text-xs text-white/50">이 이메일을 입력한 주소로 그대로 보냅니다 (최대 3개). 광고 표기 없이 발송되며 통계에 반영되지 않습니다.</p>
+              <p className="text-xs text-slate-500">이 이메일을 입력한 주소로 그대로 보냅니다 (최대 3개). 광고 표기 없이 발송되며 통계에 반영되지 않습니다.</p>
               {[0, 1, 2].map((i) => (
                 <input
                   key={i}
@@ -1196,13 +1148,13 @@ export default function EmailCampaignsPage() {
                   onChange={(e) => setCampaignTestEmails((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !campaignTestSending) handleCampaignTestSend(); }}
                   placeholder={`받는 사람 ${i + 1}${i === 0 ? ' (필수)' : ' (선택)'}`}
-                  className="w-full px-3 py-2 bg-violet-950/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-teal-400/50"
+                  className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-teal-300"
                 />
               ))}
               <button
                 onClick={handleCampaignTestSend}
                 disabled={campaignTestSending || campaignTestEmails.every((e) => !e.trim())}
-                className="w-full px-4 py-2 bg-teal-500/30 hover:bg-teal-500/50 disabled:opacity-40 disabled:cursor-not-allowed text-teal-100 text-sm font-medium rounded-lg flex items-center justify-center gap-1.5"
+                className="w-full px-4 py-2 bg-teal-100 hover:bg-teal-200 disabled:opacity-40 disabled:cursor-not-allowed text-teal-900 text-sm font-medium rounded-lg flex items-center justify-center gap-1.5"
               >
                 {campaignTestSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {campaignTestSending ? '발송 중...' : '테스트발송'}
@@ -1268,27 +1220,27 @@ export default function EmailCampaignsPage() {
       {/* AI 생성 진행 오버레이 */}
       {genStep !== null && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-          <div className="w-full max-w-sm bg-violet-950/80 border border-fuchsia-400/30 rounded-2xl shadow-2xl p-6">
+          <div className="w-full max-w-sm bg-violet-50 border border-fuchsia-200 rounded-2xl shadow-2xl p-6">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-purple-500 flex items-center justify-center">
                 <Sparkles className="w-5 h-5 text-white animate-pulse" />
               </div>
               <div>
-                <div className="text-sm font-bold text-white">AI가 이메일을 만들고 있어요</div>
-                <div className="text-[11px] text-white/50">잠시만 기다려주세요</div>
+                <div className="text-sm font-bold text-slate-900">AI가 이메일을 만들고 있어요</div>
+                <div className="text-[11px] text-slate-500">잠시만 기다려주세요</div>
               </div>
             </div>
             <div className="space-y-2">
               {EMAIL_GEN_STEPS.map((step, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs">
                   {i < (genStep ?? 0) ? (
-                    <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
                   ) : i === (genStep ?? 0) ? (
-                    <Loader2 className="w-4 h-4 text-fuchsia-300 animate-spin shrink-0" />
+                    <Loader2 className="w-4 h-4 text-fuchsia-700 animate-spin shrink-0" />
                   ) : (
-                    <div className="w-4 h-4 rounded-full border border-white/20 shrink-0" />
+                    <div className="w-4 h-4 rounded-full border border-slate-300 shrink-0" />
                   )}
-                  <span className={i <= (genStep ?? 0) ? 'text-white/90' : 'text-white/40'}>{step}</span>
+                  <span className={i <= (genStep ?? 0) ? 'text-slate-800' : 'text-slate-400'}>{step}</span>
                 </div>
               ))}
             </div>
@@ -1343,7 +1295,7 @@ export default function EmailCampaignsPage() {
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
       {/* 고객 데이터 없음 — 생성 차단 안내 */}
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
-    </div>
+    </ZoneFrame>
   );
 }
 
@@ -1369,13 +1321,13 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
   const currentPreset = SMTP_PRESETS.find((p) => p.key === presetKey);
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <Server className="w-5 h-5 text-blue-300" />
+      <div className="bg-violet-50 border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-violet-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <Server className="w-5 h-5 text-blue-700" />
             {isUpdate ? 'SMTP 설정 수정' : 'SMTP 설정 등록'}
           </h3>
-          <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기">
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100" aria-label="닫기">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -1383,7 +1335,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
         <div className="p-6 space-y-4">
           {/* 표준 SMTP 가이드 */}
           <div>
-            <label className="text-xs font-bold text-white/80 block mb-2">메일 서버 선택 (자동 입력 활용)</label>
+            <label className="text-xs font-bold text-slate-700 block mb-2">메일 서버 선택 (자동 입력 활용)</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {SMTP_PRESETS.map((preset) => (
                 <button
@@ -1391,8 +1343,8 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                   onClick={() => setPresetKey(preset.key)}
                   className={`text-xs px-2 py-2 rounded-lg border transition-colors ${
                     presetKey === preset.key
-                      ? 'bg-blue-500/30 border-blue-400/60 text-white'
-                      : 'bg-violet-900/50 border-white/10 text-white/70 hover:bg-white/5'
+                      ? 'bg-blue-100 border-blue-300 text-slate-900'
+                      : 'bg-violet-50 border-slate-200 text-slate-600 hover:bg-white'
                   }`}
                 >
                   {preset.label}
@@ -1400,12 +1352,12 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
               ))}
             </div>
             {currentPreset && (
-              <div className="text-[10px] text-white/50 mt-2 flex items-start gap-1">
+              <div className="text-[10px] text-slate-500 mt-2 flex items-start gap-1">
                 <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
                 <span>
                   {currentPreset.hint}
                   {currentPreset.docs && (
-                    <> · <a href={currentPreset.docs} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline">공식 가이드</a></>
+                    <> · <a href={currentPreset.docs} target="_blank" rel="noopener noreferrer" className="text-cyan-700 hover:underline">공식 가이드</a></>
                   )}
                 </span>
               </div>
@@ -1415,17 +1367,17 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
           {/* SMTP 정보 입력 */}
           <div className="grid grid-cols-1 md:grid-cols-[1fr,120px] gap-3">
             <div>
-              <label className="text-xs text-white/70 block mb-1">SMTP 서버 (host)</label>
+              <label className="text-xs text-slate-600 block mb-1">SMTP 서버 (host)</label>
               <input
                 type="text"
                 value={form.host}
                 onChange={(e) => setForm({ ...form, host: e.target.value })}
                 placeholder="smtp.gmail.com"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
               />
             </div>
             <div>
-              <label className="text-xs text-white/70 block mb-1">포트 (port)</label>
+              <label className="text-xs text-slate-600 block mb-1">포트 (port)</label>
               <input
                 type="number"
                 min={1}
@@ -1433,24 +1385,24 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                 value={form.port}
                 onChange={(e) => setForm({ ...form, port: parseInt(e.target.value, 10) || 587 })}
                 placeholder="587"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
               />
             </div>
           </div>
 
           <div>
-            <label className="text-xs text-white/70 block mb-1">사용자 (user): 보통 이메일 주소</label>
+            <label className="text-xs text-slate-600 block mb-1">사용자 (user): 보통 이메일 주소</label>
             <input
               type="text"
               value={form.user}
               onChange={(e) => setForm({ ...form, user: e.target.value })}
               placeholder="admin@example.com"
-              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+              className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
             />
           </div>
 
           <div>
-            <label className="text-xs text-white/70 block mb-1 flex items-center gap-1">
+            <label className="text-xs text-slate-600 block mb-1 flex items-center gap-1">
               <Lock className="w-3 h-3" /> 비밀번호 (password): 앱 비밀번호 권장 (Google 2단계 인증 영역)
             </label>
             <div className="relative">
@@ -1459,19 +1411,19 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 placeholder={isUpdate ? '변경 시에만 새 비밀번호 입력' : '앱 비밀번호 (16자)'}
-                className="w-full px-3 py-2 pr-10 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 pr-10 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
                 autoComplete="new-password"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white p-1"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-900 p-1"
                 aria-label={showPassword ? '비밀번호 숨김' : '비밀번호 표시'}
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            <div className="text-[10px] text-white/40 mt-1">서버 저장 시 AES-256-GCM 암호화. 평문 응답/로그 X</div>
+            <div className="text-[10px] text-slate-400 mt-1">서버 저장 시 AES-256-GCM 암호화. 평문 응답/로그 X</div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1482,49 +1434,49 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
               onChange={(e) => setForm({ ...form, secure: e.target.checked })}
               className="rounded"
             />
-            <label htmlFor="smtp_secure" className="text-xs text-white/80">
+            <label htmlFor="smtp_secure" className="text-xs text-slate-700">
               SSL/TLS 직접 연결 (포트 465 영역). 미체크 = STARTTLS (포트 587 default).
             </label>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-white/70 block mb-1">발신 이메일 (from_email)</label>
+              <label className="text-xs text-slate-600 block mb-1">발신 이메일 (from_email)</label>
               <input
                 type="email"
                 value={form.from_email}
                 onChange={(e) => setForm({ ...form, from_email: e.target.value })}
                 placeholder="noreply@example.com"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
               />
             </div>
             <div>
-              <label className="text-xs text-white/70 block mb-1">발신자 이름 (from_name, 선택)</label>
+              <label className="text-xs text-slate-600 block mb-1">발신자 이름 (from_name, 선택)</label>
               <input
                 type="text"
                 value={form.from_name}
                 onChange={(e) => setForm({ ...form, from_name: e.target.value })}
                 placeholder="브랜드명 또는 회사명"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
               />
             </div>
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-violet-900/40 border-t border-white/10 px-6 py-3 flex items-center justify-between gap-2">
+        <div className="sticky bottom-0 bg-violet-50 border-t border-slate-200 px-6 py-3 flex items-center justify-between gap-2">
           <div>
             {isUpdate && onClear && (
-              <button onClick={onClear} className="px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 rounded-lg flex items-center gap-1.5">
+              <button onClick={onClear} className="px-3 py-2 text-xs text-rose-700 hover:bg-rose-50 rounded-lg flex items-center gap-1.5">
                 <Trash2 className="w-3.5 h-3.5" /> 영구 제거
               </button>
             )}
           </div>
           <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
+            <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-white rounded-lg">취소</button>
             <button
               onClick={onSave}
               disabled={saving}
-              className="px-5 py-2 bg-gradient-to-r from-blue-500 to-sky-500 hover:from-blue-600 hover:to-sky-600 disabled:opacity-40 text-white text-sm font-bold rounded-lg flex items-center gap-2"
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-bold rounded-lg flex items-center gap-2"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
               {saving ? '저장 중...' : isUpdate ? '수정 저장' : 'SMTP 등록'}
@@ -1585,51 +1537,51 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between z-10">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            {editing.aiGenerated && <Sparkles className="w-4 h-4 text-fuchsia-300" />}
+      <div className="bg-violet-50 border border-slate-200 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-violet-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
+          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            {editing.aiGenerated && <Sparkles className="w-4 h-4 text-fuchsia-700" />}
             {editing.id ? '캠페인 수정' : editing.aiGenerated ? 'AI 생성 이메일: 확인 후 발송' : '신규 Email 캠페인'}
           </h3>
-          <button onClick={() => setEditing(null)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기">
+          <button onClick={() => setEditing(null)} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100" aria-label="닫기">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-6 space-y-3">
           <div>
-            <label className="text-xs text-white/70 block mb-1">캠페인 이름 (회사 admin 내부 식별용)</label>
+            <label className="text-xs text-slate-600 block mb-1">캠페인 이름 (회사 admin 내부 식별용)</label>
             <input
               type="text"
               value={editing.name || ''}
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
               placeholder="VIP 5월 재구매 안내"
-              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+              className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
               maxLength={200}
             />
           </div>
           <div>
-            <label className="text-xs text-white/70 block mb-1">제목 (수신자 노출 subject)</label>
+            <label className="text-xs text-slate-600 block mb-1">제목 (수신자 노출 subject)</label>
             <input
               type="text"
               value={editing.subject || ''}
               onChange={(e) => setEditing({ ...editing, subject: e.target.value })}
               placeholder="VIP 회원님께 드리는 5월 특별 안내"
-              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+              className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
               maxLength={200}
             />
             {(editing.subject || '').length > 40 && (
-              <div className="text-[10px] text-amber-300 mt-1">제목 {(editing.subject || '').length}자. 모바일 수신함에서 40자 이후가 잘릴 수 있어요.</div>
+              <div className="text-[10px] text-amber-700 mt-1">제목 {(editing.subject || '').length}자. 모바일 수신함에서 40자 이후가 잘릴 수 있어요.</div>
             )}
             {/* AI 제목 3안 칩 */}
             {subjects.length > 1 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
-                <span className="text-[10px] text-white/40 self-center">AI 제안:</span>
+                <span className="text-[10px] text-slate-400 self-center">AI 제안:</span>
                 {subjects.map((s, i) => (
                   <button
                     key={i}
                     onClick={() => setEditing({ ...editing, subject: s })}
-                    className={`text-[11px] px-2 py-1 rounded-full border transition-colors ${editing.subject === s ? 'bg-fuchsia-500/30 border-fuchsia-400/50 text-white' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10'}`}
+                    className={`text-[11px] px-2 py-1 rounded-full border transition-colors ${editing.subject === s ? 'bg-fuchsia-100 border-fuchsia-300 text-slate-900' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
                   >
                     {s.length > 24 ? s.slice(0, 24) + '…' : s}
                   </button>
@@ -1641,37 +1593,37 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
               비주얼 캠페인은 렌더러가 본문 첫 텍스트로 프리헤더를 자동 생성한다. */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-white/70 block mb-1">발신자 이름 (선택)</label>
+              <label className="text-xs text-slate-600 block mb-1">발신자 이름 (선택)</label>
               <input
                 type="text"
                 value={editing.fromName || ''}
                 onChange={(e) => setEditing({ ...editing, fromName: e.target.value })}
                 placeholder="SMTP 설정 default 활용"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
                 maxLength={100}
               />
             </div>
             <div>
-              <label className="text-xs text-white/70 block mb-1">발신 이메일 (선택)</label>
+              <label className="text-xs text-slate-600 block mb-1">발신 이메일 (선택)</label>
               <input
                 type="email"
                 value={editing.fromEmail || ''}
                 onChange={(e) => setEditing({ ...editing, fromEmail: e.target.value })}
                 placeholder="SMTP 설정 default 활용"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
               />
             </div>
           </div>
           {/* AI 다듬기 (1 크레딧) */}
-          <div className="bg-fuchsia-500/10 border border-fuchsia-400/25 rounded-lg p-3">
+          <div className="bg-fuchsia-50 border border-fuchsia-200 rounded-lg p-3">
             <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-1.5 text-[11px] text-fuchsia-200 font-semibold">
+              <div className="flex items-center gap-1.5 text-[11px] text-fuchsia-800 font-semibold">
                 <Wand2 className="w-3.5 h-3.5" /> AI 다듬기 (1 크레딧)
               </div>
               <button
                 onClick={() => handleRefine(ONE_CLICK_REFINE)}
                 disabled={refining || !editing.subject?.trim() || !editing.htmlBody?.trim()}
-                className="px-2.5 py-1 bg-gradient-to-r from-fuchsia-500/50 to-purple-500/50 hover:from-fuchsia-500/70 hover:to-purple-500/70 disabled:opacity-40 text-white text-[11px] font-semibold rounded-lg flex items-center gap-1 whitespace-nowrap"
+                className="px-2.5 py-1 bg-gradient-to-r from-fuchsia-50 to-purple-50 hover:from-fuchsia-50 hover:to-purple-50 disabled:opacity-40 text-slate-900 text-[11px] font-semibold rounded-lg flex items-center gap-1 whitespace-nowrap"
                 title="지시 입력 없이 AI가 전체 문장을 매끄럽게 다듬어요 (사실·혜택 보존)"
               >
                 {refining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
@@ -1686,12 +1638,12 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
                 onKeyDown={(e) => { if (e.key === 'Enter' && !refining) handleRefine(); }}
                 placeholder="예: 더 친근한 말투로, 버튼 문구 강조"
                 disabled={refining}
-                className="flex-1 px-3 py-2 bg-violet-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 disabled:opacity-50"
+                className="flex-1 px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300 disabled:opacity-50"
               />
               <button
                 onClick={() => handleRefine()}
                 disabled={refining || !refineInstruction.trim()}
-                className="px-3 py-2 bg-fuchsia-500/40 hover:bg-fuchsia-500/60 disabled:opacity-40 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 whitespace-nowrap"
+                className="px-3 py-2 bg-fuchsia-200 hover:bg-fuchsia-200 disabled:opacity-40 text-slate-900 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 whitespace-nowrap"
               >
                 {refining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                 다듬기
@@ -1700,8 +1652,8 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
           </div>
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-xs text-white/70">HTML 본문</label>
-              <button onClick={() => setShowPreview((v) => !v)} className="text-[11px] text-white/50 hover:text-white flex items-center gap-1">
+              <label className="text-xs text-slate-600">HTML 본문</label>
+              <button onClick={() => setShowPreview((v) => !v)} className="text-[11px] text-slate-500 hover:text-slate-900 flex items-center gap-1">
                 {showPreview ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                 {showPreview ? 'HTML 코드 보기' : '미리보기'}
               </button>
@@ -1710,7 +1662,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
               <iframe
                 title="이메일 미리보기"
                 srcDoc={editing.htmlBody || ''}
-                className="w-full h-72 bg-white rounded-lg border border-white/10"
+                className="w-full h-72 bg-white rounded-lg border border-slate-200"
                 sandbox=""
               />
             ) : (
@@ -1718,21 +1670,21 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
                 value={editing.htmlBody || ''}
                 onChange={(e) => setEditing({ ...editing, htmlBody: e.target.value })}
                 placeholder="<p>안녕하세요, {{이름}}님</p>"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-xs font-mono resize-y h-72 text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-xs font-mono resize-y h-72 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
               />
             )}
-            <div className="text-[10px] text-white/40 mt-1">{`{{이름}}`} = 발송 시 고객 이름 자동 치환 · 수신거부 링크는 발송 시 자동 부착</div>
+            <div className="text-[10px] text-slate-400 mt-1">{`{{이름}}`} = 발송 시 고객 이름 자동 치환 · 수신거부 링크는 발송 시 자동 부착</div>
           </div>
           <div>
-            <label className="text-xs text-white/70 block mb-1">텍스트 본문 (선택, HTML 미지원 클라이언트 대응)</label>
+            <label className="text-xs text-slate-600 block mb-1">텍스트 본문 (선택, HTML 미지원 클라이언트 대응)</label>
             <textarea
               value={editing.textBody || ''}
               onChange={(e) => setEditing({ ...editing, textBody: e.target.value })}
               placeholder="안녕하세요, {{이름}}님"
-              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-xs resize-y h-20 text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+              className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-xs resize-y h-20 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
             />
           </div>
-          <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-400/30 rounded-lg p-3">
+          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
             <input
               type="checkbox"
               id="campaign_is_ad"
@@ -1740,18 +1692,18 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
               onChange={(e) => setEditing({ ...editing, isAd: e.target.checked })}
               className="rounded"
             />
-            <label htmlFor="campaign_is_ad" className="text-xs text-amber-100">
+            <label htmlFor="campaign_is_ad" className="text-xs text-amber-900">
               <strong>광고성 이메일</strong>: 체크 시 "(광고)" prefix + 수신거부 링크 자동 부착 (정보통신망법 의무).
             </label>
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-violet-900/40 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
-          <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
+        <div className="sticky bottom-0 bg-violet-50 border-t border-slate-200 px-6 py-3 flex justify-end gap-2">
+          <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-white rounded-lg">취소</button>
           <button
             onClick={onSave}
             disabled={saving}
-            className="px-5 py-2 bg-gradient-to-r from-blue-500 to-sky-500 hover:from-blue-600 hover:to-sky-600 disabled:opacity-40 text-white text-sm font-bold rounded-lg flex items-center gap-2"
+            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-bold rounded-lg flex items-center gap-2"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {saving ? '저장 중...' : editing.id ? '수정 저장' : '저장'}
@@ -1796,15 +1748,15 @@ function InsightModal({ campaign, authHeaders, onClose, onToast }: InsightModalP
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2"><Sparkles className="w-5 h-5 text-fuchsia-300" /> AI 성과 진단</h3>
-          <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+      <div className="bg-violet-50 border border-slate-200 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-violet-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Sparkles className="w-5 h-5 text-fuchsia-700" /> AI 성과 진단</h3>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-6 space-y-4">
-          <div className="text-xs text-white/50">{campaign.name}</div>
+          <div className="text-xs text-slate-500">{campaign.name}</div>
           {loading ? (
-            <div className="py-12 flex justify-center text-white/50"><Loader2 className="w-6 h-6 animate-spin" /></div>
+            <div className="py-12 flex justify-center text-slate-500"><Loader2 className="w-6 h-6 animate-spin" /></div>
           ) : (
             <>
               {stats && (
@@ -1814,34 +1766,34 @@ function InsightModal({ campaign, authHeaders, onClose, onToast }: InsightModalP
                     { label: '클릭율', value: stats.clickRatePct != null ? `${stats.clickRatePct}%` : '—', sub: `${stats.uniqueClickers}명` },
                     { label: '발송', value: stats.sentCount.toLocaleString(), sub: `반송 ${stats.bounceCount}` },
                   ].map((m, i) => (
-                    <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
-                      <div className="text-[10px] text-white/50">{m.label}</div>
-                      <div className="text-lg font-bold text-white">{m.value}</div>
-                      <div className="text-[10px] text-white/40">{m.sub}</div>
+                    <div key={i} className="bg-white border border-slate-200 rounded-xl p-3 text-center">
+                      <div className="text-[10px] text-slate-500">{m.label}</div>
+                      <div className="text-lg font-bold text-slate-900">{m.value}</div>
+                      <div className="text-[10px] text-slate-400">{m.sub}</div>
                     </div>
                   ))}
                 </div>
               )}
               {insight && (
                 <>
-                  <div className="bg-gradient-to-br from-fuchsia-500/15 to-purple-500/15 border border-fuchsia-400/25 rounded-xl p-4">
-                    <div className="flex items-center gap-1.5 text-[11px] text-fuchsia-200 font-semibold mb-1.5"><TrendingUp className="w-3.5 h-3.5" /> 핵심 발견</div>
-                    <p className="text-sm text-white/90 leading-relaxed">{insight.topInsight}</p>
+                  <div className="bg-gradient-to-br from-fuchsia-50 to-purple-50 border border-fuchsia-200 rounded-xl p-4">
+                    <div className="flex items-center gap-1.5 text-[11px] text-fuchsia-800 font-semibold mb-1.5"><TrendingUp className="w-3.5 h-3.5" /> 핵심 발견</div>
+                    <p className="text-sm text-slate-800 leading-relaxed">{insight.topInsight}</p>
                   </div>
                   {insight.suggestions.length > 0 && (
                     <div className="space-y-2">
-                      <div className="text-xs text-white/60 font-semibold">다음 캠페인 개선 제안</div>
+                      <div className="text-xs text-slate-500 font-semibold">다음 캠페인 개선 제안</div>
                       {insight.suggestions.map((s, i) => (
-                        <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3">
-                          <div className="text-sm font-semibold text-emerald-300 mb-0.5">{s.title}</div>
-                          <div className="text-xs text-white/70 leading-relaxed">{s.description}</div>
+                        <div key={i} className="bg-white border border-slate-200 rounded-xl p-3">
+                          <div className="text-sm font-semibold text-emerald-700 mb-0.5">{s.title}</div>
+                          <div className="text-xs text-slate-600 leading-relaxed">{s.description}</div>
                         </div>
                       ))}
                     </div>
                   )}
                 </>
               )}
-              <div className="text-[10px] text-white/30 italic">Data source: 실측 오픈/클릭 이벤트 (email_events)</div>
+              <div className="text-[10px] text-slate-400 italic">Data source: 실측 오픈/클릭 이벤트 (email_events)</div>
             </>
           )}
         </div>
@@ -1944,87 +1896,87 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms, onRe
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[2000]">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-6 py-4 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2"><RefreshCw className="w-5 h-5 text-cyan-300" /> 미수신자 재발송</h3>
-          <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><RefreshCw className="w-5 h-5 text-cyan-700" /> 미수신자 재발송</h3>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-6 space-y-4">
-          <div className="text-xs text-white/50">{campaign.name}: 이메일을 열지 않은 고객에게 다시 보냅니다.</div>
+          <div className="text-xs text-slate-500">{campaign.name}: 이메일을 열지 않은 고객에게 다시 보냅니다.</div>
           {loading ? (
-            <div className="py-12 flex justify-center text-white/50"><Loader2 className="w-6 h-6 animate-spin" /></div>
+            <div className="py-12 flex justify-center text-slate-500"><Loader2 className="w-6 h-6 animate-spin" /></div>
           ) : result && phase === 'view' ? (
             <>
               <div className="grid grid-cols-3 gap-2">
-                <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
-                  <div className="text-[10px] text-white/50">미오픈</div>
-                  <div className="text-lg font-bold text-white">{result.totalNonOpeners.toLocaleString()}</div>
+                <div className="bg-white border border-slate-200 rounded-xl p-3 text-center">
+                  <div className="text-[10px] text-slate-500">미오픈</div>
+                  <div className="text-lg font-bold text-slate-900">{result.totalNonOpeners.toLocaleString()}</div>
                 </div>
-                <div className="bg-cyan-500/10 border border-cyan-400/25 rounded-xl p-3 text-center">
-                  <div className="text-[10px] text-white/50">재발송 대상</div>
-                  <div className="text-lg font-bold text-cyan-300">{result.resendEligible.toLocaleString()}</div>
+                <div className="bg-cyan-50 border border-cyan-200 rounded-xl p-3 text-center">
+                  <div className="text-[10px] text-slate-500">재발송 대상</div>
+                  <div className="text-lg font-bold text-cyan-700">{result.resendEligible.toLocaleString()}</div>
                 </div>
-                <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
-                  <div className="text-[10px] text-white/50">전화 매칭</div>
-                  <div className="text-lg font-bold text-white/60">{result.matched.length.toLocaleString()}</div>
+                <div className="bg-white border border-slate-200 rounded-xl p-3 text-center">
+                  <div className="text-[10px] text-slate-500">전화 매칭</div>
+                  <div className="text-lg font-bold text-slate-500">{result.matched.length.toLocaleString()}</div>
                 </div>
               </div>
 
-              <div className="bg-cyan-500/10 border border-cyan-400/25 rounded-xl p-4 space-y-3">
+              <div className="bg-cyan-50 border border-cyan-200 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-bold text-white flex items-center gap-1.5"><Mail className="w-4 h-4 text-cyan-300" /> 이메일로 재발송</div>
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-semibold">무료</span>
+                  <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5"><Mail className="w-4 h-4 text-cyan-700" /> 이메일로 재발송</div>
+                  <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">무료</span>
                 </div>
-                <div className="text-[11px] text-white/60">안 열어본 {result.resendEligible.toLocaleString()}명에게 같은 내용을 다시 보냅니다. 제목을 바꾸면 열람률이 오릅니다.</div>
+                <div className="text-[11px] text-slate-500">안 열어본 {result.resendEligible.toLocaleString()}명에게 같은 내용을 다시 보냅니다. 제목을 바꾸면 열람률이 오릅니다.</div>
                 <div>
-                  <label className="text-[10px] text-white/40">제목 (바꿔서 재발송 권장)</label>
+                  <label className="text-[10px] text-slate-400">제목 (바꿔서 재발송 권장)</label>
                   <input
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
                     maxLength={200}
-                    className="w-full mt-1 px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-sm text-white placeholder-white/30"
+                    className="w-full mt-1 px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-sm text-slate-900 placeholder-slate-400"
                     placeholder="이메일 제목"
                   />
                 </div>
                 <button
                   disabled={!result.resendable || result.resendEligible === 0}
                   onClick={() => setPhase('confirm')}
-                  className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm font-bold text-white flex items-center justify-center gap-1.5"
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm font-bold text-white flex items-center justify-center gap-1.5"
                 >
                   <RefreshCw className="w-4 h-4" /> {result.resendEligible.toLocaleString()}명에게 재발송
                 </button>
                 {!result.resendable && result.resendBlockReason && (
-                  <div className="text-[11px] text-amber-300/80">{result.resendBlockReason}</div>
+                  <div className="text-[11px] text-amber-700">{result.resendBlockReason}</div>
                 )}
               </div>
 
-              <div className="border-t border-white/10 pt-3">
-                <div className="text-[11px] text-white/40 mb-2">더 확실히 닿고 싶으면: 문자로 (유료)</div>
+              <div className="border-t border-slate-200 pt-3">
+                <div className="text-[11px] text-slate-400 mb-2">더 확실히 닿고 싶으면: 문자로 (유료)</div>
                 {result.matched.length > 0 ? (
                   <div className="flex gap-2">
-                    <button onClick={copyPhones} className="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-white/70">전화번호 {result.matched.length}건 복사</button>
-                    <button onClick={onGoSms} className="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-white/70 flex items-center justify-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> SMS 발송하러 가기</button>
+                    <button onClick={copyPhones} className="flex-1 py-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-600">전화번호 {result.matched.length}건 복사</button>
+                    <button onClick={onGoSms} className="flex-1 py-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-600 flex items-center justify-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> SMS 발송하러 가기</button>
                   </div>
                 ) : (
-                  <div className="text-[11px] text-white/40">전화번호가 매칭되는 미오픈 고객이 없습니다.</div>
+                  <div className="text-[11px] text-slate-400">전화번호가 매칭되는 미오픈 고객이 없습니다.</div>
                 )}
               </div>
 
-              <div className="text-[10px] text-white/30 italic">Data source: email_events delivered 후 미오픈(수신거부·반송 제외) · 전화 매칭은 고객DB</div>
+              <div className="text-[10px] text-slate-400 italic">Data source: email_events delivered 후 미오픈(수신거부·반송 제외) · 전화 매칭은 고객DB</div>
             </>
           ) : result && phase === 'confirm' ? (
             <>
-              <div className="bg-slate-800/60 border border-white/10 rounded-xl p-4 space-y-2">
-                <div className="text-sm text-white">미수신자 <strong className="text-cyan-300">{result.resendEligible.toLocaleString()}명</strong>에게 재발송합니다.</div>
-                <div className="text-[11px] text-white/50 break-words">제목: {subject.trim() || campaign.subject}</div>
-                <div className="text-[11px] text-emerald-300">비용 0원: 이메일 발송은 회사 SMTP로 나가며 무료입니다.</div>
+              <div className="bg-slate-100 border border-slate-200 rounded-xl p-4 space-y-2">
+                <div className="text-sm text-slate-900">미수신자 <strong className="text-cyan-700">{result.resendEligible.toLocaleString()}명</strong>에게 재발송합니다.</div>
+                <div className="text-[11px] text-slate-500 break-words">제목: {subject.trim() || campaign.subject}</div>
+                <div className="text-[11px] text-emerald-700">비용 0원: 이메일 발송은 회사 SMTP로 나가며 무료입니다.</div>
                 {result.resendEligible >= LARGE_VOLUME && (
-                  <div className="text-[11px] text-amber-300 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> 대량 발송입니다. 발신 도메인 평판에 영향을 줄 수 있어 재발송은 1회로 제한됩니다.</div>
+                  <div className="text-[11px] text-amber-700 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> 대량 발송입니다. 발신 도메인 평판에 영향을 줄 수 있어 재발송은 1회로 제한됩니다.</div>
                 )}
               </div>
               <div className="flex gap-2">
-                <button onClick={() => setPhase('view')} disabled={sending} className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-white/70 disabled:opacity-40">뒤로</button>
-                <button onClick={doResend} disabled={sending} className="flex-1 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 disabled:opacity-40 rounded-lg text-sm font-bold text-white flex items-center justify-center gap-1.5">
+                <button onClick={() => setPhase('view')} disabled={sending} className="flex-1 py-2.5 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-600 disabled:opacity-40">뒤로</button>
+                <button onClick={doResend} disabled={sending} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 rounded-lg text-sm font-bold text-white flex items-center justify-center gap-1.5">
                   {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {sending ? '발송 시작 중...' : '재발송 확정'}
                 </button>
               </div>
@@ -2042,12 +1994,12 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms, onRe
 
 function StatusBadge({ status }: { status: CampaignStatus }) {
   const map: Record<CampaignStatus, { label: string; cls: string }> = {
-    draft: { label: '초안', cls: 'bg-white/10 text-white/70' },
-    scheduled: { label: '예약', cls: 'bg-amber-500/20 text-amber-300' },
-    sending: { label: '발송 중', cls: 'bg-blue-500/20 text-blue-300 border border-blue-400/30' },
-    completed: { label: '완료', cls: 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' },
-    failed: { label: '실패', cls: 'bg-rose-500/20 text-rose-300 border border-rose-400/30' },
+    draft: { label: '초안', cls: 'bg-slate-100 text-slate-600' },
+    scheduled: { label: '예약', cls: 'bg-amber-100 text-amber-700' },
+    sending: { label: '발송 중', cls: 'bg-blue-100 text-blue-700 border border-blue-200' },
+    completed: { label: '완료', cls: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
+    failed: { label: '실패', cls: 'bg-rose-100 text-rose-700 border border-rose-200' },
   };
-  const e = map[status] || { label: status, cls: 'bg-white/10 text-white/70' };
+  const e = map[status] || { label: status, cls: 'bg-slate-100 text-slate-600' };
   return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${e.cls}`}>{e.label}</span>;
 }

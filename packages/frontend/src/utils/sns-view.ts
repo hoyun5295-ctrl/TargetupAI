@@ -78,24 +78,24 @@ export interface SnsSpec {
  * 사전에 없는 상태가 오면 화면은 배지를 안 그린다(틀린 이름을 붙이는 것보다 낫다).
  */
 export const SNS_ACCOUNT_BADGE: Record<string, { label: string; cls: string }> = {
-  active: { label: '연결됨', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' },
-  pending: { label: '확인 중', cls: 'bg-violet-500/15 text-violet-200 border-violet-400/30' },
-  ineligible: { label: '계정 확인 필요', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' },
-  token_expired: { label: '다시 연결 필요', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' },
-  reauth_required: { label: '다시 연결 필요', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' },
-  revoked: { label: '해제됨', cls: 'bg-white/10 text-white/60 border-white/15' },
-  error: { label: '확인 필요', cls: 'bg-rose-500/15 text-rose-300 border-rose-400/30' },
+  active: { label: '연결됨', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  pending: { label: '확인 중', cls: 'bg-violet-100 text-violet-800 border-violet-200' },
+  ineligible: { label: '계정 확인 필요', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  token_expired: { label: '다시 연결 필요', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  reauth_required: { label: '다시 연결 필요', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  revoked: { label: '해제됨', cls: 'bg-slate-100 text-slate-500 border-slate-300' },
+  error: { label: '확인 필요', cls: 'bg-rose-100 text-rose-700 border-rose-200' },
 };
 
 /** 묶음(게시물) 배지 — post 상태 7개를 덮는다(§3-5). */
 export const SNS_POST_BADGE: Record<string, { label: string; cls: string }> = {
-  draft: { label: '초안', cls: 'bg-white/10 text-white/60 border-white/15' },
-  scheduled: { label: '예약됨', cls: 'bg-sky-500/15 text-sky-300 border-sky-400/30' },
-  publishing: { label: '올리는 중', cls: 'bg-violet-500/15 text-violet-200 border-violet-400/30' },
-  published: { label: '게시됨', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' },
-  partial_failed: { label: '일부 실패', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' },
-  failed: { label: '실패', cls: 'bg-rose-500/15 text-rose-300 border-rose-400/30' },
-  cancelled: { label: '취소됨', cls: 'bg-white/10 text-white/60 border-white/15' },
+  draft: { label: '초안', cls: 'bg-slate-100 text-slate-500 border-slate-300' },
+  scheduled: { label: '예약됨', cls: 'bg-sky-100 text-sky-700 border-sky-200' },
+  publishing: { label: '올리는 중', cls: 'bg-violet-100 text-violet-800 border-violet-200' },
+  published: { label: '게시됨', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  partial_failed: { label: '일부 실패', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  failed: { label: '실패', cls: 'bg-rose-100 text-rose-700 border-rose-200' },
+  cancelled: { label: '취소됨', cls: 'bg-slate-100 text-slate-500 border-slate-300' },
 };
 
 export interface SnsTargetView {
@@ -129,32 +129,32 @@ export interface SnsTargetView {
  */
 export function snsTargetBadge(t: SnsTargetView): { label: string; cls: string; hint?: string } {
   if (t.deletedOnPlatformAt) {
-    return { label: '게시물 없음', cls: 'bg-white/10 text-white/60 border-white/15', hint: '채널에서 삭제된 것으로 확인됐어요' };
+    return { label: '게시물 없음', cls: 'bg-slate-100 text-slate-500 border-slate-300', hint: '채널에서 삭제된 것으로 확인됐어요' };
   }
   if (t.status === 'published') {
-    return { label: '게시됨', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' };
+    return { label: '게시됨', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
   }
   if (t.status === 'failed') {
     return t.lastErrorCode === 'REAUTH_REQUIRED'
-      ? { label: '계정 확인 필요', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' }
-      : { label: '실패', cls: 'bg-rose-500/15 text-rose-300 border-rose-400/30' };
+      ? { label: '계정 확인 필요', cls: 'bg-amber-100 text-amber-800 border-amber-200' }
+      : { label: '실패', cls: 'bg-rose-100 text-rose-700 border-rose-200' };
   }
   if (t.status === 'submitted' && t.platformPostId) {
     // 올라가긴 했는데 우리가 아직 확인하지 못한 상태. **다시 올리기를 열어 주면 안 된다**(이중 게시).
     return t.verifyGaveUpAt
-      ? { label: '올렸고 확인 못함', cls: 'bg-white/10 text-white/60 border-white/15', hint: '채널에서 직접 확인해 주세요' }
-      : { label: '올렸고 확인 중', cls: 'bg-violet-500/10 text-violet-200/80 border-violet-400/20', hint: '채널에서 확인되면 자동으로 바뀝니다' };
+      ? { label: '올렸고 확인 못함', cls: 'bg-slate-100 text-slate-500 border-slate-300', hint: '채널에서 직접 확인해 주세요' }
+      : { label: '올렸고 확인 중', cls: 'bg-violet-50 text-violet-800 border-violet-200', hint: '채널에서 확인되면 자동으로 바뀝니다' };
   }
   if (t.status === 'claimed' || t.status === 'submitted') {
-    return { label: '올리는 중', cls: 'bg-violet-500/15 text-violet-200 border-violet-400/30' };
+    return { label: '올리는 중', cls: 'bg-violet-100 text-violet-800 border-violet-200' };
   }
   if (t.status === 'scheduled') {
-    return { label: '예약됨', cls: 'bg-sky-500/15 text-sky-300 border-sky-400/30' };
+    return { label: '예약됨', cls: 'bg-sky-100 text-sky-700 border-sky-200' };
   }
   if (t.status === 'cancelled') {
-    return { label: '취소됨', cls: 'bg-white/10 text-white/60 border-white/15' };
+    return { label: '취소됨', cls: 'bg-slate-100 text-slate-500 border-slate-300' };
   }
-  return { label: '초안', cls: 'bg-white/10 text-white/60 border-white/15' };
+  return { label: '초안', cls: 'bg-slate-100 text-slate-500 border-slate-300' };
 }
 
 /** 다시 시도를 열어 줘도 되는가 — **올라갔을 가능성이 있으면 잠근다.** */
@@ -364,13 +364,13 @@ export function snsTargetDisplayState(t: SnsTargetView): SnsTargetDisplay {
 }
 
 export const SNS_TARGET_DISPLAY: Record<SnsTargetDisplay, { label: string; dot: string; badge: string }> = {
-  ok: { label: '게시됨', dot: 'bg-emerald-400', badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' },
-  gone: { label: '게시물 없음', dot: 'bg-white/35', badge: 'bg-white/10 text-white/60 border-white/15' },
-  fail: { label: '실패', dot: 'bg-rose-400', badge: 'bg-rose-500/15 text-rose-300 border-rose-400/30' },
-  check: { label: '확인 필요', dot: 'bg-amber-400', badge: 'bg-amber-500/15 text-amber-200 border-amber-400/30' },
-  run: { label: '올리는 중', dot: 'bg-violet-400', badge: 'bg-violet-500/15 text-violet-200 border-violet-400/30' },
-  cancelled: { label: '취소됨', dot: 'bg-white/35', badge: 'bg-white/10 text-white/60 border-white/15' },
-  draft: { label: '초안', dot: 'bg-white/35', badge: 'bg-white/10 text-white/60 border-white/15' },
+  ok: { label: '게시됨', dot: 'bg-emerald-400', badge: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  gone: { label: '게시물 없음', dot: 'bg-slate-300', badge: 'bg-slate-100 text-slate-500 border-slate-300' },
+  fail: { label: '실패', dot: 'bg-rose-400', badge: 'bg-rose-100 text-rose-700 border-rose-200' },
+  check: { label: '확인 필요', dot: 'bg-amber-400', badge: 'bg-amber-100 text-amber-800 border-amber-200' },
+  run: { label: '올리는 중', dot: 'bg-violet-400', badge: 'bg-violet-100 text-violet-800 border-violet-200' },
+  cancelled: { label: '취소됨', dot: 'bg-slate-300', badge: 'bg-slate-100 text-slate-500 border-slate-300' },
+  draft: { label: '초안', dot: 'bg-slate-300', badge: 'bg-slate-100 text-slate-500 border-slate-300' },
 };
 
 /**
@@ -660,7 +660,7 @@ export function snsChannelSummary(accounts: SnsAccount[]): {
   const worst = [...live].sort((x, y) => rank(x) - rank(y))[0];
   let badge = SNS_ACCOUNT_BADGE[worst.status] ?? null;
   if (worst.status === 'pending' && worst.stuck) badge = SNS_ACCOUNT_BADGE.reauth_required;
-  if (worst.status === 'active' && worst.renewFailing) badge = { label: '연장 확인 필요', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/30' };
+  if (worst.status === 'active' && worst.renewFailing) badge = { label: '연장 확인 필요', cls: 'bg-amber-100 text-amber-800 border-amber-200' };
   return { worst, badge, count: live.length, connected: live.some((a) => a.status === 'active') };
 }
 

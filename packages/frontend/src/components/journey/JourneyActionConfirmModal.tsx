@@ -36,57 +36,57 @@ const MODE_CONFIG: Record<JourneyActionMode, {
 }> = {
   archive: {
     icon: Archive,
-    iconBg: 'bg-cyan-500/20',
-    iconColor: 'text-cyan-300',
+    iconBg: 'bg-cyan-100',
+    iconColor: 'text-cyan-700',
     title: '보관함으로 이동',
-    accent: 'border-cyan-400/30',
-    buttonBg: 'bg-cyan-500/30',
-    buttonHover: 'hover:bg-cyan-500/50',
-    buttonText: 'text-cyan-100',
+    accent: 'border-cyan-200',
+    buttonBg: 'bg-cyan-100',
+    buttonHover: 'hover:bg-cyan-200',
+    buttonText: 'text-cyan-900',
     confirmLabel: '보관함으로 이동',
   },
   unarchive: {
     icon: ArchiveRestore,
-    iconBg: 'bg-cyan-500/20',
-    iconColor: 'text-cyan-300',
+    iconBg: 'bg-cyan-100',
+    iconColor: 'text-cyan-700',
     title: '보관함에서 복원',
-    accent: 'border-cyan-400/30',
-    buttonBg: 'bg-cyan-500/30',
-    buttonHover: 'hover:bg-cyan-500/50',
-    buttonText: 'text-cyan-100',
+    accent: 'border-cyan-200',
+    buttonBg: 'bg-cyan-100',
+    buttonHover: 'hover:bg-cyan-200',
+    buttonText: 'text-cyan-900',
     confirmLabel: '복원',
   },
   delete: {
     icon: Trash2,
-    iconBg: 'bg-rose-500/20',
-    iconColor: 'text-rose-300',
+    iconBg: 'bg-rose-100',
+    iconColor: 'text-rose-700',
     title: '영구 삭제 (복구 불가)',
-    accent: 'border-rose-400/40',
-    buttonBg: 'bg-rose-500/40',
-    buttonHover: 'hover:bg-rose-500/60',
-    buttonText: 'text-rose-50',
+    accent: 'border-rose-300',
+    buttonBg: 'bg-rose-200',
+    buttonHover: 'hover:bg-rose-200',
+    buttonText: 'text-rose-900',
     confirmLabel: '영구 삭제',
   },
   pause: {
     icon: Pause,
-    iconBg: 'bg-amber-500/20',
-    iconColor: 'text-amber-300',
+    iconBg: 'bg-amber-100',
+    iconColor: 'text-amber-700',
     title: '여정 일시정지',
-    accent: 'border-amber-400/30',
-    buttonBg: 'bg-amber-500/30',
-    buttonHover: 'hover:bg-amber-500/50',
-    buttonText: 'text-amber-100',
+    accent: 'border-amber-200',
+    buttonBg: 'bg-amber-100',
+    buttonHover: 'hover:bg-amber-200',
+    buttonText: 'text-amber-900',
     confirmLabel: '일시정지',
   },
   end: {
     icon: Power,
-    iconBg: 'bg-rose-500/20',
-    iconColor: 'text-rose-300',
+    iconBg: 'bg-rose-100',
+    iconColor: 'text-rose-700',
     title: '여정 종료 (재시작 불가)',
-    accent: 'border-rose-400/40',
-    buttonBg: 'bg-rose-500/40',
-    buttonHover: 'hover:bg-rose-500/60',
-    buttonText: 'text-rose-50',
+    accent: 'border-rose-300',
+    buttonBg: 'bg-rose-200',
+    buttonHover: 'hover:bg-rose-200',
+    buttonText: 'text-rose-900',
     confirmLabel: '종료',
   },
 };
@@ -108,39 +108,39 @@ export default function JourneyActionConfirmModal({ mode, journeyName, onConfirm
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
     >
       <div
-        className={`bg-slate-900 border ${config.accent} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden`}
+        className={`bg-white border ${config.accent} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}
-        <div className="flex items-center justify-between p-5 border-b border-white/10">
+        <div className="flex items-center justify-between p-5 border-b border-slate-200">
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-xl ${config.iconBg} flex items-center justify-center`}>
               <Icon className={`w-5 h-5 ${config.iconColor}`} />
             </div>
-            <h3 className="text-base font-semibold text-white">{config.title}</h3>
+            <h3 className="text-base font-semibold text-slate-900">{config.title}</h3>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
             aria-label="닫기"
           >
-            <X className="w-4 h-4 text-white/50" />
+            <X className="w-4 h-4 text-slate-500" />
           </button>
         </div>
 
         {/* 본문 */}
         <div className="p-5 space-y-3">
-          <div className="text-sm text-white/70">
-            여정 <span className="font-semibold text-white">"{journeyName}"</span>
+          <div className="text-sm text-slate-600">
+            여정 <span className="font-semibold text-slate-900">"{journeyName}"</span>
           </div>
 
           {mode === 'archive' && (
-            <div className="space-y-2 text-[13px] text-white/80 leading-relaxed">
+            <div className="space-y-2 text-[13px] text-slate-700 leading-relaxed">
               <div className="flex gap-2">
-                <Info className="w-4 h-4 text-cyan-300 flex-shrink-0 mt-0.5" />
+                <Info className="w-4 h-4 text-cyan-700 flex-shrink-0 mt-0.5" />
                 <span>보관함으로 이동하면 목록에서 숨겨지지만 통계는 영구 보존됩니다.</span>
               </div>
-              <ul className="text-[12px] text-white/60 space-y-1 pl-6">
+              <ul className="text-[12px] text-slate-500 space-y-1 pl-6">
                 <li>· 월간 / 분기 성과 비교 가능</li>
                 <li>· "보관함" 필터에서 영구 접근 가능</li>
                 <li>· 언제든 복원 가능 (보관함 복원 버튼)</li>
@@ -149,18 +149,18 @@ export default function JourneyActionConfirmModal({ mode, journeyName, onConfirm
           )}
 
           {mode === 'unarchive' && (
-            <div className="text-[13px] text-white/80 leading-relaxed">
+            <div className="text-[13px] text-slate-700 leading-relaxed">
               <div className="flex gap-2">
-                <Info className="w-4 h-4 text-cyan-300 flex-shrink-0 mt-0.5" />
+                <Info className="w-4 h-4 text-cyan-700 flex-shrink-0 mt-0.5" />
                 <span>보관함에서 복원하면 여정 목록에 다시 노출됩니다. 옛 통계 영역 영향 없음.</span>
               </div>
             </div>
           )}
 
           {(mode === 'pause' || mode === 'end') && (
-            <div className="text-[13px] text-white/80 leading-relaxed">
+            <div className="text-[13px] text-slate-700 leading-relaxed">
               <div className="flex gap-2">
-                <Info className={`w-4 h-4 ${mode === 'end' ? 'text-rose-300' : 'text-amber-300'} flex-shrink-0 mt-0.5`} />
+                <Info className={`w-4 h-4 ${mode === 'end' ? 'text-rose-700' : 'text-amber-700'} flex-shrink-0 mt-0.5`} />
                 <span>
                   {mode === 'pause'
                     ? '일시정지하면 발송이 멈춥니다. 언제든 다시 재개할 수 있습니다.'
@@ -172,25 +172,25 @@ export default function JourneyActionConfirmModal({ mode, journeyName, onConfirm
 
           {mode === 'delete' && (
             <>
-              <div className="p-3 bg-rose-500/10 border border-rose-400/30 rounded-lg">
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg">
                 <div className="flex gap-2 mb-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
-                  <span className="text-[13px] font-semibold text-rose-100">영구 삭제 시 즉시 손실되는 영역</span>
+                  <AlertTriangle className="w-4 h-4 text-rose-700 flex-shrink-0 mt-0.5" />
+                  <span className="text-[13px] font-semibold text-rose-900">영구 삭제 시 즉시 손실되는 영역</span>
                 </div>
-                <ul className="text-[12px] text-rose-100/80 space-y-1 pl-6 leading-relaxed">
+                <ul className="text-[12px] text-rose-900 space-y-1 pl-6 leading-relaxed">
                   <li>· 모든 step 정의</li>
                   <li>· 진입 customer 실행 영역 (journey_executions)</li>
                   <li>· 발송 로그 영역 (journey_step_logs)</li>
                   <li>· A/B variant 영역 (journey_step_variants)</li>
                 </ul>
-                <div className="mt-2 text-[12px] text-rose-200/70">
+                <div className="mt-2 text-[12px] text-rose-800">
                   복구 불가. 통계 보존이 필요하면 "보관함" 영역 정합 권장.
                 </div>
               </div>
 
               <div>
-                <label className="block text-[12px] text-white/60 mb-1.5">
-                  확정을 위해 <span className="text-rose-300 font-mono font-semibold">삭제</span> 단어를 직접 입력해주세요
+                <label className="block text-[12px] text-slate-500 mb-1.5">
+                  확정을 위해 <span className="text-rose-700 font-mono font-semibold">삭제</span> 단어를 직접 입력해주세요
                 </label>
                 <input
                   type="text"
@@ -198,7 +198,7 @@ export default function JourneyActionConfirmModal({ mode, journeyName, onConfirm
                   onChange={(e) => setDeleteConfirmInput(e.target.value)}
                   placeholder="삭제"
                   autoFocus
-                  className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/20 focus:outline-none focus:border-rose-400/50 transition-colors"
+                  className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-rose-300 transition-colors"
                 />
               </div>
             </>
@@ -206,10 +206,10 @@ export default function JourneyActionConfirmModal({ mode, journeyName, onConfirm
         </div>
 
         {/* 액션 */}
-        <div className="flex items-center gap-2 p-5 border-t border-white/10 bg-slate-950/50">
+        <div className="flex items-center gap-2 p-5 border-t border-slate-200 bg-slate-100">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors"
+            className="flex-1 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-colors"
           >
             취소
           </button>

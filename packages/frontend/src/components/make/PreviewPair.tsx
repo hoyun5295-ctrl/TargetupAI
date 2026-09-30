@@ -80,10 +80,10 @@ export default function PreviewPair({
     <div className={`h-full min-h-0 flex ${compact ? 'flex-col items-center gap-5' : 'gap-6 xl:gap-8'} justify-center`}>
       {/* 휴대폰 */}
       <div className="flex flex-col min-h-0 shrink-0" style={{ width: phoneW + 20 }}>
-        <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-white/85 mb-2.5 h-5">
-          <Smartphone className="w-3.5 h-3.5 text-violet-300" />휴대폰으로 볼 때
-          <span className="text-white/40 font-normal text-[11.5px]">고치면 바로 바뀌어요</span>
-          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-300 ml-auto" aria-label="다시 그리는 중" />}
+        <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-700 mb-2.5 h-5">
+          <Smartphone className="w-3.5 h-3.5 text-violet-700" />휴대폰으로 볼 때
+          <span className="text-slate-400 font-normal text-[11.5px]">고치면 바로 바뀌어요</span>
+          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-700 ml-auto" aria-label="다시 그리는 중" />}
         </div>
         {phoneTop && <div className="mb-2.5">{phoneTop}</div>}
         <div ref={box.ref} className="flex-1 min-h-0">
@@ -104,19 +104,19 @@ export default function PreviewPair({
               {html ? (
                 <PreviewFrame html={html} viewport={PHONE_VIEWPORT} displayWidth={phoneW} displayHeight={screenH - headH} tap={!!onTap} selectedId={selectedId} onTap={onTap} onRect={setRect} title="휴대폰 미리보기" />
               ) : (
-                <div className="flex items-center justify-center text-slate-400 text-[12px]" style={{ height: screenH - headH }} data-empty>
+                <div className="flex items-center justify-center text-slate-500 text-[12px]" style={{ height: screenH - headH }} data-empty>
                   {error ? <span className="inline-flex items-center gap-1.5 text-rose-500"><AlertCircle className="w-4 h-4" />{error}</span> : emptyText ? <span className="px-6 text-center leading-relaxed">{emptyText}</span> : <Loader2 className="w-5 h-5 animate-spin" />}
                 </div>
               )}
               {blockTools && html && selectedId && rect && rect.id === selectedId && rect.top + rect.height > 0 && rect.top < screenH - headH && (
                 <div
-                  className="absolute right-2 z-10 flex items-center gap-0.5 rounded-xl bg-indigo-950/95 border border-white/15 shadow-xl px-1 py-1"
+                  className="absolute right-2 z-10 flex items-center gap-0.5 rounded-xl bg-indigo-50 border border-slate-300 shadow-xl px-1 py-1"
                   style={{ top: Math.max(headH + 6, Math.min(screenH - 44, headH + rect.top + 8)) }}
                 >
-                  <button type="button" onClick={blockTools.onUp} disabled={!blockTools.canUp} className="w-8 h-8 rounded-lg text-white/85 hover:bg-white/10 disabled:opacity-30 flex items-center justify-center" aria-label="위로"><ChevronUp className="w-4 h-4" /></button>
-                  <button type="button" onClick={blockTools.onDown} disabled={!blockTools.canDown} className="w-8 h-8 rounded-lg text-white/85 hover:bg-white/10 disabled:opacity-30 flex items-center justify-center" aria-label="아래로"><ChevronDown className="w-4 h-4" /></button>
-                  {blockTools.onDuplicate && <button type="button" onClick={blockTools.onDuplicate} className="w-8 h-8 rounded-lg text-white/85 hover:bg-white/10 flex items-center justify-center" aria-label="복제"><Copy className="w-4 h-4" /></button>}
-                  {blockTools.onDelete && <button type="button" onClick={blockTools.onDelete} className="w-8 h-8 rounded-lg text-rose-300 hover:bg-rose-500/15 flex items-center justify-center" aria-label="빼기"><Trash2 className="w-4 h-4" /></button>}
+                  <button type="button" onClick={blockTools.onUp} disabled={!blockTools.canUp} className="w-8 h-8 rounded-lg text-slate-700 hover:bg-slate-100 disabled:opacity-30 flex items-center justify-center" aria-label="위로"><ChevronUp className="w-4 h-4" /></button>
+                  <button type="button" onClick={blockTools.onDown} disabled={!blockTools.canDown} className="w-8 h-8 rounded-lg text-slate-700 hover:bg-slate-100 disabled:opacity-30 flex items-center justify-center" aria-label="아래로"><ChevronDown className="w-4 h-4" /></button>
+                  {blockTools.onDuplicate && <button type="button" onClick={blockTools.onDuplicate} className="w-8 h-8 rounded-lg text-slate-700 hover:bg-slate-100 flex items-center justify-center" aria-label="복제"><Copy className="w-4 h-4" /></button>}
+                  {blockTools.onDelete && <button type="button" onClick={blockTools.onDelete} className="w-8 h-8 rounded-lg text-rose-700 hover:bg-rose-100 flex items-center justify-center" aria-label="빼기"><Trash2 className="w-4 h-4" /></button>}
                 </div>
               )}
             </div>
@@ -126,11 +126,11 @@ export default function PreviewPair({
 
       {/* PC */}
       <div className={`${compact ? 'w-full max-w-[336px]' : 'w-[240px] xl:w-[250px]'} shrink-0`}>
-        <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-white/85 mb-2.5 h-5"><Monitor className="w-3.5 h-3.5 text-violet-300" />PC로 볼 때</div>
+        <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-700 mb-2.5 h-5"><Monitor className="w-3.5 h-3.5 text-violet-700" />PC로 볼 때</div>
         <PcCard kind={kind} html={html} width={compact ? 336 : 240} onOpen={() => setBigOpen(true)} />
         <ul className="mt-3 space-y-1.5">
           {pcNotes(kind).map((n) => (
-            <li key={n.text} className={`flex gap-1.5 text-[11.5px] leading-snug ${n.warn ? 'text-amber-300' : 'text-white/60'}`}>
+            <li key={n.text} className={`flex gap-1.5 text-[11.5px] leading-snug ${n.warn ? 'text-amber-700' : 'text-slate-500'}`}>
               <span className={`mt-[6px] w-1 h-1 rounded-full shrink-0 ${n.warn ? 'bg-amber-300' : 'bg-violet-400'}`} />{n.text}
             </li>
           ))}
@@ -152,7 +152,7 @@ function PcCard({ kind, html, width, onOpen }: { kind: PreviewKind; html: string
   const mail = kind === 'email';
   const sideW = mail ? Math.round(width * 0.14) : 0;
   return (
-    <button type="button" onClick={onOpen} className="block rounded-xl overflow-hidden border border-white/15 bg-slate-100 text-left hover:border-violet-400/60 transition-colors" style={{ width }} aria-label="PC 화면 크게 보기">
+    <button type="button" onClick={onOpen} className="block rounded-xl overflow-hidden border border-slate-300 bg-slate-100 text-left hover:border-violet-300 transition-colors" style={{ width }} aria-label="PC 화면 크게 보기">
       <div className="flex items-center gap-1 px-2 bg-slate-300/80" style={{ height: chromeH }}>
         <span className="w-1.5 h-1.5 rounded-full bg-slate-500/70" /><span className="w-1.5 h-1.5 rounded-full bg-slate-500/70" /><span className="w-1.5 h-1.5 rounded-full bg-slate-500/70" />
       </div>
@@ -183,18 +183,18 @@ export function PcBigModal({ kind, html, onClose }: { kind: PreviewKind; html: s
     <div className={MK_MODAL_BACKDROP} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={`${MK_MODAL} w-full max-w-[1160px] p-5 md:p-6`} role="dialog" aria-label="PC에서 볼 때">
         <div className="flex items-center justify-between mb-4">
-          <div className="text-[17px] font-bold text-white inline-flex items-center gap-2"><Monitor className="w-5 h-5 text-violet-300" />PC에서 볼 때</div>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+          <div className="text-[17px] font-bold text-slate-900 inline-flex items-center gap-2"><Monitor className="w-5 h-5 text-violet-700" />PC에서 볼 때</div>
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
-        <div className="rounded-xl border border-white/10 bg-slate-800/60 p-3 flex justify-center">
+        <div className="rounded-xl border border-slate-200 bg-slate-100 p-3 flex justify-center">
           <div className="rounded-lg overflow-hidden" style={{ width: w }}>
             <PreviewFrame html={html} viewport={kind === 'email' ? 1100 : PC_VIEWPORT} displayWidth={w} displayHeight={h} title="PC 미리보기(크게)" />
           </div>
         </div>
         <div className="mt-3.5 flex flex-wrap gap-x-5 gap-y-1.5">
           {modalNotes(kind).map((n) => (
-            <span key={n.text} className={`inline-flex items-center gap-1.5 text-[12px] ${n.warn ? 'text-amber-300' : 'text-white/70'}`}>
-              {n.warn ? <AlertCircle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5 text-emerald-400" />}{n.text}
+            <span key={n.text} className={`inline-flex items-center gap-1.5 text-[12px] ${n.warn ? 'text-amber-700' : 'text-slate-600'}`}>
+              {n.warn ? <AlertCircle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5 text-emerald-600" />}{n.text}
             </span>
           ))}
         </div>

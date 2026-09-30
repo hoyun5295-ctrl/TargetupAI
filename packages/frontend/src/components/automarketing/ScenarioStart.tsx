@@ -36,8 +36,8 @@ const SCENARIOS: Array<ScenarioPick & { icon: LucideIcon; desc: string }> = [
 export default function ScenarioStart({ onSelect }: { onSelect: (s: ScenarioPick) => void }) {
   return (
     <div>
-      <h2 className="text-lg md:text-xl font-semibold text-white">검증된 시나리오로 바로 시작</h2>
-      <p className="text-[13px] text-white/60 mt-1.5 mb-4">고르면 타겟·문안·발송 시각이 미리 채워집니다. 가동 전 한 번 확인합니다.</p>
+      <h2 className="text-lg md:text-xl font-semibold text-slate-900">검증된 시나리오로 바로 시작</h2>
+      <p className="text-[13px] text-slate-500 mt-1.5 mb-4">고르면 타겟·문안·발송 시각이 미리 채워집니다. 가동 전 한 번 확인합니다.</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {SCENARIOS.map((s) => {
@@ -46,19 +46,19 @@ export default function ScenarioStart({ onSelect }: { onSelect: (s: ScenarioPick
             <button
               key={s.key}
               onClick={() => onSelect({ key: s.key, name: s.name, objective: s.objective, schedule: s.schedule, scheduleDayOfMonth: s.scheduleDayOfMonth, segmentKey: s.segmentKey, segmentParams: s.segmentParams })}
-              className="text-left bg-white/5 hover:bg-white/10 border border-white/10 hover:border-indigo-400/30 rounded-xl p-4 min-h-[118px] transition-colors"
+              className="text-left bg-white hover:bg-slate-100 border border-slate-200 hover:border-indigo-200 rounded-xl p-4 min-h-[118px] transition-colors"
             >
-              <div className="w-9 h-9 rounded-xl bg-indigo-500/15 text-indigo-300 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
                 <Icon className="w-5 h-5" />
               </div>
-              <div className="mt-3 text-sm font-medium text-white">{s.name}</div>
-              <div className="mt-1 text-xs text-white/55 leading-relaxed">{s.desc}</div>
+              <div className="mt-3 text-sm font-medium text-slate-900">{s.name}</div>
+              <div className="mt-1 text-xs text-slate-500 leading-relaxed">{s.desc}</div>
             </button>
           );
         })}
       </div>
 
-      <div className="mt-4 flex items-center justify-center gap-1.5 text-xs text-white/40">
+      <div className="mt-4 flex items-center justify-center gap-1.5 text-xs text-slate-400">
         <Lock className="w-3 h-3" />가동 전 한 번 확인합니다. 발송은 그 다음입니다
       </div>
     </div>

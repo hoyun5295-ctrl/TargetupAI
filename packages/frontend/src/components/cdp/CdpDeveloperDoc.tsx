@@ -57,14 +57,14 @@ export default function CdpDeveloperDoc({ title, summary, sections, onCopyAll }:
   const [openKey, setOpenKey] = useState<string | null>(null);
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
       <div className="flex items-start gap-3">
         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-cyan-500/20">
           <Code2 className="w-4.5 h-4.5 text-white" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-white">{title}</div>
-          <p className="text-[12px] text-white/50 leading-relaxed mt-0.5">{summary}</p>
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          <p className="text-[12px] text-slate-500 leading-relaxed mt-0.5">{summary}</p>
         </div>
       </div>
 
@@ -73,7 +73,7 @@ export default function CdpDeveloperDoc({ title, summary, sections, onCopyAll }:
         <button
           type="button"
           onClick={onCopyAll}
-          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-violet-500/25 hover:bg-violet-500/40 border border-violet-400/30 text-[12.5px] font-medium text-violet-100 transition-colors"
+          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-violet-100 hover:bg-violet-200 border border-violet-200 text-[12.5px] font-medium text-violet-900 transition-colors"
         >
           <Copy className="w-3.5 h-3.5" /> 개발자에게 보낼 내용 복사
         </button>
@@ -84,27 +84,27 @@ export default function CdpDeveloperDoc({ title, summary, sections, onCopyAll }:
         {sections.map((sec) => {
           const open = openKey === sec.key;
           return (
-            <div key={sec.key} className="rounded-xl border border-white/[0.07] bg-white/[0.02] overflow-hidden">
+            <div key={sec.key} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
               <button
                 type="button"
                 onClick={() => setOpenKey(open ? null : sec.key)}
                 aria-expanded={open}
-                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-white/[0.03] transition-colors"
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-white transition-colors"
               >
-                <span className="text-[12.5px] font-medium text-white/80">{sec.heading}</span>
+                <span className="text-[12.5px] font-medium text-slate-700">{sec.heading}</span>
                 <span className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-[11px] text-white/30">{sec.items.length}</span>
-                  <ChevronDown className={`w-3.5 h-3.5 text-white/40 transition-transform ${open ? 'rotate-180' : ''}`} />
+                  <span className="text-[11px] text-slate-400">{sec.items.length}</span>
+                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
                 </span>
               </button>
               {open && (
                 <div className="px-3 pb-3 space-y-2">
                   {sec.items.map((it, i) => (
-                    <div key={i} className="rounded-lg bg-slate-900/40 border border-white/[0.07] p-2.5">
-                      <div className="text-[12px] font-semibold text-white/85">{it.title}</div>
-                      <p className="text-[11.5px] text-white/50 leading-relaxed mt-1">{it.desc}</p>
+                    <div key={i} className="rounded-lg bg-white border border-slate-200 p-2.5">
+                      <div className="text-[12px] font-semibold text-slate-700">{it.title}</div>
+                      <p className="text-[11.5px] text-slate-500 leading-relaxed mt-1">{it.desc}</p>
                       {it.code && (
-                        <pre className="mt-2 bg-slate-950 border border-white/10 rounded-lg p-2.5 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{it.code}</pre>
+                        <pre className="mt-2 bg-slate-100 border border-slate-200 rounded-lg p-2.5 text-[11px] text-cyan-800 overflow-x-auto whitespace-pre">{it.code}</pre>
                       )}
                     </div>
                   ))}

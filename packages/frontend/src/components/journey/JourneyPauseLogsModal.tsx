@@ -48,44 +48,44 @@ const REASON_CONFIG: Record<string, { label: string; icon: typeof AlertTriangle;
   manager_manual: {
     label: '담당자 단축 URL 정지',
     icon: UserCircle2,
-    color: 'text-cyan-300',
-    bg: 'bg-cyan-500/15 border-cyan-400/40',
+    color: 'text-cyan-700',
+    bg: 'bg-cyan-100 border-cyan-300',
   },
   balance_insufficient: {
     label: '잔액 부족 자동 정지',
     icon: Wallet,
-    color: 'text-rose-300',
-    bg: 'bg-rose-500/15 border-rose-400/40',
+    color: 'text-rose-700',
+    bg: 'bg-rose-100 border-rose-300',
   },
   carrier_temp_fail: {
     label: '통신사 일시 fail 정지',
     icon: Wifi,
-    color: 'text-amber-300',
-    bg: 'bg-amber-500/15 border-amber-400/40',
+    color: 'text-amber-700',
+    bg: 'bg-amber-100 border-amber-300',
   },
   phone_invalid: {
     label: 'phone 무효 자동 정지',
     icon: PhoneOff,
-    color: 'text-orange-300',
-    bg: 'bg-orange-500/15 border-orange-400/40',
+    color: 'text-orange-700',
+    bg: 'bg-orange-100 border-orange-300',
   },
   admin_manual: {
     label: '관리자 직접 정지',
     icon: UserCircle2,
-    color: 'text-violet-300',
-    bg: 'bg-violet-500/15 border-violet-400/40',
+    color: 'text-violet-700',
+    bg: 'bg-violet-100 border-violet-300',
   },
   race_after_send: {
     label: '발송 직후 정지 (race)',
     icon: AlertTriangle,
-    color: 'text-fuchsia-300',
-    bg: 'bg-fuchsia-500/15 border-fuchsia-400/40',
+    color: 'text-fuchsia-700',
+    bg: 'bg-fuchsia-100 border-fuchsia-300',
   },
   auto_retry_exhausted: {
     label: '자동 재시도 1회 종결 정지',
     icon: Wifi,
-    color: 'text-amber-300',
-    bg: 'bg-amber-500/15 border-amber-400/40',
+    color: 'text-amber-700',
+    bg: 'bg-amber-100 border-amber-300',
   },
 };
 
@@ -162,49 +162,49 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
     >
       <div
-        className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}
-        <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-fuchsia-500/10 via-violet-500/10 to-purple-500/10">
+        <div className="flex items-center justify-between p-5 border-b border-slate-200 bg-gradient-to-r from-fuchsia-50 via-violet-50 to-purple-50">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-violet-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/30">
               <History className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+              <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
                 정지 이력 영구 기록
               </h3>
-              <p className="text-[11px] text-white/50 mt-0.5">{journeyName}</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">{journeyName}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
             aria-label="닫기"
           >
-            <X className="w-4 h-4 text-white/50" />
+            <X className="w-4 h-4 text-slate-500" />
           </button>
         </div>
 
         {/* 검색 + 필터 */}
-        <div className="p-4 border-b border-white/10 bg-slate-950/30 flex flex-col md:flex-row gap-2">
+        <div className="p-4 border-b border-slate-200 bg-slate-100 flex flex-col md:flex-row gap-2">
           <div className="flex-1 relative">
-            <Search className="w-3.5 h-3.5 text-white/30 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
               placeholder="본문 / 담당자 phone / trigger source"
-              className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/40"
+              className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300"
             />
           </div>
           <div className="relative md:w-56">
-            <Filter className="w-3.5 h-3.5 text-white/30 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Filter className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <select
               value={reasonFilter}
               onChange={(e) => setReasonFilter(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-violet-400/40 appearance-none"
+              className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:border-violet-300 appearance-none"
             >
               <option value={ALL_FILTER}>전체 사유 ({logs.length})</option>
               {Object.entries(reasonCounts).map(([reason, count]) => (
@@ -219,26 +219,26 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
         {/* 본문 */}
         <div className="flex-1 overflow-y-auto p-4">
           {loading && (
-            <div className="text-center py-10 text-[12px] text-white/50 flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-violet-300" />
+            <div className="text-center py-10 text-[12px] text-slate-500 flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-violet-700" />
               정지 이력 조회 중
             </div>
           )}
 
           {!loading && error && (
-            <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-400/30">
+            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200">
               <div className="flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
-                <div className="text-[12px] text-rose-100">{error}</div>
+                <AlertTriangle className="w-4 h-4 text-rose-700 flex-shrink-0 mt-0.5" />
+                <div className="text-[12px] text-rose-900">{error}</div>
               </div>
             </div>
           )}
 
           {!loading && !error && filteredLogs.length === 0 && (
             <div className="text-center py-10">
-              <History className="w-10 h-10 text-white/20 mx-auto mb-2" />
-              <div className="text-[13px] text-white/50">정지 이력 없음</div>
-              <div className="text-[11px] text-white/30 mt-1">
+              <History className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <div className="text-[13px] text-slate-500">정지 이력 없음</div>
+              <div className="text-[11px] text-slate-400 mt-1">
                 담당자 단축 URL 정지 / 자동 정지 발화 시 본 영역에 영구 기록
               </div>
             </div>
@@ -261,22 +261,22 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
                             {config.label}
                           </span>
                           {log.step_order != null && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/70 font-mono">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">
                               step {log.step_order}
                             </span>
                           )}
                           {log.channel && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/70 font-mono uppercase">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono uppercase">
                               {log.channel}
                             </span>
                           )}
                           {log.execution_status_at_pause && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-white/50 font-mono">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white text-slate-500 font-mono">
                               prev: {log.execution_status_at_pause}
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-white/60 mb-1.5">
+                        <div className="text-[11px] text-slate-500 mb-1.5">
                           {dateStr}
                           {log.paused_phone && (
                             <span className="ml-2 font-mono">📞 {log.paused_phone}</span>
@@ -286,19 +286,19 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
                           )}
                         </div>
                         {log.message_body_snapshot && (
-                          <div className="mt-2 p-2 rounded-lg bg-black/30 border border-white/5">
-                            <div className="flex items-center gap-1 mb-1 text-[10px] text-white/40">
+                          <div className="mt-2 p-2 rounded-lg bg-slate-50 border border-slate-100">
+                            <div className="flex items-center gap-1 mb-1 text-[10px] text-slate-400">
                               <MessageSquare className="w-3 h-3" />
                               snapshot 본문 (활성화 시점)
                             </div>
-                            <div className="text-[11px] text-white/70 whitespace-pre-wrap leading-relaxed">
+                            <div className="text-[11px] text-slate-600 whitespace-pre-wrap leading-relaxed">
                               {log.message_body_snapshot.slice(0, 200)}
-                              {log.message_body_snapshot.length > 200 && <span className="text-white/30">...</span>}
+                              {log.message_body_snapshot.length > 200 && <span className="text-slate-400">...</span>}
                             </div>
                           </div>
                         )}
                         {log.pause_trigger_source && (
-                          <div className="mt-2 text-[10px] text-white/30 font-mono">
+                          <div className="mt-2 text-[10px] text-slate-400 font-mono">
                             trigger source: {log.pause_trigger_source}
                           </div>
                         )}
@@ -312,8 +312,8 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
         </div>
 
         {/* 푸터 — Source caption */}
-        <div className="px-5 py-3 border-t border-white/10 bg-slate-950/50">
-          <div className="text-[10px] text-white/30 italic">
+        <div className="px-5 py-3 border-t border-slate-200 bg-slate-100">
+          <div className="text-[10px] text-slate-400 italic">
             Data source: journey_step_pause_logs (D218+ 영구 기록 테이블) · 정지 효과 + execution_status_at_pause 추적
           </div>
         </div>

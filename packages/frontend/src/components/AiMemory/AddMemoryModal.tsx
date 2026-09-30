@@ -70,9 +70,9 @@ const TYPE_OPTIONS: Array<{ type: MemoryType; label: string; placeholder: string
 ];
 
 const IMPORTANCE_GUIDE: Array<{ min: number; label: string; tone: string }> = [
-  { min: 8, label: '매우 중요 (AI 우선 참고)',  tone: 'text-emerald-300' },
-  { min: 5, label: '보통 (일반 참고)',           tone: 'text-amber-300' },
-  { min: 1, label: '낮음 (참고만)',              tone: 'text-white/40' },
+  { min: 8, label: '매우 중요 (AI 우선 참고)',  tone: 'text-emerald-700' },
+  { min: 5, label: '보통 (일반 참고)',           tone: 'text-amber-700' },
+  { min: 1, label: '낮음 (참고만)',              tone: 'text-slate-400' },
 ];
 
 function importanceLabel(v: number): { label: string; tone: string } {
@@ -157,20 +157,20 @@ export default function AddMemoryModal({ open, onClose, onSave, initialType = 'c
       aria-modal="true"
     >
       <div
-        className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm border-b border-white/10 px-6 py-4 flex items-center gap-3">
+        <div className="sticky top-0 bg-white backdrop-blur-sm border-b border-slate-200 px-6 py-4 flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center">
             <Plus className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1">
-            <h3 className="text-base font-bold text-white">학습 메모리 직접 입력</h3>
-            <p className="text-xs text-white/50 mt-0.5">AI가 시스템 프롬프트에 자동 포함하여 회사 고유 톤·정책을 우선 참고합니다</p>
+            <h3 className="text-base font-bold text-slate-900">학습 메모리 직접 입력</h3>
+            <p className="text-xs text-slate-500 mt-0.5">AI가 시스템 프롬프트에 자동 포함하여 회사 고유 톤·정책을 우선 참고합니다</p>
           </div>
           <button
             onClick={() => !saving && onClose()}
-            className="p-2 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors disabled:opacity-30"
+            className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors disabled:opacity-30"
             disabled={saving}
             aria-label="닫기"
           >
@@ -180,7 +180,7 @@ export default function AddMemoryModal({ open, onClose, onSave, initialType = 'c
 
         <div className="p-6 space-y-4">
           <div>
-            <label className="text-xs font-medium text-white/70 block mb-2">학습 분류</label>
+            <label className="text-xs font-medium text-slate-600 block mb-2">학습 분류</label>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               {TYPE_OPTIONS.map((opt) => (
                 <button
@@ -190,7 +190,7 @@ export default function AddMemoryModal({ open, onClose, onSave, initialType = 'c
                   className={`p-2 rounded-lg border text-xs font-medium transition-all ${
                     memoryType === opt.type
                       ? `bg-gradient-to-br ${opt.gradient} text-white border-transparent shadow-lg`
-                      : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'
+                      : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
                   {opt.label}
@@ -200,9 +200,9 @@ export default function AddMemoryModal({ open, onClose, onSave, initialType = 'c
           </div>
 
           <div>
-            <label className="text-xs font-medium text-white/70 block mb-1.5">
-              학습 제목 <span className="text-rose-300">*</span>
-              <span className="text-white/40 ml-2 font-normal">짧고 명확하게 (200자 이내)</span>
+            <label className="text-xs font-medium text-slate-600 block mb-1.5">
+              학습 제목 <span className="text-rose-700">*</span>
+              <span className="text-slate-400 ml-2 font-normal">짧고 명확하게 (200자 이내)</span>
             </label>
             <input
               ref={keyRef}
@@ -211,29 +211,29 @@ export default function AddMemoryModal({ open, onClose, onSave, initialType = 'c
               onChange={(e) => setMemoryKey(e.target.value)}
               placeholder={currentOption.placeholder}
               maxLength={200}
-              className="w-full px-3 py-2.5 bg-slate-950/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/30"
+              className="w-full px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-300 focus:ring-1 focus:ring-emerald-200"
             />
-            <div className="text-[10px] text-white/30 mt-1 text-right">{memoryKey.length} / 200</div>
+            <div className="text-[10px] text-slate-400 mt-1 text-right">{memoryKey.length} / 200</div>
           </div>
 
           <div>
-            <label className="text-xs font-medium text-white/70 block mb-1.5">
-              상세 내용 <span className="text-rose-300">*</span>
-              <span className="text-white/40 ml-2 font-normal">근거 데이터·수치 포함 권장 (2000자 이내)</span>
+            <label className="text-xs font-medium text-slate-600 block mb-1.5">
+              상세 내용 <span className="text-rose-700">*</span>
+              <span className="text-slate-400 ml-2 font-normal">근거 데이터·수치 포함 권장 (2000자 이내)</span>
             </label>
             <textarea
               value={memoryValue}
               onChange={(e) => setMemoryValue(e.target.value)}
               placeholder={currentOption.valuePlaceholder}
               maxLength={2000}
-              className="w-full px-3 py-2.5 bg-slate-950/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-none h-28 focus:outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/30"
+              className="w-full px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 resize-none h-28 focus:outline-none focus:border-emerald-300 focus:ring-1 focus:ring-emerald-200"
             />
-            <div className="text-[10px] text-white/30 mt-1 text-right">{memoryValue.length} / 2000</div>
+            <div className="text-[10px] text-slate-400 mt-1 text-right">{memoryValue.length} / 2000</div>
           </div>
 
           <div>
-            <label className="text-xs font-medium text-white/70 block mb-1.5">
-              중요도 <span className="text-white/40 ml-2 font-normal">높을수록 AI가 우선 참고</span>
+            <label className="text-xs font-medium text-slate-600 block mb-1.5">
+              중요도 <span className="text-slate-400 ml-2 font-normal">높을수록 AI가 우선 참고</span>
             </label>
             <div className="flex items-center gap-3">
               <input
@@ -245,42 +245,42 @@ export default function AddMemoryModal({ open, onClose, onSave, initialType = 'c
                 className="flex-1 accent-emerald-400"
               />
               <div className="flex items-center gap-2 min-w-[180px] justify-end">
-                <span className="text-base font-bold text-white">{importance}</span>
-                <span className="text-white/40 text-xs">/ 10</span>
+                <span className="text-base font-bold text-slate-900">{importance}</span>
+                <span className="text-slate-400 text-xs">/ 10</span>
                 <span className={`text-xs font-medium ${impMeta.tone}`}>{impMeta.label}</span>
               </div>
             </div>
           </div>
 
-          <div className="p-3 bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-400/20 rounded-lg">
+          <div className="p-3 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-lg">
             <div className="flex items-start gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-amber-300 flex-shrink-0 mt-0.5" />
-              <div className="text-[11px] text-white/70 leading-relaxed">
-                <strong className="text-amber-200">입력 팁:</strong> 구체 수치 (클릭률 % / 발송 건수 / 기간)를 포함하면 AI가 더 정확하게 참고합니다.
+              <Sparkles className="w-3.5 h-3.5 text-amber-700 flex-shrink-0 mt-0.5" />
+              <div className="text-[11px] text-slate-600 leading-relaxed">
+                <strong className="text-amber-800">입력 팁:</strong> 구체 수치 (클릭률 % / 발송 건수 / 기간)를 포함하면 AI가 더 정확하게 참고합니다.
                 같은 학습 제목으로 재입력 시 최신 내용으로 업데이트되며, 중요도는 기존 값과 비교하여 더 높은 값이 유지됩니다.
               </div>
             </div>
           </div>
 
           {validationError && (
-            <div className="p-3 bg-rose-500/10 border border-rose-400/30 rounded-lg text-xs text-rose-200">
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800">
               {validationError}
             </div>
           )}
         </div>
 
-        <div className="sticky bottom-0 bg-slate-900/95 backdrop-blur-sm border-t border-white/10 px-6 py-3 flex gap-2 justify-end">
+        <div className="sticky bottom-0 bg-white backdrop-blur-sm border-t border-slate-200 px-6 py-3 flex gap-2 justify-end">
           <button
             onClick={() => !saving && onClose()}
             disabled={saving}
-            className="px-4 py-2 border border-white/10 rounded-lg text-sm text-white/70 hover:bg-white/5 disabled:opacity-30"
+            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-white disabled:opacity-30"
           >
             취소
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-sm rounded-lg font-medium disabled:opacity-40 flex items-center gap-1.5"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-lg font-medium disabled:opacity-40 flex items-center gap-1.5"
           >
             {saving ? (
               <>

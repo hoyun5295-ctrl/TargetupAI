@@ -153,7 +153,6 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
     ],
     costs: [
       { label: '생성(후보 2장)', source: 'image-studio-generate', credits: 2 },
-      { label: '4K로 받기', source: 'image-studio-4k', credits: 2 },
       { label: 'AI 수정', source: 'image-studio-edit', credits: 1 },
     ],
   },

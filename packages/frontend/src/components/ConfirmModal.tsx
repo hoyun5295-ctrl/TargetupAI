@@ -14,6 +14,7 @@
  *   <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
  */
 
+import { useLightSurface } from './zone/surface-tone';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useBodyFlag } from '../lib/surface-flags';
@@ -77,13 +78,23 @@ const MODE_CONFIG: Record<ConfirmMode, {
   },
 };
 
+// ★ 2026-09-30 AI 존(밝은 작업대)에서 열릴 때의 짝 — 표지·테두리는 옅은 면, 확정 버튼은 채움(창의 1차 동작)
+const MODE_CONFIG_LIGHT: Record<ConfirmMode, { iconBg: string; iconText: string; border: string; button: string }> = {
+  default: { iconBg: 'bg-indigo-50', iconText: 'text-indigo-600', border: 'border-slate-200', button: 'bg-indigo-600 hover:bg-indigo-700 text-white' },
+  info: { iconBg: 'bg-sky-50', iconText: 'text-sky-600', border: 'border-slate-200', button: 'bg-indigo-600 hover:bg-indigo-700 text-white' },
+  warning: { iconBg: 'bg-amber-50', iconText: 'text-amber-600', border: 'border-amber-200', button: 'bg-amber-500 hover:bg-amber-400 text-slate-900' },
+  danger: { iconBg: 'bg-rose-50', iconText: 'text-rose-600', border: 'border-rose-200', button: 'bg-rose-600 hover:bg-rose-700 text-white' },
+};
+
 export default function ConfirmModal({ state, onClose }: Props) {
+  const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const [running, setRunning] = useState(false);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
   const open = !!state;
   // ★ 2026-08-22 인터럽트 표시 — 도움말 런처가 이 창을 덮지 않게 숨는다(조기 return 위)
   useBodyFlag('data-interrupt-open', open);
-  const config = MODE_CONFIG[state?.mode || 'default'];
+  const mode = state?.mode || 'default';
+  const config = light ? { ...MODE_CONFIG[mode], ...MODE_CONFIG_LIGHT[mode] } : MODE_CONFIG[mode];
   const Icon = config.icon;
 
   useEffect(() => {
@@ -115,43 +126,43 @@ export default function ConfirmModal({ state, onClose }: Props) {
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[2000] p-4"
     >
       <div
-        className={`bg-slate-900 border ${config.border} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden`}
+        className={light ? `bg-white border ${config.border} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden` : `bg-slate-900 border ${config.border} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
         {/* 헤더 */}
-        <div className="flex items-center justify-between p-5 border-b border-white/10">
+        <div className={light ? "flex items-center justify-between p-5 border-b border-slate-200" : "flex items-center justify-between p-5 border-b border-white/10"}>
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-xl ${config.iconBg} flex items-center justify-center`}>
               <Icon className={`w-5 h-5 ${config.iconText}`} />
             </div>
-            <h3 className="text-base font-semibold text-white">{state.title}</h3>
+            <h3 className={light ? "text-base font-semibold text-slate-900" : "text-base font-semibold text-white"}>{state.title}</h3>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+            className={light ? "p-1.5 hover:bg-slate-100 rounded-lg transition-colors" : "p-1.5 hover:bg-white/10 rounded-lg transition-colors"}
             aria-label="닫기"
           >
-            <X className="w-4 h-4 text-white/50" />
+            <X className={light ? "w-4 h-4 text-slate-500" : "w-4 h-4 text-white/50"} />
           </button>
         </div>
 
         {/* 본문 */}
         {state.description && (
           <div className="px-5 py-4">
-            <div className="text-sm text-white/75 leading-relaxed whitespace-pre-wrap break-words">
+            <div className={light ? "text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" : "text-sm text-white/75 leading-relaxed whitespace-pre-wrap break-words"}>
               {state.description}
             </div>
           </div>
         )}
 
         {/* 액션 */}
-        <div className="flex items-center gap-2 p-5 border-t border-white/10 bg-slate-950/50">
+        <div className={light ? "flex items-center gap-2 p-5 border-t border-slate-200 bg-slate-50" : "flex items-center gap-2 p-5 border-t border-white/10 bg-slate-950/50"}>
           <button
             onClick={onClose}
             disabled={running}
-            className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 text-white/80 rounded-lg text-sm font-medium transition-colors"
+            className={light ? "flex-1 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-slate-700 rounded-lg text-sm font-medium transition-colors" : "flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 text-white/80 rounded-lg text-sm font-medium transition-colors"}
           >
             {state.cancelLabel || '취소'}
           </button>

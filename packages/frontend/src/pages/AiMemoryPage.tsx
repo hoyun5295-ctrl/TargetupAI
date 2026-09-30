@@ -1,5 +1,6 @@
-import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { AI_MEMORY_TABS } from '../components/zone/zone-tabs';
+import { Plus as ZPlus } from 'lucide-react';
 /**
  * AiMemoryPage.tsx — D217+ AI 학습 메모리 (Journey Builder 동급 8 화면)
  *
@@ -566,82 +567,28 @@ export default function AiMemoryPage() {
 
   return (
     // ★ 2026-08-21 오퍼레이터 표면 단계(OUI): 작업면 = slate-950 단색 + 상단 아우라 1. 값은 utils/operator-ui.ts가 소유(0527 보라화 → 0627 slate 복귀 이력의 옛 주석 정정)
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-      {/* ───────── 1. sticky 헤더 — D222+ Phase 3 보라 톤 다운 ───────── */}
-      <div className={OUI_HEADER}>
-        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="AI Operator로 돌아가기">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-violet-400 to-fuchsia-500`}>
-            <Brain className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className={OUI_TITLE}>AI 학습 메모리</h1>
-            </div>
-            <p className={OUI_SUBTITLE}>회사별 누적 학습. 시간이 지날수록 AI 추천 정확도가 향상됩니다</p>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            {/* ★ 2026-09-20 (Harold 확정 — SNS 채널 신설): AI 자율 예측 = AI Operator 타일에서 제거 → 여기 서브메뉴로.
-                라우트 /predictive는 유지(비파괴). ⛔ **버린 것이 아니라 합친 것이다** — 타일만 내리고 입구를 안 내면
-                주소를 아는 사람만 쓰는 죽은 기능이 된다. 누적 학습(이 화면)과 예측은 같은 줄기라 여기가 제자리다. */}
-            <button
-              onClick={() => navigate('/predictive')}
-              className="text-xs text-violet-200 border border-violet-400/30 hover:bg-violet-500/20 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
-              aria-label="AI 자율 예측"
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">자율 예측</span>
-            </button>
-            {/* ★ 2026-08-12 (Harold 확정 — 플래너 메뉴 개편): 세그먼트 = AI Operator 타일에서 제거 → 여기 서브메뉴로.
-                라우트 /segments는 유지(비파괴) — AI 사용량 이동(0709)과 같은 선례. */}
-            <button
-              onClick={() => navigate('/segments')}
-              className="text-xs text-violet-200 border border-violet-400/30 hover:bg-violet-500/20 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
-              aria-label="세그먼트"
-            >
-              <Target className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">세그먼트</span>
-            </button>
-            {/* ★ 2026-07-09 (Harold 지시): AI 사용량 = 헤더 전역 메뉴에서 제거 → AI 메모리 상단 서브메뉴로 이동 */}
-            <button
-              onClick={() => navigate('/ai-usage')}
-              className="text-xs text-violet-200 border border-violet-400/30 hover:bg-violet-500/20 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
-              aria-label="AI 사용량"
-            >
-              <Activity className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">AI 사용량</span>
-            </button>
-            <button
-              onClick={reloadAll}
-              className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
-              aria-label="새로고침"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${overviewLoading || topLoading ? 'animate-spin' : ''}`} />
-              <span className="hidden md:inline">새로고침</span>
-            </button>
-            <button
-              onClick={() => setShowGuideModal(true)}
-              className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
-              aria-label="가이드"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">가이드</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-5 space-y-3">
+    <ZoneFrame
+      moduleId="ai-memory"
+      tabs={AI_MEMORY_TABS}
+      activeTab="learn"
+      aux={{ label: '가이드', icon: BookOpen, onClick: () => setShowGuideModal(true) }}
+      command={{
+        stats: overview ? [
+          { label: '누적 학습', value: `${overview.total_memories.toLocaleString()}건` },
+          { label: '최근 30일', value: `${Number(overview.recent_30d_added || 0).toLocaleString()}건` },
+        ] : [{ label: '누적 학습', value: '—' }],
+        primary: { label: '직접 가르치기', icon: ZPlus, tone: 'indigo', onClick: () => setShowAddModal(true) },
+        stamp: { text: '다시 읽기', onRefresh: reloadAll, loading: overviewLoading || topLoading },
+      }}
+    >
+      <div className="space-y-3">
         {/* ───────── DB 마이그레이션 안내 ───────── */}
         {migrationPending && (
-          <div className="p-4 bg-amber-500/10 border border-amber-400/30 rounded-xl flex items-start gap-3">
-            <Info className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" />
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+            <Info className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
-              <div className="text-sm font-semibold text-amber-100 mb-1">잠시 후 다시 시도해 주세요</div>
-              <div className="text-xs text-white/70 leading-relaxed">기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.</div>
+              <div className="text-sm font-semibold text-amber-900 mb-1">잠시 후 다시 시도해 주세요</div>
+              <div className="text-xs text-slate-600 leading-relaxed">기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.</div>
             </div>
           </div>
         )}
@@ -665,63 +612,63 @@ export default function AiMemoryPage() {
         />
 
         {/* ───────── 2. AI 자율 진단 카드 ───────── */}
-        <div className="p-4 bg-gradient-to-br from-violet-500/20 via-fuchsia-500/15 to-pink-500/20 border border-violet-400/30 rounded-2xl">
+        <div className="p-4 bg-gradient-to-br from-violet-50 via-fuchsia-50 to-pink-50 border border-violet-200 rounded-2xl">
           <div className="flex items-start gap-3">
             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-violet-500/30">
               <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-base font-bold text-white">AI 자율 진단</h2>
-                <span className="text-[10px] bg-violet-500/30 text-violet-100 px-2 py-0.5 rounded-full font-medium">실시간</span>
+                <h2 className="text-base font-bold text-slate-900">AI 자율 진단</h2>
+                <span className="text-[10px] bg-violet-100 text-violet-900 px-2 py-0.5 rounded-full font-medium">실시간</span>
               </div>
               {overviewLoading ? (
-                <div className="flex items-center gap-2 text-sm text-white/60">
+                <div className="flex items-center gap-2 text-sm text-slate-500">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   학습 데이터 분석 중...
                 </div>
               ) : overview ? (
-                <p className="text-sm text-white/90 leading-relaxed">{overview.top_insight}</p>
+                <p className="text-sm text-slate-800 leading-relaxed">{overview.top_insight}</p>
               ) : (
-                <p className="text-sm text-white/50">진단 정보를 불러올 수 없습니다.</p>
+                <p className="text-sm text-slate-500">진단 정보를 불러올 수 없습니다.</p>
               )}
               {overview && overview.total_memories > 0 && (
                 <div className="mt-3 flex flex-wrap gap-3 text-[11px]">
-                  <span className="text-white/60">
-                    누적 학습 <strong className="text-white">{overview.total_memories.toLocaleString()}건</strong>
+                  <span className="text-slate-500">
+                    누적 학습 <strong className="text-slate-900">{overview.total_memories.toLocaleString()}건</strong>
                   </span>
-                  <span className="text-white/60">
-                    최근 30일 <strong className="text-emerald-300">+{overview.recent_30d_added.toLocaleString()}건</strong>
+                  <span className="text-slate-500">
+                    최근 30일 <strong className="text-emerald-700">+{overview.recent_30d_added.toLocaleString()}건</strong>
                   </span>
                   {overview.days_since_last_learning !== null && (
-                    <span className="text-white/60">
-                      마지막 학습 <strong className="text-white">
+                    <span className="text-slate-500">
+                      마지막 학습 <strong className="text-slate-900">
                         {overview.days_since_last_learning === 0 ? '오늘' : `${overview.days_since_last_learning}일 전`}
                       </strong>
                     </span>
                   )}
                   {overview.avg_importance !== null && (
-                    <span className="text-white/60">
-                      평균 중요도 <strong className="text-white">{overview.avg_importance.toFixed(1)}/10</strong>
+                    <span className="text-slate-500">
+                      평균 중요도 <strong className="text-slate-900">{overview.avg_importance.toFixed(1)}/10</strong>
                     </span>
                   )}
                 </div>
               )}
             </div>
           </div>
-          <div className="text-[10px] text-white/30 italic mt-3 pl-15">
+          <div className="text-[10px] text-slate-400 italic mt-3 pl-15">
             Data source: ai_company_memory 5 타입 자동 누적 (성공 패턴·채널 성과 = 캠페인 클릭 실측 / 고객 인사이트 = 등급 집계 / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 차단·반려) + 회사 admin 직접 입력
           </div>
         </div>
 
         {/* ───────── 3. 자연어 입력 + 빠른 시작 7 카드 ───────── */}
         <div className="space-y-3">
-          <div className="p-4 bg-gradient-to-br from-fuchsia-500/15 via-purple-500/10 to-indigo-500/15 border border-fuchsia-400/30 rounded-2xl">
+          <div className="p-4 bg-gradient-to-br from-fuchsia-50 via-purple-50 to-indigo-50 border border-fuchsia-200 rounded-2xl">
             <div className="flex items-center gap-2 mb-2">
-              <Sparkles className="w-4 h-4 text-fuchsia-300" />
-              <span className="text-sm font-semibold text-white">자연어로 학습 메모리에 질문하기</span>
+              <Sparkles className="w-4 h-4 text-fuchsia-700" />
+              <span className="text-sm font-semibold text-slate-900">자연어로 학습 메모리에 질문하기</span>
             </div>
-            <p className="text-[11px] text-white/60 mb-3">예: "지난 30일 VIP 영역에서 AI가 발견한 가장 강한 패턴은?" (Enter 키로 즉시 검색)</p>
+            <p className="text-[11px] text-slate-500 mb-3">예: "지난 30일 VIP 영역에서 AI가 발견한 가장 강한 패턴은?" (Enter 키로 즉시 검색)</p>
             <div className="flex gap-2">
               <input
                 ref={queryInputRef}
@@ -736,7 +683,7 @@ export default function AiMemoryPage() {
                 placeholder="질문을 입력하고 Enter 키를 눌러주세요 (2~500자)"
                 maxLength={500}
                 disabled={naturalLoading}
-                className="flex-1 px-4 py-2.5 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 focus:ring-1 focus:ring-fuchsia-400/30 disabled:opacity-40"
+                className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300 focus:ring-1 focus:ring-fuchsia-200 disabled:opacity-40"
               />
               <button
                 onClick={() => runNaturalSearch(naturalQuery)}
@@ -757,13 +704,13 @@ export default function AiMemoryPage() {
                   key={card.id}
                   onClick={() => handleQuickStart(card)}
                   disabled={naturalLoading && !!card.query}
-                  className="p-2.5 bg-white/5 border border-white/10 hover:bg-white/[0.08] hover:border-white/20 rounded-lg text-left transition-all group disabled:opacity-50"
+                  className="p-2.5 bg-white border border-slate-200 hover:bg-slate-100 hover:border-slate-300 rounded-lg text-left transition-all group disabled:opacity-50"
                 >
                   <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-2 shadow-md group-hover:scale-110 transition-transform`}>
                     <Icon className="w-4 h-4 text-white" />
                   </div>
-                  <div className="text-xs font-semibold text-white mb-0.5 truncate">{card.label}</div>
-                  <div className="text-[10px] text-white/50 leading-snug line-clamp-2">{card.hint}</div>
+                  <div className="text-xs font-semibold text-slate-900 mb-0.5 truncate">{card.label}</div>
+                  <div className="text-[10px] text-slate-500 leading-snug line-clamp-2">{card.hint}</div>
                 </button>
               );
             })}
@@ -772,44 +719,44 @@ export default function AiMemoryPage() {
 
         {/* ───────── 자연어 검색 결과 ───────── */}
         {naturalResult && (
-          <div className="p-5 bg-gradient-to-br from-indigo-500/15 via-violet-500/10 to-purple-500/15 border border-indigo-400/30 rounded-2xl space-y-3">
+          <div className="p-5 bg-gradient-to-br from-indigo-50 via-violet-50 to-purple-50 border border-indigo-200 rounded-2xl space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] text-white/40 mb-1">질문</div>
-                <div className="text-sm text-white/90 italic">"{naturalResult.query}"</div>
+                <div className="text-[10px] text-slate-400 mb-1">질문</div>
+                <div className="text-sm text-slate-800 italic">"{naturalResult.query}"</div>
               </div>
-              <button onClick={() => setNaturalResult(null)} className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/10" aria-label="결과 닫기">
+              <button onClick={() => setNaturalResult(null)} className="p-1.5 rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100" aria-label="결과 닫기">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            <div className="pt-3 border-t border-white/10">
-              <div className="text-[10px] text-violet-300 mb-1.5 flex items-center gap-1">
+            <div className="pt-3 border-t border-slate-200">
+              <div className="text-[10px] text-violet-700 mb-1.5 flex items-center gap-1">
                 <Sparkles className="w-3 h-3" />
                 AI 답변
               </div>
               {naturalLoading ? (
-                <div className="flex items-center gap-2 text-sm text-white/60">
+                <div className="flex items-center gap-2 text-sm text-slate-500">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   학습 메모리를 분석하여 답변 생성 중...
                 </div>
               ) : (
-                <div className="text-sm text-white whitespace-pre-wrap leading-relaxed">{naturalResult.answer}</div>
+                <div className="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">{naturalResult.answer}</div>
               )}
             </div>
             {!naturalLoading && naturalResult.related.length > 0 && (
-              <div className="pt-3 border-t border-white/10">
-                <div className="text-[10px] text-white/40 mb-2">관련 학습 {naturalResult.related.length}건</div>
+              <div className="pt-3 border-t border-slate-200">
+                <div className="text-[10px] text-slate-400 mb-2">관련 학습 {naturalResult.related.length}건</div>
                 <div className="space-y-1.5">
                   {naturalResult.related.map((m) => {
                     const meta = TYPE_META[m.memoryType] || FALLBACK_TYPE_META;
                     return (
-                      <div key={m.id} className="p-2 bg-white/5 border border-white/10 rounded-lg flex items-start gap-2">
+                      <div key={m.id} className="p-2 bg-white border border-slate-200 rounded-lg flex items-start gap-2">
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-gradient-to-r ${meta.gradient} text-white flex-shrink-0`}>
                           {meta.label}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium text-white truncate">{m.memoryKey}</div>
-                          <div className="text-[11px] text-white/60 line-clamp-2">{m.memoryValue}</div>
+                          <div className="text-xs font-medium text-slate-900 truncate">{m.memoryKey}</div>
+                          <div className="text-[11px] text-slate-500 line-clamp-2">{m.memoryValue}</div>
                         </div>
                       </div>
                     );
@@ -817,31 +764,31 @@ export default function AiMemoryPage() {
                 </div>
               </div>
             )}
-            <div className="text-[10px] text-white/30 italic">
+            <div className="text-[10px] text-slate-400 italic">
               Data source: buildMemoryPromptContext (중요도 3 이상 최대 30건 + 시스템 프롬프트 포함)
             </div>
           </div>
         )}
 
         {/* ───────── 4. 5 메모리 타입 분포 도넛 ───────── */}
-        <div className="p-5 bg-white/5 border border-white/10 rounded-2xl">
+        <div className="p-5 bg-white border border-slate-200 rounded-2xl">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-violet-300" />
-              <h3 className="text-sm font-semibold text-white">5 학습 타입 분포</h3>
+              <BarChart3 className="w-4 h-4 text-violet-700" />
+              <h3 className="text-sm font-semibold text-slate-900">5 학습 타입 분포</h3>
             </div>
             {overview && (
-              <span className="text-[11px] text-white/50">
-                전체 <strong className="text-white">{overview.total_memories.toLocaleString()}건</strong>
+              <span className="text-[11px] text-slate-500">
+                전체 <strong className="text-slate-900">{overview.total_memories.toLocaleString()}건</strong>
               </span>
             )}
           </div>
           {overviewLoading ? (
             <div className="flex justify-center py-12">
-              <Loader2 className="w-5 h-5 animate-spin text-white/40" />
+              <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
             </div>
           ) : !overview || overview.total_memories < 5 ? (
-            <div className="text-center py-6 text-white/40 text-sm">
+            <div className="text-center py-6 text-slate-400 text-sm">
               학습 {overview?.total_memories || 0}건. 5건 이상 쌓이면 분포 차트가 표시됩니다.
             </div>
           ) : (
@@ -858,10 +805,10 @@ export default function AiMemoryPage() {
                       <title>{seg.label}: {seg.count}건 ({(seg.percent * 100).toFixed(1)}%)</title>
                     </path>
                   ))}
-                  <text x="100" y="95" textAnchor="middle" className="fill-white" style={{ fontSize: '22px', fontWeight: 700 }}>
+                  <text x="100" y="95" textAnchor="middle" className="fill-slate-900" style={{ fontSize: '22px', fontWeight: 700 }}>
                     {overview.total_memories.toLocaleString()}
                   </text>
-                  <text x="100" y="115" textAnchor="middle" className="fill-white/50" style={{ fontSize: '11px' }}>
+                  <text x="100" y="115" textAnchor="middle" className="fill-slate-500" style={{ fontSize: '11px' }}>
                     누적 학습
                   </text>
                 </svg>
@@ -875,12 +822,12 @@ export default function AiMemoryPage() {
                     <div key={type} className="flex items-center gap-3">
                       <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: meta.color }} />
                       <div className="flex-1 min-w-0">
-                        <span className="text-sm text-white">{meta.label}</span>
-                        <span className="block text-[10px] text-white/40 truncate">{meta.how}</span>
+                        <span className="text-sm text-slate-900">{meta.label}</span>
+                        <span className="block text-[10px] text-slate-400 truncate">{meta.how}</span>
                       </div>
-                      <span className="text-xs text-white/60 font-mono">{count.toLocaleString()}</span>
-                      <span className="text-xs text-white/40 font-mono w-12 text-right">{percent.toFixed(1)}%</span>
-                      <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <span className="text-xs text-slate-500 font-mono">{count.toLocaleString()}</span>
+                      <span className="text-xs text-slate-400 font-mono w-12 text-right">{percent.toFixed(1)}%</span>
+                      <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div className="h-full" style={{ width: `${percent}%`, background: meta.color }} />
                       </div>
                     </div>
@@ -889,24 +836,24 @@ export default function AiMemoryPage() {
               </div>
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-4">Data source: ai_company_memory.memory_type 5 카테고리 집계</div>
+          <div className="text-[10px] text-slate-400 italic mt-4">Data source: ai_company_memory.memory_type 5 카테고리 집계</div>
         </div>
 
         {/* ───────── 5. 영향도 top 10 카드 ───────── */}
-        <div className="p-5 bg-white/5 border border-white/10 rounded-2xl">
+        <div className="p-5 bg-white border border-slate-200 rounded-2xl">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-emerald-300" />
-              <h3 className="text-sm font-semibold text-white">AI 가장 자주 참고하는 학습 Top 10</h3>
+              <TrendingUp className="w-4 h-4 text-emerald-700" />
+              <h3 className="text-sm font-semibold text-slate-900">AI 가장 자주 참고하는 학습 Top 10</h3>
             </div>
-            <span className="text-[11px] text-white/40">활용 횟수 + 중요도 내림차순</span>
+            <span className="text-[11px] text-slate-400">활용 횟수 + 중요도 내림차순</span>
           </div>
           {topLoading ? (
             <div className="flex justify-center py-12">
-              <Loader2 className="w-5 h-5 animate-spin text-white/40" />
+              <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
             </div>
           ) : topImpact.length === 0 ? (
-            <div className="text-center py-10 text-white/40 text-sm">
+            <div className="text-center py-10 text-slate-400 text-sm">
               학습 데이터가 충분히 누적되면 여기에 표시됩니다.
             </div>
           ) : (
@@ -922,7 +869,7 @@ export default function AiMemoryPage() {
               ))}
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-4">Data source: ai_company_memory ORDER BY usage_count DESC, importance DESC LIMIT 10</div>
+          <div className="text-[10px] text-slate-400 italic mt-4">Data source: ai_company_memory ORDER BY usage_count DESC, importance DESC LIMIT 10</div>
         </div>
 
         {/* ───────── 6. 1-click 액션 3 카드 ───────── */}
@@ -930,74 +877,74 @@ export default function AiMemoryPage() {
           <button
             onClick={() => handleQuickStart({ id: 'cleanup', icon: Trash2, label: '', hint: '', gradient: '', action: 'cleanup' })}
             disabled={!isAdmin}
-            className="p-4 bg-gradient-to-br from-rose-500/15 to-pink-500/15 border border-rose-400/30 hover:border-rose-400/50 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
+            className="p-4 bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-200 hover:border-rose-300 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
               <Trash2 className="w-5 h-5 text-white" />
             </div>
-            <div className="text-sm font-semibold text-white mb-1">오래된 학습 정리</div>
-            <div className="text-[11px] text-white/60 leading-relaxed">
+            <div className="text-sm font-semibold text-slate-900 mb-1">오래된 학습 정리</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
               90일+ 미사용 + 중요도 3 미만 학습을 일괄 삭제합니다.
             </div>
-            {!isAdmin && <div className="text-[10px] text-rose-300 mt-1">회사 관리자 전용</div>}
+            {!isAdmin && <div className="text-[10px] text-rose-700 mt-1">회사 관리자 전용</div>}
           </button>
 
           <button
             onClick={() => handleQuickStart({ id: 'add', icon: Plus, label: '', hint: '', gradient: '', action: 'add' })}
             disabled={!isAdmin}
-            className="p-4 bg-gradient-to-br from-emerald-500/15 to-teal-500/15 border border-emerald-400/30 hover:border-emerald-400/50 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
+            className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 hover:border-emerald-300 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
               <Plus className="w-5 h-5 text-white" />
             </div>
-            <div className="text-sm font-semibold text-white mb-1">직접 학습 추가</div>
-            <div className="text-[11px] text-white/60 leading-relaxed">
+            <div className="text-sm font-semibold text-slate-900 mb-1">직접 학습 추가</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
               회사 정책·고객 인사이트·톤 가이드를 직접 입력하여 AI에게 우선 참고시킵니다.
             </div>
-            {!isAdmin && <div className="text-[10px] text-emerald-300 mt-1">회사 관리자 전용</div>}
+            {!isAdmin && <div className="text-[10px] text-emerald-700 mt-1">회사 관리자 전용</div>}
           </button>
 
           <button
             onClick={() => setShowGuideModal(true)}
-            className="p-4 bg-gradient-to-br from-amber-500/15 to-orange-500/15 border border-amber-400/30 hover:border-amber-400/50 rounded-xl text-left transition-all group"
+            className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 hover:border-amber-300 rounded-xl text-left transition-all group"
           >
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
               <BookOpen className="w-5 h-5 text-white" />
             </div>
-            <div className="text-sm font-semibold text-white mb-1">5 타입 가이드</div>
-            <div className="text-[11px] text-white/60 leading-relaxed">
+            <div className="text-sm font-semibold text-slate-900 mb-1">5 타입 가이드</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
               자동 누적되는 학습과 직접 입력해야 하는 학습: 예시 + 흐름 안내.
             </div>
           </button>
         </div>
 
         {/* ───────── 7. 자세히 분석 토글 ───────── */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           <button
             onClick={() => setShowDetailedAnalysis((v) => !v)}
-            className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/[0.03] transition-colors"
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-white transition-colors"
           >
             <div className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-cyan-300" />
-              <span className="text-sm font-semibold text-white">자세히 분석</span>
-              <span className="text-[10px] text-white/40">출처별 분포 · 월별 누적 · 중요도 분포 · 최근 활용</span>
+              <BarChart3 className="w-4 h-4 text-cyan-700" />
+              <span className="text-sm font-semibold text-slate-900">자세히 분석</span>
+              <span className="text-[10px] text-slate-400">출처별 분포 · 월별 누적 · 중요도 분포 · 최근 활용</span>
             </div>
-            {showDetailedAnalysis ? <ChevronUp className="w-4 h-4 text-white/50" /> : <ChevronDown className="w-4 h-4 text-white/50" />}
+            {showDetailedAnalysis ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
           </button>
 
           {showDetailedAnalysis && (
-            <div className="px-5 pb-5 space-y-5 border-t border-white/5 pt-5">
+            <div className="px-5 pb-5 space-y-5 border-t border-slate-100 pt-5">
               {allLoading ? (
                 <div className="flex justify-center py-12">
-                  <Loader2 className="w-5 h-5 animate-spin text-white/40" />
+                  <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
                 </div>
               ) : !detailedStats ? (
-                <div className="text-center py-8 text-white/40 text-sm">분석할 학습 데이터가 없습니다.</div>
+                <div className="text-center py-8 text-slate-400 text-sm">분석할 학습 데이터가 없습니다.</div>
               ) : (
                 <div className="grid md:grid-cols-2 gap-5">
                   {/* a. 출처별 도넛 */}
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-                    <div className="text-xs font-semibold text-white mb-3">출처별 분포</div>
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3">출처별 분포</div>
                     <div className="flex items-center gap-4">
                       <svg viewBox="0 0 200 200" className="w-32 h-32">
                         {detailedStats.sourceSegs.map((s) => (
@@ -1005,7 +952,7 @@ export default function AiMemoryPage() {
                             <title>{s.source}: {s.count}건 ({(s.percent * 100).toFixed(1)}%)</title>
                           </path>
                         ))}
-                        <text x="100" y="100" textAnchor="middle" dominantBaseline="middle" className="fill-white" style={{ fontSize: '18px', fontWeight: 700 }}>
+                        <text x="100" y="100" textAnchor="middle" dominantBaseline="middle" className="fill-slate-900" style={{ fontSize: '18px', fontWeight: 700 }}>
                           {detailedStats.sourceTotal}
                         </text>
                       </svg>
@@ -1013,20 +960,20 @@ export default function AiMemoryPage() {
                         {detailedStats.sourceSegs.map((s) => (
                           <div key={s.source} className="flex items-center gap-2 text-[11px]">
                             <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.color }} />
-                            <span className="text-white/80 flex-1 truncate" title={s.source}>{s.source}</span>
-                            <span className="text-white/60 font-mono">{s.count}</span>
+                            <span className="text-slate-700 flex-1 truncate" title={s.source}>{s.source}</span>
+                            <span className="text-slate-500 font-mono">{s.count}</span>
                           </div>
                         ))}
                       </div>
                     </div>
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_company_memory.source 집계</div>
+                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: ai_company_memory.source 집계</div>
                   </div>
 
                   {/* b. 월별 누적 line */}
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-                    <div className="text-xs font-semibold text-white mb-3">월별 신규 학습 (최근 6개월)</div>
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3">월별 신규 학습 (최근 6개월)</div>
                     {detailedStats.monthlyArr.length === 0 ? (
-                      <div className="text-center py-6 text-white/40 text-xs">데이터 부족</div>
+                      <div className="text-center py-6 text-slate-400 text-xs">데이터 부족</div>
                     ) : (
                       <div className="flex items-end gap-2 h-32">
                         {detailedStats.monthlyArr.map((m) => {
@@ -1041,19 +988,19 @@ export default function AiMemoryPage() {
                                   title={`${m.month}: ${m.count}건`}
                                 />
                               </div>
-                              <div className="text-[9px] text-white/40">{m.month.slice(5)}</div>
-                              <div className="text-[10px] text-white/70 font-mono">{m.count}</div>
+                              <div className="text-[9px] text-slate-400">{m.month.slice(5)}</div>
+                              <div className="text-[10px] text-slate-600 font-mono">{m.count}</div>
                             </div>
                           );
                         })}
                       </div>
                     )}
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_company_memory.created_at 월별 집계</div>
+                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: ai_company_memory.created_at 월별 집계</div>
                   </div>
 
                   {/* c. 중요도 histogram */}
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-                    <div className="text-xs font-semibold text-white mb-3">중요도 분포</div>
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3">중요도 분포</div>
                     <div className="flex items-end gap-1 h-32">
                       {detailedStats.importanceHist.map((count, idx) => {
                         const max = Math.max(...detailedStats.importanceHist, 1);
@@ -1069,18 +1016,18 @@ export default function AiMemoryPage() {
                                 title={`중요도 ${impVal}: ${count}건`}
                               />
                             </div>
-                            <div className="text-[9px] text-white/40">{impVal}</div>
+                            <div className="text-[9px] text-slate-400">{impVal}</div>
                           </div>
                         );
                       })}
                     </div>
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_company_memory.importance 1~10 분포</div>
+                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: ai_company_memory.importance 1~10 분포</div>
                   </div>
 
                   {/* d. 최근 활용 timeline */}
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-                    <div className="text-xs font-semibold text-white mb-3 flex items-center gap-1.5">
-                      <Clock className="w-3 h-3 text-cyan-300" />
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3 flex items-center gap-1.5">
+                      <Clock className="w-3 h-3 text-cyan-700" />
                       최근 AI 참고 학습 (Top 8)
                     </div>
                     <div className="space-y-1.5 max-h-44 overflow-y-auto">
@@ -1092,8 +1039,8 @@ export default function AiMemoryPage() {
                           <div key={m.id} className="flex items-start gap-2 text-[11px]">
                             <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: meta.color }} />
                             <div className="flex-1 min-w-0">
-                              <div className="text-white truncate">{m.memoryKey}</div>
-                              <div className="text-white/40 text-[10px]">
+                              <div className="text-slate-900 truncate">{m.memoryKey}</div>
+                              <div className="text-slate-400 text-[10px]">
                                 {meta.label} · {daysAgo === 0 ? '오늘' : `${daysAgo}일 전`}
                                 {m.usageCount ? ` · AI 활용 ${m.usageCount}회` : ''}
                               </div>
@@ -1102,7 +1049,7 @@ export default function AiMemoryPage() {
                         );
                       })}
                     </div>
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_company_memory.last_accessed_at 내림차순</div>
+                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: ai_company_memory.last_accessed_at 내림차순</div>
                   </div>
                 </div>
               )}
@@ -1111,7 +1058,7 @@ export default function AiMemoryPage() {
         </div>
 
         {/* ───────── 8. Source caption ───────── */}
-        <div className="text-center text-[10px] text-white/30 italic pt-4">
+        <div className="text-center text-[10px] text-slate-400 italic pt-4">
           Data source: ai_company_memory 자동 학습 (성공 패턴·채널 성과 = 캠페인 클릭 실측에서만 / 고객 인사이트 = 등급별 구매·LTV / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 광고 차단·반려) + 회사 admin 직접 입력
           <br />
           실측 데이터가 없으면 그 학습은 생성되지 않습니다. AI는 시스템 프롬프트에 중요도 3 이상 학습 최대 30건을 자동 포함합니다. 시간이 지날수록 추천 정확도가 향상됩니다
@@ -1122,6 +1069,6 @@ export default function AiMemoryPage() {
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
       <MemoryTypeGuideModal open={showGuideModal} onClose={() => setShowGuideModal(false)} />
       <AddMemoryModal open={showAddModal} onClose={() => setShowAddModal(false)} onSave={handleAddMemory} />
-    </div>
+    </ZoneFrame>
   );
 }

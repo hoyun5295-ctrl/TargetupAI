@@ -53,11 +53,10 @@ interface UploadedMedia {
 }
 
 /** 기록 화면이 작성 구역에 넘기는 요청 — 글 고치기(E6) · 불러와서 쓰기(E7) */
-export interface SnsComposeRequest {
-  kind: 'edit' | 'reuse';
-  post: SnsPostView;
-  nonce: number;
-}
+export type SnsComposeRequest =
+  | { kind: 'edit' | 'reuse'; post: SnsPostView; nonce: number }
+  /** ★ 2026-09-30 AI 존 대개편: 명령 카드 한 줄 → 글 칸에 넣고 기존 [AI로 캡션 쓰기]와 같은 경로(runAi('write'))를 부른다 */
+  | { kind: 'seed'; text: string; nonce: number };
 
 interface Props {
   specs: SnsSpec[];
@@ -67,6 +66,8 @@ interface Props {
   userId: string | null;
   request: SnsComposeRequest | null;
   onRequestHandled: () => void;
+  /** ★ 2026-09-30 AI 존: AI 글쓰기 진행 여부를 위(명령 카드 한 줄)로 알린다 — 진행 중 재제출이 결과를 버리지 않게 */
+  onAiBusyChange?: (busy: boolean) => void;
   onPublished: () => void;
   /** 끊긴 계정 칩 [다시 연결] */
   onReconnect: (accountId: string) => void;
@@ -123,7 +124,7 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 const lower = (s: string) => s.toLowerCase();
 
 export default function SnsComposer({
-  specs, accounts, defaults, companyId, userId, request, onRequestHandled, onPublished, onReconnect, onAccountsChanged, onShowPost,
+  specs, accounts, defaults, companyId, userId, request, onRequestHandled, onAiBusyChange, onPublished, onReconnect, onAccountsChanged, onShowPost,
 }: Props) {
   const toast = useToast();
   const toastRef = useRef(toast);
@@ -172,6 +173,7 @@ export default function SnsComposer({
   // ── AI · 맞춤법 ──
   const [ai, setAi] = useState<AiState | null>(null);
   const [aiBusy, setAiBusy] = useState<null | 'write' | 'again' | 'fit'>(null);
+  useEffect(() => { onAiBusyChange?.(!!aiBusy); }, [aiBusy]); // eslint-disable-line react-hooks/exhaustive-deps
   const [aiNote, setAiNote] = useState<string | null>(null);
   const [spell, setSpell] = useState<{ body: string; issues: SpellIssue[] } | null>(null);
   const [spellBusy, setSpellBusy] = useState(false);
@@ -771,7 +773,7 @@ export default function SnsComposer({
 
   const hasContent = body.trim().length > 0 || media.length > 0;
 
-  const loadPost = async (req: SnsComposeRequest) => {
+  const loadPost = async (req: Extract<SnsComposeRequest, { post: SnsPostView }>) => {
     const post = req.post;
     const latest = post.targets.filter((t) => !t.superseded);
     resetAll();
@@ -805,6 +807,17 @@ export default function SnsComposer({
     if (!request) return;
     const req = request;
     onRequestHandled();
+    if (req.kind === 'seed') {
+      // ★ 2026-09-30 Codex R1: 글쓰기 진행 중에는 본문을 바꾸지 않는다(바꾸면 진행 중 결과가 본문 변경 검사에 걸려 버려진다)
+      if (aiBusy) { toastRef.current.info('AI가 글을 쓰는 중이에요. 끝난 뒤 다시 넣어 주세요.'); return; }
+      // 쓰던 글이 있으면 그 뒤에 이어 붙인다(지우지 않는다) · AI 가 그 글을 바탕으로 채널 글을 쓴다
+      const cur = bodyRef.current.trim();
+      setBodyByApp(cur ? `${cur}
+${req.text}` : req.text);
+      sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (aiMode.mode !== 'locked') void runAi('write');
+      return;
+    }
     if (hasContent || replacing) {
       setConfirmState({
         mode: 'warning',
@@ -1025,8 +1038,8 @@ export default function SnsComposer({
     <section ref={sectionRef} className="space-y-3 scroll-mt-24">
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-sm font-semibold text-white/80">올리기</h2>
-          <p className="text-xs text-white/50 mt-0.5">한 번 쓰면 고른 채널마다 규격에 맞춰 각각 올라갑니다.</p>
+          <h2 className="text-sm font-semibold text-slate-700">올리기</h2>
+          <p className="text-xs text-slate-500 mt-0.5">한 번 쓰면 고른 채널마다 규격에 맞춰 각각 올라갑니다.</p>
         </div>
         {(hasContent || replacing) && (
           <button onClick={() => resetAll({ keepSelected: !replacing })} className={OUI_BTN_GHOST}>
@@ -1036,26 +1049,26 @@ export default function SnsComposer({
       </div>
 
       {replacing && (
-        <div className="rounded-xl border border-sky-400/30 bg-sky-500/10 px-4 py-3 flex items-start gap-2">
-          <Pencil className="w-4 h-4 text-sky-300 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-sky-100 leading-relaxed break-keep">
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 flex items-start gap-2">
+          <Pencil className="w-4 h-4 text-sky-700 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-sky-900 leading-relaxed break-keep">
             {replacing.whenIso ? `${whenText(replacing.whenIso)} 예약 글을 고치는 중이에요.` : '예약 글을 고치는 중이에요.'}
             {' '}글·태그·시각만 바꿀 수 있고 사진과 채널은 그대로예요.
           </p>
         </div>
       )}
       {replaceGone && (
-        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 flex items-start gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-amber-100 leading-relaxed break-keep">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-900 leading-relaxed break-keep">
             고치던 예약이 이미 올라가기 시작했거나 취소됐어요. 이 글은 새 글로 올릴 수 있어요.
           </p>
         </div>
       )}
       {alreadySaved !== null && (
-        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 flex items-start gap-2 flex-wrap">
-          <AlertTriangle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-amber-100 leading-relaxed break-keep flex-1 min-w-[12rem]">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2 flex-wrap">
+          <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-900 leading-relaxed break-keep flex-1 min-w-[12rem]">
             이 글은 이미 저장됐어요. 고친 내용은 반영되지 않았어요.
           </p>
           <div className="flex gap-2">
@@ -1078,45 +1091,45 @@ export default function SnsComposer({
           /* 반반 — 직접 올리기 / 소재에서 고르기. 이미 만들어 둔 소재를 다시 올리게 하지 않는다. */
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button onClick={() => fileRef.current?.click()} disabled={uploading !== null || mediaLocked}
-              className="py-10 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 hover:bg-white/[0.03] transition-colors flex flex-col items-center gap-2 disabled:opacity-50">
-              {uploading === 'file' ? <Loader2 className="w-6 h-6 animate-spin text-violet-400" /> : <ImagePlus className="w-6 h-6 text-white/40" />}
-              <span className="text-sm text-white/70">직접 올리기</span>
-              <span className="text-[11px] text-white/40">사진 또는 영상(MP4·MOV) 한 개</span>
+              className="py-10 rounded-xl border border-dashed border-slate-300 hover:border-violet-300 hover:bg-white transition-colors flex flex-col items-center gap-2 disabled:opacity-50">
+              {uploading === 'file' ? <Loader2 className="w-6 h-6 animate-spin text-violet-600" /> : <ImagePlus className="w-6 h-6 text-slate-400" />}
+              <span className="text-sm text-slate-600">직접 올리기</span>
+              <span className="text-[11px] text-slate-400">사진 또는 영상(MP4·MOV) 한 개</span>
             </button>
             <button onClick={() => setPickerOpen(true)} disabled={uploading !== null || mediaLocked}
-              className="py-10 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 hover:bg-white/[0.03] transition-colors flex flex-col items-center gap-2 disabled:opacity-50">
-              {uploading === 'asset' ? <Loader2 className="w-6 h-6 animate-spin text-violet-400" /> : <Library className="w-6 h-6 text-white/40" />}
-              <span className="text-sm text-white/70">소재에서 고르기</span>
-              <span className="text-[11px] text-white/40">이미지 스튜디오에서 만든 소재</span>
+              className="py-10 rounded-xl border border-dashed border-slate-300 hover:border-violet-300 hover:bg-white transition-colors flex flex-col items-center gap-2 disabled:opacity-50">
+              {uploading === 'asset' ? <Loader2 className="w-6 h-6 animate-spin text-violet-600" /> : <Library className="w-6 h-6 text-slate-400" />}
+              <span className="text-sm text-slate-600">소재에서 고르기</span>
+              <span className="text-[11px] text-slate-400">이미지 스튜디오에서 만든 소재</span>
             </button>
           </div>
         ) : (
           <>
             <div className="flex gap-2 flex-wrap">
               {media.map((m, i) => (
-                <div key={m.id} className="relative w-24 h-24 rounded-xl overflow-hidden border border-white/10 bg-white/5">
+                <div key={m.id} className="relative w-24 h-24 rounded-xl overflow-hidden border border-slate-200 bg-white">
                   {m.kind === 'video' ? (
                     <>
                       {m.previewUrl && <video src={m.previewUrl} muted playsInline preload="metadata" className="w-full h-full object-cover" />}
                       <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <span className="w-7 h-7 rounded-full bg-slate-950/65 flex items-center justify-center">
-                          <Play className="w-3.5 h-3.5 text-white" />
+                        <span className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center">
+                          <Play className="w-3.5 h-3.5 text-slate-900" />
                         </span>
                       </span>
                       {m.durationSec !== null && (
-                        <span className="absolute right-1 bottom-1 text-[10px] px-1 rounded bg-slate-950/70 text-white/80">{formatSnsDuration(m.durationSec)}</span>
+                        <span className="absolute right-1 bottom-1 text-[10px] px-1 rounded bg-slate-100 text-slate-700">{formatSnsDuration(m.durationSec)}</span>
                       )}
                     </>
                   ) : m.previewUrl ? <img src={m.previewUrl} alt="" className="w-full h-full object-cover" /> : (
                     <div className="w-full h-full flex items-center justify-center" title="미리보기를 불러오지 못했습니다. 올리기는 그대로 됩니다.">
-                      <ImageOff className="w-5 h-5 text-white/30" />
+                      <ImageOff className="w-5 h-5 text-slate-400" />
                     </div>
                   )}
-                  {m.kind !== 'video' && <span className="absolute left-1 top-1 text-[10px] px-1 rounded bg-slate-950/70 text-white/70">{i + 1}</span>}
-                  {m.aiNotice && <span className="absolute left-1 bottom-1 text-[9px] px-1 rounded bg-violet-600/80 text-white">AI</span>}
+                  {m.kind !== 'video' && <span className="absolute left-1 top-1 text-[10px] px-1 rounded bg-slate-100 text-slate-600">{i + 1}</span>}
+                  {m.aiNotice && <span className="absolute left-1 bottom-1 text-[9px] px-1 rounded bg-violet-200 text-slate-900">AI</span>}
                   {!mediaLocked && (
                     <button onClick={() => setMedia((prev) => prev.filter((x) => x.id !== m.id))}
-                      className="absolute right-1 top-1 p-0.5 rounded bg-slate-950/70 text-white/70 hover:text-white" aria-label="빼기">
+                      className="absolute right-1 top-1 p-0.5 rounded bg-slate-100 text-slate-600 hover:text-slate-900" aria-label="빼기">
                       <X className="w-3 h-3" />
                     </button>
                   )}
@@ -1124,12 +1137,12 @@ export default function SnsComposer({
               ))}
               {!hasVideo && !mediaLocked && (<>
               <button onClick={() => fileRef.current?.click()} disabled={uploading !== null}
-                className="w-24 h-24 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors"
+                className="w-24 h-24 rounded-xl border border-dashed border-slate-300 hover:border-violet-300 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
                 title="직접 올리기">
                 {uploading === 'file' ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImagePlus className="w-5 h-5" />}
               </button>
               <button onClick={() => setPickerOpen(true)} disabled={uploading !== null}
-                className="w-24 h-24 rounded-xl border border-dashed border-white/15 hover:border-violet-400/40 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors"
+                className="w-24 h-24 rounded-xl border border-dashed border-slate-300 hover:border-violet-300 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
                 title="소재에서 고르기">
                 {uploading === 'asset' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Library className="w-5 h-5" />}
               </button>
@@ -1140,9 +1153,9 @@ export default function SnsComposer({
             {fitSummary && (
               <div className="mt-3 flex items-start gap-1.5">
                 {fitSummary.allUntouched
-                  ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                  : <Info className="w-3.5 h-3.5 text-white/40 flex-shrink-0 mt-0.5" />}
-                <p className="text-[11px] text-white/55 leading-relaxed break-keep">
+                  ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  : <Info className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />}
+                <p className="text-[11px] text-slate-500 leading-relaxed break-keep">
                   {fitSummary.video
                     ? '고른 채널 모두 영상을 그대로 올립니다.'
                     : fitSummary.allUntouched
@@ -1157,11 +1170,11 @@ export default function SnsComposer({
         {/* ★ 1차-B — 영상 조각 업로드 진행률(보낸 조각 기준) */}
         {progress !== null && (
           <div className="mt-3" role="status" aria-live="polite">
-            <div className="flex items-center justify-between text-[11px] text-white/55 mb-1">
+            <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
               <span>영상 올리는 중</span>
               <span>{progress}%</span>
             </div>
-            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+            <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
               <div className="h-full bg-violet-500 transition-[width] duration-300" style={{ width: `${progress}%` }} />
             </div>
           </div>
@@ -1170,7 +1183,7 @@ export default function SnsComposer({
 
       {/* 2. 채널 */}
       <div className={`${OUI_CARD} p-4`}>
-        <p className="text-xs text-white/60 mb-2.5">올릴 채널</p>
+        <p className="text-xs text-slate-500 mb-2.5">올릴 채널</p>
         <div className="flex gap-2 flex-wrap">
           {shownAccounts.map((a) => {
             const spec = specOf(a.platform);
@@ -1179,10 +1192,10 @@ export default function SnsComposer({
             if (snsNeedsReconnect(a)) {
               return (
                 <button key={a.id} onClick={() => onReconnect(a.id)} disabled={!!replacing}
-                  className="px-3 py-2 rounded-xl border text-xs inline-flex items-center gap-2 bg-amber-500/10 border-amber-400/30 text-amber-100 hover:bg-amber-500/20 transition-colors disabled:opacity-50">
-                  <SnsChannelLogo platform={a.platform} size={15} muted />
+                  className="px-3 py-2 rounded-xl border text-xs inline-flex items-center gap-2 bg-amber-50 border-amber-200 text-amber-900 hover:bg-amber-100 transition-colors disabled:opacity-50">
+                  <SnsChannelLogo platform={a.platform} size={15} tile />
                   <span>{label}</span>
-                  <span className="text-amber-200/70">{nameOf(a)}</span>
+                  <span className="text-amber-800">{nameOf(a)}</span>
                   <span className="inline-flex items-center gap-1 font-semibold"><Link2 className="w-3 h-3" />다시 연결</span>
                 </button>
               );
@@ -1190,11 +1203,11 @@ export default function SnsComposer({
             if (a.status !== 'active') {
               return (
                 <span key={a.id} aria-disabled
-                  className="px-3 py-2 rounded-xl border text-xs inline-flex items-center gap-2 bg-white/[0.02] border-white/5 text-white/35 cursor-not-allowed">
+                  className="px-3 py-2 rounded-xl border text-xs inline-flex items-center gap-2 bg-white border-slate-100 text-slate-400 cursor-not-allowed">
                   <SnsChannelLogo platform={a.platform} size={15} muted />
                   <span>{label}</span>
                   <span>{nameOf(a)}</span>
-                  <span className="text-amber-200/70">{a.status === 'pending' ? '확인 중' : '계정 확인 필요'}</span>
+                  <span className="text-amber-800">{a.status === 'pending' ? '확인 중' : '계정 확인 필요'}</span>
                 </span>
               );
             }
@@ -1206,14 +1219,15 @@ export default function SnsComposer({
                 disabled={locked && !on}
                 aria-disabled={locked}
                 aria-pressed={on}
-                className={`px-3 py-2 rounded-xl border text-xs inline-flex items-center gap-2 transition-colors ${
-                  on ? 'bg-violet-600 border-violet-500 text-white'
-                    : locked ? 'bg-white/[0.02] border-white/5 text-white/30 cursor-not-allowed'
-                      : 'bg-white/[0.04] border-white/10 text-white/70 hover:bg-white/[0.08]'
+                className={`h-11 pl-1.5 pr-3 rounded-xl border text-[13px] inline-flex items-center gap-2 transition-colors ${
+                  on ? 'bg-indigo-50 border-indigo-400 text-indigo-900 font-semibold'
+                    : locked ? 'bg-white border-slate-100 text-slate-400 cursor-not-allowed'
+                      : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200'
                 }`}>
-                <SnsChannelLogo platform={a.platform} size={15} muted={!on} />
+                <SnsChannelLogo platform={a.platform} size={17} tile muted={locked && !on} />
                 <span>{label}</span>
-                <span className={on ? 'text-white/70' : 'text-white/40'}>{nameOf(a)}</span>
+                <span className={on ? 'text-indigo-700/70 font-normal' : 'text-slate-400'}>{nameOf(a)}</span>
+                {on && <Check className="w-3.5 h-3.5 text-indigo-600" />}
               </button>
             );
           })}
@@ -1228,13 +1242,13 @@ export default function SnsComposer({
           return (
             <ul className="mt-2.5 space-y-1">
               {defaultsNote && (
-                <li className="flex items-start gap-1.5 text-[11px] text-white/50 break-keep">
-                  <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-px text-emerald-400/80" />
+                <li className="flex items-start gap-1.5 text-[11px] text-slate-500 break-keep">
+                  <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-px text-emerald-600" />
                   <span>{defaultsNote}</span>
                 </li>
               )}
               {all.map((l) => (
-                <li key={l.id} className="flex items-start gap-1.5 text-[11px] text-amber-200/80 break-keep">
+                <li key={l.id} className="flex items-start gap-1.5 text-[11px] text-amber-800 break-keep">
                   <Info className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
                   <span>{l.text}</span>
                 </li>
@@ -1255,7 +1269,7 @@ export default function SnsComposer({
           {/* 왼쪽: 글 */}
           <div className="min-w-0">
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-              <span className="text-xs text-white/60">올릴 글</span>
+              <span className="text-xs text-slate-500">올릴 글</span>
               <div className="flex items-center gap-1.5 flex-wrap">
                 {/* ⛔ 1클릭 — 누르면 바로 채워진다. 중간에 무엇도 묻지 않는다(§2-17). */}
                 <button onClick={() => void runAi('write')} disabled={!!aiBusy || aiMode.mode === 'locked'}
@@ -1269,7 +1283,7 @@ export default function SnsComposer({
                 </button>
               </div>
             </div>
-            <p className="text-[11px] text-white/40 mb-2 break-keep">
+            <p className="text-[11px] text-slate-400 mb-2 break-keep">
               {aiMode.mode === 'refine' ? '쓴 글을 다듬고 맞춤법까지 바로잡아요. 링크·가격·혜택은 그대로 둬요.'
                 : aiMode.mode === 'photo_draft' ? '사진을 보고 첫 글을 써 드려요. 가격·행사 같은 사실은 쓰지 않아요.'
                   : aiMode.reason}
@@ -1277,7 +1291,7 @@ export default function SnsComposer({
 
             {aiActive && ai && (
               <div className="mb-2 flex items-center gap-1.5 flex-wrap">
-                <span className="text-[11px] text-violet-200/80 inline-flex items-center gap-1">
+                <span className="text-[11px] text-violet-800 inline-flex items-center gap-1">
                   <Sparkles className="w-3 h-3" />
                   {ai.showingBase ? '원래 글을 보고 있어요' : 'AI가 쓴 글이에요. 자유롭게 고쳐 주세요.'}
                   {!ai.showingBase && aiDiff && aiDiff.removed > 0 && ` · 지운 곳 ${aiDiff.removed}`}
@@ -1295,17 +1309,17 @@ export default function SnsComposer({
             )}
             {/* ★ 0925 A안 — AI 가 사진에서 읽은 글. 이 글에 있는 사실만 초안에 쓸 수 있다(잘못 읽었으면 여기서 보인다). */}
             {aiActive && ai && !ai.showingBase && ai.imageText.length > 0 && (
-              <p className="mb-2 text-[11px] text-white/45 break-keep">
-                <span className="text-white/60">사진에서 읽은 글</span> · {ai.imageText.join(' · ')}
+              <p className="mb-2 text-[11px] text-slate-400 break-keep">
+                <span className="text-slate-500">사진에서 읽은 글</span> · {ai.imageText.join(' · ')}
               </p>
             )}
 
             {/* 글 상자 = 글 + 꼬리(올릴 때 글 끝에 붙는 것 · 읽기 전용) */}
-            <div className="relative rounded-xl border border-white/10 bg-white/[0.04] focus-within:border-violet-400/40 transition-colors">
+            <div className="relative rounded-xl border border-slate-200 bg-white focus-within:border-violet-300 transition-colors">
               {aiDiff && aiDiff.chunks ? (
                 <div role="textbox" aria-readonly tabIndex={0}
                   onKeyDown={(e) => { if (e.key === 'Enter') toEdit(body.length); }}
-                  className="min-h-[8.5rem] px-3 py-2.5 text-sm text-white whitespace-pre-wrap break-words cursor-text">
+                  className="min-h-[8.5rem] px-3 py-2.5 text-sm text-slate-900 whitespace-pre-wrap break-words cursor-text">
                   {(() => {
                     let offset = 0;
                     return aiDiff.chunks.map((c, i) => {
@@ -1313,7 +1327,7 @@ export default function SnsComposer({
                       offset += c.text.length;
                       return (
                         <span key={i} onClick={() => toEdit(start + c.text.length)}
-                          className={c.added ? 'bg-violet-500/25 text-violet-50 rounded-sm' : undefined}>
+                          className={c.added ? 'bg-violet-100 text-violet-900 rounded-sm' : undefined}>
                           {c.text}
                         </span>
                       );
@@ -1328,39 +1342,39 @@ export default function SnsComposer({
                   onChange={(e) => setBodyByUser(e.target.value)}
                   rows={6}
                   placeholder={summary.images > 0 ? '올릴 글을 써 주세요. 비워 두고 AI로 캡션 쓰기를 누르면 사진을 보고 첫 글을 써 드려요.' : '올릴 글을 써 주세요.'}
-                  className="w-full bg-transparent px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none resize-y rounded-xl"
+                  className="w-full bg-transparent px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none resize-y rounded-xl"
                 />
               )}
               {(tailTags.length > 0 || tailNotice) && (
                 <button type="button" onClick={() => tagInputRef.current?.focus()}
-                  className="w-full text-left px-3 pb-2.5 pt-2 border-t border-dashed border-white/10 space-y-1">
-                  <span className="block text-[10px] text-white/35">올릴 때 글 끝에 붙어요{tailBasis && captions.length > 1 ? ` · ${tailBasis.spec.label} 기준` : ''}</span>
+                  className="w-full text-left px-3 pb-2.5 pt-2 border-t border-dashed border-slate-200 space-y-1">
+                  <span className="block text-[10px] text-slate-400">올릴 때 글 끝에 붙어요{tailBasis && captions.length > 1 ? ` · ${tailBasis.spec.label} 기준` : ''}</span>
                   {tailTags.length > 0 && (
-                    <span className="block text-[12px] text-violet-300 break-words">{tailTags.map((t) => `#${t}`).join(' ')}</span>
+                    <span className="block text-[12px] text-violet-700 break-words">{tailTags.map((t) => `#${t}`).join(' ')}</span>
                   )}
-                  {tailNotice && <span className="block text-[12px] text-white/40">{SNS_AI_IMAGE_NOTICE}</span>}
+                  {tailNotice && <span className="block text-[12px] text-slate-400">{SNS_AI_IMAGE_NOTICE}</span>}
                 </button>
               )}
               {aiBusy && (
-                <div className="absolute inset-0 rounded-xl bg-slate-950/60 backdrop-blur-[1px] flex items-center justify-center gap-2 text-xs text-violet-100" role="status" aria-live="polite">
-                  <Loader2 className="w-4 h-4 animate-spin text-violet-300" />
+                <div className="absolute inset-0 rounded-xl bg-slate-100 backdrop-blur-[1px] flex items-center justify-center gap-2 text-xs text-violet-900" role="status" aria-live="polite">
+                  <Loader2 className="w-4 h-4 animate-spin text-violet-700" />
                   {aiBusy === 'fit' ? 'AI가 길이를 맞추는 중이에요' : aiMode.mode === 'photo_draft' ? 'AI가 사진을 보고 쓰는 중이에요' : 'AI가 글을 쓰는 중이에요'}
                 </div>
               )}
             </div>
 
             <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
-              {aiNote ? <span className="text-[11px] text-amber-200/80 break-keep">{aiNote}</span> : <span />}
+              {aiNote ? <span className="text-[11px] text-amber-800 break-keep">{aiNote}</span> : <span />}
               {tail && (
-                <span className={`text-[11px] ${tail.overBy > 0 ? 'text-rose-300' : 'text-white/45'}`}>
+                <span className={`text-[11px] ${tail.overBy > 0 ? 'text-rose-700' : 'text-slate-400'}`}>
                   {tail.length.toLocaleString()} / {tail.limit.toLocaleString()} · {tailBasis!.spec.label} 기준
                 </span>
               )}
             </div>
 
             {overChannels.length > 0 && (
-              <div className="mt-2 rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2 flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] text-rose-100 flex-1 min-w-[10rem] break-keep">
+              <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] text-rose-900 flex-1 min-w-[10rem] break-keep">
                   {overChannels.map((c) => `${c.spec.label} ${c.cap.overBy.toLocaleString()}자 넘어요`).join(' · ')}
                 </span>
                 {worstOver && aiMode.mode === 'refine' && (
@@ -1373,23 +1387,23 @@ export default function SnsComposer({
               </div>
             )}
             {placeholderLeft && (
-              <p className="mt-2 text-[11px] text-amber-200/80 break-keep">글에 채워야 할 자리가 남아 있어요. [ ] 안을 직접 고쳐 주세요.</p>
+              <p className="mt-2 text-[11px] text-amber-800 break-keep">글에 채워야 할 자리가 남아 있어요. [ ] 안을 직접 고쳐 주세요.</p>
             )}
             {reusedBody !== null && body === reusedBody && body.trim() && (
-              <p className="mt-2 text-[11px] text-amber-200/80 break-keep">예전에 올린 글과 같아요. 그대로 올리면 같은 글이 한 번 더 올라가요.</p>
+              <p className="mt-2 text-[11px] text-amber-800 break-keep">예전에 올린 글과 같아요. 그대로 올리면 같은 글이 한 번 더 올라가요.</p>
             )}
 
             {/* 맞춤법 결과 */}
             {spell && spell.body === body && (
-              <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/40 p-3">
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-100 p-3">
                 {spell.issues.length === 0 ? (
-                  <p className="text-[11px] text-white/55 inline-flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> 고칠 곳을 찾지 못했어요.
+                  <p className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> 고칠 곳을 찾지 못했어요.
                   </p>
                 ) : (
                   <>
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-[11px] text-white/60">고칠 곳 {spell.issues.length}개</span>
+                      <span className="text-[11px] text-slate-500">고칠 곳 {spell.issues.length}개</span>
                       <button onClick={() => applyIssues(spell.issues)} className={`${OUI_BTN_OUTLINE} !h-7 !px-2 !text-[11px]`}>
                         <Check className="w-3 h-3" /> 모두 고치기
                       </button>
@@ -1397,15 +1411,15 @@ export default function SnsComposer({
                     <ul className="space-y-1.5">
                       {spell.issues.map((it) => (
                         <li key={it.id} className="flex items-center gap-2 flex-wrap text-[12px]">
-                          <button onClick={() => selectIssue(it)} className="text-left min-w-0 flex-1 break-keep hover:bg-white/5 rounded px-1 -mx-1">
-                            <span className="line-through text-rose-300/80">{it.before}</span>
-                            <span className="text-white/35 mx-1">→</span>
-                            <span className="text-emerald-300">{it.after}</span>
-                            <span className="text-white/35 ml-1.5 text-[11px]">{it.kind === 'spacing' ? '띄어쓰기' : it.reason}</span>
+                          <button onClick={() => selectIssue(it)} className="text-left min-w-0 flex-1 break-keep hover:bg-white rounded px-1 -mx-1">
+                            <span className="line-through text-rose-700">{it.before}</span>
+                            <span className="text-slate-400 mx-1">→</span>
+                            <span className="text-emerald-700">{it.after}</span>
+                            <span className="text-slate-400 ml-1.5 text-[11px]">{it.kind === 'spacing' ? '띄어쓰기' : it.reason}</span>
                           </button>
-                          <button onClick={() => applyIssues([it])} className="text-[11px] text-violet-300 hover:text-violet-200">고치기</button>
+                          <button onClick={() => applyIssues([it])} className="text-[11px] text-violet-700 hover:text-violet-800">고치기</button>
                           <button onClick={() => setSpell({ ...spell, issues: spell.issues.filter((x) => x.id !== it.id) })}
-                            className="text-[11px] text-white/40 hover:text-white/70">그대로 두기</button>
+                            className="text-[11px] text-slate-400 hover:text-slate-600">그대로 두기</button>
                         </li>
                       ))}
                     </ul>
@@ -1416,28 +1430,28 @@ export default function SnsComposer({
 
             {/* D3 — 글에 쓴 태그 */}
             {bodyTags.length > 0 && (
-              <div className="mt-3 flex items-center gap-2 flex-wrap text-[11px] text-white/50">
+              <div className="mt-3 flex items-center gap-2 flex-wrap text-[11px] text-slate-500">
                 <span>글에 쓴 태그 {bodyTags.length}개 · 글 그대로 올라가요</span>
                 {allSetInBody ? (
-                  <span className="text-emerald-300/80 inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />자주 쓰는 태그에 있어요</span>
+                  <span className="text-emerald-700 inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />자주 쓰는 태그에 있어요</span>
                 ) : (
-                  <button onClick={() => void saveBodyTags()} disabled={tagSaving} className="text-violet-300 hover:text-violet-200 inline-flex items-center gap-1 disabled:opacity-50">
+                  <button onClick={() => void saveBodyTags()} disabled={tagSaving} className="text-violet-700 hover:text-violet-800 inline-flex items-center gap-1 disabled:opacity-50">
                     <Bookmark className="w-3 h-3" /> 자주 쓰는 태그에 저장
                   </button>
                 )}
               </div>
             )}
             {bodyOverLines.map((l) => (
-              <p key={l} className="mt-1 text-[11px] text-amber-200/80 break-keep">{l}</p>
+              <p key={l} className="mt-1 text-[11px] text-amber-800 break-keep">{l}</p>
             ))}
           </div>
 
           {/* 오른쪽: 태그 */}
-          <div className="min-w-0 md:border-l md:border-white/10 md:pl-4">
+          <div className="min-w-0 md:border-l md:border-slate-200 md:pl-4">
             <div className="flex items-center justify-between gap-2 mb-2">
               <div>
-                <span className="text-xs text-white/60">태그</span>
-                <span className="text-[11px] text-white/35 ml-1.5">켜진 태그가 글 끝에 붙어요</span>
+                <span className="text-xs text-slate-500">태그</span>
+                <span className="text-[11px] text-slate-400 ml-1.5">켜진 태그가 글 끝에 붙어요</span>
               </div>
               <div className="flex items-center gap-1">
                 {activeTags.length > 0 && (
@@ -1462,13 +1476,13 @@ export default function SnsComposer({
                 onCompositionEnd={(e) => { composingRef.current = false; onTagChange((e.target as HTMLInputElement).value); }}
                 placeholder="태그 입력 후 Enter (여러 개는 띄어서)"
                 aria-label="태그 입력"
-                className="flex-1 min-w-0 bg-white/[0.04] border border-white/10 rounded-lg px-3 h-9 text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/40"
+                className="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-3 h-9 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300"
               />
               <button type="submit" disabled={!tagInput.trim()} className={OUI_BTN_OUTLINE}>
                 <Plus className="w-3.5 h-3.5" /> 추가
               </button>
             </form>
-            {tagError && <p className="mt-1.5 text-[11px] text-rose-300 break-keep">{tagError}</p>}
+            {tagError && <p className="mt-1.5 text-[11px] text-rose-700 break-keep">{tagError}</p>}
 
             {chipList.length > 0 ? (
               <div className="mt-3 flex gap-1.5 flex-wrap">
@@ -1480,10 +1494,10 @@ export default function SnsComposer({
                   const reason = chipReason(t);
                   if (tagEdit && saved) {
                     return (
-                      <span key={t} className="text-[11px] pl-2 pr-1 py-1 rounded-lg border border-white/15 bg-white/[0.04] text-white/70 inline-flex items-center gap-1">
+                      <span key={t} className="text-[11px] pl-2 pr-1 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 inline-flex items-center gap-1">
                         #{t}
                         <button onClick={() => void patchTagSet({ remove: [t] })} disabled={tagSaving}
-                          className="p-0.5 rounded hover:bg-white/10 hover:text-white" aria-label={`${t} 자주 쓰는 태그에서 빼기`}>
+                          className="p-0.5 rounded hover:bg-slate-100 hover:text-slate-900" aria-label={`${t} 자주 쓰는 태그에서 빼기`}>
                           <X className="w-3 h-3" />
                         </button>
                       </span>
@@ -1495,16 +1509,16 @@ export default function SnsComposer({
                         title={reason ?? undefined}
                         className={`text-[11px] px-2 py-1 rounded-lg border inline-flex items-center gap-1 transition-colors ${
                           on
-                            ? reason ? 'bg-violet-500/10 text-violet-200/70 border-violet-400/25 border-dashed' : 'bg-violet-500/20 text-violet-100 border-violet-400/40'
-                            : 'bg-transparent text-white/40 border-white/10 hover:text-white/70 hover:border-white/25'
+                            ? reason ? 'bg-violet-50 text-violet-800 border-violet-200 border-dashed' : 'bg-violet-100 text-violet-900 border-violet-300'
+                            : 'bg-transparent text-slate-400 border-slate-200 hover:text-slate-600 hover:border-slate-300'
                         }`}>
-                        {byAi && on && <Sparkles className="w-3 h-3 text-fuchsia-300" />}
+                        {byAi && on && <Sparkles className="w-3 h-3 text-fuchsia-700" />}
                         #{t}
-                        {reason && <span className="text-[10px] text-white/40">· {reason}</span>}
+                        {reason && <span className="text-[10px] text-slate-400">· {reason}</span>}
                       </button>
                       {!saved && (
                         <button onClick={() => void patchTagSet({ add: [t] }, `#${t} 를 자주 쓰는 태그에 저장했어요.`)} disabled={tagSaving}
-                          className="p-1 rounded text-white/35 hover:text-violet-200 hover:bg-white/5 disabled:opacity-50" title="자주 쓰는 태그에 저장"
+                          className="p-1 rounded text-slate-400 hover:text-violet-800 hover:bg-white disabled:opacity-50" title="자주 쓰는 태그에 저장"
                           aria-label={`${t} 자주 쓰는 태그에 저장`}>
                           <Bookmark className="w-3 h-3" />
                         </button>
@@ -1514,19 +1528,19 @@ export default function SnsComposer({
                 })}
               </div>
             ) : setLoaded && (
-              <p className="mt-3 text-[11px] text-white/40 break-keep">자주 쓰는 태그를 저장해 두면 새 글마다 켜진 채로 시작해요.</p>
+              <p className="mt-3 text-[11px] text-slate-400 break-keep">자주 쓰는 태그를 저장해 두면 새 글마다 켜진 채로 시작해요.</p>
             )}
 
             {tagEdit && setInvalid.length > 0 && (
               <div className="mt-3 space-y-1">
-                <p className="text-[11px] text-amber-200/80">지금 규칙에 맞지 않는 태그예요. 빼 주세요.</p>
+                <p className="text-[11px] text-amber-800">지금 규칙에 맞지 않는 태그예요. 빼 주세요.</p>
                 <div className="flex gap-1.5 flex-wrap">
                   {setInvalid.map((v) => (
                     <span key={v.raw} title={v.reason}
-                      className="text-[11px] pl-2 pr-1 py-1 rounded-lg border border-rose-400/30 bg-rose-500/10 text-rose-100 inline-flex items-center gap-1">
+                      className="text-[11px] pl-2 pr-1 py-1 rounded-lg border border-rose-200 bg-rose-50 text-rose-900 inline-flex items-center gap-1">
                       {v.raw}
                       <button onClick={() => void patchTagSet({ remove: [v.raw] })} disabled={tagSaving}
-                        className="p-0.5 rounded hover:bg-white/10" aria-label={`${v.raw} 빼기`}>
+                        className="p-0.5 rounded hover:bg-slate-100" aria-label={`${v.raw} 빼기`}>
                         <X className="w-3 h-3" />
                       </button>
                     </span>
@@ -1537,12 +1551,12 @@ export default function SnsComposer({
 
             {setLoaded && setTags.length === 0 && seeds.length > 0 && (
               <div className="mt-3">
-                <p className="text-[11px] text-white/45 mb-1.5">지난 글에서 자주 쓴 태그예요. 누르면 자주 쓰는 태그에 저장하고 켜요.</p>
+                <p className="text-[11px] text-slate-400 mb-1.5">지난 글에서 자주 쓴 태그예요. 누르면 자주 쓰는 태그에 저장하고 켜요.</p>
                 <div className="flex gap-1.5 flex-wrap">
                   {seeds.map((t) => (
                     <button key={t} disabled={tagSaving}
                       onClick={async () => { if (await patchTagSet({ add: [t] })) setOnTags((prev) => (prev.some((p) => lower(p) === lower(t)) ? prev : [...prev, t])); }}
-                      className="text-[11px] px-2 py-1 rounded-lg border border-dashed border-white/20 text-white/60 hover:text-white hover:border-violet-400/40 inline-flex items-center gap-1 disabled:opacity-50">
+                      className="text-[11px] px-2 py-1 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:text-slate-900 hover:border-violet-300 inline-flex items-center gap-1 disabled:opacity-50">
                       <Plus className="w-3 h-3" /> #{t}
                     </button>
                   ))}
@@ -1558,39 +1572,39 @@ export default function SnsComposer({
         <div className={`${OUI_CARD} p-4`}>
           {allSame && !mustOpen && !channelsOpen ? (
             <button onClick={() => setChannelsOpen(true)} className="w-full flex items-center gap-2 text-left">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              <span className="text-xs text-white/70 flex-1 min-w-0 break-keep">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <span className="text-xs text-slate-600 flex-1 min-w-0 break-keep">
                 {captions.map((c) => `${c.spec.label} ${nameOf(c.account)}`).join(' · ')}
                 {captions.length > 1 ? ` ${captions.length}곳 모두 이 글 그대로 올라가요` : '에 이 글 그대로 올라가요'}
               </span>
-              <ChevronDown className="w-4 h-4 text-white/40" />
+              <ChevronDown className="w-4 h-4 text-slate-400" />
             </button>
           ) : (
             <>
               <div className="flex items-center justify-between gap-2 mb-2.5">
-                <span className="text-xs text-white/60">채널별로 올라가는 글</span>
+                <span className="text-xs text-slate-500">채널별로 올라가는 글</span>
                 {!mustOpen && (
-                  <button onClick={() => setChannelsOpen(false)} className="text-[11px] text-white/40 hover:text-white/70">접기</button>
+                  <button onClick={() => setChannelsOpen(false)} className="text-[11px] text-slate-400 hover:text-slate-600">접기</button>
                 )}
               </div>
               {serverMap && (
-                <p className="mb-2.5 text-[11px] text-amber-200/80 break-keep">서버가 확정한 글이에요. 이대로 괜찮으면 다시 눌러 주세요.</p>
+                <p className="mb-2.5 text-[11px] text-amber-800 break-keep">서버가 확정한 글이에요. 이대로 괜찮으면 다시 눌러 주세요.</p>
               )}
               <div className="space-y-2.5">
                 {captions.map((c) => (
-                  <div key={c.account.id} className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                  <div key={c.account.id} className="rounded-xl border border-slate-200 bg-slate-100 p-3">
                     <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                       <SnsChannelLogo platform={c.account.platform} size={14} />
-                      <span className="text-[11.5px] text-white/75">{c.spec.label}</span>
-                      <span className="text-[11px] text-white/40">{nameOf(c.account)}</span>
+                      <span className="text-[11.5px] text-slate-600">{c.spec.label}</span>
+                      <span className="text-[11px] text-slate-400">{nameOf(c.account)}</span>
                       <div className="flex-1" />
-                      <span className={`text-[11px] ${c.cap.overBy > 0 ? 'text-rose-300' : 'text-white/40'}`}>
+                      <span className={`text-[11px] ${c.cap.overBy > 0 ? 'text-rose-700' : 'text-slate-400'}`}>
                         {c.cap.length.toLocaleString()} / {c.cap.limit.toLocaleString()}
                       </span>
                     </div>
-                    <p className="text-[12.5px] text-white/80 whitespace-pre-wrap break-words max-h-60 overflow-y-auto">{textOf(c) || '(글 없음)'}</p>
+                    <p className="text-[12.5px] text-slate-700 whitespace-pre-wrap break-words max-h-60 overflow-y-auto">{textOf(c) || '(글 없음)'}</p>
                     {c.cap.droppedTags.length > 0 && (
-                      <p className="mt-1.5 text-[11px] text-white/45 break-keep">
+                      <p className="mt-1.5 text-[11px] text-slate-400 break-keep">
                         {c.spec.capabilities.tagFirstOnly
                           ? `${c.spec.label}은 태그를 ${c.spec.capabilities.maxTags}개만 태그로 보여 줘요. 빠지는 태그: `
                           : `태그 자리가 모자라 빠지는 태그: `}
@@ -1598,7 +1612,7 @@ export default function SnsComposer({
                       </p>
                     )}
                     {c.cap.overBy > 0 && (
-                      <p className="mt-1 text-[11px] text-rose-300">{c.cap.overBy.toLocaleString()}자 넘어요. 글을 줄여 주세요.</p>
+                      <p className="mt-1 text-[11px] text-rose-700">{c.cap.overBy.toLocaleString()}자 넘어요. 글을 줄여 주세요.</p>
                     )}
                   </div>
                 ))}
@@ -1624,10 +1638,10 @@ export default function SnsComposer({
           </button>
         </div>
         {lockReason && hasContent && (
-          <p className={`mt-2 text-[11px] break-keep ${scheduleInPast || overChannels.length || placeholderLeft ? 'text-rose-300' : 'text-white/45'}`}>{lockReason}</p>
+          <p className={`mt-2 text-[11px] break-keep ${scheduleInPast || overChannels.length || placeholderLeft ? 'text-rose-700' : 'text-slate-400'}`}>{lockReason}</p>
         )}
         {!scheduledAt && !replacing && (
-          <p className="mt-2 text-[11px] text-white/35">시각을 고르지 않으면 누르는 즉시 올라가요.</p>
+          <p className="mt-2 text-[11px] text-slate-400">시각을 고르지 않으면 누르는 즉시 올라가요.</p>
         )}
       </div>
 

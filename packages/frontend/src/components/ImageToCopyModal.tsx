@@ -93,29 +93,29 @@ export default function ImageToCopyModal({ open, onClose, onExtracted, onStructu
 
   return createPortal(
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-8 overflow-y-auto">
-      <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+      <div className="w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/25">
               <ImagePlus className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">이미지로 문안 생성</h3>
-              <p className="text-[11px] text-white/50">상품·행사 이미지를 올리면 AI가 내용을 읽어 문안 입력칸을 채워줍니다</p>
+              <h3 className="text-base font-bold text-slate-900">이미지로 문안 생성</h3>
+              <p className="text-[11px] text-slate-500">상품·행사 이미지를 올리면 AI가 내용을 읽어 문안 입력칸을 채워줍니다</p>
             </div>
           </div>
-          <button onClick={onClose} disabled={extracting} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10 disabled:opacity-40" aria-label="닫기">
+          <button onClick={onClose} disabled={extracting} className="text-slate-500 hover:text-slate-900 p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-40" aria-label="닫기">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-6 space-y-4">
-          <p className="text-[11px] text-white/50">JPG·PNG·WebP · 한 장당 5MB 이하 · 최대 {MAX_IMAGES}장. 보이는 상품명·정가·할인·기간·혜택만 그대로 읽어옵니다(없는 값 생성 안 함).</p>
+          <p className="text-[11px] text-slate-500">JPG·PNG·WebP · 한 장당 5MB 이하 · 최대 {MAX_IMAGES}장. 보이는 상품명·정가·할인·기간·혜택만 그대로 읽어옵니다(없는 값 생성 안 함).</p>
 
           {previews.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {previews.map((p, i) => (
-                <div key={p.url} className="relative w-16 h-16 rounded-lg overflow-hidden border border-white/10">
+                <div key={p.url} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
                   <img src={p.url} alt={`업로드 이미지 ${i + 1}`} className="w-full h-full object-cover" />
                   <button
                     onClick={() => removeImage(i)}
@@ -136,7 +136,7 @@ export default function ImageToCopyModal({ open, onClose, onExtracted, onStructu
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={extracting || images.length >= MAX_IMAGES}
-              className="rounded-xl border border-dashed border-violet-400/40 bg-violet-500/[0.06] hover:bg-violet-500/10 text-violet-100 text-sm font-medium py-4 disabled:opacity-40"
+              className="rounded-xl border border-dashed border-violet-300 bg-violet-50 hover:bg-violet-50 text-violet-900 text-sm font-medium py-4 disabled:opacity-40"
             >
               <span className="inline-flex items-center gap-2"><ImagePlus className="w-4 h-4" /> 직접 업로드</span>
             </button>
@@ -144,7 +144,7 @@ export default function ImageToCopyModal({ open, onClose, onExtracted, onStructu
               type="button"
               onClick={() => setLibOpen(true)}
               disabled={extracting || images.length >= MAX_IMAGES}
-              className="rounded-xl border border-dashed border-emerald-400/40 bg-emerald-500/[0.06] hover:bg-emerald-500/10 text-emerald-100 text-sm font-medium py-4 disabled:opacity-40"
+              className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50 hover:bg-emerald-50 text-emerald-900 text-sm font-medium py-4 disabled:opacity-40"
             >
               <span className="inline-flex items-center gap-2"><FolderOpen className="w-4 h-4" /> 라이브러리에서 선택</span>
             </button>
@@ -163,14 +163,14 @@ export default function ImageToCopyModal({ open, onClose, onExtracted, onStructu
             }}
           />
 
-          {err && <p className="text-[11px] text-rose-300">{err}</p>}
+          {err && <p className="text-[11px] text-rose-700">{err}</p>}
 
           <div className="flex items-center justify-end gap-2 pt-1">
-            <button onClick={onClose} disabled={extracting} className="text-[12px] text-white/50 hover:text-white/80 px-3 py-2 disabled:opacity-40">취소</button>
+            <button onClick={onClose} disabled={extracting} className="text-[12px] text-slate-500 hover:text-slate-700 px-3 py-2 disabled:opacity-40">취소</button>
             <button
               onClick={() => run()}
               disabled={extracting || images.length === 0}
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-sm font-bold hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {extracting ? '이미지 판독 중...' : `문안 불러오기 (예상 ${IMAGE_EXTRACT_COST} 크레딧)`}

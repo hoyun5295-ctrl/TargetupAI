@@ -183,7 +183,7 @@
     <RULE id="design_quality_minimum_ceiling_free" priority="HIGH">
       신규 메뉴·페이지·UI 신설·옛 페이지 전면 재작성 = **그 시점에 낼 수 있는 최선**. 기존 화면은 **하한이지 상한이 아니다** —
       "Journey Builder 동급"에서 멈추지 않는다. 더 나은 형태가 보이면 그것을 만들고, 그때부터 그것이 새 하한이다.
-      [하한 요건 — 이건 못 내려간다] 다크 slate-950 + 액센트 정합 / 모바일 반응형 / 커스텀 모달(native dialog 0) /
+      [하한 요건 — 이건 못 내려간다] AI 존 틀(`components/zone/` · 남색 머리 띠 + 명령 카드 + 밝은 작업대) 정합 / 모바일 반응형 / 커스텀 모달(native dialog 0) /
       Source caption / 1클릭 UX / 모델명 0 / 5초+ 작업 로딩 차단.
       [절대 금지] 옛 단순 form(input+select+button) / 옛 단순 table view / native dialog(alert·confirm·prompt).
       [라벨 3단] 정가 과금 코어=무라벨 / 갓 출시=NEW(4~6주 뒤 제거) / 품질 미보증만 "실험실".

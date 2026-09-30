@@ -62,7 +62,7 @@ const NAVER_REQUIRED_API_GROUPS = ['주문 판매자'];
 // ★ 2026-07-06 메이크샵 = client_credentials(자격 입력) — 파트너센터 App에 회원·주문 Read 권한 필요. IP 등록 불요(실측).
 const MAKESHOP_REQUIRED_PERMISSIONS = ['회원 (Read)', '주문 (Read)'];
 
-const NOT_ADMIN_NOTE = <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>;
+const NOT_ADMIN_NOTE = <div className="text-[11px] text-slate-500 text-center">연동은 회사 관리자만 가능합니다.</div>;
 
 // ════════════════════════════════════════════════════════════════════
 // 카페24 — OAuth (한줄로 공식 앱 기본 + 자체앱 BYO 고급)
@@ -105,26 +105,26 @@ export interface CdpCafe24ConnectFormProps {
 
 export function CdpCafe24ConnectForm(p: CdpCafe24ConnectFormProps) {
   return (
-    <div id="section-cafe24" className="bg-white/5 border border-white/10 rounded-xl p-6">
+    <div id="section-cafe24" className="bg-white border border-slate-200 rounded-xl p-6">
       <div className="flex items-center gap-2 mb-4">
-        <Store className="w-5 h-5 text-amber-300" />
-        <h2 className="text-base font-bold text-white">카페24 연동</h2>
-        <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium">OAuth · 코딩 0건</span>
+        <Store className="w-5 h-5 text-amber-700" />
+        <h2 className="text-base font-bold text-slate-900">카페24 연동</h2>
+        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">OAuth · 코딩 0건</span>
       </div>
 
       {p.status?.connected ? (
         <div className="space-y-3">
-          <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-            <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+            <Check className="w-5 h-5 text-emerald-700 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <div className="text-sm font-medium text-emerald-100">{p.status.mall_id} 카페24 연동됨</div>
-              <div className="text-xs text-emerald-300 mt-1">
+              <div className="text-sm font-medium text-emerald-900">{p.status.mall_id} 카페24 연동됨</div>
+              <div className="text-xs text-emerald-700 mt-1">
                 status: {p.status.status} · 토큰 만료: {p.status.token_expires_at ? new Date(p.status.token_expires_at).toLocaleString('ko-KR') : '-'}
               </div>
             </div>
           </div>
           {p.isAdmin && (
-            <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+            <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-100 border border-rose-300 hover:bg-rose-100 text-rose-800 text-sm font-medium rounded-lg flex items-center gap-2">
               <Unlink className="w-4 h-4" /> 연동 해제
             </button>
           )}
@@ -132,91 +132,91 @@ export function CdpCafe24ConnectForm(p: CdpCafe24ConnectFormProps) {
       ) : (
         <div className="space-y-4">
           {/* 기본 흐름 — 한줄로 공식 앱 (mall_id만 입력, 2026-07-03) */}
-          <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4">
-            <div className="text-xs font-semibold text-violet-100 mb-1">쇼핑몰 ID만 입력하면 연결됩니다</div>
-            <div className="text-[11px] text-white/50">한줄로 공식 카페24 앱으로 연결되어 회원·주문·장바구니가 자동 동기화됩니다. 새 창에서 카페24 로그인 + 권한 동의만 하면 끝.</div>
+          <div className="bg-violet-50 border border-violet-200 rounded-xl p-4">
+            <div className="text-xs font-semibold text-violet-900 mb-1">쇼핑몰 ID만 입력하면 연결됩니다</div>
+            <div className="text-[11px] text-slate-500">한줄로 공식 카페24 앱으로 연결되어 회원·주문·장바구니가 자동 동기화됩니다. 새 창에서 카페24 로그인 + 권한 동의만 하면 끝.</div>
           </div>
 
           <div>
-            <label className="block text-[11px] text-white/50 mb-1">쇼핑몰 ID (mall_id)</label>
+            <label className="block text-[11px] text-slate-500 mb-1">쇼핑몰 ID (mall_id)</label>
             <input
               type="text"
               value={p.mallId}
               onChange={(e) => p.onMallIdChange(e.target.value)}
               placeholder="예: hanjullo-test"
-              className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
+              className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-amber-300"
             />
-            <div className="text-[11px] text-white/40 mt-1">쇼핑몰 주소가 <span className="font-mono">hanjullo-test.cafe24.com</span>이면 → <span className="font-mono">hanjullo-test</span></div>
+            <div className="text-[11px] text-slate-400 mt-1">쇼핑몰 주소가 <span className="font-mono">hanjullo-test.cafe24.com</span>이면 → <span className="font-mono">hanjullo-test</span></div>
           </div>
 
-          <button onClick={p.onConnectOfficial} disabled={p.connecting || !p.isAdmin || !p.mallId.trim()} className="w-full px-4 py-2.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+          <button onClick={p.onConnectOfficial} disabled={p.connecting || !p.isAdmin || !p.mallId.trim()} className="w-full px-4 py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-900 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
             {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 카페24 연결</>}
           </button>
           {!p.isAdmin && NOT_ADMIN_NOTE}
 
           {/* 고급 — 자체앱(직접 발급 키)으로 연결 (접이식) */}
-          <div className="border border-white/10 rounded-xl overflow-hidden">
-            <button onClick={p.onToggleByo} className="w-full px-4 py-2.5 flex items-center justify-between text-[11px] text-white/50 hover:bg-white/5">
+          <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <button onClick={p.onToggleByo} className="w-full px-4 py-2.5 flex items-center justify-between text-[11px] text-slate-500 hover:bg-white">
               <span>자체앱(직접 발급한 키)으로 연결 (고급)</span>
               {p.showByo ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
             {p.showByo && (
-              <div className="p-4 pt-2 space-y-4 border-t border-white/10">
-                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-                  <div className="text-xs font-semibold text-violet-100">자체앱 연결 · 4단계</div>
+              <div className="p-4 pt-2 space-y-4 border-t border-slate-200">
+                <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-semibold text-violet-900">자체앱 연결 · 4단계</div>
                   <GuideStep n={1}>
-                    <a href="https://developers.cafe24.com" target="_blank" rel="noreferrer" className="text-violet-200 underline inline-flex items-center gap-1">카페24 개발자센터<ExternalLink className="w-3 h-3" /></a>에서 "앱 만들기"(자체앱)를 생성합니다.
+                    <a href="https://developers.cafe24.com" target="_blank" rel="noreferrer" className="text-violet-800 underline inline-flex items-center gap-1">카페24 개발자센터<ExternalLink className="w-3 h-3" /></a>에서 "앱 만들기"(자체앱)를 생성합니다.
                   </GuideStep>
                   <GuideStep n={2}>
-                    앱의 <strong className="text-white/90">Redirect URI</strong>에 아래 주소를 그대로 등록합니다.
-                    <div className="flex items-center gap-2 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5">
-                      <code className="flex-1 text-[11px] text-emerald-200 font-mono break-all">{CAFE24_CALLBACK_URL}</code>
-                      <button onClick={() => p.onCopy(CAFE24_CALLBACK_URL, 'Redirect URI')} className="shrink-0 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60" title="복사"><Copy className="w-3.5 h-3.5" /></button>
+                    앱의 <strong className="text-slate-800">Redirect URI</strong>에 아래 주소를 그대로 등록합니다.
+                    <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 mt-1.5">
+                      <code className="flex-1 text-[11px] text-emerald-800 font-mono break-all">{CAFE24_CALLBACK_URL}</code>
+                      <button onClick={() => p.onCopy(CAFE24_CALLBACK_URL, 'Redirect URI')} className="shrink-0 p-1.5 rounded-md bg-white hover:bg-slate-100 text-slate-500" title="복사"><Copy className="w-3.5 h-3.5" /></button>
                     </div>
                   </GuideStep>
                   <GuideStep n={3}>
                     다음 권한(scope)을 모두 선택합니다.
                     <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {CAFE24_REQUIRED_SCOPES.map((s) => <span key={s} className="text-[10px] font-mono bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
+                      {CAFE24_REQUIRED_SCOPES.map((s) => <span key={s} className="text-[10px] font-mono bg-white border border-slate-200 text-slate-500 px-2 py-0.5 rounded-full">{s}</span>)}
                     </div>
                   </GuideStep>
                   <GuideStep n={4}>
-                    발급된 <strong className="text-white/90">Client ID·Secret</strong>을 아래에 입력합니다.
+                    발급된 <strong className="text-slate-800">Client ID·Secret</strong>을 아래에 입력합니다.
                   </GuideStep>
                 </div>
 
                 <div className="space-y-2.5">
                   <div>
-                    <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
+                    <label className="block text-[11px] text-slate-500 mb-1">Client ID</label>
                     <input
                       type="text"
                       value={p.clientId}
                       onChange={(e) => p.onClientIdChange(e.target.value)}
                       placeholder="자체앱 Client ID"
-                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
+                      className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-amber-300 font-mono"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
+                    <label className="block text-[11px] text-slate-500 mb-1">Client Secret</label>
                     <div className="relative">
                       <input
                         type={p.showSecret ? 'text' : 'password'}
                         value={p.clientSecret}
                         onChange={(e) => p.onClientSecretChange(e.target.value)}
                         placeholder="자체앱 Client Secret"
-                        className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
+                        className="w-full px-3 py-2 pr-10 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-amber-300 font-mono"
                       />
-                      <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={p.showSecret ? '숨기기' : '보기'}>
+                      <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600" title={p.showSecret ? '숨기기' : '보기'}>
                         {p.showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <button onClick={p.onConnectByo} disabled={p.connecting || !p.isAdmin || !p.mallId.trim() || !p.clientId.trim() || !p.clientSecret.trim()} className="w-full px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+                <button onClick={p.onConnectByo} disabled={p.connecting || !p.isAdmin || !p.mallId.trim() || !p.clientId.trim() || !p.clientSecret.trim()} className="w-full px-4 py-2.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
                   {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 자체앱 키 저장하고 연결</>}
                 </button>
-                <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다. 쇼핑몰 ID는 위 입력칸을 함께 사용합니다.</div>
+                <div className="text-[10px] text-slate-400 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다. 쇼핑몰 ID는 위 입력칸을 함께 사용합니다.</div>
               </div>
             )}
           </div>
@@ -250,34 +250,34 @@ export interface CdpNaverConnectFormProps {
 
 export function CdpNaverConnectForm(p: CdpNaverConnectFormProps) {
   return (
-    <div id="section-naver" className="bg-white/5 border border-white/10 rounded-xl p-6">
+    <div id="section-naver" className="bg-white border border-slate-200 rounded-xl p-6">
       <div className="flex items-center gap-2 mb-4">
-        <ShoppingCart className="w-5 h-5 text-emerald-300" />
-        <h2 className="text-base font-bold text-white">네이버 스마트스토어 연동</h2>
-        <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">커머스 API</span>
+        <ShoppingCart className="w-5 h-5 text-emerald-700" />
+        <h2 className="text-base font-bold text-slate-900">네이버 스마트스토어 연동</h2>
+        <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">커머스 API</span>
       </div>
 
       {/* ★ 2026-07-06 인앱 미지원 명확 안내 — 스마트스토어는 스토어 페이지에 스크립트 설치 불가(폐쇄형) */}
-      <div className="mb-4 bg-amber-500/10 border border-amber-400/25 rounded-lg p-3 text-[11px] text-amber-200/90 leading-relaxed">
-        네이버 스마트스토어는 <strong className="text-white/90">주문·구매고객 데이터 동기화만</strong> 지원됩니다. 스마트스토어 페이지에는 스크립트를 설치할 수 없어 <strong className="text-white/90">인앱 메시지(웹 팝업) 표시는 지원되지 않습니다.</strong> 인앱 메시지는 카페24·고도몰·메이크샵·아임웹·자체 쇼핑몰에서 이용할 수 있습니다.
+      <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-800 leading-relaxed">
+        네이버 스마트스토어는 <strong className="text-slate-800">주문·구매고객 데이터 동기화만</strong> 지원됩니다. 스마트스토어 페이지에는 스크립트를 설치할 수 없어 <strong className="text-slate-800">인앱 메시지(웹 팝업) 표시는 지원되지 않습니다.</strong> 인앱 메시지는 카페24·고도몰·메이크샵·아임웹·자체 쇼핑몰에서 이용할 수 있습니다.
       </div>
 
       {p.status?.connected ? (
         <div className="space-y-3">
-          <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-            <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+            <Check className="w-5 h-5 text-emerald-700 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <div className="text-sm font-medium text-emerald-100">{p.status.store_id} 네이버 스마트스토어 연동됨</div>
+              <div className="text-sm font-medium text-emerald-900">{p.status.store_id} 네이버 스마트스토어 연동됨</div>
               {/* ★ 2026-07-06 토큰 만료 시각 노출 제거 — client_credentials는 자동 재발급이라 만료 시각이 불안만 유발(Harold 지적) */}
-              <div className="text-xs text-emerald-300 mt-1">연동 유지 중 · 토큰 자동 갱신</div>
+              <div className="text-xs text-emerald-700 mt-1">연동 유지 중 · 토큰 자동 갱신</div>
             </div>
           </div>
           {p.isAdmin && (
             <div className="flex gap-2">
-              <button onClick={p.onPreview} disabled={p.previewing} className="px-4 py-2 bg-emerald-500/15 border border-emerald-400/40 hover:bg-emerald-500/25 text-emerald-200 text-sm font-medium rounded-lg flex items-center gap-2 disabled:opacity-40">
+              <button onClick={p.onPreview} disabled={p.previewing} className="px-4 py-2 bg-emerald-100 border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-sm font-medium rounded-lg flex items-center gap-2 disabled:opacity-40">
                 {p.previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />} 주문 데이터 확인 (24h)
               </button>
-              <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+              <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-100 border border-rose-300 hover:bg-rose-100 text-rose-800 text-sm font-medium rounded-lg flex items-center gap-2">
                 <Unlink className="w-4 h-4" /> 연동 해제
               </button>
             </div>
@@ -285,74 +285,74 @@ export function CdpNaverConnectForm(p: CdpNaverConnectFormProps) {
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="text-xs text-amber-200/80 bg-amber-500/10 border border-amber-400/30 rounded p-2">
+          <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
             ★ 네이버 정책상 휴대폰·이메일 등 개인정보 제공이 제한될 수 있어, 기존 고객과의 매칭률이 낮을 수 있습니다.
           </div>
           {/* 안내 — 애플리케이션 등록 4단계 (client_credentials — Redirect URI/scope 없음) */}
-          <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-            <div className="text-xs font-semibold text-violet-100">애플리케이션 연결 · 4단계</div>
+          <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-3">
+            <div className="text-xs font-semibold text-violet-900">애플리케이션 연결 · 4단계</div>
             <GuideStep n={1}>네이버 커머스 API센터에서 애플리케이션을 등록합니다.</GuideStep>
             <GuideStep n={2}>
-              애플리케이션의 <strong className="text-white/90">API 호출 IP</strong>에 한줄로 서버 IP를 등록합니다. (미등록 시 연동이 거부됩니다)
-              <div className="bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5 text-[11px] text-white/70 leading-relaxed">
-                보안을 위해 등록할 IP는 <strong className="text-emerald-200">한줄로 AI · SDK 연동 담당자</strong>에게 문의해 개별 안내받으세요.
+              애플리케이션의 <strong className="text-slate-800">API 호출 IP</strong>에 한줄로 서버 IP를 등록합니다. (미등록 시 연동이 거부됩니다)
+              <div className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 mt-1.5 text-[11px] text-slate-600 leading-relaxed">
+                보안을 위해 등록할 IP는 <strong className="text-emerald-800">한줄로 AI · SDK 연동 담당자</strong>에게 문의해 개별 안내받으세요.
               </div>
             </GuideStep>
             <GuideStep n={3}>
               API 그룹에서 다음 그룹을 추가합니다.
               <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {NAVER_REQUIRED_API_GROUPS.map((s) => <span key={s} className="text-[10px] bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
+                {NAVER_REQUIRED_API_GROUPS.map((s) => <span key={s} className="text-[10px] bg-white border border-slate-200 text-slate-500 px-2 py-0.5 rounded-full">{s}</span>)}
               </div>
             </GuideStep>
             <GuideStep n={4}>
-              발급된 <strong className="text-white/90">애플리케이션 ID·시크릿</strong>을 아래에 입력하고 연동하기를 누릅니다.
+              발급된 <strong className="text-slate-800">애플리케이션 ID·시크릿</strong>을 아래에 입력하고 연동하기를 누릅니다.
             </GuideStep>
           </div>
 
           {/* 입력 — store_id + Client ID + Secret */}
           <div className="space-y-2.5">
             <div>
-              <label className="block text-[11px] text-white/50 mb-1">store_id</label>
+              <label className="block text-[11px] text-slate-500 mb-1">store_id</label>
               <input
                 type="text"
                 value={p.storeId}
                 onChange={(e) => p.onStoreIdChange(e.target.value)}
                 placeholder="네이버 스마트스토어 store_id"
-                className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-300"
               />
             </div>
             <div>
-              <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
+              <label className="block text-[11px] text-slate-500 mb-1">Client ID</label>
               <input
                 type="text"
                 value={p.clientId}
                 onChange={(e) => p.onClientIdChange(e.target.value)}
                 placeholder="애플리케이션 Client ID"
-                className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-300 font-mono"
               />
             </div>
             <div>
-              <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
+              <label className="block text-[11px] text-slate-500 mb-1">Client Secret</label>
               <div className="relative">
                 <input
                   type={p.showSecret ? 'text' : 'password'}
                   value={p.clientSecret}
                   onChange={(e) => p.onClientSecretChange(e.target.value)}
                   placeholder="애플리케이션 Client Secret"
-                  className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
+                  className="w-full px-3 py-2 pr-10 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-300 font-mono"
                 />
-                <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={p.showSecret ? '숨기기' : '보기'}>
+                <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600" title={p.showSecret ? '숨기기' : '보기'}>
                   {p.showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
           </div>
 
-          <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.storeId.trim() || !p.clientId.trim() || !p.clientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+          <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.storeId.trim() || !p.clientId.trim() || !p.clientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
             {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연동 확인 중...</> : <><Link2 className="w-4 h-4" /> 연동하기</>}
           </button>
           {!p.isAdmin && NOT_ADMIN_NOTE}
-          <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
+          <div className="text-[10px] text-slate-400 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
         </div>
       )}
     </div>
@@ -386,28 +386,28 @@ export interface CdpMakeshopConnectFormProps {
 export function CdpMakeshopConnectForm(p: CdpMakeshopConnectFormProps) {
   const makeshopHead = buildSdkScriptTag(p.publicKey);
   return (
-    <div id="section-makeshop" className="bg-white/5 border border-white/10 rounded-xl p-6">
+    <div id="section-makeshop" className="bg-white border border-slate-200 rounded-xl p-6">
       <div className="flex items-center gap-2 mb-4">
-        <Palette className="w-5 h-5 text-rose-300" />
-        <h2 className="text-base font-bold text-white">메이크샵 연동</h2>
-        <span className="text-xs bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full font-medium">커머스 API</span>
+        <Palette className="w-5 h-5 text-rose-700" />
+        <h2 className="text-base font-bold text-slate-900">메이크샵 연동</h2>
+        <span className="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full font-medium">커머스 API</span>
       </div>
 
       {p.status?.connected ? (
         <div className="space-y-3">
-          <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-            <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+            <Check className="w-5 h-5 text-emerald-700 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <div className="text-sm font-medium text-emerald-100">{p.status.shop_uid} 메이크샵 연동됨</div>
-              <div className="text-xs text-emerald-300 mt-1">연동 유지 중 · 토큰 자동 갱신</div>
+              <div className="text-sm font-medium text-emerald-900">{p.status.shop_uid} 메이크샵 연동됨</div>
+              <div className="text-xs text-emerald-700 mt-1">연동 유지 중 · 토큰 자동 갱신</div>
             </div>
           </div>
           {p.isAdmin && (
             <div className="flex gap-2">
-              <button onClick={p.onPreview} disabled={p.previewing} className="px-4 py-2 bg-emerald-500/15 border border-emerald-400/40 hover:bg-emerald-500/25 text-emerald-200 text-sm font-medium rounded-lg flex items-center gap-2 disabled:opacity-40">
+              <button onClick={p.onPreview} disabled={p.previewing} className="px-4 py-2 bg-emerald-100 border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-sm font-medium rounded-lg flex items-center gap-2 disabled:opacity-40">
                 {p.previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Boxes className="w-4 h-4" />} 회원·주문 데이터 확인
               </button>
-              <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+              <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-100 border border-rose-300 hover:bg-rose-100 text-rose-800 text-sm font-medium rounded-lg flex items-center gap-2">
                 <Unlink className="w-4 h-4" /> 연동 해제
               </button>
             </div>
@@ -416,80 +416,80 @@ export function CdpMakeshopConnectForm(p: CdpMakeshopConnectFormProps) {
       ) : (
         <div className="space-y-4">
           {/* 안내 — App 등록 3단계 */}
-          <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-            <div className="text-xs font-semibold text-violet-100">App 연결 · 3단계</div>
+          <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-3">
+            <div className="text-xs font-semibold text-violet-900">App 연결 · 3단계</div>
             <GuideStep n={1}>메이크샵 파트너센터(partner.makeshop.co.kr)에서 App을 등록합니다.</GuideStep>
             <GuideStep n={2}>
               App에 다음 권한(Read)을 추가합니다.
               <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {MAKESHOP_REQUIRED_PERMISSIONS.map((s) => <span key={s} className="text-[10px] bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
+                {MAKESHOP_REQUIRED_PERMISSIONS.map((s) => <span key={s} className="text-[10px] bg-white border border-slate-200 text-slate-500 px-2 py-0.5 rounded-full">{s}</span>)}
               </div>
             </GuideStep>
             <GuideStep n={3}>
-              App의 <strong className="text-white/90">Client ID·Secret</strong>과 <strong className="text-white/90">상점 ID(shop_uid)</strong>를 아래에 입력하고 연동하기를 누릅니다.
+              App의 <strong className="text-slate-800">Client ID·Secret</strong>과 <strong className="text-slate-800">상점 ID(shop_uid)</strong>를 아래에 입력하고 연동하기를 누릅니다.
             </GuideStep>
           </div>
 
           {/* 입력 — shop_uid + Client ID + Secret */}
           <div className="space-y-2.5">
             <div>
-              <label className="block text-[11px] text-white/50 mb-1">상점 ID (shop_uid)</label>
+              <label className="block text-[11px] text-slate-500 mb-1">상점 ID (shop_uid)</label>
               <input
                 type="text"
                 value={p.shopUid}
                 onChange={(e) => p.onShopUidChange(e.target.value)}
                 placeholder="메이크샵 상점 ID"
-                className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-300"
               />
             </div>
             <div>
-              <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
+              <label className="block text-[11px] text-slate-500 mb-1">Client ID</label>
               <input
                 type="text"
                 value={p.clientId}
                 onChange={(e) => p.onClientIdChange(e.target.value)}
                 placeholder="App Client ID"
-                className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
+                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-300 font-mono"
               />
             </div>
             <div>
-              <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
+              <label className="block text-[11px] text-slate-500 mb-1">Client Secret</label>
               <div className="relative">
                 <input
                   type={p.showSecret ? 'text' : 'password'}
                   value={p.clientSecret}
                   onChange={(e) => p.onClientSecretChange(e.target.value)}
                   placeholder="App Client Secret"
-                  className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
+                  className="w-full px-3 py-2 pr-10 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-300 font-mono"
                 />
-                <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={p.showSecret ? '숨기기' : '보기'}>
+                <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600" title={p.showSecret ? '숨기기' : '보기'}>
                   {p.showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
           </div>
 
-          <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.shopUid.trim() || !p.clientId.trim() || !p.clientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+          <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.shopUid.trim() || !p.clientId.trim() || !p.clientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
             {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연동 확인 중...</> : <><Link2 className="w-4 h-4" /> 연동하기</>}
           </button>
           {!p.isAdmin && NOT_ADMIN_NOTE}
-          <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
+          <div className="text-[10px] text-slate-400 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
         </div>
       )}
 
       {/* ★ 2026-07-06 메이크샵 SDK 설치 (방문·장바구니 수집 + 인앱 메시지 표시) — 주문 API와 별개. 메이크샵은 자동삽입 불가라 디자인 편집 복붙. */}
-      <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
+      <div className="mt-5 pt-5 border-t border-slate-200 space-y-4">
         <div className="flex items-center gap-2">
-          <Code2 className="w-4 h-4 text-violet-300" />
-          <h3 className="text-sm font-bold text-white">SDK 설치: 방문·장바구니 수집 + 인앱 메시지 표시</h3>
+          <Code2 className="w-4 h-4 text-violet-700" />
+          <h3 className="text-sm font-bold text-slate-900">SDK 설치: 방문·장바구니 수집 + 인앱 메시지 표시</h3>
         </div>
-        <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 쇼핑몰 페이지에 아래 스크립트가 설치돼야 작동합니다. 메이크샵 관리자 &gt; 개별디자인(디자인 편집)에서 모든 페이지에 공통 적용되는 상단 HTML(&lt;head&gt;)에 붙여넣으세요. PC·모바일 디자인 양쪽 모두 필요합니다.</div>
+        <div className="text-[11px] text-slate-500 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-slate-700">인앱 메시지 표시</strong>는 쇼핑몰 페이지에 아래 스크립트가 설치돼야 작동합니다. 메이크샵 관리자 &gt; 개별디자인(디자인 편집)에서 모든 페이지에 공통 적용되는 상단 HTML(&lt;head&gt;)에 붙여넣으세요. PC·모바일 디자인 양쪽 모두 필요합니다.</div>
         <div className="space-y-3">
-          <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{makeshopHead}</pre>
-          <button type="button" onClick={() => p.onCopy(makeshopHead, '메이크샵 설치 스크립트')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
+          <pre className="bg-slate-100 border border-slate-200 rounded-xl p-3 text-[11px] text-emerald-800 overflow-x-auto whitespace-pre-wrap break-all">{makeshopHead}</pre>
+          <button type="button" onClick={() => p.onCopy(makeshopHead, '메이크샵 설치 스크립트')} className="px-3 py-2 bg-indigo-200 hover:bg-indigo-200 text-slate-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
             <Copy className="w-3.5 h-3.5" />복사
           </button>
-          <div className="text-[10px] text-amber-300/70 italic">설치 후 "수집 허용 도메인"에 쇼핑몰 도메인을 등록해야 수집·인앱 표시가 시작됩니다.</div>
+          <div className="text-[10px] text-amber-700 italic">설치 후 "수집 허용 도메인"에 쇼핑몰 도메인을 등록해야 수집·인앱 표시가 시작됩니다.</div>
         </div>
       </div>
     </div>
@@ -515,34 +515,34 @@ export interface CdpImwebConnectFormProps {
 export function CdpImwebConnectForm(p: CdpImwebConnectFormProps) {
   const imwebHead = buildSdkScriptTag(p.publicKey);
   return (
-    <div id="section-imweb" className="bg-white/5 border border-white/10 rounded-xl p-6">
+    <div id="section-imweb" className="bg-white border border-slate-200 rounded-xl p-6">
       <div className="flex items-center gap-2 mb-4">
-        <LayoutTemplate className="w-5 h-5 text-indigo-300" />
-        <h2 className="text-base font-bold text-white">아임웹 연동</h2>
-        <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium">imweb OAuth</span>
+        <LayoutTemplate className="w-5 h-5 text-indigo-700" />
+        <h2 className="text-base font-bold text-slate-900">아임웹 연동</h2>
+        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">imweb OAuth</span>
       </div>
 
       {p.status?.connected ? (
         <div className="space-y-3">
-          <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-            <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+            <Check className="w-5 h-5 text-emerald-700 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <div className="text-sm font-medium text-emerald-100">{p.status.site_code} 아임웹 연동됨</div>
-              <div className="text-xs text-emerald-300 mt-1">status: {p.status.status} · 토큰 만료: {p.status.token_expires_at ? new Date(p.status.token_expires_at).toLocaleString('ko-KR') : '-'}</div>
+              <div className="text-sm font-medium text-emerald-900">{p.status.site_code} 아임웹 연동됨</div>
+              <div className="text-xs text-emerald-700 mt-1">status: {p.status.status} · 토큰 만료: {p.status.token_expires_at ? new Date(p.status.token_expires_at).toLocaleString('ko-KR') : '-'}</div>
             </div>
           </div>
           {p.isAdmin && (
-            <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+            <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-100 border border-rose-300 hover:bg-rose-100 text-rose-800 text-sm font-medium rounded-lg flex items-center gap-2">
               <Unlink className="w-4 h-4" /> 연동 해제
             </button>
           )}
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-            <div className="text-xs font-semibold text-violet-100">아임웹 연결 · 2단계</div>
+          <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-3">
+            <div className="text-xs font-semibold text-violet-900">아임웹 연결 · 2단계</div>
             <GuideStep n={1}>
-              아임웹 앱스토어에서 <strong className="text-white/90">한줄로</strong> 앱을 추가하면 전달되는 <strong className="text-white/90">사이트 코드(siteCode)</strong>를 확인합니다.
+              아임웹 앱스토어에서 <strong className="text-slate-800">한줄로</strong> 앱을 추가하면 전달되는 <strong className="text-slate-800">사이트 코드(siteCode)</strong>를 확인합니다.
             </GuideStep>
             <GuideStep n={2}>
               사이트 코드를 아래에 입력하고 연결하면, 새 창에서 아임웹 동의 후 회원·주문·수신동의·장바구니가 자동 동기화됩니다.
@@ -550,37 +550,37 @@ export function CdpImwebConnectForm(p: CdpImwebConnectFormProps) {
           </div>
 
           <div>
-            <label className="block text-[11px] text-white/50 mb-1">사이트 코드(siteCode)</label>
+            <label className="block text-[11px] text-slate-500 mb-1">사이트 코드(siteCode)</label>
             <input
               type="text"
               value={p.siteCode}
               onChange={(e) => p.onSiteCodeChange(e.target.value)}
               placeholder="예: S2025012450f7813d2ddau"
-              className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+              className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 font-mono"
             />
           </div>
 
-          <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.siteCode.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+          <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.siteCode.trim()} className="w-full px-4 py-2.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
             {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 아임웹 연결</>}
           </button>
           {!p.isAdmin && NOT_ADMIN_NOTE}
-          <div className="text-[10px] text-white/30 italic">Data source: 아임웹 Open API (openapi.imweb.me). 회원·주문·수신동의 읽기 전용.</div>
+          <div className="text-[10px] text-slate-400 italic">Data source: 아임웹 Open API (openapi.imweb.me). 회원·주문·수신동의 읽기 전용.</div>
         </div>
       )}
 
       {/* ★ 2026-07-06 아임웹 SDK 설치 (방문·장바구니 수집 + 인앱 메시지 표시) — 주문 API와 별개. 아임웹은 자동삽입 불가라 코드 삽입 복붙. */}
-      <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
+      <div className="mt-5 pt-5 border-t border-slate-200 space-y-4">
         <div className="flex items-center gap-2">
-          <Code2 className="w-4 h-4 text-violet-300" />
-          <h3 className="text-sm font-bold text-white">SDK 설치: 방문·장바구니 수집 + 인앱 메시지 표시</h3>
+          <Code2 className="w-4 h-4 text-violet-700" />
+          <h3 className="text-sm font-bold text-slate-900">SDK 설치: 방문·장바구니 수집 + 인앱 메시지 표시</h3>
         </div>
-        <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 사이트에 아래 스크립트가 설치돼야 작동합니다. 아임웹 관리자 화면의 코드 삽입(HEAD 영역)에 붙여넣으세요.</div>
+        <div className="text-[11px] text-slate-500 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-slate-700">인앱 메시지 표시</strong>는 사이트에 아래 스크립트가 설치돼야 작동합니다. 아임웹 관리자 화면의 코드 삽입(HEAD 영역)에 붙여넣으세요.</div>
         <div className="space-y-3">
-          <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{imwebHead}</pre>
-          <button type="button" onClick={() => p.onCopy(imwebHead, '아임웹 설치 스크립트')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
+          <pre className="bg-slate-100 border border-slate-200 rounded-xl p-3 text-[11px] text-emerald-800 overflow-x-auto whitespace-pre-wrap break-all">{imwebHead}</pre>
+          <button type="button" onClick={() => p.onCopy(imwebHead, '아임웹 설치 스크립트')} className="px-3 py-2 bg-indigo-200 hover:bg-indigo-200 text-slate-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
             <Copy className="w-3.5 h-3.5" />복사
           </button>
-          <div className="text-[10px] text-amber-300/70 italic">설치 후 "수집 허용 도메인"에 사이트 도메인을 등록해야 수집·인앱 표시가 시작됩니다.</div>
+          <div className="text-[10px] text-amber-700 italic">설치 후 "수집 허용 도메인"에 사이트 도메인을 등록해야 수집·인앱 표시가 시작됩니다.</div>
         </div>
       </div>
     </div>
@@ -612,84 +612,84 @@ export function CdpGodoConnectForm(p: CdpGodoConnectFormProps) {
   const godoPurchase = `<script>\n  window.hjl && window.hjl.track('purchase', { order_id: '{=orderInfo.orderNo}' });\n</script>`;
   const blk = (label: string, code: string, copyLabel: string) => (
     <div key={copyLabel}>
-      <div className="text-xs font-medium text-white/70 mb-1.5">{label}</div>
-      <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{code}</pre>
-      <button type="button" onClick={() => p.onCopy(code, copyLabel)} className="mt-2 px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
+      <div className="text-xs font-medium text-slate-600 mb-1.5">{label}</div>
+      <pre className="bg-slate-100 border border-slate-200 rounded-xl p-3 text-[11px] text-emerald-800 overflow-x-auto whitespace-pre-wrap break-all">{code}</pre>
+      <button type="button" onClick={() => p.onCopy(code, copyLabel)} className="mt-2 px-3 py-2 bg-indigo-200 hover:bg-indigo-200 text-slate-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
         <Copy className="w-3.5 h-3.5" />복사
       </button>
     </div>
   );
 
   return (
-    <div id="section-godo" className="bg-white/5 border border-white/10 rounded-xl p-6">
+    <div id="section-godo" className="bg-white border border-slate-200 rounded-xl p-6">
       <div className="flex items-center gap-2 mb-4">
-        <Server className="w-5 h-5 text-indigo-300" />
-        <h2 className="text-base font-bold text-white">고도몰 연동</h2>
-        <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium">쇼핑몰 인증키</span>
+        <Server className="w-5 h-5 text-indigo-700" />
+        <h2 className="text-base font-bold text-slate-900">고도몰 연동</h2>
+        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">쇼핑몰 인증키</span>
       </div>
 
       {p.status?.connected ? (
         <div className="space-y-3">
-          <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-            <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+            <Check className="w-5 h-5 text-emerald-700 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <div className="text-sm font-medium text-emerald-100">고도몰 연동됨</div>
-              <div className="text-xs text-emerald-300 mt-1">
+              <div className="text-sm font-medium text-emerald-900">고도몰 연동됨</div>
+              <div className="text-xs text-emerald-700 mt-1">
                 status: {p.status.status} · 연결: {p.status.connectedAt ? new Date(p.status.connectedAt).toLocaleString('ko-KR') : '-'}
               </div>
             </div>
           </div>
           {p.isAdmin && (
-            <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+            <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-100 border border-rose-300 hover:bg-rose-100 text-rose-800 text-sm font-medium rounded-lg flex items-center gap-2">
               <Unlink className="w-4 h-4" /> 연동 해제
             </button>
           )}
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-            <div className="text-xs font-semibold text-violet-100">쇼핑몰 인증키 연결 · 2단계</div>
-            <GuideStep n={1}>고도몰 쇼핑몰 관리자에서 한줄로 API 사용을 신청하고 <strong className="text-white/90">쇼핑몰 인증키(key)</strong>를 발급받습니다.</GuideStep>
+          <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-3">
+            <div className="text-xs font-semibold text-violet-900">쇼핑몰 인증키 연결 · 2단계</div>
+            <GuideStep n={1}>고도몰 쇼핑몰 관리자에서 한줄로 API 사용을 신청하고 <strong className="text-slate-800">쇼핑몰 인증키(key)</strong>를 발급받습니다.</GuideStep>
             <GuideStep n={2}>발급된 인증키를 아래에 입력하면, 최근 주문이 자동으로 들어옵니다.</GuideStep>
           </div>
 
           <div>
-            <label className="block text-[11px] text-white/50 mb-1">쇼핑몰 인증키(key)</label>
+            <label className="block text-[11px] text-slate-500 mb-1">쇼핑몰 인증키(key)</label>
             <div className="relative">
               <input
                 type={p.showKey ? 'text' : 'password'}
                 value={p.apiKey}
                 onChange={(e) => p.onApiKeyChange(e.target.value)}
                 placeholder="고도몰에서 발급받은 인증키"
-                className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+                className="w-full px-3 py-2 pr-10 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 font-mono"
               />
-              <button type="button" onClick={p.onToggleKey} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={p.showKey ? '숨기기' : '보기'}>
+              <button type="button" onClick={p.onToggleKey} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600" title={p.showKey ? '숨기기' : '보기'}>
                 {p.showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
           </div>
 
-          <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.apiKey.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+          <button onClick={p.onConnect} disabled={p.connecting || !p.isAdmin || !p.apiKey.trim()} className="w-full px-4 py-2.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
             {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 확인 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 고도몰 연동</>}
           </button>
           {!p.isAdmin && NOT_ADMIN_NOTE}
-          <div className="text-[10px] text-white/30 italic">인증키는 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
+          <div className="text-[10px] text-slate-400 italic">인증키는 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
         </div>
       )}
 
       {/* ★ 2026-07-03 고도몰 SDK 설치 (행동·회원 수집) — 주문 API 키와 별개. 고도몰은 자동삽입 불가라 스킨 복붙. */}
-      <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
+      <div className="mt-5 pt-5 border-t border-slate-200 space-y-4">
         <div className="flex items-center gap-2">
-          <Code2 className="w-4 h-4 text-violet-300" />
-          <h3 className="text-sm font-bold text-white">SDK 설치: 방문·회원·장바구니 수집</h3>
+          <Code2 className="w-4 h-4 text-violet-700" />
+          <h3 className="text-sm font-bold text-slate-900">SDK 설치: 방문·회원·장바구니 수집</h3>
         </div>
-        <div className="text-[11px] text-white/50 -mt-2">주문(위)과 별개입니다. 방문·회원·장바구니까지 수집하려면 고도몰 스킨(PC·모바일 각각)에 아래를 붙여넣으세요. 고도몰5 표준 치환코드라 수정 없이 동작합니다.</div>
+        <div className="text-[11px] text-slate-500 -mt-2">주문(위)과 별개입니다. 방문·회원·장바구니까지 수집하려면 고도몰 스킨(PC·모바일 각각)에 아래를 붙여넣으세요. 고도몰5 표준 치환코드라 수정 없이 동작합니다.</div>
         <div className="space-y-4">
           {blk('① 설치 스크립트: 모든 페이지 스킨 <head>', godoHead, '고도몰 설치 스크립트')}
           {blk('② 회원 식별: 로그인 스킨 <body> 태그', godoBody, '고도몰 회원 식별 코드')}
           {blk('③ 장바구니 담기: 상품상세(goods_view) 스킨', godoCart, '고도몰 장바구니 코드')}
           {blk('④ 구매 완료: 주문완료(order_end) 스킨', godoPurchase, '고도몰 구매 완료 코드')}
-          <div className="text-[10px] text-amber-300/70 italic">PC·모바일 스킨 양쪽에 넣어야 합니다. 그리고 "수집 허용 도메인"에 몰 도메인을 등록해야 수집이 시작됩니다.</div>
+          <div className="text-[10px] text-amber-700 italic">PC·모바일 스킨 양쪽에 넣어야 합니다. 그리고 "수집 허용 도메인"에 몰 도메인을 등록해야 수집이 시작됩니다.</div>
         </div>
       </div>
     </div>
@@ -790,29 +790,29 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
   const adminOptions = p.storeCodeOptions || [];
   const storeCodeField = !p.canConnect ? null
     : userCodes.length === 1 ? (
-      <div className="text-[11px] text-white/60 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-        이 몰의 회원·주문은 <strong className="text-white/90">{userCodes[0]}</strong> 분류 코드 고객으로 들어옵니다.
+      <div className="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-lg px-3 py-2">
+        이 몰의 회원·주문은 <strong className="text-slate-800">{userCodes[0]}</strong> 분류 코드 고객으로 들어옵니다.
       </div>
     ) : userCodes.length > 1 ? (
       <div>
-        <label className="block text-[11px] text-white/50 mb-1">분류 코드(내게 배정된 것 중 선택)</label>
-        <select value={p.storeCode} onChange={(e) => p.onStoreCodeChange(e.target.value)} className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50">
+        <label className="block text-[11px] text-slate-500 mb-1">분류 코드(내게 배정된 것 중 선택)</label>
+        <select value={p.storeCode} onChange={(e) => p.onStoreCodeChange(e.target.value)} className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:border-indigo-300">
           <option value="">선택해 주세요</option>
           {userCodes.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
     ) : adminOptions.length > 0 ? (
       <div>
-        <label className="block text-[11px] text-white/50 mb-1">분류 코드(선택 · 비우면 회사 공용)</label>
-        <select value={p.storeCode} onChange={(e) => p.onStoreCodeChange(e.target.value)} className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50">
+        <label className="block text-[11px] text-slate-500 mb-1">분류 코드(선택 · 비우면 회사 공용)</label>
+        <select value={p.storeCode} onChange={(e) => p.onStoreCodeChange(e.target.value)} className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:border-indigo-300">
           <option value="">회사 공용(분류 없음)</option>
           {adminOptions.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
     ) : null;
   const lockNote = !p.canConnect && p.lockMessage ? (
-    <div className="flex items-start gap-2 text-[11px] text-amber-100 bg-amber-500/10 border border-amber-400/30 rounded-lg px-3 py-2">
-      <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-300" /><span>{p.lockMessage}</span>
+    <div className="flex items-start gap-2 text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+      <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-700" /><span>{p.lockMessage}</span>
     </div>
   ) : null;
   const wooHead = buildSdkScriptTag(p.publicKey);
@@ -823,50 +823,50 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
 
   const blk = (label: string, code: string, copyLabel: string) => (
     <div key={copyLabel}>
-      <div className="text-xs font-medium text-white/70 mb-1.5">{label}</div>
-      <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{code}</pre>
-      <button type="button" onClick={() => p.onCopy(code, copyLabel)} className="mt-2 px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
+      <div className="text-xs font-medium text-slate-600 mb-1.5">{label}</div>
+      <pre className="bg-slate-100 border border-slate-200 rounded-xl p-3 text-[11px] text-emerald-800 overflow-x-auto whitespace-pre-wrap break-all">{code}</pre>
+      <button type="button" onClick={() => p.onCopy(code, copyLabel)} className="mt-2 px-3 py-2 bg-indigo-200 hover:bg-indigo-200 text-slate-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
         <Copy className="w-3.5 h-3.5" />복사
       </button>
     </div>
   );
 
   return (
-    <div id="section-woocommerce" className="bg-white/5 border border-white/10 rounded-xl p-6">
+    <div id="section-woocommerce" className="bg-white border border-slate-200 rounded-xl p-6">
       <div className="flex items-center gap-2 mb-4">
-        <Blocks className="w-5 h-5 text-fuchsia-300" />
-        <h2 className="text-base font-bold text-white">우커머스 연동</h2>
-        <span className="text-xs bg-fuchsia-500/20 text-fuchsia-200 px-2 py-0.5 rounded-full font-medium">REST 키 + 웹훅 · 몰별</span>
+        <Blocks className="w-5 h-5 text-fuchsia-700" />
+        <h2 className="text-base font-bold text-slate-900">우커머스 연동</h2>
+        <span className="text-xs bg-fuchsia-100 text-fuchsia-800 px-2 py-0.5 rounded-full font-medium">REST 키 + 웹훅 · 몰별</span>
       </div>
 
       {/* 1회 노출 — 저장·재발급 직후 웹훅 주소와 비밀키 */}
       {p.issued && (
-        <div className="mb-5 bg-amber-500/10 border border-amber-400/40 rounded-xl p-4 space-y-3">
+        <div className="mb-5 bg-amber-50 border border-amber-300 rounded-xl p-4 space-y-3">
           <div className="flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
-            <div className="flex-1 text-xs text-amber-100 leading-relaxed">
-              <strong className="text-white">{p.issued.mallId}</strong> 웹훅 비밀키입니다. 이 화면을 닫으면 다시 볼 수 없습니다(재발급은 가능). 고객사 개발자에게 사적 경로로 전달하세요.
+            <AlertCircle className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" />
+            <div className="flex-1 text-xs text-amber-900 leading-relaxed">
+              <strong className="text-slate-900">{p.issued.mallId}</strong> 웹훅 비밀키입니다. 이 화면을 닫으면 다시 볼 수 없습니다(재발급은 가능). 고객사 개발자에게 사적 경로로 전달하세요.
             </div>
-            <button type="button" onClick={p.onDismissIssued} className="p-1 text-white/40 hover:text-white/80" title="닫기"><X className="w-4 h-4" /></button>
+            <button type="button" onClick={p.onDismissIssued} className="p-1 text-slate-400 hover:text-slate-700" title="닫기"><X className="w-4 h-4" /></button>
           </div>
           <div>
-            <div className="text-[11px] text-white/50 mb-1">웹훅 전송 URL</div>
+            <div className="text-[11px] text-slate-500 mb-1">웹훅 전송 URL</div>
             <div className="flex gap-2">
-              <code className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-emerald-200 break-all">{p.issued.webhookUrl}</code>
-              <button type="button" onClick={() => p.onCopy(p.issued!.webhookUrl, '웹훅 URL')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />복사</button>
+              <code className="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-[11px] text-emerald-800 break-all">{p.issued.webhookUrl}</code>
+              <button type="button" onClick={() => p.onCopy(p.issued!.webhookUrl, '웹훅 URL')} className="px-3 py-2 bg-indigo-200 hover:bg-indigo-200 text-slate-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />복사</button>
             </div>
           </div>
           <div>
-            <div className="text-[11px] text-white/50 mb-1">웹훅 비밀키(Secret)</div>
+            <div className="text-[11px] text-slate-500 mb-1">웹훅 비밀키(Secret)</div>
             <div className="flex gap-2">
-              <code className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-amber-200 font-mono break-all">{p.issued.webhookSecret}</code>
-              <button type="button" onClick={() => p.onCopy(p.issued!.webhookSecret, '웹훅 비밀키')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />복사</button>
+              <code className="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-[11px] text-amber-800 font-mono break-all">{p.issued.webhookSecret}</code>
+              <button type="button" onClick={() => p.onCopy(p.issued!.webhookSecret, '웹훅 비밀키')} className="px-3 py-2 bg-indigo-200 hover:bg-indigo-200 text-slate-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />복사</button>
             </div>
           </div>
           <button
             type="button"
             onClick={() => p.onCopy(guideFor({ mallId: p.issued!.mallId, siteUrl: issuedMall?.siteUrl || `https://${p.issued!.mallId}/`, webhookUrl: p.issued!.webhookUrl, hasRestKeys: issuedMall?.hasRestKeys ?? !!p.consumerKey.trim(), consentMetaKey: issuedMall?.consentMetaKey ?? (p.consentMetaKey.trim() || null) }), '개발자 전달용 안내')}
-            className="w-full px-4 py-2.5 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 text-sm font-medium rounded-lg inline-flex items-center justify-center gap-2"
+            className="w-full px-4 py-2.5 bg-violet-100 hover:bg-violet-200 text-violet-900 text-sm font-medium rounded-lg inline-flex items-center justify-center gap-2"
           >
             <FileText className="w-4 h-4" /> 개발자에게 보낼 안내 복사(비밀키 제외)
           </button>
@@ -877,24 +877,24 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
       {malls.length > 0 && (
         <div className="space-y-3 mb-5">
           {malls.map((m) => (
-            <div key={m.mallId} className={`rounded-xl border p-4 ${m.connected ? 'bg-emerald-500/[0.06] border-emerald-400/25' : 'bg-white/[0.03] border-white/10'}`}>
+            <div key={m.mallId} className={`rounded-xl border p-4 ${m.connected ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-white truncate">{m.mallId}</span>
+                    <span className="text-sm font-semibold text-slate-900 truncate">{m.mallId}</span>
                     {m.connected
-                      ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연결됨</span>
-                      : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-200 border border-amber-400/25 font-medium">첫 웹훅·연결 확인 대기</span>}
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/50 border border-white/10">{m.hasRestKeys ? '주기 수집 + 웹훅' : '웹훅 전용'}</span>
+                      ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연결됨</span>
+                      : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 font-medium">첫 웹훅·연결 확인 대기</span>}
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white text-slate-500 border border-slate-200">{m.hasRestKeys ? '주기 수집 + 웹훅' : '웹훅 전용'}</span>
                     {m.storeCode
-                      ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-200 border border-violet-400/25 font-medium">분류 코드 {m.storeCode}</span>
-                      : <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">회사 공용</span>}
+                      ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 border border-violet-200 font-medium">분류 코드 {m.storeCode}</span>
+                      : <span className="text-[10px] px-2 py-0.5 rounded-full bg-white text-slate-400 border border-slate-200">회사 공용</span>}
                   </div>
-                  <div className="text-[11px] text-white/45 mt-1">
+                  <div className="text-[11px] text-slate-400 mt-1">
                     연결 {fmtKo(m.connectedAt)} · 마지막 수집 {fmtKo(m.lastSyncedAt)}{m.consentMetaKey ? ` · 수신동의 키 ${m.consentMetaKey}` : ' · 수신동의 키 미설정'}
                   </div>
                   {m.backfill && m.backfill.stage !== 'done' && (
-                    <div className="mt-2 text-[11px] text-sky-200 bg-sky-500/10 border border-sky-400/25 rounded-lg px-3 py-2 flex items-start gap-1.5">
+                    <div className="mt-2 text-[11px] text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 flex items-start gap-1.5">
                       <Loader2 className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${m.syncError ? '' : 'animate-spin'}`} />
                       <span>
                         기존 회원·주문을 가져오는 중입니다 · 회원 {m.backfill.customersImported.toLocaleString()}명 · 주문 {m.backfill.ordersImported.toLocaleString()}건
@@ -903,7 +903,7 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
                     </div>
                   )}
                   {m.backfill?.stage === 'done' && (
-                    <div className="mt-1 text-[11px] text-white/45">
+                    <div className="mt-1 text-[11px] text-slate-400">
                       기존 데이터 가져오기 완료 · 회원 {m.backfill.customersImported.toLocaleString()}명 · 주문 {m.backfill.ordersImported.toLocaleString()}건
                       {(m.backfill.noPhone ?? 0) > 0 ? ` · 휴대폰 번호가 없어 넣지 않은 ${(m.backfill.noPhone ?? 0).toLocaleString()}건` : ''}
                       {(m.backfill.failed ?? 0) > 0 ? ` · 형식 문제로 건너뛴 ${(m.backfill.failed ?? 0).toLocaleString()}건` : ''}
@@ -911,19 +911,19 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
                     </div>
                   )}
                   {m.syncError && (
-                    <div className="mt-2 text-[11px] text-rose-200 bg-rose-500/10 border border-rose-400/30 rounded-lg px-3 py-2 inline-flex items-start gap-1.5">
+                    <div className="mt-2 text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 inline-flex items-start gap-1.5">
                       <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> 수집 실패 · {m.syncError.message}
                     </div>
                   )}
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" onClick={() => p.onCopy(guideFor(m), '개발자 전달용 안내')} className="px-3 py-1.5 bg-violet-500/25 hover:bg-violet-500/40 text-violet-100 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />개발자 안내 복사</button>
-                <button type="button" onClick={() => p.onCopy(m.webhookUrl, '웹훅 URL')} className="px-3 py-1.5 bg-indigo-500/25 hover:bg-indigo-500/40 text-indigo-100 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />웹훅 URL</button>
+                <button type="button" onClick={() => p.onCopy(guideFor(m), '개발자 전달용 안내')} className="px-3 py-1.5 bg-violet-100 hover:bg-violet-200 text-violet-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />개발자 안내 복사</button>
+                <button type="button" onClick={() => p.onCopy(m.webhookUrl, '웹훅 URL')} className="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />웹훅 URL</button>
                 {p.canConnect && (
                   <>
-                    <button type="button" onClick={() => p.onRotateSecret(m.mallId)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" />비밀키 재발급</button>
-                    <button type="button" onClick={() => p.onDisconnect(m.mallId)} className="px-3 py-1.5 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Unlink className="w-3.5 h-3.5" />해제</button>
+                    <button type="button" onClick={() => p.onRotateSecret(m.mallId)} className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" />비밀키 재발급</button>
+                    <button type="button" onClick={() => p.onDisconnect(m.mallId)} className="px-3 py-1.5 bg-rose-100 border border-rose-300 hover:bg-rose-100 text-rose-800 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Unlink className="w-3.5 h-3.5" />해제</button>
                   </>
                 )}
               </div>
@@ -934,32 +934,32 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
 
       {/* 몰 추가 — 1순위 = 관리자 승인(앱 인증 · 키·웹훅 자동) · 고급 = REST 키 직접 입력 */}
       <div className="space-y-4">
-        <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-          <div className="text-xs font-semibold text-violet-100">{malls.length > 0 ? '몰 추가' : '몰 연결 · 클릭 1회'}</div>
-          <GuideStep n={1}>쇼핑몰 주소를 넣고 <strong className="text-white/90">관리자 승인으로 연결</strong>을 누르면 그 몰의 우커머스 승인 창이 열립니다.</GuideStep>
+        <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-3">
+          <div className="text-xs font-semibold text-violet-900">{malls.length > 0 ? '몰 추가' : '몰 연결 · 클릭 1회'}</div>
+          <GuideStep n={1}>쇼핑몰 주소를 넣고 <strong className="text-slate-800">관리자 승인으로 연결</strong>을 누르면 그 몰의 우커머스 승인 창이 열립니다.</GuideStep>
           <GuideStep n={2}>몰 관리자로 로그인해 "승인"을 누르면 REST 키와 웹훅 {WOO_WEBHOOK_TOPICS.length}개({WOO_WEBHOOK_TOPICS.map((t) => WOO_TOPIC_LABEL[t].split('(')[0]).join('·')})가 자동으로 만들어지고 최근 90일 회원·주문이 들어옵니다.</GuideStep>
-          <GuideStep n={3}>마케팅 수신동의를 커스텀 필드로 받고 있다면 그 필드의 메타키를 적어 주세요(코드엠샵 회원가입 폼이면 <code className="text-emerald-200">mssms_agreement</code>). 비워 두면 수신동의는 반영되지 않습니다(기본 미동의).</GuideStep>
+          <GuideStep n={3}>마케팅 수신동의를 커스텀 필드로 받고 있다면 그 필드의 메타키를 적어 주세요(코드엠샵 회원가입 폼이면 <code className="text-emerald-800">mssms_agreement</code>). 비워 두면 수신동의는 반영되지 않습니다(기본 미동의).</GuideStep>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-[11px] text-white/50 mb-1">쇼핑몰 주소</label>
+            <label className="block text-[11px] text-slate-500 mb-1">쇼핑몰 주소</label>
             <input
               type="text"
               value={p.siteUrl}
               onChange={(e) => p.onSiteUrlChange(e.target.value)}
               placeholder="https://www.example.com"
-              className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+              className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 font-mono"
             />
           </div>
           <div>
-            <label className="block text-[11px] text-white/50 mb-1">마케팅 수신동의 메타키(선택)</label>
+            <label className="block text-[11px] text-slate-500 mb-1">마케팅 수신동의 메타키(선택)</label>
             <input
               type="text"
               value={p.consentMetaKey}
               onChange={(e) => p.onConsentMetaKeyChange(e.target.value)}
               placeholder="예: mssms_agreement"
-              className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+              className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 font-mono"
             />
           </div>
         </div>
@@ -967,53 +967,53 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
         {storeCodeField}
         {lockNote}
 
-        <button onClick={p.onAuthorize} disabled={p.authorizing || p.connecting || !p.canConnect || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-fuchsia-500/30 hover:bg-fuchsia-500/50 text-fuchsia-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+        <button onClick={p.onAuthorize} disabled={p.authorizing || p.connecting || !p.canConnect || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-fuchsia-100 hover:bg-fuchsia-200 text-fuchsia-900 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
           {p.authorizing ? <><Loader2 className="w-4 h-4 animate-spin" /> 승인 창을 여는 중...</> : <><ExternalLink className="w-4 h-4" /> 우커머스 관리자 승인으로 연결</>}
         </button>
-        <div className="text-[10px] text-white/30 italic">승인 창에서 몰 관리자 로그인이 필요합니다. 키는 우커머스가 한줄로 서버로 직접 전달하며 화면에 표시되지 않습니다. 몰 주소는 수집 허용 도메인에 자동 등록됩니다.</div>
+        <div className="text-[10px] text-slate-400 italic">승인 창에서 몰 관리자 로그인이 필요합니다. 키는 우커머스가 한줄로 서버로 직접 전달하며 화면에 표시되지 않습니다. 몰 주소는 수집 허용 도메인에 자동 등록됩니다.</div>
 
-        <details className="group rounded-xl border border-white/10 bg-white/[0.03]">
-          <summary className="cursor-pointer select-none px-4 py-3 text-xs font-medium text-white/60 hover:text-white/80 flex items-center gap-2">
+        <details className="group rounded-xl border border-slate-200 bg-white">
+          <summary className="cursor-pointer select-none px-4 py-3 text-xs font-medium text-slate-500 hover:text-slate-700 flex items-center gap-2">
             <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" /> 직접 입력(고급): REST 키를 우커머스에서 직접 발급해 넣기
           </summary>
           <div className="px-4 pb-4 space-y-3">
-            <div className="text-[11px] text-white/45">우커머스 관리자 → 설정 → 고급 → REST API 에서 <strong className="text-white/70">읽기/쓰기</strong> 권한 키를 만들어 넣으면, 저장 뒤 연결 확인과 웹훅 생성을 한줄로가 시도합니다. 읽기 전용 키면 웹훅은 위 안내대로 개발자가 직접 만듭니다.</div>
+            <div className="text-[11px] text-slate-400">우커머스 관리자 → 설정 → 고급 → REST API 에서 <strong className="text-slate-600">읽기/쓰기</strong> 권한 키를 만들어 넣으면, 저장 뒤 연결 확인과 웹훅 생성을 한줄로가 시도합니다. 읽기 전용 키면 웹훅은 위 안내대로 개발자가 직접 만듭니다.</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] text-white/50 mb-1">Consumer key</label>
+                <label className="block text-[11px] text-slate-500 mb-1">Consumer key</label>
                 <input
                   type="text"
                   value={p.consumerKey}
                   onChange={(e) => p.onConsumerKeyChange(e.target.value)}
                   placeholder="ck_ 로 시작"
-                  className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+                  className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 font-mono"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-white/50 mb-1">Consumer secret</label>
+                <label className="block text-[11px] text-slate-500 mb-1">Consumer secret</label>
                 <div className="relative">
                   <input
                     type={p.showSecret ? 'text' : 'password'}
                     value={p.consumerSecret}
                     onChange={(e) => p.onConsumerSecretChange(e.target.value)}
                     placeholder="cs_ 로 시작"
-                    className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+                    className="w-full px-3 py-2 pr-10 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 font-mono"
                   />
-                  <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={p.showSecret ? '숨기기' : '보기'}>
+                  <button type="button" onClick={p.onToggleSecret} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600" title={p.showSecret ? '숨기기' : '보기'}>
                     {p.showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
             </div>
-            <button onClick={p.onConnect} disabled={p.connecting || p.authorizing || !p.canConnect || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+            <button onClick={p.onConnect} disabled={p.connecting || p.authorizing || !p.canConnect || !p.siteUrl.trim()} className="w-full px-4 py-2.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
               {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 저장하고 연결 확인 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 연결 확인</>}
             </button>
-            <div className="text-[10px] text-white/30 italic">REST 키는 한줄로 서버에 보관되며 화면에 다시 표시되지 않습니다. 키 없이 주소만 저장하면 웹훅 첫 수신이 연결 신호가 됩니다.</div>
+            <div className="text-[10px] text-slate-400 italic">REST 키는 한줄로 서버에 보관되며 화면에 다시 표시되지 않습니다. 키 없이 주소만 저장하면 웹훅 첫 수신이 연결 신호가 됩니다.</div>
           </div>
         </details>
 
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/50">
-          <a href="/api/woocommerce/plugin.zip" download className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/75 font-medium">
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+          <a href="/api/woocommerce/plugin.zip" download className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 font-medium">
             <Blocks className="w-3.5 h-3.5" /> 한줄로 플러그인 다운로드(선택)
           </a>
           <span>워드프레스 플러그인 업로드에 그대로 올리면 수집 스크립트 삽입·회원 식별·수신동의 REST 노출이 자동입니다. 주문·회원 동기화는 위 승인 연결만으로 됩니다.</span>
@@ -1021,12 +1021,12 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
       </div>
 
       {/* SDK 설치 — 주문 API 와 별개(방문·장바구니 수집). 워드프레스는 테마 <head> 한 줄. */}
-      <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
+      <div className="mt-5 pt-5 border-t border-slate-200 space-y-4">
         <div className="flex items-center gap-2">
-          <Code2 className="w-4 h-4 text-violet-300" />
-          <h3 className="text-sm font-bold text-white">SDK 설치: 방문·회원·장바구니 수집</h3>
+          <Code2 className="w-4 h-4 text-violet-700" />
+          <h3 className="text-sm font-bold text-slate-900">SDK 설치: 방문·회원·장바구니 수집</h3>
         </div>
-        <div className="text-[11px] text-white/50 -mt-2">주문(위)과 별개입니다. 테마의 &lt;head&gt; 에 아래 한 줄을 넣으면 방문·장바구니가 들어옵니다. 회원 식별(②)은 선택이며 테마 &lt;body&gt; 태그 한 줄을 바꿉니다.</div>
+        <div className="text-[11px] text-slate-500 -mt-2">주문(위)과 별개입니다. 테마의 &lt;head&gt; 에 아래 한 줄을 넣으면 방문·장바구니가 들어옵니다. 회원 식별(②)은 선택이며 테마 &lt;body&gt; 태그 한 줄을 바꿉니다.</div>
         <div className="space-y-4">
           {blk('① 설치 스크립트: 테마 header.php 의 <head> 안(모든 페이지)', wooHead, '우커머스 설치 스크립트')}
           {blk('② 회원 식별(선택): 테마 <body> 태그를 이렇게 바꿉니다', wooBody, '우커머스 회원 식별 코드')}

@@ -493,7 +493,7 @@ export default function EmailVisualEditor({
 
   return (
     <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 md:p-4">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden">
         {/* 헤더 — ★ 2026-08-28 닫기 버튼 유실 정정(임은지 접수 cmtcic3gr03wdjnotwmk8ofk0).
             [근본] 버튼이 전부 shrink-0인데 입력 두 개에 min-w-0이 없었다. flex 아이템의 min-width 기본값이
             auto라 input은 자기 콘텐츠 폭 아래로 줄지 않는다 = 툴바 총 폭이 모달(max-w-6xl)을 넘고,
@@ -501,27 +501,27 @@ export default function EmailVisualEditor({
             버튼이 [임시저장]+[완성 저장 · 50] 둘에서 [저장] 하나로 줄어 폭이 남아 닫기가 보였다(접수자 관찰과 일치).
             [구조] 좌측 입력 묶음 = flex-1 min-w-0(줄어드는 쪽) / 우측 액션 묶음 = shrink-0(줄지 않는 쪽).
             이제 폭이 모자라면 제목 칸이 줄지 닫기 버튼이 밀려나지 않는다. 라벨은 lg 미만에서 접어 폭을 번다. */}
-        <div className="flex items-center gap-2 px-4 md:px-5 py-3 border-b border-white/10 bg-slate-900/80">
+        <div className="flex items-center gap-2 px-4 md:px-5 py-3 border-b border-slate-200 bg-white">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shrink-0">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1 min-w-0 flex items-center gap-2">
             <input
               value={name} onChange={(e) => setName(e.target.value)} placeholder="캠페인 이름"
-              className="bg-transparent text-sm font-semibold text-white border-b border-white/10 focus:border-violet-400 focus:outline-none px-1 py-0.5 w-40 min-w-0"
+              className="bg-transparent text-sm font-semibold text-slate-900 border-b border-slate-200 focus:border-violet-400 focus:outline-none px-1 py-0.5 w-40 min-w-0"
             />
             <input
               value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="이메일 제목"
-              className="flex-1 min-w-0 bg-transparent text-sm text-white/90 border-b border-white/10 focus:border-violet-400 focus:outline-none px-1 py-0.5"
+              className="flex-1 min-w-0 bg-transparent text-sm text-slate-800 border-b border-slate-200 focus:border-violet-400 focus:outline-none px-1 py-0.5"
             />
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <label className="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer shrink-0">
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer shrink-0">
               <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" />광고성
             </label>
             <button
               onClick={() => setThemeOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 shrink-0"
               title="디자인 테마 8종: 색·서체·조판을 1클릭으로 바꿉니다 (문안은 그대로)"
             >
               <Palette className="w-4 h-4" /><span className="hidden lg:inline">테마</span>
@@ -530,37 +530,37 @@ export default function EmailVisualEditor({
             <button
               type="button"
               onClick={() => setFontOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 shrink-0"
               title="이 캠페인 전체 글꼴을 바꿉니다 (문안은 그대로)"
             >
               <Type className="w-4 h-4" /><span className="hidden lg:inline">서체</span>
             </button>
             <button
               onClick={() => setPcPreviewOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 shrink-0"
               title="PC(데스크탑) 폭으로 크게 미리보기"
             >
               {/* ★ 2026-07-02(3) Harold 지시 — PC 미리보기는 편집 중(완성 전)에도 항상 사용. 잠금은 발송에만 유지 */}
               <Monitor className="w-4 h-4" /><span className="hidden lg:inline">PC 미리보기</span>
             </button>
-            <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/15 px-3 py-2 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-500/25 disabled:opacity-40 shrink-0" title="AI가 블록 카피를 매끄럽게 다듬어요 (1 크레딧 · 사실·혜택 보존)">
+            <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-300 bg-fuchsia-100 px-3 py-2 text-sm font-semibold text-fuchsia-900 hover:bg-fuchsia-100 disabled:opacity-40 shrink-0" title="AI가 블록 카피를 매끄럽게 다듬어요 (1 크레딧 · 사실·혜택 보존)">
               {improving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}<span className="hidden lg:inline">AI로 개선</span>
             </button>
             {completedState ? (
-              <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0">
+              <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 shrink-0">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}저장
               </button>
             ) : (
               <>
-                <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50 shrink-0" title="무료 (발송은 잠긴 상태로 보관됩니다)">
+                <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 shrink-0" title="무료 (발송은 잠긴 상태로 보관됩니다)">
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}<span className="hidden lg:inline">임시저장</span>
                 </button>
-                <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0" title="50크레딧 1회, 이후 수정·발송·이력 무제한 무료">
+                <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 shrink-0" title="50크레딧 1회, 이후 수정·발송·이력 무제한 무료">
                   <Save className="w-4 h-4" />완성 저장 · 50
                 </button>
               </>
             )}
-            <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 shrink-0" aria-label="닫기" title="닫기 (ESC)"><X className="w-5 h-5" /></button>
+            <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100 shrink-0" aria-label="닫기" title="닫기 (ESC)"><X className="w-5 h-5" /></button>
           </div>
         </div>
 
@@ -574,10 +574,10 @@ export default function EmailVisualEditor({
         )}
         <div className="flex-1 flex min-h-0">
           {/* 좌: 블록 리스트 + 추가 + AI */}
-          <div className="w-60 shrink-0 border-r border-white/10 flex flex-col bg-slate-900/60">
+          <div className="w-60 shrink-0 border-r border-slate-200 flex flex-col bg-white">
             {/* ★ 2026-07-13 프리헤더 — 수신함에서 제목 옆에 보이는 미리보기 문구 (비우면 본문 첫 문장 자동) */}
-            <div className="p-3 border-b border-white/10 space-y-1.5">
-              <div className="text-[11px] font-semibold text-white/60">프리헤더 · 수신함 미리보기</div>
+            <div className="p-3 border-b border-slate-200 space-y-1.5">
+              <div className="text-[11px] font-semibold text-slate-500">프리헤더 · 수신함 미리보기</div>
               <input
                 value={design?.preheader || ''}
                 maxLength={90}
@@ -591,26 +591,26 @@ export default function EmailVisualEditor({
                   });
                 }}
                 placeholder="비우면 본문 첫 문장이 자동 표시"
-                className="w-full text-xs bg-slate-950/60 border border-white/10 rounded-lg px-2 py-1.5 text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                className="w-full text-xs bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300"
               />
             </div>
-            <div className="p-3 border-b border-white/10 space-y-2">
-              <div className="text-[11px] font-semibold text-white/60">AI로 만들기</div>
+            <div className="p-3 border-b border-slate-200 space-y-2">
+              <div className="text-[11px] font-semibold text-slate-500">AI로 만들기</div>
               <textarea
                 value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} rows={2}
                 placeholder="예: 여름 신상 안내, VIP에게 정중한 톤"
-                className="w-full text-xs bg-slate-950/60 border border-white/10 rounded-lg px-2 py-1.5 text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 resize-none"
+                className="w-full text-xs bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300 resize-none"
               />
               {/* ★ 2026-07-14 Harold 지시 — 행사·상품 정보 붙여넣기 = 상품 카드(가격·링크·이미지) 자동 구성 + 내용 재창조 */}
               <textarea
                 value={aiEventText} onChange={(e) => setAiEventText(e.target.value)} rows={5}
                 placeholder={'행사·상품 정보 붙여넣기 (선택)\n예)\n글로우 파운데이션 30ml\n85,000원 → 15% 72,250원\nhttps://store.example.com/products/123\n\n행사 문구·기간도 함께 넣으면 내용에 반영돼요'}
-                className="w-full text-xs bg-slate-950/60 border border-white/10 rounded-lg px-2 py-1.5 text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 resize-none"
+                className="w-full text-xs bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300 resize-none"
               />
-              <button onClick={handleAi} disabled={aiBusy || (!aiPrompt.trim() && !aiEventText.trim())} className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 px-3 py-1.5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-40">
+              <button onClick={handleAi} disabled={aiBusy || (!aiPrompt.trim() && !aiEventText.trim())} className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40">
                 {aiBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}{aiBusy ? '생성 중...' : `AI 생성 (${AI_GENERATE_COSTS['email-ai-generate']}크레딧)`}
               </button>
-              <div className="text-[10px] text-white/35 leading-relaxed">상품 이름·가격·링크를 넣으면 상품 카드가 자동으로 만들어져요. 가격·혜택은 넣어주신 원문 그대로만 사용됩니다.</div>
+              <div className="text-[10px] text-slate-400 leading-relaxed">상품 이름·가격·링크를 넣으면 상품 카드가 자동으로 만들어져요. 가격·혜택은 넣어주신 원문 그대로만 사용됩니다.</div>
               {/* ★ 2026-09-06 S6 재료 입구 — 이미지·행사 내용 → 블록 전체 교체(기존 AI 생성과 같은 적용 경로) */}
               <MaterialQuickPanel
                 channel="email"
@@ -649,16 +649,16 @@ export default function EmailVisualEditor({
                   </div>
                 </SortableContext>
               </DndContext>
-              {ordered.length === 0 && <div className="text-[11px] text-white/40 px-2 py-4 text-center">블록을 추가하거나 AI로 만들어보세요.</div>}
+              {ordered.length === 0 && <div className="text-[11px] text-slate-400 px-2 py-4 text-center">블록을 추가하거나 AI로 만들어보세요.</div>}
             </div>
-            <div className="p-2 border-t border-white/10 relative">
-              <button onClick={() => setAddOpen((v) => !v)} className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/15 px-3 py-2 text-xs text-white/80 hover:bg-white/5">
+            <div className="p-2 border-t border-slate-200 relative">
+              <button onClick={() => setAddOpen((v) => !v)} className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 hover:bg-white">
                 <Plus className="w-3.5 h-3.5" />블록 추가
               </button>
               {addOpen && (
-                <div className="absolute bottom-12 left-2 right-2 bg-slate-800 border border-white/15 rounded-xl shadow-2xl p-1.5 max-h-72 overflow-y-auto z-10">
+                <div className="absolute bottom-12 left-2 right-2 bg-slate-100 border border-slate-300 rounded-xl shadow-2xl p-1.5 max-h-72 overflow-y-auto z-10">
                   {EMAIL_BLOCK_TYPES.map((t) => (
-                    <button key={t} onClick={() => addBlock(t)} className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-white/80 hover:bg-violet-500/20 text-left">
+                    <button key={t} onClick={() => addBlock(t)} className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-700 hover:bg-violet-100 text-left">
                       <span>{SECTION_META[t]?.icon || '▫️'}</span><span>{SECTION_META[t]?.label || t}</span>
                     </button>
                   ))}
@@ -668,27 +668,27 @@ export default function EmailVisualEditor({
           </div>
 
           {/* 중: 선택 블록 속성 편집 (DM 섹션 편집기 차용) */}
-          <div className="flex-1 min-w-0 overflow-y-auto p-4 bg-slate-950/40">
+          <div className="flex-1 min-w-0 overflow-y-auto p-4 bg-slate-100">
             {selected ? (
               <div className="max-w-md mx-auto">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-base">{SECTION_META[selected.type]?.icon}</span>
-                  <span className="text-sm font-semibold text-white">{SECTION_META[selected.type]?.label} 편집</span>
+                  <span className="text-sm font-semibold text-slate-900">{SECTION_META[selected.type]?.label} 편집</span>
                 </div>
                 {/* ★ 2026-07-12 블록 스타일 — 정렬(렌더러 소비 타입만) + 강조색(primary 파생 소비 타입만)
                     ★ 2026-07-13 — 구도(EMAIL_TREATMENT_OPTIONS 타입만) + 배경면(EMAIL_BAND_AWARE 타입만) */}
                 {(EMAIL_ALIGN_AWARE.has(selected.type) || EMAIL_ACCENT_AWARE.has(selected.type)
                   || !!EMAIL_TREATMENT_OPTIONS[selected.type] || EMAIL_BAND_AWARE.has(selected.type)
                   || EMAIL_MOTIF_AWARE.has(selected.type)) && (
-                  <div className="mb-4 pb-4 border-b border-white/10 space-y-2.5">
-                    <div className="text-[11px] font-semibold text-white/60">블록 스타일</div>
+                  <div className="mb-4 pb-4 border-b border-slate-200 space-y-2.5">
+                    <div className="text-[11px] font-semibold text-slate-500">블록 스타일</div>
                     {EMAIL_TREATMENT_OPTIONS[selected.type] && (
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] text-white/60 shrink-0">구도</span>
+                        <span className="text-[11px] text-slate-500 shrink-0">구도</span>
                         <select
                           value={(selected as any).treatment || 'classic'}
                           onChange={(e) => updateSelectedSection({ treatment: e.target.value } as Partial<Section>)}
-                          className="text-[11px] bg-slate-950/60 border border-white/10 rounded px-1.5 py-1 text-white max-w-[170px]"
+                          className="text-[11px] bg-slate-100 border border-slate-200 rounded px-1.5 py-1 text-slate-900 max-w-[170px]"
                         >
                           {EMAIL_TREATMENT_OPTIONS[selected.type].map((o) => (
                             <option key={o.value} value={o.value}>{o.label}</option>
@@ -699,17 +699,17 @@ export default function EmailVisualEditor({
                     {/* ★ 2026-08-27 분할 구도 안내(임은지 접수) — "글자가 이미지 오른쪽으로 빠졌다"는 설정 실수가
                         아니라 이 구도의 정의다. 고르는 자리에서 알려 준다. */}
                     {selected.type === 'hero' && (selected as any).treatment === 'split' && (
-                      <div className="text-[10px] leading-relaxed text-amber-300/80">
+                      <div className="text-[10px] leading-relaxed text-amber-700">
                         분할 구도는 넓은 화면에서 이미지가 왼쪽, 글자가 오른쪽으로 나갑니다. 좁은 화면에서만 위아래로 쌓입니다. 오른쪽 미리보기에서 PC 폭으로 확인하세요.
                       </div>
                     )}
                     {EMAIL_BAND_AWARE.has(selected.type) && (
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] text-white/60 shrink-0">배경면</span>
+                        <span className="text-[11px] text-slate-500 shrink-0">배경면</span>
                         <select
                           value={(selected as any).background || 'none'}
                           onChange={(e) => updateSelectedSection({ background: (e.target.value === 'none' ? undefined : e.target.value) } as Partial<Section>)}
-                          className="text-[11px] bg-slate-950/60 border border-white/10 rounded px-1.5 py-1 text-white max-w-[170px]"
+                          className="text-[11px] bg-slate-100 border border-slate-200 rounded px-1.5 py-1 text-slate-900 max-w-[170px]"
                         >
                           {EMAIL_BACKGROUND_OPTIONS.map((o) => (
                             <option key={o.value} value={o.value}>{o.label}</option>
@@ -720,7 +720,7 @@ export default function EmailVisualEditor({
                     {/* ★ 2026-07-13 헤드라인 강조(마커펜/밑줄) — 렌더러 emphasizeHead 소비 타입만 */}
                     {(selected.type === 'hero' || selected.type === 'text_card') && (
                       <div className="flex items-center justify-between">
-                        <span className="text-[11px] text-white/60">헤드라인 강조</span>
+                        <span className="text-[11px] text-slate-500">헤드라인 강조</span>
                         <div className="flex gap-1">
                           {([['', '없음'], ['marker', '마커'], ['underline', '밑줄']] as const).map(([v, lbl]) => (
                             <button
@@ -729,8 +729,8 @@ export default function EmailVisualEditor({
                               onClick={() => updateSelected({ headline_emphasis: v || undefined })}
                               className={`px-2 h-7 text-[11px] rounded-lg border transition-colors ${
                                 ((selected.props as any)?.headline_emphasis || '') === v
-                                  ? 'bg-violet-500/40 border-violet-400/60 text-white font-bold'
-                                  : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                                  ? 'bg-violet-200 border-violet-300 text-slate-900 font-bold'
+                                  : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
                               }`}
                             >
                               {lbl}
@@ -744,9 +744,9 @@ export default function EmailVisualEditor({
                         접수 원문이 "자동으로 숫자가 붙는데 제거 불가"였고, 정체를 모르면 끌 생각도 못 한다. */}
                     {EMAIL_MOTIF_AWARE.has(selected.type) && (
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] text-white/60 shrink-0">
+                        <span className="text-[11px] text-slate-500 shrink-0">
                           포인트 장식
-                          <span className="text-white/35 ml-1">(테마: {emailMotifLabel(design?.art_direction?.accentMotif)})</span>
+                          <span className="text-slate-400 ml-1">(테마: {emailMotifLabel(design?.art_direction?.accentMotif)})</span>
                         </span>
                         <div className="flex gap-1 shrink-0">
                           {([['', '자동'], ['none', '숨김']] as const).map(([v, lbl]) => (
@@ -756,8 +756,8 @@ export default function EmailVisualEditor({
                               onClick={() => updateSelectedSection({ motif: (v || undefined) as Section['motif'] })}
                               className={`px-2.5 h-7 text-[11px] rounded-lg border transition-colors ${
                                 (selected.motif || '') === v
-                                  ? 'bg-violet-500/40 border-violet-400/60 text-white font-bold'
-                                  : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                                  ? 'bg-violet-200 border-violet-300 text-slate-900 font-bold'
+                                  : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
                               }`}
                             >
                               {lbl}
@@ -768,7 +768,7 @@ export default function EmailVisualEditor({
                     )}
                     {EMAIL_ALIGN_AWARE.has(selected.type) && (
                       <div className="flex items-center justify-between">
-                        <span className="text-[11px] text-white/60">정렬</span>
+                        <span className="text-[11px] text-slate-500">정렬</span>
                         <div className="flex gap-1">
                           {([['left', '좌'], ['center', '중'], ['right', '우']] as const).map(([a, lbl]) => (
                             <button
@@ -777,8 +777,8 @@ export default function EmailVisualEditor({
                               onClick={() => updateSelectedSection({ align: a })}
                               className={`w-9 h-7 text-[11px] rounded-lg border transition-colors ${
                                 (selected.align || 'center') === a
-                                  ? 'bg-violet-500/40 border-violet-400/60 text-white font-bold'
-                                  : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                                  ? 'bg-violet-200 border-violet-300 text-slate-900 font-bold'
+                                  : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
                               }`}
                             >
                               {lbl}
@@ -789,20 +789,20 @@ export default function EmailVisualEditor({
                     )}
                     {EMAIL_ACCENT_AWARE.has(selected.type) && (
                       <div className="flex items-center justify-between">
-                        <span className="text-[11px] text-white/60">버튼·강조색</span>
+                        <span className="text-[11px] text-slate-500">버튼·강조색</span>
                         <div className="flex items-center gap-2">
                           <input
                             type="color"
                             value={selected.accent_color || '#4f46e5'}
                             onChange={(e) => updateSelectedSection({ accent_color: e.target.value })}
-                            className="w-9 h-7 p-0 rounded-lg border border-white/15 bg-transparent cursor-pointer"
+                            className="w-9 h-7 p-0 rounded-lg border border-slate-300 bg-transparent cursor-pointer"
                             aria-label="강조색 선택"
                           />
                           {selected.accent_color && (
                             <button
                               type="button"
                               onClick={() => updateSelectedSection({ accent_color: undefined })}
-                              className="text-[10px] text-white/50 hover:text-white underline"
+                              className="text-[10px] text-slate-500 hover:text-slate-900 underline"
                               title="직접 지정을 지우고 브랜드 색으로 돌아갑니다"
                             >
                               브랜드색
@@ -813,13 +813,13 @@ export default function EmailVisualEditor({
                     )}
                   </div>
                 )}
-                <div className="text-white" onFocus={trackFieldFocus}>
+                <div className="text-slate-900" onFocus={trackFieldFocus}>
                   <SectionPropsEditor section={selected} onUpdate={updateSelected} hiddenFields={emailHiddenFieldsFor(selected.type)} />
                   {/* ★ 2026-09-16 수신거부는 켜고 끄는 값이 아니라 발송 규칙이다(임은지 접수). 토글을 감춘 자리에
                       무엇이 붙는지 알려 준다 — 안 그러면 "칸이 사라졌다"로만 보인다. 미리보기 맨 끝이 실물이다. */}
                   {selected.type === 'footer' && (
                     <div className={`mt-3 rounded-xl border px-3 py-2.5 text-[11px] leading-relaxed ${
-                      isAd ? 'border-violet-400/30 bg-violet-500/10 text-violet-100/90' : 'border-white/10 bg-white/5 text-white/60'
+                      isAd ? 'border-violet-200 bg-violet-50 text-violet-900' : 'border-slate-200 bg-white text-slate-500'
                     }`}>
                       {isAd
                         ? '광고성 메일이라 보내는 사람 정보와 수신거부 링크가 메일 맨 아래에 자동으로 붙습니다. 오른쪽 미리보기 맨 끝에서 실제 문구를 확인하세요.'
@@ -829,10 +829,10 @@ export default function EmailVisualEditor({
                 </div>
 
                 {/* 개인화 — 변수 칩(편리한 삽입) + 조건부 표시(수신자별 맞춤) */}
-                <div className="mt-4 pt-4 border-t border-white/10 space-y-3">
-                  <div className="text-[11px] font-semibold text-white/60">개인화</div>
+                <div className="mt-4 pt-4 border-t border-slate-200 space-y-3">
+                  <div className="text-[11px] font-semibold text-slate-500">개인화</div>
                   <div>
-                    <div className="text-[10px] text-white/40 mb-1.5">입력칸을 클릭한 뒤 변수를 누르면 커서 위치에 삽입됩니다. 발송 시 수신자 정보로 자동 치환돼요.</div>
+                    <div className="text-[10px] text-slate-400 mb-1.5">입력칸을 클릭한 뒤 변수를 누르면 커서 위치에 삽입됩니다. 발송 시 수신자 정보로 자동 치환돼요.</div>
                     <div className="flex flex-wrap gap-1">
                       {emailVars.map((v) => (
                         <button
@@ -840,7 +840,7 @@ export default function EmailVisualEditor({
                           type="button"
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => insertVarToken(v.token, v.label)}
-                          className="text-[10px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-white/70 hover:bg-violet-500/20 hover:border-violet-400/40"
+                          className="text-[10px] px-2 py-1 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-violet-100 hover:border-violet-300"
                         >
                           {v.label}
                         </button>
@@ -848,7 +848,7 @@ export default function EmailVisualEditor({
                     </div>
                   </div>
                   <div>
-                    <label className="flex items-center gap-2 text-[11px] text-white/60 cursor-pointer w-fit">
+                    <label className="flex items-center gap-2 text-[11px] text-slate-500 cursor-pointer w-fit">
                       <input
                         type="checkbox"
                         checked={!!selected.display_condition}
@@ -862,7 +862,7 @@ export default function EmailVisualEditor({
                         <select
                           value={selected.display_condition.field}
                           onChange={(e) => updateSelectedSection({ display_condition: { ...selected.display_condition!, field: e.target.value } })}
-                          className="text-[11px] bg-slate-950/60 border border-white/10 rounded px-1.5 py-1 text-white"
+                          className="text-[11px] bg-slate-100 border border-slate-200 rounded px-1.5 py-1 text-slate-900"
                         >
                           {/* ★ 2026-07-02 조건 필드 = 회사 실데이터 변수 목록과 동일 소스 (이름은 조건 대상에서 제외) */}
                           {emailVars.filter((v) => v.field !== 'name').map((v) => <option key={v.field} value={v.field}>{v.label}</option>)}
@@ -870,7 +870,7 @@ export default function EmailVisualEditor({
                         <select
                           value={selected.display_condition.op}
                           onChange={(e) => updateSelectedSection({ display_condition: { ...selected.display_condition!, op: e.target.value as 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' } })}
-                          className="text-[11px] bg-slate-950/60 border border-white/10 rounded px-1.5 py-1 text-white"
+                          className="text-[11px] bg-slate-100 border border-slate-200 rounded px-1.5 py-1 text-slate-900"
                         >
                           <option value="eq">같음</option>
                           <option value="ne">다름</option>
@@ -884,44 +884,44 @@ export default function EmailVisualEditor({
                           value={selected.display_condition.value}
                           onChange={(e) => updateSelectedSection({ display_condition: { ...selected.display_condition!, value: e.target.value } })}
                           placeholder="값 (예: VIP)"
-                          className="text-[11px] bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-white placeholder-white/30 w-24"
+                          className="text-[11px] bg-slate-100 border border-slate-200 rounded px-2 py-1 text-slate-900 placeholder-slate-400 w-24"
                         />
                       </div>
                     )}
-                    <div className="text-[10px] text-white/30 mt-1.5">미리보기 오른쪽에서 VIP/일반/신규로 결과를 확인하세요.</div>
+                    <div className="text-[10px] text-slate-400 mt-1.5">미리보기 오른쪽에서 VIP/일반/신규로 결과를 확인하세요.</div>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="h-full flex items-center justify-center text-sm text-white/40">왼쪽에서 블록을 선택하면 여기서 편집합니다.</div>
+              <div className="h-full flex items-center justify-center text-sm text-slate-400">왼쪽에서 블록을 선택하면 여기서 편집합니다.</div>
             )}
           </div>
 
           {/* 우: 실시간 미리보기 (백엔드 렌더 = 실제 발송 HTML) */}
-          <div className="w-[360px] shrink-0 border-l border-white/10 flex flex-col bg-slate-900/60">
-            <div className="px-3 py-2 border-b border-white/10 flex items-center gap-2 text-[11px] text-white/60">
+          <div className="w-[360px] shrink-0 border-l border-slate-200 flex flex-col bg-white">
+            <div className="px-3 py-2 border-b border-slate-200 flex items-center gap-2 text-[11px] text-slate-500">
               <Eye className="w-3.5 h-3.5" />미리보기 (실제 발송 HTML)
               {previewLoading && <Loader2 className="w-3 h-3 animate-spin ml-auto" />}
             </div>
             {sampleCustomers.length > 0 && (
-              <div className="px-2 py-2 border-b border-white/10 flex flex-wrap gap-1">
-                <button onClick={() => setPreviewSample('none')} className={`flex-1 min-w-[60px] text-[10px] px-1.5 py-1 rounded ${previewSample === 'none' ? 'bg-violet-500/30 border border-violet-400/40 text-white' : 'bg-slate-900/60 border border-white/10 text-white/50'}`}>변수 그대로</button>
+              <div className="px-2 py-2 border-b border-slate-200 flex flex-wrap gap-1">
+                <button onClick={() => setPreviewSample('none')} className={`flex-1 min-w-[60px] text-[10px] px-1.5 py-1 rounded ${previewSample === 'none' ? 'bg-violet-100 border border-violet-300 text-slate-900' : 'bg-white border border-slate-200 text-slate-500'}`}>변수 그대로</button>
                 {sampleCustomers.map((c) => (
-                  <button key={c.label} onClick={() => setPreviewSample(c.label as 'VIP' | '일반' | '신규')} className={`flex-1 min-w-[44px] text-[10px] px-1.5 py-1 rounded ${previewSample === c.label ? 'bg-violet-500/30 border border-violet-400/40 text-white' : 'bg-slate-900/60 border border-white/10 text-white/50'}`}>{c.label}</button>
+                  <button key={c.label} onClick={() => setPreviewSample(c.label as 'VIP' | '일반' | '신규')} className={`flex-1 min-w-[44px] text-[10px] px-1.5 py-1 rounded ${previewSample === c.label ? 'bg-violet-100 border border-violet-300 text-slate-900' : 'bg-white border border-slate-200 text-slate-500'}`}>{c.label}</button>
                 ))}
               </div>
             )}
-            <div className="px-2 py-1.5 border-b border-white/10 flex items-center gap-1">
-              <span className="text-[10px] text-white/40 mr-auto">보이는 폭</span>
+            <div className="px-2 py-1.5 border-b border-slate-200 flex items-center gap-1">
+              <span className="text-[10px] text-slate-400 mr-auto">보이는 폭</span>
               <button
                 type="button"
                 onClick={() => setPreviewWidth('mobile')}
-                className={`text-[10px] px-2 py-1 rounded ${previewWidth === 'mobile' ? 'bg-violet-500/30 border border-violet-400/40 text-white' : 'bg-slate-900/60 border border-white/10 text-white/50'}`}
+                className={`text-[10px] px-2 py-1 rounded ${previewWidth === 'mobile' ? 'bg-violet-100 border border-violet-300 text-slate-900' : 'bg-white border border-slate-200 text-slate-500'}`}
               >모바일</button>
               <button
                 type="button"
                 onClick={() => setPreviewWidth('pc')}
-                className={`text-[10px] px-2 py-1 rounded ${previewWidth === 'pc' ? 'bg-violet-500/30 border border-violet-400/40 text-white' : 'bg-slate-900/60 border border-white/10 text-white/50'}`}
+                className={`text-[10px] px-2 py-1 rounded ${previewWidth === 'pc' ? 'bg-violet-100 border border-violet-300 text-slate-900' : 'bg-white border border-slate-200 text-slate-500'}`}
               >PC</button>
             </div>
             <div className="flex-1 overflow-hidden bg-white">
@@ -943,10 +943,10 @@ export default function EmailVisualEditor({
 
       {/* PC(데스크탑) 폭 전체화면 미리보기 — 실제 발송 HTML */}
       {pcPreviewOpen && (
-        <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-sm flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 text-sm text-white/80"><Monitor className="w-4 h-4" /> PC 미리보기: 데스크탑 폭 (실제 발송 HTML)</div>
-            <button onClick={() => setPcPreviewOpen(false)} className="text-white/60 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+        <div className="fixed inset-0 z-[130] bg-slate-100 backdrop-blur-sm flex flex-col">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 shrink-0" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 text-sm text-slate-700"><Monitor className="w-4 h-4" /> PC 미리보기: 데스크탑 폭 (실제 발송 HTML)</div>
+            <button onClick={() => setPcPreviewOpen(false)} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
           </div>
           <div className="flex-1 overflow-auto p-4 md:p-8 flex justify-center" onClick={(e) => e.stopPropagation()}>
             <div className="w-full max-w-[680px] bg-white rounded-lg shadow-2xl overflow-hidden">
@@ -1012,7 +1012,7 @@ function SortableBlockRow({
       ref={setNodeRef}
       style={style}
       onClick={onSelect}
-      className={`group flex items-center gap-1 rounded-lg px-1.5 py-1.5 cursor-pointer border ${selected ? 'bg-violet-500/20 border-violet-400/50' : 'border-transparent hover:bg-white/5'}`}
+      className={`group flex items-center gap-1 rounded-lg px-1.5 py-1.5 cursor-pointer border ${selected ? 'bg-violet-100 border-violet-300' : 'border-transparent hover:bg-white'}`}
     >
       <span
         {...attributes}
@@ -1020,16 +1020,16 @@ function SortableBlockRow({
         onClick={(e) => e.stopPropagation()}
         title="드래그하여 순서 변경"
         aria-label="드래그 핸들"
-        className="shrink-0 text-white/30 hover:text-white/70 cursor-grab active:cursor-grabbing touch-none px-0.5"
+        className="shrink-0 text-slate-400 hover:text-slate-600 cursor-grab active:cursor-grabbing touch-none px-0.5"
       >
         <GripVertical className="w-3.5 h-3.5" />
       </span>
       <span className="text-sm shrink-0">{SECTION_META[section.type]?.icon || '▫️'}</span>
-      <span className="flex-1 text-xs text-white/80 truncate">{SECTION_META[section.type]?.label || section.type}</span>
-      <button onClick={(e) => { e.stopPropagation(); onUp(); }} disabled={isFirst} className="text-white/30 hover:text-white disabled:opacity-30 p-0.5" aria-label="위로"><ArrowUp className="w-3 h-3" /></button>
-      <button onClick={(e) => { e.stopPropagation(); onDown(); }} disabled={isLast} className="text-white/30 hover:text-white disabled:opacity-30 p-0.5" aria-label="아래로"><ArrowDown className="w-3 h-3" /></button>
-      <button onClick={(e) => { e.stopPropagation(); onDuplicate(); }} className="text-white/30 hover:text-violet-300 p-0.5" aria-label="복제"><Copy className="w-3 h-3" /></button>
-      <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="text-white/30 hover:text-rose-400 p-0.5" aria-label="삭제"><Trash2 className="w-3 h-3" /></button>
+      <span className="flex-1 text-xs text-slate-700 truncate">{SECTION_META[section.type]?.label || section.type}</span>
+      <button onClick={(e) => { e.stopPropagation(); onUp(); }} disabled={isFirst} className="text-slate-400 hover:text-slate-900 disabled:opacity-30 p-0.5" aria-label="위로"><ArrowUp className="w-3 h-3" /></button>
+      <button onClick={(e) => { e.stopPropagation(); onDown(); }} disabled={isLast} className="text-slate-400 hover:text-slate-900 disabled:opacity-30 p-0.5" aria-label="아래로"><ArrowDown className="w-3 h-3" /></button>
+      <button onClick={(e) => { e.stopPropagation(); onDuplicate(); }} className="text-slate-400 hover:text-violet-700 p-0.5" aria-label="복제"><Copy className="w-3 h-3" /></button>
+      <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="text-slate-400 hover:text-rose-600 p-0.5" aria-label="삭제"><Trash2 className="w-3 h-3" /></button>
     </div>
   );
 }

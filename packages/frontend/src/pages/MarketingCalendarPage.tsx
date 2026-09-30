@@ -1,5 +1,4 @@
-import { OUI_BACK, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import ZoneFrame from '../components/zone/ZoneFrame';
 // 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계 → 선택 등록 (2026-07-02 4차, Harold 확정)
 // 흐름(1클릭 원칙): [AI로 1년 설계] → 12개월 카드 → 원하는 달 선택 → [등록] → 크레딧 확인 → 자동마케팅 일괄 등록.
 // ★ 2026-07-05 재점검: 등록 = 연 1회(yearly + 대상 월) — 옛 monthly는 시즌 캠페인이 매월 반복 발송되는 구조 결함.
@@ -206,34 +205,17 @@ export default function MarketingCalendarPage() {
 
   const pickedCount = entries.filter((e) => selected.has(e.month) && !registrations[String(e.month)]).length;
 
+  // ★ 2026-09-30 AI 존 대개편: 1년 설계 = 플래너의 보조 화면(플래너 머리 "1년 설계"의 도착지 · 옛 이름 '마케팅 캘린더')
   return (
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-      <div className={OUI_HEADER}>
-        <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="뒤로">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-orange-400 to-rose-500`}>
-            <CalendarDays className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className={OUI_TITLE}>마케팅 캘린더</h1>
-            </div>
-            <p className={OUI_SUBTITLE}>업종·시즌·회사 데이터로 1년치 캠페인을 AI가 설계. 고른 달은 그대로 자동마케팅으로</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-5 relative">
+    <ZoneFrame moduleId="planner" sub="1년 설계" backTo="/marketing-planner" backLabel="플래너로 돌아가기">
+      <div className="space-y-5 relative">
         {entries.length === 0 && (
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-10 text-center">
-            <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-orange-400/30 to-rose-500/30 flex items-center justify-center">
-              <Sparkles className="w-7 h-7 text-orange-300" />
+          <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-orange-50 to-rose-50 flex items-center justify-center">
+              <Sparkles className="w-7 h-7 text-orange-700" />
             </div>
             <h2 className="mt-4 text-lg font-semibold">1년치 마케팅, 한 번에 설계합니다</h2>
-            <p className="mt-1.5 text-[13px] text-white/55 leading-relaxed">
+            <p className="mt-1.5 text-[13px] text-slate-500 leading-relaxed">
               설날·여름 휴가·추석·연말 같은 시즌과 업종 성수기를 조합해 12개월 캠페인을 제안합니다.<br />
               마음에 드는 달만 골라 등록하면 그 달 정해진 날 2시간 전에 문안·대상·비용이 담당자에게 안내되고,<br />
               자동 발송 설정 회사는 정각에 자동 발송, 그 외에는 승인 후 발송됩니다.
@@ -241,21 +223,21 @@ export default function MarketingCalendarPage() {
             <button
               onClick={() => setGenConfirmOpen(true)}
               disabled={generating}
-              className="mt-5 inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-orange-500/80 to-rose-500/80 hover:opacity-90 disabled:opacity-40 text-sm font-semibold transition-opacity"
+              className="mt-5 inline-flex items-center gap-2 h-10 px-5 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-40 text-[13.5px] font-bold transition-colors"
             >
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               AI로 1년 설계하기
             </button>
-            {error && <div className="mt-4 text-xs text-rose-300">{error}</div>}
-            <div className="mt-4 text-[10px] text-white/30 italic">Data source: 회사 업종·브랜드·고객 규모 + 한국 시즌 달력</div>
+            {error && <div className="mt-4 text-xs text-rose-700">{error}</div>}
+            <div className="mt-4 text-[10px] text-slate-400 italic">Data source: 회사 업종·브랜드·고객 규모 + 한국 시즌 달력</div>
           </div>
         )}
 
         {entries.length > 0 && (
           <>
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="text-sm text-white/70">원하는 달을 선택하세요 · 선택 {pickedCount}건</div>
-              <button onClick={() => setGenConfirmOpen(true)} disabled={generating} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors">
+              <div className="text-sm text-slate-600">원하는 달을 선택하세요 · 선택 {pickedCount}건</div>
+              <button onClick={() => setGenConfirmOpen(true)} disabled={generating} className="text-xs px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 transition-colors">
                 다시 설계
               </button>
             </div>
@@ -265,48 +247,48 @@ export default function MarketingCalendarPage() {
                 const registered = !!registrations[String(e.month)];
                 const on = !registered && selected.has(e.month);
                 return (
-                  <div key={e.month} className={`rounded-2xl border p-4 transition-colors ${registered ? 'bg-emerald-500/5 border-emerald-400/30' : on ? 'bg-orange-500/10 border-orange-400/40' : 'bg-white/5 border-white/10'}`}>
+                  <div key={e.month} className={`rounded-2xl border p-4 transition-colors ${registered ? 'bg-emerald-50 border-emerald-200' : on ? 'bg-orange-50 border-orange-300' : 'bg-white border-slate-200'}`}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-sm font-semibold min-w-0 truncate">{MONTH_LABEL[e.month]} · {e.title}</div>
                       {registered ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-400/30 rounded-full px-2 py-0.5 flex-shrink-0">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 rounded-full px-2 py-0.5 flex-shrink-0">
                           <CheckCircle2 className="w-3 h-3" /> 등록됨
                         </span>
                       ) : (
                         <button
                           onClick={() => toggle(e.month)}
-                          className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors flex-shrink-0 ${on ? 'bg-orange-500/60 border-orange-400/60' : 'bg-white/5 border-white/20'}`}
+                          className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors flex-shrink-0 ${on ? 'bg-orange-200 border-orange-300' : 'bg-white border-slate-300'}`}
                           aria-label={`${MONTH_LABEL[e.month]} 선택`}
                         >
-                          {on && <Check className="w-4 h-4 text-white" />}
+                          {on && <Check className="w-4 h-4 text-slate-900" />}
                         </button>
                       )}
                     </div>
-                    <p className="mt-2 text-[12px] text-white/60 leading-relaxed">{e.objective}</p>
-                    <div className="mt-3 flex items-center gap-2 flex-wrap text-[11px] text-white/50">
+                    <p className="mt-2 text-[12px] text-slate-500 leading-relaxed">{e.objective}</p>
+                    <div className="mt-3 flex items-center gap-2 flex-wrap text-[11px] text-slate-500">
                       <span>발송일</span>
                       <select
                         value={e.suggestedDay}
                         onChange={(ev) => setDay(e.month, Number(ev.target.value))}
                         disabled={registered}
-                        className="px-2 py-1 bg-white/5 border border-white/10 rounded text-white text-[11px] focus:outline-none focus:border-orange-400/50 disabled:opacity-40"
+                        className="px-2 py-1 bg-white border border-slate-200 rounded text-slate-900 text-[11px] focus:outline-none focus:border-orange-300 disabled:opacity-40"
                       >
                         {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}일</option>)}
                       </select>
                       <span>· 오전 10:00 · LMS · 연 1회 · 발송 2시간 전 문안 안내</span>
                     </div>
                     {/* ★ 2026-07-07 완비: 발송 대상 축 — 등록 후 발송 당일 타겟 AI가 이 축을 준수 */}
-                    <div className="mt-2 flex items-center gap-2 text-[11px] text-white/50">
+                    <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
                       <span>대상</span>
                       <select
                         value={e.targetHint}
                         onChange={(ev) => setHint(e.month, ev.target.value)}
                         disabled={registered}
-                        className="px-2 py-1 bg-white/5 border border-white/10 rounded text-white text-[11px] focus:outline-none focus:border-orange-400/50 disabled:opacity-40"
+                        className="px-2 py-1 bg-white border border-slate-200 rounded text-slate-900 text-[11px] focus:outline-none focus:border-orange-300 disabled:opacity-40"
                       >
                         {TARGET_HINT_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                       </select>
-                      <span className="text-white/35">· 발송 전 실제 인원으로 산출</span>
+                      <span className="text-slate-400">· 발송 전 실제 인원으로 산출</span>
                     </div>
                     {/* ★ 2026-07-07 완비: 혜택(선택) — 입력하면 문안의 혜택 자리에 그대로, 비우면 발송 2일 전 입력 안내 문자 */}
                     {!registered && (
@@ -316,7 +298,7 @@ export default function MarketingCalendarPage() {
                         onChange={(ev) => setBenefits((prev) => ({ ...prev, [e.month]: ev.target.value }))}
                         maxLength={200}
                         placeholder="혜택 (선택) 예: 아메리카노 1잔 증정 (비우면 발송 2일 전 입력 안내)"
-                        className="mt-2 w-full px-2.5 py-1.5 bg-white/5 border border-white/10 rounded text-white text-[11px] placeholder-white/25 focus:outline-none focus:border-orange-400/50"
+                        className="mt-2 w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-slate-900 text-[11px] placeholder-slate-400 focus:outline-none focus:border-orange-300"
                       />
                     )}
                     <div className="mt-2.5 flex items-center gap-3 flex-wrap">
@@ -325,7 +307,7 @@ export default function MarketingCalendarPage() {
                           type="button"
                           onClick={() => regenerateMonth(e.month)}
                           disabled={regenMonth !== null || generating || registering}
-                          className="inline-flex items-center gap-1.5 text-[11px] text-white/45 hover:text-white/80 disabled:opacity-40 transition-colors"
+                          className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors"
                         >
                           <RefreshCcw className={`w-3 h-3 ${regenMonth === e.month ? 'animate-spin' : ''}`} />
                           {regenMonth === e.month ? '다시 설계하는 중...' : '이 달만 다시 설계 (10 크레딧)'}
@@ -335,7 +317,7 @@ export default function MarketingCalendarPage() {
                         type="button"
                         onClick={() => { setResumeDraftId(null); setEventCampaignText(`${MONTH_LABEL[e.month]} ${e.title}\n${e.objective}\n발송 예정일: ${e.month}월 ${e.suggestedDay}일`); }}
                         disabled={generating || registering}
-                        className="inline-flex items-center gap-1.5 text-[11px] text-amber-200/80 hover:text-amber-100 disabled:opacity-40 transition-colors"
+                        className="inline-flex items-center gap-1.5 text-[11px] text-amber-800 hover:text-amber-900 disabled:opacity-40 transition-colors"
                       >
                         <CalendarRange className="w-3 h-3" /> 이 행사로 채널 초안 만들기
                       </button>
@@ -349,21 +331,21 @@ export default function MarketingCalendarPage() {
               <button
                 onClick={() => setConfirmOpen(true)}
                 disabled={pickedCount === 0 || registering}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-orange-500/90 to-rose-500/90 hover:opacity-90 disabled:opacity-40 text-sm font-semibold shadow-2xl shadow-rose-500/20 transition-opacity"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-orange-50 to-rose-50 hover:opacity-90 disabled:opacity-40 text-sm font-semibold shadow-2xl shadow-rose-500/20 transition-opacity"
               >
                 {registering ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarDays className="w-4 h-4" />}
                 선택 {pickedCount}건 자동마케팅으로 등록
               </button>
             </div>
-            <div className="text-center text-[11px] text-white/40">설계 생성·다시 설계는 매회, 등록은 건당 크레딧이 차감됩니다. 혜택을 비워두면 발송 2일 전 입력 안내 문자가 가고, 미입력 상태로는 자동 발송되지 않습니다.</div>
+            <div className="text-center text-[11px] text-slate-400">설계 생성·다시 설계는 매회, 등록은 건당 크레딧이 차감됩니다. 혜택을 비워두면 발송 2일 전 입력 안내 문자가 가고, 미입력 상태로는 자동 발송되지 않습니다.</div>
           </>
         )}
 
         {generating && (
-          <div className="fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
-            <Loader2 className="w-7 h-7 text-orange-300 animate-spin" />
-            <div className="text-sm text-white/80">AI가 1년치 캘린더를 설계하고 있습니다</div>
-            <div className="text-xs text-white/40">창을 닫지 마세요</div>
+          <div className="fixed inset-0 z-40 bg-slate-100 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+            <Loader2 className="w-7 h-7 text-orange-700 animate-spin" />
+            <div className="text-sm text-slate-700">AI가 1년치 캘린더를 설계하고 있습니다</div>
+            <div className="text-xs text-slate-400">창을 닫지 마세요</div>
           </div>
         )}
 
@@ -386,16 +368,16 @@ export default function MarketingCalendarPage() {
         source="continuous-operator"
         quantity={pickedCount}
         extraContent={
-          <div className="rounded-lg bg-white/5 border border-white/10 px-3 py-2.5">
-            <label className="text-[11px] text-white/60 block mb-1">발송 안내 받을 담당자 연락처 (선택)</label>
+          <div className="rounded-lg bg-white border border-slate-200 px-3 py-2.5">
+            <label className="text-[11px] text-slate-500 block mb-1">발송 안내 받을 담당자 연락처 (선택)</label>
             <input
               type="tel"
               value={adminPhone}
               onChange={(ev) => setAdminPhone(ev.target.value)}
               placeholder="비우면 등록 계정 연락처로 안내"
-              className="w-full px-2.5 py-1.5 bg-white/5 border border-white/10 rounded text-white text-[12px] placeholder-white/25 focus:outline-none focus:border-orange-400/50"
+              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-slate-900 text-[12px] placeholder-slate-400 focus:outline-none focus:border-orange-300"
             />
-            <div className="mt-1.5 text-[10px] text-white/35 leading-relaxed">발송 2시간 전 문안·대상·비용 안내와 승인 요청 문자가 이 번호로 발송됩니다.</div>
+            <div className="mt-1.5 text-[10px] text-slate-400 leading-relaxed">발송 2시간 전 문안·대상·비용 안내와 승인 요청 문자가 이 번호로 발송됩니다.</div>
           </div>
         }
         onConfirm={() => { setConfirmOpen(false); registerSelected(); }}
@@ -408,6 +390,6 @@ export default function MarketingCalendarPage() {
         onConfirm={() => { setGenConfirmOpen(false); generate(); }}
         onCancel={() => setGenConfirmOpen(false)}
       />
-    </div>
+    </ZoneFrame>
   );
 }

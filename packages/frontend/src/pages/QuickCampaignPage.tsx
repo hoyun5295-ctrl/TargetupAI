@@ -10,8 +10,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import { ArrowLeft, Sparkles, Loader2, Lock, Check, Smartphone, Mail, BookOpen, RotateCcw, AlertTriangle, ChevronDown, Plus, Type, ShieldCheck, ShoppingBag } from 'lucide-react';
-import { OUI_PAGE, OUI_PAGE_CENTER } from '../utils/operator-ui';
-import OperatorAura from '../components/operator/OperatorAura';
+import ZoneFrame from '../components/zone/ZoneFrame';
+import { zoneModule } from '../constants/ai-operator-modules';
+import { ScanText, MessageSquareText, HelpCircle, ImageDown, Blocks, Layers3 } from 'lucide-react';
 import { BUILD_CARD_IMAGES_MAX, BUILD_CARDS_MAX } from '../components/ai-build/BuildCardsInput';
 import CatalogPagesInput from '../components/ai-build/CatalogPagesInput';
 import { AI_BUILD_PRODUCTS_MAX } from '../components/ai-build/ProductPickList';
@@ -31,7 +32,7 @@ import {
   type BuildCardValue, type BuildChannel, type BuildImageRole, type BuildImageValue, type BuildProductValue,
 } from '../utils/ai-build';
 import { makeResultPath } from '../utils/make-flow';
-import { MK_BTN_AI, MK_HEADER, MK_HEADER_ROW, MK_BACK, MK_TILE, MK_TITLE, MK_SUB, MK_CARD } from '../utils/make-ui';
+import { MK_BTN_AI, MK_CARD } from '../utils/make-ui';
 
 interface ServerQuote {
   total: number;
@@ -105,6 +106,7 @@ export default function QuickCampaignPage() {
   const [offImages, setOffImages] = useState<Set<string>>(new Set());
   const [offSite, setOffSite] = useState<Set<string>>(new Set());
   const [boardOpen, setBoardOpen] = useState(true);
+  const [makeLine, setMakeLine] = useState('');
   const [uploading, setUploading] = useState(false);
   const [libraryFor, setLibraryFor] = useState<'board' | 'catalog' | null>(null);
   const [brand, setBrand] = useState<{ logo?: string | null; name?: string | null; color?: string | null } | null>(null);
@@ -367,7 +369,7 @@ export default function QuickCampaignPage() {
 
   if (flag === 'off') return <QuickCampaignLegacyPage />;
   if (flag === 'loading') {
-    return <div className={OUI_PAGE_CENTER}><Loader2 className="w-6 h-6 animate-spin text-violet-300" /></div>;
+    return <ZoneFrame moduleId="make" backTo="/dm-builder"><div className="py-24 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div></ZoneFrame>;
   }
 
   const missing = new Set(quote?.gate.missing || []);
@@ -395,88 +397,110 @@ export default function QuickCampaignPage() {
     : [readUsed ? `행사 ${readCards.length}` : null, `사진 ${imageCount}장`, allProducts.length ? `${mallProducts.length ? '몰 ' : ''}상품 ${allProducts.length}개` : null].filter(Boolean);
   const domainNotice = readUsed && read && !read.mallDomain;
 
+  const makeOneLine = zoneModule('make').oneLine!;
+  const otherTo = (kind: 'auto' | 'image' | 'blocks') => (channel === 'email'
+    ? (kind === 'blocks' ? '/email-campaigns?other=blank' : '/email-campaigns?other=1')
+    : (kind === 'blocks' ? '/dm-builder?other=blocks' : '/dm-builder?other=1'));
+  // ★ 2026-09-30 AI 존 대개편: 한 줄 = 주소면 그 페이지를 읽고(기존 주소 읽기 · AI 0 · 차감 0), 글이면 행사 내용 칸에 담는다
+  const submitMakeLine = () => {
+    const v = makeLine.trim();
+    if (!v) return;
+    if (/^(https?:\/\/|www\.)/i.test(v) || /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(v)) {
+      setAddress(v);
+      void readUrl(v);
+    } else {
+      setBoard((b) => ({ ...b, text: b.text.trim() ? `${b.text.trim()}\n${v}` : v }));
+      setBoardOpen(true);
+      toast.info('행사 내용 칸에 넣었어요. 사진을 더하면 완성도가 올라가요.');
+    }
+    setMakeLine('');
+  };
   return (
-    <div className={OUI_PAGE}>
-      <OperatorAura />
-      <div className={MK_HEADER}>
-        <div className={`${MK_HEADER_ROW} max-w-[1280px] mx-auto`}>
-          <button onClick={() => goBackOr(navigate, '/dm-builder')} className={MK_BACK} aria-label="돌아가기"><ArrowLeft className="w-5 h-5" /></button>
-          <div className={`${MK_TILE} bg-gradient-to-br from-amber-400 to-fuchsia-500`}><Sparkles className="w-5 h-5 text-white" /></div>
-          <div className="min-w-0">
-            <h1 className={MK_TITLE}>만들기</h1>
-            <p className={MK_SUB}>재료만 넣으면 모바일 DM·이메일 완성본까지</p>
+    <ZoneFrame
+      moduleId="make"
+      backTo="/dm-builder"
+      width="flow"
+      command={{
+        line: {
+          value: makeLine,
+          onChange: setMakeLine,
+          onSubmit: submitMakeLine,
+          placeholder: makeOneLine.placeholder,
+          verb: makeOneLine.verb,
+          icon: ScanText,
+          busy: busy || readState.kind === 'reading',
+          disabled: planLocked,
+          tone: 'indigo',
+        },
+        stats: [{ label: '만들 것', value: CHANNEL_NOUN[channel] }],
+        more: [
+          { label: '한 줄로 자동 생성', icon: MessageSquareText, onClick: () => navigate(otherTo('auto')) },
+          { label: '질문 몇 개로 만들기', icon: HelpCircle, onClick: () => navigate('/dm-builder?other=onestep') },
+          { label: '이미지로 불러오기 · 저장 소재에서', icon: ImageDown, onClick: () => navigate(otherTo('image')) },
+          { label: '블록으로 직접 만들기', icon: Blocks, onClick: () => navigate(otherTo('blocks')) },
+          { label: 'DM·이메일·인앱 세트 한 번에(옛 방식)', icon: Layers3, onClick: () => { setResumeDraftId(null); setSetOpen(true); }, divider: true },
+        ],
+      }}
+      commitBar={(
+        <>
+          <div className="min-w-0 flex-1 text-[12px] text-slate-500">
+            {busy ? <span>재료를 잠그고 만드는 중이에요</span> : quote ? (
+              <>
+                <b className="block text-[14px] text-slate-900 mb-0.5">{noun} 생성 {quote.creditEnabled ? `${quote.total} 크레딧` : '(요금제 포함)'}</b>
+                <span>{summaryBits.join(' · ')} · 발행 비용은 보낼 때{readPart ? ` · 사진 글자 읽기 ${readPart.cost} 포함` : ''}</span>
+                {gateText && <span className="block text-amber-800 mt-0.5">{gateText}</span>}
+              </>
+            ) : (quoteError || '견적을 계산하는 중이에요')}
           </div>
-          <div className="ml-auto relative">
-            <button type="button" onClick={() => setOtherOpen((v) => !v)} disabled={busy} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold text-white/85 hover:bg-white/10 disabled:opacity-40" aria-haspopup="menu" aria-expanded={otherOpen}>
-              다른 방법으로 만들기<ChevronDown className="w-4 h-4" />
-            </button>
-            {otherOpen && (
-              <div role="menu" className="absolute right-0 top-11 z-40 w-[260px] p-1.5 rounded-xl bg-slate-900 border border-white/10 shadow-2xl" onMouseLeave={() => setOtherOpen(false)}>
-                {[
-                  { l: '한 줄로 자동 생성', d: '만들 내용을 한 줄로 적으면 AI가 구성', to: channel === 'email' ? '/email-campaigns?other=1' : '/dm-builder?other=1' },
-                  { l: '질문 몇 개로 만들기', d: '답하면 그 답으로 DM을 만들어요', to: '/dm-builder?other=onestep' },
-                  { l: '이미지로 불러오기 · 저장 소재에서', d: '기획전 캡처·저장 소재로 시작', to: channel === 'email' ? '/email-campaigns?other=1' : '/dm-builder?other=1' },
-                  { l: '블록으로 직접 만들기', d: '빈 화면에서 블록을 골라 쌓아요', to: channel === 'email' ? '/email-campaigns?other=blank' : '/dm-builder?other=blocks' },
-                ].map((it) => (
-                  <button key={it.l} type="button" role="menuitem" onClick={() => { setOtherOpen(false); navigate(it.to); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[0.07]">
-                    <div className="text-[13px] font-semibold text-white">{it.l}</div>
-                    <div className="text-[11.5px] text-white/45">{it.d}</div>
-                  </button>
-                ))}
-                <div className="h-px bg-white/10 my-1" />
-                <button type="button" role="menuitem" onClick={() => { setOtherOpen(false); setResumeDraftId(null); setSetOpen(true); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[0.07]">
-                  <div className="text-[13px] font-semibold text-white">DM·이메일·인앱 세트 한 번에</div>
-                  <div className="text-[11.5px] text-white/45">옛 방식 · 세 채널을 같이 만들어요</div>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-[780px] mx-auto px-4 md:px-6 pt-4 pb-32 space-y-3">
+          <button type="button" onClick={() => setConfirmOpen(true)} disabled={!canRun} className={`${MK_BTN_AI} shrink-0`}>
+            {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}{busy ? '만드는 중' : '만들기'}
+          </button>
+        </>
+      )}
+    >
+      <div className="space-y-3">
         {/* 채널 한 줄 */}
-        <div className="relative flex items-center gap-2 text-[12.5px] text-white/60 flex-wrap">
-          {channel === 'email' ? <Mail className="w-3.5 h-3.5 text-violet-300" /> : isCatalog ? <BookOpen className="w-3.5 h-3.5 text-violet-300" /> : <Smartphone className="w-3.5 h-3.5 text-violet-300" />}
+        <div className="relative flex items-center gap-2 text-[12.5px] text-slate-500 flex-wrap">
+          {channel === 'email' ? <Mail className="w-3.5 h-3.5 text-violet-700" /> : isCatalog ? <BookOpen className="w-3.5 h-3.5 text-violet-700" /> : <Smartphone className="w-3.5 h-3.5 text-violet-700" />}
           <span>
             {channel === 'email' ? '이메일로 만들어요 · 모바일 DM은 완성본 옆에서 한 번에 만들 수 있어요'
               : isCatalog ? '카탈로그 DM으로 만들어요 · 휴대폰은 슬라이드, PC는 책처럼 펼쳐 보여요'
                 : '모바일 DM으로 만들어요 · 이메일은 완성본 옆에서 한 번에 만들 수 있어요'}
           </span>
-          <button type="button" disabled={busy} onClick={() => setChanOpen((v) => !v)} className="text-violet-300 hover:text-violet-200 font-semibold disabled:opacity-40">바꾸기</button>
+          <button type="button" disabled={busy} onClick={() => setChanOpen((v) => !v)} className="text-violet-700 hover:text-violet-800 font-semibold disabled:opacity-40">바꾸기</button>
           {chanOpen && (
-            <div className="absolute left-0 top-7 z-30 p-1 rounded-xl bg-slate-900 border border-white/10 shadow-2xl flex gap-1" onMouseLeave={() => setChanOpen(false)}>
+            <div className="absolute left-0 top-7 z-30 p-1 rounded-xl bg-white border border-slate-200 shadow-2xl flex gap-1" onMouseLeave={() => setChanOpen(false)}>
               {([['dm', '모바일 DM', Smartphone], ['email', '이메일', Mail], ['catalog', '카탈로그 DM', BookOpen]] as const).map(([k, l, Icon]) => (
-                <button key={k} type="button" onClick={() => { setChannel(k); setChanOpen(false); }} className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12.5px] font-semibold ${channel === k ? 'bg-violet-600 text-white' : 'text-white/70 hover:bg-white/10'}`}><Icon className="w-3.5 h-3.5" />{l}</button>
+                <button key={k} type="button" onClick={() => { setChannel(k); setChanOpen(false); }} className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12.5px] font-semibold ${channel === k ? 'bg-violet-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><Icon className="w-3.5 h-3.5" />{l}</button>
               ))}
             </div>
           )}
         </div>
 
         {planLocked && (
-          <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 px-4 py-3 text-[12.5px] text-amber-100 inline-flex items-center gap-2 w-full"><Lock className="w-4 h-4" /> {channel === 'email' ? '이메일은 유료 요금제에서 열려요.' : '모바일 DM 요금제에서 열려요.'}</div>
+          <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-[12.5px] text-amber-900 inline-flex items-center gap-2 w-full"><Lock className="w-4 h-4" /> {channel === 'email' ? '이메일은 유료 요금제에서 열려요.' : '모바일 DM 요금제에서 열려요.'}</div>
         )}
 
         {busy && (
-          <div className={`${MK_CARD} p-5 space-y-3 border-violet-400/30`} aria-live="polite">
-            <div className="text-[15px] font-bold text-white flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin text-violet-300" />완성본을 만들고 있어요</div>
+          <div className={`${MK_CARD} p-5 space-y-3 border-violet-200`} aria-live="polite">
+            <div className="text-[15px] font-bold text-slate-900 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin text-violet-700" />완성본을 만들고 있어요</div>
             <ul className="space-y-2">
               {steps.map((s) => (
                 <li key={s.label} className="flex items-center gap-2.5 text-[13px]">
-                  {s.state === 'done' ? <Check className="w-4 h-4 text-emerald-400" /> : s.state === 'now' ? <Loader2 className="w-4 h-4 animate-spin text-violet-300" /> : <span className="w-4 h-4 inline-flex items-center justify-center"><span className="w-1.5 h-1.5 rounded-full bg-white/25" /></span>}
-                  <span className={s.state === 'todo' ? 'text-white/40' : 'text-white/90 font-semibold'}>{s.label}</span>
+                  {s.state === 'done' ? <Check className="w-4 h-4 text-emerald-600" /> : s.state === 'now' ? <Loader2 className="w-4 h-4 animate-spin text-violet-700" /> : <span className="w-4 h-4 inline-flex items-center justify-center"><span className="w-1.5 h-1.5 rounded-full bg-slate-200" /></span>}
+                  <span className={s.state === 'todo' ? 'text-slate-400' : 'text-slate-800 font-semibold'}>{s.label}</span>
                 </li>
               ))}
             </ul>
-            <p className="text-[12px] text-white/50">보통 20~40초 걸려요 · 이 창을 닫지 말고 잠시만 기다려 주세요{elapsed >= 40 ? ' · 조금 더 걸리고 있어요' : ''}</p>
-            <p className="text-[12px] text-white/55 border-t border-white/10 pt-3"><b className="text-white">완성도 점검</b>에서 첫 화면이 비었거나 구성이 모자라면 크레딧을 쓰지 않고 멈춘 뒤 <span className="text-amber-300">"이것 하나만 더 넣어 주세요"</span>를 알려 드려요.</p>
+            <p className="text-[12px] text-slate-500">보통 20~40초 걸려요 · 이 창을 닫지 말고 잠시만 기다려 주세요{elapsed >= 40 ? ' · 조금 더 걸리고 있어요' : ''}</p>
+            <p className="text-[12px] text-slate-500 border-t border-slate-200 pt-3"><b className="text-slate-900">완성도 점검</b>에서 첫 화면이 비었거나 구성이 모자라면 크레딧을 쓰지 않고 멈춘 뒤 <span className="text-amber-700">"이것 하나만 더 넣어 주세요"</span>를 알려 드려요.</p>
           </div>
         )}
 
         {isCatalog ? (
           <Field icon={<BookOpen className="w-4 h-4" />} label="카탈로그 쪽 사진" hint="올린 순서가 쪽 순서예요 · 글자 읽기나 문구 생성은 하지 않아요">
             <CatalogPagesInput value={catalogImages} onChange={setCatalogImages} title={catalogTitle} onTitleChange={setCatalogTitle} disabled={busy || planLocked} onUpload={upload} onOpenLibrary={() => setLibraryFor('catalog')} onReject={(m) => toast.warning(m)} />
-            <p className="text-[11.5px] text-white/40 mt-2">쓸 사진이 없으면 <button type="button" onClick={() => navigate('/image-studio')} className="underline underline-offset-2 hover:text-white/80">이미지 스튜디오에서 만들기</button></p>
+            <p className="text-[11.5px] text-slate-400 mt-2">쓸 사진이 없으면 <button type="button" onClick={() => navigate('/image-studio')} className="underline underline-offset-2 hover:text-slate-700">이미지 스튜디오에서 만들기</button></p>
           </Field>
         ) : (<>
           <AddressField
@@ -504,9 +528,9 @@ export default function QuickCampaignPage() {
           )}
 
           {!read && carriedRead.length > 0 && (
-            <div className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 flex items-center gap-3 text-[12.5px] text-white/70">
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 flex items-center gap-3 text-[12.5px] text-slate-600">
               <span className="flex-1">지난번 읽은 행사 {carriedRead.length}개를 함께 써요 · {carriedRead.map((c) => c.title || '행사').join(' · ')}</span>
-              <button type="button" onClick={() => setCarriedRead([])} disabled={busy} className="text-[12px] font-semibold text-violet-300 hover:text-violet-200">빼기</button>
+              <button type="button" onClick={() => setCarriedRead([])} disabled={busy} className="text-[12px] font-semibold text-violet-700 hover:text-violet-800">빼기</button>
             </div>
           )}
 
@@ -543,24 +567,24 @@ export default function QuickCampaignPage() {
               compact={!!mall.provider}
             />
           ) : (
-            <button type="button" onClick={() => setBoardOpen(true)} disabled={busy} className="w-full h-11 rounded-[14px] border border-dashed border-white/20 text-[13px] text-white/60 hover:text-white hover:border-white/35 inline-flex items-center justify-center gap-2"><Plus className="w-4 h-4" />사진·글 더 넣기</button>
+            <button type="button" onClick={() => setBoardOpen(true)} disabled={busy} className="w-full h-11 rounded-[14px] border border-dashed border-slate-300 text-[13px] text-slate-500 hover:text-slate-900 hover:border-slate-300 inline-flex items-center justify-center gap-2"><Plus className="w-4 h-4" />사진·글 더 넣기</button>
           )}
 
           {!mall.provider && mall.checked && (
             <ManualProducts products={products} onChange={setProducts} max={AI_BUILD_PRODUCTS_MAX} onNotice={(m) => toast.warning(m)} onConnect={() => navigate('/cdp-settings')} disabled={busy || planLocked} />
           )}
 
-          {cardsCut > 0 && <p className="text-[12px] text-amber-300 px-1">행사는 {BUILD_CARDS_MAX}개까지 실려요. 뒤쪽 {cardsCut}개는 이번에 빠져요.</p>}
+          {cardsCut > 0 && <p className="text-[12px] text-amber-700 px-1">행사는 {BUILD_CARDS_MAX}개까지 실려요. 뒤쪽 {cardsCut}개는 이번에 빠져요.</p>}
         </>)}
 
         {channel === 'email' && (
           <section className={`${MK_CARD} px-4 py-3 space-y-2`}>
-            <label className="inline-flex items-center gap-2 text-[12.5px] text-white/80 cursor-pointer">
+            <label className="inline-flex items-center gap-2 text-[12.5px] text-slate-700 cursor-pointer">
               <input type="checkbox" className="w-4 h-4 accent-violet-600" checked={isAd} disabled={busy} onChange={(e) => setIsAd(e.target.checked)} />
-              광고 메일로 보내기 <span className="text-white/45">(보낼 때 "(광고)" 표기와 수신거부가 자동으로 붙어요)</span>
+              광고 메일로 보내기 <span className="text-slate-400">(보낼 때 "(광고)" 표기와 수신거부가 자동으로 붙어요)</span>
             </label>
             {quote?.smtpConfigured === false && (
-              <div className="text-[12px] text-amber-200 inline-flex items-center gap-1.5 w-full"><AlertTriangle className="w-3.5 h-3.5 shrink-0" />보내려면 회사 메일 연결이 필요해요. 만들기와 미리보기는 지금 돼요.</div>
+              <div className="text-[12px] text-amber-800 inline-flex items-center gap-1.5 w-full"><AlertTriangle className="w-3.5 h-3.5 shrink-0" />보내려면 회사 메일 연결이 필요해요. 만들기와 미리보기는 지금 돼요.</div>
             )}
           </section>
         )}
@@ -568,18 +592,18 @@ export default function QuickCampaignPage() {
         <BrandChip logoUrl={brand?.logo} name={brand?.name} color={brand?.color} note="로고·브랜드 색: 회사 설정에서 가져왔어요" />
 
         {error && (
-          <div className="rounded-xl bg-rose-500/10 border border-rose-400/30 px-4 py-3 text-[13px] text-rose-100 flex items-start gap-2 flex-wrap">
+          <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-[13px] text-rose-900 flex items-start gap-2 flex-wrap">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <span className="flex-1 min-w-[200px]">{error.message}</span>
             {error.code !== 'FEATURE_DISABLED' && error.code !== 'INSUFFICIENT_CREDIT' && (
-              <button type="button" onClick={() => { if (canRun) void run(); }} disabled={!canRun} className="inline-flex items-center gap-1 h-8 px-3 rounded-lg text-[12px] font-semibold text-white bg-white/10 hover:bg-white/15 disabled:opacity-50"><RotateCcw className="w-3.5 h-3.5" />다시 시도</button>
+              <button type="button" onClick={() => { if (canRun) void run(); }} disabled={!canRun} className="inline-flex items-center gap-1 h-8 px-3 rounded-lg text-[12px] font-semibold text-slate-900 bg-slate-100 hover:bg-slate-200 disabled:opacity-50"><RotateCcw className="w-3.5 h-3.5" />다시 시도</button>
             )}
           </div>
         )}
 
         <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
-          <p className="text-[10px] text-white/30 italic">Data source: 넣어 주신 재료 · 서버 견적 · 만든 초안은 {channel === 'email' ? '이메일' : '모바일 DM'} 목록에 저장돼요</p>
-          <button type="button" onClick={resetAll} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-white/45 hover:text-white/80 disabled:opacity-50"><RotateCcw className="w-3 h-3" />새로 시작</button>
+          <p className="text-[10px] text-slate-400 italic">Data source: 넣어 주신 재료 · 서버 견적 · 만든 초안은 {channel === 'email' ? '이메일' : '모바일 DM'} 목록에 저장돼요</p>
+          <button type="button" onClick={resetAll} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-700 disabled:opacity-50"><RotateCcw className="w-3 h-3" />새로 시작</button>
         </div>
         <EventCampaignResumeBar refreshKey={resumeRefresh} onResume={(id) => { setResumeDraftId(id); setSetOpen(true); }} />
       </div>
@@ -587,23 +611,6 @@ export default function QuickCampaignPage() {
       <EventCampaignModal open={setOpen} resumeDraftId={resumeDraftId || undefined} onClose={() => { setSetOpen(false); setResumeDraftId(null); setResumeRefresh((v) => v + 1); }} />
 
       {/* 하단 바 — 서버 견적 한 줄 + [만들기] */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-slate-950/90 backdrop-blur">
-        <div className="max-w-[780px] mx-auto px-4 md:px-6 py-3.5 flex items-center justify-between gap-3">
-          <div className="min-w-0 text-[12px] text-white/55">
-            {busy ? <span>재료를 잠그고 만드는 중이에요</span> : quote ? (
-              <>
-                <b className="block text-[14px] text-white mb-0.5">{noun} 생성 {quote.creditEnabled ? `${quote.total} 크레딧` : '(요금제 포함)'}</b>
-                <span>{summaryBits.join(' · ')} · 발행 비용은 보낼 때{readPart ? ` · 사진 글자 읽기 ${readPart.cost} 포함` : ''}</span>
-                {gateText && <span className="block text-amber-200 mt-0.5">{gateText}</span>}
-              </>
-            ) : (quoteError || '견적을 계산하는 중이에요')}
-          </div>
-          <button type="button" onClick={() => setConfirmOpen(true)} disabled={!canRun} className={`${MK_BTN_AI} shrink-0`}>
-            {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}{busy ? '만드는 중' : '만들기'}
-          </button>
-        </div>
-      </div>
-
       <AssetLibraryPickerModal open={!!libraryFor} onClose={() => setLibraryFor(null)} onPick={(a) => addLibrary([a])} multiSelect onPickMany={addLibrary} />
       <CreditConfirmModal
         open={confirmOpen}
@@ -611,27 +618,27 @@ export default function QuickCampaignPage() {
         costOverride={quote ? quote.total : undefined}
         description={`${noun}을 만들까요? ${summaryBits.join(' · ')}. 완성본은 결과 화면에 바로 열리고 목록에 저장돼요. 보내는 비용은 보낼 때 따로예요.`}
         extraContent={domainNotice ? (
-          <div className="rounded-xl border border-violet-400/40 bg-violet-500/10 px-3.5 py-3 flex gap-2.5 text-left">
-            <ShieldCheck className="w-4 h-4 text-violet-300 shrink-0 mt-0.5" />
+          <div className="rounded-xl border border-violet-300 bg-violet-50 px-3.5 py-3 flex gap-2.5 text-left">
+            <ShieldCheck className="w-4 h-4 text-violet-700 shrink-0 mt-0.5" />
             <div>
-              <div className="text-[13px] font-bold text-white"><b>{read?.host}</b>의 문구·사진을 우리 회사 것으로 씁니다</div>
-              <div className="text-[12px] text-white/60 mt-0.5">만들기를 누르면 이 확인이 기록돼요 · 원문과 맞는 행사 문구만 그대로 실려요</div>
+              <div className="text-[13px] font-bold text-slate-900"><b>{read?.host}</b>의 문구·사진을 우리 회사 것으로 씁니다</div>
+              <div className="text-[12px] text-slate-500 mt-0.5">만들기를 누르면 이 확인이 기록돼요 · 원문과 맞는 행사 문구만 그대로 실려요</div>
             </div>
           </div>
         ) : mallProducts.length > 0 ? (
-          <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-3 flex gap-2.5 text-left">
-            <ShoppingBag className="w-4 h-4 text-violet-300 shrink-0 mt-0.5" />
-            <div><div className="text-[13px] font-bold text-white">상품 가격·링크는 몰에서 다시 확인해 실어요</div><div className="text-[12px] text-white/60 mt-0.5">품절 상품은 빼고 이유를 알려 드려요</div></div>
+          <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3 flex gap-2.5 text-left">
+            <ShoppingBag className="w-4 h-4 text-violet-700 shrink-0 mt-0.5" />
+            <div><div className="text-[13px] font-bold text-slate-900">상품 가격·링크는 몰에서 다시 확인해 실어요</div><div className="text-[12px] text-slate-500 mt-0.5">품절 상품은 빼고 이유를 알려 드려요</div></div>
           </div>
         ) : board.licensed && board.text.trim() ? (
-          <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-3 flex gap-2.5 text-left">
-            <Type className="w-4 h-4 text-violet-300 shrink-0 mt-0.5" />
-            <div><div className="text-[13px] font-bold text-white">적어 주신 문구와 사진으로 만들어요</div><div className="text-[12px] text-white/60 mt-0.5">할인율·기간은 적어 주신 그대로만 실려요</div></div>
+          <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3 flex gap-2.5 text-left">
+            <Type className="w-4 h-4 text-violet-700 shrink-0 mt-0.5" />
+            <div><div className="text-[13px] font-bold text-slate-900">적어 주신 문구와 사진으로 만들어요</div><div className="text-[12px] text-slate-500 mt-0.5">할인율·기간은 적어 주신 그대로만 실려요</div></div>
           </div>
         ) : undefined}
         onConfirm={run}
         onCancel={() => setConfirmOpen(false)}
       />
-    </div>
+    </ZoneFrame>
   );
 }
