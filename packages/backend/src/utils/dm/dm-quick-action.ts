@@ -16,6 +16,7 @@
  * 호출 영역: routes/dm.ts POST /:id/quick-action
  */
 
+import { findInventedBenefits, findNewNumbers } from '../copy-benefit-detector';
 import { query } from '../../config/database';
 // ★ 2026-09-26 한줄로 V2 R1-26 — 섹션 읽기·되쓰기 CT(pages 우선)
 import { extractFlatSectionsFromDm, mapDmSections } from './dm-builder';
@@ -142,8 +143,11 @@ async function refineAllCopy(companyId: string, campaignId: string): Promise<Qui
 
       const parsed = extractJson<{ refined?: string }>(aiText);
       const refined = (parsed?.refined || '').trim();
+      // ★ 2026-09-30 WP2 — 다듬기는 표현만. 원문에 없던 숫자 · 혜택 값이 생긴 다듬기는 버린다(원문 유지).
+      const fabricated = !!refined && (findNewNumbers(refined, text).length > 0 || findInventedBenefits(refined, text).length > 0);
+      if (fabricated) console.warn(`[dm-quick-action] 원문에 없는 숫자 · 혜택이 생겨 다듬기를 버림 section_id=${sec?.id}`);
 
-      if (refined && refined !== text) {
+      if (refined && refined !== text && !fabricated) {
         const newProps = applyRefinedText(sec, refined);
         changes.push({
           section_id: sec.id,

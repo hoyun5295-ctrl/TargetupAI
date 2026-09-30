@@ -117,13 +117,24 @@ export function claudeRequestShape(
  * 출력 한도 여유 — 상한일 뿐 모델이 더 길게 쓰게 만들지 않는다(정상 출력은 그대로 · 잘림만 막는 무비용 여유 · 상한 16000 = 비스트리밍 HTTP 타임아웃 안전 한계).
  *   - adaptive_v1 · sonnet_5_5: 1.5배(Sonnet 5 토크나이저 ~30%↑ 대응 · 0701 근거 그대로 · 5.5 는 같은 계열로 둔다).
  *   - opus_5_5 · unknown: 생각을 끌 수 없어 생각 토큰이 같은 한도를 쓴다 → 2배와 +1024 중 큰 값.
- *   - legacy: 그대로.
+ *   - 호출부가 생각을 켰으면(thinking = true · legacy 제외): 생각 토큰 몫으로 2배와 +4096 중 큰 값(★ 0930 문안 생각하기 스위치 — 켜도 JSON 이 잘리지 않게).
+ *   - legacy: 그대로(옛 모델은 budget_tokens 가 따로 있다).
  */
-export function resolveMaxTokens(baseMaxTokens: number, modelName: string): number {
+export function resolveMaxTokens(baseMaxTokens: number, modelName: string, thinking = false): number {
   const fam = claudeModelFamily(modelName);
   if (fam === 'legacy') return baseMaxTokens;
+  if (thinking) return Math.min(Math.max(baseMaxTokens * 2, baseMaxTokens + 4096), 16000);
   if (fam === 'adaptive_v1' || fam === 'sonnet_5_5') return Math.min(Math.ceil(baseMaxTokens * 1.5), 16000);
   return Math.min(Math.max(baseMaxTokens * 2, baseMaxTokens + 1024), 16000);
+}
+
+/**
+ * ★ 2026-09-30 문안 생성 "생각하기" 스위치(Harold 결정 · 장부 §3-7) — `.env` `CLAUDE_COPY_THINKING=on` 이면 문안 모델(Sonnet)로 부르는
+ *   기본 · 맞춤 문안 생성(services/ai generateMessages · generateCustomMessages)에만 생각을 켠다. 값이 없거나 그 밖이면 꺼짐 = 지금 동작 그대로.
+ *   바꾼 뒤에는 백엔드 재시작(--update-env)이 필요하다. 호출할 때마다 읽는다.
+ */
+export function copyThinkingEnabled(): boolean {
+  return /^(1|on|true|yes)$/i.test(String(process.env.CLAUDE_COPY_THINKING || '').trim());
 }
 
 // ============================================================

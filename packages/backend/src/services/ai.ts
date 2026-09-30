@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import { FIELD_MAP, getFieldByKey, getColumnFields, applyFieldAliases, applyFieldDisplayNames } from '../utils/standard-field-map';
 import { query } from '../config/database';
 import { currentUserId } from '../utils/request-context';
-import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, claudeRequestShape, gptRequestShape, resolveMaxTokens } from '../config/defaults';
+import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, claudeRequestShape, copyThinkingEnabled, gptRequestShape, resolveMaxTokens } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildJourneySafetyFilter } from '../utils/journey-safety-filter';
 import { cleanLeftoverVars } from '../utils/messageUtils';
@@ -17,7 +17,7 @@ import { applyBrandLinkTokens, type BrandLink } from '../utils/brand-link-core';
 import { validateBrandVoiceCompliance, buildRetryHintFromIssues } from '../utils/brand-voice-validator';
 import { composeCopyBrain } from '../utils/copy-prompt-composer';
 import { scoreSpamRisk, SPAM_FAIL_THRESHOLD } from '../utils/copy-spam-risk';
-import { detectBenefits, buildBenefitEmphasis } from '../utils/copy-benefit-detector';
+import { detectBenefits, buildBenefitEmphasis, findInventedBenefits, replaceInventedBenefits, findNewNumbers } from '../utils/copy-benefit-detector';
 import { findBannedWords } from '../utils/copy-similarity-guard';
 // ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
 import { extractJsonFromAiText } from '../utils/ai-json';
@@ -165,7 +165,7 @@ export async function callAIWithFallback(params: {
     const requestParams: any = {
       model: modelName,
       // Sonnet 5 새 토크나이저(~30% 토큰↑) 대응 — 문안 잘림 차단 여유(legacy 모델은 base 그대로)
-      max_tokens: resolveMaxTokens(params.maxTokens, modelName),
+      max_tokens: resolveMaxTokens(params.maxTokens, modelName, params.thinking === true),
       system: [
         {
           type: 'text' as const,
@@ -183,7 +183,9 @@ export async function callAIWithFallback(params: {
       thinkingBudget: params.thinkingBudget,
     }));
 
+    const startedAt = Date.now();   // ★ 0930 응답 시간 로그(생각하기 켜고 끄기 비교 · 아래 성공 로그)
     const response = await anthropic.messages.create(requestParams);
+    const elapsedTag = ` · ${Date.now() - startedAt}ms`;
 
     // ★ D169: thinking 활성 시 첫 content block이 thinking block — text block을 별도로 찾기
     const textBlock = response.content.find((b: any) => b.type === 'text');
@@ -198,9 +200,9 @@ export async function callAIWithFallback(params: {
     // 실제 적용 모델 가시화 — 배포 후 PM2 로그에서 Sonnet 5 적용 확인용 (response.model = Anthropic이 실제 사용한 모델)
     const actualModel = (response as any).model || modelName;
     if (cacheRead > 0 || cacheCreated > 0) {
-      console.log(`[AI] Claude 호출 성공 · ${actualModel}${modelTag} (Cache · read ${cacheRead}, created ${cacheCreated}, in ${usage?.input_tokens || 0}, out ${usage?.output_tokens || 0}${thinkingTag})`);
+      console.log(`[AI] Claude 호출 성공 · ${actualModel}${modelTag} (Cache · read ${cacheRead}, created ${cacheCreated}, in ${usage?.input_tokens || 0}, out ${usage?.output_tokens || 0}${thinkingTag})${elapsedTag} · src=${params.source || '-'}`);
     } else {
-      console.log(`[AI] Claude 호출 성공 · ${actualModel}${modelTag}${thinkingTag}`);
+      console.log(`[AI] Claude 호출 성공 · ${actualModel}${modelTag}${thinkingTag} (in ${usage?.input_tokens || 0}, out ${usage?.output_tokens || 0})${elapsedTag} · src=${params.source || '-'}`);
     }
 
     // ★ D209+ Phase D: 정상 응답 시점 cache 저장 + 통계 INSERT (companyId 박힘 영역만)
@@ -242,7 +244,9 @@ export async function callAIWithFallback(params: {
   // 2차: GPT fallback
   // ★ D170+ (Harold 명시 2026-05-19): AI Operator 호출(model: 'opus')과 기존 흐름의 fallback 모델 분리(변수 둘 · 값은 defaults.ts)
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
+    console.error('[AI] Claude 실패 · 대체 경로 키(OPENAI_API_KEY) 미설정');
+    // ★ 2026-09-30 — 이 문구는 여러 라우트가 err.message 로 화면에 그대로 돌려준다. 모델·업체 이름 노출 금지(no_model_name_ui_exposure) · 상세는 위 로그에만.
+    throw new Error('AI 응답이 잠시 지연되고 있어요. 잠시 후 다시 시도해 주세요.');
   }
 
   const fallbackModel = params.model === 'opus'
@@ -322,7 +326,8 @@ export async function callAIWithFallback(params: {
     return text;
   } catch (gptError: any) {
     console.error(`[AI] GPT도 실패 · model=${fallbackModel} · ${gptError.message}`);
-    throw new Error('AI 서비스 일시 장애 (Claude + GPT 모두 실패)');
+    // ★ 2026-09-30 — 이 문구는 여러 라우트가 err.message 로 화면에 그대로 돌려준다. 모델·업체 이름 노출 금지(no_model_name_ui_exposure) · 상세는 위 로그에만.
+    throw new Error('AI 응답이 잠시 지연되고 있어요. 잠시 후 다시 시도해 주세요.');
   }
 }
 
@@ -841,9 +846,9 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 - **★★ 무료수신거부 바로 위에도 반드시 빈 줄 1개**: [브랜드명]과 무료수신거부 사이도 빈 줄 1개로 구분 (D136, 가독성 필수).
 - **문장마다 빈 줄 넣기 금지**: 같은 단락 내 문장 사이는 단일 줄바꿈만.
 - 나쁜 예 1 (빈 줄 과다): "안녕하세요.\\n\\n김철수님.\\n\\n오늘은 특별한 날이에요.\\n\\n봄 맞이 특가를 진행합니다."
-- 나쁜 예 2 (마무리 붙음): "특별 할인 15%\\n[브랜드] 무료수신거부 080-540-5648"
+- 나쁜 예 2 (마무리 붙음): "새 시즌 신상 입고 소식\\n[브랜드] 무료수신거부 080-540-5648"
 - 나쁜 예 3 (★ D136 무료수신거부 앞 빈 줄 누락): "...\\n\\n[브랜드명]\\n무료수신거부 080-540-5648"
-- 좋은 예: "안녕하세요 김철수님! 오늘은 특별한 날이에요.\\n봄 맞이 특가 진행 중이니 놓치지 마세요.\\n3/15까지, ○○에서 기다립니다.\\n\\n[브랜드명]\\n\\n무료수신거부 080-540-5648"
+- 좋은 예: "안녕하세요 김철수님! 오늘은 특별한 날이에요.\\n새 시즌 신상이 도착했으니 놓치지 마세요.\\n○○에서 기다립니다.\\n\\n[브랜드명]\\n\\n무료수신거부 080-540-5648"
 
 카카오만: 이모지 사용 가능하나 절제 (1~2개 포인트)
 
@@ -866,7 +871,7 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 아래 원리를 **브랜드 품격에 맞게 은은하게** 녹이세요. 노골적으로 적용하면 싸구려 광고가 됩니다:
 
 **손실 회피**: "얻으면 좋은"보다 "놓치면 아까운"이 2배 강력
-- 좋은 예: "이번 시즌이 지나면 만나기 어려운 한정 라인이에요"
+- 좋은 예(요청에 기간이 있을 때만): "이번 행사가 끝나기 전에 챙겨 보세요"
 - 나쁜 예: "지금 안 사면 절대 후회합니다!!!" ← 이런 건 금지
 
 **호기심 갭**: 정보를 살짝만 열어주면 나머지가 궁금해짐
@@ -906,10 +911,10 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 - "많은 관심 부탁드립니다" → 금지! 대신: 기간/수량 한정으로 긴급성
 
 ### 1. 시선 정지 도입부: 첫 줄에서 스크롤을 멈추게!
-**알림 위장형:** "읽지 않은 혜택이 있어요", "%이름%님 앞으로 도착한 쿠폰" → 광고가 아닌 알림처럼
+**알림형:** "%이름%님께 새 소식이 도착했어요" → 알림처럼 가볍게 시작 (요청에 없는 쿠폰 · 혜택을 암시하지 않는다)
 **질문 훅형:** "요즘 피부 건조하지 않으세요?", "벌써 여름옷 꺼내셨나요?" → 공감+호기심
-**숫자 임팩트형:** "★ 48시간 한정 30% OFF", "잔여 수량 127개" → 구체적 숫자가 시선을 끔
-**비밀/한정형:** "%이름%님만 열 수 있는 혜택", "이 문자를 받은 분 한정" → 독점감
+**숫자 임팩트형:** 요청에 적힌 숫자(할인율 · 기간 · 수량)를 첫 줄에 크게 → 요청에 숫자가 없으면 이 유형을 쓰지 않는다 (시간 · 수량 · 순위 숫자를 새로 만들지 않는다)
+**먼저 알림형:** "%이름%님께 먼저 알려드려요" → 먼저 챙겨 받는 느낌 (요청에 없는 한정 · 자격 조건을 만들지 않는다)
 **시의성형:** 오늘 날짜와 계절을 활용한 "지금 이 시기에만" 느낌
 
 ### 2. 사용 시나리오: 고객 생활 속에 제품을 넣어라! (핵심 차별화!)
@@ -1201,10 +1206,6 @@ export async function generateMessages(
 - 채널: ${channel}
 - 타겟 고객 수: ${targetInfo.total_count.toLocaleString()}명
 
-⚠️ 중요: (광고), 무료거부, 무료수신거부, 080번호를 메시지에 절대 포함하지 마세요! 시스템이 자동으로 붙입니다.
-⚠️ 중요: 사용자가 언급하지 않은 할인율, 적립금, 사은품, 무료배송 등을 절대 지어내지 마세요!
-⚠️ 중요: 사용자가 지정하지 않은 날짜/기간/가격을 절대 만들어내지 마세요! 기간 미지정 시 날짜 자체를 넣지 마세요!
-
 ## 오늘 날짜 (한국 시간)
 ${getKoreanToday()}
 ※ "내일", "모레" 등은 위 날짜 기준으로 구체적 날짜(예: 2/5(수))로 변환하세요.
@@ -1292,18 +1293,34 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     }
   }
 
+  // ★ 2026-09-30 프롬프트 점검 WP2 — 혜택 값의 근거(사용자 요청 · 상품 · 할인율 · 행사 · 브랜드 정보). 최근 발송 문안은 근거가 아니다
+  //   (지난 행사의 "30%"를 이번 문안에 옮기면 지어낸 혜택이다). 판정 = copy-benefit-detector 값 기준(표현이 달라도 같은 값은 통과).
+  const benefitGround = [
+    prompt,
+    extraContext?.productName,
+    extraContext?.discountRate ? `${extraContext.discountRate}%` : '',
+    extraContext?.eventName,
+    brandSlogan,
+    brandDescription,
+  ].filter(Boolean).join('\n');
+
   try {
     // ★ 2026-07-06 Liquid 출구 가드 기록 — 직전 실행에서 템플릿 문법이 검출됐는지 (재생성 힌트 트리거)
     let liquidDetectedLastRun = false;
+    // ★ 2026-09-30 WP2 — 직전 실행에서 근거 없는 혜택 값 · 낱말이 나왔는지(재생성 힌트 트리거)
+    let inventedBenefitsLastRun: string[] = [];
     // ★ 2026-07-02 생성 1회 실행 — CT-100 검증 미달 시 재생성에서 재사용 (재생성 = creditCost 0, 추가 차감 없음)
     const runGenerateOnce = async (retryHint: string): Promise<AIRecommendResult> => {
     liquidDetectedLastRun = false;
+    inventedBenefitsLastRun = [];
     const text = await callAIWithFallback({
       system: enrichedSystemPrompt,
       userMessage: retryHint ? `${userMessage}${retryHint}` : userMessage,
       maxTokens: 2048,
       temperature: 0.7,
       model: extraContext?.model, // ★ D170+: AI Operator는 'opus' 전달 (1M ctx + 회사 history 활용 본문 품질 최상)
+      // ★ 0930 생각하기 스위치(CLAUDE_COPY_THINKING) — 문안 모델(Sonnet) 호출만. AI Operator(opus)는 지금 동작 그대로.
+      thinking: extraContext?.model === 'opus' ? undefined : (copyThinkingEnabled() || undefined),
       companyId: extraContext?.companyId,
       source: 'generate-messages', // ★ D227+ 종량제: 문안 생성 2크레딧 (orchestrate 묶음 안에선 자동 0)
       ...(retryHint ? { creditCost: 0 } : {}),
@@ -1342,6 +1359,14 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
           msgField = flattenLiquidToPlainText(msgField);
           console.warn(`[copy-guard] 템플릿 문법(Liquid) 검출 → 평문화: variant ${(variant as any).variant_id || ''}`);
         }
+        // ★ 2026-09-30 WP2 혜택 서버 차단 — 프롬프트 금지는 확률적이다. 근거에 없는 혜택 값 · 낱말은 자리표시로 바꾸고
+        //   재생성 1회를 유도한다. 남은 자리표시는 발송 길목(send-placeholder-gate)이 막는다(사람이 채우거나 지운 뒤에만 발송).
+        const inventedHere = findInventedBenefits(msgField, benefitGround);
+        if (inventedHere.length > 0) {
+          inventedBenefitsLastRun.push(...inventedHere);
+          msgField = replaceInventedBenefits(msgField, benefitGround);
+          console.warn(`[copy-guard] 근거 없는 혜택 → 자리표시: variant ${(variant as any).variant_id || ''} (${inventedHere.join(', ')})`);
+        }
         msgField = msgField.trim();
         (variant as any).message_text = msgField;
         
@@ -1363,6 +1388,12 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
           if (detectLiquidSyntax(subj)) {
             liquidDetectedLastRun = true;
             subj = flattenLiquidToPlainText(subj);
+          }
+          // ★ 2026-09-30 WP2 — 제목도 같은 혜택 대조(발송 길목이 제목까지 본다)
+          const subjInvented = findInventedBenefits(subj, benefitGround);
+          if (subjInvented.length > 0) {
+            inventedBenefitsLastRun.push(...subjInvented);
+            subj = replaceInventedBenefits(subj, benefitGround);
           }
           (variant as any).subject = cleanLeftoverVars(subj).replace(/  +/g, ' ').trim();
         }
@@ -1446,6 +1477,10 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         //   분기 전제로 쓰인 문안은 평문화 후 흐름이 어색할 수 있어 올바른 지시로 1회 재작성 기회 부여.
         if (liquidDetectedLastRun) {
           allIssues.add('Liquid 등 템플릿 문법(중괄호 표기·조건 분기 태그) 절대 사용 금지. 개인화는 %변수% 형태만 사용');
+        }
+        // ★ 2026-09-30 WP2 — 근거 없는 혜택이 나왔으면 재생성 1회(자리표시는 이미 들어갔다 · 다시 쓰면 자리표시 없는 문안이 된다)
+        if (inventedBenefitsLastRun.length > 0) {
+          allIssues.add(`요청에 없는 혜택(${Array.from(new Set(inventedBenefitsLastRun)).join(', ')})을 쓰지 않기. 요청에 적힌 혜택만 쓰고, 없으면 계절감 · 상품 매력으로 채우기`);
         }
 
         if (allIssues.size > 0) {
@@ -1672,7 +1707,7 @@ ${axisLines}
     });
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) return null;
-    const parsed = JSON.parse(m[0]);
+    const parsed = extractJsonFromAiText(m[0]);
     const key = typeof parsed?.key === 'string' ? parsed.key.trim() : '';
     if (!key || !availableAxes.some((a) => a.key === key)) return null;   // 목록 밖·null = 매핑 없음
     // 파라미터는 계약 범위로 자른다 — AI 숫자를 그대로 믿지 않는다.
@@ -2480,6 +2515,7 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
       system: systemPrompt,
       userMessage,
       maxTokens: 2048,
+      thinking: copyThinkingEnabled() || undefined,   // ★ 0930 생각하기 스위치(CLAUDE_COPY_THINKING) · 기본 꺼짐
       temperature: 0.7,
       companyId: options.companyId,
       source: 'generate-custom-messages', // ★ D227+ 종량제: 맞춤 문안 생성 2크레딧
@@ -2487,6 +2523,13 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
 
     // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json).
     const result = extractJsonFromAiText(text);
+
+    // ★ 2026-09-30 WP2 — 혜택 값 근거 = 사용자 브리핑 + 화면에서 확인한 프로모션 카드(값 기준 대조 · copy-benefit-detector).
+    const customBenefitGround = [
+      briefing,
+      ...Object.values(promotionCard || {}).map((v) => String(v ?? '')),
+      url,
+    ].filter(Boolean).join('\n');
 
     // 안전장치: 광고표기 자동 제거 + 변수 검증 + SMS 바이트 체크
     if (result.variants) {
@@ -2503,12 +2546,18 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
         if (channel !== '카카오' && channel !== 'KAKAO') {
           msg = stripEmojis(msg);
         }
+        // ★ 2026-09-30 WP2 혜택 서버 차단 — 카드에 없는 혜택 값 · 낱말은 자리표시(발송 길목이 막는다)
+        const customInvented = findInventedBenefits(msg, customBenefitGround);
+        if (customInvented.length > 0) {
+          msg = replaceInventedBenefits(msg, customBenefitGround);
+          console.warn(`[copy-guard] 맞춤 문안 근거 없는 혜택 → 자리표시: ${variant.variant_id || ''} (${customInvented.join(', ')})`);
+        }
         msg = msg.trim();
         variant.message_text = msg;
 
         // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
         if (variant.subject) {
-          variant.subject = cleanLeftoverVars(variant.subject).replace(/  +/g, ' ').trim();
+          variant.subject = cleanLeftoverVars(replaceInventedBenefits(String(variant.subject), customBenefitGround)).replace(/  +/g, ' ').trim();
         }
 
         // ★ 버그 #1: 미선택 변수 엄격 제거
@@ -2837,10 +2886,11 @@ const TONE_GUIDE: Record<RefineTone, ToneSpec> = {
   trendy: {
     label: '최신 트렌드',
     concept: '요즘 감성 + MZ 트렌디 카피 + 시선 정지 도입부 + 짧고 강한 임팩트. ' +
-             '진부한 표현 X, 신선한 표현으로. "혹시 아세요?" / "올해 가장 핫한" / "취향저격" 같은 호기심 갭 + 공감 + 트렌드 키워드. ' +
+             '진부한 표현 X, 신선한 표현으로. "혹시 아세요?" / "놓치면 아까운" / "취향저격" 같은 호기심 갭 + 공감 + 트렌드 키워드. ' +
              '도입부 시선 정지 한 줄(질문훅/숫자임팩트/비밀훅) + 리스트 항목에 트렌디 매력 묘사 + 강한 CTA. ' +
              '단체 안내 X, 1:1 대화감.',
-    signature: ['혹시 아세요?', '올해 가장 핫한', '요즘 가장 많이 찾으신', '취향저격', '먼저 알려드릴게요', 'Z세대 픽'],
+    // ★ 2026-09-30 — "올해 가장 핫한" · "요즘 가장 많이 찾으신" · "Z세대 픽"은 근거 없는 인기 · 통계 주장이라 뺐다(같은 프롬프트의 통계 창작 금지와 충돌).
+    signature: ['혹시 아세요?', '놓치면 아까운', '요즘 딱 좋은', '취향저격', '먼저 알려드릴게요', '가볍게 챙기는'],
     chars: '★ / ▶ / ♥ 자연스럽게',
     scenario: '신상 런칭 / MZ 타겟 / 트렌드 마케팅 / 임팩트 카피 / 시즌 트렌드',
     exampleShort: {
@@ -2849,7 +2899,7 @@ const TONE_GUIDE: Record<RefineTone, ToneSpec> = {
     },
     exampleLong: {
       original: '[브랜드] 멤버스 데이 15% 쿠폰\n\n축제같은 5월,\n멤버십 회원을 위한 스페셜 혜택을 지금 확인하세요!\n\n[SPRING FESTIVAL]\n① 마린 그래픽 반팔티\n69,000 → 58,650\n② 와플 헨리넥 반팔티\n59,000 → 50,150\n\n▶ 바로가기\nhttps://...',
-      refined: '[브랜드] 멤버스 데이 15% 쿠폰 ★\n\n혹시 아셨어요? 요즘 멤버님 사이에서 가장 핫한\nSPRING FESTIVAL이 지금 진행 중이에요.\n\n[SPRING FESTIVAL]\n① 마린 그래픽 반팔티, 올봄 데일리 픽\n69,000 → 58,650\n② 와플 헨리넥 반팔티, 가볍게 떨어지는 핏\n59,000 → 50,150\n\n▶ 지금 바로 멤버스 데이 ▶\nhttps://...',
+      refined: '[브랜드] 멤버스 데이 15% 쿠폰 ★\n\n혹시 아셨어요? 기다리시던\nSPRING FESTIVAL이 지금 진행 중이에요.\n\n[SPRING FESTIVAL]\n① 마린 그래픽 반팔티, 매일 손이 가는 데일리 픽\n69,000 → 58,650\n② 와플 헨리넥 반팔티, 가볍게 떨어지는 핏\n59,000 → 50,150\n\n▶ 지금 바로 멤버스 데이 ▶\nhttps://...',
     },
   },
 };
@@ -2941,7 +2991,7 @@ function parseRefineCandidates(rawText: string): RefineCandidate[] {
   }
   let parsed: Array<{ text?: string }>;
   try {
-    parsed = JSON.parse(jsonText);
+    parsed = extractJsonFromAiText(jsonText);
   } catch {
     console.warn('[ai][refineDirectMessage] JSON parse 실패, raw snippet:', rawText.slice(0, 300));
     return [];
@@ -3071,7 +3121,7 @@ function validateAndNormalizeRefinedCandidates(
     || ((hasAd && rejectNumber) ? `\n\n무료수신거부 ${rejectNumber}` : '');
   // ★ D152+ Harold님 PM2 진단: dropout 단계별 카운트 — 어느 필터에서 제외되는지 정확히 파악
   // ★ D224+ (2026-05-27) 남지현 신고 fix: notEnriched 분기 영구 폐기 — similar/infoLoss 분기로 중복 cover + 105% 임계값 영구 catch 사고 차단.
-  const dropCounts = { tooShort: 0, tooLong: 0, infoLoss: 0, similar: 0 };
+  const dropCounts = { tooShort: 0, tooLong: 0, infoLoss: 0, similar: 0, fabricated: 0 };
   for (const c of candidates) {
     if (!c?.text || typeof c.text !== 'string') continue;
     let text = c.text.trim();
@@ -3102,6 +3152,15 @@ function validateAndNormalizeRefinedCandidates(
 
     text = text.trim();
     const bytes = computeKsxBytes(text);
+
+    // (e) ★ 2026-09-30 WP2 — 다듬기 = 사실 보존. 원문에 없던 숫자(시간 · 기간 · 수량 조건: "90분 안에" · "3일 한정")나
+    //   근거 없는 혜택 값 · 낱말이 생긴 후보는 뺀다(프롬프트 금지는 확률적 · 예시 창작 사고 D152 부류). 지금 달 표현은 허용.
+    //   시스템이 (a-3)에서 다시 붙인 수신거부 문구(회사 번호)는 AI 가 지어낸 것이 아니다 → 대조 원문에 포함(Codex 0930 1R).
+    const factSource = `${originalMessage}\n${rejectFooterToRestore}`;
+    if (findNewNumbers(text, factSource).length > 0 || findInventedBenefits(text, factSource).length > 0) {
+      dropCounts.fabricated += 1;
+      continue;
+    }
 
     // (d) 길이 필터
     if (text.length < 10) { dropCounts.tooShort += 1; continue; }
@@ -3138,7 +3197,7 @@ function validateAndNormalizeRefinedCandidates(
     console.warn(
       `[ai][refineDirectMessage] validateAndNormalize dropout — raw=${candidates.length} out=0 ` +
       `(tooShort=${dropCounts.tooShort}, tooLong=${dropCounts.tooLong}, infoLoss=${dropCounts.infoLoss}, ` +
-      `similar=${dropCounts.similar})`,
+      `similar=${dropCounts.similar}, fabricated=${dropCounts.fabricated})`,
     );
   }
   return out;
@@ -3206,6 +3265,7 @@ ${lengthTarget}. **원본보다 짧으면 정보 손실. 원본 길이 이상 �
 - 원본 "30% 할인" → "단 3일 한정" 추가 X (기간 정보 창작)
 - 원본에 없는 "최저가"/"100% 보장"/"매출 30% 증가" 같은 통계/사실 X
 - 원본에 없는 매장/장소/약속/혜택/특가/숫자/날짜/통계/사실 추가 X
+- 원본에 없는 시간 · 기한 · 수량 · 순위 조건("오늘 단 하루" · "90분 안에" · "선착순" · "가장 많이 찾는") 추가 X (서버가 새 숫자를 검사해 후보를 뺀다)
 **자유 영역(수식어/감성/계절감)은 적극 활용, 사실(숫자/장소/약속/혜택)은 절대 보존.**
 
 ## 🚨 줄바꿈/단락 구조 보존
@@ -3243,6 +3303,7 @@ ${lengthTarget}. **원본보다 짧으면 정보 손실. 원본 길이 이상 �
 
 ## 🌸 현재 시즌 자동 반영
 현재 월: **${monthLabel}** / 시즌 키워드: **${seasonHint}**
+※ 아래 예시 속 계절 · 월 표현(봄 · 5월 등)은 보기일 뿐입니다. 결과에는 지금 달(${monthLabel}) · 시즌 키워드만 씁니다.
 원본에 시즌 정보 없어도 자연스러운 시즌 묘사 1~2개 자유 추가 가능.
 **도입부 또는 마무리에 자연스러운 시즌감(현재 월/계절) 1~2회 권장**: 결과가 시기적으로 살아있는 느낌.
 ⚠️ 시즌 묘사는 일반적 사실만 (${monthLabel} 계절감 OK). 구체적 매출/통계 지어내기 X.
@@ -3258,12 +3319,12 @@ ${lengthTarget}. **원본보다 짧으면 정보 손실. 원본 길이 이상 �
 1. **도입부 매력 강화**: 호기심 유발 / 시즌감 / 강조 표현 자연스럽게
    - 호기심 예: "혹시 알고 계셨나요?" / "오늘이 무슨 날인지 아세요?"
    - 시즌감 예: "봄의 끝자락에," / "감사의 5월에,"
-   - 강조 예: "★ 오늘 단 하루" / "▶ 지금 라이브 중!"
+   - 강조 예: "★ 놓치기 아까운 소식" / "▶ 먼저 알려드려요"
    - 원본 활기 톤은 더 활기차게, 차분 톤은 더 격조있게 (톤 역행 X)
    - **호기심 갭**: 정보를 일부 열고 나머지는 궁금증 유발. 사용자가 "URL 클릭해서 더 알아보고 싶다" 느낌
 
 2. **마무리 CTA 풍성화**: 호기심 갭 / 시급성 / 행동 유도 한 줄
-   - 예: "지금 바로 참여해 보세요." → "지금 라이브 중! 90분 안에 챙기세요 ▶"
+   - 예: "지금 바로 참여해 보세요." → "지금 바로 참여해 보세요 ▶ 놓치면 아쉬운 기회예요"
 
 3. **본문 리스트 항목은 그대로 보존, 표현만 자연스럽게**
    - 항목 자체(상품명/혜택/숫자/날짜/링크)는 그대로
@@ -3410,7 +3471,7 @@ export async function refineDirectMessage(
       const rawText = gptResponse.choices[0]?.message?.content || '';
       let parsed: any;
       try {
-        parsed = JSON.parse(rawText);
+        parsed = extractJsonFromAiText(rawText);
       } catch {
         return { candidates: [] };
       }

@@ -19,6 +19,7 @@ import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { callAIWithFallback } from '../services/ai';
+import { plainTextFromAi } from '../utils/ai-json';
 import { aiLimitCountedSql, getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
 import { getCacheStats } from '../utils/ai-cache';
 import { kstDateString } from '../utils/planner-execution';
@@ -338,7 +339,9 @@ ${topSources || '(데이터 없음)'}
 3. **구체 혜택(%, 원, 무료, 쿠폰) 임의 생성 금지**. 회사 정책 데이터가 없습니다.
 4. 답변은 한국어 3~6문장으로 간결하게 작성하세요.
 5. 비용 절감 추천 시 = Batch 처리 모드 (24시간 SLA, 50% 절감) + cache 히트율 향상 + 한도 알림 설정 중심으로 안내.
-6. "~인 것 같습니다" 가설 표현 금지. 근거 명확하면 단언, 부족하면 "데이터 부족" 명시.`;
+6. "~인 것 같습니다" 가설 표현 금지. 근거 명확하면 단언, 부족하면 "데이터 부족" 명시.
+7. 호출 출처는 영문 이름(예: generate-messages)을 그대로 쓰지 말고 우리말 작업 이름으로 풀어 쓰세요(예: 문구 생성 · 타겟 추천).
+8. 화면에 글자 그대로 보이므로 굵은 글씨(**) · 머리글(#) · 표 같은 마크다운 기호는 쓰지 않는다. 목록이 필요하면 줄마다 "· "로 시작한다.`;
 
     const answer = await callAIWithFallback({
       system: systemPrompt,
@@ -352,7 +355,7 @@ ${topSources || '(데이터 없음)'}
 
     return res.json({
       success: true,
-      answer,
+      answer: plainTextFromAi(answer),   // ★ 2026-09-30 WP6 — 마크다운 기호 출구 정리(화면 = whitespace-pre-wrap 글자 그대로)
       no_data: false,
       context_summary: {
         monthly_used: monthly.used,

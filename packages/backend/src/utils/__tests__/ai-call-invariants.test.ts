@@ -42,4 +42,35 @@ describe('AI 직접 호출 불변식 (소스 전수 스캔)', () => {
       .map(({ rel }) => rel);
     expect(offenders).toEqual([]);
   }, SCAN_TIMEOUT_MS);
+
+  // ★ 2026-09-30 WP4 — AI 응답 JSON 은 CT(extractJsonFromAiText · 코드펜스 · 머리말 · 문자열 안 제어문자 복구) 하나로만 푼다.
+  //   0930 점검 때 AI 호출 파일에 인라인 JSON.parse 가 30곳 넘게 있었다(0630 줄바꿈 제어문자 사고 부류가 파일마다 다시 열려 있었다).
+  //   AI 호출 파일에 남아도 되는 JSON.parse 는 DB 값 · 요청 본문을 푸는 아래 인자뿐이다. 새 인자가 필요하면 AI 응답이 아닌지 확인하고 여기에 더한다.
+  it('불변식 4 — AI 호출 파일의 JSON.parse 는 DB 값 허용 목록만 (AI 응답 = extractJsonFromAiText)', () => {
+    const DB_VALUE_ARGS = new Set([
+      'row.memory_value', 'raw', 'ex.rows[0].memory_value', 'dm.brand_kit', 'metaStr', 'data', 'p.proposal_json', 'value',
+    ]);
+    const offenders: string[] = [];
+    for (const { rel, src } of sources()) {
+      if (rel.includes('__tests__') || /\.test\.ts$/.test(rel)) continue;
+      if (!/callAIWithFallback\(|anthropic\s*\.messages\./.test(src)) continue;
+      for (const m of src.matchAll(/JSON\.parse\(([^)]*)\)/g)) {
+        if (!DB_VALUE_ARGS.has(m[1].trim())) offenders.push(`${rel}: JSON.parse(${m[1]})`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  }, SCAN_TIMEOUT_MS);
+
+  // ★ 2026-09-30 — 대체 경로 실패 문구가 "AI 서비스 일시 장애 (Claude + GPT 모두 실패)"였고, 여러 라우트가 err.message 를 화면에 그대로 돌려줬다.
+  //   모델·업체 이름은 사용자 노출 금지(no_model_name_ui_exposure). 상세는 console 로그에만 남긴다.
+  it('불변식 5 — 대체 경로(OpenAI)를 가진 파일의 throw 문구에 모델 · 업체 이름 금지', () => {
+    const offenders: string[] = [];
+    for (const { rel, src } of sources()) {
+      if (rel.includes('__tests__') || !src.includes('api.openai.com')) continue;
+      for (const m of src.matchAll(/throw new Error\(\s*[`'"]([^`'"]*)[`'"]/g)) {
+        if (/claude|gpt|openai|anthropic/i.test(m[1])) offenders.push(`${rel}: ${m[1]}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  }, SCAN_TIMEOUT_MS);
 });

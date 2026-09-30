@@ -19,6 +19,7 @@
  */
 import { callAIWithFallback } from '../services/ai';
 import { extractJsonFromAiText } from './ai-json';
+import { findInventedBenefits, findNewNumbers, htmlVisibleText, replaceInventedBenefits, replaceInventedBenefitsInHtml, replaceInventedBenefitsDeep } from './copy-benefit-detector';
 import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
 // 비주얼 빌더: AI 블록 출력 → 검증된 email Section[]
 import { normalizeAiBlocksToSections, buildCarouselProductsFromExtracted } from './email/email-blocks';
@@ -306,6 +307,21 @@ export async function generateEmailOneShot(input: {
       result = await genOnce(baseSystem);
     }
   }
+  // ★ 2026-09-30 WP2 혜택 서버 차단 — 근거 = 요청 · 시나리오. 없는 혜택 값 · 낱말은 자리표시(이메일 발송 가드가 막는다).
+  //   HTML 은 글자 부분만(태그 · 속성은 건드리지 않는다).
+  const emailGround = parts.join('\n');
+  const [guardedHtml, htmlInvented] = replaceInventedBenefitsInHtml(result.htmlBody, emailGround);
+  const textInvented = findInventedBenefits([result.textBody, result.preheader, ...result.subjects].join('\n'), emailGround);
+  if (htmlInvented.length > 0 || textInvented.length > 0) {
+    console.warn(`[copy-guard] 이메일 근거 없는 혜택 → 자리표시 (${Array.from(new Set([...htmlInvented, ...textInvented])).join(', ')})`);
+    result = {
+      ...result,
+      htmlBody: guardedHtml,
+      textBody: replaceInventedBenefits(result.textBody, emailGround),
+      preheader: replaceInventedBenefits(result.preheader, emailGround),
+      subjects: result.subjects.map((s) => replaceInventedBenefits(s, emailGround)),
+    };
+  }
   return result;
 }
 
@@ -429,14 +445,20 @@ export async function generateEmailSections(input: {
       s.props = p;
     }
   }
+  // ★ 2026-09-30 WP2 혜택 서버 차단 — 근거 = 행사 원문 · 요청 · 시나리오. 블록 글 필드의 없는 혜택 값 · 낱말은 자리표시
+  //   (링크 · 이미지 · 모양 값 · 가격 숫자 필드는 건너뜀 · 상품 가격은 위 원문 검증이 이미 본다). 이메일 발송 가드가 자리표시를 막는다.
+  const blocksGround = parts.join('\n');
+  const blockInvented: string[] = [];
+  const guardedSections = replaceInventedBenefitsDeep(sections, blocksGround, blockInvented);
   const subjects = (Array.isArray(parsed.subjects) ? parsed.subjects : [])
-    .map((s) => String(s || '').trim()).filter(Boolean).slice(0, 3);
+    .map((s) => replaceInventedBenefits(String(s || '').trim(), blocksGround)).filter(Boolean).slice(0, 3);
   while (subjects.length > 0 && subjects.length < 3) subjects.push(subjects[0]);
+  if (blockInvented.length > 0) console.warn(`[copy-guard] 비주얼 이메일 근거 없는 혜택 → 자리표시 (${Array.from(new Set(blockInvented)).join(', ')})`);
   return {
     name: String(parsed.name || '').trim().slice(0, 60) || 'AI 비주얼 이메일',
     subjects: subjects.length ? subjects : ['새 이메일'],
-    preheader: String(parsed.preheader || '').trim().slice(0, 100),
-    sections,
+    preheader: replaceInventedBenefits(String(parsed.preheader || '').trim(), blocksGround).slice(0, 100),
+    sections: guardedSections,
   };
 }
 
@@ -472,6 +494,14 @@ ${EMAIL_HTML_RULES}
   const subject = String(parsed.subject || '').trim();
   const htmlBody = String(parsed.html_body || '').trim();
   if (!subject || !htmlBody) throw new Error('AI 다듬기 결과가 비어 있습니다. 다시 시도해주세요.');
+  // ★ 2026-09-30 WP2 — 다듬기 = 다시 쓰기. 근거 = 원래 제목 · 본문의 **보이는 글** · 다듬기 지시(지시에 적은 새 혜택 · 숫자는 사람이 준 것).
+  //   원래 HTML 을 그대로 근거에 넣으면 속성 값(width="100%")이 혜택 근거가 된다(Codex 0930 2R). 다른 다시 쓰기 경로와 같게
+  //   근거에 없는 숫자 · 혜택이 생기면 적용하지 않는다(차감 전 throw · 화면 = 이 문장).
+  const refineGround = `${input.subject}\n${htmlVisibleText(input.htmlBody)}\n${input.instruction}`;
+  const refinedVisible = `${subject}\n${htmlVisibleText(htmlBody)}`;
+  if (findNewNumbers(refinedVisible, refineGround).length > 0 || findInventedBenefits(refinedVisible, refineGround).length > 0) {
+    throw new Error('원문에 없는 숫자나 혜택이 생겨 적용하지 않았어요. 다시 눌러 주세요.');
+  }
   return { subject, htmlBody };
 }
 
@@ -519,7 +549,12 @@ export async function refineEmailSections(input: {
   if (!refined || refined.length !== texts.length) {
     throw new Error('AI 다듬기 결과를 해석하지 못했습니다. 다시 시도해주세요.');
   }
-  const sections = applyRefinedTexts(input.sections, slots, refined);
+  // ★ 2026-09-30 WP2 — 조각마다 표현만 바꾼다. 원래 조각 · 지시에 없던 숫자 · 혜택 값이 생긴 조각은 원래 글로 되돌린다.
+  const safeRefined = refined.map((r, i) => {
+    const ground = `${texts[i]}\n${userInstruction}`;
+    return findNewNumbers(r, ground).length > 0 || findInventedBenefits(r, ground).length > 0 ? texts[i] : r;
+  });
+  const sections = applyRefinedTexts(input.sections, slots, safeRefined);
   return { sections, changed: true };
 }
 

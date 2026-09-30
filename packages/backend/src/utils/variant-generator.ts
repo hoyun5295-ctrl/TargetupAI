@@ -20,6 +20,8 @@
 import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 import { sanitizeForSms } from './message-sanitizer';
+import { extractJsonFromAiText } from './ai-json';
+import { findInventedBenefits, findNewNumbers } from './copy-benefit-detector';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -66,7 +68,7 @@ export async function generateVariantsFromMessage(input: {
       channel,
       variants: [],
       generatedAt: new Date(),
-      warnings: ['base 메시지 영역 10자 이상 의무. variant 자동 생성 X.'],
+      warnings: ['기준 문안이 10자 이상이어야 변형을 만들 수 있어요.'],
     };
   }
 
@@ -77,18 +79,22 @@ export async function generateVariantsFromMessage(input: {
   );
   const company = companyRes.rows[0] || {};
 
-  const system = `당신은 CRM 마케팅 메시지 카피라이터입니다.
-주어진 base 메시지를 3가지 톤(감성적/실용적/캐주얼)으로 자연스럽게 재작성합니다.
+  // ★ 2026-09-30 프롬프트 점검 WP3 — 자연스러운 한국어로 다시 씀(옛 문장의 "영역" 반복이 결과 말투에 번질 수 있다) ·
+  //   사실 보존 목록을 구체화 · 세 변형이 실제로 달라야 한다는 기준 · 출력 형식 통제(머리말 · 마크다운 금지).
+  //   사실 보존은 서버가 다시 본다(새 숫자 · 근거 없는 혜택이 생긴 변형은 뺀다 · copy-benefit-detector).
+  const system = `당신은 CRM 마케팅 문자 카피라이터입니다.
+기준 문안 하나를 받아, 담긴 사실은 그대로 두고 말투만 다른 세 변형(감성적 · 실용적 · 캐주얼)을 씁니다.
 
-영구 원칙:
-- 구체 혜택(% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 할인) 임의 생성 절대 금지. base 메시지 안 옛 혜택 표현 영역 그대로 유지 (수치 변경 X).
-- base 메시지에 [혜택 안내: 직접 수정해주세요] placeholder 영역 있으면 그대로 유지.
-- 인사 + 안내 + 마무리 표현만 톤 다양화 (혜택 영역은 보존).
-- 길이: SMS 90바이트 / LMS·MMS 2000바이트 이내.
-- 이모지 / 특수문자 사용 자제 (이통사 EUC-KR 안전 영역).
-- 광고 표기 (광고)+080+KISA 영역 시스템 자동 합성. 본문에 광고 단어 작성 X.
+지켜야 할 것:
+- 사실은 한 글자도 바꾸지 않습니다: 상품명 · 혜택과 그 숫자(%, 원, 쿠폰, 적립, 무료 등) · 날짜와 기간 · 시간 · 장소 · 연락처 · 링크.
+- 기준 문안에 없는 숫자 · 기간 · 수량 · 혜택을 새로 쓰지 않습니다("오늘 단 하루", "선착순 100명" 같은 조건도 새로 만들지 않습니다).
+- %이름% 같은 변수와 [혜택 안내: 직접 수정해주세요] 같은 채울 자리는 글자 그대로 둡니다.
+- 바꾸는 것은 인사 · 연결 문장 · 마무리 · 문장 리듬입니다. 세 변형은 도입과 마무리가 서로 확실히 달라야 합니다(같은 문장에 낱말만 바꾼 변형은 실패입니다).
+- 길이: 문자(SMS) 90바이트 · 장문(LMS · MMS) 2000바이트 이내.
+- 문자 채널에는 이모지를 쓰지 않습니다. 강조가 필요하면 ★ ▶ ※ 【】 같은 문자 호환 기호만 씁니다.
+- (광고) 표기 · 무료수신거부 번호는 시스템이 붙이므로 쓰지 않습니다.
 
-JSON 형식으로만 응답하세요.`;
+답은 요청한 JSON 하나만 냅니다. 머리말 · 설명 · 코드블록 · 굵은 글씨를 붙이지 않습니다.`;
 
   const userMessage = `## 회사 정보
 - 회사명: ${company.brand_name || company.company_name || '브랜드'}
@@ -128,19 +134,10 @@ ${baseMessage}
       source: 'variant-generator',
     });
 
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const parsed = JSON.parse(jsonStr);
-    const variants: GeneratedVariant[] = (Array.isArray(parsed.variants) ? parsed.variants : [])
+    // ★ 2026-09-30 WP4 — 추출은 CT 하나(코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자까지 처리 · 0630 사고 부류).
+    const parsed: any = extractJsonFromAiText(text);
+    let droppedFabricated = 0;
+    const variants: GeneratedVariant[] = (Array.isArray(parsed?.variants) ? parsed.variants : [])
       .slice(0, 3)
       .map((v: any) => {
         const tone: VariantTone =
@@ -157,17 +154,27 @@ ${baseMessage}
           reasoning: typeof v?.reasoning === 'string' ? v.reasoning : '',
         };
       })
-      .filter((v: GeneratedVariant) => v.messageTemplate.length >= 10);
+      .filter((v: GeneratedVariant) => v.messageTemplate.length >= 10)
+      // ★ 2026-09-30 WP2 — 변형은 톤만 바꾼다. 기준 문안에 없던 숫자(기간 · 수량 · 시간)나 혜택 값 · 낱말이 생긴 변형은 뺀다
+      //   (프롬프트 "혜택 표현 유지"는 확률적 · 30%가 40%로 바뀐 변형이 A/B 로 발송되면 지어낸 혜택).
+      .filter((v: GeneratedVariant) => {
+        const bad = findNewNumbers(v.messageTemplate, baseMessage).length > 0 || findInventedBenefits(v.messageTemplate, baseMessage).length > 0;
+        if (bad) droppedFabricated++;
+        return !bad;
+      });
 
+    if (droppedFabricated > 0) {
+      warnings.push(`기준 문안에 없던 숫자나 혜택이 생긴 변형 ${droppedFabricated}개는 뺐어요.`);
+    }
     if (variants.length === 0) {
-      warnings.push('AI 응답 영역 안 유효 variant 영역 0건. 다시 시도해주세요.');
+      warnings.push('만들어진 변형이 없어요. 잠시 뒤 다시 시도해 주세요.');
     }
 
     // SMS 영역 안 90바이트 초과 영역 경고
     if (channel === 'sms') {
       variants.forEach((v) => {
         if (v.byteCount > 90) {
-          warnings.push(`${v.tone} variant ${v.byteCount}바이트. SMS 90바이트 영역 초과. LMS 영역 전환 또는 본문 영역 축소 의무.`);
+          warnings.push(`${v.tone} 변형이 ${v.byteCount}바이트라 문자(SMS) 90바이트를 넘어요. 장문(LMS)으로 바꾸거나 본문을 줄여 주세요.`);
         }
       });
     }
@@ -188,7 +195,8 @@ ${baseMessage}
       channel,
       variants: [],
       generatedAt: new Date(),
-      warnings: [`AI 호출 영역 일시 오류. 잠시 후 다시 시도해주세요. (${err?.message || ''})`],
+      // ★ 2026-09-30 — 내부 오류 문장(모델명 · 키 이름이 섞일 수 있다)을 화면에 싣지 않는다(서버 로그에만).
+      warnings: ['변형을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.'],
     };
   }
 }

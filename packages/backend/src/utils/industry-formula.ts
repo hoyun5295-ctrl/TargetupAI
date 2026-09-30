@@ -3,6 +3,7 @@
 //   입력 = 승인 시드(원문, 내부 전용) → 출력 = 공식 JSON(구조·톤·후킹) + AI 재창작 예시(사용자 노출용).
 //   원문의 벽: 예시는 유사도 가드(jaccard3 < 0.35) 통과분만 저장 — 시드 원문·조각의 사용자 노출 0.
 //   구체 혜택 금지 — 예시의 혜택 자리는 "[직접 작성해주세요]" placeholder(영구 룰).
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { listCuratedSeeds } from './copy-seed-curator';
 import {
@@ -19,9 +20,8 @@ export type DistillResult =
   | { ok: false; reason: 'insufficient_seeds' | 'ai_parse_failed' | 'table_missing' };
 
 function extractJson(raw: string): any | null {
-  const m = raw.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-  if (!m) return null;
-  try { return JSON.parse(m[0]); } catch { return null; }
+  // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지. 실패 = null(종전 계약).
+  try { return extractJsonFromAiText(raw); } catch { return null; }
 }
 
 /** 공식 요약 렌더 — 관리자 패널·프롬프트 블록 공용 사람 가독 문자열. */

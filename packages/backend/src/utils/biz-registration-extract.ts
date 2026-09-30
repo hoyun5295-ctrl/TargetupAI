@@ -13,6 +13,7 @@
  *  - 이미지에 없는 값은 빈 문자열(추정 금지 — AI 혜택 날조 금지 계열과 같은 원칙).
  */
 
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { callAIWithFallback } from '../services/ai';
 import { ALLOWED_IMAGE_MEDIA_TYPES, type EventImageInput } from './event-image-extract';
 
@@ -50,7 +51,7 @@ function parseInfo(raw: string): BizRegistrationInfo | null {
     const s = t.indexOf('{');
     const e = t.lastIndexOf('}');
     if (s < 0 || e <= s) return null;
-    const obj = JSON.parse(t.slice(s, e + 1));
+    const obj = extractJsonFromAiText(t.slice(s, e + 1));
     const info: BizRegistrationInfo = {
       biz_number: clean(obj?.biz_number, 20),
       company_name: clean(obj?.company_name, 100),

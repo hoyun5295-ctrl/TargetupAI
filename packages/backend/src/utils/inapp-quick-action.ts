@@ -19,11 +19,12 @@
  *   - 회사 admin 사전 명시 후 적용 (1-click = "추천" 카드 → 회사 admin이 적용 button 누름)
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 import { createVariant, VariantOfVariantError } from './inapp-variant-optimizer';
 // ★ 2026-09-26 한줄로 V2 R1-45 — AI가 지어낸 혜택 차단 CT(원본에 있던 혜택만 통과)
-import { stripUnauthorizedBenefits } from './copy-benefit-detector';
+import { findNewNumbers, stripUnauthorizedBenefits } from './copy-benefit-detector';
 import { buildHourlyDistribution } from './inapp-funnel-stats';
 
 // ════════════════════════════════════════════════════════════════════
@@ -117,10 +118,9 @@ export async function quickActionAIRefine(
     source: 'inapp-quick-action', // ★ D227+ 종량제: 인앱 빠른액션 다듬기 3크레딧
   });
 
-  const jsonText = extractJSON(aiResult || '');
   let parsed: any;
   try {
-    parsed = JSON.parse(jsonText);
+    parsed = extractJsonFromAiText(aiResult || '');   // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지.
   } catch (e: any) {
     throw new Error(`AI 응답 JSON 파싱 실패: ${e.message}`);
   }
@@ -146,6 +146,11 @@ ${parent.body || ''}`;
 ${v.body}`;
     if (stripUnauthorizedBenefits(variantText, parentText) !== variantText) {
       console.warn(`[CT-84 quickActionAIRefine] 원본에 없던 혜택이 생겨 안을 건너뜀 (tone=${v.tone})`);
+      continue;
+    }
+    // ★ 2026-09-30 WP2 — 톤만 바꾸는 변형이다. 원본에 없던 숫자(기한 · 수량 · 시간)가 생긴 안도 만들지 않는다
+    if (findNewNumbers(variantText, parentText).length > 0) {
+      console.warn(`[CT-84 quickActionAIRefine] 원본에 없던 숫자가 생겨 안을 건너뜀 (tone=${v.tone})`);
       continue;
     }
     try {
@@ -338,16 +343,3 @@ export async function quickActionSegmentRefine(
 // 헬퍼
 // ════════════════════════════════════════════════════════════════════
 
-function extractJSON(text: string): string {
-  if (text.includes('```json')) {
-    const start = text.indexOf('```json') + 7;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  if (text.includes('```')) {
-    const start = text.indexOf('```') + 3;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  return text.trim();
-}

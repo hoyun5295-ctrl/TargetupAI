@@ -14,6 +14,7 @@
  *   - 구체 혜택(%/원/쿠폰) X (feedback_ai_no_arbitrary_benefit)
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import type { PerformanceSnapshot } from './next-action-advisor';
 
@@ -120,18 +121,8 @@ ${actionType === 'channel_recovery'
       source: 'performance-quick-action',
     });
 
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
+    const parsed: any = extractJsonFromAiText(text);
     return {
       actionType,
       objective: String(parsed.objective || ''),

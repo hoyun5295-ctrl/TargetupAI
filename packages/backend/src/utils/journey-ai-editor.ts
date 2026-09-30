@@ -12,6 +12,7 @@
  *  - 초안 패키지 편집만 — 저장/발송 경로 무변경 (프론트가 setAiPkg)
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { sanitizeForSms } from './message-sanitizer';
 import { stripAdParts } from './messageUtils';
@@ -35,19 +36,6 @@ export interface EditJourneyInput {
   instruction: string;
 }
 
-function extractJSON(text: string): string {
-  if (text.includes('```json')) {
-    const start = text.indexOf('```json') + 7;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  if (text.includes('```')) {
-    const start = text.indexOf('```') + 3;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  return text.trim();
-}
 
 function clampInt(v: any, min: number, max: number, fallback: number): number {
   const n = Number(v);
@@ -223,7 +211,7 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
 
   let parsed: any;
   try {
-    parsed = JSON.parse(extractJSON(text));
+    parsed = extractJsonFromAiText(text);
   } catch {
     throw new Error('AI 응답 JSON 파싱 실패. 요청을 더 명확히 작성해주세요.');
   }

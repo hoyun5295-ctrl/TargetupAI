@@ -11,7 +11,8 @@
  */
 
 // ★ 2026-07-16 M1 — 3000 → 8000 확대 (행사 원문 통째 붙여넣기 지원 — DM 재개편 설계서 §2-1)
-import { callAIWithFallback } from '../services/ai';
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
+import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
 
 export const EVENT_TEXT_MAX = 8000;
 
@@ -386,7 +387,7 @@ function briefExtractJson(raw: string): any {
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
   if (start < 0 || end <= start) throw new Error('JSON 없음');
-  return JSON.parse(cleaned.slice(start, end + 1));
+  return extractJsonFromAiText(cleaned.slice(start, end + 1));
 }
 
 /**
@@ -404,7 +405,8 @@ export async function extractEventBrief(eventText: string, companyId?: string): 
     const kst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().replace('Z', '+09:00');
     const raw = await callAIWithFallback({
       system: EVENT_BRIEF_SYSTEM,
-      userMessage: `현재 한국 시각: ${kst}\n\n[행사 원문]\n${text}\n\n위 원문을 JSON으로 구조화하세요.`,
+      // ★ 2026-09-30 WP5(D76) — period_end 는 "이번 주말까지" 같은 상대 표현에서 계산한다(쿠폰 만료일 · 카운트다운 끝 시각으로 고객에게 보인다). 요일은 시스템 달력으로.
+      userMessage: `현재 한국 시각: ${kst}\n요일이 걸린 상대 표현("이번 주 토요일" · "이번 주말")은 아래 달력으로 날짜를 찾으세요. 요일을 직접 계산하지 마세요.\n${getKoreanCalendar()}\n\n[행사 원문]\n${text}\n\n위 원문을 JSON으로 구조화하세요.`,
       maxTokens: 3000,
       temperature: 0,
       model: 'sonnet',

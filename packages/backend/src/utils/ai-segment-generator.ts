@@ -24,6 +24,7 @@
  *   7. 결과 반환 = { filter, explanation, matchCount, samples }
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { buildCustomerFilter } from './customer-filter';
 import { getFieldByKey, StandardFieldMapping } from './standard-field-map';
@@ -162,19 +163,6 @@ ${customFieldsBlock}
 // JSON 추출 헬퍼 (inapp-ai-generator.ts 패턴 정합)
 // ════════════════════════════════════════════════════════════════════
 
-function extractJSON(text: string): string {
-  if (text.includes('```json')) {
-    const start = text.indexOf('```json') + 7;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  if (text.includes('```')) {
-    const start = text.indexOf('```') + 3;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  return text.trim();
-}
 
 // ════════════════════════════════════════════════════════════════════
 // 메인 함수
@@ -236,8 +224,7 @@ export async function convertNaturalLanguageToFilter(
   // 2. JSON 추출 + 파싱
   let parsed: any;
   try {
-    const jsonText = extractJSON(aiResult || '');
-    parsed = JSON.parse(jsonText);
+    parsed = extractJsonFromAiText(aiResult || '');   // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지.
   } catch (e: any) {
     throw new SegmentGenerationError(
       'AI_RESPONSE_INVALID',

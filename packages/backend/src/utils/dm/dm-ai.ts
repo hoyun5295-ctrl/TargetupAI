@@ -11,7 +11,9 @@
  *
  * 설계서: status/DM-PRO-DESIGN.md §9
  */
-import { callAIWithFallback } from '../../services/ai';
+import { extractJsonFromAiText } from '../ai-json';
+import { findInventedBenefits, findNewNumbers } from '../copy-benefit-detector';
+import { callAIWithFallback, getKoreanCalendar } from '../../services/ai';
 // ★ 2026-07-03 DM 문안두뇌 주입 (전 채널 학습 통합 Phase 1c) — 회사 성과 DM 문안 RAG + 브랜드 키트
 import { composeCopyBrain } from '../copy-prompt-composer';
 // ★ 2026-07-08 행사 원문 상품 구조 추출 — 원문 실존 검증(환각 가격 차단) 공용 CT
@@ -97,8 +99,9 @@ export function extractJson<T = unknown>(raw: string): T {
   const last = s.lastIndexOf('}');
   if (first < 0 || last < first) throw new Error('JSON 형식이 아닙니다: ' + s.slice(0, 120));
   const jsonStr = s.slice(first, last + 1);
+  // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지. 객체 구간은 여기서 먼저 자른다(객체만 원한다 · 종전 동작).
   try {
-    return JSON.parse(jsonStr) as T;
+    return extractJsonFromAiText<T>(jsonStr);
   } catch (e: any) {
     throw new Error(`JSON 파싱 실패: ${e.message}, raw: ${jsonStr.slice(0, 200)}`);
   }
@@ -112,7 +115,7 @@ function extractJsonArray<T = unknown>(raw: string): T[] {
   const last = s.lastIndexOf(']');
   if (first < 0 || last < first) throw new Error('JSON 배열 형식이 아닙니다');
   const jsonStr = s.slice(first, last + 1);
-  return JSON.parse(jsonStr) as T[];
+  return extractJsonFromAiText<T[]>(jsonStr);   // 파싱은 CT(제어문자 복구) · 배열 구간은 위에서 자른다
 }
 
 // ────────────── 1. Prompt Parser ──────────────
@@ -152,7 +155,10 @@ const PROMPT_PARSER_SYSTEM = `당신은 리테일·이커머스 마케팅 캠페
 export async function parsePrompt(rawPrompt: string, companyId?: string): Promise<CampaignSpec> {
   const now = new Date();
   const kst = new Date(now.getTime() + 9 * 3600 * 1000).toISOString().replace('Z', '+09:00');
+  // ★ 2026-09-30 WP5(D76) — 상대 표현을 날짜로 바꾸는 파서다. 시각만 주면 요일을 모델이 계산한다 → 시스템 달력을 준다.
   const userMessage = `현재 한국 시각: ${kst}
+요일이 걸린 상대 표현("이번 주 토요일" · "이번 주말")은 아래 달력으로 날짜를 찾으세요. 요일을 직접 계산하지 마세요.
+${getKoreanCalendar()}
 
 입력:
 ${rawPrompt}
@@ -469,12 +475,15 @@ ${schema}`;
   // ★ 2026-07-16 M1 출구 가드 — 원문 투입 시 카피의 혜택·수치 토큰은 전부 원문에 실존해야 한다.
   //   지시(프롬프트)는 확률적으로 뚫린다 — 보장은 출구에서 코드가 한다 (0706 Liquid 사고 원칙).
   //   위반 필드만 버리고 나머지는 유지(전체 실패 X — 빈 필드는 기존 placeholder 규칙).
-  if (rawEvent) {
+  // ★ 2026-09-30 WP2 — 행사 원문이 없을 때도 같은 출구 가드. 근거 = 캠페인 스펙(사용자 요청에서 뽑은 혜택 · 대상 · 목적).
+  //   옛: 원문이 없으면 "구체 혜택 수치 생성 금지" 지시뿐이라 지어낸 수치가 그대로 나갈 수 있었다.
+  const factGround = rawEvent || specSummary;
+  {
     const d: any = draft;
-    if (Array.isArray(d.headlines)) d.headlines = d.headlines.filter((h: any) => copyFactsExistInText(h?.text, rawEvent));
-    if (Array.isArray(d.subCopies)) d.subCopies = d.subCopies.filter((s: any) => copyFactsExistInText(s, rawEvent));
-    if (Array.isArray(d.ctaLabels)) d.ctaLabels = d.ctaLabels.filter((l: any) => copyFactsExistInText(l, rawEvent));
-    if (d.body && !copyFactsExistInText(d.body, rawEvent)) d.body = '';
+    if (Array.isArray(d.headlines)) d.headlines = d.headlines.filter((h: any) => copyFactsExistInText(h?.text, factGround));
+    if (Array.isArray(d.subCopies)) d.subCopies = d.subCopies.filter((s: any) => copyFactsExistInText(s, factGround));
+    if (Array.isArray(d.ctaLabels)) d.ctaLabels = d.ctaLabels.filter((l: any) => copyFactsExistInText(l, factGround));
+    if (d.body && !copyFactsExistInText(d.body, factGround)) d.body = '';
   }
   return draft;
 }
@@ -488,7 +497,7 @@ const TONE_SYSTEM = `당신은 카피 톤 변환 전문가입니다.
 - direct: 직관형 (혜택을 바로 제시)
 - emotional: 감성형 (고객의 순간/감정 자극)
 - premium: 고급형 (절제된 언어, 여백의 미)
-- urgent: 긴박형 (마감/희소성 강조)
+- urgent: 긴박형 (원문에 있는 기간 · 수량만 강조. 원문에 없는 마감 · 희소성은 만들지 않는다)
 - friendly: 친절형 (따뜻한 어투)
 - sales: 세일즈형 (구매 전환 강조)
 
@@ -496,6 +505,7 @@ const TONE_SYSTEM = `당신은 카피 톤 변환 전문가입니다.
 - 한국어 유지
 - 원문의 길이 대비 ±30% 이내
 - 이모지 사용 금지. 원문에 있던 이모지도 제거 (2026-07-02 디자인 v2 카피 규율)
+- 원문의 사실(상품명 · 혜택과 그 숫자 · 날짜 · 기간 · 수량 · 장소)은 그대로 둔다. 원문에 없는 숫자 · 혜택 · 조건을 새로 쓰지 않는다
 - 출력은 JSON: { "text": "변환된 문장" }
 - JSON 외 다른 텍스트 금지`;
 
@@ -515,7 +525,10 @@ export async function transformTone(text: string, targetTone: ToneKey, companyId
     source: 'dm-tone', // ★ D227+ 종량제: 집계용(맵 미등록=0)
   });
   const parsed = extractJson<{ text: string }>(raw);
-  return parsed.text || text;
+  const out = String(parsed.text || '').trim();
+  // ★ 2026-09-30 WP2 — 톤만 바꾼다. 원문에 없던 숫자 · 혜택 값이 생기면 원문을 그대로 돌려준다(긴박형 마감 창작 부류).
+  if (!out || findNewNumbers(out, text).length > 0 || findInventedBenefits(out, text).length > 0) return text;
+  return out;
 }
 
 // ────────────── 5. Improve Message (전체 섹션) ──────────────
@@ -573,7 +586,12 @@ ${JSON.stringify(payload, null, 2)}
     source: 'dm-improve', // ★ D227+ 종량제: 집계용(맵 미등록=0)
   });
   const parsed = extractJson<{ suggestions?: ImprovementSuggestion[] }>(raw);
-  return parsed.suggestions || [];
+  // ★ 2026-09-30 WP2 — 개선은 표현만. before 에 없던 숫자 · 혜택 값이 after 에 생긴 제안은 뺀다.
+  return (parsed.suggestions || []).filter((sg) => {
+    const before = String(sg?.before || '');
+    const after = String(sg?.after || '');
+    return findNewNumbers(after, before).length === 0 && findInventedBenefits(after, before).length === 0;
+  });
 }
 
 // ────────────── 내부 헬퍼 ──────────────

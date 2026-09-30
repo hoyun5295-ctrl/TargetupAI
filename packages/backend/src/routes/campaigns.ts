@@ -71,7 +71,7 @@ import { validateScheduledAt } from '../utils/campaign-validation';
 import { isWithinBrandSendWindow, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError } from '../utils/send-time-util';
 import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, effectiveUnsubFilter } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
-import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from '../utils/brand-link-core';
+import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
 // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 판정·응답 모두 CT가 소유한다
 import { checkSenderAuthGate, senderAuthRejection } from '../utils/sender-auth';
@@ -597,12 +597,9 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     // ★ 2026-07-02 링크 placeholder 발송 가드 — 미완성 링크 자리 잔존 시 실발송 차단 (AI 캠페인/타겟 발송 경로)
-    if (hasUneditedLinkPlaceholder(String(messageContent || ''))) {
-      return res.status(400).json({
-        error: `문안에 링크 자리(${LINK_PLACEHOLDER})가 비어 있습니다. 링크 삽입으로 URL을 넣거나 해당 줄을 지운 뒤 발송해주세요.`,
-        code: 'LINK_PLACEHOLDER_UNEDITED',
-      });
-    }
+    // ★ 2026-09-30 AI 혜택 자리까지(발송 길목 CT send-placeholder-gate · 본문 + 제목)
+    const createPh = findUneditedSendPlaceholder(messageContent, subject);
+    if (createPh) return res.status(400).json({ error: createPh.error, code: createPh.code });
 
     // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — D142+ 자동 승격 정책 폐지
     //   정책 변경 사유 (Harold님 명시): 사용자가 광고체크 OFF + 본문에 (광고)/무료거부 복붙한
@@ -2215,6 +2212,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       const r = findLinkDefectInText(t, '본문의 링크는');
       if (r) return res.status(400).json({ success: false, error: r, code: 'LINK_DEFECT' });
     }
+    // ★ 2026-09-30 채우지 않은 링크 · AI 자리(혜택 · 기간 등)도 차감 앞에서 막는다(발송 길목 CT). 이 라우트는 AI 오퍼레이터 승인 발송이 쓴다 —
+    //   생성 문안의 지어낸 혜택이 자리표시로 바뀌므로(0930 혜택 대조) 여기를 비우면 자리표시가 고객에게 나간다. 알림톡 실패 대체 문안도 본다.
+    const directPh = findUneditedSendPlaceholder(...textsToCheck, alimtalkNextContents, alimtalkNextSubject);
+    if (directPh) return res.status(400).json({ success: false, error: directPh.error, code: directPh.code });
 
     const resolvedSendType: string = isDirectPipelineSendType(sendType) ? sendType : 'direct';
     if (sendType !== undefined && sendType !== null && sendType !== '' && !isDirectPipelineSendType(sendType)) {
@@ -3680,6 +3681,9 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     if ((campMsgType === 'LMS' || campMsgType === 'MMS') && (!subject || !subject.trim())) {
       return res.status(400).json({ success: false, error: 'LMS/MMS는 제목이 필수입니다' });
     }
+    // ★ 2026-09-30 예약 문안 수정도 발송 길목 — 채우지 않은 링크 · AI 혜택 자리는 저장하지 않는다(생성 길목과 같은 CT).
+    const editPh = findUneditedSendPlaceholder(message, subject);
+    if (editPh) return res.status(400).json({ success: false, error: editPh.error, code: editPh.code });
 
     // 15분 이내 체크
     const currentScheduledAt = new Date(campaign.rows[0].scheduled_at);
@@ -4063,6 +4067,9 @@ router.post('/brand-send', async (req: Request, res: Response) => {
     if (!phones || !Array.isArray(phones) || phones.length === 0) {
       return res.status(400).json({ error: '수신자 목록이 필요합니다' });
     }
+    // ★ 2026-09-30 브랜드메시지도 발송 길목 — 채우지 않은 링크 · AI 혜택 자리는 보내지 않는다(생성 길목과 같은 CT).
+    const brandPh = findUneditedSendPlaceholder(message, header, additionalContent, resendMessage, resendTitle);
+    if (brandPh) return res.status(400).json({ error: brandPh.error, code: brandPh.code });
 
     // ★ 2026-09-27 한줄로 V2 R100 — 카카오 사용·발신키 소유(게이트 CT). 옛 코드는 본문의 발신키를 그대로 실어
     //   남의 senderKey를 알면 그 프로필로 발송할 수 있었다. 화면(BrandMessageEditor)은 자기 회사 프로필의 profile_key를 반드시 채운다.

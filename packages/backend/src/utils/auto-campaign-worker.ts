@@ -52,6 +52,7 @@ import { getFieldByKey } from './standard-field-map';
 import { SEND_HOURS } from '../config/defaults';
 // ★ B5/B6: 신규 컨트롤타워
 import { fetchTargetSampleCustomer } from './target-sample';
+import { findUneditedSendPlaceholder } from './send-placeholder-gate';
 import {
   buildAiGeneratedNotifyMessage,
   buildPreNotifyMessage,
@@ -805,6 +806,16 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     if (!messageContent) {
       console.warn(`${logPrefix} 메시지 내용 없음 — 스킵`);
       await markFailed(ac, '메시지 내용 없음 (AI 생성 실패 + 폴백 없음)');
+      return;
+    }
+
+    // ★ 2026-09-30 채우지 않은 링크 · AI 자리(혜택 · 기간 등)가 남은 문안은 보내지 않는다(발송 길목 CT · 캠페인 · 직접발송과 같은 판정).
+    //   AI 문안 모드는 전날 생성 → 담당자 알림 → 수정이 없으면 그대로 발송이다. 0930 혜택 대조로 지어낸 혜택이 자리표시로 바뀌고,
+    //   AI 실패 비상 문안도 자리표시를 둔다 — 여기를 비우면 자리표시가 고객에게 나간다. 캠페인 행 생성 · 차감 앞이다.
+    const autoPh = findUneditedSendPlaceholder(messageContent, messageSubject);
+    if (autoPh) {
+      console.warn(`${logPrefix} 채우지 않은 자리가 남은 문안 — 본 발송 중단 (${autoPh.code})`);
+      await markFailed(ac, autoPh.error);
       return;
     }
 

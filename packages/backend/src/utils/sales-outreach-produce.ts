@@ -15,6 +15,7 @@
  * - ★0905 조립 함수 분할(A-2): 순수 조립(buildProposalEmailSections · 한글 리터럴 0 · 문구는 style.emailCopy) ↔ AI 호출(generateSubjectIntro)
  *   ↔ 진입점(assembleProposalEmail = 조립 + 렌더 + 평문 + placeholder 합산).
  */
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import * as fs from 'fs';
 import * as net from 'net';
 import * as dns from 'dns';
@@ -823,7 +824,7 @@ export async function scoreOutreachPoster(base64: string, mime: string): Promise
     });
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) return { outcome: 'undetermined', digits: null, headlineVisible: null };
-    const j = JSON.parse(m[0]);
+    const j = extractJsonFromAiText(m[0]);
     const digits = typeof j.digits === 'boolean' ? j.digits : null;
     const headline = typeof j.headline === 'boolean' ? j.headline : null;
     return { outcome: digits === null && headline === null ? 'undetermined' : 'ok', digits, headlineVisible: headline };
@@ -902,7 +903,7 @@ async function scoreDmCapture(screenshotBase64: string): Promise<DmVisionScore> 
     });
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) return { outcome: 'undetermined', items: null, at: new Date().toISOString() };
-    const j = JSON.parse(m[0]);
+    const j = extractJsonFromAiText(m[0]);
     const items: Partial<Record<DmVisionItem, boolean>> = {};
     for (const k of DM_VISION_ITEMS) if (typeof j[k] === 'boolean') items[k] = j[k];
     return { outcome: Object.keys(items).length ? 'ok' : 'undetermined', items: Object.keys(items).length ? items : null, at: new Date().toISOString() };
@@ -1902,7 +1903,7 @@ export async function transcribeBannerLines(image: { base64: string; mime: strin
       images: [{ media_type: image.mime, data: image.base64 }],
     });
     const m = raw.match(/\{[\s\S]*\}/);
-    const j = m ? JSON.parse(m[0]) : {};
+    const j = m ? extractJsonFromAiText(m[0]) : {};
     const lines: string[] = Array.isArray(j.lines) ? j.lines.map((x: unknown) => String(x || '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 6) : [];
     const person = lines.some((l) => /^person$/i.test(l));
     return { lines: lines.filter((l) => !/^person$/i.test(l)), person };
@@ -2724,7 +2725,7 @@ export async function generateSubjectIntro(guide: OutreachStyleGuide, input: Sub
       system: prompt.system, userMessage: prompt.user, maxTokens: 500, temperature: 0.7, source: 'sales-outreach-email-intro',
     });
     const block = raw.match(/\{[\s\S]*\}/);
-    const parsed = block ? JSON.parse(block[0]) : {};
+    const parsed = block ? extractJsonFromAiText(block[0]) : {};
     if (typeof parsed.subject === 'string' && parsed.subject.trim()) {
       const s = stripUnauthorizedBenefits(parsed.subject.trim(), licensedQuote);
       if (!s.includes(BENEFIT_PLACEHOLDER) && s.length <= 40) subject = s;

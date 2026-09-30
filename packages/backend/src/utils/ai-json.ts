@@ -57,6 +57,28 @@ export function escapeControlCharsInJsonStrings(jsonStr: string): string {
 }
 
 /**
+ * ★ 2026-09-30 WP6 — 화면에 글자 그대로 찍히는(whitespace-pre-wrap) AI 자유 답변의 출구.
+ *   새 모델은 지시가 있어도 굵은 글씨(**) · 머리글(#) · 목록 기호를 붙이는 일이 잦다. 지시는 확률적이라 출구에서 한 번 더 본다.
+ *   글 내용은 바꾸지 않는다. 걷는 것 = 굵게 · 기울임 쌍 표시 · 줄머리 머리글 # · 가로줄 · 코드 울타리 · 인라인 백틱.
+ *   줄머리 목록 기호(- * +)는 "· "로 바꾼다. 쌍이 아닌 * 한 글자(예: "*표시 항목")는 둔다.
+ */
+export function plainTextFromAi(text: string): string {
+  return String(text || '')
+    .replace(/```[a-z]*[ \t]*\n?/gi, '')
+    .split('\n')
+    .map((line) => line
+      .replace(/^\s{0,3}#{1,6}\s+/, '')
+      .replace(/^\s*([-*_])(\s*\1){2,}\s*$/, '')
+      .replace(/^(\s*)[-*+]\s+/, '$1· '))
+    .join('\n')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * AI 응답 텍스트에서 JSON 객체/배열을 안전하게 추출 + parse.
  * @throws 추출/parse 실패 시 Error (호출부 catch에서 fallback 처리)
  */

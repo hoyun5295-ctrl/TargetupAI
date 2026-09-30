@@ -15,6 +15,7 @@
  *   - ai_operator_user_gating: AI_OPERATOR_ALLOWED_USERS 게이팅 (routes/ai.ts 영역)
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { query, pool } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
@@ -590,18 +591,8 @@ JSON 형식만 응답:
     source: 'journey-builder-custom',
   });
 
-  let jsonStr = text;
-  if (text.includes('```json')) {
-    const start = text.indexOf('```json') + 7;
-    const end = text.indexOf('```', start);
-    jsonStr = text.slice(start, end).trim();
-  } else if (text.includes('```')) {
-    const start = text.indexOf('```') + 3;
-    const end = text.indexOf('```', start);
-    jsonStr = text.slice(start, end).trim();
-  }
-
-  const parsed = JSON.parse(jsonStr);
+  // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
+  const parsed: any = extractJsonFromAiText(text);
   const rawSteps: any[] = Array.isArray(parsed.steps) ? parsed.steps : [];
 
   // ★ D188 Phase 2-B-1 (2026-05-21): step_type 3종 정합 — message/wait/condition. condition_jsonb 정합 검증 X — activateJourney에서 검증.

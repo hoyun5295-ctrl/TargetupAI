@@ -8,6 +8,7 @@
  *   차감은 여정 설계(journey-ai-generate 단가 × 만든 여정 수)에서만 한다 — 질문만 보고 그만두면 0.
  *   (Harold 승인 "요금 = 기존 여정 AI 생성 요금 기준 재사용" · 설계서 §5)
  */
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { runInCreditBundle } from './ai-credit-context';
 import { checkCredit } from './ai-credit';
@@ -24,13 +25,6 @@ import {
 
 export const MAX_INTERVIEW_SENTENCE = 300;
 
-function extractJson(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) return fenced[1].trim();
-  const a = text.indexOf('{');
-  const b = text.lastIndexOf('}');
-  return a >= 0 && b > a ? text.slice(a, b + 1) : text.trim();
-}
 
 export async function parseJourneyIntent(companyId: string, sentence: string): Promise<InterviewPlan[]> {
   const s = String(sentence || '').trim().slice(0, MAX_INTERVIEW_SENTENCE);
@@ -61,7 +55,7 @@ ${formatTriggerMenuForAi()}
   }));
   let parsed: unknown;
   try {
-    parsed = JSON.parse(extractJson(text));
+    parsed = extractJsonFromAiText(text);
   } catch {
     return [];
   }

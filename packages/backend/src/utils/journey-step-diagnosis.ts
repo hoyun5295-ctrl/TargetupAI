@@ -21,6 +21,7 @@
  *   - 한줄로 운영 영향 0 (Read-only 진단 + 추천만)
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { buildJourneyStats, JourneyFullStats, JourneyStepStat } from './journey-stats';
@@ -369,18 +370,8 @@ ${stepsDescription || '(단계 영역 없음)'}
       source: 'journey-step-diagnosis',
     });
 
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
+    const parsed: any = extractJsonFromAiText(text);
     const mapStep = (s: any): RecommendedStep => ({
       stepType: (['message', 'wait', 'condition'].includes(s?.stepType) ? s.stepType : 'message') as 'message' | 'wait' | 'condition',
       delayHours: typeof s?.delayHours === 'number' ? Math.max(0, Math.min(720, s.delayHours)) : 24,

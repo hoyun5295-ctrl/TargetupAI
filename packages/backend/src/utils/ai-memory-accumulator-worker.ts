@@ -5,6 +5,7 @@
 // 정직성(2026-06-13): 여정 실클릭(cdp_events)이 적재되기 전에는 clickCount 0이라 company-memory
 //   게이트에서 학습이 보류된다(가짜 0% 차단). 등급 인사이트는 customers 실측만 사용(cdp 불요).
 
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { query } from '../config/database';
 import {
   recordCampaignLearning, addMemory, cleanupDeprecatedMemories,
@@ -439,7 +440,7 @@ async function accumulateAvoidPatterns(): Promise<number> {
       const m = raw.match(/\[[\s\S]*\]/);
       if (!m) continue;
       let donts: string[] = [];
-      try { donts = (JSON.parse(m[0]) as any[]).map(String).filter((s) => s.trim()).slice(0, 5); } catch { continue; }
+      try { donts = (extractJsonFromAiText(m[0]) as any[]).map(String).filter((s) => s.trim()).slice(0, 5); } catch { continue; }
       if (donts.length === 0) continue;
 
       await addMemory({

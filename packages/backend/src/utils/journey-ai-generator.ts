@@ -15,6 +15,7 @@
  *   - (광고)+080+KISA 제목 = 시스템 자동 합성 (직접 작성 X)
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
 import { randomUUID } from 'crypto';
 import { buildMemoryPromptContext } from './company-memory';
@@ -42,7 +43,7 @@ import { partitionCustomerConditions } from './journey-target-extractor';
 // 추천 문구의 단일 출처 — "이어서 만들기"와 기회 카드가 같은 목표 골격을 쓴다.
 import { presetObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
-import { stripUnauthorizedBenefits } from './copy-benefit-detector';
+import { findNewNumbers, stripUnauthorizedBenefits } from './copy-benefit-detector';
 // ★ 2026-09-27 한줄로 V2 R260 — 여정 자동 생성은 사전 확인 → 묶음 생성 → 1회 차감
 import { checkCredit, deductCreditSafe } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
@@ -216,19 +217,6 @@ function getBytes(s: string): number {
   return b;
 }
 
-function extractJSON(text: string): string {
-  if (text.includes('```json')) {
-    const start = text.indexOf('```json') + 7;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  if (text.includes('```')) {
-    const start = text.indexOf('```') + 3;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  return text.trim();
-}
 
 // ════════════════════════════════════════════════════════════════════
 // 핵심: 자연어 한 줄 → 완전 여정 패키지
@@ -634,7 +622,7 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
 
   let parsed: any;
   try {
-    parsed = JSON.parse(extractJSON(text));
+    parsed = extractJsonFromAiText(text);
   } catch (err: any) {
     console.error('[journey-ai-generator] JSON parse 실패. raw:', text.slice(0, 500));
     throw new Error('AI 응답 JSON 파싱 실패. 다시 시도해주세요.');
@@ -874,7 +862,7 @@ ${single
 
   let parsed: any;
   try {
-    parsed = JSON.parse(extractJSON(text));
+    parsed = extractJsonFromAiText(text);
   } catch {
     return { candidates: [] };
   }
@@ -898,7 +886,11 @@ ${single
       bytes: getBytes(pure),
       reasoning: String(c.reasoning || '').slice(0, 200),
     };
-  });
+  })
+    // ★ 2026-09-30 WP2 — 다듬기(본문 있음)는 원문에 없던 숫자("90분 안에" · "3일 한정")가 생긴 안을 버린다.
+    //   혜택 낱말 없이도 고객에게는 약속이다. 다 버려지면 빈 목록 = 화면 "다듬은 결과가 없습니다. 다시 시도해 주세요."
+    //   생성 모드(본문 없음)는 대조할 원문이 없어 이 검사를 하지 않는다(혜택은 위 CT가 자리표시로 바꾼다).
+    .filter((c) => !hasBody || findNewNumbers(c.message, input.currentMessage || '').length === 0);
 
   return { candidates };
 }
@@ -966,7 +958,7 @@ ${memoryContext}
   });
 
   let parsed: any = {};
-  try { parsed = JSON.parse(extractJSON(text)); } catch { parsed = {}; }
+  try { parsed = extractJsonFromAiText(text); } catch { parsed = {}; }
   // ★ AI가 본문/제목에 박은 (광고)·무료수신거부 제거 → 순수 본문만(발송 시 buildAdMessage가 (광고)+080 자동 합성, 빌더 표시도 일관).
   // ★ 2026-09-26 한줄로 V2 R259 — 다른 여정 생성 경로(636·836행)와 같은 혜택 차단 CT. 근거 = 회사가 준 목표문.
   //   혜택을 만들지 말라는 건 프롬프트 지시뿐이었다(지시는 경계가 아니다 · AI 임의 혜택 금지).
@@ -1077,6 +1069,11 @@ export async function regenerateStepAvoidingSpam(input: StepSpamRegenInput): Pro
   //   재작성을 버린다(대행 다듬기와 같은 혜택 차단 CT · 프롬프트 지시는 경계가 아니다). 버리면 자동 교체 없이 담당자 안내로 간다.
   if (out && stripUnauthorizedBenefits(out, input.currentMessage) !== out) {
     console.log(`[journey-ai-refine] 원본에 없던 혜택이 생겨 재작성을 버림 company=${input.companyId}`);
+    return null;
+  }
+  // ★ 2026-09-30 WP2 — 원문에 없던 숫자(기한 · 수량 · 시간)도 같은 이유로 버린다(사람 검토 없이 실발송 스냅샷을 바꾼다)
+  if (out && findNewNumbers(out, input.currentMessage).length > 0) {
+    console.log(`[journey-ai-refine] 원본에 없던 숫자가 생겨 재작성을 버림 company=${input.companyId}`);
     return null;
   }
   return out;

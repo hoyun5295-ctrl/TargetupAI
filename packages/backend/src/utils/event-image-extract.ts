@@ -13,6 +13,7 @@
  *
  * 크레딧: source 'event-image-extract' = 3 (callAIWithFallback이 성공 시에만 차감). 이미지 있으면 cache 우회.
  */
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { callAIWithFallback } from '../services/ai';
 import { normalizeEventText } from './event-brief';
 
@@ -139,7 +140,7 @@ function parseEvents(raw: string): ExtractedEvent[] | null {
     const end = t.lastIndexOf('}');
     if (start < 0 || end <= start) return null;
     t = t.slice(start, end + 1);
-    const obj = JSON.parse(t);
+    const obj = extractJsonFromAiText(t);
     const arr = Array.isArray(obj?.events) ? obj.events : null;
     if (!arr) return null;
     const events: ExtractedEvent[] = arr.slice(0, MAX_EVENT_IMAGES).map((e: any) => ({

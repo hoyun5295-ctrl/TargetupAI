@@ -263,6 +263,8 @@ export interface GeneratedImage {
   parts: GeminiPart[];
   imageTokens: number;
   ms: number;
+  /** ★0930 실제로 만든 엔진(OpenAI 실패 → Gemini 대체면 'gemini') — 로그 · 비교 검증이 대체를 구분한다. */
+  engine: StudioImageEngine;
 }
 
 async function callGemini(
@@ -324,26 +326,173 @@ async function callGemini(
   const imageTokens = Number(
     (cand?.content && json?.usageMetadata?.candidatesTokensDetails?.find((d: any) => d.modality === 'IMAGE')?.tokenCount) || 0,
   );
-  return { base64: imgPart.inlineData.data, mime: imgPart.inlineData.mimeType || 'image/jpeg', parts, imageTokens, ms };
+  return { base64: imgPart.inlineData.data, mime: imgPart.inlineData.mimeType || 'image/jpeg', parts, imageTokens, ms, engine: 'gemini' };
+}
+
+// ── ★ 2026-09-30 생성 엔진 스위치 (3방식 블라인드 · 원장 docs/2026-09-30-ai-model-prompt-upgrade.md §2-4) ──
+//   STUDIO_IMAGE_ENGINE=openai 이면 스튜디오 화면의 생성(/generate)·수정 지시(/edit 2K)를 OpenAI 이미지 모델로 만든다.
+//   기본 = gemini(배포만으로 동작 무변경). 엔진은 호출부가 넘긴다 — 넘기지 않으면 Gemini:
+//     · 4K 격상 = 늘 Gemini(OpenAI 최대 8,294,400 화소 → 3:4 4K 불가)
+//     · 아웃리치(배경만 생성 + 서버 글자) · 템플릿 예시 배치 = Gemini 그대로(별도 파이프라인 · 이번 비교 대상 아님)
+//   OpenAI 가 30초 안에 일시 장애(429 · 5xx · 연결 실패 · 키/권한)면 같은 요청을 Gemini 로 한 번 더 만든다(차감은 성공 1회 뒤 1번 그대로).
+//   안전 거부 · 그 밖의 400 · 시간 초과 · 늦은 실패는 대체하지 않는다(안전 우회 금지 · 대기 시간 두 배 금지).
+export type StudioImageEngine = 'gemini' | 'openai';
+export const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst';
+const OPENAI_IMAGE_URL = 'https://api.openai.com/v1/images';
+
+let openaiKeyMissingWarned = false;
+/** 스튜디오 화면이 쓸 생성 엔진 — 호출 시점의 ENV 를 읽는다(pm2 --update-env 재시작으로 켜고 끈다). */
+export function studioImageEngine(): StudioImageEngine {
+  if (String(process.env.STUDIO_IMAGE_ENGINE || '').trim().toLowerCase() !== 'openai') return 'gemini';
+  if (!process.env.OPENAI_API_KEY) {
+    if (!openaiKeyMissingWarned) {
+      openaiKeyMissingWarned = true;
+      console.log('[image-studio] STUDIO_IMAGE_ENGINE=openai 이나 OPENAI_API_KEY 미설정 → gemini 로 생성');
+    }
+    return 'gemini';
+  }
+  return 'openai';
+}
+
+/** 프리셋 크기 등급별 화소 예산 — 2K = 블라인드 비교에 쓴 1536×2048(3:4), 1K = 1008×1344(3:4). */
+const OPENAI_PIXEL_BUDGET: Record<'1K' | '2K', number> = { '1K': 1008 * 1344, '2K': 1536 * 2048 };
+/**
+ * 프리셋 비율 → OpenAI 크기 문자열. 규격 = 가로·세로 16의 배수 · 비율 1:3~3:1 · 한 변 3840 이하 ·
+ * 총 화소 655,360~8,294,400(2560×1440 초과는 실험 단계라 예산을 그 아래로 둔다).
+ */
+export function openaiImageSize(aspectRatio: string, imageSize: '1K' | '2K'): string {
+  const [a, b] = String(aspectRatio || '').split(':').map(Number);
+  const ratio = a > 0 && b > 0 ? Math.min(3, Math.max(1 / 3, a / b)) : 3 / 4;
+  const budget = OPENAI_PIXEL_BUDGET[imageSize] || OPENAI_PIXEL_BUDGET['2K'];
+  const to16 = (n: number) => Math.max(16, Math.round(n / 16) * 16);
+  const w = to16(Math.sqrt(budget * ratio));
+  const h = to16(w / ratio);
+  return `${w}x${h}`;
+}
+
+/** OpenAI 실패 중 Gemini 로 대체해도 되는 것(일시 장애 · 설정 문제). 안전 거부 · 시간 초과는 StudioError 로 바로 던진다. */
+class OpenAIFallback extends Error {
+  constructor(message: string, readonly ms = 0) { super(message); }
+}
+/** 이보다 늦게 실패하면 대체하지 않는다 — 늦은 5xx 뒤 Gemini 를 또 기다리면 대기가 두 배가 된다. */
+const OPENAI_FALLBACK_MAX_MS = 30_000;
+
+async function callOpenAIImage(input: {
+  prompt: string;
+  size: string;
+  images: Array<{ base64: string; mime: string }>;
+  timeoutMs: number;
+}): Promise<GeneratedImage> {
+  const key = process.env.OPENAI_API_KEY || '';
+  if (!key) throw new OpenAIFallback('키 미설정');
+  const isEdit = input.images.length > 0;
+  let body: string | FormData;
+  const headers: Record<string, string> = { Authorization: `Bearer ${key}` };
+  if (isEdit) {
+    // 사진이 있으면 수정 끝점(multipart · image[] 반복) — 공식 예시와 같은 형식
+    const form = new FormData();
+    form.append('model', OPENAI_IMAGE_MODEL);
+    form.append('prompt', input.prompt);
+    form.append('size', input.size);
+    form.append('quality', 'high');
+    form.append('output_format', 'jpeg');
+    input.images.forEach((img, i) => {
+      const ext = img.mime.includes('png') ? 'png' : img.mime.includes('webp') ? 'webp' : 'jpg';
+      form.append('image[]', new Blob([Buffer.from(img.base64, 'base64')], { type: img.mime }), `input-${i}.${ext}`);
+    });
+    body = form;
+  } else {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify({ model: OPENAI_IMAGE_MODEL, prompt: input.prompt, size: input.size, quality: 'high', output_format: 'jpeg', n: 1 });
+  }
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), input.timeoutMs);
+  const t0 = Date.now();
+  let res: Awaited<ReturnType<typeof fetch>>;
+  try {
+    res = await fetch(`${OPENAI_IMAGE_URL}/${isEdit ? 'edits' : 'generations'}`, { method: 'POST', headers, body, signal: ac.signal });
+  } catch (err: any) {
+    clearTimeout(timer);
+    if (err?.name === 'AbortError') {
+      console.log(`[image-studio] OpenAI 이미지 시간 초과 ${input.timeoutMs}ms`);
+      throw new StudioError('GEN_FAILED', 502, true);
+    }
+    throw new OpenAIFallback(`연결 실패 ${err?.message || err}`, Date.now() - t0);
+  }
+  const json: any = await res.json().catch(() => ({}));
+  clearTimeout(timer);
+  const ms = Date.now() - t0;
+  if (ac.signal.aborted) {
+    // 본문을 받는 중 시간 초과 — 대체하지 않는다(대기 두 배 금지)
+    console.log(`[image-studio] OpenAI 이미지 시간 초과(본문 수신 중) ${input.timeoutMs}ms`);
+    throw new StudioError('GEN_FAILED', 502, true);
+  }
+
+  if (!res.ok) {
+    // 원문은 로그만 — 응답엔 코드 매핑 메시지만(§5-1-11 모델명 노출 차단)
+    console.log(`[image-studio] OpenAI HTTP ${res.status} ${ms}ms: ${JSON.stringify(json).slice(0, 500)}`);
+    const code = String(json?.error?.code || '');
+    if (code === 'moderation_blocked' || code === 'content_policy_violation') throw new StudioError('SAFETY_BLOCKED', 400, true);
+    // 400 = 요청 자체의 문제(본문을 못 읽은 안전 거부 포함) — 다른 모델로 돌리지 않는다(fail-closed · 미차감)
+    if (res.status === 400) throw new StudioError('GEN_FAILED', 502, true);
+    throw new OpenAIFallback(`HTTP ${res.status} ${code}`, ms);
+  }
+  const b64 = json?.data?.[0]?.b64_json;
+  if (!b64) throw new OpenAIFallback('이미지 없음', ms);
+  const usage = json?.usage || {};
+  const imageTokens = Number(usage?.output_tokens_details?.image_tokens ?? usage?.output_tokens ?? 0) || 0;
+  return { base64: b64, mime: 'image/jpeg', parts: [], imageTokens, ms, engine: 'openai' };
+}
+
+/** 엔진 분기 — openai 가 대체 가능한 실패면 Gemini 로 한 번 더(로그 남김). 안전 거부 · 시간 초과는 그대로 던진다. */
+async function runOnEngine(
+  engine: StudioImageEngine,
+  what: string,
+  openai: () => Promise<GeneratedImage>,
+  gemini: () => Promise<GeneratedImage>,
+): Promise<GeneratedImage> {
+  if (engine !== 'openai') return gemini();
+  try {
+    const img = await openai();
+    console.log(`[image-studio] ${what} engine=openai model=${OPENAI_IMAGE_MODEL} ${img.ms}ms imageTokens=${img.imageTokens}`);
+    return img;
+  } catch (err: any) {
+    if (!(err instanceof OpenAIFallback)) throw err;
+    if (err.ms > OPENAI_FALLBACK_MAX_MS) {
+      console.log(`[image-studio] ${what} engine=openai 늦은 실패(${err.message} · ${err.ms}ms) → 대체 안 함`);
+      throw new StudioError('GEN_FAILED', 502, true);
+    }
+    console.log(`[image-studio] ${what} engine=openai 실패(${err.message} · ${err.ms}ms) → gemini 로 대체`);
+    return gemini();
+  }
 }
 
 /**
  * 완성 포스터 1장 생성(단일턴) — 누끼 제품 이미지를 입력으로 첨부하면
  * 생성 모델이 [제품 배치 + 배경 + 지정 문구 타이포]까지 한 장으로 렌더한다(실증 §0-2·Harold 실측).
- * cutout 미첨부 = 문구 포함 배경 포스터.
+ * cutout 미첨부 = 문구 포함 배경 포스터. engine 미지정 = Gemini(★0930 스위치는 스튜디오 라우트만 넘긴다).
  */
 export async function generatePoster(
   prompt: string,
   preset: ChannelPreset,
   cutout?: { base64: string; mime: string } | null,
+  opts?: { engine?: StudioImageEngine },
 ): Promise<GeneratedImage> {
-  const parts: GeminiPart[] = [{ text: prompt }];
-  if (cutout) parts.push({ inlineData: { mimeType: cutout.mime, data: cutout.base64 } });
-  return callGemini(
-    [{ role: 'user', parts }],
-    preset.imageSize,
-    preset.aspectRatio,
-    120_000,
+  return runOnEngine(
+    opts?.engine || 'gemini',
+    cutout ? 'poster+product' : 'poster',
+    () => callOpenAIImage({ prompt, size: openaiImageSize(preset.aspectRatio, preset.imageSize), images: cutout ? [cutout] : [], timeoutMs: 120_000 }),
+    () => {
+      const parts: GeminiPart[] = [{ text: prompt }];
+      if (cutout) parts.push({ inlineData: { mimeType: cutout.mime, data: cutout.base64 } });
+      return callGemini(
+        [{ role: 'user', parts }],
+        preset.imageSize,
+        preset.aspectRatio,
+        120_000,
+      );
+    },
   );
 }
 
@@ -367,17 +516,37 @@ export async function editOrUpscale(opts: {
   instruction: string;
   imageSize: '2K' | '4K';
   aspectRatio: string;
+  /** ★0930 스위치 — 2K 수정 지시에만 적용. 4K 는 늘 Gemini(OpenAI 화소 상한). */
+  engine?: StudioImageEngine;
 }): Promise<GeneratedImage> {
-  const modelTurnParts: GeminiPart[] = stripSignature([
-    { inlineData: { mimeType: opts.baseMime, data: opts.baseImageBase64 } },
-  ]);
-  const contents = [
-    { role: 'user', parts: [{ text: opts.basePrompt }] },
-    { role: 'model', parts: modelTurnParts },
-    { role: 'user', parts: [{ text: opts.instruction }] },
-  ];
-  return callGemini(contents, opts.imageSize, opts.aspectRatio, 120_000);
+  const gemini = () => {
+    const modelTurnParts: GeminiPart[] = stripSignature([
+      { inlineData: { mimeType: opts.baseMime, data: opts.baseImageBase64 } },
+    ]);
+    const contents = [
+      { role: 'user', parts: [{ text: opts.basePrompt }] },
+      { role: 'model', parts: modelTurnParts },
+      { role: 'user', parts: [{ text: opts.instruction }] },
+    ];
+    return callGemini(contents, opts.imageSize, opts.aspectRatio, 120_000);
+  };
+  if (opts.imageSize === '4K') return gemini();
+  // OpenAI 수정 끝점은 대화 맥락이 없다 — 원 생성 프롬프트 대신 "나머지는 그대로(글자 포함)"를 지시에 붙인다
+  return runOnEngine(
+    opts.engine || 'gemini',
+    'edit',
+    () => callOpenAIImage({
+      prompt: `${opts.instruction}\n${OPENAI_EDIT_KEEP_REST}`,
+      size: openaiImageSize(opts.aspectRatio, '2K'),
+      images: [{ base64: opts.baseImageBase64, mime: opts.baseMime }],
+      timeoutMs: 120_000,
+    }),
+    gemini,
+  );
 }
+
+export const OPENAI_EDIT_KEEP_REST =
+  'Keep everything else in the attached image unchanged, including every existing text element exactly as written and where it sits, and any product exactly as shown.';
 
 export const UPSCALE_4K_INSTRUCTION =
   'Output the exact same image at 4K resolution. Do not change the composition, layout, colors, lighting, or any element. Same scene, higher resolution only.';

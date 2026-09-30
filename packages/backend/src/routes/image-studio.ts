@@ -31,7 +31,7 @@ import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset } from '
 import {
   isStudioReady, StudioError, CREDIT_SOURCE,
   resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName,
-  generatePoster, editOrUpscale, UPSCALE_4K_INSTRUCTION, buildEditInstruction,
+  generatePoster, editOrUpscale, UPSCALE_4K_INSTRUCTION, buildEditInstruction, studioImageEngine,
   removeBackground, composeImage,
   writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, findTempFile, moveTempToPermanent,
   companyTempUsageBytes, isValidTempId, newTempId,
@@ -213,7 +213,8 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
 
     // ★ 2026-07-30 1장 생성 (Harold 확정) — 옛 후보 2장은 같은 prompt·preset 무작위 2회 호출이라 레시피 차이가 없었다.
     //   1회 호출로 줄이고 크레딧은 2 유지 → 크레딧당 Gemini 호출 0.5회(원가 절반). 실패 = 미차감(throw → respondStudioError).
-    const oks = [await generatePoster(prompt, preset, cutout)];
+    //   ★ 2026-09-30 생성 엔진 = 스위치(STUDIO_IMAGE_ENGINE · 기본 gemini) — 원장 docs/2026-09-30-ai-model-prompt-upgrade.md §2-4
+    const oks = [await generatePoster(prompt, preset, cutout, { engine: studioImageEngine() })];
 
     // temp 기록
     const images = oks.map((img) => {
@@ -280,6 +281,7 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
       instruction: is4k ? UPSCALE_4K_INSTRUCTION : buildEditInstruction(instruction),
       imageSize: is4k ? '4K' : '2K',
       aspectRatio: meta.aspectRatio || resolvePreset(meta.presetKey || undefined).aspectRatio,
+      engine: studioImageEngine(),  // ★0930 수정 지시만 적용 · 4K 는 CT 가 늘 Gemini
     });
 
     const buf = Buffer.from(result.base64, 'base64');

@@ -8,6 +8,7 @@
  * 한줄로 AI 프로 요금제 이상.
  */
 
+import { findInventedBenefits, replaceInventedBenefits } from '../utils/copy-benefit-detector';
 import { Request, Response, Router, json } from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -1928,6 +1929,14 @@ ${lengthRule}
     msg = stripAdPartsDeep(msg);
     // ★ 2026-07-08 긴 구분선 줄 정규화 — 기기 화면 폭에서 두 줄로 꺾이는 것 차단 (CT-messageUtils)
     msg = normalizeSmsSeparatorLines(msg);
+    // ★ 2026-09-30 WP2 혜택 서버 차단 — 근거 = DM 페이지 편집 내용 + 추가 요청. 없는 혜택 값 · 낱말은 자리표시
+    //   (이 문안은 문자 발송 길목을 지나고, 자리표시는 send-placeholder-gate 가 막는다 · 사람이 채우거나 지운 뒤에만 발송).
+    const dmCopyGround = `${dmSummary}\n${userPrompt || ''}`;
+    const dmCopyInvented = findInventedBenefits(msg, dmCopyGround);
+    if (dmCopyInvented.length > 0) {
+      msg = replaceInventedBenefits(msg, dmCopyGround);
+      console.warn(`[copy-guard] DM 알림 문안 근거 없는 혜택 → 자리표시 (${dmCopyInvented.join(', ')})`);
+    }
     if (!msg) return res.status(500).json({ error: '문안 생성 결과가 비어 있습니다. 다시 시도해주세요.' });
     if (!msg.includes('%DM링크%')) msg = `${msg}\n%DM링크%`;
     return res.json({ success: true, message: msg });

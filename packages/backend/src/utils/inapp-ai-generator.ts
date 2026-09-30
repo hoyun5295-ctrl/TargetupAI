@@ -22,6 +22,8 @@
  *   - 0건 자동 완화 X (segment 0건이면 안내만)
  */
 
+import { replaceInventedBenefits, replaceInventedBenefitsDeep } from './copy-benefit-detector';
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { randomUUID } from 'crypto';
 import { checkCredit, settleCreditAfterSuccess } from './ai-credit';
@@ -289,19 +291,6 @@ async function loadCompanyContext(companyId: string): Promise<CompanyContext> {
 // JSON 추출 헬퍼
 // ════════════════════════════════════════════════════════════════════
 
-function extractJSON(text: string): string {
-  if (text.includes('```json')) {
-    const start = text.indexOf('```json') + 7;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  if (text.includes('```')) {
-    const start = text.indexOf('```') + 3;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  return text.trim();
-}
 
 function validateTemplate(t: any): InAppTemplate | null {
   const valid: InAppTemplate[] = [
@@ -706,22 +695,24 @@ ${brandAccent
     noCache: true,
   }));
 
-  const jsonText = extractJSON(aiResult || '');
   let parsed: any;
   try {
-    parsed = JSON.parse(jsonText);
+    parsed = extractJsonFromAiText(aiResult || '');   // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지.
   } catch (e: any) {
-    throw new Error(`AI 응답 JSON 파싱 실패: ${e.message}\n응답 앞 300자: ${jsonText.slice(0, 300)}`);
+    throw new Error(`AI 응답 JSON 파싱 실패: ${e.message}\n응답 앞 300자: ${String(aiResult || '').slice(0, 300)}`);
   }
 
   // 응답 검증 + 안전 default
   const scenarioStyle = input.templateHint ? SCENARIO_STYLE[input.templateHint] : null;
-  const title = String(parsed.title || '').slice(0, 100);
-  const body = String(parsed.body || '');
-  const badge_text = (String(parsed.badge_text || '').slice(0, 20) || scenarioStyle?.badge || null);
+  // ★ 2026-09-30 WP2 혜택 서버 차단 — 근거 = 요청 목적 · 행사 원문. 제목 · 본문 · 머리글 · 버튼의 없는 혜택 값 · 낱말은 자리표시
+  //   (혜택 블록은 아래 forceBlockSafety 가 원문 실존분만 통과시킨다 · 자리표시는 인앱 게시 가드가 "[혜택"으로 막는다).
+  const inappGround = [input.objective, eventText].filter(Boolean).join('\n');
+  const title = replaceInventedBenefits(String(parsed.title || ''), inappGround).slice(0, 100);
+  const body = replaceInventedBenefits(String(parsed.body || ''), inappGround);
+  const badge_text = (replaceInventedBenefits(String(parsed.badge_text || ''), inappGround).slice(0, 20) || scenarioStyle?.badge || null);
   const buttons = Array.isArray(parsed.buttons) ? parsed.buttons.slice(0, 3).map((b: any, idx: number) => ({
     id: String(b.id || `btn_${idx}`),
-    label: String(b.label || '').slice(0, 30),
+    label: replaceInventedBenefits(String(b.label || ''), inappGround).slice(0, 30),
     action_url: b.action_url || null,
     style: (['primary', 'secondary', 'tertiary', 'ghost'].includes(b.style) ? b.style : 'primary') as InAppButton['style'],
     background_color: String(b.background_color || '#4f46e5'),
@@ -737,6 +728,8 @@ ${brandAccent
   if (eventText) {
     try { content_blocks = await enrichProductBlocksFromEventText(content_blocks, eventText); } catch { /* 원본 유지 */ }
   }
+  // ★ 2026-09-30 WP2 — 블록의 글 필드 전체(머리글 · 제목 · 본문 · 목록 · 버튼)도 같은 근거로 대조(링크 · 이미지 · 가격 숫자는 건너뜀).
+  content_blocks = replaceInventedBenefitsDeep(content_blocks, inappGround);
   const theme = normalizeTheme(parsed.theme);
   const scenarioAccent = input.templateHint ? SCENARIO_ACCENT[input.templateHint] : null;
   // 브랜드 킷 설정 회사 = 그 색으로 강제 (AI 출력 무시 — 임의 hex 차단). 미설정 = AI 제안 → 시나리오 팔레트 순.

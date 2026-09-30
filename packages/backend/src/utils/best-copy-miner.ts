@@ -4,6 +4,7 @@
 //   옛 휴리스틱 채굴(최근 300건 + 통계 정렬, 정보성 기본값)이 예약안내를 "베스트"로 뽑던 결함의 근본 대체.
 //   is_ad 라벨을 신뢰하지 않고 AI가 직접 마케팅성을 판별한다(라벨 오기 방어).
 //   잡 저장 = 프로세스 메모리(관리자 도구 — pm2 재시작 시 소멸, 재실행하면 됨. DB 테이블 신설 없음).
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import pool from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { getTenantRef } from './training-logger';
@@ -157,7 +158,7 @@ async function judgeBatch(batch: CorpusItem[], job: MiningJob): Promise<MiningCa
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) { job.failedBatches++; return []; }
     let arr: any[] = [];
-    try { arr = JSON.parse(m[0]); } catch { job.failedBatches++; return []; }
+    try { arr = extractJsonFromAiText(m[0]); } catch { job.failedBatches++; return []; }
     const outs: MiningCandidate[] = [];
     for (const j of arr) {
       const idx = Number(j?.i) - 1;

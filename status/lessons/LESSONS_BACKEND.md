@@ -98,7 +98,7 @@
 - **이관(외부 pull)은 외부에 없는 로컬 관리명을 유실 — 로컬 라벨은 로컬 복원 (2026-07-22)** — 0720 카카오 템플릿 IMC pull 이관이 `template_name`을 IMC 체계형 자동명(`아난티_81880`)으로 채워, 고객사 원본 관리명(레거시 event_admin `kakao_alim_talk_template.title`)이 유실. 복원 = 레거시 title을 `template_code` 매칭 로컬 UPDATE(3,242건·remainDiff 0). **핵심: `template_name`은 로컬 라벨(IMC 등록 payload 아님·리스트 검색 파라미터일 뿐·kakao-template-sync가 code/status만 갱신·template_name 미접촉)이라 IMC/재승인/발송 무접촉 안전 복원.** 단 custom_template_code 수정은 IMC 호출(순수 로컬 아님) — **필드마다 로컬/원격 여부 확인 후 경로 선택.** 복원 엔드포인트 = super_admin·dryRun·멱등(IS DISTINCT FROM)·remainDiff 효과검증(6원칙 ②).
 - **발송 5경로 전수 점검** — `messageUtils.ts replaceVariables()` 공통 (D32~D33)
 - **컨트롤타워 단일 진입점** — `utils/` CT에만 로직 / 라우트 인라인 정의 금지
-- **모델 분리 룰** — Opus 4.7 (AI Operator) / Sonnet 4.6 (기존 한줄로AI) 흐름 영향 0건
+- **모델 분리 룰** — 모델 값은 `config/defaults.ts AI_MODELS` 하나가 소유(0930: 문안 = Sonnet 5.5 · 정밀 `model:'opus'` = Opus 5.5 · 대체 = gpt-6-luna). 요청 형태(생각 끄기 · temperature)는 모델마다 달라 `claudeRequestShape` · `gptRequestShape` CT로만 만든다(장부 `docs/2026-09-30-ai-model-prompt-upgrade.md`)
 - **AI 임의 혜택 생성 X** — 구체 혜택(%/원/쿠폰/무료) 절대 미생성 / `[직접 작성해주세요]` placeholder
 - **0건 타겟 자동완화 X** (D171) — 마케팅 의도 파괴 + 정보통신망법 위험
 - **EUC-KR 호환 화이트리스트** — SMS/LMS 발송 시 unicode 이모지 사고 차단
@@ -263,8 +263,8 @@
 - 이력은 정산·감사 근거 = 모르는 과거 건에 부정확 ID 소급 X(created_by null='자동' 정직). enterWith 전파는 환경따라 불안정 가능 — 런타임 확인 후 미작동 시 명시 전달 fallback.
 
 ### 모델 분리 룰 (`feedback_ai_operator_model_isolation`)
-- **AI Operator** = Opus 4.7 (callAIWithFallback `model: 'opus'`)
-- **기존 한줄로AI** = Sonnet 4.6 (절대 건드리지 말 것 — 6,000사+ 운영 영향)
+- **AI Operator · 정밀(검수 · 타겟)** = `AI_MODELS.opus`(0930 = Opus 5.5 · callAIWithFallback `model: 'opus'`)
+- **기존 한줄로AI(문안)** = `AI_MODELS.claude`(0930 = Sonnet 5.5). 모델 문자열을 파일에 적지 않는다 — 되돌림은 .env(CLAUDE_MODEL · CLAUDE_OPUS_MODEL) + 재시작
 - gpt vs gptOperator 분리
 
 ### AI 임의 혜택 금지 (`feedback_ai_no_arbitrary_benefit`)
@@ -767,7 +767,11 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)
 - [ ] 컨트롤타워 (`utils/`) 존재 확인 + 인라인 정의 금지
-- [ ] AI 호출 = 모델 분리 룰 정합 (Opus 4.7 / Sonnet 4.6)
+- [ ] AI 호출 = 모델 분리 룰 정합 (`AI_MODELS` 값 · `claudeRequestShape` 형태 · 모델 문자열 하드코딩 0)
+- [ ] **AI 가 쓰는 문안의 사실은 서버가 다시 본다(지시는 경계가 아니다 · 0930)** — 새로 쓰는 문안 = 근거에 없는 혜택 값은 자리표시로(`replaceInventedBenefits` 값 대조) · 다시 쓰는 문안(다듬기 · 변형 · 꾸미기) = 원문에 없던 숫자가 생기면 버린다(`findNewNumbers`). 불변식 = `prompt-upgrade-0930.test.ts`
+- [ ] **서버가 자리표시를 만드는 순간, 그 자리표시가 나갈 수 있는 발송 길목 전부를 같은 CT로 막는다** — 0930: 캠페인 생성 · 직접발송만 막고 보니 AI 오퍼레이터의 옛 동기 `/direct-send` 와 자동발송 워커(전날 생성 → 수정 없으면 그대로 발송)가 비어 있었다. 길목 목록 = `prepaidDeduct(` grep · 판정 = `send-placeholder-gate` 하나(자리 문구 = "직접 …해주세요" 꼴 + 정확한 문구 목록 · 새 문구는 소스 스캔 테스트가 잡는다)
+- [ ] AI 응답 JSON = `extractJsonFromAiText` 만(불변식 4) · 화면에 글자 그대로 찍히는 자유 답변 = `plainTextFromAi` 출구 · 날짜를 계산하는 프롬프트 = `getKoreanCalendar`(D76)
+- [ ] **err.message 를 화면에 주는 라우트가 많다 → AI 공통 실패 문구에 모델 · 업체 이름 금지**(0930 "Claude + GPT 모두 실패"가 화면에 나갔다 · 불변식 5)
 - [ ] 사용자 노출 영역 (alert/toast/error response/message/throw) 박-단어 grep = 0건
 - [ ] AI 시스템 프롬프트 안 구체 혜택 (%/원/쿠폰) 박지 X 명시
 - [ ] 0건 타겟 = 발송 차단 (자동완화 X)
@@ -778,3 +782,4 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 - [ ] **`console.error` / `console.warn` 진단 의존 X = `console.log` (stdout) 의무 (grep 누락 차단)**
 - [ ] **list API 페이지네이션 `hasNext` 처리 — 첫 페이지만 break X**
 - [ ] **화면이 빈 칸을 서버 파생값에 맡기는 입력(시작 사건만 온 1클릭 생성 등)은 화면이 내보낼 수 있는 값 집합 전부를 그 서버 함수에 한 번씩 통과시키는 테스트 의무** — 0930 여정 V2: 목표 문장 파생 표가 3종뿐이라 지도 [만들기]가 나머지 시작 사건에서 개발용 문구 500(Codex 7라운드를 돈 · DB 쓰기 경로로만 좁혀 이 계약이 대상 밖이었다 · `journey-succession-preset.test.ts` 걸음 테스트)
+- [ ] **대체(fallback) 경로가 있는 생성 함수 = 결과에 실제로 만든 엔진을 싣고, 대체는 빨리 실패한 일시 장애만** — 0930 이미지 엔진 스위치: OpenAI 실패 → Gemini 대체가 결과만으론 구분되지 않아 켜기 전 블라인드 비교가 대체분을 새 엔진 점수로 셀 수 있었다(`GeneratedImage.engine` · 비교 스크립트가 "대체됨" 표시 · 운영 엔진 로그는 화면에서 걷는다). 안전 거부 · 400 · 시간 초과 · 30초 넘은 늦은 실패는 대체하지 않는다(안전 우회 · 대기 두 배)

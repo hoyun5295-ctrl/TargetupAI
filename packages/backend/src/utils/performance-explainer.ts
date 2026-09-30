@@ -13,6 +13,7 @@
  *   - 결과 = 사용자 검토 + 승인 흐름 정합 (AI 단독 발송 X)
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import type { PerformanceSnapshot } from './next-action-advisor';
 
@@ -120,18 +121,8 @@ ${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채
       source: 'performance-explainer',
     });
 
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
+    const parsed: any = extractJsonFromAiText(text);
     return {
       overallScore: typeof parsed.overallScore === 'number' ? Math.max(0, Math.min(100, parsed.overallScore)) : 50,
       topInsight: String(parsed.topInsight || ''),

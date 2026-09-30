@@ -16,6 +16,7 @@
  *    신규 매핑 경로는 반드시 이 CT를 import하여 사용한다.
  */
 
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
 import { FIELD_MAP } from './standard-field-map';
@@ -317,7 +318,7 @@ function parseMappingJson(text: string): Record<string, string | null> {
   try {
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return {};
-    const parsed = JSON.parse(match[0]);
+    const parsed = extractJsonFromAiText(match[0]);
     if (typeof parsed !== 'object' || parsed === null) return {};
     return parsed as Record<string, string | null>;
   } catch {

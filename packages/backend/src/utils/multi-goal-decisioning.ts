@@ -20,6 +20,7 @@
  *   - 모델 분리 #3 — Opus 4.7 영역 (AI Operator 영역, Sonnet 4.6 흐름 영향 0건)
  */
 
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { callAIWithFallback } from '../services/ai';
 
 // ════════════════════════════════════════════════════════════════════
@@ -120,7 +121,7 @@ ${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.descripti
   try {
     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('AI 응답에서 JSON 찾을 수 없음');
-    const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = extractJsonFromAiText(jsonMatch[0]);
     return {
       goals,
       subPlans: (parsed.sub_plans || parsed.subPlans || []).map((sp: any, idx: number) => ({

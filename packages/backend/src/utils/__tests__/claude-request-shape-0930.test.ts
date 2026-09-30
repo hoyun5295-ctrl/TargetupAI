@@ -8,7 +8,9 @@
  *   - 모르는 모델 = 새 모델이 모두 받는 형태(adaptive · temperature 없음)
  */
 import { describe, it, expect } from 'vitest';
-import { AI_MODELS, claudeModelFamily, claudeRequestShape, gptRequestShape, resolveMaxTokens } from '../../config/defaults';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { AI_MODELS, claudeModelFamily, claudeRequestShape, copyThinkingEnabled, gptRequestShape, resolveMaxTokens } from '../../config/defaults';
 
 describe('모델 판정(허용 목록)', () => {
   it('새 모델 · 지금 운영 · 옛 모델 · 모르는 모델을 가른다', () => {
@@ -82,5 +84,39 @@ describe('GPT 대체 = 최신(gpt-6-luna) · temperature 는 옛 계열만(0930 
     expect(gptRequestShape('gpt-4o', { temperature: 0.3 })).toEqual({ temperature: 0.3 });
     expect(gptRequestShape('gpt-4.1-mini', { temperature: 0.2 })).toEqual({ temperature: 0.2 });
     expect(gptRequestShape('gpt-4o')).toEqual({});
+  });
+});
+
+describe('문안 생성 생각하기 스위치(CLAUDE_COPY_THINKING · 0930 Harold 결정 · 기본 꺼짐)', () => {
+  it('값이 없거나 on/1/true/yes 가 아니면 꺼짐 = 지금 동작 그대로', () => {
+    const saved = process.env.CLAUDE_COPY_THINKING;
+    try {
+      delete process.env.CLAUDE_COPY_THINKING;
+      expect(copyThinkingEnabled()).toBe(false);
+      for (const v of ['off', '0', 'false', '', 'enable']) { process.env.CLAUDE_COPY_THINKING = v; expect(copyThinkingEnabled()).toBe(false); }
+      for (const v of ['on', 'ON', '1', 'true', ' yes ']) { process.env.CLAUDE_COPY_THINKING = v; expect(copyThinkingEnabled()).toBe(true); }
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_COPY_THINKING; else process.env.CLAUDE_COPY_THINKING = saved;
+    }
+  });
+  it('켜면 문안 모델은 adaptive(생각) · 끄면 between_tools(0930 실측 형태)', () => {
+    expect(claudeRequestShape('claude-sonnet-5-5', { thinking: true })).toEqual({ thinking: { type: 'adaptive' } });
+    expect(claudeRequestShape('claude-sonnet-5-5', { thinking: undefined })).toEqual({ thinking: { type: 'between_tools' } });
+  });
+  it('생각을 켠 호출은 출력 한도에 생각 토큰 몫(2배 · +4096 중 큰 값)을 더한다 — 끈 호출 한도는 그대로', () => {
+    expect(resolveMaxTokens(2048, 'claude-sonnet-5-5')).toBe(3072);
+    expect(resolveMaxTokens(2048, 'claude-sonnet-5-5', true)).toBe(6144);
+    expect(resolveMaxTokens(2048, 'claude-opus-5-5')).toBe(4096);
+    expect(resolveMaxTokens(4096, 'claude-opus-5-5', true)).toBe(8192);
+    expect(resolveMaxTokens(12000, 'claude-sonnet-5-5', true)).toBe(16000);
+    expect(resolveMaxTokens(2048, 'claude-sonnet-4-5-20250929', true)).toBe(2048);
+  });
+  it('스위치는 기본 · 맞춤 문안 생성에만 · AI Operator(opus) 호출은 따르지 않는다 · 공통 CT 는 thinking 을 한도에 넘긴다', () => {
+    const ai = readFileSync(resolve(process.cwd(), 'src', 'services', 'ai.ts'), 'utf8');
+    expect((ai.match(/copyThinkingEnabled\(\)/g) || []).length).toBe(2);
+    expect(ai).toContain("thinking: extraContext?.model === 'opus' ? undefined : (copyThinkingEnabled() || undefined),");
+    const custom = ai.slice(ai.indexOf('export async function generateCustomMessages('), ai.indexOf('export async function countFilteredCustomers('));
+    expect(custom).toContain('thinking: copyThinkingEnabled() || undefined,');
+    expect(ai).toContain('max_tokens: resolveMaxTokens(params.maxTokens, modelName, params.thinking === true),');
   });
 });

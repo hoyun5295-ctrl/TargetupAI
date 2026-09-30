@@ -13,6 +13,7 @@
  *   - Source caption 의무 (모든 factor에 dataSource 명시)
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 
@@ -287,12 +288,11 @@ priority: high / medium / low
     source: 'inapp-explainer', // ★ D227+ 종량제: 인앱 설명·개선추천 1크레딧
   });
 
-  const jsonText = extractJSON(aiResult || '');
   let parsed: any;
   try {
-    parsed = JSON.parse(jsonText);
+    parsed = extractJsonFromAiText(aiResult || '');   // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지.
   } catch (e: any) {
-    throw new Error(`AI 응답 JSON 파싱 실패: ${e.message}\n응답 앞 300자: ${jsonText.slice(0, 300)}`);
+    throw new Error(`AI 응답 JSON 파싱 실패: ${e.message}\n응답 앞 300자: ${String(aiResult || '').slice(0, 300)}`);
   }
 
   const factors: ImpactFactor[] = Array.isArray(parsed.factors)
@@ -374,16 +374,3 @@ function buildShortAnalysisForLowVolume(
 // 헬퍼
 // ════════════════════════════════════════════════════════════════════
 
-function extractJSON(text: string): string {
-  if (text.includes('```json')) {
-    const start = text.indexOf('```json') + 7;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  if (text.includes('```')) {
-    const start = text.indexOf('```') + 3;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  return text.trim();
-}

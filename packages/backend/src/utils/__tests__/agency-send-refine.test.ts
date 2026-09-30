@@ -56,6 +56,13 @@ describe('다듬은 문안 검사', () => {
     expect(r.reason).toBe('benefit-invented');
   });
 
+  it('원문에 없던 숫자(기한 · 수량 · 시간)를 넣으면 버린다 — 혜택 낱말이 없어도 고객에게는 약속이다 (0930 WP2)', () => {
+    const refined = '[한줄상회] %이름%님, 8월 24일 오후 2시부터 가을 신상품을 소개합니다. 선착순 50분께 드려요. 문의 02-1234-5678 https://hanjul.ai/e/1';
+    const r = checkRefined(ORIGINAL, refined);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('number-invented:50');
+  });
+
   it('원문에 있던 혜택은 그대로 써도 된다', () => {
     const withBenefit = `${ORIGINAL} 전 품목 30% 할인`;
     const refined = `[한줄상회] %이름%님, 8월 24일 오후 2시부터 가을 신상품을 소개합니다. 전 품목 30% 할인. 문의 02-1234-5678 https://hanjul.ai/e/1`;

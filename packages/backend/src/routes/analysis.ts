@@ -1,3 +1,4 @@
+import { extractJsonFromAiText } from '../utils/ai-json';
 import Anthropic from '@anthropic-ai/sdk';
 import { Request, Response, Router } from 'express';
 import * as fs from 'fs';
@@ -267,20 +268,8 @@ ${turn2Insights.map(i => `[${i.title}] ${i.summary}`).join('\n')}
 // 헬퍼: Claude 응답 파싱
 // ============================================================
 function parseClaudeResponse(text: string): AnalysisInsight[] {
-  let jsonStr = text.trim();
-
-  // 마크다운 코드블록 제거
-  if (jsonStr.includes('```json')) {
-    const start = jsonStr.indexOf('```json') + 7;
-    const end = jsonStr.indexOf('```', start);
-    jsonStr = jsonStr.slice(start, end).trim();
-  } else if (jsonStr.includes('```')) {
-    const start = jsonStr.indexOf('```') + 3;
-    const end = jsonStr.indexOf('```', start);
-    jsonStr = jsonStr.slice(start, end).trim();
-  }
-
-  const parsed = JSON.parse(jsonStr);
+  // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
+  const parsed: any = extractJsonFromAiText(text);
   const insights: AnalysisInsight[] = (parsed.insights || []).map((i: any) => ({
     id: i.id || 'unknown',
     category: i.category || 'general',
@@ -326,7 +315,9 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
 
   // 2차: GPT fallback(AI_MODELS.gpt)
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
+    console.error('[AI] Claude 실패 · 대체 경로 키(OPENAI_API_KEY) 미설정');
+    // ★ 2026-09-30 — 이 문구는 여러 라우트가 err.message 로 화면에 그대로 돌려준다. 모델·업체 이름 노출 금지(no_model_name_ui_exposure) · 상세는 위 로그에만.
+    throw new Error('AI 응답이 잠시 지연되고 있어요. 잠시 후 다시 시도해 주세요.');
   }
 
   console.warn('[AI 분석] Claude 전부 실패 → GPT fallback');
@@ -345,7 +336,8 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
     return parseClaudeResponse(text);
   } catch (gptError: any) {
     console.error(`[AI 분석] GPT fallback도 실패:`, gptError.message);
-    throw new Error('AI 서비스 일시 장애 (Claude + GPT 모두 실패)');
+    // ★ 2026-09-30 — 이 문구는 여러 라우트가 err.message 로 화면에 그대로 돌려준다. 모델·업체 이름 노출 금지(no_model_name_ui_exposure) · 상세는 위 로그에만.
+    throw new Error('AI 응답이 잠시 지연되고 있어요. 잠시 후 다시 시도해 주세요.');
   }
 }
 

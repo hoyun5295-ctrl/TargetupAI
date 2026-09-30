@@ -17,7 +17,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { AI_MODELS, claudeRequestShape } from '../config/defaults';
-import { stripUnauthorizedBenefits } from './copy-benefit-detector';
+import { findNewNumbers, stripUnauthorizedBenefits } from './copy-benefit-detector';
 import { recordAiCall } from './ai-rate-limit';
 
 export const AGENCY_REFINE_SOURCE = 'agency-send-refine';
@@ -78,6 +78,10 @@ export function checkRefined(original: string, refined: string): RefineCheck {
   if (stripUnauthorizedBenefits(text, original) !== text) {
     return { ok: false, reason: 'benefit-invented' };
   }
+
+  // ③ 원문에 없던 숫자(★ 2026-09-30 WP2 — "90분 안에" · "3일 한정" 같은 조건은 혜택 낱말 없이도 약속이 된다. 지시 2번을 기계로도 본다)
+  const invented = findNewNumbers(text, original);
+  if (invented.length > 0) return { ok: false, reason: `number-invented:${invented.slice(0, 3).join(',')}` };
 
   return { ok: true };
 }

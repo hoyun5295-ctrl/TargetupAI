@@ -14,7 +14,7 @@ import { sendSystemAlert } from './system-alert';
 import { triggerDirectSendWorker } from './direct-send-worker';
 import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, DirectSendError, type DirectSendSpec } from './direct-send-spec';
 import { logCampaignTraining } from './training-logger';
-import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from './brand-link-core';
+import { findUneditedSendPlaceholder } from './send-placeholder-gate';
 // ★ 2026-07-12 D-2: 야간 광고 발송 제한 — SEND_HOURS 창 밖 광고 접수 거부(순수 판정 CT 재사용)
 import { nightAdRestrictionMessage } from './autosend-policy';
 import { SEND_HOURS } from '../config/defaults';
@@ -219,13 +219,10 @@ export async function createDirectSendCampaign(
 ): Promise<{ campaignId: string; accepted: number }> {
   // ★ 2026-07-02 링크 placeholder 발송 가드 — [링크를 입력해주세요]/{{LINK: 잔존 시 실발송 차단.
   //   직접발송 commit + 자율발송 + DM 공통 길목 (혜택 placeholder 차단과 동일 철학 — 미완성 문안 고객 발송 0).
-  if (hasUneditedLinkPlaceholder(spec.message || '')) {
-    throw new DirectSendError(
-      'LINK_PLACEHOLDER_UNEDITED',
-      `문안에 링크 자리(${LINK_PLACEHOLDER})가 비어 있습니다. 링크 삽입으로 URL을 넣거나 해당 줄을 지운 뒤 발송해주세요.`,
-      400,
-    );
-  }
+  // ★ 2026-09-30 AI 혜택 자리까지 · 제목도(발송 길목 CT send-placeholder-gate · 링크 문구 · 코드는 종전 그대로).
+  //   알림톡 실패 대체문안 · 대체 제목도 고객에게 나가는 글이다(Codex 0930 1R — 이 길목만 본문 · 제목만 보고 있었다).
+  const sendPh = findUneditedSendPlaceholder(spec.message, spec.subject, spec.alimtalkNextContents, spec.alimtalkNextSubject);
+  if (sendPh) throw new DirectSendError(sendPh.code, sendPh.error, 400);
 
   // ★ 2026-07-12 D-2: 야간 광고 발송 제한(정보통신망법) — 광고(adEnabled)는 발송 시각(즉시=지금,
   //   예약=예약 시각 KST)이 발송 가능 창 밖이면 접수 거부. 직접발송·DM 발송·자율발송 공통 길목(1곳 = 전 경로).

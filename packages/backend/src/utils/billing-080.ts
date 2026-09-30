@@ -16,6 +16,7 @@
  *  - creditCost 0 — 슈퍼관리자 내부 운영 기능(biz-registration-extract와 동일).
  */
 
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { createHmac, timingSafeEqual } from 'crypto';
 import pool from '../config/database';
 // ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행과 **같은 두 겹**을 잡아야 반영·취소가 발행을 막는다.
@@ -157,7 +158,7 @@ export function parseKtStatementJson(raw: string): KtStatementParse | null {
     const s = t.indexOf('{');
     const e = t.lastIndexOf('}');
     if (s < 0 || e <= s) return null;
-    const obj = JSON.parse(t.slice(s, e + 1));
+    const obj = extractJsonFromAiText(t.slice(s, e + 1));
     const toInt = (v: any) => {
       const n = Number(String(v ?? '').replace(/[,\s원]/g, ''));
       return Number.isFinite(n) ? Math.round(n) : NaN;

@@ -27,7 +27,7 @@ import sharp from 'sharp';
 import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 import { extractJsonFromAiText } from './ai-json';
-import { findBenefitSpans, stripUnauthorizedBenefits } from './copy-benefit-detector';
+import { findBenefitSpans, findNewNumbers, stripUnauthorizedBenefits } from './copy-benefit-detector';
 import {
   buildSnsCaption, countSnsCaption, findBodyHashtagSpans, findSnsLinkSpans, normalizeSnsTags, snsLinkHost,
   extractBodyHashtags, type SnsCaptionSpec, type SnsTextSpan,
@@ -505,6 +505,10 @@ export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsA
   let out = dropInventedHashtags(restored, original);
   out = stripUnauthorizedBenefits(out, original);
   if (!out.trim()) return { ...unchanged(mode, original, '글을 다듬지 못했어요. 한 번 더 눌러 주세요.'), tags };
+  // ⑤-0 원문에 없던 숫자(★ 2026-09-30 WP2 — 금액 · 링크는 가림 토큰이 지키지만 "3일만" · "선착순 50명" 같은 새 숫자는 못 잡는다)
+  if (findNewNumbers(out, original).length > 0) {
+    return { ...unchanged(mode, original, 'AI가 원래 없던 숫자를 넣으려 해서 넣지 않았어요. 한 번 더 눌러 주세요.'), tags };
+  }
 
   // ⑤ 끝 태그 줄 다시 붙이기(원문 그대로)
   const caption = tail ? `${out.replace(/\s+$/, '')}${tail}` : out;

@@ -8,6 +8,7 @@
  *  - 구체 혜택(%·쿠폰·무료·N원) 생성 금지 — title/objective에 있으면 그 추천 폐기 (feedback_ai_no_arbitrary_benefit)
  *  - 추천 최대 3건 · 신호 없으면 빈 배열(insufficient_data 정직)
  */
+import { extractJsonFromAiText } from './ai-json';   // 순수 CT(import 0) — 이 파일의 "DB 미import" 원칙 유지
 
 export interface BriefSignalOpportunity {
   type: string;
@@ -73,24 +74,10 @@ export function sanitizeBriefRecommendations(
 
 /** AI 응답에서 JSON 오브젝트 안전 추출 — 코드펜스/평문/앞뒤 잡문 허용, 실패 시 null. */
 export function extractJsonObject(text: string): any | null {
-  const t = String(text || '');
-  let jsonStr = t;
-  if (t.includes('```json')) {
-    const start = t.indexOf('```json') + 7;
-    const end = t.indexOf('```', start);
-    jsonStr = end > start ? t.slice(start, end) : t.slice(start);
-  } else if (t.includes('```')) {
-    const start = t.indexOf('```') + 3;
-    const end = t.indexOf('```', start);
-    jsonStr = end > start ? t.slice(start, end) : t.slice(start);
-  } else {
-    const first = t.indexOf('{');
-    const last = t.lastIndexOf('}');
-    if (first === -1 || last <= first) return null;
-    jsonStr = t.slice(first, last + 1);
-  }
+  // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 순수 · import 0 · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 객체만 · 실패 = null(종전 계약).
   try {
-    return JSON.parse(jsonStr.trim());
+    const v = extractJsonFromAiText(String(text || ''));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
   } catch {
     return null;
   }

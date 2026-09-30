@@ -18,6 +18,7 @@
  *   // mappings = [{ source: '이름', target: 'name', confidence: 0.98 }, ...]
  */
 
+import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 
 // ════════════════════════════════════════════════════════════════════
@@ -125,19 +126,6 @@ ${fields}
 \`\`\``;
 }
 
-function extractJSON(text: string): string {
-  if (text.includes('```json')) {
-    const start = text.indexOf('```json') + 7;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  if (text.includes('```')) {
-    const start = text.indexOf('```') + 3;
-    const end = text.indexOf('```', start);
-    return text.slice(start, end).trim();
-  }
-  return text.trim();
-}
 
 // ════════════════════════════════════════════════════════════════════
 // 문안 항목 ↔ 명단 열 추천 (★ 2026-08-25 대행발송 원스텝 · 설계서 §17-6)
@@ -247,7 +235,7 @@ ${limitedSamples.map((row, idx) => `${idx + 1}. ${JSON.stringify(row)}`).join('\
 
   let parsed: any;
   try {
-    parsed = JSON.parse(extractJSON(aiResult || ''));
+    parsed = extractJsonFromAiText(aiResult || '');
   } catch (e: any) {
     throw new ColumnMappingError('AI_RESPONSE_INVALID', `AI 응답 파싱 실패: ${e.message}`);
   }
@@ -288,7 +276,7 @@ ${limitedSamples.map((row, idx) => `${idx + 1}. ${JSON.stringify(row)}`).join('\
 
   let parsed: any;
   try {
-    parsed = JSON.parse(extractJSON(aiResult || ''));
+    parsed = extractJsonFromAiText(aiResult || '');
   } catch (e: any) {
     throw new ColumnMappingError('AI_RESPONSE_INVALID', `AI 응답 파싱 실패: ${e.message}`);
   }

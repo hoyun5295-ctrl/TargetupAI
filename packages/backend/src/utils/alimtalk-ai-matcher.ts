@@ -22,6 +22,7 @@
  *   - 회사 격리 — 본 회사 보유 템플릿만 매트릭스 정독
  */
 
+import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
@@ -280,7 +281,7 @@ ${i + 1}. ID: ${t.id}
   try {
     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('AI 응답에서 JSON 추출 실패');
-    const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = extractJsonFromAiText(jsonMatch[0]);
 
     const matched = parsed.matched === true && parsed.match_score >= 50;
     const bestTemplate = matched && parsed.best_template_id

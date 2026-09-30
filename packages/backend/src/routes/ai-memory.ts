@@ -17,7 +17,7 @@ import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext, listMemories, MemoryType, LEARNING_MEMORY_TYPES } from '../utils/company-memory';
 import { fetchBrandGuideline, recordToneEvolution } from '../utils/brand-tone-evolution';
 import { scanLinkHabit, type LinkHabit } from '../utils/brand-link-core';
-import { extractJsonFromAiText } from '../utils/ai-json';
+import { extractJsonFromAiText, plainTextFromAi } from '../utils/ai-json';
 
 const router = Router();
 router.use(authenticate);
@@ -188,7 +188,7 @@ ${memoryContext}
 1. 위에 제공된 "회사 메모리" 안에 명시된 사실만 근거로 답변하세요.
 2. 메모리에 없는 정보는 추측하거나 만들어내지 마세요. 근거가 부족하면 "아직 학습 데이터가 부족합니다"라고 솔직히 답변하세요.
 3. **구체 혜택(%, 원, 무료, 쿠폰, 사은품, 할인, 적립)을 절대 임의로 생성하지 마세요.** 회사가 직접 설정한 정책만 인용 가능하며, 메모리에 없는 혜택은 추측하지 마세요.
-4. 답변은 한국어 3~6문장으로 간결하게 작성하세요. 불릿 리스트 사용 가능.
+4. 답변은 한국어 3~6문장으로 간결하게 작성하세요. 화면에 글자 그대로 보이므로 굵은 글씨(**) · 머리글(#) · 표 같은 마크다운 기호는 쓰지 않는다. 목록이 필요하면 줄마다 "· "로 시작한다.
 5. 답변 마지막에 어떤 메모리를 참고했는지 한 줄 요약 (예: "참고: 성공 패턴 3건 / 채널 성과 2건").
 
 ## 답변 톤
@@ -226,7 +226,7 @@ ${memoryContext}
 
     return res.json({
       success: true,
-      answer,
+      answer: plainTextFromAi(answer),   // ★ 2026-09-30 WP6 — 마크다운 기호 출구 정리(화면 = whitespace-pre-wrap 글자 그대로)
       related_memories: related,
       no_data: false,
     });

@@ -15,6 +15,12 @@
 import { callAIWithFallback } from '../services/ai';
 import { sanitizeForSms } from './message-sanitizer';
 import { extractJsonFromAiText } from './ai-json';
+import { findInventedBenefits, findNewNumbers } from './copy-benefit-detector';
+
+/** ★ 2026-09-30 WP2 — 꾸미기는 변수만 녹인다. 원문에 없던 숫자 · 혜택 값이 생겼는가(지시는 확률적 · 서버가 다시 본다). */
+function decoratedAddsFacts(decorated: string, original: string): boolean {
+  return findNewNumbers(decorated, original).length > 0 || findInventedBenefits(decorated, original).length > 0;
+}
 
 export interface DecorateMessageInput {
   companyId: string;
@@ -75,6 +81,7 @@ export async function decorateOperatorMessage(input: DecorateMessageInput): Prom
 
   const cleaned = String(text || '').trim();
   if (!cleaned) throw new Error('AI 꾸미기 결과가 비어 있습니다. 다시 시도해주세요.');
+  if (decoratedAddsFacts(cleaned, message)) throw new Error('원문에 없는 숫자나 혜택이 생겨 적용하지 않았어요. 다시 눌러 주세요.');
   return sanitizeForSms(cleaned.slice(0, 2000)).sanitized;
 }
 
@@ -139,7 +146,9 @@ export async function decorateOperatorMessages(
   }
   return msgs.map((orig, i) => {
     const cand = Array.isArray(arr) ? arr[i] : undefined;
-    const decorated = typeof cand === 'string' && cand.trim().length >= 5 ? cand.trim() : orig;
+    // ★ 2026-09-30 WP2 — 원문에 없던 숫자 · 혜택 값이 생긴 문안은 원문 유지(파싱 실패와 같은 처리 · 발송 영향 0)
+    const ok = typeof cand === 'string' && cand.trim().length >= 5 && !decoratedAddsFacts(cand.trim(), orig);
+    const decorated = ok ? (cand as string).trim() : orig;
     return sanitizeForSms(decorated.slice(0, 2000)).sanitized;
   });
 }

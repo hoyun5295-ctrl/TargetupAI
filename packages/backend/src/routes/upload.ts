@@ -1,3 +1,4 @@
+import { extractJsonFromAiText } from '../utils/ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { Request, Response, Router } from 'express';
 import fs from 'fs';
 import multer from 'multer';
@@ -243,7 +244,7 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
       console.warn(`[AI 매핑] Claude 실패 (${claudeErr.message}) → gpt fallback`);
 
       // 2차: gpt fallback
-      if (!process.env.OPENAI_API_KEY) throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
+      if (!process.env.OPENAI_API_KEY) { console.error('[AI] Claude 실패 · 대체 경로 키(OPENAI_API_KEY) 미설정'); throw new Error('AI 응답이 잠시 지연되고 있어요. 잠시 후 다시 시도해 주세요.'); }   // ★ 2026-09-30 — 이 문구는 여러 라우트가 err.message 로 화면에 그대로 돌려준다. 모델·업체 이름 노출 금지(no_model_name_ui_exposure) · 상세는 위 로그에만.
       const gptResponse = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -258,9 +259,10 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
       });
       const gptResult: any = await gptResponse.json();
       // ★ 2026-07-06 폴백 응답 검증 — 오류/빈 응답인데 "성공" 로그를 찍고 빈 매핑을 내보내던 위장 성공 제거 (6원칙 ②)
-      if (gptResult.error) throw new Error(`gpt fallback 실패: ${gptResult.error.message || 'API error'}`);
+      // ★ 2026-09-30 — /mapping 은 error.message 를 화면에 그대로 돌려준다. 업체 이름 · 외부 오류 원문은 로그에만(no_model_name_ui_exposure)
+      if (gptResult.error) { console.error(`[AI 매핑] gpt fallback 실패: ${gptResult.error.message || 'API error'}`); throw new Error('AI 응답이 잠시 지연되고 있어요. 잠시 후 다시 시도해 주세요.'); }
       aiText = gptResult.choices?.[0]?.message?.content || '';
-      if (!aiText.trim()) throw new Error('gpt fallback 응답 비어 있음');
+      if (!aiText.trim()) { console.error('[AI 매핑] gpt fallback 응답 비어 있음'); throw new Error('AI 응답이 잠시 지연되고 있어요. 잠시 후 다시 시도해 주세요.'); }
       console.log('[AI 매핑] gpt fallback 성공');
     }
 
@@ -268,7 +270,7 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
     try {
       const jsonMatch = aiText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        mapping = JSON.parse(jsonMatch[0]);
+        mapping = extractJsonFromAiText(jsonMatch[0]);
       }
     } catch (e) {
       console.error('AI 응답 파싱 실패:', aiText);
