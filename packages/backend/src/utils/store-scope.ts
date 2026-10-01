@@ -23,6 +23,63 @@ export function buildCustomerStoreFilterLiteral(companyId: string, storeCodes: s
   return ` AND ${col} IN (SELECT customer_id FROM customer_stores WHERE company_id = ${escapeLiteral(String(companyId))} AND store_code = ANY(ARRAY[${codes}]::text[]))`;
 }
 
+/**
+ * ★ 2026-10-01 브랜드(분류코드) 소속 조건 — 파라미터 바인딩 자리용. 소속의 진실은 customer_stores 다(SCHEMA customers 절 0814 정정).
+ *   고객 행 `customers.store_code` 는 자사몰 연동 고객에서 비어 있다(cdp-identity 가 채우지 않는다) → 그 칸으로 거르면 몰 고객이 전부 빠졌다
+ *   (박성용 접수 cmuozso84 · 이에스페이먼트 428,962명 전원 빈 칸). 브랜드로 거르는 자리는 이 함수만 쓴다(인라인 금지).
+ *   고객은 폰당 1행(customers_company_id_phone_key)이라 업로드 회사의 다매장 고객도 옛 칸에는 브랜드 하나만 있다 → 소속 표로 보면 그 고객이
+ *   소속된 모든 브랜드에 잡힌다(넓어짐). 옛 칸에만 있고 같은 코드 소속 행이 없는 고객 = 전 회사 0명(1001 실측) → 빠지는 고객 없음.
+ * @param idCol          고객 id 열(별칭 포함 · 예: 'c.id' · 'id' · 'p.customer_id')
+ * @param companyRef     회사 id 자리표(예: '$1')
+ * @param codeRef        분류코드 자리표(예: '$3') — many 면 text[] 배열
+ * @param requireConsent 몰 동의 발송(mall-consent buildSendConsent mode=mall)일 때 true — 브랜드 소속과 그 브랜드의 동의를 **같은 소속 행**에서 본다.
+ *                       없으면 범위 [A,B] 계정이 A 를 고를 때 A 거부·B 동의 고객이 범위 조각의 B 동의로 통과한다(Codex 1001 R1 high).
+ *                       별칭 한정(mcs) = mall-consent 0922 R1 규칙 — 동의 컬럼이 없는 환경에서 바깥 customers.sms_opt_in 으로 새지 않고 42703 으로 드러난다.
+ */
+export interface StoreMembershipOpts { idCol: string; companyRef: string; codeRef: string; many?: boolean; requireConsent?: boolean }
+export function storeMembershipCond(opts: StoreMembershipOpts): string {
+  const code = opts.many ? `ANY(${opts.codeRef}::text[])` : opts.codeRef;
+  if (opts.requireConsent) {
+    return `${opts.idCol} IN (SELECT mcs.customer_id FROM customer_stores mcs WHERE mcs.company_id = ${opts.companyRef} AND mcs.store_code = ${code} AND mcs.sms_opt_in = true)`;
+  }
+  return `${opts.idCol} IN (SELECT customer_id FROM customer_stores WHERE company_id = ${opts.companyRef} AND store_code = ${code})`;
+}
+/** storeMembershipCond 앞에 ' AND ' 를 붙인 WHERE 덧붙임 조각 */
+export function storeMembershipClause(opts: StoreMembershipOpts): string {
+  return ` AND ${storeMembershipCond(opts)}`;
+}
+
+/**
+ * ★ 2026-10-01 범위 안 고객 중 소속 행이 하나라도 있는가 — 활성 필드 탐지(CT-18)의 매장코드 판정용.
+ *   자사몰 연동 회사는 고객 행 store_code 가 전부 비어 고객 행 칸만 세면 매장코드 필드가 꺼졌다(B-1001-3 · Codex R1 medium).
+ * @param scopeWhere customers 기준 WHERE 조각(별칭 없음 · 예: 'company_id = $1 AND is_active = true')
+ * @param scopeParams 그 조각의 파라미터 — 회사 id 는 맨 뒤 자리로 덧붙인다(소속 표 회사 인덱스 idx_cs_company_store)
+ */
+export async function hasStoreMembershipInScope(companyId: string, scopeWhere: string, scopeParams: any[]): Promise<boolean> {
+  const r = await query(
+    `SELECT EXISTS (SELECT 1 FROM customer_stores cs WHERE cs.company_id = $${scopeParams.length + 1} AND cs.customer_id IN (SELECT id FROM customers WHERE ${scopeWhere})) AS has`,
+    [...scopeParams, companyId],
+  );
+  return r.rows[0]?.has === true;
+}
+
+/**
+ * ★ 2026-10-01 범위 안 고객의 소속 분류코드 목록(가나다순 · 최대 100) SQL — 활성 필드 드롭다운 옵션(CT-18)의 매장코드용.
+ *   결과 열 이름 = store_code. 파라미터 = [...scopeParams, companyId].
+ */
+export function storeMembershipCodesSql(scopeWhere: string, scopeParamCount: number): string {
+  return `SELECT DISTINCT cs.store_code FROM customer_stores cs WHERE cs.company_id = $${scopeParamCount + 1} AND cs.store_code <> '' AND cs.customer_id IN (SELECT id FROM customers WHERE ${scopeWhere}) ORDER BY cs.store_code LIMIT 100`;
+}
+
+/**
+ * ★ 2026-10-01 화면·엑셀의 「매장코드」 = 고객 행 값이 있으면 그것 · 없으면 소속 표의 코드들(쉼표로 · 가나다순).
+ *   자사몰 연동 고객은 고객 행 값이 비어 매장코드가 빈칸으로 보였다(cmuozso84 관련).
+ * @param alias 고객 행 별칭(예: 'customers_unified' · 'c') — company_id · id · store_code 열이 있어야 한다
+ */
+export function storeCodeDisplayExpr(alias: string): string {
+  return `COALESCE(NULLIF(${alias}.store_code, ''), (SELECT string_agg(cs.store_code, ', ' ORDER BY cs.store_code) FROM customer_stores cs WHERE cs.company_id = ${alias}.company_id AND cs.customer_id = ${alias}.id))`;
+}
+
 export type StoreScopeResult =
   | { type: 'no_filter' }           // 브랜드 체계 없음 → company_id 전체
   | { type: 'filtered'; storeCodes: string[] }  // 브랜드 체계 있음 + 할당됨

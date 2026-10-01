@@ -90,14 +90,12 @@ const blockItem = (key: string, label?: string): MakePaletteItem | null => {
 };
 
 /**
- * DM 팔레트 — 블록 조립 CT(DM_BLOCKS) 그대로 + 머리 + 사진 모음. 참여형은 한 칸으로 묶고 누르면 펼친다.
- * ★ 2026-10-01 머리(로고 · 브랜드 이름) — 만들기 개편(0927)에서 팔레트가 DM_BLOCKS 기반으로 바뀌며 빠졌다(이메일 팔레트엔 있음 · 남지현 접수 cmungizf9).
- *   이메일 팔레트와 같은 이름·아이콘(LIST_LABEL · SECTION_META). 한 쪽에 1개 상한은 스토어 addSection 이 지킨다.
+ * DM 팔레트 — 블록 조립 CT(DM_BLOCKS) 그대로 + 사진 모음. 참여형은 한 칸으로 묶고 누르면 펼친다.
+ * ★ 2026-10-01 머리는 원장(DM_BLOCKS 시작 묶음)에서 온다 — 블록으로 만들기 첫 화면과 같은 출처(남지현 cmungizf9 재오픈).
  */
 export function dmPaletteItems(): { main: MakePaletteItem[]; interaction: MakePaletteItem[] } {
   const main = [
-    { key: 'header', label: LIST_LABEL.header as string, icon: SECTION_META.header?.icon || '🏷️', section: 'header' as SectionType },
-    blockItem('headline'), blockItem('text', '설명 글'), blockItem('products', '상품'), blockItem('cta'),
+    blockItem('header'), blockItem('headline'), blockItem('text', '설명 글'), blockItem('products', '상품'), blockItem('cta'),
     blockItem('linkchip', '링크 모음'),
     { key: 'gallery', label: '사진 모음', icon: '🖼️', section: 'gallery' as SectionType },
     blockItem('video'), blockItem('coupon'), blockItem('countdown', '남은 시간'), blockItem('reviews', '후기'),

@@ -10,7 +10,7 @@ import { journeyRowActionPlan, journeyRowActionLabel, JOURNEY_STATUS_LABEL, type
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { goBackOr } from '../lib/scroll-restoration';
+import { goUpTo } from '../lib/scroll-restoration';
 import {
   ArrowLeft, ChevronDown, ChevronUp, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
@@ -1993,7 +1993,7 @@ export default function JourneysPage() {
   const scopeTotal = journeyScope.availableCount + journeyScope.lockedCount;
   const backFromView = () => (view !== 'main'
     ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); setStudioIdx(0); setBenefitText(''); } })
-    : goBackOr(navigate, '/ai-operator'));
+    : goUpTo(navigate, '/ai-operator')); // ★ 2026-10-01 첫 화면 ← = 항상 허브(머리 부품과 같은 규칙)
 
   return (
     <ZoneFrame

@@ -211,7 +211,7 @@ export default function QuickCampaignLegacyPage() {
 
   // ★ 2026-09-30 AI 존 대개편: 옛 원클릭 캠페인(신규 기능 미개방 회사) = 만들기 메뉴 같은 머리
   return (
-    <ZoneFrame moduleId="make" sub="원클릭 캠페인">
+    <ZoneFrame moduleId="make" sub="원클릭 캠페인" backTo="/dm-builder">
       <div className="space-y-5">
         {/* ★ v3 재료 페이지 — 브랜드 줄 · 행사 카드 목록 · 하단 바 */}
         {enabled && (

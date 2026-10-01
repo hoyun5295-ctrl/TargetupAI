@@ -14,7 +14,7 @@ import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { renderFieldValue } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
-import { getStoreScope, getOwnerCustomerScopeSql } from '../utils/store-scope';
+import { getStoreScope, getOwnerCustomerScopeSql, storeMembershipClause, storeMembershipCond, storeCodeDisplayExpr } from '../utils/store-scope';
 import {
   buildExtractSelect, buildKeptSelect, flattenExtractRow, keepExtraction, readExtractionState, searchExtraction, readExtractionRows,
   removeFromExtraction, fillExtractionCallback, resolveExtractionScope,
@@ -89,7 +89,7 @@ router.get('/', async (req: Request, res: Response) => {
       const fuResult = await query('SELECT store_codes FROM users WHERE id = $1 AND company_id = $2', [filterUserId, companyId]);
       const fuStoreCodes = fuResult.rows[0]?.store_codes;
       if (fuStoreCodes && fuStoreCodes.length > 0) {
-        whereClause += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        whereClause += storeMembershipClause({ idCol: 'id', companyRef: '$1', codeRef: `$${paramIndex++}`, many: true });
         params.push(fuStoreCodes);
       } else {
         // store_codes 미지정 사용자 → 해당 사용자가 업로드한 고객으로 폴백
@@ -101,7 +101,8 @@ router.get('/', async (req: Request, res: Response) => {
     // ★ 브랜드(store_code) 필터 — 고객사관리자/슈퍼관리자가 특정 브랜드만 조회
     const filterStoreCode = req.query.filterStoreCode as string;
     if (filterStoreCode && (userType === 'company_admin' || userType === 'super_admin')) {
-      whereClause += ` AND store_code = $${paramIndex++}`;
+      // ★ 2026-10-01 소속 표 기준(고객 행 store_code 는 자사몰 연동 고객에서 비어 있다 · cmuozso84)
+      whereClause += storeMembershipClause({ idCol: 'id', companyRef: '$1', codeRef: `$${paramIndex++}` });
       params.push(filterStoreCode);
     }
 
@@ -175,7 +176,7 @@ if (smsOptIn === 'true') {
     params.push(Number(limit), offset);
     const result = await query(
       `SELECT id, name, phone, gender, TO_CHAR(birth_date, 'YYYY-MM-DD') as birth_date, age, email, address, grade, region, points,
-              store_code, store_name, registered_store, recent_purchase_store,
+              ${storeCodeDisplayExpr('customers_unified')} AS store_code, store_name, registered_store, recent_purchase_store,
               store_phone, registration_type,
               recent_purchase_amount, purchase_count,
               CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubCaseIdx} AND u.phone = customers_unified.phone)
@@ -261,7 +262,7 @@ router.get('/download', async (req: Request, res: Response) => {
       const fuResult = await query('SELECT store_codes FROM users WHERE id = $1 AND company_id = $2', [filterUserId, companyId]);
       const fuStoreCodes = fuResult.rows[0]?.store_codes;
       if (fuStoreCodes && fuStoreCodes.length > 0) {
-        scopeWhere += ` AND store_code = ANY($${paramIndex++}::text[])`;
+        scopeWhere += storeMembershipClause({ idCol: 'id', companyRef: '$1', codeRef: `$${paramIndex++}`, many: true });
         scopeParams.push(fuStoreCodes);
       } else {
         scopeWhere += ` AND uploaded_by = $${paramIndex++}`;
@@ -272,7 +273,7 @@ router.get('/download', async (req: Request, res: Response) => {
     // 브랜드(store_code) 필터
     const filterStoreCode = req.query.filterStoreCode as string;
     if (filterStoreCode && (userType === 'company_admin' || userType === 'super_admin')) {
-      scopeWhere += ` AND store_code = $${paramIndex++}`;
+      scopeWhere += storeMembershipClause({ idCol: 'id', companyRef: '$1', codeRef: `$${paramIndex++}` });
       scopeParams.push(filterStoreCode);
     }
 
@@ -1614,7 +1615,7 @@ router.get('/purchases/overview', async (req: Request, res: Response) => {
       const fu = await query('SELECT store_codes FROM users WHERE id = $1 AND company_id = $2', [filterUserId, companyId]);
       const fuStores = fu.rows[0]?.store_codes;
       if (fuStores && fuStores.length > 0) {
-        where.push(`c.store_code = ANY($${idx}::text[])`);
+        where.push(storeMembershipCond({ idCol: 'p.customer_id', companyRef: '$1', codeRef: `$${idx}`, many: true }));
         params.push(fuStores);
         idx++;
       } else {

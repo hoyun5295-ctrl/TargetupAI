@@ -15,7 +15,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { getStoreScope } from '../utils/store-scope';
+import { getStoreScope, storeMembershipClause } from '../utils/store-scope';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { buildUnsubscribeFilter, CAMPAIGN_OPT080_SELECT_EXPR, buildCampaignOpt080LeftJoin } from '../utils/unsubscribe-helper';
 import { fetchTargetSampleCustomer } from '../utils/target-sample';
@@ -441,7 +441,7 @@ async function _deprecatedCreateAutoCampaign(req: Request, res: Response) {
         let storeFilter = '';
         const storeParams: any[] = [];
         if (finalStoreCode) {
-          storeFilter = ` AND c.store_code = $${filterResult.nextIndex}`;
+          storeFilter = storeMembershipClause({ idCol: 'c.id', companyRef: '$1', codeRef: `$${filterResult.nextIndex}` });
           storeParams.push(finalStoreCode);
         }
         const unsubParamIdx = filterResult.nextIndex + storeParams.length;
@@ -929,7 +929,7 @@ router.post('/:id/preview', async (req: Request, res: Response) => {
     let storeFilter = '';
     const storeParams: any[] = [];
     if (campaign.store_code) {
-      storeFilter = ` AND c.store_code = $${filterResult.nextIndex}`;
+      storeFilter = storeMembershipClause({ idCol: 'c.id', companyRef: '$1', codeRef: `$${filterResult.nextIndex}` });
       storeParams.push(campaign.store_code);
     }
 

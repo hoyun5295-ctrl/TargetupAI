@@ -625,22 +625,30 @@ router.post('/', async (req: Request, res: Response) => {
     // ★ B17-01 수정: 타겟 인원 계산 (sms_opt_in + 수신거부 제외 — user_id 기준)
     let targetCount = 0;
     if (targetFilter) {
-      const filterQuery = buildFilterQueryCompat(targetFilter, companyId);
       // ★ 2026-09-22 세는 곳 = 보내는 곳: 발송(POST /:id/send)과 같은 분류 범위·같은 동의 조각으로 센다.
       //   관리자·분류 체계 없는 회사는 조각이 비어 SQL·파라미터가 종전과 같다. blocked(미배정)는 발송이 403 이므로 0 으로 센다.
-      let countStoreFilter = '';
+      // ★ 2026-10-01 범위·몰 동의 판정을 타겟 필터보다 먼저 구한다 — 몰 동의면 타겟의 브랜드 조건도 그 브랜드 소속 행의 동의로 본다(같은 행).
+      //   범위 [A,B] 계정이 A 를 고를 때 A 거부·B 동의 고객이 범위 조각의 B 동의로 통과하던 경로 차단(B-1001-3 · Codex R1 high).
       const countStoreParams: any[] = [];
+      let countBlocked = false;
       if (req.user?.userType === 'company_user' && userId) {
         const countScope = await getStoreScope(companyId, userId);
         if (countScope.type === 'filtered') {
-          countStoreFilter = ` AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($${1 + filterQuery.params.length + 1}::text[]))`;
           countStoreParams.push(countScope.storeCodes);
         } else if (countScope.type === 'blocked') {
-          countStoreFilter = ' AND FALSE';
+          countBlocked = true;
         }
       }
+      const countEnforce = countStoreParams.length > 0 && (await resolveSendConsent(companyId, countStoreParams[0]));
+      const filterQuery = buildFilterQueryCompat(targetFilter, companyId, { storeConsent: countEnforce });
+      let countStoreFilter = '';
+      if (countStoreParams.length > 0) {
+        countStoreFilter = ` AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($${1 + filterQuery.params.length + 1}::text[]))`;
+      } else if (countBlocked) {
+        countStoreFilter = ' AND FALSE';
+      }
       const countConsent = buildSendConsent({
-        enforce: countStoreParams.length > 0 && (await resolveSendConsent(companyId, countStoreParams[0])),
+        enforce: countEnforce,
         alias: 'c',
         storeFilter: countStoreFilter,
       });
@@ -892,7 +900,10 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     // 타겟 고객 조회
     const targetFilter = campaign.target_filter;
     console.log('targetFilter:', JSON.stringify(targetFilter, null, 2));
-    const filterQuery = buildFilterQueryCompat(targetFilter, companyId);
+    // ★ 2026-10-01 범위·몰 동의 판정을 타겟 필터보다 먼저 구한다 — 몰 동의면 타겟의 브랜드 조건도 그 브랜드 소속 행의 동의로 본다(같은 행).
+    //   범위 [A,B] 계정이 A 를 고를 때 A 거부·B 동의 고객이 범위 조각의 B 동의로 통과하던 경로 차단(B-1001-3 · Codex R1 high).
+    const sendEnforce = storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0]));
+    const filterQuery = buildFilterQueryCompat(targetFilter, companyId, { storeConsent: sendEnforce });
     console.log('filterQuery:', filterQuery);
 
     // store_code 필터 인덱스 계산
@@ -901,7 +912,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     //   ENV 로 켠 몰 동의 회사의 분류코드 사용자 발송만 "그 몰의 소속 행 동의"로 자격을 본다(고객 행 sms_opt_in 퇴역 · 모름 = 제외).
     //   그 밖(관리자 · ENV 꺼짐 · 무분류 회사)은 조각이 옛 문자열과 같다.
     const sendConsent = buildSendConsent({
-      enforce: storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0])),
+      enforce: sendEnforce,
       alias: 'c',
       storeFilter,
     });
@@ -3308,28 +3319,33 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     // draft 상태이거나 MySQL에 데이터 없으면 PostgreSQL customers에서 조회
     if (camp.status === 'scheduled' || camp.status === 'draft') {
       const targetFilter = camp.target_filter || {};
-      const filterQuery = buildFilterQueryCompat(targetFilter, companyId);
       const excludedPhones = camp.excluded_phones || [];
 
       // store_codes 필터
       // ★ B16-01: store_codes 없는 company_user → 빈 결과
       // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
+      // ★ 2026-10-01 범위·몰 동의 판정을 타겟 필터보다 먼저 구한다 — 몰 동의면 타겟의 브랜드 조건도 그 브랜드 소속 행의 동의로 본다(같은 행).
+      //   범위 [A,B] 계정이 A 를 고를 때 A 거부·B 동의 고객이 범위 조각의 B 동의로 통과하던 경로 차단(B-1001-3 · Codex R1 high).
       let storeFilter = '';
       let storeParams: any[] = [];
       if (userType === 'company_user' && userId) {
         const scope = await getStoreScope(companyId, userId);
         if (scope.type === 'filtered') {
-          const storeIdx = 1 + filterQuery.params.length + 1;
-          storeFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${storeIdx}::text[]))`;
           storeParams = [scope.storeCodes];
         } else if (scope.type === 'blocked') {
           return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
         }
       }
+      const previewEnforce = storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0]));
+      const filterQuery = buildFilterQueryCompat(targetFilter, companyId, { storeConsent: previewEnforce });
+      if (storeParams.length > 0) {
+        const storeIdx = 1 + filterQuery.params.length + 1;
+        storeFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${storeIdx}::text[]))`;
+      }
 
       // ★ 2026-09-22 발송(POST /:id/send)과 같은 동의 조각 — 세는 곳·뽑는 곳·보내는 곳이 같은 자격을 본다
       const previewConsent = buildSendConsent({
-        enforce: storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0])),
+        enforce: previewEnforce,
         alias: 'c',
         storeFilter,
       });

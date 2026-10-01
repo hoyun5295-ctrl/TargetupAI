@@ -108,6 +108,12 @@ export async function syncCustomerOptIn(companyId: string, phones: string[], opt
  * @param source     등록 경로 ('sync', 'db_upload' 등)
  * @returns 실제 INSERT된 총 건수
  */
+// ★ 2026-10-01 이 자리는 고객 행 store_code 를 일부러 그대로 쓴다(브랜드 판단을 소속 표로 바꾼 cmuozso84 에서 제외).
+//   여기는 고객 행 수신동의 거부(sms_opt_in=false)를 계정별 영구 수신거부 명부로 옮겨 적는 쓰기다. 자사몰 회사는 고객 행 브랜드 칸이 비어 있고
+//   신규 고객 행을 sms_opt_in=false 로 만든다(cdp-identity 4단계 · 몰 동의의 진실 = 소속 행 · D93). 소속 표로 넓히면 그 회사 고객 대부분이
+//   브랜드 계정의 영구 수신거부로 복사되고 몰이 다시 동의해도 풀리지 않는다.
+//   남은 틈(추가 과제 · BUGS B-1001-4): 고객은 폰당 1행이라 업로드·싱크 회사의 다매장 고객은 고객 행 칸에 브랜드 하나만 있어 나머지 브랜드
+//   계정에는 등록되지 않는다. 소속 행만으로는 몰 행과 업로드 행을 가를 수 없어(consent_source 는 동의값이 온 몰 행에만 찍힌다) 정책 결정이 먼저다.
 export async function registerBulkCompanyUserUnsubscribes(
   companyId: string,
   source: string,
@@ -130,6 +136,7 @@ export async function registerBulkCompanyUserUnsubscribes(
                            WHERE cs.company_id = $1
                              AND cs.store_code = ANY(u.store_codes)))
          OR
+         -- ★ 2026-10-01 고객 행 store_code 를 일부러 그대로 쓴다 — 함수 머리 주석(D93) 참조
          (u.store_codes IS NOT NULL AND array_length(u.store_codes, 1) > 0
           AND c.store_code = ANY(u.store_codes)
           AND EXISTS (SELECT 1 FROM customer_stores cs

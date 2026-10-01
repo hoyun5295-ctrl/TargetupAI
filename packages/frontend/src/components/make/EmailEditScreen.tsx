@@ -121,39 +121,54 @@ export default function EmailEditScreen({
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(initialId ? Date.now() : null);
   const canSave = !!name.trim() && !!subject.trim() && sections.length > 0;
+  // ★ 2026-10-01 저장은 한 번에 하나 — 앞 저장(자동 저장·나가기)이 가는 중이면 끝나기를 기다린 뒤 지금 내용으로 저장한다.
+  //   새 메일은 앞 저장이 받은 id(campaignIdRef)로 수정한다 — 전에는 둘 다 새로 만들어 같은 메일이 두 건 생길 수 있었다.
+  const campaignIdRef = useRef<string | null>(campaignId || null);
+  campaignIdRef.current = campaignId || campaignIdRef.current; // 화면 상태가 우선 · 상태가 아직 안 따라온 사이(새로 만든 직후)만 ref 값
+  const inflight = useRef<Promise<string | null> | null>(null);
   const persist = useCallback(async (): Promise<string | null> => {
+    while (inflight.current) { try { await inflight.current; } catch { /* 앞 저장 실패는 아래에서 다시 시도 */ } }
     if (!canSave) return null;
-    const body: any = { name: name.trim(), subject: subject.trim(), is_ad: isAd, sections };
-    if (design) body.design = design;
-    else if (initialDesign) body.design = null;
-    if (!campaignId && aiGenerated) body.ai_generated = true;
-    const snap = JSON.stringify({ name, subject, isAd, sections, design });
-    setSaving(true);
-    try {
-      const r = await fetch(campaignId ? `/api/email/campaigns/${campaignId}` : '/api/email/campaigns', { method: campaignId ? 'PATCH' : 'POST', headers: authHeaders(), body: JSON.stringify(body) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || !d?.success) { setSaveErr(d?.error || '저장하지 못했어요.'); return null; }
-      const id = String(campaignId || d.campaign?.id || '');
-      if (!campaignId && id) setCampaignId(id);
-      savedSnap.current = snap;
-      setSaveErr(null);
-      setSavedAt(Date.now());
-      onSaved();
-      return id || null;
-    } catch (e: any) {
-      setSaveErr(e?.message || '저장하지 못했어요.');
-      return null;
-    } finally {
-      setSaving(false);
-    }
-  }, [canSave, name, subject, isAd, sections, design, initialDesign, campaignId, aiGenerated, authHeaders, onSaved]);
+    const run = (async (): Promise<string | null> => {
+      const cid = campaignIdRef.current;
+      const body: any = { name: name.trim(), subject: subject.trim(), is_ad: isAd, sections };
+      if (design) body.design = design;
+      else if (initialDesign) body.design = null;
+      if (!cid && aiGenerated) body.ai_generated = true;
+      const snap = JSON.stringify({ name, subject, isAd, sections, design });
+      setSaving(true);
+      try {
+        const r = await fetch(cid ? `/api/email/campaigns/${cid}` : '/api/email/campaigns', { method: cid ? 'PATCH' : 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d?.success) { setSaveErr(d?.error || '저장하지 못했어요.'); return null; }
+        const id = String(cid || d.campaign?.id || '');
+        if (!cid && id) { campaignIdRef.current = id; setCampaignId(id); }
+        savedSnap.current = snap;
+        setSaveErr(null);
+        setSavedAt(Date.now());
+        onSaved();
+        return id || null;
+      } catch (e: any) {
+        setSaveErr(e?.message || '저장하지 못했어요.');
+        return null;
+      } finally {
+        setSaving(false);
+      }
+    })();
+    inflight.current = run;
+    try { return await run; } finally { if (inflight.current === run) inflight.current = null; }
+  }, [canSave, name, subject, isAd, sections, design, initialDesign, aiGenerated, authHeaders, onSaved]);
   useEffect(() => {
     if (!dirty || !canSave || saving) return;
     const t = setTimeout(() => { void persist(); }, 1500);
     return () => clearTimeout(t);
   }, [dirty, canSave, saving, persist, snapStr]);
 
-  const save: { tone: SaveTone; text: string; onSaveNow?: () => void } = saving ? { tone: 'saving', text: '저장하는 중' }
+  // ★ 2026-10-01 나가는 중 = 누른 것이 보이게(저장이 끝나야 닫힌다) · 다시 눌러도 한 번만 처리
+  const [leaving, setLeaving] = useState(false);
+  const leavingRef = useRef(false);
+  const save: { tone: SaveTone; text: string; onSaveNow?: () => void } = leaving ? { tone: 'saving', text: '저장하고 나가는 중' }
+    : saving ? { tone: 'saving', text: '저장하는 중' }
     : saveErr ? { tone: 'error', text: saveErr, onSaveNow: () => { void persist(); } }
       : !subject.trim() ? { tone: 'manual', text: '받은편지함 제목을 넣으면 자동 저장돼요' }
         : sections.length === 0 ? { tone: 'manual', text: '블록을 하나 넣으면 자동 저장돼요' }
@@ -161,8 +176,20 @@ export default function EmailEditScreen({
             : { tone: 'saved', text: savedAt ? '자동 저장됨' : '저장 전' };
 
   const leave = () => {
+    if (leavingRef.current) return;
     if (!dirty) { onClose(); return; }
-    if (canSave) { void persist().then(() => onClose()); return; }
+    if (canSave) {
+      leavingRef.current = true;
+      setLeaving(true);
+      void persist().then((id) => {
+        leavingRef.current = false;
+        setLeaving(false);
+        if (id) { onClose(); return; }
+        // 저장이 실패하면 말없이 닫지 않는다(전에는 닫혀 고친 내용이 사라졌다)
+        setConfirm({ mode: 'warning', title: '저장하지 못했어요', description: '지금 나가면 고친 내용이 사라져요. 계속 고치면 자동 저장을 다시 시도해요.', confirmLabel: '저장하지 않고 나가기', cancelLabel: '계속 고치기', onConfirm: () => onClose() });
+      });
+      return;
+    }
     setConfirm({ mode: 'warning', title: '저장하지 않은 내용이 있어요', description: '받은편지함 제목과 블록이 있어야 저장돼요. 이대로 나가면 고친 내용이 사라져요.', confirmLabel: '저장하지 않고 나가기', cancelLabel: '계속 고치기', onConfirm: () => onClose() });
   };
   useEffect(() => {

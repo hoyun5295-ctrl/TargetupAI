@@ -82,6 +82,7 @@ export default function AiExplainPage() {
     <ZoneFrame
       moduleId="ai-memory"
       sub="AI에게 질문"
+      backTo="/ai-memory"
     >
       <div className="max-w-4xl mx-auto space-y-4">
 <div className="mb-3 inline-flex items-center gap-1.5 text-[12px] text-slate-500"><span className="text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-medium border border-violet-200">실험실</span><BookOpen className="w-3.5 h-3.5 text-indigo-600" />근거를 인용해 답합니다</div>

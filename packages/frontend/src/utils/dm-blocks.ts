@@ -32,6 +32,14 @@ const nonEmpty = (v: any) => typeof v === 'string' && v.trim().length > 0;
 const arr = (v: any) => (Array.isArray(v) ? v : []);
 
 export const DM_BLOCKS: readonly DmBlockDef[] = [
+  // ★ 2026-10-01 머리 — 로고·브랜드 이름 줄(헤드라인 = 대표 사진·제목과 다르다). 원장에 없어 블록으로 만들기·편집기 블록 추가 둘 다에서 빠졌다
+  //   (남지현 cmungizf9 · 이메일엔 있음). 한 쪽 1개 상한은 스토어 addSection 이 지킨다.
+  {
+    key: 'header', label: '머리', icon: '🏷️', desc: '로고 · 브랜드 이름', group: '시작',
+    section: 'header',
+    ready: (p) => nonEmpty(p?.brand_name) || nonEmpty(p?.logo_url),
+    need: '로고 또는 브랜드 이름',
+  },
   {
     key: 'headline', label: '헤드라인', icon: '🖼️', desc: '대표 사진과 제목', group: '시작',
     section: 'hero', photo: true,

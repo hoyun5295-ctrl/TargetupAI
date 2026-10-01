@@ -26,6 +26,7 @@
  * 실패 정책: 스킵 + failed 기록 → next_run_at 다음 스케줄로 갱신 (중복 발송 방지)
  */
 
+import { storeMembershipClause } from './store-scope';
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
@@ -435,7 +436,7 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
           let countStoreFilter = '';
           const countStoreParams: any[] = [];
           if (ac.store_code) {
-            countStoreFilter = ` AND c.store_code = $${filterRes.nextIndex}`;
+            countStoreFilter = storeMembershipClause({ idCol: 'c.id', companyRef: '$1', codeRef: `$${filterRes.nextIndex}` });
             countStoreParams.push(ac.store_code);
           }
           const countUnsubIdx = filterRes.nextIndex + countStoreParams.length;
@@ -576,7 +577,7 @@ async function sendPreNotification(ac: any): Promise<void> {
       let storeFilter = '';
       const storeParams: any[] = [];
       if (ac.store_code) {
-        storeFilter = ` AND c.store_code = $${filterResult.nextIndex}`;
+        storeFilter = storeMembershipClause({ idCol: 'c.id', companyRef: '$1', codeRef: `$${filterResult.nextIndex}` });
         storeParams.push(ac.store_code);
       }
       const unsubParamIdx = filterResult.nextIndex + storeParams.length;
@@ -738,7 +739,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     let storeFilter = '';
     const storeParams: any[] = [];
     if (ac.store_code) {
-      storeFilter = ` AND c.store_code = $${filterResult.nextIndex}`;
+      storeFilter = storeMembershipClause({ idCol: 'c.id', companyRef: '$1', codeRef: `$${filterResult.nextIndex}` });
       storeParams.push(ac.store_code);
     }
 

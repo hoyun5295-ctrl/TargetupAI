@@ -86,6 +86,7 @@ export default function AiBatchesPage() {
     <ZoneFrame
       moduleId="ai-memory"
       sub="AI Batch"
+      backTo="/ai-memory"
       kpis={[
         { label: '누적 batch', value: loading ? '—' : `${batches.length}건` },
         { label: '누적 요청', value: loading ? '—' : `${totalRequests.toLocaleString()}건` },

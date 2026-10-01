@@ -142,15 +142,22 @@ import { resolve } from 'path';
 describe('소스 계약 — routes/campaigns.ts 발송·세기·미리보기가 같은 동의 조각을 쓴다', () => {
   const src = readFileSync(resolve(__dirname, '..', '..', 'routes', 'campaigns.ts'), 'utf-8');
   it('POST /:id/send: 고객 행 동의 조건이 CT 조각이고 범위 서브쿼리도 CT 를 지난 값이다', () => {
+    // ★ 2026-10-01 몰 동의 판정(sendEnforce)을 타겟 필터보다 먼저 구해 타겟 필터와 동의 조각이 같은 값을 쓴다(B-1001-3 · Codex R1 high)
+    const head = src.slice(src.indexOf('const sendEnforce = '), src.indexOf('const customers = customersResult.rows;'));
+    expect(head).toContain('const sendEnforce = storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0]));');
+    expect(head).toContain('buildFilterQueryCompat(targetFilter, companyId, { storeConsent: sendEnforce })');
     const block = src.slice(src.indexOf('const sendConsent = buildSendConsent('), src.indexOf('const customers = customersResult.rows;'));
-    expect(block).toContain('resolveSendConsent(companyId, storeParams[0])');
+    expect(block).toContain('enforce: sendEnforce,');
     expect(block).toContain("sendConsent.storeFilter.replace('$STORE_IDX'");
     expect(block).toContain('AND ${sendConsent.customerConsent} ${filterQuery.where}${storeFilterFinal}');
     expect(block).not.toMatch(/c\.sms_opt_in = true/);
   });
   it('캠페인 생성 시 타겟 인원: 분류 범위(getStoreScope)와 같은 조각으로 센다 — 세는 곳 = 보내는 곳', () => {
-    const block = src.slice(src.indexOf('let countStoreFilter'), src.indexOf('targetCount = parseInt(countResult.rows[0].count);'));
+    // ★ 2026-10-01 범위·몰 동의 판정을 타겟 필터보다 먼저 구한다(구간 시작 = 범위 배열 선언) — 타겟 필터와 동의 조각이 같은 countEnforce
+    const block = src.slice(src.indexOf('const countStoreParams: any[] = [];'), src.indexOf('targetCount = parseInt(countResult.rows[0].count);'));
     expect(block).toContain('getStoreScope(companyId, userId)');
+    expect(block).toContain('buildFilterQueryCompat(targetFilter, companyId, { storeConsent: countEnforce })');
+    expect(block).toContain('enforce: countEnforce,');
     expect(block).toContain('${countConsent.customerConsent} ${filterQuery.where}${countConsent.storeFilter}');
     expect(block).toContain('[companyId, ...filterQuery.params, ...countStoreParams, userId]');
   });

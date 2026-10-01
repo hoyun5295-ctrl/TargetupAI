@@ -898,6 +898,12 @@ async function processUploadInBackground(
           // ★ D114 P3: 브랜드 사용자 → 본인 user_id + 본인 store_codes 범위 고객만 등록
           // 이전: 회사 전체 sms_opt_in=false → 다른 사용자가 업로드한 수신거부까지 공유
           // 수정: store_codes 매칭 고객만 (없으면 전체 — 단일 브랜드 회사)
+          // ★ 2026-10-01 이 자리는 고객 행 store_code 를 일부러 그대로 쓴다(브랜드 판단을 소속 표로 바꾼 cmuozso84 에서 제외).
+          //   여기는 고객 행 수신동의 거부(sms_opt_in=false)를 계정별 영구 수신거부 명부로 옮겨 적는 쓰기다. 자사몰 회사는 고객 행 브랜드 칸이 비어 있고
+          //   신규 고객 행을 sms_opt_in=false 로 만든다(cdp-identity 4단계 · 몰 동의의 진실 = 소속 행 · D93). 소속 표로 넓히면 그 회사 고객 대부분이
+          //   브랜드 계정의 영구 수신거부로 복사되고 몰이 다시 동의해도 풀리지 않는다.
+          //   남은 틈(추가 과제 · BUGS B-1001-4): 고객은 폰당 1행이라 업로드·싱크 회사의 다매장 고객은 고객 행 칸에 브랜드 하나만 있어 나머지 브랜드
+          //   계정에는 등록되지 않는다. 소속 행만으로는 몰 행과 업로드 행을 가를 수 없어(consent_source 는 동의값이 온 몰 행에만 찍힌다) 정책 결정이 먼저다.
           const hasStoreCodes = userStoreCodes && userStoreCodes.length > 0;
           const unsubResult = await query(`
             INSERT INTO unsubscribes (company_id, user_id, phone, source)

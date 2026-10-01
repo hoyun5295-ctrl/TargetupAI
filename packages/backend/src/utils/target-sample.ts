@@ -21,6 +21,7 @@
  *   - 반드시 이 함수를 통할 것 (D88/D91/B5 재발 방지)
  */
 
+import { storeMembershipClause } from './store-scope';
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
@@ -67,7 +68,7 @@ export async function fetchTargetSampleCustomer(
   const extraParams: any[] = [];
   let storeFilter = '';
   if (storeCode) {
-    storeFilter = ` AND c.store_code = $${paramIdx++}`;
+    storeFilter = storeMembershipClause({ idCol: 'c.id', companyRef: '$1', codeRef: `$${paramIdx++}` });
     extraParams.push(storeCode);
   }
 

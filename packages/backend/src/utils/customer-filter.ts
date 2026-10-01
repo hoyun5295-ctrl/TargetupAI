@@ -18,6 +18,7 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVarian
 import { isValidCustomFieldKey } from './safe-field-name';
 import { getColumnFields } from './standard-field-map';
 import { kstDateMinusDays } from './automarketing-segment';
+import { storeMembershipCond } from './store-scope';
 
 // ============================================================
 // 타입 정의
@@ -37,12 +38,18 @@ export interface FilterOptions {
   /**
    * store_code 처리 방식:
    * - 'skip': 호출부에서 직접 처리 (기본값)
-   * - 'direct': WHERE store_code = $X (campaigns.ts 방식)
-   * - 'subquery': WHERE id IN (SELECT ... FROM customer_stores) (customers.ts 방식, companyIdParamRef 필요)
+   * - 'subquery': WHERE <alias.>id IN (SELECT ... FROM customer_stores) (companyIdParamRef 필요)
+   * ★ 2026-10-01 'direct'(고객 행 store_code) 폐기 — 자사몰 연동 고객은 그 칸이 비어 브랜드로 거르면 전부 빠졌다(cmuozso84).
+   *   소속의 진실은 customer_stores 하나다(store-scope.ts storeMembershipCond 와 같은 규칙).
    */
-  storeCodeMode?: 'skip' | 'direct' | 'subquery';
+  storeCodeMode?: 'skip' | 'subquery';
   /** subquery 모드에서 company_id 파라미터 참조 (예: '$1') */
   companyIdParamRef?: string;
+  /**
+   * ★ 2026-10-01 몰 동의 발송(mall-consent buildSendConsent mode=mall)이면 true — 브랜드 조건을 그 브랜드 소속 행의 동의와 **같은 행**에서 판정한다
+   *   (store-scope storeMembershipCond requireConsent). 파라미터·자리표 번호는 바뀌지 않는다. 기본 false = 종전 글자.
+   */
+  storeConsent?: boolean;
   /**
    * 입력 형식:
    * - 'mixed': scalar + {value, operator} 혼합 지원 (campaigns.ts, ai.ts 방식)
@@ -140,6 +147,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
     startParamIndex,
     storeCodeMode = 'skip',
     companyIdParamRef = '$1',
+    storeConsent = false,
     inputFormat = 'mixed',
   } = options;
 
@@ -202,18 +210,10 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
       } else if (field === 'store_code' && storeCodeMode !== 'skip') {
         if (storeCodeMode === 'subquery') {
           if (operator === 'eq') {
-            sql += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = ${companyIdParamRef} AND store_code = $${paramIndex++})`;
+            sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, requireConsent: storeConsent })}`;
             params.push(value);
           } else if (operator === 'in' && Array.isArray(value)) {
-            sql += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = ${companyIdParamRef} AND store_code = ANY($${paramIndex++}::text[]))`;
-            params.push(value);
-          }
-        } else if (storeCodeMode === 'direct') {
-          if (operator === 'eq') {
-            sql += ` AND ${col(alias, 'store_code')} = $${paramIndex++}`;
-            params.push(value);
-          } else if (operator === 'in' && Array.isArray(value)) {
-            sql += ` AND ${col(alias, 'store_code')} = ANY($${paramIndex++}::text[])`;
+            sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, many: true, requireConsent: storeConsent })}`;
             params.push(value);
           }
         }
@@ -535,26 +535,17 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
     }
   }
 
-  // store_code (특수 처리 — storeCodeMode에 따라 direct/subquery/skip 분기)
+  // store_code (특수 처리 — storeCodeMode = subquery(소속 표) 또는 skip)
   if (storeCodeMode !== 'skip') {
     const storeCode = getValue(filters.store_code);
     if (storeCode) {
       const storeOp = filters.store_code?.operator || 'eq';
-      if (storeCodeMode === 'direct') {
-        if (storeOp === 'in' && Array.isArray(storeCode)) {
-          sql += ` AND ${col(alias, 'store_code')} = ANY($${paramIndex++}::text[])`;
-          params.push(storeCode);
-        } else {
-          sql += ` AND ${col(alias, 'store_code')} = $${paramIndex++}`;
-          params.push(storeCode);
-        }
-      }
       if (storeCodeMode === 'subquery') {
         if (storeOp === 'in' && Array.isArray(storeCode)) {
-          sql += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = ${companyIdParamRef} AND store_code = ANY($${paramIndex++}::text[]))`;
+          sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, many: true, requireConsent: storeConsent })}`;
           params.push(storeCode);
         } else {
-          sql += ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = ${companyIdParamRef} AND store_code = $${paramIndex++})`;
+          sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, requireConsent: storeConsent })}`;
           params.push(storeCode);
         }
       }
@@ -635,14 +626,21 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
  * 통합 시그니처: buildCustomerFilter(filter, options) → {sql, params, nextIndex}
  *
  * ★ 기존과 동일한 SQL 생성을 보장하되, nextIndex도 리턴하여 체이닝 가능.
- * ★ store_code는 'direct' 모드 + alias 'c' 사용.
+ * ★ 2026-10-01 store_code = 'subquery'(소속 표) + alias 'c' — 옛 'direct'(고객 행 store_code)는 자사몰 연동 고객이 빈 칸이라
+ *   브랜드를 거르면 몰 고객이 전부 빠졌다(cmuozso84). 소비처 9곳 전부 $1 = companyId 확인(campaigns 3 · auto-campaigns 2 · 워커 3 · target-sample 1).
  */
-export function buildFilterQueryCompat(filter: any, _companyId: string): { where: string; params: any[]; nextIndex: number } {
+export function buildFilterQueryCompat(
+  filter: any,
+  _companyId: string,
+  opts: { storeConsent?: boolean } = {},  // ★ 2026-10-01 몰 동의 발송이면 true(campaigns.ts 3곳 · buildSendConsent 와 같은 enforce 값)
+): { where: string; params: any[]; nextIndex: number } {
   // ★ 2026-09-27 한줄로 V2 R203 — D83 디버그 로그 제거(호출마다 필터·SQL·검색값을 로그에 남겼다)
   const result = buildCustomerFilter(filter, {
     tableAlias: 'c',
     startParamIndex: 2,  // campaigns.ts는 항상 $1 = companyId
-    storeCodeMode: 'direct',
+    storeCodeMode: 'subquery',
+    companyIdParamRef: '$1',
+    storeConsent: opts.storeConsent === true,
     inputFormat: 'mixed',
   });
   return { where: result.sql, params: result.params, nextIndex: result.nextIndex };

@@ -38,6 +38,7 @@
  *   - 향후 AI/자동발송 필드 선택 단계
  */
 
+import { storeCodeDisplayExpr, hasStoreMembershipInScope, storeMembershipCodesSql } from './store-scope';
 import { query } from '../config/database';
 import { redis } from '../config/defaults';
 import { FIELD_MAP, getColumnFields, getFieldByKey, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue } from './standard-field-map';
@@ -283,6 +284,12 @@ export async function detectEnabledFields(
         scopeParams,
       );
       const dc = dataCheckResult.rows[0] || {};
+      // ★ 2026-10-01 매장코드(store_code)의 진실은 소속 표다 — 자사몰 연동 회사는 고객 행 칸이 전부 비어 여기서 꺼졌고
+      //   엑셀·목록에 매장코드 열이 없었다(B-1001-3 · Codex R1 medium). 고객 행 값이 0건일 때만 범위 안 소속 행 유무를 본다.
+      if (detectableFields.some(f => f.fieldKey === 'store_code') && !(parseInt(dc.cnt_store_code || '0') > 0)
+        && await hasStoreMembershipInScope(companyId, scopeWhere, scopeParams)) {
+        dc.cnt_store_code = '1';
+      }
       for (const f of detectableFields) {
         if (parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0) {
           const label = fieldDefLabels[f.fieldKey] || f.displayName;
@@ -411,6 +418,9 @@ export function buildDynamicSelectExpr(
       );
     } else if (f.data_type === 'date') {
       parts.push(`TO_CHAR(${col}, 'YYYY-MM-DD') AS ${f.field_key}`);
+    } else if (f.field_key === 'store_code') {
+      // ★ 2026-10-01 매장코드 = 고객 행 값 · 없으면 소속 표 코드들(자사몰 연동 고객은 고객 행 값이 비어 빈칸이었다)
+      parts.push(`${storeCodeDisplayExpr(tableAlias)} AS ${f.field_key}`);
     } else {
       parts.push(`${col} AS ${f.field_key}`);
     }
@@ -477,7 +487,10 @@ export async function buildEnabledFieldsPayload(
     const col = mapped?.columnName || f.field_key;
     optionThunks.push(async () => {
       try {
-        const optResult = await query(
+        // ★ 2026-10-01 매장코드 옵션 = 범위 안 고객의 소속 분류코드(소속 표가 진실 · 브랜드 거르기와 같은 출처 · B-1001-3)
+        const optResult = f.field_key === 'store_code'
+          ? await query(storeMembershipCodesSql(scopeWhere, scopeParams.length), [...scopeParams, companyId])
+          : await query(
           `SELECT DISTINCT ${col} FROM customers WHERE ${scopeWhere} AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
           scopeParams
         );

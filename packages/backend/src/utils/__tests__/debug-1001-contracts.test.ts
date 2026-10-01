@@ -139,10 +139,68 @@ describe('⑥ DM 블록 추가 = 머리 포함(이메일과 같다)', () => {
     expect(dmHead!.label).toBe(emHead!.label);
     expect(dmHead!.label).toBe('머리');
   });
+  it('재오픈: 머리는 블록 원장(DM_BLOCKS) 시작 묶음 맨 앞 — 블록으로 만들기 첫 화면과 편집기 블록 추가가 같은 출처', () => {
+    const blocks = read('utils/dm-blocks.ts');
+    const at = blocks.indexOf('export const DM_BLOCKS');
+    const first = blocks.indexOf("key: '", at);
+    expect(blocks.slice(first, first + 60)).toContain("key: 'header', label: '머리'");
+    expect(blocks).toContain("section: 'header',");
+    expect(blocks).toContain("ready: (p) => nonEmpty(p?.brand_name) || nonEmpty(p?.logo_url),");
+    const flow = read('utils/make-flow.ts');
+    expect(flow).toContain("blockItem('header'), blockItem('headline'),");
+    expect(flow).not.toContain("{ key: 'header', label: LIST_LABEL.header");
+    expect(dmPaletteItems().main[0].section).toBe('header');
+  });
   it('[참여 이벤트] 칸이 끝줄에 혼자 남으면 남는 폭을 채운다(3칸·4칸 격자 · 칸 수로 계산)', () => {
     const shell = read('components/make/EditShell.tsx');
     expect(shell).toContain('const span3 = 3 - (items.length % 3);');
     expect(shell).toContain('const span4 = 4 - (items.length % 4);');
     expect(shell).toContain('className={`${interactionSpan} relative h-[66px]');
+  });
+});
+
+describe('⑦ 재오픈 뒤로가기 — 메뉴 첫 화면 ← = 항상 허브(goUpTo · D177)', () => {
+  it('goUpTo = 앞 칸이 부모면 navigate(-1) · 아니면 부모로 · 칸별 화면 기록(PUSH 면 뒤 칸 삭제)', () => {
+    const lib = read('lib/scroll-restoration.tsx');
+    expect(lib).toContain('export function goUpTo(navigate: NavigateFunction, parent: string): void {');
+    expect(lib).toContain('if (prev !== undefined && prev === parentPath) navigate(-1);');
+    expect(lib).toContain('else navigate(parent);');
+    expect(lib).toContain("if (navType === 'PUSH') for (const k of Object.keys(histPaths)) if (Number(k) > idx) delete histPaths[k];");
+    expect(lib).toContain('useEffect(() => { recordPath(currentIdx(), location.pathname, navType); }, [key, location.pathname, navType]);');
+  });
+  it('머리 부품: 부모가 허브면 goUpTo · 그 밖은 goBackOr', () => {
+    expect(read('components/zone/ZoneHeader.tsx')).toContain("const back = onBack ?? (() => (backTo === '/ai-operator' ? goUpTo(navigate, backTo) : goBackOr(navigate, backTo)));");
+  });
+  it('프론트 어디에도 허브로 가는 goBackOr 가 남지 않는다(자동 마케팅 · 여정 · 푸시 = goUpTo)', () => {
+    const left: string[] = [];
+    for (const f of walk(FRONT)) {
+      const src = readFileSync(f, 'utf8');
+      if (/goBackOr\(navigate,\s*['"]\/ai-operator['"]\)/.test(src)) left.push(f.slice(FRONT.length + 1));
+    }
+    expect(left).toEqual([]);
+    for (const rel of ['pages/ContinuousOperatorPage.tsx', 'pages/JourneysPage.tsx', 'pages/PushCampaignsPage.tsx']) {
+      expect(read(rel), rel).toContain("goUpTo(navigate, '/ai-operator')");
+    }
+  });
+  it('하위 화면 부모 지정 = AI Batch·질문 → AI 메모리 · 옛 만들기 → DM 목록(허브로 건너뛰지 않게)', () => {
+    expect(read('pages/AiBatchesPage.tsx')).toContain('backTo="/ai-memory"');
+    expect(read('pages/AiExplainPage.tsx')).toContain('backTo="/ai-memory"');
+    expect(read('pages/QuickCampaignLegacyPage.tsx')).toContain('backTo="/dm-builder"');
+  });
+});
+
+describe('⑧ 이메일 편집기 나가기 — 한 번만 · 보이게 · 실패 시 확인', () => {
+  const src = read('components/make/EmailEditScreen.tsx');
+  it('저장은 한 번에 하나(앞 저장을 기다림) · 새 메일은 앞 저장이 받은 id 로 수정', () => {
+    expect(src).toContain('while (inflight.current) { try { await inflight.current; } catch {');
+    expect(src).toContain("const r = await fetch(cid ? `/api/email/campaigns/${cid}` : '/api/email/campaigns'");
+    expect(src).toContain('if (!cid && id) { campaignIdRef.current = id; setCampaignId(id); }');
+  });
+  it('나가기 = 다시 눌러도 한 번 · "저장하고 나가는 중" 표시 · 저장 실패면 닫지 않고 확인 창', () => {
+    expect(src).toContain('if (leavingRef.current) return;');
+    expect(src).toContain("leaving ? { tone: 'saving', text: '저장하고 나가는 중' }");
+    expect(src).toContain('if (id) { onClose(); return; }');
+    expect(src).toContain("title: '저장하지 못했어요'");
+    expect(src).not.toContain('void persist().then(() => onClose());');
   });
 });

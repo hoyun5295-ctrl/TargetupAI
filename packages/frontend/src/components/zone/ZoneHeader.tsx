@@ -14,7 +14,7 @@ import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, CircleHelp, Ellipsis, RotateCw, type LucideIcon } from 'lucide-react';
 import { zoneModule, type ZoneModuleId } from '../../constants/ai-operator-modules';
-import { goBackOr } from '../../lib/scroll-restoration';
+import { goBackOr, goUpTo } from '../../lib/scroll-restoration';
 import { zoneBand } from './zone-color';
 
 export interface ZoneAction {
@@ -219,7 +219,9 @@ export default function ZoneHeader({
   const navigate = useNavigate();
   const m = zoneModule(moduleId);
   const Icon = m.icon;
-  const back = onBack ?? (() => goBackOr(navigate, backTo));
+  // ★ 2026-10-01 메뉴 첫 화면(부모 = 허브)은 항상 허브로(goUpTo · D177) — 앞 칸으로 가면 만들기·결과·짝 전환을 거친 뒤 두세 번 눌러야 했다.
+  //   하위 화면(부모 = 여정 목록 · 플래너 · AI 메모리 등)은 종전대로 앞 화면(goBackOr).
+  const back = onBack ?? (() => (backTo === '/ai-operator' ? goUpTo(navigate, backTo) : goBackOr(navigate, backTo)));
   const editor = !!(titleSlot || endSlot);
   const hasTabs = !!tabs && tabs.length > 0;
   const hasKpis = !hasTabs && !!kpis && kpis.length > 0;

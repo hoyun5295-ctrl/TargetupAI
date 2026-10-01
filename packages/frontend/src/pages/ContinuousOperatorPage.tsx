@@ -5,7 +5,7 @@
 // native dialog 0(ConfirmModal·useToast). 모델명 0.
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { goBackOr } from '../lib/scroll-restoration';
+import { goUpTo } from '../lib/scroll-restoration';
 import { GitMerge, LayoutGrid, Loader2, PenLine, SlidersHorizontal, Sparkles, TrendingUp } from 'lucide-react';
 import ZoneFrame from '../components/zone/ZoneFrame';
 import ZoneSection from '../components/zone/ZoneSection';
@@ -395,7 +395,8 @@ export default function ContinuousOperatorPage() {
   };
 
   const goHome = () => setView('recommendations');
-  const headerBack = () => (view === 'natural' || view === 'scenario' ? goHome() : goBackOr(navigate, '/ai-operator'));
+  // ★ 2026-10-01 첫 화면 ← = 항상 허브(goUpTo · 머리 부품과 같은 규칙)
+  const headerBack = () => (view === 'natural' || view === 'scenario' ? goHome() : goUpTo(navigate, '/ai-operator'));
   const oneLine = zoneModule('auto-marketing').oneLine!;
   const scheduledCount = proposals.filter((p) => p.status === 'scheduled').length;
   const stampText = loadedAt ? `${loadedAt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })} 기준 · 다시 읽기` : '다시 읽기';
