@@ -9,6 +9,7 @@
 
 import { query } from '../config/database';
 import { normalizePhone } from './normalize-phone';
+import { mallConsentCodeAmong } from './mall-consent';
 
 // ============================================================
 // 수신거부 필터 SQL 생성
@@ -108,12 +109,26 @@ export async function syncCustomerOptIn(companyId: string, phones: string[], opt
  * @param source     등록 경로 ('sync', 'db_upload' 등)
  * @returns 실제 INSERT된 총 건수
  */
-// ★ 2026-10-01 이 자리는 고객 행 store_code 를 일부러 그대로 쓴다(브랜드 판단을 소속 표로 바꾼 cmuozso84 에서 제외).
-//   여기는 고객 행 수신동의 거부(sms_opt_in=false)를 계정별 영구 수신거부 명부로 옮겨 적는 쓰기다. 자사몰 회사는 고객 행 브랜드 칸이 비어 있고
-//   신규 고객 행을 sms_opt_in=false 로 만든다(cdp-identity 4단계 · 몰 동의의 진실 = 소속 행 · D93). 소속 표로 넓히면 그 회사 고객 대부분이
-//   브랜드 계정의 영구 수신거부로 복사되고 몰이 다시 동의해도 풀리지 않는다.
-//   남은 틈(추가 과제 · BUGS B-1001-4): 고객은 폰당 1행이라 업로드·싱크 회사의 다매장 고객은 고객 행 칸에 브랜드 하나만 있어 나머지 브랜드
-//   계정에는 등록되지 않는다. 소속 행만으로는 몰 행과 업로드 행을 가를 수 없어(consent_source 는 동의값이 온 몰 행에만 찍힌다) 정책 결정이 먼저다.
+/**
+ * ★ 2026-10-01 브랜드 계정에 옮겨 적을 거부 고객의 판정(B-1001-4) — 이 함수 하나만 쓴다(인라인 금지).
+ *   = 고객 행 store_code 가 계정 코드에 있음(옛 판정 · 지금 등록되던 것은 하나도 줄이지 않는다)
+ *     OR 그 계정 코드의 소속 행이 있음(소속 표 · 고객은 폰당 1행이라 다매장 고객의 고객 행 칸엔 브랜드 하나만 있다)
+ *        — 단 **계정 코드에 몰 동의 코드가 하나라도 있으면 이 분기는 끈다**(resolveSendConsent 와 같은 단위: 그 계정은 몰 동의로 보낸다).
+ *   이유(D93): 자사몰 회사는 신규 고객 행을 sms_opt_in=false 로 만들고(cdp-identity · 동의는 올리지 않음) 몰 동의의 진실은 소속 행이다.
+ *   몰 동의로 보내는 계정에 고객 행 false 를 영구 수신거부로 옮기면 그 몰에 동의한 고객까지 막히고 몰이 다시 동의해도 풀리지 않는다
+ *   (이에스페이먼트 4몰 · Codex 1001 R1: 몰A+업로드B 섞인 계정이 B 소속을 통해 몰A 동의 고객을 막던 반례).
+ *   080·수동 수신거부는 이 판정과 무관하게 registerUnsubscribe 가 회사 전 계정에 넣는다(H2-1).
+ * @param o.customerAlias 고객 행 별칭(예: 'c' · 'customers')
+ * @param o.companyRef    회사 id 식(예: '$1')
+ * @param o.codesRef      계정 분류코드 배열 식(예: 'u.store_codes' · '$3::text[]')
+ */
+export function brandRefusalCopyCond(o: { customerAlias: string; companyRef: string; codesRef: string }): string {
+  const a = o.customerAlias;
+  return `(${a}.store_code = ANY(${o.codesRef})`
+    + ` OR (NOT ${mallConsentCodeAmong(o.companyRef, o.codesRef)}`
+    + ` AND EXISTS (SELECT 1 FROM customer_stores bm WHERE bm.company_id = ${o.companyRef} AND bm.customer_id = ${a}.id AND bm.store_code = ANY(${o.codesRef}))))`;
+}
+
 export async function registerBulkCompanyUserUnsubscribes(
   companyId: string,
   source: string,
@@ -136,15 +151,43 @@ export async function registerBulkCompanyUserUnsubscribes(
                            WHERE cs.company_id = $1
                              AND cs.store_code = ANY(u.store_codes)))
          OR
-         -- ★ 2026-10-01 고객 행 store_code 를 일부러 그대로 쓴다 — 함수 머리 주석(D93) 참조
+         -- ★ 2026-10-01 브랜드 판정 = brandRefusalCopyCond(고객 행 칸 OR 몰 동의 코드가 아닌 소속 · B-1001-4)
          (u.store_codes IS NOT NULL AND array_length(u.store_codes, 1) > 0
-          AND c.store_code = ANY(u.store_codes)
+          AND ${brandRefusalCopyCond({ customerAlias: 'c', companyRef: '$1', codesRef: 'u.store_codes' })}
           AND EXISTS (SELECT 1 FROM customer_stores cs
                        WHERE cs.company_id = $1
                          AND cs.store_code = ANY(u.store_codes)))
        )
      ON CONFLICT (user_id, phone) DO NOTHING`,
     [companyId, source],
+  );
+  return result.rowCount || 0;
+}
+
+/**
+ * ★ 2026-10-01 브랜드 사용자가 업로드한 뒤 **업로더 본인** 명부에 거부 고객을 옮겨 적는다(D114 P3 · upload.ts 인라인 SQL 을 옮김 · B-1001-4).
+ *   계정 코드가 있으면 brandRefusalCopyCond 범위만 · 없으면(단일 브랜드 회사) 회사 전체 — 옛 동작 그대로.
+ * @returns 실제 INSERT 건수
+ */
+export async function registerUploaderOwnUnsubscribes(
+  companyId: string,
+  userId: string,
+  storeCodes: string[] | null | undefined,
+  source: string,
+): Promise<number> {
+  const codes = (storeCodes || []).filter(Boolean);
+  const scoped = codes.length > 0;
+  const result = await query(
+    `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+     SELECT $1, $2, phone, $3
+     FROM customers
+     WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
+       ${scoped ? `AND ${brandRefusalCopyCond({ customerAlias: 'customers', companyRef: '$1', codesRef: '$4::text[]' })}` : ''}
+       AND NOT EXISTS (
+         SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone
+       )
+     ON CONFLICT (user_id, phone) DO NOTHING`,
+    scoped ? [companyId, userId, source, codes] : [companyId, userId, source],
   );
   return result.rowCount || 0;
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { X, FileText } from 'lucide-react';
 import { calculateSmsBytes, formatCampaignMessageForDisplay, buildAdSubjectFront, getAlimtalkTemplateStatus } from '../utils/formatDate';
 import {
@@ -8,6 +9,7 @@ import {
   resolveSendTypeLabel,
 } from '../utils/campaign-axis';
 import MmsImagePreview from './shared/MmsImagePreview';
+import CampaignCallbackField from './shared/CampaignCallbackField';
 
 /**
  * 발송결과 — 캠페인 상세 모달 (ResultsModal에서 분리, 흰 톤 모던 재설계).
@@ -74,12 +76,13 @@ export default function CampaignDetailModal({
   const fmtFull = (dt: string) => new Date(dt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   const fmtShort = (dt: string) => new Date(dt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
-  const infoRows: { label: string; value: string }[] = [
+  const infoRows: { label: string; value: ReactNode }[] = [
     { label: '캠페인명', value: campaign.campaign_name },
     ...(isLmsType && subject ? [{ label: '제목', value: buildAdSubjectFront(subject || '', campaign.message_type, campaign.is_ad ?? false) }] : []),
     { label: '유형', value: `${resolveSendTypeLabel(campaign.send_type)} / ${channelLabel}` },
     { label: '발송자', value: campaign.created_by_name || '-' },
-    { label: '회신번호', value: campaign.callback_number || '-' },
+    // ★ 2026-10-01 B-1001-6 수신자별 회신번호 = 「고객별 회신번호 … 외 N개」 + 목록 창(그 밖은 종전 표시)
+    { label: '회신번호', value: <CampaignCallbackField campaign={campaign} /> },
     { label: '전송건수', value: `${(campaign.sent_count || campaign.target_count || 0).toLocaleString()}건` },
     { label: '성공 / 실패', value: `${(campaign.success_count || 0).toLocaleString()} / ${(campaign.fail_count || 0).toLocaleString()}` },
     { label: '등록일시', value: campaign.created_at ? fmtFull(campaign.created_at) : '-' },

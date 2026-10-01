@@ -140,13 +140,22 @@ export function matchBillingTarget(candidates: SenderCandidate[], designation: s
 }
 
 /**
- * 회신 안내용 후보 표기: 표시명이 있으면 "표시명 (로그인ID)", 없으면 로그인 ID.
- * 사용자 노출 문구지만 자기 주소로 등록된 자기 계정 목록이라 노출 무해(§18-13).
+ * ★ 2026-10-01 발송 ID 반려 문구(B-1001-5 · 임은지 접수 cmup6ttgr08uojnn4twhin2jy).
+ *   옛 문구는 그 주소로 등록된 발송 계정 전부("표시명 (로그인ID)")를 실었다. 등록은 같은 주소를 **어느 회사 계정에든** 허용하고
+ *   후보 조회도 회사를 가리지 않아(resolveEmailSender) 다른 회사의 계정 이름·로그인 ID가 메일로 나갔다(mobile@invitocorp.com = 5개 회사 9계정).
+ *   ⛔ 이 함수는 **후보 계정을 인자로 받지 않는다** — 반송에 다른 계정이 실릴 길을 구조로 막는다. 사용자가 적은 값만 되돌려 준다.
  */
-export function describeBillingTargets(candidates: SenderCandidate[]): string {
-  return candidates
-    .map((c) => (c.label ? `${c.label} (${c.loginId})` : c.loginId))
-    .join(', ');
+export type BillingTargetRejectKind = 'required' | 'not_found' | 'mismatch';
+export function billingTargetRejectReason(kind: BillingTargetRejectKind, designation: string, singleAccount = false): string {
+  const RECHECK = '처음 설정된 표시명(발송 ID)을 재확인 후 일치하게 기재하여 접수 바랍니다.';
+  if (kind === 'required') {
+    return `이 이메일 주소는 발송 계정 여러 개에 등록되어 있어 어느 계정으로 접수할지 지정이 필요합니다. 요청서 "내용" 시트 맨 아래 "발송 ID" 칸에 ${RECHECK}`;
+  }
+  if (kind === 'not_found') return `"발송 ID" 칸에 적힌 "${designation}"을(를) 찾지 못했습니다. ${RECHECK}`;
+  return [
+    `"발송 ID" 칸에 적힌 "${designation}"은(는) 이 이메일 주소로 요청할 수 있는 계정이 아닙니다. ${RECHECK}`,
+    ...(singleAccount ? ['(발송 계정이 하나뿐이라 이 칸을 비워 두시면 그대로 접수됩니다)'] : []),
+  ].join(' ');
 }
 
 /**

@@ -23,7 +23,7 @@ import pool, { query } from '../config/database';
 import { LIMITS } from '../config/defaults';
 import { Pop3Client, Pop3Error } from './pop3-client';
 import {
-  resolveEmailSender, matchBillingTarget, describeBillingTargets, describeAccountLabel, type SenderCandidate,
+  resolveEmailSender, matchBillingTarget, billingTargetRejectReason, describeAccountLabel, type SenderCandidate,
   isImageAttachment, prepareMailMmsImages, type PreparedMailImage,
 } from './agency-send-email';
 import { saveMmsImageBuffer } from './mms-image-util';
@@ -791,7 +791,6 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   const dupSkipped: string[] = [];
   let firstCode: string | null = null;
   let ambiguousSeen = false;
-  const targetList = describeBillingTargets(candidates);
   // ★2026-09-05 §21-3 (2) 시각 축은 원본·조정값 둘 다로 대조한다. 컬럼 탐지는 단위마다 하지 않는다
   const dupTimeSql = emailDupTimeSql(await hasAgencyColumn(pool, 'requested_at_original'));
 
@@ -817,12 +816,13 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     let unitAcct: { companyId: string; userId: string } | null = auth;
     if (!unitAcct) {
       if (!form.billingTarget) {
-        fail(`이 이메일 주소는 발송 계정 여러 개에 등록되어 있어 어느 계정으로 접수할지 지정이 필요합니다. 요청서 "내용" 시트 맨 아래 "발송 ID" 칸에 다음 중 하나를 적어 다시 보내주세요: ${targetList}`, 'billing_target_required');
+        // ★ 2026-10-01 B-1001-5 — 반송에 계정 목록을 싣지 않는다(다른 회사 계정 노출). 문구는 후보를 받지 않는 함수 하나
+        fail(billingTargetRejectReason('required', ''), 'billing_target_required');
         continue;
       }
       const match = matchBillingTarget(candidates, form.billingTarget);
       if (match.outcome === 'not_found') {
-        fail(`"발송 ID" 칸에 적힌 "${form.billingTarget}"을(를) 찾지 못했습니다. 다음 중 하나를 그대로 적어 주세요: ${targetList}`, 'billing_target_not_found');
+        fail(billingTargetRejectReason('not_found', form.billingTarget), 'billing_target_not_found');
         continue;
       }
       if (match.outcome === 'ambiguous') {
@@ -836,10 +836,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       if (match.outcome !== 'matched' || match.candidate.userId !== unitAcct.userId) {
         // ★2026-09-05 §21-2 7 — "지정한 적도 없는데 반려됐다"로 읽히기 쉬운 자리다(업체 자체 양식의
         //   다른 뜻 라벨이 지정으로 읽힌 경우). 계정이 하나뿐이면 **비우면 된다**는 출구를 같이 준다.
-        fail([
-          `"발송 ID" 칸에 적힌 "${form.billingTarget}"은(는) 이 이메일 주소로 요청할 수 있는 계정이 아닙니다. 이 주소로 요청할 수 있는 계정: ${targetList}`,
-          ...(candidates.length === 1 ? ['(발송 계정이 하나뿐이라 이 칸을 비워 두시면 그대로 접수됩니다)'] : []),
-        ].join(' '), 'billing_target_mismatch');
+        fail(billingTargetRejectReason('mismatch', form.billingTarget, candidates.length === 1), 'billing_target_mismatch');
         continue;
       }
     }

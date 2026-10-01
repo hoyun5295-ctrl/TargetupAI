@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  normalizeSenderEmail, normalizeBillingTargetKey, matchBillingTarget, describeBillingTargets,
+  normalizeSenderEmail, normalizeBillingTargetKey, matchBillingTarget, billingTargetRejectReason,
   senderKeyClash, type SenderCandidate,
 } from '../agency-send-email';
 
@@ -53,8 +53,24 @@ describe('청구 계정 지정 대조(matchBillingTarget) — §18-13', () => {
     expect(matchBillingTarget([KUMKANG, dup], '금강').outcome).toBe('ambiguous');
   });
 
-  it('회신 안내 목록 = "표시명 (로그인ID)" · 표시명 없으면 로그인 ID', () => {
-    expect(describeBillingTargets([KUMKANG, NO_LABEL])).toBe('금강 (kumkang1), plain77');
+  it('★1001 B-1001-5 반송 문구에 발송 계정 목록이 없다 — 적은 값만 되돌리고 표시명 재확인 안내', () => {
+    const nf = billingTargetRejectReason('not_found', 'sgbaek');
+    expect(nf).toBe('"발송 ID" 칸에 적힌 "sgbaek"을(를) 찾지 못했습니다. 처음 설정된 표시명(발송 ID)을 재확인 후 일치하게 기재하여 접수 바랍니다.');
+    expect(billingTargetRejectReason('required', '')).toContain('"발송 ID" 칸에 처음 설정된 표시명(발송 ID)을 재확인 후 일치하게 기재하여 접수 바랍니다.');
+    expect(billingTargetRejectReason('mismatch', 'x', true)).toContain('(발송 계정이 하나뿐이라 이 칸을 비워 두시면 그대로 접수됩니다)');
+    expect(billingTargetRejectReason('mismatch', 'x', false)).not.toContain('하나뿐');
+    for (const s of [nf, billingTargetRejectReason('required', ''), billingTargetRejectReason('mismatch', 'x', true)]) {
+      expect(s).not.toMatch(/다음 중 하나|요청할 수 있는 계정:|kumkang|plain77/);
+    }
+  });
+  it('★1001 B-1001-5 문구 함수는 후보 계정을 인자로 받지 않는다 · 워커에 계정 목록 조립이 없다', () => {
+    expect(billingTargetRejectReason.length).toBeLessThanOrEqual(3);
+    const src = fs.readFileSync(path.resolve(__dirname, '../agency-send-email.ts'), 'utf8');
+    expect(src).toMatch(/export function billingTargetRejectReason\(kind: BillingTargetRejectKind, designation: string, singleAccount = false\): string/);
+    expect(src).not.toContain('describeBillingTargets');
+    const worker = fs.readFileSync(path.resolve(__dirname, '../agency-send-mail-worker.ts'), 'utf8');
+    expect(worker).not.toMatch(/describeBillingTargets|targetList/);
+    expect((worker.match(/billingTargetRejectReason\('(required|not_found|mismatch)'/g) || []).length).toBe(3);
   });
 
   it('정규화 키 = 공백 제거 + lower(등록 라우트의 겹침 예방과 같은 한 벌)', () => {

@@ -22,6 +22,7 @@ import { buildCampaignListCsv, channelPlainLabel, CampaignCsvRow } from '../util
 // ★ 2026-07-23: 에이전트(agent·both) 회사 발송결과에 엔진 통계 유형별 병행 표시
 import { queryPayAgentByType, isPayStatsConfigured } from '../utils/pay-stats';
 import { isSendTypeFilter } from '../utils/send-type-axis';
+import { INDIVIDUAL_CALLBACK_SELECT_EXPR, listCampaignCallbacks } from '../utils/campaign-callback-list';
 
 const router = Router();
 
@@ -326,6 +327,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         c.sent_count, c.success_count, c.fail_count, c.result_final,
         jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number, c.kakao_targeting,
+        ${INDIVIDUAL_CALLBACK_SELECT_EXPR},
         c.subject, c.message_subject, c.mms_image_paths,
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,
@@ -685,6 +687,35 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('캠페인 상세 조회 에러:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ======================================================================
+// GET /api/v1/results/campaigns/:id/callbacks — 실제 발신된 회신번호 목록(★2026-10-01 B-1001-6)
+//   수신자별 회신번호 캠페인의 회신번호 칸 「고객별 회신번호 … 외 N개」와 목록 창이 읽는다. 진실 = 발송 표 call_back(CT campaign-callback-list).
+//   권한은 단건 조회(/campaigns/:id)와 같다 — 회사 + 사용자는 본인 캠페인만.
+// ======================================================================
+router.get('/campaigns/:id/callbacks', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    const { id } = req.params;
+    if (!companyId) return res.status(403).json({ error: '권한이 필요합니다.' });
+    let sql = `SELECT c.id, c.created_by, c.send_config, c.sent_at, c.scheduled_at, c.created_at
+                 FROM campaigns c WHERE c.id = $1 AND c.company_id = $2`;
+    const params: any[] = [id, companyId];
+    if (userType === 'company_user' && userId) {
+      sql += ` AND c.created_by = $3`;
+      params.push(userId);
+    }
+    const found = await query(sql, params);
+    if (found.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+    const items = await listCampaignCallbacks(companyId, found.rows[0]);
+    return res.json({ success: true, total: items.length, items });
+  } catch (error) {
+    console.error('회신번호 목록 조회 에러:', error);
+    return res.status(500).json({ error: '회신번호 목록을 불러오지 못했습니다.' });
   }
 });
 

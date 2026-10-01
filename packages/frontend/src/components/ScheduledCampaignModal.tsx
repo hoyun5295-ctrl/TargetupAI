@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { calculateSmsBytes, buildAdSubjectFront } from '../utils/formatDate';
 import { resolveChannelLabel, isKakaoFamilyChannel } from '../utils/campaign-axis';
 import MmsImagePreview from './shared/MmsImagePreview';
+import CampaignCallbackField from './shared/CampaignCallbackField';
 import SmsCharsetNotice from './SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 
@@ -137,10 +138,10 @@ export default function ScheduledCampaignModal({
                           📋 제목: {buildAdSubjectFront(selectedScheduled.message_subject || selectedScheduled.subject || '', selectedScheduled.message_type, selectedScheduled.is_ad ?? false)}
                         </div>
                       )}
-                      {/* 회신번호 표시 */}
-                      {selectedScheduled.callback_number && (
+                      {/* 회신번호 표시 — ★ 2026-10-01 B-1001-6 수신자별이면 「고객별 회신번호 … 외 N개」 + 목록 창 */}
+                      {(selectedScheduled.callback_number || selectedScheduled.individual_callback === true) && (
                         <div className="text-sm text-gray-500 mt-1">
-                          📞 회신번호: {selectedScheduled.callback_number}
+                          📞 회신번호: <CampaignCallbackField campaign={selectedScheduled} fallback="" refreshKey={selectedScheduled.target_count} />
                         </div>
                       )}
                       {/* ★ 2026-06-26 라프레리 신고: 발송 문안 표시 (캠페인명만 보이고 문안 안 보이던 문제) */}

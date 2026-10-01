@@ -6,7 +6,7 @@
  *      고객은 폰당 1행이라 다매장 업로드 고객(옛 칸 = 브랜드 하나)은 소속된 모든 브랜드에 잡힌다(의도한 넓어짐).
  *   ①-2 몰 동의 발송(Codex R1 high): 타겟 브랜드 조건과 그 브랜드 동의를 같은 소속 행에서 본다 — 범위 [A,B] 계정이 A 를 고를 때 A 거부·B 동의 고객은 빠진다
  *   ② 공용 필터: 'direct'(고객 행 store_code) 모드 폐기 · 호환 래퍼(캠페인·자동발송·미리보기) = 소속 표 · 별칭 없는 경로는 종전 SQL 그대로
- *   ③ 잔존 0: 고객 행 store_code 로 브랜드를 거르는 SQL 이 백엔드에 남지 않는다(수신거부 영구 명부 2곳만 사유와 함께 예외)
+ *   ③ 잔존 0: 고객 행 store_code 로 브랜드를 거르는 SQL 이 백엔드에 남지 않는다(예외 0 — 수신거부 자동 등록 2곳도 CT-03 brandRefusalCopyCond · B-1001-4)
  *   ④ 표시: 관리자 고객 목록·엑셀의 「매장코드」 = 고객 행 값 · 없으면 소속 표 코드들
  */
 import { describe, it, expect } from 'vitest';
@@ -180,28 +180,29 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 describe('③ 잔존 0 — 고객 행 store_code 로 브랜드를 거르는 SQL', () => {
-  it('백엔드 전체에서 c.store_code = … / AND store_code = … (고객 행) 0건 — 수신거부 영구 명부 2곳만 예외', () => {
-    const allow = ['routes/upload.ts', 'utils/unsubscribe-helper.ts'];
+  it('백엔드 전체에서 고객 행 store_code 로 거르는 SQL 0건 — 예외 없음(c. · customers. · customers_unified. · 별칭 없음 · = · IN ( · OR)', () => {
     const bad: string[] = [];
     for (const f of walk(SRC)) {
       const rel = f.slice(SRC.length + 1).replace(/\\/g, '/');
       const lines = readFileSync(f, 'utf8').split('\n');
       lines.forEach((line, i) => {
         if (/^\s*(\/\/|\*)/.test(line)) return;
-        if (lines.slice(Math.max(0, i - 3), i + 1).some((l) => l.includes('customer_stores'))) return; // 소속 표 조회(표 이름이 윗줄)
-        if (/cs\.store_code|cn\.|callback_numbers|p\.store_code|ac\.store_code|cb2?\.store_code/.test(line)) return;
-        if (/\bc\.store_code\s*(=|IN\b)|(AND|WHERE)\s+store_code\s*=\s*(ANY|\$)/.test(line)) {
-          if (allow.includes(rel)) return;
+        // 다른 표의 칸(소속 표 · 회신번호 · 구매 · 자동 캠페인 자체 칸) — 표 이름이 윗줄에 있을 수 있어 3줄을 본다
+        if (lines.slice(Math.max(0, i - 3), i + 1).some((l) => /customer_stores|callback_numbers/.test(l))) return;
+        if (/(cs|bm|mcs|cn|p|ac|cb2?)\.store_code|\$\{hasAssignmentScope/.test(line)) return;
+        if (/\b(c|customers|customers_unified)\.store_code\s*(=|<>|!=|IN\s*\()|(AND|WHERE|OR)\s+\(?store_code\s*(=\s*(ANY|\$)|IN\s*\()/.test(line)) {
           bad.push(`${rel}:${i + 1} ${line.trim().slice(0, 90)}`);
         }
       });
     }
     expect(bad).toEqual([]);
   });
-  it('예외 2곳은 사유 주석을 갖는다(D93 · 영구 수신거부 명부)', () => {
-    for (const rel of ['routes/upload.ts', 'utils/unsubscribe-helper.ts']) {
-      expect(readFileSync(resolve(SRC, rel), 'utf8'), rel).toContain('고객 행 store_code 를 일부러 그대로 쓴다');
-    }
+  it('수신거부 자동 등록 2곳(싱크·관리자 업로드 CT · 브랜드 사용자 업로드)이 같은 판정 함수를 쓴다', () => {
+    const helper = readFileSync(resolve(SRC, 'utils/unsubscribe-helper.ts'), 'utf8');
+    expect((helper.match(/\$\{brandRefusalCopyCond\(/g) || []).length).toBe(2);
+    const upload = readFileSync(resolve(SRC, 'routes/upload.ts'), 'utf8');
+    expect(upload).toContain("registerUploaderOwnUnsubscribes(companyId, userId, userStoreCodes, 'db_upload')");
+    expect(upload).not.toMatch(/ANY\(\$3\)/);
   });
 });
 

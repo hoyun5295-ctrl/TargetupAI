@@ -31,6 +31,17 @@ export async function getMallConsentStoreCodes(companyId: string): Promise<strin
   return Array.from(new Set((r.rows as { store_code: string }[]).map((x) => String(x.store_code)).filter(Boolean)));
 }
 
+/**
+ * ★ 2026-10-01 "이 코드 묶음에 몰 동의 코드가 하나라도 있는가"의 SQL 조각 — getMallConsentStoreCodes 와 **같은 진실**(자사몰 연동 행 meta.store_code ·
+ *   해제된 연동 포함) · resolveSendConsent 와 **같은 단위**(계정 코드 중 하나라도 몰 동의 코드면 그 계정은 몰 동의로 판정된다).
+ *   SQL 안에서 계정마다 판정해야 하는 쓰기(수신거부 자동 등록 · B-1001-4)가 쓴다. 앱으로 목록을 먼저 읽어 넘기면 두 판정이 갈릴 틈이 생긴다.
+ * @param companyRef 회사 id 식(예: '$1')
+ * @param codesRef   분류코드 배열 식(예: 'u.store_codes' · '$4::text[]')
+ */
+export function mallConsentCodeAmong(companyRef: string, codesRef: string): string {
+  return `EXISTS (SELECT 1 FROM company_integrations mci WHERE mci.company_id = ${companyRef} AND mci.meta->>'store_code' = ANY(${codesRef}))`;
+}
+
 function enforceList(): string[] {
   return String(process.env[ENFORCE_ENV] || '').split(',').map((s) => s.trim()).filter(Boolean);
 }

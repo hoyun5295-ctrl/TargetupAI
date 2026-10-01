@@ -31,6 +31,7 @@ import { getStoreScope } from '../utils/store-scope';
 import { canAccessOwnedRow } from '../utils/owner-scope';
 import { buildSendConsent, resolveSendConsent, isMallConsentMigrationPending, MALL_CONSENT_MIGRATION_PENDING } from '../utils/mall-consent';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
+import { INDIVIDUAL_CALLBACK_SELECT_EXPR } from '../utils/campaign-callback-list';
 // ★ 메시징 컨트롤타워 import
 import {
   toKoreaTimeStr,
@@ -194,6 +195,7 @@ router.get('/', async (req: Request, res: Response) => {
         TO_CHAR(c.event_start_date, 'YYYY-MM-DD') as event_start_date,
         TO_CHAR(c.event_end_date, 'YYYY-MM-DD') as event_end_date,
         c.message_content, c.message_template, c.subject, c.message_subject, c.is_ad, c.callback_number,
+        ${INDIVIDUAL_CALLBACK_SELECT_EXPR},
         c.mms_image_paths,
         c.send_config, c.result_final, c.sent_count, c.success_count, c.fail_count,
         ${CAMPAIGN_OPT080_SELECT_EXPR}
