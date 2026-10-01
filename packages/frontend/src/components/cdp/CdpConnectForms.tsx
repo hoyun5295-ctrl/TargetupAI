@@ -938,7 +938,7 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
           <div className="text-xs font-semibold text-violet-900">{malls.length > 0 ? '몰 추가' : '몰 연결 · 클릭 1회'}</div>
           <GuideStep n={1}>쇼핑몰 주소를 넣고 <strong className="text-slate-800">관리자 승인으로 연결</strong>을 누르면 그 몰의 우커머스 승인 창이 열립니다.</GuideStep>
           <GuideStep n={2}>몰 관리자로 로그인해 "승인"을 누르면 REST 키와 웹훅 {WOO_WEBHOOK_TOPICS.length}개({WOO_WEBHOOK_TOPICS.map((t) => WOO_TOPIC_LABEL[t].split('(')[0]).join('·')})가 자동으로 만들어지고 최근 90일 회원·주문이 들어옵니다.</GuideStep>
-          <GuideStep n={3}>마케팅 수신동의를 커스텀 필드로 받고 있다면 그 필드의 메타키를 적어 주세요(코드엠샵 회원가입 폼이면 <code className="text-emerald-800">mssms_agreement</code>). 비워 두면 수신동의는 반영되지 않습니다(기본 미동의).</GuideStep>
+          <GuideStep n={3}>마케팅 수신동의를 커스텀 필드로 받고 있다면 그 필드의 메타키를 적어 주세요(코드엠샵 회원가입 폼이면 <code className="text-emerald-800">mssms_agreement_label</code>). 비워 두면 수신동의는 반영되지 않습니다(기본 미동의).</GuideStep>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -958,7 +958,7 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
               type="text"
               value={p.consentMetaKey}
               onChange={(e) => p.onConsentMetaKeyChange(e.target.value)}
-              placeholder="예: mssms_agreement"
+              placeholder="예: mssms_agreement_label"
               className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 font-mono"
             />
           </div>

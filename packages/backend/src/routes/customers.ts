@@ -15,6 +15,7 @@ import { renderFieldValue } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope, getOwnerCustomerScopeSql, storeMembershipClause, storeMembershipCond, storeCodeDisplayExpr } from '../utils/store-scope';
+import { purchaseHistorySourceSql } from '../utils/purchase-history-source';
 import {
   buildExtractSelect, buildKeptSelect, flattenExtractRow, keepExtraction, readExtractionState, searchExtraction, readExtractionRows,
   removeFromExtraction, fillExtractionCallback, resolveExtractionScope,
@@ -1644,7 +1645,8 @@ router.get('/purchases/overview', async (req: Request, res: Response) => {
     const whereSql = where.join(' AND ');
     // base customers 조인(id PK 1:1) — customers_unified는 (company_id·phone·name) 중복제거 뷰라
     //   구매가 가리키는 id가 dedup 탈락 행이면 매출이 조용히 누락됨. 개별 모달(/:id/purchases)도 base customers 사용(정합).
-    const fromJoin = 'FROM purchases p JOIN customers c ON c.id = p.customer_id AND c.company_id = p.company_id';
+    // ★ 2026-10-01 B-1001-7 원천 = 구매 원장 + 자사몰 결제 확정 주문(CT purchase-history-source · 원장은 쓰지 않는다 · 같은 칸 모양)
+    const fromJoin = `FROM ${purchaseHistorySourceSql('$1')} JOIN customers c ON c.id = p.customer_id AND c.company_id = p.company_id`;
 
     // ===== 요약 타일 (선택 기간 전체 범위 — 페이지 무관) =====
     const summaryRes = await query(
@@ -1780,16 +1782,18 @@ router.get('/:id/purchases', async (req: Request, res: Response) => {
       return res.status(404).json({ error: '고객을 찾을 수 없습니다.' });
     }
 
+    // ★ 2026-10-01 B-1001-7 원천 = 구매 원장 + 자사몰 결제 확정 주문(목록 탭과 같은 CT)
     const [summary, list] = await Promise.all([
       query(
-        'SELECT COUNT(*)::int AS total_count, COALESCE(SUM(total_amount), 0) AS total_amount FROM purchases WHERE customer_id = $1 AND company_id = $2',
+        `SELECT COUNT(*)::int AS total_count, COALESCE(SUM(p.total_amount), 0) AS total_amount
+           FROM ${purchaseHistorySourceSql('$2')} WHERE p.customer_id = $1`,
         [id, companyId]
       ),
       query(
-        `SELECT TO_CHAR(purchase_date, 'YYYY-MM-DD') AS purchase_date, total_amount, quantity, store_code, store_name
-         FROM purchases
-         WHERE customer_id = $1 AND company_id = $2
-         ORDER BY purchase_date DESC, id DESC
+        `SELECT TO_CHAR(p.purchase_date, 'YYYY-MM-DD') AS purchase_date, p.total_amount, p.quantity, p.store_code, p.store_name
+         FROM ${purchaseHistorySourceSql('$2')}
+         WHERE p.customer_id = $1
+         ORDER BY p.purchase_date DESC, p.id DESC
          LIMIT $3 OFFSET $4`,
         [id, companyId, limit, offset]
       ),

@@ -95,6 +95,7 @@ export async function pickStoreCodeForConnect(actor: IntegrationActor, requested
  * 브라우저 수집(SDK)은 회사당 공개키가 하나라 어느 몰인지 Origin 만 안다.
  * Origin 호스트를 몰 식별자와 같은 함수로 정규화해 그 회사 연동 행의 분류코드를 찾는다.
  * 못 찾으면 null = 지금처럼 분류 없이 적재. ⛔ 실패를 던지지 않는다(수집을 막지 않는다).
+ * ★ 2026-10-01 도메인을 옮긴 몰 — 연동 행의 증명된 주소(meta.woo_seen_hosts · 서명 검증된 웹훅이 채운다)도 같은 몰로 본다.
  */
 export async function resolveStoreCodeByOriginHost(companyId: string, originOrHost: string | null | undefined): Promise<string | null> {
   const mallId = normalizeWooMallId(String(originOrHost || ''));
@@ -103,9 +104,9 @@ export async function resolveStoreCodeByOriginHost(companyId: string, originOrHo
     const r = await query(
       `SELECT meta->>'store_code' AS store_code
          FROM company_integrations
-        WHERE company_id = $1::uuid AND mall_id = $2 AND status <> 'revoked'
+        WHERE company_id = $1::uuid AND (mall_id = $2 OR (meta->'woo_seen_hosts') ? $2) AND status <> 'revoked'
           AND COALESCE(meta->>'store_code', '') <> ''
-        ORDER BY created_at ASC
+        ORDER BY (mall_id = $2) DESC, created_at ASC
         LIMIT 1`,
       [companyId, mallId],
     );

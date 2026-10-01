@@ -126,7 +126,7 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
     if (provider.startsWith('woocommerce:')) {
       const integ = await wooMallOf(companyId, provider, await resolveIntegrationActor(req.user));
       if (!integ) return res.status(404).json({ success: false, error: '우커머스 연동이 없는 몰입니다.' });
-      const products = await fetchWooStoreProducts(integ.siteUrl, { q, limit });
+      const products = await fetchWooStoreProducts(integ.siteUrl, { q, limit }, integ.mallId);
       return res.json({ success: true, provider, products });
     }
 

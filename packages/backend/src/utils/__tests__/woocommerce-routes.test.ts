@@ -71,7 +71,9 @@ describe('routes/woocommerce.ts — 인증 라우트(★0918 권한 CT 경유 ·
     // 변경 라우트 셋(연결 · secret 재발급 · 해제)은 몰을 읽은 뒤 소유 게이트를 지난다
     expect(block("'/connect'", "'/connect-url'")).toMatch(/getWooIntegration\([\s\S]{0,300}gateMall\(res, actor, integ\.storeCode\)/);
     expect(block("'/rotate-secret'", "'/status'")).toMatch(/getWooIntegration\([\s\S]{0,200}gateMall\(res, actor, owned\.storeCode\)/);
-    expect(block("'/disconnect'", 'export default')).toMatch(/getWooIntegration\([\s\S]{0,200}gateMall\(res, actor, owned\.storeCode\)/);
+    // ★1001 해제의 소유 판정은 행을 잠근 같은 잠금 안에서 한다(client disconnectWoo 의 allow) — 먼저 읽어 판정하면 판정과 끊기 사이가 벌어진다
+    expect(block("'/disconnect'", 'export default')).toMatch(/disconnectWoo\(companyId, mallId, \(existing\) => \{\s*if \(!canTouchIntegration\(actor, existing\.storeCode\)\) throw new WooSaveRejected\(403, 'MALL_OWNED_BY_OTHER_STORE'\);/);
+    expect(block("'/disconnect'", 'export default')).not.toMatch(/getWooIntegration\(|gateMall\(/);
     // 저장 계열(자격 저장 · 1클릭 시작)은 기존 행의 소유·변경 규칙을 decideStoreCode 로 지난다
     expect(block("'/credentials'", "'/connect'")).toContain('decideStoreCode(');
     expect(block("'/connect-url'", "'/rotate-secret'")).toContain('decideStoreCode(');
@@ -205,10 +207,28 @@ describe('① 1클릭 연결 라우트 — connect-url(관리자) · auth-callba
     expect(r).toContain('buildWooPluginZip(');
     expect(r).toContain("'application/zip'");
   });
-  it('disconnect 는 몰의 웹훅을 먼저 지우려 시도한다(실패해도 해제는 진행)', () => {
+  // ★1001 Codex R1~R6 — 행은 권한 판정 직후 즉시 끊고(줄에 세우지 않는다 · 기다렸다 끊으면 그 사이 다른 담당자가 되살린 연결을 끊는다),
+  //   웹훅 제거만 그 몰의 웹훅 줄에 선다(제거는 줄 안에서 행을 새로 읽어 해제된 행이 아니면 아무것도 하지 않는다).
+  it('disconnect: 권한 판정과 행 끊기는 한 호출(같은 잠금 안) → 웹훅 제거(줄) 순 · 제거 실패해도 해제는 끝났다 · 거부는 사유 문장으로 답한다', () => {
     const r = route();
     const block = r.slice(r.indexOf("'/disconnect'"), r.indexOf('export default router'));
-    expect(block.indexOf('removeWooWebhooks(')).toBeLessThan(block.indexOf('disconnectWoo('));
+    const cut = block.indexOf('const ok = await disconnectWoo(companyId, mallId, (existing) => {');
+    const rm = block.indexOf('const removed = await removeWooWebhooks(companyId, mallId).catch(() => 0);');
+    expect(cut).toBeGreaterThan(-1);
+    expect(rm).toBeGreaterThan(cut);
+    // 행 끊기·제거 호출은 각각 한 번뿐이다 · 라우트가 먼저 행을 읽어 판정하지 않는다
+    expect((block.match(/disconnectWoo\(/g) || []).length).toBe(1);
+    expect((block.match(/removeWooWebhooks\(/g) || []).length).toBe(1);
+    expect(block).toContain('if (err instanceof WooSaveRejected) return sendWooError(res, err);');
+    expect(r).not.toContain('disconnectWooMall');
+    const client = readFileSync(resolve(SRC, 'utils', 'woocommerce-client.ts'), 'utf-8');
+    expect(client).not.toContain('export function disconnectWooMall(');
+    // 행 끊기 함수는 웹훅 줄을 쓰지 않는다(기다렸다 끊지 않는다) · 행 잠금 → 게이트 → 끊기 순
+    const cutFn = client.slice(client.indexOf('export async function disconnectWoo('), client.indexOf('export interface WooMallStatus'));
+    expect(cutFn).not.toContain('runSerial(');
+    expect(cutFn.indexOf('FOR UPDATE')).toBeGreaterThan(-1);
+    expect(cutFn.indexOf('if (allow) allow(toIntegration(row));')).toBeGreaterThan(cutFn.indexOf('FOR UPDATE'));
+    expect(cutFn.indexOf("SET status = 'revoked'")).toBeGreaterThan(cutFn.indexOf('if (allow) allow(toIntegration(row));'));
   });
 });
 
@@ -226,7 +246,8 @@ describe('② 플러그인 — wp-plugin/hanjullo-woocommerce 소스 계약', ()
     expect(p).toContain('window.hjl.identify(');
     expect(p).toContain("add_filter( 'woocommerce_rest_prepare_customer'");
     expect(p).toContain("add_filter( 'woocommerce_rest_prepare_shop_order_object'");
-    expect(p).toContain('mssms_agreement');
+    // ★1001 수신동의 값이 든 키 = mssms_agreement_label(YES/NO) — 안 쓰는 필드 mssms_agreement 를 기본으로 지정하지 않는다(이에스페이먼트 접수)
+    expect(p).toContain("define( 'HANJULLO_DEFAULT_CONSENT_KEYS', 'mssms_agreement_label,email_agreement_label' );");
     expect(p).toContain("add_action( 'admin_menu'");
   });
   it('SDK 경로·버전은 서버(cdp-sdk-script 와 같은 값)를 쓰고 · 모델명·서버 IP·비밀값이 없다', () => {

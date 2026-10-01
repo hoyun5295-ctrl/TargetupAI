@@ -39,10 +39,12 @@ import {
   clearWooSetupError,
   getWooStatus,
   disconnectWoo,
+  removeWooWebhooks,
   saveWooRestKeysFromAuth,
   ensureWooWebhooks,
-  removeWooWebhooks,
   recordWooSetupError,
+  noteWooSeenHost,
+  type WooIntegration,
 } from '../utils/woocommerce-client';
 // ★ ① 1클릭 연결 — 우커머스 내장 앱 인증(/wc-auth/v1/authorize) · state 서명 CT · 플러그인 zip
 import { signWooAuthState, verifyWooAuthState, buildWooAuthorizeUrl } from '../utils/woocommerce-auth-state';
@@ -99,9 +101,14 @@ router.post(['/webhook/:mallId', '/webhook'], json({ limit: '1mb', verify: (req:
     }
 
     // 첫 서명 통과 = 연결 신호(REST 키 없이 웹훅만 붙인 몰도 여기서 active 가 된다)
-    if (integ.status !== 'active' || !integ.connectedAt) await markWooConnected(integ.companyId, mallId);
+    if (integ.status !== 'active' || !integ.connectedAt) await markWooConnected(integ.companyId, integ.mallId);
+    // ★ 2026-10-01 서명이 검증된 본문이 말하는 몰 주소를 그 몰의 증명된 주소로 적는다(도메인 이전·다중 도메인 추적 · 새 호스트일 때만 쓰기).
+    //   실패해도 수신은 계속한다 — 주소 기록 때문에 주문을 놓치면 안 된다.
+    await noteWooSeenHost(integ, body).catch((e: any) => console.warn('[WooCommerce Webhook] 몰 주소 기록 실패(수신은 계속):', e?.message || e));
 
-    const event = buildWooEvent(mallId, topic);
+    // ★ 2026-10-01 여기부터는 서명이 맞은 행의 몰 식별자만 쓴다 — 요청의 주소(mallId)는 그 몰의 다른 주소(증명 주소)일 수 있다.
+    //   그 주소로 이벤트를 만들면 주문번호 접두({몰}:{번호})가 갈려 같은 주문이 두 번 들어간다.
+    const event = buildWooEvent(integ.mallId, topic);
     const deliveryId = wooHeader(headers, 'x-wc-webhook-delivery-id');
     const idempotencyKey = woocommerceAdapter.buildIdempotencyKey(event, body, { ...body, ...(deliveryId ? { delivery_id: deliveryId } : {}) });
 
@@ -113,7 +120,7 @@ router.post(['/webhook/:mallId', '/webhook'], json({ limit: '1mb', verify: (req:
       )
       ON CONFLICT (company_id, source, idempotency_key) DO NOTHING
       RETURNING id`,
-      [integ.companyId, event, idempotencyKey, JSON.stringify({ mall_id: mallId, topic, delivery_id: deliveryId, resource: body })],
+      [integ.companyId, event, idempotencyKey, JSON.stringify({ mall_id: integ.mallId, topic, delivery_id: deliveryId, resource: body })],
     );
 
     if (insertRes.rows.length === 0) {
@@ -300,37 +307,44 @@ function gateMall(res: Response, actor: IntegrationActor, storeCode: string | nu
   return false;
 }
 
+/** 저장·해제 권한 게이트의 거부 — client CT 의 잠금 안에서 던지고 라우트가 사유 문장으로 답한다. */
+class WooSaveRejected extends Error {
+  constructor(public httpStatus: number, public lockCode: Parameters<typeof integrationLockMessage>[0]) { super(lockCode); }
+}
+
 /**
  * 새로 저장하는 몰의 분류코드를 정한다(권한 CT) + 이미 있는 몰이면 소유·변경 규칙을 건다.
- * 반환 = 저장에 넘길 storeCode(undefined = 기존 행 값 유지) · 거부면 응답을 보내고 null.
+ * 반환 = 저장 CT 에 넘길 게이트(decide) · 분류코드를 못 정하면 응답을 보내고 null.
+ * ★ 2026-10-01 (Codex R1) 게이트는 **저장 CT 가 대상 행을 정한 뒤 같은 잠금 안에서** 돈다(saveWooCredentials decide) —
+ *   여기서 먼저 행을 찾아 판정하면, 판정과 저장 사이에 그 주소가 다른 담당자 몰의 증명 주소가 됐을 때 소유 검사 없이 덮어쓴다.
  */
-async function decideStoreCode(req: Request, res: Response, actor: IntegrationActor, companyId: string, siteUrl: string): Promise<{ storeCode: string | null | undefined } | null> {
+async function decideStoreCode(req: Request, res: Response, actor: IntegrationActor): Promise<{ decide: (existing: WooIntegration | null) => { storeCode: string | null | undefined } } | null> {
   const pick = await pickStoreCodeForConnect(actor, req.body?.store_code);
   if (!pick.ok) {
     res.status(400).json({ success: false, error: integrationLockMessage(pick.code), code: pick.code });
     return null;
   }
-  const mallId = normalizeWooMallId(siteUrl);
-  const existing = mallId ? await getWooIntegration(companyId, mallId) : undefined;
-  if (existing) {
-    if (!canTouchIntegration(actor, existing.storeCode)) {
-      res.status(409).json({ success: false, error: integrationLockMessage('MALL_OWNED_BY_OTHER_STORE'), code: 'MALL_OWNED_BY_OTHER_STORE' });
-      return null;
-    }
-    // 몰 1행 = 분류코드 1개. 관리자가 다른 코드로 다시 저장하려 하면 거부(해제 뒤 재연결이 길이다).
-    if (actor.kind === 'admin' && pick.storeCode !== null && pick.storeCode !== existing.storeCode) {
-      res.status(409).json({ success: false, error: integrationLockMessage('STORE_CODE_CHANGE_NOT_SUPPORTED'), code: 'STORE_CODE_CHANGE_NOT_SUPPORTED' });
-      return null;
-    }
-  }
-  return { storeCode: existing ? undefined : pick.storeCode };
+  return {
+    decide: (existing) => {
+      if (existing) {
+        if (!canTouchIntegration(actor, existing.storeCode)) throw new WooSaveRejected(409, 'MALL_OWNED_BY_OTHER_STORE');
+        // 몰 1행 = 분류코드 1개. 관리자가 다른 코드로 다시 저장하려 하면 거부(해제 뒤 재연결이 길이다).
+        if (actor.kind === 'admin' && pick.storeCode !== null && pick.storeCode !== existing.storeCode) throw new WooSaveRejected(409, 'STORE_CODE_CHANGE_NOT_SUPPORTED');
+      }
+      return { storeCode: existing ? undefined : pick.storeCode };
+    },
+  };
 }
 
 /** WooApiError → 상태코드. 몰 서버 쪽 문제(network·rate_limited·http·header_overflow)는 502, 입력·권한 문제는 400. */
 function sendWooError(res: Response, err: unknown): void {
+  if (err instanceof WooSaveRejected) {
+    res.status(err.httpStatus).json({ success: false, error: integrationLockMessage(err.lockCode), code: err.lockCode });
+    return;
+  }
   if (err instanceof WooApiError) {
     const upstream = err.code === 'network' || err.code === 'rate_limited' || err.code === 'http' || err.code === 'header_overflow';
-    res.status(upstream ? 502 : 400).json({ success: false, error: err.message, code: `WOO_${err.code}` });
+    res.status(upstream ? 502 : err.code === 'busy' ? 409 : 400).json({ success: false, error: err.message, code: `WOO_${err.code}` });
     return;
   }
   res.status(500).json({ success: false, error: (err as any)?.message || '우커머스 처리 중 오류가 발생했습니다.' });
@@ -351,14 +365,14 @@ router.post('/credentials', async (req: Request, res: Response) => {
     if (!(await isCdpEnabledForPlan(companyId))) return res.status(403).json(PLAN_LOCKED);
     const siteUrl = String(req.body?.site_url || '').trim();
     if (!siteUrl) return res.status(400).json({ success: false, error: '쇼핑몰 주소(site_url)를 입력해주세요.' });
-    const decided = await decideStoreCode(req, res, actor, companyId, siteUrl);
+    const decided = await decideStoreCode(req, res, actor);
     if (!decided) return;
     const r = await saveWooCredentials(companyId, {
       siteUrl,
       consumerKey: String(req.body?.consumer_key || ''),
       consumerSecret: String(req.body?.consumer_secret || ''),
       consentMetaKey: String(req.body?.consent_meta_key || ''),
-      storeCode: decided.storeCode,
+      decide: decided.decide,
     });
     return res.json({
       success: true,
@@ -425,9 +439,9 @@ router.post('/connect-url', async (req: Request, res: Response) => {
     const siteUrl = String(req.body?.site_url || '').trim();
     if (!siteUrl) return res.status(400).json({ success: false, error: '쇼핑몰 주소(site_url)를 입력해주세요.' });
     // ★ 분류코드는 여기(세션으로 몰 행을 만드는 시점)에서 정한다. 승인 콜백은 이미 있는 행에 키만 얹으므로 state 에 실을 필요가 없다.
-    const decided = await decideStoreCode(req, res, actor, companyId, siteUrl);
+    const decided = await decideStoreCode(req, res, actor);
     if (!decided) return;
-    const saved = await saveWooCredentials(companyId, { siteUrl, consumerKey: '', consumerSecret: '', consentMetaKey: String(req.body?.consent_meta_key || ''), storeCode: decided.storeCode });
+    const saved = await saveWooCredentials(companyId, { siteUrl, consumerKey: '', consumerSecret: '', consentMetaKey: String(req.body?.consent_meta_key || ''), decide: decided.decide });
     const integ = await getWooIntegration(companyId, saved.mallId);
     if (!integ) return res.status(500).json({ success: false, error: '몰 저장 뒤 조회에 실패했습니다.' });
 
@@ -516,14 +530,18 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
     const { companyId, actor } = g;
     const mallId = normalizeWooMallId(String(req.query?.mall_id || ''));
     if (!mallId) return res.status(400).json({ success: false, error: '몰 식별자(mall_id)가 올바르지 않습니다.' });
-    const owned = await getWooIntegration(companyId, mallId);
-    if (owned && !gateMall(res, actor, owned.storeCode)) return;
-    // 1클릭 연결이 만든 웹훅은 몰에서도 지운다(최선 노력 · 실패해도 해제는 진행)
+    // ★ 2026-10-01 권한 판정과 행 끊기는 **같은 잠금 안에서** 한다(client disconnectWoo 의 allow — Codex R7).
+    //   여기서 먼저 행을 읽어 판정하면, 판정과 끊기 사이에 다른 담당자가 되살린 연결을 판정 없이 끊는다.
+    //   행은 즉시 끊는다(줄에 세우지 않는다). 웹훅 제거만 그 몰의 웹훅 줄에 서고, 제거는 줄 안에서 행을 새로 읽어 해제된 행이 아니면 아무것도 하지 않는다.
+    const ok = await disconnectWoo(companyId, mallId, (existing) => {
+      if (!canTouchIntegration(actor, existing.storeCode)) throw new WooSaveRejected(403, 'MALL_OWNED_BY_OTHER_STORE');
+    });
+    // 1클릭 연결이 만든 웹훅은 몰에서도 지운다(실패해도 해제는 끝났다 · 미완료 표시가 남아 주기 워커가 이어서 정리한다)
     const removed = await removeWooWebhooks(companyId, mallId).catch(() => 0);
     if (removed > 0) console.log(`[WooCommerce /disconnect] 웹훅 ${removed}개 제거 mall=${mallId}`);
-    const ok = await disconnectWoo(companyId, mallId);
     return res.json({ success: ok });
   } catch (err: any) {
+    if (err instanceof WooSaveRejected) return sendWooError(res, err);
     console.error('[WooCommerce /disconnect] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '연동 해제 실패' });
   }

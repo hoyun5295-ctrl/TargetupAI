@@ -43,7 +43,7 @@ export async function matchMallProductByName(companyId: string, name: string, pr
         const mallId = normalizeWooMallId(prov.slice('woocommerce:'.length));
         const integ = mallId ? await getWooIntegration(companyId, mallId).catch(() => undefined) : undefined;
         if (!integ) continue;
-        products = await fetchWooStoreProducts(integ.siteUrl, { q: name, limit: 20 });
+        products = await fetchWooStoreProducts(integ.siteUrl, { q: name, limit: 20 }, integ.mallId);
       }
       if (linkNo) {
         const byId = products.find((p) => String(p.code) === linkNo || extractMallProductNo(p.productUrl) === linkNo);

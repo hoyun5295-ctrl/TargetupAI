@@ -16,7 +16,10 @@
  */
 
 import { query } from '../config/database';
-import { syncWooOrdersSince, enqueueWooBackfill, WooApiError, DEFAULT_BACKFILL_DAYS } from './woocommerce-client';
+import {
+  syncWooOrdersSince, enqueueWooBackfill, ensureWooWebhooks, startWooOrderReread, removeWooWebhooks, listWooWebhookCleanupTargets,
+  WooApiError, DEFAULT_BACKFILL_DAYS, MAX_SYNC_ORDERS,
+} from './woocommerce-client';
 import { isCdpEnabledForPlan } from './cdp-auth';
 
 /** 주기 — 몰 서버(공유 호스팅일 수 있다)에 몰아치지 않는다. */
@@ -38,6 +41,9 @@ export const MAX_WINDOW_DAYS = DEFAULT_BACKFILL_DAYS;
 /** 몰 간 간격 — 외부 서버에 몰아치지 않는다. */
 const MALL_GAP_MS = 1000;
 
+/** 한 회차 상한에 닿았는데 주문 다시 읽기로 넘기지 못한 회차의 사유(화면 "조치 필요" 근거 · 고객이 읽는 말) */
+const TRUNCATED_MESSAGE = '주문이 한 번에 읽을 수 있는 양보다 많아 수집이 밀려 있습니다. 자동으로 이어서 읽습니다.';
+
 let running = false;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -46,7 +52,7 @@ interface WooSyncTarget {
   mall_id: string;
   last_synced_at: Date | null;
   connected_at: Date | null;
-  meta: { woo_consumer_key?: string; woo_consumer_secret?: string; woo_backfill?: { stage?: string; requested?: boolean } } | null;
+  meta: { woo_consumer_key?: string; woo_consumer_secret?: string; woo_key_permissions?: string; woo_backfill?: { stage?: string; requested?: boolean } } | null;
 }
 
 /**
@@ -137,15 +143,48 @@ export async function runWooSyncPass(): Promise<WooSyncPassResult> {
         continue;
       }
 
+      // ★ 2026-10-01 주문 상태 규칙이 바뀌었다 — **이미 가져오기를 끝낸 몰**의 최근 주문을 한 번 다시 읽는다(판정·줄 세우기는 client 소유).
+      //   새 몰을 워커가 스스로 가져오는 것이 아니다(끝난 가져오기가 없는 몰은 false). 다시 읽는 회차에는 주기 수집을 건너뛴다(같은 몰에 두 흐름 금지).
+      if (await startWooOrderReread(row.company_id, row.mall_id, 'rule')) {
+        result.skipped++;
+        continue;
+      }
+
       if (isGapBeyondWindow(row.last_synced_at, row.connected_at, now)) {
         console.warn(`[Woo Sync] 공백이 ${MAX_WINDOW_DAYS}일을 넘음 — 그보다 과거 주문은 이 연동으로 가져오지 않는다(company=${row.company_id} mall=${row.mall_id}).`);
       }
 
       const since = resolveWooSince(row.last_synced_at, row.connected_at, now);
       const r = await syncWooOrdersSince(row.company_id, row.mall_id, since);
+      result.imported += r.imported;
+
+      // ★ 2026-10-01 한 회차 상한에 닿았다 = 남은 주문을 이 회차가 못 읽었다. 조용히 버리지 않는다 —
+      //   상한 없는 주문 다시 읽기(진행 저장 · 이어 가기)로 넘긴다(몰 서버가 modified_after 를 몰라 회차마다 닿아도 하루 한 번까지).
+      //   넘기지 못한 회차는 **커서를 전진시키지 않는다**(Codex 1001 R1) — 전진하면 남은 주문이 겹침 창 밖으로 밀려 영영 안 읽힌다.
+      //   다음 회차가 같은 창을 다시 읽고(적재는 멱등), 다시 읽기로 넘어간 뒤에야 커서가 나간다.
+      if (r.truncated && !(await startWooOrderReread(row.company_id, row.mall_id, 'truncated').catch(() => false))) {
+        result.failed++;
+        await markFailure(row.company_id, row.mall_id, 'truncated', TRUNCATED_MESSAGE).catch((e) => console.error('[Woo Sync] 실패 기록 실패:', e));
+        console.warn(`[Woo Sync] 한 회차 상한(${MAX_SYNC_ORDERS}건)에 닿음 · 커서 유지 company=${row.company_id} mall=${row.mall_id}`);
+        await sleep(MALL_GAP_MS);
+        continue;
+      }
+      if (r.truncated) console.warn(`[Woo Sync] 한 회차 상한(${MAX_SYNC_ORDERS}건)에 닿음 · 주문 다시 읽기로 넘김 company=${row.company_id} mall=${row.mall_id}`);
       await markSuccess(row.company_id, row.mall_id);
       result.synced++;
-      result.imported += r.imported;
+
+      // ★ 2026-10-01 우리 웹훅 4개 점검 — 없으면 만들고 꺼졌으면(disabled) 다시 켠다. 쓰기 권한 키(1클릭 연결)만.
+      //   실패는 수집 성공을 뒤집지 않는다(웹훅이 꺼져도 이 주기 수집이 안전망으로 돈다).
+      if (String(row.meta?.woo_key_permissions || '').includes('write')) {
+        try {
+          const wh = await ensureWooWebhooks(row.company_id, row.mall_id);
+          if (wh.created + wh.reactivated > 0) {
+            console.log(`[Woo Sync] 웹훅 복구 company=${row.company_id} mall=${row.mall_id} 새로 만듦 ${wh.created} · 다시 켬 ${wh.reactivated}`);
+          }
+        } catch (whErr: any) {
+          console.warn(`[Woo Sync] 웹훅 점검 실패(수집은 성공) company=${row.company_id} mall=${row.mall_id} — ${whErr?.message || whErr}`);
+        }
+      }
     } catch (err: any) {
       result.failed++;
       const code = err instanceof WooApiError ? err.code : 'unknown';
@@ -153,6 +192,14 @@ export async function runWooSyncPass(): Promise<WooSyncPassResult> {
       await markFailure(row.company_id, row.mall_id, code, message).catch((e) => console.error('[Woo Sync] 실패 기록 실패:', e));
       console.error(`[Woo Sync] 수집 실패 company=${row.company_id} mall=${row.mall_id} code=${code} — ${message}`);
     }
+    await sleep(MALL_GAP_MS);
+  }
+
+  // ★ 2026-10-01 해제 뒤 웹훅 정리가 덜 끝난 몰(몰 목록을 못 읽었거나 못 지운 것이 남음)을 이어서 정리한다(판정·기한·제거는 client 소유).
+  //   실패해도 이 회차의 수집 결과와 무관하다 — 다음 회차가 다시 한다.
+  for (const t of await listWooWebhookCleanupTargets().catch(() => [])) {
+    const n = await removeWooWebhooks(t.companyId, t.mallId).catch((e: any) => { console.warn(`[Woo Sync] 해제 몰 웹훅 정리 실패 mall=${t.mallId} — ${e?.message || e}`); return 0; });
+    if (n > 0) console.log(`[Woo Sync] 해제 몰 웹훅 정리 company=${t.companyId} mall=${t.mallId} 지움 ${n}`);
     await sleep(MALL_GAP_MS);
   }
 

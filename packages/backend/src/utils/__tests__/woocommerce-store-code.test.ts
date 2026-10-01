@@ -6,7 +6,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
+vi.mock('../../config/database', () => {
+  // 잠금(트랜잭션) 안 쿼리도 같은 모의로 잡는다 — pool.connect() 의 client.query = query
+  const query = vi.fn(async () => ({ rows: [] }));
+  return { query, pool: { connect: async () => ({ query, release: () => undefined }) } };
+});
 vi.mock('axios', () => ({ default: { get: vi.fn(), request: vi.fn() } }));
 vi.mock('../cdp-identity', async (orig) => ({ ...(await orig<any>()), identifyCustomer: vi.fn(async () => ({ customerId: 'c', linkId: 'l', wasCreated: true, wasMerged: false })) }));
 vi.mock('../cdp-orders', async (orig) => ({ ...(await orig<any>()), syncOrder: vi.fn(async () => ({ customerId: 'c', linkId: 'l', wasCustomerCreated: false, rfmUpdated: true })) }));

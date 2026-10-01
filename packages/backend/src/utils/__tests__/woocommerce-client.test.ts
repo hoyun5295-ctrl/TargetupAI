@@ -5,7 +5,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
+vi.mock('../../config/database', () => {
+  // 잠금(트랜잭션) 안 쿼리도 같은 모의로 잡는다 — pool.connect() 의 client.query = query
+  const query = vi.fn(async () => ({ rows: [] }));
+  return { query, pool: { connect: async () => ({ query, release: () => undefined }) } };
+});
 vi.mock('axios', () => ({ default: { get: vi.fn(), request: vi.fn() } }));
 vi.mock('../cdp-identity', async (orig) => ({ ...(await orig<any>()), identifyCustomer: vi.fn(async () => ({ customerId: 'c', linkId: 'l', wasCreated: true, wasMerged: false })) }));
 vi.mock('../cdp-orders', async (orig) => ({ ...(await orig<any>()), syncOrder: vi.fn(async () => ({ customerId: 'c', linkId: 'l', wasCustomerCreated: false, rfmUpdated: true })) }));
@@ -585,12 +589,12 @@ describe('① 1클릭 연결 — 앱 인증 콜백 키 저장 · 웹훅 자동 �
   });
 
   it('ensureWooWebhooks: 목록에 없으면 주제 4개를 POST 로 만든다(delivery_url = 몰별 수신 주소 · secret = 행 webhook_secret · active · wp_api_v3) · id 를 meta 에 기록', async () => {
-    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') || sql.includes('RETURNING id') ? { rows: [row()] } : { rows: [] }));
     get.mockResolvedValueOnce({ status: 200, headers: {}, data: [] });
     let nextId = 100;
     request.mockImplementation(async (cfg: any) => ({ status: 201, headers: {}, data: { id: nextId++, topic: JSON.parse(cfg.data).topic, status: 'active' } }));
     const r = await ensureWooWebhooks(COMPANY, MALL);
-    expect(r).toEqual({ created: 4, existing: 0, ids: [100, 101, 102, 103] });
+    expect(r).toEqual({ created: 4, existing: 0, reactivated: 0, ids: [100, 101, 102, 103] });
     expect(request).toHaveBeenCalledTimes(4);
     const bodies = request.mock.calls.map((c: any[]) => JSON.parse(c[0].data));
     expect(bodies.map((b: any) => b.topic)).toEqual(WOO_WEBHOOK_TOPICS);
@@ -613,7 +617,7 @@ describe('① 1클릭 연결 — 앱 인증 콜백 키 저장 · 웹훅 자동 �
   });
 
   it('ensureWooWebhooks: 같은 수신 주소·주제가 이미 있으면 만들지 않고 셈(재연결 멱등) · 목록 조회는 per_page 100', async () => {
-    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row()] } : { rows: [] }));
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') || sql.includes('RETURNING id') ? { rows: [row()] } : { rows: [] }));
     get.mockResolvedValueOnce({ status: 200, headers: {}, data: [
       { id: 7, topic: 'order.created', delivery_url: buildWooWebhookUrl(MALL), status: 'active' },
       { id: 8, topic: 'order.created', delivery_url: 'https://other.example/hook', status: 'active' },
@@ -635,15 +639,21 @@ describe('① 1클릭 연결 — 앱 인증 콜백 키 저장 · 웹훅 자동 �
   });
 
   it('removeWooWebhooks: meta 의 id 마다 DELETE ?force=true · 실패는 건너뛰고 개수만 · 키 없으면 0', async () => {
-    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row({ meta: { ...row().meta, woo_webhook_ids: [100, 101] } })] } : { rows: [] }));
+    // ★1001 제거는 해제된 행에만 한다(다시 연결된 몰의 웹훅을 지우지 않는다) — 해제 라우트가 행을 먼저 끊고 부른다
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row({ status: 'revoked', meta: { ...row().meta, woo_webhook_ids: [100, 101] } })] } : { rows: [] }));
     request.mockResolvedValueOnce({ status: 200, headers: {}, data: { id: 100 } });
     request.mockResolvedValueOnce({ status: 404, headers: {}, data: {} });
     const n = await removeWooWebhooks(COMPANY, MALL);
     expect(n).toBe(1);
     expect(request.mock.calls[0][0].method).toBe('DELETE');
     expect(request.mock.calls[0][0].url).toBe('https://www.ilbonimo.com/wp-json/wc/v3/webhooks/100?force=true');
-    q.mockImplementation(async () => ({ rows: [row({ meta: { woo_site_url: 'https://www.ilbonimo.com/', woo_webhook_ids: [1] } })] }));
+    q.mockImplementation(async () => ({ rows: [row({ status: 'revoked', meta: { woo_site_url: 'https://www.ilbonimo.com/', woo_webhook_ids: [1] } })] }));
     expect(await removeWooWebhooks(COMPANY, MALL)).toBe(0);
+    // 살아 있는 행이면 아무것도 지우지 않는다
+    request.mockClear();
+    q.mockImplementation(async (sql: string) => (sql.includes('SELECT') ? { rows: [row({ meta: { ...row().meta, woo_webhook_ids: [100, 101] } })] } : { rows: [] }));
+    expect(await removeWooWebhooks(COMPANY, MALL)).toBe(0);
+    expect(request).not.toHaveBeenCalled();
   });
 
   it('recordWooSetupError: 자동 설정 실패 사유를 수집 실패와 같은 meta 키(woo_sync_error*)에 남긴다 → 화면 "조치 필요" 한 경로', async () => {

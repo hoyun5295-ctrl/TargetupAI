@@ -26,7 +26,11 @@ export const WOO_SOURCE = 'woocommerce';
 /**
  * 우커머스 코어 상태 → syncOrder status. 매출 반영(CT-86)은 paid·completed 만.
  * processing = 결제 완료·출고 대기 → paid. on-hold·pending·failed·checkout-draft = 결제 전/실패 → pending.
- * 미지의 상태(플러그인 커스텀 · trash) → pending(매출 미반영이 안전).
+ * 미지의 상태(플러그인 커스텀) → ★2026-10-01 **결제 완료 시각(date_paid) 있음 + 환불 기록 없음 + 이행 중 이름**이면 paid · 아니면 pending.
+ *   운영 4몰 실측: 코드엠샵이 `shipping`(배송중 · 이로이로도쿄 7일 729건) · `delayed` · `hold-shipping` · `cancel-request` 를 쓴다.
+ *   옛 규칙(미지 = pending)에서는 배송 단계의 결제 완료 주문이 그 상태로 처음 들어오면 매출에 반영되지 않았다.
+ *   상태 이름을 추측해 표에 넣지 않는다 — 몰마다 플러그인이 달라 이름으로는 못 가른다. 결제 여부는 우커머스가 직접 찍는 시각으로 본다.
+ *   trash·draft 는 결제 시각이 있어도 매출로 올리지 않는다(지운 주문 · 임시 저장).
  */
 const STATUS_MAP: Record<string, OrderInput['status']> = {
   'processing': 'paid',
@@ -37,11 +41,28 @@ const STATUS_MAP: Record<string, OrderInput['status']> = {
   'on-hold': 'pending',
   'failed': 'pending',
   'checkout-draft': 'pending',
+  'trash': 'pending',
+  'draft': 'pending',
+  'auto-draft': 'pending',
 };
 
-export function mapWooOrderStatus(status: unknown): OrderInput['status'] {
+/** 몰 고유 상태 이름이 "결제는 끝났고 이행 중"을 뜻하는 낱말(허용 목록) — 운영 실측: shipping · delayed · hold-shipping */
+const WOO_FULFILLMENT_STATUS_RE = /(ship|deliver|delay|pack|prepar|transit)/;
+/** 환불·취소·반품·교환·실패 계열 이름 — 이행 낱말이 함께 있어도 매출로 올리지 않는다(예 return-shipping · 운영 실측 cancel-request) */
+const WOO_REVERSAL_STATUS_RE = /(refund|return|cancel|exchang|fail)/;
+
+/**
+ * @param paidAt 우커머스 주문의 date_paid_gmt(없으면 date_paid) — 결제가 끝난 주문에만 값이 있다
+ * @param hasRefund 그 주문에 환불 기록(refunds[])이 하나라도 있는가
+ */
+export function mapWooOrderStatus(status: unknown, paidAt?: unknown, hasRefund?: boolean): OrderInput['status'] {
   const s = String(status ?? '').trim().toLowerCase().replace(/^wc-/, '');
-  return STATUS_MAP[s] ?? 'pending';
+  const known = STATUS_MAP[s];
+  if (known) return known;
+  // 표에 없는 상태를 매출로 올리려면 세 근거가 모두 맞아야 한다(Codex 1001 R1 — 결제 시각 하나로는 환불 끝난 주문까지 올린다):
+  //   결제 완료 시각 있음 · 환불 기록 없음 · 이름이 이행 중을 뜻함(허용 목록)이고 환불·취소 계열이 아님. 하나라도 아니면 종전처럼 결제 전.
+  const paid = !!String(paidAt ?? '').trim();
+  return paid && !hasRefund && WOO_FULFILLMENT_STATUS_RE.test(s) && !WOO_REVERSAL_STATUS_RE.test(s) ? 'paid' : 'pending';
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -239,6 +260,17 @@ function mapLineItem(li: any): NonNullable<OrderInput['items']>[number] {
 }
 
 /**
+ * ★ 2026-10-01 서명이 검증된 자원 본문이 말하는 몰 자신의 주소 → 몰 식별 형태의 호스트(www 뗀 값 · https 만 · 못 읽으면 null).
+ *   우커머스는 REST 자원에 `_links.self[0].href`(그 몰의 주소)를 싣는다. 웹훅 비밀키를 아는 진짜 몰만 만들 수 있는 값이라
+ *   **도메인 이전·다중 도메인의 증명**으로 쓴다(운영 실측: lensgogo.info → www.lensgogo.net · lens007.net → www.lens007.store).
+ */
+export function wooSelfHost(resource: any): string | null {
+  const href = resource?._links?.self?.[0]?.href;
+  if (typeof href !== 'string' || !/^https:\/\//i.test(href.trim())) return null;
+  return normalizeWooMallId(href);
+}
+
+/**
  * 주문 JSON 1건 → syncOrder 입력 + 수신동의 raw.
  * - orderId = `{mallId}:{id}` · externalId = `{mallId}:{customer_id}`(회원) → `{mallId}:guest:{정규화 휴대폰}`(비회원) → `{mallId}:order:{id}`
  * - 금액 = total(문자열) → 숫자 · 주문시각 = date_created_gmt(Z) → date_created
@@ -275,7 +307,7 @@ export function mapWooOrderToCdp(raw: any, opts: WooMapOptions): WooMappedOrder 
     email,
     phone,
     name,
-    status: mapWooOrderStatus(raw.status),
+    status: mapWooOrderStatus(raw.status, raw.date_paid_gmt ?? raw.date_paid, Array.isArray(raw.refunds) && raw.refunds.length > 0),
     totalAmount: toNumber(raw.total),
     itemCount: items.length || undefined,
     items: items.length ? items : undefined,

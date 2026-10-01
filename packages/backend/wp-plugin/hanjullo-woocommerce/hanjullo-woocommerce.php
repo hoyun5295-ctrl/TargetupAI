@@ -3,7 +3,7 @@
  * Plugin Name: 한줄로 (Hanjullo) for WooCommerce
  * Plugin URI: https://hanjul.ai
  * Description: 한줄로 AI 마케팅 연동. 방문·장바구니 수집 스크립트 자동 삽입, 로그인 회원 식별, 마케팅 수신동의 값의 REST 응답 노출. 주문·회원 동기화는 한줄로 관리 화면의 "우커머스 연결(관리자 승인)" 버튼으로 시작합니다.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: 한줄로
  * Author URI: https://hanjul.ai
  * Requires at least: 6.0
@@ -15,12 +15,13 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'HANJULLO_WC_VERSION', '1.0.0' );
+define( 'HANJULLO_WC_VERSION', '1.0.1' );
 // SDK 경로·버전 = 한줄로 화면(cdp-sdk-script)이 안내하는 값과 같아야 한다. 올릴 때 두 곳을 함께 고친다.
 define( 'HANJULLO_SDK_URL', 'https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js' );
 define( 'HANJULLO_OPTION_SDK_KEY', 'hanjullo_sdk_key' );
 define( 'HANJULLO_OPTION_CONSENT_KEYS', 'hanjullo_consent_keys' );
-define( 'HANJULLO_DEFAULT_CONSENT_KEYS', 'mssms_agreement,email_agreement' );
+// 1.0.1(2026-10-01): 코드엠샵 수신동의 값이 든 키는 *_label(YES/NO). mssms_agreement 는 on/빈 값이라 안 쓰는 필드다(고객사 확인).
+define( 'HANJULLO_DEFAULT_CONSENT_KEYS', 'mssms_agreement_label,email_agreement_label' );
 
 /**
  * 설정된 수신동의 메타키 목록(콤마 구분 · 공백 제거 · 빈 값 제거).

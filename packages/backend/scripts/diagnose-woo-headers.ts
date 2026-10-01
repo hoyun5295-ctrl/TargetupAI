@@ -8,6 +8,7 @@
  * 실행(운영 서버):
  *   cd packages/backend && npx ts-node scripts/diagnose-woo-headers.ts iroirotokyo.net
  *   (비인증 기준선만: … www.iroirotokyo.net --anon  — DB·키를 쓰지 않는다)
+ *   (★1001 상태 점검: … iroirotokyo.net --health — 주소 이동 · 원본 주문 상태 분포 · 우리 웹훅 켜짐 여부 · 읽기 전용 GET)
  *   (--consent 를 붙이면 최근 주문 20건·최근 가입 회원 20명의 동의 관련 메타키와 값 분포·회원 역할 분포를 집계한다 · 개인정보 출력 없음)
  *   (--timing 을 붙이면 백필과 같은 호출 6개(회원·주문 × per_page 1·20·100)의 소요 시간·본문 크기·전체 건수를 잰다 · GET 뿐)
  *
@@ -203,10 +204,50 @@ function report(rawHeaders: string[]): void {
   [...lines].sort((a, b) => b.bytes - a.bytes).slice(0, 15).forEach((l) => console.log(`${l.bytes}\t${l.label}`));
 }
 
+// ── --health: 주소 이동 · 원본 주문 상태 분포 · 웹훅 켜짐 여부(★1001 우커머스 전수점검 · 읽기 전용 GET · 개인정보·키·secret 출력 없음) ──
+/** 저장 주소가 이동(3xx)시키면 이동 대상 origin 을 돌려준다(같은 몰 = www 만 다른 https 주소일 때만). 아니면 null */
+async function sameMallRedirect(row: Row, base: string, auth: string): Promise<string | null> {
+  const r = await probe(`${base}/wp-json/wc/v3/orders?per_page=1`, auth, WIDE_LIMIT);
+  if (!r.ok) { console.log(`주소 확인: 오류 ${r.errorCode}`); return null; }
+  const raw = r.rawHeaders || [];
+  const at = raw.findIndex((h, i) => i % 2 === 0 && h.toLowerCase() === 'location');
+  const loc = at >= 0 ? String(raw[at + 1] || '') : '';
+  if (!(Number(r.status) >= 300 && Number(r.status) < 400)) { console.log(`주소 확인: HTTP ${r.status} · 이동 없음(${base})`); return null; }
+  let target: URL | null = null;
+  try { target = new URL(loc, base); } catch { /* 아래 */ }
+  const same = !!target && target.protocol === 'https:' && target.hostname.toLowerCase().replace(/^www\./, '') === row.mall_id;
+  console.log(`주소 확인: HTTP ${r.status} · 저장 주소 ${base} → 이동 대상 ${target ? target.origin : '(해석 불가)'} · 같은 몰 = ${same}`);
+  return same && target ? target.origin : null;
+}
+
+async function healthSeries(row: Row, auth: string): Promise<void> {
+  console.log('\n[health] 저장된 몰 주소 = ' + String(row.meta?.woo_site_url || '(없음)'));
+  let base = restBase(row);
+  const moved = await sameMallRedirect(row, base, auth);
+  if (moved) base = moved;
+
+  const st = await fetchJson(`${base}/wp-json/wc/v3/reports/orders/totals`, auth);
+  console.log('\n[원본 주문 상태별 건수 · 몰 전체]');
+  if (st.ok && Array.isArray(st.data)) {
+    console.log('건수\t상태 slug\t몰 표기');
+    [...st.data].sort((a: any, b: any) => Number(b?.total || 0) - Number(a?.total || 0))
+      .forEach((x: any) => console.log(`${Number(x?.total || 0)}\t${String(x?.slug ?? '')}\t${String(x?.name ?? '')}`));
+  } else console.log(`조회 실패: HTTP ${st.status ?? '-'} ${st.errorCode || ''}`);
+
+  const wh = await fetchJson(`${base}/wp-json/wc/v3/webhooks?per_page=100`, auth);
+  console.log('\n[웹훅 · 우리 주소로 가는 것만]');
+  if (wh.ok && Array.isArray(wh.data)) {
+    const ours = wh.data.filter((w: any) => /hanjul/i.test(String(w?.delivery_url || '')));
+    console.log(`전체 ${wh.data.length}개 · 한줄로 ${ours.length}개`);
+    console.log('id\t주제\t상태\t수정일');
+    ours.forEach((w: any) => console.log(`${w?.id}\t${w?.topic}\t${w?.status}\t${String(w?.date_modified || '').slice(0, 16)}`));
+  } else console.log(`조회 실패: HTTP ${wh.status ?? '-'} ${wh.errorCode || ''}`);
+}
+
 async function main(): Promise<number> {
   const rawHost = String(process.argv[2] || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const mallId = rawHost.replace(/^www\./, '');
-  if (!mallId) { console.error('사용법: npx ts-node scripts/diagnose-woo-headers.ts <몰 식별자 예: iroirotokyo.net> [--anon]'); return 2; }
+  if (!mallId) { console.error('사용법: npx ts-node scripts/diagnose-woo-headers.ts <몰 식별자 예: iroirotokyo.net> [--anon | --health]'); return 2; }
 
   console.log(`node ${process.version} · http.maxHeaderSize(이 셸 기준) = ${http.maxHeaderSize} · NODE_OPTIONS = ${process.env.NODE_OPTIONS || '(없음)'}`);
 
@@ -252,6 +293,8 @@ async function main(): Promise<number> {
     const url = `${restBase(row)}/wp-json/wc/v3/orders?per_page=1`;
     const auth = 'Basic ' + Buffer.from(`${ck}:${cs}`).toString('base64');
     console.log(`GET ${url}`);
+    // --health 는 헤더 크기 보고 없이 상태만 본다(★1001)
+    if (process.argv.includes('--health')) { await healthSeries(row, auth); continue; }
 
     const a = await probe(url, auth);
     console.log(`① 기본 상한: ${a.ok ? `HTTP ${a.status}` : `오류 ${a.errorCode}`}`);
