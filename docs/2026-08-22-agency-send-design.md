@@ -1449,3 +1449,20 @@ Harold 2026-09-05: "한 명의 이메일로 5개의 양식을 받아서 처리�
 **2R (증분 · 범위 = 1R에서 고친 두 줄 + 직접 호출부)** = **approve · No material findings.**
 판정 원문 요지: 단건의 파일명+첨부 정상 경로 유지 · 다중 이미지 반려가 저장 전이라 고아 파일 없음 · 재시도 고지가 본문 앞에 한 번만 붙고 다건 머리말 중복 없음.
 → **critical 0 · high 0으로 2R 종결**(CLAUDE.md `codex_review_after_code_change` 종료 조건). 불수용 1건(지적 ①)은 재판정에서도 반박이 없었다.
+
+## §22) 2026-10-01 접수 2건 — 반송 메일의 계정 목록 · 수신자별 회신번호 표시 ([B-1001-5 · B-1001-6](../status/BUGS.md) · 임은지 접수 · 배포 완료 1001 `73e977ed` · Codex 적대 각 2R approve · BUGS 에서 옮김)
+
+### 22-1. B-1001-5 반송 메일에 그 주소로 등록된 모든 회사의 발송 계정이 실려 나간다 (`cmup6ttgr08uojnn4twhin2jy` · Harold 「실제 고객사에서 받았으면 어쩔뻔했냐」)
+
+- **원인(코드)**: 반송 문구 3곳(`agency-send-mail-worker.ts:820` 지정 없음 · `:825` 못 찾음 · `:840` 이 주소 계정 아님)이 `describeBillingTargets(candidates)` 목록을 싣는다. 후보 = `resolveEmailSender` 가 **회사 조건 없이** 그 주소의 활성 등록 전부(`agency-send-email.ts:65`). 등록 화면은 표시명만 있으면 같은 주소를 어느 회사 계정에든 여러 개 허용(`admin.ts:1925~1955`). 설계 §18-13(설계서 1104줄)의 근거 "자기 권한 목록이라 노출 무해"는 한 주소 = 한 회사 전제라 깨진다.
+- **회신 전수**: 계정 목록을 싣는 곳은 위 3곳뿐(접수 완료 = 그 건 계정 하나 · 중복 안내 = 계정 없음 · 초기 반려 5곳 = 계정 없음). 반송 본문은 원장에 저장하지 않는다(사유 코드만) → 우리 화면 재노출 경로 0.
+- **처방(1001 반영)**: 3곳 모두 목록 삭제 · 문구는 후보를 인자로 받지 않는 함수가 만든다(구조상 다른 계정이 실릴 수 없음) · 접수 담당 예시 문구("처음 설정된 표시명(발송 ID)을 재확인 후 일치하게 기재") · `describeBillingTargets` 삭제 · 설계서 §18-13 정정.
+- **노출 실측(Harold SQL)**: 여러 회사에 등록된 주소 = mobile@invitocorp.com 1개(금강제화 · 아이디룩 · 폴라초이스코리아 · 인비토 · 한국시세이도) · 목록 실린 반송 3통 전부 이 주소 → **실제 고객사 수신 0**(원장 90일).
+- **범위 밖(Codex R1 · 기록만)**: `agency-send-mail-worker.ts:843` 서로 다른 회사 요청서를 한 메일에 보내면 반려 원장에 회사 A · 사용자 B 조합이 기록될 수 있다.
+
+### 22-2. B-1001-6 수신자별 회신번호 접수의 회신번호 칸에 대표 번호 하나가 보인다 (`cmup5zrqd089kjnn43rj9tel0` · 한국시세이도)
+
+- **원인(코드)**: 화면 = `campaign.callback_number || '-'`(`CampaignDetailModal.tsx:82` · 예약 `ScheduledCampaignModal.tsx:141`). 직접발송은 수신자별 회신이면 대표 번호 없이 만들어 빈 칸 → '-'. 대행은 수신자별이어도 `callback: row.callback_number`(`agency-send-worker.ts:1155`)를 넘긴다 — 번호 빈 행이 떨어지는 폴백이라 **발송에 쓰이는 값**(저장값 변경 금지).
+- **처방(Harold 설계 1001)**: 수신자별 회신이면 칸 = 「고객별 회신번호 02-327-7017 외 N개」(가장 많이 쓰인 번호 + 나머지 개수) · 누르면 창 = 실제 발신된 회신번호 목록 가로 4 × 세로 5(쪽당 20) 페이지 + 검색. 출처 = MySQL 발송 표 `call_back`(캠페인 `app_etc1` · `getCampaignSmsTablesFor` = 엑셀과 같은 표·같은 키 · 예약 건도 큐에 실려 있음). 수신자별 여부 = `use_individual_callback` 또는 `send_config.useIndividualCallback`. 직접발송 수신자별(지금 '-')도 같은 표시로 통일. 발송·저장값 무변경.
+- **Codex R1 정정**: (medium) 수신자별 판정을 실제 발송 판정과 같게 — AI 캠페인은 D100(`use_individual_callback` AND 칸 지정)이라 칸이 없으면 공통번호로 나간다 · (medium) 예약 상세에서 수신자를 지우면 인원 수를 갱신 키로 목록 재조회. 실화면(데스크톱·모바일) = 일반 캠페인 종전 표시 · 「고객별 회신번호 02-3277-0171 외 44개」 · 4열(모바일 2열) · 1/3→3/3 · 검색 · ESC.
+- **자리**: `utils/campaign-callback-list.ts`(수신자별 판정 식 · 발신 회신번호 집계) · `routes/results.ts GET /campaigns/:id/callbacks` · `components/shared/CampaignCallbackField.tsx` · 계약 `campaign-callback-list-1001.test.ts` 7건.

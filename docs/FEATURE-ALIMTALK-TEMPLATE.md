@@ -209,6 +209,10 @@ IMC 등록 payload에 들어가지 않고(리스트 검색 파라미터일 뿐),
 
 ---
 
+## §8-1 2026-10-01 접수 — 버튼명 칸 폭 ([B-1001-1](../status/BUGS.md) ① · 2026-09-30 박성용·임은지·남지현 접수 · 배포 완료 1001 `bec80a18` · BUGS 에서 옮김)
+
+- **① 템플릿 버튼명 칸(cmunc1yb5)**: `ButtonEditor.tsx:216` 선택 칸 `w-24` 가 공용 `CUI_INPUT` 의 `w-full` 에 짐(빌드 CSS 순서 실측 · w-full 21233 > w-24 19041) → 버튼명 칸 26px. 한글 입력기 조합 재현 = "버튼 라인" → "인라튼버"(거꾸로 · 띄어쓰기 사라짐 · 지우기 안 됨). 처방 `!w-24 shrink-0` 뒤 366px · 정상 입력·삭제. 같은 형태 = `ItemListEditor.tsx:293`(`!w-28`) · `RcsTemplateFormModal.tsx:279`(`!w-auto`) · `BrandTemplateManagementSection.tsx:274`(겉보기 같음 · 의도대로) · `ButtonEditor` 주소 칸의 적용 안 되던 `w-auto` 6곳 제거 → 전역 0건.
+
 ## §9 관련 문서
 
 - 트랙 설계 = [2026-07-14-template-migration-track-bc-design.md](2026-07-14-template-migration-track-bc-design.md) §1·§4

@@ -305,3 +305,32 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT column_nam
 - 남은 것 = **실측 §6**(자사 시험 회사 또는 이에스페이먼트 관리자 계정으로) → 이에스페이먼트 안내(분류 코드 등록 4 → 사용자 배정 4 → 각자 연결) → **P5**(나머지 5 provider 라우트·폼을 같은 CT로) → Codex `/codex:review` 1R(공용 CT 2개 변경 · 돈·DDL 무접촉이라 권장 수준 · Harold 실행).
 - 실측 게이트 ③(`information_schema`)은 신규 컬럼·테이블이 0이라 해당 없음. `users.store_codes`의 정확한 배열 타입은 SCHEMA 미등재였다 → §7에 확인 SQL.
 
+## 10. 2026-10-01 브랜드 판단 = 소속 표 · 브랜드 계정 수신거부 자동 등록 ([B-1001-3 · B-1001-4](../status/BUGS.md) · 접수 원문 기록 · BUGS 에서 옮김)
+
+> 한 줄: 자사몰 고객은 고객 행 브랜드 칸(`customers.store_code`)이 비어 있다 — 소속의 진실은 `customer_stores` 하나다. 브랜드를 판단하는 모든 자리를 소속 표로 모았다(CT `utils/store-scope.ts`). 몰 동의와 만나는 부분 = [몰 동의 격리 설계서 §10](2026-09-22-mall-consent-isolation-design.md).
+
+### 10-1. B-1001-3 관리자 고객 DB 조회 — 브랜드를 고르면 0명 (배포 완료 1001 · `bec80a18` · Codex 적대 2R approve · 2026-10-01 박성용 접수 `cmuozso84`)
+
+- **원인(운영 SQL 실측 · Harold)**: 이에스페이먼트 고객 428,962명 전원 `customers.store_code` 빈 칸 · 전원 `customer_stores` 소속 행 있음(렌즈고고·일본이모·이로이로도쿄·렌즈007). 자사몰 적재(`cdp-identity identifyCustomer`)는 고객 행 브랜드 칸을 쓰지 않고 소속 표만 쓴다. 고객은 폰당 1행(`customers_company_id_phone_key`)이고 다매장 소속의 진실은 소속 표인데, 관리자 조회의 브랜드 거르기가 고객 행 칸을 봤다.
+- **처방 = 브랜드 판단은 소속 표 하나**: CT `store-scope.ts` 에 `storeMembershipCond` · `storeMembershipClause`(조각은 여기서만) · `storeCodeDisplayExpr`(표시 = 고객 행 값 · 비면 소속 표 코드들). 공용 필터 `customer-filter.ts` 의 `direct` 모드 폐기 · `buildFilterQueryCompat`(캠페인·자동발송·미리보기 9곳 · 전부 `$1` = 회사 · 별칭 c 확인) = 소속 표.
+- **고친 자리**: `customers.ts` 관리자 목록·다운로드 브랜드·사용자별 4곳 + 목록 매장코드 표시 + 구매 내역 사용자별 1곳 · `enabled-fields.ts` 엑셀 매장코드 · `auto-campaigns.ts` 2 · `auto-campaign-worker.ts` 3 · `target-sample.ts` 1.
+- **영향 실측(Harold SQL)**: 고객 행 칸은 있는데 같은 코드 소속 행이 없는 고객 = 전 회사 0명(병렬 끄고 재실행) → 바꿔서 빠지는 고객 0 · 브랜드 지정 자동 캠페인 = 0건(현재 발송 변화 0). 넓어지는 쪽 = 업로드 회사 다매장 고객이 소속된 모든 브랜드에 잡힘(동의 판정은 그대로).
+- **일부러 안 바꾼 2곳(사유 주석)**: `unsubscribe-helper.ts registerBulkCompanyUserUnsubscribes` · `upload.ts` 브랜드 사용자 수신거부 자동 등록 = 고객 행 `sms_opt_in=false` 를 계정별 영구 수신거부로 옮겨 적는 쓰기. 자사몰 회사는 신규 고객 행을 false 로 만들어 소속 표로 넓히면 고객 대부분이 영구 수신거부로 복사된다(D93) → B-1001-4.
+- **제외 확인**: `companies.ts` customer_schema.store_codes(읽는 곳 0) · `customer-timeline`(매장코드 미표시) · 여정 진입 원장·트리거(신원 키) · callback_numbers · users.store_codes · purchases.store_code · auto_campaigns.store_code(다른 표).
+- **Codex 적대 R1(needs-attention) 정정**: (high) 몰 동의 회사의 범위 [A,B] 계정이 A 를 고르면 A 거부·B 동의 고객이 범위 조각의 B 동의로 통과(옛 직접 비교에선 몰 고객이 아예 안 잡혀 없던 경로) → 몰 동의 모드면 타겟 브랜드 조건을 **그 브랜드 소속 행의 동의와 같은 행**에서 판정(`storeMembershipCond requireConsent` · 공용 필터 `storeConsent` · `campaigns.ts` 세기·발송·미리보기 3곳이 범위·enforce 를 필터보다 먼저 구해 같은 값 사용 · enforce 거짓이면 SQL 글자 종전). (medium) 고객 행 매장코드 전원 빈 칸 회사는 활성 필드에서 매장코드가 꺼져 엑셀 표시가 죽어 있었다 → 0건이면 범위 안 소속 행 유무로 켜고 옵션도 소속 표(`hasStoreMembershipInScope` · `storeMembershipCodesSql`).
+- **검증**: tsc 0(백·프) · vitest 524파일 7,249 · 새 계약 `brand-membership-1001.test.ts` 19건(pg-mem 실제 실행: 몰 고객이 브랜드로 잡힘 · 단일 브랜드 업로드 고객 종전 · 다매장 고객 넓어짐 고정 · 몰 동의 같은 행 반례 고정 · 잔존 0) + `brand-membership-fields-1001.test.ts` 3건 · 변이 11종 전부 실패 확인 · 기존 `mall-consent.test.ts` 소스 계약 구간 표지만 새 순서로.
+- **실제 PostgreSQL 16 실측(일회용 컨테이너 · CT 함수가 만든 SQL 그대로)**: 매장코드 표시 = 몰 고객 「이로이로도쿄, 일본이모」 · 업로드 고객 고객 행 값 그대로 · 관리자 브랜드 거르기 다른 회사 섞임 0 · 발송 원형(상관 범위 조각 + 몰 동의) 렌즈고고 거부·일본이모 동의 고객 = 렌즈고고 0명 / 일본이모 포함(옛 방식 반례 재현) · 활성 필드 소속 있음 켜짐 / 없는 회사 꺼짐 · 옵션 다른 회사 0 · 목록(30만 · COUNT OVER + LIMIT 50) 표시 서브쿼리 loops=50 · 206→214ms · 엑셀 전체 30만 행 125→918ms(42만 ≈ +1.3초).
+- **Codex 2R(증분) approve**: 지적 0 — 같은 브랜드 행 동의 · 범위 조건 · 자리표 · blocked 정합 · 섞인 계정 NULL 동의 제외 = 설계 일치.
+- **이에스페이먼트 실측(1001 Harold)**: 활성 소속 = 렌즈고고 94,903 · 일본이모 21,179 · 이로이로도쿄 309,085 · 렌즈007 17,157 / 고객 행 동의 25,340 · 12,638 · 149,656 · 1,116 / 몰 동의 24,849 · 13,613 · 154,879 · 7,170 / 브랜드 계정 각 1. 몰 동의 강제 = **OFF**(부팅 로그 `[MallConsent] 읽기 강제 OFF` · 14:28 · 16:19) → 관리자·브랜드 계정 모두 고객 행 동의로 같은 판정(배포로 판정 규칙 불변).
+- **⚠ ENV 켜기 전 조건(이에스페이먼트 `19c59d0c-…`)**: 켜면 브랜드 계정은 몰 동의로 바뀌지만 관리자가 브랜드를 골라 보내는 발송은 고객 행 동의 그대로다(D93 S7 미구현) — 렌즈고고는 고객 행 동의가 몰 동의보다 최소 491명 많다. 켜는 작업에 "관리자 브랜드 선택 발송 = 그 브랜드 소속 행 동의"를 함께 넣는다.
+- **범위 밖(기록만)**: 업로드 다매장 고객은 매장코드 칸에 고객 행 값(브랜드 하나)만 보인다 — B 로 걸러도 「A」로 표시(종전 표시 그대로 · 업로드 회사 표시 무변경 원칙).
+- **도구 사고(정정 완료)**: 패치 도구가 텍스트 모드로 저장해 원래 LF 파일 25개(이번 축 10 · 1001 오류 접수 프론트 10 · 문서 3 · 새 테스트 2)를 통째 CRLF 로 바꿨다 → git 원본 객체로 원래 줄바꿈 확인 뒤 LF 복원(내용 무변경 · 바이트 수 대조). `staging-checks-0929` 의 줄바꿈 표지 계약이 이것을 잡았다.
+- **실측 대기(배포 뒤)**: 이에스페이먼트 관리자 고객 DB 조회 → 이로이로도쿄 선택 = 그 코드 소속 활성 고객 수와 같아야(배포 뒤 대조 SQL · 소속 행 309,079) · 매장코드 칸 표시.
+
+### 10-2. B-1001-4 업로드·싱크 회사 다매장 고객의 브랜드 계정 수신거부 자동 등록 누락 (배포 완료 1001 · `73e977ed` · Codex 적대 2R approve · B-1001-3 전수 정리 중 발견)
+
+- 고객은 폰당 1행이라 고객 행 `store_code` 에는 브랜드 하나만 남는다. `registerBulkCompanyUserUnsubscribes` · `upload.ts` 브랜드 사용자 등록은 고객 행 칸으로 브랜드를 봐서 다매장 고객의 나머지 브랜드 계정에는 영구 수신거부가 안 적힌다(그 계정의 직접 발송 명단에서 안 빠짐 · 캠페인 발송은 `sms_opt_in` 으로 이미 제외).
+- 소속 표로 바로 바꾸지 못하는 이유: 자사몰 회사 고객 대량 복사(D93) · 소속 행만으로 몰 행과 업로드 행을 가를 수 없다(`consent_source` 는 동의값이 온 몰 행에만). 결정 필요 = 몰 회사 판정 기준(연동 유무 · ENV) 또는 등록 시점에 업로드한 브랜드로 한정.
+- **1001 운영 실측(Harold)**: 거부(`sms_opt_in=false`)인데 소속 브랜드 계정 명부에 없는 고객(자사몰 연동 코드 제외) = **0행**. 0 은 지금 해당자가 없다는 뜻일 뿐 구조는 그대로다(다매장 업로드 고객이 거부하면 생긴다).
+- **정정**: 위의 "소속 행만으로는 몰 행과 업로드 행을 가를 수 없다"는 틀렸다 — 몰 코드는 D93 CT `getMallConsentStoreCodes`(자사몰 연동 행 `meta.store_code`)로 코드 단위로 가른다(실측 SQL 도 그 조건). 처방 = 자동 등록 2곳(`registerBulkCompanyUserUnsubscribes` · `upload.ts` 브랜드 사용자)을 소속 표로 판정하되 몰 동의 코드는 빼는 CT 하나로 · 코드 주석 정정 동반.
+- **처방(반영)**: `unsubscribe-helper.ts brandRefusalCopyCond`(고객 행 칸 OR 계정 코드 소속 · 몰 동의 코드가 섞인 계정은 제외 = `mall-consent.ts mallConsentCodeAmong`) · `registerBulkCompanyUserUnsubscribes` · `registerUploaderOwnUnsubscribes`(업로드 라우트의 인라인 SQL 대체) · 계약 `brand-refusal-copy-1001.test.ts` 5건 · PostgreSQL 16 실측 · 변이 7종 검출.

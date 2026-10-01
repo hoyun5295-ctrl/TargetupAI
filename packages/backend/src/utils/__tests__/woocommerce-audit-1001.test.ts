@@ -28,7 +28,7 @@ import {
   saveWooCredentials, resolveWooMallIdForSave, fetchWooStoreProducts, getWooIntegration, buildWooWebhookUrl, type WooIntegration,
   wooOrderRereadDue, startWooOrderReread, runWooBackfill, wooBackfillIdle, removeWooWebhooks, resetWooSeenHostRefusals,
   listWooWebhookCleanupTargets, WOO_WEBHOOK_CLEANUP_DAYS, disconnectWoo,
-  WOO_ORDER_RULE_VERSION, WOO_REREAD_MIN_GAP_MS, MAX_SYNC_ORDERS, PAGE_SIZE,
+  WOO_ORDER_RULE_VERSION, WOO_REREAD_MIN_GAP_MS, MAX_SYNC_ORDERS, PAGE_SIZE, WOO_LEARN_LOOKBACK_DAYS,
 } from '../woocommerce-client';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
@@ -315,6 +315,87 @@ describe('W-1 몰 주소 — 서명 검증된 본문이 증명한 주소로만 �
     expect(after).toContain('JSON.stringify({ mall_id: integ.mallId, topic, delivery_id: deliveryId, resource: body })');
     expect(after).toContain('await markWooConnected(integ.companyId, integ.mallId);');
     expect(after).not.toMatch(/buildWooEvent\(mallId|mall_id: mallId|markWooConnected\(integ\.companyId, mallId\)/);
+  });
+});
+
+describe('W-1 보완 — 증명 주소를 저장된 서명 검증 웹훅 기록에서도 배운다(배포 뒤 실측 1001: 웹훅이 안 들어온 두 몰이 이동을 못 따라가 멈춰 있었다)', () => {
+  const SINCE = new Date('2026-09-22T00:00:00Z');
+  const MOVED = { status: 301, headers: { location: 'https://www.lensgogo.net/wp-json/wc/v3/orders?per_page=20' }, data: '' };
+  const OK = { status: 200, headers: { 'x-wp-totalpages': '1' }, data: [] };
+  /** delivery = 저장된 기록에서 찾은 본문 주소(없으면 0행) · noted = 증명 주소 기록 UPDATE 가 돌려주는 행(빈 배열 = 거부) */
+  const db = (delivery: string | null, noted: any[] = [{ hosts: ['lensgogo.net'] }]) => q.mockImplementation(async (sql: string) => {
+    const s = String(sql);
+    if (s.includes('FROM cdp_webhook_deliveries')) return { rows: delivery ? [{ href: delivery }] : [] };
+    if (s.includes("RETURNING t.meta->'woo_seen_hosts' AS hosts")) return { rows: noted };
+    return s.includes('SELECT') ? { rows: [row()] } : { rows: [] };
+  });
+  const lookups = () => q.mock.calls.filter((c: any[]) => String(c[0]).includes('FROM cdp_webhook_deliveries'));
+  const notes = () => q.mock.calls.filter((c: any[]) => String(c[0]).includes("RETURNING t.meta->'woo_seen_hosts' AS hosts"));
+
+  it('이동 대상 호스트가 이 몰의 저장된 기록에 있으면: 증명 주소로 적고 그 회차에 바로 따라간다(다음 웹훅을 기다리지 않는다)', async () => {
+    db('https://www.lensgogo.net/wp-json/wc/v3/orders/738523');
+    get.mockResolvedValueOnce(MOVED).mockResolvedValueOnce(OK);
+    await syncWooOrdersSince(COMPANY, MALL, SINCE);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(String(get.mock.calls[1][0])).toMatch(/^https:\/\/www\.lensgogo\.net\/wp-json\/wc\/v3\/orders\?/);
+    // 조회 = 그 회사 · 그 몰 · 서명 검증된 웹훅 기록만(연결 승인용 임시 행 제외) · 기간 안 · 이동 대상 그 호스트만
+    expect(lookups()).toHaveLength(1);
+    const [sql, params] = lookups()[0];
+    expect(sql).toContain("WHERE d.company_id = $1::uuid AND d.source = 'woocommerce' AND d.webhook_event <> 'oauth_state'");
+    expect(sql).toContain("AND d.payload->>'mall_id' = $2");
+    expect(sql).toContain("AND d.created_at >= NOW() - ($5 || ' days')::interval");
+    expect(sql).toContain('LIMIT 1');
+    expect(sql).toContain("AND (d.payload->'resource'->'_links'->'self'->0->>'href' LIKE $3\n          OR d.payload->'resource'->'_links'->'self'->0->>'href' LIKE $4)");
+    expect(params).toEqual([COMPANY, MALL, 'https://lensgogo.net/%', 'https://www.lensgogo.net/%', String(WOO_LEARN_LOOKBACK_DAYS)]);
+    expect(WOO_LEARN_LOOKBACK_DAYS).toBe(7);
+    // 적는 일은 같은 함수(유일성·상한·회사 잠금 문장 그대로) · 따라가 성공한 주소를 굳힌다
+    expect(notes()).toHaveLength(1);
+    expect(notes()[0][1]).toEqual([COMPANY, MALL, 'lensgogo.net', WOO_SEEN_HOSTS_MAX]);
+    expect(q.mock.calls.some((c: any[]) => String(c[1]?.[2] || '').includes('"woo_rest_origin":"https://www.lensgogo.net"'))).toBe(true);
+  });
+  it('기록에 없으면 따라가지 않는다(종전과 같은 redirect) · 같은 호스트를 한동안 다시 찾지 않는다', async () => {
+    db(null);
+    get.mockResolvedValue(MOVED);
+    await expect(syncWooOrdersSince(COMPANY, MALL, SINCE)).rejects.toMatchObject({ code: 'redirect' });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(lookups()).toHaveLength(1);
+    expect(notes()).toHaveLength(0);
+    await expect(syncWooOrdersSince(COMPANY, MALL, SINCE)).rejects.toMatchObject({ code: 'redirect' });
+    expect(lookups()).toHaveLength(1);                                             // 두 번째는 조회 없이 끝난다
+    for (const c of get.mock.calls) expect(String(c[0])).toMatch(/^https:\/\/www\.lensgogo\.info\//);
+  });
+  it('같은 회사의 다른 몰이 가진 주소면(적기 거부) 따라가지 않는다 — 기록에서 배워도 유일성 규칙은 그대로', async () => {
+    db('https://www.lensgogo.net/wp-json/wc/v3/orders/1', []);
+    get.mockResolvedValue(MOVED);
+    await expect(syncWooOrdersSince(COMPANY, MALL, SINCE)).rejects.toMatchObject({ code: 'redirect' });
+    expect(notes()).toHaveLength(1);
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+  it('기록에서 읽은 주소가 이동 대상 호스트와 다르거나 https 가 아니면 적지 않는다(조회 조건과 같은 판정을 코드에서 한 번 더)', async () => {
+    for (const href of ['https://evil.example/wp-json/wc/v3/orders/1', 'http://www.lensgogo.net/wp-json/wc/v3/orders/1', '']) {
+      q.mockReset(); get.mockReset(); resetWooSeenHostRefusals();
+      db(href || null);
+      get.mockResolvedValue(MOVED);
+      await expect(syncWooOrdersSince(COMPANY, MALL, SINCE), href).rejects.toMatchObject({ code: 'redirect' });
+      expect(notes(), href).toHaveLength(0);
+      expect(get, href).toHaveBeenCalledTimes(1);
+    }
+  });
+  it('따라갈 수 없는 이동(http · 같은 주소 안 이동 · Location 없음)은 기록을 찾아보지도 않는다', async () => {
+    for (const location of ['http://www.lensgogo.net/wp-json/wc/v3/orders', '/wp-json/wc/v3/orders/', undefined]) {
+      q.mockReset(); get.mockReset(); resetWooSeenHostRefusals();
+      db('https://www.lensgogo.net/wp-json/wc/v3/orders/1');
+      get.mockResolvedValue({ status: 301, headers: { location }, data: '' });
+      await expect(syncWooOrdersSince(COMPANY, MALL, SINCE), String(location)).rejects.toMatchObject({ code: 'redirect' });
+      expect(lookups(), String(location)).toHaveLength(0);
+    }
+  });
+  it('이미 인정된 주소로 가는 이동은 기록을 찾아보지 않는다(종전 경로 그대로)', async () => {
+    q.mockImplementation(async (sql: string) => (String(sql).includes('SELECT') ? { rows: [row({ woo_seen_hosts: ['lensgogo.net'] })] } : { rows: [] }));
+    get.mockResolvedValueOnce(MOVED).mockResolvedValueOnce(OK);
+    await syncWooOrdersSince(COMPANY, MALL, SINCE);
+    expect(lookups()).toHaveLength(0);
+    expect(get).toHaveBeenCalledTimes(2);
   });
 });
 

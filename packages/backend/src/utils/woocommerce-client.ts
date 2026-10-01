@@ -735,17 +735,64 @@ async function adoptWooRestOrigin(integ: WooIntegration, origin: string): Promis
 /**
  * 인증 호출 공용 — 리다이렉트는 자동으로 따라가지 않는다(Authorization 이 타 호스트로 흐르지 않게).
  * 3xx 면 이동 대상이 **이 몰의 인정된 주소**일 때만 한 번 다시 부르고, 성공하면 그 주소를 기준 주소로 굳힌다.
+ * 인정된 주소가 아니면 저장된 서명 검증 웹훅 기록에서 한 번 배워 본다(learnWooHostFromSignedDeliveries) — 거기에도 없으면 redirect 로 끝난다.
  */
 async function wooAuthedRequest(integ: WooIntegration, method: 'GET' | 'POST' | 'PUT' | 'DELETE', urlOf: (base: string) => string, body?: unknown): Promise<any> {
   const base = wooRestBase(integ);
   const first = await wooHttp(method, urlOf(base), authHeaders(integ), body, 0);
   const status = Number(first.status);
   if (!(status >= 300 && status < 400)) return wooEnsureOk(first);
-  const target = wooRedirectOrigin(integ, base, first.headers?.location);
+  let target = wooRedirectOrigin(integ, base, first.headers?.location);
+  // 이동 대상이 아직 증명 안 된 호스트면, 그 호스트가 이 몰의 **저장된 서명 검증 웹훅 기록**에 있는지 본다(있으면 증명 주소로 적고 다시 판정).
+  if (!target && (await learnWooHostFromSignedDeliveries(integ, base, first.headers?.location))) {
+    target = wooRedirectOrigin(integ, base, first.headers?.location);
+  }
   if (!target) throw new WooApiError('redirect', undefined, status);
   const second = wooEnsureOk(await wooHttp(method, urlOf(target), authHeaders(integ), body, 0));
   await adoptWooRestOrigin(integ, target);
   return second;
+}
+
+/** 저장된 웹훅 기록에서 증명 주소를 배울 때 보는 기간(일) — 그 안에 서명 검증을 통과한 기록만 근거로 삼는다 */
+export const WOO_LEARN_LOOKBACK_DAYS = 7;
+/** 기록에 없던 호스트를 다시 찾아보기까지의 간격(프로세스 메모리) — 페이지마다·회차마다 같은 조회를 되풀이하지 않는다 */
+const WOO_LEARN_RETRY_MS = 10 * 60 * 1000;
+const learnMissUntil = new Map<string, number>();
+
+/**
+ * ★ 2026-10-01 이동(3xx) 대상 호스트가 **이미 저장된 서명 검증 웹훅 기록**에 이 몰의 본문 주소로 있으면, 그 기록으로 증명 주소를 적는다.
+ *   왜(배포 뒤 실측): 증명 주소를 "다음에 들어오는 웹훅"에서만 배우게 했더니, 배포 뒤 웹훅이 들어오지 않은 두 몰이 이동을 못 따라가 멈춰 있었다.
+ *     웹훅이 몰 쪽에서 꺼졌다면 영영 못 배운다(수집이 안 되니 웹훅 점검도 못 돈다) — 증명은 이미 원장에 있는데 받는 순간에만 배운 것이 빈틈이다.
+ *   근거: cdp_webhook_deliveries 에 source = 'woocommerce' 로 쓰는 자리는 둘뿐이다 — 웹훅 수신 라우트(서명이 맞은 행의 회사로 · 서명 뒤)와
+ *     연결 승인용 임시 행(webhook_event = 'oauth_state' · 여기서 뺀다). 그래서 (회사 · 몰)의 저장 기록 본문 주소 = 그 몰 secret 으로 서명된 주소다.
+ *   ⛔ 이동 대상 **그 호스트만** 찾는다(기록에 있는 다른 주소를 미리 적지 않는다). 적는 일은 noteWooSeenHost 가 한다(한 회사 안 유일성 · 상한 · 회사 잠금 그대로).
+ * @returns 이번에 증명 주소로 적었으면 true
+ */
+async function learnWooHostFromSignedDeliveries(integ: WooIntegration, base: string, location: unknown): Promise<boolean> {
+  if (typeof location !== 'string' || !location.trim()) return false;
+  let u: URL;
+  try { u = new URL(location.trim(), base); } catch { return false; }
+  if (u.protocol !== 'https:' || u.origin === base) return false;   // 따라갈 수 없는 이동은 배울 것도 없다(wooRedirectOrigin 과 같은 조건)
+  const host = normalizeWooMallId(u.origin);
+  if (!host || host === integ.mallId || integ.seenHosts.includes(host)) return false;
+  const key = `${integ.companyId}:${integ.mallId}:${host}`;
+  if ((learnMissUntil.get(key) || 0) > Date.now()) return false;
+  const r = await query(
+    `SELECT d.payload->'resource'->'_links'->'self'->0->>'href' AS href
+       FROM cdp_webhook_deliveries d
+      WHERE d.company_id = $1::uuid AND d.source = 'woocommerce' AND d.webhook_event <> 'oauth_state'
+        AND d.payload->>'mall_id' = $2
+        AND d.created_at >= NOW() - ($5 || ' days')::interval
+        AND (d.payload->'resource'->'_links'->'self'->0->>'href' LIKE $3
+          OR d.payload->'resource'->'_links'->'self'->0->>'href' LIKE $4)
+      LIMIT 1`,
+    [integ.companyId, integ.mallId, `https://${host}/%`, `https://www.${host}/%`, String(WOO_LEARN_LOOKBACK_DAYS)],
+  );
+  // 읽어 온 주소의 호스트가 이동 대상과 같을 때만 적는다(https 만 · 조회 조건과 같은 판정을 코드에서 한 번 더)
+  const proof = { _links: { self: [{ href: r.rows[0]?.href }] } };
+  const learned = wooSelfHost(proof) === host ? await noteWooSeenHost(integ, proof) : false;
+  if (!learned) learnMissUntil.set(key, Date.now() + WOO_LEARN_RETRY_MS);
+  return learned;
 }
 
 export const WOO_SEEN_HOSTS_MAX = 8;
@@ -753,7 +800,7 @@ export const WOO_SEEN_HOSTS_MAX = 8;
 const WOO_SEEN_HOST_RETRY_MS = 30 * 60 * 1000;
 const seenHostRefusedUntil = new Map<string, number>();
 /** 테스트 전용 — 거부 기억 비우기 */
-export function resetWooSeenHostRefusals(): void { seenHostRefusedUntil.clear(); }
+export function resetWooSeenHostRefusals(): void { seenHostRefusedUntil.clear(); learnMissUntil.clear(); }
 
 /**
  * ★ 2026-10-01 서명이 검증된 웹훅 본문이 말하는 몰 주소를 그 몰의 증명된 주소로 적는다(새 호스트일 때만 쓰기 · 최대 WOO_SEEN_HOSTS_MAX).
