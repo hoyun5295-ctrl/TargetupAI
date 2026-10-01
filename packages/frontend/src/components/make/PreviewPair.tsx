@@ -126,22 +126,34 @@ export default function PreviewPair({
 
       {/* PC */}
       <div className={`${compact ? 'w-full max-w-[336px]' : 'w-[240px] xl:w-[250px]'} shrink-0`}>
-        <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-700 mb-2.5 h-5"><Monitor className="w-3.5 h-3.5 text-violet-700" />PC로 볼 때</div>
-        <PcCard kind={kind} html={html} width={compact ? 336 : 240} onOpen={() => setBigOpen(true)} />
-        <ul className="mt-3 space-y-1.5">
-          {pcNotes(kind).map((n) => (
-            <li key={n.text} className={`flex gap-1.5 text-[11.5px] leading-snug ${n.warn ? 'text-amber-700' : 'text-slate-500'}`}>
-              <span className={`mt-[6px] w-1 h-1 rounded-full shrink-0 ${n.warn ? 'bg-amber-300' : 'bg-violet-400'}`} />{n.text}
-            </li>
-          ))}
-        </ul>
-        <button type="button" onClick={() => setBigOpen(true)} disabled={!html} className={`${MK_BTN_OUTLINE} w-full mt-3 h-10`}>
-          <Monitor className="w-4 h-4" />PC 화면 크게 보기
-        </button>
+        <PcPanel kind={kind} html={html} width={compact ? 336 : 240} onOpen={() => setBigOpen(true)} />
       </div>
 
       {bigOpen && <PcBigModal kind={kind} html={html} onClose={() => setBigOpen(false)} />}
     </div>
+  );
+}
+
+/**
+ * PC로 볼 때 묶음(제목 · 작은 PC 카드 · 안내 · 크게 보기 버튼) — 수정 화면 가운데와 결과 화면(카탈로그 오른쪽 칸)이 같이 쓴다.
+ * ★ 2026-10-01 PreviewPair 안에 있던 것을 그대로 꺼냈다(겉모습 무변경).
+ */
+export function PcPanel({ kind, html, width, onOpen }: { kind: PreviewKind; html: string; width: number; onOpen: () => void }) {
+  return (
+    <>
+      <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-700 mb-2.5 h-5"><Monitor className="w-3.5 h-3.5 text-violet-700" />PC로 볼 때</div>
+      <PcCard kind={kind} html={html} width={width} onOpen={onOpen} />
+      <ul className="mt-3 space-y-1.5">
+        {pcNotes(kind).map((n) => (
+          <li key={n.text} className={`flex gap-1.5 text-[11.5px] leading-snug ${n.warn ? 'text-amber-700' : 'text-slate-500'}`}>
+            <span className={`mt-[6px] w-1 h-1 rounded-full shrink-0 ${n.warn ? 'bg-amber-300' : 'bg-violet-400'}`} />{n.text}
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={onOpen} disabled={!html} className={`${MK_BTN_OUTLINE} w-full mt-3 h-10`}>
+        <Monitor className="w-4 h-4" />PC 화면 크게 보기
+      </button>
+    </>
   );
 }
 

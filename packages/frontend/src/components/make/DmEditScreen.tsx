@@ -6,7 +6,7 @@
  * 보내기·발행 흐름은 부모(DmBuilderPage)가 가진다 — 여기서는 onSend 만 부른다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Palette, Sparkles, BookOpen, Upload, Wand2, FolderOpen, ChevronDown, ChevronRight, History, FlaskConical, ShieldCheck, Plus, X, Loader2, Image as ImageIcon, Link2 } from 'lucide-react';
+import { Palette, Sparkles, BookOpen, Upload, Wand2, FolderOpen, ChevronDown, ChevronRight, History, FlaskConical, ShieldCheck, Plus, X, Loader2, Image as ImageIcon, Link2, Trash2 } from 'lucide-react';
 import { useDmBuilderStore, selectAllSectionsFlat } from '../../stores/dmBuilderStore';
 import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
 import CatalogPageModal, { CATALOG_BLOCKS, type CatalogTemplateKey } from '../dm/build/CatalogPageModal';
@@ -442,6 +442,9 @@ function ThemeTile({ name, swatches, onClick }: { name: string; swatches: [strin
 
 // ─────────────────────────────── 카탈로그(쪽) ───────────────────────────────
 
+/** 책처럼 보기(카탈로그)의 최소 쪽 수 — 뷰어 판정(dm-viewer-catalog isCatalogDm = 2쪽 이상)과 같은 값 */
+const CATALOG_MIN_PAGES = 2;
+
 function galleryOf(p: { sections: Section[] }): Section | null {
   return p.sections.find((x) => x.type === 'gallery') || null;
 }
@@ -548,6 +551,7 @@ function CatalogPagePanel({ section }: { section: Section }) {
   const brandColor = useDmBuilderStore((s) => s.brandKit.primary_color);
   const [tpl, setTpl] = useState<CatalogTemplateKey | null>(null);
   const [studio, setStudio] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const props = (section.props || {}) as any;
   const url: string | null = props.images?.[0]?.url || null;
@@ -555,6 +559,19 @@ function CatalogPagePanel({ section }: { section: Section }) {
   const pageNo = pages.findIndex((p) => p.sections.some((x) => x.id === section.id)) + 1;
   const setImage = (u: string) => updateSectionProps(section.id, { images: [{ ...(props.images?.[0] || {}), url: u }], layout: 'list_1xN', full_bleed: true } as any);
   const setChips = (next: typeof chips) => updateSectionProps(section.id, { chips: next.length ? next : undefined } as any);
+  // ★ 2026-10-01 쪽 빼기 — 이 화면에는 쪽을 뺄 방법이 없었다(추가·순서·사진 바꾸기만 · 저장소 removePage 는 옛 편집기에서만 불렀다).
+  //   책 보기는 2쪽부터라 2쪽 이하에서는 빼지 않는다. 되돌리기로 살릴 수 있게 빼기 직전 모습을 남긴다.
+  const canRemovePage = pages.length > CATALOG_MIN_PAGES;
+  const removeThisPage = () => {
+    const st = useDmBuilderStore.getState();
+    const idx = st.pages.findIndex((p) => p.sections.some((x) => x.id === section.id));
+    if (idx < 0 || st.pages.length <= CATALOG_MIN_PAGES) return;
+    st.pushHistory();
+    st.removePage(idx);
+    const after = useDmBuilderStore.getState();
+    const g = galleryOf(after.pages[after.currentPageIndex] || { sections: [] });
+    if (g) after.selectSection(g.id);
+  };
 
   return (
     <div className="flex flex-col min-h-full">
@@ -597,7 +614,16 @@ function CatalogPagePanel({ section }: { section: Section }) {
       <div className="mt-auto pt-6 flex items-center gap-3">
         <button type="button" onClick={() => setTpl('one')} className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-violet-600 hover:bg-violet-500"><Wand2 className="w-4 h-4" />이 쪽 다시 만들기</button>
         <span className="text-[12px] text-slate-500">크레딧 0</span>
+        <button
+          type="button"
+          disabled={!canRemovePage}
+          title={canRemovePage ? undefined : `책처럼 보려면 ${CATALOG_MIN_PAGES}쪽은 있어야 해요`}
+          onClick={() => setConfirm({ mode: 'danger', title: `${pageNo}쪽을 뺄까요?`, description: '빼도 위쪽 되돌리기로 다시 살릴 수 있어요.', confirmLabel: '빼기', onConfirm: removeThisPage })}
+          className="ml-auto inline-flex items-center gap-1.5 h-10 px-3 rounded-xl border border-slate-300 bg-white text-[12.5px] text-slate-700 hover:text-rose-700 hover:border-rose-300 disabled:opacity-40 disabled:hover:text-slate-700 disabled:hover:border-slate-300"
+          data-make="catalog-remove-page"
+        ><Trash2 className="w-4 h-4" />이 쪽 빼기</button>
       </div>
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <CatalogPageModal templateKey={tpl} open={!!tpl} onClose={() => setTpl(null)} onMade={(u, c) => { setImage(u); if (c.length) setChips(c); setTpl(null); }} brandColor={brandColor || null} />
       <StudioInsertModal open={studio} onClose={() => setStudio(false)} onInserted={(u) => { setImage(u); setStudio(false); }} />
     </div>

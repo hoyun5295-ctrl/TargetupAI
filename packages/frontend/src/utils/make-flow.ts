@@ -133,17 +133,35 @@ export interface FixItem {
 }
 
 const CTA_EMPTY_RE = /CTA 버튼 \d+번의 URL이 비어/;
+const FOOTER_MISSING_RE = /^Footer 섹션이 없어요/;
 
 /**
  * 서버 검수 결과 + 블록 → 고칠 곳 목록. must(보내기 잠금) → suggest → ok → info 순.
- * 문구는 서버 문장을 쓰되, 담당자가 가장 자주 만나는 한 가지(버튼 주소 없음)만 사람 말로 바꾼다.
+ * 문구는 서버 문장을 쓰되, 담당자가 가장 자주 만나는 것(버튼 주소 없음 · 맨 아래 회사 정보 블록 없음)만 사람 말로 바꾼다.
+ *
+ * ★ 2026-10-01 잠금(must) = **넘길 수 없는 치명만**(박성용 접수 「카탈로그 · footer 섹션 필수로 다음으로 못 넘어감」).
+ *   서버 첫 발행 관문(`dm-publish-gate dmPublishBlocker`)과 보내기 창(`MakeSendModal`)은 `overridable` 치명을 막지 않는데
+ *   이 화면만 잠금으로 셌다 → 사진만 있는 DM(카탈로그 · 완성 이미지)은 구조상 Footer 가 없어 여기서 100% 못 보냈다.
+ *   넘길 수 있는 치명은 권고 줄로 내리고, 갈 블록이 없는 줄에는 [고치기]를 달지 않는다(눌러도 갈 곳이 없었다).
  */
 export function fixItemsOf(v: ValidationLike | null, sections: ReadonlyArray<Pick<Section, 'id' | 'type' | 'props'>>, extraInfo: string[] = []): FixItem[] {
   const items = v?.items || [];
   const must: FixItem[] = [];
+  const passable: FixItem[] = [];
   const seenCta = new Set<string>();
   for (const it of items) {
     if (it.severity !== 'fatal') continue;
+    if (it.overridable === true) {
+      const footerMissing = it.area === 'required_info' && !it.section_id && FOOTER_MISSING_RE.test(it.message);
+      passable.push({
+        kind: 'suggest',
+        title: footerMissing ? '맨 아래 회사 정보 블록이 없어요' : it.message,
+        sub: footerMissing ? '그대로 보낼 수 있어요 · 넣으려면 [자세히 편집]에서' : (it.fix_suggestion || '확인하고 그대로 보낼 수 있어요'),
+        sectionId: it.section_id,
+        action: it.section_id ? '고치기' : undefined,
+      });
+      continue;
+    }
     if (it.area === 'link' && CTA_EMPTY_RE.test(it.message)) {
       const key = it.section_id || 'cta';
       if (seenCta.has(key)) continue;
@@ -151,7 +169,7 @@ export function fixItemsOf(v: ValidationLike | null, sections: ReadonlyArray<Pic
       must.push({ kind: 'must', title: '버튼이 갈 주소가 없어요', sub: '누르면 바로 넣을 수 있어요', sectionId: it.section_id, action: '넣기' });
       continue;
     }
-    must.push({ kind: 'must', title: it.message, sub: it.fix_suggestion || (it.overridable ? '확인하고 넘길 수도 있어요' : undefined), sectionId: it.section_id, action: '고치기' });
+    must.push({ kind: 'must', title: it.message, sub: it.fix_suggestion, sectionId: it.section_id, action: '고치기' });
   }
   const suggest: FixItem[] = items.filter((it) => it.severity === 'recommend').slice(0, 3)
     .map((it) => ({ kind: 'suggest' as const, title: it.message, sub: it.fix_suggestion, sectionId: it.section_id, action: it.section_id ? '고치기' : undefined }));
@@ -163,7 +181,7 @@ export function fixItemsOf(v: ValidationLike | null, sections: ReadonlyArray<Pic
   if (v && !items.some((it) => it.area === 'link')) ok.push({ kind: 'ok', title: '링크 정상' });
   if (v && !items.some((it) => it.area === 'required_info' && it.severity === 'fatal')) ok.push({ kind: 'ok', title: '회사 정보 · 수신거부 안내 있음' });
   const info: FixItem[] = extraInfo.filter(Boolean).slice(0, 4).map((t) => ({ kind: 'info' as const, title: t }));
-  return [...must, ...suggest, ...ok, ...info];
+  return [...must, ...passable, ...suggest, ...ok, ...info];
 }
 
 /** 레일 머리 한 줄 */

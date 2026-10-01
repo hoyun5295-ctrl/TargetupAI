@@ -85,7 +85,7 @@ export default function MakeSendModal({
           <span className="text-[12px] text-slate-500 flex-1 min-w-[160px]">
             {otherExists
               ? (other === 'email' ? `제목: ${email?.subject || '(제목 없음)'}` : `${dm?.title || '(제목 없음)'}`)
-              : '아직 만들지 않았어요 · 같은 재료로 바로 만들 수 있어요'}
+              : (makeOther && makeOther.channel === other ? '아직 만들지 않았어요 · 같은 재료로 바로 만들 수 있어요' : '아직 만들지 않았어요')}
           </span>
           {otherExists ? (
             <button type="button" onClick={() => setActive(other)} className={MK_BTN_OUTLINE}>{other === 'email' ? '이메일 보내기' : 'DM 보내기'}</button>

@@ -41,7 +41,11 @@ vi.mock('./alimtalk-api', async (importOriginal) => {
 
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
-import { resolveBrandSendImage, resolveBrandSendAttachmentJson, resolveBrandSendRichImages, BrandImageResolveError } from './brand-image-resolver';
+import sharp from 'sharp';
+import {
+  resolveBrandSendImage, resolveBrandSendAttachmentJson, resolveBrandSendRichImages, BrandImageResolveError,
+  planCarouselSameSize, CAROUSEL_RATIO_TOLERANCE, CAROUSEL_FIT_WIDTH, CAROUSEL_MIN_WIDTH,
+} from './brand-image-resolver';
 import { extractImageListFromAnyShape } from './alimtalk-api';
 
 const queryMock = vi.mocked(query);
@@ -550,5 +554,191 @@ describe('다중 업로드 응답 추출 (extractImageListFromAnyShape)', () => 
   it('성공 목록이 비면 빈 배열 — `success: true` 같은 불리언은 목록으로 보지 않는다', () => {
     expect(extractImageListFromAnyShape({ code: '0000', data: { success: [], failure: [{ index: 0 }] } })).toEqual([]);
     expect(extractImageListFromAnyShape({ code: '0000', data: { success: true } })).toEqual([]);
+  });
+});
+
+/**
+ * ★2026-10-01 캐러셀 커머스 = 전 장을 같은 픽셀 크기로 맞춰 올린다 (박성용 접수 재오픈 · B-0923-3)
+ *
+ * 실측: 버튼·상품·이미지를 다 갖춘 건(SMSQ_SEND_15 seqno 457376)이 `KAKAO_3024_MESSAGE_INVALID_IMAGE`.
+ *   두 카드 원본 = 676×534(1.2659) · 506×400(1.2650) — 화면의 1% 오차 검사를 통과하지만 같지 않다.
+ * 못 박는 것
+ *   ①그 두 장이 같은 크기(506×400)로 올라간다 ②이미 그 크기인 장은 바이트 그대로다 ③오차 밖이면 한 장도 올리지 않고 거절한다
+ *   ④키우지 않는다 · 가로를 깎지 않는다 ⑤피드 · 이미 올린 주소가 섞인 건 · 읽을 수 없는 파일은 종전 그대로다
+ *   ⑥오차·가로 상한은 화면과 같은 값이다
+ */
+describe('캐러셀 커머스 — 전 장 같은 크기 맞춤', () => {
+  const K = (n: string) => `https://mud-kage.kakao.com/dn/abc/${n}.jpg`;
+  const multi = (n: string) => ({
+    code: '0000', message: 'SUCCESS',
+    data: { overallStatus: 'SUCCESS', code: '0000', message: null, success: [{ index: 0, formField: 'image_1', imageUrl: K(n) }], failure: [] },
+  }) as any;
+  const rel = (name: string) => `/api/cdp/inapp/image/${COMPANY}/${name}`;
+  const put = async (name: string, width: number, height: number, format: 'jpeg' | 'png' = 'jpeg'): Promise<Buffer> => {
+    const img = sharp({ create: { width, height, channels: 3, background: { r: 180, g: 140, b: 100 } } });
+    const buf = await (format === 'png' ? img.png() : img.jpeg()).toBuffer();
+    fs.writeFileSync(path.join(IMG_DIR, COMPANY, name), buf);
+    return buf;
+  };
+  /** 창구에 실제로 올라간 n번째 버퍼의 크기·형식 */
+  const uploaded = async (mock: typeof uploadCommerce, n: number) => {
+    const buf = (mock.mock.calls[n][0] as any)[0].buffer as Buffer;
+    const m = await sharp(buf).metadata();
+    return { buf, width: m.width, height: m.height, format: m.format };
+  };
+
+  beforeEach(() => {
+    uploadFeed.mockResolvedValue(multi('feed'));
+    uploadCommerce.mockResolvedValue(multi('commerce'));
+  });
+
+  describe('계획(planCarouselSameSize)', () => {
+    it('실측 두 장(676×534 · 506×400) → 506×400', () => {
+      expect(planCarouselSameSize([{ width: 676, height: 534 }, { width: 506, height: 400 }])).toEqual({ kind: 'fit', width: 506, height: 400 });
+    });
+    it('이미 전 장이 같은 크기면 손대지 않는다(상한보다 커도)', () => {
+      expect(planCarouselSameSize([{ width: 800, height: 600 }, { width: 800, height: 600 }])).toEqual({ kind: 'same', width: 800, height: 600 });
+      expect(planCarouselSameSize([{ width: 1600, height: 1200 }, { width: 1600, height: 1200 }])).toEqual({ kind: 'same', width: 1600, height: 1200 });
+    });
+    it('같은 비율 · 다른 크기 → 가장 작은 가로(상한 800)로', () => {
+      expect(planCarouselSameSize([{ width: 1600, height: 1200 }, { width: 1000, height: 750 }])).toEqual({ kind: 'fit', width: 800, height: 600 });
+      expect(planCarouselSameSize([{ width: 700, height: 525 }, { width: 600, height: 450 }])).toEqual({ kind: 'fit', width: 600, height: 450 });
+    });
+    it('오차(1%) 밖이면 어느 장인지 돌려준다 — 기준은 0번', () => {
+      expect(planCarouselSameSize([{ width: 800, height: 600 }, { width: 800, height: 600 }, { width: 800, height: 400 }])).toEqual({ kind: 'mismatch', index: 2 });
+      expect(planCarouselSameSize([{ width: 800, height: 600 }, { width: 800, height: 590 }])).toEqual({ kind: 'mismatch', index: 1 });
+      expect(planCarouselSameSize([{ width: 800, height: 600 }, { width: 800, height: 596 }])).toMatchObject({ kind: 'fit' });
+    });
+    it('가로를 깎지 않고 키우지 않는다 — 결과는 어느 장의 가로·세로도 넘지 않는다', () => {
+      const cases = [
+        [{ width: 676, height: 534 }, { width: 506, height: 400 }],
+        [{ width: 500, height: 400 }, { width: 505, height: 400 }],
+        [{ width: 640, height: 481 }, { width: 800, height: 600 }, { width: 799, height: 603 }],
+      ];
+      for (const dims of cases) {
+        const p = planCarouselSameSize(dims) as any;
+        expect(p.kind).toBe('fit');
+        expect(p.width).toBe(Math.min(CAROUSEL_FIT_WIDTH, ...dims.map((d) => d.width)));
+        for (const d of dims) { expect(p.width).toBeLessThanOrEqual(d.width); expect(p.height).toBeLessThanOrEqual(d.height); }
+      }
+    });
+    it('판단할 수 없는 입력은 null', () => {
+      expect(planCarouselSameSize([])).toBeNull();
+      expect(planCarouselSameSize([{ width: 0, height: 10 }, { width: 10, height: 10 }])).toBeNull();
+    });
+  });
+
+  it('실측 재현 — 두 장이 같은 크기로 올라가고, 이미 그 크기인 장은 바이트 그대로다', async () => {
+    await put('c1.jpg', 676, 534, 'jpeg');
+    const second = await put('c2.png', 506, 400, 'png');
+    const out = await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_COMMERCE',
+      carouselCards: [{ image: { img_url: rel('c1.jpg'), img_link: 'https://x' } }, { image: { img_url: rel('c2.png') } }],
+    });
+    expect(out.carouselCards?.map((c) => c.image?.img_url)).toEqual([K('commerce'), K('commerce')]);
+    expect(out.carouselCards?.[0].image).toMatchObject({ img_link: 'https://x' });
+    expect(uploadCommerce).toHaveBeenCalledTimes(2);
+    const a = await uploaded(uploadCommerce, 0);
+    const b = await uploaded(uploadCommerce, 1);
+    expect([a.width, a.height, a.format]).toEqual([506, 400, 'jpeg']);
+    expect([b.width, b.height, b.format]).toEqual([506, 400, 'png']);
+    expect(b.buf.equals(second)).toBe(true);
+    // 디스크 원본은 바꾸지 않는다
+    const disk = await sharp(fs.readFileSync(path.join(IMG_DIR, COMPANY, 'c1.jpg'))).metadata();
+    expect([disk.width, disk.height]).toEqual([676, 534]);
+  });
+
+  it('인트로가 있으면 인트로가 기준이고, 인트로까지 같은 크기가 된다', async () => {
+    await put('intro.jpg', 800, 600);
+    await put('k1.jpg', 640, 481);
+    await put('k2.jpg', 1000, 752);
+    await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_COMMERCE',
+      carouselIntro: { header: 'h', content: 'c', image_url: rel('intro.jpg') },
+      carouselCards: [{ image: { img_url: rel('k1.jpg') } }, { image: { img_url: rel('k2.jpg') } }],
+    });
+    expect(uploadCommerce).toHaveBeenCalledTimes(3);
+    const sizes = await Promise.all([0, 1, 2].map(async (n) => { const u = await uploaded(uploadCommerce, n); return `${u.width}x${u.height}`; }));
+    expect(new Set(sizes).size).toBe(1);
+    expect(sizes[0]).toBe('640x480');
+  });
+
+  it('오차 밖이면 한 장도 올리지 않고 어느 이미지인지 말한다', async () => {
+    await put('w1.jpg', 800, 600);
+    await put('w2.jpg', 800, 400);
+    const run = resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_COMMERCE',
+      carouselCards: [{ image: { img_url: rel('w1.jpg') } }, { image: { img_url: rel('w2.jpg') } }],
+    });
+    await expect(run).rejects.toBeInstanceOf(BrandImageResolveError);
+    await expect(run).rejects.toThrow('카드 2 이미지: 카드 1 이미지와 비율이 다릅니다');
+    expect(uploadCommerce).not.toHaveBeenCalled();
+  });
+
+  it('이미 전 장이 같은 크기면 바이트 그대로 올린다', async () => {
+    const one = await put('s1.jpg', 800, 600);
+    const two = await put('s2.png', 800, 600, 'png');
+    await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_COMMERCE',
+      carouselCards: [{ image: { img_url: rel('s1.jpg') } }, { image: { img_url: rel('s2.png') } }],
+    });
+    expect((await uploaded(uploadCommerce, 0)).buf.equals(one)).toBe(true);
+    expect((await uploaded(uploadCommerce, 1)).buf.equals(two)).toBe(true);
+  });
+
+  it('피드는 손대지 않는다 — 크기가 달라도 원본 그대로 올린다', async () => {
+    const one = await put('f1.jpg', 676, 534);
+    const two = await put('f2.jpg', 800, 400);
+    await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_FEED',
+      carouselCards: [{ header: 'a', image: { img_url: rel('f1.jpg') } }, { header: 'b', image: { img_url: rel('f2.jpg') } }],
+    });
+    expect(uploadFeed).toHaveBeenCalledTimes(2);
+    expect((await uploaded(uploadFeed, 0)).buf.equals(one)).toBe(true);
+    expect((await uploaded(uploadFeed, 1)).buf.equals(two)).toBe(true);
+  });
+
+  it('이미 올린 카카오 주소가 섞이면 맞추지 않는다(재발송·예약분) — 우리 파일이 둘 이상이어도 원본 그대로', async () => {
+    // 섞인 장의 크기를 모르는 채 우리 파일끼리만 맞추면 「전 장 같은 크기」가 되지 않는다
+    const one = await put('m1.jpg', 676, 534);
+    const two = await put('m2.png', 506, 400, 'png');
+    queryMock.mockImplementation(async (sql: any) => (String(sql).includes('SELECT') ? { rows: [{ '?column?': 1 }] } : { rows: [] }) as any);
+    const out = await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_COMMERCE',
+      carouselCards: [{ image: { img_url: rel('m1.jpg') } }, { image: { img_url: KAKAO } }, { image: { img_url: rel('m2.png') } }],
+    });
+    expect(out.carouselCards?.[1].image?.img_url).toBe(KAKAO);
+    expect(uploadCommerce).toHaveBeenCalledTimes(2);
+    expect((await uploaded(uploadCommerce, 0)).buf.equals(one)).toBe(true);
+    expect((await uploaded(uploadCommerce, 1)).buf.equals(two)).toBe(true);
+  });
+
+  it('크기를 읽을 수 없는 파일이 있으면 종전 그대로 올린다(판정은 카카오 올리기 창구가 한다)', async () => {
+    await put('r1.jpg', 676, 534);
+    await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_COMMERCE',
+      carouselCards: [{ image: { img_url: rel('r1.jpg') } }, { image: { img_url: OWN_REL } }],
+    });
+    expect(uploadCommerce).toHaveBeenCalledTimes(2);
+    expect((uploadCommerce.mock.calls[1][0] as any)[0].buffer.toString()).toBe('fake-image-bytes');
+    expect((await uploaded(uploadCommerce, 0)).width).toBe(676);
+  });
+
+  it('최소 가로에 못 미치는 장이 섞이면 맞추지 않는다 — 그 장만 카카오 올리기에서 거절되게 원본 그대로', async () => {
+    const big = await put('n1.jpg', 676, 534);
+    const small = await put('n2.jpg', 400, 316);
+    await resolveBrandSendRichImages({
+      companyId: COMPANY, bubbleType: 'CAROUSEL_COMMERCE',
+      carouselCards: [{ image: { img_url: rel('n1.jpg') } }, { image: { img_url: rel('n2.jpg') } }],
+    });
+    expect((await uploaded(uploadCommerce, 0)).buf.equals(big)).toBe(true);
+    expect((await uploaded(uploadCommerce, 1)).buf.equals(small)).toBe(true);
+  });
+
+  it('오차·가로 상한·최소 가로는 화면과 같은 값이다', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '../../../frontend/src/components/brand-send/brandImageSpec.ts'), 'utf8');
+    expect(Number(src.match(/const RATIO_TOLERANCE = ([0-9.]+);/)?.[1])).toBe(CAROUSEL_RATIO_TOLERANCE);
+    expect(Number(src.match(/carousel: \{[^}]*fitWidth: (\d+)/)?.[1])).toBe(CAROUSEL_FIT_WIDTH);
+    expect(Number(src.match(/carousel: \{ minWidth: (\d+)/)?.[1])).toBe(CAROUSEL_MIN_WIDTH);
   });
 });

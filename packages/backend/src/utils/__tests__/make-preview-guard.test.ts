@@ -10,6 +10,8 @@ import { guardPreviewHtml, MK_PREVIEW_CSP } from '../../../../frontend/src/utils
 import {
   fixItemsOf, fixHeadline, readCardUseNote, dmChipStatus, emailChipStatus, makeResultPath, defaultDmSmsText, blockLabel, dmPaletteItems, isNightAdHour,
 } from '../../../../frontend/src/utils/make-flow';
+import { catalogPagesOf } from '../dm/dm-catalog-pages';
+import { validateDm } from '../dm/dm-validate';
 
 const DOC = '<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>t</title></head><body><div data-section-id="s1">a</div><script>var x=1;</script></body></html>';
 
@@ -87,6 +89,84 @@ describe('고칠 곳 판정', () => {
     const items = fixItemsOf({ items: [] }, sections);
     expect(fixHeadline(items).tone).toBe('good');
     expect(items.some((i) => i.title === '버튼 주소 넣음')).toBe(true);
+  });
+
+  // ★ 2026-10-01 박성용 접수(카탈로그 · footer 섹션 필수로 다음으로 못 넘어감) — 잠금 수 = 서버 발행 관문이 막는 수
+  it('카탈로그 DM(실제 서버 검수 결과) = 잠금 0 · 보낼 수 있음 · 갈 곳 없는 [고치기] 없음', async () => {
+    const pages = catalogPagesOf(Array.from({ length: 34 }, (_, i) => ({ url: `/api/dm/images/c1/cat-${i + 1}.jpg` })));
+    const flat = pages.flatMap((p) => p.sections) as any;
+    const v = await validateDm({ sections: flat, publish_mode: 'now' });
+    expect(v.stats).toMatchObject({ fatal: 1, blocking: 0 });
+    const items = fixItemsOf(v as any, flat);
+    expect(items.filter((i) => i.kind === 'must')).toHaveLength(0);
+    expect(fixHeadline(items).count).toBe(v.stats.blocking);
+    expect(fixHeadline(items).tone).toBe('plain');
+    const row = items.find((i) => i.title === '맨 아래 회사 정보 블록이 없어요');
+    expect(row).toMatchObject({ kind: 'suggest' });
+    expect(row?.sub).toContain('그대로 보낼 수 있어요');
+    expect(row?.action).toBeUndefined();
+    expect(items.every((i) => !i.action || !!i.sectionId)).toBe(true);
+    expect(items.some((i) => /Footer 섹션/.test(i.title))).toBe(false);
+  });
+  it('넘길 수 없는 치명만 잠금 · 블록이 있는 넘길 수 있는 줄은 [고치기] 권고 · 잠금 줄이 먼저', () => {
+    const v = { items: [
+      { area: 'required_info', severity: 'fatal', overridable: true, message: 'Footer 섹션이 없어요. 고객센터/수신거부 정보 노출 의무를 위해 필수예요.' },
+      { area: 'required_info', severity: 'fatal', overridable: true, section_id: 'f', message: '수신거부 링크가 숨김 상태예요. 광고성 메시지는 수신거부 링크 노출이 의무예요.' },
+      { area: 'countdown', severity: 'fatal', section_id: 'k', message: '카운트다운 종료 일시가 이미 지나갔어요.', fix_suggestion: '미래 시점으로 다시 설정해 주세요.' },
+      { area: 'layout', severity: 'fatal', message: '섹션이 하나도 없어요. 최소 1개 이상 추가해 주세요.' },
+    ] } as any;
+    const items = fixItemsOf(v, sections);
+    const must = items.filter((i) => i.kind === 'must');
+    expect(must.map((i) => i.title)).toEqual(['카운트다운 종료 일시가 이미 지나갔어요.', '섹션이 하나도 없어요. 최소 1개 이상 추가해 주세요.']);
+    expect(fixHeadline(items)).toMatchObject({ tone: 'warn', count: 2 });
+    expect(items.slice(0, 2).every((i) => i.kind === 'must')).toBe(true);
+    expect(items.find((i) => i.sectionId === 'f')).toMatchObject({ kind: 'suggest', action: '고치기', title: '수신거부 링크가 숨김 상태예요. 광고성 메시지는 수신거부 링크 노출이 의무예요.', sub: '확인하고 그대로 보낼 수 있어요' });
+    // 넘길 수 있는 항목이 남아 있으면 「회사 정보 · 수신거부 안내 있음」을 말하지 않는다
+    expect(items.some((i) => i.title === '회사 정보 · 수신거부 안내 있음')).toBe(false);
+  });
+});
+
+/**
+ * ★ 2026-10-01 카탈로그 DM 전수점검(박성용 접수 · Harold 「뿌리를 뽑아」) — 결과 화면이 카탈로그를 일반 DM 으로 다루던 자리(소스 계약).
+ *   헤드리스 실측(빌드본 · 실제 서버 검수·뷰어 출력)으로 확인한 8항목 가운데, 다시 생기면 안 되는 배선만 고정한다.
+ */
+describe('결과 화면 · 수정 화면의 카탈로그 배선', () => {
+  const read = (rel: string) => readFileSync(resolve(__dirname, '../../../../frontend/src', rel), 'utf8');
+  const page = read('pages/QuickCampaignResultPage.tsx');
+  it('카탈로그 판정 = 수정 화면과 같은 값(스토어 보기 방식)', () => {
+    expect(page).toContain("layoutMode === 'slides' && catalogView");
+    expect(read('components/make/DmEditScreen.tsx')).toContain("s.layoutMode === 'slides' && s.catalogView");
+  });
+  it('다시 만들기 · 재료 다시 보기는 만든 채널로 가고 금액은 원장 키로 적는다', () => {
+    expect(page).not.toContain('quick-campaign?channel=${channel}');
+    expect(page.match(/quick-campaign\?channel=\$\{makeChannel\}/g)).toHaveLength(2);
+    expect(page).toContain("isCatalog ? 'catalog-dm-build' : 'dm-ai-generate'");
+    expect(read('pages/DmBuilderPage.tsx')).toContain("buildBar.channel === 'catalog' ? 'catalog' : 'dm'");
+    expect(read('pages/DmBuilderPage.tsx')).not.toContain("navigate('/quick-campaign?channel=dm&regen=1')");
+  });
+  it('카탈로그는 다른 채널 1클릭을 권하지 않고 PC 책 미리보기를 보여 준다 · 쪽을 눌러도 일반 편집 창을 띄우지 않는다', () => {
+    expect(page).toContain('const canMakeOther = draftFits && !isCatalog;');
+    expect(page).toContain('<PcPanel kind="catalog"');
+    expect(page).toContain("onTap={channel === 'dm' && !isCatalog ?");
+    expect(page).toContain("{sheetOpen && channel === 'dm' && !isCatalog && selected && (");
+    expect(page).toContain('makeOther={canMakeOther ?');
+  });
+  it('보내기 안내 글은 머리 띠 안에 둔다(띠 밖으로 내려 걸지 않는다) · 잠금 알림은 겹쳐 쌓지 않는다', () => {
+    expect(page).not.toContain('top-full mt-1 whitespace-nowrap');
+    expect(page).toContain('data-make="lock-hint"');
+    expect(page).toContain('lockToastAt.current');
+  });
+  it('수정 화면 쪽 패널에 [이 쪽 빼기] — 저장소의 쪽 빼기를 쓰고 되돌릴 수 있게 남긴다 · 책 최소 쪽 수 아래로는 막는다', () => {
+    const edit = read('components/make/DmEditScreen.tsx');
+    expect(edit).toContain('data-make="catalog-remove-page"');
+    expect(edit).toMatch(/st\.pushHistory\(\);\s*st\.removePage\(idx\);/);
+    expect(edit).toContain('const CATALOG_MIN_PAGES = 2;');
+    expect(edit).toContain('st.pages.length <= CATALOG_MIN_PAGES');
+    // 뷰어 판정(2쪽 미만 = 책 아님)과 같은 수
+    expect(readFileSync(resolve(__dirname, '../dm/dm-viewer-catalog.ts'), 'utf8')).toContain('pages.length < 2');
+  });
+  it('보내기 창은 만들 버튼이 없을 때 「같은 재료로 바로」를 말하지 않는다', () => {
+    expect(read('components/make/MakeSendModal.tsx')).toContain("makeOther && makeOther.channel === other ? '아직 만들지 않았어요 · 같은 재료로 바로 만들 수 있어요' : '아직 만들지 않았어요'");
   });
 });
 

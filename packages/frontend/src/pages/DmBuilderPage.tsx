@@ -726,7 +726,8 @@ export default function DmBuilderPage() {
               handoff={buildBar}
               collapsed={isDirtyForBar}
               onDismiss={() => { clearBuildResult(); setBuildBar(null); }}
-              onRegenerate={() => { clearBuildResult(); setBuildBar(null); navigate('/quick-campaign?channel=dm&regen=1'); }}
+              // ★ 2026-10-01 카탈로그로 만든 DM 은 카탈로그 채널로 다시 만든다(옛: 늘 일반 DM 채널 → 올린 쪽이 안 보이고 재료 부족으로 아무 일도 안 일어났다)
+              onRegenerate={() => { const ch = buildBar.channel === 'catalog' ? 'catalog' : 'dm'; clearBuildResult(); setBuildBar(null); navigate(`/quick-campaign?channel=${ch}&regen=1`); }}
             />
           ) : undefined}
         />

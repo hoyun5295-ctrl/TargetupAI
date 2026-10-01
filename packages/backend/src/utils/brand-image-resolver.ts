@@ -26,6 +26,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
 import { extractImageFromAnyShape, extractImageListFromAnyShape, sanitizeImcMessageForUser } from './alimtalk-api';
@@ -205,6 +206,8 @@ async function resolveOne(input: {
   imgUrl: string;
   /** 자리 이름 — 거절 사유 앞에 붙인다(이미지 자리가 여럿인 유형에서 어느 이미지인지 알 수 있게). 예: "카드 2 이미지" */
   at?: string;
+  /** ★2026-10-01 같은 크기로 맞춘 버퍼(캐러셀 커머스 · prepareCarouselSameSize) — 있으면 디스크 원본 대신 이것을 올린다 */
+  prepared?: Buffer | null;
 }): Promise<string> {
   const ref = toOwnImageRef(input.imgUrl);
   const route = input.route;
@@ -232,10 +235,14 @@ async function resolveOne(input: {
 
   const filePath = path.join(INAPP_IMAGE_BASE, ref.companyId, ref.filename);
   let buf: Buffer;
-  try {
-    buf = fs.readFileSync(filePath);
-  } catch {
-    throw new BrandImageResolveError('첨부한 이미지 파일을 찾을 수 없습니다. 이미지를 다시 올려주세요');
+  if (input.prepared) {
+    buf = input.prepared;
+  } else {
+    try {
+      buf = fs.readFileSync(filePath);
+    } catch {
+      throw new BrandImageResolveError('첨부한 이미지 파일을 찾을 수 없습니다. 이미지를 다시 올려주세요');
+    }
   }
 
   let res: any;
@@ -275,6 +282,115 @@ async function resolveOne(input: {
     bytes: buf.length,
   });
   return imageUrl;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ★2026-10-01 캐러셀 커머스 = 전 장을 **같은 픽셀 크기**로 맞춰 올린다 (박성용 접수 `cmuc0buy…` 재오픈 · B-0923-3)
+//
+// 실측: `SMSQ_SEND_15` seqno 457376 = 버튼·상품·이미지를 다 갖추고도 `KAKAO_3024_MESSAGE_INVALID_IMAGE`.
+//   두 카드 원본 = 676×534(가로/세로 1.2659) · 506×400(1.2650). 규격(attachment_method.pdf §3.4) =
+//   「캐러셀 커머스는 전체 이미지 비율이 동일해야 함」. 화면은 「첫 이미지와 같은 비율」을 1% 오차까지
+//   통과시키고, 우리는 한 장씩 따로 올리므로 올릴 때는 장마다 접수되고 **발송 때** 카카오가 비교해 거절한다
+//   (그때는 이미 차감 뒤다).
+//
+// 왜 서버인가: 화면에서 둘째 장만 맞추면 반올림 때문에 다시 어긋난다(676×534 에 맞춘 506 폭 = 400 → 1.2650).
+//   「정확히 같다」는 전 장이 같은 가로·세로일 때만 성립하고, 그것을 보장할 수 있는 자리는 올리는 함수 하나다.
+//
+// ⛔ 커머스에만 건다 — 규격이 비율 동일을 적은 유형이 커머스뿐이고, 피드는 운영에서 그대로 성공하고 있다
+//    (0920 seqno 115652). 근거 없이 넓히면 지금 되는 발송의 이미지를 우리가 바꾸게 된다.
+// ⛔ 키우지 않는다 — 결과 가로 = 가장 작은 장의 가로(상한 800) · 결과 세로도 어느 장의 세로를 넘지 않는다.
+//    그래서 최소 가로(500)를 우리가 무너뜨리지 않는다. 잘리는 양은 오차 한도(1%) 안이다.
+// ⛔ 최소 가로에 못 미치는 장이 섞이면 맞추지 않는다 — 전 장을 그 폭으로 줄이면 카카오의 「가로 부족」 거절이
+//    엉뚱한 장에 붙는다. 종전대로 그 장만 거절되게 둔다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 비율 비교 허용 오차 — 화면(`brandImageSpec.ts RATIO_TOLERANCE`)과 같은 값. 이보다 크게 다르면 맞추지 않고 거절한다 */
+export const CAROUSEL_RATIO_TOLERANCE = 0.01;
+/** 맞춘 결과의 가로 상한(px) — 화면 자동 맞춤(`BRAND_IMAGE_RULES.carousel.fitWidth`)과 같은 값 */
+export const CAROUSEL_FIT_WIDTH = 800;
+/** 캐러셀 이미지 최소 가로(px) — 화면(`BRAND_IMAGE_RULES.carousel.minWidth`)과 같은 값 */
+export const CAROUSEL_MIN_WIDTH = 500;
+
+export type CarouselSizePlan =
+  /** 이미 전 장이 같은 크기 — 손대지 않는다 */
+  | { kind: 'same'; width: number; height: number }
+  /** 전 장을 이 크기로 맞춘다 */
+  | { kind: 'fit'; width: number; height: number }
+  /** index 번째 장이 기준(0번)과 오차 밖으로 다르다 — 맞추지 않고 거절한다 */
+  | { kind: 'mismatch'; index: number };
+
+/**
+ * 전 장의 가로·세로 → 맞춤 계획(순수). 0번 = 기준(인트로가 있으면 인트로 · 없으면 카드 1 = 화면 `carouselRefRatio` 와 같은 순서).
+ * 판단할 수 없는 입력(빈 목록 · 0 이하 크기)은 null.
+ */
+export function planCarouselSameSize(dims: ReadonlyArray<{ width: number; height: number }>): CarouselSizePlan | null {
+  if (dims.length === 0 || dims.some((d) => !(d.width > 0 && d.height > 0))) return null;
+  const r0 = dims[0].width / dims[0].height;
+  for (let i = 1; i < dims.length; i++) {
+    const r = dims[i].width / dims[i].height;
+    if (Math.abs(r - r0) / r0 > CAROUSEL_RATIO_TOLERANCE) return { kind: 'mismatch', index: i };
+  }
+  const w0 = dims[0].width;
+  const h0 = dims[0].height;
+  if (dims.every((d) => d.width === w0 && d.height === h0)) return { kind: 'same', width: w0, height: h0 };
+  // 가장 넓은 비율에 맞춘다 = 가장 넓은 장은 그대로 줄이고, 나머지는 위아래를 오차만큼 잘라 낸다
+  const widest = Math.max(...dims.map((d) => d.width / d.height));
+  const width = Math.min(CAROUSEL_FIT_WIDTH, ...dims.map((d) => d.width));
+  // 세로도 가장 작은 장을 넘지 않는다(반올림 1px 로 키우는 일이 없게)
+  const height = Math.min(Math.round(width / widest), ...dims.map((d) => d.height));
+  return { kind: 'fit', width, height };
+}
+
+type CarouselSlot = { at: string; url: string };
+
+/**
+ * 캐러셀 커머스 이미지 자리(기준 먼저 = 인트로 → 카드 순)를 같은 크기로 맞춘 버퍼로 돌려준다.
+ *   - 배열(자리 순서 그대로) = 그 자리에 올릴 버퍼 · null 인 자리는 이미 그 크기라 원본을 그대로 올린다
+ *   - null = 여기서 판단하지 않는다(종전 경로 그대로): 자리가 1개 이하 · 우리 서빙 파일이 아닌 자리가 섞임
+ *     (이미 올린 카카오 URL = 재발송·예약분) · 크기를 읽을 수 없는 파일 · 이미 전 장 같은 크기
+ *   - 오차 밖으로 다르면 올리기 **전에** 거절한다(한 장도 올리지 않는다 · 차감 앞)
+ */
+async function prepareCarouselSameSize(companyId: string, slots: CarouselSlot[]): Promise<Array<Buffer | null> | null> {
+  if (slots.length < 2) return null;
+  const loaded: Array<{ buf: Buffer; width: number; height: number; format: 'jpeg' | 'png'; rotated: boolean }> = [];
+  for (const s of slots) {
+    const ref = toOwnImageRef(s.url);
+    // 우리 파일이 아니거나 경로가 이상한 자리는 뒤의 resolveOne 이 종전 규칙으로 통과·거절한다
+    if (!ref || ref.companyId !== companyId || ref.filename.includes('..') || ref.filename.includes('/') || ref.filename.includes('\\')) return null;
+    try {
+      const buf = fs.readFileSync(path.join(INAPP_IMAGE_BASE, ref.companyId, ref.filename));
+      const m = await sharp(buf).metadata();
+      if (!m.width || !m.height || (m.format !== 'jpeg' && m.format !== 'png')) return null;
+      // EXIF 방향 5~8 = 보이는 가로·세로가 저장값과 뒤바뀐다(화면이 잰 크기와 같은 기준으로 본다)
+      const o = m.orientation || 1;
+      const swap = o >= 5;
+      loaded.push({ buf, width: swap ? m.height : m.width, height: swap ? m.width : m.height, format: m.format, rotated: o !== 1 });
+    } catch {
+      return null;
+    }
+  }
+  if (loaded.some((l) => l.width < CAROUSEL_MIN_WIDTH)) return null;
+  const plan = planCarouselSameSize(loaded);
+  if (!plan || plan.kind === 'same') return null;
+  if (plan.kind === 'mismatch') {
+    throw new BrandImageResolveError(
+      `${slots[plan.index].at}: ${slots[0].at}와 비율이 다릅니다. 같은 비율의 이미지로 바꿔 주세요`,
+    );
+  }
+  const out: Array<Buffer | null> = [];
+  for (let i = 0; i < loaded.length; i++) {
+    const l = loaded[i];
+    if (l.width === plan.width && l.height === plan.height && !l.rotated) { out.push(null); continue; }
+    try {
+      const fitted = sharp(l.buf).rotate().resize(plan.width, plan.height, { fit: 'cover', position: 'centre' });
+      out.push(await (l.format === 'png' ? fitted.png({ compressionLevel: 9 }) : fitted.jpeg({ quality: 92, mozjpeg: true })).toBuffer());
+    } catch (e: any) {
+      // 다르다는 것을 알고도 그대로 올리면 발송 때(차감 뒤) 거절된다 — 여기서 세운다
+      console.error('[brand-image-resolver] 캐러셀 이미지 크기 맞춤 실패:', e?.message);
+      throw new BrandImageResolveError(`${slots[i].at}: 이미지 크기를 맞추지 못했습니다. 카드 이미지를 같은 크기로 준비해 다시 올려 주세요`);
+    }
+  }
+  return out;
 }
 
 /**
@@ -322,7 +438,8 @@ export async function resolveBrandSendRichImages<
 }): Promise<{ itemList?: TItem[]; video?: TVideo; carouselCards?: TCard[]; carouselIntro?: THead }> {
   const base = { companyId: input.companyId, userId: input.userId };
   const bubble = String(input.bubbleType || '').trim().toUpperCase();
-  const one = (route: UploadRoute | undefined, url: string, at: string) => resolveOne({ ...base, route, imgUrl: String(url).trim(), at });
+  const one = (route: UploadRoute | undefined, url: string, at: string, prepared?: Buffer | null) =>
+    resolveOne({ ...base, route, imgUrl: String(url).trim(), at, prepared });
 
   let itemList = input.itemList;
   if (bubble === 'WIDE_ITEM_LIST' && Array.isArray(itemList)) {
@@ -346,18 +463,30 @@ export async function resolveBrandSendRichImages<
   let carouselCards = input.carouselCards;
   let carouselIntro = input.carouselIntro;
   if (carRoute) {
+    const introUrl = String(carouselIntro?.image_url || '').trim();
+    // ★2026-10-01 커머스 = 전 장을 같은 크기로 맞춘 뒤 올린다(위 prepareCarouselSameSize). 자리 순서 = 기준 먼저(인트로 → 카드).
+    const slots: CarouselSlot[] = [];
+    if (carouselIntro && introUrl) slots.push({ at: '인트로 이미지', url: introUrl });
+    if (Array.isArray(carouselCards)) {
+      carouselCards.forEach((c, i) => {
+        const url = String(c?.image?.img_url || '').trim();
+        if (url && c.image) slots.push({ at: `카드 ${i + 1} 이미지`, url });
+      });
+    }
+    const prepared = bubble === 'CAROUSEL_COMMERCE' ? await prepareCarouselSameSize(input.companyId, slots) : null;
+    const preparedOf = (at: string): Buffer | null => (prepared ? prepared[slots.findIndex((s) => s.at === at)] ?? null : null);
     if (Array.isArray(carouselCards)) {
       const next: TCard[] = [];
       for (let i = 0; i < carouselCards.length; i++) {
         const c = carouselCards[i];
         const url = String(c?.image?.img_url || '').trim();
-        next.push(url && c.image ? { ...c, image: { ...c.image, img_url: await one(carRoute, url, `카드 ${i + 1} 이미지`) } } : c);
+        const at = `카드 ${i + 1} 이미지`;
+        next.push(url && c.image ? { ...c, image: { ...c.image, img_url: await one(carRoute, url, at, preparedOf(at)) } } : c);
       }
       carouselCards = next;
     }
-    const introUrl = String(carouselIntro?.image_url || '').trim();
     if (carouselIntro && introUrl) {
-      carouselIntro = { ...carouselIntro, image_url: await one(carRoute, introUrl, '인트로 이미지') };
+      carouselIntro = { ...carouselIntro, image_url: await one(carRoute, introUrl, '인트로 이미지', preparedOf('인트로 이미지')) };
     }
   }
 

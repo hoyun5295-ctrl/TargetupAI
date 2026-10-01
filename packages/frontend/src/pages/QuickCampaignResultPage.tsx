@@ -6,6 +6,10 @@
  *   오른쪽 = 다른 채널(같은 재료로 1클릭 · 이미 있으면 그 실물) · 머리 = [자세히 편집](옛 딥링크 그대로) · [보내기](보내기 창).
  * 여기서 고친 DM 은 스토어 자동 저장(초안 = 발행 전이라 라이브 주소 없음). 이메일은 여기서 고치지 않는다(자세히 편집).
  * ⛔ 자동 발행 0 · 모델명 0 · native dialog 0.
+ *
+ * ★ 2026-10-01 카탈로그 DM(책처럼 보기)은 이 화면이 따로 다룬다(박성용 접수 · 전수점검). 판정 = 수정 화면과 같은 값(스토어 보기 방식).
+ *   다시 만들기·재료 다시 보기 = 카탈로그 채널로 · 오른쪽 칸 = PC 책 미리보기(쪽 사진만으로는 이메일을 만들 수 없다)
+ *   · 쪽을 눌러도 일반 사진 모음 편집 창을 띄우지 않는다(레이아웃을 바꾸거나 빼면 책 보기가 통째로 꺼졌다) → [자세히 편집]의 쪽 패널로.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -18,7 +22,7 @@ import { useToast } from '../components/ToastProvider';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { useDmBuilderStore, selectAllSectionsFlat } from '../stores/dmBuilderStore';
 import PreviewFrame from '../components/make/PreviewFrame';
-import { PcBigModal } from '../components/make/PreviewPair';
+import { PcBigModal, PcPanel } from '../components/make/PreviewPair';
 import BlockSheet from '../components/make/BlockSheet';
 import MakeSendModal from '../components/make/MakeSendModal';
 import AiImproveModal from '../components/dm/modals/AiImproveModal';
@@ -78,6 +82,10 @@ export default function QuickCampaignResultPage() {
   const brandKit = useDmBuilderStore((s) => s.brandKit);
   const storeName = useDmBuilderStore((s) => s.storeName);
   const [sheetOpen, setSheetOpen] = useState(false);
+  // 카탈로그 DM 인가 — 수정 화면(DmEditScreen)과 같은 판정. 다른 DM 이 스토어에 남아 있는 동안(읽는 중)에는 판정하지 않는다.
+  const layoutMode = useDmBuilderStore((s) => s.layoutMode);
+  const catalogView = useDmBuilderStore((s) => s.catalogView);
+  const isCatalog = channel === 'dm' && dmReady && storeDmId === dmId && layoutMode === 'slides' && catalogView;
 
   const focusSection = useCallback((id: string | null) => {
     if (!id) { selectSection(null); return; }
@@ -152,8 +160,14 @@ export default function QuickCampaignResultPage() {
   const otherChannel: MakeChannel = channel === 'dm' ? 'email' : 'dm';
   const otherCost = AI_GENERATE_COSTS[otherChannel === 'email' ? 'email-ai-generate' : 'dm-ai-generate'];
   const [makingOther, setMakingOther] = useState(false);
+  // 남아 있는 재료 초안이 이 완성본의 것인가(카탈로그 ↔ 카탈로그 재료 · 그 밖 ↔ 그 밖). 다르면 그 재료로 다시 만들기·다른 채널 만들기를 권하지 않는다.
+  const draftFits = !!draft && (draft.channel === 'catalog') === isCatalog;
+  // 다른 채널 1클릭 = 사진·글 재료가 있을 때만(카탈로그 재료 = 쪽 사진뿐이라 이메일·일반 DM 을 만들 수 없다 · 서버 견적이 재료 부족으로 돌려준다)
+  const canMakeOther = draftFits && !isCatalog;
+  const makeChannel = channel === 'email' ? 'email' : isCatalog ? 'catalog' : 'dm';
+  const regenCost = AI_GENERATE_COSTS[channel === 'email' ? 'email-ai-generate' : isCatalog ? 'catalog-dm-build' : 'dm-ai-generate'];
   const makeOther = useCallback(async () => {
-    if (!draft || makingOther) return;
+    if (!draft || !canMakeOther || makingOther) return;
     setMakingOther(true);
     try {
       const base = { ...draft, channel: otherChannel as 'dm' | 'email' };
@@ -175,12 +189,14 @@ export default function QuickCampaignResultPage() {
     } finally {
       setMakingOther(false);
     }
-  }, [draft, makingOther, otherChannel, channel, draftId, setParams, toast]);
+  }, [draft, canMakeOther, makingOther, otherChannel, channel, draftId, setParams, toast]);
 
   // ── 보내기 · 다시 만들기 · PC 크게 보기 ──
   const [sendOpen, setSendOpen] = useState(false);
   const [pcOpen, setPcOpen] = useState<null | 'dm' | 'email'>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  // 잠긴 채 [보내기]를 거듭 눌러도 같은 알림이 겹쳐 쌓이지 않게(알림 한 장이 떠 있는 동안은 다시 띄우지 않는다)
+  const lockToastAt = useRef(0);
   const saveBarrier = useCallback(async () => {
     const st = () => useDmBuilderStore.getState();
     for (let i = 0; i < 40 && st().isSaving; i++) await new Promise((r) => setTimeout(r, 150)); // eslint-disable-line no-await-in-loop
@@ -233,12 +249,19 @@ export default function QuickCampaignResultPage() {
         )}
         endSlot={(
           <div className="flex items-center gap-2 shrink-0 ml-1">
+            {/* ★ 2026-10-01 안내 글은 머리 띠 안에 둔다 — 옛 자리(버튼 아래)는 띠 밖으로 반쯤 나가 밝은 바탕 위 노란 글씨라 읽히지 않았다(박성용 접수) */}
+            {sendLocked && <span className="hidden lg:inline whitespace-nowrap text-[11.5px] font-semibold text-amber-300 mr-1" data-make="lock-hint">{items.find((i) => i.kind === 'must')?.title === '버튼이 갈 주소가 없어요' ? '링크를 넣으면 보내기가 열려요' : '고칠 곳을 채우면 보내기가 열려요'}</span>}
             <button type="button" onClick={() => navigate(editPath(channel, draftId))} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-semibold text-white/85 hover:bg-white/10"><PenLine className="w-4 h-4" /><span className="hidden sm:inline">자세히 편집</span></button>
-            <div className="relative">
-              <button type="button" onClick={() => { if (sendLocked) { const first = items.find((i) => i.kind === 'must' && i.sectionId); if (first?.sectionId) { focusSection(first.sectionId); setSheetOpen(true); } else toast.warning('고칠 곳을 먼저 채워 주세요.'); return; } setSendOpen(true); }}
-                className={`${MK_BTN_PRIMARY} ${sendLocked ? 'opacity-60' : ''}`}><Send className="w-4 h-4" />보내기</button>
-              {sendLocked && <div className="absolute right-0 top-full mt-1 whitespace-nowrap text-[11px] font-semibold text-amber-300">{items.find((i) => i.kind === 'must')?.title === '버튼이 갈 주소가 없어요' ? '링크를 넣으면 보내기가 열려요' : '고칠 곳을 채우면 보내기가 열려요'}</div>}
-            </div>
+            <button type="button" onClick={() => {
+              if (sendLocked) {
+                const first = items.find((i) => i.kind === 'must' && i.sectionId);
+                if (channel === 'dm' && !isCatalog && first?.sectionId) { focusSection(first.sectionId); setSheetOpen(true); return; }
+                if (Date.now() - lockToastAt.current > 3200) { lockToastAt.current = Date.now(); toast.warning('고칠 곳을 먼저 채워 주세요.'); }
+                return;
+              }
+              setSendOpen(true);
+            }}
+              className={`${MK_BTN_PRIMARY} ${sendLocked ? 'opacity-60' : ''}`}><Send className="w-4 h-4" />보내기</button>
           </div>
         )}
       />
@@ -253,20 +276,21 @@ export default function QuickCampaignResultPage() {
           <div className="flex-1 min-h-0 overflow-y-auto mk-scroll space-y-2.5">
             {primaryLoading && <Loader2 className="w-5 h-5 animate-spin text-slate-400" />}
             {items.map((it, i) => <FixRow key={i} item={it} onClick={() => {
-              if (channel === 'dm' && it.sectionId) { focusSection(it.sectionId); setSheetOpen(true); }
-              else if (channel === 'email' && it.kind === 'must') navigate(editPath('email', draftId));
+              if (channel === 'dm' && it.sectionId && !isCatalog) { focusSection(it.sectionId); setSheetOpen(true); }
+              else if (it.kind === 'must' || (channel === 'dm' && it.sectionId)) navigate(editPath(channel, draftId));
             }} />)}
           </div>
           <div className="pt-4 space-y-2.5 border-t border-slate-200 mt-3">
-            <button type="button" onClick={() => navigate(`/quick-campaign?channel=${channel}`)} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900"><Eye className="w-4 h-4" />넣은 재료 다시 보기</button>
-            {draft && (
+            {/* ★ 2026-10-01 만든 채널로 돌아간다(카탈로그 = 카탈로그 채널 · 금액 = 원장) — 옛: 늘 dm 이라 올린 쪽이 안 보이고 다시 만들기가 5 크레딧으로 적혀 아무 일도 안 일어났다 */}
+            {!primaryLoading && <button type="button" onClick={() => navigate(`/quick-campaign?channel=${makeChannel}`)} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900"><Eye className="w-4 h-4" />넣은 재료 다시 보기</button>}
+            {!primaryLoading && draftFits && (
               <button type="button" onClick={() => setConfirm({
                 mode: 'warning', title: '같은 재료로 다시 만들까요?',
-                description: `지금 고친 내용 대신 새 초안을 만들어요(${AI_GENERATE_COSTS[channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate']} 크레딧). 지금 초안은 목록에 그대로 남아요.`,
-                confirmLabel: '다시 만들기', onConfirm: () => navigate(`/quick-campaign?channel=${channel}&regen=1`),
-              })} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900"><RotateCcw className="w-4 h-4" />다시 만들기 · {AI_GENERATE_COSTS[channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate']} 크레딧</button>
+                description: `지금 고친 내용 대신 새 초안을 만들어요(${regenCost} 크레딧). 지금 초안은 목록에 그대로 남아요.`,
+                confirmLabel: '다시 만들기', onConfirm: () => navigate(`/quick-campaign?channel=${makeChannel}&regen=1`),
+              })} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900"><RotateCcw className="w-4 h-4" />다시 만들기 · {regenCost} 크레딧</button>
             )}
-            <div className="text-[11px] text-slate-400">{channel === 'dm' ? '여기서 고친 내용은 바로 저장돼요' : '이메일은 [자세히 편집]에서 고쳐요'}</div>
+            <div className="text-[11px] text-slate-400">{channel !== 'dm' ? '이메일은 [자세히 편집]에서 고쳐요' : isCatalog ? '쪽을 바꾸거나 빼려면 [자세히 편집]에서' : '여기서 고친 내용은 바로 저장돼요'}</div>
           </div>
         </aside>
 
@@ -283,17 +307,22 @@ export default function QuickCampaignResultPage() {
             html={channel === 'dm' ? dmPreview.html : emailPreview.html}
             loading={channel === 'dm' ? dmPreview.loading : emailPreview.loading}
             error={channel === 'dm' ? (loadError || dmPreview.error) : emailPreview.error}
-            selectedId={channel === 'dm' ? selectedId : null}
-            onTap={channel === 'dm' ? (id) => { focusSection(id); setSheetOpen(true); } : undefined}
+            selectedId={channel === 'dm' && !isCatalog ? selectedId : null}
+            onTap={channel === 'dm' && !isCatalog ? (id) => { focusSection(id); setSheetOpen(true); } : undefined}
             inbox={channel === 'email' && email ? { from: email.fromName || '', subject: email.subject } : null}
           />
-          {channel === 'dm' && <div className="text-[11.5px] text-slate-400 mt-2.5 inline-flex items-center gap-1.5"><Info className="w-3.5 h-3.5" />블록을 누르면 그 자리만 고칠 수 있어요</div>}
+          {channel === 'dm' && <div className="text-[11.5px] text-slate-400 mt-2.5 inline-flex items-center gap-1.5"><Info className="w-3.5 h-3.5" />{isCatalog ? '화살표로 넘겨 볼 수 있어요 · 쪽을 바꾸려면 [자세히 편집]' : '블록을 누르면 그 자리만 고칠 수 있어요'}</div>}
         </main>
 
         {/* 오른쪽 — 다른 채널 */}
         <section className="hidden lg:flex w-[min(34vw,470px)] shrink-0 flex-col px-6 py-5 overflow-hidden">
-          <div className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-700 mb-3">{otherChannel === 'email' ? <Mail className="w-4 h-4 text-violet-700" /> : <Smartphone className="w-4 h-4 text-violet-700" />}{otherChannel === 'email' ? '이메일' : '모바일 DM'}</div>
-          {otherChannel === 'email' && email ? (
+          {!isCatalog && <div className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-700 mb-3">{otherChannel === 'email' ? <Mail className="w-4 h-4 text-violet-700" /> : <Smartphone className="w-4 h-4 text-violet-700" />}{otherChannel === 'email' ? '이메일' : '모바일 DM'}</div>}
+          {isCatalog ? (
+            // ★ 2026-10-01 카탈로그 = 받는 사람이 PC 로 열었을 때의 책 펼침(수정 화면 가운데와 같은 묶음)
+            <div className="w-full max-w-[336px] mx-auto" data-make="catalog-pc">
+              <PcPanel kind="catalog" html={dmPreview.html} width={336} onOpen={() => setPcOpen('dm')} />
+            </div>
+          ) : otherChannel === 'email' && email ? (
             <div className="flex-1 min-h-0 flex flex-col items-center">
               <PhoneShell html={emailPreview.html} loading={emailPreview.loading} error={emailPreview.error} inbox={{ from: email.fromName || '', subject: email.subject }} small />
               <div className="flex items-center gap-3 mt-3">
@@ -313,9 +342,9 @@ export default function QuickCampaignResultPage() {
                 <div className="h-24 rounded-xl bg-white" /><div className="h-24 rounded-xl bg-white" /><div className="h-3 rounded bg-white w-2/3" />
               </div>
               <div className="absolute inset-x-6 top-1/2 -translate-y-1/2 rounded-2xl border border-slate-300 bg-white p-5 text-center shadow-2xl">
-                <div className="text-[15px] font-bold text-slate-900">같은 재료로 {otherChannel === 'email' ? '이메일' : '모바일 DM'}도 만들 수 있어요</div>
-                <div className="text-[12.5px] text-slate-500 mt-1.5">{channel === 'dm' ? 'DM' : '이메일'}에 넣은 사진·문구·상품을 그대로 씁니다. 다시 넣을 것은 없어요.</div>
-                {draft ? (
+                <div className="text-[15px] font-bold text-slate-900">{canMakeOther ? `같은 재료로 ${otherChannel === 'email' ? '이메일' : '모바일 DM'}도 만들 수 있어요` : `${otherChannel === 'email' ? '이메일' : '모바일 DM'}도 만들 수 있어요`}</div>
+                <div className="text-[12.5px] text-slate-500 mt-1.5">{canMakeOther ? `${channel === 'dm' ? 'DM' : '이메일'}에 넣은 사진·문구·상품을 그대로 씁니다. 다시 넣을 것은 없어요.` : '만들기 화면에서 사진과 글을 넣으면 바로 만들어요.'}</div>
+                {canMakeOther ? (
                   <button type="button" onClick={() => { void makeOther(); }} disabled={makingOther} className={`${MK_BTN_AI} h-[42px] px-5 text-[13.5px] mt-4`}>
                     {makingOther ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}{otherChannel === 'email' ? '이메일도 만들기' : '모바일 DM도 만들기'}
                     <span className="text-[11px] font-bold bg-slate-300 rounded-md px-1.5 py-0.5">{otherCost} 크레딧</span>
@@ -330,7 +359,7 @@ export default function QuickCampaignResultPage() {
         </section>
       </div>
 
-      {sheetOpen && channel === 'dm' && selected && (
+      {sheetOpen && channel === 'dm' && !isCatalog && selected && (
         <BlockSheet
           section={selected}
           onUpdate={(patch) => updateSectionProps(selected.id, patch)}
@@ -350,7 +379,7 @@ export default function QuickCampaignResultPage() {
         dm={dmId && dmReady ? { id: dmId, title, heroSub, brand: storeName || null } : null}
         email={email ? { id: email.id, name: email.name, subject: email.subject, isAd: email.isAd, completed: !!email.completed, hasPlaceholder: email.hasPlaceholder } : null}
         beforeSend={async (c) => (c === 'dm' ? saveBarrier() : true)}
-        makeOther={draft ? { channel: otherChannel, label: `${otherChannel === 'email' ? '이메일' : 'DM'}도 만들기 · ${otherCost}`, busy: makingOther, run: () => { void makeOther(); } } : null}
+        makeOther={canMakeOther ? { channel: otherChannel, label: `${otherChannel === 'email' ? '이메일' : 'DM'}도 만들기 · ${otherCost}`, busy: makingOther, run: () => { void makeOther(); } } : null}
         onSent={() => navigate(channel === 'dm' ? '/dm-builder' : '/email-campaigns')}
         onOpenAdvancedDm={dmId ? () => navigate(`/dm-builder?id=${encodeURIComponent(dmId)}&send=1`) : undefined}
       />
