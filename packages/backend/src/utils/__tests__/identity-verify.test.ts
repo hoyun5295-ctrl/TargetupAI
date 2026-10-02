@@ -478,17 +478,35 @@ describe('실패 응답 — 인증기관이 왜 거절했는지는 내보내지 
   });
 });
 
-describe('설정 화면 카드 — 인증 전에는 이름 · 번호를 내보내지 않는다', () => {
-  it('본인인증 이력이 없으면 비어 있다(기존 번호를 인증된 것으로 치지 않는다)', async () => {
+describe('설정 화면 카드 — 등록된 담당자는 보여 주되 인증 여부는 따로 말한다 (★1003)', () => {
+  it('본인인증 이력이 없어도 등록된 담당자(이름 · 가린 번호)는 준다 — 인증일은 비어 있다(인증된 것으로 치지 않는다)', async () => {
     q.mockImplementation(async (sql: string) => {
       if (/FROM users WHERE id = \$1/.test(sql)) return { rows: [{ name: '인비토01', mfa_phone: '01099999999' }] };
+      if (/FROM identity_verifications/.test(sql)) return { rows: [] };
+      throw new Error(`예상하지 못한 SQL: ${sql}`);
+    });
+    expect(await loadIdentitySummary(USER.id)).toEqual({ name: '인비토01', maskedPhone: '010-****-9999', verifiedAt: null });
+  });
+
+  it('인증번호 수신 번호가 없으면 등록된 담당자가 없다 — 계정 이름만으로 담당자라고 하지 않는다', async () => {
+    q.mockImplementation(async (sql: string) => {
+      if (/FROM users WHERE id = \$1/.test(sql)) return { rows: [{ name: '인비토01', mfa_phone: null }] };
       if (/FROM identity_verifications/.test(sql)) return { rows: [] };
       throw new Error(`예상하지 못한 SQL: ${sql}`);
     });
     expect(await loadIdentitySummary(USER.id)).toEqual({ name: null, maskedPhone: null, verifiedAt: null });
   });
 
-  it('이력이 있으면 이름과 가린 번호를 준다', async () => {
+  it('번호 원문은 내보내지 않는다', async () => {
+    q.mockImplementation(async (sql: string) => {
+      if (/FROM users WHERE id = \$1/.test(sql)) return { rows: [{ name: '인비토01', mfa_phone: '01099999999' }] };
+      if (/FROM identity_verifications/.test(sql)) return { rows: [] };
+      throw new Error(`예상하지 못한 SQL: ${sql}`);
+    });
+    expect(JSON.stringify(await loadIdentitySummary(USER.id))).not.toContain('01099999999');
+  });
+
+  it('이력이 있으면 이름과 가린 번호와 인증일을 준다', async () => {
     q.mockImplementation(async (sql: string) => {
       if (/FROM users WHERE id = \$1/.test(sql)) return { rows: [{ name: '홍길동', mfa_phone: '01000000000' }] };
       if (/FROM identity_verifications/.test(sql)) return { rows: [{ verified_at: '2026-10-02T07:00:00.000Z' }] };
@@ -497,6 +515,25 @@ describe('설정 화면 카드 — 인증 전에는 이름 · 번호를 내보�
     expect(await loadIdentitySummary(USER.id)).toEqual({
       name: '홍길동', maskedPhone: '010-****-0000', verifiedAt: '2026-10-02T07:00:00.000Z',
     });
+  });
+
+  it('카드는 고객사 계정이면 항상 보이고, 변경은 본인인증이 열린 계정에서만 된다', () => {
+    const SRC = resolve(__dirname, '../..');
+    const route = readFileSync(join(SRC, 'routes/auth.ts'), 'utf8');
+    const me = route.slice(route.indexOf("router.get('/identity/me'"), route.indexOf("router.post('/identity/change/start'"));
+    expect(me).toContain("if (!req.user?.userId || req.user.userType === 'super_admin') return res.json({ visible: false, enabled: false });");
+    expect(me).toContain('return res.json({ visible: true, enabled: isIdentityVerifyActiveFor({ login_id: req.user.loginId }), ...summary });');
+    // 화면에서 버튼을 숨기는 것은 통제가 아니다 — 변경 두 라우트의 판정은 그대로다
+    const change = route.slice(route.indexOf("router.post('/identity/change/start'"));
+    expect(change.split("!isIdentityVerifyActiveFor({ login_id: req.user?.loginId })").length - 1).toBe(2);
+
+    const settings = readFileSync(join(SRC, '..', '..', 'frontend', 'src', 'pages', 'Settings.tsx'), 'utf8');
+    expect(settings).toContain('{identityInfo?.visible && (');
+    expect(settings).not.toContain('{identityInfo?.enabled && (');
+    expect(settings).toContain('{identityInfo.enabled ? (');
+    expect(settings).toContain("identityInfo.verifiedAt ? `${formatDate(identityInfo.verifiedAt)} 인증` : '본인인증 전'");
+    expect(settings).toContain('등록된 담당자가 없습니다');
+    expect(settings).toContain('`${POLICY_ENFORCE_DATE_TEXT}부터 본인인증으로 변경할 수 있습니다.`');
   });
 });
 

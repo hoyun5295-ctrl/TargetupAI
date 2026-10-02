@@ -784,13 +784,17 @@ router.post('/identity/complete', loginLimiter, async (req: Request, res: Respon
   }
 });
 
-/** 설정 화면 「계정 담당자」 카드 — 기능이 열리지 않은 계정에는 `enabled: false`만 돌려준다 */
+/**
+ * 설정 화면 「계정 담당자」 카드.
+ * ★ 2026-10-03 카드는 고객사 계정이면 항상 보인다(`visible`) — 직원이 「여기서 바꿉니다」라고 짚어 안내할 화면이 있어야 한다.
+ *   `enabled` = 이 계정에서 본인인증으로 담당자를 바꿀 수 있는가(스위치 · 명단 · 인증기관). 꺼져 있으면 화면이 버튼 대신 안내를 보인다.
+ *   ⛔ 변경 자체를 막는 것은 여기가 아니라 `/identity/change/*`의 판정이다(화면에서 버튼을 숨기는 것은 통제가 아니다).
+ */
 router.get('/identity/me', authenticate, async (req: Request, res: Response) => {
   try {
-    if (!req.user?.userId || req.user.userType === 'super_admin') return res.json({ enabled: false });
-    if (!isIdentityVerifyActiveFor({ login_id: req.user.loginId })) return res.json({ enabled: false });
+    if (!req.user?.userId || req.user.userType === 'super_admin') return res.json({ visible: false, enabled: false });
     const summary = await loadIdentitySummary(req.user.userId);
-    return res.json({ enabled: true, ...summary });
+    return res.json({ visible: true, enabled: isIdentityVerifyActiveFor({ login_id: req.user.loginId }), ...summary });
   } catch (error) {
     console.error('[identity/me]', error);
     return res.status(500).json({ error: '담당자 정보를 불러오지 못했습니다.' });

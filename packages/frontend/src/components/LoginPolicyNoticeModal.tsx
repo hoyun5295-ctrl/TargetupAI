@@ -23,10 +23,10 @@
  */
 import { useEffect, useRef } from 'react';
 import { ArrowUpRight, X } from 'lucide-react';
+import { POLICY_ENFORCE_DATE_TEXT, isPolicyEnforced } from '../constants/sendAuthPolicy';
 
-/** 시행일(한국 시각) — 10월 1일 회의 결정. 서버의 시행 스위치와는 별개인 「안내 문구」의 기준일이다 */
-const ENFORCE_AT_MS = new Date('2026-10-26T00:00:00+09:00').getTime();
-const ENFORCE_DATE_TEXT = '10월 26일';
+/** 시행일 — 설정 화면 카드와 같은 날짜를 본다(`constants/sendAuthPolicy.ts`) */
+const ENFORCE_DATE_TEXT = POLICY_ENFORCE_DATE_TEXT;
 
 /** 가이드라인 원문(3차 개정 · 2026-10-01) — 방송미디어통신위원회 누리집 문서 뷰어 */
 const GUIDELINE_REVISION_TEXT = '2026. 10. 1. 3차 개정';
@@ -84,7 +84,7 @@ const CHANGES: Array<{ label: string; title: string; source: string; quote: stri
 
 export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => void }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
-  const enforced = Date.now() >= ENFORCE_AT_MS;
+  const enforced = isPolicyEnforced();
 
   useEffect(() => {
     confirmRef.current?.focus();

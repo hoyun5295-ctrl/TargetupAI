@@ -446,7 +446,12 @@ export function identityFailureResponse(
   };
 }
 
-/** 설정 화면 카드에 쓰는 현재 담당자 — 번호는 가린 값만 내보낸다 */
+/**
+ * 설정 화면 카드에 쓰는 현재 담당자 — 번호는 가린 값만 내보낸다.
+ * ★ 2026-10-03 카드를 전 고객사 계정에 항상 보여 주게 되면서(Harold), 본인인증 전이어도 **등록된 담당자**를 준다.
+ *   등록된 담당자 = 로그인 인증번호를 받는 번호(`mfa_phone`)가 있는 계정의 이름 · 번호.
+ *   ⛔ 등록돼 있다고 인증된 것은 아니다 — 인증 여부는 `verifiedAt` 하나로만 말한다(없으면 화면이 「본인인증 전」으로 표시).
+ */
 export async function loadIdentitySummary(userId: string): Promise<{
   name: string | null;
   maskedPhone: string | null;
@@ -465,9 +470,10 @@ export async function loadIdentitySummary(userId: string): Promise<{
     if (!isIdentitySchemaMissing(err)) throw err;
   }
   const row = u.rows[0] || {};
+  const registered = !!row.mfa_phone;
   return {
-    name: verifiedAt ? row.name ?? null : null,
-    maskedPhone: verifiedAt && row.mfa_phone ? maskPhone(row.mfa_phone) : null,
+    name: registered ? row.name ?? null : null,
+    maskedPhone: registered ? maskPhone(row.mfa_phone) : null,
     verifiedAt,
   };
 }

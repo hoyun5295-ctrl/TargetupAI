@@ -91,8 +91,13 @@ describe('로그인 화면 사전 고지 창', () => {
   });
 
   it('시행일 = 10월 26일(한국 시각) · 원문은 방송미디어통신위원회 누리집', () => {
-    expect(modal).toContain("new Date('2026-10-26T00:00:00+09:00')");
-    expect(modal).toContain("const ENFORCE_DATE_TEXT = '10월 26일';");
+    // 날짜는 공용 상수 하나(설정 화면 카드와 같은 날짜)
+    const policy = fe('constants', 'sendAuthPolicy.ts');
+    expect(policy).toContain("export const POLICY_ENFORCE_AT_MS = new Date('2026-10-26T00:00:00+09:00').getTime();");
+    expect(policy).toContain("export const POLICY_ENFORCE_DATE_TEXT = '10월 26일';");
+    expect(modal).toContain('const ENFORCE_DATE_TEXT = POLICY_ENFORCE_DATE_TEXT;');
+    expect(modal).toContain('const enforced = isPolicyEnforced();');
+    expect(modal).not.toContain('2026-10-26');
     const urls = modal.match(/https:\/\/[^\s']+/g) || [];
     expect(urls.length).toBe(2);
     for (const u of urls) expect(u.startsWith('https://www.kmcc.go.kr/')).toBe(true);

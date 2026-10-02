@@ -367,6 +367,62 @@ SELECT cs.store_code,
 
 화면 숫자는 여기서 그 계정의 수신거부 등록분을 더 뺀 값이다(미측정). 관리자 수가 몰 합(240,468)보다 작은 이유 = 여러 몰에 속한 고객은 한 번만 세고, 어느 몰에서든 거부한 고객은 뺀다.
 
+**반영 기록(2026-10-03 · Harold 실행)**: 00:18 에 중간 상태(Codex R1 수정 전)가 먼저 올라가 있었다(읽기 강제 OFF 라 동작 불변) → 최종본 push·배포 뒤 서버 표식 확인(`linkedSql·consentWithUnsub·ownerJourneyConsent` 6줄) · 00:52:35 최종본으로 기동(OFF) → `.env` 에 한 줄 추가(사본 = 홈 폴더 `targetup-backend.env.bak-20261003`) → `pm2 restart all --update-env` → **00:57:54 부팅 로그 `읽기 강제 ON (19c59d0c-…)`**. ts-node 기동은 12초보다 오래 걸린다(부팅 로그는 재기동 뒤 1분쯤 지나 확인). 남은 것 = 화면 숫자 확인 · 켠 뒤 오류 로그 확인 · 고객사 회신.
+
+**켠 뒤 계정별 대시보드 수신동의 수(2026-10-03 · Harold 실행 · 대시보드 집계와 같은 식 = 소속 행 동의 − 그 계정의 수신거부)**
+
+| 계정 | 범위 | 켜기 전(고객 행) | 켠 뒤 | 차이 | 몰 동의 수 − 수신거부 |
+|---|---|---|---|---|---|
+| espayment | 관리자 | 184,012 | 220,101 | +36,089 | 230,731 − 10,630 |
+| espayment1 | 이로이로도쿄 | 149,652 | 149,078 | −574 | 155,185 − 6,107 |
+| espayment2 | 일본이모 | 12,639 | 12,885 | +246 | 13,681 − 796 |
+| espayment3 | 렌즈고고 | 25,339 | 56,303 | +30,964 | 62,581 − 6,278 |
+| espayment4 | 렌즈007 | 1,116 | 8,371 | +7,255 | 9,021 − 650 |
+
+이로이로도쿄만 574 줄었다 — 켜기 전 수는 고객 행 기준이고 켠 뒤 수는 그 몰 소속 행 기준이라 두 수의 모집단이 다르다(어느 쪽이 얼마인지 분해는 미측정).
+
+계정별 수를 다시 뽑는 SQL(읽기 전용 · PG16 에서 대시보드 집계 실물 조각과 대조한 검증본):
+
+```sql
+SET max_parallel_workers_per_gather = 0;
+SET statement_timeout = '180s';
+-- 이에스페이먼트 계정별 「대시보드 수신동의 수」 — 화면이 지금 계산하는 식 그대로(읽기만 한다)
+--   mall  = 담당자(분류코드에 몰 코드 있음): 그 코드 소속 행이 동의 − 그 계정의 수신거부
+--   admin = 관리자(범위 없음): 어느 몰에서도 거부 없음 + 한 몰 이상 동의 − 그 계정의 수신거부
+--   legacy = 몰 코드가 없는 담당자: 고객 행 값(종전 그대로)
+WITH malls AS (
+  SELECT ARRAY(SELECT DISTINCT meta->>'store_code' FROM company_integrations
+                WHERE company_id = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49' AND COALESCE(meta->>'store_code', '') <> '') AS codes
+), u AS (
+  SELECT us.id, us.login_id, us.user_type, us.store_codes::text[] AS codes,
+         CASE WHEN us.user_type = 'user' AND COALESCE(array_length(us.store_codes, 1), 0) > 0
+              THEN CASE WHEN us.store_codes::text[] && malls.codes THEN 'mall' ELSE 'legacy' END
+              ELSE 'admin' END AS mode
+    FROM users us, malls
+   WHERE us.company_id = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49' AND us.user_type IN ('admin', 'user') AND COALESCE(us.is_active, true)
+)
+SELECT u.login_id, u.user_type, u.mode, array_to_string(u.codes, ',') AS store_codes,
+       (SELECT COUNT(*)
+          FROM customers c
+          LEFT JOIN (SELECT cs.customer_id, bool_or(cs.sms_opt_in) AS t, bool_or(NOT cs.sms_opt_in) AS f
+                       FROM customer_stores cs
+                      WHERE cs.company_id = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49'
+                        AND cs.store_code = ANY(CASE WHEN u.mode = 'admin' THEN (SELECT codes FROM malls) ELSE u.codes END)
+                      GROUP BY cs.customer_id) mc ON mc.customer_id = c.id
+         WHERE c.company_id = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49'
+           AND CASE u.mode
+                 WHEN 'mall'  THEN mc.t IS TRUE
+                                   AND NOT EXISTS (SELECT 1 FROM unsubscribes x WHERE x.user_id = u.id AND x.phone = c.phone)
+                 WHEN 'admin' THEN mc.f IS NOT TRUE
+                                   AND (mc.t IS TRUE OR (c.sms_opt_in = true AND mc.customer_id IS NULL
+                                        AND NOT EXISTS (SELECT 1 FROM cdp_identity_links l WHERE l.company_id = c.company_id AND l.customer_id = c.id)))
+                                   AND NOT EXISTS (SELECT 1 FROM unsubscribes x WHERE x.user_id = u.id AND x.phone = c.phone)
+                 ELSE c.sms_opt_in = true AND mc.customer_id IS NOT NULL
+               END) AS dashboard_opt_in
+  FROM u
+ ORDER BY u.user_type, u.login_id;
+```
+
 ### 13-7. 되돌리기
 
 ENV 에서 회사 id 를 빼고 재기동 → 즉시 옛 SQL(§9). 데이터는 건드리지 않는다. 캐시 키는 몰 동의로 읽을 때만 꼬리가 붙어 옛 값과 섞이지 않는다.

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { formatPhoneNumber, formatDate } from '../utils/formatDate';
 import IdentityVerifyModal from '../components/IdentityVerifyModal';
+import { POLICY_ENFORCE_DATE_TEXT, isPolicyEnforced } from '../constants/sendAuthPolicy';
 import {
   Building2, Users, PhoneCall, Wallet, Clock, ArrowLeft, Trash2, Plus,
   Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, ShieldCheck,
@@ -26,9 +27,10 @@ export default function Settings() {
   const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean, store_code?: string, store_name?: string}[]>([]);
   const [callbackPage, setCallbackPage] = useState(0);
   const callbackPageSize = 5;
-  // ★ 2026-10-02 계정 담당자(담당자 본인인증) — enabled가 false면 카드 자체를 그리지 않는다
+  // ★ 2026-10-02 계정 담당자(담당자 본인인증).
+  //   ★ 2026-10-03 카드는 고객사 계정이면 항상 그린다(visible). enabled = 이 계정에서 본인인증으로 바꿀 수 있는가(버튼을 여는 값)
   const [identityInfo, setIdentityInfo] = useState<{
-    enabled: boolean; name?: string | null; maskedPhone?: string | null; verifiedAt?: string | null;
+    visible?: boolean; enabled: boolean; name?: string | null; maskedPhone?: string | null; verifiedAt?: string | null;
   } | null>(null);
   const [showIdentityChange, setShowIdentityChange] = useState(false);
 
@@ -104,7 +106,7 @@ export default function Settings() {
     }
   };
 
-  // ★ 2026-10-02 계정 담당자 카드 — 서버가 "열림"이라고 답한 계정에만 그린다. 조회가 실패하면 카드를 그리지 않는다
+  // ★ 2026-10-02 계정 담당자 카드 — 조회가 실패하면 카드를 그리지 않는다(옛 서버 응답에는 visible이 없어 역시 안 그린다)
   const loadIdentityInfo = async () => {
     try {
       const res = await fetch('/api/auth/identity/me', {
@@ -249,9 +251,10 @@ export default function Settings() {
             </div>
           </section>
 
-          {/* ★ 2026-10-02 계정 담당자(전송자격인증 2.1 ①-1 · 3.4 ② · ③) — 본인인증이 열린 계정에만 보인다.
+          {/* ★ 2026-10-02 계정 담당자(전송자격인증 2.1 ①-1 · 3.4 ② · ③).
+              ★ 2026-10-03 고객사 계정이면 항상 보인다 — 지금 등록된 담당자를 보여 주고, 변경은 본인인증이 열린 계정에서만 된다.
               이름·번호를 손으로 고치는 칸은 없다. 바꾸려면 새 담당자가 본인 휴대폰으로 인증한다 */}
-          {identityInfo?.enabled && (
+          {identityInfo?.visible && (
             <section className="rounded-2xl border border-neutral-200 bg-white p-5">
               <div className="mb-4 flex items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500"><ShieldCheck className="h-[18px] w-[18px]" /></div>
@@ -261,29 +264,42 @@ export default function Settings() {
                 </div>
               </div>
 
-              {identityInfo.verifiedAt ? (
-                <div className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2.5">
+              {identityInfo.maskedPhone ? (
+                <div className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 ${
+                  identityInfo.verifiedAt ? 'border-emerald-100 bg-emerald-50/60' : 'border-neutral-200 bg-neutral-50'
+                }`}>
                   <span className="min-w-0 flex-1 truncate text-sm text-neutral-700">
                     <b className="font-semibold text-neutral-800">{identityInfo.name || '담당자'}</b>
-                    <span className="ml-1.5 tabular-nums text-neutral-500">{identityInfo.maskedPhone || ''}</span>
+                    <span className="ml-1.5 tabular-nums text-neutral-500">{identityInfo.maskedPhone}</span>
                   </span>
-                  <span className="shrink-0 text-[11px] text-neutral-400">{formatDate(identityInfo.verifiedAt)} 인증</span>
+                  <span className="shrink-0 text-[11px] text-neutral-500">
+                    {identityInfo.verifiedAt ? `${formatDate(identityInfo.verifiedAt)} 인증` : '본인인증 전'}
+                  </span>
                 </div>
               ) : (
-                <div className="rounded-lg border border-dashed border-neutral-300 py-6 text-center text-[12.5px] text-neutral-500">아직 본인인증 전입니다</div>
+                <div className="rounded-lg border border-dashed border-neutral-300 py-6 text-center text-[12.5px] text-neutral-500">등록된 담당자가 없습니다</div>
               )}
 
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <p className="text-[11px] leading-relaxed text-neutral-400">
-                  담당자가 바뀌면 새 담당자 본인의 휴대폰으로 인증해 주세요. 계정 하나에 번호는 하나만 등록됩니다.
+              {identityInfo.enabled ? (
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <p className="text-[11px] leading-relaxed text-neutral-500">
+                    담당자가 바뀌면 새 담당자 본인의 휴대폰으로 인증해 주세요. 계정 하나에 번호는 하나만 등록됩니다.
+                  </p>
+                  <button
+                    onClick={() => setShowIdentityChange(true)}
+                    className="flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" /> {identityInfo.verifiedAt ? '담당자 변경' : '본인인증'}
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-3 flex items-start gap-1.5 text-[12px] leading-relaxed text-neutral-500">
+                  <ShieldCheck className="mt-[2px] h-3.5 w-3.5 shrink-0 text-neutral-400" />
+                  {isPolicyEnforced()
+                    ? '본인인증으로 담당자를 변경하는 기능을 준비하고 있습니다.'
+                    : `${POLICY_ENFORCE_DATE_TEXT}부터 본인인증으로 변경할 수 있습니다.`}
                 </p>
-                <button
-                  onClick={() => setShowIdentityChange(true)}
-                  className="flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700"
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" /> {identityInfo.verifiedAt ? '담당자 변경' : '본인인증'}
-                </button>
-              </div>
+              )}
             </section>
           )}
 
