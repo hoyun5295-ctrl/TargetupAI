@@ -191,6 +191,15 @@ export function getCompanyCosts(company: Record<string, any>) {
 export const TIMEOUTS = {
   /** 슈퍼관리자 세션 타임아웃 — 30분 */
   superAdminSessionMinutes: Number(process.env.SUPER_ADMIN_SESSION_MINUTES) || 30,
+  /**
+   * 고객사 사용자 세션 기본 시간(분) — 회사 설정(`companies.session_timeout_minutes`)이 비었거나 0일 때 쓴다.
+   * ★ 2026-10-02 30 → 480(8시간 · Harold 확정). 다중인증이 로그인마다 붙으면서 30분 자동 로그아웃이
+   *   하루에 여러 번 인증번호를 다시 받게 만든다. 추가인증 유지 시간(8시간)과 같은 값이다.
+   *   ⛔ 0(무제한)으로 두지 않는다 — 일정 시간 업무처리가 없으면 자동으로 접속을 끊어야 한다
+   *      (개인정보의 안전성 확보조치 기준 제6조 4항).
+   *   쓰는 곳 3곳이 같은 값을 본다 = 로그인(`login-issue.ts`) · 활동 갱신(`middlewares/auth.ts`) · 연장(`routes/auth.ts`).
+   */
+  companySessionDefaultMinutes: 480,
   /** 세션 활동 갱신 주기 — 5분 */
   activityUpdate: 5 * 60 * 1000,
   /** 스팸필터 테스트 최종 안전장치 타임아웃 — 60초 (정상 시 QTmsg 성공 후 10초에 판정 완료) */

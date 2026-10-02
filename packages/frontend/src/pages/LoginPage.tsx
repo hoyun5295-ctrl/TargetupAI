@@ -3,6 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import IdentityVerifyModal from '../components/IdentityVerifyModal';
+import LoginPolicyNoticeModal, { shouldShowLoginPolicyNotice } from '../components/LoginPolicyNoticeModal';
+import { DEFAULT_SESSION_TIMEOUT_MINUTES } from '../hooks/useSessionTimeout';
 import { COMPANY_NAME, CEO_NAME, BIZ_NUMBER, TRADE_NUMBER, COMPANY_ADDRESS, COMPANY_PHONE } from '../constants/company';
 
 export default function LoginPage() {
@@ -74,11 +76,9 @@ export default function LoginPage() {
   // ★ 2026-10-02 담당자 본인인증(최초 1회) — 서버가 요구할 때만 열린다(스위치·명단 밖 계정에는 오지 않는다)
   const [identity, setIdentity] = useState<{ ticket: string } | null>(null);
 
-  // 로그인 보안 강화 사전 고지 — 시행일(9/1) 전까지, 확인 전까지만 노출
-  const [showSecurityNotice, setShowSecurityNotice] = useState(
-    () => Date.now() < new Date('2026-09-01T00:00:00+09:00').getTime()
-      && localStorage.getItem('securityNotice20260901') !== 'seen'
-  );
+  // ★ 2026-10-02 로그인·발송 인증 의무화 사전 고지 — 고객사 로그인 화면에 들어올 때마다 뜬다(슈퍼관리자 화면 제외).
+  //   띄울지 말지는 창이 가진 판정 하나가 정한다(「오늘 하루 보지 않기」만 숨긴다).
+  const [showPolicyNotice, setShowPolicyNotice] = useState(() => !isSuperAdminOnly && shouldShowLoginPolicyNotice());
 
   // 페이지 진입 시 강제 로그아웃 사유 확인
   useEffect(() => {
@@ -105,7 +105,8 @@ export default function LoginPage() {
 
   const applyLoginSuccess = (data: any) => {
     const { token, user, sessionTimeoutMinutes } = data;
-    localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || 30));
+    // 슈퍼관리자도 이 함수를 지나지만 서버가 값을 항상 준다(30분). 값이 없을 때만 고객사 기본값을 쓴다
+    localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || DEFAULT_SESSION_TIMEOUT_MINUTES));
     // 통과권은 1회용이다 — 로그인이 끝났으면 남겨 두지 않는다(옛 24시간 신뢰 토큰도 여기서 정리된다)
     localStorage.removeItem('mfaDeviceToken');
 
@@ -463,42 +464,6 @@ export default function LoginPage() {
       setTakeover((prev) => (prev && prev.ticket === consumed.ticket ? null : prev));
     }
   };
-
-  // ★ 2026-08-18 로그인 보안 강화 사전 고지 — 시행 전까지 로그인 화면에서 1회 안내
-  const securityNoticeModal = showSecurityNotice && (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-40 animate-[fadeIn_0.2s_ease-out]">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-[zoomIn_0.25s_ease-out]">
-        <div className="px-6 pt-8 pb-2 text-center">
-          <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-7 h-7 text-blue-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-            </svg>
-          </div>
-          <h3 className="text-lg font-bold text-gray-900">로그인 보안 강화 안내</h3>
-          <p className="text-sm text-blue-600 font-medium mt-1">2026년 9월 1일 시행</p>
-        </div>
-        <div className="px-6 pt-4 text-sm text-gray-600 leading-relaxed space-y-3">
-          <p>
-            방송미디어통신위원회 「전송자격인증 기준 등에 관한 고시」에 따라 문자 발송 서비스는
-            로그인 시 담당자 휴대폰 인증을 적용해야 합니다.
-          </p>
-          <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 space-y-2">
-            <p className="text-gray-700"><span className="font-medium">9월 1일부터</span> 로그인 시 담당자 휴대폰으로 발송되는 <span className="font-medium">6자리 인증번호</span> 입력이 추가됩니다.</p>
-            <p className="text-xs text-gray-500">· 인증 후 <span className="font-medium text-gray-700">24시간</span> 동안은 같은 기기에서 다시 묻지 않습니다.</p>
-            <p className="text-xs text-gray-500">· 담당자 휴대폰번호는 계약 담당자 기준으로 등록됩니다. 변경이 필요하시면 담당자에게 연락 주세요.</p>
-          </div>
-        </div>
-        <div className="px-6 pb-6 pt-4">
-          <button
-            onClick={() => { localStorage.setItem('securityNotice20260901', 'seen'); setShowSecurityNotice(false); }}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-xl text-sm transition-colors"
-          >
-            확인했습니다
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 
   // ★ 다중 인증 입력 — 등록된 담당자 번호로 받은 6자리
   const mfaModal = mfa && (
@@ -1044,7 +1009,7 @@ export default function LoginPage() {
       </div>
 
       {/* 모달들 */}
-      {securityNoticeModal}
+      {showPolicyNotice && <LoginPolicyNoticeModal onClose={() => setShowPolicyNotice(false)} />}
       {mfaModal}
       {identity && (
         <IdentityVerifyModal

@@ -8,6 +8,7 @@ import { omitCompanySecrets } from '../utils/secret-hash';
 import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/auth';
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope, buildCustomerStoreFilterLiteral } from '../utils/store-scope';
+import { resolveViewerConsentScope, consentSql, consentJoinSql, consentCountTrue, type ConsentScope } from '../utils/mall-consent';
 import { getOpt080Number } from '../utils/messageUtils';
 // ★ 2026-09-27 한줄로 V2 R105 — 공개 문의 메일 본문 이스케이프 CT
 import { escapeHtml } from '../utils/dm/dm-section-renderer';
@@ -944,8 +945,12 @@ async function aggregateDynamicCard(
  * 대시보드 카드 집계 함수
  * 설정된 카드만 효율적으로 집계 (단일 customers 쿼리 + 필요한 외부 테이블만)
  */
-async function aggregateDashboardCards(companyId: string, cardIds: string[], userId?: string, userType?: string): Promise<CardDataResult[]> {
+async function aggregateDashboardCards(companyId: string, cardIds: string[], userId?: string, userType?: string, consentScope?: ConsentScope): Promise<CardDataResult[]> {
   const results: CardDataResult[] = [];
+  // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent consentSql). 몰 동의 회사가 아니면 조각이 옛 글자 그대로다.
+  //   집계(FILTER 안)라 조인 형태 조각을 쓴다 — 행마다 소속 표를 찾지 않는다.
+  const consent = consentJoinSql(consentScope ?? await resolveViewerConsentScope(companyId, { userId, userType }), '', 'customers.id');
+  const optInTrue = consentCountTrue(consent, userId, 'customers.phone');   // 몰 동의 회사 = 보는 사람의 수신거부 제외(고객 통계와 같은 수)
 
   // ★ 사용자 격리: 고객 데이터는 store_code 기준, 발송 데이터는 created_by 기준
   let customerStoreFilter = '';
@@ -981,9 +986,9 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
       COUNT(*) FILTER (WHERE birth_month_day IS NOT NULL)::int                               as has_birthday_data,
       COUNT(*) FILTER (WHERE email IS NOT NULL)::int                                         as email_has,
       COUNT(*) FILTER (WHERE email IS NOT NULL AND created_at <= NOW() - INTERVAL '30 days')::int as email_has_30d,
-      COUNT(*) FILTER (WHERE sms_opt_in = true)::int                                         as opt_in_count,
-      COUNT(*) FILTER (WHERE sms_opt_in = true AND created_at <= NOW() - INTERVAL '30 days')::int as opt_in_count_30d,
-      COUNT(*) FILTER (WHERE sms_opt_in IS NOT NULL)::int                                    as has_opt_in_data,
+      COUNT(*) FILTER (WHERE ${optInTrue})::int                                         as opt_in_count,
+      COUNT(*) FILTER (WHERE ${optInTrue} AND created_at <= NOW() - INTERVAL '30 days')::int as opt_in_count_30d,
+      COUNT(*) FILTER (WHERE ${consent.value} IS NOT NULL)::int                                    as has_opt_in_data,
       COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW()))::int                  as new_this_month,
       COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW() - INTERVAL '1 month') AND created_at < date_trunc('month', NOW()))::int as new_last_month,
       COALESCE(SUM(total_purchase_amount), 0)::numeric                                       as total_purchase_sum,
@@ -998,7 +1003,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
       COUNT(*) FILTER (WHERE grade IS NOT NULL)::int                                         as has_grade_data,
       COUNT(*) FILTER (WHERE region IS NOT NULL)::int                                        as has_region_data,
       COUNT(*) FILTER (WHERE registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)::int as has_store_data
-    FROM customers
+    FROM customers${consent.join}
     WHERE company_id = $1${customerStoreFilter}
   `, [companyId, `${month}-%`]);
 
@@ -1371,11 +1376,13 @@ router.get('/dashboard-cards', async (req: Request, res: Response) => {
     // ★ 2026-09-28 한줄로 V2 R106 — 진입마다 고객 전수 집계(FILTER 30여 개)를 돌았다 → 캐시 CT(고객 통계와 같은 정책:
     //   60초 안은 그대로 · 10분 안은 직전 값을 주고 뒤에서 1회 다시 계산). 키 = 회사 · 사용자 범위(담당자는 본인 매장) · 카드 목록.
     const cardScope = userType === 'company_user' && userId ? `u:${userId}` : 'all';
+    // ★ 2026-10-02 몰 동의로 읽는 카드는 키를 따로 둔다(읽기 강제를 켠 직후 옛 수신동의 수가 남지 않게)
+    const cardConsentScope = await resolveViewerConsentScope(companyId, { userId, userType });
     const cards = await swrCache({
-      key: `dashboard-cards:${companyId}:${cardScope}:${cardIds.join(',')}`,
+      key: `dashboard-cards:${companyId}:${cardScope}:${cardIds.join(',')}${cardConsentScope.mode === 'mall' ? `:mall:${userId || ''}` : ''}`,   // 몰 동의 = 보는 사람의 수신거부를 빼므로 사람마다 따로
       softTtlSec: CACHE_TTL.customerStats,
       hardTtlSec: 600,
-      compute: () => aggregateDashboardCards(companyId, cardIds, userId, userType),
+      compute: () => aggregateDashboardCards(companyId, cardIds, userId, userType, cardConsentScope),
     });
 
     res.json({
@@ -1423,6 +1430,9 @@ router.get('/dashboard-cards/:cardId/detail', async (req: Request, res: Response
     }
 
     const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+    // ★ 2026-10-02 수신동의 읽기 = CT(카드 숫자와 같은 조각 — 숫자와 상세가 갈리지 않는다)
+    const consent = consentSql(await resolveViewerConsentScope(companyId, { userId, userType }), '', 'customers.id');
+    const optInTrue = consentCountTrue(consent, userId, 'customers.phone');
 
     // 카드별 WHERE 조건 (customers 테이블)
     const CARD_WHERE_MAP: Record<string, string> = {
@@ -1430,7 +1440,7 @@ router.get('/dashboard-cards/:cardId/detail', async (req: Request, res: Response
       gender_male: ` AND gender = 'M'`,
       gender_female: ` AND gender = 'F'`,
       birthday_this_month: ` AND birth_month_day LIKE '${month}-%'`,
-      opt_in_count: ` AND sms_opt_in = true`,
+      opt_in_count: ` AND ${optInTrue}`,
       new_this_month: ` AND created_at >= date_trunc('month', NOW())`,
       recent_30d_purchase: ` AND recent_purchase_date >= (NOW() - INTERVAL '30 days')::date`,
       inactive_90d: ` AND recent_purchase_date IS NOT NULL AND recent_purchase_date < (NOW() - INTERVAL '90 days')::date`,
@@ -1498,7 +1508,7 @@ router.get('/dashboard-cards/:cardId/detail', async (req: Request, res: Response
         `;
       } else {
         // total/male/female/opt_in: 월 말 기준 누적 (created_at < 월말)
-        const condForTrend = cardId === 'gender_male' ? ` AND gender = 'M'` : cardId === 'gender_female' ? ` AND gender = 'F'` : cardId === 'opt_in_count' ? ` AND sms_opt_in = true` : '';
+        const condForTrend = cardId === 'gender_male' ? ` AND gender = 'M'` : cardId === 'gender_female' ? ` AND gender = 'F'` : cardId === 'opt_in_count' ? ` AND ${optInTrue}` : '';
         trendSql = `
           SELECT to_char(gs, 'YYYY-MM') as month,
             (SELECT COUNT(*) FROM customers

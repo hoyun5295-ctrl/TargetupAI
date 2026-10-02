@@ -784,7 +784,7 @@ router.post('/identity/complete', loginLimiter, async (req: Request, res: Respon
   }
 });
 
-/** 설정 화면 「계정관리자 인증」 카드 — 기능이 열리지 않은 계정에는 `enabled: false`만 돌려준다 */
+/** 설정 화면 「계정 담당자」 카드 — 기능이 열리지 않은 계정에는 `enabled: false`만 돌려준다 */
 router.get('/identity/me', authenticate, async (req: Request, res: Response) => {
   try {
     if (!req.user?.userId || req.user.userType === 'super_admin') return res.json({ enabled: false });
@@ -936,7 +936,7 @@ router.post('/extend-session', authenticate, async (req: any, res: Response) => 
           'SELECT c.session_timeout_minutes FROM companies c JOIN users u ON u.company_id = c.id WHERE u.id = $1',
           [req.user.userId]
         );
-        minutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
+        minutes = timeoutResult.rows[0]?.session_timeout_minutes || TIMEOUTS.companySessionDefaultMinutes;
       }
 
       await query(

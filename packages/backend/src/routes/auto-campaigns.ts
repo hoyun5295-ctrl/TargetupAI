@@ -16,6 +16,7 @@ import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { getStoreScope, storeMembershipClause } from '../utils/store-scope';
+import { resolveConsentScope, consentSql } from '../utils/mall-consent';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { buildUnsubscribeFilter, CAMPAIGN_OPT080_SELECT_EXPR, buildCampaignOpt080LeftJoin } from '../utils/unsubscribe-helper';
 import { fetchTargetSampleCustomer } from '../utils/target-sample';
@@ -436,8 +437,11 @@ async function _deprecatedCreateAutoCampaign(req: Request, res: Response) {
     const forceCreate = req.body.force === true;
     if (use_individual_callback && !forceCreate) {
       try {
-        const filterResult = buildFilterQueryCompat(target_filter || {}, companyId);
         const finalStoreCode = store_code || userStoreCode || null;
+        // ★ 2026-10-02 수신동의 읽기 = CT(자동발송의 브랜드 소속 행 · 없으면 관리자 기준)
+        const consentScope = await resolveConsentScope(companyId, finalStoreCode ? [finalStoreCode] : null);
+        const consent = consentSql(consentScope, 'c');
+        const filterResult = buildFilterQueryCompat(target_filter || {}, companyId, { storeConsent: consentScope.mode === 'mall' });
         let storeFilter = '';
         const storeParams: any[] = [];
         if (finalStoreCode) {
@@ -451,7 +455,7 @@ async function _deprecatedCreateAutoCampaign(req: Request, res: Response) {
         const customersResult = await query(
           `SELECT c.id, c.phone, c.callback, c.store_phone, c.custom_fields
            FROM customers c
-           WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
+           WHERE c.company_id = $1 AND c.is_active = true AND ${consent.isTrue}
            ${filterResult.where}${storeFilter}${unsubFilter}`,
           [companyId, ...filterResult.params, ...storeParams, userId]
         );
@@ -922,8 +926,11 @@ router.post('/:id/preview', async (req: Request, res: Response) => {
 
     const campaign = ownership.campaign;
 
+    // ★ 2026-10-02 수신동의 읽기 = CT. 자동발송은 브랜드가 하나로 정해진다 → 그 브랜드 소속 행의 동의(없으면 관리자 기준).
+    const consentScope = await resolveConsentScope(companyId, campaign.store_code ? [campaign.store_code] : null);
+    const consent = consentSql(consentScope, 'c');
     // customer-filter로 타겟 수 카운트
-    const filterResult = buildFilterQueryCompat(campaign.target_filter, companyId);
+    const filterResult = buildFilterQueryCompat(campaign.target_filter, companyId, { storeConsent: consentScope.mode === 'mall' });
 
     // store_code 필터
     let storeFilter = '';
@@ -939,7 +946,7 @@ router.post('/:id/preview', async (req: Request, res: Response) => {
     const countResult = await query(
       `SELECT COUNT(*)::int as cnt FROM customers c
        WHERE c.company_id = $1${filterResult.where}${storeFilter}${unsubFilter}
-       AND c.sms_opt_in = true`,
+       AND ${consent.isTrue}`,
       [companyId, ...filterResult.params, ...storeParams]
     );
 
@@ -947,7 +954,7 @@ router.post('/:id/preview', async (req: Request, res: Response) => {
     const sampleResult = await query(
       `SELECT c.name, c.phone, c.gender, c.grade FROM customers c
        WHERE c.company_id = $1${filterResult.where}${storeFilter}${unsubFilter}
-       AND c.sms_opt_in = true
+       AND ${consent.isTrue}
        ORDER BY RANDOM() LIMIT 5`,
       [companyId, ...filterResult.params, ...storeParams]
     );

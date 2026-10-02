@@ -11,6 +11,7 @@
 
 import type { Request } from 'express';
 import { query } from '../config/database';
+import { TIMEOUTS } from '../config/defaults';
 import { generateToken, JwtPayload } from '../middlewares/auth';
 import { rotateUserSession, newSessionId, SessionConflict } from './session-manager';
 import { clearBlocksOnSuccess } from './login-block';
@@ -77,7 +78,7 @@ export async function issueUserLogin(params: {
     'SELECT session_timeout_minutes, kakao_enabled FROM companies WHERE id = $1',
     [user.company_id]
   );
-  const sessionTimeoutMinutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
+  const sessionTimeoutMinutes = timeoutResult.rows[0]?.session_timeout_minutes || TIMEOUTS.companySessionDefaultMinutes;
   const kakaoEnabled = timeoutResult.rows[0]?.kakao_enabled || false;
 
   const rotate = await rotateUserSession({

@@ -397,9 +397,11 @@ export function buildDynamicSelectExpr(
     unsubParamIndex?: number;
     /** 테이블 alias (기본: customers_unified) */
     tableAlias?: string;
+    /** ★2026-10-02 수신동의 값 식(mall-consent consentSql().value). 없으면 고객 행 열 그대로(옛 글자). */
+    consentValueExpr?: string;
   } = {},
 ): { selectExpr: string; hasCustomFields: boolean } {
-  const { unsubParamIndex, tableAlias = 'customers_unified' } = options;
+  const { unsubParamIndex, tableAlias = 'customers_unified', consentValueExpr } = options;
 
   const parts: string[] = [];
   let hasCustomFields = false;
@@ -414,7 +416,7 @@ export function buildDynamicSelectExpr(
 
     if (f.field_key === 'sms_opt_in' && unsubParamIndex) {
       parts.push(
-        `CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubParamIndex} AND u.phone = ${tableAlias}.phone) THEN false ELSE ${col} END AS ${f.field_key}`,
+        `CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubParamIndex} AND u.phone = ${tableAlias}.phone) THEN false ELSE ${consentValueExpr || col} END AS ${f.field_key}`,
       );
     } else if (f.data_type === 'date') {
       parts.push(`TO_CHAR(${col}, 'YYYY-MM-DD') AS ${f.field_key}`);

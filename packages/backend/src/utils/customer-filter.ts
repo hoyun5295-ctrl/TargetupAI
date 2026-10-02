@@ -51,6 +51,11 @@ export interface FilterOptions {
    */
   storeConsent?: boolean;
   /**
+   * ★ 2026-10-02 수신동의 조각(mall-consent consentSql). mode='mall' 일 때만 조건의 「수신동의」 필드를 소속 행 기준으로 읽는다.
+   *   안 주거나 legacy 면 종전 글자·종전 파라미터 그대로(`sms_opt_in = $N`).
+   */
+  consent?: { mode: 'legacy' | 'mall'; isTrue: string; isFalse: string };
+  /**
    * 입력 형식:
    * - 'mixed': scalar + {value, operator} 혼합 지원 (campaigns.ts, ai.ts 방식)
    * - 'structured': 항상 {operator, value} 형식 (customers.ts 방식)
@@ -148,6 +153,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
     storeCodeMode = 'skip',
     companyIdParamRef = '$1',
     storeConsent = false,
+    consent,
     inputFormat = 'mixed',
   } = options;
 
@@ -194,8 +200,13 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           } else if (field === 'sms_opt_in') {
             // ★ D88: boolean 필드 — 문자열 'true'/'false' → 실제 boolean 변환
             const boolVal = String(value).toLowerCase() === 'true' || value === true;
-            sql += ` AND ${col(alias, field)} = $${paramIndex++}`;
-            params.push(boolVal);
+            if (consent?.mode === 'mall') {
+              // 몰 동의 회사 — 소속 행 기준(파라미터 없음 · 값은 CT 가 리터럴로 만든다)
+              sql += ` AND ${boolVal ? consent.isTrue : consent.isFalse}`;
+            } else {
+              sql += ` AND ${col(alias, field)} = $${paramIndex++}`;
+              params.push(boolVal);
+            }
           } else {
             sql += ` AND ${col(alias, field)} = $${paramIndex++}`;
             params.push(value);
@@ -651,13 +662,18 @@ export function buildFilterQueryCompat(
  * 기존 시그니처: buildDynamicFilter(filters, startIndex) → {where, params, nextIndex}
  * ★ store_code는 'subquery' 모드.
  */
-export function buildDynamicFilterCompat(filters: any, startIndex: number): { where: string; params: any[]; nextIndex: number } {
+export function buildDynamicFilterCompat(
+  filters: any,
+  startIndex: number,
+  opts: { consent?: FilterOptions['consent'] } = {},   // ★ 2026-10-02 조건의 「수신동의」 필드를 화면의 수신동의와 같은 기준으로
+): { where: string; params: any[]; nextIndex: number } {
   // ★ 2026-09-27 한줄로 V2 R203 — D83 디버그 로그 제거(검색값이 로그에 남았다)
   const result = buildCustomerFilter(filters, {
     tableAlias: '',
     startParamIndex: startIndex,
     storeCodeMode: 'subquery',
     companyIdParamRef: '$1',
+    consent: opts.consent,
     inputFormat: 'structured',
   });
   return { where: result.sql, params: result.params, nextIndex: result.nextIndex };

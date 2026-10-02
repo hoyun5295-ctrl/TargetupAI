@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { LifeBuoy } from 'lucide-react';
-import SessionTimer from './SessionTimer';
 import { toggleHelp, useHelpEligible } from '../lib/help-open';
 import { HELP_HEADER_BTN } from './help/help-ui';
 
@@ -161,7 +160,7 @@ export default function DashboardHeader({
           </p>
         </div>
 
-        {/* 우측: 도움말 + 세션 타이머 + 메뉴 — 모바일에서는 가로 스크롤 */}
+        {/* 우측: 도움말 + 메뉴 — 모바일에서는 가로 스크롤 */}
         <nav className="flex items-center gap-1 overflow-x-auto w-full md:w-auto -mx-3 px-3 md:mx-0 md:px-0 scrollbar-thin">
           {/* ★ 2026-08-22(2) 도움말 진입점 — 타이머 옆(Harold: 회사명이 길면 업체명 옆 자리는 밀린다).
               ⛔ 메뉴 목록(menuItems)에 넣지 않는다 — "헤더에 메뉴를 늘리지 않는다"는 확정은 유지된다. 이건 메뉴가 아니라 유틸리티다.
@@ -177,7 +176,8 @@ export default function DashboardHeader({
               궁금한 건 물어보세요
             </button>
           )}
-          <SessionTimer />
+          {/* ★ 2026-10-02 세션 남은 시간 표시 제거(Harold) — 세션은 8시간이고 자동 로그아웃·만료 5분 전 안내 창은 그대로다.
+              남은 시간을 헤더에 계속 보여 줄 이유가 없어졌다. 슈퍼관리자 화면(30분)은 타이머를 그대로 둔다 */}
           {menuItems.map((item, idx) => {
             const cfg = COLOR_CONFIG[item.color];
             const isHovered = hoveredIdx === idx;

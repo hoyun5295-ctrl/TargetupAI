@@ -28,6 +28,7 @@
 import { query, pool } from '../config/database';
 import { entryOpenClause, lockLineageEntry } from './journey-lineage';
 import { buildJourneySafetyFilter } from './journey-safety-filter';
+import { journeyOwnerConsentTrue } from './mall-consent';
 
 const WORKER_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6h
 const PER_JOURNEY_BATCH_LIMIT = 1000;  // 한 journey당 1 cron 진입 영역 limit (큰 회사 영역 분산 정합)
@@ -87,6 +88,8 @@ async function runReentryBatch(): Promise<void> {
         const journeyId = j.id;
         const companyId = j.company_id;
         const cooldownDays = Number(j.reentry_cooldown_days) || 0;
+        // ★ 2026-10-02 수신동의 읽기 = CT(추출과 같은 조각 — 여정 작성자 기준)
+        const consentTrue = await journeyOwnerConsentTrue(companyId, journeyId);
 
         // 2) 진입 조건 매트릭스 매칭 + 신규 execution INSERT (한 SQL UPSERT)
         // ★ 0930 Codex 2R — 진입 워커와 같은 진입 잠금 안에서 넣고 합계까지 한 트랜잭션(두 워커가 같은 고객을 동시에 넣지 않는다).
@@ -115,7 +118,7 @@ async function runReentryBatch(): Promise<void> {
                AND je.completed_at IS NOT NULL
                AND je.completed_at <= NOW() - ($3 * INTERVAL '1 day')
                -- ★ Fix #1 (2026-06-05): 추출과 동일한 공통 안전필터(is_active·sms_opt_in·is_opt_out·is_invalid·수신거부 회사+전화).
-               AND ${buildJourneySafetyFilter('c')}
+               AND ${buildJourneySafetyFilter('c', consentTrue)}
                -- 옛 customer 영역 안 신규 active execution 영역 X (중복 진입 차단)
                AND NOT EXISTS (
                  SELECT 1 FROM journey_executions je2

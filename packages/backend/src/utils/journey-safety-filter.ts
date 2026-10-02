@@ -14,11 +14,13 @@
  *   customers.is_active(bool), sms_opt_in(bool), is_opt_out(bool), is_invalid(bool),
  *   company_id(uuid), phone(varchar) / unsubscribes.company_id, phone.
  */
-export function buildJourneySafetyFilter(alias: string): string {
+export function buildJourneySafetyFilter(alias: string, consentTrue?: string): string {
+  // ★ 2026-10-02 consentTrue = 수신동의 조각(mall-consent consentSql().isTrue). 안 주면 고객 행 열(옛 글자 그대로).
+  //   몰 동의 회사는 호출부가 주인 기준 조각(ownerConsentTrue · journeyOwnerConsentTrue)을 넘긴다.
   const a = alias;
   return (
     `${a}.is_active = true ` +
-    `AND ${a}.sms_opt_in = true ` +
+    `AND ${consentTrue || `${a}.sms_opt_in = true`} ` +
     `AND ${a}.is_opt_out IS NOT TRUE ` +
     `AND ${a}.is_invalid IS NOT TRUE ` +
     `AND NOT EXISTS (SELECT 1 FROM unsubscribes u ` +

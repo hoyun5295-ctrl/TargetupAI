@@ -10,6 +10,7 @@ import { selectJourneyTargetCustomerIds } from '../utils/journey-target-extracto
 import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope, getOwnerCustomerScopeSql, getJourneyOwnerScopeSql } from '../utils/store-scope';
+import { viewerConsentSql, viewerConsentJoin, ownerConsentTrue, journeyOwnerConsentTrue } from '../utils/mall-consent';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
 // ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
@@ -294,7 +295,8 @@ router.post('/generate-message', async (req: Request, res: Response) => {
     await filterVarCatalogByData(varCatalog, availableVars, companyId);
 
     // 타겟 정보 조회
-    let targetQuery = 'SELECT COUNT(*) as total FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true';
+    const consentU = await viewerConsentSql(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
+    let targetQuery = `SELECT COUNT(*) as total FROM customers WHERE company_id = $1 AND is_active = true AND ${consentU.isTrue}`;
     const targetResult = await query(targetQuery, [companyId]);
 
     const statsResult = await query(
@@ -427,15 +429,16 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     }
 
     // 고객 통계 조회
+    const consentU = await viewerConsentJoin(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
     const statsResult = await query(
       `SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
+        COUNT(*) FILTER (WHERE ${consentU.isTrue}) as sms_opt_in_count,
         COUNT(*) FILTER (WHERE gender = ANY($${baseParams.length + 1}::text[])) as male_count,
         COUNT(*) FILTER (WHERE gender = ANY($${baseParams.length + 2}::text[])) as female_count,
         AVG(purchase_count) as avg_purchase_count,
         AVG(total_purchase_amount) as avg_total_spent
-       FROM customers
+       FROM customers${consentU.join}
        WHERE company_id = $1 AND is_active = true${storeFilter}`,
       [...baseParams, getGenderVariants('M'), getGenderVariants('F')]
     );
@@ -480,6 +483,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     //   변경: LIMIT 100 → 프론트 getMaxByteMessage()가 가장 긴 변수값으로 보수적 byte 계산
     let sampleCustomersRaw: Record<string, any>[] = [];
     try {
+      const consentC = await viewerConsentSql(companyId, req.user, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
       const sampleResult = await query(
         `SELECT name, gender, age, grade, points, email, address,
                 recent_purchase_store, registered_store, registration_type,
@@ -487,7 +491,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
                 recent_purchase_amount, total_purchase_amount, purchase_count,
                 birth_date, recent_purchase_date, custom_fields
          FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${sampleFilterWhere}
+         WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${sampleFilterWhere}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${sampleUnsubIdx} AND u.phone = c.phone)
          ORDER BY c.updated_at DESC NULLS LAST LIMIT 100`,
         [...baseParams, ...sampleFilterParams, userId]
@@ -615,13 +619,14 @@ router.post('/recommend-next-campaign', async (req: Request, res: Response) => {
     }
 
     // 2) 고객 통계 조회
+    const consentU = await viewerConsentJoin(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
     const statsResult = await query(
       `SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
+        COUNT(*) FILTER (WHERE ${consentU.isTrue}) as sms_opt_in_count,
         COUNT(*) FILTER (WHERE gender IN ('M', '남', '남성', 'male')) as male_count,
         COUNT(*) FILTER (WHERE gender IN ('F', '여', '여성', 'female')) as female_count
-       FROM customers WHERE company_id = $1 AND is_active = true`,
+       FROM customers${consentU.join} WHERE company_id = $1 AND is_active = true`,
       [companyId]
     );
 
@@ -756,9 +761,10 @@ router.post('/recount-target', async (req: Request, res: Response) => {
 
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubIdxB = baseParams.length + filterParams.length + 1;
+    const consentC = await viewerConsentSql(companyId, req.user, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
     const countResult = await query(
       `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterSql}
+       WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterSql}
        AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxB} AND u.phone = c.phone)`,
       [...baseParams, ...filterParams, userId]
     );
@@ -766,7 +772,7 @@ router.post('/recount-target', async (req: Request, res: Response) => {
 
     const unsubResult = await query(
       `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterSql}
+       WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterSql}
        AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxB} AND u.phone = c.phone)`,
       [...baseParams, ...filterParams, userId]
     );
@@ -820,7 +826,8 @@ router.post('/target-recipients', async (req: Request, res: Response) => {
 
     const { sql: filterSql, params: filterParams } = buildFilterWhereClauseCompat(safeFilters, baseParams.length + 1);
     const unsubIdx = baseParams.length + filterParams.length + 1; // user_id
-    const whereCommon = `c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterSql}
+    const consentC = await viewerConsentSql(companyId, req.user, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
+    const whereCommon = `c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterSql}
        AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`;
 
     const countResult = await query(
@@ -913,9 +920,10 @@ router.post('/parse-briefing', async (req: Request, res: Response) => {
 
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubIdxC = baseParams.length + filterParams.length + 1;
+    const consentC = await viewerConsentSql(companyId, req.user, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
     const countResult = await query(
       `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
+       WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterWhere}
        AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)`,
       [...baseParams, ...filterParams, userId]
     );
@@ -923,7 +931,7 @@ router.post('/parse-briefing', async (req: Request, res: Response) => {
 
     const unsubResult = await query(
       `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
+       WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterWhere}
        AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)`,
       [...baseParams, ...filterParams, userId]
     );
@@ -935,7 +943,7 @@ router.post('/parse-briefing', async (req: Request, res: Response) => {
     try {
       const sampleResult = await query(
         `SELECT * FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
+         WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterWhere}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)
          ORDER BY c.updated_at DESC NULLS LAST LIMIT 1`,
         [...baseParams, ...filterParams, userId]
@@ -1239,10 +1247,11 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
       // CT-01 customer-filter (unqualified 컬럼 · leading AND · companyId=$1 전제) — preview-recipients와 동일.
       const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, fBaseParams.length + 1);
       const fParams = [...fBaseParams, ...filterParams];
+      const consentU = await viewerConsentSql(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
       const fSql = `
         SELECT ${SAMPLE_CUSTOMER_COLUMNS}
         FROM customers
-        WHERE company_id = $1::uuid AND is_active = true AND sms_opt_in = true
+        WHERE company_id = $1::uuid AND is_active = true AND ${consentU.isTrue}
           ${fStoreFilter}
           ${filterWhere}
         ORDER BY COALESCE(ltv_score, 0) DESC, COALESCE(total_purchase_amount, 0) DESC
@@ -1261,7 +1270,7 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
 
     // 여정 trigger 기준 후보 추출 (발송과 동일 컨트롤타워). 상위 30명 추출 후 store-scope 통과 첫 1명.
     // ★ 2026-09-27 한줄로 V2 S5-04 — 저장 전 여정 미리보기 = 요청자 분류코드 범위
-    const targetIds = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters || {}, 30, undefined, undefined, await getOwnerCustomerScopeSql(companyId, req.user?.userId));
+    const targetIds = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters || {}, 30, undefined, undefined, await getOwnerCustomerScopeSql(companyId, req.user?.userId), await ownerConsentTrue(companyId, req.user?.userId));
     if (targetIds.length === 0) {
       return res.json({ success: true, sampleCustomer: null });
     }
@@ -1280,13 +1289,14 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
     }
 
     // 추출 순서(trigger ORDER BY — 신규가입=created_at DESC 등) 유지 = array_position
+    const consentU = await viewerConsentSql(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
     const sql = `
       SELECT ${SAMPLE_CUSTOMER_COLUMNS}
       FROM customers
       WHERE company_id = $1::uuid
         AND id = ANY($2::uuid[])
         AND is_active = true
-        AND sms_opt_in = true
+        AND ${consentU.isTrue}
         ${storeFilter}
       ORDER BY array_position($2::uuid[], id)
       LIMIT 1
@@ -1358,15 +1368,16 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
     companyInfo.has_kakao_profile = parseInt(kakaoProfileResult.rows[0].count) > 0;
 
     // 고객 통계
+    const consentU = await viewerConsentJoin(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
     const statsResult = await query(
       `SELECT
          COUNT(*) as total,
-         COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
+         COUNT(*) FILTER (WHERE ${consentU.isTrue}) as sms_opt_in_count,
          COUNT(*) FILTER (WHERE gender = 'M') as male_count,
          COUNT(*) FILTER (WHERE gender = 'F') as female_count,
          AVG(purchase_count) as avg_purchase_count,
          AVG(total_purchase_amount) as avg_total_spent
-       FROM customers WHERE company_id = $1 AND is_active = true`,
+       FROM customers${consentU.join} WHERE company_id = $1 AND is_active = true`,
       [companyId]
     );
     const customerStats = statsResult.rows[0];
@@ -1457,7 +1468,9 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
       });
     }
 
-    const { sql, params } = buildSendableRecipientsSql(filterWhere, filterParams, baseParams, storeFilter);
+    // ★ 2026-10-02 수신동의 읽기 = CT(요청 사용자 기준 · 몰 동의 회사가 아니면 옛 글자)
+    const recipientGates = { consentTrue: (await viewerConsentSql(companyId, req.user, 'c')).isTrue };
+    const { sql, params } = buildSendableRecipientsSql(filterWhere, filterParams, baseParams, storeFilter, recipientGates);
 
     const result = await query(sql, params);
 
@@ -1488,7 +1501,7 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
     //   같은 WHERE(buildAudienceWhere · 같은 게이트)로 실제 대상 수를 세어 준다 — 화면이 초과면 발송하지 않는다.
     let total = recipients.length;
     if (recipients.length >= SENDABLE_RECIPIENTS_LIMIT) {
-      const { sql: cntSql, params: cntParams } = buildAudienceCountSql(filterWhere, filterParams, baseParams, storeFilter);
+      const { sql: cntSql, params: cntParams } = buildAudienceCountSql(filterWhere, filterParams, baseParams, storeFilter, recipientGates);
       const cnt = await query(cntSql, cntParams);
       total = Math.max(recipients.length, Number(cnt.rows[0]?.count) || 0);
     }
@@ -1624,7 +1637,7 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
     //   계약 축은 조건 컬럼을 계약이 정하므로 filters 기반 동적 컬럼을 붙이지 않는다.
     const conditionColumns = compiled.basis === 'segment' ? [] : resolveConditionColumns(filters || {}, FIELD_MAP);
     // ★ 2026-08-03 A-1: 발송 게이트(피로도·미클릭)를 명단에도 적용. 종전 null·null이라 이 화면만 실발송보다 넓었다.
-    const gates = await resolveOperatorAudienceGates(companyId, null);
+    const gates = await resolveOperatorAudienceGates(companyId, null, scopeOwner);
     const { sql, params } = buildSendableRecipientsTopSql(
       compiled.filterWhere, compiled.filterParams, baseParams, storeFilter, gates, conditionColumns,
     );
@@ -2785,7 +2798,7 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     const filters = pj.target?.filters || {};
     // ⛔ 2026-08-03 1R 정정: 게이트를 손으로 조립하지 않는다 — 발송이 쓰는 해석기 하나만 쓴다
     //   (리마인드 코호트 경계가 여기 빠지면 화면 명단이 실발송보다 넓어진다).
-    const gates = await resolveOperatorAudienceGates(companyId, pj);
+    const gates = await resolveOperatorAudienceGates(companyId, pj, prow.created_by || null);
 
     // ★ 2026-08-04 리마인드 명단 = 발송과 같은 코호트(Codex 1R-a — target 재컴파일이면 화면 ≠ 실발송).
     //   1차 캠페인의 실수신 성공 번호 ∩ 게이트. 1차가 종결 전이거나 명단이 비면 그 상태를 그대로 말한다.
@@ -3051,12 +3064,13 @@ router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) 
       `SELECT id, company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
       [companyId]
     );
+    const consentU = await viewerConsentJoin(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
     const statsRes = await query(
       `SELECT COUNT(*) AS total,
-              COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in_count,
+              COUNT(*) FILTER (WHERE ${consentU.isTrue}) AS sms_opt_in_count,
               AVG(purchase_count) AS avg_purchase_count,
               AVG(total_purchase_amount) AS avg_total_spent
-       FROM customers WHERE company_id = $1::uuid AND is_active = true`,
+       FROM customers${consentU.join} WHERE company_id = $1::uuid AND is_active = true`,
       [companyId]
     );
 
@@ -3717,7 +3731,7 @@ router.post('/operator/journeys/preview-message', async (req: Request, res: Resp
       const j = jrow.rows[0];
       if (j?.trigger_event) {
         try {
-          const ids = await selectJourneyTargetCustomerIds(companyId, j.trigger_event, j.trigger_filters || {}, 50, undefined, undefined, await getJourneyOwnerScopeSql(companyId, journeyId));
+          const ids = await selectJourneyTargetCustomerIds(companyId, j.trigger_event, j.trigger_filters || {}, 50, undefined, undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsentTrue(companyId, journeyId));
           if (ids.length > 0) {
             const cr = await query(
               `SELECT name, gender, age, grade, points, email, address,
@@ -4184,7 +4198,7 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
     // ★ 2026-09-27 한줄로 V2 S5-04 — 미리보기도 발송과 같은 범위(여정 작성자)
     const scopeSql = await getJourneyOwnerScopeSql(companyId, req.params.id);
     // ★ 2026-09-28 한줄로 V2 R265 — 표본·인원을 한 번의 추출로(CT)
-    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters, 10, req.params.id, scopeSql);
+    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters, 10, req.params.id, scopeSql, await journeyOwnerConsentTrue(companyId, req.params.id));
 
     return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
@@ -4217,20 +4231,21 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
     const startKind = normalizeStartKind(journeyRow.start_kind);
     // ★ 2026-09-27 한줄로 V2 S5-04 — [타겟확인]도 발송과 같은 범위(여정 작성자)
     const targetScopeSql = await getJourneyOwnerScopeSql(companyId, req.params.id);
+    const targetConsentTrue = await journeyOwnerConsentTrue(companyId, req.params.id);   // ★ 2026-10-02 수신동의 읽기 = CT(발송과 같은 조각)
 
     // 추출 — 발송과 동일 함수(자동완화 X). date_anchor는 앵커 대상 함수, 그 외는 트리거 추출.
     let ids: string[] = [];
     let displayTotal = 0;
     let capped = false;
     if (startKind === 'date_anchor') {
-      ids = await selectAnchorAudienceIds(companyId, triggerFilters, 100, targetScopeSql);
+      ids = await selectAnchorAudienceIds(companyId, triggerFilters, 100, targetScopeSql, targetConsentTrue);
       // 앵커 대상 전용 count 헬퍼 없음 — 10,000 상한 실측(정직 표기)
-      const totalProbe = await selectAnchorAudienceIds(companyId, triggerFilters, 10001, targetScopeSql);
+      const totalProbe = await selectAnchorAudienceIds(companyId, triggerFilters, 10001, targetScopeSql, targetConsentTrue);
       capped = totalProbe.length > 10000;
       displayTotal = capped ? 10000 : totalProbe.length;
     } else {
-      ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id, undefined, targetScopeSql);
-      const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, targetScopeSql);
+      ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id, undefined, targetScopeSql, targetConsentTrue);
+      const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, targetScopeSql, targetConsentTrue);
       displayTotal = cnt.total;
       capped = cnt.capped;
     }
@@ -4296,7 +4311,7 @@ router.post('/operator/preview-target-samples', async (req: Request, res: Respon
     // ★ 2026-09-27 한줄로 V2 S5-04 — 저장 전 미리보기 = 요청자 분류코드 범위
     const draftScopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
     // ★ 2026-09-28 한줄로 V2 R265 — 표본·인원을 한 번의 추출로(CT)
-    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters || {}, 10, undefined, draftScopeSql);
+    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters || {}, 10, undefined, draftScopeSql, await ownerConsentTrue(companyId, req.user?.userId));
     return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
     console.error('[Journeys preview-target-samples] 오류:', err);

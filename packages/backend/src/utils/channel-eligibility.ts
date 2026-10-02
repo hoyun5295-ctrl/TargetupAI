@@ -31,7 +31,8 @@ const SAFE_ALIAS = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * @param alias customers 테이블 alias (기본 'c')
  * @throws 지원하지 않는 채널 / 안전하지 않은 alias
  */
-export function buildChannelEligibilityWhere(channel: ChannelKey, alias: string = 'c'): string {
+export function buildChannelEligibilityWhere(channel: ChannelKey, alias: string = 'c', consentTrue?: string): string {
+  // ★ 2026-10-02 consentTrue = 수신동의 조각(mall-consent). 안 주면 고객 행 열(옛 글자 그대로). 문자·카카오 자격에만 쓴다.
   if (!SAFE_ALIAS.test(alias)) {
     throw new Error(`안전하지 않은 테이블 alias: ${alias}`);
   }
@@ -48,7 +49,7 @@ export function buildChannelEligibilityWhere(channel: ChannelKey, alias: string 
     case 'dm':
     case 'kakao':
       return (
-        `${a}.is_active = true AND ${a}.sms_opt_in = true ` +
+        `${a}.is_active = true AND ${consentTrue || `${a}.sms_opt_in = true`} ` +
         `AND (${a}.is_opt_out = false OR ${a}.is_opt_out IS NULL) ` +
         `AND (${a}.is_invalid = false OR ${a}.is_invalid IS NULL)`
       );

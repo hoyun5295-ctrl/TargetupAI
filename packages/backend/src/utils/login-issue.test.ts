@@ -7,7 +7,7 @@
  *   (0915 운영 PG: hoyun 09-14 21:54 로그인 → 09-15 09:30:11 옛 토큰 page_view → 4초 뒤 login_session_conflict 3회).
  *
  * 못 박는 것:
- *   1. 세션 생성 만료(expiresInMinutes) = 회사 session_timeout_minutes (없으면 30). 24시간 아님.
+ *   1. 세션 생성 만료(expiresInMinutes) = 회사 session_timeout_minutes (없으면 기본값 = 1002부터 480). 24시간 아님.
  *   2. 응답의 sessionTimeoutMinutes(화면 타이머)와 서버 세션 만료가 같은 값이다.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -70,13 +70,22 @@ describe('고객사 로그인 — 서버 세션 만료는 처음부터 회사 �
     if (result.status === 'ok') expect(result.body.sessionTimeoutMinutes).toBe(45);
   });
 
-  it('회사 값이 없으면 30분으로 만든다', async () => {
+  it('★(1002) 회사 값이 없으면 기본 8시간(480분)으로 만든다', async () => {
     mockCompanyTimeout(null);
 
     const result = await call();
 
-    expect(rotate.mock.calls[0][0].expiresInMinutes).toBe(30);
-    if (result.status === 'ok') expect(result.body.sessionTimeoutMinutes).toBe(30);
+    expect(rotate.mock.calls[0][0].expiresInMinutes).toBe(480);
+    if (result.status === 'ok') expect(result.body.sessionTimeoutMinutes).toBe(480);
+  });
+
+  it('★(1002) 회사 값이 0이어도 무제한이 아니라 기본 8시간이다', async () => {
+    mockCompanyTimeout(0);
+
+    const result = await call();
+
+    expect(rotate.mock.calls[0][0].expiresInMinutes).toBe(480);
+    if (result.status === 'ok') expect(result.body.sessionTimeoutMinutes).toBe(480);
   });
 
   it('접속 중(conflict)이어도 세션 시간을 먼저 정해 넘긴다 — 동의 뒤 재시도가 같은 값으로 세션을 만든다', async () => {

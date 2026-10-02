@@ -128,11 +128,12 @@ describe('①-2 몰 동의 발송 — 타겟 브랜드 조건과 그 브랜드 �
   });
   it('buildSendConsent 를 쓰는 파일은 타겟 필터에도 같은 판정(storeConsent)을 넘긴다 — campaigns 세는 곳·보내는 곳·미리보기', () => {
     const src = readFileSync(resolve(__dirname, '../../routes/campaigns.ts'), 'utf8');
-    const compat = src.match(/buildFilterQueryCompat\(targetFilter, companyId(, \{ storeConsent: (\w+) \})?\)/g) || [];
+    // ★ 2026-10-02 범위 없는 발송(관리자)도 몰 동의 회사면 같은 행 판정을 켠다(resolveAdminSendConsent 가 null 이 아닐 때)
+    const compat = src.match(/buildFilterQueryCompat\(targetFilter, companyId(, \{ storeConsent: [^}]+ \})?\)/g) || [];
     expect(compat).toEqual([
-      'buildFilterQueryCompat(targetFilter, companyId, { storeConsent: countEnforce })',
-      'buildFilterQueryCompat(targetFilter, companyId, { storeConsent: sendEnforce })',
-      'buildFilterQueryCompat(targetFilter, companyId, { storeConsent: previewEnforce })',
+      'buildFilterQueryCompat(targetFilter, companyId, { storeConsent: countEnforce || countAdminConsent !== null })',
+      'buildFilterQueryCompat(targetFilter, companyId, { storeConsent: sendEnforce || sendAdminConsent !== null })',
+      'buildFilterQueryCompat(targetFilter, companyId, { storeConsent: previewEnforce || previewAdminConsent !== null })',
     ]);
     for (const v of ['countEnforce', 'sendEnforce', 'previewEnforce']) expect(src).toContain(`enforce: ${v},`);
     for (const f of walk(SRC)) {

@@ -19,13 +19,19 @@ const TICK_INTERVAL = 1000;
 // ★ 2026-09-27 한줄로 V2 S2-04 — 입력이 이어지면 5분에 한 번 서버 세션도 연장한다(서버 활동 갱신 간격과 같은 5분).
 //   옛: 입력은 화면 타이머만 늘리고 서버에 알리지 않아, 긴 글을 쓰는 동안 서버 세션만 만료돼 저장 순간 강제 로그아웃될 수 있었다.
 const SERVER_PING_INTERVAL_MS = 5 * 60 * 1000;
+/**
+ * 고객사 세션 기본 시간(분) — 서버 `TIMEOUTS.companySessionDefaultMinutes`와 같은 값(계약 테스트가 둘을 대조한다).
+ * ★ 2026-10-02 30 → 480(8시간). 로그인마다 인증번호를 받으므로 30분 자동 로그아웃을 걷어 냈다.
+ *   자동 로그아웃 자체는 남는다 — 8시간 동안 입력이 없으면 끊고, 5분 전에 안내 창이 뜬다.
+ */
+export const DEFAULT_SESSION_TIMEOUT_MINUTES = 480;
 
 export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSessionTimeoutReturn {
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
 
   const lastActivityRef = useRef<number>(Date.now());
-  const timeoutMinutesRef = useRef<number>(30);
+  const timeoutMinutesRef = useRef<number>(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const warningShownRef = useRef(false);
   const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastServerPingRef = useRef<number>(Date.now());
@@ -53,7 +59,7 @@ export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSe
         if (val > 0) return val;
       }
     } catch {}
-    return 30; // 기본 30분
+    return DEFAULT_SESSION_TIMEOUT_MINUTES;
   }, []);
 
   // 활동 감지 → 마지막 활동 시각 갱신

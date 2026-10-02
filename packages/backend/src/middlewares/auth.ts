@@ -99,18 +99,22 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     const lastActivity = new Date(sessionResult.rows[0].last_activity_at);
     if (now.getTime() - lastActivity.getTime() > ACTIVITY_UPDATE_INTERVAL) {
       // 활동이 있으면 expires_at도 연장
-      // ★ 2026-09-27 한줄로 V2 S2-04 — 고객사는 회사 설정 시간(companies.session_timeout_minutes · 없거나 0이면 30 = 연장 라우트와 같은 규칙).
+      // ★ 2026-09-27 한줄로 V2 S2-04 — 고객사는 회사 설정 시간(companies.session_timeout_minutes · 없거나 0이면 기본값 = 연장 라우트와 같은 규칙).
       //   옛: 회사 설정과 무관하게 30분으로 되돌려, 설정이 더 긴 회사도 API 호출 없이 30분이 지나면 서버가 끊었다.
-      const sessionSql = decoded.userType === 'super_admin'
+      // ★ 2026-10-02 기본값 = TIMEOUTS.companySessionDefaultMinutes(8시간). 로그인·연장과 같은 상수를 본다.
+      const isSuper = decoded.userType === 'super_admin';
+      const sessionSql = isSuper
         ? `UPDATE user_sessions SET last_activity_at = NOW(), expires_at = NOW() + INTERVAL '1 minute' * $2 WHERE id = $1`
         : `UPDATE user_sessions SET last_activity_at = NOW(),
                   expires_at = NOW() + INTERVAL '1 minute' * COALESCE((
                     SELECT NULLIF(c.session_timeout_minutes, 0) FROM users u JOIN companies c ON c.id = u.company_id WHERE u.id = $2
-                  ), 30)
+                  ), $3::int)
             WHERE id = $1`;
       query(
         sessionSql,
-        [decoded.sessionId, decoded.userType === 'super_admin' ? TIMEOUTS.superAdminSessionMinutes : decoded.userId]
+        isSuper
+          ? [decoded.sessionId, TIMEOUTS.superAdminSessionMinutes]
+          : [decoded.sessionId, decoded.userId, TIMEOUTS.companySessionDefaultMinutes]
       ).catch(err => console.error('세션 활동 갱신 실패:', err));
     }
 

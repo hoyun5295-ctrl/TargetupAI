@@ -54,6 +54,7 @@ import { buildSendableStagingInsertSql } from './operator-recipients';
 // ★ 2026-08-03 타겟팅 재설계 A-1: 대상 수는 발송과 같은 게이트를 쓰는 단일 문으로만 센다.
 import { resolveOperatorAudienceGates, compileOperatorAudience, resolveOperatorStoreScope, assertSegmentUsable } from './operator-audience';
 import { AudienceGates } from './operator-recipients';
+import { resolveConsentScope, consentJoinSql } from './mall-consent';
 import { normalizeSegmentKey, normalizeSegmentParams, segmentNeedsCycleBaseline } from './automarketing-segment';
 // ★ 2026-09-26 한줄로 V2 m104 — 회복 패스의 적재 묶음 id 검증
 import { isUuid } from './normalize';
@@ -834,13 +835,14 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   const ctx = ctxRes.rows[0] as CompanyContextRow;
 
   // 3. 고객 통계 조회
+  const statsConsent = consentJoinSql(await resolveConsentScope(operator.companyId, null), '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT
   const statsRes = await query(
     `SELECT
        COUNT(*) AS total,
-       COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in_count,
+       COUNT(*) FILTER (WHERE ${statsConsent.isTrue}) AS sms_opt_in_count,
        AVG(purchase_count) AS avg_purchase_count,
        AVG(total_purchase_amount) AS avg_total_spent
-     FROM customers
+     FROM customers${statsConsent.join}
      WHERE company_id = $1::uuid AND is_active = true`,
     [operator.companyId]
   );
@@ -2141,7 +2143,7 @@ async function dispatchProposalSend(
     // ★ 2026-07-05 발송 피로도 보호 — 자동마케팅은 광고 강제(0705 라벨 정정)라 cap 설정 회사면 추출 단계에서 제외(차감 전).
     // ⛔ 2026-08-03 1R 정정: 게이트를 손으로 조립하지 않는다 — 리마인드 코호트 경계가 여기 안 오면
     //   1차를 안 받은 신규 유입에게 리마인드가 나간다. 게이트 해석은 단일 문(resolveOperatorAudienceGates)뿐.
-    sendGates = await resolveOperatorAudienceGates(companyId, pj);
+    sendGates = await resolveOperatorAudienceGates(companyId, pj, op.created_by || null);
     sendFatigueCap = sendGates.fatigueCap ?? null;
     // ⛔ 4R: 추출 시각 경계(CTE)는 폐기했다 — 리마인드를 보류하기로 하면서 그 값을 쓸 곳이 없어졌다.
     //   구조를 고치면 덧댔던 장치도 함께 사라지는 게 정상이다.
@@ -2370,7 +2372,7 @@ async function dispatchProposalSend(
     // ⛔ 2R 정정: 발송 뒤 재조회에 피로도를 다시 걸지 않는다. 같은 발송 경로의 recordFatigueSends가 먼저 끝나면
     //   방금 보낸 고객이 cap에 걸려 분모에서 빠진다(cap=1이면 전원 누락). 실행 순서에 따라 결과가 달라지는 축을 뺀다.
     //   ⚠ 이 경로는 재설계 이전부터 피로도를 안 봤다(회귀 아님). 실제 수신자 원장 연결은 별건.
-    gates: { excludeClickedSince: sendGates.excludeClickedSince },
+    gates: { excludeClickedSince: sendGates.excludeClickedSince, consentTrue: sendGates.consentTrue },
   });
 
   // 기능 크레딧 1회 차감 (멱등키 proposalId) — 발송 성공 시점에만.

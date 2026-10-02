@@ -27,6 +27,7 @@
  */
 
 import { storeMembershipClause } from './store-scope';
+import { resolveConsentScope, consentSql } from './mall-consent';
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
@@ -226,8 +227,10 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
     await filterVarCatalogByData(varCatalog, availableVars, ac.company_id);
 
     // 타겟 통계 조회 (간략)
+    // ★ 2026-10-02 수신동의 읽기 = CT(자동발송의 브랜드 소속 행 · 없으면 관리자 기준)
+    const statsConsent = consentSql(await resolveConsentScope(ac.company_id, ac.store_code ? [ac.store_code] : null), '', 'customers.id');
     const statsResult = await query(
-      `SELECT COUNT(*) as total FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true`,
+      `SELECT COUNT(*) as total FROM customers WHERE company_id = $1 AND is_active = true AND ${statsConsent.isTrue}`,
       [ac.company_id]
     );
     const targetInfo = {
@@ -432,7 +435,9 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
         //   COUNT만 조회 (실제 발송 시 재조회) — D-1 시점 추정치, 직원 사전 확인용.
         let d1TargetCount = 0;
         try {
-          const filterRes = buildFilterQueryCompat(ac.target_filter, ac.company_id);
+          const d1ConsentScope = await resolveConsentScope(ac.company_id, ac.store_code ? [ac.store_code] : null);
+          const d1Consent = consentSql(d1ConsentScope, 'c');
+          const filterRes = buildFilterQueryCompat(ac.target_filter, ac.company_id, { storeConsent: d1ConsentScope.mode === 'mall' });
           let countStoreFilter = '';
           const countStoreParams: any[] = [];
           if (ac.store_code) {
@@ -443,7 +448,7 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
           const countUnsubFilter = ` AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${countUnsubIdx} AND u.phone = c.phone)`;
           const countRes = await query(
             `SELECT COUNT(*)::int AS cnt FROM customers c
-             WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
+             WHERE c.company_id = $1 AND c.is_active = true AND ${d1Consent.isTrue}
              ${filterRes.where}${countStoreFilter}${countUnsubFilter}`,
             [ac.company_id, ...filterRes.params, ...countStoreParams, ac.user_id]
           );
@@ -573,7 +578,9 @@ async function sendPreNotification(ac: any): Promise<void> {
     // ★ D105: 타겟 고객 수 실시간 조회 (CT-01 + CT-03 재활용)
     let targetCount = 0;
     try {
-      const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id);
+      const countConsentScope = await resolveConsentScope(ac.company_id, ac.store_code ? [ac.store_code] : null);
+      const countConsent = consentSql(countConsentScope, 'c');
+      const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id, { storeConsent: countConsentScope.mode === 'mall' });
       let storeFilter = '';
       const storeParams: any[] = [];
       if (ac.store_code) {
@@ -584,7 +591,7 @@ async function sendPreNotification(ac: any): Promise<void> {
       const unsubFilter = buildUnsubscribeFilter(`$${unsubParamIdx}`, 'c.phone');
       const countResult = await query(
         `SELECT COUNT(*) as cnt FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
+         WHERE c.company_id = $1 AND c.is_active = true AND ${countConsent.isTrue}
          ${filterResult.where}${storeFilter}${unsubFilter}`,
         [ac.company_id, ...filterResult.params, ...storeParams, ac.user_id]
       );
@@ -732,8 +739,12 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     const mappingColumns = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
     const selectColumns = [...new Set([...baseColumns, ...mappingColumns])].join(', ');
 
+    // ★ 2026-10-02 수신동의 읽기 = CT(세는 곳과 같은 조각 — 알림에 적힌 인원과 실제 발송 대상이 같은 자격을 본다)
+    const sendConsentScope = await resolveConsentScope(ac.company_id, ac.store_code ? [ac.store_code] : null);
+    const sendConsent = consentSql(sendConsentScope, 'c');
+    if (sendConsentScope.mode === 'mall') console.log(`${logPrefix} 발송 자격 = 몰 동의 codes=${sendConsentScope.codes.join(',')} admin=${sendConsentScope.admin}`);
     // ★ customer-filter로 타겟 필터링
-    const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id);
+    const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id, { storeConsent: sendConsentScope.mode === 'mall' });
 
     // store_code 필터
     let storeFilter = '';
@@ -749,7 +760,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
 
     const customersResult = await query(
       `SELECT ${selectColumns} FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
+       WHERE c.company_id = $1 AND c.is_active = true AND ${sendConsent.isTrue}
        ${filterResult.where}${storeFilter}${unsubFilter}`,
       [ac.company_id, ...filterResult.params, ...storeParams, ac.user_id]
     );

@@ -27,6 +27,7 @@
 import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { buildCustomerFilter } from './customer-filter';
+import { resolveConsentScope, consentSql } from './mall-consent';
 import { getFieldByKey, StandardFieldMapping } from './standard-field-map';
 import { query } from '../config/database';
 // ★ 2026-09-27 한줄로 V2 R161 — 프롬프트 날짜 = KST(옛: 오늘 날짜가 없고 예시만 UTC toISOString)
@@ -327,11 +328,14 @@ export async function previewMatching(
   filter: Record<string, { operator: string; value: any }>,
   sampleSize = 5,
 ): Promise<{ matchCount: number; samples: GenerateSegmentResult['samples']; sampleFields: GenerateSegmentResult['sampleFields'] }> {
+  // ★ 2026-10-02 수신동의 읽기 = CT. 이 미리보기는 회사 전체 기준(범위 없음)이다 → 몰 동의 회사는 관리자 기준 조각.
+  const consent = consentSql(await resolveConsentScope(companyId, null), 'c');
   // CT-01 호환 SQL 빌드 ($1 = companyId, $2~ = filter values)
   const { sql: filterSql, params } = buildCustomerFilter(filter, {
     tableAlias: 'c',
     startParamIndex: 2,
     storeCodeMode: 'skip',
+    consent,
     inputFormat: 'structured',
   });
 
@@ -339,7 +343,7 @@ export async function previewMatching(
   const baseWhere = `
     c.company_id = $1
     AND c.is_active = true
-    AND c.sms_opt_in = true
+    AND ${consent.isTrue}
     AND (c.is_opt_out = false OR c.is_opt_out IS NULL)
     AND (c.is_invalid = false OR c.is_invalid IS NULL)
     ${filterSql}

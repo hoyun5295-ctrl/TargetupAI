@@ -197,7 +197,7 @@ export default function AdminDashboard() {
     approvalRequired: false,
     allowCallbackSelfRegister: false,
     maxUsers: 5,
-    sessionTimeoutMinutes: 30,
+    sessionTimeoutMinutes: 480,
     storeCodeList: [] as string[],
     newStoreCode: '',
     newExcludedSegment: '',
@@ -3954,7 +3954,7 @@ const handleApproveRequest = async (id: string) => {
           approvalRequired: c.approval_required ?? false,
           allowCallbackSelfRegister: c.allow_callback_self_register ?? false,
           maxUsers: c.max_users ?? 5,
-          sessionTimeoutMinutes: c.session_timeout_minutes ?? 30,
+          sessionTimeoutMinutes: c.session_timeout_minutes ?? 480,
           storeCodeList: c.store_code_list || [],
           newStoreCode: '',
           newExcludedSegment: '',
@@ -9058,7 +9058,7 @@ const handleApproveRequest = async (id: string) => {
                         className="w-24 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" min={5} max={480} />
                       <span className="text-sm text-gray-500">분</span>
                     </div>
-                    <p className="text-xs text-gray-400 mt-1">비활동 시 자동 로그아웃 시간 (5~480분)</p>
+                    <p className="text-xs text-gray-400 mt-1">비활동 시 자동 로그아웃 시간 (5~480분 · 기본 480분 = 8시간)</p>
                   </div>
                   </div>
                   <div className="flex items-center gap-2 pt-2">

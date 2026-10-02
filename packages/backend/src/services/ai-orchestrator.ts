@@ -428,6 +428,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
         legacyFilters: targetResult.filters,
         storeFilter: scope.storeFilter,
         baseParams: scope.baseParams,
+        ownerUserId: ctx.userId || null,   // ★ 2026-10-02 수신동의 기준 = 매장 범위와 같은 사람
         // ★ 2026-08-04: 변화 축이 비교할 지난 회차. 없으면 그 축은 사유와 함께 멈춘다(아래 catch가 받는다).
         operatorId: ctx.operatorId ?? null,
       });
@@ -780,7 +781,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
           // ★ 2026-08-03 A-1 / 1R 정정: 자동마케팅 회차만 발송 게이트를 포함한 단일 문으로 센다.
           //   이 tool 흐름은 공용 제안(/operator/propose)도 쓰므로 범위 밖에는 종전 count를 유지한다.
           const actual = ctx.audienceScope === 'operator'
-            ? (await countOperatorAudienceFor({ companyId: ctx.companyId, legacyFilters: targetResult.filters })).count
+            ? (await countOperatorAudienceFor({ companyId: ctx.companyId, legacyFilters: targetResult.filters, ownerUserId: ctx.userId || null })).count
             : (await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '')).count;
           estimatedCount = actual;
           countVerified = true;

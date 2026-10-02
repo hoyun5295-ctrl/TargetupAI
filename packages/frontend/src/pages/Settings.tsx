@@ -26,7 +26,7 @@ export default function Settings() {
   const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean, store_code?: string, store_name?: string}[]>([]);
   const [callbackPage, setCallbackPage] = useState(0);
   const callbackPageSize = 5;
-  // ★ 2026-10-02 계정관리자 인증(담당자 본인인증) — enabled가 false면 카드 자체를 그리지 않는다
+  // ★ 2026-10-02 계정 담당자(담당자 본인인증) — enabled가 false면 카드 자체를 그리지 않는다
   const [identityInfo, setIdentityInfo] = useState<{
     enabled: boolean; name?: string | null; maskedPhone?: string | null; verifiedAt?: string | null;
   } | null>(null);
@@ -104,7 +104,7 @@ export default function Settings() {
     }
   };
 
-  // ★ 2026-10-02 계정관리자 인증 카드 — 서버가 "열림"이라고 답한 계정에만 그린다. 조회가 실패하면 카드를 그리지 않는다
+  // ★ 2026-10-02 계정 담당자 카드 — 서버가 "열림"이라고 답한 계정에만 그린다. 조회가 실패하면 카드를 그리지 않는다
   const loadIdentityInfo = async () => {
     try {
       const res = await fetch('/api/auth/identity/me', {
@@ -249,14 +249,14 @@ export default function Settings() {
             </div>
           </section>
 
-          {/* ★ 2026-10-02 계정관리자 인증(전송자격인증 2.1 ①-1 · 3.4 ② · ③) — 본인인증이 열린 계정에만 보인다.
+          {/* ★ 2026-10-02 계정 담당자(전송자격인증 2.1 ①-1 · 3.4 ② · ③) — 본인인증이 열린 계정에만 보인다.
               이름·번호를 손으로 고치는 칸은 없다. 바꾸려면 새 담당자가 본인 휴대폰으로 인증한다 */}
           {identityInfo?.enabled && (
             <section className="rounded-2xl border border-neutral-200 bg-white p-5">
               <div className="mb-4 flex items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500"><ShieldCheck className="h-[18px] w-[18px]" /></div>
                 <div>
-                  <h2 className="text-sm font-semibold text-neutral-900">계정관리자 인증</h2>
+                  <h2 className="text-sm font-semibold text-neutral-900">계정 담당자</h2>
                   <p className="text-[11px] text-neutral-400">이 계정 담당자 · 로그인 인증번호를 받는 휴대폰</p>
                 </div>
               </div>
@@ -281,7 +281,7 @@ export default function Settings() {
                   onClick={() => setShowIdentityChange(true)}
                   className="flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700"
                 >
-                  <ShieldCheck className="h-3.5 w-3.5" /> {identityInfo.verifiedAt ? '변경' : '본인인증'}
+                  <ShieldCheck className="h-3.5 w-3.5" /> {identityInfo.verifiedAt ? '담당자 변경' : '본인인증'}
                 </button>
               </div>
             </section>

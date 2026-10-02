@@ -51,15 +51,18 @@ export async function countTargetByFilter(
   channel: ChannelKey,
   filter: Record<string, unknown>,
   scopeSql = '',
+  // ★ 2026-10-02 수신동의 조각(mall-consent ownerConsentSql · 범위와 같은 주인). 없으면 고객 행.
+  consent?: { mode: 'legacy' | 'mall'; isTrue: string; isFalse: string },
 ): Promise<TargetCountResult> {
   // ★ 2026-09-27 한줄로 V2 S5-04 — scopeSql = 요청자 분류코드 범위(store-scope getOwnerCustomerScopeSql · 관리자 = 빈 조각)
   const { sql: filterSql, params } = buildCustomerFilter(filter, {
     tableAlias: 'c',
     startParamIndex: 2,
     storeCodeMode: 'skip',
+    consent,
     inputFormat: 'structured',
   });
-  const channelWhere = buildChannelEligibilityWhere(channel, 'c');
+  const channelWhere = buildChannelEligibilityWhere(channel, 'c', consent?.isTrue);
   const fullParams = [companyId, ...params];
 
   const matchSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid${filterSql}${scopeSql}`;

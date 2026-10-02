@@ -46,7 +46,7 @@ export async function resolvePlannerAudience(input: {
   plannerEventId: string;
 }): Promise<PlannerAudienceResolution> {
   const scope = await resolveOperatorStoreScope(input.companyId, input.createdBy);
-  const gates = await resolveOperatorAudienceGates(input.companyId, null);
+  const gates = await resolveOperatorAudienceGates(input.companyId, null, input.createdBy);
   if (scope.blocked) {
     return { blocked: true, baseParams: scope.baseParams, storeFilter: '', filterWhere: '', filterParams: [], gates };
   }

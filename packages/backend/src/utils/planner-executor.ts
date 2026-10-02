@@ -25,6 +25,7 @@
  */
 import { randomUUID } from 'crypto';
 import { query } from '../config/database';
+import { resolveConsentScope, consentJoinSql } from './mall-consent';
 import { SEND_HOURS, getCompanyCosts } from '../config/defaults';
 import { orchestrate } from '../services/ai-orchestrator';
 import { generateMessages } from '../services/ai';
@@ -109,10 +110,11 @@ async function loadCompanyContext(companyId: string): Promise<{ companyInfo: any
   );
   const ctx = ctxRes.rows[0];
   if (!ctx) return null;
+  const statsConsent = consentJoinSql(await resolveConsentScope(companyId, null), '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT
   const statsRes = await query(
     `SELECT COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in_count
-       FROM customers WHERE company_id = $1::uuid AND is_active = true`,
+            COUNT(*) FILTER (WHERE ${statsConsent.isTrue}) AS sms_opt_in_count
+       FROM customers${statsConsent.join} WHERE company_id = $1::uuid AND is_active = true`,
     [companyId],
   );
   return {

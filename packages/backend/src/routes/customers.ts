@@ -15,6 +15,7 @@ import { renderFieldValue } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope, getOwnerCustomerScopeSql, storeMembershipClause, storeMembershipCond, storeCodeDisplayExpr } from '../utils/store-scope';
+import { resolveViewerConsentScope, consentSql, consentJoinSql, viewerConsentSql } from '../utils/mall-consent';
 import { purchaseHistorySourceSql } from '../utils/purchase-history-source';
 import {
   buildExtractSelect, buildKeptSelect, flattenExtractRow, keepExtraction, readExtractionState, searchExtraction, readExtractionRows,
@@ -85,11 +86,13 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     // ★ D88: 사용자(ID)별 필터 → 해당 사용자의 store_codes 기준 조회 (uploaded_by 아닌 소속 브랜드 기준)
+    let adminPickedCodes: string[] = [];   // 관리자가 고른 브랜드(사용자·브랜드 필터) — 수신동의를 그 브랜드 기준으로 읽는다
     const filterUserId = req.query.filterUserId as string;
     if (filterUserId && (userType === 'company_admin' || userType === 'super_admin')) {
       const fuResult = await query('SELECT store_codes FROM users WHERE id = $1 AND company_id = $2', [filterUserId, companyId]);
       const fuStoreCodes = fuResult.rows[0]?.store_codes;
       if (fuStoreCodes && fuStoreCodes.length > 0) {
+        adminPickedCodes = fuStoreCodes.map(String);
         whereClause += storeMembershipClause({ idCol: 'id', companyRef: '$1', codeRef: `$${paramIndex++}`, many: true });
         params.push(fuStoreCodes);
       } else {
@@ -103,14 +106,21 @@ router.get('/', async (req: Request, res: Response) => {
     const filterStoreCode = req.query.filterStoreCode as string;
     if (filterStoreCode && (userType === 'company_admin' || userType === 'super_admin')) {
       // ★ 2026-10-01 소속 표 기준(고객 행 store_code 는 자사몰 연동 고객에서 비어 있다 · cmuozso84)
+      adminPickedCodes = [String(filterStoreCode)];
       whereClause += storeMembershipClause({ idCol: 'id', companyRef: '$1', codeRef: `$${paramIndex++}` });
       params.push(filterStoreCode);
     }
 
+    // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent consentSql). 몰 동의 회사가 아니면 조각이 옛 글자 그대로다.
+    const consent = consentSql(
+      await resolveViewerConsentScope(companyId, { userId, userType, pickedCodes: adminPickedCodes }),
+      '', 'customers_unified.id',
+    );
+
     // 동적 필터 적용
     if (filters) {
       const parsedFilters = typeof filters === 'string' ? JSON.parse(filters) : filters;
-      const filterResult = buildDynamicFilterCompat(parsedFilters, paramIndex);
+      const filterResult = buildDynamicFilterCompat(parsedFilters, paramIndex, { consent });
       whereClause += filterResult.where;
       params.push(...filterResult.params);
       paramIndex = filterResult.nextIndex;
@@ -137,11 +147,11 @@ if (grade) {
 }
 // ★ B17-01: 수신거부 user_id 기준 통일
 if (smsOptIn === 'true') {
-  whereClause += ` AND sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone)`;
+  whereClause += ` AND ${consent.isTrue} AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone)`;
   params.push(userId);
   paramIndex++;
 } else if (smsOptIn === 'false') {
-  whereClause += ` AND (sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone))`;
+  whereClause += ` AND (${consent.isFalse} OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone))`;
   params.push(userId);
   paramIndex++;
 }
@@ -181,7 +191,7 @@ if (smsOptIn === 'true') {
               store_phone, registration_type,
               recent_purchase_amount, purchase_count,
               CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubCaseIdx} AND u.phone = customers_unified.phone)
-                   THEN false ELSE sms_opt_in END as sms_opt_in,
+                   THEN false ELSE ${consent.value} END as sms_opt_in,
               TO_CHAR(recent_purchase_date, 'YYYY-MM-DD') as recent_purchase_date, total_purchase_amount, custom_fields,
               created_at,
               COUNT(*) OVER() AS total_count_all
@@ -258,11 +268,13 @@ router.get('/download', async (req: Request, res: Response) => {
     }
 
     // 사용자별 필터
+    let adminPickedCodes: string[] = [];   // 관리자가 고른 브랜드 — 수신동의를 그 브랜드 기준으로 읽는다(목록과 같은 규칙)
     const filterUserId = req.query.filterUserId as string;
     if (filterUserId && (userType === 'company_admin' || userType === 'super_admin')) {
       const fuResult = await query('SELECT store_codes FROM users WHERE id = $1 AND company_id = $2', [filterUserId, companyId]);
       const fuStoreCodes = fuResult.rows[0]?.store_codes;
       if (fuStoreCodes && fuStoreCodes.length > 0) {
+        adminPickedCodes = fuStoreCodes.map(String);
         scopeWhere += storeMembershipClause({ idCol: 'id', companyRef: '$1', codeRef: `$${paramIndex++}`, many: true });
         scopeParams.push(fuStoreCodes);
       } else {
@@ -274,9 +286,15 @@ router.get('/download', async (req: Request, res: Response) => {
     // 브랜드(store_code) 필터
     const filterStoreCode = req.query.filterStoreCode as string;
     if (filterStoreCode && (userType === 'company_admin' || userType === 'super_admin')) {
+      adminPickedCodes = [String(filterStoreCode)];
       scopeWhere += storeMembershipClause({ idCol: 'id', companyRef: '$1', codeRef: `$${paramIndex++}` });
       scopeParams.push(filterStoreCode);
     }
+    // ★ 2026-10-02 수신동의 읽기 = CT(목록과 같은 조각 · 화면 ≡ 엑셀)
+    const consent = consentSql(
+      await resolveViewerConsentScope(companyId, { userId, userType, pickedCodes: adminPickedCodes }),
+      '', 'customers_unified.id',
+    );
 
     // ─── 2. CT-18: 활성 필드 동적 탐지 (화면과 동일 결과) ───
     //   이 시점의 scopeWhere/scopeParams 기준으로 실제 데이터 유무 판정
@@ -293,7 +311,7 @@ router.get('/download', async (req: Request, res: Response) => {
     // 동적 필터 (CT-01)
     if (filters) {
       const parsedFilters = typeof filters === 'string' ? JSON.parse(filters) : filters;
-      const filterResult = buildDynamicFilterCompat(parsedFilters, paramIndex);
+      const filterResult = buildDynamicFilterCompat(parsedFilters, paramIndex, { consent });
       listWhere += filterResult.where;
       listParams.push(...filterResult.params);
       paramIndex = filterResult.nextIndex;
@@ -301,11 +319,11 @@ router.get('/download', async (req: Request, res: Response) => {
 
     // 수신동의 필터
     if (smsOptIn === 'true') {
-      listWhere += ` AND sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone)`;
+      listWhere += ` AND ${consent.isTrue} AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone)`;
       listParams.push(userId);
       paramIndex++;
     } else if (smsOptIn === 'false') {
-      listWhere += ` AND (sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone))`;
+      listWhere += ` AND (${consent.isFalse} OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${paramIndex} AND u.phone = customers_unified.phone))`;
       listParams.push(userId);
       paramIndex++;
     }
@@ -340,6 +358,7 @@ router.get('/download', async (req: Request, res: Response) => {
     const { selectExpr } = buildDynamicSelectExpr(fields, {
       unsubParamIndex,
       tableAlias: 'customers_unified',
+      consentValueExpr: consent.value,
     });
 
     if (!selectExpr) {
@@ -424,7 +443,9 @@ router.post('/filter', async (req: Request, res: Response) => {
 
     const { filters } = req.body;
 
-    let whereClause = 'WHERE company_id = $1 AND is_active = true AND sms_opt_in = true';
+    // ★ 2026-10-02 수신동의 읽기 = CT
+    const consent = consentSql(await resolveViewerConsentScope(companyId, { userId, userType }), '', 'c.id');
+    let whereClause = `WHERE company_id = $1 AND is_active = true AND ${consent.isTrue}`;
     const params: any[] = [companyId];
     let paramIndex = 2;
 
@@ -441,7 +462,7 @@ router.post('/filter', async (req: Request, res: Response) => {
     }
 
     if (filters) {
-      const filterResult = buildDynamicFilterCompat(filters, paramIndex);
+      const filterResult = buildDynamicFilterCompat(filters, paramIndex, { consent });
       whereClause += filterResult.where;
       params.push(...filterResult.params);
     }
@@ -735,7 +756,10 @@ router.get('/stats', async (req: Request, res: Response) => {
     //   가르므로(company_user=본인 발송만), 승급/강등 직후 같은 키로 옛 역할 통계가 나오는 것 차단.
     // (서명 직렬화 = JSON — 매장코드에 콤마가 있어도 서로 다른 스코프가 같은 키로 뭉치지 않게. Codex 4R)
     const statsScopeSig = scopeBaseParams.length > 1 ? `f:${JSON.stringify([...scopeBaseParams[1]].sort())}` : 'all';
-    const cacheKey = `stats:${companyId}:${userId || 'anonymous'}:${userType || 'unknown'}:${statsScopeSig}`;
+    // ★ 2026-10-02 수신동의 읽기 = CT. 몰 동의로 읽는 통계는 키를 따로 둔다(읽기 강제를 켠 직후 옛 값이 남지 않게).
+    const statsConsentScope = await resolveViewerConsentScope(companyId, { userId, userType });
+    const consent = consentJoinSql(statsConsentScope, 'c');   // 집계(FILTER 안) = 조인 형태 조각
+    const cacheKey = `stats:${companyId}:${userId || 'anonymous'}:${userType || 'unknown'}:${statsScopeSig}${statsConsentScope.mode === 'mall' ? ':mall' : ''}`;
     const computeStats = async () => {
     const params: any[] = [...scopeBaseParams];
 
@@ -749,11 +773,11 @@ router.get('/stats', async (req: Request, res: Response) => {
       query(
       `SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE c.sms_opt_in = true AND uo.phone IS NULL) as sms_opt_in_count,
+        COUNT(*) FILTER (WHERE ${consent.isTrue} AND uo.phone IS NULL) as sms_opt_in_count,
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 1}::text[])) as male_count,
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 2}::text[])) as female_count,
         COUNT(*) FILTER (WHERE c.grade = 'VIP') as vip_count,
-        COUNT(*) FILTER (WHERE c.sms_opt_in = false OR uo.phone IS NOT NULL) as unsubscribe_count,
+        COUNT(*) FILTER (WHERE ${consent.isFalse} OR uo.phone IS NOT NULL) as unsubscribe_count,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) < 20) as age_under20,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) BETWEEN 20 AND 29) as age_20s,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) BETWEEN 30 AND 39) as age_30s,
@@ -761,7 +785,7 @@ router.get('/stats', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) BETWEEN 50 AND 59) as age_50s,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (${KST_CURRENT_YEAR_SQL} - c.birth_year) >= 60) as age_60plus
        FROM customers_unified c
-       LEFT JOIN (SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $${unsubStatIdx}) uo ON uo.phone = c.phone
+       LEFT JOIN (SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $${unsubStatIdx}) uo ON uo.phone = c.phone${consent.join}
        WHERE c.company_id = $1 AND c.is_active = true${storeFilter}`,
       [...params, getGenderVariants('M'), getGenderVariants('F')]
       ),
@@ -880,6 +904,8 @@ router.post('/filter-count', async (req: Request, res: Response) => {
 
     const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, dynamicFilters } = req.body;
 
+    // ★ 2026-10-02 수신동의 읽기 = CT
+    const consent = consentSql(await resolveViewerConsentScope(companyId, { userId, userType }), '', 'customers.id');
     let whereClause = 'WHERE company_id = $1 AND is_active = true';
     const params: any[] = [companyId];
     let paramIndex = 2;
@@ -900,15 +926,15 @@ router.post('/filter-count', async (req: Request, res: Response) => {
     // 수신동의 필터
     if (dynamicFilters && typeof dynamicFilters === 'object' && Object.keys(dynamicFilters).length > 0) {
       // === 동적 필터 (새 UI) ===
-      if (smsOptIn) whereClause += ' AND sms_opt_in = true';
-      const df = buildDynamicFilterCompat(dynamicFilters, paramIndex);
+      if (smsOptIn) whereClause += ` AND ${consent.isTrue}`;
+      const df = buildDynamicFilterCompat(dynamicFilters, paramIndex, { consent });
       whereClause += df.where;
       params.push(...df.params);
       paramIndex = df.nextIndex;
     } else {
       // === 레거시 필터 (기존 UI - 하위호환) ===
       if (smsOptIn) {
-        whereClause += ' AND sms_opt_in = true';
+        whereClause += ` AND ${consent.isTrue}`;
       }
       if (gender) {
         const gf = buildGenderFilter(String(gender), paramIndex);
@@ -974,6 +1000,8 @@ router.post('/extract', async (req: Request, res: Response) => {
 
     const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, phoneField, dynamicFilters } = req.body;
 
+    // ★ 2026-10-02 수신동의 읽기 = CT
+    const consent = consentSql(await resolveViewerConsentScope(companyId, { userId, userType }), '', 'customers.id');
     let whereClause = 'WHERE company_id = $1 AND is_active = true';
     const params: any[] = [companyId];
     let paramIndex = 2;
@@ -990,14 +1018,14 @@ router.post('/extract', async (req: Request, res: Response) => {
     }
 
     if (dynamicFilters && typeof dynamicFilters === 'object' && Object.keys(dynamicFilters).length > 0) {
-      if (smsOptIn) whereClause += ' AND sms_opt_in = true';
-      const df = buildDynamicFilterCompat(dynamicFilters, paramIndex);
+      if (smsOptIn) whereClause += ` AND ${consent.isTrue}`;
+      const df = buildDynamicFilterCompat(dynamicFilters, paramIndex, { consent });
       whereClause += df.where;
       params.push(...df.params);
       paramIndex = df.nextIndex;
     } else {
       if (smsOptIn) {
-        whereClause += ' AND sms_opt_in = true';
+        whereClause += ` AND ${consent.isTrue}`;
       }
       if (gender) {
         const gf = buildGenderFilter(String(gender), paramIndex);
@@ -1868,6 +1896,12 @@ router.get('/:id/timeline', requirePlanFeature('customer_db_view'), async (req: 
     });
 
     if (!result) return res.status(404).json({ success: false, error: '고객을 찾을 수 없습니다.' });
+    // ★ 2026-10-02 수신동의 표시 = CT(상세와 같은 값). 몰 동의 회사만 다시 읽는다 — 그 밖은 조회가 늘지 않는다.
+    const tlConsent = await viewerConsentSql(companyId, req.user, 'c');
+    if (tlConsent.mode === 'mall') {
+      const cr = await query(`SELECT ${tlConsent.value} AS v FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid`, [String(id), companyId]);
+      result.customer.smsOptIn = cr.rows[0]?.v === true;
+    }
     await logPrivacyView({ req, kind: 'customer_timeline', count: 1, targetId: String(id), companyId });
     return res.json({ success: true, ...result });
   } catch (err: any) {
@@ -1893,11 +1927,13 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     // ★ 2026-09-27 한줄로 V2 R113 — 담당자는 분류코드 범위 안 고객만(구매 이력 라우트와 같은 규칙 · 범위 밖 = 없는 것과 같게 404)
     const scopeSql = await getOwnerCustomerScopeSql(companyId || '', userId);
+    // ★ 2026-10-02 수신동의 읽기 = CT
+    const consent = consentSql(await resolveViewerConsentScope(companyId || '', { userId, userType: req.user?.userType }), 'c');
     // ★ B17-01: 수신거부 user_id 기준 통일
     const result = await query(
       `SELECT c.*,
               CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $3 AND u.phone = c.phone)
-                   THEN false ELSE c.sms_opt_in END as sms_opt_in,
+                   THEN false ELSE ${consent.value} END as sms_opt_in,
               EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $3 AND u.phone = c.phone) as is_unsubscribed
        FROM customers_unified c WHERE c.id = $1 AND c.company_id = $2 AND c.is_active = true${scopeSql}`,
       [id, companyId, userId]

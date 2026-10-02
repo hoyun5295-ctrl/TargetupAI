@@ -69,6 +69,7 @@ import { getOrCreateStepCampaign } from './journey-step-campaign';
 import { confirmJourneyClaimSent, resolveJourneyClaim } from './journey-send-claim';
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
+import { readOwnerConsentForCustomer } from './mall-consent';
 // ★ §11-5(§5-1) — 종료 신호는 트리거 계약(단일 출처)에서 파생한다.
 import { getTriggerContract } from './journey-trigger-capability';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 목표(같은 상품을 다시 샀는가) · 키 규칙은 journey-product 한 곳.
@@ -667,7 +668,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
   // ★ Fix #1 (2026-06-05): 발송 직전 안전필터 재적용 — 추출 기준과 동일(is_active·sms_opt_in·is_opt_out·is_invalid).
   //   진입과 발송 사이(다단계는 며칠)에 고객이 비활성/수신거부/무효로 바뀌어도 발송 직전 한 번 더 막는다.
-  if (!isCustomerSendable(customer)) {
+  // ★ 2026-10-02 수신동의 읽기 = CT. 몰 동의 회사는 여정 작성자 기준 소속 행 동의로 다시 읽는다(추출과 같은 조각).
+  //   그 밖(null)은 읽어 둔 고객 행 값 그대로 — 쿼리가 늘지 않는다.
+  const mallConsent = await readOwnerConsentForCustomer(exec.company_id, exec.created_by, exec.customer_id);
+  if (!isCustomerSendable(mallConsent === null ? customer : { ...customer, sms_opt_in: mallConsent })) {
     await logSkippedStep(exec.execution_id, step.id, 'opt_out_or_inactive');
     await advanceOrComplete(exec, step, 0);
     return 'skipped_opt_out';

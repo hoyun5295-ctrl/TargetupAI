@@ -64,8 +64,9 @@ describe('R281 · R106 캐시', () => {
   });
   it('대시보드 카드 = 회사·사용자 범위·카드 목록 키로 캐시', () => {
     const src = read('routes/companies.ts');
-    expect(src).toContain('key: `dashboard-cards:${companyId}:${cardScope}:${cardIds.join(\',\')}`');
-    expect(src).toContain('compute: () => aggregateDashboardCards(companyId, cardIds, userId, userType),');
+    // ★ 2026-10-02 몰 동의로 읽는 카드는 키 꼬리가 붙는다(그 밖의 회사는 키가 종전과 같다)
+    expect(src).toContain('key: `dashboard-cards:${companyId}:${cardScope}:${cardIds.join(\',\')}${cardConsentScope.mode === \'mall\' ? `:mall:${userId || \'\'}` : \'\'}`');
+    expect(src).toContain('compute: () => aggregateDashboardCards(companyId, cardIds, userId, userType, cardConsentScope),');
   });
 });
 

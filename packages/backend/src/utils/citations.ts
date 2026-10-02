@@ -24,6 +24,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
+import { resolveConsentScope, consentJoinSql } from './mall-consent';
 import { AI_MODELS, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
 import { listMemories as listCompanyMemories, LEARNING_MEMORY_TYPES } from './company-memory';
 
@@ -127,12 +128,13 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
   }
 
   // 4. 고객 통계
+  const statsConsent = consentJoinSql(await resolveConsentScope(companyId, null), '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT
   const statsRes = await query(
     `SELECT COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in,
+            COUNT(*) FILTER (WHERE ${statsConsent.isTrue}) AS sms_opt_in,
             AVG(purchase_count) AS avg_purchase,
             AVG(total_purchase_amount) AS avg_spent
-     FROM customers WHERE company_id = $1::uuid AND is_active = true`,
+     FROM customers${statsConsent.join} WHERE company_id = $1::uuid AND is_active = true`,
     [companyId]
   );
   if (statsRes.rows.length > 0) {

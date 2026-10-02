@@ -18,6 +18,7 @@ import { getFatigueCap } from './fatigue-guard';
 import { getStoreScope } from './store-scope';
 import { buildFilterWhereClauseCompat } from './customer-filter';
 import { buildAudienceCountSql, AudienceGates } from './operator-recipients';
+import { ownerConsentSql } from './mall-consent';
 import { hasUsableGradeOrder } from './customer-grade-rank';
 import {
   CompanySegmentFacts, SegmentAvailability, SegmentKey,
@@ -36,7 +37,10 @@ import { isCycleSnapshotReady, cycleSnapshotMigrationPending } from './operator-
 export async function resolveOperatorAudienceGates(
   companyId: string,
   proposalJson?: { meta?: { excludeClickedSince?: string | null } | null } | null,
+  // ★ 2026-10-02 주인(자동마케팅 작성자 · 매장 범위와 같은 사람) — 몰 동의 회사는 그 사람 기준 소속 행 동의로 읽는다
+  ownerUserId?: string | null,
 ): Promise<AudienceGates> {
+  const consent = await ownerConsentSql(companyId, ownerUserId, 'c');
   const parse = (v: unknown): Date | null => {
     if (typeof v !== 'string' || !v) return null;
     const d = new Date(v);
@@ -46,6 +50,7 @@ export async function resolveOperatorAudienceGates(
     excludeClickedSince: parse(proposalJson?.meta?.excludeClickedSince),
     fatigueCap: await getFatigueCap(companyId),
     excludeInJourney: await getExcludeInJourneySetting(companyId),
+    ...(consent.mode === 'mall' ? { consentTrue: consent.isTrue } : {}),   // 몰 동의 회사가 아니면 키를 싣지 않는다(게이트 객체 종전 그대로)
   };
 }
 
@@ -324,6 +329,8 @@ export async function countOperatorAudienceFor(input: {
   legacyFilters?: Record<string, any> | null;
   /** 리마인드 등 게이트가 다른 회차 — 미전달 시 이 회사 기본 게이트(피로도만). */
   gates?: AudienceGates;
+  /** ★ 2026-10-02 주인 — gates 를 안 줄 때 기본 게이트의 수신동의 기준(없으면 범위 없음 = 관리자 기준) */
+  ownerUserId?: string | null;
   storeFilter?: string;
   baseParams?: any[];
   /** 변화 축 전용 — 지난 회차 스냅샷의 주인. 없으면 변화 축은 사유와 함께 멈춘다. */
@@ -339,7 +346,7 @@ export async function countOperatorAudienceFor(input: {
     baseParams,
     operatorId: input.operatorId ?? null,
   });
-  const gates = input.gates ?? (await resolveOperatorAudienceGates(input.companyId, null));
+  const gates = input.gates ?? (await resolveOperatorAudienceGates(input.companyId, null, input.ownerUserId ?? null));
   const count = await countCompiledAudience({ compiled, gates, storeFilter: input.storeFilter, baseParams });
   return {
     count,

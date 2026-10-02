@@ -129,7 +129,9 @@ describe('신규 고객 판정 불가 게이트', () => {
     expect(cap).toHaveBeenCalledTimes(1);
     const args = extract.mock.calls[0];
     // companyId·trigger·filters·limit·journeyId·reentry·scopeSql(★ 2026-09-27 S5-04 여정 작성자 분류코드 범위 — 회사 능력값이 아니다)
-    expect(args).toHaveLength(7);
+    //   + 수신동의 조각(★ 2026-10-02 mall-consent · 여정 작성자 기준 — 몰 동의 회사가 아니면 옛 글자 · 회사 능력값이 아니다)
+    expect(args).toHaveLength(8);
+    expect(args[7]).toBe('c.sms_opt_in = true');
     expect(typeof args[6]).toBe('string');
     expect(args.some((a: unknown) => a === HAS_SIGNAL)).toBe(false);
   });

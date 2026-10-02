@@ -224,25 +224,29 @@ describe('소스 계약 — routes/campaigns.ts 발송·세기·미리보기가 
     // ★ 2026-10-01 몰 동의 판정(sendEnforce)을 타겟 필터보다 먼저 구해 타겟 필터와 동의 조각이 같은 값을 쓴다(B-1001-3 · Codex R1 high)
     const head = src.slice(src.indexOf('const sendEnforce = '), src.indexOf('const customers = customersResult.rows;'));
     expect(head).toContain('const sendEnforce = storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0]));');
-    expect(head).toContain('buildFilterQueryCompat(targetFilter, companyId, { storeConsent: sendEnforce })');
+    // ★ 2026-10-02 범위 없는 발송(관리자) 갈래 = CT resolveAdminSendConsent(몰 동의 회사가 아니면 null → 옛 조각)
+    expect(head).toContain('const sendAdminConsent = storeParams.length === 0 ? await resolveAdminSendConsent(companyId) : null;');
+    expect(head).toContain('buildFilterQueryCompat(targetFilter, companyId, { storeConsent: sendEnforce || sendAdminConsent !== null })');
     const block = src.slice(src.indexOf('const sendConsent = buildSendConsent('), src.indexOf('const customers = customersResult.rows;'));
     expect(block).toContain('enforce: sendEnforce,');
     expect(block).toContain("sendConsent.storeFilter.replace('$STORE_IDX'");
-    expect(block).toContain('AND ${sendConsent.customerConsent} ${filterQuery.where}${storeFilterFinal}');
+    expect(block).toContain('AND ${sendAdminConsent ?? sendConsent.customerConsent} ${filterQuery.where}${storeFilterFinal}');
     expect(block).not.toMatch(/c\.sms_opt_in = true/);
   });
   it('캠페인 생성 시 타겟 인원: 분류 범위(getStoreScope)와 같은 조각으로 센다 — 세는 곳 = 보내는 곳', () => {
     // ★ 2026-10-01 범위·몰 동의 판정을 타겟 필터보다 먼저 구한다(구간 시작 = 범위 배열 선언) — 타겟 필터와 동의 조각이 같은 countEnforce
     const block = src.slice(src.indexOf('const countStoreParams: any[] = [];'), src.indexOf('targetCount = parseInt(countResult.rows[0].count);'));
     expect(block).toContain('getStoreScope(companyId, userId)');
-    expect(block).toContain('buildFilterQueryCompat(targetFilter, companyId, { storeConsent: countEnforce })');
+    expect(block).toContain('const countAdminConsent = countStoreParams.length === 0 ? await resolveAdminSendConsent(companyId) : null;');
+    expect(block).toContain('buildFilterQueryCompat(targetFilter, companyId, { storeConsent: countEnforce || countAdminConsent !== null })');
     expect(block).toContain('enforce: countEnforce,');
-    expect(block).toContain('${countConsent.customerConsent} ${filterQuery.where}${countConsent.storeFilter}');
+    expect(block).toContain('${countAdminConsent ?? countConsent.customerConsent} ${filterQuery.where}${countConsent.storeFilter}');
     expect(block).toContain('[companyId, ...filterQuery.params, ...countStoreParams, userId]');
   });
   it('수신자 미리보기(예약·초안): 건수와 명단이 같은 조각', () => {
     const block = src.slice(src.indexOf('const previewConsent = buildSendConsent('), src.indexOf('// 발송 완료/진행중이면 MySQL'));
-    expect((block.match(/\$\{previewConsent\.customerConsent\}/g) || []).length).toBe(2);
+    expect((block.match(/\$\{previewAdminConsent \?\? previewConsent\.customerConsent\}/g) || []).length).toBe(2);
+    expect(src).toContain('const previewAdminConsent = storeParams.length === 0 ? await resolveAdminSendConsent(companyId) : null;');
     expect(block).not.toMatch(/c\.sms_opt_in = true/);
   });
 });

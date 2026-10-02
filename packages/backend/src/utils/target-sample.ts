@@ -24,6 +24,7 @@
 import { storeMembershipClause } from './store-scope';
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
+import { resolveConsentScope, consentSql } from './mall-consent';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
 import { FIELD_DISPLAY_MAP, reverseDisplayValue } from './standard-field-map';
 
@@ -60,8 +61,11 @@ export async function fetchTargetSampleCustomer(
 ): Promise<TargetSampleResult> {
   const { companyId, targetFilter, userId, storeCode } = options;
 
+  // ★ 2026-10-02 수신동의 읽기 = CT(자동발송과 같은 기준 — 브랜드가 정해졌으면 그 소속 행 · 없으면 관리자 기준)
+  const consentScope = await resolveConsentScope(companyId, storeCode ? [storeCode] : null);
+  const consent = consentSql(consentScope, 'c');
   // 1) 타겟 필터 SQL (CT-01 컨트롤타워)
-  const filterResult = buildFilterQueryCompat(targetFilter || {}, companyId);
+  const filterResult = buildFilterQueryCompat(targetFilter || {}, companyId, { storeConsent: consentScope.mode === 'mall' });
 
   // 2) store_code 필터 (브랜드 격리) — 동적 파라미터 인덱스
   let paramIdx = filterResult.nextIndex;
@@ -84,7 +88,7 @@ export async function fetchTargetSampleCustomer(
     SELECT * FROM customers c
     WHERE c.company_id = $1
       AND c.is_active = true
-      AND c.sms_opt_in = true
+      AND ${consent.isTrue}
       ${filterResult.where}
       ${storeFilter}
       ${unsubFilter}

@@ -39,6 +39,11 @@ export interface AudienceGates {
    * 일반 캠페인이 끼어드는 게 괜찮은지는 브랜드마다 다르다. 기본 꺼짐 = 동작 변화 0.
    */
   excludeInJourney?: boolean;
+  /**
+   * ★ 2026-10-02 수신동의 조각(mall-consent · 주인 기준). 게이트 단일 문(resolveOperatorAudienceGates)이 몰 동의 회사에만 싣는다.
+   * 없으면 고객 행 열(옛 글자 그대로).
+   */
+  consentTrue?: string;
   // ⛔ 2026-08-03 4R: 리마인드 코호트 경계(registeredBefore)는 폐기했다 — 2026-08-04 코호트를
   //   발송 큐 원장에서 얻는 방식으로 되살림(continuous-operator.ts 코호트 분기가 소유).
 }
@@ -72,7 +77,7 @@ export function buildAudienceWhere(
        )`
     : '';
   return `c.company_id = $1
-       AND ${buildJourneySafetyFilter('c')}
+       AND ${buildJourneySafetyFilter('c', gates.consentTrue)}
        ${storeFilter}
        ${filterWhere}
        ${clickGuard}

@@ -8,6 +8,7 @@
 //   (callAIWithFallback은 creditCost 미지정 시 source 맵으로 자동 차감 — 번들이 이를 차단)
 // 타겟 실측 = 기존 검증 경로 재사용: recommendTarget(자연어→필터) + countFilteredCustomers(공통 안전필터 COUNT).
 import { query } from '../config/database';
+import { resolveConsentScope, consentJoinSql } from './mall-consent';
 import { callAIWithFallback, recommendTarget, countFilteredCustomers } from '../services/ai';
 import { extractJsonFromAiText } from './ai-json';
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
@@ -45,13 +46,14 @@ async function collectContext(companyId: string): Promise<AgencyContext> {
   if (!companyRow) throw new Error('회사를 찾을 수 없습니다.');
 
   // 고객 통계 (continuous-operator generateProposal 동일 산식 — 운영 실증)
+  const statsConsent = consentJoinSql(await resolveConsentScope(companyId, null), '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT
   const statsRes = await query(
     `SELECT
        COUNT(*) AS total,
-       COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in_count,
+       COUNT(*) FILTER (WHERE ${statsConsent.isTrue}) AS sms_opt_in_count,
        AVG(purchase_count) AS avg_purchase_count,
        AVG(total_purchase_amount) AS avg_total_spent
-     FROM customers
+     FROM customers${statsConsent.join}
      WHERE company_id = $1::uuid AND is_active = true`,
     [companyId],
   );
