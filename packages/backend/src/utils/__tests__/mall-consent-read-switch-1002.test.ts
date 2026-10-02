@@ -18,10 +18,11 @@ vi.mock('../../config/database', () => ({ query: vi.fn() }));
 import { query } from '../../config/database';
 import {
   consentSql, consentJoinSql, viewerConsentJoin, consentCountTrue, consentWithUnsub, LEGACY_CONSENT, resolveConsentScope, resolveViewerConsentScope, resolveOwnerConsentScope,
-  resolveAdminSendConsent, brandConsentOption, ownerConsentTrue, ownerConsentSql, journeyOwnerConsentTrue, readOwnerConsentForCustomer, viewerConsentSql,
+  resolveAdminSendConsent, brandConsentOption, ownerConsentTrue, ownerConsentSql, journeyOwnerConsent, ownerJourneyConsent, readOwnerConsentForCustomer, viewerConsentSql,
   type ConsentScope,
 } from '../mall-consent';
 import { buildJourneySafetyFilter } from '../journey-safety-filter';
+import { applyCustomerConditions } from '../journey-target-extractor';
 import { buildChannelEligibilityWhere } from '../channel-eligibility';
 import { buildCustomerFilter, buildDynamicFilterCompat, buildFilterQueryCompat } from '../customer-filter';
 import { buildAudienceWhere } from '../operator-recipients';
@@ -81,12 +82,27 @@ describe('consentSql — 조각(순수)', () => {
     const c = consentSql(adminScope, 'c');
     const codes = "'렌즈고고','일본이모'";
     const any = `EXISTS (SELECT 1 FROM customer_stores mcs WHERE mcs.company_id = '${ES}' AND mcs.customer_id = c.id AND mcs.store_code = ANY(ARRAY[${codes}]::text[]))`;
-    expect(c.isTrue).toBe(`(NOT ${row('c.id', codes, 'false')} AND (${row('c.id', codes, 'true')} OR (c.sms_opt_in = true AND NOT ${any})))`);
-    expect(c.isFalse).toBe(`(${row('c.id', codes, 'false')} OR (c.sms_opt_in = false AND NOT ${any}))`);
+    // 고객 행 값으로 읽는 고객 = 몰 코드의 소속 행이 없고 자사몰 연동으로 들어온 적(회원 연결)도 없다
+    const linked = `EXISTS (SELECT 1 FROM cdp_identity_links mil WHERE mil.company_id = '${ES}' AND mil.customer_id = c.id)`;
+    const uploadOnly = `(NOT ${any} AND NOT ${linked})`;
+    expect(c.isTrue).toBe(`(NOT ${row('c.id', codes, 'false')} AND (${row('c.id', codes, 'true')} OR (c.sms_opt_in = true AND ${uploadOnly})))`);
+    expect(c.isFalse).toBe(`(${row('c.id', codes, 'false')} OR (c.sms_opt_in = false AND ${uploadOnly}))`);
     // 「거부 없음」이 맨 앞(WHERE 에서 안티 조인으로 풀리는 자리)
     expect(c.isTrue.startsWith('(NOT EXISTS (SELECT 1 FROM customer_stores mcs')).toBe(true);
     // 별칭 없는 쿼리: 고객 행 열도 표 이름으로 한정한다
-    expect(consentSql(adminScope, '', 'customers_unified.id').isTrue).toContain('(customers_unified.sms_opt_in = true AND NOT EXISTS');
+    expect(consentSql(adminScope, '', 'customers_unified.id').isTrue).toContain('(customers_unified.sms_opt_in = true AND (NOT EXISTS');
+    expect(consentSql(adminScope, '', 'customers_unified.id').isTrue).toContain('mil.customer_id = customers_unified.id');
+  });
+  it('strict(여정): 분류코드 범위 안 어느 몰에서든 거부면 동의가 아니다 · 관리자 조각은 strict 여부와 무관하게 같다', () => {
+    const two: ConsentScope = { mode: 'mall', companyId: ES, codes: MALLS, admin: false };
+    const codes = "'렌즈고고','일본이모'";
+    const T = row('c.id', codes, 'true');
+    const F = row('c.id', codes, 'false');
+    expect(consentSql(two, 'c').isTrue).toBe(T);
+    const s = consentSql(two, 'c', undefined, { strict: true });
+    expect([s.isTrue, s.isFalse]).toEqual([`(NOT ${F} AND ${T})`, F]);
+    expect(consentSql(adminScope, 'c', undefined, { strict: true })).toEqual(consentSql(adminScope, 'c'));
+    expect(consentSql(LEGACY_CONSENT, 'c', undefined, { strict: true }).isTrue).toBe('c.sms_opt_in = true');
   });
   it('별칭 없는 쿼리는 고객 id 열을 표 이름으로 받는다 · 한정하지 않은 id 는 거절한다(소속 표 안에서 다른 열로 읽힌다)', () => {
     expect(consentSql(userScope, '', 'customers_unified.id').isTrue).toBe(row('customers_unified.id', "'렌즈고고'", 'true'));
@@ -120,9 +136,10 @@ describe('consentJoinSql — 집계용(조인 형태) 조각', () => {
     const a = consentJoinSql(adminScope, '', 'customers.id');
     expect(a.join).toContain('mcj ON mcj.customer_id = customers.id');
     // 관리자: 거부 없음 + (한 몰 이상 동의 또는 몰 소속 행이 없고 고객 행 동의) — 행 단위 조각과 같은 판정
+    const up = `(mcj.customer_id IS NULL AND NOT EXISTS (SELECT 1 FROM cdp_identity_links mil WHERE mil.company_id = '${ES}' AND mil.customer_id = customers.id))`;
     expect([a.isTrue, a.isFalse]).toEqual([
-      '(mcj.f IS NOT TRUE AND (mcj.t IS TRUE OR (customers.sms_opt_in = true AND mcj.customer_id IS NULL)))',
-      '(mcj.f IS TRUE OR (customers.sms_opt_in = false AND mcj.customer_id IS NULL))',
+      `(mcj.f IS NOT TRUE AND (mcj.t IS TRUE OR (customers.sms_opt_in = true AND ${up})))`,
+      `(mcj.f IS TRUE OR (customers.sms_opt_in = false AND ${up}))`,
     ]);
     expect(a.value).toBe(`(CASE WHEN ${a.isTrue} THEN true WHEN ${a.isFalse} THEN false ELSE NULL END)`);
     // 조인이 내놓는 열은 customer_id · t · f 뿐(별칭 없는 쿼리의 열과 겹치지 않는다) · 파라미터를 쓰지 않는다
@@ -196,7 +213,8 @@ describe('범위 판정 — 누구 기준으로 읽는가', () => {
     expect(await resolveOwnerConsentScope(ES, USER)).toEqual(LEGACY_CONSENT);
     expect(await resolveAdminSendConsent(ES)).toBeNull();
     expect(await ownerConsentTrue(ES, USER)).toBe('c.sms_opt_in = true');
-    expect(await journeyOwnerConsentTrue(ES, 'j1')).toBe('c.sms_opt_in = true');
+    expect(await journeyOwnerConsent(ES, 'j1')).toBeUndefined();
+    expect(await ownerJourneyConsent(ES, USER)).toBeUndefined();
     expect(await readOwnerConsentForCustomer(ES, USER, 'c1')).toBeNull();
     expect((await viewerConsentSql(ES, { userId: USER, userType: 'company_user' }, '', 'customers.id')).isTrue).toBe('sms_opt_in = true');
     expect(q).not.toHaveBeenCalled();
@@ -245,13 +263,15 @@ describe('범위 판정 — 누구 기준으로 읽는가', () => {
   it('여정 = 작성자 기준 · 범위 없는 발송(관리자) 조각 · 발송 직전 재판정', async () => {
     process.env[ENV] = ES;
     db({ userCodes: ['렌즈고고'], userType: 'user', journeyOwner: USER, consentOk: true });
-    expect(await journeyOwnerConsentTrue(ES, 'j1')).toBe(consentSql(userScope, 'c').isTrue);
+    const strict = consentSql(userScope, 'c', undefined, { strict: true });
+    expect(await journeyOwnerConsent(ES, 'j1')).toEqual({ isTrue: strict.isTrue, isFalse: strict.isFalse, value: strict.value });
+    expect(await ownerJourneyConsent(ES, USER)).toEqual({ isTrue: strict.isTrue, isFalse: strict.isFalse, value: strict.value });
     expect(await resolveAdminSendConsent(ES)).toEqual({ isTrue: consentSql(adminScope, 'c').isTrue, mallCodes: MALLS });
     expect(await readOwnerConsentForCustomer(ES, USER, 'c1')).toBe(true);
     db({ userCodes: ['렌즈고고'], userType: 'user', journeyOwner: USER, consentOk: false });
     expect(await readOwnerConsentForCustomer(ES, USER, 'c1')).toBe(false);
     const sql = String(q.mock.calls.find((c) => String(c[0]).includes(' AS ok FROM customers c'))![0]);
-    expect(sql).toContain(consentSql(userScope, 'c').isTrue);
+    expect(sql).toContain(`SELECT ${consentSql(userScope, 'c', undefined, { strict: true }).isTrue} AS ok`);   // 추출과 같은 strict 조각
     expect(sql).toContain('c.id = $1::uuid AND c.company_id = $2::uuid');
   });
 });
@@ -265,6 +285,19 @@ describe('CT 들이 조각을 받는다 — 안 주면 옛 글자 그대로', ()
     expect(buildJourneySafetyFilter('c', 'c.sms_opt_in = true')).toBe(OLD_SAFETY);
     const T = consentSql(userScope, 'c').isTrue;
     expect(buildJourneySafetyFilter('c', T)).toBe(OLD_SAFETY.replace('c.sms_opt_in = true', T));
+  });
+  it('여정 고객 조건의 「수신동의」 필드: 조각이 없으면 고객 행 열(종전 글자) · 있으면 안전필터와 같은 기준의 값으로 비교', () => {
+    const conds = [{ field: 'sms_opt_in', op: '==', value: true }, { field: 'grade', op: '==', value: 'VIP' }];
+    const p0: any[] = [ES];
+    expect(applyCustomerConditions(conds, 'AND', p0)).toBe('(c.sms_opt_in = $2 AND c.grade = $3)');
+    expect(p0).toEqual([ES, true, 'VIP']);
+    const j = consentSql(userScope, 'c', undefined, { strict: true });
+    const p1: any[] = [ES];
+    expect(applyCustomerConditions(conds, 'AND', p1, j)).toBe(`(${j.value} = $2 AND c.grade = $3)`);
+    expect(p1).toEqual([ES, true, 'VIP']);   // 파라미터는 그대로 — 글자만 바뀐다
+    expect(applyCustomerConditions([{ field: 'sms_opt_in', op: 'is_null', value: null }], 'AND', [ES], j)).toBe(`(${j.value} IS NULL)`);
+    // 다른 필드는 조각과 무관
+    expect(applyCustomerConditions([{ field: 'grade', op: '==', value: 'VIP' }], 'AND', [ES], j)).toBe('(c.grade = $2)');
   });
   it('채널 자격(문자 · 카카오) · 이메일·인앱은 수신동의 조각을 쓰지 않는다', () => {
     const OLD = "c.is_active = true AND c.sms_opt_in = true AND (c.is_opt_out = false OR c.is_opt_out IS NULL) AND (c.is_invalid = false OR c.is_invalid IS NULL)";
@@ -392,7 +425,7 @@ describe('실제 함수가 내보내는 SQL — 옛 판정은 옛 글자 · 몰 
     expect(q.mock.calls[1][1]).toEqual([ES]);   // 수신동의 필드가 파라미터를 쓰지 않는다
   });
 
-  it('세그먼트 미리보기(previewMatching · 회사 전체 기준): 켜면 관리자 기준 조각', async () => {
+  it('세그먼트 미리보기(previewMatching): 요청자를 안 넘기면 관리자 기준 · 담당자를 넘기면 그 사람의 분류코드 기준', async () => {
     db();
     await previewMatching(ES, {} as any).catch(() => undefined);
     expect(sqls().every((x) => x.includes(OLD))).toBe(true);
@@ -406,8 +439,13 @@ describe('실제 함수가 내보내는 SQL — 옛 판정은 옛 글자 · 몰 
       expect(x).toContain(`AND ${consentSql(adminScope, 'c').isTrue}`);
       // 홀로 선 옛 조건(`AND c.sms_opt_in = true` 뒤에 줄바꿈)은 없다 — 고객 행 값은 「몰 소속 행이 없는 고객」 갈래 안에서만 읽는다
       expect(x).not.toMatch(/AND c\.sms_opt_in = true\s*\n/);
-      expect(x).toContain('(c.sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM customer_stores mcs');
+      expect(x).toContain('(c.sms_opt_in = true AND (NOT EXISTS (SELECT 1 FROM customer_stores mcs');
     }
+    // 담당자(DB 유형 user · 배정 코드 렌즈고고)가 요청자면 그 사람의 발송과 같은 기준(관리자 기준이면 다른 몰의 거부로 0명이 된다)
+    q.mockReset(); db({ userCodes: ['렌즈고고'], userType: 'user' });
+    await previewMatching(ES, {} as any, 5, USER).catch(() => undefined);
+    for (const x of sqls()) expect(x).toContain(`AND ${consentSql(userScope, 'c').isTrue}`);
+    expect(sqls().length).toBeGreaterThan(0);
   });
 });
 
@@ -468,7 +506,9 @@ describe('읽는 자리 전수 — 직접 읽기 잔존은 허용 목록뿐(소�
   });
   it('여정 추출기: 안전필터는 전부 조각을 받는다(14곳) · 조각 없는 호출이 없다', () => {
     const s = readFileSync(join(SRC, 'utils/journey-target-extractor.ts'), 'utf8');
-    expect(s.match(/buildJourneySafetyFilter\('c', consentTrue\)\}\$\{scopeSql\}/g)).toHaveLength(14);
+    expect(s.match(/buildJourneySafetyFilter\('c', consent\?\.isTrue\)\}\$\{scopeSql\}/g)).toHaveLength(14);
+    // 고객 조건도 같은 조각을 받는다(조건의 수신동의 필드) — 14곳
+    expect(s.match(/applyCustomerConditions\((filters|f)\.customer_conditions \|\| \[\], (filters|f)\.logic \|\| 'AND', params, consent\);/g)).toHaveLength(14);
     expect(s).not.toMatch(/buildJourneySafetyFilter\('c'\)/);
   });
   it('안전필터를 조각 없이 부르는 자리가 없다(전 파일)', () => {
@@ -479,9 +519,9 @@ describe('읽는 자리 전수 — 직접 읽기 잔존은 허용 목록뿐(소�
   it('범위 조각을 인자로 바로 넘기는 자리는 동의 조각을 함께 넘긴다(여정 호출부)', () => {
     for (const f of ['utils/journey-activation.ts', 'utils/journey-anchor-scheduler.ts', 'utils/journey-simulator.ts', 'utils/journey-trigger-watcher.ts', 'routes/ai.ts']) {
       const s = readFileSync(join(SRC, f), 'utf8');
-      const inline = s.match(/(?<!= )await getJourneyOwnerScopeSql\([^()]+\)(, await journeyOwnerConsentTrue\([^()]+\))?/g) || [];
+      const inline = s.match(/(?<!= )await getJourneyOwnerScopeSql\([^()]+\)(, await journeyOwnerConsent\([^()]+\))?/g) || [];
       expect(inline.length, f).toBeGreaterThan(0);
-      for (const m of inline) expect(m, f).toMatch(/, await journeyOwnerConsentTrue\(/);
+      for (const m of inline) expect(m, f).toMatch(/, await journeyOwnerConsent\(/);
     }
   });
   it('자동마케팅 게이트 단일 문은 호출부마다 주인을 받는다(3번째 인자)', () => {

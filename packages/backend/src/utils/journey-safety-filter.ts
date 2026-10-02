@@ -16,7 +16,7 @@
  */
 export function buildJourneySafetyFilter(alias: string, consentTrue?: string): string {
   // ★ 2026-10-02 consentTrue = 수신동의 조각(mall-consent consentSql().isTrue). 안 주면 고객 행 열(옛 글자 그대로).
-  //   몰 동의 회사는 호출부가 주인 기준 조각(ownerConsentTrue · journeyOwnerConsentTrue)을 넘긴다.
+  //   몰 동의 회사는 호출부가 주인 기준 조각(여정 = journeyOwnerConsent · 그 밖 = ownerConsentTrue)을 넘긴다.
   const a = alias;
   return (
     `${a}.is_active = true ` +

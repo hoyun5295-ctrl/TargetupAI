@@ -341,7 +341,7 @@
 | auto_campaign_override | integer | 자동발송 회사별 오버라이드 (NULL=플랜따름, 0=비활성, 1+=허용건수) |
 | ai_usage_threshold_config | jsonb | ★ D217+ (2026-05-25) — AI 사용량 한도 알림 설정 `{ enabled, threshold_percent: 50\|80\|95, channels: ['email','sms','inapp'], updated_at }` (기본 `{}`) |
 | max_users | integer | 최대 사용자 수 (기본 5) |
-| session_timeout_minutes | integer | 세션 타임아웃 분. **★2026-10-02 코드 기본값 480(8시간)** = 값이 NULL·0일 때 `TIMEOUTS.companySessionDefaultMinutes`(로그인 · 활동 갱신 · 연장 세 곳이 같은 상수). 컬럼 기본값과 기존 행의 30 → 480 전환은 배포 뒤 SQL(전송자격인증 원장 §4-M) · 실행 전까지 저장값 30인 회사는 30분 그대로 |
+| session_timeout_minutes | integer | 세션 타임아웃 분. **★2026-10-02 코드 기본값 480(8시간)** = 값이 NULL·0일 때 `TIMEOUTS.companySessionDefaultMinutes`(로그인 · 활동 갱신 · 연장 세 곳이 같은 상수). **★2026-10-03 운영 전환 완료(Harold 실행 출력)** = 전환 전 분포 `col_default 30 · 값 30 = 145행`(다른 값 0) → `ALTER … SET DEFAULT 480` + `UPDATE 145`. 지금 컬럼 기본값 480 · 전 회사 480. 회사별로 다르게 두려면 슈퍼관리자 화면(5~480분) |
 | ai_credits_base_remaining | integer | ★ D227+ 종량제: 이번 달 남은 기본 크레딧 (매월 리셋, DEFAULT 0 NOT NULL) |
 | ai_credits_purchased | integer | ★ D227+ 종량제: 구매분 크레딧 잔액 (이월, DEFAULT 0 NOT NULL) |
 | ai_credits_reset_at | timestamptz | ★ D227+ 종량제: 마지막 월 리셋 시각 (KST 월 기준) |
@@ -527,6 +527,7 @@
 | **consent_at** | timestamptz | YES | ★0922 DDL — 그 값을 받은 시각 |
 - UNIQUE: `customer_stores_customer_id_store_code_key`(customer_id, store_code)
 - INDEX: `idx_cs_company_store`(company_id, store_code) · `idx_cs_customer`(customer_id)
+- **★2026-10-03 읽는 곳 = `utils/mall-consent.ts consentSql · consentJoinSql`**(읽기 강제 ENV 를 켠 회사만 · 설계서 §13 · D97). 직접 `sms_opt_in = true` 를 적는 자리는 계약 테스트의 허용 목록뿐.
 - 설계서 = docs/2026-09-22-mall-consent-isolation-design.md · 결정 = DECISIONS D93
 
 ### customers (고객)

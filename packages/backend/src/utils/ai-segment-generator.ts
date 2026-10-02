@@ -27,7 +27,7 @@
 import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { buildCustomerFilter } from './customer-filter';
-import { resolveConsentScope, consentSql } from './mall-consent';
+import { ownerConsentSql } from './mall-consent';
 import { getFieldByKey, StandardFieldMapping } from './standard-field-map';
 import { query } from '../config/database';
 // ★ 2026-09-27 한줄로 V2 R161 — 프롬프트 날짜 = KST(옛: 오늘 날짜가 없고 예시만 UTC toISOString)
@@ -42,6 +42,8 @@ export interface GenerateSegmentInput {
   naturalLanguage: string;
   /** 회사별 custom_fields 키 목록 (admin enabled_fields 활용). */
   customFieldKeys?: string[];
+  /** ★2026-10-02 요청자 — 매칭 수를 그 사람의 발송과 같은 수신동의 기준으로 센다(몰 동의 회사 · 없으면 관리자 기준). */
+  ownerUserId?: string | null;
 }
 
 export interface GenerateSegmentResult {
@@ -287,7 +289,7 @@ export async function generateSegmentFromNaturalLanguage(
   const { filter, explanation } = await convertNaturalLanguageToFilter(input);
 
   // 매칭 수 + 샘플 5건 (CT-01 buildCustomerFilter + COUNT + LIMIT, 문자 발송 가능 기준)
-  const { matchCount, samples, sampleFields } = await previewMatching(input.companyId, filter);
+  const { matchCount, samples, sampleFields } = await previewMatching(input.companyId, filter, undefined, input.ownerUserId);
 
   // 0건 결과 = 자동 완화 X (D171 영구 룰)
   if (matchCount === 0) {
@@ -327,9 +329,12 @@ export async function previewMatching(
   companyId: string,
   filter: Record<string, { operator: string; value: any }>,
   sampleSize = 5,
+  // ★ 2026-10-02 요청자 — 몰 동의 회사는 그 사람의 발송과 같은 기준으로 센다(담당자 = 자기 분류코드 소속 행 · 그 밖 = 관리자 기준).
+  //   안 넘기면 관리자 기준이라 담당자 화면이 실제 발송보다 적게 세고, 자연어 생성이 0건으로 막혔다(Codex 1002 R1).
+  ownerUserId?: string | null,
 ): Promise<{ matchCount: number; samples: GenerateSegmentResult['samples']; sampleFields: GenerateSegmentResult['sampleFields'] }> {
-  // ★ 2026-10-02 수신동의 읽기 = CT. 이 미리보기는 회사 전체 기준(범위 없음)이다 → 몰 동의 회사는 관리자 기준 조각.
-  const consent = consentSql(await resolveConsentScope(companyId, null), 'c');
+  // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent · 몰 동의 회사가 아니면 옛 글자)
+  const consent = await ownerConsentSql(companyId, ownerUserId, 'c');
   // CT-01 호환 SQL 빌드 ($1 = companyId, $2~ = filter values)
   const { sql: filterSql, params } = buildCustomerFilter(filter, {
     tableAlias: 'c',

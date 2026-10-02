@@ -16,7 +16,7 @@
 import { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
 import { getJourneyOwnerScopeSql } from './store-scope';
-import { journeyOwnerConsentTrue } from './mall-consent';
+import { journeyOwnerConsent } from './mall-consent';
 import {
   selectJourneyTargetCustomerIds,
   gradeBreakdownForIds,
@@ -80,7 +80,7 @@ export async function simulateJourney(
   // 발송과 동일 함수로 매칭 ID 1회 추출 → 등급 분포 + 실데이터 평균(객단가·전환·클릭).
   const ids = await selectJourneyTargetCustomerIds(
     companyId, journey.trigger_event, journey.trigger_filters || {}, JOURNEY_COUNT_CAP, journeyId,
-    undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsentTrue(companyId, journeyId),   // ★ 2026-09-27 S5-04 — 발송과 같은 범위
+    undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),   // ★ 2026-09-27 S5-04 — 발송과 같은 범위
   );
   const capped = ids.length >= JOURNEY_COUNT_CAP;
   const { total: matched, segments } = await gradeBreakdownForIds(companyId, ids);

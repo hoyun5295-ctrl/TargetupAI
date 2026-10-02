@@ -150,6 +150,7 @@ router.post(
         companyId,
         naturalLanguage,
         customFieldKeys: Array.isArray(customFieldKeys) ? customFieldKeys : undefined,
+        ownerUserId: req.user?.userId,
       });
       return res.json({ success: true, ...result });
     } catch (err: any) {
@@ -193,7 +194,7 @@ router.post('/:id/preview', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await previewMatching(companyId, seg.filter_jsonb);
+    const result = await previewMatching(companyId, seg.filter_jsonb, undefined, req.user?.userId);
     return res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('[saved-segments/preview] 실패:', err);

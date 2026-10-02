@@ -16,7 +16,7 @@ import { checkCredit, deductCreditSafe, InsufficientCreditError } from './ai-cre
 import { getCreditCost } from './ai-credit-calc';
 import { selectJourneyTargetCustomerIds, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 import { getJourneyOwnerScopeSql } from './store-scope';
-import { journeyOwnerConsentTrue } from './mall-consent';
+import { journeyOwnerConsent } from './mall-consent';
 import { filterByIndividualCallback } from './callback-filter';
 import { activateJourney } from './journey-builder';
 import { dispatchOneShotJourney } from './journey-anchor-scheduler';
@@ -59,7 +59,7 @@ export async function activateJourneyGuarded(
 
   if (row.callback_mode === 'store' && row.trigger_event && !opts.confirmCallbackExclusion) {
     try {
-      const cbIds = await selectJourneyTargetCustomerIds(companyId, row.trigger_event, row.trigger_filters || {}, JOURNEY_COUNT_CAP, undefined, undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsentTrue(companyId, journeyId));
+      const cbIds = await selectJourneyTargetCustomerIds(companyId, row.trigger_event, row.trigger_filters || {}, JOURNEY_COUNT_CAP, undefined, undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId));
       if (cbIds.length > 0) {
         const cbCust = await query(
           `SELECT store_phone, callback, custom_fields FROM customers WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,

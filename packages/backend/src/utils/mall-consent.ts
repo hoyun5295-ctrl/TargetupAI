@@ -120,10 +120,19 @@ export function buildSendConsent(o: { enforce: boolean; alias: string; storeFilt
 //   - 몰 동의 회사 + 관리자(범위 없음) = 회사의 몰 코드 중 **한 몰 이상에서 동의했고 어느 몰에서도 거부하지 않은** 고객.
 //     관리자 화면·발송은 몰을 특정하지 않으므로 덜 보내는 쪽으로 본다(§5 과도기 선택과 같은 방향). 관리자가 브랜드를 고르면
 //     브랜드 조건이 그 브랜드 소속 행의 동의를 같은 행에서 본다(store-scope storeMembershipCond requireConsent).
-//     **몰 소속 행이 하나도 없는 고객(업로드 · 싱크로 들어온 고객)은 종전대로 고객 행 값**이다 — 그 고객의 동의는 몰이 준 것이 아니라
-//     회사가 올린 값이고, 몰 동의로 읽으면 켜는 순간 관리자 발송에서 전부 빠진다.
+//     **몰 소속 행이 하나도 없고 자사몰 연동으로 들어온 적도 없는 고객(업로드 · 싱크로만 들어온 고객)은 종전대로 고객 행 값**이다 —
+//     그 고객의 동의는 몰이 준 것이 아니라 회사가 올린 값이고, 몰 동의로 읽으면 켜는 순간 관리자 발송에서 전부 빠진다.
+//     「자사몰 연동으로 들어온 적」 = 회원 연결(cdp_identity_links) 행이 있다. 몰 코드 목록만으로 가르면 연동의 분류코드를 바꿨을 때
+//     옛 코드의 소속 행이 "몰 소속 없음"으로 읽혀 몰에서 모름인 고객이 고객 행 값으로 통과한다(Codex 1002 R1 high).
+//   - 여정(자동 실행 · 몰을 특정하지 않는다)은 작성자 범위가 분류코드 여럿이어도 **그 범위 안 어느 몰에서든 거부한 고객을 보내지 않는다**(strict).
+//     여정 조건의 브랜드는 고객 행 값으로 비교하므로 "A 를 골랐는데 B 동의로 통과"를 조건 쪽에서 막을 수 없다(Codex 1002 R1 high).
 // 값은 전부 리터럴(pg escapeLiteral)이라 파라미터 번호를 건드리지 않는다 — 조각을 어느 쿼리에나 그대로 넣을 수 있다.
 // ============================================================
+
+/** 이 고객이 자사몰 연동으로 들어온 적이 있는가(회원 연결 행 · 색인 = customer_id). 별칭 mil 로 한정한다. */
+function linkedSql(companyLiteral: string, customerIdRef: string): string {
+  return `EXISTS (SELECT 1 FROM cdp_identity_links mil WHERE mil.company_id = ${companyLiteral} AND mil.customer_id = ${customerIdRef})`;
+}
 
 /** 수신동의를 어느 기준으로 읽는가 */
 export type ConsentScope =
@@ -208,7 +217,7 @@ export interface ConsentSql {
  * legacy = 옛 글자 그대로(`c.sms_opt_in = true` 또는 `sms_opt_in = true` · `= false` · 열 이름).
  * ⛔ 소속 표 열은 별칭(mcs)으로 한정한다 — 동의 컬럼이 없는 환경에서 바깥 고객 행의 같은 이름 열로 새지 않고 오류(42703)로 드러난다.
  */
-export function consentSql(scope: ConsentScope, alias: string, idRef?: string): ConsentSql {
+export function consentSql(scope: ConsentScope, alias: string, idRef?: string, opts: { strict?: boolean } = {}): ConsentSql {
   const col = alias ? `${alias}.sms_opt_in` : 'sms_opt_in';
   if (scope.mode !== 'mall') return { mode: 'legacy', isTrue: `${col} = true`, isFalse: `${col} = false`, value: col };
   const customerId = idRef || `${alias}.id`;
@@ -225,8 +234,16 @@ export function consentSql(scope: ConsentScope, alias: string, idRef?: string): 
     `EXISTS (SELECT 1 FROM customer_stores ${MALL_STORE_ALIAS} WHERE ${MALL_STORE_ALIAS}.company_id = ${company}` +
     ` AND ${MALL_STORE_ALIAS}.customer_id = ${customerId} AND ${MALL_STORE_ALIAS}.store_code = ANY(${codes}))`;
   const rowCol = `${customerId.split('.')[0]}.sms_opt_in`;   // 고객 행 열(표·별칭으로 한정)
-  const isTrue = scope.admin ? `(NOT ${row('false')} AND (${row('true')} OR (${rowCol} = true AND NOT ${any})))` : row('true');
-  const isFalse = scope.admin ? `(${row('false')} OR (${rowCol} = false AND NOT ${any}))` : `(NOT ${row('true')} AND ${row('false')})`;
+  // 고객 행 값으로 읽어도 되는 고객 = 몰 코드의 소속 행이 없고 **자사몰 연동으로 들어온 적도 없다**(회원 연결 없음)
+  const uploadOnly = `(NOT ${any} AND NOT ${linkedSql(company, customerId)})`;
+  if (scope.admin) {
+    const isTrue = `(NOT ${row('false')} AND (${row('true')} OR (${rowCol} = true AND ${uploadOnly})))`;
+    const isFalse = `(${row('false')} OR (${rowCol} = false AND ${uploadOnly}))`;
+    return { mode: 'mall', isTrue, isFalse, value: `(CASE WHEN ${isTrue} THEN true WHEN ${isFalse} THEN false ELSE NULL END)` };
+  }
+  // strict(여정) = 내 코드 어느 몰에서든 거부가 있으면 동의가 아니다
+  const isTrue = opts.strict ? `(NOT ${row('false')} AND ${row('true')})` : row('true');
+  const isFalse = opts.strict ? row('false') : `(NOT ${row('true')} AND ${row('false')})`;
   return { mode: 'mall', isTrue, isFalse, value: `(CASE WHEN ${isTrue} THEN true WHEN ${isFalse} THEN false ELSE NULL END)` };
 }
 
@@ -254,8 +271,9 @@ export function consentJoinSql(scope: ConsentScope, alias: string, idRef?: strin
     ` GROUP BY ${MALL_STORE_ALIAS}.customer_id) mcj ON mcj.customer_id = ${customerId}`;
   // mcj.customer_id IS NULL = 그 코드들의 소속 행이 하나도 없다(모름 행은 조인에 남는다 — bool_or 는 NULL 을 건너뛴다)
   const rowCol = `${customerId.split('.')[0]}.sms_opt_in`;
-  const isTrue = scope.admin ? `(mcj.f IS NOT TRUE AND (mcj.t IS TRUE OR (${rowCol} = true AND mcj.customer_id IS NULL)))` : 'mcj.t IS TRUE';
-  const isFalse = scope.admin ? `(mcj.f IS TRUE OR (${rowCol} = false AND mcj.customer_id IS NULL))` : '(mcj.t IS NOT TRUE AND mcj.f IS TRUE)';
+  const uploadOnly = `(mcj.customer_id IS NULL AND NOT ${linkedSql(company, customerId)})`;   // 회원 연결 조회는 몰 소속 행이 없는 고객에게만 평가된다
+  const isTrue = scope.admin ? `(mcj.f IS NOT TRUE AND (mcj.t IS TRUE OR (${rowCol} = true AND ${uploadOnly})))` : 'mcj.t IS TRUE';
+  const isFalse = scope.admin ? `(mcj.f IS TRUE OR (${rowCol} = false AND ${uploadOnly}))` : '(mcj.t IS NOT TRUE AND mcj.f IS TRUE)';
   return { mode: 'mall', join, isTrue, isFalse, value: `(CASE WHEN ${isTrue} THEN true WHEN ${isFalse} THEN false ELSE NULL END)` };
 }
 
@@ -319,15 +337,29 @@ export async function ownerConsentSql(companyId: string, ownerUserId?: string | 
   return consentSql(await resolveOwnerConsentScope(companyId, ownerUserId), alias, idRef);
 }
 
+/**
+ * 여정이 쓰는 조각(추출 안전필터 · 재진입 · 고객 조건의 수신동의 필드). 몰 동의 회사가 아니면 undefined — 호출부·CT 는 옛 글자를 쓴다.
+ * strict: 작성자 범위 안 어느 몰에서든 거부한 고객은 동의가 아니다(여정은 몰을 특정하지 않는 자동 발송이다).
+ */
+export interface JourneyConsent { isTrue: string; isFalse: string; value: string }
+
+/** 주인(저장 전 미리보기의 요청자 · 여정 작성자) 기준 여정 조각 */
+export async function ownerJourneyConsent(companyId: string, ownerUserId?: string | null, alias = 'c'): Promise<JourneyConsent | undefined> {
+  const scope = await resolveOwnerConsentScope(companyId, ownerUserId);
+  if (scope.mode !== 'mall') return undefined;
+  const c = consentSql(scope, alias, undefined, { strict: true });
+  return { isTrue: c.isTrue, isFalse: c.isFalse, value: c.value };
+}
+
 /** 여정 작성자 기준(store-scope getJourneyOwnerScopeSql 과 같은 주인). 몰 동의 회사가 아니면 여정을 읽지 않는다. */
-export async function journeyOwnerConsentTrue(companyId: string, journeyId?: string | null, alias = 'c'): Promise<string> {
-  if (enforceList().length === 0 || !companyId || !(await isMallConsentEnforced(companyId))) return consentSql(LEGACY_CONSENT, alias).isTrue;
+export async function journeyOwnerConsent(companyId: string, journeyId?: string | null, alias = 'c'): Promise<JourneyConsent | undefined> {
+  if (enforceList().length === 0 || !companyId || !(await isMallConsentEnforced(companyId))) return undefined;
   let owner: string | null = null;
   if (journeyId) {
     const j = await query('SELECT created_by FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid', [journeyId, companyId]);
     owner = j.rows[0]?.created_by || null;
   }
-  return ownerConsentTrue(companyId, owner, alias);
+  return ownerJourneyConsent(companyId, owner, alias);
 }
 
 /**
@@ -338,7 +370,7 @@ export async function readOwnerConsentForCustomer(companyId: string, ownerUserId
   const scope = await resolveOwnerConsentScope(companyId, ownerUserId);
   if (scope.mode !== 'mall') return null;
   const r = await query(
-    `SELECT ${consentSql(scope, 'c').isTrue} AS ok FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid`,
+    `SELECT ${consentSql(scope, 'c', undefined, { strict: true }).isTrue} AS ok FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid`,   // 추출과 같은 strict 조각
     [customerId, companyId],
   );
   return r.rows[0]?.ok === true;

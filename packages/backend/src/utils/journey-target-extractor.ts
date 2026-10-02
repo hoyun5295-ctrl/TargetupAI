@@ -19,6 +19,7 @@
 import { query } from '../config/database';
 import { KST_TODAY_DATE_SQL } from './stats-aggregation';
 import { buildJourneySafetyFilter, buildReentryAntiJoin } from './journey-safety-filter';
+import type { JourneyConsent } from './mall-consent';
 import { resolvePointsExpiringConfig, clampInt } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
 // ★ 2026-08-01 여정 재설계 §3-0-2 — "우리가 처음 본 사람" ≠ "신규 고객".
@@ -43,7 +44,7 @@ export async function selectJourneyTargetCustomerIds(
   // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자(또는 미리보기 요청자)의 분류코드 범위 조각(store-scope · 관리자 = 빈 조각).
   //   추출 SQL **안**(LIMIT 앞)에 건다 — 뒤에서 거르면 범위 밖 고객이 진입하지 않은 채 매 회차 상한을 차지해 범위 안 고객이 굶는다.
   scopeSql = '',
-  consentTrue?: string,   // ★ 2026-10-02 수신동의 조각(mall-consent · 없으면 고객 행)
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<string[]> {
   const filters = triggerFilters || {};
   // 이관 유예 일수 — 대상 트리거 목록은 CT가 소유한다(isBulkStateTrigger). 대상이 아니면 0 = 조건 없음.
@@ -72,7 +73,7 @@ export async function selectJourneyTargetCustomerIds(
       //   ⚠ 근거가 없는 회사를 생성·활성화 시점에 막는 것은 다음 조각이다. 여기서 빈 배열을 돌려주면
       //     기존 여정이 사유 없이 죽는다("조용한 0건"은 우리가 고치려는 병 자체다) → 추출 동작은 보존하고 관측만.
       const existingPred = buildExistingCustomerPredicate('c', params);
-      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(String(limit));
       // ★ 2026-08-01 Codex 2R 수용 — 같은 회차 안 중복 진입 차단.
       //   판정을 사람 단위로 좁혀도 "이전 회차 기록"만 막힌다. 같은 전화번호의 무매장·매장 행이
@@ -87,7 +88,7 @@ export async function selectJourneyTargetCustomerIds(
              FROM customers c
             WHERE c.company_id = $1::uuid
               AND COALESCE(c.phone, '') <> ''
-              AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+              AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
               AND ${entryClause}
               AND NOT ${existingPred}
               ${cond ? ` AND ${cond}` : ''}
@@ -103,19 +104,19 @@ export async function selectJourneyTargetCustomerIds(
     // 2. 재구매 / 6. 예약 (cdp_events 직전 N분)
     // 라이브 발송은 trigger-watcher가 selectCdpEvent를 커서 모드로 직접 호출. 여기(미리보기)는 추정 모드.
     case 'cdp.purchase':
-      return selectCdpEvent(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql, consentTrue);
+      return selectCdpEvent(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql, consent);
     // ★ §11-5 #2·#5 — 같은 구매 스트림의 분기(자격 필터는 라이브 경로가 적용). 미리보기는 구매 근사치.
     case 'purchase.first':
     case 'customer.dormant_return':
-      return selectCdpEvent(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql, consentTrue);
+      return selectCdpEvent(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql, consent);
     // ★ 2026-09-30 V2 3차 — 상품 재구매. 미리보기 · 인원 = 최근 7일 고른 상품 구매자(저장된 문 기준). 라이브는 커서 경로 + 상품 자격 필터.
     case 'purchase.product':
-      return selectRecentProductBuyers(companyId, filters, limit, scopeSql, consentTrue);
+      return selectRecentProductBuyers(companyId, filters, limit, scopeSql, consent);
     case 'cdp.reservation_created':
-      return selectCdpEvent(companyId, 'reservation_created', filters, limit, undefined, undefined, scopeSql, consentTrue);
+      return selectCdpEvent(companyId, 'reservation_created', filters, limit, undefined, undefined, scopeSql, consent);
     // ★ 2026-06-22: 배송 시작 = 자사몰 custom 이벤트(cdp_events.event_name='custom_order_shipped'). 라이브는 watcher가 커서 경로 호출, 여기는 미리보기·카운트 추정.
     case 'custom_order_shipped':
-      return selectCdpEvent(companyId, 'custom_order_shipped', filters, limit, undefined, undefined, scopeSql, consentTrue);
+      return selectCdpEvent(companyId, 'custom_order_shipped', filters, limit, undefined, undefined, scopeSql, consent);
 
     // 3. 휴면 (customers.recent_purchase_date < NOW - N일)
     case 'customer.dormant': {
@@ -124,12 +125,12 @@ export async function selectJourneyTargetCustomerIds(
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       // 이관 유예 — 3년 전 최근구매일이 오늘 적재되면 그 사람은 즉시 휴면 대상이 된다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
-      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(String(limit));
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+           AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            AND c.recent_purchase_date IS NOT NULL
            AND c.recent_purchase_date < (${KST_TODAY_DATE_SQL} - ($2 || ' days')::interval)
            AND c.recent_purchase_date > (${KST_TODAY_DATE_SQL} - ($3 || ' days')::interval)
@@ -148,7 +149,7 @@ export async function selectJourneyTargetCustomerIds(
       const h = Number(filters.abandon_hours || 24);
       const params: any[] = [companyId, String(h)];
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
-      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(String(limit));
       const r = await query(
         `WITH abandoned AS (
@@ -181,7 +182,7 @@ export async function selectJourneyTargetCustomerIds(
                AND p2.purchase_date IS NOT NULL
                AND p2.purchase_date > (a.cart_add_at AT TIME ZONE 'Asia/Seoul')
            )
-           AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+           AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
          ${antiJoin}
          ${cond ? ` AND ${cond}` : ''}
          LIMIT $${params.length}::int`,
@@ -196,7 +197,7 @@ export async function selectJourneyTargetCustomerIds(
       const h = d * 24;
       const params: any[] = [companyId, String(h)];
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
-      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(String(limit));
       const r = await query(
         `WITH viewed AS (
@@ -223,7 +224,7 @@ export async function selectJourneyTargetCustomerIds(
                AND p2.purchase_date IS NOT NULL
                AND p2.purchase_date > (v.viewed_at AT TIME ZONE 'Asia/Seoul')
            )
-           AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+           AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
          ${antiJoin}
          ${cond ? ` AND ${cond}` : ''}
          LIMIT $${params.length}::int`,
@@ -239,7 +240,7 @@ export async function selectJourneyTargetCustomerIds(
       const params: any[] = [companyId, String(factor)];
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const grace = buildIntakeGraceClause('c', params, graceDays);
-      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(String(limit));
       const r = await query(
         `WITH hist AS (
@@ -263,7 +264,7 @@ export async function selectJourneyTargetCustomerIds(
          FROM hist h
          INNER JOIN customers c ON c.id = h.customer_id AND c.company_id = $1::uuid
          WHERE (EXTRACT(EPOCH FROM NOW()) - h.last_e) > ((h.last_e - h.first_e) / GREATEST(h.cnt - 1, 1)) * $2::float
-           AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+           AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
          ${antiJoin}
          ${grace ? ` AND ${grace}` : ''}
          ${cond ? ` AND ${cond}` : ''}
@@ -287,7 +288,7 @@ export async function selectJourneyTargetCustomerIds(
       if (!journeyId) return [];
       const params: any[] = [companyId, journeyId];
       const antiJoin = reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
-      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(String(limit));
       try {
         const r = await query(
@@ -314,7 +315,7 @@ export async function selectJourneyTargetCustomerIds(
                 AND rn.rank_order IS NOT NULL
                 AND ro.rank_order IS NOT NULL
                 AND rn.rank_order > ro.rank_order
-                AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+                AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
                 ${antiJoin}
                 ${cond ? ` AND ${cond}` : ''}
            ) s
@@ -340,12 +341,12 @@ export async function selectJourneyTargetCustomerIds(
       const birthdayLeapMd = `CASE WHEN TO_CHAR(${birthdayTarget}, 'MM-DD') = '02-28' AND TO_CHAR(${birthdayTarget} + INTERVAL '1 day', 'MM-DD') = '03-01' THEN '02-29' END`;
       const params: any[] = [companyId, String(days)];
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
-      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(String(limit));
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+           AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            AND (
              (c.birth_month_day IS NOT NULL AND c.birth_month_day IN (${birthdayTargetMd}, ${birthdayLeapMd}))
              OR
@@ -376,12 +377,12 @@ export async function selectJourneyTargetCustomerIds(
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       // 이관 유예 — inactivity 모드는 최근구매일 기반이라 이관 배치가 통째로 걸린다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
-      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(String(limit));
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+           AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            AND c.points IS NOT NULL AND c.points >= $2::int
            AND ${edgeClause}
            ${antiJoin}
@@ -409,12 +410,12 @@ export async function selectJourneyTargetCustomerIds(
       }
       // 이관 유예 — 상시 세그먼트는 조건 맞는 전원이 들어오므로 이관 배치가 그대로 폭발한다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
-      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(String(limit));
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+           AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            ${dedupClause}
            ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
@@ -441,7 +442,7 @@ export async function selectAnchorAudienceIds(
   triggerFilters: Record<string, any>,
   limit: number,
   scopeSql = '',   // ★ 2026-09-27 S5-04 — 여정 작성자 분류코드 범위
-  consentTrue?: string,   // ★ 2026-10-02 수신동의 조각(mall-consent · 없으면 고객 행)
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<string[]> {
   const f = triggerFilters || {};
   const params: any[] = [companyId];
@@ -451,12 +452,12 @@ export async function selectAnchorAudienceIds(
     params.push(String(Math.floor(pmin)));
     pointsClause = `AND c.points IS NOT NULL AND c.points >= $${params.length}::int`;
   }
-  const cond = applyCustomerConditions(f.customer_conditions || [], f.logic || 'AND', params);
+  const cond = applyCustomerConditions(f.customer_conditions || [], f.logic || 'AND', params, consent);
   params.push(String(limit));
   const r = await query(
     `SELECT id AS customer_id FROM customers c
      WHERE c.company_id = $1::uuid
-       AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+       AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
        ${pointsClause}
        ${cond ? ` AND ${cond}` : ''}
      ORDER BY c.id
@@ -475,12 +476,12 @@ async function selectRecentProductBuyers(
   filters: Record<string, any>,
   limit: number,
   scopeSql = '',
-  consentTrue?: string,   // ★ 2026-10-02 수신동의 조각(mall-consent · 없으면 고객 행)
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<string[]> {
   let pf;
   try { pf = normalizeProductFilters(filters); } catch { return []; }
   const params: any[] = [companyId, pf.product_keys];
-  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
   params.push(String(limit));
   const buyers = pf.door === 'mall'
     ? `SELECT DISTINCT e.customer_id FROM cdp_events e, ${mallItemsSql('e')} it
@@ -494,7 +495,7 @@ async function selectRecentProductBuyers(
   const r = await query(
     `SELECT b.customer_id FROM (${buyers}) b
        INNER JOIN customers c ON c.id = b.customer_id AND c.company_id = $1::uuid
-      WHERE ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+      WHERE ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
         ${cond ? ` AND ${cond}` : ''}
       LIMIT $${params.length}::int`,
     params,
@@ -512,7 +513,7 @@ export async function selectCdpEvent(
   cursorStart?: Date | string | null,
   windowEnd?: Date | string | null,
   scopeSql = '',   // ★ 2026-09-27 S5-04
-  consentTrue?: string,   // ★ 2026-10-02 수신동의 조각(mall-consent · 없으면 고객 행)
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<string[]> {
   const params: any[] = [companyId, eventName];
   let timeClause: string;
@@ -523,7 +524,7 @@ export async function selectCdpEvent(
   } else {
     timeClause = `e.occurred_at >= NOW() - INTERVAL '7 days'`;
   }
-  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
   params.push(String(limit));
   const r = await query(
     `SELECT DISTINCT e.customer_id FROM cdp_events e
@@ -532,7 +533,7 @@ export async function selectCdpEvent(
        AND e.event_name = $2
        AND e.customer_id IS NOT NULL
        AND ${timeClause}
-       AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+       AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
        ${cond ? ` AND ${cond}` : ''}
      LIMIT $${params.length}::int`,
     params,
@@ -575,7 +576,7 @@ export async function selectCdpEventRowsForCursor(
   maxAgeHours: number,
   chunkLimit: number,
   scopeSql = '',   // ★ 2026-09-27 S5-04 — 커서 창 안에서 거른다(범위 밖 행은 커서가 지나가며 소비된다)
-  consentTrue?: string,   // ★ 2026-10-02 수신동의 조각(mall-consent · 없으면 고객 행)
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<CdpEventRow[]> {
   // 축은 화이트리스트 두 값뿐 — 문자열이 그대로 SQL에 들어가므로 여기서 닫는다(주입 표면 0).
   const axis = cursor.axis === 'created_at' ? 'created_at' : 'occurred_at';
@@ -587,7 +588,7 @@ export async function selectCdpEventRowsForCursor(
   } else {
     cursorClause = `e.${axis} > $3::timestamptz`;
   }
-  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
   params.push(String(chunkLimit));
   const r = await query(
     `SELECT e.id, e.customer_id, e.created_at, e.occurred_at,
@@ -600,7 +601,7 @@ export async function selectCdpEventRowsForCursor(
        AND ${cursorClause}
        AND e.${axis} <= $4::timestamptz
        AND e.occurred_at >= NOW() - ($5 || ' hours')::interval
-       AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+       AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
        ${cond ? ` AND ${cond}` : ''}
      ORDER BY e.${axis} ASC, e.id ASC
      LIMIT $${params.length}::int`,
@@ -636,7 +637,7 @@ export async function selectPurchaseLedgerRowsForCursor(
   maxAgeHours: number,
   chunkLimit: number,
   scopeSql = '',   // ★ 2026-09-27 S5-04
-  consentTrue?: string,   // ★ 2026-10-02 수신동의 조각(mall-consent · 없으면 고객 행)
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<CdpEventRow[]> {
   const params: any[] = [companyId, cursor.at, windowEnd, String(maxAgeHours)];
   let cursorClause: string;
@@ -646,7 +647,7 @@ export async function selectPurchaseLedgerRowsForCursor(
   } else {
     cursorClause = `p.created_at > ($2::timestamptz AT TIME ZONE current_setting('TimeZone'))`;
   }
-  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
   params.push(String(chunkLimit));
   const r = await query(
     `SELECT p.id,
@@ -669,7 +670,7 @@ export async function selectPurchaseLedgerRowsForCursor(
         AND p.purchase_date IS NOT NULL
         AND p.purchase_date >= ((NOW() - ($4 || ' hours')::interval) AT TIME ZONE 'Asia/Seoul')
         AND p.purchase_date <= (NOW() AT TIME ZONE 'Asia/Seoul')
-        AND ${buildJourneySafetyFilter('c', consentTrue)}${scopeSql}
+        AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
         ${cond ? ` AND ${cond}` : ''}
       ORDER BY p.created_at ASC, p.id ASC
       LIMIT $${params.length}::int`,
@@ -773,9 +774,9 @@ export async function buildJourneyPreviewSamples(
   limit: number,
   journeyId?: string,
   scopeSql = '',   // ★ 2026-09-27 S5-04 — 미리보기도 발송과 같은 범위
-  consentTrue?: string,   // ★ 2026-10-02 수신동의 조각(mall-consent · 없으면 고객 행)
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<JourneyPreviewSample[]> {
-  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, limit, journeyId, undefined, scopeSql, consentTrue);
+  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, limit, journeyId, undefined, scopeSql, consent);
   return buildPreviewSamplesForIds(companyId, ids);
 }
 
@@ -892,9 +893,9 @@ export async function previewJourneyTargets(
   sampleLimit: number,
   journeyId?: string,
   scopeSql = '',
-  consentTrue?: string,   // ★ 2026-10-02 수신동의 조각(mall-consent · 없으면 고객 행)
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<{ samples: JourneyPreviewSample[]; count: JourneyTargetCount }> {
-  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId, undefined, scopeSql, consentTrue);
+  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId, undefined, scopeSql, consent);
   const [samples, breakdown] = await Promise.all([
     buildPreviewSamplesForIds(companyId, ids.slice(0, sampleLimit)),
     gradeBreakdownForIds(companyId, ids),
@@ -909,9 +910,9 @@ export async function countJourneyTargetCustomers(
   triggerFilters: Record<string, any>,
   journeyId?: string,
   scopeSql = '',   // ★ 2026-09-27 S5-04
-  consentTrue?: string,   // ★ 2026-10-02 수신동의 조각(mall-consent · 없으면 고객 행)
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<JourneyTargetCount> {
-  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId, undefined, scopeSql, consentTrue);
+  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId, undefined, scopeSql, consent);
   const { total, segments } = await gradeBreakdownForIds(companyId, ids);
   return { total, segments, capped: ids.length >= JOURNEY_COUNT_CAP };
 }
@@ -1024,6 +1025,8 @@ export function applyCustomerConditions(
   conditions: Array<{ field: string; op: string; value: any }>,
   logic: 'AND' | 'OR',
   params: any[],
+  // ★ 2026-10-02 몰 동의 회사의 여정 조각 — 조건의 「수신동의」 필드를 안전필터와 같은 기준으로 읽는다(없으면 고객 행 열 · 종전 글자)
+  consent?: JourneyConsent,
 ): string | null {
   if (!conditions || conditions.length === 0) return null;
   const allowedFields: readonly string[] = CUSTOMER_CONDITION_FIELDS;
@@ -1034,7 +1037,7 @@ export function applyCustomerConditions(
     if (!allowedFields.includes(cond.field)) continue;
     if (!allowedOps.includes(cond.op)) continue;
 
-    const col = `c.${cond.field}`;
+    const col = cond.field === 'sms_opt_in' && consent ? consent.value : `c.${cond.field}`;
     if (cond.op === 'is_null') {
       clauses.push(`${col} IS NULL`);
       continue;

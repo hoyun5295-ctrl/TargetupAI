@@ -10,7 +10,7 @@ import { selectJourneyTargetCustomerIds } from '../utils/journey-target-extracto
 import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope, getOwnerCustomerScopeSql, getJourneyOwnerScopeSql } from '../utils/store-scope';
-import { viewerConsentSql, viewerConsentJoin, ownerConsentTrue, journeyOwnerConsentTrue } from '../utils/mall-consent';
+import { viewerConsentSql, viewerConsentJoin, ownerJourneyConsent, journeyOwnerConsent } from '../utils/mall-consent';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
 // ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
@@ -1270,7 +1270,7 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
 
     // 여정 trigger 기준 후보 추출 (발송과 동일 컨트롤타워). 상위 30명 추출 후 store-scope 통과 첫 1명.
     // ★ 2026-09-27 한줄로 V2 S5-04 — 저장 전 여정 미리보기 = 요청자 분류코드 범위
-    const targetIds = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters || {}, 30, undefined, undefined, await getOwnerCustomerScopeSql(companyId, req.user?.userId), await ownerConsentTrue(companyId, req.user?.userId));
+    const targetIds = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters || {}, 30, undefined, undefined, await getOwnerCustomerScopeSql(companyId, req.user?.userId), await ownerJourneyConsent(companyId, req.user?.userId));
     if (targetIds.length === 0) {
       return res.json({ success: true, sampleCustomer: null });
     }
@@ -3731,7 +3731,7 @@ router.post('/operator/journeys/preview-message', async (req: Request, res: Resp
       const j = jrow.rows[0];
       if (j?.trigger_event) {
         try {
-          const ids = await selectJourneyTargetCustomerIds(companyId, j.trigger_event, j.trigger_filters || {}, 50, undefined, undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsentTrue(companyId, journeyId));
+          const ids = await selectJourneyTargetCustomerIds(companyId, j.trigger_event, j.trigger_filters || {}, 50, undefined, undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId));
           if (ids.length > 0) {
             const cr = await query(
               `SELECT name, gender, age, grade, points, email, address,
@@ -4198,7 +4198,7 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
     // ★ 2026-09-27 한줄로 V2 S5-04 — 미리보기도 발송과 같은 범위(여정 작성자)
     const scopeSql = await getJourneyOwnerScopeSql(companyId, req.params.id);
     // ★ 2026-09-28 한줄로 V2 R265 — 표본·인원을 한 번의 추출로(CT)
-    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters, 10, req.params.id, scopeSql, await journeyOwnerConsentTrue(companyId, req.params.id));
+    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters, 10, req.params.id, scopeSql, await journeyOwnerConsent(companyId, req.params.id));
 
     return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
@@ -4231,21 +4231,21 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
     const startKind = normalizeStartKind(journeyRow.start_kind);
     // ★ 2026-09-27 한줄로 V2 S5-04 — [타겟확인]도 발송과 같은 범위(여정 작성자)
     const targetScopeSql = await getJourneyOwnerScopeSql(companyId, req.params.id);
-    const targetConsentTrue = await journeyOwnerConsentTrue(companyId, req.params.id);   // ★ 2026-10-02 수신동의 읽기 = CT(발송과 같은 조각)
+    const targetConsent = await journeyOwnerConsent(companyId, req.params.id);   // ★ 2026-10-02 수신동의 읽기 = CT(발송과 같은 조각)
 
     // 추출 — 발송과 동일 함수(자동완화 X). date_anchor는 앵커 대상 함수, 그 외는 트리거 추출.
     let ids: string[] = [];
     let displayTotal = 0;
     let capped = false;
     if (startKind === 'date_anchor') {
-      ids = await selectAnchorAudienceIds(companyId, triggerFilters, 100, targetScopeSql, targetConsentTrue);
+      ids = await selectAnchorAudienceIds(companyId, triggerFilters, 100, targetScopeSql, targetConsent);
       // 앵커 대상 전용 count 헬퍼 없음 — 10,000 상한 실측(정직 표기)
-      const totalProbe = await selectAnchorAudienceIds(companyId, triggerFilters, 10001, targetScopeSql, targetConsentTrue);
+      const totalProbe = await selectAnchorAudienceIds(companyId, triggerFilters, 10001, targetScopeSql, targetConsent);
       capped = totalProbe.length > 10000;
       displayTotal = capped ? 10000 : totalProbe.length;
     } else {
-      ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id, undefined, targetScopeSql, targetConsentTrue);
-      const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, targetScopeSql, targetConsentTrue);
+      ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id, undefined, targetScopeSql, targetConsent);
+      const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, targetScopeSql, targetConsent);
       displayTotal = cnt.total;
       capped = cnt.capped;
     }
@@ -4311,7 +4311,7 @@ router.post('/operator/preview-target-samples', async (req: Request, res: Respon
     // ★ 2026-09-27 한줄로 V2 S5-04 — 저장 전 미리보기 = 요청자 분류코드 범위
     const draftScopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
     // ★ 2026-09-28 한줄로 V2 R265 — 표본·인원을 한 번의 추출로(CT)
-    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters || {}, 10, undefined, draftScopeSql, await ownerConsentTrue(companyId, req.user?.userId));
+    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters || {}, 10, undefined, draftScopeSql, await ownerJourneyConsent(companyId, req.user?.userId));
     return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
     console.error('[Journeys preview-target-samples] 오류:', err);

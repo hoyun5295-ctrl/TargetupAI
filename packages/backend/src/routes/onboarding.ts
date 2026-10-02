@@ -191,6 +191,7 @@ router.post('/segment-generate', requireAiOperatorTrialActive, async (req: Reque
       companyId,
       naturalLanguage,
       customFieldKeys,
+      ownerUserId: req.user?.userId,
     });
     return res.json({ success: true, ...result });
   } catch (err: any) {
@@ -214,7 +215,7 @@ router.post('/segment-preview', requireAiOperatorTrialActive, async (req: Reques
     if (!filter || typeof filter !== 'object') {
       return res.status(400).json({ success: false, error: 'filter 객체 필수' });
     }
-    const result = await previewMatching(companyId, filter);
+    const result = await previewMatching(companyId, filter, undefined, req.user?.userId);
     return res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('[onboarding/segment-preview] 실패:', err);

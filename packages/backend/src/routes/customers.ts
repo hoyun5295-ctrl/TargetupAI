@@ -1986,6 +1986,7 @@ router.post(
         companyId,
         naturalLanguage,
         customFieldKeys: Array.isArray(customFieldKeys) ? customFieldKeys : undefined,
+        ownerUserId: req.user?.userId,
       });
 
       return res.json({ success: true, ...result });

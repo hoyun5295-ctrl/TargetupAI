@@ -146,7 +146,8 @@ ALTER TABLE customer_stores
 | S0·S2 | `customer_stores` 실측 → SCHEMA 등재 → DDL(§8) | 0922 실행(8컬럼 확인) |
 | S4 | 4몰 `run-woo-backfill.ts` 재실행(DDL 뒤 · 재기동 없음) | 렌즈007 완료(yes 7,167·no 7,926·모름 2,043) · 나머지 3몰 `--restart` 재실행 대기(옛 코드 적재라 몰 동의 NULL) |
 | 격리 스위치 ON | **폐기(H2-1)** — 고객사가 수신거부 회사 전체 공유를 택함 · OFF 유지 | 폐기 |
-| S6-b · S7 | 표시·건수 화면 · 자동발송·여정 · 화면 3상태 · 관리자 몰 선택 | 다음 단계(설계 승인 범위 안 · 데이터가 채워진 뒤) |
+| S6-b | 표시·건수 화면 · 자동발송·여정 · AI · 타겟 · 자동마케팅 — **읽는 자리 전부를 CT 조각으로** | **★1002~03 구현(§13)** · ENV 켜기 전 = 동작 불변 |
+| S7 · 화면 3상태 | 관리자 몰 선택 · 「모름」 표기 | 미구현(§13-9) |
 
 **★0923 전후 비교 실측(ENV 켜기 직전 · 소속 행 × 고객 행)**: 지금(고객 행 true) → ENV 후(소속 행 true) = 이로이로도쿄 149,690→154,735(빠짐 12 · 들어옴 5,057) · 렌즈고고 25,342→24,835(빠짐 1,256 · 들어옴 749) · 일본이모 12,639→13,592(빠짐 11 · 들어옴 964) · **렌즈007 1,115→7,168**(빠짐 134 · 들어옴 6,187). 합 188,786→200,330. "들어옴" = S1 동결로 고객 행이 올라가지 않아 지금 빠져 있던 신규·렌즈007 적재분(ENV 를 켜야 정상 대상이 된다) · "빠짐" 1,413 = 다른 몰의 동의로 이 몰에서 나가던 교차 누수(H2 가 닫는 바로 그 인원).
 
@@ -255,6 +256,130 @@ END $$;
 - **규칙 켜기 SQL 실행 = 4행 반환**(`UPDATE 4`): 일본이모(ilbonimo.com) · 렌즈007(lens007.net) · 이로이로도쿄(iroirotokyo.net) · 렌즈고고(lensgogo.info) 모두 `consent_missing_agree_key = 'mssms_agreement_label'`. 켠 순간부터 새로 읽는 회원 정보에 적용된다.
 - **4몰 회원 정보 다시 읽기 완료**(§12-4 3번 · 서버에서 `nohup` 으로 실행 · 로그 `/tmp/woo-reread.log` · 1002 오후 Harold 확인): 렌즈007 103초 · 일본이모 296초 · 렌즈고고 1,364초 · 이로이로도쿄 5,640초 · 4몰 모두 `stage=done` · 실패 0 · 로그의 오류 줄 0. 로그의 `phone 충돌 … 자동변경 skip + 검수 플래그` 는 건너뛴 건이다(실패가 아니다). 다음 = §12-4 4번 분포 재측정(동의 / 거부 / 모름 / 규칙으로 채운 수).
 - **분포 재측정(1002 오후 · Harold 실행 · 동의 / 거부 / 모름 / 규칙으로 채운 수)**: 이로이로도쿄 155,181 / 150,998 / 3,011 / 279 · 렌즈고고 62,581 / 30,703 / 1,623 / 37,730 · 일본이모 13,680 / 7,281 / 224 / 68 · 렌즈007 9,020 / 7,934 / 208 / 1,850. **모름 44,979 → 5,066 · 규칙으로 채운 수 39,927 · 동의 200,531 → 240,462.** 거부는 줄지 않았다(이로이로도쿄 +22 · 일본이모 +6 · 렌즈007 0 = 다시 읽으며 새로 읽힌 NO) — 렌즈고고만 30,704 → 30,703(1건 · 원인 미확인 · 규칙은 모름만 채우므로 규칙이 바꾼 것은 아니다). 남은 모름은 §12-5 의 범위(비회원뿐 약 3,538 + 회원 계정이 둘 이상이거나 회원 정보를 못 읽은 고객).
-- **대시보드 「수신동의 수」(184,016)는 그대로다** — 이 규칙은 소속 행만 채우고, 대시보드와 실제 발송 대상은 고객 행 `customers.sms_opt_in` 을 읽는다(§12-1 끝). 바뀌려면 **읽기 전환**(§10 S6-b · S7 + ENV `MALL_CONSENT_ENFORCE_COMPANY_IDS`)이 필요하다. 착수 전 = 이에스페이먼트 계정 구조 확인 + 영향표·설계안 → Harold 승인.
+- **대시보드 「수신동의 수」(184,016)는 그대로다** — 이 규칙은 소속 행만 채우고, 대시보드와 실제 발송 대상은 고객 행 `customers.sms_opt_in` 을 읽는다(§12-1 끝). → **★1002~03 읽기 전환 구현 = §13**(배포 + ENV 켜기 뒤에 숫자와 발송 대상이 바뀐다 · 순서 = §13-6).
 - 교훈(채우는 조건은 저장하는 SQL 한 문장이 본다 · 되돌리기 절차) = [LESSONS_BACKEND](../status/lessons/LESSONS_BACKEND.md) 2026-10-02 「채워도 되는가」 절.
 
+
+## 13. 읽기 전환 — 수신동의를 읽는 자리 전부 (2026-10-02~03 · [B-1001-8](../status/BUGS.md) 재접수의 후속)
+
+> 접수(1002 오후 · 이에스페이먼트): 「바뀐 게 없다 · 공란은 수신동의인데 왜 수신동의 숫자가 안 바뀌었냐」.
+> 원인: §12 규칙은 **소속 행**을 채웠는데, 수신동의를 읽는 자리(대시보드 · 고객 화면 · 타겟 인원 · 발송 대상)가 전부 **고객 행**을 읽었다. 진실은 옮겼는데 읽는 자리를 옮기지 않았다.
+> 처방: 읽는 자리는 `X.sms_opt_in = true` 를 손으로 적지 않고 CT 조각(`utils/mall-consent.ts`)을 넣는다. **DDL 0.**
+
+### 13-1. 누구 기준으로 읽는가
+
+| 범위 | 판정 | 쓰는 자리 |
+|---|---|---|
+| 옛 판정(ENV 에 없는 회사 · 몰 연동 없는 회사 · 범위 코드에 몰 동의 코드가 하나도 없는 사용자) | 고객 행 값 — 조각이 **옛 글자 그대로**라 SQL·파라미터가 달라지지 않는다. ENV 가 비어 있으면 DB 도 읽지 않는다 | 다른 고객사 전부 |
+| 분류코드 범위(담당자 · 관리자가 고른 브랜드 · 자동발송의 브랜드) | 그 코드들의 소속 행 중 **하나라도 동의**. 거부 = 동의 행이 없고 거부 행이 있음. 모름(NULL · 행 없음)은 어느 쪽도 아니다 | 화면 · 캠페인 · AI · 자동발송 · 타겟 · DM (기존 발송 조각 `buildSendConsent` 와 같은 판정) |
+| 범위 없음(관리자) | **어느 몰에서도 거부가 없고** 한 몰 이상 동의. 몰 코드의 소속 행도 회원 연결(`cdp_identity_links`)도 없는 고객(업로드 · 싱크로만 들어온 고객)은 **고객 행 값** | 관리자 화면 · 관리자 발송 · 회사 전체 통계 |
+| 여정(자동 실행) | 작성자 기준. 작성자 범위가 분류코드 여럿이어도 **그 범위 안 어느 몰에서든 거부면 제외**(strict) — 추출 · 재진입 · 발송 직전 재판정이 같은 조각 | `journeyOwnerConsent` · `readOwnerConsentForCustomer` |
+
+- 관리자 기준에 고객 행 값을 남긴 이유: 몰 동의로만 읽으면 켜는 순간 업로드 고객이 관리자 발송에서 전부 빠진다. 「몰에서 온 적 없음」을 몰 코드 목록만으로 가르면 연동의 분류코드를 바꿨을 때 옛 코드의 소속 행이 "몰 소속 없음"으로 읽혀 통과한다(Codex R1) → 회원 연결 유무로 가른다.
+- 관리자가 타겟에서 브랜드를 고르면: 그 브랜드가 **몰 동의 코드일 때만** 그 소속 행의 동의를 같은 행에서 요구한다(`brandConsentOption` → `storeMembershipCond consentMallCodes`). 업로드 브랜드는 소속 행에 동의 값이 없어 소속만 본다.
+
+### 13-2. CT 함수 (`utils/mall-consent.ts`)
+
+| 함수 | 역할 |
+|---|---|
+| `resolveConsentScope` · `resolveViewerConsentScope` · `resolveOwnerConsentScope` | 범위 판정(코드 · 요청 사용자 · 주인) |
+| `consentSql(scope, alias, idRef, {strict})` | 행 단위 조각 `isTrue` · `isFalse` · `value`. WHERE 에 쓴다 |
+| `consentJoinSql` | 집계용 — 소속 표를 한 번 훑어 고객별 (동의 있음 · 거부 있음)을 만들어 LEFT JOIN. FILTER · SELECT 안에서 쓴다 |
+| `consentCountTrue` · `consentWithUnsub` | 몰 동의 회사에서만 보는 사람의 수신거부를 뺀다(§13-4) |
+| `viewerConsentSql` · `viewerConsentJoin` · `ownerConsentSql` · `ownerConsentTrue` | 라우트 · 주인 기준 한 줄 |
+| `journeyOwnerConsent` · `ownerJourneyConsent` · `readOwnerConsentForCustomer` | 여정(strict) |
+| `resolveAdminSendConsent` · `brandConsentOption` | 범위 없는 캠페인 발송 · 타겟의 브랜드 조건 옵션 |
+
+### 13-3. 읽는 자리
+
+- **바꾼 자리**: `routes/companies.ts`(대시보드 카드 집계 · 상세 · 추이) · `routes/customers.ts`(목록 · 다운로드 · 필터 미리보기 · 통계 · 필터 인원 · 추출 · 상세 · 타임라인 · 조건의 수신동의 필드) · `routes/campaigns.ts`(인원 · 발송 · 미리보기의 관리자 갈래) · `routes/auto-campaigns.ts` 3 · `utils/auto-campaign-worker.ts` 4 · `routes/ai.ts` 14 + 여정 미리보기 · `services/ai.ts` · 여정(`journey-safety-filter` · `journey-target-extractor` 14곳 + 고객 조건 · `journey-trigger-watcher` · `journey-anchor-scheduler` · `journey-activation` · `journey-simulator` · `journey-reentry-worker` · `journey-executor`) · 자동마케팅(`operator-recipients` · `operator-audience` 게이트 단일 문 · `planner-audience` · `continuous-operator` · `ai-orchestrator`) · `channel-eligibility` + `routes/dm.ts` · `routes/targets.ts` · `utils/target-count.ts` · `ai-segment-generator`(미리보기 = 요청자 기준) · `target-sample` · `customer-filter`(수신동의 필드 · 브랜드 조건 옵션) · `store-scope`(`consentMallCodes`) · `enabled-fields`(엑셀 값) · 통계 문맥 4(`citations` · `crm-agency-proposal` · `planner-executor` · `continuous-operator`).
+- **일부러 안 바꾼 자리**(계약 테스트의 허용 목록): 개인화 미리보기용 샘플 고객 1명(`campaigns.ts` 테스트 발송 · `spam-filter.ts` · `spam-test-queue.ts`) · 동종 업체 평균 통계(`performance-benchmark.ts` — 다른 회사와 같은 식으로 세야 한다) · 프로필 파생값(`unified-customer-profile.ts` — 이벤트마다 계산) · 여정 조건 단계가 고객 행 열을 읽는 자리(`journey-executor` condition step).
+
+### 13-4. 수신거부와의 관계
+
+고객 행 값에는 수신거부(080 · 수동)가 이미 반영돼 있다(`syncCustomerOptIn`). 소속 행에는 반영되지 않는다. 발송 경로는 전부 수신거부 표를 따로 본다(캠페인 · 자동발송 · AI = 사용자 기준 · 여정 · 자동마케팅 = 회사+전화 · DM = 스테이징 정제). 수신거부 표를 따로 보지 않던 **세는 자리**(대시보드 수신동의 수 · 타겟 인원 · DM 대상 조회)는 몰 동의 회사에서만 보는 사람의 수신거부를 뺀다 — 대시보드 수 = 고객 통계의 수신동의 수.
+
+### 13-5. 성능 (1002 실측 · 일회용 PG16 · 고객 24만 · 소속 행 44만 · 병렬 끔)
+
+행 단위 조각은 WHERE 에서 해시 조인으로 풀리지만 FILTER 안에서는 고객 수만큼 소속 표를 찾는다(관리자 3.6초). 그래서 집계 자리는 조인 형태를 쓴다: 대시보드 관리자 약 1.0~1.4초 · 담당자 0.7~1.0초 · 고객 통계 0.4~1.0초 · 관리자 발송 대상 추출 약 1.1~1.2초. 대시보드 · 고객 통계는 캐시(60초 / 10분)를 지난다. 운영 수치는 켠 뒤 재측정한다.
+
+### 13-6. 켜는 순서 (Harold 실행)
+
+1. 배포(백엔드 재기동 — 업무시간 밖). **ENV 를 켜기 전에는 어떤 회사도 동작이 달라지지 않는다.**
+2. 미리 보기 SQL(읽기 전용 · PG16 검증본 · 아래) — 관리자와 몰별 「지금 → 전환 뒤」 수신동의 수.
+3. 서버 `.env` 에 `MALL_CONSENT_ENFORCE_COMPANY_IDS=19c59d0c-77d3-4e52-9ceb-9a47a3c37e49` 한 줄 → 백엔드 재기동 → 부팅 로그 `[MallConsent] 읽기 강제 ON (…)` 확인.
+4. 화면 확인: 몰 계정 대시보드 수신동의 수 = 2번의 그 몰 `after_agree` − 그 계정의 수신거부 · 관리자 계정 = 첫 줄.
+
+미리 보기 SQL(실행 위치 = .62 한줄로 운영 서버 · `docker exec -i targetup-postgres psql -U targetup targetup` 에 붙여 넣는다):
+
+```sql
+SET max_parallel_workers_per_gather = 0;
+SET statement_timeout = '120s';
+-- (1) 새 코드가 읽는 열이 있는지 — 5행이 나와야 한다
+SELECT table_name, column_name FROM information_schema.columns
+ WHERE (table_name, column_name) IN (('customer_stores','sms_opt_in'), ('cdp_identity_links','customer_id'), ('cdp_identity_links','company_id'),
+                                     ('unsubscribes','user_id'), ('unsubscribes','phone'))
+ ORDER BY 1, 2;
+-- (2) 이에스페이먼트: 수신동의 수가 「지금(고객 행)」에서 「읽기 전환 뒤(소속 행)」로 어떻게 바뀌는가 — 읽기만 한다
+--   첫 줄 = 관리자 계정(범위 없음): 어느 몰에서도 거부가 없고 한 몰 이상 동의(몰 소속도 회원 연결도 없는 고객은 고객 행 값)
+--   나머지 = 몰 계정(분류코드별): 그 몰 소속 행이 동의
+--   now_agree = 지금 화면이 세는 수 · after_agree = 읽기 전환 뒤(화면 숫자는 여기서 보는 사람의 수신거부 등록분을 더 뺀 값)
+WITH malls AS (
+  SELECT ARRAY(SELECT DISTINCT meta->>'store_code' FROM company_integrations
+                WHERE company_id = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49' AND COALESCE(meta->>'store_code', '') <> '') AS codes
+), mc AS (
+  SELECT cs.customer_id, bool_or(cs.sms_opt_in) AS t, bool_or(NOT cs.sms_opt_in) AS f
+    FROM customer_stores cs, malls
+   WHERE cs.company_id = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49' AND cs.store_code = ANY(malls.codes)
+   GROUP BY cs.customer_id
+)
+SELECT '관리자(전체)' AS scope,
+       COUNT(*) AS customers,
+       COUNT(*) FILTER (WHERE c.sms_opt_in = true) AS now_agree,
+       COUNT(*) FILTER (WHERE mc.f IS NOT TRUE AND (mc.t IS TRUE OR (c.sms_opt_in = true AND mc.customer_id IS NULL
+                AND NOT EXISTS (SELECT 1 FROM cdp_identity_links l WHERE l.company_id = c.company_id AND l.customer_id = c.id)))) AS after_agree,
+       COUNT(*) FILTER (WHERE mc.customer_id IS NULL) AS no_mall_row
+  FROM customers c LEFT JOIN mc ON mc.customer_id = c.id
+ WHERE c.company_id = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49'
+UNION ALL
+SELECT cs.store_code,
+       COUNT(*),
+       COUNT(*) FILTER (WHERE c.sms_opt_in = true),
+       COUNT(*) FILTER (WHERE cs.sms_opt_in = true),
+       NULL
+  FROM customer_stores cs
+  JOIN malls ON cs.store_code = ANY(malls.codes)
+  JOIN customers c ON c.id = cs.customer_id AND c.company_id = cs.company_id
+ WHERE cs.company_id = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49'
+ GROUP BY cs.store_code
+ ORDER BY 2 DESC;
+```
+
+**미리 보기 실측(2026-10-03 · Harold 실행 · ENV 켜기 전)**: 열 5행 확인. 고객 429,128명 전원이 몰 소속 행을 갖는다(`no_mall_row` 0 = 이 회사에는 고객 행 값으로 읽는 업로드 고객이 없다).
+
+| 보는 사람 | 지금(고객 행) | 전환 뒤(소속 행) | 차이 |
+|---|---|---|---|
+| 관리자(전체) | 184,012 | 230,731 | +46,719 |
+| 이로이로도쿄 | 149,652 | 155,185 | +5,533 |
+| 렌즈고고 | 25,339 | 62,581 | +37,242 |
+| 일본이모 | 12,639 | 13,681 | +1,042 |
+| 렌즈007 | 1,116 | 9,021 | +7,905 |
+
+화면 숫자는 여기서 그 계정의 수신거부 등록분을 더 뺀 값이다(미측정). 관리자 수가 몰 합(240,468)보다 작은 이유 = 여러 몰에 속한 고객은 한 번만 세고, 어느 몰에서든 거부한 고객은 뺀다.
+
+### 13-7. 되돌리기
+
+ENV 에서 회사 id 를 빼고 재기동 → 즉시 옛 SQL(§9). 데이터는 건드리지 않는다. 캐시 키는 몰 동의로 읽을 때만 꼬리가 붙어 옛 값과 섞이지 않는다.
+
+### 13-8. 검증 · 리뷰
+
+- tsc 0 · vitest 538 파일 7,578건 · 테스트 `__tests__/mall-consent-read-switch-1002.test.ts`(조각 · 범위 판정 · 실제 함수의 SQL · 읽는 자리 소스 계약 = 직접 읽기 잔존은 허용 목록뿐).
+- 일회용 PostgreSQL 16: 실물 조각을 읽는 자리와 같은 쿼리 모양에 넣어 실행(범위 판정 · 행 단위 ≡ 조인 형태 · 대시보드 · 목록 · 통계 · 엑셀 · 캠페인 관리자 갈래 · 브랜드 조건 · 자동발송 · 여정 strict · 발송 직전 재판정 · 자동마케팅 · 채널 자격 · 세그먼트 미리보기 · 미리 보기 SQL) 전부 일치.
+- 변이 45종 전부 검출. Codex 적대 2라운드 approve(R1 = high 2 · medium 2 → 전부 수용 · R2 = 지적 없음).
+
+### 13-9. 알고 남기는 것
+
+- 분류코드가 없는 연동(SDK 등)으로만 들어온 고객은 켠 회사의 관리자 기준에서 모름이다(덜 보내는 쪽).
+- 분류코드 여럿인 담당자: 화면 · 캠페인은 「내 코드 중 하나라도 동의」, 여정은 「어느 몰에서든 거부면 제외」 — 여정이 더 좁다.
+- 고객 목록의 수신동의 표시는 3상태(동의 · 거부 · 모름)인데 화면은 모름을 거부와 같은 색으로 그린다(화면 3상태 표기 = 미구현).
+- S7(관리자 발송에서 몰을 고르는 화면)은 열지 않았다 — 관리자 발송은 위 관리자 기준으로 나간다.
