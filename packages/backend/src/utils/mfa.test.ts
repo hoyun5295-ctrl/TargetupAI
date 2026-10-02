@@ -30,7 +30,7 @@ import { query, mysqlQuery } from '../config/database';
 import {
   isMfaEnforced, isMfaPilotTarget, isMfaRequiredFor, maskPhone, ipPrefix, generateMfaCode,
   issueMfaTicket, verifyMfaTicket, issueMfaChallenge, verifyMfaChallenge,
-  isTrustedDevice, MFA_MAX_ATTEMPTS,
+  consumeTakeoverPass, issueTakeoverPass, MFA_TAKEOVER_PASS_MINUTES, MFA_MAX_ATTEMPTS,
 } from './mfa';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
@@ -311,28 +311,56 @@ describe('인증번호 검증', () => {
   });
 });
 
-describe('신뢰 기기 — 기기·IP·UA가 모두 맞아야 한다', () => {
+describe('접속 인계용 1회 통과권 — 매 로그인 인증(★2026-10-02 기기 신뢰 24시간 폐지)', () => {
   beforeEach(() => {
     q.mockReset();
   });
 
   it('토큰이 없으면 조회조차 하지 않는다', async () => {
-    expect(await isTrustedDevice(USER, '', REQ)).toBe(false);
+    expect(await consumeTakeoverPass(USER, '', REQ)).toBe(false);
     expect(q).not.toHaveBeenCalled();
   });
 
-  it('조회 조건에 IP 대역·UA·만료가 모두 들어간다', async () => {
+  it('쓰는 순간 없앤다 — 조회와 삭제가 한 문장이다', async () => {
+    q.mockResolvedValue({ rows: [{ id: 'pass-1' }], rowCount: 1 });
+
+    expect(await consumeTakeoverPass(USER, 'device-token', REQ)).toBe(true);
+
+    expect(q).toHaveBeenCalledTimes(1);
+    const [sql] = q.mock.calls[0];
+    expect(String(sql)).toMatch(/^\s*DELETE FROM mfa_trusted_devices/i);
+    expect(String(sql)).toMatch(/RETURNING id/i);
+  });
+
+  it('조건에 기기·IP 대역·UA·만료·발급 뒤 유효시간이 모두 들어간다', async () => {
     q.mockResolvedValue({ rows: [], rowCount: 0 });
 
-    await isTrustedDevice(USER, 'device-token', REQ);
+    expect(await consumeTakeoverPass(USER, 'device-token', REQ)).toBe(false);
 
     const [sql, params] = q.mock.calls[0];
     expect(String(sql)).toMatch(/device_token_hash\s*=\s*\$2/i);
     expect(String(sql)).toMatch(/ip_prefix\s*=\s*\$3/i);
     expect(String(sql)).toMatch(/user_agent_hash\s*=\s*\$4/i);
     expect(String(sql)).toMatch(/expires_at\s*>\s*NOW\(\)/i);
+    // 배포 전에 만들어진 옛 24시간 신뢰 행은 만료 전이어도 통과권으로 쓰이지 않는다
+    expect(String(sql)).toMatch(/created_at\s*>\s*NOW\(\)\s*-\s*INTERVAL '1 minute'\s*\*\s*\$5/i);
+    expect(params[4]).toBe(MFA_TAKEOVER_PASS_MINUTES);
     // 원본 토큰을 그대로 조회 조건에 넣지 않는다(해시로만)
     expect(JSON.stringify(params)).not.toContain('device-token');
     expect(params[2]).toBe('211.234');
+  });
+
+  it('유효시간은 분 단위로 짧다 — 유지 시간이 아니라 같은 로그인을 끝내는 시간이다', async () => {
+    expect(MFA_TAKEOVER_PASS_MINUTES).toBeLessThanOrEqual(10);
+    q.mockResolvedValue({ rows: [], rowCount: 1 });
+
+    const token = await issueTakeoverPass(USER, REQ);
+
+    const [sql, params] = q.mock.calls[0];
+    expect(String(sql)).toMatch(/NOW\(\) \+ INTERVAL '1 minute' \* \$5/i);
+    expect(params[4]).toBe(MFA_TAKEOVER_PASS_MINUTES);
+    // 평문 토큰은 돌려주기만 하고 저장하지 않는다
+    expect(token).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(params)).not.toContain(token);
   });
 });

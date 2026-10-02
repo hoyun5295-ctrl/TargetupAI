@@ -188,7 +188,7 @@ export default function Dashboard() {
     ?? (senderAuthPreview === '1'
       ? { kind: 'required', callback: '1800-8125', maskedPhone: '010-****-1234', expiresInMinutes: 5, reason: 'first' }
       : senderAuthPreview === '2'
-        ? { kind: 'verified', callback: '1800-8125', verifiedAt: '오늘 09:12', remainingHours: 23 }
+        ? { kind: 'verified', callback: '1800-8125', verifiedAt: '오늘 09:12', remainingHours: 7 }
         : null);
 
   const closeSenderAuth = () => {

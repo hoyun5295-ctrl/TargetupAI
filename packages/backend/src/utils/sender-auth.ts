@@ -57,8 +57,12 @@ export function isSenderAuthRequiredFor(
   return isSenderAuthPilotTarget(user.login_id);
 }
 
-/** 인증 유지시간(시간) — 기준 3.5 "동일 세션·일정 시간 유지". 다중인증 기기 신뢰와 같은 24시간이다. */
-export const SENDER_AUTH_TRUST_HOURS = 24;
+/**
+ * 인증 유지시간(시간) — 기준 3.5 "동일 세션·일정 시간 유지".
+ * ★2026-10-02 24 → 8시간(1001 회의 결정 · Harold 승인). 다중 인증은 유지 시간 없이 매 로그인마다 묻고,
+ *   유지 시간은 이 축(발신 인증)만 갖는다. 화면 문구에는 시간 숫자를 적지 않는다(값이 바뀌어도 어긋나지 않게).
+ */
+export const SENDER_AUTH_TRUST_HOURS = 8;
 
 /** 재인증을 요구한 이유 — 화면이 사용자에게 그대로 밝힌다(팝업 `SenderAuthModal`과 같은 값 집합) */
 export type SenderAuthReason = 'first' | 'expired' | 'environment';
@@ -97,7 +101,7 @@ export function isSenderAuthSchemaMissing(err: any): boolean {
 }
 
 /**
- * 24시간 세션 판정 — 기준 3.5 "일정 시간 유지 + 접속환경 변경 시 재인증".
+ * 유지 시간 세션 판정 — 기준 3.5 "일정 시간 유지 + 접속환경 변경 시 재인증".
  *
  * ⛔ 모르면 다시 묻는다
  *   경과 시간을 읽지 못하면 만료로 본다. 통과로 접으면 값이 깨진 동안 인증이 통째로 무력해진다.
@@ -305,7 +309,7 @@ export type SenderAuthVerdict =
   | { status: 'locked' };
 
 /**
- * 인증번호 검증 — 통과하면 `verified_at`을 찍는다(24시간 세션의 유일한 근거).
+ * 인증번호 검증 — 통과하면 `verified_at`을 찍는다(유지 시간 세션의 유일한 근거).
  *
  * ⛔ 만료·소비 판정은 DB의 NOW()로 한다 — 앱 시계와 DB 시계가 어긋나도 판정이 흔들리지 않는다.
  * ⛔ 통과한 코드는 즉시 소비한다 — 같은 코드로 두 번 통과하지 못한다.

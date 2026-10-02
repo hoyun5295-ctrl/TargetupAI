@@ -2106,6 +2106,7 @@ kind별 payload 키:
 - INDEX: idx_spam_filter_results_pending (test_id, received) WHERE received = false
 - **result 허용값:** pass(정상수신), blocked(스팸차단), failed(발송실패), timeout(시간초과), NULL(판정 대기)
 - **참조:** sms-result-map.ts의 SPAM_RESULT 상수가 유일한 정의
+- ★ 2026-10-02: **닫힌 검사의 행도 닫힌 지 10분 안에는 바뀔 수 있다** — 늦게 닿은 앱 보고가 `blocked`·`timeout` 행을 `pass`(received = true)로 고친다(`failed` 는 그대로). `received_at` = 그 보고가 서버에 반영된 시각이다(폰이 문자를 받은 시각이 아니다). 검사의 `completed_at` 은 덮지 않는다. 규칙 = [FEATURE-SPAM-CHECK](../docs/FEATURE-SPAM-CHECK.md) §1.
 
 ### auto_campaigns (자동발송 스케줄) — D69 ✅ 생성 완료
 

@@ -147,15 +147,15 @@ describe('★축 분리 — 다중인증 스위치가 발신 인증을 켜지 �
 });
 
 /**
- * 24시간 세션 — 기준 3.5의 "동일 세션·일정 시간 유지 + 접속환경 변경 시 재인증".
+ * 유지 시간 세션(★2026-10-02 24 → 8시간) — 기준 3.5의 "동일 세션·일정 시간 유지 + 접속환경 변경 시 재인증".
  * 못 박는 것: 시간이 남아 있어도 **접속 환경이 바뀌면 다시 묻는다**. 탈취 계정이 하루를 그냥 쓰지 못한다.
  */
-describe('24시간 세션 판정', () => {
+describe('유지 시간 세션 판정', () => {
   const REQ: any = { ip: '119.203.154.248', headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0)' } };
   const LIVE = {
     ip_address: '119.203.154.99',
     user_agent: 'Mozilla/5.0 (Windows NT 10.0)',
-    age_seconds: 23 * 3600,
+    age_seconds: (SENDER_AUTH_TRUST_HOURS - 1) * 3600,
   };
 
   it('인증한 적이 없으면 첫 인증', () => {
@@ -163,11 +163,17 @@ describe('24시간 세션 판정', () => {
     expect(evaluateSenderAuthSession(undefined, REQ)).toEqual({ alive: false, reason: 'first' });
   });
 
-  it('24시간 안 · 같은 IP 대역 · 같은 브라우저면 통과한다', () => {
+  it('유지 시간 안 · 같은 IP 대역 · 같은 브라우저면 통과한다', () => {
     expect(evaluateSenderAuthSession(LIVE, REQ)).toEqual({ alive: true });
   });
 
-  it('24시간이 지나면 만료', () => {
+  it('유지 시간은 8시간이다(1001 회의 결정) — 다중 인증과 달리 이 축만 유지 시간을 갖는다', () => {
+    expect(SENDER_AUTH_TRUST_HOURS).toBe(8);
+    expect(evaluateSenderAuthSession({ ...LIVE, age_seconds: 8 * 3600 - 1 }, REQ)).toEqual({ alive: true });
+    expect(evaluateSenderAuthSession({ ...LIVE, age_seconds: 8 * 3600 + 1 }, REQ)).toEqual({ alive: false, reason: 'expired' });
+  });
+
+  it('유지 시간이 지나면 만료', () => {
     const old = { ...LIVE, age_seconds: SENDER_AUTH_TRUST_HOURS * 3600 + 1 };
     expect(evaluateSenderAuthSession(old, REQ)).toEqual({ alive: false, reason: 'expired' });
   });
@@ -183,8 +189,8 @@ describe('24시간 세션 판정', () => {
   });
 
   it('★경과 시간이 문자열로 와도 숫자로 읽는다 (PG numeric은 문자열로 온다)', () => {
-    expect(evaluateSenderAuthSession({ ...LIVE, age_seconds: '82800' as any }, REQ)).toEqual({ alive: true });
-    expect(evaluateSenderAuthSession({ ...LIVE, age_seconds: '90000' as any }, REQ)).toEqual({ alive: false, reason: 'expired' });
+    expect(evaluateSenderAuthSession({ ...LIVE, age_seconds: String((SENDER_AUTH_TRUST_HOURS - 1) * 3600) as any }, REQ)).toEqual({ alive: true });
+    expect(evaluateSenderAuthSession({ ...LIVE, age_seconds: String((SENDER_AUTH_TRUST_HOURS + 1) * 3600) as any }, REQ)).toEqual({ alive: false, reason: 'expired' });
   });
 
   it('경과 시간을 못 읽으면 만료로 본다 — 모르면 다시 묻는다', () => {
@@ -306,7 +312,7 @@ describe('발송 게이트', () => {
     expect(insert[1]).not.toContain('0234678612');
   });
 
-  it('24시간 인증이 살아 있으면 통과한다 — 매번 묻지 않는다', async () => {
+  it('유지 시간 안의 인증이 살아 있으면 통과한다 — 매번 묻지 않는다', async () => {
     wire({ session: { ip_address: '119.203.154.11', user_agent: AGENT, age_seconds: 3600 } });
     enablePilot();
     expect(await checkSenderAuthGate(BASE)).toEqual({ ok: true });
@@ -407,7 +413,7 @@ describe('발송 게이트', () => {
 
 /**
  * 인증번호 검증 — 못 박는 것:
- *   1. 성공은 `verified_at`을 찍는다. 이것이 24시간 세션의 유일한 근거다.
+ *   1. 성공은 `verified_at`을 찍는다. 이것이 유지 시간 세션의 유일한 근거다.
  *   2. 한 번 쓴 코드는 다시 통과하지 못한다.
  *   3. 시도 한도를 넘기면 잠근다.
  */
@@ -484,7 +490,7 @@ describe('인증번호 검증', () => {
     expect(verdict).toEqual({ status: 'expired' });
   });
 
-  it('★코드가 맞으면 verified_at을 찍는다 — 이것이 24시간 세션의 근거다', async () => {
+  it('★코드가 맞으면 verified_at을 찍는다 — 이것이 유지 시간 세션의 근거다', async () => {
     wireRow(LIVE);
     const verdict = await verifySenderAuthChallenge({ challengeId: 'x', userId: USER, code: '123456', req: REQ });
     expect(verdict).toEqual({ status: 'ok', callbackNumber: '0234678612' });

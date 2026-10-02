@@ -8,7 +8,7 @@
  * ⛔ 화면 규율
  *  1. **로그인 인증번호 화면(LoginPage `mfaModal`)을 미러링한다.** 같은 인증 체계로 보여야 심사에서
  *     "인증수단이 하나로 관리된다"가 성립한다. 새 톤을 만들지 않는다.
- *  2. **인증 상태를 숨기지 않는다.** 24시간 안에 이미 인증했으면 그 사실과 남은 시간을 보여주고 통과시킨다.
+ *  2. **인증 상태를 숨기지 않는다.** 유지 시간(★2026-10-02 서버 기준 8시간) 안에 이미 인증했으면 그 사실과 남은 시간을 보여주고 통과시킨다.
  *     매번 6자리를 묻지 않는 것이 기준 위반이 아니라, 기준이 명시한 "일정 시간 유지"다.
  *  3. **네이티브 dialog를 쓰지 않는다.**
  *
@@ -19,7 +19,7 @@
 import React from 'react';
 
 export type SenderAuthState =
-  /** 24시간 인증이 살아 있다 — 통과. 남은 시간을 보여주고 발송으로 넘어간다 */
+  /** 인증이 유지 시간 안에 살아 있다 — 통과. 남은 시간을 보여주고 발송으로 넘어간다 */
   | { kind: 'verified'; callback: string; verifiedAt: string; remainingHours: number }
   /** 인증이 필요하다 — 6자리 입력 */
   | { kind: 'required'; callback: string; maskedPhone: string; expiresInMinutes: number; reason: SenderAuthReason };
@@ -33,7 +33,8 @@ export type SenderAuthReason = 'first' | 'expired' | 'environment';
 
 const REASON_TEXT: Record<SenderAuthReason, string> = {
   first: '오늘 첫 발송이라 발신번호 담당자 확인이 필요합니다.',
-  expired: '인증 후 24시간이 지나 다시 확인이 필요합니다.',
+  // ★ 2026-10-02 시간 숫자를 적지 않는다 — 유지 시간은 서버가 소유한다(24 → 8시간). 적어 두면 값이 바뀔 때 화면만 틀린다
+  expired: '인증 유지 시간이 지나 다시 확인이 필요합니다.',
   environment: '접속 환경이 바뀌어 다시 확인이 필요합니다.',
 };
 

@@ -14,6 +14,23 @@ import { query } from '../config/database';
 import { generateToken, JwtPayload } from '../middlewares/auth';
 import { rotateUserSession, newSessionId, SessionConflict } from './session-manager';
 import { clearBlocksOnSuccess } from './login-block';
+import type { IdentityClearance } from './identity-verify';
+
+/**
+ * 로그인 판정에 쓰는 사용자 행 — `/auth/login`의 조회와 같은 컬럼을 계정 id로 읽는다.
+ * 인증 대기 티켓(다중인증 · 본인인증)으로 돌아온 요청이 이것을 쓴다. 조회 문장이 경로마다 따로 있으면
+ * 한쪽에만 컬럼이 빠져 회사 상태 판정이 조용히 갈린다.
+ * ⛔ `c.status`는 반드시 별칭 `company_status` — `u.*`의 계정 상태를 덮지 않게.
+ */
+export async function loadLoginUser(userId: string): Promise<any | null> {
+  const result = await query(
+    `SELECT u.*, u.must_change_password, u.hidden_features, c.company_name as company_name, c.id as company_code, c.subscription_status, c.usage_type, c.status AS company_status
+       FROM users u JOIN companies c ON u.company_id = c.id
+      WHERE u.id = $1`,
+    [userId]
+  );
+  return result.rows[0] || null;
+}
 
 export type LoginIssueResult =
   | { status: 'ok'; body: any }
@@ -33,10 +50,13 @@ export async function issueUserLogin(params: {
   takeoverTicket?: any;
   /** (ip, loginId) 차단 해제용 — 원 로그인 경로가 쓰던 값 그대로 */
   ipForBlock: string;
-  /** MFA를 막 통과했으면 클라이언트가 보관할 신뢰 기기 토큰 */
-  mfaDeviceToken?: string;
+  /**
+   * ★ 2026-10-02 본인인증 관문을 지났다는 증표(전송자격인증 2.1 ①-1).
+   *   `utils/identity-verify.ts`만 만들 수 있다. 세션을 만드는 경로가 늘어도 관문을 빠뜨리면 tsc가 잡는다.
+   */
+  identity: IdentityClearance;
 }): Promise<LoginIssueResult> {
-  const { user, loginId, appSource, req, takeoverTicket, ipForBlock, mfaDeviceToken } = params;
+  const { user, loginId, appSource, req, takeoverTicket, ipForBlock } = params;
 
   const sessionId = newSessionId();
   const payload: JwtPayload = {
@@ -140,7 +160,6 @@ export async function issueUserLogin(params: {
         },
       },
       sessionTimeoutMinutes,
-      ...(mfaDeviceToken ? { mfaDeviceToken } : {}),
     },
   };
 }

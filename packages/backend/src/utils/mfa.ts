@@ -2,7 +2,14 @@
  * mfa.ts — 다중 인증(MFA) 컨트롤타워 (★2026-08-18 전송자격인증 3.4)
  *
  * 무엇을 하나
- *   계정에 등록된 **주 인증번호 1개**로 6자리 코드를 보내고, 통과하면 그 기기를 24시간 신뢰한다.
+ *   계정에 등록된 **주 인증번호 1개**로 6자리 코드를 보낸다. **로그인할 때마다 묻는다.**
+ *
+ * ⛔ ★2026-10-02 기기 신뢰(24시간)를 없앴다 (1001 회의 결정 · Harold 승인)
+ *   인증기준 3.4는 "계정 로그인 시" 추가 인증을 요구한다. 일정 시간 유지를 허용한 것은 3.5(추가 인증)뿐이다.
+ *   그래서 다중 인증은 유지 시간 없이 매 로그인마다 하고, 유지는 발신 인증(8시간)만 갖는다.
+ *   남은 것은 **접속 인계용 1회 통과권**이다 — 인증번호를 통과한 직후 "이미 접속 중" 안내에 동의해
+ *   다시 로그인을 보낼 때, 방금 소비한 인증번호를 또 묻지 않게 하는 장치다(0915 hoyun 순환의 처방).
+ *   10분 안에 · 같은 기기 · 같은 IP 대역 · 같은 브라우저에서 · **한 번만** 쓰인다.
  *
  * ⛔ 주 번호는 계정당 하나다 (Harold 확정 0818)
  *   인증기준 3.4·3.5가 "다수의 이용자가 공동으로 사용할 수 있는 인증수단은 부적합"을 두 번 못 박고,
@@ -10,8 +17,8 @@
  *   그 계정을 여러 사람이 각자 폰으로 쓰는 구조가 되어 두 기준을 동시에 어긴다.
  *   담당자가 여럿이면 번호가 아니라 **계정을 나눈다**.
  *
- * ⛔ 24시간 신뢰는 기기·IP 대역에 묶는다
- *   3.5가 "접속환경 변경 시 재인증"을 명시한다. 무조건 24시간을 믿으면 탈취된 계정이 하루를 그냥 쓴다.
+ * ⛔ 통과권은 기기·IP 대역·브라우저에 묶는다
+ *   토큰만 맞으면 통과시키면 토큰이 새는 순간 인증이 무력해진다.
  *
  * ⛔ 전환기 — 번호가 등록된 계정만 태운다
  *   지금 전 계정에 번호가 없다. 전면 적용하면 배포 즉시 전 고객이 못 들어온다.
@@ -39,8 +46,11 @@ export const MFA_CODE_TTL_MINUTES = 5;
 export const MFA_MAX_ATTEMPTS = 5;
 /** 재발송 쿨다운(초) */
 export const MFA_RESEND_COOLDOWN_SECONDS = 60;
-/** 기기 신뢰 유지시간(시간) — Harold 확정 */
-export const MFA_TRUST_HOURS = 24;
+/**
+ * 접속 인계용 1회 통과권 유효시간(분) — 인증 대기 티켓과 같은 길이.
+ * ★2026-10-02 종전 `MFA_TRUST_HOURS = 24`(기기 신뢰)를 대체한다. 유지 시간이 아니라 **같은 로그인을 끝내는 시간**이다.
+ */
+export const MFA_TAKEOVER_PASS_MINUTES = 10;
 /** 인증 대기 티켓 유효시간(분) — 코드 입력에 쓰는 시간 */
 const MFA_TICKET_TTL_MINUTES = 10;
 /** 티켓 JWT 식별 클레임 — authenticate 미들웨어는 userId/userType이 없는 토큰을 거부하므로 이 티켓은 API 인증으로 통과하지 못한다 */
@@ -147,38 +157,45 @@ export function verifyMfaTicket(ticket: any): { userId: string; challengeId: str
 }
 
 /**
- * 이 기기가 24시간 신뢰 안에 있는가.
- * 기기 토큰 + IP 대역 + UA가 모두 맞아야 한다(3.5 접속환경 변경 시 재인증).
+ * 접속 인계용 통과권을 **쓰고 없앤다**(1회용).
+ * 기기 토큰 + IP 대역 + UA가 모두 맞고, 발급 뒤 유효시간 안이어야 한다.
+ *
+ * ⛔ 조회와 삭제를 한 문장으로 한다 — 조회 뒤 삭제면 같은 토큰으로 동시에 들어온 두 요청이 둘 다 통과한다.
+ * ⛔ `created_at` 조건이 옛 24시간 신뢰 행을 걸러 낸다. 배포 전에 만들어진 행은 `expires_at`이 아직 남아 있어도
+ *    발급 뒤 유효시간을 넘겼으므로 통과권으로 쓰이지 않는다(배포 순간부터 매 로그인 인증).
+ * 저장소는 종전 `mfa_trusted_devices` 표를 그대로 쓴다(DDL 0).
  */
-export async function isTrustedDevice(userId: string, deviceToken: any, req: Request): Promise<boolean> {
+export async function consumeTakeoverPass(userId: string, deviceToken: any, req: Request): Promise<boolean> {
   const token = String(deviceToken || '');
   if (!token) return false;
   const result = await query(
-    `SELECT id FROM mfa_trusted_devices
+    `DELETE FROM mfa_trusted_devices
       WHERE user_id = $1 AND device_token_hash = $2 AND ip_prefix = $3 AND user_agent_hash = $4
         AND expires_at > NOW()
-      LIMIT 1`,
-    [userId, sha256(token), ipPrefix(req.ip), sha256(String(req.headers['user-agent'] || ''))]
+        AND created_at > NOW() - INTERVAL '1 minute' * $5
+      RETURNING id`,
+    [userId, sha256(token), ipPrefix(req.ip), sha256(String(req.headers['user-agent'] || '')), MFA_TAKEOVER_PASS_MINUTES]
   );
-  if (result.rows.length === 0) return false;
-  query('UPDATE mfa_trusted_devices SET last_used_at = NOW() WHERE id = $1', [result.rows[0].id]).catch(() => {});
-  return true;
+  return result.rows.length > 0;
 }
 
-/** 인증 통과 후 이 기기를 신뢰 목록에 올린다. 반환값(평문 토큰)은 클라이언트가 보관한다 */
-export async function registerTrustedDevice(userId: string, req: Request): Promise<string> {
+/**
+ * 인증번호를 통과했는데 "이미 접속 중"으로 세션을 못 받은 경우에만 발급한다.
+ * 반환값(평문 토큰)은 그 응답에 실려 나가고, 인계 동의 뒤 재시도 한 번에 소비된다.
+ */
+export async function issueTakeoverPass(userId: string, req: Request): Promise<string> {
   const token = crypto.randomBytes(32).toString('hex');
   await query(
     `INSERT INTO mfa_trusted_devices
        (id, user_id, device_token_hash, ip_prefix, user_agent_hash, expires_at, created_at, last_used_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW() + INTERVAL '1 hour' * $5, NOW(), NOW())`,
-    [userId, sha256(token), ipPrefix(req.ip), sha256(String(req.headers['user-agent'] || '')), MFA_TRUST_HOURS]
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW() + INTERVAL '1 minute' * $5, NOW(), NOW())`,
+    [userId, sha256(token), ipPrefix(req.ip), sha256(String(req.headers['user-agent'] || '')), MFA_TAKEOVER_PASS_MINUTES]
   );
   return token;
 }
 
-/** 계정의 신뢰 기기 전부 해제 — 인증번호 변경·계정 잠금 시 호출 */
-export async function revokeTrustedDevices(userId: string): Promise<number> {
+/** 계정의 통과권(옛 신뢰 기기 행 포함) 전부 해제 — 인증번호 변경·계정 잠금 시 호출 */
+export async function revokeTakeoverPasses(userId: string): Promise<number> {
   const result = await query('DELETE FROM mfa_trusted_devices WHERE user_id = $1', [userId]);
   return (result as any).rowCount ?? 0;
 }
@@ -307,12 +324,12 @@ export async function verifyMfaChallenge(
 }
 
 /**
- * 인증 실패 한도 초과 — 계정 잠금 + 신뢰 기기 전부 해제 + **이용자 고지**.
+ * 인증 실패 한도 초과 — 계정 잠금 + 통과권 전부 해제 + **이용자 고지**.
  * 인증기준 3.4 ④(실패 초과 시 계정 잠금 및 경고 안내) · 5.1(조치 시 이용자 고지·이력).
  * ⚠ 잠금·세션·고지·이력은 조치 컨트롤타워(`account-action.ts`)가 한 벌로 처리한다 —
  *   여기서 직접 UPDATE하면 경로마다 고지가 빠지는 구멍이 다시 생긴다.
  */
 export async function lockAccountForMfaFailure(userId: string, req?: Request): Promise<void> {
   await restrictAccount({ userId, status: 'locked', reason: 'mfa_failure', req });
-  await revokeTrustedDevices(userId);
+  await revokeTakeoverPasses(userId);
 }

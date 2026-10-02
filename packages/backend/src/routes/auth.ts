@@ -7,12 +7,19 @@ import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
 import { rotateUserSession, normalizeAppSource, newSessionId, verifyPasswordChangeToken } from '../utils/session-manager';
 import { resolveCompanyAccessDenial } from '../utils/company-access';
-import { issueUserLogin } from '../utils/login-issue';
+import { issueUserLogin, loadLoginUser } from '../utils/login-issue';
 import {
-  isMfaRequiredFor, isMfaSchemaMissing, isTrustedDevice, issueMfaChallenge, issueMfaTicket,
-  verifyMfaTicket, verifyMfaChallenge, registerTrustedDevice, lockAccountForMfaFailure,
+  isMfaRequiredFor, isMfaSchemaMissing, consumeTakeoverPass, issueMfaChallenge, issueMfaTicket,
+  verifyMfaTicket, verifyMfaChallenge, issueTakeoverPass, lockAccountForMfaFailure,
   MFA_CODE_TTL_MINUTES,
 } from '../utils/mfa';
+// ★ 2026-10-02 담당자 본인인증(전송자격인증 2.1 ①-1 · 3.4 ②) — 판정·저장은 전부 CT가 소유한다
+import {
+  evaluateIdentityGate, verifyIdentityTicket, startIdentityVerification, completeIdentityVerification,
+  isIdentityVerifyActiveFor, isIdentitySchemaMissing, loadIdentitySummary, IDENTITY_TICKET_TTL_MINUTES,
+  identityFailureResponse, IDENTITY_UNAVAILABLE_RESPONSE, IDENTITY_MIGRATION_RESPONSE,
+} from '../utils/identity-verify';
+import { recordAuditLog } from '../utils/audit-log';
 import { isBlocked, recordFailureAndMaybeBlock, clearBlocksOnSuccess } from '../utils/login-block';
 // ★ 2026-09-11 서비스 페이지 접속 기록(전송자격인증 4.1)
 import { normalizePagePath, recordPageView } from '../utils/access-log';
@@ -364,15 +371,32 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       return res.status(403).json({ error: '에이전트 전용 계정은 이 페이지를 사용할 수 없습니다.' });
     }
 
+    // ===== ★ 2026-10-02 담당자 본인인증 — 전송자격인증 2.1 ①-1 · 3.4 ② =====
+    //   계정마다 최초 1회. 인증된 이름·휴대폰이 담당자 정보와 로그인 인증번호 수신 번호가 된다.
+    //   다중 인증보다 **먼저** 본다 — 종전에 직원이 넣어 둔 번호가 틀렸으면 그 번호로는 영영 못 들어온다.
+    //   스위치·명단·인증기관 셋이 모두 성립해야 요구한다(배포만으로는 아무도 요구받지 않는다).
+    //   컨트롤타워 = utils/identity-verify.ts — 판정 조건을 여기서 다시 조립하지 않는다.
+    const identity = await evaluateIdentityGate(user);
+    if (identity.status === 'required') {
+      // 세션도 인증번호도 주지 않는다 — 본인인증 티켓만 나간다
+      return res.status(401).json({
+        identityRequired: true,
+        identityTicket: identity.ticket,
+        expiresInMinutes: IDENTITY_TICKET_TTL_MINUTES,
+      });
+    }
+
     // ===== ★ 2026-08-18 다중 인증(MFA) — 전송자격인증 3.4 =====
     //   [시행일] `MFA_ENFORCE_FROM` 이전에는 번호가 등록돼 있어도 묻지 않는다 — 사전 고지 기간(Harold 확정: 9/1 시행).
     //   [전환기] 주 인증번호가 등록된 계정만 태운다. 전면 적용하면 시행 즉시 전 고객이 못 들어온다.
     //   [시범 명단] ★2026-09-11 `MFA_PILOT_LOGIN_IDS`가 있으면 그 계정만(담당자 번호 미기입 계정이 많아 전면 시행은 혼란).
-    //   [면제] 이 기기·IP 대역이 24시간 신뢰 안이면 코드를 묻지 않는다.
+    //   [매 로그인] ★2026-10-02 기기 신뢰(24시간)를 없앴다 — 로그인할 때마다 묻는다(1001 회의 결정).
+    //     예외는 접속 인계 재시도 하나다: 방금 인증을 통과하고 "이미 접속 중" 안내에 동의해 다시 보낸 요청은
+    //     그때 받은 1회 통과권으로 지난다(같은 인증번호를 두 번 묻지 않는다).
     //   컨트롤타워 = utils/mfa.ts `isMfaRequiredFor` — 판정 조건을 여기서 다시 조립하지 않는다.
     if (isMfaRequiredFor(user)) {
-      const trusted = await isTrustedDevice(user.id, req.body.mfaDeviceToken, req);
-      if (!trusted) {
+      const passed = await consumeTakeoverPass(user.id, req.body.mfaDeviceToken, req);
+      if (!passed) {
         const issued = await issueMfaChallenge(user.id, user.mfa_phone, req);
         await query(
           `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
@@ -400,6 +424,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       req,
       takeoverTicket: req.body.takeoverTicket,
       ipForBlock,
+      identity: identity.clearance,
     });
 
     if (issue.status === 'conflict') {
@@ -521,14 +546,10 @@ router.post('/sender-auth/verify', authenticate, async (req: Request, res: Respo
 async function loadMfaUser(ticket: any) {
   const parsed = verifyMfaTicket(ticket);
   if (!parsed) return null;
-  const result = await query(
-    `SELECT u.*, u.must_change_password, u.hidden_features, c.company_name as company_name, c.id as company_code, c.subscription_status, c.usage_type, c.status AS company_status
-       FROM users u JOIN companies c ON u.company_id = c.id
-      WHERE u.id = $1`,
-    [parsed.userId]
-  );
-  if (result.rows.length === 0) return null;
-  return { user: result.rows[0], challengeId: parsed.challengeId };
+  // ★ 2026-10-02 조회 문장을 CT로 옮겼다(본인인증 티켓 경로와 같은 것을 쓴다 · 문장 불변)
+  const user = await loadLoginUser(parsed.userId);
+  if (!user) return null;
+  return { user, challengeId: parsed.challengeId };
 }
 
 router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => {
@@ -576,13 +597,22 @@ router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => 
       });
     }
 
-    // 통과 — 이 기기를 24시간 신뢰하고 로그인 세션을 발급한다
+    // 통과 — 로그인 세션을 발급한다(★2026-10-02 기기 신뢰 없음 · 다음 로그인 때 다시 묻는다)
     await query(
       `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
        VALUES (gen_random_uuid(), $1, 'mfa_success', 'user', $2, $3, $4, NOW())`,
       [user.id, JSON.stringify({ loginId: user.login_id }), req.ip, req.headers['user-agent'] || '']
     );
-    const mfaDeviceToken = await registerTrustedDevice(user.id, req);
+
+    // ★ 2026-10-02 본인인증 관문 — 세션을 만드는 경로는 전부 지난다(티켓 발급 뒤 스위치가 켜졌을 수 있다)
+    const identity = await evaluateIdentityGate(user);
+    if (identity.status === 'required') {
+      return res.status(401).json({
+        identityRequired: true,
+        identityTicket: identity.ticket,
+        expiresInMinutes: IDENTITY_TICKET_TTL_MINUTES,
+      });
+    }
 
     const issue = await issueUserLogin({
       user,
@@ -591,11 +621,15 @@ router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => 
       req,
       takeoverTicket: req.body.takeoverTicket,
       ipForBlock: req.ip || '',
-      mfaDeviceToken,
+      identity: identity.clearance,
     });
-    // ★ 2026-09-15 인증번호는 위에서 이미 소비됐다. 신뢰 기기 토큰을 함께 줘야 인계 동의 뒤 재시도(/auth/login)가
-    //   인증번호 없이 통과한다. 토큰이 없으면 창이 다시 인증번호를 묻고 또 409로 막히는 순환이었다(0915 hoyun).
-    if (issue.status === 'conflict') return res.status(409).json({ ...issue.conflict, mfaDeviceToken });
+    // ★ 2026-09-15 인증번호는 위에서 이미 소비됐다. 통과권을 함께 줘야 인계 동의 뒤 재시도(/auth/login)가
+    //   인증번호 없이 통과한다. 없으면 창이 다시 인증번호를 묻고 또 409로 막히는 순환이었다(0915 hoyun).
+    //   ★ 2026-10-02 통과권은 **이 경우에만** 발급한다(10분 · 1회용). 정상 로그인 응답에는 싣지 않는다.
+    if (issue.status === 'conflict') {
+      const mfaDeviceToken = await issueTakeoverPass(user.id, req);
+      return res.status(409).json({ ...issue.conflict, mfaDeviceToken });
+    }
     if (issue.status === 'geo_blocked') return res.status(403).json({ error: issue.message });
     return res.json(issue.body);
   } catch (error) {
@@ -649,6 +683,164 @@ router.post('/mfa/resend', loginLimiter, async (req: Request, res: Response) => 
       });
     }
     console.error('[mfa/resend]', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ============================================================
+// ★ 2026-10-02 담당자 본인인증 (전송자격인증 2.1 ①-1 · 3.4 ② · ③ · 3.5 ②)
+//   로그인 경로 = 티켓으로 시작·완료(세션 없음). 설정 화면 경로 = 로그인한 계정이 담당자 변경.
+//   판정·저장·인증기관 연결은 전부 CT(utils/identity-verify.ts)가 소유한다 — 여기서 조건을 다시 조립하지 않는다.
+// ============================================================
+
+router.post('/identity/start', loginLimiter, async (req: Request, res: Response) => {
+  try {
+    // 티켓 → 사용자 행. 티켓이 죽었으면 처음부터 다시 로그인시킨다
+    const ticket = verifyIdentityTicket(req.body.identityTicket);
+    const user = ticket ? await loadLoginUser(ticket.userId) : null;
+    if (!user) {
+      return res.status(401).json({ error: '본인인증 시간이 만료되었습니다. 다시 로그인해주세요.', code: 'IDENTITY_TICKET_INVALID' });
+    }
+    const started = await startIdentityVerification({ userId: user.id, purpose: 'first_login', req });
+    if (started.status === 'unavailable') return res.status(503).json(IDENTITY_UNAVAILABLE_RESPONSE);
+    await recordAuditLog({ actorUserId: user.id, action: 'identity_verify_start',
+      targetType: 'user', targetId: user.id,
+      details: { loginId: user.login_id, purpose: 'first_login', provider: started.provider },
+      req,
+    });
+    return res.json({ verificationId: started.verificationId, provider: started.provider, start: started.start });
+  } catch (error) {
+    if (isIdentitySchemaMissing(error)) return res.status(503).json(IDENTITY_MIGRATION_RESPONSE);
+    console.error('[identity/start]', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+router.post('/identity/complete', loginLimiter, async (req: Request, res: Response) => {
+  try {
+    const ticket = verifyIdentityTicket(req.body.identityTicket);
+    const user = ticket ? await loadLoginUser(ticket.userId) : null;
+    if (!user) {
+      return res.status(401).json({ error: '본인인증 시간이 만료되었습니다. 다시 로그인해주세요.', code: 'IDENTITY_TICKET_INVALID' });
+    }
+    // 티켓 발급 이후 회사·계정 상태가 바뀌었을 수 있다 — 통과 직전에 다시 본다
+    const denial = resolveCompanyAccessDenial(user.company_status);
+    if (denial) return res.status(403).json({ error: denial.message });
+    if (!user.is_active || user.status !== 'active') {
+      return res.status(403).json({ error: '로그인할 수 없는 계정입니다. 관리자에게 문의해주세요.' });
+    }
+
+    const done = await completeIdentityVerification({
+      userId: user.id,
+      verificationId: String(req.body.verificationId || ''),
+      payload: req.body.result,
+      req,
+    });
+    if (done.status !== 'verified') {
+      await recordAuditLog({ actorUserId: user.id, action: 'identity_verify_fail',
+        targetType: 'user', targetId: user.id,
+        details: { loginId: user.login_id, purpose: 'first_login', result: done.status, reason: done.status === 'rejected' ? done.reason : null },
+        req,
+      });
+      const failure = identityFailureResponse(done);
+      return res.status(failure.http).json(failure.body);
+    }
+    await recordAuditLog({ actorUserId: user.id, action: 'identity_verified',
+      targetType: 'user', targetId: user.id,
+      details: { loginId: user.login_id, purpose: 'first_login', name: done.name, phoneMasked: done.maskedPhone, before: done.before },
+      req,
+    });
+
+    // 인증된 이름·번호가 반영된 행으로 세션을 발급한다.
+    // 본인인증이 이 로그인의 추가 인증이다 — 방금 그 휴대폰을 가진 사람임이 확인됐으므로 인증번호를 또 묻지 않는다.
+    const fresh = (await loadLoginUser(user.id)) || user;
+    const issue = await issueUserLogin({
+      user: fresh,
+      loginId: fresh.login_id,
+      appSource: normalizeAppSource(req.body.appSource),
+      req,
+      takeoverTicket: req.body.takeoverTicket,
+      ipForBlock: req.ip || '',
+      identity: done.clearance,
+    });
+    // 다중 인증 통과 경로와 같은 규칙 — "이미 접속 중"이면 인계 재시도용 1회 통과권을 함께 준다
+    if (issue.status === 'conflict') {
+      const mfaDeviceToken = await issueTakeoverPass(fresh.id, req);
+      return res.status(409).json({ ...issue.conflict, mfaDeviceToken });
+    }
+    if (issue.status === 'geo_blocked') return res.status(403).json({ error: issue.message });
+    return res.json(issue.body);
+  } catch (error) {
+    if (isIdentitySchemaMissing(error)) return res.status(503).json(IDENTITY_MIGRATION_RESPONSE);
+    console.error('[identity/complete]', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+/** 설정 화면 「계정관리자 인증」 카드 — 기능이 열리지 않은 계정에는 `enabled: false`만 돌려준다 */
+router.get('/identity/me', authenticate, async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId || req.user.userType === 'super_admin') return res.json({ enabled: false });
+    if (!isIdentityVerifyActiveFor({ login_id: req.user.loginId })) return res.json({ enabled: false });
+    const summary = await loadIdentitySummary(req.user.userId);
+    return res.json({ enabled: true, ...summary });
+  } catch (error) {
+    console.error('[identity/me]', error);
+    return res.status(500).json({ error: '담당자 정보를 불러오지 못했습니다.' });
+  }
+});
+
+router.post('/identity/change/start', authenticate, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId || req.user?.userType === 'super_admin' || !isIdentityVerifyActiveFor({ login_id: req.user?.loginId })) {
+      return res.status(403).json({ error: '본인인증이 아직 열리지 않은 계정입니다.', code: 'IDENTITY_NOT_ENABLED' });
+    }
+    const started = await startIdentityVerification({ userId, purpose: 'change', req });
+    if (started.status === 'unavailable') return res.status(503).json(IDENTITY_UNAVAILABLE_RESPONSE);
+    await recordAuditLog({ actorUserId: userId, action: 'identity_verify_start',
+      targetType: 'user', targetId: userId,
+      details: { loginId: req.user?.loginId, purpose: 'change', provider: started.provider },
+      req,
+    });
+    return res.json({ verificationId: started.verificationId, provider: started.provider, start: started.start });
+  } catch (error) {
+    if (isIdentitySchemaMissing(error)) return res.status(503).json(IDENTITY_MIGRATION_RESPONSE);
+    console.error('[identity/change/start]', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+router.post('/identity/change/complete', authenticate, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId || req.user?.userType === 'super_admin' || !isIdentityVerifyActiveFor({ login_id: req.user?.loginId })) {
+      return res.status(403).json({ error: '본인인증이 아직 열리지 않은 계정입니다.', code: 'IDENTITY_NOT_ENABLED' });
+    }
+    const done = await completeIdentityVerification({
+      userId,
+      verificationId: String(req.body.verificationId || ''),
+      payload: req.body.result,
+      req,
+    });
+    if (done.status !== 'verified') {
+      await recordAuditLog({ actorUserId: userId, action: 'identity_verify_fail',
+        targetType: 'user', targetId: userId,
+        details: { loginId: req.user?.loginId, purpose: 'change', result: done.status, reason: done.status === 'rejected' ? done.reason : null },
+        req,
+      });
+      const failure = identityFailureResponse(done);
+      return res.status(failure.http).json(failure.body);
+    }
+    await recordAuditLog({ actorUserId: userId, action: 'identity_verified',
+      targetType: 'user', targetId: userId,
+      details: { loginId: req.user?.loginId, purpose: 'change', name: done.name, phoneMasked: done.maskedPhone, before: done.before },
+      req,
+    });
+    return res.json({ success: true, name: done.name, maskedPhone: done.maskedPhone });
+  } catch (error) {
+    if (isIdentitySchemaMissing(error)) return res.status(503).json(IDENTITY_MIGRATION_RESPONSE);
+    console.error('[identity/change/complete]', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });

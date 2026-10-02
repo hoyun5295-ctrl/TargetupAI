@@ -161,3 +161,8 @@ pm2 logs hanjuldm-api --lines 100
 - [ ] preview 도구 사용 X
 - [ ] 새 config 파일 import 추가 시 package.json devDependencies 등록 grep 검증
 - [ ] PM2 변경 시 `pm2 delete` 패턴 X (`pm2 reload` 또는 `startOrReload` 우선)
+
+### 2026-10-02 요청 제한 뒤에 자동 차단이 붙어 있으면, 정상 사용의 "한꺼번에 많이"가 곧 고객사 전체 차단이다 ([B-1002-2](../BUGS.md))
+- **사고**: nginx 가 `/api/` 전체를 IP 당 초 30건으로 제한했고 DM 이미지 경로가 그 안에 있었다. DM 화면 하나가 이미지 100장 이상을 한꺼번에 불러 429 가 났고, fail2ban(`nginx-limit-req`)이 그 로그를 보고 고객사 공인 IP 를 1시간 차단했다. 고객 화면은 로그인 실패가 아니라 `ERR_CONNECTION_TIMED_OUT` 이었다(회사 PC 전부). 9/30 에도 같은 차단이 있었는데 그때는 원인을 못 잡았다.
+- **보는 순서**: 브라우저의 연결 시간 초과 = 앱보다 아래에서 막힌 것이다. 앱 차단 표(`login_blocks`)가 0건이면 nginx 접속 로그의 **그 IP 마지막 요청과 429** → fail2ban 로그의 `Ban` 순서로 본다. 배포(백엔드 재기동)는 502 로 보이지 특정 IP 만 끊기지 않는다.
+- **규칙**: ① 이미지·정적 파일처럼 한 화면이 한꺼번에 부르는 경로는 API 요청 제한과 **위치 블록을 따로** 둔다 ② 요청 제한을 걸 때는 그 로그를 읽는 자동 차단(fail2ban)이 있는지 함께 본다 — 제한은 요청 하나를 거절하지만 차단은 회사 전체를 끊는다 ③ 새 화면이 `/api/` 로 한꺼번에 많은 요청을 내면 같은 일이 난다 → 걸린 경로는 `zgrep "limiting requests" /var/log/nginx/error.log*` 로 실데이터로 센다. 설정·명령 = [OPS §4-3](../OPS.md).

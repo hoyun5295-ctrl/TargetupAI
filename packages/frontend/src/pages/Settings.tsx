@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { formatPhoneNumber } from '../utils/formatDate';
+import { formatPhoneNumber, formatDate } from '../utils/formatDate';
+import IdentityVerifyModal from '../components/IdentityVerifyModal';
 import {
   Building2, Users, PhoneCall, Wallet, Clock, ArrowLeft, Trash2, Plus,
-  Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight,
+  Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, ShieldCheck,
 } from 'lucide-react';
 
 const inputCls =
@@ -25,6 +26,11 @@ export default function Settings() {
   const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean, store_code?: string, store_name?: string}[]>([]);
   const [callbackPage, setCallbackPage] = useState(0);
   const callbackPageSize = 5;
+  // ★ 2026-10-02 계정관리자 인증(담당자 본인인증) — enabled가 false면 카드 자체를 그리지 않는다
+  const [identityInfo, setIdentityInfo] = useState<{
+    enabled: boolean; name?: string | null; maskedPhone?: string | null; verifiedAt?: string | null;
+  } | null>(null);
+  const [showIdentityChange, setShowIdentityChange] = useState(false);
 
   // 토스트
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
@@ -89,10 +95,24 @@ export default function Settings() {
         setCallbackNumbers(cbData.numbers || []);
       }
 
+      await loadIdentityInfo();
+
     } catch (error) {
       console.error('설정 로드 실패:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ★ 2026-10-02 계정관리자 인증 카드 — 서버가 "열림"이라고 답한 계정에만 그린다. 조회가 실패하면 카드를 그리지 않는다
+  const loadIdentityInfo = async () => {
+    try {
+      const res = await fetch('/api/auth/identity/me', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setIdentityInfo(res.ok ? await res.json() : null);
+    } catch {
+      setIdentityInfo(null);
     }
   };
 
@@ -228,6 +248,44 @@ export default function Settings() {
               </div>
             </div>
           </section>
+
+          {/* ★ 2026-10-02 계정관리자 인증(전송자격인증 2.1 ①-1 · 3.4 ② · ③) — 본인인증이 열린 계정에만 보인다.
+              이름·번호를 손으로 고치는 칸은 없다. 바꾸려면 새 담당자가 본인 휴대폰으로 인증한다 */}
+          {identityInfo?.enabled && (
+            <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+              <div className="mb-4 flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500"><ShieldCheck className="h-[18px] w-[18px]" /></div>
+                <div>
+                  <h2 className="text-sm font-semibold text-neutral-900">계정관리자 인증</h2>
+                  <p className="text-[11px] text-neutral-400">이 계정 담당자 · 로그인 인증번호를 받는 휴대폰</p>
+                </div>
+              </div>
+
+              {identityInfo.verifiedAt ? (
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2.5">
+                  <span className="min-w-0 flex-1 truncate text-sm text-neutral-700">
+                    <b className="font-semibold text-neutral-800">{identityInfo.name || '담당자'}</b>
+                    <span className="ml-1.5 tabular-nums text-neutral-500">{identityInfo.maskedPhone || ''}</span>
+                  </span>
+                  <span className="shrink-0 text-[11px] text-neutral-400">{formatDate(identityInfo.verifiedAt)} 인증</span>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-neutral-300 py-6 text-center text-[12.5px] text-neutral-500">아직 본인인증 전입니다</div>
+              )}
+
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-[11px] leading-relaxed text-neutral-400">
+                  담당자가 바뀌면 새 담당자 본인의 휴대폰으로 인증해 주세요. 계정 하나에 번호는 하나만 등록됩니다.
+                </p>
+                <button
+                  onClick={() => setShowIdentityChange(true)}
+                  className="flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" /> {identityInfo.verifiedAt ? '변경' : '본인인증'}
+                </button>
+              </div>
+            </section>
+          )}
 
           {/* 담당자 사전수신 */}
           <section className="rounded-2xl border border-neutral-200 bg-white p-5">
@@ -449,6 +507,19 @@ export default function Settings() {
 
         </div>
       </main>
+
+      {/* ★ 2026-10-02 담당자 변경 — 새 담당자 본인인증을 거쳐야 바뀐다 */}
+      {showIdentityChange && (
+        <IdentityVerifyModal
+          mode={{ kind: 'change' }}
+          onChanged={async (info) => {
+            setShowIdentityChange(false);
+            await loadIdentityInfo();
+            showToast('success', `담당자가 ${info.name}님(${info.maskedPhone})으로 등록되었습니다.`);
+          }}
+          onClose={() => setShowIdentityChange(false)}
+        />
+      )}
 
       {/* 토스트 */}
       {toast.show && (

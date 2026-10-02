@@ -28,7 +28,7 @@ import { distillIndustryFormula } from '../utils/industry-formula';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { invalidateCompanySessions } from '../utils/session-manager';
-import { revokeTrustedDevices, maskPhone, isMfaSchemaMissing } from '../utils/mfa';
+import { revokeTakeoverPasses, maskPhone, isMfaSchemaMissing } from '../utils/mfa';
 import { restrictAccount, isRestrictedStatus, RestrictionOutcome } from '../utils/account-action';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
@@ -315,7 +315,7 @@ router.put('/users/:id/mfa-phone', authenticate, requireSuperAdmin, async (req: 
 
     await query('UPDATE users SET mfa_phone = $1, updated_at = NOW() WHERE id = $2', [raw || null, id]);
     // 번호가 바뀌면 옛 번호로 얻은 신뢰는 무효다
-    const revoked = await revokeTrustedDevices(id);
+    const revoked = await revokeTakeoverPasses(id);
 
     await query(
       `INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, user_agent, created_at)

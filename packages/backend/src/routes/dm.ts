@@ -169,6 +169,10 @@ dmPublicRouter.get('/images/:companyId/:filename', async (req: Request, res: Res
   //   경위 = 2.4MB 원본이 메일에 그대로 실려 나가던 것(utils/image-serve.ts 주석).
   //   변환 불필요·실패 시 CT가 원본 경로를 돌려주므로 이 줄로 이미지가 안 나가는 일은 없다.
   //   `?fit=1x1&bg=<hex>` = 상품 카드가 요청하는 비율 맞춤(형식 위반·미지원 값은 CT가 무시한다).
+  // ★ 2026-10-02 하루 캐시(인앱 이미지 서빙 cdp.ts 와 같은 값) — 지시가 없으면 브라우저가 화면을 열 때마다 이미지 전부를 다시 묻는다.
+  //   DM 화면 하나가 100장 넘게 한꺼번에 물어 nginx 요청 제한에 걸렸고 고객사 IP 가 차단됐다(B-1002-2).
+  //   파일명은 업로드마다 새 UUID 라 같은 주소의 원본이 바뀌지 않는다(`?fit=` 변형은 주소가 다르다). 400·404 응답에는 싣지 않는다.
+  res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(await getServePath(filePath, parseFitOption(req.query)));
 });
 

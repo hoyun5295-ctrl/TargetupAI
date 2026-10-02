@@ -11,6 +11,11 @@
  *   2. `/auth/login` 409는 토큰을 싣지 않는다(인증번호를 거치지 않은 경로).
  *   3. 인증번호 창은 409 SESSION_IN_USE를 받으면 토큰을 보관하고, 창을 닫고, 일반 로그인 재시도용 인계 창을 연다.
  *   4. 인계 재시도(doLogin)는 보관한 토큰을 실어 인증번호 없이 통과한다.
+ *
+ * ★ 2026-10-02 기기 신뢰(24시간) 폐지 — 인증번호는 로그인할 때마다 묻는다(1001 회의 결정).
+ *   이 흐름만 남는다: 토큰은 409 응답에만 실리는 **10분 · 1회용 통과권**이고, 정상 로그인 응답에는 없다.
+ *   5. 정상 로그인 응답은 토큰을 싣지 않는다(다음 로그인에 쓸 것이 남지 않는다).
+ *   6. 로그인이 끝나면 화면이 보관한 토큰을 지운다.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -40,8 +45,22 @@ describe('서버 — 인증 통과 뒤 접속 중이면 신뢰 기기 토큰을 
   it('/auth/mfa/verify 409 응답에 mfaDeviceToken을 싣는다', () => {
     const verify = between(auth, "router.post('/mfa/verify'", "router.post('/mfa/resend'");
     expect(verify).toMatch(
-      /issue\.status === 'conflict'\)\s*return res\.status\(409\)\.json\(\{\s*\.\.\.issue\.conflict,\s*mfaDeviceToken\s*\}\)/
+      /issue\.status === 'conflict'\)\s*\{\s*const mfaDeviceToken = await issueTakeoverPass\(user\.id, req\);\s*return res\.status\(409\)\.json\(\{\s*\.\.\.issue\.conflict,\s*mfaDeviceToken\s*\}\);/
     );
+  });
+
+  it('통과권은 409 분기 안에서만 발급한다 — 정상 로그인 응답에는 실리지 않는다', () => {
+    const verify = between(auth, "router.post('/mfa/verify'", "router.post('/mfa/resend'");
+    expect(verify.match(/issueTakeoverPass\(/g) ?? []).toHaveLength(1);
+    const issueCall = between(verify, 'await issueUserLogin({', '});');
+    expect(issueCall).not.toMatch(/mfaDeviceToken/);
+    const loginIssue = stripComments(readFileSync(join(__dirname, 'login-issue.ts'), 'utf8'));
+    expect(loginIssue).not.toMatch(/mfaDeviceToken/);
+  });
+
+  it('/auth/login은 통과권을 쓰고 없앤다(1회용)', () => {
+    const login = between(auth, "router.post('/login'", "router.post('/logout'");
+    expect(login).toMatch(/await consumeTakeoverPass\(user\.id, req\.body\.mfaDeviceToken, req\)/);
   });
 
   it('/auth/login 409 응답은 토큰을 싣지 않는다', () => {
@@ -73,9 +92,10 @@ describe('로그인 화면 — 인증번호 창이 접속 중 응답을 인계 �
     expect(branch).toMatch(/setTakeover\(\{\s*ticket: data\.takeoverTicket,\s*session: data\.activeSession,\s*retry: 'login'\s*\}\)/);
   });
 
-  it('로그인 성공과 인계 분기가 같은 보관 함수를 쓴다', () => {
+  it('로그인이 끝나면 보관한 통과권을 지운다 — 다음 로그인에는 다시 인증번호를 묻는다', () => {
     const success = between(loginPage, 'const applyLoginSuccess', 'if (user.mustChangePassword)');
-    expect(success).toMatch(/rememberMfaDevice\(mfaDeviceToken\)/);
+    expect(success).toMatch(/localStorage\.removeItem\('mfaDeviceToken'\)/);
+    expect(success).not.toMatch(/rememberMfaDevice\(/);
     expect(loginPage.match(/localStorage\.setItem\('mfaDeviceToken'/g) ?? []).toHaveLength(1);
   });
 

@@ -2,6 +2,7 @@
 import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
+import IdentityVerifyModal from '../components/IdentityVerifyModal';
 import { COMPANY_NAME, CEO_NAME, BIZ_NUMBER, TRADE_NUMBER, COMPANY_ADDRESS, COMPANY_PHONE } from '../constants/company';
 
 export default function LoginPage() {
@@ -70,6 +71,9 @@ export default function LoginPage() {
   const [mfaLoading, setMfaLoading] = useState(false);
   const [mfaResendMsg, setMfaResendMsg] = useState('');
 
+  // ★ 2026-10-02 담당자 본인인증(최초 1회) — 서버가 요구할 때만 열린다(스위치·명단 밖 계정에는 오지 않는다)
+  const [identity, setIdentity] = useState<{ ticket: string } | null>(null);
+
   // 로그인 보안 강화 사전 고지 — 시행일(9/1) 전까지, 확인 전까지만 노출
   const [showSecurityNotice, setShowSecurityNotice] = useState(
     () => Date.now() < new Date('2026-09-01T00:00:00+09:00').getTime()
@@ -90,15 +94,20 @@ export default function LoginPage() {
    * 로그인 성공 처리 — 일반 로그인과 MFA 통과가 같은 것을 쓴다.
    * 두 벌이 되면 한쪽만 고쳐지는 날이 온다(비밀번호 변경·에이전트 랜딩·카페24 복귀 분기가 조용히 갈린다).
    */
-  /** 이 기기를 24시간 신뢰 — 다음 로그인 때 인증번호를 묻지 않는다. 로그인 성공과 인계 분기가 같은 것을 쓴다 */
+  /**
+   * 접속 인계용 1회 통과권 보관 — 인증을 통과한 직후 "이미 접속 중" 안내를 받았을 때만 서버가 준다.
+   * 인계에 동의해 다시 보내는 로그인 한 번에 쓰이고 사라진다(같은 인증번호를 두 번 묻지 않게).
+   * ★ 2026-10-02 기기를 24시간 신뢰하던 방식은 없앴다 — 인증번호는 로그인할 때마다 묻는다.
+   */
   const rememberMfaDevice = (deviceToken?: string) => {
     if (deviceToken) localStorage.setItem('mfaDeviceToken', deviceToken);
   };
 
   const applyLoginSuccess = (data: any) => {
-    const { token, user, sessionTimeoutMinutes, mfaDeviceToken } = data;
+    const { token, user, sessionTimeoutMinutes } = data;
     localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || 30));
-    rememberMfaDevice(mfaDeviceToken);
+    // 통과권은 1회용이다 — 로그인이 끝났으면 남겨 두지 않는다(옛 24시간 신뢰 토큰도 여기서 정리된다)
+    localStorage.removeItem('mfaDeviceToken');
 
     if (user.mustChangePassword) {
       setTempUser(user);
@@ -141,7 +150,7 @@ export default function LoginPage() {
         userType: isSuperAdminOnly ? 'super_admin' : undefined,
         totpCode: showTotp ? totpCode.trim() : undefined,
         takeoverTicket,
-        // 이 기기가 24시간 신뢰 안이면 서버가 인증번호를 묻지 않는다
+        // 접속 인계 재시도일 때만 뜻이 있다 — 방금 받은 1회 통과권이 있으면 서버가 인증번호를 다시 묻지 않는다
         mfaDeviceToken: localStorage.getItem('mfaDeviceToken') || undefined,
       } as any);
 
@@ -185,6 +194,9 @@ export default function LoginPage() {
         // 발송 진행 중 — 로그인 차단
         setSendingBlockMessage(data.error);
         setShowSendingBlockModal(true);
+      } else if (status === 401 && data?.identityRequired) {
+        // ★ 2026-10-02 담당자 본인인증 — 최초 1회. 아직 로그인 토큰은 받지 않았다
+        setIdentity({ ticket: data.identityTicket });
       } else if (status === 401 && data?.mfaRequired) {
         // ★ 다중 인증 — 등록된 담당자 번호로 6자리가 갔다. 아직 로그인 토큰은 받지 않았다
         setMfa({ ticket: data.mfaTicket, maskedPhone: data.maskedPhone, expiresInMinutes: data.expiresInMinutes || 5 });
@@ -231,6 +243,14 @@ export default function LoginPage() {
           setMfaCode('');
           setMfaResendMsg('');
           setTakeover({ ticket: data.takeoverTicket, session: data.activeSession, retry: 'login' });
+          return;
+        }
+        // ★ 2026-10-02 인증번호는 통과했는데 담당자 본인인증이 남았다 — 인증번호 창을 닫고 본인인증 창으로 넘긴다
+        if (res.status === 401 && data?.identityRequired) {
+          setMfa(null);
+          setMfaCode('');
+          setMfaResendMsg('');
+          setIdentity({ ticket: data.identityTicket });
           return;
         }
         // 티켓이 죽었거나 계정이 잠겼으면 처음부터 다시 — 입력창을 닫고 사유를 로그인 화면에 남긴다
@@ -1026,6 +1046,20 @@ export default function LoginPage() {
       {/* 모달들 */}
       {securityNoticeModal}
       {mfaModal}
+      {identity && (
+        <IdentityVerifyModal
+          mode={{ kind: 'login', ticket: identity.ticket }}
+          onLoginSuccess={(data) => { setIdentity(null); applyLoginSuccess(data); }}
+          onTakeover={(data) => {
+            // 인증번호 창의 인계 분기와 같은 처리 — 통과권을 보관하고 인계 창으로 넘긴다
+            rememberMfaDevice(data.mfaDeviceToken);
+            setIdentity(null);
+            setTakeover({ ticket: data.takeoverTicket, session: data.activeSession, retry: 'login' });
+          }}
+          onExpired={(message) => { setIdentity(null); setError(message); }}
+          onClose={() => setIdentity(null)}
+        />
+      )}
       {takeoverModal}
       {forceLogoutModal}
       {sendingBlockModalEl}

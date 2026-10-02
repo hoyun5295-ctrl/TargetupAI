@@ -28,6 +28,10 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // ★ 2026-09-12 발신 인증(추가 인증 · 전송자격인증 3.5) — 발송 시 발신번호·계정 연계 확인
   sender_auth_challenge: '발신 인증 요청',
   sender_auth_success: '발신 인증 성공',
+  // ★ 2026-10-02 담당자 본인인증(전송자격인증 2.1 ①-1 · 3.4 ② · ③) — utils/identity-verify.ts
+  identity_verify_start: '본인인증 시작',
+  identity_verified: '본인인증 완료',
+  identity_verify_fail: '본인인증 실패',
   // ★ 2026-09-12 발신 프로필 사용 중지(슈퍼관리자 · 직원 접수 4번)
   kakao_profile_disabled: '카카오 발신 프로필 사용 중지',
   totp_enroll_start: 'OTP 등록 시작',
@@ -161,6 +165,11 @@ const ISSUED_USER_TYPE_LABEL: Record<string, string> = {
 };
 const USAGE_TYPE_LABEL: Record<string, string> = {
   web: '웹 발송', agent: '발송 전용', both: '웹 발송 + 발송 전용',
+};
+/** ★ 2026-10-02 본인인증 기록의 값 → 한글. 원본은 백엔드 `utils/identity-verify.ts`(IdentityPurpose · IdentityCompletion) */
+const IDENTITY_PURPOSE_LABEL: Record<string, string> = { first_login: '최초 등록', change: '담당자 변경' };
+const IDENTITY_FAIL_LABEL: Record<string, string> = {
+  provider: '인증기관 확인 실패', invalid_identity: '이름·번호 확인 불가', expired: '시간 초과', unavailable: '인증기관 준비 안 됨',
 };
 
 /** 실패·차단 사유 → 한글 */
@@ -311,6 +320,23 @@ export function formatAuditDetail(action: string, details: any): string {
       ].filter(Boolean).join(' · ');
     case 'admin_password_changed':
       return `${d.login_id || ''} 비밀번호 변경${d.reason === 'initial_password' ? ' (초기 비밀번호 교체)' : ''}`;
+    // ★ 2026-10-02 담당자 본인인증 — 최초 등록인지 담당자 변경인지, 누구로 등록됐는지(번호는 가린 값)
+    case 'identity_verify_start':
+      return [d.loginId, IDENTITY_PURPOSE_LABEL[d.purpose] || d.purpose].filter(Boolean).join(' · ');
+    case 'identity_verified':
+      return [
+        d.loginId,
+        IDENTITY_PURPOSE_LABEL[d.purpose] || d.purpose,
+        d.name && `담당자 ${d.name}`,
+        d.phoneMasked,
+        d.before?.maskedMfaPhone && d.before.maskedMfaPhone !== d.phoneMasked && `종전 번호 ${d.before.maskedMfaPhone}`,
+      ].filter(Boolean).join(' · ');
+    case 'identity_verify_fail':
+      return [
+        d.loginId,
+        IDENTITY_PURPOSE_LABEL[d.purpose] || d.purpose,
+        IDENTITY_FAIL_LABEL[d.reason || d.result] || d.reason || d.result,
+      ].filter(Boolean).join(' · ');
     // ★ 2026-10-02 계정 발급 · 고객사 등록(전송자격인증 4.1 ②) — 누구 계정을, 어느 고객사에, 어떤 경로로
     case 'user_account_created':
       return [

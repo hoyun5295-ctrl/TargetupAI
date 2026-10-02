@@ -565,6 +565,19 @@ C:\Users\ceo\projects\targetup\  (로컬)
 | sys.hanjullo.com | /etc/letsencrypt/live/sys.hanjullo.com/ | 2026-05-08 |
 | app.hanjul.ai | /etc/letsencrypt/live/app.hanjul.ai/ | 2026-05-08 |
 
+### 4-3. 요청 제한(nginx) + 자동 차단(fail2ban) (★2026-10-02 실측 · [B-1002-2](BUGS.md))
+
+- **요청 제한 구역**(`/etc/nginx/conf.d/00-security.conf` · 넘으면 429): `login_zone` 분 5 · `upload_zone` 분 10 · `api_zone` 초 30 · `webhook_zone` 분 300. hanjul.ai(`sites-enabled/targetup`)의 `location /api/` = `api_zone burst=100` · `/c/` = `api_zone burst=50`. `sys.hanjullo.com` · `app.hanjul.ai` 에도 같은 구역이 걸려 있다.
+- **자동 차단**(.62 · `fail2ban` · `ufw` 가동 · `/etc/fail2ban/jail.d/nginx.local`): `nginx-limit-req` = nginx 오류 로그의 `limiting requests` 가 **10분에 5번이면 그 IP 를 1시간 방화벽 차단**(`maxretry 5 · findtime 600 · bantime 3600`) · `nginx-badbot` = 1번에 하루. 차단된 IP 는 로그인 화면도 못 연다(브라우저 `ERR_CONNECTION_TIMED_OUT`) · 같은 공인 IP 를 쓰는 회사 PC 전부가 막힌다.
+- ⛔ **한 화면이 한꺼번에 많이 부르는 경로를 `/api/` 제한 안에 두지 않는다.** DM 이미지(`/api/dm/v/images/`)가 그랬다 → ★1002 전용 위치 블록으로 뺐다(`location ^~ /api/dm/v/images/` · 요청 제한 없음 · `location /api/` 앞). 수정 전 원본 = `/home/administrator/nginx-targetup.bak-20261002`.
+- **「접속이 안 된다 · 연결 시간 초과」 접수가 오면**(전부 조회):
+  1. 앱 기록: `audit_logs` 에서 그 계정의 최근 `login_*` 와 IP · `login_blocks`(앱 차단이면 화면에 문구가 뜬다 — 시간 초과가 아니다).
+  2. 그 IP 의 마지막 요청과 429: `grep -h "^<IP> " /var/log/nginx/access.log | awk '{print substr($4,14,5), $9}' | sort | uniq -c | tail -40`
+  3. 차단 기록: `grep -h "<IP>" /var/log/fail2ban.log | tail` · 제한에 걸린 경로: `grep -h "<IP>" /var/log/nginx/error.log | tail -5`
+  4. 감옥 전체 이력: `zgrep -h "\[nginx-limit-req\] Ban" /var/log/fail2ban.log* | awk '{print $1, $NF}' | sort | uniq -c`
+- **해제**(root): `fail2ban-client set nginx-limit-req unbanip <IP>` → `1` 이 나오면 해제. 두면 1시간 뒤 자동 해제.
+- **수정 뒤 확인**(고객이 DM 화면을 다시 연 뒤): 반영 시각 뒤로 `limiting requests` 0건 · 그 IP 의 429 0건 · fail2ban `Found`/`Ban` 0건.
+
 ---
 
 ## 5. 상용 PostgreSQL 튜닝 (62GB RAM, 8코어)
@@ -792,23 +805,18 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 
 ## 8. 스팸필터 테스트 시스템
 
-- 테스트폰 3대 설치 (SKT/KT/LGU+ 모두 활성)
-- SMS/LMS 수신 테스트 성공 (기본 SMS 앱 설정 불필요)
-- 스팸 판정 15초 폴링 (QTmsg 성공 + 앱 미수신 = 즉시 blocked)
-- APK 경로: `C:\spam\app\build\outputs\apk\debug\app-debug.apk`
-- `.\gradlew assembleDebug` 로 커맨드라인 빌드 가능 (Android Studio 불필요)
+> 구조·판정 계약·소스 위치·재오픈 조사 순서·이력 = **[스팸 검사 기능 문서](../docs/FEATURE-SPAM-CHECK.md)**가 소유한다. 여기는 운영 명령만.
 
-### 8-1. 수신 보고 구조 (★2026-10-02 · 앱 1.2 + 서버 · 경위 = [B-1002-1](BUGS.md))
+- 테스트폰 3대(SKT · KT · LG U+) · 기본 SMS 앱 설정 불필요 · 폰 앱 = 스팸한줄(현재 1.2 · 2026-10-02 3대 설치)
+- 앱 소스 = `C:\spam`(git 저장소 아님) · 빌드 = `cd /c/spam && ./gradlew.bat testDebugUnitTest assembleDebug --console=plain -q`(Android Studio 불필요) · APK = `C:\spam\app\build\outputs\apk\debug\app-debug.apk`(1.2 사본 `C:\spam\release\spamhanjul-1.2.apk`)
 
-- **앱 소스** = `C:\spam`(git 저장소 아님 · 1.1 소스 사본 = `C:\spam\release\backup-1.1\`). 패키지 `com.example.cominvitospamhanjul` · 버전은 앱 첫 화면 「버전 x.y」.
-- **앱 1.2 의 보고**: 문자를 받으면 먼저 저장(`files/report_outbox.json`)하고, 일꾼 하나가 서버가 답할 때까지 최대 10분 다시 보낸다. 수신 알림이 끝나면 시스템 전송 작업(`ReportJobService`)이 앱을 살려 둔다. LMS 는 알림 뒤 수신함을 2초마다 다시 읽어 본문이 생기면 보고한다.
-- **요청에 싣는 값**: `ageMs`(받은 뒤 지난 시간 · 폰 시계의 시각은 보내지 않는다) · `attempt` · `appVersion`. 1.1 은 셋 다 없다.
-- **차단 확정 시점**(`utils/spam-test-queue.ts spamBlockedDue` · 수동 검사 라우트와 큐 워커 공용): 「통신사 성공 + 보고 없음」은 통신사 성공을 본 뒤 유예(수동 10초 · 큐 20~25초)가 지나고 **검사를 시작한 뒤 45초**가 지나야 차단으로 확정한다. 진짜 차단은 45초쯤에 뜬다(종전 30초쯤). 화면은 60초에 읽기를 멈춘다.
-- **서버 판정**(`utils/spam-test-queue.ts resolveSpamReportTest`): 문안이 같은 검사 중 문자를 받기 전에 만든 것 → 닫힌 지 10분 안이면 늦은 보고로 고친다(차단·시간초과 → 통과 · 발송 실패 행은 그대로). 문안이 같은 검사가 없으면 종전 규칙. `ageMs` 없는 보고(1.1)는 진행 중인 검사만.
-- **서버 로그**(`~/.pm2/logs/targetup-backend-out*.log`): `리포트 수신 — … age=Ns try=N app=1.2` · `리포트 매칭 성공 — … via=hash|single|device[, late]` · `늦은 보고로 판정 정정 — …`(닫힌 검사의 행을 고친 건수) · `리포트 매칭 없음 — …`.
-- **폰 로그 확인**(USB 디버깅 · 로컬 PowerShell): `adb logcat -s SpamHanjul` — `SMS 보고를 대기열에 저장` → `SMS 리포트 응답 200 (시도 N · 수신 후 Nms)`. 못 보내면 `리포트 전송 실패 … 대기열에 남기고 다시 보낸다` 뒤에 응답 200 이 이어져야 한다.
-- **설치**: `adb install -r C:\spam\app\build\outputs\apk\debug\app-debug.apk`(설정 유지). 설치 뒤 앱을 한 번 연다(LMS 기준선 · 남은 보고 전송).
-- **남는 한계**: 폰이 문자를 못 받는 상태(전원 꺼짐 · 강제 종료)는 앱이 알 수 없다 · 판정이 난 뒤(검사 시작 뒤 45초 초과)에 닿은 보고는 DB 만 고쳐진다(열려 있는 검사 화면은 완료 뒤 다시 읽지 않는다) · 발신번호와 문안이 같은 문자는 서로 구별하지 못한다.
+### 8-1. 설치 · 로그 확인 (★2026-10-02)
+
+- **설치**(로컬 PowerShell · 폰의 USB 디버깅 필요 · 설정 유지): `& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" install -r C:\spam\app\build\outputs\apk\debug\app-debug.apk`. 폰이 둘 이상 꽂혀 있으면 `-s <일련번호>`(일련번호 = 기능 문서 §2). 설치 뒤 앱을 한 번 연다(LMS 기준선 · 남은 보고 전송).
+- **삼성 폰**: 「보안 위험 자동 차단」이 켜져 있으면 USB 디버깅이 막힌다 → 설치할 때만 끄고 끝나면 다시 켠다. 앱은 설정에서 「강제 종료」하지 않는다(강제 종료된 앱에는 시스템이 수신 알림을 주지 않는다).
+- **폰 로그**(로컬 PowerShell): `adb logcat -d -s SpamHanjul` — `SMS 수신` → `SMS 보고를 대기열에 저장` → `SMS 리포트 응답 200 (시도 N · 수신 후 Nms)`. 못 보내면 `리포트 전송 실패 … 대기열에 남기고 다시 보낸다` 뒤에 응답 200 이 이어져야 한다. 설치된 버전 = `adb shell dumpsys package com.example.cominvitospamhanjul | grep versionName`.
+- **서버 로그**(.62): `grep -h "SpamFilter" ~/.pm2/logs/targetup-backend-out*.log | grep -E "리포트 수신|리포트 매칭|늦은 보고로 판정 정정|BLOCKED 판정" | tail -20` — `리포트 수신 — … age=Ns try=N app=1.2` · `리포트 매칭 성공 — … via=hash|single|device[, late]` · `늦은 보고로 판정 정정 — …`(닫힌 검사의 행을 고친 건) · `리포트 매칭 없음 — …`.
+- 읽는 법과 조사 순서 = 기능 문서 §3.
 
 ---
 
