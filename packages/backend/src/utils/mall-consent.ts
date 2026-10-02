@@ -111,9 +111,15 @@ let warnedMissingColumn = false;
 export function _resetMallConsentWarnForTest(): void { warnedMissingColumn = false; }
 
 /**
- * 몰이 준 수신동의를 그 몰의 소속 행에 쓴다(쓰기 입구는 여기 하나). 소속 행은 linkCustomerStore 가 먼저 만든다.
+ * 몰이 준 수신동의를 그 몰의 소속 행에 쓴다(명시 값 쓰기 입구는 여기 하나).
  * 조건이 (회사 + 고객 + 분류코드)라 다른 몰의 행에는 닿지 않는다 = H2 를 쓰기에서 보장.
  * 컬럼 미존재(DDL 전 · 42703)는 적재를 죽이지 않는다 — false 를 돌려주고 1회만 경고한다. 그 밖의 오류는 던진다.
+ *
+ * ★2026-10-02 소속 행이 없어도 **행을 만들어서** 값을 남긴다(Codex 1002 R1 high).
+ *   종전에는 UPDATE 뿐이라, 분류 기록(linkCustomerStore · 실패를 삼킨다)이 실패한 건의 명시 거부가 0행으로 조용히 빠졌다.
+ *   그때까지는 그 사람이 「모름」으로 남아 발송에서 빠졌지만, 「회원 정보에 값이 없으면 동의」 규칙(아래)이 생기면 빠진 거부 뒤의
+ *   값 없는 회원 정보 재수신이 그 사람을 동의로 채운다. 명시 값은 소속 행의 존재에 기대지 않아야 한다.
+ *   다른 회사의 같은 (고객 · 코드) 행은 건드리지 않는다(그런 행은 없어야 하지만 조건으로 닫아 둔다 · 그때는 false).
  */
 export async function upsertStoreConsent(
   companyId: string,
@@ -126,9 +132,11 @@ export async function upsertStoreConsent(
   if (!companyId || !customerId || !code) return false;
   try {
     const r = await query(
-      `UPDATE customer_stores
-          SET sms_opt_in = $4, consent_source = $5, consent_at = NOW()
-        WHERE company_id = $1::uuid AND customer_id = $2::uuid AND store_code = $3`,
+      `INSERT INTO customer_stores (company_id, customer_id, store_code, sms_opt_in, consent_source, consent_at)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, NOW())
+       ON CONFLICT (customer_id, store_code) DO UPDATE
+          SET sms_opt_in = EXCLUDED.sms_opt_in, consent_source = EXCLUDED.consent_source, consent_at = EXCLUDED.consent_at
+        WHERE customer_stores.company_id = EXCLUDED.company_id`,
       [companyId, customerId, code, optIn, source],
     );
     return (r.rowCount || 0) > 0;
@@ -140,6 +148,95 @@ export async function upsertStoreConsent(
       }
       return false;
     }
+    throw err;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ★2026-10-02 「회원 정보에 동의 값이 없으면 동의」 규칙 — 몰(분류코드) 단위로 켠다
+//
+// 경위: 이에스페이먼트 대표 확인(박성용 전달 · 1002) = 「no 만 수신거부 · 아무것도 없거나 YES 는 문자 보낼 수 있다」.
+//   운영 실측(1002): 4몰 수집 값은 `YES`·`NO` 둘뿐이고 「모름」은 값이 빈 것이 아니라 **그 키 자체가 없는 건**이다.
+//   소속 행 「모름」 44,982 중 41,444 가 그 몰의 회원 연결이 있는 고객이다(렌즈고고 39,112) · 비회원뿐 3,538.
+//
+// 규칙: 연동 행 `company_integrations.meta.consent_missing_agree_key = '<동의 키 이름>'` 인 몰은, **그 회원의 회원 정보를 그 키로 읽었는데
+//   동의 값이 없다고 확인된 때** 그 몰 소속 행의 동의가 모름(NULL)이면 동의로 채운다. 기본(키 없음) = 종전대로 모름(다른 고객사는 1바이트도 달라지지 않는다).
+//   ⛔ 규칙은 **동의 키 이름에 묶인다**. 연결 폼의 동의 키는 고객사가 고칠 수 있고, 잘못 적힌 키로 읽으면 모든 회원이 「값 없음」으로 보인다.
+//      켤 때 적은 키와 지금 읽은 키가 다르면 규칙은 멈춘다(모름으로 남는다 = 덜 보내는 방향).
+//
+// ⛔ 채우는 조건은 **저장하는 SQL 한 문장이 전부 본다**(호출 종류·캐시로 미루어 짐작하지 않는다 — Codex 1002 R1·R2·R3 가 같은 뿌리로 세 번 짚었다):
+//    ⓪ 그 순간 그 몰에 그 키의 규칙이 켜져 있을 때만. 규칙을 앱 메모리에 담아 두지 않는다 — 끈 뒤에도 담아 둔 값으로 동의를 다시 만든다(R3).
+//    ① 그 소속 행이 모름일 때만 = 명시 값(YES·NO)을 덮지 않는다. 명시 값이 나중에 오면 `upsertStoreConsent` 가 출처째 덮는다.
+//    ② 그 고객에게 **그 몰의 다른 회원 연결이 없을 때만**. 전화번호로 합쳐져 회원 계정이 둘 이상인 고객은, 한 계정의 「값 없음」이
+//       다른 계정의 아직 못 읽은 NO 를 덮을 수 있다 → 그런 고객은 명시 값만 믿는다.
+// ⛔ 주문에서는 부르지 않는다. 주문에는 동의 키가 실리지 않고, 비회원 주문도 전화번호로 회원 고객에 합쳐진다. 프로필에 휴대폰이 없어
+//    회원 정보를 못 읽은 채 주문으로 생긴 고객의 NO 를 동의로 바꾸게 된다. 비회원(회원 정보가 없는 구매자)은 이 규칙의 대상이 아니다.
+// ⛔ 읽는 쪽에 「모름도 동의」 분기를 두지 않는다 — 읽는 자리는 전부 `sms_opt_in = true` 하나만 본다(규칙은 쓰는 자리 한 곳).
+// ⛔ 고객이 스스로 켜는 값이 아니다. 고객사의 서면 확인을 받은 뒤 우리가 연동 행에 적는다(화면 칸 없음 · 설계서 §12).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 규칙을 켜는 연동 행 meta 키 — 값 = 그 규칙을 적용할 동의 키 이름(그 키로 읽었을 때 값이 없으면 동의) */
+export const MISSING_CONSENT_RULE_KEY = 'consent_missing_agree_key';
+/** 규칙으로 채운 값의 출처(`consent_source` varchar(60)) — 명시 값과 구분된다(되돌리기 축) */
+export const missingConsentSource = (source: string): string => `${String(source || 'unknown')}:missing=agree`.slice(0, 60);
+
+/**
+ * 「이 회원의 회원 정보에 동의 값이 없음」을 확인한 호출이 싣는 것.
+ * `memberIdPrefix` + `memberIdRestPattern` = 그 몰의 **회원** 연결 식별자 모양(예: 우커머스 `{몰}:` + 숫자뿐).
+ * 그 모양의 다른 연결(이 호출의 `externalId` 가 아닌 것)이 그 고객에게 있으면 채우지 않는다.
+ */
+export interface MissingConsentProfile {
+  source: string;
+  externalId: string;
+  /** 이 회원 정보를 읽은 동의 키 이름 — 규칙을 켤 때 적은 키와 같아야 한다 */
+  consentKey: string;
+  memberIdPrefix: string;
+  memberIdRestPattern: string;
+}
+
+/**
+ * 회원 정보에 동의 값이 없는 회원 — 규칙이 켜진 몰이면 그 몰 소속 행의 동의를 동의로 채운다(위 ⓪①② 를 SQL 이 본다).
+ * 규칙 판정 = 같은 회사의 연동 행 중 분류코드가 같고 `meta.consent_missing_agree_key` 가 이 회원 정보를 읽은 키와 같은 행이 있는가
+ *   (해제된 연동 행도 포함 — `getMallConsentStoreCodes` 와 같은 진실 · 규칙은 그 몰의 동의 단위에 붙는다).
+ * 돌려주는 값 = 실제로 채웠는가. 규칙이 꺼진 몰 · 규칙의 키와 다른 키로 읽은 회원 정보 · 이미 값이 있는 행 · 다른 회원 연결이 있는 고객 · 모양이 빈 입력은 false(쓰기 0).
+ * 컬럼 미존재(DDL 전 · 42703)는 `upsertStoreConsent` 와 같이 삼킨다. 그 밖의 오류는 던진다(호출부가 정한다).
+ */
+export async function applyMissingConsentRule(
+  companyId: string,
+  customerId: string,
+  storeCode: string | null | undefined,
+  profile: MissingConsentProfile,
+): Promise<boolean> {
+  const code = typeof storeCode === 'string' ? storeCode.trim() : '';
+  if (!companyId || !customerId || !code) return false;
+  const source = String(profile?.source || '').trim();
+  const externalId = String(profile?.externalId || '').trim();
+  const consentKey = String(profile?.consentKey || '').trim();
+  const prefix = String(profile?.memberIdPrefix || '');
+  const rest = String(profile?.memberIdRestPattern || '');
+  // 어느 키로 읽었는지 · 회원 연결의 모양을 모르면 판정할 수 없다 → 채우지 않는다(덜 보내는 방향)
+  if (!source || !externalId || !consentKey || !prefix || !rest) return false;
+  try {
+    const r = await query(
+      `UPDATE customer_stores
+          SET sms_opt_in = true, consent_source = $4, consent_at = NOW()
+        WHERE company_id = $1::uuid AND customer_id = $2::uuid AND store_code = $3
+          AND sms_opt_in IS NULL
+          AND EXISTS (
+            SELECT 1 FROM company_integrations ci
+             WHERE ci.company_id = $1::uuid AND ci.meta->>'store_code' = $3
+               AND ci.meta->>'${MISSING_CONSENT_RULE_KEY}' = $9)
+          AND NOT EXISTS (
+            SELECT 1 FROM cdp_identity_links l
+             WHERE l.company_id = $1::uuid AND l.customer_id = $2::uuid AND l.source = $5
+               AND l.external_id <> $6
+               AND left(l.external_id, char_length($7)) = $7
+               AND substr(l.external_id, char_length($7) + 1) ~ $8)`,
+      [companyId, customerId, code, missingConsentSource(source), source, externalId, prefix, rest, consentKey],
+    );
+    return (r.rowCount || 0) > 0;
+  } catch (err: any) {
+    if (err?.code === '42703') return false;
     throw err;
   }
 }

@@ -5,6 +5,8 @@ import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { getCompanyScope } from '../utils/permission-helper';
 import { getAuthSmsTable, getTestSmsTables } from '../utils/sms-queue';
+// ★ 2026-10-02 계정 발급 축(전송자격인증 2.1 · 4.1 ②) — 발급 기록 · 고객사 관리자 추가 차단 안내
+import { ACCOUNT_ISSUE_NOTICE, recordAccountIssued } from '../utils/account-issue';
 
 const router = Router();
 
@@ -12,7 +14,7 @@ const router = Router();
 //  사용자 관리 API — 공용 (슈퍼관리자 + 고객사관리자)
 //  마운트: /api/manage/users
 //  슈퍼관리자: 전체 회사 사용자 관리
-//  고객사관리자: 자사 사용자만 관리
+//  고객사관리자: 자사 사용자만 관리 (★2026-10-02 계정 추가는 불가 — 발급은 당사만)
 // ============================================================
 
 router.use(authenticate, requireCompanyAdmin);
@@ -73,8 +75,15 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // POST / - 사용자 추가 (계정 발급)
+// ★ 2026-10-02 계정 발급은 당사만 한다(전송자격인증 2.1 — 계약 확인 후 역발급 · Harold 확정).
+//   고객사 관리자는 자사 사용자를 직접 추가할 수 없다. 허용 목록으로 막는다(슈퍼관리자만 통과).
+//   화면에서 버튼을 숨기는 것만으로는 통제가 아니다 — 직접 호출이 뚫리므로 DB를 건드리기 전에 여기서 거절한다.
+//   수정 · 비밀번호 초기화 · 삭제는 그대로 둔다(퇴사자 계정을 고객사가 바로 회수할 수 있어야 한다).
 router.post('/', async (req: Request, res: Response) => {
-  const { userType: callerType, companyId: callerCompanyId } = (req as any).user!;
+  const { userType: callerType, companyId: callerCompanyId, userId: callerUserId } = (req as any).user!;
+  if (callerType !== 'super_admin') {
+    return res.status(403).json({ error: ACCOUNT_ISSUE_NOTICE, code: 'ACCOUNT_ISSUE_BY_OPERATOR' });
+  }
   const { companyId, loginId, password, name, email, phone, department, userType, storeCodes } = req.body;
 
   // 고객사관리자는 자사에만 사용자 생성 가능
@@ -139,6 +148,17 @@ router.post('/', async (req: Request, res: Response) => {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', true, $9)
       RETURNING id, login_id, name, email, user_type, status, created_at, store_codes
     `, [targetCompanyId, loginId, passwordHash, name, email || null, phone || null, department || null, finalUserType, storeCodesArr]);
+
+    // ★ 2026-10-02 계정 발급 기록(전송자격인증 4.1 ②) — 실패해도 발급에는 영향 없다
+    await recordAccountIssued({
+      actorUserId: callerUserId,
+      userId: result.rows[0].id,
+      loginId: result.rows[0].login_id,
+      userType: result.rows[0].user_type,
+      companyId: targetCompanyId,
+      channel: 'manage_page',
+      req,
+    });
 
     res.status(201).json({ user: result.rows[0], message: '사용자가 생성되었습니다.' });
   } catch (error) {

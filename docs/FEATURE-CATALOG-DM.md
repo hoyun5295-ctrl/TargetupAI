@@ -52,6 +52,23 @@
 | 도움말 원장 | `packages/backend/src/content/feature-catalog.ts` | 모바일 DM 만들기 단계의 카탈로그 DM 카드·토글 문구 · AI 자동제작 채널 3종 문구 |
 | 테스트 | `dm-viewer-catalog.test.ts` 12 · `ai-auto-build-catalog.test.ts` 12 · `sales-outreach-catalog.test.ts` 16 · `campaign-engine.test.ts`(크레딧 키 계약 예외) · `sales-outreach-invariants.test.ts`(주소 헬퍼) | 플래그 off = `dm-cat` 0 · 문자열 settings · og · viewport · 추적 배선 / 정규화·상한·게이트·견적 10/0·차감 순서·멱등·회수·409 / 쪽 조립·캡션 게이트·틴트·계획 순서·상한·중복·최소 쪽·sharp 카드·메일 3버튼·배선 소스 계약 |
 
+### §3-1 소스 위치 — 만들기 개편(0927) 뒤 화면 · ★1001 (「소스 읽어」 하면 여기부터)
+
+| 축 | 파일 | 볼 곳 |
+|---|---|---|
+| 만들기(카탈로그 채널) | `packages/frontend/src/pages/QuickCampaignPage.tsx` · `components/ai-build/CatalogPagesInput.tsx` · `utils/ai-build.ts` | 채널 결정(주소 `channel` > 남은 초안) · `regen` 자동 실행 · `buildMaterialsPayload` · 초안 보관(`loadBuildDraft`·`saveBuildResult`) |
+| 완성본(결과) 화면 | `packages/frontend/src/pages/QuickCampaignResultPage.tsx` | `isCatalog`(스토어 보기 방식) · `draftFits`·`canMakeOther`·`makeChannel`·`regenCost` · 머리 안내 글·보내기 버튼 · 고칠 곳 줄 클릭 · 오른쪽 `PcPanel` |
+| 고칠 곳(잠금 규칙) | `packages/frontend/src/utils/make-flow.ts` | `fixItemsOf`(잠금 = 넘길 수 없는 치명만) · `fixHeadline` · `makeResultPath` |
+| 수정 화면(카탈로그 모드) | `packages/frontend/src/components/make/DmEditScreen.tsx` | `isCatalog` · `CatalogLeft`(쪽 목록 · 쪽 추가) · `CatalogPagePanel`(쪽 모양 · 사진 · 상품 칩 · **이 쪽 빼기** `removeThisPage`) · `DmGlobalPanel`(보기 방식 3안) |
+| 미리보기 묶음 | `packages/frontend/src/components/make/PreviewPair.tsx` · `PreviewFrame.tsx` · `useDmStorePreview.ts` · `utils/make-preview.ts` | `PcPanel`·`PcCard`·`PcBigModal` · 누름 다리(`data-section-id`) · 무저장 미리보기 본문 |
+| 보내기 창 | `packages/frontend/src/components/make/MakeSendModal.tsx` | `fatal.blocking`(넘길 수 없는 치명만 막음) · 다른 채널 카드 |
+| 저장소 | `packages/frontend/src/stores/dmBuilderStore.ts` | `catalogView` · `setCatalogView` · `removePage` · `pushHistory` · `reorderPages` · 저장 body `settings.catalog` |
+| 수정 화면 진입 · 결과 띠 | `packages/frontend/src/pages/DmBuilderPage.tsx` · `components/ai-build/BuildResultBar.tsx` | 결과 띠 [다시 만들기](만든 채널) · 목록 뱃지 |
+| 서버 검수 · 첫 발행 관문 | `packages/backend/src/utils/dm/dm-validate.ts` · `dm-publish-gate.ts` | `validateRequiredInfo`(Footer 없음 = 넘길 수 있는 치명) · `dmPublishBlocker`(넘길 수 있는 치명은 막지 않음) |
+| 서버 생성(카탈로그 채널) | `packages/backend/src/utils/campaign-quick.ts` · `ai-auto-build-materials.ts` · `routes/event-campaigns.ts` | `buildCatalogDm` · `quoteFromBuildMaterials` · `checkCatalogMinimum` · `isCompanyImageUrl` · `POST /materials/quote` |
+| 뷰어 · 쪽 조립 | §3 표 그대로 | `dm-viewer-catalog.ts` · `dm-viewer.ts` · `dm-catalog-pages.ts` |
+| 계약 테스트 | `packages/backend/src/utils/__tests__/make-preview-guard.test.ts` | 「고칠 곳 판정」 · 「결과 화면 · 수정 화면의 카탈로그 배선」 |
+
 ## §4 입구 3곳 (사용자 흐름)
 
 > **★2026-09-27 만들기 개편([설계서](2026-09-27-make-redesign-design.md))** — 모바일 DM 첫 화면 만들기 카드 아래 [카탈로그 DM 만들기] = 만들기 화면 카탈로그 채널(쪽 사진 · AI 0). 옛 [완성 이미지로 만들기]는 "다른 방법으로 만들기" 안에 그대로. 수정 화면 카탈로그 모드 = 왼쪽 **쪽** 목록(썸네일 · 끌어서 순서 · ★1001 쪽 패널 [이 쪽 빼기]) · 가운데 **휴대폰 슬라이드 + 넘김 효과 3종**(휴대폰 위 전환) / **PC 책 카드 + [PC 화면 크게 보기]**(효과 무관 · 상품 칩 없음 = 뷰어 실물 그대로) · 오른쪽 **쪽 패널**(쪽 모양 4종 = 이 쪽 다시 만들기 · 사진 바꾸기·스튜디오 · 상품 칩 편집). ⛔ 휴대폰 자리에 PC 책을 놓지 않는다(Harold 0927).
@@ -128,6 +145,7 @@
   - D. 수정 화면 쪽 패널 [이 쪽 빼기](확인 창 · 되돌리기 가능 · 2쪽 이하에서는 잠김 = 뷰어 책 판정과 같은 수).
 - **수정 뒤 실측(같은 스크립트)**: 머리 「보낼 준비 완료」 · 보내기 1번에 보내기 창 · 다시 만들기 10 크레딧 → 카탈로그 채널 견적 통과 → 생성 요청 채널 = catalog 쪽 34 · 재료 다시 보기 = 카탈로그 탭에 쪽 34 · 오른쪽 = PC 책 · 쪽 눌러도 편집 창 없음 · 5쪽 → [이 쪽 빼기] → 4쪽(저장 4) → 되돌리기 5쪽(저장 5) · 2쪽 카탈로그는 버튼 잠김 / 일반 DM 잠금 화면 = 안내 글이 띠 안(23~41px) · 보내기 누르면 버튼 고치기 창.
 - **계약**: `make-preview-guard.test.ts` 「고칠 곳 판정」 +2(실제 서버 검수 결과로 잠금 0) · 「결과 화면 · 수정 화면의 카탈로그 배선」 6 · 변이 4종 검출.
+- **배포(1001 23:37 · Harold)**: 서버 소스에 쪽 빼기·잠금 규칙 코드 확인 · 빌드 결과(`dist/index.html` 23:37)가 소스(23:35)보다 뒤 · 완성본 화면 표식이 빌드 결과에 있음. 남은 것 = 접수자 화면 확인.
 - **검증**: frontend tsc 0 · backend tsc 0 · vitest 530파일 7,362건 · **Codex 적대 1R approve(지적 0 · 잠금 수가 서버 관문과 어긋나는 입력 · 넘길 수 없는 치명의 잠금 약화 여부를 물음)**.
 - **범위 밖(기록만)**: 보내기 창(`MakeSendModal`)으로 보낼 때는 넘긴 항목 기록(`validation_override`)이 남지 않는다(옛 편집기 발행은 남김 · 0927 부터의 동작) · 검수 권고 문구 「KISA 가이드 준수를 권장해요」가 화면에 그대로 보인다(서버 문구) · 수정 화면 전체 설정의 「AI로 다시 구성」·디자인 테마는 사진만 있는 카탈로그에 뜻이 없다.
 

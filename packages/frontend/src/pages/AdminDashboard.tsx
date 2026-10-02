@@ -238,7 +238,8 @@ export default function AdminDashboard() {
   const [geoHits, setGeoHits] = useState<any[]>([]);
   const [geoHitsDenied, setGeoHitsDenied] = useState(false); // 403 = 권한 없음. "기록 없음"으로 그리면 거짓이다
   const [geoCidrInput, setGeoCidrInput] = useState('');
-  const [geoForm, setGeoForm] = useState({ scope: 'user', target: '', cidr: '', reason: '' });
+  // ★ 2026-10-02 expiresAt = 허용 만료일(YYYY-MM-DD · 비우면 기한 없음) — 전송자격인증 2.2 ③
+  const [geoForm, setGeoForm] = useState({ scope: 'user', target: '', cidr: '', reason: '', expiresAt: '' });
   const [geoBusy, setGeoBusy] = useState(false);
 
   const loadGeoAccess = async () => {
@@ -290,11 +291,12 @@ export default function AdminDashboard() {
       const payload: any = { scope: geoForm.scope, cidr: geoForm.cidr.trim(), reason: geoForm.reason.trim() };
       if (geoForm.scope === 'user') payload.userId = geoForm.target.trim();
       else if (geoForm.scope !== 'global') payload.companyId = geoForm.target.trim();
+      if (geoForm.expiresAt) payload.expiresAt = geoForm.expiresAt;
       const { ok, data } = await geoPost('/api/admin/geo/exceptions', payload);
       if (!ok) { showAlert('오류', data?.error || '예외 등록에 실패했습니다.', 'error'); return; }
-      setGeoForm({ scope: 'user', target: '', cidr: '', reason: '' });
+      setGeoForm({ scope: 'user', target: '', cidr: '', reason: '', expiresAt: '' });
       await loadGeoAccess();
-      showAlert('성공', '예외가 승인되었습니다. 승인자와 사유가 이력에 남습니다.', 'success');
+      showAlert('성공', '예외가 승인되었습니다. 승인자 · 사유 · 허용 기간이 이력에 남습니다.', 'success');
     } finally { setGeoBusy(false); }
   };
 
@@ -5832,6 +5834,9 @@ const handleApproveRequest = async (id: string) => {
                       <thead className="bg-gray-50 text-xs text-gray-500">
                         <tr>
                           <th className="px-4 py-2 text-left">일시</th>
+                          {/* ★ 2026-10-02 승인자 열(전송자격인증 3.2 ③ · 3.3 ②) — 이 대장의 변경은 대표 등급만 할 수 있어
+                              승인과 처리가 같은 사람이다. 심사 확인사항이 두 항목을 따로 적으므로 열도 따로 둔다 */}
+                          <th className="px-4 py-2 text-left">승인자</th>
                           <th className="px-4 py-2 text-left">처리자</th>
                           <th className="px-4 py-2 text-left">대상 계정</th>
                           <th className="px-4 py-2 text-left">변경</th>
@@ -5841,7 +5846,7 @@ const handleApproveRequest = async (id: string) => {
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {adminRoleHistory.length === 0 && (
-                          <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-xs">변경 이력이 없습니다.</td></tr>
+                          <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">변경 이력이 없습니다.</td></tr>
                         )}
                         {adminRoleHistory.map((h) => {
                           const d = h.details || {};
@@ -5861,6 +5866,7 @@ const handleApproveRequest = async (id: string) => {
                           return (
                             <tr key={h.id}>
                               <td className="px-4 py-2 text-xs text-gray-500">{formatDateTime(h.created_at)}</td>
+                              <td className="px-4 py-2 text-xs text-gray-900">{h.actor_name || h.actor_login_id || '-'}</td>
                               <td className="px-4 py-2 text-xs text-gray-900">{h.actor_name || h.actor_login_id || '-'}</td>
                               <td className="px-4 py-2 font-mono text-xs text-gray-700">{d.login_id || '-'}</td>
                               <td className="px-4 py-2 text-xs text-gray-700 whitespace-nowrap">{change}</td>
@@ -5997,7 +6003,7 @@ const handleApproveRequest = async (id: string) => {
                 <br />
                 SDK·싱크에이전트는 국가로 막지 않습니다. 해외 본사를 둔 고객사는 <span className="font-medium">회사 API · 회사 에이전트</span> 범위로 그 대역을 등록해주세요.
               </p>
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-5 gap-2">
                 <select
                   value={geoForm.scope}
                   onChange={(e) => setGeoForm({ ...geoForm, scope: e.target.value })}
@@ -6027,7 +6033,19 @@ const handleApproveRequest = async (id: string) => {
                   placeholder="승인 사유 (필수)"
                   className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500"
                 />
+                {/* ★ 2026-10-02 허용 만료일 — 비우면 기한 없음. 그 날짜 끝까지 유효하다 */}
+                <label className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm focus-within:border-indigo-500">
+                  <span className="shrink-0 text-xs text-gray-500">허용 만료일</span>
+                  <input
+                    type="date"
+                    value={geoForm.expiresAt}
+                    min={kstTodayStr()}
+                    onChange={(e) => setGeoForm({ ...geoForm, expiresAt: e.target.value })}
+                    className="min-w-0 flex-1 bg-transparent text-xs text-gray-700 outline-none"
+                  />
+                </label>
               </div>
+              <p className="mt-1.5 text-[11px] text-gray-400">허용 만료일을 비우면 기한 없이 유지됩니다. 넣으면 그 날짜가 지난 뒤 자동으로 통과가 끊깁니다.</p>
               <div className="mt-2 flex justify-end">
                 <button
                   onClick={handleGeoExceptionCreate}
@@ -6046,23 +6064,30 @@ const handleApproveRequest = async (id: string) => {
                       <th className="px-3 py-2 text-left">대상</th>
                       <th className="px-3 py-2 text-left">대역</th>
                       <th className="px-3 py-2 text-left">사유</th>
-                      <th className="px-3 py-2 text-left">승인</th>
+                      <th className="px-3 py-2 text-left">승인자</th>
+                      <th className="px-3 py-2 text-left">승인 일시</th>
+                      <th className="px-3 py-2 text-left">허용 기간</th>
                       <th className="px-3 py-2 text-right">회수</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {geoExceptions.length === 0 && (
-                      <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400 text-xs">등록된 예외가 없습니다.</td></tr>
+                      <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400 text-xs">등록된 예외가 없습니다.</td></tr>
                     )}
                     {geoExceptions.map((x) => (
-                      <tr key={x.id} className={x.is_active ? '' : 'opacity-45'}>
+                      <tr key={x.id} className={x.is_active && !x.is_expired ? '' : 'opacity-45'}>
                         <td className="px-3 py-2 text-xs text-gray-700">
                           {x.scope === 'user' ? '계정' : x.scope === 'company_api' ? '회사 API' : x.scope === 'company_agent' ? '회사 에이전트' : '전역'}
                         </td>
                         <td className="px-3 py-2 text-xs text-gray-900">{x.login_id || x.company_name || '-'}</td>
                         <td className="px-3 py-2 font-mono text-xs text-gray-700">{x.cidr}</td>
                         <td className="px-3 py-2 text-xs text-gray-600 max-w-xs truncate">{x.reason}</td>
-                        <td className="px-3 py-2 text-[11px] text-gray-400">{formatDateTime(x.approved_at)}</td>
+                        <td className="px-3 py-2 text-xs text-gray-900 whitespace-nowrap">{x.approver_name || x.approver_login_id || '-'}</td>
+                        <td className="px-3 py-2 text-[11px] text-gray-400 whitespace-nowrap">{formatDateTime(x.approved_at)}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
+                          {formatDate(x.approved_at)} ~ {x.expires_at ? formatDate(x.expires_at) : '기한 없음'}
+                          {x.is_expired && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-gray-100 text-[10px] text-gray-500">만료</span>}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           {x.is_active ? (
                             <button

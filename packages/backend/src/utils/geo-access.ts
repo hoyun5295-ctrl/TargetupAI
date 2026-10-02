@@ -93,6 +93,33 @@ export function validateCidrToken(raw: string): { ok: true } | { ok: false; reas
   return { ok: true };
 }
 
+/**
+ * 예외 허용 만료일 검증 (★2026-10-02 전송자격인증 2.2 ③ — "허용 기간이 시스템에 기록되는가")
+ *
+ * 화면은 날짜(YYYY-MM-DD)만 보낸다. 비우면 기한 없음(null)이다.
+ * 저장값 = 그 날짜의 끝(한국 시각 23:59:59). "10월 31일까지"라고 넣은 예외가 31일 아침에 끊기면 안 된다.
+ *
+ * ⛔ 왜 필요한가 — 종전 라우트는 받은 값을 검사 없이 DB에 넘겼다. 형식이 틀리면 500으로 터지고,
+ *   지난 날짜가 들어가면 **등록되는 순간 이미 만료된 예외**가 대장에 생긴다(승인했는데 통과가 안 된다).
+ * ⚠ `2026-02-31` 같은 값은 날짜 객체가 3월로 넘겨 받아 준다. 되돌려 적은 날짜가 입력과 같은지로 거른다.
+ */
+export function parseExceptionExpiry(
+  raw: any,
+  now: Date = new Date(),
+): { ok: true; value: string | null } | { ok: false; reason: string } {
+  const s = String(raw ?? '').trim();
+  if (!s) return { ok: true, value: null };
+  const invalid = { ok: false as const, reason: '허용 만료일은 날짜 형식(예: 2026-12-31)으로 입력해주세요.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return invalid;
+  const iso = `${s}T23:59:59+09:00`;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return invalid;
+  const kstDate = new Date(t + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  if (kstDate !== s) return invalid;
+  if (t <= now.getTime()) return { ok: false, reason: '허용 만료일은 오늘 또는 그 이후 날짜여야 합니다.' };
+  return { ok: true, value: iso };
+}
+
 /** PG가 cidr 값을 거부했는가 — 호출부가 500 대신 400으로 돌려주기 위한 판정 */
 export function isInvalidCidrError(err: any): boolean {
   const msg = String(err?.message || '');

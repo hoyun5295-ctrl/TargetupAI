@@ -24,8 +24,8 @@ import { randomBytes } from 'crypto';
 import { query, pool } from '../config/database';
 import { runSerial } from './inflight-lock';
 import { syncOrder } from './cdp-orders';
-import { identifyCustomer, parseConsentValue, CdpPhoneRequiredError } from './cdp-identity';
-import { WOO_SOURCE, normalizeWooMallId, wooSiteOrigin, wooSelfHost, mapWooCustomerToCdp, mapWooOrderToCdp, type WooTopicResource } from './woocommerce-core';
+import { identifyCustomer, parseConsentValue, isConsentAbsent, CdpPhoneRequiredError } from './cdp-identity';
+import { WOO_SOURCE, normalizeWooMallId, wooSiteOrigin, wooSelfHost, mapWooCustomerToCdp, mapWooOrderToCdp, wooMemberIdFormat, wooConsentReadable, type WooTopicResource } from './woocommerce-core';
 export { wooSiteOrigin };
 import { normalizeWooStoreProduct, type MallProduct } from './mall-product-normalize';
 
@@ -991,7 +991,16 @@ async function applyWooResource(
     const m = mapWooCustomerToCdp(raw, { mallId, consentMetaKey });
     if (!m) return 'skipped';
     const consent = parseConsentValue(m.consentRaw);
-    await identifyCustomer(companyId, { ...m.identify, ...(consent !== undefined ? { smsOptIn: consent } : {}), ...store });
+    // ★1002 회원 정보에 동의 값이 아예 없으면 그 사실과 읽은 동의 키 이름 · 이 몰의 회원 식별자 모양을 싣는다 — 「회원 정보에 값이 없으면 동의」 규칙을 켠 몰만
+    //   CT 가 그 몰 소속 행의 모름을 채운다(해석 못 한 값은 싣지 않는다 = 모름). ⛔ 아래 주문 경로에는 싣지 않는다(CT mall-consent 머리 주석).
+    //   「없다」 = 동의 키가 설정돼 있고 메타 목록을 실제로 받았는데 그 키가 없거나 값이 빈 것. 키 미설정 · 메타 목록이 안 실린 본문은 읽지 못한 것이다.
+    const absent = consent === undefined && wooConsentReadable(raw?.meta_data, consentMetaKey) && isConsentAbsent(m.consentRaw);
+    await identifyCustomer(companyId, {
+      ...m.identify,
+      ...(consent !== undefined ? { smsOptIn: consent } : {}),
+      ...(absent ? { profileConsentAbsent: { consentKey: String(consentMetaKey || '').trim(), ...wooMemberIdFormat(mallId) } } : {}),
+      ...store,
+    });
     return 'synced';
   }
   const m = mapWooOrderToCdp(raw, { mallId, consentMetaKey });

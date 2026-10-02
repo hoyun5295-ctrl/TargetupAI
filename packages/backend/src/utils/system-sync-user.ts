@@ -12,6 +12,7 @@
  * 결과 데이터는 기존과 동일 — 타입 힌트만 명시해 42P08만 제거한다(로직·컬럼 변경 없음).
  */
 import { query } from '../config/database';
+import { recordAccountIssued } from './account-issue';
 
 export async function ensureSystemSyncUser(companyId: string): Promise<string | null> {
   // 1. 이미 있으면 그대로 사용
@@ -29,7 +30,17 @@ export async function ensureSystemSyncUser(companyId: string): Promise<string | 
      RETURNING id`,
     [companyId, companyId],
   );
-  if (created.rows[0]?.id) return created.rows[0].id;
+  if (created.rows[0]?.id) {
+    // ★ 2026-10-02 계정 발급 기록(전송자격인증 4.1 ②) — 사람이 로그인하지 않는 연동 전용 계정도 생긴 사실은 남긴다
+    await recordAccountIssued({
+      userId: created.rows[0].id,
+      loginId: `system_sync_${companyId}`,
+      userType: 'system',
+      companyId,
+      channel: 'system',
+    });
+    return created.rows[0].id;
+  }
 
   // 3. 경합으로 이미 생성된 경우 재조회
   const re = await query(

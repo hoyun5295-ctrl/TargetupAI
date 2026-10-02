@@ -89,12 +89,6 @@ export default function UsersTab() {
     return str.split(',').map(s => s.trim()).filter(Boolean);
   };
 
-  const openAdd = () => {
-    setEditing(null);
-    setForm({ loginId: '', password: '', name: '', email: '', phone: '', department: '', storeCodes: [] });
-    setShowModal(true);
-  };
-
   const openEdit = (u: User) => {
     setEditing(u);
     setForm({
@@ -225,13 +219,19 @@ export default function UsersTab() {
             </span>
             <div>
               <h2 className="text-lg font-bold text-slate-900 tracking-tight">사용자 관리</h2>
-              <p className="text-xs text-slate-400 mt-0.5">계정 추가·권한·분류 코드 관리</p>
+              <p className="text-xs text-slate-400 mt-0.5">권한·분류 코드 관리</p>
             </div>
           </div>
-          <button onClick={openAdd} className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm shadow-indigo-600/20 transition">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
-            사용자 추가
-          </button>
+          {/* ★ 2026-10-02 계정 발급은 당사만 한다(전송자격인증 2.1). 추가 버튼 대신 요청 경로를 안내한다.
+              서버도 같은 문구로 거절한다(utils/account-issue.ts ACCOUNT_ISSUE_NOTICE) */}
+          <div className="flex items-start gap-2 max-w-sm rounded-xl bg-slate-50 border border-slate-200 px-3.5 py-2.5">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mt-0.5 shrink-0 text-indigo-500"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg>
+            <p className="text-xs leading-relaxed text-slate-600">
+              계정 추가는 계약 확인 후 인비토가 발급합니다.
+              <br />
+              담당자 또는 <span className="font-semibold text-slate-800">1800-8125</span>로 요청해 주세요.
+            </p>
+          </div>
         </div>
 
         {/* 검색 */}

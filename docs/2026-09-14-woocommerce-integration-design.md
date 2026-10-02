@@ -214,9 +214,26 @@
 - **교차 순서 실측(증분 리뷰가 좁게 본 것을 전체로 확인)**: 실제 PostgreSQL 16 + 실제 코드 + 가짜 몰 서버(HTTP 만 가짜)로, 한 몰에 점검 · 해제(담당자 A/B · 중복 · 해제 직후 프로세스 죽음) · 재연결(담당자 A/B) · 주기 워커의 이어 정리를 무작위로 겹치고 몰 서버 호출이 끝나는 순서도 무작위로 골랐다(시작 상태 5가지 · 절반은 몰 서버 장애와 응답 유실 주입). 확인한 것 = 연결된 몰의 웹훅을 지우지 않는다 · 남의 웹훅을 지우지 않는다 · 해제된 몰에 우리 웹훅이 남지 않는다(정리 뒤 기록·미완료 표시도 비워진다) · 연결된 몰은 주제마다 웹훅이 정확히 1개이고 기록 id 와 같다 · 행을 끊은 사람 = 끊길 때의 담당자 · 끝나지 않는 실행이 없다. **3,000가지 순서에서 위반 0.** 도구 감도 = 앞 라운드 지적 결함 8종을 되살렸을 때 7종 검출(나머지 1종 = 끝 상태에 차이가 없는 중복 안전장치). 도구는 세션 스크래치(저장소 미편입).
 - **프로세스 1개 전제**: 한 줄은 메모리 줄이다(`ecosystem.config.js` fork · instances 1). 백엔드를 여러 인스턴스로 돌리게 되면 이 줄과 기존 메모리 잠금(`inflight-lock`)을 함께 DB 잠금으로 옮겨야 한다.
 
+### 8-7. 소스 위치 (「소스 읽어」 하면 여기부터 · ★1001)
+
+| 축 | 파일 | 볼 곳 |
+|---|---|---|
+| 주문 상태 · 매핑 | `packages/backend/src/utils/woocommerce-core.ts` | `mapWooOrderStatus`(몰 고유 상태 = 결제시각 + 환불 없음 + 이행 이름) · `mapWooOrderToCdp` · `wooSelfHost` |
+| 연동 저장·해제·잠금 | `packages/backend/src/utils/woocommerce-client.ts` | `withWooIdentityLock` · `resolveWooMallIdForSave` · `saveWooCredentials` · `markWooConnected` · `disconnectWoo` |
+| 도메인 이전(증명 주소) | 같은 파일 | `wooAuthedRequest`(3xx 한 번 · 인정 목록) · `noteWooSeenHost` · `learnWooHostFromSignedDeliveries`(저장된 서명 기록에서 배움) · `listWooIntegrationsByMallId` |
+| 주문 다시 읽기 · 수집 | 같은 파일 | `WOO_ORDER_RULE_VERSION` · `wooOrderRereadDue` · `startWooOrderReread` · `syncWooOrdersSince`(상한 `truncated`) |
+| 웹훅 점검·정리 | 같은 파일 | `ensureWooWebhooks` · `removeWooWebhooks` · `listWooWebhookCleanupTargets` |
+| 몰 단위 한 줄 | `packages/backend/src/utils/inflight-lock.ts` | `runSerial` |
+| 주기 수집 워커 | `packages/backend/src/utils/woocommerce-sync-worker.ts` | 다시 읽기 판정 · 상한 처리 · 웹훅 점검 · 정리 훑기 |
+| 라우트 | `packages/backend/src/routes/woocommerce.ts` | 웹훅 수신(서명 검증 뒤 기록) · `/credentials` · `/connect-url` · `/disconnect`(`WooSaveRejected`) |
+| 매장 범위 | `packages/backend/src/utils/integration-scope.ts` | `resolveStoreCodeByOriginHost`(증명 주소 포함) |
+| 구매이력 두 원천 | `packages/backend/src/utils/purchase-history-source.ts` · `routes/customers.ts` | `purchaseHistorySourceSql` · `GET /purchases/overview` · `GET /:id/purchases` · 화면 = `frontend/src/components/manage/ManagePurchasesTab.tsx`(기본 기간 = 이번 달) |
+| 진단 도구 | `packages/backend/scripts/diagnose-woo-headers.ts`(`--health`) · `scripts/run-woo-backfill.ts` | |
+| 계약 테스트 | `packages/backend/src/utils/__tests__/woocommerce-audit-1001.test.ts` · `woocommerce-sync-pass-1001.test.ts` · `inflight-serial-1001.test.ts` · `purchase-history-source-1001.test.ts` · `woocommerce-client.test.ts` · `woocommerce-routes.test.ts` · `woocommerce-store-code.test.ts` | |
+
 ### 8-5. 범위 밖(기록만 · 착수 판단은 Harold님)
 
-ⓐ 휴대폰 없는 회원 미적재(렌즈고고 19,635 · 이로이로 4,074 · 설계상 제외) ⓑ 수신동의 「공란 = 동의」 이에스페이먼트 한정 적용(고객사 설명 = no 만 거부 · 발송 대상이 바뀌는 변경이라 설계 승인 뒤) ⓒ 이메일 수신동의 미수집 ⓓ 부분 환불 미지원 ⓔ 가져오기 깊이 90일 ⓕ 구매 원장만 읽는 분석·전환 소비처(`analysis.ts:480·494·796` · `dm.ts:1617` · `recipient-conversion.ts:86` · `inapp-funnel-stats.ts:488` · `customer-timeline.ts:447·824` · `company-data-profile.ts:252·261`) = 자사몰 회사에서 0 으로 나옴(전 provider 공통 · 두 원천 통합 과제).
+ⓐ 휴대폰 없는 회원 미적재(렌즈고고 19,635 · 이로이로 4,074 · 설계상 제외) ⓑ 수신동의 「공란 = 동의」 이에스페이먼트 한정 적용 → **★1002 구현**(고객사 대표 확인 · 몰 단위 규칙 `meta.consent_missing_agree_key` · 회원 정보에 값이 없는 회원만) = [몰 동의 설계서 §12](2026-09-22-mall-consent-isolation-design.md) ⓒ 이메일 수신동의 미수집 ⓓ 부분 환불 미지원 ⓔ 가져오기 깊이 90일 ⓕ 구매 원장만 읽는 분석·전환 소비처(`analysis.ts:480·494·796` · `dm.ts:1617` · `recipient-conversion.ts:86` · `inapp-funnel-stats.ts:488` · `customer-timeline.ts:447·824` · `company-data-profile.ts:252·261`) = 자사몰 회사에서 0 으로 나옴(전 provider 공통 · 두 원천 통합 과제).
 
 **고객사 쪽에만 있는 것(재설치와 무관)**: 행동 수집 스크립트가 4몰 페이지에 없음(행동 이벤트 전 기간 0) — 주문·회원·동의·구매이력과는 별개.
 
@@ -224,4 +241,4 @@
 
 - **실측(Harold SQL)**: 서버에 저장된 수신동의 키는 4몰 모두 `mssms_agreement_label` — 수집 값은 처음부터 맞는 필드에서 왔다. 틀린 것은 우리 플러그인 기본값과 연동 화면 안내·예시(`mssms_agreement`).
 - **처방**: 플러그인 기본값 `mssms_agreement_label,email_agreement_label` · 버전 1.0.1 · 연동 화면 안내·예시 · `INTEGRATIONS.md` · 설계서. 플러그인은 설정 키의 값이 REST 응답에 없을 때만 덧붙이므로 **재설치 불필요**.
-- **남은 것(B-1001-9 범위 밖 ⓑ)**: 고객사 설명 「no 가 수신거부 · 공란이거나 YES 는 동의」 — 지금은 공란 = 모름(동의 아님). 이에스페이먼트 한정 적용은 발송 대상이 바뀌므로 설계 승인 뒤.
+- **★1002 「공란 = 동의」 구현**: 고객사 대표 확인 「no 만 수신거부 · 아무것도 없거나 YES 는 발송 가능」 → 몰 단위 규칙(회원 정보에 값이 없는 회원만 · 동의 키 이름에 묶임 · 주문·비회원 제외). 실측·규칙·소스 위치·반영 순서 = [몰 동의 설계서 §12](2026-09-22-mall-consent-isolation-design.md). ⚠ 대시보드 「수신동의 수」는 고객 행 값이라 이 규칙만으로는 안 바뀐다(읽기 전환 S6-b 가 남아 있다).

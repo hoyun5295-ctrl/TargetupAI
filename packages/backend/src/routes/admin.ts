@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample, SPAM_BLOCK_NOTICE } from '../utils/spam-block';
-import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache, GEO_BLOCK_NOTICE, validateCidrToken, isInvalidCidrError } from '../utils/geo-access';
+import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache, GEO_BLOCK_NOTICE, validateCidrToken, isInvalidCidrError, parseExceptionExpiry } from '../utils/geo-access';
 import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy, lineKindOf, parseLineLimitInput } from '../utils/sender-line-limit';
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
@@ -76,6 +76,8 @@ import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-l
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { switchCompanyBillingType } from '../utils/billing-type-history';
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, diffFields } from '../utils/audit-log';
+// ★ 2026-10-02 계정 발급 기록(전송자격인증 4.1 ②)
+import { recordAccountIssued } from '../utils/account-issue';
 // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용 · 읽기 전용 집계 CT)
 import { loadPrecheckDetail, loadPrecheckUsage, parsePrecheckDetailQuery, parsePrecheckUsageQuery } from '../utils/precheck-usage';
 // ★ 2026-09-12 발신 프로필 사용 중지(직원 접수 4번) — 판정·기록은 CT가 소유한다
@@ -177,7 +179,18 @@ router.post('/users', authenticate, requireSuperAdmin, async (req: Request, res:
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', true, $9)
       RETURNING id, login_id, name, email, user_type, status, created_at, store_codes
     `, [companyId, loginId, passwordHash, name, email || null, phone || null, department || null, userType || 'user', storeCodes || null]);
-    
+
+    // ★ 2026-10-02 계정 발급 기록(전송자격인증 4.1 ②) — 실패해도 발급에는 영향 없다
+    await recordAccountIssued({
+      actorUserId: req.user?.userId,
+      userId: result.rows[0].id,
+      loginId: result.rows[0].login_id,
+      userType: result.rows[0].user_type,
+      companyId,
+      channel: 'super_admin',
+      req,
+    });
+
     res.status(201).json({ user: result.rows[0], message: '사용자가 생성되었습니다.' });
   } catch (error) {
     console.error('사용자 생성 실패:', error);
@@ -1095,10 +1108,13 @@ router.get('/geo/exceptions', authenticate, requireSuperAdmin, async (_req: Requ
       `SELECT a.id, a.scope, a.company_id, a.user_id,
               host(a.cidr) || '/' || masklen(a.cidr) AS cidr,
               a.reason, a.approved_by, a.approved_at, a.expires_at, a.is_active,
-              c.company_name, u.login_id
+              (a.expires_at IS NOT NULL AND a.expires_at <= NOW()) AS is_expired,
+              c.company_name, u.login_id,
+              s.name AS approver_name, s.login_id AS approver_login_id
          FROM access_origin_allowlist a
          LEFT JOIN companies c ON c.id = a.company_id
          LEFT JOIN users u ON u.id = a.user_id
+         LEFT JOIN super_admins s ON s.id = a.approved_by
         ORDER BY a.is_active DESC, a.approved_at DESC
         LIMIT 300`
     );
@@ -1131,13 +1147,16 @@ router.post('/geo/exceptions', authenticate, requireSuperAdmin, async (req: Requ
     if ((scope === 'company_api' || scope === 'company_agent') && !companyId) {
       return res.status(400).json({ error: '회사 범위는 대상 고객사가 필요합니다.' });
     }
+    // ★ 2026-10-02 허용 만료일(전송자격인증 2.2 ③) — 검사 없이 DB에 넘기던 값을 CT가 거른다. 비우면 기한 없음
+    const expiry = parseExceptionExpiry(req.body?.expiresAt);
+    if (!expiry.ok) return res.status(400).json({ error: expiry.reason });
 
     const result = await query(
       `INSERT INTO access_origin_allowlist
          (id, scope, company_id, user_id, cidr, reason, approved_by, approved_at, expires_at, is_active, created_at)
        VALUES (gen_random_uuid(), $1, $2::uuid, $3::uuid, $4::cidr, $5, $6::uuid, NOW(), $7, true, NOW())
        RETURNING id`,
-      [scope, companyId, userId, cidr, reason.slice(0, 500), req.user?.userId || null, req.body?.expiresAt || null]
+      [scope, companyId, userId, cidr, reason.slice(0, 500), req.user?.userId || null, expiry.value]
     );
 
     await recordAuditLog({
@@ -1145,7 +1164,7 @@ router.post('/geo/exceptions', authenticate, requireSuperAdmin, async (req: Requ
       action: 'access_origin_exception_granted',
       targetType: 'access_origin_allowlist',
       targetId: result.rows[0].id,
-      details: { scope, companyId, userId, cidr, reason, expiresAt: req.body?.expiresAt || null },
+      details: { scope, companyId, userId, cidr, reason, expiresAt: expiry.value },
       req,
     });
     return res.json({ id: result.rows[0].id });

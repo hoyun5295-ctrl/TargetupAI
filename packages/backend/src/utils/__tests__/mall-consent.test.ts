@@ -19,6 +19,8 @@ import {
   resolveSendConsent,
   upsertStoreConsent,
   _resetMallConsentWarnForTest,
+  applyMissingConsentRule,
+  missingConsentSource,
 } from '../mall-consent';
 
 const COMPANY = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49';
@@ -109,13 +111,20 @@ describe('resolveSendConsent — 회사·사용자 코드로 강제 여부를 �
 });
 
 describe('upsertStoreConsent — 몰 동의 쓰기', () => {
-  it('소속 행 하나만 갱신한다(회사 + 고객 + 분류코드) · 다른 분류코드 행은 조건상 닿지 않는다', async () => {
+  it('그 고객의 그 몰 소속 행 하나에만 쓴다 · 소속 행이 없으면 만들어서 남긴다(명시 값이 0행으로 빠지지 않는다)', async () => {
     q.mockResolvedValue({ rows: [], rowCount: 1 });
     expect(await upsertStoreConsent(COMPANY, 'cust-1', '일본이모', false, 'woocommerce')).toBe(true);
     const [sql, params] = q.mock.calls[0];
-    expect(String(sql)).toMatch(/UPDATE customer_stores/);
-    expect(String(sql)).toMatch(/company_id = \$1::uuid AND customer_id = \$2::uuid AND store_code = \$3/);
+    const s = String(sql).replace(/\s+/g, ' ').trim();
+    // ★1002 Codex R1: 종전 UPDATE 는 소속 행이 없으면 0행 = 거부가 조용히 사라졌다
+    expect(s.startsWith('INSERT INTO customer_stores (company_id, customer_id, store_code, sms_opt_in, consent_source, consent_at)')).toBe(true);
+    expect(s).toContain('ON CONFLICT (customer_id, store_code) DO UPDATE SET sms_opt_in = EXCLUDED.sms_opt_in, consent_source = EXCLUDED.consent_source, consent_at = EXCLUDED.consent_at');
+    expect(s).toContain('WHERE customer_stores.company_id = EXCLUDED.company_id');
     expect(params).toEqual([COMPANY, 'cust-1', '일본이모', false, 'woocommerce']);
+  });
+  it('쓴 행이 없으면(다른 회사의 같은 행과 부딪힘) false 를 돌려준다', async () => {
+    q.mockResolvedValue({ rows: [], rowCount: 0 });
+    expect(await upsertStoreConsent(COMPANY, 'cust-1', '일본이모', false, 'woocommerce')).toBe(false);
   });
   it('컬럼 미존재(DDL 전 · 42703)면 false 를 돌려주고 던지지 않는다 · 경고는 한 번만', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -132,6 +141,76 @@ describe('upsertStoreConsent — 몰 동의 쓰기', () => {
   it('분류코드·고객이 비면 아무것도 하지 않는다', async () => {
     expect(await upsertStoreConsent(COMPANY, 'c', '', true, 'woocommerce')).toBe(false);
     expect(q).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ★2026-10-02 「회원 정보에 동의 값이 없으면 동의」 규칙 (이에스페이먼트 대표 확인 = no 만 수신거부 · 아무것도 없거나 YES 는 발송 가능)
+ *   채우는 조건은 **저장하는 SQL 한 문장**이 전부 본다(앱 메모리·호출 종류로 판정하지 않는다 — Codex 1002 R1·R2·R3 같은 뿌리):
+ *   ⓪ 그 순간 그 몰(회사 · 분류코드)에 **이 회원 정보를 읽은 키**의 규칙이 켜져 있다 ① 모름(NULL)일 때만 = 명시 값(YES·NO)을 덮지 않는다
+ *   ② 그 고객에게 그 몰의 다른 회원 연결이 없다(한 계정의 값 없음이 다른 계정의 못 읽은 NO 를 덮지 않게)
+ *   실제 판정(켜짐·꺼짐·키 불일치·다른 회원 연결)은 일회용 PostgreSQL 16 실행으로 본다(설계서 §12-6). 여기서는 문장과 인자를 고정한다.
+ */
+describe('회원 정보 동의 값 없음 규칙 — 몰 단위', () => {
+  const KEY = 'mssms_agreement_label';
+  const PROFILE = { source: 'woocommerce', externalId: 'lensgogo.info:25', consentKey: KEY, memberIdPrefix: 'lensgogo.info:', memberIdRestPattern: '^[0-9]+$' };
+  const filled = (n: number) => q.mockResolvedValue({ rows: [], rowCount: n });
+
+  it('한 문장이 전부 본다 — 규칙이 켜져 있다 · 모름이다 · 그 몰의 다른 회원 연결이 없다 · 출처에 규칙 표시', async () => {
+    filled(1);
+    expect(await applyMissingConsentRule(COMPANY, 'cust-1', '렌즈고고', PROFILE)).toBe(true);
+    expect(q).toHaveBeenCalledTimes(1);
+    const [sql, params] = q.mock.calls[0];
+    const s = String(sql).replace(/\s+/g, ' ').trim();
+    expect(s.startsWith('UPDATE customer_stores SET sms_opt_in = true, consent_source = $4, consent_at = NOW()')).toBe(true);
+    expect(s).toContain('WHERE company_id = $1::uuid AND customer_id = $2::uuid AND store_code = $3 AND sms_opt_in IS NULL');
+    expect(s).toContain(`AND EXISTS ( SELECT 1 FROM company_integrations ci WHERE ci.company_id = $1::uuid AND ci.meta->>'store_code' = $3 AND ci.meta->>'consent_missing_agree_key' = $9)`);
+    expect(s).toContain('AND NOT EXISTS ( SELECT 1 FROM cdp_identity_links l WHERE l.company_id = $1::uuid AND l.customer_id = $2::uuid AND l.source = $5 AND l.external_id <> $6 AND left(l.external_id, char_length($7)) = $7 AND substr(l.external_id, char_length($7) + 1) ~ $8)');
+    expect(params).toEqual([COMPANY, 'cust-1', '렌즈고고', 'woocommerce:missing=agree', 'woocommerce', 'lensgogo.info:25', 'lensgogo.info:', '^[0-9]+$', KEY]);
+  });
+  it('규칙을 앱 메모리에 담아 두지 않는다 — 부를 때마다 그 한 문장만 실행한다(규칙을 끈 뒤 담아 둔 값으로 동의를 다시 만들지 않게)', async () => {
+    filled(1);
+    await applyMissingConsentRule(COMPANY, 'cust-1', '렌즈고고', PROFILE);
+    await applyMissingConsentRule(COMPANY, 'cust-2', '렌즈고고', { ...PROFILE, externalId: 'lensgogo.info:26' });
+    expect(q).toHaveBeenCalledTimes(2);
+    for (const [sql] of q.mock.calls) expect(String(sql)).toMatch(/^\s*UPDATE customer_stores/);
+  });
+  it('읽은 키는 앞뒤 공백을 떼고 글자 그대로 규칙의 키와 견준다(다른 키 · 대소문자가 다른 키는 SQL 이 거른다)', async () => {
+    filled(0);
+    await applyMissingConsentRule(COMPANY, 'cust-1', '렌즈고고', { ...PROFILE, consentKey: ` ${KEY} ` });
+    await applyMissingConsentRule(COMPANY, 'cust-1', '렌즈고고', { ...PROFILE, consentKey: 'mssms_agreement' });
+    expect(q.mock.calls[0][1][8]).toBe(KEY);
+    expect(q.mock.calls[1][1][8]).toBe('mssms_agreement');
+  });
+  it('조건에 안 걸리면(규칙 꺼짐 · 키 불일치 · 이미 값이 있음 · 다른 회원 연결이 있음) false — 쓴 행이 없다', async () => {
+    filled(0);
+    expect(await applyMissingConsentRule(COMPANY, 'cust-1', '렌즈고고', PROFILE)).toBe(false);
+  });
+  it('분류코드·고객이 비거나 읽은 키 · 회원 연결의 모양을 모르면 아무 문장도 실행하지 않는다(판정할 수 없으면 채우지 않는다)', async () => {
+    filled(1);
+    expect(await applyMissingConsentRule(COMPANY, 'c', '', PROFILE)).toBe(false);
+    expect(await applyMissingConsentRule(COMPANY, '', '렌즈고고', PROFILE)).toBe(false);
+    expect(await applyMissingConsentRule('', 'c', '렌즈고고', PROFILE)).toBe(false);
+    for (const k of ['source', 'externalId', 'consentKey', 'memberIdPrefix', 'memberIdRestPattern'] as const) {
+      expect(await applyMissingConsentRule(COMPANY, 'c', '렌즈고고', { ...PROFILE, [k]: '' })).toBe(false);
+    }
+    expect(await applyMissingConsentRule(COMPANY, 'c', '렌즈고고', undefined as any)).toBe(false);
+    expect(q).not.toHaveBeenCalled();
+  });
+  it('컬럼 미존재(42703)는 삼키고 그 밖의 오류는 던진다', async () => {
+    q.mockRejectedValueOnce(Object.assign(new Error('column "sms_opt_in" does not exist'), { code: '42703' }));
+    expect(await applyMissingConsentRule(COMPANY, 'c', '렌즈고고', PROFILE)).toBe(false);
+    q.mockRejectedValueOnce(new Error('connection terminated'));
+    await expect(applyMissingConsentRule(COMPANY, 'c', '렌즈고고', PROFILE)).rejects.toThrow('connection terminated');
+  });
+  it('출처 표기는 칸 폭(60자)을 넘지 않는다', () => {
+    expect(missingConsentSource('woocommerce')).toBe('woocommerce:missing=agree');
+    expect(missingConsentSource('x'.repeat(80)).length).toBe(60);
+  });
+  it('읽는 쪽은 그대로 — 발송 자격 조각은 여전히 sms_opt_in = true 하나만 본다(모름도 동의 분기를 읽는 자리에 두지 않는다)', () => {
+    const f = buildSendConsent({ enforce: true, alias: 'c', storeFilter: ` AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))` });
+    expect(f.storeFilter).toContain('mcs.sms_opt_in = true');
+    expect(f.storeFilter).not.toMatch(/IS NULL/);
   });
 });
 

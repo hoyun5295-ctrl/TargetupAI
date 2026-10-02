@@ -138,6 +138,15 @@ export function wooMetaValue(meta: unknown, key: unknown): unknown {
   return undefined;
 }
 
+/**
+ * ★2026-10-02 이 자원에서 동의 값을 **읽을 수 있었는가** — 동의 키가 설정돼 있고 메타 목록(배열)을 실제로 받았을 때만 true.
+ *   wooMetaValue 의 undefined 는 셋을 가리지 못한다(키 미설정 · 메타 목록이 안 실림 · 목록에 그 키가 없음).
+ *   「회원 정보에 동의 값이 없다」는 마지막 하나뿐이다 — 앞의 둘은 읽지 못한 것이지 값이 없는 것이 아니다.
+ */
+export function wooConsentReadable(meta: unknown, key: unknown): boolean {
+  return !!str(key) && Array.isArray(meta);
+}
+
 const TZ_SUFFIX_RE = /(Z|[+-]\d{2}:?\d{2})$/i;
 
 /**
@@ -204,6 +213,16 @@ function pickAddress(billing: any): string | undefined {
  * 회원 조회는 role=all 로 하고, 허용 목록을 만들 수 없으니 고정된 운영자 역할만 뺀다. 회원 백필·회원 웹훅이 같은 규칙을 탄다.
  */
 export const WOO_STAFF_ROLES: ReadonlySet<string> = new Set(['administrator', 'shop_manager', 'editor', 'author', 'contributor']);
+
+/**
+ * ★2026-10-02 이 몰의 **회원** 연결 식별자 모양 — `{mallId}:` 뒤가 숫자뿐(아래 mapWooCustomerToCdp · mapWooOrderToCdp 의 회원 식별자).
+ *   비회원은 `{mallId}:guest:{휴대폰}` · `{mallId}:order:{주문번호}` 라 이 모양에 안 걸린다.
+ *   「회원 정보에 동의 값이 없으면 동의」 규칙(CT mall-consent)이 "그 고객에게 이 몰의 다른 회원 연결이 있는가"를 볼 때 쓴다.
+ *   ⛔ 식별자 모양을 바꾸면 여기도 같이 바꾼다(계약 테스트가 두 매핑의 실제 출력과 이 모양을 대조한다).
+ */
+export function wooMemberIdFormat(mallId: string): { memberIdPrefix: string; memberIdRestPattern: string } {
+  return { memberIdPrefix: `${str(mallId)}:`, memberIdRestPattern: '^[0-9]+$' };
+}
 
 /**
  * 회원 JSON 1건 → identifyCustomer 입력 + 수신동의 raw.

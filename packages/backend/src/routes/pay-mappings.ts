@@ -193,6 +193,7 @@ router.post('/seed-import', async (req: Request, res: Response) => {
             dataInputMethod: 'file',
             usageType: 'agent',
             createdBy: req.user?.userId ?? null,
+            auditReq: req,
           });
           company = created;
           compByCode.set(p.companyCode, created);
@@ -217,7 +218,8 @@ router.post('/seed-import', async (req: Request, res: Response) => {
           if (takenLogins.has(loginId)) {
             skippedLogins.push(loginId);
           } else {
-            await createCompanyAdminUser(String(company.id), loginId, PAY_INITIAL_PASSWORD, p.companyName);
+            await createCompanyAdminUser(String(company.id), loginId, PAY_INITIAL_PASSWORD, p.companyName,
+              { actorUserId: req.user?.userId ?? null, channel: 'bulk_pay', req });
             takenLogins.add(loginId);
             usersCreated += 1;
           }

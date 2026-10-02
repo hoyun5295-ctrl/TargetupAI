@@ -362,6 +362,62 @@ describe('가져오기(runWooBackfill) — 회원 → 주문 · 20건 단위 · 
     expect(st.customers_imported).toBe(1);
     expect(identifyCustomer).toHaveBeenCalledTimes(1);
   });
+  // ★1002 「회원 정보에 동의 값이 없으면 동의」 규칙(CT mall-consent)에 넘길 표시 — **회원 정보**에 값이 없을 때만 싣는다
+  it('회원 정보에 동의 키가 없거나 값이 비면 표시(읽은 동의 키 이름 · 이 몰의 회원 식별자 모양)를 싣는다 · 값이 있으면(해석 못 한 값 포함) 싣지 않는다', async () => {
+    const meta = (v: string) => [{ id: 1, key: 'mssms_agreement_label', value: v }];
+    await processWooResource(COMPANY, MALL, 'customer', cust(1, { meta_data: [{ id: 9, key: 'other', value: 'x' }] }), 'mssms_agreement_label');
+    await processWooResource(COMPANY, MALL, 'customer', cust(2, { meta_data: meta('') }), ' mssms_agreement_label ');
+    await processWooResource(COMPANY, MALL, 'customer', cust(3, { meta_data: meta('NO') }), 'mssms_agreement_label');
+    await processWooResource(COMPANY, MALL, 'customer', cust(4, { meta_data: meta('maybe') }), 'mssms_agreement_label');
+    const inputs = (identifyCustomer as any).mock.calls.map((c: any[]) => c[1]);
+    expect(inputs[0].profileConsentAbsent).toEqual({ consentKey: 'mssms_agreement_label', memberIdPrefix: `${MALL}:`, memberIdRestPattern: '^[0-9]+$' });
+    expect('smsOptIn' in inputs[0]).toBe(false);
+    // 키 이름의 앞뒤 공백은 떼고 싣는다(규칙을 켤 때 적은 키와 글자 그대로 견준다)
+    expect(inputs[1].profileConsentAbsent).toEqual({ consentKey: 'mssms_agreement_label', memberIdPrefix: `${MALL}:`, memberIdRestPattern: '^[0-9]+$' });
+    expect(inputs[2]).toMatchObject({ smsOptIn: false });
+    expect('profileConsentAbsent' in inputs[2]).toBe(false);
+    expect('profileConsentAbsent' in inputs[3]).toBe(false);
+    expect('smsOptIn' in inputs[3]).toBe(false);
+  });
+  it('동의 값을 읽지 못한 회원 정보에는 표시를 싣지 않는다 — 동의 키 미설정 몰 · 메타 목록이 안 실린 본문(값이 없는 것이 아니다)', async () => {
+    await processWooResource(COMPANY, MALL, 'customer', cust(1, { meta_data: [{ id: 9, key: 'other', value: 'x' }] }), null);
+    await processWooResource(COMPANY, MALL, 'customer', cust(2, { meta_data: [{ id: 9, key: 'other', value: 'x' }] }), '   ');
+    const noMeta: any = cust(3); delete noMeta.meta_data;
+    await processWooResource(COMPANY, MALL, 'customer', noMeta, 'mssms_agreement_label');
+    await processWooResource(COMPANY, MALL, 'customer', cust(4, { meta_data: null }), 'mssms_agreement_label');
+    await processWooResource(COMPANY, MALL, 'customer', cust(5, { meta_data: [] }), 'mssms_agreement_label');
+    const inputs = (identifyCustomer as any).mock.calls.map((c: any[]) => c[1]);
+    expect(inputs).toHaveLength(5);
+    for (const i of inputs.slice(0, 4)) { expect('profileConsentAbsent' in i).toBe(false); expect('smsOptIn' in i).toBe(false); }
+    // 빈 메타 목록은 받은 것이다 = 그 키가 없다
+    expect(inputs[4].profileConsentAbsent).toEqual({ consentKey: 'mssms_agreement_label', memberIdPrefix: `${MALL}:`, memberIdRestPattern: '^[0-9]+$' });
+  });
+  // 운영 실측(1002): 「모름」 44,982 중 41,444 가 회원 연결 · 주문에는 동의 키가 없다 · 비회원 주문도 전화번호로 회원 고객에 합쳐진다(Codex R2)
+  it('주문에는 표시를 싣지 않는다 — 회원의 주문도 비회원 주문도(주문으로는 그 사람의 동의 값이 없다고 말할 수 없다)', async () => {
+    await processWooResource(COMPANY, MALL, 'order', { ...order(801), customer_id: 0, meta_data: [] }, 'mssms_agreement_label');
+    await processWooResource(COMPANY, MALL, 'order', { ...order(802), customer_id: 25, meta_data: [] }, 'mssms_agreement_label');
+    const calls = (syncOrder as any).mock.calls.map((c: any[]) => c[1]);
+    expect(calls).toHaveLength(2);
+    for (const c of calls) expect(Object.keys(c).some((k) => /absent/i.test(k))).toBe(false);
+    // 값 없는 주문은 종전대로 identify 를 따로 부르지 않는다(식별은 syncOrder 가 한다)
+    expect(identifyCustomer).not.toHaveBeenCalled();
+  });
+  it('회원 식별자 모양(wooMemberIdFormat)은 두 매핑의 실제 식별자와 맞는다 — 회원은 걸리고 비회원은 안 걸린다', async () => {
+    const core = await import('../woocommerce-core');
+    const f = core.wooMemberIdFormat(MALL);
+    const isMember = (ext: string) => ext.startsWith(f.memberIdPrefix) && new RegExp(f.memberIdRestPattern).test(ext.slice(f.memberIdPrefix.length));
+    const member = core.mapWooCustomerToCdp(cust(25), { mallId: MALL, consentMetaKey: null })!;
+    const memberOrder = core.mapWooOrderToCdp({ ...order(802), customer_id: 25 }, { mallId: MALL, consentMetaKey: null })!;
+    const guestOrder = core.mapWooOrderToCdp({ ...order(801), customer_id: 0 }, { mallId: MALL, consentMetaKey: null })!;
+    const noPhoneGuest = core.mapWooOrderToCdp({ ...order(803), customer_id: 0, billing: { email: 'g@example.invalid' }, shipping: {} }, { mallId: MALL, consentMetaKey: null })!;
+    expect(isMember(member.identify.externalId)).toBe(true);
+    expect(isMember(memberOrder.order.externalId)).toBe(true);
+    expect(memberOrder.order.externalId).toBe(member.identify.externalId);
+    expect(isMember(guestOrder.order.externalId)).toBe(false);
+    expect(isMember(noPhoneGuest.order.externalId)).toBe(false);
+    // 다른 몰의 회원 식별자는 이 몰의 모양에 걸리지 않는다
+    expect(isMember('lensgogo.info:25')).toBe(false);
+  });
   it('수신동의 실측 값(mssms_agreement_label = "YES"/"NO") → smsOptIn true/false 로 들어간다', async () => {
     const meta = (v: string) => [{ id: 1, key: 'mssms_agreement_label', value: v }];
     await processWooResource(COMPANY, MALL, 'customer', cust(1, { meta_data: meta('YES') }), 'mssms_agreement_label');

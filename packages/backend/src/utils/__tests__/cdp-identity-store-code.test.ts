@@ -12,18 +12,21 @@ vi.mock('../../config/database', () => ({ query: vi.fn() }));
 vi.mock('../unified-customer-profile', () => ({ recomputeProfile: vi.fn(async () => undefined) }));
 vi.mock('../cdp-identity-review', () => ({ recordIdentityReview: vi.fn(async () => undefined) }));
 vi.mock('../customer-store-link', () => ({ linkCustomerStore: vi.fn(async () => true) }));
-vi.mock('../mall-consent', () => ({ upsertStoreConsent: vi.fn(async () => true) }));
+vi.mock('../mall-consent', () => ({ upsertStoreConsent: vi.fn(async () => true), applyMissingConsentRule: vi.fn(async () => false) }));
 
 import { query } from '../../config/database';
 import { linkCustomerStore } from '../customer-store-link';
-import { upsertStoreConsent } from '../mall-consent';
-import { identifyCustomer } from '../cdp-identity';
+import { upsertStoreConsent, applyMissingConsentRule } from '../mall-consent';
+import { identifyCustomer, isConsentAbsent } from '../cdp-identity';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
 const PHONE = '01000000000'; // 형식만 유효한 도달 불가 번호
 const q = query as unknown as ReturnType<typeof vi.fn>;
 const link = linkCustomerStore as unknown as ReturnType<typeof vi.fn>;
 const consent = upsertStoreConsent as unknown as ReturnType<typeof vi.fn>;
+const missingRule = applyMissingConsentRule as unknown as ReturnType<typeof vi.fn>;
+/** 우커머스 회원 정보에 동의 값이 없을 때 싣는 표시(woocommerce-core wooMemberIdFormat 과 같은 모양) */
+const ABSENT = { consentKey: 'mssms_agreement_label', memberIdPrefix: 'ilbonimo.com:', memberIdRestPattern: '^[0-9]+$' };
 
 interface Scenario { linkedCustomerId?: string | null; hasLink?: boolean; phoneHolderId?: string | null }
 
@@ -53,6 +56,8 @@ beforeEach(() => {
   link.mockResolvedValue(true);
   consent.mockReset();
   consent.mockResolvedValue(true);
+  missingRule.mockReset();
+  missingRule.mockResolvedValue(false);
 });
 
 describe('identifyCustomer · 현재 동작 캡처(storeCode 생략)', () => {
@@ -142,6 +147,48 @@ describe('identifyCustomer · 몰 수신동의는 소속 행에 · 고객 행 �
     db();
     await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, storeCode: '일본이모' });
     expect(consent).not.toHaveBeenCalled();
+    // ★1002 표시(회원 정보에 값 없음)가 없는 호출 = 주문에서 온 식별: 규칙도 부르지 않는다(신규 · 기존 연결 모두)
+    db({ hasLink: true, linkedCustomerId: 'cust-linked' });
+    await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:guest:01000000000', phone: PHONE, storeCode: '일본이모' });
+    expect(missingRule).not.toHaveBeenCalled();
+  });
+  // ★ 2026-10-02 「회원 정보에 동의 값이 없으면 동의」 규칙 — 판정(켜진 몰·키 · 모름 · 다른 회원 연결 없음)은 CT 의 SQL 한 문장이 한다. 여기서는 배선만 고정한다.
+  it('회원 정보에 값이 없다는 표시가 실린 호출만 규칙 CT 에 넘긴다(그 고객 · 그 몰 · 출처 · 이 호출의 식별자 · 읽은 동의 키 · 회원 식별자 모양) — 소속 행이 생긴 뒤에', async () => {
+    db();
+    await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, storeCode: '일본이모', profileConsentAbsent: ABSENT });
+    expect(missingRule).toHaveBeenCalledTimes(1);
+    expect(missingRule).toHaveBeenCalledWith(COMPANY, 'cust-new', '일본이모', { source: 'woocommerce', externalId: 'ilbonimo.com:9', ...ABSENT });
+    expect(link.mock.invocationCallOrder[0]).toBeLessThan(missingRule.mock.invocationCallOrder[0]);
+  });
+  it('기존 연결 조기 반환 경로(회원 정보 재수신 · 다시 읽기)에서도 규칙 CT 에 넘긴다', async () => {
+    db({ hasLink: true, linkedCustomerId: 'cust-linked' });
+    await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, storeCode: '일본이모', profileConsentAbsent: ABSENT });
+    expect(missingRule).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', { source: 'woocommerce', externalId: 'ilbonimo.com:9', ...ABSENT });
+  });
+  it('명시 값(동의·거부)이 오면 표시가 실려 있어도 규칙을 부르지 않는다 — 명시 값이 진실이다', async () => {
+    db();
+    await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: false, storeCode: '일본이모', profileConsentAbsent: ABSENT });
+    await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:10', phone: PHONE, smsOptIn: true, storeCode: '일본이모', profileConsentAbsent: ABSENT });
+    expect(consent).toHaveBeenCalledTimes(2);
+    expect(missingRule).not.toHaveBeenCalled();
+  });
+  it('분류코드가 없는 호출(기존 호출처 전부)은 규칙을 부르지 않는다', async () => {
+    db();
+    await identifyCustomer(COMPANY, { source: 'cafe24', externalId: 'm-1', phone: PHONE, profileConsentAbsent: ABSENT });
+    expect(missingRule).not.toHaveBeenCalled();
+  });
+  it('규칙 적용 실패는 식별을 막지 않는다 — 모름으로 남을 뿐이다(덜 보내는 방향)', async () => {
+    db();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    missingRule.mockRejectedValueOnce(new Error('connection terminated'));
+    const r = await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, storeCode: '일본이모', profileConsentAbsent: ABSENT });
+    expect(missingRule).toHaveBeenCalledTimes(1);
+    expect(r.customerId).toBe('cust-new');
+    warn.mockRestore();
+  });
+  it('「없음」 = 키 없음 · null · 빈 문자열뿐 — 해석 못 한 글자는 없음이 아니다(모름으로 둔다)', () => {
+    expect([undefined, null, '', '   '].map(isConsentAbsent)).toEqual([true, true, true, true]);
+    expect(['maybe', '동의', 'YES', 'NO', 0, false].map(isConsentAbsent)).toEqual([false, false, false, false, false, false]);
   });
   it('몰 동의 쓰기 실패는 삼키지 않는다 — 철회가 조용히 사라지면 거부한 사람에게 계속 나간다(웹훅은 재처리 · 가져오기는 그 건만 failed)', async () => {
     db();

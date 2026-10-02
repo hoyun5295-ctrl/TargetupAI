@@ -1765,6 +1765,7 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
       dataInputMethod,
       usageType,
       createdBy: req.user?.userId,
+      auditReq: req,
     });
 
     return res.status(201).json({

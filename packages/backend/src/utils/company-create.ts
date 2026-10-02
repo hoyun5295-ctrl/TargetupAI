@@ -16,6 +16,15 @@ import { ensureSystemSyncUser } from './system-sync-user';
 // ★2026-09-12 싱크에이전트 시크릿은 해시만 저장한다(원문 미저장)
 import { hashSecret } from './secret-hash';
 import { recordPlanChange } from './plan-change-log';
+// ★ 2026-10-02 고객사 등록 · 계정 발급 기록(전송자격인증 4.1 ②) — 실패해도 생성에는 영향 없다
+import { recordAccountIssued, recordCompanyRegistered, AccountIssueChannel } from './account-issue';
+
+/** 발급 기록에 남길 행위자 정보 — 없어도 기록은 남는다(행위자 · 접속 IP만 빈다) */
+export interface IssueAuditContext {
+  actorUserId?: string | null;
+  channel?: AccountIssueChannel;
+  req?: any;
+}
 
 export interface CreateCompanyParams {
   companyCode: string;
@@ -30,6 +39,8 @@ export interface CreateCompanyParams {
   dataInputMethod?: string;
   usageType?: 'web' | 'agent' | 'both';
   createdBy?: string | null;
+  /** 감사 기록의 접속 IP · 브라우저 정보용(Express req). 생성 동작에는 쓰이지 않는다 */
+  auditReq?: any;
 }
 
 export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
@@ -84,6 +95,16 @@ export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
 
   const newCompanyId = result.rows[0].id;
 
+  // ★ 2026-10-02 고객사 등록 기록 — 커밋된 뒤에만 남긴다(롤백된 생성이 기록에 남으면 거짓이다)
+  await recordCompanyRegistered({
+    actorUserId: p.createdBy ?? null,
+    companyId: String(newCompanyId),
+    companyCode: p.companyCode,
+    companyName: p.companyName,
+    usageType: p.usageType ?? 'web',
+    req: p.auditReq,
+  });
+
   // ===== SyncAgent v1.5.0: 시스템 가상 user + customer_code 시퀀스 자동 생성 =====
   // 설계서 §9-3 — 트리거 대신 애플리케이션 로직 선택(추천 B안). 실패는 생성 자체를 막지 않음(기존 동작 유지).
   try {
@@ -115,6 +136,7 @@ export async function createCompanyAdminUser(
   loginId: string,
   password: string,
   name: string,
+  audit?: IssueAuditContext,
 ): Promise<any> {
   const passwordHash = await bcrypt.hash(password, 10);
   // users.user_type DB 실값 = 'admin' (CHECK 제약) — 로그인 시 JWT에서 'company_admin'으로 매핑됨(auth.ts:295).
@@ -125,5 +147,15 @@ export async function createCompanyAdminUser(
      RETURNING id, login_id, name, user_type`,
     [companyId, loginId, passwordHash, name],
   );
+  // ★ 2026-10-02 계정 발급 기록 — 계정을 만드는 이 함수 안에서 남긴다(호출부가 늘어도 빠지지 않는다)
+  await recordAccountIssued({
+    actorUserId: audit?.actorUserId ?? null,
+    userId: r.rows[0].id,
+    loginId: r.rows[0].login_id,
+    userType: r.rows[0].user_type,
+    companyId,
+    channel: audit?.channel ?? 'bulk_gateway',
+    req: audit?.req,
+  });
   return r.rows[0];
 }

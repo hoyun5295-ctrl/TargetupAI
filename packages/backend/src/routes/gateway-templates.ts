@@ -342,6 +342,7 @@ router.post('/bills/bulk-create-companies', async (req: Request, res: Response) 
             dataInputMethod: 'file',
             usageType: 'agent',
             createdBy: req.user?.userId ?? null,
+            auditReq: req,
           });
           companyId = String(company.id);
           created += 1;
@@ -365,7 +366,8 @@ router.post('/bills/bulk-create-companies', async (req: Request, res: Response) 
           const loginId = g.loginId || g.companyCode.toLowerCase();
           const dupUser = await query(`SELECT id FROM users WHERE login_id = $1 LIMIT 1`, [loginId]);
           if (dupUser.rows.length === 0) {
-            await createCompanyAdminUser(companyId, loginId, BULK_INITIAL_PASSWORD, g.companyName);
+            await createCompanyAdminUser(companyId, loginId, BULK_INITIAL_PASSWORD, g.companyName,
+              { actorUserId: req.user?.userId ?? null, channel: 'bulk_gateway', req });
             createdUsers.push(loginId);
           } else {
             skippedUsers.push(loginId);

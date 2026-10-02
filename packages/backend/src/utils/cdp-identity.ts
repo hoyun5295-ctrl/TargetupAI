@@ -32,7 +32,7 @@ import { detectIdentityConflict } from './cdp-identity-conflict';
 import { recordIdentityReview } from './cdp-identity-review';
 // ★ 2026-09-18 자사몰 적재의 분류코드 기록 — 형제 적재 경로(upload·sync·단건)와 같은 줄을 CT 하나가 소유한다
 import { linkCustomerStore } from './customer-store-link';
-import { upsertStoreConsent } from './mall-consent';
+import { upsertStoreConsent, applyMissingConsentRule } from './mall-consent';
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -58,6 +58,13 @@ export interface IdentifyInput {
    */
   smsOptIn?: boolean;
   /**
+   * ★2026-10-02 「이 호출은 그 회원의 **회원 정보**이고, 그 동의 키로 읽었는데 값이 없다」 + 읽은 동의 키 이름 + 그 몰의 회원 연결 식별자 모양.
+   * - 실렸을 때만 「회원 정보에 값이 없으면 동의」 규칙(CT mall-consent · 연동 행 meta.consent_missing_agree_key)이 그 몰 소속 행의 모름을 채운다.
+   * - 생략 = 종전 그대로. ⛔ **주문에서 온 식별에는 싣지 않는다**(회원·비회원 모두) — 주문에는 동의 키가 실리지 않고
+   *   비회원 주문도 전화번호로 회원 고객에 합쳐진다. `smsOptIn` 이 있으면 무시된다(명시 값이 진실).
+   */
+  profileConsentAbsent?: { consentKey: string; memberIdPrefix: string; memberIdRestPattern: string };
+  /**
    * 분류코드 (2026-09-18 · 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-3)
    * - 이 회원이 들어온 몰의 분류코드. 주면 고객을 customer_stores 에 그 코드로 기록한다
    *   (사용자 범위 필터 utils/store-scope.ts 가 그 표를 거친다 = 상시 원칙 "사용자는 분류코드로 자기 것만").
@@ -78,6 +85,15 @@ export function parseConsentValue(raw: unknown): boolean | undefined {
   if (['true', 'y', 'yes', '1', 'agree', 'agreed', 't'].includes(s)) return true;
   if (['false', 'n', 'no', '0', 'disagree', 'denied', 'f'].includes(s)) return false;
   return undefined;
+}
+
+/**
+ * 동의 값이 **아예 없는가**(키 없음 · null · 빈 문자열). 해석하지 못한 글자(예: 알 수 없는 낱말)는 「없음」이 아니다 — 모름으로 둔다.
+ * ★2026-10-02 「회원 정보에 동의 값이 없으면 동의」 규칙(CT mall-consent)이 「없음」과 「모르는 값」을 가르는 자리.
+ */
+export function isConsentAbsent(raw: unknown): boolean {
+  if (raw === undefined || raw === null) return true;
+  return typeof raw === 'string' && raw.trim() === '';
 }
 
 export interface IdentifyResult {
@@ -156,7 +172,7 @@ export async function identifyCustomer(
         [linkRow.id, email, normalizedPhone]
       );
       // ★ 2026-09-18: 조기 반환 경로도 분류 기록을 지난다(빠뜨리면 이미 연결된 회원만 영영 분류 밖에 남는다)
-      await recordStoreMembership(companyId, linkRow.customer_id, input.storeCode, input.smsOptIn, input.source);
+      await recordStoreMembership(companyId, linkRow.customer_id, input);
       return {
         customerId: linkRow.customer_id,
         linkId: linkRow.id,
@@ -303,7 +319,7 @@ export async function identifyCustomer(
   }
 
   // ★ 2026-09-18: 고객이 확정된 뒤 분류 기록(신규 · email 매칭 · phone 매칭 공통). 두 몰의 회원 = 고객 1행 + 소속 2행.
-  await recordStoreMembership(companyId, customerId!, input.storeCode, input.smsOptIn, input.source);
+  await recordStoreMembership(companyId, customerId!, input);
 
   // ★ D214+ (2026-05-24) unified profile 재계산 (fire-and-forget — active_sources / primary_source / preferred_channel)
   void recomputeProfile(companyId, customerId!).catch((err) => {
@@ -362,21 +378,41 @@ export async function ensureAnonymousLink(
 async function recordStoreMembership(
   companyId: string,
   customerId: string,
-  storeCode?: string,
-  /** 그 몰이 준 수신동의(명시 값일 때만). undefined = 모름 = 소속 행 동의를 건드리지 않는다 */
-  smsOptIn?: boolean,
-  source?: string,
+  /** 식별 입력 원본(동결 전) — 분류코드 · 그 몰이 준 수신동의(명시 값일 때만) · 출처 · 식별자 · 「회원 정보에 값 없음」 표시 */
+  input: Pick<IdentifyInput, 'storeCode' | 'smsOptIn' | 'source' | 'externalId' | 'profileConsentAbsent'>,
 ): Promise<void> {
+  const { storeCode, smsOptIn, source } = input;
   if (!storeCode) return;
   try {
     await linkCustomerStore(companyId, customerId, storeCode);
   } catch (err: any) {
     console.warn('[CDP Identity] 분류 기록 실패 (식별 자체는 완료):', err?.message || err);
   }
-  // ★ 2026-09-22: 몰 동의는 소속 행이 단독으로 갖는다(CT mall-consent · 다른 몰의 행에는 닿지 않는다). 소속 행이 생긴 뒤에 쓴다.
+  // ★ 2026-09-22: 몰 동의는 소속 행이 단독으로 갖는다(CT mall-consent · 다른 몰의 행에는 닿지 않는다).
+  //   ★ 2026-10-02: 위 분류 기록이 실패했어도 명시 값은 CT 가 행을 만들어 남긴다(거부가 조용히 빠지지 않게).
   // ⛔ 이 쓰기의 실패는 삼키지 않는다(Codex 0922 R1) — 철회(false)가 조용히 사라지면 그 몰에서 거부한 사람에게 계속 나간다.
   //    던지면 웹훅은 재처리 경로로, 가져오기는 그 건만 failed 로 남는다. 컬럼 미존재(42703)는 CT 가 안에서 처리한다.
-  if (smsOptIn !== undefined) await upsertStoreConsent(companyId, customerId, storeCode, smsOptIn, source || 'unknown');
+  if (smsOptIn !== undefined) {
+    await upsertStoreConsent(companyId, customerId, storeCode, smsOptIn, source || 'unknown');
+    return;
+  }
+  // ★ 2026-10-02 「회원 정보에 동의 값이 없으면 동의」 규칙(CT mall-consent · 연동 행 meta.consent_missing_agree_key).
+  //   회원 정보에서 값이 없음을 확인한 호출만 넘긴다. 켜진 몰·키인가 · 모름인가 · 다른 회원 연결이 없는가는 전부 CT 의 SQL 한 문장이 본다.
+  //   실패는 삼킨다 — 못 채우면 모름으로 남아 발송에서 빠질 뿐이다(덜 보내는 방향 · 다음 회원 정보 수신에서 다시 채운다).
+  //   철회 쓰기(위)와 달리 던져서 재처리시킬 이유가 없고, 던지면 회원 적재가 이 규칙 때문에 멈춘다.
+  const absent = input.profileConsentAbsent;
+  if (!absent) return;
+  try {
+    await applyMissingConsentRule(companyId, customerId, storeCode, {
+      source: source || 'unknown',
+      externalId: input.externalId,
+      consentKey: absent.consentKey,
+      memberIdPrefix: absent.memberIdPrefix,
+      memberIdRestPattern: absent.memberIdRestPattern,
+    });
+  } catch (err: any) {
+    console.warn('[CDP Identity] 회원 정보 동의 값 없음 규칙 적용 실패 (식별 자체는 완료 · 모름으로 남는다):', err?.message || err);
+  }
 }
 
 /** 같은 회사에서 normalizedPhone을 보유한 활성 고객 id 1건(없으면 null). A1/A4 phone 충돌 판정 공용. */

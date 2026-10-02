@@ -83,6 +83,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   user_update: '사용자 수정',
   account_restricted: '계정 제한',
   company_terminated: '회사 해지',
+  // ★ 2026-10-02 계정 발급 · 고객사 등록 기록(전송자격인증 4.1 ②) — utils/account-issue.ts
+  user_account_created: '고객 계정 발급',
+  company_created: '고객사 등록',
   // ★ 2026-08-27 직원 계정 등급(전송자격인증 3.2·3.3)
   admin_role_changed: '직원 등급 변경',
   admin_account_created: '직원 계정 생성',
@@ -139,6 +142,25 @@ export const AUDIT_ACTION_COLOR: Record<string, string> = {
 
 const USER_TYPE_LABEL: Record<string, string> = {
   admin: '관리자', user: '사용자', super_admin: '슈퍼관리자', company_admin: '고객사관리자', company_user: '사용자',
+};
+
+/**
+ * ★ 2026-10-02 계정 발급 기록의 값 → 한글(전송자격인증 4.1 ②).
+ * ⛔ 원본은 백엔드 `utils/account-issue.ts`의 `AccountIssueChannel`이다. 경로를 늘리면 여기에도 넣는다.
+ *   발급 기록의 계정 유형은 DB 저장값(admin · user · system)이라 로그인 기록의 표기와 뜻이 다르다(admin = 고객사 관리자).
+ */
+const ISSUE_CHANNEL_LABEL: Record<string, string> = {
+  super_admin: '운영자 개별 발급',
+  manage_page: '운영자 발급(관리 화면)',
+  bulk_gateway: '일괄 발급(발송 전용 고객사)',
+  bulk_pay: '일괄 발급(결제 매핑)',
+  system: '연동 전용 계정 자동 생성',
+};
+const ISSUED_USER_TYPE_LABEL: Record<string, string> = {
+  admin: '고객사 관리자', user: '고객사 사용자', system: '연동 전용 계정',
+};
+const USAGE_TYPE_LABEL: Record<string, string> = {
+  web: '웹 발송', agent: '발송 전용', both: '웹 발송 + 발송 전용',
 };
 
 /** 실패·차단 사유 → 한글 */
@@ -289,6 +311,19 @@ export function formatAuditDetail(action: string, details: any): string {
       ].filter(Boolean).join(' · ');
     case 'admin_password_changed':
       return `${d.login_id || ''} 비밀번호 변경${d.reason === 'initial_password' ? ' (초기 비밀번호 교체)' : ''}`;
+    // ★ 2026-10-02 계정 발급 · 고객사 등록(전송자격인증 4.1 ②) — 누구 계정을, 어느 고객사에, 어떤 경로로
+    case 'user_account_created':
+      return [
+        `${d.loginId || ''} 계정 발급`,
+        d.userType && (ISSUED_USER_TYPE_LABEL[d.userType] || USER_TYPE_LABEL[d.userType] || d.userType),
+        d.companyName,
+        d.channel && (ISSUE_CHANNEL_LABEL[d.channel] || d.channel),
+      ].filter(Boolean).join(' · ');
+    case 'company_created':
+      return [
+        `${d.companyName || ''}(${d.companyCode || ''}) 등록`,
+        d.usageType && (USAGE_TYPE_LABEL[d.usageType] || d.usageType),
+      ].filter(Boolean).join(' · ');
     // ★ 2026-08-30 승인 링크 보안 보강
     case 'charge_link_approved':
       return [d.companyName, d.amount != null && `${Number(d.amount).toLocaleString()}원`, d.phone && `승인 번호 ${d.phone}`]

@@ -22,7 +22,7 @@
 | 서비스 | Host | Port | DB/User | 비고 |
 |--------|------|------|---------|------|
 | PostgreSQL | localhost | 5432 | targetup / targetup | `docker exec -it targetup-postgres psql -U targetup targetup` |
-| MySQL (QTmsg) | localhost | 3306 | smsdb / smsuser / **(서버 .env 참조 — 문서 기재 금지)** | `docker exec -it targetup-mysql mysql -usmsuser -p smsdb` (비밀번호 프롬프트 입력) |
+| MySQL (QTmsg) | localhost | 3306 | smsdb / smsuser / **(서버 .env 참조 — 문서 기재 금지)** | `docker exec -it targetup-mysql mysql -usmsuser -p smsdb` (비밀번호 프롬프트 입력) · ★1001 실측 = 이 방식과 컨테이너 환경값 모두 `ERROR 1045` 거부 → 조회는 백엔드 접속으로([FEATURE-BRAND-CAROUSEL §3](../docs/FEATURE-BRAND-CAROUSEL.md) 의 명령 모양) |
 | Redis | localhost | 6379 | - | |
 | 프론트엔드 | localhost | 5173 | - | |
 | 백엔드 API | localhost | 3000 | - | |
