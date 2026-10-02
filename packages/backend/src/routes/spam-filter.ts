@@ -8,7 +8,7 @@ import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spam
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from '../utils/system-alert';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
-import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpamQtmsgRows, refundSpamSendFailures } from '../utils/spam-test-queue';
+import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpamQtmsgRows, refundSpamSendFailures, resolveSpamReportTest, parseReportAgeMs, spamReportReceivedAt } from '../utils/spam-test-queue';
 // ★ 2026-09-26 한줄로 V2 m040 — 검사 발신번호 = 등록 번호만(발송 경로와 같은 CT)
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { getSampleCustomerScope } from '../utils/store-scope';
@@ -501,8 +501,11 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
 // [POST] /api/spam-filter/report — 앱 수신 리포트
 // ============================================================
 router.post('/report', async (req: Request, res: Response) => {
+  // 요청이 도착한 시각 — 문자를 받은 때를 계산하는 기준이다. 아래의 어떤 대기(인증 · 단말 갱신 · DB 연결)보다 먼저 잡는다
+  const arrivedAtMs = Date.now();
   try {
-    const { deviceId, senderNumber, messageContent, messageType } = req.body;
+    // ageMs(받은 뒤 지난 시간) · attempt · appVersion = 앱 1.2 부터 싣는다(1.1 은 없다)
+    const { deviceId, senderNumber, messageContent, messageType, ageMs, attempt, appVersion } = req.body;
 
     // 1) 앱 토큰 인증 — spamAppTokenVerdict(req.headers['x-spam-token'])
     const rejected = rejectSpamAppRequest(req, res);
@@ -523,68 +526,36 @@ router.post('/report', async (req: Request, res: Response) => {
     }
     const device = deviceResult.rows[0];
 
-    // 3) 발신번호로 active 테스트 후보 조회
-    const senderClean = senderNumber.replace(/\D/g, '');
+    // 3) 이 보고가 어느 검사의 것인가 — CT(spam-test-queue resolveSpamReportTest) 하나가 고른다
+    //    ★ 2026-10-02: 문안 대조에서 통신사 머리말([Web발신])을 뗀다 · 닫힌 검사도 문안이 같으면 늦은 보고로 반영한다 ·
+    //      문자를 받은 뒤에 만들어진 검사는 후보에서 뺀다(받은 때 = 요청 도착 시각 − 앱이 잰 「받은 뒤 지난 시간」 · 폰 시계의 시각은 쓰지 않는다).
+    //      종전 규칙(진행 중 하나 · 여럿이면 이 단말의 가장 최근)은 그 뒤에 그대로다.
+    const senderClean = String(senderNumber).replace(/\D/g, '');
+    // SMS/LMS 타입: 앱이 보내는 messageType 직접 사용
+    const detectedType = (messageType === 'LMS') ? 'LMS' : 'SMS';
+    const reportAgeMs = parseReportAgeMs(ageMs);
+    // 앱 1.2 가 실어 보내는 값 — 받은 지 얼마 만에 · 몇 번째 시도로 닿았는가(1.1 은 없다)
+    const reportAge = reportAgeMs === null ? '' : ` age=${Math.round(reportAgeMs / 1000)}s`;
+    const reportTry = /^\d{1,4}$/.test(String(attempt ?? '')) ? ` try=${attempt}` : '';
+    const reportApp = /^[0-9.]{1,10}$/.test(String(appVersion ?? '')) ? ` app=${appVersion}` : '';
 
-    console.log(`[SpamFilter] 리포트 수신 — device=${device.phone}(${device.carrier}), sender=${senderClean}`);
+    console.log(`[SpamFilter] 리포트 수신 — device=${device.phone}(${device.carrier}), sender=${senderClean}${reportAge}${reportTry}${reportApp}`);
 
-    const candidates = await query(
-      `SELECT id, message_content_sms, message_content_lms, message_hash FROM spam_filter_tests
-       WHERE status = 'active'
-         AND REPLACE(callback_number, '-', '') = $1
-       ORDER BY created_at DESC`,
-      [senderClean]
-    );
-    if (candidates.rows.length === 0) {
+    const target = await resolveSpamReportTest({
+      senderClean,
+      devicePhone: device.phone,
+      carrier: device.carrier,
+      messageType: detectedType,
+      messageContent: typeof messageContent === 'string' ? messageContent : '',
+      receivedAtMs: spamReportReceivedAt(arrivedAtMs, reportAgeMs),
+    });
+    if (!target) {
+      console.log(`[SpamFilter] 리포트 매칭 없음 — sender=${senderClean}, device=${device.phone}, carrier=${device.carrier}, type=${detectedType}${reportAge}`);
       return res.json({ success: true, matched: false, message: '매칭되는 테스트가 없습니다.' });
     }
+    const testId = target.testId;
 
-    let testId: string | null = null;
-
-    if (candidates.rows.length === 1) {
-      // 단일 건 → 바로 매칭
-      testId = candidates.rows[0].id;
-    } else {
-      // 복수 건 → 1차: 메시지 해시 매칭
-      const reportHash = computeMessageHash(messageContent || '');
-      if (reportHash) {
-        const hashMatched = candidates.rows.find((row: any) => row.message_hash === reportHash);
-        if (hashMatched) {
-          testId = hashMatched.id;
-        }
-      }
-
-      // 2차: 디바이스(phone+carrier) 기반 매칭 — test_results에서 이 디바이스로 발송된 미수신 테스트 조회
-      if (!testId) {
-        const candidateIds = candidates.rows.map((r: any) => r.id);
-        const deviceMatch = await query(
-          `SELECT tr.test_id FROM spam_filter_test_results tr
-           JOIN spam_filter_tests t ON t.id = tr.test_id
-           WHERE tr.test_id = ANY($1::uuid[])
-             AND tr.phone = $2 AND tr.carrier = $3
-             AND tr.received = false AND tr.result IS NULL
-           ORDER BY t.created_at DESC`,
-          [candidateIds, device.phone, device.carrier]
-        );
-        if (deviceMatch.rows.length === 1) {
-          testId = deviceMatch.rows[0].test_id;
-        } else if (deviceMatch.rows.length > 1) {
-          // 여러 건이면 가장 최근 테스트 매칭
-          testId = deviceMatch.rows[0].test_id;
-        }
-      }
-
-      // 3차: 그래도 실패 시 로그 남기고 무시
-      if (!testId) {
-        console.log(`[SpamFilter] 복수 active 테스트 매칭 실패 — sender=${senderClean}, device=${device.phone}, carrier=${device.carrier}`);
-        return res.json({ success: true, matched: false, message: '메시지 내용 매칭 실패 (무시)' });
-      }
-    }
-
-    // 4) SMS/LMS 타입: 앱이 보내는 messageType 직접 사용
-    const detectedType = (messageType === 'LMS') ? 'LMS' : 'SMS';
-
-    console.log(`[SpamFilter] 리포트 매칭 성공 — testId=${testId}, carrier=${device.carrier}, type=${detectedType}`);
+    console.log(`[SpamFilter] 리포트 매칭 성공 — testId=${testId}, carrier=${device.carrier}, type=${detectedType}, via=${target.via}${target.late ? ', late' : ''}`);
 
     // 5) 결과 업데이트
     const updateResult = await query(
@@ -598,6 +569,11 @@ router.post('/report', async (req: Request, res: Response) => {
       //   후보가 하나면 해시 없이 매칭하므로 이전 검사의 늦은 보고가 새 검사의 실패 행을 통과로 덮었다 → 청구 판정(failed 여부)이 뒤집혔다.
       [testId, device.carrier, detectedType, SPAM_RESULT.PASS, device.phone, SPAM_RESULT.FAILED]
     );
+    const updated = (updateResult.rowCount ?? 0) > 0;
+    // ★ 2026-10-02 닫힌 검사의 차단·시간초과 행이 늦은 보고로 통과가 됐다 — 건수를 세는 로그(청구는 그대로: 통과·차단·시간초과 모두 청구 대상)
+    if (target.late && updated) {
+      console.log(`[SpamFilter] 늦은 보고로 판정 정정 — testId=${testId}, carrier=${device.carrier}, type=${detectedType}${reportAge}${reportTry}${reportApp}`);
+    }
 
     // 6) 모든 결과 수신 완료 체크 → 즉시 completed 전환
     const pendingCheck = await query(
@@ -606,9 +582,10 @@ router.post('/report', async (req: Request, res: Response) => {
       [testId]
     );
     if (parseInt(pendingCheck.rows[0].cnt) === 0) {
+      // 진행 중인 검사만 닫는다 — 늦은 보고가 이미 닫힌 검사의 완료 시각을 덮지 않게(★1002)
       await query(
         `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
-         WHERE id = $1`,
+         WHERE id = $1 AND status = 'active'`,
         [testId]
       );
     }
@@ -619,7 +596,8 @@ router.post('/report', async (req: Request, res: Response) => {
       testId,
       carrier: device.carrier,
       messageType: detectedType,
-      updated: (updateResult.rowCount ?? 0) > 0
+      updated,
+      late: target.late
     });
 
   } catch (err) {

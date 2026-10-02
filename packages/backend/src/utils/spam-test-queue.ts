@@ -117,6 +117,175 @@ export function computeMessageHash(content: string): string {
   return createHash('sha256').update(normalized, 'utf8').digest('hex').substring(0, 16);
 }
 
+// ============================================================
+// 앱 수신 보고 — 어느 검사의 것인가 (★2026-10-02)
+//
+// 실측(1002): 시험 폰이 문자를 받고도 보고를 못 내보내(앱 1.1 은 9초 안에 못 보내면 버렸다) 서버가 "통신사 전송 성공 + 앱 보고 없음"을
+//   '차단'으로 판정했다 — SKT 12:46 폰 로그(`리포트 최종 실패`) · nginx 에 그 폰의 요청 없음 · 문자는 수신함에 있었다.
+// 앱 1.2 는 서버가 답할 때까지 다시 보낸다(최대 10분). 그래서 판정이 난 뒤에 도착하는 보고가 생긴다.
+//
+// ⛔ 닫힌 검사는 **문안이 같을 때만** 늦은 보고로 고친다. 문안을 보지 않으면 같은 발신번호의 다른 문자(두 번 오는 수신 알림의
+//    두 번째 보고 포함)가 진짜 차단을 통과로 덮는다.
+// ⛔ 문자를 받은 뒤에 만들어진 검사는 그 문자의 검사가 아니다. 이 조건이 없으면 늦은 보고(와 그 재전송)가 뒤에 만든 검사를 통과로 만든다.
+//    "문자를 받은 때"는 **폰 시계의 시각으로 받지 않는다.** 폰이 「받은 뒤 이 보고를 보내기까지 지난 시간」을 재서 싣고,
+//    서버가 **요청이 도착한 시각**에서 그만큼 뺀다(spamReportReceivedAt). 폰 시계가 서버와 달라도 값이 같고,
+//    보고가 서버에 닿는 데 걸린 시간만큼만 **늦은 쪽으로** 어긋난다 → 그 문자의 진짜 검사를 후보에서 빼는 일이 없다.
+//    (폰 시각을 그대로 견주던 1002 초안은 폰 시계가 1분 느리면 제때 온 보고를 버렸다 — Codex 1R)
+//    도착 시각은 라우트의 첫 줄에서 한 번 잡는다. 판정 문장을 돌리는 때의 시각으로 계산하면 그 앞의 대기(단말 갱신 · DB 연결)만큼
+//    받은 때가 더 늦게 잡혀 뒤에 만든 검사가 후보에 든다(Codex 2R).
+// ⛔ 그 문자의 검사가 어느 것인가를 **먼저** 정하고, 고칠 수 있는 때(닫힌 지 10분 안)인가는 그 뒤에 본다.
+//    지난 검사를 후보에서 미리 빼면 같은 보고의 재전송이 더 오래된 다른 검사로 넘어간다(Codex 2R).
+// ============================================================
+
+/** 닫힌 검사에 늦은 보고를 받아 주는 시간(분) — 앱 대기열의 보관 시간(10분)과 같다 */
+export const SPAM_LATE_REPORT_MINUTES = 10;
+
+/**
+ * 통신사가 받는 사람 화면 맨 앞에 붙이는 발신 구분 머리말을 뗀다(`[Web발신]` 등 — 보낸 문안에는 없다).
+ * 종전에는 이것을 떼지 않고 해시를 견줘, 실제 보고는 문안 대조가 늘 실패했다(1002 KT·SKT 폰 로그의 보고 본문 실측).
+ * 맨 앞의 것만 뗀다 — 본문 중간의 같은 글자는 고객 문안이다.
+ */
+export function stripCarrierOriginTag(content: string): string {
+  return String(content ?? '').replace(/^\s*\[(?:Web|국제|국외)발신\]\s*/, '');
+}
+
+/** 폰이 보고한 문안의 해시 — 검사 행의 message_hash(보낸 문안)와 견준다 */
+export function spamReportHash(content: string): string {
+  return computeMessageHash(stripCarrierOriginTag(content));
+}
+
+/** 앱이 싣는 「받은 뒤 지난 시간」의 상한 — 앱은 10분이 지난 보고를 버린다. 이보다 큰 값은 잘못된 값이다 */
+const REPORT_AGE_MAX_MS = 60 * 60_000;
+
+/**
+ * 앱(1.2+)이 실어 보내는 「문자를 받은 뒤 이 보고를 보내기까지 지난 시간」(ms · 폰이 자기 시계 하나로 잰 차이).
+ * 1.1 은 보내지 않는다 → null. 숫자가 아니거나 한 시간을 넘는 값도 null(= 받은 때를 모르는 보고로 다룬다).
+ */
+export function parseReportAgeMs(raw: unknown): number | null {
+  if (raw === undefined || raw === null) return null;
+  const s = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim() : '';
+  if (!/^\d{1,9}$/.test(s)) return null;
+  const n = Number(s);
+  return n <= REPORT_AGE_MAX_MS ? n : null;
+}
+
+/**
+ * 문안으로 고르는 문장 — 같은 발신번호 · **같은 문안** · 이 단말(번호 + 통신사 + 유형)의 결과 행이 있는 검사 중,
+ * **문자를 받기 전에 만들어진** 것(진행 중 · 닫힌 것)에서 하나. 이것이 "그 문자의 검사"다.
+ * $1 발신번호(숫자만) · $2 문안 해시 · $3 단말 번호 · $4 통신사 · $5 유형 · $6 받은 때(서버 시계 ms · 1.1 = NULL)
+ *
+ * - 받은 때($6)는 라우트가 요청 도착 시각에서 앱이 잰 지난 시간을 뺀 값이다(spamReportReceivedAt). 이 문장을 언제 돌리든 같다.
+ *   만든 때(created_at)는 DB 시계 · 받은 때는 백엔드 시계다 — 둘은 같은 서버에 있다(같은 시계).
+ * - $6 이 없는 보고(1.1)는 받은 때를 모른다 → 종전처럼 진행 중인 검사만 본다(닫힌 검사를 고치지 않는다).
+ * - correctable = 고칠 수 있는 때인가(진행 중 · 닫힌 지 10분 안). **후보를 거르는 조건이 아니다** — 고른 검사가 지났으면
+ *   그 보고는 무시한다. 후보에서 미리 빼면 같은 보고의 재전송이 더 오래된 다른 검사로 넘어간다.
+ * - 고르는 순서: ① 진행 중이고 이 단말의 보고를 아직 기다리는 검사(종전 규칙과 같다 — 같은 문안의 검사가 겹쳐 돌 때 두 문자가
+ *   두 검사에 하나씩 간다. 겹침은 등록 화면이 막지만 동시 등록·자동 검사와는 겹칠 수 있다) → ② 그 밖에는 가장 최근에 만든 것.
+ * ⛔ **닫힌 검사**는 그 행이 고칠 수 있는 상태인가(수신 표시 없음 · 발송 실패 아님)로 고르지 않는다 — 라우트의 갱신 문장이 본다.
+ *    "고칠 수 있는 행이 남은 닫힌 검사"로 고르면, 같은 보고가 두 번 올 때(앱의 재전송) 두 번째가 같은 문안의 **더 오래된 닫힌 검사**로
+ *    넘어가 진짜 차단을 통과로 고친다(1002 PostgreSQL 실측에서 확인).
+ *    같은 보고는 몇 번을 다시 보내도 받은 때가 같으므로 같은 검사가 골라지고, 두 번째부터는 갱신이 0행으로 끝난다.
+ */
+export const SPAM_REPORT_TEXT_MATCH_SQL = `
+  SELECT t.id, t.status,
+         (t.status = 'active' OR t.completed_at >= NOW() - INTERVAL '${SPAM_LATE_REPORT_MINUTES} minutes') AS correctable
+    FROM spam_filter_tests t
+   WHERE REPLACE(t.callback_number, '-', '') = $1
+     AND t.message_hash = $2
+     AND (t.status = 'active' OR ($6::double precision IS NOT NULL AND t.status = 'completed'))
+     AND ($6::double precision IS NULL OR t.created_at <= to_timestamp($6::double precision / 1000.0))
+     AND EXISTS (
+       SELECT 1 FROM spam_filter_test_results tr
+        WHERE tr.test_id = t.id
+          AND tr.phone = $3 AND tr.carrier = $4 AND tr.message_type = $5)
+   ORDER BY (t.status = 'active' AND EXISTS (
+              SELECT 1 FROM spam_filter_test_results w
+               WHERE w.test_id = t.id
+                 AND w.phone = $3 AND w.carrier = $4 AND w.message_type = $5
+                 AND w.received = false AND w.result IS NULL)) DESC,
+            t.created_at DESC
+   LIMIT 1`;
+
+/**
+ * 문안으로 못 고른 보고의 후보(종전 규칙용) — 같은 발신번호의 진행 중인 검사 중 문자를 받기 전에 만들어진 것.
+ * $1 발신번호(숫자만) · $2 받은 때(서버 시계 ms · 1.1 = NULL → 전부)
+ */
+export const SPAM_REPORT_ACTIVE_SQL = `
+  SELECT id FROM spam_filter_tests
+   WHERE status = 'active'
+     AND REPLACE(callback_number, '-', '') = $1
+     AND ($2::double precision IS NULL OR created_at <= to_timestamp($2::double precision / 1000.0))
+   ORDER BY created_at DESC`;
+
+/**
+ * 문자를 받은 때(서버 시계 ms) = 요청이 서버에 도착한 시각 − 앱이 잰 「받은 뒤 지난 시간」. 지난 시간을 모르면(1.1) null.
+ * [arrivedAtMs] 는 라우트가 **첫 줄에서** 잡은 값이어야 한다 — 그 뒤의 대기는 받은 때에 들어가지 않는다.
+ */
+export function spamReportReceivedAt(arrivedAtMs: number, ageMs: number | null): number | null {
+  return ageMs === null ? null : arrivedAtMs - ageMs;
+}
+
+export interface SpamReportTarget {
+  testId: string;
+  /** 이미 닫힌 검사에 반영하는 늦은 보고인가 */
+  late: boolean;
+  /** 고른 근거: hash = 문안 일치 · single = 진행 중인 검사가 하나 · device = 이 단말에 보고가 없는 가장 최근 검사 */
+  via: 'hash' | 'single' | 'device';
+}
+
+/**
+ * 앱 수신 보고가 어느 검사의 것인지 고른다(라우트 `POST /api/spam-filter/report` 가 쓰는 유일한 판정).
+ * 순서: ① 문안이 같은 검사 중 문자를 받기 전에 만들어진 것(SPAM_REPORT_TEXT_MATCH_SQL) — 그것이 그 문자의 검사다.
+ *          진행 중이거나 닫힌 지 10분 안이면 그 검사, 그보다 지났으면 무시(null).
+ *       → ② 문안이 같은 검사가 없으면 종전 규칙(진행 중인 검사가 하나면 그것 · 여럿이면 이 단말에 아직 보고가 없는 가장 최근 검사).
+ * 없으면 null(무시).
+ * ①에서 고른 검사가 지났거나, 그 행이 이미 수신 처리됐거나 발송 실패면 거기서 끝난다(다른 검사로 넘어가지 않는다).
+ *
+ * [가를 수 없는 경우 — 규칙으로 정해 둔다] 발신번호와 문안이 같은 문자는 서로 구별할 표지가 없다.
+ *   - 같은 문안으로 연달아 검사했고 앞 검사의 문자가 뒤 검사를 만든 뒤에야 도착했다면 그 보고는 뒤 검사로 간다.
+ *   - 받은 때는 보고가 서버에 닿는 데 걸린 시간(앱이 보낸 때 ~ 라우트가 시작된 때 · 앱의 한 번 시도 제한 4초 안)만큼 늦게 잡힌다.
+ *     문자를 받은 뒤 그 시간 안에 같은 문안으로 만든 검사는 "받기 전에 만든 검사"로 보인다.
+ */
+export async function resolveSpamReportTest(o: {
+  senderClean: string;
+  devicePhone: string;
+  carrier: string;
+  messageType: 'SMS' | 'LMS';
+  messageContent: string;
+  /** 문자를 받은 때(서버 시계 ms · spamReportReceivedAt). 1.1 앱 = null */
+  receivedAtMs: number | null;
+}): Promise<SpamReportTarget | null> {
+  const reportHash = spamReportHash(o.messageContent);
+  if (reportHash) {
+    const sameText = await query(SPAM_REPORT_TEXT_MATCH_SQL, [
+      o.senderClean, reportHash, o.devicePhone, o.carrier, o.messageType, o.receivedAtMs,
+    ]);
+    if (sameText.rows.length > 0) {
+      const own = sameText.rows[0];
+      // 그 문자의 검사는 이것이다. 고칠 수 있는 때가 지났으면 무시한다 — 다른 검사로 넘어가지 않는다
+      if (own.correctable !== true) return null;
+      return { testId: String(own.id), late: own.status !== 'active', via: 'hash' };
+    }
+  }
+
+  const eligible = (await query(SPAM_REPORT_ACTIVE_SQL, [o.senderClean, o.receivedAtMs])).rows as any[];
+  if (eligible.length === 0) return null;
+  if (eligible.length === 1) return { testId: String(eligible[0].id), late: false, via: 'single' };
+
+  const candidateIds = eligible.map((r) => r.id);
+  const deviceMatch = await query(
+    `SELECT tr.test_id FROM spam_filter_test_results tr
+     JOIN spam_filter_tests t ON t.id = tr.test_id
+     WHERE tr.test_id = ANY($1::uuid[])
+       AND tr.phone = $2 AND tr.carrier = $3
+       AND tr.received = false AND tr.result IS NULL
+     ORDER BY t.created_at DESC`,
+    [candidateIds, o.devicePhone, o.carrier]
+  );
+  if (deviceMatch.rows.length === 0) return null;
+  return { testId: String(deviceMatch.rows[0].test_id), late: false, via: 'device' };
+}
+
 // ★ D103: 인라인 getTestSmsTable/insertSmsQueue 삭제 → sms-queue.ts CT-04 컨트롤타워(getTestSmsTables, insertTestSmsQueue) 사용
 
 // ============================================================
