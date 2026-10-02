@@ -33,6 +33,28 @@ const QUEUE_POLL_INTERVAL_MS = 3000; // 큐 워커 체크 주기 (3초)
 const MANUAL_GRACE_MS = 20000;       // 수동 테스트: QTmsg 성공 후 앱 리포트 대기 (20초, KT 12~15초 소요 대응)
 const AUTO_GRACE_MS = 25000;         // 자동 테스트: QTmsg 성공 후 앱 리포트 대기 (25초, 오탐 방지)
 const RESULT_POLL_INTERVAL_MS = 5000; // 결과 폴링 주기 (5초)
+
+/**
+ * ★ 2026-10-02 「통신사 전송 성공 + 앱 보고 없음」을 차단으로 확정하는 **가장 이른 때** — 검사를 시작한 뒤 45초.
+ *
+ * 종전: 통신사 성공을 본 뒤 유예(수동 10초 · 큐 20~25초)만 지나면 확정 → 검사 시작 뒤 30초쯤에 「막혔어요」가 떴다.
+ *   시험 폰은 문자를 받고도 보고가 늦을 수 있다(1002 실측: 받은 뒤 32.9초에 닿은 보고 · 통신이 멎은 폰). 사람들은 화면을 한 번 보고
+ *   닫으므로 처음 뜨는 판정이 맞아야 한다 → 확정을 늦춰 그 사이에 닿는 보고를 처음부터 「통과」로 보이게 한다.
+ * 왜 60초(검사 제한 시간)가 아니고 45초인가: 검사 화면은 시작 뒤 60초에 결과 읽기를 멈추고, 수동 검사는 15초마다 확인한다(15·30·45·60).
+ *   60초 확인에서 확정하면 화면이 그것을 못 보고 진짜 차단을 「결과 없음」으로 보여 준다. 화면에 보이는 마지막 확인이 45초다.
+ * 이보다 늦게 닿은 보고는 닫힌 검사의 행을 고친다(resolveSpamReportTest · 10분 안).
+ */
+export const SPAM_BLOCK_DECIDE_AFTER_MS = 45_000;
+
+/**
+ * 「통신사 전송 성공 + 앱 보고 없음」을 지금 차단으로 확정해도 되는가 — 수동 검사 라우트와 큐 워커가 쓰는 유일한 판정.
+ * 둘 다 채워야 한다: ① 통신사 성공을 처음 본 뒤 유예([graceMs])가 지났다 ② 검사를 시작한 뒤 [SPAM_BLOCK_DECIDE_AFTER_MS] 가 지났다.
+ * [successSeenAtMs] = 통신사 성공을 처음 본 때(아직 못 봤으면 undefined) · [startedAtMs] = 검사를 시작한 때.
+ */
+export function spamBlockedDue(o: { nowMs: number; startedAtMs: number; successSeenAtMs: number | undefined; graceMs: number }): boolean {
+  if (o.successSeenAtMs === undefined) return false;
+  return o.nowMs - o.successSeenAtMs >= o.graceMs && o.nowMs - o.startedAtMs >= SPAM_BLOCK_DECIDE_AFTER_MS;
+}
 const MAX_REGENERATE_RETRIES = 2;    // 스팸 차단 시 최대 재생성 횟수
 
 // ============================================================
@@ -713,9 +735,10 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
               if (!qtmsgSuccessTime.has(rowKey)) {
                 qtmsgSuccessTime.set(rowKey, Date.now());
                 result = null;
-              } else if (Date.now() - qtmsgSuccessTime.get(rowKey)! >= graceMs) {
+              } else if (spamBlockedDue({ nowMs: Date.now(), startedAtMs: activatedAt, successSeenAtMs: qtmsgSuccessTime.get(rowKey), graceMs })) {
+                // ★ 2026-10-02 유예 + 검사 시작 뒤 45초가 지나야 확정한다(늦게 닿는 보고를 기다린다)
                 result = SPAM_RESULT.BLOCKED;
-                console.log(`[SpamTestQueue] BLOCKED — testId=${testId}, phone=${row.phone}, grace=${graceMs}ms`);
+                console.log(`[SpamTestQueue] BLOCKED — testId=${testId}, phone=${row.phone}, grace=${graceMs}ms, 시작 뒤 ${Math.round((Date.now() - activatedAt) / 1000)}초`);
               } else {
                 result = null;
               }

@@ -8,7 +8,7 @@ import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spam
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from '../utils/system-alert';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
-import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpamQtmsgRows, refundSpamSendFailures, resolveSpamReportTest, parseReportAgeMs, spamReportReceivedAt } from '../utils/spam-test-queue';
+import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpamQtmsgRows, refundSpamSendFailures, resolveSpamReportTest, parseReportAgeMs, spamReportReceivedAt, spamBlockedDue } from '../utils/spam-test-queue';
 // ★ 2026-09-26 한줄로 V2 m040 — 검사 발신번호 = 등록 번호만(발송 경로와 같은 CT)
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { getSampleCustomerScope } from '../utils/store-scope';
@@ -349,7 +349,8 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       throw sendErr;
     }
 
-    // 7) 15초 폴링 — QTmsg 성공 확인 후 10초 대기, 그래도 앱 미수신이면 BLOCKED
+    // 7) 15초 폴링 — QTmsg 성공 확인 후 10초 대기 + 검사 시작 뒤 45초가 지나도 앱 미수신이면 BLOCKED
+    //    ★ 2026-10-02 확정 시점 = CT(spamBlockedDue). 종전에는 30초쯤에 확정해, 보고가 늦은 폰의 수신이 「막혔어요」로 떴다
     // qtmsgSuccessTime: 각 result row별 QTmsg 성공이 처음 확인된 시점 기록
     const qtmsgSuccessTime = new Map<string, number>();
     const BLOCKED_GRACE_MS = 10000; // QTmsg 성공 후 앱 리포트 대기 시간 (10초)
@@ -408,12 +409,17 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
                 qtmsgSuccessTime.set(rowKey, Date.now());
                 console.log(`[SpamFilter] QTmsg 성공 확인 — row=${rowKey}, phone=${row.phone}, carrier=${row.message_type}, 10초 대기 시작`);
                 result = null;
-              } else if (Date.now() - qtmsgSuccessTime.get(rowKey)! >= BLOCKED_GRACE_MS) {
-                // 10초 경과 — 앱 미수신 확정 → BLOCKED
+              } else if (spamBlockedDue({
+                nowMs: Date.now(),
+                startedAtMs: new Date(activeCheck2.rows[0].created_at).getTime(),
+                successSeenAtMs: qtmsgSuccessTime.get(rowKey),
+                graceMs: BLOCKED_GRACE_MS,
+              })) {
+                // 유예 10초 + 검사 시작 뒤 45초 경과 — 앱 미수신 확정 → BLOCKED
                 result = SPAM_RESULT.BLOCKED;
                 console.log(`[SpamFilter] BLOCKED 판정 — row=${rowKey}, phone=${row.phone} (QTmsg 성공 후 ${Math.round((Date.now() - qtmsgSuccessTime.get(rowKey)!) / 1000)}초 경과, 앱 미수신)`);
               } else {
-                // 아직 10초 미경과 — 계속 대기
+                // 아직 확정할 때가 아니다 — 계속 대기
                 result = null;
               }
             } else if (PENDING_CODES.includes(sc)) {

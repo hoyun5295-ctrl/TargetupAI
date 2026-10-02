@@ -153,10 +153,16 @@ export default function SpamFilterTestModal({
         setTotalCount(data.results?.length || 0);
         setStatus('testing');
 
-        // 서버 시간 기준 타이머 설정
-        serverCreatedAtRef.current = new Date(data.createdAt).getTime();
-        serverTestCreatedRef.current = serverCreatedAtRef.current;
-        setCountdown(data.remainingSeconds || calcRemaining());
+        // 도착 시간 표시용 = 서버가 준 시작 시각(서버 시각끼리만 뺀다)
+        serverTestCreatedRef.current = new Date(data.createdAt).getTime();
+        // ★ 2026-10-02 남은 시간은 **서버가 준 남은 초**로 잰다 — 서버의 시작 시각을 이 PC 의 시계와 견주면,
+        //   시계가 빠른 PC 에서 결과 읽기를 일찍 멈춰 그 뒤에 나는 판정(차단은 검사 시작 뒤 45초에 확정된다)을 못 본다.
+        //   타이머 기준 = 지금(이 PC 시계) − 서버 기준으로 이미 지난 시간 → 이후 계산은 이 PC 시계의 차이만 쓴다.
+        const remainingSec = typeof data.remainingSeconds === 'number' ? Math.max(0, Math.min(60, data.remainingSeconds)) : null;
+        serverCreatedAtRef.current = remainingSec !== null
+          ? Date.now() - (60000 - remainingSec * 1000)
+          : serverTestCreatedRef.current;
+        setCountdown(calcRemaining());
 
         // 폴링 + 카운트다운 재개
         startPolling(data.testId);
