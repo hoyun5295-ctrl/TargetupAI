@@ -63,7 +63,10 @@ export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, 
     }
     // 인증은 끝났는데 같은 아이디가 접속 중이다 — 인증번호 창과 같은 인계 흐름으로 넘긴다
     if (isLogin && res.status === 409 && data?.code === 'SESSION_IN_USE') { onTakeover?.(data); return; }
-    if (data?.code === 'IDENTITY_TICKET_INVALID') { onExpired?.(data?.error || '다시 로그인해주세요.'); return; }
+    if (data?.code === 'IDENTITY_TICKET_INVALID' || data?.code === 'IDENTITY_ALREADY_VERIFIED') {
+      onExpired?.(data?.error || '다시 로그인해주세요.');
+      return;
+    }
     // 대기 시간이 끝났으면 처음 단계로 돌아가 다시 시작한다
     if (data?.code === 'IDENTITY_EXPIRED') setStarted(null);
     setError(data?.error || '본인인증을 완료하지 못했습니다.');
@@ -76,7 +79,11 @@ export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, 
       const path = isLogin ? '/api/auth/identity/start' : '/api/auth/identity/change/start';
       const { res, data } = await post(path, isLogin ? { identityTicket: mode.ticket } : {});
       if (!res.ok) {
-        if (data?.code === 'IDENTITY_TICKET_INVALID') { onExpired?.(data?.error || '다시 로그인해주세요.'); return; }
+        // 티켓이 죽었거나, 그사이 이 계정의 본인인증이 이미 끝났다 — 창을 닫고 다시 로그인하게 한다
+        if (data?.code === 'IDENTITY_TICKET_INVALID' || data?.code === 'IDENTITY_ALREADY_VERIFIED') {
+          onExpired?.(data?.error || '다시 로그인해주세요.');
+          return;
+        }
         setError(data?.error || '본인인증을 시작하지 못했습니다.');
         return;
       }

@@ -45,7 +45,7 @@ describe('서버 — 인증 통과 뒤 접속 중이면 신뢰 기기 토큰을 
   it('/auth/mfa/verify 409 응답에 mfaDeviceToken을 싣는다', () => {
     const verify = between(auth, "router.post('/mfa/verify'", "router.post('/mfa/resend'");
     expect(verify).toMatch(
-      /issue\.status === 'conflict'\)\s*\{\s*const mfaDeviceToken = await issueTakeoverPass\(user\.id, req\);\s*return res\.status\(409\)\.json\(\{\s*\.\.\.issue\.conflict,\s*mfaDeviceToken\s*\}\);/
+      /issue\.status === 'conflict'\)\s*\{\s*const mfaDeviceToken = await issueTakeoverPass\(user\.id, req, verdict\.phone\);\s*return res\.status\(409\)\.json\(\{\s*\.\.\.issue\.conflict,\s*mfaDeviceToken\s*\}\);/
     );
   });
 
@@ -56,6 +56,22 @@ describe('서버 — 인증 통과 뒤 접속 중이면 신뢰 기기 토큰을 
     expect(issueCall).not.toMatch(/mfaDeviceToken/);
     const loginIssue = stripComments(readFileSync(join(__dirname, 'login-issue.ts'), 'utf8'));
     expect(loginIssue).not.toMatch(/mfaDeviceToken/);
+  });
+
+  it('★(Codex 3R) 통과권의 증거는 실제로 인증을 통과한 번호다 — 다시 조회한 번호를 넘기지 않는다', () => {
+    const complete = between(auth, "router.post('/identity/complete'", "router.get('/identity/me'");
+    expect(complete).toMatch(/await issueTakeoverPass\(fresh\.id, req, done\.verifiedPhone\)/);
+    // 어느 호출부도 계정 행에서 읽은 번호를 증거로 넘기지 않는다
+    expect(auth).not.toMatch(/issueTakeoverPass\([^)]*\.mfa_phone\)/);
+    // 표식은 인증을 실제로 끝낸 자리(유틸)에서만 단다 — 라우트에서 달면 형으로 막은 것이 무력해진다
+    expect(auth).not.toMatch(/markVerifiedPhone/);
+    const mfaSrc = stripComments(readFileSync(join(__dirname, 'mfa.ts'), 'utf8'));
+    const identitySrc = stripComments(readFileSync(join(__dirname, 'identity-verify.ts'), 'utf8'));
+    expect(mfaSrc).toMatch(/verifiedPhone: VerifiedPhone \| null \| undefined/);
+    // 형은 any 값을 못 막으므로 실행 시점 검사가 함께 있어야 한다
+    expect(mfaSrc).toMatch(/!verifiedPhoneRegistry\.has\(verifiedPhone\)\) return null;/);
+    expect(mfaSrc.match(/markVerifiedPhone\(/g) ?? []).toHaveLength(2);      // 정의 1 + 인증번호 소비 성공 1
+    expect(identitySrc.match(/markVerifiedPhone\(/g) ?? []).toHaveLength(1); // 본인인증 완료 1
   });
 
   it('/auth/login은 통과권을 쓰고 없앤다(1회용)', () => {

@@ -17,7 +17,7 @@ import {
 import {
   evaluateIdentityGate, verifyIdentityTicket, startIdentityVerification, completeIdentityVerification,
   isIdentityVerifyActiveFor, isIdentitySchemaMissing, loadIdentitySummary, IDENTITY_TICKET_TTL_MINUTES,
-  identityFailureResponse, IDENTITY_UNAVAILABLE_RESPONSE, IDENTITY_MIGRATION_RESPONSE,
+  identityFailureResponse, IDENTITY_UNAVAILABLE_RESPONSE, IDENTITY_MIGRATION_RESPONSE, IDENTITY_ALREADY_VERIFIED_RESPONSE,
 } from '../utils/identity-verify';
 import { recordAuditLog } from '../utils/audit-log';
 import { isBlocked, recordFailureAndMaybeBlock, clearBlocksOnSuccess } from '../utils/login-block';
@@ -626,8 +626,9 @@ router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => 
     // ★ 2026-09-15 인증번호는 위에서 이미 소비됐다. 통과권을 함께 줘야 인계 동의 뒤 재시도(/auth/login)가
     //   인증번호 없이 통과한다. 없으면 창이 다시 인증번호를 묻고 또 409로 막히는 순환이었다(0915 hoyun).
     //   ★ 2026-10-02 통과권은 **이 경우에만** 발급한다(10분 · 1회용). 정상 로그인 응답에는 싣지 않는다.
+    //   ★ 2026-10-02 (Codex 2R) 방금 통과한 번호가 지금도 계정의 인증번호일 때만 나온다(아니면 null).
     if (issue.status === 'conflict') {
-      const mfaDeviceToken = await issueTakeoverPass(user.id, req);
+      const mfaDeviceToken = await issueTakeoverPass(user.id, req, verdict.phone);
       return res.status(409).json({ ...issue.conflict, mfaDeviceToken });
     }
     if (issue.status === 'geo_blocked') return res.status(403).json({ error: issue.message });
@@ -703,6 +704,8 @@ router.post('/identity/start', loginLimiter, async (req: Request, res: Response)
     }
     const started = await startIdentityVerification({ userId: user.id, purpose: 'first_login', req });
     if (started.status === 'unavailable') return res.status(503).json(IDENTITY_UNAVAILABLE_RESPONSE);
+    // 그사이 이 계정의 본인인증이 끝났다 — 옛 티켓으로 담당자를 다시 등록하지 못한다. 다시 로그인하면 된다
+    if (started.status === 'already_verified') return res.status(409).json(IDENTITY_ALREADY_VERIFIED_RESPONSE);
     await recordAuditLog({ actorUserId: user.id, action: 'identity_verify_start',
       targetType: 'user', targetId: user.id,
       details: { loginId: user.login_id, purpose: 'first_login', provider: started.provider },
@@ -733,6 +736,7 @@ router.post('/identity/complete', loginLimiter, async (req: Request, res: Respon
     const done = await completeIdentityVerification({
       userId: user.id,
       verificationId: String(req.body.verificationId || ''),
+      purpose: 'first_login',
       payload: req.body.result,
       req,
     });
@@ -764,8 +768,11 @@ router.post('/identity/complete', loginLimiter, async (req: Request, res: Respon
       identity: done.clearance,
     });
     // 다중 인증 통과 경로와 같은 규칙 — "이미 접속 중"이면 인계 재시도용 1회 통과권을 함께 준다
+    //   ★ 2026-10-02 (Codex 3R) 증거는 **이 요청이 실제로 인증한 번호**다. 위에서 다시 읽은 `fresh.mfa_phone`을
+    //   넘기면, 그 사이 다른 번호 변경이 커밋됐을 때 "새 번호 = 새 번호"로 통과권이 나간다.
+    //   (그런 값은 발급 함수가 실행 시점에 거절하고, 계약 테스트가 이 줄을 고정한다)
     if (issue.status === 'conflict') {
-      const mfaDeviceToken = await issueTakeoverPass(fresh.id, req);
+      const mfaDeviceToken = await issueTakeoverPass(fresh.id, req, done.verifiedPhone);
       return res.status(409).json({ ...issue.conflict, mfaDeviceToken });
     }
     if (issue.status === 'geo_blocked') return res.status(403).json({ error: issue.message });
@@ -797,7 +804,7 @@ router.post('/identity/change/start', authenticate, async (req: Request, res: Re
       return res.status(403).json({ error: '본인인증이 아직 열리지 않은 계정입니다.', code: 'IDENTITY_NOT_ENABLED' });
     }
     const started = await startIdentityVerification({ userId, purpose: 'change', req });
-    if (started.status === 'unavailable') return res.status(503).json(IDENTITY_UNAVAILABLE_RESPONSE);
+    if (started.status !== 'started') return res.status(503).json(IDENTITY_UNAVAILABLE_RESPONSE);
     await recordAuditLog({ actorUserId: userId, action: 'identity_verify_start',
       targetType: 'user', targetId: userId,
       details: { loginId: req.user?.loginId, purpose: 'change', provider: started.provider },
@@ -820,6 +827,7 @@ router.post('/identity/change/complete', authenticate, async (req: Request, res:
     const done = await completeIdentityVerification({
       userId,
       verificationId: String(req.body.verificationId || ''),
+      purpose: 'change',
       payload: req.body.result,
       req,
     });

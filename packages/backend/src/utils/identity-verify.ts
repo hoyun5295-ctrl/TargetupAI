@@ -4,8 +4,10 @@
  * 무엇을 하나
  *   계정마다 **최초 1회** 본인확인기관 인증을 거치게 하고, 인증된 이름·휴대폰을 그 계정의 담당자 정보와
  *   로그인 인증번호 수신 번호로 저장한다(1001 회의 결정 · Harold 승인). 담당자가 바뀌면 설정 화면에서
- *   다시 본인인증을 거쳐 바꾼다. 손으로 번호를 고치는 길은 두지 않는다 — 인증기준 3.4 ②가 요구하는
- *   "다중인증 수단이 본인확인된 정보와 연계"가 이 한 줄로 성립한다.
+ *   다시 본인인증을 거쳐 바꾼다. 이용자가 손으로 번호를 고치는 길은 두지 않는다 — 인증기준 3.4 ②가 요구하는
+ *   "다중인증 수단이 본인확인된 정보와 연계"가 이것으로 성립한다.
+ *   ⚠ 전환기 잔여 — 슈퍼관리자가 번호를 직접 넣는 경로(`routes/admin.ts` `PUT /users/:id/mfa-phone`)는
+ *     시범 계정 운영 때문에 아직 살아 있다. 본인인증을 전 계정에 시행할 때 그 경로를 닫아야 위 문장이 완결된다.
  *
  * ⛔ 판정은 이 CT 하나가 소유한다
  *   로그인 세션을 만드는 함수(`issueUserLogin`)는 이 CT가 내준 `IdentityClearance` 없이는 호출되지 않는다.
@@ -22,7 +24,7 @@
  *
  * ⛔ 인증기관 자리
  *   한국모바일인증 모듈은 아직 받지 못했다. `IdentityProvider` 두 함수(요청 만들기 · 결과 확인)가 그 자리다.
- *   운영에서는 실제 인증기관만 쓰인다 — 시험용(`stub`)은 `NODE_ENV=production`에서 **어떤 설정으로도 켜지지 않는다**.
+ *   운영에서는 실제 인증기관만 쓰인다 — 시험용(`stub`)은 `NODE_ENV`가 development · test로 명시된 환경에서만 켜진다.
  *   인증기관이 준비되지 않은 동안에는 스위치를 켜도 요구하지 않는다(위 3번).
  *
  * ⛔ 과거를 지어내지 않는다 — 본인인증 이력이 없는 계정은 "미인증"이다. 기존 번호를 인증된 것으로 치지 않는다.
@@ -32,7 +34,7 @@ import jwt from 'jsonwebtoken';
 import type { Request } from 'express';
 import pool, { query } from '../config/database';
 import { isEnforcedFrom } from './rollout-gate';
-import { maskPhone } from './mfa';
+import { maskPhone, markVerifiedPhone, VerifiedPhone } from './mfa';
 
 /** 본인인증 진행 시간(분) — 인증 창을 열어 끝낼 때까지 */
 export const IDENTITY_TICKET_TTL_MINUTES = 10;
@@ -55,6 +57,8 @@ export interface VerifiedIdentity {
  * 인증기관 연결 — 한국모바일인증 모듈이 오면 이 두 함수를 채운 구현을 하나 더한다.
  *   buildStart : 화면이 인증 창을 여는 데 필요한 값(요청 전문 · 주소 등)을 만든다
  *   verify     : 인증 창이 돌려준 결과가 진짜인지 확인하고 이름·휴대폰을 꺼낸다(위조 결과는 여기서 던진다)
+ * ⛔ verify는 그 결과가 **이 `verificationId`의 요청에서 나온 것**인지까지 확인해야 한다.
+ *    안 하면 남의 인증 결과를 가져다 붙이는 재사용이 통한다(요청에 실은 값과 결과의 값을 대조한다).
  */
 export interface IdentityProvider {
   name: string;
@@ -80,14 +84,19 @@ export function registerIdentityProvider(provider: IdentityProvider | null): voi
   injectedProvider = provider;
 }
 
+/** 시험용 인증을 허용하는 실행 환경 — 허용 목록이다. 값이 비어 있거나 모르는 값이면 허용하지 않는다 */
+const STUB_ALLOWED_NODE_ENVS = ['development', 'test'];
+
 /**
  * 지금 쓸 수 있는 인증기관. 없으면 null = 본인인증을 요구하지 않는다.
- * ⛔ 시험용은 운영에서 켜지지 않는다 — `NODE_ENV`가 production이면 설정이 무엇이든 null이다.
+ * ⛔ 시험용은 `NODE_ENV`가 development · test로 **명시된** 환경에서만 켜진다.
+ *    "production이 아니면 허용"으로 쓰지 않는다 — 운영 서버에 그 값이 비어 있으면 그대로 켜진다.
  */
 export function resolveIdentityProvider(): IdentityProvider | null {
   if (injectedProvider) return injectedProvider;
   const wanted = String(process.env.IDENTITY_VERIFY_PROVIDER || '').trim().toLowerCase();
-  if (wanted === 'stub' && process.env.NODE_ENV !== 'production') return stubProvider;
+  const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+  if (wanted === 'stub' && STUB_ALLOWED_NODE_ENVS.includes(nodeEnv)) return stubProvider;
   return null;
 }
 
@@ -201,11 +210,18 @@ function sha256(value: string): string {
 
 export type IdentityStart =
   | { status: 'started'; verificationId: string; provider: string; start: Record<string, any> }
+  /** 최초 등록을 시작하려는데 그 계정은 이미 본인인증을 마쳤다 — 다시 로그인하면 된다 */
+  | { status: 'already_verified' }
   | { status: 'unavailable' };
 
 /**
  * 본인인증 시작 — 대기 행을 만들고 인증 창을 여는 데 필요한 값을 돌려준다.
  * 인증기관이 없으면 시작하지 않는다(호출부가 사용자에게 안내한다).
+ *
+ * ⛔ 계정 단위로 줄을 세운다(★Codex 1R) — 계정 행을 잠근 채로 "옛 대기 행 접기 → 새 대기 행 만들기"를 한다.
+ *    따로 하면 동시에 들어온 두 시작이 서로의 대기 행을 못 보고 둘 다 만들어, 뒤늦게 끝난 옛 창이
+ *    새로 확정된 담당자를 다시 덮는다. 표의 부분 유일 인덱스(계정당 대기 행 하나)가 같은 것을 DB에서도 막는다.
+ * ⛔ 최초 등록(`first_login`)은 **아직 본인인증 이력이 없는 계정에서만** 시작된다.
  */
 export async function startIdentityVerification(params: {
   userId: string;
@@ -216,19 +232,46 @@ export async function startIdentityVerification(params: {
   if (!provider) return { status: 'unavailable' };
   const { userId, purpose, req } = params;
 
-  // 살아 있는 대기 행은 하나만 둔다 — 여러 창을 열어 두고 뒤늦게 끝낸 옛 창이 정보를 덮지 못하게
-  await query(
-    `UPDATE identity_verifications SET status = 'superseded' WHERE user_id = $1 AND status = 'pending'`,
-    [userId]
-  );
-  const inserted = await query(
-    `INSERT INTO identity_verifications
-       (id, user_id, purpose, status, provider, ip_address, user_agent, created_at, expires_at)
-     VALUES (gen_random_uuid(), $1, $2, 'pending', $3, $4, $5, NOW(), NOW() + INTERVAL '1 minute' * $6)
-     RETURNING id`,
-    [userId, purpose, provider.name, String(req.ip || ''), String(req.headers['user-agent'] || ''), IDENTITY_TICKET_TTL_MINUTES]
-  );
-  const verificationId = String(inserted.rows[0].id);
+  let verificationId: string;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+    if (locked.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { status: 'unavailable' };
+    }
+    if (purpose === 'first_login') {
+      const done = await client.query(
+        `SELECT 1 AS ok FROM identity_verifications WHERE user_id = $1 AND status = 'verified' LIMIT 1`,
+        [userId]
+      );
+      if (done.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return { status: 'already_verified' };
+      }
+    }
+    await client.query(
+      `UPDATE identity_verifications SET status = 'superseded' WHERE user_id = $1 AND status = 'pending'`,
+      [userId]
+    );
+    const inserted = await client.query(
+      `INSERT INTO identity_verifications
+         (id, user_id, purpose, status, provider, ip_address, user_agent, created_at, expires_at)
+       VALUES (gen_random_uuid(), $1, $2, 'pending', $3, $4, $5, NOW(), NOW() + INTERVAL '1 minute' * $6)
+       RETURNING id`,
+      [userId, purpose, provider.name, String(req.ip || ''), String(req.headers['user-agent'] || ''), IDENTITY_TICKET_TTL_MINUTES]
+    );
+    await client.query('COMMIT');
+    verificationId = String(inserted.rows[0].id);
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* 아래 전파에 포함 */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  // 인증기관 호출은 잠금 밖에서 한다 — 외부 호출을 잠금 안에 두면 그 계정의 다른 요청이 그동안 선다
   const start = await provider.buildStart({ verificationId, req });
   return { status: 'started', verificationId, provider: provider.name, start };
 }
@@ -239,6 +282,11 @@ export type IdentityCompletion =
       clearance: IdentityClearance;
       name: string;
       maskedPhone: string;
+      /**
+       * 이 본인인증이 실제로 확인한 번호(★Codex 3R) — 접속 인계용 통과권 발급의 증거로만 쓴다.
+       * 응답으로 내보내지 않는다(화면에는 `maskedPhone`만 간다).
+       */
+      verifiedPhone: VerifiedPhone;
       /** 저장 전 값 — 감사 기록용(번호는 가린 값) */
       before: { name: string | null; maskedPhone: string | null; maskedMfaPhone: string | null };
     }
@@ -246,27 +294,36 @@ export type IdentityCompletion =
   | { status: 'rejected'; reason: 'provider' | 'invalid_identity' }
   /** 대기 행이 만료됐거나 이미 쓰였다 — 처음부터 다시 */
   | { status: 'expired' }
+  /** 최초 등록인데 그 계정은 그사이 본인인증을 마쳤다 — 담당자를 다시 덮지 않는다 */
+  | { status: 'already_verified' }
   | { status: 'unavailable' };
 
 /**
  * 본인인증 완료 — 인증기관 결과를 확인하고, 인증된 이름·번호를 그 계정에 저장한다.
  *
- * ⛔ 한 트랜잭션이다 — 대기 행 확정 · 담당자 정보 저장 · 옛 통과권 해제가 함께 성공하거나 함께 취소된다.
- *    인증은 확정됐는데 번호가 안 바뀌면 다음 로그인 인증번호가 옛 번호로 간다.
- * ⛔ 대기 행 확정은 **조건이 붙은 한 문장**이다(대기 · 미만료 · 그 계정 · 그 인증기관). 갱신 0행이면 실패.
- *    조회 뒤 갱신이면 같은 결과를 동시에 두 번 내는 요청이 둘 다 통과한다.
+ * ⛔ 한 트랜잭션이고, **계정 행을 먼저 잠근다**(★Codex 1R). 그 계정의 완료·시작이 한 줄로 선다.
+ * ⛔ 최초 등록 권한은 한 번 쓰면 끝이다(★Codex 1R high). 미인증 상태에서 받은 티켓은 10분간 살아 있어,
+ *    정상 담당자가 인증을 끝낸 뒤에도 같은 티켓으로 다른 사람이 자기 휴대폰을 등록해 담당자를 갈아치울 수 있었다.
+ *    잠금 안에서 "이 계정에 인증 이력이 이미 있는가"를 다시 보고, 있으면 최초 등록 완료를 거절한다.
+ * ⛔ 대기 행 확정은 **조건이 붙은 한 문장**이다(대기 · 미만료 · 그 계정 · 그 인증기관 · 그 목적). 갱신 0행이면 실패.
+ *    목적을 조건에 넣는 이유 — 로그인 티켓 경로가 설정 화면에서 시작한 변경 건을 끝내지 못하게.
+ * ⛔ 번호가 바뀌면 옛 번호로 얻은 인증 수단은 전부 무효다(★Codex 1R high). 통과권은 여기서 지우고,
+ *    **아직 쓰지 않은 로그인 인증번호**는 검증 쪽이 현재 번호와 대조해 거른다(`verifyMfaChallenge`).
+ *    폐기를 여기에만 두면 번호를 바꾸는 다른 자리(슈퍼관리자 등록)와 동시에 발급 중이던 인증번호가 빠진다.
  * 인증된 번호가 그 계정의 **유일한** 로그인 인증번호가 된다(계정당 하나 · 기존 번호를 덮는다).
  */
 export async function completeIdentityVerification(params: {
   userId: string;
   verificationId: string;
+  purpose: IdentityPurpose;
   payload: any;
   req: Request;
 }): Promise<IdentityCompletion> {
   const provider = resolveIdentityProvider();
   if (!provider) return { status: 'unavailable' };
-  const { userId, verificationId, payload, req } = params;
+  const { userId, verificationId, purpose, payload, req } = params;
 
+  // 인증기관 확인은 잠금 밖에서 한다(외부 호출)
   let identity: VerifiedIdentity;
   try {
     identity = await provider.verify(payload, { verificationId, req });
@@ -281,23 +338,6 @@ export async function completeIdentityVerification(params: {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const confirmed = await client.query(
-      `UPDATE identity_verifications
-          SET status = 'verified', verified_name = $3, verified_phone = $4,
-              dup_key_hash = $5, provider_tx_id = $6, verified_at = NOW()
-        WHERE id = $1 AND user_id = $2 AND status = 'pending' AND provider = $7 AND expires_at > NOW()
-        RETURNING id`,
-      [
-        verificationId, userId, name, phone,
-        identity.dupKey ? sha256(String(identity.dupKey)) : null,
-        identity.providerTxId ? String(identity.providerTxId).slice(0, 120) : null,
-        provider.name,
-      ]
-    );
-    if (confirmed.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return { status: 'expired' };
-    }
     const beforeRes = await client.query(
       `SELECT name, phone, mfa_phone FROM users WHERE id = $1 FOR UPDATE`,
       [userId]
@@ -307,11 +347,42 @@ export async function completeIdentityVerification(params: {
       return { status: 'expired' };
     }
     const prev = beforeRes.rows[0];
+
+    if (purpose === 'first_login') {
+      const done = await client.query(
+        `SELECT 1 AS ok FROM identity_verifications WHERE user_id = $1 AND status = 'verified' LIMIT 1`,
+        [userId]
+      );
+      if (done.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return { status: 'already_verified' };
+      }
+    }
+
+    const confirmed = await client.query(
+      `UPDATE identity_verifications
+          SET status = 'verified', verified_name = $3, verified_phone = $4,
+              dup_key_hash = $5, provider_tx_id = $6, verified_at = NOW()
+        WHERE id = $1 AND user_id = $2 AND status = 'pending' AND provider = $7 AND purpose = $8 AND expires_at > NOW()
+        RETURNING id`,
+      [
+        verificationId, userId, name, phone,
+        identity.dupKey ? sha256(String(identity.dupKey)) : null,
+        identity.providerTxId ? String(identity.providerTxId).slice(0, 120) : null,
+        provider.name, purpose,
+      ]
+    );
+    if (confirmed.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { status: 'expired' };
+    }
     await client.query(
       `UPDATE users SET name = $2, phone = $3, mfa_phone = $3, updated_at = NOW() WHERE id = $1`,
       [userId, name, phone]
     );
-    // 번호가 바뀌면 옛 번호로 얻은 통과권은 무효다
+    // 옛 번호로 얻은 통과권은 무효다.
+    // 아직 쓰지 않은 로그인 인증번호는 여기서 지우지 않는다 — 검증(`mfa.ts` `verifyMfaChallenge`)이 쓰는 순간에
+    // "발급된 번호 = 계정의 현재 인증번호"를 대조하므로, 번호가 바뀌는 즉시 옛 번호의 인증번호는 전부 죽는다.
     await client.query(`DELETE FROM mfa_trusted_devices WHERE user_id = $1`, [userId]);
     await client.query('COMMIT');
     return {
@@ -319,6 +390,7 @@ export async function completeIdentityVerification(params: {
       clearance: CLEARED,
       name,
       maskedPhone: maskPhone(phone),
+      verifiedPhone: markVerifiedPhone(phone),
       before: {
         name: prev.name ?? null,
         maskedPhone: prev.phone ? maskPhone(prev.phone) : null,
@@ -345,6 +417,12 @@ export const IDENTITY_UNAVAILABLE_RESPONSE = {
   code: 'IDENTITY_PROVIDER_UNAVAILABLE',
 };
 
+/** 최초 등록을 하려는데 그 계정은 이미 본인인증을 마쳤다 — 담당자를 덮지 않고 다시 로그인시킨다 */
+export const IDENTITY_ALREADY_VERIFIED_RESPONSE = {
+  error: '이미 본인인증이 끝난 계정입니다. 다시 로그인해주세요.',
+  code: 'IDENTITY_ALREADY_VERIFIED',
+};
+
 /**
  * 완료 실패 → 응답. 문구를 라우트마다 다시 쓰면 로그인 경로와 설정 경로의 안내가 갈린다.
  * 인증기관이 왜 거절했는지(원문)는 내보내지 않는다 — 사용자가 할 일은 "다시 시도"뿐이다.
@@ -353,6 +431,7 @@ export function identityFailureResponse(
   done: Exclude<IdentityCompletion, { status: 'verified' }>
 ): { http: number; body: { error: string; code: string } } {
   if (done.status === 'unavailable') return { http: 503, body: IDENTITY_UNAVAILABLE_RESPONSE };
+  if (done.status === 'already_verified') return { http: 409, body: IDENTITY_ALREADY_VERIFIED_RESPONSE };
   if (done.status === 'expired') {
     return { http: 401, body: { error: '본인인증 시간이 지났습니다. 다시 시도해주세요.', code: 'IDENTITY_EXPIRED' } };
   }

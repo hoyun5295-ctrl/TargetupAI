@@ -26,15 +26,37 @@ vi.mock('./sms-queue', () => ({
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import jwt from 'jsonwebtoken';
-import { query, mysqlQuery } from '../config/database';
+import { query, mysqlQuery, pool } from '../config/database';
 import {
   isMfaEnforced, isMfaPilotTarget, isMfaRequiredFor, maskPhone, ipPrefix, generateMfaCode,
   issueMfaTicket, verifyMfaTicket, issueMfaChallenge, verifyMfaChallenge,
-  consumeTakeoverPass, issueTakeoverPass, MFA_TAKEOVER_PASS_MINUTES, MFA_MAX_ATTEMPTS,
+  consumeTakeoverPass, issueTakeoverPass, markVerifiedPhone, MFA_TAKEOVER_PASS_MINUTES, MFA_MAX_ATTEMPTS,
 } from './mfa';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
 const mq = mysqlQuery as unknown as ReturnType<typeof vi.fn>;
+// ★ 2026-10-02 (Codex 2R) 인증번호 소비 · 통과권 발급은 계정 행을 잠근 트랜잭션에서 한다
+const connect = (pool as any).connect as ReturnType<typeof vi.fn>;
+const client = { query: vi.fn(), release: vi.fn() };
+/** 잠금 트랜잭션 fake — 실제 문장에만 답한다. currentPhone = 잠금 아래에서 읽히는 계정의 현재 인증번호 */
+function wireLockedClient(opts: { userExists?: boolean; currentPhone?: string | null; consumed?: boolean } = {}) {
+  const { userExists = true, currentPhone = '01000000000', consumed = true } = opts;
+  client.query.mockReset();
+  client.release.mockReset();
+  connect.mockReset();
+  connect.mockResolvedValue(client);
+  client.query.mockImplementation(async (sql: string, params: any[] = []) => {
+    if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(sql)) return { rows: [] };
+    if (/^SELECT mfa_phone FROM users WHERE id = \$1 FOR UPDATE$/.test(sql)) return { rows: userExists ? [{ mfa_phone: currentPhone }] : [] };
+    if (/^\s*UPDATE mfa_challenges SET consumed_at = NOW\(\)/.test(sql)) {
+      // 조건의 마지막 인자가 잠금 아래에서 읽은 현재 번호다 — 그 번호의 인증번호만 소비된다
+      return { rows: consumed && params[3] === currentPhone ? [{ phone: currentPhone }] : [] };
+    }
+    if (/^\s*INSERT INTO mfa_trusted_devices/.test(sql)) return { rows: [], rowCount: 1 };
+    throw new Error(`예상하지 못한 SQL: ${sql}`);
+  });
+}
+const lockedSqls = () => client.query.mock.calls.map((c) => String(c[0]).trim());
 
 const USER = '11111111-1111-1111-1111-111111111111';
 const REQ: any = { ip: '211.234.56.78', headers: { 'user-agent': 'vitest-agent' } };
@@ -247,6 +269,8 @@ describe('인증번호 검증', () => {
       attempts: 0,
       expires_at: new Date(Date.now() + 60_000),
       consumed_at: null,
+      // 실제 조회는 발급된 번호가 계정의 현재 인증번호인지를 함께 돌려준다(★2026-10-02 Codex 1R)
+      phone_current: true,
       ...overrides,
     };
   }
@@ -297,7 +321,7 @@ describe('인증번호 검증', () => {
         stored = params[1];
         return { rows: [{ id: 'ch-new' }], rowCount: 1 };
       }
-      if (/^\s*SELECT id, code_hash/i.test(sql)) {
+      if (/^\s*SELECT c\.id, c\.code_hash/i.test(sql)) {
         return { rows: [challengeRow({ code_hash: stored })], rowCount: 1 };
       }
       if (/^\s*SELECT/i.test(sql)) return { rows: [], rowCount: 0 };
@@ -307,7 +331,77 @@ describe('인증번호 검증', () => {
     await issueMfaChallenge(USER, '01052958517', REQ);
     const code = String(mq.mock.calls[mq.mock.calls.length - 1][1][2]).match(/(\d{6})/)![1];
 
-    expect(await verifyMfaChallenge('ch-new', USER, code)).toEqual({ status: 'ok' });
+    wireLockedClient({ currentPhone: '01052958517' });
+    expect(await verifyMfaChallenge('ch-new', USER, code)).toEqual({ status: 'ok', phone: { digits: '01052958517' } });
+  });
+});
+
+describe('인증번호는 발급된 번호가 계정의 현재 인증번호일 때만 유효하다(★2026-10-02 Codex 1R)', () => {
+  beforeEach(() => {
+    q.mockReset();
+  });
+
+  it('★담당자 번호가 바뀌었으면 옛 번호로 받은 인증번호는 만료다 — 코드 대조조차 하지 않는다', async () => {
+    q.mockResolvedValue({
+      rows: [{ id: 'ch-1', code_hash: 'x', attempts: 0, expires_at: new Date(Date.now() + 60_000), consumed_at: null, phone_current: false }],
+      rowCount: 1,
+    });
+    expect(await verifyMfaChallenge('ch-1', USER, '123456')).toEqual({ status: 'expired' });
+    // 시도 횟수도 올리지 않는다(죽은 인증번호다)
+    expect(q).toHaveBeenCalledTimes(1);
+  });
+
+  it('★대조 값을 못 읽으면 통과시키지 않는다', async () => {
+    q.mockResolvedValue({
+      rows: [{ id: 'ch-1', code_hash: 'x', attempts: 0, expires_at: new Date(Date.now() + 60_000), consumed_at: null }],
+      rowCount: 1,
+    });
+    expect(await verifyMfaChallenge('ch-1', USER, '123456')).toEqual({ status: 'expired' });
+  });
+
+  it('★(Codex 2R) 통과는 계정 행 잠금 아래 조건이 붙은 한 문장으로 소비에 성공한 것이다', async () => {
+    const bcrypt = (await import('bcryptjs')).default;
+    const hash = await bcrypt.hash('123456', 4);
+    q.mockResolvedValue({
+      rows: [{ id: 'ch-1', code_hash: hash, attempts: 0, expires_at: new Date(Date.now() + 60_000), consumed_at: null, phone_current: true }],
+      rowCount: 1,
+    });
+    wireLockedClient({ currentPhone: '01000000000' });
+
+    expect(await verifyMfaChallenge('ch-1', USER, '123456')).toEqual({ status: 'ok', phone: { digits: '01000000000' } });
+
+    const order = lockedSqls();
+    expect(order[0]).toBe('BEGIN');
+    expect(order[1]).toBe('SELECT mfa_phone FROM users WHERE id = $1 FOR UPDATE');
+    const [sql, params] = client.query.mock.calls.find((c) => /UPDATE mfa_challenges/.test(String(c[0])))!;
+    expect(String(sql)).toMatch(/WHERE id = \$1 AND user_id = \$2 AND consumed_at IS NULL AND expires_at > NOW\(\)\s+AND attempts < \$3 AND phone IS NOT DISTINCT FROM \$4/);
+    expect(String(sql)).toMatch(/RETURNING phone/);
+    expect(params).toEqual(['ch-1', USER, MFA_MAX_ATTEMPTS, '01000000000']);
+    // 잠금 밖에서 무조건 소비하는 문장이 남아 있으면 안 된다
+    expect(q.mock.calls.some((c) => /UPDATE mfa_challenges SET consumed_at/.test(String(c[0])))).toBe(false);
+  });
+
+  it('★(Codex 2R) 코드가 맞아도, 대조하는 사이 담당자 번호가 바뀌었으면 통과하지 못한다', async () => {
+    const bcrypt = (await import('bcryptjs')).default;
+    const hash = await bcrypt.hash('123456', 4);
+    // 조회 시점에는 번호가 맞았다(phone_current: true)
+    q.mockResolvedValue({
+      rows: [{ id: 'ch-1', code_hash: hash, attempts: 0, expires_at: new Date(Date.now() + 60_000), consumed_at: null, phone_current: true }],
+      rowCount: 1,
+    });
+    // 잠금을 얻고 보니 번호가 바뀌어 있어 소비 문장이 0행을 돌려준다
+    wireLockedClient({ currentPhone: '01011112222', consumed: false });
+
+    expect(await verifyMfaChallenge('ch-1', USER, '123456')).toEqual({ status: 'expired' });
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('조회가 계정의 현재 인증번호와 대조한다', async () => {
+    q.mockResolvedValue({ rows: [], rowCount: 0 });
+    await verifyMfaChallenge('ch-1', USER, '123456');
+    const [sql] = q.mock.calls[0];
+    expect(String(sql)).toMatch(/c\.phone IS NOT DISTINCT FROM u\.mfa_phone/i);
+    expect(String(sql)).toMatch(/JOIN users u ON u\.id = c\.user_id/i);
   });
 });
 
@@ -344,6 +438,8 @@ describe('접속 인계용 1회 통과권 — 매 로그인 인증(★2026-10-02
     expect(String(sql)).toMatch(/expires_at\s*>\s*NOW\(\)/i);
     // 배포 전에 만들어진 옛 24시간 신뢰 행은 만료 전이어도 통과권으로 쓰이지 않는다
     expect(String(sql)).toMatch(/created_at\s*>\s*NOW\(\)\s*-\s*INTERVAL '1 minute'\s*\*\s*\$5/i);
+    // (Codex 1R) 배포 직전 10분 안에 만들어진 옛 행은 위 조건을 통과한다 — 저장된 유효기간이 통과권 길이 이내인지도 본다
+    expect(String(sql)).toMatch(/expires_at\s*<=\s*created_at\s*\+\s*INTERVAL '1 minute'\s*\*\s*\$5/i);
     expect(params[4]).toBe(MFA_TAKEOVER_PASS_MINUTES);
     // 원본 토큰을 그대로 조회 조건에 넣지 않는다(해시로만)
     expect(JSON.stringify(params)).not.toContain('device-token');
@@ -352,15 +448,54 @@ describe('접속 인계용 1회 통과권 — 매 로그인 인증(★2026-10-02
 
   it('유효시간은 분 단위로 짧다 — 유지 시간이 아니라 같은 로그인을 끝내는 시간이다', async () => {
     expect(MFA_TAKEOVER_PASS_MINUTES).toBeLessThanOrEqual(10);
-    q.mockResolvedValue({ rows: [], rowCount: 1 });
+    wireLockedClient({ currentPhone: '01000000000' });
 
-    const token = await issueTakeoverPass(USER, REQ);
+    const token = await issueTakeoverPass(USER, REQ, markVerifiedPhone('01000000000'));
 
-    const [sql, params] = q.mock.calls[0];
+    const [sql, params] = client.query.mock.calls.find((c) => /INSERT INTO mfa_trusted_devices/.test(String(c[0])))!;
     expect(String(sql)).toMatch(/NOW\(\) \+ INTERVAL '1 minute' \* \$5/i);
     expect(params[4]).toBe(MFA_TAKEOVER_PASS_MINUTES);
     // 평문 토큰은 돌려주기만 하고 저장하지 않는다
     expect(token).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(params)).not.toContain(token);
+  });
+
+  it('★(Codex 2R) 계정 행을 먼저 잠그고, 방금 통과한 번호가 지금도 계정의 인증번호일 때만 발급한다', async () => {
+    wireLockedClient({ currentPhone: '01000000000' });
+    expect(await issueTakeoverPass(USER, REQ, markVerifiedPhone('01000000000'))).toMatch(/^[0-9a-f]{64}$/);
+    const order = lockedSqls();
+    expect(order[0]).toBe('BEGIN');
+    expect(order[1]).toBe('SELECT mfa_phone FROM users WHERE id = $1 FOR UPDATE');
+    expect(order[order.length - 1]).toBe('COMMIT');
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('★(Codex 2R) 인증 통과 뒤 담당자 번호가 바뀌었으면 통과권을 만들지 않는다', async () => {
+    wireLockedClient({ currentPhone: '01011112222' });
+    expect(await issueTakeoverPass(USER, REQ, markVerifiedPhone('01000000000'))).toBeNull();
+    expect(lockedSqls().some((s) => /INSERT INTO mfa_trusted_devices/.test(s))).toBe(false);
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('★(Codex 3R) 표식 없는 번호는 증거가 아니다 — 계정에서 다시 읽은 번호(문자열)로는 통과권이 나가지 않는다', async () => {
+    wireLockedClient({ currentPhone: '01000000000' });
+    // 형을 속여 넘겨도(계정 행은 any로 읽힌다) 실행 시점에 거절한다. 현재 번호와 같은 값이어도 마찬가지다
+    expect(await issueTakeoverPass(USER, REQ, '01000000000' as any)).toBeNull();
+    expect(await issueTakeoverPass(USER, REQ, { digits: '01000000000' } as any)).toBeNull();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it('통과한 번호를 모르면 DB를 건드리지 않고 만들지 않는다', async () => {
+    wireLockedClient();
+    for (const v of [null, undefined, '']) {
+      expect(await issueTakeoverPass(USER, REQ, v as any)).toBeNull();
+    }
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it('계정이 없으면 만들지 않는다', async () => {
+    wireLockedClient({ userExists: false });
+    expect(await issueTakeoverPass(USER, REQ, markVerifiedPhone('01000000000'))).toBeNull();
+    expect(lockedSqls()).toContain('ROLLBACK');
   });
 });

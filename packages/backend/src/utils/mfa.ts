@@ -34,7 +34,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import type { Request } from 'express';
-import { query, mysqlQuery } from '../config/database';
+import { query, mysqlQuery, pool } from '../config/database';
 import { getTestSmsTables } from './sms-queue';
 import { restrictAccount } from './account-action';
 import { isEnforcedFrom, isPilotTarget } from './rollout-gate';
@@ -161,8 +161,10 @@ export function verifyMfaTicket(ticket: any): { userId: string; challengeId: str
  * 기기 토큰 + IP 대역 + UA가 모두 맞고, 발급 뒤 유효시간 안이어야 한다.
  *
  * ⛔ 조회와 삭제를 한 문장으로 한다 — 조회 뒤 삭제면 같은 토큰으로 동시에 들어온 두 요청이 둘 다 통과한다.
- * ⛔ `created_at` 조건이 옛 24시간 신뢰 행을 걸러 낸다. 배포 전에 만들어진 행은 `expires_at`이 아직 남아 있어도
- *    발급 뒤 유효시간을 넘겼으므로 통과권으로 쓰이지 않는다(배포 순간부터 매 로그인 인증).
+ * ⛔ 옛 24시간 신뢰 행은 통과권으로 쓰이지 않는다 — 조건 둘로 거른다(★Codex 1R).
+ *    `created_at` : 발급 뒤 유효시간을 넘긴 행은 쓰지 못한다.
+ *    저장된 유효기간 : `expires_at`이 발급 시각 + 통과권 길이 이내인 행만 통과권이다. 배포 직전 10분 안에 만들어진
+ *      옛 행은 앞 조건을 통과하지만 유효기간이 24시간이라 여기서 걸린다(배포 순간부터 매 로그인 인증).
  * 저장소는 종전 `mfa_trusted_devices` 표를 그대로 쓴다(DDL 0).
  */
 export async function consumeTakeoverPass(userId: string, deviceToken: any, req: Request): Promise<boolean> {
@@ -173,6 +175,7 @@ export async function consumeTakeoverPass(userId: string, deviceToken: any, req:
       WHERE user_id = $1 AND device_token_hash = $2 AND ip_prefix = $3 AND user_agent_hash = $4
         AND expires_at > NOW()
         AND created_at > NOW() - INTERVAL '1 minute' * $5
+        AND expires_at <= created_at + INTERVAL '1 minute' * $5
       RETURNING id`,
     [userId, sha256(token), ipPrefix(req.ip), sha256(String(req.headers['user-agent'] || '')), MFA_TAKEOVER_PASS_MINUTES]
   );
@@ -180,18 +183,94 @@ export async function consumeTakeoverPass(userId: string, deviceToken: any, req:
 }
 
 /**
+ * 인증을 **실제로 통과한** 번호 (★2026-10-02 Codex 3R).
+ *
+ * 왜 따로 만드나 — 통과권 발급의 증거로 "방금 인증한 번호"를 넘겨야 하는 자리에, 호출부가 계정을 다시 조회한
+ *   `mfa_phone`을 넘겼다. 그 사이 다른 번호 변경이 커밋되면 재조회 값은 새 번호라서 잠금 아래 대조가
+ *   "새 번호 = 새 번호"로 통과해 버린다. 같은 뿌리가 세 번째였다 — 재조회한 값은 증거가 아니다.
+ *
+ * ⛔ 형만으로는 못 막는다 — 계정 행은 `any`로 읽히고, `any`는 어떤 형에도 들어간다(실측: 재조회 값을 넘겨도 tsc 0).
+ *    그래서 **실행 시점에도 막는다.** 이 객체는 `markVerifiedPhone`이 만든 것만 아래 명부에 오르고,
+ *    `issueTakeoverPass`는 명부에 없는 값(문자열 · 흉내 낸 객체)을 받으면 통과권을 만들지 않는다.
+ * 만드는 곳은 둘뿐이다 — 인증번호 검증(`verifyMfaChallenge`)과 본인인증 완료(`identity-verify.ts`).
+ */
+export interface VerifiedPhone {
+  readonly digits: string;
+}
+const verifiedPhoneRegistry = new WeakSet<object>();
+
+/**
+ * 인증을 통과한 번호에 표식을 단다. ⛔ **인증을 실제로 끝낸 자리에서만 부른다**(라우트에서 부르지 않는다 —
+ *   계약 테스트가 호출 위치를 고정한다). 조회한 번호에 이 표식을 달면 막으려던 일이 그대로 일어난다.
+ */
+export function markVerifiedPhone(phone: string): VerifiedPhone {
+  const verified: VerifiedPhone = Object.freeze({ digits: String(phone) });
+  verifiedPhoneRegistry.add(verified);
+  return verified;
+}
+
+/**
+ * 계정 행을 잠근 채로 **지금의 인증번호**를 읽고 일을 한다 (★2026-10-02 Codex 2R).
+ *
+ * 왜 있나 — 같은 뿌리가 두 번 나왔다. 인증 결과를 권한(인증번호 소비 · 통과권 발급)으로 바꾸는 문장이
+ *   번호 변경과 줄을 서지 않으면, "현재 번호가 맞다"를 확인한 뒤 권한을 쓰기 전 그 틈에 번호가 바뀐다.
+ *   번호를 바꾸는 쪽(`identity-verify.ts` 완료)도 같은 계정 행을 먼저 잠그므로, 여기서 잠그면 둘이 한 줄로 선다.
+ * ⛔ 잠금 순서는 언제나 **계정 행이 먼저**다(교착 방지). 이 안에서 다른 계정 행을 잠그지 않는다.
+ * ⛔ 느린 일(bcrypt 대조 · 외부 호출)을 이 안에 넣지 않는다. 잠금은 판정과 쓰기 한두 문장 동안만 쥔다.
+ * 계정이 없으면 일을 하지 않고 null을 돌려준다.
+ */
+async function withLockedMfaPhone<T>(
+  userId: string,
+  work: (client: { query: (sql: string, params?: any[]) => Promise<any> }, currentPhone: string | null) => Promise<T>
+): Promise<T | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query('SELECT mfa_phone FROM users WHERE id = $1 FOR UPDATE', [userId]);
+    if (locked.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const out = await work(client, locked.rows[0].mfa_phone ?? null);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* 아래 전파에 포함 */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * 인증번호를 통과했는데 "이미 접속 중"으로 세션을 못 받은 경우에만 발급한다.
  * 반환값(평문 토큰)은 그 응답에 실려 나가고, 인계 동의 뒤 재시도 한 번에 소비된다.
+ *
+ * ⛔ `verifiedPhone` = 방금 인증을 통과한 번호(`markVerifiedPhone`이 만든 것만 받는다). 계정 행을 잠그고 **그 번호가 지금도 계정의 인증번호일 때만** 발급한다
+ *    (★Codex 2R). 인증 통과와 발급 사이에 담당자 번호가 바뀌면, 번호 변경이 통과권을 다 지운 뒤에
+ *    옛 번호의 인증 결과로 새 통과권이 생긴다. 못 주는 경우는 null — 인계에 동의하면 인증번호를 다시 묻는다.
  */
-export async function issueTakeoverPass(userId: string, req: Request): Promise<string> {
+export async function issueTakeoverPass(
+  userId: string,
+  req: Request,
+  verifiedPhone: VerifiedPhone | null | undefined
+): Promise<string | null> {
+  // 명부에 없는 값은 증거가 아니다 — 계정 행에서 다시 읽은 번호(문자열)가 여기로 와도 통과권은 나가지 않는다
+  if (!verifiedPhone || typeof verifiedPhone !== 'object' || !verifiedPhoneRegistry.has(verifiedPhone)) return null;
+  const verifiedDigits = verifiedPhone.digits;
+  if (!verifiedDigits) return null;
   const token = crypto.randomBytes(32).toString('hex');
-  await query(
-    `INSERT INTO mfa_trusted_devices
-       (id, user_id, device_token_hash, ip_prefix, user_agent_hash, expires_at, created_at, last_used_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW() + INTERVAL '1 minute' * $5, NOW(), NOW())`,
-    [userId, sha256(token), ipPrefix(req.ip), sha256(String(req.headers['user-agent'] || '')), MFA_TAKEOVER_PASS_MINUTES]
-  );
-  return token;
+  const issued = await withLockedMfaPhone(userId, async (client, currentPhone) => {
+    if (currentPhone !== verifiedDigits) return false;
+    await client.query(
+      `INSERT INTO mfa_trusted_devices
+         (id, user_id, device_token_hash, ip_prefix, user_agent_hash, expires_at, created_at, last_used_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW() + INTERVAL '1 minute' * $5, NOW(), NOW())`,
+      [userId, sha256(token), ipPrefix(req.ip), sha256(String(req.headers['user-agent'] || '')), MFA_TAKEOVER_PASS_MINUTES]
+    );
+    return true;
+  });
+  return issued ? token : null;
 }
 
 /** 계정의 통과권(옛 신뢰 기기 행 포함) 전부 해제 — 인증번호 변경·계정 잠금 시 호출 */
@@ -279,7 +358,8 @@ export async function sendAuthCodeSms(phone: string, message: string): Promise<v
 }
 
 export type ChallengeVerdict =
-  | { status: 'ok' }
+  /** 통과 — `phone`은 이 인증이 확인한 번호(소비 순간의 계정 인증번호와 같다) */
+  | { status: 'ok'; phone: VerifiedPhone }
   | { status: 'wrong'; remainingAttempts: number }
   | { status: 'locked' }
   | { status: 'expired' };
@@ -287,6 +367,7 @@ export type ChallengeVerdict =
 /**
  * 코드 검증.
  * - 만료·소비된 챌린지는 expired
+ * - 발급된 번호가 계정의 현재 인증번호가 아니면 expired(번호가 바뀌면 옛 번호의 인증번호는 죽는다)
  * - 틀리면 시도 횟수 증가, 한도 초과면 locked(호출부가 계정을 잠근다)
  */
 export async function verifyMfaChallenge(
@@ -294,21 +375,42 @@ export async function verifyMfaChallenge(
   userId: string,
   code: any
 ): Promise<ChallengeVerdict> {
+  // ★ 2026-10-02 (Codex 1R high) 인증번호는 **발급된 번호가 그 계정의 현재 인증번호일 때만** 유효하다.
+  //   담당자 번호가 바뀐 뒤에도 옛 번호로 받은 6자리가 통하면, 옛 번호를 가진 사람이 세션을 받는다.
+  //   번호를 바꾸는 자리마다 인증번호를 폐기하게 하면 자리가 늘 때마다 빠진다(본인인증 변경 · 슈퍼관리자 등록,
+  //   그리고 번호 변경과 동시에 발급 중이던 인증번호). 그래서 쓰는 순간에 현재 번호와 대조한다.
+  //   아래 조회의 대조는 빠른 거절용이다. 확정은 맨 끝의 소비 문장이 계정 행 잠금 아래에서 다시 한다.
   const result = await query(
-    `SELECT id, code_hash, attempts, expires_at, consumed_at
-       FROM mfa_challenges WHERE id = $1 AND user_id = $2`,
+    `SELECT c.id, c.code_hash, c.attempts, c.expires_at, c.consumed_at,
+            (c.phone IS NOT DISTINCT FROM u.mfa_phone) AS phone_current
+       FROM mfa_challenges c JOIN users u ON u.id = c.user_id
+      WHERE c.id = $1 AND c.user_id = $2`,
     [challengeId, userId]
   );
   if (result.rows.length === 0) return { status: 'expired' };
 
   const row = result.rows[0];
   if (row.consumed_at || new Date(row.expires_at) <= new Date()) return { status: 'expired' };
+  if (row.phone_current !== true) return { status: 'expired' };
   if (row.attempts >= MFA_MAX_ATTEMPTS) return { status: 'locked' };
 
   const matched = await bcrypt.compare(String(code || ''), row.code_hash);
   if (matched) {
-    await query('UPDATE mfa_challenges SET consumed_at = NOW() WHERE id = $1', [challengeId]);
-    return { status: 'ok' };
+    // ★ 2026-10-02 (Codex 2R high) 통과 = **조건이 붙은 한 문장**으로 소비에 성공한 것이다. 갱신 0행이면 실패.
+    //   위 조회에서 번호가 맞았어도, 느린 코드 대조(bcrypt) 사이에 담당자 번호가 바뀌면 옛 번호의 인증번호가
+    //   통과해 버린다. 계정 행을 잠그고(번호 변경과 줄을 선다) 미소비 · 미만료 · 시도 한도 · 현재 번호를 그 자리에서 다시 본다.
+    const verifiedPhone = await withLockedMfaPhone(userId, async (client, currentPhone) => {
+      const consumed = await client.query(
+        `UPDATE mfa_challenges SET consumed_at = NOW()
+          WHERE id = $1 AND user_id = $2 AND consumed_at IS NULL AND expires_at > NOW()
+            AND attempts < $3 AND phone IS NOT DISTINCT FROM $4
+          RETURNING phone`,
+        [challengeId, userId, MFA_MAX_ATTEMPTS, currentPhone]
+      );
+      return consumed.rows[0] ? String(consumed.rows[0].phone ?? '') : null;
+    });
+    if (!verifiedPhone) return { status: 'expired' };
+    return { status: 'ok', phone: markVerifiedPhone(verifiedPhone) };
   }
 
   const bumped = await query(

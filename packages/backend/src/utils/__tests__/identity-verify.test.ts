@@ -12,7 +12,9 @@
  *   3. 모르는 것은 통과시킨다(표 없음 · 조회 오류) — 전 고객 로그인이 걸린 게이트다.
  *   4. 본인인증 대기 티켓은 로그인 토큰이 아니다(`userId` 클레임 없음 · 다른 용도 토큰 거부).
  *   5. 완료는 한 트랜잭션이고, 대기 행 확정은 조건이 붙은 한 문장이다. 갱신 0행이면 실패.
- *   6. 인증된 번호가 그 계정의 로그인 인증번호가 된다(계정당 하나). 옛 통과권은 해제한다.
+ *   6. 인증된 번호가 그 계정의 로그인 인증번호가 된다(계정당 하나). 옛 번호의 통과권을 해제한다
+ *      (옛 번호의 미사용 인증번호는 검증 쪽이 현재 번호와 대조해 거른다 — mfa.test.ts).
+ *   9. (Codex 1R) 계정 단위로 줄을 세운다 — 시작 · 완료가 계정 행을 먼저 잠근다. 최초 등록 권한은 한 번 쓰면 끝이다.
  *   7. 이름 · 휴대폰이 형식에 맞지 않으면 DB를 건드리지 않고 거절한다.
  *   8. 세션을 만드는 경로는 전부 관문을 지난다(`issueUserLogin` 호출부에 `identity` 인자).
  *
@@ -110,15 +112,22 @@ describe('인증기관 — 시험용은 운영에서 켜지지 않는다', () =>
     expect(resolveIdentityProvider()).toBeNull();
   });
 
-  it('시험용은 운영이 아닐 때만 쓰인다', () => {
+  it.each(['development', 'test'])('시험용은 실행 환경이 %s로 명시됐을 때만 쓰인다', (env) => {
     process.env.IDENTITY_VERIFY_PROVIDER = 'stub';
-    process.env.NODE_ENV = 'test';
+    process.env.NODE_ENV = env;
     expect(resolveIdentityProvider()?.name).toBe('stub');
   });
 
   it('★운영에서는 시험용 설정이 있어도 인증기관이 없다', () => {
     process.env.IDENTITY_VERIFY_PROVIDER = 'stub';
     process.env.NODE_ENV = 'production';
+    expect(resolveIdentityProvider()).toBeNull();
+  });
+
+  it.each([undefined, '', 'staging', 'prod'])('★실행 환경 값이 비었거나 모르는 값(%s)이면 시험용을 켜지 않는다(허용 목록)', (env) => {
+    process.env.IDENTITY_VERIFY_PROVIDER = 'stub';
+    if (env === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = env;
     expect(resolveIdentityProvider()).toBeNull();
   });
 
@@ -245,51 +254,105 @@ describe('인증된 이름 · 번호 형식', () => {
 });
 
 describe('시작', () => {
-  it('인증기관이 없으면 시작하지 않는다(DB를 건드리지 않는다)', async () => {
-    const r = await startIdentityVerification({ userId: USER.id, purpose: 'first_login', req: REQ });
-    expect(r).toEqual({ status: 'unavailable' });
-    expect(q).not.toHaveBeenCalled();
-  });
-
-  it('살아 있는 대기 행을 접고 새 대기 행을 만든다', async () => {
-    turnOn();
-    q.mockImplementation(async (sql: string) => {
+  const wireStart = (opts: { userExists?: boolean; alreadyVerified?: boolean } = {}) => {
+    const { userExists = true, alreadyVerified = false } = opts;
+    client.query.mockImplementation(async (sql: string) => {
+      if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(sql)) return { rows: [] };
+      if (/^\s*SELECT id FROM users WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: userExists ? [{ id: USER.id }] : [] };
+      if (/FROM identity_verifications WHERE user_id = \$1 AND status = 'verified'/.test(sql)) return { rows: alreadyVerified ? [{ ok: 1 }] : [] };
       if (/^\s*UPDATE identity_verifications SET status = 'superseded'/.test(sql)) return { rows: [], rowCount: 1 };
       if (/^\s*INSERT INTO identity_verifications/.test(sql)) return { rows: [{ id: 'v-1' }] };
       throw new Error(`예상하지 못한 SQL: ${sql}`);
     });
+  };
+  const sqls = () => client.query.mock.calls.map((c) => String(c[0]).trim());
+
+  it('인증기관이 없으면 시작하지 않는다(DB를 건드리지 않는다)', async () => {
+    const r = await startIdentityVerification({ userId: USER.id, purpose: 'first_login', req: REQ });
+    expect(r).toEqual({ status: 'unavailable' });
+    expect(q).not.toHaveBeenCalled();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it('★계정 행을 잠근 채로 옛 대기 행을 접고 새 대기 행을 만든다(한 트랜잭션)', async () => {
+    turnOn();
+    wireStart();
     const r = await startIdentityVerification({ userId: USER.id, purpose: 'change', req: REQ });
     expect(r).toEqual({ status: 'started', verificationId: 'v-1', provider: 'kmc', start: { url: 'https://example.invalid/start' } });
-    const insert = q.mock.calls.find((c) => /INSERT INTO identity_verifications/.test(String(c[0])))!;
+
+    const order = sqls();
+    expect(order[0]).toBe('BEGIN');
+    expect(order[1]).toMatch(/^SELECT id FROM users WHERE id = \$1 FOR UPDATE/);
+    const supersedeAt = order.findIndex((s) => /^UPDATE identity_verifications SET status = 'superseded'/.test(s));
+    const insertAt = order.findIndex((s) => /^INSERT INTO identity_verifications/.test(s));
+    expect(supersedeAt).toBeGreaterThan(1);
+    expect(insertAt).toBeGreaterThan(supersedeAt);
+    expect(order[order.length - 1]).toBe('COMMIT');
+    const insert = client.query.mock.calls.find((c) => /INSERT INTO identity_verifications/.test(String(c[0])))!;
     expect(insert[1].slice(0, 3)).toEqual([USER.id, 'change', 'kmc']);
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('★이미 본인인증을 마친 계정은 최초 등록을 다시 시작하지 못한다', async () => {
+    turnOn();
+    wireStart({ alreadyVerified: true });
+    const r = await startIdentityVerification({ userId: USER.id, purpose: 'first_login', req: REQ });
+    expect(r).toEqual({ status: 'already_verified' });
+    expect(sqls().some((s) => /^INSERT INTO identity_verifications/.test(s))).toBe(false);
+    expect(sqls()).toContain('ROLLBACK');
+  });
+
+  it('담당자 변경은 인증 이력이 있어도 시작된다', async () => {
+    turnOn();
+    wireStart({ alreadyVerified: true });
+    const r = await startIdentityVerification({ userId: USER.id, purpose: 'change', req: REQ });
+    expect(r.status).toBe('started');
+    // 변경 경로는 인증 이력 유무를 묻지 않는다
+    expect(sqls().some((s) => /status = 'verified'/.test(s))).toBe(false);
+  });
+
+  it('도중에 오류가 나면 되돌리고 연결을 반납한다', async () => {
+    turnOn();
+    client.query.mockImplementation(async (sql: string) => {
+      if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] };
+      throw new Error('boom');
+    });
+    await expect(startIdentityVerification({ userId: USER.id, purpose: 'change', req: REQ })).rejects.toThrow('boom');
+    expect(sqls()).toContain('ROLLBACK');
+    expect(client.release).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('완료', () => {
-  const wireClient = (opts: { confirmed?: boolean; userRow?: any } = {}) => {
-    const { confirmed = true, userRow = { name: '인비토01', phone: '070-0000-0000', mfa_phone: '01099999999' } } = opts;
+  const wireClient = (opts: { confirmed?: boolean; userRow?: any; alreadyVerified?: boolean } = {}) => {
+    const {
+      confirmed = true,
+      userRow = { name: '인비토01', phone: '070-0000-0000', mfa_phone: '01099999999' },
+      alreadyVerified = false,
+    } = opts;
     client.query.mockImplementation(async (sql: string) => {
       if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(sql)) return { rows: [] };
-      if (/^\s*UPDATE identity_verifications/.test(sql)) return { rows: confirmed ? [{ id: 'v-1' }] : [] };
       if (/^\s*SELECT name, phone, mfa_phone FROM users WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: userRow ? [userRow] : [] };
+      if (/FROM identity_verifications WHERE user_id = \$1 AND status = 'verified'/.test(sql)) return { rows: alreadyVerified ? [{ ok: 1 }] : [] };
+      if (/^\s*UPDATE identity_verifications/.test(sql)) return { rows: confirmed ? [{ id: 'v-1' }] : [] };
       if (/^\s*UPDATE users SET name = \$2, phone = \$3, mfa_phone = \$3/.test(sql)) return { rows: [], rowCount: 1 };
       if (/^\s*DELETE FROM mfa_trusted_devices WHERE user_id = \$1/.test(sql)) return { rows: [], rowCount: 0 };
       throw new Error(`예상하지 못한 SQL: ${sql}`);
     });
   };
   const sqls = () => client.query.mock.calls.map((c) => String(c[0]).trim());
+  const complete = (purpose: 'first_login' | 'change' = 'first_login') =>
+    completeIdentityVerification({ userId: USER.id, verificationId: 'v-1', purpose, payload: {}, req: REQ });
 
   it('인증기관이 없으면 아무것도 하지 않는다', async () => {
-    const r = await completeIdentityVerification({ userId: USER.id, verificationId: 'v-1', payload: {}, req: REQ });
-    expect(r).toEqual({ status: 'unavailable' });
+    expect(await complete()).toEqual({ status: 'unavailable' });
     expect(connect).not.toHaveBeenCalled();
   });
 
   it('인증기관이 결과를 인정하지 않으면 거절하고 DB를 건드리지 않는다', async () => {
     turnOn();
     registerIdentityProvider(fakeProvider({ verify: async () => { throw new Error('signature mismatch'); } }));
-    const r = await completeIdentityVerification({ userId: USER.id, verificationId: 'v-1', payload: {}, req: REQ });
-    expect(r).toEqual({ status: 'rejected', reason: 'provider' });
+    expect(await complete()).toEqual({ status: 'rejected', reason: 'provider' });
     expect(connect).not.toHaveBeenCalled();
   });
 
@@ -300,42 +363,68 @@ describe('완료', () => {
   ])('이름 · 휴대폰이 형식에 맞지 않으면(%o) 거절하고 DB를 건드리지 않는다', async (bad) => {
     turnOn();
     registerIdentityProvider(fakeProvider({ verify: async () => bad as any }));
-    const r = await completeIdentityVerification({ userId: USER.id, verificationId: 'v-1', payload: {}, req: REQ });
-    expect(r).toEqual({ status: 'rejected', reason: 'invalid_identity' });
+    expect(await complete()).toEqual({ status: 'rejected', reason: 'invalid_identity' });
     expect(connect).not.toHaveBeenCalled();
   });
 
-  it('★대기 행 확정은 조건이 붙은 한 문장이다(대기 · 미만료 · 그 계정 · 그 인증기관)', async () => {
+  it('★계정 행을 가장 먼저 잠근다 — 그 계정의 완료가 한 줄로 선다', async () => {
     turnOn();
     wireClient();
-    await completeIdentityVerification({ userId: USER.id, verificationId: 'v-1', payload: {}, req: REQ });
+    await complete();
+    const order = sqls();
+    expect(order[0]).toBe('BEGIN');
+    expect(order[1]).toMatch(/^SELECT name, phone, mfa_phone FROM users WHERE id = \$1 FOR UPDATE/);
+  });
+
+  it('★최초 등록 권한은 한 번 쓰면 끝이다 — 이미 인증된 계정의 최초 등록 완료를 거절한다', async () => {
+    turnOn();
+    wireClient({ alreadyVerified: true });
+    expect(await complete('first_login')).toEqual({ status: 'already_verified' });
+    expect(sqls()).toContain('ROLLBACK');
+    expect(sqls().some((s) => /^UPDATE users/.test(s))).toBe(false);
+    expect(sqls().some((s) => /^UPDATE identity_verifications/.test(s))).toBe(false);
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('담당자 변경은 인증 이력이 있어도 완료된다', async () => {
+    turnOn();
+    wireClient({ alreadyVerified: true });
+    expect((await complete('change')).status).toBe('verified');
+  });
+
+  it('★대기 행 확정은 조건이 붙은 한 문장이다(대기 · 미만료 · 그 계정 · 그 인증기관 · 그 목적)', async () => {
+    turnOn();
+    wireClient();
+    await complete('change');
     const [sql, params] = client.query.mock.calls.find((c) => /UPDATE identity_verifications/.test(String(c[0])))!;
-    expect(String(sql)).toMatch(/WHERE id = \$1 AND user_id = \$2 AND status = 'pending' AND provider = \$7 AND expires_at > NOW\(\)/);
+    expect(String(sql)).toMatch(/WHERE id = \$1 AND user_id = \$2 AND status = 'pending' AND provider = \$7 AND purpose = \$8 AND expires_at > NOW\(\)/);
     expect(String(sql)).toMatch(/RETURNING id/);
     expect(params[0]).toBe('v-1');
     expect(params[1]).toBe(USER.id);
     expect(params[6]).toBe('kmc');
+    expect(params[7]).toBe('change');
   });
 
   it('★갱신 0행이면 실패다 — 담당자 정보를 바꾸지 않고 되돌린다', async () => {
     turnOn();
     wireClient({ confirmed: false });
-    const r = await completeIdentityVerification({ userId: USER.id, verificationId: 'v-1', payload: {}, req: REQ });
-    expect(r).toEqual({ status: 'expired' });
+    expect(await complete()).toEqual({ status: 'expired' });
     expect(sqls()).toContain('ROLLBACK');
     expect(sqls().some((s) => /^UPDATE users/.test(s))).toBe(false);
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
-  it('★인증된 번호가 로그인 인증번호가 되고, 옛 통과권을 해제하고, 한 트랜잭션으로 끝난다', async () => {
+  it('★인증된 번호가 로그인 인증번호가 되고, 옛 번호의 통과권을 해제하고, 한 트랜잭션으로 끝난다', async () => {
     turnOn();
     wireClient();
-    const r = await completeIdentityVerification({ userId: USER.id, verificationId: 'v-1', payload: {}, req: REQ });
+    const r = await complete();
 
     expect(r.status).toBe('verified');
     if (r.status !== 'verified') return;
     expect(r.name).toBe('홍길동');
     expect(r.maskedPhone).toBe('010-****-0000');
+    // (Codex 3R) 통과권 발급의 증거 = 이 인증이 실제로 확인한 번호. 나중에 계정을 다시 읽은 값이 아니다
+    expect(r.verifiedPhone.digits).toBe('01000000000');
     expect(r.before).toEqual({ name: '인비토01', maskedPhone: '070-****-0000', maskedMfaPhone: '010-****-9999' });
 
     const order = sqls();
@@ -344,13 +433,15 @@ describe('완료', () => {
     const userUpdate = client.query.mock.calls.find((c) => /^\s*UPDATE users/.test(String(c[0])))!;
     expect(userUpdate[1]).toEqual([USER.id, '홍길동', '01000000000']);
     expect(order.some((s) => /^DELETE FROM mfa_trusted_devices/.test(s))).toBe(true);
+    // 옛 번호의 미사용 인증번호는 여기서 지우지 않는다 — 검증이 현재 번호와 대조해 거른다(mfa.test.ts가 고정)
+    expect(order.some((s) => /mfa_challenges/.test(s))).toBe(false);
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
   it('중복가입 확인값은 원문이 아니라 해시로만 저장한다', async () => {
     turnOn();
     wireClient();
-    await completeIdentityVerification({ userId: USER.id, verificationId: 'v-1', payload: {}, req: REQ });
+    await complete();
     const [, params] = client.query.mock.calls.find((c) => /UPDATE identity_verifications/.test(String(c[0])))!;
     expect(JSON.stringify(params)).not.toContain('DI-VALUE');
     expect(params[4]).toMatch(/^[0-9a-f]{64}$/);
@@ -362,7 +453,7 @@ describe('완료', () => {
       if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] };
       throw new Error('boom');
     });
-    await expect(completeIdentityVerification({ userId: USER.id, verificationId: 'v-1', payload: {}, req: REQ })).rejects.toThrow('boom');
+    await expect(complete()).rejects.toThrow('boom');
     expect(sqls()).toContain('ROLLBACK');
     expect(client.release).toHaveBeenCalledTimes(1);
   });
@@ -372,12 +463,13 @@ describe('실패 응답 — 인증기관이 왜 거절했는지는 내보내지 
   it('종류마다 상태 코드와 안내가 정해져 있다', () => {
     expect(identityFailureResponse({ status: 'unavailable' }).http).toBe(503);
     expect(identityFailureResponse({ status: 'expired' })).toMatchObject({ http: 401, body: { code: 'IDENTITY_EXPIRED' } });
+    expect(identityFailureResponse({ status: 'already_verified' })).toMatchObject({ http: 409, body: { code: 'IDENTITY_ALREADY_VERIFIED' } });
     expect(identityFailureResponse({ status: 'rejected', reason: 'provider' })).toMatchObject({ http: 400, body: { code: 'IDENTITY_REJECTED' } });
   });
 
   it('안내 문구에 줄표가 없다', () => {
     for (const d of [
-      { status: 'unavailable' as const }, { status: 'expired' as const },
+      { status: 'unavailable' as const }, { status: 'expired' as const }, { status: 'already_verified' as const },
       { status: 'rejected' as const, reason: 'provider' as const },
       { status: 'rejected' as const, reason: 'invalid_identity' as const },
     ]) {
