@@ -102,8 +102,31 @@ describe('로그인 화면 사전 고지 창', () => {
   it('문구의 유지 시간 = 발신 인증 코드 값', () => {
     const hours = be('utils', 'sender-auth.ts').match(/export const SENDER_AUTH_TRUST_HOURS = (\d+);/);
     expect(hours).not.toBeNull();
-    expect(modal).toContain(`인증하면 ${hours![1]}시간 유지됩니다`);
+    expect(modal).toContain(`title: '보내기 전에 발신번호 인증, ${hours![1]}시간 유지',`);
     expect(modal).not.toContain('24시간');
+  });
+
+  it('★(1003) 바뀌는 것마다 가이드라인 문장을 글자 그대로 붙이고, 원문 주소는 맨 아래에 둔다', () => {
+    // 3차 개정판(2026-10-01) 8 · 14 · 15쪽과 대조한 문장 — 고쳐 쓰면 이 테스트가 깨진다
+    const quotes = [
+      ['3.4 다중 인증 · 14쪽', '단순 ID/PW만으로는 계정 탈취 위험이 크므로, 이용자 계정 접속 시 다중인증 방식을 적용해야 한다.'],
+      ['2.1 계정관리 · 8쪽', '회원가입 시 검증된 본인확인기관의 서비스를 통해 이용자 본인확인을 수행하고, 본인확인 결과를 계정과 연계하여 중복가입을 차단하여야 한다.'],
+      ['3.5 추가 인증 · 15쪽', '추가인증은 문자 발송 시 해당 발신번호와 발송 계정의 정당한 연계성을 확인하여 발신번호 도용과 대량 문자 남용을 방지하기 위한 절차이다.'],
+    ];
+    for (const [source, quote] of quotes) {
+      expect(modal).toContain(`source: '${source}',`);
+      expect(modal).toContain(`quote: '${quote}',`);
+    }
+    expect(modal).toContain('<blockquote');
+    expect(modal).toContain("const GUIDELINE_REVISION_TEXT = '2026. 10. 1. 3차 개정';");
+    // 원문 줄은 발췌 목록 뒤 · 버튼 앞(본문의 맨 아래)
+    const list = modal.indexOf('{CHANGES.map(');
+    const origin = modal.indexOf('href={GUIDELINE_VIEWER_URL}');
+    const buttons = modal.indexOf('{/* 버튼 */}');
+    expect(list).toBeGreaterThan(0);
+    expect(origin).toBeGreaterThan(list);
+    expect(buttons).toBeGreaterThan(origin);
+    expect(modal.split('href={GUIDELINE_VIEWER_URL}')).toHaveLength(2);
   });
 
   it('고객에게 보이는 글에 줄표와 모델명이 없다', () => {

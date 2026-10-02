@@ -24,7 +24,7 @@
 import { storeMembershipClause } from './store-scope';
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
-import { resolveConsentScope, consentSql } from './mall-consent';
+import { resolveConsentScope, consentSql, brandConsentOption } from './mall-consent';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
 import { FIELD_DISPLAY_MAP, reverseDisplayValue } from './standard-field-map';
 
@@ -65,7 +65,7 @@ export async function fetchTargetSampleCustomer(
   const consentScope = await resolveConsentScope(companyId, storeCode ? [storeCode] : null);
   const consent = consentSql(consentScope, 'c');
   // 1) 타겟 필터 SQL (CT-01 컨트롤타워)
-  const filterResult = buildFilterQueryCompat(targetFilter || {}, companyId, { storeConsent: consentScope.mode === 'mall' });
+  const filterResult = buildFilterQueryCompat(targetFilter || {}, companyId, brandConsentOption(consentScope));
 
   // 2) store_code 필터 (브랜드 격리) — 동적 파라미터 인덱스
   let paramIdx = filterResult.nextIndex;

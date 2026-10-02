@@ -644,7 +644,7 @@ router.post('/', async (req: Request, res: Response) => {
       const countEnforce = countStoreParams.length > 0 && (await resolveSendConsent(companyId, countStoreParams[0]));
       // ★ 2026-10-02 범위 없는 발송(관리자)도 몰 동의 회사면 소속 행 동의로 센다(CT · 몰 동의 회사가 아니면 null = 옛 조각)
       const countAdminConsent = countStoreParams.length === 0 ? await resolveAdminSendConsent(companyId) : null;
-      const filterQuery = buildFilterQueryCompat(targetFilter, companyId, { storeConsent: countEnforce || countAdminConsent !== null });
+      const filterQuery = buildFilterQueryCompat(targetFilter, companyId, countAdminConsent ? { storeConsentMallCodes: countAdminConsent.mallCodes } : { storeConsent: countEnforce });
       let countStoreFilter = '';
       if (countStoreParams.length > 0) {
         countStoreFilter = ` AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = c.company_id AND store_code = ANY($${1 + filterQuery.params.length + 1}::text[]))`;
@@ -658,7 +658,7 @@ router.post('/', async (req: Request, res: Response) => {
       });
       const unsubIdx = 1 + filterQuery.params.length + countStoreParams.length + 1;
       const countResult = await query(
-        `SELECT COUNT(*) FROM customers c WHERE c.company_id = $1 AND c.is_active = true AND ${countAdminConsent ?? countConsent.customerConsent} ${filterQuery.where}${countConsent.storeFilter}
+        `SELECT COUNT(*) FROM customers c WHERE c.company_id = $1 AND c.is_active = true AND ${countAdminConsent?.isTrue ?? countConsent.customerConsent} ${filterQuery.where}${countConsent.storeFilter}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`,
         [companyId, ...filterQuery.params, ...countStoreParams, userId]
       );
@@ -909,7 +909,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const sendEnforce = storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0]));
     // ★ 2026-10-02 범위 없는 발송(관리자)도 몰 동의 회사면 소속 행 동의로 자격을 본다(CT · 몰 동의 회사가 아니면 null = 옛 조각)
     const sendAdminConsent = storeParams.length === 0 ? await resolveAdminSendConsent(companyId) : null;
-    const filterQuery = buildFilterQueryCompat(targetFilter, companyId, { storeConsent: sendEnforce || sendAdminConsent !== null });
+    const filterQuery = buildFilterQueryCompat(targetFilter, companyId, sendAdminConsent ? { storeConsentMallCodes: sendAdminConsent.mallCodes } : { storeConsent: sendEnforce });
     console.log('filterQuery:', filterQuery);
 
     // store_code 필터 인덱스 계산
@@ -930,7 +930,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const unsubParamIdx = 1 + filterQuery.params.length + storeParams.length + 1;
     const customersResult = await query(
       `SELECT ${selectColumns} FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND ${sendAdminConsent ?? sendConsent.customerConsent} ${filterQuery.where}${storeFilterFinal}
+       WHERE c.company_id = $1 AND c.is_active = true AND ${sendAdminConsent?.isTrue ?? sendConsent.customerConsent} ${filterQuery.where}${storeFilterFinal}
        AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubParamIdx} AND u.phone = c.phone)`,
       [companyId, ...filterQuery.params, ...storeParams, userId]
     );
@@ -3346,7 +3346,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       const previewEnforce = storeParams.length > 0 && (await resolveSendConsent(companyId, storeParams[0]));
       // ★ 2026-10-02 범위 없는 발송(관리자) 갈래 — 발송(POST /:id/send)과 같은 조각
       const previewAdminConsent = storeParams.length === 0 ? await resolveAdminSendConsent(companyId) : null;
-      const filterQuery = buildFilterQueryCompat(targetFilter, companyId, { storeConsent: previewEnforce || previewAdminConsent !== null });
+      const filterQuery = buildFilterQueryCompat(targetFilter, companyId, previewAdminConsent ? { storeConsentMallCodes: previewAdminConsent.mallCodes } : { storeConsent: previewEnforce });
       if (storeParams.length > 0) {
         const storeIdx = 1 + filterQuery.params.length + 1;
         storeFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${storeIdx}::text[]))`;
@@ -3382,7 +3382,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       const unsubIdx = 1 + filterQuery.params.length + storeParams.length + searchParams.length + excludeParams.length + 1;
       const countResult = await query(
         `SELECT COUNT(*) FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND ${previewAdminConsent ?? previewConsent.customerConsent}
+         WHERE c.company_id = $1 AND c.is_active = true AND ${previewAdminConsent?.isTrue ?? previewConsent.customerConsent}
          ${filterQuery.where}${storeFilter}${searchFilter}${excludeFilter}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`,
         [companyId, ...filterQuery.params, ...storeParams, ...searchParams, ...excludeParams, userId]
@@ -3394,7 +3394,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
       const recipients = await query(
         `SELECT phone, name, phone as idx
          FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND ${previewAdminConsent ?? previewConsent.customerConsent}
+         WHERE c.company_id = $1 AND c.is_active = true AND ${previewAdminConsent?.isTrue ?? previewConsent.customerConsent}
          ${filterQuery.where}${storeFilter}${searchFilter}${excludeFilter}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)
          ORDER BY name, phone

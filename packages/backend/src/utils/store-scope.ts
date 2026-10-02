@@ -35,12 +35,19 @@ export function buildCustomerStoreFilterLiteral(companyId: string, storeCodes: s
  * @param requireConsent 몰 동의 발송(mall-consent buildSendConsent mode=mall)일 때 true — 브랜드 소속과 그 브랜드의 동의를 **같은 소속 행**에서 본다.
  *                       없으면 범위 [A,B] 계정이 A 를 고를 때 A 거부·B 동의 고객이 범위 조각의 B 동의로 통과한다(Codex 1001 R1 high).
  *                       별칭 한정(mcs) = mall-consent 0922 R1 규칙 — 동의 컬럼이 없는 환경에서 바깥 customers.sms_opt_in 으로 새지 않고 42703 으로 드러난다.
+ * @param consentMallCodes ★2026-10-02 범위 없는 발송(관리자)용 — 고른 브랜드가 **이 목록(몰 동의 코드)에 있을 때만** 그 소속 행의 동의를 요구한다.
+ *                       업로드 브랜드의 소속 행에는 동의 값이 없다(NULL) → requireConsent 로 걸면 그 브랜드가 0명이 된다. 값은 리터럴(escapeLiteral).
  */
-export interface StoreMembershipOpts { idCol: string; companyRef: string; codeRef: string; many?: boolean; requireConsent?: boolean }
+export interface StoreMembershipOpts { idCol: string; companyRef: string; codeRef: string; many?: boolean; requireConsent?: boolean; consentMallCodes?: readonly string[] }
 export function storeMembershipCond(opts: StoreMembershipOpts): string {
   const code = opts.many ? `ANY(${opts.codeRef}::text[])` : opts.codeRef;
   if (opts.requireConsent) {
     return `${opts.idCol} IN (SELECT mcs.customer_id FROM customer_stores mcs WHERE mcs.company_id = ${opts.companyRef} AND mcs.store_code = ${code} AND mcs.sms_opt_in = true)`;
+  }
+  if (opts.consentMallCodes && opts.consentMallCodes.length > 0) {
+    const mall = `ARRAY[${opts.consentMallCodes.map((c) => escapeLiteral(String(c))).join(',')}]::text[]`;
+    return `${opts.idCol} IN (SELECT mcs.customer_id FROM customer_stores mcs WHERE mcs.company_id = ${opts.companyRef} AND mcs.store_code = ${code}`
+      + ` AND (mcs.sms_opt_in = true OR NOT (mcs.store_code = ANY(${mall}))))`;
   }
   return `${opts.idCol} IN (SELECT customer_id FROM customer_stores WHERE company_id = ${opts.companyRef} AND store_code = ${code})`;
 }

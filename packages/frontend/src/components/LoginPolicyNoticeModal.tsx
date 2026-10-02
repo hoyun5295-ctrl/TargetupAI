@@ -12,17 +12,24 @@
  *   - 시행일이 지나면 문구가 「시행 중」으로 바뀐다. 끄는 시점은 따로 정한다.
  *   - 판정은 `shouldShowLoginPolicyNotice`가 한다. 호출부가 날짜·저장값을 다시 계산하지 않는다.
  *
- * ⛔ 원문 주소는 방송미디어통신위원회 누리집의 첨부 파일 주소다. 가이드라인이 개정되면 첨부가 바뀌므로
- *    `GUIDELINE_VIEWER_URL`을 새 주소로 고친다(게시물 주소 `GUIDELINE_POST_URL`은 그대로다).
+ * 근거 표시 (★2026-10-03 Harold)
+ *   원문 전체로 보내지 않고 **해당 항목의 문장만 발췌**해서 바뀌는 것 옆에 붙인다. 정확한 원문 주소는 맨 아래에 둔다.
+ *   발췌는 가이드라인 문장을 **글자 그대로** 옮긴 것이다(3차 개정판 8 · 14 · 15쪽을 누리집 뷰어에서 대조).
+ *   ⛔ 고쳐 쓰거나 줄이지 않는다. 규제기관 문서를 인용이라고 내걸면서 문장을 바꾸면 인용이 아니다.
+ *   공공누리 1유형(출처 표시 조건 자유 이용) · 출처는 맨 아래 원문 줄이 표시한다.
+ *
+ * ⛔ 가이드라인이 개정되면 ①발췌 문장과 쪽수를 새 판과 다시 대조하고 ②`GUIDELINE_VIEWER_URL`(첨부 파일 주소)과
+ *    `GUIDELINE_REVISION_TEXT`를 고친다. 게시물 주소 `GUIDELINE_POST_URL`은 그대로다.
  */
 import { useEffect, useRef } from 'react';
-import { ArrowUpRight, FileText, X } from 'lucide-react';
+import { ArrowUpRight, X } from 'lucide-react';
 
 /** 시행일(한국 시각) — 10월 1일 회의 결정. 서버의 시행 스위치와는 별개인 「안내 문구」의 기준일이다 */
 const ENFORCE_AT_MS = new Date('2026-10-26T00:00:00+09:00').getTime();
 const ENFORCE_DATE_TEXT = '10월 26일';
 
 /** 가이드라인 원문(3차 개정 · 2026-10-01) — 방송미디어통신위원회 누리집 문서 뷰어 */
+const GUIDELINE_REVISION_TEXT = '2026. 10. 1. 3차 개정';
 const GUIDELINE_VIEWER_URL =
   'https://www.kmcc.go.kr/synap/viewer.jsp?file=%2Fapp%2Fhomepage%2Fupload%2Fdata%2FHMP_1099%2Ffile928901960647183783.pdf';
 /** 가이드라인 게시물(개정되어도 주소가 같다) */
@@ -53,10 +60,26 @@ function hideLoginPolicyNoticeToday(): void {
   }
 }
 
-const CHANGES: Array<{ label: string; title: string; note: string }> = [
-  { label: '로그인', title: '로그인할 때마다 휴대폰 인증번호 입력', note: '담당자 휴대폰으로 6자리 번호가 갑니다' },
-  { label: '계정 담당자', title: '계정마다 담당자 한 명, 본인인증 1회', note: '담당자가 바뀌면 설정에서 변경합니다' },
-  { label: '문자 발송', title: '보내기 전에 발신번호 인증', note: '인증하면 8시간 유지됩니다' },
+/** 바뀌는 것 세 가지 — 제목은 우리 말, `quote`는 가이드라인 문장 그대로(고치지 않는다) */
+const CHANGES: Array<{ label: string; title: string; source: string; quote: string }> = [
+  {
+    label: '로그인',
+    title: '로그인할 때마다 휴대폰 인증번호 입력',
+    source: '3.4 다중 인증 · 14쪽',
+    quote: '단순 ID/PW만으로는 계정 탈취 위험이 크므로, 이용자 계정 접속 시 다중인증 방식을 적용해야 한다.',
+  },
+  {
+    label: '계정 담당자',
+    title: '계정마다 담당자 한 명, 본인인증 1회',
+    source: '2.1 계정관리 · 8쪽',
+    quote: '회원가입 시 검증된 본인확인기관의 서비스를 통해 이용자 본인확인을 수행하고, 본인확인 결과를 계정과 연계하여 중복가입을 차단하여야 한다.',
+  },
+  {
+    label: '문자 발송',
+    title: '보내기 전에 발신번호 인증, 8시간 유지',
+    source: '3.5 추가 인증 · 15쪽',
+    quote: '추가인증은 문자 발송 시 해당 발신번호와 발송 계정의 정당한 연계성을 확인하여 발신번호 도용과 대량 문자 남용을 방지하기 위한 절차이다.',
+  },
 ];
 
 export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => void }) {
@@ -133,54 +156,48 @@ export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => voi
           </p>
         </div>
 
-        {/* 바뀌는 것 세 가지 */}
+        {/* 바뀌는 것 세 가지 + 그 근거가 되는 가이드라인 문장 */}
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-2 sm:px-9">
           <dl>
             {CHANGES.map((c) => (
               <div
                 key={c.label}
-                className="grid gap-x-6 gap-y-1 border-b border-slate-100 py-[18px] sm:grid-cols-[108px_1fr] sm:items-baseline"
+                className="grid gap-x-6 gap-y-1.5 border-b border-slate-100 py-[18px] sm:grid-cols-[108px_1fr] sm:items-baseline"
               >
                 <dt className="text-[13.5px] font-semibold text-emerald-700">{c.label}</dt>
                 <dd>
                   <p className="text-[17px] font-semibold leading-snug tracking-[-0.01em] text-slate-900 sm:text-[18px]">{c.title}</p>
-                  <p className="mt-1 text-[14px] leading-relaxed text-slate-500">{c.note}</p>
+                  <figure className="mt-2.5 rounded-xl bg-slate-50 px-3.5 py-3">
+                    <figcaption className="text-[12px] font-semibold text-slate-500">가이드라인 {c.source}</figcaption>
+                    <blockquote className="mt-1 text-[14px] leading-[1.65] text-slate-700">{c.quote}</blockquote>
+                  </figure>
                 </dd>
               </div>
             ))}
           </dl>
 
-          {/* 근거 문서 */}
-          <div className="my-5 flex flex-col gap-3 rounded-2xl bg-slate-50 px-4 py-4 sm:flex-row sm:items-center sm:px-5">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-emerald-700 shadow-[0_1px_2px_rgba(15,23,42,0.08)]">
-                <FileText className="h-5 w-5" strokeWidth={2} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[14.5px] font-semibold leading-snug text-slate-900">전송자격인증제 가이드라인</p>
-                <p className="mt-0.5 text-[12.5px] text-slate-500">
-                  방송미디어통신위원회 ·{' '}
-                  <a
-                    href={GUIDELINE_POST_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline decoration-slate-300 underline-offset-[3px] transition hover:text-slate-800 hover:decoration-slate-500 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-emerald-500"
-                  >
-                    게시물 보기
-                  </a>
-                </p>
-              </div>
-            </div>
+          {/* 원문 — 맨 아래 */}
+          <p className="py-4 text-[12.5px] leading-relaxed text-slate-500">
+            원문: 방송미디어통신위원회 「전송자격인증제 신청서류 작성 가이드라인」 ({GUIDELINE_REVISION_TEXT}){' '}
             <a
               href={GUIDELINE_VIEWER_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-emerald-600 bg-white px-4 py-2.5 text-[14px] font-semibold text-emerald-700 transition hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+              className="ml-1 inline-flex items-center gap-0.5 whitespace-nowrap font-semibold text-emerald-700 underline decoration-emerald-300 underline-offset-[3px] transition hover:decoration-emerald-600 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-emerald-500"
             >
               원문 PDF 보기
-              <ArrowUpRight className="h-4 w-4" strokeWidth={2.4} />
+              <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2.4} />
             </a>
-          </div>
+            <a
+              href={GUIDELINE_POST_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-3 inline-flex items-center gap-0.5 whitespace-nowrap font-semibold text-slate-600 underline decoration-slate-300 underline-offset-[3px] transition hover:text-slate-900 hover:decoration-slate-500 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-emerald-500"
+            >
+              게시물
+              <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2.4} />
+            </a>
+          </p>
         </div>
 
         {/* 버튼 */}

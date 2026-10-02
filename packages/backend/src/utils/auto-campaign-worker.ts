@@ -27,7 +27,7 @@
  */
 
 import { storeMembershipClause } from './store-scope';
-import { resolveConsentScope, consentSql } from './mall-consent';
+import { resolveConsentScope, consentSql, brandConsentOption } from './mall-consent';
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
@@ -437,7 +437,7 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
         try {
           const d1ConsentScope = await resolveConsentScope(ac.company_id, ac.store_code ? [ac.store_code] : null);
           const d1Consent = consentSql(d1ConsentScope, 'c');
-          const filterRes = buildFilterQueryCompat(ac.target_filter, ac.company_id, { storeConsent: d1ConsentScope.mode === 'mall' });
+          const filterRes = buildFilterQueryCompat(ac.target_filter, ac.company_id, brandConsentOption(d1ConsentScope));
           let countStoreFilter = '';
           const countStoreParams: any[] = [];
           if (ac.store_code) {
@@ -580,7 +580,7 @@ async function sendPreNotification(ac: any): Promise<void> {
     try {
       const countConsentScope = await resolveConsentScope(ac.company_id, ac.store_code ? [ac.store_code] : null);
       const countConsent = consentSql(countConsentScope, 'c');
-      const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id, { storeConsent: countConsentScope.mode === 'mall' });
+      const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id, brandConsentOption(countConsentScope));
       let storeFilter = '';
       const storeParams: any[] = [];
       if (ac.store_code) {
@@ -744,7 +744,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     const sendConsent = consentSql(sendConsentScope, 'c');
     if (sendConsentScope.mode === 'mall') console.log(`${logPrefix} 발송 자격 = 몰 동의 codes=${sendConsentScope.codes.join(',')} admin=${sendConsentScope.admin}`);
     // ★ customer-filter로 타겟 필터링
-    const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id, { storeConsent: sendConsentScope.mode === 'mall' });
+    const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id, brandConsentOption(sendConsentScope));
 
     // store_code 필터
     let storeFilter = '';

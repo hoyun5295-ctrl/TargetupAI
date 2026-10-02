@@ -51,6 +51,11 @@ export interface FilterOptions {
    */
   storeConsent?: boolean;
   /**
+   * ★ 2026-10-02 범위 없는 발송(관리자)의 브랜드 조건 — 고른 브랜드가 이 목록(몰 동의 코드)에 있을 때만 그 소속 행의 동의를 요구한다
+   *   (store-scope storeMembershipCond consentMallCodes). storeConsent 가 켜져 있으면 그쪽이 먼저다. 없으면 종전 글자.
+   */
+  storeConsentMallCodes?: readonly string[];
+  /**
    * ★ 2026-10-02 수신동의 조각(mall-consent consentSql). mode='mall' 일 때만 조건의 「수신동의」 필드를 소속 행 기준으로 읽는다.
    *   안 주거나 legacy 면 종전 글자·종전 파라미터 그대로(`sms_opt_in = $N`).
    */
@@ -153,6 +158,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
     storeCodeMode = 'skip',
     companyIdParamRef = '$1',
     storeConsent = false,
+    storeConsentMallCodes,
     consent,
     inputFormat = 'mixed',
   } = options;
@@ -221,10 +227,10 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
       } else if (field === 'store_code' && storeCodeMode !== 'skip') {
         if (storeCodeMode === 'subquery') {
           if (operator === 'eq') {
-            sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, requireConsent: storeConsent })}`;
+            sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, requireConsent: storeConsent, consentMallCodes: storeConsentMallCodes })}`;
             params.push(value);
           } else if (operator === 'in' && Array.isArray(value)) {
-            sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, many: true, requireConsent: storeConsent })}`;
+            sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, many: true, requireConsent: storeConsent, consentMallCodes: storeConsentMallCodes })}`;
             params.push(value);
           }
         }
@@ -553,10 +559,10 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
       const storeOp = filters.store_code?.operator || 'eq';
       if (storeCodeMode === 'subquery') {
         if (storeOp === 'in' && Array.isArray(storeCode)) {
-          sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, many: true, requireConsent: storeConsent })}`;
+          sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, many: true, requireConsent: storeConsent, consentMallCodes: storeConsentMallCodes })}`;
           params.push(storeCode);
         } else {
-          sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, requireConsent: storeConsent })}`;
+          sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, requireConsent: storeConsent, consentMallCodes: storeConsentMallCodes })}`;
           params.push(storeCode);
         }
       }
@@ -643,7 +649,9 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
 export function buildFilterQueryCompat(
   filter: any,
   _companyId: string,
-  opts: { storeConsent?: boolean } = {},  // ★ 2026-10-01 몰 동의 발송이면 true(campaigns.ts 3곳 · buildSendConsent 와 같은 enforce 값)
+  // ★ 2026-10-01 몰 동의 발송이면 storeConsent true(campaigns.ts 3곳 · buildSendConsent 와 같은 enforce 값)
+  // ★ 2026-10-02 범위 없는 발송(관리자)은 storeConsentMallCodes(몰 동의 코드 목록) — mall-consent brandConsentOption 이 만든다
+  opts: { storeConsent?: boolean; storeConsentMallCodes?: readonly string[] } = {},
 ): { where: string; params: any[]; nextIndex: number } {
   // ★ 2026-09-27 한줄로 V2 R203 — D83 디버그 로그 제거(호출마다 필터·SQL·검색값을 로그에 남겼다)
   const result = buildCustomerFilter(filter, {
@@ -652,6 +660,7 @@ export function buildFilterQueryCompat(
     storeCodeMode: 'subquery',
     companyIdParamRef: '$1',
     storeConsent: opts.storeConsent === true,
+    storeConsentMallCodes: opts.storeConsentMallCodes,
     inputFormat: 'mixed',
   });
   return { where: result.sql, params: result.params, nextIndex: result.nextIndex };

@@ -74,7 +74,7 @@ import { isUuid, findLinkDefectDeep } from '../utils/normalize';
 import { canAccessDm, requireDmAccess } from '../utils/dm-access';
 // ★ 2026-09-27 한줄로 V2 S5-04 — 고객 범위 SQL CT
 import { getOwnerCustomerScopeSql } from '../utils/store-scope';
-import { ownerConsentSql } from '../utils/mall-consent';
+import { ownerConsentSql, consentWithUnsub } from '../utils/mall-consent';
 import { callAIWithFallback, getSeasonContext } from '../services/ai';
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
@@ -1411,7 +1411,8 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, async (req: any, res: any)
     // 발송 대상 resolve — DM 채널 자격(전화 유효·수신거부/무효 아님·활성) + filter. phone 중복 제거.
     //   전체 고객(allCustomers)이면 filter 조건 없이 DM 자격만 적용.
     //   ★ 2026-07-06 재발송(resendIds)이면 지정 고객 한정 — 자격 필터는 동일하게 재적용(그 사이 수신거부한 고객 자동 제외).
-    const dmConsent = await ownerConsentSql(companyId, req.user?.userId, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(범위와 같은 주인)
+    // ★ 2026-10-02 수신동의 읽기 = CT(범위와 같은 주인 · 몰 동의 회사는 수신거부도 여기서 뺀다 — 뒤의 스테이징 정제와 같은 기준)
+    const dmConsent = consentWithUnsub(await ownerConsentSql(companyId, req.user?.userId, 'c'), req.user?.userId, 'c.phone');
     const { sql: filterSql, params: filterParams } = buildCustomerFilter(effectiveFilter, {
       tableAlias: 'c', startParamIndex: 2, storeCodeMode: 'skip', consent: dmConsent, inputFormat: 'structured',
     });

@@ -21,7 +21,7 @@ import { buildChannelEligibilityWhere, type ChannelKey } from '../utils/channel-
 import { countTargetByFilter } from '../utils/target-count';
 // ★ 2026-09-27 한줄로 V2 S5-04 — 요청자 분류코드 범위(담당자 = 자기 분류 고객만)
 import { getOwnerCustomerScopeSql } from '../utils/store-scope';
-import { ownerConsentSql } from '../utils/mall-consent';
+import { ownerConsentSql, consentWithUnsub } from '../utils/mall-consent';
 import { query } from '../config/database';
 
 const router = Router();
@@ -65,7 +65,8 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
     // 2~3. 조건 → 인원수 2종 + 샘플. ★ 2026-09-12 SQL은 CT 한 벌(`countTargetByFilter`)로 옮겼다 —
     //      직접 선택(/count)과 자연어(/extract)가 같은 숫자를 내야 발송 인원과 어긋나지 않는다.
     const scopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
-    const consent = await ownerConsentSql(companyId, req.user?.userId, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(범위와 같은 주인)
+    // ★ 2026-10-02 수신동의 읽기 = CT(범위와 같은 주인 · 몰 동의 회사는 수신거부도 뺀다 — 센 수 = 나가는 수)
+    const consent = consentWithUnsub(await ownerConsentSql(companyId, req.user?.userId, 'c'), req.user?.userId, 'c.phone');
     const { matchCount, channelEligibleCount, samples } = await countTargetByFilter(companyId, ch, filter, scopeSql, consent);
 
     // 4. 0건 자동완화 X (D171) — 조건 자체가 0이면 조건 정정 안내
@@ -128,7 +129,8 @@ router.post('/count', requirePlanFeature('ai_messaging'), async (req: Request, r
     const safeFilter = filter && typeof filter === 'object' && !Array.isArray(filter) ? filter : {};
 
     const scopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
-    const consent = await ownerConsentSql(companyId, req.user?.userId, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(범위와 같은 주인)
+    // ★ 2026-10-02 수신동의 읽기 = CT(범위와 같은 주인 · 몰 동의 회사는 수신거부도 뺀다 — 센 수 = 나가는 수)
+    const consent = consentWithUnsub(await ownerConsentSql(companyId, req.user?.userId, 'c'), req.user?.userId, 'c.phone');
     const { matchCount, channelEligibleCount, samples } = await countTargetByFilter(companyId, ch, safeFilter, scopeSql, consent);
 
     return res.json({
@@ -185,7 +187,8 @@ router.post('/recipients', requirePlanFeature('ai_messaging'), async (req: Reque
     const offset = (p - 1) * size;
 
     // /extract와 동일 필터·채널 자격 (storeCodeMode:'skip' — extract 카운트와 일치)
-    const consent = await ownerConsentSql(companyId, req.user?.userId, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(범위와 같은 주인)
+    // ★ 2026-10-02 수신동의 읽기 = CT(범위와 같은 주인 · 몰 동의 회사는 수신거부도 뺀다 — 센 수 = 나가는 수)
+    const consent = consentWithUnsub(await ownerConsentSql(companyId, req.user?.userId, 'c'), req.user?.userId, 'c.phone');
     const { sql: filterSql, params } = buildCustomerFilter(safeFilter, {
       tableAlias: 'c',
       startParamIndex: 2,

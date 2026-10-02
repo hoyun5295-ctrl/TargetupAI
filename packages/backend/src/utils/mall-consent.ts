@@ -120,6 +120,8 @@ export function buildSendConsent(o: { enforce: boolean; alias: string; storeFilt
 //   - 몰 동의 회사 + 관리자(범위 없음) = 회사의 몰 코드 중 **한 몰 이상에서 동의했고 어느 몰에서도 거부하지 않은** 고객.
 //     관리자 화면·발송은 몰을 특정하지 않으므로 덜 보내는 쪽으로 본다(§5 과도기 선택과 같은 방향). 관리자가 브랜드를 고르면
 //     브랜드 조건이 그 브랜드 소속 행의 동의를 같은 행에서 본다(store-scope storeMembershipCond requireConsent).
+//     **몰 소속 행이 하나도 없는 고객(업로드 · 싱크로 들어온 고객)은 종전대로 고객 행 값**이다 — 그 고객의 동의는 몰이 준 것이 아니라
+//     회사가 올린 값이고, 몰 동의로 읽으면 켜는 순간 관리자 발송에서 전부 빠진다.
 // 값은 전부 리터럴(pg escapeLiteral)이라 파라미터 번호를 건드리지 않는다 — 조각을 어느 쿼리에나 그대로 넣을 수 있다.
 // ============================================================
 
@@ -216,9 +218,15 @@ export function consentSql(scope: ConsentScope, alias: string, idRef?: string): 
   const row = (v: 'true' | 'false') =>
     `EXISTS (SELECT 1 FROM customer_stores ${MALL_STORE_ALIAS} WHERE ${MALL_STORE_ALIAS}.company_id = ${company}` +
     ` AND ${MALL_STORE_ALIAS}.customer_id = ${customerId} AND ${MALL_STORE_ALIAS}.store_code = ANY(${codes}) AND ${MALL_STORE_ALIAS}.sms_opt_in = ${v})`;
-  // 분류코드 사용자 = 내 코드 중 하나라도 동의 / 관리자 = 한 몰 이상 동의 + 어느 몰에서도 거부 없음
-  const isTrue = scope.admin ? `(${row('true')} AND NOT ${row('false')})` : row('true');
-  const isFalse = scope.admin ? row('false') : `(NOT ${row('true')} AND ${row('false')})`;
+  // 분류코드 사용자 = 내 코드 중 하나라도 동의
+  // 관리자 = 어느 몰에서도 거부 없음 + (한 몰 이상 동의 또는 몰 소속 행이 없고 고객 행이 동의)
+  //   「거부 없음」을 맨 앞에 둔다 — WHERE 에서 이 조건이 안티 조인으로 풀리고 뒤의 OR 은 남은 행에만 평가된다.
+  const any =
+    `EXISTS (SELECT 1 FROM customer_stores ${MALL_STORE_ALIAS} WHERE ${MALL_STORE_ALIAS}.company_id = ${company}` +
+    ` AND ${MALL_STORE_ALIAS}.customer_id = ${customerId} AND ${MALL_STORE_ALIAS}.store_code = ANY(${codes}))`;
+  const rowCol = `${customerId.split('.')[0]}.sms_opt_in`;   // 고객 행 열(표·별칭으로 한정)
+  const isTrue = scope.admin ? `(NOT ${row('false')} AND (${row('true')} OR (${rowCol} = true AND NOT ${any})))` : row('true');
+  const isFalse = scope.admin ? `(${row('false')} OR (${rowCol} = false AND NOT ${any}))` : `(NOT ${row('true')} AND ${row('false')})`;
   return { mode: 'mall', isTrue, isFalse, value: `(CASE WHEN ${isTrue} THEN true WHEN ${isFalse} THEN false ELSE NULL END)` };
 }
 
@@ -231,7 +239,7 @@ export interface ConsentJoinSql extends ConsentSql {
  * 집계용 조각 — 회사 고객 전체를 훑어 세는 쿼리의 FILTER · SELECT 안에서 쓴다(대시보드 카드 · 고객 통계 · AI 문맥 통계).
  * consentSql 의 조각은 행마다 소속 표를 찾는다. WHERE 에 두면 해시 조인으로 풀리지만 FILTER 안에서는 고객 수만큼 찾는다
  *   (1002 실측 · 고객 24만: WHERE 0.56초 · FILTER 3.6초). 여기서는 소속 표를 한 번 훑어 고객별 (동의 있음 t · 거부 있음 f)을 만들어 조인한다.
- * 판정은 consentSql 과 같다(사용자 = 내 코드 중 하나라도 동의 / 관리자 = 한 몰 이상 동의 + 거부 없음 · 행 없음 = 어느 쪽도 아님).
+ * 판정은 consentSql 과 같다(사용자 = 내 코드 중 하나라도 동의 / 관리자 = 거부 없음 + 한 몰 이상 동의 · 몰 소속 행이 없으면 고객 행 값).
  * 조인이 내놓는 열은 customer_id · t · f 뿐이라 별칭 없는 쿼리의 열 이름과 겹치지 않는다.
  */
 export function consentJoinSql(scope: ConsentScope, alias: string, idRef?: string): ConsentJoinSql {
@@ -243,9 +251,11 @@ export function consentJoinSql(scope: ConsentScope, alias: string, idRef?: strin
   const join =
     ` LEFT JOIN (SELECT ${MALL_STORE_ALIAS}.customer_id, bool_or(${MALL_STORE_ALIAS}.sms_opt_in) AS t, bool_or(NOT ${MALL_STORE_ALIAS}.sms_opt_in) AS f` +
     ` FROM customer_stores ${MALL_STORE_ALIAS} WHERE ${MALL_STORE_ALIAS}.company_id = ${company} AND ${MALL_STORE_ALIAS}.store_code = ANY(${codes})` +
-    ` AND ${MALL_STORE_ALIAS}.sms_opt_in IS NOT NULL GROUP BY ${MALL_STORE_ALIAS}.customer_id) mcj ON mcj.customer_id = ${customerId}`;
-  const isTrue = scope.admin ? '(mcj.t IS TRUE AND mcj.f IS NOT TRUE)' : 'mcj.t IS TRUE';
-  const isFalse = scope.admin ? 'mcj.f IS TRUE' : '(mcj.t IS NOT TRUE AND mcj.f IS TRUE)';
+    ` GROUP BY ${MALL_STORE_ALIAS}.customer_id) mcj ON mcj.customer_id = ${customerId}`;
+  // mcj.customer_id IS NULL = 그 코드들의 소속 행이 하나도 없다(모름 행은 조인에 남는다 — bool_or 는 NULL 을 건너뛴다)
+  const rowCol = `${customerId.split('.')[0]}.sms_opt_in`;
+  const isTrue = scope.admin ? `(mcj.f IS NOT TRUE AND (mcj.t IS TRUE OR (${rowCol} = true AND mcj.customer_id IS NULL)))` : 'mcj.t IS TRUE';
+  const isFalse = scope.admin ? `(mcj.f IS TRUE OR (${rowCol} = false AND mcj.customer_id IS NULL))` : '(mcj.t IS NOT TRUE AND mcj.f IS TRUE)';
   return { mode: 'mall', join, isTrue, isFalse, value: `(CASE WHEN ${isTrue} THEN true WHEN ${isFalse} THEN false ELSE NULL END)` };
 }
 
@@ -262,6 +272,17 @@ export function consentCountTrue(c: ConsentSql, viewerUserId: string | null | un
   if (c.mode !== 'mall' || !viewerUserId || !UUID_RE.test(viewerUserId)) return c.isTrue;
   if (!/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/.test(phoneRef)) throw new Error(`consentCountTrue: 전화 열은 표(별칭)로 한정해야 합니다: ${phoneRef}`);
   return `(${c.isTrue} AND NOT EXISTS (SELECT 1 FROM unsubscribes mu WHERE mu.user_id = ${escapeLiteral(viewerUserId)} AND mu.phone = ${phoneRef}))`;
+}
+
+/**
+ * 「수신동의인가」에 보는 사람의 수신거부 제외를 합친 조각 — 수신거부 표를 따로 보지 않던 자리(타겟 인원 · DM 대상 조회)용.
+ * 그 자리들은 고객 행 값이 수신거부를 이미 반영하고 있어 따로 보지 않았다. 소속 행은 반영하지 않는다
+ * → 그대로 두면 몰 동의 회사에서 미리 센 인원에 수신거부자가 들어간다(실제 발송은 스테이징 정제가 뺀다 = 센 수와 나간 수가 갈린다).
+ * 몰 동의 회사가 아니면 받은 조각 그대로(같은 객체)다.
+ */
+export function consentWithUnsub<T extends ConsentSql>(c: T, viewerUserId: string | null | undefined, phoneRef: string): T {
+  if (c.mode !== 'mall') return c;
+  return { ...c, isTrue: consentCountTrue(c, viewerUserId, phoneRef) };
 }
 
 /** 라우트용 한 줄 — 요청 사용자(req.user) 기준 조각. consentSql(resolveViewerConsentScope(…)) 와 같다. */
@@ -326,11 +347,22 @@ export async function readOwnerConsentForCustomer(companyId: string, ownerUserId
 /**
  * 범위 없는 발송(관리자 · 분류코드 범위가 없는 사용자)의 자격 조각. 몰 동의 회사가 아니면 null — 호출부는 옛 조각을 그대로 쓴다.
  * 분류코드 사용자 발송은 buildSendConsent(범위 서브쿼리 안에 동의 조건)가 맡는다 — 두 갈래의 판정은 consentSql 과 같다
- * (사용자 = 내 코드 중 하나라도 동의 · 관리자 = 한 몰 이상 동의 + 어느 몰에서도 거부 없음).
+ * (사용자 = 내 코드 중 하나라도 동의 · 관리자 = 어느 몰에서도 거부 없음 + 한 몰 이상 동의 · 몰 소속 행이 없는 고객은 고객 행 값).
  */
-export async function resolveAdminSendConsent(companyId: string, alias = 'c'): Promise<string | null> {
+export async function resolveAdminSendConsent(companyId: string, alias = 'c'): Promise<{ isTrue: string; mallCodes: string[] } | null> {
   const scope = await resolveConsentScope(companyId, null);
-  return scope.mode === 'mall' ? consentSql(scope, alias).isTrue : null;
+  return scope.mode === 'mall' ? { isTrue: consentSql(scope, alias).isTrue, mallCodes: scope.codes } : null;
+}
+
+/**
+ * 타겟 필터의 브랜드 조건에 넘길 옵션(customer-filter buildFilterQueryCompat 3번째 인자).
+ *  - 몰 동의 회사가 아님 = 빈 객체(종전 글자)
+ *  - 분류코드 범위 = 그 브랜드 소속 행의 동의를 요구한다(기존 발송과 같은 엄격함)
+ *  - 범위 없음(관리자) = 고른 브랜드가 몰 동의 코드일 때만 요구한다(업로드 브랜드는 소속 행에 동의 값이 없다 → 소속만 본다)
+ */
+export function brandConsentOption(scope: ConsentScope): { storeConsent?: boolean; storeConsentMallCodes?: string[] } {
+  if (scope.mode !== 'mall') return {};
+  return scope.admin ? { storeConsentMallCodes: scope.codes } : { storeConsent: true };
 }
 
 let warnedMissingColumn = false;

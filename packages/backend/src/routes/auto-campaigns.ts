@@ -16,7 +16,7 @@ import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { getStoreScope, storeMembershipClause } from '../utils/store-scope';
-import { resolveConsentScope, consentSql } from '../utils/mall-consent';
+import { resolveConsentScope, consentSql, brandConsentOption } from '../utils/mall-consent';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { buildUnsubscribeFilter, CAMPAIGN_OPT080_SELECT_EXPR, buildCampaignOpt080LeftJoin } from '../utils/unsubscribe-helper';
 import { fetchTargetSampleCustomer } from '../utils/target-sample';
@@ -441,7 +441,7 @@ async function _deprecatedCreateAutoCampaign(req: Request, res: Response) {
         // ★ 2026-10-02 수신동의 읽기 = CT(자동발송의 브랜드 소속 행 · 없으면 관리자 기준)
         const consentScope = await resolveConsentScope(companyId, finalStoreCode ? [finalStoreCode] : null);
         const consent = consentSql(consentScope, 'c');
-        const filterResult = buildFilterQueryCompat(target_filter || {}, companyId, { storeConsent: consentScope.mode === 'mall' });
+        const filterResult = buildFilterQueryCompat(target_filter || {}, companyId, brandConsentOption(consentScope));
         let storeFilter = '';
         const storeParams: any[] = [];
         if (finalStoreCode) {
@@ -930,7 +930,7 @@ router.post('/:id/preview', async (req: Request, res: Response) => {
     const consentScope = await resolveConsentScope(companyId, campaign.store_code ? [campaign.store_code] : null);
     const consent = consentSql(consentScope, 'c');
     // customer-filter로 타겟 수 카운트
-    const filterResult = buildFilterQueryCompat(campaign.target_filter, companyId, { storeConsent: consentScope.mode === 'mall' });
+    const filterResult = buildFilterQueryCompat(campaign.target_filter, companyId, brandConsentOption(consentScope));
 
     // store_code 필터
     let storeFilter = '';

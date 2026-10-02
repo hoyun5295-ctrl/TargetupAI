@@ -17,18 +17,19 @@ vi.mock('../../config/database', () => ({ query: vi.fn() }));
 
 import { query } from '../../config/database';
 import {
-  consentSql, consentJoinSql, viewerConsentJoin, consentCountTrue, LEGACY_CONSENT, resolveConsentScope, resolveViewerConsentScope, resolveOwnerConsentScope,
-  resolveAdminSendConsent, ownerConsentTrue, ownerConsentSql, journeyOwnerConsentTrue, readOwnerConsentForCustomer, viewerConsentSql,
+  consentSql, consentJoinSql, viewerConsentJoin, consentCountTrue, consentWithUnsub, LEGACY_CONSENT, resolveConsentScope, resolveViewerConsentScope, resolveOwnerConsentScope,
+  resolveAdminSendConsent, brandConsentOption, ownerConsentTrue, ownerConsentSql, journeyOwnerConsentTrue, readOwnerConsentForCustomer, viewerConsentSql,
   type ConsentScope,
 } from '../mall-consent';
 import { buildJourneySafetyFilter } from '../journey-safety-filter';
 import { buildChannelEligibilityWhere } from '../channel-eligibility';
-import { buildCustomerFilter, buildDynamicFilterCompat } from '../customer-filter';
+import { buildCustomerFilter, buildDynamicFilterCompat, buildFilterQueryCompat } from '../customer-filter';
 import { buildAudienceWhere } from '../operator-recipients';
 import { buildDynamicSelectExpr } from '../enabled-fields';
 import { fetchTargetSampleCustomer } from '../target-sample';
 import { countTargetByFilter } from '../target-count';
 import { previewMatching } from '../ai-segment-generator';
+import { resolveOperatorAudienceGates } from '../operator-audience';
 
 const ES = '19c59d0c-77d3-4e52-9ceb-9a47a3c37e49';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -76,11 +77,16 @@ describe('consentSql — 조각(순수)', () => {
     // 고객 행 열을 읽지 않는다(퇴역) — 소속 표 별칭으로만 읽는다
     expect(c.isTrue).not.toMatch(/\bc\.sms_opt_in\b/);
   });
-  it('관리자(범위 없음) = 한 몰 이상 동의 + 어느 몰에서도 거부 없음 · 거부 = 어느 몰에서든 거부', () => {
+  it('관리자(범위 없음) = 어느 몰에서도 거부 없음 + 한 몰 이상 동의 · 몰 소속 행이 없는 고객(업로드)은 고객 행 값', () => {
     const c = consentSql(adminScope, 'c');
     const codes = "'렌즈고고','일본이모'";
-    expect(c.isTrue).toBe(`(${row('c.id', codes, 'true')} AND NOT ${row('c.id', codes, 'false')})`);
-    expect(c.isFalse).toBe(row('c.id', codes, 'false'));
+    const any = `EXISTS (SELECT 1 FROM customer_stores mcs WHERE mcs.company_id = '${ES}' AND mcs.customer_id = c.id AND mcs.store_code = ANY(ARRAY[${codes}]::text[]))`;
+    expect(c.isTrue).toBe(`(NOT ${row('c.id', codes, 'false')} AND (${row('c.id', codes, 'true')} OR (c.sms_opt_in = true AND NOT ${any})))`);
+    expect(c.isFalse).toBe(`(${row('c.id', codes, 'false')} OR (c.sms_opt_in = false AND NOT ${any}))`);
+    // 「거부 없음」이 맨 앞(WHERE 에서 안티 조인으로 풀리는 자리)
+    expect(c.isTrue.startsWith('(NOT EXISTS (SELECT 1 FROM customer_stores mcs')).toBe(true);
+    // 별칭 없는 쿼리: 고객 행 열도 표 이름으로 한정한다
+    expect(consentSql(adminScope, '', 'customers_unified.id').isTrue).toContain('(customers_unified.sms_opt_in = true AND NOT EXISTS');
   });
   it('별칭 없는 쿼리는 고객 id 열을 표 이름으로 받는다 · 한정하지 않은 id 는 거절한다(소속 표 안에서 다른 열로 읽힌다)', () => {
     expect(consentSql(userScope, '', 'customers_unified.id').isTrue).toBe(row('customers_unified.id', "'렌즈고고'", 'true'));
@@ -108,13 +114,17 @@ describe('consentJoinSql — 집계용(조인 형태) 조각', () => {
     const u = consentJoinSql(userScope, 'c');
     expect(u.join).toBe(
       " LEFT JOIN (SELECT mcs.customer_id, bool_or(mcs.sms_opt_in) AS t, bool_or(NOT mcs.sms_opt_in) AS f FROM customer_stores mcs"
-      + ` WHERE mcs.company_id = '${ES}' AND mcs.store_code = ANY(ARRAY['렌즈고고']::text[]) AND mcs.sms_opt_in IS NOT NULL GROUP BY mcs.customer_id) mcj ON mcj.customer_id = c.id`,
+      + ` WHERE mcs.company_id = '${ES}' AND mcs.store_code = ANY(ARRAY['렌즈고고']::text[]) GROUP BY mcs.customer_id) mcj ON mcj.customer_id = c.id`,
     );
     expect([u.isTrue, u.isFalse]).toEqual(['mcj.t IS TRUE', '(mcj.t IS NOT TRUE AND mcj.f IS TRUE)']);
     const a = consentJoinSql(adminScope, '', 'customers.id');
     expect(a.join).toContain('mcj ON mcj.customer_id = customers.id');
-    expect([a.isTrue, a.isFalse]).toEqual(['(mcj.t IS TRUE AND mcj.f IS NOT TRUE)', 'mcj.f IS TRUE']);
-    expect(a.value).toBe('(CASE WHEN (mcj.t IS TRUE AND mcj.f IS NOT TRUE) THEN true WHEN mcj.f IS TRUE THEN false ELSE NULL END)');
+    // 관리자: 거부 없음 + (한 몰 이상 동의 또는 몰 소속 행이 없고 고객 행 동의) — 행 단위 조각과 같은 판정
+    expect([a.isTrue, a.isFalse]).toEqual([
+      '(mcj.f IS NOT TRUE AND (mcj.t IS TRUE OR (customers.sms_opt_in = true AND mcj.customer_id IS NULL)))',
+      '(mcj.f IS TRUE OR (customers.sms_opt_in = false AND mcj.customer_id IS NULL))',
+    ]);
+    expect(a.value).toBe(`(CASE WHEN ${a.isTrue} THEN true WHEN ${a.isFalse} THEN false ELSE NULL END)`);
     // 조인이 내놓는 열은 customer_id · t · f 뿐(별칭 없는 쿼리의 열과 겹치지 않는다) · 파라미터를 쓰지 않는다
     expect(a.join).not.toMatch(/\$\d/);
     expect(() => consentJoinSql(userScope, '', 'id')).toThrow(/한정/);
@@ -155,6 +165,20 @@ describe('consentCountTrue — 화면의 「수신동의 수」', () => {
     const c = consentSql(userScope, '', 'customers.id');
     expect(consentCountTrue(c, USER, 'customers.phone'))
       .toBe(`(${c.isTrue} AND NOT EXISTS (SELECT 1 FROM unsubscribes mu WHERE mu.user_id = '${USER}' AND mu.phone = customers.phone))`);
+  });
+  it('consentWithUnsub: 옛 판정이면 받은 조각 그대로(같은 객체) · 몰 동의면 isTrue 에만 수신거부 제외가 붙는다', () => {
+    const leg = consentSql(LEGACY_CONSENT, 'c');
+    expect(consentWithUnsub(leg, USER, 'c.phone')).toBe(leg);
+    const c = consentSql(userScope, 'c');
+    const w = consentWithUnsub(c, USER, 'c.phone');
+    expect(w.isTrue).toBe(`(${c.isTrue} AND NOT EXISTS (SELECT 1 FROM unsubscribes mu WHERE mu.user_id = '${USER}' AND mu.phone = c.phone))`);
+    expect([w.isFalse, w.value, w.mode]).toEqual([c.isFalse, c.value, 'mall']);
+  });
+  it('타겟 인원 · DM 대상 조회는 수신거부 제외를 합친 조각을 쓴다(소스 계약)', () => {
+    const read = (f: string) => readFileSync(join(__dirname, '../..', f), 'utf8');
+    const line = "consentWithUnsub(await ownerConsentSql(companyId, req.user?.userId, 'c'), req.user?.userId, 'c.phone');";
+    expect(read('routes/targets.ts').split(line)).toHaveLength(4);
+    expect(read('routes/dm.ts').split(line)).toHaveLength(2);
   });
   it('보는 사람을 모르거나 id 모양이 아니면 빼지 않는다 · 전화 열은 표로 한정해야 한다', () => {
     const c = consentSql(userScope, '', 'customers.id');
@@ -222,7 +246,7 @@ describe('범위 판정 — 누구 기준으로 읽는가', () => {
     process.env[ENV] = ES;
     db({ userCodes: ['렌즈고고'], userType: 'user', journeyOwner: USER, consentOk: true });
     expect(await journeyOwnerConsentTrue(ES, 'j1')).toBe(consentSql(userScope, 'c').isTrue);
-    expect(await resolveAdminSendConsent(ES)).toBe(consentSql(adminScope, 'c').isTrue);
+    expect(await resolveAdminSendConsent(ES)).toEqual({ isTrue: consentSql(adminScope, 'c').isTrue, mallCodes: MALLS });
     expect(await readOwnerConsentForCustomer(ES, USER, 'c1')).toBe(true);
     db({ userCodes: ['렌즈고고'], userType: 'user', journeyOwner: USER, consentOk: false });
     expect(await readOwnerConsentForCustomer(ES, USER, 'c1')).toBe(false);
@@ -279,6 +303,27 @@ describe('CT 들이 조각을 받는다 — 안 주면 옛 글자 그대로', ()
     const cu = consentSql(userScope, '', 'customers_unified.id');
     expect(buildDynamicFilterCompat({ sms_opt_in: { operator: 'eq', value: 'true' } }, 3, { consent: cu })).toEqual({ where: ` AND ${cu.isTrue}`, params: [], nextIndex: 3 });
   });
+  it('타겟의 브랜드 조건: 옛 판정 = 종전 글자 · 분류코드 범위 = 그 소속 행 동의 · 관리자 = 고른 브랜드가 몰 동의 코드일 때만 요구', () => {
+    expect(brandConsentOption(LEGACY_CONSENT)).toEqual({});
+    expect(brandConsentOption(userScope)).toEqual({ storeConsent: true });
+    expect(brandConsentOption(adminScope)).toEqual({ storeConsentMallCodes: MALLS });
+    const f = { store_code: '렌즈고고' };
+    const old = buildFilterQueryCompat(f, ES);
+    expect(buildFilterQueryCompat(f, ES, brandConsentOption(LEGACY_CONSENT))).toEqual(old);
+    expect(old.where).toBe(' AND c.id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = $2)');
+    const strict = buildFilterQueryCompat(f, ES, brandConsentOption(userScope));
+    expect(strict.where).toBe(' AND c.id IN (SELECT mcs.customer_id FROM customer_stores mcs WHERE mcs.company_id = $1 AND mcs.store_code = $2 AND mcs.sms_opt_in = true)');
+    const admin = buildFilterQueryCompat(f, ES, brandConsentOption(adminScope));
+    expect(admin.where).toBe(
+      " AND c.id IN (SELECT mcs.customer_id FROM customer_stores mcs WHERE mcs.company_id = $1 AND mcs.store_code = $2"
+      + " AND (mcs.sms_opt_in = true OR NOT (mcs.store_code = ANY(ARRAY['렌즈고고','일본이모']::text[]))))",
+    );
+    // 파라미터·자리표 번호는 세 경우 모두 같다
+    expect([strict.params, admin.params, strict.nextIndex, admin.nextIndex]).toEqual([old.params, old.params, old.nextIndex, old.nextIndex]);
+    // 여러 브랜드를 고른 경우(IN)도 같은 규칙
+    const many = buildFilterQueryCompat({ store_code: { operator: 'in', value: ['렌즈고고', '업로드브랜드'] } }, ES, brandConsentOption(adminScope));
+    expect(many.where).toContain('mcs.store_code = ANY($2::text[]) AND (mcs.sms_opt_in = true OR NOT (mcs.store_code = ANY(ARRAY[');
+  });
   it('엑셀 값(화면 ≡ 엑셀): 값 식을 안 주면 고객 행 열 · 주면 그 식', () => {
     const fields: any[] = [{ field_key: 'sms_opt_in', column_name: 'sms_opt_in', data_type: 'boolean', is_custom: false }];
     const old = buildDynamicSelectExpr(fields, { unsubParamIndex: 4, tableAlias: 'customers_unified' }).selectExpr;
@@ -314,6 +359,20 @@ describe('실제 함수가 내보내는 SQL — 옛 판정은 옛 글자 · 몰 
     expect(pOld).toEqual([ES, '렌즈고고', '렌즈고고', USER]);
   });
 
+  it('자동마케팅 게이트 단일 문: 켜지 않은 회사는 키를 싣지 않는다(게이트 객체 종전 그대로) · 켠 회사는 주인 기준 조각을 싣는다', async () => {
+    db({ userCodes: ['렌즈고고'], userType: 'user' });
+    const off = await resolveOperatorAudienceGates(ES, null, USER);
+    expect('consentTrue' in off).toBe(false);
+    process.env[ENV] = ES;
+    const on = await resolveOperatorAudienceGates(ES, null, USER);
+    expect(on.consentTrue).toBe(consentSql(userScope, 'c').isTrue);
+    // 주인을 안 넘기면 범위 없음(관리자 기준) — 옛 판정으로 열리지 않는다
+    const noOwner = await resolveOperatorAudienceGates(ES, null);
+    expect(noOwner.consentTrue).toBe(consentSql(adminScope, 'c').isTrue);
+    // 그 조각이 대상 WHERE 에 들어간다
+    expect(buildAudienceWhere([ES], '', '', on)).toContain(`AND ${on.consentTrue} `);
+  });
+
   it('타겟 인원(countTargetByFilter): 조각을 안 주면 옛 글자 · 주면 채널 자격과 조건의 수신동의 필드가 같은 기준', async () => {
     db();
     q.mockResolvedValue({ rows: [{ cnt: 0 }] });
@@ -344,8 +403,10 @@ describe('실제 함수가 내보내는 SQL — 옛 판정은 옛 글자 · 몰 
     const mall = sqls();
     expect(mall.length).toBeGreaterThan(0);
     for (const x of mall) {
-      expect(x).toContain(consentSql(adminScope, 'c').isTrue);
-      expect(x).not.toContain(OLD);
+      expect(x).toContain(`AND ${consentSql(adminScope, 'c').isTrue}`);
+      // 홀로 선 옛 조건(`AND c.sms_opt_in = true` 뒤에 줄바꿈)은 없다 — 고객 행 값은 「몰 소속 행이 없는 고객」 갈래 안에서만 읽는다
+      expect(x).not.toMatch(/AND c\.sms_opt_in = true\s*\n/);
+      expect(x).toContain('(c.sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM customer_stores mcs');
     }
   });
 });
