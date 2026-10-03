@@ -1008,7 +1008,7 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | created_at | timestamptz |
 | expires_at | timestamptz |
 | short_code | varchar(12) UNIQUE(부분 인덱스) — ★ 2026-07-06 추가 (ALTER) — hlj.kr 단축링크 코드(base62 8자). NULL=단축 미발급(긴 링크) |
-| campaign_id | uuid NULL — ★ 2026-10-03 **DDL 대기(배포 뒤 Harold 실행)** · 이 토큰을 만든 발송 캠페인(예약·취소·실제 발송 시각 판정 · B-1003-6). 코드는 information_schema 로 존재를 확인하고 없으면 종전 동작(`dm-recipient-token.ts hasDmTokenCampaignColumn`) · FK 없음 |
+| campaign_id | uuid NULL — ★ 2026-10-03 **DDL 실행완료(배포 뒤 Harold 실행 · information_schema 실측 = uuid · is_nullable YES)** · 이 토큰을 만든 발송 캠페인(예약·취소·실제 발송 시각 판정 · B-1003-6). 코드는 information_schema 로 존재를 확인하고 없으면 종전 동작(`dm-recipient-token.ts hasDmTokenCampaignColumn`) · FK 없음 |
 
 ### dm_custom_short_links (고객사 자체 URL 단축 — hlj.kr) ★ 2026-07-10 신규 (CREATE Harold 실행)
 > 박성용 신기능(Harold 100크레딧 확정). 고객사 외부 MDM URL→hlj.kr/<code>. /s/:code 3순위 조회(토큰→발행 페이지→커스텀) — 발급 시 3축 코드 충돌 확인. 검증=dm-custom-short-link-core(오픈 리다이렉터 차단).
