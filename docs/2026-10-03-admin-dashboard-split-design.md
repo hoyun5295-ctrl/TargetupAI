@@ -21,7 +21,7 @@
 |---|---|---|---|
 | A | 상단 메뉴 4묶음 → 7묶음(항목 삭제 0 · 자리만 이동) | **배포 완료** | Harold 1003 목업 동의 |
 | B | 보안 · 인증 6메뉴 = 대표 · 지원팀장(ceo · suran)만 · 감사 로그는 대표만 · 직원 계정은 지원팀장 조회만 | **배포 완료 · 방식 = 등급표 교체**(§3-0) · Codex 적대 2R approve | Harold 1003 |
-| C | AI 영업 = ceo · suran | **배포 완료**(허용 목록 기본값) · 운영 `.env` 키 유무 확인 남음(§3-4) | Harold 1003 |
+| C | AI 영업 = ceo · suran | **배포 완료** · 운영 `.env` 값 = ceo,suran 확인(1004) | Harold 1003 |
 | D | 신규마케팅진단 뱃지 = 새 리드가 생기면 화면을 열어 둔 채로도 뜬다 | **배포 완료** | Harold 1003 |
 | E | AdminDashboard 를 기능별 파일로 나누고, 본체에는 메뉴와 연결 자리만 남긴다(동작 변경 0) | **10/6 제출 뒤 착수** | Harold 1003 |
 | F | 정산 탭 분리는 E 에서 뺀다(10/26 뒤 · Codex 적대 검토와 함께) | **추천 · Harold 확인 대기** | 돈 경로 · 상태 95개 · 계약 시험 4개 |
@@ -148,7 +148,7 @@
 | spamBlock | 금칙어 차단 | RWD | RWD | **없음** | 새 줄 · 그전에는 등급을 안 봤다 |
 | auditLogs | 감사 로그 | R | 없음 | 없음 | 그대로(Harold 「오직 나만」) |
 | opsRecords | 운영 기록 대장 | RW | RW | **없음** | 지원팀원 조회 → 없음 |
-| salesOutreach | AI 영업 | RWD | RWD | 없음 | 등급표 그대로 · ENV `SALES_OUTREACH_ALLOWED_USERS` 코드 기본값 ceo → **ceo,suran** |
+| salesOutreach | AI 영업 | RWD | RWD | 없음 | 등급표 그대로 · ENV `SALES_OUTREACH_ALLOWED_USERS` 코드 기본값 ceo → **ceo,suran**(운영 `.env` 는 원래 ceo,suran · suran 은 이전부터 사용 중 · 운영 영향 0 · 1004 확인) |
 
 ### 3-1. 막는 곳 · 보이는 곳
 
@@ -175,7 +175,7 @@
 
 ### 3-4. 배포 전 · 뒤 확인(Harold)
 
-1. 배포 전: 운영 `.env` 에 `SALES_OUTREACH_ALLOWED_USERS` 줄이 있는지(있으면 코드 기본값이 안 쓰여 suran 이 안 열린다 → 그 줄 값을 ceo,suran 으로).
+1. 배포 전: 운영 `.env` 에 `SALES_OUTREACH_ALLOWED_USERS` 줄이 있는지(있으면 코드 기본값이 안 쓰여 suran 이 안 열린다 → 그 줄 값을 ceo,suran 으로). ★1004 확인 = 줄 있음 · 값이 이미 `ceo,suran` · DB 등급 suran `lead` · 지원팀원 2명 `support` → 의도대로(대리 로그인은 OTP 라 불가 · 화면 실물은 월요일 서수란 확인).
 2. 배포 전(선택): 최근 90일 로그인 차단 해제 · 국외 예외 · 금칙어 규칙 변경 처리자 분포(액션 이름 확정 뒤 SQL).
 3. 배포 뒤: ceo · suran · 지원팀원 1명으로 각각 로그인해 「보안 · 인증」 묶음 노출 · 직원 계정 쓰기 버튼 · 금칙어 화면 열기(지원팀원 = 메뉴 없음 · 주소로 열어도 403 안내).
 
