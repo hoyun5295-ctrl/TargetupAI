@@ -58,6 +58,8 @@ const EVENT_LABEL: Record<string, string> = {
   dispatch_no_recipient: '보낼 번호가 남지 않았습니다',
   dispatch_zero_after_filter: '수신거부를 빼고 나니 보낼 번호가 없습니다',
   dispatch_var_overflow: '문안에 넣을 항목이 너무 많습니다',
+  // ★2026-10-03 금칙어 차단 규칙에 걸려 예약하지 않았다(문안 확인 상태로 돌아간다)
+  dispatch_spam_blocked: '등록된 차단정보에 걸려 예약하지 않았습니다. 문안을 고쳐 주세요',
   // ★2026-09-12 고객별 회신번호 중 등록이 풀린 번호가 있어 보내지 않았다
   dispatch_callback_unregistered: '명단의 회신번호 중 등록되지 않은 번호가 있습니다',
   // ★2026-09-13 예약을 만드는 사이 발송 시각이 지났다. 이어서 만료 기록과 미발송 안내가 남는다

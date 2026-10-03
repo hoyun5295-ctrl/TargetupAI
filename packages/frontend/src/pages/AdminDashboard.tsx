@@ -377,8 +377,14 @@ export default function AdminDashboard() {
       });
       const data = await res.json().catch(() => ({} as any));
       if (!res.ok) { showAlert('오류', data?.error || '상태 변경에 실패했습니다.', 'error'); return; }
+      const wasDisable = !adminActiveEdit.isActive;
       setAdminActiveEdit(null);
       await loadAdminAccounts();
+      // ★1003 중지는 접속 중인 세션까지 끊는다(서버가 끊은 건수를 돌려준다)
+      if (wasDisable) {
+        const ended = Number(data?.sessionsEnded || 0);
+        showAlert('완료', ended > 0 ? `사용을 중지했습니다. 접속 중이던 세션 ${ended}건을 끊었습니다.` : '사용을 중지했습니다. 접속 중인 세션은 없었습니다.', 'success');
+      }
     } finally { setAdminRoleBusy(false); }
   };
 
@@ -433,8 +439,32 @@ export default function AdminDashboard() {
       setSpamElements([{ type: 'keyword', value: '' }, { type: 'keyword', value: '' }]);
       setSpamSim(null);
       await loadSpamBlock();
-      showAlert('성공', '규칙이 등록되었습니다. 탐지 이력에서 무엇이 걸리는지 확인해주세요.', 'success');
+      showAlert('성공', '규칙이 탐지로 등록되었습니다. 결과 로그에서 무엇이 걸리는지 확인한 뒤 목록에서 차단으로 전환하세요.', 'success');
     } finally { setSpamBusy(false); }
+  };
+
+  // ★ 2026-10-03 규칙별 탐지 · 차단 전환(전송자격인증 5.2 차단 승격). 서버가 전후 값을 감사 기록에 남긴다.
+  const [spamModeBusyId, setSpamModeBusyId] = useState<string | null>(null);
+  const handleSpamModeChange = (r: any) => {
+    const next = r.mode === 'block' ? 'detect' : 'block';
+    const message = next === 'block'
+      ? `「${r.name}」을 차단으로 전환합니다.\n\n이 조합에 걸리는 문자 발송은 차감 전에 중지되고 발송자에게 안내가 표시됩니다. 최근 발송 문안으로 오탐 확인을 마친 규칙만 전환하세요.`
+      : `「${r.name}」을 탐지로 전환합니다.\n\n이 조합에 걸려도 발송은 그대로 나가고 결과 로그에만 남습니다.`;
+    showConfirm(next === 'block' ? '차단으로 전환' : '탐지로 전환', message, async () => {
+      setSpamModeBusyId(r.id);
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`/api/admin/spam-block/rules/${r.id}/mode`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ mode: next }),
+        });
+        const data = await res.json().catch(() => ({} as any));
+        if (!res.ok) { showAlert('오류', data?.error || '전환에 실패했습니다.', 'error'); return; }
+        await loadSpamBlock();
+        showAlert('성공', next === 'block' ? '차단으로 전환했습니다. 지금부터 이 조합의 문자 발송이 중지됩니다.' : '탐지로 전환했습니다.', 'success');
+      } finally { setSpamModeBusyId(null); }
+    });
   };
 
   // ★ 2026-08-18 발신번호 회선 정책(전송자격인증 2.1) — 상한은 신규 등록에만 걸린다(기존 보유분 불변)
@@ -444,6 +474,8 @@ export default function AdminDashboard() {
     landlineLineLimit: number | null;
     effective: { mobile: number | null; landline: number | null; source: string };
     held: { mobile: number; landline: number };
+    // ★1003 D-8 법인 계정당 무선 상한(스위치 켜진 법인만 값이 있다)
+    perAccount?: { activeAccounts: number; perAccount: number } | null;
   } | null>(null);
   const [linePolicySaving, setLinePolicySaving] = useState(false);
 
@@ -6162,15 +6194,18 @@ const handleApproveRequest = async (id: string) => {
                   <div className="text-[11px] font-semibold tracking-wide text-gray-400">발송 요청 필터링 정책</div>
                   <h3 className="mt-1 text-lg font-bold">금칙어 · 악성 URL 자동 차단</h3>
                   <p className="mt-1.5 text-xs leading-relaxed text-gray-300">
-                    모든 발송 요청은 큐에 적재되기 전에 차단정보와 대조합니다.
-                    등록된 조합에 걸린 문안은 <span className="font-semibold text-white">발송이 중지</span>되고
+                    모든 문자(SMS · LMS · MMS) 발송 요청은 요금 차감과 큐 적재 전에 차단정보와 대조합니다.
+                    <span className="font-semibold text-white"> 차단</span>으로 둔 조합에 걸린 문안은 <span className="font-semibold text-white">발송이 중지</span>되고
                     발송자에게 안내가 표시되며, 그 사실이 차단 결과 로그에 남습니다.
+                    <span className="font-semibold text-white"> 탐지</span>로 둔 조합은 발송을 막지 않고 기록만 합니다.
                   </p>
                 </div>
                 <div className="shrink-0 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-center">
-                  <div className="text-[10px] text-gray-400">등록된 차단정보</div>
-                  <div className="text-base font-bold text-white tabular-nums">{spamRules.length}<span className="ml-0.5 text-xs font-semibold text-gray-400">건</span></div>
-                  <div className="mt-0.5 text-[10px] text-gray-500">전 발송 경로 적용</div>
+                  <div className="text-[10px] text-gray-400">발송 차단 중인 차단정보</div>
+                  <div className="text-base font-bold text-white tabular-nums">
+                    {spamRules.filter((r) => r.is_active && r.mode === 'block').length}<span className="ml-0.5 text-xs font-semibold text-gray-400">건</span>
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-gray-500">탐지 {spamRules.filter((r) => r.is_active && r.mode !== 'block').length}건 · 문자 발송 전 경로</div>
                 </div>
               </div>
               {spamBlockNotice && (
@@ -6189,8 +6224,8 @@ const handleApproveRequest = async (id: string) => {
                 단일 키워드는 정상 문자를 막기 때문에 등록되지 않습니다.
               </p>
               <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-                등록 전에 <span className="font-medium text-gray-700">최근 발송 문안으로 오탐을 먼저 확인</span>하세요.
-                정상 문안이 걸리는 조합을 등록하면 그 고객사의 발송이 실제로 멈춥니다.
+                새 규칙은 <span className="font-medium text-gray-700">탐지</span>로 시작합니다. <span className="font-medium text-gray-700">최근 발송 문안으로 오탐을 먼저 확인</span>한 뒤 목록에서 차단으로 전환하세요.
+                정상 문안이 걸리는 조합을 차단으로 두면 그 고객사의 발송이 실제로 멈춥니다.
               </p>
 
               <div className="mt-4 space-y-3">
@@ -6287,9 +6322,17 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-2 text-xs text-gray-500">{r.source}</td>
                         <td className="px-4 py-2 text-right text-xs text-gray-700">{r.hit_count}</td>
                         <td className="px-4 py-2">
-                          <span className={`px-2 py-0.5 text-[11px] rounded ${r.is_active ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-500'}`}>
-                            {r.is_active ? '발송 차단' : '중지됨'}
-                          </span>
+                          <div className="flex items-center gap-2 whitespace-nowrap">
+                            <span className={`px-2 py-0.5 text-[11px] rounded ${!r.is_active ? 'bg-gray-100 text-gray-500' : r.mode === 'block' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {!r.is_active ? '사용 안 함' : r.mode === 'block' ? '발송 차단' : '탐지만'}
+                            </span>
+                            {r.is_active && (
+                              <button type="button" onClick={() => handleSpamModeChange(r)} disabled={spamModeBusyId === r.id}
+                                className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border disabled:opacity-50 ${r.mode === 'block' ? 'border-gray-200 text-gray-600 hover:bg-gray-50' : 'border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100'}`}>
+                                {spamModeBusyId === r.id ? '전환 중…' : r.mode === 'block' ? '탐지로 전환' : '차단으로 전환'}
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -6327,8 +6370,8 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-2 text-xs text-gray-700">{h.company_name || '-'}</td>
                         <td className="px-4 py-2 text-xs text-gray-500">{h.send_source || '-'}</td>
                         <td className="px-4 py-2">
-                          <span className={`px-2 py-0.5 text-[11px] rounded ${h.action_taken === 'block' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {h.action_taken === 'block' ? '발송 차단' : '탐지'}
+                          <span className={`px-2 py-0.5 text-[11px] rounded whitespace-nowrap ${h.action_taken === 'block' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {h.action_taken === 'block' ? '발송 차단' : h.mode === 'block' ? '탐지 · 차단 규칙' : '탐지'}
                           </span>
                         </td>
                         <td className="px-4 py-2 text-right text-xs text-gray-700">{h.affected_rows}</td>
@@ -9114,6 +9157,9 @@ const handleApproveRequest = async (id: string) => {
                           </span>
                           <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
                             적용 상한 · 무선 <span className="font-semibold text-gray-900">{linePolicy.effective.mobile ?? '제한 없음'}</span>
+                            {linePolicy.perAccount && (
+                              <span className="text-gray-500"> (활성 계정 {linePolicy.perAccount.activeAccounts}개 × {linePolicy.perAccount.perAccount})</span>
+                            )}
                             {' / '}유선 <span className="font-semibold text-gray-900">{linePolicy.effective.landline ?? '제한 없음'}</span>
                           </span>
                         </div>

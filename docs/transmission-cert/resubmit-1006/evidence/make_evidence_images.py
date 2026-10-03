@@ -134,7 +134,7 @@ def render(spec):
     width = body_w + PAD * 2
 
     meta_lines = [
-        f"대상: 비토 게이트웨이(발송 엔진)      수집: {spec['collected']}",
+        f"대상: {spec.get('target', '비토 게이트웨이(발송 엔진)')}      수집: {spec['collected']}",
         f"수집 방법: {spec['how']}",
     ]
     foot_lines = [

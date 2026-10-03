@@ -19,6 +19,7 @@ import { renderLiquid, detectLiquidSyntax, flattenCustomerForLiquid, stripLiquid
 import { applyVarFallback } from './var-fallback';
 // ★ 2026-09-26 한줄로 V2 R269 — %변수% 조각 판정(숫자 바로 뒤 %는 퍼센트 기호) · 순수 CT
 import { replaceVarTokens } from './var-tokens';
+import { toQtmsgType, subjectForMsgType } from './qtmsg-type';
 export { findVarTokens } from './var-tokens';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -517,6 +518,30 @@ export function buildAdSubject(subject: string, msgType: string, isAd: boolean):
   if (!subject) return '(광고)';
   if (/^\s*[(（]\s*광고\s*[)）]/.test(subject)) return subject; // 중복 방지 (반각·전각)
   return `(광고) ${subject}`;
+}
+
+/**
+ * ★ 2026-10-03 전송자격인증 5.2 차단 승격 — 금칙어 **차감 앞** 판정 입력 컨트롤타워.
+ *   = 제목((광고) 부착 뒤) + 개행 + 본문((광고) · 무료거부 부착 뒤), **변수 치환 전 원문**.
+ *   적재 길목 탐지(sms-queue `snapshotSendContents`)가 보는 `제목\n본문` 모양과 같다.
+ *   080 번호는 넣지 않는다 — 우리가 붙이는 값이고, 차감 앞 경로 중에는 아직 번호를 조회하지 않은 곳이 있다.
+ *   발송 경로 5곳(캠페인 발송 · 직접발송 · 직접발송 코어 · 자동발송 · 관리자 시뮬레이션)이 전부 이 함수 하나로 입력을 만든다.
+ *   소비 = utils/spam-block.ts `checkSpamBlockBeforeCharge`
+ */
+export function composeSpamCheckText(params: {
+  message: string;
+  subject?: string | null;
+  msgType: string;
+  isAd: boolean;
+}): string {
+  // ★1003 Codex 1R — 유형 · 제목은 **발송과 같은 규칙**으로 정한다. 단문은 제목을 싣지 않는다(subjectForMsgType) —
+  //   화면이 LMS 에서 SMS 로 바꿔도 남아 오는 옛 제목으로 깨끗한 단문을 막으면 본문을 고쳐도 풀리지 않는다.
+  //   유형 축약값(S · L · M) · 모르는 값도 발송 변환(toQtmsgType)과 같은 유형으로 읽는다.
+  const qt = toQtmsgType(params.msgType);
+  const msgType = qt === 'S' ? 'SMS' : qt === 'M' ? 'MMS' : 'LMS';
+  const subject = buildAdSubject(subjectForMsgType(msgType, params.subject), msgType, params.isAd === true);
+  const body = buildAdMessage(String(params.message ?? ''), msgType, params.isAd === true, '');
+  return `${subject}\n${body}`;
 }
 
 /**

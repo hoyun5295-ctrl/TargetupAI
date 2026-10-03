@@ -38,6 +38,7 @@ import { getCreditCost } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
 import { createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
+import { SPAM_BLOCKED_CODE } from './spam-block';
 import { sendEmailCampaign, resolveCustomerRecipients } from './email-channel';
 import {
   PlannerTouchpointRow,
@@ -94,7 +95,7 @@ interface CarryLink {
  * 이 실패에서는 발송 시도 표식을 남길 이유가 없다 — 남기면 한 통도 안 나간 달의 대행료 환불이 "발송 시작됨"으로 막힌다.
  * 그 밖의 실패는 커밋 여부가 미확정이므로 표식을 유지한다(§3-9-1).
  */
-const DEFINITE_NO_COMMIT = new Set(['INSUFFICIENT_BALANCE', 'LINK_PLACEHOLDER_UNEDITED', 'BENEFIT_PLACEHOLDER_UNEDITED', 'NIGHT_AD_RESTRICTED']);   // ★0930 혜택 자리 가드도 커밋 전 거절
+const DEFINITE_NO_COMMIT = new Set(['INSUFFICIENT_BALANCE', 'LINK_PLACEHOLDER_UNEDITED', 'BENEFIT_PLACEHOLDER_UNEDITED', 'NIGHT_AD_RESTRICTED', SPAM_BLOCKED_CODE]);   // ★0930 혜택 자리 가드도 커밋 전 거절 · ★1003 금칙어 차단도(캠페인 INSERT 전에 던진다)
 
 const CANCELLED_REASON = '월간 대행이 취소돼 발송하지 않았습니다.';
 

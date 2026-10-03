@@ -15,6 +15,8 @@ import { triggerDirectSendWorker } from './direct-send-worker';
 import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, DirectSendError, type DirectSendSpec } from './direct-send-spec';
 import { logCampaignTraining } from './training-logger';
 import { findUneditedSendPlaceholder } from './send-placeholder-gate';
+import { composeSpamCheckText } from './messageUtils';
+import { checkSpamBlockBeforeCharge } from './spam-block';
 // ★ 2026-07-12 D-2: 야간 광고 발송 제한 — SEND_HOURS 창 밖 광고 접수 거부(순수 판정 CT 재사용)
 import { nightAdRestrictionMessage } from './autosend-policy';
 import { SEND_HOURS } from '../config/defaults';
@@ -231,6 +233,21 @@ export async function createDirectSendCampaign(
   const nightAdMsg = nightAdRestrictionMessage(spec.adEnabled, spec.scheduled, spec.scheduledAt, SEND_HOURS.start, SEND_HOURS.end);
   if (nightAdMsg) {
     throw new DirectSendError('NIGHT_AD_RESTRICTED', nightAdMsg, 400);
+  }
+
+  // ★ 2026-10-03 전송자격인증 5.2 — 금칙어 **차단**(캠페인 생성 · 차감 앞 · 원문 판정). 문자로 나가는 문안만 본다.
+  //   직접발송 commit · DM · 자율발송 · 플래너 · 대행발송이 모두 이 길목을 지난다 — 소비처는 코드 SPAM_BLOCKED 로 갈래를 탄다.
+  //   CT = utils/spam-block.ts(판정 · 기록 · 실패 시 통과) · 입력 = messageUtils composeSpamCheckText
+  const spamChannel = spec.sendChannel || 'sms';
+  if (spamChannel === 'sms' || spamChannel === 'both') {
+    const spamVerdict = await checkSpamBlockBeforeCharge({
+      items: [{
+        text: composeSpamCheckText({ message: spec.message || '', subject: spec.subject || '', msgType: spec.msgType, isAd: spec.adEnabled === true }),
+        recipients: spec.total,
+      }],
+      companyId: ctx.companyId, userId: ctx.userId, source: spec.sendType || 'direct_core',
+    });
+    if (spamVerdict.blocked) throw new DirectSendError(spamVerdict.code, spamVerdict.notice, 400);
   }
 
   // ★ 2026-09-28 분할 값 검사 + 끝나는 날 한도(CT send-time-util) — 직접발송 commit·자율 발송 공통 길목. 캠페인 생성·차감 전에 막는다.

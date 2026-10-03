@@ -109,6 +109,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // 운영
   spam_block_rule_create: '금칙어 규칙 추가',
   spam_block_rule_update: '금칙어 규칙 수정',
+  spam_block_rule_mode: '금칙어 규칙 탐지·차단 전환',
   deposit_hold_resolved: '입금 보류 해제',
   diagnosis_manual_grant: '진단 수동 부여',
   diagnosis_status_change: '진단 상태 변경',

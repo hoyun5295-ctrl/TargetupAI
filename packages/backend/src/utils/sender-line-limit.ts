@@ -18,6 +18,13 @@
  *   초기값을 임의로 박으면 매장이 늘 때마다 정상 고객사가 막힌다.
  *
  * ⛔ 개인·외국인은 기준값 고정이다 — 여기는 우리가 정할 여지가 없다.
+ *
+ * ★2026-10-03 D-8 (3차 반려 대조) — 고시의 「무선 법인 4」는 **계정당**이다. 회사 단위 · 미설정 무제한은 그 단위와 다르다.
+ *   스위치 `SENDER_LINE_PER_ACCOUNT_ENABLED=true` 일 때만 법인의 무선 상한 = 활성 계정 수 × 4.
+ *   회사 설정이 있으면 둘 중 작은 값(설정은 좁히기만 한다 · 기준보다 넓힐 수 없다).
+ *   ⛔ 기본은 꺼짐 = 종전 그대로. 고객사별 무선 보유 · 활성 계정 현황을 실측하기 전에는 켜지 않는다(Harold 1003 지시).
+ *   ⛔ 가입자 유형 미설정 회사에는 걸지 않는다 — 유형을 모르면 기준(개인 3 · 법인 계정×4)을 고를 수 없다. 켜기 전에 유형 전량 설정이 선행이다.
+ *   ⛔ 유선은 바꾸지 않는다(법인 유선 = 종사자 수 · 회사 설정).
  */
 
 import { query } from '../config/database';
@@ -30,8 +37,16 @@ export interface LineLimits {
   mobile: number | null;
   /** 유선 상한. null = 제한 없음 */
   landline: number | null;
-  /** 이 상한이 어디서 왔나 — 화면·심사 설명용 */
-  source: 'standard' | 'company_setting' | 'unset';
+  /** 이 상한이 어디서 왔나 — 화면·심사 설명용. per_account = 법인 무선 활성 계정 × 4(D-8 스위치 켜짐) */
+  source: 'standard' | 'company_setting' | 'per_account' | 'unset';
+}
+
+/** ★1003 D-8 — 법인 무선 상한의 계정당 회선 수(가이드라인 2.1 「무선 법인 4」) */
+export const CORPORATE_MOBILE_PER_ACCOUNT = 4;
+
+/** D-8 스위치. 'true' 일 때만 켠다 — 기본 꺼짐 = 종전(회사 설정 · 미설정 제한 없음) */
+export function isPerAccountMobileLimitEnabled(): boolean {
+  return String(process.env.SENDER_LINE_PER_ACCOUNT_ENABLED || '').trim() === 'true';
 }
 
 /** 개인·외국인 기준값(가이드라인 2.1 원문) */
@@ -63,6 +78,11 @@ export function resolveLineLimits(params: {
   subscriberType: any;
   mobileLimit: any;
   landlineLimit: any;
+  /**
+   * ★1003 D-8 — 법인 계정당 무선 상한. 스위치가 켜졌을 때 호출부가 **활성 계정 수**를 넣는다.
+   * 비우면(undefined · null) 종전 판정 그대로다(스위치 꺼짐과 같다). 순수 함수라 ENV 를 여기서 읽지 않는다.
+   */
+  perAccountActiveAccounts?: number | null;
 }): LineLimits {
   const type = String(params.subscriberType || '').trim();
 
@@ -78,6 +98,12 @@ export function resolveLineLimits(params: {
   const landline = toLimit(params.landlineLimit);
 
   if (type === 'corporate') {
+    const accounts = params.perAccountActiveAccounts;
+    if (accounts !== undefined && accounts !== null && Number.isFinite(Number(accounts))) {
+      const perAccount = Math.max(0, Math.floor(Number(accounts))) * CORPORATE_MOBILE_PER_ACCOUNT;
+      // 회사 설정은 좁히기만 한다 — 기준(계정 × 4)보다 넓은 설정은 기준으로 깎인다
+      return { mobile: mobile === null ? perAccount : Math.min(mobile, perAccount), landline, source: 'per_account' };
+    }
     return { mobile, landline, source: mobile === null && landline === null ? 'unset' : 'company_setting' };
   }
 
@@ -111,12 +137,16 @@ export function evaluateLineAddition(params: {
   if (limit === null) return { status: 'unlimited', kind, current };
 
   if (current >= limit) {
+    // ★1003 D-8 계정당 상한이면 상한이 어디서 나왔는지(활성 계정 × 4)를 함께 알린다 — 계정을 늘려야 하는지 판단할 수 있게
+    const basis = kind === 'mobile' && limits.source === 'per_account'
+      ? ` 법인 무선은 활성 계정 1개당 ${CORPORATE_MOBILE_PER_ACCOUNT}회선입니다.`
+      : '';
     return {
       status: 'exceeded',
       kind,
       current,
       limit,
-      message: `${KIND_LABEL[kind]} 발신번호는 최대 ${limit}회선까지 등록할 수 있습니다. (현재 ${current}회선)`,
+      message: `${KIND_LABEL[kind]} 발신번호는 최대 ${limit}회선까지 등록할 수 있습니다. (현재 ${current}회선)${basis}`,
     };
   }
 
@@ -146,17 +176,47 @@ export function parseLineLimitInput(v: any): { ok: true; value: number | null } 
   return { ok: true, value: Math.floor(n) };
 }
 
-export async function checkSenderLineLimit(companyId: string, phone: string): Promise<LineLimitVerdict> {
+/**
+ * ★1003 D-8 — 활성 계정 수. 시스템 가상 계정(싱크에이전트 등)은 빼는 관례 그대로(admin.ts · manage-users.ts 최대 사용자 수 검사와 같은 문장).
+ */
+export async function countActiveAccounts(companyId: string): Promise<number> {
+  const r = await query(
+    'SELECT COUNT(*) FROM users WHERE company_id = $1 AND is_active = true AND COALESCE(is_system, false) = false',
+    [companyId]
+  );
+  return Number(r.rows[0]?.count || 0);
+}
+
+/**
+ * 회사 상한을 읽는다 — 등록 판정과 화면이 **같은 함수**로 같은 값을 본다.
+ * D-8 스위치가 켜졌고 법인이면 활성 계정 수를 세어 계정당 상한을 적용한다. 꺼져 있으면 종전 그대로이고, 그 사실을 한 줄 남긴다.
+ */
+async function loadCompanyLineLimits(companyId: string): Promise<{ company: any; limits: LineLimits; activeAccounts: number | null }> {
   const companyRes = await query(
     'SELECT subscriber_type, mobile_line_limit, landline_line_limit FROM companies WHERE id = $1',
     [companyId]
   );
   const company = companyRes.rows[0] || {};
+  const isCorporate = String(company.subscriber_type || '').trim() === 'corporate';
+  let activeAccounts: number | null = null;
+  if (isCorporate) {
+    if (isPerAccountMobileLimitEnabled()) {
+      activeAccounts = await countActiveAccounts(companyId);
+    } else {
+      console.log(`[sender-line-limit] 법인 계정당 무선 상한 스위치 꺼짐 — 종전 회사 설정으로 판정 (company=${companyId})`);
+    }
+  }
   const limits = resolveLineLimits({
     subscriberType: company.subscriber_type,
     mobileLimit: company.mobile_line_limit,
     landlineLimit: company.landline_line_limit,
+    perAccountActiveAccounts: activeAccounts,
   });
+  return { company, limits, activeAccounts };
+}
+
+export async function checkSenderLineLimit(companyId: string, phone: string): Promise<LineLimitVerdict> {
+  const { limits } = await loadCompanyLineLimits(companyId);
 
   // 상한이 양쪽 다 없으면 세어볼 필요가 없다(현행 유지 = 제한 없음)
   if (limits.mobile === null && limits.landline === null) {
@@ -186,16 +246,7 @@ export async function countCompanyLines(companyId: string): Promise<{ mobile: nu
 
 /** 화면용 — 현재 정책과 보유 수를 한 번에 */
 export async function getSenderLinePolicy(companyId: string) {
-  const companyRes = await query(
-    'SELECT subscriber_type, mobile_line_limit, landline_line_limit FROM companies WHERE id = $1',
-    [companyId]
-  );
-  const company = companyRes.rows[0] || {};
-  const limits = resolveLineLimits({
-    subscriberType: company.subscriber_type,
-    mobileLimit: company.mobile_line_limit,
-    landlineLimit: company.landline_line_limit,
-  });
+  const { company, limits, activeAccounts } = await loadCompanyLineLimits(companyId);
   const held = await countCompanyLines(companyId);
   return {
     subscriberType: company.subscriber_type || null,
@@ -203,5 +254,7 @@ export async function getSenderLinePolicy(companyId: string) {
     landlineLineLimit: company.landline_line_limit ?? null,
     effective: limits,
     held,
+    // ★1003 D-8 — 스위치가 켜진 법인만 값이 있다(화면이 「활성 계정 N × 4」로 근거를 보여 준다). 그 밖은 null
+    perAccount: activeAccounts === null ? null : { activeAccounts, perAccount: CORPORATE_MOBILE_PER_ACCOUNT },
   };
 }

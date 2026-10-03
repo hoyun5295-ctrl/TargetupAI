@@ -1,20 +1,20 @@
 /**
  * 금칙어 차단 체계 — 전송자격인증 5.2 (★2026-08-18)
  *
- * ★2026-08-19 탐지 전용으로 좁혔다 — 이 체계는 **발송을 막지 않는다.**
- *   차단 판정을 차감 **뒤**(큐 적재)에 뒀던 것이 뿌리였다. 돈이 이미 움직인 자리라
- *   무엇으로 막든 환불 멱등이 깨진다(같은 캠페인 재차단 시 환불 0 = 실차감 잔존).
- *   막는 동작을 없애면 그 결함은 성립 자체를 안 한다. 차단은 게이트를 차감 **앞** preflight로
- *   옮기는 재설계 뒤에 연다(브랜드메시지 0818(6)과 같은 자리).
+ * ★2026-08-19 탐지 전용으로 좁혔다가 ★2026-10-03 차단을 **차감 앞**에서 연다(설계 = 전송자격인증 §4-H).
+ *   0819 뿌리 = 판정을 차감 **뒤**(큐 적재)에 뒀다. 돈이 이미 움직인 자리라 무엇으로 막든 환불 멱등이 깨진다.
+ *   그래서 차단은 차감 앞 판정 함수(`checkSpamBlockBeforeCharge`) 하나만 하고, 큐 적재 길목은 탐지 기록만 한다.
+ *   차단 판정 · 경로별 배선 계약 = __tests__/spam-block-preflight-1003.test.ts
  *
  * 이 테스트가 지키는 것
  *   1. 단일 요소 규칙은 **만들 수 없다**. "대출" 하나로 막으면 금융 고객사가 발송을 못 한다.
  *   2. 조합은 **요소가 전부** 맞아야 걸린다. 하나라도 빠지면 통과다.
- *   3. ★ 판정 결과에 **막는 값이 없다** — 걸려도 결과는 걸린 규칙 목록뿐이다.
- *   4. ★ DB에 `mode='block'`이 들어 있어도 코드가 읽지 않는다(데이터로 차단을 켤 수 없다).
+ *   3. 판정 결과는 걸린 규칙과 그 규칙의 모드다 — 막는 결정은 판정 함수가 아니라 차감 앞 함수가 한다.
+ *   4. ★ mode 를 읽는다. 'block' 이 아닌 값은 전부 탐지다(모르는 값으로 발송을 막지 않는다).
  *   5. 예외 회사는 그 규칙에 걸리지 않는다.
  *   6. 규칙 조회가 실패하면 **전량 통과**한다(fail-open). 필터 오류로 전 고객 발송이 멈추면 안 된다.
  *   7. ★ 탐지 로그는 **규칙별 1행**으로 접어 단일 INSERT — 개인화 1만 건이 1만 INSERT가 되지 않는다.
+ *   8. ★ 기록에는 규칙 모드와 그 자리에서 실제로 한 일(action_taken)이 따로 남는다.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -40,6 +40,7 @@ function rule(over: Partial<BlockRule> = {}): BlockRule {
       { type: 'keyword', value: '무직자' },
       { type: 'keyword', value: '당일' },
     ],
+    mode: 'detect',
     source: 'kisa',
     exemptCompanyIds: [],
     ...over,
@@ -106,16 +107,18 @@ describe('★ 조합은 전부 맞아야 걸린다 — 정상 문자 보호의 �
   });
 });
 
-describe('★ 판정 결과에 막는 값이 없다 — 탐지 전용', () => {
-  it('걸려도 결과는 걸린 규칙 목록뿐이다', () => {
+describe('판정 결과 = 걸린 규칙과 그 모드 (막는 결정은 차감 앞 함수 몫)', () => {
+  it('걸리면 규칙과 모드가 나온다', () => {
     const v = evaluateContent('무직자 당일 승인', [rule()], COMPANY);
-    expect(v).toEqual({ hits: [{ ruleId: 'r1', ruleName: '무직자 당일대출' }] });
+    expect(v).toEqual({ hits: [{ ruleId: 'r1', ruleName: '무직자 당일대출', mode: 'detect' }] });
+    expect(evaluateContent('무직자 당일 승인', [rule({ mode: 'block' })], COMPANY).hits[0].mode).toBe('block');
   });
 
-  it('★ 판정 결과에 발송을 막는 필드가 존재하지 않는다 — 소비처가 막을 근거를 못 얻는다', () => {
-    const v = evaluateContent('무직자 당일 승인', [rule()], COMPANY) as Record<string, unknown>;
+  it('판정 결과에 발송을 막는 필드가 없다 — 적재 길목은 이 결과로 막을 수 없다', () => {
+    const v = evaluateContent('무직자 당일 승인', [rule({ mode: 'block' })], COMPANY) as Record<string, unknown>;
     expect(v).not.toHaveProperty('action');
     expect(v).not.toHaveProperty('message');
+    expect(v).not.toHaveProperty('blocked');
   });
 
   it('여러 규칙이 걸리면 전부 기록된다 — 우열을 가리지 않는다', () => {
@@ -170,21 +173,27 @@ describe('★ 규칙 조회 실패는 발송을 막지 않는다 (fail-open)', (
     expect(rules[0].id).toBe('b');
   });
 
-  it('★ DB에 mode=block이 들어 있어도 코드가 읽지 않는다 — 데이터로 차단을 켤 수 없다', async () => {
+  it('★ mode 를 읽는다 — block 만 차단이고 그 밖의 값(옛 hold · 빈 값 · 오타)은 전부 탐지다', async () => {
+    const two = { elements: [{ type: 'keyword', value: 'a' }, { type: 'keyword', value: 'b' }], source: null, exempt_company_ids: null };
     q.mockResolvedValue({
-      rows: [{ id: 'c', name: 'x', elements: [{ type: 'keyword', value: 'a' }, { type: 'keyword', value: 'b' }], mode: 'block', source: null, exempt_company_ids: null }],
-      rowCount: 1,
+      rows: [
+        { id: 'b', name: 'b', mode: 'block', ...two },
+        { id: 'd', name: 'd', mode: 'detect', ...two },
+        { id: 'h', name: 'h', mode: 'hold', ...two },
+        { id: 'n', name: 'n', mode: null, ...two },
+        { id: 'u', name: 'u', mode: 'BLOCK', ...two },
+      ],
+      rowCount: 5,
     });
     const rules = await loadActiveRules();
-    expect(rules[0]).not.toHaveProperty('mode');
-    // 그 규칙에 걸려도 결과는 여전히 hits뿐이다
-    expect(evaluateContent('a b', rules, COMPANY)).toEqual({ hits: [{ ruleId: 'c', ruleName: 'x' }] });
+    expect(rules.map((r) => [r.id, r.mode])).toEqual([['b', 'block'], ['d', 'detect'], ['h', 'detect'], ['n', 'detect'], ['u', 'detect']]);
   });
 
-  it('★ 규칙 조회 SQL이 mode 컬럼을 읽지 않는다 — 소스 불변식', async () => {
+  it('★ 규칙 조회 SQL이 mode 컬럼을 읽는다 — 소스 계약', async () => {
     q.mockResolvedValue({ rows: [], rowCount: 0 });
     await loadActiveRules();
-    expect(q.mock.calls[0][0]).not.toMatch(/\bmode\b/);
+    expect(q.mock.calls[0][0]).toMatch(/\bmode\b/);
+    expect(q.mock.calls[0][0]).toMatch(/is_active = true/);
   });
 
   it('★ 겹친 호출은 조회를 하나만 낸다 (0819 Codex 2R — PG 풀 고갈)', async () => {
@@ -244,7 +253,7 @@ describe('★ 탐지 로그는 규칙별 1행으로 접어 단일 INSERT (0818 C
   });
 
   it('개인화 문안 3종이 같은 규칙에 걸리면 INSERT는 1회 · 건수는 합산된다', async () => {
-    const hits = [{ ruleId: 'r1', ruleName: '무직자 당일대출' }];
+    const hits = [{ ruleId: 'r1', ruleName: '무직자 당일대출', mode: 'detect' as const }];
     await logSpamBlockHits({
       entries: [
         { verdict: { hits }, affectedRows: 4000, contentSample: '홍길동님 무직자 당일' },
@@ -262,7 +271,7 @@ describe('★ 탐지 로그는 규칙별 1행으로 접어 단일 INSERT (0818 C
   it('규칙이 둘이면 한 INSERT 안에 2행이 들어간다', async () => {
     await logSpamBlockHits({
       entries: [{
-        verdict: { hits: [{ ruleId: 'r1', ruleName: 'a' }, { ruleId: 'r2', ruleName: 'b' }] },
+        verdict: { hits: [{ ruleId: 'r1', ruleName: 'a', mode: 'detect' as const }, { ruleId: 'r2', ruleName: 'b', mode: 'detect' as const }] },
         affectedRows: 5, contentSample: 'x',
       }],
       companyId: COMPANY,
@@ -279,14 +288,14 @@ describe('★ 탐지 로그는 규칙별 1행으로 접어 단일 INSERT (0818 C
   it('★ 기록 실패가 호출부로 새어 나가지 않는다 — 로그 때문에 발송이 죽으면 안 된다', async () => {
     q.mockRejectedValue(new Error('connection terminated'));
     await expect(logSpamBlockHits({
-      entries: [{ verdict: { hits: [{ ruleId: 'r1', ruleName: 'a' }] }, affectedRows: 1, contentSample: 'x' }],
+      entries: [{ verdict: { hits: [{ ruleId: 'r1', ruleName: 'a', mode: 'detect' as const }] }, affectedRows: 1, contentSample: 'x' }],
       companyId: COMPANY,
     })).resolves.toBeUndefined();
   });
 
   it('표본은 마스킹해서 저장한다', async () => {
     await logSpamBlockHits({
-      entries: [{ verdict: { hits: [{ ruleId: 'r1', ruleName: 'a' }] }, affectedRows: 1, contentSample: '01052958517 무직자 당일' }],
+      entries: [{ verdict: { hits: [{ ruleId: 'r1', ruleName: 'a', mode: 'detect' as const }] }, affectedRows: 1, contentSample: '01052958517 무직자 당일' }],
       companyId: COMPANY,
     });
     expect(q.mock.calls[0][1].join('|')).not.toContain('01052958517');
@@ -333,5 +342,75 @@ describe('★ 0818 Codex 정정 — 로그 표본에 개인정보를 남기지 �
 
   it('짧은 숫자는 그대로 둔다 — 문맥이 사라지면 추적을 못 한다', () => {
     expect(maskSample('3만원 할인')).toContain('3만원');
+  });
+});
+
+describe('★1003 기록 = 규칙 모드 + 그 자리에서 한 일(action_taken)', () => {
+  beforeEach(() => {
+    q.mockReset();
+    q.mockResolvedValue({ rows: [], rowCount: 0 });
+  });
+
+  it('적재 길목 탐지는 action_taken 이 detect 다 — 차단 규칙이어도 그 자리에서는 막지 않았다', async () => {
+    await logSpamBlockHits({
+      entries: [{ verdict: { hits: [{ ruleId: 'r1', ruleName: 'a', mode: 'block' }] }, affectedRows: 3, contentSample: 'x' }],
+      companyId: COMPANY, source: 'campaign',
+    });
+    const [sql, params] = q.mock.calls[0];
+    expect(sql).toContain('mode, action_taken');
+    expect(sql).not.toContain("'detect'");          // 고정값이 아니라 파라미터로 싣는다
+    expect(params).toEqual(['r1', COMPANY, null, 'campaign', 'block', 'detect', 3, 'x']);
+  });
+
+  it('차감 앞 차단은 action_taken 이 block 이다', async () => {
+    await logSpamBlockHits({
+      entries: [{ verdict: { hits: [{ ruleId: 'r1', ruleName: 'a', mode: 'block' }] }, affectedRows: 7, contentSample: 'x' }],
+      companyId: COMPANY, userId: 'u1', source: 'direct', action: 'block',
+    });
+    expect(q.mock.calls[0][1]).toEqual(['r1', COMPANY, 'u1', 'direct', 'block', 'block', 7, 'x']);
+  });
+
+  it('action 에 모르는 값이 오면 detect 로 적는다', async () => {
+    await logSpamBlockHits({
+      entries: [{ verdict: { hits: [{ ruleId: 'r1', ruleName: 'a', mode: 'detect' }] }, affectedRows: 1, contentSample: 'x' }],
+      action: 'hold' as any,
+    });
+    expect(q.mock.calls[0][1][5]).toBe('detect');
+  });
+});
+
+describe('★1003 조합 하한 우회 차단 — 다른 요소가 맞으면 반드시 같이 맞는 요소는 하나로 접는다', () => {
+  it('keyword bit.ly + url BIT.LY = 같은 요소 → 하한 미달', () => {
+    expect(validateElements([{ type: 'keyword', value: 'bit.ly' }, { type: 'url', value: 'BIT.LY' }]).ok).toBe(false);
+  });
+
+  it('포함 관계(대출 ⊂ 무직자대출)는 좁은 쪽 하나만 남는다 → 하한 미달', () => {
+    expect(validateElements([{ type: 'keyword', value: '대출' }, { type: 'keyword', value: '무직자 대출' }]).ok).toBe(false);
+    expect(validateElements([{ type: 'keyword', value: '무직자대출' }, { type: 'keyword', value: '대출' }]).ok).toBe(false);
+  });
+
+  it('번호 요소가 글자 요소 안의 숫자에 들어 있으면 접는다', () => {
+    expect(validateElements([{ type: 'phone', value: '1234-5678' }, { type: 'keyword', value: '문의 010-1234-5678' }]).ok).toBe(false);
+    expect(validateElements([{ type: 'phone', value: '010-1234-5678' }, { type: 'phone', value: '01012345678' }]).ok).toBe(false);
+  });
+
+  it('접힌 뒤에도 서로 다른 요소가 2개 이상이면 통과하고, 남는 것은 좁은 쪽이다', () => {
+    const r = validateElements([
+      { type: 'keyword', value: '대출' },
+      { type: 'keyword', value: '무직자대출' },
+      { type: 'url', value: 'bit.ly' },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('거부되면 안 된다');
+    expect(r.elements.map((e) => e.value)).toEqual(['무직자대출', 'bit.ly']);
+  });
+
+  it('숫자가 없는 전화번호 요소는 거부한다 — 어떤 본문에도 맞지 않아 하한만 채운다', () => {
+    const r = validateElements([{ type: 'phone', value: '문의처' }, { type: 'keyword', value: '무직자' }]);
+    expect(r.ok).toBe(false);
+  });
+
+  it('글자 요소는 번호 요소에 함의되지 않는다(번호만 맞고 글자는 없는 본문이 있다)', () => {
+    expect(validateElements([{ type: 'keyword', value: '5678' }, { type: 'phone', value: '010-1234-5678' }]).ok).toBe(true);
   });
 });

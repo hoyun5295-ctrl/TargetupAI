@@ -30,7 +30,8 @@ import { storeMembershipClause } from './store-scope';
 import { resolveConsentScope, consentSql, brandConsentOption } from './mall-consent';
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
-import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
+import { getOpt080Number, prepareFieldMappings, prepareSendMessage, composeSpamCheckText } from './messageUtils';
+import { checkSpamBlockBeforeCharge } from './spam-block';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
 import { convertButtonsToQTmsg } from './alimtalk-button';
@@ -829,6 +830,24 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       console.warn(`${logPrefix} 채우지 않은 자리가 남은 문안 — 본 발송 중단 (${autoPh.code})`);
       await markFailed(ac, autoPh.error);
       return;
+    }
+
+    // ★ 2026-10-03 전송자격인증 5.2 — 금칙어 **차단**(캠페인 행 생성 · 차감 앞 · 원문 판정). 문자로 나가는 문안만 본다(알림톡 제외).
+    //   회차 실패로 남기고 재시도하지 않는다 — 같은 문안은 다시 돌려도 같은 규칙에 걸린다. 담당자가 문안을 고쳐야 다음 회차가 나간다.
+    //   CT = utils/spam-block.ts(판정 · 기록 · 실패 시 통과) · 입력 = messageUtils composeSpamCheckText
+    if (ac.channel !== 'alimtalk') {
+      const autoSpam = await checkSpamBlockBeforeCharge({
+        items: [{
+          text: composeSpamCheckText({ message: messageContent, subject: messageSubject, msgType: ac.message_type, isAd: ac.is_ad === true }),
+          recipients: customers.length,
+        }],
+        companyId: ac.company_id, userId: ac.user_id, source: 'automarketing',
+      });
+      if (autoSpam.blocked) {
+        console.warn(`${logPrefix} 금칙어 차단 — 본 발송 중단`);
+        await markFailed(ac, autoSpam.notice);
+        return;
+      }
     }
 
     // ★ campaign_runs에 run 기록

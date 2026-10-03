@@ -43,6 +43,7 @@ import { campaignMayHaveSent, classifyAttemptCampaign, inspectAttemptCampaign, n
 import { bulkInsertSmsQueue, getAuthSmsTable, insertTestSmsQueue, toKoreaTimeStr } from './sms-queue';
 import { countStagingFiltered, createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
+import { SPAM_BLOCKED_CODE } from './spam-block';
 import { getOpt080Number } from './messageUtils';
 import { sendSystemAlert } from './system-alert';
 // ★2026-09-13(3) 단계 격리의 마이그레이션 전 판정(판정 한 벌) · tick 단계 겹침 가드(B-0825-7)
@@ -1208,6 +1209,20 @@ async function dispatchAttempt(
       await notifyFailed('dispatch_rejected', {
         code, campaignId: made.id, message: String(err?.message || ''), ...(closed ? {} : { statusChanged: false }),
       });
+      return;
+    }
+    // ★2026-10-03 전송자격인증 5.2 — 금칙어 차단은 **다시 해도 같은 결과**다(같은 문안 · 같은 규칙).
+    //   아래 재시도 갈래로 보내면 매 tick 같은 차단을 반복하다 만료된다. 문안 문제이므로 「문안 확인」 상태로 닫고 담당자에게 알린다.
+    //   배관은 캠페인 INSERT 전에 던지므로 위 조회에서 캠페인이 없음이 확정된 뒤다 — 이 시도의 staging을 지운다(아래 재시도 갈래와 같은 문장).
+    if (code === SPAM_BLOCKED_CODE) {
+      await query(
+        `DELETE FROM campaign_send_staging s
+          WHERE s.staging_id = $1::uuid
+            AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = $1::uuid)`,
+        [stagingId],
+      ).catch((delErr: any) => console.error(`${LOG} 차단된 시도의 staging 정리 실패 request=${row.id}:`, delErr?.message || delErr));
+      if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
+      await notifyFailed('dispatch_spam_blocked', { code, message: String(err?.message || '') });
       return;
     }
     // 캠페인이 없다 = 이번 시도는 아무것도 만들지 못했다. 시도 키를 그대로 두고 되돌려 다음 tick이 다시 한다.

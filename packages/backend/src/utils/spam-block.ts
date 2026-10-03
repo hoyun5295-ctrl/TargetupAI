@@ -15,16 +15,20 @@
  *   필터 오류 하나로 전 고객 발송이 멈춘다. 오탐보다 그쪽이 훨씬 큰 사고다.
  *   차단은 "확실할 때만 하는 부가 동작"이고 통과가 기본 동작이다. 실패는 로그로 남긴다.
  *
- * ⛔ ★2026-08-19 — 이 체계는 **탐지만 한다. 발송을 막지 않는다.**
- *   차단 판정을 차감 **뒤**(`bulkInsertSmsQueue` 적재 길목)에 뒀던 것이 뿌리였다. 돈이 이미 움직인 자리라
+ * ⛔ 차단은 **차감 앞**에서만 한다 (★2026-10-03 차단 승격 · 설계 = 전송자격인증 §4-H)
+ *   0819까지는 판정이 차감 **뒤**(`bulkInsertSmsQueue` 적재 길목)에만 있었다. 돈이 이미 움직인 자리라
  *   무엇으로 막든 정합이 깨진다 — 행을 버리면 호출부 17곳이 줄어든 건수를 제각각 해석하고,
  *   throw로 바꾸면 환불 멱등이 캠페인 단위 누적이라 **같은 캠페인 재차단 시 환불 0**(실차감 잔존)이 된다.
- *   막는 동작을 없애면 그 결함은 성립 자체를 안 한다. 그래서 모드·차단 오류·강도 우열을 전부 지웠다.
- *   차단은 게이트를 차감 **앞** preflight로 옮기는 재설계 뒤에 연다(브랜드메시지 0818(6)과 같은 자리).
+ *   그래서 판정을 둘로 나눴다.
+ *   - 차단 = `checkSpamBlockBeforeCharge` — 발송 경로마다 **차감 · 캠페인 생성 앞**에서 원문(치환 전)으로 판정.
+ *     `mode='block'` 규칙만 본다. 걸리면 그 발송 요청은 돈이 움직이기 전에 끝난다.
+ *   - 탐지 = 적재 길목(sms-queue) — 최종 문안으로 전 규칙을 판정해 기록만 한다. 막지 않는다.
+ *     차단 규칙이 여기서 걸리면(기록 = mode 'block' · action_taken 'detect') 차감 앞 배선이 빠진 경로이거나
+ *     변수 치환으로 금칙어가 생긴 경우다. 둘 다 기록으로 찾아낸다.
  *
- * ⛔ 차단은 데이터로 켤 수 없다
- *   `spam_block_rules.mode` 컬럼은 남아 있지만 **코드가 읽지 않는다.** DB를 직접 고쳐 'block'을 넣어도
- *   아무 일도 일어나지 않는다. 차단을 여는 유일한 길은 재설계된 코드다.
+ * ⛔ 규칙은 하나씩 승격한다
+ *   기본은 탐지(`detect`)다. 관리자가 오탐 시뮬레이션을 본 뒤 규칙 하나를 차단(`block`)으로 올린다.
+ *   전역 스위치는 두지 않는다 — 규칙별 승격이 곧 시행이다. 알 수 없는 mode 값은 탐지로 읽는다.
  */
 
 import { query } from '../config/database';
@@ -37,13 +41,25 @@ export interface BlockElement {
   value: string;
 }
 
+/** 규칙 모드 — 탐지(기록만) · 차단(차감 앞에서 발송 중지) */
+export type BlockMode = 'detect' | 'block';
+
 export interface BlockRule {
   id: string;
   name: string;
   elements: BlockElement[];
+  mode: BlockMode;
   source: string;
   exemptCompanyIds: string[];
 }
+
+/** DB 값 → 모드. 'block' 이 아닌 값은 전부 탐지다(모르는 값으로 발송을 막지 않는다) */
+export function parseBlockMode(raw: unknown): BlockMode {
+  return raw === 'block' ? 'block' : 'detect';
+}
+
+/** 차단 시 발송 경로가 돌려주는 오류 코드 — 소비처(플래너 · 대행발송 등)가 이 값으로 갈래를 탄다 */
+export const SPAM_BLOCKED_CODE = 'SPAM_BLOCKED';
 
 /** 요소 개수 한계 — 기준 원문 "1개 이상(최대 5개)". 우리는 하한을 2로 올린다(단일 키워드 차단 금지) */
 export const MIN_ELEMENTS = 2;
@@ -76,13 +92,31 @@ export function invalidateSpamBlockCache(): void {
   cacheGen += 1;
 }
 
+/**
+ * 요소 b가 맞는 본문이면 요소 a도 반드시 맞는가 — 그렇다면 a는 조합에 아무것도 더하지 않는다.
+ * 판정은 매칭(`matchesElementPrepared`)과 같은 정규화를 쓴다.
+ *   - 글자 요소(keyword · url): 정규화 문자열 포함 관계(`대출` ⊂ `무직자대출` · keyword `bit.ly` = url `BIT.LY`)
+ *   - 번호 요소(phone): 숫자열 포함 관계. 글자 요소 안의 숫자도 본문 숫자열에 이어서 나타나므로 함께 본다.
+ */
+function isImpliedBy(a: BlockElement, b: BlockElement): boolean {
+  if (a.type === 'phone') {
+    const da = digitsOnly(a.value);
+    return da.length > 0 && digitsOnly(b.value).includes(da);
+  }
+  if (b.type === 'phone') return false;
+  return normalizeForMatch(b.value).includes(normalizeForMatch(a.value));
+}
+
 /** 저장 전 검증 — 단일 요소 규칙은 만들 수 없다 */
 export function validateElements(raw: any): { ok: true; elements: BlockElement[] } | { ok: false; error: string } {
   if (!Array.isArray(raw)) return { ok: false, error: '차단정보 요소가 배열이 아닙니다.' };
   const elements: BlockElement[] = [];
   // ★ 0818 Codex F1 — 같은 값을 두 번 넣으면 조합 하한을 통과해 **사실상 단일 키워드 차단**이 된다
   //   (`["대출","대출"]`은 한 곳에서 둘 다 맞는다). 중복은 하나로 접은 뒤 하한을 판정한다.
-  const seen = new Set<string>();
+  // ★1003 차단 승격 — 중복 기준을 유형 무관으로 넓혔다. keyword `bit.ly` + url `BIT.LY`,
+  //   keyword `대출` + keyword `무직자대출`, phone `5678` + keyword `010-1234-5678` 은 전부 한 요소만 남는다
+  //   (다른 요소가 맞으면 반드시 같이 맞는 요소는 조합을 좁히지 않는다). 차단이 실제로 발송을 막게 되면서
+  //   이 우회가 곧 단일 키워드 차단이 된다.
   for (const item of raw) {
     const type = String(item?.type || '').trim();
     const value = String(item?.value || '').trim();
@@ -90,10 +124,17 @@ export function validateElements(raw: any): { ok: true; elements: BlockElement[]
       return { ok: false, error: '요소 유형은 keyword · url · phone 중 하나여야 합니다.' };
     }
     if (!value) return { ok: false, error: '빈 요소는 넣을 수 없습니다.' };
-    const key = `${type}:${value.toLowerCase().replace(/\s+/g, '')}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    elements.push({ type, value });
+    // 숫자가 없는 전화번호 요소는 어떤 본문에도 맞지 않는다 — 조합 하한만 채우는 빈 요소가 된다
+    if (type === 'phone' && !digitsOnly(value)) {
+      return { ok: false, error: '전화번호 요소에는 숫자가 있어야 합니다.' };
+    }
+    const candidate: BlockElement = { type, value };
+    if (elements.some((kept) => isImpliedBy(candidate, kept))) continue;
+    // 새 요소가 더 좁으면 그것에 함의되는 기존 요소를 걷어낸다
+    for (let k = elements.length - 1; k >= 0; k -= 1) {
+      if (isImpliedBy(elements[k], candidate)) elements.splice(k, 1);
+    }
+    elements.push(candidate);
   }
   if (elements.length < MIN_ELEMENTS) {
     return {
@@ -157,12 +198,12 @@ export function matchesRule(rule: BlockRule, content: string): boolean {
 }
 
 /**
- * 판정 결과.
- * ⛔ **막는 값이 없다.** 걸린 규칙 목록뿐이라 소비처가 발송을 거부할 근거를 얻을 수 없다 —
- *   "실수로 막는" 경로를 타입에서 지웠다(파일 머리 참조).
+ * 판정 결과 — 걸린 규칙 목록과 각 규칙의 모드.
+ * ⛔ 이 결과로 발송을 막는 곳은 `checkSpamBlockBeforeCharge` 하나뿐이다(차감 앞).
+ *   적재 길목은 같은 결과를 기록에만 쓴다(파일 머리).
  */
 export interface SpamBlockVerdict {
-  hits: Array<{ ruleId: string; ruleName: string }>;
+  hits: Array<{ ruleId: string; ruleName: string; mode: BlockMode }>;
 }
 
 /**
@@ -175,7 +216,7 @@ export function evaluateContent(content: string, rules: BlockRule[], companyId?:
   for (const rule of rules) {
     if (companyId && rule.exemptCompanyIds?.includes(companyId)) continue;
     if (!matchesRulePrepared(rule, prep)) continue;
-    hits.push({ ruleId: rule.id, ruleName: rule.name });
+    hits.push({ ruleId: rule.id, ruleName: rule.name, mode: parseBlockMode(rule.mode) });
   }
   return { hits };
 }
@@ -199,21 +240,27 @@ export async function loadActiveRules(): Promise<BlockRule[]> {
 
 async function fetchActiveRules(gen: number): Promise<BlockRule[]> {
   try {
-    // ⛔ mode를 읽지 않는다 — DB 값으로 차단을 켤 수 없게 하는 불변식(파일 머리). 계약 테스트가 이 SQL을 검사한다
+    // ★1003 차단 승격 — mode 를 읽는다. 차감 앞 판정은 'block' 규칙만, 적재 길목 탐지는 전 규칙을 본다
     const result = await query(
-      `SELECT id, name, elements, source, exempt_company_ids
+      `SELECT id, name, elements, mode, source, exempt_company_ids
          FROM spam_block_rules
         WHERE is_active = true`
     );
     const rules: BlockRule[] = [];
     for (const row of result.rows) {
-      const elements = Array.isArray(row.elements) ? row.elements : [];
-      // 단일 요소 규칙은 적재돼 있어도 적용하지 않는다(저장 검증 + 여기 이중 방어)
-      if (elements.length < MIN_ELEMENTS) continue;
+      // 저장 검증과 **같은 함수**로 다시 본다(이중 방어). 옛 기준으로 저장된 규칙(`대출` + `무직자대출` 등)은
+      //   접으면 단일 요소라 적용하지 않는다 — 차단으로 올라가면 그대로 단일 키워드 차단이 되기 때문이다.
+      //   통과한 규칙은 접힌 요소로 쓴다(함의되는 요소를 뺀 것이라 걸리는 본문은 같다).
+      const checked = validateElements(row.elements);
+      if (!checked.ok) {
+        console.warn(`[spam-block] 조합 하한을 채우지 못한 규칙은 적용하지 않는다 rule=${row.id}: ${checked.error}`);
+        continue;
+      }
       rules.push({
         id: row.id,
         name: row.name,
-        elements,
+        elements: checked.elements,
+        mode: parseBlockMode(row.mode),
         source: row.source || 'internal',
         exemptCompanyIds: Array.isArray(row.exempt_company_ids) ? row.exempt_company_ids : [],
       });
@@ -249,22 +296,28 @@ export interface SpamBlockLogEntry {
  *   개인화 변형 하나하나가 아니다 — 접으면 INSERT가 **활성 규칙 수**로 묶인다(보통 한 자릿수).
  *
  * 실패해도 던지지 않는다. 로그 때문에 발송이 죽으면 안 된다.
+ *
+ * ★1003 차단 승격 — `mode` = 그 규칙의 모드, `action_taken` = 이 자리에서 실제로 한 일.
+ *   차감 앞 판정은 'block', 적재 길목 탐지는 'detect'. 그래서 (mode 'block', action 'detect') 행은
+ *   "차단 규칙인데 막지 못하고 기록만 된 발송"이다 — 배선 누락이나 치환으로 생긴 금칙어를 찾는 열쇠다.
  */
 export async function logSpamBlockHits(params: {
   entries: SpamBlockLogEntry[];
   companyId?: string | null;
   userId?: string | null;
   source?: string | null;
+  action?: BlockMode;
 }): Promise<void> {
   const { entries, companyId, userId, source } = params;
+  const action: BlockMode = params.action === 'block' ? 'block' : 'detect';
 
   // 규칙별 집계 — 건수는 합산하고 표본은 첫 문안 하나만 남긴다
-  const byRule = new Map<string, { rows: number; sample: string }>();
+  const byRule = new Map<string, { rows: number; sample: string; mode: BlockMode }>();
   for (const entry of entries || []) {
     for (const hit of entry.verdict?.hits || []) {
       const agg = byRule.get(hit.ruleId);
       if (agg) agg.rows += entry.affectedRows;
-      else byRule.set(hit.ruleId, { rows: entry.affectedRows, sample: entry.contentSample });
+      else byRule.set(hit.ruleId, { rows: entry.affectedRows, sample: entry.contentSample, mode: parseBlockMode(hit.mode) });
     }
   }
   if (byRule.size === 0) return;
@@ -274,9 +327,8 @@ export async function logSpamBlockHits(params: {
     const args: any[] = [];
     let i = 1;
     for (const [ruleId, agg] of byRule) {
-      // mode·action_taken은 'detect' 고정 — 이 체계는 막지 않는다(파일 머리)
-      values.push(`(gen_random_uuid(), $${i++}, $${i++}, $${i++}, $${i++}, 'detect', 'detect', $${i++}, $${i++}, NOW())`);
-      args.push(ruleId, companyId || null, userId || null, source || null, agg.rows, maskSample(agg.sample));
+      values.push(`(gen_random_uuid(), $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, NOW())`);
+      args.push(ruleId, companyId || null, userId || null, source || null, agg.mode, action, agg.rows, maskSample(agg.sample));
     }
     await query(
       `INSERT INTO spam_block_hits
@@ -286,5 +338,65 @@ export async function logSpamBlockHits(params: {
     );
   } catch (err: any) {
     console.error('[spam-block] 탐지 로그 기록 실패:', err?.message || err);
+  }
+}
+
+/** 차감 앞 판정 입력 — 원문 하나와 그 원문으로 나갈 건수 */
+export interface SpamPreflightItem {
+  /** `composeSpamCheckText`(messageUtils)로 만든 판정 입력. 여정은 그 실행의 완성 문안 */
+  text: string;
+  recipients: number;
+}
+
+export type SpamPreflightVerdict =
+  | { blocked: false }
+  | { blocked: true; code: typeof SPAM_BLOCKED_CODE; notice: string; ruleIds: string[] };
+
+/**
+ * ★1003 차단 승격 — **차감 · 캠페인 생성 앞** 금칙어 차단 판정. 막는 곳은 여기 하나다.
+ *
+ * - `mode='block'` 규칙만 본다. 탐지 규칙은 적재 길목이 기록한다.
+ * - 판정 대상은 원문 1~N개뿐이라(개인화 치환 전) 동기 비용이 수신자 수와 무관하다.
+ * - 걸리면 기록(action_taken 'block')을 남기고 차단 결과를 돌려준다. 기록이 실패해도 차단은 그대로다.
+ * - ⛔ 규칙 조회 · 판정 중 오류는 **통과**다(fail-open · 파일 머리). 필터 오류로 전 고객 발송이 멈추면 안 된다.
+ * - 발송자에게는 `SPAM_BLOCK_NOTICE` 만 보인다. 걸린 규칙 이름 · 요소는 내보내지 않는다
+ *   (요소를 알려 주면 그 요소만 피해 가는 문안이 나온다). 규칙은 관리자 화면 차단 이력에서 본다.
+ */
+export async function checkSpamBlockBeforeCharge(params: {
+  items: SpamPreflightItem[];
+  companyId?: string | null;
+  userId?: string | null;
+  source?: string | null;
+}): Promise<SpamPreflightVerdict> {
+  try {
+    const blockRules = (await loadActiveRules()).filter((r) => r.mode === 'block');
+    if (blockRules.length === 0) return { blocked: false };
+
+    // 같은 원문은 한 번만 판정하고 건수는 합친다
+    const byText = new Map<string, number>();
+    for (const item of params.items || []) {
+      const text = String(item?.text ?? '');
+      const n = Number.isFinite(item?.recipients) && item.recipients > 0 ? Math.floor(item.recipients) : 0;
+      byText.set(text, (byText.get(text) ?? 0) + n);
+    }
+
+    const entries: SpamBlockLogEntry[] = [];
+    for (const [text, recipients] of byText) {
+      const verdict = evaluateContent(text, blockRules, params.companyId ?? null);
+      if (verdict.hits.length > 0) entries.push({ verdict, affectedRows: recipients, contentSample: text });
+    }
+    if (entries.length === 0) return { blocked: false };
+
+    const ruleIds = [...new Set(entries.flatMap((e) => e.verdict.hits.map((h) => h.ruleId)))];
+    console.warn(
+      `[spam-block] 차단 — 차감 앞 발송 중지 (company=${params.companyId || '-'} source=${params.source || '-'} rules=${ruleIds.join(',')})`
+    );
+    await logSpamBlockHits({
+      entries, companyId: params.companyId, userId: params.userId, source: params.source, action: 'block',
+    });
+    return { blocked: true, code: SPAM_BLOCKED_CODE, notice: SPAM_BLOCK_NOTICE, ruleIds };
+  } catch (err: any) {
+    console.error('[spam-block] 차단 판정 실패 — 검사를 건너뛰고 발송을 진행한다:', err?.message || err);
+    return { blocked: false };
   }
 }

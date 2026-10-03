@@ -32,7 +32,7 @@
 - **포트**: 외부 22·80·443·23388 / 로컬 전용 3306·5432·6379·8555
 - **★0922 실물 확인**(DMI · Harold): **HPE ProLiant DL20 Gen11** · `systemd-detect-virt` none · Xeon **6325P** 4C/8T(6300P 계열 최저 SKU) · 62G(DIMM 구성은 iLO에서) · 저장 컨트롤러 = 온보드 SATA AHCI만(NVMe·Smart Array 0) · 그 위 소비자용 TAMMUZ SATA SSD 1장. 섀시는 ECC·iLO 있는 진짜 서버, 낮았던 것은 부품 선택.
 - **용량·증설(0922)**: 고객 128만 · PG 4.1G · 1명당 1.9KB 실측 · 계획선 1,000만 · 첫 증설 = PG 전용 DB 분리(D94). **추천 = `.62` 제자리 증설**(DDR5 ECC 128G + 데이터센터용 NVMe 2장 미러 · CPU 8코어 교체는 선택) · `.66`은 다음 단계 PG 대기 서버. 산식·비교·절차 = [FEATURE-INFRA-CAPACITY.md §3-3](../docs/FEATURE-INFRA-CAPACITY.md)
-- **★1002 실측 — `.62` 에도 `fail2ban` · `ufw` 가 가동 중**(`systemctl is-active` = active active). 감옥 = `nginx-limit-req`(요청 제한 5번/10분 → 1시간 차단) · `nginx-badbot`. 정상 고객사 IP 가 차단된 사례와 설정·확인 명령 = [OPS §4-3](OPS.md).
+- **★1002 실측 — `.62` 에도 `fail2ban` · `ufw` 가 가동 중**(`systemctl is-active` = active active). 감옥 = `nginx-limit-req`(요청 제한 5번/10분 → 1시간 차단) · `nginx-badbot`. ★1003 실측 정정 = 감옥 3개 · **`sshd` 도 가동**(누적 실패 6,560 · 누적 차단 103). ⚠ SSH 는 비밀번호 로그인 켜짐 · 방화벽 출발지 제한 없음(root 로그인만 막힘). 정상 고객사 IP 가 차단된 사례와 설정·확인 명령 = [OPS §4-3](OPS.md).
 - ✅ **DB 바인딩 원칙 준수 실측** — MySQL·PG·Redis 전부 `127.0.0.1`. 랜섬웨어 이후 원칙이 실제로 지켜지고 있다.
 - ⚠ **23388 = `pay-ingest-db`(MariaDB) 외부 개방** — 상세 §3.
 - ⚠ **재부팅 시 자동 복구 공백(2026-08-16 실측)** — 도커 4종(DB)은 restart 정책으로 자동 복구되지만, **pm2 3종(systemd 유닛 없음 — dump는 저장돼 있어 `pm2 resurrect` 한 줄로 복원)과 QTmsg 발송 에이전트 11프로세스(0731 21:30 수동 기동 — 자동 기동 장치 전무)는 재부팅 후 수동 기동 필요.** Tomcat은 현재 미가동. 재부팅은 Harold 접속 가능 시간대로만 + 직후 pm2 resurrect·에이전트 기동. 근본 개선(자동 기동 등록)은 별도 과제.

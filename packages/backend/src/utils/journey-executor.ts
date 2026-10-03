@@ -50,7 +50,9 @@ import {
   prepareSendMessage,
   prepareFieldMappings,
   getOpt080Number,
+  composeSpamCheckText,
 } from './messageUtils';
+import { checkSpamBlockBeforeCharge } from './spam-block';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { isCallbackRegistered } from './callback-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 광고 step 단건 게이트(차감 전 skip) + 발송 카운터
@@ -881,6 +883,20 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
     if (!message || message.trim().length < 2) {
       await logFailedStep(exec.execution_id, step.id, 'empty_message_after_prepare');
+      await advanceOrComplete(exec, step, 0);
+      return 'failed';
+    }
+
+    // ★ 2026-10-03 전송자격인증 5.2 — 금칙어 **차단**(차감 앞 · 단축 URL 변환 전). 여정은 실행 1건 = 수신자 1명이라
+    //   그 실행의 완성 문안((광고) · 080 부착 끝)을 본다 — 부착을 다시 하지 않도록 isAd=false 로 모양(제목\n본문)만 맞춘다.
+    //   ⛔ 여정을 멈추지 않는다 — 이 실행만 실패로 남기고 다음 단계로 넘긴다(다른 고객의 여정까지 막으면 안 된다).
+    //   CT = utils/spam-block.ts(판정 · 기록 · 실패 시 통과)
+    const journeySpam = await checkSpamBlockBeforeCharge({
+      items: [{ text: composeSpamCheckText({ message, subject, msgType, isAd: false }), recipients: 1 }],
+      companyId: exec.company_id, userId: exec.created_by || null, source: 'journey',
+    });
+    if (journeySpam.blocked) {
+      await logFailedStep(exec.execution_id, step.id, 'spam_blocked');
       await advanceOrComplete(exec, step, 0);
       return 'failed';
     }

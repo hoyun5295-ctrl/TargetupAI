@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
-import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample, SPAM_BLOCK_NOTICE } from '../utils/spam-block';
+import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample, parseBlockMode, SPAM_BLOCK_NOTICE } from '../utils/spam-block';
+import { composeSpamCheckText } from '../utils/messageUtils';
 import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache, GEO_BLOCK_NOTICE, validateCidrToken, isInvalidCidrError, parseExceptionExpiry } from '../utils/geo-access';
 import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy, lineKindOf, parseLineLimitInput } from '../utils/sender-line-limit';
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
@@ -27,7 +28,7 @@ import { parseCodeList, resolveOutreachExampleCodes, promoteOutreachExamples, li
 import { distillIndustryFormula } from '../utils/industry-formula';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
-import { invalidateCompanySessions } from '../utils/session-manager';
+import { invalidateCompanySessions, invalidateUserSessions } from '../utils/session-manager';
 import { revokeTakeoverPasses, maskPhone, isMfaSchemaMissing } from '../utils/mfa';
 import { restrictAccount, isRestrictedStatus, RestrictionOutcome } from '../utils/account-action';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
@@ -775,16 +776,15 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
 // ============================================================
 // ★ 2026-08-18 금칙어 차단 체계 (전송자격인증 5.2)
 //   ⛔ 단일 키워드 규칙은 만들 수 없다(요소 2~5개 조합만). 정상 문자를 막지 않기 위한 하한이다.
-//   ⛔ ★0819 — 이 체계는 **탐지만 한다.** 모드 승격(hold·block) 경로는 없앴다.
-//      차단 판정이 차감 뒤에 있어 막는 순간 환불 정합이 깨지기 때문이다(근거 = utils/spam-block.ts 머리).
-//      차단은 판정을 차감 앞 preflight로 옮기는 재설계 뒤에 연다.
+//   ★1003 차단 승격 — 규칙마다 탐지(detect) · 차단(block)을 고른다. 새 규칙은 탐지로 시작하고,
+//      오탐 시뮬레이션을 본 뒤 모드 전환 라우트(PATCH …/mode)로만 차단으로 올린다(전환은 감사 기록).
+//      차단은 발송 경로마다 차감 앞에서 판정한다(근거 = utils/spam-block.ts 머리).
 //   컨트롤타워 = utils/spam-block.ts
 // ============================================================
 router.get('/spam-block/rules', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
   try {
-    // mode는 내려주지 않는다 — 화면이 의미 없는 값을 승격 가능한 것처럼 보이면 안 된다
     const result = await query(
-      `SELECT r.id, r.name, r.elements, r.source, r.note, r.is_active,
+      `SELECT r.id, r.name, r.elements, r.mode, r.source, r.note, r.is_active,
               r.exempt_company_ids, r.created_at, r.updated_at,
               (SELECT COUNT(*) FROM spam_block_hits h WHERE h.rule_id = r.id) AS hit_count
          FROM spam_block_rules r
@@ -815,12 +815,12 @@ router.post('/spam-block/rules', authenticate, requireSuperAdmin, async (req: Re
     const source = String(req.body?.source || 'internal').trim();
     const exempt = Array.isArray(req.body?.exemptCompanyIds) ? req.body.exemptCompanyIds : [];
 
-    // mode는 컬럼 기본값과 같은 'detect'를 명시해 둔다 — 이 값을 바꾸는 경로는 코드에 없다
+    // 새 규칙은 언제나 탐지로 시작한다 — 차단은 시뮬레이션을 본 뒤 모드 전환 라우트로만 올린다
     const result = await query(
       `INSERT INTO spam_block_rules
          (id, name, elements, mode, source, note, is_active, exempt_company_ids, created_by, created_at, updated_at)
        VALUES (gen_random_uuid(), $1, $2::jsonb, 'detect', $3, $4, true, $5::uuid[], $6, NOW(), NOW())
-       RETURNING id, name, elements, source, is_active`,
+       RETURNING id, name, elements, mode, source, is_active`,
       [name, JSON.stringify(validated.elements), source, String(req.body?.note || '').slice(0, 500) || null, exempt, req.user?.userId || null]
     );
     invalidateSpamBlockCache();
@@ -860,7 +860,7 @@ router.put('/spam-block/rules/:id', authenticate, requireSuperAdmin, async (req:
       elements = validated.elements;
     }
 
-    // ⛔ mode는 수정 대상이 아니다 — 승격 경로 자체를 없앴다(위 절 머리). 요청에 실려 와도 무시한다.
+    // ⛔ mode는 여기서 바꾸지 않는다 — 전환은 PATCH …/mode 하나로만(전후 값을 감사 기록에 남긴다). 요청에 실려 와도 무시한다.
 
     // ★ 0818 Codex F9 — 미전송 필드를 구값으로 되쓰면 동시 수정이 서로를 덮는다(lost update).
     //   elements도 요청에 있을 때만 바꾼다.
@@ -905,8 +905,64 @@ router.put('/spam-block/rules/:id', authenticate, requireSuperAdmin, async (req:
 });
 
 /**
+ * ★1003 차단 승격 — 규칙 하나의 탐지 · 차단 전환. 모드를 바꾸는 길은 이것 하나다.
+ *   전후 값은 한 문장으로 잡는다(행 잠금 뒤 갱신) — 동시 전환이 서로의 "전" 값을 덮어 감사 기록이 어긋나지 않게.
+ *   차단으로 올린 순간부터 발송 경로의 차감 앞 판정이 이 규칙으로 막는다(규칙 캐시를 바로 비운다).
+ */
+router.patch('/spam-block/rules/:id/mode', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    if (!UUID_RE.test(String(id || ''))) return res.status(400).json({ error: '규칙을 찾을 수 없습니다.' });
+    const raw = req.body?.mode;
+    if (raw !== 'detect' && raw !== 'block') {
+      return res.status(400).json({ error: '모드는 탐지(detect) 또는 차단(block)이어야 합니다.' });
+    }
+    // 차단으로 올릴 때는 지금 기준의 조합 검증을 다시 통과해야 한다 — 옛 기준으로 저장된 규칙이
+    //   차단으로 올라가 사실상 단일 키워드 차단이 되는 길을 막는다(규칙 로드도 같은 검증으로 거른다).
+    if (raw === 'block') {
+      const current = await query(`SELECT elements FROM spam_block_rules WHERE id = $1::uuid`, [id]);
+      if (current.rows.length === 0) return res.status(404).json({ error: '규칙을 찾을 수 없습니다.' });
+      const checked = validateElements(current.rows[0].elements);
+      if (!checked.ok) {
+        return res.status(400).json({ error: `이 규칙은 차단으로 올릴 수 없습니다. ${checked.error} 요소를 고쳐 다시 등록해 주세요.` });
+      }
+    }
+    const updated = await query(
+      `WITH prev AS (SELECT id, mode FROM spam_block_rules WHERE id = $2::uuid FOR UPDATE)
+       UPDATE spam_block_rules r
+          SET mode = $1, updated_at = NOW()
+         FROM prev
+        WHERE r.id = prev.id
+       RETURNING prev.mode AS before_mode, r.mode AS after_mode, r.name, r.is_active`,
+      [raw, id]
+    );
+    if (updated.rows.length === 0) return res.status(404).json({ error: '규칙을 찾을 수 없습니다.' });
+    invalidateSpamBlockCache();
+    const row = updated.rows[0];
+
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'spam_block_rule_mode',
+      targetType: 'spam_block_rule',
+      targetId: id,
+      details: { name: row.name, before: { mode: parseBlockMode(row.before_mode) }, after: { mode: parseBlockMode(row.after_mode) }, isActive: row.is_active },
+      req,
+    });
+
+    return res.json({ success: true, mode: parseBlockMode(row.after_mode) });
+  } catch (error: any) {
+    if (String(error?.message || '').includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: spam_block_rules 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('금칙어 규칙 모드 전환 실패:', error);
+    return res.status(500).json({ error: '금칙어 규칙 모드 전환 실패' });
+  }
+});
+
+/**
  * ★ 오탐 확인 — 규칙을 실제 발송 문안에 돌려본다(차단하지 않는다).
  *   검증 없이 차단 모드로 올리지 않기 위한 장치다.
+ *   ★1003 입력은 차감 앞 차단과 **같은 함수**(composeSpamCheckText)로 만든다 — 제목 · 본문 · (광고) 부착까지 같은 모양.
  */
 router.post('/spam-block/simulate', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
@@ -920,7 +976,7 @@ router.post('/spam-block/simulate', authenticate, requireSuperAdmin, async (req:
     const contents = await query(
       // ★ 0818 Codex F3 — `campaigns.message`는 존재하지 않는다(SCHEMA 실측 = message_content).
       //   그대로 뒀으면 시뮬레이션이 늘 0건을 돌려주고 "오탐 없음"으로 오독됐다.
-      `SELECT id, company_id, message_content, message_subject, created_at
+      `SELECT id, company_id, message_content, subject, message_subject, message_type, is_ad, created_at
          FROM campaigns
         WHERE created_at > NOW() - INTERVAL '1 day' * $1
           AND message_content IS NOT NULL AND message_content <> ''
@@ -931,12 +987,17 @@ router.post('/spam-block/simulate', authenticate, requireSuperAdmin, async (req:
 
     const probe = {
       id: 'simulation', name: 'simulation', elements: validated.elements,
-      source: 'simulation', exemptCompanyIds: [],
+      mode: 'block' as const, source: 'simulation', exemptCompanyIds: [],
     };
     const matched: Array<{ campaignId: string; companyId: string; sample: string }> = [];
     for (const row of contents.rows) {
-      // 게이트는 `제목 + 개행 + 본문`을 본다 — 시뮬레이션도 같은 입력이어야 한다
-      const probeContent = `${String(row.message_subject ?? '')}\n${String(row.message_content ?? '')}`;
+      // 차단과 같은 입력 — 제목은 발송이 쓰는 subject, 비어 있으면 message_subject(원본 제목)
+      const probeContent = composeSpamCheckText({
+        message: String(row.message_content ?? ''),
+        subject: String(row.subject || row.message_subject || ''),
+        msgType: String(row.message_type || ''),
+        isAd: row.is_ad === true,
+      });
       if (matchesRule(probe, probeContent)) {
         if (matched.length < sampleLimit) {
           matched.push({ campaignId: row.id, companyId: row.company_id, sample: maskSample(probeContent).slice(0, 120) });
@@ -1375,15 +1436,34 @@ router.patch('/admin-accounts/:id/active', authenticate, requireSuperAdmin, requ
     }
 
     await query('UPDATE super_admins SET is_active = $1 WHERE id = $2', [nextActive, id]);
+
+    // ★2026-10-03 전송자격인증 3.3 — 중지는 **지금 접속 중인 세션까지** 끊는다. 로그인 게이트(is_active)는 새 로그인만 막고,
+    //   이미 받은 토큰은 세션 행이 살아 있는 한 그대로 통과한다(인증 미들웨어는 세션 행만 본다).
+    //   계정을 먼저 막은 뒤 끊는다 — 순서가 반대면 그 사이 새 로그인이 생긴다. 끊은 뒤 남은 세션을 다시 세어 0 을 확인한다.
+    let sessionsEnded = 0;
+    if (!nextActive) {
+      const countLive = async () => Number((await query(
+        'SELECT COUNT(*)::int AS n FROM user_sessions WHERE user_id = $1 AND is_active = true', [id]
+      )).rows[0]?.n || 0);
+      sessionsEnded = await invalidateUserSessions(id);
+      // 끊는 순간 진행 중이던 로그인이 세션을 만들었을 수 있다 — 한 번 더 끊고 다시 센다
+      if (await countLive() > 0) sessionsEnded += await invalidateUserSessions(id);
+      const remaining = await countLive();
+      if (remaining > 0) {
+        console.error(`[admin-accounts] 사용 중지 뒤 접속이 남았다 admin=${id} remaining=${remaining}`);
+        return res.status(500).json({ error: '계정은 중지했지만 접속 중인 세션을 모두 끊지 못했습니다. 다시 시도해 주세요.' });
+      }
+    }
+
     await recordAuditLog({
       actorUserId: req.user?.userId || null,
       action: nextActive ? 'admin_account_enabled' : 'admin_account_disabled',
       targetType: 'super_admin',
       targetId: id,
-      details: { login_id: before.rows[0].login_id, name: before.rows[0].name, reason },
+      details: { login_id: before.rows[0].login_id, name: before.rows[0].name, reason, ...(nextActive ? {} : { sessionsEnded }) },
       req,
     });
-    return res.json({ success: true });
+    return res.json({ success: true, ...(nextActive ? {} : { sessionsEnded }) });
   } catch (error: any) {
     console.error('관리자 계정 상태 변경 실패:', error);
     return res.status(500).json({ error: '관리자 계정 상태 변경 실패' });

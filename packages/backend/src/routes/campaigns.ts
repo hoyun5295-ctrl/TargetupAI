@@ -10,7 +10,8 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVarian
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSends } from '../utils/customer-send-stats';
-import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts } from '../utils/messageUtils';
+import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts, composeSpamCheckText } from '../utils/messageUtils';
+import { checkSpamBlockBeforeCharge } from '../utils/spam-block';
 import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, getDisplayContents, spamBilledResultSql, spamFailedResultSql, isSpamResultBilled, spamResultRowStatus } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
@@ -1193,6 +1194,26 @@ for (const customer of filteredCustomers) {
   }
 }
 
+// ★ 2026-10-03 전송자격인증 5.2 — 금칙어 **차단**(차감 앞 · 원문 판정). 문자로 나가는 문안만 본다.
+//   걸리면 실행 행을 실패로 닫고(잠금 해제 · 문안 수정 뒤 재발송 가능) 돈은 움직이지 않는다.
+//   판정 · 기록 · 실패 시 통과(fail-open)는 CT 소유 = utils/spam-block.ts
+if (sendChannel === 'sms' || sendChannel === 'both') {
+  const spamVerdict = await checkSpamBlockBeforeCharge({
+    items: [{
+      text: composeSpamCheckText({
+        message: campaign.message_content || '', subject: campaign.subject || '',
+        msgType: campaign.message_type, isAd: campaign.is_ad === true,
+      }),
+      recipients: filteredCustomers.length,
+    }],
+    companyId, userId, source: 'campaign',
+  });
+  if (spamVerdict.blocked) {
+    await failCampaignRun(campaignRun.id, '금칙어 차단으로 발송 중단');
+    return res.status(400).json({ error: spamVerdict.notice, code: spamVerdict.code });
+  }
+}
+
 // ── 여기서부터 되돌릴 수 없는 것들(차감·적재) ─────────────────────────
 //   ★ 2026-08-18 preflight — 위 1단계에서 **모든 수신자의 행을 만들어 본 뒤**에 차감한다.
 //   전에는 [차감 → 조립 → 적재] 순서라 규격 위반이 조립에서 throw하면 돈이 이미 움직인 뒤였다.
@@ -2315,6 +2336,21 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     const directNightAdMsg = nightAdRestrictionMessage(finalIsAd, scheduled, scheduledAt, SEND_HOURS.start, SEND_HOURS.end);
     if (directNightAdMsg) {
       return res.status(400).json({ success: false, error: directNightAdMsg, code: 'NIGHT_AD_RESTRICTED' });
+    }
+
+    // ★ 2026-10-03 전송자격인증 5.2 — 금칙어 **차단**(캠페인 생성 · 차감 앞 · 원문 판정). 문자로 나가는 문안만 본다.
+    //   CT = utils/spam-block.ts(판정 · 기록 · 실패 시 통과) · 입력 = messageUtils composeSpamCheckText
+    if (directChannel === 'sms' || directChannel === 'both') {
+      const directSpam = await checkSpamBlockBeforeCharge({
+        items: [{
+          text: composeSpamCheckText({ message: sanitizedMessage, subject: subject || '', msgType, isAd: finalIsAd }),
+          recipients: recipients.length,
+        }],
+        companyId, userId, source: 'direct',
+      });
+      if (directSpam.blocked) {
+        return res.status(400).json({ success: false, error: directSpam.notice, code: directSpam.code });
+      }
     }
 
     // ★ D102: 중복제거 — 사용자 선택에 따라 적용 (기본 true)

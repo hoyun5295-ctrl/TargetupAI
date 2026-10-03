@@ -48,7 +48,7 @@ describe('상태 변경 결과를 본 뒤에만 상태 문장을 남긴다(ⓕ)'
   });
 
   it('만료·문안 확인 분기 다섯 곳은 상태가 바뀌지 않았으면 안내하지 않는다', () => {
-    for (const kind of ['dispatch_no_owner', 'dispatch_var_overflow', 'dispatch_no_recipient', 'dispatch_callback_unregistered', 'dispatch_zero_after_filter']) {
+    for (const kind of ['dispatch_no_owner', 'dispatch_var_overflow', 'dispatch_no_recipient', 'dispatch_callback_unregistered', 'dispatch_zero_after_filter', 'dispatch_spam_blocked']) {
       const at = src.indexOf(`notifyFailed('${kind}'`);
       expect(at, kind).toBeGreaterThan(0);
       const before = src.slice(src.lastIndexOf('setStatus(', at) - 30, at);
