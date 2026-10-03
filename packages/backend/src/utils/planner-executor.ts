@@ -325,7 +325,8 @@ async function passSpamGate(
         const regen = await runInCreditBundle(() =>
           generateMessages(
             buildSpamRegeneratePrompt(objective, ''),
-            { count: 0, segmentName: tp.title, criteria: '' } as any,
+            // ★ 2026-10-03 대상 정보 형식(total_count) — 옛 { count } 는 generateMessages 가 total_count 를 읽다 던져 재생성이 늘 0회였다
+            { total_count: 0 },
             { channel: 'LMS', isAd: true, rejectNumber: rejectNumber || undefined, model: 'opus', companyId: tp.companyId },
           ),
         );

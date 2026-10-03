@@ -40,6 +40,13 @@ interface Props {
 const CONFIDENCE_LABEL: Record<string, string> = { high: '높음', medium: '보통', low: '낮음' };
 const RISK_LABEL: Record<string, string> = { low: '낮음', medium: '보통', high: '높음' };
 const variantLetter = (i: number) => String.fromCharCode(65 + i);
+/** ★ 2026-10-03 안별 스팸 검사 결과 표기(서버 판정값 → 고객 말 · 정책 사유와 같은 말) */
+const SPAM_RESULT_CHIP: Record<string, { text: string; cls: string }> = {
+  pass: { text: '스팸 검사 통과', cls: 'bg-emerald-50 text-emerald-700' },
+  blocked: { text: '스팸 차단', cls: 'bg-rose-50 text-rose-700' },
+  timeout: { text: '검사 결과 없음', cls: 'bg-slate-100 text-slate-500' },
+  failed: { text: '검사 실패', cls: 'bg-slate-100 text-slate-500' },
+};
 
 export default function ProposalDecisionCard({
   proposal, featured = false, expanded, variantData, busy,
@@ -115,8 +122,12 @@ export default function ProposalDecisionCard({
     return arrayPager(info.recipients)(page, pageSize);
   };
 
-  const banditIdx = recommendedIdx != null && messages[recommendedIdx] ? recommendedIdx : 0;
-  // 사용자가 고른 변형이 있으면 그것, 없으면 Bandit 추천. 미리보기·발송이 모두 이 index를 따른다.
+  // ★ 2026-10-03 스팸 검사를 통과한 안이 있으면 그 안이 기본(서버 발송과 같은 순서 = 통과 안 → 추천 안 · 임은지 접수).
+  const spamCheck = pj.spamCheck;
+  const spamPassedIdx = Number.isInteger(spamCheck?.passedIndex) && messages[spamCheck!.passedIndex as number] ? (spamCheck!.passedIndex as number) : null;
+  const spamResultAt = (i: number) => (spamCheck?.results || []).find((r) => r.index === i);
+  const banditIdx = spamPassedIdx != null ? spamPassedIdx : (recommendedIdx != null && messages[recommendedIdx] ? recommendedIdx : 0);
+  // 사용자가 고른 변형이 있으면 그것, 없으면 검사 통과 안(없으면 추천 안). 미리보기·발송이 모두 이 index를 따른다.
   const effectiveIdx = selectedIdx != null && messages[selectedIdx] ? selectedIdx : banditIdx;
   const effectiveMsg = messages[effectiveIdx];
   const effectiveBody = editedBody != null ? editedBody : (effectiveMsg?.body || effectiveMsg?.message || '');
@@ -204,9 +215,13 @@ export default function ProposalDecisionCard({
           <MessageSquare className="w-3 h-3" />{channelName}: {channelReason}
         </span>
       )}
-      {recommendedIdx != null && (
+      {spamPassedIdx != null ? (
+        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+          <Target className="w-3 h-3" />스팸 검사 통과 문안 {variantLetter(spamPassedIdx)}
+        </span>
+      ) : recommendedIdx != null && (
         <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-indigo-100 text-indigo-800">
-          <Target className="w-3 h-3" />Bandit 추천 변형 {variantLetter(recommendedIdx)}
+          <Target className="w-3 h-3" />추천 문안 {variantLetter(recommendedIdx)}
         </span>
       )}
     </div>
@@ -295,7 +310,12 @@ export default function ProposalDecisionCard({
                     {isSel && <Check className="w-3.5 h-3.5 text-indigo-700 shrink-0" />}
                     <span className="text-slate-700 font-medium">{m.variantName || `변형 ${variantLetter(i)}`}</span>
                     {(m.byteCount || m.byte_count) ? <span className="text-[10px] text-slate-400">{m.byteCount || m.byte_count}byte</span> : null}
-                    {rec && <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">Bandit 추천</span>}
+                    {rec && <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">추천</span>}
+                    {spamResultAt(i) && SPAM_RESULT_CHIP[spamResultAt(i)!.result] && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${SPAM_RESULT_CHIP[spamResultAt(i)!.result].cls}`}>
+                        {SPAM_RESULT_CHIP[spamResultAt(i)!.result].text}{spamResultAt(i)!.regenerated ? ' · AI가 다시 씀' : ''}
+                      </span>
+                    )}
                     {isSel && <span className="text-[10px] bg-indigo-100 text-indigo-900 px-1.5 py-0.5 rounded-full">발송 선택됨</span>}
                     {v && <span className="text-[10px] text-slate-400">발송 {v.sentCount} · 클릭 {v.clickCount} · 전환 {v.conversionCount}</span>}
                   </div>

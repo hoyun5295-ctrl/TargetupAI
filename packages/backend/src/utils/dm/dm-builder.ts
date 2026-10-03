@@ -511,12 +511,6 @@ export async function getDmList(
   //   판정 = sales-outreach-dm-ownership.ts). 호출부가 영업 회사일 때만 켜므로 다른 고객사 목록 SQL 은 글자 그대로다.
   const scopeSql = (ownerUserId ? ' AND created_by = $2' : '') + (opts.hidePurgedOutreach ? ` AND ${EXCLUDE_PURGED_OUTREACH_DMS_SQL}` : '');
   const params: any[] = ownerUserId ? [companyId, ownerUserId] : [companyId];
-  // ★ 2026-10-03 다가오는 예약 시각(목록 칩 「예약」 · make-flow dmChipStatus 가 읽는다 · 남지현 접수).
-  //   예약 = 발송결과 「예약내역」과 같은 기준(campaigns.status = 'scheduled'). 토큰에 캠페인 칸이 없으면(DDL 전) 비운다.
-  const scheduledSql = (await hasDmTokenCampaignColumn())
-    ? `(SELECT MIN(cp.scheduled_at) FROM dm_recipient_tokens t ${DM_TOKEN_CAMPAIGN_JOIN_SQL}
-         WHERE t.dm_id = dm_pages.id AND t.campaign_id IS NOT NULL AND cp.status = 'scheduled')`
-    : 'NULL::timestamptz';
   let result;
   try {
     result = await query(
@@ -527,7 +521,6 @@ export async function getDmList(
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               pages->0 AS first_page,
               EXISTS (SELECT 1 FROM dm_recipient_tokens t WHERE t.dm_id = dm_pages.id) AS has_send_history,
-              ${scheduledSql} AS scheduled_at,
               created_at, updated_at
        FROM dm_pages WHERE company_id = $1${scopeSql}
        ORDER BY updated_at DESC`,
@@ -544,7 +537,6 @@ export async function getDmList(
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               pages->0 AS first_page,
               false AS has_send_history,
-              NULL::timestamptz AS scheduled_at,
               created_at, updated_at
        FROM dm_pages WHERE company_id = $1${scopeSql}
        ORDER BY updated_at DESC`,
@@ -554,7 +546,7 @@ export async function getDmList(
   // ★ 2026-09-28 한줄로 V2 R213 — brand_kit·settings 는 목록이 읽는 키만 DB에서 꺼낸다(요약 = 강조색 · 카탈로그 뱃지 = catalog).
   //   옛: 두 JSON 전체(로고·카탈로그 설정 등)를 DM마다 받아 요약에만 썼다. 칸 타입 = jsonb(0903 information_schema 실측).
   // sections/brand_kit 원본은 요약으로 압축해 응답에서 제거(목록 payload 경량)
-  return result.rows.map((row: any) => {
+  const list = result.rows.map((row: any) => {
     const summary = buildSectionSummary(row);
     // legacy(슬라이드) DM은 sections가 없어 summary.count=0 → SQL 집계한 page_count로 보정
     if (summary.types.length === 0 && summary.count === 0) {
@@ -573,12 +565,42 @@ export async function getDmList(
       view_count: row.view_count,
       page_count: row.page_count,
       has_send_history: !!row.has_send_history,
-      scheduled_at: row.scheduled_at || null,
+      scheduled_at: null as string | null,
       section_summary: summary,
       created_at: row.created_at,
       updated_at: row.updated_at,
     };
   });
+  await fillDmScheduledAt(list, companyId);
+  return list;
+}
+
+/**
+ * ★ 2026-10-03 다가오는 예약 시각을 목록 행에 채운다(목록 칩 「예약」 · make-flow dmChipStatus 가 읽는다 · 남지현 접수).
+ * 예약 = 발송결과 「예약내역」과 같은 기준(campaigns.status = 'scheduled').
+ * ⛔ 목록 SQL 에 끼우지 않는다 — 목록 SQL 이 첫 쿼리라는 계약(dm-flow-invariants · dm-list-cover · outreach-dm-ownership 시험)과
+ *    토큰 칸이 없는 환경(DDL 전)의 목록 SQL 을 그대로 둔다. 목록이 비면 조회 0 · 실패하면 비운 채 둔다(목록은 막지 않는다).
+ */
+async function fillDmScheduledAt(list: Array<{ id: string; scheduled_at: string | null }>, companyId: string): Promise<void> {
+  if (list.length === 0) return;
+  try {
+    if (!(await hasDmTokenCampaignColumn())) return;
+    const r = await query(
+      `SELECT t.dm_id, MIN(cp.scheduled_at) AS scheduled_at
+         FROM dm_recipient_tokens t
+         JOIN campaigns cp ON cp.id = t.campaign_id AND cp.company_id = t.company_id
+        WHERE t.company_id = $1::uuid AND t.dm_id = ANY($2::uuid[]) AND cp.status = 'scheduled'
+        GROUP BY t.dm_id`,
+      [companyId, list.map((d) => d.id)],
+    );
+    const byDm = new Map<string, string>();
+    for (const row of r.rows) {
+      if (row?.dm_id && row.scheduled_at) byDm.set(String(row.dm_id), row.scheduled_at instanceof Date ? row.scheduled_at.toISOString() : String(row.scheduled_at));
+    }
+    for (const d of list) d.scheduled_at = byDm.get(String(d.id)) || null;
+  } catch (e: any) {
+    console.warn('[DM 목록] 예약 시각 조회 실패(예약 칩 없이 목록):', e?.message);
+  }
 }
 
 /**

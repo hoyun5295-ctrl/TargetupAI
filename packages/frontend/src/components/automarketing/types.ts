@@ -233,6 +233,14 @@ export interface ProposalJson {
     usePersonalization?: boolean;
     personalizationVars?: string[];
   };
+  /**
+   * ★ 2026-10-03 추천 안별 스팸 검사 결과(서버 continuous-operator · 안을 차례로 검사하고 첫 통과에서 멈춤).
+   * passedIndex = 통과한 안(없으면 null) — 기본 미리보기와 발송 문안이 이 안을 따른다(사용자가 고르면 그 선택).
+   */
+  spamCheck?: {
+    passedIndex?: number | null;
+    results?: Array<{ index: number; result: string; regenerated?: boolean }>;
+  };
 }
 
 export interface OperatorProposal {

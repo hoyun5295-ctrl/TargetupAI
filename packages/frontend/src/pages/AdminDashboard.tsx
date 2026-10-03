@@ -22,6 +22,7 @@ import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal
 import AgencyMailIntakePanel from '../components/admin/AgencyMailIntakePanel'; // ★ 2026-08-26 대행발송 메일 접수 관제(§18)
 import AgencySendLedgerPanel from '../components/admin/AgencySendLedgerPanel'; // ★ 2026-08-26(2) 대행발송 내역(전 고객사 진행현황)
 import { AUDIT_ACTION_COLOR, AUDIT_ACTION_LABEL, formatAuditDetail } from '../constants/audit-action-labels'; // ★ 2026-08-24 감사 액션 한글화 CT
+import { resolveSpamHitSourceLabel, resolveSpamRuleSourceLabel } from '../constants/spam-block-labels'; // ★1003 금칙어 화면 내부 코드 표시명
 import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
 import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 요금제 라벨 = 월정액(고객 수 축 폐기)
@@ -6319,7 +6320,7 @@ const handleApproveRequest = async (id: string) => {
                             ))}
                           </div>
                         </td>
-                        <td className="px-4 py-2 text-xs text-gray-500">{r.source}</td>
+                        <td className="px-4 py-2 text-xs text-gray-500">{resolveSpamRuleSourceLabel(r.source)}</td>
                         <td className="px-4 py-2 text-right text-xs text-gray-700">{r.hit_count}</td>
                         <td className="px-4 py-2">
                           <div className="flex items-center gap-2 whitespace-nowrap">
@@ -6344,7 +6345,7 @@ const handleApproveRequest = async (id: string) => {
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <h3 className="text-base font-semibold text-gray-900">탐지 · 차단 결과 로그</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 금칙어 탐지 로그 (spam_block_hits)</p>
+                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 금칙어 탐지 · 차단 기록</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -6368,7 +6369,7 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-2 text-xs text-gray-500">{new Date(h.created_at).toLocaleString('ko-KR')}</td>
                         <td className="px-4 py-2 text-xs text-gray-900">{h.rule_name || '-'}</td>
                         <td className="px-4 py-2 text-xs text-gray-700">{h.company_name || '-'}</td>
-                        <td className="px-4 py-2 text-xs text-gray-500">{h.send_source || '-'}</td>
+                        <td className="px-4 py-2 text-xs text-gray-500">{resolveSpamHitSourceLabel(h.send_source)}</td>
                         <td className="px-4 py-2">
                           <span className={`px-2 py-0.5 text-[11px] rounded whitespace-nowrap ${h.action_taken === 'block' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
                             {h.action_taken === 'block' ? '발송 차단' : h.mode === 'block' ? '탐지 · 차단 규칙' : '탐지'}

@@ -130,10 +130,12 @@ describe('배선', () => {
     expect(r).toContain('batches = await getDmSendBatches(req.params.id, companyId);');
   });
 
-  it('목록은 다가오는 예약 시각을 내려준다(목록 칩 「예약」)', () => {
-    const fn = builder.slice(builder.indexOf('export async function getDmList('), builder.indexOf('export async function cloneDm(') > 0 ? builder.indexOf('export async function cloneDm(') : undefined);
-    expect(fn).toContain('scheduled_at: row.scheduled_at || null,');
+  it('목록은 다가오는 예약 시각을 내려준다(목록 칩 「예약」) · 목록 SQL 뒤에 따로 채운다(목록 SQL = 첫 쿼리 계약)', () => {
+    const fn = builder.slice(builder.indexOf('export async function getDmList('), builder.indexOf('export async function cloneDm('));
+    expect(fn).toContain('await fillDmScheduledAt(list, companyId);');
     expect(fn).toContain("cp.status = 'scheduled'");
+    expect(fn.indexOf('await fillDmScheduledAt(list, companyId);')).toBeGreaterThan(fn.indexOf('result = await query('));
+    expect(fn).toContain('if (list.length === 0) return;');
   });
 });
 

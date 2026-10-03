@@ -29,13 +29,13 @@
 import { KST_TODAY_START_SQL, KST_MONTH_START_SQL } from './stats-aggregation';
 import { query, pool } from '../config/database';
 import { orchestrate } from '../services/ai-orchestrator';
-import { getCompanyCosts, SEND_HOURS } from '../config/defaults';
+import { getCompanyCosts, SEND_HOURS, TIMEOUTS } from '../config/defaults';
 import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit — message variants 생성 + Thompson Sampling
 import { insertProposalVariants, recommendVariantForProposal, recordVariantReward } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
-import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
+import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL } from './continuous-operator-policy';
 import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder, detectMissedOperatorRound } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
@@ -1084,48 +1084,90 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   //    channelForSpam·callbackForSpam·bestMessage·bestSubject·canAutoSend는 위 자격 판정에서 계산됨.
   if (canAutoSend) {
     try {
+      // ★ 2026-10-03 추천 3안을 차례로 검사하고 첫 통과에서 멈춘다 · 모두 막히면 그때 1안을 재생성(임은지 접수).
+      //   옛: 1안만 검사하고 화면·발송은 무작위 추천 안을 써서 검사한 문안과 나가는 문안이 갈렸다.
+      //   안 번호 = 글자(A·B·C) 순서. 빈 문안은 검사하지 않는다(번호는 그대로 둔다).
+      const spamVariants = messages.slice(0, 3).map((m: any, i: number) => ({
+        variantId: String.fromCharCode(65 + i),
+        messageText: String(m?.body || m?.message || ''),
+        subject: m?.subject ? String(m.subject) : (bestSubject || undefined),
+      })).filter((v: { messageText: string }) => !!v.messageText);
       const spamResult = await autoSpamTestWithRegenerate({
         companyId: operator.companyId,
         userId: operator.createdBy || operator.companyId,
         callbackNumber: callbackForSpam,
         messageType: (channelForSpam === 'LMS' || channelForSpam === 'MMS' ? channelForSpam : 'SMS') as 'SMS' | 'LMS' | 'MMS',
         subject: bestSubject || undefined,
-        variants: [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined }],
+        variants: spamVariants.length > 0 ? spamVariants : [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined }],
         isAd: !!isAd,
         rejectNumber: ctx.reject_number || undefined,
         maxRetries: 2,  // ★ Harold 2026-05-31: AI 재생성 2회
+        stopOnFirstPass: true,
+        budgetMs: TIMEOUTS.operatorSpamVariantsBudget,
         // 차단 시 AI 재작성 (Opus) — buildSpamRegeneratePrompt: 목표 유지 + 구체 혜택 생성 금지
         regenerateCallback: async () => {
           try {
             // 스팸 재생성은 자동마케팅 사이클 안전망(품질 보증) → 묶음으로 차감 0 (사이클 1회 200에 포함).
+            // ★ 2026-10-03 대상 정보 형식(total_count) — 옛 { count } 는 generateMessages 가 total_count 를 읽다 던져
+            //   catch 가 null 로 삼켰다(재생성이 늘 0회 · 화면 「AI 재생성 0회 후에도」의 원인).
             const regen = await runInCreditBundle(() => generateMessages(
               buildSpamRegeneratePrompt(operator.objective, buildCopyStylePromptBlock(operator.copyStyle)),
-              { count: recipientCount, segmentName: orchestratorResult.target?.suggestedName || operator.name, criteria: orchestratorResult.target?.criteria || '' } as any,
+              { total_count: recipientCount },
               { channel: channelForSpam, isAd: !!isAd, rejectNumber: ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId },
             ));
             const nv = regen.variants?.[0] as any;
             if (nv) return { messageText: String(nv.message_text || nv.sms_text || nv.lms_text || nv.body || ''), subject: nv.subject };
             return null;
-          } catch { return null; }
+          } catch (e: any) {
+            console.warn('[ContinuousOperator] 스팸 재생성 실패:', e?.message);
+            return null;
+          }
         },
       });
 
-      const variantResult = spamResult.variants[0];
-      const finalResult = (variantResult?.spamResult || 'failed') as 'pass' | 'blocked' | 'failed' | 'timeout';
-      const regenCount = variantResult?.regenerateCount || 0;
+      const tested = spamResult.variants || [];
+      const letterIndex = (id: string) => String(id || 'A').charCodeAt(0) - 65;
+      const passedIndex = spamResult.passedVariantId ? letterIndex(spamResult.passedVariantId) : null;
+      const firstTested = tested[0];
+      // 최종 판정 = 통과 안이 있으면 통과 · 없으면 차단이 하나라도 있으면 차단 · 그 밖은 1안의 판정
+      const finalResult = (passedIndex != null ? 'pass'
+        : tested.some((v) => v.spamResult === 'blocked') ? 'blocked'
+          : (firstTested?.spamResult || 'failed')) as 'pass' | 'blocked' | 'failed' | 'timeout';
+      const regenCount = firstTested?.regenerateCount || 0;
 
-      // 재생성된 문안이 통과했으면 proposal_json의 best 메시지를 교체 (실제 발송될 문안 = 통과 문안)
-      if (variantResult?.regenerated && variantResult.messageText) {
-        finalNoticeCopy = variantResult.messageText;
-        try {
-          const pj = orchestratorResult;
-          if (pj.messages?.[0]) {
-            pj.messages[0].body = variantResult.messageText;
-            if (variantResult.subject) pj.messages[0].subject = variantResult.subject;
-          }
-          await query(`UPDATE operator_proposals SET proposal_json = $2::jsonb WHERE id = $1::uuid`,
-            [proposalRes.rows[0].id, JSON.stringify(pj)]);
-        } catch (e: any) { console.warn('[ContinuousOperator] 재생성 문안 반영 skip:', e?.message); }
+      // 제안에 안별 결과와 통과 안 번호를 남긴다 — 화면 기본 미리보기 · 발송 문안(dispatchProposalSend)이 이 번호를 따른다.
+      //   ★ Codex 1R high — 검사는 수 분이 걸리고 그동안 제안은 화면에 있어 사람이 승인·선택·중지할 수 있다.
+      //   ⛔ 메모리의 옛 제안 JSON 으로 DB 를 덮지 않는다(그 사이 저장된 userSelection·meta 가 지워져 사람이 고른 안 대신 다른 안이 나간다).
+      //      DB 의 지금 값에 spamCheck 칸만 붙이고, 재생성된 1안 문안은 사람이 손대지 않은 제안(선택 없음)에만 바꿔 넣는다.
+      //   ⛔ 저장 실패를 삼키지 않는다 — 통과 안 번호 없이 자동 발송이 남으면 막힌 안·검사 안 한 안이 나갈 수 있다(바깥 catch = 담당자 검토).
+      const spamCheck = {
+        passedIndex,
+        results: tested.map((v) => ({ index: letterIndex(v.variantId), result: v.spamResult, regenerated: !!v.regenerated })),
+      };
+      const regenIdx = firstTested?.regenerated && firstTested.messageText ? letterIndex(firstTested.variantId) : null;
+      const regenPatch = regenIdx != null
+        ? { body: firstTested!.messageText, ...(firstTested!.subject ? { subject: firstTested!.subject } : {}) }
+        : null;
+      const saved = await query(
+        `UPDATE operator_proposals
+            SET proposal_json = jsonb_set(
+                  CASE WHEN $3::jsonb IS NOT NULL
+                         AND status IN ('pending', 'scheduled') AND reviewed_at IS NULL
+                         AND NOT (proposal_json ? 'userSelection')
+                         AND jsonb_typeof(proposal_json->'messages'->($4::int)) = 'object'
+                       THEN jsonb_set(proposal_json, ARRAY['messages', $5::text], (proposal_json->'messages'->($4::int)) || $3::jsonb)
+                       ELSE proposal_json END,
+                  '{spamCheck}', $2::jsonb, true)
+          WHERE id = $1::uuid
+          RETURNING status, (status IN ('pending', 'scheduled') AND reviewed_at IS NULL) AS untouched, proposal_json->'messages' AS messages`,
+        [proposalRes.rows[0].id, JSON.stringify(spamCheck), regenPatch ? JSON.stringify(regenPatch) : null, regenIdx ?? 0, String(regenIdx ?? 0)],
+      );
+      if (saved.rows.length === 0) throw new Error('스팸 검사 결과를 저장할 제안 행이 없습니다');
+      const liveStatus = String(saved.rows[0].status || '');
+      const untouched = saved.rows[0].untouched === true;
+      const savedMessages = Array.isArray(saved.rows[0].messages) ? saved.rows[0].messages : [];
+      if (passedIndex != null && savedMessages[passedIndex]) {
+        finalNoticeCopy = String(savedMessages[passedIndex].body || savedMessages[passedIndex].message || finalNoticeCopy);
       }
 
       // 스팸 결과 저장 + 상태 결정 (decideSpamOutcome 순수 정책)
@@ -1139,19 +1181,27 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
 
       if (outcome.status === 'admin_review') {
         // 끝내 통과 X → 담당자 검토 대기 (자동 발송 차단 + scheduled 해제, 자동 폐기 X)
-        await query(
+        //   ★ Codex 1R — 검사 중 사람이 승인·중지했으면(reviewed_at · 상태 변경) 그 판단을 덮지 않고 정지·통지도 하지 않는다.
+        const downgraded = await query(
           `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL, auto_execute_reason = $2
-           WHERE id = $1::uuid`,
+           WHERE id = $1::uuid AND status IN ('pending', 'scheduled') AND reviewed_at IS NULL
+           RETURNING id`,
           [proposalRes.rows[0].id, outcome.reason],
         );
-        console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 (재생성 ${regenCount}회) → 담당자 검토 대기`);
-        // ★ 스팸 2회 재생성 후에도 실패 → 운영자 일시정지 + 담당자 사유 알림(설계 §1)
-        await query(`UPDATE continuous_operators SET status = 'paused', updated_at = NOW() WHERE id = $1::uuid AND status = 'active'`, [operator.id]).catch(() => {});
-        await notifyOperatorAdmins(operator, '[AI 자동마케팅] 일시정지', `'${operator.name}' 문안이 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안 검토 후 재개해주세요.`).catch((e: any) => console.warn('[ContinuousOperator] 정지 알림 경고:', e?.message));
+        if (downgraded.rows.length > 0) {
+          console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 (재생성 ${regenCount}회) → 담당자 검토 대기`);
+          // ★ 스팸 2회 재생성 후에도 실패 → 운영자 일시정지 + 담당자 사유 알림(설계 §1)
+          await query(`UPDATE continuous_operators SET status = 'paused', updated_at = NOW() WHERE id = $1::uuid AND status = 'active'`, [operator.id]).catch(() => {});
+          // ★ 2026-10-03 따옴표 안은 자동마케팅 이름이다(옛 문구는 문안 이름처럼 읽혔다) · 검사한 안 수를 함께 알린다
+          await notifyOperatorAdmins(operator, '[AI 자동마케팅] 일시정지', `'${operator.name}' 자동마케팅의 추천 문안 ${tested.length}안이 모두 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안 검토 후 재개해주세요.`).catch((e: any) => console.warn('[ContinuousOperator] 정지 알림 경고:', e?.message));
+        } else {
+          console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 — 검사 중 담당자가 이미 처리한 제안이라 상태·정지·통지를 바꾸지 않음`);
+        }
       } else {
         console.log(`[ContinuousOperator] ${operator.name} 스팸 통과 (재생성 ${regenCount}회)`);
         // 자율 발송 예정(scheduled) → 담당자에 실문안 + 발송 정보(일시·타겟·비용)·정지 안내 (준비 시점 알림, 무과금 인증 라인)
-        if (autoExecuteEligible) {
+        //   ★ Codex 1R — 아직 자동 발송 예정이고 사람이 손대지 않은 제안일 때만(검사 중 승인·중지됐으면 알림이 사실과 다르다)
+        if (autoExecuteEligible && untouched && liveStatus === 'scheduled') {
           // ★ 2026-07-02: 재생성으로 문안이 교체됐으면 실제 발송될 통과 문안을 통지 (직전엔 원본을 보내 통지≠실발송 불일치)
           await sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, finalNoticeCopy, scheduledSendAt, {
             recipientCount,
@@ -1165,9 +1215,10 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       console.warn(`[ContinuousOperator] 스팸테스트 오류:`, err?.message);
       // 스팸 검증 실패 = 자동 발송 금지. scheduled였으면 담당자 검토로 내림(미검증 발송 차단).
       if (autoExecuteEligible) {
+        // ★ Codex 1R — 검사 결과 저장 실패도 여기로 온다(통과 안 번호 없이 자동 발송이 남지 않게). 사람이 손댄 제안은 덮지 않는다.
         await query(
           `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL,
-             auto_execute_reason = '스팸 검증 오류. 담당자 검토 필요' WHERE id = $1::uuid`,
+             auto_execute_reason = '스팸 검증 오류. 담당자 검토 필요' WHERE id = $1::uuid AND status IN ('pending', 'scheduled') AND reviewed_at IS NULL`,
           [proposalRes.rows[0].id],
         ).catch(() => {});
       }
@@ -1832,10 +1883,25 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
     return 'skipped';
   }
 
-  // claim (scheduled → sending) — 동시 발송/중복 방지
+  // ★ 2026-10-03 Codex 2R high — 자동 발송은 스팸 검사 통과가 저장된 제안만(AUTO_SEND_SPAM_VERIFIED_SQL).
+  //   생성 때 검사 결과 저장과 담당자 검토 전환이 둘 다 실패하면(DB 장애) 'scheduled' 가 남는다 — 보상 쓰기에 기대지 않고
+  //   효과가 만들어지는 이 자리에서 막는다. 통과 기록이 없으면 보내지 않고 담당자 검토로 내린다(사람이 판단).
+  const unverified = await query(
+    `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL,
+       auto_execute_reason = '스팸 검사 통과 기록이 없어 자동 발송하지 않았습니다. 담당자 검토 필요'
+     WHERE id = $1::uuid AND status = 'scheduled' AND NOT ${AUTO_SEND_SPAM_VERIFIED_SQL}
+     RETURNING id`,
+    [proposalId],
+  );
+  if (unverified.rows.length > 0) {
+    console.warn(`[ContinuousOperator AutoSend] ${proposalId} 스팸 검사 통과 기록 없음 → 자동 발송 안 함(담당자 검토)`);
+    return 'skipped';
+  }
+
+  // claim (scheduled → sending) — 동시 발송/중복 방지 · 검증 조건을 같은 문장에도 건다(두 문장 사이 변화 대비)
   const claim = await query(
     `UPDATE operator_proposals SET status = 'sending', reviewed_at = NOW()
-     WHERE id = $1::uuid AND status = 'scheduled' RETURNING *`,
+     WHERE id = $1::uuid AND status = 'scheduled' AND ${AUTO_SEND_SPAM_VERIFIED_SQL} RETURNING *`,
     [proposalId],
   );
   if (claim.rows.length === 0) return 'skipped'; // 다른 패스가 선점했거나 담당자가 정지함
@@ -1896,6 +1962,20 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
   return r.action;
 }
 
+/** 제안의 안 번호 → 변형 행 id(클릭 보상 추적 정합) · 실패 시 null(추적만 생략, 발송 정상) */
+async function lookupProposalVariantId(proposalId: string, variantIndex: number): Promise<string | null> {
+  try {
+    const vrow = await query(
+      `SELECT id FROM operator_proposal_variants WHERE proposal_id = $1::uuid AND variant_index = $2 LIMIT 1`,
+      [proposalId, variantIndex],
+    );
+    return vrow.rows[0]?.id || null;
+  } catch (e: any) {
+    console.warn('[ContinuousOperator AutoSend] 선택 변형 id 조회 실패:', e?.message);
+    return null;
+  }
+}
+
 /**
  * claim된('sending') 제안을 직접발송 파이프라인으로 발송 — 자동(scheduled)·수동(승인) 공유.
  * 크레딧은 발송 성공 시점 1회(멱등). 0건/잔액/발신번호 미설정은 skip + 통지.
@@ -1927,14 +2007,22 @@ async function dispatchProposalSend(
   //   발송 성공 시 그 변이에 sent_count 실측 누적(클릭/전환은 추적 경로에서 별도 누적). 추천 실패/변이 없음 → 0번 fallback.
   let chosenIndex = 0;
   let chosenVariantId: string | null = null;
-  try {
-    const rec = await recommendVariantForProposal(proposalId, { operatorId: p.operator_id, useAccumulated: true });
-    if (rec && Number.isInteger(rec.variantIndex) && rec.variantIndex >= 0 && pj.messages?.[rec.variantIndex]) {
-      chosenIndex = rec.variantIndex;
-      chosenVariantId = rec.variantId;
+  // ★ 2026-10-03 검사한 문안 = 나가는 문안 — 스팸 검사를 통과한 안이 있으면 그 안(무작위 추천보다 먼저 · 임은지 접수).
+  //   사용자가 고른 안(userSelection)은 아래에서 이 선택도 이긴다. 통과 안 기록이 없는 옛 제안은 종전대로 추천을 따른다.
+  const spamPassedIdx = spamCheckPassedIndex(pj);
+  if (spamPassedIdx != null) {
+    chosenIndex = spamPassedIdx;
+    chosenVariantId = await lookupProposalVariantId(proposalId, chosenIndex);
+  } else {
+    try {
+      const rec = await recommendVariantForProposal(proposalId, { operatorId: p.operator_id, useAccumulated: true });
+      if (rec && Number.isInteger(rec.variantIndex) && rec.variantIndex >= 0 && pj.messages?.[rec.variantIndex]) {
+        chosenIndex = rec.variantIndex;
+        chosenVariantId = rec.variantId;
+      }
+    } catch (recErr: any) {
+      console.warn('[ContinuousOperator AutoSend] Bandit 추천 실패, 0번 변이 fallback:', recErr?.message);
     }
-  } catch (recErr: any) {
-    console.warn('[ContinuousOperator AutoSend] Bandit 추천 실패, 0번 변이 fallback:', recErr?.message);
   }
 
   // ★ 2026-07-09 사용자 수동 선택/편집 우선 (수동 승인 경로) — proposal_json.userSelection이 있으면 그 변형/본문으로 발송.
@@ -1946,16 +2034,7 @@ async function dispatchProposalSend(
     if (Number.isInteger(userSel.variantIndex) && userSel.variantIndex >= 0 && pj.messages?.[userSel.variantIndex]) {
       chosenIndex = userSel.variantIndex;
       // 선택된 변형 id를 index로 재조회(클릭 보상 추적 정합). 실패 시 null(추적만 생략, 발송 정상).
-      chosenVariantId = null;
-      try {
-        const vrow = await query(
-          `SELECT id FROM operator_proposal_variants WHERE proposal_id = $1::uuid AND variant_index = $2 LIMIT 1`,
-          [proposalId, chosenIndex],
-        );
-        chosenVariantId = vrow.rows[0]?.id || null;
-      } catch (e: any) {
-        console.warn('[ContinuousOperator AutoSend] 선택 변형 id 조회 실패:', e?.message);
-      }
+      chosenVariantId = await lookupProposalVariantId(proposalId, chosenIndex);
     }
     if (typeof userSel.body === 'string' && userSel.body.trim()) userBodyOverride = userSel.body;
     if (typeof userSel.subject === 'string') userSubjectOverride = userSel.subject;

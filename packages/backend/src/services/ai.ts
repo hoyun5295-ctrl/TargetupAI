@@ -363,7 +363,7 @@ interface AIRecommendResult {
   recommendation_reason: string;
 }
 
-interface TargetInfo {
+export interface TargetInfo {
   total_count: number;
   gender_ratio?: { male: number; female: number };
   age_groups?: { [key: string]: number };
@@ -1205,7 +1205,7 @@ export async function generateMessages(
   const userMessage = `## 캠페인 정보
 - 요청: ${cleanPrompt}
 - 채널: ${channel}
-- 타겟 고객 수: ${targetInfo.total_count.toLocaleString()}명
+- 타겟 고객 수: ${(Number(targetInfo?.total_count) || 0).toLocaleString()}명
 
 ## 오늘 날짜 (한국 시간)
 ${getKoreanToday()}

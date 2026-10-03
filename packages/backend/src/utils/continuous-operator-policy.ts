@@ -65,8 +65,38 @@ export function decideSpamOutcome(
   return {
     status: 'admin_review',
     autoExecuteBlocked: true,
-    reason: `스팸필터 미통과 (AI 재생성 ${regenerateCount}회 후에도 ${finalResult}). 담당자 검토 필요`,
+    // ★ 2026-10-03 화면(자동마케팅 카드 경고)에 그대로 나가는 문장이라 판정값을 한국어로 싣는다(옛: 'blocked' 영문 노출 · 임은지 접수)
+    reason: `스팸필터 미통과 (AI 재생성 ${regenerateCount}회 후에도 ${SPAM_VERDICT_LABEL[finalResult] || '검사 실패'}). 담당자 검토 필요`,
   };
+}
+
+/** ★ 2026-10-03 스팸 검사 판정값의 고객 표기(정책 사유 · 화면 안별 결과가 같은 말을 쓴다) */
+export const SPAM_VERDICT_LABEL: Record<string, string> = {
+  pass: '통과',
+  blocked: '차단',
+  timeout: '결과를 받지 못함',
+  failed: '검사 실패',
+};
+
+/**
+ * ★ 2026-10-03 Codex 2R — 자동 발송(예약 제안 선점)이 요구하는 「검증됨」 SQL 조건(operator_proposals 행 기준).
+ *   - spam_test_status = 'pass' : 생성 때 스팸 검사 통과가 저장됐다(검사 결과 저장 → 상태 저장 순서라 통과 안 번호도 저장됨)
+ *   - reviewed_at IS NOT NULL   : 사람이 승인했다(야간 승인은 승인 뒤 scheduled 로 돌아온다 · 사람이 판단한 발송)
+ *   - 리마인드                  : 자기 검증(스팸 검증 중 → 통과 시 scheduled 승격) 뒤에만 scheduled 가 된다
+ * 이 조건 밖의 scheduled = 검사 결과 저장·담당자 검토 전환이 모두 실패해 남은 행 → 보내지 않고 담당자 검토로 내린다.
+ */
+// ⛔ spam_test_status 는 COALESCE 로 감싼다(Codex 3R) — NULL(검사 결과 저장 실패 = 이 관문이 막으려는 바로 그 행)이면
+//    식 전체가 NULL 이 되어 NOT 식도 NULL → 담당자 검토 전환도 선점도 안 일어나고 scheduled 로 영원히 남는다.
+export const AUTO_SEND_SPAM_VERIFIED_SQL = "(COALESCE(spam_test_status, '') = 'pass' OR reviewed_at IS NOT NULL OR COALESCE(proposal_json->'meta'->>'is_reminder', 'false') = 'true')";
+
+/**
+ * ★ 2026-10-03 제안의 스팸 검사 통과 안 번호(proposal_json.spamCheck.passedIndex) — 없거나 문안이 없으면 null.
+ * 발송은 사용자가 고르지 않았으면 이 안을 보낸다(검사한 문안 = 나가는 문안 · 무작위 추천보다 먼저).
+ */
+export function spamCheckPassedIndex(pj: any): number | null {
+  const idx = pj?.spamCheck?.passedIndex;
+  if (!Number.isInteger(idx) || idx < 0) return null;
+  return Array.isArray(pj?.messages) && pj.messages[idx] ? idx : null;
 }
 
 /**

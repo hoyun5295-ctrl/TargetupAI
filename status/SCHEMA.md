@@ -1008,6 +1008,7 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | created_at | timestamptz |
 | expires_at | timestamptz |
 | short_code | varchar(12) UNIQUE(부분 인덱스) — ★ 2026-07-06 추가 (ALTER) — hlj.kr 단축링크 코드(base62 8자). NULL=단축 미발급(긴 링크) |
+| campaign_id | uuid NULL — ★ 2026-10-03 **DDL 대기(배포 뒤 Harold 실행)** · 이 토큰을 만든 발송 캠페인(예약·취소·실제 발송 시각 판정 · B-1003-6). 코드는 information_schema 로 존재를 확인하고 없으면 종전 동작(`dm-recipient-token.ts hasDmTokenCampaignColumn`) · FK 없음 |
 
 ### dm_custom_short_links (고객사 자체 URL 단축 — hlj.kr) ★ 2026-07-10 신규 (CREATE Harold 실행)
 > 박성용 신기능(Harold 100크레딧 확정). 고객사 외부 MDM URL→hlj.kr/<code>. /s/:code 3순위 조회(토큰→발행 페이지→커스텀) — 발급 시 3축 코드 충돌 확인. 검증=dm-custom-short-link-core(오픈 리다이렉터 차단).
@@ -2675,6 +2676,7 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | auto_execute_reason | text | 자동 실행 시 임계값 검증 결과 |
 | reviewed_by | uuid FK → users | 사용자 승인/거부 시 |
 | reviewed_at | timestamptz | |
+| spam_test_status · spam_test_retry_count · spam_test_reasoning | ★ 2026-10-03 **운영 존재 확인**(Harold 실행 · 이 칸을 WHERE 에 쓴 SELECT 가 오류 없이 0행) · 타입 미기록(information_schema 미조회) | 생성 때 스팸 검사 최종 판정(pass·blocked·timeout·failed)·재생성 횟수·사유. **자동 발송 관문** `AUTO_SEND_SPAM_VERIFIED_SQL`(`COALESCE(spam_test_status, '') = 'pass'` · B-1003-7)이 읽는다 |
 | campaign_id | uuid FK → campaigns | 실행 시 박힘 |
 | expires_at | timestamptz | 7일 후 자동 만료 (사용자 미응답 시) |
 | created_at | timestamptz | |

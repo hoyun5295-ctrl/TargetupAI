@@ -447,7 +447,8 @@ function EmailCard({ email, beforeSend, onSent, onSmtpChanged }: { email: SendEm
   const loadSmtp = useCallback(async () => {
     const r = await fetch('/api/email/status', { headers: authGet() });
     const d = await r.json().catch(() => ({}));
-    setSmtp({ ok: r.ok && !!d?.smtp_configured, from: String(d?.from_email || ''), canManage: d?.can_manage === true });
+    // 조회 실패 = 권한을 모른다 → 연결 버튼을 보인다(관리자에게 「요청」 안내가 잘못 뜨지 않게 · 저장 권한은 서버가 다시 본다)
+    setSmtp({ ok: r.ok && !!d?.smtp_configured, from: String(d?.from_email || ''), canManage: r.ok ? d?.can_manage === true : true });
   }, []);
   const [balance, setBalance] = useState<{ total: number; enabled: boolean } | null>(null);
   const [allTotal, setAllTotal] = useState<number | null>(null);

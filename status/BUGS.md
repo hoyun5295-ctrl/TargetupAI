@@ -55,6 +55,41 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-1003-7 자동마케팅 스팸 검사 — 3사 수신인데 미통과로 정지 · AI 재생성이 늘 0회 · 1안만 검사하고 다른 안을 발송 (🟡 1003 수정 · **미배포** · DDL 0) · 2026-10-02 임은지 접수 `cmuqcxfib0b5bjnn409ij7ncl`
+- **원인(코드 확정)**: ① 재생성 콜백이 `generateMessages` 에 `{ count }` 를 넘겨 `services/ai.ts` 의 `targetInfo.total_count.toLocaleString()` 이 던지고 콜백 catch 가 null 로 삼켰다 = 정책 2회가 한 번도 안 돌았다(화면 「AI 재생성 0회 후에도 blocked」 · 같은 결함 `planner-executor.ts`) ② 검사는 1안(messages[0])만 · 화면 미리보기와 자율 발송은 무작위 추천 안이라 검사한 문안과 나가는 문안이 갈렸다 ③ 고객 화면에 `Bandit`·`blocked` 영문 노출.
+- **「3사 수신인데 차단」의 그 건 직접 원인 = 미검증**: 접수(10/02 11:41)는 B-1002-1 서버 수정(14:59) 전이고 자동 경로도 같은 차단 확정·보고 매칭 함수를 탄다. 코드상 또 하나의 경로 = 직접발송 수동 검사는 큐를 안 거쳐 자동 검사와 동시에 돌 수 있고 보고 매칭 종전 규칙에 유형 조건이 없다(`spam-filter.ts:231·261` · `spam-test-queue.ts:290-307`). 가르는 법 = 그날 `spam_filter_tests`·결과 행(통신사·시각·동시 수동 검사).
+- **수정**: 재생성 인자 `total_count` + 받는 쪽 방어 · `sequenceSpamVariants`(3안 차례 검사 · 첫 통과에서 멈춤 · 모두 막히면 1안 재생성 · 시간 예산 3분 `TIMEOUTS.operatorSpamVariantsBudget`) = `autoSpamTestWithRegenerate` `stopOnFirstPass` 옵션(기본 모드 = 다른 호출처 5곳 종전 그대로) · 통과 안 번호 `proposal_json.spamCheck.passedIndex` · 발송은 사용자 선택 → 검사 통과 안 → 추천 안 순 · 정책 사유·정지 문자 한국어 · 카드 안별 결과 표시. 계약 테스트 `automarketing-spam-variants-1003.test.ts` 12건(구현 전 12건 실패 확인).
+- **Codex 적대 검토(1003)**: 1R high 2(검사 결과 저장이 옛 제안 JSON 전체로 덮어 검사 중 사람의 승인·선택을 지움 · 저장 실패를 삼켜 자동 발송 유지 = 같은 뿌리) → DB 의 지금 값에 `spamCheck` 칸만 `jsonb_set` · 상태 결정은 사람이 손대지 않은 제안(pending·scheduled · `reviewed_at` 없음)만 · 저장 실패는 바깥 catch · medium 1(재생성 뒤 예산 재확인) 수용. 2R high 1(저장·전환 둘 다 실패하면 미검증 scheduled 잔존) → **자동 발송 선점 관문 `AUTO_SEND_SPAM_VERIFIED_SQL`**(검사 통과 저장 · 사람 승인 · 리마인드만 · 그 밖은 선점 전에 담당자 검토). 3R approve · 메모(NULL 이면 식 전체 NULL) 수용 → `COALESCE(spam_test_status, '')`. **4R approve(지적 0) = 닫힘.** 같은 묶음의 B-1003-2~6 백엔드(DM 토큰 연결·DDL 대기 경로 · 대행 MMS 원본명 · 메일 연결 상태 API)도 1R 범위에 포함해 지적 0.
+- **배포 전 확인**: 지금 scheduled 인 제안 중 관문 밖(검사 통과 기록 없음 · 사람 승인 아님 · 리마인드 아님) 행 = 배포 뒤 자동 발송 대신 담당자 검토로 간다. `operator_proposals.spam_test_status` 는 SCHEMA.md 미등재(운영 존재 근거 = 접수 캡처 문구가 그 UPDATE 뒤에만 나온다) → 확인 SQL 로 존재와 행을 함께 본다.
+- **바뀌는 것**: 통과 안이 있으면 자율 발송이 그 안을 보낸다 = 무작위 추천(탐색)은 검사 통과 기록이 없는 옛 제안에만 남는다(검사한 문안 = 나가는 문안 · LESSONS_BACKEND 0902 ②).
+- **추가 과제(착수 판단 = Harold님)**: ① 추천 문안 아래 「스팸 검사」 버튼(요청 3) = 공용 검사 창 재사용 가능하나 수동 검사 경로라 유료·체험 차감이 붙는다 → 자동마케팅 문안 재검사 과금 여부 결정 필요 ② 늦게 닿은 보고로 결과 행이 통과로 고쳐져도 제안 상태·일시정지·통지는 되돌리지 않는다 ③ 자동 경로 결과 판정 함수가 결과 없는 행을 버린다(전부 없으면 통과 · 수동 경로와 규칙 다름) ④ 다른 화면 영문 노출 `AutoSendPage.tsx` 「Bandit 자동 최적화」 · `JourneyStatsPage.tsx` · `JourneyVariantsEditor.tsx`.
+
+### 🟡 B-1003-6 모바일 DM 예약 발송이 목록·상세에서 「보냄」 · 보낸 기록 시각이 예약 시각이 아니고 9시간 이르다 (🟡 1003 수정 · **미배포** · **DDL 1건 = 배포 뒤 실행**) · 2026-10-02 남지현 접수 `cmuqkleh90bsyjnn4g4bkrusa`
+- **원인**: DM 쪽 「보냄」 근거가 실제 발송이 아니라 발행·수신자 링크 토큰 발급(예약이어도 즉시) · 토큰과 발송 캠페인을 잇는 칸이 없어 예약·취소를 몰랐다 · 보낸 기록 시각 = 토큰 발급 시각 · 화면이 UTC 시각 글자를 앞 16자로 잘라(Z 탈락) 지역 시각으로 다시 읽었다(15:00 요청 → 06:00 표시).
+- **수정**: `dm_recipient_tokens.campaign_id`(uuid NULL · 칸 없으면 종전 동작 · 칸 확인은 없음 판정을 1분만 믿음) · 발송 접수 뒤 토큰 연결(`attachDmTokensToCampaign`) · 상태 = 발송결과 예약내역과 같은 기준(`DM_TOKEN_SEND_STATE_SQL`) · 시각 = 예약 시각 → 실제 발송 시각 → 발급 시각 · 보냄 = 실제로 받은 사람 · 예약 수 따로 · 보낸 기록 = 발송마다 한 줄(`getDmSendBatches`) · 다시 보내기 대상에서 예약·취소·실패 제외 · 목록 칩 「예약」 · 시각 표시 = `formatKstMonthDayTime`. 계약 테스트 `dm-scheduled-send-1003.test.ts` 15건.
+- **배포 뒤 DDL**: `ALTER TABLE dm_recipient_tokens ADD COLUMN IF NOT EXISTS campaign_id uuid NULL;` · 그 전 토큰은 종전처럼 「보냄」·발급 시각.
+- **추가 과제(착수 판단 = Harold님)**: ① 「링크만 받기」로 발행만 했거나 예약을 취소한 DM 은 목록에서 여전히 「보냄」(발행 축) — 별도 라벨 결정 필요 ② 캠페인 생성이 실패해도 토큰은 남아 「보냄」으로 보인다 ③ 구매 전환 7일 창 기준이 토큰 발급 시각 ④ 성과 축·다음 행동 추천이 토큰 보유 = DM 수신으로 본다(예약 대기도 포함).
+
+### 🟡 B-1003-5 모바일 DM 「내 DM」 목록에서 초안을 지울 수 없다 (🟡 1003 수정 · **미배포** · 서버 변경 0) · 2026-10-02 남지현 접수 `cmuq8tru60amqjnn4kcrcbu4f`
+- **원인**: 9/27 개편 뒤 초안 카드는 누르면 편집기로 바로 가고 삭제 버튼은 상세 창에만 있는데 상세 창은 초안에서 안 열린다(옛 목록 행 삭제 메뉴는 그려지지 않음).
+- **수정**: 카드(`DmChip`)에 초안 전용 삭제 버튼(형제 버튼 · 휴대폰 폭 상시 노출) · 기존 삭제 함수(확인 창·목록 갱신) 재사용 · 지운 DM 이 편집 상태에 남아 있으면 비움(남은 자동저장 방지). 계약 테스트 `dm-draft-delete-1003.test.ts` 5건.
+- **기록**: 이메일 초안 카드도 같은 구조라 지울 방법이 없다(`EmailCampaignsPage` · 착수 판단 = Harold님).
+
+### 🟡 B-1003-4 대행발송 MMS 이미지 이름이 발송 결과·예약대기·캘린더 창에서만 UUID (🟡 1003 수정 · **미배포** · DDL 0) · 2026-10-02 임은지 접수 `cmuq9mfkq0ap1jnn4n8edjbww`(한국시세이도) · B-0910-10 2번이 예고한 자리
+- **원인**: 대행발송 워커가 발송 캠페인을 만들 때 경로 배열만 넘겼다(`agency-send-worker.ts` · 원본명은 원장 `mms_image_names` 에만). 메일·화면·원스텝 세 입구 모두 같은 워커라 같다.
+- **수정**: `mms-image-util.ts withMmsImageNames`(프론트와 같은 규칙) · 워커가 `{path, originalName}` 으로 넘김 · 발송 배관은 `normalizeMmsImagePaths` 로 경로만 읽어 무변경(직접발송이 이미 같은 모양) · 기능 문서 불변 23 보충. 계약 테스트 `agency-campaign-image-names-1003.test.ts` 6건.
+- **지난 캠페인**: 코드로 바뀌지 않는다 → 배포 뒤 1회 보정 UPDATE(원장 → 캠페인 · 예약 대기분 포함).
+- **기록(원천에 원본명이 없음)**: AI 자동마케팅 이미지(`continuous_operators.mms_image_paths`) · 여정 단계 이미지(`journey_steps.mms_image_paths`).
+
+### 🟠 B-1003-3 이메일 보내기 창 「회사 메일 연결하기」 무반응 · 담당자 계정은 연결돼 있어도 「연결 필요」 (🟡 1003 수정 · **미배포** · DDL 0) · 2026-10-02 남지현 접수 `cmuqkqs2k0c3ijjnn4osoyb3h6`
+- **원인**: ① 버튼이 `/email-campaigns?smtp=1` 로 이동만 했는데 대표 경로(수정 화면·목록 상세)는 이미 그 페이지 안이라 다시 열리지 않았다(진입 값은 처음 열릴 때 한 번만 읽음 · 열렸어도 연결 창 층이 수정 화면·보내기 창 아래) ② 연결 판정을 관리자 전용 `/smtp-config` 로 해 담당자는 403 → 「연결 필요」(발송 관문은 담당자도 통과하는 `isSmtpConfigured`).
+- **수정**: 연결 창 공용 이관(`components/email/SmtpConnectModal.tsx` · 원본 그대로) · 보내기 창 안에서 바로 띄움 · 저장 뒤 창·페이지 재조회 · 연결 판정 = `/api/email/status`(공개 값 보내는 주소·이름 + `can_manage` 추가) · 담당자에게는 「회사 관리자에게 연결 요청」 안내 · `?smtp=1` 진입 폐지. 계약 테스트 `email-smtp-connect-1003.test.ts` 7건 · 존 기능 보존 테스트 통과.
+- **요청 부분(수기 기재·연동)**: 지금 방식은 회사 메일 서버 직접 입력(관리자 저장) 하나. 「주소만 적기」는 회사 메일 서버 인증으로만 나가는 구조라 불가(플랫폼 발송 인프라 신설 = 정책 결정) · 구글·MS 계정 연동 없음 → 착수 판단 = Harold님.
+
+### 🟡 B-1003-2 모바일 DM·이메일 편집 화면 오른쪽 칸 글씨가 안 보인다 (🟡 1003 수정 · **미배포** · DDL 0) · 2026-10-02 남지현 접수 `cmuq9xapm0apvjnn4hgcro6fn`
+- **원인**: `styles/make.css` 의 편집기 변수 스코프가 어두운 패널 전제 값(흰 글씨 · 남색 입력칸)으로 남아 있었다(9/30 밝은 작업대 전환 때 누락). 계약 테스트는 tsx className 만 봐 .css 를 못 잡았다.
+- **수정**: 스코프를 밝은 값(`.mk-editor` · `dm-builder.css :root` 와 같은 값 · `--dm-error`·`--dm-font-mono`·그림자 함께 정의) · 스크롤 막대 색 · 래퍼 3곳 · 계약 테스트(값 = `:root` 대조) 7건 추가.
+
 ### 🟠 B-1003-1 알림톡 실패 후 문자 대체발송이 통계에서 알림톡 성공으로 잡히고 정산에서 알림톡 단가로 청구된다 (🟡 1003 수정 · **미배포** · DDL 0) · 2026-10-02 서수란 접수 `cmuqa9pa50aqpjnn4gze9ugam`(크로커다일 9/29 「대체발송이 문자로 안 잡힌다 · LMS 로 청구돼야 한다」)
 - **한 줄**: 대체 결과가 두 모양으로 온다. 옛 QTmsg 라인 = 대체 문자가 별도 행(L/S + `k_oriseq`). 비토 게이트웨이 라인(SMSQ_SEND_13~16) = 별도 행 없이 원래 K행의 `status_code` 가 7830(SMS)·7831(LMS)(bito-gateway `engine/report.go parentFallbackReport` · `agent/poller isGatewayManagedFallbackReport`). 한줄로 판정은 옛 모양만 알았다(청구 식 `BILLING_MSG_TYPE_SQL` 은 msg_type 만 · 통계 분리·결과 필터는 `k_oriseq`). 선불 결과별 정산(`smsAlimtalkResultAgg`)만 두 모양을 알았다.
 - **실측(1003 Harold 실행)**: 13~16 에 옛 모양 0건 · K행 7831 = 4건(13번 인비토 `[여정] step 1` 7/27 1 · 15번 크로커다일 직접발송 9/22 2 · 9/29 1) · 7830 0건. 발행된 정산서 중 해당분 0(크로커다일 = 7월 paid · 8월 confirmed 뿐 · 인비토 7월 이후 없음). 두 회사 LMS 단가 설정됨(크로커다일 22.70 · 인비토 24.55).
@@ -804,7 +839,7 @@
 ### 🔵 B-0910-10 대행발송 0910 접수 처리 중 본 범위 밖 4건 (🔵 Open · 기록만) — 2026-09-10 코드 확인
 
 1. 양식 작성 안내 "발송날짜 및 시간" 행이 "지금부터 3시간 뒤부터"라고 적는다 ↔ 코드 리드타임 40분(`agency-send-state.ts:163` · 0826(6)).
-2. 대행발송으로 나간 캠페인의 발송 결과 화면도 이미지 이름이 UUID일 것이다 — 워커가 `createDirectSendCampaign`에 경로 배열만 넘긴다(`agency-send-worker.ts:754·769`). 코드 확인 · 화면 미확인. 원본명을 넘기려면 발송 배관 한 줄이라 B-0910-9 축에서 제외.
+2. 대행발송으로 나간 캠페인의 발송 결과 화면도 이미지 이름이 UUID일 것이다 — 워커가 `createDirectSendCampaign`에 경로 배열만 넘긴다(`agency-send-worker.ts:754·769`). 코드 확인 · 화면 미확인. 원본명을 넘기려면 발송 배관 한 줄이라 B-0910-9 축에서 제외. **→ ★1003 B-1003-4 로 수정(미배포).**
 3. 공용 업로드 훅의 여러 장 첨부(기본 모드)가 서버 거절을 알리지 않고 건너뛴다(`useMmsUpload.ts` handleMmsMultiUpload · 직접발송·AI Operator). 자동 맞춤 모드만 알리게 했다.
 4. multer 한글 파일명 복원이 라우트 두 곳에 인라인으로 남아 있다(`routes/mms-images.ts:88` · `routes/agency-send.ts` oneStepFiles). CT `restoreUploadFileName`(`mms-image-fit.ts`)이 생겼으니 합칠 수 있다.
 

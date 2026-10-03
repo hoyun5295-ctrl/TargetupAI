@@ -681,3 +681,69 @@ SEND_LOG_MONTHS = r"""
 | 202611 |     11 |           0 |
 +--------+--------+-------------+
 """.strip('\n')
+
+# ── 한줄로 앱 로그 폴더 권한 좁힘 (2026-10-03 · Harold 실행 · .62 root · chmod g-w,o-w) ─────────────
+LOG_DIR_PERM_COLLECTED = '2026-10-03 (한국)'
+
+LOG_DIR_PERM = r"""
+-- 바꾸기 전
+drwxrwxr-x 2 administrator administrator 12288 Oct  3 00:00 /home/administrator/.pm2/logs
+-- 바꾼 뒤
+drwxr-xr-x 2 administrator administrator 12288 Oct  3 00:00 /home/administrator/.pm2/logs
+-- 로그가 계속 쓰이는지(최근 1분 안에 바뀐 파일)
+/home/administrator/.pm2/logs/targetup-backend-out.log
+""".strip('\n')
+
+# ── 한줄로 방화벽 9090 허용 줄 삭제 (2026-10-03 17:27 · Harold 실행 · .62 root · 직전 듣는 프로그램 없음 확인) ─────────────
+FW_9090_COLLECTED = '2026-10-03 17:27 (한국)'
+
+FW_9090_DELETE = r"""
+삭제 시각: 2026-10-03 17:27:18
+Rule deleted
+-- 남은 9090 줄
+(없음)
+2026-10-03 17:27:18.845193087 +0900  /etc/ufw/user.rules
+""".strip('\n')
+
+# ── 한줄로 원격 관리(SSH) 출발지 2곳 제한 (2026-10-03 · Harold 실행 · .62 root) ─────────────
+# 17:34:12 대표 · 사무실 허용 추가 → 지금 접속 출발지 = 대표 확인 → 17:34:59 전체 허용(v4 · v6) 삭제 → 새 창 접속 확인 → 17:35:55 재수집
+SSH_LIMIT_COLLECTED = '2026-10-03 17:34 · 17:35 (한국)'
+
+SSH_LIMIT_ADD = r"""
+추가 시각: 2026-10-03 17:34:12
+Rule added
+Rule added
+-- 22 번 규칙
+[ 1] 22/tcp                     ALLOW IN    Anywhere
+[ 6] 22/tcp                     ALLOW IN    115.138.27.202             # owner-ssh
+[ 7] 22/tcp                     ALLOW IN    180.226.236.94             # office-ssh
+[ 8] 22/tcp (v6)                ALLOW IN    Anywhere (v6)
+""".strip('\n')
+
+SSH_LIMIT_AFTER = r"""
+수집 시각: 2026-10-03 17:35:55
+Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), deny (routed)
+New profiles: skip
+
+To                         Action      From
+--                         ------      ----
+80/tcp                     ALLOW IN    Anywhere
+443/tcp                    ALLOW IN    Anywhere
+3000                       DENY IN     Anywhere
+9001:9011/tcp              DENY IN     Anywhere
+22/tcp                     ALLOW IN    115.138.27.202             # owner-ssh
+22/tcp                     ALLOW IN    180.226.236.94             # office-ssh
+80/tcp (v6)                ALLOW IN    Anywhere (v6)
+443/tcp (v6)               ALLOW IN    Anywhere (v6)
+3000 (v6)                  DENY IN     Anywhere (v6)
+9001:9011/tcp (v6)         DENY IN     Anywhere (v6)
+
+-- 방화벽 서비스
+active
+active
+-- 정책 파일 마지막 수정
+2026-10-03 17:34:59.710661457 +0900  /etc/ufw/user.rules
+2026-10-03 17:34:59.787660488 +0900  /etc/ufw/user6.rules
+""".strip('\n')

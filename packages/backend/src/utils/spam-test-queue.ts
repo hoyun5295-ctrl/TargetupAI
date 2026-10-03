@@ -122,6 +122,8 @@ export interface AutoSpamTestResult {
     regenerated: boolean;
     regenerateCount: number;
   }>;
+  /** ★ 2026-10-03 stopOnFirstPass 모드에서 통과한 안(없으면 null · 기본 모드는 넣지 않는다) */
+  passedVariantId?: string | null;
   totalTestCount: number;
   totalRegenerateCount: number;
 }
@@ -943,6 +945,64 @@ async function waitForTestCompletion(testId: string, timeoutMs: number = TIMEOUT
 // ============================================================
 // [6] 자동 스팸테스트 + 재생성 통합 (AI route에서 호출)
 // ============================================================
+
+type AutoSpamVerdict = 'pass' | 'blocked' | 'failed' | 'timeout';
+
+/**
+ * ★ 2026-10-03 안을 차례로 검사하고 첫 통과에서 멈춘다(순수 · 검사·재생성은 주입) — 임은지 접수
+ * 「1안이 스팸에 걸리면 2안·3안을 자동으로 검사해 통과한 문안으로 승인 문자」.
+ *   1) 원안을 순서대로 검사 → 통과한 안에서 멈춘다(그 뒤 안은 검사하지 않는다).
+ *   2) 모두 통과하지 못했고 1안이 「차단」이었으면 1안을 재생성해 다시 검사한다(정책 횟수 · 통과하면 멈춤).
+ *      결과 없음·검사 실패는 재생성하지 않는다(종전 규칙과 같다 · 재생성은 차단에만).
+ *   3) 시간 예산(budgetMs)을 넘기면 새 검사를 시작하지 않는다 — 결과는 미통과 = 안 보내는 쪽.
+ */
+export async function sequenceSpamVariants(p: {
+  variants: AutoSpamTestVariant[];
+  maxRetries: number;
+  runTest: (v: AutoSpamTestVariant, message: string, subject?: string) => Promise<{
+    spamResult: AutoSpamVerdict; carrierResults: Array<{ carrier: string; messageType: string; result: string }>;
+  }>;
+  regenerate?: (variantId: string) => Promise<{ messageText: string; subject?: string } | null>;
+  budgetMs?: number;
+  now?: () => number;
+}): Promise<{ variants: AutoSpamTestResult['variants']; passedVariantId: string | null; regenerateCount: number }> {
+  const now = p.now || Date.now;
+  const start = now();
+  const overBudget = () => typeof p.budgetMs === 'number' && now() - start >= p.budgetMs;
+  const out: AutoSpamTestResult['variants'] = [];
+  for (const v of p.variants) {
+    if (out.length > 0 && overBudget()) break;
+    const r = await p.runTest(v, v.messageText, v.subject);
+    out.push({
+      variantId: v.variantId, messageText: v.messageText, subject: v.subject,
+      spamResult: r.spamResult, carrierResults: r.carrierResults, regenerated: false, regenerateCount: 0,
+    });
+    if (r.spamResult === 'pass') return { variants: out, passedVariantId: v.variantId, regenerateCount: 0 };
+  }
+  const first = out[0];
+  const firstSrc = p.variants[0];
+  let regenerateCount = 0;
+  if (first && firstSrc && first.spamResult === 'blocked' && p.regenerate) {
+    for (let attempt = 0; attempt < p.maxRetries; attempt++) {
+      if (overBudget()) break;
+      const nm = await p.regenerate(first.variantId);
+      if (!nm || !nm.messageText) break;
+      // ★ Codex 1R medium — 재생성이 예산을 넘겨 돌아오면 새 검사를 시작하지 않고 문안도 바꾸지 않는다(미통과 = 안 보내는 쪽)
+      if (overBudget()) break;
+      first.messageText = nm.messageText;
+      if (nm.subject) first.subject = nm.subject;
+      first.regenerated = true;
+      first.regenerateCount++;
+      regenerateCount++;
+      const r = await p.runTest(firstSrc, first.messageText, first.subject);
+      first.spamResult = r.spamResult;
+      first.carrierResults = r.carrierResults;
+      if (r.spamResult === 'pass') return { variants: out, passedVariantId: first.variantId, regenerateCount };
+      if (r.spamResult !== 'blocked') break;
+    }
+  }
+  return { variants: out, passedVariantId: null, regenerateCount };
+}
 export async function autoSpamTestWithRegenerate(params: {
   companyId: string;
   userId: string;
@@ -955,6 +1015,13 @@ export async function autoSpamTestWithRegenerate(params: {
   firstRecipient?: Record<string, any>;
   regenerateCallback?: (blockedVariantId: string) => Promise<{ messageText: string; subject?: string } | null>;
   maxRetries?: number;
+  /**
+   * ★ 2026-10-03 안을 차례로 검사하다 첫 통과에서 멈춘다 · 모두 막히면 그때 1안을 재생성(sequenceSpamVariants).
+   * 기본(false·생략) = 종전대로 안마다 검사·재생성 — 다른 호출처(자동발송·대행·플래너·리마인드)는 그대로다.
+   */
+  stopOnFirstPass?: boolean;
+  /** stopOnFirstPass 모드의 시간 예산(넘기면 새 검사를 시작하지 않는다 · 결과는 미통과 = 안 보내는 쪽) */
+  budgetMs?: number;
 }): Promise<AutoSpamTestResult> {
   const {
     companyId, userId, callbackNumber, messageType, subject,
@@ -969,6 +1036,83 @@ export async function autoSpamTestWithRegenerate(params: {
   let totalTestCount = 0;
   let totalRegenerateCount = 0;
 
+  // 한 문안을 한 번 검사한다(광고 표기 · 큐 등록 · 완료 대기 · 통신사별 결과). 큐 등록 실패 = enqueued false.
+  const runOneTest = async (variantId: string, message: string, subj?: string): Promise<{
+    enqueued: boolean; spamResult: string; carrierResults: Array<{ carrier: string; messageType: string; result: string }>;
+  }> => {
+    // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용
+    const msgTypeForAd = isLmsType ? 'LMS' : 'SMS';
+    const testMessage = buildAdMessage(message, msgTypeForAd, isAd, rejectNumber || '');
+    // ★ KISA 2026-05: 제목(광고) — buildAdSubject 컨트롤타워 사용
+    const testSubject = buildAdSubject(subj || '', msgTypeForAd, isAd);
+
+    // 메시지 내용 구성
+    const smsContent = !isLmsType ? testMessage : undefined;
+    const lmsContent = isLmsType ? testMessage : undefined;
+
+    // 큐에 등록
+    const enqueueResult = await enqueueSpamTest({
+      companyId,
+      userId,
+      callbackNumber,
+      messageContentSms: smsContent,
+      messageContentLms: lmsContent,
+      messageType,
+      subject: testSubject,
+      firstRecipient,
+      source: 'auto_ai',
+      variantId,
+      batchId,
+      skipPrepaid: true, // 프로 이상: 무료
+    });
+
+    if (!enqueueResult.ok) {
+      console.error(`[SpamTestQueue] variant ${variantId} 큐 등록 실패:`, enqueueResult.error);
+      return { enqueued: false, spamResult: 'failed', carrierResults: [] };
+    }
+
+    totalTestCount++;
+
+    // 테스트 완료 대기
+    const verdict = await waitForTestCompletion(enqueueResult.testId!);
+
+    // 결과 조회
+    const results = await query(
+      `SELECT carrier, message_type, result FROM spam_filter_test_results
+       WHERE test_id = $1 ORDER BY carrier, message_type`,
+      [enqueueResult.testId]
+    );
+    return {
+      enqueued: true,
+      spamResult: verdict,
+      carrierResults: results.rows.map((r: any) => ({
+        carrier: r.carrier,
+        messageType: r.message_type,
+        result: r.result || 'timeout',
+      })),
+    };
+  };
+
+  if (params.stopOnFirstPass) {
+    const seq = await sequenceSpamVariants({
+      variants: variants.map((v) => ({ ...v, subject: v.subject || subject })),
+      maxRetries,
+      budgetMs: params.budgetMs,
+      runTest: async (v, message, subj) => {
+        const r = await runOneTest(v.variantId, message, subj);
+        return { spamResult: r.spamResult as AutoSpamVerdict, carrierResults: r.carrierResults };
+      },
+      regenerate: regenerateCallback,
+    });
+    return {
+      batchId,
+      variants: seq.variants,
+      totalTestCount,
+      totalRegenerateCount: seq.regenerateCount,
+      passedVariantId: seq.passedVariantId,
+    };
+  }
+
   for (const variant of variants) {
     let currentMessage = variant.messageText;
     let currentSubject = variant.subject || subject;
@@ -978,54 +1122,13 @@ export async function autoSpamTestWithRegenerate(params: {
 
     // 최대 재시도 횟수까지 반복
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용
-      const msgTypeForAd = isLmsType ? 'LMS' : 'SMS';
-      const testMessage = buildAdMessage(currentMessage, msgTypeForAd, isAd, rejectNumber || '');
-      // ★ KISA 2026-05: 제목(광고) — buildAdSubject 컨트롤타워 사용
-      const testSubject = buildAdSubject(currentSubject || '', msgTypeForAd, isAd);
-
-      // 메시지 내용 구성
-      const smsContent = !isLmsType ? testMessage : undefined;
-      const lmsContent = isLmsType ? testMessage : undefined;
-
-      // 큐에 등록
-      const enqueueResult = await enqueueSpamTest({
-        companyId,
-        userId,
-        callbackNumber,
-        messageContentSms: smsContent,
-        messageContentLms: lmsContent,
-        messageType,
-        subject: testSubject,
-        firstRecipient,
-        source: 'auto_ai',
-        variantId: variant.variantId,
-        batchId,
-        skipPrepaid: true, // 프로 이상: 무료
-      });
-
-      if (!enqueueResult.ok) {
-        console.error(`[SpamTestQueue] variant ${variant.variantId} 큐 등록 실패:`, enqueueResult.error);
+      const one = await runOneTest(variant.variantId, currentMessage, currentSubject);
+      if (!one.enqueued) {
         spamResult = 'failed';
         break;
       }
-
-      totalTestCount++;
-
-      // 테스트 완료 대기
-      spamResult = await waitForTestCompletion(enqueueResult.testId!);
-
-      // 결과 조회
-      const results = await query(
-        `SELECT carrier, message_type, result FROM spam_filter_test_results
-         WHERE test_id = $1 ORDER BY carrier, message_type`,
-        [enqueueResult.testId]
-      );
-      carrierResults = results.rows.map((r: any) => ({
-        carrier: r.carrier,
-        messageType: r.message_type,
-        result: r.result || 'timeout',
-      }));
+      spamResult = one.spamResult;
+      carrierResults = one.carrierResults;
 
       // 통과했으면 종료
       if (spamResult === 'pass') {
