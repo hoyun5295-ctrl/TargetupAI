@@ -12,7 +12,7 @@
 | PG shared_buffers | 4GB | `SHOW shared_buffers;` | 초기 구축 때 튜닝돼 있던 값 (양호) |
 | PG effective_cache_size | 48GB | `SHOW effective_cache_size;` | 〃 |
 | PG work_mem | 64MB | `SHOW work_mem;` | 〃 |
-| MySQL innodb_buffer_pool_size | **2GB** | `SHOW VARIABLES LIKE 'innodb_buffer_pool_size';` | **2026-07-17 128MB(설치 기본값 방치)→2GB 온라인 확장(SET PERSIST — 재기동 유지).** 컨테이너 수명 누적 디스크 읽기 36.9TB가 방치의 증거(데이터 1~2GB DB의 상시 재읽기). 신규/재생성 시 반드시 재적용 확인 |
+| MySQL innodb_buffer_pool_size | **8GB** | `SHOW VARIABLES LIKE 'innodb_buffer_pool_size';` | **★2026-10-03 23:47 2GB→8GB 온라인 확장(root `SET PERSIST` · MySQL 8.4.8 · resize Completed).** 근거 = 슈퍼관리자 발송 통계 3.8초 실측: 결과 확정 전 캠페인을 게이트웨이 테이블(SMSQ_SEND_13 · 14 · 15 = 약 3.2GB · 14 하나가 231만 행)에서 세는데 버퍼 풀 2GB < 자주 읽는 양 → 같은 3.9만 건 세기 처음 0.97초 · 다시 0.02초(디스크 재읽기). 발송 DB 전체 34.7GB · 서버 62GB 중 44GB 여유 · 컨테이너 메모리 한도 없음. 게이트웨이 테이블은 월별로 갈라지지 않아 계속 커진다 → 자주 읽는 양이 8GB에 가까워지면 다시 본다. **2026-07-17 128MB(설치 기본값 방치)→2GB 온라인 확장(SET PERSIST — 재기동 유지).** 컨테이너 수명 누적 디스크 읽기 36.9TB가 방치의 증거(데이터 1~2GB DB의 상시 재읽기). 신규/재생성 시 반드시 재적용 확인 |
 | nginx gzip | on + application/javascript 포함 | `grep gzip_types /etc/nginx/nginx.conf` | 양호 (JS 압축 확인 2026-07-17) |
 | 관측 | pg_stat_statements + MySQL slow_query_log(0.5s) | `SELECT count(*) FROM pg_stat_statements;` | 2026-07-17 가동 — 성능 사이클의 측정 원천 |
 

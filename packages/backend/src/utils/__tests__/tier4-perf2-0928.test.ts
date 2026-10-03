@@ -56,10 +56,10 @@ describe('R166 처방 철회(Codex medium 2 · 순차 실행기라 경합 없음
 });
 
 describe('R281 · R106 캐시', () => {
-  it('슈퍼관리자 발송통계 = 기간 집계를 캐시 CT로(신선도 최대 1분)', () => {
+  it('슈퍼관리자 발송통계 = 기간 집계를 캐시 CT로(30초 신선 · ★1003 Harold 10분까지는 직전 값 즉시 + 뒤에서 다시 셈)', () => {
     const src = read('routes/admin.ts');
     expect(src).toContain('key: `admin:stats-send:${JSON.stringify([view, startDate, endDate, companyId])}`');
-    expect(src).toMatch(/softTtlSec: 30,\s*hardTtlSec: 60,/);
+    expect(src).toMatch(/softTtlSec: 30,\s*hardTtlSec: 600,/);
     expect(src).toContain('const pagedRows = allRows.slice(offset, offset + limit);');
   });
   it('대시보드 카드 = 회사·사용자 범위·카드 목록 키로 캐시', () => {

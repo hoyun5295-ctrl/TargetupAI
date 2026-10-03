@@ -3074,11 +3074,14 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     const groupAlias = view === 'monthly' ? 'month' : 'date';
 
     // ★ 2026-09-28 한줄로 V2 R281 — 기간 집계를 캐시 CT로(같은 조건의 페이지 넘김 = 다시 집계하지 않는다).
-    //   옛: 페이지마다 기간 전체(캠페인 메타 + MySQL 결과 집계)를 다시 돌린 뒤 JS로 잘랐다. 신선도 = 최대 1분(soft 30초 · hard 60초).
+    //   옛: 페이지마다 기간 전체(캠페인 메타 + MySQL 결과 집계)를 다시 돌린 뒤 JS로 잘랐다.
+    // ★ 2026-10-03 (Harold) hard 60초 → 600초 — 결과 확정 전 캠페인을 게이트웨이 테이블(SMSQ_SEND_13 · 14 · 15 · 231만 행+)에서
+    //   세는 집계가 3.6~3.9초(운영 [SLOW-STAGE] 실측)라, 60초마다 캐시가 사라지면 그때마다 사람이 기다렸다.
+    //   30초 안 = 그대로 · 30초~10분 = 직전 값을 바로 주고 뒤에서 한 번 다시 셈(in-flight 1회) · 10분 넘게 아무도 안 열었을 때만 기다린다.
     const aggregated = await swrCache({
       key: `admin:stats-send:${JSON.stringify([view, startDate, endDate, companyId])}`,
       softTtlSec: 30,
-      hardTtlSec: 60,
+      hardTtlSec: 600,
       compute: async () => {
         const metaResult = await query(`
           SELECT

@@ -4701,7 +4701,9 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'templates', label: '템플릿 관리', badge: senderProfilePendingCount },
                   { key: 'scheduled', label: '예약 관리' },
                   { key: 'allCampaigns', label: '캠페인 관리', onClick: () => loadAllCampaigns() },
-                  { key: 'stats', label: '발송 통계', onClick: () => loadSendStats() },
+                  // ★ 2026-10-03 (Harold) 탭 진입 조회는 activeTab 효과가 한다 — 여기서도 부르면 같은 요청이 두 번 나가
+                  //   캐시가 빈 순간 3~4초짜리 집계가 둘 동시에 돌았다(운영 로그 200 + 304 한 쌍). 이미 이 탭일 때 다시 누른 경우만 새로 조회.
+                  { key: 'stats', label: '발송 통계', onClick: () => { if (activeTab === 'stats') loadSendStats(); } },
                 ],
               },
               {
