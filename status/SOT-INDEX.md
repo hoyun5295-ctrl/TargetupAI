@@ -100,6 +100,7 @@
 | AI Operator·CDP·Provider | [AI_OPERATOR_기능정의서.md](../docs/AI_OPERATOR_기능정의서.md) + [ai_operator_progress.md](ai_operator_progress.md) | 해당 절 |
 | **AI 모델 최신화 · 프롬프트 품질 점검**(0930~ · 문안 Sonnet 5.5 · 정밀 Opus 5.5 · 프롬프트 전수 점검 장부) | [2026-09-30-ai-model-prompt-upgrade.md](../docs/2026-09-30-ai-model-prompt-upgrade.md) | §2 모델 전환(실측 · 되돌리기) → §3-4 진행표 · 호출어 **AI 모델 최신화 / 프롬프트 점검** |
 | AI 영업 아웃리치(슈퍼관리자·ceo 전용) | [2026-07-31-ai-sales-outreach-design.md](../docs/2026-07-31-ai-sales-outreach-design.md) | 전체 — 착수 전 확정 = §13, 재사용 맵 = §6-1 |
+| **슈퍼관리자 화면 정리**(1003 설계 · A~D 메뉴 7묶음 · 보안 · 인증 = 대표 · 지원팀장 · AI 영업 · 진단 뱃지 = 코드 완료 · E AdminDashboard 14,646줄 기능별 분리 = 10/6 제출 뒤 · 동작 변경 0) | [2026-10-03-admin-dashboard-split-design.md](../docs/2026-10-03-admin-dashboard-split-design.md) | §0 결정 상태 → §3 등급표 교체(구현) → §5-2 옮기는 방법 → §5-3 순서 → §6 검증 |
 | CRM 캠페인 대행(설계 대행) | [2026-07-09-crm-campaign-agency-implementation.md](../docs/2026-07-09-crm-campaign-agency-implementation.md) | 전체 |
 | 요금제 무료 메시징(월 제공량·소진·정산 제외) | [2026-08-05-plan-free-messaging-design.md](../docs/2026-08-05-plan-free-messaging-design.md) | 전체 — 확정 대기 = §9 (Harold 확정 전 착수 금지) |
 | DM 편집기 AI 퍼스트 재개편 | [2026-07-16-dm-editor-ai-first-redesign.md](../docs/2026-07-16-dm-editor-ai-first-redesign.md) | 전체 (Harold 검토 대기) |

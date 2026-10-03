@@ -4,6 +4,7 @@ import { query } from '../config/database';
 import { TIMEOUTS, LIMITS } from '../config/defaults';
 import { requestContext } from '../utils/request-context';
 import { isBestLayoutViewer } from '../utils/audit-log';
+import { fetchAdminRole, canForMethod } from '../utils/admin-role';
 
 export interface JwtPayload {
   userId: string;
@@ -138,6 +139,20 @@ export const requireSuperAdmin = (req: Request, res: Response, next: NextFunctio
 export const requireBestLayoutViewer = async (req: Request, res: Response, next: NextFunction) => {
   if (!(await isBestLayoutViewer(req.user?.userId))) {
     return res.status(403).json({ error: '베스트 구성 열람 권한이 없습니다.' });
+  }
+  next();
+};
+
+/**
+ * ★ 2026-10-03 등급표 축 하나로 라우트를 막는다(보안 · 인증 묶음: 금칙어 · 국외 접근 통제 · 로그인 차단).
+ * 필요한 수준은 요청 방식이 정한다(`canForMethod`: 조회 = 조회 · DELETE = 삭제 · 그 밖 = 변경).
+ * fail-closed — 등급 조회 실패 · 미등록은 최저 등급(`support`)이라 열리지 않는다.
+ * ⚠ `authenticate` · `requireSuperAdmin` 뒤에 둔다(req.user 가 있어야 등급을 본다).
+ */
+export const requireAdminArea = (key: string) => async (req: Request, res: Response, next: NextFunction) => {
+  const role = await fetchAdminRole(req.user?.userId);
+  if (!canForMethod(role, key, req.method)) {
+    return res.status(403).json({ error: '이 화면을 쓸 수 있는 등급이 아닙니다.' });
   }
   next();
 };

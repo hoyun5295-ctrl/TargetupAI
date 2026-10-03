@@ -29,10 +29,11 @@ export const ADMIN_ROLE_LABEL: Record<AdminRole, string> = {
   support: '지원팀원',
 };
 
+// ★ 2026-10-03 보안 · 인증 화면 = 대표 · 지원팀장만(Harold). 지원팀장은 직원 계정을 조회만 한다 · 감사 기록은 대표만.
 export const ADMIN_ROLE_DESC: Record<AdminRole, string> = {
-  super: '전 영역 조회·변경·삭제. 관리자 계정과 감사 기록은 이 등급만 다룬다.',
-  lead: '운영 전 영역 조회·변경·삭제. 감사 기록과 학습 데이터는 제외.',
-  support: '운영 영역 조회·변경. 삭제와 시스템 설정은 제외.',
+  super: '전 영역 조회·변경·삭제. 관리자 계정 변경과 감사 기록은 이 등급만 다룬다.',
+  lead: '운영 · 보안 전 영역 조회·변경·삭제. 직원 계정은 조회만. 감사 기록과 학습 데이터는 제외.',
+  support: '운영 영역 조회·변경. 삭제 · 시스템 설정 · 보안 화면은 제외.',
 };
 
 /** 권한 수준 — 심사 제출 표기와 같은 어휘를 쓴다 */
@@ -111,10 +112,31 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
     levels: { super: 'RWD', lead: 'RWD', support: 'NONE' },
   },
   {
+    // ★ 2026-10-03 보안 · 인증 묶음(Harold) — 차단 정책 · 국내 대역 · 예외 대장. 그전에는 등급을 보지 않아 지원팀원도 바꿀 수 있었다.
+    key: 'geoAccess',
+    area: '국외 접근 통제',
+    screens: '국외 접근 통제(차단 정책 · 국내 대역 · 예외 대장)',
+    levels: { super: 'RWD', lead: 'RWD', support: 'NONE' },
+  },
+  {
     key: 'geoHits',
     area: '국외 접근 이력',
-    screens: '국외 접근 통제 · 탐지 차단 로그',
+    screens: '국외 접근 통제 · 탐지 · 차단 기록',
     levels: { super: 'R', lead: 'R', support: 'NONE' },
+  },
+  {
+    // ★ 2026-10-03 보안 · 인증 묶음 — 금칙어 규칙 · 시험 · 탐지 기록
+    key: 'spamBlock',
+    area: '금칙어 차단',
+    screens: '금칙어 차단(규칙 · 시험 · 탐지 기록)',
+    levels: { super: 'RWD', lead: 'RWD', support: 'NONE' },
+  },
+  {
+    // ★ 2026-10-03 보안 · 인증 묶음 — 로그인 차단 목록 · 이력 · 수동 차단 · 해제
+    key: 'loginBlocks',
+    area: '로그인 차단',
+    screens: '로그인 차단 관리',
+    levels: { super: 'RWD', lead: 'RWD', support: 'NONE' },
   },
   {
     key: 'auditLogs',
@@ -143,17 +165,19 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
   },
   {
     // ★ 2026-10-03 운영 기록 대장(로그 점검 · 방화벽 정책 변경 · 접근권한 점검 · 전송자격인증 3.1 ④ · 3.3 · 4.3).
-    //   작성 · 확인은 대표 · 지원팀장. 지원팀원은 조회만. 고치기 · 지우기는 없다(정정은 새 기록).
+    //   작성 · 확인은 대표 · 지원팀장. 고치기 · 지우기는 없다(정정은 새 기록).
+    //   ★ 같은 날 저녁 보안 · 인증 묶음(Harold) — 지원팀원 조회도 닫는다.
     key: 'opsRecords',
     area: '운영 기록 대장',
     screens: '운영 기록 대장(로그 점검 · 방화벽 변경 · 권한 점검)',
-    levels: { super: 'RW', lead: 'RW', support: 'R' },
+    levels: { super: 'RW', lead: 'RW', support: 'NONE' },
   },
   {
+    // ★ 2026-10-03 보안 · 인증 묶음(Harold) — 지원팀장 조회 추가. 등급 변경 · 계정 생성 · 중지는 대표만(승인자 = 대표이사).
     key: 'adminAccounts',
     area: '관리자 계정 관리',
     screens: '직원 계정·권한',
-    levels: { super: 'RWD', lead: 'NONE', support: 'NONE' },
+    levels: { super: 'RWD', lead: 'R', support: 'NONE' },
   },
   {
     // ★ 2026-09-03 베스트 구성(참조 골격 학습층) — ENV 허용 목록(기본 ceo)과 AND. 등급표 미등록이면 전원 NONE이라 함께 등재한다.
@@ -207,4 +231,25 @@ export function canWrite(role: AdminRole, key: string): boolean {
 /** 삭제 가능한가 */
 export function canDelete(role: AdminRole, key: string): boolean {
   return levelFor(role, key) === 'RWD';
+}
+
+/**
+ * ★ 2026-10-03 요청 방식으로 필요한 수준을 정한다 — 조회(GET · HEAD) = 조회, DELETE = 삭제, 그 밖(POST · PUT · PATCH) = 변경.
+ * 라우트 묶음 하나를 같은 축으로 막을 때 방식마다 판정을 따로 적지 않게 한다(`middlewares/auth.ts` `requireAdminArea`).
+ */
+export function canForMethod(role: AdminRole, key: string, method: string): boolean {
+  const m = String(method || '').toUpperCase();
+  if (m === 'GET' || m === 'HEAD') return canRead(role, key);
+  if (m === 'DELETE') return canDelete(role, key);
+  return canWrite(role, key);
+}
+
+/**
+ * ★ 2026-10-03 등급표의 축마다 「조회 가능」 여부 — 슈퍼관리자 화면이 메뉴를 숨길 때 쓴다(`GET /api/admin/my-permissions`).
+ * 화면이 등급 · 수준을 다시 계산하지 않게 판정 결과만 내려 보낸다. 실제 차단은 각 라우트가 같은 함수로 한다.
+ */
+export function readMapFor(role: AdminRole): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const row of PERMISSION_MATRIX) out[row.key] = canRead(role, row.key);
+  return out;
 }

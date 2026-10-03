@@ -4,7 +4,7 @@
 // 권한: super_admin 전용
 
 import { Router, Request, Response } from 'express';
-import { authenticate } from '../../middlewares/auth';
+import { authenticate, requireAdminArea } from '../../middlewares/auth';
 import {
   getActiveBlocks,
   getBlockHistory,
@@ -22,6 +22,8 @@ router.use((req: any, res: Response, next) => {
   }
   return next();
 });
+// ★ 2026-10-03 보안 · 인증 묶음(Harold) — 대표 · 지원팀장만. 등급표 `loginBlocks` · 요청 방식으로 조회 · 변경 · 삭제를 가른다.
+router.use(requireAdminArea('loginBlocks'));
 
 // GET /api/admin/login-blocks/active — 현재 활성 차단 목록
 router.get('/active', async (req: Request, res: Response) => {

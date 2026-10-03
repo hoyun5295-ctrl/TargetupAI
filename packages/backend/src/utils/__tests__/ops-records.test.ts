@@ -416,10 +416,10 @@ describe('배선', () => {
     expect(readFileSync(join(SRC, 'app.ts'), 'utf8')).toContain("app.use('/api/admin/ops-records', adminOpsRecordsRoutes);");
   });
 
-  it('등급표 — 대표 · 지원팀장은 작성 · 확인, 지원팀원은 조회만', async () => {
+  it('등급표 — 대표 · 지원팀장은 작성 · 확인, 지원팀원은 없음(★1003 저녁 보안 · 인증 묶음 · Harold)', async () => {
     const { PERMISSION_MATRIX } = await import('../admin-role');
     const row = PERMISSION_MATRIX.find((r) => r.key === 'opsRecords');
-    expect(row?.levels).toEqual({ super: 'RW', lead: 'RW', support: 'R' });
+    expect(row?.levels).toEqual({ super: 'RW', lead: 'RW', support: 'NONE' });
   });
 
   it('화면 — 작성일 칸이 없고, 고치기 · 지우기 버튼이 없고, 자기 기록에는 확인 버튼이 없다', () => {

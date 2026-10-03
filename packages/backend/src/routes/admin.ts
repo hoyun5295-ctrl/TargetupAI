@@ -12,8 +12,8 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
 import { parseWonAmount } from '../utils/normalize';
 import type { PoolClient } from 'pg';
-import { authenticate, requireSuperAdmin, requireUuidId, requireBestLayoutViewer } from '../middlewares/auth';
-import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, canDelete, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
+import { authenticate, requireSuperAdmin, requireUuidId, requireBestLayoutViewer, requireAdminArea } from '../middlewares/auth';
+import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, canDelete, readMapFor, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
 import { insertCuratedSeeds, listCuratedSeeds, listCuratedSeedCounts, deleteCuratedSeed, saveCuratedSeedOne, updateCuratedSeed, SeedGateFail } from '../utils/copy-seed-curator';
@@ -781,7 +781,7 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
 //      차단은 발송 경로마다 차감 앞에서 판정한다(근거 = utils/spam-block.ts 머리).
 //   컨트롤타워 = utils/spam-block.ts
 // ============================================================
-router.get('/spam-block/rules', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+router.get('/spam-block/rules', authenticate, requireSuperAdmin, requireAdminArea('spamBlock'), async (_req: Request, res: Response) => {
   try {
     const result = await query(
       `SELECT r.id, r.name, r.elements, r.mode, r.source, r.note, r.is_active,
@@ -804,7 +804,7 @@ router.get('/spam-block/rules', authenticate, requireSuperAdmin, async (_req: Re
   }
 });
 
-router.post('/spam-block/rules', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.post('/spam-block/rules', authenticate, requireSuperAdmin, requireAdminArea('spamBlock'), async (req: Request, res: Response) => {
   try {
     const name = String(req.body?.name || '').trim();
     if (!name) return res.status(400).json({ error: '규칙 이름을 입력해주세요.' });
@@ -844,7 +844,7 @@ router.post('/spam-block/rules', authenticate, requireSuperAdmin, async (req: Re
   }
 });
 
-router.put('/spam-block/rules/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.put('/spam-block/rules/:id', authenticate, requireSuperAdmin, requireAdminArea('spamBlock'), async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const beforeRes = await query('SELECT name, elements, is_active FROM spam_block_rules WHERE id = $1', [id]);
@@ -909,7 +909,7 @@ router.put('/spam-block/rules/:id', authenticate, requireSuperAdmin, async (req:
  *   전후 값은 한 문장으로 잡는다(행 잠금 뒤 갱신) — 동시 전환이 서로의 "전" 값을 덮어 감사 기록이 어긋나지 않게.
  *   차단으로 올린 순간부터 발송 경로의 차감 앞 판정이 이 규칙으로 막는다(규칙 캐시를 바로 비운다).
  */
-router.patch('/spam-block/rules/:id/mode', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.patch('/spam-block/rules/:id/mode', authenticate, requireSuperAdmin, requireAdminArea('spamBlock'), async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     if (!UUID_RE.test(String(id || ''))) return res.status(400).json({ error: '규칙을 찾을 수 없습니다.' });
@@ -964,7 +964,7 @@ router.patch('/spam-block/rules/:id/mode', authenticate, requireSuperAdmin, asyn
  *   검증 없이 차단 모드로 올리지 않기 위한 장치다.
  *   ★1003 입력은 차감 앞 차단과 **같은 함수**(composeSpamCheckText)로 만든다 — 제목 · 본문 · (광고) 부착까지 같은 모양.
  */
-router.post('/spam-block/simulate', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.post('/spam-block/simulate', authenticate, requireSuperAdmin, requireAdminArea('spamBlock'), async (req: Request, res: Response) => {
   try {
     const validated = validateElements(req.body?.elements);
     if (!validated.ok) return res.status(400).json({ error: validated.error });
@@ -1020,7 +1020,7 @@ router.post('/spam-block/simulate', authenticate, requireSuperAdmin, async (req:
   }
 });
 
-router.get('/spam-block/hits', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.get('/spam-block/hits', authenticate, requireSuperAdmin, requireAdminArea('spamBlock'), async (req: Request, res: Response) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
     const result = await query(
@@ -1056,7 +1056,7 @@ const GEO_MIGRATION_HINT = {
 };
 // IPv4 · IPv6 CIDR 모양. 실제 유효성은 PG의 ::cidr 캐스팅이 확정한다(트랜잭션 안이라 실패 시 롤백)
 
-router.get('/geo/status', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+router.get('/geo/status', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (_req: Request, res: Response) => {
   try {
     const [cidrs, exceptions] = await Promise.all([
       query(`SELECT COUNT(*)::int AS n, MAX(updated_at) AS updated_at FROM geo_allow_cidrs`),
@@ -1083,7 +1083,7 @@ router.get('/geo/status', authenticate, requireSuperAdmin, async (_req: Request,
  * 국내 대역 일괄 등록. 기존분을 지우고 새로 넣는다(전체 교체) — 부분 갱신은 누락 대역을 남긴다.
  * ⛔ 빈 목록으로 교체하지 않는다 — 대역이 0이면 판정이 통째로 unknown이 되어 통제가 사라진다.
  */
-router.post('/geo/cidrs/bulk', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.post('/geo/cidrs/bulk', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (req: Request, res: Response) => {
   try {
     const raw = String(req.body?.cidrs || '');
     const source = String(req.body?.source || 'apnic').slice(0, 50);
@@ -1163,7 +1163,7 @@ router.post('/geo/cidrs/bulk', authenticate, requireSuperAdmin, async (req: Requ
   }
 });
 
-router.get('/geo/exceptions', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+router.get('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (_req: Request, res: Response) => {
   try {
     const result = await query(
       `SELECT a.id, a.scope, a.company_id, a.user_id,
@@ -1188,7 +1188,7 @@ router.get('/geo/exceptions', authenticate, requireSuperAdmin, async (_req: Requ
 });
 
 /** 예외 승인 — 사유가 없으면 등록되지 않는다. 이 기록이 기준이 요구하는 "예외 승인 이력"이다 */
-router.post('/geo/exceptions', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.post('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (req: Request, res: Response) => {
   try {
     const scope = String(req.body?.scope || '');
     if (!['user', 'company_api', 'company_agent', 'global'].includes(scope)) {
@@ -1237,7 +1237,7 @@ router.post('/geo/exceptions', authenticate, requireSuperAdmin, async (req: Requ
 });
 
 /** 예외 회수 — 지우지 않고 비활성으로 남긴다. 이력이 사라지면 심사에 낼 것이 없다 */
-router.delete('/geo/exceptions/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.delete('/geo/exceptions/:id', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (req: Request, res: Response) => {
   try {
     const r = await query(
       `UPDATE access_origin_allowlist SET is_active = false WHERE id = $1 AND is_active = true RETURNING id`,
@@ -1267,12 +1267,21 @@ router.delete('/geo/exceptions/:id', authenticate, requireSuperAdmin, async (req
 //   ⛔ 사유 없는 변경은 받지 않는다 — 기준 3.3이 요구하는 것은 "변경 이력 **및 사유** 관리대장"이다.
 // ============================================================
 
+/**
+ * ★ 2026-10-03 내 등급으로 열 수 있는 축 — 슈퍼관리자 화면의 메뉴 노출용(보안 · 인증 묶음).
+ * 판정은 등급표 CT(`readMapFor`)가 한다. 화면은 이 결과로 숨기기만 하고, 실제 차단은 각 라우트가 같은 등급표로 한다.
+ */
+router.get('/my-permissions', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const role = await fetchAdminRole(req.user?.userId);
+  return res.json({ role, canRead: readMapFor(role) });
+});
+
 /** 계정 목록 + 권한분류표 + 내 등급 — 화면은 표를 스스로 만들지 않고 이 응답을 그린다 */
 router.get('/admin-accounts', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const myRole = await fetchAdminRole(req.user?.userId);
     if (!canRead(myRole, 'adminAccounts')) {
-      return res.status(403).json({ error: '관리자 계정은 대표 등급에서만 볼 수 있습니다.' });
+      return res.status(403).json({ error: '직원 계정은 대표 · 지원팀장 등급에서만 볼 수 있습니다.' });
     }
     const result = await query(
       `SELECT id, login_id, name, email, role, is_active, created_at, last_login_at
@@ -1285,6 +1294,8 @@ router.get('/admin-accounts', authenticate, requireSuperAdmin, async (req: Reque
       roles: ADMIN_ROLES.map((r) => ({ value: r, label: ADMIN_ROLE_LABEL[r], desc: ADMIN_ROLE_DESC[r] })),
       levelLabels: ACCESS_LEVEL_LABEL,
       myRole,
+      // ★ 2026-10-03 지원팀장은 조회만 — 화면이 등급 · 생성 · 중지 버튼을 이 값으로 숨긴다(쓰기 라우트는 각자 canWrite 로 막는다)
+      canWrite: canWrite(myRole, 'adminAccounts'),
     });
   } catch (error: any) {
     console.error('관리자 계정 조회 실패:', error);
@@ -1475,7 +1486,7 @@ router.get('/admin-accounts/history', authenticate, requireSuperAdmin, async (re
   try {
     const myRole = await fetchAdminRole(req.user?.userId);
     if (!canRead(myRole, 'adminAccounts')) {
-      return res.status(403).json({ error: '관리자 계정은 대표 등급에서만 볼 수 있습니다.' });
+      return res.status(403).json({ error: '직원 계정은 대표 · 지원팀장 등급에서만 볼 수 있습니다.' });
     }
     const limit = Math.min(Number(req.query.limit) || 100, 300);
     const result = await query(
@@ -1496,7 +1507,7 @@ router.get('/admin-accounts/history', authenticate, requireSuperAdmin, async (re
 });
 
 /** 국외 접근 이력 — 별도 테이블을 만들지 않고 `audit_logs`를 읽는다 */
-router.get('/geo/hits', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+router.get('/geo/hits', authenticate, requireSuperAdmin, requireAdminArea('geoHits'), async (req: Request, res: Response) => {
   try {
     // ★ 2026-08-24 이 이력의 원천이 audit_logs라 열람을 잠근다. 단 감사 로그 게이트와 축이 다르다 —
     //   Harold: 감사 로그 = ceo만 · 국외 접근 이력 = suran도(운영 담당). GEO_HITS_VIEWER_IDS 기본 'ceo,suran'.

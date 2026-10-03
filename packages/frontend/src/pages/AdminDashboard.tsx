@@ -106,6 +106,11 @@ export default function AdminDashboard() {
   const [adminCreate, setAdminCreate] = useState<{ loginId: string; name: string; email: string; role: string; password: string; reason: string } | null>(null);
   const [adminActiveEdit, setAdminActiveEdit] = useState<{ id: string; login_id: string; isActive: boolean; reason: string } | null>(null);
   const [adminRoleBusy, setAdminRoleBusy] = useState(false);
+  // ★ 2026-10-03 지원팀장은 직원 계정을 조회만 — 등급 · 계정 추가 · 중지 버튼은 서버가 준 canWrite 일 때만 보인다
+  const [adminAccountsCanWrite, setAdminAccountsCanWrite] = useState(false);
+  // ★ 2026-10-03 보안 · 인증 묶음(대표 · 지원팀장) 메뉴 노출 — 서버 GET /api/admin/my-permissions 의 canRead 가 유일 소스.
+  //   화면은 숨기기만 한다(실제 차단은 라우트가 같은 등급표로). 조회 실패 = 빈 값 = 숨김(닫힌 쪽으로).
+  const [myPermRead, setMyPermRead] = useState<Record<string, boolean>>({});
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
   const [precheckUsageAllowed, setPrecheckUsageAllowed] = useState(false); // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
@@ -122,6 +127,8 @@ export default function AdminDashboard() {
   const [lineGroupCanManage, setLineGroupCanManage] = useState(false);
   // ★ 2026-08-16: 신규마케팅진단 열람 권한 (MARKETING_DIAGNOSIS_VIEWER_IDS — 기본 ceo 전용) + 신규 리드 뱃지
   const [diagnosisAllowed, setDiagnosisAllowed] = useState(false);
+  // ★ 2026-10-03 60초 뱃지 주기(빈 의존성 효과)가 허용 여부를 읽는 통로 — state 는 그 효과 안에서 처음 값으로 굳는다
+  const diagnosisAllowedRef = useRef(false);
   const [diagnosisBadge, setDiagnosisBadge] = useState(0);
   const loadDiagnosisBadge = async () => {
     try {
@@ -322,6 +329,7 @@ export default function AdminDashboard() {
       setAdminMatrix(body.matrix || []);
       setAdminRoleOptions(body.roles || []);
       setAdminLevelLabels(body.levelLabels || {});
+      setAdminAccountsCanWrite(body.canWrite === true);
       setAdminAccountsAllowed(true);
     } else {
       setAdminAccountsAllowed(false);
@@ -1120,6 +1128,7 @@ useEffect(() => {
       const d = await r.json();
       if (d.allowed === true) {
         setDiagnosisAllowed(true);
+        diagnosisAllowedRef.current = true;
         loadDiagnosisBadge();
       }
     } catch { setDiagnosisAllowed(false); }
@@ -1150,6 +1159,13 @@ useEffect(() => {
       const r = await fetch('/api/admin/admin-accounts', { headers: { Authorization: `Bearer ${token}` } });
       setAdminAccountsAllowed(r.ok);
     } catch { setAdminAccountsAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-10-03 보안 · 인증 묶음(금칙어 · 국외 접근 통제 · 로그인 차단 · 운영 기록 대장) 메뉴 노출
+      const r = await fetch('/api/admin/my-permissions', { headers: { Authorization: `Bearer ${token}` } });
+      const d = r.ok ? await r.json() : null;
+      setMyPermRead(d?.canRead && typeof d.canRead === 'object' ? d.canRead : {});
+    } catch { setMyPermRead({}); }
   })();
 }, []);
 useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
@@ -1162,10 +1178,18 @@ useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdm
 useEffect(() => {
   let alive = true;
   let inFlight = false;
+  let diagInFlight = false;
   const tick = async () => {
     if (!alive || inFlight) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     inFlight = true;
+    // ★ 2026-10-03 (Harold) 신규마케팅진단 뱃지도 같은 주기에 — 열어 둔 동안 새 리드가 와도 뜨게 한다(허용 계정만).
+    //   ⛔ 진단 조회는 자기 진행 표시(diagInFlight)로만 겹침을 막고 기다리지 않는다 — 진단 응답이 늦을 때
+    //   공용 inFlight 가 풀리지 않으면 발신번호 · 충전 · 크레딧 뱃지 갱신까지 멈춘다(1003 Codex 1R 지적).
+    if (diagnosisAllowedRef.current && !diagInFlight) {
+      diagInFlight = true;
+      loadDiagnosisBadge().finally(() => { diagInFlight = false; });
+    }
     // ★ 2026-08-11 (서수란 접수) 요금/정산 뱃지도 같은 주기에 태운다 — 새 타이머를 만들지 않는다.
     //   0808에 만든 가드(백그라운드 건너뜀·중복 호출 차단·언마운트 정리)를 그대로 쓴다.
     try { await Promise.allSettled([loadSenderRegPendingCount(), loadPendingBadges()]); } finally { inFlight = false; }
@@ -4653,43 +4677,46 @@ const handleApproveRequest = async (id: string) => {
         <div ref={menuRef} className="bg-white rounded-2xl border border-gray-200/70 shadow-sm mb-6">
           <div className="px-3 py-2 flex items-center gap-1 flex-wrap">
             {[
+              // ★ 2026-10-03 (Harold) 4묶음 → 7묶음 · 항목 삭제 0 · key 변경 0(설계서 docs/2026-10-03-admin-dashboard-split-design.md §2).
+              //   묶음의 「활성」은 항목 key 에서 계산한다 — 그전에는 묶음마다 탭 목록(tabs)을 손으로 따로 적어
+              //   「시스템」 목록에 금칙어 · 국외 접근 통제가 빠져 그 화면을 열어도 묶음에 불이 안 들어왔다.
               {
                 label: '고객 관리', color: 'blue',
-                tabs: ['companies', 'users', 'marketingDiagnosis'] as const,
                 items: [
                   { key: 'companies', label: '고객사 관리' },
                   { key: 'users', label: '사용자 관리' },
-                  // ★ 2026-08-16: 신규마케팅진단 = 허용 계정(기본 ceo)에만 노출 · 뱃지 = 신규 리드 수
+                  // ★ 2026-08-16: 신규마케팅진단 = 허용 계정(기본 ceo)에만 노출 · 뱃지 = 신규 리드 수(60초 주기)
                   ...(diagnosisAllowed ? [{ key: 'marketingDiagnosis', label: '신규마케팅진단', badge: diagnosisBadge }] : []),
-                  // ★ 2026-08-24: AI 영업 = 허용 계정(기본 ceo)에만 노출 · 별도 모달(탭 아님 — 닫으면 고객사 탭 복귀)
+                  // ★ 2026-08-24: AI 영업 = 허용 계정(★1003 ceo · suran)에만 노출 · 별도 모달(탭 아님 — 닫으면 고객사 탭 복귀)
                   ...(outreachAllowed ? [{ key: 'salesOutreach', label: 'AI 영업', onClick: () => setOutreachOpen(true) }] : []),
                 ],
               },
               {
                 label: '발송 관리', color: 'emerald',
-                tabs: ['callbacks', 'stats', 'scheduled', 'allCampaigns', 'templates', 'agencyMail', 'agencyLedger', 'precheckUsage'] as const,
                 items: [
                   // ★ 2026-08-08 상단 메뉴는 **두 축의 합** — "발신번호 관리에 볼 일 N건"이 여기선 맞는 말이다.
                   //   화면에 보이는 두 탭 뱃지의 합으로 만든다(서버 total을 따로 받으면 뱃지끼리 어긋날 수 있다).
                   { key: 'callbacks', label: '발신번호 관리', badge: senderRegPendingCount + pendingManagerCount },
-                  { key: 'stats', label: '발송 통계', onClick: () => loadSendStats() },
-                  { key: 'scheduled', label: '예약 관리' },
-                  { key: 'allCampaigns', label: '캠페인 관리', onClick: () => loadAllCampaigns() },
-                  // ★ 2026-07-09 CRM 캠페인 대행 설계 — 비즈니스+ 업체 접수 요청서 분석 → 제안서 PDF (별도 페이지)
-                  { key: 'campaignAgency', label: '캠페인 대행 설계', onClick: () => navigate('/admin/campaign-agency') },
-                  // ★ 2026-08-26(2) 전 고객사 대행발송 진행현황(진행 레일 + 접수구분 + 고객사·신청자)
-                  { key: 'agencyLedger', label: '대행발송 내역' },
-                  // ★ 2026-08-26 §18 이메일 접수 관제 — 반려·격리 메일의 유일한 노출면
-                  { key: 'agencyMail', label: '대행발송 접수' },
                   // ★ 2026-09-14 (Harold) 발신프로필 승인 대기 = 이 탭(발신 프로필 화면)에 뱃지 — 60초 주기 + 승인·반려 직후.
                   { key: 'templates', label: '템플릿 관리', badge: senderProfilePendingCount },
-                  // ★ 2026-09-26 (Harold) 스팸 검사·맞춤법 사용 현황 = 허용 계정(기본 ceo)에만 노출 · 다른 계정은 메뉴 자체가 없다
-                  ...(precheckUsageAllowed ? [{ key: 'precheckUsage', label: '점검 사용 현황' }] : []),
+                  { key: 'scheduled', label: '예약 관리' },
+                  { key: 'allCampaigns', label: '캠페인 관리', onClick: () => loadAllCampaigns() },
+                  { key: 'stats', label: '발송 통계', onClick: () => loadSendStats() },
+                ],
+              },
+              {
+                label: '대행 발송', color: 'violet',
+                items: [
+                  // ★ 2026-08-26 §18 이메일 접수 관제 — 반려·격리 메일의 유일한 노출면
+                  { key: 'agencyMail', label: '대행발송 접수' },
+                  // ★ 2026-08-26(2) 전 고객사 대행발송 진행현황(진행 레일 + 접수구분 + 고객사·신청자)
+                  { key: 'agencyLedger', label: '대행발송 내역' },
+                  // ★ 2026-07-09 CRM 캠페인 대행 설계 — 비즈니스+ 업체 접수 요청서 분석 → 제안서 PDF (별도 페이지)
+                  { key: 'campaignAgency', label: '캠페인 대행 설계', onClick: () => navigate('/admin/campaign-agency') },
                 ],
               },
               {
                 label: '요금/정산', color: 'amber',
-                tabs: ['plans', 'requests', 'deposits', 'credits', 'billing'] as const,
                 items: [
                   { key: 'plans', label: '요금제 관리' },
                   // ★ 2026-08-11 (서수란 접수) 뱃지 = 목록 길이가 아니라 **카운트 state**.
@@ -4704,40 +4731,58 @@ const handleApproveRequest = async (id: string) => {
                 ],
               },
               {
-                label: '시스템', color: 'gray',
-                tabs: ['syncAgents', 'agentDeploy', 'lineGroups', 'auditLogs', 'helpQuestions', 'loginBlocks', 'adminAccounts', 'opsRecords'] as const,
+                // ★ 2026-10-03 (Harold) 보안 · 인증 = 대표 · 지원팀장(ceo · suran)만. 노출은 서버 등급표(my-permissions · 각 /access)가 정한다.
+                //   감사 로그는 대표만(AUDIT_LOG_VIEWER_IDS) · 직원 계정 · 권한은 지원팀장 조회만.
+                label: '보안 · 인증', color: 'rose',
+                items: [
+                  ...(adminAccountsAllowed ? [{ key: 'adminAccounts', label: '직원 계정·권한' }] : []),
+                  ...(myPermRead.loginBlocks === true ? [{ key: 'loginBlocks', label: '로그인 차단 관리' }] : []),
+                  // ★ 2026-08-19: 국외 접근 통제(전송자격인증 2.2)
+                  ...(myPermRead.geoAccess === true ? [{ key: 'geoAccess', label: '국외 접근 통제' }] : []),
+                  // ★ 2026-08-18: 금칙어 차단(전송자격인증 5.2)
+                  ...(myPermRead.spamBlock === true ? [{ key: 'spamBlock', label: '금칙어 차단' }] : []),
+                  // ★ 2026-06-11: 감사 로그 = 허용 계정(기본 ceo)에만 노출
+                  ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
+                  // ★ 2026-10-03 운영 기록 대장 — 작성 · 확인은 화면이 서버 판정(meta)을 받아 연다
+                  ...(myPermRead.opsRecords === true ? [{ key: 'opsRecords', label: '운영 기록 대장' }] : []),
+                ],
+              },
+              {
+                label: '연동 · 인프라', color: 'slate',
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
                   { key: 'agentDeploy', label: '싱크에이전트 배포' },
                   // ★ 2026-07-17: 발송 라인 설정 = 허용 계정(기본 ceo,admin)에만 노출
                   ...(lineGroupCanManage ? [{ key: 'lineGroups', label: '발송 라인 설정' }] : []),
-                  // ★ 2026-06-11: 감사 로그 = 허용 계정(기본 ceo)에만 노출
-                  ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
-                  // ★ 2026-08-24: 도움말 질문 이력 = 허용 계정(기본 ceo)에만 노출
-                  ...(helpQAccessAllowed ? [{ key: 'helpQuestions', label: '도움말 질문 이력' }] : []),
-                  // ★ 2026-08-18: 금칙어 차단(전송자격인증 5.2)
-                  { key: 'spamBlock', label: '금칙어 차단' },
-                  // ★ 2026-08-19: 국외 접근 통제(전송자격인증 2.2)
-                  { key: 'geoAccess', label: '국외 접근 통제' },
+                ],
+              },
+              {
+                label: 'AI · 콘텐츠', color: 'cyan',
+                items: [
                   // ★ 2026-07-04: 베스트 문안(업종 큐레이션) = 슈퍼관리자 공용(직원 큐레이션, ceo 게이트 없음)
                   { key: 'bestCopy', label: '베스트 문안', onClick: () => navigate('/admin/best-copy') },
                   // ★ 2026-09-03: 베스트 구성(참조 골격 = DM·이메일 구성 학습) = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
                   ...(bestLayoutAllowed ? [{ key: 'bestLayout', label: '베스트 구성', onClick: () => navigate('/admin/best-layout') }] : []),
                   // ★ 2026-06-13: AI 학습 데이터 = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
                   ...(aiTrainingAllowed ? [{ key: 'aiTraining', label: 'AI 학습 데이터', onClick: () => navigate('/admin/ai-training') }] : []),
-                  { key: 'loginBlocks', label: '로그인 차단 관리' },
-                  // ★ 2026-10-03 운영 기록 대장 — 조회는 전 등급(등급표 opsRecords) · 작성 · 확인은 화면이 서버 판정을 받아 연다
-                  { key: 'opsRecords', label: '운영 기록 대장' },
-                  ...(adminAccountsAllowed ? [{ key: 'adminAccounts', label: '직원 계정·권한' }] : []),
+                  // ★ 2026-08-24: 도움말 질문 이력 = 허용 계정(기본 ceo)에만 노출
+                  ...(helpQAccessAllowed ? [{ key: 'helpQuestions', label: '도움말 질문 이력' }] : []),
+                  // ★ 2026-09-26 (Harold) 스팸 검사·맞춤법 사용 현황 = 허용 계정(기본 ceo)에만 노출 · 다른 계정은 메뉴 자체가 없다
+                  ...(precheckUsageAllowed ? [{ key: 'precheckUsage', label: '점검 사용 현황' }] : []),
                 ],
               },
-            ].map(group => {
-              const isGroupActive = (group.tabs as readonly string[]).includes(activeTab);
+            ].filter((group) => group.items.length > 0).map(group => {
+              // 묶음 활성 = 지금 탭이 이 묶음의 항목인가(항목 목록 하나가 유일한 기준)
+              const isGroupActive = group.items.some((it: any) => it.key === activeTab);
               const isOpen = openMenu === group.label;
               const colorMap: Record<string, { active: string; hover: string; bg: string; border: string }> = {
                 blue: { active: 'text-blue-600', hover: 'hover:text-blue-600', bg: 'bg-blue-50', border: 'border-blue-500' },
                 emerald: { active: 'text-emerald-600', hover: 'hover:text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-500' },
+                violet: { active: 'text-violet-600', hover: 'hover:text-violet-600', bg: 'bg-violet-50', border: 'border-violet-500' },
                 amber: { active: 'text-amber-600', hover: 'hover:text-amber-600', bg: 'bg-amber-50', border: 'border-amber-500' },
+                rose: { active: 'text-rose-600', hover: 'hover:text-rose-600', bg: 'bg-rose-50', border: 'border-rose-500' },
+                slate: { active: 'text-slate-700', hover: 'hover:text-slate-700', bg: 'bg-slate-100', border: 'border-slate-500' },
+                cyan: { active: 'text-cyan-700', hover: 'hover:text-cyan-700', bg: 'bg-cyan-50', border: 'border-cyan-500' },
                 gray: { active: 'text-gray-700', hover: 'hover:text-gray-600', bg: 'bg-gray-50', border: 'border-gray-500' },
               };
               const c = colorMap[group.color] || colorMap.blue;
@@ -5731,7 +5776,7 @@ const handleApproveRequest = async (id: string) => {
           <div className="space-y-6">
             {!adminAccountsAllowed ? (
               <div className="bg-white rounded-xl border border-gray-200 px-5 py-10 text-center text-sm text-gray-500">
-                직원 계정·권한은 대표 등급 계정에서만 볼 수 있습니다.
+                직원 계정·권한은 대표 · 지원팀장 등급 계정에서만 볼 수 있습니다.
               </div>
             ) : (
               <>
@@ -5750,12 +5795,17 @@ const handleApproveRequest = async (id: string) => {
                       <h3 className="text-base font-semibold text-gray-900">계정 목록</h3>
                       <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 관리자 계정 원장</p>
                     </div>
-                    <button
-                      onClick={() => setAdminCreate({ loginId: '', name: '', email: '', role: 'support', password: '', reason: '' })}
-                      className="px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
-                    >
-                      계정 추가
-                    </button>
+                    {/* ★ 2026-10-03 지원팀장은 조회만 — 계정 추가 · 등급 · 중지는 대표만(서버 canWrite) */}
+                    {adminAccountsCanWrite ? (
+                      <button
+                        onClick={() => setAdminCreate({ loginId: '', name: '', email: '', role: 'support', password: '', reason: '' })}
+                        className="px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+                      >
+                        계정 추가
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-gray-400">조회 전용 · 변경은 대표 등급만</span>
+                    )}
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -5789,18 +5839,24 @@ const handleApproveRequest = async (id: string) => {
                               <td className="px-4 py-2 text-xs text-gray-600">{a.is_active ? '사용 중' : '비활성'}</td>
                               <td className="px-4 py-2 text-[11px] text-gray-400">{a.last_login_at ? formatDateTime(a.last_login_at) : '-'}</td>
                               <td className="px-4 py-2 text-right whitespace-nowrap">
-                                <button
-                                  onClick={() => setAdminRoleEdit({ id: a.id, login_id: a.login_id, role: a.role, reason: '' })}
-                                  className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
-                                >
-                                  등급
-                                </button>
-                                <button
-                                  onClick={() => setAdminActiveEdit({ id: a.id, login_id: a.login_id, isActive: !a.is_active, reason: '' })}
-                                  className="ml-1.5 px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
-                                >
-                                  {a.is_active ? '중지' : '재개'}
-                                </button>
+                                {adminAccountsCanWrite ? (
+                                  <>
+                                    <button
+                                      onClick={() => setAdminRoleEdit({ id: a.id, login_id: a.login_id, role: a.role, reason: '' })}
+                                      className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
+                                    >
+                                      등급
+                                    </button>
+                                    <button
+                                      onClick={() => setAdminActiveEdit({ id: a.id, login_id: a.login_id, isActive: !a.is_active, reason: '' })}
+                                      className="ml-1.5 px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
+                                    >
+                                      {a.is_active ? '중지' : '재개'}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="text-[11px] text-gray-300">-</span>
+                                )}
                               </td>
                             </tr>
                           );
